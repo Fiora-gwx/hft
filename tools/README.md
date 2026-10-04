@@ -107,6 +107,8 @@ cargo xtask scaffold-gate [--keep]
 11. `aws-sdk-secretsmanager` 与 `aws-sdk-kms` 只出现在 `tools/hft-secrets` 的闭包。
 12. 名为 `testing` 的 feature(SDK 的[测试桩](../crates/hft-strategy-sdk/README.md#测试桩testing-特性)、hft-py 的测试钩子)只在 `[dev-dependencies]` 中启用;`[dependencies]` 或默认 feature 中启用 → 失败。
 
+口径:workspace 成员按目录识别(`crates/hft-oms`、`apps/hft-core`;`deps.toml` 的 `strategies/*` 一项覆盖 registry 以外的全部策略 crate),外部 crate 按包名;没有 `deps.toml` 条目的成员 → 失败。闭包沿 `[dependencies]` 与 `[build-dependencies]` 传递(dev 依赖不传递;只在测试用 `--cfg` 构建中出现的依赖,如 `cfg(loom)`,按 dev 依赖处理,清单在 `deps.toml` 的 `test_cfgs`)。规则 1 对 `[dev-dependencies]` 另允许该包的 `dev` 列表与全部 dev tier 包;规则 2 针对 `crates/*` 与 `strategies/*` 的库(app 的闭包按其 README 依赖节);规则 5 的唯一例外是只在开发机与 CI 运行的 `tools/xtask`(`dev_tier_ok`,依据 [hft-testkit 依赖](../crates/hft-testkit/README.md#依赖));规则 8 检查只读 journal 的包,即其余 app 与 hft-py([crates/AGENTS.md](../crates/AGENTS.md#依赖方向)),启用 `writer` 的方式包括直接声明与经某个 crate feature 转发。违规逐条写进 `target/xtask/deps.json`(规则号、包、详情,闭包违规带路径)。
+
 ### cargo xtask hot-check
 
 基于 `syn` 的源码与配置检查,规则编号见 [hot-path-rules](../docs/hot-path-rules.md):
@@ -205,6 +207,19 @@ cargo xtask gen-host [--host <name>] [--check]
 | 残留 | 链接或提及已删除的组件、已退役的模式名与实例角色、已退役的参数与常量、已取消的上线阶段、非 32 位的 kill 字或掩码、已废弃的调优取值与命令(名单都在 `doc-check.toml`,与 `check_hft.py` 同步;本页不重复列出名字,免得自身命中)即失败 |
 | Agent Notes | 相对链接可达、类别目录属于封闭集合;其余格式检查**冻结**(由评审把关,见 [.agents/notes/README.md](../.agents/notes/README.md)) |
 | 篇幅 | 根 `AGENTS.md` > 1,800、子树 `AGENTS.md` > 900、`architecture.md` > 3,000(计量口径归 [docs/AGENTS.md](../docs/AGENTS.md#篇幅)) |
+
+上表各项由 xtask 原生检查实现(全部为硬错误),之后运行 `doc-check.toml` 的 `scripts` 列出的 `tools/doccheck/check_hft.py` 与 `check_tests.py`;`doc-check.toml` 的 `exclude`(含 xtask 测试夹具 `tools/xtask/tests/fixtures/`)不扫描,`evidence`(`design/`)只查链接,`status: frozen` 的组件跳过内容检查。表中未细化之处的机检口径:
+
+- **预算**:只查已有 `Cargo.toml` 的 hot crate。README 预算行里的基准名 = 最后一列中已在 [benchmarks 基准名登记](../benchmarks/README.md#基准名登记) 的名字;预算格中 `[pNN] ≤|< 数值 单位` 是预算值,紧跟 `+` 的(相对值)与带 `/档`、`/条` 的(引用的上限)不算;表头写 `p50 / p99` 时一格的前两个值依次是 p50、p99,否则一行有带分位的值就只取它们,没有时不带分位的值按基准名顺序一一对应(个数不等只核对基准名存在)。`benches/budgets.toml` 每个基准一张表 `[<基准名>]`,键 `pNN_ns`(带分位的值,`p99.9` 写 `p999_ns`)或 `budget_ns`(不带分位的值),与 README 必须相同;可选 `bound`(上限表"原语"列原文)、`case`(该格中以 `标签:` 区分的情形)、`levels`(按档的上限除以的档数)指明比对的上限行,`<` 的上限不得相等。
+- **分段名**:反引号内的 snake_case 名以 latency-budget §2 的某个分段名开头、紧接字母或数字(不是 `_`),且本身不是 latency-budget 表第一列的名字 → 失败。
+- **事件**:"声明为产生者" = `crates/*`、`apps/*`、`strategies/*` 的 README(hft-event 自身除外)有一行同时含反引号包住的该 kind 名(可带 `{…}`)与产生动词(产生、产出、写入、写出、写、发出、输出、生成、推入、`→`);测试 kind 除外。编号表"分类"列:`按体…` = `ByBody`,`raw journal` 与 `Meta` = `Meta`;每个登记的 kind 都要有一行。登记表 = hft-event README 表格行中的标识符与 `名字 = 数字` 写法;`StrategyDesc.notes` = `strategies/*`(registry 除外)README 表格行中的标识符。
+- **码值与布局**(硬错误):码表链接 = 注释含 `#`、`§`、Markdown 链接、"码表/码值/登记/见/自定义"、值列表(`0 无 / 1 First`)、`同 X` 或某个 `#[repr(uN)]` 枚举类型名;声明字节数取结构头行或尾行注释的 `N B`(`≤ N B` 与 `N B + …` 不算)或 `size_of` 断言,与按 repr(C) 规则(对齐、`align(N)`、`packed`)算出的大小比对;类型大小在全部 Markdown 代码块中解析(原语、数组、ID newtype、别名、`#[repr(uN)]` 枚举、嵌套结构),解析不了的结构跳过。
+- **依赖图**:`依赖方向` 代码块每行按 `;` 分句,括号内文字与 `:` 之前的文字忽略;`A ← B` = B 依赖 A,`A → X + Y` = A 依赖 X、Y;`L0`/`L1` = 以 `(L0,…)`/`(L1,…)` 标注的那一行的 crate,`venue-<x>` = 全部 `crates/venue-*`,`strategies/<name>` = `deps.toml` 的 `strategies/*`;每条边必须在 `deps.toml` 该包的 `deps` 内,图中的包名必须在 `deps.toml` 中。
+- **venue README**:必备节 = hft-venue-proto 必备节表第一列 `(` 之前的文字,匹配以它开头的标题;一节提到一侧市场(`现货` 或 `MARKET = Spot` 的产品线类型名;`永续` 或 `MARKET = LinearPerp` 的类型名)而没提另一侧,且没写"两者/两个产品线" → 失败。预算表(表头 `p50 / p99`)每行要有两个值;行按入口与消息类别对到统一门槛表的行(`classify`;`decode_md` 按 BBO/分档快照,增量深度不比;`encode`;`decode_report` 按成交/可忽略与未知/保证金推送;`decode_snapshot`;`acct_decode`),门槛列不是数值的行不比。`ingest` 核对:`net_rx_300b_mem` + `classify` + BBO `decode_md` 门槛 ≤ latency-budget §3 `ingest`(bookTicker)目标 p50 的 1/3、p99 的 1/5;`net_rx_2k_mem` + `classify` + 分档快照 `decode_md` 门槛 ≤ `ingest`(深度)目标 p50 的 1/2、p99 的 1/3。
+- **runbook 结构**:六个标题按 [写法规则](../docs/runbooks/README.md#写法规则) 的"每页结构"取,标题文字相同或以它加 `(` 开头即算;其间可以有别的二级标题。
+- **范围**:根 README 组件表(有 `tier`、`范围` 两列的表)中链接的 README,其 frontmatter 的 `tier`、`scope` 与表一致;每个有 frontmatter 的 `crates/*`、`strategies/*` README 都在表中。
+- **策略族名、写当前状态、残留、排期措辞**:`doc-check.toml` 的 `[[rule]]`(正则;各自的文件范围、豁免路径、按 frontmatter `scope` 选文件、豁免的小节与行、先删去的文字);已删除组件(`[deleted]`)按词匹配,链接目标也算。
+- **Agent Notes**:生命周期目录下直接放的 Note(没有类别目录)同样失败。
 
 ### cargo xtask new-strategy
 
@@ -493,13 +508,15 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 |---|---|
 | `tools/xtask/` | `xtask` 二进制 crate(`.cargo/config.toml` 的 `alias.xtask = "run -p xtask --"`) |
 | `tools/xtask/deps.toml` | 依赖方向的机器可读表(含策略解耦规则与 `decoupling-gate` 的分层) |
-| `tools/xtask/doc-check.toml` | 策略族名、已删除组件、历史叙述关键词与残留名单,`scope`/`status` 合法值 |
+| `tools/xtask/doc-check.toml` | 策略族名、已删除组件、历史叙述关键词、残留与排期措辞名单(`[[rule]]`),`scope`/`status` 合法值,组件 README 的路径范围,Agent Note 类别,不扫描与只查链接的目录,外部脚本清单 |
+| `crates/<x>/benches/budgets.toml` | hot crate 的基准预算(源常量;格式见 [doc-check](#cargo-xtask-doc-check) 的"预算"口径) |
 | `tools/xtask/allow-list.toml` | 允许的 `#[allow]` 登记(文件、lint、理由) |
 | `tools/xtask/toolchains.toml` | nightly 日期、cargo 插件版本 |
 | `tools/xtask/fuzz-targets.toml` | 全部 fuzz 目标、是否 core 解码器目标、CI 每夜冒烟的每目标分钟数;每个 core 目标与 `[dst]` 参与 `path_digest` 的源路径 `paths` |
 | `tools/xtask/test-trace.toml` | `test-trace` 的 `current_milestone` 与 `enabled_extensions`(已启用的可选扩展名;语义归 [docs/tests §6](../docs/tests/README.md#6-与代码的对应)) |
 | `tools/xtask/dst-nightly.toml` | CI 每夜 DST 冒烟的种子数 N 与步数 M(每夜作业据此调用 `dst --seeds N --seed S --steps M`) |
 | `tools/xtask/src/{ci,decoupling_gate,scaffold_gate,deps,hot_check,bench_gate,replay_verify,dst,gen_schema,gen_host,doc_check,new_strategy,fixtures,fuzz,journal_verify,path_digest,setup,test_trace}.rs` | 各子命令 |
+| `tools/xtask/src/doc_check/{config,md,native,layout,budget}.rs` | doc-check 的配置、Markdown 解析与各项原生检查 |
 | `tools/lint/clippy-hot.toml`、`clippy-pure.toml`、`attrs-{hot,pure,unsafe}.rs` | lint 模板 |
 | `tools/az-probe/` | Python 3.12 包(由 `probe2.py` 演化);`targets.toml` |
 | `tools/hostprobe/` | Rust 二进制(cold tier;只读 `/proc`、`/sys`、ioctl、`bpf(BPF_PROG_QUERY)` 与 nftables netlink 查询;不链接任何 hot crate) |
@@ -527,7 +544,7 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 
 ## 依赖
 
-- xtask:`cargo_metadata`、`syn`、`serde`、`toml`、`serde_json`、`walkdir`、`regex`、`pulldown-cmark`;内部只链接 `hft-event` 与 `hft-refdata`(`gen-schema` 读它们的 schema 导出);调用 `cargo`、`cargo-deny`、`cargo-fuzz`、`bpftrace`、`gh`(只在 `decoupling-gate`)、已构建的 `hft-core`(外部二进制)。
+- xtask:`cargo_metadata`、`syn`、`serde`、`toml`、`serde_json`、`walkdir`、`regex`、`pulldown-cmark`;内部链接 `hft-event` 与 `hft-refdata`(`gen-schema` 读它们的 schema 导出),`deps.toml` 另允许 `hft-testkit`(`dst` 运行器,[hft-testkit](../crates/hft-testkit/README.md#依赖));调用 `cargo`、`cargo-deny`、`cargo-fuzz`、`bpftrace`、`gh`(只在 `decoupling-gate`)、已构建的 `hft-core`(外部二进制)。
 - hostprobe:`libc`、`serde`;禁止依赖任何 hot crate(它读主机,不读交易)。
 - az-probe:Python 标准库 + `websockets`;不依赖 hft crate。
 - hft-cfg:见实现说明表;外部 `toml`、`serde_json`(读 schema JSON)、`reqwest`(仅 `refdata fetch`)。禁止依赖 `strategies/*` 与 `hft-strategy-registry`。

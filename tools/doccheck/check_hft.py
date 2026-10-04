@@ -310,9 +310,17 @@ for r in EXPECTED:
 
 # ---------- all markdown files
 md_files = []
+# fixture repos of the xtask tests (deliberate counterexamples), never part of the spec tree
+FIXTURES = os.path.join(ROOT, "tools", "xtask", "tests", "fixtures")
+
+
+def in_fixtures(dp):
+    return dp == FIXTURES or dp.startswith(FIXTURES + os.sep)
+
+
 for base in (ROOT, DESIGN):
     for dp, dn, fn in os.walk(base):
-        if any(x in dp for x in ("_src", "_dsh", os.sep + "_work")):
+        if any(x in dp for x in ("_src", "_dsh", os.sep + "_work")) or in_fixtures(dp):
             continue
         for f in fn:
             if f.endswith(".md"):
@@ -723,6 +731,8 @@ def doc_length(s):
 
 length_info = []
 for dp, dn, fn in os.walk(ROOT):
+    if in_fixtures(dp):
+        continue
     for f in fn:
         if f != "AGENTS.md":
             continue
@@ -3463,6 +3473,8 @@ prev_ok = bool(PREV) and os.path.isdir(PREV) and \
 prev_texts = {}
 if prev_ok:
     for dp, dn, fn in os.walk(PREV):
+        if os.path.join("tools", "xtask", "tests", "fixtures") in dp:
+            continue
         for f in fn:
             if f.endswith(".md"):
                 prev_texts[os.path.join(dp, f)] = read(os.path.join(dp, f))

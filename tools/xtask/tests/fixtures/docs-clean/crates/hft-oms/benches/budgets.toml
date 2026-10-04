@@ -1,0 +1,4 @@
+[oms_place]
+p50_ns = 300
+p99_ns = 1000
+bound = "OMS 分配槽 + client id + `OrderDecision` 构造"

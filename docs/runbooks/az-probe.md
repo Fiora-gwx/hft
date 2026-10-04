@@ -74,3 +74,7 @@ scope: core
 1. 周一 UTC 00:00–02:00 以外的活跃时段,在生产 CPG 的探针与生产机本身各跑一次步骤 4–5(不在 dev2 上跑:dev2 不在生产 AZ,结果不代表生产主机)(生产机只跑 probe2.py 与 `ss -ti`,不跑 ws_rtt 的新连接风暴;注意交易所的每 IP 连接数限制)。
 2. 与上周比较:任一交易所最小 RTT 变化 > 0.2 ms → P2 并在周报中分析;Binance 同 AZ 节点消失 → P1,启动 A–D 的完整探测。
 3. 结果追加到 `ops-log/az-probe-weekly.md`。核对:DRL-71(生产机上的资源占用:TOOL-099)。
+
+## 记录
+
+首次探测的报告写 `ops-log/<date>-az-probe.md`(第 9 步),每周复测追加到 `ops-log/az-probe-weekly.md`(每周复测第 3 步);每步的起止 UTC 时间与耗时拆分按[写法规则](README.md#写法规则)。

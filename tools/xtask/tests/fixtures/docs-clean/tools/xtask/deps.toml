@@ -1,0 +1,48 @@
+# doc-check fixture: the [pkg] tables the crates/AGENTS.md graph is compared with.
+[pkg."crates/hft-types"]
+tier = "pure"
+deps = []
+
+[pkg."crates/hft-refdata"]
+tier = "pure"
+deps = ["crates/hft-types"]
+
+[pkg."crates/hft-event"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata"]
+
+[pkg."crates/hft-strategy-sdk"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event"]
+
+[pkg."crates/hft-venue-proto"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event"]
+
+[pkg."crates/venue-foo"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-venue-proto"]
+
+[pkg."crates/venue-old"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-venue-proto"]
+
+[pkg."crates/hft-oms"]
+tier = "hot"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-strategy-sdk"]
+
+[pkg."crates/hft-rt"]
+tier = "hot"
+deps = ["crates/hft-types"]
+
+[pkg."crates/hft-net"]
+tier = "hot"
+deps = ["crates/hft-types", "crates/hft-event", "crates/hft-rt"]
+
+[pkg."crates/hft-sequencer"]
+tier = "hot"
+deps = ["crates/hft-types", "crates/hft-event", "crates/hft-oms", "crates/hft-strategy-sdk", "crates/hft-rt"]
+
+[pkg."strategies/*"]
+tier = "hot"
+deps = ["crates/hft-strategy-sdk"]

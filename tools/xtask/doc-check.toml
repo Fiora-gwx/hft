@@ -1,0 +1,197 @@
+# cargo xtask doc-check configuration (tools/README.md "cargo xtask doc-check", "实现说明").
+# Name lists are kept in step with tools/doccheck/check_hft.py (same patterns; Rust regex syntax, no
+# look-around: a "(?:^|[^A-Za-z])" prefix stands for a negative look-behind).
+
+# External checkers run after the native checks; each prints `problems=<n>` as its last summary line.
+scripts = ["tools/doccheck/check_hft.py", "tools/doccheck/check_tests.py"]
+
+# Never scanned (repo-relative directory prefixes).
+exclude = [
+    "target", ".git", "tools/xtask/tests/fixtures", "node_modules", "python/.venv",
+    "design/_work", "design/research/_src", "design/research/_src06", "design/research/_dsh",
+]
+# Evidence trees (design chapters): links checked, content checks skipped.
+evidence = ["design"]
+
+[frontmatter]
+keys = ["description", "kind", "tier", "scope", "status"]
+scope = ["core", "optional"]
+status = ["spec", "impl", "frozen"]
+# Component READMEs: all frontmatter keys and the README 模板 section order (crates/AGENTS.md).
+components = [
+    "crates/*/README.md", "apps/*/README.md", "strategies/*/README.md", "strategies/*/pipeline/README.md",
+    "python/*/README.md",
+]
+
+[agent_notes]
+root = ".agents/notes"
+lifecycles = ["proposed", "implemented", "rejected"]
+# Closed set (.agents/notes/README.md "分类").
+classes = ["architecture", "process", "testing", "feature", "bug-fix", "simplification"]
+
+# Deleted components: any mention or link fails (decision records keep their history).
+[deleted]
+components = ["hft-strategies"]
+skip = [".agents/notes"]
+
+# ------------------------------------------------------------------------------------------------
+# [[rule]]: a pattern that must not appear. check = strategy-name | history | residue | schedule.
+# files (globs, default **/*.md), skip (path prefixes), scope (file's frontmatter scope), skip_sections
+# (heading regex), exempt_line (regex), strip (regexes removed first), skip_code (fenced code exempt).
+# Frozen components and evidence trees are always exempt.
+
+# ---- 策略族名 (engine READMEs; python/ framework packages)
+[[rule]]
+check = "strategy-name"
+id = "STRATNAME"
+files = ["crates/*/README.md", "apps/*/README.md"]
+pattern = '(?:PortfolioCarry|Cdex|CrossTaker|MakerTaker|StockToken)|(?:^|[^A-Za-z0-9_])Carry(?:[^A-Za-z0-9_]|$)'
+
+[[rule]]
+check = "strategy-name"
+id = "CDEXCORE"
+files = ["crates/*/README.md", "apps/*/README.md"]
+scope = "core"
+pattern = 'cdex'
+
+[[rule]]
+check = "strategy-name"
+id = "PYSTRAT"
+files = ["python/**/*.md", "python/**/*.py", "python/**/*.toml"]
+strip = ['\]\([^)]*\)', 'strategies/[A-Za-z0-9_\-]+']
+pattern = '(?:PortfolioCarry|Cdex|CrossTaker|MakerTaker|StockToken)|(?:^|[^A-Za-z0-9_])Carry(?:[^A-Za-z0-9_]|$)|portfolio[-_]carry|cross[-_]taker|maker[-_]taker|stock[-_]?token'
+
+[[rule]]
+check = "strategy-name"
+id = "PYCDEX"
+files = ["python/**/*.md", "python/**/*.py", "python/**/*.toml"]
+strip = ['\]\([^)]*\)', 'strategies/[A-Za-z0-9_\-]+']
+skip_sections = '(?i)optional|可选'
+exempt_line = '(?i)optional|可选|旧框架|现有 cdex|旧 bot'
+pattern = '(?:^|[^A-Za-z0-9_])cdex(?:[^A-Za-z0-9]|$)'
+
+# ---- 写当前状态 (history narrative, cross-document sync queues)
+[[rule]]
+check = "history"
+id = "HISTORY"
+skip = [".agents/notes", "docs/postmortem"]
+skip_sections = '延伸阅读'
+strip = ['\]\([^)\s]*\)', '\[(?:负责人决定|用户决定)\s*R\d+-\d+\]?', '\(R8-12\)']
+pattern = '修订后|第[一二三四五六七八九十]+轮(?:裁决|修订|评审|决定|决策|第|新增|改|讨论|方案|问题|简报|定稿)|第\s*\d+\s*轮(?:裁决|修订|评审|决定|决策|第|新增|改|讨论|方案|问题|简报|定稿)|(?:^|[^A-Za-z])[Rr]ound\s*\d+|(?:^|[^A-Za-z0-9_])R\d+-\d+|本轮(?:新增|修订|改|删除|评审|决定|裁决|补|调整|同步|变更)'
+
+[[rule]]
+check = "history"
+id = "SYNCQ"
+skip = [".agents/notes", "docs/postmortem"]
+skip_sections = '延伸阅读'
+pattern = '同步项|需要其他组件'
+
+# ---- 范围: schedule wording ("阶段 N", "第 N 周")
+[[rule]]
+check = "schedule"
+id = "PHASE"
+skip = [".agents/notes/rejected"]
+pattern = '阶段\s*[0-4一二三四]|^phase:\s*\S'
+
+[[rule]]
+check = "schedule"
+id = "WEEK"
+skip = [".agents/notes/rejected"]
+pattern = '第\s*\d+(?:\s*[–\-~至]\s*\d+)?\s*周'
+
+# ---- 残留: retired modes, instance roles, parameters, constants, launch stages, kill word widths,
+# tuning values and commands
+[[rule]]
+id = "OLDTERM"
+skip = [".agents/notes"]
+pattern = '迁移前门槛|HypoDriver|假设回放|(?:^|[^A-Za-z])Armed(?:[^A-Za-z]|$)'
+
+[[rule]]
+id = "CANARY"
+skip = [".agents/notes/rejected"]
+pattern = "[Cc]anary|金丝雀|Primary\\s*=\\s*1|\"shadow\"|'shadow'"
+
+[[rule]]
+id = "BALDOMAIN"
+skip = [".agents/notes"]
+pattern = 'balance_domain'
+
+[[rule]]
+id = "ACKCMD"
+skip = [".agents/notes"]
+pattern = 'Adopt(?:Exchange)?`?\s*[/、]\s*`?Ack(?:[^A-Za-z]|$)|(?:^|[^A-Za-z])Ack`?\s*[/、]\s*`?(?:SetBalanceBaseline|Adopt)|ControlCmd::Ack(?:[^A-Za-z]|$)|(?:^|[^A-Za-z/])Ack\s*\{\s*report_id|(?:^|[^A-Za-z])Ack 后再一轮'
+
+[[rule]]
+id = "GROUPALL0"
+skip = [".agents/notes"]
+pattern = 'GROUP_ALL\s*(?::\s*GroupId\s*)?=\s*(?:GroupId\s*\(\s*)?0(?:[^0-9xX.]|$)|GROUP_ALL\s*[(（]\s*0\s*[)）]'
+
+[[rule]]
+id = "OLDPRIO"
+skip = [".agents/notes"]
+exempt_line = 'md\s*>\s*rep-sim'
+pattern = 'ctl\s*>\s*(?:回报|rep)[^\n]{0,40}?>\s*md'
+
+[[rule]]
+id = "SCHEMAEXP"
+skip = [".agents/notes"]
+pattern = 'hft-cfg\s+(?:schema\s+export|export-schema)'
+
+[[rule]]
+id = "ONEINST"
+skip = [".agents/notes"]
+pattern = '没有第二个\s*(?:hft-core\s*)?(?:进程)?实例|每台主机(?:只有)?一个\s*hft-core|instance_id\s*固定\s*1'
+
+[[rule]]
+id = "MANUALCMD"
+files = ["crates/*/README.md", "apps/*/README.md"]
+exempt_line = '退役|retired|Retired'
+pattern = 'Manual(?:Open|Close)(?:[^A-Za-z]|$)'
+
+[[rule]]
+id = "SMALLLIVE"
+skip = [".agents/notes"]
+exempt_line = '不设|没有|删除|取消|不跑|不再|无小额|不含|否决|取代|不做|只有模拟'
+pattern = '小额实盘|小额实单|新子账户小额|小额上线|小额阶段|小额放量|→\s*小额(?:[^真往报]|$)'
+
+[[rule]]
+id = "SIMINPROD"
+skip = [".agents/notes"]
+exempt_line = '不设|没有|删除|取消|不跑|不再|无小额|不含|否决|取代|不做|只有模拟'
+pattern = 'dev2\s*阶段[^\n。;]{0,30}(?:`?prod`?\s*(?:实例)?内|也(?:承载|含)模拟账户|同在)|Sim 账户与 Live 账户同在|模拟账户在 dev2 阶段|sim 实例(?:运行)?在哪台主机|sim 实例放哪台主机|sim 实例的(?:主机|位置)[^\n。]{0,12}(?:待定|未定)|统一升级(?:主机)?后(?:只|全部)?在\s*`?sim`?\s*实例'
+
+[[rule]]
+id = "PERPLEV"
+skip = [".agents/notes"]
+exempt_line = '退役|retired|Retired|删除|不再|取消|旧规格|旧的|取代|superseded|不设常量'
+pattern = '(?:^|[^A-Za-z0-9_])perp_leverage(?:[^A-Za-z0-9_]|$)'
+
+[[rule]]
+id = "MIDAGE"
+skip = [".agents/notes"]
+exempt_line = '退役|retired|Retired|删除|不再|取消|旧规格|旧的|取代|superseded|不设常量'
+pattern = 'max_mid_age_ms'
+
+[[rule]]
+id = "QUOTEAGE"
+skip = [".agents/notes"]
+exempt_line = '退役|retired|Retired|删除|不再|取消|旧规格|旧的|取代|superseded|不设常量'
+pattern = '(?:^|[^A-Za-z_])(?:hedge_)?quote_max_age_ms'
+
+[[rule]]
+id = "KILLU8"
+skip = [".agents/notes"]
+exempt_line = '退役|retired|Retired|删除|不再|取消|旧规格|旧的|取代|superseded|不设常量'
+pattern = 'KillWord[^\n]{0,80}AtomicU8|AtomicU8[^\n]{0,40}KillWord|kill_mask\s*:\s*u8\b|KillBits\s*\(\s*(?:pub\s+)?u8\s*\)|KillBits\s*:\s*u8\b'
+
+[[rule]]
+id = "RESID8D"
+skip = [".agents/notes", "docs/postmortem"]
+exempt_line = '删除|不再|取代|退役|否决|旧规格|去掉|不是|而非|不设|原先|原来|曾经|过去'
+pattern = 'busy_(?:poll|read)(?:\s*/\s*busy_read)?\s*=\s*25(?:\D|$)|napi_defer_hard_irqs\s*=\s*2(?:\D|$)|Conflicts\s*=\s*`?hft-replay-verify|c8`?\s*或更(?:大|高)|kernel_rx[^\n]{0,40}?≤\s*4\s*(?:µs|us)(?:[^\w.]|$)|xtask\s+ledger(?:\s+rebuild)?|dev2[^\n。;;]{0,8}不(?:跑|运行)[^\n。;;]{0,8}(?:fuzz|DST)'
+
+[[rule]]
+id = "RESID8D-PRR"
+skip = [".agents/notes", "docs/postmortem"]
+exempt_line = '删除|不再|取代|退役|否决|旧规格|去掉|不是|而非|不设|原先|原来|曾经|过去|decoupling|不(?:由|触发|跑|重跑)|只跑'
+pattern = 'pull_request_review'

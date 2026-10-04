@@ -213,7 +213,7 @@ core 的深度来源([hft-venue-proto 契约 26](../hft-venue-proto/README.md#�
 
 ### 保证金数据换算
 
-`margin_data = Push`([契约 17](../hft-venue-proto/README.md#实现方必须遵守的契约)):`account` 频道(按事件推送,约 50 ms 聚合一次,另有定期推送[官方])与 `positions` 频道(`instType = SWAP`)在归属连接上订阅;`GwCtx` 缓存最近的账户级字段与每 inst 条目,任一推送更新即产出一份完整 `MarginReport`(`source = Push`;尚未收到 `account` 推送时账户级字段为 0、`margin_ratio = Rate::MAX`)。推送超过 `gw.margin_push_stale_ms` 未到 → 兜底请求 `GET /api/v5/account/balance` + `GET /api/v5/account/positions?instType=SWAP`(`acct_queries(Margin)` 的步 0、步 1,都是 `push_fallback = true`、`every = 1`、`weight = 1`;`OkxSpot` 为空表);兜底结果是一份独立完整的 `MarginReport{source = Poll}`,不写入推送缓存(契约 27)。`margin_ratio` 一律按契约 17 由本表的 `maint_margin / margin_balance` 算出(i128 计算 `maint × 10⁹ / balance`,向零取整;`margin_balance ≤ 0` → `Rate::MAX`);交易所的 `mgnRatio`(OKX 口径 = 权益 / 维持保证金)只作校验对照,不直接采用。
+`margin_data = Push`([契约 17](../hft-venue-proto/README.md#实现方必须遵守的契约)):`account` 频道(按事件推送,约 50 ms 聚合一次,另有定期推送[官方])与 `positions` 频道(`OkxSwap`,`instType = SWAP`)在归属连接上订阅;`GwCtx` 缓存最近的账户级字段与每 inst 条目,任一推送更新即产出一份完整 `MarginReport`(`source = Push`;尚未收到 `account` 推送时账户级字段为 0、`margin_ratio = Rate::MAX`)。推送超过 `gw.margin_push_stale_ms` 未到 → 兜底请求 `GET /api/v5/account/balance` + `GET /api/v5/account/positions?instType=SWAP`(`acct_queries(Margin)` 的步 0、步 1,都是 `push_fallback = true`、`every = 1`、`weight = 1`;`OkxSpot` 为空表);兜底结果是一份独立完整的 `MarginReport{source = Poll}`,不写入推送缓存(契约 27)。`margin_ratio` 一律按契约 17 由本表的 `maint_margin / margin_balance` 算出(i128 计算 `maint × 10⁹ / balance`,向零取整;`margin_balance ≤ 0` → `Rate::MAX`);交易所的 `mgnRatio`(OKX 口径 = 权益 / 维持保证金)只作校验对照,不直接采用。
 
 | `MarginReport` 字段 | `acctLv = 2`(合约模式,默认) | `acctLv = 3`(多币种保证金,覆盖时) | 来源 |
 |---|---|---|---|

@@ -1,0 +1,47 @@
+# Reference-machine budgets of hft-rt's benchmarks (source constants read by `cargo xtask bench-gate`).
+# One table per registered benchmark name (benchmarks/README.md "基准名登记"); values in ns, equal to the
+# README "延迟与资源契约" table (`cargo xtask doc-check` compares them). Format: tools/README.md "cargo xtask doc-check".
+# `bound`/`case`: the benchmarks 单 crate 基准上限表 row (and case) this budget may not exceed.
+
+[rt_spsc_hop]
+p50_ns = 70
+p99_ns = 150
+bound = "环跳(push → pop,跨核)"
+case = "进程内单跳"
+
+[rt_spsc_push_pop]
+budget_ns = 5
+
+[rt_spsc_throughput]
+
+[rt_shm_spsc_hop]
+
+[rt_bytes_hop_1k]
+p50_ns = 150
+bound = "环跳(push → pop,跨核)"
+case = "ByteSpsc"
+
+[rt_tsc_now]
+
+[rt_killword_load]
+budget_ns = 2
+
+[rt_tsc_delta]
+budget_ns = 3
+
+[rt_swap_get]
+budget_ns = 2
+
+[rt_mailbox]
+budget_ns = 2
+
+[rt_seqcell]
+budget_ns = 5
+
+[rt_heartbeat]
+budget_ns = 1
+
+[rt_pause_cost]
+
+[rt_sample_pair]
+budget_ns = 2000

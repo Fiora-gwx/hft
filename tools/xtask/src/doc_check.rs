@@ -1,13 +1,17 @@
 //! `cargo xtask doc-check`: documentation gates (tools/README.md "cargo xtask doc-check").
 //!
-//! For now a wrapper around the Python checkers `tools/doccheck/check_hft.py` (links, README structure,
-//! names, residue, layout, length, …) and `tools/doccheck/check_tests.py` (test-spec format and coverage).
-//! Each prints `problems=<n>` as its last summary line; any non-zero count fails the gate.
-//! The pure helpers [`slug`], [`slugs`] and [`doc_length`] are the native implementations of the anchor
-//! and length rules shared with `check_hft.py` (same definitions).
-//!
-//! Native checks (run after the scripts): [`check_rings`] — the "环名" row of tools/README.md (hft-event
-//! 环拓扑 table <-> hft-sequencer ring table: ring names and element types one-to-one).
+//! Native checks (one per row of the tools/README.md doc-check table; [`native`], [`layout`], [`budget`]) run on
+//! the tree at the repo root, driven by `tools/xtask/doc-check.toml` ([`config`]); then the external scripts that
+//! config lists (`tools/doccheck/check_hft.py`, `check_tests.py`) run, each printing `problems=<n>` as its last
+//! summary line. Any native problem or non-zero script count fails the gate.
+//! The pure helpers [`slug`], [`slugs`] and [`doc_length`] are the anchor and length rules shared with
+//! `check_hft.py` (same definitions); [`check_rings`] is the "环名" row.
+
+pub mod budget;
+pub mod config;
+pub mod layout;
+pub mod md;
+pub mod native;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -18,9 +22,6 @@ use regex::Regex;
 use serde_json::json;
 
 use crate::{EXIT_ENV, EXIT_FAIL, EXIT_OK, write_json};
-
-/// The Python checkers run by `doc-check`, relative to the repo root.
-pub const SCRIPTS: &[&str] = &["tools/doccheck/check_hft.py", "tools/doccheck/check_tests.py"];
 
 static LINK_TEXT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]*)\]\([^)]*\)").unwrap());
 static NOT_SLUG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^\w\- ]").unwrap());
@@ -239,63 +240,111 @@ pub fn check_rings(root: &Path) -> Vec<String> {
     out
 }
 
+/// All native checks: `(check name, problems)`.
+pub fn native_checks(cx: &native::Ctx) -> Vec<(&'static str, Vec<native::Problem>)> {
+    let rings = check_rings(&cx.root)
+        .into_iter()
+        .map(|p| ("RINGNAME", p))
+        .collect();
+    vec![
+        ("links", native::check_links(cx)),
+        ("readme-structure", native::check_structure(cx)),
+        ("budget", budget::check_budgets(cx)),
+        ("segment-names", native::check_segments(cx)),
+        ("event-producers", native::check_producers(cx)),
+        ("event-roles", native::check_kind_roles(cx)),
+        ("note-timer-names", native::check_note_names(cx)),
+        ("codes-and-layout", layout::check_layout(cx)),
+        ("dep-graph", native::check_dep_graph(cx)),
+        ("rings", rings),
+        ("venue-readme", budget::check_venues(cx)),
+        ("runbooks", native::check_runbooks(cx)),
+        ("scope-table", native::check_scope_table(cx)),
+        ("name-rules", native::check_rules(cx)),
+        ("agent-notes", native::check_notes(cx)),
+        ("length", native::check_length(cx)),
+    ]
+}
+
 /// Entry point: returns the exit code.
 pub fn run(root: &Path) -> i32 {
-    let Some(py) = find_python() else {
-        eprintln!("doc-check: error: no Python 3 interpreter (python / python3) on PATH");
-        return EXIT_ENV;
-    };
-    let mut checks = Vec::new();
-    let mut code = EXIT_OK;
-    for script in SCRIPTS {
-        let path = root.join(script);
-        if !path.is_file() {
-            eprintln!("doc-check: error: {script} not found");
+    let cfg = match config::Config::load(root) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("doc-check: error: {e}");
             return EXIT_ENV;
         }
-        let out = match Command::new(&py)
-            .arg(&path)
-            .arg("--base")
-            .arg(root)
-            .env("PYTHONIOENCODING", "utf-8")
-            .current_dir(root)
-            .output()
-        {
-            Ok(o) => o,
-            Err(e) => {
-                eprintln!("doc-check: error: run {script}: {e}");
+    };
+    let scripts = cfg.scripts.clone();
+    let cx = native::Ctx::load(root, cfg);
+    let mut code = EXIT_OK;
+    let mut native_json = Vec::new();
+    let mut total = 0;
+    for (name, probs) in native_checks(&cx) {
+        for (cat, msg) in &probs {
+            eprintln!("[{cat}] {msg}");
+        }
+        total += probs.len();
+        native_json.push(json!({ "check": name, "problems": probs.iter().map(|(c, m)| format!("[{c}] {m}")).collect::<Vec<_>>() }));
+    }
+    eprintln!(
+        "doc-check: native checks: files={} problems={total}",
+        cx.docs.len()
+    );
+    if total > 0 {
+        code = EXIT_FAIL;
+    }
+    let mut checks = Vec::new();
+    if !scripts.is_empty() {
+        let Some(py) = find_python() else {
+            eprintln!("doc-check: error: no Python 3 interpreter (python / python3) on PATH");
+            return EXIT_ENV;
+        };
+        for script in &scripts {
+            let path = root.join(script);
+            if !path.is_file() {
+                eprintln!("doc-check: error: {script} not found");
                 return EXIT_ENV;
             }
-        };
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        eprint!("{stdout}");
-        eprint!("{}", String::from_utf8_lossy(&out.stderr));
-        let problems = PROBLEMS
-            .captures_iter(&stdout)
-            .last()
-            .and_then(|c| c[1].parse::<u64>().ok());
-        let status = out.status.code().unwrap_or(-1);
-        eprintln!(
-            "doc-check: {script}: exit {status}, problems={}",
-            problems.map_or("?".to_string(), |n| n.to_string())
-        );
-        checks.push(json!({ "script": script, "exit": status, "problems": problems }));
-        match problems {
-            None => code = EXIT_ENV,
-            Some(n) if n > 0 || status != 0 => code = code.max(EXIT_FAIL),
-            Some(_) => {}
+            let out = match Command::new(&py)
+                .arg(&path)
+                .arg("--base")
+                .arg(root)
+                .env("PYTHONIOENCODING", "utf-8")
+                .current_dir(root)
+                .output()
+            {
+                Ok(o) => o,
+                Err(e) => {
+                    eprintln!("doc-check: error: run {script}: {e}");
+                    return EXIT_ENV;
+                }
+            };
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            eprint!("{stdout}");
+            eprint!("{}", String::from_utf8_lossy(&out.stderr));
+            let problems = PROBLEMS
+                .captures_iter(&stdout)
+                .last()
+                .and_then(|c| c[1].parse::<u64>().ok());
+            let status = out.status.code().unwrap_or(-1);
+            eprintln!(
+                "doc-check: {script}: exit {status}, problems={}",
+                problems.map_or("?".to_string(), |n| n.to_string())
+            );
+            checks.push(json!({ "script": script, "exit": status, "problems": problems }));
+            match problems {
+                None => code = EXIT_ENV,
+                Some(n) if n > 0 || status != 0 => code = code.max(EXIT_FAIL),
+                Some(_) => {}
+            }
         }
     }
-    let rings = check_rings(root);
-    for p in &rings {
-        eprintln!("[RINGNAME] {p}");
-    }
-    eprintln!("doc-check: native ring-name check: problems={}", rings.len());
-    if !rings.is_empty() {
-        code = code.max(EXIT_FAIL);
-    }
-    let native = json!([{ "check": "rings", "problems": rings }]);
-    if let Err(e) = write_json(root, "doc-check", &json!({ "checks": checks, "native": native })) {
+    if let Err(e) = write_json(
+        root,
+        "doc-check",
+        &json!({ "checks": checks, "native": native_json }),
+    ) {
         eprintln!("doc-check: error: {e}");
         return EXIT_ENV;
     }

@@ -1,0 +1,58 @@
+# doc-check fixture config (tools/TESTS.md TOOL-066): strategy family name `fooarb` (and `cdex`), deleted
+# component `old-comp`, history keyword `以前`, retired name `HypoDriver`.
+scripts = []
+exclude = ["target"]
+evidence = []
+
+[frontmatter]
+keys = ["description", "kind", "tier", "scope", "status"]
+scope = ["core", "optional"]
+status = ["spec", "impl", "frozen"]
+components = [
+    "crates/*/README.md", "apps/*/README.md", "strategies/*/README.md", "strategies/*/pipeline/README.md",
+    "python/*/README.md",
+]
+
+[agent_notes]
+root = ".agents/notes"
+lifecycles = ["proposed", "implemented", "rejected"]
+classes = ["architecture", "process", "testing", "feature", "bug-fix", "simplification"]
+
+[deleted]
+components = ["old-comp"]
+skip = [".agents/notes"]
+
+[[rule]]
+check = "strategy-name"
+id = "STRATNAME"
+files = ["crates/*/README.md", "apps/*/README.md", "python/**/*.md", "python/**/*.py"]
+pattern = '(?:^|[^A-Za-z0-9_])fooarb(?:[^A-Za-z0-9_]|$)'
+
+[[rule]]
+check = "strategy-name"
+id = "CDEXCORE"
+files = ["crates/*/README.md", "apps/*/README.md"]
+scope = "core"
+pattern = 'cdex'
+
+[[rule]]
+check = "history"
+id = "HISTORY"
+skip = [".agents/notes", "docs/postmortem"]
+skip_sections = '延伸阅读'
+pattern = '以前'
+
+[[rule]]
+check = "schedule"
+id = "PHASE"
+pattern = '阶段\s*[0-4一二三四]|^phase:\s*\S'
+
+[[rule]]
+check = "schedule"
+id = "WEEK"
+pattern = '第\s*\d+(?:\s*[–\-~至]\s*\d+)?\s*周'
+
+[[rule]]
+id = "OLDTERM"
+skip = [".agents/notes"]
+pattern = 'HypoDriver'

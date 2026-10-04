@@ -1,0 +1,32 @@
+# Reference-machine budgets of hft-journal's benchmarks (source constants read by `cargo xtask bench-gate`).
+# One table per registered benchmark name (benchmarks/README.md "基准名登记"); values in ns, equal to the
+# README "延迟与资源契约" table (`cargo xtask doc-check` compares them). Format: tools/README.md "cargo xtask doc-check".
+# `bound`: the benchmarks 单 crate 基准上限表 row this budget may not exceed.
+
+[journal_append_80b]
+p50_ns = 40
+p99_ns = 100
+bound = "journal 追加(32–512 B 记录)"
+
+[journal_append_raw_512b]
+p50_ns = 100
+p99_ns = 250
+bound = "journal 追加(32–512 B 记录)"
+
+[journal_publish]
+p99_ns = 150
+
+[journal_roll_switch]
+p99_ns = 5000
+
+[journal_boot_400books]
+budget_ns = 1000000
+
+[journal_end_event]
+budget_ns = 3
+
+[journal_retire_tlb]
+
+[journal_read_scan]
+
+[journal_recover_1g]

@@ -3,12 +3,16 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use xtask::{EXIT_ENV, EXIT_OK, doc_check, gen_schema, test_trace};
+use xtask::{EXIT_ENV, EXIT_OK, deps, doc_check, gen_schema, test_trace};
 
 const SUBCOMMANDS: &[(&str, &str)] = &[
     (
+        "deps",
+        "dependency direction and forbidden dependencies (tools/xtask/deps.toml + cargo metadata)",
+    ),
+    (
         "doc-check",
-        "documentation gates (tools/doccheck/check_hft.py + check_tests.py)",
+        "documentation gates (native checks + scripts listed in tools/xtask/doc-check.toml)",
     ),
     (
         "gen-schema",
@@ -63,6 +67,7 @@ fn main() -> ExitCode {
         }
         Some("test-trace") => test_trace::run(&root),
         Some("doc-check") => doc_check::run(&root),
+        Some("deps") => deps::run(&root),
         Some(other) => {
             eprintln!(
                 "xtask: unknown or not yet implemented subcommand '{other}'\n\n{}",

@@ -1,0 +1,327 @@
+# cargo xtask deps: machine-readable dependency rules (tools/README.md "cargo xtask deps").
+# Human view: crates/AGENTS.md "依赖方向" (doc-check compares that graph with the [pkg] tables below).
+# Change the graph here, in crates/AGENTS.md and in docs/architecture.md §7 in the same commit.
+#
+# [pkg."<path>"]: one workspace package (directory relative to the repo root; "strategies/*" = every
+# strategy crate except strategies/registry).
+#   tier = pure | hot | warm | cold | dev            (crates/AGENTS.md "tier")
+#   deps = [...]   internal packages allowed in [dependencies] / [build-dependencies] (rule 1)
+#   dev  = [...]   extra internal packages allowed in [dev-dependencies]; dev-tier packages and every
+#                  entry of `deps` are allowed there too
+#   dev_tier_ok = true   the package itself only runs on dev machines and CI, so it may depend on
+#                  dev-tier packages in [dependencies] (rule 5 exception; tools/xtask, see hft-testkit)
+# Every workspace member must match one [pkg] entry.
+
+# decoupling-gate layers (tools/README.md "cargo xtask decoupling-gate").
+[layers]
+engine = ["crates/*"]
+app = ["apps/*"]
+strategy = ["strategies/*"]
+tool = ["tools/*"]
+
+[rules]
+# dependency targets of test-only `--cfg` builds: their edges count as [dev-dependencies] edges.
+test_cfgs = ["cfg(loom)"]
+# rule 2: never in the dependency closure of a hot/pure library crate (crates/*, strategies/*).
+hot_pure_forbidden = [
+    "tokio", "async-std", "mio", "futures-executor", "tracing-subscriber", "serde_json", "reqwest", "hyper",
+    "pyo3", "rust_decimal", "bigdecimal", "num-bigint",
+]
+# rule 3: venue-* direct dependencies.
+venue_internal = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-venue-proto"]
+venue_codecs = ["sonic-rs", "memchr", "zerocopy", "ed25519-dalek", "hmac", "sha2", "base64"]
+# rule 4: chain crates ("*" = prefix) only in the closure of these packages.
+chain_crates = ["alloy-*", "revm"]
+chain_allowed = ["crates/hft-amm", "crates/hft-chain-evm", "apps/chain-core", "crates/hft-py"]
+# rule 7: packages that must not have hft-rt in their closure (rule T4); strategies/* always included.
+no_rt = [
+    "crates/hft-venue-proto", "crates/hft-book", "crates/hft-oms", "crates/hft-risk", "crates/hft-ledger",
+    "crates/hft-exec", "crates/hft-strategy-sdk", "crates/hft-strat-lib", "crates/hft-amm", "crates/venue-*",
+]
+rt = "crates/hft-rt"
+# rule 8: hft-journal's `writer` feature only in the closure of `journal_writer_allowed`; checked for the
+# reader-only packages `journal_writer_roots` (crates/AGENTS.md: the other apps and hft-py).
+journal = "crates/hft-journal"
+journal_writer_feature = "writer"
+journal_writer_allowed = ["apps/hft-core", "apps/replayer", "apps/chain-core"]
+journal_writer_roots = ["apps/*", "crates/hft-py"]
+# rule 9: strategy decoupling.
+registry = "strategies/registry"
+registry_users = ["apps/hft-core", "apps/replayer"]
+no_strategy_closure = ["crates/hft-testkit", "tools/hft-cfg", "crates/hft-py"]
+# rule 10
+verify = "tools/hft-verify"
+verify_forbidden = ["reqwest", "hyper", "tokio"]
+# rule 11
+secrets = "tools/hft-secrets"
+secrets_crates = ["aws-sdk-secretsmanager", "aws-sdk-kms"]
+# rule 12
+testing_feature = "testing"
+
+# ---------------------------------------------------------------- L0
+[pkg."crates/hft-types"]
+tier = "pure"
+deps = []
+
+[pkg."crates/hft-refdata"]
+tier = "pure"
+deps = ["crates/hft-types"]
+
+[pkg."crates/hft-event"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata"]
+
+# ---------------------------------------------------------------- strategy interface
+[pkg."crates/hft-strategy-sdk"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event"]
+
+[pkg."crates/hft-strat-lib"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-strategy-sdk"]
+
+# ---------------------------------------------------------------- L1: protocol trait and venues
+[pkg."crates/hft-venue-proto"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event"]
+
+[pkg."crates/venue-binance"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-venue-proto"]
+
+[pkg."crates/venue-okx"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-venue-proto"]
+
+[pkg."crates/venue-bitget"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-venue-proto"]
+
+[pkg."crates/venue-bybit"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-venue-proto"]
+
+[pkg."crates/venue-gate"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-venue-proto"]
+
+[pkg."crates/venue-kucoin"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-venue-proto"]
+
+[pkg."crates/venue-hyperliquid"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-venue-proto"]
+
+# ---------------------------------------------------------------- L1: book, orders, risk, ledger, execution
+[pkg."crates/hft-book"]
+tier = "hot"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-strategy-sdk"]
+
+[pkg."crates/hft-oms"]
+tier = "hot"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-strategy-sdk"]
+
+[pkg."crates/hft-risk"]
+tier = "hot"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-strategy-sdk"]
+
+[pkg."crates/hft-ledger"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-strategy-sdk"]
+
+[pkg."crates/hft-exec"]
+tier = "hot"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-strategy-sdk"]
+
+# ---------------------------------------------------------------- hot-path runtime
+[pkg."crates/hft-rt"]
+tier = "hot"
+deps = ["crates/hft-types"]
+
+[pkg."crates/hft-journal"]
+tier = "hot"
+deps = ["crates/hft-types", "crates/hft-event", "crates/hft-rt"]
+
+[pkg."crates/hft-net"]
+tier = "hot"
+deps = ["crates/hft-types", "crates/hft-event", "crates/hft-rt"]
+
+[pkg."crates/hft-venue"]
+tier = "hot"
+deps = [
+    "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-venue-proto", "crates/hft-net",
+    "crates/hft-journal", "crates/hft-rt",
+]
+
+[pkg."crates/hft-sequencer"]
+tier = "hot"
+deps = [
+    "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-book", "crates/hft-oms",
+    "crates/hft-risk", "crates/hft-ledger", "crates/hft-exec", "crates/hft-strategy-sdk", "crates/hft-journal",
+    "crates/hft-rt",
+]
+
+# ---------------------------------------------------------------- control, observability, simulation, tests
+[pkg."crates/hft-ctl-proto"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event"]
+
+[pkg."crates/hft-ctl"]
+tier = "warm"
+deps = [
+    "crates/hft-ctl-proto", "crates/hft-types", "crates/hft-event", "crates/hft-refdata",
+    "crates/hft-strategy-sdk", "crates/hft-risk", "crates/hft-sequencer", "crates/hft-journal", "crates/hft-rt",
+]
+
+[pkg."crates/hft-telemetry"]
+tier = "cold"
+deps = ["crates/hft-types", "crates/hft-event", "crates/hft-refdata", "crates/hft-journal", "crates/hft-ledger"]
+
+[pkg."crates/hft-sim"]
+tier = "warm"
+deps = [
+    "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-book", "crates/hft-rt",
+    "crates/hft-journal",
+]
+
+[pkg."crates/hft-py"]
+tier = "cold"
+deps = [
+    "crates/hft-journal", "crates/hft-event", "crates/hft-refdata", "crates/hft-types", "crates/hft-strategy-sdk",
+    "crates/hft-ledger", "crates/hft-risk", "crates/hft-rt",
+]
+
+[pkg."crates/hft-testkit"]
+tier = "dev"
+deps = [
+    "crates/hft-types", "crates/hft-sim", "crates/hft-sequencer", "crates/hft-oms", "crates/hft-risk",
+    "crates/hft-ledger", "crates/hft-exec", "crates/hft-strategy-sdk", "crates/hft-strat-lib",
+    "crates/hft-venue-proto", "crates/hft-event", "crates/hft-refdata", "crates/hft-rt", "crates/hft-chain-evm",
+]
+
+# ---------------------------------------------------------------- optional chain (frozen)
+[pkg."crates/hft-ext-proto"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event"]
+
+[pkg."crates/hft-amm"]
+tier = "pure"
+deps = ["crates/hft-types"]
+
+[pkg."crates/hft-chain-evm"]
+tier = "cold"
+deps = [
+    "crates/hft-event", "crates/hft-types", "crates/hft-refdata", "crates/hft-journal", "crates/hft-ext-proto",
+    "crates/hft-amm",
+]
+
+[pkg."crates/hft-chain-solana"]
+tier = "hot"
+deps = [
+    "crates/hft-amm", "crates/hft-rt", "crates/hft-journal", "crates/hft-event", "crates/hft-refdata",
+    "crates/hft-net", "crates/hft-types",
+]
+
+# ---------------------------------------------------------------- strategies
+[pkg."strategies/*"]
+tier = "hot"
+deps = ["crates/hft-strategy-sdk", "crates/hft-strat-lib"]
+
+[pkg."strategies/registry"]
+tier = "hot"
+deps = ["crates/hft-strategy-sdk", "strategies/*"]
+dev = [
+    "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-strat-lib", "crates/hft-book",
+    "crates/hft-oms", "crates/hft-risk", "crates/hft-ledger", "crates/hft-exec", "crates/hft-sequencer",
+    "crates/hft-sim", "crates/hft-journal", "crates/hft-rt",
+]
+
+# ---------------------------------------------------------------- apps (assembly only)
+[pkg."apps/hft-core"]
+tier = "hot"
+deps = [
+    "crates/hft-types", "crates/hft-event", "crates/hft-refdata", "crates/hft-rt", "crates/hft-journal",
+    "crates/hft-net", "crates/hft-venue", "crates/venue-binance", "crates/venue-okx", "crates/venue-bitget",
+    "crates/hft-book", "crates/hft-oms", "crates/hft-risk", "crates/hft-ledger", "crates/hft-exec",
+    "crates/hft-strategy-sdk", "crates/hft-strat-lib", "crates/hft-sequencer", "crates/hft-sim", "crates/hft-ctl",
+    "strategies/registry", "crates/hft-ext-proto",
+]
+
+[pkg."apps/replayer"]
+tier = "cold"
+deps = [
+    "crates/hft-types", "crates/hft-sequencer", "crates/hft-strategy-sdk", "crates/hft-exec",
+    "crates/hft-strat-lib", "crates/hft-oms", "crates/hft-risk", "crates/hft-ledger", "crates/hft-book",
+    "crates/hft-event", "crates/hft-refdata", "crates/hft-sim", "crates/hft-journal", "strategies/registry",
+    "crates/hft-telemetry", "crates/venue-binance", "crates/venue-okx", "crates/venue-bitget",
+]
+
+[pkg."apps/watchtower"]
+tier = "cold"
+deps = [
+    "crates/hft-types", "crates/hft-event", "crates/hft-journal", "crates/hft-telemetry", "crates/hft-ledger",
+    "crates/hft-refdata", "crates/hft-rt", "crates/hft-ctl",
+]
+
+[pkg."apps/reconciler"]
+tier = "cold"
+deps = [
+    "crates/hft-types", "crates/hft-event", "crates/hft-journal", "crates/hft-ledger", "crates/hft-oms",
+    "crates/hft-risk", "crates/hft-refdata", "crates/hft-venue-proto", "crates/venue-binance",
+    "crates/venue-okx", "crates/venue-bitget", "crates/hft-ctl",
+]
+
+[pkg."apps/journal-archiver"]
+tier = "cold"
+deps = [
+    "crates/hft-types", "crates/hft-event", "crates/hft-journal", "crates/hft-refdata", "crates/hft-telemetry",
+    "crates/hft-ledger",
+]
+
+[pkg."apps/kill-switch"]
+tier = "cold"
+deps = ["crates/hft-rt"]
+
+[pkg."apps/chain-core"]
+tier = "cold"
+deps = [
+    "crates/hft-types", "crates/hft-event", "crates/hft-refdata", "crates/hft-rt", "crates/hft-journal",
+    "crates/hft-chain-evm", "crates/hft-ext-proto", "crates/hft-ctl-proto",
+]
+
+[pkg."apps/chain-grpc-relay"]
+tier = "cold"
+deps = ["crates/hft-rt", "crates/hft-event"]
+
+[pkg."apps/mock-exchange"]
+tier = "dev"
+deps = [
+    "crates/venue-binance", "crates/venue-okx", "crates/venue-bitget", "crates/hft-sim", "crates/hft-refdata",
+    "crates/hft-journal", "crates/hft-event",
+]
+
+# ---------------------------------------------------------------- tools
+[pkg."tools/xtask"]
+tier = "cold"
+deps = ["crates/hft-event", "crates/hft-refdata", "crates/hft-testkit"]
+dev_tier_ok = true
+
+[pkg."tools/hft-cfg"]
+tier = "cold"
+deps = [
+    "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-strategy-sdk", "crates/hft-risk",
+    "crates/venue-binance", "crates/venue-okx", "crates/venue-bitget", "crates/hft-ctl-proto",
+]
+
+[pkg."tools/hostprobe"]
+tier = "cold"
+deps = []
+
+[pkg."tools/hft-secrets"]
+tier = "cold"
+deps = []
+
+[pkg."tools/hft-verify"]
+tier = "cold"
+deps = []
