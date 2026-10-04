@@ -4,6 +4,7 @@ resolver = "2"
 members = [
     "crates/hft-types",
     "crates/hft-refdata",
+    "crates/hft-event",
     "crates/hft-rt",
     "tools/xtask",
 ]
@@ -33,6 +34,7 @@ trybuild = "1"
 hft-rt = { path = "crates/hft-rt" }
 rtrb = "0.3"
 static_assertions = "1"
+hft-event = { path = "crates/hft-event" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

@@ -82,7 +82,7 @@ impl RefData {
     pub fn caps_row(&self, v: VenueId) -> Option<u32>; pub fn venue_row(&self, v: VenueId) -> Option<u32>; // 段内行下标(错误定位)
     pub fn account_venues(&self) -> &[(AccountId, VenueId, Box<str>)]; pub fn blob(&self) -> &[u8]; pub fn created_utc_ns(&self) -> i64;
 }
-pub struct GroupSpecView<'a> { pub asset: AssetId, pub legs: &'a [LegView] }   // hft-event GroupSpec 的同形视图(hft-event 提供转换)
+pub struct GroupSpecView<'a> { pub asset: AssetId, pub legs: &'a [LegView] }   // hft-event GroupSpec 的同形视图(hft-event 的 GroupSpec::view 在调用方存储里构造)
 pub struct LegView { pub inst: InstId, pub venue: VenueId }
 pub struct ProtocolFacts { pub venue: VenueId, pub market: MarketKind, pub caps: VenueCaps /* VenueProtocol::default_caps() */, pub stale_guard: StaleGuardKind }
 pub struct AssemblyFacts<'a> { pub host: HostClass, pub max_universe_insts: u32, pub protocols: &'a [ProtocolFacts], pub kinds: &'a [u16] /* StrategySet::kinds() */ }
@@ -120,7 +120,7 @@ impl SymbolIndex {
 }
 ```
 
-`GroupSpec` 的布局在 [hft-event](../hft-event/README.md#strategyparamsspb1);本 crate 只提供针对它的 refdata 一致性检查。hft-event 依赖本 crate,所以 `check_group` 接受本 crate 定义的同形视图 `GroupSpecView`(前 `n_legs` 条腿的 `inst`、`venue` 与 `asset`),由 hft-event 提供 `From<&GroupSpec>` 转换。
+`GroupSpec` 的布局在 [hft-event](../hft-event/README.md#strategyparamsspb1);本 crate 只提供针对它的 refdata 一致性检查。hft-event 依赖本 crate,所以 `check_group` 接受本 crate 定义的同形视图 `GroupSpecView`(前 `n_legs` 条腿的 `inst`、`venue` 与 `asset`),由 hft-event 提供转换 `GroupSpec::view`(腿视图写在调用方给的存储里)。
 
 ### LoadErrCode 码表
 

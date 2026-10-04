@@ -1,0 +1,9 @@
+error[E0080]: evaluation panicked: Var prefix + max exceeds 65 504
+ --> tests/compile_fail/evt_170_5_var_max_65425.rs:4:1
+  |
+4 | / event_body! {
+5 | |     pub struct P : var(EventKind(0x7E03), 1, 65_425), FromBytes { pub a: [u8; 80] }
+6 | | }
+  | |_^ evaluation of `_` failed here
+  |
+  = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `event_body` (in Nightly builds, run with -Z macro-backtrace for more info)

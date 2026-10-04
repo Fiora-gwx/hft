@@ -1,0 +1,52 @@
+error[E0277]: `Gap` has 7 total byte(s) of padding
+ --> tests/compile_fail/evt_170_2_implicit_padding.rs:4:1
+  |
+4 | / event_body! {
+5 | |     pub struct Gap : fixed(EventKind(0x7E01), 1), FromBytes { pub a: u8, pub b: u64 }
+6 | | }
+  | |_^ types with padding cannot implement `IntoBytes`
+  |
+  = note: consider using `zerocopy::Unalign` to lower the alignment of individual fields
+  = note: consider adding explicit fields where padding would be
+  = note: consider using `#[repr(packed)]` to remove padding
+help: the trait `PaddingFree<Gap, 7>` is not implemented for `()`
+      but trait `PaddingFree<Gap, 0>` is implemented for it
+ --> $CARGO/zerocopy-$VERSION/src/util/macro_util.rs
+  |
+  | impl<T: ?Sized> PaddingFree<T, 0> for () {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = note: this error originates in the derive macro `zerocopy::IntoBytes` which comes from the expansion of the macro `event_body` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: `Gap` has 7 total byte(s) of padding
+ --> tests/compile_fail/evt_170_2_implicit_padding.rs:4:1
+  |
+4 | / event_body! {
+5 | |     pub struct Gap : fixed(EventKind(0x7E01), 1), FromBytes { pub a: u8, pub b: u64 }
+6 | | }
+  | |_^ types with padding cannot implement `IntoBytes`
+  |
+  = note: consider using `zerocopy::Unalign` to lower the alignment of individual fields
+  = note: consider adding explicit fields where padding would be
+  = note: consider using `#[repr(packed)]` to remove padding
+help: the trait `PaddingFree<Gap, 7>` is not implemented for `()`
+      but trait `PaddingFree<Gap, 0>` is implemented for it
+ --> $CARGO/zerocopy-$VERSION/src/util/macro_util.rs
+  |
+  | impl<T: ?Sized> PaddingFree<T, 0> for () {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required for `Gap` to implement `IntoBytes`
+ --> tests/compile_fail/evt_170_2_implicit_padding.rs:4:1
+  |
+4 | / event_body! {
+5 | |     pub struct Gap : fixed(EventKind(0x7E01), 1), FromBytes { pub a: u8, pub b: u64 }
+6 | | }
+  | |_^ type parameter would need to implement `IntoBytes`
+  = help: consider manually implementing `IntoBytes` to avoid undesired bounds
+note: required by a bound in `Body`
+ --> src/lib.rs
+  |
+  | pub trait Body:
+  |           ---- required by a bound in this trait
+  |     zerocopy::TryFromBytes + zerocopy::IntoBytes + zerocopy::KnownLayout + zerocopy::Immutable + Copy
+  |                              ^^^^^^^^^^^^^^^^^^^ required by this bound in `Body`
+  = note: this error originates in the macro `event_body` (in Nightly builds, run with -Z macro-backtrace for more info)

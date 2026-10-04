@@ -143,6 +143,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc32c"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a47af21622d091a8f0fb295b88bc886ac74efcc613efc19f5d0b21de5c89e47"
+dependencies = [
+ "rustc_version",
+]
+
+[[package]]
 name = "criterion"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -412,6 +421,21 @@ name = "hermit-abi"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
+
+[[package]]
+name = "hft-event"
+version = "0.1.0"
+dependencies = [
+ "crc32c",
+ "criterion",
+ "hft-refdata",
+ "hft-types",
+ "libc",
+ "proptest",
+ "serde_json",
+ "trybuild",
+ "zerocopy",
+]
 
 [[package]]
 name = "hft-refdata"

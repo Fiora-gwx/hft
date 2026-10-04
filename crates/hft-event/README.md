@@ -57,7 +57,10 @@ pub struct KindInfo {
 pub struct FieldDesc { pub name: &'static str, pub offset: u16, pub ty: FieldTy, pub measure: bool, pub doc: &'static str }
 // measure = 测量字段(如 OrderDecision.decided_tsc):验证回放逐字节比对 Output 记录时屏蔽它们与记录头 tsc
 pub enum FieldTy { U8, U16, U32, U64, I8, I16, I32, I64, Px, Qty, Notional, Rate, Tsc, UtcNs, Id(IdKind),
-                   Enum(&'static EnumDesc), Bits(&'static str), Bytes(u16), Pad(u16), Nested(&'static [FieldDesc]) }
+                   Enum(&'static EnumDesc), Bits(&'static EnumDesc), Bytes(u16), Pad(u16), Nested(&'static [FieldDesc]) }
+pub struct EnumDesc { pub name: &'static str, pub width: u8 /* 字段字节宽 */, pub items: &'static [EnumItem] }   // 码表(Enum)或具名位(Bits)
+pub struct EnumItem { pub name: &'static str, pub value: u32 }
+// 整数编码的码表与位集合(ExecDecision.action、ReconcileReport.sflags 等)以 `codes` 模块的 EnumDesc 登记,FieldDesc.ty 引用它们
 pub static KINDS: &[KindInfo];
 pub fn kind_info(k: EventKind) -> Option<&'static KindInfo>;   // 未知 kind → None,读者跳过该记录(按 len)
 ```
@@ -101,7 +104,9 @@ pub fn encode_fixed<B: Body>(out: &mut [u8], seq: u64, tsc: u64, flags: RecordFl
 pub fn encode_var<P: Body>(out: &mut [u8], seq: u64, tsc: u64, flags: RecordFlags, prefix: &P, tail: &[u8]) -> Result<u32, EncodeErr>;
     // Var 布局;tail.len() ≠ 前缀计数推出的长度 L(见下)→ Count;L 超过 KindInfo.max → TooLong;out 不足 → BufTooSmall
 #[repr(u8)] pub enum EncodeErr { TooLong = 1, BufTooSmall = 2, Count = 3 }
-pub struct RecordView<'a> { pub hdr: &'a RecordHeader, pub body: &'a [u8] }   // body = 记录 [24, len)(CRC 位置位时 [24, len − 4)),含体末零填充
+pub struct RecordView<'a> { pub hdr: RecordHeader, pub body: &'a [u8] }   // hdr 按值(缓冲不要求 8 B 对齐);body = 记录 [24, len)(CRC 位置位时 [24, len − 4)),含体末零填充
+pub fn encode_part(out: &mut [u8], seq: u64, tsc: u64, flags: RecordFlags, kind: EventKind, ph: &PartHdr, chunk: &[u8]) -> Result<u32, EncodeErr>;
+    // Multi 记录的一段(体 = PartHdr + chunk,PartIter 产出);chunk.len() ≠ ph.chunk_len → Count;记录 > 65 536 → TooLong;out 不足 → BufTooSmall
 pub fn decode_record(buf: &[u8]) -> Result<RecordView<'_>, DecodeErr>;
     // buf < 24、len < 24、len > buf.len() 或 CRC 位置位而 len < 32 → Short;len > 65 536 → TooLong;len 不是 8 的倍数 → Misaligned;
     // CRC 位置位且末 4 字节 ≠ crc32c([0, len − 4)) → BadCrc;不检查 kind 是否登记(未登记的由调用方经 kind_info 判定后按 len 跳过)
@@ -836,9 +841,11 @@ StrategyParamsHdr (48 B) | GroupSpec × n_groups (80 B each) | body (body_len B,
     pub _pad2: u32,                 // 12
 }
 pub struct SpbView<'a> { pub hdr: &'a StrategyParamsHdr, pub groups: &'a [GroupSpec], pub body: &'a [u8] }
-impl<'a> From<&'a GroupSpec> for hft_refdata::GroupSpecView<'a>;   // 供 check_group:asset 与前 n_legs 条腿的 (inst, venue);refdata 不依赖本 crate,转换在这里
+impl GroupSpec { pub fn view<'a>(&self, legs: &'a mut [hft_refdata::LegView; 4]) -> hft_refdata::GroupSpecView<'a>; }
+    // 供 check_group:asset 与前 n_legs 条腿的 (inst, venue),腿视图写在调用方给的存储里(GroupSpecView 借用 LegView 切片);refdata 不依赖本 crate,转换在这里
 pub fn parse_spb1(blob: &[u8]) -> Result<SpbView<'_>, ParamsErr>;     // 只做容器级校验(下列 1–3,按序,返回第一个错误);body 原样返回,不检查其内部结构
-#[repr(u8)] pub enum ParamsErr { Truncated = 1, BadLen = 2, BadGroup = 3, BadLeg = 4, Padding = 5, DupGroup = 6, BadHdr = 7 }
+#[repr(u8)] pub enum ParamsErr { Truncated = 1, BadLen = 2, BadGroup = 3, BadLeg = 4, Padding = 5, DupGroup = 6, BadHdr = 7,
+                                 Misaligned = 8 /* blob 不是 8 B 对齐,无法零拷贝视图 */ }
 ```
 
 容器级校验(`parse_spb1`):
@@ -895,6 +902,7 @@ pub struct GwCmd {                   // out-<venue> 环与 out-sim 环元素,64 
 }
 const _: () = assert!(size_of::<GwCmd>() == 64);
 impl GwCmd {
+    // 维护类与模拟类构造器的 side/tif 写占位值 Buy/Gtc(gw 与 sim-gw 不读),其余未列字段为 0
     pub fn mirror_restore(account: AccountId, inst: InstId, slot: SlotId, gen: u32, epoch: u16, exch_order_id: u64) -> GwCmd;
     pub fn exch_order_id(&self) -> u64;   // 只对 MirrorRestore 有意义:从 px 字段的 64 位取回
     pub fn epoch(&self) -> u16;           // 只对 SetEpoch、MirrorRestore 有意义:arg 的低 16 位
@@ -990,7 +998,7 @@ pub struct CmdScope { pub strategy: StrategyId, pub venue: VenueId, pub account:
 // 具体 GroupId = 该 group;GROUP_NONE(0)在 CmdScope 中非法(→ InvalidArgs)。CapRecord.scope 同此编码。
 pub struct BlobRef  { pub kind: BlobKind /* u16 */, pub encoding: u16, pub len: u32, pub version: u64, pub sha256: [u8; 32] } // 48 B
 
-pub enum ControlCmd {                // Rust 侧类型化视图;载荷字节布局 = 字段按序排列 + 显式填充到 8 的倍数;名字以 control-plane 为准
+pub enum ControlCmd<'a> {            // Rust 侧类型化视图(InjectWarmup 的 payload 借用逻辑体);载荷字节布局 = 字段按序排列 + 显式填充到 8 的倍数;名字以 control-plane 为准
     SetMode { scope: CmdScope, mode: RunMode },                     // 0x0001  24 B
     SetParams { scope: CmdScope, blob: BlobRef },                   // 0x0002  64 B;scope.strategy/account 必须等于 blob 的 StrategyParamsHdr
     SetRisk { blob: BlobRef },                                      // 0x0003  48 B
@@ -1024,7 +1032,7 @@ pub enum ControlCmd {                // Rust 侧类型化视图;载荷字节布�
                   payload: [u8; 256] /* 前 len 字节有效,其余 0;len ≤ 256 */ },  //   group:GROUP_NONE = 实例级;GROUP_ALL 非法;账户 = CmdHdr.account
     InjectWarmup { instance: StrategyId, last: u8 /* 0/1:本批预热数据的末块 */, local_kind: u16, // 0x0019 变长:16 B 前缀 + len B 载荷,按 8 B 补零
                    chunk_no: u32 /* 同一 (instance, local_kind) 批内从 0 递增 */, len: u16, _pad: [u8; 6],
-                   payload: [u8; len] /* ≤ WARMUP_MAX_PAYLOAD,格式由策略定义 */ },   //   实例级命令:CmdHdr.account 必须为 0
+                   payload: &'a [u8] /* len 字节,≤ WARMUP_MAX_PAYLOAD,格式由策略定义 */ },   //   实例级命令:CmdHdr.account 必须为 0
     SmokeOrder { account: AccountId, venue: VenueId, _pad: u16, inst: InstId,     // 0x001A  16 B(1+1+2 填充+4+1+3 填充+4);Admin 冒烟单,只对 Live 账户
                  side: Side, _pad2: [u8; 3], ttl_ms: u32 /* 范围与缺省值见 control-plane */ },
     WriteOffResidual { account: AccountId, _pad: [u8; 3], group: GroupId },        // 0x001B   8 B;残余核销(语义见 control-plane)
@@ -1038,10 +1046,12 @@ impl ControlCmd {
     pub fn encode(&self, hdr: &CmdHdr, out: &mut [u8]) -> Result<usize, EncodeErr>;
         // 写 CmdHdr + 载荷(逻辑体);CmdHdr.cmd、cmd_ver、payload_len 按 self 与当前版本填写(忽略 hdr 中这三项);out 不足 → BufTooSmall;
         // StrategyCmd.len > 256、InjectWarmup.len > 4096 或 payload.len() ≠ len → TooLong
-    pub fn decode(logical_body: &[u8]) -> Result<(CmdHdr, ControlCmd), DecodeErr>;
+    pub fn decode(logical_body: &'a [u8]) -> Result<(CmdHdr, ControlCmd<'a>), DecodeErr>;
         // logical_body < 128 → Short;未知 cmd 或 cmd_ver → UnknownKind;payload_len 与 logical_body.len() − 128 不等,或与该 (cmd, cmd_ver)
         // 的载荷大小(InjectWarmup:16 + len 向上取 8)不等 → 小于为 Short、大于为 TooLong;StrategyCmd.len > 256、InjectWarmup.len > 4096、
-        // StrategyCmd.payload 在 len 之后有非零字节 → TooLong;枚举、CapSource(0 或 > 15)与 bool 字段(非 0/1)越界 → InvalidEnum
+        // StrategyCmd.payload 在 len 之后有非零字节、Annotate.text_len > 256 → TooLong;枚举、码字段(Annotate.kind、VenueNotice.kind、SimFault.fault、
+        // AdoptExchange.item 越出码表)、CapSource(0 或 > 15)与 bool 字段(非 0/1)越界 → InvalidEnum;载荷中未作为变体字段列出的填充字节非 0 → InvalidEnum
+        // (Kill v1 的偏移 19 除外:v1 填充,读为 hard = false)。因此当前 cmd_ver 的命令 decode 后再 encode 逐字节相同
 }
 ```
 
@@ -1155,7 +1165,8 @@ impl<'b> Reassembler<'b> {
 | `src/var.rs` | `PartHdr`、`L2SnapHdr`、`BlobHdr`、`RawHdr`、`SnapshotHdr`/`SectionHdr`;`multi_view`、`PartIter`(拆分)与 `Reassembler`(重组,调用方提供缓冲) |
 | `src/codec.rs` | `encode_fixed`、`encode_var`、`decode_record`、`classify`、CRC32C(`crc32c` crate,ARMv8 CRC 指令) |
 | `src/ring.rs` | `FeedMsg`、`RepMsg`、`HkMsg`、`OutMsg`、`GwCmd`、`FeedCmd`、`CtlRecord`、`AdviceMsg`(进程内环元素与 ctl、advice 帧) |
-| `src/schema.rs` | `FieldDesc`/`EnumDesc`、`catalog()` |
+| `src/schema.rs` | `FieldDesc`/`EnumDesc`、`catalog()`(返回 `Catalog`:39 个生产 kind、`CmdKind`、`NOTE_NAMES`、SPB1 与分帧结构、全部码表、`MEASURE_MASK`;测试 kind 不导出) |
+| `src/codes.rs` | 整数编码字段的码表与位集合(`EnumDesc`) |
 
 </details>
 

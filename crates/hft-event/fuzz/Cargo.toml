@@ -1,0 +1,44 @@
+[package]
+name = "hft-event-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+hft-event = { path = "..", features = ["dev-kinds"] }
+
+# Not a member of the root workspace: built only by `cargo fuzz` (pinned nightly, tools/README.md).
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "decode_record"
+path = "fuzz_targets/decode_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decode_cmd"
+path = "fuzz_targets/decode_cmd.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "reassemble"
+path = "fuzz_targets/reassemble.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "spb1"
+path = "fuzz_targets/spb1.rs"
+test = false
+doc = false
+bench = false

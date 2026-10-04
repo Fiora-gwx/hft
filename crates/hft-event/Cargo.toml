@@ -1,0 +1,50 @@
+[package]
+name = "hft-event"
+description = "Record header, kind registry, event bodies, payload containers, control commands and their zero-copy codecs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Test kinds 0x7F01–0x7F06 (README "测试 kind"); only allowed in [dev-dependencies].
+dev-kinds = []
+
+[dependencies]
+hft-types.workspace = true
+hft-refdata.workspace = true
+zerocopy.workspace = true
+crc32c.workspace = true
+
+[dev-dependencies]
+# zerocopy and hft-types are repeated here so the trybuild projects (EVT-170) can expand
+# `event_body!` (trybuild gives its test crates the dev-dependencies only).
+zerocopy.workspace = true
+hft-types.workspace = true
+proptest.workspace = true
+criterion.workspace = true
+trybuild.workspace = true
+serde_json = "1"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc.workspace = true
+
+[[test]]
+name = "dev_kinds"
+required-features = ["dev-kinds"]
+
+[[bench]]
+name = "codec"
+harness = false
+
+[[bench]]
+name = "cmd"
+harness = false
+
+[[bench]]
+name = "spb1"
+harness = false

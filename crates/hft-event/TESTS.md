@@ -154,7 +154,7 @@ spec: README.md
 - 期望:
   - 每个 `Layout::Fixed` 的 kind 恰有一个 `Body` 且 `size` 等于 `size_of`、`schema_version` 等于 `SCHEMA_VERSION`;每个 `Var` 的 kind 恰有一个前缀 `Body` 且 `prefix` 等于其 `size_of`;没有 `KIND` 未登记的 `Body`
   - `KINDS` 内编号两两不同;编号高字节 → 域:`0x01` Market、`0x02` Exec、`0x03` Chain、`0x04` Control、`0x05` System、`0x06` Raw;没有编号落在 `0x0310..=0x033F`(该段归 hft-ext-proto)
-  - 每个 kind 的 `fields` 非空,`fields` 的末项偏移 + 宽度 = `size`(定长)或 `prefix`(Var/Multi)
+  - 每个生产 kind 的 `fields` 非空(测试 kind 的体不透明,不参与本条),`fields` 的末项偏移 + 宽度 = `size`(定长)或 `prefix`(Var/Multi)
 - 实现:`crates/hft-event/tests/kinds.rs::evt_005_kinds_match_bodies`
 
 ### EVT-006 kind_info 对已登记编号返回条目、对其余编号返回 None
@@ -562,7 +562,7 @@ spec: README.md
 | EVT-041.3 | `rx_empty_gap_ns = u32::MAX`(饱和值 4 294 967 295) | 体偏移 48..52 = `FF FF FF FF`;读回 `u32::MAX` |
 | EVT-041.4 | `sw_rx_ns = 0`(不可用) | 体偏移 40..48 全 0;读回 0 |
 | EVT-041.5 | `sw_rx_ns = 1 759 000 000 123 456 789` | 读回同值 |
-| EVT-041.6 | 同一组 `MarketHdr` 值分别写入 8 个行情体与 `L2SnapHdr`、`L2BatchHdr` | 每个体的前 56 字节逐字节相同;`_rsv`(偏移 52..56)为 0 |
+| EVT-041.6 | 同一组 `MarketHdr` 值分别写入 7 个定长行情体与 `L2SnapHdr`、`L2BatchHdr` | 每个体的前 56 字节逐字节相同;`_rsv`(偏移 52..56)为 0 |
 
 ### EVT-050 执行体的大小、对齐与字段偏移与规格一致
 
@@ -1269,7 +1269,7 @@ spec: README.md
 - 规则:[策略载荷容器](README.md#策略载荷容器)、[依赖](README.md#依赖)
 - 级别:unit
 - 里程碑:M1
-- 前置:`cargo metadata --format-version 1` 的输出(含 dev 依赖与 build 依赖)
+- 前置:`cargo metadata --format-version 1` 的输出;工作区 crate 的检查含 dev 与 build 依赖,外部 crate(serde、SBE)的检查只看 normal 与 build 闭包(criterion、trybuild 等 dev 工具自带 serde,不进生产闭包)
 - 步骤:
   1. 求 `hft-event` 的完整依赖闭包
 - 期望:
@@ -1411,6 +1411,7 @@ spec: README.md
 - 里程碑:M1
 - 前置:无参数
 - 实现:`crates/hft-event/tests/ring.rs::evt_142_gwcmd_ctors`
+- 备注:"其余字段 0"不含 `side`/`tif`:维护类与模拟类构造器写占位值 `Buy`/`Gtc`(枚举无 0 值;gw 与 sim-gw 不读)
 
 | 行 | 输入 | 期望 |
 |---|---|---|
@@ -1540,7 +1541,7 @@ spec: README.md
 - 级别:prop
 - 里程碑:M1
 - 性质:对任意合法 `ControlCmd` c 与任意 `CmdHdr` h:`n = c.encode(&h, out)` 后 `ControlCmd::decode(&out[..n])` 返回 `(h', c)`,`h'` 除 `cmd`、`cmd_ver`、`payload_len` 外与 h 逐字段相等;`n == 128 + payload_len`
-- 生成:均匀选 23 个变体;枚举字段只取合法值,`CapSource` 1..=15,bool 取 0/1;`StrategyCmd.len` 0..=256(`len` 之后的载荷为 0);`InjectWarmup.len` 0..=4096;`CmdScope.group` 取 `GROUP_ALL` 或合法 `GroupId`;h 的其余字段全域
+- 生成:均匀选 24 个变体;枚举字段只取合法值,`CapSource` 1..=15,bool 取 0/1;`StrategyCmd.len` 0..=256(`len` 之后的载荷为 0);`InjectWarmup.len` 0..=4096;`CmdScope.group` 取 `GROUP_ALL` 或合法 `GroupId`;h 的其余字段全域
 - 参考:输入本身
 - 例数:PR 2 000
 - 实现:`crates/hft-event/tests/prop_cmd.rs::evt_153_cmd_roundtrip`
@@ -1578,6 +1579,7 @@ spec: README.md
 | EVT-154.21 | `SmokeOrder.side = 0` | `Err(InvalidEnum)` |
 | EVT-154.22 | `Drain.cancel_resting = 2` | `Err(InvalidEnum)` |
 | EVT-154.23 | `SetParams.blob.kind = 0` / `7` | 各为 `Err(InvalidEnum)` |
+| EVT-154.24 | `SetMode` 载荷偏移 17(隐式填充)= 1;`InjectWarmup` 载荷尾部填充(偏移 16 + len)= 1 | 各为 `Err(InvalidEnum)` |
 
 ### EVT-155 旧 cmd_ver 的载荷按旧布局读出、新字段取缺省
 
@@ -1797,7 +1799,7 @@ spec: README.md
 - 规则:[实现说明](README.md#实现说明)、[体 trait 与编解码](README.md#体-trait-与编解码)
 - 级别:golden
 - 里程碑:M1
-- 输入:`crates/hft-event/tests/canonical.rs` 中每个 kind 一条规范样例(各字段取非零且按字段序递增的值,枚举取最大合法值;`seq = 1`、`tsc = 2`、`flags = EVENT_END`,`CRC` 按该 kind 的策略),Multi kind 为单段记录
+- 输入:`crates/hft-event/tests/common/canonical.rs` 中每个 kind 一条规范样例(各字段取非零且按字段序递增的值,枚举取最大合法值;`seq = 1`、`tsc = 2`、`flags = EVENT_END`,`CRC` 按该 kind 的策略),Multi kind 为单段记录
 - 期望文件:`fixtures/hft-event/EVT-173/<kind>.bin`(39 个)
 - 实现:`crates/hft-event/tests/golden.rs::evt_173_canonical_records`
 

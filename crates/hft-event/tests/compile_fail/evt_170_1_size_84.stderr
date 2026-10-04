@@ -1,0 +1,9 @@
+error[E0080]: evaluation panicked: size is not a multiple of 8
+ --> tests/compile_fail/evt_170_1_size_84.rs:4:1
+  |
+4 | / event_body! {
+5 | |     pub struct Odd : fixed(EventKind(0x7E01), 1), FromBytes { pub a: [u8; 84] }
+6 | | }
+  | |_^ evaluation of `_` failed here
+  |
+  = note: this error originates in the macro `$crate::panic::panic_2021` which comes from the expansion of the macro `event_body` (in Nightly builds, run with -Z macro-backtrace for more info)
