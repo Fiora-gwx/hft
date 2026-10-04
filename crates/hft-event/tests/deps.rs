@@ -96,8 +96,27 @@ fn evt_123_dependency_closure() {
             .replace('\\', "/");
         assert!(!path.contains("/strategies/"), "{n} is a strategy crate");
     }
-    for id in &prod {
-        let n = name[id.as_str()];
+    // `cargo metadata` resolves features for the whole workspace (another member may enable an
+    // optional feature of a shared dependency), so the normal/build closure is taken from
+    // `cargo tree -p hft-event`, which resolves features for this package alone.
+    let _ = prod;
+    let tree = Command::new(env!("CARGO"))
+        .args([
+            "tree",
+            "-p",
+            "hft-event",
+            "-e",
+            "normal,build",
+            "--prefix",
+            "none",
+            "--manifest-path",
+        ])
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
+        .output()
+        .unwrap();
+    assert!(tree.status.success(), "{}", String::from_utf8_lossy(&tree.stderr));
+    for line in String::from_utf8_lossy(&tree.stdout).lines() {
+        let n = line.split_whitespace().next().unwrap_or("");
         assert!(
             !n.starts_with("serde") && !n.contains("sbe"),
             "{n} in the normal/build closure"
