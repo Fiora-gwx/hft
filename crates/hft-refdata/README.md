@@ -77,6 +77,10 @@ impl RefData {
     // —— 跨 blob 与跨组件复核(冷路径;规则见实现说明"跨 blob 与跨组件校验")——
     pub fn check_rebind(&self, prev: &RefData, busy: impl Fn(AccountId) -> bool) -> Result<(), LoadReport>; // bound_instance 相对 prev 变化且 busy(a)(有仓位、挂单或 Unknown,调用方按快照判定)→ BindingChangedWithPosition,row = 账户
     pub fn check_ref_inst(&self, id: InstId) -> Result<(), LoadErr>;   // RefInstNotSubscribed
+    // —— 装配与工具辅助(冷)——
+    pub fn inst_count(&self) -> usize; pub fn venues_in_order(&self) -> &[VenueId]; pub fn instances_in_order(&self) -> &[InstanceMeta];
+    pub fn caps_row(&self, v: VenueId) -> Option<u32>; pub fn venue_row(&self, v: VenueId) -> Option<u32>; // 段内行下标(错误定位)
+    pub fn account_venues(&self) -> &[(AccountId, VenueId, Box<str>)]; pub fn blob(&self) -> &[u8]; pub fn created_utc_ns(&self) -> i64;
 }
 pub struct GroupSpecView<'a> { pub asset: AssetId, pub legs: &'a [LegView] }   // hft-event GroupSpec 的同形视图(hft-event 提供转换)
 pub struct LegView { pub inst: InstId, pub venue: VenueId }
@@ -84,7 +88,12 @@ pub struct ProtocolFacts { pub venue: VenueId, pub market: MarketKind, pub caps:
 pub struct AssemblyFacts<'a> { pub host: HostClass, pub max_universe_insts: u32, pub protocols: &'a [ProtocolFacts], pub kinds: &'a [u16] /* StrategySet::kinds() */ }
 pub fn check_assembly(rd: &RefData, ec: &EngineConfig, f: &AssemblyFacts<'_>) -> Result<(), LoadReport>; // hft-core 启动与 ReplaceRefdata 装配校验调用;纯函数
 pub struct RdbBuilder { /* 唯一的 RDB1 编码器;tools/hft-cfg 与测试 fixture 都用它 */ }
-impl RdbBuilder { pub fn new(version: u64) -> Self; pub fn asset(&mut self, a: AssetSpec) -> AssetId; /* … venue/caps/inst/instance/account/account_venue/sim/fee/limit/endpoint/maint/token/alias … */ pub fn finish(self) -> Vec<u8>; }
+impl RdbBuilder { pub fn new(version: u64) -> Self; pub fn asset(&mut self, a: AssetSpec) -> AssetId; /* … venue/caps/inst/instance/account/account_venue/sim/sim_balance/fee/fee_override/limit/endpoint/maint/token/alias/mmr_tier … */
+                  pub fn finish(self) -> Vec<u8>; pub fn finish_raw(self) -> RawBlob; } // finish_raw:可编辑容器(工具与测试钩子,blob::RawBlob)
+pub struct EcfBuilder { /* 唯一的 ECF1 编码器 */ }
+impl EcfBuilder { pub fn new(version: u64, host: HostClass) -> Self; pub fn section(&mut self, s: EngineSection, row_ver: u16, row_size: u32, count: u32, bytes: Vec<u8>) -> &mut Self; pub fn finish(self) -> Vec<u8>; }
+#[cfg(feature = "tools")] pub fn dump(rd: &RefData) -> String;                 // 可读 TOML(枚举小写)
+#[cfg(feature = "tools")] pub fn diff(a: &RefData, b: &RefData) -> Vec<DiffItem>; // 叶子级差异 (path, old, new),按 path 排序
 
 pub struct EngineConfig { /* ECF1;不可变 */ }
 impl EngineConfig {
@@ -106,6 +115,8 @@ impl SymbolIndex {
     pub fn get(&self, wire_symbol: &[u8]) -> Option<InstId>;  // 交易所报文里的原样字节(大小写敏感)
     pub fn get_num(&self, venue_num_id: u64) -> Option<InstId>; // OKX instIdCode、SBE symbolId 等数值 id
     pub fn prewarm(&self) -> u64;                              // 顺序读全部条目,返回校验和防优化;在使用线程上调用
+    pub fn from_entries(syms: &[(&[u8], InstId)], nums: &[(u64, InstId)]) -> SymbolIndex; // 加载器与测试用
+    pub fn get_sorted(&self, s: &[u8]) -> Option<InstId>; pub fn get_hashed(&self, s: &[u8]) -> Option<InstId>; // 两条路径(get = get_hashed)
 }
 ```
 
@@ -118,7 +129,7 @@ impl SymbolIndex {
 ```rust
 #[repr(u16)] pub enum LoadErrCode {
     // 加载校验第 1–4 步
-    Structure = 1,               // magic/format、total_len、base_version ≠ 0、段越界或重叠、段 id 重复、row_size 小于已知大小、对齐;无 OPTIONAL 位的未知段;退役段(不论 OPTIONAL);
+    Structure = 1,               // magic/format、total_len、base_version ≠ 0、version = 0、段越界或重叠、段 id 重复、row_size 小于已知大小、对齐;无 OPTIONAL 位的未知段;退役段(不论 OPTIONAL);
                                  // 行内枚举或 Option 线编码的判别值非法(含 ECF1 host_class)
     Strings = 2,                 // StrRef 越界、非 UTF-8、符号或别名的长度或字符非法、实例名或账户标签重复
     Ids = 3,                     // id 不从 1 起稠密、重复或未排序
@@ -185,21 +196,21 @@ pub struct InstHot {                 // 64 B,热路径唯一需要的一行
 }
 
 pub struct InstMeta {                // 冷字段
-    pub id: InstId, pub symbol: &'static str /* 指向 blob 字符串池 */, pub venue_num_id: u64,
+    pub id: InstId, pub symbol: Box<str> /* 加载时从 blob 字符串池复制 */, pub venue_num_id: u64,
     pub px_unit_shift: i8,           // venue 价格按 10^s 个资产单位报价:1000PEPEUSDT → 3
     pub qty_unit_shift: i8,          // 1 个 venue 数量单位 = 10^s 资产单位:1000PEPEUSDT → 3;OKX ctVal=1e7 → 7
-    pub tick_str: &'static str, pub lot_str: &'static str, pub min_qty_str: &'static str, // 交易所原文,加载时复核(第 7 步)
+    pub tick_str: Box<str>, pub lot_str: Box<str>, pub min_qty_str: Box<str>, // 交易所原文,加载时复核(第 7 步)
     pub funding_interval_s: u32,     // 默认周期;实际周期以 Funding 事件为准
     pub funding_anchor_s: u32,       // 结算对齐偏移(UTC 秒)
     pub max_leverage: u16, pub listed_utc_ns: i64, pub delivery_utc_ns: i64, // 0 = 永续/现货
-    pub mmr_tiers: &'static [MmrTier], // 分档维持保证金率(RDB1 段 18,只对 Perp;按 notional_max 升序;空 = 未登记);hft-sim 的 MmrSource::RefdataTiers 与压力用例使用,缺失时 hft-sim 报 MmrTiersMissing
+    pub mmr_tiers: Box<[MmrTier]>, // 分档维持保证金率(RDB1 段 18,只对 Perp;按 notional_max 升序;空 = 未登记);hft-sim 的 MmrSource::RefdataTiers 与压力用例使用,缺失时 hft-sim 报 MmrTiersMissing
     pub price_band: PriceBand,         // 交易所价格限制带;up = down = Rate(0) 表示未登记(hft-sim 跳过 PriceLimit 检查)
 }
 pub struct MmrTier { pub notional_max: Notional /* 本档持仓名义上限(含) */, pub mmr: Rate /* 维持保证金率 */ }
 pub struct PriceBand { pub up: Rate, pub down: Rate } // 委托价须在 [ref × (1 − down), ref × (1 + up)] 内;参考价的口径归 hft-sim
 impl InstMeta { pub fn market(&self) -> MarketKind; }   // InstKind::Spot → Spot,Perp → LinearPerp(Delivery 不在 core,加载拒绝)
 
-pub struct AssetMeta { pub id: AssetId, pub name: &'static str, pub class: AssetClass, pub exp: AssetExp,
+pub struct AssetMeta { pub id: AssetId, pub name: Box<str>, pub class: AssetClass, pub exp: AssetExp,
                        pub px_max: Px, pub qty_max: Qty,    // hft-cfg 给出的上限,用于范围校验
                        pub dust: Qty }                      // 资产级尘埃线(余额、库存与资金费比对的容差,按本资产 qty_exp);hft-risk、hft-ledger、reconciler 共用,全仓唯一来源;0 < dust ≤ qty_max
 pub struct VenueMeta {               // 连接与协议常量;交易语义在 VenueCaps
@@ -207,7 +218,7 @@ pub struct VenueMeta {               // 连接与协议常量;交易语义在 Ve
     pub ws_max_streams_per_conn: u16, pub ws_max_in_msgs_per_s: u16, pub ws_max_conn_age_s: u32,
     pub ws_new_conn_per_5min_ip: u16, pub app_ping_interval_s: u16,
     pub ts_unit: TsUnit,             // 交易所时间戳精度(Ms/Us/Ns)
-    pub client_id_max_len: u8, pub client_id_prefix: &'static str,
+    pub client_id_max_len: u8, pub client_id_prefix: Box<str>,
     pub max_batch: u8, pub max_inflight_amend: u8,
     pub crossed_tolerance_default: u16,
     pub stale_guard: StaleGuardKind, // None | RecvWindow | ExpireAt:下单请求是否带过期保护(超窗到达的请求被交易所拒绝,各所口径待核实(方法:见各 `venue-*` 的开发备忘));
@@ -220,7 +231,7 @@ pub struct VenueMeta {               // 连接与协议常量;交易语义在 Ve
 pub struct InstanceMeta {            // 策略实例表(RDB1 段 15);StrategyInstanceId 的唯一分配处
     pub id: StrategyInstanceId,      // 稠密,1..=254(GroupId 的构造用它作高 8 位,hft-types),永久绑定 (kind_id, name)
     pub kind_id: u16,                // 策略种类(StrategyDesc.kind_id);hft-core 启动时核对它在编译进来的 StrategySet 里
-    pub name: &'static str,          // 如 "pc-main"、"pc-sim-a";唯一,ops_bot 与命令里的实例名
+    pub name: Box<str>,              // 如 "pc-main"、"pc-sim-a";唯一,ops_bot 与命令里的实例名
 }
 
 pub struct AccountMeta {
@@ -229,14 +240,14 @@ pub struct AccountMeta {
     pub bound_instance: StrategyInstanceId, // 唯一使用该账户的策略实例;0 = 未绑定(任何策略都不能用它下单)
     pub is_prod: bool,               // 正式资金账户;Sim 恒为 false;交易所测试网/模拟盘联调账户 = Live + is_prod = false(只出现在联调用实例的 refdata 中)
     pub venues: u64,                 // VenueId 位图:Live = 可交易的 venue;Sim = 撮合所用行情的 venue;同一 Exchange 至多一个 VenueId(SameExchangeMarkets)
-    pub label: &'static str,         // 账户名:命令 JSON 的 account、ops_bot 路由与显示、hft-cfg TOML 都用它;加载时唯一;
+    pub label: Box<str>,             // 账户名:命令 JSON 的 account、ops_bot 路由与显示、hft-cfg TOML 都用它;加载时唯一;
                                      // sim 实例的账户必须以 "sim-" 开头、prod 实例的不得以它开头(规则与退出码 AccountNamePrefix 归 apps/hft-core,hft-cfg 构建时预检)
     pub uid_policy: UidPolicy,       // 交易所 UID 能否核验;缺省 Verified(见下)
 }
 pub enum AccountKind { Live, Sim(SimAccountCfg) }   // 行内编码 u8:Live=1 Sim=2(与 CmdPreview.target_kind 同码)
 #[repr(u8)] pub enum UidPolicy { Verified = 1, Unverifiable = 2 }   // gen-schema 随 RDB1 行导出
 pub struct SimAccountCfg {           // 只对 Sim;四个字段的语义(撮合、延迟抽样、费率档、保证金与强平)与模型定义归 hft-sim
-    pub initial_balances: &'static [SimBalance], // SimReset 回到这里(SimBalances 段)
+    pub initial_balances: Box<[SimBalance]>, // SimReset 回到这里(SimBalances 段)
     pub latency_model: u16,          // hft-core 配置 [sim.latency_models] 数组的下标(0 起)
     pub fee_tier: u8,                // 费率档:取 Fees 段中 (venue, tier = fee_tier) 的行;本账户有 FeeOverrides 行时以覆盖行为准
     pub margin_model: u16,           // hft-core 配置 [sim.margin_models] 数组的下标(0 起)
@@ -248,7 +259,7 @@ pub struct SimBalance { pub venue: VenueId, pub asset: AssetId, pub qty: Qty }
 
 pub struct FeePair { pub maker: Rate, pub taker: Rate }                     // 负 maker = 返佣
 pub struct RateLimit { pub scope: LimitScope, pub bucket: LimitBucket, pub limit: u32, pub window_ms: u32, pub default_cost: u16 }
-pub struct Endpoint { pub role: EndpointRole, pub env: EndpointEnv, pub url: &'static str, pub conn_group: u8 }
+pub struct Endpoint { pub role: EndpointRole, pub env: EndpointEnv, pub url: Box<str>, pub conn_group: u8 }
 pub struct MaintWindow { pub venue: VenueId, pub inst: InstId /* 0 = 全 venue */, pub start_ns: i64, pub end_ns: i64, pub kind: MaintKind }
 pub struct ChainToken { pub chain: VenueId, pub asset: AssetId, pub address: [u8; 32], pub decimals: u8 }   // optional 链上
 
@@ -272,7 +283,7 @@ pub struct ChainToken { pub chain: VenueId, pub asset: AssetId, pub address: [u8
 每个 `VenueId` 一行。`VenueId` 本身按产品线划分(`VenueMeta.product`),所以能力表**只以 `VenueId` 为键**;行内的 `market` 是由 `VenueMeta.product` 推出的冗余字段(Spot → `Spot`,Perp → `LinearPerp`),加载时与 [hft-types `VenueId::market()`](../hft-types/README.md#id-与枚举) 及编译进来的 `VenueProtocol::MARKET` 交叉校验。策略视图按 venue 取这一行([hft-strategy-sdk](../hft-strategy-sdk/README.md));视图若同时给出市场段,只用于断言一致。**策略与执行层不出现交易所名字**:凡是交易所之间的差异,要么在这张表里,要么在对应 `venue-*` 的协议实现里。
 
 ```rust
-pub struct VenueCaps {
+pub struct VenueCaps {                       // #[repr(C)]:能力位与死手字段在首个缓存行;实际字段顺序与显式 _pad 以代码为准
     pub venue: VenueId, pub market: MarketKind,   // market = VenueMeta.product 推出的冗余字段
     pub fee_asset_rule: FeeAssetRule,        // 手续费扣哪个资产 → 决定成交净量(hft-ledger FillDelta.net_qty)
     pub reduce_only: bool,                   // 是否支持 reduceOnly(不支持时 hft-risk 只按本地仓位校验减仓量)
@@ -284,8 +295,8 @@ pub struct VenueCaps {
     pub funding_settle: FundingSettleKind,   // 资金费实收推送方式
     pub margin_data: MarginData,             // 保证金率、强平价、ADL 档的来源
     pub own_liquidation_marker: LiqMarker,   // 识别自身强平/ADL 订单的方法(判定由 venue crate 实现)
-    pub liq_marker_arg: &'static str,        // 方法参数(如 client id 前缀);无则 ""
-    pub ignorable_user_events: &'static [&'static str], // 用户流中可忽略的事件名:计数,不当解码失败
+    pub liq_marker_arg: Box<str>,            // 方法参数(如 client id 前缀);无则 ""
+    pub ignorable_user_events: Box<[Box<str>]>, // 用户流中可忽略的事件名:计数,不当解码失败
     pub flags: CapFlags,                     // AMEND=1 POST_ONLY=2 IOC=4 FOK=8 BATCH_CANCEL=16
     pub amend_qty_down_only: bool,           // 改单只能减量、不能改价(AMEND 置位时才有意义);hft-oms 拒绝该 venue 上改价或增量的 Amend(AMEND_UNSUPPORTED)
     pub dms: DeadManCap,                     // 交易所侧死手;None → 只有 kill-switch 兜底
@@ -351,8 +362,9 @@ RDB1 段(本 crate 定义行格式):Assets(1) Venues(2) Insts(3) Accounts(4) Fee
          AccountVenues(14:Live 账户 × venue 的交易所 UID)
          Instances(15) SimAccounts(16:SimAccountCfg 的定长部分 = fee_tier 与两个模型下标) SimBalances(17)
          MmrTiers(18:每 (inst, 档) 一行 {inst, notional_max, mmr},按 (inst, notional_max) 升序;可缺省)
+         StrRefs(19:StrRef 数组,ignorable_user_events 的名单)
 RDB1 32–37:退役,永不复用;出现即拒绝(不论 OPTIONAL 位)
-字符串引用 StrRef { off: u32, len: u32 } 指向 Strings 段(UTF-8,不以 0 结尾);ignorable_user_events 是 StrRef 列表(段 13 行内 {off, count} 指向连续的 StrRef 数组)
+字符串引用 StrRef { off: u32, len: u32 } 指向 Strings 段(UTF-8,不以 0 结尾);ignorable_user_events 是 StrRef 列表(段 13 行内 {off, count} 指向段 19 中连续的 StrRef)
 ```
 
 refdata 不含 group(在 `StrategyParams` 的 `GroupSpec`)、OMS/ledger/容量参数(在 `EngineConfig`)、`risk_class`(在 [hft-risk](../hft-risk/README.md) 的 `RiskParams`)与链上路由表(optional,归 [hft-chain-evm](../hft-chain-evm/README.md))。
@@ -383,10 +395,10 @@ ECF1 段 id 只追加、永不复用。每段只有一种行格式(`SectionEntry
 
 **加载校验**(按顺序;任何一步失败整体拒绝,不部分生效——[错误配置在加载时失败](../../AGENTS.md#常驻规则)。同一步内收集该步的全部错误,按该步规则的列出顺序、同一规则内按 (段 id, 行下标) 升序;某一步有错误时不进入下一步,`LoadReport` 只含这一步的错误):
 
-1. 结构:magic/format、`total_len == blob.len()`、`base_version = 0`、段不越界不重叠、段 id 唯一、`row_size ≥` 已知大小、对齐;未知段与退役段按上文;行内枚举与 Option 线编码的判别值合法。
+1. 结构:magic/format、`total_len == blob.len()`、`base_version = 0`、`version ≥ 1`、段不越界不重叠、段 id 唯一、`row_size ≥` 已知大小、对齐;未知段与退役段按上文;行内枚举与 Option 线编码的判别值合法。
 2. 字符串:`StrRef` 在界内、合法 UTF-8;符号与别名长度 1..=27,不含空白与控制字符;实例名与账户标签唯一。
 3. ID:Assets、Insts、Accounts、Instances 的 id 从 1 起稠密、唯一、按 id 排序;Venues 与 VenueCaps 以 `VenueId` 为键(按常量表取值,不要求稠密),唯一、升序;`VenueId` 必须在 [hft-types 常量表](../hft-types/README.md#id-与枚举)内(`UnknownVenue`);Instances 的 id ≤ 254(`InstanceIdRange`,`GroupId` 构造要求)。
-4. 引用:inst 的 venue/asset/quote 存在;quote 的 `class == Stable`;费率行的 (account, venue) 存在;维护窗口、端点、限速、代币行引用的 venue/inst/asset 存在;代币行的 chain 是链上 venue;别名行的 inst 存在且属于该行的 venue;`VenueCaps` 行的 venue 存在于 Venues,其 `fee_asset_rule` 引用的资产存在;`AccountMeta.bound_instance` 为 0 或存在于 Instances,且每个实例至多被一个账户绑定(`InstanceMultiBound`);`AccountVenues`、`SimAccounts`、`SimBalances` 引用的账户、venue、资产存在;`MmrTiers` 行的 inst 存在。
+4. 引用:inst 的 venue/asset/quote 存在;quote 的 `class == Stable`;费率行的 (account, venue) 存在;维护窗口、端点、限速、代币行引用的 venue/inst/asset 存在;代币行的 chain 是链上 venue;别名行的 inst 存在且属于该行的 venue;`VenueCaps` 行的 venue 存在于 Venues,其 `fee_asset_rule` 引用的资产存在;`AccountMeta.bound_instance` 为 0 或存在于 Instances、`venues` 位图中的每个 venue 存在于 Venues,且每个实例至多被一个账户绑定(`InstanceMultiBound`);`AccountVenues`、`SimAccounts`、`SimBalances` 引用的账户、venue、资产存在;`MmrTiers` 行的 inst 存在。
 5. 能力表:每个被 inst 引用的 `VenueId` 恰有一行 `VenueCaps`(`MissingCaps`),`market` 与 `VenueMeta.product`、`VenueId::market()` 一致(`CapsMarketMismatch`);`InstKind` 为 `Spot`/`Perp` 的 inst 与其 venue 的 `VenueMeta.product` 相同(`CapsMarketMismatch`;`Delivery` 留给第 6 步);现货行显式 `NotApplicable`:`required_position_mode`、`required_margin_mode`、`funding_settle`、`margin_data`,且 `required_multi_asset = None`(违反 → `CapsMarketMismatch`);现货行 `required_spot_borrow ∈ {None, Some(false)}`(`Some(true)` → `SpotBorrowRequired`),永续行 `required_spot_borrow = None`(`CapsMarketMismatch`);永续行 `funding_settle ≠ NotApplicable`(`CapsMarketMismatch`);`Poll` 的 `interval_ms ∈ [1000, 600000]`(`CapsValue`);`dms ≠ None` 时 `dms_refresh_ms > 0`、`dms_timeout_ms ≥ max(dms_min_ms, 2 × dms_refresh_ms)`(丢一次刷新不触发交易所侧全撤)且 `dms_max_ms = 0` 或 `dms_timeout_ms ≤ dms_max_ms`,`dms = None` 时四个时长字段为 0(`DeadManRange`);`required_margin_mode ≠ Mixed`(`CapsMarketMismatch`)。
 6. 指数:`px_exp, qty_exp ∈ [-18, 6]`;**`px_exp + qty_exp ≤ −6`**(保证名义换算只做除法,见 [hft-types](../hft-types/README.md#实现说明);违反 → `NotionalExp`);`px_unit_shift, qty_unit_shift ∈ [-12, 12]`;`px_wire_exp = px_exp + px_unit_shift`、`qty_wire_exp = qty_exp − qty_unit_shift` 由加载器计算,不从 blob 读,且两者 ∈ [-18, 6](`parse_exact` 的指数范围;越界 → `ExpRange`);`InstKind::Delivery` 拒绝(`UnsupportedKind`)。
 7. 步长复核:用 `parse_exact(tick_str, px_wire_exp)` 重新解析交易所原文,结果必须等于行内 `tick`(不等或其他解析错误 → `TickMismatch`;`PRECISION` → `AssetExpTooCoarse`)。`lot`(`lot_str`)、`min_qty`(`min_qty_str`)同理,以 `qty_wire_exp` 解析。`tick > 0`、`lot > 0`、`min_qty > 0`、`min_qty` 是 `lot` 整数倍(`TickMismatch`)。
@@ -401,7 +413,7 @@ ECF1 段 id 只追加、永不复用。每段只有一种行格式(`SectionEntry
 
 **符号表**:**有序数组**——每 venue 一个按键字节排序的 `[SymEntry]`(条目 32 B `{ key: [u8; 27], len: u8, inst: u32 }`),查找为二分(≤ 13 次比较 @ 8 192 条);另配一张 `FxHash` 开放寻址前置表(容量 `next_pow2(2n)`,存条目下标)作为可选快速路径,构建确定性(固定种子、按排序序插入)。可选扩展:换成静态最小完美哈希(触发条件:`refdata_symbol_get` 基准证明查表进入关键路径);任何实现下构建都不会失败。别名段把替代写法(大小写、`BTC_USDT` 与 `BTCUSDT`)映射到同一 `InstId`。数值 id 用同构的 `u64` 键表;`venue_num_id = 0` 表示无数值 id,不进表(`get_num(0)` 恒为 `None`)。
 
-**内存布局**:`InstHot` 数组按 `InstId` 下标(`#[repr(align(64))]`,每 inst 一个缓存行);`VenueCaps` 按 `VenueId` 下标的定长数组(每行 ≤ 128 B,热路径只读能力位所在的首个缓存行;`ignorable_user_events` 等借用切片指向冷区);`AccountMeta` 按 `AccountId` 下标,热字段(`kind` 判别值、`bound_instance`、`venues`)在行首同一缓存行;`InstMeta`、字符串池、其余表放在同一次分配的冷区。blob 字节本身保留在 `RefData` 内(字符串引用指向它),因此 `&'static str` 在实现中是带生命周期的借用,对外表现为 `&str`。
+**内存布局**:`InstHot` 数组按 `InstId` 下标(`#[repr(align(64))]`,每 inst 一个缓存行);`VenueCaps` 按 `VenueId` 下标的定长数组(每行 ≤ 128 B,热路径只读能力位所在的首个缓存行;`ignorable_user_events` 等借用切片指向冷区);`AccountMeta` 按 `AccountId` 下标,热字段(`kind` 判别值、`bound_instance`、`venues`)在行首同一缓存行;`InstMeta`、字符串池、其余表放在同一次分配的冷区。blob 字节本身保留在 `RefData` 内(`blob()`);字符串与切片字段在加载时复制为 `Box<str>`/`Box<[T]>`(冷区),对外按 `&str`/`&[T]` 借用。
 
 **规划源文件**
 
@@ -409,9 +421,9 @@ ECF1 段 id 只追加、永不复用。每段只有一种行格式(`SectionEntry
 |---|---|
 | `src/lib.rs` | `RefData` 与查询 API |
 | `src/types.rs` | 行结构、枚举(只有类型) |
-| `src/blob.rs` | RDB1 段目录解析(零拷贝视图) |
+| `src/blob.rs` | RDB1 段目录解析(零拷贝视图)、行格式、`RawBlob`(工具与测试用的可编辑容器) |
 | `src/validate.rs` | 第 1–10 步校验,`LoadErr`/`LoadReport` |
-| `src/caps.rs` | `VenueCaps` 解码、第 5 步校验、能力位比较(供 hft-core 的协议复核调用) |
+| `src/caps.rs` | `VenueCaps` 与其枚举、能力位比较、`check_assembly`(hft-core 的协议复核) |
 | `src/accounts.rs` | `AccountMeta`、`AccountKind`/`SimAccountCfg`、`AccountVenues`、`Instances`、`check_binding`/`check_group` |
 | `src/symbols.rs` | `SymbolIndex` 构建与查找 |
 | `src/fees.rs` | 费率解析(覆盖行 > venue 默认) |
@@ -441,7 +453,7 @@ ECF1 段 id 只追加、永不复用。每段只有一种行格式(`SectionEntry
 ## 依赖
 
 - 内部:[hft-types](../hft-types/README.md)。
-- 外部:`zerocopy`(行视图)、`sha2`(blob 身份;启用 `asm`)、`rustc-hash`(FxHash 前置表;表布局不进 journal,换哈希只影响性能);`toml` 仅在 feature `tools`。
+- 外部:`zerocopy`(行视图)、`sha2`(blob 身份;本 crate 不启用 `asm`:冷路径,sha2-asm 需要目标 C 工具链;同进程链接 hft-journal 时经特性合并启用)、`rustc-hash`(FxHash 前置表;表布局不进 journal,换哈希只影响性能);`toml` 仅在 feature `tools`。
 - 禁止:`serde_json` 解析 blob、任何 I/O(文件读取由调用方完成)、线程与原子(跨线程发布在 [hft-rt](../hft-rt/README.md))、任何 `venue-*` 与 [hft-strategy-sdk](../hft-strategy-sdk/README.md)(默认能力行由 hft-cfg 从 venue crate 取得后写进 blob;协议与策略种类的复核在 hft-core 装配处)。
 
 ## 延伸阅读

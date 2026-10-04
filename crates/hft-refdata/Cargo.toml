@@ -1,0 +1,48 @@
+[package]
+name = "hft-refdata"
+description = "Reference data (RDB1) and engine configuration (ECF1): format, load-time validation and lookups"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Readable TOML dump and two-version diff for review (tools/hft-cfg); never in the engine.
+tools = ["dep:toml"]
+
+[dependencies]
+hft-types.workspace = true
+zerocopy.workspace = true
+rustc-hash.workspace = true
+toml = { workspace = true, optional = true }
+
+# Blob identity (cold path). Not `workspace = true`: the workspace entry enables `asm`, whose
+# sha2-asm build needs a C toolchain for the target (breaks `cargo check --target aarch64-…` on
+# dev boxes and does not build on Windows MSVC). Processes that also link hft-journal get `asm`
+# through feature unification; the digest is identical either way.
+sha2 = "0.10"
+
+[dev-dependencies]
+proptest.workspace = true
+criterion.workspace = true
+serde_json = "1"
+
+[[bench]]
+name = "symbols"
+harness = false
+
+[[bench]]
+name = "query"
+harness = false
+
+[[bench]]
+name = "params"
+harness = false
+
+[[bench]]
+name = "load"
+harness = false

@@ -1,0 +1,24 @@
+[package]
+name = "hft-refdata-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+hft-refdata = { path = ".." }
+hft-types = { path = "../../hft-types" }
+
+# Not a member of the root workspace: built only by `cargo fuzz` (pinned nightly, tools/README.md).
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "load"
+path = "fuzz_targets/load.rs"
+test = false
+doc = false
+bench = false

@@ -31,7 +31,7 @@ spec: README.md
 
 ## 用例
 
-**基准 fixture `F0`**(`crates/hft-refdata/tests/common/f0.rs::f0()`,只经 `RdbBuilder` 构造;用例写"F0 上…"时只改所列字段,其余取下表的值;`RefData::load(b, None)` 简写为 `load(b)`;段号与行下标:Assets 1、Venues 2、Insts 3、Accounts 4、Fees 5、FeeOverrides 6、RateLimits 7、Endpoints 8、Maint 9、Tokens 10、Aliases 11、Strings 12、VenueCaps 13、AccountVenues 14、Instances 15、SimAccounts 16、SimBalances 17,行下标从 0 起,Insts 第 k 行是 `InstId(k + 1)`):
+**基准 fixture `F0`**(`crates/hft-refdata/tests/common/f0.rs::f0()`,只经 `RdbBuilder` 构造;用例写"F0 上…"时只改所列字段,其余取下表的值;`RefData::load(b, None)` 简写为 `load(b)`;段号与行下标:Assets 1、Venues 2、Insts 3、Accounts 4、Fees 5、FeeOverrides 6、RateLimits 7、Endpoints 8、Maint 9、Tokens 10、Aliases 11、Strings 12、VenueCaps 13、AccountVenues 14、Instances 15、SimAccounts 16、SimBalances 17、MmrTiers 18、StrRefs 19,行下标从 0 起,Insts 第 k 行是 `InstId(k + 1)`):
 
 | 表 | F0 的取值 |
 |---|---|
@@ -124,13 +124,14 @@ spec: README.md
 | REF-005.8 | `base_version = 1` | `[{Structure, 0, 0}]` |
 | REF-005.9 | `n_sections` 改为 200(目录超出 blob) | `[{Structure, 0, 0}]` |
 | REF-005.10 | 未改(对照) | `Ok` |
+| REF-005.11 | `version = 0` | `[{Structure, 0, 0}]` |
 
 ### REF-006 段越界、重叠、未对齐与重复段 id 以 Structure 拒绝
 
 - 规则:[实现说明](README.md#实现说明)
 - 级别:table
 - 里程碑:M1
-- 前置:F0 用 `RdbBuilder` 的测试钩子 `raw_directory(...)` 重写目录;Insts 段放在 blob 最后
+- 前置:F0 经测试钩子 `RdbBuilder::finish_raw()` 得到 `RawBlob`,把 Insts 段排到最后再编码,然后就地改目录项
 - 实现:`crates/hft-refdata/tests/structure.rs::ref_006_section_bounds`
 
 | 行 | 目录改动 | 期望 |
@@ -166,8 +167,8 @@ spec: README.md
 
 | 行 | 段 id | flags | 期望 |
 |---|---|---|---|
-| REF-008.1 | 19 | OPTIONAL | `Ok`;加载结果与 F0 相同(`sha256` 除外) |
-| REF-008.2 | 19 | 0 | `[{Structure, 19, 0}]` |
+| REF-008.1 | 20 | OPTIONAL | `Ok`;加载结果与 F0 相同(`sha256` 除外) |
+| REF-008.2 | 20 | 0 | `[{Structure, 20, 0}]` |
 | REF-008.3 | 31 | 0 | `[{Structure, 31, 0}]` |
 | REF-008.4 | 32 | OPTIONAL | `[{Structure, 32, 0}]`(退役) |
 | REF-008.5 | 32 | 0 | `[{Structure, 32, 0}]` |
@@ -359,6 +360,7 @@ spec: README.md
 | REF-017.21 | 追加 AccountVenues `(account 1, venue 3, "x")`(按键排在第 1 行) | `[{DanglingRef, 14, 1}]` |
 | REF-017.22 | SimAccounts 行的 account = 9 | `[{DanglingRef, 16, 0}]` |
 | REF-017.23 | SimBalances 行 0 的 asset = 9 | `[{DanglingRef, 17, 0}]` |
+| REF-017.24 | 账户 1 的 `venues` 加 bit 3(venue 3 不在 Venues) | `[{DanglingRef, 4, 0}]` |
 
 ### REF-018 报价资产必须是稳定币
 
@@ -618,7 +620,7 @@ spec: README.md
 | 行 | 改动 | 期望 |
 |---|---|---|
 | REF-031.1 | 账户 1 `venues = {5, 6}`(`OKX_SWAP` + `OKX_SPOT`) | `[{SameExchangeMarkets, 4, 0}]` |
-| REF-031.2 | 账户 2(Sim)`venues = {1, 2}`(`BINANCE_USDM` + `BINANCE_SPOT`),SimBalances 改到 venue 1 | `[{SameExchangeMarkets, 4, 1}]` |
+| REF-031.2 | 账户 2(Sim)`venues = {1, 2}`(`BINANCE_USDM` + `BINANCE_SPOT`),SimBalances 改到 venue 1,补 Fees `(2, 1)` | `[{SameExchangeMarkets, 4, 1}]` |
 | REF-031.3 | 账户 1 `venues = {1, 5}`(两个交易所各一个) | `Ok` |
 | REF-031.4 | 账户 1 `venues = {2, 6}` | `Ok` |
 
@@ -1119,7 +1121,7 @@ spec: README.md
 | REF-062.5 | F0 的 Venues 加 `GATE_USDT_FUT`(3,无 inst),`A0` 不变 | `Ok`(无 inst 的 venue 不要求协议) |
 | REF-062.6 | F0 加 inst 6 `BTC_USDT`@`GATE_SPOT`(4,含 Venues、VenueCaps、Fees 行),`A0` 不变 | `[{UnknownVenue, 2, 2}]` |
 | REF-062.7 | venue 1 协议的 `market = Spot` | `[{CapsMarketMismatch, 13, 0}]` |
-| REF-062.8 | venue 1 协议的 `caps.flags = POST_ONLY\|IOC`(3),F0 行为 7 | `[{CapsExceedProtocol, 13, 0}]` |
+| REF-062.8 | venue 1 协议的 `caps.flags = POST_ONLY\|IOC`(6),F0 行为 7 | `[{CapsExceedProtocol, 13, 0}]` |
 | REF-062.9 | venue 2 协议的 `caps.flags = AMEND\|POST_ONLY\|IOC\|FOK`(15),F0 行为 6 | `Ok`(子集) |
 | REF-062.10 | venue 5 协议的 `caps.dms = CountdownAccount`,F0 行为 `None` | `[{CapsExceedProtocol, 13, 2}]` |
 | REF-062.11 | venue 1 协议的 `stale_guard = ExpireAt`,F0 为 RecvWindow | `[{StaleGuardMismatch, 2, 0}]` |
@@ -1257,7 +1259,7 @@ spec: README.md
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)、[生命周期(变更 = 重启)](README.md#生命周期变更--重启)
 - 级别:unit
 - 里程碑:M1
-- 前置:F0;`cfg(test)` 下可导出内部表字节的 `RefData::debug_tables()`
+- 前置:F0;`RefData::debug_tables()`(`#[doc(hidden)]`,导出 blob 副本与哈希以外的全部内部表字节)
 - 步骤:
   1. 在两个线程中各 `load(&f0())` 一次
   2. 第三次在同一线程先分配并释放 1 MiB 后再加载(改变堆布局)
@@ -1284,7 +1286,7 @@ spec: README.md
 - 前置:`universe6(5000, 20)`(5 000 个 inst 均匀分布在 6 个 core venue,20 个 Live 账户);计数分配器记录 `load` 期间的分配字节
 - 步骤:
   1. `rd = load(&b)`
-- 期望:`InstHot` 表 5 001 行 × 64 B = 320 064 B;除 blob 副本与 `InstHot` 表外的分配合计 < 4 000 000 B
+- 期望:`InstHot` 表 5 001 行 × 64 B = 320 064 B;`load` 返回时仍持有的分配字节(分配减释放)除 blob 副本与 `InstHot` 表外合计 < 4 000 000 B
 - 实现:`crates/hft-refdata/tests/alloc.rs::ref_073_memory_5000`
 
 ### REF-074 InstHot、SymEntry 与热字段的布局
@@ -1477,7 +1479,7 @@ spec: README.md
 - 前置:`cargo metadata` 的输出;`src/` 的源文件文本
 - 步骤:
   1. 取 hft-refdata 的普通依赖(不含 feature `tools`)
-  2. 扫描 `src/**/*.rs`
+  2. 扫描 `src/**/*.rs`(`#[cfg(test)] mod tests` 测试模块除外)
 - 期望:
   - 步骤 1 的集合 ⊆ {`hft-types`、`zerocopy`、`sha2`、`rustc-hash`};不含任何 `venue-*`、`hft-strategy-sdk`、`serde_json`、`tokio`
   - 步骤 2 中没有 `std::fs`、`std::net`、`std::thread`、`std::time`、`HashMap`、`AtomicU`、`rand` 的出现
