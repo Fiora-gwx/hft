@@ -511,7 +511,7 @@ spec: README.md
 - 规则:[API](README.md#api)
 - 级别:prop
 - 里程碑:M1
-- 性质:同一快照之后的消息序列,一份以 `apply_batch` 每条消息一次、一份拆成 `L2Delta` 逐档喂入,每条消息结束后两簿 `state_hash()`、`last_id()`、`state()`、`meta()` 相同,批的返回位与逐档末档返回位的 `BID_TOP`/`ASK_TOP`/`CROSSED`/`RECENTERED`/`TRUNCATED` 的并集相同;序列中注入的非法消息在批路径整条不写入、在逐档路径转 Stale,之后两路都只返回 `NOT_LIVE`
+- 性质:同一快照之后的消息序列,一份以 `apply_batch` 每条消息一次、一份拆成 `L2Delta` 逐档喂入;在第一条非法消息之前,每条消息结束后两簿 `state_hash()`、`last_id()`、`state()`、`meta()` 相同,批的 `CROSSED`/`RECENTERED`/`TRUNCATED` 位等于逐档各次返回位的并集,批的 `BID_TOP`/`ASK_TOP` 位当且仅当该侧最优档(价, 量)在消息前后不同;注入的非法消息在批路径整条不写入(最优档不变)、在逐档路径于非法档转 Stale,两簿都为 `Stale`,之后两路都只返回 `NOT_LIVE`
 - 生成:`window ∈ {64, 256}`、`ovf_cap ∈ {1, 4, 64}`;1–200 条消息,每条 1–20 档,价格在中价 ±3W 内(含窗口外与跨窗口大跳),5% 的消息含一个非法档
 - 参考:两路实现互为参考
 - 例数:PR 1 000
@@ -618,7 +618,7 @@ spec: README.md
 - 级别:prop
 - 里程碑:M1
 - 性质:每条消息后最优档、前 50 档、`last_id` 与参考簿相同;发生的 `RECENTERED` 次数 ≥ 9;未发生截断时 `TRUNCATED` 从不出现
-- 生成:`window ∈ {64, 2048}`;中价从起点单调移动 10 × W 档(上涨与下跌各一半),每步 1–5 档,每条消息改 1–10 档并保持两侧各 ≥ 3 档
+- 生成:`window ∈ {64, 2048}`、`ovf_cap = 64`;中价从起点单调移动 10 × W 档(上涨与下跌的用例各一半),每步 1–5 档,每条消息改 1–10 档并保持两侧各 ≥ 3 档(另删除越过中价的档与每侧第 40 档之外的档)
 - 参考:`tests/model.rs` 的 `BTreeMap` 参考簿
 - 例数:PR 200
 - 实现:`crates/hft-book/tests/prop_recenter.rs::book_056_monotonic_drift_matches_model`
@@ -629,7 +629,7 @@ spec: README.md
 - 级别:prop
 - 里程碑:M1
 - 性质:每一步之后最优档、两侧前 50 档、`last_id`、`state()` 与参考相同;参考按同一规则模拟溢出区容量(离中价最远者并入远端)时,本簿在参考发生淘汰的那一步返回 `TRUNCATED`,`meta().truncated` 等于参考的淘汰次数
-- 生成:`window ∈ {64, 128, 2048}`、`ovf_cap ∈ {1, 4, 64}`;一条 Exchange 快照后 1–2 000 条消息;档价在中价 ±4W 内(含窗口外、跨窗口大跳、删除不存在的档、同价多次更新);1% 的消息为新快照
+- 生成:`window ∈ {64, 128, 2048}`、`ovf_cap ∈ {1, 4, 64}`、`crossed_tolerance ∈ {0, 3, 65535}`;一条 Exchange 快照后 1–2 000 条消息;档价在中价 ±4W 内(含窗口外、跨窗口大跳、删除不存在的档、同价多次更新);消息另附删除与新中价交叉的档(每 16 条有 1 条不删,覆盖交叉与 Stale);1% 的消息为新快照
 - 参考:`tests/model.rs` 的 `BTreeMap` 参考簿(含溢出容量模拟)
 - 例数:PR 500
 - 实现:`crates/hft-book/tests/prop_model.rs::book_060_matches_btreemap_model`
@@ -853,7 +853,7 @@ spec: README.md
 - 级别:prop
 - 里程碑:M1
 - 性质:簿 A 运行任意前缀后,`snapshot` + `export` 得到节 6 行与关键帧;新簿 B `restore` 后以 `origin = Keyframe` 应用关键帧;此后同一后缀分别喂给 A 与 B,每一步返回位、`state_hash()`、`meta()` 相同
-- 生成:同 BOOK-060 的序列,前缀与后缀长度各 0–500;前缀结束时簿为 Live(关键帧只为 Live 簿导出)且未发生截断
+- 生成:同 BOOK-060 的序列(`window ∈ {64, 128}`,档价在中价 ±W 内,消息删除与新中价交叉的档),前缀与后缀长度各 0–500;前缀不含跨窗口大跳;前缀结束时簿为 Live(关键帧只为 Live 簿导出)且未发生截断,否则该例跳过
 - 参考:连续运行的簿 A
 - 例数:PR 300
 - 实现:`crates/hft-book/tests/prop_restore.rs::book_079_restore_plus_keyframe_is_seamless`

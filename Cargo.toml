@@ -8,6 +8,7 @@ members = [
     "crates/hft-rt",
     "crates/hft-journal",
     "crates/hft-strategy-sdk",
+    "crates/hft-book",
     "tools/xtask",
     "tools/hft-cfg",
 ]
@@ -40,6 +41,7 @@ static_assertions = "1"
 hft-event = { path = "crates/hft-event" }
 hft-journal = { path = "crates/hft-journal" }
 hft-strategy-sdk = { path = "crates/hft-strategy-sdk" }
+hft-book = { path = "crates/hft-book" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

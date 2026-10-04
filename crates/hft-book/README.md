@@ -38,13 +38,14 @@ feed 线程检测到缺口时发 `ConnState::Resync`(簿 → `Resyncing`);簿自
 
 ```rust
 pub struct BookParams { pub tick: i64, pub window: u32 /* W,来自 InstHot.book_window */, pub ovf_cap: u16, pub crossed_tolerance: u16 }
-impl BookParams { pub fn from_inst(h: &InstHot) -> BookParams; }   // ovf_cap 默认 64
+impl BookParams { pub fn from_inst(h: &InstHot) -> BookParams; pub fn is_valid(&self) -> bool; }   // ovf_cap 默认 64(OVF_CAP_DEFAULT)
 
 pub struct L2Book { /* 见实现说明 */ }
 impl L2Book {
     pub fn bytes_needed(p: &BookParams) -> usize;
     pub fn new_in(p: &BookParams, mem: &'static mut [u8]) -> Result<L2Book, BookErr>; // 调用方给内存(sequencer 用 hft-rt 的大页 Arena);mem 起点须 64 B 对齐
-    pub fn new(p: &BookParams) -> L2Book;                                            // 堆分配;测试、回放、PyO3
+    pub fn new(p: &BookParams) -> L2Book;                                            // 堆分配;测试、回放、PyO3;非法参数夹到合法范围
+    pub fn params(&self) -> BookParams;
     pub fn apply_snapshot(&mut self, h: &L2SnapHdr, levels: &[Level]) -> Outcome;    // bids 降序在前,asks 升序在后
     pub fn apply_batch(&mut self, h: &L2BatchHdr, levels: &[Level]) -> Outcome; // 一条交易所消息整体应用(feed 默认产出 L2Batch)
     pub fn apply_delta(&mut self, d: &L2Delta) -> Outcome;                         // 逐档记录的读者/工具用;同一套校验
@@ -81,8 +82,9 @@ impl Top { pub fn apply(&mut self, b: &Bbo, seq: Seq) -> TopOutcome; }
 
 pub struct BookSet { /* tops: [Top; n_inst];l2: 只为订阅了 L2 的 inst 分配;l2_slot: [u16; n_inst](0 = 无) */ }
 impl BookSet {
+    pub fn bytes_needed(refdata: &RefData, l2_insts: &[InstId]) -> usize;   // new_in 所需内存
     pub fn new_in(refdata: &RefData, l2_insts: &[InstId], mem: &'static mut [u8]) -> Result<BookSet, BookErr>;
-    pub fn top(&self, i: InstId) -> &Top;          pub fn top_mut(&mut self, i: InstId) -> &mut Top;
+    pub fn top(&self, i: InstId) -> &Top;          pub fn top_mut(&mut self, i: InstId) -> &mut Top;   // 0 与超出 refdata 的 id → 不进快照的暂存槽
     pub fn l2(&self, i: InstId) -> Option<&L2Book>; pub fn l2_mut(&mut self, i: InstId) -> Option<&mut L2Book>;
     /// 一次写完本 crate 的全部快照节:节 6 `BookMeta`(每个已分配的 L2 簿一行 `BookMetaRow`)与节 7 `Tops`
     /// (每个收到过 Bbo 的 inst 一行 `TopRow`)。引导块、关键帧、Drain、Recovery 与按需快照都调用它;不分片。
@@ -164,14 +166,14 @@ hot:   { base: i64 /* 窗口首档的 tick 下标 */, best: [i32; 2] /* 窗口�
 
 W = 2048 时每簿 ≈ 64 KiB 数量数组 + 1 KiB 位图 + 4 KiB 溢出区;400 个 L2 簿 ≈ 28 MiB,放在 sequencer 的大页区。
 
-**`apply_batch` 步骤**:与下述 `apply_delta` 的第 2–5 步相同,只是第 2 步(序号)对整条消息做一次(`prev_id == last_id`,`last_id ≤ self.last_id` 为重复),第 3 步先对全部档做完结构校验再写第 4 步,第 5 步在末尾做一次。批量写入时最优档只在批末从位图重算一次。
+**`apply_batch` 步骤**:逐档 `L2Delta` 消息未见 `LAST` 时到达的 `L2Batch` 视为 `Split`;其余与下述 `apply_delta` 的第 2–5 步相同,只是第 2 步(序号)对整条消息做一次(`prev_id == last_id`,`last_id ≤ self.last_id` 为重复),第 3 步先对全部档做完结构校验再写第 4 步,第 5 步在末尾做一次。批量写入时最优档只在批末从位图重算一次。
 
 **`apply_delta` 步骤**:
 
 1. `state != Live` → `NOT_LIVE`。
 2. 消息边界:`idx == 0` 且仍在上一条消息中(`IN_MSG`,上一条未见 `LAST`)→ 转 `Stale(Split)`;否则清 `SKIP_MSG`,若 `last_id ≤ self.last_id` → 整条消息是重复(双路合流的后到者),置 `SKIP_MSG`,返回 `DUPLICATE`(带 `LAST` 的档同时清 `SKIP_MSG`);否则若 `prev_id != self.last_id` → `GAP`,转 `Stale(Gap)`;否则开始新消息(`msg_last_id = last_id`,`next_idx = 0`)。`idx > 0` 时,`SKIP_MSG` → `DUPLICATE`;不在消息中、`idx != next_idx` 或 `last_id != msg_last_id` → 转 `Stale(Split)`。
 3. 结构校验:`px > 0`、`qty ≥ 0`、`px % tick == 0`,否则 `INVALID`,转 `Stale(BadLevel)`。
-4. `i = px / tick − base`。`0 ≤ i < L`:写 `qty[s][i]`,同步位图;最优档维护——买侧:`qty > 0 && i > best` → `best = i`;`i == best && qty == 0` → 用位图从 `i` 向下找最高置位(每步 64 档,最多 L/64 步),窗口内无则 `best = -1`;`i == best` 且量变 → 置 `BID_TOP`。卖侧对称。窗口外:在 `ovf[s]` 中二分插入/更新/删除(删除不存在的档是空操作);容量满时把新档与已有档中离中价最远的一档并入 `far_qty`(不再可见、不可删除),`truncated` 计数加 1 并置 `TRUNCATED`。
+4. `i = px / tick − base`。`0 ≤ i < L`:写 `qty[s][i]`,同步位图;最优档维护——买侧:`qty > 0 && i > best` → `best = i`;`i == best && qty == 0` → 用位图从 `i` 向下找最高置位(每步 64 档,最多 L/64 步),窗口内无则 `best = -1`;`i == best` 且量变 → 置 `BID_TOP`。卖侧对称。窗口外:在 `ovf[s]` 中二分插入/更新/删除(删除不存在的档是空操作);容量满时把新档与已有档中离窗口中心(`base + W`)最远的一档(等距时取该侧较差价)并入 `far_qty`(不再可见、不可删除),`truncated` 计数加 1 并置 `TRUNCATED`。
 5. `LAST`:`self.last_id = msg_last_id`,清消息标志;交叉检查:两侧最优都存在且买 ≥ 卖 → `crossed_run += 1`,超过 `crossed_tolerance` 转 `Stale(Crossed)`,否则返回 `CROSSED`;不交叉则 `crossed_run = 0`。再做重新居中检查。
 
 **最优档不在窗口内**:`best_*()` 返回该侧全部可见档(窗口与溢出区)中价格最优的一档;最优档只在溢出区时在 `LAST` 时触发重新居中。
@@ -180,14 +182,14 @@ W = 2048 时每簿 ≈ 64 KiB 数量数组 + 1 KiB 位图 + 4 KiB 溢出区;400 
 
 **重新居中**(`LAST` 之后,当中价下标落在 `[W/2, 3W/2)` 之外,或任一侧最优只在溢出区):
 
-1. 中价 tick 下标 `m`(一侧为空时用另一侧最优);新 `base' = m − W`,位移 `d = base' − base`。
+1. 中价 tick 下标 `m`(一侧为空时用另一侧最优);新 `base' = m − W`,位移 `d = base' − base`;`d = 0` 时不做任何事(不置 `RECENTERED`)。
 2. `|d| ≥ L`:把窗口与溢出区的全部非空档收集到预分配的暂存区(容量 `2 × (L + ovf_cap)`),清空,按新 `base'` 重新插入。
 3. 否则 `copy_within` 平移两侧数量数组 `|d|` 档;移出窗口的非空档进入溢出区;溢出区中落入新窗口的档移入;重算受影响的位图字与 `best`。
-4. 置 `RECENTERED`。代价 O(L),罕见。
+4. 置 `RECENTERED`。代价 O(L),罕见。溢出区之外的档按"离新窗口近者先"进入溢出区,结果是溢出区保留离新中心最近的 `ovf_cap` 档,其余并入 `far_qty`(计入 `truncated`、置 `TRUNCATED`)。
 
-**`apply_snapshot`**(任一状态都可调用):先对全部档做第 3 步的结构校验(`qty = 0` 的档跳过;同价重复时后者生效)与交叉检查(两侧最优都存在且买 ≥ 卖),不通过 → 簿内容与 `last_id` 不变,转 `Stale(BadLevel)` 或 `Stale(Crossed)`,返回 `INVALID`(由 Live 离开时另置 `WENT_STALE`);通过 → 按位图只清非空档(不整块 memset),以快照中价设 `base`(中价下标 `m = ⌊(最优买下标 + 最优卖下标)/2⌋`,一侧为空用另一侧最优,两侧都空则 `base` 不变;`base = m − W`),逐档插入,`last_id = snap_id`,记下 `origin`,转 `Live`(由非 Live 进入时置 `WENT_LIVE`),返回 `APPLIED`。`origin = TopN` 时先做重复检查(调用约束第 6 条),中价下标仍在 `[base + W/2, base + 3W/2)` 内时不重新设 `base`(只清旧档、写新档),每条的代价与档数成正比。`origin = Keyframe`(只用于冷读者自举与恢复):沿用当前 `base` 写入档位与 `last_id`,不改 `state`、`stale_reason`、`origin`、`crossed_run` 与 `truncated`(这些由 `restore` 读回);簿为 `Uninit` 时按 Exchange 规则处理。
+**`apply_snapshot`**(任一状态都可调用):先对全部档做第 3 步的结构校验(`qty = 0` 的档跳过;同价重复时后者生效)与交叉检查(两侧最优都存在且买 ≥ 卖),不通过 → 簿内容与 `last_id` 不变,转 `Stale(BadLevel)` 或 `Stale(Crossed)`,返回 `INVALID`(由 Live 离开时另置 `WENT_STALE`);通过 → 按位图只清非空档(不整块 memset),以快照中价设 `base`(中价下标 `m = ⌊(最优买下标 + 最优卖下标)/2⌋`,一侧为空用另一侧最优,两侧都空则 `base` 不变;`base = m − W`),逐档插入,`last_id = snap_id`,记下 `origin`,转 `Live`(由非 Live 进入时置 `WENT_LIVE`),返回 `APPLIED`。`origin = TopN` 时先做重复检查(调用约束第 6 条),中价下标仍在 `[base + W/2, base + 3W/2)` 内时不重新设 `base`(只清旧档、写新档),每条的代价与档数成正比。`origin` 不是 Exchange/Keyframe/TopN → `INVALID`,簿不变。快照不置 `BID_TOP`/`ASK_TOP`。`origin = Keyframe`(只用于冷读者自举与恢复;不做交叉检查——它是引擎自己导出的 Live 簿,可能处于交叉容忍内):沿用当前 `base` 写入档位与 `last_id`,不改 `state`、`stale_reason`、`origin`、`crossed_run` 与 `truncated`(这些由 `restore` 读回);簿为 `Uninit` 时按 Exchange 规则处理。
 
-**`BookSet::snapshot`**:节 6 按 `inst` 升序每个已分配的 L2 簿写一行 `BookMetaRow`;节 7 按 `inst` 升序对 `Top.seq ≠ 0` 的 inst 写一行 `TopRow`(不写 `rx_tsc`)。`restore` 逆向填回,`Top.rx_tsc` 置 0;本 `BookSet` 没有分配 L2 簿的 inst 的节 6 行与超出 refdata 范围的节 7 行跳过;行内 `state`、`stale_reason`、`origin` 不是合法码值 → `Err`;快照之后的 L2 档位由 `L2Snapshot{Keyframe}`(冷读者与恢复)或重新订阅(实盘)补齐。
+**`BookSet::snapshot`**:节 6 按 `inst` 升序每个已分配的 L2 簿写一行 `BookMetaRow`;节 7 按 `inst` 升序对 `Top.seq ≠ 0` 的 inst 写一行 `TopRow`(不写 `rx_tsc`)。`restore` 在整份快照中查找两节(缺节即不恢复该节),先校验全部行再写入,逆向填回(L2 簿的档位清空,由关键帧补齐),`Top.rx_tsc` 置 0;本 `BookSet` 没有分配 L2 簿的 inst 的节 6 行与超出 refdata 范围的节 7 行跳过;行内 `state`、`stale_reason`、`origin` 不是合法码值 → `Err`;快照之后的 L2 档位由 `L2Snapshot{Keyframe}`(冷读者与恢复)或重新订阅(实盘)补齐。
 
 **`Top::apply`**:`update_id != 0 && update_id ≤ self.update_id` → `DUPLICATE`(相等)或 `OLDER`;两侧价都 > 0 且买 ≥ 卖 → `INVALID`;否则写入并按字段变化置位。约 98% 的 BBO 更新只改量不改价([bbo 实测](../../design/research/06-data-plane-replay-observability.md)),策略可凭 `BID_PX|ASK_PX` 位跳过纯量更新。
 
@@ -233,7 +235,7 @@ W = 2048 时每簿 ≈ 64 KiB 数量数组 + 1 KiB 位图 + 4 KiB 溢出区;400 
 ## 依赖
 
 - 内部:[hft-types](../hft-types/README.md)、[hft-refdata](../hft-refdata/README.md)(`InstHot` → `BookParams`)、[hft-event](../hft-event/README.md)(`L2Batch` 前缀 `L2BatchHdr`、`L2Delta`、`L2SnapHdr`(含 `origin`)、`Level`、`Bbo`、`ConnStateKind`)、[hft-strategy-sdk](../hft-strategy-sdk/README.md)(只用快照读写类型 `SnapshotWriter`/`SnapshotReader`/`RestoreError`)。
-- 外部:`xxhash-rust`(xxh3,`state_hash`);dev:`proptest`、`criterion`。
+- 外部:`xxhash-rust`(xxh3,`state_hash`)、`zerocopy`(把调用方内存安全地视为对齐的 `[u64]`,快照行编解码);dev:`proptest`、`criterion`。
 - 禁止:`BTreeMap`/`HashMap` 于簿本体(只在测试参考模型中)、任何 venue crate、`hft-rt`(L1 不依赖 L3;大页内存由调用方以 `&mut [u8]` 传入)。`unsafe` 只用于索引热循环的越界检查消除,每处 `// SAFETY:` 写明 `0 ≤ i < L` 的来源。
 
 ## 延伸阅读
