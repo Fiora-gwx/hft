@@ -1,0 +1,6 @@
+# cargo xtask test-trace configuration; semantics: docs/tests/README.md §6.
+# current_milestone: cases whose 里程碑 <= this must be implemented.
+# enabled_extensions: optional extensions (状态:可选扩展:<名>) whose cases are required;
+# enabling an extension adds it here in the same commit.
+current_milestone = "M1"
+enabled_extensions = []

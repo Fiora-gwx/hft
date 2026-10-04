@@ -174,10 +174,10 @@ DST 场景写 `故障`(何时注入什么)、`种子` 与 `断言`;`步骤` 选�
 - 测试函数名以用例编号开头:`<前缀小写>_<三位数>_<描述>`,如 `oms_014_linked_notfound_waits_history`。Python(pytest)的测试函数必须以 `test_` 开头,写作 `test_<前缀小写>_<三位数>_<描述>`。表驱动用例的每行用 `rstest` 的 `#[case::<前缀小写>_<三位数>_<行号>]` 或在循环断言信息中带行号;属性测试的 `proptest!` 函数同名规则;DST 场景以编号注册(`Scenario::new("OMS-201", …)`);金样目录名含编号;基准的 Criterion id 等于 `基准名`;`host`/`testnet`/`drill` 用例的脚本放 `tests/host/<编号>.sh` 或指向 runbook 步骤,证据文件名含编号。
 - `实现` 字段写 `<路径>::<函数名>`;尚未实现的写 `待实现`。
 - **追溯检查** `cargo xtask test-trace`(CI `ci.yml` 的文档作业,每个 PR):
-  1. 解析全仓 `TESTS.md` 与 `docs/tests/*.md`;
-  2. 级别为 `unit`/`table`/`prop`/`golden`/`fuzz`/`bench`/`dst`/`integ`/`proc`/`replay`、且里程碑 ≤ 当前里程碑(`tools/xtask/test-trace.toml` 的 `current_milestone`)的用例,必须有同编号的测试函数、场景或基准,且 `实现` 字段与找到的位置一致;
+  1. 解析全仓 `TESTS.md` 与 `docs/tests/*.md`(本页除外);xtask 测试的夹具仓库 `tools/xtask/tests/fixtures/` 既不读其规格也不扫其代码;
+  2. 级别为 `unit`/`table`/`prop`/`golden`/`fuzz`/`bench`/`dst`/`integ`/`proc`/`replay`、且里程碑 ≤ 当前里程碑(`tools/xtask/test-trace.toml` 的 `current_milestone`)的用例,必须有同编号的测试函数、场景或基准,且 `实现` 字段与找到的位置一致(恰好一处)。位置 = `<文件>::<函数>`:测试函数(Rust 带测试属性或在 `proptest!` 内;pytest 测试文件中的 `test_` 函数)取其自身;DST 场景取 `Scenario::new("<编号>", …)` 调用所在的函数;基准取等于 `基准名` 的 Criterion id 字面量所在的函数(`benches/` 或 `benchmarks/` 下);fuzz 用例取 fuzz 目标文件中以编号开头的函数(`fuzz_target!` 调用它);`实现` 为 `待实现` 时即使找到也列为未实现;
   3. 代码中名字匹配 `^(test_)?[a-z]+_[0-9]{3}_` 的测试函数,其编号必须存在于测试规格;
-  4. 带 `#[ignore]` 的测试视为未实现,除非用例有 `状态:隔离:…`;
+  4. 带 `#[ignore]`(pytest:`@pytest.mark.skip…`)的测试视为未实现,除非用例有 `状态:隔离:…`;
   4a. `状态:可选扩展:<名>` 的用例只在 `tools/xtask/test-trace.toml` 的 `enabled_extensions` 列出该扩展时才要求实现;启用扩展的同一提交把它加进该列表;
   5. 输出未实现、多余与不一致三张清单;任一非空即失败。
 - `host`/`testnet`/`drill` 用例不进 CI;其执行记录按 `证据` 字段归档,上线门槛([testing §8](../testing.md#8-上线门槛))按编号检查证据。

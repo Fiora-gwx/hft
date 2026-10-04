@@ -3,6 +3,7 @@ resolver = "2"
 # M1 members; later milestones add theirs (docs/development.md, architecture-v2/11 §3).
 members = [
     "crates/hft-types",
+    "tools/xtask",
 ]
 
 [workspace.package]

@@ -43,7 +43,7 @@ spec: README.md
 
 ## 用例
 
-约定:xtask 的用例在 `tools/xtask/tests/fixtures/<名字>/` 的小型假仓库上运行(每个夹具一个最小 workspace + 文档树);外部命令(`cargo`、`git`、`gh`、`hft-core`、`bpftrace`)经 xtask 内部的命令执行器调用,测试替换为**记录型执行器**(记下每次调用的程序名与参数,按脚本返回退出码与输出)。"退出码"指子命令进程的退出码;"JSON"指 `target/xtask/<subcommand>.json`。
+约定:xtask 的用例在小型假仓库上运行(每个夹具一个最小 workspace + 文档树),夹具放 `tools/xtask/tests/fixtures/<名字>/`,或由测试代码按名字在临时目录中生成(如 `trace-clean`,见 `tools/xtask/tests/test_trace.rs`);外部命令(`cargo`、`git`、`gh`、`hft-core`、`bpftrace`)经 xtask 内部的命令执行器调用,测试替换为**记录型执行器**(记下每次调用的程序名与参数,按脚本返回退出码与输出)。"退出码"指子命令进程的退出码;"JSON"指 `target/xtask/<subcommand>.json`。
 
 ### TOOL-001 每个 xtask 子命令按 0/1/2 约定退出
 

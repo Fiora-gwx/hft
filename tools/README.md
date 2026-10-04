@@ -526,7 +526,7 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 
 ## 依赖
 
-- xtask:`cargo_metadata`、`syn`、`serde`、`toml`、`serde_json`、`walkdir`、`pulldown-cmark`;调用 `cargo`、`cargo-deny`、`cargo-fuzz`、`bpftrace`、`gh`(只在 `decoupling-gate`)、已构建的 `hft-core`(外部二进制)。
+- xtask:`cargo_metadata`、`syn`、`serde`、`toml`、`serde_json`、`walkdir`、`regex`、`pulldown-cmark`;调用 `cargo`、`cargo-deny`、`cargo-fuzz`、`bpftrace`、`gh`(只在 `decoupling-gate`)、已构建的 `hft-core`(外部二进制)。
 - hostprobe:`libc`、`serde`;禁止依赖任何 hot crate(它读主机,不读交易)。
 - az-probe:Python 标准库 + `websockets`;不依赖 hft crate。
 - hft-cfg:见实现说明表;外部 `toml`、`serde_json`(读 schema JSON)、`reqwest`(仅 `refdata fetch`)。禁止依赖 `strategies/*` 与 `hft-strategy-registry`。
