@@ -1,6 +1,12 @@
 //! Reference implementations for property tests and the fuzz target: decimal digit vectors and
 //! sign-magnitude integer arithmetic, written independently of the crate's algorithms.
 //! Included with `mod reference;` by the property tests (and by `fuzz/fuzz_targets/parse.rs`).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(dead_code)]
 
 use hft_types::{AssetExp, FxErr, MAX_RAW, Notional, RoundMode};

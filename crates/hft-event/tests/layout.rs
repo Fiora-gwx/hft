@@ -1,6 +1,12 @@
 //! Runtime layout assertions (sizes, alignment, offsets) on top of the compile-time ones
 //! (EVT-001, EVT-040, EVT-050, EVT-060, EVT-070, EVT-090, EVT-120, EVT-130, EVT-150, EVT-160).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use core::mem::offset_of;
 use hft_event::*;
 

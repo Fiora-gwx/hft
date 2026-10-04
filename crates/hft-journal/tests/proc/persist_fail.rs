@@ -1,6 +1,12 @@
 //! Cold disk full: the writer is unaffected, lag grows, and catches up after space returns
 //! (JNL-048). Linux, CI prerequisite: `sudo mount -t tmpfs -o size=2M none /mnt/cold-small`
 //! (path in `HFT_TEST_COLD_SMALL`) and password-less `sudo` for the remount (`HFT_TEST_SUDO=1`).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(target_os = "linux")]
 
 #[path = "../common/mod.rs"]

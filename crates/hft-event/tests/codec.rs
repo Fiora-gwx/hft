@@ -1,5 +1,11 @@
 //! Record codec (EVT-003, EVT-010, EVT-012 – EVT-024, EVT-026, EVT-030, EVT-041, EVT-072).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

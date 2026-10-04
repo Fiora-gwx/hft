@@ -1,5 +1,7 @@
 //! x86_64 host check table (optional metal profile).
 
+#![allow(clippy::disallowed_macros, clippy::disallowed_methods)] // allow-list: startup host self-check, not on a hot thread
+
 use crate::host::{Hits, HostCheck, SysRoot, selected};
 
 /// x86_64 hard bits beyond the common ones: none.

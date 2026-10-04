@@ -1,5 +1,11 @@
 //! Property tests for fixed-point arithmetic (TYP-004, TYP-012, TYP-020, TYP-024).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod reference;
 
 use hft_types::*;

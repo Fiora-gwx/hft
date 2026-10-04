@@ -1,4 +1,10 @@
 //! Table tests for fixed-point arithmetic (TYP-006 – TYP-025, TYP-160).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(clippy::type_complexity)] // table rows are tuples
 
 use hft_types::RoundMode::{Ceil, Floor, HalfEven, TowardZero};

@@ -17,10 +17,29 @@ path = "src/main.rs"
 [dependencies]
 hft-event = { workspace = true }
 hft-refdata = { workspace = true }
+# journal-verify: the reading/verification implementation (no `writer` feature).
+hft-journal = { workspace = true }
+proc-macro2 = { version = "1", features = ["span-locations"] }
 regex = "1"
 serde_json = "1"
+# Not `workspace = true`: the workspace entry enables `asm` (needs a C toolchain for the target).
+sha2 = "0.10"
+syn = { version = "2", features = ["full", "visit", "extra-traits"] }
 toml = { workspace = true }
 walkdir = "2"
+
+[dev-dependencies]
+criterion = { workspace = true }
+crc32c = { workspace = true }
+hft-event = { workspace = true }
+hft-journal = { workspace = true, features = ["writer", "mem-backend"] }
+hft-rt = { workspace = true }
+hft-types = { workspace = true }
+zerocopy = { workspace = true }
+
+[[bench]]
+name = "decoupling_gate"
+harness = false
 
 [lints]
 workspace = true

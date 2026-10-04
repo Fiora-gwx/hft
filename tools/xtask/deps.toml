@@ -304,7 +304,9 @@ deps = [
 # ---------------------------------------------------------------- tools
 [pkg."tools/xtask"]
 tier = "cold"
-deps = ["crates/hft-event", "crates/hft-refdata", "crates/hft-testkit"]
+deps = ["crates/hft-event", "crates/hft-refdata", "crates/hft-journal", "crates/hft-testkit"]
+# journal-verify tests write journals with hft-journal's writer.
+dev = ["crates/hft-types", "crates/hft-rt"]
 dev_tier_ok = true
 
 [pkg."tools/hft-cfg"]

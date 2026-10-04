@@ -1,5 +1,11 @@
 //! Load step 7: tick / lot / min_qty re-parsed from the exchange text (REF-028).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

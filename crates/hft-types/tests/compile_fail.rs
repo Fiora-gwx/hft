@@ -1,5 +1,11 @@
 //! Forbidden APIs do not compile (TYP-005); one source file per table row in `tests/ui/`.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 #[test]
 fn typ_005_forbidden_api_does_not_compile() {
     let t = trybuild::TestCases::new();

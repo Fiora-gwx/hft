@@ -1,5 +1,11 @@
 //! Property test for U256 ↔ Qty (TYP-072).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod reference;
 
 use hft_types::*;

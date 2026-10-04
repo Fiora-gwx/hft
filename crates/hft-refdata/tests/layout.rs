@@ -1,5 +1,11 @@
 //! Container and hot-row layouts (REF-001, REF-002, REF-074).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use core::mem::{align_of, offset_of, size_of};

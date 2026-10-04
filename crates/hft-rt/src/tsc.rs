@@ -58,6 +58,7 @@ pub fn tsc_ordered() -> Tsc {
 }
 
 #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+#[allow(clippy::disallowed_methods)] // allow-list: counter fallback on targets without a cycle counter
 fn fallback_ns() -> u64 {
     use std::sync::OnceLock;
     static START: OnceLock<std::time::Instant> = OnceLock::new();

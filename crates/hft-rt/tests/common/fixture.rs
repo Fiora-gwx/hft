@@ -1,5 +1,11 @@
 //! `SysRoot` fixture F0 and `HostNeeds` N0 of RT-073 (every check passes), with edit helpers.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};

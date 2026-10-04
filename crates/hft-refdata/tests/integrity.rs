@@ -1,5 +1,11 @@
 //! Load step 9: account integrity (REF-031 – REF-038).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

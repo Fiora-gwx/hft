@@ -1,4 +1,10 @@
 //! ByteSpsc capacity, records, size limit, wrap marker, reservation overwrite (RT-030 – RT-034).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(not(loom))]
 
 use hft_rt::{Backing, RtErr, byte_spsc};

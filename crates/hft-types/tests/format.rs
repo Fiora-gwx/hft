@@ -1,5 +1,11 @@
 //! Table test for `write_fixed` (TYP-046).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use hft_types::{MAX_RAW, write_fixed};
 
 #[test]

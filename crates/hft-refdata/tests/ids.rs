@@ -1,6 +1,12 @@
 //! Load step 3: dense ids, venue-keyed tables, unknown venues, instance id range
 //! (REF-013 – REF-016).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

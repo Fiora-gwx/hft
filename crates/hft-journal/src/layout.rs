@@ -6,12 +6,14 @@
 //! This is the only module of the crate with `unsafe` (README "读者", JNL-103).
 
 use std::alloc::Layout as AllocLayout;
+#[allow(clippy::disallowed_types)] // allow-list: heap segment backend (tests, offline writer)
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+#[allow(clippy::disallowed_types)] // allow-list: heap segment backend (tests, offline writer)
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use hft_types::VenueId;
@@ -50,6 +52,7 @@ pub struct SchemaEntry {
     /// Fixed: body size; Var/Multi: prefix size.
     pub size: u32,
 }
+const _: () = assert!(size_of::<SchemaEntry>() == 8 && align_of::<SchemaEntry>() == 4);
 
 /// The immutable region `0..3072` of a segment header (zerocopy view; journal-format "SegmentHeader").
 #[repr(C, align(8))]
@@ -399,6 +402,7 @@ struct MemFile {
 }
 
 #[derive(Default)]
+#[allow(clippy::disallowed_types)] // allow-list: heap segment backend (tests, offline writer)
 struct MemStore {
     roots: Vec<PathBuf>,
     files: BTreeMap<PathBuf, u64>,
@@ -409,6 +413,7 @@ struct MemStore {
 // SAFETY: the store owns its heap blocks; access is serialised by the mutex.
 unsafe impl Send for MemStore {}
 
+#[allow(clippy::disallowed_types)] // allow-list: heap segment backend (tests, offline writer)
 fn mem() -> MutexGuard<'static, MemStore> {
     static S: OnceLock<Mutex<MemStore>> = OnceLock::new();
     let m = S.get_or_init(|| Mutex::new(MemStore::default()));

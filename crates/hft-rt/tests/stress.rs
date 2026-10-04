@@ -1,6 +1,12 @@
 //! Two-thread stress: SPSC sequence, byte records, kill word (RT-009, RT-036, RT-046).
 //!
 //! Scale: `HFT_RT_STRESS_SCALE` multiplies the PR counts (the nightly arm job sets 10).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(not(loom))]
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};

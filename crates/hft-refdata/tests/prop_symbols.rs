@@ -1,6 +1,12 @@
 //! REF-047: on any symbol set of up to 8 192 entries both lookup paths agree with a
 //! `BTreeMap` reference, and binary search makes at most ⌈log₂ n⌉ ordered comparisons.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use std::collections::BTreeMap;
 
 use hft_refdata::SymbolIndex;

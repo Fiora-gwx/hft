@@ -1,5 +1,11 @@
 //! `ControlCmd::decode` benchmark (EVT-194).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};

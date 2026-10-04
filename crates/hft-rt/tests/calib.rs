@@ -1,4 +1,10 @@
 //! Calibration with injected readings, calibration pairs, drift tracking (RT-053 – RT-055).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(not(loom))]
 
 use std::collections::VecDeque;

@@ -1,5 +1,11 @@
 //! Load of 5 000 insts over the six core venues with 20 accounts (REF-087).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 #[path = "../tests/common/f0.rs"]
 mod f0;
 

@@ -1,5 +1,11 @@
 //! Record framing (JNL-009).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::harness::*;

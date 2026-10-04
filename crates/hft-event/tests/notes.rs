@@ -1,5 +1,11 @@
 //! Note name registry, `note_code`, `VField` and CapRecord in `Note.v` (EVT-075 – EVT-078, EVT-091).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

@@ -1,4 +1,10 @@
 //! Timer code packing (EVT-110 – EVT-113).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(clippy::type_complexity)]
 
 use hft_event::*;

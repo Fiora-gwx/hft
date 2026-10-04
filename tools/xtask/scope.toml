@@ -1,0 +1,22 @@
+# Optional components (frontmatter `scope: optional`; the frontmatter is the source, this list mirrors it
+# for `cargo xtask ci`). `ci` includes such a component only when it is a workspace member and reports
+# it as skipped otherwise, so a missing optional component never turns the core CI red
+# (tools/README.md "cargo xtask ci" 范围).
+optional = [
+    "crates/hft-amm",
+    "crates/hft-chain-evm",
+    "crates/hft-chain-solana",
+    "crates/hft-ext-proto",
+    "crates/venue-bybit",
+    "crates/venue-gate",
+    "crates/venue-hyperliquid",
+    "crates/venue-kucoin",
+    "apps/chain-core",
+    "apps/chain-grpc-relay",
+    "apps/mock-exchange",
+    "strategies/cdex",
+    "strategies/cross-taker",
+    "strategies/maker-taker",
+    "python/research",
+    "contracts",
+]

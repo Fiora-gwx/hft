@@ -1,6 +1,8 @@
 //! File access: hot segments (shared mappings on hugetlbfs/tmpfs, or the in-memory backend),
 //! cold copies (ordinary files), naming, directory modes and the in-process mapping registry.
 
+#![allow(clippy::disallowed_types, clippy::disallowed_macros)] // allow-list: segment files, naming and mapping registry; called at open, roll preparation, persist and readers, not per append
+
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read};

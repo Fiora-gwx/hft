@@ -175,6 +175,7 @@ fixtures/
 - **脱敏替换**(确定性:同一原值在同一 fixture 集里映射到同一占位符):交易所账户 id / UID / 子账户名 → `acct-0001`(UID 查询响应的金样同样替换,`AccountMeta.venue_uid` 测试用占位值);交易所订单 id 与 `clientOrderId` 保留格式与长度、替换内容;钱包地址(可选扩展,链上)→ 占位地址。
 - `cargo xtask fixtures scrub` 按 `fixtures/scrub-rules.toml` 执行替换;`cargo xtask fixtures check` 扫描全部 fixture:命中 key 形态(64 位十六进制 secret、`-----BEGIN`、Base64 Ed25519 密钥长度)、登录/签名字段名(`signature`、`apiKey`、`passphrase`、`listenKey`)、`scrub-rules.toml` 里登记的真实账户 id(以哈希登记)→ 失败。
 - `fixtures check` 在 CI 每个 PR 运行。
+- 机检口径:扫描 `fixtures/` 下全部文件(Markdown 与 `scrub-rules.toml` 除外,二进制按字节扫描);字段名 = JSON 键 `"<名>":` 或查询参数 `?<名>=`/`&<名>=`;64 位十六进制只在所在行不含 `sha256`/`hash`/`digest` 时算命中;Base64 Ed25519 密钥 = 引号内 44 字符(32 字节)的 Base64 串或 PKCS#8 前缀 `MC4CAQAwBQYDK2Vw`;登记的账户 id = 文本中每个 `[A-Za-z0-9_.@:-]{3,}` 片段的 SHA-256 命中 `scrub-rules.toml` 的 `[forbid] sha256 = [...]`。`fixtures scrub` 删去上述登录/签名字段(JSON 成员与查询参数),再按 `[[replace]]`(`pattern` 正则 → `with`)替换,只改写 UTF-8 文本文件;不给路径时处理全部 fixture。
 
 ## 实现说明
 

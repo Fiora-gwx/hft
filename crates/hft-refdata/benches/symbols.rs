@@ -1,5 +1,11 @@
 //! Symbol-table lookups (REF-081 – REF-083); ids equal the `基准名` fields in TESTS.md.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 #[path = "../tests/common/f0.rs"]
 mod f0;
 

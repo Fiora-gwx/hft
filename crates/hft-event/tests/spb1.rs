@@ -1,4 +1,10 @@
 //! SPB1 container parse (EVT-131, EVT-132).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(clippy::type_complexity)]
 
 #[path = "common/spb.rs"]

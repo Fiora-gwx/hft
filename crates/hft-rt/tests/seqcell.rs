@@ -1,4 +1,10 @@
 //! SeqCell single-thread store/load (RT-043).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(not(loom))]
 
 use hft_rt::{SeqCell, Tsc, TscUtc};

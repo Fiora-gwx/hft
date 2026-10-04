@@ -1,6 +1,12 @@
 //! The `writer` feature gate (JNL-102) and `DurableMeta` without it (JNL-122): a throw-away
 //! project depending on `hft-journal` with default features, built by a nested `cargo`.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

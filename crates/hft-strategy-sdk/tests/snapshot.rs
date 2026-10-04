@@ -1,5 +1,11 @@
 //! Snapshot writer and reader (SDK-025, SDK-191).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use hft_strategy_sdk::{RestoreError, SnapshotFull, SnapshotReader, SnapshotWriter};
 
 #[test]

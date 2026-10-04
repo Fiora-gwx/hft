@@ -1,4 +1,10 @@
 //! BOOK-056: a mid drifting monotonically by 10 × W ticks matches the reference book.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 mod common;
 #[path = "model.rs"]
 mod model;

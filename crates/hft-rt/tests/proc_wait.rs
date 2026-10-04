@@ -1,4 +1,10 @@
 //! Backoff spins, then yields, never sleeps (RT-099). Linux + strace.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(all(target_os = "linux", not(loom)))]
 
 #[allow(dead_code)]

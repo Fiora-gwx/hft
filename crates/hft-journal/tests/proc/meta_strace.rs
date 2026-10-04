@@ -1,4 +1,10 @@
 //! `DurableMeta::write_sync` system-call order under strace (JNL-098). Linux, CI installs strace.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(target_os = "linux")]
 
 #[path = "../common/mod.rs"]

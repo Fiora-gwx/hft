@@ -1,5 +1,11 @@
 //! Load step 6: exponents, unit shifts, wire exponents, unsupported kinds (REF-025 – REF-027).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

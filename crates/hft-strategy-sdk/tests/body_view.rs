@@ -2,6 +2,12 @@
 //!
 //! A per-thread counting allocator stands in for `hft-testkit::CountingAlloc` until that crate
 //! exists; only allocations on the measuring thread while counting is enabled are counted.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(clippy::type_complexity)] // table-driven rows
 
 mod common;

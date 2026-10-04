@@ -1,4 +1,10 @@
 //! `HedgePxLimits` and `cap_cross_px` (TYP-120, TYP-121).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(clippy::type_complexity)] // table rows are tuples
 
 use hft_types::{HedgePxLimits, MAX_RAW, Px, Rate, Side, cap_cross_px};

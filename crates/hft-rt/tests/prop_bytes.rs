@@ -1,4 +1,10 @@
 //! ByteSpsc matches a byte-occupancy model; an empty ring always accepts (RT-035).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(not(loom))]
 
 use std::collections::VecDeque;

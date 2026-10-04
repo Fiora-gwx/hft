@@ -1,4 +1,10 @@
 //! BOOK-080–BOOK-082: `export` and `state_hash`.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(clippy::type_complexity)]
 mod common;
 

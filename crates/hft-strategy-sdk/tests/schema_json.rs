@@ -1,5 +1,11 @@
 //! Canonical schema JSON, `schema_digest` and `OwnedSchema` (SDK-106–SDK-109).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use std::path::PathBuf;

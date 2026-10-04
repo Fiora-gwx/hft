@@ -2,6 +2,12 @@
 //!
 //! Each read is one `try_load` attempt (`load` = retry `try_load` until `Some`): a retry loop
 //! lets loom read stale values forever, so the model checks every successful attempt instead.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(loom)]
 
 use loom::sync::Arc;

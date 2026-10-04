@@ -1,6 +1,12 @@
 //! loom: every interleaving of push / batch push against pop / batch read delivers 1, 2, 3 exactly
 //! once and in order; slot accesses are race-checked by loom (RT-008).
 //! Run: `RUSTFLAGS="--cfg loom" cargo test -p hft-rt --test loom_spsc --release`.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(loom)]
 
 use hft_rt::{Backing, spsc};

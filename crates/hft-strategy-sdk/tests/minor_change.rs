@@ -1,4 +1,10 @@
 //! Gate ⑦ minor-change check (SDK-110, SDK-111).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(clippy::type_complexity)] // table-driven rows
 
 mod common;

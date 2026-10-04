@@ -1,6 +1,8 @@
 //! `DurableMeta`: per-instance durable key/value store (`<cold_root>/<instance>/meta/<key>`) —
 //! README "持久元数据".
 
+#![allow(clippy::disallowed_macros)] // allow-list: DurableMeta file I/O on cold threads
+
 use std::fs::File;
 use std::io::{self, ErrorKind, Write};
 use std::path::{Path, PathBuf};

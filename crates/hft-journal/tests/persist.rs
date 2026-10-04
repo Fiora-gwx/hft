@@ -1,6 +1,12 @@
 //! Persist: chunked copy, sync thresholds, sealing, lag, round order (JNL-044 – JNL-047, JNL-049,
 //! JNL-050). Linux rows use tmpfs; elsewhere the heap backend.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::harness::*;

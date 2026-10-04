@@ -1,6 +1,12 @@
 //! Four-leg `check_group` (REF-086): F0 plus Bitget futures and Gate spot, account 1 on
 //! Binance USD-M, OKX spot, Bitget futures and Gate spot.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 #[path = "../tests/common/f0.rs"]
 mod f0;
 

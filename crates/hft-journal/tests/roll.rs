@@ -1,6 +1,12 @@
 //! Size valves, roll products, boot blocks, NextNotReady/Io, seal_and_close, config digest and
 //! self-sufficient boot blocks (JNL-028 – JNL-037, JNL-120).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::harness::*;

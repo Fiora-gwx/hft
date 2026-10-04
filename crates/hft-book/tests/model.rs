@@ -2,6 +2,12 @@
 //! the obvious way — every visible level in one map per side, window = `[base, base + L)`,
 //! the overflow area = visible levels outside the window, capped at `cap` by evicting the level
 //! farthest from the window centre `base + W` (equal distance → the worse price).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;

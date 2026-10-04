@@ -1,5 +1,11 @@
 //! Funding settlement time normalization (TYP-130).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use hft_types::funding_settle_norm_ns;
 
 #[test]

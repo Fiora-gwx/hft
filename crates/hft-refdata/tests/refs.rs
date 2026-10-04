@@ -1,5 +1,11 @@
 //! Load step 4: references, stable quotes, single binding per instance (REF-017 – REF-019).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

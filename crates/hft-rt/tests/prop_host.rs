@@ -1,4 +1,10 @@
 //! `hard` is exactly `bits ∩ H(class)` for any class and any set of hits (RT-079).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(not(loom))]
 
 #[allow(dead_code)]

@@ -1,6 +1,8 @@
 //! `Persister`: copies hot segments to cold copies, `fdatasync`s by size/time thresholds and seals
 //! (`.seal` with the masked SHA-256) — README "persist", journal-format "冷副本与热段".
 
+#![allow(clippy::disallowed_types)] // allow-list: persist thread (warm, non-isolated core)
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
 use std::io;

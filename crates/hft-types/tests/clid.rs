@@ -1,5 +1,11 @@
 //! `ClientOrderId` encode/decode (TYP-135 – TYP-137, TYP-140 – TYP-142).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use hft_types::{AccountId, CidErr, ClientOrderId, VenueId};
 
 fn cid(epoch: u16, venue: u8, account: u8, slot: u32, r#gen: u32) -> ClientOrderId {

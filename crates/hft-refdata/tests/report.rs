@@ -1,5 +1,11 @@
 //! Step ordering of `LoadReport` (REF-010, REF-011).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

@@ -1,5 +1,11 @@
 //! Codec round trips (EVT-011, EVT-025).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use hft_event::*;
 use proptest::prelude::*;
 use zerocopy::IntoBytes;

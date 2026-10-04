@@ -1,5 +1,11 @@
 //! SPB1 body struct layout (SDK-100).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use core::mem::{align_of, offset_of, size_of};
 
 use hft_strategy_sdk::params::{ParamOverride, ParamsBodyHdr};

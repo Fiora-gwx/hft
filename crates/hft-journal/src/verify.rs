@@ -1,6 +1,8 @@
 //! Offline verification (`cargo xtask journal-verify`, journal-archiver): journal-format
 //! "校验与缺段检测" items 1–6.
 
+#![allow(clippy::disallowed_types)] // allow-list: offline verification
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 

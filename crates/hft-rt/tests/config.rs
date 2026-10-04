@@ -1,4 +1,10 @@
 //! `[rt]` defaults and validation (RT-130, RT-131).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(not(loom))]
 
 use std::path::PathBuf;

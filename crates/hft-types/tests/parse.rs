@@ -1,4 +1,10 @@
 //! Table tests for decimal parsing (TYP-040 – TYP-044, TYP-051).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(clippy::type_complexity)] // table rows are tuples
 
 use hft_types::RoundMode::{Ceil, Floor, HalfEven, TowardZero};

@@ -1,5 +1,11 @@
 //! Queries on a loaded snapshot (REF-050, REF-051, REF-053 – REF-057).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

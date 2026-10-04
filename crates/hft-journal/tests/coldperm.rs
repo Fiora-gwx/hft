@@ -1,5 +1,11 @@
 //! Cold copy directory modes (JNL-092). Linux, non-root, with a supplementary group.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 #[cfg(target_os = "linux")]

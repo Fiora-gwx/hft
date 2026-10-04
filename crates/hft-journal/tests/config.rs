@@ -1,5 +1,11 @@
 //! Configuration checks and defaults (JNL-011, JNL-012).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::harness::*;

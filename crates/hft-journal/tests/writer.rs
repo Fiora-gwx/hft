@@ -2,6 +2,12 @@
 //! reserve_var, Sealed/InBoot, snapshots, raw and CRC policy (JNL-013 – JNL-027, JNL-038, JNL-104,
 //! JNL-121).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::harness::*;

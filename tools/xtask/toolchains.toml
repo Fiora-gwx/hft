@@ -1,0 +1,9 @@
+# Pinned tool versions installed by `cargo xtask setup` (tools/README.md "其他 xtask 子命令";
+# docs/development.md "工具链"). CI installs and caches the same set.
+
+# Fixed-date nightly used only by `cargo xtask fuzz` (never for release binaries).
+nightly = "nightly-2026-09-01"
+
+[plugins]
+cargo-deny = "0.20.2"
+cargo-fuzz = "0.13.2"

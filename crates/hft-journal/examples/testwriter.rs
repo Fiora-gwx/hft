@@ -8,6 +8,12 @@
 //!
 //! Exit codes: 0 success, 1 argument or source error, 2 writer error.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::exit;

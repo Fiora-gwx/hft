@@ -3,6 +3,12 @@
 //! `parse_value`, encoded with `encode_body` inside the SPB1 container and compared byte for
 //! byte with the hand-computed `.blob`; `decode_body` of the blob's body gives the input back.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use std::path::PathBuf;

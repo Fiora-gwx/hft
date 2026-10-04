@@ -1,5 +1,11 @@
 //! Shared-ring element size and alignment limits are compile-time errors (RT-028); one source
 //! file per table row in `tests/ui/`.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(not(loom))]
 
 #[test]

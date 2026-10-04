@@ -1,4 +1,10 @@
 //! BOOK-010–BOOK-017: Exchange and Keyframe snapshots.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(clippy::type_complexity)]
 mod common;
 

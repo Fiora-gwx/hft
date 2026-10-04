@@ -3,6 +3,12 @@
 //! runs with `HFT_BENCH_HOT` pointing at a hugetlbfs/tmpfs directory. Only the hot calls are
 //! timed: rolls, persistence and retirement between batches are not.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 #[path = "../tests/common/harness.rs"]
 mod harness;
 

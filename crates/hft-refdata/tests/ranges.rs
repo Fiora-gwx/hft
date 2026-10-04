@@ -1,6 +1,12 @@
 //! Load step 8: value ranges, symbol uniqueness, dust, MMR tiers, price bands
 //! (REF-029, REF-030, REF-090 – REF-092).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

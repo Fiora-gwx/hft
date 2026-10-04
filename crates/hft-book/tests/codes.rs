@@ -1,4 +1,10 @@
 //! BOOK-068: code values.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 use hft_book::{BookErr, BookState, Outcome, StaleReason, TopOutcome};
 
 #[test]

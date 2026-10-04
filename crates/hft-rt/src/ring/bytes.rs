@@ -6,6 +6,7 @@
 //! Release store of `tail` in `advance` ↔ Acquire load in `reserve`.
 
 use core::ptr::NonNull;
+#[allow(clippy::disallowed_types)] // allow-list: see the ring/handle owners below
 use std::sync::Arc;
 
 use super::{Lines, RingAlloc};
@@ -31,6 +32,7 @@ struct Pending {
 }
 
 /// Byte-ring producer (exactly one; not `Clone`).
+#[allow(clippy::disallowed_types)] // allow-list: shared ring memory owner, never cloned after construction
 pub struct ByteProducer {
     lines: NonNull<Lines>,
     buf: NonNull<u8>,
@@ -43,6 +45,7 @@ pub struct ByteProducer {
 }
 
 /// Byte-ring consumer (exactly one; not `Clone`).
+#[allow(clippy::disallowed_types)] // allow-list: shared ring memory owner, never cloned after construction
 pub struct ByteConsumer {
     lines: NonNull<Lines>,
     buf: NonNull<u8>,
@@ -59,6 +62,7 @@ unsafe impl Send for ByteProducer {}
 unsafe impl Send for ByteConsumer {}
 
 /// `capacity_bytes` must be a power of two ≥ 64 (else `Capacity`).
+#[allow(clippy::disallowed_types)] // allow-list: shared ring memory owner, never cloned after construction
 pub fn byte_spsc(capacity_bytes: usize, mem: Backing) -> Result<(ByteProducer, ByteConsumer), RtErr> {
     if capacity_bytes < 64 || !capacity_bytes.is_power_of_two() {
         return Err(RtErr::Capacity);

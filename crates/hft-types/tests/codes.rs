@@ -1,5 +1,11 @@
 //! Code values of enums and bit sets (TYP-026, TYP-086, TYP-110 – TYP-114).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use hft_types::*;
 use zerocopy::{IntoBytes, TryFromBytes};
 

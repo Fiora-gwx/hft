@@ -1,5 +1,11 @@
 //! Kill-word bit layout (TYP-100 – TYP-105).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use hft_types::KillBits;
 
 #[test]

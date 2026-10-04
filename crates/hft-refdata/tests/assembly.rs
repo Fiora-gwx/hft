@@ -1,6 +1,12 @@
 //! `check_assembly` against the compiled-in protocol and strategy facts
 //! (REF-061 – REF-063, REF-093).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

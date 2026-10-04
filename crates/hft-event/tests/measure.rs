@@ -1,5 +1,11 @@
 //! Measurement mask (EVT-100 – EVT-102).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

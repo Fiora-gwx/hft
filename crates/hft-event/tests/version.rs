@@ -1,6 +1,12 @@
 //! Old-version records read by the current reader (EVT-071). Fixtures in
 //! `fixtures/hft-event/EVT-071/` (old field values non-zero); `HFT_REGEN_GOLDEN=1` rewrites them.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

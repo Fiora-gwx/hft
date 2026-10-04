@@ -1,6 +1,12 @@
 //! Criterion benchmarks for the hft-types hot entries (TYP-170 – TYP-179); ids equal the
 //! `基准名` fields in TESTS.md and the budget names in README "延迟与资源契约".
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};

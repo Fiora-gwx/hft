@@ -1,6 +1,12 @@
 //! Symbol tables: exact-byte lookup, aliases, numeric ids, front table, prewarm
 //! (REF-045, REF-046, REF-048, REF-049).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

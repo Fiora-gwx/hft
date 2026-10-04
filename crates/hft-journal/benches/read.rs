@@ -1,5 +1,11 @@
 //! Sequential reader scan over a sealed cold copy in the page cache (JNL-115).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 #[path = "../tests/common/harness.rs"]
 mod harness;
 

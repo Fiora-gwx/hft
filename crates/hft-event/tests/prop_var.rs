@@ -1,5 +1,11 @@
 //! Split / reassemble round trip (EVT-163).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use hft_event::*;
 use proptest::prelude::*;
 

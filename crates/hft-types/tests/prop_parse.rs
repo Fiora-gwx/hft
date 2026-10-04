@@ -1,5 +1,11 @@
 //! Property tests for parsing and formatting (TYP-045, TYP-047, TYP-048).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod reference;
 
 use hft_types::*;

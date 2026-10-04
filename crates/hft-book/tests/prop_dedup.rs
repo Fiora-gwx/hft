@@ -1,4 +1,10 @@
 //! BOOK-061: two merged copies of one delta stream give the single-path book.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 mod common;
 
 use common::{book_s0, delta};

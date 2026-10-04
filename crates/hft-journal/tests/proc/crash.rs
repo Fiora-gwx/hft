@@ -1,4 +1,10 @@
 //! Crash survival and recovery with real processes (JNL-069 – JNL-072). Linux tmpfs.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(target_os = "linux")]
 
 #[path = "../common/mod.rs"]

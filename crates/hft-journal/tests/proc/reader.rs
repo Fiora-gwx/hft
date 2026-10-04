@@ -1,4 +1,10 @@
 //! Readers map read-only and never slow the writer (JNL-087, JNL-088). Linux tmpfs.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(target_os = "linux")]
 
 #[path = "../common/mod.rs"]

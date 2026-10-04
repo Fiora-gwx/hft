@@ -1,4 +1,10 @@
 //! BOOK-103: no allocation in any entry point after `new_in`.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 mod common;
 
 use std::alloc::{GlobalAlloc, Layout, System};

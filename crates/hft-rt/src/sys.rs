@@ -18,6 +18,7 @@ pub(crate) fn cpath(p: &std::path::Path) -> Option<std::ffi::CString> {
 /// Process start time (field 22 of `/proc/<pid>/stat`, clock ticks since boot); `None` when the
 /// process does not exist.
 #[cfg(target_os = "linux")]
+#[allow(clippy::disallowed_macros)] // allow-list: startup /proc read
 pub(crate) fn proc_start(pid: u32) -> Option<u64> {
     let s = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let rest = &s[s.rfind(')')? + 1..];
@@ -26,6 +27,7 @@ pub(crate) fn proc_start(pid: u32) -> Option<u64> {
 }
 
 #[cfg(target_os = "linux")]
+#[allow(clippy::disallowed_methods)] // allow-list: calibration clock read (startup, housekeeping)
 pub(crate) fn clock_ns(clock: libc::clockid_t) -> i64 {
     let mut ts = libc::timespec {
         tv_sec: 0,

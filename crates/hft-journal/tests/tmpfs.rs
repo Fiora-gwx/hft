@@ -1,6 +1,12 @@
 //! tmpfs small-segment mode equals the heap backend byte for byte (JNL-105). Linux; elsewhere both
 //! sides run on the heap backend.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::harness::*;

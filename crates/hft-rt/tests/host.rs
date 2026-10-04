@@ -1,4 +1,10 @@
 //! Host check bits and fixture-driven checks (RT-072 – RT-076).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(not(loom))]
 
 #[allow(dead_code)]

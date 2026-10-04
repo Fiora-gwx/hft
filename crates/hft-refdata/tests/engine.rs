@@ -1,5 +1,11 @@
 //! ECF1 `EngineConfig`: container, section views, validators, versions (REF-066 – REF-069).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use std::cell::RefCell;

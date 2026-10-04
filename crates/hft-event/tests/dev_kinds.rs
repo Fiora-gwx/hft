@@ -1,5 +1,11 @@
 //! Test kinds with feature `dev-kinds` (EVT-008). Built only with that feature (Cargo.toml).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use hft_event::*;
 
 #[test]

@@ -1,4 +1,10 @@
 //! HeartbeatBlock create / open_ro / claim / set_state (RT-095 – RT-098). Linux.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(all(target_os = "linux", not(loom)))]
 
 #[allow(dead_code)]

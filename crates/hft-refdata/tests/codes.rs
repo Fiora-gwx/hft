@@ -1,5 +1,11 @@
 //! Code tables: values and builder → load round trips (REF-075); `LoadErrCode` values (REF-076).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

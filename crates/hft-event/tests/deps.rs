@@ -1,6 +1,12 @@
 //! Dependency closure (EVT-123): only hft-types and hft-refdata among workspace crates (normal,
 //! build and dev edges of hft-event); no serde / SBE / SDK / L1+ crates in the normal + build closure.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::process::Command;

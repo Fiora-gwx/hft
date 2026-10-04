@@ -8,6 +8,7 @@ use crate::tsc::{CalibPair, ClockErr, ClockReads, Tsc, TscClock, tsc_ordered};
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SysClock;
 
+#[allow(clippy::disallowed_methods)] // allow-list: startup clock calibration reads the system clocks
 impl ClockReads for SysClock {
     fn tsc(&mut self) -> Tsc {
         tsc_ordered()
@@ -145,6 +146,7 @@ impl Phc {
                 nsec: u32,
                 reserved: u32,
             }
+            const _: () = assert!(size_of::<PtpClockTime>() == 16);
             #[repr(C)]
             struct PtpSysOffsetExtended {
                 n_samples: u32,

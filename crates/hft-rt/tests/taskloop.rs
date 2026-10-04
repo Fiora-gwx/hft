@@ -1,4 +1,10 @@
 //! TaskLoop rounds and idle decisions (RT-110 – RT-115, RT-121).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(not(loom))]
 
 use std::cell::RefCell;

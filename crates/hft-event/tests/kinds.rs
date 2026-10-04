@@ -1,5 +1,11 @@
 //! Record flags, the `KINDS` registry, `kind_info`, `classify` and field tables
 //! (EVT-002, EVT-004 – EVT-007, EVT-171).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(clippy::type_complexity)]
 
 #[path = "bodies.rs"]

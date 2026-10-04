@@ -1,5 +1,11 @@
 //! hft-book benchmarks (README "延迟与资源契约"; BOOK-090–BOOK-101).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};

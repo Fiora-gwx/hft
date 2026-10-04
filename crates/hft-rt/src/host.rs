@@ -3,6 +3,12 @@
 //! register check (`TSC_NOT_INVARIANT`) and the `CNTVCT_TRAPS` timing read real hardware, and
 //! only when the root is the real `/`.
 
+#![allow(
+    clippy::disallowed_macros,
+    clippy::disallowed_types,
+    clippy::disallowed_methods
+)] // allow-list: startup host self-check, not on a hot thread
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 

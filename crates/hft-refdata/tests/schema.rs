@@ -1,5 +1,11 @@
 //! REF-077: the exported schema matches the code table and the row structs.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use core::mem::{offset_of, size_of};
 
 use hft_refdata::LoadErrCode;

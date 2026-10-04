@@ -7,12 +7,22 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+pub mod ci;
 pub mod code_scan;
+pub mod decoupling_gate;
 pub mod deps;
 pub mod doc_check;
+pub mod exec;
+pub mod fixtures;
+pub mod gen_host;
 pub mod gen_schema;
+pub mod hot_check;
+pub mod journal_verify;
+pub mod replay_verify;
+pub mod setup;
 pub mod spec;
 pub mod test_trace;
+pub mod workspace;
 
 /// Check passed.
 pub const EXIT_OK: i32 = 0;

@@ -1,4 +1,10 @@
 //! BOOK-054–BOOK-055: re-centering.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 mod common;
 
 use std::collections::BTreeMap;

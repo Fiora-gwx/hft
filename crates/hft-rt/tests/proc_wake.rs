@@ -1,4 +1,10 @@
 //! A producer without a wake hook makes no system call on commit (RT-010). Linux + strace.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(all(target_os = "linux", not(loom)))]
 
 #[allow(dead_code)]

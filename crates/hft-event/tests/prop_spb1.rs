@@ -1,5 +1,11 @@
 //! SPB1 round trip with an opaque body (EVT-133).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 #[path = "common/spb.rs"]
 mod spb;
 

@@ -1,5 +1,11 @@
 //! Offline verification (JNL-089, JNL-090). Linux rows use tmpfs; elsewhere the heap backend.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use std::path::PathBuf;

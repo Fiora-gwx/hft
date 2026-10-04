@@ -1,5 +1,11 @@
 //! `FxErr` values and aggregation (TYP-155, TYP-156).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use hft_types::{FxErr, parse_exact};
 
 #[test]

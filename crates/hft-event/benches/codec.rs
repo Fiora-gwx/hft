@@ -1,5 +1,11 @@
 //! Codec benchmarks (EVT-190 – EVT-193); ids equal the `基准名` in TESTS.md and README.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};

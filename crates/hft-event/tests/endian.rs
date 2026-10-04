@@ -1,5 +1,11 @@
 //! Big-endian targets do not build (EVT-027; CI ubuntu with the powerpc64 target installed).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 #[cfg(target_os = "linux")]
 #[test]
 fn evt_027_big_endian_build_fails() {

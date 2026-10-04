@@ -1,4 +1,10 @@
 //! Endpoint Send/Sync/Clone constraints, checked at compile time (RT-007).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(not(loom))]
 
 use hft_rt::{ByteConsumer, ByteProducer, Consumer, MailReceiver, MailSender, Producer};

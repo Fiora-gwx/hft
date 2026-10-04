@@ -56,6 +56,7 @@ pub struct PeerLine {
     pub beat: AtomicU64,
     pub _pad: [u8; 104],
 }
+const _: () = assert!(size_of::<PeerLine>() == 128 && align_of::<PeerLine>() == 128);
 
 /// The 4 KiB header page. Line 0 is read-only after creation.
 #[repr(C, align(128))]
@@ -456,6 +457,7 @@ mod imp {
         let len = file_len::<T>(capacity, page).ok_or(ShmErr::LayoutMismatch)?;
         let epoch = old_epoch(path);
         let name = path.file_name().ok_or(ShmErr::Io)?.to_string_lossy().into_owned();
+        #[allow(clippy::disallowed_macros)] // allow-list: shm ring creation at startup
         let tmp = path.with_file_name(format!("{name}.tmp.{}", std::process::id()));
         let _ = std::fs::remove_file(&tmp);
         let ctmp = cpath(&tmp).ok_or(ShmErr::Io)?;

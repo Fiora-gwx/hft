@@ -2,6 +2,12 @@
 //! cross-segment and cold switching, gaps, read errors, LastCompleteEvent, unmapping, mapping
 //! limits and in-process slots (JNL-074 – JNL-086). Linux rows use tmpfs; elsewhere the heap backend.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::harness::*;

@@ -1,0 +1,126 @@
+# Registered exceptions checked by `cargo xtask hot-check` (tools/README.md "cargo xtask hot-check",
+# docs/hot-path-rules.md "检查机制").
+#
+# [[allow]]: every `#[allow(...)]` / `#![allow(...)]` of a disallowed_* or C1 lint (unwrap_used, expect_used,
+#   panic, unreachable, todo, unimplemented, indexing_slicing) in a hot/pure crate must match an entry:
+#   `file` (glob: `*` = one path segment, `**` = any depth) and the lint in `lints`; `reason` is required.
+# [[tsc]]: snapshot row fields holding a TSC value (D6); `class` = 1 (shifted by recovery_end),
+#   2 (connection liveness, voided at cold start), 3 (calibration copy, not hashed); `reason` is required.
+
+# ---------------------------------------------------------------- test, bench, example and build code
+[[allow]]
+file = "crates/*/tests/**"
+lints = ["clippy::disallowed_types", "clippy::disallowed_macros", "clippy::disallowed_methods"]
+reason = "integration tests are not on a hot path"
+
+[[allow]]
+file = "crates/*/benches/**"
+lints = ["clippy::disallowed_types", "clippy::disallowed_macros", "clippy::disallowed_methods"]
+reason = "benchmark drivers time with Instant and build fixtures; not on a hot path"
+
+[[allow]]
+file = "crates/*/examples/**"
+lints = ["clippy::disallowed_types", "clippy::disallowed_macros", "clippy::disallowed_methods"]
+reason = "example/test-writer binaries (hft-journal testwriter); not part of a release artefact"
+
+[[allow]]
+file = "crates/*/build.rs"
+lints = ["clippy::disallowed_types", "clippy::disallowed_macros", "clippy::disallowed_methods"]
+reason = "build scripts print cargo directives"
+
+# ---------------------------------------------------------------- hft-rt
+[[allow]]
+file = "crates/hft-rt/src/host.rs"
+lints = ["clippy::disallowed_macros", "clippy::disallowed_types", "clippy::disallowed_methods"]
+reason = "startup host self-check (check_host) builds its report strings; never on a hot thread"
+
+[[allow]]
+file = "crates/hft-rt/src/host_x86.rs"
+lints = ["clippy::disallowed_macros", "clippy::disallowed_methods"]
+reason = "startup host self-check (x86 table)"
+
+[[allow]]
+file = "crates/hft-rt/src/host_aarch64.rs"
+lints = ["clippy::disallowed_macros", "clippy::disallowed_methods"]
+reason = "startup host self-check (aarch64 table; times one CNTVCT_EL0 read with Instant)"
+
+[[allow]]
+file = "crates/hft-rt/src/calib.rs"
+lints = ["clippy::disallowed_methods"]
+reason = "SysClock: clock calibration reads the system clocks and sleeps at startup and in housekeeping (T4 allows calibration off the hot threads)"
+
+[[allow]]
+file = "crates/hft-rt/src/sys.rs"
+lints = ["clippy::disallowed_macros", "clippy::disallowed_methods"]
+reason = "clock_gettime for calibration and /proc reads at startup"
+
+[[allow]]
+file = "crates/hft-rt/src/tsc.rs"
+lints = ["clippy::disallowed_methods"]
+reason = "counter fallback on targets without a cycle counter (neither aarch64 nor x86_64)"
+
+[[allow]]
+file = "crates/hft-rt/src/ring/spsc.rs"
+lints = ["clippy::disallowed_types"]
+reason = "Arc owns the ring memory shared by the two ends; created at startup, never cloned or touched on the hot path"
+
+[[allow]]
+file = "crates/hft-rt/src/ring/bytes.rs"
+lints = ["clippy::disallowed_types"]
+reason = "Arc owns the byte-ring memory shared by the two ends; created at startup, never cloned on the hot path"
+
+[[allow]]
+file = "crates/hft-rt/src/ring/shm.rs"
+lints = ["clippy::disallowed_macros"]
+reason = "temporary file name when creating a shared-memory ring (startup)"
+
+[[allow]]
+file = "crates/hft-rt/src/swap.rs"
+lints = ["clippy::disallowed_types"]
+reason = "Arc owns the EpochSwap state shared by publisher, readers and reclaimer; handles are created at startup"
+
+# ---------------------------------------------------------------- hft-journal
+[[allow]]
+file = "crates/hft-journal/src/fs.rs"
+lints = ["clippy::disallowed_types", "clippy::disallowed_macros"]
+reason = "segment file naming, directory listing and the in-process mapping registry: open, roll preparation, persist and readers, not per append"
+
+[[allow]]
+file = "crates/hft-journal/src/layout.rs"
+lints = ["clippy::disallowed_types"]
+reason = "heap segment backend (mem-backend tests and the offline writer)"
+
+[[allow]]
+file = "crates/hft-journal/src/held.rs"
+lints = ["clippy::disallowed_types"]
+reason = "startup space accounting of the instance's hot segments"
+
+[[allow]]
+file = "crates/hft-journal/src/meta.rs"
+lints = ["clippy::disallowed_macros"]
+reason = "DurableMeta file I/O on cold threads"
+
+[[allow]]
+file = "crates/hft-journal/src/oplog.rs"
+lints = ["clippy::disallowed_types"]
+reason = "mem-backend test hook (per-thread operation log)"
+
+[[allow]]
+file = "crates/hft-journal/src/persist.rs"
+lints = ["clippy::disallowed_types"]
+reason = "Persister runs on the persist thread (warm, non-isolated core)"
+
+[[allow]]
+file = "crates/hft-journal/src/reader.rs"
+lints = ["clippy::disallowed_types", "clippy::disallowed_methods"]
+reason = "JournalReader runs in other processes and on cold threads (tail poll timing)"
+
+[[allow]]
+file = "crates/hft-journal/src/retire.rs"
+lints = ["clippy::disallowed_macros"]
+reason = "hugetlbfs retirement audit on the housekeeping thread"
+
+[[allow]]
+file = "crates/hft-journal/src/verify.rs"
+lints = ["clippy::disallowed_types"]
+reason = "offline verification (journal-verify, journal-archiver)"

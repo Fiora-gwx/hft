@@ -1,4 +1,10 @@
 //! TSC conversions and counter reads (RT-050 – RT-052, RT-056, RT-057, RT-059).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(not(loom))]
 
 use hft_rt::{CalibPair, SeqCell, Tsc, TscClock, TscUtc, tsc_now, tsc_ordered};

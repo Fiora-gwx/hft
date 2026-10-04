@@ -121,6 +121,7 @@ mod hot {
     }
 
     #[cfg(target_os = "linux")]
+    #[allow(clippy::disallowed_macros)] // allow-list: retirement audit on the housekeeping thread
     fn audit_impl() -> HugeAudit {
         let read = |p: &str| -> u64 {
             std::fs::read_to_string(p)

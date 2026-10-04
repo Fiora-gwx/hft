@@ -1,4 +1,10 @@
 //! Pinning and thread names (RT-070, RT-071). Linux.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(all(target_os = "linux", not(loom)))]
 
 use hft_rt::{RtErr, name_current_thread, pin_current_thread};

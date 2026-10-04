@@ -1,4 +1,10 @@
 //! BOOK-071, BOOK-075: layouts.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 use core::mem::offset_of;
 
 use hft_book::{BookMetaRow, Top, TopRow};

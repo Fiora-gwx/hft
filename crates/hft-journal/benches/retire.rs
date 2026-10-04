@@ -2,6 +2,12 @@
 //! bench thread while another thread rolls, persists and retires segments; the `/baseline` id is
 //! the same hop without retirement.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 #[path = "../tests/common/harness.rs"]
 mod harness;
 

@@ -7,6 +7,7 @@
 
 use core::ptr;
 use core::sync::atomic::{AtomicPtr, AtomicU64, Ordering};
+#[allow(clippy::disallowed_types)] // allow-list: see the ring/handle owners below
 use std::sync::Arc;
 
 use crate::wait::CachePadded;
@@ -55,11 +56,13 @@ unsafe impl<T: Send + Sync> Sync for Inner<T> {}
 pub struct EpochSwap<T>(core::marker::PhantomData<T>);
 
 /// The single publisher.
+#[allow(clippy::disallowed_types)] // allow-list: shared version-exchange owner, never cloned after construction
 pub struct SwapPublisher<T> {
     inner: Arc<Inner<T>>,
 }
 
 /// One reader (≤ 16).
+#[allow(clippy::disallowed_types)] // allow-list: shared version-exchange owner, never cloned after construction
 pub struct SwapReader<T> {
     inner: Arc<Inner<T>>,
     idx: usize,
@@ -68,6 +71,7 @@ pub struct SwapReader<T> {
 }
 
 /// Housekeeping side that frees acknowledged old versions.
+#[allow(clippy::disallowed_types)] // allow-list: shared version-exchange owner, never cloned after construction
 pub struct SwapReclaimer<T> {
     inner: Arc<Inner<T>>,
 }
@@ -77,6 +81,7 @@ unsafe impl<T: Send + Sync> Send for SwapReader<T> {}
 
 impl<T> EpochSwap<T> {
     /// `readers` is clamped to `MAX_SWAP_READERS`.
+    #[allow(clippy::disallowed_types)] // allow-list: shared version-exchange owner
     #[allow(clippy::new_ret_no_self)] // README signature: the three handles, no `EpochSwap` value
     pub fn new(initial: Box<T>, readers: usize) -> (SwapPublisher<T>, Vec<SwapReader<T>>, SwapReclaimer<T>) {
         let n = readers.min(MAX_SWAP_READERS);

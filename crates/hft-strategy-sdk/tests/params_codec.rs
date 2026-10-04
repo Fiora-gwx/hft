@@ -1,5 +1,11 @@
 //! Parameter body codec: `n_fields_at`, `field_ix`, `encode_body`, `decode_body` (SDK-090,
 //! SDK-091, SDK-094–SDK-097, SDK-101).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(clippy::type_complexity)] // table-driven rows
 
 mod common;

@@ -1,4 +1,10 @@
 //! BOOK-045–BOOK-049: whole-message `apply_batch`.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 mod common;
 
 use common::*;

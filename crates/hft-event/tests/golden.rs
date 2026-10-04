@@ -1,6 +1,12 @@
 //! Canonical records against the golden files (EVT-173). `HFT_REGEN_GOLDEN=1` rewrites
 //! `fixtures/hft-event/EVT-173/` (only together with a layout change, see TESTS.md 验收).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::canonical::{file_name, records};

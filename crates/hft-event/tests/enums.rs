@@ -1,5 +1,11 @@
 //! Code tables and bit sets (EVT-054, EVT-055, EVT-061, EVT-073, EVT-074).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

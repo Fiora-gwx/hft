@@ -1,5 +1,11 @@
 //! `OrderFlags` (EVT-051 – EVT-053).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

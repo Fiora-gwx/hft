@@ -1,5 +1,11 @@
 //! REF-088: dependency closure and purity of `src/`.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

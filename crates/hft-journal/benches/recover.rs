@@ -2,6 +2,12 @@
 //! (default 1 GiB, the README budget); cold directory: `HFT_BENCH_COLD` (local NVMe/EBS) or a
 //! temporary directory.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 #[path = "../tests/common/harness.rs"]
 mod harness;
 

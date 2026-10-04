@@ -1,5 +1,11 @@
 //! Binding changes need an idle account; `ref_inst` must be subscribable (REF-064, REF-065).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

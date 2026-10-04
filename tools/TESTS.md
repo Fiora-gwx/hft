@@ -50,7 +50,7 @@ spec: README.md
 - 规则:[使用本组件](README.md#使用本组件)
 - 级别:table
 - 里程碑:M1
-- 前置:夹具 `clean`(无违规的最小仓库)与各行指定的夹具;记录型执行器对外部命令一律返回 0
+- 前置:夹具 `clean`(无违规的最小仓库)与各行指定的夹具;记录型执行器对外部命令一律返回 0(TOOL-001.7 例外:在只有一个提交的真实 git 仓库上运行,不替换执行器)
 - 实现:`tools/xtask/tests/exit_codes.rs::tool_001_exit_code_convention`
 
 | 行 | 输入 | 期望 |
@@ -528,6 +528,20 @@ spec: README.md
 | TOOL-032.16 | `crates/hft-oms/src/a.rs` 出现 `unsafe {}` | 退出 1(B5) |
 | TOOL-032.17 | `crates/hft-rt/src/a.rs` 的 `unsafe` 块前一行没有 `// SAFETY:` | 退出 1 |
 | TOOL-032.18 | 同上,带 `// SAFETY: …` | 退出 0 |
+| TOOL-032.19 | `crates/hft-oms/src/a.rs` 加 `#[repr(C)] struct R { a: u64 }`,crate 内没有 `size_of::<R>()` | 退出 1(M4) |
+| TOOL-032.20 | `#[repr(C)] struct P { a: u8, b: u64 }` 带 `size_of::<P>() == 16` 断言 | 退出 1(M6);报告字段之间 7 B 隐式填充 |
+| TOOL-032.21 | 同上,`a` 与 `b` 之间写出 `_pad: [u8; 7]` | 退出 0 |
+| TOOL-032.22 | `crates/hft-oms/src/a.rs` 加 `struct SlotRow { deadline_tsc: u64 }`,未登记 | 退出 1(D6) |
+| TOOL-032.23 | 同上,`allow-list.toml` 有 `[[tsc]] row = "SlotRow"`、`field = "deadline_tsc"`、`class = 1` | 退出 0 |
+| TOOL-032.24 | `crates/hft-oms/src/a.rs` 调用 `std::thread::spawn` | 退出 1(T1) |
+| TOOL-032.25 | `crates/hft-oms` 的字段类型为 `memmap2::MmapMut` | 退出 1(M3) |
+| TOOL-032.26 | `crates/hft-oms` 的字段类型为 `AtomicU64` | 退出 1(T3) |
+| TOOL-032.27 | 根 `Cargo.toml` 的 `[profile.release]` 写 `panic = "unwind"`(夹具 development 构建剖面表为 `abort`) | 退出 1(B1) |
+| TOOL-032.28 | `.cargo/config.toml` 的发布目标段没有 `target-cpu` | 退出 1(B2) |
+| TOOL-032.29 | `crates/hft-oms/src/a.rs` 引入 rustls 并调用 `WriteTraffic` 的 `.encrypt(…)` | 退出 1(T6) |
+| TOOL-032.30 | 同一调用写在 `crates/hft-net/src/tls.rs` | `xtask::hot_check::scan_tls_encrypt` 返回空;与 TOOL-032.29 的改动同时存在时恰返回 `crates/hft-oms/src/a.rs` 一处 |
+| TOOL-032.31 | `apps/watchtower/src/main.rs` 以 `mimalloc::MiMalloc` 为全局分配器,未设 `purge_delay` | 退出 1(M1) |
+| TOOL-032.32 | 同上,另调用 `mi_option_set(mi_option_purge_delay, -1)` | 退出 0 |
 | TOOL-032.19 | `crates/hft-venue/src/a.rs` 调用 `std::thread::spawn` | 退出 1(T1) |
 | TOOL-032.20 | `apps/hft-core/src/main.rs` 调用 `std::thread::Builder::spawn` | 退出 0 |
 | TOOL-032.21 | `crates/hft-net/src/conn.rs` 调用 rustls 记录加密入口 | 退出 1(T6) |
@@ -1273,14 +1287,14 @@ spec: README.md
 - 规则:[其他 xtask 子命令](README.md#其他-xtask-子命令)
 - 级别:table
 - 里程碑:M1
-- 前置:DST 产出的 4 段 seq journal 目录(段 1–4),各行改动一份副本;检查项口径归 [journal-format 校验与缺段检测](../docs/subsystems/journal-format.md#校验与缺段检测)
+- 前置:以 hft-journal 写者(堆内存热段、磁盘冷副本)写出的 4 段 seq journal 冷目录(段 1–3 已滚动并封存,段 4 未封存;每段引导块后 100 条 `Bbo`),各行改动一份副本(TOOL-083.5 把 `BootDone` 的滚动标记改写为 `Begin` 并重算该记录的 CRC);检查项口径归 [journal-format 校验与缺段检测](../docs/subsystems/journal-format.md#校验与缺段检测)
 - 实现:`tools/xtask/tests/journal_verify.rs::tool_083_corruption_reports`
 
 | 行 | 改动 | 期望 |
 |---|---|---|
 | TOOL-083.1 | 无改动 | 退出 0 |
 | TOOL-083.2 | 段 3 在偏移 8192 处截断(段已封存) | 退出 1;报告段 3、偏移 8192 |
-| TOOL-083.3 | 段 2 偏移 4096 处记录的 CRC 翻转一位 | 退出 1;报告段 2、偏移 4096 |
+| TOOL-083.3 | 段 2 偏移 4096 处记录(引导块 `Begin`;`seq` journal 中该 kind 不带 CRC)的 `len` 最低位翻转 | 退出 1;报告段 2、偏移 4096 |
 | TOOL-083.4 | 删除段 2 | 退出 1;报告缺段 2 |
 | TOOL-083.5 | 段 1 引导块去掉 `BootDone` | 退出 1;报告段 1 与引导块偏移 |
 | TOOL-083.6 | 最后一段只有 `RECOVERY_GAP` 标记的尾部缺失 | 退出 0;报告"可能丢失的尾部" |

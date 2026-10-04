@@ -1,5 +1,11 @@
 //! `HotRetirer::audit` counts hugetlbfs pages of unlinked but still mapped segments (JNL-054).
 //! Linux, CI prerequisite: the 2 MiB hugetlbfs mount of JNL-043 (`HFT_TEST_HUGE2M`).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(target_os = "linux")]
 
 #[path = "../common/mod.rs"]

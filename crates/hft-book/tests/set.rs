@@ -1,4 +1,10 @@
 //! BOOK-004, BOOK-073: `BookSet` construction and the Top/L2 independence.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 mod common;
 
 use common::*;

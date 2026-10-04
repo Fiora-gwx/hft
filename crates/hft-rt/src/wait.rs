@@ -6,6 +6,7 @@ use core::sync::atomic::{AtomicU8, AtomicU16, AtomicU64, Ordering};
 #[repr(C, align(128))]
 #[derive(Default, Debug)]
 pub struct CachePadded<T>(pub T);
+const _: () = assert!(size_of::<CachePadded<u64>>() == 128 && align_of::<CachePadded<u64>>() == 128);
 
 impl<T> core::ops::Deref for CachePadded<T> {
     type Target = T;

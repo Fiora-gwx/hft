@@ -1,4 +1,10 @@
 //! BOOK-076–BOOK-078, BOOK-083: snapshot sections 6 and 7.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 mod common;
 
 use common::*;

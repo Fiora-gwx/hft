@@ -1,5 +1,11 @@
 //! Allocation rules: queries never allocate; memory of a 5 000-inst snapshot (REF-072, REF-073).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use std::hint::black_box;

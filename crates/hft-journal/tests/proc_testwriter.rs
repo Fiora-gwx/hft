@@ -1,4 +1,10 @@
 //! The test writer example writes journals readers can read back (JNL-123). Linux tmpfs.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(target_os = "linux")]
 
 mod common;

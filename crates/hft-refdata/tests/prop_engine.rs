@@ -1,6 +1,12 @@
 //! REF-070: `EcfBuilder` → `EngineConfig::load` round-trips every section view byte for byte;
 //! encoding is deterministic, `total_len` matches and sections are 8-byte aligned.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

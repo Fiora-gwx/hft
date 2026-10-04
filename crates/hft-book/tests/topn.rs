@@ -1,4 +1,10 @@
 //! BOOK-020–BOOK-025: TopN snapshot books.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 mod common;
 
 use common::*;

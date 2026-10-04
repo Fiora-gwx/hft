@@ -1,6 +1,8 @@
 //! `JournalReader`: tails or replays a journal across hot segments and cold copies, reassembles
 //! multi-part records, reports gaps (README "读者", journal-format "读者 API 概要").
 
+#![allow(clippy::disallowed_types, clippy::disallowed_methods)] // allow-list: readers run in other processes and on cold threads
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::Instant;

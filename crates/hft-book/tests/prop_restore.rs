@@ -1,4 +1,10 @@
 //! BOOK-079: restore + keyframe gives a book indistinguishable from the continuously running one.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 mod common;
 #[path = "seqgen.rs"]
 mod seqgen;

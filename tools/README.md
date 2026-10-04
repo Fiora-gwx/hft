@@ -60,6 +60,8 @@ cargo xtask ci [--pure-only] [--fast]
 
 **范围**:`ci` 里的金样、fuzz 目标、DST 场景覆盖 frontmatter `scope: core` 的全部组件——`venue-binance`、`venue-okx`、`venue-bitget`(现货 + USDT 永续)、hft-core、hft-exec、hft-sim 的共用撮合器(即 hft-testkit 的撮合器)、控制面命令集(唯一清单在 [control-plane](../docs/subsystems/control-plane.md))、pipeline 与 ops_bot 的 Python 测试;`scope: optional` 的组件(链上、其余 venue、optional 策略)只在其 crate 存在时纳入,不让 core 的 CI 变红(`tools/xtask/scope.toml`);frontmatter `status: frozen` 的组件不进跨文档一致性检查。
 
+**尚未进入 workspace 的组件**:某步依赖的组件不在 workspace 时该步跳过,跳过原因写进摘要(stderr)与 `target/xtask/ci.json` 的该步 `note`,不算失败:金样步 = 每个有 `tests/golden.rs` 的成员一条 `cargo test --profile ci --all-features -p <包> --test golden`,一个都没有时跳过;两个 DST 步在 hft-testkit 的 DST 框架(`crates/hft-testkit/src/dst/`)存在时才运行;单元/属性步另以 `python -m pytest` 运行有 `tests/` 目录的 Python 包(`python/<包>/` 与 `strategies/<名>/pipeline/`,按 README frontmatter 的 `tier` 参与 `--pure-only` 选择),没有时跳过。`scope.toml` 是 `optional = [<目录>…]`(与各 README frontmatter 的 `scope: optional` 一致),列出的组件是 workspace 成员时纳入,否则摘要写"不在 workspace,跳过"。单元/属性步不带 `--pure-only` 时为 `cargo test --profile ci --workspace --all-features`,带时为每个 `tier: pure` 成员一个 `-p`;clippy 步同样。任一步的命令退出 2 时 `ci` 退出 2,其余非 0 退出 1。
+
 ### cargo xtask decoupling-gate
 
 ```sh
@@ -72,6 +74,8 @@ PR 级的解耦检查,上线门槛 ⑧ 的一部分([testing §8](../docs/testin
 2. **豁免**:`--pr` 给出的 PR 带 `engine-change` 标签,**且**有一位 Admin(名单 `.github/hft-admins.txt`)的批准评审——经 `GITHUB_TOKEN`(`pull-requests: read`)读评审列表核对批准人;只有标签、或批准人不在名单里 → 仍失败。
 3. 每次豁免写进 `$GITHUB_STEP_SUMMARY` 与 `target/xtask/decoupling-gate.json`(PR 号、批准人、改动的引擎 crate 与 app 列表),供每夜摘要汇总。
 4. 退出 2:读不到 PR 评审(无 token、API 失败)、`base`/`head` 不存在。
+
+口径:提交存在 = `git rev-parse --verify --quiet <sha>^{commit}` 成功;分层取 `deps.toml` 的 `[layers]`(`strategy`、`engine`、`app`;`crates/*` = `crates/<x>/` 下的任何文件,`tool` 与其余路径中立);只有判定失败且给了 `--pr` 时才读 GitHub——`gh api repos/<GITHUB_REPOSITORY>/pulls/<n>`(标签)与 `…/pulls/<n>/reviews`,token 取 `GITHUB_TOKEN`(或 `GH_TOKEN`);每位评审人以其最后一条 `APPROVED`/`CHANGES_REQUESTED`/`DISMISSED` 评审为准(`COMMENTED` 不算);批准人不在名单时 stderr 写明"不在 Admin 名单";Admin 名单文件缺失退出 2。JSON 含 `strategies`、`engine`(`crates/*` 的文件)、`apps` 与 `result`,豁免时另有 `exemption = {pr, approver, engine, apps}`(组件目录列表)。
 
 调用它的作业与触发(`ci.yml` 的 PR 运行、`decoupling.yml` 的评审与标签触发、`main` 推送时对合并提交的判定)以及发布 `preflight` 对其结论的核对归 [development](../docs/development.md#质量门quality-gatesyml)。
 
@@ -131,6 +135,16 @@ cargo xtask scaffold-gate [--keep]
 | `strategies/*` 的快速部分(`src/model/` 以外)违反上列 hot 规则集(trait object、`f32`/`f64`、未登记的 allow、`unsafe`) | S1 |
 | SDK `model_math` 模块被策略 `src/model/` 以外的代码引用 | N3 |
 | 快照节的行类型中出现 `Tsc` 字段而未登记在 `allow-list.toml` | D6 |
+
+机检口径:
+
+- **范围**:库 crate = `crates/` 与 `strategies/` 下有 `Cargo.toml` 的目录(`_` 开头的除外),tier 取 `deps.toml`;"hot/pure crate" 只指其中 tier 为 `hot`/`pure` 的库(apps 是二进制,不在内)。源码规则读 `<crate>/src/**/*.rs` 并跳过 `#[cfg(test)]` 项与只经 `#[cfg(test)] mod x;` 引入的文件;`#[allow]` 规则读 hot/pure crate 的全部 `.rs`(含 `tests/`、`benches/`、`examples/`、`build.rs`,clippy 配置同样作用于它们);嵌套包(`fuzz/`)不读。策略 crate 的快速部分 = `src/` 去掉 `src/model/`。T1 读 `crates/*`、`strategies/*` 全部 tier 的 `src/`;M3、M1、T6 另读 `apps/*`。
+- **lint 模板**:`clippy.toml` 与 `tools/lint/clippy-<tier>.toml` 逐字节相同。属性块:`tools/lint/attrs-<tier>.rs` 中每条 lint 在 `lib.rs` 的 crate 级属性里以不低于模板的级别出现(`forbid` ≥ `deny`;同一 lint 以最后一条属性为准,后出现的 `warn`/`allow` 即削弱);B5 的四个 crate 以 `attrs-unsafe.rs` 代替 `forbid(unsafe_code)`(保留 `forbid(unsafe_code)` 也可);N3 列出的 crate 与策略 crate 另要求 `deny(clippy::float_arithmetic)`。
+- **allow-list**:`allow-list.toml` 的 `[[allow]]` 为 `file`(glob,`*` 一段、`**` 任意层)+ `lints` + `reason`;需登记的 lint 为 `clippy::disallowed_{methods,types,macros}` 与 C1 的 `unwrap_used`、`expect_used`、`panic`、`unreachable`、`todo`、`unimplemented`、`indexing_slicing`(含 `#[expect]` 与 `cfg_attr` 内的写法)。`[[tsc]]` 为 `row` + `field` + `class`(D6 的三类,1–3)+ `reason`。
+- **类型位置**:trait object = 任一类型中的 `dyn`;浮点 = 类型路径恰为 `f32`/`f64`(含 `as` 转换的目标类型);`Atomic*` = 末段以 `Atomic` 开头的类型路径;`MmapMut` = 任一路径段;线程 = 调用 `…thread::spawn`/`…Builder::spawn` 或接收者含 `Builder` 的 `.spawn(`;T6 = `WriteTraffic::encrypt` 路径或含 `rustls`/`WriteTraffic` 的文件中的 `.encrypt(` 调用;`model_math` 或 `hft_strat_lib::model` 路径(含 `use`)在 SDK/strat-lib 自身与策略 `src/model/` 之外即违规。
+- **`unsafe`**:B5 四个 crate 之外的 hot/pure crate 出现 `unsafe` 块、`unsafe impl`、`unsafe fn`、`unsafe trait` 即违规;四个 crate 内的 `unsafe` 块与 `unsafe impl` 要在同一行、紧邻的注释行或所属语句之上的注释里有 `SAFETY:`。
+- **布局**:hot/pure crate 中每个 `#[repr(C)]` 结构在本 crate `src/` 里有 `size_of::<名>()`(可带泛型实参)出现;未 derive zerocopy `IntoBytes` 的非泛型结构按 repr(C) 规则计算(原语、原子类型、数组(长度为字面量或同树 `const`)、`repr(transparent)` 新类型、`repr(uN)` 枚举、别名与嵌套结构;解析不了的跳过),字段之间有填充、或无 `align(N)` 而尾部有填充即违规(M6)。D6 的"快照节行类型" = 名字以 `Row` 结尾的结构,`Tsc` 字段 = 类型末段为 `Tsc` 或字段名为 `tsc`/以 `_tsc` 结尾。
+- **剖面**:`docs/development.md` 构建剖面表 `release`、`release-hot`、`ci`、`bench` 行的 `` `键 = 值` `` 沿 `inherits` 展开(Cargo 内置的 `bench` → `release`),与根 `Cargo.toml` 同样展开后的取值逐键相等;目标 CPU 表第一行(core)的三元组在 `.cargo/config.toml` 的 `[target.<三元组>] rustflags` 中有 `-C target-cpu=<值>`。M1:有 `#[global_allocator]` 且用 `MiMalloc` 的包,其源码里要有 `purge_delay … -1`。
 
 ### cargo xtask bench-gate
 
@@ -242,12 +256,12 @@ cargo xtask new-strategy <name> --kind-id <n> [--with-model] [--with-pipeline]
 |---|---|
 | `fixtures fetch` | 按 `fixtures/replay/*.pointer.toml` 下载并校验 SHA-256 到 `target/fixtures-cache/`(CI 经 OIDC 读 S3,见 [development 凭证与权限](../docs/development.md#凭证与权限)) |
 | `fixtures extract --wal <s3-key> \| --journal <path> …` | 从旧 WAL v2 或 raw journal 抽取报文为 `.in` |
-| `fixtures scrub` / `fixtures check` / `fixtures corpus <venue>` | 清洗、敏感信息扫描、生成 fuzz 语料(见 [fixtures/](../fixtures/README.md)) |
+| `fixtures scrub [<路径>…]` / `fixtures check` / `fixtures corpus <venue>` | 清洗、敏感信息扫描、生成 fuzz 语料(见 [fixtures/](../fixtures/README.md));`check` 逐条报告文件与字节偏移,JSON 在 `target/xtask/fixtures.json` |
 | `fixtures bbo-diff --wal <s3-key> --journal <path> --venue <v> --window <a..b>` | 离线对照:同一时段两边(现有 collector 与新框架)的 BBO 序列一致性,规则见 [fixtures](../fixtures/README.md) |
 | `fuzz <target> [--time T] [--repro <input>]` / `fuzz --nightly` | 以 `tools/xtask/toolchains.toml` 里**固定日期的 nightly** 运行 `cargo fuzz`;崩溃输入最小化后写进 `fixtures/<venue>/regressions/`。`--repro <input>`:以 libFuzzer 默认限额对单个输入复现(服务器上的疑似 OOM/超时由 CI 用它复核,见 [hft-verify](#hft-verify))。`--nightly`:CI 每夜回归冒烟,按 `fuzz-targets.toml` 轮转、每目标短跑(合计时长归 testing §6),语料只存 CI cache,不计入门槛 ③。目标清单 `fuzz-targets.toml` 标出哪些是 core 解码器目标(验证包只打包这些,[development 验证包工作流](../docs/development.md#验证包工作流verify-bundleyml)) |
 | `path-digest [--sha <SHA>] [--group <g>] [--json]` | 按 [development 验证包工作流](../docs/development.md#验证包工作流verify-bundleyml) 定义的求法计算验证包各目标组的 `path_digest`(路径清单读 `tools/xtask/fuzz-targets.toml` 的 `paths` 与 `[dst].paths`);验证包工作流用它填 `VERIFY.json`([hft-verify](#hft-verify)) |
-| `journal-verify <dir> [--from-segment N] [--json]` | 逐段校验 journal 目录(段头、段链、记录结构与 CRC、多段组、引导块、封存、缺段汇总;检查项的唯一定义在 [journal-format 校验与缺段检测](../docs/subsystems/journal-format.md#校验与缺段检测),读取实现在 [hft-journal](../crates/hft-journal/README.md));`RECOVERY_GAP` 报告为"可能丢失的尾部",不算失败;任一损坏退出 1 并报告段号与偏移。CI 对 `fixtures/replay/` 样本与 DST 产出的 journal 运行 |
-| `setup` | 按 `tools/xtask/toolchains.toml` 安装固定版本的 cargo 插件与 nightly |
+| `journal-verify <dir> [--from-segment N] [--json]` | 逐段校验 journal 目录(段头、段链、记录结构与 CRC、多段组、引导块、封存、缺段汇总;检查项的唯一定义在 [journal-format 校验与缺段检测](../docs/subsystems/journal-format.md#校验与缺段检测),读取实现在 [hft-journal](../crates/hft-journal/README.md));`RECOVERY_GAP` 报告为"可能丢失的尾部",不算失败;任一损坏退出 1 并报告段号与偏移;已封存段的文件短于 `.seal` 记录的长度时,偏移报告为截断点(文件末尾);缺段区间报告为"缺段";`--from-segment N` 只保留段号 ≥ N 的结果,`--json` 另把报告(每段 `segment_no`、`ok`、`issues[]{offset, item, what}`、`recovery_gap`、`sealed`,以及 `missing`、`recovery_gaps`、`unsealed`)打印到 stdout。CI 对 `fixtures/replay/` 样本与 DST 产出的 journal 运行 |
+| `setup` | 按 `tools/xtask/toolchains.toml`(`nightly = "nightly-YYYY-MM-DD"`;`[plugins]` 插件名 = 版本)安装固定版本的 cargo 插件(`cargo install <插件> --version <v> --locked`)与 nightly(`rustup toolchain install <nightly> --profile minimal`);`cargo <插件名去掉 cargo-> --version` 已输出该版本、`rustup toolchain list` 已列出该 nightly 时跳过,可重复运行 |
 | `test-trace` | 测试规格(`TESTS.md`、`docs/tests/*.md`)与测试代码的追溯检查;检查项、输出与运行时机唯一归属 [docs/tests §6](../docs/tests/README.md#6-与代码的对应) |
 
 ### az-probe
@@ -516,6 +530,11 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 | `tools/xtask/test-trace.toml` | `test-trace` 的 `current_milestone` 与 `enabled_extensions`(已启用的可选扩展名;语义归 [docs/tests §6](../docs/tests/README.md#6-与代码的对应)) |
 | `tools/xtask/dst-nightly.toml` | CI 每夜 DST 冒烟的种子数 N 与步数 M(每夜作业据此调用 `dst --seeds N --seed S --steps M`) |
 | `tools/xtask/src/{ci,decoupling_gate,scaffold_gate,deps,hot_check,bench_gate,replay_verify,dst,gen_schema,gen_host,doc_check,new_strategy,fixtures,fuzz,journal_verify,path_digest,setup,test_trace}.rs` | 各子命令 |
+| `tools/xtask/src/hot_check/scan.rs` | hot-check 的 `syn` 扫描(带行号;`#[cfg(test)]` 标记) |
+| `tools/xtask/src/exec.rs` | 外部命令执行器(`cargo`、`git`、`gh`、`rustup`、python 与 xtask 自身的子命令都经它调用);环境变量 `XTASK_EXEC_SCRIPT=<json>` 换成记录型执行器(按命令行前缀返回脚本里的退出码与输出,不启动进程),`XTASK_EXEC_LOG=<文件>` 逐行记下每次调用的程序与参数(测试用,tools/TESTS.md 用例约定) |
+| `tools/xtask/src/workspace.rs` | workspace 成员、包名与 README frontmatter 的读取 |
+| `tools/xtask/scope.toml` | `ci` 的 optional 组件清单(`optional = [<目录>…]`,与 frontmatter `scope: optional` 一致) |
+| `deny.toml` | `cargo deny` 配置:许可证白名单(私有 crate 不查)、`bans`(N4 的 `rust_decimal`、`bigdecimal`、`num-bigint`) |
 | `tools/xtask/src/doc_check/{config,md,native,layout,budget}.rs` | doc-check 的配置、Markdown 解析与各项原生检查 |
 | `tools/lint/clippy-hot.toml`、`clippy-pure.toml`、`attrs-{hot,pure,unsafe}.rs` | lint 模板 |
 | `tools/az-probe/` | Python 3.12 包(由 `probe2.py` 演化);`targets.toml` |
@@ -544,7 +563,7 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 
 ## 依赖
 
-- xtask:`cargo_metadata`、`syn`、`serde`、`toml`、`serde_json`、`walkdir`、`regex`、`pulldown-cmark`;内部链接 `hft-event` 与 `hft-refdata`(`gen-schema` 读它们的 schema 导出),`deps.toml` 另允许 `hft-testkit`(`dst` 运行器,[hft-testkit](../crates/hft-testkit/README.md#依赖));调用 `cargo`、`cargo-deny`、`cargo-fuzz`、`bpftrace`、`gh`(只在 `decoupling-gate`)、已构建的 `hft-core`(外部二进制)。
+- xtask:`cargo_metadata`、`syn`(`full`、`visit`)与 `proc-macro2`(`span-locations`,hot-check 的行号)、`serde`、`toml`、`serde_json`、`walkdir`、`regex`、`pulldown-cmark`、`sha2`(fixtures 与回放指针的哈希);内部链接 `hft-event` 与 `hft-refdata`(`gen-schema` 读它们的 schema 导出)、`hft-journal`(`journal-verify`,不启用 `writer`;其测试以 dev 依赖启用 `writer` 与 `mem-backend` 写夹具 journal),`deps.toml` 另允许 `hft-testkit`(`dst` 运行器,[hft-testkit](../crates/hft-testkit/README.md#依赖));调用 `cargo`、`cargo-deny`、`cargo-fuzz`、`bpftrace`、`gh`(只在 `decoupling-gate`)、已构建的 `hft-core`(外部二进制)。
 - hostprobe:`libc`、`serde`;禁止依赖任何 hot crate(它读主机,不读交易)。
 - az-probe:Python 标准库 + `websockets`;不依赖 hft crate。
 - hft-cfg:见实现说明表;外部 `toml`、`serde_json`(读 schema JSON)、`reqwest`(仅 `refdata fetch`)。禁止依赖 `strategies/*` 与 `hft-strategy-registry`。
@@ -564,6 +583,8 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 - az-probe 的首帧单向分布依赖 PHC;探针实例若无 PHC,只能给 RTT 结论。
 - `doc-check` 的分段名与策略族名检查只能匹配名单内的写法,自然语言里的错误用法靠评审。
 - hft-cfg 不跑策略的跨字段 `validate`(它不链接策略代码);离线发现跨字段错误要靠 `send` 的预览或 CI 里对 `fixtures/params/*` 的 gateway 级测试。
+- xtask 尚未实现(随各自的里程碑加入):`scaffold-gate`、`new-strategy`、`bench-gate`、`dst`、`fuzz`、`path-digest`(未知子命令,退出 2);`fixtures fetch/extract/corpus/bbo-diff` 退出 2;`replay-verify` 只做输入核对(指针缓存的 SHA-256、目录存在),`apps/replayer` 不在 workspace 时退出 2;`gen-host` 只做输入核对(`--host` 的清单存在),`deploy/gen/` 与 hft-core 主机类档不在仓库时退出 2。
+- hot-check 尚未覆盖 [hot-path-rules](../docs/hot-path-rules.md) 中写给 hot-check 而本节检查表未列的项:T5 warm 开关默认值、T7 rustls 握手/`connect` 与 REST 快照调用点只在 `conn-builder`/`snap-fetch` 模块、M6 含枚举字段的事件体 derive `FromBytes`(相关 crate 进入 workspace 时随表加入)。
 - hft-cfg 尚未接入:`build --kind risk`(hft-risk 构建器)、`refdata fetch`、`send`(hft-ctl-proto 帧)、从 journal 目录读取生效 blob(`--against`/`--refdata` 给目录)与 core `venue-*` 的 `default_caps()`(能力行的底取 `[caps.<venue>]`);前四项当前退出 2。
 - hft-verify 的吞吐受服务器空闲 CPU 限制(批处理所在 slice 为 `CPUWeight=idle`,dev2 上的吞吐随旧系统负载变化;达成时间估算见 testing §6.1);它不并行,也不在主机间协调——同时有两台主机运行时靠种子编码与按完成时刻折叠保证结果正确,不靠锁。
 

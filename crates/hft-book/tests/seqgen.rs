@@ -1,5 +1,11 @@
 //! Random message streams shared by the property tests (BOOK-048, BOOK-060, BOOK-079).
 //! Generated values are unitless; `Stream::next` turns them into prices around a moving mid.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(dead_code)]
 
 use proptest::prelude::*;

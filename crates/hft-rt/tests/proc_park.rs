@@ -1,4 +1,10 @@
 //! Parking and waking with real futex / epoll (RT-117 – RT-120, RT-122). Linux.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(all(target_os = "linux", not(loom)))]
 
 #[allow(dead_code)]

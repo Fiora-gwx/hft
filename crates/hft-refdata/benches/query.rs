@@ -1,5 +1,11 @@
 //! Array-indexed queries (REF-084, REF-085); ids equal the `基准名` fields in TESTS.md.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 #[path = "../tests/common/f0.rs"]
 mod f0;
 

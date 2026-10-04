@@ -12,8 +12,10 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
+    clippy::unreachable,
     clippy::todo,
-    clippy::unimplemented
+    clippy::unimplemented,
+    clippy::undocumented_unsafe_blocks
 )]
 #![cfg_attr(not(feature = "writer"), allow(dead_code))]
 

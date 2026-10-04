@@ -1,5 +1,11 @@
 //! Layout tests (TYP-001 – TYP-003, TYP-150).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use std::mem::{align_of, offset_of, size_of};
 
 use hft_types::*;

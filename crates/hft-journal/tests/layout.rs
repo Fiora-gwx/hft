@@ -1,5 +1,11 @@
 //! Layout and code tables (JNL-001 – JNL-004, JNL-008).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use std::mem::{align_of, offset_of, size_of};

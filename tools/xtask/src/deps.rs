@@ -589,7 +589,7 @@ pub fn check(g: &Graph, cfg: &Config) -> Vec<Violation> {
     out.into_iter().collect()
 }
 
-/// Package name of the member at `label` (falls back to the directory name).
+/// Package name of the member at `label` (falls back to the last path segment).
 fn journal_name(g: &Graph, label: &str) -> String {
     g.find(label)
         .map(|i| g.nodes[i].name.clone())
@@ -631,9 +631,19 @@ pub fn run(root: &Path) -> i32 {
         eprintln!("[rule {}] {}: {}", x.rule, x.package, x.detail);
     }
     let members = g.nodes.iter().filter(|n| n.member).count();
+    // Edge violations name both ends (`from`/`to` = package names) in the JSON.
+    let edge = regex::Regex::new(r"^`([^`]+) → ([^`]+)`").ok();
+    let name_of = |label: &str| journal_name(&g, label);
     let j = json!({
         "members": members,
-        "violations": vs.iter().map(|x| json!({"rule": x.rule, "package": x.package, "detail": x.detail})).collect::<Vec<_>>(),
+        "violations": vs.iter().map(|x| {
+            let mut e = json!({"rule": x.rule, "package": x.package, "detail": x.detail});
+            if let Some(c) = edge.as_ref().and_then(|re| re.captures(&x.detail)) {
+                e["from"] = json!(name_of(&c[1]));
+                e["to"] = json!(name_of(&c[2]));
+            }
+            e
+        }).collect::<Vec<_>>(),
     });
     if let Err(e) = write_json(root, "deps", &j) {
         eprintln!("deps: error: {e}");

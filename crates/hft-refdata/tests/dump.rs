@@ -1,4 +1,10 @@
 //! REF-078: readable dump and two-version diff (feature `tools`).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(feature = "tools")]
 
 mod common;

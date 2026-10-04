@@ -1,5 +1,11 @@
 //! ID newtypes, named constants, `GroupId` and the `VenueId` table (TYP-080 – TYP-083, TYP-085).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use std::any::TypeId;
 
 use hft_types::*;

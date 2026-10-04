@@ -1,4 +1,10 @@
 //! Hot entries make no system call (RT-167). Linux + strace (all system calls traced).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(all(target_os = "linux", not(loom)))]
 
 #[allow(dead_code)]

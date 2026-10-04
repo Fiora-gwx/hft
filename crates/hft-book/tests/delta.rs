@@ -1,4 +1,10 @@
 //! BOOK-030–BOOK-041: incremental levels (`apply_delta`).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(clippy::type_complexity)]
 mod common;
 

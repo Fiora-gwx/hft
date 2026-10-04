@@ -1,5 +1,7 @@
 //! `held_by_instance`: space already held by this instance's own hot segments (README "段大小与热段内存" 5).
 
+#![allow(clippy::disallowed_types)] // allow-list: startup space accounting
+
 use std::io;
 use std::path::Path;
 

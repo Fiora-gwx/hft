@@ -1,4 +1,10 @@
 //! BOOK-048: the same messages fed as `L2Batch` and as `L2Delta` levels give the same book.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 mod common;
 #[path = "seqgen.rs"]
 mod seqgen;

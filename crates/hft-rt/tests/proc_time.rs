@@ -1,4 +1,10 @@
 //! No PHC: open fails, sampling still works (RT-058). Linux.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(all(target_os = "linux", not(loom)))]
 
 use std::path::Path;

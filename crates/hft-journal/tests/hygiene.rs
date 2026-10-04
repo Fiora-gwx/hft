@@ -1,5 +1,11 @@
 //! `unsafe` only in `src/layout.rs`, each with a `// SAFETY:` comment (JNL-103).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use std::path::{Path, PathBuf};
 
 fn rs_files(dir: &Path, out: &mut Vec<PathBuf>) {

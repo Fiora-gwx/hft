@@ -1,4 +1,10 @@
 //! On a real aarch64 Linux host the counter does not trap and is invariant (RT-077).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(all(target_os = "linux", target_arch = "aarch64", not(loom)))]
 
 use hft_rt::{CpuSet, HeldBySelf, HostCheck, HostClass, HostNeeds, Isa, SysRoot, check_host};

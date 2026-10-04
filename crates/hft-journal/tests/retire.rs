@@ -1,5 +1,11 @@
 //! Hot segment retirement (JNL-051 – JNL-053). Linux rows use tmpfs; elsewhere the heap backend.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::harness::*;

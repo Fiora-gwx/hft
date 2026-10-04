@@ -8,6 +8,7 @@
 
 use core::mem::MaybeUninit;
 use core::ptr::NonNull;
+#[allow(clippy::disallowed_types)] // allow-list: see the ring/handle owners below
 use std::sync::Arc;
 
 use super::{Lines, RingAlloc};
@@ -304,12 +305,14 @@ impl<T> core::fmt::Debug for ReadBatch<'_, T> {
 }
 
 /// In-process producer: exactly one per ring; `Send`, not `Sync`, not `Clone`.
+#[allow(clippy::disallowed_types)] // allow-list: shared ring memory owner, never cloned after construction
 pub struct Producer<T> {
     core: ProdCore<T>,
     _mem: Arc<RingAlloc>,
 }
 
 /// In-process consumer: exactly one per ring; `Send`, not `Sync`, not `Clone`.
+#[allow(clippy::disallowed_types)] // allow-list: shared ring memory owner, never cloned after construction
 pub struct Consumer<T> {
     core: ConsCore<T>,
     _mem: Arc<RingAlloc>,
@@ -322,6 +325,7 @@ unsafe impl<T: Send> Send for Producer<T> {}
 unsafe impl<T: Send> Send for Consumer<T> {}
 
 /// Creates an in-process ring; `capacity` must be a power of two ≥ 2 (else `Capacity`).
+#[allow(clippy::disallowed_types)] // allow-list: shared ring memory owner, never cloned after construction
 pub fn spsc<T: Copy>(capacity: usize, mem: Backing) -> Result<(Producer<T>, Consumer<T>), RtErr> {
     if capacity < 2 || !capacity.is_power_of_two() {
         return Err(RtErr::Capacity);

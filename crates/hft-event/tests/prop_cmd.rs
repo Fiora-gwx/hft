@@ -1,4 +1,10 @@
 //! ControlCmd round trip (EVT-153).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(clippy::large_enum_variant)]
 
 use hft_event::*;

@@ -1,4 +1,10 @@
 //! Clock math: additivity within 1 ns, monotonic, equal to the i128 reference (RT-060).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(not(loom))]
 
 use hft_rt::{CalibPair, Tsc, TscClock};

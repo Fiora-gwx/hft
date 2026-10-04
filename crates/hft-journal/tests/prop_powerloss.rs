@@ -1,5 +1,11 @@
 //! Cold copy damaged by power loss: recovery keeps exactly the intact complete events (JNL-073).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::harness::*;

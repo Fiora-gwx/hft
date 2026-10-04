@@ -1,4 +1,10 @@
 //! loom: KillWord reads always return a complete written value, in write order (RT-045).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(loom)]
 
 use loom::sync::Arc;

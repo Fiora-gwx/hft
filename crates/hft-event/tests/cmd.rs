@@ -1,4 +1,10 @@
 //! ControlCmd encoding (EVT-151, EVT-152, EVT-154 – EVT-158).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(clippy::type_complexity)]
 
 #[path = "common/cmds.rs"]

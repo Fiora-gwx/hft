@@ -1,5 +1,11 @@
 //! DurableMeta (JNL-094 – JNL-097). Needs no writer feature.
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 

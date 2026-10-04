@@ -1,5 +1,11 @@
 //! Every `Body` implementation of the crate (fixed bodies, Var and Multi prefixes), used by
 //! EVT-005 (`kinds.rs`). Also built as its own (empty) test target.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(dead_code)]
 
 use hft_event::*;

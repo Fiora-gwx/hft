@@ -1,5 +1,11 @@
 //! Zero allocation and zero system calls on every codec entry (EVT-196).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 #[path = "common/cmds.rs"]
 mod cmds;
 mod common;

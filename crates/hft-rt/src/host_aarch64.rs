@@ -1,5 +1,7 @@
 //! aarch64 host check table (main path, Graviton).
 
+#![allow(clippy::disallowed_macros, clippy::disallowed_methods)] // allow-list: startup host self-check, not on a hot thread
+
 use crate::host::{Hits, HostCheck, SysRoot, selected};
 
 /// aarch64 hard bits beyond the common ones.

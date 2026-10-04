@@ -1,4 +1,10 @@
 //! loom: every value sent through a Mailbox is taken exactly once and dropped once (RT-041).
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(loom)]
 
 use loom::sync::Arc;

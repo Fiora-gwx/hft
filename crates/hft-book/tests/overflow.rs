@@ -1,4 +1,10 @@
 //! BOOK-050–BOOK-053: overflow area outside the window.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![allow(clippy::type_complexity)]
 mod common;
 

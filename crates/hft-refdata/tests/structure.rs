@@ -1,6 +1,12 @@
 //! Load step 1: header, directory, row sizes, unknown/retired sections, discriminants
 //! (REF-005 – REF-009).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 mod common;
 
 use common::*;

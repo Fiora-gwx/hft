@@ -1,5 +1,11 @@
 //! Ring element types and byte-ring frames (EVT-121, EVT-122, EVT-124, EVT-140 – EVT-143).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use core::mem::offset_of;
 use hft_event::*;
 use hft_types::*;

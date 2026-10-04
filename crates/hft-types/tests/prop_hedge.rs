@@ -1,5 +1,11 @@
 //! Property test for `cap_cross_px` (TYP-122).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use hft_types::*;
 use proptest::prelude::*;
 

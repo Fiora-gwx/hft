@@ -1,6 +1,12 @@
 //! hugetlbfs 2 MiB pages: prepare, write, copy (JNL-043). Linux, CI prerequisite:
 //! `sudo sysctl vm.nr_hugepages=16; sudo mount -t hugetlbfs -o pagesize=2M,uid=$(id -u) none /mnt/huge2m`,
 //! mount path in `HFT_TEST_HUGE2M`.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(target_os = "linux")]
 
 #[path = "../common/mod.rs"]

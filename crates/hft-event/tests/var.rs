@@ -1,5 +1,11 @@
 //! Multi prefixes, splitting and reassembly (EVT-161, EVT-162, EVT-164, EVT-165).
 
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
+
 use hft_event::*;
 use zerocopy::{FromZeros, IntoBytes};
 

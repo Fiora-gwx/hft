@@ -1,6 +1,12 @@
 //! loom: the wake protocol never loses a wake-up, and a producer that sees PARKING makes no
 //! wake system call (RT-116). The consumer's wait is "spin until the state leaves PARKED"; the
 //! wake system call is replaced by a counter.
+
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code, not a hot path
 #![cfg(loom)]
 
 use loom::sync::Arc;
