@@ -1,0 +1,25 @@
+[package]
+name = "hft-journal-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+hft-journal = { path = "..", features = ["writer", "mem-backend"] }
+hft-rt = { path = "../../hft-rt" }
+hft-types = { path = "../../hft-types" }
+
+# Not a member of the root workspace: built only by `cargo fuzz` (pinned nightly, tools/README.md).
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "reader"
+path = "fuzz_targets/reader.rs"
+test = false
+doc = false
+bench = false

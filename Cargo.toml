@@ -6,6 +6,7 @@ members = [
     "crates/hft-refdata",
     "crates/hft-event",
     "crates/hft-rt",
+    "crates/hft-journal",
     "crates/hft-strategy-sdk",
     "tools/xtask",
     "tools/hft-cfg",
@@ -37,6 +38,7 @@ hft-rt = { path = "crates/hft-rt" }
 rtrb = "0.3"
 static_assertions = "1"
 hft-event = { path = "crates/hft-event" }
+hft-journal = { path = "crates/hft-journal" }
 hft-strategy-sdk = { path = "crates/hft-strategy-sdk" }
 
 [workspace.lints.rust]

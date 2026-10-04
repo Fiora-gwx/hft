@@ -451,6 +451,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "hft-journal"
+version = "0.1.0"
+dependencies = [
+ "crc32c",
+ "criterion",
+ "hft-event",
+ "hft-rt",
+ "hft-types",
+ "libc",
+ "proptest",
+ "sha2",
+ "xxhash-rust",
+ "zerocopy",
+]
+
+[[package]]
 name = "hft-refdata"
 version = "0.1.0"
 dependencies = [
@@ -1333,6 +1349,12 @@ dependencies = [
  "toml 0.8.23",
  "walkdir",
 ]
+
+[[package]]
+name = "xxhash-rust"
+version = "0.8.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "550a2b930b62486a393c52d5c3b84bff264b28aa437ed64694d31e93b1757af7"
 
 [[package]]
 name = "zerocopy"

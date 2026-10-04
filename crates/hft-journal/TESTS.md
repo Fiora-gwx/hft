@@ -54,7 +54,7 @@ spec: README.md
 
 **测试 kind**(hft-event 在 dev 构建登记,`0x7F01`–`0x7F06`):`TIn`(Input,定长 80 B,CRC Never,记录 104 B)、`TOut`(Output,56 B,记录 80 B)、`TMeta`(Meta,32 B,记录 56 B)、`TCrc`(Input,40 B,CRC Always,记录 72 B)、`TMulti`(Multi,Input,CRC Never)、`TVar`(Var,前缀 16 B,`KindInfo.max` = 尾部 65 000 B)。真实 kind 只在需要其语义时使用(`SegmentRoll`、`StateSnapshot`、`RawRx`)。
 
-**`C0`**(seq 写者配置):`name = "seq"`、`kind = Seq`、`instance = Prod`、`page = Normal`、`segment_bytes = 1 048 576`、`hot_keep = 1`、`size_idle_pct = 75`、`size_valve_pct = 90`;`WriterEnv{writer_epoch = 7, build_git = [0xAB; 20], host_profile_sha256 = [0xCD; 32]}`;引导块 `BB0` = `SegmentRoll{Begin}` + `SegmentRoll{BootDone}`(各 72 B,共 144 B,所以 `reserve = 288`)。**`R0`**(raw 写者):`name = "raw-feed-binance-usdm"`、`kind = Raw`、`venue = BINANCE_USDM`,其余同 C0(引导块只有 `Begin`,`reserve = 144`)。**`H(cfg)`**:测试装配 `tests/common/harness.rs`——同一线程持有写者、`SegmentPreparer`、`Persister`、`HotRetirer` 与手动推进的 `mono_ns`/`utc_ns`(起点 `utc_ns = 2026-10-01T00:00:00Z`),预创建、复制与退役只在测试显式 `poll` 时发生。**`open0`** = 在空目录上 `open`,以 `Startup` 首次 `roll` 并 `finish(BB0)`:段 1 `Begin` 的 seq = 1、`BootDone` 的 seq = 2,`committed_len = 4 096 + 144 = 4 240`,下一条普通记录 seq = 3。
+**`C0`**(seq 写者配置):`name = "seq"`、`kind = Seq`、`instance = Prod`、`page = Normal`、`segment_bytes = 1 048 576`、`hot_keep = 1`、`size_idle_pct = 75`、`size_valve_pct = 90`;`WriterEnv{writer_epoch = 7, build_git = [0xAB; 20], host_profile_sha256 = [0xCD; 32]}`;引导块 `BB0` = `SegmentRoll{Begin}` + `SegmentRoll{BootDone}`(各 72 B,共 144 B,所以 `reserve = 288`)。**`R0`**(raw 写者):`name = "raw-feed-binance-usdm"`、`kind = Raw`、`venue = BINANCE_USDM`,其余同 C0(引导块只有 `Begin`;raw 的全部记录带 CRC,`Begin` 为 80 B,`reserve = 160`)。**`H(cfg)`**:测试装配 `tests/common/harness.rs`——同一线程持有写者、`SegmentPreparer`、`Persister`、`HotRetirer` 与手动推进的 `mono_ns`/`utc_ns`(起点 `utc_ns = 2026-10-01T00:00:00Z`),预创建、复制与退役只在测试显式 `poll` 时发生;"模拟崩溃"= 丢弃写者、预创建者、persist 与退役器而不做任何清理,再以新的环 `open`。标"Linux"的 `unit` 在其他平台上以堆内存后端作热目录照样运行(Linux 专有的断言如 `/proc/self/maps`、`VmLck`、`ru_minflt` 只在 Linux 上检查)。测试与基准目标 `required-features = ["writer", "mem-backend"]`,以 `--all-features` 运行。`proc` 用例所需的 CI 准备经环境变量传入:`HFT_TEST_HUGE2M`(2 MiB hugetlbfs 挂载点)、`HFT_TEST_COLD_SMALL` 与 `HFT_TEST_SUDO`(JNL-048)、`HFT_TEST_SHM8`(JNL-100);未设置时用例打印缺少的前置后返回。**`open0`** = 在空目录上 `open`,以 `Startup` 首次 `roll` 并 `finish(BB0)`:段 1 `Begin` 的 seq = 1、`BootDone` 的 seq = 2,`committed_len = 4 096 + 144 = 4 240`,下一条普通记录 seq = 3。
 
 ### JNL-001 SegmentHeader 是 4 096 B 且每个字段偏移固定
 
@@ -391,7 +391,7 @@ spec: README.md
 | JNL-021.2 | `append_var(TVar, 尾部 65 001 B)` | `Err(TooLarge)`;不写字节 |
 | JNL-021.3 | `append_var(TMulti, 逻辑体 15 × 65 488 B)`(15 段,982 920 B) | `Ok` |
 | JNL-021.4 | `append_var(TMulti, 逻辑体 16 × 65 488 B)`(16 段,1 048 448 B > 1 044 192) | `Err(TooLarge)` |
-| JNL-021.5 | `reserve_var(TMulti, 5 × 2³⁰)` | `Err(TooLarge)`;不分配、不写字节 |
+| JNL-021.5 | `reserve_var(TMulti, u32::MAX)`(`len` 是 `u32`,整组远超一个空段) | `Err(TooLarge)`;不分配、不写字节 |
 
 ### JNL-022 多段记录按 65 488 B 切块,段间连续,只有末段不置 PART
 
@@ -491,17 +491,17 @@ spec: README.md
 - 规则:[写者](README.md#写者)
 - 级别:table
 - 里程碑:M1
-- 前置:`H(R0)`(`reserve = 144`);`set_roll_deadline(at = 10 000)`(TSC)按行设定;`now` 按行
+- 前置:`H(R0)`(`reserve = 160`);`set_roll_deadline(at = 10 000)`(TSC)按行设定;`now` 按行
 - 实现:`crates/hft-journal/tests/roll.rs::jnl_029_raw_valve_and_deadline`
 
 | 行 | `committed_len` | deadline / `now` | `needs_roll` |
 |---|---|---|---|
 | JNL-029.1 | 900 000(> 75 %) | 无 | `None` |
-| JNL-029.2 | 943 568 | 无 | `None` |
-| JNL-029.3 | 943 576 | 无 | `Some((Size, EventBoundary))` |
+| JNL-029.2 | 943 552 | 无 | `None` |
+| JNL-029.3 | 943 560 | 无 | `Some((Size, EventBoundary))` |
 | JNL-029.4 | 10 000 | `at = 10 000`,`now = 9 999` | `None` |
 | JNL-029.5 | 10 000 | `at = 10 000`,`now = 10 000` | `Some((Hourly, EventBoundary))` |
-| JNL-029.6 | 943 576 | `at = 10 000`,`now = 10 000` | `Some((Size, EventBoundary))`(大小优先于整点) |
+| JNL-029.6 | 943 560 | `at = 10 000`,`now = 10 000` | `Some((Size, EventBoundary))`(大小优先于整点) |
 
 ### JNL-030 预留量随当前段引导块的大小变化
 
@@ -700,7 +700,7 @@ spec: README.md
 - 规则:[实现说明](README.md#实现说明)、[persist 与后台维护(persist 线程调用)](README.md#persist-与后台维护persist-线程调用)
 - 级别:table
 - 里程碑:M1
-- 前置:Linux;`H(C0)`;`PersistConfig{4 MiB, 1 MiB, 20}`;上次同步在 `mono = t₀`;冷文件句柄由计数 shim 记录 `fdatasync` 次数;每行先追加使"未同步字节"为行内值、publish,再 `poll(mono)`
+- 前置:Linux;`H(C1)`(C1 见 JNL-044;1 MiB 的 C0 装不下第 2 行的未同步量);`PersistConfig{4 MiB, 1 MiB, 20}`(第 3、4 行 `chunk_bytes = 8`,使一次 `poll` 恰好复制 8 B);上次同步在 `mono = t₀`;`fdatasync` 次数由操作日志计数;每行先追加使"未同步字节"为行内值、publish,再 `poll(mono)`
 - 实现:`crates/hft-journal/tests/persist.rs::jnl_045_sync_thresholds`
 
 | 行 | 未同步字节 | `mono` | 期望 |
@@ -848,7 +848,7 @@ spec: README.md
 - 前置:`H(C0)`、`open0`;事件 E1 已 publish(`committed_len = c₁`);其后写 E2 = [`TIn`, `TOut`] 并 `end_event`(不 publish),再写 E3 的 `TIn` 与 `TOut`(无 `end_event`);模拟崩溃
 - 步骤:
   1. `open`
-- 期望:段 1 `committed_len = c₁ + 184`(E2 保留);E3 的 184 B 清零;`RecoveryReport.bytes_discarded = 184`、`last_seq` 等于 E2 的 `TOut` 的 seq + 1(随后追加的 `End{Recovery}`)
+- 期望:段 1 截断到 `c₁ + 184`(E2 保留),`End{Recovery}` 从该处开始;E3 的 184 B 清零;`RecoveryReport.bytes_discarded = 184`、`last_seq` 等于 E2 的 `TOut` 的 seq + 1(随后追加的 `End{Recovery}`)
 - 实现:`crates/hft-journal/tests/recover.rs::jnl_057_truncate_half_event`
 
 ### JNL-058 扫描在第一条不合法记录处停止
@@ -1047,7 +1047,7 @@ spec: README.md
 - 级别:prop
 - 里程碑:M1
 - 性质:对冷副本做一种损坏后删除热目录再 `open`:恢复后的冷副本是原内容在某条 `EVENT_END` 记录之后的前缀;新段置 `RECOVERY_GAP`;`verify` 把该位置报为 `recovery_gaps` 而不是 `issues`;损坏位置之前的记录全部保留
-- 生成:先写 1–5 000 个随机事件并完全同步但不封存;损坏 ∈ {在随机偏移截断文件;把随机一个 4 KiB 页置零;把随机一个 4 KiB 页填随机字节};随机偏移 ≥ 4 096
+- 生成:先写 1–5 000 个随机事件(每事件 1–3 条 `TCrc`,使任何损坏都可检出)并完全同步但不封存;损坏 ∈ {在随机偏移截断文件;把从随机偏移起的 4 KiB 置零;把从随机偏移起的 4 KiB 填随机字节};随机偏移在段 1 引导块之后(≥ 4 240)、已写数据之内
 - 参考:原事件序列的前缀判定(逐条比较 seq 与字节)
 - 例数:PR 128;每夜 4 096
 - 实现:`crates/hft-journal/tests/prop_powerloss.rs::jnl_073_cold_corruption`
@@ -1170,12 +1170,12 @@ spec: README.md
 
 | 行 | 改造 | `on_gap` | 期望 |
 |---|---|---|---|
-| JNL-081.1 | 段 2 的热段与冷副本都删除 | Error | 读完段 1 后 `Gap{reason: Deleted, resume_segment_no: 3}`;之后每次 `poll` 返回同一个 `Gap` |
+| JNL-081.1 | 读者打开之后,段 2 的热段与冷副本都删除 | Error | 读完段 1 后 `Gap{reason: Deleted, resume_segment_no: 3}`;之后每次 `poll` 返回同一个 `Gap` |
 | JNL-081.2 | 同上 | SkipToNextBoot | 一次 `Gap`,下一次交付段 3 的 `Begin` |
-| JNL-081.3 | 段 3 置 `RECOVERY_GAP`,`first_seq` = 段 2 `last_seq + 5` | Error | 段 2 读完后 `Gap{reason: RecoveryGap, expected_seq: 段 2 last_seq + 1}`,停住 |
+| JNL-081.3 | 段 3 置 `RECOVERY_GAP`,`first_seq` = 段 2 `last_seq + 5`(写者测试钩子在滚动时跳过 4 个 seq) | Error | 段 2 读完后 `Gap{reason: RecoveryGap, expected_seq: 段 2 last_seq + 1}`,停住 |
 | JNL-081.4 | 同上 | SkipToNextBoot | 一次 `Gap{RecoveryGap}`,随后交付段 3 的 `Begin` |
 | JNL-081.5 | 段 3 `first_seq` 不连续且未置 `RECOVERY_GAP` | SkipToNextBoot | `Gap{reason: ChainBroken}` |
-| JNL-081.6 | 段 2 的 `End.other_segment_no = 3` 但段 3 文件不存在、段 4 存在 | SkipToNextBoot | `Gap{reason: MissingSegment, resume_segment_no: 4}`,随后交付段 4 的 `Begin` |
+| JNL-081.6 | 段 2 的 `End.other_segment_no = 3` 但段 3 文件(热与冷)在读者打开之前已不存在、段 4 存在 | SkipToNextBoot | `Gap{reason: MissingSegment, resume_segment_no: 4}`,随后交付段 4 的 `Begin` |
 
 ### JNL-082 kind、CRC 与段头的读取错误
 
@@ -1236,7 +1236,7 @@ spec: README.md
 - 规则:[读者](README.md#读者)
 - 级别:unit
 - 里程碑:M1
-- 前置:内存后端计数 `map`/`unmap`;C0 `hot_keep = 1`;同进程读者以固定槽位方式打开(`hot_keep + 2 = 3` 个槽)
+- 前置:内存后端计数 `map`/`unmap`(只计读者 `poll` 期间);C0 `hot_keep = 1`;同进程读者以固定槽位方式打开(`ReaderConfig.same_process = true`)
 - 步骤:
   1. 写者滚动 10 次,读者全程尾随并读完
 - 期望:读者打开之后 `map` 与 `unmap` 的调用次数都为 0;交付序列完整
@@ -1281,7 +1281,7 @@ spec: README.md
 - 规则:[恢复与校验](README.md#恢复与校验)、[journal-format 校验与缺段检测](../../docs/subsystems/journal-format.md#校验与缺段检测)
 - 级别:table
 - 里程碑:M1
-- 前置:同 JNL-089,每行只做一处篡改;期望写 `issues`(`{segment_no, item}`,偏移按篡改处)或汇总字段
+- 前置:同 JNL-089(段 2 的引导块含 `StateSnapshot{Boot, n_books = 2}` 与 2 条 `L2Snapshot{Keyframe}`,段 1 含 `TCrc`),每行只做一处篡改(改段头的第 5–7 行重算 `header_crc32c`);期望写 `issues` 中必须出现的项(`{segment_no, item}`,偏移按篡改处;篡改已封存段时 item 5 可同时出现)或汇总字段
 - 实现:`crates/hft-journal/tests/verify.rs::jnl_090_verify_detects`
 
 | 行 | 篡改 | 期望 |
@@ -1475,7 +1475,7 @@ spec: README.md
 - 规则:[cargo feature](README.md#cargo-feature)
 - 级别:table
 - 里程碑:M1
-- 前置:`trybuild`;依赖 `hft-journal` 时不开 `writer`
+- 前置:测试在临时目录生成一个只依赖 `hft-journal` 默认特性的工程,以嵌套 `cargo check` 编译各行代码(不用 `trybuild`:它沿用被测 crate 的特性,`--all-features` 下 `writer` 已开)
 - 实现:`crates/hft-journal/tests/feature.rs::jnl_102_writer_feature_gate`
 
 | 行 | 代码 | 期望 |
@@ -1483,7 +1483,7 @@ spec: README.md
 | JNL-102.1 | 使用 `hft_journal::JournalWriter` | 编译失败 |
 | JNL-102.2 | 使用 `Persister`、`SegmentPreparer`、`HotRetirer` | 各自编译失败 |
 | JNL-102.3 | 使用 `JournalReader`、`verify`、`cold_retire`、`DurableMeta` | 编译通过 |
-| JNL-102.4 | 不开 `writer` 时 `cargo build --example testwriter` | 该 example 不参与构建(`required-features`),构建退出 0 |
+| JNL-102.4 | 不开 `writer` 时 `cargo build -p hft-journal --examples` | `testwriter` 不参与构建(`required-features`),构建退出 0(显式 `--example testwriter` 时 cargo 报缺少特性) |
 
 ### JNL-103 unsafe 只出现在 layout.rs 且每处带 SAFETY 注释
 
@@ -1695,7 +1695,7 @@ spec: README.md
 - 规则:[持久元数据(engine_epoch 等)](README.md#持久元数据engine_epoch-等)、[cargo feature](README.md#cargo-feature)
 - 级别:unit
 - 里程碑:M1
-- 前置:`trybuild`;依赖 `hft-journal` 时不开 `writer`;临时目录作 `cold_root`
+- 前置:同 JNL-102 的临时工程(不开 `writer`);临时目录作 `cold_root`
 - 步骤:
   1. 编译并运行:`DurableMeta::open(root, &InstanceName::Prod)`、`write_sync("engine_epoch", 42)`、`read("engine_epoch")`
 - 期望:
@@ -1710,7 +1710,7 @@ spec: README.md
 - 前置:Linux;`cargo build -p hft-journal --example testwriter --features writer`;热目录为 `/dev/shm` 下的临时目录,冷目录为 `/tmp` 下的临时目录
 - 步骤:
   1. `testwriter --hot H --cold C --instance prod --synth-bbo 1000 --inst 101 --bid 6000000 --ask 6000001 --qty 50000000 --t0-ns 1759276810000000000 --step-ns 1000000 --publish-every 10 --segment-bytes 1048576 --sync-interval-ms 50 --seal`
-  2. 以 `ReaderConfig::new(H, C, Prod, "seq")`、`end = Snapshot` 读全部记录
+  2. 以 `ReaderConfig::new(H, C, Prod, "seq")`、`end = LastCompleteEvent` 读全部记录
   3. 同样参数去掉 `--seal`,写到新的目录对 H2、C2,再读
   4. 不给 `--hot` 运行
   5. `--hot` 指向 ext4 目录运行

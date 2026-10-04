@@ -1,0 +1,175 @@
+[package]
+name = "hft-journal"
+description = "raw/seq/chain journals: RAM hot-segment writer, readers, segment preparation, roll and boot blocks, persist to cold copies, recovery, retention, verification and DurableMeta"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# JournalWriter, BootWriter, SegmentPreparer, Persister, HotRetirer and recovery (README "cargo feature"):
+# only apps/hft-core, apps/replayer and the optional apps/chain-core enable it.
+writer = []
+# Heap segment backend (any platform) plus test hooks (operation log, in-place byte access);
+# README "段内存后端". Tests only.
+mem-backend = []
+
+[dependencies]
+hft-types.workspace = true
+hft-event.workspace = true
+hft-rt.workspace = true
+libc.workspace = true
+zerocopy.workspace = true
+# Same crate hft-event uses for record CRCs (README "依赖": crc32c via hft-event).
+crc32c.workspace = true
+# Not `workspace = true`: the workspace entry enables `asm`, whose build needs a C toolchain for the
+# target (breaks cross `cargo check` on dev boxes and Windows MSVC); see crates/hft-refdata/Cargo.toml.
+sha2 = "0.10"
+
+[dev-dependencies]
+hft-event = { workspace = true, features = ["dev-kinds"] }
+proptest.workspace = true
+criterion.workspace = true
+xxhash-rust.workspace = true
+
+[[example]]
+name = "testwriter"
+required-features = ["writer"]
+
+
+# Tests and benches drive the writer and the heap backend (README "cargo feature", "段内存后端"):
+# run them with `--all-features` (or `--features writer,mem-backend`).
+[[test]]
+name = "layout"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "framing"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "naming"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "config"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "writer"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "roll"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "prepare"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "persist"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "retire"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "recover"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "prop_powerloss"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "reader"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "verify"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "retain"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "coldperm"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "held"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "offline"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "tmpfs"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "proc_testwriter"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "proc_huge2m"
+path = "tests/proc/huge2m.rs"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "proc_persist_fail"
+path = "tests/proc/persist_fail.rs"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "proc_audit"
+path = "tests/proc/audit.rs"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "proc_crash"
+path = "tests/proc/crash.rs"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "proc_reader"
+path = "tests/proc/reader.rs"
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "proc_meta_strace"
+path = "tests/proc/meta_strace.rs"
+required-features = ["writer", "mem-backend"]
+
+[[bench]]
+name = "append"
+harness = false
+required-features = ["writer", "mem-backend"]
+
+[[bench]]
+name = "roll"
+harness = false
+required-features = ["writer", "mem-backend"]
+
+[[bench]]
+name = "retire"
+harness = false
+required-features = ["writer", "mem-backend"]
+
+[[bench]]
+name = "read"
+harness = false
+required-features = ["writer", "mem-backend"]
+
+[[bench]]
+name = "recover"
+harness = false
+required-features = ["writer", "mem-backend"]
