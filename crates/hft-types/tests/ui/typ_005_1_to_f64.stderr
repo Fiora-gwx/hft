@@ -1,0 +1,5 @@
+error[E0599]: no method named `to_f64` found for struct `hft_types::Px` in the current scope
+ --> tests/ui/typ_005_1_to_f64.rs:5:19
+  |
+5 |     let _ = Px(1).to_f64();
+  |                   ^^^^^^ method not found in `hft_types::Px`

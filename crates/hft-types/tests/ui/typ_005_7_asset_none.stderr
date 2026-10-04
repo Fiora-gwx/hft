@@ -1,0 +1,5 @@
+error[E0599]: no associated function or constant named `NONE` found for struct `hft_types::AssetId` in the current scope
+ --> tests/ui/typ_005_7_asset_none.rs:5:22
+  |
+5 |     let _ = AssetId::NONE;
+  |                      ^^^^ associated function or constant not found in `hft_types::AssetId`

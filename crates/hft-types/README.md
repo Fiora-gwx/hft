@@ -179,7 +179,7 @@ pub const MAX_BBO_CONN_SLOTS: u8 = 8;
 
 策略**种类**(`kind_id: u16`,由各策略 crate 的 `StrategyDesc` 给出,只追加)不是本 crate 的 ID 类型,规则见 [hft-strategy-sdk](../hft-strategy-sdk/README.md);一个种类可以有多个实例(不同账户、不同参数),一个账户只绑定一个实例([hft-refdata `AccountMeta`](../hft-refdata/README.md#数据结构))。
 
-`VenueId` 常量(协议级,与编译进二进制的 `VenueProtocol` 一一对应;refdata 引用未知编号即加载失败)。**`VenueId` 按产品划分,因此每个 `VenueId` 恰有一个 `MarketKind`**(refdata 加载时校验 `VenueCaps` 行与此表一致):
+`VenueId` 常量(`VenueId` 的关联常量,如 `VenueId::BINANCE_USDM`;协议级,与编译进二进制的 `VenueProtocol` 一一对应;refdata 引用未知编号即加载失败)。**`VenueId` 按产品划分,因此每个 `VenueId` 恰有一个 `MarketKind`**(refdata 加载时校验 `VenueCaps` 行与此表一致):
 
 | 值 | 常量 | `MarketKind` | scope |
 |---|---|---|---|
@@ -333,8 +333,8 @@ pub fn funding_settle_norm_ns(ts_ns: i64, interval_s: u32, anchor_s: u32) -> i64
 字段含义、宽度、分配与唯一性、上一 epoch 的接受窗口归属 [hft-oms](../hft-oms/README.md);本 crate 只提供逻辑值与**规范文本**(24 个小写十六进制字符)的编解码,供 gw 线程里的 `venue-*` 渲染与解析(各所外形——前缀、填充——由 `VenueProtocol::render_cid/parse_cid` 包装)。
 
 ```rust
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub struct ClientOrderId { pub epoch: u16 /* 最高位 = 保留位,恒 0 */, pub venue: VenueId, pub account: AccountId, pub slot: u32 /* 低 20 位 */, pub gen: u32 }
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub struct ClientOrderId { pub epoch: u16 /* 最高位 = 保留位,恒 0 */, pub venue: VenueId, pub account: AccountId, pub slot: u32 /* 低 20 位 */, pub r#gen: u32 /* gen 是 2024 版保留字 */ }
 // 96 位 = ver:4 | epoch:16 | venue:8 | account:8 | slot:20 | gen:32 | check:8,从最高位起按此顺序排列;ver = 1
 // 文本 = 这 96 位按大端(最高位在前)的 24 个小写十六进制字符;check = 前 11 个字节(前 88 位)按字节异或
 // epoch 的最高位(bit 15)是恒 0 的保留位;低 15 位是 engine_epoch(取值与分配规则归 hft-oms)
@@ -465,7 +465,7 @@ impl FxErr { OK = 0; SYNTAX = 1; EMPTY = 2; PRECISION = 4; OVERFLOW = 8; NEGATIV
 - **实现顺序**:`types.rs` → `fixed.rs`(含参考实现与属性测试;`cap_cross_px` 随之)→ `parse.rs` 标量版 → SWAR 版(属性测试对拍标量版)→ `format.rs` → `wire.rs` → `clid.rs` → `u256.rs`(optional 链上使用,可最后)。
 - **待核实**:哪些 core venue 会输出科学计数法字符串(方法:在 Binance、OKX、Bitget 金样与 24 h raw 采集中 grep `[eE][-+]?[0-9]`);OKX 的 PEPE/SHIB 最细 tick 与 `ctVal`、OKX 是否存在非 10 的幂的 `ctVal`(方法:各所 instruments 接口,由 `hft-cfg refdata fetch` 生成待审 TOML 时打印;非 10 的幂的 inst 被 refdata 加载拒绝,见 hft-refdata)。
 - 本 crate 开 `#![deny(clippy::arithmetic_side_effects)]`([hot-path-rules N2](../../docs/hot-path-rules.md)):加减也写成显式 `checked_*`,溢出置 `FxErr::OVERFLOW` 并饱和;不变量 1 保证它在合法输入下不触发。
-- `Px`/`Qty` 不实现 `Add<Px> for Qty` 之类跨类型运算;不实现 `Mul` 运算符(乘法必须显式给指数与取整)。`Ord`、`Add`、`Sub`、`Neg` 只在同类型间实现。
+- `Px`/`Qty` 不实现 `Add<Px> for Qty` 之类跨类型运算;不实现 `Mul` 运算符(乘法必须显式给指数与取整)。`Ord`、`Add`、`Sub`、`Neg` 只在同类型间实现;`Add`/`Sub`/`Neg` 在 i64 边界饱和(合法输入下等于精确结果,违反不变量 1 的输入也不 panic)。
 - `Rate` 选 1e-9 是为了资金费率(交易所给 8 位小数)与 0.01 bp 级费率都精确;若将来遇到更细的输入,`parse_round(HalfEven)` 处理。
 - `StrategyInstanceId` 是 `StrategyId` 的类型别名而不是新 newtype:两者是同一身份(策略实例),分成两个类型会让每个事件字段与绑定表之间多一次无意义的转换。
 

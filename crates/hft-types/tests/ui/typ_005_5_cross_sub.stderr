@@ -1,0 +1,7 @@
+error[E0308]: mismatched types
+ --> tests/ui/typ_005_5_cross_sub.rs:5:22
+  |
+5 |     let _ = Qty(1) - Px(1);
+  |             ------   ^^^^^ expected `Qty`, found `Px`
+  |             |
+  |             expected because this is `hft_types::Qty`

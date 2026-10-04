@@ -1,0 +1,13 @@
+error[E0369]: cannot multiply `hft_types::Px` by `hft_types::Qty`
+ --> tests/ui/typ_005_3_mul.rs:5:19
+  |
+5 |     let _ = Px(1) * Qty(1);
+  |             ----- ^ ------ hft_types::Qty
+  |             |
+  |             hft_types::Px
+  |
+note: `hft_types::Px` does not implement `Mul<hft_types::Qty>`
+ --> src/types.rs
+  |
+  | pub struct Px(pub i64);
+  | ^^^^^^^^^^^^^ `hft_types::Px` is defined in another crate

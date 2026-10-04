@@ -1,0 +1,19 @@
+error[E0277]: the trait bound `f64: From<hft_types::Px>` is not satisfied
+ --> tests/ui/typ_005_2_into_f64.rs:5:25
+  |
+5 |     let _x: f64 = Px(1).into();
+  |                         ^^^^ the trait `From<hft_types::Px>` is not implemented for `f64`
+  |
+  = help: `f64` implements trait `From<T>`:
+            From<bool>
+            From<f16>
+            From<f32>
+            From<i16>
+            From<i32>
+            From<i8>
+            From<u16>
+            From<u32>
+            From<u8>
+            From<zerocopy::byteorder::F32<O>>
+            From<zerocopy::byteorder::F64<O>>
+  = note: required for `hft_types::Px` to implement `Into<f64>`

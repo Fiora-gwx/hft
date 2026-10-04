@@ -1,0 +1,7 @@
+error[E0308]: mismatched types
+ --> tests/ui/typ_005_4_cross_add.rs:5:21
+  |
+5 |     let _ = Px(1) + Qty(1);
+  |             -----   ^^^^^^ expected `Px`, found `Qty`
+  |             |
+  |             expected because this is `hft_types::Px`

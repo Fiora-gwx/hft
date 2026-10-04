@@ -437,7 +437,7 @@ spec: README.md
 - 里程碑:M1
 - 性质:`pair_lot` 返回的 q 是 `lot_f` 的整数倍、`q × num` 被 `den × lot_h` 整除,且是满足这两条的最小正数;q ≤ MAX_RAW 时为 `Some(q)`
 - 生成:`lot_f, lot_h ∈ [1, 10^6]`;`num, den ∈ [1, 1000]`
-- 参考:按 `lot_f` 的倍数逐个尝试的暴力搜索
+- 参考:按 `lot_f` 的倍数逐个尝试的暴力搜索(倍数 ≤ 10 000 时);更大的倍数 k 不逐个尝试,改为断言 `lot_f × k` 合法且对 k 的每个素因子 p,`lot_f × k / p` 不合法(合法倍数对 gcd 封闭,故 k 最小)
 - 例数:PR 2 000
 - 实现:`crates/hft-types/tests/prop_fixed.rs::typ_024_pair_lot_matches_brute_force`
 
@@ -1398,7 +1398,7 @@ spec: README.md
   2. 对每个结构查找紧随其后的 `assert!(size_of::<T>() == …)`;对每个枚举查找 `TryFromBytes` 派生
 - 期望:
   - 结构集合为 `{AssetExp}`,其后有大小断言与两个字段的偏移断言
-  - 枚举集合为 `{RoundMode, Side, Tif, MarketKind, RunMode, KillLevel, CidErr}`;其中线格式枚举 `Side`、`Tif`、`MarketKind`、`RunMode`、`KillLevel` 派生 `TryFromBytes` 且不派生 `FromBytes`
+  - 枚举集合为 `{RoundMode, Side, Tif, MarketKind, HostClass, RunMode, KillLevel, CidErr}`;其中线格式枚举 `Side`、`Tif`、`MarketKind`、`HostClass`、`RunMode`、`KillLevel` 派生 `TryFromBytes` 且不派生 `FromBytes`
 - 实现:`crates/hft-types/tests/layout.rs::typ_150_layout_asserts_present`
 
 ### TYP-155 FxErr 的位值
