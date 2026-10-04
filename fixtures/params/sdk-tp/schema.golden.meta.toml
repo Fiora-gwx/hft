@@ -1,0 +1,10 @@
+# SDK-106/SDK-107 golden: canonical schema JSON of the SDK test strategy `EchoProbe` (schema `TP`).
+source = "synthetic"
+purpose = "hft-strategy-sdk params::schema_json key order, value spelling and display object; hft-py S_TP schema"
+schema_id = 65281
+schema_version = 2
+# SHA-256 (first 8 bytes, little-endian) of the digest input JSON; recomputed independently
+# (Python hashlib over the hand-written digest input) and equal to params::schema_digest.
+schema_digest = "8ebe560371c8a09a"
+schema_digest_v1 = "858914ad78920e31"
+reviewed_by = "hft-dev (key order and values checked against crates/hft-strategy-sdk/README.md)"

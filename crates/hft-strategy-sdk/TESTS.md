@@ -50,7 +50,7 @@ spec: README.md
 
 **共用夹具**(用例的 `前置` 引用这里的名字;用例依赖的参数值仍在 `前置` 里写出):
 
-- **`TP` 测试 schema**(`crates/hft-strategy-sdk/tests/common/params.rs`,`define_params!`;`schema_id = 0xFF01`,`version = 2`):
+- **`TP` 测试 schema**(`crates/hft-strategy-sdk/tests/common/params.rs`,`define_params!`;M1 尚无该宏时为手写的同一 `ParamSchemaDesc` 常量;`schema_id = 0xFF01`,`version = 2`):
 
   | ix | 字段 | 单位 | min | max | default | 属性 | since |
   |---|---|---|---|---|---|---|---|
@@ -417,7 +417,7 @@ spec: README.md
 
 - 规则:[快照节](README.md#快照节)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M1
 - 前置:`SnapshotWriter` 上限 262_144 B
 - 步骤:
   1. `put_bytes(&[0u8; 262_144])`
@@ -1583,9 +1583,9 @@ spec: README.md
 - 规则:[schema JSON 与 define_params!](README.md#schema-json-与-define_params)、[策略描述符:Note、报表、策略命令](README.md#策略描述符note报表策略命令)
 - 级别:golden
 - 里程碑:M1
-- 输入:`schema_json(&EchoProbe::DESC, 2)`(`TP` v2、`non_prod_only = false`、3 个 Note、1 个报表字段、SDK-114 的 3 个命令)
+- 输入:`schema_json(&EchoProbe::DESC, &ModelLayoutDesc::EMPTY, 2)`(`TP` v2、`non_prod_only = false`、3 个 Note、1 个报表字段、SDK-114 的 3 个命令、无 Model);另以 `ProbeModel::LAYOUT` 调用一次
 - 期望文件:`fixtures/params/sdk-tp/schema.golden.json`
-- 前置:金样由人按 README 的键序手写核对:顶层键依次 `name`、`kind_id`、`non_prod_only`、`schema_id`、`schema_version`、`fields`、`notes`、`report`、`cmds`;`open_th` 的 `minor_change = "rel_pct:10"`、`cooldown_ms` 的 `"abs:1000"`、`max_qty` 的 `"any"`、`pct_bin` 的 `"none"`;只有 `mode` 带 `enum`;无多余空白;数值为十进制整数
+- 前置:金样由人按 README 的键序手写核对:顶层键依次 `name`、`kind_id`、`non_prod_only`、`schema_id`、`schema_version`、`fields`、`notes`、`report`、`cmds`、`sections`(`[]`);`open_th` 的 `minor_change = "rel_pct:10"`、`cooldown_ms` 的 `"abs:1000"`、`max_qty` 的 `"any"`、`pct_bin` 的 `"none"`;只有 `mode` 带 `enum`;`open_th` 的 `display = {"min":"0%","max":"10%","default":"0.5%"}`;无多余空白;数值为十进制整数;以 `ProbeModel::LAYOUT` 调用时只有末尾不同:`"sections":[{"tag":1,"name":"ticks"},{"tag":2,"name":"samples"}]`
 - 实现:`crates/hft-strategy-sdk/tests/schema_json.rs::sdk_106_schema_json_golden`
 
 ### SDK-107 `schema_digest` 只覆盖编码相关的键
@@ -1834,9 +1834,9 @@ spec: README.md
 - 规则:[参数编解码器(`params` 模块,唯一实现)](README.md#参数编解码器params-模块唯一实现)
 - 级别:golden
 - 里程碑:M1
-- 输入:`fixtures/params/sdk-tp/*.input.toml`(至少:全默认值;每个 per_group 字段各一条覆盖;3 个 group 的乱序覆盖;v1 schema 的旧 body)
+- 输入:`fixtures/params/sdk-tp/*.input.toml`(至少:全默认值;每个 per_group 字段各一条覆盖;3 个 group 的乱序覆盖;v1 schema 的旧 body;另有期望为 `ParamError` 的 case,不带 `.blob`)
 - 期望文件:`fixtures/params/sdk-tp/<case>.blob` 与 `<case>.meta.toml`(期望结果 `Ok` 或 `ParamError::<变体>`)
-- 前置:金样由人按 README 的布局手算核对,不由当前代码生成
+- 前置:金样由人按 README 的布局手算核对,不由当前代码生成;本用例把输入中的 refdata 名字(实例 `sdk-probe` = S3、账户 `sdk-a1` = A1、`BTC`、`v1:BTC-SPOT` = I1、`v2:BTC-PERP` = I2)按 `GT3` 映射,`generated_at_ns = 0`;v1 的 case 用 `TP` 的 v1 前缀编码、用 `TP` 以 `schema_ver = 1` 解码
 - 实现:`crates/hft-strategy-sdk/tests/params_golden.rs::sdk_120_params_golden`
 
 ### SDK-121 hft-cfg 与 hft-py 对同一输入产出相同字节
@@ -2872,14 +2872,16 @@ spec: README.md
 
 - 规则:[快照节](README.md#快照节)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M1
 - 前置:`SnapshotWriter` 上限 1 024 B
 - 步骤:
   1. `section(7)`;`put_u8(1)`、`put_u16(0x0203)`、`put_i64(-2)`、`put_i128(1 << 100)`、`put_bytes(&[9, 9])`
   2. 以 `desc_version = 5` 构造 `SnapshotReader` 读回;另以"其他用途"构造读回
+  3. 新 writer:`begin_section(6, 1)`、两次 `put_row(&[u32; 2])`;`begin_section(7, 2)`、`put_u8(5)`、`add_rows(1)`、`end_section()`;读者 `find_section(7)`、`find_section(6)`、`find_section(9)`
 - 期望:
-  - 步骤 1 中 `put_u16` 写出 `03 02`;`put_i64(-2)` 写出 `FE FF FF FF FF FF FF FF`
-  - 步骤 2 读回的值逐个相等;前者 `desc_version() = 5`,后者 `desc_version() = 0`;读过尾 → `Err(RestoreError)`
+  - 步骤 1 中 `section(7)` 不写字节,`put_u16` 写出 `03 02`(字节 1..3);`put_i64(-2)` 写出 `FE FF FF FF FF FF FF FF`
+  - 步骤 2 读回的值逐个相等;前者 `desc_version() = 5`,后者 `desc_version() = 0`;读过尾 → `Err(RestoreError::Truncated)`
+  - 步骤 3 共 56 B;节 7:`version = 2`、`count = 1`、节体 8 B(补零)且首字节 5;节 6:`version = 1`、`count = 2`、节体 16 B;节 9 → `None`
 - 实现:`crates/hft-strategy-sdk/tests/snapshot.rs::sdk_191_writer_reader_le`
 
 ### SDK-192 `testing::layout_json` 输出稳定
@@ -3113,7 +3115,7 @@ spec: README.md
 
 ## 验收
 
-- 里程碑已到的用例全部有同编号的实现且通过(`cargo xtask test-trace`,规则见 [docs/tests §6](../../docs/tests/README.md#6-与代码的对应));`params` 模块的用例(SDK-090–SDK-101、SDK-106–SDK-112、SDK-120、SDK-204)在 M1 随 `tools/hft-cfg` 先行完成,其余在 M2。
+- 里程碑已到的用例全部有同编号的实现且通过(`cargo xtask test-trace`,规则见 [docs/tests §6](../../docs/tests/README.md#6-与代码的对应));`params` 模块的用例(SDK-090–SDK-101、SDK-106–SDK-112、SDK-120、SDK-204)在 M1 随 `tools/hft-cfg` 先行完成,快照读写类型的用例(SDK-025、SDK-191,hft-book 在 M1 使用)也在 M1 完成,其余在 M2。
 - 属性测试的大例数运行:各属性用例"例数"字段中的每夜例数在 CI 每夜任务中运行(运行矩阵归 [testing §6](../../docs/testing.md#6-ci-运行矩阵));SDK-079、SDK-080 的 Model 确定性夹具同时是每个有 Model 的策略必须复用的夹具,策略 crate 以自己的 Model 与事件脚本各跑一遍(cookbook 第 4 步的验证)。
 - SDK-177 与 SDK-192 在 x86_64 与 aarch64 上都运行,结果逐位相同。
 - 编译期用例(`trybuild`:SDK-057、SDK-105、SDK-114、SDK-174、SDK-187)在 PR 中运行。

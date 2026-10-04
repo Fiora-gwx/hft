@@ -1,0 +1,8 @@
+# SDK-120 golden case "unordered".
+source = "synthetic"
+purpose = "overrides given out of (group_ix, field_ix) order are sorted"
+schema_id = 65281
+schema_version = 2
+generator = "hand-computed raw values written with Python struct per the SPB1 and body layouts (not hft-cfg, not the SDK codec)"
+reviewed_by = "hft-dev"
+expect = "Ok"

@@ -1,0 +1,8 @@
+# SDK-120 golden case "err_not_per_group".
+source = "synthetic"
+purpose = "override of a non-per_group field: no blob"
+schema_id = 65281
+schema_version = 2
+generator = "none (error case)"
+reviewed_by = "hft-dev"
+expect = "ParamError::NotPerGroup"

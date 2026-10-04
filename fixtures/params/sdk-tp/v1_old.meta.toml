@@ -1,0 +1,8 @@
+# SDK-120 golden case "v1_old".
+source = "synthetic"
+purpose = "body of the v1 schema (5 fields); decode at schema_ver 1 fills mode with its default"
+schema_id = 65281
+schema_version = 1
+generator = "hand-computed raw values written with Python struct per the SPB1 and body layouts (not hft-cfg, not the SDK codec)"
+reviewed_by = "hft-dev"
+expect = "Ok"

@@ -1,0 +1,8 @@
+# SDK-120 golden case "err_open_th_over".
+source = "synthetic"
+purpose = "default above max: no blob"
+schema_id = 65281
+schema_version = 2
+generator = "none (error case)"
+reviewed_by = "hft-dev"
+expect = "ParamError::OutOfRange"

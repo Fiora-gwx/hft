@@ -467,6 +467,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hft-strategy-sdk"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "hft-event",
+ "hft-strategy-sdk",
+ "hft-types",
+ "proptest",
+ "sha2",
+ "toml 0.8.23",
+ "zerocopy",
+]
+
+[[package]]
 name = "hft-types"
 version = "0.1.0"
 dependencies = [

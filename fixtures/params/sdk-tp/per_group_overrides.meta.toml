@@ -1,0 +1,8 @@
+# SDK-120 golden case "per_group_overrides".
+source = "synthetic"
+purpose = "one override per per_group field (Rate, Rate, Qty at BTC qty_exp -8)"
+schema_id = 65281
+schema_version = 2
+generator = "hand-computed raw values written with Python struct per the SPB1 and body layouts (not hft-cfg, not the SDK codec)"
+reviewed_by = "hft-dev"
+expect = "Ok"

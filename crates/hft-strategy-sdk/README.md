@@ -334,6 +334,7 @@ pub enum Unit {
 pub enum ParamError {
     SchemaMismatch { want: u32, got: u32 }, SchemaTooNew { have: u16, got: u16 }, BodyLen,
     OverrideOrder { ix: u32 }, Padding,                      // SPB1 body 容器错误(见"SPB1 body 布局")
+    Misaligned,                                              // body_view:body 不是 8 B 对齐(decode_body 先复制,不返回它)
     OutOfRange { field_ix: u16, group_ix: u16 }, BadEnum { field_ix: u16 }, NotPerGroup { field_ix: u16 },
     GroupIxOutOfRange { group_ix: u16 }, TooManyGroups,
     GroupShape { gix: u16, code: u16 },                      // 腿数/市场类型/资产不符合本策略要求
@@ -341,7 +342,7 @@ pub enum ParamError {
     BadText { field_ix: u16 },                               // parse_value:文本不能按该字段单位解析(含小数位超过该单位的精度、Qty/Px 缺指数)
     UnknownOp { op: u8 },                                    // decode_cmd:op 不在该策略的 cmds 中(cmds 为空时任何 op)
 }
-// group_ix 为 0xFFFF:错误发生在默认值或命令字段上(不针对 group)。SchemaMismatch:装配处 decode_params 收到集合外的 kind_id
+// group_ix 为 0xFFFF(params::GROUP_IX_NONE):错误发生在默认值或命令字段上(不针对 group)。SchemaMismatch:装配处 decode_params 收到集合外的 kind_id
 // (want = 0,got = kind_id);gateway 在调用前已按 kind 与 schema 版本拒绝,这是防御路径。
 ```
 
@@ -358,16 +359,30 @@ pub mod params {
     pub struct RawParams { pub defaults: Vec<i64>, pub overrides: Vec<ParamOverride> }
     /// 编解码器读取 schema 的接口:编译进二进制的 &'static ParamSchemaDesc 与从 JSON 还原的 OwnedSchema 都实现它。
     pub trait SchemaView { fn id(&self) -> u32; fn version(&self) -> u16; fn n_fields(&self) -> u16;
-                           fn field(&self, ix: u16) -> FieldRef<'_>; }   // FieldRef = FieldDesc 的借用形式(名字为 &str)
+                           fn field(&self, ix: u16) -> Option<FieldRef<'_>>; }   // ix ≥ n_fields → None
+    /// FieldDesc 的借用形式:名字为 &str,带字段下标 ix(BadText/BadEnum 的 field_ix),单位拆成 UnitKind + 枚举名表。
+    pub struct FieldRef<'a> { pub ix: u16, pub name: &'a str, pub unit: UnitKind, pub enum_names: EnumNames<'a>, /* 其余同 FieldDesc */ }
+    /// 命令载荷描述的读取接口:CmdDesc 与 OwnedCmd 都实现它(encode_cmd/decode_cmd 对它泛型)。
+    pub trait CmdSchema { fn op(&self) -> u8; fn n_fields(&self) -> u16; fn field(&self, ix: u16) -> Option<FieldRef<'_>>; }
     pub struct OwnedSchema { /* 从规范 schema JSON 还原(schema-json 特性) */ }
-    impl OwnedSchema { pub fn from_json(s: &str) -> Result<OwnedSchema, ParamError>; }
+    impl OwnedSchema {
+        /// 任何不合规(JSON 语法、缺键或类型不符、未知取值写法、违反"schema 编译期校验"的各条)→ Err(SchemaMismatch{want: 0, got: 0});
+        /// 不读 notes、report、sections 与 display。
+        pub fn from_json(s: &str) -> Result<OwnedSchema, ParamError>;
+        pub fn cmds(&self) -> &[OwnedCmd];                   // 命令描述符(实现 CmdSchema)
+        pub fn schema_digest(&self, ver: u16) -> u64;        // = 导出它的策略的 params::schema_digest
+    }
     // 下列函数的 s: &ParamSchemaDesc 实际为 s: &impl SchemaView
 
     pub fn n_fields_at(s: &ParamSchemaDesc, ver: u16) -> Option<u16>;        // since ≤ ver 的字段数(前缀);ver > s.version → None
     pub fn field_ix(s: &ParamSchemaDesc, name: &str) -> Option<u16>;
-    /// 文本 → 原始值:"0.5%"、"50bp"、"1500"、"5m"、"true"、枚举名;Qty/Px 需要该 group 资产的指数。
+    /// 文本 → 原始值:"0.5%"、"50bp"、"1500"、"5m"、"true"、枚举名;Qty/Px 需要该 group 资产的指数。不查范围;枚举名不存在 → BadEnum。
+    /// 写法:Rate 为 "<x>%"(×10^7)、"<x>bp"(×10^5)或纯小数(×10^9);Notional 为 USDT 小数;Qty/Px 按资产指数的小数;
+    /// DurationMs 为毫秒整数(可带 "ms")或 "<x>s"/"m"/"h"/"d";Count 为整数;Bool 为 true/false/1/0。十进制解析经 hft-types parse_exact(不经浮点)。
     pub fn parse_value(f: FieldRef<'_>, text: &str, exp: Option<AssetExp>) -> Result<i64, ParamError>;
-    pub fn format_value(f: FieldRef<'_>, raw: i64, exp: Option<AssetExp>) -> String;   // 显示与 schema JSON 用
+    /// 显示与 schema JSON 用:Rate 写 "<x>%";DurationMs 取能整除的最大单位(d/h/m/s,否则毫秒整数);Qty/Px 缺指数时写原始整数。
+    /// 对 [min, max] 内任意值 parse_value(f, &format_value(f, x, exp), exp) == Ok(x)。
+    pub fn format_value(f: FieldRef<'_>, raw: i64, exp: Option<AssetExp>) -> String;
     /// 编码:按当前 s.version 写全部字段(raw.defaults 的个数 ≠ 字段数 → BodyLen);覆盖表按 (group_ix, field_ix) 排序,
     /// 完全相同的项合并,同一 (group_ix, field_ix) 值不同 → OverrideOrder{ix = 输入中后出现的那一项的下标};检查范围、per_group、枚举。
     pub fn encode_body(s: &ParamSchemaDesc, n_groups: u16, raw: &RawParams) -> Result<Vec<u8>, ParamError>;
@@ -378,7 +393,8 @@ pub mod params {
     /// schema_version/fields 五个键、且 fields 元素只含编码相关键 ix/name/unit/enum/min/max/default/per_group/since 的规范 JSON)
     /// 前 8 字节(按小端解释为 u64),写入 StrategyParamsHdr.schema_digest;ctl-gateway 比对不一致 → InvalidArgs。
     /// doc、字段属性(structural/manual_only/relax/minor_change)、non_prod_only 与 notes/report/cmds 不进摘要:改它们不影响已编码的参数。
-    pub fn schema_json(d: &StrategyDesc, ver: u16) -> String;
+    /// layout = 该策略的 Model::LAYOUT(无 Model 为 ModelLayoutDesc::EMPTY),给出 sections;StrategySet::schema_json 按此调用。
+    pub fn schema_json(d: &StrategyDesc, layout: &ModelLayoutDesc, ver: u16) -> String;
     pub fn schema_digest(d: &StrategyDesc, ver: u16) -> u64;
     /// 门槛 ⑦ 的小改判定:按各字段 minor_change(语义见 MinorChange)比较基准(⑦ 计时起点生效的版本)与当前参数
     /// (默认值;两版都有的 group 按 GroupId 对齐比生效值,只在一版里出现的 group 不比较)。
@@ -387,9 +403,10 @@ pub mod params {
         -> Result<(), MajorChange>;
     pub struct MajorChange { pub field_ix: u16, pub group: GroupId /* GROUP_NONE = 默认值 */ }
     /// StrategyCmd 载荷编解码(见"策略描述符");与参数共用文本解析与范围检查。
-    pub fn encode_cmd(d: &CmdDesc, vals: &[i64]) -> Result<Vec<u8>, ParamError>;
-    /// ver ≠ 1、长度 < 8、长度 ≠ 8 + 8n、n ≠ 该 op 的字段数 → BodyLen;未知 op → UnknownOp;值越界 → OutOfRange/BadEnum。
-    pub fn decode_cmd(cmds: &[CmdDesc], payload: &[u8]) -> Result<(u8 /* op */, Vec<i64>), ParamError>;
+    pub fn encode_cmd(d: &impl CmdSchema, vals: &[i64]) -> Result<Vec<u8>, ParamError>;
+    /// 按序检查:长度 < 8、ver ≠ 1、n > 31、长度 ≠ 8 + 8n → BodyLen;_pad 非 0 → Padding;未知 op → UnknownOp;
+    /// n ≠ 该 op 的字段数 → BodyLen;值越界 → OutOfRange/BadEnum。
+    pub fn decode_cmd<C: CmdSchema>(cmds: &[C], payload: &[u8]) -> Result<(u8 /* op */, Vec<i64>), ParamError>;
 }
 ```
 
@@ -423,7 +440,7 @@ pub mod params {
     pub struct BodyView<'a> { pub hdr: &'a ParamsBodyHdr, pub defaults: &'a [i64], pub overrides: &'a [ParamOverride] }
     /// 容器级校验(不读 schema):① body.len() = 8 + 8 × n_fields + 16 × n_overrides(BodyLen);
     /// ② 填充为 0(Padding);③ 覆盖表按 (group_ix, field_ix) 严格升序,即已排序且无重复(OverrideOrder{ix});
-    /// ④ group_ix < n_groups(GroupIxOutOfRange)。零拷贝(zerocopy),不分配。
+    /// ④ group_ix < n_groups(GroupIxOutOfRange)。零拷贝(zerocopy),不分配;body 须 8 B 对齐(SPB1 blob 对齐时成立),否则 Misaligned。
     pub fn body_view(body: &[u8], n_groups: u16) -> Result<BodyView<'_>, ParamError>;
 }
 ```
@@ -433,7 +450,7 @@ pub mod params {
 
 #### schema JSON 与 define_params!
 
-- **规范 schema JSON**(本模块生成,`GetSchema`、hft-cfg、ops_bot、pipeline、watchtower、journal-archiver 只认它):`{"name", "kind_id", "non_prod_only", "schema_id", "schema_version", "fields": [{"ix", "name", "unit", "enum"?, "min", "max", "default", "per_group", "structural", "manual_only", "relax", "minor_change", "since", "doc"}], "notes": [{"code", "name", "level", "v", "doc"}], "report": [{"name", "unit", "agg", "scope", "note", "v_ix", "doc"}], "cmds": [{"op", "name", "reduce_only", "fields": [同 fields 的元素形状], "doc"}], "sections": [{"tag", "name"}]}`(`sections` 是 `Model::LAYOUT` 各节的 `tag` 与 `name`,无 Model 为空数组;gen-schema 据它核对检查点节 `tag` 只追加);键按此顺序、无多余空白、数值为十进制整数(原始定点);`minor_change` 写成字符串 `"none"`、`"any"`、`"rel_pct:<n>"` 或 `"abs:<原始值>"`;另附 `"display"` 子对象给出按单位换算的十进制字符串。
+- **规范 schema JSON**(本模块生成,`GetSchema`、hft-cfg、ops_bot、pipeline、watchtower、journal-archiver 只认它):`{"name", "kind_id", "non_prod_only", "schema_id", "schema_version", "fields": [{"ix", "name", "unit", "enum"?, "min", "max", "default", "per_group", "structural", "manual_only", "relax", "minor_change", "since", "doc"}], "notes": [{"code", "name", "level", "v", "doc"}], "report": [{"name", "unit", "agg", "scope", "note", "v_ix", "doc"}], "cmds": [{"op", "name", "reduce_only", "fields": [同 fields 的元素形状], "doc"}], "sections": [{"tag", "name"}]}`(`sections` 是 `Model::LAYOUT` 各节的 `tag` 与 `name`,无 Model 为空数组;gen-schema 据它核对检查点节 `tag` 只追加);键按此顺序、无多余空白、数值为十进制整数(原始定点);`minor_change` 写成字符串 `"none"`、`"any"`、`"rel_pct:<n>"` 或 `"abs:<原始值>"`;单位、`relax`、Note `level`、报表 `agg`/`scope` 写成小写字符串(`"rate"`、`"notional"`、`"qty"`、`"px"`、`"duration_ms"`、`"count"`、`"bool"`、`"enum"`;`"up"`/`"down"`/`"none"`;`"p1"`/`"p2"`/`"info"`;`"count"`/`"sum"`/`"last"`/`"max"`/`"p99"`;`"instance"`/`"group"`);参数字段与命令字段的每个元素在 `doc` 之后另附 `"display":{"min","max","default"}` 子对象,值为 `format_value` 的输出(`Qty`/`Px` 无资产指数,写原始整数)。
 - **`decode`/`validate` 的执行位置与预算**:`SetParams` 时它们在 ctl-gateway 的 warm 线程上运行(不在 sequencer 热线程);必须有界、无 I/O,预算 p99 ≤ 2 ms(按 group 数线性,`params/validate` 基准);超预算视为参数无效(`InvalidArgs`),旧参数继续生效。**禁止 panic**:发布剖面 `panic = "abort"`,ctl-gateway 线程上的 panic 使整个 hft-core 进程退出(退出码见 [apps/hft-core](../../apps/hft-core/README.md));越界、溢出、除零一律用 checked 运算返回 `ParamError`(属性测试覆盖,见 [TESTS.md](TESTS.md) SDK-102)。hft-cfg 离线只做 schema 级校验,跨字段校验只在发送前的 PREVIEW 中由 gateway 执行。
 - **`define_params!`**:SDK 提供的声明宏,一处声明生成字段结构体、`ParamSchemaDesc` 常量、`ParamSet::decode`(= `params::decode_body` + 类型化 + 按 gix 展开)与按 group 解析后的访问表;交叉校验由策略写一个 `fn check(&self, groups, rd) -> Result<(), ParamError>` 挂入 `validate`。
 
@@ -1090,7 +1107,7 @@ pub trait StrategySet: 'static {
     /// ctl-gateway 的 SetParams 预览(冷):按新旧参数与 GroupTable(以 GroupId 对齐)估算;口径见"参数变化时的 group 重置"第 3 条。
     fn reset_preview(old: &Self::Params, old_g: &GroupTable, new: &Self::Params, new_g: &GroupTable) -> ResetPreview;
     #[cfg(feature = "schema-json")]
-    fn schema_json(kind_id: u16) -> Option<String>;          // GetSchema 与 `hft-core schemas`(经 registry::export_schemas)
+    fn schema_json(kind_id: u16) -> Option<String>;          // = params::schema_json(&DESC, Model::LAYOUT, schema.version);GetSchema 与 `hft-core schemas`(经 registry::export_schemas)
     fn cmds(kind_id: u16) -> &'static [CmdDesc];             // ctl-gateway 校验 StrategyCmd 用;集合外的 kind_id → 空
 }
 /// 与 hft-event CmdPreview 的同名字段同名同宽,原样进入 SetParams 的预览。
@@ -1246,7 +1263,7 @@ pub mod testing {
 
 ### 快照节
 
-- `SnapshotWriter`/`SnapshotReader` 是本 crate 的定长字节写入/读取器(小端,`put_u8…put_i128`、`put_bytes`、`section(tag)`);`SnapshotReader::desc_version(&self) -> u16` 返回构造者填入的节版本(策略节 = 行头 `desc_version`,其他用途为 0)。快速部分每实例上限 `strategy_snapshot_max`(256 KiB),超限 → `SnapshotFull`(配置错误,在最大 group 数的测试里暴露;writer 以上限构造,越界的那次 `put_*` 起不再写入,`SnapshotWriter::status() -> Result<usize /* 已写字节 */, SnapshotFull>` 供调用方在 `snapshot` 返回后检查);Model 的检查点没有固定上限,以 `Model::snapshot_bytes` 的声明为准。引擎 L1 组件的快照节使用同一类型;快照记录的整体结构(`SnapshotHdr` + 分节)归 [journal-format](../../docs/subsystems/journal-format.md)。
+- `SnapshotWriter`/`SnapshotReader` 是本 crate 的定长字节写入/读取器(小端,`put_u8…put_i128`、`put_bytes`、`put_row`、`section(tag)`):`SnapshotWriter::new(limit)` 在构造时一次分配上限大小的缓冲,`clear()` 复用,之后不再分配;`section(tag)` 是策略与 Model 状态的布局标记(`SectionDesc.tag`),普通 writer 不为它写字节;引擎 L1 组件的节用 `begin_section(section, version)` … `end_section()` 写出,前缀为 hft-event `SectionHdr`(`count` = 节内 `put_row`/`add_rows` 计的行数,`len` = 节体补零到 8 B 后的长度);读者 `next_section()`/`find_section(n)` 按 `SectionHdr` 定位(长度不是 8 的倍数、超出剩余字节或保留字段非 0 → `RestoreError::BadSection`),`get_*` 读过尾 → `Truncated`,`try_row` 读含枚举的行(非法判别值 → `BadValue`);`RestoreError` 另有 `VersionUnsupported`、`Capacity`(`#[non_exhaustive]`)。`SnapshotReader::desc_version(&self) -> u16` 返回构造者填入的节版本(策略节 = 行头 `desc_version`,其他用途为 0)。快速部分每实例上限 `strategy_snapshot_max`(256 KiB),超限 → `SnapshotFull`(配置错误,在最大 group 数的测试里暴露;writer 以上限构造,越界的那次 `put_*` 起不再写入,`SnapshotWriter::status() -> Result<usize /* 已写字节 */, SnapshotFull>` 供调用方在 `snapshot` 返回后检查);Model 的检查点没有固定上限,以 `Model::snapshot_bytes` 的声明为准。引擎 L1 组件的快照节使用同一类型;快照记录的整体结构(`SnapshotHdr` + 分节)归 [journal-format](../../docs/subsystems/journal-format.md)。
 - 快速部分的状态进 `StateSnapshot` 的策略节:sequencer 为每个实例写行头 `StrategyRowHdr`(布局与行版本归 [hft-sequencer](../hft-sequencer/README.md),其中 `desc_version` = `StrategyDesc.version`),节体由策略写。关键帧在空闲轮一次写完全部节(不分片;周期与预算归 hft-sequencer 与 [latency-budget](../../docs/latency-budget.md)),所以 `Strategy::snapshot` 必须 O(状态字节)、无分配。Model 的 `snapshot_path`/`restore_path`/`snapshot_chunk`/`restore` 只用于 [Model 检查点](#model-检查点)文件,不进 journal。
 - `snapshot_chunk` 的 writer 在 `max_bytes` 处不截断:Model 自己按"再加一个 group 会超出就停"决定块边界;writer 只统计字节数供 advisor 计时与 `snapshot_bytes` 核对。
 
@@ -1275,9 +1292,9 @@ pub mod testing {
 | 文件 | 职责 |
 |---|---|
 | `src/lib.rs` | 重导出(含 `prelude` 的 L0 类型);`Strategy`、`Model`、`NoModel`、`StrategyDesc`、`StrategyInstance`、`ModelParamEffect`、`GroupResets`、`ResetCause`、`SnapshotProgress` |
-| `src/params.rs`、`src/params_macro.rs` | `ParamSet`、`ParamSchemaDesc`、`FieldDesc`、`Relax`、`MinorChange`、`Unit`、`ParamError`、`define_params!`、编译期校验 |
-| `src/params/{body.rs,codec.rs,text.rs,schema_json.rs,minor.rs}` | SPB1 body 布局与 `body_view`、`params` 编解码器、文本解析与格式化、规范 schema JSON 与摘要(`schema-json` 特性)、`minor_change_check` |
-| `src/desc.rs` | `NoteDesc`、`ReportFieldDesc`、`ReportAgg`、`ReportScope`、`CmdDesc`、`CmdView`、描述符编译期校验 |
+| `src/params.rs`、`src/params_macro.rs` | `ParamSet`、`ParamSchemaDesc`、`FieldDesc`、`FieldRef`、`SchemaView`、`Relax`、`MinorChange`、`Unit`、`ParamError`、`RawParams`、`define_params!`、编译期校验 |
+| `src/params/{body.rs,codec.rs,text.rs,schema_json.rs,minor.rs,json.rs,owned.rs}` | SPB1 body 布局与 `body_view`、`params` 编解码器(含命令载荷)、文本解析与格式化、规范 schema JSON 与摘要(`schema-json` 特性)、`minor_change_check`、手写 JSON 读取、`OwnedSchema` |
+| `src/desc.rs` | `NoteDesc`、`ReportFieldDesc`、`ReportAgg`、`ReportScope`、`CmdDesc`、`CmdSchema`、`CmdView`、描述符编译期校验 |
 | `src/checkpoint.rs`、`src/layout.rs` | 检查点键类型(`CkptKey`:`kind_id`、`layout_version`、`schema_id`、实例、`last_seq`)与键比较;`ModelLayoutDesc` 与规范 JSON;文件格式与读写在 hft-core / advisor |
 | `src/group.rs` | `GroupTable`、`GroupSpecExt::fingerprint` |
 | `src/views.rs` | `Views`、`ModelViews`、`BookRead`、`Now`、`RefView` |

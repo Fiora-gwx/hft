@@ -1,0 +1,35 @@
+# SDK-120 / SDK-121 parameter golden (one override per per_group field). Shape: tools/README.md "hft-cfg" strategy TOML.
+[strategy]
+instance = "sdk-probe"
+account = "sdk-a1"
+schema = { id = 65281, version = 2 }
+version = 1
+source = "manual"
+
+[defaults]
+cooldown_ms = "30s"
+mode = "b"
+
+[[groups]]
+n = 1
+asset = "BTC"
+open_allowed = true
+legs = [ { inst = "v1:BTC-SPOT" }, { inst = "v2:BTC-PERP" } ]
+[groups.overrides]
+pct_bin = "0.02%"
+
+[[groups]]
+n = 2
+asset = "BTC"
+open_allowed = true
+legs = [ { inst = "v1:BTC-SPOT" }, { inst = "v2:BTC-PERP" } ]
+[groups.overrides]
+open_th = "0.6%"
+
+[[groups]]
+n = 3
+asset = "BTC"
+open_allowed = true
+legs = [ { inst = "v1:BTC-SPOT" }, { inst = "v2:BTC-PERP" } ]
+[groups.overrides]
+max_qty = "0.5"
