@@ -1,0 +1,123 @@
+error[E0277]: the trait bound `E: zerocopy::FromBytes` is not satisfied
+  --> tests/ui/rt_028_7_enum.rs:13:31
+   |
+13 |     let _ = ShmSpsc::create::<E>(Path::new("/nonexistent-hft-dir/ring"), 2, PageSize::Normal, RingSide::Producer, 1);
+   |                               ^ unsatisfied trait bound
+   |
+help: the trait `zerocopy::FromBytes` is not implemented for `E`
+  --> tests/ui/rt_028_7_enum.rs:8:1
+   |
+ 8 | enum E {
+   | ^^^^^^
+   = note: Consider adding `#[derive(FromBytes)]` to `E`
+   = help: the following other types implement trait `zerocopy::FromBytes`:
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+             (A, B, C, D, E, F, G, H)
+           and $N others
+note: required by a bound in `ShmSpsc::create`
+  --> src/ring/shm.rs
+   |
+   |     pub fn create<T>(
+   |            ------ required by a bound in this associated function
+...
+   |         T: FromBytes + IntoBytes + KnownLayout + Immutable + Copy,
+   |            ^^^^^^^^^ required by this bound in `ShmSpsc::create`
+
+error[E0277]: the trait bound `E: zerocopy::IntoBytes` is not satisfied
+  --> tests/ui/rt_028_7_enum.rs:13:31
+   |
+13 |     let _ = ShmSpsc::create::<E>(Path::new("/nonexistent-hft-dir/ring"), 2, PageSize::Normal, RingSide::Producer, 1);
+   |                               ^ unsatisfied trait bound
+   |
+help: the trait `zerocopy::IntoBytes` is not implemented for `E`
+  --> tests/ui/rt_028_7_enum.rs:8:1
+   |
+ 8 | enum E {
+   | ^^^^^^
+   = note: Consider adding `#[derive(IntoBytes)]` to `E`
+   = help: the following other types implement trait `zerocopy::IntoBytes`:
+             ()
+             Atomic<bool>
+             Atomic<i16>
+             Atomic<i32>
+             Atomic<i64>
+             Atomic<i8>
+             Atomic<isize>
+             Atomic<u16>
+           and $N others
+note: required by a bound in `ShmSpsc::create`
+  --> src/ring/shm.rs
+   |
+   |     pub fn create<T>(
+   |            ------ required by a bound in this associated function
+...
+   |         T: FromBytes + IntoBytes + KnownLayout + Immutable + Copy,
+   |                        ^^^^^^^^^ required by this bound in `ShmSpsc::create`
+
+error[E0277]: the trait bound `E: zerocopy::KnownLayout` is not satisfied
+  --> tests/ui/rt_028_7_enum.rs:13:31
+   |
+13 |     let _ = ShmSpsc::create::<E>(Path::new("/nonexistent-hft-dir/ring"), 2, PageSize::Normal, RingSide::Producer, 1);
+   |                               ^ unsatisfied trait bound
+   |
+help: the trait `zerocopy::KnownLayout` is not implemented for `E`
+  --> tests/ui/rt_028_7_enum.rs:8:1
+   |
+ 8 | enum E {
+   | ^^^^^^
+   = note: Consider adding `#[derive(KnownLayout)]` to `E`
+   = help: the following other types implement trait `zerocopy::KnownLayout`:
+             &T
+             &mut T
+             ()
+             *const T
+             *mut T
+             Atomic<*mut T>
+             Atomic<bool>
+             Atomic<i16>
+           and $N others
+note: required by a bound in `ShmSpsc::create`
+  --> src/ring/shm.rs
+   |
+   |     pub fn create<T>(
+   |            ------ required by a bound in this associated function
+...
+   |         T: FromBytes + IntoBytes + KnownLayout + Immutable + Copy,
+   |                                    ^^^^^^^^^^^ required by this bound in `ShmSpsc::create`
+
+error[E0277]: the trait bound `E: zerocopy::Immutable` is not satisfied
+  --> tests/ui/rt_028_7_enum.rs:13:31
+   |
+13 |     let _ = ShmSpsc::create::<E>(Path::new("/nonexistent-hft-dir/ring"), 2, PageSize::Normal, RingSide::Producer, 1);
+   |                               ^ unsatisfied trait bound
+   |
+help: the trait `zerocopy::Immutable` is not implemented for `E`
+  --> tests/ui/rt_028_7_enum.rs:8:1
+   |
+ 8 | enum E {
+   | ^^^^^^
+   = note: Consider adding `#[derive(Immutable)]` to `E`
+   = help: the following other types implement trait `zerocopy::Immutable`:
+             &T
+             &mut T
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+           and $N others
+note: required by a bound in `ShmSpsc::create`
+  --> src/ring/shm.rs
+   |
+   |     pub fn create<T>(
+   |            ------ required by a bound in this associated function
+...
+   |         T: FromBytes + IntoBytes + KnownLayout + Immutable + Copy,
+   |                                                  ^^^^^^^^^ required by this bound in `ShmSpsc::create`

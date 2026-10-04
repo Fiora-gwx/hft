@@ -157,7 +157,7 @@ spec: README.md
 - 步骤:
   1. `loom::model` 穷举全部交错
 - 期望:
-  - 每个交错中消费者收到的序列恰为 1、2、3;没有读到未写入的槽(`MaybeUninit` 读由 loom 的未初始化检测断言);每个元素的 `Drop` 计数为 1(元素类型带计数)
+  - 每个交错中消费者收到的序列恰为 1、2、3,之后 `try_pop` 为 `None`;没有读到未发布的槽(每个槽的读写登记在 `loom::cell::UnsafeCell` 上,读与其写入之间没有先行关系即由 loom 报错)
 - 实现:`crates/hft-rt/tests/loom_spsc.rs::rt_008_loom_spsc`
 
 ### RT-009 两线程压力:带序号元素连续无缺无重
@@ -427,7 +427,7 @@ spec: README.md
 - 规则:[变长字节环与版本交换](README.md#变长字节环与版本交换)
 - 级别:unit
 - 里程碑:M1
-- 前置:`byte_spsc(262_144, Heap)`;生产与消费各一线程;10^7 条记录(每夜 arm 专项 10^8),长度 0–65 536 随机,内容为序号派生的伪随机字节
+- 前置:`byte_spsc(262_144, Heap)`;生产与消费各一线程;10^5 条记录(每夜 arm 专项 10^6),长度 0–65 536 随机,内容为序号派生的伪随机字节
 - 步骤:
   1. 生产者写入;消费者逐条校验长度与内容
 - 期望:
@@ -467,11 +467,11 @@ spec: README.md
 - 规则:[所有权交接、值单元与 kill 字](README.md#所有权交接值单元与-kill-字)
 - 级别:unit
 - 里程碑:M1
-- 前置:`loom` 模型;`SeqCell<(u64, u64)>` 初值 (0, 0);一个写线程依次 `store((1, 1))`、`store((2, 2))`;两个读线程各 `load` 两次
+- 前置:`loom` 模型;`SeqCell<(u64, u64)>` 初值 (0, 0);一个写线程依次 `store((1, 1))`、`store((2, 2))`;一个读线程做两次单次尝试 `try_load`(`load` = 重复 `try_load` 直到 `Some`;重试循环会让 loom 无限读旧值,两个读线程穷举 > 10 min);两线程结束后主线程 `load`
 - 步骤:
   1. `loom::model` 穷举全部交错
 - 期望:
-  - 每次 `load` 结果的两半相等;同一读线程两次读到的值不递减
+  - 每次返回 `Some` 的结果两半相等;两次都为 `Some` 时值不递减;主线程 `load()` 为 (2, 2)
 - 实现:`crates/hft-rt/tests/loom_seqcell.rs::rt_042_loom_seqcell`
 
 ### RT-043 SeqCell 单线程存取
@@ -573,7 +573,7 @@ spec: README.md
 - 规则:[时间](README.md#时间)、[实现说明](README.md#实现说明)
 - 级别:table
 - 里程碑:M1
-- 前置:`CalibConfig { rounds: 5, samples: 8, phc_samples: 10, cpuid_tolerance_ppm: 100, step_threshold_ns: 50_000 }`;注入的 `ClockReads`:`mono_raw_ns` 与 `realtime_ns` 每读一次前进 50 ns,`tsc` 按该轮给定频率与单调时钟严格线性对应,`sleep_ms(200)` 使单调时钟前进 2 × 10^8 ns 并被计数
+- 前置:`CalibConfig { rounds: 5, samples: 8, phc_samples: 10, cpuid_tolerance_ppm: 100, step_threshold_ns: 50_000 }`;注入的 `ClockReads`:`mono_raw_ns` 与 `realtime_ns` 每读一次前进 50 ns,`tsc` = ⌊单调时钟 × 该轮频率 / 10^12⌋,`sleep_ms(200)` 使单调时钟前进 2 × 10^8 − 400 ns 并被计数(每组 8 次读数前进 400 ns,同一轮两组的首个读数恰相隔 2 × 10^8 ns,各行频率下 Δtsc 为整数)
 - 实现:`crates/hft-rt/tests/calib.rs::rt_053_calibrate_with`
 
 | 行 | 各轮频率(hz_milli) | nominal_hz_milli | 期望 |

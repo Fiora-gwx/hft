@@ -1,0 +1,30 @@
+[package]
+name = "hft-rt"
+description = "Runtime primitives shared by hot and cold processes: SPSC rings, TSC clock, pinning, host checks, huge pages, heartbeats, idle policy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+hft-types.workspace = true
+libc.workspace = true
+zerocopy.workspace = true
+
+[target.'cfg(loom)'.dependencies]
+loom.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+criterion.workspace = true
+trybuild.workspace = true
+rtrb.workspace = true
+static_assertions.workspace = true
+
+[[bench]]
+name = "rt"
+harness = false

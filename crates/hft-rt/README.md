@@ -67,7 +67,8 @@ impl ShmSpsc {
     pub fn attach<T>(path: &Path, side: RingSide, layout_id: u64) -> Result<ShmEnd<T>, ShmErr>
         where T: zerocopy::FromBytes + zerocopy::IntoBytes + zerocopy::KnownLayout + zerocopy::Immutable + Copy;
 }
-pub enum ShmEnd<T> { Producer(ShmProducer<T>), Consumer(ShmConsumer<T>) } // 与进程内同名方法;另有 peer()、beat() 与 replaced()
+pub enum ShmEnd<T> { Producer(ShmProducer<T>), Consumer(ShmConsumer<T>) } // 与进程内同名方法;另有 peer()、beat()、replaced() 与 header() -> &ShmRingHdr
+// ShmEnd::into_producer()/into_consumer() -> Option<…>;create 的 capacity 不是 ≥ 2 的 2 的幂 → LayoutMismatch
 pub struct PeerStatus { pub alive: bool, pub pid: u32, pub epoch: u64, pub last_beat: u64 }
 // alive = 环头 state 为 Ready 且对端 pid 行非 0(只读共享内存,无系统调用;进程是否还在由调用方按 last_beat 停滞判定)
 // replaced():warm 调用,stat 路径并与已映射文件的 inode 比较;inode 不同或路径不存在 → true
@@ -81,7 +82,7 @@ pub struct PeerStatus { pub alive: bool, pub pid: u32, pub epoch: u64, pub last_
 ### 变长字节环与版本交换
 
 ```rust
-pub fn byte_spsc(capacity_bytes: usize, mem: Backing) -> Result<(ByteProducer, ByteConsumer), RtErr>; // 同样有 Shm 版本
+pub fn byte_spsc(capacity_bytes: usize, mem: Backing) -> Result<(ByteProducer, ByteConsumer), RtErr>; // 共享内存版本见已知限制
 impl ByteProducer { pub fn reserve(&mut self, len: u32) -> Option<&mut [u8]>; pub fn commit(&mut self); } // len ≤ capacity/4
 // capacity_bytes 为 2 的幂且 ≥ 64,否则 Capacity;reserve:len > capacity/4 → 永远 None,空间不足 → None;
 // 未 commit 的预留被下一次 reserve 覆盖(从不发布);没有预留时 commit 为空操作;len = 0 的记录合法
@@ -106,7 +107,7 @@ impl<T: Send> MailReceiver<T> { pub fn try_take(&mut self) -> Option<T>; }      
 
 ```rust
 pub struct SeqCell<T: Copy> { /* 单写者 seqlock:seq: AtomicU64 + T;读者重试撕裂读 */ }
-impl<T: Copy> SeqCell<T> { pub fn store(&self, v: T); pub fn load(&self) -> T; }   // store 只能由一个线程调用(调用约定)
+impl<T: Copy> SeqCell<T> { pub fn new(v: T) -> SeqCell<T>; pub fn store(&self, v: T); pub fn load(&self) -> T; pub fn try_load(&self) -> Option<T>; }  // try_load:单次尝试,写入中 → None   // store 只能由一个线程调用(调用约定)
 
 #[derive(Copy, Clone)] pub struct TscUtc { pub base_tsc: Tsc, pub base_utc_ns: i64, pub mult: u64, pub shift: u32, pub err_ns: u32 }
 impl TscUtc { pub fn utc_ns(&self, t: Tsc) -> i64; }     // base_utc_ns + ((t − base_tsc) × mult) >> shift(i128,有符号差,算术右移);warm 线程(ctl-gateway、snap-fetch)把 TSC 换成 UTC;热路径不调用
@@ -156,6 +157,8 @@ pub trait ClockReads { fn tsc(&mut self) -> Tsc; fn mono_raw_ns(&mut self) -> i6
 #[derive(Debug, PartialEq)] pub enum ClockErr { NotInvariant, Unstable, Mismatch, Phc(i32 /* errno */), Os(i32) }
 #[derive(Copy, Clone)] pub struct CalibPair { pub tsc: Tsc, pub realtime_ns: i64, pub phc_ns: i64 /* 0 = 无 */, pub err_ns: u32 /* 误差界 */ }
 pub fn sample_pair(clock: &TscClock, phc: Option<&Phc>) -> Result<CalibPair, ClockErr>; // warm:系统调用;= sample_pair_with(&mut SysClock, clock.hz_milli, phc 的读数, rt.calib.samples)
+                                                                                         // samples 与 PHC 组数(rt.phc.samples)取 calibrate 时的 CalibConfig,记在 TscClock 内(from_hz_milli 取默认 8/10)
+pub struct SysClock;   // ClockReads 的真实实现:tsc_ordered、CLOCK_MONOTONIC_RAW、CLOCK_REALTIME、thread::sleep
 pub fn sample_pair_with<R: ClockReads>(src: &mut R, hz_milli: u64, phc: Option<&PhcOffset>, samples: u8) -> CalibPair; // 纯算法:取窗口最窄的一次,窗口按 hz_milli 换成 ns,err_ns 合并 PHC 误差界
 pub struct Phc { /* /dev/ptp* 的 fd */ } impl Phc {
     pub fn open(dev: &Path) -> Result<Phc, ClockErr>;
@@ -177,6 +180,11 @@ impl DriftTracker {
 
 ```rust
 pub struct CpuSet([u64; 4]);                                  // ≤ 256 个逻辑 CPU
+impl CpuSet {                                                 // 构造与集合运算(≥ 256 的 CPU 号忽略;parse_list 遇到返回 None)
+    pub const fn new() -> CpuSet; pub fn from_cpus(c: &[u16]) -> CpuSet; pub fn parse_list(s: &str) -> Option<CpuSet>; // 内核列表语法 "0-3,8"
+    pub fn insert(&mut self, c: u16); pub fn contains(&self, c: u16) -> bool; pub fn count(&self) -> u32; pub fn is_empty(&self) -> bool;
+    pub fn union(&self, o: &CpuSet) -> CpuSet; pub fn intersects(&self, o: &CpuSet) -> bool; pub fn is_subset(&self, o: &CpuSet) -> bool;
+}
 pub fn pin_current_thread(cpu: u16) -> Result<(), RtErr>;     // sched_setaffinity 后用 sched_getcpu 复核;不符 → PinMismatch,系统调用失败 → Os
 pub fn name_current_thread(name: &str);                       // ≤ 15 字节(更长按字节截断到 15),供 /proc 与 perf 识别
 
@@ -191,6 +199,10 @@ impl HostCheck {
 }
 pub struct HostReport { pub bits: HostCheck, pub hard: HostCheck /* bits 中对 need.class 为 hard 的子集 */, pub lines: Vec<String> /* 冷,人读 */ }
 pub fn check_host(root: &SysRoot, hot: &CpuSet, hk: &CpuSet, need: &HostNeeds) -> HostReport; // root 可指向测试夹具目录;不读 rt.host.mode
+pub struct SysRoot { /* 根路径 + 是否真实根 */ }
+impl SysRoot { pub fn real() -> SysRoot; pub fn fixture(dir: impl Into<PathBuf>) -> SysRoot; } // real = "/";fixture 的可用空间取其 statvfs 文件
+pub enum Isa { Aarch64, X86_64 }                              // Isa::TARGET = 编译目标(非 aarch64 一律按 x86_64 表)
+pub fn required_cpu_features() -> Vec<&'static str>;          // CPU_NOT_NEOVERSE_V1_COMPAT 的清单(cpuinfo 名);非 aarch64 为空
 pub use hft_types::HostClass;                                 // 定义与编码归 hft-types;C32 = prod + sim 同机的默认候选,C16 = 条件候选(latency-budget §7);选定归 apps/hft-core;各类的 CPU/内存下限与 hard 位见实现说明
 pub struct HostNeeds {
     pub class: HostClass, pub min_cpus: u16, pub max_cpus: u16, pub min_mem_mib: u32, pub isa: Isa,
@@ -207,6 +219,7 @@ impl HugeRegion {
     pub fn anon(len: usize, page: PageSize, numa: Option<u8>) -> Result<HugeRegion, RtErr>; // len 向上取整到页;页不足 → NoMem
     pub fn file(path: &Path, len: usize, page: PageSize, mode: OpenMode) -> Result<HugeRegion, RtErr>; // hugetlbfs / /dev/shm
     pub fn prefault(&self);                                   // 每页读一个字节并原值写回(新建区域仍全为 0,已有内容不变)
+    pub fn as_ptr(&self) -> *mut u8; pub fn len(&self) -> usize; pub fn page(&self) -> PageSize;  // len = 取整后的映射长度
 }
 pub enum OpenMode { CreateNew /* 已存在 → Os(EEXIST) */, OpenExisting /* 不存在 → Os(ENOENT);长度不足 len → NoMem */ }
 pub fn lock_all() -> Result<(), RtErr>;                       // mlockall(MCL_CURRENT | MCL_FUTURE);失败 → Os(errno)
@@ -228,11 +241,12 @@ impl Backoff { pub fn new(spin_limit: u32) -> Backoff; pub fn snooze(&mut self);
 #[repr(C, align(128))]
 pub struct Heartbeat {               // 一条 128 B 填充行(覆盖相邻行预取),单写者
     count: AtomicU64,                //   0 每轮主循环 +1
-    pub name: [u8; 16],              //   8 线程名(ASCII,claim 时写一次)
-    pub core: u16, pub kind: u8,     //  24 kind:Sequencer=1 Feed=2 Gw=3 Persist=4 Housekeeping=5 Advisor=6 Ctl=7 Ext=8 ChainWorker=9(chain-core 的 ingest/sim/send/receipt)Mixed=10(线程计划里承载多个任务的线程;按线程 claim,一线程一槽)
+    pub name: [AtomicU8; 16],        //   8 线程名(ASCII,claim 时写一次;块与其他进程共享且经 & 写入,故为原子)
+    pub core: AtomicU16, pub kind: AtomicU8, //  24 kind(HbKind 的码值):Sequencer=1 Feed=2 Gw=3 Persist=4 Housekeeping=5 Advisor=6 Ctl=7 Ext=8 ChainWorker=9(chain-core 的 ingest/sim/send/receipt)Mixed=10(线程计划里承载多个任务的线程;按线程 claim,一线程一槽)
     pub _pad: [u8; 101],
 }
-impl Heartbeat { pub fn beat(&self); pub fn read(&self) -> u64; }   // Relaxed 读 + Release 写,无 RMW、无系统调用
+impl Heartbeat { pub const fn new() -> Heartbeat; pub fn beat(&self); pub fn read(&self) -> u64; pub fn name_bytes(&self) -> [u8; 16]; }   // beat:Relaxed 读 + Release 写,无 RMW、无系统调用
+#[repr(u8)] pub enum HbKind { Sequencer = 1, Feed = 2, Gw = 3, Persist = 4, Housekeeping = 5, Advisor = 6, Ctl = 7, Ext = 8, ChainWorker = 9, Mixed = 10 }
 pub struct HeartbeatWatch { /* last, stalled */ }
 impl HeartbeatWatch {
     pub fn new() -> HeartbeatWatch;
@@ -253,7 +267,7 @@ pub struct HkLine {
     pub layout_version: u32,         // 1;读者遇到不认识的版本拒绝启动
     pub pid: u32,
     pub instance_id: u8, pub _rsv: u8 /* 0;保留,读者忽略 */, pub state: AtomicU8 /* Starting=1 Warmup=2 Running=3 Draining=4 Stopped=5 */,
-    pub n_slots: u8,                 // 已 claim 的区 2.. 数量
+    pub n_slots: AtomicU8,           // 已 claim 的区 2.. 数量
     pub _p: [u8; 4],
     pub boot_id: [u8; 16], pub started_utc_ns: i64, pub hk_utc_ns: AtomicI64,
 }
@@ -288,6 +302,7 @@ pub trait PollTask {
     /// 进入 park 前的最后检查:输入环/邮箱/socket 缓冲里是否有待处理的东西(只读,无副作用)。
     fn has_pending(&self) -> bool;
 }
+pub struct WaitFds { /* ≤ 64 个 fd */ }  impl WaitFds { pub fn push(&mut self, fd: i32) -> bool /* 满 → false */; pub fn as_slice(&self) -> &[i32]; }
 #[derive(Copy, Clone)] pub struct Polled { pub did_work: bool }
 #[derive(Copy, Clone, Debug, PartialEq)] pub enum IdleAction { Continue, Relax, Park { timeout_ns: u64 } }   // timeout 为 0 时不 park,按 Continue 处理
 
@@ -311,6 +326,7 @@ impl<T: PollTask, const N: usize> TaskLoop<T, N> {
     pub fn idle_action(&mut self, now: Tsc, did_work: bool) -> IdleAction;
     /// 线程主循环:loop { round(); 空闲处理 };stop 置位后返回。由 apps 在线程函数里调用。
     pub fn run(&mut self, stop: &AtomicBool, hb: &Heartbeat);
+    pub fn tasks(&self) -> &[T; N]; pub fn tasks_mut(&mut self) -> &mut [T; N];
 }
 
 pub struct Parker { /* state: CachePadded<AtomicU32>(RUNNING=0 PARKING=1 PARKED=2)、后端:Futex | Epoll{epfd, eventfd} */ }
@@ -389,6 +405,8 @@ impl RtConfig { pub fn validate(&self) -> Result<(), &'static str>; } // 失败�
 
 <details><summary>实现要点</summary>
 
+**平台**:Linux 专用设施(mmap、futex、epoll、`sched_setaffinity`、`mlockall`、PHC、`HeartbeatBlock` 与共享内存环)在其他平台照常编译,调用返回 `RtErr::Os(38)`(ENOSYS)、`ShmErr::Io` 或 `ClockErr::Phc(38)`;`name_current_thread` 为空操作。
+
 **`Spsc` 布局**(进程内与共享内存相同;共享内存版前面多一个 4 KiB 文件头):
 
 ```
@@ -407,8 +425,8 @@ slots: [MaybeUninit<T>; N],首槽对齐 128 B
 ```
 行 0(初始化后只读): magic *b"HFTRING1", version: u32 = 1, state: AtomicU32 (Creating=0 Ready=1 Closed=2),
                     layout_id: u64, elem_size: u32, elem_align: u32, capacity: u64, epoch: u64, boot_id: [u8; 16], creator_pid: u32
-行 1: producer_pid: AtomicU32, producer_start: AtomicU64(/proc 启动时间,防 pid 复用), producer_beat: AtomicU64
-行 2: consumer_pid, consumer_start, consumer_beat(同上)
+行 1: producer: PeerLine { pid: AtomicU32, start: AtomicU64(/proc 启动时间,防 pid 复用), beat: AtomicU64 }
+行 2: consumer: PeerLine(同上)
 其后 4 KiB 起:producer 行、consumer 行、slots(同进程内布局)
 ```
 
@@ -430,7 +448,7 @@ slots: [MaybeUninit<T>; N],首槽对齐 128 B
 2. 标称频率:aarch64 取 `CNTFRQ_EL0`(Graviton 的计数器频率与分辨率待核实,方法见开发备忘:分辨率若为数 ns,`rx_tsc` 等测量的粒度随之变粗,基准如实记录);x86 若 CPUID `0x15` 给出 crystal 与比值则计算标称值,否则无。
 3. 实测:`rounds` 轮,每轮在开始与 200 ms 后各采一对 `(tsc, CLOCK_MONOTONIC_RAW)`(采样用"TSC—读时钟—TSC"夹逼,取 `samples` 次中窗口最窄的一次,TSC 取两读数中点),`hz = Δtsc / Δns`,取中位;各轮离散(`(最大 − 最小) / 中位`)> 1 ppm 报 `Unstable`;有标称值且 `|中位 − 标称| / 标称` > `cpuid_tolerance_ppm` 报 `Mismatch`(恰等于不报)。
 4. 由 `hz_milli` 计算 `mult/shift`(`shift = 32`,`mult = round(1e9 × 2^32 / hz)`),使 `delta_ns` 为一次 128 位乘与移位。
-5. 按第 4 步的频率取一个 `sample_pair` 作 `base`(含 PHC 若可用)。
+5. 按第 4 步的频率取一个 `sample_pair_with`(无 PHC)作 `base`;`calibrate` 不打开 PHC 设备,需要 PHC 的调用方随后以 `sample_pair(&clock, Some(&phc))` 取校准对。
 
 `sample_pair`:(a)TSC ↔ `CLOCK_REALTIME`:读 TSC → `clock_gettime(CLOCK_REALTIME)` → 读 TSC,`samples` 次取窗口最窄者(同宽取最早一次),TSC 取中点(向下取整),`err_ns` = 窗口换算成 ns 后的一半(向上取整;不设 200 ns 之类的硬窗口,如实报告);(b)PHC ↔ 系统时钟:`ioctl(PTP_SYS_OFFSET_EXTENDED)` 一次取 `rt.phc.samples` 组 `(sys_before, phc, sys_after)`,取最窄一组,误差界 = 其宽度一半,与 (a) 的误差界相加得 `err_ns`;`phc_ns = realtime_ns + (PhcOffset.phc_ns − PhcOffset.sys_ns)`。无 PHC 时 `phc_ns = 0`、`err_ns` 只含 (a)。不用 `clock_gettime(FD_TO_CLOCKID)` 读 PHC(无法给出误差界)。ENA PHC 读取上限约 125 次/s,每秒一次 ioctl(10 组)在限内([02 §5](../../design/02-硬件与托管方案.md));chrony 若也读 PHC,两者合计须在上限内(由 [hostprobe](../../tools/README.md#hostprobe) 检查)。
 
@@ -533,6 +551,7 @@ x86_64(可选 metal 剖面):
 
 ## 已知限制与后续工作
 
+- `ByteSpsc` 的共享内存版本未实现(当前没有跨进程变长载荷的使用者;ctl 环在进程内),首个使用者出现时按 `ShmSpsc` 的文件头与协议补上。
 - 只支持 SPSC;多订阅者广播(一个生产者、多个共享内存消费者)不在范围,需要时评估 iceoryx2 或加 SPMC 序号广播([13 O1](../../design/13-设计评审与优化.md))。
 - 跨机传输(hft-core ↔ 另一台主机上的 chain-core)不在本 crate;走 UDP + 序号/确认,见 [external-venue-protocol](../../docs/subsystems/external-venue-protocol.md)。
 - CI 只用 GitHub 托管 runner:PR 质量门(`ubuntu-latest`,x86_64)编译并测试 x86_64 路径;aarch64 路径(`CNTVCT_EL0`、`ISB`、Graviton 主机检查表)的单元测试在按 tag 的 `ubuntu-24.04-arm` 发布作业里先于打包运行;基准验收在 M1.5 起按需租用的 aarch64 参考机(c8g 系列)上做;可选的 metal 剖面立项时另行验收。

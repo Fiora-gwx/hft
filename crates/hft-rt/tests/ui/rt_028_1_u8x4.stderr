@@ -1,0 +1,28 @@
+error[E0080]: evaluation panicked: ShmSpsc element: size 8 B – 4 KiB, a multiple of 8, align ≤ 8
+ --> $RUST/core/src/panic.rs
+  |
+  = note: evaluation of `hft_rt::ring::shm::ElemCheck::<[u8; 4]>::OK` failed here
+  |
+ ::: src/ring/shm.rs
+  |
+  |       const OK: () = assert!(
+  |  ____________________-
+  | |         size_of::<T>() >= 8
+  | |             && size_of::<T>() <= 4096
+  | |             && size_of::<T>().is_multiple_of(8)
+  | |             && align_of::<T>() <= 8,
+  | |         "ShmSpsc element: size 8 B – 4 KiB, a multiple of 8, align ≤ 8"
+  | |     );
+  | |_____- in this macro invocation
+
+note: erroneous constant encountered
+ --> src/ring/shm.rs
+  |
+  |         let () = ElemCheck::<T>::OK;
+  |                  ^^^^^^^^^^^^^^^^^^
+
+note: the above error was encountered while instantiating `fn ShmSpsc::create::<[u8; 4]>`
+ --> tests/ui/rt_028_1_u8x4.rs:7:13
+  |
+7 |     let _ = ShmSpsc::create::<[u8; 4]>(Path::new("/nonexistent-hft-dir/ring"), 2, PageSize::Normal, RingSide::Producer, 1);
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
