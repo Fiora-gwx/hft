@@ -1,0 +1,83 @@
+{
+ "BTCUSDT": {
+  "changes": {
+   "binance": 16132,
+   "okx": 0,
+   "bitget": 12912
+  },
+  "binance->bitget": {
+   "hit_rate": 0.812,
+   "delay_ms_p25": 11.01,
+   "delay_ms_p50": 21.24,
+   "delay_ms_p75": 33.27
+  },
+  "bitget->binance": {
+   "hit_rate": 0.115,
+   "delay_ms_p25": 2.59,
+   "delay_ms_p50": 10.14,
+   "delay_ms_p75": 32.93
+  }
+ },
+ "ETHUSDT": {
+  "changes": {
+   "binance": 28369,
+   "okx": 0,
+   "bitget": 28323
+  },
+  "binance->bitget": {
+   "hit_rate": 0.859,
+   "delay_ms_p25": 9.85,
+   "delay_ms_p50": 19.11,
+   "delay_ms_p75": 30.3
+  },
+  "bitget->binance": {
+   "hit_rate": 0.104,
+   "delay_ms_p25": 3.54,
+   "delay_ms_p50": 14.68,
+   "delay_ms_p75": 46.22
+  }
+ },
+ "SOLUSDT": {
+  "changes": {
+   "binance": 3989,
+   "okx": 6442,
+   "bitget": 35278
+  },
+  "binance->okx": {
+   "hit_rate": 0.593,
+   "delay_ms_p25": 5.62,
+   "delay_ms_p50": 9.95,
+   "delay_ms_p75": 21.27
+  },
+  "binance->bitget": {
+   "hit_rate": 0.898,
+   "delay_ms_p25": 5.35,
+   "delay_ms_p50": 12.06,
+   "delay_ms_p75": 22.52
+  },
+  "okx->binance": {
+   "hit_rate": 0.149,
+   "delay_ms_p25": 6.35,
+   "delay_ms_p50": 18.9,
+   "delay_ms_p75": 44.98
+  },
+  "okx->bitget": {
+   "hit_rate": 0.678,
+   "delay_ms_p25": 9.25,
+   "delay_ms_p50": 23.78,
+   "delay_ms_p75": 53.67
+  },
+  "bitget->binance": {
+   "hit_rate": 0.062,
+   "delay_ms_p25": 9.79,
+   "delay_ms_p50": 28.95,
+   "delay_ms_p75": 58.04
+  },
+  "bitget->okx": {
+   "hit_rate": 0.154,
+   "delay_ms_p25": 12.36,
+   "delay_ms_p50": 36.8,
+   "delay_ms_p75": 64.68
+  }
+ }
+}

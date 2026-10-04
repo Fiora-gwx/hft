@@ -1,0 +1,60 @@
+[workspace]
+resolver = "2"
+# M1 members; later milestones add theirs (docs/development.md, architecture-v2/11 §3).
+members = [
+    "crates/hft-types",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "LicenseRef-Proprietary"
+publish = false
+
+[workspace.dependencies]
+hft-types = { path = "crates/hft-types" }
+zerocopy = { version = "0.8", features = ["derive"] }
+crc32c = "0.6"
+sha2 = { version = "0.10", features = ["asm"] }
+rustc-hash = "2"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+libc = "0.2"
+toml = "0.8"
+proptest = "1"
+criterion = { version = "0.5", default-features = false }
+rstest = "0.23"
+loom = "0.7"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+# Build profiles: the single home is docs/development.md#构建剖面.
+[profile.release]
+lto = "thin"
+codegen-units = 16
+panic = "abort"
+overflow-checks = false
+debug = "line-tables-only"
+
+[profile.release-hot]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+
+[profile.ci]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = false
+debug-assertions = true
+overflow-checks = true
+panic = "unwind"
+
+[profile.bench]
+lto = "fat"
+codegen-units = 1

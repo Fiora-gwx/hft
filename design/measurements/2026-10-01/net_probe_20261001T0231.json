@@ -1,0 +1,437 @@
+[
+ {
+  "venue": "binance",
+  "host": "fstream.binance.com",
+  "ips": [
+   "13.159.99.198",
+   "3.115.253.86",
+   "35.73.135.78",
+   "35.73.91.187",
+   "35.74.175.77",
+   "35.78.130.58"
+  ],
+  "n_ips": 8,
+  "rdns": "ec2-13-159-99-198.ap-northeast-1.compute.amazonaws.com",
+  "tcp_min_ms": 1.417,
+  "tcp_p50_ms": 1.744,
+  "tcp_max_ms": 2.766,
+  "tls_min_ms": 4.2,
+  "tls_p50_ms": 4.4,
+  "tls_ver": "TLSv1.3"
+ },
+ {
+  "venue": "binance",
+  "host": "ws-fapi.binance.com",
+  "ips": [
+   "13.192.51.94",
+   "13.196.49.169",
+   "52.194.33.112",
+   "52.198.163.117"
+  ],
+  "n_ips": 4,
+  "rdns": "ec2-13-192-51-94.ap-northeast-1.compute.amazonaws.com",
+  "tcp_min_ms": 1.375,
+  "tcp_p50_ms": 1.55,
+  "tcp_max_ms": 1.848,
+  "tls_min_ms": 3.7,
+  "tls_p50_ms": 3.7,
+  "tls_ver": "TLSv1.3"
+ },
+ {
+  "venue": "binance",
+  "host": "fapi.binance.com",
+  "ips": [
+   "13.114.82.1",
+   "13.159.192.24",
+   "13.159.29.213",
+   "13.192.57.198",
+   "3.112.114.224",
+   "52.194.100.207"
+  ],
+  "n_ips": 8,
+  "rdns": "ec2-13-114-82-1.ap-northeast-1.compute.amazonaws.com",
+  "tcp_min_ms": 1.376,
+  "tcp_p50_ms": 1.529,
+  "tcp_max_ms": 2.028,
+  "tls_min_ms": 3.6,
+  "tls_p50_ms": 3.9,
+  "tls_ver": "TLSv1.3"
+ },
+ {
+  "venue": "binance",
+  "host": "stream.binance.com",
+  "ips": [
+   "13.115.34.218",
+   "18.179.100.0",
+   "18.182.228.122",
+   "3.115.100.104",
+   "52.199.15.157",
+   "52.69.83.64"
+  ],
+  "n_ips": 8,
+  "rdns": "ec2-13-115-34-218.ap-northeast-1.compute.amazonaws.com",
+  "tcp_min_ms": 1.341,
+  "tcp_p50_ms": 1.598,
+  "tcp_max_ms": 2.06,
+  "tls_min_ms": 4.1,
+  "tls_p50_ms": 4.2,
+  "tls_ver": "TLSv1.3"
+ },
+ {
+  "venue": "binance",
+  "host": "ws-api.binance.com",
+  "ips": [
+   "54.150.79.73",
+   "54.168.192.67",
+   "54.64.14.234",
+   "54.95.19.119"
+  ],
+  "n_ips": 4,
+  "rdns": "ec2-54-150-79-73.ap-northeast-1.compute.amazonaws.com",
+  "tcp_min_ms": 1.326,
+  "tcp_p50_ms": 1.583,
+  "tcp_max_ms": 2.053,
+  "tls_min_ms": 6.5,
+  "tls_p50_ms": 6.6,
+  "tls_ver": "TLSv1.2"
+ },
+ {
+  "venue": "binance",
+  "host": "api.binance.com",
+  "ips": [
+   "3.173.240.227"
+  ],
+  "n_ips": 1,
+  "rdns": "server-3-173-240-227.nrt20.r.cloudfront.net",
+  "tcp_min_ms": 1.414,
+  "tcp_p50_ms": 1.476,
+  "tcp_max_ms": 2.557,
+  "tls_min_ms": 3.9,
+  "tls_p50_ms": 4.0,
+  "tls_ver": "TLSv1.3"
+ },
+ {
+  "venue": "binance",
+  "host": "api1.binance.com",
+  "ips": [
+   "18.180.190.213",
+   "52.198.104.15"
+  ],
+  "n_ips": 2,
+  "rdns": "ec2-18-180-190-213.ap-northeast-1.compute.amazonaws.com",
+  "tcp_min_ms": 1.329,
+  "tcp_p50_ms": 1.538,
+  "tcp_max_ms": 2.028,
+  "tls_min_ms": 5.1,
+  "tls_p50_ms": 5.1,
+  "tls_ver": "TLSv1.2"
+ },
+ {
+  "venue": "binance",
+  "host": "api2.binance.com",
+  "ips": [
+   "13.114.56.123",
+   "13.158.244.30"
+  ],
+  "n_ips": 2,
+  "rdns": "ec2-13-114-56-123.ap-northeast-1.compute.amazonaws.com",
+  "tcp_min_ms": 1.316,
+  "tcp_p50_ms": 1.485,
+  "tcp_max_ms": 1.958,
+  "tls_min_ms": 5.2,
+  "tls_p50_ms": 5.4,
+  "tls_ver": "TLSv1.2"
+ },
+ {
+  "venue": "binance",
+  "host": "api3.binance.com",
+  "ips": [
+   "13.159.76.97",
+   "54.150.178.88"
+  ],
+  "n_ips": 2,
+  "rdns": "ec2-13-159-76-97.ap-northeast-1.compute.amazonaws.com",
+  "tcp_min_ms": 1.345,
+  "tcp_p50_ms": 1.462,
+  "tcp_max_ms": 1.652,
+  "tls_min_ms": 5.3,
+  "tls_p50_ms": 5.3,
+  "tls_ver": "TLSv1.2"
+ },
+ {
+  "venue": "binance",
+  "host": "api4.binance.com",
+  "ips": [
+   "13.159.136.114",
+   "54.92.94.205"
+  ],
+  "n_ips": 2,
+  "rdns": "ec2-13-159-136-114.ap-northeast-1.compute.amazonaws.com",
+  "tcp_min_ms": 1.334,
+  "tcp_p50_ms": 1.507,
+  "tcp_max_ms": 1.79,
+  "tls_min_ms": 5.7,
+  "tls_p50_ms": 6.0,
+  "tls_ver": "TLSv1.2"
+ },
+ {
+  "venue": "gate",
+  "host": "api.gateio.ws",
+  "ips": [
+   "13.158.187.177",
+   "13.192.22.120",
+   "52.192.203.140",
+   "52.196.60.59",
+   "52.198.48.75",
+   "52.199.20.161"
+  ],
+  "n_ips": 8,
+  "rdns": "ec2-13-158-187-177.ap-northeast-1.compute.amazonaws.com",
+  "tcp_min_ms": 0.358,
+  "tcp_p50_ms": 0.978,
+  "tcp_max_ms": 1.727,
+  "tls_min_ms": 5.4,
+  "tls_p50_ms": 5.6,
+  "tls_ver": "TLSv1.2"
+ },
+ {
+  "venue": "gate",
+  "host": "fx-ws.gateio.ws",
+  "ips": [
+   "13.112.107.149",
+   "13.113.175.225",
+   "18.181.60.224",
+   "35.72.107.81",
+   "35.79.200.161",
+   "54.150.251.58"
+  ],
+  "n_ips": 8,
+  "rdns": "ec2-13-112-107-149.ap-northeast-1.compute.amazonaws.com",
+  "tcp_min_ms": 0.283,
+  "tcp_p50_ms": 0.567,
+  "tcp_max_ms": 1.646,
+  "tls_min_ms": 3.6,
+  "tls_p50_ms": 3.6,
+  "tls_ver": "TLSv1.2"
+ },
+ {
+  "venue": "gate",
+  "host": "ws.gate.io",
+  "ips": [
+   "35.79.111.189",
+   "52.192.145.243"
+  ],
+  "n_ips": 2,
+  "rdns": "ec2-35-79-111-189.ap-northeast-1.compute.amazonaws.com",
+  "tcp_min_ms": 0.892,
+  "tcp_p50_ms": 1.417,
+  "tcp_max_ms": 1.742,
+  "tls_min_ms": 5.6,
+  "tls_p50_ms": 5.8,
+  "tls_ver": "TLSv1.2"
+ },
+ {
+  "venue": "gate",
+  "host": "fx-api.gateio.ws",
+  "ips": [
+   "13.112.6.66",
+   "13.196.36.210",
+   "35.73.25.39"
+  ],
+  "n_ips": 3,
+  "rdns": "ec2-13-112-6-66.ap-northeast-1.compute.amazonaws.com",
+  "tcp_min_ms": 0.32,
+  "tcp_p50_ms": 0.925,
+  "tcp_max_ms": 2.079,
+  "tls_min_ms": 3.0,
+  "tls_p50_ms": 3.4,
+  "tls_ver": "TLSv1.2"
+ },
+ {
+  "venue": "okx",
+  "host": "ws.okx.com",
+  "ips": [
+   "104.18.43.174",
+   "172.64.144.82"
+  ],
+  "n_ips": 2,
+  "rdns": "104.18.43.174",
+  "tcp_min_ms": 0.908,
+  "tcp_p50_ms": 1.618,
+  "tcp_max_ms": 2.047,
+  "tls_min_ms": 7.1,
+  "tls_p50_ms": 8.0,
+  "tls_ver": "TLSv1.3"
+ },
+ {
+  "venue": "okx",
+  "host": "www.okx.com",
+  "ips": [
+   "104.18.43.174",
+   "172.64.144.82"
+  ],
+  "n_ips": 2,
+  "rdns": "104.18.43.174",
+  "tcp_min_ms": 1.194,
+  "tcp_p50_ms": 1.888,
+  "tcp_max_ms": 2.134,
+  "tls_min_ms": 4.8,
+  "tls_p50_ms": 5.4,
+  "tls_ver": "TLSv1.3"
+ },
+ {
+  "venue": "bybit",
+  "host": "stream.bybit.com",
+  "ips": [
+   "99.84.141.19",
+   "99.84.141.31",
+   "99.84.141.51",
+   "99.84.141.76"
+  ],
+  "n_ips": 4,
+  "rdns": "server-99-84-141-19.nrt57.r.cloudfront.net",
+  "tcp_min_ms": 0.6,
+  "tcp_p50_ms": 1.248,
+  "tcp_max_ms": 1.628,
+  "tls_min_ms": 3.6,
+  "tls_p50_ms": 4.5,
+  "tls_ver": "TLSv1.3"
+ },
+ {
+  "venue": "bybit",
+  "host": "api.bybit.com",
+  "ips": [
+   "54.239.163.57",
+   "54.239.163.61",
+   "54.239.163.69",
+   "54.239.163.94"
+  ],
+  "n_ips": 4,
+  "rdns": "server-54-239-163-57.nrt57.r.cloudfront.net",
+  "tcp_min_ms": 0.686,
+  "tcp_p50_ms": 1.159,
+  "tcp_max_ms": 1.571,
+  "tls_min_ms": 3.2,
+  "tls_p50_ms": 3.5,
+  "tls_ver": "TLSv1.3"
+ },
+ {
+  "venue": "bitget",
+  "host": "ws.bitget.com",
+  "ips": [
+   "3.173.197.11",
+   "3.173.197.14",
+   "3.173.197.40",
+   "3.173.197.57"
+  ],
+  "n_ips": 4,
+  "rdns": "server-3-173-197-11.nrt12.r.cloudfront.net",
+  "tcp_min_ms": 0.779,
+  "tcp_p50_ms": 1.057,
+  "tcp_max_ms": 1.644,
+  "tls_min_ms": 3.4,
+  "tls_p50_ms": 4.0,
+  "tls_ver": "TLSv1.3"
+ },
+ {
+  "venue": "bitget",
+  "host": "api.bitget.com",
+  "ips": [
+   "104.18.14.166",
+   "104.18.15.166"
+  ],
+  "n_ips": 2,
+  "rdns": "104.18.14.166",
+  "tcp_min_ms": 1.557,
+  "tcp_p50_ms": 2.392,
+  "tcp_max_ms": 3.212,
+  "tls_min_ms": 11.4,
+  "tls_p50_ms": 11.9,
+  "tls_ver": "TLSv1.3"
+ },
+ {
+  "venue": "kucoin",
+  "host": "ws-api-spot.kucoin.com",
+  "ips": [
+   "3.164.121.37",
+   "3.164.121.70",
+   "3.164.121.84",
+   "3.164.121.89"
+  ],
+  "n_ips": 4,
+  "rdns": "server-3-164-121-37.nrt12.r.cloudfront.net",
+  "tcp_min_ms": 0.728,
+  "tcp_p50_ms": 1.149,
+  "tcp_max_ms": 1.525,
+  "tls_min_ms": 4.0,
+  "tls_p50_ms": 4.3,
+  "tls_ver": "TLSv1.3"
+ },
+ {
+  "venue": "kucoin",
+  "host": "api.kucoin.com",
+  "ips": [
+   "104.18.33.108",
+   "172.64.154.148"
+  ],
+  "n_ips": 2,
+  "rdns": "104.18.33.108",
+  "tcp_min_ms": 0.896,
+  "tcp_p50_ms": 1.587,
+  "tcp_max_ms": 2.04,
+  "tls_min_ms": 5.7,
+  "tls_p50_ms": 8.6,
+  "tls_ver": "TLSv1.3"
+ },
+ {
+  "venue": "kucoin",
+  "host": "api-futures.kucoin.com",
+  "ips": [
+   "104.18.33.108",
+   "172.64.154.148"
+  ],
+  "n_ips": 2,
+  "rdns": "104.18.33.108",
+  "tcp_min_ms": 0.774,
+  "tcp_p50_ms": 1.645,
+  "tcp_max_ms": 2.605,
+  "tls_min_ms": 5.0,
+  "tls_p50_ms": 5.3,
+  "tls_ver": "TLSv1.3"
+ },
+ {
+  "venue": "hyperliquid",
+  "host": "api.hyperliquid.xyz",
+  "ips": [
+   "99.86.195.32",
+   "99.86.195.44",
+   "99.86.195.72",
+   "99.86.195.78"
+  ],
+  "n_ips": 4,
+  "rdns": "server-99-86-195-32.nrt57.r.cloudfront.net",
+  "tcp_min_ms": 0.631,
+  "tcp_p50_ms": 1.203,
+  "tcp_max_ms": 1.579,
+  "tls_min_ms": 4.3,
+  "tls_p50_ms": 4.3,
+  "tls_ver": "TLSv1.3"
+ },
+ {
+  "venue": "bsc",
+  "host": "bsc-dataseed.bnbchain.org",
+  "ips": [
+   "16.76.147.3",
+   "18.179.73.140",
+   "57.180.144.16"
+  ],
+  "n_ips": 3,
+  "rdns": "ec2-16-76-147-3.ap-northeast-1.compute.amazonaws.com",
+  "tcp_min_ms": 0.313,
+  "tcp_p50_ms": 0.906,
+  "tcp_max_ms": 1.527,
+  "tls_min_ms": 4.2,
+  "tls_p50_ms": 4.3,
+  "tls_ver": "TLSv1.2"
+ }
+]
