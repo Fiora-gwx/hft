@@ -1,0 +1,8 @@
+# refdata-basic: overrides on the base capability rows (rules: hft-refdata VenueCaps).
+[venue_caps.binance-usdm]
+margin_data = { kind = "poll", interval_ms = 5000 }
+reason = "保证金率 5 s 轮询"
+
+[venue_caps.bitget-uta-spot]
+required_spot_borrow = false
+reason = "只做多现货,从不借币"

@@ -1,0 +1,15 @@
+# refdata-basic: strategy instances (kind resolved through the schema index.json, --schemas).
+[[instance]]
+id = 1
+name = "pc-main"
+kind = "probe-taker"
+
+[[instance]]
+id = 2
+name = "pc-b"
+kind = "probe-taker"
+
+[[instance]]
+id = 3
+name = "pc-sim-a"
+kind = "probe-taker"

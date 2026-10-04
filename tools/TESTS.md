@@ -1791,14 +1791,14 @@ spec: README.md
 - 规则:[hft-cfg](README.md#hft-cfg)
 - 级别:unit
 - 里程碑:M2
-- 前置:schema 目录夹具 `tools/hft-cfg/tests/fixtures/schemas/`(由 SDK `params` 对测试 schema 导出:`index.json` + `65280-probe-taker.schema.json`,`schema_version = 2`;字段 `spread_th: Rate[per_group, min 0, max 10_000_000, default 500_000, minor rel_pct:10]`、`max_qty: Qty[per_group]`、`cooldown_ms: DurationMs[min 0, max 60_000, default 1_000, minor abs:100]`、`mode: Enum["a","b"][since 2]`、`bins: Count[structural, min 1, max 64, default 16]`);refdata 夹具 `refdata-basic`(资产 AIN `qty_exp = −2`,实例 id 1 `pc-main` kind `probe-taker`,账户 id 3 `pc-live` 绑定 `pc-main`,venues `binance-usdm`、`bitget-uta-spot`);TOML `pc-main.pc-live.toml`:`version = 42`,`[defaults] spread_th = "0.0005"`,一个 group `n = 101`、两腿 `binance-usdm:AINUSDT`、`bitget-uta-spot:AINUSDT`,`[groups.overrides] max_qty = "5000"`
+- 前置:schema 目录夹具 `tools/hft-cfg/tests/fixtures/schemas/`(由 SDK `params` 对测试 schema 导出:`index.json` + `65280-probe-taker.schema.json`,`schema_version = 2`;字段按序 `spread_th: Rate[per_group, min 0, max 10_000_000, default 500_000, minor rel_pct:10]`、`max_qty: Qty[per_group]`、`cooldown_ms: DurationMs[min 0, max 60_000, default 1_000, minor abs:100]`、`bins: Count[per_group, structural, min 1, max 64, default 16]`、`whitelist: Count[min 0, max 1000, default 3, minor any]`、`limit_x: Count[min 0, max 100, default 7]`、`mode: Enum["a","b"][since 2]`;测试先由 SDK 重新导出并核对与已提交副本相同);refdata 夹具 `tools/hft-cfg/tests/fixtures/refdata-basic/`(资产 AIN `qty_exp = −2`,实例 id 1 `pc-main` kind `probe-taker`,账户 id 3 `pc-live` 绑定 `pc-main`,venues `binance-usdm`、`bitget-uta-spot`;由 `hft-cfg build --kind refdata` 构建为 `refdata.blob`);TOML `pc-main.pc-live.toml`:`version = 1`(第一版,不带 `--against`),`[defaults] spread_th = "0.0005"`,一个 group `n = 101`、两腿 `binance-usdm:AINUSDT`、`bitget-uta-spot:AINUSDT`,`[groups.overrides] max_qty = "5000"`
 - 步骤:
   1. `hft-cfg build --kind strategy --schemas <夹具> --refdata <refdata.blob> --in pc-main.pc-live.toml --out a.blob`
-  2. `hft-cfg show a.blob --schemas <夹具>`
+  2. `hft-cfg show a.blob --schemas <夹具> --refdata <refdata.blob>`
 - 期望:
-  - 步骤 1 退出 0;`StrategyParamsHdr`:`strategy = 1`、`account = 3`、`kind_id = 65280`、`schema_id = 65280`、`schema_ver = 2`、`source = Manual(2)`、`n_groups = 1`、`version = 42`、`schema_digest` = schema 文件中的摘要
+  - 步骤 1 退出 0;`StrategyParamsHdr`:`strategy = 1`、`account = 3`、`kind_id = 65280`、`schema_id = 65280`、`schema_ver = 2`、`source = Manual(2)`、`n_groups = 1`、`version = 1`、`schema_digest` = 按 schema 文件重算、与 `index.json` 一致的摘要
   - `GroupSpec.id = 0x0100_0065`;`max_qty` 覆盖值为 5000(raw 500000,`qty_exp = −2`);`spread_th` 默认值 raw 500000
-  - 步骤 2 的输出含 `spread_th = 0.0005`、group `0x01000065` 的 `max_qty = 5000`、两腿 inst 名,与 TOML 的取值逐项相同
+  - 步骤 2 的输出含 `spread_th = 0.05%`(SDK `format_value` 的 Rate 写法,= TOML 的 0.0005)、group `0x01000065` 的 `max_qty = 5000`、两腿 inst 名,与 TOML 的取值逐项相同
 - 实现:`tools/hft-cfg/tests/strategy.rs::tool_119_toml_blob_show_roundtrip`
 
 ### TOOL-120 同一输入两次编码逐字节相同
@@ -1887,7 +1887,7 @@ spec: README.md
 | TOOL-124.19 | 一条腿 `okx-swap:AIN-USDT-SWAP`(venue 不在账户内) | 退出 1;`LegVenueNotInAccount` |
 | TOOL-124.20 | 两腿基础资产不同(AIN 与 BTC) | 退出 1;`LegAssetMismatch` |
 | TOOL-124.21 | 两腿报价资产不同(USDT 与 USDC) | 退出 1;`QuoteMismatch` |
-| TOOL-124.22 | 两腿 `binance-usdm:AINUSDT` 与 `binance-spot:AINUSDT`(同一交易所) | 退出 1;`SameExchangeLegs` |
+| TOOL-124.22 | 两腿 `binance-usdm:AINUSDT` 与 `binance-spot:AINUSDT`(同一交易所) | 退出 1;`LegVenueNotInAccount`(账户每个交易所只有一个 venue,`check_group` 的逐腿检查先于两腿之间的 `SameExchangeLegs`) |
 | TOOL-124.23 | `n = 0` | 退出 1 |
 | TOOL-124.24 | `n = 1` | 退出 0;`GroupId = 0x0100_0001` |
 | TOOL-124.25 | `n = 0xFF_FFFE` | 退出 0;`GroupId = 0x01FF_FFFE` |
@@ -1902,6 +1902,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:同 TOOL-119;生效 blob `cur.blob`(`version = 7`)含 group n = 101、103、105(各自的资产与腿已知),`group_ctr_hwm = 105`;各行的 TOML 在保留这三个 group 不变的基础上做该行改动,`--against cur.blob`
 - 实现:`tools/hft-cfg/tests/strategy.rs::tool_125_groupid_continuation`
+- 备注:TOOL-125.7 待 hft-cfg 接入 hft-journal 的读取接口后实现;此前 `--against`/`--refdata` 给出目录时退出 2
 
 | 行 | 改动 | 期望 |
 |---|---|---|
@@ -1910,7 +1911,7 @@ spec: README.md
 | TOOL-125.3 | 新增 group `n = 100` | 退出 1 |
 | TOOL-125.4 | group 103 的一条腿换成另一 inst(指纹变化) | 退出 1;报告 `GroupId 0x01000067` 的指纹变化 |
 | TOOL-125.5 | group 103 只把 `open_allowed` 改为 false | 退出 0(指纹只含资产与腿) |
-| TOOL-125.6 | 移除 group 103,同时新增 `n = 103`、腿与原 103 不同 | 退出 1(`n = 103` 不在生效 blob 中,属新增,且不大于 105) |
+| TOOL-125.6 | 移除 group 103,同时新增 `n = 103`、腿与原 103 不同 | 退出 1:同一份 TOML 中与"改 103 的腿"无法区分,报告 `GroupId 0x01000067` 的指纹变化;先单独移除 103 生效、再以新腿新增 `n = 103` 时报告 `n = 103` 不大于 H = 105 |
 | TOOL-125.7 | `--against` 改为 journal 目录,其中该 (pc-main, pc-live) 最后生效的 `StrategyParams` 即 `cur.blob`;新增 `n = 104` | 退出 1(同 TOOL-125.2) |
 | TOOL-125.8 | 不带 `--against`,TOML `version = 8`,新增 `n = 104` | 退出 2;不产出 blob |
 | TOOL-125.9 | 生效 blob 只含 101、103(105 已在更早版本移除)、`group_ctr_hwm = 105`,新增 `n = 105` | 退出 1;报告 `n = 105` 不大于 H = 105(被移除的 n 不再使用) |
@@ -1966,10 +1967,10 @@ spec: README.md
 - 规则:[hft-cfg](README.md#hft-cfg)
 - 级别:unit
 - 里程碑:M3
-- 前置:refdata TOML 夹具 `refdata-basic`(`assets.toml`、`venues.toml`、`insts-*.toml`、`venue_caps.toml`、`instances.toml`、`accounts.toml`、`fees.toml`、`limits.toml`、`endpoints.toml`、`maint.toml`);core `venue-*` 的 `default_caps()`
+- 前置:refdata TOML 夹具 `refdata-basic`(`assets.toml`、`venues.toml`、`insts-*.toml`、`caps.toml`、`venue_caps.toml`、`instances.toml`、`accounts.toml`、`fees.toml`、`limits.toml`、`endpoints.toml`、`maint.toml`;core `venue-*` 尚未接入,能力行的底取 `caps.toml` 的完整行)
 - 步骤:
   1. `hft-cfg build --kind refdata --in params/refdata/ --out rd.blob`
-  2. `RefData::load(rd.blob, None)` 后以同一构建器重新编码
+  2. `RefData::load(rd.blob, None)` 后经 `dump` 与 `hft-cfg build` 以同一构建器重新编码
   3. `hft-cfg show rd.blob`
 - 期望:
   - 步骤 1 退出 0;步骤 2 加载成功,重新编码的字节与 `rd.blob` 相同
@@ -2004,7 +2005,7 @@ spec: README.md
 - 规则:[hft-cfg](README.md#hft-cfg)
 - 级别:table
 - 里程碑:M3
-- 前置:同 TOOL-129;`.github/hft-admins.txt` 只含 `owner1`;每行只改该行所列一处;"退出 1"均不产出 blob,stderr 含所列码名
+- 前置:同 TOOL-129;Admin 名单(`--admins`,缺省 `.github/hft-admins.txt`)只含 `owner1`;另有 Sim 账户 4 `sim-pc-a`(绑定实例 3 `pc-sim-a`);每行只改该行所列一处;"退出 1"均不产出 blob,stderr 含所列码名
 - 实现:`tools/hft-cfg/tests/refdata.rs::tool_131_account_validation`
 
 | 行 | 改动 | 期望 |
@@ -2055,7 +2056,7 @@ spec: README.md
 |---|---|---|
 | TOOL-132.1 | 资产 AIN 的 `qty_exp` −2 → −3 | 退出 1;`AssetChanged` |
 | TOOL-132.2 | 某 inst 的合约乘数 10 → 100 | 退出 1;`MultiplierChanged` |
-| TOOL-132.3 | 账户 3 的 `kind` live → sim | 退出 1;`AccountKindChanged` |
+| TOOL-132.3 | 账户 3 的 `kind` live → sim(label 同时改为 `sim-` 前缀并写 Sim 配置,否则先报 `AccountNamePrefix`) | 退出 1;`AccountKindChanged` |
 | TOOL-132.4 | 账户 3 的 `is_prod` true → false | 退出 1;`AccountKindChanged` |
 | TOOL-132.5 | 账户 3 的 UID 改变 | 退出 1;`UidChanged` |
 | TOOL-132.6 | 实例 1 的 `kind` 改为另一种类 | 退出 1;`InstanceChanged` |
@@ -2137,7 +2138,7 @@ spec: README.md
 - 规则:[hft-cfg](README.md#hft-cfg)
 - 级别:unit
 - 里程碑:M1
-- 前置:`old.blob` 的 OMS 槽容量 4096,`new.blob` 为 2048
+- 前置:`old.blob` 的 ECF1 段 3 `capacities.max_insts` = 4096,`new.blob` 为 2048(其余相同)
 - 步骤:
   1. `hft-cfg diff --old old.blob --new new.blob`
 - 期望:
@@ -2744,7 +2745,7 @@ spec: README.md
 | TOOL-182.3 | 新增 `n = 111` | 退出 0;`group_ctr_hwm = 111` |
 | TOOL-182.4 | 新增 `n = 109` | 退出 1 |
 | TOOL-182.5 | 移除 103,不新增 | 退出 0;`group_ctr_hwm = 110` |
-| TOOL-182.6 | 生效 blob 的 `group_ctr_hwm = 0`,含 101、103;新增 `n = 102` | 退出 1;报告 H = max(0, 103) = 103 |
+| TOOL-182.6 | 生效 blob 的 `group_ctr_hwm` 改为 0,含 101、103;新增 `n = 102` | 退出 1;`--against` 不是合法 SPB1(`parse_spb1` 要求 `group_ctr_hwm` ≥ 每个 counter,`BadGroup`),所以 H 恒等于生效 blob 的 `group_ctr_hwm` |
 | TOOL-182.7 | 不带 `--against`,`version = 1`,group n = 1、2 | 退出 0;`group_ctr_hwm = 2` |
 | TOOL-182.8 | 不带 `--against`,`version = 2` | 退出 2;不产出 blob |
 | TOOL-182.9 | 同一输入编码两次 | 两个 blob 逐字节相同(含 `group_ctr_hwm`) |

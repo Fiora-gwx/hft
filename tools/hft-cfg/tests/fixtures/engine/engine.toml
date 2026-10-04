@@ -1,0 +1,54 @@
+# EngineConfig params of a c8 prod instance (values: apps/hft-core capacity and ring tables,
+# hft-sequencer section 5 defaults). The three section-5 values owned by the hft-core config
+# (advisor_mem_budget_mib, advisor_ckpt_max_mib, allow_missing_standby) come from --core-config.
+version = 3
+host_class = "c8"
+
+[capacities]
+max_insts = 4096
+max_cells_total = 256
+max_subs_per_inst = 8
+max_groups_per_instance = 64
+max_timers = 4096
+recent_cmd_ids = 4096
+max_instances = 8
+
+[rings]
+ctl = 262144
+hk = 256
+feed_ctl = 256
+bbo = 65536
+md = 65536
+md_bulk = 4194304
+rep = 16384
+out = 4096
+rep_bulk = 1048576
+acct_req = 64
+acct = 2097152
+advice = 262144
+snap_req = 64
+snap = 4194304
+
+[sequencer]
+md_round_ns = 50000
+ctl_bytes_per_round = 8192
+keyframe_period_ms = 300000
+keyframe_max_events = 1500000
+sim_max_per_round = 32
+conflate_backlog = 64
+notify_per_continue = 64
+replay_per_round = 1024
+auto_resume_after_clean_drain = true
+
+[sequencer.rings]
+ctl = { per_ring = 4, total = 4 }
+hk = { per_ring = 4, total = 4 }
+rep = { per_ring = 32, total = 64 }
+chain = { per_ring = 32, total = 0 }
+bbo = { per_ring = 32, total = 128 }
+advice = { per_ring = 16, total = 16 }
+
+[conn.rotate_margin_s]
+binance-usdm = 3600
+okx-swap = 3600
+bitget-uta-spot = 3600

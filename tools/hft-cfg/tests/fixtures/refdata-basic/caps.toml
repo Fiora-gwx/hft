@@ -1,0 +1,88 @@
+# refdata-basic: complete capability rows. No venue-* crate is linked yet, so the base row of
+# every venue is written here; venue_caps.toml holds the reviewed overrides on top of it.
+[caps.binance-usdm]
+market = "linear_perp"
+fee_asset_rule = "quote"
+reduce_only = true
+required_position_mode = "one_way"
+required_margin_mode = "cross"
+required_multi_asset = false
+required_spot_borrow = "none"
+funding_settle = "balance_only_push"
+margin_data = "push"
+own_liquidation_marker = "client_id_prefix"
+liq_marker_arg = "autoclose-"
+ignorable_user_events = ["TRADE_LITE"]
+flags = 7
+dms = "countdown_account"
+dms_timeout_ms = 20000
+dms_refresh_ms = 10000
+testnet = "testnet"
+
+[caps.binance-spot]
+market = "spot"
+fee_asset_rule = "received_asset"
+reduce_only = false
+required_position_mode = "not_applicable"
+required_margin_mode = "not_applicable"
+required_multi_asset = "none"
+required_spot_borrow = "none"
+funding_settle = "not_applicable"
+margin_data = "not_applicable"
+own_liquidation_marker = "not_identifiable"
+ignorable_user_events = []
+flags = 6
+dms = "none"
+testnet = "testnet"
+
+[caps.okx-swap]
+market = "linear_perp"
+fee_asset_rule = "quote"
+reduce_only = true
+required_position_mode = "one_way"
+required_margin_mode = "cross"
+required_multi_asset = "none"
+required_spot_borrow = "none"
+funding_settle = "per_symbol_push"
+margin_data = "push"
+own_liquidation_marker = "exec_type_field"
+ignorable_user_events = []
+flags = 7
+dms = "countdown_account"
+dms_min_ms = 10000
+dms_max_ms = 120000
+dms_timeout_ms = 20000
+dms_refresh_ms = 10000
+testnet = "demo"
+
+[caps.bitget-uta-spot]
+market = "spot"
+fee_asset_rule = "received_asset"
+reduce_only = false
+required_position_mode = "not_applicable"
+required_margin_mode = "not_applicable"
+required_multi_asset = "none"
+required_spot_borrow = false
+funding_settle = "not_applicable"
+margin_data = "not_applicable"
+own_liquidation_marker = "not_identifiable"
+ignorable_user_events = []
+flags = 6
+dms = "none"
+testnet = "demo"
+
+[caps.okx-spot]
+market = "spot"
+fee_asset_rule = "received_asset"
+reduce_only = false
+required_position_mode = "not_applicable"
+required_margin_mode = "not_applicable"
+required_multi_asset = "none"
+required_spot_borrow = false
+funding_settle = "not_applicable"
+margin_data = "not_applicable"
+own_liquidation_marker = "not_identifiable"
+ignorable_user_events = []
+flags = 6
+dms = "none"
+testnet = "demo"

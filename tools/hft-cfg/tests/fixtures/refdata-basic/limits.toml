@@ -1,0 +1,6 @@
+# refdata-basic: rate limits (merged into [venues.*] with venues.toml).
+[venues.binance-usdm]
+rate_limits = [
+  { scope = "account", bucket = "orders", limit = 300, window_ms = 10000, default_cost = 1 },
+  { scope = "ip", bucket = "weight", limit = 2400, window_ms = 60000, default_cost = 1 },
+]

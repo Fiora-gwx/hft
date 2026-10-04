@@ -1,0 +1,39 @@
+# refdata-basic: accounts.
+[[account]]
+id = 1
+label = "pc-b-live"
+kind = "live"
+is_prod = true
+bound_instance = "pc-b"
+venues = ["okx-swap", "binance-spot"]
+venue_uids = { okx-swap = "5001", binance-spot = "5002" }
+
+[[account]]
+id = 2
+label = "spare"
+kind = "live"
+is_prod = false
+venues = ["bitget-uta-spot"]
+venue_uids = { bitget-uta-spot = "6001" }
+
+[[account]]
+id = 3
+label = "pc-live"
+kind = "live"
+is_prod = true
+bound_instance = "pc-main"
+venues = ["binance-usdm", "bitget-uta-spot"]
+venue_uids = { binance-usdm = "123456789", bitget-uta-spot = "987654321" }
+
+[[account]]
+id = 4
+label = "sim-pc-a"
+kind = "sim"
+bound_instance = "pc-sim-a"
+venues = ["binance-usdm", "bitget-uta-spot"]
+[account.sim]
+fee_tier = 0
+latency_model = 0
+margin_model = 0
+initial_balances = [ { venue = "binance-usdm", asset = "USDT", qty = "10000" },
+                     { venue = "bitget-uta-spot", asset = "USDT", qty = "10000" } ]

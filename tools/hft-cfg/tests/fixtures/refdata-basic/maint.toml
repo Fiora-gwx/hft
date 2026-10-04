@@ -1,0 +1,4 @@
+# refdata-basic: maintenance windows (inst = "" → the whole venue).
+maint = [
+  { venue = "okx-swap", inst = "", start_ns = 1759363200000000000, end_ns = 1759366800000000000, kind = "venue_maintenance" },
+]

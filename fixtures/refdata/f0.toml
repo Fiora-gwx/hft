@@ -1,0 +1,486 @@
+# Fixture F0 of crates/hft-refdata/TESTS.md as hft-cfg refdata TOML (REF-079): the
+# `hft_refdata::dump` rendering of `f0()`; `hft-cfg build --kind refdata` of this file must equal f0().
+created_utc_ns = 1759276800000000000
+fee_overrides = []
+maint = []
+tokens = []
+version = 10
+
+[accounts.acct-a]
+bound_instance = "pc-main"
+id = 1
+is_prod = true
+kind = "live"
+uid_policy = "verified"
+venues = ["BINANCE_USDM", "OKX_SPOT"]
+
+[accounts.acct-a.uids]
+BINANCE_USDM = "1001"
+OKX_SPOT = "2001"
+
+[accounts.sim-a]
+bound_instance = "pc-sim-a"
+id = 2
+is_prod = false
+kind = "sim"
+uid_policy = "verified"
+venues = ["BINANCE_USDM", "OKX_SPOT"]
+
+[accounts.sim-a.sim]
+fee_tier = 1
+latency_model = 0
+margin_model = 0
+
+[[accounts.sim-a.sim.balances]]
+asset = "USDT"
+qty_raw = 1000000000000
+venue = "BINANCE_USDM"
+
+[[accounts.sim-a.sim.balances]]
+asset = "USDT"
+qty_raw = 1000000000000
+venue = "OKX_SPOT"
+
+[accounts.sim-a.uids]
+
+[[aliases]]
+alias = "BTC_USDT"
+inst = "BTCUSDT"
+venue = "BINANCE_SPOT"
+
+[assets.BTC]
+class = "crypto"
+dust_raw = 1000
+id = 1
+px_exp = -8
+px_max_raw = 1000000000000000
+qty_exp = -8
+qty_max_raw = 100000000000000
+
+[assets.ETH]
+class = "crypto"
+dust_raw = 1000
+id = 3
+px_exp = -8
+px_max_raw = 100000000000000
+qty_exp = -8
+qty_max_raw = 1000000000000000
+
+[assets.PEPE]
+class = "crypto"
+dust_raw = 1000
+id = 5
+px_exp = -12
+px_max_raw = 1000000000000
+qty_exp = 0
+qty_max_raw = 1000000000000000
+
+[assets.USDC]
+class = "stable"
+dust_raw = 1000
+id = 4
+px_exp = -8
+px_max_raw = 1000000000
+qty_exp = -8
+qty_max_raw = 1000000000000000000
+
+[assets.USDT]
+class = "stable"
+dust_raw = 1000
+id = 2
+px_exp = -8
+px_max_raw = 1000000000
+qty_exp = -8
+qty_max_raw = 1000000000000000000
+
+[caps.BINANCE_SPOT]
+amend_qty_down_only = false
+dms = "none"
+dms_max_ms = 0
+dms_min_ms = 0
+dms_refresh_ms = 0
+dms_timeout_ms = 0
+fee_asset_rule = "received_asset"
+flags = 6
+funding_settle = "not_applicable"
+ignorable_user_events = []
+liq_marker_arg = ""
+margin_data = "not_applicable"
+market = "spot"
+own_liquidation_marker = "not_identifiable"
+reduce_only = false
+required_margin_mode = "not_applicable"
+required_multi_asset = "none"
+required_position_mode = "not_applicable"
+required_spot_borrow = "none"
+testnet = "testnet"
+
+[caps.BINANCE_USDM]
+amend_qty_down_only = false
+dms = "none"
+dms_max_ms = 0
+dms_min_ms = 0
+dms_refresh_ms = 0
+dms_timeout_ms = 0
+fee_asset_rule = "quote"
+flags = 7
+funding_settle = "per_symbol_push"
+ignorable_user_events = ["TRADE_LITE"]
+liq_marker_arg = "autoclose-"
+margin_data = "push"
+market = "linear_perp"
+own_liquidation_marker = "client_id_prefix"
+reduce_only = true
+required_margin_mode = "cross"
+required_multi_asset = "false"
+required_position_mode = "one_way"
+required_spot_borrow = "none"
+testnet = "testnet"
+
+[caps.OKX_SPOT]
+amend_qty_down_only = false
+dms = "none"
+dms_max_ms = 0
+dms_min_ms = 0
+dms_refresh_ms = 0
+dms_timeout_ms = 0
+fee_asset_rule = "received_asset"
+flags = 6
+funding_settle = "not_applicable"
+ignorable_user_events = []
+liq_marker_arg = ""
+margin_data = "not_applicable"
+market = "spot"
+own_liquidation_marker = "not_identifiable"
+reduce_only = false
+required_margin_mode = "not_applicable"
+required_multi_asset = "none"
+required_position_mode = "not_applicable"
+required_spot_borrow = "false"
+testnet = "testnet"
+
+[caps.OKX_SWAP]
+amend_qty_down_only = false
+dms = "none"
+dms_max_ms = 0
+dms_min_ms = 0
+dms_refresh_ms = 0
+dms_timeout_ms = 0
+fee_asset_rule = "quote"
+flags = 7
+funding_settle = "per_symbol_push"
+ignorable_user_events = ["TRADE_LITE"]
+liq_marker_arg = "autoclose-"
+margin_data = "push"
+market = "linear_perp"
+own_liquidation_marker = "client_id_prefix"
+reduce_only = true
+required_margin_mode = "cross"
+required_multi_asset = "false"
+required_position_mode = "one_way"
+required_spot_borrow = "none"
+testnet = "testnet"
+
+[[fees]]
+maker = 200000
+taker = 500000
+tier = 0
+venue = "BINANCE_USDM"
+
+[[fees]]
+maker = 100000
+taker = 400000
+tier = 1
+venue = "BINANCE_USDM"
+
+[[fees]]
+maker = 200000
+taker = 500000
+tier = 0
+venue = "BINANCE_SPOT"
+
+[[fees]]
+maker = 200000
+taker = 500000
+tier = 0
+venue = "OKX_SWAP"
+
+[[fees]]
+maker = 800000
+taker = 1000000
+tier = 0
+venue = "OKX_SPOT"
+
+[[fees]]
+maker = 600000
+taker = 800000
+tier = 1
+venue = "OKX_SPOT"
+
+[instances.pc-main]
+id = 1
+kind_id = 65280
+
+[instances.pc-sim-a]
+id = 2
+kind_id = 65280
+
+[instances.probe-a]
+id = 3
+kind_id = 65281
+
+[insts."BINANCE_SPOT:BTCUSDT"]
+asset = "BTC"
+book_window = 4096
+crossed_tolerance = 0
+delivery_utc_ns = 0
+flags = 0
+funding_anchor_s = 0
+funding_interval_s = 0
+id = 2
+kind = "spot"
+l2_depth = 20
+listed_utc_ns = 0
+lot = "0.00001"
+lot_raw = 1000
+max_leverage = 0
+max_qty_raw = 100000000000
+min_notional_raw = 5000000
+min_qty = "0.00001"
+min_qty_raw = 1000
+mmr_tiers = []
+price_band_down = 0
+price_band_up = 0
+px_unit_shift = 0
+qty_unit_shift = 0
+quote = "USDT"
+status = "trading"
+tick = "0.01"
+tick_raw = 1000000
+venue_num_id = "0"
+
+[insts."BINANCE_USDM:1000PEPEUSDT"]
+asset = "PEPE"
+book_window = 4096
+crossed_tolerance = 0
+delivery_utc_ns = 0
+flags = 0
+funding_anchor_s = 0
+funding_interval_s = 28800
+id = 5
+kind = "perp"
+l2_depth = 20
+listed_utc_ns = 0
+lot = "1"
+lot_raw = 1000
+max_leverage = 125
+max_qty_raw = 1000000000
+min_notional_raw = 5000000
+min_qty = "1"
+min_qty_raw = 1000
+mmr_tiers = []
+price_band_down = 0
+price_band_up = 0
+px_unit_shift = 3
+qty_unit_shift = 3
+quote = "USDT"
+status = "trading"
+tick = "0.0000001"
+tick_raw = 100
+venue_num_id = "0"
+
+[insts."BINANCE_USDM:BTCUSDT"]
+asset = "BTC"
+book_window = 4096
+crossed_tolerance = 0
+delivery_utc_ns = 0
+flags = 0
+funding_anchor_s = 0
+funding_interval_s = 28800
+id = 1
+kind = "perp"
+l2_depth = 20
+listed_utc_ns = 0
+lot = "0.001"
+lot_raw = 100000
+max_leverage = 125
+max_qty_raw = 100000000000
+min_notional_raw = 5000000
+min_qty = "0.001"
+min_qty_raw = 100000
+mmr_tiers = []
+price_band_down = 0
+price_band_up = 0
+px_unit_shift = 0
+qty_unit_shift = 0
+quote = "USDT"
+status = "trading"
+tick = "0.10"
+tick_raw = 10000000
+venue_num_id = "0"
+
+[insts."OKX_SPOT:BTC-USDT"]
+asset = "BTC"
+book_window = 4096
+crossed_tolerance = 0
+delivery_utc_ns = 0
+flags = 0
+funding_anchor_s = 0
+funding_interval_s = 0
+id = 4
+kind = "spot"
+l2_depth = 20
+listed_utc_ns = 0
+lot = "0.00000001"
+lot_raw = 1
+max_leverage = 0
+max_qty_raw = 100000000000
+min_notional_raw = 5000000
+min_qty = "0.00001"
+min_qty_raw = 1000
+mmr_tiers = []
+price_band_down = 0
+price_band_up = 0
+px_unit_shift = 0
+qty_unit_shift = 0
+quote = "USDT"
+status = "trading"
+tick = "0.1"
+tick_raw = 10000000
+venue_num_id = "20001"
+
+[insts."OKX_SWAP:BTC-USDT-SWAP"]
+asset = "BTC"
+book_window = 4096
+crossed_tolerance = 0
+delivery_utc_ns = 0
+flags = 0
+funding_anchor_s = 0
+funding_interval_s = 28800
+id = 3
+kind = "perp"
+l2_depth = 20
+listed_utc_ns = 0
+lot = "0.01"
+lot_raw = 10000
+max_leverage = 125
+max_qty_raw = 100000000000
+min_notional_raw = 5000000
+min_qty = "0.01"
+min_qty_raw = 10000
+mmr_tiers = []
+price_band_down = 0
+price_band_up = 0
+px_unit_shift = 0
+qty_unit_shift = -2
+quote = "USDT"
+status = "trading"
+tick = "0.1"
+tick_raw = 10000000
+venue_num_id = "10459"
+
+[venues.BINANCE_SPOT]
+app_ping_interval_s = 0
+client_id_max_len = 36
+client_id_prefix = ""
+crossed_tolerance_default = 0
+endpoints = []
+exchange = "binance"
+id = 2
+max_batch = 5
+max_inflight_amend = 1
+product = "spot"
+rate_limits = []
+stale_guard = "recv_window"
+ts_unit = "ms"
+ws_max_conn_age_s = 86400
+ws_max_in_msgs_per_s = 10
+ws_max_streams_per_conn = 1024
+ws_new_conn_per_5min_ip = 300
+
+[venues.BINANCE_USDM]
+app_ping_interval_s = 0
+client_id_max_len = 36
+client_id_prefix = ""
+crossed_tolerance_default = 0
+exchange = "binance"
+id = 1
+max_batch = 5
+max_inflight_amend = 1
+product = "perp"
+stale_guard = "recv_window"
+ts_unit = "ms"
+ws_max_conn_age_s = 86400
+ws_max_in_msgs_per_s = 10
+ws_max_streams_per_conn = 1024
+ws_new_conn_per_5min_ip = 300
+
+[[venues.BINANCE_USDM.endpoints]]
+conn_group = 0
+env = "prod"
+role = "order_ws"
+url = "wss://ws-fapi.binance.com/ws-fapi/v1"
+
+[[venues.BINANCE_USDM.endpoints]]
+conn_group = 0
+env = "prod"
+role = "md_public"
+url = "wss://fstream.binance.com/public"
+
+[[venues.BINANCE_USDM.endpoints]]
+conn_group = 0
+env = "testnet"
+role = "md_public"
+url = "wss://fstream.binancefuture.com/public"
+
+[[venues.BINANCE_USDM.rate_limits]]
+bucket = "orders"
+default_cost = 1
+limit = 300
+scope = "account"
+window_ms = 10000
+
+[[venues.BINANCE_USDM.rate_limits]]
+bucket = "weight"
+default_cost = 1
+limit = 2400
+scope = "ip"
+window_ms = 60000
+
+[venues.OKX_SPOT]
+app_ping_interval_s = 0
+client_id_max_len = 32
+client_id_prefix = ""
+crossed_tolerance_default = 0
+endpoints = []
+exchange = "okx"
+id = 6
+max_batch = 5
+max_inflight_amend = 1
+product = "spot"
+rate_limits = []
+stale_guard = "expire_at"
+ts_unit = "ms"
+ws_max_conn_age_s = 86400
+ws_max_in_msgs_per_s = 10
+ws_max_streams_per_conn = 1024
+ws_new_conn_per_5min_ip = 300
+
+[venues.OKX_SWAP]
+app_ping_interval_s = 0
+client_id_max_len = 32
+client_id_prefix = ""
+crossed_tolerance_default = 0
+endpoints = []
+exchange = "okx"
+id = 5
+max_batch = 5
+max_inflight_amend = 1
+product = "perp"
+rate_limits = []
+stale_guard = "expire_at"
+ts_unit = "ms"
+ws_max_conn_age_s = 86400
+ws_max_in_msgs_per_s = 10
+ws_max_streams_per_conn = 1024
+ws_new_conn_per_5min_ip = 300

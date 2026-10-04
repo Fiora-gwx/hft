@@ -1,0 +1,28 @@
+[package]
+name = "hft-cfg"
+description = "TOML → refdata / EngineConfig / StrategyParams blobs, schema-generic strategy parameters, account and binding checks, diff reports (cold tool); spec: tools/README.md#hft-cfg"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "hft-cfg"
+path = "src/main.rs"
+
+# Never depends on strategies/* or hft-strategy-registry (tools/README.md "依赖"; cargo xtask deps).
+[dependencies]
+hft-types.workspace = true
+hft-refdata = { workspace = true, features = ["tools"] }
+hft-event.workspace = true
+hft-strategy-sdk = { workspace = true, features = ["schema-json"] }
+zerocopy.workspace = true
+toml.workspace = true
+serde_json = "1"
+
+[lints]
+workspace = true

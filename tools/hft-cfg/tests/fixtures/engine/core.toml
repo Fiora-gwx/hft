@@ -1,0 +1,10 @@
+# The part of an hft-core instance config that hft-cfg reads for ECF1 section 5.
+[instance]
+name = "prod"
+
+[advisor]
+mem_budget_mib = 256
+checkpoint_max_mib = 64
+
+[startup]
+allow_missing_standby = false

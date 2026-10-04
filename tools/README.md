@@ -325,22 +325,22 @@ ExecStartPre=+/opt/hft/current-core/bin/hft-secrets fetch --manifest /etc/hft/se
 refdata、`RiskParams`、`EngineConfig` 的**唯一来源**,也是 `StrategyParams` 的人工通道:把受版本控制的 TOML(`params/` 目录,不含秘密)编译成 blob 并输出差异报告;可选地经 ctl 把 `SetParams`/`SetRisk`/`ReplaceRefdata` 发给 hft-core。Rust CLI,cold tier,**复用各归属 crate 的构建器与加载期校验**,每种 blob 只有一个编码器:refdata/ECF1 在 [hft-refdata](../crates/hft-refdata/README.md)(`RdbBuilder`/`EcfBuilder`),SPB1 头在 [hft-event](../crates/hft-event/README.md#strategyparamsspb1),参数 body 在 [hft-strategy-sdk 的 `params` 模块](../crates/hft-strategy-sdk/README.md),`RiskParams` 在 [hft-risk](../crates/hft-risk/README.md)。
 
 ```sh
-hft-cfg build  --kind refdata  --in params/refdata/ --out refdata.blob [--against <当前 blob 或 journal 目录>] [--sim-models <hft-core 配置>]
+hft-cfg build  --kind refdata  --in params/refdata/ --out refdata.blob [--against <当前 blob 或 journal 目录>] [--sim-models <hft-core 配置>] \n               [--schemas <dir>] [--admins <名单文件>]
 hft-cfg build  --kind strategy --schemas <release>/schemas/strategies --refdata <refdata.blob | journal 目录> \
                --in params/strategies/<instance>.<account>.toml --out <file>.blob [--against <当前 blob 或 journal 目录>]
 hft-cfg build  --kind risk   --in params/<file>.toml --out <file>.blob [--against …]
 hft-cfg build  --kind engine --in params/<file>.toml --core-config <hft-core 实例配置> --out <file>.blob [--against …]
 hft-cfg refdata fetch --venue <venue> --out params/refdata/insts-<venue>.toml   # 拉 instruments 接口,生成待审 TOML
-hft-cfg diff   --old <a.blob> --new <b.blob> [--json]
-hft-cfg show   <file.blob> [--schemas <dir>]          # strategy blob 按 schema 渲染字段名与人读单位
+hft-cfg diff   --old <a.blob> --new <b.blob> [--schemas <dir>] [--refdata <refdata.blob>] [--json]   # strategy blob 需要 --schemas
+hft-cfg show   <file.blob> [--schemas <dir>] [--refdata <refdata.blob>]   # strategy blob 按 schema 与 refdata 渲染字段名、人读单位、资产与 inst 名
 hft-cfg send   --kind strategy|risk|refdata --blob <file.blob> --account <name> [--socket /run/hft/core-<instance>/ctl.sock]
 ```
 
 **策略参数:按 schema 通用的 TOML → blob**
 
-- **schema 来源**:发布制品里由 `hft-core schemas --out <dir>` 导出的目录 `schemas/strategies/`(本地开发用已提交的金样 `fixtures/strategy-schemas/`),这是 schema 导出的**唯一**命令;文件命名与 `index.json` 的格式唯一归属 [strategies/registry](../strategies/registry/README.md):每个编译进二进制的策略种类一个 `<kind_id>-<name>.schema.json`(内容——参数字段、`notes`、`report`、`cmds` 描述符与 `schema_digest`——由 SDK `params` 产生,格式归 [hft-strategy-sdk](../crates/hft-strategy-sdk/README.md)),`index.json` 是按 `kind_id` 升序的数组,每项 `{kind_id, name, file, schema_id, schema_version, schema_digest}`(`schema_id = kind_id`)。
+- **schema 来源**:发布制品里由 `hft-core schemas --out <dir>` 导出的目录 `schemas/strategies/`(本地开发用已提交的金样 `fixtures/strategy-schemas/`),这是 schema 导出的**唯一**命令;文件命名与 `index.json` 的格式唯一归属 [strategies/registry](../strategies/registry/README.md):每个编译进二进制的策略种类一个 `<kind_id>-<name>.schema.json`(内容——参数字段与 `notes`、`report`、`cmds` 描述符——由 SDK `params` 产生,格式归 [hft-strategy-sdk](../crates/hft-strategy-sdk/README.md);摘要不在文件内,由 SDK 按文件内容重算),`index.json` 是按 `kind_id` 升序的数组,每项 `{kind_id, name, file, schema_id, schema_version, schema_digest}`(`schema_id = kind_id`)。
 
-  hft-cfg 先读 `index.json`,按 `instances.toml` 的种类名或 `kind_id` 定位文件,并核对文件内摘要与索引一致;hft-py、pipeline、watchtower、journal-archiver 用同一目录。hft-cfg **不链接任何策略 crate**,只链接 SDK 的 `params` 编解码器;新增策略、给策略加字段都不改 hft-cfg。
+  hft-cfg 先读 `index.json`,按 `instances.toml` 的种类名或 `kind_id` 定位文件,并核对按文件重算的摘要(`OwnedSchema::schema_digest`)与索引一致;hft-py、pipeline、watchtower、journal-archiver 用同一目录。hft-cfg **不链接任何策略 crate**,只链接 SDK 的 `params` 编解码器;新增策略、给策略加字段都不改 hft-cfg。
 - **TOML 形状**(字段名来自 schema,未知字段即报错;下例用 core 策略的两个字段):
 
   ```toml
@@ -417,14 +417,15 @@ reason = "只做多现货,从不借币"
 
 联调用的交易所测试网/模拟盘账户写 `kind = "live"`、`is_prod = false`,只放进联调实例使用的那份 refdata(与正式账户的 refdata 分开构建);读不到 UID 的测试网账户另写 `uid_policy = "unverifiable"`(取值 `"verified" | "unverifiable"`,缺省 `"verified"`,对应 `UidPolicy::{Verified, Unverifiable}`)与 `uid_policy_signoff = "<Admin 的 GitHub 登录名>"`,签字人必须在 `.github/hft-admins.txt` 名单内(否则退出 1),差异报告列出签字人(字段语义与限制归 [hft-refdata](../crates/hft-refdata/README.md#数据结构));永续杠杆不在任何 TOML 里——它在交易所账户上设置,运行期由 `AccountConfigReport` 读回([hft-refdata](../crates/hft-refdata/README.md#交易所能力表venuecaps))。
 
-- **能力表**:hft-cfg 链接各 core `venue-*` crate(纯协议,无 I/O)取 `default_caps()` 与 `dead_man()`,以它为底叠加 `venue_caps.toml`,把最终整行写进 blob;覆盖规则(能力位只能关、`ignorable_user_events` 只能追加、`required_*`/`fee_asset_rule`/轮询间隔/死手的超时与刷新可改且必须写 `reason`)与字段语义归 [hft-refdata VenueCaps](../crates/hft-refdata/README.md#交易所能力表venuecaps)。
+- **TOML 写法**:目录内各 `*.toml` 按文件名合并(表逐键合并,顶层数组串接,其余重复键退出 1),也可给单个文件。表与键即 `hft_refdata::dump` 的输出:`[assets.<名>]`、`[venues.<venue>]`(含 `rate_limits`、`endpoints` 数组)、`[caps.<venue>]`、`[insts."<venue>:<符号>"]`、`[instances.<名>]`、`[accounts.<label>]`(`uids`、`sim.balances`)与 `fees`/`fee_overrides`/`aliases`/`maint`/`tokens` 数组,所以转储可原样再构建;实例与账户另可写成上例的 `[[instance]]`/`[[account]]`(`venue_uids`、`initial_balances` 即 `uids`、`sim.balances`)。枚举取值小写(`one_way` 与 `one-way` 同义),venue 名写 `binance-usdm` 或 `BINANCE_USDM`;定点量写 `<键>_raw`(原始整数)或 `<键>`(十进制字符串,按资产指数经 `parse_exact`);inst 的 tick/lot/min_qty 只写交易所原文时按线格式指数换算。实例的 `kind = "<种类名>"` 经 `--schemas` 的 `index.json` 解析(也可写 `kind_id`);签字人名单缺省 `.github/hft-admins.txt`,`--admins` 可改。构建器按 id 等规范顺序调用,同一内容恒得同一字节;构建打印报告(签字人、`warnings()`,带 `--against` 时另有差异报告,`--json` 同内容)。
+- **能力表**:hft-cfg 链接各 core `venue-*` crate(纯协议,无 I/O)取 `default_caps()` 与 `dead_man()`,以它为底叠加 `venue_caps.toml`,把最终整行写进 blob(该 venue 的协议 crate 未链接时,底行取 `[caps.<venue>]` 的完整行;已链接时只允许写覆盖);覆盖规则(能力位只能关、`ignorable_user_events` 只能追加、`required_*`/`fee_asset_rule`/轮询间隔/死手的超时与刷新可改且必须写 `reason`)与字段语义归 [hft-refdata VenueCaps](../crates/hft-refdata/README.md#交易所能力表venuecaps)。
 - **账户与模拟账户校验**(调用 hft-refdata 的加载校验,失败退出 1):账户名前缀(`AccountNamePrefix`:Sim 账户的 `label` 必须以 `sim-` 开头、Live 账户的不得以它开头——一份 refdata 只服务一个实例角色,规则归 [apps/hft-core](../apps/hft-core/README.md));每个账户在同一交易所至多一个 venue(`SameExchangeMarkets`);每个实例至多被一个账户绑定(`InstanceMultiBound`);Live 账户每个 venue 都有 UID(`uid_policy = "unverifiable"` 的账户可留空;它只允许 `is_prod = false`)、每 venue 实盘账户 ≤ 12;同一 (交易所, UID) 登记在两个账户上是 `DuplicateVenueUid` 错误,唯一例外是两个 `is_prod = false` 账户在同一交易所的不同 `VenueId` 上——加载成功,该条进 `RefData::warnings()` 并列在差异报告中(规则归 [hft-refdata](../crates/hft-refdata/README.md));Sim 账户 `is_prod = false`、有初始余额、无 UID、余额的 venue ⊆ `venues`、`fee_tier` 档在 `fees.toml` 中存在;`latency_model`/`margin_model` 下标是否在 hft-core 配置的表内由 hft-core 启动时检查(hft-cfg 给出 `--sim-models <hft-core 配置>` 时预检);`bound_instance` 指向已登记的实例;实例名唯一;`--against` 时再检查不可变量(资产指数、合约乘数、账户 id/类型/`is_prod`/UID、实例的 kind 与名字)。
 - **差异报告**:新增/删除的 inst、账户与实例,绑定变化(提示"账户有仓位时 hft-core 会拒绝启动"),能力表逐字段变化,按账户逐字段的放宽/收紧;strategy blob 逐字段的变化按 schema 的 `FieldDesc.minor_change`(`None`/`RelPct`/`Abs`/`Any`,属性定义归 [hft-strategy-sdk](../crates/hft-strategy-sdk/README.md))判定是否属于小改,并标出改动了的结构字段(`structural`)与受影响的 group——门槛 ⑦ 的重新计时只读这份判定([testing §8](../docs/testing.md#8-上线门槛));`engine` blob 的容量变小时提示"缩容只经 Drain + 重启,启动时当前占用超过新容量 hft-core 会拒绝启动(`CapacityShrink`)";人读文本 + `--json`。分类只是预览:**升级/降级的权威判定在 sequencer**。
 
 **发送与其余**
 
 - **发送**:`send` 以 `cli:<login>` 身份连本实例的 ctl socket(路径 = hft-core 配置 `paths.ctl_socket`,位于 `/run/hft/core-<instance>/`;运维账户访问 socket 的组成员资格归 [deploy](../deploy/README.md);strategy 需 Trader 或 Admin;risk、refdata 需 Admin,refdata 只在维护窗口),按 [control-plane 的二次确认协议](../docs/subsystems/control-plane.md#版本与确认) 先发预览、打印 sequencer 返回的 `CmdResult{preview}`(第一行是目标账户、账户类型与对照账户的有效模式),人工确认后带 `confirmed` 与 `expect_state_version` 重发;`StateChanged` 时重新预览;被拒时打印结果码与 detail 名(如 `Rejected{RefdataRecheck}`)。Telegram 不直接发 `SetParams`/`SetRisk`;ops_bot 的参数编辑命令改的是 pipeline 的策略文件,由 pipeline 产出 blob 后以自己的身份下发。
-- **`EngineConfig`**:按主机类给出(oms/ledger/容量/批量上限/每事件出环上限 K/环容量),随 hft-core 配置部署,启动时记为 `ConfigBlob{Engine}`;变更需要重启,`send` 不接受 `engine`。ECF1 段 5 中取值归 hft-core 实例配置的三项由 `--core-config` 读入,不在 `params/` 里另写:`advisor.mem_budget_mib` → `advisor_mem_budget_mib`、`advisor.checkpoint_max_mib` → `advisor_ckpt_max_mib`、`startup.allow_missing_standby` → `allow_missing_standby`(段 5 字段归 [hft-sequencer](../crates/hft-sequencer/README.md),hft-core 启动时核对两边相等);配置缺其中任一键 → 退出 2。ECF1 与 refdata 之间的交叉校验(含段 2 每个 `ref_inst` 的 `RefInstNotSubscribed`,规则归 [hft-refdata](../crates/hft-refdata/README.md))只在 hft-core 启动时由 `EngineConfig::load` 的验证器进行,hft-cfg 不预检。
+- **`EngineConfig`**:按主机类给出(oms/ledger/容量/批量上限/每事件出环上限 K/环容量),随 hft-core 配置部署,启动时记为 `ConfigBlob{Engine}`;变更需要重启,`send` 不接受 `engine`。ECF1 段 5 中取值归 hft-core 实例配置的三项由 `--core-config` 读入,不在 `params/` 里另写:`advisor.mem_budget_mib` → `advisor_mem_budget_mib`、`advisor.checkpoint_max_mib` → `advisor_ckpt_max_mib`、`startup.allow_missing_standby` → `allow_missing_standby`(段 5 字段归 [hft-sequencer](../crates/hft-sequencer/README.md),hft-core 启动时核对两边相等);配置缺其中任一键 → 退出 2;三键出现在 params 文件任何位置 → 退出 1。params 文件写 `version`、`host_class` 与各段表:`[capacities]`(段 3)、`[rings]`(段 4,键为 `RingCapKind` 名的 snake_case)、`[sequencer]`(段 5 其余字段,`rings.<RingClass 名>.{per_ring, total}`)、`[conn.rotate_margin_s]`(段 6,按 venue);段 1、2、7 在归属 crate 定义行格式后加入(未知表退出 1)。ECF1 与 refdata 之间的交叉校验(含段 2 每个 `ref_inst` 的 `RefInstNotSubscribed`,规则归 [hft-refdata](../crates/hft-refdata/README.md))只在 hft-core 启动时由 `EngineConfig::load` 的验证器进行,hft-cfg 不预检。
 - **`refdata fetch`**:冷路径联网工具,按 venue 拉 instruments/exchangeInfo,按 [hft-refdata 的指数规则](../crates/hft-refdata/README.md#实现说明)生成 inst 行与资产指数建议,排除非 10 的幂合约乘数与交割合约;输出供人审阅的 TOML,不直接产出 blob。
 - 退出码:0 成功;1 校验或差异被拒;2 输入/环境错误(文件缺失、socket 不可达、schema 目录缺失)。
 
@@ -503,7 +504,7 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 | `tools/az-probe/` | Python 3.12 包(由 `probe2.py` 演化);`targets.toml` |
 | `tools/hostprobe/` | Rust 二进制(cold tier;只读 `/proc`、`/sys`、ioctl、`bpf(BPF_PROG_QUERY)` 与 nftables netlink 查询;不链接任何 hot crate) |
 | `tools/hft-cfg/` | Rust 二进制(cold tier;依赖 `hft-refdata`、`hft-event`、`hft-strategy-sdk`(只用 `params`)、`hft-risk` 的构建器与校验、core `venue-*`(只用 `default_caps`/`dead_man`)、`hft-ctl-proto` 的帧;不依赖任何 `strategies/*` 与 hot 运行时 crate) |
-| `tools/hft-cfg/src/{refdata,strategy,risk,engine,fetch,diff,send}.rs` | 各子命令;`strategy.rs` 只做 TOML ↔ schema 字段映射与单位换算,编码调用 SDK |
+| `tools/hft-cfg/src/{lib,refdata,strategy,engine,diff,util}.rs` | CLI 与各子命令;`strategy.rs` 只做 TOML ↔ schema 字段映射与单位换算,编码调用 SDK;`risk`、`fetch`、`send` 随 hft-risk 构建器、`refdata fetch` 与 hft-ctl-proto 帧加入 |
 | `tools/hft-secrets/` | Rust 二进制(cold tier;`aws-sdk-secretsmanager`、`aws-sdk-kms`、tokio;不链接任何 hot crate);清单模板在 `deploy/secrets/` |
 | `tools/hft-verify/` | Rust 二进制(cold tier;不链接任何 hft crate、无网络代码);`src/{run,rotate,classify,record,ledger,crash,resolve}.rs`;`gates.toml`(门槛取值,与 testing §8 比对) |
 
@@ -546,6 +547,7 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 - az-probe 的首帧单向分布依赖 PHC;探针实例若无 PHC,只能给 RTT 结论。
 - `doc-check` 的分段名与策略族名检查只能匹配名单内的写法,自然语言里的错误用法靠评审。
 - hft-cfg 不跑策略的跨字段 `validate`(它不链接策略代码);离线发现跨字段错误要靠 `send` 的预览或 CI 里对 `fixtures/params/*` 的 gateway 级测试。
+- hft-cfg 尚未接入:`build --kind risk`(hft-risk 构建器)、`refdata fetch`、`send`(hft-ctl-proto 帧)、从 journal 目录读取生效 blob(`--against`/`--refdata` 给目录)与 core `venue-*` 的 `default_caps()`(能力行的底取 `[caps.<venue>]`);前四项当前退出 2。
 - hft-verify 的吞吐受服务器空闲 CPU 限制(批处理所在 slice 为 `CPUWeight=idle`,dev2 上的吞吐随旧系统负载变化;达成时间估算见 testing §6.1);它不并行,也不在主机间协调——同时有两台主机运行时靠种子编码与按完成时刻折叠保证结果正确,不靠锁。
 
 ### 开发备忘

@@ -1,0 +1,6 @@
+# refdata-basic: endpoints (merged into [venues.*] with venues.toml).
+[venues.binance-usdm]
+endpoints = [
+  { role = "order_ws", env = "prod", url = "wss://ws-fapi.binance.com/ws-fapi/v1" },
+  { role = "md_public", env = "prod", url = "wss://fstream.binance.com/public" },
+]

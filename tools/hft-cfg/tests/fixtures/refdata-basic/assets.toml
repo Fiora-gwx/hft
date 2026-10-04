@@ -1,0 +1,39 @@
+# refdata-basic (tools/TESTS.md TOOL-119 前置): assets. Files of this directory are merged.
+version = 1
+created_utc_ns = 1759276800000000000
+
+[assets.AIN]
+id = 1
+class = "crypto"
+px_exp = -8
+qty_exp = -2
+px_max = "1000"
+qty_max = "100000000"
+dust = "0.01"
+
+[assets.BTC]
+id = 2
+class = "crypto"
+px_exp = -8
+qty_exp = -8
+px_max = "10000000"
+qty_max = "1000000"
+dust = "0.00001"
+
+[assets.USDT]
+id = 3
+class = "stable"
+px_exp = -8
+qty_exp = -8
+px_max = "10"
+qty_max = "10000000000"
+dust = "0.00001"
+
+[assets.USDC]
+id = 4
+class = "stable"
+px_exp = -8
+qty_exp = -8
+px_max = "10"
+qty_max = "10000000000"
+dust = "0.00001"

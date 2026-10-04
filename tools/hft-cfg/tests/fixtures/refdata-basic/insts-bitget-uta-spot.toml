@@ -1,0 +1,42 @@
+# refdata-basic: bitget-uta-spot insts.
+[insts."bitget-uta-spot:AINUSDT"]
+id = 3
+status = "trading"
+kind = "spot"
+asset = "AIN"
+quote = "USDT"
+tick = "0.0001"
+lot = "0.1"
+min_qty = "0.1"
+max_qty = "1000000"
+min_notional = "1"
+book_window = 4096
+l2_depth = 15
+
+[insts."bitget-uta-spot:BTCUSDT"]
+id = 4
+status = "trading"
+kind = "spot"
+asset = "BTC"
+quote = "USDT"
+tick = "0.01"
+lot = "0.000001"
+min_qty = "0.000001"
+max_qty = "1000"
+min_notional = "1"
+book_window = 4096
+l2_depth = 15
+
+[insts."bitget-uta-spot:AINUSDC"]
+id = 5
+status = "trading"
+kind = "spot"
+asset = "AIN"
+quote = "USDC"
+tick = "0.0001"
+lot = "0.1"
+min_qty = "0.1"
+max_qty = "1000000"
+min_notional = "1"
+book_window = 4096
+l2_depth = 15

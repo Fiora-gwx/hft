@@ -1,0 +1,80 @@
+# refdata-basic: venues (connection and protocol constants).
+[venues.binance-usdm]
+exchange = "binance"
+product = "perp"
+ws_max_streams_per_conn = 1024
+ws_max_in_msgs_per_s = 10
+ws_max_conn_age_s = 86400
+ws_new_conn_per_5min_ip = 300
+app_ping_interval_s = 0
+ts_unit = "ms"
+client_id_max_len = 36
+client_id_prefix = ""
+max_batch = 5
+max_inflight_amend = 1
+crossed_tolerance_default = 0
+stale_guard = "recv_window"
+
+[venues.binance-spot]
+exchange = "binance"
+product = "spot"
+ws_max_streams_per_conn = 1024
+ws_max_in_msgs_per_s = 10
+ws_max_conn_age_s = 86400
+ws_new_conn_per_5min_ip = 300
+app_ping_interval_s = 0
+ts_unit = "ms"
+client_id_max_len = 36
+client_id_prefix = ""
+max_batch = 5
+max_inflight_amend = 1
+crossed_tolerance_default = 0
+stale_guard = "recv_window"
+
+[venues.okx-swap]
+exchange = "okx"
+product = "perp"
+ws_max_streams_per_conn = 480
+ws_max_in_msgs_per_s = 10
+ws_max_conn_age_s = 86400
+ws_new_conn_per_5min_ip = 300
+app_ping_interval_s = 25
+ts_unit = "ms"
+client_id_max_len = 32
+client_id_prefix = ""
+max_batch = 20
+max_inflight_amend = 1
+crossed_tolerance_default = 0
+stale_guard = "expire_at"
+
+[venues.bitget-uta-spot]
+exchange = "bitget"
+product = "spot"
+ws_max_streams_per_conn = 1000
+ws_max_in_msgs_per_s = 10
+ws_max_conn_age_s = 86400
+ws_new_conn_per_5min_ip = 300
+app_ping_interval_s = 30
+ts_unit = "ms"
+client_id_max_len = 40
+client_id_prefix = ""
+max_batch = 20
+max_inflight_amend = 1
+crossed_tolerance_default = 0
+stale_guard = "none"
+
+[venues.okx-spot]
+exchange = "okx"
+product = "spot"
+ws_max_streams_per_conn = 480
+ws_max_in_msgs_per_s = 10
+ws_max_conn_age_s = 86400
+ws_new_conn_per_5min_ip = 300
+app_ping_interval_s = 25
+ts_unit = "ms"
+client_id_max_len = 32
+client_id_prefix = ""
+max_batch = 20
+max_inflight_amend = 1
+crossed_tolerance_default = 0
+stale_guard = "expire_at"

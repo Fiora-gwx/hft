@@ -1,0 +1,18 @@
+# Strategy parameters of instance pc-main on account pc-live (tools/TESTS.md TOOL-119 前置).
+[strategy]
+instance = "pc-main"
+account = "pc-live"
+schema = { id = 65280, version = 2 }
+version = 1
+source = "manual"
+
+[defaults]
+spread_th = "0.0005"
+
+[[groups]]
+n = 101
+asset = "AIN"
+open_allowed = true
+legs = [ { inst = "binance-usdm:AINUSDT" }, { inst = "bitget-uta-spot:AINUSDT" } ]
+[groups.overrides]
+max_qty = "5000"

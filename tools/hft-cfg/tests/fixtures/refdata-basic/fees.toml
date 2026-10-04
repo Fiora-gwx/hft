@@ -1,0 +1,8 @@
+# refdata-basic: fee tiers (Rate written as decimal fractions).
+fees = [
+  { venue = "binance-usdm", tier = 0, maker = "0.0002", taker = "0.0005" },
+  { venue = "binance-spot", tier = 0, maker = "0.001", taker = "0.001" },
+  { venue = "okx-swap", tier = 0, maker = "0.0002", taker = "0.0005" },
+  { venue = "bitget-uta-spot", tier = 0, maker = "0.001", taker = "0.001" },
+  { venue = "okx-spot", tier = 0, maker = "0.0008", taker = "0.001" },
+]

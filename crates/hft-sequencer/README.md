@@ -177,6 +177,15 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 | 5 | `allow_missing_standby` | bool | = hft-core `startup.allow_missing_standby`(hft-cfg 写入);启动闸门 `ORDER_CONNS` 是否不要求热备 Up(语义归 [hft-risk 启动闸门](../hft-risk/README.md#启动闸门)) |
 
 - **两个 group 容量,不是同一个量**:`max_cells_total` 是本进程全部实例的 cell 总数;`max_groups_per_instance` 是每个实例的上限。`max_instances` 计入实盘与模拟实例(模拟实例池见 [hft-sim](../hft-sim/README.md))。
+- **段 3 的行格式**(草案,实现时以代码与编译期断言为准;行版本 1):段 3 只有一行 `CapacitiesRow`(ECF1 段头的 `row_size` = 24),字段语义见上表,只在尾部追加:
+
+```rust
+#[repr(C)] pub struct CapacitiesRow {                                                         // 24 B
+    pub max_insts: u32, pub max_cells_total: u32, pub max_timers: u32, pub recent_cmd_ids: u32, //  0
+    pub max_subs_per_inst: u16, pub max_groups_per_instance: u16, pub max_instances: u16,      // 16
+    pub _pad: u16,                                                                              // 22 为 0
+}
+```
 - **段 5 的行格式**(草案,实现时以代码与编译期断言为准;行版本 1):段 5 只有一行 `SeqParamsRow`(ECF1 段头的 `row_size` = 72),字段语义见上表,只在尾部追加:
 
 ```rust

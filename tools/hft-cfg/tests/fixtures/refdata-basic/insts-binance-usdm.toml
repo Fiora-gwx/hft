@@ -1,0 +1,32 @@
+# refdata-basic: binance-usdm insts.
+[insts."binance-usdm:AINUSDT"]
+id = 1
+status = "trading"
+kind = "perp"
+asset = "AIN"
+quote = "USDT"
+tick = "0.0001"
+lot = "0.01"
+min_qty = "0.01"
+max_qty = "1000000"
+min_notional = "5"
+book_window = 4096
+l2_depth = 20
+funding_interval_s = 28800
+max_leverage = 20
+
+[insts."binance-usdm:BTCUSDT"]
+id = 2
+status = "trading"
+kind = "perp"
+asset = "BTC"
+quote = "USDT"
+tick = "0.1"
+lot = "0.001"
+min_qty = "0.001"
+max_qty = "1000"
+min_notional = "5"
+book_window = 4096
+l2_depth = 20
+funding_interval_s = 28800
+max_leverage = 125
