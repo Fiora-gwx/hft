@@ -1,0 +1,122 @@
+{
+  "fields": [
+    {
+      "metadata": {},
+      "name": "quote_id",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "block",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:group"
+      },
+      "name": "group",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "route",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:venue"
+      },
+      "name": "chain",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:PoolLevel"
+      },
+      "name": "level",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "bits:PoolQuoteFlags"
+      },
+      "name": "qflags",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "qty"
+      },
+      "name": "size",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "px"
+      },
+      "name": "buy_px",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "px"
+      },
+      "name": "sell_px",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "notional"
+      },
+      "name": "depth",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "notional"
+      },
+      "name": "gas_cost",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "rate"
+      },
+      "name": "fee",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {},
+      "name": "computed_ts_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "tsc"
+      },
+      "name": "rx_tsc",
+      "nullable": false,
+      "type": "UInt64"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0302",
+    "hft.layout": "fixed 96",
+    "hft.name": "PoolQuote",
+    "hft.schema_version": "1"
+  }
+}

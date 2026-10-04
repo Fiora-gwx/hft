@@ -926,7 +926,22 @@ pub enum FeedCmd {                   // sequencer → feed 的 feedctl-<venue> �
 //   sequencer 在并集变化时重发 Subscribe;按位分发到 feed-bbo/feed-md 与各路由的规则归 hft-venue §1。
 ```
 
-**环拓扑**(环名、方向、优先级与每轮上限的唯一归属是 [hft-sequencer 环表](../hft-sequencer/README.md),线程落点归 apps/hft-core):每 venue `bbo-<venue>` 与 `md-<venue>`(+ `md-<venue>-bulk`)由该 venue 的 `feed-bbo:<venue>` / `feed-md:<venue>` 任务写入(`routes = All` 时同一任务写两条环),`rep-<venue>`(+ `rep-<venue>-bulk`)由 gw 写入(账户查询的解码结果 `AccountConfigReport`、`MarginReport` 等也由 gw 推入这里),`out-<venue>`、`feedctl-<venue>`(拆分时另有 `feedctl-<venue>-bbo`)由 sequencer 写入;模拟账户的 `out-sim`/`rep-sim`;advisor 的 `advice` 字节环(`AdviceMsg`);ctl-gateway 的 `ctl` 字节环;housekeeping 的 `hk` 环(`HkMsg`,启动路径在 housekeeping 线程启动前写完)。以下环在 hft-venue 内部、不进 sequencer,环名与元素类型归 [hft-venue](../hft-venue/README.md):行情任务与 snap-fetch 之间的快照请求/回送环(BBO 补帧与可选的深度快照各一组);`acctreq-<venue>`(gw → acct-fetch,账户查询请求)与 `acct-<venue>`(acct-fetch → gw,hft-venue 内部字节环,携带原始响应与切好的报告,由 gw 写 raw 后推入 `rep-<venue>`)。
+**环拓扑**(本表登记 sequencer 两侧每条环的元素类型;环名、方向、优先级与每轮上限的唯一归属是 [hft-sequencer 环表](../hft-sequencer/README.md),两表的环名与元素类型由 [`cargo xtask doc-check`](../../tools/README.md#cargo-xtask-doc-check) 核对一一对应,optional 的 `chain-in`/`chain-out` 不列;线程落点归 apps/hft-core):
+
+| 环 | 写者 | 元素类型 |
+|---|---|---|
+| `ctl` | ctl-gateway | `CtlRecord` 帧(`ByteSpsc`,见下) |
+| `hk` | housekeeping 线程(启动路径在 housekeeping 线程启动前写完) | `HkMsg` |
+| `rep-<venue>` | gw(账户查询的解码结果 `AccountConfigReport`、`MarginReport` 等也由 gw 推入) | `RepMsg`;配套 `rep-<venue>-bulk` 字节环 |
+| `rep-sim` | 模拟账户的 sim-gw | `RepMsg` |
+| `bbo-<venue>` | 该 venue 的 `feed-bbo:<venue>` 任务 | `FeedMsg`(只有 `Bbo` 与 BBO 连接的 `ConnState`) |
+| `md-<venue>` | 该 venue 的 `feed-md:<venue>` 任务(`routes = All` 时与 `bbo-<venue>` 由同一任务写) | `FeedMsg`;配套 `md-<venue>-bulk` 字节环 |
+| `advice` | advisor | `AdviceMsg` 帧(`ByteSpsc`,见下) |
+| `out-<venue>` | sequencer | `GwCmd`(`OutMsg`) |
+| `out-sim` | sequencer | `GwCmd` |
+| `feedctl-<venue>`、`feedctl-<venue>-bbo`(拆分时) | sequencer | `FeedCmd` |
+
+以下环在 hft-venue 内部、不进 sequencer,环名与元素类型归 [hft-venue](../hft-venue/README.md):行情任务与 snap-fetch 之间的快照请求/回送环(BBO 补帧与可选的深度快照各一组);`acctreq-<venue>`(gw → acct-fetch,账户查询请求)与 `acct-<venue>`(acct-fetch → gw,hft-venue 内部字节环,携带原始响应与切好的报告,由 gw 写 raw 后推入 `rep-<venue>`)。
 
 **路由**:sequencer 按 `AccountMeta.kind` 把 `GwCmd` 推入 `out-<venue>`(实盘账户)或 `out-sim`(模拟账户);gw 永远收不到模拟账户的单,sim-gw 永远收不到实盘账户的单(装配时断言,见 [apps/hft-core](../../apps/hft-core/README.md))。
 
@@ -1136,18 +1151,20 @@ impl<'b> Reassembler<'b> {
 
 **定义宏**:每个定长体与 Var 前缀用一个 `macro_rules! event_body!` 声明(不引入 proc-macro crate),宏展开出:结构体与 `zerocopy` 派生、`Body` 实现、`FieldDesc` 表(偏移用 `core::mem::offset_of!`)、编译期断言(`size_of % 8 == 0`、`size_of ≤ 65536 − 24 − 8`、与 `KINDS` 中登记的 `size`/`prefix` 相等)。`KINDS` 是手写的 `static` 数组,单元测试断言它与全部 `Body` 实现一一对应、编号唯一、落在 event-model 规定的编号段内。Var kind 的 `max` 编译期检查 `prefix + max ≤ 65536 − 24 − 8`(`Advice`:32 + 4096;`MarginReport`:64 + 16 × 1024;`AccountConfigReport`:64 + 16 × 1024;`L2Batch`:80 + 16 × 4000)。`ControlCmd` 是 Multi,但 `InjectWarmup` 的最大逻辑体(16 + 128 + 16 + 4096)远小于单段上限,编码器断言它总是单段。
 
-**schema 生成**(`cargo xtask gen-schema`,调用 `hft_event::schema::catalog()` 与 `hft_refdata::schema::rows()`):
+**schema 生成**(`cargo xtask gen-schema`,调用 `hft_event::schema::catalog()` 与 `hft_refdata::schema::{RDB1_ROWS, load_err_codes}`;嵌套结构(如 `MarketHdr`)在 lock、Arrow 与目录中展开为 `外层.字段`,在 Python 中为嵌套 dtype):
 
 | 输出 | 内容 |
 |---|---|
 | `docs/generated/event-catalog.md` | 每 kind:编号、域、角色、布局、`schema_version`、字段表(偏移、类型、单位、说明)、枚举码表;Note 码表、`ExecDecision.detail` 子码表与 `OrderDecision.reason` 码表(各 crate 与策略 crate 经 SDK 提供) |
-| `python/_generated/events.py` | 每 kind 的 `numpy.dtype({names, formats, offsets, itemsize})`、kind 常量、枚举字典;`Px/Qty` 为 `int64` 并带 `hft.type` 注解;SPB1 容器头(`StrategyParamsHdr`、`GroupSpec`、`LegDef`)的 dtype(body 由 hft-py 包装的 SDK 编码器产生) |
-| `schemas/arrow/<kind>.json` | Arrow schema;`Px/Qty` 为 `Int64` + 字段元数据 `hft.type=px/qty`(十进制换算由 journal-archiver 按 inst 的 `AssetExp` 完成) |
+| `python/_generated/events.py` | 每 kind 的 `numpy.dtype({names, formats, offsets, itemsize})`(`names`/`offsets` 与 `FieldDesc` 逐项相同,Var/Multi 的 `itemsize` 为前缀大小)、kind 常量、枚举字典;`Px/Qty` 为 `int64` 并带 `hft.type` 注解;SPB1 容器头(`StrategyParamsHdr`、`GroupSpec`、`LegDef`)的 dtype(body 由 hft-py 包装的 SDK 编码器产生) |
+| `schemas/arrow/<kind>.json` | 每 kind 一个文件,文件名为 kind 名的 snake_case(`Bbo` → `bbo.json`,`L2Delta` → `l2_delta.json`);JSON `{fields: [{name, type, nullable, metadata}], metadata}`,`type` 为 Arrow 类型名(`UInt8`…`Int64`、`FixedSizeBinary(n)`),保留字节不导出;`Px/Qty` 为 `Int64` + 字段元数据 `hft.type=px/qty`(十进制换算由 journal-archiver 按 inst 的 `AssetExp` 完成),ID、码表与 TSC 字段同样以 `hft.type` 标注 |
 | `python/_generated/refdata.py` | RDB1 行 dtype(只读,解析 journal 里的 refdata blob;编码器只在 Rust);hft-refdata 的 `LoadErrCode` 码表(`event-catalog.md` 同时列出) |
-| `schemas/event-layout.lock` | 只追加核对的基线:每 kind 的编号、名、`schema_version`、大小、字段表(名、偏移、类型)与 `deprecated` 标记;`CmdKind`、hft-refdata `LoadErrCode` 的编号与名;引擎 Note 码 `(source, n) → 码名`;各策略种类 `kind_id → 名` 及其 Note 码(`NoteDesc.code → 名`)、命令 `CmdDesc.op → 名` 与检查点节 `SectionDesc.tag → 名`(从 `hft-core schemas` 导出读取);SPB1 容器结构(`StrategyParamsHdr`、`GroupSpec`、`LegDef` 的字段表) |
+| `schemas/event-layout.lock` | 只追加核对的基线(逐行文本:`kind <编号> <名> v<版本> <fixed\|var\|multi> <大小> [deprecated]` 后接缩进的 `<偏移> <字段> <类型>` 行,`cmd`、`load-err`、`note <source> <n> <名>`、`struct`、`strategy <kind_id> <名>` 后接 `note`/`op`/`tag` 行):每 kind 的编号、名、`schema_version`、大小、字段表(名、偏移、类型)与 `deprecated` 标记(`kinds.rs` 中该 kind 常量带 `#[deprecated]`);`CmdKind`、hft-refdata `LoadErrCode` 的编号与名;引擎 Note 码 `(source, n) → 码名`;各策略种类 `kind_id → 名` 及其 Note 码(`NoteDesc.code → 名`)、命令 `CmdDesc.op → 名` 与检查点节 `SectionDesc.tag → 名`(从 `hft-core schemas` 导出读取);SPB1 容器结构(`StrategyParamsHdr`、`GroupSpec`、`LegDef` 的字段表) |
 | `crates/hft-telemetry/src/notes_catalog.rs` | 引擎 Note 码表:每个 `(source, n)` 的码名、默认级别与 `NOTE_NAMES` 中的 `v[]` 字段(hft-telemetry 的翻译表;策略码不进此表) |
 
-`gen-schema` 每次运行都对照基线 `schemas/event-layout.lock` 做只追加核对(CI 取 PR 目标分支合并基点上的该文件,本地取工作区已提交的版本;基线中还没有该文件时只生成、不核对),违反时不改写任何生成物、退出 1;`--check` 另把生成物与仓库逐字节比较。失败条件:布局变化而 `schema_version` 未加一(占用保留字节且大小不变的情形除外,条件见 [event-model 演进规则](../../docs/subsystems/event-model.md#演进规则));新布局不是旧布局的前缀扩展(改名、改型、改偏移、删字段;把 `_pad*`/`_rsv*` 中的字节改为具名字段不算改名);kind、`CmdKind`、hft-refdata `LoadErrCode`、引擎 Note 码 `(source, n)`、策略 `kind_id`、策略 Note 码、`CmdDesc.op` 或检查点节 `tag` 的编号消失或被复用(同一编号换了名字;策略的后四项按 `kind_id` 分别核对);const 表或 `NoteDesc` 中出现 `n = 0`;追加或占用保留字节的新字段是 0 非法的枚举;Note 登记表(`NOTE_NAMES`)与各 source crate 的 `const` 表名字不一一对应、`source` 不同或同一 source 内 `n` 重复,`Venue`/`Measure`/`Housekeeping` 源的码名不以 `Venue`/`Measure`/`Hk` 开头;hft-ext-proto 的 `KINDS_EXT` 与 `KINDS` 编号重叠或越段;生成物与仓库不一致(仅 `--check`)。策略参数 schema 的导出(每策略一个 JSON)不在本 crate,见 [tools hft-cfg](../../tools/README.md#hft-cfg)。
+`gen-schema` 每次运行都对照基线 `schemas/event-layout.lock` 做只追加核对(CI 取 PR 目标分支合并基点上的该文件,取不到合并基点退出 2;本地取工作区 HEAD 已提交的版本;基线中还没有该文件时只生成、不核对),违反时不改写任何生成物、退出 1;`--check` 另把生成物与仓库逐字节比较。失败条件:布局变化而 `schema_version` 未加一(占用保留字节且大小不变的情形除外,条件见 [event-model 演进规则](../../docs/subsystems/event-model.md#演进规则));新布局不是旧布局的前缀扩展(改名、改型、改偏移、删字段;把 `_pad*`/`_rsv*` 中的字节改为具名字段不算改名);kind、`CmdKind`、hft-refdata `LoadErrCode`、引擎 Note 码 `(source, n)`、策略 `kind_id`、策略 Note 码、`CmdDesc.op` 或检查点节 `tag` 的编号消失或被复用(同一编号换了名字;策略的后四项按 `kind_id` 分别核对;kind(按编号段)、`CmdKind` 与 `LoadErrCode` 的新编号小于基线中同一编号空间的最大值而基线没有它,视为复用退役或保留的编号);const 表或 `NoteDesc` 中出现 `n = 0`;追加或占用保留字节的新字段是 0 非法的枚举;Note 登记表(`NOTE_NAMES`)与各 source crate 的 `const` 表名字不一一对应、`source` 不同或同一 source 内 `n` 重复,`Venue`/`Measure`/`Housekeeping` 源的码名不以 `Venue`/`Measure`/`Hk` 开头(仓库里还没有任何 const 表项的 source——其 crate 尚未实现——不做一一对应核对);hft-ext-proto 的 `KINDS_EXT` 与 `KINDS` 编号重叠或越段;生成物与仓库不一致(仅 `--check`;含已不再生成的 `schemas/arrow/*.json`,写入模式删除它们)。策略参数 schema 的导出(每策略一个 JSON)不在本 crate,见 [tools hft-cfg](../../tools/README.md#hft-cfg)。
+
+**const 表的形式**(gen-schema 以文本扫描读取,不链接 source crate):每个 source crate 在 `src/` 下声明 `pub const NOTE_CODES: &[(NoteSource, u32, &str)] = &[(NoteSource::Oms, 1, "OmsTransition"), …];`(`n` 写十进制或十六进制字面量);扫描范围是 `crates/*/src` 与 `apps/*/src`。**策略四项的来源**:`apps/hft-core` 在 workspace 中时运行已构建的 `hft-core schemas`(找不到二进制退出 2,规则归 [tools gen-schema](../../tools/README.md#cargo-xtask-gen-schema)),读 `index.json` 与各 schema JSON 的 `notes[].code`、`cmds[].op`、`sections[].tag`;`apps/hft-core` 尚不在 workspace 时跳过这一部分(运行输出注明),lock 中的策略行原样沿用基线。hft-ext-proto 的 `KINDS_EXT` 随该可选扩展启用时链接;扩展的 crate 已在仓库而 xtask 尚未链接它 → 退出 2。
 
 **版本读取**:段头记录写者的 `(kind, schema_version, size)` 表([journal-format](../../docs/subsystems/journal-format.md#segmentheader));读者以段头表为准判断旧/新记录,`RecordView::read` 按 `min(len, size_of::<B>())` 拷贝并补零。
 
@@ -1210,6 +1227,7 @@ impl<'b> Reassembler<'b> {
 - `MarginReport` 单条至多 1024 个条目;超出时置 `ITEMS_TRUNCATED`,hft-risk 按"数据不完整"处理(视为 L1)。`AccountConfigReport` 同样至多 1024 条杠杆条目,超出置 `LEV_TRUNCATED`,未列出的 inst 杠杆按"读不到"处理(规则归 hft-risk);某 venue 的永续宇宙超过 1024 个 inst 时,可选扩展:按 inst 分多条 `PARTIAL` 报告(触发条件:refdata 中单个永续 venue 的可交易 inst 超过 1024)。
 - `EngineClock` 每次进程启动一条;引擎时间的精度受启动时 TSC 频率校准误差限制(≤ 1e-6 相对误差时,一天的运行累计偏差 ≤ 87 ms),它只用于跨重启的冷却与截止,不用于延迟测量。
 - Arrow 导出不做十进制类型:`Px/Qty` 以 `Int64` + 元数据导出,十进制列在 journal-archiver 按分区生成。
+- 金样用的规范 JSON 渲染 `to_canonical_json`([fixtures 金样文件格式](../../fixtures/README.md#金样文件格式))还不是 gen-schema 的生成物:它需要 refdata 的 venue 名与资产指数,随第一个 venue 解码金样驱动一起加入生成物清单;在此之前金样期望以手写结构体比较(fixtures 已注明)。
 
 ### 开发备忘
 

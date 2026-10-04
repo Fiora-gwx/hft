@@ -1,0 +1,116 @@
+{
+  "fields": [
+    {
+      "metadata": {},
+      "name": "cmd_id",
+      "nullable": false,
+      "type": "FixedSizeBinary(16)"
+    },
+    {
+      "metadata": {},
+      "name": "issuer",
+      "nullable": false,
+      "type": "FixedSizeBinary(24)"
+    },
+    {
+      "metadata": {},
+      "name": "issued_at_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {},
+      "name": "expires_at_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "tsc"
+      },
+      "name": "expires_tsc",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "peer_uid",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:CmdKind"
+      },
+      "name": "cmd",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {},
+      "name": "cmd_ver",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:CmdRole"
+      },
+      "name": "role",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:account"
+      },
+      "name": "account",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {},
+      "name": "confirmed",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "bits:CmdHdrFlags"
+      },
+      "name": "hflags",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {},
+      "name": "payload_len",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "cmd_hash",
+      "nullable": false,
+      "type": "FixedSizeBinary(32)"
+    },
+    {
+      "metadata": {},
+      "name": "base_version",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "expect_state_version",
+      "nullable": false,
+      "type": "UInt64"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0401",
+    "hft.layout": "multi 128",
+    "hft.name": "ControlCmd",
+    "hft.schema_version": "1"
+  }
+}

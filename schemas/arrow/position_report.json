@@ -1,0 +1,80 @@
+{
+  "fields": [
+    {
+      "metadata": {
+        "hft.type": "id:venue"
+      },
+      "name": "venue",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:account"
+      },
+      "name": "account",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:inst"
+      },
+      "name": "inst",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "qty"
+      },
+      "name": "qty",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "px"
+      },
+      "name": "entry_px",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "notional"
+      },
+      "name": "upnl",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "px"
+      },
+      "name": "liq_px",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {},
+      "name": "ex_ts_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "tsc"
+      },
+      "name": "rx_tsc",
+      "nullable": false,
+      "type": "UInt64"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0204",
+    "hft.layout": "fixed 56",
+    "hft.name": "PositionReport",
+    "hft.schema_version": "1"
+  }
+}

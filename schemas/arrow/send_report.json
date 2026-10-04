@@ -1,0 +1,99 @@
+{
+  "fields": [
+    {
+      "metadata": {},
+      "name": "decision_seq",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {
+        "hft.measure": "true",
+        "hft.type": "tsc"
+      },
+      "name": "sent_tsc",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:slot"
+      },
+      "name": "slot",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "gen",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:slot"
+      },
+      "name": "target_slot",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "target_gen",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:venue"
+      },
+      "name": "venue",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:account"
+      },
+      "name": "account",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:conn"
+      },
+      "name": "conn",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:SendStatus"
+      },
+      "name": "status",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:GwOp"
+      },
+      "name": "op",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {},
+      "name": "os_errno",
+      "nullable": false,
+      "type": "Int32"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0202",
+    "hft.layout": "fixed 48",
+    "hft.name": "SendReport",
+    "hft.schema_version": "1"
+  }
+}

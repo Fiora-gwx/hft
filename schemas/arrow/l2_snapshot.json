@@ -1,0 +1,98 @@
+{
+  "fields": [
+    {
+      "metadata": {
+        "hft.type": "id:venue"
+      },
+      "name": "h.venue",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:conn"
+      },
+      "name": "h.conn",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:inst"
+      },
+      "name": "h.inst",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "h.ex_ts_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {},
+      "name": "h.ex_send_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {},
+      "name": "h.hw_rx_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "tsc"
+      },
+      "name": "h.rx_tsc",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "h.sw_rx_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {},
+      "name": "h.rx_empty_gap_ns",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "snap_id",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:L2Origin"
+      },
+      "name": "origin",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {},
+      "name": "n_bids",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {},
+      "name": "n_asks",
+      "nullable": false,
+      "type": "UInt16"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0103",
+    "hft.layout": "multi 72",
+    "hft.name": "L2Snapshot",
+    "hft.schema_version": "1"
+  }
+}

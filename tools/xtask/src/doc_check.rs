@@ -5,6 +5,9 @@
 //! Each prints `problems=<n>` as its last summary line; any non-zero count fails the gate.
 //! The pure helpers [`slug`], [`slugs`] and [`doc_length`] are the native implementations of the anchor
 //! and length rules shared with `check_hft.py` (same definitions).
+//!
+//! Native checks (run after the scripts): [`check_rings`] — the "环名" row of tools/README.md (hft-event
+//! 环拓扑 table <-> hft-sequencer ring table: ring names and element types one-to-one).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -82,6 +85,160 @@ pub fn find_python() -> Option<String> {
     })
 }
 
+/// One ring row of a Markdown table (`| 环 | … |`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RingRow {
+    /// Ring name (`rep-<venue>`).
+    pub ring: String,
+    /// Element type (aliases resolved: `OutMsg` → `GwCmd`; "同 `<ring>`" → that ring's type).
+    pub elem: String,
+    /// Companion byte rings named in the element cell (`rep-<venue>-bulk`).
+    pub companions: Vec<String>,
+    /// 1-based line in its file.
+    pub line: usize,
+}
+
+/// hft-event README (owner of the 环拓扑 table).
+pub const RING_EVENT_MD: &str = "crates/hft-event/README.md";
+/// hft-sequencer README (owner of the ring table).
+pub const RING_SEQ_MD: &str = "crates/hft-sequencer/README.md";
+/// Optional rings that take no part in the comparison.
+pub const RING_OPTIONAL: &[&str] = &["chain-in", "chain-out"];
+
+static BACKTICK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`([^`]+)`").unwrap());
+static RING_NAME: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-z]+(?:-[a-z]+)*(?:-<venue>(?:-[a-z]+)*)?$").unwrap());
+
+fn md_cells(line: &str) -> Vec<String> {
+    let t = line.trim();
+    let t = t.strip_prefix('|').unwrap_or(t);
+    let t = t.strip_suffix('|').unwrap_or(t);
+    t.split('|').map(|c| c.trim().to_string()).collect()
+}
+
+/// Element type of an element cell: its first backticked token, `Type::Variant` / `Type{…}` cut to
+/// `Type`, `OutMsg` → `GwCmd`.
+fn first_type(cell: &str) -> String {
+    let t = BACKTICK
+        .captures(cell)
+        .map(|c| c[1].to_string())
+        .unwrap_or_default();
+    let t = t.split("::").next().unwrap_or("");
+    let t = t.split('{').next().unwrap_or("").trim();
+    if t == "OutMsg" {
+        "GwCmd".to_string()
+    } else {
+        t.to_string()
+    }
+}
+
+/// Rows of the first table whose header starts with `环` and has an element column (`元素…`),
+/// searched from the first line containing `after` (or from the top); code blocks are skipped.
+fn ring_table(text: &str, after: Option<&str>) -> Option<Vec<RingRow>> {
+    let lines: Vec<&str> = text.lines().collect();
+    let start = match after {
+        Some(a) => lines.iter().position(|l| l.contains(a))?,
+        None => 0,
+    };
+    let mut in_code = false;
+    for i in start..lines.len() {
+        let l = lines[i].trim_start();
+        if l.starts_with("```") {
+            in_code = !in_code;
+            continue;
+        }
+        if in_code || !l.starts_with('|') {
+            continue;
+        }
+        let hdr = md_cells(l);
+        let Some(ec) = hdr.iter().position(|c| c.starts_with("元素")) else {
+            continue;
+        };
+        if hdr.first().is_none_or(|c| c != "环") {
+            continue;
+        }
+        let mut rows: Vec<RingRow> = Vec::new();
+        for (j, row) in lines.iter().enumerate().skip(i + 2) {
+            if !row.trim_start().starts_with('|') {
+                break;
+            }
+            let cells = md_cells(row);
+            let cell = cells.get(ec).cloned().unwrap_or_default();
+            let elem = first_type(&cell);
+            let companions: Vec<String> = BACKTICK
+                .captures_iter(&cell)
+                .map(|c| c[1].to_string())
+                .filter(|t| t.ends_with("-bulk") && RING_NAME.is_match(t))
+                .collect();
+            for c in BACKTICK.captures_iter(cells.first().map_or("", |c| c.as_str())) {
+                let ring = c[1].replace("<v>", "<venue>");
+                if RING_NAME.is_match(&ring) {
+                    rows.push(RingRow {
+                        ring,
+                        elem: elem.clone(),
+                        companions: companions.clone(),
+                        line: j + 1,
+                    });
+                }
+            }
+        }
+        // "同 `<ring>`": the element type of that ring.
+        let named = rows.clone();
+        for r in rows.iter_mut() {
+            if let Some(o) = named.iter().find(|o| o.ring == r.elem) {
+                r.elem = o.elem.clone();
+            }
+        }
+        return Some(rows);
+    }
+    None
+}
+
+/// `(hft-event 环拓扑 rows, hft-sequencer ring-table rows)` of the tree at `root`.
+pub fn ring_tables(root: &Path) -> Result<(Vec<RingRow>, Vec<RingRow>), String> {
+    let read = |p: &str| std::fs::read_to_string(root.join(p)).map_err(|e| format!("{p}: {e}"));
+    let ev = read(RING_EVENT_MD)?;
+    let sq = read(RING_SEQ_MD)?;
+    let ev_rows = ring_table(&ev, Some("**环拓扑**"))
+        .ok_or_else(|| format!("{RING_EVENT_MD}: 环拓扑 table (| 环 | … | 元素类型 |) not found"))?;
+    let sq_rows = ring_table(&sq, None)
+        .ok_or_else(|| format!("{RING_SEQ_MD}: ring table (| 环 | … | 元素 | …) not found"))?;
+    Ok((ev_rows, sq_rows))
+}
+
+/// "环名" check (tools/README.md doc-check table): every non-optional ring of either table appears in
+/// the other with the same element type. Returns the problems.
+pub fn check_rings(root: &Path) -> Vec<String> {
+    let (ev, sq) = match ring_tables(root) {
+        Ok(x) => x,
+        Err(e) => return vec![e],
+    };
+    let mut out = Vec::new();
+    let keep = |r: &&RingRow| !RING_OPTIONAL.contains(&r.ring.as_str());
+    for e in ev.iter().filter(keep) {
+        match sq.iter().find(|s| s.ring == e.ring) {
+            None => out.push(format!(
+                "{RING_EVENT_MD}:{}: ring `{}` is in the hft-event 环拓扑 table but not in the hft-sequencer ring table",
+                e.line, e.ring
+            )),
+            Some(s) if s.elem != e.elem => out.push(format!(
+                "{RING_SEQ_MD}:{}: ring `{}` element type `{}` differs from `{}` in the hft-event 环拓扑 table ({RING_EVENT_MD}:{})",
+                s.line, e.ring, s.elem, e.elem, e.line
+            )),
+            Some(_) => {}
+        }
+    }
+    for s in sq.iter().filter(keep) {
+        if !ev.iter().any(|e| e.ring == s.ring) {
+            out.push(format!(
+                "{RING_SEQ_MD}:{}: ring `{}` is in the hft-sequencer ring table but not in the hft-event 环拓扑 table",
+                s.line, s.ring
+            ));
+        }
+    }
+    out
+}
+
 /// Entry point: returns the exit code.
 pub fn run(root: &Path) -> i32 {
     let Some(py) = find_python() else {
@@ -129,7 +286,16 @@ pub fn run(root: &Path) -> i32 {
             Some(_) => {}
         }
     }
-    if let Err(e) = write_json(root, "doc-check", &json!({ "checks": checks })) {
+    let rings = check_rings(root);
+    for p in &rings {
+        eprintln!("[RINGNAME] {p}");
+    }
+    eprintln!("doc-check: native ring-name check: problems={}", rings.len());
+    if !rings.is_empty() {
+        code = code.max(EXIT_FAIL);
+    }
+    let native = json!([{ "check": "rings", "problems": rings }]);
+    if let Err(e) = write_json(root, "doc-check", &json!({ "checks": checks, "native": native })) {
         eprintln!("doc-check: error: {e}");
         return EXIT_ENV;
     }

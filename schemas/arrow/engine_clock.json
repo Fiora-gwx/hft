@@ -1,0 +1,38 @@
+{
+  "fields": [
+    {
+      "metadata": {},
+      "name": "base_engine_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "tsc"
+      },
+      "name": "tsc_hz_milli",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "prev_last_seq",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:EngineClockSource"
+      },
+      "name": "source",
+      "nullable": false,
+      "type": "UInt8"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x050A",
+    "hft.layout": "fixed 32",
+    "hft.name": "EngineClock",
+    "hft.schema_version": "1"
+  }
+}

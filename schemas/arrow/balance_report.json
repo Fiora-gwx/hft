@@ -1,0 +1,64 @@
+{
+  "fields": [
+    {
+      "metadata": {
+        "hft.type": "id:venue"
+      },
+      "name": "venue",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:account"
+      },
+      "name": "account",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:asset"
+      },
+      "name": "asset",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {
+        "hft.type": "qty"
+      },
+      "name": "free",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "qty"
+      },
+      "name": "locked",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {},
+      "name": "ex_ts_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "tsc"
+      },
+      "name": "rx_tsc",
+      "nullable": false,
+      "type": "UInt64"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0205",
+    "hft.layout": "fixed 40",
+    "hft.name": "BalanceReport",
+    "hft.schema_version": "1"
+  }
+}

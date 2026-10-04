@@ -1781,7 +1781,7 @@ spec: README.md
 - 规则:[实现说明](README.md#实现说明)
 - 级别:unit
 - 里程碑:M1
-- 前置:测试直接调用 xtask 的生成函数,输出到临时目录 `<tmp>`(需要 hft-core 二进制的策略 schema 部分以替身目录代替);系统 Python 3 带 numpy
+- 前置:测试直接调用 xtask 的生成函数(`gen_schema::run_model`),输出到临时目录 `<tmp>`;模型由链接的 hft-event/hft-refdata 导出构建,策略 schema 部分以一个替身策略代替,`Oms`、`Ledger` 源的 const 表以替身注入(登记表中该源的全部名字);系统 Python 3 带 numpy
 - 步骤:
   1. 生成
   2. 用 Python 导入 `<tmp>/python/_generated/events.py`,对每个 kind 读出 dtype
@@ -1808,7 +1808,7 @@ spec: README.md
 - 规则:[实现说明](README.md#实现说明)
 - 级别:table
 - 里程碑:M1
-- 前置:临时 git 仓库,内容为当前仓库的 `crates/hft-event`、`crates/hft-refdata`、生成物与已构建的 `hft-core` 二进制路径;每行在干净副本上做所列改动后运行 `cargo xtask gen-schema --check`
+- 前置:临时 git 仓库,内容为当前构建的 xtask(链接 `crates/hft-event`、`crates/hft-refdata`)生成的全部生成物并已提交;每行在干净副本上做所列改动后运行 `cargo xtask --root <副本> gen-schema --check`
 - 实现:`tools/xtask/tests/gen_schema.rs::evt_174_check_detects_drift`
 
 | 行 | 输入 | 期望 |
@@ -1817,14 +1817,14 @@ spec: README.md
 | EVT-174.2 | 手改 `python/_generated/events.py` 中 `Bbo` 的一个 offset | 退出 1,输出含 `python/_generated/events.py` |
 | EVT-174.3 | 删除 `schemas/arrow/bbo.json` | 退出 1,输出含该路径 |
 | EVT-174.4 | 手改 `docs/generated/event-catalog.md` 一行 | 退出 1 |
-| EVT-174.5 | 已构建的 `hft-core` 二进制不存在 | 退出 2 |
+| EVT-174.5 | 副本中有 `apps/hft-core/Cargo.toml`,已构建的 `hft-core` 二进制不存在(无 `HFT_CORE_BIN`) | 退出 2 |
 
 ### EVT-175 只追加核对拒绝改布局而放行合规的追加与占用保留字节
 
 - 规则:[实现说明](README.md#实现说明)、[event-model 演进规则](../../docs/subsystems/event-model.md#演进规则)
 - 级别:table
 - 里程碑:M1
-- 前置:基线 `schemas/event-layout.lock` 为当前布局;每行在干净副本上改 `crates/hft-event` 的源码后运行 `cargo xtask gen-schema`(写入模式)
+- 前置:基线 `schemas/event-layout.lock` 为当前布局;每行在干净副本上做所列源码改动后以写入模式运行 gen-schema——改动施加在 xtask 由链接的 hft-event 导出构建的模型(`gen_schema::model::Model`)上,与改源码后重新构建 xtask 等价,测试不重新编译 hft-event
 - 实现:`tools/xtask/tests/gen_schema.rs::evt_175_append_only_rules`
 
 | 行 | 输入 | 期望 |
@@ -1861,7 +1861,7 @@ spec: README.md
 | EVT-176.5 | 把 `0x0017` 改名为 `SetBaseline` | 退出 1(同一编号换名字) |
 | EVT-176.6 | 删除 `LoadErrCode::DanglingRef`(6) | 退出 1 |
 | EVT-176.7 | `LoadErrCode` 6 改为新名字 | 退出 1 |
-| EVT-176.8 | 追加新 kind `0x010A`(v1) | 退出 0;lock 末尾多一行 |
+| EVT-176.8 | 追加新 kind `0x010A`(v1) | 退出 0;lock 多出该 kind 的块 |
 | EVT-176.9 | 追加 `CmdKind 0x001D` | 退出 0 |
 | EVT-176.10 | 在 `LoadErrCode` 末尾追加一个新编号 | 退出 0 |
 | EVT-176.11 | 引擎 Note 码 `(Oms, n)` 中 `OmsAnomaly` 的 `n` 改给新码 `OmsFoo`,`OmsAnomaly` 换新 `n` | 退出 1(复用) |
@@ -1877,7 +1877,7 @@ spec: README.md
 - 规则:[实现说明](README.md#实现说明)、[Note 来源与码登记表](README.md#note-来源与码登记表)
 - 级别:table
 - 里程碑:M1
-- 前置:gen-schema 从各 source crate 的 `const` 表读取 `(source, n, name)`(测试以替身 const 表注入);基线一致
+- 前置:gen-schema 从各 source crate 的 `NOTE_CODES` 表读取 `(source, n, name)`(测试以替身 const 表注入:`Oms`、`Ledger`、`Exec` 源各列出登记表中该源的全部名字,`n` 自 1 递增);基线一致
 - 实现:`tools/xtask/tests/gen_schema.rs::evt_177_note_const_tables`
 
 | 行 | 输入 | 期望 |
@@ -1927,7 +1927,7 @@ spec: README.md
 - 规则:[实现说明](README.md#实现说明)
 - 级别:proc
 - 里程碑:M1
-- 前置:临时 git 仓库,`main` 上有当前代码与 lock;分支 `pr` 的一个提交同时删除 `0x0108 Liquidation` 并从 `schemas/event-layout.lock` 删去该行;环境变量按 GitHub PR 事件设置(`GITHUB_EVENT_NAME=pull_request`、`GITHUB_BASE_REF=main`)
+- 前置:临时 git 仓库,`main` 上有当前代码的生成物与 lock;分支 `pr` 的一个提交同时删除 `0x0108 Liquidation`(模型替身,同 EVT-175)并重新生成全部生成物(lock 中不再有该块);步骤 1 的基线按 GitHub PR 事件选取(`GITHUB_EVENT_NAME=pull_request`、`GITHUB_BASE_REF=main`,测试直接传入同一选择)
 - 步骤:
   1. 在 `pr` 上运行 `cargo xtask gen-schema --check`
   2. 不设上述环境变量再运行一次

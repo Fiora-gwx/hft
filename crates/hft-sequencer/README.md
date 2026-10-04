@@ -203,8 +203,8 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 | `rep-<venue>` ×M | gw → sequencer | `RepMsg`:`OrderEvent`、`SendReport`、`PositionReport`、`BalanceReport`、`FundingSettle`、`ExternalFill`、`MarginReport(hdr)`(条目在配套的 `rep-<venue>-bulk` 字节环)、`AccountConfigReport`、`ConnState` | 2 |
 | `chain-in` ×0–1 | `ext-<chain>` → sequencer(optional) | `PoolQuote`、`TxLifecycle`、`ChainHead` | 2 |
 | `bbo-<venue>` ×N | feed-bbo 任务(BBO 连接,`conn` = 槽号 0..`MAX_BBO_CONN_SLOTS`)→ sequencer | `FeedMsg::Bbo`、BBO 连接的 `ConnState` | 3 |
-| `advice` ×1–2 | advisor → sequencer(`ByteSpsc`) | `AdviceHdr` + 不透明载荷(≤ 4096 B);advisor 的 Meta `Note{source = Advisor}`(`AdvisorLag`、`ModelGroupReset`、`AdvisorStats`)也经此环送达(记录形式归 hft-event `AdviceRecord`) | 4 |
-| `md-<venue>` ×N | feed-md 任务(成交/标记价/资金费连接,订阅深度时另有分档快照流)→ sequencer | `L2Snapshot{origin = TopN}`(分档快照流)、`L2Batch` 与 REST 快照 `L2Snapshot{origin = Exchange}` 分片(增量深度启用时;以上都经 `md-<venue>-bulk` 字节环)、`Trade`、`Funding`、`MarkPrice`、`IndexPrice`、`Liquidation`、其余 `ConnState` | 5 |
+| `advice` ×1–2 | advisor → sequencer(`ByteSpsc`) | `AdviceMsg`:`AdviceHdr` + 不透明载荷(≤ 4096 B);advisor 的 Meta `Note{source = Advisor}`(`AdvisorLag`、`ModelGroupReset`、`AdvisorStats`)也经此环送达(记录形式归 hft-event `AdviceRecord`) | 4 |
+| `md-<venue>` ×N | feed-md 任务(成交/标记价/资金费连接,订阅深度时另有分档快照流)→ sequencer | `FeedMsg`:`L2Snapshot{origin = TopN}`(分档快照流)、`L2Batch` 与 REST 快照 `L2Snapshot{origin = Exchange}` 分片(增量深度启用时;以上都经 `md-<venue>-bulk` 字节环)、`Trade`、`Funding`、`MarkPrice`、`IndexPrice`、`Liquidation`、其余 `ConnState` | 5 |
 | `rep-sim` ×0–1 | sim-gw([hft-sim](../hft-sim/README.md),warm 线程)→ sequencer | 同 `rep-<venue>`(模拟账户的回报,同一组事件) | 6(最低;每轮 ≤ `sim_max_per_round`) |
 | `out-<venue>` ×M | sequencer → gw | `OutMsg` = `GwCmd`(64 B):放行且非 SHADOW 的 `OrderDecision` 的投影;维护类 `DeadManRefresh`、`Rotate`、`ResetRate`、`Resubscribe`、`SetEpoch`、`SessionKeepalive`、`MirrorRestore` | — |
 | `out-sim` ×0–1 | sequencer → sim-gw | 模拟账户的 `GwCmd`(同一类型)与 `SimReset`/`SimTransfer` | — |

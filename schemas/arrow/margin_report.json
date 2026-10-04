@@ -1,0 +1,94 @@
+{
+  "fields": [
+    {
+      "metadata": {
+        "hft.type": "id:venue"
+      },
+      "name": "venue",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:account"
+      },
+      "name": "account",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:MarginSource"
+      },
+      "name": "source",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "bits:MarginFlags"
+      },
+      "name": "mflags",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {},
+      "name": "n",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {
+        "hft.type": "notional"
+      },
+      "name": "margin_balance",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "notional"
+      },
+      "name": "maint_margin",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "notional"
+      },
+      "name": "avail_margin",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "rate"
+      },
+      "name": "margin_ratio",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {},
+      "name": "ex_ts_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "tsc"
+      },
+      "name": "rx_tsc",
+      "nullable": false,
+      "type": "UInt64"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0208",
+    "hft.layout": "var 64 16384",
+    "hft.name": "MarginReport",
+    "hft.schema_version": "1"
+  }
+}

@@ -1,0 +1,200 @@
+{
+  "fields": [
+    {
+      "metadata": {},
+      "name": "trigger_seq",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "set_seq",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:group"
+      },
+      "name": "group",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "tag",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:strategy"
+      },
+      "name": "owner",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:account"
+      },
+      "name": "account",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:ExecAction"
+      },
+      "name": "action",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:ExecAlgo"
+      },
+      "name": "algo",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:TargetOrigin"
+      },
+      "name": "origin",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:TargetReason"
+      },
+      "name": "reason",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:Urgency"
+      },
+      "name": "urgency",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:TargetState"
+      },
+      "name": "state_from",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:TargetState"
+      },
+      "name": "state_to",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {},
+      "name": "leg_ix",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {},
+      "name": "first_leg_ix",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {},
+      "name": "side",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "bits:ExecFlags"
+      },
+      "name": "eflags",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {},
+      "name": "detail",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "gate",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "exec_order_id",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "qty"
+      },
+      "name": "qty",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "px"
+      },
+      "name": "px",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "qty"
+      },
+      "name": "target_qty",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "qty"
+      },
+      "name": "pos_qty",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "qty"
+      },
+      "name": "inflight_qty",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "qty"
+      },
+      "name": "depth_qty",
+      "nullable": false,
+      "type": "Int64"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x020A",
+    "hft.layout": "fixed 104",
+    "hft.name": "ExecDecision",
+    "hft.schema_version": "1"
+  }
+}

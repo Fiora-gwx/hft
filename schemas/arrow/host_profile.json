@@ -1,0 +1,72 @@
+{
+  "fields": [
+    {
+      "metadata": {},
+      "name": "boot_id",
+      "nullable": false,
+      "type": "FixedSizeBinary(16)"
+    },
+    {
+      "metadata": {},
+      "name": "build_git",
+      "nullable": false,
+      "type": "FixedSizeBinary(20)"
+    },
+    {
+      "metadata": {},
+      "name": "profile_sha256",
+      "nullable": false,
+      "type": "FixedSizeBinary(32)"
+    },
+    {
+      "metadata": {},
+      "name": "release",
+      "nullable": false,
+      "type": "FixedSizeBinary(16)"
+    },
+    {
+      "metadata": {},
+      "name": "kernel",
+      "nullable": false,
+      "type": "FixedSizeBinary(32)"
+    },
+    {
+      "metadata": {
+        "hft.type": "tsc"
+      },
+      "name": "tsc_hz_milli",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "host_checks",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "hugepages_1g_total",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "hugepages_1g_free",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "isolated_cpus",
+      "nullable": false,
+      "type": "FixedSizeBinary(32)"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0507",
+    "hft.layout": "fixed 176",
+    "hft.name": "HostProfile",
+    "hft.schema_version": "1"
+  }
+}

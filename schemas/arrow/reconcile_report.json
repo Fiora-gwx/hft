@@ -1,0 +1,176 @@
+{
+  "fields": [
+    {
+      "metadata": {},
+      "name": "report_id",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:venue"
+      },
+      "name": "venue",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:account"
+      },
+      "name": "account",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:ReconItem"
+      },
+      "name": "item",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:ReconSeverity"
+      },
+      "name": "severity",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:inst"
+      },
+      "name": "inst",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:asset"
+      },
+      "name": "asset",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {},
+      "name": "idx",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {},
+      "name": "count",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {
+        "hft.type": "qty"
+      },
+      "name": "engine_qty",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "qty"
+      },
+      "name": "exch_qty",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "notional"
+      },
+      "name": "diff",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {},
+      "name": "exch_ts_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:slot"
+      },
+      "name": "slot",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:ReconOrderStatus"
+      },
+      "name": "order_status",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {},
+      "name": "history_checked",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {},
+      "name": "view_seq",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "gen",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "epoch",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {
+        "hft.type": "notional"
+      },
+      "name": "exch_amount",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "notional"
+      },
+      "name": "engine_amount",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "bits:ReconFlags"
+      },
+      "name": "sflags",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {},
+      "name": "skipped_inflight",
+      "nullable": false,
+      "type": "UInt16"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0404",
+    "hft.layout": "fixed 104",
+    "hft.name": "ReconcileReport",
+    "hft.schema_version": "3"
+  }
+}

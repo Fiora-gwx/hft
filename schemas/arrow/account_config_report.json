@@ -1,0 +1,108 @@
+{
+  "fields": [
+    {
+      "metadata": {
+        "hft.type": "id:venue"
+      },
+      "name": "venue",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:account"
+      },
+      "name": "account",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:PositionMode"
+      },
+      "name": "position_mode",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:MarginMode"
+      },
+      "name": "margin_mode",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:MultiAsset"
+      },
+      "name": "multi_asset",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:AccountConfigSource"
+      },
+      "name": "source",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {},
+      "name": "n_lev",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {
+        "hft.type": "bits:CfgMismatch"
+      },
+      "name": "mismatches",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "bits:AccountConfigFlags"
+      },
+      "name": "rflags",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {
+        "hft.type": "bits:UidKeys"
+      },
+      "name": "uid_keys",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {},
+      "name": "venue_uid",
+      "nullable": false,
+      "type": "FixedSizeBinary(24)"
+    },
+    {
+      "metadata": {},
+      "name": "ex_ts_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "tsc"
+      },
+      "name": "rx_tsc",
+      "nullable": false,
+      "type": "UInt64"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0209",
+    "hft.layout": "var 64 16384",
+    "hft.name": "AccountConfigReport",
+    "hft.schema_version": "1"
+  }
+}

@@ -175,7 +175,7 @@ cargo xtask dst --hashtrail check|write [--first K] [--strategy K]
 cargo xtask gen-schema [--check]
 ```
 
-从 [`hft-event`](../crates/hft-event/README.md) 的 Rust 定义生成:Arrow schema、Python dtype 模块(`python/_generated/`)、事件目录文档(`docs/generated/event-catalog.md`)、hft-telemetry 的 Note 码表 `notes_catalog.rs`、规范 JSON 渲染代码(金样使用;生成物清单归 [hft-event 实现说明](../crates/hft-event/README.md#实现说明));核对 hft-event 的 Note 码登记表与各 source crate 的 `const` 表一一对应;并运行已构建的 `hft-core schemas --out target/schemas`,把导出的 `<kind_id>-<name>.schema.json` 与 `index.json` 与已提交的 [`fixtures/strategy-schemas/`](../fixtures/README.md) 逐字节比较(格式归 [strategies/registry](../strategies/registry/README.md))。`--check` 只生成到临时目录并与仓库内容比较,有差异退出 1。每次运行(带不带 `--check`)都先做只追加核对:基线是 `schemas/event-layout.lock`——CI 的 PR 运行(`GITHUB_EVENT_NAME = pull_request`)取 PR 目标分支(`GITHUB_BASE_REF`)与 HEAD 的合并基点上的该文件,其余情形取工作区已提交的版本,基线中还没有该文件时只生成、不核对;核对范围含事件布局、kind、`CmdKind`、`LoadErrCode`、引擎 Note 码,以及经 `hft-core schemas` 导出读取的各策略 `kind_id`、策略 Note 码、命令 `op` 与检查点节 `tag` 只追加、不复用的核对;失败条件的唯一定义在 [hft-event 实现说明](../crates/hft-event/README.md#实现说明),违反时不改写任何生成物、退出 1;找不到已构建的 `hft-core` 二进制退出 2。
+从 [`hft-event`](../crates/hft-event/README.md) 的 Rust 定义生成:Arrow schema、Python dtype 模块(`python/_generated/`)、事件目录文档(`docs/generated/event-catalog.md`)、hft-telemetry 的 Note 码表 `notes_catalog.rs`、只追加基线 `schemas/event-layout.lock`(生成物清单与格式归 [hft-event 实现说明](../crates/hft-event/README.md#实现说明));核对 hft-event 的 Note 码登记表与各 source crate 的 `const` 表一一对应;`apps/hft-core` 在 workspace 中时运行已构建的 `hft-core schemas --out target/schemas`(二进制取 `HFT_CORE_BIN`,否则 `target/{debug,release,ci}/hft-core`;`apps/hft-core` 尚不在 workspace 时跳过策略部分并在输出中注明),把导出的 `<kind_id>-<name>.schema.json` 与 `index.json` 与已提交的 [`fixtures/strategy-schemas/`](../fixtures/README.md) 逐字节比较(格式归 [strategies/registry](../strategies/registry/README.md))。`--check` 只生成到临时目录并与仓库内容比较,有差异退出 1。每次运行(带不带 `--check`)都先做只追加核对:基线是 `schemas/event-layout.lock`——CI 的 PR 运行(`GITHUB_EVENT_NAME = pull_request`)取 PR 目标分支(`GITHUB_BASE_REF`,先找 `origin/<分支>` 再找本地分支;检出时须带上目标分支)与 HEAD 的合并基点上的该文件,取不到合并基点退出 2,其余情形取工作区 HEAD 已提交的版本,基线中还没有该文件时只生成、不核对;核对范围含事件布局、kind、`CmdKind`、`LoadErrCode`、引擎 Note 码,以及经 `hft-core schemas` 导出读取的各策略 `kind_id`、策略 Note 码、命令 `op` 与检查点节 `tag` 只追加、不复用的核对;失败条件的唯一定义在 [hft-event 实现说明](../crates/hft-event/README.md#实现说明),违反时不改写任何生成物、退出 1;找不到已构建的 `hft-core` 二进制退出 2。
 
 ### cargo xtask gen-host
 
@@ -526,7 +526,7 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 
 ## 依赖
 
-- xtask:`cargo_metadata`、`syn`、`serde`、`toml`、`serde_json`、`walkdir`、`regex`、`pulldown-cmark`;调用 `cargo`、`cargo-deny`、`cargo-fuzz`、`bpftrace`、`gh`(只在 `decoupling-gate`)、已构建的 `hft-core`(外部二进制)。
+- xtask:`cargo_metadata`、`syn`、`serde`、`toml`、`serde_json`、`walkdir`、`regex`、`pulldown-cmark`;内部只链接 `hft-event` 与 `hft-refdata`(`gen-schema` 读它们的 schema 导出);调用 `cargo`、`cargo-deny`、`cargo-fuzz`、`bpftrace`、`gh`(只在 `decoupling-gate`)、已构建的 `hft-core`(外部二进制)。
 - hostprobe:`libc`、`serde`;禁止依赖任何 hot crate(它读主机,不读交易)。
 - az-probe:Python 标准库 + `websockets`;不依赖 hft crate。
 - hft-cfg:见实现说明表;外部 `toml`、`serde_json`(读 schema JSON)、`reqwest`(仅 `refdata fetch`)。禁止依赖 `strategies/*` 与 `hft-strategy-registry`。

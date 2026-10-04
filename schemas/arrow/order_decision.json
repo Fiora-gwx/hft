@@ -1,0 +1,169 @@
+{
+  "fields": [
+    {
+      "metadata": {},
+      "name": "trigger_seq",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {
+        "hft.measure": "true",
+        "hft.type": "tsc"
+      },
+      "name": "decided_tsc",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {
+        "hft.type": "px"
+      },
+      "name": "px",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "qty"
+      },
+      "name": "qty",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:group"
+      },
+      "name": "group",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:inst"
+      },
+      "name": "inst",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:slot"
+      },
+      "name": "slot",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "gen",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:slot"
+      },
+      "name": "target_slot",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "reject",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:strategy"
+      },
+      "name": "strategy",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:venue"
+      },
+      "name": "venue",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:account"
+      },
+      "name": "account",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:OrderAction"
+      },
+      "name": "action",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:Side"
+      },
+      "name": "side",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:Tif"
+      },
+      "name": "tif",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "bits:OrderFlags"
+      },
+      "name": "oflags",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {},
+      "name": "reason",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "intent_no",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "px"
+      },
+      "name": "req_px",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:LinkRole"
+      },
+      "name": "link_role",
+      "nullable": false,
+      "type": "UInt8"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0201",
+    "hft.layout": "fixed 88",
+    "hft.name": "OrderDecision",
+    "hft.schema_version": "1"
+  }
+}

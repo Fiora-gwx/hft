@@ -3,12 +3,16 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use xtask::{EXIT_ENV, EXIT_OK, doc_check, test_trace};
+use xtask::{EXIT_ENV, EXIT_OK, doc_check, gen_schema, test_trace};
 
 const SUBCOMMANDS: &[(&str, &str)] = &[
     (
         "doc-check",
         "documentation gates (tools/doccheck/check_hft.py + check_tests.py)",
+    ),
+    (
+        "gen-schema",
+        "[--check] event schema outputs + append-only lock check (crates/hft-event README 实现说明)",
     ),
     (
         "test-trace",
@@ -52,6 +56,7 @@ fn main() -> ExitCode {
             print!("{}", usage());
             EXIT_OK
         }
+        Some("gen-schema") => gen_schema::run(&root, &rest),
         Some(cmd) if !rest.is_empty() => {
             eprintln!("xtask {cmd}: unexpected arguments {rest:?}");
             EXIT_ENV

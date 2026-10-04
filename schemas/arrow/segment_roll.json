@@ -1,0 +1,64 @@
+{
+  "fields": [
+    {
+      "metadata": {},
+      "name": "segment_no",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "other_segment_no",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "seq_mark",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "utc_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:RollMark"
+      },
+      "name": "mark",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:RollReason"
+      },
+      "name": "reason",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:JournalKind"
+      },
+      "name": "journal_kind",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {},
+      "name": "boot_records",
+      "nullable": false,
+      "type": "UInt32"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0509",
+    "hft.layout": "fixed 48",
+    "hft.name": "SegmentRoll",
+    "hft.schema_version": "1"
+  }
+}

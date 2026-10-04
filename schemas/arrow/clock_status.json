@@ -1,0 +1,78 @@
+{
+  "fields": [
+    {
+      "metadata": {
+        "hft.type": "tsc"
+      },
+      "name": "tsc",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "realtime_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {},
+      "name": "phc_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "tsc"
+      },
+      "name": "tsc_hz_milli",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "chrony_offset_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {},
+      "name": "max_error_ns",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "rms_ns",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "calib_err_ns",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:ClockSource"
+      },
+      "name": "source",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:ClockState"
+      },
+      "name": "state",
+      "nullable": false,
+      "type": "UInt8"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0508",
+    "hft.layout": "fixed 56",
+    "hft.name": "ClockStatus",
+    "hft.schema_version": "1"
+  }
+}

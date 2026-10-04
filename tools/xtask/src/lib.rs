@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 pub mod code_scan;
 pub mod doc_check;
+pub mod gen_schema;
 pub mod spec;
 pub mod test_trace;
 

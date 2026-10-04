@@ -870,16 +870,16 @@ spec: README.md
   - 步骤 2 的 stderr 没有步级轨迹行
 - 实现:`tools/xtask/tests/dst.rs::tool_056_trace_flag`
 
-### TOOL-057 gen-schema 生成四类产物并核对 Note 码登记表
+### TOOL-057 gen-schema 生成全部产物且重复运行逐字节相同
 
 - 规则:[cargo xtask gen-schema](README.md#cargo-xtask-gen-schema)
 - 级别:unit
 - 里程碑:M1
-- 前置:夹具 `events`(含 3 个 kind、一张 Note 登记表与对应 source crate 的 `const` 码表);`python/_generated/`、`docs/generated/`、`schemas/arrow/` 为空
+- 前置:夹具 `events`(测试代码构造的 gen-schema 模型:3 个 kind、一张两项的 Note 登记表与 `hft-oms` 的 `NOTE_CODES` 表、22 个 `LoadErrCode`);输出目录为空
 - 步骤:
   1. 运行 `cargo xtask gen-schema`
 - 期望:
-  - 退出 0;生成 `schemas/arrow/<kind>.json`(3 个)、`python/_generated/events.py`、`docs/generated/event-catalog.md` 与规范 JSON 渲染代码文件;同一输入再运行一次,全部生成物逐字节相同
+  - 退出 0;生成 `schemas/arrow/<kind>.json`(3 个)、`python/_generated/events.py`、`docs/generated/event-catalog.md`、`crates/hft-telemetry/src/notes_catalog.rs` 与 `schemas/event-layout.lock`;同一输入再运行一次(基线为第一次生成的 lock),不写任何文件,全部生成物逐字节相同
 - 实现:`tools/xtask/tests/gen_schema.rs::tool_057_generates_four_outputs`
 
 ### TOOL-058 Note 登记表与 source crate 的 const 表不一一对应时失败
@@ -894,7 +894,7 @@ spec: README.md
 |---|---|---|
 | TOOL-058.1 | 登记表有 `OmsFoo`,`hft-oms` 的 const 表没有 | 退出 1;报告 `OmsFoo` |
 | TOOL-058.2 | `hft-oms` 的 const 表有 `OMS_BAR`,登记表没有 | 退出 1;报告 `OMS_BAR` |
-| TOOL-058.3 | 两边同名但码值不同 | 退出 1;报告两个码值 |
+| TOOL-058.3 | 两边同名但 source 不同(码值 `source << 24 \| n` 因此不同) | 退出 1;报告两个码值 |
 
 ### TOOL-059 导出的策略 schema 与已提交金样逐字节比较
 
@@ -916,7 +916,7 @@ spec: README.md
 - 规则:[cargo xtask gen-schema](README.md#cargo-xtask-gen-schema)
 - 级别:unit
 - 里程碑:M1
-- 前置:夹具 `events` 已生成并提交;随后在源码给一个 kind 追加尾部字段并把 `schema_version` 加一,但不重新生成
+- 前置:夹具 `events` 已生成(基线为生成的 lock);随后在源码(夹具模型)给一个 kind 追加尾部字段并把 `schema_version` 加一,但不重新生成
 - 步骤:
   1. 记录全部生成物的 SHA-256
   2. 运行 `cargo xtask gen-schema --check`
@@ -930,7 +930,7 @@ spec: README.md
 - 规则:[cargo xtask gen-schema](README.md#cargo-xtask-gen-schema)
 - 级别:table
 - 里程碑:M1
-- 前置:夹具 `events` 已生成并提交 `schemas/event-layout.lock`;各行改源码后**连同生成物一起**重新生成并提交(只留下与锁文件的差异);失败条件的口径归 hft-event
+- 前置:夹具 `events` 已生成 `schemas/event-layout.lock`(基线,测试直接以基线文本传入);各行改源码(改夹具模型)后**连同生成物与锁文件一起**重新生成,再以该基线运行 `--check`;失败条件的口径归 hft-event
 - 实现:`tools/xtask/tests/gen_schema.rs::tool_061_append_only_violations`
 
 | 行 | 改动 | 期望 |
@@ -2675,7 +2675,7 @@ spec: README.md
 - 规则:[cargo xtask gen-schema](README.md#cargo-xtask-gen-schema)
 - 级别:table
 - 里程碑:M2
-- 前置:夹具 `events` 已生成并提交 `schemas/event-layout.lock`,其中策略种类 `1 → probe-a`,其 Note 码 `5 → ProbeEdge`、命令 `op 1 → set_thr`、检查点节 `tag 2 → path`;记录型执行器扮演 `hft-core schemas --out`,按行输出导出的 schema;各行连同生成物与金样一起重新提交(只留下与锁文件的差异);基线取工作区已提交的锁文件
+- 前置:夹具 `events` 已生成并提交 `schemas/event-layout.lock`,其中策略种类 `1 → probe-a`,其 Note 码 `5 → ProbeEdge`、命令 `op 1 → set_thr`、检查点节 `tag 2 → path`;按行变化的是 `hft-core schemas --out` 导出读到的策略行(测试直接把它们注入 gen-schema 模型,不运行二进制);基线为该夹具第一次生成的锁文件
 - 实现:`tools/xtask/tests/gen_schema.rs::tool_179_strategy_append_only`
 - 备注:引擎侧编号(kind、`CmdKind`、`LoadErrCode`、引擎 Note 码)、基线选择与"违反不写"由 hft-event 的 EVT-174–EVT-180 覆盖,本用例只测经 `hft-core schemas` 导出读取的策略四项
 

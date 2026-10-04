@@ -1,0 +1,79 @@
+{
+  "fields": [
+    {
+      "metadata": {
+        "hft.type": "enum:SnapshotPurpose"
+      },
+      "name": "purpose",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {},
+      "name": "n_sections",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "at_seq",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "state_hash",
+      "nullable": false,
+      "type": "FixedSizeBinary(16)"
+    },
+    {
+      "metadata": {},
+      "name": "n_books",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "out_hash",
+      "nullable": false,
+      "type": "FixedSizeBinary(16)"
+    },
+    {
+      "metadata": {
+        "hft.measure": "true",
+        "hft.type": "tsc"
+      },
+      "name": "snap_tsc",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {
+        "hft.measure": "true"
+      },
+      "name": "boot_id",
+      "nullable": false,
+      "type": "FixedSizeBinary(16)"
+    },
+    {
+      "metadata": {
+        "hft.measure": "true"
+      },
+      "name": "snap_utc_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {},
+      "name": "engine_ns",
+      "nullable": false,
+      "type": "Int64"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0504",
+    "hft.layout": "multi 96",
+    "hft.name": "StateSnapshot",
+    "hft.schema_version": "1"
+  }
+}

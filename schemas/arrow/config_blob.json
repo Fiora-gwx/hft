@@ -1,0 +1,90 @@
+{
+  "fields": [
+    {
+      "metadata": {
+        "hft.type": "enum:BlobKind"
+      },
+      "name": "blob.kind",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {},
+      "name": "blob.encoding",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {},
+      "name": "blob.len",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "blob.version",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "blob.sha256",
+      "nullable": false,
+      "type": "FixedSizeBinary(32)"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:strategy"
+      },
+      "name": "scope.strategy",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:venue"
+      },
+      "name": "scope.venue",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:account"
+      },
+      "name": "scope.account",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:group"
+      },
+      "name": "scope.group",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:inst"
+      },
+      "name": "scope.inst",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:Boot"
+      },
+      "name": "boot",
+      "nullable": false,
+      "type": "UInt8"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0403",
+    "hft.layout": "multi 72",
+    "hft.name": "ConfigBlob",
+    "hft.schema_version": "1"
+  }
+}

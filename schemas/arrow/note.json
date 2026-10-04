@@ -1,0 +1,62 @@
+{
+  "fields": [
+    {
+      "metadata": {},
+      "name": "code",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:NoteLevel"
+      },
+      "name": "level",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:NoteSource"
+      },
+      "name": "source",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:strategy"
+      },
+      "name": "strategy",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:group"
+      },
+      "name": "group",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:inst"
+      },
+      "name": "inst",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "v",
+      "nullable": false,
+      "type": "FixedSizeBinary(64)"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0506",
+    "hft.layout": "fixed 80",
+    "hft.name": "Note",
+    "hft.schema_version": "1"
+  }
+}

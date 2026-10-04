@@ -1,0 +1,60 @@
+{
+  "fields": [
+    {
+      "metadata": {
+        "hft.type": "id:strategy"
+      },
+      "name": "strategy",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:account"
+      },
+      "name": "account",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {},
+      "name": "local_kind",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:group"
+      },
+      "name": "group",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "len",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {},
+      "name": "basis_seq",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {
+        "hft.type": "tsc"
+      },
+      "name": "basis_tsc",
+      "nullable": false,
+      "type": "UInt64"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0503",
+    "hft.layout": "var 32 4096",
+    "hft.name": "Advice",
+    "hft.schema_version": "1"
+  }
+}

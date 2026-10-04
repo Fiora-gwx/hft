@@ -1,0 +1,60 @@
+{
+  "fields": [
+    {
+      "metadata": {
+        "hft.type": "id:venue"
+      },
+      "name": "venue",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:conn"
+      },
+      "name": "conn",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "enum:RawWhat"
+      },
+      "name": "what",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "bits:RawFlags"
+      },
+      "name": "rflags",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {},
+      "name": "stream",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "hw_rx_ns",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {},
+      "name": "payload_len",
+      "nullable": false,
+      "type": "UInt32"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0602",
+    "hft.layout": "multi 24",
+    "hft.name": "RawTx",
+    "hft.schema_version": "1"
+  }
+}

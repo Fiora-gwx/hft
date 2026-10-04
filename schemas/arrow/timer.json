@@ -1,0 +1,38 @@
+{
+  "fields": [
+    {
+      "metadata": {},
+      "name": "timer_id",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {},
+      "name": "owner",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:group"
+      },
+      "name": "group",
+      "nullable": false,
+      "type": "UInt32"
+    },
+    {
+      "metadata": {
+        "hft.type": "tsc"
+      },
+      "name": "deadline_tsc",
+      "nullable": false,
+      "type": "UInt64"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0501",
+    "hft.layout": "fixed 24",
+    "hft.name": "Timer",
+    "hft.schema_version": "1"
+  }
+}
