@@ -69,12 +69,27 @@ hft_testkit::golden_suite!(venue_binance::Spot, "binance-spot");
 
 状态机测试用 `proptest-state-machine`:参考模型(纯内存、朴素实现)与被测系统同步步进并比较不变量([research/04 §7](../../design/research/04-oss-frameworks-and-patterns.md))。
 
+```rust
+pub fn market_stream(venue: VenueId, insts: &[InstId], n: usize, gap: GapPolicy) -> impl Strategy<Value = Vec<MdEvent>>;
+pub fn market_stream_with(cfg: MarketStreamCfg) -> impl Strategy<Value = Vec<MdEvent>>;   // 另含 quiet、bbo_ping_ms、tsc_hz、步间隔等
+pub enum MdEvent { Bbo(Bbo), Trade(Trade), Funding(Funding), Mark(MarkPrice), L2Snapshot(OwnedL2Snapshot), Conn(ConnState) }
+pub enum GapPolicy { NoSeq, Contiguous, Skips { max_skip: u32 } }          // core:每 inst 的 Bbo.update_id
+pub enum QuietPolicy { None, Still { inst, from_ms, to_ms }, Silent { from_ms, to_ms } }   // 窗口 [from_ms, to_ms),0 < from_ms
+pub fn perturb<T: Clone>(seq: Vec<T>, p: Perturb) -> impl Strategy<Value = Vec<Delivery<T>>>;  // Delivery{item, index, dup, delay_ns}
+pub mod seed { pub fn derive(seed: u64, label: &str) -> u64; pub fn runner(seed: u64, cases: u32) -> TestRunner; pub fn sample<S>(seed: u64, s: &S) -> S::Value; }
+```
+
+- **`market_stream` 的连接模型**:一条 BBO 连接(槽 0)承载全部 inst 的 `Bbo`,一条行情连接(`MAX_BBO_CONN_SLOTS`)承载成交、标记价、资金费与分档快照;t = 0 两条连接 `Up`、每个 inst 加入 BBO 连接(成员 `Up`);两条连接每 `bbo_ping_ms` 探测一次,回帧按 [hft-venue §3a](../hft-venue/README.md) 第 3 条产出 `Alive`。全部事件按虚拟时间全序。
+- **`QuietPolicy`**:`Still` 让该 inst 在窗口内没有 `Bbo`(盘口不变),连接照常回帧;`Silent` 让 BBO 连接在窗口内没有任何事件,在 `to_ms` 依次产出**静默恢复序列** `Degraded{BBO_SILENT}`、`Down{inst = 0}`、`Up{inst = 0}`、每个 inst 的 `Up{inst}` 与 `Resync{inst, BBO_REFRESH}`(原因码归 hft-venue),之后该连接才有 `Bbo`。增量深度的序号缺口与重复属可选扩展。
+- **随机性**:生成器是纯 proptest 策略,不读系统时钟与全局随机源;`seed::runner` 的 ChaCha 密钥由种子经 `xxh3` 按标签派生(`seed::derive` 同法派生子流),同一种子跨进程、跨主机逐字节相同。
+
 ### 3. 假时钟
 
 ```rust
-pub struct ManualTsc { /* 实现 hft-rt 的 TSC 读取 trait;固定 tsc_hz */ }
+pub struct ManualTsc { /* 实现 hft-rt 的 TSC 读取 trait ClockReads(含 &ManualTsc);固定 tsc_hz;advance_ns 取 ⌊ns × tsc_hz / 10^9⌋ */ }
 impl ManualTsc { pub fn new(tsc_hz: u64, start: u64) -> Self; pub fn advance_ns(&self, ns: u64); pub fn set(&self, tsc: u64); }
 pub struct ManualUtc { /* tsc → UTC 的固定校准对,供 ClockStatus/段头测试 */ }
+impl ManualUtc { pub fn new(pair_tsc: u64, pair_utc_ns: i64, tsc_hz: u64) -> Self; pub fn utc_ns(&self, tsc: u64) -> i64; pub fn tsc_utc(&self) -> TscUtc; }
 ```
 
 只给读 TSC 的组件(feed/gw 运行时、housekeeping、sim-gw 的交付时刻)用;sequencer 与策略只从事件取时间,不需要时钟替身。
@@ -237,7 +252,8 @@ hft-dst list                                          # 编进本二进制的套
 ```rust
 /// 全局分配器包装:按线程计数 alloc/realloc 调用(dealloc 不计);测试二进制以 #[global_allocator] 安装。
 pub struct CountingAlloc;
-impl CountingAlloc { pub fn scope() -> AllocScope; }          // 从此刻起计本线程的分配次数
+impl CountingAlloc { pub fn scope() -> AllocScope;            // 从此刻起计本线程的分配次数
+                     pub fn is_installed() -> bool; }         // 是否已装为全局分配器(本线程一次探测分配被计入)
 pub struct AllocScope { /* … */ }
 impl AllocScope { pub fn allocs(&self) -> u64; }               // 本线程自 scope() 以来的分配次数;其他线程的分配不计入
 /// Criterion 之外的直方图基准驱动(HistBench):每次迭代前后各读一次 TSC,记进预分配的 hdrhistogram,同时以 CountingAlloc 计分配。
@@ -275,8 +291,9 @@ pub struct HistBench { /* name、迭代与热身次数、是否冒烟模式 */ }
 | 文件 | 职责 |
 |---|---|
 | `src/golden.rs` | `GoldenCase`、加载、`run_decoder_case`、`run_sim_case`、`golden_suite!` |
-| `src/gen/{market.rs, orders.rs, perturb.rs, ctl.rs, fees.rs, margin.rs, external.rs, acct_cfg.rs}` | proptest 策略;`gen/chain/*`(`chain` feature) |
+| `src/gen/{market.rs, orders.rs, perturb.rs, ctl.rs, fees.rs, margin.rs, external.rs, acct_cfg.rs}` | proptest 策略(模块名 `r#gen`:`gen` 是 2024 版关键字);`gen/chain/*`(`chain` feature) |
 | `src/clock.rs` | `ManualTsc`、`ManualUtc` |
+| `src/seed.rs` | 种子派生与确定性 `TestRunner` |
 | `src/sdk_mock.rs` | `MockViews`、`StrategyHarness`、`ModelHarness`、`CtxCapture` |
 | `src/strategies.rs`、`strategies/{probe-taker,probe-target}/` | 测试策略集合与两个测试策略 crate |
 | `src/dst/{world.rs, driver.rs, actors.rs, venue_behavior.rs, faults.rs, invariants.rs, shrink.rs, report.rs}` | DST 框架 |

@@ -524,6 +524,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "hft-testkit"
+version = "0.1.0"
+dependencies = [
+ "hft-event",
+ "hft-rt",
+ "hft-types",
+ "proptest",
+ "xxhash-rust",
+ "zerocopy",
+]
+
+[[package]]
 name = "hft-types"
 version = "0.1.0"
 dependencies = [

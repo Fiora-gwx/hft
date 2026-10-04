@@ -170,13 +170,13 @@ spec: README.md
 - 规则:[2. proptest 生成器](README.md#2-proptest-生成器)
 - 级别:table
 - 里程碑:M1
-- 前置:`bbo_ping_ms = 1000`;inst X 的静默窗口 [0, 10 000] ms
+- 前置:`market_stream_with`:`insts = [X]`,`bbo_ping_ms = 1000`,`GapPolicy::Contiguous`,n = 3000,步间隔 5–20 ms,固定种子;窗口 [1 000, 12 000) ms
 - 实现:`crates/hft-testkit/tests/gen.rs::tk_011_quiet_policy`
 
 | 行 | 策略 | 期望 |
 |---|---|---|
-| TK-011.1 | 盘口不变、连接健康 | 窗口内 X 的 `Bbo` 价量全相同;X 的 BBO 连接有连接健康输入,相邻两条间隔 1000 ms,窗口内 ≥ 10 条 |
-| TK-011.2 | 连接停止回帧 | 窗口内该连接没有任何事件;窗口结束后先出现重同步序列再有 `Bbo` |
+| TK-011.1 | `Still{X}`:盘口不变、连接健康 | 窗口内没有 X 的 `Bbo`;BBO 连接的 `ConnState{Alive}` 相邻两条间隔 1000 ms,窗口内 ≥ 10 条;窗口后 X 再有 `Bbo` |
+| TK-011.2 | `Silent`:连接停止回帧 | 窗口内 BBO 连接没有任何事件;该连接在窗口后的前 5 条依次为 `Degraded{BBO_SILENT}`、`Down{inst = 0}`、`Up{inst = 0}`、`Up{X}`、`Resync{X, BBO_REFRESH}`,`rx_tsc` 均为 12 000 ms;之后才有 `Bbo` |
 
 ### TK-012 order_lifecycle 产出某 venue 语义下合法的回报序列
 

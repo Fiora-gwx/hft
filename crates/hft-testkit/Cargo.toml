@@ -1,0 +1,21 @@
+[package]
+name = "hft-testkit"
+description = "Shared test infrastructure: proptest generators, manual clocks, seed derivation, per-thread allocation counting (dev-dependencies, xtask and the verification bundle only)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# M1 part (README "已知限制与后续工作"): golden runner, SDK stubs, DST and hft-dst arrive with
+# their milestones together with the README dependencies they need.
+[dependencies]
+hft-types.workspace = true
+hft-event.workspace = true
+hft-rt.workspace = true
+zerocopy.workspace = true
+proptest.workspace = true
+xxhash-rust.workspace = true
