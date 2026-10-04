@@ -1,0 +1,171 @@
+# Emergency path when ubuntu-24.04-arm is unavailable (queue, outage): cross-compile the same
+# aarch64 binaries on ubuntu-latest (docs/development.md#应急交叉编译release-x86-crossyml).
+# Uses the same CI quota as the arm build; it is NOT the quota-exhausted path. Same preflight as
+# release-aarch64.yml; no aarch64 conformance set, native smoke, verification bundle or benchmark
+# artifact (the server's `releasectl verify` and `hft-core --check` take over the native checks).
+# Quarterly drill: DRL-110 (docs/tests/drills.md).
+name: Release x86 cross
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit to release (green ci.yml)
+        type: string
+        required: true
+      version:
+        description: X.Y.Z (= workspace version at sha)
+        type: string
+        required: true
+      dev_n:
+        description: N for a development build vX.Y.Z-dev.N (empty = formal vX.Y.Z)
+        type: string
+        required: false
+      quota_override:
+        description: Skip the nightly (formal) / CI-usage (dev) condition (Admins in .github/hft-admins.txt only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    outputs:
+      sha: ${{ steps.pf.outputs.sha }}
+      tag: ${{ steps.pf.outputs.tag }}
+      version: ${{ steps.pf.outputs.version }}
+      channel: ${{ steps.pf.outputs.channel }}
+      create_tag: ${{ steps.pf.outputs.create_tag }}
+      evidence: ${{ steps.pf.outputs.evidence }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Preflight (same rules as release-aarch64.yml)
+        id: pf
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          WORKFLOW: x86-cross
+          EVENT: ${{ github.event_name }}
+          IN_SHA: ${{ inputs.sha }}
+          IN_VERSION: ${{ inputs.version }}
+          IN_DEV_N: ${{ inputs.dev_n }}
+          IN_QUOTA_OVERRIDE: ${{ inputs.quota_override }}
+          ACTOR: ${{ github.actor }}
+        run: python3 .github/scripts/release-preflight.py
+
+  build:
+    needs: preflight
+    if: needs.preflight.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      SHA: ${{ needs.preflight.outputs.sha }}
+      TAG: ${{ needs.preflight.outputs.tag }}
+      VERSION: ${{ needs.preflight.outputs.version }}
+      CHANNEL: ${{ needs.preflight.outputs.channel }}
+      CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+      CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+      AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+      - name: Install cross toolchain
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross file zstd
+      - name: Install pinned Rust toolchain
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: x86-cross
+      - name: Version check
+        run: |
+          ws=$(cargo metadata --no-deps --format-version 1 |
+            python3 -c 'import json,sys; print({p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] != "xtask"}.pop())')
+          if [[ $VERSION != "$ws" ]]; then
+            echo "::error::$TAG does not match the workspace version $ws"
+            exit 1
+          fi
+      - name: Build aarch64 binaries (same profiles and target-cpu)
+        run: bash .github/scripts/build-release.sh "$CHANNEL"
+      # The aarch64 hft-core cannot run here, so `hft-core schemas --out` is not available. The
+      # green ci.yml of this SHA (preflight 1) already proved the export equals
+      # fixtures/strategy-schemas/ byte for byte, so the archive takes that copy.
+      - name: Strategy schemas (fixtures copy)
+        if: hashFiles('fixtures/strategy-schemas/index.json') != ''
+        run: |
+          mkdir -p dist/schemas/strategies
+          cp -r fixtures/strategy-schemas/. dist/schemas/strategies/
+      - name: Python wheels (hft_py via maturin --target aarch64) and wheelhouse
+        run: bash .github/scripts/build-wheels.sh dist --cross
+      - name: IMDS lock BPF object
+        if: hashFiles('deploy/imds/hft-imds-connect.bpf.c') != ''
+        run: |
+          sudo apt-get install -y -q --no-install-recommends clang libbpf-dev
+          mkdir -p dist/deploy/imds
+          clang -O2 -target bpf -c deploy/imds/hft-imds-connect.bpf.c -o dist/deploy/imds/hft-imds-connect.bpf.o
+      - name: Package release archive
+        env:
+          EVIDENCE: ${{ needs.preflight.outputs.evidence }}
+        run: |
+          if [[ ! -f deploy/release/package-release.sh ]]; then
+            echo "::error::deploy/release/package-release.sh is not there yet (deploy, M3); nothing to package"
+            exit 1
+          fi
+          printf '%s\n' "$EVIDENCE" >dist/evidence.json
+          export HFT_RELEASE_EVIDENCE=dist/evidence.json HFT_CI_RUN_ID=$GITHUB_RUN_ID
+          SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
+          export SOURCE_DATE_EPOCH
+          bash deploy/release/package-release.sh "$TAG" "$SHA" dist
+          mkdir -p out
+          mv "dist/hft-$TAG-aarch64.tar.zst" "dist/hft-$TAG-aarch64.tar.zst.sha256" out/
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: out/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [preflight, build]
+    if: needs.preflight.result == 'success' && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: dist
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          SHA: ${{ needs.preflight.outputs.sha }}
+          CHANNEL: ${{ needs.preflight.outputs.channel }}
+          CREATE_TAG: ${{ needs.preflight.outputs.create_tag }}
+          DIST: dist
+          NOTES: >-
+            CROSS-COMPILED on x86_64 (release-x86-cross.yml run ${{ github.run_id }}; arm runner
+            unavailable): aarch64 ${{ needs.preflight.outputs.channel }} build of ${{ needs.preflight.outputs.sha }};
+            no aarch64 conformance set, no verification bundle. Preflight evidence ${{ needs.preflight.outputs.evidence }}
+        run: bash .github/scripts/publish-release.sh

@@ -1,0 +1,29 @@
+# PR and main-push quality gates (docs/development.md#ci-概要). Only calls quality-gates.yml.
+# Above 1,500 CI minutes this month a PR without the `hotfix` label runs only `docs` and
+# `decoupling-gate` (docs/development.md#免费额度).
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Cancel only superseded runs of the same PR; every main push keeps its own verdict.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  quality-gates:
+    uses: ./.github/workflows/quality-gates.yml
+    # Union of what the called jobs request (docs/development.md#凭证与权限):
+    # decoupling-gate: pull-requests + actions read; rust: id-token for the S3 fixtures (OIDC).
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+      id-token: write

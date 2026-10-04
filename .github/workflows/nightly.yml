@@ -1,0 +1,220 @@
+# Nightly regression smoke on main (docs/development.md#每夜任务nightlyyml; contents and limits:
+# docs/testing.md §6). Results never count toward launch gates ③④ (those accumulate on the
+# server from the verification bundle). Skipped by quota-gate at >= 1,500 CI minutes this month
+# unless an Admin dispatches with quota_override.
+name: Nightly
+
+on:
+  schedule:
+    - cron: "30 18 * * *" # 18:30 UTC = 02:30 Beijing
+  workflow_dispatch:
+    inputs:
+      quota_override:
+        description: Run even at >= 1,500 CI minutes this month (Admins in .github/hft-admins.txt only)
+        type: boolean
+        default: false
+      sha:
+        description: Commit to test (default the head of main)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quota-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    outputs:
+      ran: ${{ steps.gate.outputs.ran }}
+      minutes: ${{ steps.gate.outputs.minutes }}
+      over: ${{ steps.gate.outputs.over }}
+      override: ${{ steps.gate.outputs.override }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
+      - name: Estimate CI usage (ran = below threshold or Admin override)
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OVERRIDE: ${{ inputs.quota_override }}
+        run: >-
+          python3 .github/scripts/ci-usage.py gate --threshold 1500
+          --override "${OVERRIDE:-false}" --actor "$GITHUB_ACTOR" --non-admin-override ignore
+      - name: Alert QuotaSkip
+        if: steps.gate.outputs.ran == 'false'
+        env:
+          HFT_ALERT_TG_TOKEN: ${{ secrets.HFT_ALERT_TG_TOKEN }}
+          HFT_ALERT_TG_CHAT: ${{ secrets.HFT_ALERT_TG_CHAT }}
+          MINUTES: ${{ steps.gate.outputs.minutes }}
+        run: >-
+          bash .github/scripts/notify.sh
+          "hft nightly QuotaSkip: CI usage this month ${MINUTES} min >= 1500; nightly and nightly-arm skipped
+          (${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+
+  nightly:
+    needs: quota-gate
+    if: needs.quota-gate.result == 'success' && needs.quota-gate.outputs.ran == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha || 'main' }}
+      - name: Install pinned Rust toolchain
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: x86-ci
+      - name: xtask subcommands
+        id: xtask
+        run: bash .github/scripts/xtask-inventory.sh
+      - name: Install pinned cargo plugins and nightly (cargo xtask setup)
+        if: steps.xtask.outputs.setup == 'true'
+        run: cargo xtask setup
+
+      # M2 (cargo xtask dst, fixtures/dst/hashtrail.toml): every registered conformance seed.
+      - name: HashTrail check, all conformance seeds
+        if: steps.xtask.outputs.dst == 'true' && hashFiles('fixtures/dst/hashtrail.toml') != ''
+        run: cargo xtask dst --hashtrail check
+      # M2: a batch of new seeds; N (`seeds`) and M (`steps`) from tools/xtask/dst-nightly.toml,
+      # start S = UTC date YYYYMMDD * 10^6 (docs/development.md#每夜任务nightlyyml).
+      - name: DST new seeds (regression smoke)
+        if: ${{ !cancelled() && steps.xtask.outputs.dst == 'true' && hashFiles('tools/xtask/dst-nightly.toml') != '' }}
+        run: |
+          read -r n m < <(python3 -c 'import tomllib; t = tomllib.load(open("tools/xtask/dst-nightly.toml", "rb")); print(t["seeds"], t["steps"])')
+          s=$(( $(date -u +%Y%m%d) * 1000000 ))
+          cargo xtask dst --seeds "$n" --seed "$s" --steps "$m"
+
+      # M3 (cargo xtask fuzz --nightly): short runs by the rotation in tools/xtask/fuzz-targets.toml;
+      # minimized corpora live only in actions/cache.
+      - name: Restore fuzz corpora
+        if: ${{ !cancelled() && steps.xtask.outputs.fuzz == 'true' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: fuzz/corpus
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: fuzz-corpus-
+      - name: Fuzz rotation (regression smoke)
+        id: fuzz
+        if: ${{ !cancelled() && steps.xtask.outputs.fuzz == 'true' }}
+        run: cargo xtask fuzz --nightly
+      - name: Save fuzz corpora
+        if: ${{ !cancelled() && steps.fuzz.outcome != 'skipped' }}
+        uses: actions/cache/save@v4
+        with:
+          path: fuzz/corpus
+          key: fuzz-corpus-${{ github.run_id }}
+
+      # In-process recovery cases (docs/testing.md §3.6), from the milestone that adds tests/recover/.
+      - name: Recovery cases (tests/recover/)
+        if: ${{ !cancelled() && hashFiles('**/tests/recover/**') != '' }}
+        run: cargo test --locked --profile ci --workspace --all-features --test recover
+
+      - name: cargo deny check advisories (non-blocking, goes to the nightly summary)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          if ! command -v cargo-deny >/dev/null; then
+            echo "::warning::cargo-deny is not installed (cargo xtask setup)"
+            exit 1
+          fi
+          cargo deny check advisories
+
+      - name: Upload minimized crash inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-crashes
+          path: |
+            fuzz/artifacts/
+            crates/*/fuzz/artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  nightly-arm:
+    needs: quota-gate
+    if: needs.quota-gate.result == 'success' && needs.quota-gate.outputs.ran == 'true'
+    runs-on: ubuntu-24.04-arm
+    container: ubuntu:24.04
+    timeout-minutes: 10
+    outputs:
+      cache-hit: ${{ steps.cache.outputs.cache-hit }}
+    env:
+      HFT_RT_STRESS_SCALE: "10" # nightly arm sizes of the hft-rt stress cases (crates/hft-rt/TESTS.md)
+    steps:
+      - name: Install build prerequisites
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+            build-essential ca-certificates curl git pkg-config python3
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha || 'main' }}
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        id: cache
+        with:
+          key: arm64-ci
+      - name: CPU features vs neoverse-v1 (待核实 item of docs/development.md#构建剖面)
+        shell: bash
+        run: |
+          grep -m1 '^Features' /proc/cpuinfo | tee -a "$GITHUB_STEP_SUMMARY"
+          rustc --print cfg -C target-cpu=neoverse-v1 | sed -n 's/^target_feature="\(.*\)"/\1/p' | tr '\n' ' ' | tee -a "$GITHUB_STEP_SUMMARY"
+      # Architecture-dependent tests only (ci profile): hft-rt counter reads and conversion, SPSC
+      # rings and atomics (multi-thread stress), the journal commit cursor, the CPU feature check;
+      # hostprobe host checks join when tools/hostprobe exists (M1.5).
+      - name: Architecture-dependent tests
+        shell: bash
+        run: |
+          cargo test --locked --profile ci -p hft-rt
+          cargo test --locked --profile ci -p hft-journal --all-features
+          if [[ -f tools/hostprobe/Cargo.toml ]]; then
+            cargo test --locked --profile ci -p hostprobe
+          fi
+
+  # One message to the alert group: job verdicts, CI usage and quota state, the day's decoupling
+  # exemptions. Not run after a QuotaSkip (quota-gate already alerted).
+  summary:
+    needs: [quota-gate, nightly, nightly-arm]
+    if: ${{ always() && needs.quota-gate.outputs.ran != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
+      - name: Nightly summary
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          HFT_ALERT_TG_TOKEN: ${{ secrets.HFT_ALERT_TG_TOKEN }}
+          HFT_ALERT_TG_CHAT: ${{ secrets.HFT_ALERT_TG_CHAT }}
+          QUOTA_RAN: ${{ needs.quota-gate.outputs.ran }}
+          QUOTA_MINUTES: ${{ needs.quota-gate.outputs.minutes }}
+          QUOTA_OVER: ${{ needs.quota-gate.outputs.over }}
+          QUOTA_OVERRIDE: ${{ needs.quota-gate.outputs.override }}
+          NIGHTLY_RESULT: ${{ needs.nightly.result }}
+          ARM_RESULT: ${{ needs.nightly-arm.result }}
+          ARM_CACHE_HIT: ${{ needs.nightly-arm.outputs.cache-hit }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          msg=$(python3 .github/scripts/nightly-summary.py)
+          bash .github/scripts/notify.sh "$msg"

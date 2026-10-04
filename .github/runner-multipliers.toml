@@ -1,0 +1,15 @@
+# Runner minute multipliers for .github/scripts/ci-usage.py (docs/development.md#免费额度).
+#
+# Key: a `runs-on` label as reported by the GitHub jobs API (`labels`); the first label of a job
+# that appears here wins, anything else uses `default`.
+# Linux 2-core hosted runners bill at 1.
+
+default = 1
+
+[labels]
+"ubuntu-latest" = 1
+"ubuntu-24.04" = 1
+# 待核实(M1 第一周):the multiplier of ubuntu-24.04-arm in an organization private repository.
+# Method: run release-aarch64.yml once, read the organization billing page, write the value here
+# and in the ops-log.
+"ubuntu-24.04-arm" = 1

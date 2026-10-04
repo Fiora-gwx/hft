@@ -1,0 +1,318 @@
+# aarch64 release and development builds (docs/development.md#发布工作流release-aarch64yml).
+#   formal vX.Y.Z:        preflight -> conformance-x86 + build (aarch64 conformance set) + verify
+#                         (verification bundle) -> publish
+#   dev vX.Y.Z-dev.N:     preflight -> build (release profile only, no conformance set) -> publish
+# preflight only proves existing verdicts for the SHA; it never re-runs the quality gates.
+# Time limits: docs/testing.md §6 (release target <= 30 min, timeout-minutes: 90).
+name: Release aarch64
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Development build of this commit (a PR head or a main commit with green ci.yml); needs dev_n
+        type: string
+        required: false
+      dev_n:
+        description: N of vX.Y.Z-dev.N (X.Y.Z = workspace version at sha)
+        type: string
+        required: false
+      tag:
+        description: Re-run for an already pushed formal tag vX.Y.Z (instead of sha/dev_n)
+        type: string
+        required: false
+      quota_override:
+        description: Skip the nightly (formal) / CI-usage (dev) condition (Admins in .github/hft-admins.txt only)
+        type: boolean
+        default: false
+      skip_verify:
+        description: Hotfix without the verification bundle; make it later with verify-bundle.yml (Admins only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    outputs:
+      sha: ${{ steps.pf.outputs.sha }}
+      tag: ${{ steps.pf.outputs.tag }}
+      version: ${{ steps.pf.outputs.version }}
+      channel: ${{ steps.pf.outputs.channel }}
+      create_tag: ${{ steps.pf.outputs.create_tag }}
+      skip_verify: ${{ steps.pf.outputs.skip_verify }}
+      evidence: ${{ steps.pf.outputs.evidence }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Preflight (ci.yml rust, decoupling-gate, nightly / quota, Admin overrides)
+        id: pf
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          WORKFLOW: aarch64
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          IN_SHA: ${{ inputs.sha }}
+          IN_DEV_N: ${{ inputs.dev_n }}
+          IN_TAG: ${{ inputs.tag }}
+          IN_QUOTA_OVERRIDE: ${{ inputs.quota_override }}
+          IN_SKIP_VERIFY: ${{ inputs.skip_verify }}
+          ACTOR: ${{ github.actor }}
+        run: python3 .github/scripts/release-preflight.py
+
+  conformance-x86:
+    needs: preflight
+    if: needs.preflight.result == 'success' && needs.preflight.outputs.channel == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+      - name: Install pinned Rust toolchain
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: x86-ci
+      - name: xtask subcommands
+        id: xtask
+        run: bash .github/scripts/xtask-inventory.sh
+      # M2 (cargo xtask dst, fixtures/dst/hashtrail.toml): the fixed conformance seeds (ci profile)
+      # against this SHA's golden file, byte for byte.
+      - name: DST conformance set vs fixtures/dst/hashtrail.toml
+        if: steps.xtask.outputs.dst == 'true' && hashFiles('fixtures/dst/hashtrail.toml') != ''
+        run: cargo xtask dst --hashtrail check
+
+  build:
+    needs: preflight
+    if: needs.preflight.result == 'success'
+    runs-on: ubuntu-24.04-arm
+    # Production Ubuntu 24.04 / glibc baseline.
+    container: ubuntu:24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write # S3 fixtures through GitHub OIDC (replay samples of the conformance set)
+    env:
+      SHA: ${{ needs.preflight.outputs.sha }}
+      TAG: ${{ needs.preflight.outputs.tag }}
+      VERSION: ${{ needs.preflight.outputs.version }}
+      CHANNEL: ${{ needs.preflight.outputs.channel }}
+    steps:
+      - name: Install build prerequisites
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+            build-essential ca-certificates curl file git pkg-config zstd python3 python3-venv python3-pip
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+      - name: Mark the workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: bash .github/scripts/install-rust.sh
+      # Release builds only; evicted after 7 unused days -> cold build (counted in the release reserve).
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: arm64-release
+      - name: xtask subcommands
+        id: xtask
+        shell: bash
+        run: bash .github/scripts/xtask-inventory.sh
+      - name: CPU features of the runner vs neoverse-v1 (待核实, docs/development.md#构建剖面)
+        shell: bash
+        run: |
+          grep -m1 '^Features' /proc/cpuinfo | tee -a "$GITHUB_STEP_SUMMARY"
+          rustc --print cfg -C target-cpu=neoverse-v1 | sed -n 's/^target_feature="\(.*\)"/\1/p' | tr '\n' ' ' | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Version check
+        shell: bash
+        run: |
+          ws=$(cargo metadata --no-deps --format-version 1 |
+            python3 -c 'import json,sys; print({p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] != "xtask"}.pop())')
+          if [[ $VERSION != "$ws" ]]; then
+            echo "::error::$TAG does not match the workspace version $ws"
+            exit 1
+          fi
+          echo "$TAG: channel $CHANNEL, workspace $ws"
+
+      # ---- aarch64 conformance set (formal only; docs/testing.md §6) ----
+      - name: Unit and golden tests (ci profile)
+        if: env.CHANNEL == 'release'
+        run: cargo test --locked --profile ci --workspace --all-features
+      - name: DST conformance set vs fixtures/dst/hashtrail.toml
+        if: env.CHANNEL == 'release' && steps.xtask.outputs.dst == 'true' && hashFiles('fixtures/dst/hashtrail.toml') != ''
+        run: cargo xtask dst --hashtrail check
+      - name: Configure AWS credentials for S3 fixtures (OIDC)
+        id: aws
+        if: >-
+          env.CHANNEL == 'release' && steps.xtask.outputs.replay-verify == 'true' &&
+          steps.xtask.outputs.fixtures == 'true' && hashFiles('fixtures/replay/*.pointer.toml') != '' &&
+          vars.HFT_FIXTURES_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.HFT_FIXTURES_ROLE_ARN }}
+          aws-region: ${{ vars.HFT_FIXTURES_AWS_REGION }}
+      - name: replay-verify fixtures/replay samples
+        if: >-
+          env.CHANNEL == 'release' && steps.xtask.outputs.replay-verify == 'true' &&
+          steps.xtask.outputs.fixtures == 'true' && hashFiles('fixtures/replay/*.pointer.toml') != ''
+        shell: bash
+        env:
+          AWS_OK: ${{ steps.aws.outcome }}
+        run: |
+          if [[ $AWS_OK != success ]]; then
+            echo "::error::replay samples need repository variables HFT_FIXTURES_ROLE_ARN and HFT_FIXTURES_AWS_REGION"
+            exit 1
+          fi
+          cargo xtask fixtures fetch
+          for p in fixtures/replay/*.pointer.toml; do cargo xtask replay-verify "$p"; done
+
+      # ---- build ----
+      - name: Build aarch64 binaries
+        shell: bash
+        run: bash .github/scripts/build-release.sh "$CHANNEL"
+      # M3 (apps/hft-core): CPU feature check etc. against the sample configuration.
+      - name: hft-core --check
+        if: hashFiles('apps/hft-core/Cargo.toml') != ''
+        shell: bash
+        run: |
+          bin=target/aarch64-unknown-linux-gnu/release-hot/hft-core
+          [[ -x $bin ]] || bin=target/aarch64-unknown-linux-gnu/release/hft-core
+          cfg=${HFT_CORE_SAMPLE_CONFIG:-apps/hft-core/config/sample.toml}
+          if [[ ! -f $cfg ]]; then
+            echo "::error::sample configuration $cfg for hft-core --check is missing"
+            exit 1
+          fi
+          "$bin" --config "$cfg" --check
+      - name: Export strategy schemas and compare with fixtures/strategy-schemas
+        if: hashFiles('apps/hft-core/Cargo.toml') != ''
+        shell: bash
+        run: |
+          bin=target/aarch64-unknown-linux-gnu/release-hot/hft-core
+          [[ -x $bin ]] || bin=target/aarch64-unknown-linux-gnu/release/hft-core
+          mkdir -p dist/schemas/strategies
+          "$bin" schemas --out dist/schemas/strategies
+          diff -r fixtures/strategy-schemas dist/schemas/strategies
+      - name: Python wheels and offline wheelhouse
+        shell: bash
+        run: bash .github/scripts/build-wheels.sh dist
+      - name: IMDS lock BPF object
+        if: hashFiles('deploy/imds/hft-imds-connect.bpf.c') != ''
+        shell: bash
+        run: |
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends clang libbpf-dev linux-libc-dev
+          mkdir -p dist/deploy/imds
+          clang -O2 -target bpf -c deploy/imds/hft-imds-connect.bpf.c -o dist/deploy/imds/hft-imds-connect.bpf.o
+      - name: SBOM
+        shell: bash
+        run: |
+          echo "::notice::SBOM tool not selected yet (docs/development.md step 6: chosen when the repository is set up)"
+
+      - name: Package release archive
+        shell: bash
+        env:
+          EVIDENCE: ${{ needs.preflight.outputs.evidence }}
+        run: |
+          if [[ ! -f deploy/release/package-release.sh ]]; then
+            echo "::error::deploy/release/package-release.sh is not there yet (deploy, M3); nothing to package"
+            exit 1
+          fi
+          mkdir -p dist
+          printf '%s\n' "$EVIDENCE" >dist/evidence.json
+          export HFT_RELEASE_EVIDENCE=dist/evidence.json HFT_CI_RUN_ID=$GITHUB_RUN_ID
+          SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
+          export SOURCE_DATE_EPOCH
+          bash deploy/release/package-release.sh "$TAG" "$SHA" dist
+          mkdir -p out
+          mv "dist/hft-$TAG-aarch64.tar.zst" "dist/hft-$TAG-aarch64.tar.zst.sha256" out/
+      # Formal only (from M1.5, benchmarks/): the bench-profile executables of hft-benchmarks and
+      # the bench-gate runner (xtask) as hft-bench-<tag>-aarch64.tar.zst + .sha256, separate from
+      # the production archive (benchmarks/README.md 实现说明); same reproducible tar flags.
+      - name: Package benchmark artifact
+        if: env.CHANNEL == 'release' && hashFiles('benchmarks/Cargo.toml') != ''
+        shell: bash
+        run: |
+          t=aarch64-unknown-linux-gnu
+          name=hft-bench-$TAG-aarch64
+          stage=$RUNNER_TEMP/$name
+          mkdir -p "$stage/bin" "$stage/benches"
+          cargo build --locked --profile bench --target "$t" -p hft-benchmarks --benches             --message-format=json-render-diagnostics >"$RUNNER_TEMP/bench-build.json"
+          python3 -c 'import json,sys; [print(m["executable"]) for m in map(json.loads, open(sys.argv[1])) if m.get("reason") == "compiler-artifact" and m.get("executable")]'             "$RUNNER_TEMP/bench-build.json" | while read -r exe; do cp "$exe" "$stage/benches/"; done
+          cargo build --locked --release --target "$t" -p xtask
+          cp "target/$t/release/xtask" "$stage/bin/"
+          SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
+          tar -C "$RUNNER_TEMP" --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner -cf - "$name" |
+            zstd -19 -T4 -q -o "out/$name.tar.zst"
+          (cd out && sha256sum "$name.tar.zst" >"$name.tar.zst.sha256")
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: out/
+          if-no-files-found: error
+          retention-days: 1
+
+  verify:
+    needs: preflight
+    # Formal only; an Admin's skip_verify (hotfix) leaves it out.
+    if: >-
+      needs.preflight.result == 'success' && needs.preflight.outputs.channel == 'release' &&
+      needs.preflight.outputs.skip_verify != 'true'
+    uses: ./.github/workflows/verify-bundle.yml
+    with:
+      sha: ${{ needs.preflight.outputs.sha }}
+      version: ${{ needs.preflight.outputs.tag }}
+    # verify-bundle.yml declares its dispatch-only jobs too (resolve: actions read, upload:
+    # contents write); a caller must grant what any called job requests.
+    permissions:
+      contents: write
+      actions: read
+
+  publish:
+    needs: [preflight, conformance-x86, build, verify]
+    if: >-
+      ${{ !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' &&
+      (needs.preflight.outputs.channel == 'dev' ||
+      (needs.conformance-x86.result == 'success' &&
+      (needs.verify.result == 'success' || needs.preflight.outputs.skip_verify == 'true'))) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*-dist"
+          merge-multiple: true
+          path: dist
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          SHA: ${{ needs.preflight.outputs.sha }}
+          CHANNEL: ${{ needs.preflight.outputs.channel }}
+          CREATE_TAG: ${{ needs.preflight.outputs.create_tag }}
+          DIST: dist
+          NOTES: >-
+            aarch64 ${{ needs.preflight.outputs.channel }} build of ${{ needs.preflight.outputs.sha }}
+            (release-aarch64.yml run ${{ github.run_id }}; preflight evidence ${{ needs.preflight.outputs.evidence }})
+        run: bash .github/scripts/publish-release.sh

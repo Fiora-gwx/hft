@@ -1,0 +1,200 @@
+# Verification bundle hft-verify-<ver>-aarch64.tar.zst for the server-side ③④ accumulation
+# (docs/development.md#验证包工作流verify-bundleyml; contents and install: deploy/README.md
+# 验证包与 hft-verify; hft-verify: tools/README.md; ledger rules: docs/testing.md §6.1).
+#   workflow_call (formal releases, from release-aarch64.yml): artifact only; `publish` attaches it.
+#   workflow_dispatch(sha): a SHA with green ci.yml and an existing release tag; uploaded to that
+#   tag's Release by the `upload` job.
+# The bundle needs components of later milestones (cargo xtask fuzz + fuzz-targets.toml M3,
+# deploy/release/package-verify.sh M3, path-digest + tools/hft-verify M6, hft-dst M2): the
+# `bundle` job fails with a clear message until they exist.
+name: Verification bundle
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        type: string
+        required: true
+      version:
+        description: Release tag vX.Y.Z
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit with green ci.yml and a release tag (formal or development build)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.r.outputs.sha }}
+      tag: ${{ steps.r.outputs.tag }}
+      upload: ${{ steps.r.outputs.upload }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve SHA and release tag
+        id: r
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          WORKFLOW: verify-bundle
+          IN_SHA: ${{ inputs.sha }}
+          CALL_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ -n $CALL_VERSION ]]; then
+            # Called by release-aarch64.yml, whose preflight already proved the SHA.
+            { echo "sha=$IN_SHA"; echo "tag=$CALL_VERSION"; echo "upload=false"; } >>"$GITHUB_OUTPUT"
+          else
+            python3 .github/scripts/release-preflight.py
+            echo "upload=true" >>"$GITHUB_OUTPUT"
+          fi
+
+  bundle:
+    needs: resolve
+    if: needs.resolve.result == 'success'
+    runs-on: ubuntu-24.04-arm
+    container: ubuntu:24.04
+    timeout-minutes: 60
+    env:
+      SHA: ${{ needs.resolve.outputs.sha }}
+      TAG: ${{ needs.resolve.outputs.tag }}
+      STAGE: verify-stage
+    steps:
+      - name: Install build prerequisites
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+            build-essential ca-certificates curl file git pkg-config zstd python3
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+      - name: Mark the workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: arm64-verify
+      - name: xtask subcommands
+        id: xtask
+        shell: bash
+        run: bash .github/scripts/xtask-inventory.sh
+      - name: Bundle prerequisites present
+        shell: bash
+        env:
+          HAS_SETUP: ${{ steps.xtask.outputs.setup }}
+          HAS_DIGEST: ${{ steps.xtask.outputs.path-digest }}
+        run: |
+          miss=()
+          [[ -f deploy/release/package-verify.sh ]] || miss+=("deploy/release/package-verify.sh (M3)")
+          [[ -f tools/xtask/fuzz-targets.toml ]] || miss+=("tools/xtask/fuzz-targets.toml (M3)")
+          [[ -f tools/xtask/toolchains.toml ]] || miss+=("tools/xtask/toolchains.toml (pinned nightly)")
+          [[ -f tools/hft-verify/Cargo.toml ]] || miss+=("tools/hft-verify (M6)")
+          [[ $HAS_SETUP == true ]] || miss+=("cargo xtask setup")
+          [[ $HAS_DIGEST == true ]] || miss+=("cargo xtask path-digest (M6)")
+          if ((${#miss[@]})); then
+            echo "::error::verification bundle prerequisites missing: ${miss[*]}"
+            exit 1
+          fi
+      - name: Install pinned nightly and cargo-fuzz (cargo xtask setup)
+        run: cargo xtask setup
+      - name: Build core decoder fuzz targets (pinned nightly, AddressSanitizer, debug assertions)
+        shell: bash
+        run: |
+          nightly=$(sed -n 's/^nightly *= *"\(.*\)".*/\1/p' tools/xtask/toolchains.toml)
+          mkdir -p "$STAGE/fuzz"
+          python3 .github/scripts/fuzz-targets.py --core >"$RUNNER_TEMP/core-targets"
+          [[ -s $RUNNER_TEMP/core-targets ]] || { echo "::error::no core targets in fuzz-targets.toml"; exit 1; }
+          while read -r name dir; do
+            (cd "$dir" && cargo "+$nightly" fuzz build --sanitizer address --debug-assertions "$name")
+            bin=$(find "$dir/fuzz/target" -path "*/release/$name" -type f -executable | head -n1)
+            cp "$bin" "$STAGE/fuzz/$name"
+          done <"$RUNNER_TEMP/core-targets"
+      - name: Build hft-dst and hft-verify (ci profile)
+        shell: bash
+        run: |
+          cargo build --locked --profile ci --bin hft-dst --bin hft-verify
+          mkdir -p "$STAGE/bin"
+          cp target/ci/hft-dst target/ci/hft-verify "$STAGE/bin/"
+      # Initial corpus = repository seed corpus + the nightly fuzz corpus from actions/cache.
+      - name: Restore nightly fuzz corpora
+        uses: actions/cache/restore@v4
+        with:
+          path: fuzz/corpus
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: fuzz-corpus-
+      - name: Assemble initial corpus
+        shell: bash
+        run: |
+          while read -r name dir; do
+            mkdir -p "$STAGE/corpus/$name"
+            for src in "$dir/fuzz/corpus/$name" "fuzz/corpus/$name"; do
+              if [[ -d $src ]]; then cp -r "$src/." "$STAGE/corpus/$name/"; fi
+            done
+          done <"$RUNNER_TEMP/core-targets"
+      - name: path_digest per target group
+        shell: bash
+        run: cargo xtask path-digest --sha "$SHA" --json >"$STAGE/path-digest.json"
+      - name: Package the verification bundle
+        shell: bash
+        run: |
+          SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
+          export SOURCE_DATE_EPOCH HFT_VERIFY_STAGE=$STAGE HFT_CI_RUN_ID=$GITHUB_RUN_ID
+          mkdir -p out
+          bash deploy/release/package-verify.sh "$TAG" "$SHA" out
+      - name: Smoke the packaged bundle (10 s per fuzz target, 10 fixed hft-dst seeds)
+        shell: bash
+        run: |
+          x=$RUNNER_TEMP/bundle
+          mkdir -p "$x"
+          tar -C "$x" --zstd -xf "out/hft-verify-$TAG-aarch64.tar.zst"
+          root=$(find "$x" -mindepth 1 -maxdepth 1 -type d | head -n1)
+          for f in "$root"/fuzz/*; do
+            t=$(basename "$f")
+            mkdir -p "$RUNNER_TEMP/smoke/$t"
+            ASAN_OPTIONS=quarantine_size_mb=16 "$f" -max_total_time=10 "$RUNNER_TEMP/smoke/$t" "$root/corpus/$t"
+          done
+          # Seed range is inclusive (hft-testkit §8).
+          "$root/bin/hft-dst" run --seeds 0..9 --out "$RUNNER_TEMP/dst-smoke.json" --crash-dir "$RUNNER_TEMP/dst-crash"
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-dist
+          path: out/
+          if-no-files-found: error
+          retention-days: 1
+
+  # workflow_dispatch only: attach the bundle to the tag's Release (formal releases attach it in
+  # release-aarch64.yml's publish).
+  upload:
+    needs: [resolve, bundle]
+    if: needs.resolve.outputs.upload == 'true' && needs.bundle.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: verify-dist
+          path: dist
+      - name: Upload to the Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY"

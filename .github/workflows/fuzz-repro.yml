@@ -1,0 +1,112 @@
+# Reproduce a server-side fuzz suspect (single-input timeout or memory limit on a constrained host)
+# with libFuzzer's default limits, using the already compiled fuzz binary of that version's
+# verification bundle (docs/development.md#复现疑似失败fuzz-reproyml). No compilation.
+# Conclusion goes to the job summary (reproduced / not-reproduced, both `success`); the operator
+# then runs `hft-verify crash resolve <crash-id> --reproduced|--not-reproduced --evidence <run URL>`
+# on the server. A build/download failure or an input whose SHA-1 does not match is `failure`.
+# Minutes count toward the release reserve; the 1,500 min rule does not skip it.
+name: Fuzz repro
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Verification bundle version = its Release tag (vX.Y.Z or vX.Y.Z-dev.N)
+        type: string
+        required: true
+      target:
+        description: Fuzz target name
+        type: string
+        required: true
+      crash_id:
+        description: Entry of `hft-verify crash list` (<target>/<sha1>)
+        type: string
+        required: true
+      input_b64:
+        description: Minimized input, base64 (待核实 the dispatch input length limit; method in development.md)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    runs-on: ubuntu-24.04-arm
+    container: ubuntu:24.04
+    timeout-minutes: 20
+    env:
+      VERSION: ${{ inputs.version }}
+      TARGET: ${{ inputs.target }}
+      CRASH_ID: ${{ inputs.crash_id }}
+      INPUT_B64: ${{ inputs.input_b64 }}
+    steps:
+      - name: Install prerequisites
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+            ca-certificates curl python3 zstd
+      - name: Download and check the verification bundle
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          api=${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}
+          name="hft-verify-${VERSION}-aarch64.tar.zst"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" "$api/releases/tags/$VERSION" >release.json
+          for f in "$name" "$name.sha256"; do
+            url=$(python3 -c 'import json,sys; print(next(a["url"] for a in json.load(open("release.json"))["assets"] if a["name"] == sys.argv[1]))' "$f")
+            curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" -o "$f" "$url"
+          done
+          sha256sum -c "$name.sha256"
+          mkdir -p bundle
+          tar -C bundle --zstd -xf "$name"
+          root=$(find bundle -mindepth 1 -maxdepth 1 -type d | head -n1)
+          [[ -f $root/VERIFY.json ]] || { echo "::error::VERIFY.json missing from the bundle"; exit 1; }
+          [[ -x $root/fuzz/$TARGET ]] || { echo "::error::fuzz target $TARGET not in the bundle"; exit 1; }
+          echo "ROOT=$root" >>"$GITHUB_ENV"
+      - name: Decode the input and check its SHA-1 against crash_id
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$INPUT_B64" | base64 -d >input.bin
+          got=$(sha1sum input.bin | cut -d' ' -f1)
+          want=${CRASH_ID##*/}
+          want=${want%.min}
+          if [[ ${CRASH_ID%%/*} != "$TARGET" ]]; then
+            echo "::error::crash_id $CRASH_ID is not for target $TARGET"
+            exit 1
+          fi
+          if [[ $got != "$want" ]]; then
+            echo "::error::input SHA-1 $got does not match crash_id $CRASH_ID"
+            exit 1
+          fi
+          echo "INPUT_SHA1=$got" >>"$GITHUB_ENV"
+      - name: Run the input with libFuzzer default limits
+        id: run
+        shell: bash
+        run: |
+          rc=0
+          "$ROOT/fuzz/$TARGET" input.bin >repro.log 2>&1 || rc=$?
+          tail -n 60 repro.log
+          if ((rc == 0)); then verdict=not-reproduced; else verdict=reproduced; fi
+          echo "verdict=$verdict" >>"$GITHUB_OUTPUT"
+          {
+            echo "### fuzz-repro: $verdict"
+            echo
+            echo "- crash_id \`$CRASH_ID\`, target \`$TARGET\`, bundle \`$VERSION\`"
+            echo "- input SHA-1 \`$INPUT_SHA1\`, exit $rc"
+            echo "- run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            echo "On the server: \`hft-verify crash resolve $CRASH_ID --$verdict --evidence ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\`"
+          } >>"$GITHUB_STEP_SUMMARY"
+      - name: Upload the reproduced input
+        if: steps.run.outputs.verdict == 'reproduced'
+        uses: actions/upload-artifact@v4
+        with:
+          name: repro-${{ inputs.target }}
+          path: |
+            input.bin
+            repro.log
+          retention-days: 7

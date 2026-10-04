@@ -1,0 +1,427 @@
+# Quality gates, called by ci.yml (docs/development.md#质量门quality-gatesyml).
+# What runs and the time limits: docs/testing.md §6 (PR row: target <= 12 billed minutes,
+# timeout-minutes: 20). Jobs: decoupling-gate (also decides full/docs-only), docs, rust, ops-py.
+#
+# Steps for components of later milestones are guarded by `steps.xtask.outputs.<subcommand>`
+# (.github/scripts/xtask-inventory.sh: a subcommand that is due but missing fails the job) or by
+# the existence of the path they need; each guard names the milestone in which it starts to run.
+name: Quality gates
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Test the exact commit that preflight later looks up (the PR head, not the merge ref).
+  HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+
+jobs:
+  decoupling-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    outputs:
+      full: ${{ steps.quota.outputs.full }}
+      docs_only: ${{ steps.paths.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.HEAD_SHA }}
+          fetch-depth: 0
+
+      - name: Classify changed paths
+        id: paths
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ env.BASE_SHA }}
+          HEAD: ${{ env.HEAD_SHA }}
+        run: python3 .github/scripts/changed-paths.py
+
+      # full = main push, or a PR with the `hotfix` label, or usage < 1,500 min
+      # (docs/development.md#免费额度). An estimation error fails open (full=true, warning).
+      - name: Estimate CI usage and decide full or docs-only run
+        id: quota
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          HOTFIX: ${{ contains(github.event.pull_request.labels.*.name, 'hotfix') }}
+        run: |
+          if [[ $EVENT != pull_request ]]; then
+            echo "full=true" >>"$GITHUB_OUTPUT"
+            echo "main push: full quality gates" >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ $HOTFIX == true ]]; then
+            echo "full=true" >>"$GITHUB_OUTPUT"
+            echo "PR has the \`hotfix\` label: full quality gates" >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          rc=0
+          res=$(python3 .github/scripts/ci-usage.py gate --threshold 1500 --override false) || rc=$?
+          if ((rc != 0)); then
+            echo "::warning::CI usage estimate failed (exit $rc); running the full quality gates"
+            echo "full=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          ran=$(printf '%s\n' "$res" | sed -n 's/^ran=//p')
+          echo "full=$ran" >>"$GITHUB_OUTPUT"
+          if [[ $ran != true ]]; then
+            echo "QuotaSkip: \`rust\` and \`ops-py\` are skipped for this PR (add the \`hotfix\` label and push to run them)" >>"$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Install pinned Rust toolchain
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: x86-xtask
+      - name: xtask subcommands
+        id: xtask
+        run: bash .github/scripts/xtask-inventory.sh
+
+      # M1 (tools/TESTS.md TOOL-012..019). On main pushes: the merge commit against its first
+      # parent, with the labels and reviews of the PR it came from.
+      - name: cargo xtask decoupling-gate
+        if: steps.xtask.outputs.decoupling-gate == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [[ $EVENT == pull_request ]]; then
+            base=$BASE_SHA
+            pr=$PR
+          else
+            base=$(git rev-parse "$HEAD_SHA^1")
+            pr=$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/pulls" --jq '.[0].number // empty')
+          fi
+          args=(--base "$base" --head "$HEAD_SHA")
+          if [[ -n $pr ]]; then args+=(--pr "$pr"); fi
+          cargo xtask decoupling-gate "${args[@]}"
+      - name: Report a decoupling exemption
+        if: ${{ !cancelled() && steps.xtask.outputs.decoupling-gate == 'true' }}
+        run: python3 .github/scripts/report-exemption.py
+
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.HEAD_SHA }}
+      - name: Install pinned Rust toolchain
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: x86-xtask
+      - name: xtask subcommands
+        id: xtask
+        run: bash .github/scripts/xtask-inventory.sh
+      - name: cargo xtask doc-check
+        run: cargo xtask doc-check
+      - name: cargo xtask test-trace
+        # docs/tests/README.md §6: every PR and main push.
+        if: ${{ !cancelled() }}
+        run: cargo xtask test-trace
+
+  rust:
+    needs: decoupling-gate
+    # Runs on the quota verdict, not on the gate's own result: a coupling violation still gets its
+    # build and test feedback. No verdict (the gate job broke before deciding) -> skipped.
+    if: >-
+      ${{ !cancelled() && needs.decoupling-gate.outputs.full == 'true' &&
+      needs.decoupling-gate.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write # S3 fixtures through GitHub OIDC (replay-verify samples)
+    env:
+      # scaffold-gate reuses this job's target directory (no second full build).
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+    steps:
+      - name: Record start time
+        run: echo "JOB_START=$(date +%s)" >>"$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.HEAD_SHA }}
+          fetch-depth: 0 # path rules, gen-schema's merge-base baseline, toolchain base worktree
+      - name: Classify changed paths
+        id: paths
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ env.BASE_SHA }}
+          HEAD: ${{ env.HEAD_SHA }}
+        run: python3 .github/scripts/changed-paths.py
+      - name: Install system packages
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross strace
+      - name: Install pinned Rust toolchain
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: x86-ci
+      - name: xtask subcommands
+        id: xtask
+        run: bash .github/scripts/xtask-inventory.sh
+      - name: Install pinned cargo plugins and nightly (cargo xtask setup)
+        if: steps.xtask.outputs.setup == 'true'
+        run: cargo xtask setup
+      - name: Prepare proc test prerequisites
+        run: bash .github/scripts/test-prereqs.sh
+
+      # fmt, clippy, deny licenses/bans, deps, hot-check, fixtures check, unit/property (ci profile),
+      # golden, DST smoke + `dst --hashtrail check --first 50` (from M2), gen-schema --check,
+      # doc-check (tools/README.md "cargo xtask ci").
+      - name: cargo xtask ci
+        id: ci
+        run: cargo xtask ci
+
+      - name: aarch64 cross check (ISA-specific code stays compilable)
+        run: cargo check --locked --target aarch64-unknown-linux-gnu --workspace
+
+      # M3 (gen-host lands with deploy/gen): deploy/ or apps/hft-core changed.
+      - name: cargo xtask gen-host --check
+        id: genhost
+        if: steps.paths.outputs.gen_host == 'true' && steps.xtask.outputs.gen-host == 'true'
+        run: cargo xtask gen-host --check
+
+      # M2: crates/ apps/ strategies/ tools/ changed.
+      - name: cargo xtask scaffold-gate
+        if: steps.paths.outputs.scaffold == 'true' && steps.xtask.outputs.scaffold-gate == 'true'
+        run: cargo xtask scaffold-gate
+
+      # M3 (cargo xtask fuzz and tools/xtask/fuzz-targets.toml): 60 s per changed target.
+      - name: Fuzz smoke of changed targets
+        if: steps.paths.outputs.fuzz_targets != '' && steps.xtask.outputs.fuzz == 'true'
+        env:
+          TARGETS: ${{ steps.paths.outputs.fuzz_targets }}
+        run: |
+          for t in $TARGETS; do
+            cargo xtask fuzz "$t" --time 60
+          done
+
+      # M2 (replay-verify) + M3 (fixtures fetch): strategy/exec/risk/OMS/sequencer changed.
+      - name: Configure AWS credentials for S3 fixtures (OIDC)
+        id: aws
+        if: >-
+          steps.paths.outputs.replay == 'true' && steps.xtask.outputs.replay-verify == 'true' &&
+          steps.xtask.outputs.fixtures == 'true' && hashFiles('fixtures/replay/*.pointer.toml') != '' &&
+          vars.HFT_FIXTURES_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.HFT_FIXTURES_ROLE_ARN }}
+          aws-region: ${{ vars.HFT_FIXTURES_AWS_REGION }}
+      - name: replay-verify fixtures/replay samples
+        if: >-
+          steps.paths.outputs.replay == 'true' && steps.xtask.outputs.replay-verify == 'true' &&
+          steps.xtask.outputs.fixtures == 'true' && hashFiles('fixtures/replay/*.pointer.toml') != ''
+        env:
+          AWS_OK: ${{ steps.aws.outcome }}
+        run: |
+          if [[ $AWS_OK != success ]]; then
+            echo "::error::replay samples need the fixture role: set repository variables HFT_FIXTURES_ROLE_ARN and HFT_FIXTURES_AWS_REGION"
+            exit 1
+          fi
+          cargo xtask fixtures fetch
+          for p in fixtures/replay/*.pointer.toml; do
+            cargo xtask replay-verify "$p"
+          done
+
+      # M1.5 (bench-gate): hot crates or benchmarks/ changed; ci profile, numbers are reported only.
+      - name: Benchmark smoke (report only)
+        if: >-
+          (steps.paths.outputs.bench_crates != '' || steps.paths.outputs.benchmarks == 'true') &&
+          steps.xtask.outputs.bench-gate == 'true'
+        env:
+          CRATES: ${{ steps.paths.outputs.bench_crates }}
+          ALL: ${{ steps.paths.outputs.benchmarks }}
+        run: |
+          if [[ $ALL == true ]]; then
+            cargo xtask bench-gate --smoke
+          else
+            for c in $CRATES; do cargo xtask bench-gate --smoke --crate "$c"; done
+          fi
+
+      # M1.5: rust-toolchain.toml changed -> base and head benchmark smoke in this job (report
+      # only, hot-path-rules B4).
+      - name: Toolchain change, base vs head benchmark (report only)
+        if: steps.paths.outputs.toolchain == 'true' && steps.xtask.outputs.bench-gate == 'true'
+        continue-on-error: true
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          base=$BASE_SHA
+          if [[ $EVENT != pull_request ]]; then base=$(git rev-parse "$HEAD_SHA^1"); fi
+          wt=$RUNNER_TEMP/base
+          git worktree add --detach "$wt" "$base"
+          (cd "$wt" && bash "$GITHUB_WORKSPACE/.github/scripts/install-rust.sh" &&
+            CARGO_TARGET_DIR="$wt/target" cargo xtask bench-gate --smoke)
+          cargo xtask bench-gate --smoke
+          {
+            echo "### Toolchain change: benchmark smoke, base \`$base\` vs head"
+            echo
+            echo "<details><summary>base</summary>"
+            echo
+            echo '```json'
+            cat "$wt/target/xtask/bench-gate.json"
+            echo '```'
+            echo "</details><details><summary>head</summary>"
+            echo
+            echo '```json'
+            cat target/xtask/bench-gate.json
+            echo '```'
+            echo "</details>"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: cargo deny check advisories (Cargo.lock changed; non-blocking)
+        if: steps.paths.outputs.cargo_lock == 'true'
+        continue-on-error: true
+        run: |
+          if ! command -v cargo-deny >/dev/null; then
+            echo "::warning::cargo-deny is not installed (cargo xtask setup)"
+            exit 1
+          fi
+          cargo deny check advisories
+
+      # Generated files out of date -> upload the regenerated diff; a human applies it with
+      # `git apply` and commits it (no local build needed).
+      - name: Regenerate generated files into regen.patch
+        id: regen
+        if: failure() && (steps.ci.outcome == 'failure' || steps.genhost.outcome == 'failure')
+        env:
+          HAS_GEN_SCHEMA: ${{ steps.xtask.outputs.gen-schema }}
+          HAS_GEN_HOST: ${{ steps.xtask.outputs.gen-host }}
+          HAS_DST: ${{ steps.xtask.outputs.dst }}
+        run: |
+          set +e
+          if [[ $HAS_GEN_SCHEMA == true ]]; then cargo xtask gen-schema; fi
+          if [[ $HAS_GEN_HOST == true ]]; then cargo xtask gen-host; fi
+          if [[ $HAS_DST == true && -f fixtures/dst/hashtrail.toml ]]; then
+            cargo xtask dst --hashtrail write
+          fi
+          core=""
+          for p in target/ci/hft-core target/release/hft-core target/debug/hft-core; do
+            if [[ -x $p ]]; then core=$p; break; fi
+          done
+          if [[ -n $core && -d fixtures/strategy-schemas ]]; then
+            "$core" schemas --out fixtures/strategy-schemas
+          fi
+          git add -N .
+          git diff --binary >"$RUNNER_TEMP/regen.patch"
+          if [[ -s $RUNNER_TEMP/regen.patch ]]; then echo "has=true" >>"$GITHUB_OUTPUT"; fi
+          exit 0
+      - name: Upload regen.patch
+        if: failure() && steps.regen.outputs.has == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: regen-patch
+          path: ${{ runner.temp }}/regen.patch
+          retention-days: 7
+
+      - name: PR minute target (12 billed minutes, docs/testing.md §6)
+        if: always()
+        run: |
+          mins=$(( ($(date +%s) - JOB_START + 59) / 60 ))
+          echo "rust job: about $mins min" >>"$GITHUB_STEP_SUMMARY"
+          if ((mins > 12)); then
+            echo "::warning::rust job took about $mins min, over the 12 billed-minute PR target"
+            echo "**Over the 12 billed-minute PR target.**" >>"$GITHUB_STEP_SUMMARY"
+          fi
+
+  ops-py:
+    needs: decoupling-gate
+    # Same condition as `rust`.
+    if: >-
+      ${{ !cancelled() && needs.decoupling-gate.outputs.full == 'true' &&
+      needs.decoupling-gate.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.HEAD_SHA }}
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: paths
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ env.BASE_SHA }}
+          HEAD: ${{ env.HEAD_SHA }}
+        run: python3 .github/scripts/changed-paths.py
+      - name: No relevant changes
+        if: steps.paths.outputs.python != 'true' && steps.paths.outputs.ops != 'true'
+        run: echo "无相关改动 (no python/, strategies/*/pipeline/, crates/hft-py/, deploy/ or .github/ changes)"
+
+      # Python packages land with their milestones (hft-py M2, pipeline/ops_bot M4-M5).
+      - uses: actions/setup-python@v5
+        if: steps.paths.outputs.python == 'true' || steps.paths.outputs.ops == 'true'
+        with:
+          python-version: "3.12"
+      - name: Install pinned Rust toolchain (hft_py)
+        if: steps.paths.outputs.python == 'true' && hashFiles('crates/hft-py/Cargo.toml') != ''
+        run: bash .github/scripts/install-rust.sh
+      - name: Python packages (maturin develop, ruff, mypy --strict, pytest)
+        if: steps.paths.outputs.python == 'true'
+        run: |
+          mapfile -t pkgs < <(git ls-files 'python/*pyproject.toml' 'strategies/*/pipeline/pyproject.toml' | xargs -r -n1 dirname | sort -u)
+          if ((${#pkgs[@]} == 0)) && [[ ! -f crates/hft-py/Cargo.toml ]]; then
+            echo "no Python packages yet"
+            exit 0
+          fi
+          python -m venv "$RUNNER_TEMP/venv"
+          # shellcheck disable=SC1091
+          source "$RUNNER_TEMP/venv/bin/activate"
+          if [[ -f python/requirements-dev.lock ]]; then
+            python -m pip install -r python/requirements-dev.lock
+          else
+            echo "::warning::python/requirements-dev.lock is missing; installing unpinned dev tools"
+            python -m pip install maturin ruff mypy pytest
+          fi
+          if [[ -f crates/hft-py/Cargo.toml ]]; then
+            (cd crates/hft-py && maturin develop)
+          fi
+          for p in "${pkgs[@]}"; do python -m pip install -e "$p"; done
+          python -m ruff check python strategies
+          if ((${#pkgs[@]})); then
+            python -m mypy --strict "${pkgs[@]}"
+            python -m pytest -q "${pkgs[@]}"
+          fi
+
+      # deploy/ lands in M3 (deploy/TESTS.md); every guard below is "the files exist".
+      - name: Deploy checks (shellcheck, bats, unit verify, dev2 guard container tests)
+        if: steps.paths.outputs.ops == 'true'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends shellcheck bats
+          mapfile -t sh < <(git ls-files 'deploy/*.sh')
+          if ((${#sh[@]})); then shellcheck -S warning "${sh[@]}"; else echo "no deploy shell scripts yet"; fi
+          mapfile -t bt < <(git ls-files 'deploy/*.bats')
+          if ((${#bt[@]})); then bats "${bt[@]}"; fi
+          mapfile -t units < <(git ls-files 'deploy/*.service' 'deploy/*.timer' 'deploy/*.slice' 'deploy/*.socket' 'deploy/*.path')
+          if ((${#units[@]})); then
+            # Test users and directory fixtures for systemd-analyze come from deploy (its CI fixture script).
+            if [[ -f deploy/tests/ci-unit-fixtures.sh ]]; then sudo bash deploy/tests/ci-unit-fixtures.sh; fi
+            systemd-analyze verify "${units[@]}"
+          fi
+          if [[ -d deploy/tests ]]; then
+            python -m pip install pytest
+            python -m pytest -q deploy/tests
+          fi
+          if [[ -d deploy/dev2/tests ]]; then
+            python -m pytest -q deploy/dev2/tests
+          fi
+      - name: actionlint
+        if: steps.paths.outputs.ops == 'true'
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color

@@ -1,0 +1,49 @@
+# Re-run only decoupling-gate when a review is submitted or a label changes
+# (docs/development.md#质量门quality-gatesyml). No build, no tests. The exemption needs the
+# `engine-change` label and an approving review by a login of .github/hft-admins.txt.
+name: Decoupling
+
+on:
+  pull_request_review:
+    types: [submitted]
+  pull_request:
+    types: [labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  decoupling-gate:
+    # Label changes other than `engine-change` cannot change the verdict.
+    if: github.event_name == 'pull_request_review' || github.event.label.name == 'engine-change'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Only the review list is read here; the usage estimate (actions: read) is done by the
+    # decoupling-gate job of ci.yml, which decides full/docs-only runs.
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Install pinned Rust toolchain
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: x86-xtask
+      - name: xtask subcommands
+        id: xtask
+        run: bash .github/scripts/xtask-inventory.sh
+      - name: cargo xtask decoupling-gate
+        if: steps.xtask.outputs.decoupling-gate == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          PR: ${{ github.event.pull_request.number }}
+        run: cargo xtask decoupling-gate --base "$BASE" --head "$HEAD" --pr "$PR"
+      - name: Report a decoupling exemption
+        if: ${{ !cancelled() && steps.xtask.outputs.decoupling-gate == 'true' }}
+        run: python3 .github/scripts/report-exemption.py

@@ -1,0 +1,12 @@
+# hft Admin list (docs/development.md#免费额度, #质量门quality-gatesyml).
+#
+# One GitHub login per line; `#` starts a comment; case-insensitive.
+# Read by:
+#   - cargo xtask decoupling-gate   (engine-change exemption needs an approving review by a login here)
+#   - .github/scripts/ci-usage.py   (quota_override / skip_verify are honoured only for a login here)
+#
+# Current Admin: the owner (负责人). The login is still to be filled in once the GitHub
+# organization <org> and the repository <org>/hft exist; until then nobody is an Admin, so every
+# exemption, quota_override and skip_verify is refused.
+#
+# Changing this file is a normal PR (review it like code).
