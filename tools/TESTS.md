@@ -466,8 +466,8 @@ spec: README.md
 | TOOL-031.14 | `hft-oms →` `num-bigint` | 退出 1 |
 | TOOL-031.15 | `hft-types`(pure)`→` `serde_json` | 退出 1 |
 | TOOL-031.16 | `venue-binance → hft-net` | 退出 1 |
-| TOOL-031.17 | `venue-binance →` `serde`(白名单外) | 退出 1 |
-| TOOL-031.18 | `venue-binance →` `sonic-rs`、`memchr`、`zerocopy`、`ed25519-dalek`、`hmac`、`sha2`、`base64` | 退出 0 |
+| TOOL-031.17 | `venue-binance →` `simd-json`(白名单外) | 退出 1 |
+| TOOL-031.18 | `venue-binance →` `sonic-rs`、`serde`、`memchr`、`zerocopy`、`ed25519-dalek`、`hmac`、`sha2`、`base64` | 退出 0 |
 | TOOL-031.19 | `hft-oms →` `alloy-primitives` | 退出 1 |
 | TOOL-031.20 | `apps/chain-core →` `revm` | 退出 0 |
 | TOOL-031.21 | `hft-oms → hft-testkit`(`[dependencies]`) | 退出 1 |

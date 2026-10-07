@@ -100,7 +100,7 @@ cargo xtask scaffold-gate [--keep]
 
 1. 每条直接依赖边在 `deps.toml` 允许集合内;依赖只向下。
 2. `hot`/`pure` crate 的完整依赖闭包不含:`tokio`、`async-std`、`mio`、`futures-executor`、`tracing-subscriber`、`serde_json`、`reqwest`、`hyper`、`pyo3`、`rust_decimal`、`bigdecimal`、`num-bigint`。
-3. `venue-*` 只依赖 `hft-types`、`hft-refdata`、`hft-event`、`hft-venue-proto` 与编解码白名单(`sonic-rs`、`memchr`、`zerocopy`、`ed25519-dalek`、`hmac`、`sha2`、`base64`)。
+3. `venue-*` 只依赖 `hft-types`、`hft-refdata`、`hft-event`、`hft-venue-proto` 与编解码白名单(`sonic-rs`、`serde`(只为 sonic-rs 专用结构体的 `derive`)、`memchr`、`zerocopy`、`ed25519-dalek`、`hmac`、`sha2`、`base64`)。
 4. `alloy-*`/`revm` 只出现在 optional 链上组件(`hft-amm`、`hft-chain-evm`、`apps/chain-core`)与 `hft-py` 的闭包。
 5. `dev` tier crate 只出现在 `[dev-dependencies]`。
 6. `hft-venue` 不依赖任何 `venue-*`。

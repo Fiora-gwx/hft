@@ -265,6 +265,7 @@ const VENDOR: &[(&str, &[&str])] = &[
     ("hmac", &[]),
     ("sha2", &[]),
     ("base64", &[]),
+    ("simd-json", &[]),
     ("alloy-primitives", &[]),
     ("revm", &["alloy-primitives"]),
     ("aws-sdk-secretsmanager", &[]),
@@ -476,13 +477,14 @@ const ROWS: &[Row] = &[
     ),
     (
         "TOOL-031.17",
-        &[("crates/venue-binance", D, "vendor/serde")],
+        &[("crates/venue-binance", D, "vendor/simd-json")],
         1,
-        "crates/venue-binance → serde",
+        "crates/venue-binance → simd-json",
     ),
     (
         "TOOL-031.18",
         &[
+            ("crates/venue-binance", D, "vendor/serde"),
             ("crates/venue-binance", D, "vendor/memchr"),
             ("crates/venue-binance", D, "vendor/zerocopy"),
             ("crates/venue-binance", D, "vendor/ed25519-dalek"),

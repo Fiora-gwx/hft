@@ -56,7 +56,7 @@ crates/venue-<exchange>/
   fuzz/              cargo-fuzz 目标
 ```
 
-`Cargo.toml` 允许的依赖:`hft-types`、`hft-refdata`、`hft-event`、`hft-venue-proto`、`sonic-rs`、签名库(`hmac`+`sha2`、`ed25519-dalek`、`k256` 等按需)、`base64`/`hex`、`memchr`。`serde_json` 只进 `[dev-dependencies]`。**不得**依赖 `hft-venue`、`hft-net`、`hft-journal`、`hft-rt`、`tokio` 或任何 I/O crate([crates/AGENTS.md 依赖方向](../../crates/AGENTS.md#依赖方向))。
+`Cargo.toml` 允许的依赖:`hft-types`、`hft-refdata`、`hft-event`、`hft-venue-proto`、`sonic-rs` 与 `serde`(`derive`,只为 sonic-rs 专用结构体)、签名库(`hmac`+`sha2`、`ed25519-dalek`、`k256` 等按需)、`base64`/`hex`、`memchr`。`serde_json` 只进 `[dev-dependencies]`。**不得**依赖 `hft-venue`、`hft-net`、`hft-journal`、`hft-rt`、`tokio` 或任何 I/O crate([crates/AGENTS.md 依赖方向](../../crates/AGENTS.md#依赖方向))。
 
 把 crate 加进 workspace `members`;在 [hft-types](../../crates/hft-types/README.md) 的 `VenueId` 常量表追加编号(永不复用);在 [README.md 组件一览](../../README.md) 加一行。
 
