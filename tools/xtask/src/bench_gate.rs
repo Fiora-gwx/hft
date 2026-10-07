@@ -296,6 +296,76 @@ fn bench_packages(root: &Path, o: &Opts) -> Result<Vec<Pkg>, EnvError> {
     Ok(out)
 }
 
+/// Benchmark target names of the member at `dir`: `[[bench]]` names plus, unless
+/// `autobenches = false`, the auto-discovered `benches/<name>.rs` and `benches/<name>/main.rs`.
+fn bench_targets(root: &Path, dir: &str) -> BTreeSet<String> {
+    let d = root.join(dir);
+    let mut out = BTreeSet::new();
+    let manifest: toml::Table = std::fs::read_to_string(d.join("Cargo.toml"))
+        .ok()
+        .and_then(|t| t.parse().ok())
+        .unwrap_or_default();
+    for b in manifest
+        .get("bench")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+    {
+        if let Some(n) = b.get("name").and_then(|v| v.as_str()) {
+            out.insert(n.to_string());
+        }
+    }
+    let auto = manifest
+        .get("package")
+        .and_then(|p| p.get("autobenches"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    if auto {
+        for e in std::fs::read_dir(d.join("benches"))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            let p = e.path();
+            if p.is_file() && p.extension().is_some_and(|x| x == "rs") {
+                if let Some(s) = p.file_stem() {
+                    out.insert(s.to_string_lossy().into_owned());
+                }
+            } else if p.join("main.rs").is_file() {
+                out.insert(e.file_name().to_string_lossy().into_owned());
+            }
+        }
+    }
+    out
+}
+
+/// Executables of the benchmark targets of the member at `dir` among the `compiler-artifact`
+/// messages of a `--message-format=json…` build (in output order, without duplicates).
+fn bench_executables(stdout: &str, dir: &str) -> Vec<String> {
+    let want = format!("/{}/Cargo.toml", dir.trim_matches('/'));
+    let mut out: Vec<String> = Vec::new();
+    for l in stdout.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(l) else {
+            continue;
+        };
+        if v["reason"] != "compiler-artifact" {
+            continue;
+        }
+        let bench = v["target"]["kind"]
+            .as_array()
+            .is_some_and(|k| k.iter().any(|x| x == "bench"));
+        let ours = v["manifest_path"]
+            .as_str()
+            .is_some_and(|m| m.replace('\\', "/").ends_with(&want));
+        if let (true, true, Some(x)) = (bench, ours, v["executable"].as_str())
+            && !out.iter().any(|o| o == x)
+        {
+            out.push(x.to_string());
+        }
+    }
+    out
+}
+
 /// Measured numbers of one benchmark.
 #[derive(Debug, Clone, Default)]
 struct Res {
@@ -835,21 +905,28 @@ fn run_inner(root: &Path, o: &Opts) -> Result<i32, EnvError> {
                 }
             }
         } else {
-            let b = ex.run(&Cmd::new(
+            // Built with the workspace's feature resolution (`--workspace --all-features`, as the
+            // unit/property step), so the `ci`-profile libraries of that step are reused; a
+            // per-package `-p` resolves features differently and rebuilds dependencies.
+            let mut c = Cmd::capture(
                 "cargo",
                 &[
                     "bench",
                     "--profile",
                     "ci",
+                    "--workspace",
                     "--all-features",
                     "--no-run",
-                    "-p",
-                    &pkg.name,
-                    "--bench",
-                    "*",
+                    "--message-format=json-render-diagnostics",
                 ],
-            ))?;
-            if !b.ok() {
+            );
+            for n in bench_targets(root, &pkg.dir) {
+                c = c.arg("--bench").arg(n);
+            }
+            let b = ex.run(&c)?;
+            let exes = bench_executables(&b.stdout, &pkg.dir);
+            if !b.ok() || exes.is_empty() {
+                eprint!("{}", b.stderr);
                 eprintln!(
                     "bench-gate: benchmarks of {} ({}) do not build (exit {})",
                     pkg.dir, pkg.name, b.code
@@ -857,27 +934,25 @@ fn run_inner(root: &Path, o: &Opts) -> Result<i32, EnvError> {
                 failures.push(format!("{}: build failed", pkg.dir));
                 continue;
             }
-            let mut c = Cmd::capture(
-                "cargo",
-                &[
-                    "bench",
-                    "--profile",
-                    "ci",
-                    "--all-features",
-                    "-p",
-                    &pkg.name,
-                    "--bench",
-                    "*",
-                    "--",
-                ],
-            );
-            if let Some(p) = &o.path {
-                c = c.arg(p.clone());
+            // Run the package's own executables (another member may have a benchmark target of
+            // the same name), as `cargo bench` would: `--bench` plus the arguments.
+            let mut all = crate::exec::Output::default();
+            for x in exes {
+                let mut c = Cmd::capture(&x, &["--bench"]);
+                if let Some(p) = &o.path {
+                    c = c.arg(p.clone());
+                }
+                for a in SMOKE_ARGS {
+                    c = c.arg(*a);
+                }
+                let r = ex.run(&c)?;
+                all.stdout += &r.stdout;
+                if !r.ok() {
+                    all.code = r.code;
+                    all.stderr += &r.stderr;
+                }
             }
-            for a in SMOKE_ARGS {
-                c = c.arg(*a);
-            }
-            ex.run(&c)?
+            all
         };
         if !out.ok() {
             eprintln!(

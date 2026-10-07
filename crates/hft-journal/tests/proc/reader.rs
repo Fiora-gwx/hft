@@ -129,12 +129,27 @@ fn jnl_088_slow_reader() {
     let mut kid = spawn("jnl_088_slow_reader", "reader", &envs(&hot, &cold));
     assert_eq!(kid.hear(), "open");
     kid.signal(libc::SIGSTOP);
-    let mut worst = Duration::ZERO;
+    // "Blocked" is judged by what the writer thread itself did inside its `append` calls, not by
+    // wall time: on a shared runner the wall time of a ~100 ns call also holds preemption by other
+    // runnable threads and vCPU steal (README "延迟与资源契约": tmpfs hot segments only record
+    // times; testing.md §8: no time thresholds on shared CI runners). A call that waits gives up
+    // the CPU (voluntary context switch) or waits for I/O (major fault).
+    let mut inside = ThreadUsage::default();
+    let mut worst_wall = Duration::ZERO;
+    let mut worst_cpu = Duration::ZERO;
     for i in 0..200_000u64 {
+        let u0 = ThreadUsage::now();
         let t = Instant::now();
         let r1 = h.w().append(F0, Tsc(i), &tin(1));
         let r2 = h.w().append(F0, Tsc(i), &tout(1));
-        worst = worst.max(t.elapsed());
+        let wall = t.elapsed();
+        let d = u0.until(ThreadUsage::now());
+        worst_wall = worst_wall.max(wall);
+        worst_cpu = worst_cpu.max(d.cpu);
+        inside.nvcsw += d.nvcsw;
+        inside.nivcsw += d.nivcsw;
+        inside.minflt += d.minflt;
+        inside.majflt += d.majflt;
         r1.unwrap();
         r2.unwrap();
         h.w().end_event();
@@ -150,7 +165,16 @@ fn jnl_088_slow_reader() {
         }
     }
     h.persist_all();
-    assert!(worst < Duration::from_millis(1), "append blocked {worst:?}");
+    // Recorded, not judged (the latency budgets are JNL-108/JNL-110 on the reference machine).
+    eprintln!(
+        "jnl_088: worst append pair wall {worst_wall:?}, thread CPU {worst_cpu:?}; preempted {} times, minor faults {}",
+        inside.nivcsw, inside.minflt
+    );
+    assert_eq!(
+        (inside.nvcsw, inside.majflt),
+        (0, 0),
+        "append blocked: voluntary context switches, major faults"
+    );
     let last = h.w().next_seq().0 - 1;
     kid.signal(libc::SIGCONT);
     kid.tell(&last.to_string());

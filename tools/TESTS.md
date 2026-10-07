@@ -638,11 +638,11 @@ spec: README.md
 - 规则:[cargo xtask bench-gate](README.md#cargo-xtask-bench-gate)
 - 级别:unit
 - 里程碑:M1.5
-- 前置:workspace 中 `hft-book` 与 `hft-oms` 都有基准
+- 前置:workspace 中 `hft-book` 与 `hft-oms` 都有名为 `b` 的基准目标;记录型执行器:构建输出两者的基准可执行文件
 - 步骤:
   1. 运行 `cargo xtask bench-gate --smoke --crate hft-book`
 - 期望:
-  - 记录中的基准运行只有 `hft-book` 的;`target/bench/` 下没有 `hft-oms` 的结果文件
+  - 构建调用带 `--workspace`、不带 `-p`;记录中的基准运行只有 `hft-book` 的可执行文件;`target/bench/` 下没有 `hft-oms` 的结果文件
 - 实现:`tools/xtask/tests/bench_gate.rs::tool_038_crate_filter`
 
 ### TOOL-039 replay-verify 对未改动的样本报告一致

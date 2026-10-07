@@ -172,6 +172,8 @@ jobs:
           key: x86-ci
           # A cold run (new Cargo.lock, eviction) builds the cargo plugins and the whole test tree
           # from scratch and is close to the 20 min limit; keep what it built even if it fails.
+          # The first save of a key is final (later runs hit it fully and do not save), so the
+          # dependency builds run before any gate can stop the job (next two steps).
           cache-on-failure: true
       - name: xtask subcommands
         id: xtask
@@ -182,11 +184,19 @@ jobs:
       - name: Prepare proc test prerequisites
         run: bash .github/scripts/test-prereqs.sh
 
+      # Same command, profile and features as the unit/property step of `cargo xtask ci`, which
+      # then finds everything built; `--keep-going` builds every dependency even past a broken
+      # crate, so a failing run still caches a complete dependency tree.
+      - name: Build the ci-profile test tree
+        run: cargo test --locked --profile ci --workspace --all-features --no-run --keep-going
+
       # fmt, clippy, deny licenses/bans, deps, hot-check, fixtures check, unit/property (ci profile),
       # golden, DST smoke + `dst --hashtrail check --first 50` (from M2), gen-schema --check,
       # doc-check (tools/README.md "cargo xtask ci").
       - name: cargo xtask ci
         id: ci
+        # Also after a failed build: fmt and clippy still report.
+        if: ${{ !cancelled() }}
         run: |
           # tmpfs journal segments are mlocked (crates/hft-journal JNL-040/044/045); the hosted
           # runner's RLIMIT_MEMLOCK (8 MiB) is below one 16 MiB test segment.
@@ -194,6 +204,8 @@ jobs:
           cargo xtask ci
 
       - name: aarch64 cross check (ISA-specific code stays compilable)
+        # Also after a failed gate: its verdict is independent, and its dependencies get cached.
+        if: ${{ !cancelled() }}
         run: cargo check --locked --target aarch64-unknown-linux-gnu --workspace
 
       # M3 (gen-host lands with deploy/gen): deploy/ or apps/hft-core changed.

@@ -107,7 +107,10 @@ def check_workflow(path: Path, doc: dict, all_docs: dict[str, dict]) -> None:
         runs_on = job.get("runs-on")
         if runs_on not in RUNNERS:
             bad(f"{where}: runs-on {runs_on!r} not in {sorted(RUNNERS)}")
-        if runs_on == "ubuntu-24.04-arm" and job.get("container") != "ubuntu:24.04":
+        container = job.get("container")
+        if isinstance(container, dict):  # long form `container: {image: …, options: …}`
+            container = container.get("image")
+        if runs_on == "ubuntu-24.04-arm" and container != "ubuntu:24.04":
             bad(f"{where}: arm job without container: ubuntu:24.04")
         ids = {s.get("id") for s in job.get("steps", []) if s.get("id")}
         job_text = yaml.safe_dump(job, allow_unicode=True)

@@ -26,7 +26,7 @@ spec: README.md
 | 段大小与热段内存 | JNL-043, JNL-099, JNL-100, JNL-106 |
 | 配置项 | JNL-011, JNL-012, JNL-028 |
 | 实现说明 | JNL-001–JNL-009, JNL-014, JNL-022, JNL-023, JNL-031, JNL-033, JNL-034, JNL-039–JNL-047, JNL-050, JNL-055–JNL-073, JNL-080, JNL-081, JNL-083, JNL-105, JNL-106 |
-| 延迟与资源契约 | JNL-048, JNL-108–JNL-117, JNL-119 |
+| 延迟与资源契约 | JNL-048, JNL-088, JNL-108–JNL-117, JNL-119 |
 | 测试与验收 | 不适用:非规范 |
 | 依赖 | JNL-039, JNL-043, JNL-069 |
 | 延伸阅读 | 不适用:非规范 |
@@ -1255,14 +1255,15 @@ spec: README.md
 
 ### JNL-088 慢读者不影响写者
 
-- 规则:[读者](README.md#读者)
+- 规则:[读者](README.md#读者)、[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:proc
 - 里程碑:M1
 - 前置:Linux tmpfs;C0 `segment_bytes = 4 MiB`、`hot_keep = 1`;子进程读者从 `Oldest` 尾随
 - 步骤:
   1. 对读者 `SIGSTOP`;写者写 200 000 个事件(期间多次滚动与退役,persist 照常)
   2. `SIGCONT` 读者,读到末尾
-- 期望:步骤 1 中写者每次 `append` 都返回 `Ok`,没有阻塞超过 1 ms 的调用;读者恢复后交付的序列完整(早期段从冷副本读)
+- 期望:步骤 1 中写者每次 `append` 都返回 `Ok`,且没有一次调用阻塞:写者线程在全部 `append` 调用内的自愿上下文切换数与主缺页数(`getrusage(RUSAGE_THREAD)` 的 `ru_nvcsw`、`ru_majflt`)都为 0;读者恢复后交付的序列完整(早期段从冷副本读)
+- 备注:只记录不判定每对 `append` 的最长墙钟时间与线程 CPU 时间、被抢占次数、次缺页数。tmpfs 热段与共享 CI runner 上不判时间门槛([延迟与资源契约](README.md#延迟与资源契约)表头、[testing §8](../../docs/testing.md#8-上线门槛));墙钟时间含其他可运行线程的抢占与 vCPU 被宿主机挪用,不反映实现。`append` 时延由 JNL-108、有读者时的 `publish` 由 JNL-110 在参考机上判定
 - 实现:`crates/hft-journal/tests/proc/reader.rs::jnl_088_slow_reader`
 
 ### JNL-089 verify 对完好的 journal 不报问题

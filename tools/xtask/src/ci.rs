@@ -134,7 +134,9 @@ pub fn plan(root: &Path, opts: Options) -> Result<(Vec<Step>, Optional), EnvErro
     if opts.pure_only && selected.is_empty() {
         steps.push(skip(clippy_note, "no tier = pure crate in the workspace".into()));
     } else {
-        let c = sel_args(&["clippy"])
+        // `ci` profile like the unit/property step: build scripts (aws-lc-sys's C build) and
+        // proc-macros are built once for both.
+        let c = sel_args(&["clippy", "--profile", "ci"])
             .arg("--all-targets")
             .arg("--all-features")
             .arg("--")

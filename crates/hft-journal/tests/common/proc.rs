@@ -172,6 +172,51 @@ pub fn minflt() -> i64 {
     u.ru_minflt
 }
 
+/// Calling thread's own accounting: CPU time and the `getrusage(RUSAGE_THREAD)` counters. Unlike
+/// wall time it does not grow while the thread is preempted (another runnable thread on a busy
+/// host); a call that blocks shows up as a voluntary context switch.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ThreadUsage {
+    pub cpu: Duration,
+    /// Voluntary context switches: the thread gave up the CPU (it blocked).
+    pub nvcsw: i64,
+    /// Involuntary context switches: the scheduler preempted the thread.
+    pub nivcsw: i64,
+    pub minflt: i64,
+    pub majflt: i64,
+}
+
+impl ThreadUsage {
+    pub fn now() -> ThreadUsage {
+        // SAFETY: zeroed timespec/rusage are valid out-buffers.
+        let mut ts: libc::timespec = unsafe { std::mem::zeroed() };
+        // SAFETY: valid clock id and writable buffer.
+        unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts) };
+        // SAFETY: as above.
+        let mut u: libc::rusage = unsafe { std::mem::zeroed() };
+        // SAFETY: RUSAGE_THREAD with a writable buffer.
+        unsafe { libc::getrusage(libc::RUSAGE_THREAD, &mut u) };
+        ThreadUsage {
+            cpu: Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32),
+            nvcsw: u.ru_nvcsw,
+            nivcsw: u.ru_nivcsw,
+            minflt: u.ru_minflt,
+            majflt: u.ru_majflt,
+        }
+    }
+
+    /// Counters accumulated from `self` to `later`.
+    pub fn until(self, later: ThreadUsage) -> ThreadUsage {
+        ThreadUsage {
+            cpu: later.cpu.saturating_sub(self.cpu),
+            nvcsw: later.nvcsw - self.nvcsw,
+            nivcsw: later.nivcsw - self.nivcsw,
+            minflt: later.minflt - self.minflt,
+            majflt: later.majflt - self.majflt,
+        }
+    }
+}
+
 /// A prerequisite from the CI job (mount points, sudo); `None` → the test reports and returns.
 pub fn prereq(var: &str, what: &str) -> Option<String> {
     match std::env::var(var) {

@@ -59,7 +59,24 @@ fn read(f: &Fixture, rel: &str) -> Value {
     serde_json::from_str(&f.read(rel)).unwrap()
 }
 
-const SMOKE_A: &str = "cargo bench --profile ci --all-features -p a --bench * --";
+/// Smoke build: one workspace-wide `cargo bench --no-run` (shared feature resolution).
+const BUILD: &str = "cargo bench --profile ci --workspace --all-features --no-run";
+/// Smoke run of crate `a`'s benchmark executable.
+const SMOKE_A: &str = "/bench/a-b --bench";
+
+/// `compiler-artifact` lines of the smoke build for `(member dir, executable)`.
+fn built(list: &[(&str, &str)]) -> String {
+    list.iter()
+        .map(|(dir, exe)| {
+            format!(
+                "{}
+",
+                json!({"reason": "compiler-artifact", "manifest_path": format!("/repo/{dir}/Cargo.toml"),
+                       "target": {"kind": ["bench"], "name": "b"}, "executable": exe})
+            )
+        })
+        .collect()
+}
 const REF_A: &str = "cargo bench --profile bench --all-features -p a --bench * --";
 
 #[test]
@@ -69,7 +86,12 @@ fn tool_033_smoke_never_blocks() {
         "crates/a/benches/budgets.toml",
         "[\"a/x\"]\np50_ns = 50\np99_ns = 100\n",
     );
-    let s = Script::new(&f, &[(SMOKE_A, 0, &line("a/x", 1000), "")], 0);
+    let ba = built(&[("crates/a", "/bench/a-b")]);
+    let s = Script::new(
+        &f,
+        &[(BUILD, 0, &ba, ""), (SMOKE_A, 0, &line("a/x", 1000), "")],
+        0,
+    );
     let r = f.xtask_script(&["bench-gate", "--smoke"], &s, &[]);
     assert_eq!(r.code, 0, "{}", r.stderr);
     let j = read(&f, "target/bench/a/a/x.json");
@@ -97,16 +119,7 @@ fn tool_033_smoke_never_blocks() {
 #[test]
 fn tool_034_smoke_build_failure() {
     let f = repo("bg-034", &[("crates/a", "a")], &[]);
-    let s = Script::new(
-        &f,
-        &[(
-            "cargo bench --profile ci --all-features --no-run -p a --bench *",
-            101,
-            "",
-            "error[E0425]",
-        )],
-        0,
-    );
+    let s = Script::new(&f, &[(BUILD, 101, "", "error[E0425]")], 0);
     let r = f.xtask_script(&["bench-gate", "--smoke"], &s, &[]);
     assert_eq!(r.code, 1, "{}", r.stderr);
     assert!(r.stderr.contains("crates/a"), "{}", r.stderr);
@@ -344,33 +357,34 @@ fn tool_038_crate_filter() {
         &[("crates/hft-book", "hft-book"), ("crates/hft-oms", "hft-oms")],
         &[],
     );
+    // Both members have a benchmark target `b`: the build reports both, only hft-book's runs.
+    let bb = built(&[
+        ("crates/hft-book", "/bench/hft-book-b"),
+        ("crates/hft-oms", "/bench/hft-oms-b"),
+    ]);
     let s = Script::new(
         &f,
         &[
-            (
-                "cargo bench --profile ci --all-features -p hft-book --bench * --",
-                0,
-                &line("book_best", 10),
-                "",
-            ),
-            (
-                "cargo bench --profile ci --all-features -p hft-oms --bench * --",
-                0,
-                &line("oms/place", 10),
-                "",
-            ),
+            (BUILD, 0, &bb, ""),
+            ("/bench/hft-book-b --bench", 0, &line("book_best", 10), ""),
+            ("/bench/hft-oms-b --bench", 0, &line("oms/place", 10), ""),
         ],
         0,
     );
     let r = f.xtask_script(&["bench-gate", "--smoke", "--crate", "hft-book"], &s, &[]);
     assert_eq!(r.code, 0, "{}", r.stderr);
-    let benches: Vec<String> = s
-        .calls()
-        .into_iter()
-        .filter(|c| c.starts_with("cargo bench"))
-        .collect();
-    assert!(!benches.is_empty());
-    assert!(benches.iter().all(|c| c.contains("-p hft-book")), "{benches:?}");
+    let calls = s.calls();
+    let builds: Vec<&String> = calls.iter().filter(|c| c.starts_with("cargo bench")).collect();
+    assert!(!builds.is_empty());
+    assert!(
+        builds
+            .iter()
+            .all(|c| c.contains("--workspace") && !c.contains(" -p ")),
+        "{builds:?}"
+    );
+    let runs: Vec<&String> = calls.iter().filter(|c| c.starts_with("/bench/")).collect();
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    assert!(runs[0].starts_with("/bench/hft-book-b --bench"), "{runs:?}");
     assert!(f.path("target/bench/hft-book/book_best.json").is_file());
     assert!(!f.path("target/bench/hft-oms").exists());
 }
@@ -447,14 +461,18 @@ fn tool_185_budget_kinds() {
     }
     // TOOL-185.4
     let f = strat_repo("bg-185", &reg, &all);
+    let ba = built(&[("crates/a", "/bench/a-b")]);
     let s = Script::new(
         &f,
-        &[(
-            SMOKE_A,
-            0,
-            &format!("{}{}", line("a/x", 200), line("a/y", 50)),
-            "",
-        )],
+        &[
+            (BUILD, 0, &ba, ""),
+            (
+                SMOKE_A,
+                0,
+                &format!("{}{}", line("a/x", 200), line("a/y", 50)),
+                "",
+            ),
+        ],
         0,
     );
     assert_eq!(
@@ -465,7 +483,7 @@ fn tool_185_budget_kinds() {
     // TOOL-185.5
     let some: Vec<&str> = all.iter().copied().filter(|e| *e != "advice").collect();
     let f = strat_repo("bg-185", &reg, &some);
-    let s = Script::new(&f, &[(SMOKE_A, 0, &both, "")], 0);
+    let s = Script::new(&f, &[(BUILD, 0, &ba, ""), (SMOKE_A, 0, &both, "")], 0);
     let r = f.xtask_script(&["bench-gate", "--smoke"], &s, &[]);
     assert_eq!(r.code, 1, "TOOL-185.5: {}", r.stderr);
     assert!(
@@ -479,7 +497,7 @@ fn tool_185_budget_kinds() {
     );
     // TOOL-185.6
     let f = strat_repo("bg-185", &reg, &all);
-    let s = Script::new(&f, &[(SMOKE_A, 0, &both, "")], 0);
+    let s = Script::new(&f, &[(BUILD, 0, &ba, ""), (SMOKE_A, 0, &both, "")], 0);
     let r = f.xtask_script(&["bench-gate", "--smoke"], &s, &[]);
     assert_eq!(r.code, 0, "TOOL-185.6: {}", r.stderr);
 }

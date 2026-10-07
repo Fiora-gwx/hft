@@ -38,7 +38,7 @@ fn ci_repo(tag: &str) -> Fixture {
 
 const STEPS: [&str; 12] = [
     "cargo fmt --all --check",
-    "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+    "cargo clippy --profile ci --workspace --all-targets --all-features -- -D warnings",
     "cargo deny check licenses bans",
     "xtask deps",
     "xtask hot-check",
