@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use xtask::{
-    EXIT_ENV, EXIT_OK, ci, decoupling_gate, deps, doc_check, fixtures, gen_host, gen_schema, hot_check,
-    journal_verify, replay_verify, setup, test_trace,
+    EXIT_ENV, EXIT_OK, bench_gate, ci, decoupling_gate, deps, doc_check, fixtures, gen_host, gen_schema,
+    hot_check, journal_verify, replay_verify, setup, test_trace,
 };
 
 const SUBCOMMANDS: &[(&str, &str)] = &[
@@ -40,6 +40,10 @@ const SUBCOMMANDS: &[(&str, &str)] = &[
     (
         "gen-host",
         "[--host <name>] [--check] host configuration generator (input checks only for now)",
+    ),
+    (
+        "bench-gate",
+        "[--crate <x>] [--path <p>] [--smoke | --reference] [--syscall-audit] benchmark smoke and reference gates (benchmarks/README.md)",
     ),
     (
         "replay-verify",
@@ -103,6 +107,7 @@ fn main() -> ExitCode {
         Some("setup") => setup::run(&root, &rest),
         Some("gen-host") => gen_host::run(&root, &rest),
         Some("replay-verify") => replay_verify::run(&root, &rest),
+        Some("bench-gate") => bench_gate::run(&root, &rest),
         Some(cmd) if !rest.is_empty() => {
             eprintln!("xtask {cmd}: unexpected arguments {rest:?}");
             EXIT_ENV

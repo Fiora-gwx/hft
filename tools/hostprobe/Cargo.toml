@@ -1,0 +1,33 @@
+[package]
+name = "hostprobe"
+description = "Reads the host parameters actually in effect and writes the HostProfile JSON; compares it with an expected profile (cold tool); spec: tools/README.md#hostprobe"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "hostprobe"
+path = "src/main.rs"
+
+# Never depends on a hot crate (tools/README.md "依赖"; cargo xtask deps).
+[dependencies]
+libc = { workspace = true }
+serde_json = "1"
+# Not `workspace = true`: the workspace entry enables `asm` (needs a C toolchain for the target).
+sha2 = "0.10"
+toml = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "collect"
+harness = false
+
+[lints]
+workspace = true

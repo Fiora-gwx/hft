@@ -16,7 +16,7 @@ Writes step outputs (true/false unless noted):
   toolchain     rust-toolchain.toml                         -> base vs head relative benchmark
   cargo_lock    Cargo.lock                                  -> cargo deny check advisories
   gen_host      deploy/ or apps/hft-core/                   -> gen-host --check, deploy container tests
-  python        python/ strategies/*/pipeline/ crates/hft-py/
+  python        python/ strategies/*/pipeline/ crates/hft-py/ tools/az-probe/
   ops           deploy/ .github/
 """
 
@@ -106,7 +106,7 @@ def main() -> int:
         "toolchain": "rust-toolchain.toml" in files,
         "cargo_lock": "Cargo.lock" in files,
         "gen_host": under(files, "deploy/", "apps/hft-core/"),
-        "python": under(files, "python/", "crates/hft-py/") or pipeline,
+        "python": under(files, "python/", "crates/hft-py/", "tools/az-probe/") or pipeline,
         "ops": under(files, "deploy/", ".github/"),
     }
     lines = [f"{k}={str(v).lower() if isinstance(v, bool) else v}" for k, v in res.items()]

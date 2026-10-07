@@ -7,6 +7,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+pub mod bench_gate;
 pub mod ci;
 pub mod code_scan;
 pub mod decoupling_gate;

@@ -1,0 +1,1 @@
+BOOT_IMAGE=/vmlinuz-6.12.0-1009-aws root=PARTUUID=0a1b ro console=ttyS0 isolcpus=managed_irq,domain,2-15 nohz_full=2 rcu_nocbs=1-15 irqaffinity=0-1 transparent_hugepage=madvise

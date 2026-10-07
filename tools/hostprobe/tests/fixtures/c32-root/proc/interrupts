@@ -1,0 +1,17 @@
+           CPU0       CPU1       CPU2       CPU3
+  10:        100          0          0          0   GICv3  arch_timer
+  29:        100          0          0          0   GICv3  ena-mgmnt@pci_0000_00_05.0
+  30:        100          0          0          0   GICv3  ens5-Tx-Rx-0
+  31:        100          0          0          0   GICv3  ens5-Tx-Rx-1
+  40:        100          0          0          0   GICv3  ens6-Tx-Rx-0
+  41:        100          0          0          0   GICv3  ens6-Tx-Rx-1
+  42:        100          0          0          0   GICv3  ens6-Tx-Rx-2
+  43:        100          0          0          0   GICv3  ens6-Tx-Rx-3
+  44:        100          0          0          0   GICv3  ens6-Tx-Rx-4
+  45:        100          0          0          0   GICv3  ens6-Tx-Rx-5
+  46:        100          0          0          0   GICv3  ens6-Tx-Rx-6
+  47:        100          0          0          0   GICv3  ens6-Tx-Rx-7
+  50:        100          0          0          0   GICv3  ens7-Tx-Rx-0
+  60:        100          0          0          0   GICv3  nvme0q0
+  61:        100          0          0          0   GICv3  nvme0q1
+  62:        100          0          0          0   GICv3  nvme0q2

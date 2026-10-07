@@ -369,7 +369,7 @@ jobs:
         if: >-
           steps.paths.outputs.python != 'true' && steps.paths.outputs.ops != 'true' &&
           steps.paths.outputs.gen_host != 'true'
-        run: echo "无相关改动 (no python/, strategies/*/pipeline/, crates/hft-py/, deploy/, apps/hft-core/ or .github/ changes)"
+        run: echo "无相关改动 (no python/, strategies/*/pipeline/, crates/hft-py/, tools/az-probe/, deploy/, apps/hft-core/ or .github/ changes)"
 
       # Python packages land with their milestones (hft-py M2, pipeline/ops_bot M4-M5).
       - uses: actions/setup-python@v5
@@ -384,7 +384,7 @@ jobs:
       - name: Python packages (maturin develop, ruff, mypy --strict, pytest)
         if: steps.paths.outputs.python == 'true'
         run: |
-          mapfile -t pkgs < <(git ls-files 'python/*pyproject.toml' 'strategies/*/pipeline/pyproject.toml' | xargs -r -n1 dirname | sort -u)
+          mapfile -t pkgs < <(git ls-files 'python/*pyproject.toml' 'strategies/*/pipeline/pyproject.toml' 'tools/az-probe/pyproject.toml' | xargs -r -n1 dirname | sort -u)
           if ((${#pkgs[@]} == 0)) && [[ ! -f crates/hft-py/Cargo.toml ]]; then
             echo "no Python packages yet"
             exit 0
@@ -402,7 +402,7 @@ jobs:
             (cd crates/hft-py && maturin develop)
           fi
           for p in "${pkgs[@]}"; do python -m pip install -e "$p"; done
-          python -m ruff check python strategies
+          python -m ruff check python strategies tools/az-probe
           if ((${#pkgs[@]})); then
             python -m mypy --strict "${pkgs[@]}"
             python -m pytest -q "${pkgs[@]}"

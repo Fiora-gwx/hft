@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "az-probe"
+version = "0.1.0"
+description = "AZ / CPG latency probe to exchange endpoints and the comparison report (tools/README.md#az-probe)"
+requires-python = ">=3.12"
+dependencies = ["websockets>=12"]
+
+[project.scripts]
+az-probe = "az_probe.cli:main"
+
+[tool.setuptools]
+packages = ["az_probe"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.mypy]
+strict = true

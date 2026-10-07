@@ -10,7 +10,7 @@ scope: core
 - **M1.5 延迟探针之前**做第一次:M1.5 探针、M3 末满订阅探针与参考机的租用实例都开在本页选出的 AZ;同一结论决定 M7 统一升级主机(默认 `c32`;可选扩展的 tokyo-chain 同 CPG)落在哪个 AZ 与哪个 CPG([host-upgrade](host-upgrade.md)、[02 §2.1](../../design/02-硬件与托管方案.md)、[11 §1](../../design/11-实施路线图.md)),验证假设 A1(Binance 在 apne1-az4,同 AZ 可省 0.5–1 ms,[12 §2](../../design/12-风险与未决问题.md))。
 - 同一报告还给出:**第二 AZ**(待命清单与预建 ENI 所在,[deploy 主机清单](../../deploy/README.md#主机清单))与**是否需要第三 AZ 看门狗**(升级主机所在 AZ 与 dev2 相同时,[deploy 机外看门狗](../../deploy/README.md#机外看门狗))。
 - 之后**每周**复测(交易所端点与我们的实例都会随扩缩容移动);交易所公告迁移时(如 Bybit 11-12 迁 apne1-az4)加测。
-- 首次探测用的脚本是 `architecture-v2/research/_src/` 下的三个无依赖 Python 脚本;`tools/az-probe` 是它们的产品化版本(同样的测量,加上 PHC 首帧分布与报告生成),就绪后替换。
+- 首次探测用的脚本是 `architecture-v2/research/_src/` 下的三个无依赖 Python 脚本;`tools/az-probe` 是它们的产品化版本(同样的测量,加上 PHC 首帧分布与报告生成),已就绪:每台探针 `az-probe run --targets tools/az-probe/targets.toml --out report-<AZ-ID>-<CPG>.json --duration 60m [--ws-first-frame]`(每 10 分钟一轮,代替步骤 4 的三个脚本),步骤 7 的汇总表由 `az-probe compare report-*.json > az-report.md` 生成;报告覆盖与演练核对的脚本是 `tests/host/TOOL-098.sh` 与 `tests/host/DRL-69.sh`。
 
 ## 前置条件
 

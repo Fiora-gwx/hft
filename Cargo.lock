@@ -547,6 +547,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hostprobe"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "libc",
+ "serde_json",
+ "sha2",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

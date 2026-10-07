@@ -1,0 +1,135 @@
+# az-probe target endpoints (tools/README.md "az-probe"; procedure: docs/runbooks/az-probe.md).
+# Every A record of every host is probed (TCP handshake x9 per IP and cycle, TLS handshake).
+# `core = true` endpoints enter the `compare` ranking sum (per exchange: the smallest minRTT).
+# `ws` (optional): a public market-data stream for `--ws-first-frame`: `url`, `subscribe` (text frame
+# sent after connecting, empty = none), `ts` (dotted path of the exchange event time in the JSON
+# frame; numeric index for arrays) and `unit` (ms | us | ns). No key, no private stream.
+
+# ---- Binance (core)
+[[target]]
+name = "binance-fstream"
+host = "fstream.binance.com"
+exchange = "binance"
+core = true
+ws = { url = "wss://fstream.binance.com/public/ws/btcusdt@bookTicker", subscribe = "", ts = "E", unit = "ms" }
+
+[[target]]
+name = "binance-ws-fapi"
+host = "ws-fapi.binance.com"
+exchange = "binance"
+core = true
+
+[[target]]
+name = "binance-fapi"
+host = "fapi.binance.com"
+exchange = "binance"
+core = true
+
+[[target]]
+name = "binance-stream"
+host = "stream.binance.com"
+port = 9443
+exchange = "binance"
+core = true
+
+[[target]]
+name = "binance-ws-api"
+host = "ws-api.binance.com"
+exchange = "binance"
+core = true
+
+[[target]]
+name = "binance-api"
+host = "api.binance.com"
+exchange = "binance"
+core = true
+
+[[target]]
+name = "binance-api1"
+host = "api1.binance.com"
+exchange = "binance"
+core = true
+
+[[target]]
+name = "binance-api2"
+host = "api2.binance.com"
+exchange = "binance"
+core = true
+
+[[target]]
+name = "binance-api3"
+host = "api3.binance.com"
+exchange = "binance"
+core = true
+
+[[target]]
+name = "binance-api4"
+host = "api4.binance.com"
+exchange = "binance"
+core = true
+
+# ---- OKX (core)
+[[target]]
+name = "okx-ws"
+host = "ws.okx.com"
+port = 8443
+exchange = "okx"
+core = true
+ws = { url = "wss://ws.okx.com:8443/ws/v5/public", subscribe = '{"op":"subscribe","args":[{"channel":"bbo-tbt","instId":"BTC-USDT-SWAP"}]}', ts = "data.0.ts", unit = "ms" }
+
+[[target]]
+name = "okx-rest"
+host = "www.okx.com"
+exchange = "okx"
+core = true
+
+# ---- Bitget (core)
+[[target]]
+name = "bitget-ws"
+host = "ws.bitget.com"
+exchange = "bitget"
+core = true
+ws = { url = "wss://ws.bitget.com/v2/ws/public", subscribe = '{"op":"subscribe","args":[{"instType":"USDT-FUTURES","channel":"books1","instId":"BTCUSDT"}]}', ts = "data.0.ts", unit = "ms" }
+
+[[target]]
+name = "bitget-rest"
+host = "api.bitget.com"
+exchange = "bitget"
+core = true
+
+# ---- optional exchanges and controls
+[[target]]
+name = "gate-fx-ws"
+host = "fx-ws.gateio.ws"
+exchange = "gate"
+core = false
+
+[[target]]
+name = "gate-api"
+host = "api.gateio.ws"
+exchange = "gate"
+core = false
+
+[[target]]
+name = "bybit-stream"
+host = "stream.bybit.com"
+exchange = "bybit"
+core = false
+
+[[target]]
+name = "bybit-api"
+host = "api.bybit.com"
+exchange = "bybit"
+core = false
+
+[[target]]
+name = "kucoin-api"
+host = "api.kucoin.com"
+exchange = "kucoin"
+core = false
+
+[[target]]
+name = "hyperliquid-api"
+host = "api.hyperliquid.xyz"
+exchange = "hyperliquid"
+core = false

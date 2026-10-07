@@ -1420,7 +1420,7 @@ spec: README.md
   1. 运行 `az-probe run --targets targets.toml --out r.json --duration 1m`
 - 期望:
   - `r.json` 中该端点恰有 3 个 IP 行(1.1.1.1、1.1.1.2、1.1.1.3),每行 TCP 握手样本数 = 9,`min_rtt_us = 300`
-- 实现:`tools/az-probe/tests/test_run.py::tool_092_probes_all_a_records`
+- 实现:`tools/az-probe/tests/test_run.py::test_tool_092_probes_all_a_records`
 
 ### TOOL-093 az-probe 按 ip-ranges.json 标注端点属性
 
@@ -1428,7 +1428,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M1.5
 - 前置:替身 `ip-ranges.json`:`3.112.0.0/14` 为 `EC2`(ap-northeast-1),`13.32.0.0/15` 为 `CLOUDFRONT`;Cloudflare 网段表含 `104.16.0.0/13`
-- 实现:`tools/az-probe/tests/test_attribution.py::tool_093_endpoint_attribution`
+- 实现:`tools/az-probe/tests/test_attribution.py::test_tool_093_endpoint_attribution`
 
 | 行 | IP | 期望属性 |
 |---|---|---|
@@ -1447,7 +1447,7 @@ spec: README.md
   1. 运行 `az-probe run … --ws-first-frame`
 - 期望:
   - 首帧分布行 `clock = "unsynced"`,样本数 10;报告仍含全部 RTT 结果
-- 实现:`tools/az-probe/tests/test_run.py::tool_094_first_frame_unsynced`
+- 实现:`tools/az-probe/tests/test_run.py::test_tool_094_first_frame_unsynced`
 
 ### TOOL-095 不带 --ws-first-frame 时只做握手与 ping,不订阅任何流
 
@@ -1459,7 +1459,7 @@ spec: README.md
   1. 运行 `az-probe run --targets targets.toml --out r.json --duration 1m`
 - 期望:
   - 替身端点没有收到任何订阅帧;`r.json` 没有首帧分布行;进程没有读取任何 API key 文件或环境变量
-- 实现:`tools/az-probe/tests/test_run.py::tool_095_handshake_only`
+- 实现:`tools/az-probe/tests/test_run.py::test_tool_095_handshake_only`
 
 ### TOOL-096 az-probe 输出每 (AZ, CPG, 端点, IP) 的统计
 
@@ -1468,7 +1468,7 @@ spec: README.md
 - 里程碑:M1.5
 - 输入:替身 RTT 序列(2 个端点 × 2 个 IP × 9 个样本,AZ `apne1-az4`,CPG `cpg-a`)
 - 期望文件:`tools/az-probe/tests/fixtures/expected-run.json`(每行 `az`、`cpg`、`endpoint`、`ip`、`min_rtt_us`、`p50_us`、`p99_us`、`tls_handshake_us`、`n`)
-- 实现:`tools/az-probe/tests/test_run.py::tool_096_output_rows`
+- 实现:`tools/az-probe/tests/test_run.py::test_tool_096_output_rows`
 
 ### TOOL-097 compare 按 core 交易所握手 minRTT 之和升序排名
 
@@ -1480,7 +1480,7 @@ spec: README.md
   1. 运行 `az-probe compare report-*.json`
 - 期望:
   - 排名顺序恰为 (az4, cpg-z) 1990 µs、(az4, cpg-y) 2000 µs、(az1, cpg-x) 2400 µs;Gate 不计入和
-- 实现:`tools/az-probe/tests/test_compare.py::tool_097_ranking`
+- 实现:`tools/az-probe/tests/test_compare.py::test_tool_097_ranking`
 
 ### TOOL-098 首次 AZ 探测报告覆盖活跃时段并量化各 AZ 差异
 
@@ -1594,7 +1594,7 @@ spec: README.md
 | TOOL-105.2 | `spin-loop`(未登记的自旋线程) | `irq_cores_tasks` 含 (`1`, `spin-loop`);`verify` 退出 1 |
 | TOOL-105.3 | `hft-keepawake-1` 与 `hft-keepawake-1b` | 后者列入占用;`verify` 退出 1 |
 | TOOL-105.4 | 无任务,内核参数含 `cpuidle.off=1` | 输出列出 `cpuidle.off` 为未允许的保持唤醒手段;`verify` 退出 1 |
-| TOOL-105.5 | 无任务,`/dev/cpu_dma_latency` 被进程 `x` 持有 | 列出 `cpu_dma_latency` 持有者 `x`;`verify` 退出 1 |
+| TOOL-105.5 | 无任务,进程 `x` 经 `/dev/cpu_dma_latency` 持有 0 µs 约束(设备读出 0,低于默认值) | `keepawake_violations` 列出 `cpu_dma_latency=0`;`verify` 退出 1 |
 | TOOL-105.6 | 无任务,内核参数含 `nohlt` | 不列为占用;`verify` 退出 0 |
 
 ### TOOL-106 verify 对每个 required 项的不符退出 1 并逐行列出
@@ -1602,7 +1602,7 @@ spec: README.md
 - 规则:[hostprobe](README.md#hostprobe)
 - 级别:table
 - 里程碑:M1.5
-- 前置:期望剖面夹具 `upgrade-c32.toml`(由 deploy 生成器对 `test-c32` 生成,各项的 required/advisory 由它标定);夹具根初始与期望全部相符(`verify` 退出 0);每行只改一项
+- 前置:期望剖面夹具 `tools/hostprobe/tests/fixtures/upgrade-c32.toml`(测试清单 `test-c32` 的期望剖面,按 [hostprobe 期望剖面格式](README.md#hostprobe) 手写,各项的 required/advisory 按 [deploy HostProfile](../deploy/README.md#hostprofile) 标定;deploy 生成器落地(M3)后改为生成);夹具根初始与期望全部相符(`verify` 退出 0);每行只改一项
 - 实现:`tools/hostprobe/tests/verify.rs::tool_106_required_mismatch`
 
 | 行 | 改动 | 期望 |
@@ -1678,7 +1678,7 @@ spec: README.md
 |---|---|---|
 | TOOL-109.1 | 发布内 GRUB 片段与 `/proc/cmdline` 的参数一致 | `pending_reboot = false`;退出 0 |
 | TOOL-109.2 | GRUB 片段多一个 `idle=poll`,该参数不是 required 项 | `pending_reboot = true`;退出 0 |
-| TOOL-109.3 | GRUB 片段的 `isolcpus` 改为 `2-14`,cmdline 未变 | `pending_reboot = true`;退出 1(`cpu.isolated` 不符) |
+| TOOL-109.3 | GRUB 片段的 `isolcpus` 改为 `2-14`(期望剖面的 `cpu.isolated` 随之为 `2-14`,同一发布),cmdline 未变 | `pending_reboot = true`;退出 1(`cpu.isolated` 不符) |
 
 ### TOOL-110 verify 写出与 collect 相同的剖面并附 verify 段
 

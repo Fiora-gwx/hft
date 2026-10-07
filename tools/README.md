@@ -154,6 +154,8 @@ cargo xtask bench-gate [--crate <x>] [--path <p>] [--smoke | --reference] [--sys
 
 门槛、参考机、伸缩系数与回归阈值的规格在 [benchmarks/](../benchmarks/README.md);退出码(含 `--reference` 时已登记基准缺预算退出 1、`gate.kind = "report"` 的基准超预算不影响退出码只在 `verdict` 中标出)归 [benchmarks 使用本组件](../benchmarks/README.md#使用本组件)。每个已注册策略 crate 必须有 SDK 规定的基准入口([hft-strategy-sdk 延迟与资源契约](../crates/hft-strategy-sdk/README.md#延迟与资源契约)):`--smoke` 与 `--reference` 先核对每个 `strategies/<kind>/benches/` 都提供这些基准名,缺任一个 → 退出 1 并列出缺的名字。`--smoke`:CI 托管 runner 上以 `ci` 剖面构建(不用 `bench`/`release-hot`,剖面归 [development 构建剖面](../docs/development.md#构建剖面))并只报告数字,从不阻断;`--reference`:在按需租用的参考机上(同型实例,从 M1.5 起每个里程碑结束时;租用与时机归 [development 参考机](../docs/development.md#参考机))运行正式版附带的基准制品,按回归阈值与单 crate 上限阻断。`--reference` 先调用 `hostprobe verify --expected benchmarks/reference.toml`,不符退出 2。`--syscall-audit`:在 mock 回环运行期间启动 bpftrace,挂 `tracepoint:raw_syscalls:sys_enter`,按 `comm`(线程名)与系统调用号计数,结束后与 [hot-path-rules T7](../docs/hot-path-rules.md) 的允许表比对;需要 root 或 `CAP_BPF`+`CAP_PERFMON`,只在参考机上运行。不用 strace(ptrace 改变被测时序)。
 
+实现口径:`--smoke` 对每个带 `benches/` 的 workspace 成员先 `cargo bench --profile ci --all-features --no-run -p <x> --bench '*'`(构建失败报告该目录、继续其余包,结果退出 1),再以短跑参数运行;`--reference` 用 `--bench-dir <dir>`(基准制品中的可执行文件)运行,缺省时 `cargo bench --profile bench`(只供本地排查)。结果取自基准在 stdout 输出的 `hft-bench: {json}` 行(HistBench),Criterion 基准取本次运行写出的 `<target>/criterion/**/new/{benchmark,sample}.json`(按样本均值求分位);每个基准写 `target/bench/<path>/<case>.json`(单 crate 基准的 `<path>` = 包名、`<case>` = 基准名),汇总写 `target/xtask/bench-gate.json`。`budgets.toml` 表在 [doc-check 预算口径](#cargo-xtask-doc-check) 之外另可写 `gate = "absolute" | "report"`(缺省:有数值即 `absolute`)与 `allocs = 0`(预热后分配必须为 0);表在而无数值视为没有预算。路径基准的预算在 `benchmarks/budgets.toml`,`benchmarks/reference.toml` 写 `path_absolute = true` 之前只报告。基线为 `--baseline-dir`(缺省 `target/bench-baseline/`)下 `<host_profile_hash>/<基准名>.jsonl` 的通过记录,哈希取 `hostprobe verify` 写出的 `target/bench/hostprofile.json`;与 S3 `hft-bench/` 前缀的同步由参考机 runbook 完成。`--syscall-audit` 读 `benchmarks/syscall-audit.toml`(`run` = 被测运行的命令行数组,`threads` = 该运行的 `[[threads]]` 文件),以 `bpftrace -e … -c <run>` 计数,线程角色按 `tasks`(`sequencer`、`gw:*`、`feed*`;其余为 warm,不审计),非 `Spin` 线程另允许 park 边界的 `futex`/`epoll_wait`/`epoll_pwait`/`write`;单独给 `--syscall-audit` 时只做审计(仍先核对主机剖面)。
+
 ### cargo xtask replay-verify
 
 ```sh
@@ -294,7 +296,7 @@ hostprobe osnoise --cpus <hot> --duration 24h      # 主机基线与调优 A/B
 | 类别 | 项 | 来源 |
 |---|---|---|
 | 实例 | 实例类型、AZ ID、放置组、AMI | IMDSv2(以 root 运行;IMDS 锁定的主机上非 root 读不到,该项标 `unreadable`) |
-| 内核 | 版本、`/proc/cmdline`(`isolcpus`、`nohz_full`、`rcu_nocbs`、`idle=`、`irqaffinity`、`mitigations`、`nosmt`) | `uname`、`/proc/cmdline` |
+| 内核 | 版本、`/proc/cmdline`(`isolcpus`、`nohz_full`、`rcu_nocbs`、`idle=`、`irqaffinity`、`mitigations`、`nosmt`) | `/proc/sys/kernel/osrelease`(即 `uname -r`)、`/proc/cmdline` |
 | CPU | 型号、特性标志(与发布 `target-cpu` 要求比对)、隔离集合、`nohz_full` 集合、SMT 状态、cpuidle 驱动、时钟源 | `/proc/cpuinfo`、`/sys/devices/system/cpu/{isolated,nohz_full,smt/active}`、`/sys/devices/system/clocksource/*/current_clocksource` |
 | 内存 | 各尺寸 hugepages 总数/空闲、THP 模式、`numa_balancing`、swap、`vm.*` 关键 sysctl、KSM | `/sys/kernel/mm/hugepages/*`、`/sys/kernel/mm/transparent_hugepage/enabled`、`/proc/sys/vm/*`、`/proc/swaps` |
 | 网卡 | 网卡角色(ENI-A 管理、ENI-B 交易、ENI-C sim、启用时的 ENI-B2):按主机清单的设备序号(`device_index`,字段归 deploy)经 IMDS 识别网卡,得出接口名与私有 IP;MAC 只在运行期核对(IMDS 读出的 MAC 与接口的 `address` 一致,写进输出,`advisory`)、ENA 驱动版本、队列数、RSS 设置、合并参数(含 `adaptive-rx`、`rx-usecs`)、卸载、环大小、ntuple 规则、每个 TX 队列的 XPS 掩码、硬件时间戳能力、PHC 设备、ENA 整形计数(`*_allowance_exceeded`,采集时刻的快照;持续采集归 watchtower)、`/etc/hft/egress.toml` 中每个出口地址是否配在清单指定的网卡上并关联 EIP | IMDSv2(按设备序号;EIP 关联读 `network/interfaces/macs/<mac>/ipv4-associations/`)、`ethtool -i/-l/-x/-c/-k/-g/-n/-T/-S`(经 ioctl 读取)、`/dev/ptp*`、`/sys/class/net/*/address`、`/sys/class/net/<if>/queues/tx-*/xps_cpus` |
@@ -303,15 +305,17 @@ hostprobe osnoise --cpus <hot> --duration 24h      # 主机基线与调优 A/B
 | 内核线程 | workqueue cpumask、`timer_migration`、`stat_interval` | `/sys/devices/virtual/workqueue/cpumask`、`/proc/sys/kernel/*`、`/proc/sys/vm/stat_interval` |
 | resctrl | 是否挂载、L3 CAT 与 MBA 可用性、CLOS 数、热核组的 schemata | `/sys/fs/resctrl/info/*`、`/sys/fs/resctrl/<group>/schemata` |
 | 时钟 | chrony 参考源、偏移、误差界;chrony 是否以 PHC 为 refclock 及其读取频率,与 hft-core 校准的 PHC 读取频率之和对照 ENA PHC 的读取上限(上限与 hft-core 的读取口径归 [hft-rt](../crates/hft-rt/README.md)) | `chronyc -c tracking`、`chronyc -c sources`、chrony 配置的 `refclock` 行 |
-| 占用 | 隔离核与 IRQ 专用核上除预期线程外的可运行任务(登记的 keepawake 线程算预期线程,见下) | `/proc/*/stat` 的 `processor` 字段 |
+| 占用 | 隔离核与 IRQ 专用核上除预期线程外的可运行任务(登记的 keepawake 线程算预期线程,内核线程不计,见下);不允许的保持唤醒手段 | `/proc/*/task/*/stat` 的 `state`、`flags` 与 `processor` 字段;`/proc/cmdline`、cpuidle 驱动、`/dev/cpu_dma_latency` 的读出值 |
 | 资源护栏 | `hft.slice`、根级 `hftbatch.slice` 与各子 slice 的 `CPUQuota`(设了的)、`CPUWeight`(含 `cpu.idle`)、`AllowedCPUs`、`MemoryMax`、`MemorySwapMax`、`IOReadBandwidthMax`/`IOWriteBandwidthMax` 实际值;`cgroup.subtree_control`;`system.slice` 的 `cpu.pressure`/`memory.pressure`;dev2 护栏守护 `hft-dev2-guard.service` 是否 active | `/sys/fs/cgroup/{hft.slice,hftbatch.slice}/**`、`/sys/fs/cgroup/cgroup.subtree_control`、`/sys/fs/cgroup/system.slice/*.pressure`、systemd |
 | IMDS 锁定 | 根 cgroup 的 `connect4`/`connect6` 上挂载的 BPF 程序(名字与 id;dev2 以外的主机类);`imds/hft-imds-dev2.nft` 定义的表与规则是否已加载(dev2);机制与期望归 [deploy](../deploy/README.md#imds-锁定与凭证代理) | `bpf(BPF_PROG_QUERY)`(根 cgroup)与 `/sys/fs/bpf/hft-imds/`;nftables netlink 查询 |
 
 - **不做连接级检查**:某条连接落在哪块网卡(NAPI 归属)由 conn-builder 在交接前经 netdev netlink 自检([hft-net](../crates/hft-net/README.md) `Connector::napi_ifindex`,规则与处置归 [hft-core 主机资源隔离](../apps/hft-core/README.md#主机资源隔离slice核与出口-ip));hostprobe 在 hft-core 建连之前运行,读不到其他进程的 socket。
-- **IRQ 专用核"保持唤醒"的允许形式**(本节是唯一登记处;[hot-path-rules T12](../docs/hot-path-rules.md) 与 [hft-rt `TASK_ON_HOT`](../crates/hft-rt/README.md) 链接这里):只有两种——内核参数 `nohlt`(arm64 上是否支持、能否改变 WFI:待核实(方法:M1.5 探针上对比 IRQ 核的 cpuidle 状态计数与 `nic_to_kernel`)),或期望剖面里按线程名登记的 keepawake 线程(每个 IRQ 专用核至多一条,不做 I/O;线程名、单元与是否启用归 [deploy](../deploy/README.md))。hostprobe 把登记的 keepawake 线程算作预期线程;其他手段(`cpuidle.off`、haltpoll、`/dev/cpu_dma_latency`、未登记的自旋线程)都按"占用"报告。是否保持唤醒由 M1.5 的 A/B 决定([11 §3](../design/11-实施路线图.md))。
+- **IRQ 专用核"保持唤醒"的允许形式**(本节是唯一登记处;[hot-path-rules T12](../docs/hot-path-rules.md) 与 [hft-rt `TASK_ON_HOT`](../crates/hft-rt/README.md) 链接这里):只有两种——内核参数 `nohlt`(arm64 上是否支持、能否改变 WFI:待核实(方法:M1.5 探针上对比 IRQ 核的 cpuidle 状态计数与 `nic_to_kernel`)),或期望剖面里按线程名登记的 keepawake 线程(每个 IRQ 专用核至多一条,不做 I/O;线程名、单元与是否启用归 [deploy](../deploy/README.md))。hostprobe 把登记的 keepawake 线程算作预期线程;其他手段(`cpuidle.off`、haltpoll、`/dev/cpu_dma_latency` 的生效值低于默认值——有进程持有约束、未登记的自旋线程)都按"占用"报告(`occupancy.keepawake_violations`;hostprobe 不读 `/proc/*/fd`,所以报告生效值而不是持有者)。是否保持唤醒由 M1.5 的 A/B 决定([11 §3](../design/11-实施路线图.md))。
 - 输出是规范化 JSON(键排序),附内容的 SHA-256(`host_profile_hash`);另含 `pending_reboot`(发布内 GRUB 片段的参数与当前 `/proc/cmdline` 不同时为 `true`,判定条件归 deploy)。读不到的项写 `unreadable`(附原因),不省略。**本节是采集项清单与输出格式的归属地**;哪些项是 `required`、期望值是什么由 [deploy](../deploy/README.md) 生成(收包模型的四项参数——`busy_poll`、`busy_read`、ENI-B 的 `napi_defer_hard_irqs` 与 `gro_flush_timeout`——与 ENI-B/ENI-A 的 IRQ 落点在升级主机类上是 hard 比较项,规则归 [hft-net](../crates/hft-net/README.md) 与 hft-core)。
 - hft-core 启动时读取该文件,自己与 `[host.expect]` 逐项比较(比较项与不符时的退出码归 [hft-core](../apps/hft-core/README.md)),把摘要与比较结果位写成 `HostProfile` 事件,把 JSON 完整内容写成 `ConfigBlob{HostManifest}`——journal 因此自足([13 R6](../design/13-设计评审与优化.md))。
 - `verify`:给没有 hft-core 的场合用——部署激活检查、参考机(`bench-gate --reference`)、探针机。先照 `collect` 写出 `--out`,再逐项与期望剖面比较:每个不符项向 stderr 打印一行 `<键> expected=<期望> actual=<实际> required|advisory`,并写进输出 JSON 的 `verify` 段;退出 0 = 全部 `required` 项相符(`advisory` 不符只列出);1 = 任一 `required` 项不符或为 `unreadable`;2 = 期望剖面缺失或无法解析、`--out` 不可写。`pending_reboot` 不单独影响退出码。期望剖面随发布归档([deploy/](../deploy/README.md))。
+- **期望剖面的格式**(`verify --expected` 读取;取值由 deploy 生成,本节只定格式):TOML,`[[expect]]` 每项 `key`(输出 JSON 的点分键,对象键本身可含点,如 `guard.slices.hftbatch.slice.cpu_idle`;`[*]` 展开数组)、恰好一个比较符(`eq = <值>`、`lt`、`le`(可带 `add`:实际值加它再比,用于"chrony 与 hft-core 合计的 PHC 读取频率")、`contains_cpus`、`disjoint_cpus`(CPU 列表)、`empty = true`、`present = true`)与 `level = "required" | "advisory"`;可选 `grub`(发布内 GRUB 片段的路径,相对本文件)、`[roles]`(网卡角色 → 设备序号,缺省 `eni_a = 0`、`eni_b = 1`、`eni_c = 2`、`eni_b2 = 3`)、`[occupancy]`(`irq_cpus` IRQ 专用核,缺省为 ENI-B IRQ 实际所在核;`keepawake` 登记的线程名);其他顶层键忽略(`benchmarks/reference.toml` 另记 `host_class`、`path_absolute`)。`collect` 经 `/etc/hft/host-local.toml` 的 `manifest` 读 `/opt/hft/current-core/deploy/tuning/<清单名>.toml` 取同样的输入,没有时用缺省值。
+- `--root <dir>` 以夹具根目录代替 `/`(unit/table 用例在任意平台运行;非文件的来源——IMDS、`chronyc`/`rtla` 输出、ioctl、BPF 与 netlink 查询、`getifaddrs`——的替身放在 `<dir>/.hostprobe/`,布局见 `tools/hostprobe/src/host.rs`);读真实主机只在 Linux 上。
 - `osnoise`:包装 `rtla osnoise`/`timerlat`,输出隔离核的 max 与 p99.9;升级主机类(`c16`/`c32`)与参考机的验收:max < 20 µs,p99.9 < 5 µs([02 §6](../design/02-硬件与托管方案.md))。
 
 ### hft-secrets
@@ -564,7 +568,7 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 ## 依赖
 
 - xtask:`cargo_metadata`、`syn`(`full`、`visit`)与 `proc-macro2`(`span-locations`,hot-check 的行号)、`serde`、`toml`、`serde_json`、`walkdir`、`regex`、`pulldown-cmark`、`sha2`(fixtures 与回放指针的哈希);内部链接 `hft-event` 与 `hft-refdata`(`gen-schema` 读它们的 schema 导出)、`hft-journal`(`journal-verify`,不启用 `writer`;其测试以 dev 依赖启用 `writer` 与 `mem-backend` 写夹具 journal),`deps.toml` 另允许 `hft-testkit`(`dst` 运行器,[hft-testkit](../crates/hft-testkit/README.md#依赖));调用 `cargo`、`cargo-deny`、`cargo-fuzz`、`bpftrace`、`gh`(只在 `decoupling-gate`)、已构建的 `hft-core`(外部二进制)。
-- hostprobe:`libc`、`serde`;禁止依赖任何 hot crate(它读主机,不读交易)。
+- hostprobe:`libc`、`serde_json`、`toml`、`sha2`;禁止依赖任何 hot crate(它读主机,不读交易)。`unsafe` 只在 `src/sys.rs`(ioctl、`bpf`、netlink、`getifaddrs`),每处带 `// SAFETY:`。
 - az-probe:Python 标准库 + `websockets`;不依赖 hft crate。
 - hft-cfg:见实现说明表;外部 `toml`、`serde_json`(读 schema JSON)、`reqwest`(仅 `refdata fetch`)。禁止依赖 `strategies/*` 与 `hft-strategy-registry`。
 - hft-secrets:`aws-sdk-secretsmanager`、`aws-sdk-kms`、`tokio`、`toml`;不被任何 crate 依赖(只以二进制在 `ExecStartPre` 调用)。
@@ -580,10 +584,12 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 ## 已知限制与后续工作
 
 - hostprobe 只读当前状态,不修改;调优的施加在 [deploy/](../deploy/README.md) 的 oneshot 单元里。
+- hostprobe 的 `osnoise` 只包装 `rtla osnoise hist`(`timerlat` 尚未包装);nftables 只列出已加载的表(dev2 的"表含两条规则"在 M3 随 dev2 剖面补上);ntuple 规则数在 ENA 上报 `unsupported`。
+- bench-gate 的 Criterion 结果按样本均值求分位(不是逐次迭代),逐次分位要等 HistBench(hft-testkit)落地;发布工作流的基准制品目前只打包 `hft-benchmarks` 的基准,单 crate 基准的参考机运行先用 `cargo bench --profile bench`(参考机上编译)或在制品中补打包。
 - az-probe 的首帧单向分布依赖 PHC;探针实例若无 PHC,只能给 RTT 结论。
 - `doc-check` 的分段名与策略族名检查只能匹配名单内的写法,自然语言里的错误用法靠评审。
 - hft-cfg 不跑策略的跨字段 `validate`(它不链接策略代码);离线发现跨字段错误要靠 `send` 的预览或 CI 里对 `fixtures/params/*` 的 gateway 级测试。
-- xtask 尚未实现(随各自的里程碑加入):`scaffold-gate`、`new-strategy`、`bench-gate`、`dst`、`fuzz`、`path-digest`(未知子命令,退出 2);`fixtures fetch/extract/corpus/bbo-diff` 退出 2;`replay-verify` 只做输入核对(指针缓存的 SHA-256、目录存在),`apps/replayer` 不在 workspace 时退出 2;`gen-host` 只做输入核对(`--host` 的清单存在),`deploy/gen/` 与 hft-core 主机类档不在仓库时退出 2。
+- xtask 尚未实现(随各自的里程碑加入):`scaffold-gate`、`new-strategy`、`dst`、`fuzz`、`path-digest`(未知子命令,退出 2);`fixtures fetch/extract/corpus/bbo-diff` 退出 2;`replay-verify` 只做输入核对(指针缓存的 SHA-256、目录存在),`apps/replayer` 不在 workspace 时退出 2;`gen-host` 只做输入核对(`--host` 的清单存在),`deploy/gen/` 与 hft-core 主机类档不在仓库时退出 2。
 - hot-check 尚未覆盖 [hot-path-rules](../docs/hot-path-rules.md) 中写给 hot-check 而本节检查表未列的项:T5 warm 开关默认值、T7 rustls 握手/`connect` 与 REST 快照调用点只在 `conn-builder`/`snap-fetch` 模块、M6 含枚举字段的事件体 derive `FromBytes`(相关 crate 进入 workspace 时随表加入)。
 - hft-cfg 尚未接入:`build --kind risk`(hft-risk 构建器)、`refdata fetch`、`send`(hft-ctl-proto 帧)、从 journal 目录读取生效 blob(`--against`/`--refdata` 给目录)与 core `venue-*` 的 `default_caps()`(能力行的底取 `[caps.<venue>]`);前四项当前退出 2。
 - hft-verify 的吞吐受服务器空闲 CPU 限制(批处理所在 slice 为 `CPUWeight=idle`,dev2 上的吞吐随旧系统负载变化;达成时间估算见 testing §6.1);它不并行,也不在主机间协调——同时有两台主机运行时靠种子编码与按完成时刻折叠保证结果正确,不靠锁。

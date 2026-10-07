@@ -12,6 +12,7 @@ members = [
     "crates/hft-testkit",
     "tools/xtask",
     "tools/hft-cfg",
+    "tools/hostprobe",
 ]
 
 [workspace.package]

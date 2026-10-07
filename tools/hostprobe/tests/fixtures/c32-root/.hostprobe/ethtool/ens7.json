@@ -1,0 +1,36 @@
+{
+  "allowance_exceeded": {
+    "bw_in": 0,
+    "bw_out": 0,
+    "conntrack": 0,
+    "linklocal": 0,
+    "pps": 0
+  },
+  "coalesce": {
+    "adaptive_rx": false,
+    "adaptive_tx": false,
+    "rx_usecs": 0,
+    "tx_usecs": 0
+  },
+  "driver": "ena",
+  "driver_version": "2.13.0g",
+  "hw_rx_timestamp": true,
+  "max_queues": 32,
+  "ntuple_rules": "unsupported",
+  "offload": {
+    "gro": false,
+    "gso": false,
+    "lro": false,
+    "sg": false,
+    "tso": false
+  },
+  "phc_index": 0,
+  "queues": 1,
+  "ring": {
+    "rx": 4096,
+    "rx_max": 16384,
+    "tx": 1024,
+    "tx_max": 1024
+  },
+  "rss_indir_size": 128
+}

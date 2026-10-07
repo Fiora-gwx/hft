@@ -1,0 +1,48 @@
+{
+  "rows": [
+    {
+      "az": "apne1-az4",
+      "cpg": "cpg-a",
+      "endpoint": "binance-fstream",
+      "ip": "1.1.1.1",
+      "min_rtt_us": 300.0,
+      "n": 9,
+      "p50_us": 315.0,
+      "p99_us": 400.0,
+      "tls_handshake_us": 2500.0
+    },
+    {
+      "az": "apne1-az4",
+      "cpg": "cpg-a",
+      "endpoint": "binance-fstream",
+      "ip": "1.1.1.2",
+      "min_rtt_us": 1290.0,
+      "n": 9,
+      "p50_us": 1301.0,
+      "p99_us": 1500.0,
+      "tls_handshake_us": 2500.0
+    },
+    {
+      "az": "apne1-az4",
+      "cpg": "cpg-a",
+      "endpoint": "okx-ws",
+      "ip": "2.2.2.1",
+      "min_rtt_us": 880.0,
+      "n": 9,
+      "p50_us": 884.0,
+      "p99_us": 2000.0,
+      "tls_handshake_us": 2500.0
+    },
+    {
+      "az": "apne1-az4",
+      "cpg": "cpg-a",
+      "endpoint": "okx-ws",
+      "ip": "2.2.2.2",
+      "min_rtt_us": 700.1,
+      "n": 9,
+      "p50_us": 700.5,
+      "p99_us": 700.9,
+      "tls_handshake_us": 2500.0
+    }
+  ]
+}

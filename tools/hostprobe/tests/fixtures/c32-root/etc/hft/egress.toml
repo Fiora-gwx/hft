@@ -1,0 +1,2 @@
+prod = [{ eni = "b", ip = "10.0.1.10", eip_alloc = "eipalloc-0b" }]
+sim = [{ eni = "c", ip = "10.0.1.20", eip_alloc = "eipalloc-0c" }]

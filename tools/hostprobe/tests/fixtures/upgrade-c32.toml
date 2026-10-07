@@ -1,0 +1,244 @@
+# Expected HostProfile of the test manifest `test-c32` (upgrade host class c32), in the format read by
+# `hostprobe verify` (tools/README.md "hostprobe"). Stands in for the deploy generator's output
+# (deploy/README.md "HostProfile" decides which items are required); used by TOOL-105–TOOL-110.
+manifest = "test-c32"
+class = "c32"
+grub = "grub/50-hft.cfg"
+
+[roles]
+eni_a = 0
+eni_b = 1
+eni_c = 2
+eni_b2 = 3
+
+[occupancy]
+irq_cpus = "1"
+keepawake = ["hft-keepawake-1"]
+
+[[expect]]
+key = "cpu.isolated"
+eq = "2-15"
+level = "required"
+
+[[expect]]
+key = "cmdline.nohz_full"
+eq = "2"
+level = "required"
+
+[[expect]]
+key = "cmdline.rcu_nocbs"
+contains_cpus = "1-15"
+level = "required"
+
+[[expect]]
+key = "memory.hugepages.2048kB.total"
+eq = 1024
+level = "required"
+
+[[expect]]
+key = "memory.hugepages.1048576kB.total"
+eq = 4
+level = "required"
+
+[[expect]]
+key = "memory.thp"
+eq = "madvise"
+level = "required"
+
+[[expect]]
+key = "nic.eni_b.device_index"
+eq = 1
+level = "required"
+
+[[expect]]
+key = "nic.eni_b.present"
+eq = true
+level = "required"
+
+[[expect]]
+key = "nic.eni_b.driver_version"
+eq = "2.13.0g"
+level = "required"
+
+[[expect]]
+key = "nic.eni_b.coalesce"
+eq = { adaptive_rx = false, adaptive_tx = false, rx_usecs = 0, tx_usecs = 0 }
+level = "required"
+
+[[expect]]
+key = "nic.eni_b.offload"
+eq = { gro = false, lro = false, tso = false, gso = false, sg = false }
+level = "required"
+
+[[expect]]
+key = "nic.eni_b.mac_match"
+eq = true
+level = "advisory"
+
+[[expect]]
+key = "nic.eni_c.present"
+eq = true
+level = "required"
+
+[[expect]]
+key = "nic.eni_c.driver_version"
+eq = "2.13.0g"
+level = "required"
+
+[[expect]]
+key = "net.core.busy_poll"
+eq = 0
+level = "required"
+
+[[expect]]
+key = "net.core.busy_read"
+eq = 0
+level = "required"
+
+[[expect]]
+key = "nic.eni_b.napi_defer_hard_irqs"
+eq = 0
+level = "required"
+
+[[expect]]
+key = "nic.eni_b.gro_flush_timeout"
+eq = 0
+level = "required"
+
+[[expect]]
+key = "irq.eni_b[*].effective_affinity_list"
+eq = "1"
+level = "required"
+
+[[expect]]
+key = "irq.eni_a[*].effective_affinity_list"
+eq = "0"
+level = "required"
+
+[[expect]]
+key = "irq.eni_c[*].effective_affinity_list"
+eq = "16"
+level = "required"
+
+[[expect]]
+key = "irq.managed[*].effective_affinity_list"
+disjoint_cpus = "1"
+level = "required"
+
+[[expect]]
+key = "irq.irqbalance_active"
+eq = false
+level = "required"
+
+[[expect]]
+key = "occupancy.irq_cores_tasks"
+empty = true
+level = "required"
+
+[[expect]]
+key = "occupancy.keepawake_violations"
+empty = true
+level = "required"
+
+[[expect]]
+key = "nic.eni_b.xps.tx-0"
+eq = "2"
+level = "required"
+
+[[expect]]
+key = "nic.eni_b.xps.tx-1"
+eq = "3"
+level = "required"
+
+[[expect]]
+key = "nic.eni_b.xps.tx-2"
+eq = "4"
+level = "required"
+
+[[expect]]
+key = "nic.eni_b.xps.tx-3"
+eq = "5"
+level = "required"
+
+[[expect]]
+key = "nic.eni_b.xps.tx-4"
+eq = "6"
+level = "required"
+
+[[expect]]
+key = "nic.eni_b.xps.tx-5"
+eq = "7"
+level = "required"
+
+[[expect]]
+key = "nic.eni_b.xps.tx-6"
+eq = "8"
+level = "required"
+
+[[expect]]
+key = "nic.eni_b.xps.tx-7"
+eq = "9"
+level = "required"
+
+[[expect]]
+key = "clock.chrony.leap"
+eq = "Normal"
+level = "required"
+
+[[expect]]
+key = "clock.chrony.max_error_ns"
+lt = 40000
+level = "required"
+
+# PHC reads: chrony's rate + hft-core's calibration rate (124/s here) <= the ENA PHC limit (hft-rt;
+# 125/s in this fixture).
+[[expect]]
+key = "clock.chrony.refclock_phc_poll_hz"
+le = 125
+add = 124
+level = "required"
+
+[[expect]]
+key = "guard.slices.hft-sim.slice.allowed_cpus"
+disjoint_cpus = "1-15"
+level = "required"
+
+[[expect]]
+key = "nic.egress[*].on_nic"
+eq = true
+level = "required"
+
+[[expect]]
+key = "nic.egress[*].eip"
+present = true
+level = "required"
+
+[[expect]]
+key = "imds.bpf.connect4"
+eq = ["hft_imds4"]
+level = "required"
+
+[[expect]]
+key = "imds.bpf.connect6"
+eq = ["hft_imds6"]
+level = "required"
+
+[[expect]]
+key = "net.nf_conntrack_loaded"
+eq = false
+level = "required"
+
+[[expect]]
+key = "guard.slices.hftbatch.slice.parent"
+eq = "/"
+level = "required"
+
+[[expect]]
+key = "guard.slices.hftbatch.slice.cpu_idle"
+eq = 1
+level = "required"
+
+[[expect]]
+key = "resctrl.mounted"
+eq = false
+level = "advisory"
