@@ -1,0 +1,32 @@
+[package]
+name = "hft-venue-proto"
+description = "VenueProtocol trait and the pure types in its signatures (M1.5 part: RxMeta, the market-data decode surface, MdSink and the testkit contract-3 check)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+# tests/fake_venue.rs is a shared fixture module (TESTS.md "夹具"), not a test target.
+autotests = false
+
+[lints]
+workspace = true
+
+[features]
+# VecSink and the contract checks (README "实现说明"); only venue crates' tests/ and fuzz/ enable it.
+testkit = []
+
+[dependencies]
+hft-types.workspace = true
+hft-refdata.workspace = true
+hft-event.workspace = true
+
+[dev-dependencies]
+zerocopy.workspace = true
+
+[[test]]
+name = "layout"
+
+[[test]]
+name = "contract_md"
+required-features = ["testkit"]

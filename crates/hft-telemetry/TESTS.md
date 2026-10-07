@@ -233,7 +233,7 @@ spec: README.md
 - 里程碑:M1.5
 - 前置:只有 a;一条落在 a 之后的标准样本;随后 journal 结束(进程退出)
 - 步骤:
-  1. 喂入后调用 `day_close`
+  1. 喂入后调用 `finish()`(journal 结束),再调用 `day_close`
 - 期望:
   - 该样本在 b 到达前不出数;结束时计入 `unsynced_cal`,不进任何含 PHC 端点的分位数
 - 实现:`crates/hft-telemetry/tests/clock.rs::tel_014_missing_next_clockstatus`

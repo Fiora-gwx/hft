@@ -1,0 +1,38 @@
+[package]
+name = "hft-telemetry"
+description = "Cold-side observability: latency stages with interpolated clock conversion and per-sample error bounds, dimensioned histograms and counters, event-weighted offline statistics with burst/calm strata and kernel_rx bounds (M1.5 part)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+hft-types.workspace = true
+hft-event.workspace = true
+hft-refdata.workspace = true
+# Reader only (no `writer` feature; crates/AGENTS.md rule 8).
+hft-journal.workspace = true
+zerocopy.workspace = true
+# 7.x without the serialization/sync features (README "依赖").
+hdrhistogram = { version = "7.5", default-features = false }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# Fixture journals are written with hft-journal's writer on the heap backend.
+hft-journal = { workspace = true, features = ["writer", "mem-backend"] }
+hft-rt.workspace = true
+proptest.workspace = true
+criterion.workspace = true
+serde_json = "1"
+# Not `workspace = true`: the workspace entry enables `asm` (needs a C toolchain for the target).
+sha2 = "0.10"
+# TEL-081 runs `cargo xtask deps` on a fixture workspace through the xtask library.
+xtask = { path = "../../tools/xtask" }
+
+[[bench]]
+name = "telemetry"
+harness = false

@@ -177,6 +177,9 @@ deps = [
 [pkg."crates/hft-telemetry"]
 tier = "cold"
 deps = ["crates/hft-types", "crates/hft-event", "crates/hft-refdata", "crates/hft-journal", "crates/hft-ledger"]
+# Tests write fixture journals with hft-journal's writer (rings from hft-rt); TEL-081 runs the deps check
+# through the xtask library.
+dev = ["crates/hft-rt", "tools/xtask"]
 
 [pkg."crates/hft-sim"]
 tier = "warm"

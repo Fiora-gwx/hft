@@ -10,7 +10,7 @@ publish.workspace = true
 [lints]
 workspace = true
 
-# M1 part (README "已知限制与后续工作"): golden runner, SDK stubs, DST and hft-dst arrive with
+# M1/M1.5 part (README "已知限制与后续工作"): golden runner, SDK stubs, DST and hft-dst arrive with
 # their milestones together with the README dependencies they need.
 [dependencies]
 hft-types.workspace = true
@@ -19,3 +19,5 @@ hft-rt.workspace = true
 zerocopy.workspace = true
 proptest.workspace = true
 xxhash-rust.workspace = true
+# HistBench histogram (README "9. 分配计数与基准驱动"); 7.x without serialization/sync features.
+hdrhistogram = { version = "7.5", default-features = false }

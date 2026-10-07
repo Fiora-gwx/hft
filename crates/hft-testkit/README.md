@@ -258,6 +258,11 @@ pub struct AllocScope { /* … */ }
 impl AllocScope { pub fn allocs(&self) -> u64; }               // 本线程自 scope() 以来的分配次数;其他线程的分配不计入
 /// Criterion 之外的直方图基准驱动(HistBench):每次迭代前后各读一次 TSC,记进预分配的 hdrhistogram,同时以 CountingAlloc 计分配。
 pub struct HistBench { /* name、迭代与热身次数、是否冒烟模式 */ }
+impl HistBench { pub fn smoke(name: &str) -> HistBench;                       // 热身 1 000、迭代 10 000、不绑核
+                 pub fn reference(name: &str, cpu: u16, iters: u64) -> HistBench; // 热身 100 000、绑到 cpu
+                 pub fn run(&self, f: impl FnMut()) -> Result<BenchOutput, String>; } // 闭包共调用 warmup + iters 次
+/// n、warmup、p50/p90/p99/p99.9/max(ns)、allocs_after_warmup(热身后本线程的分配次数)、pinned、直方图本身。
+pub struct BenchOutput { /* … */ }
 ```
 
 ## 实现说明
@@ -333,6 +338,7 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 | [`hft-venue-proto`](../hft-venue-proto/README.md)、[`hft-event`](../hft-event/README.md)、[`hft-refdata`](../hft-refdata/README.md)、[`hft-rt`](../hft-rt/README.md) | 类型与 trait |
 | [`hft-chain-evm`](../hft-chain-evm/README.md) | 仅 `chain` feature(可选扩展) |
 | `proptest`、`proptest-state-machine`、`rand_chacha`、`xxhash-rust` | 生成、状态机测试、随机、哈希 |
+| `hdrhistogram`(7.x,不开序列化与 sync 特性) | `HistBench` 的直方图 |
 
 只允许出现在 `[dev-dependencies]`、`tools/xtask` 与本 crate 自己的 `hft-dst` 二进制(只进验证包,不进生产归档);任何非 dev 依赖它的 crate 由 `cargo xtask ci` 拒绝([crates/AGENTS.md](../AGENTS.md))。**禁止**依赖 [hft-strategy-registry](../../strategies/registry/README.md) 与任何 `strategies/*`:两个测试策略在本 crate 内;`strategies/registry` 与 `apps/hft-core` 以 dev 依赖使用本 crate 跑生产策略的集成测试(方向单一,无依赖环)。
 

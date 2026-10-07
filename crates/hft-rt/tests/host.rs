@@ -7,12 +7,13 @@
 )] // allow-list: test code, not a hot path
 #![cfg(not(loom))]
 
+// Explicit path: `tests/host/` holds the host-level scripts (TESTS.md `实现` of RT-029/140/144),
+// which would otherwise make rustfmt look for `tests/host/common/fixture.rs`.
 #[allow(dead_code)]
-mod common {
-    pub mod fixture;
-}
+#[path = "common/fixture.rs"]
+mod fixture;
 
-use common::fixture::*;
+use fixture::*;
 use hft_rt::{HostCheck, HostClass, HostNeeds, SysRoot, check_host};
 
 const COMMON_MASK: u64 = (1 << 14) - 1;

@@ -36,7 +36,9 @@ status: spec
 pub struct Telemetry { /* 见实现说明 */ }
 impl Telemetry {
     pub fn new(cfg: &TelemetryConfig, rd: &RefData, cat: &StrategyCatalog) -> Telemetry;
-    pub fn ingest(&mut self, hdr: &RecordHeader, body: &[u8]);        // 任意 seq/raw journal 记录(链上 journal 为可选扩展)
+    pub fn ingest(&mut self, hdr: &RecordHeader, body: &[u8]);        // 任意 seq/raw journal 记录(多段记录传重组后的逻辑体;链上 journal 为可选扩展)
+    pub fn finish(&mut self);                                          // journal 结束:仍在等下一条 ClockStatus 的样本按"缺少后一条"计算(计入 unsynced_cal)
+    pub fn cal_queue(&self) -> &CalQueue;                              // 校准队列(≤ 4 条)
     pub fn window(&mut self, now_utc_ns: i64) -> Option<WindowReport>; // 每 window_s 滚动一次
     pub fn day_close(&mut self, day: u32) -> DailyClose;               // UTC 日切:账户报告 + 策略报告;day = 自 1970-01-01 起的 UTC 日序号
     pub fn stages(s: &LatencySample, cal: &ClockCal) -> StageSet;      // 纯函数:时间点 → 分段(含逐样本误差界)
@@ -50,6 +52,7 @@ pub struct StageSet { /* 每个分段:Option<i64 ns>;err_bound_ns: u32;cal_ok: b
 pub struct WindowReport {
     pub start_ns: i64, pub end_ns: i64,
     pub hist: Vec<(HistKey, Quantiles)>,     // p50/p90/p99/p99.9/max/count
+    pub cal_err: Vec<(HistKey, Quantiles)>,  // 逐样本误差界的分布(键的 stage 记为 kernel_rx:跨域误差限制在这一段)
     pub counters: Vec<(CounterKey, u64)>,    // 含 unsynced、unsynced_cal、missing、negative
     pub gauges: Vec<(GaugeKey, i64)>,        // 保证金率、MarginStress 档位、资金费数据年龄…
     pub clock_trust: ClockTrust,             // 本窗口含交易所时钟的分段是否可信
@@ -57,8 +60,12 @@ pub struct WindowReport {
 pub struct TelemetryConfig { pub window_s: u32 /* 10 */, pub sig_digits: u8 /* 3 */, pub min_ns: u64 /* 1 */,
                              pub max_ns: u64 /* 10 s */, pub max_series: u32 /* 基数上限,由使用方按内存上限给出,见"延迟与资源契约" */,
                              pub clock_untrusted_offset_ns: i64 /* 200 µs */, pub cal_max_err_ns: u32 /* 取 latency-budget §2.1 的阈值,调用方传入 */,
-                             pub naked_usd: Notional }
+                             pub naked_usd: Notional, pub dataset: Dataset /* Live;见"直方图"的数据集 */ }
 pub struct DailyClose {
+    pub day: u32,
+    pub hist: Vec<(HistKey, Quantiles)>,     // 按日累计的直方图(日报与回归基线用),cal_err、counters 同理
+    pub cal_err: Vec<(HistKey, Quantiles)>,
+    pub counters: Vec<(CounterKey, u64)>,
     pub accounts: Vec<AccountDaily>,         // 每账户一行 + 每 (账户, group) 一行
     pub strategies: Vec<StrategyDailyRow>,   // 见"策略报告"
 }
@@ -114,8 +121,14 @@ pub struct EventWeightedReport {
     pub n: u64, pub missing: u64, pub gap_missing: u64 /* rx_empty_gap_ns = 0,无上界 */, pub negative: u64, pub unsynced_cal: u64,
     pub unsynced_cal_by_stratum: [(Stratum, u64 /* unsynced_cal */, u64 /* n */); 2],
     pub cal_err: Vec<(EwKey, Quantiles)>,   // 逐样本误差界的分布
+    pub kernel_rx_hi_sw_gap_only: bool,     // kernel_rx_hi 含 SW 键:其上界只有 rx_empty_gap_ns,不含网卡到软中断一段
+    pub series_overflow: u64,               // 超过 max_series 的新键被丢弃的样本数
     pub host_profile: [u8; 32], pub release: String,   // 数据集维度(取自段首 HostProfile)
 }
+/// 同 event_weighted,另对每个记入直方图的样本调用 visit(按 seq 顺序;replayer 导出逐条样本、测试逐值核对用)。
+pub fn event_weighted_with(rd: &mut JournalReader, rdata: &RefData, cfg: &EventWeightedCfg, visit: impl FnMut(&EwSample))
+    -> Result<Vec<EventWeightedReport>, TelemetryError>;
+pub struct EwSample { pub seq: u64, pub key: EwKey, pub value: i64, pub hi: bool /* kernel_rx 上界样本 */ }
 /// 只读:顺序读 seq journal(读者 API),每条带 MarketHdr 的行情记录(Bbo、Trade、Mark/Index、Funding、L2Snapshot,
 /// 增量深度启用时含 L2Batch)取记录头 tsc(= proc_tsc)与 MarketHdr 的 hw_rx/sw_rx/rx_tsc/rx_empty_gap_ns,按"分段"一节的插值换算。
 pub fn event_weighted(rd: &mut JournalReader, rdata: &RefData, cfg: &EventWeightedCfg) -> Result<Vec<EventWeightedReport>, TelemetryError>; // 每个数据集(段首 HostProfile)一份,按 seq 顺序
@@ -195,13 +208,13 @@ pub struct StratifiedGroup { pub key: HistKey, pub n: [u64; 2], pub by_stratum: 
 ### 直方图
 
 - `hdrhistogram`,3 位有效数字,范围 1 ns–10 s;每 `window_s`(10 s)输出 p50/p90/p99/p99.9/max/count 后清零,另维护一份按日累积(日报与回归基线用)。窗口按 UTC 对齐到 `window_s` 的整数倍;`window(now)` 在 `now` 达到当前窗口的终点时返回该窗口(`start_ns`、`end_ns` 为窗口边界)并开始下一个窗口,否则返回 `None`;样本计入它被算出时所在的窗口。分段值 < 0 → 计入 `negative`、不进直方图;值 = 0 照常记录;任一端点缺失(来源位为缺失或值为 0)→ 该分段为 `None` 并计入 `missing`。
-- 维度键 `HistKey { stage, venue, account, account_kind, inst_class, action, strategy, trigger_kind, ts_src }`;`inst_class` 由 refdata 给(如 `perp-major`、`perp-alt`、`spot`),**不用 inst 做维度**以控制基数;超过 `max_series` 的新键并入 `other` 并计入计数器 `series_overflow`。
+- 维度键 `HistKey { stage, dataset, venue, account, account_kind, inst_class, action, strategy, trigger_kind, trigger_sub, ts_src, other }`;`trigger_sub` 在回报触发时为触发 `OrderEvent.what`(`rep_to_order` 按回报种类分组,latency-budget §5),其余为 0;`inst_class` 由 refdata 给(如 `perp-major`、`perp-alt`、`spot`),**不用 inst 做维度**以控制基数;超过 `max_series` 的新键并入该分段的 `other` 序列(`other = true`,只保留 `stage` 与 `dataset`),每个并入的样本计入计数器 `series_overflow`。`Quantiles` 的 p99 需 n ≥ 1 000、p99.9 需 n ≥ 10 000(latency-budget §5),不足为空;`max` 为精确最大值。
 - **不同数据集不混算**:实盘、Sim 账户、验证回放、模拟重演(`replayer sim`)、mock 回环、按事件加权的离线统计各自一个 `dataset` 标签,绝不合并([00 §3](../../design/00-目标与延迟预算.md));HW 与 SW 时间戳分开。
 - 回归基线(可选扩展,随 replayer `bench`):同一份 journal 回放得到的 `decide` 分段按 `strategy` 出 p99,与前 7 日中位比较,上涨 > 10% 阻断发布([09 §2](../../design/09-可观测性、风控与控制面.md))。
 
 ### 时钟校准序列
 
-- `ClockStatus`(布局归 hft-event,每 1 000 ms 一条,写入节拍归 [hft-core](../../apps/hft-core/README.md))按 seq 顺序进入一个有界队列;一个 `LatencySample` 或行情记录要等它之后的下一条 `ClockStatus` 到达才计算(实时尾随时延迟约 1 s 出数;进程退出前最后一段计入 `unsynced_cal`)。
+- `ClockStatus`(布局归 hft-event,每 1 000 ms 一条,写入节拍归 [hft-core](../../apps/hft-core/README.md))按 seq 顺序进入一个有界队列;一个 `LatencySample` 或行情记录要等它之后的下一条 `ClockStatus` 到达才计算(实时尾随时延迟约 1 s 出数;journal 结束时(`finish`,离线函数读到末尾)最后一段计入 `unsynced_cal`)。插值区间按样本的 `rx_tsc`(无行情/回报触发时按 `sent_tsc`)所在的相邻两条选取。
 - 插值与误差界只按 latency-budget §2.1 的公式实现;`calib_err_ns` 取自 `ClockStatus`,`state = Stepped` 的校准对不跨越插值(区间两端之一为 `Stepped` 的样本计入 `unsynced_cal`)。
 
 ### 计数器(由事件派生,冷侧计算)
@@ -318,6 +331,7 @@ pub fn interference(hours: &[HourStat], p: &InterferenceParams) -> InterferenceR
 ## 已知限制与后续工作
 
 - `event_weighted` 依赖 `MarketHdr` 的三个接收时间戳;只记录在 raw journal 而不进 seq journal 的帧(被合并丢弃的 BBO 等)不在统计内,丢弃数见计数器 `Conflated`。
+- `inst_class`:refdata 目前只有合约种类(`InstKind`),先按 `Spot`/`Perp` 两类;`perp-major`/`perp-alt` 的划分待 refdata 增加类别字段(触发条件:watchtower 看板需要按大小币分组)。
 - `hw_tx` 在 ENA 上不可用;若换到支持 TX 硬件时间戳的网卡,新增时间点按 hft-event 的尾部追加规则扩展 `LatencySample`。
 - `pnl_basis` 的拆分按 group 两腿净量,跨 group 共用库存(unassigned 现货)不计入任何 group 的已对冲部分,单列。
 - 实时尾随时,含 PHC 端点的分段要等下一条 `ClockStatus` 才出数(约 1 s 延迟);只影响 10 s 窗口的边界样本归属,不影响按日与按小时直方图。
