@@ -553,30 +553,45 @@ fn jnl_083_last_complete_event() {
     );
 }
 
+/// Lines of `/proc/self/maps` that contain `needle`. The harness's writer, prepared segment and
+/// retire queue live in this process too, so reader checks compare against a count taken before
+/// the reader mapped anything.
 #[cfg(target_os = "linux")]
-fn maps_contain(needle: &str) -> bool {
+fn maps_count(needle: &str) -> usize {
     std::fs::read_to_string("/proc/self/maps")
         .unwrap()
-        .contains(needle)
+        .lines()
+        .filter(|l| l.contains(needle))
+        .count()
 }
 
 #[test]
 fn jnl_084_unmap_deleted_segments() {
     // Row 1: retired → released in the same poll, continue on the cold copy.
     let h = three_linux();
+    #[cfg(target_os = "linux")]
+    let seg2 = h.seg_path(2).to_str().unwrap().to_string();
+    #[cfg(target_os = "linux")]
+    let base = maps_count(&seg2);
     let mut r = h.reader(StartAt::SegmentBoot(2));
     r.set_clock_ns(0);
     let mut got: Vec<u64> = (0..5).map(|_| seq_of(r.poll())).collect();
+    #[cfg(target_os = "linux")]
+    assert!(maps_count(&seg2) > base, "JNL-084.1: the reader maps segment 2");
     testing::poke(&h.seg_path(2), 3152, &1u32.to_le_bytes()).unwrap();
     got.push(seq_of(r.poll()));
     #[cfg(target_os = "linux")]
-    assert!(!maps_contain(h.seg_path(2).to_str().unwrap()), "JNL-084.1");
+    assert_eq!(maps_count(&seg2), base, "JNL-084.1");
     got.extend(all_seqs(&mut r));
     let first = h.hdr(2).first_seq;
     assert_eq!(got, (first..=h.last_seq(3)).collect::<Vec<_>>(), "JNL-084.1");
 
     // Row 2: unlinked without `retired`: released at the next fstat (+1 s).
     let h = three_linux();
+    #[cfg(target_os = "linux")]
+    let seg2 = h.seg_path(2).to_str().unwrap().to_string();
+    #[cfg(target_os = "linux")]
+    let base = maps_count(&seg2);
     let mut r = h.reader(StartAt::SegmentBoot(2));
     r.set_clock_ns(0);
     for _ in 0..5 {
@@ -586,10 +601,7 @@ fn jnl_084_unmap_deleted_segments() {
     r.set_clock_ns(1_000_000_000);
     seq_of(r.poll());
     #[cfg(target_os = "linux")]
-    assert!(
-        !maps_contain("(deleted)") || !maps_contain(h.seg_path(2).to_str().unwrap()),
-        "JNL-084.2"
-    );
+    assert_eq!(maps_count(&seg2), base, "JNL-084.2");
 
     // Row 3: the cold copy being read is removed by retention.
     let h = three_linux();
@@ -626,6 +638,12 @@ fn jnl_085_two_hot_maps() {
         h.roll(RollReason::Hourly);
     }
     h.events(10);
+    #[cfg(target_os = "linux")]
+    let dir = h.hot_jdir().to_str().unwrap().to_string();
+    // The writer's own mappings (active, prepared and not yet retired segments) do not change
+    // while the reader polls.
+    #[cfg(target_os = "linux")]
+    let base = maps_count(&dir);
     let mut r = h.reader(StartAt::Oldest);
     #[allow(unused_mut)]
     let mut max = 0;
@@ -637,10 +655,7 @@ fn jnl_085_two_hot_maps() {
         }
         #[cfg(target_os = "linux")]
         {
-            let maps = std::fs::read_to_string("/proc/self/maps").unwrap();
-            let dir = h.hot_jdir();
-            let n = maps.lines().filter(|l| l.contains(dir.to_str().unwrap())).count();
-            max = max.max(n);
+            max = max.max(maps_count(&dir).saturating_sub(base));
         }
     }
     assert_eq!(r.position().segment_no, 6);

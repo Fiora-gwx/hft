@@ -1001,7 +1001,7 @@ spec: README.md
 - 规则:[依赖](README.md#依赖)、[实现说明](README.md#实现说明)
 - 级别:proc
 - 里程碑:M1
-- 前置:Linux tmpfs;子进程 `open0` 后写 10 000 个事件并逐个 publish,然后 `SIGKILL` 自身
+- 前置:Linux tmpfs;子进程 `open0` 后写 4 000 个事件(每个 184 B,约 736 KB,在 C0 的 1 MiB 段的空闲阈值之内)并逐个 publish,然后 `SIGKILL` 自身
 - 步骤:
   1. 父进程读热段文件
 - 期望:文件存在,`state = Open`;[0, committed_len) 中的记录逐条合法、seq 从 1 连续到 `last_seq`、最后一条带 `EVENT_END`
@@ -1211,13 +1211,13 @@ spec: README.md
 - 规则:[读者](README.md#读者)
 - 级别:table
 - 里程碑:M1
-- 前置:Linux;冷进程式读者(非同进程槽位)映射段 2 的热段;手动时钟驱动读者的 `fstat` 节拍
+- 前置:Linux;冷进程式读者(非同进程槽位)映射段 2 的热段;手动时钟驱动读者的 `fstat` 节拍;写者与读者在同一测试进程中,`/proc/self/maps` 的计数以读者打开前该路径的条目数为基数(写者、预创建段与退役队列的映射)
 - 实现:`crates/hft-journal/tests/reader.rs::jnl_084_unmap_deleted_segments`
 
 | 行 | 事件 | 期望 |
 |---|---|---|
-| JNL-084.1 | 段 2 置 `retired = 1`,读者 `poll` 一次 | 该次 `poll` 内 `munmap` 并关闭 fd:`/proc/self/maps` 不再含段 2 的路径;之后从冷副本同偏移继续 |
-| JNL-084.2 | 段 2 文件被 `unlink`(未置 `retired`),读者上次 `fstat` 之后 +1 000 ms 时 `poll` | 已解除映射:读者进程的 `/proc/self/maps` 中没有 `(deleted)` 的段 2 |
+| JNL-084.1 | 段 2 置 `retired = 1`,读者 `poll` 一次 | 该次 `poll` 内 `munmap` 并关闭 fd:`/proc/self/maps` 中段 2 路径的条目数回到基数;之后从冷副本同偏移继续 |
+| JNL-084.2 | 段 2 文件被 `unlink`(未置 `retired`),读者上次 `fstat` 之后 +1 000 ms 时 `poll` | 已解除映射:`/proc/self/maps` 中段 2(`(deleted)`)的条目数回到基数 |
 | JNL-084.3 | 读者正在读的冷副本被 `cold_retire` 删除,+1 000 ms `poll` | 解除冷副本映射,返回 `Gap{Deleted}` |
 
 ### JNL-085 读者同时最多映射 2 个热段
@@ -1227,7 +1227,7 @@ spec: README.md
 - 里程碑:M1
 - 前置:Linux;`hot_keep = 4`;6 个热段;读者从 `Oldest` 读到段 6 末尾
 - 步骤:
-  1. 每次 `poll` 后统计 `/proc/self/maps` 中属于该 journal 热目录的映射数
+  1. 每次 `poll` 后统计 `/proc/self/maps` 中属于该 journal 热目录的映射数,减去读者打开前的基数(同进程写者的活动段、预创建段与退役队列的映射,读的过程中不变)
 - 期望:最大值 ≤ 2
 - 实现:`crates/hft-journal/tests/reader.rs::jnl_085_two_hot_maps`
 
@@ -1717,7 +1717,7 @@ spec: README.md
 - 期望:
   - 步骤 1 退出 0;C 中每个段都有 `.seal`
   - 步骤 2 读到恰好 1 000 条 `Bbo`,第 i 条 `h.inst = 101`、`bid_px = 6 000 000`、`ask_px = 6 000 001`、`bid_qty = ask_qty = 50 000 000`、`h.ex_ts_ns = 1 759 276 810 000 000 000 + i × 1 000 000 − 2 000 000`,`h.hw_rx_ns` 在 i 偶数时为 `h.ex_ts_ns + 1 000 000`、奇数时为 0;每条带 `EVENT_END`
-  - 步骤 3 退出 0;最后一段 `state = Open`、无 `.seal`,读者读到 1 000 条 `Bbo`
+  - 步骤 3 退出 0;最后写入的一段(段号最大的非 `Preparing` 段;写者另保持一个已准备好的下一段)`state = Open`、无 `.seal`,读者读到 1 000 条 `Bbo`
   - 步骤 4 退出 1;步骤 5 退出 2(`DiskBacked`)
 - 实现:`crates/hft-journal/tests/proc_testwriter.rs::jnl_123_testwriter_roundtrip`
 

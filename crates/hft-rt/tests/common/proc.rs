@@ -4,8 +4,10 @@
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::time::{Duration, Instant};
 
 pub const ROLE: &str = "HFT_RT_ROLE";
 const TIDFILE: &str = "HFT_RT_TIDFILE";
@@ -29,11 +31,16 @@ pub fn shm_dir() -> PathBuf {
     d
 }
 
+/// Longest a parent waits for one line from a child, for a child to exit, or for a traced run;
+/// past it the child is killed and the test fails instead of hanging the job.
+pub const CHILD_DEADLINE: Duration = Duration::from_secs(60);
+
 /// A child process running only `test` from this binary with `role` and extra environment.
+/// Dropping it kills and reaps the child.
 pub struct Kid {
     pub child: Child,
     stdin: Option<ChildStdin>,
-    out: BufReader<ChildStdout>,
+    lines: Receiver<String>,
 }
 
 pub fn spawn(test: &str, role: &str, envs: &[(&str, String)]) -> Kid {
@@ -49,19 +56,55 @@ pub fn spawn(test: &str, role: &str, envs: &[(&str, String)]) -> Kid {
     let mut child = cmd.spawn().unwrap();
     let stdin = child.stdin.take();
     let out = BufReader::new(child.stdout.take().unwrap());
-    Kid { child, stdin, out }
+    let (tx, lines) = mpsc::channel();
+    std::thread::spawn(move || forward(out, &tx));
+    Kid { child, stdin, lines }
+}
+
+/// Sends every `say` line of the child to the channel until EOF. The marker is not necessarily at
+/// the line start: with one test thread libtest prints "test <name> ... " before the test runs.
+fn forward(mut out: BufReader<ChildStdout>, tx: &Sender<String>) {
+    loop {
+        let mut l = String::new();
+        if out.read_line(&mut l).unwrap_or(0) == 0 {
+            return;
+        }
+        if let Some(i) = l.find("@@")
+            && tx.send(l[i + 2..].trim_end().to_string()).is_err()
+        {
+            return;
+        }
+    }
+}
+
+/// Waits for `child` up to `CHILD_DEADLINE`; kills it and panics past that.
+pub fn wait_deadline(child: &mut Child) -> ExitStatus {
+    let t0 = Instant::now();
+    loop {
+        if let Some(st) = child.try_wait().unwrap() {
+            return st;
+        }
+        if t0.elapsed() > CHILD_DEADLINE {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("child {} did not exit within {CHILD_DEADLINE:?}", child.id());
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 impl Kid {
     /// Next line the child printed with `say` (libtest chatter is skipped).
     pub fn hear(&mut self) -> String {
-        loop {
-            let mut l = String::new();
-            if self.out.read_line(&mut l).unwrap() == 0 {
-                panic!("child closed stdout before saying anything");
+        match self.lines.recv_timeout(CHILD_DEADLINE) {
+            Ok(l) => l,
+            Err(RecvTimeoutError::Disconnected) => {
+                panic!("child closed stdout before saying anything")
             }
-            if let Some(m) = l.trim_end().strip_prefix("@@") {
-                return m.to_string();
+            Err(RecvTimeoutError::Timeout) => {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+                panic!("child said nothing for {CHILD_DEADLINE:?}");
             }
         }
     }
@@ -76,17 +119,33 @@ impl Kid {
         self.child.id()
     }
 
-    /// Exit code (panics on a signal death).
+    /// Exit code (panics on a signal death or after `CHILD_DEADLINE`).
     pub fn code(mut self) -> i32 {
         drop(self.stdin.take());
-        let st = self.child.wait().unwrap();
+        let st = wait_deadline(&mut self.child);
         st.code()
             .unwrap_or_else(|| panic!("child died by signal: {st:?}"))
+    }
+
+    /// Waits up to `CHILD_DEADLINE` (stdin closed first).
+    pub fn wait(&mut self) -> ExitStatus {
+        drop(self.stdin.take());
+        wait_deadline(&mut self.child)
     }
 
     pub fn kill(mut self) {
         let _ = self.child.kill(); // SIGKILL
         let _ = self.child.wait();
+    }
+}
+
+impl Drop for Kid {
+    fn drop(&mut self) {
+        // No-op for a child already reaped (its pid is not signalled again).
+        if matches!(self.child.try_wait(), Ok(None)) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
     }
 }
 
@@ -139,9 +198,10 @@ pub fn strace_segments(test: &str, syscalls: Option<&str>) -> Vec<BTreeMap<Strin
         .env(ROLE, "traced")
         .env(TIDFILE, &tidfile)
         .stdout(Stdio::null());
-    let st = cmd
-        .status()
+    let mut ch = cmd
+        .spawn()
         .unwrap_or_else(|e| panic!("strace not available ({e}); CI installs it"));
+    let st = wait_deadline(&mut ch);
     assert!(st.success(), "traced child failed: {st:?}");
     let tid = std::fs::read_to_string(&tidfile).unwrap();
     let trace = std::fs::read_to_string(trace_file(&prefix, tid.trim())).unwrap();

@@ -223,6 +223,28 @@ pub fn roll_body(b: &[u8], off: usize) -> hft_event::SegmentRoll {
     hft_event::SegmentRoll::read_from_bytes(&b[off + 24..off + 72]).unwrap()
 }
 
+/// `RLIMIT_MEMLOCK` soft limit in bytes as text (`unlimited`; `n/a` off Linux).
+pub fn memlock_soft() -> String {
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: zeroed rlimit is a valid out-buffer.
+        let mut r: libc::rlimit = unsafe { std::mem::zeroed() };
+        // SAFETY: getrlimit with a writable buffer.
+        if unsafe { libc::getrlimit(libc::RLIMIT_MEMLOCK, &mut r) } != 0 {
+            return "?".into();
+        }
+        if r.rlim_cur == libc::RLIM_INFINITY {
+            "unlimited".into()
+        } else {
+            r.rlim_cur.to_string()
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        "n/a".into()
+    }
+}
+
 /// The test harness.
 pub struct H {
     pub cfg: JournalConfig,
@@ -308,7 +330,13 @@ impl H {
 
     /// Prepares the next segment, rolls and returns the boot writer.
     pub fn roll_boot(&mut self, reason: RollReason) -> BootWriter<'_> {
-        assert_ne!(self.prep.poll(), PrepState::Failed, "prepare");
+        assert_ne!(
+            self.prep.poll(),
+            PrepState::Failed,
+            "prepare ({} B segment; tmpfs segments are mlocked: RLIMIT_MEMLOCK soft = {})",
+            self.cfg.segment_bytes,
+            memlock_soft()
+        );
         self.try_roll(reason).unwrap()
     }
 

@@ -84,7 +84,7 @@ fn rt_095_create_and_open_ro() {
     }
     assert_eq!(reader.code(), 0, "step 2");
     let mut w = spawn("rt_095_create_and_open_ro", "writer", &envs);
-    let st = w.child.wait().unwrap();
+    let st = w.wait();
     assert_eq!(st.signal(), Some(libc::SIGSEGV), "step 3: {st:?}");
     let _ = std::fs::remove_dir_all(dir);
 }

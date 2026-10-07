@@ -186,7 +186,11 @@ jobs:
     needs: quota-gate
     if: needs.quota-gate.result == 'success' && needs.quota-gate.outputs.ran == 'true'
     runs-on: ubuntu-24.04-arm
-    container: ubuntu:24.04
+    container:
+      image: ubuntu:24.04
+      # tmpfs journal segments are mlocked (crates/hft-journal JNL-040/044/045): no 8 MiB cap;
+      # /dev/shm holds the hot test segments (Docker default 64 MiB).
+      options: --ulimit memlock=-1:-1 --shm-size=1g
     timeout-minutes: 10
     outputs:
       cache-hit: ${{ steps.cache.outputs.cache-hit }}

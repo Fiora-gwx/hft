@@ -59,27 +59,30 @@ fn jnl_098_write_sync_order() {
     let lines: Vec<&str> = t.lines().skip_while(|l| !l.contains("mark")).collect();
     let pos = |pred: &dyn Fn(&str) -> bool| lines.iter().position(|l| pred(l)).unwrap_or(usize::MAX);
     let open_tmp = pos(&|l| l.contains("openat") && l.contains("engine_epoch.tmp"));
-    let fd = |i: usize| -> String { lines[i].rsplit("= ").next().unwrap().trim().to_string() };
+    let fd = |i: usize| -> String {
+        let l = lines
+            .get(i)
+            .unwrap_or_else(|| panic!("open not traced: {lines:#?}"));
+        l.rsplit("= ").next().unwrap().trim().to_string()
+    };
     let tmp_fd = fd(open_tmp);
-    let write = pos(&|l| l.contains(&format!("write({tmp_fd},")));
-    let fsync_tmp = pos(&|l| l.contains(&format!("fsync({tmp_fd})")));
+    // Descriptor numbers are reused (the marker file had the same one): look after the open.
+    let after = |from: usize, pred: &dyn Fn(&str) -> bool| {
+        lines
+            .iter()
+            .enumerate()
+            .skip(from)
+            .find(|(_, l)| pred(l))
+            .map(|(i, _)| i)
+            .unwrap_or(usize::MAX)
+    };
+    let write = after(open_tmp, &|l| l.contains(&format!("write({tmp_fd},")));
+    let fsync_tmp = after(open_tmp, &|l| l.contains(&format!("fsync({tmp_fd})")));
     let rename =
         pos(&|l| l.contains("rename") && l.contains("engine_epoch.tmp") && l.contains("meta/engine_epoch\""));
-    let open_dir = lines
-        .iter()
-        .enumerate()
-        .skip(rename.min(lines.len()))
-        .find(|(_, l)| l.contains("openat") && l.contains("/meta\""))
-        .map(|(i, _)| i)
-        .unwrap_or(usize::MAX);
+    let open_dir = after(rename, &|l| l.contains("openat") && l.contains("/meta\""));
     let dir_fd = fd(open_dir);
-    let fsync_dir = lines
-        .iter()
-        .enumerate()
-        .skip(open_dir)
-        .find(|(_, l)| l.contains(&format!("fsync({dir_fd})")))
-        .map(|(i, _)| i)
-        .unwrap_or(usize::MAX);
+    let fsync_dir = after(open_dir, &|l| l.contains(&format!("fsync({dir_fd})")));
     assert!(
         open_tmp < write
             && write < fsync_tmp

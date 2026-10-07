@@ -4,6 +4,8 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::time::{Duration, Instant};
 
 pub const ROLE: &str = "HFT_JNL_ROLE";
 
@@ -15,11 +17,16 @@ pub fn var(k: &str) -> String {
     std::env::var(k).unwrap_or_else(|_| panic!("missing env {k}"))
 }
 
-/// A child running only `test` of this binary with `role`.
+/// Longest a parent waits for one line from a child or for the child to exit; past it the child is
+/// killed and the test fails instead of hanging the job.
+pub const CHILD_DEADLINE: Duration = Duration::from_secs(60);
+
+/// A child running only `test` of this binary with `role`. Dropping it kills and reaps the child.
 pub struct Kid {
-    pub child: Child,
+    child: Option<Child>,
+    pid: i32,
     stdin: Option<ChildStdin>,
-    out: BufReader<ChildStdout>,
+    lines: Receiver<String>,
 }
 
 pub fn spawn(test: &str, role: &str, envs: &[(&str, String)]) -> Kid {
@@ -35,19 +42,43 @@ pub fn spawn(test: &str, role: &str, envs: &[(&str, String)]) -> Kid {
     let mut child = cmd.spawn().unwrap();
     let stdin = child.stdin.take();
     let out = BufReader::new(child.stdout.take().unwrap());
-    Kid { child, stdin, out }
+    let (tx, lines) = mpsc::channel();
+    // Protocol lines go to the channel; libtest chatter is dropped. The thread ends at EOF.
+    std::thread::spawn(move || forward(out, &tx));
+    Kid {
+        pid: child.id() as i32,
+        child: Some(child),
+        stdin,
+        lines,
+    }
+}
+
+fn forward(mut out: BufReader<ChildStdout>, tx: &Sender<String>) {
+    loop {
+        let mut l = String::new();
+        if out.read_line(&mut l).unwrap_or(0) == 0 {
+            return;
+        }
+        // Not necessarily at the line start: with one test thread libtest prints "test <name> ... "
+        // before the test runs, and the child's first line follows it on the same line.
+        if let Some(i) = l.find("@@")
+            && tx.send(l[i + 2..].trim_end().to_string()).is_err()
+        {
+            return;
+        }
+    }
 }
 
 impl Kid {
-    /// Next line the child said (`None` at EOF); libtest chatter is skipped.
+    /// Next line the child said (`None` at EOF); libtest chatter is skipped. Panics (after killing
+    /// the child) when nothing arrives within `CHILD_DEADLINE`.
     pub fn try_hear(&mut self) -> Option<String> {
-        loop {
-            let mut l = String::new();
-            if self.out.read_line(&mut l).unwrap_or(0) == 0 {
-                return None;
-            }
-            if let Some(m) = l.trim_end().strip_prefix("@@") {
-                return Some(m.to_string());
+        match self.lines.recv_timeout(CHILD_DEADLINE) {
+            Ok(l) => Some(l),
+            Err(RecvTimeoutError::Disconnected) => None,
+            Err(RecvTimeoutError::Timeout) => {
+                self.reap();
+                panic!("child {} said nothing for {CHILD_DEADLINE:?}", self.pid);
             }
         }
     }
@@ -63,29 +94,54 @@ impl Kid {
     }
 
     pub fn pid(&self) -> i32 {
-        self.child.id() as i32
+        self.pid
     }
 
     pub fn signal(&self, sig: i32) {
         // SAFETY: sending a signal to our own child process.
-        unsafe { libc::kill(self.pid(), sig) };
+        unsafe { libc::kill(self.pid, sig) };
     }
 
     /// SIGKILL and reap.
     pub fn kill(mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        self.reap();
     }
 
-    /// Waits; `Err(signal)` when killed by a signal.
+    /// Waits (closing its stdin first); `Err(signal)` when killed by a signal. Panics (after
+    /// killing the child) when it has not exited within `CHILD_DEADLINE`.
     pub fn wait(mut self) -> Result<i32, i32> {
         use std::os::unix::process::ExitStatusExt;
         drop(self.stdin.take());
-        let st = self.child.wait().unwrap();
+        let mut child = self.child.take().unwrap();
+        let t0 = Instant::now();
+        let st = loop {
+            if let Some(st) = child.try_wait().unwrap() {
+                break st;
+            }
+            if t0.elapsed() > CHILD_DEADLINE {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("child {} did not exit within {CHILD_DEADLINE:?}", self.pid);
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        };
         match st.code() {
             Some(c) => Ok(c),
             None => Err(st.signal().unwrap_or(0)),
         }
+    }
+
+    fn reap(&mut self) {
+        if let Some(mut c) = self.child.take() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
+}
+
+impl Drop for Kid {
+    fn drop(&mut self) {
+        self.reap();
     }
 }
 

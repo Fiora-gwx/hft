@@ -123,8 +123,15 @@ fn jnl_123_testwriter_roundtrip() {
     }
     let (h2, c2) = (shm_hot(), cold_dir());
     assert_eq!(run(&bin, Some(&h2), &c2, false), 0, "step 3");
+    // The writer keeps one prepared next segment (state Preparing): the last written one is the
+    // newest that is not Preparing.
     let files = hft_journal::testing::hot_files(&h2.join("prod/seq"));
-    let last = std::fs::read(files.last().unwrap()).unwrap();
+    let last = files
+        .iter()
+        .rev()
+        .map(|f| std::fs::read(f).unwrap())
+        .find(|b| u32_at(b, 3088) != 0)
+        .expect("step 3: a written segment");
     assert_eq!(u32_at(&last, 3088), 1, "step 3: last segment Open");
     assert_eq!(read_bbos(&h2, &c2).len(), 1000, "step 3");
     assert_eq!(run(&bin, None, &cold_dir(), false), 1, "step 4");

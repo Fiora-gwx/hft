@@ -45,7 +45,7 @@ fn kill_self() -> ! {
 fn jnl_069_segment_survives_kill() {
     if role().is_some() {
         let mut h = H::open0(child_cfg());
-        h.events(10_000);
+        h.events(4_000);
         kill_self();
     }
     let (hot, cold) = dirs();
@@ -280,8 +280,10 @@ fn jnl_072_random_kill() {
             }
         }
         kid.kill();
-        let mut h = H::bare(c0(&hot, &cold), false);
-        h.cfg.segment_bytes = 256 << 10;
+        // The preparer copies the configuration in `bare`: set the segment size before.
+        let mut cfg = c0(&hot, &cold);
+        cfg.segment_bytes = 256 << 10;
+        let mut h = H::bare(cfg, false);
         let rep = h.open().unwrap();
         h.roll(rep.boot_reason);
         let mut r = h.reader(StartAt::Oldest);

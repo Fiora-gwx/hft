@@ -102,7 +102,11 @@ jobs:
     if: needs.preflight.result == 'success'
     runs-on: ubuntu-24.04-arm
     # Production Ubuntu 24.04 / glibc baseline.
-    container: ubuntu:24.04
+    container:
+      image: ubuntu:24.04
+      # tmpfs journal segments are mlocked (crates/hft-journal JNL-040/044/045): no 8 MiB cap;
+      # /dev/shm holds the hot test segments (Docker default 64 MiB).
+      options: --ulimit memlock=-1:-1 --shm-size=1g
     timeout-minutes: 90
     permissions:
       contents: read

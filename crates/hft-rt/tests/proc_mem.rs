@@ -28,10 +28,15 @@ fn rt_085_anon_region() {
         Some(RtErr::NoMem),
         "RT-085.2"
     );
+    // The CI job reserves 2 MiB pages for the journal cases: ask for one more than are free.
+    let free: usize = std::fs::read_to_string("/sys/kernel/mm/hugepages/hugepages-2048kB/free_hugepages")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0);
     assert_eq!(
-        HugeRegion::anon(2 << 20, PageSize::Huge2M, None).err(),
+        HugeRegion::anon((free + 1) << 21, PageSize::Huge2M, None).err(),
         Some(RtErr::NoMem),
-        "RT-085.3"
+        "RT-085.3 ({free} free 2 MiB pages)"
     );
 }
 

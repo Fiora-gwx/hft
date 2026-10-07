@@ -862,14 +862,14 @@ spec: README.md
 - 规则:[CPU、主机检查、内存](README.md#cpu主机检查内存)
 - 级别:table
 - 里程碑:M1
-- 前置:Linux CI(无大页)
+- 前置:Linux CI(无 1 GiB 大页;2 MiB 大页 `nr_overcommit_hugepages = 0`,CI 作业为 journal 用例预留的 2 MiB 页可以存在)
 - 实现:`crates/hft-rt/tests/proc_mem.rs::rt_085_anon_region`
 
 | 行 | 调用 | 期望 |
 |---|---|---|
 | RT-085.1 | `HugeRegion::anon(10_000, Normal, None)`,再 `prefault()` | `Ok`;长度 12 288;全部字节为 0 |
 | RT-085.2 | `HugeRegion::anon(1 << 30, Huge1G, None)` | `Err(RtErr::NoMem)` |
-| RT-085.3 | `HugeRegion::anon(2 << 20, Huge2M, None)` | `Err(RtErr::NoMem)` |
+| RT-085.3 | `HugeRegion::anon((F + 1) × 2 MiB, Huge2M, None)`,F = 调用前 `hugepages-2048kB/free_hugepages` | `Err(RtErr::NoMem)` |
 
 ### RT-086 文件区域的打开模式与预触摸不改内容
 
