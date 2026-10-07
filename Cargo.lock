@@ -663,6 +663,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "hft-venue"
+version = "0.1.0"
+dependencies = [
+ "aws-lc-rs",
+ "criterion",
+ "hft-event",
+ "hft-journal",
+ "hft-net",
+ "hft-refdata",
+ "hft-rt",
+ "hft-testkit",
+ "hft-types",
+ "hft-venue-proto",
+ "libc",
+ "proptest",
+ "rustls",
+ "serde_json",
+ "toml 0.8.23",
+ "xxhash-rust",
+ "zerocopy",
+]
+
+[[package]]
 name = "hft-venue-proto"
 version = "0.1.0"
 dependencies = [

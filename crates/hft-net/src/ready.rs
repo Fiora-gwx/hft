@@ -15,6 +15,9 @@ pub struct ReadyPoll {
     sys: SysCount,
     #[cfg(feature = "test-io")]
     script_err: Option<i32>,
+    /// Scripted readiness: the latest set pushed by the test is the level-triggered ready set.
+    #[cfg(feature = "test-io")]
+    script_ready: Option<(hft_rt::Consumer<ConnSet>, ConnSet)>,
 }
 
 impl std::fmt::Debug for ReadyPoll {
@@ -33,6 +36,8 @@ impl ReadyPoll {
             sys: SysCount::default(),
             #[cfg(feature = "test-io")]
             script_err: None,
+            #[cfg(feature = "test-io")]
+            script_ready: None,
         })
     }
 
@@ -52,6 +57,14 @@ impl ReadyPoll {
         #[cfg(feature = "test-io")]
         if self.script_err.is_some() {
             return 0;
+        }
+        #[cfg(feature = "test-io")]
+        if let Some((rx, cur)) = self.script_ready.as_mut() {
+            while let Some(set) = rx.try_pop() {
+                *cur = set;
+            }
+            *out = *cur;
+            return cur.bits.iter().map(|w| w.count_ones() as u16).sum();
         }
         let n = sock::epoll_pwait0(self.epfd, &mut self.buf, |key| out.insert(ConnId(key as u8)));
         if n < 0 { 0 } else { n as u16 }
@@ -76,6 +89,21 @@ impl ReadyPoll {
             buf: EpollBuf::new(),
             sys: SysCount::default(),
             script_err: Some(errno),
+            script_ready: None,
+        }
+    }
+
+    /// A probe whose ready set is the latest `ConnSet` pushed into `rx` (feature `test-io`; scripted
+    /// connections have no fd). Each `probe` still counts one `epoll_pwait(timeout = 0)`.
+    #[cfg(feature = "test-io")]
+    #[doc(hidden)]
+    pub fn scripted(rx: hft_rt::Consumer<ConnSet>) -> ReadyPoll {
+        ReadyPoll {
+            epfd: -1,
+            buf: EpollBuf::new(),
+            sys: SysCount::default(),
+            script_err: None,
+            script_ready: Some((rx, ConnSet::default())),
         }
     }
 }
@@ -89,11 +117,25 @@ pub struct ReadyHandle {
 impl ReadyHandle {
     /// `EPOLL_CTL_ADD` before the hand-off; a second registration → `Os(EEXIST)`.
     pub fn add(&self, c: &Conn) -> Result<(), NetErr> {
+        #[cfg(feature = "test-io")]
+        if self.epfd < 0 {
+            return Ok(());
+        }
         sock::epoll_ctl(self.epfd, true, c.raw_fd(), c.id().0 as u64).map_err(NetErr::Os)
     }
 
     /// `EPOLL_CTL_DEL` before `Connector::reclaim`; not registered → `Os(ENOENT)`.
     pub fn del(&self, c: &Conn) -> Result<(), NetErr> {
-        sock::epoll_ctl(self.epfd, false, c.raw_fd(), 0).map_err(NetErr::Os)
+        self.del_fd(c.raw_fd())
+    }
+
+    /// `EPOLL_CTL_DEL` by descriptor (the caller remembered it at hand-off; a retired connection is
+    /// no longer reachable as a `Conn` before `Connector::reclaim`).
+    pub fn del_fd(&self, fd: i32) -> Result<(), NetErr> {
+        #[cfg(feature = "test-io")]
+        if self.epfd < 0 {
+            return Ok(());
+        }
+        sock::epoll_ctl(self.epfd, false, fd, 0).map_err(NetErr::Os)
     }
 }

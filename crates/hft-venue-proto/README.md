@@ -49,6 +49,7 @@ pub trait VenueProtocol: Sized + 'static {
                                          // gw 与 acct-fetch 各构建一份(交易 REST key),reconciler 以只读 key 构建自己的一份(契约 31)
     const CANCEL_ALL_SWEEP: bool = false; // true:gw 发完 CancelAll 后再查一次挂单列表兜底(契约 29;OKX)
     const BBO_SNAPSHOT_BATCH: u16 = 1;   // 一次 BBO 补帧请求可覆盖的 inst 上限(契约 24);u16::MAX = 只受 RestReqBuf 长度限制
+    const USER_STREAM: bool = false;     // true:私有频道在独立的用户流连接上(Binance USDT-M listenKey 流),而不是下单连接(hft-venue §4b)
     type AcctCtx: Default;               // 账户查询跨序列的 venue 私有状态(如上一次的 ADL 档);acct-fetch 每账户一个(契约 27)
     type AcctScratch: Default;           // 一次账户查询序列的中间结果;定长,不含堆(契约 16、17)
 
@@ -62,10 +63,11 @@ pub trait VenueProtocol: Sized + 'static {
     fn routes() -> &'static [RouteSpec];                                          // 行情路由表(如 Binance /public、/market);含 Bbo、DepthTopN 与 Md 路由
     fn endpoint(role: Role, route: RouteId, cfg: &VenueCfg, cred: Option<&Credential>, boot: Option<&[u8]>,
                 now_ms: i64, out: &mut EndpointSpec) -> Result<(), ProtoErr>;     // path、query、额外 Upgrade 头
-    fn login(role: Role, cfg: &VenueCfg, cred: &Credential, now_ms: i64, out: &mut Vec<u8>)
-             -> Result<LoginStep, ProtoErr>;                                      // NotNeeded / Frame / Handshake
+    fn login(role: Role, cfg: &VenueCfg, cred: &Credential, step: u8, now_ms: i64, out: &mut Vec<u8>)
+             -> Result<LoginStep, ProtoErr>;                                      // NotNeeded / Frame / Handshake;step = 第几步(0 起;login_result 返回 Continue 后加一再调)
     fn login_result(payload: &[u8]) -> LoginResult;                               // Ok / Rejected(code) / Continue / NotMine
-    fn subscribe(subs: &[SubSpec], cfg: &VenueCfg, out: &mut SubFrames) -> Result<(), ProtoErr>; // 分批帧
+    /// 订阅(unsub = false)或退订帧,分批;每帧记它覆盖 subs 的前几项。feed 线程在 install 后调用:写进预分配的 out,不分配。
+    fn subscribe(subs: &[SubSpec], unsub: bool, cfg: &VenueCfg, out: &mut SubFrames) -> Result<(), ProtoErr>;
     /// 私有频道订阅帧(用户流、订单、持仓、账户、保证金推送);只在被选为私有频道归属的连接上发(见 hft-venue §4b)。
     fn private_subscribe(cfg: &VenueCfg, acct: AccountId, unsub: bool, out: &mut SubFrames) -> Result<(), ProtoErr>;
     fn heartbeat(role: Role) -> HeartbeatSpec;
@@ -80,7 +82,7 @@ pub trait VenueProtocol: Sized + 'static {
 
     // ---- 行情(feed 任务;热) ----
     fn classify(route: RouteId, op: MsgOp, head: &[u8]) -> Self::MdClass;          // 只看前 64 B;route = 该连接所属路由(同名推送按路由区分)
-    fn peek(rd: &RefData, ctx: &Self::FeedCtx, c: Self::MdClass, payload: &[u8]) -> Result<Peek, DecodeErr>; // inst + 归一化序号,不解价格
+    fn peek(rd: &RefData, ctx: &Self::FeedCtx, c: Self::MdClass, payload: &[u8]) -> Result<Peek, DecodeErr>; // inst + 流 + 归一化序号,不解价格;不带数据的类(Control/Ack/Pong/Unknown)→ Err(UnknownClass)
     fn seq_rule(c: Self::MdClass) -> SeqRule;
     fn decode_md(rd: &RefData, ctx: &mut Self::FeedCtx, c: Self::MdClass, payload: &[u8], rx: &RxMeta,
                  out: &mut impl MdSink) -> Result<MdOutcome, DecodeErr>;
@@ -199,7 +201,16 @@ pub enum MsgOp { Text, Binary }
 #[repr(C)] pub struct SeqIds { pub prev_id: u64, pub last_id: u64 }
 /// 交易所原始序号,只给 align_first 用(快照衔接规则各所不同)。
 #[repr(C)] pub struct RawSeq { pub first: u64, pub last: u64, pub prev: u64, pub has_prev: bool, pub _pad: [u8; 7] }
-pub struct Peek { pub inst: InstId, pub ids: SeqIds, pub raw: RawSeq }   // inst = 0:未订阅符号
+pub struct Peek { pub inst: InstId, pub stream: StreamKind, pub ids: SeqIds, pub raw: RawSeq }   // inst = 0:未订阅符号;stream = 该消息所属的流(运行时按 (inst, stream) 取去重状态)
+/// subscribe / private_subscribe 的输出:帧首尾相接写进一块启动期预分配的缓冲;容量固定,放不下 → ProtoErr::BufFull。
+pub struct SubFrames { /* 字节缓冲 + 每帧 (终点, 覆盖的 subs 数) */ }
+impl SubFrames {
+    pub fn with_capacity(bytes: usize, frames: usize) -> SubFrames;   // 启动期
+    pub fn clear(&mut self);
+    pub fn push(&mut self, text: &[u8], subs: u16) -> Result<(), ProtoErr>;
+    pub fn len(&self) -> usize;
+    pub fn get(&self, i: usize) -> Option<(&[u8], u16)>;
+}
 pub enum SeqRule {
     None,          // 无序号:只按到达转发(不去重)
     Monotonic,     // 单调 id(BBO update_id、trade_id):last_id > 已转发 才转发 —— BBO 双路去重
@@ -568,6 +579,7 @@ pub enum ExchIdHint { Resolved { epoch: u16, slot: SlotId, gen: u32 }, Recorded,
 
 ## 已知限制与后续工作
 
+- **M1.5 实现范围**:trait 已含行情、会话、下单编码、回报解码、BBO 补帧与死手、限速观测各节;账户查询(`AcctCtx`、`AcctScratch`、`acct_queries`/`acct_request`/`acct_decode`/`acct_finish`)与只读查询(`ro_request`/`ro_decode`、`RoSink`)随 M3 的 acct-fetch 与 reconciler 加入,在此之前 venue 实现不需要也不能提供它们。
 - **帧单位是 WS 消息**:FIX(Binance Spot、Bybit spot)需要非 WS 分帧,可选扩展:接入 FIX 时扩展 `MsgOp` 与 hft-net。
 - **Hyperliquid 自建节点**输出本地文件而非 WS,不适合本 trait 的帧模型;需要时另开 Agent Note 设计文件尾随变体。
 - **账户查询只走 REST 池**:部分所的 WS API 也提供账户查询(Binance ws-fapi 的账户方法,待核实,见 venue-binance 开发备忘第 10 条);改走 WS 只换 `acct_request` 的输出形式,接口不变,触发条件:REST 权重成为瓶颈。

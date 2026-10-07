@@ -1,0 +1,52 @@
+[package]
+name = "hft-venue"
+description = "Venue runtime (M1.5 part): FeedRuntime (BBO race dedup and connection health, TopN depth, raw-feed), GwRuntime (drain_out, kill check, send, SendReport, slot mirror, reports), SessionDriver, kill_admit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+hft-types.workspace = true
+hft-refdata.workspace = true
+hft-event.workspace = true
+hft-venue-proto.workspace = true
+hft-net.workspace = true
+# raw-feed / raw-gw single writer (README "依赖"; only apps/hft-core links this crate).
+hft-journal = { workspace = true, features = ["writer"] }
+hft-rt.workspace = true
+xxhash-rust.workspace = true
+zerocopy.workspace = true
+
+[dev-dependencies]
+# Scripted sockets (`ScriptNet`) and the heap journal backend.
+hft-net = { workspace = true, features = ["test-io"] }
+hft-journal = { workspace = true, features = ["writer", "mem-backend"] }
+hft-testkit.workspace = true
+proptest.workspace = true
+criterion.workspace = true
+# MemPeer (in-process TLS server of the scripted connections).
+rustls = { version = "0.23.45", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+aws-lc-rs = { version = "1.14", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
+serde_json = "1"
+toml.workspace = true
+
+# The Linux loopback peer of hft-net's test support (VEN-354 bench); tests only, never the library.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc.workspace = true
+
+[[bench]]
+name = "feed"
+harness = false
+
+[[bench]]
+name = "gw"
+harness = false
+
+[[bench]]
+name = "raw"
+harness = false

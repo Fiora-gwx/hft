@@ -1,0 +1,89 @@
+{
+  "reasons": [
+    {
+      "code": 1,
+      "name": "GAP",
+      "state": "Resync"
+    },
+    {
+      "code": 2,
+      "name": "DECODE",
+      "state": "Resync"
+    },
+    {
+      "code": 3,
+      "name": "SNAPSHOT_FAIL",
+      "state": "Degraded"
+    },
+    {
+      "code": 4,
+      "name": "SUB_REJECTED",
+      "state": "Degraded"
+    },
+    {
+      "code": 5,
+      "name": "RACE_SINGLE",
+      "state": "Degraded"
+    },
+    {
+      "code": 6,
+      "name": "BBO_REFRESH",
+      "state": "Resync"
+    },
+    {
+      "code": 7,
+      "name": "BBO_SILENT",
+      "state": "Degraded"
+    },
+    {
+      "code": 8,
+      "name": "DEADMAN",
+      "state": "Degraded"
+    },
+    {
+      "code": 9,
+      "name": "CLOCK_SKEW",
+      "state": "Degraded"
+    },
+    {
+      "code": 10,
+      "name": "INFLIGHT_TIMEOUT",
+      "state": "Degraded"
+    },
+    {
+      "code": 11,
+      "name": "RATE_LIMIT",
+      "state": "Degraded"
+    },
+    {
+      "code": 12,
+      "name": "REPORT_DECODE",
+      "state": "Degraded"
+    },
+    {
+      "code": 13,
+      "name": "MIRROR",
+      "state": "Degraded"
+    },
+    {
+      "code": 14,
+      "name": "ACCT_QUERY",
+      "state": "Degraded"
+    },
+    {
+      "code": 15,
+      "name": "CONN_LOST",
+      "state": "Resync"
+    },
+    {
+      "code": 16,
+      "name": "NEW_SUB",
+      "state": "Resync"
+    },
+    {
+      "code": 17,
+      "name": "REQUESTED",
+      "state": "Resync"
+    }
+  ]
+}

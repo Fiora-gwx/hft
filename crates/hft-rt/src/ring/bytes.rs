@@ -208,6 +208,13 @@ impl ByteConsumer {
         }
     }
 
+    /// Whether a record is published and not yet released (read only; for `has_pending`).
+    #[inline]
+    pub fn has_data(&self) -> bool {
+        // Acquire pairs with the producer's Release store of `head` in `commit`.
+        self.tail != self.lines().prod.load(Ordering::Acquire)
+    }
+
     /// Releases the current record (peeking first if needed); no-op when empty.
     #[inline]
     pub fn advance(&mut self) {

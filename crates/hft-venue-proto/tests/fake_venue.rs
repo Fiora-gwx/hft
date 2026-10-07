@@ -12,13 +12,20 @@
 #![allow(dead_code)]
 
 use hft_event::{Bbo, L2SnapHdr, L2SnapshotPart, Level, MarkPrice, MarketHdr, Trade};
+use hft_event::{GwCmd, GwOp};
 use hft_refdata::{
     AssetClass, AssetSpec, CapFlags, DeadManCap, Exchange, FeeAssetRule, FundingSettleKind, InstKind,
     InstSpec, InstStatus, LiqMarker, MarginData, MarginMode, PositionMode, RdbBuilder, RefData,
     StaleGuardKind, TestnetKind, TsUnit, VenueCaps, VenueSpec,
 };
+use hft_types::{AccountId, ClientOrderId};
 use hft_types::{AssetExp, AssetId, InstId, MarketKind, Notional, Px, Qty, Side, VenueId};
-use hft_venue_proto::{DecodeErr, MdOutcome, MdSink, MsgOp, RouteId, RxMeta, VenueProtocol};
+use hft_venue_proto::{
+    Align, BootCall, ControlHint, Credential, DeadManOut, DeadManSpec, DecodeErr, EncodeErr, EndpointSpec,
+    HeartbeatSpec, LoginResult, LoginStep, MdOutcome, MdSink, MsgOp, Peek, PingKind, ProtoErr, RateRule,
+    RawSeq, ReportOutcome, ReportSink, RestReqBuf, ResyncMethod, Role, RouteId, RouteSpec, RxMeta, SeqRule,
+    SnapshotInfo, StaleGuard, SubFrames, SubSpec, TargetRef, VenueCfg, VenueProtocol, WallClock,
+};
 use zerocopy::FromZeros;
 
 /// Venue of the fake refdata (a spot venue row: the M1.5 fixture only exercises decoding).
@@ -142,8 +149,161 @@ impl VenueProtocol for FakePerp {
     const NAME: &'static str = "fake-perp";
     const VENUE: VenueId = FAKE_VENUE;
     const MARKET: MarketKind = MarketKind::LinearPerp;
+    const ORDER_FRAME_CAP: usize = 2048;
     type MdClass = FakeMd;
+    type ReportClass = FakeMd;
     type FeedCtx = FakeFeedCtx;
+    type GwCtx = ();
+    type Templates = ();
+
+    // The session, order and account members are not exercised by the M1.5 cases of this crate
+    // (their fixtures arrive with M3): inert bodies.
+    fn default_caps(_asset: impl Fn(&str) -> Option<AssetId>) -> VenueCaps {
+        VenueCaps::none(FAKE_VENUE)
+    }
+    fn bootstrap(_r: Role, _c: &VenueCfg, _k: Option<&Credential>) -> Option<BootCall> {
+        None
+    }
+    fn routes() -> &'static [RouteSpec] {
+        &[]
+    }
+    fn endpoint(
+        _r: Role,
+        _route: RouteId,
+        _c: &VenueCfg,
+        _k: Option<&Credential>,
+        _b: Option<&[u8]>,
+        _n: i64,
+        _o: &mut EndpointSpec,
+    ) -> Result<(), ProtoErr> {
+        Err(ProtoErr::Unsupported)
+    }
+    fn login(
+        _r: Role,
+        _c: &VenueCfg,
+        _k: &Credential,
+        _s: u8,
+        _n: i64,
+        _o: &mut Vec<u8>,
+    ) -> Result<LoginStep, ProtoErr> {
+        Ok(LoginStep::NotNeeded)
+    }
+    fn login_result(_p: &[u8]) -> LoginResult {
+        LoginResult::NotMine
+    }
+    fn subscribe(_s: &[SubSpec], _u: bool, _c: &VenueCfg, _o: &mut SubFrames) -> Result<(), ProtoErr> {
+        Err(ProtoErr::Unsupported)
+    }
+    fn private_subscribe(_c: &VenueCfg, _a: AccountId, _u: bool, _o: &mut SubFrames) -> Result<(), ProtoErr> {
+        Err(ProtoErr::Unsupported)
+    }
+    fn heartbeat(_r: Role) -> HeartbeatSpec {
+        HeartbeatSpec {
+            ping: PingKind::WsPing,
+            interval_ms: 0,
+            unconditional: false,
+            pong_timeout_ms: 0,
+            idle_timeout_ms: 0,
+        }
+    }
+    fn app_ping(_r: Role, _n: i64, _o: &mut [u8]) -> usize {
+        0
+    }
+    fn session_identity_request(
+        _c: &VenueCfg,
+        _k: &Credential,
+        _n: i64,
+        _o: &mut RestReqBuf,
+    ) -> Result<bool, ProtoErr> {
+        Ok(false)
+    }
+    fn decode_identity(_s: u16, _b: &[u8], _u: &mut [u8; 24]) -> Result<(), DecodeErr> {
+        Err(DecodeErr::UnknownClass)
+    }
+    fn peek(_rd: &RefData, _ctx: &FakeFeedCtx, _c: FakeMd, _p: &[u8]) -> Result<Peek, DecodeErr> {
+        Err(DecodeErr::UnknownClass)
+    }
+    fn seq_rule(_c: FakeMd) -> SeqRule {
+        SeqRule::None
+    }
+    fn control(_c: FakeMd, _p: &[u8]) -> Option<ControlHint> {
+        None
+    }
+    fn resync_method(_c: FakeMd) -> ResyncMethod {
+        ResyncMethod::None
+    }
+    fn align_first(_s: u64, _r: &RawSeq) -> Align {
+        Align::Gap
+    }
+    fn snapshot_request(
+        _rd: &RefData,
+        _c: &FakeFeedCtx,
+        _i: InstId,
+        _o: &mut RestReqBuf,
+    ) -> Result<(), ProtoErr> {
+        Err(ProtoErr::Unsupported)
+    }
+    fn decode_snapshot(
+        _rd: &RefData,
+        _c: &mut FakeFeedCtx,
+        _i: InstId,
+        _b: &[u8],
+        _rx: &RxMeta,
+        _o: &mut impl MdSink,
+    ) -> Result<SnapshotInfo, DecodeErr> {
+        Err(DecodeErr::UnknownClass)
+    }
+    fn build_templates(_c: &VenueCfg, _rd: &RefData, _a: AccountId, _k: &Credential) -> Result<(), ProtoErr> {
+        Ok(())
+    }
+    fn encode(
+        _rd: &RefData,
+        _t: &(),
+        c: &GwCmd,
+        _tg: &TargetRef,
+        _k: &WallClock,
+        _b: &mut [u8],
+    ) -> Result<usize, EncodeErr> {
+        Err(EncodeErr::Unsupported(c.op))
+    }
+    fn render_cid(_id: &ClientOrderId, _o: &mut [u8; 48]) -> usize {
+        0
+    }
+    fn parse_cid(_b: &[u8]) -> Option<ClientOrderId> {
+        None
+    }
+    fn classify_report(_op: MsgOp, _h: &[u8]) -> FakeMd {
+        FakeMd::Unknown
+    }
+    fn decode_report(
+        _rd: &RefData,
+        _c: &mut (),
+        _k: FakeMd,
+        _p: &[u8],
+        _rx: &RxMeta,
+        _o: &mut impl ReportSink,
+    ) -> Result<ReportOutcome, DecodeErr> {
+        Err(DecodeErr::UnknownClass)
+    }
+    fn rate_rules() -> &'static [RateRule] {
+        &[]
+    }
+    fn stale_guard() -> StaleGuard {
+        StaleGuard::None
+    }
+    fn dead_man() -> DeadManSpec {
+        DeadManSpec::None
+    }
+    fn dead_man_refresh(
+        _rd: &RefData,
+        _t: &(),
+        _ms: u32,
+        _i: &[InstId],
+        _k: &WallClock,
+        _o: &mut DeadManOut,
+    ) -> Result<(), EncodeErr> {
+        Err(EncodeErr::Unsupported(GwOp::DeadManRefresh))
+    }
 
     fn classify(_route: RouteId, op: MsgOp, head: &[u8]) -> FakeMd {
         if op != MsgOp::Text {

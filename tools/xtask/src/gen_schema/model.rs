@@ -29,6 +29,8 @@ pub struct Model {
     pub notes: Vec<NoteReg>,
     /// `(source, n, name)` rows of the source crates' `NOTE_CODES` tables.
     pub note_consts: Vec<NoteConst>,
+    /// `ConnState.reason` codes (hft-venue `CONN_REASONS`); empty when that crate is absent.
+    pub conn_reasons: Vec<ConnReason>,
     /// Exported container structs (SPB1, framing).
     pub structs: Vec<StructRow>,
     /// Every code table and bit set, by name.
@@ -38,6 +40,14 @@ pub struct Model {
     /// `(kind, body offset, length)` masked by the verifying replay.
     pub measure_mask: Vec<(u16, u16, u16)>,
     pub strategies: Strategies,
+}
+
+/// One `ConnState.reason` code: `(code, name, ConnStateKind name)`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConnReason {
+    pub code: u32,
+    pub name: String,
+    pub state: String,
 }
 
 /// Strategy descriptors read from the `hft-core schemas` export.
@@ -407,6 +417,13 @@ static NOTE_CODES_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
 static NOTE_CODE_ROW: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"\(\s*NoteSource::(\w+)\s*,\s*(0x[0-9A-Fa-f_]+|[0-9_]+)\s*,\s*"([^"]*)"\s*,?\s*\)"#).unwrap()
 });
+static CONN_REASONS_BLOCK: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?s)CONN_REASONS\s*:\s*&\s*\[\s*\(\s*u32\s*,\s*&\s*(?:'static\s+)?str\s*,\s*ConnStateKind\s*\)\s*\]\s*=\s*&\s*\[(.*?)\]\s*;")
+        .unwrap()
+});
+static CONN_REASON_ROW: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"\(\s*([0-9_]+)\s*,\s*"([^"]*)"\s*,\s*ConnStateKind::(\w+)\s*,?\s*\)"#).unwrap()
+});
 static LINE_COMMENT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"//[^\n]*").unwrap());
 
 /// Kind numbers marked `#[deprecated]` in `crates/hft-event/src/kinds.rs` under `root`.
@@ -469,6 +486,28 @@ pub fn scan_note_consts(root: &Path) -> Vec<NoteConst> {
                         }
                     }
                 }
+            }
+        }
+    }
+    out
+}
+
+/// Rows of hft-venue's `CONN_REASONS: &[(u32, &str, ConnStateKind)]` (text scan of
+/// `crates/hft-venue/src/codes.rs` under `root`; absent → empty).
+pub fn scan_conn_reasons(root: &Path) -> Vec<ConnReason> {
+    let Ok(text) = std::fs::read_to_string(root.join("crates/hft-venue/src/codes.rs")) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for b in CONN_REASONS_BLOCK.captures_iter(&text) {
+        let body = LINE_COMMENT.replace_all(&b[1], "");
+        for r in CONN_REASON_ROW.captures_iter(&body) {
+            if let Some(code) = parse_int(&r[1]) {
+                out.push(ConnReason {
+                    code,
+                    name: r[2].to_string(),
+                    state: r[3].to_string(),
+                });
             }
         }
     }
@@ -578,6 +617,7 @@ pub fn from_crates(root: &Path) -> Model {
             .collect(),
         notes,
         note_consts: scan_note_consts(root),
+        conn_reasons: scan_conn_reasons(root),
         structs,
         enums,
         rdb_rows,

@@ -15,27 +15,27 @@ spec: README.md
 | 概要 | VEN-014、VEN-020、VEN-021、VEN-241、VEN-389 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
-| 协议接口 | VEN-018、VEN-064、VEN-341 |
-| 出环:`OutMsg = GwCmd` | VEN-194、VEN-196、VEN-199–VEN-206、VEN-214、VEN-235–VEN-238、VEN-240、VEN-241 |
+| 协议接口 | VEN-018、VEN-064、VEN-341、VEN-390 |
+| 出环:`OutMsg = GwCmd` | VEN-194、VEN-196、VEN-199–VEN-206、VEN-214、VEN-235–VEN-238、VEN-240、VEN-241、VEN-391、VEN-392 |
 | 运行时入口 | VEN-007、VEN-011、VEN-013、VEN-071、VEN-084、VEN-085、VEN-161、VEN-210、VEN-245、VEN-264 |
 | 产生与消费的事件 | VEN-005、VEN-065、VEN-160、VEN-205、VEN-233、VEN-242、VEN-243、VEN-303、VEN-320、VEN-321 |
-| 配置项 | VEN-006、VEN-008–VEN-012、VEN-015–VEN-017、VEN-028、VEN-067、VEN-068、VEN-076、VEN-080、VEN-081、VEN-159、VEN-176、VEN-208、VEN-209、VEN-219、VEN-222、VEN-229、VEN-234、VEN-239、VEN-246、VEN-251、VEN-253、VEN-256、VEN-257、VEN-261、VEN-293、VEN-301、VEN-388 |
+| 配置项 | VEN-006、VEN-008–VEN-012、VEN-015–VEN-017、VEN-028、VEN-067、VEN-068、VEN-076、VEN-080、VEN-081、VEN-159、VEN-176、VEN-208、VEN-209、VEN-219、VEN-222、VEN-229、VEN-234、VEN-239、VEN-246、VEN-251、VEN-253、VEN-256、VEN-257、VEN-261、VEN-293、VEN-301、VEN-388、VEN-393 |
 | 实现说明 | 不适用:见子节 |
 | 1. 线程与环(由 hft-core 装配) | VEN-013、VEN-020–VEN-027、VEN-030–VEN-036、VEN-069–VEN-074、VEN-086、VEN-087、VEN-212、VEN-380、VEN-383 |
 | 2. `FeedRuntime::poll_once` 的固定顺序 | VEN-017、VEN-040–VEN-046、VEN-050–VEN-056、VEN-060–VEN-069、VEN-075、VEN-077–VEN-084、VEN-330、VEN-367、VEN-384 |
 | 3. 去重、断裂与重同步 | VEN-001、VEN-100–VEN-109、VEN-129、VEN-171 |
 | 3a. BBO 连接健康 | VEN-026、VEN-031、VEN-075、VEN-076、VEN-079、VEN-082、VEN-103、VEN-104、VEN-120–VEN-134、VEN-360、VEN-389 |
-| 3b. 快照获取(snap-fetch) | VEN-002、VEN-007、VEN-130、VEN-133、VEN-150–VEN-163、VEN-387 |
+| 3b. 快照获取(snap-fetch) | VEN-002、VEN-007、VEN-130、VEN-133、VEN-150–VEN-163、VEN-387、VEN-395 |
 | 3c. 分档快照(DepthTopN) | VEN-028、VEN-074、VEN-078、VEN-170–VEN-176、VEN-330、VEN-385 |
-| 4. `GwRuntime::poll_once` 的循环结构 | VEN-014、VEN-190–VEN-249、VEN-357、VEN-369、VEN-386、VEN-389 |
-| 4a. 账户查询:保证金轮询与配置核验 | VEN-003、VEN-007、VEN-015、VEN-211、VEN-225、VEN-227、VEN-250–VEN-265、VEN-313、VEN-364、VEN-365、VEN-389 |
+| 4. `GwRuntime::poll_once` 的循环结构 | VEN-014、VEN-190–VEN-249、VEN-357、VEN-369、VEN-386、VEN-389、VEN-391–VEN-393 |
+| 4a. 账户查询:保证金轮询与配置核验 | VEN-003、VEN-007、VEN-015、VEN-211、VEN-225、VEN-227、VEN-250–VEN-265、VEN-313、VEN-364、VEN-365、VEN-389、VEN-390、VEN-395 |
 | 4b. 私有频道归属与热备连接 | VEN-014、VEN-241、VEN-270–VEN-276、VEN-381 |
 | 5. 心跳 | VEN-120、VEN-134、VEN-280–VEN-283 |
 | 6. exch id → slot 私有表(`IdTable`) | VEN-004、VEN-215、VEN-290–VEN-297、VEN-358、VEN-386 |
 | 6a. 去重环的重启重建 | VEN-300–VEN-304、VEN-382 |
-| 7. 会话建立(warm 线程 `conn-builder`,`SessionDriver`) | VEN-310–VEN-315 |
+| 7. 会话建立(warm 线程 `conn-builder`,`SessionDriver`) | VEN-310–VEN-315、VEN-394 |
 | 8. 源文件规划 | VEN-341 |
-| 延迟与资源契约 | VEN-046、VEN-053、VEN-340、VEN-350–VEN-369 |
+| 延迟与资源契约 | VEN-046、VEN-053、VEN-340、VEN-350–VEN-369、VEN-395 |
 | 测试与验收 | 不适用:非规范 |
 | 依赖 | VEN-341 |
 | 延伸阅读 | 不适用:非规范 |
@@ -46,17 +46,18 @@ spec: README.md
 
 夹具(`crates/hft-venue/tests/support/`,只给本文件的用例用;本 crate 不依赖任何 `venue-*`,含 dev 依赖):
 
-- **`StubProto`**:实现 `VenueProtocol` 的桩协议,`NAME = "stub-perp"`、`VENUE = V7`(测试 venue 号 7)、`MARKET = LinearPerp`、`ORDER_FRAME_CAP = 2048`。报文是以 `|` 分隔的文本行:
-  - 行情:`B|<sym>|<u>|<bid>|<bq>|<ask>|<aq>`(Bbo,`seq_rule = Monotonic`,`u` 为 update_id)、`T|<sym>|<tid>|<px>|<qty>|<side>`(Trade,`Monotonic`)、`M|<sym>|<ex_ms>|<px>`(Mark,`ByTime`)、`I|<sym>|<ex_ms>|<px>`(Index,`ByTime`)、`F|<sym>|<ex_ms>|<rate>|<next_ms>`(Funding,`ByTime`)、`D|<sym>|<seq>|<n>|<px qty>×n…`(分档快照,`Snapshot`)、`DT|<sym>|<ex_ms>|<n>|…`(无序号分档快照,`ByTime`);控制 `ACK|<sub_id>|<ok>|<code>`、`PONG|<tsc>`、`BYE`(`ServerShutdown`);`B|ZZZ|…`(未订阅符号,`peek` 返回 `inst = 0`);`B|S1|x…`(类别已知、数值坏 → `DecodeErr::Number`)。
+- **`StubProto`**:实现 `VenueProtocol` 的桩协议,`NAME = "stub-perp"`、`VENUE = V7`(取值 `VenueId::BYBIT_LINEAR`:refdata 只加载已登记的 venue 号,7 是保留号;本 crate 的用例不涉及该 venue 的任何协议细节)、`MARKET = LinearPerp`、`ORDER_FRAME_CAP = 2048`。报文是以 `|` 分隔的文本行:
+  - 行情:`B|<sym>|<u>|<bid>|<bq>|<ask>|<aq>`(Bbo,`seq_rule = Monotonic`,`u` 为 update_id)、`T|<sym>|<tid>|<px>|<qty>|<side>`(Trade,`Monotonic`)、`M|<sym>|<ex_ms>|<px>`(Mark,`ByTime`)、`I|<sym>|<ex_ms>|<px>`(Index,`ByTime`)、`F|<sym>|<ex_ms>|<rate>|<next_ms>`(Funding,`ByTime`)、`D|<sym>|<seq>|<n>|<px qty>×n…`(分档快照,`Snapshot`)、`DT|<sym>|<ex_ms>|<n>|…`(无序号分档快照,`ByTime`);控制 `ACK|<sub_id>|<ok>|<code>`、`PONG|<tsc>`、`BYE`(`ServerShutdown`);应用心跳 `PING|<now_ms>`(本端发出);订阅 `SUB|<inst>,<inst>…`、退订 `UNSUB|…`(inst 为数值 id,每帧至多 `StubCfg.subs_per_frame` 个,默认 10);登录 `LOGIN<step>|…`(本端发出),结果 `LOGIN_OK`/`LOGIN_CONT`/`LOGIN_REJ|<code>`;`B|ZZZ|…`(未订阅符号,`peek` 返回 `inst = 0`);`B|S1|x…`(类别已知、数值坏 → `DecodeErr::Number`)。
   - 回报:`O|<cid>|<exch_id>|<what>|<qty>|<cum>|<avg>|<fee>|<fee_asset>|<tid>`(`what` ∈ Ack/Fill/PartialFill/CancelAck/FeeOnly/Reject…;`cid` 为空表示回报不带 client id)、`X|<cause>|…`(venue 直接判定的 `ExternalFill`)、`E|<name>`(用户流事件:`listenKeyExtended` 为名单内,其余名字为未知)、`R|<req>|<code>`(响应码:`-2010` 登记为确定拒绝,`-1007` 登记为结果未知,其余未登记)、`MP|…`(保证金推送)、`FS|<sym>|<settle_ms>|<amt>|<disc>`(资金费结算)、`H|MARGIN_CALL`(`hint = MarginNow`)、`H|CFG`(`hint = ConfigRecheck`)、`Z|…`(类别已知、字段坏 → `DecodeErr::Shape`)。
+  - 订单帧:`P|<req>|<cid>|<inst>|<side>|<px>|<qty>|<exp>|<oflags>`、`C|<req>|<cid>|<exch>|<inst>`、`A|<req>|<cid>|<px>|<qty>`、`Q|<req>|<cid>|<exch>`、`CA|<req>|<inst>`、`BC|<req>|<cid>,<cid>…`、`DM|<timeout>|<inst>,…`;`req` = `<slot>-<gen>-<op>-<epoch>`,响应 `R|<req>|<code>[|<used>|<limit>|<window>]`。
   - client id 外形:`"st-"` + hft-types 规范 24 位十六进制。
-  - 开关 `StubCfg`:`bbo_snapshot`(`bbo_snapshot_request` 返回 `Ok(true)` / `Ok(false)`)、`bbo_batch`(一次请求可覆盖的 inst 上限,传入更多时返回 `Err(ProtoErr::BufFull)`)、`account_cancel_all`(为假时 `encode` 对 `CancelAll{inst = 0}` 返回 `Err(EncodeErr::Unsupported(GwOp::CancelAll))`)、`query_by_cid`(为假时 `exch_order_id = 0` 的 Query/Cancel 返回 `Err(EncodeErr::UnknownTarget)`)、`dead_man`(`None` / `CountdownPerInst{min_ms: 5000, timeout_ms: 30000, refresh_ms: 10000, via: Ws}` / `CountdownAccount{…, via: Rest}`)、`session_identity`(`session_identity_request` 返回 `Ok(true)` / `Ok(false)`)、`user_stream`(为真时私有频道在独立用户流连接上)、`inst_cancel_all`(为假时 `encode` 对 `CancelAll{inst ≠ 0}` 也返回 `Unsupported(CancelAll)`)、`rest_query`(为真时 `order_channel(Query) = Rest`,查单经 `encode_rest`/`decode_rest`)、`keepalive`(`session_keepalive_request` 返回 `Ok(true)` / `Ok(false)`);`R|<req>|-1125` 置 `ctl = UserStreamEnded`,`E|SHUTDOWN` 置 `ctl = ServerShutdown`。类型参数给出 `CANCEL_ALL_SWEEP`(默认 false)与 `BBO_SNAPSHOT_BATCH`(默认 `u16::MAX`;BBO 补帧的 `BufFull` 由 `bbo_batch` 模拟请求长度上限)。
+  - 开关 `StubCfg`:`bbo_snapshot`(`bbo_snapshot_request` 返回 `Ok(true)` / `Ok(false)`)、`bbo_batch`(一次请求可覆盖的 inst 上限,传入更多时返回 `Err(ProtoErr::BufFull)`)、`account_cancel_all`(为假时 `encode` 对 `CancelAll{inst = 0}` 返回 `Err(EncodeErr::Unsupported(GwOp::CancelAll))`)、`query_by_cid`(为假时 `exch_order_id = 0` 的 Query/Cancel 返回 `Err(EncodeErr::UnknownTarget)`)、`dead_man`(`None` / `CountdownPerInst{min_ms: 5000, timeout_ms: 30000, refresh_ms: 10000, via: Ws}` / `CountdownAccount{…, via: Rest}`)、`session_identity`(`session_identity_request` 返回 `Ok(true)` / `Ok(false)`)、`inst_cancel_all`(为假时 `encode` 对 `CancelAll{inst ≠ 0}` 也返回 `Unsupported(CancelAll)`)、`rest_query`(为真时 `order_channel(Query) = Rest`,查单经 `encode_rest`/`decode_rest`)、`keepalive`(`session_keepalive_request` 返回 `Ok(true)` / `Ok(false)`);`R|<req>|-1125` 置 `ctl = UserStreamEnded`,`E|SHUTDOWN` 置 `ctl = ServerShutdown`。另有 `subs_per_frame`、`encode_batch_ok`、`bootstrap`、`login`(无 / 一步 / 两步)、`hb_md`/`hb_order`(`HeartbeatSpec`)、`encode_err`。`StubProto = Stub<2048, 0>`;`Stub<FCAP, V>` 的 `FCAP` 为 `ORDER_FRAME_CAP`,`V` 为变体位:`V_SWEEP`(`CANCEL_ALL_SWEEP = true`)、`V_SIGN`(逐单签名)、`V_REST_CANCEL_ALL`(`order_channel(CancelAll) = Rest`)、`V_USER_STREAM`(`USER_STREAM = true`,私有频道在独立用户流连接上;它是 trait 常量,不能按线程开关,用例前置写 `StubCfg{user_stream: true}` 即指此变体);`BBO_SNAPSHOT_BATCH = u16::MAX`(BBO 补帧的 `BufFull` 由 `bbo_batch` 模拟请求长度上限,VEN-163 另用类型参数)。
   - 每次 trait 方法调用记入 `CallLog`(方法名、调用线程 id、参数摘要),用于"从不调用"类断言。
 - **`ScriptNet`**:基于 hft-net feature `test-io` 的 `ScriptIo` 与 `MemPeer`(真实 rustls 会话、真实 WS 分帧,[hft-net TESTS](../hft-net/TESTS.md) 的同名夹具):`push(conn, payload, at_tsc)` 让对端发一条 WS 文本帧,`pong(conn, at_tsc)` 回 WS Pong,`eof(conn)`/`rst(conn)` 断开,`set_ready(conn, bool)` 决定 `ReadyPoll::probe` 的结果,`sent(conn)` 返回本端发出的明文帧序列,`SysCount` 按连接与种类(`recvmsg`、`sendmsg`、`epoll_pwait`、`epoll_ctl`)计数。
 - **`BuildStub`**:代替 conn-builder:读 `BuildReq` 环;用例调用 `complete(req, conn)` 把一条 `ScriptNet` 连接以请求方给出的 `ConnId` 交接,`fail(req)` 报建连失败;`retired()` 返回收到的 `RetireMsg`。
 - **`Taps`**:`bbo`、`md`(含 bulk)、`rep`(含 bulk)、`snapreq`、`snap`、`acctreq`、`acct` 各环的消费端,按顺序收集元素;`raw(j)` 按顺序读出 journal `j` 的记录(`RawHdr` + payload + 记录头 `tsc`);`Order` 把各环与 journal 的写入合成一条全序日志(用于"先入环、后写 raw"一类断言)。
 - **时钟**:hft-testkit `ManualTsc`,1 tick = 1 ns;`TscUtc` 取 `utc_ns = tsc`。用例中的 TSC 值即纳秒。
-- **`rd_stub()`**:venue V7;inst `S1` = 701、`S2` = 702、`S3` = 703(价格指数 −2、数量指数 −3),规模用例另有 `P001`–`P300` = 7001–7300;资产 USDT(数量指数 −6)、BNB(−8);账户 A1(Live,`venue_account_ix = 0`)、A2(Live,`venue_account_ix = 11`)、A9(Sim);`VenueMeta{ws_max_streams_per_conn: 50, ws_max_in_msgs_per_s: 10, ws_max_conn_age_s: 86400}`;`VenueCaps{margin_data: Poll{interval_ms: 2000}, flags: AMEND | POST_ONLY | IOC | BATCH_CANCEL, reduce_only: true, ignorable_user_events: ["listenKeyExtended"], funding_settle: PerSymbolPush}`;`RateLimitTable`:(V7, A1)、(V7, A2) 下单桶各 10 条 / 1000 ms,REST 权重桶各 100 / 60 000 ms。
+- **`rd_stub()`**:venue V7;inst `S1` = 701、`S2` = 702、`S3` = 703(价格指数 −2、数量指数 −4:refdata 要求价格与数量指数之和 ≤ −6),规模用例另有 `P001`–`P300` = 7001–7300;资产 USDT(数量指数 −6)、BNB(−8);账户 A1 = `AccountId(1)`(Live,`venue_account_ix = 0`)、A2 = `AccountId(12)`(Live,`venue_account_ix = 11`;refdata 的 ix 是稠密序号,中间是 10 个只占位的 Live 账户 2–11)、A9 = `AccountId(13)`(Sim);`VenueMeta{ws_max_streams_per_conn: 50, ws_max_in_msgs_per_s: 10, ws_max_conn_age_s: 86400}`;`VenueCaps{margin_data: Poll{interval_ms: 2000}, flags: AMEND | POST_ONLY | IOC | BATCH_CANCEL, reduce_only: true, ignorable_user_events: ["listenKeyExtended"], funding_settle: PerSymbolPush}`;`RateLimitTable`:(V7, A1)、(V7, A2) 下单桶各 10 条 / 1000 ms,REST 权重桶各 100 / 60 000 ms。
 - **基准配置**(用例在 `前置` 里写"`F0`"等即表示取下列显式值,再列出本用例改动的键):
   - `F0`(`FeedRuntime`):`routes = All`、`ready = false`、`feed.bbo_conns = 2`、`feed.bbo_frames_per_poll = 8`、`feed.frames_per_poll = 64`、`feed.bbo_ping_ms = 1000`、`feed.bbo_dead_ms = 3000`、`feed.bbo_refresh_grace_ms = 500`、`feed.depth = topn`、`feed.topn_levels = 5`、`feed.snapshot_part_levels = 64`、`feed.raw_dups = false`、`feed.raw.bbo = on`、`feed.raw.md = on`、`feed.raw.sample_ms = 1000`、`feed.ring_full_park_us = 200`、`conn.rotate_margin_s = 3600`、`max_sub_insts = 50`;环容量 bbo 1024、md 1024、md-bulk 1 MiB、feedctl 256、snapreq 64、snap 256 KiB;`StubCfg{bbo_snapshot: true, bbo_batch: 4}`。
   - `S0`(`SnapFetchTask`):`snap.parallel = 2`、`gw.rest_idle_check_ms = 1000`、hft-net `rest_timeout_ms = 2000`;snap 环 256 KiB。
@@ -350,10 +351,10 @@ spec: README.md
 - 里程碑:M1.5
 - 前置:`F0`、`G0`;`StubProto::default_caps()` 给 `margin_data = Poll{interval_ms: 5000}`,`routes()` 的 Bbo 路由 `max_streams = 200`、`max_in_msgs_per_s = 20`;refdata 生效值为 `Poll{interval_ms: 2000}`、`ws_max_streams_per_conn = 50`、`ws_max_in_msgs_per_s = 10`
 - 步骤:
-  1. 订阅 `P001`–`P051` 的 `BBO`,完成建连;gw 运行 10 s
+  1. 订阅 `P001`–`P051` 的 `BBO`,完成建连并运行 1.1 s;构造 `GwRuntime`
 - 期望:
-  - BBO 连接分 2 组(按 50 拆分,不是 200);订阅帧节奏按 10 条/s 计算(VEN-017 的公式);Margin 序列间隔 2 s
-  - `CallLog` 中 `default_caps` 调用数为 0;`routes()` 只用于取路由种类与档位
+  - BBO 连接分 2 组(按 50 拆分,不是 200);订阅帧节奏按 10 条/s 计算(VEN-017 的公式)(Margin 序列间隔见 VEN-390)
+  - `CallLog` 中 `default_caps` 调用数为 0(feed 与 gw 构造及运行都不调);`routes()` 只用于取路由种类与档位
 - 实现:`crates/hft-venue/tests/config.rs::ven_018_refdata_effective_values`
 
 ### VEN-020 `routes = Bbo` 的任务只建 Bbo 路由、只写 bbo 环与 `raw-feed-<venue>-bbo`
@@ -534,7 +535,7 @@ spec: README.md
 - 级别:prop
 - 里程碑:M1.5
 - 性质:任一时刻同一 venue 的 BBO 连接(活跃、在建、待退役)≤ `MAX_BBO_CONN_SLOTS`(8);全部 BBO 记录的 `conn` < 8;对每个槽,bbo 环中连接级记录按 `Up, …, Down, Up, …` 交替,不出现两个 `Up` 之间没有 `Down`
-- 生成:`feed.bbo_conns` 取 1–3;订阅 1–150 个 inst(`ws_max_streams_per_conn = 50`,满足 VEN-012 的约束);10⁴ 步,每步从 {`eof`/`rst` 任一连接、建连失败、建连成功、`BYE`、时钟推进 0–4000 ms 使计划轮换或静默触发、`Rotate{conn}`} 抽取
+- 生成:`feed.bbo_conns` 取 1–3;订阅 1–150 个 inst(`ws_max_streams_per_conn = 50`,满足 VEN-012 的约束);每例 1–999 步,每步从 {`eof`/`rst` 任一连接、建连失败、建连成功、`BYE`、时钟推进 0–4000 ms 使计划轮换或静默触发、`Rotate{conn}`} 抽取
 - 参考:逐步统计 `BuildStub` 上未完成的请求 + 活跃连接 + 已退役未回收的连接
 - 例数:PR 256
 - 实现:`crates/hft-venue/tests/conn_id.rs::ven_033_bbo_slots_bounded`
@@ -679,9 +680,10 @@ spec: README.md
 - 步骤:
   1. `poll_once` 三次,读 `CallLog` 中 `classify` 的调用顺序(连接号、帧号)
 - 期望:
-  - 第 1 次 `poll_once`:`c0f1, c1f1, c0f2, c1f2, …, c0f8, c1f8`(16 帧)
-  - 第 2 次 `poll_once`:`c1f9, c0f9, c1f10, c0f10, …, c1f16, c0f16`(16 帧,起点为连接 1)
-  - 第 3 次 `poll_once`:`c0f17, c1f17, …, c0f20, c1f20`(8 帧)
+  - 记第 1 次的起点连接为 `s`(取决于此前建连各轮的轮换,不固定为 0),另一条为 `t`
+  - 第 1 次 `poll_once`:`c{s}f1, c{t}f1, c{s}f2, c{t}f2, …, c{s}f8, c{t}f8`(16 帧)
+  - 第 2 次 `poll_once`:`c{t}f9, c{s}f9, …, c{t}f16, c{s}f16`(16 帧,起点为 `t`)
+  - 第 3 次 `poll_once`:`c{s}f17, c{t}f17, …, c{s}f20, c{t}f20`(8 帧)
 - 实现:`crates/hft-venue/tests/feed_poll.rs::ven_050_bbo_frame_round_robin`
 
 ### VEN-051 只有一条连接积压时每轮只处理该连接的 `bbo_frames_per_poll` 帧
@@ -696,7 +698,7 @@ spec: README.md
   - 处理 8 帧(`c0f1`–`c0f8`);`LoopStat.frames = 8`;连接 0 余 12 帧
 - 实现:`crates/hft-venue/tests/feed_poll.rs::ven_051_single_backlog_cap`
 
-### VEN-052 三条 BBO 连接时轮转起点依次为 0、1、2、0
+### VEN-052 三条 BBO 连接时轮转起点每轮前移一条
 
 - 规则:[§2](README.md#2-feedruntimepoll_once-的固定顺序)
 - 级别:unit
@@ -705,7 +707,7 @@ spec: README.md
 - 步骤:
   1. `poll_once` 四次
 - 期望:
-  - 四轮处理的第一帧依次来自连接 0、1、2、0;每轮恰好 3 帧
+  - 四轮处理的第一帧依次来自连接 `s`、`s + 1`、`s + 2`、`s`(模 3;`s` 取决于此前各轮的轮换);每轮恰好 3 帧
 - 实现:`crates/hft-venue/tests/feed_poll.rs::ven_052_start_rotates`
 
 ### VEN-053 同线程多个 feed-bbo 任务时新到 BBO 帧的等待帧数不超过上界
@@ -713,8 +715,8 @@ spec: README.md
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)、[§2](README.md#2-feedruntimepoll_once-的固定顺序)
 - 级别:prop
 - 里程碑:M1.5
-- 性质:一个 `TaskLoop` 承载两个 `routes = Bbo` 的任务 A、B(各 2 条 BBO 连接);任一时刻在 B 的连接 1 上新到的一帧,从到达到被处理之间处理的其他帧数 ≤ A 的 2 × `bbo_frames_per_poll` + B 的另一条连接 1 帧 + 同一连接上排在它前面的帧数
-- 生成:`feed.bbo_frames_per_poll` 取 1–8;每条连接初始积压 0–64 帧;目标帧的到达时刻随机落在某一轮之前
+- 性质:一个 `TaskLoop` 承载两个 `routes = Bbo` 的任务 A、B(各 2 条 BBO 连接);任一时刻在 B 的连接 1 上新到的一帧,从到达到被处理之间处理的其他帧数 ≤ A 的 2 × `bbo_frames_per_poll` + B 的另一条连接 1 帧(目标帧所在连接无积压,即"同一连接上排在它前面的帧"为 0;有积压时上界另加该积压,由按帧轮转直接给出)
+- 生成:`feed.bbo_frames_per_poll` 取 1–8;A 的两条连接与 B 的连接 0 初始积压各 0–64 帧,B 的连接 1 无积压;目标帧在第 0–5 轮之前到达 B 的连接 1
 - 参考:按插桩计数(每处理一帧加 1)与上式比较
 - 例数:PR 512
 - 实现:`crates/hft-venue/tests/feed_poll.rs::ven_053_bbo_wait_bound`
@@ -891,13 +893,13 @@ spec: README.md
 - 规则:[§1](README.md#1-线程与环由-hft-core-装配)
 - 级别:integ
 - 里程碑:M1.5
-- 前置:`F0`,`routes = Bbo`,`feed.ring_full_park_us = 200`;bbo 环容量 4,已被占满且消费者暂停;连接 0 有 3 帧 `u` = 21–23
+- 前置:`F0`,`routes = Bbo`,`feed.ring_full_park_us = 200`;bbo 环容量 4,消费者暂停;连接 0 的一次 `recvmsg` 读到 7 帧 `u` = 17–23,前一轮转发 17–20 占满环,21–23 留在连接的 TLS 缓冲中
 - 步骤:
   1. `now = 1_000_000`,`poll_once`
-  2. 消费者取走 4 条;`now = 1_200_000`,`poll_once`
+  2. 消费者取走 4 条(17–20);`now = 1_200_000`,`poll_once`
 - 期望:
   - 步骤 1:无新 `Bbo`;`LoopStat{did_work: false, ring_full: 1, next_deadline: Some(1_200_000)}`;三帧仍在连接缓冲中
-  - 步骤 2:依次转发 `u` = 21、22、23;与环容量 1024 时的同一输入相比,bbo 环元素序列逐条相同
+  - 步骤 2:依次转发 `u` = 21、22、23;与环容量 1024 时的同一输入相比,bbo 环元素序列(17–23)逐条相同
 - 实现:`crates/hft-venue/tests/ring_full.rs::ven_070_bbo_ring_full`
 
 ### VEN-071 环满期间 `has_pending` 不计 socket 中的待读数据
@@ -1848,7 +1850,7 @@ spec: README.md
 | VEN-197.1 | 112 `Open`,113 `Open` | `Written`,`conn = 112` |
 | VEN-197.2 | 112 `Closing`,113 `Open` | `Written`,`conn = 113` |
 | VEN-197.3 | 112 与 113 都不是 `Open` | `NoConn(5)`;两条连接的 `MemPeer` 都没收到密文 |
-| VEN-197.4 | 112 `Open` 但 `send_frame` 返回 `NotOpen`,113 `Open` | 改走 113,`Written`,`conn = 113`;112 没收到密文 |
+| VEN-197.4 | 112 的 `send_frame` 返回 `NotOpen`(gw 不预先判相位,先在 primary 上发;以 `Closing` 相位造出),113 `Open` | 改走 113,`Written`,`conn = 113`;112 没收到密文 |
 | VEN-197.5 | 112 返回 `TxBacklog`,113 返回 `NotOpen` | `NoConn`;两条都没收到密文 |
 
 ### VEN-198 写入失败如实上报 `WriteError`,Place 照写槽镜像
@@ -1975,8 +1977,6 @@ spec: README.md
 | VEN-206.1 | true / `CancelAll{account: A1, inst: 0}` | 1 帧;1 条 `SendReport{CancelAll, Written}` |
 | VEN-206.2 | false / 同上 | `encode` 先以 `inst = 0` 返回 `Unsupported(CancelAll)`,随后以 `inst = S1`、`S2` 各编码一帧(共 2 帧,不含 S3);1 条 `SendReport{Written}` |
 | VEN-206.3 | false,且 `inst_cancel_all = false` / 同上 | `inst = 0`、`S1`、`S2` 都返回 `Unsupported(CancelAll)`;随后 A1 的 3 张活动单展开为 `Cancel`:`encode_batch` 返回 `Ok` 时 1 帧,返回 `Unsupported` 时 3 帧(逐条 `encode`);1 条 `SendReport{CancelAll, Written}`,展开的 `Cancel` 不另回 `SendReport` |
-| VEN-206.4 | VEN-206.3 且 `CANCEL_ALL_SWEEP = true` | 展开的帧之后提交 1 个 `ro_request(OpenOrders)` 请求;其响应(A1 的 1 张仍挂 + 1 张外来单)经 `decode_rest(Sweep)` 产出 1 条 `QueryResult` 入 rep 环 |
-| VEN-206.5 | true,`StubCfg{rest_query: false}`,`order_channel(CancelAll) = Rest` 的桩变体 / 同上 | 无 WS 帧;1 个 REST 请求(`encode_rest`);1 条 `SendReport{CancelAll, Written}` |
 
 ### VEN-207 回报突发期间每处理一帧就检查一次出环
 
@@ -1995,19 +1995,19 @@ spec: README.md
 - 规则:[§4](README.md#4-gwruntimepoll_once-的循环结构)、[配置项](README.md#配置项)
 - 级别:integ
 - 里程碑:M1.5
-- 前置:`G0`,`gw.aux_every = 8`,`gw.rest_idle_check_ms = 1000`,`StubCfg{user_stream: true}`;A1 有 primary、独立用户流、standby、2 个 REST 端点池(各 2 条连接,其中连接 130 有一个在途查单,其余空闲);上次空闲检查在第 1 圈前 1 ms,整个运行在 100 ms 内
+- 前置:`G0`,`gw.aux_every = 8`,`gw.rest_idle_check_ms = 1000`,`StubCfg{user_stream: true}`;A1 有 primary、独立用户流、standby(REST 池部分见 VEN-393)
 - 步骤:
   1. 运行 80 圈
 - 期望:
-  - `SysCount.recvmsg`:primary 80、用户流 80、standby 10、连接 130 为 10(在途期间的 aux 圈)、其余 REST 连接 0;`epoll_pwait` 为 0
-  - 每次 standby 或 REST socket 被读之后都紧跟一次 `drain_out`(插桩计数相等)
+  - `SysCount.recvmsg`:primary 80、用户流 80、standby 10;`epoll_pwait` 为 0
+  - 每次 standby 被读之后都紧跟一次 `drain_out`(插桩计数相等)
 - 实现:`crates/hft-venue/tests/gw_loop.rs::ven_208_poll_cadence`
 
 ### VEN-209 gw 的空闲 REST 连接每 `rest_idle_check_ms` 只做一次存活检查
 
 - 规则:[§4](README.md#4-gwruntimepoll_once-的循环结构)、[配置项](README.md#配置项)
 - 级别:table
-- 里程碑:M1.5
+- 里程碑:M3
 - 前置:`G0`,`gw.rest_idle_check_ms = 1000`;A1 的 REST 连接 131、132 空闲;上次检查 `t_c`
 - 实现:`crates/hft-venue/tests/gw_loop.rs::ven_209_rest_idle_check`
 
@@ -2021,7 +2021,7 @@ spec: README.md
 
 - 规则:[运行时入口](README.md#运行时入口)
 - 级别:unit
-- 里程碑:M1.5
+- 里程碑:M3
 - 前置:`G0`;A1 有 primary 112、standby 113、REST 130(在途 1)、131(空闲)
 - 步骤:
   1. 调 `wait_fds`
@@ -2550,7 +2550,7 @@ spec: README.md
 - 规则:[§4](README.md#4-gwruntimepoll_once-的循环结构)、[§4b](README.md#4b-私有频道归属与热备连接)
 - 级别:table
 - 里程碑:M3
-- 前置:`G0`;A1 primary 112(私有频道归属)、standby 113 已登录;A2 `StubCfg{user_stream: true}`,用户流连接 121;按行注入一帧
+- 前置:`G0`;行 .1 用 `StubCfg{user_stream: true}`(A2 用户流连接 121);行 .2–.4 用 `StubProto`,A1 primary 112(私有频道归属)、standby 113 已登录;按行注入一帧(`USER_STREAM` 是协议常量,同一 gw 的账户不能混用两种归属)
 - 实现:`crates/hft-venue/tests/gw_report.rs::ven_248_stream_end_and_shutdown`
 
 | 行 | 帧 / 连接 | 期望 |
@@ -3118,7 +3118,6 @@ spec: README.md
 | 行 | 角色 / 变体 | 期望 |
 |---|---|---|
 | VEN-310.1 | Md / `bootstrap = None`,无登录 | `endpoint` → `submit` → `Open` → `SessEvent::Ready`;交接的连接号 = `BuildReq.conn` |
-| VEN-310.2 | UserStream / `bootstrap = Some`(REST 取 token) | `bootstrap` 收到的 `cred` 为该账户的 REST 凭证;先执行 bootstrap REST,再以其 2xx 响应体作 `boot` 调 `endpoint`;`Ready` |
 | VEN-310.3 | Order / `login_result`:`Continue` 后 `Ok` | 发两步登录帧,`Ready` |
 | VEN-310.4 | Order / `Rejected(4001)` | `SessEvent::Failed`,带码 4001;不交接,连接被 `reclaim` |
 
@@ -3236,9 +3235,7 @@ spec: README.md
 | 行 | 运行时 / 负载(10⁵ 次 `poll_once`) | 期望 `allocs()` |
 |---|---|---|
 | VEN-340.1 | `FeedRuntime`(`routes = All`;BBO、成交、分档快照、Pong) | 0 |
-| VEN-340.2 | `GwRuntime`(下单、撤单、回报、暂存、acct 记录应用) | 0 |
-| VEN-340.3 | `SnapFetchTask`(BBO 补帧请求与响应) | 0 |
-| VEN-340.4 | `AcctFetchTask`(Config 与 Margin 序列) | 0 |
+| VEN-340.2 | `GwRuntime`(下单、撤单、回报) | 0 |
 
 ### VEN-341 依赖闭包中没有任何 `venue-*` 与被禁止的 crate
 
@@ -3553,12 +3550,87 @@ spec: README.md
 - 证据:`VEN-389-<venue>-<日期>.txt`,并列入门槛 ⑥ 的记录
 - 实现:`tests/host/VEN-389.sh`
 
+### VEN-390 保证金轮询间隔取 refdata 生效值,不取协议默认
+
+- 规则:[协议接口](README.md#协议接口)、[§4a](README.md#4a-账户查询保证金轮询与配置核验)
+- 级别:unit
+- 里程碑:M3
+- 前置:`G0` + `C0`;`StubProto::default_caps()` 给 `margin_data = Poll{interval_ms: 5000}`,refdata 生效值为 `Poll{interval_ms: 2000}`(VEN-018 的 Margin 部分拆出:M1.5 的 gw 不调度账户查询)
+- 步骤:
+  1. gw 运行 10 s
+- 期望:
+  - Margin 序列间隔 2 s(10 s 内 5 条 `AcctReq{Margin}`);`CallLog` 中 `default_caps` 调用数为 0
+- 实现:`crates/hft-venue/tests/config.rs::ven_390_margin_interval_from_refdata`
+
+### VEN-391 `CANCEL_ALL_SWEEP` 的挂单列表兜底
+
+- 规则:[出环](README.md#出环outmsg--gwcmd)
+- 级别:unit
+- 里程碑:M3
+- 前置:同 VEN-206.3(`account_cancel_all = false`、`inst_cancel_all = false`),`Stub<2048, V_SWEEP>`(`CANCEL_ALL_SWEEP = true`);gw 的 REST 池已交接(原 VEN-206.4)
+- 步骤:
+  1. 处理 `CancelAll{account: A1, inst: 0}`;对端回挂单列表(A1 的 1 张仍挂 + 1 张外来单)
+- 期望:
+  - 展开的帧之后提交 1 个 `ro_request(OpenOrders)` 请求;其响应经 `decode_rest(Sweep)` 产出 1 条 `QueryResult` 入 rep 环
+- 实现:`crates/hft-venue/tests/gw_send.rs::ven_391_cancel_all_sweep`
+
+### VEN-392 `order_channel(CancelAll) = Rest` 的全撤走 REST
+
+- 规则:[出环](README.md#出环outmsg--gwcmd)
+- 级别:unit
+- 里程碑:M3
+- 前置:`G0`,`Stub<2048, V_REST_CANCEL_ALL>`,`StubCfg{account_cancel_all: true, rest_query: false}`;gw 的 REST 池已交接(原 VEN-206.5;M1.5 的 gw 对 REST 通道的命令回 `NoConn`)
+- 步骤:
+  1. 处理 `CancelAll{account: A1, inst: 0}`
+- 期望:
+  - 无 WS 帧;1 个 REST 请求(`encode_rest`);1 条 `SendReport{CancelAll, Written}`
+- 实现:`crates/hft-venue/tests/gw_send.rs::ven_392_cancel_all_rest`
+
+### VEN-393 gw REST 连接的轮询节拍
+
+- 规则:[§4](README.md#4-gwruntimepoll_once-的循环结构)、[配置项](README.md#配置项)
+- 级别:integ
+- 里程碑:M3
+- 前置:同 VEN-208,另有 A1 的 2 个 REST 端点池(各 2 条连接,其中连接 130 有一个在途查单,其余空闲);上次空闲检查在第 1 圈前 1 ms,整个运行在 100 ms 内(原 VEN-208 的 REST 部分)
+- 步骤:
+  1. 运行 80 圈
+- 期望:
+  - `SysCount.recvmsg`:连接 130 为 10(在途期间的 aux 圈)、其余 REST 连接 0;`epoll_pwait` 为 0
+  - 每次 REST socket 被读之后都紧跟一次 `drain_out`(插桩计数相等)
+- 实现:`crates/hft-venue/tests/gw_loop.rs::ven_393_rest_poll_cadence`
+
+### VEN-394 会话建立:bootstrap REST 先于 endpoint
+
+- 规则:[§7](README.md#7-会话建立warm-线程-conn-buildersessiondriver)
+- 级别:unit
+- 里程碑:M3
+- 前置:`SessionDriver<StubProto>`,`StubCfg{bootstrap: true}`;角色 UserStream,账户 A1 有 REST 凭证(原 VEN-310.2;M1.5 的 `start` 对需要 bootstrap 的角色返回 `SessErr::Bootstrap`)
+- 步骤:
+  1. `start` 后驱动至结束,bootstrap REST 回 2xx
+- 期望:
+  - `bootstrap` 收到的 `cred` 为该账户的 REST 凭证;先执行 bootstrap REST,再以其 2xx 响应体作 `boot` 调 `endpoint`;`SessEvent::Ready`
+- 实现:`crates/hft-venue/tests/session.rs::ven_394_session_bootstrap`
+
+### VEN-395 warm 任务与 gw 账户路径的稳态零分配
+
+- 规则:[延迟与资源契约](README.md#延迟与资源契约)、[§3b](README.md#3b-快照获取snap-fetch)、[§4a](README.md#4a-账户查询保证金轮询与配置核验)
+- 级别:table
+- 里程碑:M3
+- 前置:同 VEN-340(原 VEN-340.2 的暂存与 acct 部分、VEN-340.3、VEN-340.4)
+- 实现:`crates/hft-venue/tests/alloc.rs::ven_395_zero_alloc_warm`
+
+| 行 | 运行时 / 负载(10⁵ 次 `poll_once`) | 期望 `allocs()` |
+|---|---|---|
+| VEN-395.1 | `GwRuntime`(解析不到槽的成交暂存与超时、acct 记录应用) | 0 |
+| VEN-395.2 | `SnapFetchTask`(BBO 补帧请求与响应) | 0 |
+| VEN-395.3 | `AcctFetchTask`(Config 与 Margin 序列) | 0 |
+
 ## 验收
 
 - **里程碑**:M1.5 纵切片(BBO 行情、gw 下单与撤单、kill 判定、会话建立)以本文件里程碑为 M1.5 的用例全部有实现且通过为完成;M3 以里程碑 ≤ M3 的全部用例为完成;M6 的 `testnet` 用例在 dev2 联调窗口执行并按 `证据` 归档。
 - **属性测试例数**:PR 的例数写在各用例;每夜对 VEN-022、VEN-033、VEN-053、VEN-103、VEN-151、VEN-175、VEN-193、VEN-200、VEN-270 各跑 PR 例数的 50 倍,VEN-296 跑 64 例(每例 10⁶ 次操作)。
 - **预算**:VEN-350–VEN-369 的基准名与数值上限登记在本 crate README 的[延迟与资源契约](README.md#延迟与资源契约)与 [benchmarks](../../benchmarks/README.md);判定在统一升级主机类 `c16`/`c32` 的参考机上(`bench-gate --reference`),`dev2` 只验功能;主机内分段(`ingest`、`egress`、`hedge_host`、`rep_to_order`、`tick_to_trade`)的数字归 [latency-budget](../../docs/latency-budget.md),判定口径归 [testing §8](../../docs/testing.md#8-上线门槛) 门槛 ⑩,第一份数据来自 M1.5 延迟探针。
-- **稳态零分配**:VEN-340 四行均为 0。
+- **稳态零分配**:VEN-340 与 VEN-395 各行均为 0。
 - **重连混沌**:VEN-330 的 1000 次断连重连中,没有一次簿在收到新快照之前回到 `Live`。
 - **测试网/模拟盘**:VEN-389 对 Binance、OKX、Bitget 的现货与 USDT 永续全部通过,作为门槛 ⑥ 的运行时部分(行情与下单都用测试网,`feed_env = "testnet"`);VEN-381 在 M3 之前完成。
 - **发布**:改动本 crate 的版本先在 dev2 测试网窗口冒烟,再上升级主机(步骤归 [release-and-deploy](../../docs/runbooks/release-and-deploy.md))。

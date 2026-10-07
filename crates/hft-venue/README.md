@@ -74,7 +74,7 @@ pub const SNAP_BBO_BATCH_MAX: usize = 32;  // snap-fetch 一次合并的 BBO 补
 
 pub struct FeedRuntime<P: VenueProtocol> { /* 见实现说明 §2 */ }
 impl<P: VenueProtocol> FeedRuntime<P> {
-    pub fn new(cfg: FeedCfg /* 含 routes: FeedRoutes、ready(ready_poll_on 的结果)、max_sub_insts(hft-core venues.<v>.max_sub_insts) */, deps: FeedDeps<'_>, ctx: P::FeedCtx) -> Result<Self, InitErr>;   // 启动期,可分配
+    pub fn new(cfg: FeedCfg /* 含 routes: FeedRoutes、ready(ready_poll_on 的结果)、max_sub_insts(hft-core venues.<v>.max_sub_insts) */, deps: FeedDeps, ctx: P::FeedCtx) -> Result<Self, InitErr>;   // 启动期,可分配
     /// 循环体一轮。由 hft-rt `TaskLoop` 按线程计划调用(可与其他任务同线程,见 hft-core 线程计划)。
     /// 非阻塞:不自旋等待、不睡眠;每轮工作量有上限(bbo_frames_per_poll、frames_per_poll、每轮至多一条快照记录)。
     pub fn poll_once(&mut self, now_tsc: u64) -> LoopStat;
@@ -86,32 +86,42 @@ pub struct LoopStat { pub did_work: bool, pub frames: u16, pub cmds: u16, pub ri
 
 pub struct SnapFetchTask<P: VenueProtocol> { /* 见实现说明 §3b */ }
 impl<P: VenueProtocol> SnapFetchTask<P> {
-    pub fn new(cfg: SnapCfg, deps: SnapDeps<'_>, ctx: P::FeedCtx /* 独立实例,hft-venue-proto 契约 25 */) -> Result<Self, InitErr>;
+    pub fn new(cfg: SnapCfg, deps: SnapDeps, ctx: P::FeedCtx /* 独立实例,hft-venue-proto 契约 25 */) -> Result<Self, InitErr>;
     pub fn poll_once(&mut self, now_tsc: u64) -> LoopStat;
 }
 
 pub struct GwRuntime<P: VenueProtocol, const CAP: usize = 2048> { /* 见实现说明 §4 */ }
 impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
     /// 启动期:建槽镜像与 IdTable,并从 raw-gw journal 尾部重建去重环(§6a)。
-    pub fn new(cfg: GwCfg, deps: GwDeps<'_>, accts: &[GwAccount<P>]) -> Result<Self, InitErr>;
+    /// accts:每个 Live 账户的 GwAccountSpec(账户、出口 IP 序号、P::build_templates 的结果与 P::GwCtx);其余字段(kill 位、连接号段)由 new 从 refdata 求出。
+    pub fn new(cfg: GwCfg, deps: GwDeps, accts: Vec<GwAccountSpec<P>>) -> Result<Self, InitErr>;
     pub fn poll_once(&mut self, now_tsc: u64) -> LoopStat;
 }
 
 pub struct AcctFetchTask<P: VenueProtocol> { /* 见实现说明 §4a */ }
 impl<P: VenueProtocol> AcctFetchTask<P> {
     /// 启动期:每个 Live 账户建自己的 Templates 与 AcctCtx(hft-venue-proto 契约 27),REST 连接由 conn-builder 交接。
-    pub fn new(cfg: AcctCfg, deps: AcctDeps<'_>, accts: &[AccountId]) -> Result<Self, InitErr>;
+    pub fn new(cfg: AcctCfg, deps: AcctDeps, accts: &[AccountId]) -> Result<Self, InitErr>;
     pub fn poll_once(&mut self, now_tsc: u64) -> LoopStat;
 }
 
+pub struct GwAccountSpec<P: VenueProtocol> { pub account: AccountId, pub src_ip_idx: u8, pub tpl: P::Templates, pub ctx: P::GwCtx }
+
 pub struct SessionDriver<P: VenueProtocol> { /* warm 线程 conn-builder */ }
 impl<P: VenueProtocol> SessionDriver<P> {
-    pub fn start(&mut self, job: JobId, role: Role, acct: Option<AccountId>) -> Result<(), SessErr>;
-    pub fn drive(&mut self, c: &mut Connector, now_ns: i64) -> Option<SessEvent>;  // Ready(Handoff) / Failed
+    /// cfg:VenueCfg 与各行情任务的 ReadyHandle(§7 第 4 步);creds:每个账户的会话凭证(Order/UserStream 角色)。
+    pub fn new(cfg: SessionCfg, creds: Vec<(AccountId, Credential)>) -> Self;
+    /// 按请求方的 BuildReq(角色、连接号)开始一次会话:bootstrap 判定、endpoint、Connector::submit(§7 第 1–2 步)。
+    pub fn start(&mut self, c: &mut Connector, req: BuildReq, acct: Option<AccountId>, now_ns: i64) -> Result<JobId, SessErr>;
+    pub fn drive(&mut self, c: &mut Connector, now_ns: i64) -> Option<SessEvent>;  // Ready(Handoff) / Failed{conn, code}
+    /// 收到 RetireMsg:先从就绪 epfd 注销(若注册过),再 Connector::reclaim(§7 第 7 步)。
+    pub fn retire(&mut self, c: &mut Connector, m: RetireMsg);
 }
+pub enum SessErr { Busy, Build(BuildErr), Proto(ProtoErr), Bootstrap /* 该角色需要 bootstrap REST(M3 起执行) */ }
+/// conn-builder → 请求方任务的交接环元素:登录完成的连接,或请求方所要的那次建连失败(请求方释放该连接号后重建)。
+pub enum Handover { Ready(Handoff), Failed(ConnId) }
 
-pub struct FeedDeps<'a> {
-    pub arena: &'a ConnArena,
+pub struct FeedDeps {   // 连接经 Handoff 交接、经 RetireMsg 交还,任务不持有 ConnArena 引用
     pub rd: &'static RefData,                // 不热换(变更 = 重启)
     pub bbo: Option<Producer<FeedMsg>>,      // → bbo-<venue> 环(高优先级:Bbo 与 BBO 连接的 ConnState);routes ∈ {Bbo, All}
     pub md: Option<Producer<FeedMsg>>,       // → md-<venue> 环(Trade、Mark/Funding/Index、Liquidation、L2Snapshot{TopN}、深度连接的 ConnState;增量深度另有 L2Batch、L2Snapshot{Exchange});routes ∈ {Md, All}
@@ -121,38 +131,35 @@ pub struct FeedDeps<'a> {
     pub snap: Option<ByteConsumer>,          // ← 对应的 snap 环(snap-fetch 写入)
     pub ready: Option<ReadyPoll>,            // hft-net 就绪探测;只在 ready_poll 生效时(§2 第 2 步)
     pub raw: JournalWriter,                  // raw-feed-<venue>(Md/All)或 raw-feed-<venue>-bbo(feed-bbo),本任务唯一写者
-    pub handoff: Consumer<Handoff>, pub retire: Producer<RetireMsg>, pub build: Producer<BuildReq>,
+    pub handoff: Consumer<Handover>, pub retire: Producer<RetireMsg>, pub build: Producer<BuildReq>,
     pub clock: TscUtc,                       // TSC → UTC 换算(基础层类型)
 }
-pub struct SnapDeps<'a> {
-    pub arena: &'a ConnArena,
+pub struct SnapDeps {
     pub rd: &'static RefData,
     pub reqs: [Option<Consumer<SnapReq>>; 2], // snapreq-<venue>、snapreq-<venue>-bbo(各自存在的条件见 §1)
     pub out: [Option<ByteProducer>; 2],       // snap-<venue>、snap-<venue>-bbo
-    pub handoff: Consumer<Handoff>, pub retire: Producer<RetireMsg>, pub build: Producer<BuildReq>,
+    pub handoff: Consumer<Handover>, pub retire: Producer<RetireMsg>, pub build: Producer<BuildReq>,
     pub clock: TscUtc,
 }
-pub struct GwDeps<'a> {
-    pub arena: &'a ConnArena,
+pub struct GwDeps {
     pub rd: &'static RefData,
     pub cmds: Consumer<OutMsg>,              // ← sequencer 的 out-<venue> 环
     pub out: Producer<RepMsg>,               // → sequencer 的 rep-<venue> 环(+ rep-<venue>-bulk)
-    pub acct_req: Producer<AcctReq>,         // → acctreq-<venue>(acct-fetch);唤醒按 hft-rt 规则(Spin 生产者 wake = None)
+    pub acct_req: Producer<AcctReq>,         // → acctreq-<venue>(acct-fetch);唤醒按 hft-rt 规则(Spin 生产者 wake = None);M3 起(M1.5 实现无此字段)
     pub acct: ByteConsumer,                  // ← acct-<venue>(acct-fetch 写入的 acct 记录,§4a)
     pub raw: JournalWriter,                  // raw-gw-<venue>
-    pub raw_tail: JournalReader,             // 同一 journal 的读者,只在 new() 里用于重建去重环(§6a)
+    pub raw_tail: JournalReader,             // 同一 journal 的读者,只在 new() 里用于重建去重环(§6a);M3 起(M1.5 实现无此字段)
     pub kill: &'static KillWord,             // hft-rt 的 CachePadded<AtomicU32>;每个 gw 一个;位常量 hft_types::KillBits(u32),语义 hft-risk
     pub kill_mask: u32,                      // GLOBAL | VENUE | HARD(全 gw 共用的位;账户位按 GwAccount.kill_ix 逐条取,见 §4 第 1 步)
     pub tx_tags: Option<Producer<TxTag>>,    // TX 时间戳配对;可选,默认 None
-    pub handoff: Consumer<Handoff>, pub retire: Producer<RetireMsg>, pub build: Producer<BuildReq>,
+    pub handoff: Consumer<Handover>, pub retire: Producer<RetireMsg>, pub build: Producer<BuildReq>,
     pub clock: TscUtc,
 }
-pub struct AcctDeps<'a> {
-    pub arena: &'a ConnArena,
+pub struct AcctDeps {
     pub rd: &'static RefData,
     pub reqs: Consumer<AcctReq>,             // ← acctreq-<venue>
     pub out: ByteProducer,                   // → acct-<venue>(唤醒按消费者 gw 的空闲策略)
-    pub handoff: Consumer<Handoff>, pub retire: Producer<RetireMsg>, pub build: Producer<BuildReq>,
+    pub handoff: Consumer<Handover>, pub retire: Producer<RetireMsg>, pub build: Producer<BuildReq>,
     pub clock: TscUtc,
 }
 ```
@@ -620,6 +627,9 @@ struct IdTable {
 | 文件 | 职责 |
 |---|---|
 | `src/lib.rs` | 公开入口 |
+| `src/config.rs` | `FeedCfg`/`GwCfg`/`SnapCfg` 与默认值、`InitErr`、`ready_poll_on`、`feed_cmd_dest` |
+| `src/codes.rs` | `ConnState.reason` 码表(gen-schema 读取,导出 `schemas/conn-reason.json`) |
+| `src/raw.rs` | raw journal 的追加与滚动 |
 | `src/feed.rs` | `FeedRuntime` 循环体、按 `FeedRoutes` 建路由池、就绪探测、BBO 按帧轮转 |
 | `src/conn_id.rs` | 连接号号段、BBO 槽分配与复用 |
 | `src/seq.rs` | `InstSeq`、去重与断裂判定 |
@@ -711,6 +721,7 @@ struct IdTable {
 
 ## 已知限制与后续工作
 
+- **M1.5 实现范围**:已实现 BBO 行情(feed-bbo、按帧轮转、就绪探测、BBO 槽、Alive 与静默判定、去重)、`routes = Md/All` 的成交/标记价/资金费与分档快照、raw journal、gw 的出环/kill/限速/发送/撤单(含 `CancelAll` 展开)/回报/`OutcomeUnknown`/在途超时/主备与计划切换、心跳、`SessionDriver` 的 endpoint/登录/交接/回收。M3 再实现(构造与接口已在,运行中不触发):BBO 补帧(feed 不发 `SnapReq`)、`SnapFetchTask` 的 REST 执行(`poll_once` 空转)、`AcctFetchTask` 与 gw 侧账户查询(`GwDeps.acct_req`/`raw_tail` 随之加入)、成交暂存(`hold.rs`;解析不到槽的回报直接以 `slot = UNRESOLVED` 入环)、去重环重建(`reseed.rs`)、gw 的 REST 池(查单/撤单走 REST、`CANCEL_ALL_SWEEP`、`rest_idle_check_ms` 检查,`order_channel = Rest` 的命令回 `NoConn`)、私有频道归属与 `private_subscribe`、`bootstrap`(`SessionDriver::start` 返回 `SessErr::Bootstrap`)与会话 UID 核验(`session_identity_request` 只调用、不执行)、增量深度。对应用例的里程碑见 TESTS.md(M3)。
 - **深度只有前 N 档**:core 的深度是分档快照(各所档位上限不同,见各 venue README);需要全深度的策略触发可选扩展"增量深度与快照重同步"(§3),它的深度连接是单路,一条连接断开 = 该连接上所有 inst 重同步;双路合并是再一层可选扩展(开发备忘)。
 - **gw 负责填帧**:OMS 只产出数值化 `OrderDecision`,sequencer 投影为 `GwCmd`,venue 特定的帧编码在 gw 线程完成(sequencer 不依赖任何 `venue-*`,各 venue 并行填帧)。
 - **refdata 变更 = 重启**:新增/移除 inst 走 ConfigBlob + Drain + 重启;可选扩展(refdata 热替换,触发条件:重启窗口影响交易)时 `rd` 参数接口不变,运行时需增加订阅差分。

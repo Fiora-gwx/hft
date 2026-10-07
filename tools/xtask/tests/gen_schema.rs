@@ -1023,6 +1023,7 @@ fn events_fixture() -> Model {
                 origin: "crates/hft-oms/src/notes.rs".into(),
             },
         ],
+        conn_reasons: vec![],
         structs: vec![],
         enums,
         rdb_rows: vec![],

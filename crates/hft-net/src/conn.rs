@@ -115,6 +115,7 @@ pub struct Conn {
     close_echo: Option<(u8, [u8; 2])>,
     ping_tsc: Option<u64>,
     pub(crate) last_rx_tsc: u64,
+    last_pong_tsc: u64,
     pub(crate) opened_tsc: u64,
     pub(crate) napi_id: u32,
     pub(crate) mss: u32,
@@ -207,6 +208,7 @@ impl Conn {
             close_echo: None,
             ping_tsc: None,
             last_rx_tsc: 0,
+            last_pong_tsc: 0,
             opened_tsc: 0,
             napi_id: 0,
             mss: 1448,
@@ -245,6 +247,7 @@ impl Conn {
         self.close_echo = None;
         self.ping_tsc = None;
         self.last_rx_tsc = 0;
+        self.last_pong_tsc = 0;
         self.opened_tsc = 0;
         self.napi_id = 0;
         self.mss = 1448;
@@ -720,6 +723,7 @@ impl Conn {
                     self.queue_pong(p0, p1);
                 }
                 OP_PONG => {
+                    self.last_pong_tsc = ts.rx_tsc;
                     if let Some(t) = self.ping_tsc
                         && self.rx[p0..p1] == t.to_le_bytes()
                     {
@@ -1110,6 +1114,19 @@ impl Conn {
         self.last_rx_tsc
     }
 
+    /// `rx_tsc` of the last WS Pong (any payload); 0 = none since the connection opened.
+    #[inline]
+    pub fn last_pong_tsc(&self) -> u64 {
+        self.last_pong_tsc
+    }
+
+    /// Received bytes not yet consumed: plaintext not taken by `next_frame` plus ciphertext not yet
+    /// decrypted (no system call; `has_pending` of the upper layers).
+    #[inline]
+    pub fn rx_buffered(&self) -> usize {
+        (self.pe - self.ps) + (self.ce - self.cs)
+    }
+
     /// `SO_INCOMING_NAPI_ID` read once after the handshake; 0 = unavailable.
     #[inline]
     pub fn napi_id(&self) -> u32 {
@@ -1339,6 +1356,12 @@ impl Conn {
     }
 
     /// The hot thread's `install` effect without a pool.
+    /// The current queue-empty confirmation (`None` = none since `install`).
+    #[doc(hidden)]
+    pub fn test_empty_tsc(&self) -> Option<u64> {
+        self.empty_tsc
+    }
+
     #[doc(hidden)]
     pub fn test_on_install(&mut self) {
         self.on_install();

@@ -1377,6 +1377,30 @@
 | `AdvisorStats` | Advisor |  | Info |  |
 | `ModelCkptSkipped` | Advisor |  | P1 |  |
 
+## ConnState.reason
+
+`Down`/`Rotated` 时为 hft-net `ErrBits` 原值,`Up`/`Alive` 时为 0;`Resync`/`Degraded` 取下表(唯一归属 [hft-venue](../../crates/hft-venue/README.md#产生与消费的事件) 的 `CONN_REASONS`)。
+
+| 码 | 名 | 状态 |
+|---|---|---|
+| 1 | `GAP` | Resync |
+| 2 | `DECODE` | Resync |
+| 3 | `SNAPSHOT_FAIL` | Degraded |
+| 4 | `SUB_REJECTED` | Degraded |
+| 5 | `RACE_SINGLE` | Degraded |
+| 6 | `BBO_REFRESH` | Resync |
+| 7 | `BBO_SILENT` | Degraded |
+| 8 | `DEADMAN` | Degraded |
+| 9 | `CLOCK_SKEW` | Degraded |
+| 10 | `INFLIGHT_TIMEOUT` | Degraded |
+| 11 | `RATE_LIMIT` | Degraded |
+| 12 | `REPORT_DECODE` | Degraded |
+| 13 | `MIRROR` | Degraded |
+| 14 | `ACCT_QUERY` | Degraded |
+| 15 | `CONN_LOST` | Resync |
+| 16 | `NEW_SUB` | Resync |
+| 17 | `REQUESTED` | Resync |
+
 ## LoadErrCode
 
 | 值 | 名 |

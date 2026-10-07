@@ -13,6 +13,8 @@ pub const EVENTS_PY: &str = "python/_generated/events.py";
 pub const REFDATA_PY: &str = "python/_generated/refdata.py";
 pub const ARROW_DIR: &str = "schemas/arrow";
 pub const CATALOG_MD: &str = "docs/generated/event-catalog.md";
+/// `ConnState.reason` code table (from hft-venue `CONN_REASONS`).
+pub const CONN_REASON_JSON: &str = "schemas/conn-reason.json";
 pub const NOTES_RS: &str = "crates/hft-telemetry/src/notes_catalog.rs";
 
 /// `L2Delta` → `l2_delta`.
@@ -312,6 +314,18 @@ pub fn arrow_json(k: &KindRow, ext: bool, enums: &BTreeMap<String, EnumTable>) -
     serde_json::to_string_pretty(&v).unwrap_or_default() + "\n"
 }
 
+/// `schemas/conn-reason.json`: `{"reasons": [{"code", "name", "state"}, …]}` in code order.
+pub fn conn_reason_json(m: &Model) -> String {
+    let rows: Vec<Value> = m
+        .conn_reasons
+        .iter()
+        .map(|r| json!({ "code": r.code, "name": r.name, "state": r.state }))
+        .collect();
+    serde_json::to_string_pretty(&json!({ "reasons": rows })).unwrap_or_default()
+        + "
+"
+}
+
 // ---------- catalog
 
 fn md_cell(s: &str) -> String {
@@ -486,6 +500,13 @@ pub fn catalog_md(m: &Model) -> String {
             let _ = writeln!(s, "| `{}` | {} | {} |", c.name, c.source, c.n);
         }
     }
+    if !m.conn_reasons.is_empty() {
+        s += "\n## ConnState.reason\n\n`Down`/`Rotated` 时为 hft-net `ErrBits` 原值,`Up`/`Alive` 时为 0;`Resync`/`Degraded` 取下表";
+        s += "(唯一归属 [hft-venue](../../crates/hft-venue/README.md#产生与消费的事件) 的 `CONN_REASONS`)。\n\n| 码 | 名 | 状态 |\n|---|---|---|\n";
+        for r in &m.conn_reasons {
+            let _ = writeln!(s, "| {} | `{}` | {} |", r.code, r.name, r.state);
+        }
+    }
     s += "\n## LoadErrCode\n\n| 值 | 名 |\n|---|---|\n";
     for c in &m.load_err {
         let _ = writeln!(s, "| {} | `{}` |", c.value, c.name);
@@ -562,6 +583,9 @@ pub fn outputs(m: &Model) -> BTreeMap<String, String> {
     out.insert(REFDATA_PY.to_string(), refdata_py(m));
     out.insert(CATALOG_MD.to_string(), catalog_md(m));
     out.insert(NOTES_RS.to_string(), notes_rs(m));
+    if !m.conn_reasons.is_empty() {
+        out.insert(CONN_REASON_JSON.to_string(), conn_reason_json(m));
+    }
     for (k, ext) in all_kinds(m) {
         out.insert(arrow_path(&k.name), arrow_json(k, ext, &m.enums));
     }

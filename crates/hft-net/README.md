@@ -178,6 +178,8 @@ impl Conn {
     pub fn phase(&self) -> ConnPhase;
     pub fn opened_tsc(&self) -> u64;
     pub fn last_rx_tsc(&self) -> u64;       // 最近一次解出任一完整 WS 帧(数据、Ping、Pong、Close)的 rx_tsc;hft-venue 用它判 BBO 连接存活
+    pub fn last_pong_tsc(&self) -> u64;     // 最近一次 WS Pong(任意 payload)的 rx_tsc;0 = 建连以来没有;hft-venue 的 ws ping 超时判定(§5)
+    pub fn rx_buffered(&self) -> usize;     // 已收未消费的字节(未被 next_frame 取走的明文 + 未解密的密文);无系统调用,供上层 has_pending
     pub fn napi_id(&self) -> u32;           // 握手完成时读到的 SO_INCOMING_NAPI_ID;0 = 不可用
     pub fn last_errno(&self) -> i32;        // 最近一次置 IO/RESET 的 errno;0 = 无
     pub fn stats(&self) -> &ConnStats;
@@ -297,6 +299,7 @@ impl ReadyPoll {
 impl ReadyHandle {
     pub fn add(&self, c: &Conn) -> Result<(), NetErr>;      // EPOLL_CTL_ADD;在交接前调用;重复注册 → Os(EEXIST)
     pub fn del(&self, c: &Conn) -> Result<(), NetErr>;      // EPOLL_CTL_DEL;在 Connector::reclaim 之前调用;未注册 → Os(ENOENT)
+    pub fn del_fd(&self, fd: i32) -> Result<(), NetErr>;    // 同上,按交接时记下的 fd(连接已退役、回收前不再以 Conn 可达)
 }
 pub struct ConnSet { pub bits: [u64; 4] }                   // 按 ConnId 的 256 位集合
 pub enum NetErr { Os(i32) }

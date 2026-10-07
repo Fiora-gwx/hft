@@ -1,0 +1,95 @@
+# Reference-machine budgets of hft-venue's benchmarks (source constants read by `cargo xtask bench-gate`).
+# One table per registered benchmark name (benchmarks/README.md "基准名登记"); values in ns, equal to the
+# README "延迟与资源契约" table (`cargo xtask doc-check` compares them). Format: tools/README.md "cargo xtask doc-check".
+
+[venue_feed_bbo_path]
+p50_ns = 600
+p99_ns = 1500
+
+[venue_feed_dup_drop]
+p50_ns = 150
+p99_ns = 400
+
+[venue_feed_topn_path]
+p50_ns = 1500
+p99_ns = 3000
+
+[venue_feed_l2_path]
+p50_ns = 2500
+p99_ns = 5000
+
+[venue_feed_snap_apply_1000]
+p50_ns = 15000
+p99_ns = 30000
+
+[venue_snap_fetch_1000]
+p50_ns = 80000
+p99_ns = 120000
+
+[venue_raw_append]
+p50_ns = 200
+p99_ns = 500
+
+[venue_gw_place_loopback]
+p50_ns = 3000
+p99_ns = 8000
+
+[venue_gw_place_mem]
+p50_ns = 800
+p99_ns = 1500
+
+[venue_gw_report_path]
+p50_ns = 1000
+p99_ns = 2500
+
+[venue_gw_drain_during_burst]
+p50_ns = 1200
+p99_ns = 3000
+
+[venue_idtable]
+p50_ns = 40
+p99_ns = 100
+
+[venue_kill_admit]
+p50_ns = 3
+p99_ns = 8
+
+[venue_bbo_live_tick]
+p50_ns = 20
+p99_ns = 50
+
+[venue_gw_external_fill]
+p50_ns = 1000
+p99_ns = 2500
+
+[venue_gw_skip_event]
+p50_ns = 200
+p99_ns = 400
+
+[venue_gw_margin_push]
+p50_ns = 8000
+p99_ns = 15000
+
+[venue_gw_acct_apply_16k]
+p50_ns = 2000
+p99_ns = 5000
+
+[venue_acct_fetch_50k]
+p50_ns = 60000
+p99_ns = 120000
+
+[venue_idle_loop_bbo]
+p50_ns = 2000
+p99_ns = 4000
+
+[venue_idle_loop_bbo_ready]
+p50_ns = 800
+p99_ns = 2000
+
+[venue_idle_loop]
+p50_ns = 3000
+p99_ns = 6000
+
+[venue_gw_idle_8sock]
+p50_ns = 1000
+p99_ns = 2000

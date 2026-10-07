@@ -86,7 +86,7 @@ pub fn byte_spsc(capacity_bytes: usize, mem: Backing) -> Result<(ByteProducer, B
 impl ByteProducer { pub fn reserve(&mut self, len: u32) -> Option<&mut [u8]>; pub fn commit(&mut self); } // len ≤ capacity/4
 // capacity_bytes 为 2 的幂且 ≥ 64,否则 Capacity;reserve:len > capacity/4 → 永远 None,空间不足 → None;
 // 未 commit 的预留被下一次 reserve 覆盖(从不发布);没有预留时 commit 为空操作;len = 0 的记录合法
-impl ByteConsumer { pub fn peek(&mut self) -> Option<&[u8]>; pub fn advance(&mut self); }
+impl ByteConsumer { pub fn peek(&mut self) -> Option<&[u8]>; pub fn advance(&mut self); pub fn has_data(&self) -> bool /* 只读,供 has_pending */; }
 ```
 
 用于体积不定的载荷(交易所快照与 `L2Batch`、ctl 帧、跨进程大消息);定长事件用 `Spsc`。**ctl 环统一是 `ByteSpsc`**:容量取 EngineConfig 的环容量段(各环容量的取值唯一归属 [hft-core](../../apps/hft-core/README.md);ctl 环 ≥ 256 KiB),单条 ≤ 容量/4,帧格式为 hft-event 的 `CtlRecord`。
