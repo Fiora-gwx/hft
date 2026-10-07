@@ -114,7 +114,8 @@ fn jnl_102_writer_feature_gate() {
     }
     assert!(check_bin(&dir, "use_reader"), "JNL-102.3");
     // Row 4: without `writer`, the examples build skips `testwriter` (required-features) and exits 0.
-    let t = target_root().join("ex");
+    // Same target directory as the fixture builds: hft-journal and its dependencies build once.
+    let t = target_root().join("t");
     let st = cargo()
         .args(["build", "--quiet", "--examples", "--manifest-path"])
         .arg(manifest_dir().join("Cargo.toml"))

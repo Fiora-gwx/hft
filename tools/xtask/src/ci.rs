@@ -184,16 +184,21 @@ pub fn plan(root: &Path, opts: Options) -> Result<(Vec<Step>, Optional), EnvErro
     }
     steps.push(s);
     if !opts.fast {
-        let golden: Vec<Cmd> = selected
+        // One command with the unit step's package selection and features, so it reuses that
+        // build (a per-package `-p` would resolve features differently and rebuild).
+        let has_golden = selected
             .iter()
-            .filter(|m| root.join(&m.dir).join("tests").join("golden.rs").is_file())
-            .map(|m| {
-                Cmd::new("cargo", &["test", "--profile", "ci", "--all-features", "-p"])
-                    .arg(m.name.clone())
+            .any(|m| root.join(&m.dir).join("tests").join("golden.rs").is_file());
+        let golden: Vec<Cmd> = if has_golden {
+            vec![
+                sel_args(&["test", "--profile", "ci"])
+                    .arg("--all-features")
                     .arg("--test")
-                    .arg("golden")
-            })
-            .collect();
+                    .arg("golden"),
+            ]
+        } else {
+            Vec::new()
+        };
         if golden.is_empty() {
             steps.push(skip(
                 "golden",
