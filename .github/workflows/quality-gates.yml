@@ -184,11 +184,12 @@ jobs:
       - name: Prepare proc test prerequisites
         run: bash .github/scripts/test-prereqs.sh
 
-      # Same command, profile and features as the unit/property step of `cargo xtask ci`, which
-      # then finds everything built; `--keep-going` builds every dependency even past a broken
-      # crate, so a failing run still caches a complete dependency tree.
+      # The units of the unit/property step of `cargo xtask ci` (`cargo test --profile ci
+      # --workspace --all-features`), which then finds everything built; `cargo build` because
+      # `--keep-going` (every dependency is built even past a broken crate, so a failing run
+      # still caches a complete dependency tree) is unstable on `cargo test`.
       - name: Build the ci-profile test tree
-        run: cargo test --locked --profile ci --workspace --all-features --no-run --keep-going
+        run: cargo build --locked --profile ci --workspace --all-features --tests --examples --keep-going
 
       # fmt, clippy, deny licenses/bans, deps, hot-check, fixtures check, unit/property (ci profile),
       # golden, DST smoke + `dst --hashtrail check --first 50` (from M2), gen-schema --check,
