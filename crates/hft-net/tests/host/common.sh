@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Shared helpers of the hft-net host cases (crates/hft-net/TESTS.md NET-370–NET-374). These run on the
 # M1.5 latency probe (rented c8g instance) or dev2, never in CI. The vertical-slice binary that opens
-# connections and prints `ConnStats` (apps/hft-core M1.5 slice) is given by HFT_SLICE; evidence goes to
+# connections and prints `ConnStats` (tools/latency-slice; its configuration in HFT_SLICE_CONFIG) is given by HFT_SLICE; evidence goes to
 # $EVIDENCE_DIR (default: current directory) as <CASE>-<host>-<date>.txt.
 set -euo pipefail
 CASE=${CASE:?}

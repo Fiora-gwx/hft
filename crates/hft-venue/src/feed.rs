@@ -1847,7 +1847,14 @@ fn send_sub<P: VenueProtocol>(
         }
     }
     frames.clear();
-    let ok = P::subscribe(specs.get(..k).unwrap_or(&[]), first.unsub, &st.cfg.venue, frames).is_ok();
+    let ok = P::subscribe(
+        st.rd,
+        specs.get(..k).unwrap_or(&[]),
+        first.unsub,
+        &st.cfg.venue,
+        frames,
+    )
+    .is_ok();
     let Some((text, covered)) = frames.get(0).filter(|_| ok) else {
         // Nothing the venue can subscribe: drop the batch so the queue cannot stall.
         for _ in 0..k {

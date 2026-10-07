@@ -1,0 +1,39 @@
+[package]
+name = "venue-binance"
+description = "Binance USDT-M perpetual and spot protocol (M1.5 part: bookTicker and the other market classes' dispatch and ids, ws-fapi/ws-api session logon, order frames and responses, subscriptions, rate and capability defaults)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+hft-types.workspace = true
+hft-refdata.workspace = true
+hft-event.workspace = true
+hft-venue-proto.workspace = true
+# Per-message structs over borrowed strings (README "2. 解码"); no generic JSON values.
+sonic-rs = "0.5"
+serde = { version = "1", default-features = false, features = ["derive"] }
+# session.logon signature (README "下单:WS API", src/sign.rs).
+ed25519-dalek = "2"
+base64 = "0.22"
+
+[dev-dependencies]
+hft-venue-proto = { workspace = true, features = ["testkit"] }
+hft-testkit.workspace = true
+proptest.workspace = true
+criterion.workspace = true
+# Golden comparison only (README "依赖": never in [dependencies]).
+serde_json = "1"
+
+[[bench]]
+name = "decode"
+harness = false
+
+[[bench]]
+name = "encode"
+harness = false

@@ -246,7 +246,8 @@ PY = "pipeline ops_bot research treasury".split()
 PIPELINE_PLUGINS = ["strategies/portfolio-carry/pipeline/README.md", "strategies/cdex/pipeline/README.md"]
 
 COMPONENTS = ([f"crates/{c}/README.md" for c in CRATES] + [f"strategies/{s}/README.md" for s in STRATS]
-              + [f"apps/{a}/README.md" for a in APPS] + [f"python/{p}/README.md" for p in PY] + PIPELINE_PLUGINS)
+              + [f"apps/{a}/README.md" for a in APPS] + [f"python/{p}/README.md" for p in PY] + PIPELINE_PLUGINS
+              + ["tools/latency-slice/README.md"])
 EXPECTED = COMPONENTS + """AGENTS.md CLAUDE.md README.md crates/AGENTS.md strategies/AGENTS.md apps/AGENTS.md python/AGENTS.md
 deploy/AGENTS.md deploy/README.md benchmarks/AGENTS.md benchmarks/README.md fixtures/README.md tools/README.md
 contracts/README.md docs/AGENTS.md docs/architecture.md docs/glossary.md docs/latency-budget.md docs/hot-path-rules.md

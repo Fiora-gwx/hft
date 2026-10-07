@@ -157,7 +157,7 @@ else:
 # ---------- components that need TESTS.md
 EXEMPT = {"strategies/portfolio-carry", "strategies/portfolio-carry/pipeline"}
 need = {}
-for top in ("crates", "apps", "strategies", "python"):
+for top in ("crates", "apps", "strategies", "python", "tools"):
     d = os.path.join(ROOT, top)
     if not os.path.isdir(d):
         continue

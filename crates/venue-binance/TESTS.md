@@ -8,7 +8,7 @@ spec: README.md
 
 格式与规则见 [docs/tests](../../docs/tests/README.md)。本文件的记号(各用例在 `前置` 中引用;数值即定义,不依赖默认值):
 
-- `RD-BIN` = 测试 refdata `fixtures/refdata/bin-test-1.blob`(hft-cfg 由同目录 `bin-test-1.toml` 生成):资产 `USDT` = AssetId 1(`qty_exp = −8`)、`BTC` = 2(`px_exp = −2`,`qty_exp = −8`)、`ETH` = 3(`px_exp = −2`,`qty_exp = −8`)、`BNB` = 4(`px_exp = −3`,`qty_exp = −8`);`BINANCE_USDM`(1):`BTCUSDT` = InstId 1042(tick 0.1,lot 0.001)、`ETHUSDT` = 1043(tick 0.01,lot 0.001);`BINANCE_SPOT`(2):`BTCUSDT` = 2001(tick 0.01,lot 0.00001)、`BNBUSDT` = 2002(tick 0.001,lot 0.001);合约平移全为 0;账户 `AccountId 2`,`venue_uid = "acct-0001"`,两个 venue 的生效 `VenueCaps` 等于 `default_caps()`(BIN-171)。数值写成"十进制(raw)":`65000.1` 价格 = raw 6500010,`0.004` BTC = raw 400000,`1` USDT 名义 = `Notional` raw 1000000,`Rate` 1.0 = raw 10⁹。
+- `RD-BIN` = 测试 refdata(`tests/support/mod.rs::rd()` 以 `RdbBuilder` 构建;inst id 从 1 稠密,未列出的 id 是 `BINANCE_USDM` 上名为 `F<id>USDT` 的填充 inst):资产 `USDT` = AssetId 1(`qty_exp = −8`)、`BTC` = 2(`px_exp = −2`,`qty_exp = −8`)、`ETH` = 3(`px_exp = −2`,`qty_exp = −8`)、`BNB` = 4(`px_exp = −3`,`qty_exp = −8`);`BINANCE_USDM`(1):`BTCUSDT` = InstId 1042(tick 0.1,lot 0.001)、`ETHUSDT` = 1043(tick 0.01,lot 0.001);`BINANCE_SPOT`(2):`BTCUSDT` = 2001(tick 0.01,lot 0.00001)、`BNBUSDT` = 2002(tick 0.001,lot 0.001);合约平移全为 0;账户 `AccountId 2` 在 `BINANCE_USDM`、`AccountId 1` 在 `BINANCE_SPOT`(一个账户在一个交易所只用一个市场),两者 `venue_uid = "acct-0001"`;两个 venue 的生效 `VenueCaps` 等于 `default_caps()`(BIN-171)、限速等于 `rate_rules()`(BIN-170)。数值写成"十进制(raw)":`65000.1` 价格 = raw 6500010,`0.004` BTC = raw 400000,`1` USDT 名义 = `Notional` raw 1000000,`Rate` 1.0 = raw 10⁹。
 - `RX` = `RxMeta{rx_tsc: 1000, hw_rx_ns: 1790000000126000000, sw_rx_ns: 1790000000126500000, prev_override: 0, conn: 3, account: 2, ts_flags: 0, rx_empty_gap_ns: 2500}`。
 - `WC` = `WallClock{unix_ms: 1790000000000, unix_us: 1790000000000000}`;`gw.stale_guard_ms = 1500`(经 `VenueCfg.stale_guard_ms` 交给 `build_templates`);除注明外 `Templates` 以 `build_templates(cfg, rd, 2, &HM1)` 构建。
 - `CID(e, s, g)` = `ClientOrderId{epoch: e, venue: <本产品线>, account: 2, slot: s, gen: g}` 的规范 24 位文本:`Usdm` 的 `CID(3,42,7) = 1000301020002a000000073d`、`CID(3,43,1) = 1000301020002b000000013a`、`CID(2,42,7) = 1000201020002a000000072d`;`Spot` 的 `CID(3,42,7) = 1000302020002a000000070d`。
@@ -29,7 +29,7 @@ spec: README.md
 | 使用本组件 | BIN-001, BIN-078, BIN-079 |
 | 端点与路由 | BIN-002–BIN-007, BIN-215 |
 | 行情频道 → 事件 | BIN-020–BIN-025, BIN-030–BIN-034, BIN-037, BIN-300, BIN-302–BIN-304, BIN-320, BIN-322 |
-| 下单:WS API | BIN-013, BIN-060–BIN-077, BIN-081, BIN-090, BIN-094, BIN-307–BIN-311, BIN-324–BIN-326 |
+| 下单:WS API | BIN-013, BIN-060–BIN-077, BIN-081, BIN-090, BIN-094, BIN-096, BIN-307–BIN-311, BIN-324–BIN-326 |
 | 限速默认值(`rate_rules()`,生效值以 refdata 为准) | BIN-091, BIN-170 |
 | 分档快照流 | BIN-002, BIN-003, BIN-027–BIN-029, BIN-201, BIN-301, BIN-321 |
 | L2 序号归一化(`L2Batch.prev_id/last_id`) | 不适用:里程碑外 |
@@ -49,11 +49,11 @@ spec: README.md
 | 2. 解码 | BIN-024, BIN-026, BIN-120, BIN-152, BIN-210 |
 | 3. 快照对齐(`align_first`) | 不适用:里程碑外 |
 | 4. 订单帧模板 | BIN-064–BIN-067, BIN-073–BIN-075, BIN-402 |
-| 5. 回报解码 | BIN-090, BIN-092, BIN-100, BIN-101, BIN-106, BIN-107, BIN-111, BIN-313, BIN-327 |
+| 5. 回报解码 | BIN-090, BIN-092, BIN-096, BIN-100, BIN-101, BIN-106, BIN-107, BIN-111, BIN-313, BIN-327 |
 | 6. 死手与会话维护 | BIN-007, BIN-035, BIN-060, BIN-080, BIN-081, BIN-118, BIN-172, BIN-173, BIN-202, BIN-312 |
 | 7. 订阅节奏 | BIN-002, BIN-200–BIN-202 |
 | 8. 源文件规划 | BIN-142, BIN-174, BIN-400, BIN-401 |
-| 延迟与资源契约 | BIN-038, BIN-500–BIN-508 |
+| 延迟与资源契约 | BIN-038, BIN-039, BIN-500–BIN-508 |
 | 测试与验收 | 不适用:非规范 |
 | 依赖 | BIN-210 |
 | 延伸阅读 | 不适用:非规范 |
@@ -85,7 +85,7 @@ spec: README.md
 
 - 规则:[端点与路由](README.md#端点与路由)、[分档快照流](README.md#分档快照流)、[7. 订阅节奏](README.md#7-订阅节奏)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`Usdm::routes()`;每行按 `name` 找到一条 `RouteSpec` 并断言全部字段;另断言表长 = 4、`RouteId` 互不相同
 - 实现:`crates/venue-binance/tests/routes.rs::bin_002_usdm_routes`
 
@@ -101,7 +101,7 @@ spec: README.md
 
 - 规则:[端点与路由](README.md#端点与路由)、[分档快照流](README.md#分档快照流)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`Spot::routes()`;特性只开默认(不含 `spot-sbe`);另断言表长 = 3
 - 实现:`crates/venue-binance/tests/routes.rs::bin_003_spot_routes`
 
@@ -115,7 +115,7 @@ spec: README.md
 
 - 规则:[端点与路由](README.md#端点与路由)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;`VenueCfg` 为 prod 环境;`now_ms = 1790000000000`;`cred = None`(行情)或测试凭证;`boot` 除注明外为 `None`;每行断言 `EndpointSpec` 的 path 与 query(主机来自 refdata 端点表,不在本用例)
 - 实现:`crates/venue-binance/tests/endpoint.rs::bin_004_endpoint_paths`
 
@@ -135,7 +135,7 @@ spec: README.md
 
 - 规则:[端点与路由](README.md#端点与路由)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;`now_ms = 1790000000000`;测试凭证
 - 步骤:
   1. `Spot::endpoint(Role::UserStream, RouteId(0), &cfg, Some(&cred), None, now_ms, &mut out)`
@@ -167,7 +167,7 @@ spec: README.md
 
 - 规则:[端点与路由](README.md#端点与路由)、[6. 死手与会话维护](README.md#6-死手与会话维护)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;prod 环境 `VenueCfg`
 - 实现:`crates/venue-binance/tests/endpoint.rs::bin_007_bootstrap`
 
@@ -183,7 +183,7 @@ spec: README.md
 
 - 规则:[1. 分派(`classify` / `classify_report`,只看前 64 B)](README.md#1-分派classify--classify_report只看前-64-b)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`Usdm::classify(route, op, head)`;`head` 为 payload 的前 min(64, len) 字节;路由取自 BIN-002
 - 实现:`crates/venue-binance/tests/classify.rs::bin_010_usdm_classify`
 
@@ -209,7 +209,7 @@ spec: README.md
 
 - 规则:[1. 分派(`classify` / `classify_report`,只看前 64 B)](README.md#1-分派classify--classify_report只看前-64-b)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`Spot::classify(route, op, head)`;默认特性(不含 `spot-sbe`)
 - 实现:`crates/venue-binance/tests/classify.rs::bin_011_spot_classify`
 
@@ -239,7 +239,7 @@ spec: README.md
 
 - 规则:[1. 分派(`classify` / `classify_report`,只看前 64 B)](README.md#1-分派classify--classify_report只看前-64-b)、[用户流事件表](README.md#用户流事件表)、[下单:WS API](README.md#下单ws-api)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`classify_report(Text, head)`;`default_caps()` 的可忽略名单
 - 实现:`crates/venue-binance/tests/classify.rs::bin_013_classify_report`
 
@@ -270,7 +270,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)、[分档快照流](README.md#分档快照流)、[hft-venue-proto 契约 26](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:无参数
 - 实现:`crates/venue-binance/tests/md.rs::bin_020_seq_rule_resync`
 
@@ -289,7 +289,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)、[hft-venue-proto 契约 2](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;全新 `FeedCtx`;payload 见记号 `BT1`(`Usdm`)、`SBT1`(`Spot`)与下表改写
 - 实现:`crates/venue-binance/tests/md.rs::bin_021_peek_ids`
 
@@ -309,7 +309,7 @@ spec: README.md
 
 - 规则:[hft-venue-proto 契约 2](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;`BT1` 的 `b` 改为 `"abc"`
 - 步骤:
   1. `Usdm::peek(rd, ctx, BookTicker, payload)`
@@ -323,7 +323,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)、[2. 解码](README.md#2-解码)、[hft-venue-proto 契约 3](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;`Usdm` 的 `FeedCtx.time_unit = Ms`(连接 URL 不带 `timeUnit`);输入 `BT1`;`RX`
 - 步骤:
   1. `decode_md(rd, ctx, BookTicker, BT1, &RX, &mut sink)`
@@ -336,7 +336,7 @@ spec: README.md
 
 - 规则:[2. 解码](README.md#2-解码)、[hft-venue-proto 契约 3](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;`FeedCtx.time_unit = Ms`;`BT1` 的 `T` 改为 `1790000000123456`(µs 量级)
 - 步骤:
   1. `decode_md(rd, ctx, BookTicker, payload, &RX, &mut sink)`
@@ -348,7 +348,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;`Spot` `FeedCtx.time_unit = Us`;输入 `SBT1`;`RX`
 - 步骤:
   1. `decode_md(rd, ctx, JsonBookTicker, SBT1, &RX, &mut sink)`
@@ -360,7 +360,7 @@ spec: README.md
 
 - 规则:[2. 解码](README.md#2-解码)、[hft-venue-proto 契约 4](../hft-venue-proto/README.md#实现方必须遵守的契约)、[hft-venue-proto 契约 5](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`(BTC `px_exp = −2`,`qty_exp = −8`);`Usdm` `FeedCtx.time_unit = Ms`;每行在 `BT1` 上做一处改写;每行另断言 `sink` 为空、无 panic
 - 实现:`crates/venue-binance/tests/md.rs::bin_026_bookticker_errors`
 
@@ -490,7 +490,7 @@ spec: README.md
 
 - 规则:[1. 分派(`classify` / `classify_report`,只看前 64 B)](README.md#1-分派classify--classify_report只看前-64-b)、[6. 死手与会话维护](README.md#6-死手与会话维护)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`Usdm::control(c, payload)`
 - 实现:`crates/venue-binance/tests/md.rs::bin_035_control_hints`
 
@@ -505,7 +505,7 @@ spec: README.md
 
 - 规则:[hft-venue-proto 契约 5](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;每行喂 BIN-035.1 的 payload
 - 实现:`crates/venue-binance/tests/md.rs::bin_036_decode_unknown_class`
 
@@ -545,6 +545,20 @@ spec: README.md
 - 期望:
   - 分配次数 = 0,释放次数 = 0
 - 实现:`crates/venue-binance/tests/alloc.rs::bin_038_hot_path_zero_alloc`
+### BIN-039 M1.5 热路径子集零分配
+
+- 规则:[延迟与资源契约](README.md#延迟与资源契约)、[hft-venue-proto 契约 5](../hft-venue-proto/README.md#实现方必须遵守的契约)
+- 级别:unit
+- 里程碑:M1.5
+- 前置:计数分配器(`#[global_allocator]` 包装);`RD-BIN`;两个产品线的 `build_templates` 在计数开始前完成;不分配的计数 sink(行情与回报);样本 = `BT1`、`SBT1`,`Usdm` 下单 ACK(带 `rateLimits`)、撤单成功、`-5022` 拒单与查询响应各一条
+- 步骤:
+  1. 预热一轮后开始计数;重复 1 000 次:两条行情样本各 `classify`、`peek`、`decode_md`,两个产品线各 `encode` 一条 `PostOnly` Place 与一条 Cancel,四条回报各 `classify_report`、`decode_report`
+  2. 读取计数
+- 期望:
+  - 分配次数 = 0;回报 sink 共收到 4 × 1 001 条 `OrderEvent`、1 001 次 `exch_id`
+- 实现:`crates/venue-binance/tests/alloc.rs::bin_039_hot_subset_zero_alloc`
+- 备注:BIN-038(全部 core 金样输入)随金样在 M3 实现
+
 ### BIN-050 Usdm BBO 补帧请求一次取一个 inst
 
 - 规则:[心跳与 BBO 探测](README.md#心跳与-bbo-探测)、[hft-venue-proto 契约 24](../hft-venue-proto/README.md#实现方必须遵守的契约)
@@ -647,7 +661,7 @@ spec: README.md
 
 - 规则:[下单:WS API](README.md#下单ws-api)、[6. 死手与会话维护](README.md#6-死手与会话维护)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:测试凭证 `ED1`(RFC 8032 测试 1 私钥 `9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60`,公钥 `d75a9801…511a`),`apiKey = "TESTKEY"`;`now_ms = 1790000000000`
 - 步骤:
   1. `Usdm::login(Role::Order, &cfg, &ED1, now_ms, &mut out)`
@@ -661,7 +675,7 @@ spec: README.md
 
 - 规则:[下单:WS API](README.md#下单ws-api)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:同 BIN-060
 - 步骤:
   1. `Spot::login(Role::Order, &cfg, &ED1, now_ms, &mut out)`
@@ -673,7 +687,7 @@ spec: README.md
 
 - 规则:[下单:WS API](README.md#下单ws-api)、[hft-venue-proto 契约 8](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:无
 - 实现:`crates/venue-binance/tests/session.rs::bin_062_login_result`
 
@@ -705,7 +719,7 @@ spec: README.md
 
 - 规则:[下单:WS API](README.md#下单ws-api)、[4. 订单帧模板](README.md#4-订单帧模板)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;`build_templates(&cfg{stale_guard_ms: 1500}, rd, 2)`;`WC`;`c = GwCmd{op: Place, inst: 1042, slot: 42, gen: 7, side: Buy, tif: Ioc, px: 6500010, qty: 400000, oflags: 0, account: 2}`;gw 生成的 client id = `CID(3,42,7)` = `1000301020002a000000073d`
 - 步骤:
   1. `encode(rd, &t, &c, &tgt, &WC, &mut body)`(`body` 2048 B)
@@ -718,7 +732,7 @@ spec: README.md
 
 - 规则:[下单:WS API](README.md#下单ws-api)、[4. 订单帧模板](README.md#4-订单帧模板)、[hft-venue-proto 契约 11](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:同 BIN-064,每行只改一处;断言帧中对应字段(其余字段同 BIN-064)
 - 实现:`crates/venue-binance/tests/encode.rs::bin_065_usdm_place_variants`
 
@@ -736,7 +750,7 @@ spec: README.md
 
 - 规则:[下单:WS API](README.md#下单ws-api)、[hft-venue-proto 契约 11](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;`Spot` 模板;`c = GwCmd{op: Place, inst: 2001, slot: 42, gen: 7, side: Buy, tif: Gtc, px: 6500010, qty: 100000, oflags: 0}`;client id = `CID(3,42,7)`(Spot)= `1000302020002a000000070d`
 - 实现:`crates/venue-binance/tests/encode.rs::bin_066_spot_place_variants`
 
@@ -753,7 +767,7 @@ spec: README.md
 
 - 规则:[4. 订单帧模板](README.md#4-订单帧模板)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`(BTC `px_exp = −2`,`qty_exp = −8`);在 BIN-064 的帧中读取 `price`/`quantity` 字符串
 - 实现:`crates/venue-binance/tests/encode.rs::bin_067_shortest_decimal`
 
@@ -769,7 +783,7 @@ spec: README.md
 
 - 规则:[下单:WS API](README.md#下单ws-api)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;`WC`;`stale_guard_ms = 1500`;`c = GwCmd{op: Cancel, inst: 1042(Spot 行用 2001), target_slot: 42}`;`tgt = TargetRef{id: CID(3,42,7), exch_order_id: <列>}`
 - 实现:`crates/venue-binance/tests/encode.rs::bin_068_cancel_frame`
 
@@ -784,7 +798,7 @@ spec: README.md
 
 - 规则:[下单:WS API](README.md#下单ws-api)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;`c = GwCmd{op: Amend, inst: 1042, target_slot: 42, side: Buy, tif: Gtc, px: 6500020, qty: 300000}`;`tgt = TargetRef{id: CID(3,42,7), exch_order_id: 325078477}`;`WC`
 - 步骤:
   1. `encode`
@@ -796,7 +810,7 @@ spec: README.md
 
 - 规则:[下单:WS API](README.md#下单ws-api)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;`Spot`;`tgt = TargetRef{id: CID(3,42,7)(Spot), exch_order_id: 0}`;`WC`
 - 实现:`crates/venue-binance/tests/encode.rs::bin_070_spot_amend_keep_priority`
 
@@ -810,7 +824,7 @@ spec: README.md
 
 - 规则:[下单:WS API](README.md#下单ws-api)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;`WC`;`stale_guard_ms = 1500`
 - 实现:`crates/venue-binance/tests/encode.rs::bin_071_query_cancel_all_frames`
 
@@ -838,7 +852,7 @@ spec: README.md
 
 - 规则:[4. 订单帧模板](README.md#4-订单帧模板)、[hft-venue-proto 契约 5](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;BIN-064 的 `c`;`body` 默认 2048 B
 - 实现:`crates/venue-binance/tests/encode.rs::bin_073_encode_errors`
 
@@ -854,7 +868,7 @@ spec: README.md
 
 - 规则:[4. 订单帧模板](README.md#4-订单帧模板)
 - 级别:prop
-- 里程碑:M3
+- 里程碑:M1.5
 - 性质:任意合法 `GwCmd`(Place/Cancel/Amend/Query,两个产品线)编码后的帧能被 `sonic-rs` 解析;`symbol`、`side`、`timeInForce`/`type`、`price`、`quantity`/`newQty` 与按 hft-types 十进制参考格式化的值相同;`id` 解回 `(op, slot, gen)`;帧长 ≤ 512 B
 - 生成:inst 取 `RD-BIN` 全部 inst;`px` ∈ [1, 10¹⁵] 且为 tick 整数倍;`qty` ∈ [1, 10¹⁵] 且为 lot 整数倍;`slot` ∈ [0, 2²⁰);`gen` ∈ u32;side、tif、oflags(Spot 不含 `REDUCE_ONLY`)随机
 - 参考:`serde_json` 解析(dev-dependency)与十进制参考实现
@@ -865,7 +879,7 @@ spec: README.md
 
 - 规则:[4. 订单帧模板](README.md#4-订单帧模板)、[下单:WS API](README.md#下单ws-api)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;BIN-064 的 `c`
 - 实现:`crates/venue-binance/tests/encode.rs::bin_075_timestamp_recv_window`
 
@@ -879,7 +893,7 @@ spec: README.md
 
 - 规则:[已知限制与后续工作](README.md#已知限制与后续工作)、[下单:WS API](README.md#下单ws-api)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;两条 BIN-064 形状的 Place
 - 步骤:
   1. `Usdm::encode_batch(rd, &t, &[c1, c2], &[tgt1, tgt2], &WC, &mut body)`;`Spot` 同样调用
@@ -893,7 +907,7 @@ spec: README.md
 
 - 规则:[下单:WS API](README.md#下单ws-api)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`decode_report` 读响应的 `id`(其余字段为最小合法 200 响应);"还原"指 `ReportOutcome.req`
 - 实现:`crates/venue-binance/tests/req_id.rs::bin_077_request_id`
 
@@ -913,7 +927,7 @@ spec: README.md
 
 - 规则:[使用本组件](README.md#使用本组件)、[hft-venue-proto 契约 13](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`Usdm`;`render_cid(&CID(3,42,7), &mut buf)`;`parse_cid` 的输入如列
 - 实现:`crates/venue-binance/tests/cid.rs::bin_078_cid_shape`
 
@@ -933,7 +947,7 @@ spec: README.md
 
 - 规则:[使用本组件](README.md#使用本组件)
 - 级别:prop
-- 里程碑:M3
+- 里程碑:M1.5
 - 性质:任意 `ClientOrderId`(epoch bit 15 = 0、slot < 2²⁰)经 `render_cid` 后满足 `^[\.A-Z\:/a-z0-9_-]{1,36}$`、长度恰为 24,且 `parse_cid(render_cid(x)) == Some(x)`;两个产品线相同
 - 生成:epoch ∈ [0, 2¹⁵);venue ∈ {1, 2};account ∈ u8;slot ∈ [0, 2²⁰);gen ∈ u32
 - 参考:hft-types `ClientOrderId::encode/decode`
@@ -974,7 +988,7 @@ spec: README.md
 
 - 规则:[5. 回报解码](README.md#5-回报解码)、[hft-venue-proto 契约 13](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;全新 `GwCtx`;`RX`(`account = 2`);payload `{"id":"p0000002a00000007","status":200,"result":{"orderId":325078477,"symbol":"BTCUSDT","status":"NEW","clientOrderId":"1000301020002a000000073d","updateTime":1790000000010},"rateLimits":[{"rateLimitType":"ORDERS","interval":"SECOND","intervalNum":10,"limit":300,"count":12},{"rateLimitType":"ORDERS","interval":"MINUTE","intervalNum":1,"limit":1200,"count":40},{"rateLimitType":"REQUEST_WEIGHT","interval":"MINUTE","intervalNum":1,"limit":2400,"count":5}]}`
 - 步骤:
   1. `decode_report(rd, ctx, WsResp, payload, &RX, &mut sink)`
@@ -988,7 +1002,7 @@ spec: README.md
 
 - 规则:[限速默认值(`rate_rules()`,生效值以 refdata 为准)](README.md#限速默认值rate_rules生效值以-refdata-为准)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:BIN-090 的 payload,只替换 `rateLimits`
 - 实现:`crates/venue-binance/tests/reports.rs::bin_091_rate_limits_pick`
 
@@ -1005,8 +1019,8 @@ spec: README.md
 
 - 规则:[结果未知码表](README.md#结果未知码表)、[5. 回报解码](README.md#5-回报解码)、[hft-venue-proto 契约 6](../hft-venue-proto/README.md#实现方必须遵守的契约)、[hft-venue-proto 契约 8](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
-- 前置:`RD-BIN`;`Usdm`;响应 `{"id":"p0000002a00000007","status":<st>,"error":{"code":<code>,"msg":"…"}}`(只有状态的行没有 `error`);"Reject" = 恰好一条 `OrderEvent{what: Reject, slot: 42, gen: 7, reject_code: raw}` 且 `outcome_unknown = None`;"未知" = 零条 `OrderEvent`、`outcome_unknown = Some(ReqRef{42, 7, Place})`;两种都有 `ReportOutcome.raw_code = raw`
+- 里程碑:M1.5
+- 前置:`RD-BIN`;`Usdm`;响应 `{"id":"p0000002a00000007","status":<st>,"error":{"code":<code>,"msg":"…"}}`(只有状态的行没有 `error`);"Reject" = 恰好一条 `OrderEvent{what: Reject, slot: 42, gen: 7, epoch: 0, reject_code: raw}`(错误响应不带 client id,README"已知限制与后续工作")且 `outcome_unknown = None`;"未知" = 零条 `OrderEvent`、`outcome_unknown = Some(ReqRef{42, 7, Place})`;两种都有 `ReportOutcome.raw_code = raw`
 - 实现:`crates/venue-binance/tests/codes.rs::bin_092_error_code_table`
 
 | 行 | status / code | 期望 |
@@ -1039,7 +1053,7 @@ spec: README.md
 
 - 规则:[结果未知码表](README.md#结果未知码表)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;payload `{"id":"c0000002a00000007","status":400,"error":{"code":-2011,"msg":"Unknown order sent."}}`
 - 步骤:
   1. `decode_report(rd, ctx, WsResp, payload, &RX, &mut sink)`
@@ -1052,7 +1066,7 @@ spec: README.md
 
 - 规则:[下单:WS API](README.md#下单ws-api)、[累计量与费用来源](README.md#累计量与费用来源)、[hft-venue-proto 契约 9](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;`Usdm` 响应 `{"id":"q0000002a00000007","status":200,"result":{"orderId":325078477,"symbol":"BTCUSDT","status":<X>,"clientOrderId":"1000301020002a000000073d","price":"65000.1","origQty":"0.004","executedQty":<z>,"avgPrice":<ap>,…}}`;`Spot` 行用 `cummulativeQuoteQty`;每行断言一条 `OrderEvent{what: QueryResult, slot: 42, gen: 7, epoch: 3}` 的字段
 - 实现:`crates/venue-binance/tests/reports.rs::bin_094_query_result`
 
@@ -1073,7 +1087,7 @@ spec: README.md
 
 - 规则:[结果未知码表](README.md#结果未知码表)、[hft-venue-proto 契约 10](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;`stale_guard() = RecvWindow`;payload `{"id":"q0000002a00000007","status":400,"error":{"code":-2013,"msg":"Order does not exist."}}`
 - 步骤:
   1. `decode_report(rd, ctx, WsResp, payload, &RX, &mut sink)`
@@ -1081,6 +1095,21 @@ spec: README.md
   - 一条 `OrderEvent{what: QueryResult, slot: 42, gen: 7, cum_filled: 0, avg_px: 0, reject_code: 0xFFFFF823}`,订单状态 NotFound(7)
   - 没有 `Reject`、没有 `Expired`;`outcome_unknown = None`
 - 实现:`crates/venue-binance/tests/codes.rs::bin_095_query_not_found`
+### BIN-096 撤单与改单的成功响应给出 CancelAck 与 AmendAck,现货全撤响应零事件
+
+- 规则:[5. 回报解码](README.md#5-回报解码)、[下单:WS API](README.md#下单ws-api)
+- 级别:table
+- 里程碑:M1.5
+- 前置:`RD-BIN`;全新 `GwCtx`;`RX`;每行一条 `status = 200` 的响应(响应体为官方文档示例的字段集,值按下表)
+- 实现:`crates/venue-binance/tests/reports.rs::bin_096_cancel_amend_acks`
+
+| 行 | 产品线 / 响应 | 期望 |
+|---|---|---|
+| BIN-096.1 | `Usdm` `order.cancel`,`id = c0000002a00000007`,`result{clientOrderId: CID(3,42,7), orderId: 325078477, status: CANCELED, symbol: BTCUSDT, updateTime: 1790000000020}` | 一条 `OrderEvent{what: CancelAck, epoch: 3, slot: 42, gen: 7, inst: 1042, exch_order_id: 325078477, ex_ts_ns: 1790000000020000000}`;`req = Some(ReqRef{42, 7, Cancel})`;不调用 `exch_id` |
+| BIN-096.2 | `Spot` `order.cancel`,`result{origClientOrderId: CID(3,42,7)(Spot), clientOrderId: "91fe37ce9e69c90d6358c0", orderId: 12569099453, transactTime: 1790000000020000(µs)}` | 一条 `OrderEvent{what: CancelAck, epoch: 3, slot: 42, gen: 7, inst: 2001, exch_order_id: 12569099453, ex_ts_ns: 1790000000020000000}`(client id 取 `origClientOrderId`) |
+| BIN-096.3 | `Usdm` `order.modify`,`id = m0000002a00000007`,`result{clientOrderId: CID(3,42,7), orderId: 325078477, status: NEW}` | 一条 `OrderEvent{what: AmendAck, epoch: 3, slot: 42, gen: 7}` |
+| BIN-096.4 | `Spot` `openOrders.cancelAll`,`id = x0000000000000000`,`result` 为数组 | 零事件,`events = 0` |
+
 ### BIN-100 ORDER_TRADE_UPDATE 的执行类型映射为 OrderEvent 种类
 
 - 规则:[5. 回报解码](README.md#5-回报解码)、[用户流事件表](README.md#用户流事件表)
@@ -1657,7 +1686,7 @@ spec: README.md
 
 - 规则:[限速默认值(`rate_rules()`,生效值以 refdata 为准)](README.md#限速默认值rate_rules生效值以-refdata-为准)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`rate_rules()`;另断言 `Usdm` 表长 5、`Spot` 表长 5
 - 实现:`crates/venue-binance/tests/caps.rs::bin_170_rate_rules`
 - 备注:`Usdm` 新连接一行依赖待核实:开发备忘第 11 条
@@ -1679,7 +1708,7 @@ spec: README.md
 
 - 规则:[VenueCaps 默认值](README.md#venuecaps-默认值)、[hft-venue-proto 契约 15](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`Usdm::default_caps()` 与 `Spot::default_caps()`;`fee_asset_rule` 的平台币以资产名断言
 - 实现:`crates/venue-binance/tests/caps.rs::bin_171_default_caps`
 
@@ -1705,7 +1734,7 @@ spec: README.md
 
 - 规则:[VenueCaps 默认值](README.md#venuecaps-默认值)、[6. 死手与会话维护](README.md#6-死手与会话维护)、[hft-venue-proto 契约 10](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:无参数
 - 实现:`crates/venue-binance/tests/caps.rs::bin_172_stale_guard_dead_man`
 
@@ -1788,7 +1817,7 @@ spec: README.md
 
 - 规则:[心跳与 BBO 探测](README.md#心跳与-bbo-探测)、[hft-venue-proto 契约 24](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`heartbeat(role)`
 - 实现:`crates/venue-binance/tests/session.rs::bin_190_heartbeat_spec`
 - 备注:依赖待核实:开发备忘第 18 条(各连接的服务端 Ping 间隔)
@@ -1805,7 +1834,7 @@ spec: README.md
 
 - 规则:[心跳与 BBO 探测](README.md#心跳与-bbo-探测)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`out` 为 64 B 缓冲,初值全 0xAA
 - 步骤:
   1. `Usdm::bbo_probe()`、`Spot::bbo_probe()`
@@ -1819,7 +1848,7 @@ spec: README.md
 
 - 规则:[7. 订阅节奏](README.md#7-订阅节奏)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:测试 refdata 另含 450 个 `Usdm` inst;`SubSpec{stream: Bbo, route: public-bbo}` × k
 - 实现:`crates/venue-binance/tests/subscribe.rs::bin_200_subscribe_batching`
 
@@ -1836,7 +1865,7 @@ spec: README.md
 
 - 规则:[7. 订阅节奏](README.md#7-订阅节奏)、[分档快照流](README.md#分档快照流)、[已知限制与后续工作](README.md#已知限制与后续工作)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:`RD-BIN`;每行一组 `SubSpec`,断言 `params` 内容
 - 实现:`crates/venue-binance/tests/subscribe.rs::bin_201_stream_names`
 
@@ -1859,7 +1888,7 @@ spec: README.md
 
 - 规则:[7. 订阅节奏](README.md#7-订阅节奏)、[6. 死手与会话维护](README.md#6-死手与会话维护)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M1.5
 - 前置:账户 2
 - 实现:`crates/venue-binance/tests/subscribe.rs::bin_202_private_subscribe`
 
@@ -2327,7 +2356,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M1.5
 - 基准名:`bench_classify_usdm`
 - 实现:`crates/venue-binance/benches/decode.rs::bin_500_classify_usdm`
 
@@ -2335,7 +2364,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M1.5
 - 基准名:`bench_peek_bookticker`
 - 实现:`crates/venue-binance/benches/decode.rs::bin_501_peek_bookticker`
 
@@ -2343,7 +2372,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M1.5
 - 基准名:`bench_decode_bookticker`
 - 实现:`crates/venue-binance/benches/decode.rs::bin_502_decode_bookticker`
 
@@ -2359,7 +2388,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M1.5
 - 基准名:`bench_decode_spot_bookticker`
 - 实现:`crates/venue-binance/benches/decode.rs::bin_504_decode_spot_bookticker`
 
@@ -2367,7 +2396,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M1.5
 - 基准名:`bench_encode_place`
 - 实现:`crates/venue-binance/benches/encode.rs::bin_505_encode_place`
 

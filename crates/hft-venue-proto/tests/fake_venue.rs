@@ -191,7 +191,13 @@ impl VenueProtocol for FakePerp {
     fn login_result(_p: &[u8]) -> LoginResult {
         LoginResult::NotMine
     }
-    fn subscribe(_s: &[SubSpec], _u: bool, _c: &VenueCfg, _o: &mut SubFrames) -> Result<(), ProtoErr> {
+    fn subscribe(
+        _rd: &RefData,
+        _s: &[SubSpec],
+        _u: bool,
+        _c: &VenueCfg,
+        _o: &mut SubFrames,
+    ) -> Result<(), ProtoErr> {
         Err(ProtoErr::Unsupported)
     }
     fn private_subscribe(_c: &VenueCfg, _a: AccountId, _u: bool, _o: &mut SubFrames) -> Result<(), ProtoErr> {

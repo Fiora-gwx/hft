@@ -489,6 +489,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
     }
 
     fn subscribe(
+        _rd: &hft_refdata::RefData,
         subs: &[SubSpec],
         unsub: bool,
         _cfg: &VenueCfg,

@@ -99,8 +99,14 @@ pub trait VenueProtocol: Sized + 'static {
     fn login_result(payload: &[u8]) -> LoginResult;
     /// Subscription (`unsub = false`) or unsubscription frames; each frame records how many leading
     /// `subs` it covers. Called on the feed thread after `install`: writes into the preallocated
-    /// `out` without allocating.
-    fn subscribe(subs: &[SubSpec], unsub: bool, cfg: &VenueCfg, out: &mut SubFrames) -> Result<(), ProtoErr>;
+    /// `out` without allocating. `rd` gives the wire symbols of the insts.
+    fn subscribe(
+        rd: &RefData,
+        subs: &[SubSpec],
+        unsub: bool,
+        cfg: &VenueCfg,
+        out: &mut SubFrames,
+    ) -> Result<(), ProtoErr>;
     /// Private channel frames; only on the owning connection (hft-venue §4b).
     fn private_subscribe(
         cfg: &VenueCfg,

@@ -20,7 +20,7 @@ status = ["spec", "impl", "frozen"]
 # Component READMEs: all frontmatter keys and the README 模板 section order (crates/AGENTS.md).
 components = [
     "crates/*/README.md", "apps/*/README.md", "strategies/*/README.md", "strategies/*/pipeline/README.md",
-    "python/*/README.md",
+    "python/*/README.md", "tools/latency-slice/README.md",
 ]
 
 [agent_notes]

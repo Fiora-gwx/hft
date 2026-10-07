@@ -3,7 +3,7 @@ description: "Binance USDT-M 永续与现货的纯协议实现(core:USDT-M 与�
 kind: crate
 tier: pure
 scope: core
-status: spec
+status: impl
 ---
 
 # venue-binance
@@ -394,6 +394,10 @@ pub mod mock {
 |---|---|
 | 下单响应 `status=200` | `Ack`(`exch_order_id = result.orderId`) |
 | 下单响应 `status≥400`,`error.code` | 确定拒绝表 → `Reject{reject_code}`;结果未知表与未登记码 → `outcome_unknown` |
+| 撤单响应(`order.cancel`)`status=200` | `CancelAck`(被撤订单的 client id:`Usdm` 取 `result.clientOrderId`,`Spot` 取 `result.origClientOrderId`——`Spot` 的 `clientOrderId` 是撤单请求自己的 id;`exch_order_id = result.orderId`);与用户流 `x=CANCELED` 重复时 OMS 幂等处理 |
+| 改单响应(`order.modify`、`order.amend.keepPriority`)`status=200` | `AmendAck`(`Spot` 的被改订单在 `result.amendedOrder`,client id 取其 `origClientOrderId`) |
+| `openOrders.cancelAll` 响应 `status=200`(`result` 为数组) | 零事件(撤单回报来自用户流) |
+| 撤单、改单、查询、全撤响应 `status≥400` | 撤单:`-2011` → `CancelReject{detail = GONE}`,其余确定拒绝码 → `CancelReject{detail = 0}`;改单:确定拒绝码 → `AmendReject`;查询:`-2013` → `QueryResult` 的 NotFound 形态(见"结果未知码表"),其余确定拒绝码零事件;全撤:零事件;结果未知码(撤单、改单)→ `outcome_unknown`,查询与全撤只记 `raw_code`。错误响应不带 client id:`slot`/`gen` 取请求 id,`epoch` 写 0(见"已知限制与后续工作") |
 | `ORDER_TRADE_UPDATE` `x=NEW` | `Ack`(若响应已给过 Ack,sequencer 幂等忽略) |
 | `x=TRADE`,`X=PARTIALLY_FILLED/FILLED` | `PartialFill` / `Fill`(`qty ← l`,`px ← L`,`cum_filled ← z`,`avg_px ← ap`,`fee ← n`,`fee_asset ← N`,`ex_ts_ns ← T`);先过"外部成交识别" |
 | `x=CALCULATED` | 只经"外部成交识别"产出 `ExternalFill`(本系统订单不会出现此类型;若 client id 是我们的且不命中强平类前缀 → `DecodeErr::Shape`,运行时按 `REPORT_DECODE` 告警) |
@@ -420,22 +424,22 @@ pub mod mock {
 
 | 文件 | 职责 |
 |---|---|
-| `src/lib.rs` | `Usdm`、`Spot` 与 trait 实现入口 |
-| `src/caps.rs` | 两个产品线的 `default_caps()` |
+| `src/lib.rs` | `Usdm`、`Spot`(同一份实现,按 `Line` 区分产品线)与 trait 实现入口 |
+| `src/line.rs` | `Line`:两个产品线的差异 |
+| `src/json.rs` | sonic-rs 专用结构体(字段借用 `&str`)、`rateLimits` 选择、解码错误映射 |
+| `src/wr.rs` | 定长帧写入器(写满即失败,不分配) |
+| `src/caps.rs` | 两个产品线的 `default_caps()`、官方默认限速、`stale_guard`/`dead_man`、心跳规格 |
 | `src/cid.rs` | client id 与请求 id 渲染/解析 |
 | `src/sign.rs` | Ed25519 logon 签名;REST 一律 HMAC-SHA256(独立 key) |
 | `src/errors.rs` | 错误码两张表:确定拒绝 / 结果未知(未登记码默认结果未知) |
-| `src/rate.rs` | 官方默认限速、`rateLimits` 解析 |
 | `src/external.rs` | 外部成交识别(两个产品线共用的前缀表与判定顺序) |
-| `src/usdm/md.rs` | bookTicker、分档快照 depthUpdate、aggTrade、markPrice、forceOrder;增量 depthUpdate(可选扩展) |
-| `src/usdm/snapshot.rs` | REST 快照解析与 `align_first` |
-| `src/usdm/orders.rs` | 模板与 `encode` |
-| `src/usdm/reports.rs` | WS API 响应、`ORDER_TRADE_UPDATE`、`ACCOUNT_UPDATE`、`MARGIN_CALL`、`ACCOUNT_CONFIG_UPDATE`、用户流事件表 |
-| `src/usdm/acct.rs` | Config 与 Margin 序列的请求与解码 |
-| `src/usdm/session.rs` | logon、listenKey、`countdownCancelAll` |
-| `src/spot/json.rs` | JSON bookTicker、combined 流的分档快照、trade;增量 depth(可选扩展) |
+| `src/md.rs` | 行情分派、`peek`、序号规则、控制提示与行情解码(bookTicker、分档快照、aggTrade/trade、markPrice、forceOrder;增量 depth 为可选扩展) |
+| `src/snapshot.rs` | REST 快照解析与 `align_first`(可选扩展) |
+| `src/session.rs` | 路由、端点、listenKey bootstrap、logon、订阅与私有频道订阅、`countdownCancelAll` |
+| `src/orders.rs` | 模板与 `encode`(两个产品线的 ws-fapi/ws-api 帧) |
+| `src/reports.rs` | 回报分派、WS API 响应、`ORDER_TRADE_UPDATE`/`executionReport` 与用户流事件表 |
+| `src/acct.rs` | Config 与 Margin 序列的请求与解码 |
 | `src/spot/sbe/*.rs` | SBE 头、bestBidAsk、trade、depth diff、depth20(feature `spot-sbe`) |
-| `src/spot/orders.rs` / `reports.rs` / `acct.rs` | ws-api 模板、cancelReplace、amend.keepPriority、executionReport、outboundAccountPosition、Config 序列 |
 | `schemas/` | SBE schema XML(随版本锁定;feature `spot-sbe`) |
 | `fuzz/` | fuzz 目标(见 [TESTS.md](TESTS.md)) |
 
@@ -473,6 +477,7 @@ pub mod mock {
 | `hft-types`、`hft-refdata`、`hft-event` | 定点、ID、`SymbolIndex`、`VenueCaps`、事件体、出环元素 `GwCmd` |
 | `hft-venue-proto` | `VenueProtocol` 与辅助类型(测试与 fuzz 用其 `testkit` feature) |
 | `sonic-rs 0.5` | JSON 专用结构体解码 |
+| `serde 1`(`derive`) | sonic-rs 专用结构体的派生(不用 serde_json) |
 | `ed25519-dalek 2` | logon 与 SBE key 签名(warm 线程) |
 | `hmac 0.12` + `sha2 0.10` | REST HMAC(独立 key) |
 | `base64 0.22` | 签名编码 |
@@ -498,6 +503,8 @@ pub mod mock {
 - **`TRADE_LITE` 不用**:它可能比 `ORDER_TRADE_UPDATE` 更早到达;可选扩展(触发条件:对冲第二腿的回报延迟成为主要项)时改为成交提示,并与 `ORDER_TRADE_UPDATE` 按 `t` 去重。
 - **保证金轮询走 REST**:5 s 间隔下逼空时的保证金率最多滞后 5 s + 一次往返;更快的来源(ws-fapi 账户方法)待核实后再评估(开发备忘第 10 条)。
 - **现货用户流**依赖 ws-api 归属连接上的订阅;归属切换期间的缺口由 `Unknown` + 查询收敛。
+- **当前构建只含 M1.5 子集**(纵切片 [latency-slice](../../tools/latency-slice/README.md) 用到的部分):路由、端点与 listenKey bootstrap;全部 core 行情类的分派、`peek`、序号规则与控制提示;两个产品线的 bookTicker 解码;logon;订阅与私有频道订阅;下单、撤单、改单、查询与现货全撤帧;WS API 响应(Ack、Reject、结果未知、撤单与改单应答、查询结果);限速、能力、过期、死手与心跳默认值。其余随 M3 补全(TESTS.md 中里程碑 M3 的用例):bookTicker 以外的行情解码与用户流事件(`decode_md`/`decode_report` 返回 `UnknownClass`),账户与只读查询,签名 REST(`encode_rest`、`dead_man_refresh`、`session_keepalive_request` 返回 `Unsupported`),会话 key 身份查询(`session_identity_request` 返回 `Unsupported`),BBO 补帧请求(保持 trait 默认 `Ok(false)`)。
+- **错误响应的 epoch**:WS API 错误响应不带 client id,请求 id 也不含 epoch,`decode_report` 以请求 id 的 `slot`/`gen` 与 `epoch = 0` 产出事件;gw 的 epoch 不为 0 时这些事件按外来处理(hft-venue 把 `slot` 置为 `UNRESOLVED`)。M3 之前在 hft-venue gw 侧按槽镜像补 epoch(或把 epoch 编进请求 id),届时同步改 [hft-venue-proto 契约 13](../hft-venue-proto/README.md#实现方必须遵守的契约) 与"5. 回报解码"表。
 
 ### 开发备忘
 

@@ -42,6 +42,7 @@
 | venue-okx | OKX | hft-telemetry | TEL | ops_bot | OPS |
 | venue-bitget | BGT | hft-testkit | TK | pipeline | PIP |
 | hft-py | PY | | | treasury | TRS |
+| latency-slice | SLC | | | | |
 
 ## 4. 用例格式
 

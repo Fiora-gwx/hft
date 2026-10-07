@@ -66,8 +66,9 @@ pub trait VenueProtocol: Sized + 'static {
     fn login(role: Role, cfg: &VenueCfg, cred: &Credential, step: u8, now_ms: i64, out: &mut Vec<u8>)
              -> Result<LoginStep, ProtoErr>;                                      // NotNeeded / Frame / Handshake;step = 第几步(0 起;login_result 返回 Continue 后加一再调)
     fn login_result(payload: &[u8]) -> LoginResult;                               // Ok / Rejected(code) / Continue / NotMine
-    /// 订阅(unsub = false)或退订帧,分批;每帧记它覆盖 subs 的前几项。feed 线程在 install 后调用:写进预分配的 out,不分配。
-    fn subscribe(subs: &[SubSpec], unsub: bool, cfg: &VenueCfg, out: &mut SubFrames) -> Result<(), ProtoErr>;
+    /// 订阅(unsub = false)或退订帧,分批;每帧记它覆盖 subs 的前几项。feed 线程在 install 后调用:写进预分配的 out,不分配;
+    /// 流名所需的交易所符号从 rd 取(SubSpec 只带 InstId)。
+    fn subscribe(rd: &RefData, subs: &[SubSpec], unsub: bool, cfg: &VenueCfg, out: &mut SubFrames) -> Result<(), ProtoErr>;
     /// 私有频道订阅帧(用户流、订单、持仓、账户、保证金推送);只在被选为私有频道归属的连接上发(见 hft-venue §4b)。
     fn private_subscribe(cfg: &VenueCfg, acct: AccountId, unsub: bool, out: &mut SubFrames) -> Result<(), ProtoErr>;
     fn heartbeat(role: Role) -> HeartbeatSpec;
