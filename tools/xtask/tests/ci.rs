@@ -1,5 +1,6 @@
-//! `cargo xtask ci` (tools/TESTS.md TOOL-003–TOOL-008, TOOL-010, TOOL-011). Every step runs through the
-//! recording executor; the fixture holds a workspace whose components make every step run.
+//! `cargo xtask ci` (tools/TESTS.md TOOL-003–TOOL-008, TOOL-010, TOOL-011, TOOL-186). Every step
+//! runs through the recording executor; the fixture holds a workspace whose components make every
+//! step run.
 
 mod common;
 
@@ -140,6 +141,16 @@ fn tool_006_fast_skips_dst_and_golden() {
         .collect();
     assert_eq!(want.len(), 9);
     assert_eq!(s.calls(), want);
+}
+
+#[test]
+fn tool_186_no_doc_check_skips_doc_check() {
+    let f = ci_repo("ci-186");
+    let s = Script::new(&f, &[], 0);
+    let r = f.xtask_script(&["ci", "--no-doc-check"], &s, &[]);
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert_eq!(s.calls(), STEPS[..11].to_vec());
+    assert!(r.stderr.contains("doc-check: skipped"), "{}", r.stderr);
 }
 
 #[test]

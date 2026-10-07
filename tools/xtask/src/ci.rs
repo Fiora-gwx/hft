@@ -25,6 +25,8 @@ pub const DST_DIR: &str = "crates/hft-testkit/src/dst";
 pub struct Options {
     pub pure_only: bool,
     pub fast: bool,
+    /// Skip the doc-check step (the CI `rust` job: the `docs` job runs it on the same commit).
+    pub no_doc_check: bool,
 }
 
 /// One step: name, the commands to run (empty = skipped with `note`).
@@ -234,7 +236,11 @@ pub fn plan(root: &Path, opts: Options) -> Result<(Vec<Step>, Optional), EnvErro
         "gen-schema --check",
         vec![Cmd::new("xtask", &["gen-schema", "--check"])],
     ));
-    steps.push(step("doc-check", vec![Cmd::new("xtask", &["doc-check"])]));
+    if opts.no_doc_check {
+        steps.push(skip("doc-check", "--no-doc-check (the docs job runs it)".into()));
+    } else {
+        steps.push(step("doc-check", vec![Cmd::new("xtask", &["doc-check"])]));
+    }
     Ok((steps, opt))
 }
 
@@ -244,6 +250,7 @@ fn parse(args: &[String]) -> Result<Options, EnvError> {
         match a.as_str() {
             "--pure-only" => o.pure_only = true,
             "--fast" => o.fast = true,
+            "--no-doc-check" => o.no_doc_check = true,
             x => return Err(EnvError(format!("unknown argument {x}"))),
         }
     }

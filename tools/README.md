@@ -47,10 +47,10 @@ status: spec
 ### cargo xtask ci
 
 ```sh
-cargo xtask ci [--pure-only] [--fast]
+cargo xtask ci [--pure-only] [--fast] [--no-doc-check]
 ```
 
-按顺序运行,任一步失败即停止:`fmt --check` → `clippy --workspace --all-targets -D warnings` → `deny check licenses bans` → `deps` → `hot-check` → `fixtures check` → 单元/属性测试(`--profile ci`,剖面定义归 [development 构建剖面](../docs/development.md#构建剖面))→ 金样 → `dst` 冒烟(种子数与回归集归 [testing §2](../docs/testing.md#2-金字塔))→ `dst --hashtrail check --first K`(K = PR 核对的一致性种子数,取值归 [testing §6](../docs/testing.md#6-ci-运行矩阵))→ `gen-schema --check` → `doc-check`。`--pure-only` 只选 frontmatter `tier: pure` 的 crate 与 Python 包;`--fast` 跳过 DST 与金样(本地迭代,CI 不用)。`cargo deny check advisories` 不在 `ci` 内:它是独立的非阻塞任务([development](../docs/development.md))。
+按顺序运行,任一步失败即停止:`fmt --check` → `clippy --workspace --all-targets -D warnings` → `deny check licenses bans` → `deps` → `hot-check` → `fixtures check` → 单元/属性测试(`--profile ci`,剖面定义归 [development 构建剖面](../docs/development.md#构建剖面))→ 金样 → `dst` 冒烟(种子数与回归集归 [testing §2](../docs/testing.md#2-金字塔))→ `dst --hashtrail check --first K`(K = PR 核对的一致性种子数,取值归 [testing §6](../docs/testing.md#6-ci-运行矩阵))→ `gen-schema --check` → `doc-check`。`--pure-only` 只选 frontmatter `tier: pure` 的 crate 与 Python 包;`--fast` 跳过 DST 与金样(本地迭代,CI 不用);`--no-doc-check` 跳过 doc-check 步(只供 CI 的 `rust` 作业:同一提交的 `docs` 作业每次都运行 `doc-check`,不在两个作业里各跑一遍)。`cargo deny check advisories` 不在 `ci` 内:它是独立的非阻塞任务([development](../docs/development.md))。
 
 **按路径触发的步骤不在 `ci` 内**:`scaffold-gate`、改动目标的 fuzz 冒烟、`fixtures/replay/` 样本的 `replay-verify`、基准短跑由工作流按 [testing §6](../docs/testing.md#6-ci-运行矩阵) 的路径规则分别调用对应子命令;`decoupling-gate` 是独立作业(下节)。工作流文件、触发、作业图与分钟预算归 [development](../docs/development.md#ci-概要);本地(Windows)只写代码并推送。
 

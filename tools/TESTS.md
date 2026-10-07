@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | 不适用:非规范 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | TOOL-001–TOOL-002 |
-| cargo xtask ci | TOOL-003–TOOL-011 |
+| cargo xtask ci | TOOL-003–TOOL-011, TOOL-186 |
 | cargo xtask decoupling-gate | TOOL-012–TOOL-019 |
 | cargo xtask scaffold-gate | TOOL-020–TOOL-029 |
 | cargo xtask deps | TOOL-030–TOOL-031、TOOL-118 |
@@ -2810,6 +2810,18 @@ spec: README.md
 | TOOL-185.4 | `--smoke`;`a/x` 超出预算 | 退出 0(冒烟不读门槛) |
 | TOOL-185.5 | `--smoke`;`strategies/s/benches/` 缺 `strategies/s/advice` | 退出 1;列出缺的基准名 |
 | TOOL-185.6 | `--smoke`;`strategies/s/benches/` 提供 SDK 规定的全部入口 | 退出 0 |
+
+### TOOL-186 ci --no-doc-check 跳过 doc-check 步
+
+- 规则:[cargo xtask ci](README.md#cargo-xtask-ci)
+- 级别:unit
+- 里程碑:M1
+- 前置:记录型执行器对每步返回 0
+- 步骤:
+  1. 运行 `cargo xtask ci --no-doc-check`
+- 期望:
+  - 退出 0;步骤序列为 TOOL-004 的前十一步(没有 `xtask doc-check` 调用);stderr 的摘要把 doc-check 步记为跳过
+- 实现:`tools/xtask/tests/ci.rs::tool_186_no_doc_check_skips_doc_check`
 
 ## 验收
 

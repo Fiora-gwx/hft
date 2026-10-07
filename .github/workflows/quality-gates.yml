@@ -192,8 +192,8 @@ jobs:
         run: cargo build --locked --profile ci --workspace --all-features --tests --examples --keep-going
 
       # fmt, clippy, deny licenses/bans, deps, hot-check, fixtures check, unit/property (ci profile),
-      # golden, DST smoke + `dst --hashtrail check --first 50` (from M2), gen-schema --check,
-      # doc-check (tools/README.md "cargo xtask ci").
+      # golden, DST smoke + `dst --hashtrail check --first 50` (from M2), gen-schema --check
+      # (tools/README.md "cargo xtask ci"); doc-check is the docs job's.
       - name: cargo xtask ci
         id: ci
         # Also after a failed build: fmt and clippy still report.
@@ -202,7 +202,8 @@ jobs:
           # tmpfs journal segments are mlocked (crates/hft-journal JNL-040/044/045); the hosted
           # runner's RLIMIT_MEMLOCK (8 MiB) is below one 16 MiB test segment.
           sudo prlimit --pid $$ --memlock=unlimited:unlimited
-          cargo xtask ci
+          # doc-check runs in the docs job on the same commit (every PR and main push).
+          cargo xtask ci --no-doc-check
 
       - name: aarch64 cross check (ISA-specific code stays compilable)
         # Also after a failed gate: its verdict is independent, and its dependencies get cached.
