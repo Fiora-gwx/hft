@@ -309,10 +309,15 @@ impl RefData {
     }
 }
 
+// Declared at crate level so the path is relative to `src/` (an inline module's `#[path]` is
+// relative to the non-existent `src/tests/` directory, which rustfmt cannot resolve on Linux).
+#[cfg(test)]
+#[path = "../tests/common/f0.rs"]
+mod f0_fixture;
+
 #[cfg(test)]
 mod tests {
-    #[path = "../../tests/common/f0.rs"]
-    mod f0;
+    use super::f0_fixture as f0;
 
     use super::RefData;
 
