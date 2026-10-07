@@ -42,6 +42,8 @@ pub struct LoopOpts {
     pub suites: Option<Vec<rustls::SupportedCipherSuite>>,
     pub kx_x25519_only: bool,
     pub tickets: usize,
+    /// Wait this long before answering the Upgrade (lets a test observe `WsUpgrade` between drives).
+    pub upgrade_delay_ms: u64,
 }
 
 impl Default for LoopOpts {
@@ -54,6 +56,7 @@ impl Default for LoopOpts {
             suites: None,
             kx_x25519_only: false,
             tickets: 0,
+            upgrade_delay_ms: 0,
         }
     }
 }
@@ -205,6 +208,9 @@ fn serve(mut tcp: TcpStream, o: LoopOpts, tx: mpsc::Sender<PeerConn>, hellos: Ar
             .trim()
             .to_string();
         let accept = String::from_utf8(hft_net::ws_accept(key.as_bytes()).to_vec()).unwrap();
+        if o.upgrade_delay_ms > 0 {
+            std::thread::sleep(Duration::from_millis(o.upgrade_delay_ms));
+        }
         let resp = match &o.upgrade {
             Upgrade::Ok => format!(
                 "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"

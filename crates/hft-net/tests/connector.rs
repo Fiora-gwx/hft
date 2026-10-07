@@ -320,6 +320,9 @@ mod lo {
                 rustls::crypto::aws_lc_rs::cipher_suite::TLS13_AES_128_GCM_SHA256,
             ]),
             kx_x25519_only: true,
+            // The peer answers the Upgrade 20 ms late so that at least one drive sees `WsUpgrade`
+            // (on a fast host the 101 can otherwise arrive within the drive that sent the request).
+            upgrade_delay_ms: 20,
             ..LoopOpts::default()
         }
     }
