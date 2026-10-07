@@ -43,7 +43,7 @@ const STEPS: [&str; 12] = [
     "xtask deps",
     "xtask hot-check",
     "xtask fixtures check",
-    "cargo test --profile ci --workspace --all-features",
+    "cargo test --profile ci --workspace --all-features --no-fail-fast",
     "cargo test --profile ci --all-features -p a --test golden",
     "xtask dst --seeds 200 --regressions",
     "xtask dst --hashtrail check --first 50",

@@ -158,7 +158,11 @@ pub fn plan(root: &Path, opts: Options) -> Result<(Vec<Step>, Optional), EnvErro
     if opts.pure_only && selected.is_empty() {
         unit_notes.push("no tier = pure crate in the workspace".to_string());
     } else {
-        unit.push(sel_args(&["test", "--profile", "ci"]).arg("--all-features"));
+        unit.push(
+            sel_args(&["test", "--profile", "ci"])
+                .arg("--all-features")
+                .arg("--no-fail-fast"),
+        );
     }
     let py: Vec<String> = python_packages(root)
         .into_iter()
