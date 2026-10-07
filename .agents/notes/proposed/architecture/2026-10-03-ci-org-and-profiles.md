@@ -6,6 +6,8 @@ Status: proposed
 
 > **第八轮第六次修订(2026-10-03)**:收窄第 6 条——用量由 quota-gate 按作业时长自估(GitHub 用量接口已关闭),quota-gate 与发布 `preflight` 接受 Admin 的 `quota_override`,过 1,500 min 后不带 `hotfix` 标签的 PR 只跑 docs 与 `decoupling-gate`,额度耗尽时经负责人个人账户的私有镜像仓库出包;`release-x86-cross.yml` 只用于 arm runner 不可用;`nightly-arm` 改用自己的缓存键。见 [ci-quota-self-estimate](../process/2026-10-03-ci-quota-self-estimate.md)。
 
+> **实现期修订(2026-10-07,负责人决定)**:部分取代第 1 条——不建 GitHub 组织,仓库放负责人个人账户下的私有仓库 `Fiora-gwx/hft`,老板为协作者(个人私有仓库没有只读角色,老板实际有写权限;已知取舍,安全靠服务器只装经 `preflight` 的制品与发布工作流的 Admin 检查,`.github/hft-admins.txt` 只有 `Fiora-gwx`);2,000 min/月与 Trading 共享,1,500 min 规则按 hft 自估用量计,负责人每周对账时把 Trading 用量一并考虑;OIDC 信任策略 `repo:Fiora-gwx/hft:*`;deploy 容器测试只在改动 `deploy/` 或 `apps/hft-core/` 的 PR 上跑,每夜全量。规格以 [development](../../../../docs/development.md#仓库与-ci) 为准。
+
 ## Problem
 
 第三次修订后的 CI 预算在现实里不成立。只读统计 Trading 仓库的 Actions 用量:8 月 530 min、9 月 411 min;ARM64 发布每次 15–17 min;CI 每次计费中位 9 min(无 LTO)。hft 与 Trading 共享个人账户的 2,000 min,扣掉每夜 750 min 与 Trading 的实际用量后只剩约 720–840 min;`ci` 剖面继承 `release` 的 fat LTO,PR 现实 15–30 计费分钟、发布 35–60 min;评审标签与评审事件会重跑整套质量门;发布 artifact 保留 7 天、账本 artifact 保留 90 天,Free 计划 artifact 存储只有 500 MB;额度用尽会把 Trading 的发布一起停掉。另外个人账户的私有仓库不能给协作者只读权限,也没有受保护分支([V4 评审](../../../../design/_work/review-2026-10-03-M0c-V4运行与交付.md) P0-1、P1-9)。
@@ -14,7 +16,7 @@ Status: proposed
 
 用户决定按推荐执行([round8-decisions](../../../../design/_work/round8-decisions.md) R8-10;落地规格见 [round8d 简报](../../../../design/_work/round8d-spec-brief.md) D1)。规格唯一归属 [development](../../../../docs/development.md)。
 
-1. M1 时在一个**免费 GitHub Organization** 下建私有仓库 `<org>/hft`:独立的 2,000 min/月、artifact 500 MB、cache 10 GB;负责人 Admin、老板 Read。没有受保护分支,生产安全以发布 `preflight` 证实该 SHA 的 `ci.yml` 全绿且 `decoupling-gate` 通过为准。
+1. M1 时在一个**免费 GitHub Organization** 下建私有仓库(已由 2026-10-07 实现期修订取代:个人私有仓库 `Fiora-gwx/hft`):独立的 2,000 min/月、artifact 500 MB、cache 10 GB;负责人 Admin、老板 Read。没有受保护分支,生产安全以发布 `preflight` 证实该 SHA 的 `ci.yml` 全绿且 `decoupling-gate` 通过为准。
 2. 构建剖面:`release` = thin LTO、16 个 codegen 单元;`release-hot` = fat LTO、1 个 codegen 单元,只用于正式版的 `hft-core` 与 `kill-switch`;`ci` = 继承 `release` 但关 LTO、关增量、开断言与溢出检查;`bench` = `release-hot`。开发构建只用 `release`。
 3. `ci.yml` 只由 PR 的 opened/synchronize/reopened 与 `main` 推送触发;评审与标签事件只经 `decoupling.yml` 重跑 `decoupling-gate`;`python` 与 `operations` 合并为按路径的 `ops-py` 作业。
 4. CI 全绿的 PR 头可经 `workflow_dispatch(sha, dev_n)` 直接出开发构建。

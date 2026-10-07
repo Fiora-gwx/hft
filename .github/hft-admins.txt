@@ -5,8 +5,12 @@
 #   - cargo xtask decoupling-gate   (engine-change exemption needs an approving review by a login here)
 #   - .github/scripts/ci-usage.py   (quota_override / skip_verify are honoured only for a login here)
 #
-# Current Admin: the owner (负责人). The login is still to be filled in once the GitHub
-# organization <org> and the repository <org>/hft exist; until then nobody is an Admin, so every
-# exemption, quota_override and skip_verify is refused.
+# Current Admin: the owner (负责人), who owns the private repository Fiora-gwx/hft under a personal
+# account (no GitHub organization; owner's decision 2026-10-07). The boss is a collaborator; a
+# personal private repository has no read-only role, so collaborators can push and merge, and this
+# list (not repository permissions) is what gates exemptions, quota_override and skip_verify.
+# Do not add collaborators here.
 #
 # Changing this file is a normal PR (review it like code).
+
+Fiora-gwx

@@ -2440,7 +2440,7 @@ spec: README.md
 - 规则:[发布归档与 releasectl](README.md#发布归档与-releasectl)
 - 级别:table
 - 里程碑:M3
-- 前置:GitHub API 替身(仓库 `<org>/hft`);`/etc/hft/github-release-token` 为 `root` 0600;替身记录请求
+- 前置:GitHub API 替身(仓库 `Fiora-gwx/hft`);`/etc/hft/github-release-token` 为 `root` 0600;替身记录请求
 - 实现:`deploy/tests/test_release.py::dep_222_fetch`
 
 | 行 | 命令 | 期望 |

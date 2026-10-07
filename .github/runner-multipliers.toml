@@ -9,7 +9,8 @@ default = 1
 [labels]
 "ubuntu-latest" = 1
 "ubuntu-24.04" = 1
-# 待核实(M1 第一周):the multiplier of ubuntu-24.04-arm in an organization private repository.
-# Method: run release-aarch64.yml once, read the organization billing page, write the value here
-# and in the ops-log.
+# 待核实(M1 第一周):the multiplier of ubuntu-24.04-arm in the personal private repository
+# Fiora-gwx/hft. Method: run release-aarch64.yml once, read the personal account billing page
+# (shared with Trading, which has arm runs from Aug-Sep to compare), write the value here and in
+# the ops-log.
 "ubuntu-24.04-arm" = 1

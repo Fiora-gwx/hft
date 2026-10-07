@@ -93,7 +93,7 @@ refdata 不热替换:名单、模式、阈值变化走 `SetParams`;**只有交�
 
 服务器拉取用的只读 token(`/etc/hft/github-release-token`;归属与权限见 [deploy 发布归档](../../deploy/README.md#发布归档与-releasectl))有效期 ≤ 1 年,到期前 30 天轮换:
 
-23. `[需授权]` 负责人在组织 `<org>` 下新建 fine-grained token(只授权仓库 `<org>/hft`、Contents 读),记下到期日。
+23. `[需授权]` 负责人在个人账户 `Fiora-gwx` 下新建 fine-grained token(资源所有者 `Fiora-gwx`,只授权仓库 `Fiora-gwx/hft`、Contents 读),记下到期日。
 24. 在每台服务器上 `sudo install -m 0600 -o root -g root <新 token 文件> /etc/hft/github-release-token`;`fetch-release.sh --version <当前版本> --dry-run` 成功。
 25. 撤销旧 token;ops-log 记录新到期日并设下一次提醒。核对:DRL-84。
 

@@ -123,6 +123,44 @@ jobs:
         if: ${{ !cancelled() && hashFiles('**/tests/recover/**') != '' }}
         run: cargo test --locked --profile ci --workspace --all-features --test recover
 
+      # Full deploy checks every night, container tests included (PRs run the container tests only
+      # when deploy/ or apps/hft-core/ changed). Same commands as the "Deploy checks" step of
+      # quality-gates.yml; skipped until deploy/ exists (M3, deploy/TESTS.md).
+      - uses: actions/setup-python@v5
+        if: ${{ !cancelled() && hashFiles('deploy/**') != '' }}
+        with:
+          python-version: "3.12"
+      - name: Deploy checks (shellcheck, bats, unit verify, dev2 guard container tests)
+        if: ${{ !cancelled() && hashFiles('deploy/**') != '' }}
+        env:
+          DEPLOY_CONTAINER: "true"
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends shellcheck bats
+          mapfile -t sh < <(git ls-files 'deploy/*.sh')
+          if ((${#sh[@]})); then shellcheck -S warning "${sh[@]}"; else echo "no deploy shell scripts yet"; fi
+          mapfile -t bt < <(git ls-files 'deploy/*.bats')
+          if ((${#bt[@]})); then bats "${bt[@]}"; fi
+          mapfile -t units < <(git ls-files 'deploy/*.service' 'deploy/*.timer' 'deploy/*.slice' 'deploy/*.socket' 'deploy/*.path')
+          if ((${#units[@]})); then
+            # Test users and directory fixtures for systemd-analyze come from deploy (its CI fixture script).
+            if [[ -f deploy/tests/ci-unit-fixtures.sh ]]; then sudo bash deploy/tests/ci-unit-fixtures.sh; fi
+            systemd-analyze verify "${units[@]}"
+          fi
+          skip=()
+          if [[ "$DEPLOY_CONTAINER" != true ]]; then
+            skip=(--ignore=deploy/tests/container --ignore=deploy/dev2/tests/container)
+            echo "deploy container tests skipped (no deploy/ or apps/hft-core/ change; nightly runs them)"
+          fi
+          if [[ -d deploy/tests ]]; then
+            python -m pip install pytest
+            python -m pytest -q "${skip[@]}" deploy/tests
+          fi
+          if [[ -d deploy/dev2/tests ]]; then
+            python -m pip install pytest
+            python -m pytest -q "${skip[@]}" deploy/dev2/tests
+          fi
+
       - name: cargo deny check advisories (non-blocking, goes to the nightly summary)
         if: ${{ !cancelled() }}
         continue-on-error: true

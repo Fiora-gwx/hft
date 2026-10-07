@@ -15,7 +15,7 @@ Writes step outputs (true/false unless noted):
   benchmarks    benchmarks/
   toolchain     rust-toolchain.toml                         -> base vs head relative benchmark
   cargo_lock    Cargo.lock                                  -> cargo deny check advisories
-  gen_host      deploy/ or apps/hft-core/                   -> gen-host --check
+  gen_host      deploy/ or apps/hft-core/                   -> gen-host --check, deploy container tests
   python        python/ strategies/*/pipeline/ crates/hft-py/
   ops           deploy/ .github/
 """

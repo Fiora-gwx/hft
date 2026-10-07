@@ -4,10 +4,10 @@
 
 ## 仓库与 CI
 
-- **仓库**:设计基线 v1 在 `E:\trading\hft` 冻结([changes](changes.md));M1 起把它复制到 **`E:\trading` 之外**的本机目录 `E:\hft`(待负责人确认)作为代码仓库,组织与远端建好前只做本地 git 提交;远端是一个**免费 GitHub Organization** 下的私有仓库 `<org>/hft`(组织由负责人创建,`[需授权]`);它不放进 Trading 的仓库或其子目录(避免误推到 Trading 的远端)。设计长文 `architecture-v2/` 同时迁入新仓库的 `docs/design/`,指向它的相对链接同一改动内改写。
-- **角色**:负责人 = Admin;老板 = Read(只读,不能推送与合并);其他协作者的角色在建仓时由负责人决定。组织私有仓库有独立的 2,000 min/月、artifact 存储 500 MB、每仓库 cache 10 GB;Trading 仓库仍在个人账户,两边额度互不影响([免费额度](#免费额度))。
-- **没有受保护分支**:Free 组织的私有仓库不提供受保护分支,CI 红也能合并。生产安全以发布工作流的 `preflight` 为准——它证实该 SHA 的 `ci.yml` 全绿且 `decoupling-gate` 通过,正式版另要求该 SHA 在 `main` 上([发布工作流](#发布工作流release-aarch64yml));服务器只安装经过 `preflight` 的制品。
-- **CI 是唯一的构建与测试环境,只用 GitHub 托管的免费 runner**:PR 与 `main` 推送的质量门在 `ubuntu-latest`(x86_64)上跑——引擎的纯逻辑 crate 跨平台,ISA 专属代码另做 aarch64 交叉检查;aarch64 发布制品与验证包在 `ubuntu-24.04-arm` 上原生构建。**不用自托管 runner**;`dev2` 与任何交易主机都不注册为 runner,不在其上编译。CI 结论是"能编译、测试通过"的唯一证据。`ubuntu-24.04-arm` 在个人私有仓库可用已由 Trading 8–9 月 20 次成功运行证实;在组织私有仓库的可用性与计费倍率在 M1 第一周核实(方法:跑一次发布工作流,看组织计费页)。
+- **仓库**:设计基线 v1 在 `E:\trading\hft` 冻结([changes](changes.md));M1 起把它复制到 **`E:\trading` 之外**的本机目录 `E:\hft`(待负责人确认)作为代码仓库,远端建好前只做本地 git 提交;远端是负责人**个人账户下的私有仓库** `Fiora-gwx/hft`(https://github.com/Fiora-gwx/hft;负责人决定不建 GitHub 组织,2026-10-07);它不放进 Trading 的仓库或其子目录(避免误推到 Trading 的远端)。设计长文 `architecture-v2/` 同时迁入新仓库的 `docs/design/`,指向它的相对链接同一改动内改写。
+- **角色**:负责人(GitHub 登录名 `Fiora-gwx`)= 仓库所有者与唯一 Admin(`.github/hft-admins.txt`);老板已被邀请为协作者。个人账户的私有仓库**没有只读协作者**——协作者一律有写权限(能推送、能合并),所以老板实际有写权限。这是已知取舍:生产安全不依赖仓库权限,而靠"服务器只安装经过 `preflight` 的制品"与发布工作流的 Admin 检查(`quota_override`、`skip_verify` 与解耦豁免只认 `.github/hft-admins.txt` 中的登录名);请负责人不要授予老板以外的人协作者身份。额度是个人账户的 2,000 min/月(**与 Trading 仓库共享**)、artifact 存储 500 MB、每仓库 cache 10 GB([免费额度](#免费额度))。
+- **没有受保护分支**:免费个人账户的私有仓库不提供受保护分支,CI 红也能合并。生产安全以发布工作流的 `preflight` 为准——它证实该 SHA 的 `ci.yml` 全绿且 `decoupling-gate` 通过,正式版另要求该 SHA 在 `main` 上([发布工作流](#发布工作流release-aarch64yml));服务器只安装经过 `preflight` 的制品。
+- **CI 是唯一的构建与测试环境,只用 GitHub 托管的免费 runner**:PR 与 `main` 推送的质量门在 `ubuntu-latest`(x86_64)上跑——引擎的纯逻辑 crate 跨平台,ISA 专属代码另做 aarch64 交叉检查;aarch64 发布制品与验证包在 `ubuntu-24.04-arm` 上原生构建。**不用自托管 runner**;`dev2` 与任何交易主机都不注册为 runner,不在其上编译。CI 结论是"能编译、测试通过"的唯一证据。`ubuntu-24.04-arm` 在个人私有仓库可用已由 Trading 8–9 月 20 次成功运行证实(hft 同在该个人账户);计费倍率在 M1 第一周核实(方法:跑一次发布工作流,看个人账户计费页)。
 - **长时间 fuzz 与 DST 在服务器上跑 CI 构建的验证包**:CI 构建 `hft-verify-<ver>-aarch64.tar.zst`([验证包工作流](#验证包工作流verify-bundleyml));服务器只安装并在批处理 slice 内以最低优先级运行它(`hft-verify.service`,[deploy](../deploy/README.md#验证包与-hft-verify)),不编译。上线门槛 ③④ 的累计量只来自这些运行(账本规则归 [testing §6.1](testing.md#61-服务器上的累计运行));CI 每夜只做回归冒烟,不计入。
 - **本地只写代码**:Windows 工作站上编辑、提交、推送;不要求本地能编译或运行,也不用 WSL2。本地装了 Rust 工具链时可以 `cargo check` 或跑 `pure` crate 的测试作参考,结论以 CI 为准。
 - **服务器只安装 CI 产出的制品**:正式版、开发构建与验证包(见 [deploy](../deploy/README.md#制品从哪里来)),不在服务器上编译、不装工具链。CI 不接触服务器:没有 SSH 部署作业,服务器自己拉取制品(server-pull)。
@@ -121,7 +121,7 @@
 ### 凭证与权限
 
 - 全部工作流默认 `permissions: contents: read`;只有下列作业提权:`preflight`、`quota-gate` 与每夜 `summary`(`actions: read`、`checks: read`)、`decoupling-gate`(`pull-requests: read`;`ci.yml` 中另有 `actions: read`——它同时估算本月用量)、`verify-bundle.yml` 的 `resolve`(`actions: read`,`workflow_dispatch` 时核对 `ci.yml` 结论)、`publish` 与 `verify-bundle.yml` 的上传作业(`contents: write`)、需要 S3 fixtures 的作业(`id-token: write`:质量门 `rust`、发布 `build`)。调用可复用工作流的作业授予被调用作业所需权限的并集(`ci.yml` 的 `quality-gates`;发布的 `verify` 为 `contents: write` + `actions: read`,因为 `verify-bundle.yml` 也声明了只在 dispatch 时运行的作业)。
-- **S3 fixtures 经 GitHub OIDC**:只有执行 `cargo xtask fixtures fetch` 的作业开 `id-token: write`,用 `aws-actions/configure-aws-credentials` 扮演只读 fixture 桶的角色(角色 ARN 与区域存仓库变量 `HFT_FIXTURES_ROLE_ARN`、`HFT_FIXTURES_AWS_REGION`;未设置而需要读 S3 指针时该步失败;信任策略只接受 `repo:<org>/hft:*`;创建该角色是 `[需授权]` 的 IAM 变更)。不在仓库或 Actions secrets 里存任何长期 AWS 凭据。
+- **S3 fixtures 经 GitHub OIDC**:只有执行 `cargo xtask fixtures fetch` 的作业开 `id-token: write`,用 `aws-actions/configure-aws-credentials` 扮演只读 fixture 桶的角色(角色 ARN 与区域存仓库变量 `HFT_FIXTURES_ROLE_ARN`、`HFT_FIXTURES_AWS_REGION`;未设置而需要读 S3 指针时该步失败;信任策略只接受 `repo:Fiora-gwx/hft:*`;创建该角色是 `[需授权]` 的 IAM 变更)。不在仓库或 Actions secrets 里存任何长期 AWS 凭据。
 - **告警群消息**(每夜 `QuotaSkip` 与每夜摘要)经只发不读的 Telegram bot:仓库 secrets `HFT_ALERT_TG_TOKEN`、`HFT_ALERT_TG_CHAT`(`.github/scripts/notify.sh`);未配置时只写作业摘要并给出警告。这是 CI 唯一的 secret。
 - 没有任何作业持有服务器凭据或 SSH key(服务器自己拉取制品;服务器上的只读拉取 token 的归属与轮换见 [deploy 发布归档](../deploy/README.md#发布归档与-releasectl))。
 
@@ -132,7 +132,7 @@
 | 作业 | 内容 |
 |---|---|
 | `rust` | 条件 `needs.decoupling-gate.outputs.full == 'true'`(用量规则,见[免费额度](#免费额度))。`cargo xtask ci`(以 `ci` 剖面:fmt、clippy、`deny check licenses bans`、deps、hot-check、单元/属性、策略测试、金样、`gen-schema --check`、`fixtures check`、doc-check、DST 冒烟,`dst --hashtrail check --first 50` 核对一致性集登记顺序前 50 个种子的 `HashTrail` 与金样 `fixtures/dst/hashtrail.toml` 逐字节相同);`cargo check --locked --target aarch64-unknown-linux-gnu --workspace`(ISA 专属代码保持可编译);按路径的步骤(规则归 [testing §6](testing.md#6-ci-运行矩阵)):`cargo xtask scaffold-gate`(复用本作业的 target 目录)、改动目标的 fuzz 冒烟、`fixtures/replay/` 样本 `replay-verify`、基准冒烟 `bench-gate --smoke`(`ci` 剖面,不做 fat LTO)、`rust-toolchain.toml` 改动时同一作业内 base 与 head 的相对基准(只报告,规则 [B4](hot-path-rules.md#构建b));`Cargo.lock` 改动时 `cargo deny check advisories`(`continue-on-error`,不阻塞);生成物核对(`gen-schema --check`、`gen-host --check`、策略 schema 与 `HashTrail` 金样)失败时,把重新生成的差异作为 `regen.patch` 上传(`retention-days: 7`),由人下载后 `git apply` 并在同一提交提交——本地不要求能编译 |
-| `ops-py` | 条件同 `rust`。一个作业,按改动路径决定步骤:改了 `python/**`、`strategies/*/pipeline/**` 或 `crates/hft-py/**` → 以 `maturin develop` 构建 x86_64 的 `hft_py`,跑 `ruff`、`mypy --strict`、`pytest`(离线,fixtures 驱动;含各策略的 pipeline 插件包);改了 `deploy/**` 或 `.github/**` → `shellcheck deploy/**/*.sh`、`bats` 脚本测试、建测试用户与目录夹具后 `systemd-analyze verify` 全部单元、dev2 护栏的 systemd 容器测试([deploy 测试](../deploy/README.md#测试与验收))、`actionlint`;都没改 → 只打印"无相关改动"并成功 |
+| `ops-py` | 条件同 `rust`。一个作业,按改动路径决定步骤:改了 `python/**`、`strategies/*/pipeline/**` 或 `crates/hft-py/**` → 以 `maturin develop` 构建 x86_64 的 `hft_py`,跑 `ruff`、`mypy --strict`、`pytest`(离线,fixtures 驱动;含各策略的 pipeline 插件包);改了 `deploy/**` 或 `.github/**` → `shellcheck deploy/**/*.sh`、`bats` 脚本测试、建测试用户与目录夹具后 `systemd-analyze verify` 全部单元、deploy 的非容器 pytest、`actionlint`;deploy 的 systemd 容器测试(`deploy/tests/container/`、`deploy/dev2/tests/container/`,含 dev2 护栏,[deploy 测试](../deploy/README.md#测试与验收))只在改了 `deploy/**` 或 `apps/hft-core/**`(线程计划)时跑,其余 PR 跳过(每夜全量跑,见[每夜任务](#每夜任务nightlyyml));都没改 → 只打印"无相关改动"并成功 |
 | `decoupling-gate` | `cargo xtask decoupling-gate --base … --head … --pr …`(PR 级解耦检查,上线门槛 ⑧ 的一部分,[tools](../tools/README.md#cargo-xtask-decoupling-gate));不构建、不测试;见下。另按[免费额度](#免费额度)估算本月用量并输出 `full`:`main` 推送、带 `hotfix` 标签的 PR 或用量 < 1,500 min 时为 `true` |
 | `docs` | `cargo xtask doc-check` 与 `cargo xtask test-trace`(每个 PR 与 `main` 推送都跑;只改 `*.md` 的 PR 只跑这一作业与 `decoupling-gate`——后者输出 `full` 与 `docs_only` 决定 `rust`、`ops-py` 是否运行,不构建) |
 
@@ -186,20 +186,20 @@
 四个作业:`quota-gate` 先跑,`nightly` 与 `nightly-arm` 以 `needs.quota-gate.outputs.ran == 'true'` 为条件并行启动、互不依赖,最后 `summary`(≤ 2 min,`QuotaSkip` 的夜里不运行)发每夜摘要;各自跑什么与时长上限见 [testing §6](testing.md#6-ci-运行矩阵),预算见[免费额度](#免费额度)。每夜只做**回归冒烟**,结果不计入上线门槛 ③④(累计只在服务器上,见[仓库与 CI](#仓库与-ci))。
 
 - **`quota-gate`**(≤ 2 min):按[免费额度](#免费额度)估算本月用量;≥ 1,500 min 且不是 Admin 带 `quota_override: true` 的 `workflow_dispatch` → 输出 `ran = false`,在作业摘要写 `QuotaSkip` 与用量,并向告警群发一条消息;否则 `ran = true`(覆盖写进摘要)。
-- **`nightly`**(`ubuntu-latest`,时长上限见 [testing §6](testing.md#6-ci-运行矩阵);私有仓库的托管 runner 是 2 核):对当时的 `main` 头提交运行(`workflow_dispatch` 可指定 SHA);DST 一批新种子(≤ 6 min,批量写在 `tools/xtask/dst-nightly.toml` 的 `seeds`、`steps`;起点 `S` = UTC 日期 `YYYYMMDD` × 10^6)、fuzz 按目标短跑轮转(≤ 4 min,写在 `tools/xtask/fuzz-targets.toml`)、`tests/recover/` 进程内恢复用例、`dst --hashtrail check`(一致性集的全部种子,不一致即当夜失败)、`cargo deny check advisories`;作业在超时前自行收尾。fuzz 的最小化语料只存 `actions/cache`(全部目标一个缓存项,路径 `fuzz/corpus/<target>/`,键 `fuzz-corpus-<run_id>`,按前缀 `fuzz-corpus-` 恢复——`actions/cache` 的步骤是静态的,不能按目标数生成;被逐出时从仓库种子语料重来);不上传账本或语料 artifact。发现崩溃时上传最小化的崩溃输入(`retention-days: 7`),由人经 PR 写进对应 crate 的回归金样。
+- **`nightly`**(`ubuntu-latest`,时长上限见 [testing §6](testing.md#6-ci-运行矩阵);私有仓库的托管 runner 是 2 核):对当时的 `main` 头提交运行(`workflow_dispatch` 可指定 SHA);DST 一批新种子(≤ 6 min,批量写在 `tools/xtask/dst-nightly.toml` 的 `seeds`、`steps`;起点 `S` = UTC 日期 `YYYYMMDD` × 10^6)、fuzz 按目标短跑轮转(≤ 4 min,写在 `tools/xtask/fuzz-targets.toml`)、`tests/recover/` 进程内恢复用例、`dst --hashtrail check`(一致性集的全部种子,不一致即当夜失败)、deploy 检查全量运行(与 `quality-gates.yml` 的 "Deploy checks" 步骤相同的命令,含 PR 上按路径跳过的 systemd 容器测试;`deploy/` 存在才执行,M3 起)、`cargo deny check advisories`;作业在超时前自行收尾。fuzz 的最小化语料只存 `actions/cache`(全部目标一个缓存项,路径 `fuzz/corpus/<target>/`,键 `fuzz-corpus-<run_id>`,按前缀 `fuzz-corpus-` 恢复——`actions/cache` 的步骤是静态的,不能按目标数生成;被逐出时从仓库种子语料重来);不上传账本或语料 artifact。发现崩溃时上传最小化的崩溃输入(`retention-days: 7`),由人经 PR 写进对应 crate 的回归金样。
 - **`nightly-arm`**(`ubuntu-24.04-arm`,时长上限见 [testing §6](testing.md#6-ci-运行矩阵)):只跑与架构有关的测试(`ci` 剖面);`rust-cache` 用自己的键 `arm64-ci`(与发布构建的剖面不同,共用一个键会让先保存者决定缓存内容);缓存未命中导致超时视为基础设施失败(摘要中标出),当夜由人在运行页重跑一次(工作流不持有 `actions: write`)。
 - 门槛 ⑦ 中的"回放每日通过"读服务器上每日 `replayer verify` 的结果文件(`hft-replay-verify` 定时单元,[deploy](../deploy/README.md#systemd-单元)),不占 CI 分钟。
 - 每夜失败不阻塞 PR,但阻止正式版标签(`preflight` 第 3 条;Admin 可覆盖,用于每夜恰好是红的热修);每夜摘要(一条消息推到告警群)列出各作业的结论、本月 CI 用量与额度规则的状态、当日的解耦豁免。
 
 ### 应急交叉编译(`release-x86-cross.yml`)
 
-`ubuntu-24.04-arm` 不可用(排队、故障)时出正式版或热修的路径;它与 arm 构建用同一份额度,**不是**额度用尽时的路径(额度用尽见[免费额度](#免费额度)的"额度耗尽的应急"):
+`ubuntu-24.04-arm` 不可用(排队、故障)时出正式版或热修的路径;它与 arm 构建用同一份额度,**不是**额度用尽时的路径(额度用尽见[免费额度](#免费额度)的"额度耗尽"):
 
 - 与 `release-aarch64.yml` 同一个 `preflight`;在 `ubuntu-latest` 上装 `gcc-aarch64-linux-gnu` 与同一固定工具链,以交叉链接器构建同样的 aarch64 二进制(剖面与 `target-cpu` 不变)、Python wheel(`hft_py` 经 `maturin --target aarch64-unknown-linux-gnu`)与归档,用同一个 `package-release.sh` 打包、同样上传 Release。
 - 不跑 aarch64 一致性集与原生冒烟(x86 上跑不了 aarch64 二进制):它们改由服务器安装时的 `releasectl verify` 与 `hft-core --check` 承担;不产出验证包与基准制品(验证包 fuzz 目标交叉编译的可行性待核实,方法:季度演练中试一次 `cargo fuzz build --target aarch64-unknown-linux-gnu`)。开正式实盘所用的版本仍须按 testing §6.1 有验证包补跑,所以应急版本用于热修已上线的版本。
 - 用本工作流出的版本在发布说明与 `RELEASE.json.ci_run_id` 上可辨认。标签 `v<version>`(或 `-dev.<dev_n>`)不存在时由 `publish` 在 `sha` 上创建;已存在时必须指向 `sha`。归档的 `schemas/strategies/` 取 `fixtures/strategy-schemas/` 的副本(aarch64 的 `hft-core` 在 x86 上不能运行;该 SHA 的绿 `ci.yml` 已证实导出与它逐字节相同)。
 - **每季度演练一次**:由负责人对 `main` 的一个已有标签的提交出一个开发构建,在 dev2 上安装到 `sim` 组并跑第一分钟验收;用例与证据见 [DRL-110](tests/drills.md#drl-110-arm-runner-不可用路径的季度演练交叉编译的开发构建在-dev2-sim-组通过第一分钟验收)。
-- 额度用尽时组织私有仓库的 Actions 全部停止,本工作流同样不能运行。
+- 额度用尽时个人账户全部私有仓库(含 Trading)的 Actions 停止,本工作流同样不能运行。
 
 ### 免费额度
 
@@ -207,18 +207,18 @@
 
 | 项 | 预算 | 说明 |
 |---|---|---|
-| 账户额度 | **组织 `<org>` 的私有仓库 2,000 min/月,hft 独享**;artifact 存储 500 MB;每仓库 cache 10 GB | 计费按每个作业向上取整到整分钟后求和(并行作业各自计费);Linux 2 核托管 runner 倍率 1;`ubuntu-24.04-arm` 在组织私有仓库的倍率待核实(方法:M1 第一周跑一次发布工作流后看组织计费页)。组织没有付款方式时,额度用尽即停止本组织私有仓库的 Actions,不影响 Trading |
+| 账户额度 | **个人账户 `Fiora-gwx` 的私有仓库 2,000 min/月,与 Trading 仓库共享**;artifact 存储 500 MB;每仓库 cache 10 GB | 计费按每个作业向上取整到整分钟后求和(并行作业各自计费);Linux 2 核托管 runner 倍率 1;`ubuntu-24.04-arm` 的倍率待核实(方法:M1 第一周跑一次发布工作流后看个人账户计费页;Trading 已有 8–9 月 arm 成功运行的记录可作对照)。Trading 实际用量 8 月 530 min、9 月 411 min,本表各项预算是 hft 自己的份额,不含 Trading。账户没有设置付费上限时,额度用尽即停止 hft **与 Trading** 的私有仓库 Actions |
 | 每夜 `quota-gate` + `summary` + `nightly`(x86) | 预留 510 min/月(`quota-gate` 与 `summary` 合计 ≤ 2 min/夜;`nightly` 的上限见 [testing §6](testing.md#6-ci-运行矩阵)) | 批量由 toml 调整,不改工作流 |
 | 每夜 `nightly-arm` | 预留 300 min/月(上限见 [testing §6](testing.md#6-ci-运行矩阵);缓存命中时约 3–5 min/夜) | 只跑与架构有关的测试 |
 | 发布构建、开发构建、验证包与 `fuzz-repro` | 预留 ≥ 500 min/月 | 预留不被每夜或 PR 挤占;单次上限见 [testing §6](testing.md#6-ci-运行矩阵)(`fuzz-repro` 见上表);单次实际计费分钟待实测(方法:M1 第一周各跑一次后读运行的 timing) |
 | PR 与 `main` 推送 | 其余约 690 min/月 | PR 目标与各作业的 `timeout-minutes` 见 [testing §6](testing.md#6-ci-运行矩阵);只改文档的 PR 只跑 `docs`;同一 PR 的旧运行被取消;超过目标的 PR 在作业摘要中标出 |
 
-- **1,500 min 规则**:每夜任务的 `quota-gate`、`ci.yml` 的 `decoupling-gate` 与发布 `preflight` 按下一条估算本月用量;**≥ 1,500 min** → 每夜任务与开发构建自动跳过(写作业摘要与告警);不带 `hotfix` 标签的 PR 只跑 `docs` 与 `decoupling-gate`(`rust`、`ops-py` 以 `full = false` 跳过,摘要写 `QuotaSkip`);带 `hotfix` 标签的 PR、`main` 推送与正式版照常跑全部质量门。每夜任务与发布 `preflight` 接受 Admin 覆盖(`workflow_dispatch` 输入 `quota_override: true`,只认 `.github/hft-admins.txt` 中的 `github.actor`,覆盖写作业摘要);PR 侧的例外只有 `hotfix` 标签。月初额度重置后自动恢复。
+- **1,500 min 规则**:每夜任务的 `quota-gate`、`ci.yml` 的 `decoupling-gate` 与发布 `preflight` 按下一条估算本月用量;**≥ 1,500 min** → 每夜任务与开发构建自动跳过(写作业摘要与告警);不带 `hotfix` 标签的 PR 只跑 `docs` 与 `decoupling-gate`(`rust`、`ops-py` 以 `full = false` 跳过,摘要写 `QuotaSkip`);带 `hotfix` 标签的 PR、`main` 推送与正式版照常跑全部质量门。每夜任务与发布 `preflight` 接受 Admin 覆盖(`workflow_dispatch` 输入 `quota_override: true`,只认 `.github/hft-admins.txt` 中的 `github.actor`,覆盖写作业摘要);PR 侧的例外只有 `hotfix` 标签。月初额度重置后自动恢复。1,500 min 按 **hft 自估用量**计(脚本只看本仓库的运行,看不到 Trading);余下约 500 min 留给 Trading(8–9 月实际 411–530 min)。上表各项合计按 2,000 min 写,超出 1,500 的部分由本规则截断;M1 第一周重算时按"hft 份额 = 2,000 − Trading 实际用量"重排。
 - **artifact 与 cache**:发布与验证包的 workflow artifact `retention-days: 1`(发布物以 Release 资产为准);每夜只在崩溃时上传小文件;CI 不保存累计账本 artifact。cache 存 Rust 构建缓存(x86 `ci`(键 `x86-ci`)、只构建 xtask 的 `docs`/`decoupling-gate`(共享键 `x86-xtask`)、arm 发布 `arm64-release`、`nightly-arm` 的 `arm64-ci`、arm 验证包 `arm64-verify`、应急交叉编译 `x86-cross`)与 fuzz 语料,被逐出时冷构建,超时的每夜视为基础设施失败。
-- **用量自估**(GitHub 的运行用量与按产品计费接口已关闭):用 `GITHUB_TOKEN`(`actions: read`)列出本月(UTC)本仓库全部 workflow run 的作业,每个作业按 `completed_at − started_at` 向上取整到整分钟、乘以 runner 倍率(Linux 2 核托管 runner = 1;`ubuntu-24.04-arm` 的倍率按 M1 第一周核实的值写进 `.github/runner-multipliers.toml`)后求和;脚本 `.github/scripts/ci-usage.py` 由 `quota-gate`、`decoupling-gate` 与 `preflight` 共用。负责人每周与组织计费页人工对账一次,偏差写 ops-log;偏差持续偏大时调倍率表。
-- **额度耗尽的应急**(额度用尽后组织私有仓库的全部 Actions 停止,直到月初):负责人 `[需授权]` 把仓库镜像到自己个人账户下的私有仓库 `<owner>/hft-mirror`(`git push --mirror`;个人账户的私有仓库仍免费,但用的是 Trading 所在的个人额度),在镜像仓库先对该 SHA 跑一次 `ci.yml`,再以 `workflow_dispatch(tag, quota_override)` 跑 `release-aarch64.yml`(每夜条件由 Admin 覆盖);下载产出的归档与 `.sha256` 并核对,再以 `gh release create --verify-tag` 发布到 `<org>/hft` 的同一标签(Release 不占 Actions 额度),服务器照常从 `<org>/hft` 拉取;`RELEASE.json.ci_run_id` 指向镜像仓库的运行,发布说明注明。前提:fixtures 的 OIDC 角色信任策略同时接受 `repo:<owner>/hft-mirror:*`(建仓时一次性 `[需授权]`)。**每季度演练一次**:在镜像仓库出一个开发构建,在 dev2 上安装到 `sim` 组并跑第一分钟验收(用例与证据见 [DRL-111](tests/drills.md#drl-111-额度耗尽路径的季度演练镜像仓库出的开发构建发布到组织仓库并在-dev2-通过验收))。
+- **用量自估**(GitHub 的运行用量与按产品计费接口已关闭):用 `GITHUB_TOKEN`(`actions: read`)列出本月(UTC)本仓库全部 workflow run 的作业,每个作业按 `completed_at − started_at` 向上取整到整分钟、乘以 runner 倍率(Linux 2 核托管 runner = 1;`ubuntu-24.04-arm` 的倍率按 M1 第一周核实的值写进 `.github/runner-multipliers.toml`)后求和;脚本 `.github/scripts/ci-usage.py` 由 `quota-gate`、`decoupling-gate` 与 `preflight` 共用。负责人每周与个人账户计费页人工对账一次,对账时把 Trading 的用量一并考虑(计费页是两个仓库的合计:hft 自估 + Trading 用量接近 2,000 min 时提前收紧 hft 的批量),偏差写 ops-log;偏差持续偏大时调倍率表。
+- **额度耗尽**(额度用尽后个人账户全部私有仓库的 Actions 停止,含 Trading,直到月初):耗尽后到月初前**无法在 CI 出包**——`release-x86-cross.yml` 用同一份额度,也不能运行;原"镜像到个人账户"的应急路径已不成立(仓库本身就在个人账户)。预防靠 1,500 min 规则(quota-gate)与每周对账;紧急情况下负责人可临时为个人账户设置付费上限(spending limit)以恢复 Actions(`[需授权]`,需负责人决定,写 ops-log)。原 DRL-111 季度演练随之删除([drills](tests/drills.md))。
 - **M1 第一周**:按实测的 PR、发布、开发构建、验证包与每夜计费分钟重算本表,写进 ops-log;与本表冲突时改本表。
-- **备选(不是默认)**:若 `ubuntu-24.04-arm` 在组织私有仓库长期不可用或不免费,`release-x86-cross.yml` 成为常规发布路径、`nightly-arm` 停用,验证包的出包方式另定;启用需负责人决定并更新 [ci-org-and-profiles](../.agents/notes/proposed/architecture/2026-10-03-ci-org-and-profiles.md)。
+- **备选(不是默认)**:若 `ubuntu-24.04-arm` 在个人私有仓库长期不可用或不免费,`release-x86-cross.yml` 成为常规发布路径、`nightly-arm` 停用,验证包的出包方式另定;启用需负责人决定并更新 [ci-org-and-profiles](../.agents/notes/proposed/architecture/2026-10-03-ci-org-and-profiles.md)。
 
 ## 参考机
 
@@ -242,4 +242,4 @@
 
 - 代理读根 [AGENTS.md](../AGENTS.md) 与目标目录 README 开始工作;代理写的热路径代码必须经人工评审([12 §3.2](../design/12-风险与未决问题.md))。
 - 金样、解码器、Python 包、文档可由代理完成;每个金样的期望输出由人按交易所文档复核后才合入([fixtures/](../fixtures/README.md#更新流程))。
-- 代理不部署、不启动交易或采集、不删除数据、不改外部系统(含 GitHub 组织与仓库设置、Actions 设置与计费设置、AWS 资源),除非用户在当次会话中明确授权。
+- 代理不部署、不启动交易或采集、不删除数据、不改外部系统(含 GitHub 仓库与协作者设置、Actions 设置与计费设置、AWS 资源),除非用户在当次会话中明确授权。

@@ -53,7 +53,7 @@
 | [incident-response R](../runbooks/incident-response.md#r-老板紧急停止stop之后) | DRL-92–DRL-97 |
 | [incident-response S](../runbooks/incident-response.md#s-交易主机失联) | DRL-26–DRL-29、DRL-60 |
 | [incident-response kill 演练](../runbooks/incident-response.md#kill-演练) | DRL-88–DRL-100 |
-| [development 应急交叉编译、免费额度](../development.md#应急交叉编译release-x86-crossyml) | DRL-110、DRL-111 |
+| [development 应急交叉编译、免费额度](../development.md#应急交叉编译release-x86-crossyml) | DRL-110(DRL-111 已删除) |
 | [migration](../runbooks/migration.md)、[bsc-node](../runbooks/bsc-node.md) | 里程碑外(可选扩展;启用时补写) |
 
 ## 3. 上线(launch)
@@ -1450,7 +1450,7 @@
 - 授权:`[需授权]`(建与撤销 token)
 - 步骤:按 [release-and-deploy 第 23–25 步](../runbooks/release-and-deploy.md#g-拉取-token-轮换)
 - 通过标准:
-  - 新 token 只授权仓库 `<org>/hft` 的 Contents 读,到期日 ≤ 创建日 + 1 年,记入 ops-log
+  - 新 token 只授权仓库 `Fiora-gwx/hft` 的 Contents 读,到期日 ≤ 创建日 + 1 年,记入 ops-log
   - 每台服务器 `/etc/hft/github-release-token` 为 `0600 root:root`,`fetch-release.sh --version <当前版本> --dry-run` 成功
   - 撤销后用旧 token 的同一请求返回 401
   - 下一次轮换提醒设在新到期日之前 30 天
@@ -1893,19 +1893,7 @@
 
 ### DRL-111 额度耗尽路径的季度演练:镜像仓库出的开发构建发布到组织仓库并在 dev2 通过验收
 
-- 规则:[development 免费额度](../development.md#免费额度)
-- 级别:host
-- 里程碑:M4
-- 环境:负责人个人账户下的 `<owner>/hft-mirror`;`<org>/hft` 的 Release;dev2 `sim` 组
-- 授权:`[需授权]`(负责人)
-- 步骤:按 development"额度耗尽的应急"出一个开发构建 → `gh release create --verify-tag` 发布到 `<org>/hft` → dev2 从 `<org>/hft` 拉取、安装到 `sim` 组、第一分钟验收
-- 通过标准:
-  - 镜像仓库对该 SHA 的 `ci.yml` 全绿;`release-aarch64.yml` 以 `quota_override` 运行成功
-  - 下载的归档 `sha256sum -c` 通过;`<org>/hft` 的 Release 资产与镜像运行的产物逐字节相同;`RELEASE.json.ci_run_id` 指向镜像仓库的运行,发布说明注明
-  - dev2 照常用 `fetch-release.sh` 从 `<org>/hft` 拉取;`sim` 组第一分钟验收满足
-  - 相邻两次演练间隔 ≤ 92 天
-- 证据:`ops-log/<UTC 日期>-DRL-111.md`
-- 实现:`tests/host/DRL-111.sh`
+已删除:负责人决定 hft 改放个人账户的私有仓库 `Fiora-gwx/hft`(2026-10-07),原"镜像到个人账户出包"的应急路径不再成立——额度与 Trading 共享,耗尽后到月初前任何仓库都无法在 CI 出包,没有可演练的替代路径;预防靠 quota-gate 与每周对账,紧急时由负责人决定是否临时设置付费上限([development 免费额度](../development.md#免费额度))。
 
 ## 10. 通用
 

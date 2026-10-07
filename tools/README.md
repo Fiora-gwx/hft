@@ -597,7 +597,7 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 - 待核实:ENA PHC 在 c8g 上的设备名与 `ethtool -T` 报告的能力([12 A7](../design/12-风险与未决问题.md);方法:M1.5 延迟探针时在租用实例上读取)。
 - 待核实:core 交易所 instruments 接口的字段与分页(`refdata fetch`;本机连不上官方文档站,方法:在服务器上实拉并存为 fixtures)。
 - 待核实:`ubuntu-24.04-arm` 上以 ASan 构建的 libFuzzer 二进制在服务器(Ubuntu 24.04、glibc 相同)上直接运行,以及 `quarantine_size_mb=16` 下 `-rss_limit_mb`/`-malloc_limit_mb` 与 cgroup `MemoryMax` 的配合(不出现假 OOM)——方法:验证包工作流的冒烟步骤 + dev2 上首次 `hft-verify run --budget-min 5`,读单元的 `MemoryPeak`。
-- 待核实:`pull_request_review` 触发的运行与 PR 头 SHA 的 check run 关联方式(影响 `decoupling-gate` 结论能否被发布 `preflight` 找到)——方法:M1 第一周在组织仓库实测。
+- 待核实:`pull_request_review` 触发的运行与 PR 头 SHA 的 check run 关联方式(影响 `decoupling-gate` 结论能否被发布 `preflight` 找到)——方法:M1 第一周在 `Fiora-gwx/hft` 实测。
 - 实现顺序:`deps` → `hot-check` → `doc-check` → `ci` 骨架(建仓时让空壳 CI 变绿)→ `decoupling-gate` → `gen-schema` → hft-cfg(refdata → engine → risk → strategy)→ `new-strategy` → `scaffold-gate` → `bench-gate` → `replay-verify` → `dst` → `journal-verify` → `gen-host` → hft-verify;hostprobe 与 az-probe 先于 xtask 完成(选 AZ 与做主机基线需要它们)。
 
 </details>
