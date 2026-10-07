@@ -1,0 +1,34 @@
+[package]
+name = "hft-net-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+hft-net = { path = "..", features = ["test-io"] }
+hft-rt = { path = "../../hft-rt" }
+hft-types = { path = "../../hft-types" }
+rustls = { version = "0.23.45", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+aws-lc-rs = { version = "1.14", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
+
+# Not a member of the root workspace: built only by `cargo fuzz` (pinned nightly, tools/README.md).
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "ws_deframe"
+path = "fuzz_targets/ws_deframe.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cmsg"
+path = "fuzz_targets/cmsg.rs"
+test = false
+doc = false
+bench = false

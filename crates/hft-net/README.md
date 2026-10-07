@@ -10,7 +10,7 @@ status: spec
 
 ## 概要
 
-`hft-net` 拥有**一条连接从 socket 到 WS 帧的全部字节**:非阻塞 TCP socket 与其选项、rustls 0.23 unbuffered 会话(在我们自己的大页缓冲上原地解密/加密)、WS 解帧与控制帧、`recvmsg` 的 RX 时间戳、连接池(主/备/预热、轮换)、最小 HTTP/1.1 REST 客户端。它**不**懂任何交易所协议(订阅、登录、JSON 都在 [`hft-venue`](../hft-venue/README.md) 与 `venue-*`),不写 journal,不创建线程。热路径上它是 t1 的前半段(`recvmsg → 解密 → 解帧`)与 t4 的后半段(`掩码帧 → 加密一次 → sendmsg`,见 [architecture.md §4](../../docs/architecture.md#4-一次-tick-to-trade));建连、TLS 握手、WS Upgrade 全部在 warm 线程 `conn-builder`(apps/hft-core 装配)由 `Connector` 完成,热线程只接收"已打开"的连接。**收包是中断驱动**:网卡 IRQ 与软中断在专用 IRQ 核,热线程只做非阻塞 `recvmsg`、不做 NAPI 轮询,短读即停;`Connector` 对每个 socket 显式设 `SO_BUSY_POLL = 0`;多 socket 的行情线程可用 `ReadyPoll` 每次 `poll_once` 做一次 `epoll_pwait(timeout = 0)`,只读就绪的 socket。**不对真实连接预加密**:TLS 1.3 记录序号即 nonce,加密即必须发送;缓存预热用独立的 scratch 会话([13 R1](../../design/13-设计评审与优化.md))。
+`hft-net` 拥有**一条连接从 socket 到 WS 帧的全部字节**:非阻塞 TCP socket 与其选项、TLS(握手用 rustls 0.23 unbuffered API;握手完成后转成 rustls kernel connection,由本 crate 的记录层用 aws-lc-rs AEAD 在我们自己的缓冲上原地解密/加密)、WS 解帧与控制帧、`recvmsg` 的 RX 时间戳、连接池(主/备/预热、轮换)、最小 HTTP/1.1 REST 客户端。它**不**懂任何交易所协议(订阅、登录、JSON 都在 [`hft-venue`](../hft-venue/README.md) 与 `venue-*`),不写 journal,不创建线程。热路径上它是 t1 的前半段(`recvmsg → 解密 → 解帧`)与 t4 的后半段(`掩码帧 → 加密一次 → sendmsg`,见 [architecture.md §4](../../docs/architecture.md#4-一次-tick-to-trade));建连、TLS 握手、WS Upgrade 全部在 warm 线程 `conn-builder`(apps/hft-core 装配)由 `Connector` 完成,热线程只接收"已打开"的连接。**收包是中断驱动**:网卡 IRQ 与软中断在专用 IRQ 核,热线程只做非阻塞 `recvmsg`、不做 NAPI 轮询,短读即停;`Connector` 对每个 socket 显式设 `SO_BUSY_POLL = 0`;多 socket 的行情线程可用 `ReadyPoll` 每次 `poll_once` 做一次 `epoll_pwait(timeout = 0)`,只读就绪的 socket。**不对真实连接预加密**:TLS 1.3 记录序号即 nonce,加密即必须发送;缓存预热用独立的 scratch 会话([13 R1](../../design/13-设计评审与优化.md))。
 
 ## 目录
 
@@ -36,6 +36,8 @@ status: spec
 | `Frame<'a>` | 解出的一个服务端帧:opcode + 借用接收缓冲的 payload + 时间戳 | 借用期内 |
 | `Timestamps` | `hw_rx_ns / sw_rx_ns / rx_tsc / rx_empty_gap_ns` + 标志 | 值类型 |
 | `ErrBits` | 连接错误/事件位,轮询末尾一次处理 | 值类型 |
+| `SysCount` | 每个 `Conn`、`Connector`、`ReadyPoll` 自己的系统调用计数(按种类)与定长调用日志;零分配 | 所有者线程 |
+| `NetConfig` / `ConnCfg` | 配置项的承载类型 / 一条连接保留的子集 | 启动期 |
 | `RestPool` | 一个 REST 端点的 keep-alive HTTP/1.1 连接池,一连接一在途请求 | gw 线程、snap-fetch、acct-fetch |
 | `ReadyPoll` / `ReadyHandle` | 行情任务的就绪探测:一个 epfd,热线程 `probe`(`epoll_pwait(timeout = 0)`),warm 线程经 `ReadyHandle` 注册与注销连接 | 行情任务 / `conn-builder` |
 | `TxTsDrain` | 从 `MSG_ERRQUEUE` 取 TX 时间戳(**可选,默认关**;启用条件见已知限制) | housekeeping |
@@ -163,6 +165,7 @@ impl Conn {
     /// 不阻塞;短写时剩余密文留在 tx,由 finish_poll/flush 续写,绝不丢弃或重加密。
     pub fn send_frame<const C: usize>(&mut self, f: &MaskedFrame<C>) -> Result<SendOk, SendErr>;
     /// 订阅、应用层 ping 等非订单文本:内部 scratch 帧 + send_frame。
+    /// payload ≤ `TEXT_CAP − 14` = 8 178 B(内部 `MaskedFrame<TEXT_CAP>`,`TEXT_CAP` = 8 192);更长是调用方错误:debug_assert,`NotSealed`。
     pub fn send_text(&mut self, payload: &[u8], now_tsc: u64) -> Result<SendOk, SendErr>;
     pub fn send_ping(&mut self, now_tsc: u64) -> Result<SendOk, SendErr>;   // WS Ping,payload = now_tsc 的 8 字节小端;BBO 连接每 feed.bbo_ping_ms 一次(hft-venue §3a)
     pub fn flush(&mut self) -> Result<u32 /* 剩余字节 */, SendErr>;
@@ -178,6 +181,13 @@ impl Conn {
     pub fn napi_id(&self) -> u32;           // 握手完成时读到的 SO_INCOMING_NAPI_ID;0 = 不可用
     pub fn last_errno(&self) -> i32;        // 最近一次置 IO/RESET 的 errno;0 = 无
     pub fn stats(&self) -> &ConnStats;
+    pub fn sys(&self) -> &SysCount;         // 经本连接做的系统调用
+    pub fn buf_caps(&self) -> (u32, u32);   // 生效的 rx / tx 容量(按角色)
+    pub fn tx_pending(&self) -> usize;      // tx 里待写出的密文字节
+    pub fn tls_info(&self) -> TlsInfo;
+    pub fn raw_fd(&self) -> i32;            // 脚本化或已关闭的连接为 -1
+    pub fn local_addr(&mut self) -> Result<(Ipv4Addr, u16), i32>;   // getsockname(warm 线程)
+    pub fn scratch_sessions(&self) -> u32;  // warm 用的 scratch 会话数;预热关闭时恒为 0
 }
 pub struct ConnStats {
     pub frames: u64, pub bytes: u64,        // 解出的数据帧数与 payload 字节
@@ -212,12 +222,22 @@ impl<const N: usize> ConnPool<N> {
     pub fn next_build(&mut self, now_tsc: u64) -> Option<BuildWhy>;
     pub fn build_failed(&mut self);                                      // 上层报告在建失败:清除"在建"
     pub fn rotate_due(&mut self, now_tsc: u64) -> Option<ConnId>;        // 到期的连接,同时在其上置 ROTATE_DUE
+    pub fn get(&mut self, id: ConnId) -> Option<&mut Conn>;              // 已装入的连接(活跃或替补)
 }
 pub enum PoolErr { Full, NotOpen, NoStandby, WrongMode, UnknownConn }
 pub enum BuildWhy { Fill /* 活跃数 < target */, Rotate(ConnId), Hint(ConnId) /* 该连接带 SERVER_HINT */ }
 
-pub struct Connector { /* ConnArena 引用、rustls ClientConfig、RssPlan、作业表 [BuildJob; 16] */ }
+/// 启动期:plan = (角色, 槽数);每槽按该角色的 rx_buf、tx_buf 与一块 max_msg 分片区一次分配并预触摸;clock 换算 TSC 差。
+impl ConnArena { pub fn new(plan: &[(ConnRole, u16)], cfg: &NetConfig, clock: TscClock) -> &'static ConnArena; }
+
+pub struct Connector { /* ConnArena 引用、rustls ClientConfig、作业表 [BuildJob; 16] */ }
 impl Connector {
+    /// 启动期:校验配置并建 rustls ClientConfig(`endpoint_override` 时读 extra_ca)。尚未实现的选项
+    /// (`tls_mode = buffered`、`warm_interval_ns > 0`、`tx_timestamps`、`rss_plan`)→ `ConfigErr`,不静默忽略。
+    pub fn new(arena: &'static ConnArena, cfg: &NetConfig) -> Result<Connector, ConfigErr>;
+    /// 作业所在连接的相位(TcpConnecting … Open);作业不存在或已结束 → None。
+    pub fn phase(&self, job: JobId) -> Option<ConnPhase>;
+    pub fn sys(&self) -> &SysCount;                     // Connector 自己的系统调用(解析器)
     /// 作业表满 → JobsFull;arena 无空槽 → ArenaFull;endpoint 不在 endpoints[] → BadEndpoint;src_ip_idx 越界或该地址不在 bind_device → BadSrcIp。
     pub fn submit(&mut self, req: BuildReq) -> Result<JobId, BuildErr>;
     /// 推进所有作业一步(非阻塞 connect / 握手 / Upgrade);就绪或失败时返回一个事件。
@@ -288,7 +308,7 @@ impl TxTsDrain {
 }
 #[repr(C)] pub struct ConnKey { pub venue: VenueId, pub conn: ConnId, pub _pad: u16 }                       // 4 B
 #[repr(C)] pub struct TxStamp { pub key: ConnKey, pub tskey: u32, pub kind: u8 /* SCHED=1 SW=2 */, pub _pad: [u8; 7], pub ts_ns: i64 }   // 0 key、4 tskey、8 kind、16 ts_ns;24 B
-#[repr(C)] pub struct TxTag   { pub key: ConnKey, pub tskey_end: u32, pub slot: u32, pub gen: u32, pub sent_tsc: u64 }                // 0、4、8、12、16;24 B
+#[repr(C)] pub struct TxTag   { pub key: ConnKey, pub tskey_end: u32, pub slot: u32, pub gen: u32, pub sent_tsc: u64 }                // 0、4、8、12、16;24 B(代码里写作 `r#gen`:edition 2024 保留字)
 ```
 
 ### 调用约束
@@ -306,13 +326,14 @@ impl TxTsDrain {
 
 | 名称 | 类型 | 默认 | 含义 / 来源 |
 |---|---|---|---|
-| `endpoints[]` | `{host, sni, port, path, ips[]}` | — | `ips` 为部署期逐 A 记录测 RTT 后钉选的地址;为空才在 warm 线程解析 DNS([research/02 §11.1](../../design/research/02-exchange-connectivity.md)) |
+| `endpoints[]` | `{host, sni, port, path, ips[], upgrade_headers[]}` | — | `ips` 为部署期逐 A 记录测 RTT 后钉选的地址;为空才在 warm 线程解析 DNS([research/02 §11.1](../../design/research/02-exchange-connectivity.md));`upgrade_headers` 是上层给的 Upgrade 请求额外头(如 Binance SBE 流的 `X-MBX-APIKEY`) |
 | `bind_device` | 源地址 → 网卡名的表 | deploy 生成 | 每个 socket 按 `BuildReq.src_ip_idx` 选源地址,并 `SO_BINDTODEVICE` 到该地址所在的网卡:升级主机上 `prod` 的地址在 ENI-B(c32 预留的 ENI-B2 启用后,批量流的地址在 ENI-B2)、`sim` 的在 ENI-C;dev2 只有一块网卡。网卡、地址与实例、连接种类的划分归 [hft-core 主机资源隔离](../../apps/hft-core/README.md#主机资源隔离slice核与出口-ip) |
 | `src_ips[]` | `[Ipv4Addr]` | — | 本实例出口网卡上的私有 IP(各配 EIP);连接固定源 IP。按实例划分、两组不相交,sim 的连接不消耗 prod 的 IP 级限额(取值与校验归 [hft-core 主机资源隔离](../../apps/hft-core/README.md#主机资源隔离slice核与出口-ip)) |
 | `src_port_range` | `(u16,u16)` | `40000..=40999` | 须在 `net.ipv4.ip_local_reserved_ports` 内(deploy 调优脚本保证) |
 | `rss_plan` | path | 空(关) | 部署期 `ethtool -x` 导出的哈希函数、key、间接表;为空时源端口由内核分配(默认) |
 | `tx_timestamps` | bool | false | TX `SO_TIMESTAMPING` + errqueue 配对;可选,默认关 |
 | `extra_ca` | path | 空 | 额外信任的 CA(mock-exchange 回环测生产二进制用);**只在配置含 `endpoint_override` 时加载**,生产配置禁止两者 |
+| `endpoint_override` | bool | false | hft-core 配置含 `endpoint_override` 时由 hft-core 置真(只决定是否加载 `extra_ca`) |
 | `rx_buf` | bytes | Md 256 KiB / Order 与 UserStream 64 KiB / Rest 1 MiB | 每连接接收缓冲(大页) |
 | `tx_buf` | bytes | 16 KiB | 每连接密文发送缓冲 |
 | `max_msg` | bytes | 256 KiB | 单条 WS 消息(含分片拼接)上限,超出置 `RX_FULL` |
@@ -324,7 +345,7 @@ impl TxTsDrain {
 | `warm_interval_ns` | u64 | 0(关) | `warm` 最小调用间隔;scratch TLS 预热是可选项,默认关 |
 | `rest_timeout_ms` | u32 | 2000 | REST 请求超时 → `RestErr::Timeout` |
 | `ts_expect_hw` | bool | true | 生产开;缺 HW 戳置 `TS_MISSING` |
-| `tls_mode` | `unbuffered \| buffered` | `unbuffered`(`dev2` 可设 `buffered`) | `buffered` = rustls 普通 `ClientConnection`(内部缓冲,读写各多一次拷贝、稳态有分配);**`Conn` 的公开 API 不变**,只换 `src/tls.rs` 的后端。在 `dev2` 可先用 buffered 降低实现风险,零分配测试与延迟基准只对 `unbuffered` 生效 |
+| `tls_mode` | `unbuffered \| buffered` | `unbuffered`(`dev2` 可设 `buffered`) | `unbuffered` = rustls 握手 + 本 crate 的原地记录层(实现说明 §1);`buffered` = rustls 普通 `ClientConnection`(内部缓冲,读写各多一次拷贝、稳态有分配);**`Conn` 的公开 API 不变**,只换 `src/tls.rs` 的后端。`buffered` 随 M3(NET-340–NET-342)实现,此前 `Connector::new` 拒绝;零分配测试与延迟基准只对 `unbuffered` 生效 |
 
 ## 实现说明
 
@@ -334,33 +355,36 @@ impl TxTsDrain {
 
 以下按 `tls_mode = unbuffered` 描述;`buffered` 后端用 rustls `ClientConnection::read_tls/process_new_packets/reader()` 与 `writer()/write_tls`,对外的 `poll_rx`/`next_frame`/`send_frame`/`warm` 语义(含"只在发送时加密一次"与加密调用点白名单)完全相同。
 
+**记录层**:rustls 0.23 的 unbuffered `process_tls_records` 与加密都按记录分配(明文进 `Vec`、密文经 `PrefixedPayload`),达不到零分配与原地解密。所以握手(warm 线程)仍由 rustls `UnbufferedClientConnection` 驱动,到达 `WriteTraffic` 后经 `dangerous_into_kernel_connection` 转成 kernel connection(配置开 `enable_secret_extraction`):取出两个方向的流量密钥、IV 与当前序号,本 crate 用 aws-lc-rs `LessSafeKey::open_in_place`/`seal_in_place_separate_tag` 在连接缓冲上原地开、封记录(TLS 1.3:AAD = 记录头,nonce = IV ⊕ 序号,去零填充取内层类型;TLS 1.2:AES-GCM 显式 8 B nonce、ChaCha20 无显式 nonce,AAD = 序号‖类型‖版本‖长度)。kernel connection 只负责 KeyUpdate 后的新密钥(`update_rx_secret`/`update_tx_secret`)与保存会话票据(`handle_new_session_ticket`)。
+
 **收包模型(唯一形态)**:网卡队列的 IRQ 与软中断在专用 IRQ 核(升级主机类为核 1,线程计划归 [hft-core](../../apps/hft-core/README.md#线程计划));内核把包放进 socket 接收队列,热线程用非阻塞 `recvmsg` 取走,**不做 NAPI 轮询**。为此 `Connector` 对每个 socket 显式 `setsockopt(SO_BUSY_POLL, 0)`(不依赖 `net.core.busy_read` 的主机值),不设 `SO_PREFER_BUSY_POLL`、`SO_BUSY_POLL_BUDGET`。主机侧参数(busy poll 相关 sysctl、网卡中断合并、IRQ 落点)由 [deploy 调优](../../deploy/README.md) 设置、[hostprobe](../../tools/README.md#hostprobe) 作为 hard 项校验(不符 → hft-core 退出 3);本 crate 只保证 socket 级不开 busy poll。
 
 1. **`poll_rx`**:先压缩缓冲(把未消费的明文与未解密的密文移到缓冲头;稳态下为 0 或几百字节)。然后 `recvmsg(fd, iov=[rx 空闲尾部], control=cmsg_buf[128], MSG_DONTWAIT)`,每次 `poll_rx` **至多一次**:**短读即停**——返回的字节数小于所给的空闲空间即认为内核队列已空,不再补一次必然返回 `EAGAIN` 的 `recvmsg`;读满所给空间时缓冲已满,本次不再读(不算确认为空),剩余数据留在内核,下一次 `poll_rx` 再读;空闲空间为 0 时不调用 `recvmsg`(零长度读的返回 0 会被误认为 EOF)。没有数据时是一次返回 `EAGAIN` 的调用(`net_poll_empty`),用 `ReadyPoll` 的任务对未就绪的连接不调用。调用前读一次 TSC(队列为空的确认时刻,§7),返回后立即读 TSC 写 `rx_tsc`,解析 cmsg 的 `SCM_TIMESTAMPING`:`ts[0]` → `sw_rx_ns`,`ts[2]` → `hw_rx_ns`,按 §7 写 `rx_empty_gap_ns`;把 `(该次读取的密文起止偏移, 读到的字节数, Timestamps)` 记进每连接的读取戳表(定长 16 项;溢出时合并最老两项、保留较早的戳并置 `MULTI_SKB`)。不解密。
-2. **`next_frame`**:明文区已有完整 WS 帧 → 直接解出;否则调 `UnbufferedClientConnection::process_tls_records(&mut rx[cipher_start..])`,在 `ReadTraffic` 下**一次只取一条** `next_record()`(rustls 在原位解密,得到 `AppDataRecord{payload}`),并入明文区后再试解帧,直到凑齐一帧或密文耗尽。因此一次调用的解密量以"这一帧所跨的记录"为界,一大段积压不会在第一帧之前整段解密。
+2. **`next_frame`**:明文区已有完整 WS 帧 → 直接解出;否则从 `cipher_start` 取**一条**完整记录原地解密,并入明文区后再试解帧,直到凑齐一帧或没有完整记录。因此一次调用的解密量以"这一帧所跨的记录"为界,一大段积压不会在第一帧之前整段解密。记录长度 > 2^14 + 256 → `TLS_PROTO`;一条记录在压缩后的缓冲里也放不下(明文区未消费字节 + 记录长度 > `rx_buf`)→ `RX_FULL`。
 3. **并入连续明文**:把每条记录的 payload `memmove` 到明文区尾 `plain_end`(payload 地址必然 ≥ `plain_end`,因为其前的记录头与 tag 已被消费)。结果是 `[连续明文 | 未处理密文]` 同处一个缓冲;WS 帧跨 TLS 记录也连续,只移动一次(300 B ≈ 10 ns,2 KB ≈ 40 ns)。
 4. 在明文区上解 WS 帧:读 2–14 B 头,校验 FIN/RSV/opcode/MASK 位;完整帧就产出 `Frame{payload: &plain[a..b]}`,不复制。时间戳按 §7 从读取戳表取。
 5. `finish_poll`:发出排队的 Pong/Close;续写 tx 剩余密文;若 `quickack_after_read` 对该角色为真且这一轮读到数据,`setsockopt(TCP_QUICKACK, 1)`(默认关)。
 6. 接收缓冲满且解密全部密文后仍无完整帧 → `RX_FULL`。调用方因下游环满而停读时不调用 `poll_rx`,数据留在内核缓冲(TCP 背压)。
 
-| rustls unbuffered 状态 | 处理 |
+| 记录(解密后的内层类型) | 处理 |
 |---|---|
-| `ReadTraffic` | 按需逐条取记录,按 `discard` 前移密文起点 |
-| `WriteTraffic` | 稳态;接收侧无事可做 |
-| `EncodeTlsData` / `TransmitTlsData` | 稳态下只因 KeyUpdate 出现:编码到 tx 并在 `finish_poll` 发出,置 `KEY_UPDATE` |
-| `BlockedHandshake` | 热线程不应出现(握手在 warm 完成)→ `TLS_PROTO` |
-| `PeerClosed` / `Closed` | `TLS_ALERT` |
-| `Err(_)` | `TLS_PROTO` |
+| 应用数据(23) | 明文并入明文区(长度 0 的记录忽略) |
+| 握手(22):NewSessionTicket | 计数;warm 线程上交给 rustls 保存,热线程 `install` 之后只计数(跨记录的长票据按长度跳过) |
+| 握手(22):KeyUpdate | 按 rustls 给出的新密钥换接收方向;对端要求回应时立即把我们的 KeyUpdate 封进 tx(`finish_poll` 发出)并换发送方向;置 `KEY_UPDATE` |
+| 握手(22):其他,或格式错 | `TLS_PROTO` |
+| 告警(21),含 close_notify | `TLS_ALERT` |
+| 解密失败、其他类型、全零填充 | `TLS_PROTO` |
+| 连接仍在握手(rustls 会话未转换,热线程上的 `BlockedHandshake`) | `TLS_PROTO` |
 
-**WS 解帧规则**(RFC 6455 §5):服务端帧带 MASK → `WS_PROTO`;RSV1–3 非 0 → `WS_PROTO`(不协商 permessage-deflate,见 §4);控制帧 >125 B 或分片 → `WS_PROTO`;Close 载荷长度为 1 → `WS_PROTO`;没有未完成的分片消息时收到 continuation 帧,或分片进行中收到新的 Text/Binary 起始帧 → `WS_PROTO`;Ping → 排队同 payload 的 Pong(每连接最多排 4 个;已排 4 个时再到 Ping,清空队列只排这一个);Pong → 若 payload 是我们发的 tsc,记一次 RTT;Close → 排队 Close(回显状态码)并置 `WS_CLOSE`;文本/二进制分片(FIN=0 + continuation)→ 拼到每连接一块 `max_msg` 的 scratch 区(唯一的复制路径,`reassembled=true`,计数);长度字段 > `max_msg` → `RX_FULL`。帧头解析用 `tungstenite::protocol::frame::FrameHeader::parse`(见开发备忘),payload 切片、掩码、控制帧逻辑是本 crate 自己的。
+**WS 解帧规则**(RFC 6455 §5):服务端帧带 MASK → `WS_PROTO`;RSV1–3 非 0 → `WS_PROTO`(不协商 permessage-deflate,见 §4);控制帧 >125 B 或分片 → `WS_PROTO`;Close 载荷长度为 1 → `WS_PROTO`;没有未完成的分片消息时收到 continuation 帧,或分片进行中收到新的 Text/Binary 起始帧 → `WS_PROTO`;Ping → 排队同 payload 的 Pong(每连接最多排 4 个;已排 4 个时再到 Ping,清空队列只排这一个);Pong → 若 payload 是我们发的 tsc,记一次 RTT;Close → 排队 Close(回显状态码)并置 `WS_CLOSE`;文本/二进制分片(FIN=0 + continuation)→ 拼到每连接一块 `max_msg` 的 scratch 区(唯一的复制路径,`reassembled=true`,计数);长度字段 > `max_msg` → `RX_FULL`。帧头(2–14 B,RFC 6455 §5.2)由本 crate 自己解析(`src/ws.rs`,与 `fuzz_ws_deframe` 一起交付;不依赖 tungstenite),payload 切片、掩码、控制帧逻辑同样是本 crate 自己的。
 
-**热线程上的相位**:`Open` 收到 Close 帧 → `Closing`(回显的 Close 在 `finish_poll` 发出后 → `Dead`);其他任何致命位 → `Dead`。`Closing`/`Dead` 的连接:`poll_rx` 返回 0 且不做系统调用,`next_frame` 返回 `None`,`send_*` 返回 `NotOpen(phase)`;之后只能 `retire`,`Connector::reclaim` 后槽回到 `Free`。
+**热线程上的相位**:`Open` 收到 Close 帧 → `Closing`(回显的 Close 在 `finish_poll` 发出后 → `Dead`);传输类致命位(`PEER_EOF`、`RESET`、`IO`、`TLS_ALERT`、`TLS_PROTO`、`WS_PROTO`、`RX_FULL`、`HTTP_PROTO`)→ `Dead`;`TX_BACKLOG` 与上层置的 `PING_TIMEOUT`/`IDLE_TIMEOUT` 只置位、相位不变(连接仍须退役,由上层决定;积压期间只 `finish_poll` 续写即可再发)。`Closing`/`Dead` 的连接:`poll_rx` 返回 0 且不做系统调用,`next_frame` 返回 `None`,`send_*` 返回 `NotOpen(phase)`;之后只能 `retire`,`Connector::reclaim` 后槽回到 `Free`。
 
 ### 2. 发送路径
 
 1. gw 线程(`hft-venue`)把订单帧明文写进 `MaskedFrame::body_mut()`,`seal(Text, len, mask_key)`:在 `buf[14-hdr_len..14]` 写头(len < 126 → 2 B 头 + 4 B 掩码键;< 65536 → 4 + 4),对 payload 做 SIMD 异或(按 16 B 块,尾部逐字节)。掩码键来自每连接的 xorshift64* 序列,种子在 warm 线程由 `getrandom` 取(RFC 要求不可预测针对浏览器缓存投毒,对我们的客户端无安全意义)。
-2. `send_frame`:检查帧已 seal(否则 `NotSealed`)、`phase == Open` 且 tx 剩余 + 本帧密文上界(`len + 22`)≤ `tx_buf`,否则返回 `NotOpen/TxBacklog`(未加密;`TxBacklog` 同时置 `TX_BACKLOG`)。
-3. `WriteTraffic::encrypt(f.as_bytes(), &mut tx[tail..])` —— **真实记录序号在此推进一次**。
+2. `send_frame`:检查帧已 seal(否则 `NotSealed`)、`phase == Open` 且 tx 剩余 + 本帧密文上界 ≤ `tx_buf`,否则返回 `NotOpen/TxBacklog`(未加密;`TxBacklog` 同时置 `TX_BACKLOG`)。上界 = `len` + 每条记录的开销(TLS 1.3 为 22 B;TLS 1.2 AES-GCM 为 29 B、ChaCha20 为 21 B),帧超过 2^14 B 时按 2^14 B 一条记录切分。
+3. `tls::seal_app_record(f.as_bytes(), &mut tx[tail..])`(把帧拷进 tx 后原地 `seal_in_place_separate_tag`)—— **真实记录序号在此推进一次**。TLS 1.3 发送序号到 2^23 时先封一条我们的 KeyUpdate 并换发送密钥(AES-GCM 的保密上限由调用方负责,kernel connection 不跟踪)。
 4. `sendmsg(fd, iov, MSG_DONTWAIT|MSG_NOSIGNAL)`:tx 之前为空时 1 个 iovec,有短写剩余时 2 个(`[旧剩余, 新记录]`)。读 TSC 作为 `sent_tsc`(= 系统调用返回时刻)。
 5. 短写 / `EAGAIN`:剩余字节留在 tx,置 `TX_PARTIAL`,返回 `Ok(SendOk{queued>0})`;之后每轮 `finish_poll` 续写,直到写完。**加密过的字节只会被完整发出或随连接一起丢弃**,不存在"重加密再发"。
 6. 其他 errno:密文留在 tx,返回 `Io(errno)`,置 `RESET`/`IO`。
@@ -371,7 +395,7 @@ impl TxTsDrain {
 
 ### 3. `warm` 与 scratch 会话(scratch 预热可选,默认关)
 
-**TLS 加密调用点白名单**:对 rustls 的 `WriteTraffic::encrypt` / `EncodeTlsData::encode` 与任何 AEAD `seal` 的调用只允许出现在 `src/tls.rs`,且只经三个入口:`tls::seal_app_record`(`Conn::send_frame` 与 REST 请求的唯一加密点,推进真实记录序号)、`tls::seal_scratch`(`Conn::warm`,只作用于 scratch 会话)、`tls::encode_handshake_or_keyupdate`(握手期与 KeyUpdate)。其他文件出现这些调用即 CI 失败(`cargo xtask ci` 的 grep 规则 + clippy `disallowed-methods` 对 `rustls::unbuffered::WriteTraffic::encrypt` 在 `src/tls.rs` 之外报错)。这是"不对真实连接预加密"([13 R1](../../design/13-设计评审与优化.md))的机械保证。
+**TLS 加密调用点白名单**:对 rustls 的 `WriteTraffic::encrypt` / `EncodeTlsData::encode` 与任何 AEAD `seal` 的调用只允许出现在 `src/tls.rs`,且只经这些入口:`tls::seal_app_record`(`Conn::send_frame`、控制帧、Upgrade 请求与 REST 请求的唯一加密点,推进真实记录序号)、`tls::encode_handshake_or_keyupdate`(我们的 KeyUpdate;握手期的 flight 由 rustls 编码、`encode_handshake_flight` 拷入 tx)、`tls::seal_scratch`(`Conn::warm`,只作用于 scratch 会话;随 TLS 预热可选扩展实现,此前不存在)。其他文件出现这些调用即 CI 失败(`cargo xtask ci` 的 grep 规则 + clippy `disallowed-methods` 对 `rustls::unbuffered::WriteTraffic::encrypt` 在 `src/tls.rs` 之外报错)。这是"不对真实连接预加密"([13 R1](../../design/13-设计评审与优化.md))的机械保证。
 
 `warm_interval_ns > 0` 时,每个热线程在启动期(`conn-builder` 代建后交接)持有一个 **scratch 会话对**;默认关闭时不创建 scratch 会话,`Conn::warm` 为空操作:一个 `UnbufferedClientConnection` 与进程内 rustls server 在内存里完成握手(协商与生产连接相同的套件,默认 `TLS13_AES_128_GCM_SHA256`),之后只用 client 侧的 `WriteTraffic::encrypt` 把与真实帧同长度的明文加密进一个丢弃缓冲。这样被预热的是与真实发送**完全相同**的代码路径(rustls 记录层 + aws-lc-rs AES-GCM),而真实连接的序号、fd、tx 一概不碰。scratch 会话的序号自由增长;rustls 在接近 AES-GCM 加密次数上限时会自行发 KeyUpdate(写到丢弃缓冲),每小时由 warm 线程替换一次 scratch 会话。`warm` 同时读触(不写)目标 `Conn` 的 tx 缓冲首几条缓存行与 rustls 发送态所在行。
 
@@ -387,10 +411,10 @@ Rest 角色:TlsHandshake 后直接 Open(不 Upgrade)
 失败的 `BuildFail`:connect 报错 → `Errno(SO_ERROR)`;收到 TLS alert → `TlsAlert(描述码)`,其他 rustls 错误 → `Tls`;Upgrade 响应非 101 → `HttpStatus(状态码)`,`Sec-WebSocket-Accept` 不符 → `BadAccept`,带 `Sec-WebSocket-Extensions` → `Extensions`;超时 → `Timeout`。超时判定:`now_ns − 该阶段开始 ≥ 该阶段超时`(`connect_timeout_ms`/`tls_timeout_ms`/`upgrade_timeout_ms`),或 `now_ns ≥ BuildReq.deadline_ns`,先到者生效;`stage` = 失败时所处的相位。
 
 1. 创建 socket(`socket2`),按 §5 设置选项(含显式 `SO_BUSY_POLL = 0`);`bind(src_ip, src_port)`:`rss_plan` 配置时 `src_port = RssPlan::pick(...)`,否则端口为 0 由内核分配(默认);非阻塞 `connect`。
-2. rustls `ClientConfig`:aws-lc-rs provider;套件顺序 AES-128-GCM、AES-256-GCM、ChaCha20;TLS 1.3 优先、允许 1.2(以实测为准);密钥交换默认含 X25519MLKEM768;根证书用固定的 `webpki-roots` 快照(`extra_ca` 只在 `endpoint_override` 存在时追加);会话票据内存存储(复用只省握手 RTT,握手不在热路径)。
+2. rustls `ClientConfig`:aws-lc-rs provider;套件顺序 AES-128-GCM、AES-256-GCM、ChaCha20;TLS 1.3 优先、允许 1.2(以实测为准);密钥交换依次 X25519MLKEM768、X25519、P-256、P-384;根证书用固定的 `webpki-roots` 快照(`extra_ca` 只在 `endpoint_override` 存在时追加);会话票据内存存储(复用只省握手 RTT,握手不在热路径);`enable_secret_extraction = true`(握手完成即转 kernel connection,§1)。每次建连克隆一份配置交给 rustls(warm 线程)。
 3. WS Upgrade 请求由本 crate 拼接:`GET <path> HTTP/1.1`、`Host`、`Upgrade: websocket`、`Connection: Upgrade`、`Sec-WebSocket-Key`(16 B 随机 base64)、`Sec-WebSocket-Version: 13`,外加上层给的额外头(如 Binance SBE 流的 `X-MBX-APIKEY`)。**不发送 `Sec-WebSocket-Extensions`**;响应若带该头 → 失败(防 permessage-deflate)。响应用 `httparse` 解析,`Sec-WebSocket-Accept` 按 RFC 计算比对。
 4. **NAPI 落点与 MSS**:TLS 握手完成后 `getsockopt(SO_INCOMING_NAPI_ID)` 与 `getsockopt(TCP_MAXSEG)` 各一次(握手期间已收到包),分别写进 `Conn::napi_id`(及 `BuildEvent::Ready`)与 `Conn` 的 MSS(§7 的 `MULTI_SKB` 判定);`Connector::napi_ifindex` 经 netdev netlink 把它映射到网卡(内核 ≥ 6.9;hft-core 单元因此须允许 `AF_NETLINK`,单元表归 [deploy](../../deploy/README.md))。conn-builder 在交接前据此核对"连接落在本实例的网卡上"(规则与处置归 [hft-core 主机资源隔离](../../apps/hft-core/README.md#主机资源隔离slice核与出口-ip),不符的连接不交接);hostprobe 在 hft-core 建连之前运行,读不到这些 socket。dev2 只有一块网卡,不适用。启用 `rss_plan` 时另与计划队列比对,不符置 `WRONG_QUEUE`,`Connector` 换下一个候选端口重建(最多 3 次),仍不符则接受并上报。
-5. 登录与订阅由 `hft-venue` 的会话驱动器在同一 warm 线程上用 `Conn` API 完成,然后 `handoff`。TLS 1.3 的 NewSessionTicket 通常紧随握手到达;`Connector` 在 `Open` 后最多等 `ticket_wait_ms=20`(常量)让它们在 warm 线程被处理:`Ready` 在 `Open` 之后、已处理至少一张票据或 `now_ns ≥ Open 时刻 + 20 ms` 的第一次 `drive` 给出。
+5. 登录与订阅由 `hft-venue` 的会话驱动器在同一 warm 线程上用 `Conn` API 完成,然后 `handoff`。TLS 1.3 的 NewSessionTicket 通常紧随握手到达;`Connector` 在 `Open` 后最多等 `ticket_wait_ms=20`(常量)让它们在 warm 线程被处理(明文区已有应用数据时不再往后解密,票据留给热线程计数):`Ready` 在 `Open` 之后、已处理至少一张票据或 `now_ns ≥ Open 时刻 + 20 ms` 的第一次 `drive` 给出。
 
 ### 5. socket 选项清单
 
@@ -448,7 +472,7 @@ HTTP/1.1 over 同一 `Conn`(`ConnRole::Rest`,无 WS)。请求在 tx 明文 scrat
 
 ### 10. 内存
 
-`ConnArena` 在启动期从 [`hft-rt`](../hft-rt/README.md) 的大页分配器取一整块并预触摸:每槽 = `Conn` 结构(≈ 4 KiB,含 rustls 会话)+ rx + tx + 分片 scratch。每 venue 典型:BBO 3 条(两条赛马 + 一条在建)、分档快照/成交/标记价 2 条、下单 3 条、gw REST 2 条、acct-fetch REST 每账户 1–2 条、snap-fetch REST `snap.parallel` 条;core 的 3 个交易所 × 现货/永续 = 6 个 venue,按 `rx_buf`/`tx_buf`/`max_msg` 默认值约 50 MiB;每启用一个 optional venue 约加 8 MiB。实际总量以启动日志里 `ConnArena` 的分配为准(内存表归 [hft-core](../../apps/hft-core/README.md))。rustls 内部结构在握手期可能分配(warm 线程),稳态收发不分配(以计数分配器测试为准)。
+`ConnArena` 在启动期按 `(角色, 槽数)` 一次分配全部槽并预触摸:每槽 = `Conn` 结构(含记录层密钥与 rustls kernel connection)+ 该角色的 rx + tx + 分片 scratch;槽只给同角色的作业用。目标形态是从 [`hft-rt`](../hft-rt/README.md) 的大页分配器取一整块;M1.5 实现先用堆分配 + 预触摸(见已知限制)。每 venue 典型:BBO 3 条(两条赛马 + 一条在建)、分档快照/成交/标记价 2 条、下单 3 条、gw REST 2 条、acct-fetch REST 每账户 1–2 条、snap-fetch REST `snap.parallel` 条;core 的 3 个交易所 × 现货/永续 = 6 个 venue,按 `rx_buf`/`tx_buf`/`max_msg` 默认值约 50 MiB;每启用一个 optional venue 约加 8 MiB。实际总量以启动日志里 `ConnArena` 的分配为准(内存表归 [hft-core](../../apps/hft-core/README.md))。rustls 内部结构在握手期可能分配(warm 线程),稳态收发不分配(以计数分配器测试为准)。
 
 ### 11. 源文件规划
 
@@ -506,15 +530,12 @@ HTTP/1.1 over 同一 `Conn`(`ConnRole::Rest`,无 WS)。请求在 tx 明文 scrat
 | `hft-rt` | workspace | `tsc_now`/`tsc_ordered`、`HugeRegion` 大页与预触摸、`spsc`(交接环、`TxTag` 环) |
 | `hft-types` | workspace | `VenueId`、`ConnId` |
 | `hft-event` | workspace | 只用 `ConnRole`(连接角色编码的唯一归属) |
-| `rustls` | `0.23`,`default-features = false`,features `aws_lc_rs, std, tls12` | unbuffered API(`rustls::client::UnbufferedClientConnection`、`rustls::unbuffered::*`);锁定小版本,升级须重跑属性测试与零分配测试 |
-| `aws-lc-rs` | 随 rustls | aarch64(AES/PMULL 汇编,唯一发布目标)与 x86 都有优化路径([research/01 §3](../../design/research/01-network-kernel-bypass-tls.md));Graviton 上的单记录成本待 `net_rx_*_mem` 实测 |
+| `rustls` | `0.23.45`,`default-features = false`,features `aws_lc_rs, std, tls12` | 握手用 unbuffered API(`rustls::client::UnbufferedClientConnection`、`rustls::unbuffered::*`),之后用 kernel connection(`rustls::kernel`,0.23.2x 起)管 KeyUpdate 与票据;小版本经 Cargo.lock 锁定,升级须重跑属性测试与零分配测试 |
+| `aws-lc-rs` | `1`(与 rustls 同一构建),features `aws-lc-sys, prebuilt-nasm` | 直接依赖:记录层的原地 AEAD、`Sec-WebSocket-Accept` 的 SHA-1、掩码种子与 `Sec-WebSocket-Key` 的随机数(`aws_lc_rs::rand`,仅 warm 线程)。aarch64(AES/PMULL 汇编,唯一发布目标)与 x86 都有优化路径([research/01 §3](../../design/research/01-network-kernel-bypass-tls.md));Graviton 上的单记录成本待 `net_rx_*_mem` 实测;构建需目标平台的 C 编译器(CI 装 `gcc-aarch64-linux-gnu`) |
 | `webpki-roots` | 固定快照 | 根证书随发布归档,不读系统证书 |
-| `tungstenite` | `0.2x`,`default-features = false` | 只用 `FrameHeader` 解析;不用其 `WebSocket` 读写(每消息分配) |
 | `httparse` | `1` | Upgrade 响应与 REST 响应头 |
-| `socket2` | `0.6` | socket 创建与常用选项 |
-| `libc` | `0.2` | `recvmsg`、cmsg、`SO_TIMESTAMPING`、`SO_BUSY_POLL`、`SO_INCOMING_NAPI_ID` |
+| `libc` | `0.2` | 全部 socket 系统调用(创建、选项、`bind`、`connect`、`recvmsg`/`sendmsg`、`epoll`、netdev netlink),都经 `src/sock.rs` 计数 |
 | `bitflags` | `2` | `ErrBits` |
-| `getrandom` | `0.2` | 掩码种子、`Sec-WebSocket-Key`(仅 warm 线程) |
 
 **禁止**:`tokio`、`mio`、任何 async 运行时;`openssl`/`native-tls`;`serde_json`;`tracing` 于热路径;依赖 `hft-venue`、`venue-*`、`hft-journal`(本 crate 不写 journal)。
 
@@ -537,6 +558,7 @@ HTTP/1.1 over 同一 `Conn`(`ConnRole::Rest`,无 WS)。请求在 tx 明文 scrat
 - **TX 无硬件戳**:ENA 限制;`sent_tsc` 是 `sendmsg` 返回时刻,线上时刻只能用对端回执估计。
 - **一次读多包只拿到最后一个包的戳**:见实现说明 §7(取最早一个包所在读取的戳、`MULTI_SKB` 标记、`rx_empty_gap_ns` 上界);若测得 `MULTI_SKB` 比例 > 1%,再评估逐包读(`recvmmsg` 不适用于 TCP)。
 - **IPv4 only**:交易所端点全部 IPv4;IPv6 不在范围内。
+- **M1.5 实现范围**:接收、发送、时间戳、`Connector`、`ConnArena`/`ConnPool`、`ReadyPoll` 已实现;`RestPool`(M3)、`tls_mode = buffered`(M3)、`RssPlan` 与 TX 时间戳 `TxTsDrain`、scratch TLS 预热(可选扩展,M7)尚未实现,对应配置在 `Connector::new` 被拒绝。`ConnArena` 的大页 backing 待 hft-core 装配时接入(现为堆分配 + 预触摸)。
 
 ### 开发备忘
 
@@ -546,9 +568,9 @@ HTTP/1.1 over 同一 `Conn`(`ConnRole::Rest`,无 WS)。请求在 tx 明文 scrat
 
 1. **TCP `recvmsg` 的时间戳语义**:确认 6.12 内核 `tcp_recvmsg` 报告的是本次读取最后一个 skb 的戳(`tcp_update_recv_tstamps`),以及 TCP 接收队列合并 skb 时保留哪个戳。方法:回环 + netem 让两包间隔 1 ms,一次读两包,比较 `sw_rx_ns` 与两包各自的到达时刻;同时统计 `MULTI_SKB` 比例与 `rx_empty_gap_ns` 的分布。
 2. **ENA RSS 哈希函数与 key 可配性**:在目标实例上 `ethtool -x` 看 `RSS hash function`(toeplitz/crc32)与 key;c8g(Graviton4)上同样核实。若为 crc32,`RssPlan` 需增加 crc32 实现或退化为校验上报。
-3. **`tungstenite::protocol::frame::FrameHeader::parse` 在锁定版本是否 `pub`**;否则自写 2–14 B 头解析(RFC 6455 §5.2),与 `fuzz_ws_deframe` 一起交付。
-4. **rustls 0.23 unbuffered 稳态零分配**:尤其 `process_tls_records` 对应用数据与晚到的 NewSessionTicket。若晚到票据导致分配,关闭会话复用(`Resumption::disabled()`),握手本就在 warm 线程。
-5. **rustls unbuffered 能否每次只取一条记录后返回**(按需解密的前提):在 `ReadTraffic` 下取一条 `next_record()` 后丢弃状态对象,下一次 `process_tls_records` 从未消费的密文继续。方法:内存对端属性测试 + 读 rustls 源码;不行时退化为"每次 `next_frame` 至多解密 N 条记录(N = 4)"。
+3. **已定**:帧头自写(2–14 B,RFC 6455 §5.2),与 `fuzz_ws_deframe` 一起交付;不依赖 tungstenite(其依赖闭包带 `rand`/`log`/`http`)。
+4. **已核实(否)**:rustls 0.23.45 unbuffered 的 `process_tls_records` 把每条应用数据记录的明文放进新 `Vec`,`WriteTraffic::encrypt` 也经 `PrefixedPayload` 分配;因此握手后改用 kernel connection + 本 crate 的原地记录层(§1),NET-285 在此基础上通过。热线程上的晚到票据只计数、不交给 rustls。
+5. **已定**:按需逐条解密由本 crate 的记录层直接实现(一次一条完整记录),NET-089 覆盖。
 6. **各端点协商结果**:TLS 版本、套件、是否 PQ 密钥交换;`Connector` 把结果写进 `BuildEvent`,首周汇总进 HostProfile。TLS 1.2 端点同样适用"不预加密"(显式 nonce 也是序号)。
 7. **`SO_BINDTODEVICE` 权限**:6.12 上未绑定过设备的 socket 是否仍需 `CAP_NET_RAW`;systemd unit 预留 `AmbientCapabilities=CAP_NET_RAW`。
 8. **`SO_BUSY_POLL = 0` 的效果与权限**:6.12 上把值调低不需要 `CAP_NET_ADMIN`;设为 0 后空的非阻塞 `recvmsg` 不进入 `napi_busy_loop`。方法:主机 `net.core.busy_read` 临时设非 0 的测试机上 perf/bpftrace 计 `napi_busy_loop` 调用次数,并实测 `net_poll_empty`。

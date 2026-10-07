@@ -1,0 +1,21 @@
+error[E0080]: evaluation panicked: MaskedFrame CAP must be in 15..=65535
+ --> $RUST/core/src/panic.rs
+  |
+  = note: evaluation of `hft_net::MaskedFrame::<65536>::CAP_OK` failed here
+  |
+ ::: src/ws.rs
+  |
+  |     const CAP_OK: () = assert!(CAP > 14 && CAP <= 65_535, "MaskedFrame CAP must be in 15..=65535");
+  |                        --------------------------------------------------------------------------- in this macro invocation
+
+note: erroneous constant encountered
+ --> src/ws.rs
+  |
+  |         let () = Self::CAP_OK;
+  |                  ^^^^^^^^^^^^
+
+note: the above error was encountered while instantiating `fn MaskedFrame::<65536>::new`
+ --> tests/ui/net_009_cap_65536.rs:3:13
+  |
+3 |     let f = hft_net::MaskedFrame::<65_536>::new();
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

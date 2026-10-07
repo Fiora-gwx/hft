@@ -1,0 +1,134 @@
+[package]
+name = "hft-net"
+description = "Non-blocking TCP + TLS 1.3 + WebSocket transport for the feed/gw threads: receive/send paths, RX timestamps, Connector (conn-builder), ReadyPoll"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Scripted socket I/O (README "11. 源文件规划" src/sock.rs) plus test hooks: every recvmsg/sendmsg/
+# connect/getsockopt result, the TSC around each call and one injected TLS encryption failure come
+# from a script. Tests only.
+test-io = []
+
+[dependencies]
+hft-types.workspace = true
+hft-event.workspace = true
+hft-rt.workspace = true
+libc.workspace = true
+bitflags = "2"
+httparse = "1"
+# Handshake, certificate verification, session tickets and key updates (kernel connection API);
+# README "依赖". Minor version locked through Cargo.lock.
+rustls = { version = "0.23.45", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+# The record layer after the handshake (in-place AEAD), HKDF-free; SHA-1 for Sec-WebSocket-Accept;
+# the CSPRNG for mask seeds and Sec-WebSocket-Key. Same build rustls uses.
+aws-lc-rs = { version = "1.14", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
+webpki-roots = "1"
+
+[dev-dependencies]
+hft-testkit.workspace = true
+proptest.workspace = true
+criterion.workspace = true
+trybuild.workspace = true
+static_assertions.workspace = true
+toml.workspace = true
+serde_json = "1"
+# NET-164: the T6 scan is the one `cargo xtask hot-check` runs.
+xtask = { path = "../../tools/xtask" }
+
+[[test]]
+name = "layout"
+required-features = ["test-io"]
+
+[[test]]
+name = "compile_fail"
+
+[[test]]
+name = "ws_rx"
+required-features = ["test-io"]
+
+[[test]]
+name = "ws_tx"
+required-features = ["test-io"]
+
+[[test]]
+name = "rx_path"
+required-features = ["test-io"]
+
+[[test]]
+name = "rx_prop"
+required-features = ["test-io"]
+
+[[test]]
+name = "cmsg"
+
+[[test]]
+name = "timestamps"
+required-features = ["test-io"]
+
+[[test]]
+name = "tx_path"
+required-features = ["test-io"]
+
+[[test]]
+name = "warm"
+required-features = ["test-io"]
+
+[[test]]
+name = "connector"
+required-features = ["test-io"]
+
+[[test]]
+name = "ready"
+required-features = ["test-io"]
+
+[[test]]
+name = "loopback"
+required-features = ["test-io"]
+
+[[test]]
+name = "hot_syscalls"
+required-features = ["test-io"]
+
+[[test]]
+name = "arena"
+required-features = ["test-io"]
+
+[[test]]
+name = "alloc"
+required-features = ["test-io"]
+
+[[test]]
+name = "config"
+required-features = ["test-io"]
+
+[[test]]
+name = "txts"
+required-features = ["test-io"]
+
+[[test]]
+name = "whitelist"
+
+[[test]]
+name = "deps"
+
+[[bench]]
+name = "rx"
+harness = false
+required-features = ["test-io"]
+
+[[bench]]
+name = "tx"
+harness = false
+required-features = ["test-io"]
+
+[[bench]]
+name = "ready"
+harness = false
+required-features = ["test-io"]

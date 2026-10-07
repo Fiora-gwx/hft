@@ -146,6 +146,8 @@ deps = ["crates/hft-types", "crates/hft-event", "crates/hft-rt"]
 [pkg."crates/hft-net"]
 tier = "hot"
 deps = ["crates/hft-types", "crates/hft-event", "crates/hft-rt"]
+# NET-164 runs the T6 scan of `cargo xtask hot-check` (tools/xtask exports it).
+dev = ["tools/xtask"]
 
 [pkg."crates/hft-venue"]
 tier = "hot"

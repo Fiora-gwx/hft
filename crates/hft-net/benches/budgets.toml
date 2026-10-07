@@ -1,0 +1,49 @@
+# Reference-machine budgets of hft-net's benchmarks (source constants read by `cargo xtask bench-gate`).
+# One table per registered benchmark name (benchmarks/README.md "基准名登记"); values in ns, equal to the
+# README "延迟与资源契约" table (`cargo xtask doc-check` compares them). Format: tools/README.md "cargo xtask doc-check".
+
+[net_rx_300b_mem]
+p50_ns = 350
+p99_ns = 800
+
+[net_rx_2k_mem]
+p50_ns = 700
+p99_ns = 1500
+
+[net_rx_first_of_64k]
+p50_ns = 1000
+p99_ns = 2000
+
+[net_poll_loopback]
+p50_ns = 2000
+p99_ns = 5000
+
+[net_poll_empty]
+p50_ns = 800
+p99_ns = 2000
+
+[net_ready_probe]
+p50_ns = 500
+p99_ns = 1500
+
+[net_seal_300b]
+p50_ns = 30
+p99_ns = 60
+
+[net_encrypt_300b_mem]
+p50_ns = 250
+p99_ns = 500
+
+[net_send_loopback]
+p50_ns = 2500
+p99_ns = 6000
+
+[net_warm_300b]
+p50_ns = 300
+p99_ns = 600
+
+[net_pool_swap]
+p50_ns = 20
+
+[net_rss_pick]
+p50_ns = 50000

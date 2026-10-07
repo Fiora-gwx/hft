@@ -12,7 +12,13 @@ allow = [
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
+    # hft-net TLS stack: subtle (rustls).
+    "BSD-3-Clause",
     "BSL-1.0",
+    # hft-net TLS stack: webpki-roots (Mozilla root store data licence).
+    "CDLA-Permissive-2.0",
+    # hft-net TLS stack: aws-lc-rs/aws-lc-sys, rustls-webpki, untrusted.
+    "ISC",
     "MIT",
     "Unicode-3.0",
     "Unlicense",

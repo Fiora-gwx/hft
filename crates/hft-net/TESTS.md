@@ -28,7 +28,7 @@ spec: README.md
 | 6. 源端口预计算(`RssPlan`,可选) | NET-350–NET-353 |
 | 7. 时间戳 | NET-002、NET-080、NET-081、NET-120–NET-136、NET-274、NET-337、NET-360–NET-362、NET-370、NET-373、NET-376 |
 | 8. `ConnPool` 与轮换 | NET-240–NET-254 |
-| 9. REST 客户端 | NET-260–NET-275、NET-336 |
+| 9. REST 客户端 | NET-260–NET-277、NET-336 |
 | 10. 内存 | NET-285、NET-287 |
 | 11. 源文件规划 | NET-164、NET-080 |
 | 延迟与资源契约 | NET-086、NET-267、NET-285、NET-286、NET-320–NET-331 |
@@ -1194,11 +1194,10 @@ spec: README.md
 - 步骤:
   1. `send_frame(f1)`
   2. `warm(&f2)` 10⁶ 次;`seal` 一个新帧 f4;`send_frame` 一个未 seal 的帧(得 `NotSealed`);服务端发 100 帧,`poll_rx`/`next_frame` 直到取完
-  3. `send_frame(f3)`;同一 `MemPeer` 上的 REST 连接 `RestPool::submit` 一次
+  3. `send_frame(f3)`
 - 期望:
   - 服务端在本连接上收到的应用数据记录序号依次为 0、1,中间没有空洞;f1、f3 解密成功
-  - REST 连接上服务端收到序号 0 的一条记录
-  - 步骤 2 前后本连接的发送序号相同(测试钩子读出);未 seal 与 `NotOpen`/`TxBacklog` 不推进序号由 NET-065、NET-156、NET-157 覆盖
+  - 步骤 2 前后本连接的发送序号相同(测试钩子读出);未 seal 与 `NotOpen`/`TxBacklog` 不推进序号由 NET-065、NET-156、NET-157 覆盖;REST 请求的同一性质由 NET-276 覆盖
 - 实现:`crates/hft-net/tests/tx_path.rs::net_151_tls_seq_advances_only_on_send`
 
 ### NET-152 短写把剩余密文留在 tx 并在 finish_poll 续写,不重加密
@@ -1421,7 +1420,7 @@ spec: README.md
 - 里程碑:M1.5
 - 前置:`LoopPeer`(WS,TLS 1.3,只开 `TLS13_AES_128_GCM_SHA256`,密钥交换 X25519);`connect/tls/upgrade_timeout_ms = 3000`;`BuildReq{role: Md, deadline_ns: 开始 + 10 s}`
 - 步骤:
-  1. `submit`;反复 `drive(now)` 并在每次之间记录 `conn_mut(job).map(|c| c.phase())`
+  1. `submit`;反复 `drive(now)` 并在每次之间记录 `phase(job)`
 - 期望:
   - 观察到的相位序列依次含 `TcpConnecting`、`TlsHandshake`、`WsUpgrade`、`Open`
   - 恰好一个事件 `Ready{tls: TlsInfo{version: 0x0304, suite: 0x1301, group: 0x001D}, napi_id: 0}`;`handoff(job)` 返回 `Ok`
@@ -1717,11 +1716,11 @@ spec: README.md
 - 规则:[调用约束](README.md#调用约束)
 - 级别:unit
 - 里程碑:M1.5
-- 前置:`MemPeer` + `ScriptIo`;已交接的 WS 连接与 REST 池;脚本含数据、`EAGAIN`、短写、EOF、对端 Close
+- 前置:`MemPeer` + `ScriptIo`;经 `Connector` 建好、`ConnPool::install` 交接的 WS 连接;脚本含数据、`EAGAIN`、短写、EOF、对端 Close
 - 步骤:
-  1. 对上述连接执行 10⁴ 轮 `poll_rx`/`next_frame`/`send_frame`/`send_text`/`send_ping`/`finish_poll`/`flush`/`RestPool::poll`/`idle_check`/`ConnPool::retire`
+  1. 对上述连接执行 10⁴ 轮 `poll_rx`/`next_frame`/`send_frame`/`send_text`/`send_ping`/`finish_poll`/`flush`,最后 `ConnPool::retire`
 - 期望:
-  - `SysCount` 中 `connect`、`shutdown`、`close`、`getaddrinfo`、`epoll_ctl` 都为 0
+  - 热线程阶段 `SysCount` 中 `connect`、`shutdown`、`close`、`getaddrinfo`、`epoll_ctl` 的增量都为 0;REST 池的同一性质由 NET-277 覆盖
 - 实现:`crates/hft-net/tests/hot_syscalls.rs::net_212_hot_never_connects`
 
 ### NET-213 端点钉选 IP 时不做 DNS 解析
@@ -2244,6 +2243,32 @@ spec: README.md
 - 期望:
   - 依次 `Some(Fill)`、`None`、`Ok`、`Some(Fill)`、`Ok`、`None`、`Err(PoolErr::Full)`
 - 实现:`crates/hft-net/tests/rest.rs::net_275_rest_pool_build`
+
+### NET-276 REST 请求也只在 submit 加密发送时推进记录序号
+
+- 规则:[2. 发送路径](README.md#2-发送路径)、[9. REST 客户端](README.md#9-rest-客户端)
+- 级别:unit
+- 里程碑:M3
+- 前置:`MemPeer`(服务端逐条解密并记录收到的记录序号);`RestPool::<1>` 一条 Open 连接
+- 步骤:
+  1. `submit` 一个请求;服务端回响应;`poll` 直到 `Some`
+  2. `submit` 一个超过 tx 明文区的请求(得 `ReqTooLarge`)
+  3. 再 `submit` 一个请求
+- 期望:
+  - 服务端收到的记录序号依次为 0、1;步骤 2 不推进发送序号
+- 实现:待实现
+
+### NET-277 RestPool 的热线程入口从不调用 connect、shutdown、close、getaddrinfo
+
+- 规则:[调用约束](README.md#调用约束)、[9. REST 客户端](README.md#9-rest-客户端)
+- 级别:unit
+- 里程碑:M3
+- 前置:`MemPeer` + `ScriptIo`;已交接的 REST 池;脚本含数据、`EAGAIN`、短写、EOF
+- 步骤:
+  1. 10⁴ 轮 `RestPool::submit`/`poll`/`idle_check`/`take_retired`
+- 期望:
+  - 热线程阶段 `SysCount` 中 `connect`、`shutdown`、`close`、`getaddrinfo`、`epoll_ctl` 的增量都为 0
+- 实现:待实现
 
 ### NET-285 稳态收发零分配
 

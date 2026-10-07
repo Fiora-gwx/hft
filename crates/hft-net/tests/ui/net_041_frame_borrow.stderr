@@ -1,0 +1,9 @@
+error[E0499]: cannot borrow `*c` as mutable more than once at a time
+ --> tests/ui/net_041_frame_borrow.rs:4:13
+  |
+3 |     let a = c.next_frame().unwrap();
+  |             - first mutable borrow occurs here
+4 |     let b = c.next_frame();
+  |             ^ second mutable borrow occurs here
+5 |     std::hint::black_box(a.payload);
+  |                          --------- first borrow later used here
