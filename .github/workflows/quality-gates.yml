@@ -154,6 +154,10 @@ jobs:
         with:
           ref: ${{ env.HEAD_SHA }}
           fetch-depth: 0 # path rules, gen-schema's merge-base baseline, toolchain base worktree
+      # The build, the aarch64 check and the benchmark links need more than the stock image's
+      # free space on / (a full disk killed rust-lld with SIGBUS); removal runs in the background.
+      - name: Free runner disk
+        run: bash .github/scripts/free-disk.sh
       - name: Classify changed paths
         id: paths
         env:
@@ -267,6 +271,8 @@ jobs:
           CRATES: ${{ steps.paths.outputs.bench_crates }}
           ALL: ${{ steps.paths.outputs.benchmarks }}
         run: |
+          df -h /
+          du -sh "$CARGO_TARGET_DIR"
           if [[ $ALL == true ]]; then
             cargo xtask bench-gate --smoke
           else
