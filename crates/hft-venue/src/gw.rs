@@ -780,7 +780,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         if let Some(obs) = o.rate
             && let Some(x) = self.accts.get_mut(a)
         {
-            x.rate.observe(obs.used, now);
+            x.rate.observe(obs.used, obs.limit, now);
         }
         if let Some(r) = o.outcome_unknown {
             self.n.outcome_unknown += 1;

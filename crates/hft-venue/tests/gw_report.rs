@@ -100,6 +100,25 @@ fn ven_224_rate_obs_correction() {
         statuses(&h.reps()),
         vec![SendStatus::Written, SendStatus::RateLimited]
     );
+    // Step 3: an observation of another window (daily 2147 / 200000) is scaled to the local
+    // 10 / 1000 ms bucket by its fill ratio (→ 1), so both orders pass.
+    let mut h = gw::<StubProto>();
+    let c = h.place(A1, 1, 1, S1, false);
+    h.cmd(c);
+    h.poll(3_000_000);
+    h.reps();
+    h.net.push(P, b"R|1-1-1-5|0|2147|200000|86400000");
+    h.poll(3_000_001);
+    for s in [3, 4] {
+        let c = h.place(A1, s, 1, S1, false);
+        h.cmd(c);
+    }
+    h.poll(3_000_002);
+    assert_eq!(
+        statuses(&h.reps()),
+        vec![SendStatus::Written, SendStatus::Written],
+        "VEN-224 step 3"
+    );
 }
 
 #[test]

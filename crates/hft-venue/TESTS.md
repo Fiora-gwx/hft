@@ -2226,8 +2226,10 @@ spec: README.md
 - 步骤:
   1. 收到带 `RateObs{used: 9, limit: 10, window_ms: 1000}` 的响应
   2. 出环 2 条 A1 `Place`
+  3. 另起 `G0`(A1 已有 1 条在途):收到带另一窗口的 `RateObs{used: 2147, limit: 200000, window_ms: 86400000}` 的响应(Binance 取最满的 `rateLimits` 条目,如日订单数),再出环 2 条 A1 `Place`
 - 期望:
-  - 第一条 `Written`(used 9 → 10),第二条 `RateLimited`
+  - 步骤 2:第一条 `Written`(used 9 → 10),第二条 `RateLimited`
+  - 步骤 3:观测按占用比例折算到本地上限(⌈2147 × 10 / 200000⌉ = 1),两条都 `Written`(M1.5 探针上未折算时日订单数 2147 被当成 10 s 计数,撤单全部 `RateLimited`)
 - 实现:`crates/hft-venue/tests/gw_report.rs::ven_224_rate_obs_correction`
 
 ### VEN-225 回报给出的提示立即排一次账户查询

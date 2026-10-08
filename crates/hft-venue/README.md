@@ -456,7 +456,7 @@ struct GwAccount<P: VenueProtocol> {
     hold: HoldBuf,                // 解析不到槽的成交类 OrderEvent 暂存(≤ gw.unmatched_hold_cap,预分配)
     acct: AcctSched,              // 账户查询的调度状态(§4a)
     inflight: [u16; 3],           // 每连接已发未回的请求数
-    rate: RateCounters,           // 发送侧计数,按 (venue, account) 独立(本账户的 API key 与出口 IP),响应 rateLimits 校正;一个账户的限速风暴不消耗另一个账户的配额
+    rate: RateCounters,           // 发送侧计数,按 (venue, account) 独立(本账户的 API key 与出口 IP),响应 rateLimits 校正(交易所报的是另一窗口时按占用比例折算到本计数的上限);一个账户的限速风暴不消耗另一个账户的配额
     frame: MaskedFrame<CAP>, warm_frame: MaskedFrame<CAP>,
 }
 ```

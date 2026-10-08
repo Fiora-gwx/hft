@@ -1,6 +1,6 @@
 //! Send-side rate counters per (venue, account) (README §4 step 1.2): the last line before the
 //! exchange's hard limit. Fixed windows from refdata `RateLimitTable` (scope `Account`, bucket
-//! `Orders`); `RateObs` in a response replaces the local count; `ResetRate` zeroes it.
+//! `Orders`); `RateObs` in a response replaces the local count (scaled to this counter's limit when it reports another window); `ResetRate` zeroes it.
 
 use hft_refdata::{LimitBucket, LimitScope, RateLimit};
 
@@ -50,13 +50,21 @@ impl RateCounters {
         true
     }
 
-    /// A response reported the exchange's own count.
-    pub fn observe(&mut self, used: u32, now: u64) {
+    /// A response reported the exchange's own count `used` of a limit `limit`. The exchange may
+    /// report another window than this counter's (Binance picks its fullest `rateLimits` entry,
+    /// e.g. the daily order count), so the count is scaled to this counter's limit by the same
+    /// fill ratio (rounded up); an observation with this counter's limit is taken as is.
+    pub fn observe(&mut self, used: u32, limit: u32, now: u64) {
         if self.limit == 0 {
             return;
         }
         self.roll(now);
-        self.used = used;
+        self.used = if limit == 0 || limit == self.limit {
+            used
+        } else {
+            let scaled = (u64::from(used) * u64::from(self.limit)).div_ceil(u64::from(limit));
+            u32::try_from(scaled).unwrap_or(u32::MAX)
+        };
     }
 
     /// `GwCmd{ResetRate}`.
