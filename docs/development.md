@@ -201,6 +201,10 @@
 - **每季度演练一次**:由负责人对 `main` 的一个已有标签的提交出一个开发构建,在 dev2 上安装到 `sim` 组并跑第一分钟验收;用例与证据见 [DRL-110](tests/drills.md#drl-110-arm-runner-不可用路径的季度演练交叉编译的开发构建在-dev2-sim-组通过第一分钟验收)。
 - 额度用尽时个人账户全部私有仓库(含 Trading)的 Actions 停止,本工作流同样不能运行。
 
+### 探针构建(`probe-build.yml`)
+
+手动 `workflow_dispatch(sha)`:在 `ubuntu-24.04-arm`(容器 `ubuntu:24.04`)上以 `release` 剖面构建 M1.5 探针程序 `latency-slice` 与 `hostprobe`,打包 `probe-aarch64.tar.zst`(含 `SHA` 与 `SHA256SUMS`)作为 workflow artifact(保留 3 天),供按需租用的探针主机下载运行;不进任何 Release 与生产归档,`timeout-minutes: 40`。
+
 ### 免费额度
 
 本节是 CI 分钟预算的**唯一归属**;[testing §6](testing.md#6-ci-运行矩阵) 的运行矩阵链接这里。只用免费的 GitHub 托管 runner,超出时缩减批量,不加付费资源;决定见 [ci-org-and-profiles](../.agents/notes/proposed/architecture/2026-10-03-ci-org-and-profiles.md) 与 [ci-quota-self-estimate](../.agents/notes/proposed/process/2026-10-03-ci-quota-self-estimate.md)。

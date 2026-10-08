@@ -1,0 +1,60 @@
+# M1.5 latency probe binaries (tools/latency-slice/README.md, design/11 §3.1).
+# latency-slice and hostprobe are not part of any production release archive; this manual workflow
+# builds them for the rented probe host (aarch64, release profile, target-cpu neoverse-v1) from a
+# commit whose ci.yml is green, and keeps them as a short-lived workflow artifact. Never runs on
+# servers; the probe host only runs the downloaded binaries.
+name: Probe build
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit to build (main commit with green ci.yml)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: ubuntu:24.04
+    timeout-minutes: 40
+    steps:
+      - name: Install build prerequisites
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+            build-essential ca-certificates curl git pkg-config cmake zstd
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+      - name: Mark the workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: probe-arm64
+      - name: Build latency-slice and hostprobe
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo build --locked --release -p latency-slice -p hostprobe
+          mkdir -p out/bin
+          cp target/release/latency-slice target/release/hostprobe out/bin/
+          git rev-parse HEAD > out/SHA
+          (cd out && sha256sum bin/* > SHA256SUMS && tar --zstd -cf ../probe-aarch64.tar.zst .)
+          sha256sum probe-aarch64.tar.zst
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-aarch64
+          path: probe-aarch64.tar.zst
+          retention-days: 3
