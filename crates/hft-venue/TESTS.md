@@ -3117,7 +3117,7 @@ spec: README.md
 
 | 行 | 角色 / 变体 | 期望 |
 |---|---|---|
-| VEN-310.1 | Md / `bootstrap = None`,无登录 | `endpoint` → `submit` → `Open` → `SessEvent::Ready`;交接的连接号 = `BuildReq.conn` |
+| VEN-310.1 | Md / `bootstrap = None`,无登录 | 不调用 `endpoint`;`submit` → `Open` → `SessEvent::Ready`;交接的连接号 = `BuildReq.conn` |
 | VEN-310.3 | Order / `login_result`:`Continue` 后 `Ok` | 发两步登录帧,`Ready` |
 | VEN-310.4 | Order / `Rejected(4001)` | `SessEvent::Failed`,带码 4001;不交接,连接被 `reclaim` |
 

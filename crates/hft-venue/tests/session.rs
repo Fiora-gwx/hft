@@ -130,12 +130,12 @@ fn ven_310_session_flow() {
         .collect();
     assert_eq!(
         names.iter().filter(|n| **n == "endpoint").count(),
-        1,
+        0,
         "VEN-310.1 endpoint"
     );
     assert_eq!(
-        drv.log().take(2).collect::<Vec<_>>(),
-        vec![SessionOp::Endpoint(ConnId(3)), SessionOp::Submit(ConnId(3))]
+        drv.log().take(1).collect::<Vec<_>>(),
+        vec![SessionOp::Submit(ConnId(3))]
     );
     let mut p = ConnPool::<1>::new(PoolMode::Race, 1, RotatePolicy::default());
     p.install(h, None).unwrap();

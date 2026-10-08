@@ -111,7 +111,7 @@ pub struct SessionDriver<P: VenueProtocol> { /* warm 线程 conn-builder */ }
 impl<P: VenueProtocol> SessionDriver<P> {
     /// cfg:VenueCfg 与各行情任务的 ReadyHandle(§7 第 4 步);creds:每个账户的会话凭证(Order/UserStream 角色)。
     pub fn new(cfg: SessionCfg, creds: Vec<(AccountId, Credential)>) -> Self;
-    /// 按请求方的 BuildReq(角色、连接号)开始一次会话:bootstrap 判定、endpoint、Connector::submit(§7 第 1–2 步)。
+    /// 按请求方的 BuildReq(角色、连接号)开始一次会话:bootstrap 判定、endpoint(Md 角色不调用)、Connector::submit(§7 第 1–2 步)。
     pub fn start(&mut self, c: &mut Connector, req: BuildReq, acct: Option<AccountId>, now_ns: i64) -> Result<JobId, SessErr>;
     pub fn drive(&mut self, c: &mut Connector, now_ns: i64) -> Option<SessEvent>;  // Ready(Handoff) / Failed{conn, code}
     /// 收到 RetireMsg:先从就绪 epfd 注销(若注册过),再 Connector::reclaim(§7 第 7 步)。
@@ -614,7 +614,7 @@ struct IdTable {
 ### 7. 会话建立(warm 线程 `conn-builder`,`SessionDriver`)
 
 1. `P::bootstrap(role, cfg, cred)`(`cred` = 该账户的 REST 凭证,行情角色为 `None`)返回 `Some(BootCall)` 时先执行该 REST 请求(Binance USDT-M listenKey、KuCoin bullet token),2xx 响应体作为 `endpoint` 的 `boot`。
-2. `P::endpoint` 生成 path/query/额外头(可能含签名,如 KuCoin 私有 WS URL)→ `Connector::submit`。
+2. `P::endpoint` 生成 path/query/额外头(可能含签名,如 KuCoin 私有 WS URL)→ `Connector::submit`。行情角色(`Md`)不调用 `P::endpoint`:公共行情的 path 按路由固定,装配时已写进 `Connector` 的端点表,而 `BuildReq` 不带路由号(M1.5 探针上以路由 0 调用时 Binance 现货与 USDT-M 返回 `Unsupported`,行情连接全部建不起来)。
 3. `Open` 后:Order/UserStream 角色调 `P::login`,等 `P::login_result`(多步挑战式登录用 `Continue`);失败按 `LoginResult::Rejected(code)` 上报并退避。
 4. 交接前核对 NAPI 落点(`Connector::napi_ifindex`,规则与处置归 [hft-core 主机资源隔离](../../apps/hft-core/README.md#主机资源隔离slice核与出口-ip)):不符 → 不交接,按建连失败退役。登录成功 → `handoff` 给请求它的任务(feed-bbo、feed-md、snap-fetch、acct-fetch 或 gw;连接号由请求方在 `BuildReq` 里按 §1 号段给出)。请求方启用了就绪探测时,交接前先把该连接注册进请求方的就绪 epfd(hft-net `ReadyHandle::add`,`epoll_ctl` 在 warm 线程;hft-core 装配时把各行情任务的 `ReadyHandle` 交给该 venue 的 `SessionDriver`,按 §1 的连接号段找到请求方)。**订阅由热任务在 `install` 后发出**(订阅回执进 raw journal,限速由行情任务控制);登录帧与凭据只在 warm 线程出现,热线程不持有会话私钥(需逐单签名的 Hyperliquid 例外,gw 持有 API 钱包私钥)。
 5. REST 签名请求用**独立的 HMAC REST key**(每次 1–2 µs):它在启动期作为 `P::build_templates` 的 `rest` 参数进入 gw 与 acct-fetch 各自的 `Templates`(契约 7),gw 用它签死手、REST 订单操作、挂单列表兜底与会话维护,acct-fetch 签账户查询;Ed25519 key 只给 ws-fapi/ws-api 会话登录用。

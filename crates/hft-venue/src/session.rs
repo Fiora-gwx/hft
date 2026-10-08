@@ -142,18 +142,22 @@ impl<P: VenueProtocol> SessionDriver<P> {
         if P::bootstrap(role, &cfg, cred.as_ref()).is_some() {
             return Err(SessErr::Bootstrap);
         }
-        let mut ep = EndpointSpec::default();
-        P::endpoint(
-            role,
-            RouteId(0),
-            &cfg,
-            cred.as_ref(),
-            None,
-            now_ns / 1_000_000,
-            &mut ep,
-        )
-        .map_err(SessErr::Proto)?;
-        self.note(SessionOp::Endpoint(req.conn));
+        // Public market data (`Md`): the path is fixed per route and already in the connector's
+        // endpoint table (BuildReq carries no route), so `P::endpoint` is not called (README §7 step 2).
+        if role != ConnRole::Md {
+            let mut ep = EndpointSpec::default();
+            P::endpoint(
+                role,
+                RouteId(0),
+                &cfg,
+                cred.as_ref(),
+                None,
+                now_ns / 1_000_000,
+                &mut ep,
+            )
+            .map_err(SessErr::Proto)?;
+            self.note(SessionOp::Endpoint(req.conn));
+        }
         let job = c.submit(req).map_err(SessErr::Build)?;
         self.note(SessionOp::Submit(req.conn));
         if let Some(s) = self.jobs.get_mut(free) {
