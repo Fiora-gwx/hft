@@ -1,6 +1,7 @@
 //! VEN-350, VEN-351, VEN-360, VEN-366, VEN-367: feed-task benchmarks (README "延迟与资源契约").
 //! Scripted connections (hft-net `test-io`): the frames are encrypted outside the timed region;
 //! only `poll_once` is timed.
+//! (CI check: bench smoke after freeing runner disk.)
 #![allow(
     clippy::disallowed_types,
     clippy::disallowed_macros,
