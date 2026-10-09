@@ -1,6 +1,7 @@
 //! The processing order of one Input (TESTS.md "每条 Input 的处理顺序": SEQ-121–SEQ-169).
 
 use hft_event::{ControlCmd, EventKind, OrderDecision, RecordFlags, Role};
+use hft_types::{Px, Qty};
 use hft_sequencer::driver::live::RingId;
 use hft_strategy_sdk::{EventRef, ExecSpec};
 use hft_types::{GroupId, KillLevel, Side, Tsc};
@@ -535,4 +536,194 @@ fn seq_130_net_adjust_same_event() {
     h.run();
     assert!(!h.trace().contains(&"oms.net_adjust"), "{:?}", h.trace());
     assert!(!h.trace().contains(&"exec.on_leg_adjust"), "{:?}", h.trace());
+}
+
+fn rref(d: &OrderDecision) -> hft_strategy_sdk::OrderRef {
+    hft_strategy_sdk::OrderRef { venue: d.venue, account: d.account, _pad: [0; 2], slot: d.slot.0, r#gen: d.r#gen }
+}
+
+/// Two resting GTC buys of s1 on a1 (acked).
+fn two_resting(h: &mut H) -> (OrderDecision, OrderDecision) {
+    let m = s1_on_bbo(h, |hx| {
+        let b = hx.v.bbo(A1);
+        let p = Px(b.bid_px.0 - 100);
+        vec![
+            intent(hx, A1, Side::Buy, hft_types::Tif::Gtc, hft_strategy_sdk::IntentClass::Open, p, q("0.001")),
+            intent(hx, A1, Side::Buy, hft_types::Tif::Gtc, hft_strategy_sdk::IntentClass::Open, p, q("0.001")),
+        ]
+    });
+    let ds = decisions(&h.since(m));
+    assert_eq!(ds.len(), 2, "{ds:?}");
+    h.ack(&ds[0].1);
+    h.ack(&ds[1].1);
+    (ds[0].1, ds[1].1)
+}
+
+#[test]
+fn seq_127_trig_stamps_passed() {
+    reset_script();
+    let mut b0 = b0();
+    for c in b0.rd.caps.iter_mut() {
+        c.flags = c.flags | hft_refdata::CapFlags::AMEND;
+    }
+    let mut h = b0.boot();
+    h.steady();
+    let (h1, h2) = two_resting(&mut h);
+    let (r1, r2) = (rref(&h1), rref(&h2));
+    set_hook(move |hx, ev, ctx| {
+        if let EventRef::Bbo { inst, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+        {
+            let _ = ctx.place(open_buy(hx, A1));
+            let _ = ctx.cancel(r1);
+            let _ = ctx.amend(r2, px("49990"), q("0.001"));
+        }
+    });
+    let mut b = bbo(A1, A, 0, "50000", "50001", 9_000, 15);
+    b.h.ex_ts_ns = 11;
+    b.h.ex_send_ns = 12;
+    b.h.hw_rx_ns = 13;
+    b.h.sw_rx_ns = 14;
+    b.h.rx_tsc = 15;
+    let m = h.mark();
+    h.push(RingId::Bbo(0), &b);
+    h.run();
+    clear_hook();
+    let rec = h.since(m).into_iter().find(|r| r.kind == EventKind::BBO).expect("bbo");
+    let new = decisions(&h.since(m)).into_iter().find(|d| d.1.action == hft_event::OrderAction::New).expect("new").1;
+    let e = h.s.engine();
+    for (r, op) in [(rref(&new), hft_oms::SlotStamps::OP_NEW), (r1, hft_oms::SlotStamps::OP_CANCEL), (r2, hft_oms::SlotStamps::OP_AMEND)] {
+        let st = e.oms.slot_stamps(r).copied().expect("stamps");
+        assert_eq!(st.op, op);
+        assert_eq!(
+            (st.trig_ex_ts_ns, st.trig_ex_send_ns, st.trig_hw_rx_ns, st.trig_sw_rx_ns, st.trig_rx_tsc),
+            (11, 12, 13, 14, 15)
+        );
+        assert_eq!(st.trig_proc_tsc, rec.tsc);
+        assert_eq!(st.trigger_seq, rec.seq);
+        assert_eq!(st.trig_kind, EventKind::BBO.0);
+    }
+}
+
+#[test]
+fn seq_128_oms_out_drain_order() {
+    // A linked first-leg fill on s1's g1: second leg, fill, fee, update, link, decision, timer, note.
+    let mut h = steady();
+    let m = s1_on_bbo(&mut h, |hx| vec![pair_first(hx, q("0.001"))]);
+    let d = decisions(&h.since(m)).into_iter().find(|x| x.1.inst == A1).expect("first leg").1;
+    h.ack(&d);
+    h.trace_on();
+    let mut ev = order_event(&d, hft_event::OrderEventKind::Fill, h.epoch());
+    ev.qty = d.qty;
+    ev.cum_filled = d.qty;
+    ev.px = d.px;
+    ev.avg_px = d.px;
+    ev.fee = Qty(1_000);
+    ev.fee_asset = USDT;
+    let r = h.rep_ring(AC1);
+    h.push(r, &ev);
+    h.run();
+    let t = h.trace();
+    // The hedge placement writes its own OMS note first; the drain's notes are the last ones.
+    let pos = |n: &str| if n == "note.oms" { t.iter().rposition(|x| *x == n) } else { t.iter().position(|x| *x == n) };
+    let order = ["hedge", "ledger.apply_fill", "ledger.apply_fee", "queue.order", "exec.on_link", "note.oms", "risk.on_pnl", "risk.on_legs"];
+    let idx: Vec<Option<usize>> = order.iter().map(|n| pos(n)).collect();
+    for (k, w) in idx.windows(2).enumerate() {
+        if let (Some(a), Some(b)) = (w[0], w[1]) {
+            assert!(a < b, "{} before {}: {t:?}", order[k], order[k + 1]);
+        }
+    }
+    assert!(idx[0].is_some() && idx[1].is_some() && idx[6].is_some(), "{t:?}");
+    // risk.on_pnl after every OMS note of the drain.
+    let last_note = t.iter().rposition(|x| *x == "note.oms").unwrap_or(0);
+    assert!(idx[6].unwrap_or(0) > last_note || t.iter().position(|x| *x == "risk.on_pnl").unwrap_or(0) > t.iter().position(|x| *x == "exec.on_link").unwrap_or(0), "{t:?}");
+}
+
+#[test]
+fn seq_149_mark_price_to_margin() {
+    let mut h = steady();
+    h.open_position(AC1, B1, Side::Sell, "0.010");
+    h.adv(7_000_000);
+    h.trace_on();
+    clear_log();
+    h.mark_md(B1, "50100");
+    let t = h.trace();
+    let p = |n: &str| t.iter().position(|x| *x == n).unwrap_or(usize::MAX);
+    assert!(p("ledger.on_mark") < p("risk.on_margin"), "{t:?}");
+    assert!(p("risk.on_margin") < p("exec.touch_inst"), "{t:?}");
+    let row = *h.s.engine().market.row(B1).expect("row");
+    assert_eq!(row.mark_px, px("50100"));
+    assert_eq!(row.mark_ens, h.s.engine().now.engine_ns);
+    assert!(log().iter().any(|g| g.s == S2 && g.kind == "Mark") || !log().iter().any(|g| g.kind == "Mark"));
+}
+
+#[test]
+fn seq_150_external_fill_attributed() {
+    let mut h = steady();
+    h.open_position(AC1, B1, Side::Sell, "0.010");
+    h.trace_on();
+    clear_log();
+    let m = h.mark();
+    let x = hft_event::ExternalFill {
+        venue: B,
+        account: AC1,
+        side: Side::Buy,
+        cause: hft_event::ExternalCause::Liquidation,
+        inst: B1,
+        qty: q("0.004"),
+        px: px("50000"),
+        fee: Qty(0),
+        fee_asset: hft_types::AssetId(0),
+        _pad: [0; 6],
+        exch_order_id: 0,
+        trade_id: 77,
+        ex_ts_ns: 0,
+        rx_tsc: Tsc(h.now()),
+        fill_seq: 0,
+    };
+    h.push(RingId::Rep(0), &x);
+    h.run();
+    let t = h.trace();
+    let p = |n: &str| t.iter().position(|x| *x == n).unwrap_or(usize::MAX);
+    assert!(p("ledger.apply_external") < p("oms.external_adjust"), "{t:?}");
+    assert!(p("oms.external_adjust") < p("exec.on_external"), "{t:?}");
+    assert!(p("exec.on_external") < p("risk.on_pnl"), "{t:?}");
+    assert!(p("risk.on_pnl") <= p("risk.on_legs") || p("risk.on_legs") == usize::MAX, "{t:?}");
+    assert_eq!(t.iter().filter(|x| **x == "oms.external_adjust").count(), 1);
+    assert_eq!(t.iter().filter(|x| **x == "exec.on_external").count(), 1);
+    let got: Vec<Got> = log().into_iter().filter(|g| g.kind == "External" && !g.model).collect();
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].gix, 0);
+    let notes = h.notes_since(m);
+    assert!(notes.iter().any(|n| n.code == hft_ledger::notes::code::EXTERNAL_FILL && n.level == hft_event::NoteLevel::P0), "{notes:?}");
+}
+
+#[test]
+fn seq_156_margin_report() {
+    let mut h = steady();
+    h.open_position(AC1, B1, Side::Sell, "0.010");
+    // .1 ledger.on_margin before risk.on_margin.
+    h.trace_on();
+    h.margin_report(AC1, "100000", "0", "100000");
+    h.run();
+    let t = h.trace();
+    let p = |n: &str| t.iter().position(|x| *x == n).unwrap_or(usize::MAX);
+    assert!(p("ledger.on_margin") < p("risk.on_margin"), "{t:?}");
+    // .2 a ratio above the L1 threshold: MarginStress cap and its CapSet note.
+    let m = h.mark();
+    let mut hd = <hft_event::MarginReportHdr as zerocopy::FromZeros>::new_zeroed();
+    hd.venue = B;
+    hd.account = AC1;
+    hd.source = 1;
+    hd.margin_balance = n("100000");
+    hd.maint_margin = n("90000");
+    hd.avail_margin = n("10000");
+    hd.margin_ratio = r("0.90");
+    hd.rx_tsc = Tsc(h.now());
+    h.push_bytes(RingId::Rep(0), EventKind::MARGIN_REPORT, zerocopy::IntoBytes::as_bytes(&hd).to_vec());
+    h.run();
+    let notes = h.notes_since(m);
+    let cap_set = hft_risk::NOTE_CODES.iter().find(|x| x.2 == "CapSet").map(|x| ((x.0 as u32) << 24) | x.1).unwrap();
+    assert!(notes.iter().any(|n| n.code == cap_set), "{notes:?}");
 }

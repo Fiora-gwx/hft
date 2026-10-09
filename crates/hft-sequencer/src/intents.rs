@@ -541,6 +541,8 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
     for h in hedges.iter() {
         place_hedge(e, inst, drv, h)?;
     }
+    // PnL of the fills and fees goes to risk after the whole output is drained.
+    let mut pnls: Vec<hft_ledger::PnlDelta> = Vec::new();
     // Fills → ledger.
     let fills: Vec<hft_oms::FillOut> = out.fills.as_slice().to_vec();
     for f in fills.iter() {
@@ -569,7 +571,7 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
         let before = e.ledger.pos(f.account, f.inst).qty.0 != 0;
         let r = e.ledger.apply_fill(&fd, e.now.engine_ns);
         e.trace.rec("ledger.apply_fill", u64::from(f.account.0), u64::from(f.inst.0));
-        crate::process::pnl(e, inst, drv, r.pnl)?;
+        pnls.push(r.pnl);
         if let Some(n) = r.net_adjust {
             e.trace.rec("oms.net_adjust", u64::from(n.account.0), u64::from(n.group.0));
             e.oms.net_adjust(n.account, n.group, n.inst, n.delta);
@@ -597,7 +599,7 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
         };
         let r = e.ledger.apply_fee(&fd, e.now.engine_ns);
         e.trace.rec("ledger.apply_fee", u64::from(f.account.0), 0);
-        crate::process::pnl(e, inst, drv, r.pnl)?;
+        pnls.push(r.pnl);
         if let Some(n) = r.net_adjust {
             e.trace.rec("oms.net_adjust", u64::from(n.account.0), u64::from(n.group.0));
             e.oms.net_adjust(n.account, n.group, n.inst, n.delta);
@@ -721,6 +723,9 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
     }
     for l in out.latency.as_slice().iter() {
         e.out.push(RecordFlags(0), l);
+    }
+    for d in pnls {
+        crate::process::pnl(e, inst, drv, d)?;
     }
     for n in notes_snapshot.iter() {
         if n.code == unknown_code && n.level == NoteLevel::P0 {
