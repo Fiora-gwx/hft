@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 43d8e7945e32be8d6102fd3839739562649f63ba516f128d9dd1643437987195 # shrinks to opts = [false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false], v = ViewGen { not_ready: [false, false, false], unknown: [false, false, false], bbo: [0, 0, 0, 0], b1_pos: 0, a1_pos: 0, b1_open: (0, 0, 0), b1_pend: (0, 0, 0), held: (0, 0, 0), equity: 0, quote: 0, margin: 0, used_a: 0, used_b: 2, backoff: 0, legs: 0, lev_unknown: false }, g = ItGen { kind: 0, acct2: false, inst: 0, buy: false, ioc: false, lots: 0, px: 0, cap_short: false, ro: false, bump: 0, bad: 0, exec: false, link: 0, link_n: 0 }
+cc f4515ea4ead1236773ac8500e95ef933b910e014c0188a2fa83fa866c04995ac # shrinks to opts = [false, false, false, false, false, false, false, false, false, true, false, true, false, false, false, false, false, false, false, false, false, false, false, false], v = ViewGen { not_ready: [false, false, false], unknown: [false, false, false], bbo: [0, 0, 0, 0], b1_pos: 0, a1_pos: 0, b1_open: (0, 0, 0), b1_pend: (0, 0, 0), held: (0, 0, 0), equity: 0, quote: 0, margin: 0, used_a: 0, used_b: 0, backoff: 0, legs: 0, lev_unknown: false }, g = ItGen { kind: 6, acct2: false, inst: 0, buy: false, ioc: false, lots: 0, px: 0, cap_short: false, ro: false, bump: 0, bad: 1, exec: false, link: 1, link_n: 0 }

@@ -965,6 +965,7 @@ pub fn draining() -> ModeInput<'static> {
 // ---------------------------------------------------------------------------------------- world
 
 /// R0 world.
+#[derive(Clone)]
 pub struct W {
     pub rd: &'static RefData,
     pub p: RiskParams,
@@ -1059,7 +1060,18 @@ pub enum Step {
 impl W {
     pub fn base(rd: &'static RefData, p: RiskParams, mc: ModeCfg, caps: Capacities) -> W {
         let n = account_count(rd);
-        let risk = Risk::new(&p, rd, &gws_for(rd), &caps, &exec_bounds(n), mc).unwrap();
+        Self::base_ex(rd, p, mc, caps, &exec_bounds(n))
+    }
+
+    pub fn base_ex(
+        rd: &'static RefData,
+        p: RiskParams,
+        mc: ModeCfg,
+        caps: Capacities,
+        exec: &[ExecBounds],
+    ) -> W {
+        let n = account_count(rd);
+        let risk = Risk::new(&p, rd, &gws_for(rd), &caps, exec, mc).unwrap();
         let out = ModeOutcome::with_capacity(caps.max_cells_total as usize, n, n * 3);
         W {
             rd,
@@ -1263,7 +1275,19 @@ pub fn gspec(id: GroupId, asset: AssetId, legs: &[(InstId, VenueId)]) -> GroupSp
 
 /// Builds a world over `rd`/`p`: groups, releases, Live modes, R0 margin; version recorded.
 pub fn world(rd: &'static RefData, p: RiskParams, mc: ModeCfg, caps: Capacities) -> W {
-    let mut w = W::base(rd, p, mc, caps);
+    let n = account_count(rd);
+    world_ex(rd, p, mc, caps, &exec_bounds(n))
+}
+
+/// `world` with explicit `ExecBounds` (indexed by `AccountId`).
+pub fn world_ex(
+    rd: &'static RefData,
+    p: RiskParams,
+    mc: ModeCfg,
+    caps: Capacities,
+    exec: &[ExecBounds],
+) -> W {
+    let mut w = W::base_ex(rd, p, mc, caps, exec);
     let n = account_count(rd) as u8;
     for a in 1..=n {
         let specs = w.specs(a);
