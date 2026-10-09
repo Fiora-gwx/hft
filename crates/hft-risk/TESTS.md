@@ -1359,8 +1359,8 @@ spec: README.md
 | RSK-101.8 | B 的报告 `mismatches = POS_MODE`;`MARGIN_MODE`;`MULTI_ASSET`(三个子例) | `ACCOUNT_CFG` 未置位 |
 | RSK-101.9 | A 的报告 `mismatches = AUTO_BORROW`;`FEE_RULE`;`ACCT_TYPE`;`KEY_PERM`;`UNREADABLE`(五个子例) | `ACCOUNT_CFG` 未置位 |
 | RSK-101.10 | B 的报告 `mismatches = 0` 但 `position_mode = Hedge`(VenueCaps 要求 OneWay) | `ACCOUNT_CFG` 未置位(按 refdata 复算后取并集) |
-| RSK-101.11 | C 之前 `on_account_cfg` 给 c1 `leverage = 3.01` | `ACCOUNT_CFG` 未置位;`cfg_ok_venues` 含 C |
-| RSK-101.12 | C 的杠杆报告不列 c1 | `ACCOUNT_CFG` 未置位 |
+| RSK-101.11 | 账户 1 另有交易 c1 的 group g4 = 0x0100_0003(腿 a1 + c1,经 `on_groups_changed`);C 之前 `on_account_cfg` 给 c1 `leverage = 3.01` | `ACCOUNT_CFG` 未置位;`cfg_ok_venues` 含 C |
+| RSK-101.12 | 同 .11 的 g4;C 的杠杆报告不列 c1 | `ACCOUNT_CFG` 未置位 |
 | RSK-101.13 | C 的报告 `uid_keys = SESSION`(缺 REST) | `IDENTITY` 未置位;`drain = None`;无 Kill cap |
 | RSK-101.14 | C 的报告 `mismatches = UID \| UNREADABLE` | `IDENTITY` 未置位;`drain = None`;无 Kill cap |
 | RSK-101.15 | 不投递 `KillSelfTest{1}` | `IDENTITY` 未置位 |

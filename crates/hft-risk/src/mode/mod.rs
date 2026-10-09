@@ -623,10 +623,12 @@ impl Mode {
     }
 
     /// `reconciled_venues`, `cfg_ok_venues`, `identity_ok_venues`, `conns_ok_venues`,
-    /// `standby_ok_venues` of an account.
+    /// `standby_ok_venues` of an account. Identity venues count only once the account's kill
+    /// self-test has passed (README `IDENTITY` row); the snapshot keeps the per-venue reports.
     pub fn venue_bitmaps(&self, a: AccountId) -> [u64; 5] {
         self.gates.get(usize::from(a.0)).map_or([0; 5], |g| {
-            [g.reconciled, g.cfg_ok, g.identity_ok, g.conns_ok, g.standby_ok]
+            let ident = if g.selftest { g.identity_ok } else { 0 };
+            [g.reconciled, g.cfg_ok, ident, g.conns_ok, g.standby_ok]
         })
     }
 
