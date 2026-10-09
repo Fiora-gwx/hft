@@ -29,7 +29,7 @@
 - 故障:全部 DST 套件;每步检查。最能触发:重复与乱序回报、回收槽后的迟到成交、旧代数(`StaleGen`)成交、无 client id 成交、他人订单回报
 - 种子:标准集([scenarios §2.4](scenarios.md#24-种子集))
 - 断言:每条 `OrderEvent` Input 恰好落入下列一类,并产生该类列出的可观察输出(没有任何一类成立即违反):
-  - 匹配当前槽 `(epoch, slot, gen)`:该槽一条 `Note{OmsTransition}`,或 `OmsStats` 的 dup 计数加 1,或 `Note{OmsAnomaly}`(`v[0] = Table`);`FeeOnly` 另有一条 `FeeOut`
+  - 匹配当前槽 `(epoch, slot, gen)`:该槽一条 `Note{OmsTransition}`,或 `OmsStats` 的 dup 计数加 1,或 `Note{OmsAnomaly}`(`v[0] = Table`),或落在[回报处理表](../../crates/hft-oms/README.md#回报处理表)的"保持"格(`PendingCancel`/`PendingAmend` 收到 `Ack`、`Unknown` 收到 `CancelReject`(其他原因)/`AmendReject`/`OutcomeUnknown`、`PendingCancel` 收到 `AmendAck`/`AmendReject`、`QueryResult` 确认当前状态且累计成交不增:槽的状态与成交量不变);`FeeOnly` 另有一条 `FeeOut`
   - 匹配墓碑:`cum_filled > tomb.filled` → `FillOut{flags 含 LATE}` 与 `Note{OmsLateFill}`(P0);否则 dup 计数加 1
   - `slot = SLOT_UNRESOLVED`:无成交 → `Note{OmsForeignOrder}`(P1);有成交 → `Note{OmsForeignFillViaOrderEvent}`(P1),且(扣除 `ext_held` 后仍有量时)一条 `ForeignFill` 与一条 `Note{OmsForeignFill}`,扣除部分写 `Note{OmsExtDedup}`
   - `StaleGen`(不匹配当前槽也不匹配墓碑):无成交 → `OmsStats.stale_gen` 加 1;有成交 → `Note{OmsStaleGenFill}`(P0,`v[2]` = 是否已入账),`exch_order_id ≠ 0` 时另有 `ForeignFill` 与 `Note{OmsForeignFill}`

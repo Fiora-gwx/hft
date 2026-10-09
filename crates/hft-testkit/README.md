@@ -150,8 +150,8 @@ impl<S: Strategy> ModelHarness<S> {
 pub struct World<E> { /* 虚拟时间、按 (virtual_ns, gen_seq) 全序的事件堆 */ }
 pub fn actor_rng(seed: u64, a: ActorId) -> ChaCha8Rng;   // ChaCha8Rng::seed_from_u64(seed::derive(seed, actor 标签))
 
-/// 被测系统的边界:引擎适配器 SeqSut<S: StrategySet>(以 DstDriver 单线程驱动真实 Sequencer<DstDriver, S>,
-/// 把各组件调试视图抄进 Obs)实现它;ToyEngine 是框架自测引擎。
+/// 被测系统的边界:引擎适配器 SeqSut<S: StrategySet>(feature `seq`;真实 Sequencer 在实盘驱动上单线程运行,
+/// 其 LiveIo 是以 DstDriver 为时钟与出环缓冲的 DstIo;把各组件的公开状态抄进 Obs)实现它;ToyEngine 是框架自测引擎。
 pub trait Sut {
     type Matcher: Matcher;                               // hft_sim::SimExchange(引擎运行)| ToyMatcher(框架自测)
     fn boot(ctx: &BootCtx<'_>) -> Result<Self, BootFail>;
@@ -384,16 +384,16 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 - 控制面(tokio 的 ctl-gateway 客户端侧)的网络混沌不在本框架;需要时用 `turmoil` 单独测。
 - 多进程场景(可选扩展:hft-core ↔ chain-core)只在集成环境测;DST 以 `SeqActor` + 真实 `ChainSeq` 同进程模拟链路。
 - `MockVenue` 的交易所行为层是"规格中的交易所",与真实交易所的差异只能由金样、测试网/模拟盘联调与正式实盘的运行监控发现。
-- 当前构建:三个 DST 入口以 `ToyEngine` + `ToyMatcher` 运行;引擎适配器 `SeqSut<S>`(真实 sequencer、`SimExchange` 撮合、调试视图到 `Obs` 的抄录)、`run_sim_case`(TK-009)、`ProbeBuild` 注入(TK-095)与模板探针的构建检查(TK-042)随 hft-sequencer 与模拟撮合金样夹具落地;`hft-dst` 的 `SIGINT`/`SIGTERM` 处理属 M6。
+- 当前构建:引擎适配器 `SeqSut<S>`(`src/dst/seq/`,feature `seq`)已落地:真实 sequencer 跑在实盘驱动上(`DstIo` 实现 `LiveIo`:环中放 World 交出的 Input,TSC = `DstDriver::stamp()`,出环帧进 `DstDriver` 的收集缓冲,journal 是 sequencer 的 `MemJournal`;启动与每次重启后以一段固定的启动输入走完闸门;gw 角色的接收时间戳、epoch 与查询回执的 client id 由 `DstIo`/`SimMatcher` 补上),`Matcher` 为 `SimMatcher`(`hft_sim::SimExchange` 适配,私有 refdata 中所有账户为 Sim 账户,外来成交以覆盖量计入真值),`observe` 抄录 ledger 持仓/库存/余额、OMS 槽/表/墓碑/链接/LegTracker 与 world 限额;risk 的 cap/cell/kill、执行层 cell、保证金分档、在途行与逐笔决策事实(`DecisionInfo`)组件尚无公开视图,这些行留空,读它们的检查器(INV-4 的 Open 部分、INV-5、INV-11、INV-12 的模式部分、INV-15、INV-17、INV-18、INV-19、INV-20)对真实引擎空过。三个 DST 入口仍以 `ToyEngine` + `ToyMatcher` 运行(`scenarios::DstEngine`):`SeqEngine` 在 `core`/`storage` 套件的扫描中通过,`modes` 套件约 6% 的种子有 `INV-16`(现货计价资产余额与 `SimExchange` 真值相差一笔手续费量级)待查,清零后切换;`toy::PLANTED` 各行的真实引擎版本(各 crate 的 `planted-*` feature)、`run_sim_case`(TK-009)、`ProbeBuild` 注入(TK-095)与模板探针的构建检查(TK-042)未落地;`hft-dst` 的 `SIGINT`/`SIGTERM` 处理属 M6。
 
 ### 开发备忘
 
 <details><summary>给实现者</summary>
 
 - **依赖 hft-sequencer 的快照分段**:组件级哈希要求快照按组件分段且段边界可定位(含执行层段)。
-- **依赖被测 crate 的调试视图**:各 crate 以 `#[cfg(any(test, feature = "testkit"))]` 暴露 `debug_view()`,不进入生产构建。
+- **依赖被测 crate 的调试视图**:各 crate 以 `#[cfg(any(test, feature = "testkit"))]` 暴露 `debug_view()`,不进入生产构建(尚未提供;`SeqSut` 目前读各组件的公开状态)。
 - **避免 dev 依赖环**:被测 crate 的单元测试只用本 crate 中**不引用被测类型**的部分(生成器、假时钟、金样、`MockViews`);DST 与跨组件测试放在本 crate 的 `tests/` 或 xtask 里。
-- 引擎适配器 `SeqSut<S>`(随 hft-sequencer 落地):`DstDriver` 实现 sequencer 的 `Driver`(`take` 交出 `offer` 的 Input,`out.tsc = stamp()`;`run_tsc`/`measure` = `stamp()`;`emit` 进收集缓冲;`journal` = `MemJournal`),`Matcher` 为 `hft_sim::SimExchange`,`observe` 把各组件 `debug_view()` 抄进 `Obs`、`StepInfo`。
+- 引擎适配器 `SeqSut<S>`:sequencer 跑在实盘驱动上,`DstIo`(实现 `LiveIo`)以 `DstDriver` 提供虚拟时间(`tsc`/`measure` = `stamp()`)与出环收集缓冲,journal 为 sequencer 的 `MemJournal`(实盘驱动的环序、每轮限额、定时器与关键帧同为被测对象);`Matcher` 为 `SimMatcher`(`SimExchange`);`observe` 读各组件公开状态;`StepInfo` 的 Note 名取各 crate 的 `NOTE_CODES`,成交证据取能携带成交的 Input 前后的持仓差;排查辅助 `seq::record_states`/`recorded_journals`/`recorded_dumps` 按步记下状态,便于与校验回放逐事件对比。
 - 实现顺序:假时钟与金样运行器 → 生成器 → `MockViews`/`StrategyHarness` → 两个测试策略与 `scaffold-gate` → 状态哈希工具 → DST 世界与 OMS/风控/执行层不变量 → 存储与毒丸故障 → `shrink` → 场景套件迁入 `src/scenarios/` 与 `hft-dst` → (可选)链上 mock。
 
 </details>

@@ -8,7 +8,7 @@ use hft_testkit::dst::faults::{AdvisorLagFault, Fault, FaultCategory};
 use hft_testkit::dst::obs::TruthRow;
 use hft_testkit::dst::sut::{InputRec, Source};
 use hft_testkit::dst::venue_behavior::{Matcher, MockVenue, MockVenueCfg, ToyMatcher};
-use hft_testkit::dst::world::{ACCT_A, AccountKind, S1, VS, WorldSpec};
+use hft_testkit::dst::world::{ACCT_A, AccountKind, S1, VP, VS, WorldSpec};
 use hft_testkit::dst::{MarketSource, ToyEngine, run_record};
 use hft_types::{AccountId, InstId, Px, Qty, Side, SlotId, Tif, Tsc, VenueId};
 
@@ -114,8 +114,8 @@ fn tk_057_behavior_layer() {
     );
     // TK-057.6: a liquidation from the truth carries the venue's own marker.
     let mut w = WorldSpec::w1();
-    w.accounts[0].venues = vec![VenueId(2)];
-    let mut c = MockVenueCfg::w1(VenueId(2));
+    w.accounts[0].venues = vec![VP];
+    let mut c = MockVenueCfg::w1(VP);
     c.liquidation_prefix = "autoclose-";
     let mut v: MockVenue<ToyMatcher> = MockVenue::new(c, &w, 1);
     v.m.external(ACCT_A, InstId(2), Side::Sell, 100_000, "seed", false, 0);
@@ -248,7 +248,7 @@ fn tk_060_ctl_principals() {
 fn truth_one_more(a: AccountId) -> Vec<TruthRow> {
     vec![TruthRow {
         account: a,
-        venue: VenueId(2),
+        venue: VP,
         positions: vec![(InstId(2), 100_000)],
         inventory: Vec::new(),
         balances: Vec::new(),
@@ -290,7 +290,7 @@ fn tk_061_recon_actor_flags() {
     );
     // TK-061.4: injected funding differences produce per-item funding entries.
     let mut a = ReconActor::new(p);
-    a.funding_diffs.push((ACCT_A, VenueId(2), 1_234));
+    a.funding_diffs.push((ACCT_A, VP, 1_234));
     let r = a.round(p, &truth_one_more(ACCT_A), &engine);
     assert!(r.iter().any(|x| x.item == 5 && x.diff.0 == 1_234), "TK-061.4");
 }

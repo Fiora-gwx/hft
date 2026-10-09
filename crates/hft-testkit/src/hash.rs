@@ -239,6 +239,46 @@ pub fn state_hash_of(secs: &[(u16, &[u8])]) -> u128 {
     h.digest128()
 }
 
+/// Sections of a bare section blob (`SectionHdr` + body, repeated; no snapshot header).
+pub fn sections_of(mut rest: &[u8]) -> Sections<'_> {
+    let mut out = Vec::new();
+    while let Ok((sh, _)) = SectionHdr::read_from_prefix(rest) {
+        let total = 16 + (sh.len as usize).div_ceil(8) * 8;
+        let Some(bytes) = rest.get(..total) else { break };
+        out.push((sh.section, bytes));
+        rest = &rest[total..];
+    }
+    out
+}
+
+/// Component hashes of a bare section blob (the running state of an engine adapter); `all` is
+/// [`state_hash_of`] over it, the value a keyframe of that state carries.
+pub fn component_hashes_of_sections(blob: &[u8]) -> ComponentHashes {
+    let secs = sections_of(blob);
+    let mut h = per_component(&secs);
+    h.all = state_hash_of(&secs);
+    h
+}
+
+fn per_component(secs: &[(u16, &[u8])]) -> ComponentHashes {
+    let mut acc: Vec<(Component, Vec<u8>)> = Vec::new();
+    for (n, b) in secs {
+        if let Some((_, c)) = SECTION_COMPONENT.iter().find(|(s, _)| s == n) {
+            match acc.iter_mut().find(|(k, _)| k == c) {
+                Some((_, v)) => v.extend_from_slice(b),
+                None => acc.push((*c, b.to_vec())),
+            }
+        }
+    }
+    let mut h = ComponentHashes::default();
+    for (c, bytes) in acc {
+        if let Some(slot) = h.get_mut(c) {
+            *slot = xxh3_64(&bytes);
+        }
+    }
+    h
+}
+
 /// Component hashes of a `StateSnapshot` logical body.
 pub fn component_hashes(logical: &[u8]) -> Result<ComponentHashes, SnapErr> {
     let (hdr, secs) = sections(logical)?;

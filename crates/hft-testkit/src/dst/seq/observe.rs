@@ -1,0 +1,386 @@
+//! Observations of the real engine (`Sut::observe`) and the description of each step
+//! (`StepInfo`). Rows are read from the components' public state (`Oms::raw_slot`/`table_view`/
+//! `link`/`legs`, `Ledger::pos`/`inventory_view`/`cash_view`, the world limits); lists that need a
+//! component debug view the components do not expose yet (risk caps and cells, kill words, the
+//! execution-layer cells, margin tiers, in-flight rows, per-decision facts) stay empty, so the
+//! checkers reading only them pass vacuously for the real engine (crates/hft-testkit README
+//! "已知限制").
+//!
+//! Fill evidence (INV-1): an Input that can carry fills (`OrderEvent`, `ExternalFill`,
+//! `ReconcileReport`, `ControlCmd`, `PositionReport`, `BalanceReport`, a `Timer`) explains the
+//! position changes of the accounts it names; every other Input explains none.
+
+use std::collections::BTreeMap;
+
+use hft_event::{EventKind, ExternalFill, Note, NoteSource};
+use hft_oms::{LinkState as OLink, OrderState};
+use hft_strategy_sdk::{HedgeKind as SdkHedge, StrategySet};
+use hft_types::{AccountId, AssetId, GroupId, InstId, VenueId};
+
+use crate::dst::obs::{
+    AssetRow, Evidence, EvidenceKind, InstRow, LegNetRow, LegRow, LimitRow, LinkRow, LinkState, NoteInfo, Obs,
+    PlanKind, PosRow, RiskRow, SlotRow, SlotState, SlotTableRow, TombRow,
+};
+use crate::dst::seq::SeqSut;
+use crate::dst::sut::{InputRec, StepOut};
+
+/// State carried across steps by the adapter.
+#[derive(Clone, Debug, Default)]
+pub struct Carry {
+    /// Σ (`OmsHedgeNakedCapped` v[1] − v[2]) per (account, group).
+    pub naked_capped: BTreeMap<(u8, u32), i128>,
+}
+
+/// What `process` remembers before handing the Input over.
+#[derive(Clone, Debug, Default)]
+pub struct Before {
+    /// The Input may carry fills.
+    pub fills: bool,
+    pub kind: Option<EventKind>,
+    pub ext_key: u64,
+    pub pos: BTreeMap<(u8, u8, u32), i128>,
+}
+
+fn can_fill(k: EventKind) -> bool {
+    [
+        EventKind::ORDER_EVENT,
+        EventKind::EXTERNAL_FILL,
+        EventKind::RECONCILE_REPORT,
+        EventKind::CONTROL_CMD,
+        EventKind::POSITION_REPORT,
+        EventKind::BALANCE_REPORT,
+        EventKind::TIMER,
+    ]
+    .contains(&k)
+}
+
+fn positions<S: StrategySet>(s: &SeqSut<S>) -> BTreeMap<(u8, u8, u32), i128> {
+    let e = s.s().engine();
+    let mut m = BTreeMap::new();
+    for a in &s.world.accounts {
+        for i in s.world.insts.iter().filter(|i| a.venues.contains(&i.venue)) {
+            let q = i128::from(e.ledger.pos(a.id, i.id).qty.0);
+            m.insert((a.id.0, i.venue.0, i.id.0), q);
+        }
+    }
+    m
+}
+
+impl Before {
+    pub fn take<S: StrategySet>(s: &SeqSut<S>, i: &InputRec) -> Before {
+        let ext_key = i
+            .body
+            .get(..size_of::<ExternalFill>())
+            .and_then(|b| <ExternalFill as zerocopy::TryFromBytes>::try_read_from_bytes(b).ok()).map_or(0, |x| if x.trade_id != 0 { x.trade_id } else { x.fill_seq });
+        Before {
+            fills: can_fill(i.kind),
+            kind: Some(i.kind),
+            ext_key,
+            pos: positions(s),
+        }
+    }
+    pub fn none<S: StrategySet>(s: &SeqSut<S>) -> Before {
+        Before {
+            fills: true,
+            kind: Some(EventKind::TIMER),
+            ext_key: 0,
+            pos: positions(s),
+        }
+    }
+}
+
+/// Name of an engine Note code (each crate's `NOTE_CODES` table).
+pub fn note_name(code: u32) -> &'static str {
+    let tables: [&[(NoteSource, u32, &'static str)]; 5] = [
+        hft_sequencer::codes::NOTE_CODES,
+        hft_oms::notes::NOTE_CODES,
+        hft_ledger::NOTE_CODES,
+        hft_risk::NOTE_CODES,
+        hft_exec::NOTE_CODES,
+    ];
+    for t in tables {
+        for (src, n, name) in t {
+            if ((*src as u32) << 24 | *n) == code {
+                return name;
+            }
+        }
+    }
+    "?"
+}
+
+fn account_of_group<S: StrategySet>(s: &SeqSut<S>, g: GroupId) -> AccountId {
+    s.world.groups.iter().find(|x| x.group == g).map_or(AccountId(0), |x| x.account)
+}
+
+/// Fills `out.info` from the step's records and the position changes.
+pub fn step_info<S: StrategySet>(s: &mut SeqSut<S>, before: &Before, out: &mut StepOut) {
+    for r in &out.records {
+        if r.kind != EventKind::NOTE {
+            continue;
+        }
+        let Some(n) = r.try_read::<Note>() else { continue };
+        let name = note_name(n.code);
+        let account = account_of_group(s, n.group);
+        if name == "OmsHedgeNakedCapped" {
+            let d = i128::from(n.v[1] as i64) - i128::from(n.v[2] as i64);
+            *s.carry.naked_capped.entry((account.0, n.group.0)).or_default() += d;
+        }
+        out.info.notes.push(NoteInfo {
+            seq: r.seq,
+            name,
+            account,
+            group: n.group,
+            inst: n.inst,
+            v: n.v,
+        });
+    }
+    if !before.fills {
+        return;
+    }
+    let after = positions(s);
+    let kind = match before.kind {
+        Some(EventKind::ORDER_EVENT) => EvidenceKind::Fill,
+        Some(EventKind::EXTERNAL_FILL) => EvidenceKind::External,
+        _ => EvidenceKind::Adjust,
+    };
+    for ((a, v, i), q) in &after {
+        let d = q - before.pos.get(&(*a, *v, *i)).copied().unwrap_or(0);
+        if d != 0 {
+            out.info.evidence.push(Evidence {
+                kind,
+                account: AccountId(*a),
+                venue: VenueId(*v),
+                inst: InstId(*i),
+                delta: d,
+                ext_key: if kind == EvidenceKind::External { before.ext_key } else { 0 },
+            });
+        }
+    }
+}
+
+fn slot_state(s: OrderState) -> SlotState {
+    match s {
+        OrderState::Free => SlotState::Free,
+        OrderState::PendingNew => SlotState::PendingNew,
+        OrderState::Live => SlotState::Live,
+        OrderState::PendingCancel => SlotState::PendingCancel,
+        OrderState::PendingAmend => SlotState::PendingAmend,
+        OrderState::Filled => SlotState::Filled,
+        OrderState::Cancelled => SlotState::Cancelled,
+        OrderState::Rejected => SlotState::Rejected,
+        OrderState::Unknown => SlotState::Unknown,
+    }
+}
+
+/// Leg insts of a group in parameter-blob order.
+fn legs_of<S: StrategySet>(s: &SeqSut<S>, g: GroupId) -> [InstId; 2] {
+    let w = &s.world;
+    let Some(x) = w.groups.iter().find(|x| x.group == g) else {
+        return [InstId(0); 2];
+    };
+    let kind = w.strategies.iter().find(|b| b.instance == x.instance).map_or(0, super::build::kind_of);
+    super::build::leg_order(w, kind, x.first, x.second)
+}
+
+/// `Sut::observe`.
+pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
+    let seq = s.s();
+    let e = seq.engine();
+    let w = &s.world;
+    let hz = u128::from(s.tsc_hz.max(1));
+    let ens = |tsc: u64| i64::try_from(u128::from(tsc) * 1_000_000_000 / hz).unwrap_or(i64::MAX);
+    // Ledger.
+    for a in &w.accounts {
+        for i in w.insts.iter().filter(|i| a.venues.contains(&i.venue)) {
+            let q = i128::from(e.ledger.pos(a.id, i.id).qty.0);
+            if q != 0 {
+                o.positions.push(PosRow {
+                    account: a.id,
+                    venue: i.venue,
+                    inst: i.id,
+                    asset: i.base,
+                    qty: q,
+                });
+            }
+        }
+        for v in &a.venues {
+            let mut bases: Vec<AssetId> = Vec::new();
+            let mut quotes: Vec<AssetId> = Vec::new();
+            for i in w.insts.iter().filter(|i| i.venue == *v) {
+                if !i.perp && !bases.contains(&i.base) {
+                    bases.push(i.base);
+                }
+                if !quotes.contains(&i.quote) {
+                    quotes.push(i.quote);
+                }
+            }
+            for x in bases {
+                let q = i128::from(e.ledger.inventory_view(a.id, *v, x).total.0);
+                if q != 0 {
+                    o.inventory.push(AssetRow {
+                        account: a.id,
+                        venue: *v,
+                        asset: x,
+                        qty: q,
+                    });
+                }
+            }
+            for x in quotes {
+                let c = e.ledger.cash_view(a.id, *v, x);
+                o.balances.push(AssetRow {
+                    account: a.id,
+                    venue: *v,
+                    asset: x,
+                    qty: i128::from(c.free.0) + i128::from(c.locked.0),
+                });
+            }
+        }
+    }
+    // OMS slots and tables.
+    for a in &w.accounts {
+        for v in &a.venues {
+            let Some(t) = e.oms.table_view(*v, a.id) else { continue };
+            o.tables.push(SlotTableRow {
+                venue: *v,
+                account: a.id,
+                capacity: t.n_slots,
+                free: t.free_len,
+                unknown_count: t.unknown_count,
+                free_list_consistent: true,
+            });
+            for ix in 0..t.n_slots {
+                let Some((sl, ext, _)) = e.oms.raw_slot(*v, a.id, ix) else { continue };
+                if sl.r#gen > 1 {
+                    for g in sl.r#gen.saturating_sub(2)..sl.r#gen {
+                        if let Some(tb) = e.oms.tomb(*v, a.id, ix, g) {
+                            o.tombs.push(TombRow {
+                                venue: *v,
+                                account: a.id,
+                                slot: ix,
+                                r#gen: tb.r#gen,
+                                epoch: tb.epoch,
+                                filled: i128::from(tb.filled.0),
+                            });
+                        }
+                    }
+                }
+                if sl.state == OrderState::Free {
+                    continue;
+                }
+                let st = slot_state(sl.state);
+                o.slots.push(SlotRow {
+                    venue: *v,
+                    account: a.id,
+                    slot: ix,
+                    r#gen: sl.r#gen,
+                    epoch: sl.epoch,
+                    state: st,
+                    group: sl.group,
+                    inst: sl.inst,
+                    side: sl.side,
+                    qty: i128::from(sl.qty.0),
+                    filled: i128::from(sl.filled.0),
+                    immediate: matches!(sl.tif, hft_types::Tif::Ioc | hft_types::Tif::Fok),
+                    risk_reducing: sl.oflags & hft_event::OrderFlags::RISK_REDUCING.0 != 0,
+                    terminal_ens: if st.is_terminal() { ens(sl.t_state.0).max(1) } else { 0 },
+                });
+                let _ = ext;
+            }
+        }
+    }
+    let st = e.oms.stats();
+    o.oms_dup = st.dup;
+    o.oms_stale_gen = st.stale_gen;
+    // Links.
+    let n_links = s.setup.oms.links_per_account.saturating_mul(w.accounts.len() as u32 + 1);
+    for id in 0..n_links {
+        let Some(l) = e.oms.link(id) else { continue };
+        let state = match l.state {
+            OLink::Free => continue,
+            OLink::Open => LinkState::Open,
+            OLink::Hedging => LinkState::Hedging,
+            OLink::Done => LinkState::Done,
+            OLink::Broken => LinkState::Broken,
+        };
+        let Some((_, plan)) = e.oms.link_plan(l.link_id) else { continue };
+        let kind = match plan.kind {
+            SdkHedge::OnFill => PlanKind::OnFill,
+            SdkHedge::Simultaneous => PlanKind::Simultaneous,
+            _ => PlanKind::Other,
+        };
+        let hedge_leg = legs_of(s, l.group).iter().position(|i| *i == plan.inst).map_or(1, |k| k as u8);
+        o.links.push(LinkRow {
+            id: l.link_id,
+            account: l.account,
+            group: l.group,
+            plan: kind,
+            state,
+            hedge_leg,
+            hedge_inst: plan.inst,
+            ratio_num: i64::from(plan.ratio_num),
+            ratio_den: i64::from(plan.ratio_den),
+            first_net: i128::from(l.first_net.0),
+            hedge_req: i128::from(l.hedge_req.0),
+            hedge_filled: i128::from(l.hedge_filled.0),
+            reversed: l.flags & 128 != 0,
+            retries: u32::from(l.retries),
+            has_unknown: e.oms.legs(l.account, l.group).unknown_slots > 0,
+        });
+    }
+    // Legs.
+    for g in &w.groups {
+        let ls = e.oms.legs(g.account, g.group);
+        let v = &ls.view;
+        // The second leg of the parameter blob is the hedge leg of the takers' links.
+        let hedge = 1usize;
+        let first = legs_of(s, g.group)[0];
+        let mut imm = [0i128; 4];
+        for (k, t) in v.leg.iter().enumerate() {
+            imm[k] = i128::from(t.inflight_immediate.0);
+            o.leg_net.push(LegNetRow {
+                account: g.account,
+                group: g.group,
+                leg: k as u8,
+                net: i128::from(t.net.0),
+            });
+        }
+        o.legs.push(LegRow {
+            account: g.account,
+            group: g.group,
+            unknown_slots: u32::from(ls.unknown_slots),
+            naked_qty: i128::from(v.naked_qty.0).abs(),
+            naked_buy: 0,
+            naked_sell: 0,
+            max_pos_qty: g.max_pos_qty,
+            residual: v.leg.get(hedge).map_or(0, |t| i128::from(t.residual.0)),
+            fee_adjust: 0,
+            naked_capped: s.carry.naked_capped.get(&(g.account.0, g.group.0)).copied().unwrap_or(0),
+            inflight_immediate: imm,
+        });
+        o.limits.push(LimitRow {
+            account: g.account,
+            asset: w.inst(first).map_or(AssetId(0), |i| i.base),
+            max_pos_qty: g.max_pos_qty,
+        });
+    }
+    o.limits.sort_by_key(|l| (l.account.0, l.asset.0));
+    o.limits.dedup_by_key(|l| (l.account.0, l.asset.0));
+    for i in &w.insts {
+        o.insts.push(InstRow {
+            inst: i.id,
+            venue: i.venue,
+            asset: i.base,
+            perp: i.perp,
+            lot: i128::from(i.lot),
+            min_qty: i128::from(i.min_qty),
+        });
+    }
+    o.risk = RiskRow {
+        max_hedge_notional: w.risk.max_hedge_notional,
+        max_reduce_notional: w.risk.max_reduce_notional,
+        force_step_bp: w.risk.force_step_bp,
+        broken_auto_fix_ms: w.risk.broken_auto_fix_ms,
+        reuse_quarantine_ms: i64::from(s.setup.oms.reuse_quarantine_ms),
+        sweep_batch: u32::from(s.setup.oms.sweep_batch),
+    };
+}

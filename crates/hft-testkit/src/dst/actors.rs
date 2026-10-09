@@ -391,8 +391,8 @@ impl HkActor {
     pub fn clock_status(now: u64, tsc_hz: u64) -> InputRec {
         let c = ClockStatus {
             tsc: Tsc(crate::dst::driver::tsc_at(0, tsc_hz, now)),
-            realtime_ns: now as i64,
-            phc_ns: now as i64,
+            realtime_ns: crate::dst::world::UTC0 + now as i64,
+            phc_ns: crate::dst::world::UTC0 + now as i64,
             tsc_hz_milli: tsc_hz * 1_000,
             chrony_offset_ns: 0,
             max_error_ns: 1_000,

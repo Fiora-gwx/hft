@@ -17,6 +17,7 @@ mod planted;
 mod probes;
 mod sdk_mock;
 mod sdk_rd;
+mod seq_sut;
 mod shrink;
 mod suites;
 mod support;

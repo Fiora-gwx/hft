@@ -1,13 +1,13 @@
 //! Framework scenarios (crates/hft-testkit/TESTS.md TK-043, TK-054, TK-055, TK-056): determinism,
 //! cross-architecture conformance, crash and rebuild, poison repeat. They run on the engine the
-//! caller instantiates (`ToyEngine` until the sequencer adapter exists).
+//! caller instantiates ([`super::DstEngine`] for the cargo-test smoke).
 
 use crate::dst::faults::{CrashFault, Fault};
 use crate::dst::invariants::{InvId, InvariantSet};
 use crate::dst::run::RunRecord;
 use crate::dst::scenario::{Scenario, SeedSet};
 use crate::dst::sut::CrashPoint;
-use crate::dst::{DstConfig, RerunPolicy, ToyEngine};
+use crate::dst::{DstConfig, RerunPolicy};
 
 /// Every framework scenario.
 pub fn all() -> Vec<Scenario> {
@@ -100,13 +100,14 @@ pub fn tk_056_poison_repeat() -> Scenario {
         .assert(crash_assert)
 }
 
-/// Runs one scenario for `n` consecutive seeds from `start` on the toy engine (cargo-test smoke).
+/// Runs one scenario for `n` consecutive seeds from `start` on [`super::DstEngine`] (cargo-test
+/// smoke).
 pub fn smoke(s: &Scenario, start: u64, n: u64, steps: u64) -> Result<(), String> {
     let suites = super::suites();
     for seed in start..start + n {
         let mut sc = *s;
         sc.steps = Some(steps.min(sc.steps.unwrap_or(u64::MAX)));
-        let r = sc.run_seed::<ToyEngine>(&suites, seed);
+        let r = sc.run_seed::<super::DstEngine>(&suites, seed);
         if let Some(f) = r.outcome.failure() {
             return Err(format!("{}: {}", crate::dst::report::repro_line(f), f.message));
         }

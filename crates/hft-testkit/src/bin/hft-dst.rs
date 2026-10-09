@@ -7,9 +7,8 @@
 //! hft-dst hashtrail --seed 0x… --suite <name> --steps N   # one line: trail <xxh3-128 hex> points=<n>
 //! ```
 //!
-//! Exit codes: 0 no violation, 1 violations, 2 argument or environment error. The engine is the
-//! framework's `ToyEngine` until the sequencer adapter lands; the suites, seeds, selection and
-//! output format are final.
+//! Exit codes: 0 no violation, 1 violations, 2 argument or environment error. The engine is
+//! `scenarios::DstEngine`.
 
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -18,8 +17,8 @@ use std::time::Instant;
 
 use hft_testkit::dst::report::{repro_line, write_artifacts};
 use hft_testkit::dst::scenario::{DstSuite, suite_for_seed};
-use hft_testkit::dst::{DstOutcome, ToyEngine, run};
-use hft_testkit::scenarios::suites;
+use hft_testkit::dst::{DstOutcome, run};
+use hft_testkit::scenarios::{DstEngine, suites};
 use hft_testkit::seed::DST_DEFAULT_STEPS;
 
 struct Args {
@@ -187,7 +186,7 @@ fn cmd_run(a: &Args) -> Result<ExitCode, String> {
             s.name, a.steps
         );
         atomic_write(&inflight, &marker).map_err(|e| format!("inflight marker: {e}"))?;
-        let outcome = std::panic::catch_unwind(|| run::<ToyEngine>(&cfg));
+        let outcome = std::panic::catch_unwind(|| run::<DstEngine>(&cfg));
         match outcome {
             Ok(DstOutcome::Fail(f)) => {
                 eprintln!("{}", repro_line(&f));
@@ -231,7 +230,7 @@ fn cmd_repro(a: &Args) -> Result<ExitCode, String> {
     let mut cfg = s.config(seed);
     cfg.steps = a.steps;
     cfg.trace = a.trace;
-    let rec = hft_testkit::dst::run_record::<ToyEngine>(&cfg);
+    let rec = hft_testkit::dst::run_record::<DstEngine>(&cfg);
     if a.trace {
         for t in &rec.trace {
             println!(
@@ -259,7 +258,7 @@ fn cmd_hashtrail(a: &Args) -> Result<ExitCode, String> {
     let mut cfg = s.config(seed);
     cfg.steps = a.steps;
     cfg.rerun = hft_testkit::dst::RerunPolicy::Never;
-    let rec = hft_testkit::dst::run_record::<ToyEngine>(&cfg);
+    let rec = hft_testkit::dst::run_record::<DstEngine>(&cfg);
     if let DstOutcome::Fail(f) = &rec.outcome {
         eprintln!("{}", repro_line(f));
         return Ok(ExitCode::from(1));

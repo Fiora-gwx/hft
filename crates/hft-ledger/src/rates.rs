@@ -109,6 +109,22 @@ impl Ledger {
         v.or((p.last_px.0 != 0).then_some(p.last_px))
     }
 
+    /// The valuation price of `inst` is its last trade price (the mark / BBO it is valued at is
+    /// not known yet).
+    pub(crate) fn val_by_last_px(&self, inst: InstId) -> bool {
+        let (Some(s), Some(p)) = (self.inst(inst), self.ipx.get(inst.0 as usize)) else {
+            return false;
+        };
+        if s.perp {
+            match self.cfg.valuation.perp {
+                PerpVal::Mark => !p.has_mark,
+                PerpVal::ExitSide => !p.has_bbo,
+            }
+        } else {
+            !p.has_bbo
+        }
+    }
+
     /// Unrealized of `qty` with absolute `cost` at the valuation price, in USDT.
     pub(crate) fn upnl_of(&self, inst: InstId, qty: Qty, cost: i128) -> Notional {
         if qty.0 == 0 {

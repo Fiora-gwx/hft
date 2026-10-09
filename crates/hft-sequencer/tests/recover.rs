@@ -247,9 +247,17 @@ fn seq_261_remaining_durations_preserved() {
     }
     h2.quote(A1, "50000", "50001");
     h2.run();
+    // An order after the restart is tracked on its group leg (the OMS group legs survive the
+    // epoch reload of the recovery end).
+    let ext = |h: &H| {
+        let e = h.s.engine();
+        (1..=16u32).filter_map(|s| e.oms.raw_slot(B, AC1, s)).filter(|(sl, _, _)| sl.state != hft_oms::OrderState::Free).map(|(_, x, _)| x.leg_ix).collect::<Vec<u8>>()
+    };
     let rs = h2.snapshots().into_iter().filter(|r| snap(r).0.purpose == 4).last().expect("recovery snapshot");
     let v = h2.verify_from(Some(rs.seq));
     assert!(v.is_empty(), "verify from the Recovery snapshot: {v:?}");
+    let _ = ext(&h2);
+    assert!(h2.s.engine().oms.legs(AC1, G1).view.n_legs == 2, "group legs registered after the restart");
 }
 
 /// SEQ-261.4: the Recovery snapshot restores exactly the state the restarted run holds.

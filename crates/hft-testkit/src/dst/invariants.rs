@@ -517,9 +517,9 @@ fn check_2(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
                 && s.r#gen == e.r#gen
                 && s.epoch == e.epoch
         });
-        if cur.is_some() {
+        if let Some(c) = cur {
             let dup = v.after.oms_dup > v.before.oms_dup;
-            return if v.has_note("OmsTransition") || dup || v.has_note("OmsAnomaly") {
+            return if v.has_note("OmsTransition") || dup || v.has_note("OmsAnomaly") || keep_cell(v, &e, c) {
                 Ok(())
             } else {
                 Err(format!(
@@ -574,6 +574,32 @@ fn check_2(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
         return Err("ExternalFill neither booked, deduplicated nor offset".into());
     }
     Ok(())
+}
+
+/// The "保持" cells of hft-oms's report table: the slot stays in its state and the OMS writes
+/// nothing (a late new-order receipt, a reject of an operation already superseded, a query that
+/// confirms the current state).
+fn keep_cell(v: &StepView<'_>, e: &OrderEvent, before: &crate::dst::obs::SlotRow) -> bool {
+    use OrderEventKind as K;
+    use SlotState as S;
+    let st = before.state;
+    let after = v
+        .after
+        .slots
+        .iter()
+        .find(|s| s.venue == before.venue && s.account == before.account && s.slot == before.slot)
+        .map(|s| (s.state, s.filled));
+    let unchanged = after.is_some_and(|(a, f)| a == st && f == before.filled);
+    unchanged
+        && match e.what {
+            K::Ack => matches!(st, S::PendingCancel | S::PendingAmend),
+            K::CancelReject => st == S::Unknown,
+            K::AmendAck => st == S::PendingCancel,
+            K::AmendReject => matches!(st, S::PendingCancel | S::Unknown),
+            K::OutcomeUnknown => st == S::Unknown,
+            K::QueryResult => i128::from(e.cum_filled.0) <= before.filled,
+            _ => false,
+        }
 }
 
 // ------------------------------------------------------------------------------------------- I3

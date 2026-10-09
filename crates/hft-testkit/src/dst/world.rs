@@ -262,10 +262,12 @@ pub struct WorldSpec {
     pub risk: RiskSpec,
 }
 
-/// `VS`, `VP`, `VQ` (scenarios §2.2).
-pub const VS: VenueId = VenueId(1);
-pub const VP: VenueId = VenueId(2);
-pub const VQ: VenueId = VenueId(3);
+/// `VS`, `VP`, `VQ` (scenarios §2.2): Binance spot, OKX USDT swap, Bitget spot (fixed `VenueId`s).
+pub const VS: VenueId = VenueId::BINANCE_SPOT;
+pub const VP: VenueId = VenueId::OKX_SWAP;
+pub const VQ: VenueId = VenueId::BITGET_UTA_SPOT;
+/// UTC of virtual time 0 (the engine adapter's clock calibration and `HkActor`'s `ClockStatus`).
+pub const UTC0: i64 = 1_790_814_600_000_000_000;
 /// `S1` BTC-USDT spot @ VS, `P1` BTC-USDT perp @ VP.
 pub const S1: InstId = InstId(1);
 pub const P1: InstId = InstId(2);

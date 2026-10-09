@@ -696,6 +696,12 @@ fn recovery_end<D: Driver<S>, S: StrategySet>(
         e.oms = Oms::restore(&mut r, &cfg, &e.rd).map_err(|_| BootError::SnapshotUndecodable { section: 3 })?;
         e.prev_epoch = e.epoch;
         e.epoch = new_epoch;
+        // The group legs are not in the OMS sections: register them again, as `restore_at` does.
+        for s in inst.slots.iter() {
+            if let Some(p) = s.cur.as_ref() {
+                e.oms.on_groups_changed(&p.groups);
+            }
+        }
     }
     let cause = e.cur_seq;
     let mut o = e.take_oms();

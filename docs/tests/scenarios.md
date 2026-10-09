@@ -42,7 +42,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 | 项 | 取值 |
 |---|---|
-| venue | `VS`:`VenueId = 1`,`Exchange::Binance`,现货;`VP`:`VenueId = 2`,`Exchange::Okx`,USDT 永续;`VQ`:`VenueId = 3`,`Exchange::Bitget`,现货(只在写明时使用) |
+| venue | `VS`:`VenueId = 2`(`BINANCE_SPOT`),`Exchange::Binance`,现货;`VP`:`VenueId = 5`(`OKX_SWAP`),`Exchange::Okx`,USDT 永续;`VQ`:`VenueId = 11`(`BITGET_UTA_SPOT`),`Exchange::Bitget`,现货(只在写明时使用) |
 | inst | `S1` = BTC-USDT 现货 @ `VS`:tick 0.01 USDT,lot 0.00001 BTC,`min_qty` 0.00001 BTC,`min_notional` 5 USDT;`P1` = BTC-USDT 永续 @ `VP`:tick 0.1 USDT,lot 0.001 BTC,`min_qty` 0.001 BTC,`min_notional` 5 USDT,`max_leverage` 50 |
 | 资产 | BTC `AssetExp{px_exp: −4, qty_exp: −8}`;USDT 金额指数 −6 |
 | 账户 | `a`、`b`:`AccountKind::Live`,`is_prod = false`,`venues = {VS, VP}`,`uid_policy = Verified`;`a` 绑定策略实例 1,`b` 绑定策略实例 2 |

@@ -5,6 +5,17 @@
 
 pub mod framework;
 
+/// The engine the three DST entries run (`tests/dst/`, `cargo xtask dst`, `hft-dst`). Still the
+/// framework's self-test engine: the real-engine adapter [`SeqEngine`] passes the suites on most
+/// seeds but a sweep still finds `INV-16` differences (README "已知限制"), and the entries switch
+/// once it is clean.
+pub type DstEngine = crate::dst::ToyEngine;
+
+/// The real engine under the DST: the sequencer over `SimExchange` with the test strategies
+/// (feature `seq`).
+#[cfg(feature = "seq")]
+pub type SeqEngine = crate::dst::SeqSut<crate::strategies::TestStrategies>;
+
 use crate::dst::DstConfig;
 use crate::dst::faults::{FaultCategory, FaultRates};
 use crate::dst::scenario::{DstSuite, Scenario};

@@ -20,6 +20,8 @@ pub mod obs;
 pub mod report;
 pub mod run;
 pub mod scenario;
+#[cfg(feature = "seq")]
+pub mod seq;
 pub mod shrink;
 pub mod sut;
 pub mod toy;
@@ -36,6 +38,8 @@ pub use run::{RunRecord, run, run_record};
 pub use scenario::{DstSuite, Scenario, SeedSet, SuiteSel};
 pub use shrink::shrink;
 pub use sut::{BootCtx, BootFail, CrashPoint, FrameRec, InputRec, JRec, OutRing, Source, StepOut, Sut};
+#[cfg(feature = "seq")]
+pub use seq::{SeqSut, SimMatcher};
 pub use toy::ToyEngine;
 pub use venue_behavior::MockVenueCfg;
 pub use world::{World, WorldSpec};

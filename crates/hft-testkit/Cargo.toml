@@ -13,8 +13,8 @@ autotests = false
 [lints]
 workspace = true
 
-# The engine crates (hft-sim, hft-sequencer, hft-oms, hft-risk, hft-ledger, hft-exec) join when their
-# DST adapters land; until then the framework runs on the `Sut` boundary (README "6. DST 框架").
+# The engine crates (hft-sim, hft-sequencer, hft-oms, hft-risk, hft-ledger, hft-exec) are the DST
+# engine adapter's (`SeqSut`, feature `seq`; README "6. DST 框架").
 [dependencies]
 hft-types.workspace = true
 hft-event.workspace = true
@@ -31,11 +31,22 @@ hdrhistogram = { version = "7.5", default-features = false }
 # DST randomness: one ChaCha8 stream per actor, derived from the run seed (README "DST 的世界模型" 5).
 rand_chacha = { version = "0.9", default-features = false }
 rand_core = { version = "0.9", default-features = false }
+# The engine adapter `SeqSut` (feature `seq`).
+hft-sequencer = { workspace = true, optional = true }
+hft-sim = { workspace = true, optional = true }
+hft-oms = { workspace = true, optional = true }
+hft-risk = { workspace = true, optional = true }
+hft-ledger = { workspace = true, optional = true }
+hft-exec = { workspace = true, optional = true }
+# SHA-256 of the configuration blobs (not `workspace = true`: that entry enables `asm`).
+sha2 = { version = "0.10", optional = true }
 
 [features]
 # `MockViews`, `StrategyHarness`, `ModelHarness` (README "4. 策略测试桩"); enables the SDK's
 # `testing` stubs, so only dev-dependencies turn it on.
 sdk-mock = ["hft-strategy-sdk/testing"]
+# The engine adapter `SeqSut<S>` over the real sequencer and `hft_sim::SimExchange`.
+seq = ["dep:hft-sequencer", "dep:hft-sim", "dep:hft-oms", "dep:hft-risk", "dep:hft-ledger", "dep:hft-exec", "dep:sha2"]
 # The `hft-dst` runner binary (verification bundle only; README "8. hft-dst 运行器").
 dst-bin = []
 
@@ -63,7 +74,7 @@ name = "dst"
 path = "../../tests/dst/main.rs"
 
 [dev-dependencies]
-hft-testkit = { path = ".", features = ["sdk-mock"] }
+hft-testkit = { path = ".", features = ["sdk-mock", "seq"] }
 criterion.workspace = true
 
 [[bench]]

@@ -185,8 +185,13 @@ impl Ledger {
         col_add(&mut d, tr.col, rn);
         let cell = tr.cell.map(|(c, _)| c);
         self.add_pnl(tr.acc, cell, &d);
-        // Upkeep.
+        // Upkeep. While the inst is valued at its last trade price (no mark / no BBO yet), that
+        // price just moved for every holder: revalue them all, so the caches stay the function of
+        // the price rows that `restore` rebuilds them from.
         self.track_open_perp(av, p);
+        if self.val_by_last_px(tr.inst) {
+            self.revalue_inst(tr.inst, tr.t, None);
+        }
         self.revalue_pos(tr.acc, p, tr.inst);
         if let Some((c, l)) = tr.cell {
             self.revalue_leg(c, l);
