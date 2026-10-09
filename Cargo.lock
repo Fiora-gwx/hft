@@ -645,6 +645,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "hft-ctl"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "criterion",
+ "hft-ctl-proto",
+ "hft-event",
+ "hft-journal",
+ "hft-refdata",
+ "hft-risk",
+ "hft-rt",
+ "hft-strategy-sdk",
+ "hft-types",
+ "libc",
+ "proptest",
+ "serde_json",
+ "sha2",
+ "toml 0.8.23",
+ "zerocopy",
+]
+
+[[package]]
+name = "hft-ctl-proto"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "criterion",
+ "hft-event",
+ "hft-refdata",
+ "hft-types",
+ "proptest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml 0.8.23",
+ "uuid",
+ "zerocopy",
+]
+
+[[package]]
 name = "hft-event"
 version = "0.1.0"
 dependencies = [
@@ -1961,6 +2001,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97277d36b9c3ace13e58fa6e753f8b0bbbf302a18dd193240d70f9e29681059a"
 dependencies = [
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 

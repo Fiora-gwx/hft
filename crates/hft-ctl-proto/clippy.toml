@@ -1,0 +1,28 @@
+# hft-ctl-proto is pure in behaviour (README "依赖"): no I/O, no threads, no clock, no environment.
+# Tests and benches allow these lints (tools/xtask/allow-list.toml).
+
+disallowed-methods = [
+    { path = "std::time::SystemTime::now", reason = "no clock: std::time" },
+    { path = "std::time::Instant::now", reason = "no clock: std::time" },
+    { path = "std::thread::spawn", reason = "no threads: std::thread" },
+    { path = "std::thread::sleep", reason = "no threads: std::thread" },
+    { path = "std::env::var", reason = "no environment: std::env" },
+    { path = "std::env::var_os", reason = "no environment: std::env" },
+    { path = "std::env::vars", reason = "no environment: std::env" },
+    { path = "std::fs::read", reason = "no I/O: std::fs" },
+    { path = "std::fs::read_to_string", reason = "no I/O: std::fs" },
+    { path = "std::fs::write", reason = "no I/O: std::fs" },
+    { path = "std::fs::File::open", reason = "no I/O: std::fs" },
+    { path = "std::fs::File::create", reason = "no I/O: std::fs" },
+    { path = "std::net::TcpStream::connect", reason = "no I/O: std::net" },
+]
+
+disallowed-types = [
+    { path = "std::fs::File", reason = "no I/O: std::fs" },
+    { path = "std::net::TcpStream", reason = "no I/O: std::net" },
+    { path = "std::net::TcpListener", reason = "no I/O: std::net" },
+    { path = "std::net::UdpSocket", reason = "no I/O: std::net" },
+    { path = "std::time::SystemTime", reason = "no clock: std::time" },
+    { path = "std::time::Instant", reason = "no clock: std::time" },
+    { path = "std::thread::JoinHandle", reason = "no threads: std::thread" },
+]

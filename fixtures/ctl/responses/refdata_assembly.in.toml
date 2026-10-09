@@ -1,0 +1,10 @@
+status = "ok"
+code = "Rejected"
+cmd_id = "00000000-0000-4000-8000-000000000006"
+detail = 131474
+cmd_hash = "9f3c000000000000000000000000000000000000000000000000000000000006"
+[engine]
+version = "0.4.0"
+epoch = 17
+refdata = "sha256:00"
+risk = 7

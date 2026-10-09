@@ -32,7 +32,7 @@ spec: README.md
 
 **基线 `P0`**(`crates/hft-ctl-proto/tests/common/mod.rs::p0()`;用例 `前置` 写"P0"时以下取值都显式生效,用例另列的取值覆盖它们;不依赖任何默认值):
 
-- refdata `rd-ctl`(测试构建,`fixtures/refdata/ctl-p0.blob`):venue `binance-usdm`(`VenueId 1`)、`binance-spot`(2)、`bitget-usdt-futures`(10)、`bitget-spot`(11);资产 `USDT`(`AssetId 1`,数量指数 −6)、`BTC`(`AssetId 2`,数量指数 −8);inst `binance-usdm:BTCUSDT`(`InstId 101`)、`binance-spot:BTCUSDT`(201)、`bitget-usdt-futures:BTCUSDT`(1001)、`bitget-spot:BTCUSDT`(1101);策略实例 `s1-main`(`StrategyId 1`,kind_id 0xFF01)、`s2-main`(2,0xFF02)、`s9-sim`(9,0xFF01);账户 `acct-a`(`AccountId 1`,`Live`,`is_prod = false`,绑定 `s1-main`,venue 1、11)、`acct-b`(2,`Live`,`is_prod = false`,绑定 `s2-main`,venue 2、10)、`sim-a`(9,`Sim`,绑定 `s9-sim`,venue 1、11)。
+- refdata `rd-ctl`(测试构建,`fixtures/refdata/ctl-p0.blob`):venue `binance-usdm`(`VenueId 1`)、`binance-spot`(2)、`bitget-usdt-futures`(10)、`bitget-spot`(11);资产 `USDT`(`AssetId 1`,数量指数 −6)、`BTC`(`AssetId 2`,数量指数 −8);inst `binance-usdm:BTCUSDT`(`InstId 1`)、`binance-spot:BTCUSDT`(2)、`bitget-usdt-futures:BTCUSDT`(3)、`bitget-spot:BTCUSDT`(4);策略实例 `s1-main`(`StrategyId 1`,kind_id 0xFF01)、`s2-main`(2,0xFF02)、`s9-sim`(3,0xFF01);账户 `acct-a`(`AccountId 1`,`Live`,`is_prod = false`,绑定 `s1-main`,venue 1、11)、`acct-b`(2,`Live`,`is_prod = false`,绑定 `s2-main`,venue 2、10)、`sim-a`(3,`Sim`,绑定 `s9-sim`,venue 1、11)。资产、inst、账户与实例的 id 按 [hft-refdata 实现说明](../hft-refdata/README.md#实现说明)加载校验第 3 条从 1 起稠密(名字 `s9-sim`、`sim-a` 只是标签)。
 - group:`g1` = `"16777317"`(`GroupId 0x0100_0065` = `(1 << 24) | 101`,属 `s1-main`,腿 `binance-usdm:BTCUSDT` + `bitget-spot:BTCUSDT`)、`g2` = `"33554533"`(`(2 << 24) | 101`,属 `s2-main`,腿 `binance-spot:BTCUSDT` + `bitget-usdt-futures:BTCUSDT`)。
 - 信封 `E0`:`v = 2`、`cmd_id = "00000000-0000-4000-8000-000000000001"`、`issuer = "cli:alice"`、`issued_at_ns = 1790000000000000000`、`expires_at_ns = 1790000030000000000`(签发后 30 s)、`preview = false`、`confirmed = false`、无 `expect_state_version`;issuer 为 `tg:*` 的用例另带 `chat_type = "private"`。
 - 规范化入口:`normalize(&req, &rd-ctl)`;"记录"指 `Normalized.record` 的 `CmdHdr` + 载荷字节(布局归 [hft-event 控制命令编码](../hft-event/README.md#控制命令编码))。
@@ -243,7 +243,7 @@ spec: README.md
 | CTP-016.2 | `PREVIEW`(1) | `preview` 存在,`target_account = "acct-a"`、`target_kind = "Live"`;没有 `confirm_within_s` 键 |
 | CTP-016.3 | `PREVIEW \| PREVIEW_TTL`(5) | `preview.confirm_within_s = 60` |
 | CTP-016.4 | `PREVIEW \| NEEDS_CONFIRM`(3) | `preview` 存在;没有 `confirm_within_s` 键 |
-| CTP-016.5 | `PREVIEW \| NEEDS_CONFIRM`(3),`CmdPreview` 另有 `wo_venue = 11`、`wo_leg_ix = 1`、`wo_inst` = `bitget-spot:BTCUSDT`、`wo_qty = 0.0004`(raw 40000,−8) | `preview.wo_venue = "bitget-spot"`、`wo_leg_ix = "1"`、`wo_inst = "bitget-spot:BTCUSDT"`、`wo_qty = "0.0004"` |
+| CTP-016.5 | `PREVIEW \| NEEDS_CONFIRM`(3),`CmdPreview` 另有 `wo_venue = 11`、`wo_leg_ix = 1`、`wo_inst` = `bitget-spot:BTCUSDT`(`InstId 4`)、`wo_qty = 0.0004`(raw 40000,−8) | `preview.wo_venue = "bitget-spot"`、`wo_leg_ix = "1"`、`wo_inst = "bitget-spot:BTCUSDT"`、`wo_qty = "0.0004"` |
 | CTP-016.6 | `PREVIEW`(1),`wo_venue = 0` | `preview` 中没有任何 `wo_` 开头的键 |
 
 ### CTP-017 十进制字符串按资产指数转为定点
@@ -259,8 +259,8 @@ spec: README.md
 | CTP-017.1 | `"0.5"` | 载荷 `amount = Qty(50 000 000)`(0.5,raw 50 000 000,指数 −8) |
 | CTP-017.2 | `"0.00000001"` | `Qty(1)` |
 | CTP-017.3 | `"0.000000001"` | `InvalidArgs{BadValue}`(多一位小数) |
-| CTP-017.4 | `"92233720368.54775807"` | `Qty(i64::MAX)` |
-| CTP-017.5 | `"92233720368.54775808"` | `InvalidArgs{BadValue}`(溢出) |
+| CTP-017.4 | `"46116860184.27387903"` | `Qty(4611686018427387903)`(`MAX_RAW`) |
+| CTP-017.5 | `"46116860184.27387904"` | `InvalidArgs{BadValue}`(超过 `MAX_RAW`) |
 | CTP-017.6 | `"abc"` | 模式层错误,`invalid_request` |
 | CTP-017.7 | `0.5`(JSON 数字) | 模式层错误,`invalid_request` |
 
@@ -283,7 +283,7 @@ spec: README.md
 | CTP-018.7 | `account = "nope"` | `InvalidArgs{UnknownName}` |
 | CTP-018.8 | `venue = "bitget-spot"` | 载荷 `venue = 11` |
 | CTP-018.9 | `venue = "kraken"` | `InvalidArgs{UnknownName}` |
-| CTP-018.10 | `inst = "binance-spot:BTCUSDT"` | 载荷 `inst = 201` |
+| CTP-018.10 | `inst = "binance-spot:BTCUSDT"` | 载荷 `inst = 2` |
 | CTP-018.11 | `inst = "binance-spot:NOPE"` | `InvalidArgs{UnknownName}` |
 | CTP-018.12 | `asset = "BTC"` | 载荷 `asset = 2` |
 | CTP-018.13 | `asset = "XYZ"` | `InvalidArgs{UnknownName}` |
@@ -324,7 +324,7 @@ spec: README.md
 | CTP-020.6 | `s2-main` / `"16777317"`(高 8 位 = 1 ≠ 2) | `InvalidArgs{BadGroup}` |
 | CTP-020.7 | `"*"` / `"16777317"` | `scope.strategy = 0`、`scope.group = 0x0100_0065`(实例由 group 指明) |
 | CTP-020.12 | `"*"` / `"4278190081"`(高 8 位 = 255,不是实例) | `InvalidArgs{BadGroup}` |
-| CTP-020.13 | `"*"` / `"50331649"`(高 8 位 = 3,refdata 中没有实例 3) | `InvalidArgs{BadGroup}` |
+| CTP-020.13 | `"*"` / `"67108865"`(高 8 位 = 4,refdata 中没有实例 4) | `InvalidArgs{BadGroup}` |
 | CTP-020.8 | `s1-main` / `"0"` | `InvalidArgs{BadGroup}` |
 | CTP-020.9 | `s1-main` / `"4294967295"` | `InvalidArgs{BadGroup}`(全部只能写 `"*"`) |
 | CTP-020.10 | `s1-main` / `"4294967296"` | `InvalidArgs{BadValue}`(超出 u32) |
@@ -446,7 +446,7 @@ spec: README.md
 | CTP-040.3 | 同上,`mode "CloseOnly"` | `mode = 3` |
 | CTP-040.4 | `strategy "s1-main", group "*", mode "Live"`,`"acct-b"` | `InvalidArgs{AccountBound}`(`acct-b` 绑定 `s2-main`) |
 | CTP-040.5 | `strategy "*", group "*", mode "CloseOnly"`,`"acct-a"` | `scope = {0, 0, 1, 0xFFFF_FFFF, 0}` |
-| CTP-040.6 | `strategy "s9-sim", group "*", mode "Live"`,`"sim-a"` | `scope = {9, 0, 9, 0xFFFF_FFFF, 0}`(模拟账户同一编码) |
+| CTP-040.6 | `strategy "s9-sim", group "*", mode "Live"`,`"sim-a"` | `scope = {3, 0, 3, 0xFFFF_FFFF, 0}`(模拟账户同一编码) |
 
 ### CTP-041 SetParams 的规范化
 
@@ -527,7 +527,7 @@ spec: README.md
 | CTP-044.3 | `source "Recon", venue "bitget-spot"`,`"acct-a"` | `scope = {0, 11, 1, 0xFFFF_FFFF, 0}`、`source = 3` |
 | CTP-044.4 | `source "Halted", strategy "s1-main", group "16777317"`,`"acct-a"` | `scope = {1, 0, 1, 0x0100_0065, 0}`、`source = 8` |
 | CTP-044.5 | `source "Broken", group "16777317"`,`"acct-a"` | `scope = {0, 0, 1, 0x0100_0065, 0}`、`source = 5` |
-| CTP-044.6 | `source "Delisting", venue "binance-spot", inst "binance-spot:BTCUSDT"`,`"*"` | `scope = {0, 2, 0, 0xFFFF_FFFF, 201}`、`source = 14` |
+| CTP-044.6 | `source "Delisting", venue "binance-spot", inst "binance-spot:BTCUSDT"`,`"*"` | `scope = {0, 2, 0, 0xFFFF_FFFF, 2}`、`source = 14` |
 | CTP-044.7 | `source "ClockBad"`,`"*"` | 规范化成功,`source = 10`(是否可清除由 sequencer 判定) |
 | CTP-044.8 | `source "Nope"`,`"acct-a"` | 模式层错误,`invalid_request`,`detail = UnknownDiscriminant` |
 
@@ -541,7 +541,7 @@ spec: README.md
 
 | 行 | 命令,`account` | 期望 |
 |---|---|---|
-| CTP-045.1 | `CancelAll{venue "bitget-spot", inst "bitget-spot:BTCUSDT"}`,`"acct-a"` | `cmd = 0x000F`、`payload_len = 16`、`scope = {0, 11, 1, 0xFFFF_FFFF, 1101}` |
+| CTP-045.1 | `CancelAll{venue "bitget-spot", inst "bitget-spot:BTCUSDT"}`,`"acct-a"` | `cmd = 0x000F`、`payload_len = 16`、`scope = {0, 11, 1, 0xFFFF_FFFF, 4}` |
 | CTP-045.2 | `CancelAll{}`(venue、inst 省略),`"*"` | `scope = {0, 0, 0, 0xFFFF_FFFF, 0}` |
 | CTP-045.3 | `Drain{}`,缺 | `cmd = 0x0010`、`payload_len = 8`、`cancel_resting = 1` |
 | CTP-045.4 | `Drain{cancel_resting false}`,缺 | `cancel_resting = 0` |
@@ -551,7 +551,7 @@ spec: README.md
 | CTP-045.8 | `WriteOffResidual{group "16777317"}`,`"acct-a"` | `cmd = 0x001B`、`payload_len = 8`、载荷 `{account 1, group 0x0100_0065}` |
 | CTP-045.9 | `WriteOffResidual{group "*"}`,`"acct-a"` | `InvalidArgs{BadGroup}` |
 | CTP-045.10 | `SetBalanceBaseline{venue "bitget-spot"}`,`"acct-a"` | `cmd = 0x0017`、`payload_len = 8`、载荷 `{account 1, venue 11}` |
-| CTP-045.11 | `SimReset{}`,`"sim-a"` | `cmd = 0x0014`、`payload_len = 8`、载荷 `{account 9}` |
+| CTP-045.11 | `SimReset{}`,`"sim-a"` | `cmd = 0x0014`、`payload_len = 8`、载荷 `{account 3}` |
 | CTP-045.12 | `SimReset{}`,`"acct-a"` | 规范化成功(`NotSim` 由 gateway 判定,见 hft-ctl) |
 
 ### CTP-046 SmokeOrder 的编码与 ttl_ms 缺省值、边界
@@ -564,7 +564,7 @@ spec: README.md
 
 | 行 | `ttl_ms` / 其他 | 期望 |
 |---|---|---|
-| CTP-046.1 | 省略 | `cmd = 0x001A`、`payload_len = 16`、载荷 `{account 1, venue 11, inst 1101, side 1, ttl_ms 10 000}` |
+| CTP-046.1 | 省略 | `cmd = 0x001A`、`payload_len = 16`、载荷 `{account 1, venue 11, inst 4, side 1, ttl_ms 10 000}` |
 | CTP-046.2 | `"1"` | `ttl_ms = 1` |
 | CTP-046.3 | `"0"` | `InvalidArgs{BadValue}` |
 | CTP-046.4 | `"60000"` | `ttl_ms = 60 000` |
@@ -585,7 +585,7 @@ spec: README.md
 
 | 行 | 命令字段 | 期望 |
 |---|---|---|
-| CTP-047.1 | `item "Position", inst "binance-usdm:BTCUSDT"` | `cmd = 0x0013`、`cmd_ver = 2`、`payload_len = 32`;`{account 1, venue 1, inst 101, report_id 7, item 0, asset 0, group 0, entry_px 0}` |
+| CTP-047.1 | `item "Position", inst "binance-usdm:BTCUSDT"` | `cmd = 0x0013`、`cmd_ver = 2`、`payload_len = 32`;`{account 1, venue 1, inst 1, report_id 7, item 0, asset 0, group 0, entry_px 0}` |
 | CTP-047.2 | `venue "bitget-spot", item "Balance", asset "BTC", group "16777317"` | `venue = 11`、`item = 1`、`asset = 2`、`group = 0x0100_0065`、`inst = 0` |
 | CTP-047.3 | `venue "bitget-spot", item "Balance", asset "BTC"` | `group = 0`(缺省 unassigned) |
 | CTP-047.4 | `item "Position"`(无 inst) | 模式层错误,`invalid_request` |
@@ -602,7 +602,7 @@ spec: README.md
 
 | 行 | 命令字段,`account` | 期望 |
 |---|---|---|
-| CTP-048.1 | `inst "binance-spot:BTCUSDT", kind "Delisting", at_ns "1790100000000000000"`,缺 | `cmd = 0x0016`、`payload_len = 24`;`{venue 2, kind 1, inst 201, a 1790100000000000000, b 0}` |
+| CTP-048.1 | `inst "binance-spot:BTCUSDT", kind "Delisting", at_ns "1790100000000000000"`,缺 | `cmd = 0x0016`、`payload_len = 24`;`{venue 2, kind 1, inst 2, a 1790100000000000000, b 0}` |
 | CTP-048.2 | 同上去掉 `inst` | `inst = 0` |
 | CTP-048.3 | `kind "FundingInterval", new_s "14400"`,`"*"` | `kind = 2`、`a = 14400`、`b = 0` |
 | CTP-048.4 | `kind "Maintenance", from_ns "1790100000000000000", to_ns "1790103600000000000"`,`"*"` | `kind = 3`、`a = 1790100000000000000`、`b = 1790103600000000000` |
@@ -619,7 +619,7 @@ spec: README.md
 
 | 行 | 请求(`E0` + 命令),`account` | 期望 |
 |---|---|---|
-| CTP-049.1 | `SimTransfer{from_venue "binance-usdm", to_venue "bitget-spot", asset "BTC", amount "0.5"}`,`"sim-a"` | `cmd = 0x0015`、`payload_len = 16`;`{account 9, from 1, to 11, asset 2, amount 50 000 000}` |
+| CTP-049.1 | `SimTransfer{from_venue "binance-usdm", to_venue "bitget-spot", asset "BTC", amount "0.5"}`,`"sim-a"` | `cmd = 0x0015`、`payload_len = 16`;`{account 3, from 1, to 11, asset 2, amount 50 000 000}` |
 | CTP-049.2 | `RecordTransfer{from "binance-usdm", to "bitget-spot", asset "USDT", amount "100", ext_ref "TX123"}`,`"acct-a"` | `cmd = 0x0011`、`payload_len = 80`;`{account 1, from 1, to 11, asset 1, amount 100 000 000, reference = "TX123" 后补 59 个 0}` |
 | CTP-049.3 | 同 049.2,`ext_ref` 为 64 字节 | 成功,`reference` 64 字节无补零 |
 | CTP-049.4 | 同 049.2,`ext_ref` 为 65 字节 | `InvalidArgs{TooLong}` |
@@ -695,7 +695,7 @@ spec: README.md
 
 | 行 | `items` | 期望 |
 |---|---|---|
-| CTP-053.1 | 3 条:`{venue "binance-usdm", account "acct-a", item "Position", severity "Ignore", inst "binance-usdm:BTCUSDT", engine_qty "0", exch_qty "0", view_seq "100"}`、同样一条 `venue "bitget-spot", item "Balance", asset "BTC"`、一条 `item "Summary"` | 3 条 `CtlRecord{kind = ReconcileReport}`,依序 `idx = 0, 1, 2`、`count = 3`、`report_id = 7`;第 1 条 `item = 1, severity = 1, inst = 101, view_seq = 100`;不产生 `ControlCmd`,没有 `cmd_hash` |
+| CTP-053.1 | 3 条:`{venue "binance-usdm", account "acct-a", item "Position", severity "Ignore", inst "binance-usdm:BTCUSDT", engine_qty "0", exch_qty "0", view_seq "100"}`、同样一条 `venue "bitget-spot", item "Balance", asset "BTC"`、一条 `item "Summary"` | 3 条 `CtlRecord{kind = ReconcileReport}`,依序 `idx = 0, 1, 2`、`count = 3`、`report_id = 7`;第 1 条 `item = 1, severity = 1, inst = 1, view_seq = 100`;不产生 `ControlCmd`,没有 `cmd_hash` |
 | CTP-053.2 | 1 条 `item "Position"`,`sflags ["AUTO_EXTERNAL"]` | `sflags = 8` |
 | CTP-053.3 | 1 条 `item "Summary"`,`sflags ["USERSTREAM_DOWN","TRUNCATED"]` | `sflags = 3` |
 | CTP-053.4 | 1 条 `severity "Severe"` | 模式层错误,`invalid_request`,`detail = UnknownDiscriminant` |
@@ -740,7 +740,7 @@ spec: README.md
 
 | 行 | 请求 | 期望 |
 |---|---|---|
-| CTP-056.1 | `HedgeFix{group "16777317"}` 缺 `account`(②),且 group 的高 8 位改为不存在的实例 3(③) | `InvalidArgs{AccountRequired}` |
+| CTP-056.1 | `HedgeFix{group "16777317"}` 缺 `account`(②),且 group 的高 8 位改为不存在的实例 4(③) | `InvalidArgs{AccountRequired}` |
 | CTP-056.2 | `SimTransfer{asset "XYZ"(③), amount "0.000000001"(④)}`,`"sim-a"` | `InvalidArgs{UnknownName}` |
 | CTP-056.3 | `SetParams{strategy "s1-main"}`,`account "*"`(②),blob 头 `account 2`(⑤) | `InvalidArgs{AccountRequired}` |
 | CTP-056.4 | `SetParams`,`"acct-a"`,`blob_b64` 解码 786 433 字节且头 `strategy 2` | `InvalidArgs{TooLong}`(长度先于头部核对) |
@@ -987,7 +987,7 @@ spec: README.md
   2. 把副本中 `SmokeOrder` 行的 Trader 列由 `—` 改为 `✓` 后再运行
   3. 删去副本中 `HedgeFix` 一行后再运行
 - 期望:
-  - 步骤 1 通过,渲染出的 Markdown 行数等于 `PermRow` 个数(optional 行未实现时不在 `perms.rs` 中,也不由生成器渲染为可用行)
+  - 步骤 1 通过,渲染出的 Markdown 行数等于 `PERM_ROWS` 与 `OPTIONAL_ROWS` 的行数之和(optional 行未实现时只在不参与 `allowed` 判定的 `OPTIONAL_ROWS` 中)
   - 步骤 2、3 各失败一次,错误信息分别含 `SmokeOrder` 与 `HedgeFix`
 - 实现:`tools/xtask/tests/doc_check_perms.rs::ctp_093_perm_table_matches_code`
 
@@ -2232,7 +2232,7 @@ spec: README.md
   1. `cargo xtask deps` 检查 `hft-ctl-proto` 的依赖闭包(含 dev 依赖)
 - 期望:
   - 内部依赖恰为 {`hft-types`、`hft-refdata`、`hft-event`};闭包中没有 `hft-strategy-sdk`、`hft-strategy-registry`、任何 `strategies/*`、L1 引擎 crate(`hft-oms`、`hft-risk`、`hft-ledger`、`hft-exec`、`hft-book`)与 `tokio`
-  - 外部直接依赖是 {`serde`、`serde_json`、`uuid`、`sha2`、`base64`} 的子集
+  - 外部直接依赖是 {`serde`、`serde_json`、`uuid`、`sha2`、`base64`、`zerocopy`} 的子集
 - 实现:`tools/xtask/tests/deps_ctl.rs::ctp_173_ctl_proto_dep_closure`
 
 ### CTP-174 源码不做 I/O、不建线程、不读时钟

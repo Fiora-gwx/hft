@@ -1,0 +1,19 @@
+status = "ok"
+code = "Applied"
+cmd_id = "00000000-0000-4000-8000-000000000001"
+seq = 123456789
+cmd_hash = "9f3c000000000000000000000000000000000000000000000000000000000001"
+ctl_state_version = 4183
+rflags = 7
+[preview]
+target_account = 1
+target_kind = 1
+target_mode = 4
+affected_cells = 3
+open_orders = 2
+[engine]
+version = "0.4.0"
+epoch = 17
+refdata = "sha256:00"
+risk = 7
+params = { "s1-main/acct-a" = 42 }

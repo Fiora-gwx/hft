@@ -1,0 +1,31 @@
+[package]
+name = "hft-ctl-proto-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+hft-ctl-proto = { path = ".." }
+hft-refdata = { path = "../../hft-refdata" }
+
+# Not a member of the root workspace: built only by `cargo fuzz` (pinned nightly, tools/README.md).
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "ctl_frame"
+path = "fuzz_targets/ctl_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ctl_normalize"
+path = "fuzz_targets/ctl_normalize.rs"
+test = false
+doc = false
+bench = false

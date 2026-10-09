@@ -1,0 +1,9 @@
+status = "ok"
+code = "Applied"
+cmd_id = "00000000-0000-4000-8000-000000000007"
+body = '{"name":"probe-taker","kind_id":65281,"fields":[]}'
+[engine]
+version = "0.4.0"
+epoch = 17
+refdata = "sha256:00"
+risk = 7

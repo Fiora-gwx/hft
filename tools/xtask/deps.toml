@@ -166,7 +166,7 @@ deps = [
 
 # ---------------------------------------------------------------- control, observability, simulation, tests
 [pkg."crates/hft-ctl-proto"]
-tier = "pure"
+tier = "warm"
 deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event"]
 
 [pkg."crates/hft-ctl"]

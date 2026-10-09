@@ -7,6 +7,8 @@ members = [
     "crates/hft-event",
     "crates/hft-rt",
     "crates/hft-journal",
+    "crates/hft-ctl-proto",
+    "crates/hft-ctl",
     "crates/hft-strategy-sdk",
     "crates/hft-book",
     "crates/hft-sim",
@@ -52,6 +54,7 @@ rtrb = "0.3"
 static_assertions = "1"
 hft-event = { path = "crates/hft-event" }
 hft-journal = { path = "crates/hft-journal" }
+hft-ctl-proto = { path = "crates/hft-ctl-proto" }
 hft-strategy-sdk = { path = "crates/hft-strategy-sdk" }
 hft-book = { path = "crates/hft-book" }
 hft-sim = { path = "crates/hft-sim" }

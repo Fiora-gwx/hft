@@ -1,0 +1,1 @@
+{"v":2,"cmd_id":"00000000-0000-4000-8000-000000000005","status":"ok","code":"InvalidArgs","detail":{"name":"ParamInvalid","arg":"Strategy:3"},"seq":900,"cmd_hash":"9f3c000000000000000000000000000000000000000000000000000000000005","ctl_state_version":21,"engine":{"version":"0.4.0","epoch":17,"refdata":"sha256:00","params":{},"risk":7},"body":{}}

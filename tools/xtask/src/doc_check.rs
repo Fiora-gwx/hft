@@ -12,6 +12,7 @@ pub mod config;
 pub mod layout;
 pub mod md;
 pub mod native;
+pub mod perms;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -246,6 +247,10 @@ pub fn native_checks(cx: &native::Ctx) -> Vec<(&'static str, Vec<native::Problem
         .into_iter()
         .map(|p| ("RINGNAME", p))
         .collect();
+    let perm_table = perms::check(&cx.root)
+        .into_iter()
+        .map(|p| ("PERMTABLE", p))
+        .collect();
     vec![
         ("links", native::check_links(cx)),
         ("readme-structure", native::check_structure(cx)),
@@ -257,6 +262,7 @@ pub fn native_checks(cx: &native::Ctx) -> Vec<(&'static str, Vec<native::Problem
         ("codes-and-layout", layout::check_layout(cx)),
         ("dep-graph", native::check_dep_graph(cx)),
         ("rings", rings),
+        ("perm-table", perm_table),
         ("venue-readme", budget::check_venues(cx)),
         ("runbooks", native::check_runbooks(cx)),
         ("scope-table", native::check_scope_table(cx)),

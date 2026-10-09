@@ -28,7 +28,7 @@
 | [crates/hft-types](crates/hft-types/README.md) | pure | core | 定点(按资产指数)、ID、枚举、`RunMode`/`KillLevel`/`RejectBits` |
 | [crates/hft-refdata](crates/hft-refdata/README.md) | pure | core | 合约/资产/费率/限速/符号映射、`VenueCaps` 交易所能力表、`AccountMeta`(账户类型、交易所 UID、绑定的策略实例);`EngineConfig` 模块 |
 | [crates/hft-event](crates/hft-event/README.md) | pure | core | 记录头、事件体(含不透明 `Advice`、策略参数头、`ExternalFill`、`MarginReport`)、控制命令;schema 导出 |
-| [crates/hft-ctl-proto](crates/hft-ctl-proto/README.md) | pure | core | ctl 帧编码与命令权限表 |
+| [crates/hft-ctl-proto](crates/hft-ctl-proto/README.md) | warm | core | ctl 帧编码与命令权限表 |
 | [crates/hft-strategy-sdk](crates/hft-strategy-sdk/README.md) | pure | core | 策略唯一依赖的稳定接口:`Strategy`(快速部分)、`Model`(慢速部分)、参数 schema、只读视图、订单意图与目标意图、`strategy_set!` |
 | [crates/hft-rt](crates/hft-rt/README.md) | hot | core | SPSC 环(进程内/共享内存)、TSC、绑核、大页、任务轮转与空闲策略 |
 | [crates/hft-journal](crates/hft-journal/README.md) | hot | core | RAM 热段写者、读者、快照滚动、persist 复制(含段预创建与退役) |

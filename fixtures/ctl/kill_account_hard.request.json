@@ -1,0 +1,1 @@
+{"v":2,"cmd_id":"00000000-0000-4000-8000-000000000001","issuer":"cli:alice","issued_at_ns":1790000000000000000,"expires_at_ns":1790000030000000000,"account":"acct-a","cmd":{"type":"Kill","level":"Account","hard":true}}

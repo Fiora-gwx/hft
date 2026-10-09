@@ -215,6 +215,7 @@ cargo xtask gen-host [--host <name>] [--check]
 | 码值与布局 | `#[repr(C)]` 结构里名为 `*kind`/`*level`/`*purpose`/`*role`/`*mode`/`*status`/`*reason`/`*code` 的整型字段,注释含码值(`=`)或码表链接;结构字段字节和与声明字节数一致 |
 | 依赖图 | `crates/AGENTS.md` 依赖方向图与 `deps.toml` 不一致 |
 | 环名 | [hft-event 环拓扑](../crates/hft-event/README.md#环元素类型) 与 [hft-sequencer](../crates/hft-sequencer/README.md) 环表的环名与元素类型不一一对应(optional 的 `chain-in`/`chain-out` 不参与) |
+| 权限表 | [hft-ctl-proto 权限表](../crates/hft-ctl-proto/README.md#权限表)与 `crates/hft-ctl-proto/src/perms.rs` 的 `PERM_ROWS`、`OPTIONAL_ROWS` 渲染出的行不逐行相同(CTP-093) |
 | venue README | `scope: core` 的 `venue-*` README 缺 [hft-venue-proto 必备节](../crates/hft-venue-proto/README.md#每个-venue-readme-的必备节) 中的任一节或某节缺现货/永续之一;venue 预算表某项未写 p50 与 p99,或任一分位宽于 [hft-venue-proto 统一门槛表](../crates/hft-venue-proto/README.md#延迟与资源契约);门槛表与 hft-net 预算、[latency-budget](../docs/latency-budget.md) `ingest` 行的核对规则(归 hft-venue-proto)不成立 |
 | runbook 结构 | `docs/runbooks/` 下 frontmatter `scope: core` 的页缺 [写法规则](../docs/runbooks/README.md#写法规则) 规定的二级标题(适用范围、前置条件、步骤、验收、回退、记录)或顺序不同 |
 | 范围 | 每个组件 README frontmatter 的 `scope` 是范围的**唯一来源**;`doc-check` 据此生成根 [README](../README.md) 的组件一览,不一致即失败;正文出现"阶段 N"或"第 N 周"式措辞即失败——optional 内容写成"可选扩展:……(触发条件)";`status: frozen` 的组件跳过跨文档一致性检查 |

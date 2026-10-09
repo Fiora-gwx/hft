@@ -36,20 +36,27 @@ pub struct GatewayConfig {
     pub dedup_capacity: u32,              // 最近 cmd_id 缓存,默认 4096
     pub advisor_mem_budget_mib: u32,      // 装配时从 EngineConfig ECF1 段 5 `advisor_mem_budget_mib` 读入(与 sequencer 同一个值;字段归 hft-sequencer,取值归 apps/hft-core),SetParams 校验 ⑧ 用
     pub advisor_ckpt_max_mib: u32,        // 同上,读 ECF1 段 5 `advisor_ckpt_max_mib`;SetParams 校验 ⑧ 用
+    pub max_groups_per_instance: u16,     // 装配时读 ECF1 Capacities `max_groups_per_instance`:交给 S::decode_params 的 GroupTable 容量(超出 → SDK TooManyGroups)
 }
-pub struct Gateway<S: StrategySet> { /* listener、连接表、挂起表、去重缓存、journal 尾随游标、S 的静态描述 */ }
-impl<S: StrategySet> Gateway<S> {
-    pub fn new(cfg: GatewayConfig, rd: RefDataHandle,
-               ctl: ByteProducer,                          // ctl 环:hft-rt ByteSpsc,容量 ≥ 256 KiB,单条 ≤ 容量/4
+impl GatewayConfig { pub fn new(socket_path, principals, advisor_mem_budget_mib, advisor_ckpt_max_mib, max_groups_per_instance) -> GatewayConfig; } // 其余字段取默认值;没有默认值的三项是参数
+pub struct Gateway<S: StrategySet, R: CtlRing = ByteProducer, J: ResultSource = JournalReader> { /* listener、连接表、Core(挂起表、去重缓存、限速、比较基准)、结果源 */ }
+impl<S: StrategySet, R: CtlRing, J: ResultSource> Gateway<S, R, J> {
+    pub fn new(cfg: GatewayConfig, rd: RefData,
+               ctl: R, ring_bytes: usize,                  // ctl 环:hft-rt ByteSpsc,容量 ring_bytes ≥ 256 KiB(否则 GatewayError),单条 ≤ 容量/4
                parsed: MailboxSender<ParsedConfig<S>>,     // 解析好的大对象(StrategyParams 解码结果、RiskParams;类型归 hft-sequencer)
                retired: MailboxReceiver<ParsedConfig<S>>,  // sequencer 交还的旧对象,在本任务释放
                internal: Consumer<InternalCmd>,            // housekeeping 的 SIGTERM 路径(issuer = cli:systemd)
                refdata_check: RefdataAssemblyCheck,        // 装配处提供:hft-core 启动步 2 的同一组装配校验函数,ReplaceRefdata 用
+               risk_decode: RiskDecode,                    // 装配处提供:hft-risk 的 RiskParams 解码与作用域检查(Err = BadValue/OutOfScope),SetRisk 用
                active_params: Vec<ParsedConfig<S>>,        // 装配处另行解码的启动时生效 StrategyParams(每 (实例, 账户) 一份),SetParams 的比较基准
-               journal: JournalReader, clock: TscUtc) -> Result<Gateway<S>, GatewayError>;
+               journal: J /* CmdResult 源:seq journal 读者 */, clock: TscUtc, engine: EngineInfo) -> Result<Gateway<S, R, J>, GatewayError>;
+    pub fn adopt(&mut self, stream: UnixStream, uid: u32); // 接受后、SO_PEERCRED 之后的路径;测试以 socket pair 注入凭证
 }
-impl<S: StrategySet> hft_rt::PollTask for Gateway<S> {
-    fn poll_once(&mut self, now: Tsc) -> bool;             // 非阻塞:accept/recv/send 各至多一批 + 尾随一批 CmdResult;不睡眠
+pub trait CtlRing { fn fits(&mut self, lens: &[usize]) -> bool; fn write_all(&mut self, recs: &[Rec]) -> bool; } // 一个请求的全部记录一次写入或一条不写
+pub trait ResultSource { fn next_result(&mut self) -> Option<CmdResult>; }             // JournalReader 实现:尾随 seq journal 取 CmdResult
+impl<S: StrategySet, R: CtlRing, J: ResultSource> hft_rt::PollTask for Gateway<S, R, J> {
+    fn poll_once(&mut self, now: Tsc) -> Polled;           // 非阻塞:accept/recv/send 各至多一批 + 尾随一批 CmdResult;不睡眠
+    fn has_pending(&self) -> bool;                         // 有连接待读或待写
     fn wait_fds(&self, out: &mut WaitFds);                   // listener 与各连接 fd,交给 TaskLoop 的 epoll
     fn next_deadline(&self) -> Option<Tsc>;                // 最早的挂起超时
 }
@@ -57,7 +64,9 @@ impl<S: StrategySet> hft_rt::PollTask for Gateway<S> {
 
 `CtlRecord`(`encode_into(&mut [u8])`)与 `TscUtc` 以基础层为准:前者在 [hft-event](../hft-event/README.md),后者在 [hft-rt](../hft-rt/README.md);`StrategySet` 在 [hft-strategy-sdk](../hft-strategy-sdk/README.md)。
 
-- 任务模型:由 hft-rt `TaskLoop` 调度,与其他可阻塞任务不同线程;每连接一请求一响应后关闭;无 tokio。
+- 任务模型:由 hft-rt `TaskLoop` 调度,与其他可阻塞任务不同线程;每连接一请求一响应后关闭;无 tokio。处理逻辑在与 socket 无关的 `Core<S, R>`(`on_request(conn, peer_uid, body, now)`、`on_result`、`on_tick`、`on_internal`),`Gateway` 只做 I/O。
+- ctl 环里 Multi kind(`ControlCmd`、`ConfigBlob`)的 `CtlRecord` 体 = `PartHdr` + 段(即该段 journal 记录体);`ControlCmd` 恒为单段,`ConfigBlob` 按 `PART_MAX_CHUNK` 分段,逻辑体 = `BlobHdr` + blob。
+- `ParsedConfig<S>` 的类型归 hft-sequencer;该 crate 落地前暂定义在本 crate `parsed.rs`(字段同下文),届时原样迁移并改为引用。
 - 处理一个写请求,按以下顺序取第一个失败:① 对端 uid([鉴权](#鉴权)第 1 条)→ ② 读帧与模式(`invalid_request`)→ ③ issuer(鉴权第 2 条)→ ④ `hft_ctl_proto::allowed`(uid 上限 ∩ issuer 角色 ∩ 聊天类型;按命令与**目标值**静态分类;`Forbidden`)→ ⑤ `check_confirm_fields`(`invalid_request`)→ ⑥ `cmd_id` 去重缓存([CmdResult 回传](#cmdresult-回传))→ ⑦ 过期(`Expired`)→ ⑧ 限速(`RateLimited`)→ ⑨ `normalize`(`InvalidArgs`)→ ⑩ 命令相关的 gateway 校验(下节)→ ⑪ 写 `CtlRecord`(其引用的 `ConfigBlob` 分段在 `ControlCmd` 之前,另加审计 `Note`)进 ctl 环;对 `SetParams`、`SetRisk` 与 `ReplaceRefdata`(`RefData::load(新 blob, 当前)` 的结果,成败都交给 sequencer 复核)另把**解析好的对象**放进 `Mailbox`(单槽:上一个未被取走时回 `Busy`)。一个请求的全部记录一次写入或一条不写。只读的 `GetSchema` 在 ⑤ 之后直接应答;`ReconcileReport` 跳过 ⑥ 与 ⑧,整组写入 ctl 环后回 `Applied`(没有 `CmdResult`,不进去重缓存)。preview、确认、版本、放宽、闸门、账户类型相关的前置条件都只是**透传**给 sequencer 判定。
 - ctl 环满(剩余空间放不下该请求的全部记录)→ 立即回 `Busy`,不排队不阻塞,该请求的审计 `Note` 也不写(环没有空间)。
 
@@ -67,7 +76,7 @@ impl<S: StrategySet> hft_rt::PollTask for Gateway<S> {
 
 | 命令 | gateway 校验 |
 |---|---|
-| `SetParams` | ① `hft_event::parse_spb1`(失败的 `ParamsErr`:`DupGroup` → `InvalidArgs{GroupIdDup}`(111),其余值 → `InvalidArgs{BadGroup}`(112);容器结构:长度、`GroupSpec`(含 `GroupId` 的构造规则:高 8 位 = 该实例)、`LegDef`;body 不透明,其布局与覆盖表规则在 ⑥ 由 SDK `params` 校验);② `StrategyParamsHdr.strategy/account` 与命令一致(`ScopeMismatch`);③ `rd.check_binding(account, strategy, kind_id)`:账户已绑定到该策略实例、种类一致(`AccountBound`、`KindMismatch`);④ 对每个 `GroupSpec` 调 `rd.check_group`(腿 inst 可交易、venue 在账户内、同基础资产、同报价资产、任两腿不在同一交易所 → `SameExchangeLegs`);`GroupId` 在 blob 内唯一(`GroupIdDup`);⑤ `kind_id ∈ S::kinds()`、`schema_id/schema_ver` 是编译进来的版本、`schema_digest` 与编译进来的 schema 一致(`SchemaUnsupported`、`SchemaMismatch`);⑥ `S::decode_params(kind_id, body, schema_ver, &groups)` 解码、`S::validate_params` 校验(策略与 SDK 返回的 `ParamError`(含 `TooManyGroups`)映射为 `InvalidArgs{ParamInvalid}`,kind `Strategy`,arg 带字段下标或"未指明");⑦ 该种类 `StrategyDesc.non_prod_only` 为真而 `rd.account(account).is_prod` → `ParamInvalid`(kind `NonProdOnly`);⑧ `S::model_mem_bytes(&params, n_groups)` 与 `S::model_snapshot_bytes(&params, n_groups)` 算出新参数下的 Model 内存上界 `model_mem` 与检查点上界 `model_ckpt`,单个实例已超过 `advisor_mem_budget_mib`、或 2 × `model_ckpt` 已超过 `advisor_ckpt_max_mib` → `ParamInvalid`(kind `ModelMemBudget`);再与该 (实例, 账户) 的生效参数副本(见下)比较,按 SDK 的规则判定是否改动了 `FieldDesc.structural` 字段(`structural_changed`),并调 `S::reset_preview` 生成预览所需的估算。全部通过后,解码结果 + `GroupTable` + `model_mem`、`model_ckpt`、`structural_changed`、`reset_preview`(字段归 hft-sequencer `ParsedConfig`)经 Mailbox 交给 sequencer;sequencer 只核对 sha256 并复核 ③ 与 ⑦,再做需要状态的检查(跨 group 的 `GroupId` 全局唯一、`InstOwned`、有仓位 group 不得移除、全部实例的内存上界之和与检查点上界之和不超过预算、类别是否为升级)。detail 码见 [control-plane 结果码](../../docs/subsystems/control-plane.md#结果码) |
+| `SetParams` | ⓪ `kind_id ∉ S::kinds()` → `SchemaUnsupported`(先于 ③ 的种类比对);① `hft_event::parse_spb1`(失败的 `ParamsErr`:`DupGroup` → `InvalidArgs{GroupIdDup}`(111),其余值 → `InvalidArgs{BadGroup}`(112);容器结构:长度、`GroupSpec`(含 `GroupId` 的构造规则:高 8 位 = 该实例)、`LegDef`;body 不透明,其布局与覆盖表规则在 ⑥ 由 SDK `params` 校验);② `StrategyParamsHdr.strategy/account` 与命令一致(`ScopeMismatch`);③ `rd.check_binding(account, strategy, kind_id)`:账户已绑定到该策略实例、种类一致(`AccountBound`、`KindMismatch`);④ 对每个 `GroupSpec` 调 `rd.check_group`(腿 inst 可交易、venue 在账户内、同基础资产、同报价资产、任两腿不在同一交易所 → `SameExchangeLegs`);`GroupId` 在 blob 内唯一(`GroupIdDup`);⑤ `kind_id ∈ S::kinds()`、`schema_id/schema_ver` 是编译进来的版本、`schema_digest` 与编译进来的 schema 一致(`SchemaUnsupported`、`SchemaMismatch`);⑥ `S::decode_params(kind_id, body, schema_ver, &groups)` 解码、`S::validate_params` 校验(策略与 SDK 返回的 `ParamError`(含 `TooManyGroups`)映射为 `InvalidArgs{ParamInvalid}`,kind `Strategy`,arg 带字段下标或"未指明");⑦ 该种类 `StrategyDesc.non_prod_only` 为真而 `rd.account(account).is_prod` → `ParamInvalid`(kind `NonProdOnly`);⑧ `S::model_mem_bytes(&params, n_groups)` 与 `S::model_snapshot_bytes(&params, n_groups)` 算出新参数下的 Model 内存上界 `model_mem` 与检查点上界 `model_ckpt`,单个实例已超过 `advisor_mem_budget_mib`、或 2 × `model_ckpt` 已超过 `advisor_ckpt_max_mib` → `ParamInvalid`(kind `ModelMemBudget`);再与该 (实例, 账户) 的生效参数副本(见下)比较,按 SDK 的规则判定是否改动了 `FieldDesc.structural` 字段(`structural_changed`),并调 `S::reset_preview` 生成预览所需的估算。全部通过后,解码结果 + `GroupTable` + `model_mem`、`model_ckpt`、`structural_changed`、`reset_preview`(字段归 hft-sequencer `ParsedConfig`)经 Mailbox 交给 sequencer;sequencer 只核对 sha256 并复核 ③ 与 ⑦,再做需要状态的检查(跨 group 的 `GroupId` 全局唯一、`InstOwned`、有仓位 group 不得移除、全部实例的内存上界之和与检查点上界之和不超过预算、类别是否为升级)。detail 码见 [control-plane 结果码](../../docs/subsystems/control-plane.md#结果码) |
 | `SetRisk` | 按 hft-risk 的编码解析 `RiskParams`(解析失败 → `BadValue`),作用域外字段改动 → `OutOfScope`;与 `ExecConfig` 的一致性(`ExecRiskMismatch`)由 sequencer 判定 |
 | `SimReset`、`SimTransfer`、`SimFault` | 目标账户 `AccountMeta.kind == Sim`(`NotSim`;`prod` 实例没有 Sim 账户,`SimFault` 在那里一律以此被拒);`SimTransfer` 的两个 venue 与 `SimFault` 的 venue 都在该账户 `venues` 内、资产存在(否则 `UnknownName`) |
 | `VenueNotice` | venue 存在;`inst ≠ 0` 时属于该 venue(两者不满足 → `UnknownName`);`FundingInterval` 的 `new_s ∈ {3600, 7200, 14400, 28800}`(其他值 → `InvalidArgs{BadValue}`;是否另有别的周期待核实(方法:见开发备忘));`Maintenance` 的 `from_ns < to_ns`(否则 `BadValue`) |
@@ -164,9 +173,9 @@ impl CtlClient {
 | 文件 | 职责 |
 |---|---|
 | `src/lib.rs` | 公开 API |
-| `src/gateway/{task,auth,rate,pending}.rs` | `PollTask` 实现、鉴权、限速、挂起表 |
-| `src/gateway/validate.rs` | 上表的 gateway 侧命令校验(含 SetParams 的 SPB1 解析、绑定检查与 `S::decode_params`) |
-| `src/gateway/schema.rs` | `GetSchema` 本地应答 |
+| `src/core.rs` | 与 socket 无关的处理:鉴权第 2 条起的全部步骤、限速、挂起表、去重、gateway 侧命令校验(含 SetParams 的 SPB1 解析、绑定检查与 `S::decode_params`)、`GetSchema` 本地应答、审计 Note |
+| `src/gateway.rs` | `PollTask` 实现:Unix socket、`SO_PEERCRED`、连接状态机、`ResultSource` |
+| `src/principals.rs`、`src/config.rs`、`src/ring.rs`、`src/parsed.rs` | 签发者表、配置、ctl 环接口、`ParsedConfig`(暂居) |
 | `src/client.rs` | Rust 客户端 |
 | `clients/python/hftctl.py`、`clients/python/test_hftctl.py` | 纯 Python 客户端与测试 |
 | `tests/golden_frames.rs` | 对 `fixtures/ctl/*.json` 的金样 |
@@ -196,7 +205,7 @@ gateway 不在 tick-to-trade 路径,无微秒预算;约束的是**它对热核�
 ## 依赖
 
 - 内部:`hft-ctl-proto`(帧、模式、规范化、权限)、`hft-types`、`hft-event`(含 SPB1 解析)、`hft-refdata`(`check_binding`/`check_group`)、[hft-strategy-sdk](../hft-strategy-sdk/README.md)(`StrategySet` trait 与 `params` 的 schema JSON;具体的策略集合由 apps/hft-core 从 hft-strategy-registry 以泛型参数传入)、`hft-risk`(`RiskParams` 解码)、`hft-sequencer`(仅 `ParsedConfig<S>` 类型)、`hft-journal`(只读者)、`hft-rt`(`ByteSpsc` 生产端、`Mailbox`、`PollTask`、TSC↔UTC)。
-- 外部:`serde`/`serde_json`(仅 gateway 与客户端;warm/cold)、`uuid`、`sha2`(`cmd_hash`)、`base64`、`nix`(`SO_PEERCRED`)。
+- 外部:`serde_json`(仅 gateway 与客户端;warm/cold)、`sha2`(blob 的 sha256)、`base64`、`toml`(签发者表)、`zerocopy`、`libc`(`SO_PEERCRED`、`getpwnam`)。
 - 禁止:`tokio`(gateway 在热进程内)、任何 `strategies/*`(只经 `S: StrategySet` 泛型)、任何 hot crate 反向依赖本 crate(sequencer 只看到 ctl 环里的记录与 Mailbox 里的对象)。
 
 ## 延伸阅读
@@ -209,6 +218,8 @@ gateway 不在 tick-to-trade 路径,无微秒预算;约束的是**它对热核�
 ## 已知限制与后续工作
 
 - 只有本机 Unix socket,不做远程转发。可选扩展:optional 的 chain-core 若迁到另一主机,需在该主机部署同一 uid 的转发客户端,或改由 hft-core 经外部 venue 会话转发(链上策略接入立项时定)。
+- hft-rt `ByteProducer` 没有剩余空间查询:生产实现的 `CtlRing::fits` 只能乐观返回真,一个请求的后续记录放不下时已写入的前段留在环里(惰性的 `ConfigBlob` 段;命令本身在最后写)。hft-rt 补充按字节的剩余空间查询后改为精确判定(测试环 `VecRing` 已精确)。
+- `WaitFds` 至多 64 个 fd:监听者加 64 个连接时最后一个连接不进 epoll 集合(仍被轮询)。
 - issuer 真实性依赖客户端进程(ops_bot)的自证。可选扩展:端到端签名(触发条件见 [hft-ctl-proto](../hft-ctl-proto/README.md#已知限制与后续工作))。
 - 读命令(状态查询)不走本通道:冷进程直接读 journal/Parquet;gateway 不提供状态服务(`GetSchema` 是编译期静态数据,例外)。
 - `SetParams` 的 body 解码在 gateway(warm)里执行策略代码(`ParamSet::decode/validate`);它们必须是纯函数且有界,策略 crate 的 `validate` 预算由 [hft-strategy-sdk](../hft-strategy-sdk/README.md) 规定。

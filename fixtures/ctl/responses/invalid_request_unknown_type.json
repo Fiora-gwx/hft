@@ -1,0 +1,1 @@
+{"v":2,"cmd_id":"00000000-0000-4000-8000-000000000003","status":"invalid_request","code":"InvalidArgs","detail":{"name":"UnknownDiscriminant"},"engine":{"version":"0.4.0","epoch":17,"refdata":"sha256:00","params":{},"risk":7},"body":{}}

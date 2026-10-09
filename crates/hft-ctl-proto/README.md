@@ -1,7 +1,7 @@
 ---
 description: "控制面的纯协议层:长度前缀帧、请求/响应 JSON 模式、JSON → ControlCmd 的规范化编码、角色(Admin/Trader/Viewer)与权限表;ctl-gateway、Rust/Python 客户端、hft-cfg 与 optional 的 chain-core gateway 共用"
 kind: crate
-tier: pure
+tier: warm
 scope: core
 status: spec
 ---
@@ -34,27 +34,34 @@ pub fn frame_len(hdr: &[u8; 4]) -> Result<usize, FrameErr>;          // N > MAX_
 pub fn encode_frame(json: &[u8], out: &mut Vec<u8>);
 
 /// 请求/响应的类型化视图(serde,只在 warm/cold 使用)。
+pub fn parse_request(body: &[u8]) -> Result<CmdRequest, SchemaErr>;   // 模式层校验;SchemaErr → invalid_request(detail 只可能是 UnknownDiscriminant)
 pub struct CmdRequest { pub v: u8, pub cmd_id: Uuid, pub issuer: Issuer, pub issued_at_ns: i64, pub expires_at_ns: i64,
                         pub account: AccountSel, pub preview: bool, pub confirmed: bool, pub expect_state_version: Option<u64>,
                         pub view_account: Option<AccountName>, pub chat_type: Option<ChatType>, pub cmd: CmdBody }
 pub enum CmdBody { /* 每个 ControlCmd 变体一个 JSON 形状(type 字段区分)+ 只读请求 GetSchema */ }
 pub struct CmdResponse { pub v: u8, pub cmd_id: Uuid, pub status: TransportStatus, pub code: Option<ResultCode> /* status = accepted 时 None */, pub detail: Option<Detail> /* 名字 + arg,码表归 control-plane */, pub seq: Option<u64>,
                          pub cmd_hash: Option<Hex32> /* gateway 规范化时算出的 cmd_hash;只读请求与规范化之前就被拒的请求为 None */,
-                         pub ctl_state_version: Option<u64>, pub preview: Option<PreviewBody>, pub engine: EngineInfo, pub body: serde_json::Value }
+                         pub ctl_state_version: Option<u64>, pub preview: Option<Box<RawValue>> /* PreviewBody */, pub engine: EngineInfo,
+                         pub body: Box<serde_json::value::RawValue> /* 原样透传,不改键序 */ }
 
 /// 规范化:JSON 命令体 → hft-event ControlCmd 字节(数值按 refdata 资产指数转定点,名字解析为稠密 id)。
 pub fn normalize(req: &CmdRequest, rd: &RefData) -> Result<Normalized, NormErr>;  // NormErr → InvalidArgs{detail}
-pub struct Normalized { pub record: CtlRecord /* hft-event */, pub cmd_hash: [u8; 32], pub blobs: FixedVec<BlobPart, 64>,
-                        pub params_blob: Option<&'static [u8]> /* SetParams:原始 SPB1 字节,交给 gateway 做结构与 body 校验 */ }
+pub struct Normalized { pub kind: EventKind /* ControlCmd 或 ReconcileReport */, pub hdr: CmdHdr, pub record: Vec<u8> /* ControlCmd 逻辑体 = CmdHdr + 载荷 */,
+                        pub cmd_hash: [u8; 32], pub blobs: Vec<BlobPart> /* ≤ 64 段 ConfigBlob,体 = PartHdr + 段 */, pub blob: Option<Vec<u8>> /* 解码后的大参数 */,
+                        pub reports: Vec<ReconcileReport> }
+impl Normalized { pub fn params_blob(&self) -> Option<&[u8]> /* SetParams:原始 SPB1 字节,交给 gateway 做结构与 body 校验 */;
+                  pub fn set_gateway_fields(&mut self, expires_tsc: u64, peer_uid: u32, role: u8);
+                  pub fn ring_records(&self) -> Vec<(EventKind, RecordFlags, Vec<u8>)> /* 写环顺序:ConfigBlob 各段,再一段 ControlCmd(PartHdr + 逻辑体);或各条 ReconcileReport */ }
 
 /// 权限:纯函数,gateway 调用;不需要任何 sequencer 状态。
 pub fn class_of(cmd: &CmdBody) -> CmdClass;                  // Downgrade | Upgrade | Neutral | ReadOnly,按命令与目标值静态判定;
                                                               // 类别"按状态"的 SetParams、SetRisk 静态返回 Neutral(放宽与否由 sequencer 判定)
 pub fn allowed(role: RoleSet, principal: Principal, chat: ChatType, cmd: &CmdBody) -> Result<(), PermErr>; // → Forbidden
-pub fn needs_confirm_static(role: Role, principal: Principal, cmd: &CmdBody) -> ConfirmRule;
+pub fn effective_role(roles: RoleSet, principal: Principal, chat: ChatType, cmd: &CmdBody) -> Option<Role>; // 人工主体允许该命令的最高角色(= CmdHdr.role)
+pub fn needs_confirm_static(role: Option<Role> /* 进程主体 None */, principal: Principal, cmd: &CmdBody) -> ConfirmRule;
 pub enum ConfirmRule { Never, Always, IfLoosening /* 由 sequencer 按状态判定(SetRisk、人工与 pipeline 的 SetParams) */, PreviewBound /* Viewer 的 Kill:绑定预览 cmd_hash + 60 s TTL */ }
 /// 确认字段的静态检查(gateway 在得到有效角色后调用):confirmed = true 时,PreviewBound 以外的命令必须带非 0 的 expect_state_version。
-pub fn check_confirm_fields(rule: ConfirmRule, req: &CmdRequest) -> Result<(), NormErr>;   // → invalid_request
+pub fn check_confirm_fields(rule: ConfirmRule, req: &CmdRequest) -> Result<(), NormErr>;   // → invalid_request(NormErr.detail = 0)
 pub const VIEWER_CONFIRM_TTL_MS: u32 = 60_000;   // 语义归 control-plane;sequencer 执行,客户端用于提示
 ```
 
@@ -100,7 +107,7 @@ pub const VIEWER_CONFIRM_TTL_MS: u32 = 60_000;   // 语义归 control-plane;sequ
 
 ### 权限表
 
-**唯一归属**:代码 `src/perms.rs`;本表由 doc-check 生成比对;[control-plane](../../docs/subsystems/control-plane.md)、[hft-ctl](../hft-ctl/README.md)、[ops_bot](../../python/ops_bot/README.md) 只链接这里(群聊放行列表即"群聊"列)。角色 `Admin`、`Trader`、`Viewer`(**老板 = Viewer**:唯一改变状态的写权限是"紧急停止"——非 HARD、不带 flatten、默认 `cancel_resting` 的 `Kill{Global | Account}`,须二次确认;另可发无状态效果的 `Annotate{OpsNote | LocalWrite}`;不能 `Resume`,不能发任何其他写命令)的定义见 [control-plane 角色](../../docs/subsystems/control-plane.md#角色)。"scope"列:`core` = 首次上线必须具备;`optional` = 已分配编码与语义,未实现前 `perms.rs` 不含该行,gateway 返回 `Forbidden`(触发条件见 [control-plane 命令集](../../docs/subsystems/control-plane.md#命令集))。类别按命令与**目标值**静态判定(`SetMode → Live` 升级;`→ CloseOnly`/`→ Shadow` 降级);"按状态"的类别由 sequencer 判定([control-plane 类别](../../docs/subsystems/control-plane.md#类别))。"进程主体"列的主体见下节。"确认"列:`是` = 一律要求二次确认;`放宽时是` = sequencer 判定为升级(放宽)时要求确认,收紧或中性时不要求;`否` = sequencer 不要求(客户端仍可先预览)。
+**唯一归属**:代码 `src/perms.rs`;本表由 doc-check 生成比对;[control-plane](../../docs/subsystems/control-plane.md)、[hft-ctl](../hft-ctl/README.md)、[ops_bot](../../python/ops_bot/README.md) 只链接这里(群聊放行列表即"群聊"列)。角色 `Admin`、`Trader`、`Viewer`(**老板 = Viewer**:唯一改变状态的写权限是"紧急停止"——非 HARD、不带 flatten、默认 `cancel_resting` 的 `Kill{Global | Account}`,须二次确认;另可发无状态效果的 `Annotate{OpsNote | LocalWrite}`;不能 `Resume`,不能发任何其他写命令)的定义见 [control-plane 角色](../../docs/subsystems/control-plane.md#角色)。"scope"列:`core` = 首次上线必须具备;`optional` = 已分配编码与语义,未实现前 `perms.rs` 的 `PERM_ROWS` 不含该行(只在不参与 `allowed` 判定、仅供本表生成的 `OPTIONAL_ROWS` 中),gateway 返回 `Forbidden`(触发条件见 [control-plane 命令集](../../docs/subsystems/control-plane.md#命令集))。类别按命令与**目标值**静态判定(`SetMode → Live` 升级;`→ CloseOnly`/`→ Shadow` 降级);"按状态"的类别由 sequencer 判定([control-plane 类别](../../docs/subsystems/control-plane.md#类别))。"进程主体"列的主体见下节。"确认"列:`是` = 一律要求二次确认;`放宽时是` = sequencer 判定为升级(放宽)时要求确认,收紧或中性时不要求;`否` = sequencer 不要求(客户端仍可先预览)。
 
 | 命令 / 参数组合 | scope | 类别 | Viewer | Trader | Admin | 群聊 | 进程主体 | 确认 |
 |---|---|---|---|---|---|---|---|---|
@@ -171,16 +178,19 @@ pipeline、reconciler、`ops_bot` 自身与 `cli:systemd` 是**进程主体**,�
 | 文件 | 职责 |
 |---|---|
 | `src/frame.rs` | 帧编解码 |
-| `src/schema.rs` | `CmdRequest`/`CmdResponse`/`CmdBody`(serde) |
+| `src/schema.rs` | `CmdRequest`/`CmdBody` 的严格解析与规范 JSON 写出 |
+| `src/response.rs` | `CmdResponse`、`EngineInfo`、预览体渲染 |
+| `src/codes.rs` | 结果码、detail 码的名字与 arg 渲染 |
+| `src/names.rs` | 名字 ↔ 稠密 id(venue 名 = hft-core `venues.<v>.protocol` 名) |
 | `src/normalize.rs` | JSON → `CtlRecord` 与 `cmd_hash` |
-| `src/perms.rs` | 权限表、主体表、角色码(唯一来源) |
-| `fixtures/ctl/*.json` | 金样帧(Rust 与 Python 客户端共用) |
+| `src/perms.rs` | 权限表(`PERM_ROWS` + `OPTIONAL_ROWS`)、主体表、角色码(唯一来源) |
+| `fixtures/ctl/*.json` | 金样帧(Rust 与 Python 客户端共用);请求 JSON 为规范形(`CmdRequest::to_json`:键序固定、`preview`/`confirmed` 只在为 true 时写出、缺省的可选键省略) |
 
 </details>
 
 ## 延迟与资源契约
 
-无热路径约束(pure,只在 warm 的 gateway 与冷客户端里调用)。`normalize` 对一帧上限大小的请求(`blob_b64` 解码后为 `MAX_BLOB`)p99 ≤ 1 ms(`ctlproto/normalize_1m`)。
+无热路径约束(warm:不做 I/O、不建线程、不读时钟,只在 warm 的 gateway 与冷客户端里调用;因依赖 `serde_json` 不能标为 pure)。`normalize` 对一帧上限大小的请求(`blob_b64` 解码后为 `MAX_BLOB`)p99 ≤ 1 ms(`ctlproto/normalize_1m`)。
 
 ## 测试与验收
 
@@ -189,7 +199,7 @@ pipeline、reconciler、`ops_bot` 自身与 `cli:systemd` 是**进程主体**,�
 ## 依赖
 
 - 内部:`hft-types`、`hft-refdata`、`hft-event`(`ControlCmd`、`CmdHdr`、`CtlRecord`、`BlobRef`、SPB1 头)。不依赖 hft-strategy-sdk 与任何 `strategies/*`(schema JSON 只透传)。
-- 外部:`serde`/`serde_json`、`uuid`、`sha2`、`base64`。
+- 外部:`serde`/`serde_json`、`uuid`、`sha2`、`base64`、`zerocopy`(hft-event 记录体的字节视图)。
 - 禁止:I/O、线程、`tokio`、任何运行时状态、L1 引擎 crate(参数与风控参数的解码在 hft-ctl 的 gateway 里调用)。
 
 ## 延伸阅读

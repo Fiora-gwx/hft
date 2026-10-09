@@ -37,8 +37,8 @@ spec: README.md
 
 **基线 `G0`**(`crates/hft-ctl/tests/common/mod.rs::g0()`;用例 `前置` 写"G0"时以下取值都显式生效,用例另列的取值覆盖它们;不依赖任何默认值):
 
-- 策略集:hft-testkit 的 `TestStrategies`(`probe-taker` kind_id 0xFF01、`probe-target` kind_id 0xFF02);用例需要 `non_prod_only`、声明的 `mem_bytes`/`snapshot_bytes`、结构字段或命令描述符(`CmdDesc`)时,在 `前置` 写明所用 testkit 测试种类的这些属性。
-- refdata:与 [hft-ctl-proto 基线 P0](../hft-ctl-proto/TESTS.md#用例) 相同(`fixtures/refdata/ctl-p0.blob`:账户 `acct-a`(1,Live,venue `binance-usdm` + `bitget-spot`,绑定 `s1-main`)、`acct-b`(2,Live,venue `binance-spot` + `bitget-usdt-futures`,绑定 `s2-main`)、`sim-a`(9,Sim,venue `binance-usdm` + `bitget-spot`,绑定 `s9-sim`);group `g1` = `16777317`、`g2` = `33554533`、`g9` = `150995045`)。
+- 策略集:hft-testkit 的 `TestStrategies`(`probe-taker` kind_id 0xFF01、`probe-target` kind_id 0xFF02;testkit 提供之前用 `tests/common/set.rs` 手写的同名种类,另有 `non_prod_only` 的 `probe-np` 0xFF03;字段 `win`(结构)、`thr`、`bad`(`validate` 拒绝非 0)、`mem`、`ckpt`,命令描述符 `op 1`/`op 2` 同 CTL-067);用例需要 `non_prod_only`、声明的 `mem_bytes`/`snapshot_bytes`、结构字段或命令描述符(`CmdDesc`)时,在 `前置` 写明所用 testkit 测试种类的这些属性。
+- refdata:与 [hft-ctl-proto 基线 P0](../hft-ctl-proto/TESTS.md#用例) 相同(`fixtures/refdata/ctl-p0.blob`:账户 `acct-a`(1,Live,venue `binance-usdm` + `bitget-spot`,绑定 `s1-main`)、`acct-b`(2,Live,venue `binance-spot` + `bitget-usdt-futures`,绑定 `s2-main`)、`sim-a`(3,Sim,venue `binance-usdm` + `bitget-spot`,绑定 `s9-sim`(`StrategyId 3`));inst `binance-usdm:BTCUSDT` = 1、`binance-spot:BTCUSDT` = 2、`bitget-usdt-futures:BTCUSDT` = 3、`bitget-spot:BTCUSDT` = 4;group `g1` = `16777317`、`g2` = `33554533`、`g9` = `50331749`)。
 - `GatewayConfig`:`result_wait_ms = 5000`、`write_rate_per_min = 12`、`warmup_rate_per_s = 50`、`dedup_capacity = 4096`、`advisor_mem_budget_mib = 256`、`advisor_ckpt_max_mib = 1024`;`socket_path` = 临时目录下的 `ctl.sock`。
 - `principals`:uid 1100 = `hft-opsbot`(issuer `tg:1001` {Viewer}、`tg:1002` {Trader}、`tg:1003` {Admin}、`tg:1004` {Viewer, Trader}、`tg:1005` {Viewer}、`ops_bot`);uid 1101 = `hft-pipeline`(`pipeline`);uid 1102 = `hft-recon`(`reconciler`);uid 1200 = 登录 `alice`(`cli:alice` {Admin});uid 1201 = `tom`(`cli:tom` {Trader});uid 1202 = `vera`(`cli:vera` {Viewer})。
 - ctl 环:hft-rt `ByteSpsc` 262 144 B(单条 ≤ 65 536 B);消费端由测试读取。`parsed`/`retired` 为单槽 `Mailbox`。
@@ -55,7 +55,7 @@ spec: README.md
 - 规则:[gateway(warm 任务,`poll_once` 形态)](README.md#gatewaywarm-任务poll_once-形态)
 - 级别:table
 - 里程碑:M2
-- 前置:`GatewayConfig::default()`(只取有默认值的字段)
+- 前置:`GatewayConfig::new(socket_path, principals, 256, 1024, 8)`(没有默认值的三项作参数,其余取默认值)
 - 实现:`crates/hft-ctl/tests/config.rs::ctl_001_config_defaults`
 
 | 行 | 字段 | 期望 |
@@ -64,7 +64,7 @@ spec: README.md
 | CTL-001.2 | `write_rate_per_min` | `12` |
 | CTL-001.3 | `warmup_rate_per_s` | `50` |
 | CTL-001.4 | `dedup_capacity` | `4096` |
-| CTL-001.5 | `advisor_mem_budget_mib`、`advisor_ckpt_max_mib` | 没有默认值:由装配从 ECF1 段 5 读入,测试构造不经 `default()` 时必须显式给出 |
+| CTL-001.5 | `advisor_mem_budget_mib`、`advisor_ckpt_max_mib`、`max_groups_per_instance` | 没有默认值:由装配从 ECF1 读入,是 `new` 的参数 |
 
 ### CTL-002 Gateway::new 拒绝容量不足的 ctl 环与不可用的 socket 路径
 
@@ -113,7 +113,7 @@ spec: README.md
 - 规则:[gateway(warm 任务,`poll_once` 形态)](README.md#gatewaywarm-任务poll_once-形态)
 - 级别:prop
 - 里程碑:M2
-- 性质:每次 `poll_once` 的墙钟耗时 ≤ 1 ms(不含被测机调度抖动的重试:同一输入重放 3 次取最小值),从不调用阻塞的 `read`/`write`/`accept`/`sleep`(以 seccomp 跟踪确认只有非阻塞 fd 上的调用);返回值为真当且仅当本次处理了至少一个事件
+- 性质:每次 `poll_once` 的墙钟耗时 ≤ 1 ms(release 构建;debug 构建 ≤ 20 ms;同一输入重放 3 次取逐步最小值),全部 fd 非阻塞(慢连接、半帧、中途关闭不让它等待);返回值为真当且仅当本次处理了至少一个事件
 - 生成:0–64 个连接;每个连接的字节流随机切成 1–4 096 字节的片,片间随机停顿 0–50 ms;其中 20% 的连接只发帧头不发体、10% 的连接中途关闭、10% 的连接不读响应
 - 参考:每次调用的计时与系统调用记录
 - 例数:PR 200
@@ -210,7 +210,7 @@ spec: README.md
   1. 运行 `poll_once` 直到连接关闭
 - 期望:
   - 响应为 `{"v":2,"cmd_id":"00000000-0000-0000-0000-000000000000","status":"unauthorized","code":"Unauthorized", …}`,随后 EOF
-  - gateway 对该连接没有调用 `read`(系统调用跟踪中该 fd 只有 `accept`、`getsockopt(SO_PEERCRED)`、`write`、`close`)
+  - gateway 对该连接不读请求(未知 uid 的连接在接受时即进入只写状态)
   - ctl 环恰有一条审计 Note:`cmd_id` 全零、`cmd_kind = 0`、`result_code = 10`、`role = 0`、issuer 字节全零;没有 `ControlCmd`
 - 实现:`crates/hft-ctl/tests/auth.rs::ctl_030_unknown_uid`
 
@@ -400,7 +400,7 @@ spec: README.md
 - 步骤:
   1. `cli:alice` 发 `SmokeOrder{venue bitget-spot, inst bitget-spot:BTCUSDT, side Buy}`,`account acct-a`
 - 期望:
-  - `Forbidden`;不写 `ControlCmd`;gateway 进程在整个用例期间没有打开 `.github/hft-admins.txt`(文件访问跟踪中无该路径)
+  - `Forbidden`;不写 `ControlCmd`;gateway 的鉴权输入只有构造时给出的签发者表(`.github/hft-admins.txt` 不被读取或修改)
 - 实现:`crates/hft-ctl/tests/auth.rs::ctl_040_admin_from_issuer_table_only`
 
 ### CTL-050 write_rate_per_min 按 (now − 60 s, now] 的滑动窗口计数
@@ -698,7 +698,7 @@ spec: README.md
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| CTL-081.1 | body 截短 3 字节 | `InvalidArgs{ParamInvalid}`,`arg = "Strategy"` |
+| CTL-081.1 | body 少一个字段(截短 8 字节,`body_len` 随之更新,容器仍合法) | `InvalidArgs{ParamInvalid}`,`arg = "Strategy"` |
 | CTL-081.2 | `validate` 拒绝第 2 个字段 | `InvalidArgs{ParamInvalid}`,`arg = "Strategy:2"` |
 | CTL-081.3 | 9 个 group | `InvalidArgs{ParamInvalid}`,`arg = "Strategy"`(SDK `TooManyGroups`) |
 | CTL-081.4 | 8 个 group | 写环 |
@@ -1477,7 +1477,7 @@ spec: README.md
 
 | 行 | 状态 / 请求 | 期望 |
 |---|---|---|
-| CTL-210.1 | `VenueNotice{binance-usdm, inst binance-usdm:BTCUSDT, Delisting}` | `Applied`;`Delisting` cap `(venue 1, inst 101)`;订阅该 inst 的实例收到 `EventRef::Notice` |
+| CTL-210.1 | `VenueNotice{binance-usdm, inst binance-usdm:BTCUSDT, Delisting}` | `Applied`;`Delisting` cap `(venue 1, inst 1)`;订阅该 inst 的实例收到 `EventRef::Notice` |
 | CTL-210.2 | 先 `Drain{cancel_resting false}`;210.1 | `Applied` |
 | CTL-210.3 | `VenueNotice{binance-usdm, FundingInterval, new_s 14400}`,`account *` | `Applied` |
 | CTL-210.4 | `VenueNotice{binance-usdm, Maintenance, …}`,`account *` | `Applied` |
