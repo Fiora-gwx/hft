@@ -13,6 +13,7 @@ mod common;
 mod params;
 mod preempt;
 mod boot;
+mod env;
 mod recover;
 mod strategies;
 mod views;

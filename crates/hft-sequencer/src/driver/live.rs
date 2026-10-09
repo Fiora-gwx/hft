@@ -155,6 +155,8 @@ pub struct LiveDriver<S: StrategySet, IO: LiveIo<S>> {
     kf_done: Vec<InstId>,
     funding_written: Option<(VenueId, i64)>,
     snapshot_round: bool,
+    /// A `Timer{Sys, Roll}` was handed in this round (at most one per round).
+    roll_this_round: bool,
     lim: Limits,
     /// Inputs handed per round (tests).
     pub taken_log: Vec<(EventKind, Option<RingId>)>,
@@ -201,6 +203,7 @@ impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
             kf_done: Vec::with_capacity(64),
             funding_written: None,
             snapshot_round: false,
+            roll_this_round: false,
             lim: Limits::default(),
             taken_log: Vec::with_capacity(4096),
             _s: core::marker::PhantomData,
@@ -208,7 +211,7 @@ impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
     }
 
     fn ms_ticks(v: &DriverView<'_>, ms: u64) -> u64 {
-        ((u128::from(ms) * u128::from(v.tsc_hz_milli())) / 1_000_000_000) as u64
+        ((u128::from(ms) * u128::from(v.tsc_hz_milli())) / 1_000_000) as u64
     }
 
     fn ns_ticks(v: &DriverView<'_>, ns: u64) -> u64 {
@@ -277,7 +280,8 @@ impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
         if self.rolled_hour == i64::MIN {
             self.rolled_hour = hour;
         }
-        if size_now || size_idle || hourly {
+        if (size_now || size_idle || hourly) && !self.roll_this_round {
+            self.roll_this_round = true;
             if hourly {
                 self.rolled_hour = hour;
             }
@@ -696,6 +700,7 @@ impl<S: StrategySet, IO: LiveIo<S>> Driver<S> for LiveDriver<S, IO> {
         self.a_env_done = false;
         self.exclusive = false;
         self.snapshot_round = false;
+        self.roll_this_round = false;
         self.backpressure = false;
         self.rings_empty_at_begin = self.all_rings_empty();
         // Staged FeedCmd first.
