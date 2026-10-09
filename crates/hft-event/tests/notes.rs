@@ -59,6 +59,15 @@ fn evt_075_note_registry_rows() {
         ),
         ("EVT-075.10", "IdentityMismatch", Sequencer, Some(P0), va),
         ("EVT-075.11", "RefdataRecheckFailed", Sequencer, Some(P1), &[]),
+        ("EVT-075.89", "TimersCancelled", Sequencer, Some(Info), &[]),
+        ("EVT-075.90", "TargetCleared", Sequencer, Some(Info), &[]),
+        (
+            "EVT-075.91",
+            "PositionDiff",
+            Sequencer,
+            Some(P1),
+            &[(0, 8), (8, 8), (64, 64), (128, 64)],
+        ),
         ("EVT-075.12", "RateLimitHit", Risk, Some(P2), &[]),
         ("EVT-075.13", "CapSet", Risk, Some(Info), &[(0, 384)]),
         ("EVT-075.14", "CapCleared", Risk, Some(Info), &[(0, 384)]),
@@ -178,8 +187,8 @@ fn evt_075_note_registry_rows() {
         ("EVT-075.82", "AdvisorStats", Advisor, Some(Info), &[]),
         ("EVT-075.88", "ModelCkptSkipped", Advisor, Some(P1), &[]),
     ];
-    assert_eq!(NOTE_NAMES.len(), 85);
-    assert_eq!(rows.len(), 85);
+    assert_eq!(NOTE_NAMES.len(), 88);
+    assert_eq!(rows.len(), 88);
     for (i, (row, name, src, lvl, v)) in rows.iter().enumerate() {
         let n = note_name(name).unwrap_or_else(|| panic!("{row}"));
         assert_eq!(NOTE_NAMES[i].name, *name, "{row} order");

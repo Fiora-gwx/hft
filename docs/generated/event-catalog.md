@@ -1301,6 +1301,9 @@
 | `ShadowDeferred` | Sequencer |  | Info | `strategy` [0, +8)、`account` [8, +8)、`group` [64, +64)、`state` [128, +64) |
 | `IdentityMismatch` | Sequencer |  | P0 | `venue` [0, +8)、`account` [8, +8) |
 | `RefdataRecheckFailed` | Sequencer |  | P1 |  |
+| `TimersCancelled` | Sequencer |  | Info |  |
+| `TargetCleared` | Sequencer |  | Info |  |
+| `PositionDiff` | Sequencer |  | P1 | `venue` [0, +8)、`account` [8, +8)、`ledger_qty` [64, +64)、`report_qty` [128, +64) |
 | `RateLimitHit` | Risk | 1 | P2 |  |
 | `CapSet` | Risk | 2 | Info | `cap` [0, +384) |
 | `CapCleared` | Risk | 3 | Info | `cap` [0, +384) |

@@ -292,6 +292,9 @@ pub static NOTE_NAMES: &[NoteName] = notes![
     ShadowDeferred: Sequencer, Info, [f("strategy", 0, 8), f("account", 8, 8), f("group", 64, 64), f("state", 128, 64)];
     IdentityMismatch: Sequencer, P0, [f("venue", 0, 8), f("account", 8, 8)];
     RefdataRecheckFailed: Sequencer, P1, [];
+    TimersCancelled: Sequencer, Info, [];
+    TargetCleared: Sequencer, Info, [];
+    PositionDiff: Sequencer, P1, [f("venue", 0, 8), f("account", 8, 8), f("ledger_qty", 64, 64), f("report_qty", 128, 64)];
     RateLimitHit: Risk, P2, [];
     CapSet: Risk, Info, [f("cap", 0, 384)];
     CapCleared: Risk, Info, [f("cap", 0, 384)];

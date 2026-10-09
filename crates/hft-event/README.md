@@ -580,6 +580,9 @@ pub struct Note {                   // 0x0506,80 B;热路径唯一的"日志",�
 | `ShadowDeferred` | Sequencer | Info | v[0] = strategy \| account << 8,v[1] = group;v[2] = 0 推迟 / 1 已落到 Shadow(hft-risk `ModeOutcome` 给出,sequencer 写) |
 | `IdentityMismatch` | Sequencer | P0 | UID 核验不符:v[0] = venue \| account << 8;hft-risk 置账户级 HARD 并发起 Drain(sequencer 按 `ModeOutcome` 写本条),hft-core 以退出码 2 结束 |
 | `RefdataRecheckFailed` | Sequencer | P1 | `ReplaceRefdata` 的 Drain 末二次复核不通过(复核由 apps/hft-core 执行、结果作为 Input 交 sequencer):sequencer 撤销该 blob 的待生效引用并写本条,旧 refdata 继续生效,进程以退出码 0 结束(`v[]` 归 hft-sequencer) |
+| `TimersCancelled` | Sequencer | Info | `SetParams` 移除 group 时撤销了该 group 的策略定时器:`Note.group` = 被移除的 group,v[0] = 撤销条数(hft-sequencer) |
+| `TargetCleared` | Sequencer | Info | `SetParams` 移除 group 时撤销了该 group 在执行层的目标:`Note.group` = 被移除的 group,v[0] = strategy,v[1] = account(hft-sequencer) |
+| `PositionDiff` | Sequencer | P1 | `PositionReport` 的数量与账本仓位不同:v[0] = venue \| account << 8,v[1] = 账本量,v[2] = 报告量(原始值;差异的处理归对账) |
 | `RateLimitHit` | Risk | P2 | 限速命中(`v[]` 归 [hft-risk](../hft-risk/README.md)) |
 | `CapSet` / `CapCleared` | Risk | Info | v[0..6] = 该条 [`CapRecord`](#cap-记录) 的 48 字节;告警级别由 [watchtower](../../apps/watchtower/README.md) 按 cap 来源定 |
 | `MarginLevel` | Risk | 按档位:L2 P1、L3 P0 | v = [account \| venue << 8, level, liq_dist, ratio, deadline_ens];档位语义归 hft-risk |

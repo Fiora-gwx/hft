@@ -103,12 +103,9 @@ pub mod note {
     pub const SHADOW_DEFERRED: u32 = 8;
     pub const IDENTITY_MISMATCH: u32 = 9;
     pub const REFDATA_RECHECK_FAILED: u32 = 10;
-    /// Sequencer bookkeeping Notes that are not in the README table (appended).
     pub const TIMERS_CANCELLED: u32 = 11;
     pub const TARGET_CLEARED: u32 = 12;
     pub const POSITION_DIFF: u32 = 13;
-    pub const FUNDING_MISMATCH_SEEN: u32 = 14;
-    pub const SUBS_FULL: u32 = 15;
 }
 
 /// The `(source, n, name)` table of the Sequencer Notes.
@@ -127,6 +124,9 @@ pub const NOTE_CODES: &[(NoteSource, u32, &str)] = &[
         note::REFDATA_RECHECK_FAILED,
         "RefdataRecheckFailed",
     ),
+    (NoteSource::Sequencer, note::TIMERS_CANCELLED, "TimersCancelled"),
+    (NoteSource::Sequencer, note::TARGET_CLEARED, "TargetCleared"),
+    (NoteSource::Sequencer, note::POSITION_DIFF, "PositionDiff"),
 ];
 
 /// Full code of a Sequencer Note.
