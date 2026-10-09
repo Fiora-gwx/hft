@@ -23,7 +23,11 @@ fn tick() -> ev::Ev {
 
 /// Sets I1's quote around `mid` and delivers it to group `gix` at the current time.
 fn bbo<M: Model>(h: &mut ModelHarness, m: &mut M, v: &mut MockViews, gix: u16, mid: i64) {
-    v.bbo(I1, (Px(mid - 50), Qty(100_000_000)), (Px(mid + 50), Qty(100_000_000)));
+    v.bbo(
+        I1,
+        (Px(mid - 50), Qty(100_000_000)),
+        (Px(mid + 50), Qty(100_000_000)),
+    );
     model(h, m, &ev::bbo(I1, gix, v.bbo_of(I1)), v);
 }
 
@@ -31,9 +35,22 @@ fn bbo<M: Model>(h: &mut ModelHarness, m: &mut M, v: &mut MockViews, gix: u16, m
 fn sdk_030_no_model_is_empty() {
     type N = NoModel<TPParams>;
     let p = tp(8, &[]);
-    assert_eq!((N::LAYOUT_VERSION, N::PATH_VERSION, N::WARMUP, N::LAYOUT.sections.len()), (0, 0, false, 0));
     assert_eq!(
-        (N::mem_bytes(&p, 8), N::snapshot_bytes(&p, 8), N::path_settle_ms(&p), N::cold_start_ms(&p, 0)),
+        (
+            N::LAYOUT_VERSION,
+            N::PATH_VERSION,
+            N::WARMUP,
+            N::LAYOUT.sections.len()
+        ),
+        (0, 0, false, 0)
+    );
+    assert_eq!(
+        (
+            N::mem_bytes(&p, 8),
+            N::snapshot_bytes(&p, 8),
+            N::path_settle_ms(&p),
+            N::cold_start_ms(&p, 0)
+        ),
         (0, 0, 0, 0)
     );
     let mut v = clocked_views();
@@ -43,8 +60,14 @@ fn sdk_030_no_model_is_empty() {
     assert_eq!((c.path.len(), c.body.len(), c.n_chunks), (0, 0, 0), "step 2");
     let m_ = &mut v;
     m_.bbo(I1, (Px(6_500_000), Qty(1)), (Px(6_500_100), Qty(1)));
-    assert!(model(&mut h, &mut m, &ev::bbo(I1, 0, v.bbo_of(I1)), &v).is_empty(), "step 3 bbo");
-    assert!(model(&mut h, &mut m, &ev::warmup(1, 0, true, &[1]), &v).is_empty(), "step 3 warmup");
+    assert!(
+        model(&mut h, &mut m, &ev::bbo(I1, 0, v.bbo_of(I1)), &v).is_empty(),
+        "step 3 bbo"
+    );
+    assert!(
+        model(&mut h, &mut m, &ev::warmup(1, 0, true, &[1]), &v).is_empty(),
+        "step 3 warmup"
+    );
 }
 
 #[test]
@@ -64,7 +87,11 @@ fn sdk_032_model_on_params_idempotent() {
     assert!(m.groups.iter().all(|g| g.s.len() == 100));
     let before = h.snapshot_all(&m, 65_536);
     for i in 0..2 {
-        assert_eq!(m.on_params(&p, &t, &v.refview()), ModelParamEffect::None, "call {i}");
+        assert_eq!(
+            m.on_params(&p, &t, &v.refview()),
+            ModelParamEffect::None,
+            "call {i}"
+        );
         let c = h.snapshot_all(&m, 65_536);
         assert_eq!((&c.path, &c.body), (&before.path, &before.body), "call {i}");
     }
@@ -72,15 +99,18 @@ fn sdk_032_model_on_params_idempotent() {
 
 /// SDK-063's script: 8 groups, 256 warmup samples each, then 300 live Bbos per group (one per
 /// second); returns the checkpoint.
-fn full_window<M: Model<Params = TP2Params>>(h: &mut ModelHarness) -> (TP2Params, hft_strategy_sdk::testing::Ckpt) {
+fn full_window<M: Model<Params = TP2Params>>(
+    h: &mut ModelHarness,
+) -> (TP2Params, hft_strategy_sdk::testing::Ckpt) {
     let specs: Vec<_> = (1..=8u32).map(|n| gspec(GroupId(0x0300_0000 + n))).collect();
     let t = GroupTable::new(&specs, 8);
     let p = tp2(8, &[]);
     let mut v = clocked_views();
     let mut m = h.track(|| M::new(s3(0xFF02), &p, &t, &v.refview()));
     for (gix, g) in t.iter() {
-        let samples: Vec<(i64, i64)> =
-            (0..256).map(|k| (UTC0 - (300 - k) * 1_000_000_000, 6_500_000 + i64::from(gix) + k)).collect();
+        let samples: Vec<(i64, i64)> = (0..256)
+            .map(|k| (UTC0 - (300 - k) * 1_000_000_000, 6_500_000 + i64::from(gix) + k))
+            .collect();
         let e = ev::warmup(1, u32::from(gix), gix == 7, &warm_chunk(g.id, &samples));
         model(h, &mut m, &e, &v);
     }
@@ -133,11 +163,23 @@ fn sdk_178_nan_not_output() {
     }
     let out = model(&mut h, &mut m, &tick(), &v);
     assert_eq!(out.len(), 2);
-    let a: Vec<(GroupId, BandAdvice)> = out.iter().map(|(g, k, b)| {
-        assert_eq!(*k, 1);
-        (*g, BandAdvice::decode(b).unwrap())
-    }).collect();
-    assert_eq!(a[0], (G1, BandAdvice { flags: NOT_READY, band: 0 }));
+    let a: Vec<(GroupId, BandAdvice)> = out
+        .iter()
+        .map(|(g, k, b)| {
+            assert_eq!(*k, 1);
+            (*g, BandAdvice::decode(b).unwrap())
+        })
+        .collect();
+    assert_eq!(
+        a[0],
+        (
+            G1,
+            BandAdvice {
+                flags: NOT_READY,
+                band: 0
+            }
+        )
+    );
     let sum: i64 = mids.iter().sum();
     let want = model_math::round_even(sum as f64 / 10.0).unwrap();
     assert_eq!(a[1].0, G2);

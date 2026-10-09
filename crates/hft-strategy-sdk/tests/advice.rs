@@ -32,7 +32,10 @@ fn probe(v: &MockViews) -> TargetProbe {
     TargetProbe::new(s3(0xFF02), &tp2(3, &[]), &gt3(), &v.refview()).unwrap()
 }
 
-const P: BandAdvice = BandAdvice { flags: 0, band: 6_500_000 };
+const P: BandAdvice = BandAdvice {
+    flags: 0,
+    band: 6_500_000,
+};
 
 #[test]
 fn sdk_171_payload_roundtrip_unknown_version() {
@@ -76,7 +79,12 @@ fn sdk_172_advice_staleness() {
 }
 
 /// Emits `n` payloads of `len` bytes in one run; returns (results, outputs, full count).
-fn emit(n: usize, len: usize, group: hft_types::GroupId, kind: u16) -> (Vec<Result<(), AdviceFull>>, usize, u32) {
+fn emit(
+    n: usize,
+    len: usize,
+    group: hft_types::GroupId,
+    kind: u16,
+) -> (Vec<Result<(), AdviceFull>>, usize, u32) {
     let mut h = ModelHarness::new();
     let bytes = vec![7u8; len];
     let mut res = Vec::new();

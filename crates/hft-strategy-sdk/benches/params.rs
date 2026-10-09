@@ -41,7 +41,6 @@ fn sdk_204_body_view(c: &mut Criterion) {
     });
 }
 
-
 #[path = "../tests/common/mod.rs"]
 mod common;
 
@@ -135,7 +134,9 @@ fn sdk_203_params_decode(c: &mut Criterion) {
     let bytes = body.as_bytes();
     let t = table(64, 64);
     assert!(P64::decode(bytes, 1, &t).is_ok());
-    c.bench_function("sdk/params_decode", |b| b.iter(|| P64::decode(black_box(bytes), 1, &t).is_ok()));
+    c.bench_function("sdk/params_decode", |b| {
+        b.iter(|| P64::decode(black_box(bytes), 1, &t).is_ok())
+    });
 }
 
 fn sdk_205_params_validate(c: &mut Criterion) {
@@ -144,7 +145,9 @@ fn sdk_205_params_validate(c: &mut Criterion) {
     for n in [1u32, 8, 64] {
         let t = table(n, 64);
         let ov: Vec<(u16, u16, i64)> = (0..n as u16).map(|gix| (gix, 0, 6_000_000)).collect();
-        let body = common::aligned(&encode_body(&common::TP, n as u16, &common::raw(common::tp_defaults(), &ov)).unwrap());
+        let body = common::aligned(
+            &encode_body(&common::TP, n as u16, &common::raw(common::tp_defaults(), &ov)).unwrap(),
+        );
         let bytes = body.as_bytes();
         let p = common::TPParams::decode(bytes, 2, &t).unwrap();
         assert_eq!(p.validate(&t, &rd.view()), Ok(()));
@@ -158,5 +161,10 @@ fn sdk_205_params_validate(c: &mut Criterion) {
     g.finish();
 }
 
-criterion_group!(benches, sdk_203_params_decode, sdk_204_body_view, sdk_205_params_validate);
+criterion_group!(
+    benches,
+    sdk_203_params_decode,
+    sdk_204_body_view,
+    sdk_205_params_validate
+);
 criterion_main!(benches);

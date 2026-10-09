@@ -9,11 +9,11 @@
 mod common;
 
 use common::*;
+use hft_strategy_sdk::ctx::SubEntry;
 use hft_strategy_sdk::params::{RawParams, encode_body};
 use hft_strategy_sdk::set::reset_preview_of;
 use hft_strategy_sdk::testing::{CtxHarness, MockViews, ModelHarness, Recorded, ev};
 use hft_strategy_sdk::*;
-use hft_strategy_sdk::ctx::SubEntry;
 use hft_types::{GROUP_NONE, Tsc};
 use proptest::prelude::{ProptestConfig, TestCaseError, any};
 use proptest::{prop_assert, prop_assert_eq, proptest};
@@ -37,19 +37,37 @@ fn sdk_186_static_queries() {
     assert!(ProbeSet::cmds(0xFF09).is_empty(), "SDK-186.4");
     assert_eq!(
         ProbeSet::schema_json(0xFF01),
-        Some(hft_strategy_sdk::params::schema_json(&EchoProbe::DESC, &ModelLayoutDesc::EMPTY, 2)),
+        Some(hft_strategy_sdk::params::schema_json(
+            &EchoProbe::DESC,
+            &ModelLayoutDesc::EMPTY,
+            2
+        )),
         "SDK-186.5"
     );
     assert_eq!(ProbeSet::schema_json(0xFF09), None, "SDK-186.6");
-    assert_eq!((ProbeSet::model_path_version(0xFF02), ProbeSet::model_path_version(0xFF01)), (1, 0), "SDK-186.7");
-    assert!(core::ptr::eq(ProbeSet::model_layout(0xFF02), ProbeModel::LAYOUT), "SDK-186.8");
+    assert_eq!(
+        (
+            ProbeSet::model_path_version(0xFF02),
+            ProbeSet::model_path_version(0xFF01)
+        ),
+        (1, 0),
+        "SDK-186.7"
+    );
+    assert!(
+        core::ptr::eq(ProbeSet::model_layout(0xFF02), ProbeModel::LAYOUT),
+        "SDK-186.8"
+    );
     assert_eq!(
         ProbeSet::decode_params(0xFF09, &[], 2, &gt3()).err(),
         Some(ParamError::SchemaMismatch { want: 0, got: 0xFF09 }),
         "SDK-186.9"
     );
     let p = tp2(3, &[]);
-    assert_eq!(ProbeSet::model_mem_bytes(&Params::TargetProbe(p.clone()), 8), ProbeModel::mem_bytes(&p, 8), "SDK-186.10");
+    assert_eq!(
+        ProbeSet::model_mem_bytes(&Params::TargetProbe(p.clone()), 8),
+        ProbeModel::mem_bytes(&p, 8),
+        "SDK-186.10"
+    );
     assert_eq!(ProbeModel::mem_bytes(&p, 8), 131_072);
 }
 
@@ -59,24 +77,41 @@ fn sdk_186_static_queries() {
 #[test]
 fn sdk_189_no_dyn_in_expansion() {
     let src = include_str!("../src/set_macro.rs");
-    let start = src.find("macro_rules! strategy_set").expect("strategy_set! definition");
+    let start = src
+        .find("macro_rules! strategy_set")
+        .expect("strategy_set! definition");
     let body = &src[start..];
-    let code: String = body.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
+    let code: String = body
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
     assert_eq!(code.matches("dyn ").count(), 0, "`dyn ` in the expansion");
     assert_eq!(code.matches("Box<").count(), 0, "`Box<` in the expansion");
     let on_event = code.find("fn on_event").expect("on_event");
-    let next_fn = code[on_event + 1..].find("fn ").map_or(code.len(), |i| on_event + 1 + i);
-    assert_eq!(code[on_event..next_fn].matches("match ").count(), 1, "on_event is one match");
+    let next_fn = code[on_event + 1..]
+        .find("fn ")
+        .map_or(code.len(), |i| on_event + 1 + i);
+    assert_eq!(
+        code[on_event..next_fn].matches("match ").count(),
+        1,
+        "on_event is one match"
+    );
 }
 
 /// Encodes random valid TP values: defaults in range, overrides of per-group fields.
 fn raw_params(n: u16, d: &[i64; 6], ov: &[(u16, u16, i64)]) -> RawParams {
-    let defaults = TP_FIELDS.iter().zip(d).map(|(f, &x)| f.min + x.rem_euclid(f.max - f.min + 1)).collect();
+    let defaults = TP_FIELDS
+        .iter()
+        .zip(d)
+        .map(|(f, &x)| f.min + x.rem_euclid(f.max - f.min + 1))
+        .collect();
     let overrides = ov
         .iter()
         .filter_map(|&(g, f, x)| {
             let fd = TP_FIELDS[usize::from(f % 6)];
-            fd.per_group.then(|| (g % n, f % 6, fd.min + x.rem_euclid(fd.max - fd.min + 1)))
+            fd.per_group
+                .then(|| (g % n, f % 6, fd.min + x.rem_euclid(fd.max - fd.min + 1)))
         })
         .fold(Vec::<(u16, u16, i64)>::new(), |mut acc, o| {
             // One value per (gix, field): a repeated key with another value is an encoding error.
@@ -95,7 +130,11 @@ fn rec_eq(a: &Recorded, b: &Recorded) -> Result<(), TestCaseError> {
 
 fn subs<S: Strategy>(s: &S, g: &GroupTable, v: &MockViews) -> (Vec<SubEntry>, Option<u32>) {
     let room = vec![8u16; 200];
-    let lim = SubsLimits { rd: &v.refdata().rd, feeds: FEEDS, room: &room };
+    let lim = SubsLimits {
+        rd: &v.refdata().rd,
+        feeds: FEEDS,
+        room: &room,
+    };
     let mut b = SubsBuilder::new(lim, 64);
     s.subscriptions(g, &mut b);
     (b.entries().to_vec(), b.model_tick_ms())
@@ -103,7 +142,11 @@ fn subs<S: Strategy>(s: &S, g: &GroupTable, v: &MockViews) -> (Vec<SubEntry>, Op
 
 fn set_subs(s: &Inst, g: &GroupTable, v: &MockViews) -> (Vec<SubEntry>, Option<u32>) {
     let room = vec![8u16; 200];
-    let lim = SubsLimits { rd: &v.refdata().rd, feeds: FEEDS, room: &room };
+    let lim = SubsLimits {
+        rd: &v.refdata().rd,
+        feeds: FEEDS,
+        room: &room,
+    };
     let mut b = SubsBuilder::new(lim, 64);
     ProbeSet::subscriptions(s, g, &mut b);
     (b.entries().to_vec(), b.model_tick_ms())
@@ -145,7 +188,15 @@ fn model_bytes<M: Model>(m: &M) -> (Vec<u8>, Vec<u8>) {
     (path, w.as_bytes().to_vec())
 }
 
-type Case = (bool, u16, [i64; 6], Vec<(u16, u16, i64)>, [i64; 6], Vec<(u16, u16, i64)>, Vec<(u8, u16, i64, u32)>);
+type Case = (
+    bool,
+    u16,
+    [i64; 6],
+    Vec<(u16, u16, i64)>,
+    [i64; 6],
+    Vec<(u16, u16, i64)>,
+    Vec<(u8, u16, i64, u32)>,
+);
 
 /// Runs one kind both ways: `S` directly, and through `ProbeSet`.
 fn compare<S: Strategy>(kind: u16, desc: &'static StrategyDesc, c: &Case) -> Result<(), TestCaseError> {
@@ -162,7 +213,9 @@ fn compare<S: Strategy>(kind: u16, desc: &'static StrategyDesc, c: &Case) -> Res
     let direct = S::Params::decode(body, 2, &t);
     let via = ProbeSet::decode_params(kind, body, 2, &t);
     prop_assert_eq!(direct.is_ok(), via.is_ok());
-    let (Ok(p), Ok(sp)) = (direct, via) else { return Ok(()) };
+    let (Ok(p), Ok(sp)) = (direct, via) else {
+        return Ok(());
+    };
     prop_assert_eq!(p.validate(&t, &rd), ProbeSet::validate_params(&sp, &t, &rd));
     // create / create_model / subscriptions.
     let mut a = S::new(s3(kind), &p, &t, &rd).unwrap();
@@ -170,9 +223,18 @@ fn compare<S: Strategy>(kind: u16, desc: &'static StrategyDesc, c: &Case) -> Res
     let mut ma = <S::Model as Model>::new(s3(kind), &p, &t, &rd);
     let mut mb = ProbeSet::create_model(s3(kind), &sp, &t, &rd);
     prop_assert_eq!(subs(&a, &t, &v), set_subs(&b, &t, &v));
-    prop_assert_eq!(<S::Model as Model>::mem_bytes(&p, 8), ProbeSet::model_mem_bytes(&sp, 8));
-    prop_assert_eq!(<S::Model as Model>::snapshot_bytes(&p, 8), ProbeSet::model_snapshot_bytes(&sp, 8));
-    prop_assert_eq!(<S::Model as Model>::path_settle_ms(&p), ProbeSet::model_path_settle_ms(&sp));
+    prop_assert_eq!(
+        <S::Model as Model>::mem_bytes(&p, 8),
+        ProbeSet::model_mem_bytes(&sp, 8)
+    );
+    prop_assert_eq!(
+        <S::Model as Model>::snapshot_bytes(&p, 8),
+        ProbeSet::model_snapshot_bytes(&sp, 8)
+    );
+    prop_assert_eq!(
+        <S::Model as Model>::path_settle_ms(&p),
+        ProbeSet::model_path_settle_ms(&sp)
+    );
     // Event script.
     let (mut ha, mut hb) = (CtxHarness::new(desc), CtxHarness::new(desc));
     let (mut hma, mut hmb) = (ModelHarness::new(), ModelHarness::new());
@@ -220,17 +282,32 @@ fn compare<S: Strategy>(kind: u16, desc: &'static StrategyDesc, c: &Case) -> Res
     let body2 = encode_body(&TP, n, &raw_params(n, d2, ov2)).unwrap();
     let al2 = aligned(&body2);
     let body2 = bytes_of(&al2, body2.len());
-    if let (Ok(p2), Ok(sp2)) = (S::Params::decode(body2, 2, &t), ProbeSet::decode_params(kind, body2, 2, &t)) {
-        prop_assert_eq!(a.on_params(&p2, &t, &rd), ProbeSet::on_params(&mut b, &sp2, &t, &rd));
-        prop_assert_eq!(ma.on_params(&p2, &t, &rd), ProbeSet::model_on_params(&mut mb, &sp2, &t, &rd));
+    if let (Ok(p2), Ok(sp2)) = (
+        S::Params::decode(body2, 2, &t),
+        ProbeSet::decode_params(kind, body2, 2, &t),
+    ) {
+        prop_assert_eq!(
+            a.on_params(&p2, &t, &rd),
+            ProbeSet::on_params(&mut b, &sp2, &t, &rd)
+        );
+        prop_assert_eq!(
+            ma.on_params(&p2, &t, &rd),
+            ProbeSet::model_on_params(&mut mb, &sp2, &t, &rd)
+        );
         prop_assert_eq!(snap(&a), snap_set(&b));
         prop_assert_eq!(model_bytes(&ma), model_bytes_set(&mb));
-        prop_assert_eq!(reset_preview_of::<S>(&p, &t, &p2, &t), ProbeSet::reset_preview(&sp, &t, &sp2, &t));
+        prop_assert_eq!(
+            reset_preview_of::<S>(&p, &t, &p2, &t),
+            ProbeSet::reset_preview(&sp, &t, &sp2, &t)
+        );
     }
     // Parameters of another kind are refused.
     let other = if kind == 0xFF01 { 0xFF02 } else { 0xFF01 };
     let op = ProbeSet::decode_params(other, body, 2, &t).unwrap();
-    prop_assert!(ProbeSet::on_params(&mut b, &op, &t, &rd).is_err(), "other kind's parameters");
+    prop_assert!(
+        ProbeSet::on_params(&mut b, &op, &t, &rd).is_err(),
+        "other kind's parameters"
+    );
     Ok(())
 }
 

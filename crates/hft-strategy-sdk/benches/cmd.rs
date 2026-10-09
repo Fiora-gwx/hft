@@ -18,7 +18,9 @@ fn sdk_200_cmd_parse(c: &mut Criterion) {
     }
     c.bench_function("sdk/cmd_parse", |b| {
         b.iter(|| {
-            let Ok(v) = CmdView::parse(black_box(&p)) else { return 0 };
+            let Ok(v) = CmdView::parse(black_box(&p)) else {
+                return 0;
+            };
             (0..31u8).fold(0i64, |a, i| a.wrapping_add(v.val(i).unwrap_or(0)))
         })
     });

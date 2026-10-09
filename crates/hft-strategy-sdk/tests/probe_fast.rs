@@ -39,7 +39,13 @@ fn sdk_015_overflow_drops_group_action() {
     });
     assert!(r.places.is_empty());
     let n: Vec<(u32, NoteLevel, GroupId)> = r.notes.iter().map(|n| (n.code, n.level, n.group)).collect();
-    assert_eq!(n, vec![(ECHO_OVERFLOW, NoteLevel::P2, G1), (ECHO_OVERFLOW, NoteLevel::P2, G2)]);
+    assert_eq!(
+        n,
+        vec![
+            (ECHO_OVERFLOW, NoteLevel::P2, G1),
+            (ECHO_OVERFLOW, NoteLevel::P2, G2)
+        ]
+    );
 }
 
 /// Valid version-2 body (no `fills`/`timer_hits`) for `groups`.
@@ -70,11 +76,23 @@ fn sdk_022_restore_version_window() {
     let v3 = snap(&src);
     let v2 = v2_body(&src.groups);
     let mut s = fresh();
-    assert_eq!(s.restore(&mut SnapshotReader::with_desc_version(&v3, 3)), Ok(()), "SDK-022.1");
+    assert_eq!(
+        s.restore(&mut SnapshotReader::with_desc_version(&v3, 3)),
+        Ok(()),
+        "SDK-022.1"
+    );
     assert_eq!(snap(&s), v3, "SDK-022.1 state restored");
     let mut s = fresh();
-    assert_eq!(s.restore(&mut SnapshotReader::with_desc_version(&v2, 2)), Ok(()), "SDK-022.2");
-    assert_eq!((s.mode, s.groups[0].cooldown_until_ens, s.groups[0].fills), (2, ENS0 + 7, 0), "SDK-022.2");
+    assert_eq!(
+        s.restore(&mut SnapshotReader::with_desc_version(&v2, 2)),
+        Ok(()),
+        "SDK-022.2"
+    );
+    assert_eq!(
+        (s.mode, s.groups[0].cooldown_until_ens, s.groups[0].fills),
+        (2, ENS0 + 7, 0),
+        "SDK-022.2"
+    );
     for (row, ver, body) in [("SDK-022.3", 1u16, &v2), ("SDK-022.4", 4, &v3)] {
         let mut s = fresh();
         let before = snap(&s);
@@ -121,7 +139,10 @@ fn sdk_128_cooldown_survives_restart() {
     assert_eq!(r.places.len(), 1);
     let b = snap(&s);
     let has = |x: [u8; 8]| b.windows(8).any(|w| w == x);
-    assert!(has((e + 20_000_000_000).to_le_bytes()), "B holds the engine_ns deadline");
+    assert!(
+        has((e + 20_000_000_000).to_le_bytes()),
+        "B holds the engine_ns deadline"
+    );
     assert!(!has(fire_tsc.to_le_bytes()), "B holds no TSC");
     assert!(!has(r.timers[0].at.0.to_le_bytes()), "B holds no timer TSC");
     // Restart at E + 5 s after 1 h of downtime.
@@ -129,7 +150,10 @@ fn sdk_128_cooldown_survives_restart() {
     let utc = Views::now(&v).utc_ns;
     v.restart_after(Tsc(7), 900, 3_600_000_000_000);
     let n = Views::now(&v);
-    assert_eq!((n.tsc, n.engine_ns, n.utc_ns, n.boot_seq), (Tsc(7), e + 5_000_000_000, utc + 3_600_000_000_000, 900));
+    assert_eq!(
+        (n.tsc, n.engine_ns, n.utc_ns, n.boot_seq),
+        (Tsc(7), e + 5_000_000_000, utc + 3_600_000_000_000, 900)
+    );
     let mut s2 = EchoProbe::new(s3(0xFF01), &tp(3, &[]), &t, &v.refview()).unwrap();
     s2.restore(&mut SnapshotReader::with_desc_version(&b, 3)).unwrap();
     let mut h2 = CtxHarness::new(&EchoProbe::DESC);
@@ -156,7 +180,10 @@ fn event(v: &mut MockViews, n: u16, st: Step) -> ev::Ev {
         0 => ev::bbo(I1, gix, quote(6_500_000 + x % 40_000)),
         1 => {
             let kind = if x % 3 == 0 {
-                OrderUpdateKind::Rejected { bits: RejectBits(1), venue_code: 0 }
+                OrderUpdateKind::Rejected {
+                    bits: RejectBits(1),
+                    venue_code: 0,
+                }
             } else {
                 OrderUpdateKind::Filled {
                     d: Qty(x % 5_000),
@@ -167,7 +194,15 @@ fn event(v: &mut MockViews, n: u16, st: Step) -> ev::Ev {
                     done: x % 2 == 0,
                 }
             };
-            ev::order(gix, OrderUpdate { r: OrderRef::new(V1, A1, (x % 64) as u32, 1), group: gid, tag: 0, kind })
+            ev::order(
+                gix,
+                OrderUpdate {
+                    r: OrderRef::new(V1, A1, (x % 64) as u32, 1),
+                    group: gid,
+                    tag: 0,
+                    kind,
+                },
+            )
         }
         2 => ev::exec(
             gix,
@@ -175,7 +210,10 @@ fn event(v: &mut MockViews, n: u16, st: Step) -> ev::Ev {
                 group: gid,
                 tag: 0,
                 origin: TargetOrigin::Strategy,
-                kind: ExecUpdateKind::Progress { leg_ix: 0, d: Qty(x % 1_000) },
+                kind: ExecUpdateKind::Progress {
+                    leg_ix: 0,
+                    d: Qty(x % 1_000),
+                },
                 target: [Qty(0); 4],
                 filled: [Qty(0); 4],
                 inflight: [Qty(0); 4],
@@ -187,11 +225,18 @@ fn event(v: &mut MockViews, n: u16, st: Step) -> ev::Ev {
             ev::manual_at(gix, op, &[x.rem_euclid(3)], op == 2)
         }
         5 => {
-            let a = BandAdvice { flags: (x % 2) as u8, band: x };
+            let a = BandAdvice {
+                flags: (x % 2) as u8,
+                band: x,
+            };
             ev::advice(gix, &a, now.boot_seq, now.tsc)
         }
         _ => {
-            let new = if x % 2 == 0 { RunMode::CloseOnly } else { RunMode::Live };
+            let new = if x % 2 == 0 {
+                RunMode::CloseOnly
+            } else {
+                RunMode::Live
+            };
             ev::mode(gix, RunMode::Live, new)
         }
     }

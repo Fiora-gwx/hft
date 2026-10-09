@@ -23,7 +23,6 @@ use proptest::{prop_assert_eq, proptest};
 const OPEN_TH: u16 = 0;
 const COOLDOWN: u16 = 1;
 const PCT_BIN: u16 = 2;
-const DEFAULT: u16 = 0xFFFF;
 
 /// TP2 parameters for `n` groups: `defaults` overrides (`(field, value)`) and per-group overrides.
 fn params(n: u16, defaults: &[(u16, i64)], overrides: &[(u16, u16, i64)]) -> TP2Params {
@@ -87,19 +86,77 @@ fn sdk_081_model_reset_by_cause() {
     let mut g3_asset2 = gspec(G3);
     g3_asset2.asset = ASSET2;
     let rows: Vec<(&str, GroupTable, TP2Params, ModelParamEffect, &[GroupId])> = vec![
-        ("SDK-081.1", table(&[gspec(G1), gspec(G2), gspec(G3), g4()]), params(4, &[], &[(1, PCT_BIN, 200_000)]), resets(8, &[(3, Fingerprint)]), &[G4]),
-        ("SDK-081.2", table(&[gspec(G1), gspec(G2), g3_leg_i5()]), old_params(), resets(8, &[(2, Fingerprint)]), &[G3]),
-        ("SDK-081.3", table(&[gspec(G1), gspec(G2), g3_asset2]), old_params(), resets(8, &[(2, Fingerprint)]), &[G3]),
-        ("SDK-081.4", gt3(), params(3, &[], &[(1, PCT_BIN, 300_000)]), resets(8, &[(1, Structural)]), &[G2]),
-        ("SDK-081.5", gt3(), params(3, &[(PCT_BIN, 150_000)], &[(1, PCT_BIN, 200_000)]), resets(8, &[(0, Structural), (2, Structural)]), &[G1, G3]),
-        ("SDK-081.6", gt3(), params(3, &[(PCT_BIN, 150_000)], &[]), ModelParamEffect::ResetAll, &[G1, G2, G3]),
-        ("SDK-081.7", gt3(), params(3, &[(OPEN_TH, 7_000_000), (COOLDOWN, 30_000)], &[(1, PCT_BIN, 200_000)]), ModelParamEffect::None, &[]),
-        ("SDK-081.8", {
-            let mut g1 = gspec(G1);
-            g1.open_allowed = 0;
-            table(&[g1, gspec(G2), gspec(G3)])
-        }, old_params(), ModelParamEffect::None, &[]),
-        ("SDK-081.9", table(&[gspec(G3), gspec(G1), gspec(G2)]), params(3, &[], &[(2, PCT_BIN, 200_000)]), ModelParamEffect::None, &[]),
+        (
+            "SDK-081.1",
+            table(&[gspec(G1), gspec(G2), gspec(G3), g4()]),
+            params(4, &[], &[(1, PCT_BIN, 200_000)]),
+            resets(8, &[(3, Fingerprint)]),
+            &[G4],
+        ),
+        (
+            "SDK-081.2",
+            table(&[gspec(G1), gspec(G2), g3_leg_i5()]),
+            old_params(),
+            resets(8, &[(2, Fingerprint)]),
+            &[G3],
+        ),
+        (
+            "SDK-081.3",
+            table(&[gspec(G1), gspec(G2), g3_asset2]),
+            old_params(),
+            resets(8, &[(2, Fingerprint)]),
+            &[G3],
+        ),
+        (
+            "SDK-081.4",
+            gt3(),
+            params(3, &[], &[(1, PCT_BIN, 300_000)]),
+            resets(8, &[(1, Structural)]),
+            &[G2],
+        ),
+        (
+            "SDK-081.5",
+            gt3(),
+            params(3, &[(PCT_BIN, 150_000)], &[(1, PCT_BIN, 200_000)]),
+            resets(8, &[(0, Structural), (2, Structural)]),
+            &[G1, G3],
+        ),
+        (
+            "SDK-081.6",
+            gt3(),
+            params(3, &[(PCT_BIN, 150_000)], &[]),
+            ModelParamEffect::ResetAll,
+            &[G1, G2, G3],
+        ),
+        (
+            "SDK-081.7",
+            gt3(),
+            params(
+                3,
+                &[(OPEN_TH, 7_000_000), (COOLDOWN, 30_000)],
+                &[(1, PCT_BIN, 200_000)],
+            ),
+            ModelParamEffect::None,
+            &[],
+        ),
+        (
+            "SDK-081.8",
+            {
+                let mut g1 = gspec(G1);
+                g1.open_allowed = 0;
+                table(&[g1, gspec(G2), gspec(G3)])
+            },
+            old_params(),
+            ModelParamEffect::None,
+            &[],
+        ),
+        (
+            "SDK-081.9",
+            table(&[gspec(G3), gspec(G1), gspec(G2)]),
+            params(3, &[], &[(2, PCT_BIN, 200_000)]),
+            ModelParamEffect::None,
+            &[],
+        ),
     ];
     for (row, t, p, want, empty) in rows {
         let mut v = clocked_views();
@@ -115,12 +172,21 @@ fn sdk_081_model_reset_by_cause() {
             if empty.contains(&g.id) {
                 assert!(mg.s.is_empty(), "{row}: {:?} empty", g.id);
             } else {
-                assert_eq!(after.get(&g.id.0), before.get(&g.id.0), "{row}: {:?} bytes unchanged", g.id);
+                assert_eq!(
+                    after.get(&g.id.0),
+                    before.get(&g.id.0),
+                    "{row}: {:?} bytes unchanged",
+                    g.id
+                );
             }
         }
         // The path section is in gix order: only rows that keep the order compare it (.7, .8).
         if want == ModelParamEffect::None && row != "SDK-081.9" {
-            assert_eq!(h.snapshot_all(&m, 65_536).path, path_before, "{row}: path section unchanged");
+            assert_eq!(
+                h.snapshot_all(&m, 65_536).path,
+                path_before,
+                "{row}: path section unchanged"
+            );
         }
     }
 }
@@ -145,7 +211,10 @@ fn sdk_082_pct_config_mismatch() {
     let p1 = params(3, &[], &[(1, PCT_BIN, 250_000)]);
     let mut m = ProbeModel::new(s3(0xFF02), &p1, &gt3(), &v.refview());
     h.restore_all(&mut m, &c, true).unwrap();
-    assert_eq!(m.on_params(&p1, &gt3(), &v.refview()), resets(8, &[(1, ResetCause::PctConfig)]));
+    assert_eq!(
+        m.on_params(&p1, &gt3(), &v.refview()),
+        resets(8, &[(1, ResetCause::PctConfig)])
+    );
     assert!(m.groups[1].s.is_empty());
     assert_eq!(m.groups[0].s, m0.groups[0].s);
     assert_eq!(m.groups[2].s, m0.groups[2].s);
@@ -179,8 +248,14 @@ fn sdk_084_group_resets_min_code() {
     r.set(1, PctConfig);
     r.set(1, Structural);
     r.set(5, PctConfig);
-    assert_eq!((r.get(1), r.get(5), r.get(0)), (Some(Structural), Some(Fingerprint), None));
-    assert_eq!(r.iter().collect::<Vec<_>>(), vec![(1, Structural), (5, Fingerprint)]);
+    assert_eq!(
+        (r.get(1), r.get(5), r.get(0)),
+        (Some(Structural), Some(Fingerprint), None)
+    );
+    assert_eq!(
+        r.iter().collect::<Vec<_>>(),
+        vec![(1, Structural), (5, Fingerprint)]
+    );
 }
 
 fn preview<const K: u8>(new_g: &GroupTable, new: &TP2Params) -> ResetPreview {
@@ -191,8 +266,15 @@ fn preview<const K: u8>(new_g: &GroupTable, new: &TP2Params) -> ResetPreview {
 fn sdk_087_reset_preview() {
     let with_g4 = table(&[gspec(G1), gspec(G2), gspec(G3), gspec(G4)]);
     let p4 = params(4, &[], &[(1, PCT_BIN, 200_000)]);
-    let pv = |r, n| ResetPreview { reset_groups: r, no_open_ms: n };
-    let non_struct = params(3, &[(OPEN_TH, 7_000_000), (COOLDOWN, 30_000)], &[(1, PCT_BIN, 200_000)]);
+    let pv = |r, n| ResetPreview {
+        reset_groups: r,
+        no_open_ms: n,
+    };
+    let non_struct = params(
+        3,
+        &[(OPEN_TH, 7_000_000), (COOLDOWN, 30_000)],
+        &[(1, PCT_BIN, 200_000)],
+    );
     let pct = params(3, &[(PCT_BIN, 150_000)], &[(1, PCT_BIN, 200_000)]);
     let swap = table(&[gspec(G1), gspec(G2), g3_leg_i5(), gspec(G4)]);
     let reorder = table(&[gspec(G3), gspec(G1), gspec(G2)]);
@@ -203,7 +285,11 @@ fn sdk_087_reset_preview() {
     assert_eq!(preview::<K_COLD>(&gt3(), &pct), pv(2, 300_000), "SDK-087.4");
     assert_eq!(preview::<K_PROBE>(&gt3(), &pct), pv(2, 60_000), "SDK-087.5");
     assert_eq!(preview::<K_COLD>(&swap, &p4), pv(2, 400_000), "SDK-087.6");
-    assert_eq!(preview::<K_COLD_HUGE>(&with_g4, &p4), pv(1, u32::MAX), "SDK-087.7");
+    assert_eq!(
+        preview::<K_COLD_HUGE>(&with_g4, &p4),
+        pv(1, u32::MAX),
+        "SDK-087.7"
+    );
     assert_eq!(preview::<K_COLD>(&reorder, &reorder_p), pv(0, 0), "SDK-087.8");
 }
 
@@ -244,7 +330,11 @@ fn build(s: &Side) -> (GroupTable, TP2Params, Vec<(GroupId, u64, i64)>) {
         .map(|&n| {
             let id = GroupId(0x0300_0000 + n);
             if s.alt[n as usize] {
-                if n % 2 == 0 { spec(id, BTC_ID, &[(I1, V1), (I5, V2)]) } else { spec(id, ASSET2, &[(I1, V1), (I2, V2)]) }
+                if n % 2 == 0 {
+                    spec(id, BTC_ID, &[(I1, V1), (I5, V2)])
+                } else {
+                    spec(id, ASSET2, &[(I1, V1), (I2, V2)])
+                }
             } else {
                 gspec(id)
             }
@@ -271,7 +361,10 @@ fn check_088(old: &Side, new: &Side) -> Result<(), TestCaseError> {
     let (ng, np, ne) = build(new);
     let reference = ne
         .iter()
-        .filter(|(id, fp, pct)| !oe.iter().any(|(oid, ofp, opct)| oid == id && ofp == fp && opct == pct))
+        .filter(|(id, fp, pct)| {
+            !oe.iter()
+                .any(|(oid, ofp, opct)| oid == id && ofp == fp && opct == pct)
+        })
         .count() as u32;
     let pv = reset_preview_of::<TargetProbe>(&op, &og, &np, &ng);
     prop_assert_eq!(pv.reset_groups, reference);

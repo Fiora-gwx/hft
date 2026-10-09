@@ -19,14 +19,25 @@ fn sdk_208_ref_view() {
     let r = RefView::new(&rd, A1);
     // `InstHot.kind` is the product kind; the market kind of the venue is `VenueCaps.market`.
     assert_eq!(r.inst(I2).kind, InstKind::Perp, "SDK-208.1");
-    assert_eq!(r.caps(r.inst(I2).venue).market, MarketKind::LinearPerp, "SDK-208.1");
+    assert_eq!(
+        r.caps(r.inst(I2).venue).market,
+        MarketKind::LinearPerp,
+        "SDK-208.1"
+    );
     assert_eq!(r.insts_of(BTC_ID), &[I1, I2, I3, I4], "SDK-208.2");
     assert_eq!(r.insts_of(ASSET2), &[I5], "SDK-208.3");
     assert_eq!(r.account().id, A1, "SDK-208.4");
-    assert_eq!((r.caps(V2).venue, r.caps(V2).market), (V2, MarketKind::LinearPerp), "SDK-208.5");
+    assert_eq!(
+        (r.caps(V2).venue, r.caps(V2).market),
+        (V2, MarketKind::LinearPerp),
+        "SDK-208.5"
+    );
     let fee = r.fee(A1, I1);
     assert_eq!((fee.maker.0, fee.taker.0), (200_000, 500_000), "SDK-208.6");
-    assert!(r.try_inst(I2).is_some_and(|h| core::ptr::eq(h, r.inst(I2))), "SDK-208.7");
+    assert!(
+        r.try_inst(I2).is_some_and(|h| core::ptr::eq(h, r.inst(I2))),
+        "SDK-208.7"
+    );
     assert!(r.try_inst(InstId(999)).is_none(), "SDK-208.8");
     assert_eq!(r.try_fee(A1, I1), Some(fee), "SDK-208.9");
     assert_eq!(r.try_fee(A2, I1), None, "SDK-208.10");

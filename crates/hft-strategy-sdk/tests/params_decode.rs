@@ -5,6 +5,7 @@
     clippy::disallowed_macros,
     clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
+#![allow(clippy::type_complexity)] // table-driven rows
 
 mod common;
 
@@ -32,7 +33,11 @@ fn groups(n: u32) -> GroupTable {
 
 #[test]
 fn sdk_059_too_many_groups() {
-    for (row, n, ok) in [("SDK-059.1", 7u32, true), ("SDK-059.2", 8, true), ("SDK-059.3", 9, false)] {
+    for (row, n, ok) in [
+        ("SDK-059.1", 7u32, true),
+        ("SDK-059.2", 8, true),
+        ("SDK-059.3", 9, false),
+    ] {
         let t = groups(n);
         assert_eq!(t.len(), n as u16, "{row}: the table keeps every spec");
         let b = body(0, tp_defaults(), &[]);
@@ -61,10 +66,34 @@ fn sdk_103_validate_shape_and_cross_field() {
     let g1_i5 = spec(G1, BTC_ID, &[(I1, V1), (I5, V2)]);
     let rows: [(&str, GroupTable, &[(u16, u16, i64)], i64, Result<(), ParamError>); 6] = [
         ("SDK-103.1", gt3(), &[], 1, Ok(())),
-        ("SDK-103.2", table(&[gspec(G1), one_leg, gspec(G3)]), &[], 1, Err(ParamError::GroupShape { gix: 1, code: 1 })),
-        ("SDK-103.3", table(&[gspec(G1), gspec(G2), g3_spot_leg1]), &[], 1, Err(ParamError::GroupShape { gix: 2, code: 2 })),
-        ("SDK-103.4", table(&[g1_i5, gspec(G2), gspec(G3)]), &[], 1, Err(ParamError::GroupShape { gix: 0, code: 3 })),
-        ("SDK-103.5", gt3(), &[(1, OPEN_TH, 0)], 1, Err(ParamError::Invalid { field_ix: 0, code: 1 })),
+        (
+            "SDK-103.2",
+            table(&[gspec(G1), one_leg, gspec(G3)]),
+            &[],
+            1,
+            Err(ParamError::GroupShape { gix: 1, code: 1 }),
+        ),
+        (
+            "SDK-103.3",
+            table(&[gspec(G1), gspec(G2), g3_spot_leg1]),
+            &[],
+            1,
+            Err(ParamError::GroupShape { gix: 2, code: 2 }),
+        ),
+        (
+            "SDK-103.4",
+            table(&[g1_i5, gspec(G2), gspec(G3)]),
+            &[],
+            1,
+            Err(ParamError::GroupShape { gix: 0, code: 3 }),
+        ),
+        (
+            "SDK-103.5",
+            gt3(),
+            &[(1, OPEN_TH, 0)],
+            1,
+            Err(ParamError::Invalid { field_ix: 0, code: 1 }),
+        ),
         ("SDK-103.6", gt3(), &[(1, OPEN_TH, 0)], 0, Ok(())),
     ];
     for (row, t, ov, enabled, want) in rows {
@@ -75,14 +104,23 @@ fn sdk_103_validate_shape_and_cross_field() {
 /// A group whose legs use arbitrary (possibly unknown) insts.
 fn rand_spec(k: u32, insts: (u32, u32), n_legs: u8) -> GroupSpec {
     let legs = [(InstId(insts.0), VenueId(2)), (InstId(insts.1), VenueId(5))];
-    let mut g = spec(GroupId(0x0300_0000 + k), BTC_ID, &legs[..usize::from(n_legs.clamp(1, 2))]);
+    let mut g = spec(
+        GroupId(0x0300_0000 + k),
+        BTC_ID,
+        &legs[..usize::from(n_legs.clamp(1, 2))],
+    );
     g.n_legs = n_legs;
     g
 }
 
 fn arb_body() -> impl proptest::strategy::Strategy<Value = Vec<u8>> {
     use proptest::strategy::Strategy as _;
-    let valid = encode_body(&TP, 3, &raw(tp_defaults(), &[(0, 0, 6_000_000), (2, 3, 50_000_000)])).unwrap();
+    let valid = encode_body(
+        &TP,
+        3,
+        &raw(tp_defaults(), &[(0, 0, 6_000_000), (2, 3, 50_000_000)]),
+    )
+    .unwrap();
     prop_oneof![
         proptest::collection::vec(any::<u8>(), 0..=8_192),
         proptest::collection::vec((any::<usize>(), any::<u8>()), 1..=8).prop_map(move |flips| {

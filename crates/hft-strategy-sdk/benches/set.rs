@@ -1,5 +1,4 @@
-//! `StrategySet` dispatch overhead (SDK-198): one Bbo through `ProbeSet::on_event` and the same
-//! call made directly, for comparison.
+//! `StrategySet` dispatch overhead (SDK-198): one Bbo through `ProbeSet::on_event`.
 
 #![allow(
     clippy::disallowed_types,
@@ -33,23 +32,20 @@ fn sdk_198_set_dispatch(c: &mut Criterion) {
     let e = ev::bbo(I1, 0, b);
     let er = e.as_ref();
     let p = tp(3, &[]);
-    let mut direct = EchoProbe::new(s3(0xFF01), &p, &t, &v.refview()).unwrap();
-    let mut via = ProbeSet::create(s3(0xFF01), &__strategy_set::Params::EchoProbe(p.clone()), &t, &v.refview()).unwrap();
+    let mut via = ProbeSet::create(
+        s3(0xFF01),
+        &__strategy_set::Params::EchoProbe(p),
+        &t,
+        &v.refview(),
+    )
+    .unwrap();
     let mut bufs = CtxBufs::new();
-    let mut g = c.benchmark_group("sdk/set_dispatch");
-    g.bench_function("set", |bn| {
+    c.bench_function("sdk/set_dispatch", |bn| {
         bn.iter(|| {
             bufs.begin();
             ProbeSet::on_event(&mut via, black_box(&er), &v, &mut bufs.ctx());
         })
     });
-    g.bench_function("direct", |bn| {
-        bn.iter(|| {
-            bufs.begin();
-            direct.on_event(black_box(&er), &v, &mut bufs.ctx());
-        })
-    });
-    g.finish();
 }
 
 criterion_group!(benches, sdk_198_set_dispatch);

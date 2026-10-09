@@ -30,7 +30,11 @@ fn run(n: u16, steps: &[Step]) -> Out {
     let mut e = EchoProbe::new(s3(0xFF01), &tp(n, &[]), &t, &v.refview()).unwrap();
     let mut p = TargetProbe::new(s3(0xFF02), &tp2(n, &[]), &t, &v.refview()).unwrap();
     let mut m = ProbeModel::new(s3(0xFF02), &tp2(n, &[]), &t, &v.refview());
-    let (mut he, mut hp, mut hm) = (CtxHarness::new(&EchoProbe::DESC), CtxHarness::new(&TargetProbe::DESC), ModelHarness::new());
+    let (mut he, mut hp, mut hm) = (
+        CtxHarness::new(&EchoProbe::DESC),
+        CtxHarness::new(&TargetProbe::DESC),
+        ModelHarness::new(),
+    );
     let mut out: Out = (Vec::new(), Vec::new(), Vec::new());
     for &(k, g, x, dt) in steps {
         let now = Views::now(&v);

@@ -34,7 +34,9 @@ fn tick() -> ev::Ev {
 }
 
 fn n_groups(n: u16) -> GroupTable {
-    let specs: Vec<_> = (1..=u32::from(n)).map(|k| gspec(GroupId(0x0300_0000 + k))).collect();
+    let specs: Vec<_> = (1..=u32::from(n))
+        .map(|k| gspec(GroupId(0x0300_0000 + k)))
+        .collect();
     GroupTable::new(&specs, 8)
 }
 
@@ -88,7 +90,11 @@ fn sdk_070_path_first_then_group_chunks() {
     let (s, r) = s_and_r(&m);
     assert!(s < r, "S {s} < R {r}");
     let c = h.snapshot_all(&m, 3 * r as u32);
-    assert_eq!(c.path.len(), 4 + 8 * 32, "snapshot_path first (path section bytes)");
+    assert_eq!(
+        c.path.len(),
+        4 + 8 * 32,
+        "snapshot_path first (path section bytes)"
+    );
     let calls: Vec<(u16, SnapshotProgress, u32)> = c.chunks.clone();
     let r32 = r as u32;
     assert_eq!(
@@ -116,9 +122,17 @@ fn sdk_071_oversized_group_own_chunk() {
     for (gix, (from, p, n)) in c.chunks.iter().enumerate() {
         let gix = gix as u16;
         assert_eq!(*from, gix);
-        let want = if gix == 7 { SnapshotProgress::Done } else { SnapshotProgress::More(gix + 1) };
+        let want = if gix == 7 {
+            SnapshotProgress::Done
+        } else {
+            SnapshotProgress::More(gix + 1)
+        };
         assert_eq!(*p, want);
-        assert_eq!(*n as usize, if gix == 0 { s + r } else { r }, "gix {gix} not truncated");
+        assert_eq!(
+            *n as usize,
+            if gix == 0 { s + r } else { r },
+            "gix {gix} not truncated"
+        );
     }
 }
 
@@ -153,7 +167,11 @@ fn sdk_075_derived_state_recomputed() {
         let median = model_math::round_even((mids[127] as f64 + mids[128] as f64) / 2.0).unwrap();
         let a = BandAdvice::decode(p).unwrap();
         assert_eq!((*g, a.band), (mg.id, median));
-        assert_ne!(median, ProbeModel::stat(&mg.s).unwrap(), "median differs from the mean here");
+        assert_ne!(
+            median,
+            ProbeModel::stat(&mg.s).unwrap(),
+            "median differs from the mean here"
+        );
     }
 }
 
@@ -188,7 +206,8 @@ fn golden_vs_version(file: &str, got: &[u8], key: &str, version: u32, what: &str
         write_meta();
         return;
     }
-    let want = std::fs::read(&p).unwrap_or_else(|e| panic!("{}: {e} (HFT_REGEN_GOLDEN=1 to create)", p.display()));
+    let want =
+        std::fs::read(&p).unwrap_or_else(|e| panic!("{}: {e} (HFT_REGEN_GOLDEN=1 to create)", p.display()));
     let recorded = meta_version(key);
     if want != got {
         if version == recorded {
@@ -196,13 +215,22 @@ fn golden_vs_version(file: &str, got: &[u8], key: &str, version: u32, what: &str
         }
         panic!("{what} bumped {recorded} → {version}: regenerate {file} (HFT_REGEN_GOLDEN=1)");
     }
-    assert_eq!(version, recorded, "{file} unchanged but meta.toml records {key} = {recorded}");
+    assert_eq!(
+        version, recorded,
+        "{file} unchanged but meta.toml records {key} = {recorded}"
+    );
 }
 
 #[test]
 fn sdk_076_layout_golden_requires_bump() {
     let got = layout_json(ProbeModel::LAYOUT);
-    golden_vs_version("layout.json", got.as_bytes(), "layout_version", ProbeModel::LAYOUT_VERSION, "LAYOUT_VERSION");
+    golden_vs_version(
+        "layout.json",
+        got.as_bytes(),
+        "layout_version",
+        ProbeModel::LAYOUT_VERSION,
+        "LAYOUT_VERSION",
+    );
 }
 
 #[test]
@@ -213,7 +241,13 @@ fn sdk_077_path_golden_requires_bump() {
     path_script(&mut m, &mut v, &mut h);
     let mut w = SnapshotWriter::new(1 << 20);
     m.snapshot_path(&mut w);
-    golden_vs_version("path.bin", w.as_bytes(), "path_version", ProbeModel::PATH_VERSION, "PATH_VERSION");
+    golden_vs_version(
+        "path.bin",
+        w.as_bytes(),
+        "path_version",
+        ProbeModel::PATH_VERSION,
+        "PATH_VERSION",
+    );
 }
 
 #[test]
@@ -238,7 +272,11 @@ fn sdk_192_layout_json_stable() {
             tag: 7,
             name: "q\"\\",
             scope: SectionScope::Group,
-            elems: &[ElemDesc { name: "x", ty: ElemTy::F64Bits, len: LenRule::Fixed(3) }],
+            elems: &[ElemDesc {
+                name: "x",
+                ty: ElemTy::F64Bits,
+                len: LenRule::Fixed(3),
+            }],
         }],
     };
     assert_eq!(
@@ -293,14 +331,24 @@ fn arb_op(n: u16) -> impl proptest::strategy::Strategy<Value = Op> {
     ]
 }
 
+/// The Advice of one op: op index, engine time of its record, `(group, local_kind, payload)`s.
+type Stamped = (usize, i64, Vec<(GroupId, u16, Vec<u8>)>);
+
 /// Replays `ops` on fresh views from a fresh (or restored) Model; collects every Advice with the
 /// engine time of its record, then the final checkpoint.
 struct Run {
-    advice: Vec<(usize, i64, Vec<(GroupId, u16, Vec<u8>)>)>,
+    advice: Vec<Stamped>,
     ckpt: Ckpt,
 }
 
-fn apply(m: &mut ProbeModel, v: &mut MockViews, h: &mut ModelHarness, t: &GroupTable, op: Op, boot: &mut u64) -> Option<Vec<(GroupId, u16, Vec<u8>)>> {
+fn apply(
+    m: &mut ProbeModel,
+    v: &mut MockViews,
+    h: &mut ModelHarness,
+    t: &GroupTable,
+    op: Op,
+    boot: &mut u64,
+) -> Option<Vec<(GroupId, u16, Vec<u8>)>> {
     let adv = |v: &mut MockViews, ms: u32| {
         let n = Views::now(v);
         v.at_tsc(Tsc(n.tsc.0 + u64::from(ms) * 1_000_000));
@@ -320,18 +368,25 @@ fn apply(m: &mut ProbeModel, v: &mut MockViews, h: &mut ModelHarness, t: &GroupT
         Op::Warm { gix, n, back_s } => {
             let now = Views::now(v).utc_ns.div_euclid(1_000_000_000) * 1_000_000_000;
             let base = now - i64::from(back_s) * 1_000_000_000;
-            let samples: Vec<(i64, i64)> =
-                (0..i64::from(n)).map(|k| (base - k * 1_000_000_000, 6_500_000 + k * 7)).collect();
+            let samples: Vec<(i64, i64)> = (0..i64::from(n))
+                .map(|k| (base - k * 1_000_000_000, 6_500_000 + k * 7))
+                .collect();
             let id = t.get(gix).id;
             model(h, m, &ev::warmup(1, 0, true, &warm_chunk(id, &samples)), v);
             None
         }
         Op::Params { open_th } => {
-            let p = TP2Params::from_raw(&raw({
-                let mut d = tp_defaults();
-                d[0] = open_th;
-                d
-            }, &[]), t.len());
+            let p = TP2Params::from_raw(
+                &raw(
+                    {
+                        let mut d = tp_defaults();
+                        d[0] = open_th;
+                        d
+                    },
+                    &[],
+                ),
+                t.len(),
+            );
             assert_eq!(m.on_params(&p, t, &v.refview()), ModelParamEffect::None);
             None
         }
@@ -352,7 +407,10 @@ fn run(n: u16, ops: &[Op], cut: Option<(usize, u32, bool)>) -> (Run, i64) {
     let mut h = ModelHarness::new();
     let mut boot = 1u64;
     let mut m = ProbeModel::new(s3(0xFF02), &tp2(n, &[]), &t, &v.refview());
-    let mut out = Run { advice: Vec::new(), ckpt: Ckpt::default() };
+    let mut out = Run {
+        advice: Vec::new(),
+        ckpt: Ckpt::default(),
+    };
     let mut e0 = Views::now(&v).engine_ns;
     for (i, op) in ops.iter().enumerate() {
         if let Some((k, max, keep)) = cut
@@ -373,14 +431,19 @@ fn run(n: u16, ops: &[Op], cut: Option<(usize, u32, bool)>) -> (Run, i64) {
     (out, e0)
 }
 
-fn script(downs: bool) -> impl proptest::strategy::Strategy<Value = (u16, Vec<Op>, proptest::sample::Index, u32)> {
+fn script(
+    downs: bool,
+) -> impl proptest::strategy::Strategy<Value = (u16, Vec<Op>, proptest::sample::Index, u32)> {
     use proptest::sample::Index;
     use proptest::strategy::Strategy as _;
     (1u16..=8).prop_flat_map(move |n| {
         (
             proptest::strategy::Just(n),
             proptest::collection::vec(arb_op(n), 100..=5_000),
-            proptest::collection::vec((proptest::prelude::any::<Index>(), 1u32..=7_200), if downs { 0..=3 } else { 0..=0 }),
+            proptest::collection::vec(
+                (proptest::prelude::any::<Index>(), 1u32..=7_200),
+                if downs { 0..=3 } else { 0..=0 },
+            ),
             proptest::prelude::any::<Index>(),
             1u32..=65_536,
         )
@@ -412,8 +475,12 @@ fn check_080(n: u16, ops: &[Op], k: usize, max: u32) -> Result<(), TestCaseError
     let (a, _) = run(n, ops, None);
     let (c, e0) = run(n, ops, Some((k, max, false)));
     let settle = 60_000i64 * 1_000_000;
-    let late = |r: &Run| -> Vec<(usize, i64, Vec<(GroupId, u16, Vec<u8>)>)> {
-        r.advice.iter().filter(|x| x.0 >= k && x.1 >= e0 + settle).cloned().collect()
+    let late = |r: &Run| -> Vec<Stamped> {
+        r.advice
+            .iter()
+            .filter(|x| x.0 >= k && x.1 >= e0 + settle)
+            .cloned()
+            .collect()
     };
     prop_assert!(late(&a) == late(&c), "advice ≥ E0 + path_settle_ms differs");
     Ok(())

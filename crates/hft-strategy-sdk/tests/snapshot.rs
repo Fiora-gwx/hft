@@ -68,7 +68,9 @@ mod common;
 fn sdk_024_max_groups_fit_snapshot_max() {
     use common::*;
     use hft_strategy_sdk::{GroupTable, Strategy};
-    let specs: Vec<_> = (1..=8u32).map(|n| gspec(hft_types::GroupId(0x0300_0000 + n))).collect();
+    let specs: Vec<_> = (1..=8u32)
+        .map(|n| gspec(hft_types::GroupId(0x0300_0000 + n)))
+        .collect();
     let t = GroupTable::new(&specs, 8);
     assert_eq!((t.len(), t.capacity()), (8, 8));
     let v = clocked_views();

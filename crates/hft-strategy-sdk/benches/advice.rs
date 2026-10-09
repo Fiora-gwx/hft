@@ -18,9 +18,16 @@ use hft_strategy_sdk::*;
 fn sdk_199_payload_decode(c: &mut Criterion) {
     let mut buf = [0u8; 16];
     let mut w = PayloadWriter::new(&mut buf, 16);
-    BandAdvice { flags: 0, band: 6_500_000 }.encode(&mut w).unwrap();
+    BandAdvice {
+        flags: 0,
+        band: 6_500_000,
+    }
+    .encode(&mut w)
+    .unwrap();
     let bytes = w.as_bytes().to_vec();
-    c.bench_function("sdk/payload_decode", |b| b.iter(|| BandAdvice::decode(black_box(&bytes)).is_ok()));
+    c.bench_function("sdk/payload_decode", |b| {
+        b.iter(|| BandAdvice::decode(black_box(&bytes)).is_ok())
+    });
 }
 
 criterion_group!(benches, sdk_199_payload_decode);

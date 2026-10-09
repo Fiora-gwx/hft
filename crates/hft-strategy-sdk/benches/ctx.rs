@@ -18,7 +18,16 @@ use hft_types::{Px, Qty, Side};
 
 fn sdk_196_ctx_place(c: &mut Criterion) {
     let mut b = CtxBufs::new();
-    let it = order(s3(0xFF01), G1, I1, Side::Buy, IntentClass::Open, Px(6_500_000), Qty(1_000), 0);
+    let it = order(
+        s3(0xFF01),
+        G1,
+        I1,
+        Side::Buy,
+        IntentClass::Open,
+        Px(6_500_000),
+        Qty(1_000),
+        0,
+    );
     c.bench_function("sdk/ctx_place", |bn| {
         bn.iter(|| {
             b.begin();

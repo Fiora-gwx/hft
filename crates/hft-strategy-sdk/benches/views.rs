@@ -13,7 +13,12 @@ use hft_strategy_sdk::{BboView, EngineClockAnchor, Now};
 use hft_types::Tsc;
 
 fn sdk_201_quote_live(c: &mut Criterion) {
-    let b = BboView { conn_up: true, conn_live_tsc: Tsc(99_000_000_000), rx_tsc: Tsc(99_000_000_000), ..BboView::EMPTY };
+    let b = BboView {
+        conn_up: true,
+        conn_live_tsc: Tsc(99_000_000_000),
+        rx_tsc: Tsc(99_000_000_000),
+        ..BboView::EMPTY
+    };
     c.bench_function("sdk/quote_live", |bn| {
         bn.iter(|| black_box(b).quote_live(black_box(Tsc(100_000_000_000)), black_box(6_000_000_000)))
     });

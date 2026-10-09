@@ -88,7 +88,12 @@ pub fn pair_target(account: hft_types::AccountId, group: GroupId, q: i64, tag: u
         account,
         _pad0: [0; 3],
         group,
-        legs: [LegTarget::new(0, Qty(q)), LegTarget::new(1, Qty(-q)), LegTarget::ZERO, LegTarget::ZERO],
+        legs: [
+            LegTarget::new(0, Qty(q)),
+            LegTarget::new(1, Qty(-q)),
+            LegTarget::ZERO,
+            LegTarget::ZERO,
+        ],
         n_legs: 2,
         reason: TargetReason::Rebalance,
         urgency: Urgency::Normal,

@@ -38,16 +38,32 @@ fn sdk_089_structural_changed() {
     assert!(ch(&def_150, G1), "SDK-089.4");
     assert!(!ch(&def_150, G2), "SDK-089.5");
     assert!(ch(&p(&[], &[]), G2), "SDK-089.6");
-    assert!(!ch(&p(&[], &[(0, PCT_BIN, 100_000), (1, PCT_BIN, 200_000)]), G1), "SDK-089.7");
-    assert!(!ch(&p(&[(OPEN_TH, 7_000_000)], &[(1, PCT_BIN, 200_000)]), G1), "SDK-089.8");
+    assert!(
+        !ch(&p(&[], &[(0, PCT_BIN, 100_000), (1, PCT_BIN, 200_000)]), G1),
+        "SDK-089.7"
+    );
+    assert!(
+        !ch(&p(&[(OPEN_TH, 7_000_000)], &[(1, PCT_BIN, 200_000)]), G1),
+        "SDK-089.8"
+    );
     // GroupId alignment: G2 moved from gix 1 to gix 0 keeps its effective value.
     let moved = TPParams::from_raw(&raw(tp_defaults(), &[(0, PCT_BIN, 200_000)]), 3);
-    assert!(!moved.structural_changed(&old, 1, 0), "aligned by GroupId, not gix");
+    assert!(
+        !moved.structural_changed(&old, 1, 0),
+        "aligned by GroupId, not gix"
+    );
 }
 
 #[test]
 fn sdk_104_at_applies_overrides() {
-    let b = aligned(&encode_body(&TP, 3, &raw(tp_defaults(), &[(0, 0, 6_000_000), (2, 3, 50_000_000)])).unwrap());
+    let b = aligned(
+        &encode_body(
+            &TP,
+            3,
+            &raw(tp_defaults(), &[(0, 0, 6_000_000), (2, 3, 50_000_000)]),
+        )
+        .unwrap(),
+    );
     let p = TPParams::decode(bytes_of(&b, b.len() * 8), 2, &gt3()).unwrap();
     assert_eq!(p.defaults().open_th, Rate(5_000_000));
     assert_eq!(p.at(0).open_th, Rate(6_000_000));
