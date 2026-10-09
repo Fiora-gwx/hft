@@ -77,7 +77,7 @@ jobs:
         run: bash .github/scripts/install-rust.sh
       - uses: Swatinem/rust-cache@v2
         with:
-          key: x86-ci
+          key: x86-ci-v2
       - name: xtask subcommands
         id: xtask
         run: bash .github/scripts/xtask-inventory.sh

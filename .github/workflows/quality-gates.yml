@@ -173,7 +173,7 @@ jobs:
         run: bash .github/scripts/install-rust.sh
       - uses: Swatinem/rust-cache@v2
         with:
-          key: x86-ci
+          key: x86-ci-v2
           # A cold run (new Cargo.lock, eviction) builds the cargo plugins and the whole test tree
           # from scratch and is close to the 20 min limit; keep what it built even if it fails.
           # The first save of a key is final (later runs hit it fully and do not save), so the
