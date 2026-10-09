@@ -676,6 +676,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "hft-ledger"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "hft-event",
+ "hft-refdata",
+ "hft-strategy-sdk",
+ "hft-testkit",
+ "hft-types",
+ "proptest",
+ "rstest",
+ "trybuild",
+ "zerocopy",
+]
+
+[[package]]
 name = "hft-net"
 version = "0.1.0"
 dependencies = [

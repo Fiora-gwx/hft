@@ -1,0 +1,13 @@
+error[E0308]: mismatched types
+ --> tests/ui/led_005_fill_tsc.rs:5:29
+  |
+5 |     let _ = l.apply_fill(f, Tsc(5));
+  |               ----------    ^^^^^^ expected `i64`, found `Tsc`
+  |               |
+  |               arguments to this method are incorrect
+  |
+note: method defined here
+ --> src/position.rs
+  |
+  |     pub fn apply_fill(&mut self, f: &FillDelta, t: i64) -> FillApplied {
+  |            ^^^^^^^^^^

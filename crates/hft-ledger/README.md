@@ -3,7 +3,7 @@ description: "sequencer 在每笔成交、外部成交、资金费、余额与�
 kind: crate
 tier: pure
 scope: core
-status: spec
+status: impl
 ---
 
 # hft-ledger
@@ -33,7 +33,7 @@ impl Ledger {
 
     // ── 事件入口(热路径,O(1) 或 O(该 inst 的持有者数 ≤ max_subs_per_inst))──
     // 时间参数 t 一律是引擎时间 engine_ns(SDK `Now.engine_ns`,i64;算法唯一定义在 event-model 时间戳语义);本 crate 不接触 TSC。
-    pub fn on_groups_changed(&mut self, groups: &GroupTable);                              // SetParams 应用后:重建 (account, inst) → [(group, leg_ix)] 候选表
+    pub fn on_groups_changed(&mut self, s: StrategyInstanceId, groups: &GroupTable);     // SetParams 应用后:实例 s 绑定的账户重建 (account, inst) → [(group, leg_ix)] 候选表
     pub fn set_cell_shadow(&mut self, a: AccountId, g: GroupId, shadow: bool);             // cell 有效模式进入/离开 Shadow(外来成交归属只在非 Shadow cell 中找)
     pub fn on_run_start(&mut self, run_start_ens: i64);                                    // 本次运行起点(当前 EngineClock.base_engine_ns):早于它的换算率、保证金报告与标记价视为过期
     pub fn apply_fill(&mut self, f: &FillDelta, t: i64) -> FillApplied;                   // CEX 成交增量;净量复算不一致时带 NetAdjust
@@ -77,6 +77,7 @@ impl Ledger {
     pub fn group(&self, a: AccountId, g: GroupId) -> &GroupBook;
     pub fn account(&self, a: AccountId) -> &AccountBook;      // day_pnl、held_notional
     pub fn rate(&self, asset: AssetId) -> RateView;           // 换算率与年龄
+    pub fn portfolio(&self, a: AccountId) -> Portfolio<'_>;    // SDK `PortfolioRead` 的实现(sequencer 视图适配器的 `Views::portfolio` 返回它)
     pub fn funding_grid(&self, v: VenueId, inst: InstId) -> (u32, u32); // 资金费时刻归一化的 (interval_s, anchor_s);inst = INST_NONE 取该 venue 的最细网格
     pub fn snapshot(&self, w: &mut SnapshotWriter);           // 一次写完本 crate 的全部节:1、13、22(按此顺序;各组件的写出顺序归 hft-sequencer 快照)
     pub fn restore(r: &mut SnapshotReader, rd: &RefData, cfg: &LedgerConfig, caps: &Capacities) -> Result<Ledger, RestoreError>;
@@ -259,7 +260,7 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 
 对成交增量 `(side, q = net_qty, p)`,令 `s = +1 买 / −1 卖`、`Q = pos.qty`:
 
-1. 同向加仓(`Q == 0` 或 `sign(Q) == s`):`qty += s×q`,`cost += p×qty_gross`(现货买入时成本按毛量 × 价,扣在基础资产上的手续费体现为更高的单位成本)。
+1. 同向加仓(`Q == 0` 或 `sign(Q) == s`):`qty += s×q`,`cost += p×q`(`q` 是净量:扣在基础资产上的手续费不进成本,只在第 4 步按换算率记入 `fee_cex`——同一笔费用不同时体现为更高的单位成本与 `fee_cex`;晚到的基础资产手续费按平均成本移出同量,两条路径结果相同)。
 2. 反向减仓且 `q ≤ |Q|`:移出成本 `removed = cost × q / |Q|`(i128 一次相除,`TowardZero`;`q = |Q|` 时恰为 `cost`,全平不留残余成本);`realized += sign(Q) × (p × q − removed)`(即 `(p − avg) × q × sign(Q)`,`avg = cost / |Q|`);`cost −= removed`;`qty += s×q`。`cost` 存绝对值(多空都 ≥ 0);`cost` 与 `realized_quote` 的指数是该 inst 的 `px_exp + qty_exp`(`Px × Qty` 的 i128 积本身,不取整)。
 3. 穿越零(`q > |Q|`):拆成"平掉 |Q|"(规则 2)+"新开 q − |Q|"(规则 1)。
 4. 手续费:`fee` 按 `fee_asset` 当时换算率入 `fee_cex`(折扣代币等非 USDT 资产照样换算),并从该资产的 `CashEntry.total` 扣除。**扣哪一桶**(保持基础资产不变量):计价/保证金资产 → 只扣 `total`;本 inst 的基础资产 → 按净量规则体现在该 group 的库存与持仓上(第 5 步);其他基础资产(如平台币折扣)→ 先扣该资产的 `unassigned`,不足部分扣 `baseline`(保持 `NON_STRATEGY`),仍不足则 `unassigned` 记为负并写 `Note{InvShortfall}`(P1);**从不动其他 group 的 `inv`**。
@@ -373,7 +374,7 @@ pub enum FundingRecon { Matched, TooRecent, OutsideWindow, NoHistoryHeld, NotApp
   4. **最旧标记价时刻** `mark_oldest_ens = min_i(该持仓最近一次 on_mark 的 t)`(无永续持仓 → `i64::MAX`;持仓尚无标记价 → 0);hft-risk 以它判"标记价断流 → L1"。
   5. 增量维护:每持仓的 `d_i` 与标记价时刻缓存;`on_mark` 只重算该 inst,当它原是最小者且变大时才重扫该 venue 的持仓(≤ 64 项);`N` 与 `MB` 按差量更新。
 - 换算率、保证金报告与标记价早于本次运行起点(`on_run_start`)时,`RATE_STALE`/`MARGIN_STALE` 置位直到本次运行收到新数据(引擎时间不计停机,停机前的数据不能当新的用)。
-- **派生量与快照**:`est_*`、两种强平距离、`upnl` 缓存与标记价时刻不进快照;从快照起步后 sequencer 调一次 `restore_marks`(用 hft-sequencer 节 10 的每 inst 最新标记价与其 engine_ns)重建,结果与连续运行逐值相同,因此从中途关键帧起步的验证回放与 hft-risk 的定档一致。
+- **派生量与快照**:各 inst 的估值价(最近 bid/ask、标记价与其 engine_ns、最近成交价)进快照节 13 的 `Px` 行,`restore` 按它重建持有者的未实现与名义缓存,所以恢复后的缓存与快照里的账户、group 合计一致(估值价缺失时缓存为 0 而合计不为 0,第一次重估会把整额当差量重复计入);`est_*` 与两种强平距离不进快照。从快照起步后 sequencer 调一次 `restore_marks`(用 hft-sequencer 节 10 的每 inst 最新标记价与其 engine_ns)补上更新的标记价并重建派生量,结果与连续运行逐值相同,因此从中途关键帧起步的验证回放与 hft-risk 的定档一致。
 
 ### 人工干预的采纳(`AdoptExchange`)
 
@@ -399,7 +400,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 - `Balance`:该资产 `total += qty`;`group ≠ GROUP_NONE` 时 `inv(asset, group) += qty` 且该现货 inst 的 `InstPos` 按 `px` 记成本(可用于采纳一条现货腿并带入场价);否则进 `unassigned`。
 - 这两种都把产生的已实现部分记入 `PnlBreakdown.adjust`(不参与轮次的价差);写 `Note{source=Ledger, code=Adjusted}`;sequencer 以同量调整 LegTracker(`group ≠ GROUP_NONE` 时)并向 hft-risk 报告处置(`Disposition::Adopted`)。
 - `Funding`:只由[资金费对账校正](#资金费对账校正)产生,计入 `PnlBreakdown.funding`(它就是资金费,不是人工调整)或只动钱包与残差(钱包条目),不动持仓、库存与 LegTracker,不报告处置(资金费条目不进闸门)。交易所侧真实的成交价与手续费若之后补到,以 `Annotate` 留痕,不再改账。
-- `WriteOff`(`AdjustDelta::WriteOff`):只由 Admin 命令 `WriteOffResidual{account, group}` 产生(适用于静止的 group,`Broken` 或非 `Broken`;语义与前置条件归 control-plane,执行归 [hft-sequencer](../hft-sequencer/README.md#命令路径)):sequencer 按 OMS 残余核销(`write_off_residual`)返回的单条 `WriteOff{venue, inst, leg_ix, qty}` 构造——账本只动**多出的那一腿**(单腿,选腿规则与清零全部腿余数归 [hft-oms](../hft-oms/README.md#残余核销));`qty = 0`(无裸量、只清余数)时账不变,只写下面的注记。账本只把这条腿的已成交裸量 `qty` **从该 group 移到 unassigned**(现货进 `unassigned`,永续成为账户级无 group 持仓),交易所上的真实仓位不变,所以账本仍与交易所一致:现货腿 `inv(base, group) −= qty`、`unassigned += qty`(基础资产 `total` 不变);永续腿该 group 该 inst 的腿净量减 `qty`,`InstPos` 不变,这部分随之成为账户级无 group 持仓(MarginStress L3 与 `Kill{flatten}` 照常覆盖它)。不产生已实现 PnL、不改现金与成本;group 的 `held_notional` 与轮次按新的腿净量更新(残余低于 `round_dust_notional` 时轮次随之结束)。写 `Note{source = Ledger, code = ResidualWrittenOff}`(P1;`v = [account | venue << 8, group, inst, qty, notional, cmd_seq]`,`notional` 按当时估值价折 USDT)。不报告对账处置。
+- `WriteOff`(`AdjustDelta::WriteOff`):只由 Admin 命令 `WriteOffResidual{account, group}` 产生(适用于静止的 group,`Broken` 或非 `Broken`;语义与前置条件归 control-plane,执行归 [hft-sequencer](../hft-sequencer/README.md#命令路径)):sequencer 按 OMS 残余核销(`write_off_residual`)返回的单条 `WriteOff{venue, inst, leg_ix, qty}` 构造——账本只动**多出的那一腿**(单腿,选腿规则与清零全部腿余数归 [hft-oms](../hft-oms/README.md#残余核销));`qty = 0`(无裸量、只清余数)时账不变,只写下面的注记。账本只把这条腿的已成交裸量 `qty` **从该 group 移到 unassigned**(现货进 `unassigned`,永续成为账户级无 group 持仓),交易所上的真实仓位不变,所以账本仍与交易所一致:现货腿 `inv(base, group) −= qty`、`unassigned += qty`(基础资产 `total` 不变;`qty > 0` 时至多移出该 group 实际持有的库存——卖出超过库存的部分早已从 `unassigned` 扣除,`qty < 0` 时从 `unassigned` 移入该 group);永续腿该 group 该 inst 的腿净量减 `qty`,`InstPos` 不变,这部分随之成为账户级无 group 持仓(MarginStress L3 与 `Kill{flatten}` 照常覆盖它)。不产生已实现 PnL、不改现金与成本;group 的 `held_notional` 与轮次按新的腿净量更新(残余低于 `round_dust_notional` 时轮次随之结束)。写 `Note{source = Ledger, code = ResidualWrittenOff}`(P1;`v = [account | venue << 8, group, inst, qty, notional, cmd_seq]`,`notional` 按当时估值价折 USDT)。不报告对账处置。
 
 ### 划转与模拟账户
 
@@ -438,7 +439,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 
 ### 快照行格式(节 1、13、22;草案,实现时以代码与编译期断言为准)
 
-`StateSnapshot` 的分节表与 `SectionHdr` 归 [journal-format](../../docs/subsystems/journal-format.md#快照记录结构);本 crate 定义节 1、13、22 的行(当前行版本:节 1 v2、节 13 v7、节 22 v2)。全部 `#[repr(C)]`、小端、按所列键升序;i128 以 `[u64; 2]` 小端存放。`snapshot(&self, w)` 按节 1 → 13 → 22 一次写完。
+`StateSnapshot` 的分节表与 `SectionHdr` 归 [journal-format](../../docs/subsystems/journal-format.md#快照记录结构);本 crate 定义节 1、13、22 的行(当前行版本:节 1 v2、节 13 v8、节 22 v2)。全部 `#[repr(C)]`、小端、按所列键升序;i128 以 `[u64; 2]` 小端存放。`snapshot(&self, w)` 按节 1 → 13 → 22 一次写完。
 
 ```rust
 // 节 1 Positions:每 (account, inst) 一行,只写 qty、cost、realized、fees 任一非零的项;键 (account, inst)
@@ -448,15 +449,16 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 }
 
 // 节 13 LedgerGroups 与节 22 LedgerInventory:每行以 LedgerRowHdr 开头;所有 *_ens 字段为 engine_ns。
-// 节 13 顺序 Account* → Rate* → (Group 行紧跟其 Pending 行)* → Margin* → FundPending* → (FundMark 行紧跟其 FundHist 行)* → FundNoHist*
+// 节 13 顺序 Account* → Rate* → Px* → (Group 行紧跟其 Pending 行)* → Margin* → FundPending* → (FundMark 行紧跟其 FundHist 行)* → FundNoHist*
 //        → FundSeen* → ExtSeen* → AutoHeld*;节 22 顺序 Cash* → Inv*
-#[repr(C)] pub struct LedgerRowHdr { pub kind: u8 /* Account=1 Rate=2 Group=3 Pending=4 Cash=5 Inv=6 Margin=7 FundPending=8 FundMark=9 FundHist=10 FundNoHist=11 FundSeen=12 ExtSeen=13 AutoHeld=14 */,
+#[repr(C)] pub struct LedgerRowHdr { pub kind: u8 /* Account=1 Rate=2 Group=3 Pending=4 Cash=5 Inv=6 Margin=7 FundPending=8 FundMark=9 FundHist=10 FundNoHist=11 FundSeen=12 ExtSeen=13 AutoHeld=14 Px=15 */,
                                      pub account: AccountId, pub venue: VenueId, pub _pad: u8,
-                                     pub id: u32 /* Rate/Cash/Inv:asset;Group/Pending:group;FundHist/FundNoHist/ExtSeen/AutoHeld:inst;其余 0 */ } // 8 B
+                                     pub id: u32 /* Rate/Cash/Inv:asset;Group/Pending:group;FundHist/FundNoHist/ExtSeen/AutoHeld/Px:inst;其余 0 */ } // 8 B
 // Account:    { day: PnlBreakdown, held_notional, upnl, funding_residual }                                     88 B
 // Rate:       { bid: Px, ask: Px, ens: i64, rflags: u8 /* RATE_STALE=1 */, _pad: [u8; 7] }                     32 B
-// Group:      { pnl, day: PnlBreakdown, held_notional, peak_notional, round_id: u32, tag: u32, gflags: u8 /* REORG=1 STALE=2 ADOPTED=4 */,
-//               _pad: [u8; 7], open_seq: u64, open_ens: i64, round_pnl: PnlBreakdown, legs: [LegAgg; 4] }      432 B
+// Group:      { pnl, day: PnlBreakdown, held_notional, peak_notional, round_id: u32, tag: u32, gflags: u8 /* REORG=1 STALE=2 ADOPTED=4 ROUND_OPEN=8 */,
+//               _pad: [u8; 7], open_seq: u64, open_ens: i64, round_pnl: PnlBreakdown, legs: [LegAgg; 4],
+//               last_fill_ens: i64, leg_inst: [u32; 4], leg_net: [Qty; 4], leg_cost: [[u64; 2]; 4] }              552 B;各腿已成交净量与成本随行持久
 // Pending:    { intent_id: u64, block: u64, amount_in, amount_out, gas_cost, bribe: Qty, inst: InstId, pflags: u8 /* REORG_SUSPECT=1 */,
 //               _pad: [u8; 3] }                                                                                  56 B(feature chain)
 // Cash:       { total, baseline, unassigned, rep_free, rep_locked: Qty, rep_ex_ts_ns: i64, rep_ens: i64, bflags: u8, _pad: [u8; 7] } 64 B;键 (account, venue, asset)
@@ -471,29 +473,36 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 // FundSeen:   { settle_ts_ns: i64, amount: Notional }                                                             16 B;BalanceOnlyPush 已入账推送,按入账顺序(FIFO)
 // ExtSeen:    { kind: u8 /* TradeId=1 OrderFill=2 */, _pad: [u8; 7], a: u64 /* trade_id 或 exch_order_id */, b: u64 /* 0 或 fill_seq */ } 24 B;外来成交去重键,按入账顺序(FIFO)
 // AutoHeld:   { buy: Qty, sell: Qty }                                                                         16 B;键 (account, venue, inst);AUTO_RECON 入账量的待抵扣余量,只写非零项
+// Px:         { bid, ask, mark, last_px: Px, mark_ens: i64, pflags: u8 /* BBO=1 MARK=2 */, _pad: [u8; 7] }        48 B;键 inst;每个有报价、标记价或成交价的 inst
 #[repr(C)] pub struct LegAgg { pub open_qty: Qty, pub open_notional: Notional, pub close_qty: Qty,
                                pub close_notional: Notional, pub fee: Notional, pub gas: Notional }                  // 48 B
 ```
 
-`PnlBreakdown` 为 64 B(8 × `Notional`)。`est_*`、两种强平距离、`upnl` 缓存与标记价时刻不进快照(由 `restore_marks` 重建,见[保证金数据](#保证金数据))。所列字节数均不含 8 B 的 `LedgerRowHdr`;`AccountId`、`VenueId` 各 u8,`InstId`、`GroupId` 各 u32(hft-types),每个结构旁有 `size_of` 断言。时刻字段只存 engine_ns(恢复后原样有效,不平移),不存 TSC;资金费的 `settle_ts_ns` 都是归一化后的值。快照中没有某 (account, venue) 的 `FundMark` 行时,`hist_from_ns` 按[资金费](#资金费)"逐笔入账记录"的恢复规则取值(此前结算的差额走无历史路径:挂起、窗口结束后入账)。
+`PnlBreakdown` 为 64 B(8 × `Notional`)。`est_*` 与两种强平距离不进快照,持有者的 `upnl` 与名义缓存由 `restore` 按 `Px` 行重建(见[保证金数据](#保证金数据))。所列字节数均不含 8 B 的 `LedgerRowHdr`;`AccountId`、`VenueId` 各 u8,`InstId`、`GroupId` 各 u32(hft-types),每个结构旁有 `size_of` 断言。时刻字段只存 engine_ns(恢复后原样有效,不平移),不存 TSC;资金费的 `settle_ts_ns` 都是归一化后的值。快照中没有某 (account, venue) 的 `FundMark` 行时,`hist_from_ns` 按[资金费](#资金费)"逐笔入账记录"的恢复规则取值(此前结算的差额走无历史路径:挂起、窗口结束后入账)。
 
 ### 规划源文件
 
 | 文件 | 职责 |
 |---|---|
-| `src/lib.rs` | `Ledger` 与入口 |
-| `src/types.rs` | `InstPos`、`GroupBook`、`RoundBook`、`PnlBreakdown`、`FillDelta`、`AdjustDelta`、`VenueBook` 系列 |
-| `src/position.rs` | 平均成本法、穿越零、净量复算与 `NetAdjust` |
+| `src/lib.rs` | 模块与公开导出 |
+| `src/ledger.rs` | `Ledger`:`new` 按 refdata 建的静态表、动态账本、查询与只读接口 |
+| `src/types.rs` | `InstPos`、`GroupBook`、`RoundBook`、`PnlBreakdown`、`FillDelta`、`AdjustDelta`、`VenueBook` 系列与结果类型 |
+| `src/config.rs` | `LedgerConfig`、ECF1 `ledger` 段的行格式与验证器、`Capacities` |
+| `src/fixed.rs` | `FixedVec` 与 i128 定点辅助 |
+| `src/position.rs` | 平均成本法、穿越零、净量复算与 `NetAdjust`、成交与费用入口 |
 | `src/cash.rs` | 现金、库存归属、手续费扣桶、余额初始化/校验/基线、划转、模拟重置 |
+| `src/rates.rs` | 换算率表、过期、估值价、每 venue 汇总行、`on_ref_px` |
 | `src/funding.rs` | 结算周期表与 `funding_grid`(调 hft-types `funding_settle_norm_ns`)、资金费入账与推送去重、合成计算、推送配对与残差、已入钱包额、逐笔记录环与水位线、对账自动校正、无历史挂起与窗口结束入账 |
-| `src/attrib.rs` | 外来成交去重环、`auto_held` 抵扣、归属候选表(含以腿减到 0 为限)、非 Shadow 过滤、`auto_external_fill`、`external_from_oms_note` |
+| `src/attrib.rs` | `auto_held` 抵扣、归属候选表(含以腿减到 0 为限)、非 Shadow 过滤、`auto_external_fill`、`external_from_oms_note`、外来成交入口 |
+| `src/dedup.rs` | 外来成交去重环(FIFO + 按键的开放寻址索引) |
 | `src/adjust.rs` | `AdjustDelta` 四种 kind 的入账(采纳、资金费校正、核销) |
-| `src/margin.rs` | 保证金报告与估计、两种强平距离、最旧标记价时刻(增量维护)、`restore_marks` |
-| `src/equity.rs` | 估值规则与合计权益 |
-| `src/rates.rs` | 换算率表、过期 |
+| `src/margin.rs` | 保证金报告与估计、两种强平距离、最旧标记价时刻、`restore_marks` |
 | `src/rounds.rs` | 轮次开始/结束与 `RoundClosed` |
-| `src/chain.rs` | 链上两本账、重组冲回(feature `chain`) |
+| `src/notes.rs` | 本 crate 的 Note 码 |
+| `src/views.rs` | SDK 视图类型的重导出与 `Portfolio`(`PortfolioRead` 的实现) |
+| `src/journal.rs` | `JournalLedger`(冷消费者) |
 | `src/snapshot.rs` | 快照(一次写完三节)与恢复 |
+| `src/chain.rs` | 链上两本账、重组冲回(feature `chain`,未实现) |
 
 </details>
 

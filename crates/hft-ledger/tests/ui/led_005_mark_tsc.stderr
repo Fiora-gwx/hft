@@ -1,0 +1,13 @@
+error[E0308]: mismatched types
+ --> tests/ui/led_005_mark_tsc.rs:6:34
+  |
+6 |     l.on_mark(InstId(21), Px(1), Tsc(5), &mut touched);
+  |       -------                    ^^^^^^ expected `i64`, found `Tsc`
+  |       |
+  |       arguments to this method are incorrect
+  |
+note: method defined here
+ --> src/margin.rs
+  |
+  |     pub fn on_mark(
+  |            ^^^^^^^

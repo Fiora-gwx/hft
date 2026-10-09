@@ -1,0 +1,29 @@
+[package]
+name = "hft-ledger-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+hft-ledger = { path = ".." }
+hft-event = { path = "../../hft-event" }
+hft-refdata = { path = "../../hft-refdata" }
+hft-strategy-sdk = { path = "../../hft-strategy-sdk" }
+hft-types = { path = "../../hft-types" }
+proptest = "1"
+zerocopy = { version = "0.8", features = ["derive"] }
+
+# Not a member of the root workspace: built only by `cargo fuzz` (pinned nightly, tools/README.md).
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "ledger_restore"
+path = "fuzz_targets/ledger_restore.rs"
+test = false
+doc = false
+bench = false

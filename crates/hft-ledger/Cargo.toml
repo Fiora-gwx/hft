@@ -1,0 +1,29 @@
+[package]
+name = "hft-ledger"
+description = "Event-sourced equity and PnL ledger per (account, venue) and (account, group), and its journal cold consumer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+hft-types.workspace = true
+hft-refdata.workspace = true
+hft-event.workspace = true
+hft-strategy-sdk.workspace = true
+zerocopy.workspace = true
+
+[dev-dependencies]
+hft-testkit.workspace = true
+proptest.workspace = true
+rstest.workspace = true
+criterion.workspace = true
+trybuild.workspace = true
+
+[[bench]]
+name = "ledger"
+harness = false

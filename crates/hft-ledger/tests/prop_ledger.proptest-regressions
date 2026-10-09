@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b25b029f145d5cf14bf5696dea4a4ba27472b6862177d5c096236f564513cc34 # shrinks to (fee_ix, fund_ix, ops) = (0, 0, [Fill { perp: false, buy: false, lots: 1, px: 300000000, fee: 2, late: false, g4: false }])

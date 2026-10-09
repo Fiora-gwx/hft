@@ -47,7 +47,7 @@ spec: README.md
 
 **夹具**(各用例的"前置"按名字引用;实现在 `crates/hft-ledger/tests/common/mod.rs`,参数一律显式赋值,不取 `Default`):
 
-- `rd_lf()`:refdata。资产 `USDT`(Stable,`px_exp = −4`,`qty_exp = −6`)、`USDC`(Stable,`px_exp = −4`,`qty_exp = −6`)、`BTC`、`ETH`、`BNB`(三者 `px_exp = −4`,`qty_exp = −8`);venue `S1`(`VenueId(1)`,现货,交易所 E1)、`P2`(`VenueId(2)`,USDT 永续,交易所 E2,保证金资产 USDT)、`S3`(`VenueId(3)`,现货,交易所 E3);inst `BTC/S1`(`InstId(11)`,tick 0.01,lot 0.00001,`min_notional` 5)、`BNB/S1`(12)、`USDC/S1`(13,USDC 的参考 inst)、`BTC/P2`(21,lot 0.001,`funding_interval_s = 28 800`,`funding_anchor_s = 0`)、`ETH/P2`(22,`funding_interval_s = 28 800`,`funding_anchor_s = 0`)、`BTCUSDC/S3`(32,计价 USDC);账户 `A1`(Live,venues {S1, P2})、`A2`(Live,venues {S3, P2})、`A9`(Sim,venues {S1, P2},`initial_balances` = S1 USDT 10 000、P2 USDT 10 000)。资产 dust(测试 refdata 给定):USDT 0.01、USDC 0.01、BTC 0.00001、BNB 0.0001。
+- `rd_lf()`:refdata。资产 `USDT`(Stable,`px_exp = −4`,`qty_exp = −6`)、`USDC`(Stable,`px_exp = −4`,`qty_exp = −6`)、`BTC`、`ETH`、`BNB`(三者 `px_exp = −4`,`qty_exp = −8`);venue `S1`(`VenueId::BINANCE_SPOT`,现货,交易所 E1)、`P2`(`VenueId::OKX_SWAP`,USDT 永续,交易所 E2,保证金资产 USDT)、`S3`(`VenueId::GATE_SPOT`,现货,交易所 E3)(refdata 按 VenueId 号校验市场,所以取这三个号);inst `BTC/S1`(`InstId(11)`,tick 0.01,lot 0.00001,`min_notional` 5)、`BNB/S1`(12)、`USDC/S1`(13,USDC 的参考 inst)、`BTC/P2`(21,lot 0.001,`funding_interval_s = 28 800`,`funding_anchor_s = 0`)、`ETH/P2`(22,`funding_interval_s = 28 800`,`funding_anchor_s = 0`)、`BTCUSDC/S3`(32,计价 USDC);账户 `A1`(Live,venues {S1, P2},绑定实例 1)、`A2`(Live,venues {S3, P2},实例 2)、`A9`(Sim,venues {S1, P2},实例 3,`initial_balances` = S1 USDT 10 000、P2 USDT 10 000)。inst 号从 1 起稠密:其余号为 `S3` 上已下架的填充 inst,其中 `InstId(1)` 状态为 `Halted`;每个 venue 一档手续费。资产 dust(测试 refdata 给定):USDT 0.01、USDC 0.01、BTC 0.00001、BNB 0.0001。
 - 每个 `VenueCaps.fee_asset_rule` 与 `funding_settle` 在用到它的用例"前置"里写明。
 - group(`A1` 绑定的实例,`on_groups_changed` 已调用,cell 均非 Shadow):`G1` = 腿 0 `BTC/S1`、腿 1 `BTC/P2`(对冲比 1/1);`G3` = 腿 0 `ETH/P2`;`G4` = 腿 0 `BNB/S1`(只在注明加入 `G4` 的用例里存在,其余用例中 BNB 不属于任何 group)。
 - `cfg_lf()`:`LedgerConfig` 逐字段显式赋值——`par_assets = {USDT}`、`stable_par_fallback = {USDC}`、`rate_max_age_ms = 60 000`、`valuation = {spot: Bid, perp: Mark, include_baseline: false, include_unassigned: true}`、`round_dust_notional = 5`、`balance_check_quiet_ms = 2 000`、`funding_tol_abs = 0.05`、`funding_tol_rel = 0.005`、`funding_recon_lag_ms = 600 000`、`funding_recon_window_ms = 172 800 000`、`funding_hist_cap = 4 096`、`funding_push_seen_cap = 64`、`ext_dedup_cap = 1 024`;`Capacities.max_subs_per_inst = 4`。用例改动其中某项时在"前置"里写出新值。
@@ -114,7 +114,7 @@ spec: README.md
   1. `Ledger::new` 之后清零分配计数
   2. 依次调用 10 000 次:`apply_fill`、`apply_fee`、`apply_external`、`apply_funding`、`apply_funding_push`、`reconcile_funding`、`funding_window_sweep`、`on_ref_px`、`on_mark`、`on_margin`、`equity`(输入为随机合法值,去重环与资金费环各填满一次)
 - 期望:
-  - 分配计数为 0;释放计数为 0
+  - 每个入口的分配计数(`alloc`/`alloc_zeroed`/`realloc`,hft-testkit `CountingAlloc` 只计这些)都为 0
 - 实现:`crates/hft-ledger/tests/config.rs::led_004_zero_alloc_after_new`
 
 ### LED-005 公开入口的时间参数只接受 engine_ns
@@ -418,7 +418,7 @@ spec: README.md
   - 步骤 2 后 `removed` 24 000,`realized_quote` +800,`cost` 36 000,`qty` −0.6
 - 实现:`crates/hft-ledger/tests/position.rs::led_035_short_reduce`
 
-### LED-036 现货买入成本按毛量计
+### LED-036 现货买入成本按净量计,基础资产手续费只记 fee_cex
 
 - 规则:[仓位与已实现](README.md#仓位与已实现平均成本法)
 - 级别:unit
@@ -427,8 +427,8 @@ spec: README.md
 - 步骤:
   1. `apply_fill(F(Buy, BTC/S1, 1.0, 60 000, 0.001, BTC, G1, 0), t = 10 s)`
 - 期望:
-  - `pos(A1, BTC/S1)`:`qty` 0.999,`cost` 60 000(毛量 1.0 × 60 000)
-- 实现:`crates/hft-ledger/tests/position.rs::led_036_spot_cost_gross`
+  - `pos(A1, BTC/S1)`:`qty` 0.999,`cost` 59 940(净量 0.999 × 60 000);`G1.pnl.fee_cex` −60(费用不再计入成本);与"成交不带费用 + 晚到 `FeeOnly`"路径(LED-014、LED-015)的 `cost` 相同
+- 实现:`crates/hft-ledger/tests/position.rs::led_036_spot_cost_net`
 
 ### LED-037 已实现与手续费同时进累计、当日、当前轮次与账户当日
 
@@ -543,7 +543,7 @@ spec: README.md
 - 规则:[余额初始化、校验与基线](README.md#余额初始化校验与基线)
 - 级别:unit
 - 里程碑:M2
-- 前置:LED-044 的前置;另有 `inv(BTC, G1) = 0.1`、BTC `unassigned = 0.05`(外来成交构造);报告 USDT 100 500、BTC 0.2
+- 前置:LED-044 的前置,但 `A1/S1` BTC 初始化为 0.05(`unassigned = 0.05`;外来买入有唯一候选 `G1`,构造不出未归属量);入账 `F(Buy, BTC/S1, 0.1, 60 000, 0, USDT, G1, 0)`(`inv(BTC, G1) = 0.1`);报告 USDT 100 500、BTC 0.2
 - 步骤:
   1. `set_balance_baseline(A1, S1, 77, &mut out)`
 - 期望:
@@ -668,7 +668,7 @@ spec: README.md
   1. `apply_external(&E2, false, 20 s)`
 - 期望:
   - 返回 `None`;`InstPos.qty` 仍为 6.0,`G1` 的 PnL、现金与钱包不变;`auto_held(Sell)` = 0
-  - 一条 `Note{LedgerAutoHeldOffset}`,P0,`v = [2 | 1 << 8, 21, Sell 的码, 4.0, 4.0, 0]`(qty 与 off 为 raw);`E2` 的去重键已记入
+  - 一条 `Note{LedgerAutoHeldOffset}`,P0,`v = [5 | 1 << 8, 21, Sell 的码, 4.0, 4.0, 0]`(`P2` = 5)(qty 与 off 为 raw);`E2` 的去重键已记入
 - 实现:`crates/hft-ledger/tests/external.rs::led_057_adl_fully_offset`
 
 ### LED-058 补推量大于 auto_held 时只入账超出部分,手续费按比例
@@ -864,8 +864,8 @@ spec: README.md
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| LED-072.1 | `ExternalFill{Adl, Sell, BTC/P2, 0.002, px 60 500, eoid 77}`,`auto_recon = false` | `v[0] = 0x0002_0102`(venue 2、account 1、cause 2、aflags 0);`v[1] = 21`;`v[2]` = Sell 的码;`v[3]` = 200 000;`v[4]` = 605 000 000;`v[5]` = 77;`v[6]` = G1;`v[7]` = 1 |
-| LED-072.2 | `auto_external_fill(A1, P2, BTC/P2, +0.002, 60 500, 4245)`,`auto_recon = true` | `v[0] = 0x0205_0102`(cause 5、aflags `AUTO_RECON` 2);`v[5] = 0` |
+| LED-072.1 | `ExternalFill{Adl, Sell, BTC/P2, 0.002, px 60 500, eoid 77}`,`auto_recon = false` | `v[0] = 0x0002_0105`(venue 5 = `P2`、account 1、cause 2、aflags 0);`v[1] = 21`;`v[2]` = Sell 的码;`v[3]` = 200 000;`v[4]` = 605 000 000;`v[5]` = 77;`v[6]` = G1;`v[7]` = 1 |
+| LED-072.2 | `auto_external_fill(A1, P2, BTC/P2, +0.002, 60 500, 4245)`,`auto_recon = true` | `v[0] = 0x0205_0105`(cause 5、aflags `AUTO_RECON` 2);`v[5] = 0` |
 | LED-072.3 | 对 `v[0]` 解包 | `(v0 & 0xFF, v0 >> 8 & 0xFF, v0 >> 16 & 0xFF, v0 >> 24 & 0xFF)` 等于输入的 `(venue, account, cause, aflags)` |
 
 ### LED-073 cause = Unknown 之后被认领的槽成交只算一次
@@ -969,7 +969,7 @@ spec: README.md
 - 故障:每个种子随机选 1–3 个时刻向 gw 注入 `StaleGen` 带成交的 `OrderEvent`(`exch_order_id ≠ 0`,`trade_id = 0` 与 `> 0` 各半)与 1 条 `SLOT_UNRESOLVED` 带成交的 `OrderEvent`;其中一半与之前 gw 已报的 `ExternalFill{Unknown}` 同一订单
 - 种子:PR 200(提交派生)+ 回归集;每夜日期派生
 - 断言:每个事件边界后,热进程 ledger 与冷读者 ledger 的节 1、13、22 快照字节相等;每条 `Note{OmsForeignFill}` 在冷读者中恰好产生一次 `apply_external` 调用;INV-1、INV-16
-- 实现:`crates/hft-testkit/src/scenarios/ledger.rs::led_080_cold_reader_foreign_fill_matches_hot`
+- 实现:待实现
 
 ### LED-081 AUTO_EXTERNAL:冷读者账本与 auto_held 与热进程逐值相同
 
@@ -981,7 +981,7 @@ spec: README.md
 - 故障:用户流断开期间对 `A1` 永续仓位做部分或全量 ADL(不推送),恢复后一半种子由交易所补推同一笔真实 ADL
 - 种子:PR 200 + 回归集;每夜日期派生
 - 断言:合成成交入账的那个事件之后,热进程与冷读者的节 1、13、22 字节相等(含 `AutoHeld` 行);补推的 ADL 在两边都被抵扣、都写 `Note{LedgerAutoHeldOffset}`;INV-1、INV-16
-- 实现:`crates/hft-testkit/src/scenarios/ledger.rs::led_081_cold_reader_auto_external_matches_hot`
+- 实现:待实现
 
 资金费用例另用夹具 `fund_a1(kind)`:`boot_a1(0 s)`;`P2` 的 `funding_settle = kind`;入账 `F(Sell, BTC/P2, 1.0, 60 000, 0, USDT, G1, 1)`(1 s);`on_mark(BTC/P2, 60 000, 1 s)`。`T1 = D + 8 h`,`T2 = D + 16 h`。推送写作 `Push(inst, amount, settle_ts)`,即 `FundingSettle { A1, P2, inst, amount, synth: 0, … }`。
 
@@ -1328,7 +1328,7 @@ spec: README.md
 - 期望:
   - 返回 `Corrected { adj: AdjustDelta { kind: Funding(3), px_src: 0, account: A1, venue: P2, inst: BTC/P2, asset: USDT, group: G1, qty: +3.0, px: 0, report_id: 9, cmd_seq: 0, settle_ts_ns: T1 }, pnl: PnlDelta { A1, G1, d.funding: +3.0 } }`
   - USDT `total` 与 `wallet` +3;`G1.pnl.funding` +3;`FundHist` 记录 `corrected` = 3.0
-  - `Note{FundingCorrected}`,P1,`v = [2 | 1 << 8, 21, T1, 9.0, 6.0, 3.0, G1, 0]`
+  - `Note{FundingCorrected}`,P1,`v = [5 | 1 << 8, 21, T1, 9.0, 6.0, 3.0, G1, 0]`(`P2` = 5)
   - `pos(A1, BTC/P2)`、库存与 `FillApplied`/`NetAdjust` 均无变化或输出
 - 实现:`crates/hft-ledger/tests/funding_recon.rs::led_123_per_symbol_corrected`
 
@@ -1634,7 +1634,7 @@ spec: README.md
 - 级别:prop
 - 里程碑:M2
 - 性质:任意 `on_mark`/`on_margin`/成交序列之后,`rep_liq_dist`、`est_liq_dist`、`est_ratio`、`mark_oldest_ens` 等于按"保证金数据"定义对当前全部持仓的全量重算
-- 生成:1–8 个永续 inst,每个持仓在 [−5, 5] 内随机(含 0);0–200 次 `on_mark`(价格 ±40%)、0–10 次 `on_margin`(`liq_px` 含 0 与已越过值)、0–50 笔成交,任意交错
+- 生成:`rd_lf` 的 2 个永续 inst,持仓由 0.1 的 1–20 倍的成交累积(含回到 0);0–200 次 `on_mark`(价格 ±40%)、0–10 次 `on_margin`(`liq_px` 含 0 与已越过值)、0–50 笔成交,任意交错
 - 参考:测试内的全量重算函数(i128,`HalfEven`)
 - 例数:PR 2 000;每夜 100 000
 - 实现:`crates/hft-ledger/tests/prop_margin.rs::led_157_incremental_equals_full`
@@ -1700,7 +1700,7 @@ spec: README.md
   1. `apply_adjust(AdjustDelta { A1, P2, kind: Position(1), px_src: Cmd(1), inst: BTC/P2, asset: 0, group: G1, qty: −0.5, px: 61 000, report_id: 31, cmd_seq: 501, settle_ts_ns: 0 }, 10 s)`
 - 期望:
   - `pos(A1, BTC/P2)`:`qty` −1.5,`cost` 90 500;`G1` 永续腿 −1.5;返回 `PnlDelta.d` 全 0
-  - `Note{Adjusted}`:`v[0] = 1 | 2 << 8`,`v[1] = 21`,`v[2] = 31`,`v[3]` = −50 000 000,`v[4]` = 610 000 000,`v[5] = 0`
+  - `Note{Adjusted}`:`v[0] = 1 | 5 << 8`(`P2` = 5),`v[1] = 21`,`v[2] = 31`,`v[3]` = −50 000 000,`v[4]` = 610 000 000,`v[5] = 0`
   - `GroupPosView(A1, G1).flags` 含 `ENTRY_ADOPTED`
 - 实现:`crates/hft-ledger/tests/adjust.rs::led_170_adopt_position`
 
@@ -1751,7 +1751,7 @@ spec: README.md
 - 期望:
   - `G1` 永续腿 −1.0;`pos(A1, BTC/P2).qty` 仍为 −1.004,`cost` 不变;账户级无 group 持仓 −0.004
   - 各资产 `total`、`wallet`、全部 `PnlBreakdown` 不变;返回 `PnlDelta.d` 全 0
-  - `Note{ResidualWrittenOff}`,P1,`v = [1 | 2 << 8, G1, 21, −400 000, 240 USDT(raw 240 000 000,|qty| × mark), 601]`
+  - `Note{ResidualWrittenOff}`,P1,`v = [1 | 5 << 8, G1, 21, −400 000, 240 USDT(raw 240 000 000,|qty| × mark), 601]`
 - 实现:`crates/hft-ledger/tests/adjust.rs::led_174_write_off_perp_leg`
 
 ### LED-175 核销现货腿残余从 group 库存移到 unassigned
@@ -2168,7 +2168,7 @@ spec: README.md
   1. `snapshot(&mut w)`,解析写出的 `SectionHdr` 与行
 - 期望:
   - 节的出现顺序为 1、13、22,各节恰好一次
-  - 节 1 行按 `(account, inst)` 升序;节 13 行的 `kind` 序列符合 Account* → Rate* → (Group 紧跟其 Pending)* → Margin* → FundPending* → (FundMark 紧跟其 FundHist)* → FundNoHist* → FundSeen* → ExtSeen* → AutoHeld*,同种类内按键升序(`FundSeen`、`ExtSeen` 按入账顺序);节 22 为 Cash* → Inv*
+  - 节 1 行按 `(account, inst)` 升序;节 13 行的 `kind` 序列符合 Account* → Rate* → Px* → (Group 紧跟其 Pending)* → Margin* → FundPending* → (FundMark 紧跟其 FundHist)* → FundNoHist* → FundSeen* → ExtSeen* → AutoHeld*,同种类内按键升序(`FundSeen`、`ExtSeen` 按入账顺序);节 22 为 Cash* → Inv*
 - 实现:`crates/hft-ledger/tests/snapshot.rs::led_230_section_and_row_order`
 
 ### LED-231 快照往返:restore 后再 snapshot 逐字节相同
@@ -2206,11 +2206,11 @@ spec: README.md
 |---|---|---|
 | LED-233.1 | `PositionRow` | 64 |
 | LED-233.2 | `LedgerRowHdr` | 8 |
-| LED-233.3 | Account / Rate / Group 行 | 88 / 32 / 432 |
+| LED-233.3 | Account / Rate / Group 行 | 88 / 32 / 552 |
 | LED-233.4 | Cash / Inv 行 | 64 / 16 |
 | LED-233.5 | Margin 行 / 每项 | 64 / 16 |
 | LED-233.6 | FundPending / FundMark / FundHist / FundNoHist / FundSeen | 32 / 16 / 32 / 32 / 16 |
-| LED-233.7 | ExtSeen / AutoHeld | 24 / 16 |
+| LED-233.7 | ExtSeen / AutoHeld / Px | 24 / 16 / 48 |
 | LED-233.8 | `LegAgg` / `PnlBreakdown` | 48 / 64 |
 | LED-233.9 | 每个上列结构的字段大小之和(含显式 `_pad`) | 等于其 `size_of`(无隐式填充) |
 
@@ -2228,7 +2228,7 @@ spec: README.md
 | LED-234.2 | `LedgerRowHdr` | `kind` 0、`account` 1、`venue` 2、`id` 4 |
 | LED-234.3 | FundHist 行 | `group` 0、`hflags` 4、`settle_ts_ns` 8、`booked` 16、`corrected` 24 |
 | LED-234.4 | ExtSeen 行 | `kind` 0、`a` 8、`b` 16 |
-| LED-234.5 | `LedgerRowHdr.kind` 码 | Account 1 … AutoHeld 14,与 README 列表逐一相同;0 与 15 在 `restore` 中返回 `Err` |
+| LED-234.5 | `LedgerRowHdr.kind` 码 | Account 1 … AutoHeld 14、Px 15,与 README 列表逐一相同;0 与 16 在 `restore` 中返回 `Err` |
 
 ### LED-235 行版本:写出当前版本,恢复拒绝更高版本
 
@@ -2240,8 +2240,8 @@ spec: README.md
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| LED-235.1 | 读三节 `SectionHdr` 的行版本 | 节 1 = 2,节 13 = 7,节 22 = 2 |
-| LED-235.2 | 把节 13 的行版本改为 8 后 `restore` | `Err(RestoreError::VersionUnsupported)`,不 panic |
+| LED-235.1 | 读三节 `SectionHdr` 的行版本 | 节 1 = 2,节 13 = 8,节 22 = 2 |
+| LED-235.2 | 把节 13 的行版本改为 9 后 `restore` | `Err(RestoreError::VersionUnsupported)`,不 panic |
 | LED-235.3 | 把节 1 的行版本改为 3 后 `restore` | 同上 |
 
 ### LED-236 i128 字段以两个小端 u64 存放
@@ -2283,7 +2283,7 @@ spec: README.md
 - 规则:[仓位与已实现](README.md#仓位与已实现平均成本法)、[外部成交](README.md#外部成交externalfill)、[资金费](README.md#资金费)
 - 级别:prop
 - 里程碑:M2
-- 性质:① 每个 (account) Σ 已实现(含 `funding`、`fee_cex`、`external`、`adjust`)+ 未实现(按成交价估值)= Σ 现金流,误差 ≤ 已发生的换算次数 × 1 raw
+- 性质:① 价格不变时,每个 (account) Σ 已实现(含 `funding`、`fee_cex`、`external`、`adjust`,加 `funding_residual`)+ 未实现 = 持有资产的价值变化 − 余额采纳带入的价值 − Σ 即时基础资产手续费 × (换算率 − 成交价)(费用按换算率计费、所扣数量按成交价成交),误差 ≤ 已发生的换算次数 × 8 raw;生成器不含行情变化与晚到的基础资产手续费
 - 生成:单账户 `A1`,0–300 步,从 {现货/永续成交(四种 `fee_asset_rule`)、`FeeDelta`、外来成交(五种 cause,含重复)、资金费(三种方式,含重复推送)、对账校正条目、划转、核销、采纳} 中抽取;价格在 [30 000, 90 000] 内,数量在 lot 的 1–1 000 倍
 - 参考:测试内以 i128 逐笔累计的现金流模型
 - 例数:PR 2 000;每夜 100 000
@@ -2305,7 +2305,7 @@ spec: README.md
 - 规则:[权益数据](README.md#权益数据portfolioview-的字段语义)、[划转与模拟账户](README.md#划转与模拟账户)
 - 级别:prop
 - 里程碑:M2
-- 性质:③ 每步 Σ 资产价值变化(按该步的换算率)= Σ `PnlBreakdown` 变化 + Σ 划转净额,误差 ≤ 1 raw × 该步换算次数
+- 性质:③ 每步 Σ 资产价值变化(各 venue 汇总行的 `equity`,`valuation.spot = Mid` 使现货估值价等于换算率,计入基线与未归属)= Σ `PnlBreakdown` 变化 + `funding_residual` 变化 + Σ 划转净额 + 即时基础资产手续费 × (换算率 − 成交价),误差 ≤ 16 raw;行情变化、余额采纳(带入外部资产)与晚到的基础资产手续费(按平均成本移出)那一步不判定
 - 生成:LED-240 的生成器
 - 参考:逐步断言等式
 - 例数:PR 2 000;每夜 100 000
@@ -2328,7 +2328,7 @@ spec: README.md
 - 级别:prop
 - 里程碑:M2
 - 性质:⑥ 对窗口内(`hist_from_ns` 之后、未 `OutsideWindow`)的每个 (inst 或 `INST_NONE`, settle_ts),最近一次 `reconcile_funding` 之后 `booked + corrected` 与该次 `exch_amount` 之差 < 结算资产 dust;同一条目任意重复报告不改变这一结果
-- 生成:1–3 个永续 inst × 1–20 个结算时刻;三种 `funding_settle`;推送随机丢失、重复、乱序;对账条目随机重复、`now_ns` 在 lag 两侧
+- 生成:1–2 个永续 inst(`rd_lf` 的 `BTC/P2`、`ETH/P2`)× 1–20 个结算时刻;三种 `funding_settle`;推送随机丢失、重复、乱序;对账条目随机重复、`now_ns` 在 lag 两侧且单调不减(报告的事件时间按 journal 顺序);最后按结算顺序把每个条目再报告两次,只对仍在窗口内的条目断言
 - 参考:按交易所流水的金额表
 - 例数:PR 2 000;每夜 100 000
 - 实现:`crates/hft-ledger/tests/prop_funding.rs::led_244_funding_converges_to_exchange`
@@ -2355,7 +2355,7 @@ spec: README.md
   2. 经 `hft_py.ledger`(内部同一 `JournalLedger`)读同一 journal 重建
 - 期望:
   - 两边每步的 `PnlBreakdown`(`hft_py.pnl` 输出)与最终三节快照逐字节相同
-- 实现:`crates/hft-py/tests/ledger_parity.rs::led_246_python_matches_rust`
+- 实现:待实现
 
 ### LED-247 记账时刻跨重启连续
 
@@ -2529,7 +2529,7 @@ spec: README.md
 - 级别:prop
 - 里程碑:M2
 - 性质:从第一条 `StateSnapshot` 起步的 `JournalLedger` 喂完到第 k 条 `StateSnapshot` 为止的全部记录后,其 `pos`、`inventory`、`venue_book`(余额)与从第 k 条快照 `restore` 的 Ledger 逐项相等
-- 生成:hft-testkit 的 sequencer 夹具在 `rd_lf()` 上运行 1–200 条随机输入(下单、部分成交、重复与乱序回报、`FeeOnly`、`ExternalFill`、资金费推送、`AdoptExchange`、`StaleGen` 带成交),每 20 条写一次 `StateSnapshot`
+- 生成:测试内的 sequencer 替身(写出 sequencer 会写的 journal 记录并按同样的调用驱动引擎 Ledger;hft-testkit 的 sequencer 夹具落地后改用它)在 `rd_lf()` 上运行 1–200 条随机输入(下单、部分成交、重复与乱序回报、`FeeOnly`、`ExternalFill`、资金费推送、`AdoptExchange`、`StaleGen` 带成交),每 20 条写一次 `StateSnapshot`
 - 参考:引擎 Ledger 在同一快照处的读数
 - 例数:PR 500
 - 实现:`crates/hft-ledger/tests/prop_journal_ledger.rs::led_266_cold_equals_engine_at_snapshots`
@@ -2542,7 +2542,7 @@ spec: README.md
 - 故障:标准故障注入表(断线、回报重复与乱序、`StaleGen`、ADL 外来成交、资金费推送丢失)
 - 种子:PR 200(提交派生)+ 回归集;每夜日期派生
 - 断言:每条 `StateSnapshot` 处 JournalLedger 的 `pos`、`inventory`、`venue_book` 与引擎 Ledger 相等;`unmapped_fills` 的每一笔都在同一事件内有 `Note{OmsForeignFill}` 或属于 `Shadow` 扣留的单
-- 实现:`crates/hft-testkit/src/scenarios/ledger.rs::led_267_journal_ledger_matches_engine`
+- 实现:待实现
 
 ### LED-268 资金费逐笔差额以 AssetMeta.dust 为界判 Matched
 

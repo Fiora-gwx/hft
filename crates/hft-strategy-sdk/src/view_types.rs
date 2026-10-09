@@ -251,7 +251,7 @@ pub struct PerpPosView {
     pub upnl: Notional,
     /// From `MarginReport`; 0 = unknown.
     pub liq_px: Px,
-    /// From `MarginReport`; 0xFF = unknown.
+    /// From `MarginReport`; 0 = unknown.
     pub adl_quantile: u8,
 }
 
