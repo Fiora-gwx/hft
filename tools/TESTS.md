@@ -842,13 +842,13 @@ spec: README.md
 - 规则:[cargo xtask dst](README.md#cargo-xtask-dst)
 - 级别:table
 - 里程碑:M2
-- 前置:`fixtures/dst/hashtrail.toml` 由当前提交以 `--hashtrail write` 生成,登记 3 个种子
+- 前置:`fixtures/dst/hashtrail.toml` 登记 3 个种子(1、2、3,套件 `core`);记录型执行器扮演 `hft-dst hashtrail`,对种子 i 输出 `trail <T_i> points=4`,文件中的 `trail` 即 T_i
 - 实现:`tools/xtask/tests/dst.rs::tool_054_hashtrail_check`
 
 | 行 | 操作 | 期望 |
 |---|---|---|
 | TOOL-054.1 | `--hashtrail check` | 退出 0 |
-| TOOL-054.2 | 把文件中种子 2 的某点 `oms` 哈希改一个十六进制位后 `--hashtrail check` | 退出 1;输出种子 2、该点的 `seq` 与组件 `oms` |
+| TOOL-054.2 | 把文件中种子 2 的 `trail` 改一个十六进制位后 `--hashtrail check` | 退出 1;输出种子 2 与两侧摘要;不运行种子 3 |
 | TOOL-054.3 | 先 `--hashtrail write`,再 `--hashtrail check` | 两次都退出 0;文件中的种子集与改写前相同 |
 | TOOL-054.4 | 种子 3 的某点哈希改一位后 `--hashtrail check --first 2` | 退出 0;只运行种子 1、2 |
 | TOOL-054.5 | 同上改动,`--hashtrail check --first 3` | 退出 1;报告种子 3 |

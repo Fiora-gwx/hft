@@ -1,4 +1,4 @@
-//! `cargo xtask dst` (tools/TESTS.md TOOL-047–TOOL-049, TOOL-051, TOOL-053). The fixture holds the
+//! `cargo xtask dst` (tools/TESTS.md TOOL-047–TOOL-049, TOOL-051, TOOL-053, TOOL-054). The fixture holds the
 //! DST framework directory; the recording executor plays `cargo build` of `hft-dst` and the runner
 //! (`hft-dst list` prints the suites).
 
@@ -188,4 +188,130 @@ fn files(root: &std::path::Path) -> Vec<String> {
         .collect();
     v.sort();
     v
+}
+
+const TRAILS: [&str; 3] = [
+    "0123456789abcdef0123456789abcdef",
+    "11111111111111112222222222222222",
+    "fedcba9876543210fedcba9876543210",
+];
+
+fn trail_file(trails: [&str; 3]) -> String {
+    (0..3)
+        .map(|i| {
+            format!(
+                "[[seed]]\nseed = \"{:#018x}\"\nsuite = \"core\"\nsteps = 2000\ntrail = \"{}\"\n\n",
+                i + 1,
+                trails[i]
+            )
+        })
+        .collect()
+}
+
+/// Recording executor: `hft-dst hashtrail --seed <i>` prints `trail <TRAILS[i-1]> points=4`.
+fn trail_script(f: &Fixture) -> Script {
+    let rules: Vec<(String, String)> = (0..3)
+        .map(|i| {
+            (
+                format!("{} hashtrail --seed {:#018x}", runner(f), i + 1),
+                format!("trail {} points=4\n", TRAILS[i]),
+            )
+        })
+        .collect();
+    let r: Vec<(&str, i32, &str, &str)> = rules
+        .iter()
+        .map(|(p, o)| (p.as_str(), 0, o.as_str(), ""))
+        .collect();
+    Script::new(f, &r, 0)
+}
+
+fn flip(t: &str) -> String {
+    let c = if t.starts_with('0') { "1" } else { "0" };
+    format!("{c}{}", &t[1..])
+}
+
+/// `(id, file trails, args, exit code, seeds run, stderr must contain)`.
+type TrailRow<'a> = (
+    &'a str,
+    [&'a str; 3],
+    &'a [&'a str],
+    i32,
+    &'a [u64],
+    &'a [&'a str],
+);
+
+#[test]
+fn tool_054_hashtrail_check() {
+    const FILE: &str = "fixtures/dst/hashtrail.toml";
+    let f = dst_repo("dst-054");
+    let ran = |s: &Script| -> Vec<u64> {
+        s.calls()
+            .iter()
+            .filter_map(|c| c.split(" hashtrail --seed ").nth(1))
+            .map(|r| u64::from_str_radix(r[2..18].trim(), 16).unwrap())
+            .collect()
+    };
+    let b2 = flip(TRAILS[1]);
+    let b3 = flip(TRAILS[2]);
+    // (id, file trails, args, exit, seeds run, stderr must contain)
+    let rows: [TrailRow; 6] = [
+        ("TOOL-054.1", TRAILS, &["check"], 0, &[1, 2, 3], &[]),
+        (
+            "TOOL-054.2",
+            [TRAILS[0], &b2, TRAILS[2]],
+            &["check"],
+            1,
+            &[1, 2],
+            &["seed=0x0000000000000002", TRAILS[1], &b2],
+        ),
+        (
+            "TOOL-054.4",
+            [TRAILS[0], TRAILS[1], &b3],
+            &["check", "--first", "2"],
+            0,
+            &[1, 2],
+            &[],
+        ),
+        (
+            "TOOL-054.5",
+            [TRAILS[0], TRAILS[1], &b3],
+            &["check", "--first", "3"],
+            1,
+            &[1, 2, 3],
+            &["seed=0x0000000000000003"],
+        ),
+        ("TOOL-054.6", TRAILS, &["check", "--first", "4"], 2, &[], &[]),
+        ("TOOL-054.7", TRAILS, &["check", "--first", "0"], 2, &[], &[]),
+    ];
+    for (id, trails, args, want, seeds, msgs) in rows {
+        f.write(FILE, &trail_file(trails));
+        let s = trail_script(&f);
+        let mut a = vec!["--hashtrail"];
+        a.extend_from_slice(args);
+        let r = dst(&f, &s, &a);
+        assert_eq!(r.code, want, "{id}: {}", r.stderr);
+        assert_eq!(ran(&s), seeds.to_vec(), "{id}");
+        for m in msgs {
+            assert!(r.stderr.contains(m), "{id}: `{m}` not in {}", r.stderr);
+        }
+    }
+    // TOOL-054.3: write then check; the seed set is unchanged.
+    let stale = trail_file([&b2, &b2, &b3]);
+    f.write(FILE, &stale);
+    let s = trail_script(&f);
+    assert_eq!(dst(&f, &s, &["--hashtrail", "write"]).code, 0, "TOOL-054.3 write");
+    assert_eq!(
+        f.read(FILE),
+        trail_file(TRAILS),
+        "TOOL-054.3: only trail values change"
+    );
+    let s = trail_script(&f);
+    assert_eq!(dst(&f, &s, &["--hashtrail", "check"]).code, 0, "TOOL-054.3 check");
+    // TOOL-054.8: write with --first is refused and leaves the file alone.
+    f.write(FILE, &stale);
+    let s = trail_script(&f);
+    let r = dst(&f, &s, &["--hashtrail", "write", "--first", "2"]);
+    assert_eq!(r.code, 2, "TOOL-054.8: {}", r.stderr);
+    assert_eq!(f.read(FILE), stale, "TOOL-054.8: file unchanged");
+    assert!(ran(&s).is_empty(), "TOOL-054.8: no seed ran");
 }

@@ -9,6 +9,8 @@
 //! - Runs: `hft-dst run --seeds A..B` for the range (`hft-dst repro` per seed with `--trace`), `hft-dst
 //!   repro` per regression seed; crash directories under `target/dst/`. Nothing is written outside
 //!   `target/` (no server ledger).
+//! - `--hashtrail check|write`: `hft-dst hashtrail` per registered seed of
+//!   `fixtures/dst/hashtrail.toml`, compared with / written into its `trail` values.
 //! - JSON `target/xtask/dst.json`: `seeds` (16-digit hex, range then regressions), `runs`
 //!   (`seed`, `suite`, `source`), `steps`, `strategy_set`, `result`.
 
@@ -204,6 +206,199 @@ fn fail(msg: impl std::fmt::Display) -> i32 {
     EXIT_ENV
 }
 
+/// One registered conformance seed of `fixtures/dst/hashtrail.toml`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrailSeed {
+    pub seed: u64,
+    pub suite: String,
+    pub steps: u64,
+    pub trail: String,
+}
+
+/// The `[[seed]]` tables of the HashTrail golden file, in registration (file) order.
+pub fn read_trails(text: &str) -> Result<Vec<TrailSeed>, EnvError> {
+    let t: toml::Table = text.parse().map_err(|e| EnvError(format!("{HASHTRAIL}: {e}")))?;
+    let arr = t
+        .get("seed")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| EnvError(format!("{HASHTRAIL}: no [[seed]] tables")))?;
+    arr.iter()
+        .enumerate()
+        .map(|(i, v)| {
+            let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
+            let bad = || {
+                EnvError(format!(
+                    "{HASHTRAIL}: [[seed]] #{}: needs seed, suite, steps, trail",
+                    i + 1
+                ))
+            };
+            Ok(TrailSeed {
+                seed: s("seed").as_deref().and_then(parse_u64).ok_or_else(bad)?,
+                suite: s("suite").ok_or_else(bad)?,
+                steps: v
+                    .get("steps")
+                    .and_then(|x| x.as_integer())
+                    .and_then(|x| u64::try_from(x).ok())
+                    .ok_or_else(bad)?,
+                trail: s("trail").ok_or_else(bad)?,
+            })
+        })
+        .collect()
+}
+
+/// `text` with the `trail` value of the i-th `[[seed]]` table replaced by `trails[i]` (all else
+/// byte-identical).
+pub fn rewrite_trails(text: &str, trails: &[String]) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut ix: Option<usize> = None;
+    for line in text.split_inclusive('\n') {
+        let t = line.trim_start();
+        if t.starts_with("[[seed]]") {
+            ix = Some(ix.map_or(0, |i| i + 1));
+        } else if t.starts_with('[') {
+            ix = None;
+        }
+        if let Some(i) = ix
+            && t.starts_with("trail")
+            && t[5..].trim_start().starts_with('=')
+            && let Some(new) = trails.get(i)
+        {
+            let indent = &line[..line.len() - t.len()];
+            let nl = if line.ends_with('\n') { "\n" } else { "" };
+            out.push_str(&format!("{indent}trail = \"{new}\"{nl}"));
+            continue;
+        }
+        out.push_str(line);
+    }
+    out
+}
+
+/// `trail <hex> points=<n>` → `<hex>`.
+pub fn parse_trail_line(stdout: &str) -> Option<String> {
+    stdout
+        .lines()
+        .find_map(|l| l.strip_prefix("trail "))
+        .and_then(|r| r.split_whitespace().next())
+        .map(str::to_string)
+}
+
+fn build_runner(root: &Path, exec: &mut dyn Exec) -> Result<String, i32> {
+    let build = Cmd::new(
+        "cargo",
+        &[
+            "build",
+            "--profile",
+            "ci",
+            "-p",
+            "hft-testkit",
+            "--features",
+            "dst-bin",
+            "--bin",
+            "hft-dst",
+        ],
+    );
+    match exec.run(&build) {
+        Ok(r) if r.ok() => Ok(runner_bin(root).display().to_string()),
+        Ok(r) => Err(fail(format!("`{}` exited {}", build.line(), r.code))),
+        Err(e) => Err(fail(e)),
+    }
+}
+
+/// `--hashtrail check|write [--first K]`: `hft-dst hashtrail --seed S --suite X --steps N` per
+/// registered seed (stdout `trail <xxh3_128 hex> points=<n>`); `check` stops at the first digest
+/// that differs from the file (exit 1), `write` rewrites the `trail` values (seed set unchanged).
+fn hashtrail(root: &Path, o: &Opts, exec: &mut dyn Exec) -> i32 {
+    let path = root.join(HASHTRAIL);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) => return fail(format!("{HASHTRAIL}: {e}")),
+    };
+    let seeds = match read_trails(&text) {
+        Ok(s) => s,
+        Err(e) => return fail(e),
+    };
+    let n = match o.first {
+        Some(k) if k as usize > seeds.len() => {
+            return fail(format!(
+                "--first {k}: {HASHTRAIL} registers {} seeds",
+                seeds.len()
+            ));
+        }
+        Some(k) => k as usize,
+        None => seeds.len(),
+    };
+    let bin = match build_runner(root, exec) {
+        Ok(b) => b,
+        Err(c) => return c,
+    };
+    let write = o.hashtrail == Some(Trail::Write);
+    let mut got = Vec::with_capacity(n);
+    let mut code = EXIT_OK;
+    let mut first_diff = serde_json::Value::Null;
+    for t in &seeds[..n] {
+        let c = Cmd::capture(
+            &bin,
+            &[
+                "hashtrail",
+                "--seed",
+                &hex(t.seed),
+                "--suite",
+                &t.suite,
+                "--steps",
+                &t.steps.to_string(),
+            ],
+        );
+        let r = match exec.run(&c) {
+            Ok(r) => r,
+            Err(e) => return fail(e),
+        };
+        eprint!("{}", r.stderr);
+        if !r.ok() {
+            eprintln!("dst: `{}` exited {}", c.line(), r.code);
+            code = if r.code == EXIT_ENV { EXIT_ENV } else { EXIT_FAIL };
+            break;
+        }
+        let Some(trail) = parse_trail_line(&r.stdout) else {
+            return fail(format!("`{}` printed no `trail <hex>` line", c.line()));
+        };
+        if !write && trail != t.trail {
+            eprintln!(
+                "dst: HashTrail differs: seed={} suite={} steps={} expected={} got={}",
+                hex(t.seed),
+                t.suite,
+                t.steps,
+                t.trail,
+                trail
+            );
+            first_diff = json!({"seed": hex(t.seed), "suite": t.suite, "expected": t.trail, "got": trail});
+            code = EXIT_FAIL;
+            break;
+        }
+        got.push(trail);
+    }
+    if write
+        && code == EXIT_OK
+        && let Err(e) = std::fs::write(&path, rewrite_trails(&text, &got))
+    {
+        return fail(format!("write {HASHTRAIL}: {e}"));
+    }
+    let j = json!({
+        "hashtrail": if write { "write" } else { "check" },
+        "seeds": seeds[..n].iter().map(|t| hex(t.seed)).collect::<Vec<_>>(),
+        "first_divergence": first_diff,
+        "result": match code { EXIT_OK => "pass", EXIT_FAIL => "fail", _ => "error" },
+    });
+    if let Err(e) = write_json(root, "dst", &j) {
+        return fail(e);
+    }
+    eprintln!(
+        "dst: --hashtrail {}: {n} seeds -> {}",
+        if write { "write" } else { "check" },
+        if code == EXIT_OK { "PASS" } else { "FAIL" }
+    );
+    code
+}
+
 /// Runs `dst` with `exec`; returns the exit code.
 pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
     let o = match parse(args) {
@@ -229,7 +424,7 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
         if !root.join(HASHTRAIL).is_file() {
             return fail(format!("{HASHTRAIL} not found"));
         }
-        return fail("--hashtrail: the hft-dst runner has no HashTrail output yet");
+        return hashtrail(root, &o, exec);
     }
     let steps = o.steps.unwrap_or(hft_testkit::seed::DST_DEFAULT_STEPS);
     let start = match o.seed {
@@ -244,26 +439,10 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
         return fail(format!("seed range {}..+{n} overflows u64", hex(start)));
     };
     // Build the runner and read its suites.
-    let build = Cmd::new(
-        "cargo",
-        &[
-            "build",
-            "--profile",
-            "ci",
-            "-p",
-            "hft-testkit",
-            "--features",
-            "dst-bin",
-            "--bin",
-            "hft-dst",
-        ],
-    );
-    match exec.run(&build) {
-        Ok(r) if r.ok() => {}
-        Ok(r) => return fail(format!("`{}` exited {}", build.line(), r.code)),
-        Err(e) => return fail(e),
-    }
-    let bin = runner_bin(root).display().to_string();
+    let bin = match build_runner(root, exec) {
+        Ok(b) => b,
+        Err(c) => return c,
+    };
     let suites = match exec.run(&Cmd::capture(&bin, &["list"])) {
         Ok(r) if r.ok() => parse_suites(&r.stdout),
         Ok(r) => return fail(format!("`{bin} list` exited {}", r.code)),
