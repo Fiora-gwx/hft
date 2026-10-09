@@ -741,3 +741,9 @@ impl Risk {
         Ok(risk)
     }
 }
+
+/// `RiskUsRow.uflags`.
+pub mod us_flags {
+    /// The previous reconciliation group saw the user stream down.
+    pub const PREV_US_DOWN: u8 = crate::mode::PREV_US_DOWN;
+}

@@ -1551,3 +1551,17 @@ pub const LIVE: Effective = Effective::Live;
 pub const CLOSE: Effective = Effective::CloseOnly {
     deferred_shadow: false,
 };
+
+/// R0 margin sample with the given reported/estimated liquidation distance, at `report_ens`.
+pub fn msample(liq: &str, ratio: &str, report_ens: i64) -> MarginSample {
+    MarginSample {
+        rep_liq_dist: r(liq),
+        est_liq_dist: r(liq),
+        reported_ratio: r(ratio),
+        est_ratio: r(ratio),
+        report_ens,
+        mark_ens: i64::MAX,
+        has_report: true,
+        truncated: false,
+    }
+}

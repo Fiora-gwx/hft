@@ -135,7 +135,7 @@ spec: README.md
 - 规则:[配置](README.md#配置riskparams版本化经-setrisk-替换并作为-configblob-写入-journal)(容量)、[热路径:分类与检查](README.md#热路径分类与检查)(`set_params`)
 - 级别:table
 - 里程碑:M2
-- 前置:refdata 有 20 个 Live 账户(各只在 A)、`Capacities{max_insts = 64, max_cells_total = 32}`;`Risk::new` 用 20 行账户参数成功;此后 testkit `CountingAlloc` 计数清零
+- 前置:refdata 有 20 个 Live 账户(账户 1–10 只在 A、11–20 只在 B;每 venue 的 Live 账户数受 `KillBits::MAX_ACCOUNTS_PER_GW` 限制)、`Capacities{max_insts = 64, max_cells_total = 32}`;`Risk::new` 用 20 行账户参数成功;此后 testkit `CountingAlloc` 计数清零
 - 实现:`crates/hft-risk/tests/params.rs::rsk_004_capacity_rows`
 
 | 行 | `set_params(scope = *)` 的输入 | 期望 |
@@ -155,10 +155,10 @@ spec: README.md
 - 里程碑:M2
 - 前置:R0
 - 步骤:
-  1. `set_params(P1, scope = Account(1))`,P1 = P0 改账户 1、账户 2 的 `max_order_notional` 都为 5 000,`classes[0].rr_max_cross = 0.02`、`l3_max_cross = 0.03`
+  1. `set_params(P1, scope = Account(1))`,P1 = P0 改账户 1、账户 2 的 `max_order_notional` 都为 15 000(不低于 `force_max_chunk`,否则是 RSK-007.7 的 `ExecRiskMismatch`),`classes[0].rr_max_cross = 0.02`、`l3_max_cross = 0.03`
 - 期望:
   - 返回 `Ok`
-  - `view(1).max_order_notional = 5 000`,`view(2).max_order_notional = 10 000`
+  - `view(1).max_order_notional = 15 000`,`view(2).max_order_notional = 10 000`
   - `view_for(1, a1).rr_max_cross = 0.01`、`view_for(1, a1).l3_max_cross = 0`(全局字段只随 `scope = *` 替换)
 - 实现:`crates/hft-risk/tests/params.rs::rsk_005_account_scope_replace`
 
