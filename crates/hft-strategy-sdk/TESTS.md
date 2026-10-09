@@ -61,10 +61,10 @@ spec: README.md
   | 4 | `enabled` | Bool | 0 | 1 | 1 | manual_only、minor = Any | 1 |
   | 5 | `mode` | Enum(["a", "b", "c"]) | 0 | 2 | 0 | manual_only | 2 |
 
-- **`GT3`**:3 个 group 的 `GroupTable`,`capacity() = 8`(`max_groups_per_instance = 8`);gix 0 = `G1`(`0x0300_0001`)、gix 1 = `G2`(`0x0300_0002`)、gix 2 = `G3`(`0x0300_0003`),都是 `asset = 1`(BTC,`px_exp = −2`、`qty_exp = −8`)、两腿:leg 0 = `I1`(inst 101,venue `V1` 现货,交易所 X1)、leg 1 = `I2`(inst 102,venue `V2` USDT 永续,交易所 X2),`LegDef.kind = Cex`、`route = 0`、`open_allowed = 1`。参考 inst(都是资产 1):`I3`(inst 103,venue `V3`,交易所 X3,不在账户内,本实例有 feed)、`I4`(inst 104,venue `V4`,交易所 X4,不在账户内,本实例无 feed)、`I5`(inst 105,venue `V2` 永续,另一资产 2)。
+- **`GT3`**:3 个 group 的 `GroupTable`,`capacity() = 8`(`max_groups_per_instance = 8`);gix 0 = `G1`(`0x0300_0001`)、gix 1 = `G2`(`0x0300_0002`)、gix 2 = `G3`(`0x0300_0003`),都是 `asset = 1`(BTC,`px_exp = −2`、`qty_exp = −8`)、两腿:leg 0 = `I1`(inst 101,venue `V1` 现货,交易所 X1)、leg 1 = `I2`(inst 102,venue `V2` USDT 永续,交易所 X2),`LegDef.kind = Cex`、`route = 0`、`open_allowed = 1`。refdata 的 InstId 必须从 1 稠密编号,故另有填充 inst 1–100(V1 现货、资产 4,不属于任何 group);参考 inst(都是资产 1):`I3`(inst 103,venue `V3`,交易所 X3,不在账户内,本实例有 feed)、`I4`(inst 104,venue `V4`,交易所 X4,不在账户内,本实例无 feed)、`I5`(inst 105,venue `V2` 永续,另一资产 2)。
 - **账户与实例**:`A1`(`AccountKind::Sim`,`is_prod = false`,venues {V1, V2},绑定实例 `S3` = `StrategyId(3)`);需要正式账户的用例另设 `A9`(`is_prod = true`,测试网端点)。
 - **SDK 内的测试策略**(`crates/hft-strategy-sdk/tests/common/`,只用于本 crate 的单元、属性与分派测试):`EchoProbe`(kind_id 0xFF01,`DESC.version = 3`,参数 `TP`,只发订单意图;BBO 中价 × `open_th` 越过阈值时对该 group 发一张 `Open` IOC,冷却 `cooldown_ms` 按 `engine_ns` 计;`cmds` 见 SDK-160;Note 码 1 `EchoFire`(Info)、2 `EchoOverflow`(P2)、3 `EchoNoFeed`(P2))与 `TargetProbe`(kind_id 0xFF02,只发 `TargetIntent`,带 `ProbeModel`,`cmds` 为空)。两者经本 crate `tests/set_dispatch.rs` 的 `strategy_set!` 装配成 `ProbeSet`。
-- **`ProbeModel`**(TargetProbe 的 Model):`LAYOUT_VERSION = 1`、`PATH_VERSION = 1`、`WARMUP = true`;原始样本节 = 实例级节 tag 1 `{n_ticks: U64 One}` + 每 group 节 tag 2 `{utc_ns: I64 Prefixed, mid: I64 Prefixed}`(每 group 至多 256 个 1 s 样本);路径状态节 = 每 group `{band: i64, band_upd_ns: i64, last_sent: u64}`,`band` 在 UTC 60 s 边界由样本重算;`path_settle_ms = 60_000`;`cold_start_ms(p, gix) = 100_000 × (gix + 1)`;`mem_bytes(p, n) = n × 8_192 + 65_536`;`snapshot_bytes(p, n) = 256 + n × 4_352`;每个模型 tick(`model_tick(1_000)`)对每个 group 发一条 `local_kind = 1` 的 Advice `{ver: u8 = 1, flags: u8, _pad: [u8; 6], band: i64}`(样本不足 → `flags` 的 NOT_READY 位 = 1、`band = 0`);预热载荷 `local_kind = 1`:`{ver: u8 = 1, _pad: [u8; 3], group: u32, n: u16, _pad2: [u8; 6], (utc_ns: i64, mid: i64) × n}`。`ColdModel` 与它相同但 `WARMUP = false`。
+- **`ProbeModel`**(TargetProbe 的 Model):`LAYOUT_VERSION = 1`、`PATH_VERSION = 1`、`WARMUP = true`;原始样本节 = 实例级节 tag 1 `{n_ticks: U64 One}` + 每 group 节 tag 2 `{GroupId: u32, utc_ns: I64 Prefixed, mid: I64 Prefixed, pct_bin: I64 One, fp: U64 One}`(每 group 至多 256 个 1 s 样本;`pct_bin` 是样本的存储解释配置,SDK-082 据它报告 `PctConfig`;`fp` 是写出时的 group 指纹;满窗口一条记录 4 124 B);路径状态节 = `n: u32` + 每 group `{id: u32, _pad: u32, band: i64, band_upd_ns: i64, last_sent: u64}`,`band` 在 UTC 60 s 边界由样本重算;`path_settle_ms = 60_000`;`cold_start_ms(p, gix) = 100_000 × (gix + 1)`;`mem_bytes(p, n) = n × 8_192 + 65_536`;`snapshot_bytes(p, n) = 256 + n × 4_352`;每个模型 tick(`model_tick(1_000)`)对每个 group 发一条 `local_kind = 1` 的 Advice `{ver: u8 = 1, flags: u8, _pad: [u8; 6], band: i64}`(样本不足 → `flags` 的 NOT_READY 位 = 1、`band = 0`);预热载荷 `local_kind = 1`:`{ver: u8 = 1, _pad: [u8; 3], group: u32, n: u16, _pad2: [u8; 6], (utc_ns: i64, mid: i64) × n}`。`ColdModel` 与它相同但 `WARMUP = false`。
 - **引擎侧契约夹具**(`crates/hft-testkit/tests/sdk_contract/`):`RecProbe`(kind_id 0xFF03,参数 `TP`,只依赖 SDK)记录每次被调用的(方法、`EventRef` 变体、gix、`v.now().seq`;没有 `Views` 参数的方法只记方法名与所在 Input)到定长数组,意图按测试脚本发出;`RecModel` 是它的 Model(同 `ProbeModel` 的节与常量),同样记录每次调用;二者以测试内手写的 `impl StrategySet for RecSet` 装配(不调用 `strategy_set!`)。`SeqRig` = 真实 `Sequencer<RecSet>` + hft-testkit `DstDriver` + `MockVenue`(V1、V2、V3 有 feed);`AdvRig` = 真实 `Advisor<RecSet, MemCkpt>` 尾随同一 journal,`MemCkpt` 是内存里的 `CheckpointStore`(文件头与分节按 [apps/hft-core](../../apps/hft-core/README.md#内存与-journal-段按主机类唯一归属) 的 `CkptHdr`/`PathSecHdr`)。`SeqRig` 的 EngineConfig:`max_groups_per_instance = 8`、`conn_liveness_ms = 2_000`、`tsc_per_ms = 3_000_000`。
 - 定点数写法:`Rate` 1e-9(1 bp = 100_000),`Notional` 1e-6 USDT,BTC 的 `Qty` 指数 −8、`Px` 指数 −2。
 
@@ -1063,7 +1063,7 @@ spec: README.md
 - 步骤:
   1. `snapshot_all(&m, 1_000)`
 - 期望:
-  - 原始样本节共 8 块,每块恰一个 group(4 100 B,第一块另含实例级节),每次返回 `More(gix + 1)`,最后 `Done`;writer 不截断(每块字节 = 该 group 记录长度)
+  - 原始样本节共 8 块,每块恰一个 group(4 124 B,第一块另含实例级节),每次返回 `More(gix + 1)`,最后 `Done`;writer 不截断(每块字节 = 该 group 记录长度)
 - 实现:`crates/hft-strategy-sdk/tests/checkpoint.rs::sdk_071_oversized_group_own_chunk`
 
 ### SDK-072 检查点字节与分块大小无关
@@ -2600,7 +2600,7 @@ spec: README.md
 - 规则:[Advice 载荷](README.md#advice-载荷)
 - 级别:table
 - 里程碑:M2
-- 前置:`TargetProbe`;`advice_max_age_ms = 1_000`;`MockViews`:`boot_seq = 100`、`tsc_per_ms = 3_000_000`、`now.tsc = 30_000_000_000`;每行投递一条 G1 的合法 `BandAdvice` 后检查是否发目标(新鲜则发)
+- 前置:`TargetProbe`;`advice_max_age_ms = 1_000`;`MockViews`:`boot_seq = 100`、`tsc_per_ms = 1_000_000`、`now.tsc = 30_000_000_000`;每行投递一条 G1 的合法 `BandAdvice` 后检查是否发目标(新鲜则发)
 - 实现:`crates/hft-strategy-sdk/tests/advice.rs::sdk_172_advice_staleness`
 
 | 行 | `basis_seq` / `basis_tsc` | 期望 |
@@ -2809,7 +2809,7 @@ spec: README.md
 | SDK-186.2 | `cmds(0xFF01)` | 3 项(op 1、2、3) |
 | SDK-186.3 | `cmds(0xFF02)` | 空 |
 | SDK-186.4 | `cmds(0xFF09)`(集合外) | 空 |
-| SDK-186.5 | `schema_json(0xFF01)` | `Some(s)`,`s == params::schema_json(&EchoProbe::DESC, 2)` |
+| SDK-186.5 | `schema_json(0xFF01)` | `Some(s)`,`s == params::schema_json(&EchoProbe::DESC, &ModelLayoutDesc::EMPTY, 2)` |
 | SDK-186.6 | `schema_json(0xFF09)` | `None` |
 | SDK-186.7 | `model_path_version(0xFF02)` / `(0xFF01)` | 1 / 0(`NoModel`) |
 | SDK-186.8 | `model_layout(0xFF02)` | 与 `ProbeModel::LAYOUT` 是同一个 `&'static` |
@@ -2849,9 +2849,9 @@ spec: README.md
 - 规则:[装配:StrategySet 与 strategy_set!](README.md#装配strategyset-与-strategy_set)
 - 级别:unit
 - 里程碑:M2
-- 前置:`cargo expand` 展开 `tests/set_dispatch.rs` 的 `strategy_set!` 调用
+- 前置:`strategy_set!` 的展开模板(`src/set_macro.rs` 中的宏定义,去掉注释行;工具链不含 `cargo expand`,每次展开都由该模板生成)
 - 步骤:
-  1. 在展开结果里搜索 `dyn ` 与 `Box<`
+  1. 在展开模板里搜索 `dyn ` 与 `Box<`
 - 期望:
   - 两者都 0 处;`on_event` 的展开是一层 `match`
 - 实现:`crates/hft-strategy-sdk/tests/set_dispatch.rs::sdk_189_no_dyn_in_expansion`
@@ -3056,7 +3056,7 @@ spec: README.md
 
 | 行 | 调用 | 期望 |
 |---|---|---|
-| SDK-208.1 | `inst(102).kind` | `LinearPerp` |
+| SDK-208.1 | `inst(102).kind`;`caps(inst(102).venue).market` | `InstKind::Perp`(热行的产品类型);`MarketKind::LinearPerp`(市场类型在 `VenueCaps`) |
 | SDK-208.2 | `insts_of(1)` | `[101, 102, 103, 104]`(InstId 升序,含不在 A1 venues 内的) |
 | SDK-208.3 | `insts_of(2)` | `[105]` |
 | SDK-208.4 | `account().id` | A1 |

@@ -515,7 +515,7 @@ impl<'a> CmdView<'a> {
 }
 ```
 
-- **编译期校验**(`const` 断言,`define_params!` 同一套机制;`strategy_set!` 对每个登记的策略再断言一次):`notes` 的 `code` 与 `name` 唯一、`1 ≤ code ≤ 0xFF_FFFF`(`Note.code` 的低 24 位,高 8 位是 source;码 0 保留不用,与 [hft-event Note 码](../hft-event/README.md)的保留规则相同)、`v.len() ≤ 8`、**`level` 不得为 `P0`**(策略 Note 最高 P1;P0 保留给引擎条件——裸腿、Broken、强平类外来成交等由引擎自己的 Note 报出);`report` 的 `name` 唯一、`note` 在 `notes` 中、`v_ix < 8`;`cmds` 的 `op` 与 `name` 唯一、每个 `fields` 满足参数 schema 的同样规则且 ≤ 31 项、`per_group`/`structural` 为 false 且 `minor_change = None`。
+- **编译期校验**(`const` 断言,`define_params!` 同一套机制:策略在 `DESC` 旁写 `const _: () = hft_strategy_sdk::check::validate_desc(&DESC);`;`strategy_set!` 对每个登记的策略再断言一次):`notes` 的 `code` 与 `name` 唯一、`1 ≤ code ≤ 0xFF_FFFF`(`Note.code` 的低 24 位,高 8 位是 source;码 0 保留不用,与 [hft-event Note 码](../hft-event/README.md)的保留规则相同)、`v.len() ≤ 8`、**`level` 不得为 `P0`**(策略 Note 最高 P1;P0 保留给引擎条件——裸腿、Broken、强平类外来成交等由引擎自己的 Note 报出);`report` 的 `name` 唯一、`note` 在 `notes` 中、`v_ix < 8`;`cmds` 的 `op` 与 `name` 唯一、每个 `fields` 满足参数 schema 的同样规则且 ≤ 31 项、`per_group`/`structural` 为 false 且 `minor_change = None`。
 - **Note 纪律**:`Ctx::note` 的 `code` 必须在 `DESC.notes` 中、`level` 与描述符一致(`testing::CtxHarness` 在每次记录时断言,所以策略单测会暴露未登记的码);`group` 填该 Note 所属的 GroupId(实例级为 `GROUP_NONE`),`ReportScope::Group` 的报表按它分行;码只追加、永不复用,含义不改。
 - **报表**:日报的通用项(PnL 分解、成交率、两腿间隔、裸敞口、保证金占用)由 journal-archiver 从引擎事件算出;`report` 只描述策略专项项。每个字段按 UTC 日、按 `scope` 聚合;`P99` 在日内样本上取;模拟账户与实盘账户分开出报(数据来自各自的 journal)。
 - **策略命令**:人工命令 `StrategyCmd{instance, group, payload, reduce_only}`([control-plane](../../docs/subsystems/control-plane.md))由 ctl-gateway 在 warm 线程用 `params::decode_cmd` 按该实例的 `cmds` 校验(未知 `op`、字段越界 → `InvalidArgs`;`cmds` 为空 → `InvalidArgs`);通过后作为 Input 记 journal,经 `EventRef::Manual` 投递给该实例的快速部分(`group = GROUP_NONE` 为实例级)。载荷含义(开平、数量、阈值、模式)只在策略 README 定义,引擎不解释。
@@ -1258,6 +1258,8 @@ pub mod testing {
                     .as_ref() → EventRef */ }
 }
 ```
+
+设定器与 `Views` 的读取方法同名:在 `&mut MockViews` 上调用设定器(`let m = &mut v; m.bbo(i, bid, ask)`,或在 `at(..)` 起头的链式调用里),在 `&MockViews` 上或以 `Views::bbo(&v, i)` 调用读取方法(对 `MockViews` 值直接调用时方法解析先找到 `&self` 的读取方法)。
 
 `MockViews` 不撮合:它只回放测试设定的状态。需要成交、两腿、故障注入时用 [hft-testkit](../hft-testkit/README.md) 的场景与 DST(其撮合器即 [hft-sim](../hft-sim/README.md) 的撮合器)。
 
