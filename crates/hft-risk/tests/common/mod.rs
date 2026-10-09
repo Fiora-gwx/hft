@@ -432,7 +432,8 @@ pub fn load(sp: &Spec) -> &'static RefData {
 }
 
 pub fn r0_refdata() -> &'static RefData {
-    load(&r0_spec())
+    static RD: std::sync::OnceLock<&'static RefData> = std::sync::OnceLock::new();
+    RD.get_or_init(|| load(&r0_spec()))
 }
 
 // ---------------------------------------------------------------------------------------- params
