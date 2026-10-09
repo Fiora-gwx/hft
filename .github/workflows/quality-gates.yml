@@ -179,6 +179,20 @@ jobs:
           # The first save of a key is final (later runs hit it fully and do not save), so the
           # dependency builds run before any gate can stop the job (next two steps).
           cache-on-failure: true
+      # Nested cargo builds that tests run themselves (trybuild compile-fail/UI tests under
+      # target/tests/trybuild, hft-journal's feature-gate fixture under target/jnl-feature) build
+      # their dependencies in the dev profile. rust-cache would keep them, but its key is saved
+      # once, often by a run that stopped before the tests; this cache is saved after a run whose
+      # tests all ran, once per Cargo.lock (docs/development.md, `rust` job).
+      - name: Restore nested test builds
+        id: nested
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            target/tests/trybuild
+            target/jnl-feature
+          key: x86-nested-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: x86-nested-${{ hashFiles('rust-toolchain.toml') }}-
       - name: xtask subcommands
         id: xtask
         run: bash .github/scripts/xtask-inventory.sh
@@ -192,8 +206,16 @@ jobs:
       # --workspace --all-features`), which then finds everything built; `cargo build` because
       # `--keep-going` (every dependency is built even past a broken crate, so a failing run
       # still caches a complete dependency tree) is unstable on `cargo test`.
+      # Then the DST runner exactly as `cargo xtask dst` builds it (its own feature set): its
+      # dependency builds land in rust-cache like the others.
       - name: Build the ci-profile test tree
-        run: cargo build --locked --profile ci --workspace --all-features --tests --examples --keep-going
+        run: |
+          rc=0
+          cargo build --locked --profile ci --workspace --all-features --tests --examples --keep-going || rc=$?
+          if [[ -f crates/hft-testkit/src/bin/hft-dst.rs ]]; then
+            cargo build --locked --profile ci -p hft-testkit --features dst-bin --bin hft-dst || rc=$?
+          fi
+          exit $rc
 
       # fmt, clippy, deny licenses/bans, deps, hot-check, fixtures check, unit/property (ci profile),
       # golden, DST smoke + `dst --hashtrail check --first 50` (from M2), gen-schema --check
@@ -208,6 +230,15 @@ jobs:
           sudo prlimit --pid $$ --memlock=unlimited:unlimited
           # doc-check runs in the docs job on the same commit (every PR and main push).
           cargo xtask ci --no-doc-check
+      - name: Save nested test builds
+        if: steps.ci.outcome == 'success' && steps.nested.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            target/tests/trybuild
+            target/jnl-feature
+          key: ${{ steps.nested.outputs.cache-primary-key }}
 
       - name: aarch64 cross check (ISA-specific code stays compilable)
         # Also after a failed gate: its verdict is independent, and its dependencies get cached.

@@ -123,6 +123,23 @@ opt-level = 0
 [profile.ci.package.latency-slice]
 opt-level = 0
 
+# Leaf crates whose tests run in under ~6 s even at 0 (nothing in the workspace runs their code in
+# property tests or DST yet; move a crate back when that changes, docs/development.md#构建剖面).
+[profile.ci.package.hft-exec]
+opt-level = 0
+
+[profile.ci.package.hft-ctl]
+opt-level = 0
+
+[profile.ci.package.hft-ctl-proto]
+opt-level = 0
+
+[profile.ci.package.venue-binance]
+opt-level = 0
+
+[profile.ci.package.hft-strategy-registry]
+opt-level = 0
+
 [profile.bench]
 lto = "fat"
 codegen-units = 1
