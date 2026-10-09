@@ -45,8 +45,8 @@ pub type ConnId = u64;
 /// `Err(item)` = `RefdataAssembly` arg (1 AccountNamePrefix … 5 DustBelowMinNotional).
 pub type RefdataAssemblyCheck = fn(&[u8], &RefData) -> Result<(), u16>;
 /// `RiskParams` decoding for `SetRisk` (encoding owned by hft-risk); `Err(detail)` = InvalidArgs
-/// detail (`BadValue`, `OutOfScope`).
-pub type RiskDecode = fn(&[u8], AccountId, &RefData) -> Result<RiskParams, u16>;
+/// detail (`BadValue`, `OutOfScope`). The same function type the sequencer's replay drivers take.
+pub use hft_sequencer::RiskDecode;
 
 /// Commands of hft-core's SIGTERM path (`issuer = cli:systemd`).
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]

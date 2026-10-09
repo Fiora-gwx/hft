@@ -19,6 +19,8 @@ hft-event.workspace = true
 hft-refdata.workspace = true
 hft-strategy-sdk = { workspace = true, features = ["schema-json"] }
 hft-risk.workspace = true
+# `ParsedConfig<S>` (the Mailbox object) is hft-sequencer's type.
+hft-sequencer.workspace = true
 hft-rt.workspace = true
 hft-journal.workspace = true
 serde_json = { version = "1", features = ["raw_value"] }
