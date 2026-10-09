@@ -307,7 +307,7 @@ pub(crate) fn cancel_obligation(e: &Engine, a: AccountId) -> Option<(hft_oms::Ca
             continue;
         }
         if c.source == CapSource::KILL && c.params[0] & hft_risk::mode::kill_params::CANCEL_RESTING != 0 {
-            let hard = c.cflags & CapRecord::HARD != 0 || c.level >= 3;
+            let hard = c.cflags & CapRecord::HARD != 0;
             let scope = if c.scope.account.0 == 0 {
                 hft_oms::CancelScope::Global
             } else {

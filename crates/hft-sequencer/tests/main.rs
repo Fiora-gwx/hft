@@ -21,6 +21,7 @@ mod env;
 mod exec_glue;
 mod funding;
 mod liveness;
+mod mode;
 mod recon;
 mod recover;
 mod strategies;
