@@ -909,11 +909,18 @@ dependencies = [
 name = "hft-testkit"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "hdrhistogram",
  "hft-event",
+ "hft-refdata",
  "hft-rt",
+ "hft-strat-lib",
+ "hft-strategy-sdk",
+ "hft-testkit",
  "hft-types",
  "proptest",
+ "rand_chacha",
+ "rand_core 0.9.5",
  "xxhash-rust",
  "zerocopy",
 ]

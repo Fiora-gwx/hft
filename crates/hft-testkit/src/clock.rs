@@ -14,6 +14,9 @@ pub struct ManualTsc {
     tsc_hz: u64,
     // Relaxed throughout: the value is the only shared state; readers need no other memory.
     now: AtomicU64,
+    /// Number of reads (`now` and the `ClockReads` methods): `StrategyHarness` asserts a strategy
+    /// never reads it.
+    reads: AtomicU64,
 }
 
 impl ManualTsc {
@@ -23,6 +26,7 @@ impl ManualTsc {
         ManualTsc {
             tsc_hz,
             now: AtomicU64::new(start),
+            reads: AtomicU64::new(0),
         }
     }
 
@@ -30,9 +34,15 @@ impl ManualTsc {
         self.tsc_hz
     }
 
-    /// Current reading.
+    /// Current reading (counted as a read).
     pub fn now(&self) -> Tsc {
+        self.reads.fetch_add(1, Ordering::Relaxed);
         Tsc(self.now.load(Ordering::Relaxed))
+    }
+
+    /// Reads so far.
+    pub fn reads(&self) -> u64 {
+        self.reads.load(Ordering::Relaxed)
     }
 
     /// Advances by `⌊ns × tsc_hz / 10^9⌋` ticks (u128 intermediate, saturating).

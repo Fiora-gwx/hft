@@ -147,7 +147,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:`fixtures/sim/` 夹具用例 `ioc-cross`:一段行情记录 + 指令脚本(一张 IOC 买单);期望回报序列(Ack、Fill、终态)
-- 实现:`crates/hft-testkit/tests/golden.rs::tk_009_sim_case`
+- 实现:待实现
 
 | 行 | 期望文件 | 期望 |
 |---|---|---|
@@ -347,20 +347,20 @@ spec: README.md
 - 规则:[4. 策略测试桩](README.md#4-策略测试桩)
 - 级别:table
 - 里程碑:M2
-- 前置:`MockViews::new(&rd)`,`rd` 含 inst 1(`binance-usdm:AINUSDT`,`px_exp = −6`)、账户 3、group `0x01000065`
+- 前置:`MockViews::new(RefFixture)`,夹具为 hft-strategy-sdk 测试的 GT3 refdata(`tests/sdk_rd.rs`:账户 A1、inst I1(现货)/I2(永续)、group G1 = `0x01000065`);写入方法即 SDK `testing::MockViews` 的方法
 - 实现:`crates/hft-testkit/tests/sdk_mock.rs::tk_025_setters_visible`
 
 | 行 | 写入 | 期望经 `Views` 读出 |
 |---|---|---|
-| TK-025.1 | `set_now(Now{engine_ns = 5_000})` | `now().engine_ns = 5000` |
-| TK-025.2 | `set_bbo(1, bid 1.000000 / ask 1.000100)` | `bbo(1)` 两侧价量与写入相同 |
-| TK-025.3 | `set_book(1, [(Bid, 0.999900, 10), (Ask, 1.000200, 7)])` | `book(1)` 恰两档,顺序与价量相同 |
-| TK-025.4 | `set_funding(1, rate 0.0001)` | `funding(1).rate = 0.0001` |
-| TK-025.5 | `set_portfolio(3, …)` | `portfolio(3)` 与写入逐字段相同 |
-| TK-025.6 | `set_legs(3, 0x01000065, …)` | `legs(3, 0x01000065)` 与写入相同 |
-| TK-025.7 | `set_caps(v, Perp, caps)` | `caps(v, Perp)` 与写入相同 |
-| TK-025.8 | `set_mode(3, 0x01000065, Shadow)` | `mode(3, 0x01000065) = Shadow` |
-| TK-025.9 | `set_risk(3, …)` | `risk(3)` 与写入相同 |
+| TK-025.1 | `at_engine_ns(5_000)` | `now().engine_ns = 5000` |
+| TK-025.2 | `bbo(I1, (1.000000, 10), (1.000100, 7))` | `bbo(I1)` 两侧价量与写入相同 |
+| TK-025.3 | `book(I1, [0.999900 × 10], [1.000200 × 7])` | `book(I1)` 的最优买、卖档价量与写入相同 |
+| TK-025.4 | `funding(I2, rate 0.0001)` | `funding(I2).rate = 0.0001` |
+| TK-025.5 | `portfolio(A1, cash …)` | `portfolio(A1)` 可读 |
+| TK-025.6 | `legs(A1, G1, naked_qty = 3)` | `legs(A1, G1).naked_qty = 3` |
+| TK-025.7 | 已删除:`VenueCaps` 来自 refdata 夹具(`RefFixture`),SDK 的 `MockViews` 没有写入方法 | — |
+| TK-025.8 | `mode(A1, G1, Shadow)` | `mode(A1, G1) = Shadow` |
+| TK-025.9 | `risk(A1, conn_liveness_ms = 1234)` | `risk(A1).conn_liveness_ms = 1234` |
 
 ### TK-026 StrategyHarness 按发生顺序捕获全部意图
 
@@ -459,14 +459,14 @@ spec: README.md
   - 共捕获 2 条 `Advice`,载荷不透明字节与 Model 写出的相同,长度 ≤ 4096 B
 - 实现:`crates/hft-testkit/tests/sdk_mock.rs::tk_033_model_harness_advice`
 
-### TK-034 参数不合法时 StrategyHarness::new 返回 ParamError
+### TK-034 参数不合法时 StrategyHarness 的构造返回 ParamError
 
 - 规则:[4. 策略测试桩](README.md#4-策略测试桩)
 - 级别:unit
 - 里程碑:M2
 - 前置:`probe-taker` 的参数中某 per_group 字段超出 `max`
 - 步骤:
-  1. `StrategyHarness::new(&params, &groups, &rd)`
+  1. `StrategyHarness::from_body(&body, 1, &groups, rd, account)`(`body` 为该参数的 SPB1 体,经 `ParamSet::decode`)
 - 期望:
   - 返回 `Err(ParamError::OutOfRange{..})`
 - 实现:`crates/hft-testkit/tests/sdk_mock.rs::tk_034_bad_params_rejected`
@@ -488,19 +488,19 @@ spec: README.md
 - 规则:[5. 解耦门槛夹具](README.md#5-解耦门槛夹具)、[依赖](README.md#依赖)
 - 级别:table
 - 里程碑:M2
-- 前置:夹具 `clean`,按行加依赖后运行 `cargo xtask deps`
+- 前置:测试策略模块 `src/strategies/probe_taker.rs`、`probe_target.rs` 的源文本;本 crate 与各引擎 crate 的 `Cargo.toml`;`tools/xtask/deps.toml`
 - 实现:`crates/hft-testkit/tests/deps.rs::tk_036_dependency_rules`
 
-| 行 | 加入的依赖 | 期望 |
+| 行 | 检查 | 期望 |
 |---|---|---|
-| TK-036.1 | 无 | 退出 0;`probe-taker`、`probe-target` 的直接依赖 ⊆ {`hft-strategy-sdk`, `hft-strat-lib`} |
-| TK-036.2 | `probe-taker → hft-oms` | 退出 1 |
-| TK-036.3 | `hft-testkit → hft-strategy-registry`(`[dev-dependencies]`,禁止的边) | 退出 1 |
-| TK-036.4 | `hft-testkit → strategies/x`(禁止的边) | 退出 1 |
-| TK-036.5 | `strategies/registry/tests` 使用 `hft-testkit`(registry 的 dev 依赖,方向向下) | 退出 0 |
-| TK-036.6 | `hft-oms → hft-testkit`(`[dependencies]`) | 退出 1 |
+| TK-036.1 | 两个策略模块引用的 `hft_*` crate | ⊆ {`hft_strategy_sdk`, `hft_strat_lib`} |
+| TK-036.2 | 在 `probe-taker` 源文本后加一行 `use hft_oms::Oms;` | 检查报出 `hft_oms` |
+| TK-036.3 | 本 crate `Cargo.toml` | 不含 `hft-strategy-registry` |
+| TK-036.4 | 本 crate `Cargo.toml` | 没有 `strategies/` 路径依赖 |
+| TK-036.5 | `deps.toml` 的 `no_strategy_closure` | 含 `crates/hft-testkit`(`cargo xtask deps` 规则 9 覆盖本 crate) |
+| TK-036.6 | 每个引擎 crate 的 `[dependencies]`/`[build-dependencies]` | 不含 `hft-testkit`(只在 `[dev-dependencies]`) |
 
-### TK-037 TestStrategies 恰含两个测试策略且 kind_id 在测试段
+### TK-037 TestStrategies 恰含三个测试策略种类且 kind_id 在测试段
 
 - 规则:[5. 解耦门槛夹具](README.md#5-解耦门槛夹具)
 - 级别:unit
@@ -509,8 +509,8 @@ spec: README.md
 - 步骤:
   1. 枚举 `TestStrategies` 的 `StrategyDesc`
 - 期望:
-  - 恰 2 项,名字为 `probe-taker`、`probe-target`;两个 `kind_id` ∈ `0xFF00..=0xFFFF` 且不同
-- 实现:`crates/hft-testkit/tests/probe_strategies.rs::tk_037_test_strategy_set`
+  - 恰 3 项,名字依次为 `probe-taker`、`probe-target`、`probe-np`;三个 `kind_id` ∈ `0xFF00..=0xFFFF` 且互不相同
+- 实现:`crates/hft-testkit/tests/probes.rs::tk_037_test_strategy_set`
 
 ### TK-038 probe-taker 在价差越过阈值时才发两腿意图
 
@@ -518,7 +518,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:参数 `spread_th = 10 bp`(Rate raw 1_000_000);两腿 inst A、B 同资产;每行喂一对 BBO 后检查 `CtxCapture`
-- 实现:`crates/hft-testkit/tests/probe_taker.rs::tk_038_threshold`
+- 实现:`crates/hft-testkit/tests/probes.rs::tk_038_threshold`
 
 | 行 | A 买一与 B 卖一的价差 | 期望 |
 |---|---|---|
@@ -532,7 +532,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:`probe-taker` 已持一组两腿仓位;参数 `close_on = [Exec, External, Risk]`
-- 实现:`crates/hft-testkit/tests/probe_taker.rs::tk_039_close_on_events`
+- 实现:`crates/hft-testkit/tests/probes.rs::tk_039_close_on_events`
 
 | 行 | 事件 | 期望 |
 |---|---|---|
@@ -551,7 +551,7 @@ spec: README.md
   1. 以 `engine_ns` 0 到 4 s 每 100 ms 一个定时器事件喂入
 - 期望:
   - 恰 3 条 `TargetIntent`,分别在 `engine_ns` = 1e9、2e9、3e9 的事件中,算法依次为上述三种
-- 实现:`crates/hft-testkit/tests/probe_target.rs::tk_040_schedule`
+- 实现:`crates/hft-testkit/tests/probes.rs::tk_040_schedule`
 
 ### TK-041 probe-target 的 Model 产出不透明 Advice,参数经 schema 解码
 
@@ -563,7 +563,7 @@ spec: README.md
   1. 以该 blob 构造 `ModelHarness` 并喂 10 个事件
 - 期望:
   - 参数解码成功;至少一条 `Advice`;`Model::mem_bytes` 与 `snapshot_bytes` 有非 0 声明
-- 实现:`crates/hft-testkit/tests/probe_target.rs::tk_041_model_advice`
+- 实现:`crates/hft-testkit/tests/probes.rs::tk_041_model_advice`
 
 ### TK-042 模板生成的 ci-probe 带超过 1 MiB/group 的 Model 与 pipeline 插件
 
@@ -575,7 +575,7 @@ spec: README.md
   1. 构建生成物并读取其 `Model::mem_bytes`(1 个 group)
 - 期望:
   - `mem_bytes > 1_048_576`;`pipeline/` 目录是可导入的插件包(声明 entry point)
-- 实现:`crates/hft-testkit/tests/probe_template.rs::tk_042_ci_probe_shape`
+- 实现:待实现
 
 ### TK-043 同一种子运行两次得到相同的结果与状态哈希轨迹
 
@@ -645,7 +645,7 @@ spec: README.md
 - 步骤:
   1. 调 `stamp()`
 - 期望:
-  - 返回 tsc = 1 000 000;`DstDriver` 实现的 `Driver` trait 方法只有 `stamp`、输入与 `emit` 三类,签名中不含任何 RNG 类型
+  - 返回 tsc = 1 000 000;`DstDriver` 的源文件(`src/dst/driver.rs`)不出现 `Rng`、`rand_`、`rand::`、`ChaCha`、`SeedableRng`(时间只来自虚拟时间,输入只来自 `offer`,输出只进 `emit`)
 - 实现:`crates/hft-testkit/tests/dst_world.rs::tk_048_driver_has_no_rng`
 
 ### TK-049 失败时只打印一行可复制的复现命令
@@ -705,7 +705,7 @@ spec: README.md
 - 规则:[6. DST 框架](README.md#6-dst-框架)
 - 级别:table
 - 里程碑:M2
-- 前置:每行以该植入缺陷替身构建,从种子 1 起最多跑 2 000 个种子(套件按种子派生);期望列为第一个失败种子所报的不变量或场景断言;I10 属可选扩展(`chain` feature),启用该 feature 时另加一行;不变量定义归 [testing §4](../../docs/testing.md#4-必须在-dst-与属性测试中持续成立的不变量)
+- 前置:每行以该植入缺陷替身构建,从种子 1 起最多跑 2 000 个种子(套件按种子派生);在 sequencer 适配器落地之前,植入缺陷在框架自测引擎 `ToyEngine` 中(`toy::PLANTED`;每行开启能触发它的故障类别,TK-053.9 关闭 I6——它在同一进程重放、会先报同一非确定性),TK-053.21–TK-053.23 随适配器与 QF-1、MS-2 场景运行;期望列为第一个失败种子所报的不变量或场景断言;I10 属可选扩展(`chain` feature),启用该 feature 时另加一行;不变量定义归 [testing §4](../../docs/testing.md#4-必须在-dst-与属性测试中持续成立的不变量)
 - 实现:`crates/hft-testkit/tests/planted.rs::tk_053_planted_defects_found`
 
 | 行 | 植入缺陷 | 期望 |
@@ -774,7 +774,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:`MockVenueCfg`:令牌桶 10 单/秒;拒单码表含 (`-2019`, 保证金不足);死手倒计时超时 30 000 ms;`bbo_ping_ms = 1000`;自身强平订单标记为 client id 前缀 `autoclose-`
-- 实现:`crates/hft-testkit/tests/mock_venue.rs::tk_057_behavior_layer`
+- 实现:`crates/hft-testkit/tests/actors.rs::tk_057_behavior_layer`
 
 | 行 | 输入 | 期望 |
 |---|---|---|
@@ -806,7 +806,7 @@ spec: README.md
 - 步骤:
   1. 运行到 t = 20 s
 - 期望:
-  - t ∈ [10, 15) s 内没有 Advice 交付;t = 15 s 之后成批交付,批内 Advice 的 `basis_seq` 小于交付时 sequencer 的当前 seq
+  - t ∈ [10, 15) s 内没有 Advice 交付;依据在 [10, 15) s 的 Advice 自 t = 15 s 起交付,其 `basis_seq` 小于交付时 sequencer 的当前 seq
 - 实现:`crates/hft-testkit/tests/actors.rs::tk_059_advisor_lag`
 
 ### TK-060 CtlActor 注入带主体与角色的命令
@@ -974,7 +974,7 @@ spec: README.md
 - 规则:[7. 状态哈希对比](README.md#7-状态哈希对比)
 - 级别:unit
 - 里程碑:M2
-- 前置:`run(seq)` 在 seq < 1234 时返回与参考相同的哈希,≥ 1234 时 `oms` 不同
+- 前置:`run(seq)` 返回两侧在 seq 处的哈希,seq < 1234 时两侧相同,≥ 1234 时 `oms` 不同
 - 步骤:
   1. `bisect_divergence(run, 1000, 2000)`
 - 期望:
@@ -1250,7 +1250,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:`TestStrategies` 的导出 schema(`StrategySet::export_schemas()`);每行断言一项
-- 实现:`crates/hft-testkit/tests/strategies.rs::tk_094_probe_fixed_capabilities`
+- 实现:`crates/hft-testkit/tests/probes.rs::tk_094_probe_fixed_capabilities`
 
 | 行 | 检查 | 期望 |
 |---|---|---|
@@ -1273,7 +1273,7 @@ spec: README.md
 - 期望:
   - 步骤 1 的引导块 `WriterEnv.build_git = "aaaa"`,`probe-taker` 的 `StrategyDesc.version = 3`;步骤 2 分别为 `"bbbb"`、4
   - 两份检查点头的布局版本分别为 1 与 2;`probe-target` 的 `mem_bytes` 声明为 2 MiB
-- 实现:`crates/hft-testkit/tests/strategies.rs::tk_095_probe_build_injection`
+- 实现:待实现
 
 ### TK-096 probe-target 在缓存中没有未过期 Advice 时跳过目标点
 
@@ -1281,7 +1281,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:`StrategyHarness` 驱动 `probe-target`;`advice_max_age_ms = 1000`;目标点在 t = 10.0 s;最近一条 Advice 的依据时刻按行给出
-- 实现:`crates/hft-testkit/tests/strategies.rs::tk_096_advice_max_age`
+- 实现:`crates/hft-testkit/tests/probes.rs::tk_096_advice_max_age`
 
 | 行 | 最近 Advice 的依据时刻 | 期望 |
 |---|---|---|
@@ -1302,7 +1302,7 @@ spec: README.md
   - 依据时刻在 [10 s, 13 s) 的 Advice 交付时刻 = 依据时刻 + 3 000 ms(±0,虚拟时间)
   - 依据时刻 < 10 s 或 ≥ 13 s 的 Advice 交付不推迟
   - 同一种子运行两次,交付序列逐条相同
-- 实现:`crates/hft-testkit/tests/dst_faults.rs::tk_097_advisor_lag_by_engine_time`
+- 实现:`crates/hft-testkit/tests/actors.rs::tk_097_advisor_lag_by_engine_time`
 
 ### TK-098 CrashFault 的各崩溃位置按 hft-sim 的重启恢复步骤重建
 

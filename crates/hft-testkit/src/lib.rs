@@ -12,8 +12,14 @@
 pub mod alloc;
 pub mod bench;
 pub mod clock;
+pub mod dst;
 pub mod r#gen;
+pub mod hash;
+pub mod scenarios;
+#[cfg(feature = "sdk-mock")]
+pub mod sdk_mock;
 pub mod seed;
+pub mod strategies;
 
 pub use alloc::{AllocScope, CountingAlloc};
 pub use bench::{BenchMode, BenchOutput, HistBench};
@@ -22,3 +28,6 @@ pub use r#gen::market::{
     GapPolicy, MarketStreamCfg, MdEvent, OwnedL2Snapshot, QuietPolicy, market_stream, market_stream_with,
 };
 pub use r#gen::perturb::{Delivery, Perturb, perturb};
+#[cfg(feature = "sdk-mock")]
+pub use sdk_mock::{CtxCapture, MockViews, ModelHarness, StrategyHarness};
+pub use strategies::TestStrategies;

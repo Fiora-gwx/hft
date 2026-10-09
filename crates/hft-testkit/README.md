@@ -96,50 +96,45 @@ impl ManualUtc { pub fn new(pair_tsc: u64, pair_utc_ns: i64, tsc_hz: u64) -> Sel
 
 ### 4. 策略测试桩
 
-策略 crate 的单元与场景测试只依赖 SDK 与本节(不起 sequencer)。**归属**:若 [hft-strategy-sdk](../hft-strategy-sdk/README.md) 的 `testing` feature 已提供同名 mock,本模块直接 re-export,不另实现。
+策略 crate 的单元与场景测试只依赖 SDK 与本节(不起 sequencer)。`MockViews` 只有一份实现:[hft-strategy-sdk](../hft-strategy-sdk/README.md) `testing` 特性的 `testing::MockViews`(写入方法与 `RefFixture` 归 SDK),本 crate 原样 re-export;本节加单策略驱动与 Model 驱动。本节在本 crate 的 `sdk-mock` 特性下(它打开 SDK 的 `testing`,所以只在 `[dev-dependencies]` 启用)。
 
 ```rust
-/// 实现 SDK 的 Views / ModelViews;全部表定容,由测试按需写入。
-pub struct MockViews { /* now、bbo、book、funding、mark、portfolio、group_pos、legs、target、orders、inst、caps、mode、risk */ }
-impl MockViews {
-    pub fn new(rd: &RefData) -> MockViews;
-    pub fn set_now(&mut self, now: Now);
-    pub fn set_bbo(&mut self, i: InstId, b: BboView);
-    pub fn set_book(&mut self, i: InstId, levels: &[(Side, Px, Qty)]);
-    pub fn set_funding(&mut self, i: InstId, f: FundingView);
-    pub fn set_portfolio(&mut self, a: AccountId, p: PortfolioFixture);
-    pub fn set_legs(&mut self, a: AccountId, g: GroupId, l: LegView);
-    pub fn set_caps(&mut self, v: VenueId, m: MarketKind, c: VenueCaps);
-    pub fn set_mode(&mut self, a: AccountId, g: GroupId, m: RunMode);
-    pub fn set_risk(&mut self, a: AccountId, r: RiskStateView);
-}
-impl hft_strategy_sdk::Views for MockViews { /* … */ }
-impl hft_strategy_sdk::ModelViews for MockViews {}
+pub use hft_strategy_sdk::testing::{MockViews, PortfolioFixture, RefFixture};
 
-/// 单策略驱动:一个事件进,捕获 Ctx 的全部输出;每次调用在 CountingAlloc 下断言零分配。
-pub struct StrategyHarness<S: Strategy> { /* 策略实例、MockViews、Ctx 缓冲 */ }
+/// 单策略驱动:一个事件进,按调用顺序捕获 Ctx 的全部输出。
+pub struct StrategyHarness<S: Strategy> { /* 策略实例、MockViews、CtxBufs、GroupTable、参数 */ }
 impl<S: Strategy> StrategyHarness<S> {
-    pub fn new(params: &S::Params, groups: &GroupTable, rd: &RefData) -> Result<Self, ParamError>;
-    pub fn feed(&mut self, ev: &EventRef<'_>) -> CtxCapture<'_>;        // 订单意图、目标意图、撤改、定时器、Note
+    pub fn new(params: &S::Params, groups: &GroupTable, rd: RefFixture, account: AccountId) -> Result<Self, ParamError>; // 先 ParamSet::validate
+    pub fn from_body(body: &[u8], schema_ver: u16, groups: &GroupTable, rd: RefFixture, account: AccountId) -> Result<Self, ParamError>; // 经 ParamSet::decode
+    pub fn bind_clock(&mut self, c: &'static ManualTsc);                // 之后 feed 中任何读取即失败
+    pub fn feed(&mut self, ev: &EventRef<'_>) -> CtxCapture;            // 订单意图、目标意图、撤改、定时器、halt,之后是 Note
+    pub fn on_params(&mut self, p: &S::Params) -> Result<(), ParamError>; // validate 失败时策略不被调用
+    pub fn snapshot(&self) -> Vec<u8>;
+    pub fn snapshot_roundtrip(&mut self) -> Result<(), RestoreError>;   // snapshot → 新实例 restore → 再 snapshot 字节相等
     pub fn views_mut(&mut self) -> &mut MockViews;
-    pub fn snapshot_roundtrip(&mut self) -> Result<(), RestoreError>;    // snapshot → restore → 再 snapshot 字节相等
 }
-pub struct ModelHarness<S: Strategy> { /* S::Model 实例 + MockViews */ }
-impl<S: Strategy> ModelHarness<S> { pub fn feed(&mut self, ev: &EventRef<'_>) -> AdviceCapture<'_>; }
+pub struct CtxCapture { pub items: Vec<Captured>, pub handles: Vec<IntentHandle>, pub full: u32 }
+pub enum Captured { Place(OrderIntent), Target(TargetIntent), ClearTarget(AccountId, GroupId), Cancel(CancelReq),
+                    Timer(TimerReq), CancelTimer(TimerId), Halt(GroupId, u16), Note(NoteReq) }
+pub struct ModelHarness<S: Strategy> { /* S::Model 实例 + MockViews + AdviceBufs */ }
+impl<S: Strategy> ModelHarness<S> {
+    pub fn new(params: &S::Params, groups: &GroupTable, rd: RefFixture, account: AccountId) -> Self;
+    pub fn feed(&mut self, ev: &EventRef<'_>) -> Vec<(GroupId, u16, Vec<u8>)>;   // (group, local_kind, 载荷)
+}
 ```
 
-- `CtxCapture` 按发生顺序列出意图,`Ctx` 满(`CtxFull`)时记录并让测试可断言。
-- `StrategyHarness` 同时检查:`on_event` 中不读系统时钟(假时钟未被访问)、不分配、不 panic;`on_params` 校验失败不改状态。
+- `CtxCapture.items` 按调用顺序列出操作(SDK 的 `CtxBufs::ops()`);Note 在 SDK 中单独成表、不记相对顺序,排在操作之后。`full` 为本次的 `CtxFull` 次数。
+- 每次 `feed` 检查:不分配(测试二进制以 `CountingAlloc` 为全局分配器时;失败信息含"分配次数 N")、不读时钟(绑定了 `ManualTsc` 时,其读取计数不变;失败信息含"读取了时钟")、不 panic(panic 时以 0 起的事件序号与 panic 信息报告)。
 
 ### 5. 解耦门槛夹具
 
 [testing §8](../../docs/testing.md#8-上线门槛) 门槛 ⑧ 的执行者:**新增一个策略时引擎 crate 的 diff 为零**。
 
-- **两个测试策略**(dev-only crate,在 `crates/hft-testkit/strategies/`,只依赖 [hft-strategy-sdk](../hft-strategy-sdk/README.md) 与 [hft-strat-lib](../hft-strat-lib/README.md)):
-  - `probe-taker`:BBO 价差越过参数阈值时发带 `LegLink` 的两腿 `OrderIntent`,收到 `Exec`/`External`/`Risk` 事件按参数平仓;行使 OMS 链接、风控两腿检查与对冲重试。
-  - `probe-target`:按参数化时间表发 `TargetIntent`(`TakerSlice`、`PairOnFill`、`Simultaneous`),带一个产出不透明 `Advice` 载荷的 `Model`;行使执行层、advisor 路径与 schema 驱动参数。
+- **两个测试策略**(本 crate 的 `src/strategies/` 模块,只引用 [hft-strategy-sdk](../hft-strategy-sdk/README.md) 与 [hft-strat-lib](../hft-strat-lib/README.md),TK-036 检查;不另设 workspace 包,依赖图不变):
+  - `probe-taker`(kind_id 0xFF01):腿 A 买一高出腿 B 卖一超过 `spread_th`(`(A bid − B ask) × 10^9 / B ask`,Rate raw,严格大于)时卖 A,带 `LegLink`(OnFill,第二腿买 B);同一事件内另设一个持有定时器并写一条 Note(码 `NOTE_OPENED`);收到 `close_on` 选中的 `Exec`/`External`/`Risk` 事件时设 0/0 的退出目标;行使 OMS 链接、风控两腿检查与对冲重试。参数 `spread_th`(per_group)、`qty_lots`(per_group)、`close_on`(位:1 Exec、2 External、4 Risk)、`hold_ms`(`check`:0 < `hold_ms` < 10 为 `Invalid`)。
+  - `probe-target`(kind_id 0xFF02):在引擎时间 `t_slice_ms`、`t_pair_ms`、`t_simul_ms` 各发一次 `TargetIntent`(依次 `TakerSlice`、`PairOnFill`、`Simultaneous`;0 = 不发),`need_advice` 时只在缓存的 Advice 未过期时发、否则跳过该点;`Model` 每 `advice_every` 个事件产出一条 16 B 不透明 `Advice`,`mem_bytes`/`snapshot_bytes` 由参数 `model_mem_kib`/`model_ckpt_kib` 声明;行使执行层、advisor 路径与 schema 驱动参数。
   - **场景用到的固定能力**(跨组件用例按名字引用,改动须同时改引用它的用例):`probe-target` 的参数 schema 含结构字段 `win`(`FieldDesc.structural = true`)与非结构字段 `thr`、参数 `advice_max_age_ms`(快速部分用 hft-strat-lib `Expiring` 缓存 Advice,目标点到时缓存中没有未过期 Advice 就跳过该点),命令描述符 `op 1`(`set_thr`)与 `op 2`(`exit_all`);`TestStrategies` 另含 `probe-np`——与 `probe-taker` 同一代码、`StrategyDesc.non_prod_only = true`、kind_id 不同;测试构建以 `ProbeBuild{build_git, desc_version, model_layout_version, model_path_version, model_mem_bytes, model_ckpt_bytes}` 在装配时注入版本、布局与 Model 的内存与检查点大小,两组不同取值即两个"构建"(版本变化冷启动与检查点沿用/丢弃的场景用它,不另编二进制)。
-- 装配:本 crate 的 `src/strategies.rs` 用 SDK 的 `strategy_set!` 生成只含两个测试策略的 `TestStrategies`(kind_id 在 0xFF00–0xFFFF,只在测试构建中出现);本 crate 的 DST 与场景测试经它驱动真实 sequencer。**不依赖 registry**:生产策略的唯一列表在 [hft-strategy-registry](../../strategies/registry/README.md),以生产策略运行的 DST 场景与压力用例写在 `strategies/registry/tests/`(以 registry 的 `Strategies` 实例化本 crate 的泛型 DST 框架)或 `apps/hft-core/tests/`。
+- 装配:本 crate 的 `src/strategies/mod.rs` 用 SDK 的 `strategy_set!` 生成只含测试策略的 `TestStrategies`(`probe-taker`、`probe-target`、`probe-np`(0xFF03);kind_id 在 0xFF00–0xFFFF,只在测试构建中出现);本 crate 的 DST 与场景测试经它驱动真实 sequencer。**不依赖 registry**:生产策略的唯一列表在 [hft-strategy-registry](../../strategies/registry/README.md),以生产策略运行的 DST 场景与压力用例写在 `strategies/registry/tests/`(以 registry 的 `Strategies` 实例化本 crate 的泛型 DST 框架)或 `apps/hft-core/tests/`。
 - 门槛 ⑧ 由两个 xtask 子命令共同执行,都通过才绿(子命令的步骤、参数、触发与"引擎侧零改动"检查的路径范围唯一归属 [tools](../../tools/README.md#cargo-xtask-scaffold-gate);本节只写本 crate 提供的夹具与门槛 ⑧ 对它的要求):
   - **A. `cargo xtask scaffold-gate`(模板探针;改动 `crates/`、`apps/`、`strategies/`、`tools/` 的 PR)**,本 crate 提供:
     1. **探针的形态**:探针 `ci-probe` 由 `cargo xtask new-strategy ci-probe --kind-id <0xFF00–0xFFFF 测试段> --with-model --with-pipeline` 生成——带一个声明 `mem_bytes` > 1 MiB/group 的 `Model`(行使 advisor、检查点分块与按 `mem_bytes` 的装配预算)与一个 pipeline 插件(行使 schema 驱动的参数产出),模板内容归 [adding-a-strategy](../../docs/cookbook/adding-a-strategy.md);
@@ -152,24 +147,53 @@ impl<S: Strategy> ModelHarness<S> { pub fn feed(&mut self, ev: &EventRef<'_>) ->
 ### 6. DST 框架
 
 ```rust
-pub struct World { /* 虚拟时间、全序事件堆、种子化 RNG、各 actor、故障计划、不变量检查器 */ }
+pub struct World<E> { /* 虚拟时间、按 (virtual_ns, gen_seq) 全序的事件堆 */ }
+pub fn actor_rng(seed: u64, a: ActorId) -> ChaCha8Rng;   // ChaCha8Rng::seed_from_u64(seed::derive(seed, actor 标签))
 
-pub struct DstConfig<S: StrategySet> {
-    pub seed: u64,
-    pub steps: u64,                      // 事件步数上限
-    pub venues: Vec<MockVenueCfg>,       // hft-sim SimTuning + 每账户 SimAccountCfg + venue 行为层(限速、拒单码、死手、VenueCaps)
-    pub market: MarketSource,            // Generated(gen::market_stream) | Recorded(journal 片段)
-    pub strategies: StrategySetup<S>,    // 策略集(本 crate 场景为 TestStrategies;registry 测试为 Strategies)、参数 blob、账户绑定、RunMode
-    pub faults: FaultRates,              // 见故障目录;取值由各套件的 DstSuite 给出(hft-dst list 打印),没有全局缺省
-    pub invariants: InvariantSet,
-    pub chain: Option<MockChainCfg>,     // 可选扩展(chain feature)
+/// 被测系统的边界:引擎适配器 SeqSut<S: StrategySet>(以 DstDriver 单线程驱动真实 Sequencer<DstDriver, S>,
+/// 把各组件调试视图抄进 Obs)实现它;ToyEngine 是框架自测引擎。
+pub trait Sut {
+    type Matcher: Matcher;                               // hft_sim::SimExchange(引擎运行)| ToyMatcher(框架自测)
+    fn boot(ctx: &BootCtx<'_>) -> Result<Self, BootFail>;
+    fn process(&mut self, now_ns: u64, tsc: u64, input: &InputRec, out: &mut StepOut);   // 一步 = 一条 Input 及其全部 Output
+    fn next_deadline(&self) -> Option<u64>;
+    fn fire_timers(&mut self, now_ns: u64, tsc: u64, out: &mut StepOut) -> bool;
+    fn observe(&self, obs: &mut Obs);                    // 只读;src/dst/obs.rs 的行即适配器契约
+    fn hashes(&self) -> ComponentHashes;
+    fn rebuilt_hashes(&self) -> Option<ComponentHashes>; // INV-6:最近快照 + 其后 Input 重建
+    fn crash_and_recover(&mut self, p: CrashPoint, input: Option<&InputRec>) -> Result<(), BootFail>;
+    fn clean_restart(&mut self) -> Result<(), BootFail>;
+    /* seq()、journal()、is_sim() */
 }
 
-pub fn run<S: StrategySet>(cfg: &DstConfig<S>) -> DstOutcome;          // Pass{state_hash_trail} | Fail{seed, step, invariant, trace, fault_schedule}
-pub fn shrink<S: StrategySet>(cfg: &DstConfig<S>, fail: &DstFailure, budget_s: u32) -> DstFailure;   // 删减故障计划得到最小复现
+pub struct DstConfig {                   // 与引擎无关的数据;引擎是 run 的类型参数
+    pub seed: u64,
+    pub suite: &'static str,
+    pub steps: u64,                      // 步数上限
+    pub horizon_ns: u64,                 // 虚拟时间上限,也是故障计划的范围
+    pub world: WorldSpec,                // venue、inst、账户(Live/Sim)、策略绑定(kind_id、参数 blob、RunMode)、group、风控参数;WorldSpec::w1() = scenarios §2.2 W1
+    pub venues: Vec<MockVenueCfg>,       // venue 行为层(限速、拒单码、死手、bbo_ping_ms、自身强平标记、时延)
+    pub market: MarketSource,            // Generated(MarketGen:种子化随机游走)| Recorded(Vec<(virtual_ns, InputRec)>)
+    pub faults: FaultRates,              // 每类别开关 + 每个故障槽(slot_ms)的千分概率;取值由各套件的 DstSuite 给出,没有全局缺省
+    pub scripted: Vec<(u64, Fault)>,     // 场景的 `故障` 脚本,并入生成的计划
+    pub plan: Option<FaultPlan>,         // 显式计划(shrink、按记录复现);None = 由种子生成
+    pub invariants: InvariantSet,
+    pub hash_every: u64, pub rebuild_every: u64, pub rerun: RerunPolicy,   // HashTrail 采样、INV-6 间隔、INV-9 复跑
+    pub actors: ActorSet, pub planted: Vec<&'static str>, pub tsc_hz: u64, pub trace: bool,
+}
+
+pub fn run<E: Sut>(cfg: &DstConfig) -> DstOutcome;          // Pass{state_hash_trail} | Fail(DstFailure{seed, suite, step, invariant, message, trace, fault_schedule, journal_tail})
+pub fn run_record<E: Sut>(cfg: &DstConfig) -> RunRecord;    // 另含 journal、出环帧、交付的 Input、计划、HashTrail、最终 Obs(场景断言用)
+pub fn shrink<E: Sut>(cfg: &DstConfig, fail: &DstFailure, budget_s: u32) -> DstFailure;   // 删减故障计划得到最小复现
+
+/// 一个 dst 用例:Scenario::new("<编号>", 标题) 注册(test-trace 以该调用所在函数为位置)。
+pub struct Scenario { pub id, pub title, pub suite: SuiteSel /* All | Named */, pub seeds: SeedSet /* Standard | Pr(n) | Fixed */,
+                      pub steps: Option<u64>, pub invariants: Option<InvariantSet>,
+                      pub configure: Option<fn(&mut DstConfig)>, pub assert: Option<fn(&RunRecord) -> Result<(), String>> }
+pub struct DstSuite { pub name, pub title, pub faults: FaultRates, pub steps: u64, pub base: fn(u64) -> DstConfig, pub must_pass: &'static [&'static str] }
 ```
 
-**场景套件**:`src/scenarios/<主题>.rs` 定义以 `TestStrategies` 运行的全部套件与场景(全仓 `dst`/`integ` 用例的 `实现` 落点,场景以用例编号注册)(`DstSuite`:名称、市场源、故障率、策略设置、必过用例 QF-1/MS-2(测试策略版)/MS-3 等,[testing §3.4、§4](../../docs/testing.md#34-dst));仓库根 `tests/dst/` 只是 cargo test 入口(每个套件一个 `#[test]`),`cargo xtask dst` 与 [`hft-dst`](#8-hft-dst-运行器) 调用同一组套件,保证 PR、CI 每夜与服务器累计跑的是同一份场景。
+**场景套件**:`src/scenarios/<主题>.rs` 定义以 `TestStrategies` 运行的全部套件与场景(全仓 `dst`/`integ` 用例的 `实现` 落点,场景以用例编号注册)(`DstSuite`:名称、市场源、故障率、策略设置、必过用例 QF-1/MS-2(测试策略版)/MS-3 等,[testing §3.4、§4](../../docs/testing.md#34-dst));`hft_testkit::scenarios::{suites(), scenarios()}` 是唯一清单:仓库根 `tests/dst/main.rs` 只是 cargo test 入口(本 crate 的 `[[test]] dst` 目标,每个套件一个 `#[test]`,跑该套件场景的短种子区间),`cargo xtask dst` 与 [`hft-dst`](#8-hft-dst-运行器) 调用同一组套件,保证 PR、CI 每夜与服务器累计跑的是同一份场景。套件:`core`、`modes`、`storage`。在 sequencer 适配器落地之前,三个入口以 `ToyEngine` 运行(框架自测引擎:两腿 taker、OMS 槽表、OnFill 对冲与余数、ledger、kill 与模式、Broken 自动平仓、L3、Drain,带 `toy::PLANTED` 植入缺陷;不是生产引擎的模型)。
 
 `cargo xtask dst --seeds N …` 是开发与 CI 的入口(签名与参数唯一归属 [tools](../../tools/README.md#cargo-xtask-dst));失败时打印且只打印一行可复制的复现命令(种子为 16 位十六进制,`--steps` = 违反所在步 + 1,`--suite` 为该种子实际运行的套件):
 
@@ -195,7 +219,7 @@ DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xt
 | 存储与进程 | persist 滞后与磁盘低水位(`Timer{PersistLag|DiskLow}`)、任意时刻崩溃后 `RecoverDriver` 重启、同一输入连续崩溃(毒丸)、恢复时输出不一致、停机时长超过 `hedge_deadline_ms` 后冷启动(有未完成链接)、补腿冷却或外来成交计时中崩溃(testing BK-5)、L3 中途重启且现货所断线(testing MS-6)、`stop_core` 写下停机标记后的干净重启(期望启动时写 `Kill`;标记已作废为 `.aborted` 时不写)、干净重启时 group 带容差内残余(期望无 `Broken`、无 `HedgeFailure`)、只含 Sim 账户的实例非干净重启(期望无 `RecoverMismatch` 与毒丸时自动解除 `Recovery`)、换 `boot_id` 与 TSC 频率后冷启动(检验 `engine_ns` 连续)、Drain 期间在途链接、IOC 与未到达的 `MarginStress`/`Hard` 引擎目标 |
 | 链上(可选扩展,`chain` feature) | builder/公共 RPC 传输错误与限速封禁、回执源矛盾、重组、终局停摆、泄露或重组回灌后迟到上链、钱包外部交易(语义与期望归 [hft-chain-evm](../hft-chain-evm/README.md)) |
 
-**不变量**(每步检查,`InvariantSet` 里可单独开关)。**定义与断言以 [docs/tests/invariants.md](../../docs/tests/invariants.md) 为准**:检查器 `I<n>` 就是 `INV-n`,检查函数在 `src/dst/invariants.rs`(`inv_<n>_<描述>`);本框架按编号逐条实现 `I1`–`I20`,下表只写检查方式:
+**不变量**(每步检查,`InvariantSet` 里可单独开关)。**定义与断言以 [docs/tests/invariants.md](../../docs/tests/invariants.md) 为准**:检查器 `I<n>` 就是 `INV-n`,在 `src/dst/invariants.rs`:`inv_<n>_<描述>()` 以 `Scenario::new("INV-n", …)` 登记该不变量的常设用例(全部套件、标准种子集),`CHECKERS` 表给出每个编号的步检查与结束检查;检查器只读该步的 journal 记录、出环帧、`StepInfo`(决策时刻的调试视图事实、成交证据、Note 名)与步前步后的 `Obs`,所以开关检查器不改变运行。本框架按编号逐条实现 `I1`–`I20`,下表只写检查方式:
 
 | # | 检查方式 |
 |---|---|
@@ -221,12 +245,13 @@ DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xt
 
 ```rust
 pub struct HashTrail { pub every_n: u64, pub points: Vec<(u64 /*seq*/, ComponentHashes)> }
-pub struct ComponentHashes { pub book: u64, pub oms: u64, pub risk: u64, pub ledger: u64, pub exec: u64, pub strategies: u64, pub all: u64 }
-pub fn diff_trails(a: &HashTrail, b: &HashTrail) -> Option<Divergence>;   // 第一处不一致的 seq 与组件
-pub fn bisect_divergence(run: impl Fn(u64) -> ComponentHashes, lo: u64, hi: u64) -> u64;   // 在两个采样点之间逐事件二分
+pub struct ComponentHashes { pub book: u64, pub oms: u64, pub risk: u64, pub ledger: u64, pub exec: u64, pub strategies: u64, pub all: u128 }
+pub fn diff_trails(a: &HashTrail, b: &HashTrail) -> Option<Divergence>;   // 第一处不一致的 seq 与组件(写出顺序在前者);缺点时 component = None
+pub fn bisect_divergence(run: impl FnMut(u64) -> (ComponentHashes, ComponentHashes), lo: u64, hi: u64) -> u64;   // run(seq) 返回两侧在 seq 处的哈希;lo 处相同、hi 处不同,返回 (lo, hi] 中第一处不同
+pub fn component_hashes(snapshot_logical_body: &[u8]) -> Result<ComponentHashes, SnapErr>;
 ```
 
-组件哈希取自 [`hft-sequencer`](../hft-sequencer/README.md) 快照的分组件段(顺序由 sequencer 固定),每段 xxh3-64;`all` 即快照头的 `state_hash`。本 crate 不定义新的哈希协议,只提供采样、比较与二分。`cargo xtask replay-verify` 用它报告"第一处分歧在 seq N 的 oms 组件"。
+组件哈希取自 [`hft-sequencer`](../hft-sequencer/README.md) 快照的分组件段(顺序由 sequencer 固定):每个组件 = 其各节(`SectionHdr` + 节体,按写出顺序拼接)的 xxh3-64;节到组件的对应(节号归 [journal-format](../../docs/subsystems/journal-format.md#快照记录结构)):ledger 1、13、22;oms 2、3、12;risk 4、14、17、18、23;strategies 5;book 6、7;exec 21;其余节只进 `all`。`all` 即快照头的 `state_hash`(xxh3-128);`purpose = Keyframe` 的头写 0,读者对除节 16 外的全部节按写出顺序算 xxh3-128。组件的"写出顺序"按其最小节号:ledger、oms、risk、strategies、book、exec。DST 的 `HashTrail` 以已处理 Input 的序号为点(每 `hash_every` 个),`replay-verify` 以 journal seq 为点。本 crate 不定义新的哈希协议,只提供采样、比较与二分。`cargo xtask replay-verify` 用它报告"第一处分歧在 seq N 的 oms 组件"。
 
 ### 8. hft-dst 运行器
 
@@ -236,9 +261,11 @@ pub fn bisect_divergence(run: impl Fn(u64) -> ComponentHashes, lo: u64, hi: u64)
 hft-dst run   --seeds <from>..<to> [--suite <name>|all] [--steps 10000] [--deadline-s N] [--checkpoint-seeds 1000] --out <result.json> --crash-dir <dir>
 hft-dst repro --seed 0x… --suite <name> --steps N [--trace] --crash-dir <dir>
 hft-dst list                                          # 编进本二进制的套件、必过用例与各自的故障率
+hft-dst hashtrail --seed 0x… --suite <name> --steps N # 一行:trail <32 位十六进制> points=<n>
 ```
 
-- **`list`**:每个套件一行,以 `suite <名称>` 开头(其后是该套件的必过用例与故障率);`cargo xtask dst` 的套件表就取这些行。
+- **`list`**:每个套件一行,以 `suite <名称>` 开头(其后是 `must_pass=…`、`steps=…`、`slot_ms=…`、`faults=<类别>:<千分率>,…`);`cargo xtask dst` 的套件表就取这些行。
+- **`hashtrail`**:以该种子、套件与步数运行一次(不做 INV-9 复跑),标准输出恰一行 `trail <xxh3-128(HashTrail::to_bytes()) 的 32 位小写十六进制> points=<点数>`,退出 0;有违反时 stderr 打印复现行、退出 1;参数错误退出 2。`cargo xtask dst --hashtrail check|write` 用它核对或重写 `fixtures/dst/hashtrail.toml`(`[[seed]]` 表:`seed = "0x<16 位十六进制>"`、`suite`、`steps`、`trail`,登记顺序即文件顺序)。
 
 - **`run`**:按升序逐个运行区间内的种子(每个种子轮转套件,由种子派生选择);到 `--deadline-s` 时在当前种子结束后停止。结果 `DstRunResult`(JSON,规范化字段顺序):`{bin_version, git_sha, profile, suites, seed_from, seed_to_done, seeds_run, steps, violations: [{seed, suite, step, invariant}], elapsed_s}`;`seed_to_done` 之后的种子视为未运行(不计入,也不算失败)。每完成 `checkpoint_seeds`(默认 1,000)个种子就把当前结果原子地写到 `--out`(先写 `.new` 再 rename);收到 `SIGINT`/`SIGTERM` 时在当前种子结束后写出结果并退出,被强杀时最近一次落盘的结果仍可计入。
 - **进行中种子标记**:每个种子开始前,`run` 原子地写 `--crash-dir/.inflight.json` = `{seed, suite, steps, started_utc}`(先写 `.new`、`fsync`、再 rename);下一个种子开始时覆盖,正常退出时删除。它以隐藏文件命名,journal-archiver 的 files source 不上传它(会被改写的文件上传会 `Conflict`,[journal-archiver](../../apps/journal-archiver/README.md#文件归档files-source))。进程被信号终止时该文件指明当时在跑的种子:以致命信号结束(如 `SIGABRT`/`SIGSEGV`:双重 panic、栈溢出、内存错误)时 `hft-verify` 按它记失败种子,被强杀或中止时该种子由下一次运行重跑(信号的分类表归 [tools](../../tools/README.md#hft-verify),清零规则归 [testing §6.1](../../docs/testing.md#61-服务器上的累计运行))。
@@ -275,7 +302,7 @@ pub struct BenchOutput { /* … */ }
 
 1. **单线程、虚拟时间**:`World` 持有按 `(virtual_ns, gen_seq)` 全序的事件堆;每步弹出一个事件交给目标 actor,actor 产生的新事件按其延迟压回堆。没有真实线程、socket、时钟。
 2. **actor**:
-   - `SeqActor`:真实 [`hft-sequencer`](../hft-sequencer/README.md)(以 `S` 实例化;本 crate 的场景为 `TestStrategies`),用 `DstDriver`(实现 sequencer 的 `Driver` trait:`stamp` 返回虚拟时间对应的 tsc,输入来自 `World`,`emit` 进收集缓冲)单线程驱动;Live 账户的出环帧交给 `MockVenue`,Sim 账户的交给 `SimActor`。
+   - `SeqActor`(`Sut` 的引擎适配器 `SeqSut<S>`):真实 [`hft-sequencer`](../hft-sequencer/README.md)(以 `S` 实例化;本 crate 的场景为 `TestStrategies`),用 `DstDriver` 单线程驱动——它实现 sequencer 的 `Driver` trait:`take` 交出 `World` 投递的 Input、`out.tsc` 与 `run_tsc`/`measure` 都是虚拟时间对应的 tsc(`stamp()`),`emit` 进收集缓冲,`journal` 是内存段 `MemJournal`;签名中没有随机数源;Live 账户的出环帧交给 `MockVenue`,Sim 账户的交给 `SimActor`。
    - `MockVenue`:`hft-sim::SimExchange` + venue 行为层(限速令牌桶、拒单码表、死手倒计时、`VenueCaps` 推送形态、自身强平订单标记、行情连接按 `bbo_ping_ms` 回 pong——连接健康输入的事件形态与 hft-venue 相同,归 hft-event),回报经 `FaultPlan` 扰动后回到 `SeqActor`。它在 DST 里扮演"真实交易所",模拟真值同时是不变量 I16 的参照。
    - `SimActor`:与 hft-core 的 sim-gw 相同的 `SimExchange` 用法(不经故障注入),覆盖 Sim 账户路径;`CrashFault` 之后按 hft-sim 规定的恢复步骤由快照与 journal 重建模拟交易所状态(余额、仓位、挂单;规则归 [hft-sim](../hft-sim/README.md)),不保留崩溃前的内存对象。
    - `AdvisorActor`:按 sequencer 的 advisor 规则驱动策略的 `Model`,产出带依据(`basis_seq` 等,字段归 hft-event)的 `Advice` 送回 `SeqActor`;可注入"落后"(按种子延迟交付并成批追赶;或按 `AdvisorLagFault{from_ens, to_ens, lag_ms}` 在引擎时间 [from_ens, to_ens) 内使 Model 处理 journal 落后 `lag_ms`,其间产出的 Advice 同样推迟交付)。
@@ -283,9 +310,9 @@ pub struct BenchOutput { /* … */ }
    - 可选扩展 `MockChain`(`chain` feature):`hft-sim` 链上模型 + 证据源;被测对象是 `hft-chain-evm` 时驱动真实 `ChainSeq`。
 3. **崩溃与毒丸**:`CrashFault{at_step, repeat, point}` 在某输入处理中途丢弃 sequencer 实例,只留 journal(内存段),再以 `RecoverDriver` 重建;`repeat = 2` 时同一输入再次崩溃,检验隔离路径。`point` 选崩溃位置:`SeqInput`(缺省,上述)、`SimMatchedUndelivered`(sim-gw 已撮合、回报仍在待交付堆)、`SimRepQueued`(回报已入 `rep-sim` 环、sequencer 未取走)、`BeforeFirstReport`(某 Sim 账户的第一条余额报告被处理之前);后三种同时丢弃 `SimActor` 的内存对象(整进程崩溃),按 hft-sim 的重启恢复步骤重建。`CleanRestartFault{at_step}` 做一次干净 Drain 重启。
 4. **故障计划**:运行开始时由种子一次性生成完整故障时间表(`Vec<(virtual_ns, Fault)>`),`shrink` 可以逐项删除并重跑。
-5. **随机性唯一来源**:`ChaCha8Rng::seed_from_u64(seed)`,按 actor 派生子流;被测代码需要的随机数必须由事件提供,DST 不向被测代码暴露 RNG。
-6. **检查**:每步后运行启用的不变量检查器(只读访问调试视图);失败即停,把违反前 200 条事件写成可直接喂 `replayer` 的 journal 片段,连同故障表存到 `target/dst/<seed>/`;失败种子加入 `fixtures/dst-seeds/` 回归集。
-7. **收缩**:"删除一个故障 → 重跑 → 仍失败则保留删除",直到不能再删或超出预算。
+5. **随机性唯一来源**:每个 actor 一条 `ChaCha8Rng::seed_from_u64(seed::derive(seed, <actor 标签>))`,增删一个 actor 不改变其他 actor 的流;被测代码需要的随机数必须由事件提供,DST 不向被测代码暴露 RNG。
+6. **检查**:每步后运行启用的不变量检查器(只读访问调试视图);失败即停,把违反前 200 条事件(按 `EVENT_END` 计)写成 journal 记录格式的片段(`journal.bin`,24 B 记录头 + 体 + 补零,`hft_event::decode_record` 可逐条读出;replayer 读入片段随 replayer 落地)、故障表(`faults.txt`,每行 `<virtual_ns> <类别> <故障>`)与复现行(`repro.txt`)存到 `<目录>/<种子 16 位十六进制>/`(`cargo xtask dst` 为 `target/dst/`);失败种子加入 `fixtures/dst-seeds/` 回归集。
+7. **收缩**:"删除一段故障 → 重跑 → 仍以同一不变量失败则保留删除",段长从一半起逐次减半到单项,直到不能再删或超出预算(墙钟秒;预算只决定收缩走多远,每次重跑本身确定)。
 
 ### 金样运行器
 
@@ -298,12 +325,12 @@ pub struct BenchOutput { /* … */ }
 | 文件 | 职责 |
 |---|---|
 | `src/golden.rs` | `GoldenCase`、加载、`run_decoder_case`、`run_sim_case`、`golden_suite!` |
-| `src/gen/{market.rs, orders.rs, perturb.rs, ctl.rs, fees.rs, margin.rs, external.rs, acct_cfg.rs}` | proptest 策略(模块名 `r#gen`:`gen` 是 2024 版关键字);`gen/chain/*`(`chain` feature) |
+| `src/gen/{market.rs, orders.rs, perturb.rs, ctl.rs, fees.rs, margin.rs, external.rs}` | proptest 策略(模块名 `r#gen`:`gen` 是 2024 版关键字;`fees.rs` 含 `funding_flows`,`margin.rs` 含 `one_sided_move`,`external.rs` 含 `account_config`);`gen/chain/*`(`chain` feature) |
 | `src/clock.rs` | `ManualTsc`、`ManualUtc` |
 | `src/seed.rs` | 种子派生与确定性 `TestRunner` |
 | `src/sdk_mock.rs` | `MockViews`、`StrategyHarness`、`ModelHarness`、`CtxCapture` |
-| `src/strategies.rs`、`strategies/{probe-taker,probe-target}/` | 测试策略集合与两个测试策略 crate |
-| `src/dst/{world.rs, driver.rs, actors.rs, venue_behavior.rs, faults.rs, invariants.rs, shrink.rs, report.rs}` | DST 框架 |
+| `src/strategies/{mod.rs, probe_taker.rs, probe_target.rs}` | `TestStrategies` 与测试策略 |
+| `src/dst/{world.rs, driver.rs, sut.rs, obs.rs, actors.rs, venue_behavior.rs, faults.rs, invariants.rs, run.rs, scenario.rs, shrink.rs, report.rs, toy.rs}` | DST 框架(`sut.rs` 引擎边界、`obs.rs` 调试视图行、`run.rs` 主循环、`scenario.rs` 场景与套件、`toy.rs` 框架自测引擎) |
 | `src/scenarios/<主题>.rs` | 以 `TestStrategies` 运行的场景套件与按用例编号注册的场景(仓库根 `tests/dst/` 只是 cargo test 入口) |
 | `src/bin/hft-dst.rs`(feature `dst-bin`) | `hft-dst` 运行器:`run`/`repro`/`list`、`DstRunResult` 输出与周期落盘、进行中种子标记、每种子的 `catch_unwind` |
 | `src/hash.rs` | `HashTrail`、`diff_trails`、`bisect_divergence` |
@@ -339,7 +366,7 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 | [`hft-strategy-sdk`](../hft-strategy-sdk/README.md)、[`hft-strat-lib`](../hft-strat-lib/README.md) | 测试策略、`MockViews` 实现的 trait |
 | [`hft-venue-proto`](../hft-venue-proto/README.md)、[`hft-event`](../hft-event/README.md)、[`hft-refdata`](../hft-refdata/README.md)、[`hft-rt`](../hft-rt/README.md) | 类型与 trait |
 | [`hft-chain-evm`](../hft-chain-evm/README.md) | 仅 `chain` feature(可选扩展) |
-| `proptest`、`proptest-state-machine`、`rand_chacha`、`xxhash-rust` | 生成、状态机测试、随机、哈希 |
+| `proptest`、`proptest-state-machine`、`rand_chacha`、`rand_core`、`xxhash-rust` | 生成、状态机测试、随机、哈希 |
 | `hdrhistogram`(7.x,不开序列化与 sync 特性) | `HistBench` 的直方图 |
 
 只允许出现在 `[dev-dependencies]`、`tools/xtask` 与本 crate 自己的 `hft-dst` 二进制(只进验证包,不进生产归档);任何非 dev 依赖它的 crate 由 `cargo xtask ci` 拒绝([crates/AGENTS.md](../AGENTS.md))。**禁止**依赖 [hft-strategy-registry](../../strategies/registry/README.md) 与任何 `strategies/*`:两个测试策略在本 crate 内;`strategies/registry` 与 `apps/hft-core` 以 dev 依赖使用本 crate 跑生产策略的集成测试(方向单一,无依赖环)。
@@ -357,6 +384,7 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 - 控制面(tokio 的 ctl-gateway 客户端侧)的网络混沌不在本框架;需要时用 `turmoil` 单独测。
 - 多进程场景(可选扩展:hft-core ↔ chain-core)只在集成环境测;DST 以 `SeqActor` + 真实 `ChainSeq` 同进程模拟链路。
 - `MockVenue` 的交易所行为层是"规格中的交易所",与真实交易所的差异只能由金样、测试网/模拟盘联调与正式实盘的运行监控发现。
+- 当前构建:三个 DST 入口以 `ToyEngine` + `ToyMatcher` 运行;引擎适配器 `SeqSut<S>`(真实 sequencer、`SimExchange` 撮合、调试视图到 `Obs` 的抄录)、`run_sim_case`(TK-009)、`ProbeBuild` 注入(TK-095)与模板探针的构建检查(TK-042)随 hft-sequencer 与模拟撮合金样夹具落地;`hft-dst` 的 `SIGINT`/`SIGTERM` 处理属 M6。
 
 ### 开发备忘
 
@@ -365,7 +393,7 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 - **依赖 hft-sequencer 的快照分段**:组件级哈希要求快照按组件分段且段边界可定位(含执行层段)。
 - **依赖被测 crate 的调试视图**:各 crate 以 `#[cfg(any(test, feature = "testkit"))]` 暴露 `debug_view()`,不进入生产构建。
 - **避免 dev 依赖环**:被测 crate 的单元测试只用本 crate 中**不引用被测类型**的部分(生成器、假时钟、金样、`MockViews`);DST 与跨组件测试放在本 crate 的 `tests/` 或 xtask 里。
-- `MockViews` 与 SDK `testing` feature 的归属在 SDK 定稿时二选一,另一处删除。
+- 引擎适配器 `SeqSut<S>`(随 hft-sequencer 落地):`DstDriver` 实现 sequencer 的 `Driver`(`take` 交出 `offer` 的 Input,`out.tsc = stamp()`;`run_tsc`/`measure` = `stamp()`;`emit` 进收集缓冲;`journal` = `MemJournal`),`Matcher` 为 `hft_sim::SimExchange`,`observe` 把各组件 `debug_view()` 抄进 `Obs`、`StepInfo`。
 - 实现顺序:假时钟与金样运行器 → 生成器 → `MockViews`/`StrategyHarness` → 两个测试策略与 `scaffold-gate` → 状态哈希工具 → DST 世界与 OMS/风控/执行层不变量 → 存储与毒丸故障 → `shrink` → 场景套件迁入 `src/scenarios/` 与 `hft-dst` → (可选)链上 mock。
 
 </details>
