@@ -15,6 +15,8 @@ pub struct Trace {
     /// Recording is on (tests switch it on).
     pub on: bool,
     pub ev: Vec<TraceEv>,
+    /// `IntentView`s handed to `risk.evaluate` while recording.
+    pub views: Vec<hft_risk::IntentView>,
 }
 
 impl Trace {
@@ -40,5 +42,6 @@ impl Trace {
     }
     pub fn clear(&mut self) {
         self.ev.clear();
+        self.views.clear();
     }
 }

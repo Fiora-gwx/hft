@@ -302,6 +302,9 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
         iv.link_account = req.peer_account;
     }
     // 5. evaluate.
+    if e.trace.on {
+        e.trace.views.push(iv);
+    }
     let res = {
         let v = RiskAdapter { v: views_noexec(e) };
         e.risk.evaluate(&iv, &v, &e.now)
@@ -363,7 +366,7 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
     if extra_flags & OrderFlags::SMOKE.0 != 0 {
         ai.intent.flags |= 0;
     }
-    e.trace.rec("oms.place", u64::from(account.0), u64::from(inst_id.0));
+    e.trace.rec("oms.place", u64::from(inst_id.0), u64::from(lev));
     let mut o = e.take_oms();
     let r = e.oms.place(&ai, e.now.tsc, e.cur_seq, &mut o);
     drain_oms(e, inst, drv, &mut o)?;
@@ -671,8 +674,13 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
         crate::process::external_fill(e, inst, drv, &ef, false)?;
     }
     // Decisions → Output + out ring.
-    let decs: Vec<OrderDecision> = out.decisions.as_slice().to_vec();
-    for d in decs.iter() {
+    let mut decs: Vec<OrderDecision> = out.decisions.as_slice().to_vec();
+    for d in decs.iter_mut() {
+        // Every Output carries the seq of the Input that produced it (README "process" 9).
+        if d.trigger_seq == 0 {
+            d.trigger_seq = e.cur_seq;
+        }
+        let d = &*d;
         let ix = e.out.push(RecordFlags(0), d);
         e.trace.rec("decision", u64::from(d.slot.0), d.action as u64);
         let ring = ring_of(e, d.account, d.venue);

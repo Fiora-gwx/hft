@@ -483,7 +483,7 @@ pub fn b0_risk(rd: &RefData) -> RiskParams {
         author: [0; 16],
         rate_headroom: Rate(0),
         conn_liveness_ms: 2_000,
-        max_perp_leverage_x100: 300,
+        max_perp_leverage_x100: 2_000,
         l3_max_cross: Rate(0),
         risk_class: PreVec::from_vec(Vec::new()),
         accounts: PreVec::from_vec(accounts),
@@ -1055,7 +1055,7 @@ impl<S: StrategySet> H<S> {
     pub fn trace_on(&mut self) {
         let e = self.s.engine_mut();
         e.trace.on = true;
-        e.trace.ev.clear();
+        e.trace.clear();
     }
     pub fn trace(&self) -> Vec<&'static str> {
         self.s.engine().trace.names()
