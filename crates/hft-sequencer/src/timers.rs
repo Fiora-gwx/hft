@@ -133,18 +133,7 @@ impl TimerHeap {
     }
     /// Removes every entry with this `(owner, timer_id, group)`; returns how many.
     pub fn remove_key(&mut self, owner: u16, timer_id: u32, group: u32) -> usize {
-        let mut n = 0;
-        let mut i = 0;
-        while i < self.v.len() {
-            let e = self.v.get(i).copied().unwrap_or_default();
-            if e.owner == owner && e.timer_id == timer_id && e.group == group {
-                self.remove_at(i);
-                n += 1;
-            } else {
-                i += 1;
-            }
-        }
-        n
+        self.remove_if(|e| e.owner == owner && e.timer_id == timer_id && e.group == group)
     }
     /// Removes the exact entry; true when found.
     pub fn remove_exact(&mut self, e: &TimerEntry) -> bool {
@@ -153,17 +142,15 @@ impl TimerHeap {
             None => false,
         }
     }
-    /// Removes entries matching `f`; returns how many.
+    /// Removes entries matching `f`; returns how many (the heap order is rebuilt).
     pub fn remove_if(&mut self, mut f: impl FnMut(&TimerEntry) -> bool) -> usize {
-        let mut n = 0;
-        let mut i = 0;
-        while i < self.v.len() {
-            let hit = self.v.get(i).is_some_and(&mut f);
-            if hit {
-                self.remove_at(i);
-                n += 1;
-            } else {
-                i += 1;
+        let before = self.v.len();
+        self.v.retain(|e| !f(e));
+        let n = before - self.v.len();
+        if n != 0 {
+            let len = self.v.len();
+            for i in (0..len / 2).rev() {
+                self.down(i);
             }
         }
         n
