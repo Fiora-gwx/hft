@@ -154,20 +154,21 @@ impl Side {
             .get(usize::from(a.0))
             .is_some_and(|p| p.resumes_today < max)
     }
-    /// Account margin tier and the bitmap of venues at L1 or above.
-    fn margin_level(&self, a: AccountId) -> (u8, u64) {
+    /// Account margin tier and the bitmap of venues at L1 or above, over every venue of the
+    /// account except `skip`.
+    fn margin_level_except(&self, a: AccountId, skip: VenueId) -> (u8, u64) {
         let mut lvl = 0u8;
         let mut bits = 0u64;
-        for v in 0u8..64 {
-            if self.venues(a) & (1u64 << v) == 0 {
-                continue;
-            }
-            if let Some(s) = self.mstate(a, VenueId(v))
-                && s.present
-                && s.level > 0
-            {
-                lvl = lvl.max(s.level);
-                bits |= 1u64 << v;
+        let mut rest = self.venues(a) & !(1u64 << (skip.0 & 63));
+        while rest != 0 {
+            let v = rest.trailing_zeros() as u8;
+            rest &= rest - 1;
+            if let Some(s) = self.mstate(a, VenueId(v)) {
+                let c = s.contribution();
+                if c > 0 {
+                    lvl = lvl.max(c);
+                    bits |= 1u64 << v;
+                }
             }
         }
         (lvl, bits)
@@ -548,7 +549,8 @@ impl Risk {
         if self.s.venues(acct) & (1u64 << (v.0 & 63)) == 0 || v.market() != Some(MarketKind::LinearPerp) {
             return;
         }
-        let before = self.s.margin_level(acct);
+        let ix = usize::from(acct.0) * 64 + usize::from(v.0 & 63);
+        let c0 = self.s.margin.get(ix).map_or(0, MState::contribution);
         let m = self.s.lim().acct(acct).margin;
         let c = margin::Ctx {
             a: acct,
@@ -557,14 +559,10 @@ impl Risk {
             run_start: self.s.run_start,
             m: &m,
         };
-        if let Some(st) = self
-            .s
-            .margin
-            .get_mut(usize::from(acct.0) * 64 + usize::from(v.0 & 63))
-        {
+        if let Some(st) = self.s.margin.get_mut(ix) {
             margin::on_sample(st, sample, &c, out);
         }
-        self.margin_cap(acct, before, out);
+        self.margin_cap(acct, v, c0, out);
     }
 
     /// A `Timer{Risk, …}` of this crate.
@@ -575,7 +573,8 @@ impl Risk {
             | RiskTimer::MarginDeadline { a, v }
             | RiskTimer::MarginForce { a, v } => (a, v),
         };
-        let before = self.s.margin_level(a);
+        let ix = usize::from(a.0) * 64 + usize::from(v.0 & 63);
+        let c0 = self.s.margin.get(ix).map_or(0, MState::contribution);
         let m = self.s.lim().acct(a).margin;
         let c = margin::Ctx {
             a,
@@ -584,20 +583,31 @@ impl Risk {
             run_start: self.s.run_start,
             m: &m,
         };
-        match self
-            .s
-            .margin
-            .get_mut(usize::from(a.0) * 64 + usize::from(v.0 & 63))
-        {
+        match self.s.margin.get_mut(ix) {
             Some(st) if st.present => margin::on_timer(st, t, &c, out),
             _ => return,
         }
-        self.margin_cap(a, before, out);
+        self.margin_cap(a, v, c0, out);
     }
 
-    fn margin_cap(&self, a: AccountId, before: (u8, u64), out: &mut MarginOut) {
-        let after = self.s.margin_level(a);
-        if after != before {
+    /// Account tier input when (a, v)'s contribution changed from `c0`; the account tier and its
+    /// venue bitmap depend on nothing else, so an unchanged contribution skips the scan.
+    fn margin_cap(&self, a: AccountId, v: VenueId, c0: u8, out: &mut MarginOut) {
+        let ix = usize::from(a.0) * 64 + usize::from(v.0 & 63);
+        let c1 = self.s.margin.get(ix).map_or(0, MState::contribution);
+        if c1 == c0 {
+            return;
+        }
+        let (lvl, bits) = self.s.margin_level_except(a, v);
+        let with = |c: u8| {
+            if c > 0 {
+                (lvl.max(c), bits | 1u64 << (v.0 & 63))
+            } else {
+                (lvl, bits)
+            }
+        };
+        let after = with(c1);
+        if after != with(c0) {
             out.mode.push(margin::cap_input(a, after.0, after.1));
         }
     }

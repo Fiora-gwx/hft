@@ -7,7 +7,9 @@
     clippy::disallowed_methods,
     clippy::unwrap_used,
     clippy::expect_used,
-    clippy::panic
+    clippy::panic,
+    clippy::type_complexity,
+    clippy::too_many_arguments
 )] // allow-list: test code, not a hot path
 
 mod common;
@@ -278,14 +280,13 @@ fn rsk_062_default_mode_for_new_group() {
             .iter()
             .any(|r| r.account == 1 && r.group == G3.0 && r.flags & mode_row_flags::DEFAULT == 0)
     );
-    assert!(rows.iter().any(|r| *r
-        == ModeRow {
-            strategy: 1,
-            account: 1,
-            mode: RunMode::Shadow as u8,
-            flags: mode_row_flags::DEFAULT,
-            group: GROUP_NONE.0,
-        }));
+    assert!(rows.contains(&ModeRow {
+        strategy: 1,
+        account: 1,
+        mode: RunMode::Shadow as u8,
+        flags: mode_row_flags::DEFAULT,
+        group: GROUP_NONE.0,
+    }));
 }
 
 #[test]

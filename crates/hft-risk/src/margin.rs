@@ -145,6 +145,11 @@ impl Default for MState {
 }
 
 impl MState {
+    /// This venue's share of the account tier: its level when present, else 0.
+    pub(crate) fn contribution(&self) -> u8 {
+        if self.present { self.level } else { 0 }
+    }
+
     pub fn liq(&self) -> Rate {
         self.rep_liq_dist.min(self.est_liq_dist)
     }

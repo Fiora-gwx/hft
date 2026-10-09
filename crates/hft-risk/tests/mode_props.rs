@@ -102,7 +102,7 @@ fn gen_input(kind: u8, a: u8, b: u8, c: u8, d: bool, e: bool) -> Gen {
             Gen::In(ModeInput::Kill(KillCmd {
                 level,
                 scope,
-                cancel_resting: c % 2 == 0,
+                cancel_resting: c.is_multiple_of(2),
                 flatten: d,
                 hard: e,
             }))

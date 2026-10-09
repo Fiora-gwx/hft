@@ -506,12 +506,13 @@ pub fn first_fail(it: &IntentView, env: &Env<'_>) -> Option<RejectBits> {
         }
     }
     // #9
-    if gated && !smoke {
-        if let Some((_, (ratio, nn))) = env.legs.iter().find(|(k, _)| *k == (a, it.group)) {
-            if *ratio > 500_000_000 && *nn >= 100 * NOTIONAL {
-                return Some(RejectBits::EXPOSURE_GATE);
-            }
-        }
+    if gated
+        && !smoke
+        && let Some((_, (ratio, nn))) = env.legs.iter().find(|(k, _)| *k == (a, it.group))
+        && *ratio > 500_000_000
+        && *nn >= 100 * NOTIONAL
+    {
+        return Some(RejectBits::EXPOSURE_GATE);
     }
     let _ = (venues_of(a), AccountId(0), B2);
     None

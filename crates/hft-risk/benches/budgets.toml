@@ -1,0 +1,78 @@
+# Reference-machine budgets of hft-risk's benchmarks (source constants read by `cargo xtask bench-gate`).
+# One table per registered benchmark name (benchmarks/README.md "基准名登记"); values in ns, equal to the
+# README "延迟与资源契约" table (`cargo xtask doc-check` compares them). Format: tools/README.md "cargo xtask doc-check".
+# `bound`/`case`: the benchmarks 单 crate 基准上限表 row (and its labelled case) this budget may not exceed.
+
+["risk/classify"]
+p50_ns = 15
+p99_ns = 40
+allocs = 0
+
+["risk/check_pass_open"]
+p50_ns = 200
+p99_ns = 500
+bound = "风控链(每意图全部检查 + commit)"
+case = "单腿 Open"
+allocs = 0
+
+["risk/check_pass_linked_open"]
+p50_ns = 280
+p99_ns = 500
+bound = "风控链(每意图全部检查 + commit)"
+case = "链接 Open(两腿 venue,含第二腿报价健康与可负担性)"
+allocs = 0
+
+["risk/check_reject_kill"]
+p50_ns = 30
+p99_ns = 80
+allocs = 0
+
+["risk/check_pass_hedge"]
+p50_ns = 150
+p99_ns = 400
+allocs = 0
+
+["risk/mode_apply"]
+p50_ns = 2000
+p99_ns = 5000
+allocs = 0
+
+["risk/effective"]
+p50_ns = 5
+p99_ns = 15
+allocs = 0
+
+["risk/on_pnl"]
+p50_ns = 20
+p99_ns = 60
+allocs = 0
+
+["risk/on_legs"]
+p50_ns = 15
+p99_ns = 40
+allocs = 0
+
+["risk/on_margin"]
+p50_ns = 20
+p99_ns = 60
+allocs = 0
+
+["risk/hedge_px_limits"]
+p50_ns = 5
+p99_ns = 15
+allocs = 0
+
+["risk/leverage"]
+p50_ns = 5
+p99_ns = 15
+allocs = 0
+
+["risk/view_for"]
+p50_ns = 5
+p99_ns = 15
+allocs = 0
+
+["risk/on_account_cfg"]
+p50_ns = 5000
+p99_ns = 15000
+allocs = 0

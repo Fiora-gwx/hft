@@ -58,7 +58,7 @@ fn ident(w: &W, a: u8) -> u64 {
 
 /// Replaces the step matching `pred` with `new` (or appends `new` when none matches).
 fn replace(steps: &mut Vec<Step>, pred: impl Fn(&Step) -> bool, new: Vec<Step>) {
-    if let Some(i) = steps.iter().position(|s| pred(s)) {
+    if let Some(i) = steps.iter().position(pred) {
         steps.splice(i..=i, new);
     } else {
         steps.extend(new);
