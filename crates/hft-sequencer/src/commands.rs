@@ -1765,7 +1765,9 @@ pub(crate) fn sys_timer<'a, D: Driver<S>, S: StrategySet>(
             crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Gate(GateEvent::Clock { ok: e.clock_ok }))?;
         }
         10 => {
-            let n = e.conflated;
+            // The count of Bbo dropped by conflation rides in `deadline_tsc` (the live driver's
+            // decision, journaled with the Timer).
+            let n = slot.read::<hft_event::Timer>().map_or(0, |t| t.deadline_tsc);
             e.conflated = 0;
             e.seq_note(note::CONFLATED, NoteLevel::Info, GroupId(0), InstId(0), [n, 0, 0, 0, 0, 0, 0, 0]);
         }
