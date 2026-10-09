@@ -1230,7 +1230,7 @@ spec: README.md
 - 规则:[mode 模块](README.md#mode-模块唯一的模式状态)(`ModeOutcome` 容量取构造上界)
 - 级别:unit
 - 里程碑:M2
-- 前置:refdata 20 个 Live 账户,每账户 2 个 venue;`max_cells_total = 32`,32 个 cell 分属这 20 个账户;`ModeOutcome::with_capacity(32, 20, 40)`;全部已放行,期望 Live
+- 前置:refdata 20 个 Live 账户,每账户 2 个 venue(奇数账户 {A, B}、偶数账户 {C, D = `VenueId 10` `BITGET_UTA_USDT_FUT`},使每 venue 的 Live 账户数不超过 `KillBits::MAX_ACCOUNTS_PER_GW`);`max_cells_total = 32`,32 个 cell 分属这 20 个账户;`ModeOutcome::with_capacity(32, 20, 40)`;全部已放行,期望 Live
 - 步骤:
   1. `apply(Kill{Global, hard})`
   2. 20 个账户各经 G0 的复位并投递除 `Clock` 以外的放行序列,然后 `apply(Gate(Clock{ok: true}))`
@@ -2089,7 +2089,7 @@ spec: README.md
   1. `apply(Notice(Delisting{B, b1, at_ns}))`
   2. `apply(Notice(FundingInterval{B, b1, …}))`;`apply(Notice(Maintenance{B, 0, …}))`
   3. `apply(Resume{Delisting, (B, b1)})`
-  4. 重新设置 Delisting{B, b1},`snapshot`,用不含 b1 的 refdata `restore`
+  4. 重新设置 Delisting{B, b1},`snapshot`,用不含 b1 的 refdata(只留 a1、a2,id 保持稠密)`restore`
 - 期望:
   - 步骤 1:`CapSet`(Info);`inst_blocked(B, b1) = true`;`cancels` 恰一项 (B, b1)、`open_only = true`;`cells` 为空
   - 步骤 2:两次 apply 都无输出、无 cap、`ctl_state_version` 不变
