@@ -1704,3 +1704,61 @@ pub fn bid_empty(w: &mut W, i: InstId) {
     w.mv.bbo_mut(i).bid_px = Px(0);
     w.mv.bbo_mut(i).bid_qty = Qty(0);
 }
+
+/// The `n` of a `source = Risk` Note code.
+pub fn note_n(nt: &hft_event::Note) -> u32 {
+    nt.code & 0x00FF_FFFF
+}
+pub const N_CAP_SET: u32 = 2;
+pub const N_CAP_CLEARED: u32 = 3;
+pub const N_MARGIN_LEVEL: u32 = 4;
+pub const N_RECOVERY_HELD_SIM: u32 = 5;
+pub const N_IDENTITY_UNVERIFIED: u32 = 6;
+
+impl W {
+    /// `on_legs` with every field given.
+    pub fn legs_full(
+        &mut self,
+        a: u8,
+        g: GroupId,
+        quiescent: bool,
+        filled: &str,
+    ) -> Option<ModeInput<'static>> {
+        let s = hft_risk::LegSummary {
+            naked_ratio: Rate(0),
+            naked_notional: Notional(0),
+            naked_filled_notional: n(filled),
+            quiescent,
+        };
+        self.risk.on_legs(acc(a), g, &s)
+    }
+
+    /// One all-Ignore reconciliation group per Live (account, venue), `view_seq` after the
+    /// current `seq`; each goes through `on_reconcile` and `Gate(Recon)`.
+    pub fn recon_all(&mut self) {
+        let n = account_count(self.rd) as u8;
+        for a in 1..=n {
+            let m = self.rd.account(acc(a));
+            if matches!(m.kind, hft_refdata::AccountKind::Sim(_)) {
+                continue;
+            }
+            for v in 0u8..64 {
+                if m.venues & (1u64 << v) == 0 {
+                    continue;
+                }
+                let id = 50_000 + self.seq * 64 + u64::from(v);
+                let vs = self.seq + 10_000;
+                self.step(
+                    a,
+                    &Step::Recon(VenueId(v), vec![summary(a, VenueId(v), id, vs, 0, 0)]),
+                )
+                .unwrap();
+            }
+        }
+    }
+
+    /// The cap of `source` with exactly `scope`, if any.
+    pub fn cap(&self, source: CapSource, scope: CmdScope) -> Option<hft_risk::mode::CapRecord> {
+        self.risk.mode.cap(source, &scope).copied()
+    }
+}

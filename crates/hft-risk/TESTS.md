@@ -966,7 +966,7 @@ spec: README.md
 | RSK-056.2 | — | 同上 qty 0.011 | 拒 `HEDGE_LIMIT` |
 | RSK-056.3 | — | 同上 qty 0.4 @ 50 000.0、`hedge_cap_qty 0.5`,`notional = 20 000.000001` | 拒 `HEDGE_LIMIT` |
 | RSK-056.4 | `Kill{Account(1), hard}` | .1 的意图 | 拒 `HARD` |
-| RSK-056.5 | `MarginStress{1}`(L3)+ `Kill{Account(1), flatten}` | 执行层 `Flatten(1, g1, b1, Buy, 0.2 @ 50 005.0, reason = MarginStress)` | 放行 |
+| RSK-056.5 | `MarginStress{1}`(L3)+ `Kill{Account(1), flatten}` | 执行层 `Flatten(1, g1, b1, Buy, 0.2 @ 50 000.0, reason = MarginStress)`(名义恰为 `max_reduce_notional`) | 放行 |
 | RSK-056.6 | `Kill{Account(1), flatten}` | 执行层 `Flatten(…, reason = Hard)`,`notional = 10 000.000001` | 拒 `NOTIONAL_ORDER` |
 
 ### RSK-060 有效模式由期望模式与覆盖 cell 的 cap 决定
