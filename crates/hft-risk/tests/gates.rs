@@ -3,10 +3,7 @@
 #![allow(
     clippy::disallowed_types,
     clippy::disallowed_macros,
-    clippy::disallowed_methods,
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic
+    clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
 
 mod common;
