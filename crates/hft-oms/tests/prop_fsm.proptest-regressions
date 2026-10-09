@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5b3f1d4b104bcb8fd4efcd8d4e38249a6117a97c20749537c35b347a1f3691f0 # shrinks to c = Case { orders: [(0, 1)], ops: [(0, Rep(CancelReject { gone: false, cum: 250000 })), (0, Amend(800000)), (0, Rep(AmendAck { cum: 0, qty: 0 }))], quarantine0: false }
+cc 1b814390000c8bac0e86ba631af92d0ebc9aa43ce1aa011801690195fc8f3c6e # shrinks to c = Case { orders: [(0, 0)], ops: [(0, Send(1)), (0, Rep(AmendAck { cum: 0, qty: 800000 }))], quarantine0: false }
+cc 753d1813c133f651adf1751d671a4314bd8f6ea3bc47dba76e075a3691dd37b1 # shrinks to c = Case { orders: [(0, 0), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0)], ops: [(3, Send(1)), (3, Rep(AmendAck { cum: 0, qty: 800000 })), (3, Rep(Query { status: 1, cum: 1000000, qty: 0 }))], quarantine0: false }

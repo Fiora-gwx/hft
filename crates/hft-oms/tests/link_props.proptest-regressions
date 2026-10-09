@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b57bb80a9c3a8a6821c81d51f7f58e38925ccc98ce09f5af0e1c9698572ba103 # shrinks to max = 0, fails = [Send(KillBlocked), Reject], ro = 0

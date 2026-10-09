@@ -715,6 +715,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "hft-oms"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "hft-event",
+ "hft-oms",
+ "hft-refdata",
+ "hft-strategy-sdk",
+ "hft-testkit",
+ "hft-types",
+ "proptest",
+ "zerocopy",
+]
+
+[[package]]
 name = "hft-refdata"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,33 @@
+[package]
+name = "hft-oms"
+description = "Order slots, client order ids, the order state machine with Unknown convergence, LegLink second legs, LegTracker and the in-flight book"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# State hooks for this crate's own tests (put a slot into a given state, read private fields);
+# only enabled from [dev-dependencies] (cargo xtask deps rule 12).
+testing = []
+
+[dependencies]
+hft-types.workspace = true
+hft-refdata.workspace = true
+hft-event.workspace = true
+hft-strategy-sdk.workspace = true
+zerocopy.workspace = true
+
+[dev-dependencies]
+hft-oms = { path = ".", features = ["testing"] }
+hft-testkit.workspace = true
+proptest.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "oms"
+harness = false

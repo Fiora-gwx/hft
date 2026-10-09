@@ -11,6 +11,7 @@ members = [
     "crates/hft-book",
     "crates/hft-sim",
     "crates/hft-ledger",
+    "crates/hft-oms",
     "crates/hft-testkit",
     "crates/hft-venue-proto",
     "crates/hft-telemetry",

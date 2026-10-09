@@ -1,0 +1,12 @@
+# OMS-366: fixture P0 (crates/hft-oms/tests/common). One command per line, last field = event time (ms).
+# Index n in commands = n-th placed order (0-based).
+place_buy_x 0
+ack 0 777 1
+fill 0 0.004 60000.00 2
+place_first 0.02 3
+ack 1 778 4
+fill 1 0.012 60000.01 5
+external -0.004 9001 6
+place_sell_y 7
+cancel 0 8
+enqueue_query 2 9

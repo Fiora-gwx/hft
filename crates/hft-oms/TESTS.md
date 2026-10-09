@@ -137,12 +137,12 @@ spec: README.md
 - 里程碑:M2
 - 前置:P0;refdata 只改 venue 数 × 账户数(稠密网格,`table_ix = venue_ix × n_accounts + account_ix`)
 - 实现:`crates/hft-oms/tests/config.rs::oms_003_table_count`
-- 备注:257 是质数,无法由 ≤ 255 个账户的网格构成,+1 一侧取最小可构成的 258
+- 备注:257 是质数,无法由 ≤ 255 个账户的网格构成,+1 一侧取最小可构成的 258;hft-types 只定义 15 个 VenueId,网格用少 venue × 多账户
 
 | 行 | 网格 | 期望 |
 |---|---|---|
-| OMS-003.1 | 15 × 17 = 255 | `Ok` |
-| OMS-003.2 | 16 × 16 = 256 | `Ok`;最大 `table_ix = 255` |
+| OMS-003.1 | 3 × 85 = 255 | `Ok` |
+| OMS-003.2 | 2 × 128 = 256 | `Ok`;最大 `table_ix = 255` |
 | OMS-003.3 | 2 × 129 = 258 | `Err(OmsConfigError::TooManyTables)` |
 
 ### OMS-004 墓碑代数只接受 1..=4
@@ -355,7 +355,7 @@ spec: README.md
 - 规则:[RISK_REDUCING 判定](README.md#risk_reducing-判定)、[数据布局](README.md#数据布局草案实现时以代码与编译期断言为准)
 - 级别:unit
 - 里程碑:M2
-- 前置:P0;槽 s 为 `Live`,`oflags = POST_ONLY`(0x0002);测试钩子把 `sflags` 置为 0x07FF(全部已定义位)
+- 前置:P0;槽 s 为 `Live`,`oflags = POST_ONLY`(0x0002);测试钩子把 `sflags` 置为 0x07FF 去掉 `CANCEL_SENT`、`AMEND_SENT`(其余全部已定义位;这两位置上时撤改单不再发出)
 - 步骤:
   1. `cancel(s)`;再对 `VX` 上一张 `Live` 槽 `amend`;再 `place` 一张新单
 - 期望:
@@ -3490,7 +3490,7 @@ spec: README.md
 - 步骤:
   1. `snapshot` → `restore`;两侧各自反复 `on_continue` 直到 `wants_continue()` 为假
 - 期望:
-  - 原实例与恢复实例交出的决策序列逐条相等;节 12 的 `Out` 行按 FIFO 顺序写出 4080 行
+  - 原实例与恢复实例交出的决策序列逐条相等;节 12 的 `Out` 行中 `Decision` 项 4080 行(`Notify` 等项同在 `pending_out`,另计),按 FIFO 顺序
 - 实现:`crates/hft-oms/tests/out.rs::oms_333_pending_out_snapshot`
 
 ### OMS-334 出环配额:账户之间轮转、同一队列内 RISK_REDUCING 先出
@@ -3719,7 +3719,7 @@ spec: README.md
 
 - 规则:[OnFill](README.md#onfill)、[数量对齐](README.md#数量对齐)
 - 级别:prop
-- 性质:无外来成交、无裸量截量时,任意成交拆分与费用序列下 `Σ 第二腿请求量 + residual[g][h] == Σ 第一腿成交净量 × num/den`(误差 < 1 raw);每条第二腿请求量 ≤ 对应 `raw` 且为 lot 的整数倍
+- 性质:无外来成交、无裸量截量时,任意成交拆分与费用序列下 `Σ 第二腿请求量 + residual[g][h] == Σ 第一腿成交净量 × num/den`(误差 ≤ 晚到 `FeeOnly` 调整条数 raw;无调整时精确相等);每条第二腿请求量 ≤ 对应 `raw` 且为 lot 的整数倍
 - 生成:ratio ∈ {1/1, 2/1, 1/3};第一腿 1–20 笔增量(raw 1..=10⁷),费用资产 ∈ {BTC, USDT, ASSET_NONE};`FeeOnly` 晚到 0–5 条
 - 参考:i128 精确算术的逐笔求和
 - 例数:PR 2 000
@@ -3753,7 +3753,7 @@ spec: README.md
 - 规则:[OnFill](README.md#onfill)、[RISK_REDUCING 判定](README.md#risk_reducing-判定)
 - 级别:prop
 - 里程碑:M2
-- 性质:任意执行失败与门控交错下,每条链接的 `SecondRetry` 条数 ≤ `hedge_retry_max`;`retries` 只在执行失败时增加;每条 `SecondRetry` 的 `reduce_only == HedgePlan.reduce_only`;门控(`StaleQuote`、`BeyondCross`、风控位、不计次类本地发送失败)不改变 `retries`
+- 性质:任意执行失败与门控交错下,每条链接紧随执行失败产生的 `SecondRetry` 条数 ≤ `hedge_retry_max`(门控后的到期重试不计入);`retries` 只在执行失败时增加;每条 `SecondRetry` 的 `reduce_only == HedgePlan.reduce_only`;门控(`StaleQuote`、`BeyondCross`、风控位、不计次类本地发送失败)不改变 `retries`
 - 生成:`hedge_retry_max` ∈ 0..=5;失败序列从 {交易所拒, IOC 部分成交, IOC 零成交, EncodeError, KillBlocked, RateLimited, NoConn, RingFull, StaleQuote, BeyondCross, Risk(KILLED)} 抽取 1–12 次
 - 参考:计次规则的直接编码
 - 例数:PR 2 000

@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 527833a61a94276c67eb751978590431237f8aec59ad0942a45dd395e4534178 # shrinks to k = 17, quota = 17, sizes = [1, 82], ops = [(CancelResting(1), 0), (Reissue(0, false), 0)]
+cc c48c420e74cd197cc781dcc5c24d748f5fc90a059ce5304dec8b5814486ff714 # shrinks to k = 1, quota = 1, sizes = [405, 1], ops = [(UserDown(0), 0), (ConnUp(0), 0), (UserDown(0), 0)]

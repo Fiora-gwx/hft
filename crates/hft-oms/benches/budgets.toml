@@ -1,0 +1,84 @@
+# Reference-machine budgets of hft-oms's benchmarks (source constants read by `cargo xtask bench-gate`).
+# One table per registered benchmark name (benchmarks/README.md "基准名登记"); values in ns, equal to the
+# README "延迟与资源契约" table (`cargo xtask doc-check` compares them). Format: tools/README.md "cargo xtask doc-check".
+# `bound`/`case`: the benchmarks 单 crate 基准上限表 row this budget may not exceed.
+
+["oms/place"]
+p50_ns = 150
+p99_ns = 400
+bound = "OMS 分配槽 + client id + `OrderDecision` 构造"
+allocs = 0
+
+["oms/on_event_ack"]
+p50_ns = 100
+p99_ns = 300
+allocs = 0
+
+["oms/on_event_fill"]
+p50_ns = 100
+p99_ns = 300
+allocs = 0
+
+["oms/leglink_onfill"]
+p50_ns = 150
+p99_ns = 400
+allocs = 0
+
+["oms/price_hedge"]
+p50_ns = 15
+p99_ns = 40
+allocs = 0
+
+["oms/hedge_gated"]
+p50_ns = 30
+p99_ns = 80
+allocs = 0
+
+["oms/unknown_query"]
+p50_ns = 80
+p99_ns = 200
+allocs = 0
+
+["oms/tomb_late_fill"]
+p50_ns = 120
+p99_ns = 350
+allocs = 0
+
+["oms/leg_adjust"]
+p50_ns = 30
+p99_ns = 80
+allocs = 0
+
+["oms/sweep_256"]
+p50_ns = 3000
+p99_ns = 8000
+allocs = 0
+
+["oms/hedge_gate_open_64"]
+p50_ns = 3000
+p99_ns = 10000
+allocs = 0
+
+["oms/continue_16"]
+p50_ns = 2000
+p99_ns = 5000
+allocs = 0
+
+["oms/cancel_resting_8"]
+p50_ns = 300
+p99_ns = 1000
+allocs = 0
+
+["oms/smoke"]
+p50_ns = 300
+p99_ns = 1000
+allocs = 0
+
+["oms/write_off"]
+p50_ns = 50
+p99_ns = 150
+allocs = 0
+
+["oms/recovery_end_4096"]
+budget_ns = 300000
+allocs = 0

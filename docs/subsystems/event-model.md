@@ -138,7 +138,7 @@ kind 编号**永不复用**;废弃的 kind 在 `hft-event` 中保留为 `#[depre
 #[repr(C)] pub struct Trade { pub h: MarketHdr, pub px: Px, pub qty: Qty, pub trade_id: u64, pub taker_side: Side, pub _pad: [u8; 7] } // 88 B
 
 #[repr(C)] pub struct OrderEvent {       // gw/sim-gw 解码或产生回报后写入,96 B
-    pub venue: VenueId, pub account: AccountId, pub what: OrderEventKind, pub detail: u8 /* 按 what 取值(QueryResult 订单状态码;CancelReject/AmendReject 拒绝分类 GONE),码表见 hft-event */
+    pub venue: VenueId, pub account: AccountId, pub what: OrderEventKind, pub detail: u8 /* 按 what 取值(QueryResult 订单状态码;CancelReject/AmendReject 拒绝分类 GONE;PartialFill/Fill 订单方向),码表见 hft-event */
     pub slot: u32, pub gen: u32, pub inst: InstId,
     pub px: Px, pub qty: Qty, pub cum_filled: Qty,
     pub fee: Qty, pub fee_asset: AssetId, pub epoch: u16 /* 从 client id 解出的 engine_epoch;解不出为 0 */,

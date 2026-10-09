@@ -116,8 +116,9 @@ impl Oms {
     pub fn on_reconcile(&mut self, ev: &ReconcileReport, hdr: &RecordHeader, out: &mut OmsOut);
     /// 外来成交(B3)经 hft-ledger 归属后由 sequencer 调用:按带符号净量更新 LegTracker;cause = Unknown 且带
     /// exch_order_id 时记入 ext_held,供该单之后被匹配到槽时去重。不产生订单。
+    /// `out` 只接收 `ext_held` FIFO 淘汰的 `OmsAnomaly{ForeignEvict}`。
     pub fn external_adjust(&mut self, a: AccountId, v: VenueId, g: GroupId, inst: InstId, net: Qty,
-                           exch_order_id: u64, cause: ExternalCause);
+                           exch_order_id: u64, cause: ExternalCause, out: &mut OmsOut);
     /// FeeOnly 的净量补差(hft-ledger apply_fee 返回的 NetAdjust)由 sequencer 同一事件内转交。
     pub fn net_adjust(&mut self, a: AccountId, g: GroupId, inst: InstId, delta: Qty);
     /// 系统定时器 OMS_SWEEP(1 s)。有界:每次最多扫 `sweep_batch` 个非空闲槽,游标跨次推进;另判 RESUME_HOLD 的续接超时(见"恢复")。
@@ -132,6 +133,8 @@ impl Oms {
     pub fn inflight(&self) -> &InflightBook;
     pub fn legs(&self, a: AccountId, g: GroupId) -> &LegState;          // = SDK LegView
     pub fn link_peer(&self, link_id: u32) -> Option<(VenueId, AccountId)>; // 链接另一腿的 venue/account(B1)
+    /// sequencer 填写待合成样本的 `decided_tsc`(见"延迟样本"第 1 条;槽无待合成样本时无动作)。
+    pub fn stamp_decided(&mut self, s: SlotRef, decided_tsc: Tsc);
     pub fn venue_ready(&self, v: VenueId, a: AccountId) -> bool;          // 该 (venue, account) 无 Unknown、连接 Up
     pub fn quiescent(&self, a: AccountId) -> QuiesceBits;                 // Drain 等待:LINKS_ACTIVE | IOC_NONTERMINAL | HEDGE_RETRY_PENDING | UNKNOWN
     pub fn snapshot(&self, w: &mut SnapshotWriter);                       // 一次写本 crate 的全部节(2、3、12)
@@ -147,7 +150,9 @@ impl Oms {
 /// 对冲腿定价(纯函数,sequencer 在投影 IntentView 之前调用),规则见"对冲定价"。lim 是 hft-types 的 HedgePxLimits
 /// (唯一定义在 hft-types;sequencer 按对冲单所在账户与 inst 从 hft-risk 取值,与风控检查链 #5 同值同源,本 crate 不另设阈值);
 /// tick = 对冲腿 inst 的价格步长(refdata `InstHot.tick`,sequencer 按 req.inst 取),交给 cap_cross_px 取整。
-pub fn price_hedge(req: &HedgeRequest, plan: &HedgePlan, bbo: &BboView, now: Tsc, lim: &HedgePxLimits, tick: i64) -> Result<HedgePx, HedgePxErr>;
+/// tsc_per_ms = 本次运行每毫秒的 TSC tick 数(把 lim.conn_liveness_ms 换成 TSC;纯函数不持有频率)。
+pub fn price_hedge(req: &HedgeRequest, plan: &HedgePlan, bbo: &BboView, now: Tsc, lim: &HedgePxLimits, tick: i64,
+                   tsc_per_ms: u64) -> Result<HedgePx, HedgePxErr>;
 pub struct HedgePx { pub px: Px, pub capped: bool,                      // capped:限价被越价上限截住,或超滑点按上限定价
                      pub slipped: bool, pub touch: Px, pub cap: Px }     // slipped:Cross/Mid 因 dev > max_slip 按 cap 定价(第 4 步;Limit 恒 false);touch/cap 供 OmsHedgeSlipCapped;
                                                                         // sequencer 把结果随 ApprovedIntent.hedge_px 交回 place
@@ -171,7 +176,7 @@ pub struct TrigStamps { pub ex_ts_ns: i64, pub ex_send_ns: i64, pub hw_rx_ns: i6
 
 ```rust
 pub struct OmsOut {                               // 各向量容量 = 单次调用上限;满了的工作项进 pending_out 续发,从不丢弃(见"输出扇出")
-    pub decisions: FixedVec<OrderDecision, 16>,   // → seq journal;放行且非 SHADOW 的由 sequencer 投影成 GwCmd(OutMsg)推 gw 出环
+    pub decisions: FixedVec<OrderDecision, 32>,   // 容量 ≥ max_out_per_event 的上限 32,K 不被向量容量截断;→ seq journal;放行且非 SHADOW 的由 sequencer 投影成 GwCmd(OutMsg)推 gw 出环
     pub swaps:     FixedVec<SwapDecision, 4>,     // optional(chain):→ seq journal + chain 出环
     pub hedges:    FixedVec<HedgeRequest, 8>,     // Second / SecondRetry / Reverse → price_hedge → 风控(含 #6 HEDGE_LIMIT)→ place()
     pub fills:     FixedVec<FillOut, 16>,         // 成交增量(含净量)→ sequencer 转 FillDelta 交 ledger
@@ -226,7 +231,7 @@ pub struct ForeignFill {                           // 防御路径与 StaleGen �
 
 `OrderDecision`、`SwapDecision`、`LatencySample`、`Note`、`ExternalFill` 与出环元素 `OutMsg`(= `GwCmd`,64 B)的布局归 [hft-event](../hft-event/README.md#环元素类型)。`OrderDecision` 只写 journal;放行且非 SHADOW 的决策由 sequencer 投影成一条 `GwCmd`(`op = action`、`oflags` 原样)出环,gw 从 `GwCmd` 取下单字段按 venue 模板填帧;OMS 不编码交易所帧。`OrderUpdate`、`OrderRef`、`LegView`、`GroupTable`、`BboView` 是 [SDK](../hft-strategy-sdk/README.md) 类型。
 
-`ApprovedIntent` = 订单意图(策略经 `Ctx::place` 的 SDK `OrderIntent`,hft-exec 的 `ExecOrder.intent`,或 `smoke_intent` 生成的冒烟单)+ 来源(`Strategy` \| `Exec` \| `Oms` \| `Command`;`Command` 目前只用于冒烟单)+ 风控结果 + **hft-risk `classify()` 的结果**(`class`、`risk_reducing`、`reduce_only`,OMS 只把它们拷进 `oflags`,自己不做分类)+ 风控评估永续 Open 时所用的杠杆 `lev_x100`(百分之一倍;其余为 0,供 InflightBook 增量维护)+ 冒烟单的 `smoke_ttl_ms`(其余为 0)+ 本 crate 对冲请求的定价结果 `hedge_px: HedgePx`(sequencer 原样拷入;其余为零值)+ 带 LegLink 的第一腿的 `hedge_ref_px`(sequencer 在本次 `place` 前从第二腿 inst 的 `BboView` 取第二腿方向的对手价——买取 ask、卖取 bid;报价不健康或缺该侧时为 0;其余为 0,写进 `LinkEntry.ref_px`)+ 触发事件的时间戳 `TrigStamps`;来自 hft-exec 的意图在槽上置 `EXEC` 标志,冒烟单在 `oflags` 置 `SMOKE`(见"冒烟单")。`OrderDecision.reason`:执行层订单 = hft-exec 登记的 `ExecOrderKind` 码;本 crate 产生的对冲单(第二腿、重试、反向)与冒烟单 = 0(角色与来源分别在 `link_role` 与 `oflags`)。`ApprovedSwap` 同理对应 `SwapIntent`(optional)。`SlotRef` 就是 SDK 的 `OrderRef { venue, account, slot, gen }`(12 B),是持有订单的唯一句柄。
+`ApprovedIntent` = 订单意图(策略经 `Ctx::place` 的 SDK `OrderIntent`,hft-exec 的 `ExecOrder.intent`,或 `smoke_intent` 生成的冒烟单)+ 来源(`Strategy` \| `Exec` \| `Oms` \| `Command`;`Command` 目前只用于冒烟单)+ 风控结果 + **hft-risk `classify()` 的结果**(`class`、`risk_reducing`、`reduce_only`,OMS 只把它们拷进 `oflags`,自己不做分类)+ 风控评估永续 Open 时所用的杠杆 `lev_x100`(百分之一倍;其余为 0,供 InflightBook 增量维护)+ 冒烟单的 `smoke_ttl_ms`(其余为 0)+ 本 crate 对冲请求的定价结果 `hedge_px: HedgePx`(sequencer 原样拷入;其余为零值)+ 带 LegLink 的第一腿的 `hedge_ref_px`(sequencer 在本次 `place` 前从第二腿 inst 的 `BboView` 取第二腿方向的对手价——买取 ask、卖取 bid;报价不健康或缺该侧时为 0;其余为 0,写进 `LinkEntry.ref_px`)+ 触发事件的时间戳 `TrigStamps`;来自 hft-exec 的意图在槽上置 `EXEC` 标志,冒烟单在 `oflags` 置 `SMOKE`(见"冒烟单")。`OrderDecision.reason`:执行层订单 = hft-exec 登记的 `ExecOrderKind` 码;本 crate 产生的对冲单(第二腿、重试、反向)与冒烟单 = 0(角色与来源分别在 `link_role` 与 `oflags`)。`ApprovedSwap` 同理对应 `SwapIntent`(optional)。`SlotRef` 就是 SDK 的 `OrderRef { venue, account, slot, gen }`(12 B),是持有订单的唯一句柄。`ApprovedIntent` 另带 `reason`(→ `OrderDecision.reason`)、`intent_no`(SDK 意图序号,原样回填 `OrderDecision`)与 `link_id`(对冲请求的链接号,`ApprovedIntent::hedge` 填写;其余 0)。`CancelScope`/`CellKey` 目前在本 crate 定义,与 hft-risk 的同名类型逐值一致(sequencer 转换);待两者移到下层公共 crate 时合并。
 
 `GroupId` 约定(常量定义在 [hft-types](../hft-types/README.md)):`GROUP_NONE = GroupId(0)` = 不属于任何 group(策略不带 group 的订单、无法归属的外来成交);真实 group 从 1 起;`GROUP_ALL` 只用于命令作用域,本 crate 不使用。
 
@@ -276,6 +281,10 @@ pub struct ForeignFill {                           // 防御路径与 StaleGen �
 | `foreign_fill_track[(venue, account)]` | u16 | 64 | 防御路径:按 `exch_order_id` 跟踪外来单累计成交的表容量(见"外来成交") |
 | `ext_held_track[(venue, account)]` | u16 | 64 | `ext_held` 表容量:按 `exch_order_id` 记录已按 `ExternalFill{cause: Unknown}` 入账、可能之后被匹配到槽的成交量 |
 | `decode_fail_down_n` | u8 | 3 | 连续 N 次 `REPORT_DECODE` 按连接 Down 处理 |
+| `expire_window_ms[venue]` | u32 | 无 | 该所下单请求的过期保护窗口(`recvWindow`/`expTime` 的配置值),只用于推出 `not_found_grace_ms` 的默认值 |
+| `max_groups` | u32 | 4096 | LegTracker 容量((account, group) 条目数;`on_groups_changed` 不分配) |
+
+`OmsConfig` 另带本次运行的 `engine_epoch` 与 `tsc_hz_milli`(启动装配给出,不是可调参数);全部 `*_ms` 按后者换算成 TSC。
 
 对冲腿定价的报价连接健康阈值 `conn_liveness_ms`(默认 2 000)与越价上限 `rr_max_cross` 不在本表:它们是 [hft-risk `RiskParams`](../hft-risk/README.md) 字段,风控检查链 #5(含 B1 第二腿 `LINK_STALE`)与 `price_hedge` 用同一个值,由 sequencer 经 [hft-types `HedgePxLimits`](../hft-types/README.md#对冲定价限值) 传入。尘埃线、补腿阈值、残余规则与 Broken 处置时长不在本表:它们是 [hft-exec 配置](../hft-exec/README.md#配置项execconfigengineconfig-blob-的-exec-段每账户一行--全局默认行变更--drain--重启)与目标/链接参数。gw 暂存无法归属成交的时长 `gw.unmatched_hold_ms`(默认 5 000)归 [hft-venue](../hft-venue/README.md)。
 
@@ -336,7 +345,8 @@ pub struct SlotExt {                   // 32 B,与槽平行;成交、费用与�
     pub lev_x100: u16,                 // 16 = ApprovedIntent.lev_x100(永续 Open;其余 0),InflightBook.open_margin 用
     pub _pad1: u16,                    // 18
     pub max_rest_ms: u32,              // 20 = 意图的 max_rest_ms(0 = 不限;sweep ② 用)
-    pub _pad: [u8; 8],                 // 24
+    pub reason: u32,                   // 24 = ApprovedIntent.reason(New 决策排队后交出时用)
+    pub intent_no: u32,                // 28 = ApprovedIntent.intent_no(同上)
 }
 
 #[repr(C)]
@@ -574,7 +584,10 @@ pub struct LinkEntry {          // LinkTable 元素,80 B(本 crate 私有;布局
     pub account: AccountId, pub state: LinkState /* Open | Hedging | Done | Broken */, pub retries: u8,
     pub flags: u8,              // 11 位:RESUME_HOLD=1(恢复后、续接前:不判 hedge_deadline_ms,受 resume_hold_max_ms 约束)| RESUME_RETRY=2(续接单终态前不判截止)
                                 //    | SLIP_NOTED=4 STALE_NOTED=8 BEYOND_NOTED=16(对冲定价 Note 已写,见"对冲定价"第 7 条)
-    pub plan: u32,              // 12 计划表下标(表内存 SDK 的 HedgePlan 与 LegLink.tolerance)
+                                //    | RETRY_PENDING=32(已登记未到期的 HedgeRetry)| HEDGE_QUEUED=64(续接 Hedge 项在 pending_out)
+                                //    | REVERSING=128(失败处理已转为 Reverse)
+    pub plan: u32,              // 12 低 24 位 = 计划表下标(= 链接表下标;表内存 SDK 的 HedgePlan 与 LegLink.tolerance);
+                                //    高 8 位 = Broken 时的 LinkBroken 码
     pub first: SlotRef,         // 16 12 B
     pub held_ms: u32,           // 28 RESUME_HOLD 时保存的已用引擎运行时间(≤ hedge_deadline_ms)
     pub first_net: Qty,         // 32 第一腿累计成交净量(对冲基数,超量部分不计)
@@ -589,15 +602,15 @@ const _: () = assert!(size_of::<LinkEntry>() == 80 && offset_of!(LinkEntry, firs
 
 含枚举字段的结构(`OrderSlot`、`SlotExt`、`LinkEntry`、`Tomb`,以及快照中的 `HedgePlan`)从快照读回时用 `zerocopy::TryFromBytes`,非法判别值 → `RestoreError`。链接的欠对冲量 `owed = hedge_req − hedge_filled − hedge_open`。
 
-**链接状态**(唯一定义):带 `LegLink{role = First}` 的意图 `place` 成功时建链接(`Open`;`first` = 该槽,`ref_px = ApprovedIntent.hedge_ref_px`;该账户 `LinkTable` 已满 → `Err(PlaceError::LinkTableFull)`);产出第一条对冲请求(OnFill 第 5 条或 Simultaneous)时 → `Hedging`;第一腿已终态且 `owed = 0`、`hedge_open = 0`、无已登记的 HedgeRetry、无在途 `Reverse` 时 → `Done`(第一腿零成交终态的 OnFill 链接同样 `Done`;`on_fail = Hold` 的失败处理 → `Done`);`Broken` 的来源见 OnFill 第 6、7 条、"回报匹配与成交增量"第 6 条与"恢复"第 5 条。每次状态变化产出一条 `LinkUpdate`。**`hedge_deadline_ms` 的判定时机**:该链接的失败处理(OnFill 第 6 条)、`hedge_gated`、`on_hedge_retry`,以及该链接任一槽的 `on_unknown_query` 与 sweep ③;以当次调用的 `now` 判定,条件为 `first_fill_tsc ≠ 0`、不处于 `RESUME_HOLD`/`RESUME_RETRY`、`owed > 0` 或 `hedge_open > 0`,且 `now − first_fill_tsc > hedge_deadline_ms` → `Broken{Deadline}`。
+**链接状态**(唯一定义):带 `LegLink{role = First}` 的意图 `place` 成功时建链接(`Open`;`first` = 该槽,`ref_px = ApprovedIntent.hedge_ref_px`;该账户 `LinkTable` 已满 → `Err(PlaceError::LinkTableFull)`);产出第一条对冲请求(OnFill 第 5 条或 Simultaneous)时 → `Hedging`;第一腿已终态且 `owed = 0`、`hedge_open = 0`、无已登记的 HedgeRetry、无在途 `Reverse` 时 → `Done`(第一腿零成交终态的 OnFill 链接同样 `Done`;`on_fail = Hold` 的失败处理 → `Done`);`Broken` 的来源见 OnFill 第 6、7 条、"回报匹配与成交增量"第 6 条与"恢复"第 5 条。每次状态变化产出一条 `LinkUpdate`。**链接号分配**:`link_id` = 全局链接表下标 + 1,取最低的空闲(`Free` 或 `Done`)下标(确定性);`Broken` 条目保留到 hft-exec 处置完。**`hedge_deadline_ms` 的判定时机**:该链接的失败处理(OnFill 第 6 条)、`hedge_gated`、`on_hedge_retry`,以及该链接任一槽的 `on_unknown_query` 与 sweep ③;以当次调用的 `now` 判定,条件为 `first_fill_tsc ≠ 0`、不处于 `RESUME_HOLD`/`RESUME_RETRY`、`owed > 0` 或 `hedge_open > 0`,且 `now − first_fill_tsc > hedge_deadline_ms` → `Broken{Deadline}`。
 
 ### OnFill
 
 第一腿每个成交增量(含部分成交;链上第一腿为 `TxLifecycle::IncludedOk`,optional)在**同一事件处理内**:
 
-1. 取净量增量 `d_net`(见"成交净量");超量成交部分不计(见"回报匹配"第 6 条)。先把本增量写进 LegTracker(该腿 `net` 与在途),再 `first_net += d_net`。**截止起点**:未对冲量 `u = first_net × num / den − hedge_filled`;本增量使 `|u|` 从 < 第二腿 lot 变为 ≥ 1 lot 时 `first_fill_tsc = now`(最早一笔尚未对冲完的成交);第二腿成交(或 `Reverse` 成交)使 `|u|` 回到 < 1 lot 时 `first_fill_tsc = 0`。`|u|` ≥ 1 lot 期间的后续第一腿成交不改起点——起点按未对冲区间计,不按逐笔先进先出前移(更保守)。
-2. `raw = d_net × ratio_num / ratio_den + residual[g][hedge_leg]`(i128 中间积;**余数按 group 累计**,同 group 先后多条链接共享,可为负)。
-3. `q_fill = raw` 按 lot **向零**取整;`q_fill < hedge_inst.min_qty` 或 `q_fill × ref_px < hedge_inst.min_notional` → `residual = raw`,本次不发。
+1. 取净量增量 `d_net`(见"成交净量");超量成交部分不计(见"回报匹配"第 6 条)。先把本增量写进 LegTracker(该腿 `net` 与在途),再 `first_net += d_net`。**截止起点**:未对冲量 `u = first_net × num / den − hedge_filled`;本增量使 `|u|` 从 < 第二腿 lot 变为 ≥ 1 lot 时 `first_fill_tsc = max(now, 1)`(最早一笔尚未对冲完的成交;0 是"无"的哨兵);第二腿成交(或 `Reverse` 成交)使 `|u|` 回到 < 1 lot 时 `first_fill_tsc = 0`。`|u|` ≥ 1 lot 期间的后续第一腿成交不改起点——起点按未对冲区间计,不按逐笔先进先出前移(更保守)。
+2. `raw = ⌊first_net × num / den⌋ − ⌊(first_net − d_net) × num / den⌋ + residual[g][hedge_leg]`(即 `d_net × num / den` 按链接累计换算,i128 中间积,截断误差不随成交笔数累积;**余数按 group 累计**,同 group 先后多条链接共享,可为负)。
+3. `q_fill = raw` 按 lot **向零**取整;`q_fill < hedge_inst.min_qty` 或 `q_fill × ref_px < hedge_inst.min_notional`(`ref_px = 0` 时不判名义)→ `residual = raw`,本次不发。
 4. 否则 `residual = raw − q_fill`;**第二腿数量上限**(D2):`q = min(q_fill, floor_to_lot(naked_dir))`,`naked_dir` 是 LegTracker 在对冲方向上的裸量(定义见 [LegTracker](#legtracker))。`q < q_fill` → 差额 `q_fill − q` 不计入余数、不计入 `hedge_req`(这段敞口已由别的途径覆盖),写 `Note{OmsHedgeNakedCapped}`(P1,`v = [link_id, q_fill, q, naked_dir]`);`q` 低于最小下单量 → 本次不发。
 5. 发出时 `hedge_req += q`;产出 `HedgeRequest{role: Second, qty: q, basis: raw, hedge_cap_qty: raw + 1 lot, reduce_only: plan.reduce_only, ref_px}`。sequencer:`price_hedge` → 投影 `IntentView`(含 `hedge_cap_qty`)→ `classify` → `evaluate`(检查链 #6 `HEDGE_LIMIT`)→ `commit` → `place()`。第二腿永远 IOC。
 6. **第二腿失败**(`HEDGE_LIMIT` 以外的风控拒、`price_hedge` 门控、`place` 错误、本地发送失败(`SendReport` 确定未写出)、交易所拒、IOC 未全成)且 `owed > 0`:
@@ -703,7 +716,7 @@ pub struct LegState {                 // 192 B(布局为草案,以代码与编�
     pub broken_links: u16,            // 180
     pub pending_slots: u16,           // 182 has_pending = pending_slots > 0(Pending* 槽)
     pub unknown_slots: u16,           // 184 has_unknown = unknown_slots > 0
-    pub _pad: [u8; 6],                // 186
+    pub last_px48: [u8; 6],           // 186 该 group 最近成交价(48 位有符号 raw,小端;naked_notional 用,超出 ±2^47 饱和)
 }
 const _: () = assert!(size_of::<LegState>() == 192);
 ```
@@ -772,8 +785,11 @@ const _: () = assert!(size_of::<LegState>() == 192);
 #[repr(C)]
 pub struct OutItem {                 // 32 B(布局为草案,以代码与编译期断言为准)
     pub kind: u8,                    //  0 Decision=1(出环决策)| Notify=2(Transition Note + 给拥有者的 OrderUpdate)| Hedge=3(续接/重试的 HedgeRequest)
-                                     //    | Link=4(LinkUpdate,交出时按链接当前状态填)
-    pub action: u8,                  //  1 Decision:OrderAction;Notify:to 状态(OrderState 码);Hedge:LinkRole;Link:0
+                                     //    | Link=4(LinkUpdate,交出时按链接当前状态填)| Timer=5(OmsTimerReq;action = 种类
+                                     //      UnknownQuery 1 / HedgeRetry 2 / SmokeTtl 3,link_id = id,from = cancel,cause_seq = deadline_tsc)
+                                     //    | Alarm=6(槽的 P0 OmsUnknown)| Aged=7(给拥有者的 OrderUpdate{Aged})
+    pub action: u8,                  //  1 Decision:OrderAction;Notify:to 状态(OrderState 码);Hedge:LinkRole;
+                                     //    Link:随行 Note(0 无、1 OmsHedgeBroken、2 OmsResumeTimeout P0、3 同 P1,from = 原因)
     pub from: u8, pub cause: u8,     //  2 / 3 Notify:from 状态与迁移原因(OrderState、TransitionCause 码,见"状态机")
     pub link_id: u32,                //  4 Hedge、Link;其余 0
     pub cause_seq: u64,              //  8 触发迁移/决策的事件 seq(Note 与 OrderDecision.trigger_seq 用原值,不用续发时的 seq)
@@ -783,7 +799,7 @@ pub struct OutItem {                 // 32 B(布局为草案,以代码与编译�
 const _: () = assert!(size_of::<OutItem>() == 32);
 ```
 
-`pending_out` 容量 = 2 × 全部表槽数之和 + 全部账户的 `links_per_account`,进快照(节 12 的 `Out` 行);出环决策的槽置 `QUEUED`。`wants_continue()` 为真时 sequencer 的实盘驱动下一轮写 `Timer{OmsContinue}`,`on_continue` 按 FIFO 再交出至多 K 条决策及相应的其他输出;`Hedge` 项在交出时按当时的 `owed` 与 `naked_dir` 计算数量(与立即发出时同一规则,回放确定)。队列中的撤单在交出前若槽已终态则丢弃(那是已无意义的命令,不是丢输出)。
+`pending_out` 由一个全局 FIFO(Notify、Hedge、Link、Timer、Alarm、Aged 项,容量 4 × 全部表槽数 + 2 × 全部账户链接数 + 64)与每 (venue, account) 两条决策队列(风险递减、Open)组成;Notify 项交出时另带进入 Unknown 的 `OmsUnknown`,UnknownQuery 等定时器登记同样经 Timer 项排队,保证同类输出按产生顺序交出。进快照(节 12 的 `Out` 行:先全局 FIFO,再按表键升序的各表风险递减队列、Open 队列,各自 FIFO);恢复时 Decision 项按槽的 (venue, account) 与是否风险递减回到对应队列。出环决策的槽置 `QUEUED`;已排队决策的槽不再排第二条 `Query`(队列长度以槽数为界,下一次 UnknownQuery 定时器再查)。`wants_continue()` 为真时 sequencer 的实盘驱动下一轮写 `Timer{OmsContinue}`,`on_continue` 按 FIFO 再交出至多 K 条决策及相应的其他输出;`Hedge` 项在交出时按当时的 `owed` 与 `naked_dir` 计算数量(与立即发出时同一规则,回放确定)。队列中的撤单在交出前若槽已终态则丢弃(那是已无意义的命令,不是丢输出)。
 
 **撤单范围与批量撤单**(Kill、`Drain`、`CancelAll` 命令走 `cancel_all`,撤单持续义务走 `reissue_cancels`,两者同一规则;本段是可撤状态的唯一定义,[control-plane `CancelAll`](../../docs/subsystems/control-plane.md) 与 Kill 链接这里):"可撤的槽"= 状态 `Live`、`PendingNew` 或 `PendingAmend` 的槽(`PendingAmend` 的槽在交易所上仍挂着);`PendingCancel` 已在撤;`Unknown` 槽不发撤单,收敛为 `Live` 时由撤单持续义务补撤;已置 `CANCEL_SENT` 的不重发:
 
@@ -928,7 +944,8 @@ const _: () = assert!(size_of::<TableRow>() == 32 && size_of::<LinkRowHdr>() == 
 | 入口 | p50 | p99 | 基准名 |
 |---|---|---|---|
 | `place`(分配 + id 编码 + 决策填充) | ≤ 150 ns | ≤ 400 ns | `oms/place` |
-| `on_order_event`(不含第二腿) | ≤ 100 ns | ≤ 300 ns | `oms/on_event_ack`、`oms/on_event_fill` |
+| `on_order_event` Ack | ≤ 100 ns | ≤ 300 ns | `oms/on_event_ack` |
+| `on_order_event` 成交(不含第二腿) | ≤ 100 ns | ≤ 300 ns | `oms/on_event_fill` |
 | 成交 → 第二腿 `HedgeRequest`(含净量、对齐与裸量上限) | ≤ 150 ns | ≤ 400 ns | `oms/leglink_onfill` |
 | `price_hedge`(含越价上限与超滑点改价) | ≤ 15 ns | ≤ 40 ns | `oms/price_hedge` |
 | `hedge_gated` / `hedge_vetoed` | ≤ 30 ns | ≤ 80 ns | `oms/hedge_gated` |

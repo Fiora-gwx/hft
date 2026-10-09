@@ -1301,50 +1301,50 @@
 | `ShadowDeferred` | Sequencer |  | Info | `strategy` [0, +8)、`account` [8, +8)、`group` [64, +64)、`state` [128, +64) |
 | `IdentityMismatch` | Sequencer |  | P0 | `venue` [0, +8)、`account` [8, +8) |
 | `RefdataRecheckFailed` | Sequencer |  | P1 |  |
-| `RateLimitHit` | Risk |  | P2 |  |
-| `CapSet` | Risk |  | Info | `cap` [0, +384) |
-| `CapCleared` | Risk |  | Info | `cap` [0, +384) |
-| `MarginLevel` | Risk |  | 按条件 | `account` [0, +8)、`venue` [8, +8)、`level` [64, +64)、`liq_dist` [128, +64)、`ratio` [192, +64)、`deadline_ens` [256, +64) |
-| `RecoveryHeldSim` | Risk |  | P1 |  |
-| `IdentityUnverified` | Risk |  | P1 | `venue` [0, +8)、`account` [8, +8) |
-| `OmsTransition` | Oms |  | Info |  |
-| `OmsUnknown` | Oms |  | 按条件 |  |
-| `OmsUnknownStuck` | Oms |  | P0 |  |
-| `OmsVenueReady` | Oms |  | Info |  |
-| `OmsStaleGenFill` | Oms |  | P0 |  |
-| `OmsLateFill` | Oms |  | P0 |  |
-| `OmsOverfill` | Oms |  | P0 |  |
-| `OmsForeignOrder` | Oms |  | P1 |  |
-| `OmsForeignFillViaOrderEvent` | Oms |  | P1 |  |
-| `OmsExtDedup` | Oms |  | P1 |  |
-| `OmsForeignFill` | Oms |  | Info |  |
-| `OmsHedgeBroken` | Oms |  | P0 |  |
-| `OmsHedgePxStale` | Oms |  | P1 |  |
-| `OmsHedgePxGated` | Oms |  | P1 |  |
-| `OmsHedgeSlipCapped` | Oms |  | P1 |  |
-| `OmsHedgeNakedCapped` | Oms |  | P1 |  |
-| `OmsResumeRetry` | Oms |  | P1 |  |
-| `OmsResumeTimeout` | Oms |  | 按条件 |  |
-| `OmsFillPxEstimated` | Oms |  | P1 |  |
-| `OmsFeeUnattributed` | Oms |  | P1 |  |
-| `OmsCancelNotSent` | Oms |  | P2 |  |
-| `OmsNeedsRestQuery` | Oms |  | Info |  |
-| `OmsAnomaly` | Oms |  | 按条件 |  |
-| `RoundClosed` | Ledger |  | Info |  |
-| `Adjusted` | Ledger |  | Info | `account` [0, +8)、`venue` [8, +8)、`inst_or_asset` [64, +64)、`report_id` [128, +64)、`qty` [192, +64)、`px` [256, +64)、`realized` [320, +64) |
-| `BaselineSet` | Ledger |  | Info |  |
-| `BalanceInit` | Ledger |  | Info |  |
-| `SimReset` | Ledger |  | Info |  |
-| `ResidualWrittenOff` | Ledger |  | P1 |  |
-| `ExternalFill` | Ledger |  | 按条件 |  |
-| `LedgerAutoHeldOffset` | Ledger |  | P0 |  |
-| `BalanceDrift` | Ledger |  | P1 |  |
-| `InvShortfall` | Ledger |  | P1 |  |
-| `NetQtyMismatch` | Ledger |  | P1 |  |
-| `FundingMismatch` | Ledger |  | P1 |  |
-| `FundingCorrected` | Ledger |  | P1 |  |
-| `ChainReorg` | Ledger |  | P1 |  |
-| `ChainReorgNaked` | Ledger |  | P0 |  |
+| `RateLimitHit` | Risk | 1 | P2 |  |
+| `CapSet` | Risk | 2 | Info | `cap` [0, +384) |
+| `CapCleared` | Risk | 3 | Info | `cap` [0, +384) |
+| `MarginLevel` | Risk | 4 | 按条件 | `account` [0, +8)、`venue` [8, +8)、`level` [64, +64)、`liq_dist` [128, +64)、`ratio` [192, +64)、`deadline_ens` [256, +64) |
+| `RecoveryHeldSim` | Risk | 5 | P1 |  |
+| `IdentityUnverified` | Risk | 6 | P1 | `venue` [0, +8)、`account` [8, +8) |
+| `OmsTransition` | Oms | 1 | Info |  |
+| `OmsUnknown` | Oms | 2 | 按条件 |  |
+| `OmsUnknownStuck` | Oms | 3 | P0 |  |
+| `OmsVenueReady` | Oms | 4 | Info |  |
+| `OmsStaleGenFill` | Oms | 6 | P0 |  |
+| `OmsLateFill` | Oms | 7 | P0 |  |
+| `OmsOverfill` | Oms | 8 | P0 |  |
+| `OmsForeignOrder` | Oms | 9 | P1 |  |
+| `OmsForeignFillViaOrderEvent` | Oms | 10 | P1 |  |
+| `OmsExtDedup` | Oms | 12 | P1 |  |
+| `OmsForeignFill` | Oms | 11 | Info |  |
+| `OmsHedgeBroken` | Oms | 16 | P0 |  |
+| `OmsHedgePxStale` | Oms | 17 | P1 |  |
+| `OmsHedgePxGated` | Oms | 18 | P1 |  |
+| `OmsHedgeSlipCapped` | Oms | 19 | P1 |  |
+| `OmsHedgeNakedCapped` | Oms | 20 | P1 |  |
+| `OmsResumeRetry` | Oms | 21 | P1 |  |
+| `OmsResumeTimeout` | Oms | 22 | 按条件 |  |
+| `OmsFillPxEstimated` | Oms | 13 | P1 |  |
+| `OmsFeeUnattributed` | Oms | 14 | P1 |  |
+| `OmsCancelNotSent` | Oms | 15 | P2 |  |
+| `OmsNeedsRestQuery` | Oms | 5 | Info |  |
+| `OmsAnomaly` | Oms | 23 | 按条件 |  |
+| `RoundClosed` | Ledger | 1 | Info |  |
+| `Adjusted` | Ledger | 2 | Info | `account` [0, +8)、`venue` [8, +8)、`inst_or_asset` [64, +64)、`report_id` [128, +64)、`qty` [192, +64)、`px` [256, +64)、`realized` [320, +64) |
+| `BaselineSet` | Ledger | 3 | Info |  |
+| `BalanceInit` | Ledger | 4 | Info |  |
+| `SimReset` | Ledger | 5 | Info |  |
+| `ResidualWrittenOff` | Ledger | 6 | P1 |  |
+| `ExternalFill` | Ledger | 7 | 按条件 |  |
+| `LedgerAutoHeldOffset` | Ledger | 8 | P0 |  |
+| `BalanceDrift` | Ledger | 9 | P1 |  |
+| `InvShortfall` | Ledger | 10 | P1 |  |
+| `NetQtyMismatch` | Ledger | 11 | P1 |  |
+| `FundingMismatch` | Ledger | 12 | P1 |  |
+| `FundingCorrected` | Ledger | 13 | P1 |  |
+| `ChainReorg` | Ledger | 14 | P1 |  |
+| `ChainReorgNaked` | Ledger | 15 | P0 |  |
 | `ExecBroken` | Exec |  | P0 |  |
 | `ExecExternalDefault` | Exec |  | 按条件 |  |
 | `ExecAutoFixFailed` | Exec |  | P0 |  |

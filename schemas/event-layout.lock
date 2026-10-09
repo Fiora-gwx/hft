@@ -690,6 +690,50 @@ load-err 48 UnknownStrategyKind
 load-err 49 CapsExceedProtocol
 load-err 50 StaleGuardMismatch
 load-err 51 BindingChangedWithPosition
+note Risk 1 RateLimitHit
+note Risk 2 CapSet
+note Risk 3 CapCleared
+note Risk 4 MarginLevel
+note Risk 5 RecoveryHeldSim
+note Risk 6 IdentityUnverified
+note Oms 1 OmsTransition
+note Oms 2 OmsUnknown
+note Oms 3 OmsUnknownStuck
+note Oms 4 OmsVenueReady
+note Oms 5 OmsNeedsRestQuery
+note Oms 6 OmsStaleGenFill
+note Oms 7 OmsLateFill
+note Oms 8 OmsOverfill
+note Oms 9 OmsForeignOrder
+note Oms 10 OmsForeignFillViaOrderEvent
+note Oms 11 OmsForeignFill
+note Oms 12 OmsExtDedup
+note Oms 13 OmsFillPxEstimated
+note Oms 14 OmsFeeUnattributed
+note Oms 15 OmsCancelNotSent
+note Oms 16 OmsHedgeBroken
+note Oms 17 OmsHedgePxStale
+note Oms 18 OmsHedgePxGated
+note Oms 19 OmsHedgeSlipCapped
+note Oms 20 OmsHedgeNakedCapped
+note Oms 21 OmsResumeRetry
+note Oms 22 OmsResumeTimeout
+note Oms 23 OmsAnomaly
+note Ledger 1 RoundClosed
+note Ledger 2 Adjusted
+note Ledger 3 BaselineSet
+note Ledger 4 BalanceInit
+note Ledger 5 SimReset
+note Ledger 6 ResidualWrittenOff
+note Ledger 7 ExternalFill
+note Ledger 8 LedgerAutoHeldOffset
+note Ledger 9 BalanceDrift
+note Ledger 10 InvShortfall
+note Ledger 11 NetQtyMismatch
+note Ledger 12 FundingMismatch
+note Ledger 13 FundingCorrected
+note Ledger 14 ChainReorg
+note Ledger 15 ChainReorgNaked
 struct StrategyParamsHdr 48
   0 strategy id:strategy
   1 account id:account
