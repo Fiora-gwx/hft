@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 9da43c796ebc9afe24d884191b8633ae419f42b9e1dcbbb4cf665ce68e704fed # shrinks to sc = Scenario { n_accts: 1, n_insts: 1, empirical: false, evs: [(0, Bbo { inst: 0, off: 0, spread: 1, qty: 700 }), (0, Place { acct: 0, inst: 0, buy: false, lots: 1, off: 0, tif: 0 }), (2, Reset { acct: 0 })] }, seed = 0

@@ -3,7 +3,7 @@ description: "模拟撮合 + 模拟账户:hft-core 的 sim-gw 任务用它在实
 kind: crate
 tier: warm
 scope: core
-status: spec
+status: impl
 ---
 
 # hft-sim
@@ -54,19 +54,23 @@ status: spec
 pub struct SimExchange { /* 每 Sim 账户一个 SimAccount;每 (venue, inst) 一个簿副本;待撮合指令堆;待交付回报堆;RNG 子流 */ }
 
 impl SimExchange {
-    pub fn new(setup: &SimSetup, rd: &RefData, caps: &CapsTable) -> Result<SimExchange, SimCfgErr>;
+    /// 能力表(`VenueCaps`)、费率行(`Fees`/`FeeOverrides`)、限速与分档维持保证金率都取自 `rd`;启动回报
+    /// (每账户 `ConnState{Up}`、每 (账户, venue) `AccountConfigReport`、首轮真值报告)以 `due_tsc = 0` 入堆。
+    pub fn new(setup: &SimSetup, rd: &RefData) -> Result<SimExchange, SimCfgErr>;
     /// 行情与时间推进,按 journal 顺序送入:Bbo、L2Snapshot{origin = TopN}(分档深度,整替换)、Trade、Funding、Mark,
-    /// 启用增量深度时另有 L2Batch、L2SnapshotPart;以及任意记录头(只取 tsc 推进时间)。
+    /// 启用增量深度时另有 L2Batch 与多段 L2Snapshot;`VenueNotice` 控制命令;以及任意记录头(只取 tsc 推进时间)。
     pub fn on_record(&mut self, hdr: &RecordHeader, ev: SimInput<'_>);
     /// out-sim 环上的指令;decided_tsc 取该指令对应 OrderDecision 的 decided_tsc(见 sim-gw 任务第 2 步)。
     pub fn on_command(&mut self, cmd: &GwCmd, decided_tsc: Tsc);
     /// 已消费到的事件时间:执行 arrive_tsc < t 的指令、资金费结算、保证金检查。
     pub fn advance(&mut self, t: Tsc);
     /// 交付 due_tsc ≤ now 的回报,按 (due_tsc, gen_seq) 升序。
-    pub fn drain_due<F: FnMut(SimReply)>(&mut self, now: Tsc, sink: F);
+    pub fn drain_due<F: FnMut(SimReply<'_>)>(&mut self, now: Tsc, sink: F);
     pub fn next_due(&self) -> Option<Tsc>;
-    /// 模拟真值视图(DST 不变量、SimDrift 规则、测试用)。
+    pub fn pending_replies(&self) -> usize;
+    /// 模拟真值视图(DST 不变量、SimDrift 规则、测试用):余额、仓位、保证金、强平价、订单表、记忆、Sim 计数。
     pub fn account(&self, a: AccountId) -> Option<SimAccountView<'_>>;
+    pub fn counters(&self) -> SimCounters;
     /// 从恢复后的引擎状态初始化该账户的模拟真值(已吃流动性记忆为空):hft-core 重启与 replayer sim 从快照起步共用,见"重启恢复"。
     pub fn seed_account_from(&mut self, a: AccountId, s: &SimSeedState) -> Result<(), SimCfgErr>;
     /// 压力用例的 GwDown 故障:在事件时间 t 把 (a, venue) 的模拟下单连接置 Down/Up(产出 ConnState),
@@ -75,21 +79,32 @@ impl SimExchange {
     pub fn state_hash(&self) -> u64;
 }
 
-pub struct SimSetup {
+pub struct SimSetup {                                                 // 冷路径输入;长度由 new 按 MAX_* 校验
     pub tuning: SimTuning,
     pub tsc_hz_milli: u64,                                            // µs/ms 参数换算到事件时间(TSC)的频率:hft-core 取本次运行的 TSC 频率,replayer 取 journal 的 EngineClock 行
-    pub latency_models: FixedVec<LatencyModel, MAX_LATENCY_MODELS>,   // hft-core [sim.latency_models],下标 = 出现顺序
-    pub margin_models: FixedVec<MarginModel, MAX_MARGIN_MODELS>,      // hft-core [sim.margin_models]
-    pub accounts: FixedVec<(AccountId, SimAccountCfg), MAX_SIM_ACCOUNTS>,
+    pub latency_models: Vec<LatencyModel>,                            // hft-core [sim.latency_models],下标 = 出现顺序;≤ MAX_LATENCY_MODELS
+    pub margin_models: Vec<MarginModel>,                              // hft-core [sim.margin_models];≤ MAX_MARGIN_MODELS
+    pub accounts: Vec<(AccountId, SimAccountCfg)>,                    // ≤ MAX_SIM_ACCOUNTS
 }
-pub enum SimInput<'a> { Market(&'a MarketEventRef<'a>), Clock }
-pub enum SimReply { Rep(RepMsg) }      // RepMsg 与实盘 gw 产出的元素同构(归 hft-event)
+pub enum MarketEventRef<'a> { Bbo(&'a Bbo), L2Snapshot(L2SnapshotPart<'a>), L2Batch(L2BatchView<'a>), Trade(&'a Trade),
+                              Funding(&'a Funding), Mark(&'a MarkPrice), Index(&'a IndexPrice) }
+pub enum SimInput<'a> {
+    Market(MarketEventRef<'a>),
+    VenueNotice { venue: VenueId, kind: u8, inst: InstId },   // ControlCmd::VenueNotice;kind = 1(Delisting)使 inst(0 = 该 venue 全部)只减仓
+    Clock,
+}
+/// RepMsg 与实盘 gw 产出的元素同构(归 hft-event);bulk = MarginReport 的 [MarginItem; n] 或 AccountConfigReport 的
+/// [LeverageItem; n_lev] 字节(与 rep-sim-bulk 同一拆分)。
+pub struct SimReply<'a> { pub account: AccountId, pub due_tsc: Tsc, pub gen_seq: u64, pub msg: RepMsg, pub bulk: &'a [u8] }
 pub const SIM_CODE_BASE: u32 = 0x1000_0000;   // 模拟拒单的 OrderEvent.reject_code = SIM_CODE_BASE + n(n 见"拒单规则")
 pub const MAX_SIM_ACCOUNTS: usize = 16;
 pub const MAX_LATENCY_MODELS: usize = 16;
 pub const MAX_MARGIN_MODELS: usize = 16;
+pub const CMDS_PER_POLL: usize = 256;          // sim-gw
+pub const REPLY_RESERVE: usize = 4_096;        // sim-gw
 ```
 
+- **Sim 账户的 venue 集合** = refdata `AccountMeta.venues` ∪ `initial_balances` 中出现的 venue(refdata 加载已保证后者是前者的子集);`SameExchangeMarkets` 按这个集合判定。
 - 泛型使用,不做 trait object;`SimExchange` 不依赖 hft-sequencer、hft-oms、hft-ledger、hft-risk——它是**独立实现的交易所真值**,ledger 的缺陷不会被模拟同样复制。
 - `SimCfgErr`:`UnknownVenue`;`UnknownAsset`(`initial_balances` 引用 refdata 不存在的资产);`FeeTier`(refdata `Fees` 中没有 (venue, `fee_tier`) 这一行);`LatencyModelIndex` / `MarginModelIndex`(下标从 0 起,超出对应表);`BadDist`(`Empirical` 分位点不单调);`MarginMode`(该 venue 的 `VenueCaps.required_margin_mode` 不是全仓——模拟只实现全仓);`SameExchangeMarkets`(同一 Sim 账户的 venue 集合含同一交易所的两个 VenueId);`TooManyAccounts`(超过 `MAX_SIM_ACCOUNTS`);`MmrTiersMissing`(压力用例要求的分档维持保证金率在 refdata 中缺失,只由 `StressTransform::new` 返回)。hft-core 启动步 2 用 `SimExchange::new` 干校验,任一错误退出 2。
 
@@ -150,7 +165,7 @@ hft-sim **不占快照节**,`SimExchange` 的状态也不写进 journal:模拟�
 
 1. `SimExchange::new(setup)`(全部账户先按 `initial_balances` 建立)。
 2. 对每个 Sim 账户按 `AccountId` 升序:ledger 中该账户至少一个 venue 已初始化(`VenueBook.vflags` 含 `INIT`)→ 由上表构造 `SimSeedState` 调 `seed_account_from(a, &s)`;否则(首次启动、首条真值报告交付前崩溃)不调用,保持 `initial_balances`。
-3. `seed_account_from` 的效果:余额、钱包、仓位与订单表按上表替换;已吃流动性记忆、待撮合指令堆、待交付回报堆为空;在途 `SimTransfer` 不恢复(ledger 在命令时刻已移动现金,视为已到账);该账户 RNG 子流重新取 `splitmix64(seed ⊕ account_id)` 的初始状态。
+3. `seed_account_from` 的效果:余额、钱包、仓位与订单表按上表替换;已吃流动性记忆、待撮合指令堆、待交付回报堆为空;在途 `SimTransfer` 不恢复(ledger 在命令时刻已移动现金,视为已到账);该账户 RNG 子流重新取 `splitmix64(seed ⊕ account_id)` 的初始状态;`new` 入堆的启动回报(`ConnState{Up}`、`AccountConfigReport`)保留。
 4. 受控故障注入的状态不恢复(重启即清除,见"受控故障注入")。重启前已撮合而未交付的回报随进程丢失;它们的成交不在 ledger 里,也不在恢复后的真值里(两边一致)。OMS 对恢复后的 `Unknown` 槽发 `Query`,模拟交易所按订单表回 `QueryResult`(终态记录 → `Filled`/`Expired`,挂单 → `New`/`PartiallyFilled`),槽随之收敛,不产生新成交;模拟账户不出现 `NotFound` 形态的恢复查询(reconciler 不覆盖 Sim 账户,`NotFound` 会使槽停在 `Unknown`)。
 
 ```rust
@@ -198,13 +213,13 @@ pub enum MmrSource { RefdataTiers, Flat(Rate) }
 
 | 键 | 类型 | 含义 | 默认 |
 |---|---|---|---|
-| `seed` | u64 | 每账户 RNG 子流种子 = `splitmix64(seed ⊕ account_id)` | 必填 |
+| `seed` | u64 | 每账户 RNG 子流种子 = `splitmix64(seed ⊕ account_id)` | 必填(`SimTuning::with_seed(seed)` 是唯一构造器,无 `Default`) |
 | `consume_decay_ms` | u32 | 已吃流动性记忆的线性衰减时长 | 1 000(待标定) |
 | `take_avail_bp` | u16 | 每档可见量中可被我们吃到的比例(10000 = 全部;竞争折扣) | 10 000(待校准) |
 | `quiet_ms` | u32 | journal 静默多久后以本地 TSC 推进 | 50 |
 | `report_interval_s` | u16 | 真值报告(`PositionReport`/`BalanceReport`)周期 | 60 |
 | `transfer_delay_ms` | u32 | `SimTransfer` 到账延迟 | 300 000(待标定) |
-| `rate_limit` | bool | 按 refdata `RateLimitTable` 计数,超限按该所语义回拒 | true |
+| `rate_limit` | bool | 按 refdata `RateLimitTable` 中 `Orders` 桶、范围 Ip/Uid/Account 的行计数(按到达时刻的固定窗口,到达第 10 条规则的新单计入),超限以 `RateLimited` 回拒 | true |
 | `late_fee` | bool | 模拟"成交后手续费另行到达"(`FeeOnly`)的所 | false(DST 打开) |
 | `maker_fill` | `TradeThrough` \| `Queue`(需 `queue-hftbacktest` feature) | 挂单成交模型 | `TradeThrough` |
 
@@ -216,15 +231,16 @@ sim-gw 按该 venue 的 [`VenueCaps`](../hft-refdata/README.md) 模仿交易所�
 
 | 事件 | 何时 | 形态 |
 |---|---|---|
-| `SendReport{Written}` | 取到订单类 `GwCmd` | `sent_tsc` = 取出时刻 |
+| `SendReport{Written}` | sim-gw 取到订单类 `GwCmd`(由 `task` 层产出,纯核心不产出) | `sent_tsc` = 取出时刻 |
+| `SendReport{NoConn}` | 下单连接 Down(`set_order_conn`)期间到达的订单类指令 | `due_tsc` = 到达时刻 |
 | `OrderEvent` | 撮合与终态 | `OrderEventKind`(码值归 [hft-event](../hft-event/README.md)):`Ack` → 每档一条 `PartialFill`/`Fill`(累计量、均价、`fee`、`fee_asset`)→ IOC 余量 `Expired`;拒单为 `Reject`(`reject_code = SIM_CODE_BASE + n`,n 见[拒单规则](#拒单规则));`late_fee` 的延迟费用为 `FeeOnly`;`ex_ts_ns` = 撮合时所用行情记录的交易所时间 |
 | `OrderEvent`(撤、改、查) | 该指令的 `arrive_tsc` | 按订单表(每账户 1,024 项:挂单与最近终结的订单,满时淘汰最早终结的记录):`Cancel` 目标是挂单 → `CancelAck`(解锁),否则 `CancelReject`;`CancelAll` 对范围内(`inst ≠ 0` 为该 inst,`inst = 0` 为该账户全部)每个挂单一条 `CancelAck`;`Amend` 目标是挂单且新价量通过拒单规则第 2–4、7–9 条 → `AmendAck`,否则 `AmendReject`;`Query` → `QueryResult`(`order_status`:挂单 New/PartiallyFilled,终态记录按其终态,订单表中没有 → NotFound;带 `cum_filled` 与 `avg_px`) |
 | `FundingSettle` | 结算时刻 | `funding_settle = PerSymbolPush`:每 inst 一条;`BalanceOnlyPush`:`inst = INST_NONE` 的合计;`RateOnly`:不推送(由 sequencer 按规则合成,[hft-event](../hft-event/README.md)) |
 | `MarginReport` | `margin_data = Push`:比率与上一条报告之差的绝对值 ≥ 0.01 或距上一条 1 s;`Poll{interval_ms}`:每 `interval_ms` | 保证金余额、维持、可用、比率、每 inst 强平价(按 §7 的公式算,与模拟强平的触发条件同一口径;ADL 档恒 0) |
 | `ExternalFill{cause = Liquidation}` | 模拟强平 | 每 inst 一条,带强平费 |
 | `AccountConfigReport` | 启动与 `SimReset` 后 | 恒与 `VenueCaps` 要求一致(`mismatches = 0`,`uid_keys = 0`:Sim 账户没有 key,`IDENTITY` 对它视为满足);永续 venue 对每个可交易 inst 一条 `LeverageItem{leverage = MarginModel.leverage}`,hft-risk 按它折算保证金 |
-| `PositionReport` / `BalanceReport` | 每 `report_interval_s` 与每次 `SimTransfer`/`SimReset` | 模拟真值,供 ledger 校验与 `SimDrift` |
-| `ConnState{Up}` | 启动时一次 | sim 下单"连接"恒为 Up |
+| `PositionReport` / `BalanceReport` | 事件时间 0(随启动回报)、此后每 `report_interval_s`,以及每次 `SimTransfer`/`SimReset` | 模拟真值,供 ledger 校验与 `SimDrift`;每个非零余额/仓位一条,上一条报告非零而现在为零的再报一次;`due_tsc` = 该事件时刻(不加 resp 延迟) |
+| `ConnState{Up}` | 启动时每账户一次 | `venue = 0`、`conn = 0`、`role = Order`;`set_order_conn` 另按 (账户, venue) 推 Down/Up |
 
 ### 拒单规则
 
@@ -236,7 +252,7 @@ sim-gw 按该 venue 的 [`VenueCaps`](../hft-refdata/README.md) 模仿交易所�
 | 2 | 数量是 lot 整数倍且 ≥ 最小数量 | `InstMeta` | `Lot`(2) |
 | 3 | 价格在 tick 上 | `InstMeta` | `Tick`(3) |
 | 4 | 名义 ≥ 最小名义 | `InstMeta` | `MinNotional`(4) |
-| 5 | 价格在该所价格限制带内(`InstMeta` 的交易所价格限制带,字段归 [hft-refdata](../hft-refdata/README.md#数据结构);该 inst 未配置时跳过本项) | `InstMeta` | `PriceLimit`(5) |
+| 5 | 价格在该所价格限制带内:`参考价 × (1 − down) ≤ px ≤ 参考价 × (1 + up)`,参考价 = 永续的 mark、现货的撮合视图中间价(`InstMeta` 的交易所价格限制带,字段归 [hft-refdata](../hft-refdata/README.md#数据结构);该 inst 未配置或无参考价时跳过本项) | `InstMeta` | `PriceLimit`(5) |
 | 6 | `reduce_only = true` 时该所支持;且不会增仓、当前有反向仓位 | `VenueCaps.reduce_only`、模拟仓位 | `Unsupported`(6)/ `ReduceOnly`(7) |
 | 7 | `post_only` 不会立即成交 | 簿副本 | `PostOnly`(8) |
 | 8 | 现货买:可用计价资产 ≥ 名义(手续费扣计价资产时含费);现货卖:可用基础资产 ≥ 数量 | 模拟余额 | `InsufficientBalance`(9) |
@@ -372,7 +388,7 @@ pub struct StressVerdict {
 ### 1. 时间
 
 - 事件时间 = journal 记录头 `tsc`(sequencer 处理时刻,即策略看到它的时刻);交易所时间取记录体 `ex_ts_ns`。
-- 指令:`arrive_tsc = decided_tsc + sample(entry)`;在**所有 `tsc ≤ arrive_tsc` 的行情记录应用之后**的簿副本上撮合(即在看到第一条 `tsc > arrive_tsc` 的记录时执行);回报 `due_tsc = 撮合时刻 + sample(resp)`。
+- 指令:`arrive_tsc = decided_tsc + sample(entry)`;在**所有 `tsc ≤ arrive_tsc` 的行情记录应用之后**的簿副本上撮合(即在看到第一条 `tsc > arrive_tsc` 的记录时执行);回报 `due_tsc = 撮合时刻 + sample(resp)`;同一订单的回报按产生顺序交付(`due_tsc` 取不小于该订单上一条回报的值,`FeeOnly` 除外);交易所推送类回报(`FundingSettle`、`MarginReport`、`ExternalFill`)= 事件时刻 + `sample(resp)`。
 - 同一账户的指令按 `(arrive_tsc, gen_seq)` 全序执行;延迟抽样按指令到达顺序从该账户子流取数,不受其他账户影响。
 
 ### 2. 簿副本
@@ -396,7 +412,7 @@ pub struct StressVerdict {
 
 ### 5. 手续费与扣费资产
 
-费率 = refdata `Fees` 中 (venue, `fee_tier`) 行的 maker/taker;`fee = 成交名义 × 费率`,按扣费资产换算后取整一次,向上取整到该资产的最小单位(支出 `Ceil`,与 [hft-types 取整规则](../hft-types/README.md#运算) 同向);扣费资产按 `VenueCaps.fee_asset_rule`:
+费率 = 该账户的 `FeeOverrides`(inst 行 > venue 行)> refdata `Fees` 中 (venue, `fee_tier`) 行的 maker/taker(`new` 时从 refdata blob 解析);`fee = 成交名义 × 费率`,按扣费资产换算后取整一次,向上取整到该资产的最小单位(支出 `Ceil`,与 [hft-types 取整规则](../hft-types/README.md#运算) 同向);扣费资产按 `VenueCaps.fee_asset_rule`:
 
 | 规则 | 买 | 卖 |
 |---|---|---|
@@ -425,7 +441,7 @@ pub struct StressVerdict {
 - `maint = Σ |qty| × mark × mmr(inst, 名义档)`;`initial = Σ |qty| × mark / leverage`;`avail = margin_balance − initial − 挂单占用`。
 - `margin_ratio = maint / margin_balance`(与 [权益视图](../hft-ledger/README.md) 统一口径)。
 - **强平价**(写进 `MarginReport` 每 inst 条目,与下一条的强平触发同一口径):对持仓 `q_i`(带符号)的 inst i,固定其他 inst 的 mark,解 `margin_balance(m) = maint(m)` 得
-  `liq_px_i = (W + U_{≠i} − M_{≠i} − q_i × entry_i) / (|q_i| × mmr_i − q_i)`,其中 `W` = wallet,`U_{≠i}`/`M_{≠i}` = 其他 inst 的未实现盈亏与维持保证金;分母或结果 ≤ 0 → 0(无强平价);结果取整到价格最小单位,空头向上、多头向下(使 mark 到达 `liq_px` 时触发条件成立)。`mmr` 用 `RefdataTiers` 时按 `liq_px` 处名义所在的档重算,至多迭代 3 次(分段线性,确定)。全部用 i128 定点,不经 f64。
+  `liq_px_i = (W + U_{≠i} − M_{≠i} − q_i × entry_i) / (|q_i| × mmr_i − q_i)`,其中 `W` = wallet,`U_{≠i}`/`M_{≠i}` = 其他 inst 的未实现盈亏与维持保证金;分母为 0 或结果 ≤ 0 → 0(无强平价);结果取整到价格最小单位,空头向上、多头向下(使 mark 到达 `liq_px` 时触发条件成立)。`mmr` 用 `RefdataTiers` 时维持保证金随名义分段跳变,`liq_px` 取触发条件(下一条)成立的边界价:在以首档与末档费率求得的两个根之间对整数价格二分(空头取最小的触发价,多头取最大的触发价),确定且与触发判定同一函数。`RefdataTiers` 下未登记分档的 inst 维持保证金率按 0 计(实时模拟应改用 `Flat`;压力用例由 `MmrTiersMissing` 拒绝)。全部用 i128 定点,不经 f64。
 - 每条 `Mark` 后检查:`margin_ratio ≥ 1`(判定为 `maint ≥ margin_balance`,i128 精确比较,不经比率取整)→ 该 venue 全部永续仓位按 `mark × (1 ∓ liq_slippage_bp / 10 000)`(向不利方向取整到价格最小单位)平仓,扣 `liq_fee`,每 inst 一条 `ExternalFill{Liquidation}`;之后 `MarginReport`。只有一个永续持仓时,mark 到达 `liq_px` 的那一条 `Mark` 恰好触发(属性测试),所以 hft-risk 由 `MarginReport` 算出的到强平距离(`liq_dist`,定义归 [hft-risk](../hft-risk/README.md))就是模拟真值的距离。
 - 不模拟 ADL、联合保证金/多资产模式、逐仓;该 venue 的 `VenueCaps.required_margin_mode` 不是全仓时 `SimCfgErr::MarginMode`。
 
@@ -451,17 +467,15 @@ pub struct StressVerdict {
 
 | 文件 | 职责 |
 |---|---|
-| `src/lib.rs`、`src/types.rs` | `SimExchange`、`SimSetup`、`SimTuning`、`SimReply`、错误类型 |
-| `src/clock.rs` | 事件时间推进、待撮合与待交付堆 |
-| `src/book_view.rs` | 簿副本与撮合视图(BBO + L2 合成) |
-| `src/taker.rs`、`src/memory.rs` | 吃单撮合、已吃流动性记忆 |
-| `src/maker.rs` | `TradeThrough` 挂单模型;`queue-hftbacktest` feature 的适配 |
-| `src/rules.rs` | 拒单规则 |
-| `src/account/{spot.rs, perp.rs, margin.rs, funding.rs, transfer.rs}` | 模拟账户真值 |
-| `src/models.rs` | `LatencyModel`、`Dist`、`MarginModel` 与表校验 |
-| `src/stress.rs` | `StressSpec`、`StressCase`、`PricePath`、`StressFault`、`StressTransform`、`StressVerdict` |
-| `src/latency.rs`、`src/rng.rs` | 延迟抽样与子流 |
-| `src/task.rs`(`task` feature) | `SimGwTask`、`DecisionTable` |
+| `src/lib.rs`、`src/types.rs` | `SimExchange`(构造、公开入口、回报堆)、`SimSetup`、`SimTuning`、`SimReply`、模型与错误类型 |
+| `src/state.rs` | 预分配的内部行:inst(簿副本、资金费与 mark)、venue、账户(余额、仓位、订单表、记忆)、待撮合与待交付项 |
+| `src/market.rs` | 事件时间推进、行情记录、撮合视图(BBO + L2 合成)、`TradeThrough` 挂单成交、资金费与 mark 触发 |
+| `src/exec.rs` | 指令执行:拒单规则、吃单撮合与已吃流动性记忆、订单表、撤/改/查 |
+| `src/account.rs` | 现货结算与锁定、手续费资产、永续仓位、全仓保证金与强平价、强平、资金费、划转、重置、seed、真值报告 |
+| `src/models.rs` | `LatencyModel`/`Dist` 校验、延迟抽样、账户子流 |
+| `src/view.rs`、`src/hash.rs`、`src/fx.rs` | `SimAccountView`、`state_hash`、i128 定点辅助 |
+| `src/stress.rs`(M4) | `StressSpec`、`StressCase`、`PricePath`、`StressFault`、`StressTransform`、`StressVerdict` |
+| `src/task.rs`(`task` feature,M4) | `SimGwTask`、`DecisionTable` |
 | `vendor/hftbacktest/`(`queue-hftbacktest` feature) | 上游模型层原文件 + `LICENSE`(MIT)+ `PATCHES.md` |
 
 </details>
@@ -507,6 +521,7 @@ pub struct StressVerdict {
 
 ## 已知限制与后续工作
 
+- **M2 实现范围**:纯核心 `SimExchange`;`task` feature(`SimGwTask`、受控故障注入 `SimFault`,`on_command` 目前忽略 `SimFault`)、压力用例(`stress.rs`)与 `queue-hftbacktest` 随 M4 落地。每个被跟踪的 inst(Sim 账户各 venue 的全部 inst)在 `new` 时分配一本 hft-book `L2Book`(窗口取 refdata `book_window`)。
 - **无市场冲击**:我们的模拟单不改变真实行情;已吃流动性记忆只近似"同一档被吃掉";单笔名义相对深度大时结论偏乐观,以 `take_avail_bp` 校准与 `top_only_fills` 计数约束。
 - **延迟是抽样的**:交易所内部排队与跨所时钟差不可见;校准前的模拟成交率与滑点只作方向性参考。
 - **挂单不建排队位置**(默认 `TradeThrough`,偏保守);需要时启用 `queue-hftbacktest`(触发条件:MakerFirst 立项)。

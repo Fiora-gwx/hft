@@ -1,0 +1,4 @@
+end_ms = 3000
+[seed]
+wallet = "18000"
+positions = [["BTC/P2", "-1.0", "60000"]]

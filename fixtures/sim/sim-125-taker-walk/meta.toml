@@ -1,0 +1,4 @@
+covers = "level walk to the limit, IOC remainder, consumed-liquidity memory, FOK both ways, GTC remainder resting"
+source = "synthetic"
+reviewed_by = "pending"
+note = "expected files written by SIM_GOLDEN_BLESS=1 and checked line by line against crates/hft-sim/README.md"

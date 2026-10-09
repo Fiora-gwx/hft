@@ -1,0 +1,5 @@
+p2_funding_settle = "BalanceOnlyPush"
+end_ms = 28801000
+[seed]
+wallet = "18000"
+positions = [["BTC/P2", "-1.0", "60000"], ["ETH/P2", "-10.0", "3000"]]

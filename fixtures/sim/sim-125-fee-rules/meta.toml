@@ -1,0 +1,4 @@
+covers = "BNB discount on taker buy and sell, maker fee on a trade-through fill"
+source = "synthetic"
+reviewed_by = "pending"
+note = "expected files written by SIM_GOLDEN_BLESS=1 and checked line by line against crates/hft-sim/README.md"

@@ -49,7 +49,7 @@ spec: README.md
 
 **夹具**(各用例的"前置"按名字引用;实现在 `crates/hft-sim/tests/common/mod.rs`,参数一律显式赋值):
 
-- `rd_sim()`:refdata。资产 `USDT`(`qty_exp = −6`)、`BTC`、`ETH`、`BNB`(三者 `px_exp = −4`,`qty_exp = −8`);venue `S1`(`VenueId(1)`,现货,交易所 E1,`reduce_only = false`)、`P2`(`VenueId(2)`,USDT 永续,交易所 E2,`required_margin_mode = Cross`,`reduce_only = true`,`margin_data = Push`)、`S4`(`VenueId(4)`,现货,交易所 E2,只用于同所两 venue 的用例);inst `BTC/S1`(`InstId(11)`,tick 0.01,lot 0.00001,`min_qty` 0.00001,`min_notional` 5,`Trading`)、`BNB/S1`(12)、`BTC/P2`(21,tick 0.1,lot 0.001,`min_qty` 0.001,`min_notional` 5)、`ETH/P2`(22,tick 0.01,lot 0.01);`Fees`:(S1, 档 1)maker 0.0002、taker 0.0004,(S1, 档 2)taker 0.0003,(P2, 档 1)maker 0.0002、taker 0.0005;各 venue 的 `fee_asset_rule` 与 `funding_settle` 在用例"前置"里写明。
+- `rd_sim()`:refdata(以 `RdbBuilder` 构建;资产、inst、账户 id 稠密)。资产 `USDT`(`AssetId(1)`,`qty_exp = −6`)、`BTC`(2)、`ETH`(3)、`BNB`(4)(三者 `px_exp = −4`,`qty_exp = −8`);venue `S1`(`VenueId(2)` = `BINANCE_SPOT`,现货,交易所 E1 = Binance,`reduce_only = false`)、`P2`(`VenueId(5)` = `OKX_SWAP`,USDT 永续,交易所 E2 = OKX,`required_margin_mode = Cross`,`reduce_only = true`,`margin_data = Push`,`funding_settle = PerSymbolPush`)、`S4`(`VenueId(6)` = `OKX_SPOT`,现货,交易所 E2,只用于同所两 venue 的用例);inst `BTC/S1`(`InstId(11)`,tick 0.01,lot 0.00001,`min_qty` 0.00001,`min_notional` 5,`Trading`,`book_window` 4096)、`BNB/S1`(12,tick 0.01,lot 0.001)、`BTC/P2`(21,tick 0.1,lot 0.001,`min_qty` 0.001,`min_notional` 5)、`ETH/P2`(22,tick 0.01,lot 0.01),inst 1–10、13–20 为 `S1` 上 `Delisted` 的占位行;账户 1–9 都是 venues {S1, P2} 的 Sim 账户;`Fees`:(S1, 档 1)maker 0.0002、taker 0.0004,(S1, 档 2)maker 0.0002、taker 0.0003,(P2, 档 1)与(P2, 档 2)maker 0.0002、taker 0.0005,(S4, 档 1)同 (S1, 档 1);各 venue 的 `fee_asset_rule` 与 `funding_settle` 在用例"前置"里写明。
 - 账户:`A9`(Sim,venues {S1, P2},`initial_balances` = S1 USDT 100 000、S1 BNB 1、P2 USDT 18 000,`latency_model = 0`、`fee_tier = 1`、`margin_model = 0`);`A8`(Sim,venues {S1, P2},`initial_balances` = S1 USDT 50 000、P2 USDT 10 000,其余同 `A9`;只在注明加入的用例中存在)。
 - `setup_sim()`:`SimSetup { tuning: SimTuning { seed: 42, consume_decay_ms: 1 000, take_avail_bp: 10 000, quiet_ms: 50, report_interval_s: 60, transfer_delay_ms: 300 000, rate_limit: false, late_fee: false, maker_fill: TradeThrough }, tsc_hz_milli: 1 000 000 000 000(1 GHz,1 TSC = 1 ns), latency_models: [Fixed { entry_us: 2 000, resp_us: 2 000 }], margin_models: [MarginModel { mmr: Flat(0.005), leverage: 5, liq_fee: 0.005, liq_slippage_bp: 50 }], accounts: [A9] }`;用例改动其中某项时在"前置"里写出新值。
 - 记法:事件时间写成 ms(1 GHz TSC);"`@t`"表示记录头 `tsc = t`,行情记录的 `ex_ts_ns` 默认等于 `t` 的 ns 值;`Bbo(inst, bid×量, ask×量) @t`;`TopN(inst, asks[…], bids[…]) @t` 是 `L2Snapshot{origin = TopN}`;`Place(inst, side, qty, px, tif) decided @t` 是一条 `op = Place` 的 `GwCmd` 经 `on_command(cmd, decided_tsc = t)`,slot 按出现顺序为 1、2、…,`gen = 1`;"撮合"由下一条 `tsc` 更大的记录或 `advance` 触发。数量、价格写十进制(raw = 十进制 × 10^(−exp));`Rate` 指数 −9。
@@ -112,7 +112,7 @@ spec: README.md
 | SIM-003.13 | `n = 64`、分位点合法 | `Ok` |
 | SIM-003.14 | `n = 65` | `Err(BadDist)` |
 | SIM-003.15 | `P2.required_margin_mode = Isolated` | `Err(MarginMode)` |
-| SIM-003.16 | `A9.venues = {P2, S4}`(同为交易所 E2) | `Err(SameExchangeMarkets)` |
+| SIM-003.16 | `A9.initial_balances` 另含 `(S4, USDT, 1)`(venue 集合 {S1, P2, S4} 中 P2 与 S4 同为交易所 E2) | `Err(SameExchangeMarkets)` |
 | SIM-003.17 | 16 个 Sim 账户 | `Ok` |
 | SIM-003.18 | 17 个 Sim 账户 | `Err(TooManyAccounts)` |
 
@@ -317,9 +317,11 @@ spec: README.md
 - 里程碑:M2
 - 前置:同 SIM-020;`consume_decay_ms = 60 000`;64 个不同价位各被吃过一次(t0 依次递增,全部未过期)
 - 步骤:
-  1. 吃第 65 个价位;再对第 1 个价位(t0 最早)下单
+  1. 吃第 65 个价位;读记忆
+  2. 再对第 1 个价位(t0 最早)下单
 - 期望:
-  - 环仍为 64 项;第 1 个价位的记忆已被覆盖,该价位按全部可见量成交;第 2 个价位的记忆仍在
+  - 步骤 1:环为 64 项;第 1 个价位的记忆已被覆盖,第 2 个与第 65 个价位的记忆在
+  - 步骤 2:该价位按全部可见量成交;环仍为 64 项
 - 实现:`crates/hft-sim/tests/taker.rs::sim_035_memory_ring_overwrite`
 
 ### SIM-036 可成交的 GTC 限价单余量转为挂单
@@ -366,7 +368,7 @@ spec: README.md
 - 规则:[5. 手续费与扣费资产](README.md#5-手续费与扣费资产)
 - 级别:table
 - 里程碑:M2
-- 前置:同 SIM-020(`fee_tier = 1`,taker 0.0004);`TopN(BTC/S1, asks [60 000×1], bids [60 000×1]) @100 ms`;`Bbo(BNB/S1, 599.99×10, 600.01×10) @100 ms`(中间价 600.00,第 7 行除外);卖出行之前 `A9` 持有 BTC 0.1;每行一笔 IOC,`S1` 的 `fee_asset_rule` 按行
+- 前置:同 SIM-020(`fee_tier = 1`,taker 0.0004);买入行 `TopN(BTC/S1, asks [60 000×1]) @100 ms`,卖出行 `TopN(BTC/S1, bids [60 000×1]) @100 ms`(同价两侧的快照是交叉簿,hft-book 拒绝);`Bbo(BNB/S1, 599.99×10, 600.01×10) @100 ms`(中间价 600.00,第 7 行除外);卖出行之前 `A9` 持有 BTC 0.1;每行一笔 IOC,`S1` 的 `fee_asset_rule` 按行
 - 实现:`crates/hft-sim/tests/fees.rs::sim_050_fee_asset_rules`
 
 | 行 | 规则 / 方向 / 量 @ 价 | 期望 |
@@ -380,7 +382,7 @@ spec: README.md
 | SIM-050.7 | 同上,BNB free 1,没有 `BNB/S1` 行情 | `fee` 0.00004 BTC |
 | SIM-050.8 | `ReceivedAssetUnlessDiscount{BNB}` / Sell / 0.1,BNB free 0.003 | `fee` 2.4 USDT(卖出回退扣计价资产) |
 | SIM-050.9 | `Configured(BNB)` / Sell / 0.1 | `fee` 0.004 BNB |
-| SIM-050.10 | `Quote` / Buy / 0.00001 @ 60 000.01 | `fee` 0.000241 USDT(0.00024000004 按支出向上取整) |
+| SIM-050.10 | `Quote` / Buy / 0.00001 @ 60 000.01(本行 `BTC/S1` 的 `min_notional` 改为 0.5,卖一 60 000.01) | `fee` 0.000241 USDT(0.00024000004 按支出向上取整) |
 
 ### SIM-051 挂单成交按 maker 费率计费
 
@@ -826,7 +828,7 @@ spec: README.md
 - 级别:prop
 - 里程碑:M2
 - 性质:同一 `(SimSetup, refdata, 记录与指令序列)` 运行两次,`drain_due` 交付的回报序列逐字节相等,每处理一条输入后的 `state_hash()` 序列逐项相等
-- 生成:1–4 个账户、1–6 个 inst;0–5 000 条行情记录(Bbo、TopN、Trade、Funding、Mark,增量深度另含 L2Batch);0–500 条指令(含撤、改、查、`SimTransfer`、`SimReset`);`Empirical` 与 `Fixed` 延迟模型各半
+- 生成:1–4 个账户、1–4 个 inst(`rd_sim()` 的可交易 inst);0–400 个输入,行情记录(Bbo、TopN、L2Batch、Trade、Funding、Mark)与指令(下单、撤、改、查、CancelAll、`SimTransfer`、`SimReset`)混合;`Empirical` 与 `Fixed` 延迟模型各半
 - 参考:第一次运行
 - 例数:PR 500;每夜 20 000
 - 实现:`crates/hft-sim/tests/prop_determinism.rs::sim_120_same_seed_same_trace`
@@ -859,8 +861,8 @@ spec: README.md
 - 规则:[9. 确定性](README.md#9-确定性)
 - 级别:golden
 - 里程碑:M2
-- 输入:`fixtures/sim/sim-123-mixed/` 的行情记录与指令脚本(含 `Empirical` 延迟、强平、资金费、`RefdataTiers`)
-- 期望文件:`fixtures/sim/sim-123-mixed/expected-replies.bin` 与 `expected-state-hash.txt`(两个架构的 CI 都与它比对)
+- 输入:`fixtures/sim/sim-123-mixed/` 的 `records.jsonl`、`commands.jsonl`、`setup.toml`(含 `Empirical` 延迟、强平、资金费、`RefdataTiers`)
+- 期望文件:`fixtures/sim/sim-123-mixed/expected-replies.bin`(逐条回报字节)与 `expected-state-hash.txt`(每个输入之后的 `state_hash`)
 - 实现:`crates/hft-sim/tests/golden.rs::sim_123_cross_arch_golden`
 
 ### SIM-124 资金守恒、仓位与成交量上界、回报时序三组不变量
@@ -868,8 +870,8 @@ spec: README.md
 - 规则:[10. 不变量](README.md#10-不变量)
 - 级别:prop
 - 里程碑:M2
-- 性质:每处理一条输入后:① 每 (账户, venue, asset) 余额变化 = Σ 成交 ± 手续费 ± 资金费 ± 划转 ± 强平费,逐笔可追溯;② 每个永续仓位 = Σ 成交(含强平);每档成交量 ≤ 可见量 × `take_avail_bp` / 10 000 − 记忆剩余量;③ 每条回报 `due_tsc ≥` 其指令的 `decided_tsc`,同一订单回报的 `ex_ts_ns` 单调不减,`cum_filled ≤` 下单量
-- 生成:同 SIM-120
+- 性质:每处理一条输入并交付全部待交付回报后:① 每 (账户, venue, asset) 余额变化 = Σ 成交 ± 手续费 ± 资金费 ± 划转 ± 强平费,逐笔可追溯;② 每个永续仓位 = Σ 成交(含强平);每档成交量 ≤ 可见量 × `take_avail_bp` / 10 000 − 记忆剩余量;③ 每条回报 `due_tsc ≥` 其指令的 `decided_tsc`,同一订单回报的 `ex_ts_ns` 单调不减,`cum_filled ≤` 下单量
+- 生成:同 SIM-120,但 0–150 个输入
 - 参考:测试内逐笔记账模型
 - 例数:PR 2 000;每夜 100 000
 - 实现:`crates/hft-sim/tests/prop_invariants.rs::sim_124_invariants`
@@ -879,8 +881,8 @@ spec: README.md
 - 规则:[3. 吃单撮合](README.md#3-吃单撮合)、[5. 手续费与扣费资产](README.md#5-手续费与扣费资产)、[6. 资金费](README.md#6-资金费)、[7. 永续全仓保证金与强平](README.md#7-永续全仓保证金与强平)
 - 级别:golden
 - 里程碑:M2
-- 输入:`fixtures/sim/<case>/`(`taker-walk`、`fee-rules`、`funding-push-forms`、`liquidation`、`transfer-reset` 五组;每组一段 L2/BBO/Funding/Mark 记录与指令脚本)
-- 期望文件:各组目录下的 `expected-replies.json`(人工核对后入库)
+- 输入:`fixtures/sim/sim-125-<case>/`(`taker-walk`、`fee-rules`、`funding-push-forms`、`liquidation`、`transfer-reset` 五组;每组 `records.jsonl`、`commands.jsonl`、`setup.toml`)
+- 期望文件:各组目录下的 `expected.jsonl`(人工核对后入库)
 - 实现:`crates/hft-sim/tests/golden.rs::sim_125_replay_fixtures`
 
 ### SIM-114 回报只用实盘同一组事件类型
@@ -1388,7 +1390,7 @@ spec: README.md
 | SIM-200.1 | SIM-021 的成交 | `top_only_fills` +1 |
 | SIM-200.2 | SIM-034.2 的第二单(可得量被记忆削减) | `liquidity_memory_hits` +1 |
 | SIM-200.3 | SIM-072.2 的强平 | `liquidations` +1 |
-| SIM-200.4 | SIM-144.2 的静默推进 | `quiet_advance` +1 |
+| SIM-200.4 | 由 SIM-144.2 覆盖(`quiet_advance` 是 sim-gw 任务的计数,M4) | — |
 
 ### SIM-201 预置模拟实例池:换参数与清空重来都不重启
 

@@ -1,0 +1,5 @@
+{"tsc":25200000000000,"kind":"Funding","inst":"BTC/P2","rate":"0.0001","next_funding_ns":28800000000000}
+{"tsc":25200000000000,"kind":"Funding","inst":"ETH/P2","rate":"0.0001","next_funding_ns":28800000000000}
+{"tsc":28799000000000,"kind":"Mark","inst":"BTC/P2","px":"60000"}
+{"tsc":28799000000000,"kind":"Mark","inst":"ETH/P2","px":"3000"}
+{"tsc":28800000000000,"kind":"Mark","inst":"BTC/P2","px":"60000"}

@@ -1,0 +1,6 @@
+latency = "empirical"
+mmr = "tiers"
+end_ms = 8000
+[seed]
+wallet = "54000"
+positions = [["BTC/P2", "-3.0", "60000"]]

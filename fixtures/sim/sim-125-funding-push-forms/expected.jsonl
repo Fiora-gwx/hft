@@ -1,0 +1,16 @@
+{"due":0,"acct":9,"ev":"ConnState","venue":0,"state":"Up"}
+{"due":0,"acct":9,"ev":"AccountConfigReport","venue":2,"n_lev":0,"mismatches":0}
+{"due":0,"acct":9,"ev":"AccountConfigReport","venue":5,"n_lev":2,"mismatches":0}
+{"due":25200000000000,"acct":9,"ev":"BalanceReport","venue":2,"asset":"USDT","free":"100000","locked":"0"}
+{"due":25200000000000,"acct":9,"ev":"BalanceReport","venue":5,"asset":"USDT","free":"18000","locked":"0"}
+{"due":25200000000000,"acct":9,"ev":"PositionReport","inst":"BTC/P2","qty":"-1","entry":"60000","liq":"77462.6866"}
+{"due":25200000000000,"acct":9,"ev":"PositionReport","inst":"ETH/P2","qty":"-10","entry":"3000","liq":"4746.2687"}
+{"due":25200002000000,"acct":9,"ev":"MarginReport","mb":"18000","maint":"450","avail":"0","ratio":"0.025","items":[["BTC/P2","77462.6866"],["ETH/P2","4746.2687"]]}
+{"due":28799000000000,"acct":9,"ev":"BalanceReport","venue":2,"asset":"USDT","free":"100000","locked":"0"}
+{"due":28799000000000,"acct":9,"ev":"BalanceReport","venue":5,"asset":"USDT","free":"18000","locked":"0"}
+{"due":28799000000000,"acct":9,"ev":"PositionReport","inst":"BTC/P2","qty":"-1","entry":"60000","liq":"77462.6866"}
+{"due":28799000000000,"acct":9,"ev":"PositionReport","inst":"ETH/P2","qty":"-10","entry":"3000","liq":"4746.2687"}
+{"due":28799002000000,"acct":9,"ev":"MarginReport","mb":"18000","maint":"450","avail":"0","ratio":"0.025","items":[["BTC/P2","77462.6866"],["ETH/P2","4746.2687"]]}
+{"due":28800002000000,"acct":9,"ev":"MarginReport","mb":"18000","maint":"450","avail":"0","ratio":"0.025","items":[["BTC/P2","77462.6866"],["ETH/P2","4746.2687"]]}
+{"due":28800002000000,"acct":9,"ev":"FundingSettle","inst":"-","amount":"9","rate":"0","pos":"0","settle_ts":28800000000000}
+{"due":28801002000000,"acct":9,"ev":"MarginReport","mb":"18009","maint":"450","avail":"9","ratio":"0.024987507","items":[["BTC/P2","77471.6418"],["ETH/P2","4747.1642"]]}

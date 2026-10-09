@@ -1,0 +1,5 @@
+{"decided_tsc":100000000,"account":9,"op":"Place","inst":"BTC/S1","side":"Buy","qty":"0.25","px":"60015","tif":"Ioc"}
+{"decided_tsc":100000000,"account":9,"op":"Place","inst":"BTC/S1","side":"Buy","qty":"0.7","px":"60015","tif":"Ioc"}
+{"decided_tsc":1200000000,"account":9,"op":"Place","inst":"BTC/S1","side":"Buy","qty":"0.7","px":"61000","tif":"Fok"}
+{"decided_tsc":1250000000,"account":9,"op":"Place","inst":"BTC/S1","side":"Buy","qty":"0.6","px":"61000","tif":"Fok"}
+{"decided_tsc":2500000000,"account":9,"op":"Place","inst":"BTC/S1","side":"Buy","qty":"0.5","px":"60010","tif":"Gtc"}

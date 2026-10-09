@@ -1,0 +1,5 @@
+{"decided_tsc":100000000,"account":9,"op":"Place","inst":"BTC/S1","side":"Buy","qty":"0.1","px":"60000","tif":"Ioc"}
+{"decided_tsc":100000000,"account":9,"op":"Place","inst":"BTC/S1","side":"Buy","qty":"0.1","px":"59000","tif":"Gtc"}
+{"decided_tsc":500000000,"account":9,"op":"SimTransfer","amount":"1000"}
+{"decided_tsc":700000000,"account":9,"op":"SimReset"}
+{"decided_tsc":850000000,"account":9,"op":"SimTransfer","amount":"500"}

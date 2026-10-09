@@ -1,0 +1,8 @@
+{"due":0,"acct":9,"ev":"ConnState","venue":0,"state":"Up"}
+{"due":0,"acct":9,"ev":"AccountConfigReport","venue":2,"n_lev":0,"mismatches":0}
+{"due":0,"acct":9,"ev":"AccountConfigReport","venue":5,"n_lev":2,"mismatches":0}
+{"due":3000000,"acct":9,"ev":"MarginReport","mb":"18000","maint":"300","avail":"6000","ratio":"0.016666667","items":[["BTC/P2","77611.9403"]]}
+{"due":1002000000,"acct":9,"ev":"MarginReport","mb":"8000","maint":"350","avail":"-6000","ratio":"0.04375","items":[["BTC/P2","77611.9403"]]}
+{"due":2002000000,"acct":9,"ev":"MarginReport","mb":"8000","maint":"350","avail":"-6000","ratio":"0.04375","items":[["BTC/P2","77611.9403"]]}
+{"due":2002000000,"acct":9,"ev":"ExternalFill","cause":"Liquidation","side":"Buy","inst":"BTC/P2","qty":"1","px":"78000.0001","fee":"390.000001","fee_asset":"USDT"}
+{"due":2002000000,"acct":9,"ev":"MarginReport","mb":"-390.000101","maint":"0","avail":"-390.000101","ratio":"9223372036.854775807","items":[]}

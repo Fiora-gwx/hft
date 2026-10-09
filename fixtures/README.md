@@ -106,6 +106,8 @@ fixtures/
 | `expected.jsonl` | 期望回报序列(规范 JSON,含 `due_tsc`) |
 | `meta.toml` | 想覆盖的行为、核对人 |
 
+hft-sim 的用例目录名带用例编号(`sim-125-<case>/`、`sim-123-mixed/`),refdata 固定为 hft-sim 测试夹具 `rd_sim()`,`setup.toml` 只写与夹具不同的键(扣费规则、资金费推送形态、延迟模型、`mmr` 来源、seed 的仓位、结束时刻);`sim-123-mixed/` 另有 `expected-replies.bin` 与 `expected-state-hash.txt`。
+
 覆盖要求:逐档吃单与限价截止、已吃流动性记忆、每条拒单规则、四种扣费规则、三种资金费推送形态、保证金率、强平价(`liq_px`)与强平、单边行情下的强平价移动(testing MS-2 用的路径片段)、划转、`SimReset`。期望由人按 hft-sim 规格手算,不由当前代码输出生成。
 
 ### 参数编码金样

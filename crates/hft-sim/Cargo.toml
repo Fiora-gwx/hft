@@ -1,0 +1,35 @@
+[package]
+name = "hft-sim"
+description = "Simulated exchange for Sim accounts: deterministic taker/maker matching on live market data, balances, positions, cross margin, funding and liquidation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# M2 part (README "已知限制与后续工作"): the pure core. The `task` feature (SimGwTask, hft-rt +
+# hft-journal), the stress transforms and `queue-hftbacktest` arrive with M4.
+[dependencies]
+hft-types.workspace = true
+hft-refdata.workspace = true
+hft-event.workspace = true
+hft-book.workspace = true
+xxhash-rust.workspace = true
+zerocopy.workspace = true
+# Deterministic per-account latency sub-streams (README "9. 确定性").
+rand_chacha = { version = "0.9", default-features = false }
+
+[dev-dependencies]
+hft-testkit.workspace = true
+proptest.workspace = true
+criterion.workspace = true
+static_assertions.workspace = true
+serde_json = "1"
+toml.workspace = true
+
+[[bench]]
+name = "sim"
+harness = false

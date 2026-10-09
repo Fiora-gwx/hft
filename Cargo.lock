@@ -728,6 +728,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "hft-sim"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "hft-book",
+ "hft-event",
+ "hft-refdata",
+ "hft-testkit",
+ "hft-types",
+ "proptest",
+ "rand_chacha",
+ "serde_json",
+ "static_assertions",
+ "toml 0.8.23",
+ "xxhash-rust",
+ "zerocopy",
+]
+
+[[package]]
 name = "hft-strategy-sdk"
 version = "0.1.0"
 dependencies = [
