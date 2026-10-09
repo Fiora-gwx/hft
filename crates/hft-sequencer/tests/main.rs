@@ -19,6 +19,7 @@ mod intents;
 mod conflate;
 mod env;
 mod exec_glue;
+mod funding;
 mod liveness;
 mod recon;
 mod recover;

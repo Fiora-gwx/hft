@@ -243,6 +243,8 @@ pub type SubScript = Vec<(InstId, u16, EvMask, Part)>;
 pub struct Script {
     pub log: Vec<Got>,
     pub hook: Option<Hook>,
+    /// Hooks that stay installed (deterministic triggers; they also run during verify replays).
+    pub persist: Vec<Hook>,
     pub mhook: Option<MHook>,
     pub subs: Vec<(StrategyId, SubScript)>,
     pub model_tick: Vec<(StrategyId, u32)>,
@@ -283,6 +285,11 @@ pub fn set_hook(h: impl FnMut(&Hx<'_>, &EventRef<'_>, &mut Ctx<'_>) + 'static) {
 }
 pub fn clear_hook() {
     SCRIPT.with(|s| s.borrow_mut().hook = None);
+}
+/// Adds a hook that stays installed for the rest of the test (its trigger must be a pure
+/// function of the event, so replays act the same).
+pub fn add_hook(h: impl FnMut(&Hx<'_>, &EventRef<'_>, &mut Ctx<'_>) + 'static) {
+    SCRIPT.with(|s| s.borrow_mut().persist.push(Box::new(h)));
 }
 pub fn set_mhook(h: impl FnMut(&Hx<'_>, &EventRef<'_>, &mut AdviceOut<'_>) + 'static) {
     SCRIPT.with(|s| s.borrow_mut().mhook = Some(Box::new(h)));
@@ -411,18 +418,18 @@ macro_rules! test_set {
                     text: format!("{ev:?}"),
                     bbo,
                 };
-                let hook = SCRIPT.with(|x| {
+                let (hook, mut persist) = SCRIPT.with(|x| {
                     let mut x = x.borrow_mut();
                     x.log.push(got);
-                    x.hook.take()
+                    (x.hook.take(), core::mem::take(&mut x.persist))
                 });
+                let w = W(v);
+                let hx = Hx {
+                    s: s.i,
+                    v: &w,
+                    groups: &s.groups,
+                };
                 if let Some(mut h) = hook {
-                    let w = W(v);
-                    let hx = Hx {
-                        s: s.i,
-                        v: &w,
-                        groups: &s.groups,
-                    };
                     h(&hx, ev, ctx);
                     SCRIPT.with(|x| {
                         let mut x = x.borrow_mut();
@@ -431,6 +438,15 @@ macro_rules! test_set {
                         }
                     });
                 }
+                for h in persist.iter_mut() {
+                    h(&hx, ev, ctx);
+                }
+                SCRIPT.with(|x| {
+                    let mut x = x.borrow_mut();
+                    let added = core::mem::take(&mut x.persist);
+                    persist.extend(added);
+                    x.persist = persist;
+                });
             }
             fn on_params(s: &mut TestInst, _: &P, g: &GroupTable, _: &RefView<'_>) -> Result<(), ParamError> {
                 let fail = SCRIPT.with(|x| {

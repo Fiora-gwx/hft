@@ -1616,3 +1616,62 @@ impl<S: StrategySet> H<S> {
 }
 
 use hft_strategy_sdk::EventRef;
+
+// ------------------------------------------------------------------------------- positions
+
+impl<S: StrategySet> H<S> {
+    /// The instance bound to `a` opens `qty` of `i` (`side`) with an IOC at the touch, acked and
+    /// filled; returns the decision.
+    pub fn open_position(&mut self, a: AccountId, i: InstId, side: hft_types::Side, qty: &str) -> hft_event::OrderDecision {
+        let sid = self.s.instances().slots.iter().find(|x| x.account == a).map(|x| x.id).expect("bound instance");
+        let qx = q(qty);
+        let trigger = self.upd + 1;
+        add_hook(move |hx, ev, ctx| {
+            if let EventRef::Bbo { inst, b, .. } = ev
+                && *inst == i
+                && hx.s.strategy == sid
+                && b.update_id == trigger
+            {
+                let b = hx.v.bbo(i);
+                let p = if side == hft_types::Side::Buy { b.ask_px } else { b.bid_px };
+                let mut it = intent(hx, i, side, hft_types::Tif::Ioc, hft_strategy_sdk::IntentClass::Open, p, qx);
+                it.group = hx.groups.specs().first().map_or(GroupId(0), |g| g.id);
+                let _ = ctx.place(it);
+            }
+        });
+        let m = self.mark();
+        let (bid, ask) = if i == B1 { ("50010", "50011") } else if i == A1 { ("50000", "50001") } else { ("3000", "3000.5") };
+        self.quote(i, bid, ask);
+        self.run();
+        let d = decisions(&self.since(m)).into_iter().find(|d| d.1.inst == i).expect("decision").1;
+        assert_eq!(d.reject, 0, "{d:?}");
+        self.ack(&d);
+        self.fill(&d, d.qty, d.qty, d.px);
+        d
+    }
+    /// `Funding` of `i` on the md ring.
+    pub fn funding_md(&mut self, i: InstId, rate: &str, next: i64, interval_s: u32) {
+        let mut h = MarketHdr::new_zeroed();
+        h.venue = inst_venue(i);
+        h.inst = i;
+        h.rx_tsc = self.now();
+        let f = hft_event::Funding { h, rate: r(rate), next_funding_ns: next, interval_s, _pad: 0 };
+        self.push(RingId::Md(1), &f);
+        self.run();
+    }
+    /// `MarkPrice` of `i` on the md ring.
+    pub fn mark_md(&mut self, i: InstId, p: &str) {
+        let mut h = MarketHdr::new_zeroed();
+        h.venue = inst_venue(i);
+        h.inst = i;
+        h.rx_tsc = self.now();
+        let m = hft_event::MarkPrice { h, px: px(p) };
+        self.push(RingId::Md(1), &m);
+        self.run();
+    }
+}
+
+/// `FundingSettle` records of a slice.
+pub fn settles(recs: &[MemRecord]) -> Vec<hft_event::FundingSettle> {
+    recs.iter().filter(|r| r.kind == EventKind::FUNDING_SETTLE).filter_map(|r| r.read::<hft_event::FundingSettle>()).collect()
+}

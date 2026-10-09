@@ -1794,8 +1794,12 @@ pub(crate) fn sys_timer<'a, D: Driver<S>, S: StrategySet>(
         }
         15 => {
             let v = VenueId((arg & 0xFF) as u8);
+            // Only a settlement that is due by this record's UTC (the driver writes the Timer
+            // when UTC reaches it; a replayed or early Timer finds nothing due).
             let at = crate::driver::next_funding_settle_of(e, v);
-            if let Some(t) = at {
+            if let Some(t) = at
+                && e.now.utc_ns >= t
+            {
                 synth_funding(e, inst, drv, v, t)?;
             }
         }
