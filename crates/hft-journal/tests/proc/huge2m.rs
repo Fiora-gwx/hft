@@ -48,7 +48,7 @@ fn jnl_043_hugetlbfs_2m() {
     let Some(mnt) = prereq("HFT_TEST_HUGE2M", "hugetlbfs pagesize=2M mount") else {
         return;
     };
-    let hot = PathBuf::from(&mnt).join(format!("jnl043-{}", std::process::id()));
+    let hot = common::harness::tmp::owned(PathBuf::from(&mnt).join(format!("jnl043-{}", std::process::id())));
     std::fs::create_dir_all(&hot).unwrap();
     let cold = cold_dir();
     let c = cfg(hot.to_str().unwrap(), cold.to_str().unwrap());
@@ -91,5 +91,4 @@ fn jnl_043_hugetlbfs_2m() {
     kid.tell("go");
     assert_eq!(kid.hear(), "minflt 0");
     let _ = kid.wait();
-    let _ = std::fs::remove_dir_all(&hot);
 }

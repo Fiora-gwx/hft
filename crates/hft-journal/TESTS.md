@@ -50,7 +50,7 @@ spec: README.md
 
 ## 用例
 
-**级别分界**(Linux 专用部分):`unit` 默认用堆内存段后端(README"段内存后端",任意平台可跑);标"Linux"的 `unit` 用 `/dev/shm` 下的临时目录(tmpfs)作热目录、`/tmp` 下的临时目录(ext4)作冷目录,单进程,CI 的 `ubuntu-latest` 作业运行;`proc` 是 CI Linux 作业里的多进程(fork 子进程写、`SIGKILL`、跨进程映射),或需要作业准备 hugetlbfs 2 MiB 挂载、`sudo`、`strace` 的用例(写在 `前置`);1 GiB 大页、bpftrace、EBS 卷、ACL 与真实服务用户只在 `host`。
+**级别分界**(Linux 专用部分):`unit` 默认用堆内存段后端(README"段内存后端",任意平台可跑);标"Linux"的 `unit` 用 `/dev/shm` 下的临时目录(tmpfs)作热目录、`/tmp` 下的临时目录(ext4)作冷目录,单进程,CI 的 `ubuntu-latest` 作业运行(测试建的临时目录——`/dev/shm/hftj-*`、临时目录下的 `hftj-*`——归创建它的测试所有,测试结束时删除,panic 时也删;设 `HFT_TEST_KEEP_TMP=1` 则保留以便排障,见 `tests/common/tmp.rs`);`proc` 是 CI Linux 作业里的多进程(fork 子进程写、`SIGKILL`、跨进程映射),或需要作业准备 hugetlbfs 2 MiB 挂载、`sudo`、`strace` 的用例(写在 `前置`);1 GiB 大页、bpftrace、EBS 卷、ACL 与真实服务用户只在 `host`。
 
 **测试 kind**(hft-event 在 dev 构建登记,`0x7F01`–`0x7F06`):`TIn`(Input,定长 80 B,CRC Never,记录 104 B)、`TOut`(Output,56 B,记录 80 B)、`TMeta`(Meta,32 B,记录 56 B)、`TCrc`(Input,40 B,CRC Always,记录 72 B)、`TMulti`(Multi,Input,CRC Never)、`TVar`(Var,前缀 16 B,`KindInfo.max` = 尾部 65 000 B)。真实 kind 只在需要其语义时使用(`SegmentRoll`、`StateSnapshot`、`RawRx`)。
 

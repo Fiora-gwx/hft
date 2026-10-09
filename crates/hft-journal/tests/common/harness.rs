@@ -1,7 +1,8 @@
 //! `H(cfg)` of TESTS.md: one thread holding the writer, `SegmentPreparer`, `Persister`,
 //! `HotRetirer` and manually advanced `mono_ns`/`utc_ns`. Preparation, copies and retirement happen
 //! only when a test polls them. Hot directory: the heap backend (any platform) or, for tests marked
-//! Linux, a `/dev/shm` temporary directory when running on Linux.
+//! Linux, a `/dev/shm` temporary directory when running on Linux. Every directory made here is
+//! owned by the calling test and removed when it ends (`tmp`).
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
@@ -15,18 +16,23 @@ use hft_rt::{Backing, CalibPair, Consumer, Producer, spsc};
 use hft_types::{Seq, Tsc, VenueId};
 use zerocopy::{FromBytes, IntoBytes};
 
+// Declared here (not in `common/mod.rs`) so that benches including this file alone get it too.
+#[path = "tmp.rs"]
+pub mod tmp;
+use tmp::owned;
+
 /// 2026-10-01T00:00:00Z.
 pub const UTC0: i64 = 1_790_812_800_000_000_000;
 
 static N: AtomicU32 = AtomicU32::new(0);
 
-/// A unique scratch path (not created).
+/// A unique scratch path (not created), removed when the calling test ends.
 pub fn scratch(tag: &str) -> PathBuf {
     let n = N.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("hftj-{tag}-{}-{n}", std::process::id()))
+    owned(std::env::temp_dir().join(format!("hftj-{tag}-{}-{n}", std::process::id())))
 }
 
-/// A fresh directory on disk.
+/// A fresh directory on disk, removed when the calling test ends.
 pub fn disk_dir(tag: &str) -> PathBuf {
     let d = scratch(tag);
     let _ = std::fs::remove_dir_all(&d);
@@ -46,11 +52,11 @@ pub fn mem_hot() -> PathBuf {
     d
 }
 
-/// A tmpfs hot root (`/dev/shm`), Linux only.
+/// A tmpfs hot root (`/dev/shm`), Linux only; removed when the calling test ends.
 #[cfg(target_os = "linux")]
 pub fn shm_hot() -> PathBuf {
     let n = N.fetch_add(1, Ordering::Relaxed);
-    let d = PathBuf::from(format!("/dev/shm/hftj-{}-{n}", std::process::id()));
+    let d = owned(PathBuf::from(format!("/dev/shm/hftj-{}-{n}", std::process::id())));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d
