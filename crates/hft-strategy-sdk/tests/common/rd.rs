@@ -27,6 +27,8 @@ pub const I5: InstId = InstId(105);
 pub const BTC_ID: AssetId = AssetId(1);
 pub const ASSET2: AssetId = AssetId(2);
 pub const USDT: AssetId = AssetId(3);
+/// Asset of the filler insts 1..=100 (keeps `insts_of` of assets 1 and 2 to I1–I5).
+pub const FILLER: AssetId = AssetId(4);
 pub const A1: AccountId = AccountId(1);
 pub const A2: AccountId = AccountId(2);
 pub const S3: StrategyId = StrategyId(3);
@@ -146,6 +148,7 @@ pub fn gt3_refdata() -> RefData {
         (BTC_ID, "BTC", AssetClass::Crypto, -2, -8),
         (ASSET2, "ETH", AssetClass::Crypto, -2, -8),
         (USDT, "USDT", AssetClass::Stable, -6, -6),
+        (FILLER, "FILL", AssetClass::Crypto, -2, -8),
     ] {
         b.asset(AssetSpec {
             id,
@@ -167,7 +170,7 @@ pub fn gt3_refdata() -> RefData {
     venue(&mut b, V3, Exchange::Bitget, InstKind::Perp);
     // Inst ids are dense from 1: fillers 1..=100 (V1 spot) put I1–I5 at 101–105.
     for id in 1..=100u32 {
-        inst(&mut b, InstId(id), V1, InstKind::Spot, ASSET2);
+        inst(&mut b, InstId(id), V1, InstKind::Spot, FILLER);
     }
     inst(&mut b, I1, V1, InstKind::Spot, BTC_ID);
     inst(&mut b, I2, V2, InstKind::Perp, BTC_ID);

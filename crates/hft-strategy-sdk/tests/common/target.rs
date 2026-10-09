@@ -82,6 +82,24 @@ impl<const K: u8> TargetProbeT<K> {
     }
 }
 
+/// Two-leg target: leg 0 long `q`, leg 1 short `q`, `PairOnFill` with `pair_spec()`.
+pub fn pair_target(account: hft_types::AccountId, group: GroupId, q: i64, tag: u32) -> TargetIntent {
+    TargetIntent {
+        account,
+        _pad0: [0; 3],
+        group,
+        legs: [LegTarget::new(0, Qty(q)), LegTarget::new(1, Qty(-q)), LegTarget::ZERO, LegTarget::ZERO],
+        n_legs: 2,
+        reason: TargetReason::Rebalance,
+        urgency: Urgency::Normal,
+        _pad1: [0; 5],
+        band: Rate(0),
+        exec: pair_spec(),
+        tag,
+        _pad2: 0,
+    }
+}
+
 /// The probe's default target exec spec.
 pub fn pair_spec() -> ExecSpec {
     ExecSpec::PairOnFill(PairParams {
@@ -158,25 +176,7 @@ impl<const K: u8> Strategy for TargetProbeT<K> {
                     return;
                 };
                 let q = self.p.at(gix).max_qty.0.max(1_000);
-                let t = TargetIntent {
-                    account: self.inst.account,
-                    _pad0: [0; 3],
-                    group: g.id,
-                    legs: [
-                        LegTarget::new(0, Qty(q)),
-                        LegTarget::new(1, Qty(-q)),
-                        LegTarget::ZERO,
-                        LegTarget::ZERO,
-                    ],
-                    n_legs: 2,
-                    reason: TargetReason::Rebalance,
-                    urgency: Urgency::Normal,
-                    _pad1: [0; 5],
-                    band: Rate(0),
-                    exec: pair_spec(),
-                    tag: a.band as u32,
-                    _pad2: 0,
-                };
+                let t = pair_target(self.inst.account, g.id, q, a.band as u32);
                 if ctx.target(t).is_ok()
                     && let Some(s) = self.groups.get_mut(usize::from(gix))
                 {

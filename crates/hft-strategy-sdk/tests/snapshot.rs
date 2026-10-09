@@ -61,3 +61,36 @@ fn sdk_191_writer_reader_le() {
     assert_eq!((s6.version, s6.count, s6.body.len()), (1, 2, 16));
     assert!(r.find_section(9).unwrap().is_none());
 }
+
+mod common;
+
+#[test]
+fn sdk_024_max_groups_fit_snapshot_max() {
+    use common::*;
+    use hft_strategy_sdk::{GroupTable, Strategy};
+    let specs: Vec<_> = (1..=8u32).map(|n| gspec(hft_types::GroupId(0x0300_0000 + n))).collect();
+    let t = GroupTable::new(&specs, 8);
+    assert_eq!((t.len(), t.capacity()), (8, 8));
+    let v = clocked_views();
+    let mut e = EchoProbe::new(s3(0xFF01), &tp(8, &[]), &t, &v.refview()).unwrap();
+    for g in &mut e.groups {
+        // Cooldown running, counters non-zero (every field written with a non-default value).
+        g.cooldown_until_ens = i64::MAX - 1;
+        g.fills = i64::MAX;
+        g.timer_hits = u32::MAX;
+    }
+    let mut tp_ = TargetProbe::new(s3(0xFF02), &tp2(8, &[]), &t, &v.refview()).unwrap();
+    for g in &mut tp_.groups {
+        g.last_band = i64::MAX;
+        g.n_targets = u32::MAX;
+        g.n_exec = u32::MAX;
+    }
+    let mut w = SnapshotWriter::new(262_144);
+    e.snapshot(&mut w);
+    let n = w.status().expect("EchoProbe snapshot fits");
+    assert!(n <= 262_144, "{n}");
+    let mut w = SnapshotWriter::new(262_144);
+    tp_.snapshot(&mut w);
+    let n = w.status().expect("TargetProbe snapshot fits");
+    assert!(n <= 262_144, "{n}");
+}

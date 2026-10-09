@@ -95,6 +95,16 @@ pub fn raw(defaults: Vec<i64>, overrides: &[(u16, u16, i64)]) -> RawParams {
     }
 }
 
+/// `TPParams` for `n` groups: defaults with `overrides` (`(gix, field_ix, value)`).
+pub fn tp(n: u16, overrides: &[(u16, u16, i64)]) -> TPParams {
+    TPParams::from_raw(&raw(tp_defaults(), overrides), n)
+}
+
+/// `TP2Params` (TargetProbe) for `n` groups.
+pub fn tp2(n: u16, overrides: &[(u16, u16, i64)]) -> TP2Params {
+    TP2Params::from_raw(&raw(tp_defaults(), overrides), n)
+}
+
 pub const ECHO_NOTES: [NoteDesc; 3] = [
     NoteDesc {
         code: 1,
