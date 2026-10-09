@@ -17,6 +17,7 @@ mod conflate;
 mod drain;
 mod env;
 mod exec_glue;
+mod fanout;
 mod funding;
 mod intents;
 mod keyframe;
