@@ -108,8 +108,8 @@ mod linux {
             .iter()
             .flat_map(|t| inodes(t))
             .collect();
-        let unix = std::fs::read_to_string("/proc/net/unix").unwrap();
-        let mut sockets = 0;
+        // No socket of this process is TCP (other tests of the binary may open Unix pairs or
+        // other non-TCP sockets concurrently; only TCP is excluded process-wide).
         for e in std::fs::read_dir("/proc/self/fd").unwrap().flatten() {
             let Ok(l) = std::fs::read_link(e.path()) else {
                 continue;
@@ -117,14 +117,24 @@ mod linux {
             let l = l.to_string_lossy().into_owned();
             if let Some(ino) = l.strip_prefix("socket:[").and_then(|x| x.strip_suffix(']')) {
                 assert!(!tcp.iter().any(|t| t == ino), "TCP socket fd {l}");
-                assert!(
-                    unix.lines().any(|u| u.split_whitespace().nth(6) == Some(ino)),
-                    "non-unix socket {l}"
-                );
-                sockets += 1;
             }
         }
-        // listener + adopted server end + client end (other test threads may add pairs).
-        assert!(sockets >= 3);
+        // The gateway's own sockets: one AF_UNIX listener and the AF_UNIX connection it accepted.
+        let mut w = hft_rt::WaitFds::new();
+        hft_rt::PollTask::wait_fds(&s.gw, &mut w);
+        assert_eq!(w.as_slice().len(), 2);
+        let opt = |fd: i32, name: i32| {
+            let mut v: libc::c_int = 0;
+            let mut len = size_of::<libc::c_int>() as libc::socklen_t;
+            // SAFETY: `v` and `len` are valid for writes of the sizes passed; `fd` is open.
+            let rc =
+                unsafe { libc::getsockopt(fd, libc::SOL_SOCKET, name, (&raw mut v).cast(), &raw mut len) };
+            assert_eq!(rc, 0);
+            v
+        };
+        for (i, &fd) in w.as_slice().iter().enumerate() {
+            assert_eq!(opt(fd, libc::SO_DOMAIN), libc::AF_UNIX, "fd {fd}");
+            assert_eq!(opt(fd, libc::SO_ACCEPTCONN), i32::from(i == 0), "fd {fd}");
+        }
     }
 }
