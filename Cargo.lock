@@ -847,6 +847,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hft-strat-lib"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "hft-event",
+ "hft-refdata",
+ "hft-strategy-sdk",
+ "hft-testkit",
+ "hft-types",
+ "proptest",
+]
+
+[[package]]
 name = "hft-strategy-sdk"
 version = "0.1.0"
 dependencies = [

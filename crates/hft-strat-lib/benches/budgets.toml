@@ -1,0 +1,39 @@
+# Reference-machine budgets of hft-strat-lib's fast-part benchmarks (source constants read by
+# `cargo xtask bench-gate`); values in ns, equal to the README "延迟与资源契约" table. The M4 Model
+# benchmarks (funding, pct, leadlag) are added with their code.
+
+["stratlib/spread"]
+p50_ns = 8
+p99_ns = 20
+
+["stratlib/cost_read"]
+p50_ns = 2
+p99_ns = 5
+
+["stratlib/trigger_update"]
+p50_ns = 20
+p99_ns = 40
+
+["stratlib/trigger_hit"]
+p50_ns = 2
+p99_ns = 5
+
+["stratlib/confirm"]
+p50_ns = 5
+p99_ns = 15
+
+["stratlib/dirty"]
+p50_ns = 5
+p99_ns = 15
+
+["stratlib/throttle"]
+p50_ns = 3
+p99_ns = 8
+
+["stratlib/vwap20"]
+p50_ns = 80
+p99_ns = 150
+
+["stratlib/expiring"]
+p50_ns = 2
+p99_ns = 5

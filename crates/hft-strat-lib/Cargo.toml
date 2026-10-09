@@ -1,0 +1,26 @@
+[package]
+name = "hft-strat-lib"
+description = "Reusable strategy building blocks: fixed-point fast-part checks (spread and cost line, trigger price, confirm window, dirty filter, throttle, L2 VWAP, expiring values) and Model-only statistics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+hft-types.workspace = true
+hft-strategy-sdk.workspace = true
+
+[dev-dependencies]
+hft-refdata.workspace = true
+hft-event.workspace = true
+hft-testkit.workspace = true
+proptest.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "fast"
+harness = false

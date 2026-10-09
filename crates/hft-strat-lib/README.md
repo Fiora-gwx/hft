@@ -120,6 +120,7 @@ impl ConfirmWindow {
     /// cond:本次评估条件是否成立;from_slow:本次评估由慢侧更新触发;slow_seq:慢侧序号(外部报价为块号,CEX 慢侧为 update_id,无则 0)。
     pub fn observe(&mut self, cond: bool, from_slow: bool, slow_seq: u64, now_ens: i64, p: &ConfirmParamsNs) -> Confirm;
     pub fn reset(&mut self);
+    pub fn state(&self) -> Confirm;
     pub fn snapshot(&self, w: &mut SnapshotWriter);           // since_ens i64、n_updates u16、n_slow u16、first_slow_seq u64、last_slow_seq u64、state u8(29 B)
     pub fn restore(&mut self, r: &mut SnapshotReader) -> Result<(), RestoreError>;
 }
@@ -169,6 +170,8 @@ impl Throttle {
     pub fn set_backoff(&mut self, until_ens: i64);
     pub fn in_fallback(&self, now_ens: i64) -> bool;
     pub fn reset_open_state(&mut self);            // Mode 事件:cooldown_until_ens 与 fallback_until_ens 置 0;其余字段不变
+    pub fn halted(&self) -> bool;                  // halted 镜像的当前值
+    pub fn consec_fail(&self) -> u8;               // 当前连续失败数
     pub fn snapshot(&self, w: &mut SnapshotWriter); // 按上面字段声明顺序:i64、u8、u8、i64、i64、u8、i64(35 B)
     pub fn restore(&mut self, r: &mut SnapshotReader) -> Result<(), RestoreError>;
 }
@@ -326,7 +329,7 @@ impl LeadLag {
 |---|---|---|---|
 | `CostLine` | `items[≤ 8]`、`rt_floor` | `CostItem`、Rate | 成本项与往返下限;手续费项建议用 `fee_round_trip` 从 refdata 求 |
 | `ConfirmParams` | `min_ms`、`min_updates`、`min_slow_updates`、`min_slow_span` | ms、u16、u16、u8 | 0 = 不要求该项;全 0 = 不确认(第一次成立即 `Confirmed`) |
-| `DirtyParams` | `stale_fast_ms`、`stale_slow_ms`、`max_abs_spread`、`junk_after` | ms、ms、Rate、u16 | 0 = 关闭该项;CEX 腿的 `stale_*_ms` 是**连接静默上限**(不是报价不变的时长),外部报价腿是最近报价的最大年龄 |
+| `DirtyParams` | `stale_fast_ms`、`stale_slow_ms`、`max_abs_spread`、`junk_after` | ms、ms、Rate、u16 | 0 = 关闭该项(`max_abs_spread ≤ 0` 同样关闭);CEX 腿的 `stale_*_ms` 是**连接静默上限**(不是报价不变的时长),外部报价腿是最近报价的最大年龄 |
 | `ThrottleParams` | `cooldown_ms`、`max_consec_fail`、`fallback_ms`、`hard_rearm_ms` | ms、u8、ms、ms | `max_consec_fail = 0` = 不熔断 |
 | `VwapParams` | `book_frac`、`max_levels` | Rate、u8 | `max_levels ≤ 64` |
 | `PctConfig` | 见上 | — | 标 [存储解释] 的字段对应的策略参数是结构参数(`FieldDesc.structural`);内存见[延迟与资源契约](#延迟与资源契约) |
@@ -390,7 +393,7 @@ impl LeadLag {
 
 ### ImpactModel::vwap
 
-1. `top_qty ≥ qty / book_frac`(按 `top_qty × book_frac ≥ qty × 10^9` 在 i128 中比较)→ `Top(top_px)`;`book_frac ≤ 0` 时跳过本步。
+1. `top_qty ≥ qty / book_frac`(按 `top_qty × book_frac ≥ qty × 10^9` 在 i128 中比较)→ `Top(top_px)`;`book_frac ≤ 0` 时跳过本步。本步不成立且 `qty ≤ 0` → `Walked{vwap = top_px, levels = 1, impact = 0}`(不读逐档)。
 2. 否则从顶档逐档累加 `Σ px_i × q_i`(最后一档只取剩余量)到满足 qty 或到 `max_levels`(> 64 按 64;为 0 时只做第 1 步);满足 → `Walked{vwap = Σ/qty(按吃单方向取整到更不利一侧:吃卖盘 Ceil、吃买盘 Floor), levels = 用到的档数, impact = |vwap.ratio(top)|(HalfEven)}`;不满足 → `Insufficient{avail = 已遍历各档量之和}`。
 3. 中间积 i128;经 `BookRead::levels` 把至多 `max_levels` 档拷到栈上数组(≤ 64 × 16 B),不持有簿的引用。
 

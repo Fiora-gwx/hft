@@ -3,6 +3,7 @@
 
 #![allow(dead_code)]
 
+pub mod deps_repo;
 pub mod repos;
 
 use std::path::PathBuf;

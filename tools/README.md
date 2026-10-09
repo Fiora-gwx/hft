@@ -126,6 +126,7 @@ cargo xtask scaffold-gate [--keep]
 | N3 列出的 crate 类型位置出现 `f32`/`f64`(策略 crate 的 `Model` 模块按 SDK 规则豁免;`crates/hft-strat-lib/src/model/` 同样豁免) | N3 |
 | `unsafe` 出现在四个允许的 crate 之外;允许的 crate 里 `unsafe` 块缺 `// SAFETY:` | B5 |
 | `std::thread::spawn`/`Builder::spawn` 出现在 `apps/*` 之外 | T1 |
+| pure crate 的 `src/`(测试代码除外)引用 `std::time`(报 T4)、`std::fs` 或 `std::net`(报 `pure`;tier 规则见 [crates/AGENTS.md](../crates/AGENTS.md#tier)) | T4、pure |
 | rustls 记录加密入口的调用点不在 `crates/hft-net/src/tls.rs` | T6 |
 | `memmap2::MmapMut` 出现在 `hft-journal` 之外 | M3 |
 | `Atomic*` 类型定义出现在 `hft-rt`、`hft-journal` 之外 | T3 |

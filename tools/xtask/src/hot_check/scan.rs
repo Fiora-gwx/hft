@@ -40,6 +40,8 @@ pub struct FileScan {
     pub atomics: Vec<At<String>>,
     /// Paths referencing `model_math` or `hft_strat_lib::model`.
     pub model_refs: Vec<At<String>>,
+    /// Paths into `std::time`, `std::fs` or `std::net` (forbidden in pure crates).
+    pub std_io: Vec<At<String>>,
     pub encrypt_calls: Vec<At<String>>,
     /// `#[allow]`/`#[expect]` (also inside `cfg_attr`): lint paths.
     pub allows: Vec<At<Vec<String>>>,
@@ -345,6 +347,13 @@ impl<'ast> Visit<'ast> for V<'_> {
                     what: (),
                 });
             }
+            if let Some(r) = std_io(&segs) {
+                self.out.std_io.push(At {
+                    line: l,
+                    test: self.t(),
+                    what: r,
+                });
+            }
             if let Some(r) = model_ref(&segs) {
                 self.out.model_refs.push(At {
                     line: l,
@@ -367,6 +376,13 @@ impl<'ast> Visit<'ast> for V<'_> {
         let mut out = Vec::new();
         use_paths(&u.tree, &mut Vec::new(), &mut out);
         for segs in out {
+            if let Some(r) = std_io(&segs) {
+                self.out.std_io.push(At {
+                    line: line(u.use_token.span),
+                    test: self.t(),
+                    what: r,
+                });
+            }
             if let Some(r) = model_ref(&segs) {
                 self.out.model_refs.push(At {
                     line: line(u.use_token.span),
@@ -551,4 +567,12 @@ pub fn inner_lint_levels(src: &str) -> Result<Vec<(String, String)>, String> {
         }
     }
     Ok(out)
+}
+
+/// `std::time::…`, `std::fs::…` or `std::net::…` (also `core::time` is allowed: `Duration` only).
+fn std_io(segs: &[String]) -> Option<String> {
+    match segs {
+        [a, b, ..] if a == "std" && (b == "time" || b == "fs" || b == "net") => Some(segs.join("::")),
+        _ => None,
+    }
 }

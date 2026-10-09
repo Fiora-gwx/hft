@@ -2028,10 +2028,10 @@ spec: README.md
 |---|---|---|---|
 | SLB-134.1 | `src/spread.rs` 中 `let x: f64 = 0.0;` | `cargo xtask hot-check` | 退出 1,报 N3 与文件行号 |
 | SLB-134.2 | `src/model/leadlag.rs` 中 `let x: f64 = 0.0;` | `cargo xtask hot-check` | 退出 0 |
-| SLB-134.3 | `src/throttle.rs` 中 `std::time::Instant::now()` | `cargo xtask ci`(clippy) | 失败,报 `disallowed_methods` |
+| SLB-134.3 | `src/throttle.rs` 中 `std::time::Instant::now()` | `cargo xtask hot-check` | 退出 1,报 T4 与文件行号 |
 | SLB-134.4 | `src/model/pct.rs` 中对 `std::collections::HashMap` 的 `iter()` | `cargo xtask ci`(clippy) | 失败 |
 | SLB-134.5 | `src/impact.rs` 中参数类型 `&dyn BookRead` | `cargo xtask hot-check` | 退出 1,报 N6 |
-| SLB-134.6 | `src/funding.rs` 中 `std::fs::read("x")` | `cargo xtask ci`(clippy) | 失败 |
+| SLB-134.6 | `src/funding.rs` 中 `std::fs::read("x")` | `cargo xtask hot-check` | 退出 1,报 `pure` 与文件行号 |
 
 ### SLB-135 同一输入在 x86_64 与 aarch64 上输出逐位相同
 

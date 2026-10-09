@@ -816,6 +816,18 @@ pub fn check(root: &Path) -> Result<Vec<Violation>, EnvError> {
                     ));
                 }
             }
+            // Pure tier (crates/AGENTS.md "tier"; T4 for the clock): no `std::time`, `std::fs`,
+            // `std::net` outside test code.
+            if krate.is_some_and(|c| c.tier.as_deref() == Some("pure")) {
+                for x in s.std_io.iter().filter(|d| live(d.test)) {
+                    let rule = if x.what.starts_with("std::time") {
+                        "T4"
+                    } else {
+                        "pure"
+                    };
+                    out.push(v(rule, f, x.line, format!("`{}` in a pure crate", x.what)));
+                }
+            }
             // N3: model_math / strat-lib model only from a strategy's src/model/.
             let own = c.dir == "crates/hft-strategy-sdk" || c.dir == "crates/hft-strat-lib";
             if !own && !model {
