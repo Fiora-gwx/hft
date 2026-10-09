@@ -44,6 +44,7 @@ pub mod trace;
 pub mod types;
 pub mod views;
 
+pub use commands::{ActiveConfigRow, CmdDedupHdr, CmdDedupRow, ReconPendingHdr, VenueNoticeRow, ViewerPreviewRow};
 pub use driver::{Driver, DriverMode, DriverView, ParseCx};
 pub use engine::{Engine, EngineSetup};
 pub use journal::{BootSink, JournalSink, MemJournal, MemRecord, MemSegment, RollMeta, SegClock};
@@ -173,6 +174,10 @@ impl<D: Driver<S>, S: StrategySet> Sequencer<D, S> {
     }
     pub fn driver_mut(&mut self) -> &mut D {
         &mut self.drv
+    }
+    /// Writes every component's snapshot sections of the current state (readers, tools).
+    pub fn write_sections(&self, w: &mut hft_strategy_sdk::SnapshotWriter) {
+        snapshot::write_sections(&self.e, &self.inst, w);
     }
     /// Hands the driver back (end of a replay).
     pub fn into_driver(self) -> D {
