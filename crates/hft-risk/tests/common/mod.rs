@@ -761,7 +761,7 @@ impl RiskView for Mv {
     }
     fn equity(&self, a: AccountId) -> EquityView {
         *self.equity.get(&a.0).unwrap_or(&EquityView {
-            total: n("200000"),
+            total: Notional(200_000_000_000),
             valid: true,
         })
     }
@@ -774,13 +774,13 @@ impl RiskView for Mv {
     fn avail_quote(&self, a: AccountId, v: VenueId, _quote: AssetId) -> Option<Notional> {
         match self.avail_quote.get(&(a.0, v.0)) {
             Some(x) => x.map(Notional),
-            None => Some(n("100000")),
+            None => Some(Notional(100_000_000_000)),
         }
     }
     fn avail_margin(&self, a: AccountId, v: VenueId) -> Option<Notional> {
         match self.avail_margin.get(&(a.0, v.0)) {
             Some(x) => x.map(Notional),
-            None => Some(n("100000")),
+            None => Some(Notional(100_000_000_000)),
         }
     }
 }
