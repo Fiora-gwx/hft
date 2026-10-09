@@ -7,6 +7,10 @@ p50_ns = 150
 p99_ns = 400
 allocs = 0
 
+["seq/head_check"]
+
+["seq/l2burst"]
+
 ["seq/conn_alive"]
 p50_ns = 80
 p99_ns = 250
@@ -96,3 +100,7 @@ allocs = 0
 p50_ns = 150000
 p99_ns = 300000
 allocs = 0
+
+["seq/replay_throughput"]
+
+["seq/mirror_throughput"]

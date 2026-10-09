@@ -485,11 +485,11 @@ fn next_input(log: &Log, ix: usize) -> usize {
 }
 
 /// Chooses the start snapshot (record index) and restores it.
-fn choose_and_restore<S: StrategySet>(
+fn choose_and_restore<S: StrategySet, F: Fn(u32) -> Option<u32>>(
     log: &Log,
     plan: &RecoverPlan,
     setup: &EngineSetup,
-    epoch_of: &dyn Fn(u32) -> Option<u32>,
+    epoch_of: &F,
 ) -> Result<(usize, Engine, Instances<S>), BootError> {
     let snaps = snapshot_indices(log);
     let last = *snaps.last().ok_or(BootError::Journal(JournalErr::NoSnapshot))?;
@@ -580,8 +580,8 @@ pub(crate) fn boot_journal<D: Driver<S>, S: StrategySet>(
     let live = mode == DriverMode::Live;
     // The tail is replayed with the snapshot's epoch (the logged reports carry it); the new
     // epoch takes effect at the end of the recovery.
-    let epoch_of = |_snap: u32| None;
-    let (ix, mut e, mut inst) = choose_and_restore::<S>(&log, &plan, setup, &epoch_of)?;
+    let epoch_of = |_snap: u32| -> Option<u32> { None };
+    let (ix, mut e, mut inst) = choose_and_restore::<S, _>(&log, &plan, setup, &epoch_of)?;
     e.rec.poison = poison;
     e.rec.drain_tail = ends_with_drain(&log) && snapshot_indices(&log).last() == Some(&ix);
     if !live {

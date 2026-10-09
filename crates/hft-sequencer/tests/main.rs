@@ -3,10 +3,7 @@
     clippy::type_complexity,
     clippy::disallowed_types,
     clippy::disallowed_methods,
-    clippy::disallowed_macros,
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic
+    clippy::disallowed_macros
 )] // allow-list: test code, not a hot path
 
 mod advice;

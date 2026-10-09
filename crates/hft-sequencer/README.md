@@ -781,7 +781,8 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 | `L2Batch`(20 档)整批应用 + 1 次策略调用 | ≤ 1 µs | ≤ 3 µs | `seq/l2batch_20` |
 | 成交回报 → 第二腿出环(`leg_gap` 与 `rep_to_order` 的 sequencer 部分,含 ledger 与通知) | ≤ 1.5 µs | ≤ 4 µs | `seq/fill_to_hedge` |
 | `Advice` 路由 + 1 次策略调用(载荷 512 B) | ≤ 300 ns | ≤ 800 ns | `seq/advice_route` |
-| `MarginReport` / `ExternalFill` 处理(不在 tick-to-trade 路径) | ≤ 2 µs | ≤ 5 µs | `seq/margin_report`、`seq/external_fill` |
+| `MarginReport` 处理(不在 tick-to-trade 路径) | ≤ 2 µs | ≤ 5 µs | `seq/margin_report` |
+| `ExternalFill` 处理(不在 tick-to-trade 路径) | ≤ 2 µs | ≤ 5 µs | `seq/external_fill` |
 | `ReconcileReport`:一条 `Funding` 条目到达即处理 / 同组末条的整组处理(256 个非 Funding 条目,含 oms/risk 分级与 `funding_window_sweep`;ctl 优先级,条目数上限归 reconciler) | ≤ 600 ns / ≤ 15 µs | ≤ 1.5 µs / ≤ 40 µs | `seq/recon_funding_item`、`seq/recon_group` |
 | `InjectWarmup`(4 KiB 载荷:append + `CmdResult`,不投递快速部分)/ `StrategyCmd` 路由 + 1 次策略调用(命令路径,不在 tick-to-trade) | ≤ 2 µs / ≤ 500 ns | ≤ 5 µs / ≤ 1.2 µs | `seq/inject_warmup`、`seq/strategy_cmd` |
 | 关键帧一次写完(≤ 2 MiB,不算 `state_hash`;按周期或事件数到期、在空闲轮之后,最大推迟后在事件边界强制;引导块与 Drain 快照同量级,另算 `state_hash`) | ≤ 150 µs | ≤ 300 µs(p99.9 记录项,[latency-budget §3.1](../../docs/latency-budget.md#31-p999-记录项)) | `seq/snapshot_keyframe` |

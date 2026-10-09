@@ -196,3 +196,28 @@ row = "ExecGateRow"
 field = "gate_closed_tsc"
 class = 1
 reason = "hft-exec recovery_end resets it to the recovery time"
+
+# hft-sequencer snapshot rows (journal-format sections 8, 15, 16, 25).
+[[tsc]]
+row = "TimerRow"
+field = "deadline_tsc"
+class = 1
+reason = "hft-sequencer recovery_end shifts the heap deadlines (downtime not counted)"
+
+[[tsc]]
+row = "ConnLiveRow"
+field = "live_tsc"
+class = 2
+reason = "connection liveness of the previous run; EngineClock clears it at every start"
+
+[[tsc]]
+row = "ClockCalRow"
+field = "tsc"
+class = 3
+reason = "TscClock calibration copy of the run; section 16 is excluded from state_hash"
+
+[[tsc]]
+row = "EngineClockRow"
+field = "base_tsc"
+class = 2
+reason = "engine-clock base of the previous run; the next run's EngineClock replaces it"
