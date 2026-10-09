@@ -602,7 +602,7 @@ spec: README.md
 - 规则:[检查链](README.md#检查链按廉价--昂贵短路适用范围以本表为唯一定义)(#6、`HEDGE_LIMIT` 是终局拒绝)
 - 级别:table
 - 里程碑:M2
-- 前置:R0;b1 持仓 −1;`IntentView.notional` 未写时按 `qty × px`
+- 前置:R0;Reduce 与 Flatten 行 b1 持仓 −1,Hedge 行 b1 持仓 0(持仓 −1 时卖出对冲会先超 #7 的 `max_pos_qty 1`);`IntentView.notional` 未写时按 `qty × px`
 - 实现:`crates/hft-risk/tests/chain.rs::rsk_033_hedge_and_reduce_limits`
 
 | 行 | 意图 | 期望 |
@@ -624,7 +624,7 @@ spec: README.md
 - 规则:[检查链](README.md#检查链按廉价--昂贵短路适用范围以本表为唯一定义)(#7、#7 只扣即时在途的理由)
 - 级别:table
 - 里程碑:M2
-- 前置:R0(g1 `max_pos_qty = 1`);视图按行设置 `pos`、`open_qty`(即时 + 挂单)、`open_qty_immediate`、`pending_reduce`(即时 + 挂单)、`pending_reduce_immediate`,未写为 0;未写限价的 b1 意图:买 @ 50 005.0、卖 @ 49 995.0(都在价格带与越价上限之内)
+- 前置:R0(g1 `max_pos_qty = 1`),账户 1 的 `max_order_notional`、`max_reduce_notional` 与 `max_hedge_notional` 改为 50 000(否则 0.3、0.4 的行先被 #6 拒);视图按行设置 `pos`、`open_qty`(即时 + 挂单)、`open_qty_immediate`、`pending_reduce`(即时 + 挂单)、`pending_reduce_immediate`,未写为 0;未写限价的 b1 意图:买 @ 50 005.0、卖 @ 49 995.0(都在价格带与越价上限之内)
 - 实现:`crates/hft-risk/tests/chain.rs::rsk_034_position_inflight`
 
 | 行 | 视图(b1,账户 1) | 意图 | 期望 |

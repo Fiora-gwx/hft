@@ -1566,3 +1566,117 @@ pub fn msample(liq: &str, ratio: &str, report_ens: i64) -> MarginSample {
         truncated: false,
     }
 }
+
+/// One parsed section-17 row: header and raw body.
+#[derive(Clone, Debug)]
+pub struct Row17 {
+    pub h: hft_risk::snapshot::RiskRowHdr,
+    pub body: Vec<u8>,
+}
+
+/// Rows of section 17 of a snapshot.
+pub fn section17(bytes: &[u8]) -> Vec<Row17> {
+    use hft_risk::snapshot::{ReconGateRowHdr, RiskRowHdr, SECTION_RISK_COUNTERS, row_kind};
+    let r = hft_strategy_sdk::SnapshotReader::new(bytes);
+    let Some(s) = r.find_section(SECTION_RISK_COUNTERS).unwrap() else {
+        return Vec::new();
+    };
+    let mut x = s.reader();
+    let mut out = Vec::new();
+    for _ in 0..s.count {
+        let h: RiskRowHdr = x.get_row().unwrap();
+        let len = match h.kind {
+            row_kind::ACCT | row_kind::BUCKET => 40,
+            row_kind::RECON => 16,
+            row_kind::LEV => 8,
+            row_kind::USER_STREAM => 24,
+            row_kind::RECON_GATE => {
+                let b = x.get_bytes(32).unwrap().to_vec();
+                let g = <ReconGateRowHdr as zerocopy::FromBytes>::read_from_bytes(&b).unwrap();
+                let k = usize::from(g.n_items).min(64) * 8;
+                let mut body = b;
+                body.extend_from_slice(x.get_bytes(k).unwrap());
+                out.push(Row17 { h, body });
+                continue;
+            }
+            k => panic!("unknown kind {k}"),
+        };
+        out.push(Row17 {
+            h,
+            body: x.get_bytes(len).unwrap().to_vec(),
+        });
+    }
+    out
+}
+
+/// The bucket row of (account, venue, inst) (inst 0 = window buckets).
+pub fn bucket_row(rows: &[Row17], a: u8, v: VenueId, inst: u32) -> Option<hft_risk::snapshot::RiskBucketRow> {
+    rows.iter()
+        .find(|r| {
+            r.h.kind == hft_risk::snapshot::row_kind::BUCKET
+                && r.h.account == a
+                && r.h.venue == v.0
+                && r.h.inst == inst
+        })
+        .map(|r| {
+            <hft_risk::snapshot::RiskBucketRow as zerocopy::FromBytes>::read_from_bytes(&r.body).unwrap()
+        })
+}
+
+impl W {
+    /// `Notice(Delisting{v, inst})` (inst 0 = the whole venue).
+    pub fn delist(&mut self, v: VenueId, i: InstId) {
+        let cmd = hft_risk::mode::VenueNoticeCmd {
+            venue: v,
+            kind: hft_risk::mode::VenueNoticeCmd::DELISTING,
+            inst: i,
+            a: 1_700_000_000_000_000_000,
+            b: 0,
+        };
+        self.ok(ModeInput::Notice(&cmd));
+    }
+
+    /// `on_legs(a, g, …)`; returns the optional mode input.
+    pub fn legs(&mut self, a: u8, g: GroupId, ratio: &str, naked: &str) -> Option<ModeInput<'static>> {
+        let s = hft_risk::LegSummary {
+            naked_ratio: r(ratio),
+            naked_notional: n(naked),
+            naked_filled_notional: Notional(0),
+            quiescent: false,
+        };
+        self.risk.on_legs(acc(a), g, &s)
+    }
+
+    /// `on_rate_limit_hit(v, a)` at the current time.
+    pub fn hit(&mut self, v: VenueId, a: u8) -> hft_event::Note {
+        let now = self.nowv();
+        self.risk.on_rate_limit_hit(v, acc(a), &now)
+    }
+
+    pub fn clock_bad(&mut self) {
+        self.ok(ModeInput::Clock { ok: false });
+    }
+
+    pub fn storage(&mut self, level: u8) {
+        self.ok(ModeInput::Storage {
+            kind: hft_risk::mode::StorageKind::PersistLag,
+            level,
+        });
+    }
+}
+
+/// R0 with one inst's status replaced.
+pub fn r0_status(i: InstId, status: InstStatus) -> W {
+    let mut sp = r0_spec();
+    for s in sp.insts.iter_mut().filter(|s| s.id == i) {
+        s.status = status;
+    }
+    let rd = load(&sp);
+    world(rd, p0_for(rd, 3), MC, CAPS)
+}
+
+/// Sets the BBO of `i` to "bid empty".
+pub fn bid_empty(w: &mut W, i: InstId) {
+    w.mv.bbo_mut(i).bid_px = Px(0);
+    w.mv.bbo_mut(i).bid_qty = Qty(0);
+}
