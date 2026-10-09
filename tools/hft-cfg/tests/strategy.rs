@@ -1,9 +1,9 @@
-//! `build --kind strategy` (tools/TESTS.md TOOL-119, TOOL-120, TOOL-124, TOOL-125, TOOL-143,
+//! `build --kind strategy` (tools/TESTS.md TOOL-119–TOOL-121, TOOL-123–TOOL-125, TOOL-143,
 //! TOOL-182): schema-generic TOML → SPB1, validation, GroupId continuation and `group_ctr_hwm`.
 
 mod common;
 
-use common::schemas::FILE;
+use common::schemas::{DESC, EXTRA_DESC, FILE, TARGET_DESC, write_schema_dir};
 use common::strat::*;
 use common::*;
 use hft_event::parse_spb1;
@@ -517,4 +517,230 @@ fn tool_182_group_ctr_hwm() {
     let (b, _) = env.ok("TOOL-182.9b", &t, Some(&cur));
     assert_eq!(a, b, "TOOL-182.9");
     assert_eq!(hwm(&a), 111);
+}
+
+#[test]
+fn tool_121_generic_over_schemas() {
+    let dir = scratch("tool_121");
+    let schemas = dir.join("schemas");
+    write_schema_dir(&schemas, &[&DESC, &TARGET_DESC]);
+    let inst = "name = \"pc-sim-a\"
+kind = \"probe-taker\"
+";
+    let sim_tail = "{ venue = \"bitget-uta-spot\", asset = \"USDT\", qty = \"10000\" } ]
+";
+    let account = |id: u32, label: &str, bound: &str, uid: u32| {
+        format!(
+            "
+[[account]]
+id = {id}
+label = \"{label}\"
+kind = \"live\"
+is_prod = false
+bound_instance = \"{bound}\"
+venues = [\"binance-usdm\", \"bitget-uta-spot\"]
+venue_uids = {{ binance-usdm = \"{uid}\", bitget-uta-spot = \"{}\" }}
+",
+            uid + 1
+        )
+    };
+    let tg_inst = format!(
+        "{inst}
+[[instance]]
+id = 4
+name = \"tg-main\"
+kind = \"probe-target\"
+"
+    );
+    let tg_acct = format!("{sim_tail}{}", account(5, "tg-live", "tg-main", 7001));
+    let edits = [
+        ("instances.toml", inst, tg_inst.as_str()),
+        ("accounts.toml", sim_tail, tg_acct.as_str()),
+    ];
+    let env = Env {
+        refdata: refdata_blob(&dir, &schemas, "rd", &edits),
+        dir: dir.clone(),
+        schemas: schemas.clone(),
+    };
+    let legs = "legs = [ { inst = \"binance-usdm:AINUSDT\" }, { inst = \"bitget-uta-spot:AINUSDT\" } ]
+";
+    let params = |inst: &str, acct: &str, kind: u16, defaults: &str, overrides: &str| {
+        format!(
+            "[strategy]
+instance = \"{inst}\"
+account = \"{acct}\"
+schema = {{ id = {kind}, version = 1 }}
+version = 1
+source = \"manual\"
+
+[defaults]
+{defaults}
+
+[[groups]]
+n = 7
+asset = \"AIN\"
+open_allowed = true
+{legs}[groups.overrides]
+{overrides}
+"
+        )
+    };
+    let show = |env: &Env, blob: &std::path::Path| {
+        let r = run(&[
+            "show",
+            p(blob),
+            "--schemas",
+            p(&env.schemas),
+            "--refdata",
+            p(&env.refdata),
+        ]);
+        assert_eq!(r.code, 0, "{}", r.stderr);
+        r.stdout
+    };
+
+    // TOOL-121.1: probe-taker.
+    let (b, out) = env.ok("taker", &base_toml(), None);
+    assert_eq!(hdr_u16(&b, 2), 65280, "TOOL-121.1 kind_id");
+    let s = show(&env, &out);
+    for want in [
+        "spread_th = 0.05%",
+        "  max_qty = 5000",
+        "[[groups]] id = 0x01000065",
+    ] {
+        assert!(
+            s.contains(want),
+            "TOOL-121.1: missing `{want}` in
+{s}"
+        );
+    }
+
+    // TOOL-121.2: probe-target with the same binary.
+    let (b, out) = env.ok(
+        "target",
+        &params("tg-main", "tg-live", 65281, "thr = \"0.002\"", "win = \"20\""),
+        None,
+    );
+    assert_eq!(hdr_u16(&b, 2), 65281, "TOOL-121.2 kind_id");
+    assert_eq!(group_ids(&b), vec![0x0400_0007], "TOOL-121.2");
+    let s = show(&env, &out);
+    for want in [
+        "thr = 0.2%",
+        "  win = 20",
+        "[[groups]] id = 0x04000007",
+        "binance-usdm:AINUSDT",
+    ] {
+        assert!(
+            s.contains(want),
+            "TOOL-121.2: missing `{want}` in
+{s}"
+        );
+    }
+
+    // TOOL-121.3: a third kind that exists only as a schema file; the same in-process binary.
+    write_schema_dir(&schemas, &[&DESC, &TARGET_DESC, &EXTRA_DESC]);
+    let ex_inst = format!(
+        "{tg_inst}
+[[instance]]
+id = 5
+name = \"ex-main\"
+kind = \"probe-extra\"
+"
+    );
+    let ex_acct = format!("{tg_acct}{}", account(6, "ex-live", "ex-main", 8001));
+    let edits = [
+        ("instances.toml", inst, ex_inst.as_str()),
+        ("accounts.toml", sim_tail, ex_acct.as_str()),
+    ];
+    let env = Env {
+        refdata: refdata_blob(&dir, &schemas, "rd3", &edits),
+        dir,
+        schemas,
+    };
+    let (b, out) = env.ok(
+        "extra",
+        &params("ex-main", "ex-live", 65282, "level = \"3\"", "").replace(
+            "[groups.overrides]
+",
+            "",
+        ),
+        None,
+    );
+    assert_eq!(hdr_u16(&b, 2), 65282, "TOOL-121.3 kind_id");
+    let s = show(&env, &out);
+    assert!(
+        s.contains("level = 3"),
+        "TOOL-121.3: missing `level = 3` in
+{s}"
+    );
+}
+
+#[test]
+fn tool_123_schema_dir_errors() {
+    // TOOL-123.1: index.json deleted -> exit 2, no blob.
+    let env = Env::new("tool_123_1");
+    std::fs::remove_file(env.schemas.join("index.json")).unwrap();
+    let (r, out) = env.build("s", &base_toml(), None);
+    assert_eq!(r.code, 2, "TOOL-123.1: {}", r.stderr);
+    assert!(!out.exists(), "TOOL-123.1: no blob");
+
+    // TOOL-123.2: --schemas names a missing directory -> exit 2.
+    let env = Env::new("tool_123_2");
+    let env = Env {
+        schemas: env.dir.join("nosuch"),
+        ..env
+    };
+    let (r, out) = env.build("s", &base_toml(), None);
+    assert_eq!(r.code, 2, "TOOL-123.2: {}", r.stderr);
+    assert!(!out.exists(), "TOOL-123.2: no blob");
+
+    // TOOL-123.3: index.json digest differs from the digest recomputed from the file -> exit 1.
+    let env = Env::new("tool_123_3");
+    let ix = env.schemas.join("index.json");
+    let text = std::fs::read_to_string(&ix).unwrap();
+    let at = text.find("\"schema_digest\":\"").unwrap() + "\"schema_digest\":\"".len();
+    let flipped = if &text[at..=at] == "0" { "1" } else { "0" };
+    std::fs::write(&ix, format!("{}{flipped}{}", &text[..at], &text[at + 1..])).unwrap();
+    let (r, out) = env.build("s", &base_toml(), None);
+    assert_eq!(r.code, 1, "TOOL-123.3: {}", r.stderr);
+    assert!(r.stderr.contains("digest"), "TOOL-123.3: {}", r.stderr);
+    assert!(!out.exists(), "TOOL-123.3: no blob");
+
+    // TOOL-123.4: the schema file changed (cooldown_ms max) while index.json did not -> exit 1.
+    let env = Env::new("tool_123_4");
+    let f = env.schemas.join(FILE);
+    let text = std::fs::read_to_string(&f).unwrap();
+    assert_eq!(text.matches("\"max\":60000,").count(), 1);
+    std::fs::write(&f, text.replace("\"max\":60000,", "\"max\":60001,")).unwrap();
+    let (r, out) = env.build("s", &base_toml(), None);
+    assert_eq!(r.code, 1, "TOOL-123.4: {}", r.stderr);
+    assert!(r.stderr.contains("digest"), "TOOL-123.4: {}", r.stderr);
+    assert!(!out.exists(), "TOOL-123.4: no blob");
+
+    // TOOL-123.5: instances.toml kind not in index.json -> refdata build exits 1.
+    let dir = scratch("tool_123_5");
+    let schemas = common::schemas::schema_dir(&dir);
+    let d = dir.join("rd");
+    std::fs::create_dir_all(&d).unwrap();
+    for e in std::fs::read_dir(fixtures().join("refdata-basic")).unwrap() {
+        let e = e.unwrap();
+        std::fs::copy(e.path(), d.join(e.file_name())).unwrap();
+    }
+    let it = d.join("instances.toml");
+    let t = std::fs::read_to_string(&it).unwrap();
+    std::fs::write(&it, t.replacen("kind = \"probe-taker\"", "kind = \"nosuch\"", 1)).unwrap();
+    let out = dir.join("rd.blob");
+    let r = run(&[
+        "build",
+        "--kind",
+        "refdata",
+        "--in",
+        p(&d),
+        "--out",
+        p(&out),
+        "--schemas",
+        p(&schemas),
+    ]);
+    assert_eq!(r.code, 1, "TOOL-123.5: {}", r.stderr);
+    assert!(r.stderr.contains("nosuch"), "TOOL-123.5: {}", r.stderr);
+    assert!(!out.exists(), "TOOL-123.5: no blob");
 }

@@ -635,6 +635,7 @@ dependencies = [
 name = "hft-cfg"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "hft-event",
  "hft-refdata",
  "hft-strategy-sdk",
@@ -2314,6 +2315,7 @@ dependencies = [
  "hft-journal",
  "hft-refdata",
  "hft-rt",
+ "hft-testkit",
  "hft-types",
  "proc-macro2",
  "regex",

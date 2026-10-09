@@ -126,3 +126,83 @@ pub fn schema_dir(dir: &Path) -> PathBuf {
     std::fs::write(d.join(FILE), file).unwrap();
     d
 }
+
+/// A second test schema of the `probe-target` shape (crates/hft-testkit README §5: structural `win`,
+/// non-structural `thr`, `advice_max_age_ms`), kind_id 65281, schema version 1.
+pub const TARGET_FIELDS: [FieldDesc; 3] = [
+    FieldDesc {
+        per_group: true,
+        structural: true,
+        doc: "window",
+        ..field("win", Unit::Count, 1, 100, 10)
+    },
+    FieldDesc {
+        minor_change: MinorChange::RelPct(10),
+        doc: "threshold",
+        ..field("thr", Unit::Rate, 0, 10_000_000, 1_000_000)
+    },
+    FieldDesc {
+        doc: "advice max age",
+        ..field("advice_max_age_ms", Unit::DurationMs, 0, 600_000, 5_000)
+    },
+];
+
+pub const TARGET_SCHEMA: ParamSchemaDesc = ParamSchemaDesc {
+    id: 65281,
+    version: 1,
+    fields: &TARGET_FIELDS,
+};
+
+pub const TARGET_DESC: StrategyDesc = StrategyDesc {
+    name: "probe-target",
+    kind_id: 65281,
+    schema: &TARGET_SCHEMA,
+    ..DESC
+};
+
+/// A third schema that exists only as a schema file (no crate anywhere), kind_id 65282.
+pub const EXTRA_FIELDS: [FieldDesc; 1] = [FieldDesc {
+    doc: "level",
+    ..field("level", Unit::Count, 0, 9, 1)
+}];
+
+pub const EXTRA_SCHEMA: ParamSchemaDesc = ParamSchemaDesc {
+    id: 65282,
+    version: 1,
+    fields: &EXTRA_FIELDS,
+};
+
+pub const EXTRA_DESC: StrategyDesc = StrategyDesc {
+    name: "probe-extra",
+    kind_id: 65282,
+    schema: &EXTRA_SCHEMA,
+    ..DESC
+};
+
+/// File name of `d` in a schema directory.
+pub fn file_of(d: &StrategyDesc) -> String {
+    format!("{}-{}.schema.json", d.kind_id, d.name)
+}
+
+/// Writes the SDK export of `descs` (schema files + `index.json` in kind_id order) to `dir`, the
+/// way `hft-core schemas --out` does.
+pub fn write_schema_dir(dir: &Path, descs: &[&StrategyDesc]) {
+    std::fs::create_dir_all(dir).unwrap();
+    let mut ds: Vec<&StrategyDesc> = descs.to_vec();
+    ds.sort_by_key(|d| d.kind_id);
+    let mut entries = Vec::new();
+    for d in ds {
+        let v = d.schema.version;
+        std::fs::write(dir.join(file_of(d)), schema_json(d, &ModelLayoutDesc::EMPTY, v)).unwrap();
+        entries.push(format!(
+            "{{\"kind_id\":{},\"name\":\"{}\",\"file\":\"{}\",\"schema_id\":{},\"schema_version\":{},\"schema_digest\":\"{:016x}\"}}",
+            d.kind_id,
+            d.name,
+            file_of(d),
+            d.schema.id,
+            v,
+            schema_digest(d, v)
+        ));
+    }
+    std::fs::write(dir.join("index.json"), format!("[{}]", entries.join(","))).unwrap();
+}

@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use xtask::{
-    EXIT_ENV, EXIT_OK, bench_gate, ci, decoupling_gate, deps, doc_check, fixtures, gen_host, gen_schema,
-    hot_check, journal_verify, replay_verify, setup, test_trace,
+    EXIT_ENV, EXIT_OK, bench_gate, ci, decoupling_gate, deps, doc_check, dst, fixtures, gen_host, gen_schema,
+    hot_check, journal_verify, new_strategy, replay_verify, scaffold_gate, setup, test_trace,
 };
 
 const SUBCOMMANDS: &[(&str, &str)] = &[
@@ -16,6 +16,18 @@ const SUBCOMMANDS: &[(&str, &str)] = &[
     (
         "decoupling-gate",
         "--base <sha> --head <sha> [--pr <n>] strategy/engine co-change check (git + GitHub only)",
+    ),
+    (
+        "scaffold-gate",
+        "[--keep] template probe build with zero engine-side diff (gate 8; skipped until template, registry and hft-core exist)",
+    ),
+    (
+        "new-strategy",
+        "<name> --kind-id <n> [--with-model] [--with-pipeline] strategy crate skeleton from strategies/_template/",
+    ),
+    (
+        "dst",
+        "--seeds N [--steps M] [--seed S] [--suite X] [--regressions] [--trace] | --hashtrail check|write [--first K] deterministic simulation via hft-dst",
     ),
     (
         "deps",
@@ -108,6 +120,9 @@ fn main() -> ExitCode {
         Some("gen-host") => gen_host::run(&root, &rest),
         Some("replay-verify") => replay_verify::run(&root, &rest),
         Some("bench-gate") => bench_gate::run(&root, &rest),
+        Some("scaffold-gate") => scaffold_gate::run(&root, &rest),
+        Some("new-strategy") => new_strategy::run(&root, &rest),
+        Some("dst") => dst::run(&root, &rest),
         Some(cmd) if !rest.is_empty() => {
             eprintln!("xtask {cmd}: unexpected arguments {rest:?}");
             EXIT_ENV

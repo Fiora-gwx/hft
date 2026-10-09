@@ -177,7 +177,7 @@ pub fn shrink<S: StrategySet>(cfg: &DstConfig<S>, fail: &DstFailure, budget_s: u
 DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xtask dst --seeds 1 --seed 0x9e3779b97f4a7c15 --suite core --steps 48214 --trace
 ```
 
-**套件选择**:不指定套件时,一个种子运行的套件 = 按名字排序的全部套件中下标为 `xxh3_64(seed 的 8 字节小端) mod 套件数` 的那个;`cargo xtask dst` 与 `hft-dst run` 用同一函数。**缺省步数** 10,000(两个入口相同)。
+**套件选择**:不指定套件时,一个种子运行的套件 = 按名字排序的全部套件中下标为 `xxh3_64(seed 的 8 字节小端) mod 套件数` 的那个;`cargo xtask dst` 与 `hft-dst run` 用同一函数 `seed::suite_index`。**缺省步数** 10,000(两个入口相同,`seed::DST_DEFAULT_STEPS`)。
 
 **故障目录**(每项有速率参数与开关;期望行为由不变量检查,具体场景的期望写在 [testing §3.4、§4.3](../../docs/testing.md#34-dst)):
 
@@ -237,6 +237,8 @@ hft-dst run   --seeds <from>..<to> [--suite <name>|all] [--steps 10000] [--deadl
 hft-dst repro --seed 0x… --suite <name> --steps N [--trace] --crash-dir <dir>
 hft-dst list                                          # 编进本二进制的套件、必过用例与各自的故障率
 ```
+
+- **`list`**:每个套件一行,以 `suite <名称>` 开头(其后是该套件的必过用例与故障率);`cargo xtask dst` 的套件表就取这些行。
 
 - **`run`**:按升序逐个运行区间内的种子(每个种子轮转套件,由种子派生选择);到 `--deadline-s` 时在当前种子结束后停止。结果 `DstRunResult`(JSON,规范化字段顺序):`{bin_version, git_sha, profile, suites, seed_from, seed_to_done, seeds_run, steps, violations: [{seed, suite, step, invariant}], elapsed_s}`;`seed_to_done` 之后的种子视为未运行(不计入,也不算失败)。每完成 `checkpoint_seeds`(默认 1,000)个种子就把当前结果原子地写到 `--out`(先写 `.new` 再 rename);收到 `SIGINT`/`SIGTERM` 时在当前种子结束后写出结果并退出,被强杀时最近一次落盘的结果仍可计入。
 - **进行中种子标记**:每个种子开始前,`run` 原子地写 `--crash-dir/.inflight.json` = `{seed, suite, steps, started_utc}`(先写 `.new`、`fsync`、再 rename);下一个种子开始时覆盖,正常退出时删除。它以隐藏文件命名,journal-archiver 的 files source 不上传它(会被改写的文件上传会 `Conflict`,[journal-archiver](../../apps/journal-archiver/README.md#文件归档files-source))。进程被信号终止时该文件指明当时在跑的种子:以致命信号结束(如 `SIGABRT`/`SIGSEGV`:双重 panic、栈溢出、内存错误)时 `hft-verify` 按它记失败种子,被强杀或中止时该种子由下一次运行重跑(信号的分类表归 [tools](../../tools/README.md#hft-verify),清零规则归 [testing §6.1](../../docs/testing.md#61-服务器上的累计运行))。

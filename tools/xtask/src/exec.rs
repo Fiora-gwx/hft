@@ -5,8 +5,11 @@
 //! - `XTASK_EXEC_SCRIPT=<file.json>`: do not spawn anything; answer each command with the first rule
 //!   whose `prefix` is a prefix of the command line (`program arg1 arg2 …`):
 //!   `{"rules": [{"prefix": "xtask deps", "code": 1, "stdout": "", "stderr": ""}], "default_code": 0}`.
+//!   A rule may also carry `"files": {"<path>": "<text>", …}`: written (parents created) each time
+//!   the rule answers, paths relative to the repo root, so a scripted program can leave outputs
+//!   (`hft-core schemas --out …`).
 //! - `XTASK_EXEC_LOG=<file>`: append one JSON line `{"program": …, "args": […]}` per command (both
-//!   executors).
+//!   executors), plus `"env": {…}` when the command sets environment variables.
 //!
 //! Program `xtask` means this binary (`<current exe> --root <root> …`); program `cargo` honours `$CARGO`.
 
@@ -103,7 +106,16 @@ fn append_log(log: &Option<PathBuf>, cmd: &Cmd) {
     if let Some(p) = log
         && let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p)
     {
-        let _ = writeln!(f, "{}", json!({"program": cmd.program, "args": cmd.args}));
+        let mut v = json!({"program": cmd.program, "args": cmd.args});
+        if !cmd.env.is_empty() {
+            let env: serde_json::Map<String, Value> = cmd
+                .env
+                .iter()
+                .map(|(k, x)| (k.clone(), Value::from(x.clone())))
+                .collect();
+            v["env"] = Value::Object(env);
+        }
+        let _ = writeln!(f, "{v}");
     }
 }
 
@@ -154,6 +166,8 @@ impl Exec for SysExec {
 pub struct Rule {
     pub prefix: String,
     pub out: Output,
+    /// `(path, text)` written when the rule answers (relative paths against the executor root).
+    pub files: Vec<(String, String)>,
 }
 
 /// Recording executor: answers from a script, never spawns.
@@ -163,6 +177,8 @@ pub struct ScriptExec {
     pub default_code: i32,
     /// Every command run, in order.
     pub calls: Vec<Cmd>,
+    /// Base of relative rule `files` paths.
+    pub root: PathBuf,
     log: Option<PathBuf>,
 }
 
@@ -184,6 +200,15 @@ impl ScriptExec {
             .map(|a| {
                 a.iter()
                     .map(|r| Rule {
+                        files: r
+                            .get("files")
+                            .and_then(Value::as_object)
+                            .map(|m| {
+                                m.iter()
+                                    .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
                         prefix: s(r, "prefix"),
                         out: Output {
                             code: r.get("code").and_then(Value::as_i64).unwrap_or(0) as i32,
@@ -207,15 +232,24 @@ impl Exec for ScriptExec {
         append_log(&self.log, cmd);
         self.calls.push(cmd.clone());
         let line = cmd.line();
-        let out = self
+        let rule = self
             .rules
             .iter()
-            .find(|r| line == r.prefix || line.starts_with(&format!("{} ", r.prefix)) || r.prefix.is_empty())
-            .map(|r| r.out.clone())
-            .unwrap_or(Output {
-                code: self.default_code,
-                ..Output::default()
-            });
+            .find(|r| line == r.prefix || line.starts_with(&format!("{} ", r.prefix)) || r.prefix.is_empty());
+        if let Some(r) = rule {
+            for (path, text) in &r.files {
+                let p = self.root.join(path);
+                if let Some(d) = p.parent() {
+                    std::fs::create_dir_all(d)
+                        .map_err(|e| EnvError(format!("create {}: {e}", d.display())))?;
+                }
+                std::fs::write(&p, text).map_err(|e| EnvError(format!("write {}: {e}", p.display())))?;
+            }
+        }
+        let out = rule.map(|r| r.out.clone()).unwrap_or(Output {
+            code: self.default_code,
+            ..Output::default()
+        });
         if !cmd.capture {
             // Inherited output goes to our stderr (stdout stays machine-only).
             eprint!("{}{}", out.stdout, out.stderr);
@@ -233,6 +267,7 @@ pub fn from_env(root: &Path) -> Result<Box<dyn Exec>, EnvError> {
                 .map_err(|e| EnvError(format!("read {}: {e}", Path::new(&p).display())))?;
             let mut s = ScriptExec::parse(&text)?;
             s.log = log;
+            s.root = root.to_path_buf();
             Ok(Box::new(s))
         }
         None => Ok(Box::new(SysExec {

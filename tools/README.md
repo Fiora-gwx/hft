@@ -87,10 +87,12 @@ cargo xtask scaffold-gate [--keep]
 
 "新增策略零改动"的检查,上线门槛 ⑧ 的另一部分:
 
-1. 用 [`new-strategy`](#cargo-xtask-new-strategy) 的模板以 `--with-model --with-pipeline` 生成临时策略 `ci-probe`(kind_id 取测试段 `0xFF00–0xFFFF`;带 `Model` 与 pipeline 插件,探针形态归 [hft-testkit §5](../crates/hft-testkit/README.md#5-解耦门槛夹具))到 `target/decoupling/`;
-2. 在 `target/decoupling/` 生成 `strategies/registry` 的临时副本(`strategy_set!` 末尾加一行 `CiProbe`)与临时 workspace 清单,以 `[patch]` 让 `apps/hft-core` 与 `apps/replayer` 改用该副本构建;构建复用主 `target/` 目录(`CARGO_TARGET_DIR` 指向它),不另起一份全量编译;
-3. 跑 `ci-probe` 的场景测试与 DST 短集(夹具与两个测试策略归 [hft-testkit §5](../crates/hft-testkit/README.md#5-解耦门槛夹具)),再以该副本构建的 `hft-core --check` 对生成的 `sim` 实例测试配置(`ci-probe` 绑定一个 Sim 账户)做一次装配检查(含 Model 内存与检查点预算;退出非 0 即失败);
-4. 断言工作区 `git diff --stat` 在 `crates/`(引擎 crate)、`apps/`、`tools/hft-cfg`、`python/` 下为零(策略的 pipeline 插件随策略放在 `strategies/<name>/pipeline/`,不进 `python/`);补丁副本不提交,`--keep` 只为排障保留 `target/decoupling/`。
+1. 用 [`new-strategy`](#cargo-xtask-new-strategy) 的模板以 `--with-model --with-pipeline` 生成临时策略 `ci-probe`(kind_id `0xFFF0`,取测试段 `0xFF00–0xFFFF`;带 `Model` 与 pipeline 插件,探针形态归 [hft-testkit §5](../crates/hft-testkit/README.md#5-解耦门槛夹具))到 `target/decoupling/strategies/ci-probe/`,并核对形态(`src/model/` 中声明 `mem_bytes` 的 Model 骨架、`pipeline/pyproject.toml`)与直接依赖(只许 `deps.toml` 给 `strategies/*` 的两项,违规报告边 `ci-probe → <包>`);
+2. 在 `target/decoupling/` 生成临时 workspace 清单 `Cargo.toml`(沿用根清单的 `[workspace]` 设置与 `[profile]`,依赖路径改写到新位置)、`strategies/registry` 的临时副本 `registry/`(`strategy_set!` 末尾加一行 `ci_probe::CiProbe`、加对探针的依赖、按 `tools/xtask/scaffold/registry_dst.rs.tmpl` 生成 DST 短集 `tests/ci_probe_dst.rs`),以及 `apps/hft-core`、`apps/replayer` 的清单副本(源码仍取仓库里的文件,registry 依赖指向副本;Cargo 的 `[patch]` 不能替换 path 依赖,所以改向写在清单副本里);每次构建与测试都以环境 `CARGO_TARGET_DIR` 指向主 target 目录(未设置时为 `target/`),不另起一份全量编译;
+3. 依次跑 `ci-probe` 的场景测试 `--test scenario`、registry 副本的 DST 短集(100 个种子;夹具与两个测试策略归 [hft-testkit §5](../crates/hft-testkit/README.md#5-解耦门槛夹具))、构建副本的 `hft-core`,再以 `hft-core --check --config <生成的 sim 实例测试配置>` 做一次装配检查(配置按 `tools/xtask/scaffold/sim-check.toml` 生成,`ci-probe` 绑定一个 `sim-` 开头的 Sim 账户;含 Model 内存与检查点预算;任一步退出非 0 即失败,报告该步与退出码);
+4. 断言 `git status --porcelain --untracked-files=all` 在 `crates/`(引擎 crate)、`apps/`、`tools/hft-cfg`、`python/` 下为空,非空时 stderr 与 JSON `engine_changes` 列出这些文件(策略的 pipeline 插件随策略放在 `strategies/<name>/pipeline/`,不进 `python/`);补丁副本不提交,结束时删除 `target/decoupling/`,`--keep` 只为排障保留它。
+
+模板(`strategies/_template/`)、`strategies/registry` 或 `apps/hft-core` 尚不在仓库时跳过:退出 0,原因写进摘要与 JSON(`result = "skipped"`)。JSON 另含 `new_strategy_args`、`dst_seeds`、`sim_account`(生成配置中的 Sim 账户)、`steps`(每步命令与退出码)与 `violations`。
 
 按路径触发(改动 `crates/`、`apps/`、`strategies/`、`tools/` 的 PR,[testing §6](../docs/testing.md#6-ci-运行矩阵))。
 
@@ -188,6 +190,8 @@ cargo xtask dst --hashtrail check|write [--first K] [--strategy K]
 
 失败输出:种子、套件、违反的不变量([testing §4](../docs/testing.md))、违反前 200 条事件的 journal 片段(可直接喂 `replayer`),以及一行可复制的复现命令 `cargo xtask dst --seeds 1 --seed S --suite X --steps M --trace`(格式归 [hft-testkit](../crates/hft-testkit/README.md#6-dst-框架))。CI 与本地运行都不写服务器账本、不计入门槛 ④。
 
+实现口径:缺省起点 = HEAD 提交 SHA 的前 16 位十六进制(作为 u64);种子写作 `0x` + 16 位小写十六进制,也接受十进制。`dst` 以 `ci` 剖面构建 hft-testkit 的 [`hft-dst`](../crates/hft-testkit/README.md#8-hft-dst-运行器)(`cargo build --profile ci -p hft-testkit --features dst-bin --bin hft-dst`)并调用它:套件表取 `hft-dst list` 中以 `suite <名称>` 开头的行,按名字排序后用 hft-testkit 的 `seed::suite_index` 派生种子的套件;区间种子以 `hft-dst run --seeds <起点>..<终点>`(十进制、含两端)运行,带 `--trace` 时改为逐个 `hft-dst repro … --trace`;回归种子逐个 `hft-dst repro --seed S --suite <文件名所示套件>`;崩溃目录与运行结果都在 `target/dst/` 下。`fixtures/dst-seeds/<suite>.txt` 每行取第一个字段为种子,`#` 开头的行跳过。JSON `target/xtask/dst.json`:`seeds`(区间在前、回归在后)、`runs`(每项 `seed`、`suite`、`source = range | regression`)、`steps`、`suite`、`strategy_set`(不带 `--strategy` 时 `"TestStrategies"`)、`result`。hft-testkit 的 DST 框架(`crates/hft-testkit/src/dst/`)不在仓库时退出 2。
+
 ### cargo xtask gen-schema
 
 ```sh
@@ -247,10 +251,10 @@ cargo xtask new-strategy <name> --kind-id <n> [--with-model] [--with-pipeline]
 
 从 `strategies/_template/` 生成新策略 crate 的骨架(模板内容归 [strategies/AGENTS.md](../strategies/AGENTS.md) 与 [adding-a-strategy](../docs/cookbook/adding-a-strategy.md)):
 
-1. 创建 `strategies/<name>/`:`Cargo.toml`(只依赖 `hft-strategy-sdk`、`hft-strat-lib`)、`src/lib.rs`(`Strategy` 骨架、`StrategyDesc`、空的 `ParamSet` 与 schema)、`--with-model` 时加 `Model` 骨架(含 `mem_bytes`/`snapshot_bytes` 声明)、`tests/scenario.rs`(SDK mock 视图上的场景测试)、`README.md`(按 strategies/AGENTS.md 的模板);`--with-pipeline` 时另建 `strategies/<name>/pipeline/`(该策略的 pipeline 插件 Python 包骨架,插件接口归 [python/pipeline](../python/pipeline/README.md))。
-2. 校验 `--kind-id` 等于 [strategies/registry 的 kind_id 登记表](../strategies/registry/README.md) 中真实策略行的最大值 + 1(退役行仍算占用;测试段 `0xFF00–0xFFFF` 不经本命令分配),把该 crate 加进 workspace。kind_id 不等于下一个编号(已被占用或跳号)或 `strategies/<name>/` 已存在 → 退出 1,不写任何文件。
-3. 在 `strategies/registry` 的 `strategy_set!` 调用里加一行(这是新增策略在装配处的**唯一**改动)。
-4. 运行该 crate 的单元测试与 `deps`;退出 0 表示骨架可构建。
+1. 创建 `strategies/<name>/`:`Cargo.toml`(只依赖 `hft-strategy-sdk`、`hft-strat-lib`)、`src/lib.rs`(`Strategy` 骨架、`StrategyDesc`、空的 `ParamSet` 与 schema)、`--with-model` 时加 `Model` 骨架(含 `mem_bytes`/`snapshot_bytes` 声明)、`tests/scenario.rs`(SDK mock 视图上的场景测试)、`README.md`(按 strategies/AGENTS.md 的模板);`--with-pipeline` 时另建 `strategies/<name>/pipeline/`(该策略的 pipeline 插件 Python 包骨架,插件接口归 [python/pipeline](../python/pipeline/README.md))。模板目录的布局:`base/` 总是生成,`model/`(`--with-model`)与 `pipeline/`(`--with-pipeline`)是叠加在同一 crate 根上的层(同路径文件以叠加层为准);路径与 UTF-8 内容中的 `{{name}}`(目录名与 crate 名)、`{{crate}}`(snake_case)、`{{Type}}`(CamelCase)、`{{kind_id}}`(十进制)被替换。
+2. 校验 `--kind-id`(十进制或 `0x` 十六进制)等于 [strategies/registry 的 kind_id 登记表](../strategies/registry/README.md) 中真实策略行的最大值 + 1(退役行仍算占用;测试段 `0xFF00–0xFFFF` 不经本命令分配),在登记表最后一个真实策略行之后加一行 `| <n> | [<name>](../<name>/README.md) | core | 默认 |`,把该 crate 加进 workspace 的 `members`。kind_id 不等于下一个编号(已被占用或跳号,报告期望的编号)或 `strategies/<name>/` 已存在 → 退出 1,不写任何文件;缺 `--kind-id`、名字不是 `[a-z][a-z0-9-]*` 或模板缺所需的层 → 退出 2。
+3. 在 `strategies/registry` 的 `strategy_set!` 调用末尾加一行 `<crate>::<Type>,`,并在 registry 的 `Cargo.toml` `[dependencies]` 加 `<name> = { path = "../<name>" }`(这两行是新增策略在装配处的**唯一**改动)。
+4. 运行该 crate 的单元测试(`cargo test -p <name>`)与 `deps`;退出 0 表示骨架可构建,任一失败退出 1。
 
 不改动任何引擎 crate、`tools/hft-cfg`、`python/`;[`scaffold-gate`](#cargo-xtask-scaffold-gate) 在 CI 里跑这一步并检查 diff。
 
@@ -591,7 +595,7 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 - az-probe 的首帧单向分布依赖 PHC;探针实例若无 PHC,只能给 RTT 结论。
 - `doc-check` 的分段名与策略族名检查只能匹配名单内的写法,自然语言里的错误用法靠评审。
 - hft-cfg 不跑策略的跨字段 `validate`(它不链接策略代码);离线发现跨字段错误要靠 `send` 的预览或 CI 里对 `fixtures/params/*` 的 gateway 级测试。
-- xtask 尚未实现(随各自的里程碑加入):`scaffold-gate`、`new-strategy`、`dst`、`fuzz`、`path-digest`(未知子命令,退出 2);`fixtures fetch/extract/corpus/bbo-diff` 退出 2;`replay-verify` 只做输入核对(指针缓存的 SHA-256、目录存在),`apps/replayer` 不在 workspace 时退出 2;`gen-host` 只做输入核对(`--host` 的清单存在),`deploy/gen/` 与 hft-core 主机类档不在仓库时退出 2。
+- xtask 尚未实现(随各自的里程碑加入):`fuzz`、`path-digest`(未知子命令,退出 2);`strategies/_template/` 尚未建立,`new-strategy` 在真实仓库中退出 2、`scaffold-gate` 跳过;`dst` 的 `--hashtrail` 与 `--strategy` 退出 2(`hft-dst` 尚无 `HashTrail` 输出,registry 尚无策略 DST 入口);`fixtures fetch/extract/corpus/bbo-diff` 退出 2;`replay-verify` 只做输入核对(指针缓存的 SHA-256、目录存在),`apps/replayer` 不在 workspace 时退出 2;`gen-host` 只做输入核对(`--host` 的清单存在),`deploy/gen/` 与 hft-core 主机类档不在仓库时退出 2。
 - hot-check 尚未覆盖 [hot-path-rules](../docs/hot-path-rules.md) 中写给 hot-check 而本节检查表未列的项:T5 warm 开关默认值、T7 rustls 握手/`connect` 与 REST 快照调用点只在 `conn-builder`/`snap-fetch` 模块、M6 含枚举字段的事件体 derive `FromBytes`(相关 crate 进入 workspace 时随表加入)。
 - hft-cfg 尚未接入:`build --kind risk`(hft-risk 构建器)、`refdata fetch`、`send`(hft-ctl-proto 帧)、从 journal 目录读取生效 blob(`--against`/`--refdata` 给目录)与 core `venue-*` 的 `default_caps()`(能力行的底取 `[caps.<venue>]`);前四项当前退出 2。
 - hft-verify 的吞吐受服务器空闲 CPU 限制(批处理所在 slice 为 `CPUWeight=idle`,dev2 上的吞吐随旧系统负载变化;达成时间估算见 testing §6.1);它不并行,也不在主机间协调——同时有两台主机运行时靠种子编码与按完成时刻折叠保证结果正确,不靠锁。

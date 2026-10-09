@@ -43,7 +43,7 @@ spec: README.md
 
 ## 用例
 
-约定:xtask 的用例在小型假仓库上运行(每个夹具一个最小 workspace + 文档树),夹具放 `tools/xtask/tests/fixtures/<名字>/`,或由测试代码按名字在临时目录中生成(如 `trace-clean`,见 `tools/xtask/tests/test_trace.rs`);外部命令(`cargo`、`git`、`gh`、`hft-core`、`bpftrace`)经 xtask 内部的命令执行器调用,测试替换为**记录型执行器**(记下每次调用的程序名与参数,按脚本返回退出码与输出)。"退出码"指子命令进程的退出码;"JSON"指 `target/xtask/<subcommand>.json`。
+约定:xtask 的用例在小型假仓库上运行(每个夹具一个最小 workspace + 文档树),夹具放 `tools/xtask/tests/fixtures/<名字>/`,或由测试代码按名字在临时目录中生成(如 `trace-clean`,见 `tools/xtask/tests/test_trace.rs`);外部命令(`cargo`、`git`、`gh`、`hft-core`、`bpftrace`)经 xtask 内部的命令执行器调用,测试替换为**记录型执行器**(记下每次调用的程序名、参数与设置的环境变量,按脚本返回退出码与输出,必要时写出脚本给定的文件以扮演产出文件的程序)。"退出码"指子命令进程的退出码;"JSON"指 `target/xtask/<subcommand>.json`。
 
 ### TOOL-001 每个 xtask 子命令按 0/1/2 约定退出
 
@@ -321,7 +321,7 @@ spec: README.md
   1. 运行 `cargo xtask scaffold-gate --keep`
 - 期望:
   - `target/decoupling/registry/src/lib.rs` 的 `strategy_set!` 调用最后一项是 `CiProbe`,其余各行与仓库中的 registry 逐字节相同
-  - 临时 workspace 清单含 `[patch]` 段,把 `apps/hft-core` 与 `apps/replayer` 的 registry 依赖指向该副本
+  - 临时 workspace 清单 `target/decoupling/Cargo.toml` 的 `members` 含 `registry`、`strategies/ci-probe`、`apps/hft-core`、`apps/replayer`,其 `[workspace.dependencies]` 的 `hft-strategy-registry` 指向 `registry`;`apps/replayer` 清单副本中直接写路径的 registry 依赖改为 `../../registry`
   - 每次构建调用的环境 `CARGO_TARGET_DIR = /w/target`;运行结束后 `target/decoupling/` 下没有 `target/` 子目录
 - 实现:`tools/xtask/tests/scaffold_gate.rs::tool_021_registry_copy_and_shared_target`
 
@@ -392,7 +392,7 @@ spec: README.md
 - 规则:[cargo xtask scaffold-gate](README.md#cargo-xtask-scaffold-gate)
 - 级别:table
 - 里程碑:M2
-- 前置:临时分支上把模板改为在生成时额外修改各行的文件
+- 前置:探针生成过程的副作用以运行前改动工作区中各行的文件代替(未提交)
 - 实现:`tools/xtask/tests/scaffold_gate.rs::tool_027_engine_diff_fails`
 
 | 行 | 被额外修改的文件 | 期望 |
@@ -1106,7 +1106,7 @@ spec: README.md
 - 期望:
   - 退出 0;`strategies/foo/` 含 `Cargo.toml`、`src/lib.rs`、`tests/scenario.rs`、`README.md`,没有 Model 骨架与 `pipeline/`
   - `strategies/foo/Cargo.toml` 的依赖恰为 `hft-strategy-sdk`、`hft-strat-lib`
-  - `git diff --name-only` 恰为:`strategies/foo/**`、workspace 清单、`strategies/registry/src/lib.rs`(一行新增,`strategy_set!` 末尾)与 kind_id 登记表的一行
+  - `git status --porcelain --untracked-files=all` 恰为:`strategies/foo/**`、workspace 清单(一行新增)、`strategies/registry/src/lib.rs`(一行新增,`strategy_set!` 末尾)、`strategies/registry/Cargo.toml`(一行新增的依赖)与 kind_id 登记表的一行
   - 记录中运行了 `strategies/foo` 的单元测试与 `deps`,都返回 0
 - 实现:`tools/xtask/tests/new_strategy.rs::tool_069_skeleton_builds`
 
@@ -1117,10 +1117,10 @@ spec: README.md
 - 里程碑:M2
 - 前置:同 TOOL-069
 - 步骤:
-  1. 运行 `cargo xtask new-strategy foo --kind-id 0x0105 --with-model --with-pipeline`
+  1. 运行 `cargo xtask new-strategy foo --kind-id 0x0005 --with-model --with-pipeline`(十六进制写法)
 - 期望:
   - Model 骨架声明 `mem_bytes` 与 `snapshot_bytes`;`strategies/foo/pipeline/` 是 Python 包骨架
-  - `git diff --name-only` 中没有 `crates/`、`apps/`、`tools/hft-cfg/`、`python/` 下的文件
+  - `git status --porcelain --untracked-files=all` 中没有 `crates/`、`apps/`、`tools/hft-cfg/`、`python/` 下的文件
 - 实现:`tools/xtask/tests/new_strategy.rs::tool_070_model_and_pipeline`
 
 ### TOOL-071 kind_id 已占用或目录已存在时退出 1 且不写文件
@@ -1832,14 +1832,14 @@ spec: README.md
 - 规则:[hft-cfg](README.md#hft-cfg)
 - 级别:table
 - 里程碑:M2
-- 前置:schema 目录取 hft-testkit 两个测试策略经 `hft-core schemas --out` 导出的目录(`probe-taker`、`probe-target`);hft-cfg 只构建一次;refdata 夹具含绑定两者的实例与账户
+- 前置:schema 目录由 SDK `params` 对两个测试 schema 导出(与 `hft-core schemas --out` 的写法相同):`probe-taker` 同 TOOL-119;`probe-target` kind_id 65281、`schema_version = 1`,字段 `win: Count[per_group, structural, min 1, max 100, default 10]`、`thr: Rate[min 0, max 10_000_000, default 1_000_000, minor rel_pct:10]`、`advice_max_age_ms: DurationMs[min 0, max 600_000, default 5_000]`;hft-cfg 只构建一次;refdata 夹具 `refdata-basic` 另加实例 id 4 `tg-main`(`probe-target`)与绑定它的账户 id 5 `tg-live`(`is_prod = false`)
 - 实现:`tools/hft-cfg/tests/strategy.rs::tool_121_generic_over_schemas`
 
 | 行 | 输入 TOML | 期望 |
 |---|---|---|
 | TOOL-121.1 | `probe-taker` 实例的参数 | 退出 0;`kind_id` = 该策略的 kind_id;`show` 往返一致 |
-| TOOL-121.2 | `probe-target` 实例的参数 | 退出 0;`kind_id` = 该策略的 kind_id;`show` 往返一致 |
-| TOOL-121.3 | 在 schema 目录加入第三个只有 schema 文件的策略 `probe-extra`(新 kind_id)并编码其参数 | 退出 0;hft-cfg 未重新编译 |
+| TOOL-121.2 | `probe-target` 实例的参数(`thr = "0.002"`,group `n = 7` 覆盖 `win = "20"`) | 退出 0;`kind_id` = 65281;`GroupSpec.id = 0x0400_0007`;`show` 含 `thr = 0.2%`、`win = 20` |
+| TOOL-121.3 | 在 schema 目录加入第三个只有 schema 文件的策略 `probe-extra`(kind_id 65282,字段 `level: Count[min 0, max 9, default 1]`),refdata 加实例 id 5 `ex-main` 与账户 id 6 `ex-live`,编码 `level = "3"` | 退出 0;`kind_id` = 65282;`show` 含 `level = 3`;hft-cfg 未重新编译 |
 
 ### TOOL-122 Rust 与 Python 两条路径对参数金样逐字节相同
 
@@ -1866,8 +1866,8 @@ spec: README.md
 |---|---|---|
 | TOOL-123.1 | 删除 `index.json` | 退出 2;无输出 blob |
 | TOOL-123.2 | `--schemas` 指向不存在的目录 | 退出 2 |
-| TOOL-123.3 | `index.json` 中该项的 `schema_digest` 与文件内摘要不同 | 退出 1 |
-| TOOL-123.4 | 文件内摘要与按规范 JSON 重算的摘要不同 | 退出 1 |
+| TOOL-123.3 | `index.json` 中该项的 `schema_digest` 改一位(与按 schema 文件重算的摘要不同) | 退出 1;无输出 blob |
+| TOOL-123.4 | schema 文件中 `cooldown_ms` 的 `max` 改为 60001,`index.json` 不变(重算的摘要与索引不同) | 退出 1;无输出 blob |
 | TOOL-123.5 | `instances.toml` 的 `kind = "nosuch"` 在 `index.json` 中查不到 | 退出 1 |
 
 ### TOOL-124 strategy 参数校验的每条规则拒绝其反例

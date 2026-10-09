@@ -13,6 +13,7 @@ fn rule(prefix: &str, stdout: String) -> Rule {
             stdout,
             stderr: String::new(),
         },
+        files: Vec::new(),
     }
 }
 

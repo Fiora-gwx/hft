@@ -46,3 +46,17 @@ pub fn sample<S: proptest::strategy::Strategy>(seed: u64, strategy: &S) -> S::Va
         Err(e) => panic!("seed::sample: strategy rejected every value: {e}"),
     }
 }
+
+/// Default step limit of one DST seed (README §6 "缺省步数"; `cargo xtask dst` and `hft-dst`).
+pub const DST_DEFAULT_STEPS: u64 = 10_000;
+
+/// The suite a seed runs in when none is given: index `xxh3_64(seed LE bytes) mod n_suites` into
+/// the suites sorted by name (README §6 "套件选择"; `cargo xtask dst` and `hft-dst run` both call
+/// this). `n_suites = 0` → 0.
+pub fn suite_index(seed: u64, n_suites: usize) -> usize {
+    if n_suites == 0 {
+        return 0;
+    }
+    let h = xxhash_rust::xxh3::xxh3_64(&seed.to_le_bytes());
+    (h % n_suites as u64) as usize
+}

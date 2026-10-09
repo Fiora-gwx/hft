@@ -1,5 +1,5 @@
 //! `cargo xtask gen-schema` (crates/hft-event/TESTS.md EVT-172, EVT-174–EVT-180; tools/TESTS.md
-//! TOOL-057, TOOL-058, TOOL-060, TOOL-061, TOOL-179).
+//! TOOL-057–TOOL-061, TOOL-179).
 //!
 //! Source edits of the specs ("改 crates/hft-event 的源码") are applied to the `Model` built from the
 //! linked crates (the stand-in allowed by the specs: the binary would link the edited source).
@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use common::Fixture;
+use xtask::exec::{Output, Rule, ScriptExec};
 use xtask::gen_schema::lock::{self, LOCK_PATH};
 use xtask::gen_schema::model::{
     Code, Field, KindRow, LayoutRow, Model, NoteConst, NoteReg, Strategies, StrategyRow, Ty,
@@ -1243,6 +1244,90 @@ fn tool_179_strategy_append_only() {
         if want == 1 {
             // TOOL-179.10: python/_generated, docs/generated and the lock unchanged.
             assert_eq!(snapshot(&f.root), before, "TOOL-179.10 ({id})");
+        }
+    }
+}
+
+/// `(id, exported files, exit code, reported name)`.
+type ExportRow = (&'static str, Vec<(&'static str, String)>, i32, &'static str);
+
+/// TOOL-059: the recording executor plays the built `hft-core schemas --out target/schemas` and
+/// leaves the row's export; the comparison result maps to the exit code of `gen-schema`.
+#[test]
+fn tool_059_strategy_schema_compare() {
+    const IX: &str = r#"[{"kind_id":1,"name":"a","file":"1-a.schema.json","schema_id":1,"schema_version":1,"schema_digest":"0000000000000001"},{"kind_id":5,"name":"b","file":"5-b.schema.json","schema_id":5,"schema_version":1,"schema_digest":"0000000000000002"}]"#;
+    const A: &str = r#"{"name":"a","kind_id":1,"notes":[{"code":1,"name":"AEdge"}],"cmds":[],"sections":[]}"#;
+    const B: &str = r#"{"name":"b","kind_id":5,"notes":[],"cmds":[{"op":1,"name":"set_x"}],"sections":[]}"#;
+    let rows: [ExportRow; 3] = [
+        (
+            "TOOL-059.1",
+            vec![
+                ("index.json", IX.into()),
+                ("1-a.schema.json", A.into()),
+                ("5-b.schema.json", B.into()),
+            ],
+            0,
+            "",
+        ),
+        (
+            "TOOL-059.2",
+            vec![
+                ("index.json", IX.replacen(',', ", ", 1)),
+                ("1-a.schema.json", A.into()),
+                ("5-b.schema.json", B.into()),
+            ],
+            1,
+            "index.json",
+        ),
+        (
+            "TOOL-059.3",
+            vec![("index.json", IX.into()), ("1-a.schema.json", A.into())],
+            1,
+            "5-b.schema.json",
+        ),
+    ];
+    for (id, export, want, names) in rows {
+        let f = Fixture::empty(&id.to_lowercase().replace('.', "-"));
+        f.write(
+            "apps/hft-core/Cargo.toml",
+            "[package]
+name = \"hft-core\"
+",
+        );
+        let bin = if cfg!(windows) {
+            "target/debug/hft-core.exe"
+        } else {
+            "target/debug/hft-core"
+        };
+        f.write(bin, "");
+        f.write("fixtures/strategy-schemas/index.json", IX);
+        f.write("fixtures/strategy-schemas/1-a.schema.json", A);
+        f.write("fixtures/strategy-schemas/5-b.schema.json", B);
+        let out = f.root.join("target").join("schemas");
+        let mut ex = ScriptExec::new(vec![Rule {
+            prefix: format!("{} schemas --out {}", f.root.join(bin).display(), out.display()),
+            out: Output::default(),
+            files: export
+                .iter()
+                .map(|(n, t)| (out.join(n).display().to_string(), t.clone()))
+                .collect(),
+        }]);
+        ex.default_code = 2;
+        let r = gen_schema::strategy_export(&f.root, &mut ex);
+        assert_eq!(ex.calls.len(), 1, "{id}: one hft-core run");
+        match r {
+            Ok(v) => {
+                assert_eq!(want, 0, "{id}: passed");
+                assert_eq!(
+                    v.iter().map(|s| s.kind_id).collect::<Vec<_>>(),
+                    vec![1, 5],
+                    "{id}"
+                );
+            }
+            Err((code, msg)) => {
+                assert_eq!(code, want, "{id}: {msg}");
+                assert!(msg.contains(names), "{id}: `{names}` not reported in {msg}");
+            }
         }
     }
 }

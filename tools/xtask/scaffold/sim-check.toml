@@ -1,0 +1,24 @@
+# scaffold-gate (tools/README.md "cargo xtask scaffold-gate"): `sim` instance test config for the
+# assembly check `hft-core --check --config <this>` of the template probe `{{name}}` (kind_id
+# {{kind_id}}). Field meanings belong to apps/hft-core; rendered into target/decoupling/, never
+# committed.
+
+[instance]
+name = "sim"
+
+[advisor]
+mem_budget_mib = 64
+checkpoint_max_mib = 64
+
+[startup]
+allow_missing_standby = true
+
+[[instances]]
+name = "{{name}}-sim"
+kind_id = {{kind_id}}
+
+[[sim_accounts]]
+label = "sim-{{name}}"
+kind = "sim"
+bound_instance = "{{name}}-sim"
+venues = ["binance-usdm", "bitget-uta-spot"]

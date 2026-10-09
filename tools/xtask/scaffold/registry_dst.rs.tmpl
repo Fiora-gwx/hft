@@ -1,0 +1,10 @@
+//! scaffold-gate (tools/README.md "cargo xtask scaffold-gate"): DST short set of the template probe
+//! `{{name}}` in the temporary registry copy, {{seeds}} seeds of hft-testkit's generic DST framework
+//! instantiated with the copy's `Strategies` (crates/hft-testkit README §5–§6). Rendered into
+//! `target/decoupling/registry/tests/{{crate}}_dst.rs`; never committed.
+
+#[test]
+fn {{crate}}_dst_short_set() {
+    let failures = hft_testkit::dst::run_short_set::<hft_strategy_registry::Strategies>("{{name}}", {{seeds}});
+    assert!(failures.is_empty(), "{failures:?}");
+}

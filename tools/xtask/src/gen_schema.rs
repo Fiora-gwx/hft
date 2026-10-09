@@ -16,6 +16,7 @@ use std::process::Command;
 
 use serde_json::json;
 
+use crate::exec::{Cmd, Exec};
 use crate::{EXIT_ENV, EXIT_FAIL, EXIT_OK, EnvError, write_json};
 pub use model::{Model, Strategies};
 
@@ -509,6 +510,12 @@ pub fn compare_schema_dirs(exported: &Path, committed: &Path) -> Vec<String> {
 /// schemas exported by the built `hft-core`. `Err((code, message))` for environment errors, and for
 /// a strategy-schema mismatch with `fixtures/strategy-schemas/` (exit 1).
 pub fn load(root: &Path) -> Result<Model, (i32, String)> {
+    let mut exec = crate::exec::from_env(root).map_err(|e| (EXIT_ENV, e.0))?;
+    load_with(root, exec.as_mut())
+}
+
+/// [`load`] with `hft-core schemas --out target/schemas` run through `exec`.
+pub fn load_with(root: &Path, exec: &mut dyn Exec) -> Result<Model, (i32, String)> {
     let mut m = model::from_crates(root);
     if root.join("crates/hft-ext-proto/Cargo.toml").is_file() {
         return Err((
@@ -520,6 +527,13 @@ pub fn load(root: &Path) -> Result<Model, (i32, String)> {
         m.strategies = Strategies::Skipped("apps/hft-core is not in the workspace yet".into());
         return Ok(m);
     }
+    m.strategies = Strategies::Exported(strategy_export(root, exec)?);
+    Ok(m)
+}
+
+/// Runs the built `hft-core schemas --out target/schemas` and compares the export byte for byte
+/// with `fixtures/strategy-schemas/` (mismatch → exit 1) before reading it.
+pub fn strategy_export(root: &Path, exec: &mut dyn Exec) -> Result<Vec<model::StrategyRow>, (i32, String)> {
     let Some(bin) = find_hft_core(root) else {
         return Err((
             EXIT_ENV,
@@ -528,28 +542,25 @@ pub fn load(root: &Path) -> Result<Model, (i32, String)> {
     };
     let out_dir = root.join("target").join("schemas");
     let _ = std::fs::remove_dir_all(&out_dir);
-    let status = Command::new(&bin)
-        .arg("schemas")
-        .arg("--out")
-        .arg(&out_dir)
-        .status();
-    match status {
-        Ok(s) if s.success() => {}
-        Ok(s) => {
-            return Err((
-                EXIT_ENV,
-                format!("{} schemas --out {}: exit {s}", bin.display(), out_dir.display()),
-            ));
+    let cmd = Cmd::new(&bin.display().to_string(), &["schemas", "--out"]).arg(out_dir.display().to_string());
+    match exec.run(&cmd) {
+        Ok(o) if o.ok() => {}
+        Ok(o) => {
+            return Err((EXIT_ENV, format!("{}: exit {}", cmd.line(), o.code)));
         }
-        Err(e) => return Err((EXIT_ENV, format!("run {}: {e}", bin.display()))),
+        Err(e) => return Err((EXIT_ENV, e.0)),
     }
-    let rows = model::read_strategy_export(&out_dir).map_err(|e| (EXIT_ENV, e.0))?;
     let diffs = compare_schema_dirs(&out_dir, &root.join("fixtures/strategy-schemas"));
     if !diffs.is_empty() {
-        return Err((EXIT_FAIL, diffs.join("\n")));
+        return Err((
+            EXIT_FAIL,
+            diffs.join(
+                "
+",
+            ),
+        ));
     }
-    m.strategies = Strategies::Exported(rows);
-    Ok(m)
+    model::read_strategy_export(&out_dir).map_err(|e| (EXIT_ENV, e.0))
 }
 
 /// Entry point: `cargo xtask gen-schema [--check]`.

@@ -1,4 +1,4 @@
-//! `cargo xtask ci` (tools/TESTS.md TOOL-003–TOOL-008, TOOL-010, TOOL-011, TOOL-186). Every step
+//! `cargo xtask ci` (tools/TESTS.md TOOL-003–TOOL-011, TOOL-186). Every step
 //! runs through the recording executor; the fixture holds a workspace whose components make every
 //! step run.
 
@@ -238,4 +238,21 @@ fn tool_011_optional_present_included() {
     );
     let j = r.json.unwrap();
     assert_eq!(j["optional"][0]["in_workspace"], true);
+}
+
+#[test]
+fn tool_009_dst_smoke_args() {
+    // ci passes no start seed: `dst` derives it from the HEAD commit itself.
+    let f = ci_repo("ci-009");
+    let s = Script::new(&f, &[], 0);
+    let r = f.xtask_script(&["ci"], &s, &[]);
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    let calls = s.calls();
+    let i = calls
+        .iter()
+        .position(|c| c.starts_with("xtask dst --seeds"))
+        .expect("dst smoke step");
+    assert_eq!(calls[i], "xtask dst --seeds 200 --regressions");
+    assert!(!calls[i].contains("--seed "), "the smoke start is commit-derived");
+    assert_eq!(calls[i + 1], "xtask dst --hashtrail check --first 50");
 }

@@ -5,6 +5,7 @@
 
 pub mod deps_repo;
 pub mod repos;
+pub mod strat_repo;
 
 use std::path::PathBuf;
 use std::process::Command;

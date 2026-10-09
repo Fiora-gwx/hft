@@ -19,6 +19,8 @@ hft-event = { workspace = true }
 hft-refdata = { workspace = true }
 # journal-verify: the reading/verification implementation (no `writer` feature).
 hft-journal = { workspace = true }
+# dst: the shared suite selection and default step count (crates/hft-testkit README §6).
+hft-testkit = { workspace = true }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 regex = "1"
 serde_json = "1"
