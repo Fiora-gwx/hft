@@ -1,0 +1,15 @@
+error[E0080]: evaluation panicked: notes: at most 8 v[] entries
+  --> tests/ui/desc_114_04_fail.rs:30:15
+   |
+30 | const _: () = hft_strategy_sdk::check::validate_desc(&DESC);
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed inside this call
+   |
+note: inside `validate_desc`
+  --> $RUST/core/src/panic.rs
+   |
+   = note: the failure occurred here
+   |
+  ::: src/check.rs
+   |
+   |         assert!(n.v.len() <= 8, "notes: at most 8 v[] entries");
+   |         ------------------------------------------------------- in this macro invocation

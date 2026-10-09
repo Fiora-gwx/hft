@@ -1,0 +1,15 @@
+error[E0080]: evaluation panicked: report: v_ix must be < 8
+  --> tests/ui/desc_114_11_fail.rs:30:15
+   |
+30 | const _: () = hft_strategy_sdk::check::validate_desc(&DESC);
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed inside this call
+   |
+note: inside `validate_desc`
+  --> $RUST/core/src/panic.rs
+   |
+   = note: the failure occurred here
+   |
+  ::: src/check.rs
+   |
+   |         assert!(r.v_ix < 8, "report: v_ix must be < 8");
+   |         ----------------------------------------------- in this macro invocation

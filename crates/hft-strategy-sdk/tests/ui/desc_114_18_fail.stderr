@@ -1,0 +1,23 @@
+error[E0080]: evaluation panicked: cmds: command fields need minor_change = None
+  --> tests/ui/desc_114_18_fail.rs:30:15
+   |
+30 | const _: () = hft_strategy_sdk::check::validate_desc(&DESC);
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed inside this call
+   |
+note: inside `validate_desc`
+  --> src/check.rs
+   |
+   |         validate_cmd(c);
+   |         ^^^^^^^^^^^^^^^
+note: inside `check::validate_cmd`
+  --> $RUST/core/src/panic.rs
+   |
+   = note: the failure occurred here
+   |
+  ::: src/check.rs
+   |
+   | /         assert!(
+   | |             matches!(f.minor_change, MinorChange::None),
+   | |             "cmds: command fields need minor_change = None"
+   | |         );
+   | |_________- in this macro invocation

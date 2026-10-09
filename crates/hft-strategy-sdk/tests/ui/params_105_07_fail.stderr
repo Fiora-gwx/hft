@@ -1,0 +1,24 @@
+error[E0080]: evaluation panicked: field: Qty/Px fields must be per_group
+ --> tests/ui/params_105_07_fail.rs:2:1
+  |
+2 | / hft_strategy_sdk::define_params! {
+3 | |     pub struct P(schema_id = 0xFF01, version = 1, fields = PF) {
+4 | |         x: Px [min = 0, max = 10, default = 0],
+5 | |     }
+6 | | }
+  | |_^ evaluation of `_` failed inside this call
+  |
+note: inside `validate_schema`
+ --> src/check.rs
+  |
+  |         check_field(f);
+  |         ^^^^^^^^^^^^^^
+note: inside `check::check_field`
+ --> $RUST/core/src/panic.rs
+  |
+  = note: the failure occurred here
+  |
+ ::: src/check.rs
+  |
+  |         Unit::Qty | Unit::Px => assert!(f.per_group, "field: Qty/Px fields must be per_group"),
+  |                                 -------------------------------------------------------------- in this macro invocation

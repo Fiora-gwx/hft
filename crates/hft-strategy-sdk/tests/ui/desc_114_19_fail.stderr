@@ -1,0 +1,25 @@
+error[E0080]: evaluation panicked: field: min > default
+  --> tests/ui/desc_114_19_fail.rs:30:15
+   |
+30 | const _: () = hft_strategy_sdk::check::validate_desc(&DESC);
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed inside this call
+   |
+note: inside `validate_desc`
+  --> src/check.rs
+   |
+   |         validate_cmd(c);
+   |         ^^^^^^^^^^^^^^^
+note: inside `check::validate_cmd`
+  --> src/check.rs
+   |
+   |         check_field(f);
+   |         ^^^^^^^^^^^^^^
+note: inside `check::check_field`
+  --> $RUST/core/src/panic.rs
+   |
+   = note: the failure occurred here
+   |
+  ::: src/check.rs
+   |
+   |     assert!(f.min <= f.default, "field: min > default");
+   |     --------------------------------------------------- in this macro invocation

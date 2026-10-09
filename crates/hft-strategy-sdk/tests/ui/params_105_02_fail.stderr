@@ -1,0 +1,48 @@
+error[E0124]: field `open_th` is already declared
+  --> tests/ui/params_105_02_fail.rs:2:1
+   |
+ 2 | / hft_strategy_sdk::define_params! {
+ 3 | |     pub struct P(schema_id = 0xFF01, version = 2, fields = PF) {
+ 4 | |         open_th: Rate [min = 0, max = 100_000_000, default = 5_000_000, per_group, relax = Down, minor = RelPct(10)],
+ 5 | |         open_th: DurationMs [min = 0, max = 600_000, default = 20_000],
+...  |
+11 | | }
+   | | ^
+   | | |
+   | |_field already declared
+   |   `open_th` first declared here
+   |
+   = note: this error originates in the macro `hft_strategy_sdk::define_params` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0062]: field `open_th` specified more than once
+  --> tests/ui/params_105_02_fail.rs:5:9
+   |
+ 2 | / hft_strategy_sdk::define_params! {
+ 3 | |     pub struct P(schema_id = 0xFF01, version = 2, fields = PF) {
+ 4 | |         open_th: Rate [min = 0, max = 100_000_000, default = 5_000_000, per_group, relax = Down, minor = RelPct(10)],
+ 5 | |         open_th: DurationMs [min = 0, max = 600_000, default = 20_000],
+   | |         ^^^^^^^ used more than once
+...  |
+11 | | }
+   | |_- first use of `open_th`
+
+error[E0080]: evaluation panicked: schema: duplicate field name
+  --> tests/ui/params_105_02_fail.rs:2:1
+   |
+ 2 | / hft_strategy_sdk::define_params! {
+ 3 | |     pub struct P(schema_id = 0xFF01, version = 2, fields = PF) {
+ 4 | |         open_th: Rate [min = 0, max = 100_000_000, default = 5_000_000, per_group, relax = Down, minor = RelPct(10)],
+ 5 | |         open_th: DurationMs [min = 0, max = 600_000, default = 20_000],
+...  |
+11 | | }
+   | |_^ evaluation of `_` failed inside this call
+   |
+note: inside `validate_schema`
+  --> $RUST/core/src/panic.rs
+   |
+   = note: the failure occurred here
+   |
+  ::: src/check.rs
+   |
+   |             assert!(!str_eq(f.name, g.name), "schema: duplicate field name");
+   |             ---------------------------------------------------------------- in this macro invocation

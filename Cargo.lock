@@ -740,6 +740,7 @@ dependencies = [
  "proptest",
  "sha2",
  "toml 0.8.23",
+ "trybuild",
  "zerocopy",
 ]
 

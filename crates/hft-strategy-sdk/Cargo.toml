@@ -37,6 +37,8 @@ hft-strategy-sdk = { path = ".", features = ["schema-json", "testing"] }
 proptest.workspace = true
 criterion.workspace = true
 toml.workspace = true
+# Compile-fail cases (SDK-057, SDK-105, SDK-114, SDK-174, SDK-187), `tests/ui.rs`.
+trybuild.workspace = true
 
 [[bench]]
 name = "params"

@@ -1,0 +1,18 @@
+error[E0080]: evaluation panicked: notes: strategy Notes cannot be P0
+  --> tests/ui/desc_114_06_fail.rs:30:15
+   |
+30 | const _: () = hft_strategy_sdk::check::validate_desc(&DESC);
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed inside this call
+   |
+note: inside `validate_desc`
+  --> $RUST/core/src/panic.rs
+   |
+   = note: the failure occurred here
+   |
+  ::: src/check.rs
+   |
+   | /         assert!(
+   | |             !matches!(n.level, NoteLevel::P0),
+   | |             "notes: strategy Notes cannot be P0"
+   | |         );
+   | |_________- in this macro invocation

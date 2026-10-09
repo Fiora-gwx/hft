@@ -1,0 +1,20 @@
+error[E0080]: evaluation panicked: strategy_set!: duplicate name
+  --> tests/ui/set_187_03_fail.rs:9:1
+   |
+ 9 | / hft_strategy_sdk::strategy_set! {
+10 | |     pub struct ProbeSet {
+11 | |         EchoProbe,
+12 | |         TargetProbe,
+13 | |     }
+14 | | }
+   | |_^ evaluation of `_` failed inside this call
+   |
+note: inside `validate_set`
+  --> $RUST/core/src/panic.rs
+   |
+   = note: the failure occurred here
+   |
+  ::: src/check.rs
+   |
+   |             assert!(!str_eq(k.name, o.name), "strategy_set!: duplicate name");
+   |             ----------------------------------------------------------------- in this macro invocation

@@ -1,0 +1,20 @@
+error[E0080]: evaluation panicked: cmds: command fields cannot be per_group
+  --> tests/ui/desc_114_16_fail.rs:30:15
+   |
+30 | const _: () = hft_strategy_sdk::check::validate_desc(&DESC);
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed inside this call
+   |
+note: inside `validate_desc`
+  --> src/check.rs
+   |
+   |         validate_cmd(c);
+   |         ^^^^^^^^^^^^^^^
+note: inside `check::validate_cmd`
+  --> $RUST/core/src/panic.rs
+   |
+   = note: the failure occurred here
+   |
+  ::: src/check.rs
+   |
+   |         assert!(!f.per_group, "cmds: command fields cannot be per_group");
+   |         ----------------------------------------------------------------- in this macro invocation

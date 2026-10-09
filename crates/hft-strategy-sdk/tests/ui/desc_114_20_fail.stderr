@@ -1,0 +1,27 @@
+error[E0080]: evaluation panicked: notes: strategy Notes cannot be P0
+  --> tests/ui/desc_114_20_fail.rs:32:1
+   |
+32 | / hft_strategy_sdk::strategy_set! {
+33 | |     pub struct Set {
+34 | |         Echo,
+35 | |     }
+36 | | }
+   | |_^ evaluation of `_` failed inside this call
+   |
+note: inside `validate_set`
+  --> src/check.rs
+   |
+   |         validate_desc(k);
+   |         ^^^^^^^^^^^^^^^^
+note: inside `validate_desc`
+  --> $RUST/core/src/panic.rs
+   |
+   = note: the failure occurred here
+   |
+  ::: src/check.rs
+   |
+   | /         assert!(
+   | |             !matches!(n.level, NoteLevel::P0),
+   | |             "notes: strategy Notes cannot be P0"
+   | |         );
+   | |_________- in this macro invocation

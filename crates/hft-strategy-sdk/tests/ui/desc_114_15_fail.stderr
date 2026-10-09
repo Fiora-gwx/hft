@@ -1,0 +1,20 @@
+error[E0080]: evaluation panicked: cmds: more than 31 fields
+  --> tests/ui/desc_114_15_fail.rs:30:15
+   |
+30 | const _: () = hft_strategy_sdk::check::validate_desc(&DESC);
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed inside this call
+   |
+note: inside `validate_desc`
+  --> src/check.rs
+   |
+   |         validate_cmd(c);
+   |         ^^^^^^^^^^^^^^^
+note: inside `check::validate_cmd`
+  --> $RUST/core/src/panic.rs
+   |
+   = note: the failure occurred here
+   |
+  ::: src/check.rs
+   |
+   |     assert!(c.fields.len() <= MAX_CMD_FIELDS, "cmds: more than 31 fields");
+   |     ---------------------------------------------------------------------- in this macro invocation

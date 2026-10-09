@@ -1,0 +1,24 @@
+error[E0080]: evaluation panicked: AdvicePayload::LOCAL_KIND is reserved
+ --> $RUST/core/src/panic.rs
+  |
+  = note: evaluation of `hft_strategy_sdk::advice::Check::<P>::OK` failed here
+  |
+ ::: src/advice.rs
+  |
+  | /         assert!(
+  | |             !local_kind_reserved(P::LOCAL_KIND),
+  | |             "AdvicePayload::LOCAL_KIND is reserved"
+  | |         );
+  | |_________- in this macro invocation
+
+note: erroneous constant encountered
+ --> src/advice.rs
+  |
+  |         let () = Check::<P>::OK;
+  |                  ^^^^^^^^^^^^^^
+
+note: the above error was encountered while instantiating `fn AdviceOut::<'_>::emit::<P>`
+  --> tests/ui/payload_174_03_fail.rs:23:13
+   |
+23 |     let _ = out.emit(GroupId(1), &P);
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^

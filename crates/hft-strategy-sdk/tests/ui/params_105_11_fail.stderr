@@ -1,0 +1,20 @@
+error[E0080]: evaluation panicked: schema: more than 256 fields
+   --> tests/ui/params_105_11_fail.rs:2:1
+    |
+  2 | / hft_strategy_sdk::define_params! {
+  3 | |     pub struct P(schema_id = 0xFF01, version = 1, fields = PF) {
+  4 | |         f000: Count [max = 1],
+  5 | |         f001: Count [max = 1],
+...   |
+262 | | }
+    | |_^ evaluation of `_` failed inside this call
+    |
+note: inside `validate_schema`
+   --> $RUST/core/src/panic.rs
+    |
+    = note: the failure occurred here
+    |
+   ::: src/check.rs
+    |
+    |     assert!(s.fields.len() <= MAX_FIELDS, "schema: more than 256 fields");
+    |     --------------------------------------------------------------------- in this macro invocation

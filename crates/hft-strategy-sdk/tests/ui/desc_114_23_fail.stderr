@@ -1,0 +1,27 @@
+error[E0080]: evaluation panicked: notes: code must be 1..=0xFF_FFFF
+  --> tests/ui/desc_114_23_fail.rs:30:1
+   |
+30 | / hft_strategy_sdk::strategy_set! {
+31 | |     pub struct Set {
+32 | |         Echo,
+33 | |     }
+34 | | }
+   | |_^ evaluation of `_` failed inside this call
+   |
+note: inside `validate_set`
+  --> src/check.rs
+   |
+   |         validate_desc(k);
+   |         ^^^^^^^^^^^^^^^^
+note: inside `validate_desc`
+  --> $RUST/core/src/panic.rs
+   |
+   = note: the failure occurred here
+   |
+  ::: src/check.rs
+   |
+   | /         assert!(
+   | |             n.code >= 1 && n.code <= MAX_NOTE_CODE,
+   | |             "notes: code must be 1..=0xFF_FFFF"
+   | |         );
+   | |_________- in this macro invocation

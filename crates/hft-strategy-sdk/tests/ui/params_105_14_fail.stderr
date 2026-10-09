@@ -1,0 +1,27 @@
+error[E0080]: evaluation panicked: field: Bool/Enum take minor None or Any
+ --> tests/ui/params_105_14_fail.rs:2:1
+  |
+2 | / hft_strategy_sdk::define_params! {
+3 | |     pub struct P(schema_id = 0xFF01, version = 1, fields = PF) {
+4 | |         x: Bool [default = 1, minor = RelPct(10)],
+5 | |     }
+6 | | }
+  | |_^ evaluation of `_` failed inside this call
+  |
+note: inside `validate_schema`
+ --> src/check.rs
+  |
+  |         check_field(f);
+  |         ^^^^^^^^^^^^^^
+note: inside `check::check_field`
+ --> $RUST/core/src/panic.rs
+  |
+  = note: the failure occurred here
+  |
+ ::: src/check.rs
+  |
+  | /             assert!(
+  | |                 !matches!(f.unit, Unit::Bool | Unit::Enum(_)),
+  | |                 "field: Bool/Enum take minor None or Any"
+  | |             );
+  | |_____________- in this macro invocation

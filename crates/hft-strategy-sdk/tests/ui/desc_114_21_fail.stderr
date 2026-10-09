@@ -1,0 +1,18 @@
+error[E0080]: evaluation panicked: notes: code must be 1..=0xFF_FFFF
+  --> tests/ui/desc_114_21_fail.rs:28:15
+   |
+28 | const _: () = hft_strategy_sdk::check::validate_desc(&DESC);
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed inside this call
+   |
+note: inside `validate_desc`
+  --> $RUST/core/src/panic.rs
+   |
+   = note: the failure occurred here
+   |
+  ::: src/check.rs
+   |
+   | /         assert!(
+   | |             n.code >= 1 && n.code <= MAX_NOTE_CODE,
+   | |             "notes: code must be 1..=0xFF_FFFF"
+   | |         );
+   | |_________- in this macro invocation

@@ -1,0 +1,15 @@
+error[E0080]: evaluation panicked: cmds: duplicate name
+  --> tests/ui/desc_114_14_fail.rs:30:15
+   |
+30 | const _: () = hft_strategy_sdk::check::validate_desc(&DESC);
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `_` failed inside this call
+   |
+note: inside `validate_desc`
+  --> $RUST/core/src/panic.rs
+   |
+   = note: the failure occurred here
+   |
+  ::: src/check.rs
+   |
+   |             assert!(!str_eq(c.name, e.name), "cmds: duplicate name");
+   |             -------------------------------------------------------- in this macro invocation
