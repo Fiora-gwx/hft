@@ -13,7 +13,6 @@ use hft_risk::{ExecBounds, GwMap, MarginOut, ModeCfg, ModeOutcome, Risk, RiskPar
 use hft_rt::Heartbeat;
 use hft_strategy_sdk::{EngineClockAnchor, Now, StrategySet, VenueSet};
 use hft_types::{AccountId, GroupId, InstId, Notional, Tsc, VenueId};
-use zerocopy::IntoBytes;
 
 use crate::clock::EngineClock;
 use crate::commands::CmdState;
@@ -187,7 +186,6 @@ pub struct Engine {
     pub dust: Vec<Notional>,
     pub(crate) out: OutBuf,
     /// Scratch for calls whose output is discarded (boot, group tables).
-    pub(crate) exec_out: ExecOut,
     pub(crate) oms_pool: Vec<OmsOut>,
     pub(crate) exec_pool: Vec<ExecOut>,
     pub(crate) mode_pool: Vec<ModeOutcome>,
@@ -221,7 +219,6 @@ pub struct Engine {
     /// `CtxFull` count of `timer_at` over the strategy quota.
     pub ctx_full: u64,
     /// The input hash of the record being processed (quarantine).
-    pub(crate) poison_hash: u64,
     /// Union of streams last sent per inst (this run only).
     pub(crate) sent_union: Vec<u8>,
     /// Insts whose position changed between zero and non-zero in this Input.
@@ -475,7 +472,6 @@ impl Engine {
             prev_epoch: setup.oms.engine_epoch,
             dust,
             out: OutBuf::new(),
-            exec_out: ExecOut::with_caps(OutCaps::README),
             oms_pool: (0..6).map(|_| OmsOut::new()).collect(),
             exec_pool: (0..6).map(|_| ExecOut::with_caps(OutCaps::README)).collect(),
             mode_pool,
@@ -495,7 +491,6 @@ impl Engine {
             trace: Trace::default(),
             strat_timers: 0,
             ctx_full: 0,
-            poison_hash: 0,
             sent_union: vec![0; n_inst + 1],
             pos_touched: Vec::with_capacity(64),
         })
@@ -563,11 +558,6 @@ impl Engine {
             v,
         };
         self.out.push(RecordFlags(0), &note);
-    }
-
-    /// Buffers any Note as is.
-    pub(crate) fn push_note(&mut self, n: &Note) {
-        self.out.push(RecordFlags(0), n);
     }
 
     /// An empty `OmsOut` from the pool (nested drains each take their own).

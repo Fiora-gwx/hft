@@ -73,8 +73,7 @@ fn seq_086_time_trigger_boundary() {
         let kf = h.keyframe();
         let t0 = timers_since(&h, 0)
             .into_iter()
-            .filter(|t| t.0.owner == 1 && t.0.timer_id == 1)
-            .last()
+            .rfind(|t| t.0.owner == 1 && t.0.timer_id == 1)
             .unwrap()
             .1;
         let _ = kf;
@@ -138,7 +137,7 @@ fn seq_088_max_deferral() {
     while written_at.is_none() && k < 400 {
         k += 1;
         h.at(t + k * 10_000_000);
-        h.quote(A1, "50000", if k % 2 == 0 { "50003" } else { "50004" });
+        h.quote(A1, "50000", if k.is_multiple_of(2) { "50003" } else { "50004" });
         let m = h.mark();
         h.step();
         if sys_ids(&h, m).contains(&1) {

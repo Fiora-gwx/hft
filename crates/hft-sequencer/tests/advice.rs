@@ -140,8 +140,7 @@ fn seq_189_spec_seq_updates() {
     let cmd_seq = h
         .since(m)
         .into_iter()
-        .filter(|r| r.kind == EventKind::CONTROL_CMD)
-        .last()
+        .rfind(|r| r.kind == EventKind::CONTROL_CMD)
         .unwrap()
         .seq;
     assert_eq!(h.s.instances().get(S2).unwrap().spec_seq_of(g2b), Some(cmd_seq));

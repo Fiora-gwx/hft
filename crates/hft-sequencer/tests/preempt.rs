@@ -260,7 +260,7 @@ fn seq_059_rep_round_limits() {
 fn seq_060_bbo_round_limits() {
     let fill = |h: &mut H, ring: u8, n: u64| {
         for k in 0..n {
-            let i = if ring % 2 == 0 { A1 } else { B1 };
+            let i = if ring.is_multiple_of(2) { A1 } else { B1 };
             let v = inst_venue(i);
             h.push(RingId::Bbo(ring), &bbo(i, v, 0, "50000", "50002", 10_000 + k, 1));
         }

@@ -377,8 +377,17 @@ pub fn ckpt_checksum(body: &[u8]) -> u64 {
 
 /// The layout digest of a kind's Model.
 pub fn layout_digest<S: StrategySet>(kind_id: u16) -> u64 {
-    let d = format!("{:?}", S::model_layout(kind_id));
-    xxhash_rust::xxh3::xxh3_64(d.as_bytes())
+    /// Streams the `Debug` text into the hash (no allocation).
+    struct H(xxhash_rust::xxh3::Xxh3);
+    impl core::fmt::Write for H {
+        fn write_str(&mut self, s: &str) -> core::fmt::Result {
+            self.0.update(s.as_bytes());
+            Ok(())
+        }
+    }
+    let mut h = H(xxhash_rust::xxh3::Xxh3::new());
+    let _ = core::fmt::write(&mut h, format_args!("{:?}", S::model_layout(kind_id)));
+    h.0.digest()
 }
 
 /// The advice ring as the advisor sees it (variable-length records).
@@ -916,7 +925,7 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
             }
         }
         job.written += bytes.len() as u64;
-        if job.limit != 0 && job.written > job.limit.saturating_add(8 + 1 << 20) {
+        if job.limit != 0 && job.written > job.limit.saturating_add(8 + (1 << 20)) {
             // Over the declared size: this generation is void.
             self.next_job(job.ix + 1);
             return;

@@ -8,7 +8,7 @@ use hft_event::{BlobHdr, BlobKind, BlobRef, EventKind, NoteLevel, RecordFlags, R
 use hft_journal::RollReason;
 use hft_ledger::Ledger;
 use hft_oms::Oms;
-use hft_refdata::{AccountKind, RefData};
+use hft_refdata::RefData;
 use hft_risk::ModeCfg;
 use hft_risk::Risk;
 use hft_risk::mode::{ModeInput, RecoveryFlags};
@@ -23,7 +23,7 @@ use crate::engine::{Engine, EngineSetup, account_count, exec_bounds};
 use crate::journal::{JournalSink, MemRecord};
 use crate::parsed::parse_params;
 use crate::snapshot::{ClockCalRow, PURPOSE_DRAIN, PURPOSE_RECOVERY, SeqSections, read_seq_sections};
-use crate::strategies::{Instances, strategy_owner};
+use crate::strategies::Instances;
 use crate::types::{BootError, CapKind, ConfigErr, InputSlot, JournalErr, RecoverPlan, SnapshotSel};
 use crate::{Sequencer, codes};
 
@@ -985,9 +985,4 @@ pub(crate) fn mirror_restore_all(e: &mut Engine) {
             }
         }
     }
-}
-
-/// `true` when the record is an Input of a replay log.
-pub(crate) fn is_input(r: &MemRecord) -> bool {
-    r.role() == Role::Input
 }

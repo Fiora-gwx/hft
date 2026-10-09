@@ -176,7 +176,8 @@ fn seq_323_notify_continue(c: &mut Criterion) {
             timed(iters, 1, steady, |h, _| {
                 let t = h.now();
                 for k in 0..64u32 {
-                    h.push(RingId::Hk, &sys_timer(7 + (k % 1) * 0, t));
+                    let _ = k;
+                    h.push(RingId::Hk, &sys_timer(7, t));
                 }
             })
         })
@@ -217,7 +218,7 @@ fn seq_325_bbo_target_idle(c: &mut Criterion) {
 }
 
 fn fire_setup() -> H {
-    let mut h = steady();
+    let h = steady();
     add_hook(|hx, ev, ctx| {
         if let EventRef::Bbo { inst, .. } = ev
             && *inst == A1

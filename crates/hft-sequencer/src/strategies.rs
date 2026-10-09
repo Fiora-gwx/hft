@@ -10,7 +10,7 @@ use hft_strategy_sdk::{
     CtxBufs, EventRef, GroupSpecExt, GroupTable, IntentHandle, IntentOutcome, OrderIntent, OwnEvMask, Part,
     RefView, StrategyInstance, StrategySet, TargetIntent, TimerId,
 };
-use hft_types::{AccountId, CapSource, GroupId, InstId, StrategyId, VenueId};
+use hft_types::{AccountId, CapSource, GroupId, InstId, StrategyId};
 
 use crate::engine::Engine;
 use crate::notify::{Notif, Queued};
@@ -90,7 +90,7 @@ pub(crate) enum OpOwned {
     Cancel(CancelReq),
     Timer(TimerReq),
     CancelTimer(TimerId),
-    Halt { group: GroupId, reason: u16 },
+    Halt { group: GroupId },
 }
 
 /// The instance table.
@@ -105,7 +105,6 @@ pub struct Instances<S: StrategySet> {
     pub(crate) ops: Vec<(IntentHandle, OpOwned)>,
     pub(crate) outcomes: Vec<(IntentHandle, IntentOutcome)>,
     pub(crate) notes: Vec<NoteReq>,
-    pub(crate) queue: Vec<Queued>,
     pub(crate) touched: Vec<u16>,
     /// Market-delivery subscription index (CSR etc.).
     pub subs: crate::subs::SubIndex,
@@ -182,7 +181,6 @@ impl<S: StrategySet> Instances<S> {
             ops: Vec::with_capacity(hft_strategy_sdk::ctx::CAP_OPS),
             outcomes: Vec::with_capacity(hft_strategy_sdk::ctx::CAP_OPS),
             notes: Vec::with_capacity(hft_strategy_sdk::ctx::CAP_NOTE),
-            queue: Vec::with_capacity(1024),
             touched: Vec::with_capacity(256),
             subs: crate::subs::SubIndex::new(rd, caps),
             models: crate::advisor::MirrorModels::default(),
@@ -778,7 +776,7 @@ pub(crate) fn apply_ctx<D: crate::Driver<S>, S: StrategySet>(
             Op::Cancel(c) => OpOwned::Cancel(*c),
             Op::Timer(t) => OpOwned::Timer(*t),
             Op::CancelTimer(id) => OpOwned::CancelTimer(id),
-            Op::Halt { group, reason } => OpOwned::Halt { group, reason },
+            Op::Halt { group, .. } => OpOwned::Halt { group },
         };
         inst.ops.push((h, o));
     }
@@ -896,14 +894,4 @@ pub(crate) fn gix_for<S: StrategySet>(inst: &Instances<S>, account: AccountId, g
         .and_then(|ix| inst.slots.get(ix))
         .and_then(|s| s.gix_of(g))
         .unwrap_or(hft_strategy_sdk::GIX_NONE)
-}
-
-/// The slot index owning a group (by the GroupId's strategy byte).
-pub(crate) fn ix_of_group<S: StrategySet>(inst: &Instances<S>, g: GroupId) -> Option<usize> {
-    inst.ix(g.strategy())
-}
-
-/// Venue helper.
-pub(crate) fn venue_of(rd: &RefData, i: InstId) -> VenueId {
-    rd.inst(i).venue
 }

@@ -4,7 +4,7 @@
 use hft_event::RecordFlags;
 use hft_exec::{ExecCmdErr, ExecOut};
 use hft_strategy_sdk::{IntentOutcome, StrategySet, TargetIntent};
-use hft_types::{AccountId, GroupId, InstId, Rate, StrategyId, VenueId};
+use hft_types::{AccountId, GroupId, Rate, StrategyId, VenueId};
 
 use crate::Driver;
 use crate::engine::Engine;
@@ -294,6 +294,3 @@ pub(crate) fn on_mode<D: Driver<S>, S: StrategySet>(
     e.put_exec(xo);
     Ok(())
 }
-
-#[allow(dead_code)]
-fn _inst_unused(_i: InstId) {}

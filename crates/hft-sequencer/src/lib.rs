@@ -80,7 +80,8 @@ impl<S: StrategySet> core::fmt::Debug for ConfigSet<S> {
     }
 }
 
-/// Where `boot` starts from.
+/// Where `boot` starts from (built once per boot; the size difference does not matter).
+#[allow(clippy::large_enum_variant)]
 pub enum BootSource<S: StrategySet> {
     /// Cold-start recovery from the journal the driver reads.
     Journal(RecoverPlan),

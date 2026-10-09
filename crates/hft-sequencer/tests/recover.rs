@@ -394,8 +394,7 @@ fn seq_261_remaining_durations_preserved() {
     let rs = h2
         .snapshots()
         .into_iter()
-        .filter(|r| snap(r).0.purpose == 4)
-        .last()
+        .rfind(|r| snap(r).0.purpose == 4)
         .expect("recovery snapshot");
     let v = h2.verify_from(Some(rs.seq));
     assert!(v.is_empty(), "verify from the Recovery snapshot: {v:?}");
@@ -416,8 +415,7 @@ fn recovery_snapshot_restores_the_run_state() {
     let rs = h2
         .snapshots()
         .into_iter()
-        .filter(|r| snap(r).0.purpose == 4)
-        .last()
+        .rfind(|r| snap(r).0.purpose == 4)
         .expect("recovery snapshot");
     let mut wa = hft_strategy_sdk::SnapshotWriter::new(64 << 20);
     h2.s.write_sections(&mut wa);

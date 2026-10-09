@@ -5,12 +5,10 @@
 use std::collections::VecDeque;
 
 use hft_event::{
-    BlobKind, BlobRef, CmdHdr, CmdKind, CmdPreview, CmdResult, CmdScope, ControlCmd, EventKind,
-    FundingSettle, NoteLevel, ReconcileReport, RecordFlags,
+    BlobRef, CmdHdr, CmdPreview, CmdResult, CmdScope, ControlCmd, EventKind, NoteLevel, ReconcileReport,
+    RecordFlags,
 };
-use hft_ledger::{
-    AdjustDelta, AdjustKind, FundingRecon, FundingReconItem, PnlDelta, TransferDelta, TransferKind,
-};
+use hft_ledger::{AdjustDelta, AdjustKind, FundingRecon, FundingReconItem, TransferDelta, TransferKind};
 use hft_refdata::{AccountKind, RefData};
 use hft_risk::mode::{GateEvent, KillCmd, ModeErr, ModeInput, ReconItemKey, StorageKind, VenueNoticeCmd};
 use hft_risk::{AccountScope, ReconcileGroup};
@@ -200,7 +198,6 @@ pub struct CmdState {
     pub unknown_last: Vec<u32>,
     pub feeds_last: Vec<bool>,
     /// Last `ReplaceRefdata` version accepted or active.
-    pub refdata_version: u64,
     /// `report_id → view_seq` of the latest reconciliation groups.
     pub recon_view: Vec<(u64, u64)>,
     /// `(report_id, account, inst) → exch − engine` of position items.
@@ -229,7 +226,6 @@ impl CmdState {
             conns: ConnTable::default(),
             unknown_last: vec![u32::MAX; 256],
             feeds_last: vec![false; 256],
-            refdata_version: 0,
             recon_view: Vec::new(),
             recon_diff: Vec::new(),
             fill_seq: Vec::new(),
@@ -302,7 +298,6 @@ fn write_result(e: &mut Engine, inst_ver: u64, hdr: &CmdHdr, r: &Res) {
     c.detail = r.detail;
     c.engine_epoch = e.epoch;
     c.effect_count = r.effect;
-    c.refdata_version = e.rd.version();
     c.risk_version = e.risk.params().version;
     c.params_version = inst_ver;
     c.ctl_state_version = e.risk.mode.ctl_state_version();
@@ -338,7 +333,6 @@ fn issuer_str(h: &CmdHdr) -> &str {
     core::str::from_utf8(h.issuer.get(..n).unwrap_or(&[])).unwrap_or("")
 }
 
-const ROLE_VIEWER: u8 = CmdHdr::ROLE_VIEWER;
 const ROLE_TRADER: u8 = CmdHdr::ROLE_TRADER;
 const ROLE_ADMIN: u8 = CmdHdr::ROLE_ADMIN;
 
@@ -1900,15 +1894,15 @@ fn drain_timeout_note<S: StrategySet>(e: &mut Engine, _inst: &Instances<S>) {
     for a in 1..=crate::engine::account_count(&e.rd) {
         let acc = AccountId(a as u8);
         let q = e.oms.quiescent(acc);
-        if q & (hft_oms::quiesce::LINKS_ACTIVE
-            | hft_oms::quiesce::IOC_NONTERMINAL
-            | hft_oms::quiesce::HEDGE_RETRY_PENDING)
+        if (q
+            & (hft_oms::quiesce::LINKS_ACTIVE
+                | hft_oms::quiesce::IOC_NONTERMINAL
+                | hft_oms::quiesce::HEDGE_RETRY_PENDING)
             != 0
-            || !e.exec.drain_ready_acct(acc)
+            || !e.exec.drain_ready_acct(acc))
+            && let Some(w) = bitmap.get_mut(a / 64)
         {
-            if let Some(w) = bitmap.get_mut(a / 64) {
-                *w |= 1u64 << (a % 64);
-            }
+            *w |= 1u64 << (a % 64);
         }
         if q & hft_oms::quiesce::LINKS_ACTIVE != 0 {
             links += 1;
@@ -2389,18 +2383,6 @@ fn auto_external_check(e: &Engine, it: &ReconcileReport, summary_flags: u16) -> 
 }
 
 // Fill seq tracking for StaleReport / AUTO_EXTERNAL (kept in CmdState).
-impl CmdState {
-    /// Records a fill of (account, inst) at the current seq.
-    pub fn note_fill(&mut self, a: AccountId, i: InstId, seq: u64) {
-        match self.fill_seq.iter_mut().find(|x| x.0 == (a, i)) {
-            Some(x) => x.1 = seq,
-            None => self.fill_seq.push(((a, i), seq)),
-        }
-    }
-}
-
-#[allow(dead_code)]
-fn _unused(_: BlobKind, _: StrategyId, _: PnlDelta, _: FundingSettle) {}
 
 impl Default for ReconPendingHdr {
     fn default() -> ReconPendingHdr {

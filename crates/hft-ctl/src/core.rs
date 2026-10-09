@@ -17,7 +17,6 @@ use hft_event::{
     parse_spb1,
 };
 use hft_refdata::{AccountKind, LegView, LoadErrCode, RefData};
-use hft_risk::RiskParams;
 use hft_rt::{MailReceiver, MailSender, TscUtc};
 use hft_strategy_sdk::{GroupTable, ParamError, RefView, ResetPreview, StrategySet};
 use hft_types::{AccountId, GROUP_NONE, InstId, StrategyId, Tsc, VenueId};

@@ -235,10 +235,7 @@ impl MemJournal {
     /// returns the number of records dropped.
     pub fn truncate_to_event_end(&mut self) -> usize {
         let mut dropped = 0;
-        loop {
-            let Some(seg) = self.segments.last_mut() else {
-                break;
-            };
+        while let Some(seg) = self.segments.last_mut() {
             match seg.records.last() {
                 Some(r) if r.flags.0 & RecordFlags::EVENT_END.0 == 0 => {
                     seg.records.pop();

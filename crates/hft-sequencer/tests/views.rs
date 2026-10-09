@@ -23,8 +23,8 @@ fn now_on_bbo(h: &mut H, i: hft_types::InstId) -> Now {
     h.quote(i, "50000", "50002");
     h.run();
     clear_hook();
-    let v = c.borrow().last().copied().expect("delivered");
-    v
+
+    c.borrow().last().copied().expect("delivered")
 }
 
 #[test]

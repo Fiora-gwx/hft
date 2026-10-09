@@ -2,7 +2,7 @@
 //! OMS hedge requests and smoke orders — plus cancel/amend and the fixed-order drain of `OmsOut`
 //! (README "process" 3).
 
-use hft_event::{GwCmd, Note, NoteLevel, NoteSource, OrderAction, OrderDecision, OrderFlags, RecordFlags};
+use hft_event::{GwCmd, Note, NoteLevel, OrderAction, OrderDecision, OrderFlags, RecordFlags};
 use hft_exec::{ExecOrder, ExecOrigin, LinkBrokenCause, LinkNotice, LinkPhase, PlaceResult};
 use hft_oms::{
     ApprovedIntent, HedgeGate, HedgePx, HedgeRequest, OmsOut, OmsTimerKind, OrderState, link_valid,
@@ -16,8 +16,8 @@ use hft_strategy_sdk::{
     HedgeKind, IntentClass, IntentOutcome, LinkRole, OrderIntent, OrderRef, OrderUpdate, StrategySet,
 };
 use hft_types::{
-    AccountId, CapSource, GroupId, InstId, Px, Qty, Rate, RejectBits, RoundMode, Side, SlotId, StrategyId,
-    Tsc, VenueId,
+    AccountId, CapSource, GroupId, InstId, Px, Qty, RejectBits, RoundMode, Side, SlotId, StrategyId, Tsc,
+    VenueId,
 };
 
 use crate::Driver;
@@ -73,6 +73,7 @@ fn oms_origin(s: &Src) -> hft_oms::Origin {
 }
 
 /// A decision that is only recorded (rejected or shadowed): no slot, no tokens, no in-flight.
+#[allow(clippy::too_many_arguments)]
 fn record_only(
     e: &mut Engine,
     strategy: StrategyId,
@@ -858,11 +859,6 @@ fn foreign_to_external(f: &hft_oms::ForeignFill) -> hft_event::ExternalFill {
         rx_tsc: Tsc(0),
         fill_seq: if f.trade_id == 0 { f.cum_filled.0 as u64 } else { 0 },
     }
-}
-
-/// Rate helper re-export for other modules.
-pub(crate) fn rate_one() -> Rate {
-    Rate(1_000_000_000)
 }
 
 /// Unused helpers kept for the pipeline's callers.

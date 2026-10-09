@@ -3,14 +3,14 @@
 //! `decided_tsc`, `EVENT_END`, publish, then the ring pushes.
 
 use hft_event::{
-    AccountConfigReportHdr, AdviceHdr, BalanceReport, Bbo, CmdScope, ConnRole, ConnState, ConnStateKind,
-    EngineClock, EventKind, ExternalFill, Funding, FundingSettle, IndexPrice, L2BatchHdr, L2SnapHdr, Level,
-    Liquidation, MarginReportHdr, MarkPrice, Note, NoteLevel, NoteSource, OrderEvent, OrderEventKind,
-    PositionReport, ReconcileReport, RecordFlags, RecordHeader, SendReport, Timer, Trade,
+    AccountConfigReportHdr, AdviceHdr, BalanceReport, Bbo, ConnRole, ConnState, ConnStateKind, EngineClock,
+    EventKind, ExternalFill, Funding, FundingSettle, IndexPrice, L2BatchHdr, L2SnapHdr, Level, Liquidation,
+    MarginReportHdr, MarkPrice, Note, NoteLevel, OrderEvent, OrderEventKind, PositionReport, RecordFlags,
+    RecordHeader, SendReport, Timer, Trade,
 };
 use hft_ledger::PnlDelta;
-use hft_refdata::{FundingSettleKind, InstKind};
-use hft_risk::mode::{GateEvent, ModeInput, StorageKind};
+use hft_refdata::FundingSettleKind;
+use hft_risk::mode::{GateEvent, ModeInput};
 use hft_risk::{EquitySource, EquityView, MarginSample, RiskTimer};
 use hft_strategy_sdk::{ExternalFillView, LiquidationView, StrategySet, TradeView};
 use hft_types::{AccountId, GROUP_NONE, GroupId, InstId, MAX_BBO_CONN_SLOTS, Px, Qty, Seq, Tsc, VenueId};
@@ -33,8 +33,6 @@ type R<T> = Result<T, FatalReason>;
 pub(crate) struct Pending<'a> {
     pub market: Option<MarketEv>,
     pub direct: Option<(usize, Direct<'a>, bool)>,
-    /// Ledger touched: refresh position-driven subscriptions.
-    pub legs_touched: bool,
 }
 
 /// Processes the Input in `seq.slot`.
@@ -1516,9 +1514,6 @@ impl EquitySource for LedgerEquity<'_> {
         }
     }
 }
-
-#[allow(dead_code)]
-fn _unused(_: CmdScope, _: InstKind, _: NoteSource) {}
 
 #[allow(dead_code)]
 fn _as_bytes(n: &Note) -> &[u8] {

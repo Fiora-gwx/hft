@@ -26,11 +26,10 @@ fn steady() -> H {
 }
 
 fn pending(h: &H, id: u64) -> Option<(u16, u16, u16)> {
-    let kf_body = {
+    {
         let e = h.s.engine();
         e.cmd_recon_pending(id)
-    };
-    kf_body
+    }
 }
 
 #[test]

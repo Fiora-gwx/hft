@@ -242,7 +242,7 @@ pub fn refdata_blob(w: &WorldSpec, all_sim: bool) -> Vec<u8> {
         b.inst(RdInst {
             id: i.id,
             venue: i.venue,
-            symbol: format!("I{}", i.id.0).into(),
+            symbol: format!("I{}", i.id.0),
             status: InstStatus::Trading,
             kind: if i.perp { InstKind::Perp } else { InstKind::Spot },
             asset: i.base,
@@ -254,9 +254,9 @@ pub fn refdata_blob(w: &WorldSpec, all_sim: bool) -> Vec<u8> {
             min_notional: Notional(5_000_000),
             book_window: 4096,
             l2_depth: 0,
-            tick_str: dec_str(i.tick, e.px_exp).into(),
-            lot_str: dec_str(i.lot, e.qty_exp).into(),
-            min_qty_str: dec_str(i.min_qty, e.qty_exp).into(),
+            tick_str: dec_str(i.tick, e.px_exp),
+            lot_str: dec_str(i.lot, e.qty_exp),
+            min_qty_str: dec_str(i.min_qty, e.qty_exp),
             funding_interval_s: if i.perp { 28_800 } else { 0 },
             max_leverage: if i.perp { 50 } else { 0 },
             ..RdInst::default()

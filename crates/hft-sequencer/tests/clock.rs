@@ -186,8 +186,7 @@ fn seq_109_snapshot_engine_ns() {
     let t = h
         .recs()
         .into_iter()
-        .filter(|r| r.kind == EventKind::TIMER && r.seq < sr.seq)
-        .last()
+        .rfind(|r| r.kind == EventKind::TIMER && r.seq < sr.seq)
         .unwrap();
     let (hd, _) = snap(&sr);
     assert_eq!(hd.at_seq, t.seq);
