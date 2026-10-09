@@ -12,6 +12,7 @@
 mod common;
 mod params;
 mod preempt;
+mod process;
 mod boot;
 mod clock;
 mod conflate;

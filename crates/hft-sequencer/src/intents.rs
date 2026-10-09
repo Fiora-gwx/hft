@@ -290,7 +290,14 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
             };
         }
     }
-    if let Src::Hedge { req } = src {
+    // The peer of a Simultaneous second leg (README "意图管线" 4); OnFill hedges have none.
+    if let Src::Hedge { req } = src
+        && req.role == LinkRole::Second
+        && e
+            .oms
+            .link_plan(req.link_id)
+            .is_some_and(|(_, p)| p.kind == hft_strategy_sdk::HedgeKind::Simultaneous)
+    {
         iv.link_venue = req.peer_venue;
         iv.link_account = req.peer_account;
     }

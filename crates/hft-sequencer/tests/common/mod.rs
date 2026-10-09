@@ -616,8 +616,10 @@ pub fn b0_setup(rd: &RefData) -> EngineSetup {
     oms.max_out_per_event = 16;
     oms.links_per_account = 4;
     oms.slots = hft_oms::PerTable::new(16);
-    let mut exec = ExecConfig { default: ExecParams::default(), accounts: Vec::new() };
-    exec.default = ExecParams::default();
+    let accounts = (1..=9u8)
+        .map(|a| hft_exec::ExecAccount { account: AccountId(a), sim: a == 9, params: None })
+        .collect();
+    let exec = ExecConfig { default: ExecParams::default(), accounts };
     let mut keys = Vec::new();
     for a in [AC1, AC2] {
         for v in [A, B] {
@@ -771,6 +773,10 @@ pub struct TestIo<S: StrategySet> {
     pub old: Option<Log>,
     /// `(take number, tsc)`: TSC jumps after that hand-over.
     pub jump: Option<(u64, u64)>,
+    /// Fixed `measure()` value (`None` = the TSC).
+    pub measure: Option<u64>,
+    /// `committed_len` at every out-ring push.
+    pub push_committed: Vec<u64>,
 }
 
 impl<S: StrategySet> TestIo<S> {
@@ -800,6 +806,8 @@ impl<S: StrategySet> TestIo<S> {
             build: [0; 20],
             old: None,
             jump: None,
+            measure: None,
+            push_committed: Vec::new(),
         }
     }
     pub fn ring(&mut self, r: RingId) -> &mut VecDeque<Elem> {
@@ -851,6 +859,7 @@ impl<S: StrategySet> LiveIo<S> for TestIo<S> {
             *f -= 1;
         }
         self.out.push((ring, *c));
+        self.push_committed.push(self.j.committed_len);
         true
     }
     fn push_feed(&mut self, v: VenueId, c: &FeedCmd) -> bool {
@@ -880,6 +889,9 @@ impl<S: StrategySet> LiveIo<S> for TestIo<S> {
         let mut h = hft_sequencer::snapshot::host_profile(self.hz);
         h.build_git = self.build;
         h
+    }
+    fn measure(&mut self) -> Tsc {
+        Tsc(self.measure.unwrap_or(self.tsc))
     }
     fn recovery_log(&mut self) -> Option<Log> {
         self.old.take()
@@ -1163,6 +1175,22 @@ impl<S: StrategySet> H<S> {
             self.push(RingId::Hk, &sys_timer(16 | (u32::from(a.0) << 16), t));
         }
         self.run();
+        for a in [AC1, AC2] {
+            for v in [A, B] {
+                let br = hft_event::BalanceReport {
+                    venue: v,
+                    account: a,
+                    asset: USDT,
+                    _pad: 0,
+                    free: q("100000"),
+                    locked: Qty(0),
+                    ex_ts_ns: 0,
+                    rx_tsc: Tsc(self.now()),
+                };
+                self.push(RingId::Rep(0), &br);
+            }
+            self.margin_report(a, "100000", "0", "100000");
+        }
         self.quote(A1, "50000", "50001");
         self.quote(B1, "50010", "50011");
         self.quote(A2, "3000", "3000.5");
@@ -1181,6 +1209,20 @@ impl<S: StrategySet> H<S> {
             self.run();
             assert_eq!(self.result_of(id).map(|r| r.status), Some(0), "steady: SetMode Live of {s:?}");
         }
+    }
+
+    /// A `MarginReport` of (a, B) without items.
+    pub fn margin_report(&mut self, a: AccountId, balance: &str, maint: &str, avail: &str) {
+        let mut hd = hft_event::MarginReportHdr::new_zeroed();
+        hd.venue = B;
+        hd.account = a;
+        hd.source = 1;
+        hd.margin_balance = n(balance);
+        hd.maint_margin = n(maint);
+        hd.avail_margin = n(avail);
+        hd.margin_ratio = Rate(0);
+        hd.rx_tsc = Tsc(self.now());
+        self.push_bytes(RingId::Rep(0), EventKind::MARGIN_REPORT, hd.as_bytes().to_vec());
     }
 
     /// Next update id per inst.
@@ -1459,3 +1501,118 @@ pub fn trade(i: InstId, id: u64) -> hft_event::Trade {
     h.inst = i;
     hft_event::Trade { h, px: px("50000"), qty: q("0.001"), trade_id: id, taker_side: hft_types::Side::Buy, _pad: [0; 7] }
 }
+
+// ------------------------------------------------------------------------------- links and targets
+
+use hft_strategy_sdk::{
+    ExecSpec, FirstLeg, HedgeKind, HedgePlan, LegLink, LegLinkOpt, LegTarget, LinkRole, OnFail, PairParams, PxMode,
+    ResidualPolicy, TakerSliceParams, TargetIntent, TargetReason, Urgency,
+};
+
+/// An OnFill hedge plan: second leg `inst` (`side`) at ratio 1:1, IOC, cross.
+pub fn onfill(account: AccountId, inst: InstId, side: hft_types::Side) -> HedgePlan {
+    HedgePlan {
+        kind: HedgeKind::OnFill,
+        px_mode: PxMode::Cross,
+        on_fail: OnFail::Retry,
+        tif: hft_types::Tif::Ioc,
+        venue: inst_venue(inst),
+        account,
+        side,
+        reduce_only: 0,
+        inst,
+        ratio_num: 1,
+        ratio_den: 1,
+        residual: ResidualPolicy::Defer,
+        _pad: [0; 3],
+        px_param: r("0.003"),
+        max_slip: r("0.004"),
+        limit_px: Px(0),
+    }
+}
+
+/// A first leg a1 buy (IOC at the ask) with an OnFill b1 sell link in the hook's first group.
+pub fn pair_first(hx: &Hx<'_>, qty: Qty) -> hft_strategy_sdk::OrderIntent {
+    let mut it = open_buy(hx, A1);
+    it.qty = qty;
+    let g = it.group;
+    it.link = LegLinkOpt::some(LegLink {
+        group: g,
+        role: LinkRole::First,
+        _pad: [0; 3],
+        tolerance: r("0.02"),
+        hedge: onfill(hx.s.account, B1, hft_types::Side::Sell),
+    });
+    it
+}
+
+pub fn slice0() -> TakerSliceParams {
+    TakerSliceParams {
+        depth_frac: r("0.5"),
+        depth_levels: 5,
+        _pad0: [0; 7],
+        max_cross: r("0.005"),
+        max_chunk_notional: n("1000"),
+        min_chunk_notional: n("10"),
+        cooldown_ms: 300,
+        _pad1: 0,
+    }
+}
+
+pub fn pair0() -> PairParams {
+    PairParams {
+        slice: slice0(),
+        first_leg: FirstLeg::ByLiquidity,
+        first_leg_ix: 0,
+        hedge_px_mode: PxMode::Cross,
+        _pad0: [0; 5],
+        hedge_cross: r("0.003"),
+        hedge_max_slip: r("0.004"),
+        ratio_num: 1,
+        ratio_den: 1,
+        fix_tolerance: r("0.02"),
+        residual: ResidualPolicy::TrimExcess,
+        _pad1: [0; 7],
+    }
+}
+
+/// A target of (a, g) with `legs = [(leg_ix, qty)]`.
+pub fn target(a: AccountId, g: GroupId, legs: &[(u8, Qty)], exec: ExecSpec) -> TargetIntent {
+    let mut l = [LegTarget::ZERO; 4];
+    for (d, (i, x)) in l.iter_mut().zip(legs.iter()) {
+        *d = LegTarget::new(*i, *x);
+    }
+    TargetIntent {
+        account: a,
+        _pad0: [0; 3],
+        group: g,
+        legs: l,
+        n_legs: legs.len() as u8,
+        reason: TargetReason::Rebalance,
+        urgency: Urgency::Normal,
+        _pad1: [0; 5],
+        band: r("0.01"),
+        exec,
+        tag: 0x10,
+        _pad2: 0,
+    }
+}
+
+impl<S: StrategySet> H<S> {
+    /// s2 sets `t` on the next a1 Bbo.
+    pub fn set_target_s2(&mut self, t: TargetIntent) {
+        set_hook(move |hx, ev, ctx| {
+            if let EventRef::Bbo { inst, .. } = ev
+                && *inst == A1
+                && hx.s.strategy == S2
+            {
+                let _ = ctx.target(t);
+            }
+        });
+        self.quote(A1, "50000", "50003");
+        self.run();
+        clear_hook();
+    }
+}
+
+use hft_strategy_sdk::EventRef;

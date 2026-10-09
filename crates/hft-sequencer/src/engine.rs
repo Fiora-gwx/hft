@@ -482,6 +482,10 @@ impl Engine {
         })
     }
 
+    /// Whether a command id is in the de-duplication table (tests, tools).
+    pub fn cmd_dedup_has(&self, id: [u8; 16]) -> bool {
+        self.cmd.dedup.iter().any(|r| r.cmd_id == id)
+    }
     /// The read-only views of the current state (tests, tools).
     pub fn seq_views(&self) -> crate::views::SeqViews<'_> {
         crate::strategies::full_views(self)

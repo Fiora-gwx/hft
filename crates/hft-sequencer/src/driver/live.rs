@@ -70,6 +70,10 @@ pub trait LiveIo<S: StrategySet> {
     fn after_take(&mut self, r: Option<RingId>) {
         let _ = r;
     }
+    /// The measurement TSC (`decided_tsc`); production = `tsc()`.
+    fn measure(&mut self) -> Tsc {
+        self.tsc()
+    }
     /// The old journal of a cold start (records of every readable segment, in seq order).
     fn recovery_log(&mut self) -> Option<super::replay::Log> {
         None
@@ -910,7 +914,7 @@ impl<S: StrategySet, IO: LiveIo<S>> Driver<S> for LiveDriver<S, IO> {
     }
 
     fn measure(&mut self) -> Tsc {
-        self.io.tsc()
+        self.io.measure()
     }
 
     fn emit(&mut self, o: &OutRecord<'_>) -> EmitResult {
