@@ -333,7 +333,7 @@ g. rep-sim ≤ sim_max_per_round
 | `Sys{PersistLag{level}}` / `Sys{DiskLow{level}}` / `Sys{StorageOk}` | housekeeping 测得的 persist 滞后 / 冷盘剩余空间跨越档位(1 = 禁开阈值,2 = Drain 阈值;阈值归 [apps/hft-core](../../apps/hft-core/README.md)),两项都回到阈值以下时写 `StorageOk` | `risk.mode.apply(Storage{kind, level})`;见[存储降级](#存储降级) |
 | `Sys{KillSelfTestOk{account}}` | hft-core 启动时该账户的 kill 位自检通过(自检本身在 hft-core,结果另以 Meta `Note{KillSelfTest}` 供人读) | `risk.mode.apply(Gate(KillSelfTest{account}))`:启动闸门 `IDENTITY` 的一部分 |
 | `Sys{RefdataRecheck}` | `view().refdata_recheck_due()` 为真(`ReplaceRefdata` 发起的 Drain 到达复核点,见 [Drain](#drain) 第 4 步)的下一轮 a 段最先写:先用待生效的 blob 跑一次 ctl-gateway 的装配校验(`RefdataAssemblyCheck`,装配处提供,归 apps/hft-core),结果装进 `timer_id` 的参数位(0 = 通过,否则 = control-plane `RefdataAssembly` 的失败项;id 与编码登记在 [hft-event 定时器编码](../hft-event/README.md#定时器编码)) | Drain 末二次复核(见 [Drain](#drain) 第 4 步) |
-| `Sys{ConflateReport}` | 每 1 s | 写 `Note{Conflated}` 计数 |
+| `Sys{ConflateReport}` | 每 1 s | 写 `Note{Conflated}` 计数(驱动把上一报告以来丢弃的 `Bbo` 条数放在该 `Timer` 记录的 `deadline_tsc` 里,回放从日志读出,不依赖驱动状态) |
 | `Sys{AdvisorTick}` | 每 1 s | 只记录;advisor 以它为 Model 的时间刻度(SDK `model_tick`) |
 
 `EngineClock`(每次进程启动恰好一条、在任何其他 Input 之前)同样由实盘驱动写成 Input,见[引擎时间](#引擎时间engine_ns)。恢复、验证与镜像驱动不生成这些记录,只从日志读。
@@ -622,7 +622,7 @@ advice 环元素 = `AdviceHdr { strategy, account, local_kind, group, len, basis
 1. 确定受影响范围:不一致的记录带 (venue, account)(`OrderDecision`、`ExecDecision`、`FundingSettle`)→ 该 (venue, account);不带账户的记录(`CmdResult`、无账户的 `Note`、快照哈希)→ 全部 (venue, account)。
 2. 恢复结束时对每个受影响的 (venue, account):`oms.force_unknown(venue, account)` 把**全部**非终态槽(含 Live;范围归 [hft-oms](../hft-oms/README.md))置 `Unknown` 并查询;该 (venue, account) 的上一 epoch 回报一律按成交证据应用(迟到成交按墓碑入账并报 P0)。
 3. 受影响账户置 `RECOVER_MISMATCH`:禁用自动解除 Recovery;`RECONCILED` 需要该账户每个 venue 一组 `EpochStart` 之后的报告满足严格条件(未知挂单由对账以孤儿单报出,须先撤单或处置)。
-4. 每个受影响的 (venue, account) 恰好写一条 `Note{RecoverMismatch, seq, venue, account}`(`seq` = 使它受影响的第一条不一致记录的 seq),级别 **P0**。
+4. 每个受影响的 (venue, account) 恰好写一条 `Note{RecoverMismatch, seq, venue, account}`(`seq` = 使它受影响的第一条不一致记录的 seq),级别 **P0**;这些 Note 在 Recovery 引导块之后、`EngineClock` 之前写成一个事件(引导块的快照已含恢复结束的结果,新段的验证回放从该快照起步)。
 
 ### 毒丸输入隔离
 
