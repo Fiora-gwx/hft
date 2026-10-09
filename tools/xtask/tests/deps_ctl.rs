@@ -172,7 +172,7 @@ fn ctl_161_ctl_dep_closure() {
             for (i, _) in t.match_indices("hft_sequencer::") {
                 let rest = &t[i + "hft_sequencer::".len()..];
                 assert!(
-                    rest.starts_with("ParsedConfig"),
+                    rest.starts_with("ParsedConfig") || rest.starts_with("ParsedParams"),
                     "{}: hft_sequencer::{}",
                     e.path().display(),
                     &rest[..rest.len().min(30)]

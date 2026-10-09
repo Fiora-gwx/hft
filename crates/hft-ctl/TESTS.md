@@ -1264,7 +1264,7 @@ spec: README.md
   1. `cargo xtask deps` 检查 `hft-ctl` 的依赖闭包(含 dev 依赖)
 - 期望:
   - 闭包中没有 `tokio`、`hft-strategy-registry` 与任何 `strategies/*`;没有 hot crate 反向依赖本 crate
-  - 源码中 `hft_sequencer::` 的引用只有 `ParsedConfig`(xtask 的源码扫描)
+  - 源码中 `hft_sequencer::` 的引用只有 `ParsedConfig` 与其载荷 `ParsedParams`(xtask 的源码扫描)
 - 实现:`tools/xtask/tests/deps_ctl.rs::ctl_161_ctl_dep_closure`
 
 ### CTL-200 SetMode 经客户端的每种结果码

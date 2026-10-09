@@ -74,7 +74,7 @@ name = "dst"
 path = "../../tests/dst/main.rs"
 
 [dev-dependencies]
-hft-testkit = { path = ".", features = ["sdk-mock", "seq"] }
+hft-testkit = { path = ".", features = ["sdk-mock"] }
 criterion.workspace = true
 
 [[bench]]

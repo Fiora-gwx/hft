@@ -96,13 +96,13 @@ fn advice(s: StrategyId, a: AccountId, g: GroupId, len: usize) -> Vec<u8> {
 }
 
 fn seq_317_overhead_per_event(c: &mut Criterion) {
-    // A Timer{Sys, AdvisorTick}: append + engine_ns + dispatch + end_event, no component work.
+    // A Timer{Sys, AdvisorTick} (id 6): append + engine_ns + dispatch + end_event, no component work.
     c.bench_function("seq/overhead_per_event", |b| {
         let mut h = steady();
         b.iter_custom(|iters| {
             each(iters, &mut h, |h, _| {
                 let t = h.now();
-                h.push(RingId::Hk, &sys_timer(7, t));
+                h.push(RingId::Hk, &sys_timer(6, t));
             })
         })
     });
@@ -177,7 +177,7 @@ fn seq_323_notify_continue(c: &mut Criterion) {
                 let t = h.now();
                 for k in 0..64u32 {
                     let _ = k;
-                    h.push(RingId::Hk, &sys_timer(7, t));
+                    h.push(RingId::Hk, &sys_timer(6, t));
                 }
             })
         })

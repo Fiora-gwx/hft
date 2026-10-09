@@ -560,6 +560,11 @@ impl Engine {
         self.out.push(RecordFlags(0), &note);
     }
 
+    /// Viewer previews held for confirmation (control-plane `VIEWER_CONFIRM_TTL_MS`; at most 16).
+    pub fn viewer_preview_count(&self) -> usize {
+        self.cmd.previews.len()
+    }
+
     /// An empty `OmsOut` from the pool (nested drains each take their own).
     pub(crate) fn take_oms(&mut self) -> OmsOut {
         self.oms_pool.pop().unwrap_or_default()

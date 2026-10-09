@@ -4379,7 +4379,7 @@ spec: README.md
 - 规则:[Drain](README.md#drain)
 - 级别:table
 - 里程碑:M2
-- 前置:B0 稳态;账户 1 在 A 有普通 GTC 挂单 2 张、带 LegLink 的挂单第一腿 1 张;在 B 有普通挂单 1 张
+- 前置:B0 稳态,A、B 的 `VenueCaps.flags` 含 `BATCH_CANCEL`;账户 1 在 A 有普通 GTC 挂单 2 张、带 LegLink 的挂单第一腿 1 张;在 B 有普通挂单 1 张
 - 实现:`crates/hft-sequencer/tests/drain.rs::seq_305_drain_cancel`
 
 | 行 | 命令 | 期望(同一 Input 内) |

@@ -663,7 +663,9 @@ fn command<'a, D: Driver<S>, S: StrategySet>(
             }
         }
     }
-    if draining && is_upgrade_class(c, e) && !flatten_kill {
+    // `Resume{Draining}` is answered by the cap rules (not resumable), not by the drain gate.
+    let resume_draining = matches!(c, ControlCmd::Resume { source, .. } if *source == CapSource::DRAINING);
+    if draining && is_upgrade_class(c, e) && !flatten_kill && !resume_draining {
         return Ok(res(status::PRECONDITION_FAILED, detail::DRAINING));
     }
     if preview {
@@ -1812,9 +1814,45 @@ pub(crate) fn start_drain<D: Driver<S>, S: StrategySet>(
         e.oms
             .cancel_all(hft_oms::CancelScope::Global, false, e.now.tsc, e.cur_seq, &mut o);
     } else {
-        // Linked resting first legs only: cancel the open orders of every linked cell.
-        e.oms
-            .cancel_all(hft_oms::CancelScope::Global, true, e.now.tsc, e.cur_seq, &mut o);
+        // Only the resting first legs that carry a LegLink (their fill would leave a naked leg);
+        // every other resting order stays.
+        let trig = e.trig;
+        let first = hft_strategy_sdk::LinkRole::First as u8;
+        for a in 1..=crate::engine::account_count(&e.rd) {
+            let acc = AccountId(a as u8);
+            for v in 0..64u8 {
+                if e.rd.account(acc).venues & (1u64 << v) == 0 {
+                    continue;
+                }
+                let venue = VenueId(v);
+                let n = e.oms.table_view(venue, acc).map_or(0, |t| t.n_slots);
+                for s in 1..=n {
+                    let Some((sl, ext, _)) = e.oms.raw_slot(venue, acc, s) else {
+                        continue;
+                    };
+                    let open = matches!(
+                        sl.state,
+                        hft_oms::OrderState::Live
+                            | hft_oms::OrderState::PendingNew
+                            | hft_oms::OrderState::PendingAmend
+                    );
+                    if !open || ext.role != first {
+                        continue;
+                    }
+                    let r = hft_strategy_sdk::OrderRef {
+                        venue,
+                        account: acc,
+                        _pad: [0; 2],
+                        slot: s,
+                        r#gen: sl.r#gen,
+                    };
+                    e.trace.rec("oms.cancel", u64::from(s), 2);
+                    if e.oms.cancel(r, &trig, e.now.tsc, e.cur_seq, &mut o).is_ok() {
+                        e.out.stamped.push(r);
+                    }
+                }
+            }
+        }
     }
     crate::intents::drain_oms(e, inst, drv, &mut o)?;
     e.put_oms(o);
