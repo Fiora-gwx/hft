@@ -78,7 +78,7 @@ fn case_with(name: &str, v: Value) {
         );
         golden(
             &dir().join(format!("{name}.cmd_hash.hex")),
-            (hex(&n.cmd_hash) + "\n").as_bytes(),
+            format!("cmd_hash {}\n", hex(&n.cmd_hash)).as_bytes(),
         );
     }
 }

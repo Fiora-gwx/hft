@@ -1970,7 +1970,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:P0 的 refdata 以 `fixtures/refdata/ctl-p0.blob` 固定;记录中 `expires_tsc`、`peer_uid`、`role` 为 0
 - 输入:`fixtures/ctl/set_mode_live_group.request.json`、`fixtures/ctl/set_mode_closeonly_all.request.json`、`fixtures/ctl/set_mode_shadow_sim.request.json`
-- 期望文件:`fixtures/ctl/set_mode_live_group.record.hex`、`fixtures/ctl/set_mode_closeonly_all.record.hex`、`fixtures/ctl/set_mode_shadow_sim.record.hex`与 `.cmd_hash.hex`(同名)
+- 期望文件(`.cmd_hash.hex` 为一行 `cmd_hash <64 位小写十六进制>`,行内写明 hash 以通过 fixtures 秘密扫描):`fixtures/ctl/set_mode_live_group.record.hex`、`fixtures/ctl/set_mode_closeonly_all.record.hex`、`fixtures/ctl/set_mode_shadow_sim.record.hex`与 `.cmd_hash.hex`(同名)
 - 实现:`crates/hft-ctl-proto/tests/golden.rs::ctp_140_golden_set_mode`
 
 ### CTP-141 SetParams 的请求规范化为固定字节与 cmd_hash
