@@ -1343,7 +1343,7 @@ fn group_busy(e: &Engine, a: AccountId, g: GroupId) -> bool {
     gp.legs.iter().any(|l| l.qty.0 != 0)
         || legs.leg.iter().any(|l| l.net.0 != 0 || l.inflight_immediate.0 != 0 || l.inflight_resting.0 != 0)
         || legs.has_pending
-        || e.exec.view(a, g).is_some()
+        || e.exec.cell(a, g).is_some_and(|c| c.has_target)
 }
 
 // ------------------------------------------------------------------------------- others
@@ -1421,7 +1421,7 @@ fn sim_reset<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<
         .cells()
         .filter(|c| c.account == a)
         .any(|c| matches!(e.risk.mode.effective(c), hft_risk::mode::Effective::Live));
-    let target = inst.cells().filter(|c| c.account == a).any(|c| e.exec.view(a, c.group).is_some());
+    let target = inst.cells().filter(|c| c.account == a).any(|c| e.exec.cell(a, c.group).is_some_and(|x| x.has_target));
     let q = e.oms.quiescent(a);
     let unknown = q & hft_oms::quiesce::UNKNOWN != 0;
     let ioc = q & hft_oms::quiesce::IOC_NONTERMINAL != 0;

@@ -359,7 +359,7 @@ pub(crate) fn apply_params<D: crate::Driver<S>, S: StrategySet>(
     e.risk.on_groups_changed(account, &groups);
     e.trace.rec("risk.on_groups_changed", u64::from(account.0), 0);
     for c in removed.iter() {
-        if e.exec.view(account, c.group).is_some() {
+        if e.exec.cell(account, c.group).is_some_and(|x| x.has_target) {
             let mut xo = e.take_exec();
             e.exec.clear_target(strategy, account, c.group, e.now, &mut xo);
             e.put_exec(xo);

@@ -307,3 +307,207 @@ fn seq_140_leg_summary_projection() {
     assert!(ls.quiescent);
     assert!(ls.naked_filled_notional.0 > 0);
 }
+
+fn mhdr(i: hft_types::InstId, rx: u64) -> hft_event::MarketHdr {
+    let mut h = <hft_event::MarketHdr as zerocopy::FromZeros>::new_zeroed();
+    h.venue = inst_venue(i);
+    h.inst = i;
+    h.rx_tsc = rx;
+    h
+}
+
+#[test]
+fn seq_142_bbo_steps() {
+    let mut h = steady();
+    let c: Cap<hft_strategy_sdk::BboView> = cap();
+    let c2 = c.clone();
+    set_hook(move |hx, ev, _| {
+        if let EventRef::Bbo { inst, b, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+        {
+            c2.borrow_mut().push(*b);
+        }
+    });
+    h.trace_on();
+    h.quote(A1, "50000", "50006");
+    h.run();
+    clear_hook();
+    let tr = h.trace();
+    let p = |n: &str| tr.iter().position(|x| *x == n).unwrap_or(usize::MAX);
+    assert!(p("top.apply") < p("liveness"));
+    assert!(p("liveness") < p("ledger.on_ref_px"));
+    assert!(p("ledger.on_ref_px") < p("exec.touch_inst"));
+    assert!(p("exec.touch_inst") < p("deliver.market"));
+    let e = h.s.engine();
+    assert_eq!(c.borrow().last().copied(), Some(e.market.bbo_view(&e.books, A1)));
+}
+
+#[test]
+fn seq_143_stale_bbo_no_ref_px() {
+    let mut h = steady();
+    h.quote(A1, "50000", "50006");
+    h.run();
+    let top0 = *h.s.engine().books.top(A1);
+    h.trace_on();
+    let rx = h.now() + 9_000;
+    let b = bbo(A1, A, 0, "49000", "49001", 1, rx);
+    h.push(RingId::Bbo(0), &b);
+    h.run();
+    assert!(!h.trace().contains(&"ledger.on_ref_px"));
+    assert_eq!(*h.s.engine().books.top(A1), top0);
+    assert_eq!(h.s.engine().market.conns[usize::from(A.0)][0].live_tsc, rx);
+}
+
+#[test]
+fn seq_147_market_last_updates() {
+    let mut h = steady();
+    set_subs(S2, vec![(B1, 0, hft_strategy_sdk::EvMask(0xFF), hft_strategy_sdk::Part::Fast)]);
+    let mut p = Spb::s2(2);
+    p.values[F_THR] = 9;
+    let id = h.set_params(&p);
+    h.run();
+    assert_eq!(h.result_of(id).map(|r| r.status), Some(0));
+    clear_log();
+    let mut t = trade(B1, 1);
+    t.px = px("50010");
+    t.qty = q("0.5");
+    t.h.ex_ts_ns = 123;
+    h.push(RingId::Md(1), &t);
+    let ix = hft_event::IndexPrice { h: mhdr(B1, 1), px: px("50005") };
+    h.push(RingId::Md(1), &ix);
+    let lq = hft_event::Liquidation { h: mhdr(B1, 1), px: px("50000"), qty: q("1"), side: Side::Buy, _pad: [0; 7] };
+    h.push(RingId::Md(1), &lq);
+    h.run();
+    let row = *h.s.engine().market.row(B1).unwrap();
+    assert_eq!(row.trade_px, px("50010"));
+    assert_eq!(row.trade_qty, q("0.5"));
+    assert_eq!(row.index_px, px("50005"));
+    let kinds: Vec<&str> = log().iter().filter(|g| g.s == S2 && !g.model).map(|g| g.kind).collect();
+    assert!(kinds.contains(&"Trade") && kinds.contains(&"Index") && kinds.contains(&"Liquidation"), "{kinds:?}");
+    // .4 interval 0: unchanged, no ledger call.
+    h.trace_on();
+    let f = hft_event::Funding { h: mhdr(B1, 2), rate: r("0.0001"), next_funding_ns: UTC0 + 7 * 3_600_000_000_000, interval_s: 0, _pad: 0 };
+    h.push(RingId::Md(1), &f);
+    h.run();
+    let row2 = *h.s.engine().market.row(B1).unwrap();
+    assert_eq!(row2.funding_rate, r("0.0001"));
+    assert_eq!(row2.interval_s, row.interval_s);
+    assert!(!h.trace().contains(&"ledger.on_funding_interval"));
+}
+
+#[test]
+fn seq_148_funding_interval_change() {
+    let mut h = steady();
+    let fund = |iv: u32, rx: u64| hft_event::Funding { h: mhdr(B1, rx), rate: r("0.0001"), next_funding_ns: UTC0 + 3_600_000_000_000, interval_s: iv, _pad: 0 };
+    h.push(RingId::Md(1), &fund(28_800, 1));
+    h.run();
+    h.trace_on();
+    h.push(RingId::Md(1), &fund(3_600, 2));
+    h.run();
+    let row = *h.s.engine().market.row(B1).unwrap();
+    assert_eq!((row.prev_interval_s, row.interval_s), (28_800, 3_600));
+    assert_eq!(h.s.engine().trace.count("ledger.on_funding_interval"), 1);
+    h.trace_on();
+    h.push(RingId::Md(1), &fund(3_600, 3));
+    h.run();
+    let row = *h.s.engine().market.row(B1).unwrap();
+    assert_eq!((row.prev_interval_s, row.interval_s), (28_800, 3_600));
+    assert_eq!(h.s.engine().trace.count("ledger.on_funding_interval"), 1);
+    h.trace_on();
+    h.push(RingId::Md(1), &fund(0, 4_000));
+    h.run();
+    assert_eq!(h.s.engine().trace.count("ledger.on_funding_interval"), 0);
+    assert_eq!(h.s.engine().market.funding[B1.0 as usize].upd_tsc, Tsc(4_000));
+}
+
+pub fn ext(a: hft_types::AccountId, i: hft_types::InstId, side: Side, qty: &str, cause: hft_event::ExternalCause, tid: u64) -> hft_event::ExternalFill {
+    hft_event::ExternalFill {
+        venue: inst_venue(i),
+        account: a,
+        side,
+        cause,
+        inst: i,
+        qty: q(qty),
+        px: px("50000"),
+        fee: hft_types::Qty(0),
+        fee_asset: hft_types::AssetId(0),
+        _pad: [0; 6],
+        exch_order_id: 0,
+        trade_id: tid,
+        ex_ts_ns: 0,
+        rx_tsc: Tsc(0),
+        fill_seq: 0,
+    }
+}
+
+#[test]
+fn seq_152_external_fill_unattributed() {
+    let mut h = steady();
+    clear_log();
+    h.trace_on();
+    h.push(RingId::Rep(0), &ext(AC1, A2, Side::Sell, "0.5", hft_event::ExternalCause::Manual, 501));
+    h.run();
+    assert_eq!(h.s.engine().trace.count("exec.on_external"), 1);
+    let ex: Vec<Got> = log().into_iter().filter(|g| g.kind == "External" && !g.model).collect();
+    assert_eq!(ex.len(), 1);
+    assert_eq!(ex[0].s, S1);
+    assert_eq!(ex[0].gix, hft_strategy_sdk::GIX_NONE);
+}
+
+#[test]
+fn seq_153_external_fill_duplicate() {
+    let mut h = steady();
+    h.push(RingId::Rep(0), &ext(AC1, A2, Side::Sell, "0.5", hft_event::ExternalCause::Manual, 77));
+    h.run();
+    clear_log();
+    h.trace_on();
+    let m = h.mark();
+    h.push(RingId::Rep(0), &ext(AC1, A2, Side::Sell, "0.5", hft_event::ExternalCause::Manual, 77));
+    h.run();
+    assert_eq!(h.s.engine().trace.count("exec.on_external"), 0);
+    assert_eq!(h.s.engine().trace.count("oms.external_adjust"), 0);
+    assert!(log().iter().all(|g| g.kind != "External"));
+    assert!(h.since(m).iter().all(|r| r.role() != Role::Output));
+}
+
+#[test]
+fn seq_157_account_config_report() {
+    reset_script();
+    let mut h = b0().boot();
+    h.step();
+    h.trace_on();
+    let l = hft_event::LeverageItem { inst: B1, _pad: 0, leverage: r("10") };
+    let hd = cfg_hdr(AC1, B, 1);
+    let mut body = zerocopy::IntoBytes::as_bytes(&hd).to_vec();
+    body.extend_from_slice(zerocopy::IntoBytes::as_bytes(&l));
+    h.push_bytes(RingId::Rep(0), EventKind::ACCOUNT_CONFIG_REPORT, body);
+    h.run();
+    let tr = h.trace();
+    let a = tr.iter().position(|x| *x == "risk.on_account_cfg").unwrap();
+    let b = tr.iter().position(|x| *x == "risk.apply").unwrap();
+    assert!(a < b);
+    use hft_strategy_sdk::Views;
+    assert_eq!(h.s.engine().seq_views().leverage(AC1, B1), Some(1000));
+}
+
+#[test]
+fn seq_159_balance_position_reports() {
+    let mut h = steady();
+    h.trace_on();
+    let br = hft_event::BalanceReport { venue: A, account: AC1, asset: USDT, _pad: 0, free: q("100000"), locked: hft_types::Qty(0), ex_ts_ns: 0, rx_tsc: Tsc(0) };
+    h.push(RingId::Rep(0), &br);
+    h.run();
+    let ev = h.s.engine().trace.ev.iter().find(|e| e.what == "ledger.on_balance").copied().unwrap();
+    assert_eq!(ev.b, 1);
+    let pr = |qty: &str| hft_event::PositionReport { venue: B, account: AC1, _pad: 0, inst: B1, qty: q(qty), entry_px: hft_types::Px(0), upnl: hft_types::Notional(0), liq_px: hft_types::Px(0), ex_ts_ns: 0, rx_tsc: Tsc(0) };
+    let m = h.mark();
+    h.push(RingId::Rep(0), &pr("0"));
+    h.run();
+    assert!(h.since(m).iter().all(|r| r.role() != Role::Output));
+    let m = h.mark();
+    h.push(RingId::Rep(0), &pr("-0.012"));
+    h.run();
+    assert_eq!(h.notes_since(m).len(), 1);
+    assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty.0, 0);
+}

@@ -23,4 +23,5 @@ mod strategies;
 mod views;
 mod advisor;
 mod advisor_lag;
+mod advice;
 mod snapshot_rows;
