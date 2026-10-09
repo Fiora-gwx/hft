@@ -13,3 +13,7 @@ mod common;
 mod params;
 mod boot;
 mod recover;
+mod strategies;
+mod views;
+mod advisor_lag;
+mod snapshot_rows;

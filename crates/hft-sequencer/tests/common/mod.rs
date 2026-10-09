@@ -1086,7 +1086,7 @@ impl<S: StrategySet> H<S> {
         };
         self.io().mailbox.push(ParsedConfig::StrategyParams(Box::new(p)));
         self.blob_input(r, scope(spb.strategy, spb.account, GroupId(0)), &b);
-        self.cmd(spb.account, &ControlCmd::SetParams { scope: scope(spb.strategy, spb.account, GroupId(0)), blob: r })
+        self.cmd_confirmed(spb.account, &ControlCmd::SetParams { scope: scope(spb.strategy, spb.account, GroupId(0)), blob: r })
     }
     /// Queues a `ConfigBlob` Input on the ctl ring.
     pub fn blob_input(&mut self, r: BlobRef, sc: CmdScope, content: &[u8]) {
@@ -1138,7 +1138,15 @@ impl<S: StrategySet> H<S> {
         self.quote(A1, "50000", "50001");
         self.quote(B1, "50010", "50011");
         self.run();
-        for (s, a, g) in [(S1, AC1, G1), (S2, AC2, G2), (S9, AC9, G9)] {
+        let cells: Vec<(StrategyId, AccountId, GroupId)> = self
+            .s
+            .instances()
+            .slots
+            .iter()
+            .filter_map(|x| x.cur.as_ref().map(|p| (x.id, x.account, p.groups.specs().iter().map(|g| g.id).collect::<Vec<_>>())))
+            .flat_map(|(s, a, gs)| gs.into_iter().map(move |g| (s, a, g)))
+            .collect();
+        for (s, a, g) in cells {
             let id = self.cmd_confirmed(a, &ControlCmd::SetMode { scope: scope(s, a, g), mode: RunMode::Live });
             self.run();
             assert_eq!(self.result_of(id).map(|r| r.status), Some(0), "steady: SetMode Live of {s:?}");
@@ -1307,4 +1315,109 @@ pub fn verify_journal<S: StrategySet>(j: &MemJournal, setup: &EngineSetup, at_se
     let mut v = d.mismatches().to_vec();
     v.extend(d.leftover());
     v
+}
+
+// ------------------------------------------------------------------------------- snapshots
+
+impl<S: StrategySet> H<S> {
+    /// Every `StateSnapshot` record so far.
+    pub fn snapshots(&self) -> Vec<MemRecord> {
+        self.j().records().filter(|r| r.kind == EventKind::STATE_SNAPSHOT).cloned().collect()
+    }
+    /// Hands a `Timer{Sys, id}` over through the hk ring and runs.
+    pub fn sys(&mut self, id: u32) {
+        let t = self.now();
+        self.push(RingId::Hk, &sys_timer(id, t));
+        self.run();
+    }
+    /// A keyframe (`Timer{Sys, Snapshot}`).
+    pub fn keyframe(&mut self) -> MemRecord {
+        self.sys(1);
+        self.snapshots().pop().expect("keyframe written")
+    }
+}
+
+/// The header and this crate's sections of a snapshot record.
+pub fn snap(r: &MemRecord) -> (hft_event::SnapshotHdr, hft_sequencer::snapshot::SeqSections) {
+    use zerocopy::FromBytes;
+    let h = hft_event::SnapshotHdr::read_from_bytes(&r.body[..96]).expect("hdr");
+    let s = match hft_sequencer::snapshot::read_seq_sections(&r.body[96..]) {
+        Ok(s) => s,
+        Err(e) => panic!("section {e}"),
+    };
+    (h, s)
+}
+
+/// Shared capture cell for hook closures.
+pub type Cap<T> = std::rc::Rc<std::cell::RefCell<Vec<T>>>;
+pub fn cap<T>() -> Cap<T> {
+    std::rc::Rc::new(std::cell::RefCell::new(Vec::new()))
+}
+
+// ------------------------------------------------------------------------------- order events
+
+/// `OrderDecision`s of the journal since a mark.
+pub fn decisions(recs: &[MemRecord]) -> Vec<(u64, hft_event::OrderDecision)> {
+    recs.iter()
+        .filter(|r| r.kind == EventKind::ORDER_DECISION)
+        .filter_map(|r| hft_sequencer::types::read_body::<hft_event::OrderDecision>(&r.body).map(|d| (r.seq, d)))
+        .collect()
+}
+
+pub fn order_event(d: &hft_event::OrderDecision, what: hft_event::OrderEventKind, epoch: u16) -> hft_event::OrderEvent {
+    hft_event::OrderEvent {
+        venue: d.venue,
+        account: d.account,
+        what,
+        detail: 0,
+        slot: d.slot,
+        r#gen: d.r#gen,
+        inst: d.inst,
+        px: d.px,
+        qty: d.qty,
+        cum_filled: Qty(0),
+        fee: Qty(0),
+        fee_asset: AssetId(0),
+        epoch,
+        reject_code: 0,
+        exch_order_id: 1_000 + u64::from(d.slot.0),
+        ex_ts_ns: 0,
+        hw_rx_ns: 0,
+        rx_tsc: 0,
+        avg_px: d.px,
+    }
+}
+
+impl<S: StrategySet> H<S> {
+    /// Ring of an account's reports.
+    pub fn rep_ring(&self, a: AccountId) -> RingId {
+        if matches!(self.rd.account(a).kind, hft_refdata::AccountKind::Sim(_)) { RingId::RepSim } else { RingId::Rep(0) }
+    }
+    pub fn epoch(&self) -> u16 {
+        self.s.view().engine_epoch() as u16
+    }
+    pub fn ack(&mut self, d: &hft_event::OrderDecision) {
+        let ev = order_event(d, hft_event::OrderEventKind::Ack, self.epoch());
+        let r = self.rep_ring(d.account);
+        self.push(r, &ev);
+        self.run();
+    }
+    /// A fill of `qty` at `px` (cumulative = `cum`).
+    pub fn fill(&mut self, d: &hft_event::OrderDecision, qty: Qty, cum: Qty, px: Px) {
+        let what = if cum.0 >= d.qty.0 { hft_event::OrderEventKind::Fill } else { hft_event::OrderEventKind::PartialFill };
+        let mut ev = order_event(d, what, self.epoch());
+        ev.qty = qty;
+        ev.cum_filled = cum;
+        ev.px = px;
+        ev.avg_px = px;
+        let r = self.rep_ring(d.account);
+        self.push(r, &ev);
+        self.run();
+    }
+    pub fn reject(&mut self, d: &hft_event::OrderDecision) {
+        let ev = order_event(d, hft_event::OrderEventKind::Reject, self.epoch());
+        let r = self.rep_ring(d.account);
+        self.push(r, &ev);
+        self.run();
+    }
 }

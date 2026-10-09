@@ -482,6 +482,15 @@ impl Engine {
         })
     }
 
+    /// The read-only views of the current state (tests, tools).
+    pub fn seq_views(&self) -> crate::views::SeqViews<'_> {
+        crate::strategies::full_views(self)
+    }
+    /// The `RiskView` adapter of the current state (tests, tools).
+    pub fn risk_adapter(&self) -> crate::views::RiskAdapter<'_> {
+        crate::views::RiskAdapter { v: self.seq_views() }
+    }
+
     /// The Now of a record of this run.
     pub(crate) fn now_of(&self, tsc: Tsc, seq: u64) -> Now {
         let a = self.clock.anchor(Tsc(self.seg.calib_tsc), self.seg.calib_realtime_ns);

@@ -514,3 +514,8 @@ pub fn leg_summary(oms: &Oms, market: &Market, rd: &RefData, a: AccountId, g: Gr
         quiescent,
     }
 }
+
+/// The `RunMode` a strategy sees for an effective mode (tests, tools).
+pub fn eff_mode_pub(x: hft_risk::mode::Effective) -> hft_types::RunMode {
+    crate::mode_glue::eff_mode(x)
+}
