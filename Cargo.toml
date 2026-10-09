@@ -110,6 +110,19 @@ debug = false
 [profile.ci.package."*"]
 opt-level = 3
 
+# tools/ members: their tests are process- and I/O-bound, opt-level 0 only shortens the build.
+[profile.ci.package.xtask]
+opt-level = 0
+
+[profile.ci.package.hft-cfg]
+opt-level = 0
+
+[profile.ci.package.hostprobe]
+opt-level = 0
+
+[profile.ci.package.latency-slice]
+opt-level = 0
+
 [profile.bench]
 lto = "fat"
 codegen-units = 1
