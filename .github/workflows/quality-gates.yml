@@ -447,10 +447,20 @@ jobs:
             python -m pip install -r python/requirements-dev.lock
           else
             echo "::warning::python/requirements-dev.lock is missing; installing unpinned dev tools"
-            python -m pip install maturin ruff mypy pytest
+            python -m pip install maturin ruff mypy pytest numpy polars pyarrow duckdb
           fi
           if [[ -f crates/hft-py/Cargo.toml ]]; then
-            (cd crates/hft-py && maturin develop)
+            # crates/hft-py/TESTS.md: the `testing` build here; the release build (no `testing`) in a
+            # second venv for the public-surface and stub rows (HFT_PY_RELEASE_PYTHON); TW and the
+            # fixture generator for the journal fixtures; hot segments are mlocked (> 8 MiB).
+            maturin build --profile ci --features testing --manifest-path crates/hft-py/Cargo.toml -o "$RUNNER_TEMP/wheels"
+            maturin build --profile ci --manifest-path crates/hft-py/Cargo.toml -o "$RUNNER_TEMP/wheels-rel"
+            python -m pip install --no-deps "$RUNNER_TEMP"/wheels/*.whl
+            python -m venv "$RUNNER_TEMP/venv-rel"
+            "$RUNNER_TEMP/venv-rel/bin/python" -m pip install -q mypy "$RUNNER_TEMP"/wheels-rel/*.whl
+            cargo build --locked --profile ci -p hft-journal --example testwriter --features hft-journal/writer -p hft-py --example pyfixture
+            sudo prlimit --pid $$ --memlock=unlimited:unlimited
+            HFT_PY_TOOLS=target/ci/examples HFT_PY_RELEASE_PYTHON="$RUNNER_TEMP/venv-rel/bin/python" python -m pytest -q crates/hft-py/tests/python
           fi
           for p in "${pkgs[@]}"; do python -m pip install -e "$p"; done
           python -m ruff check python strategies tools/az-probe

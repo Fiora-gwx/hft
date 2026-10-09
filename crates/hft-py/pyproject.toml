@@ -1,0 +1,17 @@
+# maturin build of the `hft_py` wheel (README "打包与发布"): one cp310-abi3 wheel per target.
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "hft_py"
+description = "Read-only journal access, ledger/PnL and strategy parameter codec of the hft engine"
+requires-python = ">=3.10"
+dynamic = ["version"]
+# Batches are handed out as pyarrow arrays (src/cols.rs).
+dependencies = ["pyarrow>=14"]
+
+[tool.maturin]
+python-source = "python"
+module-name = "hft_py._native"
+features = ["pyo3/extension-module"]

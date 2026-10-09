@@ -37,17 +37,18 @@ spec: README.md
 **共用夹具**(用例的 `前置` 引用这里的名字;用例依赖的参数值仍在 `前置` 里写出):
 
 - **时间与校准**:`D = 2026-10-01T00:00:00Z` = `1_790_812_800_000_000_000` ns。全部 journal 夹具的段头 `tsc_hz_milli = 3_000_000_000_000`(3 GHz),校准对 `calib_tsc = 0` ↔ `calib_realtime_ns = D`,每秒一条与该校准对一致(无漂移)的 `ClockStatus`;因此记录头 `tsc = 3 × (t − D)` 的记录 `proc_ns = t`。下文"时刻 t 的记录"即按此写记录头。
-- **`RD_PY`**(refdata,经 hft-cfg 生成,写进各夹具的引导块):资产 `BTC`(`AssetId(1)`,`px_exp = −2`,`qty_exp = −8`)、`ETH`(`AssetId(2)`,`px_exp = −2`,`qty_exp = −6`)、`USDT`(`AssetId(3)`,`px_exp = −4`,`qty_exp = −6`);venue `S1`(`VenueId(1)`,现货,交易所 X1)、`P2`(`VenueId(2)`,USDT 永续,交易所 X2);inst `101` = BTC/S1、`102` = BTC/P2、`202` = ETH/P2;账户 `A1`(`AccountId(1)`,label `bn-1`,Live,venues {S1, P2},只在 prod 实例)、`A9`(`AccountId(9)`,label `sim-a`,Sim,venues {S1, P2},只在 sim 实例)。
-- **`J_MD`**(`fixtures/replay/hft-py/md/prod/seq/`,prod 实例 seq journal,1 个已封存段,只有冷副本):引导块之后,inst 101 的 `Bbo` 在 `t_k = D + 10 s + k × 10 ms`(k = 0…59 999),inst 102 的 `Bbo` 在 `t_k + 5 ms`;每条 `Bbo` 的 `ex_ts_ns = t − 2 ms`,`hw_rx_ns = t − 1 ms`(k 为偶数)或 0(k 为奇数,无 HW 戳);inst 101 的 `Trade` 在 `D + 10 s + j × 1 s`(j = 0…599);账户 A1 的 `OrderDecision` 100 条与 `OrderEvent` 100 条(`D + 20 s` 起每 1 s 一对)。`Bbo` 价格:inst 101 bid = 60 000.00(raw 6 000 000,指数 −2)、ask = 60 000.01,数量 0.5(raw 50 000 000,指数 −8)。
-- **`J_SIM`**(`fixtures/replay/hft-py/md/sim/seq/`):sim 实例 seq journal,结构同 `J_MD`,只含账户 A9,`Bbo` 1 000 条(k = 0…999)。
-- **`J_ALL`**(`fixtures/replay/hft-py/all-kinds/prod/seq/`):prod 实例 seq journal,2 个已封存段;`hft_event::KINDS` 中允许出现在 seq journal 的每个非 optional kind 各 ≥ 3 条(变长 kind 至少一条带非空尾部);一条 `ControlCmd` 拆成 3 段(`PART`);`Bbo` 覆盖 inst 101、102、202,`OrderEvent` 属账户 A1 且 `fee_asset = USDT`(`USDT` 的 `qty_exp = −6`);期望值目录 `expected/<kind>.jsonl` 由 Rust `JournalReader` 解码生成,其中 `Bbo`、`OrderDecision`、`ExternalFill`、`MarginReport`、`ConfigBlob` 五个 kind 的期望值经人工按 [hft-event](../hft-event/README.md) 布局核对。
+- **夹具的生成**:下列 journal 夹具都在 pytest 会话中生成(不入库):`examples/pyfixture.rs` 产出 refdata/引擎/策略参数 blob、`TW` 脚本与批量记录文件,`TW` 写出 journal;`RUST_REF` 的读出同样由它给出(`ref`、`ledger-ref` 子命令)。`TW` 与它由 `HFT_PY_TOOLS` 指定,否则测试先 `cargo build` 这两个 example。热目录在 `/dev/shm` 下;大于 8 MiB 的段要求 `RLIMIT_MEMLOCK` 不受限(热段 `mlock`)。
+- **`RD_PY`**(refdata,经 hft-refdata 的 `RdbBuilder` 生成,写进各夹具的引导块):资产 `BTC`(`AssetId(1)`,`px_exp = −2`,`qty_exp = −8`)、`ETH`(`AssetId(2)`,`px_exp = −2`,`qty_exp = −6`)、`USDT`(`AssetId(3)`,`px_exp = −4`,`qty_exp = −6`);venue `S1`(`VenueId(2)` = `BINANCE_SPOT`,现货)、`P2`(`VenueId(5)` = `OKX_SWAP`,USDT 永续;`VenueId` 由 hft-types 常量表按名字固定);inst `101` = BTC/S1、`102` = BTC/P2、`202` = ETH/P2(inst id 须从 1 起稠密,其余 id 为 `Delisted` 的占位现货 inst);策略实例 `alpha`(`StrategyId(1)`);prod 实例的 refdata 只有账户 `A1`(`AccountId(1)`,label `bn-1`,Live,venues {S1, P2}),sim 实例的 refdata 只有账户 `A9`(`AccountId(1)`(账户 id 同样稠密),label `sim-a`,Sim,venues {S1, P2})。
+- **`J_MD`**(`pyfixture md prod 60000`,prod 实例 seq journal,1 个 64 MiB 的已封存段,只有冷副本;引导块含 `RD_PY` 与一条 `HostProfile`;每整秒一条 `ClockStatus`):引导块之后,inst 101 的 `Bbo` 在 `t_k = D + 10 s + k × 10 ms`(k = 0…59 999),inst 102 的 `Bbo` 在 `t_k + 5 ms`;每条 `Bbo` 的 `ex_ts_ns = t − 2 ms`,`hw_rx_ns = t − 1 ms`(k 为偶数)或 0(k 为奇数,无 HW 戳);inst 101 的 `Trade` 在 `D + 10 s + j × 1 s`(j = 0…599);账户 A1 的 `OrderDecision` 100 条与 `OrderEvent` 100 条(`D + 20 s` 起每 1 s 一对)。`Bbo` 价格:inst 101 bid = 60 000.00(raw 6 000 000,指数 −2)、ask = 60 000.01,数量 0.5(raw 50 000 000,指数 −8)。
+- **`J_SIM`**(`pyfixture md sim 1000`):sim 实例 seq journal,结构同 `J_MD`,只含账户 A9,`Bbo` 每 inst 1 000 条(k = 0…999)。
+- **`J_ALL`**(`pyfixture all`):prod 实例 seq journal,2 个已封存段;`hft_event::KINDS` 中允许出现在 seq journal 的每个非 optional kind 各 ≥ 3 条(写者自己的 `SegmentRoll` 除外;变长 kind 至少一条带非空尾部,`MarginReport` 另有一条 0 个条目);一条 `ControlCmd` 拆成 3 段(`PART`);`Bbo` 覆盖 inst 101、102、202,`OrderEvent` 属账户 A1 且 `fee_asset = USDT`(`USDT` 的 `qty_exp = −6`);期望值目录 `<kind>.jsonl` 由 `pyfixture ref`(Rust `JournalReader` + 按 hft-event 字段表的读出)生成,其中 `Bbo`、`OrderDecision`、`ExternalFill`、`MarginReport`、`ConfigBlob` 五个 kind 的读出另与 hft-event 的类型化解码逐字段比对(不一致即生成失败)。
 - **`J_EXT`**(`fixtures/replay/hft-py/ext/prod/seq/`,账户 A1,初始状态同 LED-055:`G1` 的永续腿 `BTC/P2` 多 10.0):事件 E1 = Input `ReconcileReport{report_id = 4242}` + `Note{ExternalFill}`(`aflags = AUTO_RECON`,与 LED-076 步骤 1 的注记相同)+ `EVENT_END`;事件 E2 = Input `ExternalFill{Adl, Sell, BTC/P2, 1.0, trade_id 77}`(补推的同向 ADL)+ 热进程写出的 `Note{LedgerAutoHeldOffset}` 与 `Note{ExternalFill}`;事件 E3 = Input `OrderEvent`(`StaleGen` 带成交)+ `Note{OmsForeignFill}`(LED-077.1 的字段:`path = 2`、`trade_id = 0`、`qty = 0.3`、`px = 60 100`、`fee = 0.09`、`exch_order_id = 99`、`cum_filled = 0.5`);事件 E4 = Input `ExternalFill{Liquidation, Buy, BTC/P2, 0.4, trade_id 910}` + `Note{ExternalFill}`(`aflags = 0`)。夹具由 testkit 的 `SeqRig` 生成,同时保存热进程在每个事件边界后的 ledger 节 1、13、22 字节(`expected/ledger-<event>.bin`)。
-- **`J_LED20`**:[LED-246](../hft-ledger/TESTS.md) 的 20 个固定种子 journal 夹具与同目录保存的 Rust hft-ledger `JournalLedger` 每事件结果(`PnlDelta` 序列、最终三节快照)。
+- **`J_LED20`**:`pyfixture led <种子>`(种子 1–20)的 20 个 journal 夹具:账户 A1、`alpha` 的 group `G1`(`0x0100_0001`,101/S1 + 102/P2)与 `G2`(`0x0100_0002`,202/P2);下单(`OrderDecision{New}`)与分次成交、永续上的外部成交、资金费推送、余额、BBO 与标记价,约 30 h(跨 UTC 日);3 个段,每段引导块重述配置并带当前账本的 `StateSnapshot{Boot}`(含 hft-oms 节 2 的未完成订单行),段 2、段 3 各有一条关键帧 `StateSnapshot{Keyframe}`。Rust 参照由 `pyfixture ledger-ref`(hft-ledger `JournalLedger` 从同一起点逐事件消费)给出每事件各 group 的 `PnlBreakdown` 增量与最终视图、三节快照字节。
 - **`RUST_REF`**:Rust 参考读法 = `hft_journal::JournalReader`(`StartAt::Oldest`、`EndAt::Follow`、`OnGap::Error`)+ `hft_event` 解码 + [hft-ledger 冷消费者](../hft-ledger/README.md#冷消费者journalledger) `JournalLedger`(hft-ledger 测试中的同名驱动)。比较 hft-py 输出时一律以它为参照。
-- **`TW`**(测试写者):hft-journal 的测试写者 `examples/testwriter.rs`(`required-features = ["writer"]`,只在测试中以子进程运行,不是 hft-py 的依赖;见"留给别人")。参数:源记录(`J_MD` 或合成 `Bbo`)、热目录(tmpfs 下的临时目录 `<tmp>/hot/prod/seq/`)、冷目录 `<tmp>/cold/prod/seq/`、每事件一条记录、每 `publish_every` 个事件 `publish` 一次、`segment_bytes`、persist 同步间隔。默认用于本文件:`segment_bytes = 8 MiB`,`publish_every = 1`,persist `sync_interval_ms = 50`。"合成 `Bbo`"= inst 101,bid 60 000.00(raw 6 000 000)、ask 60 000.01(raw 6 000 001)、`bid_qty`/`ask_qty` 0.5(raw 50 000 000),第 i 条(从 0 起)的时刻 `D + 10 s + i × 1 ms`,`ex_ts_ns` 与 `hw_rx_ns` 同 `J_MD` 的规则。
+- **`TW`**(测试写者):hft-journal 的测试写者 `examples/testwriter.rs`(`required-features = ["writer"]`,只在测试中以子进程运行,不是 hft-py 的依赖),本文件用它的 `--script` 模式([hft-journal 测试写者](../hft-journal/README.md#读者)):命令从文件或 stdin 读,可交错写入、发布、滚动、暂停 persist、`abort` 与输出单调时钟标记;记录头 `tsc` 与段头校准对按"时间与校准"夹具写。参数:源记录(`J_MD` 或合成 `Bbo`)、热目录(tmpfs 下的临时目录 `<tmp>/hot/prod/seq/`)、冷目录 `<tmp>/cold/prod/seq/`、每事件一条记录、每 `publish_every` 个事件 `publish` 一次、`segment_bytes`、persist 同步间隔。默认用于本文件:`segment_bytes = 8 MiB`,`publish_every = 1`,persist `sync_interval_ms = 50`。"合成 `Bbo`"= inst 101,bid 60 000.00(raw 6 000 000)、ask 60 000.01(raw 6 000 001)、`bid_qty`/`ask_qty` 0.5(raw 50 000 000),第 i 条(从 0 起)的时刻 `D + 10 s + i × 1 ms`,`ex_ts_ns` 与 `hw_rx_ns` 同 `J_MD` 的规则。
 - **`HB`**:在临时目录 `<tmp>/shm/` 下以 `HeartbeatBlock::create(<tmp>/shm/prod/heartbeat, 1)` 建块(hft-rt;建成后 `state = Starting`、`n_slots = 0`),测试按需 `set_state`、`sequencer().beat()`;hft-py 以 `root = "<tmp>/shm"` 读取。
 - **`S_TP`**(schema 目录,测试时生成):`fixtures/params/sdk-tp/schema.golden.json`(SDK 的 `EchoProbe`:kind_id 0xFF01 = 65281,`TP` schema `schema_id = 65281`、`version = 2`,字段 `open_th`(Rate,per_group)、`cooldown_ms`(DurationMs)、`pct_bin`(Rate,per_group,structural)、`max_qty`(Qty,per_group)、`enabled`(Bool,manual_only)、`mode`(Enum a/b/c,since 2);`cmds`:op 1 `open`(`notional`: Notional 0..=10 000 000 000)、op 2 `close`(无字段,`reduce_only`)、op 3 `set_mode`(`m`: Enum x/y);取值见 [hft-strategy-sdk TESTS](../hft-strategy-sdk/TESTS.md) 的 `TP` 夹具)复制为 `65281-<name>.schema.json`,并写 `index.json` = `[{"kind_id":65281,"name":<name>,"file":"65281-<name>.schema.json","schema_id":65281,"schema_version":2,"schema_digest":<金样记录的摘要>}]`。`S_TP2` 另加一项 kind_id 0xFF02(`TargetProbe`,`cmds` 为空)。
-- **`GT3_PY`**(`encode` 的 `groups` 输入):3 项,`id` = `0x0300_0001`、`0x0300_0002`、`0x0300_0003`,`asset = 1`,`open_allowed = True`,`legs = [{inst: 101, venue: 1, kind: "Cex"}, {inst: 102, venue: 2, kind: "Cex"}]`,`qty_exp = −8`,`px_exp = −2`;`header = {strategy: 3, account: 9, version: 7, source: "Pipeline", generated_at_ns: D}`。
+- **`GT3_PY`**(`encode` 的 `groups` 输入):3 项,`id` = `0x0300_0001`、`0x0300_0002`、`0x0300_0003`,`asset = 1`,`open_allowed = True`,`legs = [{inst: 101, venue: 2, kind: "Cex"}, {inst: 102, venue: 5, kind: "Cex"}]`,`qty_exp = −8`,`px_exp = −2`;`header = {strategy: 3, account: 9, version: 7, source: "Pipeline", generated_at_ns: D}`。
 
 ### PY-001 带 hot_root 打开时读到 RAM 热段中尚未同步到冷副本的尾部
 
@@ -57,7 +58,7 @@ spec: README.md
 - 前置:`TW` 以 `J_MD` 的前 2 000 条 `Bbo`(inst 101)写热目录 `<tmp>/hot/prod/seq/`,persist 已把前 1 500 条同步到冷目录 `<tmp>/cold/prod/seq/`,之后暂停 persist(`synced_len` 停在第 1 500 条之后)
 - 步骤:
   1. `j = hft_py.open_journal("<tmp>/cold/prod/seq", hot_root="<tmp>/hot")`
-  2. `df = pl.from_arrow(j.events("Bbo", inst=101))`
+  2. `df = pl.DataFrame(j.events("Bbo", inst=101))`
 - 期望:
   - `df.height == 2000`;`df["seq"]` 严格递增、相邻差 1;最后一行的 `seq` = `RUST_REF` 在热段上读到的最后一条 `Bbo` 的 seq
 - 实现:`crates/hft-py/tests/python/test_open.py::test_py_001_hot_root_reads_unsynced_tail`
@@ -70,7 +71,7 @@ spec: README.md
 - 前置:同 PY-001(热段 2 000 条,冷副本同步到第 1 500 条)
 - 步骤:
   1. `j = hft_py.open_journal("<tmp>/cold/prod/seq")`
-  2. `pl.from_arrow(j.events("Bbo", inst=101)).height`
+  2. `pl.DataFrame(j.events("Bbo", inst=101)).height`
 - 期望:
   - 步骤 2 返回 1500;`j.info()["last_seq"]` = 冷副本中最后一条记录的 seq(小于热段的 `last_seq`)
 - 实现:`crates/hft-py/tests/python/test_open.py::test_py_002_no_hot_root_cold_only`
@@ -101,7 +102,7 @@ spec: README.md
 | PY-004.1 | 键集合 | 恰为 `{"journal_name", "instance", "segments", "first_seq", "last_seq", "schema", "host_profile"}` |
 | PY-004.2 | `journal_name` | `"seq"` |
 | PY-004.3 | `instance` | `"prod"` |
-| PY-004.4 | `segments` | 2 项,按段号升序,每项带段号、`first_seq`、冷副本路径 |
+| PY-004.4 | `segments` | 2 项,按段号升序,每项带段号 `segment_no`、`first_seq`、冷副本路径 `path`(另有 `hot_path`、`sealed`) |
 | PY-004.5 | `first_seq` / `last_seq` | 段 1 的 `first_seq` / 段 2 最后一条记录的 seq |
 | PY-004.6 | `schema` | 与 `hft_py.schema_hash()` 的 kind 表一致时为空的差异列表 |
 | PY-004.7 | `host_profile` | 段 2 引导块 `HostProfile` 记录的字段(含清单哈希) |
@@ -197,7 +198,7 @@ spec: README.md
   2. 各读 `events("OrderEvent")`
 - 期望:
   - `jp.info()["instance"] == "prod"`,`js.info()["instance"] == "sim"`
-  - `jp` 的 `OrderEvent` 共 100 行且全部 `account == 1`;`js` 的 `OrderEvent` 全部 `account == 9`;两者的 `seq` 各自从本实例 journal 的段 1 起递增
+  - `jp` 的 `OrderEvent` 共 100 行,全部 `account == 1` 且 `account_kind == "Live"`;`js` 的 `OrderEvent` 全部 `account == 1`(sim 实例 refdata 中的 A9)且 `account_kind == "Sim"`;两者的 `seq` 各自从本实例 journal 的段 1 起递增
 - 实现:`crates/hft-py/tests/python/test_open.py::test_py_011_two_instances`
 
 列名以 `python/_generated/`(gen-schema 输出)为准;下文按字段名指代列(`MarketHdr` 的嵌套字段写叶子名,如 `inst`、`ex_ts_ns`)。
@@ -209,8 +210,8 @@ spec: README.md
 - 里程碑:M2
 - 前置:`j = open_journal(J_MD)`
 - 步骤:
-  1. `a = pl.from_arrow(j.events("Bbo"))`
-  2. `b = pl.from_arrow(j.events(0x0101))`
+  1. `a = pl.DataFrame(j.events("Bbo"))`
+  2. `b = pl.DataFrame(j.events(0x0101))`
 - 期望:
   - `a.height == b.height == 120000`;`a.equals(b)` 为真(列名、类型与值全同)
 - 实现:`crates/hft-py/tests/python/test_events.py::test_py_020_kind_name_and_number`
@@ -351,7 +352,7 @@ spec: README.md
 | PY-029.1 | `jp.events("OrderEvent", account="bn-1")` | 100 行;`account` 全为 1;`account_kind` 全为 `"Live"` |
 | PY-029.2 | `jp.events("OrderEvent", account=1)` | 与 PY-029.1 相同 |
 | PY-029.3 | `js.events("OrderEvent", account="sim-a")` | 行数 = `J_SIM` 中 A9 的 `OrderEvent` 条数;`account_kind` 全为 `"Sim"` |
-| PY-029.4 | `js.events("OrderEvent", account=9)` | 与 PY-029.3 相同 |
+| PY-029.4 | `js.events("OrderEvent", account=1)`(A9 的 `AccountId`) | 与 PY-029.3 相同 |
 
 ### PY-030 account 用错时拒绝
 
@@ -502,10 +503,10 @@ spec: README.md
 
 | 行 | 列 | 期望 |
 |---|---|---|
-| PY-043.1 | `Bbo.bid_px` | Arrow 类型 `int64`;元数据 `px_exp` = `{"101": -2, "102": -2, "202": -2}`(该批出现的 inst) |
+| PY-043.1 | `Bbo.bid_px` | Arrow 类型 `int64`;元数据 `px_exp` = `{"101": -2, "102": -2, "202": -2}`(refdata 中非 `Delisted` 的 inst) |
 | PY-043.2 | `Bbo.bid_qty` | `int64`;`qty_exp` = `{"101": -8, "102": -8, "202": -6}` |
 | PY-043.3 | `events("Bbo", inst=202).bid_qty` | `qty_exp` = `{"202": -6}` |
-| PY-043.4 | `OrderEvent.fee` | `int64`;元数据 `exp_asset_col = "fee_asset"`,`qty_exp_by_asset` = `{"3": -6}` |
+| PY-043.4 | `OrderEvent.fee` | `int64`;元数据 `exp_asset_col = "fee_asset"`,`qty_exp_by_asset` = `{"1": -8, "2": -6, "3": -6}`(refdata 的全部资产) |
 | PY-043.5 | `Bbo.update_id` | `uint64`,无 `px_exp`/`qty_exp` 元数据 |
 
 ### PY-044 六个变长 kind 给原始体 binary 列,decode 函数与 Rust 解码一致
@@ -513,7 +514,7 @@ spec: README.md
 - 规则:[Arrow 映射](README.md#arrow-映射)
 - 级别:table
 - 里程碑:M2
-- 前置:`J_ALL`;每行取该 kind 的全部行,对 binary 列逐行调用对应解码函数,与 `RUST_REF` 的解码结果比较
+- 前置:`J_ALL`;每行取该 kind 的全部行,对 `body` 列逐行调用对应解码函数,与 `RUST_REF` 的解码结果比较;`RawRx`/`RawTx` 只出现在 raw journal(seq journal 的读者拒绝它们),这两行改为对按 `python/_generated` 的 `RAW_RX` dtype 编码的逻辑体(`venue = 2`、`payload_len = 5`、载荷 `b"hello"`)调用解码函数
 - 实现:`crates/hft-py/tests/python/test_arrow.py::test_py_044_var_kinds_binary`
 
 | 行 | kind | 解码函数 | 期望 |
@@ -522,8 +523,8 @@ spec: README.md
 | PY-044.2 | `ConfigBlob` | `hft_py.decode.config_blob` | `BlobHdr` 字段(`kind`、`encoding`、`boot`、`sha256`、`len`)相同,`payload` 长度 = `len` 且 SHA-256 = `sha256` |
 | PY-044.3 | `StateSnapshot` | `hft_py.decode.state_snapshot` | 前缀字段相同,节表字节相同 |
 | PY-044.4 | `Advice` | `hft_py.decode.advice` | `AdviceHdr` 字段相同,`payload` 字节相同 |
-| PY-044.5 | `RawRx` | `hft_py.decode.raw_rx` | 前缀字段相同,`payload` 字节相同 |
-| PY-044.6 | `RawTx` | `hft_py.decode.raw_tx` | 前缀字段相同,`payload` 字节相同 |
+| PY-044.5 | `RawRx` | `hft_py.decode.raw_rx` | `venue == 2`、`payload_len == 5`、`payload == b"hello"` |
+| PY-044.6 | `RawTx` | `hft_py.decode.raw_tx` | 同 PY-044.5 |
 | PY-044.7 | `ConfigBlob` | `hft_py.decode.config_blob(b[:-1])`(截掉 1 字节) | `ValueError` |
 
 ### PY-045 Advice 给出 AdviceHdr 字段列与原始载荷
@@ -533,7 +534,7 @@ spec: README.md
 - 前置:`J_ALL` 中一条 `Advice`:`AdviceHdr{strategy = 3, account = 0, local_kind = 1, group = 0x0300_0001, len = 16, basis_seq = 1000, basis_tsc = 3_000_000_000}`,载荷 16 B `0x01 00 00 00 00 00 00 00` + `band = 12345`(i64 小端)
 - 里程碑:M2
 - 步骤:
-  1. `pl.from_arrow(j.events("Advice"))` 取该行
+  1. `pl.DataFrame(j.events("Advice"))` 取该行
 - 期望:
   - `AdviceHdr` 的每个字段各为一列,值同上;载荷列为 16 字节且与上面的字节逐字节相同;不存在按载荷内容展开的列
 - 实现:`crates/hft-py/tests/python/test_arrow.py::test_py_045_advice_hdr_and_payload`
@@ -561,7 +562,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:`J_ALL` 中拆成 3 段(`PART`)的 `ControlCmd`,第 0 段 seq = s
 - 步骤:
-  1. `df = pl.from_arrow(j.events("ControlCmd"))`
+  1. `df = pl.DataFrame(j.events("ControlCmd"))`
 - 期望:
   - 该命令只出现 1 行,`seq = s`;binary 列长度 = 3 段 `chunk_len` 之和,与 `RUST_REF` 的 `LogicalEvent.body` 逐字节相同;df 中没有 seq 为 s + 1、s + 2 的行
 - 实现:`crates/hft-py/tests/python/test_arrow.py::test_py_047_multipart_one_row`
@@ -573,7 +574,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:按 [journal-format](../../docs/subsystems/journal-format.md) 布局改写 `J_MD` 段的副本:段头 schema 表把 `Bbo` 登记为比本 wheel 编译版本小 1 的版本、体长 88 B,全部 `Bbo` 记录截成 88 B 体(去掉 `update_id`),重算段头 CRC
 - 步骤:
-  1. `df = pl.from_arrow(open_journal(副本).events("Bbo", inst=101))`
+  1. `df = pl.DataFrame(open_journal(副本).events("Bbo", inst=101))`
 - 期望:
   - 60 000 行;`update_id` 全为 0;`_missing` 列中 `update_id` 对应的位全为 1、其他位全为 0;其余字段与 `J_MD` 原值相同;不抛异常
 - 实现:`crates/hft-py/tests/python/test_arrow.py::test_py_048_new_reads_old`
@@ -585,7 +586,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:同 PY-048 的改写方式,但段头把 `Bbo` 登记为编译版本 + 1、体长 104 B,每条 `Bbo` 体尾追加 8 字节 `0xFF`
 - 步骤:
-  1. `j = open_journal(副本)`;`df = pl.from_arrow(j.events("Bbo", inst=101))`
+  1. `j = open_journal(副本)`;`df = pl.DataFrame(j.events("Bbo", inst=101))`
 - 期望:
   - 60 000 行,列集合与 `J_MD` 相同(没有多出的列),字段值与 `J_MD` 相同
   - `j.info()["schema"]` 恰有 1 项:`Bbo`,journal 版本 = 编译版本 + 1,本读者版本 = 编译版本
@@ -650,10 +651,10 @@ spec: README.md
 - 里程碑:M2
 - 前置:以 cargo feature `testing` 构建(`hft_py._testing.last_buffer_addrs()` 返回最近一批每列数据缓冲的地址);`j = open_journal(J_MD)`
 - 步骤:
-  1. `df = pl.from_arrow(j.events("Bbo", inst=101, batch_rows=60000))`
+  1. `df = pl.DataFrame(j.events("Bbo", inst=101, batch_rows=60000))`
   2. `a = hft_py._testing.last_buffer_addrs()`
 - 期望:
-  - 对 `bid_px`、`ask_px`、`bid_qty`、`seq` 四列,Polars 列的数据缓冲地址(`Series._get_buffer_info()[0]`)等于 `a` 中同名列的地址
+  - 对 `bid_px`、`ask_px`、`bid_qty`、`seq` 四列,Polars 列的数据缓冲地址(`Series.to_numpy(allow_copy=False)` 的 `ctypes.data`;Polars 2 已删除 `_get_buffer_info`)等于 `a` 中同名列的地址
 - 实现:`crates/hft-py/tests/python/test_zero_copy.py::test_py_055_polars_zero_copy`
 
 ### PY-056 pyarrow 与 DuckDB 经 PyCapsule 消费同一流
@@ -714,7 +715,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:`TW` 写 100 条合成 `Bbo` 并 `publish`;随后 `TW` 再追加 10 条但不 `publish`;再在 `committed_len` 之后的空白处写 4 KiB 随机字节(模拟未发布区的残留)
 - 步骤:
-  1. `pl.from_arrow(open_journal(cold, hot_root=hot).events("Bbo")).height`
+  1. `pl.DataFrame(open_journal(cold, hot_root=hot).events("Bbo")).height`
 - 期望:
   - 返回 100;不抛异常
 - 实现:`crates/hft-py/tests/python/test_corrupt.py::test_py_063_beyond_committed_len`
@@ -896,7 +897,7 @@ spec: README.md
   - 50 个样本全部 ≤ 205 ms
 - 实现:`crates/hft-py/tests/python/test_tail.py::test_py_080_tail_visibility_latency`
 
-`config_at` 用例的夹具 **`J_CFG`**(`fixtures/replay/hft-py/cfg/prod/seq/`,testkit `SeqRig` 生成,refdata `RD_PY` 另加策略实例 `alpha`(`StrategyId(3)`,绑定 A1)):段 1 引导块含 `ConfigBlob{boot = 1}` 的 Refdata(`version` 1)、RiskParams(`version` 1)、Engine、StrategyParams(`alpha/bn-1`,`version` 7)、HostManifest;之后依次是:① `ConfigBlob{StrategyParams, version 8}`(seq `p1`)→ `ControlCmd{SetParams}`(seq `p2`)→ `CmdResult{Applied}`(seq `p3`);② `ConfigBlob{StrategyParams, version 9}` → `SetParams` → `CmdResult{InvalidArgs}`(seq `r3`);③ `ConfigBlob{RiskParams, version 2}` → `SetRisk` → `CmdResult{Applied}`(seq `k3`);④ `ConfigBlob{Refdata, version 2}` → `ReplaceRefdata` → `CmdResult{Applied}`(seq `a3`)→ Drain;段 2 是重启后的新运行,引导块(`BootDone` 的 seq = `b2`)含 Refdata `version` 2。
+`config_at` 用例的夹具 **`J_CFG`**(`pyfixture cfg`,两次 `TW` 运行:第二次是重启,写段 2;refdata `RD_PY`,策略实例 `alpha` 绑定 A1;RiskParams 与 HostManifest 的内容是占位字节 `risk-params-v1`/`-v2`、`host-manifest`,Engine 是只有 `ledger` 节的 ECF1):段 1 引导块含 `ConfigBlob{boot = 1}` 的 Refdata(`version` 1)、RiskParams(`version` 1)、Engine、StrategyParams(`alpha/bn-1`,`version` 7)、HostManifest;之后依次是:① `ConfigBlob{StrategyParams, version 8}`(seq `p1`)→ `ControlCmd{SetParams}`(seq `p2`)→ `CmdResult{Applied}`(seq `p3`);② `ConfigBlob{StrategyParams, version 9}` → `SetParams` → `CmdResult{InvalidArgs}`(seq `r3`);③ `ConfigBlob{RiskParams, version 2}` → `SetRisk` → `CmdResult{Applied}`(seq `k3`);④ `ConfigBlob{Refdata, version 2}` → `ReplaceRefdata` → `CmdResult{Applied}`(seq `a3`)→ Drain;段 2 是重启后的新运行,引导块(`BootDone` 的 seq = `b2`)含 Refdata `version` 2。
 
 ### PY-085 config_at 返回该运行引导块中的配置
 
@@ -952,10 +953,10 @@ spec: README.md
 | 行 | 键 | 期望 |
 |---|---|---|
 | PY-088.1 | `refdata` | dict;账户表含 label `bn-1`(`AccountId(1)`、`kind = Live`);inst 101 的 `px_exp = −2` |
-| PY-088.2 | `risk` | dict;含 `liq_dist_block_open`、`liq_dist_reduce`、`liq_dist_force`、`liq_dist_hyst`、`margin_stale_ms`,值与 Rust 解码相同 |
-| PY-088.3 | `engine` | dict;`exec` 段中账户 A1 一行的 `dust_notional` 与 Rust 解码相同 |
-| PY-088.4 | `strategy_params["alpha/bn-1"]` | `hdr` 含 `strategy = 3`、`account = 1`、`kind_id`、`schema_id`、`schema_ver`、`source`、`version = 8`;`groups` 为 `GroupSpec` 字段的列表;`body` 为 `bytes`,长度 = `hdr.body_len` |
-| PY-088.5 | `host_manifest` | `bytes`,SHA-256 = 该项 `sha256` |
+| PY-088.2 | `risk` | dict;`bytes` 为该 blob 的原始字节(`risk-params-v2`),SHA-256 = `sha256`(hft-risk 提供 `RiskParams` blob 编解码后改为解码字段) |
+| PY-088.3 | `engine` | dict;`sections` 含 `ledger`,为 512 字节的原始行(各节解码归各自 crate) |
+| PY-088.4 | `strategy_params["alpha/bn-1"]` | `hdr` 含 `strategy = 1`、`account = 1`、`kind_id`、`schema_id`、`schema_ver`、`source`、`version = 8`;`groups` 为 `GroupSpec` 字段的列表;`body` 为 `bytes`,长度 = `hdr.body_len` |
+| PY-088.5 | `host_manifest` | dict,`bytes` 的 SHA-256 = 该项 `sha256` |
 | PY-088.6 | `sim_config` | 不在结果中(prod 实例没有该 blob) |
 
 ### PY-089 seq 早于第一个完整引导块时拒绝
@@ -1085,7 +1086,7 @@ spec: README.md
 |---|---|---|
 | PY-102.1 | `None` / `None` | `breakdown()` 各列 = 全部 `PnlDelta` 之和 |
 | PY-102.2 | `S` / `M` | 各列 = `proc_ns ∈ [S, M)` 的事件的 `PnlDelta` 之和 |
-| PY-102.3 | `M` / `E` | 各列 = `proc_ns ∈ [M, E)` 的和;与 PY-102.2 相加等于 PY-102.1 |
+| PY-102.3 | `M` / `E` | 各列 = 从 `M` 之前最近一条带 ledger 节的快照起步的 `JournalLedger` 中 `proc_ns ∈ [M, E)` 的和(快照不含估值价,与从头起步的增量不一定相同,见 README `ledger`) |
 | PY-102.4 | `M` / `M` | 各列为 0 |
 
 ### PY-103 ledger 的账户可用名字或 id,模拟账户结果带 Sim 标注
@@ -1114,7 +1115,7 @@ spec: README.md
 |---|---|---|
 | PY-104.1 | `"group"` | 每个 GroupId(含 `GROUP_NONE`)一行,`PnlBreakdown` 各列与参照相等 |
 | PY-104.2 | `"account"` | 每个账户一行,与参照相等 |
-| PY-104.3 | `"round"` | 每个轮次(`Note{RoundClosed}` 结束的轮次与未结束的当前轮次)一行,与参照相等 |
+| PY-104.3 | `"round"` | 每个 (group, 事件结束时该 group 的 `round_id`) 一行,与参照相等 |
 | PY-104.4 | `"day"` | 每个 UTC 日一行,与参照相等;各行之和等于 PY-104.2 的账户合计 |
 
 ### PY-105 pnl 的 by 取其他值时拒绝
@@ -1142,6 +1143,7 @@ spec: README.md
   1. `led = hft_py.ledger(j, account="bn-1", t1 = T2)`(只消费到 E1)
 - 期望:
   - `positions()` 中 `BTC/P2` 的数量 = 6.0(raw 600 000 000,指数 −8),与 `expected/ledger-E1.bin` 经 Rust 解出的 `InstPos` 相同;`breakdown()` 等于 Rust hft-ledger `JournalLedger` 在 E1 之后的同一值
+- 备注:夹具与"热进程每个事件边界后的 ledger 三节字节"由 testkit 的 `SeqRig` 生成(需要 hft-sequencer);它落地之前本用例未实现
 - 实现:`crates/hft-py/tests/python/test_ledger.py::test_py_106_auto_recon_note_booked`
 
 ### PY-107 补推的同向 ADL 被 auto_held 抵扣,不重复入账
@@ -1154,6 +1156,7 @@ spec: README.md
   1. `led = hft_py.ledger(j, account="bn-1", t1 = T3)`(消费到 E2)
 - 期望:
   - `BTC/P2` 数量仍为 6.0;`breakdown()` 的 `external` 列与 PY-106 相同;结果与 `expected/ledger-E2.bin` 一致
+- 备注:夹具与"热进程每个事件边界后的 ledger 三节字节"由 testkit 的 `SeqRig` 生成(需要 hft-sequencer);它落地之前本用例未实现
 - 实现:`crates/hft-py/tests/python/test_ledger.py::test_py_107_adl_offset_by_auto_held`
 
 ### PY-108 不带 AUTO_RECON 的 ExternalFill 注记不被当作成交
@@ -1166,6 +1169,7 @@ spec: README.md
   1. `led = hft_py.ledger(j, account="bn-1")`
 - 期望:
   - `BTC/P2` 数量 = 6.0 + 0.3(E3)+ 0.4(E4)= 6.7;E4 只按 Input 入账一次(若也按注记入账会是 7.1);与 `expected/ledger-E4.bin` 一致
+- 备注:夹具与"热进程每个事件边界后的 ledger 三节字节"由 testkit 的 `SeqRig` 生成(需要 hft-sequencer);它落地之前本用例未实现
 - 实现:`crates/hft-py/tests/python/test_ledger.py::test_py_108_plain_note_not_booked`
 
 ### PY-109 OMS 防御路径的外来成交经注记入账,与热进程逐值相同
@@ -1174,6 +1178,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:各行一个 `SeqRig` 生成的 journal 夹具 `fixtures/replay/hft-py/ff/<行号>/`(账户 A1,事件 = 带成交的 `OrderEvent` Input + 一条 `Note{OmsForeignFill}`,`qty = 0.3`、`px = 60 100`),同目录保存热进程的 ledger 三节字节;`led = hft_py.ledger(j, account="bn-1")`
+- 备注:夹具与"热进程每个事件边界后的 ledger 三节字节"由 testkit 的 `SeqRig` 生成(需要 hft-sequencer);它落地之前本用例未实现
 - 实现:`crates/hft-py/tests/python/test_ledger.py::test_py_109_oms_foreign_fill`
 
 | 行 | 注记 | 期望 |
@@ -1202,6 +1207,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:各行一个 `SeqRig` 生成的夹具 `fixtures/replay/hft-py/samples/<行号>/`(账户 A1),同目录保存热进程每个事件边界后的 ledger 三节字节;比较对象为 `hft_py.ledger(j, account="bn-1")` 的 `positions()`、`inventory()`、`portfolio()`、`breakdown()` 与由三节字节经 Rust 解出的同名值
+- 备注:夹具与"热进程每个事件边界后的 ledger 三节字节"由 testkit 的 `SeqRig` 生成(需要 hft-sequencer);它落地之前本用例未实现
 - 实现:`crates/hft-py/tests/python/test_ledger.py::test_py_111_booking_samples`
 
 | 行 | 事件 | 期望 |
@@ -1284,7 +1290,7 @@ spec: README.md
 | PY-124.1 | `defaults = {"open_th": "10.0000001%"}`(原始值 100 000 001,上界 + 1) | `(None, [e])`,`e.variant == "OutOfRange"`、`e.field == "open_th"`、`e.group_ix is None` |
 | PY-124.2 | `defaults = {"open_th": "10%"}` | `errs == []`(上界含) |
 | PY-124.3 | `overrides = [{"group_ix": 0, "field": "cooldown_ms", "value": "5000"}]` | `e.variant == "NotPerGroup"`、`e.group_ix == 0` |
-| PY-124.4 | `defaults = {"mode": "z"}` | `e.variant == "BadText"`、`e.field == "mode"` |
+| PY-124.4 | `defaults = {"mode": "z"}` | `e.variant == "BadEnum"`(SDK `parse_value` 对不认识的枚举名)、`e.field == "mode"` |
 | PY-124.5 | `overrides` 的 `max_qty` 值 `"0.5"`,而 `groups` 不含 `qty_exp`/`px_exp` | `e.variant == "BadText"` |
 | PY-124.6 | `defaults = {"nope": "1"}` | `e.variant == "UnknownField"`、`e.field == "nope"` |
 | PY-124.7 | `overrides = [{"group_ix": 3, "field": "open_th", "value": "1%"}]`(只有 3 个 group) | `e.variant == "GroupIxOutOfRange"`、`e.group_ix == 3` |
@@ -1360,7 +1366,7 @@ spec: README.md
 - 步骤:
   1. `p = decode(load_schemas(S_TP), 旧 blob)`
 - 期望:
-  - `p["header"]["schema_ver"] == 1`;`p["defaults"]` 有 6 个字段,`mode == 0`(默认值),其余 5 个与金样旁 `.meta.toml` 记录的值相同
+  - `p["header"]["schema_ver"] == 1`;`p["defaults"]` 有 6 个字段,`mode == 0`(默认值),其余 5 个为金样 `v1_old.input.toml` 的值(`open_th` 6 000 000、`cooldown_ms` 25 000、`pct_bin` 100 000、`max_qty` 0、`enabled` 0)
 - 实现:`crates/hft-py/tests/python/test_params.py::test_py_129_old_body_defaults`
 
 ### PY-130 encode_cmd 按命令名编码载荷
@@ -1404,7 +1410,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:扫描 `crates/hft-py/src/` 与 `crates/hft-py/python/hft_py/` 的源文件
 - 步骤:
-  1. 在 Rust 源中查找构造 `ParamsBodyHdr`、`ParamOverride`、`StrategyParamsHdr` 字节或对参数值调用 `to_le_bytes` 的代码;在 Python 源中查找 `struct.pack`、`int.to_bytes`
+  1. 在 Rust 源中查找 `ParamsBodyHdr`、`ParamOverride` 的结构体字面量,以及 `src/params.rs` 中的 `to_le_bytes`(SPB1 容器头 `StrategyParamsHdr` 是 hft-event 类型,由本 crate 按 `header` 与 schema 填写,不在扫描之列);在 Python 源中查找 `struct.pack`、`to_bytes(`
   2. 在 `src/params.rs` 中查找对 `hft_strategy_sdk::params::{encode_body, decode_body, encode_cmd}` 的调用
 - 期望:
   - 步骤 1 零处命中;步骤 2 三个函数各至少一处调用。向 `src/params.rs` 加入一行 `ParamOverride { … }` 构造的补丁副本上本测试失败
@@ -1455,7 +1461,7 @@ spec: README.md
 - 规则:[概要](README.md#概要)、[Python API](README.md#python-api导入名-hft_py)
 - 级别:table
 - 里程碑:M2
-- 前置:发布剖面构建的 wheel(不含 `testing` 特性);"公开名字"= 不以 `_` 开头的属性
+- 前置:不带 `testing` 特性构建的 wheel 装在 `HFT_PY_RELEASE_PYTHON` 指向的解释器里(各行在该解释器的子进程中读取);"公开名字"= 不以 `_` 开头的属性
 - 实现:`crates/hft-py/tests/python/test_surface.py::test_py_140_no_write_api`
 
 | 行 | 对象 | 期望的公开名字集合 |
@@ -1476,7 +1482,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:仓库的临时副本;每行只在 `crates/hft-py/Cargo.toml` 的 `[dependencies]` 加入所列依赖后运行 `cargo xtask deps`;`[dev-dependencies]` 中的策略包由 TOOL-031.37 覆盖
-- 实现:`tools/xtask/tests/deps_hft_py.rs::py_141_forbidden_deps`
+- 实现:`tools/xtask/tests/deps.rs::py_141_forbidden_deps`
 
 | 行 | 加入的依赖 | 期望 |
 |---|---|---|
@@ -1500,17 +1506,17 @@ spec: README.md
   2. `cargo tree -p hft-py -e features --features testing`
 - 期望:
   - 两次输出中都没有 `hft-journal feature "writer"`;都含 `hft-journal` 的默认特性(读者)
-- 实现:`tools/xtask/tests/deps_hft_py.rs::py_142_no_writer_feature`
+- 实现:`tools/xtask/tests/deps.rs::py_142_no_writer_feature`
 
 ### PY-143 类型存根与运行时模块一致
 
 - 规则:[3. 源文件](README.md#3-源文件)
 - 级别:proc
 - 里程碑:M2
-- 前置:CI 中装好本次构建的 wheel(含 `python/hft_py/__init__.pyi`)
+- 前置:不带 `testing` 特性构建的 wheel(含 `python/hft_py/*.pyi`)装在 `HFT_PY_RELEASE_PYTHON` 指向的解释器里,并装有 mypy
 - 步骤:
   1. `python -m mypy.stubtest hft_py`
-  2. 对删去 `heartbeat.Watch` 声明的存根副本再运行一次
+  2. 对删去 `heartbeat.Watch` 声明的存根副本(放在 `MYPYPATH` 下)再运行一次
 - 期望:
   - 步骤 1 退出 0;步骤 2 退出非 0 且输出点名 `hft_py.heartbeat.Watch`
 - 实现:`crates/hft-py/tests/python/test_surface.py::test_py_143_stubtest`
@@ -1527,6 +1533,7 @@ spec: README.md
 - 期望:
   - 产物文件名为 `hft_py-v-cp310-abi3-manylinux_2_28_aarch64.whl`;`auditwheel` 报告平台标签 `manylinux_2_28_aarch64`
   - wheel 位于归档的 `python/` 目录,`RELEASE.json` 中该文件的 SHA-256 与文件实际 SHA-256 相同
+- 备注:在发布工作流(`release-aarch64.yml`,`.github/scripts/build-wheels.sh`)中运行;`manylinux_2_28` 标签与"wheel 版本 = 发布版本"需要该流水线以 manylinux 容器或 zig 构建并按发布标签设置版本,接入之前本用例未实现
 - 实现:`crates/hft-py/tests/python/test_wheel.py::test_py_150_wheel_name_and_archive`
 
 ### PY-151 wheel 在干净的按版本 venv 中离线安装并通过冒烟
@@ -1535,6 +1542,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:CI arm64 runner;按 `/opt/hft/releases/<v>/venv` 的结构新建空 venv;`pip install --no-index --find-links <归档>/python hft_py`;冒烟 = `open_journal(J_MD).events("Bbo")` 行数、`params.load_schemas("fixtures/strategy-schemas")`、`heartbeat.read` 读 `HB`
+- 备注:在发布工作流(`release-aarch64.yml`,`.github/scripts/build-wheels.sh`)中运行;`manylinux_2_28` 标签与"wheel 版本 = 发布版本"需要该流水线以 manylinux 容器或 zig 构建并按发布标签设置版本,接入之前本用例未实现
 - 实现:`crates/hft-py/tests/python/test_wheel.py::test_py_151_offline_install_smoke`
 
 | 行 | 解释器 | 期望 |
@@ -1566,6 +1574,7 @@ spec: README.md
   1. `importlib.metadata.version("hft_py")`
 - 期望:
   - 结果等于 `RELEASE.json` 的 `version`
+- 备注:在发布工作流(`release-aarch64.yml`,`.github/scripts/build-wheels.sh`)中运行;`manylinux_2_28` 标签与"wheel 版本 = 发布版本"需要该流水线以 manylinux 容器或 zig 构建并按发布标签设置版本,接入之前本用例未实现
 - 实现:`crates/hft-py/tests/python/test_wheel.py::test_py_153_version_matches_release`
 
 ### PY-160 events() 定长 kind 扫描与转置吞吐
@@ -1582,7 +1591,7 @@ spec: README.md
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:table
 - 里程碑:M2
-- 前置:计数全局分配器(Rust 测试);合成 `Bbo` 写入已封存段;`batch_rows = 100 000`;行宽 = `Bbo` 各列每行字节数之和(由 `python/_generated` 的列类型算出);测量迭代期间分配器的峰值增量
+- 前置:本测试单独一个测试二进制;合成 `Bbo` 写入已封存段;`batch_rows = 100 000`;行宽 = 查询的 Arrow schema 各列每行字节数之和;测量迭代期间进程 `RssAnon` 的峰值增量(先对 1M 行夹具做一遍不计入的预热扫描,glibc 在首次释放大块后抬高 mmap 阈值;读完每批即丢弃;采样线程每 200 µs 读一次 `/proc/self/status`;计数分配器需要 `unsafe impl GlobalAlloc`,本 crate 不允许 `unsafe`,hft-testkit 的 `CountingAlloc` 只计次数)
 - 实现:`crates/hft-py/tests/memory.rs::py_161_batch_memory_bound`
 
 | 行 | 段中 `Bbo` 条数 | 期望 |
@@ -1610,6 +1619,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:`SeqRig` 生成的夹具 `fixtures/replay/hft-py/fills/`(账户 A1):Output `OrderDecision{New}` 槽 (epoch 3, slot 7, gen 1) → (A1, `BTC/P2`, Buy, `G1`);之后按行投递 `OrderEvent`;比较对象为 `hft_py.ledger(j, account="bn-1").positions()` 中 `BTC/P2` 的数量与 `G1` 的永续腿
+- 备注:夹具与"热进程每个事件边界后的 ledger 三节字节"由 testkit 的 `SeqRig` 生成(需要 hft-sequencer);它落地之前本用例未实现
 - 实现:`crates/hft-py/tests/python/test_ledger.py::test_py_112_fills_dedup_by_cum_filled`
 
 | 行 | 槽 (3, 7, 1) 的 `OrderEvent` 序列(`cum_filled`) | 期望 |

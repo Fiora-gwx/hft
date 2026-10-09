@@ -151,6 +151,10 @@ KINDS = {
     0x0602: ("RawTx", 1, "multi 24", RAW_TX),
 }
 
+# FNV-1a 64 of (kind u16, schema_version u16, size u32) LE of every production kind in number
+# order (size = fixed body or Var/Multi prefix); equals hft_py.schema_hash().
+SCHEMA_HASH = 0x61FCFD5C25BD0F10
+
 STRUCTS = {
     "StrategyParamsHdr": STRATEGY_PARAMS_HDR,
     "GroupSpec": GROUP_SPEC,

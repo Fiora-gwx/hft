@@ -343,3 +343,92 @@ fn tool_031_rule_counterexamples() {
         assert!(fails.is_empty(), "{}", fails.join("\n"));
     });
 }
+
+/// crates/hft-py/TESTS.md PY-141: forbidden dependencies of hft-py fail `cargo xtask deps`.
+#[test]
+fn py_141_forbidden_deps() {
+    const PY: &str = "crates/hft-py";
+    let rows: &[(&str, &str, i32, &str)] = &[
+        ("PY-141.1", "crates/hft-journal:writer", 1, "hft-journal/writer"),
+        (
+            "PY-141.2",
+            "crates/hft-sequencer",
+            1,
+            "crates/hft-py → crates/hft-sequencer",
+        ),
+        ("PY-141.3", "crates/hft-sim", 1, "crates/hft-py → crates/hft-sim"),
+        ("PY-141.4", "crates/hft-net", 1, "crates/hft-py → crates/hft-net"),
+        (
+            "PY-141.5",
+            "crates/hft-venue",
+            1,
+            "crates/hft-py → crates/hft-venue",
+        ),
+        ("PY-141.6", "strategies/x", 1, "crates/hft-py → strategies/x"),
+        (
+            "PY-141.7",
+            "strategies/registry",
+            1,
+            "crates/hft-py → strategies/registry",
+        ),
+        ("PY-141.8", "", 0, ""),
+    ];
+    let mut fails = Vec::new();
+    for (row, entry, want, needle) in rows {
+        let f = clean(&row.to_lowercase().replace('.', "-"));
+        if entry.ends_with(":writer") {
+            // hft-py already depends on hft-journal in the clean fixture: the line gains the feature.
+            f.replace(
+                &format!("{PY}/Cargo.toml"),
+                "hft-journal = { path = \"../../crates/hft-journal\" }",
+                "hft-journal = { path = \"../../crates/hft-journal\", features = [\"writer\"] }",
+            );
+        } else if !entry.is_empty() {
+            apply(&f, PY, D, entry);
+        }
+        let run = f.xtask(&["deps"]);
+        let vs = violations(&run);
+        if run.code != *want {
+            fails.push(format!(
+                "{row}: exit {} (want {want}); {vs:?}; {}",
+                run.code, run.stderr
+            ));
+        } else if !needle.is_empty() && !vs.iter().any(|v| v.contains(needle)) {
+            fails.push(format!("{row}: no violation mentions '{needle}': {vs:?}"));
+        }
+    }
+    assert!(fails.is_empty(), "{}", fails.join("\n"));
+}
+
+/// crates/hft-py/TESTS.md PY-142: the feature closure of hft-py (with and without `testing`, for
+/// the aarch64 target) never enables hft-journal's `writer`.
+#[test]
+fn py_142_no_writer_feature() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for extra in [&[][..], &["--features", "testing"][..]] {
+        let out = std::process::Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+            .current_dir(&root)
+            .args([
+                "tree",
+                "-p",
+                "hft-py",
+                "-e",
+                "features",
+                "--target",
+                "aarch64-unknown-linux-gnu",
+            ])
+            .args(extra)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let t = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            !t.contains("hft-journal feature \"writer\""),
+            "{extra:?}: writer enabled\n{t}"
+        );
+        assert!(
+            t.contains("hft-journal feature \"default\""),
+            "{extra:?}: no hft-journal default features\n{t}"
+        );
+    }
+}

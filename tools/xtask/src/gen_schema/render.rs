@@ -104,6 +104,23 @@ fn py_struct(fields: &[Field], size: u16, enums: &BTreeMap<String, EnumTable>) -
     )
 }
 
+/// FNV-1a 64 over `(kind u16, schema_version u16, size u32)` little-endian of the production kinds
+/// (`m.kinds`, number order); the value `hft_py.schema_hash()` computes from its compiled table.
+pub fn schema_hash(m: &Model) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for k in &m.kinds {
+        let mut b = Vec::with_capacity(8);
+        b.extend_from_slice(&k.kind.to_le_bytes());
+        b.extend_from_slice(&k.schema_version.to_le_bytes());
+        b.extend_from_slice(&u32::from(k.layout.size()).to_le_bytes());
+        for x in b {
+            h ^= u64::from(x);
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    h
+}
+
 /// `python/_generated/events.py`.
 pub fn events_py(m: &Model) -> String {
     let mut s = String::new();
@@ -148,7 +165,11 @@ pub fn events_py(m: &Model) -> String {
             snake(&k.name).to_uppercase()
         );
     }
-    s += "}\n\nSTRUCTS = {\n";
+    s += "}\n\n";
+    s += "# FNV-1a 64 of (kind u16, schema_version u16, size u32) LE of every production kind in number\n";
+    s += "# order (size = fixed body or Var/Multi prefix); equals hft_py.schema_hash().\n";
+    let _ = writeln!(s, "SCHEMA_HASH = 0x{:016X}", schema_hash(m));
+    s += "\nSTRUCTS = {\n";
     for st in &m.structs {
         let _ = writeln!(s, "    {}: {},", py_str(&st.name), snake(&st.name).to_uppercase());
     }

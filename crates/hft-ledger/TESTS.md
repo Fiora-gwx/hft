@@ -2349,13 +2349,13 @@ spec: README.md
 - 规则:[冷消费者(`JournalLedger`)](README.md#冷消费者journalledger)、[使用本组件](README.md#使用本组件)
 - 级别:integ
 - 里程碑:M2
-- 前置:LED-240 生成器产出的 20 条固定种子序列,写成 journal 夹具
+- 前置:hft-py 的夹具 `J_LED20`(`crates/hft-py/examples/pyfixture.rs` 的 `led` 子命令,20 个固定种子;生成器按 LED-240 的操作种类写成 journal 记录:下单与分次成交、外部成交、资金费推送、余额、BBO 与标记价)
 - 步骤:
-  1. Rust 测试以 `JournalLedger` 按序消费该 journal,记下每步 `PnlBreakdown` 与最终三节快照
+  1. Rust 侧(`pyfixture ledger-ref`)以 `JournalLedger` 按序消费该 journal,记下每个事件各 group 的 `PnlBreakdown` 增量与最终三节快照
   2. 经 `hft_py.ledger`(内部同一 `JournalLedger`)读同一 journal 重建
 - 期望:
-  - 两边每步的 `PnlBreakdown`(`hft_py.pnl` 输出)与最终三节快照逐字节相同
-- 实现:待实现
+  - 每隔 10 个事件取一个时刻 t,`hft_py.ledger(…, t1 = t + 1 ns).breakdown()` 等于 Rust 侧 `proc_ns ≤ t` 的增量之和;最终三节快照(`hft_py._testing.ledger_snapshot`)逐字节相同
+- 实现:`crates/hft-py/tests/python/test_ledger.py::test_led_246_pyo3_matches_rust`
 
 ### LED-247 记账时刻跨重启连续
 

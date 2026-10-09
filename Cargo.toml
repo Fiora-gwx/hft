@@ -23,6 +23,7 @@ members = [
     "crates/hft-venue",
     "crates/venue-binance",
     "crates/hft-risk",
+    "crates/hft-py",
     "strategies/latency-probe",
     "strategies/registry",
     "tools/xtask",
