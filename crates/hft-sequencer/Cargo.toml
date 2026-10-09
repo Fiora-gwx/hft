@@ -35,8 +35,10 @@ xxhash-rust.workspace = true
 
 [dev-dependencies]
 hft-sequencer = { path = ".", features = ["testing"] }
-hft-strategy-sdk = { workspace = true, features = ["testing"] }
+hft-strategy-sdk = { workspace = true, features = ["testing", "schema-json"] }
 hft-testkit.workspace = true
+# Not `workspace = true`: the workspace entry enables `asm` (needs a C toolchain per target).
+sha2 = "0.10"
 proptest.workspace = true
 criterion.workspace = true
 

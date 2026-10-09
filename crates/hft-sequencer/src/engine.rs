@@ -300,8 +300,12 @@ pub(crate) fn timer_demand(rd: &RefData, setup: &EngineSetup) -> u32 {
     let n_acc = account_count(rd) as u32;
     let mut slots = 0u32;
     let mut risk = 0u32;
+    let mut with_tables = 0u32;
     for a in 1..=n_acc {
         let am = rd.account(AccountId(a as u8));
+        if am.venues != 0 {
+            with_tables += 1;
+        }
         for v in 0..64u8 {
             if am.venues & (1u64 << v) == 0 {
                 continue;
@@ -312,7 +316,7 @@ pub(crate) fn timer_demand(rd: &RefData, setup: &EngineSetup) -> u32 {
             }
         }
     }
-    let oms = n_acc * setup.oms.links_per_account + slots + 1;
+    let oms = with_tables * setup.oms.links_per_account + slots + 1;
     exec + oms + risk + sys_timer_count(rd)
 }
 
@@ -440,7 +444,7 @@ impl Engine {
             clock: EngineClock::default(),
             seg: setup.clock,
             boot_seq: 0,
-            clock_ok: true,
+            clock_ok: false,
             last_day_rolled: 0,
             now: Now::new(Tsc(0), 0, 0, true, anchor),
             cur_seq: 0,

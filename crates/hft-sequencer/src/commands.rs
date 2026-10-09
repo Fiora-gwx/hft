@@ -218,7 +218,7 @@ impl CmdState {
             recon: Vec::with_capacity(8),
             legs_touched: Vec::with_capacity(16),
             conns: ConnTable::default(),
-            unknown_last: vec![0; 256],
+            unknown_last: vec![u32::MAX; 256],
             feeds_last: vec![false; 256],
             refdata_version: 0,
             recon_view: Vec::new(),
@@ -1745,6 +1745,7 @@ pub(crate) fn sys_timer<'a, D: Driver<S>, S: StrategySet>(
             e.now = e.now_of(slot.tsc, e.cur_seq);
             e.trace.rec("apply.Clock", u64::from(e.clock_ok), 0);
             crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Clock { ok: e.clock_ok })?;
+            crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Gate(GateEvent::Clock { ok: e.clock_ok }))?;
         }
         10 => {
             let n = e.conflated;

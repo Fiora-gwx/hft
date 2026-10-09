@@ -57,6 +57,10 @@ pub(crate) fn process_parts<D: Driver<S>, S: StrategySet>(
         .journal()
         .append_var(slot.kind, slot.flags, slot.tsc, &[slot.body()])
         .map_err(|_| FatalReason::JournalFull)?;
+    // Meta records from the hk / advice rings are recorded only (README "记录分类").
+    if crate::journal::role_of(slot.kind, slot.body()) == hft_event::Role::Meta {
+        return Ok(());
+    }
     e.cur_seq = s.0;
     e.cur_kind = slot.kind;
     e.inputs_since_keyframe += 1;
@@ -531,6 +535,16 @@ fn l2_snapshot<'a, D: Driver<S>, S: StrategySet>(
         p.market = Some(MarketEv::Book { inst: i });
     }
     Ok(())
+}
+
+/// A boot-block `L2Snapshot{origin = Keyframe}` read while starting from a snapshot: levels only.
+pub(crate) fn apply_l2_keyframe(e: &mut Engine, body: &[u8]) {
+    let Some(h) = crate::types::read_body::<L2SnapHdr>(body) else { return };
+    let n = usize::from(h.n_bids) + usize::from(h.n_asks);
+    let levels = level_slice(body.get(core::mem::size_of::<L2SnapHdr>()..).unwrap_or(&[]), n);
+    if let Some(b) = e.books.l2_mut(h.h.inst) {
+        b.apply_snapshot(&h, &levels);
+    }
 }
 
 fn level_slice(b: &[u8], n: usize) -> Vec<Level> {

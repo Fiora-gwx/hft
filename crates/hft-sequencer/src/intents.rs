@@ -656,7 +656,7 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
     let notes_snapshot: Vec<Note> = out.notes.as_slice().to_vec();
     for f in ff.iter() {
         let n = notes_snapshot.iter().find(|n| {
-            n.code == hft_event::note_code(NoteSource::Oms, hft_oms::notes::code_of(hft_oms::notes::FOREIGN_FILL))
+            n.code == hft_oms::notes::code_of(hft_oms::notes::FOREIGN_FILL)
                 && n.inst == f.inst
         });
         let ef = n.and_then(hft_ledger::Ledger::external_from_oms_note);
@@ -698,7 +698,7 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
         e.trace.rec("heap.oms", u64::from(tid), 0);
     }
     // Notes and latency samples; P0 OmsUnknown → UnknownTimeout cap.
-    let unknown_code = hft_event::note_code(NoteSource::Oms, hft_oms::notes::code_of(hft_oms::notes::UNKNOWN));
+    let unknown_code = hft_oms::notes::code_of(hft_oms::notes::UNKNOWN);
     for n in notes_snapshot.iter() {
         e.out.push(RecordFlags(0), n);
         e.trace.rec("note.oms", u64::from(n.code), 0);

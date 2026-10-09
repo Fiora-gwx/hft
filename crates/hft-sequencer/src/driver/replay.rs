@@ -67,6 +67,8 @@ pub struct ReplaySink {
     pub mismatches: Vec<Mismatch>,
     /// Outputs compared.
     pub compared: u64,
+    /// `(seq, logged, regenerated)` masked bodies of the first mismatches (diagnostics).
+    pub detail: Vec<(u64, Vec<u8>, Vec<u8>)>,
     scratch_a: Vec<u8>,
     scratch_b: Vec<u8>,
 }
@@ -89,6 +91,7 @@ impl ReplaySink {
             pos: 0,
             mismatches: Vec::new(),
             compared: 0,
+            detail: Vec::new(),
             scratch_a: Vec::with_capacity(1 << 16),
             scratch_b: Vec::with_capacity(1 << 16),
         }
@@ -133,6 +136,13 @@ impl ReplaySink {
                 && self.scratch_a == self.scratch_b;
             self.compared += 1;
             if !same {
+                if self.detail.len() < 16 {
+                    let mut lg = self.scratch_b.clone();
+                    lg.splice(0..0, r.kind.0.to_le_bytes());
+                    let mut rg = self.scratch_a.clone();
+                    rg.splice(0..0, kind.0.to_le_bytes());
+                    self.detail.push((seq, lg, rg));
+                }
                 let (venue, account) = venue_account(kind, &self.scratch_a);
                 self.mismatches.push(Mismatch {
                     seq,
@@ -302,6 +312,21 @@ impl ReplayDriver {
     pub fn mismatches(&self) -> &[Mismatch] {
         &self.sink.mismatches
     }
+    /// Logged Outputs never reached by the replay (verify: a failure each).
+    pub fn leftover(&self) -> Vec<Mismatch> {
+        let mut v = Vec::new();
+        for r in self.sink.log.recs.iter().take(self.end).skip(self.sink.pos) {
+            if r.role() == Role::Output && r.kind != EventKind::SEGMENT_ROLL {
+                v.push(Mismatch {
+                    seq: r.seq,
+                    kind: r.kind,
+                    venue: VenueId(0),
+                    account: AccountId(0),
+                });
+            }
+        }
+        v
+    }
 }
 
 impl<S: StrategySet> Driver<S> for ReplayDriver {
@@ -389,6 +414,14 @@ impl<S: StrategySet> Driver<S> for ReplayDriver {
     }
     fn clock_status(&self) -> ClockStatus {
         crate::snapshot::clock_status(hft_rt::CalibPair::default(), 0)
+    }
+    fn start_log(&mut self) -> Option<Log> {
+        Some(self.sink.log.clone())
+    }
+    fn start_at(&mut self, ix: usize) {
+        self.end = self.end.min(crate::recover::event_end(&self.sink.log));
+        self.cursor = ix;
+        self.sink.pos = ix;
     }
 }
 

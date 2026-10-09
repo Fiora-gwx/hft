@@ -74,6 +74,14 @@ pub trait Driver<S: StrategySet> {
     fn roll_info(&mut self) -> RollInfo;
     fn host_profile(&self) -> HostProfile;
     fn clock_status(&self) -> ClockStatus;
+    /// `boot(Journal)`: the logged records to start from (live: the old journal of this
+    /// instance, already truncated by hft-journal `open`; verify/mirror: their own log).
+    fn start_log(&mut self) -> Option<replay::Log>;
+    /// Replay drivers: continue from record index `ix` (the first Input after the start
+    /// snapshot). Live: nothing.
+    fn start_at(&mut self, ix: usize) {
+        let _ = ix;
+    }
 }
 
 /// Read-only derived state the driver consults before and while taking Inputs.

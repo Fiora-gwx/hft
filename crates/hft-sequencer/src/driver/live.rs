@@ -70,6 +70,10 @@ pub trait LiveIo<S: StrategySet> {
     fn after_take(&mut self, r: Option<RingId>) {
         let _ = r;
     }
+    /// The old journal of a cold start (records of every readable segment, in seq order).
+    fn recovery_log(&mut self) -> Option<super::replay::Log> {
+        None
+    }
 }
 
 /// Live driver configuration.
@@ -987,6 +991,10 @@ impl<S: StrategySet, IO: LiveIo<S>> Driver<S> for LiveDriver<S, IO> {
 
     fn clock_status(&self) -> ClockStatus {
         self.io.clock_status()
+    }
+
+    fn start_log(&mut self) -> Option<super::replay::Log> {
+        self.io.recovery_log()
     }
 }
 

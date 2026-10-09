@@ -872,6 +872,7 @@ dependencies = [
  "hft-testkit",
  "hft-types",
  "proptest",
+ "sha2",
  "xxhash-rust",
  "zerocopy",
 ]

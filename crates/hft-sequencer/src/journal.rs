@@ -227,6 +227,34 @@ impl MemJournal {
     pub fn is_empty(&self) -> bool {
         self.total == 0
     }
+    /// Drops every record after the last one carrying `EVENT_END` (the half event of a crash);
+    /// returns the number of records dropped.
+    pub fn truncate_to_event_end(&mut self) -> usize {
+        let mut dropped = 0;
+        loop {
+            let Some(seg) = self.segments.last_mut() else { break };
+            match seg.records.last() {
+                Some(r) if r.flags.0 & RecordFlags::EVENT_END.0 == 0 => {
+                    seg.records.pop();
+                    dropped += 1;
+                }
+                Some(_) => break,
+                None => {
+                    if self.segments.len() > 1 {
+                        self.segments.pop();
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+        self.total -= dropped;
+        self.next_seq = self.records().last().map_or(1, |r| r.seq + 1);
+        self.boundary = self.total;
+        self.committed = self.committed.min(self.total);
+        self.last_non_meta = None;
+        dropped
+    }
     fn push(&mut self, kind: EventKind, flags: RecordFlags, tsc: u64, pieces: &[&[u8]]) -> u64 {
         let mut body = Vec::with_capacity(pieces.iter().map(|p| p.len()).sum());
         for p in pieces {
@@ -361,6 +389,35 @@ impl JournalSink for MemJournal {
         if self.faults.roll_not_ready > 0 {
             self.faults.roll_not_ready -= 1;
             return Err(RollErr::NextNotReady);
+        }
+        // A fresh journal: the first segment is opened in place (no `End`).
+        if self.total == 0 {
+            let clock = SegClock {
+                tsc_hz_milli: info.tsc_hz_milli,
+                calib_tsc: info.calib.tsc.0,
+                calib_realtime_ns: info.calib.realtime_ns,
+            };
+            if self.segments.is_empty() {
+                self.segments.push(MemSegment::default());
+            }
+            if let Some(s) = self.segments.last_mut() {
+                s.no = s.no.max(1);
+                s.reason = reason as u8;
+                s.clock = clock;
+            }
+            if self.next_seq == 0 {
+                self.next_seq = 1;
+            }
+            let no = self.segments.last().map_or(1, |s| s.no);
+            let mut begin = SegmentRoll::new_zeroed_body();
+            begin.mark = 2;
+            begin.journal_kind = 2;
+            begin.segment_no = no;
+            begin.seq_mark = self.next_seq;
+            begin.utc_ns = info.utc_ns;
+            begin.reason = reason as u8;
+            self.push(EventKind::SEGMENT_ROLL, RecordFlags(0), info.calib.tsc.0, &[begin.as_bytes()]);
+            return Ok(MemBoot { j: self, n: 1 });
         }
         let old_no = self.segments.last().map_or(0, |s| s.no);
         let mut end = SegmentRoll::new_zeroed_body();

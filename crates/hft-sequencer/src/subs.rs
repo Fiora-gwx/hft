@@ -30,6 +30,8 @@ pub struct SubIndex {
     pub union: Vec<u8>,
     max_insts: u32,
     max_subs: u16,
+    /// First subscriptions refused because `max_insts` was used up.
+    pub overflow: u32,
     scratch: Vec<(u16, u16, u16, EvMask, bool)>,
 }
 
@@ -46,6 +48,7 @@ impl SubIndex {
             union: vec![0; n],
             max_insts: caps.max_insts,
             max_subs: caps.max_subs_per_inst,
+            overflow: 0,
             scratch: Vec::with_capacity(caps.max_insts as usize * usize::from(caps.max_subs_per_inst)),
         }
     }
@@ -60,6 +63,7 @@ impl SubIndex {
             return Some(x);
         }
         if self.insts.len() as u32 >= self.max_insts {
+            self.overflow += 1;
             return None;
         }
         let x = self.insts.len() as u16;
