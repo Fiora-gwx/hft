@@ -502,8 +502,16 @@ jobs:
             python -m pip install pytest
             python -m pytest -q "${skip[@]}" deploy/dev2/tests
           fi
+      # Pinned release binary, checked against its SHA-256 (the docker://rhysd/actionlint image hit
+      # Docker Hub's anonymous pull rate limit). shellcheck from the runner image checks run: blocks.
       - name: actionlint
         if: steps.paths.outputs.ops == 'true'
-        uses: docker://rhysd/actionlint:1.7.12
-        with:
-          args: -color
+        env:
+          AL_VER: 1.7.12
+          AL_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          f=actionlint_${AL_VER}_linux_amd64.tar.gz
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$f" "https://github.com/rhysd/actionlint/releases/download/v${AL_VER}/$f"
+          echo "$AL_SHA256  $RUNNER_TEMP/$f" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
