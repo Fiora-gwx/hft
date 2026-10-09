@@ -6,9 +6,7 @@
     clippy::disallowed_macros
 )] // allow-list: test code, not a hot path
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use hft_ctl_proto::perms::{OPTIONAL_ROWS, PERM_ROWS, PRINCIPALS, render_rows};
 use hft_ctl_proto::{CmdBody, CmdClass, Principal, Role, RoleSet, allowed, class_of};
 use serde_json::{Value, json};

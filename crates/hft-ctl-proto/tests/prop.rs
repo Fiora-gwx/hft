@@ -6,9 +6,7 @@
     clippy::disallowed_macros
 )] // allow-list: test code, not a hot path
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use hft_ctl_proto::{
     CmdResponse, EngineInfo, Normalized, ResultCode, TransportStatus, Uuid, allowed, class_of,
     needs_confirm_static, normalize, parse_request,

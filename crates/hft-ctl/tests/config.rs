@@ -6,8 +6,6 @@
     clippy::disallowed_macros
 )] // allow-list: test code, not a hot path
 
-mod common;
-
 use hft_ctl::config::{
     DEFAULT_DEDUP_CAPACITY, DEFAULT_RESULT_WAIT_MS, DEFAULT_WARMUP_RATE_PER_S, DEFAULT_WRITE_RATE_PER_MIN,
 };
@@ -49,8 +47,8 @@ mod linux {
     use hft_rt::{Backing, Mailbox, PollTask, spsc};
     use hft_types::Tsc;
 
-    use super::common::sock::{ResQ, Sock, tmpdir};
-    use super::common::*;
+    use crate::common::sock::{ResQ, Sock, tmpdir};
+    use crate::common::*;
 
     fn try_new(socket: std::path::PathBuf, ring: usize) -> Result<(), String> {
         let (p_send, _p) = Box::leak(Box::new(Mailbox::new())).split();

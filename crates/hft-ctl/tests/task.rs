@@ -6,9 +6,7 @@
     clippy::disallowed_macros
 )] // allow-list: test code, not a hot path
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use hft_types::Tsc;
 use serde_json::{Value, json};
 
@@ -87,8 +85,8 @@ mod linux {
     use proptest::prelude::*;
     use serde_json::json;
 
-    use super::common::sock::Sock;
-    use super::common::*;
+    use crate::common::sock::Sock;
+    use crate::common::*;
 
     fn frame(v: &serde_json::Value) -> Vec<u8> {
         let mut f = Vec::new();

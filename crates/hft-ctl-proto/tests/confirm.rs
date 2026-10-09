@@ -6,9 +6,7 @@
     clippy::disallowed_macros
 )] // allow-list: test code, not a hot path
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use hft_ctl_proto::{CmdBody, ConfirmRule, Role, check_confirm_fields, needs_confirm_static};
 use proptest::prelude::*;
 use serde_json::{Value, json};

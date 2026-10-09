@@ -6,9 +6,7 @@
     clippy::disallowed_macros
 )] // allow-list: test code, not a hot path
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use hft_ctl_proto::codes::{Detail, detail};
 use hft_ctl_proto::response::render_preview;
 use hft_ctl_proto::{CmdResponse, EngineInfo, Hex32, ResultCode, TransportStatus, Uuid, render_detail};

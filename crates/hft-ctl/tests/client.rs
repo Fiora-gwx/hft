@@ -6,8 +6,6 @@
     clippy::disallowed_macros
 )] // allow-list: test code, not a hot path
 
-mod common;
-
 #[cfg(target_os = "linux")]
 mod linux {
     use std::time::Duration;
@@ -18,8 +16,8 @@ mod linux {
     use hft_event::ControlCmd;
     use hft_rt::PollTask;
 
-    use super::common::sock::{Sock, principals_with_self};
-    use super::common::*;
+    use crate::common::sock::{Sock, principals_with_self};
+    use crate::common::*;
 
     /// Runs `f` on a client thread while this thread polls the gateway.
     fn drive<R: Send>(s: &mut Sock, f: impl FnOnce() -> R + Send) -> R {

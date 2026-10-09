@@ -6,12 +6,10 @@
     clippy::disallowed_macros
 )] // allow-list: test code, not a hot path
 
-mod common;
-
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use common::*;
+use crate::common::*;
 use hft_ctl::ParsedConfig;
 use hft_event::{ControlCmd, EventKind};
 use hft_refdata::{AccountSpec, AccountVenueSpec, InstStatus, InstanceSpec, UidPolicy};

@@ -6,6 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+# One test binary per crate (tests/main.rs includes every group module); goldens stay a target of
+# their own for `cargo xtask ci`'s golden step.
+autotests = false
 
 [lints]
 workspace = true
@@ -30,3 +33,11 @@ toml.workspace = true
 [[bench]]
 name = "normalize"
 harness = false
+
+[[test]]
+name = "ctp"
+path = "tests/main.rs"
+
+[[test]]
+name = "golden"
+path = "tests/golden.rs"

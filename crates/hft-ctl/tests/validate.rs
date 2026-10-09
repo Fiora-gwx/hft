@@ -6,9 +6,7 @@
     clippy::disallowed_macros
 )] // allow-list: test code, not a hot path
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use hft_ctl::ParsedConfig;
 use hft_ctl::validate::{EventErr, detail_of_event_err};
 use hft_ctl_proto::ResultCode;
