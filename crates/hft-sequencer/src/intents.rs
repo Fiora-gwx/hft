@@ -5,7 +5,8 @@
 use hft_event::{GwCmd, Note, NoteLevel, NoteSource, OrderAction, OrderDecision, OrderFlags, RecordFlags};
 use hft_exec::{ExecOrder, ExecOrigin, LinkBrokenCause, LinkNotice, LinkPhase, PlaceResult};
 use hft_oms::{
-    ApprovedIntent, HedgeGate, HedgePx, HedgeRequest, OmsOut, OmsTimerKind, OrderState, link_valid, price_hedge,
+    ApprovedIntent, HedgeGate, HedgePx, HedgeRequest, OmsOut, OmsTimerKind, OrderState, link_valid,
+    price_hedge,
 };
 use hft_refdata::InstKind;
 use hft_risk::mode::{CellKey, Effective, ModeInput};
@@ -14,7 +15,10 @@ use hft_strategy_sdk::ctx::CancelReq;
 use hft_strategy_sdk::{
     HedgeKind, IntentClass, IntentOutcome, LinkRole, OrderIntent, OrderRef, OrderUpdate, StrategySet,
 };
-use hft_types::{AccountId, CapSource, GroupId, InstId, Px, Qty, Rate, RejectBits, RoundMode, Side, SlotId, StrategyId, Tsc, VenueId};
+use hft_types::{
+    AccountId, CapSource, GroupId, InstId, Px, Qty, Rate, RejectBits, RoundMode, Side, SlotId, StrategyId,
+    Tsc, VenueId,
+};
 
 use crate::Driver;
 use crate::engine::{Emit, Engine};
@@ -69,7 +73,16 @@ fn oms_origin(s: &Src) -> hft_oms::Origin {
 }
 
 /// A decision that is only recorded (rejected or shadowed): no slot, no tokens, no in-flight.
-fn record_only(e: &mut Engine, strategy: StrategyId, it: &OrderIntent, reject: RejectBits, shadow: bool, oflags: u16, reason: u32, intent_no: u32) {
+fn record_only(
+    e: &mut Engine,
+    strategy: StrategyId,
+    it: &OrderIntent,
+    reject: RejectBits,
+    shadow: bool,
+    oflags: u16,
+    reason: u32,
+    intent_no: u32,
+) {
     let d = OrderDecision {
         trigger_seq: e.cur_seq,
         decided_tsc: Tsc(0),
@@ -94,8 +107,20 @@ fn record_only(e: &mut Engine, strategy: StrategyId, it: &OrderIntent, reject: R
         link_role: it.link.get().map_or(0, |l| l.role as u8),
         _pad: [0; 7],
     };
-    let flags = if shadow { RecordFlags::SHADOW } else { RecordFlags(0) };
-    e.trace.rec(if shadow { "decision.shadow" } else { "decision.reject" }, u64::from(reject.0), 0);
+    let flags = if shadow {
+        RecordFlags::SHADOW
+    } else {
+        RecordFlags(0)
+    };
+    e.trace.rec(
+        if shadow {
+            "decision.shadow"
+        } else {
+            "decision.reject"
+        },
+        u64::from(reject.0),
+        0,
+    );
     e.out.push(flags, &d);
 }
 
@@ -152,14 +177,25 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
             Ok(hp) => {
                 hedge_px = hp;
                 hedge_cap = req.hedge_cap_qty;
-                let class = if req.reduce_only { IntentClass::Reduce } else { IntentClass::Hedge };
+                let class = if req.reduce_only {
+                    IntentClass::Reduce
+                } else {
+                    IntentClass::Hedge
+                };
                 let ai = ApprovedIntent::hedge(&req, &plan, hp, class);
                 it = ai.intent;
             }
             Err(err) => {
                 e.trace.rec("oms.hedge_gated", u64::from(req.link_id), 0);
                 let mut o = e.take_oms();
-                e.oms.hedge_gated(req.link_id, HedgeGate::Px(err), Tsc(0), e.now.tsc, e.cur_seq, &mut o);
+                e.oms.hedge_gated(
+                    req.link_id,
+                    HedgeGate::Px(err),
+                    Tsc(0),
+                    e.now.tsc,
+                    e.cur_seq,
+                    &mut o,
+                );
                 drain_oms(e, inst, drv, &mut o)?;
                 e.put_oms(o);
                 return Ok(PipeOut::Gated);
@@ -186,7 +222,10 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
         pending_sell: fl.open_sell,
     };
     let link_role = it.link.get().map(|l| l.role);
-    let simul = it.link.get().is_some_and(|l| l.hedge.kind == HedgeKind::Simultaneous);
+    let simul = it
+        .link
+        .get()
+        .is_some_and(|l| l.hedge.kind == HedgeKind::Simultaneous);
     let draft = IntentDraft {
         account,
         inst: inst_id,
@@ -221,16 +260,36 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
                 return Ok(PipeOut::Shadowed);
             }
             Effective::Live if class.class == IntentClass::Open && !open_allowed(inst, account, it.group) => {
-                record_only(e, strategy, &it, RejectBits::MODE_SHADOW, false, oflags, reason, intent_no);
+                record_only(
+                    e,
+                    strategy,
+                    &it,
+                    RejectBits::MODE_SHADOW,
+                    false,
+                    oflags,
+                    reason,
+                    intent_no,
+                );
                 return Ok(PipeOut::Shadowed);
             }
             _ => {}
         }
     }
-    if let Src::Strategy { reduce_only_ctx: true } = src
+    if let Src::Strategy {
+        reduce_only_ctx: true,
+    } = src
         && class.class == IntentClass::Open
     {
-        record_only(e, strategy, &it, RejectBits::CLOSE_ONLY, false, oflags, reason, intent_no);
+        record_only(
+            e,
+            strategy,
+            &it,
+            RejectBits::CLOSE_ONLY,
+            false,
+            oflags,
+            reason,
+            intent_no,
+        );
         return Ok(PipeOut::Rejected(RejectBits::CLOSE_ONLY));
     }
     // 4. IntentView.
@@ -293,8 +352,7 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
     // The peer of a Simultaneous second leg (README "意图管线" 4); OnFill hedges have none.
     if let Src::Hedge { req } = src
         && req.role == LinkRole::Second
-        && e
-            .oms
+        && e.oms
             .link_plan(req.link_id)
             .is_some_and(|(_, p)| p.kind == hft_strategy_sdk::HedgeKind::Simultaneous)
     {
@@ -330,7 +388,14 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
                     };
                     e.trace.rec("oms.hedge_gated", u64::from(req.link_id), retry_at.0);
                     let mut o = e.take_oms();
-                    e.oms.hedge_gated(req.link_id, HedgeGate::Risk(bits), retry_at, e.now.tsc, e.cur_seq, &mut o);
+                    e.oms.hedge_gated(
+                        req.link_id,
+                        HedgeGate::Risk(bits),
+                        retry_at,
+                        e.now.tsc,
+                        e.cur_seq,
+                        &mut o,
+                    );
                     drain_oms(e, inst, drv, &mut o)?;
                     e.put_oms(o);
                 }
@@ -393,7 +458,15 @@ pub(crate) fn place_strategy<D: Driver<S>, S: StrategySet>(
     it: &OrderIntent,
     ro: bool,
 ) -> R<IntentOutcome> {
-    let r = pipeline(e, inst, drv, strategy, it, Src::Strategy { reduce_only_ctx: ro }, 0)?;
+    let r = pipeline(
+        e,
+        inst,
+        drv,
+        strategy,
+        it,
+        Src::Strategy { reduce_only_ctx: ro },
+        0,
+    )?;
     Ok(match r {
         PipeOut::Placed(h) => IntentOutcome::Placed(h),
         PipeOut::Rejected(b) => IntentOutcome::Rejected(b),
@@ -452,7 +525,12 @@ pub(crate) fn place_hedge<D: Driver<S>, S: StrategySet>(
 }
 
 /// Cancel or amend from a strategy `Ctx` (trigger stamps of this Input).
-pub(crate) fn cancel<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, c: &CancelReq) -> R<()> {
+pub(crate) fn cancel<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    c: &CancelReq,
+) -> R<()> {
     let mut o = e.take_oms();
     let trig = e.trig;
     let r = match c.amend {
@@ -504,7 +582,11 @@ fn gw_of(d: &OrderDecision) -> GwCmd {
 
 /// The out ring of an account's orders.
 pub(crate) fn ring_of(e: &Engine, a: AccountId, v: VenueId) -> OutRing {
-    if e.is_sim(a) { OutRing::Sim } else { OutRing::Venue(v) }
+    if e.is_sim(a) {
+        OutRing::Sim
+    } else {
+        OutRing::Venue(v)
+    }
 }
 
 fn link_phase(s: hft_oms::LinkState) -> LinkPhase {
@@ -570,10 +652,12 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
         };
         let before = e.ledger.pos(f.account, f.inst).qty.0 != 0;
         let r = e.ledger.apply_fill(&fd, e.now.engine_ns);
-        e.trace.rec("ledger.apply_fill", u64::from(f.account.0), u64::from(f.inst.0));
+        e.trace
+            .rec("ledger.apply_fill", u64::from(f.account.0), u64::from(f.inst.0));
         pnls.push(r.pnl);
         if let Some(n) = r.net_adjust {
-            e.trace.rec("oms.net_adjust", u64::from(n.account.0), u64::from(n.group.0));
+            e.trace
+                .rec("oms.net_adjust", u64::from(n.account.0), u64::from(n.group.0));
             e.oms.net_adjust(n.account, n.group, n.inst, n.delta);
             e.exec.on_leg_adjust(n.account, n.group);
         }
@@ -601,7 +685,8 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
         e.trace.rec("ledger.apply_fee", u64::from(f.account.0), 0);
         pnls.push(r.pnl);
         if let Some(n) = r.net_adjust {
-            e.trace.rec("oms.net_adjust", u64::from(n.account.0), u64::from(n.group.0));
+            e.trace
+                .rec("oms.net_adjust", u64::from(n.account.0), u64::from(n.group.0));
             e.oms.net_adjust(n.account, n.group, n.inst, n.delta);
             e.exec.on_leg_adjust(n.account, n.group);
         }
@@ -610,7 +695,10 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
     let ups: Vec<OrderUpdate> = out.updates.as_slice().to_vec();
     for u in ups.iter() {
         let origin = e.oms.slot_ext(u.r).map_or(1, |x| x.origin);
-        let smoke = e.oms.slot(u.r).is_some_and(|s| s.oflags & OrderFlags::SMOKE.0 != 0);
+        let smoke = e
+            .oms
+            .slot(u.r)
+            .is_some_and(|s| s.oflags & OrderFlags::SMOKE.0 != 0);
         if smoke {
             continue;
         }
@@ -625,10 +713,19 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
             e.put_exec(xo);
         } else {
             let strategy = e.oms.slot(u.r).map_or(StrategyId(0), |s| s.strategy);
-            let strategy = if strategy.0 == 0 { e.rd.account(u.r.account).bound_instance } else { strategy };
+            let strategy = if strategy.0 == 0 {
+                e.rd.account(u.r.account).bound_instance
+            } else {
+                strategy
+            };
             if let Some(ix) = inst.ix(strategy) {
-                let gix = inst.slots.get(ix).and_then(|s| s.gix_of(u.group)).unwrap_or(hft_strategy_sdk::GIX_NONE);
-                e.trace.rec("queue.order", u64::from(strategy.0), u64::from(u.r.slot));
+                let gix = inst
+                    .slots
+                    .get(ix)
+                    .and_then(|s| s.gix_of(u.group))
+                    .unwrap_or(hft_strategy_sdk::GIX_NONE);
+                e.trace
+                    .rec("queue.order", u64::from(strategy.0), u64::from(u.r.slot));
                 e.notify.push(ix as u16, Notif::Order { gix, u: *u });
             }
         }
@@ -668,10 +765,9 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
     let ff: Vec<hft_oms::ForeignFill> = out.foreign_fills.as_slice().to_vec();
     let notes_snapshot: Vec<Note> = out.notes.as_slice().to_vec();
     for f in ff.iter() {
-        let n = notes_snapshot.iter().find(|n| {
-            n.code == hft_oms::notes::code_of(hft_oms::notes::FOREIGN_FILL)
-                && n.inst == f.inst
-        });
+        let n = notes_snapshot
+            .iter()
+            .find(|n| n.code == hft_oms::notes::code_of(hft_oms::notes::FOREIGN_FILL) && n.inst == f.inst);
         let ef = n.and_then(hft_ledger::Ledger::external_from_oms_note);
         let ef = ef.unwrap_or_else(|| foreign_to_external(f));
         crate::process::external_fill(e, inst, drv, &ef, false)?;

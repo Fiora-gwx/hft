@@ -18,8 +18,8 @@ use hft_strategy_sdk::{HedgeKind as SdkHedge, StrategySet};
 use hft_types::{AccountId, AssetId, GroupId, InstId, VenueId};
 
 use crate::dst::obs::{
-    AssetRow, Evidence, EvidenceKind, InstRow, LegNetRow, LegRow, LimitRow, LinkRow, LinkState, NoteInfo, Obs,
-    PlanKind, PosRow, RiskRow, SlotRow, SlotState, SlotTableRow, TombRow,
+    AssetRow, Evidence, EvidenceKind, InstRow, LegNetRow, LegRow, LimitRow, LinkRow, LinkState, NoteInfo,
+    Obs, PlanKind, PosRow, RiskRow, SlotRow, SlotState, SlotTableRow, TombRow,
 };
 use crate::dst::seq::SeqSut;
 use crate::dst::sut::{InputRec, StepOut};
@@ -71,7 +71,8 @@ impl Before {
         let ext_key = i
             .body
             .get(..size_of::<ExternalFill>())
-            .and_then(|b| <ExternalFill as zerocopy::TryFromBytes>::try_read_from_bytes(b).ok()).map_or(0, |x| if x.trade_id != 0 { x.trade_id } else { x.fill_seq });
+            .and_then(|b| <ExternalFill as zerocopy::TryFromBytes>::try_read_from_bytes(b).ok())
+            .map_or(0, |x| if x.trade_id != 0 { x.trade_id } else { x.fill_seq });
         Before {
             fills: can_fill(i.kind),
             kind: Some(i.kind),
@@ -109,7 +110,11 @@ pub fn note_name(code: u32) -> &'static str {
 }
 
 fn account_of_group<S: StrategySet>(s: &SeqSut<S>, g: GroupId) -> AccountId {
-    s.world.groups.iter().find(|x| x.group == g).map_or(AccountId(0), |x| x.account)
+    s.world
+        .groups
+        .iter()
+        .find(|x| x.group == g)
+        .map_or(AccountId(0), |x| x.account)
 }
 
 /// Fills `out.info` from the step's records and the position changes.
@@ -152,7 +157,11 @@ pub fn step_info<S: StrategySet>(s: &mut SeqSut<S>, before: &Before, out: &mut S
                 venue: VenueId(*v),
                 inst: InstId(*i),
                 delta: d,
-                ext_key: if kind == EvidenceKind::External { before.ext_key } else { 0 },
+                ext_key: if kind == EvidenceKind::External {
+                    before.ext_key
+                } else {
+                    0
+                },
             });
         }
     }
@@ -178,7 +187,11 @@ fn legs_of<S: StrategySet>(s: &SeqSut<S>, g: GroupId) -> [InstId; 2] {
     let Some(x) = w.groups.iter().find(|x| x.group == g) else {
         return [InstId(0); 2];
     };
-    let kind = w.strategies.iter().find(|b| b.instance == x.instance).map_or(0, super::build::kind_of);
+    let kind = w
+        .strategies
+        .iter()
+        .find(|b| b.instance == x.instance)
+        .map_or(0, super::build::kind_of);
     super::build::leg_order(w, kind, x.first, x.second)
 }
 
@@ -239,7 +252,9 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
     // OMS slots and tables.
     for a in &w.accounts {
         for v in &a.venues {
-            let Some(t) = e.oms.table_view(*v, a.id) else { continue };
+            let Some(t) = e.oms.table_view(*v, a.id) else {
+                continue;
+            };
             o.tables.push(SlotTableRow {
                 venue: *v,
                 account: a.id,
@@ -249,7 +264,9 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
                 free_list_consistent: true,
             });
             for ix in 0..t.n_slots {
-                let Some((sl, ext, _)) = e.oms.raw_slot(*v, a.id, ix) else { continue };
+                let Some((sl, ext, _)) = e.oms.raw_slot(*v, a.id, ix) else {
+                    continue;
+                };
                 if sl.r#gen > 1 {
                     for g in sl.r#gen.saturating_sub(2)..sl.r#gen {
                         if let Some(tb) = e.oms.tomb(*v, a.id, ix, g) {
@@ -282,7 +299,11 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
                     filled: i128::from(sl.filled.0),
                     immediate: matches!(sl.tif, hft_types::Tif::Ioc | hft_types::Tif::Fok),
                     risk_reducing: sl.oflags & hft_event::OrderFlags::RISK_REDUCING.0 != 0,
-                    terminal_ens: if st.is_terminal() { ens(sl.t_state.0).max(1) } else { 0 },
+                    terminal_ens: if st.is_terminal() {
+                        ens(sl.t_state.0).max(1)
+                    } else {
+                        0
+                    },
                 });
                 let _ = ext;
             }
@@ -292,7 +313,11 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
     o.oms_dup = st.dup;
     o.oms_stale_gen = st.stale_gen;
     // Links.
-    let n_links = s.setup.oms.links_per_account.saturating_mul(w.accounts.len() as u32 + 1);
+    let n_links = s
+        .setup
+        .oms
+        .links_per_account
+        .saturating_mul(w.accounts.len() as u32 + 1);
     for id in 0..n_links {
         let Some(l) = e.oms.link(id) else { continue };
         let state = match l.state {
@@ -302,13 +327,18 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
             OLink::Done => LinkState::Done,
             OLink::Broken => LinkState::Broken,
         };
-        let Some((_, plan)) = e.oms.link_plan(l.link_id) else { continue };
+        let Some((_, plan)) = e.oms.link_plan(l.link_id) else {
+            continue;
+        };
         let kind = match plan.kind {
             SdkHedge::OnFill => PlanKind::OnFill,
             SdkHedge::Simultaneous => PlanKind::Simultaneous,
             _ => PlanKind::Other,
         };
-        let hedge_leg = legs_of(s, l.group).iter().position(|i| *i == plan.inst).map_or(1, |k| k as u8);
+        let hedge_leg = legs_of(s, l.group)
+            .iter()
+            .position(|i| *i == plan.inst)
+            .map_or(1, |k| k as u8);
         o.links.push(LinkRow {
             id: l.link_id,
             account: l.account,
@@ -354,7 +384,12 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
             max_pos_qty: g.max_pos_qty,
             residual: v.leg.get(hedge).map_or(0, |t| i128::from(t.residual.0)),
             fee_adjust: 0,
-            naked_capped: s.carry.naked_capped.get(&(g.account.0, g.group.0)).copied().unwrap_or(0),
+            naked_capped: s
+                .carry
+                .naked_capped
+                .get(&(g.account.0, g.group.0))
+                .copied()
+                .unwrap_or(0),
             inflight_immediate: imm,
         });
         o.limits.push(LimitRow {

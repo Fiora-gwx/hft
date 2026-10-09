@@ -10,8 +10,8 @@ use hft_ledger::Ledger;
 use hft_oms::Oms;
 use hft_refdata::{AccountKind, RefData};
 use hft_risk::ModeCfg;
-use hft_risk::mode::{ModeInput, RecoveryFlags};
 use hft_risk::Risk;
+use hft_risk::mode::{ModeInput, RecoveryFlags};
 use hft_rt::Heartbeat;
 use hft_strategy_sdk::{RefView, SnapshotReader, StrategyInstance, StrategySet};
 use hft_types::{AccountId, CapSource, GroupId, InstId, Tsc, VenueId};
@@ -110,7 +110,11 @@ pub fn ends_with_drain(log: &Log) -> bool {
     let Some(&ix) = snapshot_indices(log).last() else {
         return false;
     };
-    let drain = log.recs.get(ix).and_then(snap_hdr).is_some_and(|h| h.purpose == PURPOSE_DRAIN);
+    let drain = log
+        .recs
+        .get(ix)
+        .and_then(snap_hdr)
+        .is_some_and(|h| h.purpose == PURPOSE_DRAIN);
     drain && !log.recs.iter().skip(ix + 1).any(|r| r.role() == Role::Input)
 }
 
@@ -131,7 +135,9 @@ fn blobs_upto(log: &Log, upto: usize) -> Vec<(BlobRef, Vec<u8>)> {
         if r.kind != EventKind::CONFIG_BLOB {
             continue;
         }
-        let Some(h) = crate::types::read_body::<BlobHdr>(&r.body) else { continue };
+        let Some(h) = crate::types::read_body::<BlobHdr>(&r.body) else {
+            continue;
+        };
         let c = r.body.get(72..72 + h.blob.len as usize).unwrap_or(&[]);
         if !v.iter().any(|x| x.0.sha256 == h.blob.sha256) {
             v.push((h.blob, c.to_vec()));
@@ -149,12 +155,21 @@ pub(crate) fn restore_at<S: StrategySet>(
     setup: &EngineSetup,
     epoch: Option<u32>,
 ) -> Result<(Engine, Instances<S>), BootError> {
-    let rec = log.recs.get(ix).ok_or(BootError::Journal(JournalErr::NoSnapshot))?;
+    let rec = log
+        .recs
+        .get(ix)
+        .ok_or(BootError::Journal(JournalErr::NoSnapshot))?;
     let hdr = snap_hdr(rec).ok_or(BootError::SnapshotUndecodable { section: 0 })?;
     let body = rec.body.get(core::mem::size_of::<SnapshotHdr>()..).unwrap_or(&[]);
-    let secs: SeqSections = read_seq_sections(body).map_err(|s| BootError::SnapshotUndecodable { section: s })?;
+    let secs: SeqSections =
+        read_seq_sections(body).map_err(|s| BootError::SnapshotUndecodable { section: s })?;
     let blobs = blobs_upto(log, ix);
-    let content = |r: &BlobRef| blobs.iter().find(|x| x.0.sha256 == r.sha256).map(|x| x.1.as_slice());
+    let content = |r: &BlobRef| {
+        blobs
+            .iter()
+            .find(|x| x.0.sha256 == r.sha256)
+            .map(|x| x.1.as_slice())
+    };
     // Active configuration (section 9): refdata, engine, strategy params, risk.
     let mut refdata: Option<BlobRef> = None;
     let mut engine_ref: Option<BlobRef> = None;
@@ -171,19 +186,30 @@ pub(crate) fn restore_at<S: StrategySet>(
     }
     let rd_ref = refdata.ok_or(BootError::SnapshotUndecodable { section: 9 })?;
     let rd_bytes = content(&rd_ref).ok_or(BootError::Config(ConfigErr::Missing))?;
-    let rd = RefData::load(rd_bytes, None)
-        .map_err(|r| BootError::Config(ConfigErr::Blob { kind: BlobKind::Refdata as u16, code: r.code() as u16 }))?;
+    let rd = RefData::load(rd_bytes, None).map_err(|r| {
+        BootError::Config(ConfigErr::Blob {
+            kind: BlobKind::Refdata as u16,
+            code: r.code() as u16,
+        })
+    })?;
     let risk_ref = risk_ref.ok_or(BootError::SnapshotUndecodable { section: 9 })?;
     let risk_bytes = content(&risk_ref).ok_or(BootError::Config(ConfigErr::Missing))?;
-    let decode = setup.risk_decode.ok_or(BootError::Config(ConfigErr::Component("risk_decode")))?;
-    let risk_params = decode(risk_bytes, AccountId(0), &rd).map_err(|d| BootError::Config(ConfigErr::Params(u32::from(d))))?;
+    let decode = setup
+        .risk_decode
+        .ok_or(BootError::Config(ConfigErr::Component("risk_decode")))?;
+    let risk_params = decode(risk_bytes, AccountId(0), &rd)
+        .map_err(|d| BootError::Config(ConfigErr::Params(u32::from(d))))?;
     // The OMS epoch: section 3.
     let r = SnapshotReader::new(body);
     let snap_epoch = r
         .find_section(hft_oms::SECTION_OMS_COUNTERS)
         .ok()
         .flatten()
-        .and_then(|s| s.body.get(..4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])))
+        .and_then(|s| {
+            s.body
+                .get(..4)
+                .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        })
         .unwrap_or(setup.oms.engine_epoch);
     let mut setup2 = setup.clone();
     setup2.oms.engine_epoch = epoch.unwrap_or(snap_epoch);
@@ -231,7 +257,9 @@ pub(crate) fn restore_at<S: StrategySet>(
     e.risk = Risk::restore(&mut r, &risk_params, &e.rd, &setup.gws, &rcaps, &bounds, mc)
         .map_err(|_| BootError::SnapshotUndecodable { section: 4 })?;
     let mut r = SnapshotReader::new(body);
-    e.books.restore(&mut r).map_err(|_| BootError::SnapshotUndecodable { section: 6 })?;
+    e.books
+        .restore(&mut r)
+        .map_err(|_| BootError::SnapshotUndecodable { section: 6 })?;
     // Strategy instances (section 5) with their parameters.
     let mut cells_total = 0usize;
     let mut groups_over = false;
@@ -243,19 +271,23 @@ pub(crate) fn restore_at<S: StrategySet>(
             return Err(BootError::SnapshotUndecodable { section: 9 });
         };
         let pb = content(b).ok_or(BootError::Config(ConfigErr::Missing))?;
-        let p = parse_params::<S>(pb, b.sha256, &e.rd, u16::MAX, None).map_err(|d| BootError::Config(ConfigErr::Params(d)))?;
+        let p = parse_params::<S>(pb, b.sha256, &e.rd, u16::MAX, None)
+            .map_err(|d| BootError::Config(ConfigErr::Params(d)))?;
         if p.groups.len() > e.caps.max_groups_per_instance {
             groups_over = true;
         }
         cells_total += usize::from(p.groups.len());
-        let Some(slot) = inst.slots.get_mut(sl_ix) else { continue };
+        let Some(slot) = inst.slots.get_mut(sl_ix) else {
+            continue;
+        };
         let si = StrategyInstance {
             strategy: slot.id,
             account: slot.account,
             kind_id: slot.kind_id,
         };
         let rv = RefView::new(&e.rd, slot.account);
-        let mut s = S::create(si, &p.params, &p.groups, &rv).map_err(|_| BootError::SnapshotUndecodable { section: 5 })?;
+        let mut s = S::create(si, &p.params, &p.groups, &rv)
+            .map_err(|_| BootError::SnapshotUndecodable { section: 5 })?;
         let mut rr = SnapshotReader::with_desc_version(bytes, h.desc_version);
         S::restore(&mut s, &mut rr).map_err(|_| BootError::SnapshotUndecodable { section: 5 })?;
         slot.inst = Some(s);
@@ -275,7 +307,8 @@ pub(crate) fn restore_at<S: StrategySet>(
     if secs.timers.len() > e.caps.max_timers as usize {
         timers_over = true;
     }
-    e.heap.set_capacity(secs.timers.len().max(e.caps.max_timers as usize));
+    e.heap
+        .set_capacity(secs.timers.len().max(e.caps.max_timers as usize));
     for t in secs.timers.iter() {
         let _ = e.heap.push(crate::timers::TimerEntry {
             deadline: t.deadline_tsc,
@@ -320,7 +353,8 @@ pub(crate) fn restore_at<S: StrategySet>(
     e.last_day_rolled = secs.seq_day.last_day_rolled;
     e.cmd.notices.extend_from_slice(&secs.notices);
     if secs.engine_clock.tsc_hz_milli != 0 {
-        e.clock = crate::clock::EngineClock::new(secs.engine_clock).map_err(|_| BootError::SnapshotUndecodable { section: 25 })?;
+        e.clock = crate::clock::EngineClock::new(secs.engine_clock)
+            .map_err(|_| BootError::SnapshotUndecodable { section: 25 })?;
         e.boot_seq = secs.engine_clock.clock_seq + 1;
     }
     for c in secs.conns.iter() {
@@ -341,7 +375,11 @@ pub(crate) fn restore_at<S: StrategySet>(
     e.last_tsc = rec.tsc;
     e.last_keyframe_tsc = rec.tsc;
     e.rec.snapshot_seq = rec.seq;
-    e.clock_ok = hdr.purpose != 0 && e.risk.mode.cap(CapSource::CLOCK_BAD, &hft_risk::scope_any()).is_none();
+    e.clock_ok = hdr.purpose != 0
+        && e.risk
+            .mode
+            .cap(CapSource::CLOCK_BAD, &hft_risk::scope_any())
+            .is_none();
     // Derived caches (README "从快照起步").
     e.market.rx_from_seq = hdr.at_seq;
     for i in 0..e.market.rows.len() {
@@ -417,7 +455,9 @@ pub(crate) fn restore_at<S: StrategySet>(
         Some(CapKind::Insts)
     } else if cells_total > e.caps.max_cells_total as usize {
         Some(CapKind::Cells)
-    } else if n_instances > usize::from(e.caps.max_instances) || inst.slots.len() > usize::from(e.caps.max_instances) {
+    } else if n_instances > usize::from(e.caps.max_instances)
+        || inst.slots.len() > usize::from(e.caps.max_instances)
+    {
         Some(CapKind::Instances)
     } else if groups_over {
         Some(CapKind::GroupsPerInstance)
@@ -454,14 +494,21 @@ fn choose_and_restore<S: StrategySet>(
     let snaps = snapshot_indices(log);
     let last = *snaps.last().ok_or(BootError::Journal(JournalErr::NoSnapshot))?;
     let try_one = |ix: usize| -> Result<(usize, Engine, Instances<S>), BootError> {
-        let rec = log.recs.get(ix).ok_or(BootError::Journal(JournalErr::NoSnapshot))?;
+        let rec = log
+            .recs
+            .get(ix)
+            .ok_or(BootError::Journal(JournalErr::NoSnapshot))?;
         let body = rec.body.get(core::mem::size_of::<SnapshotHdr>()..).unwrap_or(&[]);
         let r = SnapshotReader::new(body);
         let snap_epoch = r
             .find_section(hft_oms::SECTION_OMS_COUNTERS)
             .ok()
             .flatten()
-            .and_then(|s| s.body.get(..4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])))
+            .and_then(|s| {
+                s.body
+                    .get(..4)
+                    .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            })
             .unwrap_or(0);
         let (e, i) = restore_at::<S>(log, ix, setup, epoch_of(snap_epoch))?;
         Ok((ix, e, i))
@@ -505,7 +552,9 @@ pub(crate) fn boot_journal<D: Driver<S>, S: StrategySet>(
     mut drv: D,
     hb: &'static Heartbeat,
 ) -> Result<Sequencer<D, S>, BootError> {
-    let mut log = drv.start_log().ok_or(BootError::Journal(JournalErr::NoSnapshot))?;
+    let mut log = drv
+        .start_log()
+        .ok_or(BootError::Journal(JournalErr::NoSnapshot))?;
     let mode = drv.mode();
     // 1. Truncate to the last EVENT_END; report the half event's Input.
     let end = event_end(&log);
@@ -521,7 +570,10 @@ pub(crate) fn boot_journal<D: Driver<S>, S: StrategySet>(
     if mode == DriverMode::Live {
         let cur = drv.host_profile().build_git;
         let changed = last_build(&log).is_some_and(|b| b != cur);
-        if changed && matches!(plan.start, SnapshotSel::Latest | SnapshotSel::AtSeq(_)) && !ends_with_drain(&log) {
+        if changed
+            && matches!(plan.start, SnapshotSel::Latest | SnapshotSel::AtSeq(_))
+            && !ends_with_drain(&log)
+        {
             return Err(BootError::VersionNeedsDrain);
         }
     }
@@ -548,7 +600,11 @@ pub(crate) fn boot_journal<D: Driver<S>, S: StrategySet>(
     let snap_ens = e.last_ens;
     let mut stop_tsc = snap_rec_tsc;
     let mut stop_ens = snap_ens;
-    let hz_prev = if e.clock.row.tsc_hz_milli != 0 { e.clock.row.tsc_hz_milli } else { e.seg.tsc_hz_milli };
+    let hz_prev = if e.clock.row.tsc_hz_milli != 0 {
+        e.clock.row.tsc_hz_milli
+    } else {
+        e.seg.tsc_hz_milli
+    };
     if plan.replay_tail {
         let start = next_input(&log, ix);
         let per_round = setup.seq.replay_per_round;
@@ -576,7 +632,12 @@ pub(crate) fn boot_journal<D: Driver<S>, S: StrategySet>(
                 break;
             }
         }
-        let Sequencer { e: e2, inst: i2, drv: rdrv, .. } = rs;
+        let Sequencer {
+            e: e2,
+            inst: i2,
+            drv: rdrv,
+            ..
+        } = rs;
         e = e2;
         inst = i2;
         e.rec.mismatches = rdrv.mismatches().to_vec();
@@ -592,8 +653,21 @@ pub(crate) fn boot_journal<D: Driver<S>, S: StrategySet>(
     // 4. recovery_end with this run's TSC.
     let now = drv.run_tsc().unwrap_or(Tsc(stop_tsc));
     let hz_cur = drv.roll_info().tsc_hz_milli;
-    let hz_cur = if hz_cur == 0 { setup.clock.tsc_hz_milli } else { hz_cur };
-    recovery_end(&mut e, &mut inst, &mut drv, &plan, now, Tsc(stop_tsc), hz_prev, hz_cur)?;
+    let hz_cur = if hz_cur == 0 {
+        setup.clock.tsc_hz_milli
+    } else {
+        hz_cur
+    };
+    recovery_end(
+        &mut e,
+        &mut inst,
+        &mut drv,
+        &plan,
+        now,
+        Tsc(stop_tsc),
+        hz_prev,
+        hz_cur,
+    )?;
     // New segment: Recovery boot block (the live driver then writes EngineClock).
     e.seg = crate::journal::SegClock {
         tsc_hz_milli: hz_cur,
@@ -615,7 +689,8 @@ pub(crate) fn boot_journal<D: Driver<S>, S: StrategySet>(
         let t = Tsc(seq.e.rec.recovery_now.0);
         let j = seq.drv.journal();
         for n in notes.iter() {
-            j.append(RecordFlags(0), t, n).map_err(|_| BootError::Journal(JournalErr::Chain))?;
+            j.append(RecordFlags(0), t, n)
+                .map_err(|_| BootError::Journal(JournalErr::Chain))?;
         }
         j.end_event();
         j.publish();
@@ -658,12 +733,16 @@ pub(crate) fn derive_gate_caches(e: &mut Engine) {
             }
             let primary = vb[3] & (1u64 << v) != 0;
             let standby = vb[4] & (1u64 << v) != 0;
-            e.cmd.conns.set(acc, VenueId(v), crate::commands::ConnRow {
-                primary,
-                standby,
-                us_seen: primary,
-                us_up: primary,
-            });
+            e.cmd.conns.set(
+                acc,
+                VenueId(v),
+                crate::commands::ConnRow {
+                    primary,
+                    standby,
+                    us_seen: primary,
+                    us_up: primary,
+                },
+            );
         }
     }
 }
@@ -693,7 +772,8 @@ fn recovery_end<D: Driver<S>, S: StrategySet>(
         cfg.engine_epoch = new_epoch;
         cfg.tsc_hz_milli = e.setup.clock.tsc_hz_milli;
         let mut r = SnapshotReader::new(w.as_bytes());
-        e.oms = Oms::restore(&mut r, &cfg, &e.rd).map_err(|_| BootError::SnapshotUndecodable { section: 3 })?;
+        e.oms =
+            Oms::restore(&mut r, &cfg, &e.rd).map_err(|_| BootError::SnapshotUndecodable { section: 3 })?;
         e.prev_epoch = e.epoch;
         e.epoch = new_epoch;
         // The group legs are not in the OMS sections: register them again, as `restore_at` does.
@@ -777,16 +857,13 @@ fn recovery_end<D: Driver<S>, S: StrategySet>(
         e.put_oms(o);
         e.trace.rec("oms.force_unknown", u64::from(v.0), u64::from(a.0));
         e.rec.forced.push((*v, *a, n));
-        e.seq_note(codes::note::RECOVER_MISMATCH, NoteLevel::P0, GroupId(0), InstId(0), [
-            u64::from(v.0) | (u64::from(a.0) << 8),
-            *seq,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-        ]);
+        e.seq_note(
+            codes::note::RECOVER_MISMATCH,
+            NoteLevel::P0,
+            GroupId(0),
+            InstId(0),
+            [u64::from(v.0) | (u64::from(a.0) << 8), *seq, 0, 0, 0, 0, 0, 0],
+        );
     }
     // CLEAN_DRAIN: hft-risk conditions ①–③ over the whole instance.
     let clean = clean_restart(e, plan);
@@ -806,10 +883,15 @@ fn recovery_end<D: Driver<S>, S: StrategySet>(
         }
         e.rec.flags.push((acc, f));
         e.trace.rec("apply.RecoveryFlags", a as u64, u64::from(f));
-        crate::mode_glue::apply_mode(e, inst, drv, ModeInput::RecoveryFlags {
-            account: acc,
-            flags: RecoveryFlags(f),
-        })
+        crate::mode_glue::apply_mode(
+            e,
+            inst,
+            drv,
+            ModeInput::RecoveryFlags {
+                account: acc,
+                flags: RecoveryFlags(f),
+            },
+        )
         .map_err(fatal)?;
     }
     // Mirror restore batches are sent after EngineClock (see `mirror_restore_all`).
@@ -854,7 +936,9 @@ fn clean_restart(e: &Engine, plan: &RecoverPlan) -> bool {
         let acc = AccountId(a as u8);
         for v in 0..64u8 {
             if e.rd.account(acc).venues & (1u64 << v) != 0
-                && e.oms.table_view(VenueId(v), acc).is_some_and(|t| t.unknown_count != 0)
+                && e.oms
+                    .table_view(VenueId(v), acc)
+                    .is_some_and(|t| t.unknown_count != 0)
             {
                 return false;
             }
@@ -882,7 +966,14 @@ pub(crate) fn mirror_restore_all(e: &mut Engine) {
             let mut batch = hft_oms::FixedVec::<hft_oms::MirrorRestore, 256>::new();
             let more = e.oms.mirror_restore(v, a, &mut batch, &mut cursor);
             for m in batch.as_slice() {
-                let c = hft_event::GwCmd::mirror_restore(a, m.inst, hft_types::SlotId(m.slot), m.r#gen, m.epoch, m.exch_order_id);
+                let c = hft_event::GwCmd::mirror_restore(
+                    a,
+                    m.inst,
+                    hft_types::SlotId(m.slot),
+                    m.r#gen,
+                    m.epoch,
+                    m.exch_order_id,
+                );
                 e.out.emits.push(crate::engine::Emit::Gw {
                     ring: crate::types::OutRing::Venue(v),
                     cmd: c,

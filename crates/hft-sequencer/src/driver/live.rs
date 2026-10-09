@@ -6,8 +6,8 @@
 use std::collections::VecDeque;
 
 use hft_event::{
-    BlobRef, CmdHdr, CmdScope, ClockStatus, ControlCmd, EngineClock, EventKind, FeedCmd, GwCmd, GwOp, HostProfile,
-    Note, NoteLevel, NoteSource, RecordFlags, SendReport, SendStatus, Timer,
+    BlobRef, ClockStatus, CmdHdr, CmdScope, ControlCmd, EngineClock, EventKind, FeedCmd, GwCmd, GwOp,
+    HostProfile, Note, NoteLevel, NoteSource, RecordFlags, SendReport, SendStatus, Timer,
 };
 use hft_journal::{RollAt, RollReason};
 use hft_strategy_sdk::StrategySet;
@@ -223,7 +223,10 @@ impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
     }
 
     fn all_rings_empty(&mut self) -> bool {
-        let mut n = self.io.len(RingId::Ctl) + self.io.len(RingId::Hk) + self.io.len(RingId::Advice) + self.io.len(RingId::RepSim);
+        let mut n = self.io.len(RingId::Ctl)
+            + self.io.len(RingId::Hk)
+            + self.io.len(RingId::Advice)
+            + self.io.len(RingId::RepSim);
         for k in 0..self.io.n_rep() {
             n += self.io.len(RingId::Rep(k));
         }
@@ -262,7 +265,11 @@ impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
         let by_time = now.0.saturating_sub(v.last_keyframe_tsc()) >= period;
         let by_events = v.inputs_since_keyframe() >= u64::from(p.keyframe_max_events);
         if (by_time || by_events) && self.keyframe_due_tsc.is_none() {
-            self.keyframe_due_tsc = Some(if by_time { v.last_keyframe_tsc() + period } else { now.0 });
+            self.keyframe_due_tsc = Some(if by_time {
+                v.last_keyframe_tsc() + period
+            } else {
+                now.0
+            });
         }
         by_time || by_events
     }
@@ -378,7 +385,10 @@ impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
             v: [h, 0, 0, 0, 0, 0, 0, 0],
         };
         let t = out.tsc;
-        let _ = self.io.journal().append_var(EventKind::NOTE, RecordFlags(0), t, &[n.as_bytes()]);
+        let _ = self
+            .io
+            .journal()
+            .append_var(EventKind::NOTE, RecordFlags(0), t, &[n.as_bytes()]);
         true
     }
 
@@ -457,7 +467,12 @@ impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
                 return true;
             }
         }
-        if self.io.has_chain() && self.c.chain < self.lim_chain() && self.c.rep < total && self.io.len(RingId::Chain) > 0 && self.pop_one(RingId::Chain, out) {
+        if self.io.has_chain()
+            && self.c.chain < self.lim_chain()
+            && self.c.rep < total
+            && self.io.len(RingId::Chain) > 0
+            && self.pop_one(RingId::Chain, out)
+        {
             self.c.chain += 1;
             self.c.rep += 1;
             return true;
@@ -1009,7 +1024,9 @@ impl<S: StrategySet, IO: LiveIo<S>> Driver<S> for LiveDriver<S, IO> {
 
 fn feed_inst(c: &FeedCmd) -> Option<InstId> {
     match c {
-        FeedCmd::Subscribe { inst, .. } | FeedCmd::Unsubscribe { inst } | FeedCmd::Resync { inst } => Some(*inst),
+        FeedCmd::Subscribe { inst, .. } | FeedCmd::Unsubscribe { inst } | FeedCmd::Resync { inst } => {
+            Some(*inst)
+        }
         FeedCmd::Rotate { .. } => None,
     }
 }
@@ -1037,7 +1054,12 @@ fn stop_kill_input(out: &mut InputSlot, now: Tsc, level: KillLevel, scope: CmdSc
     };
     let mut buf = [0u8; 512];
     let n = c.encode(&h, &mut buf).unwrap_or(0);
-    out.set_bytes(EventKind::CONTROL_CMD, RecordFlags(0), now, buf.get(..n).unwrap_or(&[]));
+    out.set_bytes(
+        EventKind::CONTROL_CMD,
+        RecordFlags(0),
+        now,
+        buf.get(..n).unwrap_or(&[]),
+    );
 }
 
 #[allow(dead_code)]

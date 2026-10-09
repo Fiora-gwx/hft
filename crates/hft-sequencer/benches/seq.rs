@@ -15,9 +15,11 @@ use std::hint::black_box;
 use std::time::{Duration, Instant};
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use hft_event::{AdviceHdr, ConnRole, ConnStateKind, ControlCmd, EventKind, ExternalCause, ExternalFill, Timer};
-use hft_sequencer::driver::live::RingId;
+use hft_event::{
+    AdviceHdr, ConnRole, ConnStateKind, ControlCmd, EventKind, ExternalCause, ExternalFill, Timer,
+};
 use hft_sequencer::StepOutcome;
+use hft_sequencer::driver::live::RingId;
 use hft_strategy_sdk::EventRef;
 use hft_types::{AccountId, AssetId, GroupId, InstId, Px, Qty, Side, StrategyId, Tsc};
 use zerocopy::{FromZeros, IntoBytes};
@@ -120,7 +122,18 @@ fn seq_320_conn_alive(c: &mut Criterion) {
         b.iter_custom(|iters| {
             each(iters, &mut h, |h, _| {
                 let t = h.now();
-                h.push(RingId::Rep(0), &conn(A, 0, ConnStateKind::Alive, ConnRole::Md, InstId(0), AccountId(0), t));
+                h.push(
+                    RingId::Rep(0),
+                    &conn(
+                        A,
+                        0,
+                        ConnStateKind::Alive,
+                        ConnRole::Md,
+                        InstId(0),
+                        AccountId(0),
+                        t,
+                    ),
+                );
             })
         })
     });
@@ -131,7 +144,18 @@ fn seq_321_conn_down(c: &mut Criterion) {
         b.iter_custom(|iters| {
             timed(iters, 1, steady, |h, _| {
                 let t = h.now();
-                h.push(RingId::Rep(0), &conn(A, 0, ConnStateKind::Down, ConnRole::Md, InstId(0), AccountId(0), t));
+                h.push(
+                    RingId::Rep(0),
+                    &conn(
+                        A,
+                        0,
+                        ConnStateKind::Down,
+                        ConnRole::Md,
+                        InstId(0),
+                        AccountId(0),
+                        t,
+                    ),
+                );
             })
         })
     });
@@ -174,7 +198,12 @@ fn seq_324_bbo_miss(c: &mut Criterion) {
 fn seq_325_bbo_target_idle(c: &mut Criterion) {
     c.bench_function("seq/bbo_target_idle", |b| {
         let mut h = steady();
-        h.set_target_s2(target(AC2, G2, &[(0, q("0")), (1, q("0"))], hft_strategy_sdk::ExecSpec::TakerSlice(slice0())));
+        h.set_target_s2(target(
+            AC2,
+            G2,
+            &[(0, q("0")), (1, q("0"))],
+            hft_strategy_sdk::ExecSpec::TakerSlice(slice0()),
+        ));
         h.quote(A1, "50000", "50001");
         h.run();
         clear_hook();
@@ -202,9 +231,7 @@ fn fire_setup() -> H {
 
 fn seq_326_bbo_fire(c: &mut Criterion) {
     c.bench_function("seq/bbo_fire", |b| {
-        b.iter_custom(|iters| {
-            timed(iters, 1, fire_setup, |h, _| bbo_elem(h, A1, "50000", "50001"))
-        })
+        b.iter_custom(|iters| timed(iters, 1, fire_setup, |h, _| bbo_elem(h, A1, "50000", "50001")))
     });
 }
 
@@ -216,7 +243,12 @@ fn seq_327_bbo_exec_fire(c: &mut Criterion) {
                 1,
                 || {
                     let mut h = steady();
-                    h.set_target_s2(target(AC2, G2, &[(0, q("0.001")), (1, q("-0.001"))], hft_strategy_sdk::ExecSpec::TakerSlice(slice0())));
+                    h.set_target_s2(target(
+                        AC2,
+                        G2,
+                        &[(0, q("0.001")), (1, q("-0.001"))],
+                        hft_strategy_sdk::ExecSpec::TakerSlice(slice0()),
+                    ));
                     h
                 },
                 |h, _| bbo_elem(h, A1, "50000", "50001"),
@@ -241,7 +273,10 @@ fn seq_328_l2batch_20(c: &mut Criterion) {
                 hd.n_asks = 10;
                 let mut body = hd.as_bytes().to_vec();
                 for l in 0..20i64 {
-                    let lv = hft_event::Level { px: Px(5_000_000 + if l < 10 { -l } else { l }), qty: Qty(1_000) };
+                    let lv = hft_event::Level {
+                        px: Px(5_000_000 + if l < 10 { -l } else { l }),
+                        qty: Qty(1_000),
+                    };
                     body.extend_from_slice(lv.as_bytes());
                 }
                 h.push_bytes(RingId::Bbo(0), EventKind::L2_BATCH, body);
@@ -271,7 +306,10 @@ fn seq_329_fill_to_hedge(c: &mut Criterion) {
                     h.quote(A1, "50000", "50001");
                     h.run();
                     clear_hook();
-                    decisions(&h.since(m)).into_iter().find(|x| x.1.inst == A1).map(|x| x.1)
+                    decisions(&h.since(m))
+                        .into_iter()
+                        .find(|x| x.1.inst == A1)
+                        .map(|x| x.1)
                 };
                 let Some(d) = d else { continue };
                 h.ack(&d);
@@ -295,7 +333,9 @@ fn seq_330_advice_route(c: &mut Criterion) {
     c.bench_function("seq/advice_route", |b| {
         let mut h = steady();
         b.iter_custom(|iters| {
-            each(iters, &mut h, |h, _| h.push_bytes(RingId::Advice, EventKind::ADVICE, advice(S2, AC2, G2, 512)))
+            each(iters, &mut h, |h, _| {
+                h.push_bytes(RingId::Advice, EventKind::ADVICE, advice(S2, AC2, G2, 512))
+            })
         })
     });
 }
@@ -303,7 +343,11 @@ fn seq_330_advice_route(c: &mut Criterion) {
 fn seq_331_margin_report(c: &mut Criterion) {
     c.bench_function("seq/margin_report", |b| {
         let mut h = steady();
-        b.iter_custom(|iters| each(iters, &mut h, |h, _| h.margin_report(AC1, "100000", "0", "100000")))
+        b.iter_custom(|iters| {
+            each(iters, &mut h, |h, _| {
+                h.margin_report(AC1, "100000", "0", "100000")
+            })
+        })
     });
 }
 
@@ -381,7 +425,18 @@ fn seq_335_inject_warmup(c: &mut Criterion) {
         let payload = vec![7u8; 4_096];
         b.iter_custom(|iters| {
             each(iters, &mut h, |h, _| {
-                h.cmd(AccountId(0), &ControlCmd::InjectWarmup { instance: S1, last: 1, local_kind: 3, chunk_no: 0, len: 4_096, _pad: [0; 6], payload: &payload });
+                h.cmd(
+                    AccountId(0),
+                    &ControlCmd::InjectWarmup {
+                        instance: S1,
+                        last: 1,
+                        local_kind: 3,
+                        chunk_no: 0,
+                        len: 4_096,
+                        _pad: [0; 6],
+                        payload: &payload,
+                    },
+                );
             })
         })
     });
@@ -392,7 +447,16 @@ fn seq_336_strategy_cmd(c: &mut Criterion) {
         let mut h = steady();
         b.iter_custom(|iters| {
             each(iters, &mut h, |h, _| {
-                h.cmd_confirmed(AC1, &ControlCmd::StrategyCmd { instance: S1, reduce_only: 0, len: 32, group: G1, payload: [0x11; 256] });
+                h.cmd_confirmed(
+                    AC1,
+                    &ControlCmd::StrategyCmd {
+                        instance: S1,
+                        reduce_only: 0,
+                        len: 32,
+                        group: G1,
+                        payload: [0x11; 256],
+                    },
+                );
             })
         })
     });
@@ -431,7 +495,9 @@ fn seq_338_replay_throughput(c: &mut Criterion) {
     let n = 20_000u64;
     let (h, kf) = bbo_journal(n);
     g.throughput(criterion::Throughput::Elements(n));
-    g.bench_function("replay_throughput", |b| b.iter(|| black_box(verify_journal::<TestSet>(h.j(), &h.setup, Some(kf)))));
+    g.bench_function("replay_throughput", |b| {
+        b.iter(|| black_box(verify_journal::<TestSet>(h.j(), &h.setup, Some(kf))))
+    });
     g.finish();
 }
 
@@ -445,10 +511,20 @@ fn seq_339_mirror_throughput(c: &mut Criterion) {
     g.bench_function("mirror_throughput", |b| {
         b.iter(|| {
             let log = hft_sequencer::driver::replay::Log::from_segments(&h.j().segments);
-            let drv = hft_sequencer::driver::replay::ReplayDriver::new(hft_sequencer::driver::replay::ReplayMode::Mirror, log, 0, 1_024);
+            let drv = hft_sequencer::driver::replay::ReplayDriver::new(
+                hft_sequencer::driver::replay::ReplayMode::Mirror,
+                log,
+                0,
+                1_024,
+            );
             let p = plan(hft_sequencer::SnapshotSel::AtSeq(kf), true, 0, 0);
             let mut s: hft_sequencer::Sequencer<hft_sequencer::driver::replay::ReplayDriver, TestSet> =
-                match hft_sequencer::Sequencer::boot(hft_sequencer::BootSource::Journal(p), &h.setup, drv, hb()) {
+                match hft_sequencer::Sequencer::boot(
+                    hft_sequencer::BootSource::Journal(p),
+                    &h.setup,
+                    drv,
+                    hb(),
+                ) {
                     Ok(s) => s,
                     Err(e) => panic!("mirror boot: {e:?}"),
                 };

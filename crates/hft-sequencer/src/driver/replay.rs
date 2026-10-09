@@ -189,7 +189,13 @@ impl BootSink for ReplayBoot<'_> {
 
 impl JournalSink for ReplaySink {
     type Boot<'a> = ReplayBoot<'a>;
-    fn append_var(&mut self, kind: EventKind, flags: RecordFlags, _tsc: Tsc, pieces: &[&[u8]]) -> Result<Seq, AppendErr> {
+    fn append_var(
+        &mut self,
+        kind: EventKind,
+        flags: RecordFlags,
+        _tsc: Tsc,
+        pieces: &[&[u8]],
+    ) -> Result<Seq, AppendErr> {
         let mut probe = [0u8; 80];
         let mut n = 0;
         'o: for p in pieces {
@@ -216,7 +222,11 @@ impl JournalSink for ReplaySink {
     }
     fn end_event(&mut self) {}
     fn publish(&mut self) {}
-    fn roll(&mut self, _reason: RollReason, _info: &crate::journal::RollMeta<'_>) -> Result<ReplayBoot<'_>, RollErr> {
+    fn roll(
+        &mut self,
+        _reason: RollReason,
+        _info: &crate::journal::RollMeta<'_>,
+    ) -> Result<ReplayBoot<'_>, RollErr> {
         // Rolls happen where the log has `SegmentRoll{End}` right after the Timer.
         let mut p = self.pos;
         let mut found = false;
@@ -366,8 +376,15 @@ impl<S: StrategySet> Driver<S> for ReplayDriver {
         let Some(i) = self.next_input(self.cursor.max(self.sink.pos)) else {
             return false;
         };
-        let Some(r) = self.sink.log.recs.get(i) else { return false };
-        out.set_bytes(r.kind, RecordFlags(r.flags.0 & !(RecordFlags::EVENT_END.0 | RecordFlags::CRC.0 | RecordFlags::PART.0)), Tsc(r.tsc), &r.body);
+        let Some(r) = self.sink.log.recs.get(i) else {
+            return false;
+        };
+        out.set_bytes(
+            r.kind,
+            RecordFlags(r.flags.0 & !(RecordFlags::EVENT_END.0 | RecordFlags::CRC.0 | RecordFlags::PART.0)),
+            Tsc(r.tsc),
+            &r.body,
+        );
         out.seq = r.seq;
         // Unconsumed Outputs of the previous event are mismatches.
         let mut p = self.sink.pos;
@@ -403,7 +420,16 @@ impl<S: StrategySet> Driver<S> for ReplayDriver {
     }
     fn take_parsed(&mut self, r: &BlobRef, cx: &ParseCx<'_, S>) -> Result<ParsedConfig<S>, ConfigErr> {
         let content = self.blobs.get(&r.sha256).ok_or(ConfigErr::Missing)?.to_vec();
-        parse_blob::<S>(r, &content, cx.rd, cx.max_groups, cx.base, cx.risk_account, cx.risk_decode).map_err(ConfigErr::Params)
+        parse_blob::<S>(
+            r,
+            &content,
+            cx.rd,
+            cx.max_groups,
+            cx.base,
+            cx.risk_account,
+            cx.risk_decode,
+        )
+        .map_err(ConfigErr::Params)
     }
     fn retire(&mut self, _old: ParsedConfig<S>) {}
     fn journal(&mut self) -> &mut ReplaySink {

@@ -63,14 +63,19 @@ fn seq_sut_same_seed_same_trail() {
     assert!(r.outcome.is_pass(), "{}", show(&r));
 }
 
-
 /// Seed sweep in `hft-dst run` order (`DST_SEED`, `DST_N`; manual: `cargo test -p hft-testkit
 /// --test testkit -- --ignored seq_sut_sweep --nocapture`).
 #[test]
 #[ignore]
 fn seq_sut_sweep() {
-    let from: u64 = std::env::var("DST_SEED").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
-    let n: u64 = std::env::var("DST_N").ok().and_then(|v| v.parse().ok()).unwrap_or(20);
+    let from: u64 = std::env::var("DST_SEED")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+    let n: u64 = std::env::var("DST_N")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20);
     let all = hft_testkit::scenarios::suites();
     let mut bad = Vec::new();
     for seed in from..from + n {

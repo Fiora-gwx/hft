@@ -36,7 +36,13 @@ fn send(h: &mut H, rec: Vec<u8>) -> (Vec<Got>, Vec<hft_event::Note>) {
     let m = h.mark();
     h.push_bytes(RingId::Advice, EventKind::ADVICE, rec);
     h.run();
-    (log().into_iter().filter(|g| g.kind == "Advice" && !g.model).collect(), h.notes_since(m))
+    (
+        log()
+            .into_iter()
+            .filter(|g| g.kind == "Advice" && !g.model)
+            .collect(),
+        h.notes_since(m),
+    )
 }
 
 #[test]
@@ -45,7 +51,11 @@ fn seq_169_advice_input_routed() {
     let rec = advice(S2, AC2, G2, 16, 1_000_000);
     let m = h.mark();
     let (got, _) = send(&mut h, rec.clone());
-    let logged = h.since(m).into_iter().find(|r| r.kind == EventKind::ADVICE).unwrap();
+    let logged = h
+        .since(m)
+        .into_iter()
+        .find(|r| r.kind == EventKind::ADVICE)
+        .unwrap();
     assert_eq!(logged.body, rec);
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].s, S2);
@@ -64,15 +74,30 @@ fn seq_188_advice_routing_checks() {
     let spec = h.s.instances().get(S2).unwrap().spec_seq_of(G2).unwrap();
     let code = |n: u32| hft_sequencer::codes::seq_note(n);
     let cases: Vec<(Vec<u8>, Option<u32>)> = vec![
-        (advice(StrategyId(5), AccountId(0), GroupId(0), 8, spec), Some(MISROUTED)),
+        (
+            advice(StrategyId(5), AccountId(0), GroupId(0), 8, spec),
+            Some(MISROUTED),
+        ),
         (advice(S2, AccountId(0), G2, 4_097, spec), Some(MISROUTED)),
         (advice(S2, AccountId(0), G2, 4_096, spec), None),
-        (advice(S2, AccountId(0), hft_types::GROUP_ALL, 8, spec), Some(MISROUTED)),
-        (advice(S2, AccountId(0), GroupId(0x0100_0001), 8, spec), Some(MISROUTED)),
+        (
+            advice(S2, AccountId(0), hft_types::GROUP_ALL, 8, spec),
+            Some(MISROUTED),
+        ),
+        (
+            advice(S2, AccountId(0), GroupId(0x0100_0001), 8, spec),
+            Some(MISROUTED),
+        ),
         (advice(S2, AC1, G2, 8, spec), Some(MISROUTED)),
         (advice(S2, AccountId(0), G2, 8, spec), None),
-        (advice(S2, AccountId(0), GroupId(0x0200_0009), 8, spec), Some(STALE)),
-        (advice(S2, AccountId(0), G2, 8, spec.saturating_sub(1)), Some(STALE)),
+        (
+            advice(S2, AccountId(0), GroupId(0x0200_0009), 8, spec),
+            Some(STALE),
+        ),
+        (
+            advice(S2, AccountId(0), G2, 8, spec.saturating_sub(1)),
+            Some(STALE),
+        ),
         (advice(S2, AccountId(0), hft_types::GROUP_NONE, 8, 1), None),
     ];
     for (k, (rec, want)) in cases.into_iter().enumerate() {
@@ -84,7 +109,11 @@ fn seq_188_advice_routing_checks() {
             }
             Some(n) => {
                 assert!(got.is_empty(), "row {}", k + 1);
-                assert!(notes.iter().any(|x| x.code == code(n)), "row {}: {notes:?}", k + 1);
+                assert!(
+                    notes.iter().any(|x| x.code == code(n)),
+                    "row {}: {notes:?}",
+                    k + 1
+                );
             }
         }
     }
@@ -108,7 +137,13 @@ fn seq_189_spec_seq_updates() {
     let id = h.set_params(&p);
     h.run();
     assert_eq!(h.result_of(id).map(|r| r.status), Some(0));
-    let cmd_seq = h.since(m).into_iter().filter(|r| r.kind == EventKind::CONTROL_CMD).last().unwrap().seq;
+    let cmd_seq = h
+        .since(m)
+        .into_iter()
+        .filter(|r| r.kind == EventKind::CONTROL_CMD)
+        .last()
+        .unwrap()
+        .seq;
     assert_eq!(h.s.instances().get(S2).unwrap().spec_seq_of(g2b), Some(cmd_seq));
     assert_eq!(h.s.instances().get(S2).unwrap().spec_seq_of(G2), Some(s0));
 }
@@ -120,7 +155,10 @@ fn seq_190_spec_seq_in_snapshot() {
     let (_, secs) = snap(&kf);
     let (_, rows, _) = secs.strategies.iter().find(|x| x.0.strategy == S2).unwrap();
     let spec = h.s.instances().get(S2).unwrap().spec_seq_of(G2).unwrap();
-    assert_eq!(rows.iter().find(|r| r.group == G2).map(|r| r.spec_seq), Some(spec));
+    assert_eq!(
+        rows.iter().find(|r| r.group == G2).map(|r| r.spec_seq),
+        Some(spec)
+    );
     for b in [spec.saturating_sub(1), spec.saturating_sub(1), spec + 5, spec + 6] {
         send(&mut h, advice(S2, AccountId(0), G2, 8, b));
     }
@@ -136,6 +174,9 @@ fn seq_191_no_engine_staleness() {
     let (got, notes) = send(&mut h, advice(S2, AccountId(0), G2, 8, spec));
     assert_eq!(got.len(), 1);
     assert!(got[0].text.contains("basis_tsc: Tsc(123)"), "{}", got[0].text);
-    let adv = [hft_sequencer::codes::seq_note(MISROUTED), hft_sequencer::codes::seq_note(STALE)];
+    let adv = [
+        hft_sequencer::codes::seq_note(MISROUTED),
+        hft_sequencer::codes::seq_note(STALE),
+    ];
     assert!(notes.iter().all(|n| !adv.contains(&n.code)), "{notes:?}");
 }

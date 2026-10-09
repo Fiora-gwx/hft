@@ -9,34 +9,34 @@
     clippy::panic
 )] // allow-list: test code, not a hot path
 
-mod common;
-mod params;
-mod poison;
-mod preempt;
-mod process;
+mod advice;
+mod advisor;
+mod advisor_lag;
 mod boot;
 mod clock;
 mod commands;
-mod intents;
-mod keyframe;
+mod common;
 mod conflate;
 mod env;
 mod exec_glue;
 mod funding;
+mod intents;
+mod keyframe;
 mod liveness;
 mod mismatch;
 mod mode;
+mod params;
+mod poison;
+mod preempt;
+mod process;
 mod recon;
 mod recover;
 mod ring_full;
 mod sim_route;
 mod snapshot;
+mod snapshot_rows;
+mod strategies;
 mod subs;
 mod timers;
-mod strategies;
 mod version;
 mod views;
-mod advisor;
-mod advisor_lag;
-mod advice;
-mod snapshot_rows;

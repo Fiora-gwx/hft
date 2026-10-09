@@ -23,7 +23,18 @@ fn seq_008_first_round_engine_clock_only() {
     let t = h.now();
     let c = h.cmd_elem("cli:test", 4, AC1, &ControlCmd::SnapshotNow, |_| {}).0;
     h.push_e(RingId::Ctl, c);
-    h.push(RingId::Rep(0), &conn(A, 0, hft_event::ConnStateKind::Up, hft_event::ConnRole::Md, InstId(0), hft_types::AccountId(0), t));
+    h.push(
+        RingId::Rep(0),
+        &conn(
+            A,
+            0,
+            hft_event::ConnStateKind::Up,
+            hft_event::ConnRole::Md,
+            InstId(0),
+            hft_types::AccountId(0),
+            t,
+        ),
+    );
     h.quote(A1, "50000", "50001");
     assert_eq!(h.step(), StepOutcome::Busy);
     let m = after_boot(&h);
@@ -38,15 +49,36 @@ fn seq_008_first_round_engine_clock_only() {
     assert_eq!(h.io().ring(RingId::Bbo(0)).len(), 1);
     let m2 = h.mark();
     h.step();
-    let inputs: Vec<EventKind> = h.since(m2).iter().filter(|r| r.role() == Role::Input).map(|r| r.kind).collect();
-    let dbg: Vec<_> = h.since(m2).iter().filter(|r| r.kind == EventKind::TIMER).map(|r| r.read::<hft_event::Timer>()).collect();
-    assert_eq!(&inputs[..3], &[EventKind::CONTROL_CMD, EventKind::CONN_STATE, EventKind::BBO], "{dbg:?}");
+    let inputs: Vec<EventKind> = h
+        .since(m2)
+        .iter()
+        .filter(|r| r.role() == Role::Input)
+        .map(|r| r.kind)
+        .collect();
+    let dbg: Vec<_> = h
+        .since(m2)
+        .iter()
+        .filter(|r| r.kind == EventKind::TIMER)
+        .map(|r| r.read::<hft_event::Timer>())
+        .collect();
+    assert_eq!(
+        &inputs[..3],
+        &[EventKind::CONTROL_CMD, EventKind::CONN_STATE, EventKind::BBO],
+        "{dbg:?}"
+    );
 }
 
 #[test]
 fn seq_009_stop_marker_kill_second() {
     let mut b = b0();
-    b.live.stop_kill = Some((KillLevel::Global, scope(hft_types::StrategyId(0), hft_types::AccountId(0), hft_types::GroupId(0))));
+    b.live.stop_kill = Some((
+        KillLevel::Global,
+        scope(
+            hft_types::StrategyId(0),
+            hft_types::AccountId(0),
+            hft_types::GroupId(0),
+        ),
+    ));
     let mut h = b.boot();
     h.quote(A1, "50000", "50001");
     h.step();
@@ -59,7 +91,9 @@ fn seq_009_stop_marker_kill_second() {
     let hdr = inputs[1].read::<hft_event::CmdHdr>().unwrap();
     assert_eq!(&hdr.issuer[..11], b"cli:systemd");
     match ControlCmd::decode(&inputs[1].body).unwrap().1 {
-        ControlCmd::Kill { level, hard, flatten, .. } => {
+        ControlCmd::Kill {
+            level, hard, flatten, ..
+        } => {
             assert_eq!(level, KillLevel::Global);
             assert!(!hard);
             assert!(!flatten);
@@ -71,8 +105,9 @@ fn seq_009_stop_marker_kill_second() {
     assert_eq!(res.status, 0);
     let caps = h.notes_since(m);
     assert!(
-        caps.iter().any(|n| n.code == hft_event::note_code(hft_event::NoteSource::Risk, 2)
-            && hft_risk::cap_of_note(n).source == hft_types::CapSource::KILL),
+        caps.iter()
+            .any(|n| n.code == hft_event::note_code(hft_event::NoteSource::Risk, 2)
+                && hft_risk::cap_of_note(n).source == hft_types::CapSource::KILL),
         "{caps:?}"
     );
 }
@@ -143,6 +178,3 @@ fn seq_014_retire_old_params() {
         x => panic!("{x:?}"),
     }
 }
-
-
-

@@ -40,13 +40,19 @@ pub(crate) fn drain_out<D: Driver<S>, S: StrategySet>(
         } else {
             RecordFlags(0)
         };
-        e.trace.rec("exec_decision", u64::from(d.action), u64::from(d.group.0));
+        e.trace
+            .rec("exec_decision", u64::from(d.action), u64::from(d.group.0));
         e.out.push(flags, d);
     }
     for c in cancel_resting.iter() {
-        e.trace.rec("oms.cancel_resting_on", u64::from(c.account.0), u64::from(c.inst.0));
+        e.trace.rec(
+            "oms.cancel_resting_on",
+            u64::from(c.account.0),
+            u64::from(c.inst.0),
+        );
         let mut o = e.take_oms();
-        e.oms.cancel_resting_on(c.account, c.inst, e.now.tsc, e.cur_seq, &mut o);
+        e.oms
+            .cancel_resting_on(c.account, c.inst, e.now.tsc, e.cur_seq, &mut o);
         crate::intents::drain_oms(e, inst, drv, &mut o)?;
         e.put_oms(o);
     }
@@ -70,7 +76,8 @@ pub(crate) fn drain_out<D: Driver<S>, S: StrategySet>(
         e.put_oms(o);
     }
     for b in broken.iter() {
-        e.trace.rec("exec.broken", u64::from(b.account.0), u64::from(b.group.0));
+        e.trace
+            .rec("exec.broken", u64::from(b.account.0), u64::from(b.group.0));
         crate::mode_glue::broken(e, inst, drv, b.account, b.group)?;
     }
     for t in timers.iter() {
@@ -161,7 +168,11 @@ pub(crate) fn note_action<D: Driver<S>, S: StrategySet>(
 }
 
 /// `exec.advance` when something is pending (README "process" 6).
-pub(crate) fn advance<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D) -> R<()> {
+pub(crate) fn advance<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+) -> R<()> {
     if !e.exec.has_pending() {
         return Ok(());
     }
@@ -201,7 +212,8 @@ pub(crate) fn force<D: Driver<S>, S: StrategySet>(
     v: VenueId,
     frac: Rate,
 ) -> R<()> {
-    e.trace.rec("exec.force_deleverage", u64::from(a.0), u64::from(v.0));
+    e.trace
+        .rec("exec.force_deleverage", u64::from(a.0), u64::from(v.0));
     let mut xo = e.take_exec();
     e.exec.force_deleverage(a, v, frac, e.now, &mut xo);
     drain_out(e, inst, drv, &mut xo)?;
@@ -210,7 +222,12 @@ pub(crate) fn force<D: Driver<S>, S: StrategySet>(
 }
 
 /// `exec.engine_flatten` (`Kill{Account, flatten}`).
-pub(crate) fn flatten<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, a: AccountId) -> R<()> {
+pub(crate) fn flatten<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    a: AccountId,
+) -> R<()> {
     e.trace.rec("exec.engine_flatten", u64::from(a.0), 0);
     let mut xo = e.take_exec();
     e.exec.engine_flatten(a, e.now, &mut xo);
@@ -248,7 +265,8 @@ pub(crate) fn on_external<D: Driver<S>, S: StrategySet>(
     f: &hft_strategy_sdk::ExternalFillView,
 ) -> R<hft_types::Tsc> {
     e.gpos.refresh(&e.ledger);
-    e.trace.rec("exec.on_external", u64::from(a.0), u64::from(f.group.0));
+    e.trace
+        .rec("exec.on_external", u64::from(a.0), u64::from(f.group.0));
     let mut xo = e.take_exec();
     let d = {
         let v = crate::noexec_views!(e);

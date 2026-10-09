@@ -14,12 +14,15 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 use crate::Driver;
 use crate::clock::{EngineClockRow, SeqDayRow};
 use crate::commands::{
-    ACTIVE_CONFIG_VERSION, CMD_DEDUP_VERSION, ActiveConfigRow, CmdDedupHdr, RECON_PENDING_VERSION, ReconPendingHdr,
-    SECTION_ACTIVE_CONFIG, SECTION_CMD_DEDUP, SECTION_RECON_PENDING, SECTION_VENUE_NOTICES, VENUE_NOTICES_VERSION,
+    ACTIVE_CONFIG_VERSION, ActiveConfigRow, CMD_DEDUP_VERSION, CmdDedupHdr, RECON_PENDING_VERSION,
+    ReconPendingHdr, SECTION_ACTIVE_CONFIG, SECTION_CMD_DEDUP, SECTION_RECON_PENDING, SECTION_VENUE_NOTICES,
+    VENUE_NOTICES_VERSION,
 };
 use crate::engine::Engine;
 use crate::journal::{BootSink, JournalSink, role_of};
-use crate::market::{CONN_LIVE_VERSION, ConnLiveRow, MARKET_LAST_VERSION, SECTION_CONN_LIVE, SECTION_MARKET_LAST};
+use crate::market::{
+    CONN_LIVE_VERSION, ConnLiveRow, MARKET_LAST_VERSION, SECTION_CONN_LIVE, SECTION_MARKET_LAST,
+};
 use crate::strategies::Instances;
 use crate::timers::{SECTION_TIMERS, TIMERS_VERSION};
 use crate::types::FatalReason;
@@ -254,7 +257,10 @@ fn active_rows<S: StrategySet>(e: &Engine, inst: &Instances<S>) -> Vec<ActiveCon
             let mut sc = none;
             sc.strategy = s.id;
             sc.account = s.account;
-            v.push(ActiveConfigRow { blob: s.blob, scope: sc });
+            v.push(ActiveConfigRow {
+                blob: s.blob,
+                scope: sc,
+            });
         }
     }
     v.push(ActiveConfigRow {
@@ -280,7 +286,9 @@ pub fn state_hash(sections: &[u8]) -> [u8; 16] {
     let mut h = xxhash_rust::xxh3::Xxh3::new();
     let mut off = 0usize;
     while let Some(hb) = sections.get(off..off + 16) {
-        let Some(sh) = SectionHdr::read_from_bytes(hb).ok() else { break };
+        let Some(sh) = SectionHdr::read_from_bytes(hb).ok() else {
+            break;
+        };
         let end = off + 16 + sh.len as usize;
         let Some(all) = sections.get(off..end) else { break };
         if sh.section != SECTION_CLOCK_CAL {
@@ -296,7 +304,9 @@ pub fn count_sections(sections: &[u8]) -> u32 {
     let mut n = 0;
     let mut off = 0usize;
     while let Some(hb) = sections.get(off..off + 16) {
-        let Some(sh) = SectionHdr::read_from_bytes(hb).ok() else { break };
+        let Some(sh) = SectionHdr::read_from_bytes(hb).ok() else {
+            break;
+        };
         off += 16 + sh.len as usize;
         n += 1;
     }
@@ -304,7 +314,12 @@ pub fn count_sections(sections: &[u8]) -> u32 {
 }
 
 /// Builds the snapshot body (header + sections) for `purpose` at the current Input.
-pub(crate) fn build_snapshot<S: StrategySet>(e: &mut Engine, inst: &Instances<S>, purpose: u8, snap_tsc: Tsc) -> Vec<u8> {
+pub(crate) fn build_snapshot<S: StrategySet>(
+    e: &mut Engine,
+    inst: &Instances<S>,
+    purpose: u8,
+    snap_tsc: Tsc,
+) -> Vec<u8> {
     let mut w = SnapshotWriter::new(64 << 20);
     write_sections(e, inst, &mut w);
     // The gate-input caches restart from the snapshotted state, as in a replay from here.
@@ -320,7 +335,11 @@ pub(crate) fn build_snapshot<S: StrategySet>(e: &mut Engine, inst: &Instances<S>
         _pad: [0; 3],
         n_sections: count_sections(sections),
         at_seq: e.cur_seq,
-        state_hash: if purpose == PURPOSE_KEYFRAME { [0; 16] } else { state_hash(sections) },
+        state_hash: if purpose == PURPOSE_KEYFRAME {
+            [0; 16]
+        } else {
+            state_hash(sections)
+        },
         n_books,
         _pad2: 0,
         out_hash: e.out_hash.digest(),
@@ -339,7 +358,11 @@ pub(crate) fn build_snapshot<S: StrategySet>(e: &mut Engine, inst: &Instances<S>
 pub(crate) fn live_books(e: &Engine) -> Vec<InstId> {
     (1..=e.rd.inst_count())
         .map(|i| InstId(i as u32))
-        .filter(|i| e.books.l2(*i).is_some_and(|b| b.state() == hft_book::BookState::Live))
+        .filter(|i| {
+            e.books
+                .l2(*i)
+                .is_some_and(|b| b.state() == hft_book::BookState::Live)
+        })
         .collect()
 }
 
@@ -369,7 +392,9 @@ pub(crate) fn after_snapshot(e: &mut Engine, purpose: u8) {
 
 /// `L2Snapshot{origin = Keyframe}` of one Live book.
 pub(crate) fn l2_keyframe(e: &mut Engine, i: InstId) {
-    let Some(body) = l2_keyframe_body(e, i) else { return };
+    let Some(body) = l2_keyframe_body(e, i) else {
+        return;
+    };
     e.out.push_bytes(EventKind::L2_SNAPSHOT, RecordFlags(0), &body);
 }
 
@@ -444,7 +469,16 @@ pub(crate) fn boot_block<D: Driver<S>, S: StrategySet>(
     };
     let snap = {
         let t = drv.measure();
-        build_snapshot(e, inst, purpose, if purpose == PURPOSE_RECOVERY { e.rec.recovery_now } else { t })
+        build_snapshot(
+            e,
+            inst,
+            purpose,
+            if purpose == PURPOSE_RECOVERY {
+                e.rec.recovery_now
+            } else {
+                t
+            },
+        )
     };
     let host = drv.host_profile();
     let clk = drv.clock_status();
@@ -464,7 +498,10 @@ pub(crate) fn boot_block<D: Driver<S>, S: StrategySet>(
         b.extend_from_slice(content);
         cfg.push(b);
     }
-    let books: Vec<Vec<u8>> = live_books(e).iter().filter_map(|i| l2_keyframe_body(e, *i)).collect();
+    let books: Vec<Vec<u8>> = live_books(e)
+        .iter()
+        .filter_map(|i| l2_keyframe_body(e, *i))
+        .collect();
     let mut hashes: Vec<(EventKind, Vec<u8>)> = Vec::new();
     {
         let j = drv.journal();
@@ -473,15 +510,20 @@ pub(crate) fn boot_block<D: Driver<S>, S: StrategySet>(
             Err(RollErr::NextNotReady) => return Err(BootBlockErr::NotReady),
             Err(_) => return Err(BootBlockErr::Append),
         };
-        b.append_var(EventKind::HOST_PROFILE, tsc, &[host.as_bytes()]).map_err(|_| BootBlockErr::Append)?;
-        b.append_var(EventKind::CLOCK_STATUS, tsc, &[clk.as_bytes()]).map_err(|_| BootBlockErr::Append)?;
+        b.append_var(EventKind::HOST_PROFILE, tsc, &[host.as_bytes()])
+            .map_err(|_| BootBlockErr::Append)?;
+        b.append_var(EventKind::CLOCK_STATUS, tsc, &[clk.as_bytes()])
+            .map_err(|_| BootBlockErr::Append)?;
         for c in cfg.iter() {
-            b.append_var(EventKind::CONFIG_BLOB, tsc, &[c]).map_err(|_| BootBlockErr::Append)?;
+            b.append_var(EventKind::CONFIG_BLOB, tsc, &[c])
+                .map_err(|_| BootBlockErr::Append)?;
             hashes.push((EventKind::CONFIG_BLOB, c.clone()));
         }
-        b.append_var(EventKind::STATE_SNAPSHOT, tsc, &[&snap]).map_err(|_| BootBlockErr::Append)?;
+        b.append_var(EventKind::STATE_SNAPSHOT, tsc, &[&snap])
+            .map_err(|_| BootBlockErr::Append)?;
         for k in books.iter() {
-            b.append_var(EventKind::L2_SNAPSHOT, tsc, &[k]).map_err(|_| BootBlockErr::Append)?;
+            b.append_var(EventKind::L2_SNAPSHOT, tsc, &[k])
+                .map_err(|_| BootBlockErr::Append)?;
         }
         b.finish().map_err(|_| BootBlockErr::Append)?;
     }
@@ -496,7 +538,8 @@ pub(crate) fn boot_block<D: Driver<S>, S: StrategySet>(
         calib_realtime_ns: info.calib.realtime_ns,
     };
     after_snapshot(e, purpose);
-    e.trace.rec("boot_block", u64::from(reason as u8), u64::from(purpose));
+    e.trace
+        .rec("boot_block", u64::from(reason as u8), u64::from(purpose));
     Ok(())
 }
 
@@ -510,7 +553,11 @@ pub(crate) fn write_boot_block<D: Driver<S>, S: StrategySet>(
     // Outputs produced while assembling are not journaled (the boot snapshot carries the state).
     e.out.clear();
     e.notify.begin();
-    let p = if purpose == 1 && reason == RollReason::Recovery { PURPOSE_RECOVERY } else { purpose };
+    let p = if purpose == 1 && reason == RollReason::Recovery {
+        PURPOSE_RECOVERY
+    } else {
+        purpose
+    };
     boot_block(e, inst, drv, reason, p)
 }
 
@@ -562,7 +609,10 @@ pub fn read_seq_sections(body: &[u8]) -> Result<SeqSections, u16> {
             for _ in 0..h.n_groups {
                 g.push(rr.get_row::<GroupSeqRow>().map_err(|_| SECTION_STRATEGY)?);
             }
-            let bytes = rr.get_bytes(h.len as usize).map_err(|_| SECTION_STRATEGY)?.to_vec();
+            let bytes = rr
+                .get_bytes(h.len as usize)
+                .map_err(|_| SECTION_STRATEGY)?
+                .to_vec();
             let pad = (h.len as usize).next_multiple_of(8) - h.len as usize;
             rr.get_bytes(pad).map_err(|_| SECTION_STRATEGY)?;
             out.strategies.push((h, g, bytes));
@@ -588,11 +638,17 @@ pub fn read_seq_sections(body: &[u8]) -> Result<SeqSections, u16> {
         let rows = s.count.max(1) as usize;
         let row_size = if s.count == 0 { 112 } else { s.body.len() / rows };
         for k in 0..s.count as usize {
-            let b = s.body.get(k * row_size..(k + 1) * row_size).ok_or(SECTION_MARKET_LAST)?;
+            let b = s
+                .body
+                .get(k * row_size..(k + 1) * row_size)
+                .ok_or(SECTION_MARKET_LAST)?;
             let mut buf = [0u8; 112];
             let n = b.len().min(112);
-            buf.get_mut(..n).ok_or(SECTION_MARKET_LAST)?.copy_from_slice(b.get(..n).ok_or(SECTION_MARKET_LAST)?);
-            let mut row = crate::market::MarketLastRow::read_from_bytes(&buf).map_err(|_| SECTION_MARKET_LAST)?;
+            buf.get_mut(..n)
+                .ok_or(SECTION_MARKET_LAST)?
+                .copy_from_slice(b.get(..n).ok_or(SECTION_MARKET_LAST)?);
+            let mut row =
+                crate::market::MarketLastRow::read_from_bytes(&buf).map_err(|_| SECTION_MARKET_LAST)?;
             if row_size < 112 {
                 row.prev_interval_s = row.interval_s;
             }

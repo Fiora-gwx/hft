@@ -16,7 +16,11 @@ fn timers_since(h: &H, m: usize) -> Vec<(Timer, u64)> {
 }
 
 fn sys_ids(h: &H, m: usize) -> Vec<u32> {
-    timers_since(h, m).iter().filter(|t| t.0.owner == 1).map(|t| t.0.timer_id).collect()
+    timers_since(h, m)
+        .iter()
+        .filter(|t| t.0.owner == 1)
+        .map(|t| t.0.timer_id)
+        .collect()
 }
 
 #[test]
@@ -43,14 +47,23 @@ fn seq_085_keyframe_round_conditions() {
     // .1 previous round idle, rings empty: only the Snapshot Timer.
     let m = h.mark();
     h.step();
-    let inp: Vec<EventKind> = h.since(m).iter().filter(|r| r.role() == Role::Input).map(|r| r.kind).collect();
+    let inp: Vec<EventKind> = h
+        .since(m)
+        .iter()
+        .filter(|r| r.role() == Role::Input)
+        .map(|r| r.kind)
+        .collect();
     assert_eq!(inp, vec![EventKind::TIMER]);
     assert_eq!(sys_ids(&h, m), vec![1]);
 }
 
 #[test]
 fn seq_086_time_trigger_boundary() {
-    for (dt, write) in [(299_999_000_000u64, false), (300_000_000_000, true), (300_001_000_000, true)] {
+    for (dt, write) in [
+        (299_999_000_000u64, false),
+        (300_000_000_000, true),
+        (300_001_000_000, true),
+    ] {
         let mut h = {
             reset_script();
             let mut h = b0().boot();
@@ -58,7 +71,12 @@ fn seq_086_time_trigger_boundary() {
             h
         };
         let kf = h.keyframe();
-        let t0 = timers_since(&h, 0).into_iter().filter(|t| t.0.owner == 1 && t.0.timer_id == 1).last().unwrap().1;
+        let t0 = timers_since(&h, 0)
+            .into_iter()
+            .filter(|t| t.0.owner == 1 && t.0.timer_id == 1)
+            .last()
+            .unwrap()
+            .1;
         let _ = kf;
         h.at(t0 + dt);
         // The idle round, then the keyframe round (ConflateReport / AdvisorTick may come first).
@@ -84,7 +102,18 @@ fn seq_087_event_count_trigger_boundary() {
         let mut k = 0;
         while (h.s.view().inputs_since_keyframe() as usize) < n {
             k += 1;
-            h.push(RingId::Rep(0), &conn(A, 1, hft_event::ConnStateKind::Alive, hft_event::ConnRole::Md, InstId(0), hft_types::AccountId(0), k));
+            h.push(
+                RingId::Rep(0),
+                &conn(
+                    A,
+                    1,
+                    hft_event::ConnStateKind::Alive,
+                    hft_event::ConnRole::Md,
+                    InstId(0),
+                    hft_types::AccountId(0),
+                    k,
+                ),
+            );
             h.step();
         }
         let m = h.mark();
@@ -114,7 +143,12 @@ fn seq_088_max_deferral() {
         h.step();
         if sys_ids(&h, m).contains(&1) {
             written_at = Some(h.now());
-            let inp: Vec<EventKind> = h.since(m).iter().filter(|r| r.role() == Role::Input).map(|r| r.kind).collect();
+            let inp: Vec<EventKind> = h
+                .since(m)
+                .iter()
+                .filter(|r| r.role() == Role::Input)
+                .map(|r| r.kind)
+                .collect();
             assert_eq!(inp, vec![EventKind::TIMER]);
         }
     }
@@ -123,7 +157,6 @@ fn seq_088_max_deferral() {
     let m = h.verify();
     assert!(m.is_empty(), "{m:?}");
 }
-
 
 #[test]
 fn seq_245_keyframe_one_shot() {

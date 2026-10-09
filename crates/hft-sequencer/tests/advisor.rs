@@ -4,11 +4,13 @@
 use std::collections::HashMap;
 
 use hft_event::{AdviceHdr, EventKind, Note, NoteSource};
-use hft_sequencer::advisor::{Advisor, AdvisorCfg, AdviceRing, CheckpointStore, CkptHdr, CkptIoErr, ckpt_checksum};
+use hft_sequencer::advisor::{
+    AdviceRing, Advisor, AdvisorCfg, CheckpointStore, CkptHdr, CkptIoErr, ckpt_checksum,
+};
 use hft_sequencer::driver::live::RingId;
 use hft_sequencer::driver::replay::Log;
 use hft_sequencer::journal::MemJournal;
-use hft_strategy_sdk::{EventRef, EvMask, GroupResets, ModelParamEffect, Part, ResetCause};
+use hft_strategy_sdk::{EvMask, EventRef, GroupResets, ModelParamEffect, Part, ResetCause};
 use hft_types::{GroupId, InstId, StrategyId};
 use zerocopy::FromBytes;
 
@@ -59,7 +61,9 @@ impl CheckpointStore for MemCkpt {
             self.cur = None;
             return Err(CkptIoErr);
         }
-        let Some((s, mut h, b)) = self.cur.take() else { return Err(CkptIoErr) };
+        let Some((s, mut h, b)) = self.cur.take() else {
+            return Err(CkptIoErr);
+        };
         h.len = b.len() as u64;
         h.checksum = ckpt_checksum(&b);
         self.gens.insert(s, (h, b));
@@ -91,13 +95,22 @@ impl AdviceRing for Ring {
 
 impl Ring {
     pub fn big() -> Ring {
-        Ring { cap: 1 << 24, used: 0, recs: Vec::new() }
+        Ring {
+            cap: 1 << 24,
+            used: 0,
+            recs: Vec::new(),
+        }
     }
     pub fn advice(&self) -> Vec<(AdviceHdr, Vec<u8>)> {
         self.recs
             .iter()
             .filter(|r| r.0 == EventKind::ADVICE)
-            .map(|r| (AdviceHdr::read_from_bytes(&r.1[..32]).unwrap(), r.1[32..].to_vec()))
+            .map(|r| {
+                (
+                    AdviceHdr::read_from_bytes(&r.1[..32]).unwrap(),
+                    r.1[32..].to_vec(),
+                )
+            })
             .collect()
     }
     pub fn notes(&self) -> Vec<Note> {
@@ -126,7 +139,13 @@ fn start(h: &H, ckpt: MemCkpt, ring: Ring, cfg: AdvisorCfg) -> Adv {
 }
 
 fn cfg() -> AdvisorCfg {
-    AdvisorCfg { batch: 64, checkpoint_ms: 0, chunk_bytes: 1 << 20, max_lag_ms: 5_000, shard: Some(vec![S2]) }
+    AdvisorCfg {
+        batch: 64,
+        checkpoint_ms: 0,
+        chunk_bytes: 1 << 20,
+        max_lag_ms: 5_000,
+        shard: Some(vec![S2]),
+    }
 }
 
 /// Polls until the mirror caught up with the committed journal and the outbox is empty.
@@ -148,7 +167,11 @@ fn model_log(s: StrategyId) -> Vec<Got> {
 fn b0_model() -> H {
     reset_script();
     set_subs(S2, vec![(A1, 0, EvMask::BBO, Part::Model)]);
-    SCRIPT.with(|x| x.borrow_mut().model_own.push((S2, hft_strategy_sdk::OwnEvMask::ORDER.0)));
+    SCRIPT.with(|x| {
+        x.borrow_mut()
+            .model_own
+            .push((S2, hft_strategy_sdk::OwnEvMask::ORDER.0))
+    });
     let mut h = b0().boot();
     h.steady();
     h
@@ -163,7 +186,11 @@ fn seq_030_poll_once_bounded() {
         b0()
     };
     let mut p = Spb::s2(1);
-    p.groups = vec![gspec(G2), gspec(GroupId(0x0200_0002)), gspec(GroupId(0x0200_0003))];
+    p.groups = vec![
+        gspec(G2),
+        gspec(GroupId(0x0200_0002)),
+        gspec(GroupId(0x0200_0003)),
+    ];
     b.params = vec![Spb::s1(1), p, Spb::s9(1)];
     let mut h = b.boot();
     h.steady();
@@ -201,7 +228,16 @@ fn seq_030_poll_once_bounded() {
 #[test]
 fn seq_031_outbox_keeps_latest() {
     let mut h = b0_model();
-    let mut a = start(&h, MemCkpt::default(), Ring { cap: 0, used: 0, recs: Vec::new() }, cfg());
+    let mut a = start(
+        &h,
+        MemCkpt::default(),
+        Ring {
+            cap: 0,
+            used: 0,
+            recs: Vec::new(),
+        },
+        cfg(),
+    );
     catch_up(&mut a, &h);
     set_mhook(|hx, ev, out| {
         if let EventRef::Bbo { .. } = ev
@@ -284,11 +320,26 @@ fn seq_033_basis_seq_tsc() {
     assert_eq!(hd.basis_tsc.0, bbo.tsc);
     // The sequencer delivers it with the same values.
     clear_log();
-    let raw = a.ring.recs.iter().rev().find(|r| r.0 == EventKind::ADVICE).unwrap().1.clone();
+    let raw = a
+        .ring
+        .recs
+        .iter()
+        .rev()
+        .find(|r| r.0 == EventKind::ADVICE)
+        .unwrap()
+        .1
+        .clone();
     h.push_bytes(RingId::Advice, EventKind::ADVICE, raw);
     h.run();
-    let got = log().into_iter().find(|g| g.s == S2 && g.kind == "Advice" && !g.model).expect("delivered");
-    assert!(got.text.contains(&format!("basis_seq: {}", bbo.seq)), "{}", got.text);
+    let got = log()
+        .into_iter()
+        .find(|g| g.s == S2 && g.kind == "Advice" && !g.model)
+        .expect("delivered");
+    assert!(
+        got.text.contains(&format!("basis_seq: {}", bbo.seq)),
+        "{}",
+        got.text
+    );
     assert_eq!(p, b"basis");
 }
 
@@ -305,24 +356,42 @@ fn seq_035_model_delivery_table() {
         model_log(S2).iter().map(|g| g.kind).collect()
     };
     // .1 subscribed a1 BBO.
-    assert_eq!(row(&mut h, &mut a, &|h| {
-        h.quote(A1, "50000", "50005");
-        h.run();
-    }), vec!["Bbo"]);
+    assert_eq!(
+        row(&mut h, &mut a, &|h| {
+            h.quote(A1, "50000", "50005");
+            h.run();
+        }),
+        vec!["Bbo"]
+    );
     // .2 a2 not subscribed.
-    assert!(row(&mut h, &mut a, &|h| {
-        h.quote(A2, "3000", "3001");
-        h.run();
-    })
-    .is_empty());
+    assert!(
+        row(&mut h, &mut a, &|h| {
+            h.quote(A2, "3000", "3001");
+            h.run();
+        })
+        .is_empty()
+    );
     // .7 ConnState Down of B: no Conn.
-    assert!(row(&mut h, &mut a, &|h| {
-        let t = h.now();
-        h.push(RingId::Rep(0), &conn(B, 0, hft_event::ConnStateKind::Down, hft_event::ConnRole::Md, InstId(0), hft_types::AccountId(0), t));
-        h.run();
-    })
-    .iter()
-    .all(|k| *k != "Conn"));
+    assert!(
+        row(&mut h, &mut a, &|h| {
+            let t = h.now();
+            h.push(
+                RingId::Rep(0),
+                &conn(
+                    B,
+                    0,
+                    hft_event::ConnStateKind::Down,
+                    hft_event::ConnRole::Md,
+                    InstId(0),
+                    hft_types::AccountId(0),
+                    t,
+                ),
+            );
+            h.run();
+        })
+        .iter()
+        .all(|k| *k != "Conn")
+    );
 }
 
 #[test]
@@ -338,7 +407,11 @@ fn seq_037_model_group_reset_notes() {
     let mut r = GroupResets::new(8);
     r.set(0, ResetCause::Structural);
     r.set(1, ResetCause::Structural);
-    SCRIPT.with(|x| x.borrow_mut().reset_effect.push((5, ModelParamEffect::ResetGroups(r))));
+    SCRIPT.with(|x| {
+        x.borrow_mut()
+            .reset_effect
+            .push((5, ModelParamEffect::ResetGroups(r)))
+    });
     let mut a = start(&h, MemCkpt::default(), Ring::big(), cfg());
     catch_up(&mut a, &h);
     let mut p5 = p.clone();
@@ -349,7 +422,12 @@ fn seq_037_model_group_reset_notes() {
     assert_eq!(h.result_of(id).map(|r| (r.status, r.detail)), Some((0, 0)));
     catch_up(&mut a, &h);
     eprintln!("notes {:?}", a.ring.notes());
-    let notes: Vec<Note> = a.ring.notes().into_iter().filter(|n| n.code == hft_event::note_code(NoteSource::Advisor, 4)).collect();
+    let notes: Vec<Note> = a
+        .ring
+        .notes()
+        .into_iter()
+        .filter(|n| n.code == hft_event::note_code(NoteSource::Advisor, 4))
+        .collect();
     assert_eq!(notes.len(), 2);
     assert_eq!(notes[0].strategy, S2);
     assert_eq!(notes[0].group, G2);
@@ -376,7 +454,12 @@ fn seq_038_reset_all_reason_4() {
     h.set_params(&p6);
     h.run();
     catch_up(&mut a, &h);
-    let notes: Vec<Note> = a.ring.notes().into_iter().filter(|n| n.code == hft_event::note_code(NoteSource::Advisor, 4)).collect();
+    let notes: Vec<Note> = a
+        .ring
+        .notes()
+        .into_iter()
+        .filter(|n| n.code == hft_event::note_code(NoteSource::Advisor, 4))
+        .collect();
     assert_eq!(notes.len(), 2);
     assert!(notes.iter().all(|n| n.v[0] == 4 && n.v[1] == 6));
 }
@@ -497,7 +580,11 @@ fn checkpoint_now(a: &mut Adv) -> MemCkpt {
 fn seq_047_checkpoint_discard_reasons() {
     let disc = hft_event::note_code(NoteSource::Advisor, 1);
     let reason = |a: &Adv| -> Option<u64> {
-        a.notes.iter().chain(a.ring.notes().iter()).find(|n| n.code == disc && n.strategy == S2).map(|n| n.v[1])
+        a.notes
+            .iter()
+            .chain(a.ring.notes().iter())
+            .find(|n| n.code == disc && n.strategy == S2)
+            .map(|n| n.v[1])
     };
     let mut h = b0_model();
     let mut a = start(&h, MemCkpt::default(), Ring::big(), cfg());
@@ -508,11 +595,17 @@ fn seq_047_checkpoint_discard_reasons() {
     h.quote(A1, "50000", "50003");
     h.run();
     // A valid checkpoint: no discard.
-    let mut s = MemCkpt { gens: store.gens.clone(), ..MemCkpt::default() };
+    let mut s = MemCkpt {
+        gens: store.gens.clone(),
+        ..MemCkpt::default()
+    };
     let a2 = start(&h, s, Ring::big(), cfg());
     assert_eq!(reason(&a2), None);
     // .2 corrupt.
-    s = MemCkpt { gens: store.gens.clone(), ..MemCkpt::default() };
+    s = MemCkpt {
+        gens: store.gens.clone(),
+        ..MemCkpt::default()
+    };
     if let Some(g) = s.gens.get_mut(&S2) {
         let n = g.1.len() - 1;
         g.1[n] ^= 0xFF;
@@ -520,29 +613,44 @@ fn seq_047_checkpoint_discard_reasons() {
     assert_eq!(reason(&start(&h, s, Ring::big(), cfg())), Some(2));
     // .3 layout.
     SCRIPT.with(|x| x.borrow_mut().layout_alt = true);
-    let s3 = MemCkpt { gens: store.gens.clone(), ..MemCkpt::default() };
+    let s3 = MemCkpt {
+        gens: store.gens.clone(),
+        ..MemCkpt::default()
+    };
     assert_eq!(reason(&start(&h, s3, Ring::big(), cfg())), Some(3));
     SCRIPT.with(|x| x.borrow_mut().layout_alt = false);
     // .5 kind and .6 instance.
-    let mut s5 = MemCkpt { gens: store.gens.clone(), ..MemCkpt::default() };
+    let mut s5 = MemCkpt {
+        gens: store.gens.clone(),
+        ..MemCkpt::default()
+    };
     if let Some(g) = s5.gens.get_mut(&S2) {
         g.0.kind_id = TAKER;
     }
     assert_eq!(reason(&start(&h, s5, Ring::big(), cfg())), Some(3));
-    let mut s6 = MemCkpt { gens: store.gens.clone(), ..MemCkpt::default() };
+    let mut s6 = MemCkpt {
+        gens: store.gens.clone(),
+        ..MemCkpt::default()
+    };
     if let Some(g) = s6.gens.get_mut(&S2) {
         g.0.strategy = S1;
     }
     assert_eq!(reason(&start(&h, s6, Ring::big(), cfg())), Some(3));
     // .7 last_seq not in the journal.
-    let mut s7 = MemCkpt { gens: store.gens.clone(), ..MemCkpt::default() };
+    let mut s7 = MemCkpt {
+        gens: store.gens.clone(),
+        ..MemCkpt::default()
+    };
     if let Some(g) = s7.gens.get_mut(&S2) {
         g.0.last_seq = 1 << 40;
     }
     assert_eq!(reason(&start(&h, s7, Ring::big(), cfg())), Some(4));
     // .8 model_restore error.
     SCRIPT.with(|x| x.borrow_mut().fail_model_restore = true);
-    let s8 = MemCkpt { gens: store.gens.clone(), ..MemCkpt::default() };
+    let s8 = MemCkpt {
+        gens: store.gens.clone(),
+        ..MemCkpt::default()
+    };
     assert_eq!(reason(&start(&h, s8, Ring::big(), cfg())), Some(5));
     SCRIPT.with(|x| x.borrow_mut().fail_model_restore = false);
 }
@@ -558,14 +666,30 @@ fn seq_049_path_section_reset() {
     h.quote(A1, "50000", "50003");
     h.run();
     SCRIPT.with(|x| x.borrow_mut().path_version = 2);
-    let a2 = start(&h, MemCkpt { gens: store.gens, ..MemCkpt::default() }, Ring::big(), cfg());
-    let pr = a2.notes.iter().find(|n| n.code == hft_event::note_code(NoteSource::Advisor, 2)).expect("ModelPathReset");
+    let a2 = start(
+        &h,
+        MemCkpt {
+            gens: store.gens,
+            ..MemCkpt::default()
+        },
+        Ring::big(),
+        cfg(),
+    );
+    let pr = a2
+        .notes
+        .iter()
+        .find(|n| n.code == hft_event::note_code(NoteSource::Advisor, 2))
+        .expect("ModelPathReset");
     assert_eq!(pr.strategy, S2);
     assert_eq!(pr.v[0], 1);
     assert_eq!(pr.v[1], last);
     assert_eq!(pr.v[3], 1);
     assert_eq!(pr.v[4], 2);
-    assert!(!a2.notes.iter().any(|n| n.code == hft_event::note_code(NoteSource::Advisor, 1) && n.strategy == S2));
+    assert!(
+        !a2.notes
+            .iter()
+            .any(|n| n.code == hft_event::note_code(NoteSource::Advisor, 1) && n.strategy == S2)
+    );
 }
 
 #[test]
@@ -580,7 +704,15 @@ fn seq_050_restore_then_params_once() {
     }
     SCRIPT.with(|x| x.borrow_mut().model_params.clear());
     clear_log();
-    let mut a2 = start(&h, MemCkpt { gens: store.gens, ..MemCkpt::default() }, Ring::big(), cfg());
+    let mut a2 = start(
+        &h,
+        MemCkpt {
+            gens: store.gens,
+            ..MemCkpt::default()
+        },
+        Ring::big(),
+        cfg(),
+    );
     catch_up(&mut a2, &h);
     let calls: Vec<(StrategyId, i64)> = SCRIPT.with(|x| x.borrow().model_params.clone());
     assert_eq!(calls.iter().filter(|c| c.0 == S2).count(), 1, "{calls:?}");
@@ -598,12 +730,30 @@ fn seq_051_checkpoint_write_failure() {
     h.quote(A1, "50000", "50003");
     h.run();
     // .1 commit fails.
-    let mut a = start(&h, MemCkpt { gens: c1.gens.clone(), fail_commit: true, ..MemCkpt::default() }, Ring::big(), cfg());
+    let mut a = start(
+        &h,
+        MemCkpt {
+            gens: c1.gens.clone(),
+            fail_commit: true,
+            ..MemCkpt::default()
+        },
+        Ring::big(),
+        cfg(),
+    );
     catch_up(&mut a, &h);
     let s = checkpoint_now(&mut a);
     assert_eq!(s.gens.get(&S2), Some(&gen1));
     // .2 the 2nd chunk fails: no commit.
-    let mut a = start(&h, MemCkpt { gens: c1.gens.clone(), fail_chunk_at: Some(2), ..MemCkpt::default() }, Ring::big(), cfg());
+    let mut a = start(
+        &h,
+        MemCkpt {
+            gens: c1.gens.clone(),
+            fail_chunk_at: Some(2),
+            ..MemCkpt::default()
+        },
+        Ring::big(),
+        cfg(),
+    );
     catch_up(&mut a, &h);
     let s = checkpoint_now(&mut a);
     assert_eq!(s.gens.get(&S2), Some(&gen1));

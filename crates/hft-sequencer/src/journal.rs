@@ -2,9 +2,7 @@
 //! (`MemJournal`, used by tests, the replay drivers and as the reference of the record model),
 //! the per-event output buffer and the output hash (README "每条 Input 的处理顺序", "状态哈希").
 
-use hft_event::{
-    BlobRef, Body, EventKind, MEASURE_MASK, RecordFlags, Role, SegmentRoll, classify,
-};
+use hft_event::{BlobRef, Body, EventKind, MEASURE_MASK, RecordFlags, Role, SegmentRoll, classify};
 use hft_journal::{AppendErr, RollAt, RollErr, RollReason};
 use hft_rt::CalibPair;
 use hft_types::{Seq, Tsc};
@@ -42,7 +40,13 @@ pub trait JournalSink {
     where
         Self: 'a;
     /// One record from scattered pieces of its logical body; seq comes from the writer only.
-    fn append_var(&mut self, kind: EventKind, flags: RecordFlags, tsc: Tsc, pieces: &[&[u8]]) -> Result<Seq, AppendErr>;
+    fn append_var(
+        &mut self,
+        kind: EventKind,
+        flags: RecordFlags,
+        tsc: Tsc,
+        pieces: &[&[u8]],
+    ) -> Result<Seq, AppendErr>;
     /// Fixed-layout convenience.
     fn append<B: Body>(&mut self, flags: RecordFlags, tsc: Tsc, body: &B) -> Result<Seq, AppendErr> {
         self.append_var(B::KIND, flags, tsc, &[body.as_bytes()])
@@ -232,7 +236,9 @@ impl MemJournal {
     pub fn truncate_to_event_end(&mut self) -> usize {
         let mut dropped = 0;
         loop {
-            let Some(seg) = self.segments.last_mut() else { break };
+            let Some(seg) = self.segments.last_mut() else {
+                break;
+            };
             match seg.records.last() {
                 Some(r) if r.flags.0 & RecordFlags::EVENT_END.0 == 0 => {
                     seg.records.pop();
@@ -305,7 +311,12 @@ impl BootSink for MemBoot<'_> {
         sr.journal_kind = 2;
         sr.boot_records = self.n + 1;
         sr.segment_no = self.j.segments.last().map_or(0, |s| s.no);
-        let seq = self.j.push(EventKind::SEGMENT_ROLL, RecordFlags::EVENT_END, 0, &[sr.as_bytes()]);
+        let seq = self.j.push(
+            EventKind::SEGMENT_ROLL,
+            RecordFlags::EVENT_END,
+            0,
+            &[sr.as_bytes()],
+        );
         // The BootDone record ends the boot block (Meta, but it carries EVENT_END).
         if let Some(r) = self.j.segments.last_mut().and_then(|s| s.records.last_mut()) {
             r.flags = RecordFlags(r.flags.0 | RecordFlags::EVENT_END.0);
@@ -329,7 +340,13 @@ impl ZeroedBody for SegmentRoll {
 
 impl JournalSink for MemJournal {
     type Boot<'a> = MemBoot<'a>;
-    fn append_var(&mut self, kind: EventKind, flags: RecordFlags, tsc: Tsc, pieces: &[&[u8]]) -> Result<Seq, AppendErr> {
+    fn append_var(
+        &mut self,
+        kind: EventKind,
+        flags: RecordFlags,
+        tsc: Tsc,
+        pieces: &[&[u8]],
+    ) -> Result<Seq, AppendErr> {
         if self.in_boot {
             return Err(AppendErr::InBoot);
         }
@@ -416,7 +433,12 @@ impl JournalSink for MemJournal {
             begin.seq_mark = self.next_seq;
             begin.utc_ns = info.utc_ns;
             begin.reason = reason as u8;
-            self.push(EventKind::SEGMENT_ROLL, RecordFlags(0), info.calib.tsc.0, &[begin.as_bytes()]);
+            self.push(
+                EventKind::SEGMENT_ROLL,
+                RecordFlags(0),
+                info.calib.tsc.0,
+                &[begin.as_bytes()],
+            );
             return Ok(MemBoot { j: self, n: 1 });
         }
         let old_no = self.segments.last().map_or(0, |s| s.no);
@@ -428,7 +450,12 @@ impl JournalSink for MemJournal {
         end.seq_mark = self.next_seq.saturating_sub(1);
         end.utc_ns = info.utc_ns;
         end.reason = reason as u8;
-        self.push(EventKind::SEGMENT_ROLL, RecordFlags::EVENT_END, 0, &[end.as_bytes()]);
+        self.push(
+            EventKind::SEGMENT_ROLL,
+            RecordFlags::EVENT_END,
+            0,
+            &[end.as_bytes()],
+        );
         if let Some(r) = self.segments.last_mut().and_then(|s| s.records.last_mut()) {
             r.flags = RecordFlags(r.flags.0 | RecordFlags::EVENT_END.0);
         }
@@ -453,7 +480,12 @@ impl JournalSink for MemJournal {
         begin.seq_mark = self.next_seq;
         begin.utc_ns = info.utc_ns;
         begin.reason = reason as u8;
-        self.push(EventKind::SEGMENT_ROLL, RecordFlags(0), info.calib.tsc.0, &[begin.as_bytes()]);
+        self.push(
+            EventKind::SEGMENT_ROLL,
+            RecordFlags(0),
+            info.calib.tsc.0,
+            &[begin.as_bytes()],
+        );
         self.in_boot = false;
         Ok(MemBoot { j: self, n: 1 })
     }

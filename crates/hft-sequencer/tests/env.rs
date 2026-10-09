@@ -18,7 +18,11 @@ fn timers_since(h: &H, m: usize) -> Vec<(Timer, u64)> {
 }
 
 fn sys_ids(h: &H, m: usize) -> Vec<u32> {
-    timers_since(h, m).iter().filter(|t| t.0.owner == 1).map(|t| t.0.timer_id).collect()
+    timers_since(h, m)
+        .iter()
+        .filter(|t| t.0.owner == 1)
+        .map(|t| t.0.timer_id)
+        .collect()
 }
 
 /// B0 with keyframes out of the way.
@@ -67,12 +71,18 @@ fn seq_079_heap_timer_to_input() {
     h.at(9_000_500);
     let m = h.mark();
     h.step();
-    let t = timers_since(&h, m).into_iter().find(|t| t.0.owner == 17).expect("timer");
+    let t = timers_since(&h, m)
+        .into_iter()
+        .find(|t| t.0.owner == 17)
+        .expect("timer");
     assert_eq!(t.0.timer_id, 9);
     assert_eq!(t.0.group, G1);
     assert_eq!(t.0.deadline_tsc, 9_000_000);
     assert_eq!(t.1, 9_000_500);
-    let got = log().into_iter().find(|g| g.kind == "Timer" && g.s == S1).expect("delivered");
+    let got = log()
+        .into_iter()
+        .find(|g| g.kind == "Timer" && g.s == S1)
+        .expect("delivered");
     assert!(got.text.contains("tag: 9"));
     assert!(!h.s.engine().heap.sorted().iter().any(|e| e.owner == 17));
 }
@@ -81,12 +91,24 @@ fn seq_079_heap_timer_to_input() {
 fn seq_080_timer_owner_dispatch() {
     let mut h = quiet();
     // .1 Sweep: re-registered +1 000 ms.
-    let sweep = h.s.engine().heap.sorted().into_iter().find(|e| e.owner == 3 && e.timer_id == 2).expect("sweep");
+    let sweep =
+        h.s.engine()
+            .heap
+            .sorted()
+            .into_iter()
+            .find(|e| e.owner == 3 && e.timer_id == 2)
+            .expect("sweep");
     h.at(sweep.deadline);
     h.trace_on();
     h.step();
     assert!(h.trace().contains(&"timer"));
-    let next = h.s.engine().heap.sorted().into_iter().find(|e| e.owner == 3 && e.timer_id == 2).expect("sweep again");
+    let next =
+        h.s.engine()
+            .heap
+            .sorted()
+            .into_iter()
+            .find(|e| e.owner == 3 && e.timer_id == 2)
+            .expect("sweep again");
     assert_eq!(next.deadline, h.now() + 1_000_000_000);
     // .6 a strategy timer only reaches its instance.
     set_hook(|hx, ev, ctx| {
@@ -179,7 +201,11 @@ fn seq_090_snapshot_now() {
     let m2 = h.mark();
     h.step();
     assert_eq!(sys_ids(&h, m2), vec![7]);
-    let snap_rec = h.since(m2).into_iter().find(|r| r.kind == EventKind::STATE_SNAPSHOT).expect("snapshot");
+    let snap_rec = h
+        .since(m2)
+        .into_iter()
+        .find(|r| r.kind == EventKind::STATE_SNAPSHOT)
+        .expect("snapshot");
     assert_eq!(snap(&snap_rec).0.purpose, 3);
     assert!(!h.s.view().snapshot_requested());
 }
@@ -222,12 +248,20 @@ fn seq_091_day_roll() {
 
 #[test]
 fn seq_093_storage_timers() {
-    for (id, kind, level) in [(268u32, "PersistLag", 1u8), (524, "PersistLag", 2), (269, "DiskLow", 1), (14, "Both", 0)] {
+    for (id, kind, level) in [
+        (268u32, "PersistLag", 1u8),
+        (524, "PersistLag", 2),
+        (269, "DiskLow", 1),
+        (14, "Both", 0),
+    ] {
         let mut h = quiet();
         h.trace_on();
         h.sys(id);
         let tr = h.s.engine().trace.ev.clone();
-        let st = tr.iter().find(|e| e.what == "apply.Storage").unwrap_or_else(|| panic!("{id}: {:?}", h.trace()));
+        let st = tr
+            .iter()
+            .find(|e| e.what == "apply.Storage")
+            .unwrap_or_else(|| panic!("{id}: {:?}", h.trace()));
         assert_eq!(st.b, u64::from(level), "{kind}");
     }
 }
@@ -252,13 +286,21 @@ fn seq_094_kill_self_test_ok() {
     h.push(RingId::Hk, &n);
     h.run();
     assert_eq!(h.gate_bits(AC1), g0);
-    assert!(h.notes_since(m).iter().all(|n| n.code != hft_sequencer::codes::seq_note(7)));
+    assert!(
+        h.notes_since(m)
+            .iter()
+            .all(|n| n.code != hft_sequencer::codes::seq_note(7))
+    );
     h.trace_on();
     let m = h.mark();
     h.sys(16 | (1 << 16));
     assert_eq!(h.s.engine().trace.count("apply.KillSelfTest"), 1);
     if h.gate_bits(AC1) != g0 {
-        let sg: Vec<_> = h.notes_since(m).into_iter().filter(|n| n.code == hft_sequencer::codes::seq_note(7)).collect();
+        let sg: Vec<_> = h
+            .notes_since(m)
+            .into_iter()
+            .filter(|n| n.code == hft_sequencer::codes::seq_note(7))
+            .collect();
         assert_eq!(sg.len(), 1);
         assert_eq!(sg[0].v[0], 1);
     }
@@ -295,12 +337,25 @@ fn seq_096_replay_drivers_no_env_inputs() {
         h.quote(A1, "50000", if k % 2 == 0 { "50003" } else { "50004" });
         h.run();
     }
-    let logged: Vec<Timer> = h.recs().iter().filter(|r| r.kind == EventKind::TIMER && r.role() == Role::Input).filter_map(|r| r.read::<Timer>()).collect();
+    let logged: Vec<Timer> = h
+        .recs()
+        .iter()
+        .filter(|r| r.kind == EventKind::TIMER && r.role() == Role::Input)
+        .filter_map(|r| r.read::<Timer>())
+        .collect();
     let mut setup = h.setup.clone();
     setup.seq.replay_per_round = 7;
     let log = hft_sequencer::driver::replay::Log::from_segments(&h.j().segments);
-    let first = log.recs.iter().find(|r| r.kind == EventKind::STATE_SNAPSHOT).unwrap().seq;
-    for mode in [hft_sequencer::driver::replay::ReplayMode::Verify, hft_sequencer::driver::replay::ReplayMode::Mirror] {
+    let first = log
+        .recs
+        .iter()
+        .find(|r| r.kind == EventKind::STATE_SNAPSHOT)
+        .unwrap()
+        .seq;
+    for mode in [
+        hft_sequencer::driver::replay::ReplayMode::Verify,
+        hft_sequencer::driver::replay::ReplayMode::Mirror,
+    ] {
         let drv = hft_sequencer::driver::replay::ReplayDriver::new(mode, log.clone(), 0, 7);
         let p = plan(hft_sequencer::SnapshotSel::AtSeq(first), true, 0, 0);
         let mut s: hft_sequencer::Sequencer<hft_sequencer::driver::replay::ReplayDriver, TestSet> =
@@ -309,7 +364,9 @@ fn seq_096_replay_drivers_no_env_inputs() {
         while s.step() == StepOutcome::Busy {}
         let n_timers = s.engine().trace.count("timer");
         assert_eq!(n_timers, logged.len(), "{mode:?}");
-        assert!(s.driver().mismatches().is_empty() || mode == hft_sequencer::driver::replay::ReplayMode::Mirror);
+        assert!(
+            s.driver().mismatches().is_empty() || mode == hft_sequencer::driver::replay::ReplayMode::Mirror
+        );
     }
 }
 
@@ -338,7 +395,13 @@ fn seq_098_ms_tsc_from_segment_header() {
     h.run();
     clear_hook();
     let t = *c.borrow().last().unwrap();
-    let e = h.s.engine().heap.sorted().into_iter().find(|e| e.owner == 17 && e.timer_id == 5).unwrap();
+    let e =
+        h.s.engine()
+            .heap
+            .sorted()
+            .into_iter()
+            .find(|e| e.owner == 17 && e.timer_id == 5)
+            .unwrap();
     assert_eq!(e.deadline, t + 1_000_000_000);
     let m = h.verify();
     assert!(m.is_empty(), "{m:?}");

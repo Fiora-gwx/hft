@@ -41,31 +41,62 @@ fn backlog70(h: &mut H) {
 fn seq_099_conflate_keeps_last() {
     let mut h = steady();
     backlog70(&mut h);
-    let first32: Vec<hft_types::InstId> = h.io().ring(RingId::Bbo(0)).iter().take(32).map(|e| hft_sequencer::types::read_body::<hft_event::Bbo>(&e.body).unwrap().h.inst).collect();
+    let first32: Vec<hft_types::InstId> = h
+        .io()
+        .ring(RingId::Bbo(0))
+        .iter()
+        .take(32)
+        .map(|e| {
+            hft_sequencer::types::read_body::<hft_event::Bbo>(&e.body)
+                .unwrap()
+                .h
+                .inst
+        })
+        .collect();
     let n_a1 = first32.iter().filter(|i| **i == A1).count();
     let n_a2 = first32.iter().filter(|i| **i == A2).count();
     assert_eq!(first32.iter().filter(|i| **i == A3).count(), 1);
     let m = h.mark();
     h.step();
-    let b: Vec<_> = h.since(m).into_iter().filter(|r| r.kind == EventKind::BBO).collect();
+    let b: Vec<_> = h
+        .since(m)
+        .into_iter()
+        .filter(|r| r.kind == EventKind::BBO)
+        .collect();
     // The 3 kept records come first; the remaining 38 are handed one by one afterwards.
     let kept: Vec<_> = b.iter().take(3).collect();
-    let insts: Vec<hft_types::InstId> = kept.iter().map(|r| r.read::<hft_event::Bbo>().unwrap().h.inst).collect();
+    let insts: Vec<hft_types::InstId> = kept
+        .iter()
+        .map(|r| r.read::<hft_event::Bbo>().unwrap().h.inst)
+        .collect();
     assert!(insts.contains(&A1) && insts.contains(&A2) && insts.contains(&A3));
     for r in kept {
         let i = r.read::<hft_event::Bbo>().unwrap().h.inst;
         let conf = r.flags.0 & RecordFlags::CONFLATED.0 != 0;
         assert_eq!(conf, i != A3, "{i:?}");
     }
-    let timers: Vec<hft_event::Timer> = h.since(m).iter().filter(|r| r.kind == EventKind::TIMER).filter_map(|r| r.read::<hft_event::Timer>()).collect();
-    assert_eq!(h.s.driver().conflated, (n_a1 - 1 + n_a2 - 1) as u64, "{timers:?} {n_a1} {n_a2}");
+    let timers: Vec<hft_event::Timer> = h
+        .since(m)
+        .iter()
+        .filter(|r| r.kind == EventKind::TIMER)
+        .filter_map(|r| r.read::<hft_event::Timer>())
+        .collect();
+    assert_eq!(
+        h.s.driver().conflated,
+        (n_a1 - 1 + n_a2 - 1) as u64,
+        "{timers:?} {n_a1} {n_a2}"
+    );
     assert_eq!(n_a1 - 1 + n_a2 - 1, 29);
     // ConflateReport one second later carries 29.
     h.run();
     h.adv(1_100_000_000);
     let m = h.mark();
     h.run();
-    let n = h.notes_since(m).into_iter().find(|n| n.code == hft_sequencer::codes::seq_note(2)).expect("Conflated");
+    let n = h
+        .notes_since(m)
+        .into_iter()
+        .find(|n| n.code == hft_sequencer::codes::seq_note(2))
+        .expect("Conflated");
     assert_eq!(n.v[0], 29);
 }
 
@@ -78,7 +109,11 @@ fn seq_100_conflate_threshold() {
         }
         let m = h.mark();
         h.step();
-        let b: Vec<_> = h.since(m).into_iter().filter(|r| r.kind == EventKind::BBO).collect();
+        let b: Vec<_> = h
+            .since(m)
+            .into_iter()
+            .filter(|r| r.kind == EventKind::BBO)
+            .collect();
         if conflate {
             assert!(b[0].flags.0 & RecordFlags::CONFLATED.0 != 0);
             assert_eq!(n as usize - h.io().ring(RingId::Bbo(0)).len(), 32);
@@ -95,11 +130,29 @@ fn seq_101_checks_between_conflated() {
     backlog70(&mut h);
     let base = h.io().takes;
     let (c, _) = h.cmd_elem("cli:test", 4, AC1, &ControlCmd::SnapshotNow, |_| {});
-    h.io().arrivals.push(Arrival { after_take: base + 1, ring: RingId::Ctl, elem: c });
+    h.io().arrivals.push(Arrival {
+        after_take: base + 1,
+        ring: RingId::Ctl,
+        elem: c,
+    });
     let m = h.mark();
     h.step();
-    let k: Vec<EventKind> = h.since(m).iter().filter(|r| r.role() == Role::Input).map(|r| r.kind).take(4).collect();
-    assert_eq!(k, vec![EventKind::BBO, EventKind::CONTROL_CMD, EventKind::BBO, EventKind::BBO]);
+    let k: Vec<EventKind> = h
+        .since(m)
+        .iter()
+        .filter(|r| r.role() == Role::Input)
+        .map(|r| r.kind)
+        .take(4)
+        .collect();
+    assert_eq!(
+        k,
+        vec![
+            EventKind::BBO,
+            EventKind::CONTROL_CMD,
+            EventKind::BBO,
+            EventKind::BBO
+        ]
+    );
 }
 
 #[test]
@@ -110,10 +163,17 @@ fn seq_102_md_never_conflated() {
     }
     let m = h.mark();
     h.run();
-    let md: Vec<_> = h.since(m).into_iter().filter(|r| r.kind == EventKind::TRADE).collect();
+    let md: Vec<_> = h
+        .since(m)
+        .into_iter()
+        .filter(|r| r.kind == EventKind::TRADE)
+        .collect();
     assert_eq!(md.len(), 2_000);
     assert!(md.iter().all(|r| r.flags.0 & RecordFlags::CONFLATED.0 == 0));
-    let ids: Vec<u64> = md.iter().map(|r| u64::from_le_bytes(r.body[72..80].try_into().unwrap())).collect();
+    let ids: Vec<u64> = md
+        .iter()
+        .map(|r| u64::from_le_bytes(r.body[72..80].try_into().unwrap()))
+        .collect();
     assert!(ids.windows(2).all(|w| w[1] == w[0] + 1));
 }
 
@@ -127,7 +187,11 @@ fn seq_103_dropped_bbo_invisible() {
         .since(m1)
         .iter()
         .filter(|r| r.kind == EventKind::BBO)
-        .map(|r| Elem { kind: EventKind::BBO, flags: RecordFlags(r.flags.0 & RecordFlags::CONFLATED.0), body: r.body.clone() })
+        .map(|r| Elem {
+            kind: EventKind::BBO,
+            flags: RecordFlags(r.flags.0 & RecordFlags::CONFLATED.0),
+            body: r.body.clone(),
+        })
         .collect();
     let mut h2 = steady();
     let m2 = h2.mark();
@@ -149,5 +213,8 @@ fn seq_103_dropped_bbo_invisible() {
     assert_eq!(outs(&h1, m1), outs(&h2, m2));
     let e1 = h1.s.engine();
     let e2 = h2.s.engine();
-    assert_eq!(e1.market.bbo_view(&e1.books, A1), e2.market.bbo_view(&e2.books, A1));
+    assert_eq!(
+        e1.market.bbo_view(&e1.books, A1),
+        e2.market.bbo_view(&e2.books, A1)
+    );
 }

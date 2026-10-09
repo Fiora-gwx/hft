@@ -25,7 +25,15 @@ fn seq_224_ring_full_synth_send_report() {
             && b.ask_px == px("50029")
         {
             let bb = hx.v.bbo(B1);
-            let mut it = intent(hx, B1, Side::Sell, Tif::Ioc, hft_strategy_sdk::IntentClass::Open, bb.bid_px, q("0.001"));
+            let mut it = intent(
+                hx,
+                B1,
+                Side::Sell,
+                Tif::Ioc,
+                hft_strategy_sdk::IntentClass::Open,
+                bb.bid_px,
+                q("0.001"),
+            );
             it.group = G1;
             let _ = ctx.place(it);
         }
@@ -34,8 +42,15 @@ fn seq_224_ring_full_synth_send_report() {
     h.quote(A1, "50000", "50029");
     h.run();
     let recs = h.since(m);
-    let d = recs.iter().position(|r| r.kind == EventKind::ORDER_DECISION).expect("decision");
-    let next_input = recs.iter().skip(d + 1).find(|r| r.role() == Role::Input).expect("next input");
+    let d = recs
+        .iter()
+        .position(|r| r.kind == EventKind::ORDER_DECISION)
+        .expect("decision");
+    let next_input = recs
+        .iter()
+        .skip(d + 1)
+        .find(|r| r.role() == Role::Input)
+        .expect("next input");
     assert_eq!(next_input.kind, EventKind::SEND_REPORT);
     let sr = next_input.read::<SendReport>().unwrap();
     assert_eq!(sr.status, SendStatus::RingFull);

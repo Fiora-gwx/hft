@@ -52,7 +52,10 @@ fn seq_193_timer_triggered_synthesis() {
     assert_eq!(s.len(), 2, "{s:?}");
     assert_eq!(s[0].account, AC1);
     assert_eq!(s[1].account, AC2);
-    assert!(s.iter().all(|x| x.synth == 1 && x.settle_ts_ns == t0800() && x.rx_tsc == Tsc(0)));
+    assert!(
+        s.iter()
+            .all(|x| x.synth == 1 && x.settle_ts_ns == t0800() && x.rx_tsc == Tsc(0))
+    );
     assert_eq!(s[0].amount.0.abs(), 50_000);
     assert_eq!(s[1].amount.0.abs(), 100_000);
     let tr = h.trace();
@@ -73,7 +76,13 @@ fn seq_194_synthesis_once() {
     let r0 = *h.s.engine().market.row(B1).unwrap();
     h.funding_md(B1, "0.0001", t0800() + H8, 28_800);
     let st = settles(&h.since(m));
-    assert_eq!(st.len(), 1, "{st:?} cut {} next {}", r0.settled_cut_ns, r0.next_funding_ns);
+    assert_eq!(
+        st.len(),
+        1,
+        "{st:?} cut {} next {}",
+        r0.settled_cut_ns,
+        r0.next_funding_ns
+    );
     // .2 Funding first (past the unsettled 08:00): synthesized there; the Timer adds nothing.
     let mut h = rate_only();
     h.open_position(AC1, B1, Side::Sell, "0.010");

@@ -44,14 +44,40 @@ impl Part {
 /// An owned notification for one instance (index into the instance table).
 #[derive(Copy, Clone, Debug)]
 pub enum Notif {
-    Order { gix: u16, u: OrderUpdate },
-    Exec { gix: u16, u: ExecUpdate },
-    External { gix: u16, f: ExternalFillView },
-    Risk { a: AccountId, e: RiskEvent },
-    Mode { gix: u16, old: RunMode, new: RunMode },
-    Conn { venue: VenueId, state: ConnStateKind },
-    Notice { inst: InstId, gix: u16, n: VenueNoticeView },
-    Timer { tag: u32, group: GroupId },
+    Order {
+        gix: u16,
+        u: OrderUpdate,
+    },
+    Exec {
+        gix: u16,
+        u: ExecUpdate,
+    },
+    External {
+        gix: u16,
+        f: ExternalFillView,
+    },
+    Risk {
+        a: AccountId,
+        e: RiskEvent,
+    },
+    Mode {
+        gix: u16,
+        old: RunMode,
+        new: RunMode,
+    },
+    Conn {
+        venue: VenueId,
+        state: ConnStateKind,
+    },
+    Notice {
+        inst: InstId,
+        gix: u16,
+        n: VenueNoticeView,
+    },
+    Timer {
+        tag: u32,
+        group: GroupId,
+    },
 }
 
 impl Notif {

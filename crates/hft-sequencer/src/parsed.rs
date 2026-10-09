@@ -147,7 +147,8 @@ pub fn parse_params<S: StrategySet>(
     let ver = v.hdr.schema_ver;
     let groups = GroupTable::new(v.groups, max_groups);
     let params = S::decode_params(kind, v.body, ver, &groups).map_err(|e| strategy_param_detail(&e))?;
-    S::validate_params(&params, &groups, &RefView::new(rd, account)).map_err(|e| strategy_param_detail(&e))?;
+    S::validate_params(&params, &groups, &RefView::new(rd, account))
+        .map_err(|e| strategy_param_detail(&e))?;
     let n_groups = u16::try_from(v.groups.len()).unwrap_or(u16::MAX);
     let model_mem = S::model_mem_bytes(&params, n_groups);
     let model_ckpt = S::model_snapshot_bytes(&params, n_groups);
@@ -196,9 +197,8 @@ pub fn parse_blob<S: StrategySet>(
     risk_decode: Option<RiskDecode>,
 ) -> Result<ParsedConfig<S>, u32> {
     match r.kind {
-        BlobKind::StrategyParams => {
-            parse_params::<S>(content, r.sha256, rd, max_groups, base).map(|p| ParsedConfig::StrategyParams(Box::new(p)))
-        }
+        BlobKind::StrategyParams => parse_params::<S>(content, r.sha256, rd, max_groups, base)
+            .map(|p| ParsedConfig::StrategyParams(Box::new(p))),
         BlobKind::RiskParams => {
             let d = risk_decode.ok_or(u32::from(detail::BAD_VALUE))?;
             let p = d(content, risk_account, rd).map_err(u32::from)?;

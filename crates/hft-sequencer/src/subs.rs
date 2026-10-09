@@ -127,7 +127,9 @@ pub(crate) fn rebuild_all<S: StrategySet>(e: &mut Engine, inst: &mut Instances<S
     let order = inst.dispatch_order.clone();
     for &ix16 in order.iter() {
         let ix = usize::from(ix16);
-        let Some(slot) = inst.slots.get_mut(ix) else { continue };
+        let Some(slot) = inst.slots.get_mut(ix) else {
+            continue;
+        };
         slot.subs.clear();
         let (Some(s), Some(p)) = (slot.inst.as_ref(), slot.cur.as_ref()) else {
             continue;
@@ -174,7 +176,9 @@ pub(crate) fn rebuild_all<S: StrategySet>(e: &mut Engine, inst: &mut Instances<S
     si.scratch.clear();
     for &ix16 in order.iter() {
         let pos = inst.dispatch_pos.get(usize::from(ix16)).copied().unwrap_or(0);
-        let Some(slot) = inst.slots.get(usize::from(ix16)) else { continue };
+        let Some(slot) = inst.slots.get(usize::from(ix16)) else {
+            continue;
+        };
         for se in slot.subs.iter() {
             if let Some(x) = si.ix_of(se.inst) {
                 if se.part.fast() {
@@ -217,7 +221,9 @@ pub(crate) fn rebuild_all<S: StrategySet>(e: &mut Engine, inst: &mut Instances<S
         *u = 0;
     }
     for x in 0..n {
-        let Some(i) = si.insts.get(x).copied() else { continue };
+        let Some(i) = si.insts.get(x).copied() else {
+            continue;
+        };
         let a = si.off.get(x).copied().unwrap_or(0) as usize;
         let b = si.off.get(x + 1).copied().unwrap_or(0) as usize;
         let am = si.moff.get(x).copied().unwrap_or(0) as usize;
@@ -246,7 +252,11 @@ pub(crate) fn engine_subscriptions<S: StrategySet>(e: &mut Engine, inst: &mut In
         let Some(g) = s.groups() else { continue };
         for (_, sp) in g.iter() {
             for l in sp.legs.iter().take(usize::from(sp.n_legs)) {
-                let m = if e.rd.inst(l.inst).kind == InstKind::Perp { perp } else { EvMask::BBO.0 };
+                let m = if e.rd.inst(l.inst).kind == InstKind::Perp {
+                    perp
+                } else {
+                    EvMask::BBO.0
+                };
                 add.push((l.inst, m));
             }
         }
@@ -254,7 +264,11 @@ pub(crate) fn engine_subscriptions<S: StrategySet>(e: &mut Engine, inst: &mut In
     for i in 1..=e.rd.inst_count() {
         let id = InstId(i as u32);
         if pos_nonzero(e, id) {
-            let m = if e.rd.inst(id).kind == InstKind::Perp { perp } else { EvMask::BBO.0 };
+            let m = if e.rd.inst(id).kind == InstKind::Perp {
+                perp
+            } else {
+                EvMask::BBO.0
+            };
             add.push((id, m));
         }
     }
@@ -310,7 +324,9 @@ pub(crate) fn rebuild_unions_only<S: StrategySet>(e: &mut Engine, inst: &mut Ins
         *u = 0;
     }
     for x in 0..si.insts.len() {
-        let Some(i) = si.insts.get(x).copied() else { continue };
+        let Some(i) = si.insts.get(x).copied() else {
+            continue;
+        };
         let a = si.off.get(x).copied().unwrap_or(0) as usize;
         let b = si.off.get(x + 1).copied().unwrap_or(0) as usize;
         let am = si.moff.get(x).copied().unwrap_or(0) as usize;

@@ -13,36 +13,38 @@ pub mod strat;
 use std::collections::{HashMap, VecDeque};
 
 use hft_event::{
-    AccountConfigReportHdr, BlobHdr, BlobKind, BlobRef, Body, CmdHdr, CmdScope, ClockStatus, ConnRole, ConnState,
-    ConnStateKind, ControlCmd, EventKind, FeedCmd, GroupSpec, GwCmd, HostProfile, LegDef, LeverageItem, MarketHdr,
-    ParamSource, RecordFlags, ReconcileReport, StrategyParamsHdr, Timer,
+    AccountConfigReportHdr, BlobHdr, BlobKind, BlobRef, Body, ClockStatus, CmdHdr, CmdScope, ConnRole,
+    ConnState, ConnStateKind, ControlCmd, EventKind, FeedCmd, GroupSpec, GwCmd, HostProfile, LegDef,
+    LeverageItem, MarketHdr, ParamSource, ReconcileReport, RecordFlags, StrategyParamsHdr, Timer,
 };
 use hft_exec::{ExecConfig, ExecParams};
 use hft_journal::RollReason;
 use hft_ledger::LedgerConfig;
 use hft_oms::OmsConfig;
 use hft_refdata::{
-    AccountSpec, AccountVenueSpec, AssetClass, AssetSpec, CapFlags, DeadManCap, EcfBuilder, EngineSection, Exchange,
-    FeeAssetRule, FeePair, FeeSpec, FundingSettleKind, InstKind, InstSpec, InstStatus, InstanceSpec, LimitBucket,
-    LimitScope, LiqMarker, MarginData, MarginMode, PositionMode, RateLimit, RdbBuilder, RefData, SimBalanceSpec, SimSpec,
-    StaleGuardKind, TestnetKind, TsUnit, UidPolicy, VenueCaps, VenueSpec,
+    AccountSpec, AccountVenueSpec, AssetClass, AssetSpec, CapFlags, DeadManCap, EcfBuilder, EngineSection,
+    Exchange, FeeAssetRule, FeePair, FeeSpec, FundingSettleKind, InstKind, InstSpec, InstStatus,
+    InstanceSpec, LimitBucket, LimitScope, LiqMarker, MarginData, MarginMode, PositionMode, RateLimit,
+    RdbBuilder, RefData, SimBalanceSpec, SimSpec, StaleGuardKind, TestnetKind, TsUnit, UidPolicy, VenueCaps,
+    VenueSpec,
 };
 use hft_risk::{
-    AcctLimits, DEFAULT_MARGIN, FixedVec, GroupLimits, GwMap, MarginLimits, PreVec, PxBand, RiskParams, VenueLimits,
+    AcctLimits, DEFAULT_MARGIN, FixedVec, GroupLimits, GwMap, MarginLimits, PreVec, PxBand, RiskParams,
+    VenueLimits,
 };
 use hft_rt::{CalibPair, Heartbeat};
-use hft_sequencer::driver::live::{LiveCfg, LiveDriver, LiveIo, RingId};
 use hft_sequencer::driver::RollInfo;
-use hft_sequencer::{
-    CapacitiesRow, ConfigSet, EngineSetup, MemJournal, MemRecord, ParsedConfig, ParsedParams, RingLimit, SegClock,
-    SeqParamsRow, Sequencer, StepOutcome,
-};
-use hft_sequencer::types::{InputSlot, OutRing};
+use hft_sequencer::driver::live::{LiveCfg, LiveDriver, LiveIo, RingId};
 use hft_sequencer::parsed::parse_params;
+use hft_sequencer::types::{InputSlot, OutRing};
+use hft_sequencer::{
+    CapacitiesRow, ConfigSet, EngineSetup, MemJournal, MemRecord, ParsedConfig, ParsedParams, RingLimit,
+    SegClock, SeqParamsRow, Sequencer, StepOutcome,
+};
 use hft_strategy_sdk::{StrategySet, VenueSet};
 use hft_types::{
-    AccountId, AssetExp, AssetId, GroupId, HostClass, InstId, KillBits, MarketKind, Notional, Px, Qty, Rate, RunMode,
-    StrategyId, Tsc, VenueId,
+    AccountId, AssetExp, AssetId, GroupId, HostClass, InstId, KillBits, MarketKind, Notional, Px, Qty, Rate,
+    RunMode, StrategyId, Tsc, VenueId,
 };
 use sha2::{Digest, Sha256};
 use zerocopy::{FromZeros, IntoBytes};
@@ -138,15 +140,39 @@ pub fn venue_spec(id: VenueId, ex: Exchange, product: InstKind) -> VenueSpec {
 pub fn caps_spec(v: VenueId, perp: bool) -> VenueCaps {
     VenueCaps {
         venue: v,
-        market: if perp { MarketKind::LinearPerp } else { MarketKind::Spot },
-        fee_asset_rule: if perp { FeeAssetRule::Quote } else { FeeAssetRule::ReceivedAsset },
+        market: if perp {
+            MarketKind::LinearPerp
+        } else {
+            MarketKind::Spot
+        },
+        fee_asset_rule: if perp {
+            FeeAssetRule::Quote
+        } else {
+            FeeAssetRule::ReceivedAsset
+        },
         reduce_only: perp,
-        required_position_mode: if perp { PositionMode::OneWay } else { PositionMode::NotApplicable },
-        required_margin_mode: if perp { MarginMode::Cross } else { MarginMode::NotApplicable },
+        required_position_mode: if perp {
+            PositionMode::OneWay
+        } else {
+            PositionMode::NotApplicable
+        },
+        required_margin_mode: if perp {
+            MarginMode::Cross
+        } else {
+            MarginMode::NotApplicable
+        },
         required_multi_asset: if perp { Some(false) } else { None },
         required_spot_borrow: None,
-        funding_settle: if perp { FundingSettleKind::PerSymbolPush } else { FundingSettleKind::NotApplicable },
-        margin_data: if perp { MarginData::Push } else { MarginData::NotApplicable },
+        funding_settle: if perp {
+            FundingSettleKind::PerSymbolPush
+        } else {
+            FundingSettleKind::NotApplicable
+        },
+        margin_data: if perp {
+            MarginData::Push
+        } else {
+            MarginData::NotApplicable
+        },
         own_liquidation_marker: LiqMarker::NotIdentifiable,
         liq_marker_arg: "".into(),
         ignorable_user_events: Vec::new().into(),
@@ -162,7 +188,15 @@ pub fn caps_spec(v: VenueId, perp: bool) -> VenueCaps {
     }
 }
 
-pub fn inst_spec(id: InstId, v: VenueId, sym: &str, perp: bool, asset: AssetId, tick: (&str, i64), lot: (&str, i64)) -> InstSpec {
+pub fn inst_spec(
+    id: InstId,
+    v: VenueId,
+    sym: &str,
+    perp: bool,
+    asset: AssetId,
+    tick: (&str, i64),
+    lot: (&str, i64),
+) -> InstSpec {
     InstSpec {
         id,
         venue: v,
@@ -192,7 +226,10 @@ fn asset(id: u16, name: &str, class: AssetClass, dust: i64) -> AssetSpec {
         id: AssetId(id),
         name: name.into(),
         class,
-        exp: AssetExp { px_exp: -2, qty_exp: -8 },
+        exp: AssetExp {
+            px_exp: -2,
+            qty_exp: -8,
+        },
         px_max: Px(1_000_000_000_000_000),
         qty_max: Qty(1_000_000_000_000_000_000),
         dust: Qty(dust),
@@ -216,8 +253,26 @@ pub struct Rd {
 
 pub fn order_limits(v: VenueId, l10: u32, l60: u32) -> Vec<(VenueId, RateLimit)> {
     vec![
-        (v, RateLimit { scope: LimitScope::Account, bucket: LimitBucket::Orders, limit: l10, window_ms: 10_000, default_cost: 1 }),
-        (v, RateLimit { scope: LimitScope::Account, bucket: LimitBucket::Orders, limit: l60, window_ms: 60_000, default_cost: 1 }),
+        (
+            v,
+            RateLimit {
+                scope: LimitScope::Account,
+                bucket: LimitBucket::Orders,
+                limit: l10,
+                window_ms: 10_000,
+                default_cost: 1,
+            },
+        ),
+        (
+            v,
+            RateLimit {
+                scope: LimitScope::Account,
+                bucket: LimitBucket::Orders,
+                limit: l60,
+                window_ms: 60_000,
+                default_cost: 1,
+            },
+        ),
     ]
 }
 
@@ -233,7 +288,15 @@ pub fn b0_rd() -> Rd {
             21 => inst_spec(i, B, "BTC_USDT", true, BTC, ("0.1", 10), ("0.001", 100_000)),
             22 => inst_spec(i, B, "ETH_USDT", true, ETH, ("0.01", 1), ("0.01", 1_000_000)),
             _ => {
-                let mut s = inst_spec(i, A, &format!("F{id}USDT"), false, FILL, ("0.01", 1), ("0.001", 100_000));
+                let mut s = inst_spec(
+                    i,
+                    A,
+                    &format!("F{id}USDT"),
+                    false,
+                    FILL,
+                    ("0.01", 1),
+                    ("0.001", 100_000),
+                );
                 s.status = InstStatus::Trading;
                 s
             }
@@ -332,23 +395,44 @@ impl Rd {
             }
             for v in [A, B] {
                 if a.venues & (1u64 << v.0) != 0 {
-                    b.account_venue(AccountVenueSpec { account: a.id, venue: v, uid: format!("uid-{}-{}", a.id.0, v.0) });
+                    b.account_venue(AccountVenueSpec {
+                        account: a.id,
+                        venue: v,
+                        uid: format!("uid-{}-{}", a.id.0, v.0),
+                    });
                 }
             }
         }
         for v in [A, B] {
             for tier in 0..=1u8 {
-                b.fee(FeeSpec { venue: v, tier, fee: FeePair { maker: Rate(200_000), taker: Rate(500_000) } });
+                b.fee(FeeSpec {
+                    venue: v,
+                    tier,
+                    fee: FeePair {
+                        maker: Rate(200_000),
+                        taker: Rate(500_000),
+                    },
+                });
             }
         }
         for a in &self.accounts {
             if !a.sim {
                 continue;
             }
-            b.sim(SimSpec { account: a.id, fee_tier: 0, latency_model: 0, margin_model: 0 });
+            b.sim(SimSpec {
+                account: a.id,
+                fee_tier: 0,
+                latency_model: 0,
+                margin_model: 0,
+            });
             for v in [A, B] {
                 if a.venues & (1u64 << v.0) != 0 {
-                    b.sim_balance(SimBalanceSpec { account: a.id, venue: v, asset: USDT, qty: Qty(1_000_000_000_000_000) });
+                    b.sim_balance(SimBalanceSpec {
+                        account: a.id,
+                        venue: v,
+                        asset: USDT,
+                        qty: Qty(1_000_000_000_000_000),
+                    });
                 }
             }
         }
@@ -384,12 +468,30 @@ pub fn b0_caps() -> CapacitiesRow {
 /// B0 section 5.
 pub fn b0_seq() -> SeqParamsRow {
     let mut rings = [RingLimit::default(); 8];
-    rings[1] = RingLimit { per_ring: 4, total: 4 };
-    rings[2] = RingLimit { per_ring: 4, total: 4 };
-    rings[3] = RingLimit { per_ring: 32, total: 64 };
-    rings[4] = RingLimit { per_ring: 32, total: 0 };
-    rings[5] = RingLimit { per_ring: 32, total: 128 };
-    rings[6] = RingLimit { per_ring: 16, total: 16 };
+    rings[1] = RingLimit {
+        per_ring: 4,
+        total: 4,
+    };
+    rings[2] = RingLimit {
+        per_ring: 4,
+        total: 4,
+    };
+    rings[3] = RingLimit {
+        per_ring: 32,
+        total: 64,
+    };
+    rings[4] = RingLimit {
+        per_ring: 32,
+        total: 0,
+    };
+    rings[5] = RingLimit {
+        per_ring: 32,
+        total: 128,
+    };
+    rings[6] = RingLimit {
+        per_ring: 16,
+        total: 16,
+    };
     SeqParamsRow {
         rings,
         md_round_ns: 50_000,
@@ -424,11 +526,20 @@ pub fn engine_blob(caps: &CapacitiesRow, seq: &SeqParamsRow) -> Vec<u8> {
 // ------------------------------------------------------------------------------- risk
 
 pub fn band(dev: &str, ioc: &str, rr: &str) -> PxBand {
-    PxBand { max_px_dev: r(dev), ioc_max_cross: r(ioc), rr_max_cross: r(rr) }
+    PxBand {
+        max_px_dev: r(dev),
+        ioc_max_cross: r(ioc),
+        rr_max_cross: r(rr),
+    }
 }
 
 pub fn group_limits(max_pos: &str) -> GroupLimits {
-    GroupLimits { max_group_notional: n("50000"), max_pos_qty: q(max_pos), naked_gate: r("0.5"), naked_gate_min: n("100") }
+    GroupLimits {
+        max_group_notional: n("50000"),
+        max_pos_qty: q(max_pos),
+        naked_gate: r("0.5"),
+        naked_gate_min: n("100"),
+    }
 }
 
 pub fn acct_limits(a: u8) -> AcctLimits {
@@ -446,7 +557,10 @@ pub fn acct_limits(a: u8) -> AcctLimits {
         recon_closeonly_notional: n("100"),
         unknown_blocks_open: true,
         funds_buffer: r("0.05"),
-        margin: MarginLimits { margin_stale_ms: 15_000, ..DEFAULT_MARGIN },
+        margin: MarginLimits {
+            margin_stale_ms: 15_000,
+            ..DEFAULT_MARGIN
+        },
     }
 }
 
@@ -519,14 +633,35 @@ pub fn sha(b: &[u8]) -> [u8; 32] {
 // ------------------------------------------------------------------------------- params
 
 pub fn leg(inst: InstId, venue: VenueId) -> LegDef {
-    LegDef { inst, venue, kind: LegDef::CEX, _pad: 0, route: 0, _pad2: 0 }
+    LegDef {
+        inst,
+        venue,
+        kind: LegDef::CEX,
+        _pad: 0,
+        route: 0,
+        _pad2: 0,
+    }
 }
 
 pub fn group(id: GroupId, asset: AssetId, legs: &[LegDef]) -> GroupSpec {
-    let none = LegDef { inst: InstId(0), venue: VenueId(0), kind: 0, _pad: 0, route: 0, _pad2: 0 };
+    let none = LegDef {
+        inst: InstId(0),
+        venue: VenueId(0),
+        kind: 0,
+        _pad: 0,
+        route: 0,
+        _pad2: 0,
+    };
     let mut l = [none; 4];
     l[..legs.len()].copy_from_slice(legs);
-    GroupSpec { id, asset, n_legs: legs.len() as u8, open_allowed: 1, legs: l, _rsv: 0 }
+    GroupSpec {
+        id,
+        asset,
+        n_legs: legs.len() as u8,
+        open_allowed: 1,
+        legs: l,
+        _rsv: 0,
+    }
 }
 
 /// A second, disjoint group (legs a2 + b2, ETH).
@@ -555,7 +690,17 @@ pub struct Spb {
 
 impl Spb {
     pub fn new(s: StrategyId, a: AccountId, kind_id: u16, version: u64, groups: Vec<GroupSpec>) -> Spb {
-        Spb { strategy: s, account: a, kind_id, schema_ver: 1, version, digest: digest(kind_id), groups, values: [10, 5, 0, 0, 0], hwm: None }
+        Spb {
+            strategy: s,
+            account: a,
+            kind_id,
+            schema_ver: 1,
+            version,
+            digest: digest(kind_id),
+            groups,
+            values: [10, 5, 0, 0, 0],
+            hwm: None,
+        }
     }
     pub fn s1(version: u64) -> Spb {
         Spb::new(S1, AC1, TAKER, version, vec![gspec(G1)])
@@ -568,7 +713,14 @@ impl Spb {
     }
     pub fn bytes(&self) -> Vec<u8> {
         let body = body(self.values, self.groups.len() as u16);
-        let hwm = self.hwm.unwrap_or_else(|| self.groups.iter().map(|g| g.id.counter()).max().unwrap_or(0).max(1000));
+        let hwm = self.hwm.unwrap_or_else(|| {
+            self.groups
+                .iter()
+                .map(|g| g.id.counter())
+                .max()
+                .unwrap_or(0)
+                .max(1000)
+        });
         let h = StrategyParamsHdr {
             strategy: self.strategy,
             account: self.account,
@@ -594,7 +746,13 @@ impl Spb {
     }
     pub fn blob_ref(&self) -> BlobRef {
         let b = self.bytes();
-        BlobRef { kind: BlobKind::StrategyParams, encoding: 1, len: b.len() as u32, version: self.version, sha256: sha(&b) }
+        BlobRef {
+            kind: BlobKind::StrategyParams,
+            encoding: 1,
+            len: b.len() as u32,
+            version: self.version,
+            sha256: sha(&b),
+        }
     }
 }
 
@@ -617,9 +775,16 @@ pub fn b0_setup(rd: &RefData) -> EngineSetup {
     oms.links_per_account = 4;
     oms.slots = hft_oms::PerTable::new(16);
     let accounts = (1..=9u8)
-        .map(|a| hft_exec::ExecAccount { account: AccountId(a), sim: a == 9, params: None })
+        .map(|a| hft_exec::ExecAccount {
+            account: AccountId(a),
+            sim: a == 9,
+            params: None,
+        })
         .collect();
-    let exec = ExecConfig { default: ExecParams::default(), accounts };
+    let exec = ExecConfig {
+        default: ExecParams::default(),
+        accounts,
+    };
     let mut keys = Vec::new();
     for a in [AC1, AC2] {
         for v in [A, B] {
@@ -640,7 +805,11 @@ pub fn b0_setup(rd: &RefData) -> EngineSetup {
         advisor_max_lag_ms: 5_000,
         drain_timeout_ms: 0,
         risk_decode: Some(risk_decode),
-        clock: SegClock { tsc_hz_milli: HZ, calib_tsc: T0, calib_realtime_ns: UTC0 },
+        clock: SegClock {
+            tsc_hz_milli: HZ,
+            calib_tsc: T0,
+            calib_realtime_ns: UTC0,
+        },
         base_engine_ns: 0,
     }
 }
@@ -669,7 +838,10 @@ impl<S: StrategySet> B0<S> {
             seq: b0_seq(),
             setup_edit: Vec::new(),
             params: vec![Spb::s1(1), Spb::s2(1), Spb::s9(1)],
-            live: LiveCfg { feed_stage_cap: 1024, ..LiveCfg::default() },
+            live: LiveCfg {
+                feed_stage_cap: 1024,
+                ..LiveCfg::default()
+            },
             risk: None,
             _s: core::marker::PhantomData,
         }
@@ -682,7 +854,11 @@ impl<S: StrategySet> B0<S> {
             risk_sha256: sha(&rb),
             risk_blob: rb,
             risk: self.risk.clone().unwrap_or_else(|| b0_risk(rd)),
-            params: self.params.iter().map(|p| (p.bytes(), parsed::<S>(p, rd))).collect(),
+            params: self
+                .params
+                .iter()
+                .map(|p| (p.bytes(), parsed::<S>(p, rd)))
+                .collect(),
         }
     }
     pub fn setup(&self, rd: &RefData) -> EngineSetup {
@@ -703,7 +879,14 @@ impl<S: StrategySet> B0<S> {
         let drv = LiveDriver::new(io, self.live.clone());
         let hb = hb();
         let s = Sequencer::boot(hft_sequencer::BootSource::Empty { configs: cfg }, &setup, drv, hb)?;
-        Ok(H { s, rd, setup, cmd_no: 0, hb, upd: 1 })
+        Ok(H {
+            s,
+            rd,
+            setup,
+            cmd_no: 0,
+            hb,
+            upd: 1,
+        })
     }
     pub fn boot(self) -> H<S> {
         match self.try_boot() {
@@ -797,7 +980,12 @@ impl<S: StrategySet> TestIo<S> {
             mailbox: Vec::new(),
             retired: Vec::new(),
             kills: Vec::new(),
-            calib: CalibPair { tsc: Tsc(c.calib_tsc), realtime_ns: c.calib_realtime_ns, phc_ns: 0, err_ns: 0 },
+            calib: CalibPair {
+                tsc: Tsc(c.calib_tsc),
+                realtime_ns: c.calib_realtime_ns,
+                phc_ns: 0,
+                err_ns: 0,
+            },
             hz: c.tsc_hz_milli,
             takes: 0,
             arrivals: Vec::new(),
@@ -844,10 +1032,14 @@ impl<S: StrategySet> LiveIo<S> for TestIo<S> {
     }
     fn peek_inst(&mut self, r: RingId) -> Option<InstId> {
         let e = self.rings.get(&r)?.front()?;
-        (e.kind == EventKind::BBO).then(|| hft_sequencer::types::read_body::<hft_event::Bbo>(&e.body).map_or(InstId(0), |b| b.h.inst))
+        (e.kind == EventKind::BBO).then(|| {
+            hft_sequencer::types::read_body::<hft_event::Bbo>(&e.body).map_or(InstId(0), |b| b.h.inst)
+        })
     }
     fn pop(&mut self, r: RingId, out: &mut InputSlot) -> bool {
-        let Some(e) = self.rings.get_mut(&r).and_then(|q| q.pop_front()) else { return false };
+        let Some(e) = self.rings.get_mut(&r).and_then(|q| q.pop_front()) else {
+            return false;
+        };
         out.set_bytes(e.kind, e.flags, Tsc(self.tsc), &e.body);
         true
     }
@@ -883,7 +1075,11 @@ impl<S: StrategySet> LiveIo<S> for TestIo<S> {
         self.kills.push(bits.to_vec());
     }
     fn roll_info(&mut self) -> RollInfo {
-        RollInfo { utc_ns: self.utc_of(Tsc(self.tsc)), calib: self.calib, tsc_hz_milli: self.hz }
+        RollInfo {
+            utc_ns: self.utc_of(Tsc(self.tsc)),
+            calib: self.calib,
+            tsc_hz_milli: self.hz,
+        }
     }
     fn host_profile(&self) -> HostProfile {
         let mut h = hft_sequencer::snapshot::host_profile(self.hz);
@@ -914,7 +1110,12 @@ impl<S: StrategySet> LiveIo<S> for TestIo<S> {
             self.tsc = t;
             self.jump = None;
         }
-        let due: Vec<Arrival> = self.arrivals.iter().filter(|a| a.after_take == n).cloned().collect();
+        let due: Vec<Arrival> = self
+            .arrivals
+            .iter()
+            .filter(|a| a.after_take == n)
+            .cloned()
+            .collect();
         self.arrivals.retain(|a| a.after_take != n);
         for a in due {
             self.ring(a.ring).push_back(a.elem);
@@ -938,7 +1139,11 @@ pub struct H<S: StrategySet = TestSet> {
 }
 
 pub fn elem<B: Body>(b: &B) -> Elem {
-    Elem { kind: B::KIND, flags: RecordFlags(0), body: b.as_bytes().to_vec() }
+    Elem {
+        kind: B::KIND,
+        flags: RecordFlags(0),
+        body: b.as_bytes().to_vec(),
+    }
 }
 
 pub fn bbo(i: InstId, venue: VenueId, conn: u8, bid: &str, ask: &str, upd: u64, rx: u64) -> hft_event::Bbo {
@@ -947,22 +1152,62 @@ pub fn bbo(i: InstId, venue: VenueId, conn: u8, bid: &str, ask: &str, upd: u64, 
     h.conn = hft_types::ConnId(conn);
     h.inst = i;
     h.rx_tsc = rx;
-    hft_event::Bbo { h, bid_px: px(bid), bid_qty: q("1"), ask_px: px(ask), ask_qty: q("1"), update_id: upd }
+    hft_event::Bbo {
+        h,
+        bid_px: px(bid),
+        bid_qty: q("1"),
+        ask_px: px(ask),
+        ask_qty: q("1"),
+        update_id: upd,
+    }
 }
 
-pub fn conn(venue: VenueId, k: u8, state: ConnStateKind, role: ConnRole, inst: InstId, account: AccountId, rx: u64) -> ConnState {
-    ConnState { venue, conn: k, state, role, inst, reason: 0, account, _pad2: [0; 3], rx_tsc: rx }
+pub fn conn(
+    venue: VenueId,
+    k: u8,
+    state: ConnStateKind,
+    role: ConnRole,
+    inst: InstId,
+    account: AccountId,
+    rx: u64,
+) -> ConnState {
+    ConnState {
+        venue,
+        conn: k,
+        state,
+        role,
+        inst,
+        reason: 0,
+        account,
+        _pad2: [0; 3],
+        rx_tsc: rx,
+    }
 }
 
 pub fn sys_timer(id: u32, tsc: u64) -> Timer {
-    Timer { timer_id: id, owner: 1, _pad: 0, group: GroupId(0), _pad2: 0, deadline_tsc: tsc }
+    Timer {
+        timer_id: id,
+        owner: 1,
+        _pad: 0,
+        group: GroupId(0),
+        _pad2: 0,
+        deadline_tsc: tsc,
+    }
 }
 
 /// A command scope; `GroupId(0)` stands for "every group" (`GROUP_ALL`; `GROUP_NONE` is illegal
 /// in a scope).
 pub fn scope(s: StrategyId, a: AccountId, g: GroupId) -> CmdScope {
     let group = if g.0 == 0 { hft_types::GROUP_ALL } else { g };
-    CmdScope { strategy: s, venue: VenueId(0), account: a, _pad: 0, group, inst: InstId(0), _pad2: 0 }
+    CmdScope {
+        strategy: s,
+        venue: VenueId(0),
+        account: a,
+        _pad: 0,
+        group,
+        inst: InstId(0),
+        _pad2: 0,
+    }
 }
 
 pub fn cfg_hdr(a: AccountId, v: VenueId, n_lev: u16) -> AccountConfigReportHdr {
@@ -1029,7 +1274,14 @@ impl<S: StrategySet> H<S> {
         self.push_e(r, elem(b));
     }
     pub fn push_bytes(&mut self, r: RingId, kind: EventKind, body: Vec<u8>) {
-        self.push_e(r, Elem { kind, flags: RecordFlags(0), body });
+        self.push_e(
+            r,
+            Elem {
+                kind,
+                flags: RecordFlags(0),
+                body,
+            },
+        );
     }
     pub fn step(&mut self) -> StepOutcome {
         self.s.step()
@@ -1065,7 +1317,14 @@ impl<S: StrategySet> H<S> {
     }
 
     /// A ControlCmd element (`role`: Viewer 1, Trader 2, Admin 4).
-    pub fn cmd_elem(&mut self, issuer: &str, role: u8, account: AccountId, c: &ControlCmd<'_>, f: impl FnOnce(&mut CmdHdr)) -> (Elem, [u8; 16]) {
+    pub fn cmd_elem(
+        &mut self,
+        issuer: &str,
+        role: u8,
+        account: AccountId,
+        c: &ControlCmd<'_>,
+        f: impl FnOnce(&mut CmdHdr),
+    ) -> (Elem, [u8; 16]) {
         self.cmd_no += 1;
         let mut h = CmdHdr::zeroed();
         h.cmd_id[..8].copy_from_slice(&self.cmd_no.to_le_bytes());
@@ -1082,13 +1341,27 @@ impl<S: StrategySet> H<S> {
         };
         buf.truncate(n);
         let id = h.cmd_id;
-        (Elem { kind: EventKind::CONTROL_CMD, flags: RecordFlags(0), body: buf }, id)
+        (
+            Elem {
+                kind: EventKind::CONTROL_CMD,
+                flags: RecordFlags(0),
+                body: buf,
+            },
+            id,
+        )
     }
     /// Queues a command on the ctl ring (Admin, `cli:test`).
     pub fn cmd(&mut self, account: AccountId, c: &ControlCmd<'_>) -> [u8; 16] {
         self.cmd_with("cli:test", 4, account, c, |_| {})
     }
-    pub fn cmd_with(&mut self, issuer: &str, role: u8, account: AccountId, c: &ControlCmd<'_>, f: impl FnOnce(&mut CmdHdr)) -> [u8; 16] {
+    pub fn cmd_with(
+        &mut self,
+        issuer: &str,
+        role: u8,
+        account: AccountId,
+        c: &ControlCmd<'_>,
+        f: impl FnOnce(&mut CmdHdr),
+    ) -> [u8; 16] {
         let (e, id) = self.cmd_elem(issuer, role, account, c, f);
         self.push_e(RingId::Ctl, e);
         id
@@ -1117,7 +1390,10 @@ impl<S: StrategySet> H<S> {
             let slot = self.s.instances().get(spb.strategy);
             let base = slot
                 .and_then(|s| s.cur.as_ref())
-                .map(|c| hft_sequencer::parsed::ParamBase { params: &c.params, groups: &c.groups });
+                .map(|c| hft_sequencer::parsed::ParamBase {
+                    params: &c.params,
+                    groups: &c.groups,
+                });
             match parse_params::<S>(&b, r.sha256, &self.s.engine().rd, 8, base) {
                 Ok(p) => p,
                 Err(d) => panic!("params rejected: {d:#x}"),
@@ -1125,11 +1401,22 @@ impl<S: StrategySet> H<S> {
         };
         self.io().mailbox.push(ParsedConfig::StrategyParams(Box::new(p)));
         self.blob_input(r, scope(spb.strategy, spb.account, GroupId(0)), &b);
-        self.cmd_confirmed(spb.account, &ControlCmd::SetParams { scope: scope(spb.strategy, spb.account, GroupId(0)), blob: r })
+        self.cmd_confirmed(
+            spb.account,
+            &ControlCmd::SetParams {
+                scope: scope(spb.strategy, spb.account, GroupId(0)),
+                blob: r,
+            },
+        )
     }
     /// Queues a `ConfigBlob` Input on the ctl ring.
     pub fn blob_input(&mut self, r: BlobRef, sc: CmdScope, content: &[u8]) {
-        let h = BlobHdr { blob: r, scope: sc, boot: 0, _pad: [0; 7] };
+        let h = BlobHdr {
+            blob: r,
+            scope: sc,
+            boot: 0,
+            _pad: [0; 7],
+        };
         let mut body = h.as_bytes().to_vec();
         body.extend_from_slice(content);
         self.push_bytes(RingId::Ctl, EventKind::CONFIG_BLOB, body);
@@ -1141,16 +1428,26 @@ impl<S: StrategySet> H<S> {
         self.step();
         let t = self.now();
         for v in [A, B] {
-            self.push(RingId::Rep(0), &conn(v, 0, ConnStateKind::Up, ConnRole::Md, InstId(0), AccountId(0), t));
+            self.push(
+                RingId::Rep(0),
+                &conn(v, 0, ConnStateKind::Up, ConnRole::Md, InstId(0), AccountId(0), t),
+            );
             for i in [A1, A2, A3, B1, B2] {
                 if self.rd.inst(i).venue == v {
-                    self.push(RingId::Rep(0), &conn(v, 0, ConnStateKind::Up, ConnRole::Md, i, AccountId(0), t));
+                    self.push(
+                        RingId::Rep(0),
+                        &conn(v, 0, ConnStateKind::Up, ConnRole::Md, i, AccountId(0), t),
+                    );
                 }
             }
         }
         for a in [AC1, AC2, AC9] {
             for v in [A, B] {
-                for (k, role) in [(0u8, ConnRole::Order), (1, ConnRole::Order), (0, ConnRole::UserStream)] {
+                for (k, role) in [
+                    (0u8, ConnRole::Order),
+                    (1, ConnRole::Order),
+                    (0, ConnRole::UserStream),
+                ] {
                     let ring = if a == AC9 { RingId::RepSim } else { RingId::Rep(0) };
                     self.push(ring, &conn(v, k, ConnStateKind::Up, role, InstId(0), a, t));
                 }
@@ -1162,7 +1459,18 @@ impl<S: StrategySet> H<S> {
         for a in [AC1, AC2] {
             for v in [A, B] {
                 let levs: Vec<LeverageItem> = if v == B {
-                    vec![LeverageItem { inst: B1, _pad: 0, leverage: r("3.00") }, LeverageItem { inst: B2, _pad: 0, leverage: r("3.00") }]
+                    vec![
+                        LeverageItem {
+                            inst: B1,
+                            _pad: 0,
+                            leverage: r("3.00"),
+                        },
+                        LeverageItem {
+                            inst: B2,
+                            _pad: 0,
+                            leverage: r("3.00"),
+                        },
+                    ]
                 } else {
                     Vec::new()
                 };
@@ -1204,13 +1512,31 @@ impl<S: StrategySet> H<S> {
             .instances()
             .slots
             .iter()
-            .filter_map(|x| x.cur.as_ref().map(|p| (x.id, x.account, p.groups.specs().iter().map(|g| g.id).collect::<Vec<_>>())))
+            .filter_map(|x| {
+                x.cur.as_ref().map(|p| {
+                    (
+                        x.id,
+                        x.account,
+                        p.groups.specs().iter().map(|g| g.id).collect::<Vec<_>>(),
+                    )
+                })
+            })
             .flat_map(|(s, a, gs)| gs.into_iter().map(move |g| (s, a, g)))
             .collect();
         for (s, a, g) in cells {
-            let id = self.cmd_confirmed(a, &ControlCmd::SetMode { scope: scope(s, a, g), mode: RunMode::Live });
+            let id = self.cmd_confirmed(
+                a,
+                &ControlCmd::SetMode {
+                    scope: scope(s, a, g),
+                    mode: RunMode::Live,
+                },
+            );
             self.run();
-            assert_eq!(self.result_of(id).map(|r| r.status), Some(0), "steady: SetMode Live of {s:?}");
+            assert_eq!(
+                self.result_of(id).map(|r| r.status),
+                Some(0),
+                "steady: SetMode Live of {s:?}"
+            );
         }
     }
 
@@ -1240,7 +1566,11 @@ impl<S: StrategySet> H<S> {
 
     /// The effective mode of a cell.
     pub fn mode(&self, s: StrategyId, a: AccountId, g: GroupId) -> hft_risk::mode::Effective {
-        self.s.engine().risk.mode.effective(hft_risk::mode::CellKey { strategy: s, account: a, group: g })
+        self.s.engine().risk.mode.effective(hft_risk::mode::CellKey {
+            strategy: s,
+            account: a,
+            group: g,
+        })
     }
     /// The gate bits of an account.
     pub fn gate_bits(&self, a: AccountId) -> u32 {
@@ -1251,7 +1581,11 @@ impl<S: StrategySet> H<S> {
         self.since(m).into_iter().filter(|r| r.kind == k).collect()
     }
     pub fn notes_since(&self, m: usize) -> Vec<hft_event::Note> {
-        self.since(m).iter().filter(|r| r.kind == EventKind::NOTE).filter_map(|r| r.read::<hft_event::Note>()).collect()
+        self.since(m)
+            .iter()
+            .filter(|r| r.kind == EventKind::NOTE)
+            .filter_map(|r| r.read::<hft_event::Note>())
+            .collect()
     }
 }
 
@@ -1261,7 +1595,15 @@ pub const STARTUP: RollReason = RollReason::Startup;
 // ------------------------------------------------------------------------------- intents
 
 /// A single-leg order intent of the hook's instance.
-pub fn intent(hx: &Hx<'_>, inst: InstId, side: hft_types::Side, tif: hft_types::Tif, class: hft_strategy_sdk::IntentClass, p: Px, qty: Qty) -> hft_strategy_sdk::OrderIntent {
+pub fn intent(
+    hx: &Hx<'_>,
+    inst: InstId,
+    side: hft_types::Side,
+    tif: hft_types::Tif,
+    class: hft_strategy_sdk::IntentClass,
+    p: Px,
+    qty: Qty,
+) -> hft_strategy_sdk::OrderIntent {
     let group = hx.groups.specs().first().map_or(GroupId(0), |g| g.id);
     hft_strategy_sdk::OrderIntent {
         venue: inst_venue(inst),
@@ -1289,7 +1631,15 @@ pub fn inst_venue(i: InstId) -> VenueId {
 /// IOC open buy of 0.001 at the ask.
 pub fn open_buy(hx: &Hx<'_>, inst: InstId) -> hft_strategy_sdk::OrderIntent {
     let b = hx.v.bbo(inst);
-    intent(hx, inst, hft_types::Side::Buy, hft_types::Tif::Ioc, hft_strategy_sdk::IntentClass::Open, b.ask_px, q("0.001"))
+    intent(
+        hx,
+        inst,
+        hft_types::Side::Buy,
+        hft_types::Tif::Ioc,
+        hft_strategy_sdk::IntentClass::Open,
+        b.ask_px,
+        q("0.001"),
+    )
 }
 
 // ------------------------------------------------------------------------------- restart / verify
@@ -1298,7 +1648,13 @@ use hft_sequencer::driver::replay::{Log, Mismatch, ReplayDriver, ReplayMode};
 use hft_sequencer::{BootError, BootSource, RecoverPlan, RecoveryFlags, SnapshotSel};
 
 pub fn plan(start: SnapshotSel, replay_tail: bool, epoch: u32, flags: u8) -> RecoverPlan {
-    RecoverPlan { start, replay_tail, epoch, flags: RecoveryFlags(flags), quarantine: Vec::new() }
+    RecoverPlan {
+        start,
+        replay_tail,
+        epoch,
+        flags: RecoveryFlags(flags),
+        quarantine: Vec::new(),
+    }
 }
 
 /// The run-time knobs of a restarted process.
@@ -1314,7 +1670,16 @@ pub struct Rerun {
 
 impl Default for Rerun {
     fn default() -> Rerun {
-        Rerun { tsc: 5_000_000_000_000, hz: HZ, utc: UTC0 + 3_600_000_000_000, live: LiveCfg { feed_stage_cap: 1024, ..LiveCfg::default() }, build: [0; 20] }
+        Rerun {
+            tsc: 5_000_000_000_000,
+            hz: HZ,
+            utc: UTC0 + 3_600_000_000_000,
+            live: LiveCfg {
+                feed_stage_cap: 1024,
+                ..LiveCfg::default()
+            },
+            build: [0; 20],
+        }
     }
 }
 
@@ -1338,8 +1703,17 @@ impl<S: StrategySet> H<S> {
         Self::restart_over(j, setup, p, rr)
     }
     /// A cold start over `j` exactly as it is (records past the last EVENT_END included).
-    pub fn restart_over(j: MemJournal, mut setup: EngineSetup, p: RecoverPlan, rr: Rerun) -> Result<H<S>, BootError> {
-        setup.clock = SegClock { tsc_hz_milli: rr.hz, calib_tsc: rr.tsc, calib_realtime_ns: rr.utc };
+    pub fn restart_over(
+        j: MemJournal,
+        mut setup: EngineSetup,
+        p: RecoverPlan,
+        rr: Rerun,
+    ) -> Result<H<S>, BootError> {
+        setup.clock = SegClock {
+            tsc_hz_milli: rr.hz,
+            calib_tsc: rr.tsc,
+            calib_realtime_ns: rr.utc,
+        };
         let mut io = TestIo::new(setup.clock);
         io.build = rr.build;
         io.old = Some(Log::from_segments(&j.segments));
@@ -1352,7 +1726,14 @@ impl<S: StrategySet> H<S> {
         let hb = hb();
         let s = Sequencer::boot(BootSource::Journal(p), &setup, drv, hb)?;
         let rd = s.engine().rd.clone();
-        Ok(H { s, rd, setup, cmd_no: 1_000_000, hb, upd: 1_000_000 })
+        Ok(H {
+            s,
+            rd,
+            setup,
+            cmd_no: 1_000_000,
+            hb,
+            upd: 1_000_000,
+        })
     }
     /// `VerifyDriver` over this journal from the snapshot at or before `at_seq` (`None` = the
     /// first one): mismatches and logged Outputs never reached.
@@ -1365,9 +1746,17 @@ impl<S: StrategySet> H<S> {
 }
 
 /// Verify replay of a journal (README "验证回放").
-pub fn verify_journal<S: StrategySet>(j: &MemJournal, setup: &EngineSetup, at_seq: Option<u64>) -> Vec<Mismatch> {
+pub fn verify_journal<S: StrategySet>(
+    j: &MemJournal,
+    setup: &EngineSetup,
+    at_seq: Option<u64>,
+) -> Vec<Mismatch> {
     let log = Log::from_segments(&j.segments);
-    let first = log.recs.iter().find(|r| r.kind == EventKind::STATE_SNAPSHOT).map_or(0, |r| r.seq);
+    let first = log
+        .recs
+        .iter()
+        .find(|r| r.kind == EventKind::STATE_SNAPSHOT)
+        .map_or(0, |r| r.seq);
     let at = at_seq.unwrap_or(first);
     let drv = ReplayDriver::new(ReplayMode::Verify, log, 0, setup.seq.replay_per_round);
     let p = plan(SnapshotSel::AtSeq(at), true, 0, 0);
@@ -1383,9 +1772,11 @@ pub fn verify_journal<S: StrategySet>(j: &MemJournal, setup: &EngineSetup, at_se
     }
     let d = s.driver();
     for (seq, a, b) in d.sink.detail.iter().take(4) {
-        eprintln!("verify mismatch at {seq}:
+        eprintln!(
+            "verify mismatch at {seq}:
   log {a:?}
-  got {b:?}");
+  got {b:?}"
+        );
     }
     let mut v = d.mismatches().to_vec();
     v.extend(d.leftover());
@@ -1397,7 +1788,11 @@ pub fn verify_journal<S: StrategySet>(j: &MemJournal, setup: &EngineSetup, at_se
 impl<S: StrategySet> H<S> {
     /// Every `StateSnapshot` record so far.
     pub fn snapshots(&self) -> Vec<MemRecord> {
-        self.j().records().filter(|r| r.kind == EventKind::STATE_SNAPSHOT).cloned().collect()
+        self.j()
+            .records()
+            .filter(|r| r.kind == EventKind::STATE_SNAPSHOT)
+            .cloned()
+            .collect()
     }
     /// Hands a `Timer{Sys, id}` over through the hk ring and runs.
     pub fn sys(&mut self, id: u32) {
@@ -1435,11 +1830,17 @@ pub fn cap<T>() -> Cap<T> {
 pub fn decisions(recs: &[MemRecord]) -> Vec<(u64, hft_event::OrderDecision)> {
     recs.iter()
         .filter(|r| r.kind == EventKind::ORDER_DECISION)
-        .filter_map(|r| hft_sequencer::types::read_body::<hft_event::OrderDecision>(&r.body).map(|d| (r.seq, d)))
+        .filter_map(|r| {
+            hft_sequencer::types::read_body::<hft_event::OrderDecision>(&r.body).map(|d| (r.seq, d))
+        })
         .collect()
 }
 
-pub fn order_event(d: &hft_event::OrderDecision, what: hft_event::OrderEventKind, epoch: u16) -> hft_event::OrderEvent {
+pub fn order_event(
+    d: &hft_event::OrderDecision,
+    what: hft_event::OrderEventKind,
+    epoch: u16,
+) -> hft_event::OrderEvent {
     hft_event::OrderEvent {
         venue: d.venue,
         account: d.account,
@@ -1466,7 +1867,11 @@ pub fn order_event(d: &hft_event::OrderDecision, what: hft_event::OrderEventKind
 impl<S: StrategySet> H<S> {
     /// Ring of an account's reports.
     pub fn rep_ring(&self, a: AccountId) -> RingId {
-        if matches!(self.rd.account(a).kind, hft_refdata::AccountKind::Sim(_)) { RingId::RepSim } else { RingId::Rep(0) }
+        if matches!(self.rd.account(a).kind, hft_refdata::AccountKind::Sim(_)) {
+            RingId::RepSim
+        } else {
+            RingId::Rep(0)
+        }
     }
     pub fn epoch(&self) -> u16 {
         self.s.view().engine_epoch() as u16
@@ -1479,7 +1884,11 @@ impl<S: StrategySet> H<S> {
     }
     /// A fill of `qty` at `px` (cumulative = `cum`).
     pub fn fill(&mut self, d: &hft_event::OrderDecision, qty: Qty, cum: Qty, px: Px) {
-        let what = if cum.0 >= d.qty.0 { hft_event::OrderEventKind::Fill } else { hft_event::OrderEventKind::PartialFill };
+        let what = if cum.0 >= d.qty.0 {
+            hft_event::OrderEventKind::Fill
+        } else {
+            hft_event::OrderEventKind::PartialFill
+        };
         let mut ev = order_event(d, what, self.epoch());
         ev.qty = qty;
         ev.cum_filled = cum;
@@ -1502,14 +1911,21 @@ pub fn trade(i: InstId, id: u64) -> hft_event::Trade {
     let mut h = MarketHdr::new_zeroed();
     h.venue = inst_venue(i);
     h.inst = i;
-    hft_event::Trade { h, px: px("50000"), qty: q("0.001"), trade_id: id, taker_side: hft_types::Side::Buy, _pad: [0; 7] }
+    hft_event::Trade {
+        h,
+        px: px("50000"),
+        qty: q("0.001"),
+        trade_id: id,
+        taker_side: hft_types::Side::Buy,
+        _pad: [0; 7],
+    }
 }
 
 // ------------------------------------------------------------------------------- links and targets
 
 use hft_strategy_sdk::{
-    ExecSpec, FirstLeg, HedgeKind, HedgePlan, LegLink, LegLinkOpt, LegTarget, LinkRole, OnFail, PairParams, PxMode,
-    ResidualPolicy, TakerSliceParams, TargetIntent, TargetReason, Urgency,
+    ExecSpec, FirstLeg, HedgeKind, HedgePlan, LegLink, LegLinkOpt, LegTarget, LinkRole, OnFail, PairParams,
+    PxMode, ResidualPolicy, TakerSliceParams, TargetIntent, TargetReason, Urgency,
 };
 
 /// An OnFill hedge plan: second leg `inst` (`side`) at ratio 1:1, IOC, cross.
@@ -1625,8 +2041,21 @@ use hft_strategy_sdk::EventRef;
 impl<S: StrategySet> H<S> {
     /// The instance bound to `a` opens `qty` of `i` (`side`) with an IOC at the touch, acked and
     /// filled; returns the decision.
-    pub fn open_position(&mut self, a: AccountId, i: InstId, side: hft_types::Side, qty: &str) -> hft_event::OrderDecision {
-        let sid = self.s.instances().slots.iter().find(|x| x.account == a).map(|x| x.id).expect("bound instance");
+    pub fn open_position(
+        &mut self,
+        a: AccountId,
+        i: InstId,
+        side: hft_types::Side,
+        qty: &str,
+    ) -> hft_event::OrderDecision {
+        let sid = self
+            .s
+            .instances()
+            .slots
+            .iter()
+            .find(|x| x.account == a)
+            .map(|x| x.id)
+            .expect("bound instance");
         let qx = q(qty);
         let trigger = self.upd + 1;
         add_hook(move |hx, ev, ctx| {
@@ -1636,17 +2065,39 @@ impl<S: StrategySet> H<S> {
                 && b.update_id == trigger
             {
                 let b = hx.v.bbo(i);
-                let p = if side == hft_types::Side::Buy { b.ask_px } else { b.bid_px };
-                let mut it = intent(hx, i, side, hft_types::Tif::Ioc, hft_strategy_sdk::IntentClass::Open, p, qx);
+                let p = if side == hft_types::Side::Buy {
+                    b.ask_px
+                } else {
+                    b.bid_px
+                };
+                let mut it = intent(
+                    hx,
+                    i,
+                    side,
+                    hft_types::Tif::Ioc,
+                    hft_strategy_sdk::IntentClass::Open,
+                    p,
+                    qx,
+                );
                 it.group = hx.groups.specs().first().map_or(GroupId(0), |g| g.id);
                 let _ = ctx.place(it);
             }
         });
         let m = self.mark();
-        let (bid, ask) = if i == B1 { ("50010", "50011") } else if i == A1 { ("50000", "50001") } else { ("3000", "3000.5") };
+        let (bid, ask) = if i == B1 {
+            ("50010", "50011")
+        } else if i == A1 {
+            ("50000", "50001")
+        } else {
+            ("3000", "3000.5")
+        };
         self.quote(i, bid, ask);
         self.run();
-        let d = decisions(&self.since(m)).into_iter().find(|d| d.1.inst == i).expect("decision").1;
+        let d = decisions(&self.since(m))
+            .into_iter()
+            .find(|d| d.1.inst == i)
+            .expect("decision")
+            .1;
         assert_eq!(d.reject, 0, "{d:?}");
         self.ack(&d);
         self.fill(&d, d.qty, d.qty, d.px);
@@ -1658,7 +2109,13 @@ impl<S: StrategySet> H<S> {
         h.venue = inst_venue(i);
         h.inst = i;
         h.rx_tsc = self.now();
-        let f = hft_event::Funding { h, rate: r(rate), next_funding_ns: next, interval_s, _pad: 0 };
+        let f = hft_event::Funding {
+            h,
+            rate: r(rate),
+            next_funding_ns: next,
+            interval_s,
+            _pad: 0,
+        };
         self.push(RingId::Md(1), &f);
         self.run();
     }
@@ -1676,7 +2133,10 @@ impl<S: StrategySet> H<S> {
 
 /// `FundingSettle` records of a slice.
 pub fn settles(recs: &[MemRecord]) -> Vec<hft_event::FundingSettle> {
-    recs.iter().filter(|r| r.kind == EventKind::FUNDING_SETTLE).filter_map(|r| r.read::<hft_event::FundingSettle>()).collect()
+    recs.iter()
+        .filter(|r| r.kind == EventKind::FUNDING_SETTLE)
+        .filter_map(|r| r.read::<hft_event::FundingSettle>())
+        .collect()
 }
 
 // ------------------------------------------------------------------------------- SetParams variants
@@ -1689,41 +2149,56 @@ pub const ADMIN: u8 = 4;
 impl<S: StrategySet> H<S> {
     /// `SetParams` of `spb` from `issuer` (`confirm` = confirmed with the current state version);
     /// the parsed object goes to the Mailbox only when the blob parses.
-    pub fn set_params_as(&mut self, spb: &Spb, issuer: &str, role: u8, confirm: bool, f: impl FnOnce(&mut CmdHdr)) -> [u8; 16] {
+    pub fn set_params_as(
+        &mut self,
+        spb: &Spb,
+        issuer: &str,
+        role: u8,
+        confirm: bool,
+        f: impl FnOnce(&mut CmdHdr),
+    ) -> [u8; 16] {
         let b = spb.bytes();
         let r = spb.blob_ref();
         let parsed = {
             let slot = self.s.instances().get(spb.strategy);
             let base = slot
                 .and_then(|s| s.cur.as_ref())
-                .map(|c| hft_sequencer::parsed::ParamBase { params: &c.params, groups: &c.groups });
-            parse_params::<S>(&b, r.sha256, &self.s.engine().rd, 8, base).ok().or_else(|| {
-                // What a gateway that skipped its own checks would hand over (the sequencer's
-                // rechecks are under test): the raw groups and the decoded body.
-                let groups = hft_strategy_sdk::GroupTable::new(&spb.groups, 8);
-                let body = body(spb.values, spb.groups.len() as u16);
-                let params = S::decode_params(spb.kind_id, &body, spb.schema_ver, &groups).ok()?;
-                Some(ParsedParams {
-                    sha256: r.sha256,
-                    strategy: spb.strategy,
-                    account: spb.account,
-                    version: spb.version,
-                    kind_id: spb.kind_id,
-                    params,
-                    groups,
-                    model_mem: 0,
-                    model_ckpt: 0,
-                    structural_changed: false,
-                    reset_preview: hft_strategy_sdk::ResetPreview::default(),
+                .map(|c| hft_sequencer::parsed::ParamBase {
+                    params: &c.params,
+                    groups: &c.groups,
+                });
+            parse_params::<S>(&b, r.sha256, &self.s.engine().rd, 8, base)
+                .ok()
+                .or_else(|| {
+                    // What a gateway that skipped its own checks would hand over (the sequencer's
+                    // rechecks are under test): the raw groups and the decoded body.
+                    let groups = hft_strategy_sdk::GroupTable::new(&spb.groups, 8);
+                    let body = body(spb.values, spb.groups.len() as u16);
+                    let params = S::decode_params(spb.kind_id, &body, spb.schema_ver, &groups).ok()?;
+                    Some(ParsedParams {
+                        sha256: r.sha256,
+                        strategy: spb.strategy,
+                        account: spb.account,
+                        version: spb.version,
+                        kind_id: spb.kind_id,
+                        params,
+                        groups,
+                        model_mem: 0,
+                        model_ckpt: 0,
+                        structural_changed: false,
+                        reset_preview: hft_strategy_sdk::ResetPreview::default(),
+                    })
                 })
-            })
         };
         if let Some(p) = parsed {
             self.io().mailbox.push(ParsedConfig::StrategyParams(Box::new(p)));
         }
         self.blob_input(r, scope(spb.strategy, spb.account, GroupId(0)), &b);
         let v = self.s.engine().risk.mode.ctl_state_version();
-        let c = ControlCmd::SetParams { scope: scope(spb.strategy, spb.account, GroupId(0)), blob: r };
+        let c = ControlCmd::SetParams {
+            scope: scope(spb.strategy, spb.account, GroupId(0)),
+            blob: r,
+        };
         self.cmd_with(issuer, role, spb.account, &c, |h| {
             if confirm {
                 h.confirmed = 1;
@@ -1734,6 +2209,8 @@ impl<S: StrategySet> H<S> {
     }
     /// Status and detail of a command's result.
     pub fn res(&self, id: [u8; 16]) -> (u8, u32) {
-        self.result_of(id).map(|r| (r.status, r.detail)).unwrap_or((255, 0))
+        self.result_of(id)
+            .map(|r| (r.status, r.detail))
+            .unwrap_or((255, 0))
     }
 }

@@ -217,7 +217,9 @@ impl TimerHeap {
     }
     #[inline]
     fn key_at(&self, i: usize) -> (u64, u16, u32, u32) {
-        self.v.get(i).map_or((u64::MAX, u16::MAX, u32::MAX, u32::MAX), TimerEntry::key)
+        self.v
+            .get(i)
+            .map_or((u64::MAX, u16::MAX, u32::MAX, u32::MAX), TimerEntry::key)
     }
 }
 

@@ -108,13 +108,22 @@ fn evt_084_sequencer_never_writes_advisor_lag() {
         h.run();
     }
     let lag = hft_event::note_code(NoteSource::Advisor, LAG_CODE);
-    let logged: Vec<Note> = h.recs().iter().filter(|r| r.kind == EventKind::NOTE).filter_map(|r| r.read::<Note>()).filter(|n| n.code == lag).collect();
+    let logged: Vec<Note> = h
+        .recs()
+        .iter()
+        .filter(|r| r.kind == EventKind::NOTE)
+        .filter_map(|r| r.read::<Note>())
+        .filter(|n| n.code == lag)
+        .collect();
     assert!(!logged.is_empty());
     assert!(logged.iter().all(|n| n.source == NoteSource::Advisor));
     // Verification replay regenerates every Output and never an AdvisorLag.
     let m = h.verify();
     assert!(m.is_empty(), "{m:?}");
-    assert!(!h.recs().iter().any(|r| r.kind == EventKind::NOTE
-        && r.role() == hft_event::Role::Output
-        && r.read::<Note>().is_some_and(|n| n.code & 0x00FF_FFFF == LAG_CODE && n.source == NoteSource::Sequencer)));
+    assert!(!h.recs().iter().any(|r| {
+        r.kind == EventKind::NOTE
+            && r.role() == hft_event::Role::Output
+            && r.read::<Note>()
+                .is_some_and(|n| n.code & 0x00FF_FFFF == LAG_CODE && n.source == NoteSource::Sequencer)
+    }));
 }

@@ -108,11 +108,22 @@ fn conn_live_alive_and_resync_rows() {
     h.run();
     assert_eq!(h.s.engine().market.row(A1).unwrap().bbo_flags & 1, 0);
     // .11/.12 Rotated and Degraded change nothing.
-    let before = (h.s.engine().market.conns[usize::from(A.0)], mask(&h, A1), mask(&h, A2));
+    let before = (
+        h.s.engine().market.conns[usize::from(A.0)],
+        mask(&h, A1),
+        mask(&h, A2),
+    );
     for st in [ConnStateKind::Rotated, ConnStateKind::Degraded] {
         h.push(RingId::Rep(0), &md(A, 0, st, InstId(0), 9_600));
         h.run();
-        assert_eq!((h.s.engine().market.conns[usize::from(A.0)], mask(&h, A1), mask(&h, A2)), before);
+        assert_eq!(
+            (
+                h.s.engine().market.conns[usize::from(A.0)],
+                mask(&h, A1),
+                mask(&h, A2)
+            ),
+            before
+        );
     }
 }
 
@@ -252,9 +263,15 @@ fn seq_120_liveness_from_keyframe() {
     let kf = h.keyframe();
     for k in 0..200u64 {
         if k % 10 == 0 {
-            h.push(RingId::Rep(0), &md(A, (k % 3) as u8, ConnStateKind::Alive, InstId(0), 2_000 + k));
+            h.push(
+                RingId::Rep(0),
+                &md(A, (k % 3) as u8, ConnStateKind::Alive, InstId(0), 2_000 + k),
+            );
         }
-        h.push(RingId::Bbo(0), &bbo(A1, A, (k % 2) as u8, "50000", "50002", 800_000 + k, 2_000 + k));
+        h.push(
+            RingId::Bbo(0),
+            &bbo(A1, A, (k % 2) as u8, "50000", "50002", 800_000 + k, 2_000 + k),
+        );
         h.run();
     }
     let m = h.verify_from(Some(kf.seq));

@@ -7,8 +7,8 @@ use hft_refdata::{AccountKind, RefData};
 use hft_risk::mode::{CellKey, ModeInput};
 use hft_strategy_sdk::ctx::{CancelReq, NoteReq, Op, SubEntry, TimerReq};
 use hft_strategy_sdk::{
-    CtxBufs, EventRef, GroupSpecExt, GroupTable, IntentHandle, IntentOutcome, OrderIntent, OwnEvMask, Part, RefView,
-    StrategyInstance, StrategySet, TargetIntent, TimerId,
+    CtxBufs, EventRef, GroupSpecExt, GroupTable, IntentHandle, IntentOutcome, OrderIntent, OwnEvMask, Part,
+    RefView, StrategyInstance, StrategySet, TargetIntent, TimerId,
 };
 use hft_types::{AccountId, CapSource, GroupId, InstId, StrategyId, VenueId};
 
@@ -218,7 +218,10 @@ impl<S: StrategySet> Instances<S> {
     }
     /// Count of cells.
     pub fn n_cells(&self) -> usize {
-        self.slots.iter().map(|s| s.groups().map_or(0, |g| usize::from(g.len()))).sum()
+        self.slots
+            .iter()
+            .map(|s| s.groups().map_or(0, |g| usize::from(g.len())))
+            .sum()
     }
     /// The GroupSpec of a group (any instance).
     pub fn spec(&self, a: AccountId, g: GroupId) -> Option<&GroupSpec> {
@@ -307,7 +310,9 @@ pub(crate) fn apply_params<D: crate::Driver<S>, S: StrategySet>(
     let mut removed: Vec<CellKey> = Vec::new();
     let mut changed_fp: Vec<GroupId> = Vec::new();
     for (_, g) in p.groups.iter() {
-        let prev = old.as_ref().and_then(|o| o.groups.gix_of(g.id).map(|gi| *o.groups.get(gi)));
+        let prev = old
+            .as_ref()
+            .and_then(|o| o.groups.gix_of(g.id).map(|gi| *o.groups.get(gi)));
         match prev {
             None => added.push(cell(strategy, account, g.id)),
             Some(pg) if pg.fingerprint() != g.fingerprint() => changed_fp.push(g.id),
@@ -353,7 +358,8 @@ pub(crate) fn apply_params<D: crate::Driver<S>, S: StrategySet>(
     e.ledger.on_groups_changed(strategy, &groups);
     let all = all_groups(inst, e.caps.max_cells_total);
     let mut xo = e.take_exec();
-    e.exec.on_groups_changed(&all, &RefView::new(&e.rd, account), &mut xo);
+    e.exec
+        .on_groups_changed(&all, &RefView::new(&e.rd, account), &mut xo);
     crate::exec_glue::drain_out(e, inst, drv, &mut xo)?;
     e.put_exec(xo);
     e.risk.on_groups_changed(account, &groups);
@@ -363,32 +369,39 @@ pub(crate) fn apply_params<D: crate::Driver<S>, S: StrategySet>(
             let mut xo = e.take_exec();
             e.exec.clear_target(strategy, account, c.group, e.now, &mut xo);
             e.put_exec(xo);
-            e.seq_note(crate::codes::note::TARGET_CLEARED, hft_event::NoteLevel::Info, c.group, InstId(0), [
-                u64::from(strategy.0),
-                u64::from(account.0),
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-            ]);
+            e.seq_note(
+                crate::codes::note::TARGET_CLEARED,
+                hft_event::NoteLevel::Info,
+                c.group,
+                InstId(0),
+                [u64::from(strategy.0), u64::from(account.0), 0, 0, 0, 0, 0, 0],
+            );
         }
         if n_timers > 0 {
-            e.seq_note(crate::codes::note::TIMERS_CANCELLED, hft_event::NoteLevel::Info, c.group, InstId(0), [
-                n_timers, 0, 0, 0, 0, 0, 0, 0,
-            ]);
+            e.seq_note(
+                crate::codes::note::TIMERS_CANCELLED,
+                hft_event::NoteLevel::Info,
+                c.group,
+                InstId(0),
+                [n_timers, 0, 0, 0, 0, 0, 0, 0],
+            );
         }
     }
     let cells: Vec<(AccountId, GroupId)> = inst_cells(inst);
     e.gpos.set_cells(cells.into_iter());
     crate::advisor::on_params(e, inst, ix);
     if !added.is_empty() || !removed.is_empty() {
-        e.trace.rec("apply.GroupsChanged", added.len() as u64, removed.len() as u64);
-        crate::mode_glue::apply_mode(e, inst, drv, ModeInput::GroupsChanged {
-            added: &added,
-            removed: &removed,
-        })?;
+        e.trace
+            .rec("apply.GroupsChanged", added.len() as u64, removed.len() as u64);
+        crate::mode_glue::apply_mode(
+            e,
+            inst,
+            drv,
+            ModeInput::GroupsChanged {
+                added: &added,
+                removed: &removed,
+            },
+        )?;
     }
     Ok(Ok(old))
 }
@@ -419,13 +432,32 @@ pub(crate) fn cell(s: StrategyId, a: AccountId, g: GroupId) -> CellKey {
 /// A market event to deliver through the subscription index.
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum MarketEv {
-    Bbo { inst: InstId, b: hft_strategy_sdk::BboView },
-    Book { inst: InstId },
-    Trade { inst: InstId, t: hft_strategy_sdk::TradeView },
-    Funding { inst: InstId },
-    Mark { inst: InstId, px: hft_types::Px },
-    Index { inst: InstId, px: hft_types::Px },
-    Liq { inst: InstId, l: hft_strategy_sdk::LiquidationView },
+    Bbo {
+        inst: InstId,
+        b: hft_strategy_sdk::BboView,
+    },
+    Book {
+        inst: InstId,
+    },
+    Trade {
+        inst: InstId,
+        t: hft_strategy_sdk::TradeView,
+    },
+    Funding {
+        inst: InstId,
+    },
+    Mark {
+        inst: InstId,
+        px: hft_types::Px,
+    },
+    Index {
+        inst: InstId,
+        px: hft_types::Px,
+    },
+    Liq {
+        inst: InstId,
+        l: hft_strategy_sdk::LiquidationView,
+    },
 }
 
 impl MarketEv {
@@ -457,13 +489,32 @@ impl MarketEv {
 /// A direct delivery to one instance (payload borrowed from the Input).
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum Direct<'a> {
-    Advice { gix: u16, local_kind: u16, payload: &'a [u8], basis_seq: u64, basis_tsc: hft_types::Tsc },
-    Manual { gix: u16, payload: &'a [u8], reduce_only: bool },
-    Warmup { local_kind: u16, chunk_no: u32, last: bool, payload: &'a [u8] },
+    Advice {
+        gix: u16,
+        local_kind: u16,
+        payload: &'a [u8],
+        basis_seq: u64,
+        basis_tsc: hft_types::Tsc,
+    },
+    Manual {
+        gix: u16,
+        payload: &'a [u8],
+        reduce_only: bool,
+    },
+    Warmup {
+        local_kind: u16,
+        chunk_no: u32,
+        last: bool,
+        payload: &'a [u8],
+    },
 }
 
 /// `market_ev` for the advisor's Model deliveries.
-pub(crate) fn market_ev_pub<'a>(m: &'a MarketEv, gix: u16, market: &'a crate::market::Market) -> EventRef<'a> {
+pub(crate) fn market_ev_pub<'a>(
+    m: &'a MarketEv,
+    gix: u16,
+    market: &'a crate::market::Market,
+) -> EventRef<'a> {
     market_ev(m, gix, market)
 }
 
@@ -516,7 +567,15 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
     e.gpos.refresh(&e.ledger);
     if inst.models.on {
         let manual = match direct {
-            Some((dix, Direct::Manual { gix, payload, reduce_only }, _)) => Some((dix, gix, payload, reduce_only)),
+            Some((
+                dix,
+                Direct::Manual {
+                    gix,
+                    payload,
+                    reduce_only,
+                },
+                _,
+            )) => Some((dix, gix, payload, reduce_only)),
             _ => None,
         };
         crate::advisor::deliver(e, inst, market, queued, manual);
@@ -531,7 +590,9 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
         if let Some(m) = market {
             let entries = inst.subs.fast_entries(m.inst(), ix16);
             if !entries.is_empty() {
-                let Some(slot) = inst.slots.get_mut(ix) else { continue };
+                let Some(slot) = inst.slots.get_mut(ix) else {
+                    continue;
+                };
                 let Some(st) = slot.inst.as_mut() else { continue };
                 if !any {
                     slot.bufs.begin();
@@ -541,7 +602,8 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
                     if !mask.contains(m.mask()) {
                         continue;
                     }
-                    e.trace.rec("deliver.market", u64::from(slot.id.0), u64::from(*gix));
+                    e.trace
+                        .rec("deliver.market", u64::from(slot.id.0), u64::from(*gix));
                     let v = full_views(e);
                     let ev = market_ev(&m, *gix, &e.market);
                     S::on_event(st, &ev, &v, &mut slot.bufs.ctx());
@@ -549,22 +611,32 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
             }
         }
         for q in queued.iter().filter(|q| usize::from(q.inst) == ix) {
-            let Some(slot) = inst.slots.get_mut(ix) else { continue };
+            let Some(slot) = inst.slots.get_mut(ix) else {
+                continue;
+            };
             let groups = slot.cur.as_ref().map(|p| p.groups.clone());
             let Some(st) = slot.inst.as_mut() else { continue };
             if !any {
                 slot.bufs.begin();
                 any = true;
             }
-            e.trace.rec("deliver.notify", u64::from(slot.id.0), notif_code(&q.n));
+            e.trace
+                .rec("deliver.notify", u64::from(slot.id.0), notif_code(&q.n));
             let v = full_views(e);
-            let ev = notif_ev(&q.n, |g| groups.as_ref().and_then(|t| t.gix_of(g)).unwrap_or(hft_strategy_sdk::GIX_NONE));
+            let ev = notif_ev(&q.n, |g| {
+                groups
+                    .as_ref()
+                    .and_then(|t| t.gix_of(g))
+                    .unwrap_or(hft_strategy_sdk::GIX_NONE)
+            });
             S::on_event(st, &ev, &v, &mut slot.bufs.ctx());
         }
         if let Some((dix, d, ro)) = direct
             && dix == ix
         {
-            let Some(slot) = inst.slots.get_mut(ix) else { continue };
+            let Some(slot) = inst.slots.get_mut(ix) else {
+                continue;
+            };
             let Some(st) = slot.inst.as_mut() else { continue };
             if !any {
                 slot.bufs.begin();
@@ -717,13 +789,15 @@ pub(crate) fn apply_ctx<D: crate::Driver<S>, S: StrategySet>(
     for (h, op) in ops {
         match op {
             OpOwned::Place(it) => {
-                e.trace.rec("ctx.place", u64::from(strategy.0), u64::from(it.inst.0));
+                e.trace
+                    .rec("ctx.place", u64::from(strategy.0), u64::from(it.inst.0));
                 let r = crate::intents::place_strategy(e, inst, drv, strategy, &it, ro)?;
                 inst.outcomes.push((h, r));
                 crate::exec_glue::note_action(e, inst, drv, it.account, it.group)?;
             }
             OpOwned::Target(t) => {
-                e.trace.rec("exec.set_target", u64::from(strategy.0), u64::from(t.group.0));
+                e.trace
+                    .rec("exec.set_target", u64::from(strategy.0), u64::from(t.group.0));
                 let r = crate::exec_glue::set_target(e, inst, drv, strategy, &t, ro)?;
                 inst.outcomes.push((h, r));
             }
@@ -765,7 +839,8 @@ pub(crate) fn apply_ctx<D: crate::Driver<S>, S: StrategySet>(
                 }
             }
             OpOwned::Halt { group, .. } => {
-                e.trace.rec("ctx.request_halt", u64::from(strategy.0), u64::from(group.0));
+                e.trace
+                    .rec("ctx.request_halt", u64::from(strategy.0), u64::from(group.0));
                 let rec = hft_event::CapRecord {
                     source: CapSource(CapSource::HALTED.0),
                     level: 1,
@@ -804,7 +879,12 @@ pub(crate) fn apply_ctx<D: crate::Driver<S>, S: StrategySet>(
 }
 
 /// Queues a notification for the instance bound to `account` (cell gix looked up by group).
-pub(crate) fn queue_for_account<S: StrategySet>(e: &mut Engine, inst: &Instances<S>, account: AccountId, n: Notif) {
+pub(crate) fn queue_for_account<S: StrategySet>(
+    e: &mut Engine,
+    inst: &Instances<S>,
+    account: AccountId,
+    n: Notif,
+) {
     if let Some(ix) = inst.ix_of_account(account) {
         e.notify.push(ix as u16, n);
     }

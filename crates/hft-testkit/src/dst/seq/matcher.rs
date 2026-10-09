@@ -10,8 +10,8 @@ use std::collections::{BTreeMap, VecDeque};
 use hft_event::{Bbo, ExternalCause, ExternalFill, GwCmd, GwOp, MarketHdr, RecordHeader, RepMsg};
 use hft_refdata::{RefData, SimAccountCfg};
 use hft_sim::{
-    LatencyModel, MakerFill, MarginModel, MarketEventRef, MmrSource, SimBalance, SimExchange, SimInput, SimSetup,
-    SimTuning,
+    LatencyModel, MakerFill, MarginModel, MarketEventRef, MmrSource, SimBalance, SimExchange, SimInput,
+    SimSetup, SimTuning,
 };
 use hft_types::{AccountId, AssetId, InstId, Px, Qty, Rate, Side, SlotId, Tif, Tsc, VenueId};
 use zerocopy::FromZeros;
@@ -65,7 +65,9 @@ pub struct SimMatcher {
 
 impl core::fmt::Debug for SimMatcher {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("SimMatcher").field("venue", &self.venue).finish_non_exhaustive()
+        f.debug_struct("SimMatcher")
+            .field("venue", &self.venue)
+            .finish_non_exhaustive()
     }
 }
 
@@ -338,13 +340,24 @@ impl Matcher for SimMatcher {
         self.on_command(&c, now_ns);
     }
     fn free_quote(&self, a: AccountId) -> i128 {
-        let Some(q) = self.insts.first().map(|x| x.2) else { return 0 };
+        let Some(q) = self.insts.first().map(|x| x.2) else {
+            return 0;
+        };
         self.ex
             .as_ref()
             .and_then(|e| e.account(a))
             .map_or(0, |v| i128::from(v.balance(self.venue, q).free.0))
     }
-    fn external(&mut self, a: AccountId, inst: InstId, side: Side, qty: i64, client_id: &str, push: bool, now_ns: u64) {
+    fn external(
+        &mut self,
+        a: AccountId,
+        inst: InstId,
+        side: Side,
+        qty: i64,
+        client_id: &str,
+        push: bool,
+        now_ns: u64,
+    ) {
         let Some((_, base, _, perp)) = self.inst(inst) else {
             return;
         };

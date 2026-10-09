@@ -105,7 +105,12 @@ pub(crate) fn broken<D: Driver<S>, S: StrategySet>(
     a: AccountId,
     g: GroupId,
 ) -> R<()> {
-    let rec = auto_rec(CapSource::BROKEN, hft_risk::account_group_scope(a, g), e.cur_seq, 0);
+    let rec = auto_rec(
+        CapSource::BROKEN,
+        hft_risk::account_group_scope(a, g),
+        e.cur_seq,
+        0,
+    );
     e.trace.rec("apply.Broken", u64::from(a.0), u64::from(g.0));
     apply_mode(e, inst, drv, ModeInput::Auto(rec))?;
     on_legs(e, inst, drv, a, g)
@@ -140,35 +145,79 @@ pub(crate) fn execute<D: Driver<S>, S: StrategySet>(
 ) -> R<()> {
     // ① cells: Mode events (live instances first), ledger shadow flag, ShadowDeferred notes.
     let mut cells: Vec<(CellKey, Effective, Effective)> = out.cells.as_slice().to_vec();
-    cells.sort_by_key(|c| inst.ix(c.0.strategy).and_then(|i| inst.dispatch_pos.get(i).copied()).unwrap_or(u16::MAX));
+    cells.sort_by_key(|c| {
+        inst.ix(c.0.strategy)
+            .and_then(|i| inst.dispatch_pos.get(i).copied())
+            .unwrap_or(u16::MAX)
+    });
     for (k, old, new) in cells.iter() {
         let (om, nm) = (eff_mode(*old), eff_mode(*new));
         if om != nm
             && let Some(ix) = inst.ix(k.strategy)
         {
-            let gix = inst.slots.get(ix).and_then(|s| s.gix_of(k.group)).unwrap_or(hft_strategy_sdk::GIX_NONE);
-            e.trace.rec("queue.mode", u64::from(k.strategy.0), u64::from(k.group.0));
-            e.notify.push(ix as u16, Notif::Mode { gix, old: om, new: nm });
+            let gix = inst
+                .slots
+                .get(ix)
+                .and_then(|s| s.gix_of(k.group))
+                .unwrap_or(hft_strategy_sdk::GIX_NONE);
+            e.trace
+                .rec("queue.mode", u64::from(k.strategy.0), u64::from(k.group.0));
+            e.notify.push(
+                ix as u16,
+                Notif::Mode {
+                    gix,
+                    old: om,
+                    new: nm,
+                },
+            );
         }
         let was_shadow = matches!(old, Effective::Shadow);
         let is_shadow = matches!(new, Effective::Shadow);
         if was_shadow != is_shadow {
-            e.trace.rec("ledger.set_cell_shadow", u64::from(k.account.0), u64::from(is_shadow));
+            e.trace.rec(
+                "ledger.set_cell_shadow",
+                u64::from(k.account.0),
+                u64::from(is_shadow),
+            );
             e.ledger.set_cell_shadow(k.account, k.group, is_shadow);
         }
-        let deferred_now = matches!(new, Effective::CloseOnly { deferred_shadow: true });
-        let landed = matches!(old, Effective::CloseOnly { deferred_shadow: true }) && is_shadow;
-        if (deferred_now && !matches!(old, Effective::CloseOnly { deferred_shadow: true })) || landed {
-            e.seq_note(note::SHADOW_DEFERRED, NoteLevel::Info, k.group, InstId(0), [
-                u64::from(k.strategy.0) | (u64::from(k.account.0) << 8),
-                u64::from(k.group.0),
-                u64::from(landed),
-                0,
-                0,
-                0,
-                0,
-                0,
-            ]);
+        let deferred_now = matches!(
+            new,
+            Effective::CloseOnly {
+                deferred_shadow: true
+            }
+        );
+        let landed = matches!(
+            old,
+            Effective::CloseOnly {
+                deferred_shadow: true
+            }
+        ) && is_shadow;
+        if (deferred_now
+            && !matches!(
+                old,
+                Effective::CloseOnly {
+                    deferred_shadow: true
+                }
+            ))
+            || landed
+        {
+            e.seq_note(
+                note::SHADOW_DEFERRED,
+                NoteLevel::Info,
+                k.group,
+                InstId(0),
+                [
+                    u64::from(k.strategy.0) | (u64::from(k.account.0) << 8),
+                    u64::from(k.group.0),
+                    u64::from(landed),
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                ],
+            );
         }
     }
     // ② cancels.
@@ -176,7 +225,8 @@ pub(crate) fn execute<D: Driver<S>, S: StrategySet>(
         let mut o = e.take_oms();
         match c.scope {
             CancelScope::Cell(k) => {
-                e.trace.rec("oms.cancel_open", u64::from(k.account.0), u64::from(k.group.0));
+                e.trace
+                    .rec("oms.cancel_open", u64::from(k.account.0), u64::from(k.group.0));
                 e.oms.cancel_open(
                     hft_oms::CellKey {
                         strategy: k.strategy,
@@ -190,7 +240,8 @@ pub(crate) fn execute<D: Driver<S>, S: StrategySet>(
             }
             sc => {
                 e.trace.rec("oms.cancel_all", u64::from(c.open_only), 0);
-                e.oms.cancel_all(oms_scope(sc), c.open_only, e.now.tsc, e.cur_seq, &mut o);
+                e.oms
+                    .cancel_all(oms_scope(sc), c.open_only, e.now.tsc, e.cur_seq, &mut o);
             }
         }
         crate::intents::drain_oms(e, inst, drv, &mut o)?;
@@ -209,14 +260,16 @@ pub(crate) fn execute<D: Driver<S>, S: StrategySet>(
     }
     // ⑤ gates.
     for (a, v) in out.hedge_gate_open.as_slice().iter() {
-        e.trace.rec("oms.on_hedge_gate_open", u64::from(a.0), u64::from(v.0));
+        e.trace
+            .rec("oms.on_hedge_gate_open", u64::from(a.0), u64::from(v.0));
         let mut o = e.take_oms();
         e.oms.on_hedge_gate_open(*a, *v, e.now.tsc, e.cur_seq, &mut o);
         crate::intents::drain_oms(e, inst, drv, &mut o)?;
         e.put_oms(o);
     }
     for (a, v) in out.venue_gate_open.as_slice().iter() {
-        e.trace.rec("exec.on_venue_gate_open", u64::from(a.0), u64::from(v.0));
+        e.trace
+            .rec("exec.on_venue_gate_open", u64::from(a.0), u64::from(v.0));
         e.exec.on_venue_gate_open(*a, *v, e.now);
     }
     for a in out.released.as_slice().iter() {
@@ -249,32 +302,44 @@ pub(crate) fn execute<D: Driver<S>, S: StrategySet>(
                 crate::commands::start_drain(e, inst, drv, true, crate::types::DoneCause::StorageCritical)?;
             }
             DrainCause::IdentityMismatch { account, venue } => {
-                e.seq_note(note::IDENTITY_MISMATCH, NoteLevel::P0, GroupId(0), InstId(0), [
-                    u64::from(venue.0) | (u64::from(account.0) << 8),
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                ]);
+                e.seq_note(
+                    note::IDENTITY_MISMATCH,
+                    NoteLevel::P0,
+                    GroupId(0),
+                    InstId(0),
+                    [
+                        u64::from(venue.0) | (u64::from(account.0) << 8),
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                    ],
+                );
                 crate::commands::start_drain(e, inst, drv, true, crate::types::DoneCause::IdentityMismatch)?;
             }
         }
     }
     // ⑧ gate changes and cap notes.
     for g in out.gate_changes.as_slice().iter() {
-        e.seq_note(note::STARTUP_GATE, NoteLevel::Info, GroupId(0), InstId(0), [
-            u64::from(g.account.0),
-            u64::from(g.old_bits),
-            u64::from(g.new_bits),
-            u64::from(g.released),
-            0,
-            0,
-            0,
-            0,
-        ]);
+        e.seq_note(
+            note::STARTUP_GATE,
+            NoteLevel::Info,
+            GroupId(0),
+            InstId(0),
+            [
+                u64::from(g.account.0),
+                u64::from(g.old_bits),
+                u64::from(g.new_bits),
+                u64::from(g.released),
+                0,
+                0,
+                0,
+                0,
+            ],
+        );
     }
     for n in out.notes.as_slice().iter() {
         e.out.push(RecordFlags(0), n);
@@ -331,9 +396,11 @@ pub(crate) fn cancel_obligation_on_live<D: Driver<S>, S: StrategySet>(
     _v: VenueId,
 ) -> R<()> {
     if let Some((scope, open_only)) = cancel_obligation(e, a) {
-        e.trace.rec("oms.reissue_cancels", u64::from(a.0), u64::from(open_only));
+        e.trace
+            .rec("oms.reissue_cancels", u64::from(a.0), u64::from(open_only));
         let mut o = e.take_oms();
-        e.oms.reissue_cancels(scope, open_only, e.now.tsc, e.cur_seq, &mut o);
+        e.oms
+            .reissue_cancels(scope, open_only, e.now.tsc, e.cur_seq, &mut o);
         crate::intents::drain_oms(e, inst, drv, &mut o)?;
         e.put_oms(o);
     }

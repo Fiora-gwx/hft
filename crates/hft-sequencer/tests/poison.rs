@@ -35,7 +35,13 @@ fn seq_270_runtime_poison_quarantine() {
     // The process died while processing R: R is the last record, without EVENT_END.
     let r = report(77);
     let mut j = h.j().clone();
-    j.append_var(EventKind::RECONCILE_REPORT, hft_event::RecordFlags(0), Tsc(h.now()), &[r.as_bytes()]).unwrap();
+    j.append_var(
+        EventKind::RECONCILE_REPORT,
+        hft_event::RecordFlags(0),
+        Tsc(h.now()),
+        &[r.as_bytes()],
+    )
+    .unwrap();
     let hash = input_hash(EventKind::RECONCILE_REPORT, r.as_bytes());
     let setup = h.setup.clone();
     let mut p = plan(SnapshotSel::Latest, true, 1, RecoveryFlags::POISON);
@@ -53,11 +59,24 @@ fn seq_270_runtime_poison_quarantine() {
         .iter()
         .filter(|x| x.kind == EventKind::NOTE)
         .filter_map(|x| x.read::<hft_event::Note>())
-        .filter(|n| n.code == hft_event::note_code(hft_event::NoteSource::Boot, hft_sequencer::codes::boot_note::INPUT_QUARANTINED))
+        .filter(|n| {
+            n.code
+                == hft_event::note_code(
+                    hft_event::NoteSource::Boot,
+                    hft_sequencer::codes::boot_note::INPUT_QUARANTINED,
+                )
+        })
         .collect();
     assert_eq!(quarantined.len(), 2);
-    assert!(quarantined.iter().all(|n| n.v[0] == hash && n.level == hft_event::NoteLevel::P0));
-    let reps: Vec<_> = recs.iter().filter(|x| x.kind == EventKind::RECONCILE_REPORT).collect();
+    assert!(
+        quarantined
+            .iter()
+            .all(|n| n.v[0] == hash && n.level == hft_event::NoteLevel::P0)
+    );
+    let reps: Vec<_> = recs
+        .iter()
+        .filter(|x| x.kind == EventKind::RECONCILE_REPORT)
+        .collect();
     assert_eq!(reps.len(), 1);
     assert_eq!(reps[0].read::<ReconcileReport>().unwrap().report_id, 78);
 }
@@ -71,7 +90,9 @@ fn seq_271_quarantine_process_lifetime() {
     let r = report(77);
     let setup = h.setup.clone();
     let j = h.j().clone();
-    let mut h2 = H::<TestSet>::restart_over(j, setup, plan(SnapshotSel::Latest, true, 1, 0), Rerun::default()).unwrap();
+    let mut h2 =
+        H::<TestSet>::restart_over(j, setup, plan(SnapshotSel::Latest, true, 1, 0), Rerun::default())
+            .unwrap();
     h2.step();
     let m = h2.mark();
     h2.push(RingId::Rep(0), &r);

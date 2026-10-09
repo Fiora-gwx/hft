@@ -8,11 +8,11 @@ use hft_exec::Exec;
 use hft_ledger::Ledger;
 use hft_oms::Oms;
 use hft_refdata::{InstHot, InstKind, RefData, VenueCaps};
-use hft_risk::{EquityView, LegSummary, ModeView, Risk, RiskView, Scope};
 use hft_risk::mode::CellKey;
+use hft_risk::{EquityView, LegSummary, ModeView, Risk, RiskView, Scope};
 use hft_strategy_sdk::{
-    BboView, BookRead, BookStatus, FeeView, FundingView, GroupPosView, InstRiskView, LegView, ModelViews, Now,
-    OrderRef, OrderStateView, OrderView, RiskStateView, TargetView, Views,
+    BboView, BookRead, BookStatus, FeeView, FundingView, GroupPosView, InstRiskView, LegView, ModelViews,
+    Now, OrderRef, OrderStateView, OrderView, RiskStateView, TargetView, Views,
 };
 use hft_types::{AccountId, AssetId, GroupId, InstId, Notional, Px, Qty, Rate, RunMode, Side, Tsc, VenueId};
 
@@ -133,7 +133,9 @@ pub struct SeqViews<'a> {
 
 impl core::fmt::Debug for SeqViews<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("SeqViews").field("now", &self.now).finish_non_exhaustive()
+        f.debug_struct("SeqViews")
+            .field("now", &self.now)
+            .finish_non_exhaustive()
     }
 }
 
@@ -220,7 +222,11 @@ impl Views for SeqViews<'_> {
     }
     fn legs(&self, a: AccountId, g: GroupId) -> &LegView {
         let l = &self.oms.legs(a, g).view;
-        if core::ptr::eq(l, &EMPTY_LEGS) { &EMPTY_LEGS } else { l }
+        if core::ptr::eq(l, &EMPTY_LEGS) {
+            &EMPTY_LEGS
+        } else {
+            l
+        }
     }
     fn target(&self, a: AccountId, g: GroupId) -> Option<&TargetView> {
         if self.model {
@@ -330,7 +336,9 @@ impl RiskView for RiskAdapter<'_> {
                         let px = self.v.market.row(*i).map_or(Px(0), |r| r.mark_px);
                         let px = if px.0 == 0 { mid_px(&self.v, *i) } else { px };
                         let e = self.v.rd.asset(self.v.rd.inst(*i).asset).exp;
-                        n = n.saturating_add(Risk::notional(p.qty, px, e, quote_rate(self.v.rd, self.v.ledger, *i)).0);
+                        n = n.saturating_add(
+                            Risk::notional(p.qty, px, e, quote_rate(self.v.rd, self.v.ledger, *i)).0,
+                        );
                     }
                 }
                 Notional(n)
@@ -404,7 +412,9 @@ impl RiskView for RiskAdapter<'_> {
             return None;
         }
         Some(Notional(
-            m.rep_avail.0.saturating_sub(self.v.oms.inflight().open_margin(a, v).0),
+            m.rep_avail
+                .0
+                .saturating_sub(self.v.oms.inflight().open_margin(a, v).0),
         ))
     }
 }
@@ -449,10 +459,9 @@ impl ModeView for ModeAdapter<'_> {
         let gp = self.ledger.group_pos(c.account, c.group);
         let legs = &self.oms.legs(c.account, c.group).view;
         let pos_flat = gp.legs.iter().all(|l| l.qty.0 == 0);
-        let inflight = legs
-            .leg
-            .iter()
-            .all(|l| l.inflight_immediate.0 == 0 && l.inflight_resting.0 == 0 && l.residual.0 == 0 && l.net.0 == 0);
+        let inflight = legs.leg.iter().all(|l| {
+            l.inflight_immediate.0 == 0 && l.inflight_resting.0 == 0 && l.residual.0 == 0 && l.net.0 == 0
+        });
         pos_flat && inflight && !legs.has_pending
     }
     fn naked_cleared(&self, _a: AccountId, _g: GroupId) -> bool {
@@ -477,7 +486,14 @@ impl ModeView for ModeAdapter<'_> {
 
 /// `LegSummary` of a group from the OMS `LegView` (README "process" 7): `naked_filled_notional =
 /// |Σ leg.net| × mark` (mark of the group's first perp leg, else the last fill price).
-pub fn leg_summary(oms: &Oms, market: &Market, rd: &RefData, a: AccountId, g: GroupId, spec: Option<&hft_event::GroupSpec>) -> LegSummary {
+pub fn leg_summary(
+    oms: &Oms,
+    market: &Market,
+    rd: &RefData,
+    a: AccountId,
+    g: GroupId,
+    spec: Option<&hft_event::GroupSpec>,
+) -> LegSummary {
     let st = oms.legs(a, g);
     let v = &st.view;
     let mut net_sum: i128 = 0;

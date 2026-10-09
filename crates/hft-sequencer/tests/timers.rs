@@ -41,15 +41,35 @@ fn seq_235_removed_group_timers_cancelled() {
     });
     h.quote(A1, "50000", "50019");
     h.run();
-    assert_eq!(h.s.engine().heap.sorted().iter().filter(|e| e.group == g2b.0).count(), 2);
+    assert_eq!(
+        h.s.engine()
+            .heap
+            .sorted()
+            .iter()
+            .filter(|e| e.group == g2b.0)
+            .count(),
+        2
+    );
     let mut p2 = Spb::s2(2);
     p2.groups = vec![gspec(G2)];
     let m = h.mark();
     let id = h.set_params(&p2);
     h.run();
     assert_eq!(h.result_of(id).map(|r| r.status), Some(0));
-    assert_eq!(h.s.engine().heap.sorted().iter().filter(|e| e.group == g2b.0).count(), 0);
-    let n = h.notes_since(m).into_iter().find(|n| n.code == hft_sequencer::codes::seq_note(hft_sequencer::codes::note::TIMERS_CANCELLED)).expect("note");
+    assert_eq!(
+        h.s.engine()
+            .heap
+            .sorted()
+            .iter()
+            .filter(|e| e.group == g2b.0)
+            .count(),
+        0
+    );
+    let n = h
+        .notes_since(m)
+        .into_iter()
+        .find(|n| n.code == hft_sequencer::codes::seq_note(hft_sequencer::codes::note::TIMERS_CANCELLED))
+        .expect("note");
     assert_eq!(n.v[0], 2);
 }
 
@@ -98,7 +118,13 @@ fn seq_237_heap_shift_formula() {
 
 #[test]
 fn seq_240_engine_ns_deadline_ceil() {
-    let a = EngineClockAnchor { base_engine_ns: 0, base_tsc: Tsc(0), tsc_hz_milli: 1_050_000_000_000, utc_tsc: Tsc(0), utc_ns: 0 };
+    let a = EngineClockAnchor {
+        base_engine_ns: 0,
+        base_tsc: Tsc(0),
+        tsc_hz_milli: 1_050_000_000_000,
+        utc_tsc: Tsc(0),
+        utc_ns: 0,
+    };
     let n = Now::new(Tsc(0), 1, 1, true, a);
     assert_eq!(n.tsc_of(100), Tsc(105));
     assert_eq!(n.tsc_of(101), Tsc(107));
@@ -122,7 +148,11 @@ fn seq_241_dead_man_refresh() {
     }
     let refresh: Vec<_> = h.io_ref().out[n0..]
         .iter()
-        .filter(|o| o.0 == hft_sequencer::OutRing::Venue(B) && o.1.op == hft_event::GwOp::DeadManRefresh && o.1.account == AC1)
+        .filter(|o| {
+            o.0 == hft_sequencer::OutRing::Venue(B)
+                && o.1.op == hft_event::GwOp::DeadManRefresh
+                && o.1.account == AC1
+        })
         .collect();
     assert_eq!(refresh.len(), 3);
     assert!(refresh.iter().all(|o| o.1.arg == 30_000));
@@ -176,7 +206,13 @@ fn seq_351_timer_overflow_fatal() {
     let n_out = h.io_ref().out.len();
     h.trace_on();
     // Strategy timers stay within the quota check; the engine path: Sweep re-registration.
-    let sweep = h.s.engine().heap.sorted().into_iter().find(|e| e.owner == 3 && e.timer_id == 2).unwrap();
+    let sweep =
+        h.s.engine()
+            .heap
+            .sorted()
+            .into_iter()
+            .find(|e| e.owner == 3 && e.timer_id == 2)
+            .unwrap();
     clear_hook();
     h.s.engine_mut().heap.set_capacity(n - 1);
     h.at(sweep.deadline);

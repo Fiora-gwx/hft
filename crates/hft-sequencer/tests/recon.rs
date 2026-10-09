@@ -1,8 +1,8 @@
 //! Reconciliation reports (TESTS.md SEQ-161–SEQ-168).
 
 use hft_event::{EventKind, ReconcileReport};
-use hft_sequencer::driver::live::RingId;
 use hft_sequencer::SnapshotSel;
+use hft_sequencer::driver::live::RingId;
 use hft_types::{AccountId, AssetId, InstId, Qty};
 use zerocopy::FromZeros;
 
@@ -58,9 +58,18 @@ fn seq_161_funding_items_immediate() {
     h.push(RingId::Rep(0), &b);
     h.run();
     let tr = h.trace();
-    let o = tr.iter().position(|x| *x == "oms.on_reconcile").expect("oms.on_reconcile");
-    let r = tr.iter().position(|x| *x == "risk.on_reconcile").expect("risk.on_reconcile");
-    let w = tr.iter().position(|x| *x == "ledger.funding_window_sweep").expect("sweep");
+    let o = tr
+        .iter()
+        .position(|x| *x == "oms.on_reconcile")
+        .expect("oms.on_reconcile");
+    let r = tr
+        .iter()
+        .position(|x| *x == "risk.on_reconcile")
+        .expect("risk.on_reconcile");
+    let w = tr
+        .iter()
+        .position(|x| *x == "ledger.funding_window_sweep")
+        .expect("sweep");
     assert!(o < r && r < w);
     assert_eq!(pending(&h, 900), None);
 }
@@ -102,7 +111,11 @@ fn seq_163_funding_only_group() {
         h.run();
     }
     assert_eq!(h.gate_bits(AC1), g0);
-    assert!(h.notes_since(m).iter().all(|n| n.code != hft_sequencer::codes::seq_note(7)));
+    assert!(
+        h.notes_since(m)
+            .iter()
+            .all(|n| n.code != hft_sequencer::codes::seq_note(7))
+    );
 }
 
 #[test]

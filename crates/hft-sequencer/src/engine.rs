@@ -70,8 +70,15 @@ pub(crate) struct OutRec {
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum Emit {
     /// `rec` = index of the `OrderDecision` it projects (decision_seq/decided_tsc filled at flush).
-    Gw { ring: OutRing, cmd: GwCmd, rec: Option<u32> },
-    Feed { venue: VenueId, cmd: FeedCmd },
+    Gw {
+        ring: OutRing,
+        cmd: GwCmd,
+        rec: Option<u32>,
+    },
+    Feed {
+        venue: VenueId,
+        cmd: FeedCmd,
+    },
 }
 
 /// Per-Input output buffer: records in production order, then ring messages.
@@ -353,15 +360,21 @@ pub(crate) fn live_gw_venues(rd: &RefData) -> Vec<(VenueId, Vec<AccountId>)> {
 
 impl Engine {
     /// Builds every component (allocations happen here, not in `step`).
-    pub(crate) fn new(rd: RefData, setup: &EngineSetup, risk_params: &RiskParams) -> Result<Engine, BootError> {
+    pub(crate) fn new(
+        rd: RefData,
+        setup: &EngineSetup,
+        risk_params: &RiskParams,
+    ) -> Result<Engine, BootError> {
         let caps = setup.caps;
         let sp = setup.seq;
         let l2 = l2_insts(&rd, setup.feeds);
         let mem = book_region(BookSet::bytes_needed(&rd, &l2));
-        let books = BookSet::new_in(&rd, &l2, mem).map_err(|_| BootError::Config(ConfigErr::Component("book")))?;
+        let books =
+            BookSet::new_in(&rd, &l2, mem).map_err(|_| BootError::Config(ConfigErr::Component("book")))?;
         let mut ocfg = setup.oms.clone();
         ocfg.tsc_hz_milli = setup.clock.tsc_hz_milli;
-        let oms = hft_oms::Oms::new(&ocfg, &rd).map_err(|_| BootError::Config(ConfigErr::Component("oms")))?;
+        let oms =
+            hft_oms::Oms::new(&ocfg, &rd).map_err(|_| BootError::Config(ConfigErr::Component("oms")))?;
         let bounds = exec_bounds(&setup.exec, &rd);
         let mc = ModeCfg {
             auto_resume_after_clean_drain: sp.auto_resume_after_clean_drain == 1,
@@ -415,8 +428,14 @@ impl Engine {
             *d = p.dust_notional;
         }
         let u = caps.notify_unit() as usize;
-        let mode_dims = (caps.max_cells_total as usize, n_acc + 1, account_venue_pairs(&rd) + 1);
-        let mode_pool = (0..4).map(|_| ModeOutcome::with_capacity(mode_dims.0, mode_dims.1, mode_dims.2)).collect();
+        let mode_dims = (
+            caps.max_cells_total as usize,
+            n_acc + 1,
+            account_venue_pairs(&rd) + 1,
+        );
+        let mode_pool = (0..4)
+            .map(|_| ModeOutcome::with_capacity(mode_dims.0, mode_dims.1, mode_dims.2))
+            .collect();
         let market = Market::new(&rd);
         let n_inst = rd.inst_count();
         let anchor = EngineClockAnchor {
@@ -525,7 +544,9 @@ impl Engine {
 
     /// The Now of a record of this run.
     pub(crate) fn now_of(&self, tsc: Tsc, seq: u64) -> Now {
-        let a = self.clock.anchor(Tsc(self.seg.calib_tsc), self.seg.calib_realtime_ns);
+        let a = self
+            .clock
+            .anchor(Tsc(self.seg.calib_tsc), self.seg.calib_realtime_ns);
         Now::new(tsc, seq, self.boot_seq, self.clock_ok, a)
     }
 
@@ -558,7 +579,9 @@ impl Engine {
         self.oms_pool.push(o);
     }
     pub(crate) fn take_exec(&mut self) -> ExecOut {
-        self.exec_pool.pop().unwrap_or_else(|| ExecOut::with_caps(OutCaps::README))
+        self.exec_pool
+            .pop()
+            .unwrap_or_else(|| ExecOut::with_caps(OutCaps::README))
     }
     pub(crate) fn put_exec(&mut self, mut o: ExecOut) {
         o.clear();
@@ -566,7 +589,9 @@ impl Engine {
     }
     pub(crate) fn take_mode(&mut self) -> ModeOutcome {
         let d = self.mode_dims;
-        self.mode_pool.pop().unwrap_or_else(|| ModeOutcome::with_capacity(d.0, d.1, d.2))
+        self.mode_pool
+            .pop()
+            .unwrap_or_else(|| ModeOutcome::with_capacity(d.0, d.1, d.2))
     }
     pub(crate) fn put_mode(&mut self, mut o: ModeOutcome) {
         o.clear();
@@ -604,16 +629,34 @@ pub(crate) fn boot_empty<D: Driver<S>, S: StrategySet>(
     mut drv: D,
     hb: &'static Heartbeat,
 ) -> Result<Sequencer<D, S>, BootError> {
-    let rd = RefData::load(&configs.refdata_blob, None)
-        .map_err(|r| BootError::Config(ConfigErr::Blob { kind: BlobKind::Refdata as u16, code: r.code() as u16 }))?;
+    let rd = RefData::load(&configs.refdata_blob, None).map_err(|r| {
+        BootError::Config(ConfigErr::Blob {
+            kind: BlobKind::Refdata as u16,
+            code: r.code() as u16,
+        })
+    })?;
     let mut e = Engine::new(rd, setup, &configs.risk)?;
     let mut inst = Instances::<S>::new(&e.rd, &e.caps)?;
-    let ec = hft_refdata::EngineConfig::load(&configs.engine_blob, None)
-        .map_err(|r| BootError::Config(ConfigErr::Blob { kind: BlobKind::Engine as u16, code: r.code() as u16 }))?;
-    e.cmd.active.refdata = Engine::blob_ref(BlobKind::Refdata, e.rd.version(), &configs.refdata_blob, *e.rd.sha256());
-    e.cmd.active.engine = Engine::blob_ref(BlobKind::Engine, ec.version(), &configs.engine_blob, *ec.sha256());
-    e.cmd.active.risk =
-        Engine::blob_ref(BlobKind::RiskParams, configs.risk.version, &configs.risk_blob, configs.risk_sha256);
+    let ec = hft_refdata::EngineConfig::load(&configs.engine_blob, None).map_err(|r| {
+        BootError::Config(ConfigErr::Blob {
+            kind: BlobKind::Engine as u16,
+            code: r.code() as u16,
+        })
+    })?;
+    e.cmd.active.refdata = Engine::blob_ref(
+        BlobKind::Refdata,
+        e.rd.version(),
+        &configs.refdata_blob,
+        *e.rd.sha256(),
+    );
+    e.cmd.active.engine =
+        Engine::blob_ref(BlobKind::Engine, ec.version(), &configs.engine_blob, *ec.sha256());
+    e.cmd.active.risk = Engine::blob_ref(
+        BlobKind::RiskParams,
+        configs.risk.version,
+        &configs.risk_blob,
+        configs.risk_sha256,
+    );
     e.cmd.blobs.put(e.cmd.active.refdata, &configs.refdata_blob);
     e.cmd.blobs.put(e.cmd.active.engine, &configs.engine_blob);
     e.cmd.blobs.put(e.cmd.active.risk, &configs.risk_blob);

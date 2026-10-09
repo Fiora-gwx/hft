@@ -5,17 +5,20 @@
 use std::collections::VecDeque;
 
 use hft_event::{
-    BlobKind, BlobRef, CmdHdr, CmdKind, CmdPreview, CmdResult, CmdScope, ControlCmd, EventKind, FundingSettle,
-    NoteLevel, RecordFlags, ReconcileReport,
+    BlobKind, BlobRef, CmdHdr, CmdKind, CmdPreview, CmdResult, CmdScope, ControlCmd, EventKind,
+    FundingSettle, NoteLevel, ReconcileReport, RecordFlags,
 };
-use hft_ledger::{AdjustDelta, AdjustKind, FundingRecon, FundingReconItem, PnlDelta, TransferDelta, TransferKind};
+use hft_ledger::{
+    AdjustDelta, AdjustKind, FundingRecon, FundingReconItem, PnlDelta, TransferDelta, TransferKind,
+};
 use hft_refdata::{AccountKind, RefData};
-use hft_risk::mode::{
-    GateEvent, KillCmd, ModeErr, ModeInput, ReconItemKey, StorageKind, VenueNoticeCmd,
-};
+use hft_risk::mode::{GateEvent, KillCmd, ModeErr, ModeInput, ReconItemKey, StorageKind, VenueNoticeCmd};
 use hft_risk::{AccountScope, ReconcileGroup};
 use hft_strategy_sdk::StrategySet;
-use hft_types::{AccountId, CapSource, GROUP_ALL, GROUP_NONE, GroupId, InstId, KillLevel, Qty, RunMode, StrategyId, Tsc, VenueId};
+use hft_types::{
+    AccountId, CapSource, GROUP_ALL, GROUP_NONE, GroupId, InstId, KillLevel, Qty, RunMode, StrategyId, Tsc,
+    VenueId,
+};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 use crate::Driver;
@@ -135,7 +138,10 @@ impl BlobStore {
         }
     }
     pub fn get(&self, sha: &[u8; 32]) -> Option<&[u8]> {
-        self.blobs.iter().find(|(r, _)| r.sha256 == *sha).map(|(_, b)| b.as_slice())
+        self.blobs
+            .iter()
+            .find(|(r, _)| r.sha256 == *sha)
+            .map(|(_, b)| b.as_slice())
     }
 }
 
@@ -166,7 +172,10 @@ pub struct ConnTable {
 
 impl ConnTable {
     pub fn get(&self, a: AccountId, v: VenueId) -> ConnRow {
-        self.rows.iter().find(|(k, _)| *k == (a, v)).map_or(ConnRow::default(), |x| x.1)
+        self.rows
+            .iter()
+            .find(|(k, _)| *k == (a, v))
+            .map_or(ConnRow::default(), |x| x.1)
     }
     pub fn set(&mut self, a: AccountId, v: VenueId, r: ConnRow) {
         match self.rows.iter_mut().find(|(k, _)| *k == (a, v)) {
@@ -297,9 +306,15 @@ fn write_result(e: &mut Engine, inst_ver: u64, hdr: &CmdHdr, r: &Res) {
     c.risk_version = e.risk.params().version;
     c.params_version = inst_ver;
     c.ctl_state_version = e.risk.mode.ctl_state_version();
-    c.rflags = if r.preview { CmdResult::PREVIEW } else { 0 } | if r.status == status::NEEDS_CONFIRM { CmdResult::NEEDS_CONFIRM } else { 0 };
+    c.rflags = if r.preview { CmdResult::PREVIEW } else { 0 }
+        | if r.status == status::NEEDS_CONFIRM {
+            CmdResult::NEEDS_CONFIRM
+        } else {
+            0
+        };
     c.preview = <CmdPreview as zerocopy::FromZeros>::new_zeroed();
-    e.trace.rec("cmd_result", u64::from(r.status), u64::from(r.detail));
+    e.trace
+        .rec("cmd_result", u64::from(r.status), u64::from(r.detail));
     e.out.push(RecordFlags(0), &c);
 }
 
@@ -359,7 +374,12 @@ fn role_ok(h: &CmdHdr, c: &ControlCmd<'_>) -> bool {
                 hard,
                 cancel_resting,
                 ..
-            } => matches!(level, KillLevel::Global | KillLevel::Account) && !*flatten && !*hard && *cancel_resting,
+            } => {
+                matches!(level, KillLevel::Global | KillLevel::Account)
+                    && !*flatten
+                    && !*hard
+                    && *cancel_resting
+            }
             ControlCmd::Annotate { .. } | ControlCmd::SnapshotNow => true,
             _ => false,
         };
@@ -397,9 +417,18 @@ fn cmd_account(c: &ControlCmd<'_>) -> Option<AccountId> {
 }
 
 /// Whether the command is an upgrade that needs confirmation in the current state.
-fn needs_confirm<S: StrategySet>(e: &Engine, inst: &Instances<S>, h: &CmdHdr, c: &ControlCmd<'_>, d: &mut dyn_free::Drv<'_>) -> bool {
+fn needs_confirm<S: StrategySet>(
+    e: &Engine,
+    inst: &Instances<S>,
+    h: &CmdHdr,
+    c: &ControlCmd<'_>,
+    d: &mut dyn_free::Drv<'_>,
+) -> bool {
     match c {
-        ControlCmd::SetMode { scope, mode } => e.risk.mode.is_upgrade(&ModeInput::SetMode { scope: *scope, mode: *mode }),
+        ControlCmd::SetMode { scope, mode } => e.risk.mode.is_upgrade(&ModeInput::SetMode {
+            scope: *scope,
+            mode: *mode,
+        }),
         ControlCmd::Resume { .. } => true,
         ControlCmd::Kill { flatten, level, .. } => *flatten && *level == KillLevel::Account,
         ControlCmd::HedgeFix { .. }
@@ -414,7 +443,9 @@ fn needs_confirm<S: StrategySet>(e: &Engine, inst: &Instances<S>, h: &CmdHdr, c:
             let _ = inst;
             let human = issuer_str(h) != "pipeline" && h.role != 0;
             let live_inst = d.params_live_instance;
-            (live_inst && d.params_structural) || (human && d.params_opens) || (human && false && scope.account.0 == 0)
+            (live_inst && d.params_structural)
+                || (human && d.params_opens)
+                || (human && false && scope.account.0 == 0)
         }
         _ => false,
     }
@@ -434,7 +465,10 @@ mod dyn_free {
 
 fn is_upgrade_class(c: &ControlCmd<'_>, e: &Engine) -> bool {
     match c {
-        ControlCmd::SetMode { scope, mode } => e.risk.mode.is_upgrade(&ModeInput::SetMode { scope: *scope, mode: *mode }),
+        ControlCmd::SetMode { scope, mode } => e.risk.mode.is_upgrade(&ModeInput::SetMode {
+            scope: *scope,
+            mode: *mode,
+        }),
         ControlCmd::Resume { .. }
         | ControlCmd::HedgeFix { .. }
         | ControlCmd::WriteOffResidual { .. }
@@ -460,7 +494,12 @@ pub(crate) fn control<'a, D: Driver<S>, S: StrategySet>(
         if let Some(x) = body.get(..16) {
             hz.cmd_id.copy_from_slice(x);
         }
-        write_result(e, 0, &hz, &res(status::INVALID_ARGS, detail::UNKNOWN_DISCRIMINANT));
+        write_result(
+            e,
+            0,
+            &hz,
+            &res(status::INVALID_ARGS, detail::UNKNOWN_DISCRIMINANT),
+        );
         return Ok(());
     };
     // 2. expiry.
@@ -516,7 +555,10 @@ fn command<'a, D: Driver<S>, S: StrategySet>(
     // Facts for SetParams / SetRisk confirmation.
     let mut facts = dyn_free::Drv::default();
     let mut parsed: Option<crate::parsed::ParsedConfig<S>> = None;
-    if let ControlCmd::SetParams { blob, .. } | ControlCmd::SetRisk { blob } | ControlCmd::ReplaceRefdata { blob } = c {
+    if let ControlCmd::SetParams { blob, .. }
+    | ControlCmd::SetRisk { blob }
+    | ControlCmd::ReplaceRefdata { blob } = c
+    {
         let base_ix = match c {
             ControlCmd::SetParams { scope, .. } => inst.ix(scope.strategy),
             _ => None,
@@ -545,7 +587,11 @@ fn command<'a, D: Driver<S>, S: StrategySet>(
         let _ = blob;
         match (c, parsed.as_ref()) {
             (ControlCmd::SetRisk { .. }, Some(crate::parsed::ParsedConfig::Risk { params, .. })) => {
-                let sc = if h.account.0 == 0 { AccountScope::All } else { AccountScope::Account(h.account) };
+                let sc = if h.account.0 == 0 {
+                    AccountScope::All
+                } else {
+                    AccountScope::Account(h.account)
+                };
                 facts.risk_loosens = e.risk.loosens(params, sc);
             }
             (ControlCmd::SetParams { scope, .. }, Some(crate::parsed::ParsedConfig::StrategyParams(pp))) => {
@@ -563,8 +609,20 @@ fn command<'a, D: Driver<S>, S: StrategySet>(
         }
     }
     // Draining blocks upgrades (Kill{Account, flatten} excepted).
-    let draining = e.risk.mode.cap(CapSource::DRAINING, &hft_risk::scope_any()).is_some() || e.drain.active;
-    let flatten_kill = matches!(c, ControlCmd::Kill { flatten: true, level: KillLevel::Account, .. });
+    let draining = e
+        .risk
+        .mode
+        .cap(CapSource::DRAINING, &hft_risk::scope_any())
+        .is_some()
+        || e.drain.active;
+    let flatten_kill = matches!(
+        c,
+        ControlCmd::Kill {
+            flatten: true,
+            level: KillLevel::Account,
+            ..
+        }
+    );
     // confirmation.
     let viewer = h.role != 0 && h.role & (ROLE_TRADER | ROLE_ADMIN) == 0;
     if viewer {
@@ -589,11 +647,9 @@ fn command<'a, D: Driver<S>, S: StrategySet>(
             }
             let ttl = VIEWER_CONFIRM_TTL_MS * 1_000_000;
             let now = e.now.engine_ns;
-            let pos = e
-                .cmd
-                .previews
-                .iter()
-                .position(|x| x.cmd_hash == h.cmd_hash && x.issuer == h.issuer && now - x.preview_engine_ns <= ttl);
+            let pos = e.cmd.previews.iter().position(|x| {
+                x.cmd_hash == h.cmd_hash && x.issuer == h.issuer && now - x.preview_engine_ns <= ttl
+            });
             match pos {
                 Some(i) => {
                     e.cmd.previews.remove(i);
@@ -639,7 +695,10 @@ fn preview_result<S: StrategySet>(e: &Engine, _inst: &Instances<S>, c: &ControlC
     match c {
         ControlCmd::Resume { scope, source } => {
             let mut pv = hft_risk::mode::Preview::default();
-            let inp = ModeInput::Resume { source: *source, scope: *scope };
+            let inp = ModeInput::Resume {
+                source: *source,
+                scope: *scope,
+            };
             let ad = crate::views::ModeAdapter {
                 oms: &e.oms,
                 ledger: &e.ledger,
@@ -678,11 +737,23 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
     let now = e.now;
     match c {
         ControlCmd::SetMode { scope, mode } => {
-            let r = crate::mode_glue::apply_mode_r(e, inst, drv, ModeInput::SetMode { scope: *scope, mode: *mode })?;
+            let r = crate::mode_glue::apply_mode_r(
+                e,
+                inst,
+                drv,
+                ModeInput::SetMode {
+                    scope: *scope,
+                    mode: *mode,
+                },
+            )?;
             Ok(match r {
                 Ok(()) => {
                     let deferred = *mode == RunMode::Shadow && shadow_deferred(e, scope);
-                    if deferred { res(status::APPLIED, detail::SHADOW_DEFERRED) } else { ok() }
+                    if deferred {
+                        res(status::APPLIED, detail::SHADOW_DEFERRED)
+                    } else {
+                        ok()
+                    }
                 }
                 Err(m) => mode_err(m),
             })
@@ -716,7 +787,15 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
             }
         }
         ControlCmd::Resume { scope, source } => {
-            let r = crate::mode_glue::apply_mode_r(e, inst, drv, ModeInput::Resume { source: *source, scope: *scope })?;
+            let r = crate::mode_glue::apply_mode_r(
+                e,
+                inst,
+                drv,
+                ModeInput::Resume {
+                    source: *source,
+                    scope: *scope,
+                },
+            )?;
             Ok(match r {
                 Ok(()) => ok(),
                 Err(m) => mode_err(m),
@@ -732,7 +811,11 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
             let Some(crate::parsed::ParsedConfig::Risk { params, sha256 }) = parsed else {
                 return Ok(res(status::INVALID_ARGS, detail::BAD_VALUE));
             };
-            let sc = if h.account.0 == 0 { AccountScope::All } else { AccountScope::Account(h.account) };
+            let sc = if h.account.0 == 0 {
+                AccountScope::All
+            } else {
+                AccountScope::Account(h.account)
+            };
             let r = e.risk.set_params(&params, sc);
             e.trace.rec("risk.set_params", u64::from(h.account.0), 0);
             let res = match r {
@@ -742,7 +825,9 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
                     ok()
                 }
                 Err(hft_risk::RiskParamError::Invalid(_)) => res(status::INVALID_ARGS, detail::PARAM_INVALID),
-                Err(hft_risk::RiskParamError::ExecRiskMismatch) => res(status::INVALID_ARGS, detail::EXEC_RISK_MISMATCH),
+                Err(hft_risk::RiskParamError::ExecRiskMismatch) => {
+                    res(status::INVALID_ARGS, detail::EXEC_RISK_MISMATCH)
+                }
                 Err(hft_risk::RiskParamError::Capacity) => res(status::CAPACITY_EXCEEDED, 0),
             };
             drv.retire(crate::parsed::ParsedConfig::Risk { sha256, params });
@@ -805,11 +890,16 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
             group,
             entry_px,
             ..
-        } => adopt(e, inst, drv, *account, *venue, *inst_id, *report_id, *item, *asset, *group, *entry_px),
+        } => adopt(
+            e, inst, drv, *account, *venue, *inst_id, *report_id, *item, *asset, *group, *entry_px,
+        ),
         ControlCmd::SetBalanceBaseline { account, venue } => {
             let mut outv = hft_ledger::FixedVec::<hft_types::AssetId, 64>::new();
-            let r = e.ledger.set_balance_baseline(*account, *venue, e.cur_seq, &mut outv);
-            e.trace.rec("ledger.set_balance_baseline", u64::from(account.0), 0);
+            let r = e
+                .ledger
+                .set_balance_baseline(*account, *venue, e.cur_seq, &mut outv);
+            e.trace
+                .rec("ledger.set_balance_baseline", u64::from(account.0), 0);
             for a in outv.iter().copied().collect::<Vec<_>>() {
                 crate::mode_glue::apply_mode(
                     e,
@@ -826,7 +916,9 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
             }
             Ok(match r {
                 hft_ledger::BaselineResult::Set { .. } => ok(),
-                hft_ledger::BaselineResult::NoBalanceView => res(status::PRECONDITION_FAILED, detail::NO_BALANCE_VIEW),
+                hft_ledger::BaselineResult::NoBalanceView => {
+                    res(status::PRECONDITION_FAILED, detail::NO_BALANCE_VIEW)
+                }
             })
         }
         ControlCmd::VenueNotice {
@@ -846,7 +938,9 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
                 b: *b,
                 cmd_seq: e.cur_seq,
             };
-            e.cmd.notices.retain(|x| !(x.venue == *venue && x.inst == *inst_id && x.kind == *kind));
+            e.cmd
+                .notices
+                .retain(|x| !(x.venue == *venue && x.inst == *inst_id && x.kind == *kind));
             e.cmd.notices.push(row);
             e.cmd.notices.sort_by_key(|x| (x.venue, x.inst, x.kind));
             let n = VenueNoticeCmd {
@@ -920,7 +1014,10 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
             group,
             payload,
         } => {
-            let Some(ix) = inst.ix(*instance).filter(|ix| inst.slots.get(*ix).is_some_and(|s| s.inst.is_some())) else {
+            let Some(ix) = inst
+                .ix(*instance)
+                .filter(|ix| inst.slots.get(*ix).is_some_and(|s| s.inst.is_some()))
+            else {
                 return Ok(res(status::UNKNOWN_TARGET, 0));
             };
             let acc = inst.slots.get(ix).map_or(AccountId(0), |s| s.account);
@@ -940,7 +1037,15 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
             // The payload in the logged body: CmdHdr (128 B) + instance, reduce_only, len, group.
             let pl: &'a [u8] = body.get(136..136 + n).unwrap_or(&[]);
             let _ = payload;
-            p.direct = Some((ix, Direct::Manual { gix, payload: pl, reduce_only: ro }, ro));
+            p.direct = Some((
+                ix,
+                Direct::Manual {
+                    gix,
+                    payload: pl,
+                    reduce_only: ro,
+                },
+                ro,
+            ));
             Ok(ok())
         }
         ControlCmd::InjectWarmup {
@@ -951,13 +1056,19 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
             payload,
             ..
         } => {
-            let Some(ix) = inst.ix(*instance).filter(|ix| inst.slots.get(*ix).is_some_and(|s| s.inst.is_some())) else {
+            let Some(ix) = inst
+                .ix(*instance)
+                .filter(|ix| inst.slots.get(*ix).is_some_and(|s| s.inst.is_some()))
+            else {
                 return Ok(res(status::UNKNOWN_TARGET, 0));
             };
             if payload.len() > hft_event::WARMUP_MAX_PAYLOAD {
                 return Ok(res(status::INVALID_ARGS, detail::BAD_VALUE));
             }
-            let both = inst.slots.get(ix).is_some_and(|s| s.warmup == hft_strategy_sdk::Part::Both);
+            let both = inst
+                .slots
+                .get(ix)
+                .is_some_and(|s| s.warmup == hft_strategy_sdk::Part::Both);
             if inst.models.on
                 && let ControlCmd::InjectWarmup {
                     local_kind,
@@ -1044,7 +1155,9 @@ fn shadow_deferred(e: &Engine, scope: &CmdScope) -> bool {
     };
     matches!(
         e.risk.mode.effective(cell),
-        hft_risk::mode::Effective::CloseOnly { deferred_shadow: true }
+        hft_risk::mode::Effective::CloseOnly {
+            deferred_shadow: true
+        }
     )
 }
 
@@ -1063,7 +1176,10 @@ fn notice_delivery<S: StrategySet>(e: &mut Engine, inst: &Instances<S>, row: &Ve
     let kind = match row.kind {
         1 => NoticeKind::Delisting { at_ns: row.a },
         2 => NoticeKind::FundingInterval { new_s: row.a as u32 },
-        _ => NoticeKind::Maintenance { from_ns: row.a, to_ns: row.b },
+        _ => NoticeKind::Maintenance {
+            from_ns: row.a,
+            to_ns: row.b,
+        },
     };
     let n = VenueNoticeView {
         venue: row.venue,
@@ -1072,13 +1188,20 @@ fn notice_delivery<S: StrategySet>(e: &mut Engine, inst: &Instances<S>, row: &Ve
     };
     for (ix, s) in inst.slots.iter().enumerate() {
         for se in s.subs.iter() {
-            let hit = if row.inst.0 == 0 { e.rd.inst(se.inst).venue == row.venue } else { se.inst == row.inst };
+            let hit = if row.inst.0 == 0 {
+                e.rd.inst(se.inst).venue == row.venue
+            } else {
+                se.inst == row.inst
+            };
             if hit && se.part.fast() {
-                e.notify.push(ix as u16, crate::notify::Notif::Notice {
-                    inst: se.inst,
-                    gix: se.gix,
-                    n,
-                });
+                e.notify.push(
+                    ix as u16,
+                    crate::notify::Notif::Notice {
+                        inst: se.inst,
+                        gix: se.gix,
+                        n,
+                    },
+                );
                 break;
             }
         }
@@ -1097,7 +1220,11 @@ fn set_params<D: Driver<S>, S: StrategySet>(
     pp: Box<crate::parsed::ParsedParams<S>>,
 ) -> R<Res> {
     let strategy = scope.strategy;
-    let account = if scope.account.0 != 0 { scope.account } else { pp.account };
+    let account = if scope.account.0 != 0 {
+        scope.account
+    } else {
+        pp.account
+    };
     let Some(ix) = inst.ix(strategy) else {
         drv.retire(crate::parsed::ParsedConfig::StrategyParams(pp));
         return Ok(res(status::INVALID_ARGS, detail::ACCOUNT_BOUND));
@@ -1108,7 +1235,11 @@ fn set_params<D: Driver<S>, S: StrategySet>(
     };
     // ① binding, kind, non_prod_only, legs.
     if let Err(x) = e.rd.check_binding(account, strategy, pp.kind_id) {
-        let d = if x.code == hft_refdata::LoadErrCode::KindMismatch { detail::KIND_MISMATCH } else { detail::ACCOUNT_BOUND };
+        let d = if x.code == hft_refdata::LoadErrCode::KindMismatch {
+            detail::KIND_MISMATCH
+        } else {
+            detail::ACCOUNT_BOUND
+        };
         return fail(drv, pp, res(status::INVALID_ARGS, d));
     }
     let desc = S::kinds().iter().find(|d| d.kind_id == pp.kind_id);
@@ -1116,7 +1247,13 @@ fn set_params<D: Driver<S>, S: StrategySet>(
         return fail(
             drv,
             pp,
-            res_d(status::INVALID_ARGS, detail::pack(detail::PARAM_INVALID, detail::param_arg(detail::PARAM_KIND_NON_PROD_ONLY, 0))),
+            res_d(
+                status::INVALID_ARGS,
+                detail::pack(
+                    detail::PARAM_INVALID,
+                    detail::param_arg(detail::PARAM_KIND_NON_PROD_ONLY, 0),
+                ),
+            ),
         );
     }
     if let Err(d) = crate::parsed::check_groups(&e.rd, account, &pp.groups) {
@@ -1156,7 +1293,11 @@ fn set_params<D: Driver<S>, S: StrategySet>(
             account,
             group: g.id,
         };
-        let desired = e.risk.mode.desired(cell).or_else(|| e.risk.mode.default_mode(strategy, account));
+        let desired = e
+            .risk
+            .mode
+            .desired(cell)
+            .or_else(|| e.risk.mode.default_mode(strategy, account));
         if desired == Some(RunMode::Shadow) {
             continue;
         }
@@ -1171,7 +1312,11 @@ fn set_params<D: Driver<S>, S: StrategySet>(
         return fail(drv, pp, res(status::INVALID_ARGS, detail::INST_OWNED));
     }
     // ⑤ removed / fingerprint-changed groups must be empty.
-    let old = inst.slots.get(ix).and_then(|s| s.cur.as_ref()).map(|c| c.groups.clone());
+    let old = inst
+        .slots
+        .get(ix)
+        .and_then(|s| s.cur.as_ref())
+        .map(|c| c.groups.clone());
     if let Some(old) = old.as_ref() {
         use hft_strategy_sdk::GroupSpecExt;
         let mut busy = false;
@@ -1185,11 +1330,20 @@ fn set_params<D: Driver<S>, S: StrategySet>(
             }
         }
         if busy {
-            return fail(drv, pp, res(status::PRECONDITION_FAILED, detail::GROUP_HAS_POSITION));
+            return fail(
+                drv,
+                pp,
+                res(status::PRECONDITION_FAILED, detail::GROUP_HAS_POSITION),
+            );
         }
     }
     // ⑥ capacity.
-    let other_cells = inst.n_cells() - inst.slots.get(ix).and_then(|s| s.groups()).map_or(0, |g| usize::from(g.len()));
+    let other_cells = inst.n_cells()
+        - inst
+            .slots
+            .get(ix)
+            .and_then(|s| s.groups())
+            .map_or(0, |g| usize::from(g.len()));
     if other_cells + usize::from(pp.groups.len()) > e.caps.max_cells_total as usize {
         return fail(drv, pp, res(status::CAPACITY_EXCEEDED, 0));
     }
@@ -1234,14 +1388,19 @@ fn set_params<D: Driver<S>, S: StrategySet>(
             if viol.is_some() {
                 break;
             }
-            let is_new = old
-                .as_ref()
-                .and_then(|o| o.gix_of(g.id).map(|gi| o.get(gi).fingerprint() == g.fingerprint()))
-                != Some(true);
+            let is_new = old.as_ref().and_then(|o| {
+                o.gix_of(g.id)
+                    .map(|gi| o.get(gi).fingerprint() == g.fingerprint())
+            }) != Some(true);
             if !is_new {
                 continue;
             }
-            let legs: Vec<InstId> = g.legs.iter().take(usize::from(g.n_legs)).map(|l| l.inst).collect();
+            let legs: Vec<InstId> = g
+                .legs
+                .iter()
+                .take(usize::from(g.n_legs))
+                .map(|l| l.inst)
+                .collect();
             let mut max_min = 0i64;
             for i in legs.iter() {
                 max_min = max_min.max(e.rd.inst(*i).min_notional.0);
@@ -1265,7 +1424,12 @@ fn set_params<D: Driver<S>, S: StrategySet>(
                     let ok = match (hft_types::pair_lot(la, lb, 1, 1), px) {
                         (Some(l), Some(px)) => {
                             let exp = e.rd.asset(e.rd.inst(ia).asset).exp;
-                            let n = hft_risk::Risk::notional(l, px, exp, crate::views::quote_rate(&e.rd, &e.ledger, ia));
+                            let n = hft_risk::Risk::notional(
+                                l,
+                                px,
+                                exp,
+                                crate::views::quote_rate(&e.rd, &e.ledger, ia),
+                            );
                             n.0 <= p.force_slice.max_chunk_notional.0
                         }
                         _ => false,
@@ -1297,7 +1461,10 @@ fn set_params<D: Driver<S>, S: StrategySet>(
                 pp,
                 res_d(
                     status::INVALID_ARGS,
-                    detail::pack(detail::PARAM_INVALID, detail::param_arg(detail::PARAM_KIND_MODEL_MEM_BUDGET, 0)),
+                    detail::pack(
+                        detail::PARAM_INVALID,
+                        detail::param_arg(detail::PARAM_KIND_MODEL_MEM_BUDGET, 0),
+                    ),
                 ),
             );
         }
@@ -1341,7 +1508,10 @@ fn group_busy(e: &Engine, a: AccountId, g: GroupId) -> bool {
     let gp = e.ledger.group_pos(a, g);
     let legs = &e.oms.legs(a, g).view;
     gp.legs.iter().any(|l| l.qty.0 != 0)
-        || legs.leg.iter().any(|l| l.net.0 != 0 || l.inflight_immediate.0 != 0 || l.inflight_resting.0 != 0)
+        || legs
+            .leg
+            .iter()
+            .any(|l| l.net.0 != 0 || l.inflight_immediate.0 != 0 || l.inflight_resting.0 != 0)
         || legs.has_pending
         || e.exec.cell(a, g).is_some_and(|c| c.has_target)
 }
@@ -1363,24 +1533,51 @@ fn adopt<D: Driver<S>, S: StrategySet>(
     entry_px: hft_types::Px,
 ) -> R<Res> {
     // Stale: a fill on the inst after the report's view seq.
-    let view_seq = e.cmd.recon_view.iter().find(|x| x.0 == report_id).map_or(0, |x| x.1);
-    let last_fill = e.cmd.fill_seq.iter().find(|x| x.0 == (account, inst_id)).map_or(0, |x| x.1);
+    let view_seq = e
+        .cmd
+        .recon_view
+        .iter()
+        .find(|x| x.0 == report_id)
+        .map_or(0, |x| x.1);
+    let last_fill = e
+        .cmd
+        .fill_seq
+        .iter()
+        .find(|x| x.0 == (account, inst_id))
+        .map_or(0, |x| x.1);
     if last_fill > view_seq && view_seq != 0 {
         return Ok(res(status::PRECONDITION_FAILED, detail::STALE_REPORT));
     }
-    let diff = e.cmd.recon_diff.iter().find(|x| x.0 == (report_id, account, inst_id)).map_or(Qty(0), |x| x.1);
-    let kind = if item == 1 { AdjustKind::Position } else { AdjustKind::Balance };
+    let diff = e
+        .cmd
+        .recon_diff
+        .iter()
+        .find(|x| x.0 == (report_id, account, inst_id))
+        .map_or(Qty(0), |x| x.1);
+    let kind = if item == 1 {
+        AdjustKind::Position
+    } else {
+        AdjustKind::Balance
+    };
     let d = AdjustDelta {
         account,
         venue,
         kind: kind as u8,
-        px_src: if entry_px.0 != 0 { hft_ledger::PxSrc::Cmd as u8 } else { hft_ledger::PxSrc::Mark as u8 },
+        px_src: if entry_px.0 != 0 {
+            hft_ledger::PxSrc::Cmd as u8
+        } else {
+            hft_ledger::PxSrc::Mark as u8
+        },
         inst: inst_id,
         asset,
         _pad: 0,
         group,
         qty: diff,
-        px: if entry_px.0 != 0 { entry_px } else { e.market.row(inst_id).map_or(hft_types::Px(0), |r| r.mark_px) },
+        px: if entry_px.0 != 0 {
+            entry_px
+        } else {
+            e.market.row(inst_id).map_or(hft_types::Px(0), |r| r.mark_px)
+        },
         report_id,
         cmd_seq: e.cur_seq,
         settle_ts_ns: 0,
@@ -1389,7 +1586,8 @@ fn adopt<D: Driver<S>, S: StrategySet>(
     e.trace.rec("ledger.apply_adjust", u64::from(account.0), 0);
     crate::process::pnl(e, inst, drv, pnl)?;
     if group != GROUP_NONE && item == 1 {
-        e.trace.rec("oms.adopt_adjust", u64::from(account.0), u64::from(group.0));
+        e.trace
+            .rec("oms.adopt_adjust", u64::from(account.0), u64::from(group.0));
         e.oms.adopt_adjust(account, group, inst_id, diff);
     }
     let key = if item == 1 {
@@ -1412,7 +1610,12 @@ fn adopt<D: Driver<S>, S: StrategySet>(
     Ok(ok())
 }
 
-fn sim_reset<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, a: AccountId) -> R<Res> {
+fn sim_reset<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    a: AccountId,
+) -> R<Res> {
     let AccountKind::Sim(cfg) = e.rd.account(a).kind.clone() else {
         return Ok(res(status::INVALID_ARGS, detail::NOT_SIM));
     };
@@ -1421,7 +1624,10 @@ fn sim_reset<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<
         .cells()
         .filter(|c| c.account == a)
         .any(|c| matches!(e.risk.mode.effective(c), hft_risk::mode::Effective::Live));
-    let target = inst.cells().filter(|c| c.account == a).any(|c| e.exec.cell(a, c.group).is_some_and(|x| x.has_target));
+    let target = inst
+        .cells()
+        .filter(|c| c.account == a)
+        .any(|c| e.exec.cell(a, c.group).is_some_and(|x| x.has_target));
     let q = e.oms.quiescent(a);
     let unknown = q & hft_oms::quiesce::UNKNOWN != 0;
     let ioc = q & hft_oms::quiesce::IOC_NONTERMINAL != 0;
@@ -1472,22 +1678,40 @@ fn smoke<D: Driver<S>, S: StrategySet>(
     };
     let bbo = e.market.bbo_view(&e.books, inst_id);
     let liveness = e.risk.view(account, &e.now).conn_liveness_ms;
-    let r = e.oms.smoke_intent(&req, &bbo, e.rd.inst(inst_id), liveness, e.now.tsc);
+    let r = e
+        .oms
+        .smoke_intent(&req, &bbo, e.rd.inst(inst_id), liveness, e.now.tsc);
     let it = match r {
         Ok(it) => it,
         Err(hft_oms::SmokeErr::Busy) => return Ok(res(status::PRECONDITION_FAILED, detail::SMOKE_ACTIVE)),
-        Err(hft_oms::SmokeErr::NoQuote) => return Ok(res(status::PRECONDITION_FAILED, detail::SMOKE_NO_PRICE)),
+        Err(hft_oms::SmokeErr::NoQuote) => {
+            return Ok(res(status::PRECONDITION_FAILED, detail::SMOKE_NO_PRICE));
+        }
         Err(hft_oms::SmokeErr::BadInst) => return Ok(res(status::INVALID_ARGS, detail::BAD_VALUE)),
     };
     let strategy = e.rd.account(account).bound_instance;
-    let out = crate::intents::pipeline(e, inst, drv, strategy, &it, crate::intents::Src::Smoke { ttl_ms }, 0)?;
+    let out = crate::intents::pipeline(
+        e,
+        inst,
+        drv,
+        strategy,
+        &it,
+        crate::intents::Src::Smoke { ttl_ms },
+        0,
+    )?;
     Ok(match out {
         crate::intents::PipeOut::Placed(_) => ok(),
         _ => res(status::REJECTED, detail::SMOKE_RISK_REJECT),
     })
 }
 
-fn write_off<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, a: AccountId, g: GroupId) -> R<Res> {
+fn write_off<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    a: AccountId,
+    g: GroupId,
+) -> R<Res> {
     let bound = e.rd.account(a).bound_instance;
     let in_params = inst.get(bound).and_then(|s| s.gix_of(g)).is_some();
     if !in_params {
@@ -1497,7 +1721,8 @@ fn write_off<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<
         Ok(w) => w,
         Err(_) => return Ok(res(status::PRECONDITION_FAILED, detail::NOT_QUIESCENT)),
     };
-    e.trace.rec("oms.write_off_residual", u64::from(a.0), w.qty.0 as u64);
+    e.trace
+        .rec("oms.write_off_residual", u64::from(a.0), w.qty.0 as u64);
     let d = AdjustDelta {
         account: a,
         venue: w.venue,
@@ -1523,7 +1748,11 @@ fn write_off<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<
 }
 
 /// `ReplaceRefdata` recheck: `None` = pass, else the arg (LoadErrCode, binding code, 0).
-fn refdata_recheck<S: StrategySet>(e: &Engine, inst: &Instances<S>, r: &Result<RefData, hft_refdata::LoadReport>) -> Option<u16> {
+fn refdata_recheck<S: StrategySet>(
+    e: &Engine,
+    inst: &Instances<S>,
+    r: &Result<RefData, hft_refdata::LoadReport>,
+) -> Option<u16> {
     let new = match r {
         Ok(n) => n,
         Err(rep) => return Some(rep.code() as u16),
@@ -1577,14 +1806,21 @@ pub(crate) fn start_drain<D: Driver<S>, S: StrategySet>(
         ..Default::default()
     };
     e.trace.rec("drain.start", u64::from(cancel_resting), 0);
-    let rec = crate::mode_glue::auto_rec(CapSource::DRAINING, hft_risk::scope_any(), e.cur_seq, u64::from(cancel_resting));
+    let rec = crate::mode_glue::auto_rec(
+        CapSource::DRAINING,
+        hft_risk::scope_any(),
+        e.cur_seq,
+        u64::from(cancel_resting),
+    );
     crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Auto(rec))?;
     let mut o = e.take_oms();
     if cancel_resting {
-        e.oms.cancel_all(hft_oms::CancelScope::Global, false, e.now.tsc, e.cur_seq, &mut o);
+        e.oms
+            .cancel_all(hft_oms::CancelScope::Global, false, e.now.tsc, e.cur_seq, &mut o);
     } else {
         // Linked resting first legs only: cancel the open orders of every linked cell.
-        e.oms.cancel_all(hft_oms::CancelScope::Global, true, e.now.tsc, e.cur_seq, &mut o);
+        e.oms
+            .cancel_all(hft_oms::CancelScope::Global, true, e.now.tsc, e.cur_seq, &mut o);
     }
     crate::intents::drain_oms(e, inst, drv, &mut o)?;
     e.put_oms(o);
@@ -1592,7 +1828,11 @@ pub(crate) fn start_drain<D: Driver<S>, S: StrategySet>(
 }
 
 /// Drain step 3–6 after every Input.
-pub(crate) fn drain_check<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D) -> R<()> {
+pub(crate) fn drain_check<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+) -> R<()> {
     if !e.drain.active || e.finished.is_some() {
         return Ok(());
     }
@@ -1620,7 +1860,9 @@ fn drain_ready<S: StrategySet>(e: &Engine, _inst: &Instances<S>) -> bool {
     for a in 1..=crate::engine::account_count(&e.rd) {
         let a = AccountId(a as u8);
         let q = e.oms.quiescent(a);
-        let blocking = hft_oms::quiesce::LINKS_ACTIVE | hft_oms::quiesce::IOC_NONTERMINAL | hft_oms::quiesce::HEDGE_RETRY_PENDING;
+        let blocking = hft_oms::quiesce::LINKS_ACTIVE
+            | hft_oms::quiesce::IOC_NONTERMINAL
+            | hft_oms::quiesce::HEDGE_RETRY_PENDING;
         if q & blocking != 0 {
             return false;
         }
@@ -1641,7 +1883,9 @@ fn pending_slots(e: &Engine, v: VenueId, a: AccountId, n: u32) -> bool {
         if let Some((sl, _, _)) = e.oms.raw_slot(v, a, s)
             && matches!(
                 sl.state,
-                hft_oms::OrderState::PendingNew | hft_oms::OrderState::PendingCancel | hft_oms::OrderState::PendingAmend
+                hft_oms::OrderState::PendingNew
+                    | hft_oms::OrderState::PendingCancel
+                    | hft_oms::OrderState::PendingAmend
             )
         {
             return true;
@@ -1656,7 +1900,10 @@ fn drain_timeout_note<S: StrategySet>(e: &mut Engine, _inst: &Instances<S>) {
     for a in 1..=crate::engine::account_count(&e.rd) {
         let acc = AccountId(a as u8);
         let q = e.oms.quiescent(acc);
-        if q & (hft_oms::quiesce::LINKS_ACTIVE | hft_oms::quiesce::IOC_NONTERMINAL | hft_oms::quiesce::HEDGE_RETRY_PENDING) != 0
+        if q & (hft_oms::quiesce::LINKS_ACTIVE
+            | hft_oms::quiesce::IOC_NONTERMINAL
+            | hft_oms::quiesce::HEDGE_RETRY_PENDING)
+            != 0
             || !e.exec.drain_ready_acct(acc)
         {
             if let Some(w) = bitmap.get_mut(a / 64) {
@@ -1668,10 +1915,27 @@ fn drain_timeout_note<S: StrategySet>(e: &mut Engine, _inst: &Instances<S>) {
         }
     }
     let engine_targets = u64::from(e.exec.engine_reduce_pending());
-    let level = if links > 0 || engine_targets > 0 { NoteLevel::P0 } else { NoteLevel::P1 };
-    e.seq_note(note::DRAIN_TIMEOUT, level, GroupId(0), InstId(0), [
-        bitmap[0], bitmap[1], bitmap[2], bitmap[3], links, 0, engine_targets, 0,
-    ]);
+    let level = if links > 0 || engine_targets > 0 {
+        NoteLevel::P0
+    } else {
+        NoteLevel::P1
+    };
+    e.seq_note(
+        note::DRAIN_TIMEOUT,
+        level,
+        GroupId(0),
+        InstId(0),
+        [
+            bitmap[0],
+            bitmap[1],
+            bitmap[2],
+            bitmap[3],
+            links,
+            0,
+            engine_targets,
+            0,
+        ],
+    );
 }
 
 fn finish_drain<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D) -> R<()> {
@@ -1741,7 +2005,13 @@ pub(crate) fn sys_timer<'a, D: Driver<S>, S: StrategySet>(
             let pending = crate::engine::live_gw_venues(&e.rd)
                 .iter()
                 .find(|x| x.0 == v)
-                .is_some_and(|x| x.1.iter().any(|a| e.oms.table_view(v, *a).is_some_and(|t| pending_slots(e, v, *a, t.n_slots))));
+                .is_some_and(|x| {
+                    x.1.iter().any(|a| {
+                        e.oms
+                            .table_view(v, *a)
+                            .is_some_and(|t| pending_slots(e, v, *a, t.n_slots))
+                    })
+                });
             if !pending {
                 let mut c = hft_event::GwCmd::sim_reset(AccountId(0));
                 c.op = hft_event::GwOp::Rotate;
@@ -1769,7 +2039,13 @@ pub(crate) fn sys_timer<'a, D: Driver<S>, S: StrategySet>(
             // decision, journaled with the Timer).
             let n = slot.read::<hft_event::Timer>().map_or(0, |t| t.deadline_tsc);
             e.conflated = 0;
-            e.seq_note(note::CONFLATED, NoteLevel::Info, GroupId(0), InstId(0), [n, 0, 0, 0, 0, 0, 0, 0]);
+            e.seq_note(
+                note::CONFLATED,
+                NoteLevel::Info,
+                GroupId(0),
+                InstId(0),
+                [n, 0, 0, 0, 0, 0, 0, 0],
+            );
         }
         11 => {
             let v = VenueId((arg & 0xFF) as u8);
@@ -1783,14 +2059,26 @@ pub(crate) fn sys_timer<'a, D: Driver<S>, S: StrategySet>(
             });
         }
         12 | 13 => {
-            let kind = if k == 12 { StorageKind::PersistLag } else { StorageKind::DiskLow };
+            let kind = if k == 12 {
+                StorageKind::PersistLag
+            } else {
+                StorageKind::DiskLow
+            };
             let level = (arg & 0xFF) as u8;
             e.trace.rec("apply.Storage", k.into(), u64::from(level));
             crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Storage { kind, level })?;
         }
         14 => {
             e.trace.rec("apply.Storage", 14, 0);
-            crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Storage { kind: StorageKind::Both, level: 0 })?;
+            crate::mode_glue::apply_mode(
+                e,
+                inst,
+                drv,
+                ModeInput::Storage {
+                    kind: StorageKind::Both,
+                    level: 0,
+                },
+            )?;
         }
         15 => {
             let v = VenueId((arg & 0xFF) as u8);
@@ -1806,7 +2094,12 @@ pub(crate) fn sys_timer<'a, D: Driver<S>, S: StrategySet>(
         16 => {
             let a = AccountId(((arg >> 8) & 0xFF) as u8);
             e.trace.rec("apply.KillSelfTest", u64::from(a.0), 0);
-            crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Gate(GateEvent::KillSelfTest { account: a }))?;
+            crate::mode_glue::apply_mode(
+                e,
+                inst,
+                drv,
+                ModeInput::Gate(GateEvent::KillSelfTest { account: a }),
+            )?;
         }
         17 => {
             let n = usize::from(e.sp.notify_per_continue);
@@ -1827,7 +2120,12 @@ pub(crate) fn sys_timer<'a, D: Driver<S>, S: StrategySet>(
     Ok(())
 }
 
-fn refdata_recheck_timer<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, assembly: u16) -> R<()> {
+fn refdata_recheck_timer<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    assembly: u16,
+) -> R<()> {
     e.drain.recheck_due = false;
     e.drain.recheck_done = true;
     let mut stage_arg: Option<(u64, u64)> = None;
@@ -1850,7 +2148,13 @@ fn refdata_recheck_timer<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mu
         Some((st, arg)) => {
             e.drain.recheck_ok = false;
             e.cmd.active.pending_refdata = None;
-            e.seq_note(note::REFDATA_RECHECK_FAILED, NoteLevel::P1, GroupId(0), InstId(0), [st, arg, 0, 0, 0, 0, 0, 0]);
+            e.seq_note(
+                note::REFDATA_RECHECK_FAILED,
+                NoteLevel::P1,
+                GroupId(0),
+                InstId(0),
+                [st, arg, 0, 0, 0, 0, 0, 0],
+            );
         }
     }
     drain_check(e, inst, drv)
@@ -1859,21 +2163,33 @@ fn refdata_recheck_timer<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mu
 // ------------------------------------------------------------------------------- funding
 
 /// Synthesis of every unsettled (account, inst) of venue `v` up to settle time `at`.
-pub(crate) fn synth_funding<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, v: VenueId, at: i64) -> R<()> {
+pub(crate) fn synth_funding<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    v: VenueId,
+    at: i64,
+) -> R<()> {
     let insts: Vec<InstId> = e.rd.insts_of_venue(v).to_vec();
     let n_acc = crate::engine::account_count(&e.rd);
     for a in 1..=n_acc {
         let a = AccountId(a as u8);
         for i in insts.iter().copied() {
-            let Some(r) = e.market.row(i).copied() else { continue };
+            let Some(r) = e.market.row(i).copied() else {
+                continue;
+            };
             if r.next_funding_ns == 0 || r.next_funding_ns > at || r.settled_cut_ns >= r.next_funding_ns {
                 continue;
             }
             if e.ledger.pos(a, i).qty.0 == 0 {
                 continue;
             }
-            e.trace.rec("ledger.synth_funding", u64::from(a.0), u64::from(i.0));
-            if let Some(mut f) = e.ledger.synth_funding(a, i, r.mark_px, r.funding_rate, r.next_funding_ns) {
+            e.trace
+                .rec("ledger.synth_funding", u64::from(a.0), u64::from(i.0));
+            if let Some(mut f) = e
+                .ledger
+                .synth_funding(a, i, r.mark_px, r.funding_rate, r.next_funding_ns)
+            {
                 f.rx_tsc = Tsc(0);
                 f.synth = 1;
                 e.out.push(RecordFlags(0), &f);
@@ -1896,10 +2212,22 @@ pub(crate) fn synth_funding<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: 
 
 // ------------------------------------------------------------------------------- recon
 
-pub(crate) fn reconcile<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, slot: &InputSlot) -> R<()> {
-    let Some(r) = slot.read::<ReconcileReport>() else { return Ok(()) };
+pub(crate) fn reconcile<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    slot: &InputSlot,
+) -> R<()> {
+    let Some(r) = slot.read::<ReconcileReport>() else {
+        return Ok(());
+    };
     let key = (r.report_id, r.account, r.venue);
-    let gi = match e.cmd.recon.iter().position(|g| (g.report_id, g.account, g.venue) == key) {
+    let gi = match e
+        .cmd
+        .recon
+        .iter()
+        .position(|g| (g.report_id, g.account, g.venue) == key)
+    {
         Some(i) => i,
         None => {
             e.cmd.recon.push(ReconGroupState {
@@ -1935,10 +2263,13 @@ pub(crate) fn reconcile<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut
         g.stored.push(r);
     }
     if r.item == ITEM_POSITION {
-        e.cmd.recon_diff.retain(|x| x.0 != (r.report_id, r.account, r.inst));
         e.cmd
             .recon_diff
-            .push(((r.report_id, r.account, r.inst), Qty(r.exch_qty.0 - r.engine_qty.0)));
+            .retain(|x| x.0 != (r.report_id, r.account, r.inst));
+        e.cmd.recon_diff.push((
+            (r.report_id, r.account, r.inst),
+            Qty(r.exch_qty.0 - r.engine_qty.0),
+        ));
         e.cmd.recon_view.retain(|x| x.0 != r.report_id);
         e.cmd.recon_view.push((r.report_id, r.view_seq));
     }
@@ -1948,8 +2279,16 @@ pub(crate) fn reconcile<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut
     }
     let g = e.cmd.recon.remove(gi);
     // ① AUTO_EXTERNAL.
-    let summary_flags = g.stored.iter().find(|x| x.item == ITEM_SUMMARY).map_or(0, |x| x.sflags);
-    for it in g.stored.iter().filter(|x| x.item == ITEM_POSITION && x.sflags & ReconcileReport::AUTO_EXTERNAL != 0) {
+    let summary_flags = g
+        .stored
+        .iter()
+        .find(|x| x.item == ITEM_SUMMARY)
+        .map_or(0, |x| x.sflags);
+    for it in g
+        .stored
+        .iter()
+        .filter(|x| x.item == ITEM_POSITION && x.sflags & ReconcileReport::AUTO_EXTERNAL != 0)
+    {
         if auto_external_check(e, it, summary_flags) {
             let mark = e.market.row(it.inst).map_or(hft_types::Px(0), |r| r.mark_px);
             let x = hft_ledger::Ledger::auto_external_fill(
@@ -2005,7 +2344,8 @@ pub(crate) fn reconcile<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut
     }
     // ③ funding window sweep.
     let mut outv = hft_ledger::FixedVec::<FundingRecon, 64>::new();
-    e.trace.rec("ledger.funding_window_sweep", u64::from(g.account.0), 0);
+    e.trace
+        .rec("ledger.funding_window_sweep", u64::from(g.account.0), 0);
     e.ledger
         .funding_window_sweep(g.account, g.venue, e.now.utc_ns, e.now.engine_ns, &mut outv);
     for fr in outv.iter().copied().collect::<Vec<_>>() {

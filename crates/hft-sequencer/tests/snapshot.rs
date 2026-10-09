@@ -7,7 +7,9 @@ use hft_journal::{RollAt, RollReason};
 use hft_sequencer::market::{ConnLiveRow, MarketLastRow};
 use hft_sequencer::snapshot::{ClockCalRow, GroupSeqRow, StrategyRowHdr};
 use hft_sequencer::timers::TimerRow;
-use hft_sequencer::{ActiveConfigRow, CmdDedupHdr, CmdDedupRow, ReconPendingHdr, VenueNoticeRow, ViewerPreviewRow};
+use hft_sequencer::{
+    ActiveConfigRow, CmdDedupHdr, CmdDedupRow, ReconPendingHdr, VenueNoticeRow, ViewerPreviewRow,
+};
 use zerocopy::FromBytes;
 
 use crate::common::*;
@@ -24,7 +26,9 @@ fn sections(body: &[u8]) -> Vec<(u16, u16)> {
     let mut v = Vec::new();
     let mut off = 0usize;
     while let Some(b) = body.get(off..off + 16) {
-        let Ok(sh) = SectionHdr::read_from_bytes(b) else { break };
+        let Ok(sh) = SectionHdr::read_from_bytes(b) else {
+            break;
+        };
         v.push((sh.section, sh.version));
         off += 16 + sh.len as usize;
     }
@@ -63,8 +67,21 @@ fn seq_242_bootblock_order() {
         .filter_map(|r| hft_sequencer::types::read_body::<hft_event::BlobHdr>(&r.body).map(|b| b.blob.kind))
         .collect();
     use hft_event::BlobKind as K;
-    assert_eq!(blobs, vec![K::Refdata, K::Engine, K::StrategyParams, K::StrategyParams, K::StrategyParams, K::RiskParams]);
-    let si = kinds.iter().position(|k| *k == EventKind::STATE_SNAPSHOT).unwrap();
+    assert_eq!(
+        blobs,
+        vec![
+            K::Refdata,
+            K::Engine,
+            K::StrategyParams,
+            K::StrategyParams,
+            K::StrategyParams,
+            K::RiskParams
+        ]
+    );
+    let si = kinds
+        .iter()
+        .position(|k| *k == EventKind::STATE_SNAPSHOT)
+        .unwrap();
     assert!(kinds[3..si].iter().all(|k| *k == EventKind::CONFIG_BLOB));
     assert_eq!(*kinds.last().unwrap(), EventKind::SEGMENT_ROLL);
     let (hd, _) = snap(&new.records[si]);
@@ -84,7 +101,14 @@ fn seq_244_roll_next_not_ready() {
     h.step();
     assert_eq!(h.j().segments.len(), segs0);
     let r1: Vec<_> = h.since(m);
-    let t = r1.iter().position(|r| r.kind == EventKind::TIMER && r.read::<hft_event::Timer>().is_some_and(|t| t.owner == 1 && t.timer_id == 2)).expect("roll timer");
+    let t = r1
+        .iter()
+        .position(|r| {
+            r.kind == EventKind::TIMER
+                && r.read::<hft_event::Timer>()
+                    .is_some_and(|t| t.owner == 1 && t.timer_id == 2)
+        })
+        .expect("roll timer");
     assert!(r1.get(t + 1).is_none_or(|r| r.role() == Role::Input));
     h.quote(A1, "50000", "50005");
     h.step();
@@ -99,7 +123,12 @@ fn seq_248_section_write_order() {
     let mut h = steady();
     let o = on_demand(&mut h);
     let s: Vec<u16> = sections(&o.body[96..]).iter().map(|x| x.0).collect();
-    assert_eq!(s, vec![1, 13, 22, 2, 3, 12, 4, 14, 17, 18, 23, 5, 8, 9, 10, 15, 16, 19, 20, 24, 25, 26, 6, 7, 21]);
+    assert_eq!(
+        s,
+        vec![
+            1, 13, 22, 2, 3, 12, 4, 14, 17, 18, 23, 5, 8, 9, 10, 15, 16, 19, 20, 24, 25, 26, 6, 7, 21
+        ]
+    );
     assert_eq!(snap(&o).0.n_sections, 25);
 }
 
@@ -155,8 +184,22 @@ fn seq_252_row_versions() {
     let mut h = steady();
     let o = on_demand(&mut h);
     let s = sections(&o.body[96..]);
-    for (sec, ver) in [(5u16, 2u16), (8, 2), (9, 1), (10, 6), (15, 2), (16, 1), (19, 2), (24, 1), (26, 2)] {
-        assert_eq!(s.iter().find(|x| x.0 == sec).map(|x| x.1), Some(ver), "section {sec}");
+    for (sec, ver) in [
+        (5u16, 2u16),
+        (8, 2),
+        (9, 1),
+        (10, 6),
+        (15, 2),
+        (16, 1),
+        (19, 2),
+        (24, 1),
+        (26, 2),
+    ] {
+        assert_eq!(
+            s.iter().find(|x| x.0 == sec).map(|x| x.1),
+            Some(ver),
+            "section {sec}"
+        );
     }
 }
 
@@ -165,7 +208,17 @@ fn seq_255_venue_notice_expiry() {
     let mut h = steady();
     let t1000 = UTC0 + 9 * 3_600_000_000_000 + 30 * 60_000_000_000;
     let t1030 = t1000 + 30 * 60_000_000_000;
-    h.cmd_confirmed(AC1, &ControlCmd::VenueNotice { venue: B, kind: 3, _pad: 0, inst: hft_types::InstId(0), a: t1000, b: t1030 });
+    h.cmd_confirmed(
+        AC1,
+        &ControlCmd::VenueNotice {
+            venue: B,
+            kind: 3,
+            _pad: 0,
+            inst: hft_types::InstId(0),
+            a: t1000,
+            b: t1030,
+        },
+    );
     h.run();
     let o1 = on_demand(&mut h);
     assert!(snap(&o1).1.notices.iter().any(|r| r.kind == 3 && r.venue == B));

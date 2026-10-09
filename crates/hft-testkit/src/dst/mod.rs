@@ -36,10 +36,10 @@ pub use faults::{
 pub use invariants::{InvId, InvariantSet};
 pub use run::{RunRecord, run, run_record};
 pub use scenario::{DstSuite, Scenario, SeedSet, SuiteSel};
-pub use shrink::shrink;
-pub use sut::{BootCtx, BootFail, CrashPoint, FrameRec, InputRec, JRec, OutRing, Source, StepOut, Sut};
 #[cfg(feature = "seq")]
 pub use seq::{SeqSut, SimMatcher};
+pub use shrink::shrink;
+pub use sut::{BootCtx, BootFail, CrashPoint, FrameRec, InputRec, JRec, OutRing, Source, StepOut, Sut};
 pub use toy::ToyEngine;
 pub use venue_behavior::MockVenueCfg;
 pub use world::{World, WorldSpec};

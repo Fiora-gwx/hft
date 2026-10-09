@@ -8,10 +8,11 @@ use std::cell::RefCell;
 
 use hft_strategy_sdk::params::{RawParams, decode_body, encode_body, schema_digest, schema_json};
 use hft_strategy_sdk::{
-    AdviceOut, BboView, CmdDesc, Ctx, EvMask, EventRef, FieldDesc, FundingView, GroupTable, LegView, MinorChange,
-    ModelLayoutDesc, ModelParamEffect, ModelViews, Now, OrderRef, OrderView, ParamError, ParamSchemaDesc, Part,
-    RefView, Relax, ResetPreview, RestoreError, RiskStateView, SnapshotProgress, SnapshotReader, SnapshotWriter,
-    StrategyDesc, StrategyInstance, StrategySet, SubsBuilder, TargetView, Unit, Views,
+    AdviceOut, BboView, CmdDesc, Ctx, EvMask, EventRef, FieldDesc, FundingView, GroupTable, LegView,
+    MinorChange, ModelLayoutDesc, ModelParamEffect, ModelViews, Now, OrderRef, OrderView, ParamError,
+    ParamSchemaDesc, Part, RefView, Relax, ResetPreview, RestoreError, RiskStateView, SnapshotProgress,
+    SnapshotReader, SnapshotWriter, StrategyDesc, StrategyInstance, StrategySet, SubsBuilder, TargetView,
+    Unit, Views,
 };
 use hft_types::{AccountId, GroupId, InstId, RunMode, StrategyId};
 
@@ -363,11 +364,19 @@ macro_rules! test_set {
             fn kinds() -> &'static [StrategyDesc] {
                 &$kinds
             }
-            fn decode_params(kind_id: u16, body: &[u8], schema_ver: u16, g: &GroupTable) -> Result<P, ParamError> {
-                let d = $kinds.iter().find(|d| d.kind_id == kind_id).ok_or(ParamError::SchemaMismatch {
-                    want: 0,
-                    got: u32::from(kind_id),
-                })?;
+            fn decode_params(
+                kind_id: u16,
+                body: &[u8],
+                schema_ver: u16,
+                g: &GroupTable,
+            ) -> Result<P, ParamError> {
+                let d = $kinds
+                    .iter()
+                    .find(|d| d.kind_id == kind_id)
+                    .ok_or(ParamError::SchemaMismatch {
+                        want: 0,
+                        got: u32::from(kind_id),
+                    })?;
                 if g.len() > g.capacity() {
                     return Err(ParamError::TooManyGroups);
                 }
@@ -383,14 +392,22 @@ macro_rules! test_set {
                 }
                 Ok(())
             }
-            fn create(i: StrategyInstance, _: &P, g: &GroupTable, _: &RefView<'_>) -> Result<TestInst, ParamError> {
+            fn create(
+                i: StrategyInstance,
+                _: &P,
+                g: &GroupTable,
+                _: &RefView<'_>,
+            ) -> Result<TestInst, ParamError> {
                 let fail = SCRIPT.with(|s| {
                     let mut s = s.borrow_mut();
                     s.calls.push((i.strategy, "create"));
                     s.fail_create
                 });
                 if fail {
-                    return Err(ParamError::Invalid { field_ix: 0, code: 9 });
+                    return Err(ParamError::Invalid {
+                        field_ix: 0,
+                        code: 9,
+                    });
                 }
                 Ok(TestInst {
                     i,
@@ -460,7 +477,10 @@ macro_rules! test_set {
                     x.fail_on_params
                 });
                 if fail {
-                    return Err(ParamError::Invalid { field_ix: 1, code: 9 });
+                    return Err(ParamError::Invalid {
+                        field_ix: 1,
+                        code: 9,
+                    });
                 }
                 s.groups = g.clone();
                 Ok(())
@@ -469,10 +489,19 @@ macro_rules! test_set {
                 let script = SCRIPT.with(|x| {
                     let x = x.borrow();
                     (
-                        x.subs.iter().find(|e| e.0 == s.i.strategy).map(|e| e.1.clone()),
-                        x.model_tick.iter().find(|e| e.0 == s.i.strategy).map(|e| e.1),
+                        x.subs
+                            .iter()
+                            .find(|e| e.0 == s.i.strategy)
+                            .map(|e| e.1.clone()),
+                        x.model_tick
+                            .iter()
+                            .find(|e| e.0 == s.i.strategy)
+                            .map(|e| e.1),
                         x.warmup_both.contains(&s.i.strategy),
-                        x.model_own.iter().find(|e| e.0 == s.i.strategy).map(|e| e.1),
+                        x.model_own
+                            .iter()
+                            .find(|e| e.0 == s.i.strategy)
+                            .map(|e| e.1),
                     )
                 });
                 match script.0 {
@@ -503,7 +532,10 @@ macro_rules! test_set {
                 w.put_u64(s.n_events);
             }
             fn restore(s: &mut TestInst, r: &mut SnapshotReader<'_>) -> Result<(), RestoreError> {
-                let cur = $kinds.iter().find(|d| d.kind_id == s.i.kind_id).map_or(0, |d| d.version);
+                let cur = $kinds
+                    .iter()
+                    .find(|d| d.kind_id == s.i.kind_id)
+                    .map_or(0, |d| d.version);
                 let v = r.desc_version();
                 if v != cur && v + 1 != cur {
                     return Err(RestoreError::VersionUnsupported);
@@ -526,9 +558,18 @@ macro_rules! test_set {
                         elems: &[],
                     }],
                 };
-                if SCRIPT.with(|x| x.borrow().layout_alt) { &ALT } else { &ModelLayoutDesc::EMPTY }
+                if SCRIPT.with(|x| x.borrow().layout_alt) {
+                    &ALT
+                } else {
+                    &ModelLayoutDesc::EMPTY
+                }
             }
-            fn model_on_event<V: ModelViews>(m: &mut TestModel, ev: &EventRef<'_>, v: &V, out: &mut AdviceOut<'_>) {
+            fn model_on_event<V: ModelViews>(
+                m: &mut TestModel,
+                ev: &EventRef<'_>,
+                v: &V,
+                out: &mut AdviceOut<'_>,
+            ) {
                 m.n_events += 1;
                 let (kind, gix, inst) = event_name(ev);
                 let got = Got {
@@ -562,17 +603,31 @@ macro_rules! test_set {
                     });
                 }
             }
-            fn model_on_params(m: &mut TestModel, p: &P, g: &GroupTable, _: &RefView<'_>) -> ModelParamEffect {
+            fn model_on_params(
+                m: &mut TestModel,
+                p: &P,
+                g: &GroupTable,
+                _: &RefView<'_>,
+            ) -> ModelParamEffect {
                 m.groups = g.clone();
                 SCRIPT.with(|x| {
                     let mut x = x.borrow_mut();
                     x.calls.push((m.i.strategy, "model_on_params"));
                     x.model_params.push((m.i.strategy, p.get(F_THR)));
                     let v = p.get(F_THR);
-                    x.reset_effect.iter().find(|e| e.0 as i64 == v).map(|e| e.1.clone()).unwrap_or(ModelParamEffect::None)
+                    x.reset_effect
+                        .iter()
+                        .find(|e| e.0 as i64 == v)
+                        .map(|e| e.1.clone())
+                        .unwrap_or(ModelParamEffect::None)
                 })
             }
-            fn model_snapshot_chunk(m: &TestModel, from_gix: u16, w: &mut SnapshotWriter, _max: u32) -> SnapshotProgress {
+            fn model_snapshot_chunk(
+                m: &TestModel,
+                from_gix: u16,
+                w: &mut SnapshotWriter,
+                _max: u32,
+            ) -> SnapshotProgress {
                 w.put_u64(m.n_events);
                 if usize::from(from_gix) + 1 < usize::from(m.groups.len()) {
                     SnapshotProgress::More(from_gix + 1)
@@ -616,7 +671,10 @@ macro_rules! test_set {
                     .map(|d| schema_json(d, &ModelLayoutDesc::EMPTY, d.schema.version))
             }
             fn cmds(kind_id: u16) -> &'static [CmdDesc] {
-                $kinds.iter().find(|d| d.kind_id == kind_id).map_or(&[], |d| d.cmds)
+                $kinds
+                    .iter()
+                    .find(|d| d.kind_id == kind_id)
+                    .map_or(&[], |d| d.cmds)
             }
         }
     };

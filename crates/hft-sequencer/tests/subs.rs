@@ -42,7 +42,13 @@ fn seq_228_subscribe_on_union_change() {
     let mut h = steady();
     // a2 is subscribed by s2's group legs? No: a3 starts unsubscribed.
     let n = h.io_ref().feed.len();
-    set_subs(S1, vec![(A1, 0, EvMask::BBO, Part::Fast), (A3, 0, EvMask(EvMask::BBO.0 | EvMask::TRADE.0), Part::Fast)]);
+    set_subs(
+        S1,
+        vec![
+            (A1, 0, EvMask::BBO, Part::Fast),
+            (A3, 0, EvMask(EvMask::BBO.0 | EvMask::TRADE.0), Part::Fast),
+        ],
+    );
     let mut p = Spb::s1(2);
     p.values[F_THR] = 7;
     h.set_params(&p);
@@ -55,7 +61,11 @@ fn seq_228_subscribe_on_union_change() {
     p.values[F_THR] = 8;
     h.set_params(&p);
     h.run();
-    assert!(h.io_ref().feed[n..].iter().all(|(_, c)| !matches!(c, FeedCmd::Subscribe { inst, .. } if *inst == A3)));
+    assert!(
+        h.io_ref().feed[n..]
+            .iter()
+            .all(|(_, c)| !matches!(c, FeedCmd::Subscribe { inst, .. } if *inst == A3))
+    );
     // Dropped by everyone: Unsubscribe.
     set_subs(S1, vec![(A1, 0, EvMask::BBO, Part::Fast)]);
     let n = h.io_ref().feed.len();
@@ -63,7 +73,11 @@ fn seq_228_subscribe_on_union_change() {
     p.values[F_THR] = 9;
     h.set_params(&p);
     h.run();
-    assert!(h.io_ref().feed[n..].iter().any(|(_, c)| matches!(c, FeedCmd::Unsubscribe { inst } if *inst == A3)));
+    assert!(
+        h.io_ref().feed[n..]
+            .iter()
+            .any(|(_, c)| matches!(c, FeedCmd::Unsubscribe { inst } if *inst == A3))
+    );
 }
 
 #[test]
@@ -88,10 +102,15 @@ fn seq_232_startup_subscribe_once() {
     reset_script();
     let mut h = b0().boot();
     h.step();
-    let subs: Vec<_> = h.io_ref().feed.iter().filter_map(|(_, c)| match c {
-        FeedCmd::Subscribe { inst, .. } => Some(*inst),
-        _ => None,
-    }).collect();
+    let subs: Vec<_> = h
+        .io_ref()
+        .feed
+        .iter()
+        .filter_map(|(_, c)| match c {
+            FeedCmd::Subscribe { inst, .. } => Some(*inst),
+            _ => None,
+        })
+        .collect();
     let mut d = subs.clone();
     d.sort_by_key(|i| i.0);
     d.dedup();
@@ -110,9 +129,18 @@ fn seq_233_group_index_delivery() {
     let mut h = b.boot();
     h.steady();
     clear_log();
-    h.cmd(AC2, &ControlCmd::SetMode { scope: scope(S2, AC2, g2b), mode: RunMode::CloseOnly });
+    h.cmd(
+        AC2,
+        &ControlCmd::SetMode {
+            scope: scope(S2, AC2, g2b),
+            mode: RunMode::CloseOnly,
+        },
+    );
     h.run();
-    let m: Vec<Got> = log().into_iter().filter(|g| g.kind == "Mode" && !g.model).collect();
+    let m: Vec<Got> = log()
+        .into_iter()
+        .filter(|g| g.kind == "Mode" && !g.model)
+        .collect();
     assert_eq!(m.len(), 1);
     assert_eq!(m[0].s, S2);
     assert_eq!(m[0].gix, 1);

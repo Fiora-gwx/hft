@@ -45,7 +45,9 @@ pub struct ParseCx<'a, S: StrategySet> {
 
 impl<S: StrategySet> core::fmt::Debug for ParseCx<'_, S> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("ParseCx").field("max_groups", &self.max_groups).finish_non_exhaustive()
+        f.debug_struct("ParseCx")
+            .field("max_groups", &self.max_groups)
+            .finish_non_exhaustive()
     }
 }
 
@@ -211,7 +213,10 @@ impl<'a> DriverView<'a> {
     }
     /// UTC of a TSC by the current segment calibration.
     pub fn utc_of(&self, t: Tsc) -> i64 {
-        let a = self.e.clock.anchor(Tsc(self.e.seg.calib_tsc), self.e.seg.calib_realtime_ns);
+        let a = self
+            .e
+            .clock
+            .anchor(Tsc(self.e.seg.calib_tsc), self.e.seg.calib_realtime_ns);
         let a = hft_strategy_sdk::EngineClockAnchor {
             tsc_hz_milli: self.e.seg.tsc_hz_milli,
             ..a

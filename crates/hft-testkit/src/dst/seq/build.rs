@@ -9,21 +9,21 @@ use hft_oms::{OmsConfig, PerTable};
 use hft_refdata::{
     AccountSpec as RdAccount, AccountVenueSpec, AssetClass, AssetSpec, CapFlags, DeadManCap, EcfBuilder,
     EngineSection, Exchange, FeeAssetRule, FeePair, FeeSpec, FundingSettleKind, InstKind, InstSpec as RdInst,
-    InstStatus, InstanceSpec, LimitBucket, LimitScope, LiqMarker, MarginData, MarginMode, PositionMode, RateLimit,
-    RdbBuilder, RefData, SimBalanceSpec, SimSpec, StaleGuardKind, TestnetKind, TsUnit, UidPolicy, VenueCaps,
-    VenueSpec as RdVenue,
+    InstStatus, InstanceSpec, LimitBucket, LimitScope, LiqMarker, MarginData, MarginMode, PositionMode,
+    RateLimit, RdbBuilder, RefData, SimBalanceSpec, SimSpec, StaleGuardKind, TestnetKind, TsUnit, UidPolicy,
+    VenueCaps, VenueSpec as RdVenue,
 };
 use hft_risk::{
     AcctLimits, DEFAULT_MARGIN, FixedVec, GroupLimits, GroupLimitsRow, GwMap, MarginLimits, PreVec, PxBand,
     RiskParams, VenueLimits,
 };
 use hft_sequencer::{CapacitiesRow, ConfigSet, EngineSetup, ParsedParams, RingLimit, SegClock, SeqParamsRow};
-use hft_strategy_sdk::params::{RawParams, encode_body};
 use hft_strategy_sdk::params::SchemaView;
+use hft_strategy_sdk::params::{RawParams, encode_body};
 use hft_strategy_sdk::{StrategySet, VenueSet};
 use hft_types::{
-    AccountId, AssetExp, AssetId, GroupId, HostClass, InstId, MarketKind, Notional, Px, Qty, Rate, StrategyId,
-    VenueId,
+    AccountId, AssetExp, AssetId, GroupId, HostClass, InstId, MarketKind, Notional, Px, Qty, Rate,
+    StrategyId, VenueId,
 };
 use zerocopy::IntoBytes;
 
@@ -71,15 +71,35 @@ fn venue_row(id: VenueId, perp: bool) -> RdVenue {
 fn caps_row(v: VenueId, perp: bool, reduce_only: bool) -> VenueCaps {
     VenueCaps {
         venue: v,
-        market: if perp { MarketKind::LinearPerp } else { MarketKind::Spot },
+        market: if perp {
+            MarketKind::LinearPerp
+        } else {
+            MarketKind::Spot
+        },
         fee_asset_rule: FeeAssetRule::Quote,
         reduce_only,
-        required_position_mode: if perp { PositionMode::OneWay } else { PositionMode::NotApplicable },
-        required_margin_mode: if perp { MarginMode::Cross } else { MarginMode::NotApplicable },
+        required_position_mode: if perp {
+            PositionMode::OneWay
+        } else {
+            PositionMode::NotApplicable
+        },
+        required_margin_mode: if perp {
+            MarginMode::Cross
+        } else {
+            MarginMode::NotApplicable
+        },
         required_multi_asset: if perp { Some(false) } else { None },
         required_spot_borrow: None,
-        funding_settle: if perp { FundingSettleKind::PerSymbolPush } else { FundingSettleKind::NotApplicable },
-        margin_data: if perp { MarginData::Push } else { MarginData::NotApplicable },
+        funding_settle: if perp {
+            FundingSettleKind::PerSymbolPush
+        } else {
+            FundingSettleKind::NotApplicable
+        },
+        margin_data: if perp {
+            MarginData::Push
+        } else {
+            MarginData::NotApplicable
+        },
         own_liquidation_marker: LiqMarker::NotIdentifiable,
         liq_marker_arg: "".into(),
         ignorable_user_events: vec!["evt_ignorable".into()].into(),
@@ -120,9 +140,15 @@ fn dec_str(raw: i64, exp: i8) -> String {
 /// Price and quantity exponents of an asset of the world (BTC −4 / −8; the quote asset −6 / −6).
 pub fn asset_exp(w: &WorldSpec, a: AssetId) -> AssetExp {
     if w.insts.iter().any(|i| i.base == a) {
-        AssetExp { px_exp: -4, qty_exp: -8 }
+        AssetExp {
+            px_exp: -4,
+            qty_exp: -8,
+        }
     } else {
-        AssetExp { px_exp: -6, qty_exp: -6 }
+        AssetExp {
+            px_exp: -6,
+            qty_exp: -6,
+        }
     }
 }
 
@@ -176,7 +202,11 @@ pub fn refdata_blob(w: &WorldSpec, all_sim: bool) -> Vec<u8> {
         b.asset(AssetSpec {
             id: a,
             name: asset_name(w, a).into(),
-            class: if base { AssetClass::Crypto } else { AssetClass::Stable },
+            class: if base {
+                AssetClass::Crypto
+            } else {
+                AssetClass::Stable
+            },
             exp: asset_exp(w, a),
             px_max: Px(1_000_000_000_000_000),
             qty_max: Qty(1_000_000_000_000_000_000),
@@ -247,7 +277,11 @@ pub fn refdata_blob(w: &WorldSpec, all_sim: bool) -> Vec<u8> {
             bound_instance: binding_of(w, a.id).map_or(StrategyId(0), |s| s.instance),
             is_prod: false,
             venues: vbits(&a.venues),
-            label: if sim { format!("sim-{}", a.id.0) } else { format!("acct-{}", a.id.0) },
+            label: if sim {
+                format!("sim-{}", a.id.0)
+            } else {
+                format!("acct-{}", a.id.0)
+            },
             uid_policy: UidPolicy::Verified,
         });
         if sim {
@@ -306,12 +340,30 @@ pub fn caps_row_of(w: &WorldSpec) -> CapacitiesRow {
 /// Sequencer parameters of a DST run (`keyframe_period_ms = 60 000`).
 pub fn seq_row() -> SeqParamsRow {
     let mut rings = [RingLimit::default(); 8];
-    rings[1] = RingLimit { per_ring: 4, total: 4 };
-    rings[2] = RingLimit { per_ring: 4, total: 4 };
-    rings[3] = RingLimit { per_ring: 32, total: 64 };
-    rings[4] = RingLimit { per_ring: 32, total: 0 };
-    rings[5] = RingLimit { per_ring: 32, total: 128 };
-    rings[6] = RingLimit { per_ring: 16, total: 16 };
+    rings[1] = RingLimit {
+        per_ring: 4,
+        total: 4,
+    };
+    rings[2] = RingLimit {
+        per_ring: 4,
+        total: 4,
+    };
+    rings[3] = RingLimit {
+        per_ring: 32,
+        total: 64,
+    };
+    rings[4] = RingLimit {
+        per_ring: 32,
+        total: 0,
+    };
+    rings[5] = RingLimit {
+        per_ring: 32,
+        total: 128,
+    };
+    rings[6] = RingLimit {
+        per_ring: 16,
+        total: 16,
+    };
     SeqParamsRow {
         rings,
         md_round_ns: 50_000,
@@ -490,7 +542,12 @@ pub fn spb_blob<S: StrategySet>(w: &WorldSpec, s: &StrategyBinding, version: u64
     } else {
         s.params.clone()
     };
-    let hwm = groups.iter().map(|g| g.id.counter()).max().unwrap_or(0).max(1_000);
+    let hwm = groups
+        .iter()
+        .map(|g| g.id.counter())
+        .max()
+        .unwrap_or(0)
+        .max(1_000);
     let h = StrategyParamsHdr {
         strategy: s.instance,
         account: s.account,
@@ -549,7 +606,8 @@ pub fn spb_ref(b: &[u8], version: u64) -> BlobRef {
 
 /// Parses an SPB1 blob for the sequencer.
 pub fn parse_spb<S: StrategySet>(b: &[u8], rd: &RefData) -> Result<ParsedParams<S>, String> {
-    hft_sequencer::parsed::parse_params::<S>(b, sha256(b), rd, 16, None).map_err(|d| format!("params rejected: {d:#x}"))
+    hft_sequencer::parsed::parse_params::<S>(b, sha256(b), rd, 16, None)
+        .map_err(|d| format!("params rejected: {d:#x}"))
 }
 
 /// Accounts whose `ExecConfig` row is a Sim row.
@@ -595,7 +653,9 @@ pub fn engine_setup(w: &WorldSpec, tsc_hz: u64, epoch: u32) -> EngineSetup {
         oms,
         ledger: LedgerConfig::default(),
         exec: exec_config(w),
-        gws: GwMap { venues: venues.clone() },
+        gws: GwMap {
+            venues: venues.clone(),
+        },
         feeds: VenueSet(vbits(&venues)),
         keys_required: keys,
         role_prod: false,
@@ -626,11 +686,17 @@ pub fn risk_decode(b: &[u8], _a: AccountId, _rd: &RefData) -> Result<RiskParams,
     if b.get(..4) != Some(b"DSTR") {
         return Err(hft_sequencer::codes::detail::BAD_VALUE);
     }
-    RISK_OF_RUN.with(|r| r.borrow().clone()).ok_or(hft_sequencer::codes::detail::BAD_VALUE)
+    RISK_OF_RUN
+        .with(|r| r.borrow().clone())
+        .ok_or(hft_sequencer::codes::detail::BAD_VALUE)
 }
 
 /// The empty-start configuration of the world.
-pub fn config_set<S: StrategySet>(w: &WorldSpec, rd: &RefData, rd_blob: Vec<u8>) -> Result<ConfigSet<S>, String> {
+pub fn config_set<S: StrategySet>(
+    w: &WorldSpec,
+    rd: &RefData,
+    rd_blob: Vec<u8>,
+) -> Result<ConfigSet<S>, String> {
     let caps = caps_row_of(w);
     let seq = seq_row();
     let risk = risk_params(w);
@@ -653,5 +719,9 @@ pub fn config_set<S: StrategySet>(w: &WorldSpec, rd: &RefData, rd_blob: Vec<u8>)
 
 /// Group ids of an account in the world.
 pub fn groups_of(w: &WorldSpec, a: AccountId) -> Vec<(StrategyId, GroupId)> {
-    w.groups.iter().filter(|g| g.account == a).map(|g| (g.instance, g.group)).collect()
+    w.groups
+        .iter()
+        .filter(|g| g.account == a)
+        .map(|g| (g.instance, g.group))
+        .collect()
 }

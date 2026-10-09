@@ -209,7 +209,11 @@ impl Market {
         }
         let book_resync = books.l2(i).is_some_and(|b| b.state() == BookState::Resyncing);
         let resync = !any_clean || row.bbo_flags & BBO_RESYNC != 0 || book_resync;
-        let rx_tsc = if top.seq > self.rx_from_seq { top.rx_tsc } else { Tsc(0) };
+        let rx_tsc = if top.seq > self.rx_from_seq {
+            top.rx_tsc
+        } else {
+            Tsc(0)
+        };
         let src = if row.bbo_hw_rx_ns == 0 {
             RxTsSrc::None
         } else if row.bbo_flags & BBO_SW_TS != 0 {
@@ -234,7 +238,6 @@ impl Market {
         }
     }
 }
-
 
 impl Default for MarketLastRow {
     fn default() -> MarketLastRow {

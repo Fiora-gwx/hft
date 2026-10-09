@@ -81,12 +81,30 @@ pub const CAPACITIES_ROW_VERSION: u16 = 1;
 impl Default for SeqParamsRow {
     fn default() -> SeqParamsRow {
         let mut rings = [RingLimit::default(); 8];
-        rings[RingClass::Ctl as usize] = RingLimit { per_ring: 4, total: 4 };
-        rings[RingClass::Hk as usize] = RingLimit { per_ring: 4, total: 4 };
-        rings[RingClass::Rep as usize] = RingLimit { per_ring: 32, total: 64 };
-        rings[RingClass::Chain as usize] = RingLimit { per_ring: 32, total: 0 };
-        rings[RingClass::Bbo as usize] = RingLimit { per_ring: 32, total: 128 };
-        rings[RingClass::Advice as usize] = RingLimit { per_ring: 16, total: 16 };
+        rings[RingClass::Ctl as usize] = RingLimit {
+            per_ring: 4,
+            total: 4,
+        };
+        rings[RingClass::Hk as usize] = RingLimit {
+            per_ring: 4,
+            total: 4,
+        };
+        rings[RingClass::Rep as usize] = RingLimit {
+            per_ring: 32,
+            total: 64,
+        };
+        rings[RingClass::Chain as usize] = RingLimit {
+            per_ring: 32,
+            total: 0,
+        };
+        rings[RingClass::Bbo as usize] = RingLimit {
+            per_ring: 32,
+            total: 128,
+        };
+        rings[RingClass::Advice as usize] = RingLimit {
+            per_ring: 16,
+            total: 16,
+        };
         SeqParamsRow {
             rings,
             md_round_ns: 50_000,
@@ -186,7 +204,8 @@ impl CapacitiesRow {
     }
     /// Per-input notification bound `U = max_cells_total + 128`.
     pub fn notify_unit(&self) -> u32 {
-        self.max_cells_total.saturating_add(crate::notify::NOTIFY_QUEUE_CAP as u32)
+        self.max_cells_total
+            .saturating_add(crate::notify::NOTIFY_QUEUE_CAP as u32)
     }
 }
 

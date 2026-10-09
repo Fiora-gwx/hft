@@ -10,7 +10,10 @@ use crate::common::*;
 #[test]
 fn seq_001_seq_params_defaults() {
     let d = SeqParamsRow::default();
-    let rl = |p, t| RingLimit { per_ring: p, total: t };
+    let rl = |p, t| RingLimit {
+        per_ring: p,
+        total: t,
+    };
     assert_eq!(d.rings[1], rl(4, 4));
     assert_eq!(d.rings[2], rl(4, 4));
     assert_eq!(d.rings[3], rl(32, 64));
@@ -63,7 +66,8 @@ fn rd() -> RefData {
 
 fn load_validate(blob: &[u8], rd: &RefData) -> Result<EngineConfig, LoadErrCode> {
     let ec = EngineConfig::load(blob, None).map_err(|r| r.code())?;
-    ec.validate(rd, &[CAPS_VALIDATOR, SEQ_VALIDATOR]).map_err(|r| r.code())?;
+    ec.validate(rd, &[CAPS_VALIDATOR, SEQ_VALIDATOR])
+        .map_err(|r| r.code())?;
     Ok(ec)
 }
 
@@ -84,9 +88,15 @@ fn seq_003_seq_params_roundtrip() {
     // .3 two rows.
     let mut two = row.as_bytes().to_vec();
     two.extend_from_slice(row.as_bytes());
-    assert_eq!(load_validate(&engine_blob_rows(1, b0_caps().as_bytes(), &two, 2, 72), &rd).err(), Some(LoadErrCode::Structure));
+    assert_eq!(
+        load_validate(&engine_blob_rows(1, b0_caps().as_bytes(), &two, 2, 72), &rd).err(),
+        Some(LoadErrCode::Structure)
+    );
     // .4 zero rows.
-    assert_eq!(load_validate(&engine_blob_rows(1, b0_caps().as_bytes(), &[], 0, 72), &rd).err(), Some(LoadErrCode::Structure));
+    assert_eq!(
+        load_validate(&engine_blob_rows(1, b0_caps().as_bytes(), &[], 0, 72), &rd).err(),
+        Some(LoadErrCode::Structure)
+    );
 }
 
 #[test]
@@ -104,7 +114,10 @@ fn seq_004_engine_validator() {
         f(&mut x);
         x
     };
-    let rl = |p, t| RingLimit { per_ring: p, total: t };
+    let rl = |p, t| RingLimit {
+        per_ring: p,
+        total: t,
+    };
     let caps = b0_caps();
     assert_eq!(check(s(&|x| x.auto_resume_after_clean_drain = 2), caps), vr);
     assert_eq!(check(s(&|x| x.allow_missing_standby = 1), caps), Ok(()));

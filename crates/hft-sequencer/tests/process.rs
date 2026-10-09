@@ -1,10 +1,10 @@
 //! The processing order of one Input (TESTS.md "每条 Input 的处理顺序": SEQ-121–SEQ-169).
 
 use hft_event::{ControlCmd, EventKind, OrderDecision, RecordFlags, Role};
-use hft_types::{Px, Qty};
 use hft_sequencer::driver::live::RingId;
 use hft_strategy_sdk::{EventRef, ExecSpec};
 use hft_types::{GroupId, KillLevel, Side, Tsc};
+use hft_types::{Px, Qty};
 
 use crate::common::*;
 
@@ -70,13 +70,19 @@ fn seq_122_cmd_expiry() {
         let e = h.now() + 1_000;
         h.at((e as i64 + dt) as u64);
         let v0 = h.s.engine().risk.mode.ctl_state_version();
-        let id = h.cmd_with("cli:test", 4, AC1, &ControlCmd::Kill {
-            scope: scope(hft_types::StrategyId(0), AC1, GroupId(0)),
-            level: KillLevel::Account,
-            flatten: false,
-            cancel_resting: true,
-            hard: false,
-        }, |x| x.expires_tsc = Tsc(e));
+        let id = h.cmd_with(
+            "cli:test",
+            4,
+            AC1,
+            &ControlCmd::Kill {
+                scope: scope(hft_types::StrategyId(0), AC1, GroupId(0)),
+                level: KillLevel::Account,
+                flatten: false,
+                cancel_resting: true,
+                hard: false,
+            },
+            |x| x.expires_tsc = Tsc(e),
+        );
         let m = h.mark();
         h.run();
         let r = h.result_of(id).unwrap();
@@ -85,7 +91,11 @@ fn seq_122_cmd_expiry() {
         } else {
             assert_eq!(r.status, 3);
             assert_eq!(h.s.engine().risk.mode.ctl_state_version(), v0);
-            assert!(h.notes_since(m).iter().all(|n| n.code != hft_event::note_code(hft_event::NoteSource::Risk, 2)));
+            assert!(
+                h.notes_since(m)
+                    .iter()
+                    .all(|n| n.code != hft_event::note_code(hft_event::NoteSource::Risk, 2))
+            );
             assert!(!h.s.engine().cmd_dedup_has(id));
         }
     }
@@ -98,7 +108,13 @@ fn seq_123_output_tsc_and_trigger_seq() {
     let m = s1_on_bbo(&mut h, |hx| vec![open_buy(hx, A1)]);
     let recs = h.since(m);
     let bbo = recs.iter().find(|r| r.kind == EventKind::BBO).unwrap();
-    let outs: Vec<_> = recs.iter().skip_while(|r| r.seq != bbo.seq).skip(1).take_while(|r| r.role() != Role::Input).filter(|r| r.role() == Role::Output).collect();
+    let outs: Vec<_> = recs
+        .iter()
+        .skip_while(|r| r.seq != bbo.seq)
+        .skip(1)
+        .take_while(|r| r.role() != Role::Input)
+        .filter(|r| r.role() == Role::Output)
+        .collect();
     assert!(!outs.is_empty());
     assert!(outs.iter().all(|r| r.tsc == 4_000_000));
     let d = decisions(&recs);
@@ -121,10 +137,22 @@ fn seq_124_event_end_placement() {
     // .2 Bbo + OrderDecision: the decision carries it.
     let m = s1_on_bbo(&mut h, |hx| vec![open_buy(hx, A1)]);
     let r = h.since(m);
-    let end = r.iter().skip_while(|x| x.kind != EventKind::BBO).find(|x| x.flags.0 & RecordFlags::EVENT_END.0 != 0).unwrap();
+    let end = r
+        .iter()
+        .skip_while(|x| x.kind != EventKind::BBO)
+        .find(|x| x.flags.0 & RecordFlags::EVENT_END.0 != 0)
+        .unwrap();
     // Every non-Meta record of the event up to `end`, none after it before the next Input.
-    let after: Vec<_> = r.iter().skip_while(|x| x.seq <= end.seq).take_while(|x| x.role() != Role::Input).collect();
-    assert!(after.iter().all(|x| x.role() == Role::Meta), "{:?}", after.iter().map(|x| x.kind).collect::<Vec<_>>());
+    let after: Vec<_> = r
+        .iter()
+        .skip_while(|x| x.seq <= end.seq)
+        .take_while(|x| x.role() != Role::Input)
+        .collect();
+    assert!(
+        after.iter().all(|x| x.role() == Role::Meta),
+        "{:?}",
+        after.iter().map(|x| x.kind).collect::<Vec<_>>()
+    );
     assert_ne!(end.role(), Role::Meta);
     assert_ne!(end.kind, EventKind::BBO);
 }
@@ -136,7 +164,15 @@ fn seq_125_publish_before_push() {
     let m = s1_on_bbo(&mut h, |hx| {
         let mut b = open_buy(hx, A1);
         b.qty = q("0.001");
-        let mut s = intent(hx, B1, Side::Sell, hft_types::Tif::Ioc, hft_strategy_sdk::IntentClass::Open, hx.v.bbo(B1).bid_px, q("0.001"));
+        let mut s = intent(
+            hx,
+            B1,
+            Side::Sell,
+            hft_types::Tif::Ioc,
+            hft_strategy_sdk::IntentClass::Open,
+            hx.v.bbo(B1).bid_px,
+            q("0.001"),
+        );
         s.group = G1;
         vec![b, s]
     });
@@ -193,14 +229,20 @@ fn seq_129_hedge_fast_path_first() {
     h.fill(&first, q("0.01"), q("0.01"), first.px);
     let recs = h.since(m);
     let outs: Vec<_> = recs.iter().filter(|r| r.role() == Role::Output).collect();
-    let dbg: Vec<_> = outs.iter().map(|r| (r.kind, r.read::<hft_event::Note>().map(|n| (n.code, n.v)))).collect();
+    let dbg: Vec<_> = outs
+        .iter()
+        .map(|r| (r.kind, r.read::<hft_event::Note>().map(|n| (n.code, n.v))))
+        .collect();
     assert_eq!(outs[0].kind, EventKind::ORDER_DECISION, "{dbg:?}");
     let sec = outs[0].read::<OrderDecision>().unwrap();
     assert_eq!(sec.inst, B1);
     assert_eq!(sec.side, Side::Sell);
     assert_eq!(sec.qty, q("0.010"));
     assert_eq!(sec.reject, 0, "{sec:?}");
-    let pushed: Vec<_> = h.io_ref().out[n_out..].iter().filter(|o| o.0 == hft_sequencer::OutRing::Venue(B)).collect();
+    let pushed: Vec<_> = h.io_ref().out[n_out..]
+        .iter()
+        .filter(|o| o.0 == hft_sequencer::OutRing::Venue(B))
+        .collect();
     assert_eq!(pushed.len(), 1);
 }
 
@@ -211,7 +253,10 @@ fn seq_131_update_routing() {
     let d = decisions(&h.since(m))[0].1;
     clear_log();
     h.ack(&d);
-    let got: Vec<Got> = log().into_iter().filter(|g| g.kind == "Order" && !g.model).collect();
+    let got: Vec<Got> = log()
+        .into_iter()
+        .filter(|g| g.kind == "Order" && !g.model)
+        .collect();
     assert!(!got.is_empty());
     assert!(got.iter().all(|g| g.s == S1));
 }
@@ -220,23 +265,37 @@ fn seq_131_update_routing() {
 fn seq_134_delivery_order() {
     let mut h = steady();
     for s in [S1, S2, S9] {
-        set_subs(s, vec![(A1, 0, hft_strategy_sdk::EvMask::BBO, hft_strategy_sdk::Part::Fast)]);
+        set_subs(
+            s,
+            vec![(A1, 0, hft_strategy_sdk::EvMask::BBO, hft_strategy_sdk::Part::Fast)],
+        );
     }
     clear_log();
     h.quote(A1, "50000", "50003");
     h.run();
-    let order: Vec<_> = log().iter().filter(|g| g.kind == "Bbo" && !g.model).map(|g| g.s).collect();
+    let order: Vec<_> = log()
+        .iter()
+        .filter(|g| g.kind == "Bbo" && !g.model)
+        .map(|g| g.s)
+        .collect();
     assert_eq!(order, vec![S1, S2, S9]);
     clear_log();
-    h.cmd(hft_types::AccountId(0), &ControlCmd::Kill {
-        scope: scope(hft_types::StrategyId(0), hft_types::AccountId(0), GroupId(0)),
-        level: KillLevel::Global,
-        flatten: false,
-        cancel_resting: true,
-        hard: false,
-    });
+    h.cmd(
+        hft_types::AccountId(0),
+        &ControlCmd::Kill {
+            scope: scope(hft_types::StrategyId(0), hft_types::AccountId(0), GroupId(0)),
+            level: KillLevel::Global,
+            flatten: false,
+            cancel_resting: true,
+            hard: false,
+        },
+    );
     h.run();
-    let order: Vec<_> = log().iter().filter(|g| g.kind == "Mode" && !g.model).map(|g| g.s).collect();
+    let order: Vec<_> = log()
+        .iter()
+        .filter(|g| g.kind == "Mode" && !g.model)
+        .map(|g| g.s)
+        .collect();
     assert_eq!(order, vec![S1, S2, S9]);
 }
 
@@ -263,16 +322,35 @@ fn seq_135_ctx_application() {
     assert!(tr.contains(&"ctx.place"));
     assert!(tr.contains(&"heap.push"));
     assert!(tr.contains(&"ctx.request_halt"));
-    assert!(h.s.engine().heap.sorted().iter().any(|e| e.owner == 17 && e.timer_id == 5 && e.group == G1.0));
+    assert!(
+        h.s.engine()
+            .heap
+            .sorted()
+            .iter()
+            .any(|e| e.owner == 17 && e.timer_id == 5 && e.group == G1.0)
+    );
     let notes = h.notes_since(m);
-    assert!(notes.iter().any(|n| n.source == hft_event::NoteSource::Strategy && n.strategy == S1));
-    assert!(notes.iter().any(|n| n.code == hft_event::note_code(hft_event::NoteSource::Risk, 2)));
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.source == hft_event::NoteSource::Strategy && n.strategy == S1)
+    );
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.code == hft_event::note_code(hft_event::NoteSource::Risk, 2))
+    );
 }
 
 #[test]
 fn seq_138_advance_only_when_pending() {
     let mut h = steady();
-    let t = target(AC2, G2, &[(0, q("0.01")), (1, q("-0.01"))], ExecSpec::PairOnFill(pair0()));
+    let t = target(
+        AC2,
+        G2,
+        &[(0, q("0.01")), (1, q("-0.01"))],
+        ExecSpec::PairOnFill(pair0()),
+    );
     h.set_target_s2(t);
     // advance runs exactly when a cell is pending after the Input's own effects.
     for k in 0..6u64 {
@@ -363,7 +441,15 @@ fn seq_143_stale_bbo_no_ref_px() {
 #[test]
 fn seq_147_market_last_updates() {
     let mut h = steady();
-    set_subs(S2, vec![(B1, 0, hft_strategy_sdk::EvMask(0xFF), hft_strategy_sdk::Part::Fast)]);
+    set_subs(
+        S2,
+        vec![(
+            B1,
+            0,
+            hft_strategy_sdk::EvMask(0xFF),
+            hft_strategy_sdk::Part::Fast,
+        )],
+    );
     let mut p = Spb::s2(2);
     p.values[F_THR] = 9;
     let id = h.set_params(&p);
@@ -375,20 +461,42 @@ fn seq_147_market_last_updates() {
     t.qty = q("0.5");
     t.h.ex_ts_ns = 123;
     h.push(RingId::Md(1), &t);
-    let ix = hft_event::IndexPrice { h: mhdr(B1, 1), px: px("50005") };
+    let ix = hft_event::IndexPrice {
+        h: mhdr(B1, 1),
+        px: px("50005"),
+    };
     h.push(RingId::Md(1), &ix);
-    let lq = hft_event::Liquidation { h: mhdr(B1, 1), px: px("50000"), qty: q("1"), side: Side::Buy, _pad: [0; 7] };
+    let lq = hft_event::Liquidation {
+        h: mhdr(B1, 1),
+        px: px("50000"),
+        qty: q("1"),
+        side: Side::Buy,
+        _pad: [0; 7],
+    };
     h.push(RingId::Md(1), &lq);
     h.run();
     let row = *h.s.engine().market.row(B1).unwrap();
     assert_eq!(row.trade_px, px("50010"));
     assert_eq!(row.trade_qty, q("0.5"));
     assert_eq!(row.index_px, px("50005"));
-    let kinds: Vec<&str> = log().iter().filter(|g| g.s == S2 && !g.model).map(|g| g.kind).collect();
-    assert!(kinds.contains(&"Trade") && kinds.contains(&"Index") && kinds.contains(&"Liquidation"), "{kinds:?}");
+    let kinds: Vec<&str> = log()
+        .iter()
+        .filter(|g| g.s == S2 && !g.model)
+        .map(|g| g.kind)
+        .collect();
+    assert!(
+        kinds.contains(&"Trade") && kinds.contains(&"Index") && kinds.contains(&"Liquidation"),
+        "{kinds:?}"
+    );
     // .4 interval 0: unchanged, no ledger call.
     h.trace_on();
-    let f = hft_event::Funding { h: mhdr(B1, 2), rate: r("0.0001"), next_funding_ns: UTC0 + 7 * 3_600_000_000_000, interval_s: 0, _pad: 0 };
+    let f = hft_event::Funding {
+        h: mhdr(B1, 2),
+        rate: r("0.0001"),
+        next_funding_ns: UTC0 + 7 * 3_600_000_000_000,
+        interval_s: 0,
+        _pad: 0,
+    };
     h.push(RingId::Md(1), &f);
     h.run();
     let row2 = *h.s.engine().market.row(B1).unwrap();
@@ -400,7 +508,13 @@ fn seq_147_market_last_updates() {
 #[test]
 fn seq_148_funding_interval_change() {
     let mut h = steady();
-    let fund = |iv: u32, rx: u64| hft_event::Funding { h: mhdr(B1, rx), rate: r("0.0001"), next_funding_ns: UTC0 + 3_600_000_000_000, interval_s: iv, _pad: 0 };
+    let fund = |iv: u32, rx: u64| hft_event::Funding {
+        h: mhdr(B1, rx),
+        rate: r("0.0001"),
+        next_funding_ns: UTC0 + 3_600_000_000_000,
+        interval_s: iv,
+        _pad: 0,
+    };
     h.push(RingId::Md(1), &fund(28_800, 1));
     h.run();
     h.trace_on();
@@ -422,7 +536,14 @@ fn seq_148_funding_interval_change() {
     assert_eq!(h.s.engine().market.funding[B1.0 as usize].upd_tsc, Tsc(4_000));
 }
 
-pub fn ext(a: hft_types::AccountId, i: hft_types::InstId, side: Side, qty: &str, cause: hft_event::ExternalCause, tid: u64) -> hft_event::ExternalFill {
+pub fn ext(
+    a: hft_types::AccountId,
+    i: hft_types::InstId,
+    side: Side,
+    qty: &str,
+    cause: hft_event::ExternalCause,
+    tid: u64,
+) -> hft_event::ExternalFill {
     hft_event::ExternalFill {
         venue: inst_venue(i),
         account: a,
@@ -447,10 +568,16 @@ fn seq_152_external_fill_unattributed() {
     let mut h = steady();
     clear_log();
     h.trace_on();
-    h.push(RingId::Rep(0), &ext(AC1, A2, Side::Sell, "0.5", hft_event::ExternalCause::Manual, 501));
+    h.push(
+        RingId::Rep(0),
+        &ext(AC1, A2, Side::Sell, "0.5", hft_event::ExternalCause::Manual, 501),
+    );
     h.run();
     assert_eq!(h.s.engine().trace.count("exec.on_external"), 1);
-    let ex: Vec<Got> = log().into_iter().filter(|g| g.kind == "External" && !g.model).collect();
+    let ex: Vec<Got> = log()
+        .into_iter()
+        .filter(|g| g.kind == "External" && !g.model)
+        .collect();
     assert_eq!(ex.len(), 1);
     assert_eq!(ex[0].s, S1);
     assert_eq!(ex[0].gix, hft_strategy_sdk::GIX_NONE);
@@ -459,12 +586,18 @@ fn seq_152_external_fill_unattributed() {
 #[test]
 fn seq_153_external_fill_duplicate() {
     let mut h = steady();
-    h.push(RingId::Rep(0), &ext(AC1, A2, Side::Sell, "0.5", hft_event::ExternalCause::Manual, 77));
+    h.push(
+        RingId::Rep(0),
+        &ext(AC1, A2, Side::Sell, "0.5", hft_event::ExternalCause::Manual, 77),
+    );
     h.run();
     clear_log();
     h.trace_on();
     let m = h.mark();
-    h.push(RingId::Rep(0), &ext(AC1, A2, Side::Sell, "0.5", hft_event::ExternalCause::Manual, 77));
+    h.push(
+        RingId::Rep(0),
+        &ext(AC1, A2, Side::Sell, "0.5", hft_event::ExternalCause::Manual, 77),
+    );
     h.run();
     assert_eq!(h.s.engine().trace.count("exec.on_external"), 0);
     assert_eq!(h.s.engine().trace.count("oms.external_adjust"), 0);
@@ -478,7 +611,11 @@ fn seq_157_account_config_report() {
     let mut h = b0().boot();
     h.step();
     h.trace_on();
-    let l = hft_event::LeverageItem { inst: B1, _pad: 0, leverage: r("10") };
+    let l = hft_event::LeverageItem {
+        inst: B1,
+        _pad: 0,
+        leverage: r("10"),
+    };
     let hd = cfg_hdr(AC1, B, 1);
     let mut body = zerocopy::IntoBytes::as_bytes(&hd).to_vec();
     body.extend_from_slice(zerocopy::IntoBytes::as_bytes(&l));
@@ -496,12 +633,39 @@ fn seq_157_account_config_report() {
 fn seq_159_balance_position_reports() {
     let mut h = steady();
     h.trace_on();
-    let br = hft_event::BalanceReport { venue: A, account: AC1, asset: USDT, _pad: 0, free: q("100000"), locked: hft_types::Qty(0), ex_ts_ns: 0, rx_tsc: Tsc(0) };
+    let br = hft_event::BalanceReport {
+        venue: A,
+        account: AC1,
+        asset: USDT,
+        _pad: 0,
+        free: q("100000"),
+        locked: hft_types::Qty(0),
+        ex_ts_ns: 0,
+        rx_tsc: Tsc(0),
+    };
     h.push(RingId::Rep(0), &br);
     h.run();
-    let ev = h.s.engine().trace.ev.iter().find(|e| e.what == "ledger.on_balance").copied().unwrap();
+    let ev =
+        h.s.engine()
+            .trace
+            .ev
+            .iter()
+            .find(|e| e.what == "ledger.on_balance")
+            .copied()
+            .unwrap();
     assert_eq!(ev.b, 1);
-    let pr = |qty: &str| hft_event::PositionReport { venue: B, account: AC1, _pad: 0, inst: B1, qty: q(qty), entry_px: hft_types::Px(0), upnl: hft_types::Notional(0), liq_px: hft_types::Px(0), ex_ts_ns: 0, rx_tsc: Tsc(0) };
+    let pr = |qty: &str| hft_event::PositionReport {
+        venue: B,
+        account: AC1,
+        _pad: 0,
+        inst: B1,
+        qty: q(qty),
+        entry_px: hft_types::Px(0),
+        upnl: hft_types::Notional(0),
+        liq_px: hft_types::Px(0),
+        ex_ts_ns: 0,
+        rx_tsc: Tsc(0),
+    };
     let m = h.mark();
     h.push(RingId::Rep(0), &pr("0"));
     h.run();
@@ -523,7 +687,10 @@ fn seq_130_net_adjust_same_event() {
     assert!(!h.trace().contains(&"oms.net_adjust"), "{:?}", h.trace());
     let l = h.s.engine().oms.legs(AC1, G1);
     assert_eq!(l.view.leg[1].net, hft_types::Qty(-q("0.001").0));
-    assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, hft_types::Qty(-q("0.001").0));
+    assert_eq!(
+        h.s.engine().ledger.pos(AC1, B1).qty,
+        hft_types::Qty(-q("0.001").0)
+    );
     // .3 a FeeOnly in the quote asset: no net adjustment.
     h.trace_on();
     let mut ev = order_event(&d, hft_event::OrderEventKind::FeeOnly, h.epoch());
@@ -539,7 +706,13 @@ fn seq_130_net_adjust_same_event() {
 }
 
 fn rref(d: &OrderDecision) -> hft_strategy_sdk::OrderRef {
-    hft_strategy_sdk::OrderRef { venue: d.venue, account: d.account, _pad: [0; 2], slot: d.slot.0, r#gen: d.r#gen }
+    hft_strategy_sdk::OrderRef {
+        venue: d.venue,
+        account: d.account,
+        _pad: [0; 2],
+        slot: d.slot.0,
+        r#gen: d.r#gen,
+    }
 }
 
 /// Two resting GTC buys of s1 on a1 (acked).
@@ -548,8 +721,24 @@ fn two_resting(h: &mut H) -> (OrderDecision, OrderDecision) {
         let b = hx.v.bbo(A1);
         let p = Px(b.bid_px.0 - 100);
         vec![
-            intent(hx, A1, Side::Buy, hft_types::Tif::Gtc, hft_strategy_sdk::IntentClass::Open, p, q("0.001")),
-            intent(hx, A1, Side::Buy, hft_types::Tif::Gtc, hft_strategy_sdk::IntentClass::Open, p, q("0.001")),
+            intent(
+                hx,
+                A1,
+                Side::Buy,
+                hft_types::Tif::Gtc,
+                hft_strategy_sdk::IntentClass::Open,
+                p,
+                q("0.001"),
+            ),
+            intent(
+                hx,
+                A1,
+                Side::Buy,
+                hft_types::Tif::Gtc,
+                hft_strategy_sdk::IntentClass::Open,
+                p,
+                q("0.001"),
+            ),
         ]
     });
     let ds = decisions(&h.since(m));
@@ -590,14 +779,32 @@ fn seq_127_trig_stamps_passed() {
     h.push(RingId::Bbo(0), &b);
     h.run();
     clear_hook();
-    let rec = h.since(m).into_iter().find(|r| r.kind == EventKind::BBO).expect("bbo");
-    let new = decisions(&h.since(m)).into_iter().find(|d| d.1.action == hft_event::OrderAction::New).expect("new").1;
+    let rec = h
+        .since(m)
+        .into_iter()
+        .find(|r| r.kind == EventKind::BBO)
+        .expect("bbo");
+    let new = decisions(&h.since(m))
+        .into_iter()
+        .find(|d| d.1.action == hft_event::OrderAction::New)
+        .expect("new")
+        .1;
     let e = h.s.engine();
-    for (r, op) in [(rref(&new), hft_oms::SlotStamps::OP_NEW), (r1, hft_oms::SlotStamps::OP_CANCEL), (r2, hft_oms::SlotStamps::OP_AMEND)] {
+    for (r, op) in [
+        (rref(&new), hft_oms::SlotStamps::OP_NEW),
+        (r1, hft_oms::SlotStamps::OP_CANCEL),
+        (r2, hft_oms::SlotStamps::OP_AMEND),
+    ] {
         let st = e.oms.slot_stamps(r).copied().expect("stamps");
         assert_eq!(st.op, op);
         assert_eq!(
-            (st.trig_ex_ts_ns, st.trig_ex_send_ns, st.trig_hw_rx_ns, st.trig_sw_rx_ns, st.trig_rx_tsc),
+            (
+                st.trig_ex_ts_ns,
+                st.trig_ex_send_ns,
+                st.trig_hw_rx_ns,
+                st.trig_sw_rx_ns,
+                st.trig_rx_tsc
+            ),
             (11, 12, 13, 14, 15)
         );
         assert_eq!(st.trig_proc_tsc, rec.tsc);
@@ -611,7 +818,11 @@ fn seq_128_oms_out_drain_order() {
     // A linked first-leg fill on s1's g1: second leg, fill, fee, update, link, decision, timer, note.
     let mut h = steady();
     let m = s1_on_bbo(&mut h, |hx| vec![pair_first(hx, q("0.001"))]);
-    let d = decisions(&h.since(m)).into_iter().find(|x| x.1.inst == A1).expect("first leg").1;
+    let d = decisions(&h.since(m))
+        .into_iter()
+        .find(|x| x.1.inst == A1)
+        .expect("first leg")
+        .1;
     h.ack(&d);
     h.trace_on();
     let mut ev = order_event(&d, hft_event::OrderEventKind::Fill, h.epoch());
@@ -626,8 +837,23 @@ fn seq_128_oms_out_drain_order() {
     h.run();
     let t = h.trace();
     // The hedge placement writes its own OMS note first; the drain's notes are the last ones.
-    let pos = |n: &str| if n == "note.oms" { t.iter().rposition(|x| *x == n) } else { t.iter().position(|x| *x == n) };
-    let order = ["hedge", "ledger.apply_fill", "ledger.apply_fee", "queue.order", "exec.on_link", "note.oms", "risk.on_pnl", "risk.on_legs"];
+    let pos = |n: &str| {
+        if n == "note.oms" {
+            t.iter().rposition(|x| *x == n)
+        } else {
+            t.iter().position(|x| *x == n)
+        }
+    };
+    let order = [
+        "hedge",
+        "ledger.apply_fill",
+        "ledger.apply_fee",
+        "queue.order",
+        "exec.on_link",
+        "note.oms",
+        "risk.on_pnl",
+        "risk.on_legs",
+    ];
     let idx: Vec<Option<usize>> = order.iter().map(|n| pos(n)).collect();
     for (k, w) in idx.windows(2).enumerate() {
         if let (Some(a), Some(b)) = (w[0], w[1]) {
@@ -637,7 +863,12 @@ fn seq_128_oms_out_drain_order() {
     assert!(idx[0].is_some() && idx[1].is_some() && idx[6].is_some(), "{t:?}");
     // risk.on_pnl after every OMS note of the drain.
     let last_note = t.iter().rposition(|x| *x == "note.oms").unwrap_or(0);
-    assert!(idx[6].unwrap_or(0) > last_note || t.iter().position(|x| *x == "risk.on_pnl").unwrap_or(0) > t.iter().position(|x| *x == "exec.on_link").unwrap_or(0), "{t:?}");
+    assert!(
+        idx[6].unwrap_or(0) > last_note
+            || t.iter().position(|x| *x == "risk.on_pnl").unwrap_or(0)
+                > t.iter().position(|x| *x == "exec.on_link").unwrap_or(0),
+        "{t:?}"
+    );
 }
 
 #[test]
@@ -689,14 +920,25 @@ fn seq_150_external_fill_attributed() {
     assert!(p("ledger.apply_external") < p("oms.external_adjust"), "{t:?}");
     assert!(p("oms.external_adjust") < p("exec.on_external"), "{t:?}");
     assert!(p("exec.on_external") < p("risk.on_pnl"), "{t:?}");
-    assert!(p("risk.on_pnl") <= p("risk.on_legs") || p("risk.on_legs") == usize::MAX, "{t:?}");
+    assert!(
+        p("risk.on_pnl") <= p("risk.on_legs") || p("risk.on_legs") == usize::MAX,
+        "{t:?}"
+    );
     assert_eq!(t.iter().filter(|x| **x == "oms.external_adjust").count(), 1);
     assert_eq!(t.iter().filter(|x| **x == "exec.on_external").count(), 1);
-    let got: Vec<Got> = log().into_iter().filter(|g| g.kind == "External" && !g.model).collect();
+    let got: Vec<Got> = log()
+        .into_iter()
+        .filter(|g| g.kind == "External" && !g.model)
+        .collect();
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(got[0].gix, 0);
     let notes = h.notes_since(m);
-    assert!(notes.iter().any(|n| n.code == hft_ledger::notes::code::EXTERNAL_FILL && n.level == hft_event::NoteLevel::P0), "{notes:?}");
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.code == hft_ledger::notes::code::EXTERNAL_FILL && n.level == hft_event::NoteLevel::P0),
+        "{notes:?}"
+    );
 }
 
 #[test]
@@ -721,9 +963,17 @@ fn seq_156_margin_report() {
     hd.avail_margin = n("10000");
     hd.margin_ratio = r("0.90");
     hd.rx_tsc = Tsc(h.now());
-    h.push_bytes(RingId::Rep(0), EventKind::MARGIN_REPORT, zerocopy::IntoBytes::as_bytes(&hd).to_vec());
+    h.push_bytes(
+        RingId::Rep(0),
+        EventKind::MARGIN_REPORT,
+        zerocopy::IntoBytes::as_bytes(&hd).to_vec(),
+    );
     h.run();
     let notes = h.notes_since(m);
-    let cap_set = hft_risk::NOTE_CODES.iter().find(|x| x.2 == "CapSet").map(|x| ((x.0 as u32) << 24) | x.1).unwrap();
+    let cap_set = hft_risk::NOTE_CODES
+        .iter()
+        .find(|x| x.2 == "CapSet")
+        .map(|x| ((x.0 as u32) << 24) | x.1)
+        .unwrap();
     assert!(notes.iter().any(|n| n.code == cap_set), "{notes:?}");
 }

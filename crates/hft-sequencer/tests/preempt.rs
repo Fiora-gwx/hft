@@ -9,7 +9,10 @@ use hft_types::{GroupId, InstId, KillLevel, Tsc};
 use crate::common::*;
 
 fn inputs_since(h: &H, m: usize) -> Vec<hft_sequencer::MemRecord> {
-    h.since(m).into_iter().filter(|r| r.role() == Role::Input).collect()
+    h.since(m)
+        .into_iter()
+        .filter(|r| r.role() == Role::Input)
+        .collect()
 }
 
 fn len(h: &mut H, r: RingId) -> usize {
@@ -32,7 +35,11 @@ fn hk_note(k: u64) -> Elem {
 }
 
 fn ctl_bytes(n: usize) -> Elem {
-    Elem { kind: EventKind::CONTROL_CMD, flags: hft_event::RecordFlags(0), body: vec![0u8; n] }
+    Elem {
+        kind: EventKind::CONTROL_CMD,
+        flags: hft_event::RecordFlags(0),
+        body: vec![0u8; n],
+    }
 }
 
 fn steady() -> H {
@@ -55,7 +62,10 @@ fn seq_055_round_a_order() {
     // .2 with a stop marker: EngineClock, Kill.
     reset_script();
     let mut b = b0();
-    b.live.stop_kill = Some((KillLevel::Global, scope(hft_types::StrategyId(0), hft_types::AccountId(0), GroupId(0))));
+    b.live.stop_kill = Some((
+        KillLevel::Global,
+        scope(hft_types::StrategyId(0), hft_types::AccountId(0), GroupId(0)),
+    ));
     let mut h = b.boot();
     h.quote(A1, "50000", "50002");
     let m = h.mark();
@@ -97,21 +107,49 @@ fn seq_056_due_timers_per_round() {
     let (c, _) = h.cmd_elem("cli:test", 4, AC1, &ControlCmd::SnapshotNow, |_| {});
     h.push_e(RingId::Ctl, c);
     let tt = h.now();
-    h.push(RingId::Rep(0), &conn(A, 1, hft_event::ConnStateKind::Alive, hft_event::ConnRole::Md, InstId(0), hft_types::AccountId(0), tt));
+    h.push(
+        RingId::Rep(0),
+        &conn(
+            A,
+            1,
+            hft_event::ConnStateKind::Alive,
+            hft_event::ConnRole::Md,
+            InstId(0),
+            hft_types::AccountId(0),
+            tt,
+        ),
+    );
     let m = h.mark();
     // Every take moves time past the timers again (they are all due already).
     h.step();
     let inp = inputs_since(&h, m);
-    let tm: Vec<u32> = inp.iter().filter(|r| r.kind == EventKind::TIMER).filter_map(|r| r.read::<hft_event::Timer>()).filter(|t| t.owner >= 16).map(|t| t.timer_id).collect();
+    let tm: Vec<u32> = inp
+        .iter()
+        .filter(|r| r.kind == EventKind::TIMER)
+        .filter_map(|r| r.read::<hft_event::Timer>())
+        .filter(|t| t.owner >= 16)
+        .map(|t| t.timer_id)
+        .collect();
     assert_eq!(tm, (1..=16).collect::<Vec<u32>>());
     assert!(inp.iter().any(|r| r.kind == EventKind::CONTROL_CMD));
     assert_eq!(len(&mut h, RingId::Rep(0)), 1);
     let m = h.mark();
     h.step();
     let inp = inputs_since(&h, m);
-    let tm: Vec<u32> = inp.iter().filter(|r| r.kind == EventKind::TIMER).filter_map(|r| r.read::<hft_event::Timer>()).filter(|t| t.owner >= 16).map(|t| t.timer_id).collect();
+    let tm: Vec<u32> = inp
+        .iter()
+        .filter(|r| r.kind == EventKind::TIMER)
+        .filter_map(|r| r.read::<hft_event::Timer>())
+        .filter(|t| t.owner >= 16)
+        .map(|t| t.timer_id)
+        .collect();
     assert_eq!(tm, vec![17, 18, 19, 20]);
-    let p_last_timer = inp.iter().rposition(|r| r.kind == EventKind::TIMER && r.read::<hft_event::Timer>().is_some_and(|t| t.owner >= 16)).unwrap();
+    let p_last_timer = inp
+        .iter()
+        .rposition(|r| {
+            r.kind == EventKind::TIMER && r.read::<hft_event::Timer>().is_some_and(|t| t.owner >= 16)
+        })
+        .unwrap();
     let p_rep = inp.iter().position(|r| r.kind == EventKind::CONN_STATE).unwrap();
     assert!(p_rep > p_last_timer);
 }
@@ -149,7 +187,15 @@ fn seq_058_ctl_bytes_per_round() {
 }
 
 fn alive(v: hft_types::VenueId, k: u64) -> hft_event::ConnState {
-    conn(v, 1, hft_event::ConnStateKind::Alive, hft_event::ConnRole::Md, InstId(0), hft_types::AccountId(0), k)
+    conn(
+        v,
+        1,
+        hft_event::ConnStateKind::Alive,
+        hft_event::ConnRole::Md,
+        InstId(0),
+        hft_types::AccountId(0),
+        k,
+    )
 }
 
 #[test]
@@ -201,7 +247,11 @@ fn seq_059_rep_round_limits() {
     }
     let base = h.io().takes;
     let (c, _) = h.cmd_elem("cli:test", 4, AC1, &ControlCmd::SnapshotNow, |_| {});
-    h.io().arrivals.push(Arrival { after_take: base + 2, ring: RingId::Ctl, elem: c });
+    h.io().arrivals.push(Arrival {
+        after_take: base + 2,
+        ring: RingId::Ctl,
+        elem: c,
+    });
     h.step();
     assert_eq!(63 - len(&mut h, RingId::Rep(0)), 32);
 }
@@ -249,14 +299,24 @@ fn seq_061_ctl_preempts_bbo() {
     let mut h = steady();
     bbos(&mut h, 10);
     let base = h.io().takes;
-    let (c, id) = h.cmd_elem("cli:test", 4, AC1, &ControlCmd::Kill {
-        scope: scope(hft_types::StrategyId(0), AC1, GroupId(0)),
-        level: KillLevel::Account,
-        flatten: false,
-        cancel_resting: true,
-        hard: false,
-    }, |_| {});
-    h.io().arrivals.push(Arrival { after_take: base + 3, ring: RingId::Ctl, elem: c });
+    let (c, id) = h.cmd_elem(
+        "cli:test",
+        4,
+        AC1,
+        &ControlCmd::Kill {
+            scope: scope(hft_types::StrategyId(0), AC1, GroupId(0)),
+            level: KillLevel::Account,
+            flatten: false,
+            cancel_resting: true,
+            hard: false,
+        },
+        |_| {},
+    );
+    h.io().arrivals.push(Arrival {
+        after_take: base + 3,
+        ring: RingId::Ctl,
+        elem: c,
+    });
     let m = h.mark();
     h.step();
     let k = order_of(&h, m);
@@ -264,8 +324,19 @@ fn seq_061_ctl_preempts_bbo() {
     assert_eq!(pos, 3);
     assert!(k[..3].iter().all(|x| *x == EventKind::BBO));
     assert_eq!(k.iter().filter(|x| **x == EventKind::BBO).count(), 10);
-    let res = h.since(m).iter().position(|r| r.kind == EventKind::CMD_RESULT).unwrap();
-    let b4 = h.since(m).iter().enumerate().filter(|(_, r)| r.kind == EventKind::BBO).nth(3).unwrap().0;
+    let res = h
+        .since(m)
+        .iter()
+        .position(|r| r.kind == EventKind::CMD_RESULT)
+        .unwrap();
+    let b4 = h
+        .since(m)
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.kind == EventKind::BBO)
+        .nth(3)
+        .unwrap()
+        .0;
     assert!(res < b4);
     assert!(h.result_of(id).is_some());
 }
@@ -276,12 +347,26 @@ fn seq_062_rep_preempts_bbo() {
     bbos(&mut h, 10);
     let base = h.io().takes;
     for k in 0..2 {
-        h.io().arrivals.push(Arrival { after_take: base + 3, ring: RingId::Rep(1), elem: elem(&alive(B, k)) });
+        h.io().arrivals.push(Arrival {
+            after_take: base + 3,
+            ring: RingId::Rep(1),
+            elem: elem(&alive(B, k)),
+        });
     }
     let m = h.mark();
     h.step();
     let k = order_of(&h, m);
-    assert_eq!(&k[..6], &[EventKind::BBO, EventKind::BBO, EventKind::BBO, EventKind::CONN_STATE, EventKind::CONN_STATE, EventKind::BBO]);
+    assert_eq!(
+        &k[..6],
+        &[
+            EventKind::BBO,
+            EventKind::BBO,
+            EventKind::BBO,
+            EventKind::CONN_STATE,
+            EventKind::CONN_STATE,
+            EventKind::BBO
+        ]
+    );
 }
 
 #[test]
@@ -294,7 +379,11 @@ fn seq_063_preempted_count_against_limits() {
     bbos(&mut h, 10);
     let base = h.io().takes;
     let (c, _) = h.cmd_elem("cli:test", 4, AC1, &ControlCmd::SnapshotNow, |_| {});
-    h.io().arrivals.push(Arrival { after_take: base + 6, ring: RingId::Ctl, elem: c });
+    h.io().arrivals.push(Arrival {
+        after_take: base + 6,
+        ring: RingId::Ctl,
+        elem: c,
+    });
     let m = h.mark();
     h.step();
     let k = order_of(&h, m);
@@ -322,11 +411,20 @@ fn seq_064_advice_limit_and_preempt() {
         h.push_bytes(RingId::Advice, EventKind::ADVICE, rec);
     }
     let base = h.io().takes;
-    h.io().arrivals.push(Arrival { after_take: base + 5, ring: RingId::Rep(0), elem: elem(&alive(A, 1)) });
+    h.io().arrivals.push(Arrival {
+        after_take: base + 5,
+        ring: RingId::Rep(0),
+        elem: elem(&alive(A, 1)),
+    });
     let m = h.mark();
     h.step();
     let k = order_of(&h, m);
-    let adv: Vec<usize> = k.iter().enumerate().filter(|(_, x)| **x == EventKind::ADVICE).map(|(i, _)| i).collect();
+    let adv: Vec<usize> = k
+        .iter()
+        .enumerate()
+        .filter(|(_, x)| **x == EventKind::ADVICE)
+        .map(|(i, _)| i)
+        .collect();
     assert_eq!(adv.len(), 16);
     let rep = k.iter().position(|x| *x == EventKind::CONN_STATE).unwrap();
     assert_eq!(rep, 5);
@@ -335,7 +433,13 @@ fn seq_064_advice_limit_and_preempt() {
 
 #[test]
 fn seq_066_md_time_slice() {
-    for (p, want) in [(20_000u64, 3usize), (24_999, 3), (25_000, 2), (25_001, 2), (60_000, 1)] {
+    for (p, want) in [
+        (20_000u64, 3usize),
+        (24_999, 3),
+        (25_000, 2),
+        (25_001, 2),
+        (60_000, 1),
+    ] {
         let mut h = steady();
         for k in 0..100u64 {
             let t = trade(A1, k + 1);
@@ -453,8 +557,18 @@ fn seq_073_replay_per_round() {
     setup.seq.replay_per_round = 100;
     let log = hft_sequencer::driver::replay::Log::from_segments(&h.j().segments);
     let n_inputs = log.recs.iter().filter(|r| r.role() == Role::Input).count();
-    let first = log.recs.iter().find(|r| r.kind == EventKind::STATE_SNAPSHOT).unwrap().seq;
-    let drv = hft_sequencer::driver::replay::ReplayDriver::new(hft_sequencer::driver::replay::ReplayMode::Verify, log, 0, 100);
+    let first = log
+        .recs
+        .iter()
+        .find(|r| r.kind == EventKind::STATE_SNAPSHOT)
+        .unwrap()
+        .seq;
+    let drv = hft_sequencer::driver::replay::ReplayDriver::new(
+        hft_sequencer::driver::replay::ReplayMode::Verify,
+        log,
+        0,
+        100,
+    );
     let hb = hb();
     let p = plan(hft_sequencer::SnapshotSel::AtSeq(first), true, 0, 0);
     let mut s: hft_sequencer::Sequencer<hft_sequencer::driver::replay::ReplayDriver, TestSet> =
@@ -494,7 +608,11 @@ fn seq_075_take_one_at_a_time() {
     h.io().tsc_per_take = 7;
     let m = h.mark();
     h.step();
-    let ts: Vec<u64> = inputs_since(&h, m).iter().filter(|r| r.kind == EventKind::BBO).map(|r| r.tsc).collect();
+    let ts: Vec<u64> = inputs_since(&h, m)
+        .iter()
+        .filter(|r| r.kind == EventKind::BBO)
+        .map(|r| r.tsc)
+        .collect();
     assert_eq!(ts.len(), 5);
     assert!(ts.windows(2).all(|w| w[1] > w[0]));
 }

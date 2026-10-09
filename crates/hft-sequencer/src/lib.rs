@@ -44,7 +44,9 @@ pub mod trace;
 pub mod types;
 pub mod views;
 
-pub use commands::{ActiveConfigRow, CmdDedupHdr, CmdDedupRow, ReconPendingHdr, VenueNoticeRow, ViewerPreviewRow};
+pub use commands::{
+    ActiveConfigRow, CmdDedupHdr, CmdDedupRow, ReconPendingHdr, VenueNoticeRow, ViewerPreviewRow,
+};
 pub use driver::{Driver, DriverMode, DriverView, ParseCx};
 pub use engine::{Engine, EngineSetup};
 pub use journal::{BootSink, JournalSink, MemJournal, MemRecord, MemSegment, RollMeta, SegClock};
@@ -147,7 +149,11 @@ impl<D: Driver<S>, S: StrategySet> Sequencer<D, S> {
             }
         }
         self.drv.journal().publish();
-        if busy { StepOutcome::Busy } else { StepOutcome::Idle }
+        if busy {
+            StepOutcome::Busy
+        } else {
+            StepOutcome::Idle
+        }
     }
 
     /// The driver's read-only view.

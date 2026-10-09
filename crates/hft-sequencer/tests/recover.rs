@@ -25,10 +25,16 @@ fn hash_of<D: hft_sequencer::Driver<TestSet>>(s: &Sequencer<D, TestSet>) -> [u8;
 
 /// Verify replay of `log` from its first snapshot to the end; the final state hash.
 fn replay_hash(log: Log, setup: &hft_sequencer::EngineSetup) -> [u8; 16] {
-    let first = log.recs.iter().find(|r| r.kind == EventKind::STATE_SNAPSHOT).unwrap().seq;
+    let first = log
+        .recs
+        .iter()
+        .find(|r| r.kind == EventKind::STATE_SNAPSHOT)
+        .unwrap()
+        .seq;
     let drv = ReplayDriver::new(ReplayMode::Verify, log, 0, 64);
     let p = plan(SnapshotSel::AtSeq(first), true, 0, 0);
-    let mut s: Sequencer<ReplayDriver, TestSet> = Sequencer::boot(BootSource::Journal(p), setup, drv, hb()).unwrap();
+    let mut s: Sequencer<ReplayDriver, TestSet> =
+        Sequencer::boot(BootSource::Journal(p), setup, drv, hb()).unwrap();
     while s.step() == StepOutcome::Busy {}
     hash_of(&s)
 }
@@ -78,10 +84,22 @@ fn seq_257_snapshot_selection() {
     let j = h.j().clone();
     let setup = h.setup.clone();
     // .1 Latest → S2 (no tail).
-    let h1 = H::<TestSet>::restart_over(j.clone(), setup.clone(), plan(SnapshotSel::Latest, true, 1, 0), Rerun::default()).unwrap();
+    let h1 = H::<TestSet>::restart_over(
+        j.clone(),
+        setup.clone(),
+        plan(SnapshotSel::Latest, true, 1, 0),
+        Rerun::default(),
+    )
+    .unwrap();
     assert_eq!(h1.s.engine().recovery_replayed(), 0);
     // .3 AtSeq(S2 − 1) → S1 (the tail after S1 is replayed).
-    let h3 = H::<TestSet>::restart_over(j.clone(), setup.clone(), plan(SnapshotSel::AtSeq(s2.seq - 1), true, 1, 0), Rerun::default()).unwrap();
+    let h3 = H::<TestSet>::restart_over(
+        j.clone(),
+        setup.clone(),
+        plan(SnapshotSel::AtSeq(s2.seq - 1), true, 1, 0),
+        Rerun::default(),
+    )
+    .unwrap();
     assert!(h3.s.engine().recovery_replayed() > 0);
     // .5 Latest with a desc_version two behind the binary → SnapshotUndecodable{5}.
     let r = H::<TestSetV5>::restart_over(j, setup, plan(SnapshotSel::Latest, true, 1, 0), Rerun::default());
@@ -97,11 +115,19 @@ fn seq_258_tail_replay_no_emit() {
         h.quote(B1, "50010", if k % 2 == 0 { "50012" } else { "50013" });
         h.run();
     }
-    let kf = h.snapshots().into_iter().find(|r| snap(r).0.purpose == 2).unwrap();
+    let kf = h
+        .snapshots()
+        .into_iter()
+        .find(|r| snap(r).0.purpose == 2)
+        .unwrap();
     let v = h.verify_from(Some(kf.seq));
     assert!(v.is_empty(), "verify from the keyframe: {v:?}");
     let h2 = H::crash_restart(h, plan(SnapshotSel::Latest, true, 1, 0), Rerun::default()).unwrap();
-    assert!(h2.s.engine().recovery_mismatches().is_empty(), "{:?}", h2.s.engine().recovery_mismatches());
+    assert!(
+        h2.s.engine().recovery_mismatches().is_empty(),
+        "{:?}",
+        h2.s.engine().recovery_mismatches()
+    );
     assert!(h2.s.engine().recovery_replayed() > 0);
     assert!(h2.io_ref().out.is_empty());
     assert!(h2.io_ref().feed.is_empty());
@@ -113,10 +139,21 @@ fn seq_259_no_tail_tail_lost() {
     let mut h = steady();
     h.keyframe();
     h.open_position(AC1, A1, Side::Buy, "0.001");
-    let h2 = H::crash_restart(h, plan(SnapshotSel::Latest, false, 1, RecoveryFlags::TAIL_LOST), Rerun::default()).unwrap();
+    let h2 = H::crash_restart(
+        h,
+        plan(SnapshotSel::Latest, false, 1, RecoveryFlags::TAIL_LOST),
+        Rerun::default(),
+    )
+    .unwrap();
     assert_eq!(h2.s.engine().recovery_replayed(), 0);
     for a in [AC1, AC2, AC9] {
-        let f = h2.s.engine().recovery_flags().iter().find(|x| x.0 == a).map(|x| x.1).unwrap();
+        let f =
+            h2.s.engine()
+                .recovery_flags()
+                .iter()
+                .find(|x| x.0 == a)
+                .map(|x| x.1)
+                .unwrap();
         assert!(f & RecoveryFlags::TAIL_LOST != 0);
     }
     assert_eq!(h2.s.engine().ledger.pos(AC1, A1).qty.0, 0);
@@ -126,32 +163,77 @@ fn seq_259_no_tail_tail_lost() {
 fn seq_260_recovery_end_now() {
     let mut h = steady();
     h.keyframe();
-    let rr = Rerun { tsc: 500_000, hz: 3 * HZ, ..Rerun::default() };
+    let rr = Rerun {
+        tsc: 500_000,
+        hz: 3 * HZ,
+        ..Rerun::default()
+    };
     let h2 = H::crash_restart(h, plan(SnapshotSel::Latest, true, 1, 0), rr).unwrap();
     let rs = h2.snapshots().pop().unwrap();
     let (hd, _) = snap(&rs);
     assert_eq!(hd.purpose, 4);
     assert_eq!(hd.snap_tsc, 500_000);
     // Timers were shifted into this run's TSC.
-    let sw = h2.s.engine().heap.sorted().into_iter().find(|e| e.owner == 3 && e.timer_id == 2).unwrap();
+    let sw =
+        h2.s.engine()
+            .heap
+            .sorted()
+            .into_iter()
+            .find(|e| e.owner == 3 && e.timer_id == 2)
+            .unwrap();
     assert!(sw.deadline < 500_000 + 3_000_000_000_000, "{}", sw.deadline);
 }
 
 #[test]
 fn seq_262_recovery_cap_no_cells() {
     let mut h = steady();
-    h.cmd(AC2, &ControlCmd::SetMode { scope: scope(S2, AC2, G2), mode: hft_types::RunMode::Shadow });
+    h.cmd(
+        AC2,
+        &ControlCmd::SetMode {
+            scope: scope(S2, AC2, G2),
+            mode: hft_types::RunMode::Shadow,
+        },
+    );
     h.run();
     h.keyframe();
-    let d1 = h.s.engine().risk.mode.desired(hft_risk::mode::CellKey { strategy: S1, account: AC1, group: G1 });
-    let d2 = h.s.engine().risk.mode.desired(hft_risk::mode::CellKey { strategy: S2, account: AC2, group: G2 });
+    let d1 = h.s.engine().risk.mode.desired(hft_risk::mode::CellKey {
+        strategy: S1,
+        account: AC1,
+        group: G1,
+    });
+    let d2 = h.s.engine().risk.mode.desired(hft_risk::mode::CellKey {
+        strategy: S2,
+        account: AC2,
+        group: G2,
+    });
     let h2 = H::crash_restart(h, plan(SnapshotSel::Latest, true, 1, 0), Rerun::default()).unwrap();
     let e = h2.s.engine();
     for a in [AC1, AC2, AC9] {
-        assert!(e.risk.mode.caps().iter().any(|c| c.source == CapSource::RECOVERY && c.scope.account == a), "{a:?}");
+        assert!(
+            e.risk
+                .mode
+                .caps()
+                .iter()
+                .any(|c| c.source == CapSource::RECOVERY && c.scope.account == a),
+            "{a:?}"
+        );
     }
-    assert_eq!(e.risk.mode.desired(hft_risk::mode::CellKey { strategy: S1, account: AC1, group: G1 }), d1);
-    assert_eq!(e.risk.mode.desired(hft_risk::mode::CellKey { strategy: S2, account: AC2, group: G2 }), d2);
+    assert_eq!(
+        e.risk.mode.desired(hft_risk::mode::CellKey {
+            strategy: S1,
+            account: AC1,
+            group: G1
+        }),
+        d1
+    );
+    assert_eq!(
+        e.risk.mode.desired(hft_risk::mode::CellKey {
+            strategy: S2,
+            account: AC2,
+            group: G2
+        }),
+        d2
+    );
 }
 
 #[test]
@@ -161,16 +243,26 @@ fn seq_263_epoch() {
         h.keyframe();
         let snap_epoch = h.s.view().engine_epoch();
         assert_eq!(snap_epoch, 1);
-        let mut h2 = H::crash_restart(h, plan(SnapshotSel::Latest, true, persisted, 0), Rerun::default()).unwrap();
+        let mut h2 =
+            H::crash_restart(h, plan(SnapshotSel::Latest, true, persisted, 0), Rerun::default()).unwrap();
         assert_eq!(h2.s.view().engine_epoch(), want);
         let n = h2.io_ref().out.len();
         let m = h2.mark();
         h2.step();
-        let ep = h2.notes_since(m).into_iter().find(|n| n.code == hft_sequencer::codes::seq_note(1)).unwrap();
+        let ep = h2
+            .notes_since(m)
+            .into_iter()
+            .find(|n| n.code == hft_sequencer::codes::seq_note(1))
+            .unwrap();
         assert_eq!(ep.v[0], u64::from(want));
-        let se: Vec<_> = h2.io_ref().out[n..].iter().filter(|o| o.1.op == hft_event::GwOp::SetEpoch).collect();
+        let se: Vec<_> = h2.io_ref().out[n..]
+            .iter()
+            .filter(|o| o.1.op == hft_event::GwOp::SetEpoch)
+            .collect();
         assert!(!se.is_empty());
-        assert!(se.iter().all(|o| o.1.epoch() == want as u16 && o.1.prev_epoch() == snap_epoch as u16 && o.1.accept_prev()));
+        assert!(se.iter().all(|o| o.1.epoch() == want as u16
+            && o.1.prev_epoch() == snap_epoch as u16
+            && o.1.accept_prev()));
     }
 }
 
@@ -185,7 +277,11 @@ fn seq_264_recovery_segment() {
     h2.step();
     let seg = h2.j().segments.last().unwrap().clone();
     assert_eq!(seg.reason, RollReason::Recovery as u8);
-    let done = seg.records.iter().position(|r| r.kind == EventKind::SEGMENT_ROLL && r.body.get(32) == Some(&3)).unwrap();
+    let done = seg
+        .records
+        .iter()
+        .position(|r| r.kind == EventKind::SEGMENT_ROLL && r.body.get(32) == Some(&3))
+        .unwrap();
     let ec = &seg.records[done + 1];
     assert_eq!(ec.kind, EventKind::ENGINE_CLOCK);
     assert_eq!(ec.read::<hft_event::EngineClock>().unwrap().base_engine_ns, stop);
@@ -202,7 +298,15 @@ fn seq_265_mirror_restore_batches() {
             && hx.s.strategy == S1
             && b.ask_px == px("50039")
         {
-            let mut it = intent(hx, A1, Side::Buy, hft_types::Tif::Gtc, hft_strategy_sdk::IntentClass::Open, px("49000"), q("0.001"));
+            let mut it = intent(
+                hx,
+                A1,
+                Side::Buy,
+                hft_types::Tif::Gtc,
+                hft_strategy_sdk::IntentClass::Open,
+                px("49000"),
+                q("0.001"),
+            );
             it.group = G1;
             let _ = ctx.place(it);
         }
@@ -215,12 +319,16 @@ fn seq_265_mirror_restore_batches() {
     h.keyframe();
     let mut h2 = H::crash_restart(h, plan(SnapshotSel::Latest, true, 1, 0), Rerun::default()).unwrap();
     h2.step();
-    let mr: Vec<_> = h2.io_ref().out.iter().filter(|o| o.1.op == hft_event::GwOp::MirrorRestore).collect();
+    let mr: Vec<_> = h2
+        .io_ref()
+        .out
+        .iter()
+        .filter(|o| o.1.op == hft_event::GwOp::MirrorRestore)
+        .collect();
     assert_eq!(mr.len(), 1);
     assert_eq!(mr[0].0, hft_sequencer::OutRing::Venue(A));
     assert_eq!(mr[0].1.slot, d.slot);
 }
-
 
 /// SEQ-261.4: the new segment's verify replay starts from the `purpose = Recovery` snapshot and
 /// reproduces the restarted run, including the gate inputs after the restart (README "恢复结束").
@@ -233,10 +341,36 @@ fn seq_261_remaining_durations_preserved() {
     h2.run();
     let t = h2.now();
     for v in [A, B] {
-        h2.push(hft_sequencer::driver::live::RingId::Rep(0), &conn(v, 0, hft_event::ConnStateKind::Up, hft_event::ConnRole::Md, hft_types::InstId(0), hft_types::AccountId(0), t));
+        h2.push(
+            hft_sequencer::driver::live::RingId::Rep(0),
+            &conn(
+                v,
+                0,
+                hft_event::ConnStateKind::Up,
+                hft_event::ConnRole::Md,
+                hft_types::InstId(0),
+                hft_types::AccountId(0),
+                t,
+            ),
+        );
         for a in [AC1, AC2] {
-            for (k, role) in [(0u8, hft_event::ConnRole::Order), (1, hft_event::ConnRole::Order), (0, hft_event::ConnRole::UserStream)] {
-                h2.push(hft_sequencer::driver::live::RingId::Rep(0), &conn(v, k, hft_event::ConnStateKind::Up, role, hft_types::InstId(0), a, t));
+            for (k, role) in [
+                (0u8, hft_event::ConnRole::Order),
+                (1, hft_event::ConnRole::Order),
+                (0, hft_event::ConnRole::UserStream),
+            ] {
+                h2.push(
+                    hft_sequencer::driver::live::RingId::Rep(0),
+                    &conn(
+                        v,
+                        k,
+                        hft_event::ConnStateKind::Up,
+                        role,
+                        hft_types::InstId(0),
+                        a,
+                        t,
+                    ),
+                );
             }
         }
     }
@@ -251,13 +385,25 @@ fn seq_261_remaining_durations_preserved() {
     // epoch reload of the recovery end).
     let ext = |h: &H| {
         let e = h.s.engine();
-        (1..=16u32).filter_map(|s| e.oms.raw_slot(B, AC1, s)).filter(|(sl, _, _)| sl.state != hft_oms::OrderState::Free).map(|(_, x, _)| x.leg_ix).collect::<Vec<u8>>()
+        (1..=16u32)
+            .filter_map(|s| e.oms.raw_slot(B, AC1, s))
+            .filter(|(sl, _, _)| sl.state != hft_oms::OrderState::Free)
+            .map(|(_, x, _)| x.leg_ix)
+            .collect::<Vec<u8>>()
     };
-    let rs = h2.snapshots().into_iter().filter(|r| snap(r).0.purpose == 4).last().expect("recovery snapshot");
+    let rs = h2
+        .snapshots()
+        .into_iter()
+        .filter(|r| snap(r).0.purpose == 4)
+        .last()
+        .expect("recovery snapshot");
     let v = h2.verify_from(Some(rs.seq));
     assert!(v.is_empty(), "verify from the Recovery snapshot: {v:?}");
     let _ = ext(&h2);
-    assert!(h2.s.engine().oms.legs(AC1, G1).view.n_legs == 2, "group legs registered after the restart");
+    assert!(
+        h2.s.engine().oms.legs(AC1, G1).view.n_legs == 2,
+        "group legs registered after the restart"
+    );
 }
 
 /// SEQ-261.4: the Recovery snapshot restores exactly the state the restarted run holds.
@@ -267,13 +413,29 @@ fn recovery_snapshot_restores_the_run_state() {
     h.keyframe();
     h.open_position(AC1, A1, Side::Buy, "0.001");
     let h2 = H::crash_restart(h, plan(SnapshotSel::Latest, true, 1, 0), Rerun::default()).unwrap();
-    let rs = h2.snapshots().into_iter().filter(|r| snap(r).0.purpose == 4).last().expect("recovery snapshot");
+    let rs = h2
+        .snapshots()
+        .into_iter()
+        .filter(|r| snap(r).0.purpose == 4)
+        .last()
+        .expect("recovery snapshot");
     let mut wa = hft_strategy_sdk::SnapshotWriter::new(64 << 20);
     h2.s.write_sections(&mut wa);
     let log = hft_sequencer::driver::replay::Log::from_segments(&h2.j().segments);
-    let drv = hft_sequencer::driver::replay::ReplayDriver::new(hft_sequencer::driver::replay::ReplayMode::Verify, log, 0, 1024);
+    let drv = hft_sequencer::driver::replay::ReplayDriver::new(
+        hft_sequencer::driver::replay::ReplayMode::Verify,
+        log,
+        0,
+        1024,
+    );
     let s: hft_sequencer::Sequencer<hft_sequencer::driver::replay::ReplayDriver, TestSet> =
-        hft_sequencer::Sequencer::boot(hft_sequencer::BootSource::Journal(plan(SnapshotSel::AtSeq(rs.seq), false, 0, 0)), &h2.setup, drv, hb()).unwrap();
+        hft_sequencer::Sequencer::boot(
+            hft_sequencer::BootSource::Journal(plan(SnapshotSel::AtSeq(rs.seq), false, 0, 0)),
+            &h2.setup,
+            drv,
+            hb(),
+        )
+        .unwrap();
     let mut wb = hft_strategy_sdk::SnapshotWriter::new(64 << 20);
     s.write_sections(&mut wb);
     let (a, b) = (wa.as_bytes(), wb.as_bytes());
@@ -290,12 +452,19 @@ fn recovery_snapshot_restores_the_run_state() {
     };
     let (sa, sb) = (secs(a), secs(b));
     for (n, x) in &sa {
-        let y = sb.iter().find(|(m, _)| m == n).map(|(_, y)| y.clone()).unwrap_or_default();
+        let y = sb
+            .iter()
+            .find(|(m, _)| m == n)
+            .map(|(_, y)| y.clone())
+            .unwrap_or_default();
         if *x != y {
             let k = x.iter().zip(y.iter()).position(|(p, q)| p != q).unwrap_or(0);
-            eprintln!("section {n} differs at {k}: live {:?} replay {:?}", &x[k.saturating_sub(4)..(k + 24).min(x.len())], &y[k.saturating_sub(4)..(k + 24).min(y.len())]);
+            eprintln!(
+                "section {n} differs at {k}: live {:?} replay {:?}",
+                &x[k.saturating_sub(4)..(k + 24).min(x.len())],
+                &y[k.saturating_sub(4)..(k + 24).min(y.len())]
+            );
         }
     }
     assert_eq!(a, b);
 }
-

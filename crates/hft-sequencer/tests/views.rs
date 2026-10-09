@@ -32,7 +32,11 @@ fn seq_019_now_fields() {
     reset_script();
     let mut h = b0().boot();
     h.steady();
-    let ec = h.recs().into_iter().find(|r| r.kind == EventKind::ENGINE_CLOCK).unwrap();
+    let ec = h
+        .recs()
+        .into_iter()
+        .find(|r| r.kind == EventKind::ENGINE_CLOCK)
+        .unwrap();
     let ep = h
         .recs()
         .into_iter()
@@ -119,7 +123,14 @@ fn seq_022_hw_rx_and_sw_ts() {
     assert_eq!(row(&h).bbo_flags & 2, 0);
     let mut b = bbo_rx(A1, 101, 1_001);
     b.h.hw_rx_ns = 222;
-    h.push_e(RingId::Bbo(0), Elem { kind: EventKind::BBO, flags: RecordFlags::SW_TS, body: b.as_bytes().to_vec() });
+    h.push_e(
+        RingId::Bbo(0),
+        Elem {
+            kind: EventKind::BBO,
+            flags: RecordFlags::SW_TS,
+            body: b.as_bytes().to_vec(),
+        },
+    );
     h.run();
     assert_eq!(row(&h).bbo_hw_rx_ns, 222);
     assert_eq!(row(&h).bbo_flags & 2, 2);
@@ -157,7 +168,11 @@ fn seq_023_funding_upd_tsc_visibility() {
 }
 
 fn lev_report(h: &mut H, x: &str) {
-    let l = hft_event::LeverageItem { inst: B1, _pad: 0, leverage: r(x) };
+    let l = hft_event::LeverageItem {
+        inst: B1,
+        _pad: 0,
+        leverage: r(x),
+    };
     let hd = cfg_hdr(AC1, B, 1);
     let mut body = hd.as_bytes().to_vec();
     body.extend_from_slice(l.as_bytes());
@@ -190,10 +205,26 @@ fn seq_027_open_qty_immediate() {
             && hx.s.strategy == S1
         {
             let b = hx.v.bbo(B1);
-            let mut ioc = intent(hx, B1, Side::Sell, hft_types::Tif::Ioc, hft_strategy_sdk::IntentClass::Open, b.bid_px, q("0.002"));
+            let mut ioc = intent(
+                hx,
+                B1,
+                Side::Sell,
+                hft_types::Tif::Ioc,
+                hft_strategy_sdk::IntentClass::Open,
+                b.bid_px,
+                q("0.002"),
+            );
             ioc.group = G1;
             let _ = ctx.place(ioc);
-            let mut gtc = intent(hx, B1, Side::Sell, hft_types::Tif::Gtc, hft_strategy_sdk::IntentClass::Open, hft_types::Px(b.ask_px.0 + 1_000), q("0.005"));
+            let mut gtc = intent(
+                hx,
+                B1,
+                Side::Sell,
+                hft_types::Tif::Gtc,
+                hft_strategy_sdk::IntentClass::Open,
+                hft_types::Px(b.ask_px.0 + 1_000),
+                q("0.005"),
+            );
             gtc.group = G1;
             let _ = ctx.place(gtc);
         }
@@ -201,7 +232,11 @@ fn seq_027_open_qty_immediate() {
     h.run();
     clear_hook();
     let ds = decisions(&h.since(m));
-    let gtc = ds.iter().find(|d| d.1.tif == hft_types::Tif::Gtc).expect("gtc decision").1;
+    let gtc = ds
+        .iter()
+        .find(|d| d.1.tif == hft_types::Tif::Gtc)
+        .expect("gtc decision")
+        .1;
     h.ack(&gtc);
     let ra = h.s.engine().risk_adapter();
     assert_eq!(ra.open_qty(AC1, B1, Side::Sell), q("0.007"));
@@ -216,7 +251,11 @@ fn seq_029_view_sources() {
     let e = h.s.engine();
     let v = e.seq_views();
     assert_eq!(
-        hft_sequencer::views::eff_mode_pub(e.risk.mode.effective(hft_risk::mode::CellKey { strategy: S1, account: AC1, group: G1 })),
+        hft_sequencer::views::eff_mode_pub(e.risk.mode.effective(hft_risk::mode::CellKey {
+            strategy: S1,
+            account: AC1,
+            group: G1
+        })),
         v.mode(AC1, G1)
     );
     assert_eq!(v.venue_ready(AC1, B), e.oms.venue_ready(B, AC1));

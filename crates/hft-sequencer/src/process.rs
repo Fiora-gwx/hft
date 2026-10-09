@@ -3,20 +3,21 @@
 //! `decided_tsc`, `EVENT_END`, publish, then the ring pushes.
 
 use hft_event::{
-    AccountConfigReportHdr, Bbo, ConnRole, ConnState, ConnStateKind, EngineClock, EventKind, ExternalFill, Funding,
-    FundingSettle, IndexPrice, L2BatchHdr, L2SnapHdr, Level, Liquidation, MarginReportHdr, MarkPrice, Note,
-    NoteLevel, NoteSource, OrderEvent, OrderEventKind, PositionReport, RecordFlags, RecordHeader, ReconcileReport,
-    SendReport, Timer, Trade, BalanceReport, AdviceHdr, CmdScope,
+    AccountConfigReportHdr, AdviceHdr, BalanceReport, Bbo, CmdScope, ConnRole, ConnState, ConnStateKind,
+    EngineClock, EventKind, ExternalFill, Funding, FundingSettle, IndexPrice, L2BatchHdr, L2SnapHdr, Level,
+    Liquidation, MarginReportHdr, MarkPrice, Note, NoteLevel, NoteSource, OrderEvent, OrderEventKind,
+    PositionReport, ReconcileReport, RecordFlags, RecordHeader, SendReport, Timer, Trade,
 };
 use hft_ledger::PnlDelta;
 use hft_refdata::{FundingSettleKind, InstKind};
 use hft_risk::mode::{GateEvent, ModeInput, StorageKind};
 use hft_risk::{EquitySource, EquityView, MarginSample, RiskTimer};
-use hft_strategy_sdk::{ExternalFillView, StrategySet, TradeView, LiquidationView};
-use hft_types::{AccountId, GroupId, InstId, MAX_BBO_CONN_SLOTS, Px, Qty, Seq, Tsc, VenueId, GROUP_NONE};
+use hft_strategy_sdk::{ExternalFillView, LiquidationView, StrategySet, TradeView};
+use hft_types::{AccountId, GROUP_NONE, GroupId, InstId, MAX_BBO_CONN_SLOTS, Px, Qty, Seq, Tsc, VenueId};
 use zerocopy::IntoBytes;
 
 use crate::Driver;
+use crate::Sequencer;
 use crate::codes::note;
 use crate::engine::{Emit, Engine};
 use crate::journal::{JournalSink, role_of};
@@ -24,7 +25,6 @@ use crate::market::{BBO_RESYNC, BBO_SW_TS};
 use crate::notify::{Notif, Queued};
 use crate::strategies::{Direct, Instances, MarketEv};
 use crate::types::{FatalReason, InputSlot, OutRecord};
-use crate::Sequencer;
 
 type R<T> = Result<T, FatalReason>;
 
@@ -39,7 +39,9 @@ pub(crate) struct Pending<'a> {
 
 /// Processes the Input in `seq.slot`.
 pub(crate) fn process<D: Driver<S>, S: StrategySet>(seq: &mut Sequencer<D, S>) -> R<()> {
-    let Sequencer { e, inst, drv, slot, .. } = seq;
+    let Sequencer {
+        e, inst, drv, slot, ..
+    } = seq;
     process_parts(e, inst, drv, slot)
 }
 
@@ -122,7 +124,9 @@ pub(crate) fn finish_event<D: Driver<S>, S: StrategySet>(e: &mut Engine, drv: &m
     let n = e.out.recs.len();
     e.out.seqs.clear();
     for k in 0..n {
-        let Some(r) = e.out.recs.get(k).copied() else { continue };
+        let Some(r) = e.out.recs.get(k).copied() else {
+            continue;
+        };
         if r.kind == EventKind::ORDER_DECISION
             && let Some(b) = e.out.bytes.get_mut(r.off as usize + 8..r.off as usize + 16)
         {
@@ -260,7 +264,10 @@ fn dispatch<'a, D: Driver<S>, S: StrategySet>(
                 if let Some(r) = e.market.row_mut(m.h.inst) {
                     r.index_px = m.px;
                 }
-                p.market = Some(MarketEv::Index { inst: m.h.inst, px: m.px });
+                p.market = Some(MarketEv::Index {
+                    inst: m.h.inst,
+                    px: m.px,
+                });
             }
             Ok(())
         }
@@ -295,16 +302,22 @@ fn dispatch<'a, D: Driver<S>, S: StrategySet>(
             if let Some(r) = slot.read::<PositionReport>() {
                 let eng = e.ledger.pos(r.account, r.inst).qty;
                 if eng != r.qty {
-                    e.seq_note(note::POSITION_DIFF, NoteLevel::P1, GroupId(0), r.inst, [
-                        u64::from(r.venue.0) | (u64::from(r.account.0) << 8),
-                        eng.0 as u64,
-                        r.qty.0 as u64,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                    ]);
+                    e.seq_note(
+                        note::POSITION_DIFF,
+                        NoteLevel::P1,
+                        GroupId(0),
+                        r.inst,
+                        [
+                            u64::from(r.venue.0) | (u64::from(r.account.0) << 8),
+                            eng.0 as u64,
+                            r.qty.0 as u64,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                        ],
+                    );
                 }
             }
             Ok(())
@@ -312,7 +325,8 @@ fn dispatch<'a, D: Driver<S>, S: StrategySet>(
         EventKind::BALANCE_REPORT => {
             if let Some(b) = slot.read::<BalanceReport>() {
                 let quiet = balance_quiet(e, b.account, b.venue);
-                e.trace.rec("ledger.on_balance", u64::from(b.account.0), u64::from(quiet));
+                e.trace
+                    .rec("ledger.on_balance", u64::from(b.account.0), u64::from(quiet));
                 let _ = e.ledger.on_balance(&b, quiet, e.now.engine_ns);
                 ledger_notes(e);
             }
@@ -339,7 +353,12 @@ fn dispatch<'a, D: Driver<S>, S: StrategySet>(
 
 // ------------------------------------------------------------------------------- EngineClock
 
-fn engine_clock<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, _slot: &InputSlot) -> R<()> {
+fn engine_clock<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    _slot: &InputSlot,
+) -> R<()> {
     e.market.clear_run();
     e.cmd.previews.clear();
     let base = e.clock.row.base_engine_ns;
@@ -347,16 +366,13 @@ fn engine_clock<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instanc
     e.ledger.on_run_start(base);
     e.trace.rec("risk.set_run_start", base as u64, 0);
     e.risk.set_run_start(base);
-    e.seq_note(note::EPOCH_START, NoteLevel::Info, GroupId(0), InstId(0), [
-        u64::from(e.epoch),
-        base as u64,
-        e.cur_seq,
-        0,
-        0,
-        0,
-        0,
-        0,
-    ]);
+    e.seq_note(
+        note::EPOCH_START,
+        NoteLevel::Info,
+        GroupId(0),
+        InstId(0),
+        [u64::from(e.epoch), base as u64, e.cur_seq, 0, 0, 0, 0, 0],
+    );
     e.market.set_rx_from(e.cur_seq);
     register_periodic(e)?;
     if e.set_epoch_due {
@@ -432,7 +448,9 @@ fn bbo<'a, D: Driver<S>, S: StrategySet>(
     slot: &'a InputSlot,
     p: &mut Pending<'a>,
 ) -> R<()> {
-    let Some(b) = slot.read::<Bbo>() else { return Ok(()) };
+    let Some(b) = slot.read::<Bbo>() else {
+        return Ok(());
+    };
     let i = b.h.inst;
     let out = e.books.top_mut(i).apply(&b, Seq(e.cur_seq));
     e.trace.rec("top.apply", u64::from(i.0), u64::from(out.bits()));
@@ -476,7 +494,12 @@ fn bbo<'a, D: Driver<S>, S: StrategySet>(
     Ok(())
 }
 
-fn after_book<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, i: InstId) -> R<()> {
+fn after_book<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    i: InstId,
+) -> R<()> {
     let (bid, ask) = {
         let b = e.books.l2(i);
         (
@@ -501,7 +524,9 @@ fn l2_batch<'a, D: Driver<S>, S: StrategySet>(
     p: &mut Pending<'a>,
 ) -> R<()> {
     let body = slot.body();
-    let Some(h) = crate::types::read_body::<L2BatchHdr>(body) else { return Ok(()) };
+    let Some(h) = crate::types::read_body::<L2BatchHdr>(body) else {
+        return Ok(());
+    };
     let n = usize::from(h.n_bids) + usize::from(h.n_asks);
     let levels = level_slice(body.get(core::mem::size_of::<L2BatchHdr>()..).unwrap_or(&[]), n);
     let i = h.h.inst;
@@ -522,13 +547,16 @@ fn l2_snapshot<'a, D: Driver<S>, S: StrategySet>(
     p: &mut Pending<'a>,
 ) -> R<()> {
     let body = slot.body();
-    let Some(h) = crate::types::read_body::<L2SnapHdr>(body) else { return Ok(()) };
+    let Some(h) = crate::types::read_body::<L2SnapHdr>(body) else {
+        return Ok(());
+    };
     let n = usize::from(h.n_bids) + usize::from(h.n_asks);
     let levels = level_slice(body.get(core::mem::size_of::<L2SnapHdr>()..).unwrap_or(&[]), n);
     let i = h.h.inst;
     if let Some(b) = e.books.l2_mut(i) {
         b.apply_snapshot(&h, &levels);
-        e.trace.rec("book.apply_snapshot", u64::from(i.0), u64::from(h.origin));
+        e.trace
+            .rec("book.apply_snapshot", u64::from(i.0), u64::from(h.origin));
     }
     if h.origin == L2SnapHdr::TOP_N {
         after_book(e, inst, drv, i)?;
@@ -539,7 +567,9 @@ fn l2_snapshot<'a, D: Driver<S>, S: StrategySet>(
 
 /// A boot-block `L2Snapshot{origin = Keyframe}` read while starting from a snapshot: levels only.
 pub(crate) fn apply_l2_keyframe(e: &mut Engine, body: &[u8]) {
-    let Some(h) = crate::types::read_body::<L2SnapHdr>(body) else { return };
+    let Some(h) = crate::types::read_body::<L2SnapHdr>(body) else {
+        return;
+    };
     let n = usize::from(h.n_bids) + usize::from(h.n_asks);
     let levels = level_slice(body.get(core::mem::size_of::<L2SnapHdr>()..).unwrap_or(&[]), n);
     if let Some(b) = e.books.l2_mut(h.h.inst) {
@@ -566,10 +596,15 @@ fn funding<'a, D: Driver<S>, S: StrategySet>(
     slot: &'a InputSlot,
     p: &mut Pending<'a>,
 ) -> R<()> {
-    let Some(f) = slot.read::<Funding>() else { return Ok(()) };
+    let Some(f) = slot.read::<Funding>() else {
+        return Ok(());
+    };
     let i = f.h.inst;
     // Synthesis when the next settle time moves past an unsettled one.
-    let (old_next, cut) = e.market.row(i).map_or((0, 0), |r| (r.next_funding_ns, r.settled_cut_ns));
+    let (old_next, cut) = e
+        .market
+        .row(i)
+        .map_or((0, 0), |r| (r.next_funding_ns, r.settled_cut_ns));
     if old_next != 0 && f.next_funding_ns > old_next && cut < old_next {
         let v = e.rd.inst(i).venue;
         if needs_synth(e, v) {
@@ -586,7 +621,11 @@ fn funding<'a, D: Driver<S>, S: StrategySet>(
             }
             r.interval_s = f.interval_s;
         }
-        e.trace.rec("ledger.on_funding_interval", u64::from(i.0), u64::from(f.interval_s));
+        e.trace.rec(
+            "ledger.on_funding_interval",
+            u64::from(i.0),
+            u64::from(f.interval_s),
+        );
         e.ledger.on_funding_interval(i, f.interval_s);
     }
     if let Some(r) = e.market.row_mut(i) {
@@ -616,7 +655,9 @@ fn mark<'a, D: Driver<S>, S: StrategySet>(
     slot: &'a InputSlot,
     p: &mut Pending<'a>,
 ) -> R<()> {
-    let Some(m) = slot.read::<MarkPrice>() else { return Ok(()) };
+    let Some(m) = slot.read::<MarkPrice>() else {
+        return Ok(());
+    };
     let i = m.h.inst;
     if let Some(r) = e.market.row_mut(i) {
         r.mark_px = m.px;
@@ -624,7 +665,8 @@ fn mark<'a, D: Driver<S>, S: StrategySet>(
         r.mark_ens = e.now.engine_ns;
     }
     let mut touched = hft_ledger::FixedVec::<(AccountId, VenueId), 4>::new();
-    e.trace.rec("ledger.on_mark", u64::from(i.0), e.now.engine_ns as u64);
+    e.trace
+        .rec("ledger.on_mark", u64::from(i.0), e.now.engine_ns as u64);
     e.ledger.on_mark(i, m.px, e.now.engine_ns, &mut touched);
     for (a, v) in touched.iter().copied().collect::<Vec<_>>() {
         margin_to_risk(e, inst, drv, a, v, false)?;
@@ -664,7 +706,12 @@ fn margin_to_risk<D: Driver<S>, S: StrategySet>(
 }
 
 /// Executes a `MarginOut`: mode → events → force → timers → notes.
-fn margin_out<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, out: &hft_risk::MarginOut) -> R<()> {
+fn margin_out<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    out: &hft_risk::MarginOut,
+) -> R<()> {
     let modes: Vec<ModeInput<'static>> = out.mode.iter().copied().collect();
     for m in modes {
         crate::mode_glue::apply_mode(e, inst, drv, m)?;
@@ -697,11 +744,19 @@ fn margin_out<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances
 
 // ------------------------------------------------------------------------------- exec reports
 
-fn order_event<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, slot: &InputSlot) -> R<()> {
-    let Some(ev) = slot.read::<OrderEvent>() else { return Ok(()) };
+fn order_event<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    slot: &InputSlot,
+) -> R<()> {
+    let Some(ev) = slot.read::<OrderEvent>() else {
+        return Ok(());
+    };
     let h = hdr_of(e, slot);
     let mut o = e.take_oms();
-    e.trace.rec("oms.on_order_event", u64::from(ev.slot.0), ev.what as u64);
+    e.trace
+        .rec("oms.on_order_event", u64::from(ev.slot.0), ev.what as u64);
     e.oms.on_order_event(&ev, &h, &mut o);
     crate::intents::drain_oms(e, inst, drv, &mut o)?;
     e.put_oms(o);
@@ -744,7 +799,12 @@ pub(crate) fn touch_legs(e: &mut Engine, _a: AccountId, g: GroupId) {
 }
 
 /// `risk.on_pnl` for one delta (day P&L of the account).
-pub(crate) fn pnl<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, d: PnlDelta) -> R<()> {
+pub(crate) fn pnl<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    d: PnlDelta,
+) -> R<()> {
     let a = d.account;
     if a.0 == 0 {
         return Ok(());
@@ -752,7 +812,14 @@ pub(crate) fn pnl<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Insta
     let day = e.ledger.account(a).day.net_realized();
     let eq = e.ledger.equity(a);
     e.trace.rec("risk.on_pnl", u64::from(a.0), 0);
-    if let Some(inp) = e.risk.on_pnl(a, day, EquityView { total: eq.total, valid: eq.valid }) {
+    if let Some(inp) = e.risk.on_pnl(
+        a,
+        day,
+        EquityView {
+            total: eq.total,
+            valid: eq.valid,
+        },
+    ) {
         crate::mode_glue::apply_mode(e, inst, drv, inp)?;
     }
     Ok(())
@@ -777,7 +844,8 @@ pub(crate) fn external_fill<D: Driver<S>, S: StrategySet>(
 ) -> R<()> {
     let a = x.account;
     let before = e.ledger.pos(a, x.inst).qty.0 != 0;
-    e.trace.rec("ledger.apply_external", u64::from(a.0), u64::from(auto_recon));
+    e.trace
+        .rec("ledger.apply_external", u64::from(a.0), u64::from(auto_recon));
     let r = e.ledger.apply_external(x, auto_recon, e.now.engine_ns);
     ledger_notes(e);
     let Some(app) = r else {
@@ -788,10 +856,19 @@ pub(crate) fn external_fill<D: Driver<S>, S: StrategySet>(
     }
     let mut parts: Vec<(GroupId, Qty)> = Vec::with_capacity(2);
     if app.net_qty.0 != 0 {
-        e.trace.rec("oms.external_adjust", u64::from(a.0), u64::from(app.group.0));
+        e.trace
+            .rec("oms.external_adjust", u64::from(a.0), u64::from(app.group.0));
         let mut o = e.take_oms();
-        e.oms
-            .external_adjust(a, x.venue, app.group, x.inst, app.net_qty, x.exch_order_id, x.cause, &mut o);
+        e.oms.external_adjust(
+            a,
+            x.venue,
+            app.group,
+            x.inst,
+            app.net_qty,
+            x.exch_order_id,
+            x.cause,
+            &mut o,
+        );
         crate::intents::drain_oms(e, inst, drv, &mut o)?;
         e.put_oms(o);
         parts.push((app.group, app.net_qty));
@@ -835,8 +912,15 @@ pub(crate) fn external_fill<D: Driver<S>, S: StrategySet>(
     Ok(())
 }
 
-fn funding_settle<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, slot: &InputSlot) -> R<()> {
-    let Some(f) = slot.read::<FundingSettle>() else { return Ok(()) };
+fn funding_settle<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    slot: &InputSlot,
+) -> R<()> {
+    let Some(f) = slot.read::<FundingSettle>() else {
+        return Ok(());
+    };
     match e.rd.caps(f.venue).funding_settle {
         FundingSettleKind::PerSymbolPush => {
             e.trace.rec("ledger.apply_funding", u64::from(f.account.0), 0);
@@ -848,7 +932,8 @@ fn funding_settle<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Insta
             }
         }
         FundingSettleKind::BalanceOnlyPush => {
-            e.trace.rec("ledger.apply_funding_push", u64::from(f.account.0), 0);
+            e.trace
+                .rec("ledger.apply_funding_push", u64::from(f.account.0), 0);
             let _ = e.ledger.apply_funding_push(&f, e.now.engine_ns);
             ledger_notes(e);
             pnl(
@@ -867,9 +952,16 @@ fn funding_settle<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Insta
     Ok(())
 }
 
-fn margin_report<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, slot: &InputSlot) -> R<()> {
+fn margin_report<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    slot: &InputSlot,
+) -> R<()> {
     let body = slot.body();
-    let Some(h) = crate::types::read_body::<MarginReportHdr>(body) else { return Ok(()) };
+    let Some(h) = crate::types::read_body::<MarginReportHdr>(body) else {
+        return Ok(());
+    };
     let items = body.get(core::mem::size_of::<MarginReportHdr>()..).unwrap_or(&[]);
     let view = hft_ledger::MarginReportView { hdr: h, items };
     e.trace.rec("ledger.on_margin", u64::from(h.account.0), 0);
@@ -879,11 +971,20 @@ fn margin_report<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instan
     margin_to_risk(e, inst, drv, h.account, h.venue, trunc)
 }
 
-fn account_cfg<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, slot: &InputSlot) -> R<()> {
+fn account_cfg<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    slot: &InputSlot,
+) -> R<()> {
     let body = slot.body();
-    let Some(h) = crate::types::read_body::<AccountConfigReportHdr>(body) else { return Ok(()) };
+    let Some(h) = crate::types::read_body::<AccountConfigReportHdr>(body) else {
+        return Ok(());
+    };
     let n = usize::from(h.n_lev);
-    let tail = body.get(core::mem::size_of::<AccountConfigReportHdr>()..).unwrap_or(&[]);
+    let tail = body
+        .get(core::mem::size_of::<AccountConfigReportHdr>()..)
+        .unwrap_or(&[]);
     let mut items = Vec::with_capacity(n);
     for k in 0..n {
         if let Some(x) = tail.get(16 * k..16 * k + 16)
@@ -892,7 +993,11 @@ fn account_cfg<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instance
             items.push(l);
         }
     }
-    e.trace.rec("risk.on_account_cfg", u64::from(h.account.0), u64::from(h.venue.0));
+    e.trace.rec(
+        "risk.on_account_cfg",
+        u64::from(h.account.0),
+        u64::from(h.venue.0),
+    );
     e.risk.on_account_cfg(&h, &items);
     let keys = e
         .setup
@@ -900,13 +1005,28 @@ fn account_cfg<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instance
         .iter()
         .find(|k| k.0 == h.account && k.1 == h.venue)
         .map_or(0, |k| k.2);
-    crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Gate(GateEvent::AccountCfg { hdr: &h, keys_required: keys }))
+    crate::mode_glue::apply_mode(
+        e,
+        inst,
+        drv,
+        ModeInput::Gate(GateEvent::AccountCfg {
+            hdr: &h,
+            keys_required: keys,
+        }),
+    )
 }
 
 // ------------------------------------------------------------------------------- connections
 
-fn conn_state<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, slot: &InputSlot) -> R<()> {
-    let Some(c) = slot.read::<ConnState>() else { return Ok(()) };
+fn conn_state<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    slot: &InputSlot,
+) -> R<()> {
+    let Some(c) = slot.read::<ConnState>() else {
+        return Ok(());
+    };
     let bbo_conn = c.role == ConnRole::Md && c.conn < MAX_BBO_CONN_SLOTS;
     if bbo_conn {
         liveness(e, &c);
@@ -938,12 +1058,17 @@ fn conn_state<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances
     if matches!(c.role, ConnRole::Order | ConnRole::UserStream | ConnRole::Rest) {
         let h = hdr_of(e, slot);
         let mut o = e.take_oms();
-        e.trace.rec("oms.on_conn_state", u64::from(c.account.0), c.state as u64);
+        e.trace
+            .rec("oms.on_conn_state", u64::from(c.account.0), c.state as u64);
         e.oms.on_conn_state(&c, &h, &mut o);
         crate::intents::drain_oms(e, inst, drv, &mut o)?;
         e.put_oms(o);
         if c.state == ConnStateKind::Degraded && c.reason == RATE_LIMIT_REASON {
-            e.trace.rec("risk.on_rate_limit_hit", u64::from(c.venue.0), u64::from(c.account.0));
+            e.trace.rec(
+                "risk.on_rate_limit_hit",
+                u64::from(c.venue.0),
+                u64::from(c.account.0),
+            );
             let n = e.risk.on_rate_limit_hit(c.venue, c.account, &e.now);
             e.out.push(RecordFlags(0), &n);
         }
@@ -962,10 +1087,13 @@ fn conn_state<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances
         }
         let a = s.account;
         if e.rd.account(a).venues & (1u64 << (c.venue.0 & 63)) != 0 && (c.account.0 == 0 || c.account == a) {
-            e.notify.push(ix as u16, Notif::Conn {
-                venue: c.venue,
-                state: c.state,
-            });
+            e.notify.push(
+                ix as u16,
+                Notif::Conn {
+                    venue: c.venue,
+                    state: c.state,
+                },
+            );
         }
     }
     unknown_gate(e, inst, drv, c.account)
@@ -1034,7 +1162,12 @@ fn liveness(e: &mut Engine, c: &ConnState) {
 }
 
 /// gw order connections (conn 0 = primary, 1 = standby) and user streams → `Gate(OrderConns)`.
-fn order_conns<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, c: &ConnState) -> R<()> {
+fn order_conns<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    c: &ConnState,
+) -> R<()> {
     let up = c.state == ConnStateKind::Up;
     let down = matches!(c.state, ConnStateKind::Down);
     if !up && !down {
@@ -1052,7 +1185,8 @@ fn order_conns<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instance
     e.cmd.conns.set(c.account, c.venue, st);
     let primary_up = st.primary && (!st.us_seen || st.us_up);
     let standby_up = st.standby;
-    e.trace.rec("gate.order_conns", u64::from(primary_up), u64::from(standby_up));
+    e.trace
+        .rec("gate.order_conns", u64::from(primary_up), u64::from(standby_up));
     crate::mode_glue::apply_mode(
         e,
         inst,
@@ -1067,7 +1201,12 @@ fn order_conns<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instance
 }
 
 /// `Gate(Unknown{account, count})` when the account's Unknown count changed.
-pub(crate) fn unknown_gate<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, a: AccountId) -> R<()> {
+pub(crate) fn unknown_gate<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    a: AccountId,
+) -> R<()> {
     if a.0 == 0 {
         return Ok(());
     }
@@ -1082,13 +1221,22 @@ pub(crate) fn unknown_gate<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &
         if let Some(x) = e.cmd.unknown_last.get_mut(usize::from(a.0)) {
             *x = n;
         }
-        crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Gate(GateEvent::Unknown { account: a, count: n }))?;
+        crate::mode_glue::apply_mode(
+            e,
+            inst,
+            drv,
+            ModeInput::Gate(GateEvent::Unknown { account: a, count: n }),
+        )?;
     }
     Ok(())
 }
 
 /// `Gate(Feeds{account, ok})` when every subscribed leg inst of the account is quoted.
-pub(crate) fn feeds_gate<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D) -> R<()> {
+pub(crate) fn feeds_gate<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+) -> R<()> {
     for ix in 0..inst.slots.len() {
         let Some(s) = inst.slots.get(ix) else { continue };
         let a = s.account;
@@ -1097,7 +1245,10 @@ pub(crate) fn feeds_gate<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mu
         for (_, sp) in g.iter() {
             for l in sp.legs.iter().take(usize::from(sp.n_legs)) {
                 let b = e.market.bbo_view(&e.books, l.inst);
-                let book_ok = e.books.l2(l.inst).is_none_or(|b| b.state() == hft_book::BookState::Live);
+                let book_ok = e
+                    .books
+                    .l2(l.inst)
+                    .is_none_or(|b| b.state() == hft_book::BookState::Live);
                 if b.seq == 0 || !b.conn_up || !book_ok {
                     ok = false;
                 }
@@ -1137,7 +1288,9 @@ fn timer<'a, D: Driver<S>, S: StrategySet>(
     slot: &'a InputSlot,
     p: &mut Pending<'a>,
 ) -> R<()> {
-    let Some(t) = slot.read::<Timer>() else { return Ok(()) };
+    let Some(t) = slot.read::<Timer>() else {
+        return Ok(());
+    };
     let owner = t.owner;
     let id = t.timer_id;
     let group = t.group;
@@ -1186,7 +1339,12 @@ fn timer<'a, D: Driver<S>, S: StrategySet>(
     Ok(())
 }
 
-fn oms_timer<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, id: u32) -> R<()> {
+fn oms_timer<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    id: u32,
+) -> R<()> {
     let kind = id & 0xFF;
     let arg = id >> 8;
     let mut o = e.take_oms();
@@ -1231,21 +1389,34 @@ fn oms_timer<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<
 
 // ------------------------------------------------------------------------------- advice
 
-fn advice<'a, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, slot: &'a InputSlot, p: &mut Pending<'a>) -> R<()> {
+fn advice<'a, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    slot: &'a InputSlot,
+    p: &mut Pending<'a>,
+) -> R<()> {
     let body = slot.body();
-    let Some(h) = crate::types::read_body::<AdviceHdr>(body) else { return Ok(()) };
+    let Some(h) = crate::types::read_body::<AdviceHdr>(body) else {
+        return Ok(());
+    };
     let payload = body.get(32..32 + usize::from(h.len)).unwrap_or(&[]);
     let misrouted = |e: &mut Engine| {
-        e.seq_note(note::ADVICE_MISROUTED, NoteLevel::P2, h.group, InstId(0), [
-            u64::from(h.strategy.0),
-            u64::from(h.account.0),
-            u64::from(h.len),
-            0,
-            0,
-            0,
-            0,
-            0,
-        ]);
+        e.seq_note(
+            note::ADVICE_MISROUTED,
+            NoteLevel::P2,
+            h.group,
+            InstId(0),
+            [
+                u64::from(h.strategy.0),
+                u64::from(h.account.0),
+                u64::from(h.len),
+                0,
+                0,
+                0,
+                0,
+                0,
+            ],
+        );
     };
     let Some(ix) = inst.ix(h.strategy) else {
         misrouted(e);
@@ -1265,19 +1436,19 @@ fn advice<'a, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, slot: &'a
         hft_strategy_sdk::GIX_NONE
     } else {
         let s = inst.slots.get(ix);
-        match (s.and_then(|s| s.gix_of(h.group)), s.and_then(|s| s.spec_seq_of(h.group))) {
+        match (
+            s.and_then(|s| s.gix_of(h.group)),
+            s.and_then(|s| s.spec_seq_of(h.group)),
+        ) {
             (Some(g), Some(ss)) if h.basis_seq >= ss => g,
             _ => {
-                e.seq_note(note::ADVICE_STALE, NoteLevel::P2, h.group, InstId(0), [
-                    u64::from(h.strategy.0),
-                    h.basis_seq,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                    0,
-                ]);
+                e.seq_note(
+                    note::ADVICE_STALE,
+                    NoteLevel::P2,
+                    h.group,
+                    InstId(0),
+                    [u64::from(h.strategy.0), h.basis_seq, 0, 0, 0, 0, 0, 0],
+                );
                 return Ok(());
             }
         }
@@ -1299,7 +1470,11 @@ fn advice<'a, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, slot: &'a
 // ------------------------------------------------------------------------------- broken scan
 
 /// Continues the `resolve_broken` scan (≤ 64 groups per call).
-pub(crate) fn naked_scan<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D) -> R<()> {
+pub(crate) fn naked_scan<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+) -> R<()> {
     let Some((mut a, mut cursor)) = e.naked_scan else {
         return Ok(());
     };

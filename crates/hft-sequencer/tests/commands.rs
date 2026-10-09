@@ -15,7 +15,13 @@ fn steady() -> H {
 }
 
 fn kill1() -> ControlCmd<'static> {
-    ControlCmd::Kill { scope: scope(StrategyId(0), AC1, GroupId(0)), level: KillLevel::Account, flatten: false, cancel_resting: true, hard: false }
+    ControlCmd::Kill {
+        scope: scope(StrategyId(0), AC1, GroupId(0)),
+        level: KillLevel::Account,
+        flatten: false,
+        cancel_resting: true,
+        hard: false,
+    }
 }
 
 fn set_id(h: &mut CmdHdr, id: u64) {
@@ -28,7 +34,9 @@ fn set_id(h: &mut CmdHdr, id: u64) {
 fn seq_278_check_order() {
     let mut h = steady();
     // A command to duplicate.
-    let id0 = h.cmd_with("cli:test", ADMIN, AC1, &ControlCmd::SnapshotNow, |x| set_id(x, 900));
+    let id0 = h.cmd_with("cli:test", ADMIN, AC1, &ControlCmd::SnapshotNow, |x| {
+        set_id(x, 900)
+    });
     h.run();
     assert_eq!(h.res(id0).0, status::APPLIED);
     // .1 expired + duplicate → Expired.
@@ -39,16 +47,36 @@ fn seq_278_check_order() {
     });
     let m = h.mark();
     h.run();
-    let r: Vec<_> = h.since(m).iter().filter(|r| r.kind == hft_event::EventKind::CMD_RESULT).filter_map(|r| r.read::<hft_event::CmdResult>()).filter(|r| r.cmd_id == id).collect();
+    let r: Vec<_> = h
+        .since(m)
+        .iter()
+        .filter(|r| r.kind == hft_event::EventKind::CMD_RESULT)
+        .filter_map(|r| r.read::<hft_event::CmdResult>())
+        .filter(|r| r.cmd_id == id)
+        .collect();
     assert_eq!(r[0].status, status::EXPIRED);
     // .2 duplicate + role insufficient → Duplicate.
-    let id = h.cmd_with("cli:test", VIEWER, AC1, &ControlCmd::SnapshotNow, |x| set_id(x, 900));
+    let id = h.cmd_with("cli:test", VIEWER, AC1, &ControlCmd::SnapshotNow, |x| {
+        set_id(x, 900)
+    });
     let m = h.mark();
     h.run();
-    let r: Vec<_> = h.since(m).iter().filter(|r| r.kind == hft_event::EventKind::CMD_RESULT).filter_map(|r| r.read::<hft_event::CmdResult>()).filter(|r| r.cmd_id == id).collect();
+    let r: Vec<_> = h
+        .since(m)
+        .iter()
+        .filter(|r| r.kind == hft_event::EventKind::CMD_RESULT)
+        .filter_map(|r| r.read::<hft_event::CmdResult>())
+        .filter(|r| r.cmd_id == id)
+        .collect();
     assert_eq!(r[0].status, status::DUPLICATE);
     // .5 needs confirm + precondition → NeedsConfirm.
-    let id = h.cmd(AC1, &ControlCmd::Resume { scope: scope(StrategyId(0), AC1, GroupId(0)), source: CapSource::KILL });
+    let id = h.cmd(
+        AC1,
+        &ControlCmd::Resume {
+            scope: scope(StrategyId(0), AC1, GroupId(0)),
+            source: CapSource::KILL,
+        },
+    );
     h.run();
     assert_eq!(h.res(id).0, status::NEEDS_CONFIRM);
 }
@@ -61,13 +89,27 @@ fn seq_279_cmd_dedup_window() {
         h.run();
         assert_eq!(h.res(c).0, status::APPLIED);
         for k in 0..n {
-            h.cmd_with("cli:test", ADMIN, AC1, &ControlCmd::SetMode { scope: scope(S1, AC1, G1), mode: RunMode::CloseOnly }, |x| set_id(x, 6_000 + k));
+            h.cmd_with(
+                "cli:test",
+                ADMIN,
+                AC1,
+                &ControlCmd::SetMode {
+                    scope: scope(S1, AC1, G1),
+                    mode: RunMode::CloseOnly,
+                },
+                |x| set_id(x, 6_000 + k),
+            );
             h.run();
         }
         let m = h.mark();
         h.cmd_with("cli:test", ADMIN, AC1, &kill1(), |x| set_id(x, 5_000));
         h.run();
-        let r: Vec<_> = h.since(m).iter().filter(|r| r.kind == hft_event::EventKind::CMD_RESULT).filter_map(|r| r.read::<hft_event::CmdResult>()).collect();
+        let r: Vec<_> = h
+            .since(m)
+            .iter()
+            .filter(|r| r.kind == hft_event::EventKind::CMD_RESULT)
+            .filter_map(|r| r.read::<hft_event::CmdResult>())
+            .collect();
         if dup {
             assert_eq!(r[0].status, status::DUPLICATE, "n {n}");
         } else {
@@ -85,17 +127,37 @@ fn seq_279_cmd_dedup_window() {
     let m = h2.mark();
     h2.cmd_with("cli:test", ADMIN, AC1, &kill1(), |x| set_id(x, 5_000));
     h2.run();
-    let r: Vec<_> = h2.since(m).iter().filter(|r| r.kind == hft_event::EventKind::CMD_RESULT).filter_map(|r| r.read::<hft_event::CmdResult>()).collect();
+    let r: Vec<_> = h2
+        .since(m)
+        .iter()
+        .filter(|r| r.kind == hft_event::EventKind::CMD_RESULT)
+        .filter_map(|r| r.read::<hft_event::CmdResult>())
+        .collect();
     assert_eq!(r[0].status, status::DUPLICATE);
 }
 
 #[test]
 fn seq_280_account_semantics() {
     let mut h = steady();
-    let id = h.cmd(AC1, &ControlCmd::SetMode { scope: scope(S2, AC2, G2), mode: RunMode::CloseOnly });
+    let id = h.cmd(
+        AC1,
+        &ControlCmd::SetMode {
+            scope: scope(S2, AC2, G2),
+            mode: RunMode::CloseOnly,
+        },
+    );
     h.run();
-    assert_eq!(h.res(id), (status::INVALID_ARGS, u32::from(detail::ACCOUNT_MISMATCH)));
-    let id = h.cmd(AC2, &ControlCmd::SetMode { scope: scope(S2, AC2, G2), mode: RunMode::CloseOnly });
+    assert_eq!(
+        h.res(id),
+        (status::INVALID_ARGS, u32::from(detail::ACCOUNT_MISMATCH))
+    );
+    let id = h.cmd(
+        AC2,
+        &ControlCmd::SetMode {
+            scope: scope(S2, AC2, G2),
+            mode: RunMode::CloseOnly,
+        },
+    );
     h.run();
     assert_eq!(h.res(id).0, status::APPLIED);
 }
@@ -103,11 +165,26 @@ fn seq_280_account_semantics() {
 #[test]
 fn seq_281_preview_no_state_change() {
     let mut h = steady();
-    h.cmd(AC1, &ControlCmd::SetMode { scope: scope(S1, AC1, G1), mode: RunMode::Shadow });
+    h.cmd(
+        AC1,
+        &ControlCmd::SetMode {
+            scope: scope(S1, AC1, G1),
+            mode: RunMode::Shadow,
+        },
+    );
     h.run();
     let v0 = h.s.engine().risk.mode.ctl_state_version();
     let mode0 = h.mode(S1, AC1, G1);
-    let id = h.cmd_with("cli:test", TRADER, AC1, &ControlCmd::SetMode { scope: scope(S1, AC1, G1), mode: RunMode::Live }, |x| x.hflags = CmdHdr::PREVIEW);
+    let id = h.cmd_with(
+        "cli:test",
+        TRADER,
+        AC1,
+        &ControlCmd::SetMode {
+            scope: scope(S1, AC1, G1),
+            mode: RunMode::Live,
+        },
+        |x| x.hflags = CmdHdr::PREVIEW,
+    );
     h.run();
     let r = h.result_of(id).unwrap();
     assert!(r.rflags & hft_event::CmdResult::PREVIEW != 0);
@@ -115,7 +192,9 @@ fn seq_281_preview_no_state_change() {
     assert_eq!(h.mode(S1, AC1, G1), mode0);
     // .3 Viewer Kill preview: one preview row, nothing else.
     let caps0 = h.s.engine().risk.mode.caps().len();
-    let id = h.cmd_with("cli:viewer", VIEWER, AC1, &kill1(), |x| x.hflags = CmdHdr::PREVIEW);
+    let id = h.cmd_with("cli:viewer", VIEWER, AC1, &kill1(), |x| {
+        x.hflags = CmdHdr::PREVIEW
+    });
     h.run();
     assert_eq!(h.res(id).0, status::APPLIED);
     assert_eq!(h.s.engine().risk.mode.caps().len(), caps0);
@@ -129,7 +208,10 @@ fn seq_282_confirm_and_version() {
     h.cmd(AC1, &kill1());
     h.run();
     let v = h.s.engine().risk.mode.ctl_state_version();
-    let resume = ControlCmd::Resume { scope: scope(StrategyId(0), AC1, GroupId(0)), source: CapSource::KILL };
+    let resume = ControlCmd::Resume {
+        scope: scope(StrategyId(0), AC1, GroupId(0)),
+        source: CapSource::KILL,
+    };
     let id = h.cmd_with("cli:test", TRADER, AC1, &resume, |_| {});
     h.run();
     assert_eq!(h.res(id).0, status::NEEDS_CONFIRM);
@@ -138,7 +220,10 @@ fn seq_282_confirm_and_version() {
         x.expect_state_version = v - 1;
     });
     h.run();
-    assert_eq!(h.res(id), (status::CONFIRM_INVALID, u32::from(detail::STATE_CHANGED)));
+    assert_eq!(
+        h.res(id),
+        (status::CONFIRM_INVALID, u32::from(detail::STATE_CHANGED))
+    );
     let r = h.result_of(id).unwrap();
     assert_eq!(r.ctl_state_version, h.s.engine().risk.mode.ctl_state_version());
     let v = h.s.engine().risk.mode.ctl_state_version();
@@ -198,22 +283,56 @@ fn seq_284_draining_and_gate() {
             && hx.s.strategy == S1
             && b.ask_px == px("50049")
         {
-            let mut it = intent(hx, A1, hft_types::Side::Buy, hft_types::Tif::Gtc, hft_strategy_sdk::IntentClass::Open, px("49000"), q("0.001"));
+            let mut it = intent(
+                hx,
+                A1,
+                hft_types::Side::Buy,
+                hft_types::Tif::Gtc,
+                hft_strategy_sdk::IntentClass::Open,
+                px("49000"),
+                q("0.001"),
+            );
             it.group = G1;
             let _ = ctx.place(it);
         }
     });
     h.quote(A1, "50000", "50049");
     h.run();
-    h.cmd(AC1, &ControlCmd::SetMode { scope: scope(S1, AC1, G1), mode: RunMode::CloseOnly });
+    h.cmd(
+        AC1,
+        &ControlCmd::SetMode {
+            scope: scope(S1, AC1, G1),
+            mode: RunMode::CloseOnly,
+        },
+    );
     h.run();
-    h.cmd_confirmed(AccountId(0), &ControlCmd::Drain { cancel_resting: false });
+    h.cmd_confirmed(
+        AccountId(0),
+        &ControlCmd::Drain {
+            cancel_resting: false,
+        },
+    );
     h.run();
     assert!(h.s.view().draining());
-    let id = h.cmd_confirmed(AC1, &ControlCmd::SetMode { scope: scope(S1, AC1, G1), mode: RunMode::Live });
+    let id = h.cmd_confirmed(
+        AC1,
+        &ControlCmd::SetMode {
+            scope: scope(S1, AC1, G1),
+            mode: RunMode::Live,
+        },
+    );
     h.run();
-    assert_eq!(h.res(id), (status::PRECONDITION_FAILED, u32::from(detail::DRAINING)));
-    let fk = ControlCmd::Kill { scope: scope(StrategyId(0), AC1, GroupId(0)), level: KillLevel::Account, flatten: true, cancel_resting: true, hard: false };
+    assert_eq!(
+        h.res(id),
+        (status::PRECONDITION_FAILED, u32::from(detail::DRAINING))
+    );
+    let fk = ControlCmd::Kill {
+        scope: scope(StrategyId(0), AC1, GroupId(0)),
+        level: KillLevel::Account,
+        flatten: true,
+        cancel_resting: true,
+        hard: false,
+    };
     let id = h.cmd(AC1, &fk);
     h.run();
     assert_eq!(h.res(id).0, status::NEEDS_CONFIRM);
@@ -239,13 +358,19 @@ fn seq_285_set_params_binding() {
     p.digest = digest(TARGET);
     let id = h.set_params_as(&p, "pipeline", ADMIN, true, |_| {});
     h.run();
-    assert_eq!(h.res(id), (status::INVALID_ARGS, u32::from(detail::KIND_MISMATCH)));
+    assert_eq!(
+        h.res(id),
+        (status::INVALID_ARGS, u32::from(detail::KIND_MISMATCH))
+    );
     // .6 both legs on the same exchange.
     let mut p = Spb::s1(2);
     p.groups = vec![group(G1, BTC, &[leg(A1, A), leg(A3, A)])];
     let id = h.set_params_as(&p, "pipeline", ADMIN, true, |_| {});
     h.run();
-    assert_eq!(h.res(id), (status::INVALID_ARGS, u32::from(detail::SAME_EXCHANGE_LEGS)));
+    assert_eq!(
+        h.res(id),
+        (status::INVALID_ARGS, u32::from(detail::SAME_EXCHANGE_LEGS))
+    );
     assert_eq!(h.s.instances().get(S1).unwrap().params_version(), 1);
 }
 
@@ -273,7 +398,11 @@ fn seq_286_set_params_version_group_id() {
         p.groups = vec![gspec(g)];
         let id = h.set_params_as(&p, "pipeline", ADMIN, true, |_| {});
         h.run();
-        assert_eq!(h.res(id), (status::INVALID_ARGS, u32::from(detail::BAD_GROUP)), "{g:?}");
+        assert_eq!(
+            h.res(id),
+            (status::INVALID_ARGS, u32::from(detail::BAD_GROUP)),
+            "{g:?}"
+        );
     }
     let mut p = Spb::s1(6);
     p.groups = vec![gspec(GroupId(0x0100_0003)), gspec_eth(GroupId(0x0100_0003))];
@@ -297,7 +426,10 @@ fn seq_287_inst_owned_group_has_position() {
     p.groups = vec![gspec_eth(GroupId(0x0100_0002))];
     let id = h.set_params_as(&p, "pipeline", ADMIN, true, |_| {});
     h.run();
-    assert_eq!(h.res(id), (status::PRECONDITION_FAILED, u32::from(detail::GROUP_HAS_POSITION)));
+    assert_eq!(
+        h.res(id),
+        (status::PRECONDITION_FAILED, u32::from(detail::GROUP_HAS_POSITION))
+    );
 }
 
 #[test]
@@ -329,9 +461,14 @@ fn seq_290_model_budget() {
     b.params = vec![Spb::s1(1), p2, p9];
     let mut h = b.boot();
     h.steady();
-    for (k, (mem, ckpt, ok)) in [(56 * mib, 100 * mib, true), (56 * mib + 1, 100 * mib, false), (10 * mib, 212 * mib, true), (10 * mib, 212 * mib + 1, false)]
-        .into_iter()
-        .enumerate()
+    for (k, (mem, ckpt, ok)) in [
+        (56 * mib, 100 * mib, true),
+        (56 * mib + 1, 100 * mib, false),
+        (10 * mib, 212 * mib, true),
+        (10 * mib, 212 * mib + 1, false),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let mut p = Spb::s1(2 + k as u64);
         p.values[F_THR] = 10 + k as i64;
@@ -360,7 +497,13 @@ fn seq_294_kill_combinations() {
     ];
     for (k, (level, a, hard, flatten, want)) in cases.into_iter().enumerate() {
         let mut h = steady();
-        let c = ControlCmd::Kill { scope: scope(StrategyId(0), a, GroupId(0)), level, flatten, cancel_resting: true, hard };
+        let c = ControlCmd::Kill {
+            scope: scope(StrategyId(0), a, GroupId(0)),
+            level,
+            flatten,
+            cancel_resting: true,
+            hard,
+        };
         let id = h.cmd_confirmed(a, &c);
         h.run();
         assert_eq!(h.res(id).0, want, "row {}", k + 1);
@@ -373,10 +516,30 @@ fn seq_294_kill_combinations() {
 #[test]
 fn seq_297_baseline_transfer_notice() {
     let mut h = steady();
-    let id = h.cmd_confirmed(AC1, &ControlCmd::VenueNotice { venue: B, kind: 3, _pad: 0, inst: hft_types::InstId(0), a: UTC0 + 3_600_000_000_000, b: UTC0 + 5_400_000_000_000 });
+    let id = h.cmd_confirmed(
+        AC1,
+        &ControlCmd::VenueNotice {
+            venue: B,
+            kind: 3,
+            _pad: 0,
+            inst: hft_types::InstId(0),
+            a: UTC0 + 3_600_000_000_000,
+            b: UTC0 + 5_400_000_000_000,
+        },
+    );
     h.run();
     assert_eq!(h.res(id).0, status::APPLIED);
-    let id = h.cmd_confirmed(AC1, &ControlCmd::VenueNotice { venue: B, kind: 2, _pad: 0, inst: B1, a: 3_600, b: 0 });
+    let id = h.cmd_confirmed(
+        AC1,
+        &ControlCmd::VenueNotice {
+            venue: B,
+            kind: 2,
+            _pad: 0,
+            inst: B1,
+            a: 3_600,
+            b: 0,
+        },
+    );
     h.run();
     assert_eq!(h.res(id).0, status::APPLIED);
     let kf = h.keyframe();
@@ -394,8 +557,20 @@ fn seq_298_sim_reset_transfer() {
     // g9 is Live: not idle.
     let id = h.cmd_confirmed(AC9, &ControlCmd::SimReset { account: AC9 });
     h.run();
-    assert_eq!(h.res(id), (status::PRECONDITION_FAILED, u32::from(detail::SIM_NOT_IDLE)));
-    let id = h.cmd_confirmed(AC1, &ControlCmd::SimTransfer { account: AC1, from: A, to: B, asset: USDT, amount: q("1") });
+    assert_eq!(
+        h.res(id),
+        (status::PRECONDITION_FAILED, u32::from(detail::SIM_NOT_IDLE))
+    );
+    let id = h.cmd_confirmed(
+        AC1,
+        &ControlCmd::SimTransfer {
+            account: AC1,
+            from: A,
+            to: B,
+            asset: USDT,
+            amount: q("1"),
+        },
+    );
     h.run();
     assert_eq!(h.res(id), (status::INVALID_ARGS, u32::from(detail::NOT_SIM)));
 }
@@ -403,22 +578,47 @@ fn seq_298_sim_reset_transfer() {
 #[test]
 fn seq_299_write_off_residual() {
     let mut h = steady();
-    let c = ControlCmd::WriteOffResidual { account: AC1, _pad: [0; 3], group: G1 };
+    let c = ControlCmd::WriteOffResidual {
+        account: AC1,
+        _pad: [0; 3],
+        group: G1,
+    };
     let id = h.cmd(AC1, &c);
     h.run();
     assert_eq!(h.res(id).0, status::NEEDS_CONFIRM);
-    let c = ControlCmd::WriteOffResidual { account: AC1, _pad: [0; 3], group: G2 };
+    let c = ControlCmd::WriteOffResidual {
+        account: AC1,
+        _pad: [0; 3],
+        group: G2,
+    };
     let id = h.cmd_confirmed(AC1, &c);
     h.run();
-    assert_eq!(h.res(id), (status::INVALID_ARGS, u32::from(detail::UNKNOWN_GROUP)));
+    assert_eq!(
+        h.res(id),
+        (status::INVALID_ARGS, u32::from(detail::UNKNOWN_GROUP))
+    );
 }
 
 #[test]
 fn seq_300_smoke_order() {
-    let smoke = |a: AccountId| ControlCmd::SmokeOrder { account: a, venue: B, _pad: 0, inst: B1, side: hft_types::Side::Buy, _pad2: [0; 3], ttl_ms: 30_000 };
+    let smoke = |a: AccountId| ControlCmd::SmokeOrder {
+        account: a,
+        venue: B,
+        _pad: 0,
+        inst: B1,
+        side: hft_types::Side::Buy,
+        _pad2: [0; 3],
+        ttl_ms: 30_000,
+    };
     // .1 Shadow cell: still sent, flagged SMOKE, no strategy delivery.
     let mut h = steady();
-    h.cmd(AC1, &ControlCmd::SetMode { scope: scope(S1, AC1, G1), mode: RunMode::Shadow });
+    h.cmd(
+        AC1,
+        &ControlCmd::SetMode {
+            scope: scope(S1, AC1, G1),
+            mode: RunMode::Shadow,
+        },
+    );
     h.run();
     clear_log();
     let n = h.io_ref().out.len();
@@ -436,7 +636,10 @@ fn seq_300_smoke_order() {
     // .4 a second smoke order on (1, B).
     let id = h.cmd_confirmed(AC1, &smoke(AC1));
     h.run();
-    assert_eq!(h.res(id), (status::PRECONDITION_FAILED, u32::from(detail::SMOKE_ACTIVE)));
+    assert_eq!(
+        h.res(id),
+        (status::PRECONDITION_FAILED, u32::from(detail::SMOKE_ACTIVE))
+    );
     // .6 Trader: role insufficient.
     let id = h.cmd_with("cli:test", TRADER, AC1, &smoke(AC1), |x| x.confirmed = 1);
     h.run();
@@ -450,7 +653,13 @@ fn seq_300_smoke_order() {
 #[test]
 fn seq_301_strategy_cmd() {
     let mut h = steady();
-    let sc = |inst: StrategyId, g: GroupId, ro: u8| ControlCmd::StrategyCmd { instance: inst, reduce_only: ro, len: 32, group: g, payload: [0x11; 256] };
+    let sc = |inst: StrategyId, g: GroupId, ro: u8| ControlCmd::StrategyCmd {
+        instance: inst,
+        reduce_only: ro,
+        len: 32,
+        group: g,
+        payload: [0x11; 256],
+    };
     clear_log();
     let id = h.cmd_with("cli:test", TRADER, AC1, &sc(S1, G1, 0), |x| {
         x.confirmed = 1;
@@ -463,11 +672,17 @@ fn seq_301_strategy_cmd() {
     let id = h.cmd_confirmed(AC1, &sc(S1, G1, 0));
     h.run();
     assert_eq!(h.res(id).0, status::APPLIED);
-    let got: Vec<Got> = log().into_iter().filter(|g| g.kind == "Manual" && !g.model).collect();
+    let got: Vec<Got> = log()
+        .into_iter()
+        .filter(|g| g.kind == "Manual" && !g.model)
+        .collect();
     assert!(!got.is_empty() && got.iter().all(|g| g.s == S1 && g.gix == 0));
     let id = h.cmd_confirmed(AC1, &sc(S1, G2, 0));
     h.run();
-    assert_eq!(h.res(id), (status::INVALID_ARGS, u32::from(detail::UNKNOWN_GROUP)));
+    assert_eq!(
+        h.res(id),
+        (status::INVALID_ARGS, u32::from(detail::UNKNOWN_GROUP))
+    );
     let id = h.cmd_confirmed(AccountId(0), &sc(StrategyId(7), G1, 0));
     h.run();
     assert_eq!(h.res(id).0, status::UNKNOWN_TARGET);
@@ -478,7 +693,10 @@ fn seq_301_strategy_cmd() {
     let id = h.cmd_confirmed(AC1, &sc(S1, hft_types::GROUP_NONE, 1));
     h.run();
     assert_eq!(h.res(id).0, status::APPLIED);
-    let got: Vec<Got> = log().into_iter().filter(|g| g.kind == "Manual" && !g.model).collect();
+    let got: Vec<Got> = log()
+        .into_iter()
+        .filter(|g| g.kind == "Manual" && !g.model)
+        .collect();
     assert!(got.iter().any(|g| g.gix == hft_strategy_sdk::GIX_NONE));
 }
 
@@ -489,7 +707,15 @@ fn seq_302_inject_warmup() {
     let mut h = b0().boot();
     h.steady();
     clear_log();
-    let w = |inst: StrategyId| ControlCmd::InjectWarmup { instance: inst, last: 1, local_kind: 3, chunk_no: 0, len: 4_096, _pad: [0; 6], payload: &[7u8; 4_096] };
+    let w = |inst: StrategyId| ControlCmd::InjectWarmup {
+        instance: inst,
+        last: 1,
+        local_kind: 3,
+        chunk_no: 0,
+        len: 4_096,
+        _pad: [0; 6],
+        payload: &[7u8; 4_096],
+    };
     let id = h.cmd(AccountId(0), &w(S2));
     h.run();
     assert_eq!(h.res(id).0, status::APPLIED);
@@ -504,9 +730,21 @@ fn seq_302_inject_warmup() {
     assert_eq!(h.res(id).0, status::UNKNOWN_TARGET);
     // .5 20 warmup records of 4 096 B each, then a Kill: at most 2 chunks per round, the Kill in
     // the round after the 10 rounds of chunks.
-    let probe = h.cmd_elem("cli:test", 4, AccountId(0), &w(S2), |_| {}).0.body.len();
+    let probe = h
+        .cmd_elem("cli:test", 4, AccountId(0), &w(S2), |_| {})
+        .0
+        .body
+        .len();
     let pay = vec![7u8; 4_096 - (probe - 4_096)];
-    let w4k = ControlCmd::InjectWarmup { instance: S2, last: 1, local_kind: 3, chunk_no: 0, len: pay.len() as u16, _pad: [0; 6], payload: &pay };
+    let w4k = ControlCmd::InjectWarmup {
+        instance: S2,
+        last: 1,
+        local_kind: 3,
+        chunk_no: 0,
+        len: pay.len() as u16,
+        _pad: [0; 6],
+        payload: &pay,
+    };
     for _ in 0..20 {
         let (e, _) = h.cmd_elem("cli:test", 4, AccountId(0), &w4k, |_| {});
         assert_eq!(e.body.len(), 4_096);
@@ -515,9 +753,17 @@ fn seq_302_inject_warmup() {
     let k = h.cmd(AC1, &kill1());
     let mut rounds = 0;
     while h.result_of(k).is_none() && rounds < 20 {
-        let before = h.io_ref().rings.get(&hft_sequencer::driver::live::RingId::Ctl).map_or(0, |r| r.len());
+        let before = h
+            .io_ref()
+            .rings
+            .get(&hft_sequencer::driver::live::RingId::Ctl)
+            .map_or(0, |r| r.len());
         h.step();
-        let after = h.io_ref().rings.get(&hft_sequencer::driver::live::RingId::Ctl).map_or(0, |r| r.len());
+        let after = h
+            .io_ref()
+            .rings
+            .get(&hft_sequencer::driver::live::RingId::Ctl)
+            .map_or(0, |r| r.len());
         assert!(before - after <= 2, "{before} -> {after}");
         rounds += 1;
     }
@@ -531,14 +777,31 @@ fn seq_304_replace_refdata_recheck() {
     let mut rd2 = b0_rd();
     rd2.version = 2;
     let blob = rd2.blob();
-    let r = hft_event::BlobRef { kind: hft_event::BlobKind::Refdata, encoding: 1, len: blob.len() as u32, version: 2, sha256: sha(&blob) };
+    let r = hft_event::BlobRef {
+        kind: hft_event::BlobKind::Refdata,
+        encoding: 1,
+        len: blob.len() as u32,
+        version: 2,
+        sha256: sha(&blob),
+    };
     let parsed = hft_refdata::RefData::load(&blob, Some(&h.s.engine().rd));
-    h.io().mailbox.push(hft_sequencer::ParsedConfig::Refdata { sha256: r.sha256, result: Box::new(parsed) });
+    h.io().mailbox.push(hft_sequencer::ParsedConfig::Refdata {
+        sha256: r.sha256,
+        result: Box::new(parsed),
+    });
     h.blob_input(r, scope(StrategyId(0), AccountId(0), GroupId(0)), &blob);
     let id = h.cmd_confirmed(AccountId(0), &ControlCmd::ReplaceRefdata { blob: r });
     h.run();
     assert_eq!(h.res(id).0, status::APPLIED, "{:?}", h.res(id));
     assert!(h.s.view().draining());
-    let draining = h.s.engine().risk.mode.caps().iter().find(|c| c.source == CapSource::DRAINING).copied().expect("Draining");
+    let draining =
+        h.s.engine()
+            .risk
+            .mode
+            .caps()
+            .iter()
+            .find(|c| c.source == CapSource::DRAINING)
+            .copied()
+            .expect("Draining");
     assert_eq!(draining.params[0], 0);
 }

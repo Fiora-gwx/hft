@@ -72,7 +72,9 @@ impl RingKey {
 
 impl<S: StrategySet> core::fmt::Debug for DstIo<S> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("DstIo").field("now_ns", &self.drv.now_ns()).finish_non_exhaustive()
+        f.debug_struct("DstIo")
+            .field("now_ns", &self.drv.now_ns())
+            .finish_non_exhaustive()
     }
 }
 
@@ -105,7 +107,10 @@ impl<S: StrategySet> DstIo<S> {
         self.venues.iter().position(|x| *x == v).map_or(0, |i| i as u8)
     }
     pub fn push(&mut self, r: RingId, kind: EventKind, body: Vec<u8>) {
-        self.rings.entry(RingKey::of(r)).or_default().push_back(Elem { kind, body });
+        self.rings
+            .entry(RingKey::of(r))
+            .or_default()
+            .push_back(Elem { kind, body });
     }
     pub fn queued(&self) -> usize {
         self.rings.values().map(VecDeque::len).sum()
@@ -133,12 +138,16 @@ impl<S: StrategySet> LiveIo<S> for DstIo<S> {
         self.rings.get(&RingKey::of(r)).map_or(0, VecDeque::len)
     }
     fn peek_len(&mut self, r: RingId) -> Option<usize> {
-        self.rings.get(&RingKey::of(r)).and_then(|q| q.front()).map(|e| e.body.len())
+        self.rings
+            .get(&RingKey::of(r))
+            .and_then(|q| q.front())
+            .map(|e| e.body.len())
     }
     fn peek_inst(&mut self, r: RingId) -> Option<InstId> {
         let e = self.rings.get(&RingKey::of(r))?.front()?;
-        (e.kind == EventKind::BBO)
-            .then(|| hft_sequencer::types::read_body::<hft_event::Bbo>(&e.body).map_or(InstId(0), |b| b.h.inst))
+        (e.kind == EventKind::BBO).then(|| {
+            hft_sequencer::types::read_body::<hft_event::Bbo>(&e.body).map_or(InstId(0), |b| b.h.inst)
+        })
     }
     fn pop(&mut self, r: RingId, out: &mut InputSlot) -> bool {
         let Some(e) = self.rings.get_mut(&RingKey::of(r)).and_then(VecDeque::pop_front) else {
@@ -167,7 +176,11 @@ impl<S: StrategySet> LiveIo<S> for DstIo<S> {
                 }
             }
             GwOp::Place => {
-                let ep = self.gw_epoch.get(&(rk, c.account.0)).copied().unwrap_or(self.epoch0);
+                let ep = self
+                    .gw_epoch
+                    .get(&(rk, c.account.0))
+                    .copied()
+                    .unwrap_or(self.epoch0);
                 c.arg = u32::from(ep);
                 self.slot_epoch.insert((rk, c.account.0, c.slot.0), ep);
             }
@@ -175,8 +188,17 @@ impl<S: StrategySet> LiveIo<S> for DstIo<S> {
                 self.slot_epoch.insert((rk, c.account.0, c.slot.0), c.epoch());
             }
             GwOp::Query => {
-                let gw = self.gw_epoch.get(&(rk, c.account.0)).copied().unwrap_or(self.epoch0);
-                c.arg = u32::from(self.slot_epoch.get(&(rk, c.account.0, c.slot.0)).copied().unwrap_or(gw));
+                let gw = self
+                    .gw_epoch
+                    .get(&(rk, c.account.0))
+                    .copied()
+                    .unwrap_or(self.epoch0);
+                c.arg = u32::from(
+                    self.slot_epoch
+                        .get(&(rk, c.account.0, c.slot.0))
+                        .copied()
+                        .unwrap_or(gw),
+                );
             }
             _ => {}
         }

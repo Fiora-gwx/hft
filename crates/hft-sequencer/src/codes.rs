@@ -23,7 +23,9 @@ pub mod status {
     pub const REJECTED: u8 = 27;
     pub const INTERNAL: u8 = 40;
     /// Every status the sequencer writes (CmdResult decoding checks membership).
-    pub const ALL: &[u8] = &[0, 1, 2, 3, 10, 11, 12, 13, 20, 21, 22, 23, 24, 25, 26, 27, 30, 31, 40];
+    pub const ALL: &[u8] = &[
+        0, 1, 2, 3, 10, 11, 12, 13, 20, 21, 22, 23, 24, 25, 26, 27, 30, 31, 40,
+    ];
 }
 
 /// `CmdResult.detail` codes (`detail = code | arg << 16`).
@@ -120,7 +122,11 @@ pub const NOTE_CODES: &[(NoteSource, u32, &str)] = &[
     (NoteSource::Sequencer, note::STARTUP_GATE, "StartupGate"),
     (NoteSource::Sequencer, note::SHADOW_DEFERRED, "ShadowDeferred"),
     (NoteSource::Sequencer, note::IDENTITY_MISMATCH, "IdentityMismatch"),
-    (NoteSource::Sequencer, note::REFDATA_RECHECK_FAILED, "RefdataRecheckFailed"),
+    (
+        NoteSource::Sequencer,
+        note::REFDATA_RECHECK_FAILED,
+        "RefdataRecheckFailed",
+    ),
 ];
 
 /// Full code of a Sequencer Note.

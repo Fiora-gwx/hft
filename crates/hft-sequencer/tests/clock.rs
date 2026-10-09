@@ -11,7 +11,12 @@ use proptest::prelude::*;
 use crate::common::*;
 
 fn row(base: i64, hz: u64) -> EngineClockRow {
-    EngineClockRow { base_engine_ns: base, base_tsc: 0, tsc_hz_milli: hz, clock_seq: 0 }
+    EngineClockRow {
+        base_engine_ns: base,
+        base_tsc: 0,
+        tsc_hz_milli: hz,
+        clock_seq: 0,
+    }
 }
 
 #[test]
@@ -21,7 +26,18 @@ fn seq_104_engine_clock_processing() {
     h.steady();
     // Membership and a preview from the previous run.
     let t = h.now();
-    h.push(RingId::Rep(0), &conn(A, 1, hft_event::ConnStateKind::Up, hft_event::ConnRole::Md, A1, hft_types::AccountId(0), t));
+    h.push(
+        RingId::Rep(0),
+        &conn(
+            A,
+            1,
+            hft_event::ConnStateKind::Up,
+            hft_event::ConnRole::Md,
+            A1,
+            hft_types::AccountId(0),
+            t,
+        ),
+    );
     h.run();
     h.cmd(AC1, &hft_event::ControlCmd::SnapshotNow);
     h.run();
@@ -87,7 +103,11 @@ fn seq_107_clock_range() {
     assert!(multiplier(15_625_000_000).is_err());
     assert!(multiplier(15_625_000_001).is_ok());
     assert!(multiplier(15_624_999_999).is_err());
-    for (hz, want) in [(15_625_000_000u64, false), (15_625_000_001, true), (15_624_999_999, false)] {
+    for (hz, want) in [
+        (15_625_000_000u64, false),
+        (15_625_000_001, true),
+        (15_624_999_999, false),
+    ] {
         reset_script();
         let mut h = b0().boot();
         h.io().hz = hz;
@@ -99,7 +119,11 @@ fn seq_107_clock_range() {
         }
     }
     // .4/.5 Δ = 2^58 − 1 / 2^58 after a 1 GHz base; .6 tsc before base.
-    for (dt, ok) in [(((1u64 << 58) - 1) as i64, true), (1i64 << 58, false), (-1, false)] {
+    for (dt, ok) in [
+        (((1u64 << 58) - 1) as i64, true),
+        (1i64 << 58, false),
+        (-1, false),
+    ] {
         reset_script();
         let mut h = b0().boot();
         h.step();
@@ -159,7 +183,12 @@ fn seq_109_snapshot_engine_ns() {
     h.step();
     h.step();
     let sr = h.snapshots().last().cloned().unwrap();
-    let t = h.recs().into_iter().filter(|r| r.kind == EventKind::TIMER && r.seq < sr.seq).last().unwrap();
+    let t = h
+        .recs()
+        .into_iter()
+        .filter(|r| r.kind == EventKind::TIMER && r.seq < sr.seq)
+        .last()
+        .unwrap();
     let (hd, _) = snap(&sr);
     assert_eq!(hd.at_seq, t.seq);
     assert_eq!(hd.engine_ns, (t.tsc - base) as i64);
@@ -167,7 +196,11 @@ fn seq_109_snapshot_engine_ns() {
 
 #[test]
 fn seq_110_engine_ns_continuous() {
-    for (tsc, hz, adv) in [(0u64, HZ, 1_000_000_000u64), (5_000, HZ, 1_000_000_000), (0, 3 * HZ, 3_000_000_000)] {
+    for (tsc, hz, adv) in [
+        (0u64, HZ, 1_000_000_000u64),
+        (5_000, HZ, 1_000_000_000),
+        (0, 3 * HZ, 3_000_000_000),
+    ] {
         reset_script();
         let mut h = b0().boot();
         h.steady();
@@ -176,7 +209,11 @@ fn seq_110_engine_ns_continuous() {
         h.run();
         let x = h.s.engine().last_ens;
         let now = h.now();
-        let rr = Rerun { tsc: if tsc == 0 { now + 600_000_000_000 } else { tsc }, hz, ..Rerun::default() };
+        let rr = Rerun {
+            tsc: if tsc == 0 { now + 600_000_000_000 } else { tsc },
+            hz,
+            ..Rerun::default()
+        };
         let mut h2 = H::crash_restart(h, plan(SnapshotSel::Latest, true, 1, 0), rr.clone()).unwrap();
         h2.io().hz = hz;
         h2.step();
@@ -193,9 +230,31 @@ fn seq_110_engine_ns_continuous() {
         h2.at(base + adv);
         let t = h2.now();
         for v in [A, B] {
-            h2.push(RingId::Rep(0), &conn(v, 0, hft_event::ConnStateKind::Up, hft_event::ConnRole::Md, hft_types::InstId(0), hft_types::AccountId(0), t));
+            h2.push(
+                RingId::Rep(0),
+                &conn(
+                    v,
+                    0,
+                    hft_event::ConnStateKind::Up,
+                    hft_event::ConnRole::Md,
+                    hft_types::InstId(0),
+                    hft_types::AccountId(0),
+                    t,
+                ),
+            );
         }
-        h2.push(RingId::Rep(0), &conn(A, 0, hft_event::ConnStateKind::Up, hft_event::ConnRole::Md, A1, hft_types::AccountId(0), t));
+        h2.push(
+            RingId::Rep(0),
+            &conn(
+                A,
+                0,
+                hft_event::ConnStateKind::Up,
+                hft_event::ConnRole::Md,
+                A1,
+                hft_types::AccountId(0),
+                t,
+            ),
+        );
         h2.quote(A1, "50000", "50006");
         h2.run();
         clear_hook();

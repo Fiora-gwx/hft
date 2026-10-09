@@ -11,7 +11,10 @@ pub enum StepOutcome {
     /// No Input this round.
     Idle,
     /// Drain finished; exit codes and restart belong to apps/hft-core.
-    Done { restart: bool, cause: DoneCause },
+    Done {
+        restart: bool,
+        cause: DoneCause,
+    },
     Fatal(FatalReason),
 }
 
@@ -204,7 +207,9 @@ pub struct GwKey {
 }
 
 /// A plain (non-`Body`) row from bytes, zero-extended when shorter.
-pub fn read_body_plain<T: zerocopy::FromBytes + zerocopy::KnownLayout + zerocopy::Immutable>(body: &[u8]) -> Option<T> {
+pub fn read_body_plain<T: zerocopy::FromBytes + zerocopy::KnownLayout + zerocopy::Immutable>(
+    body: &[u8],
+) -> Option<T> {
     let size = core::mem::size_of::<T>();
     if let Some(b) = body.get(..size) {
         return T::read_from_bytes(b).ok();

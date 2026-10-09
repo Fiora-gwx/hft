@@ -17,8 +17,8 @@ pub mod matcher;
 pub mod observe;
 
 use hft_event::{
-    AccountConfigReportHdr, BalanceReport, Bbo, CmdHdr, ConnRole, ConnState, ConnStateKind, ControlCmd, EventKind,
-    LeverageItem, MarginReportHdr, MarketHdr, ReconcileReport, Timer,
+    AccountConfigReportHdr, BalanceReport, Bbo, CmdHdr, ConnRole, ConnState, ConnStateKind, ControlCmd,
+    EventKind, LeverageItem, MarginReportHdr, MarketHdr, ReconcileReport, Timer,
 };
 use hft_refdata::RefData;
 use hft_rt::Heartbeat;
@@ -66,7 +66,9 @@ pub struct SeqSut<S: StrategySet> {
 
 impl<S: StrategySet> core::fmt::Debug for SeqSut<S> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("SeqSut").field("epoch", &self.epoch).finish_non_exhaustive()
+        f.debug_struct("SeqSut")
+            .field("epoch", &self.epoch)
+            .finish_non_exhaustive()
     }
 }
 
@@ -86,7 +88,8 @@ fn ring_of(io: &io::DstIo<impl StrategySet>, i: &InputRec) -> RingId {
         Source::Venue(v) => RingId::Rep(io.venue_ix(v)),
         Source::Recon | Source::Engine => RingId::Rep(0),
         Source::Market => {
-            let v = <MarketHdr as zerocopy::FromBytes>::read_from_prefix(&i.body).map_or(VenueId(0), |(h, _)| h.venue);
+            let v = <MarketHdr as zerocopy::FromBytes>::read_from_prefix(&i.body)
+                .map_or(VenueId(0), |(h, _)| h.venue);
             RingId::Bbo(io.venue_ix(v))
         }
     }
@@ -271,7 +274,13 @@ impl<S: StrategySet> SeqSut<S> {
         for v in &venues {
             let r = RingId::Rep(self.s().driver().io.venue_ix(*v));
             self.conn(r, *v, 0, ConnRole::Md, InstId(0), AccountId(0));
-            let insts: Vec<InstId> = self.world.insts.iter().filter(|i| i.venue == *v).map(|i| i.id).collect();
+            let insts: Vec<InstId> = self
+                .world
+                .insts
+                .iter()
+                .filter(|i| i.venue == *v)
+                .map(|i| i.id)
+                .collect();
             for i in insts {
                 self.conn(r, *v, 0, ConnRole::Md, i, AccountId(0));
             }
@@ -283,7 +292,11 @@ impl<S: StrategySet> SeqSut<S> {
                 } else {
                     RingId::Rep(self.s().driver().io.venue_ix(*v))
                 };
-                for (k, role) in [(0u8, ConnRole::Order), (1, ConnRole::Order), (0, ConnRole::UserStream)] {
+                for (k, role) in [
+                    (0u8, ConnRole::Order),
+                    (1, ConnRole::Order),
+                    (0, ConnRole::UserStream),
+                ] {
                     self.conn(r, *v, k, role, InstId(0), a.id);
                 }
             }
@@ -343,7 +356,13 @@ impl<S: StrategySet> SeqSut<S> {
     }
     fn balances(&mut self) {
         let t = self.s().driver().io.drv.stamp();
-        for a in self.world.accounts.clone().iter().filter(|a| a.kind == AccountKind::Live) {
+        for a in self
+            .world
+            .accounts
+            .clone()
+            .iter()
+            .filter(|a| a.kind == AccountKind::Live)
+        {
             for (v, asset, amt) in &a.balances {
                 let r = RingId::Rep(self.s().driver().io.venue_ix(*v));
                 let q = i64::try_from(*amt).unwrap_or(i64::MAX);
@@ -430,7 +449,13 @@ impl<S: StrategySet> SeqSut<S> {
                         inst: InstId(0),
                         _pad2: 0,
                     };
-                    self.cmd(b.account, &ControlCmd::SetMode { scope: sc, mode: b.mode });
+                    self.cmd(
+                        b.account,
+                        &ControlCmd::SetMode {
+                            scope: sc,
+                            mode: b.mode,
+                        },
+                    );
                     self.run();
                 }
             }
@@ -441,18 +466,26 @@ impl<S: StrategySet> SeqSut<S> {
         let Some(h) = hft_sequencer::types::read_body::<hft_event::BlobHdr>(&i.body) else {
             return;
         };
-        let content = i.body.get(size_of::<hft_event::BlobHdr>()..).unwrap_or(&[]).to_vec();
+        let content = i
+            .body
+            .get(size_of::<hft_event::BlobHdr>()..)
+            .unwrap_or(&[])
+            .to_vec();
         let parsed: Option<ParsedConfig<S>> = match h.blob.kind {
             hft_event::BlobKind::StrategyParams => {
                 let rd = &self.s().engine().rd;
-                build::parse_spb::<S>(&content, rd).ok().map(|p| ParsedConfig::StrategyParams(Box::new(p)))
+                build::parse_spb::<S>(&content, rd)
+                    .ok()
+                    .map(|p| ParsedConfig::StrategyParams(Box::new(p)))
             }
             hft_event::BlobKind::RiskParams => {
                 let rd = &self.s().engine().rd;
-                build::risk_decode(&content, h.scope.account, rd).ok().map(|p| ParsedConfig::Risk {
-                    sha256: h.blob.sha256,
-                    params: Box::new(p),
-                })
+                build::risk_decode(&content, h.scope.account, rd)
+                    .ok()
+                    .map(|p| ParsedConfig::Risk {
+                        sha256: h.blob.sha256,
+                        params: Box::new(p),
+                    })
             }
             hft_event::BlobKind::Refdata => {
                 let cur = &self.s().engine().rd;
@@ -541,7 +574,9 @@ impl<S: StrategySet> Sut for SeqSut<S> {
 
     fn boot(ctx: &BootCtx<'_>) -> Result<Self, BootFail> {
         if let Some(p) = ctx.planted.iter().find(|p| !PLANTED.iter().any(|(n, _)| n == *p)) {
-            return Err(BootFail(format!("planted defect `{p}` is not built into the engine crates")));
+            return Err(BootFail(format!(
+                "planted defect `{p}` is not built into the engine crates"
+            )));
         }
         let w = ctx.world.clone();
         let rd_blob = build::refdata_blob(&w, false);
@@ -584,7 +619,10 @@ impl<S: StrategySet> Sut for SeqSut<S> {
         let r = ring_of(&self.s().driver().io, input);
         let before = observe::Before::take(self, input);
         let mut body = input.body.clone();
-        if !matches!(input.src, Source::Ctl | Source::Hk | Source::Advisor | Source::Engine) {
+        if !matches!(
+            input.src,
+            Source::Ctl | Source::Hk | Source::Advisor | Source::Engine
+        ) {
             let t = self.s().driver().io.drv.stamp();
             stamp_rx(input.kind, &mut body, t.max(1));
         }
@@ -640,7 +678,8 @@ impl<S: StrategySet> Sut for SeqSut<S> {
             flags: RecoveryFlags(0),
             quarantine: Vec::new(),
         };
-        let mut s: Sequencer<ReplayDriver, S> = Sequencer::boot(BootSource::Journal(plan), &self.setup, drv, self.hb).ok()?;
+        let mut s: Sequencer<ReplayDriver, S> =
+            Sequencer::boot(BootSource::Journal(plan), &self.setup, drv, self.hb).ok()?;
         for _ in 0..10_000_000 {
             if s.step() != StepOutcome::Busy {
                 break;
@@ -670,7 +709,10 @@ impl<S: StrategySet> Sut for SeqSut<S> {
         if !matches!(o, StepOutcome::Done { .. }) {
             // A Drain that cannot finish (in-flight orders) is a crash restart instead.
             for _ in 0..MAX_ROUNDS {
-                if matches!(self.s_mut().step(), StepOutcome::Done { .. } | StepOutcome::Fatal(_)) {
+                if matches!(
+                    self.s_mut().step(),
+                    StepOutcome::Done { .. } | StepOutcome::Fatal(_)
+                ) {
                     break;
                 }
             }
@@ -773,6 +815,11 @@ impl<S: StrategySet> SeqSut<S> {
     }
     /// The world's run mode of every cell (scenario helpers).
     pub fn mode_of(&self, a: AccountId, g: GroupId) -> Option<RunMode> {
-        self.world.strategies.iter().find(|s| s.account == a).map(|s| s.mode).filter(|_| g.0 != 0)
+        self.world
+            .strategies
+            .iter()
+            .find(|s| s.account == a)
+            .map(|s| s.mode)
+            .filter(|_| g.0 != 0)
     }
 }
