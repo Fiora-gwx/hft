@@ -153,12 +153,19 @@ fn py_161_batch_memory_bound() {
     // Warm-up pass: glibc raises its mmap threshold after the first large free, so the first scan
     // of a process moves later batches from mmap to the heap; only the steady state is compared.
     let _ = scan_peak(&j1, 100_000);
-    let (p1, w) = scan_peak(&j1, 100_000);
+    // The sampler can miss the short reallocation peaks: the largest of three scans is used.
+    let peak3 = |p: &Path, rows: i64| {
+        (0..3)
+            .map(|_| scan_peak(p, rows))
+            .fold((0, 0), |a, b| (a.0.max(b.0), b.1))
+    };
+    let (p1, w) = peak3(&j1, 100_000);
     let bound = 100_000 * w * 2;
     assert!(p1 <= bound, "PY-161.1: peak {p1} > {bound}");
-    let (p2, _) = scan_peak(&j2, 100_000);
+    let (p2, _) = peak3(&j2, 100_000);
     assert!(p2 <= bound, "PY-161.2: peak {p2} > {bound}");
     let diff = p1.abs_diff(p2) as f64 / p1.max(1) as f64;
+    eprintln!("PY-161: peaks {p1} {p2}, row width {w}");
     assert!(diff < 0.05, "PY-161.2: {p1} vs {p2}");
     let (p3, _) = scan_peak(&j1, 1_000_000);
     let bound3 = 1_000_000 * w * 2;
