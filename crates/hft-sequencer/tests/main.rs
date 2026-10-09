@@ -16,6 +16,7 @@ mod preempt;
 mod process;
 mod boot;
 mod clock;
+mod commands;
 mod intents;
 mod keyframe;
 mod conflate;

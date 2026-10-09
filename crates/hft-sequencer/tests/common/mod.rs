@@ -229,7 +229,7 @@ pub fn b0_rd() -> Rd {
         let s = match id {
             11 => inst_spec(i, A, "BTCUSDT", false, BTC, ("0.01", 1), ("0.0001", 10_000)),
             12 => inst_spec(i, A, "ETHUSDT", false, ETH, ("0.01", 1), ("0.001", 100_000)),
-            13 => inst_spec(i, A, "SOLUSDT", false, FILL, ("0.01", 1), ("0.001", 100_000)),
+            13 => inst_spec(i, A, "BTCUSDC", false, BTC, ("0.01", 1), ("0.0001", 10_000)),
             21 => inst_spec(i, B, "BTC_USDT", true, BTC, ("0.1", 10), ("0.001", 100_000)),
             22 => inst_spec(i, B, "ETH_USDT", true, ETH, ("0.01", 1), ("0.01", 1_000_000)),
             _ => {
@@ -958,8 +958,11 @@ pub fn sys_timer(id: u32, tsc: u64) -> Timer {
     Timer { timer_id: id, owner: 1, _pad: 0, group: GroupId(0), _pad2: 0, deadline_tsc: tsc }
 }
 
+/// A command scope; `GroupId(0)` stands for "every group" (`GROUP_ALL`; `GROUP_NONE` is illegal
+/// in a scope).
 pub fn scope(s: StrategyId, a: AccountId, g: GroupId) -> CmdScope {
-    CmdScope { strategy: s, venue: VenueId(0), account: a, _pad: 0, group: g, inst: InstId(0), _pad2: 0 }
+    let group = if g.0 == 0 { hft_types::GROUP_ALL } else { g };
+    CmdScope { strategy: s, venue: VenueId(0), account: a, _pad: 0, group, inst: InstId(0), _pad2: 0 }
 }
 
 pub fn cfg_hdr(a: AccountId, v: VenueId, n_lev: u16) -> AccountConfigReportHdr {
@@ -1674,4 +1677,63 @@ impl<S: StrategySet> H<S> {
 /// `FundingSettle` records of a slice.
 pub fn settles(recs: &[MemRecord]) -> Vec<hft_event::FundingSettle> {
     recs.iter().filter(|r| r.kind == EventKind::FUNDING_SETTLE).filter_map(|r| r.read::<hft_event::FundingSettle>()).collect()
+}
+
+// ------------------------------------------------------------------------------- SetParams variants
+
+/// Role codes of `CmdHdr.role`.
+pub const VIEWER: u8 = 1;
+pub const TRADER: u8 = 2;
+pub const ADMIN: u8 = 4;
+
+impl<S: StrategySet> H<S> {
+    /// `SetParams` of `spb` from `issuer` (`confirm` = confirmed with the current state version);
+    /// the parsed object goes to the Mailbox only when the blob parses.
+    pub fn set_params_as(&mut self, spb: &Spb, issuer: &str, role: u8, confirm: bool, f: impl FnOnce(&mut CmdHdr)) -> [u8; 16] {
+        let b = spb.bytes();
+        let r = spb.blob_ref();
+        let parsed = {
+            let slot = self.s.instances().get(spb.strategy);
+            let base = slot
+                .and_then(|s| s.cur.as_ref())
+                .map(|c| hft_sequencer::parsed::ParamBase { params: &c.params, groups: &c.groups });
+            parse_params::<S>(&b, r.sha256, &self.s.engine().rd, 8, base).ok().or_else(|| {
+                // What a gateway that skipped its own checks would hand over (the sequencer's
+                // rechecks are under test): the raw groups and the decoded body.
+                let groups = hft_strategy_sdk::GroupTable::new(&spb.groups, 8);
+                let body = body(spb.values, spb.groups.len() as u16);
+                let params = S::decode_params(spb.kind_id, &body, spb.schema_ver, &groups).ok()?;
+                Some(ParsedParams {
+                    sha256: r.sha256,
+                    strategy: spb.strategy,
+                    account: spb.account,
+                    version: spb.version,
+                    kind_id: spb.kind_id,
+                    params,
+                    groups,
+                    model_mem: 0,
+                    model_ckpt: 0,
+                    structural_changed: false,
+                    reset_preview: hft_strategy_sdk::ResetPreview::default(),
+                })
+            })
+        };
+        if let Some(p) = parsed {
+            self.io().mailbox.push(ParsedConfig::StrategyParams(Box::new(p)));
+        }
+        self.blob_input(r, scope(spb.strategy, spb.account, GroupId(0)), &b);
+        let v = self.s.engine().risk.mode.ctl_state_version();
+        let c = ControlCmd::SetParams { scope: scope(spb.strategy, spb.account, GroupId(0)), blob: r };
+        self.cmd_with(issuer, role, spb.account, &c, |h| {
+            if confirm {
+                h.confirmed = 1;
+                h.expect_state_version = v;
+            }
+            f(h);
+        })
+    }
+    /// Status and detail of a command's result.
+    pub fn res(&self, id: [u8; 16]) -> (u8, u32) {
+        self.result_of(id).map(|r| (r.status, r.detail)).unwrap_or((255, 0))
+    }
 }
