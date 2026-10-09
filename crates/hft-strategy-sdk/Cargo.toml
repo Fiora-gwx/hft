@@ -1,6 +1,6 @@
 [package]
 name = "hft-strategy-sdk"
-description = "The stable strategy interface: parameter schema and codec, descriptors, snapshot read/write types (M1 part)"
+description = "The stable strategy interface: Strategy/Model traits, parameter schema and codec, descriptors, views, intents, Ctx, StrategySet and snapshot types"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,6 +16,7 @@ schema-json = ["dep:sha2"]
 
 [dependencies]
 hft-types.workspace = true
+hft-refdata.workspace = true
 hft-event.workspace = true
 zerocopy.workspace = true
 

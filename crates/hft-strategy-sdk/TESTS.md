@@ -2159,8 +2159,8 @@ spec: README.md
 - 里程碑:M2
 - 前置:SDK-141 的 15 个结构
 - 步骤:
-  1. 对每个结构断言 `size_of` = 各字段 `size_of` 之和(`ExecSpec` 除外:判别字节 1 + 显式说明的 7 B 对齐 + 128 B 载荷)
-  2. 对除 `ExecSpec` 外的 14 个结构做 `zerocopy::IntoBytes` 派生(要求无填充)
+  1. 对每个结构断言 `size_of` = 各字段 `size_of` 之和(`ExecSpec` 除外:判别字节 1 + 显式说明的 7 B 对齐 + 128 B 载荷;`TargetIntent` 的 `exec` 字段按 136 B 计)
+  2. 对除 `ExecSpec` 与含它的 `TargetIntent` 外的 13 个结构做 `zerocopy::IntoBytes` 派生(要求无填充)
 - 期望:
   - 步骤 1 全部相等;步骤 2 编译通过(加一个去掉 `_pad` 的变体 → 编译失败,`trybuild`)
 - 实现:`crates/hft-strategy-sdk/tests/layout.rs::sdk_142_no_implicit_padding`

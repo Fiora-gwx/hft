@@ -177,9 +177,10 @@ impl<P: ParamSet> Model for NoModel<P> { type Params = P; const LAYOUT_VERSION: 
 
 pub struct GroupTable { /* 本实例本参数版本的 GroupSpec 列表;gix = 在 SetParams blob 中的下标 */ }
 impl GroupTable {
+    pub fn new(specs: &[GroupSpec], capacity: u16) -> Result<GroupTable, ParamError>;   // 命令路径;超过 capacity → TooManyGroups
     pub fn len(&self) -> u16;
     pub fn capacity(&self) -> u16;                           // = max_groups_per_instance(见下)
-    pub fn get(&self, gix: u16) -> &GroupSpec;               // GroupSpec / LegDef 的布局在 hft-event
+    pub fn get(&self, gix: u16) -> &GroupSpec;               // GroupSpec / LegDef 的布局在 hft-event;越界 → 全零 GroupSpec
     pub fn gix_of(&self, g: GroupId) -> Option<u16>;         // 有序数组二分;命令路径与跨事件对齐用
     pub fn iter(&self) -> impl Iterator<Item = (u16, &GroupSpec)>;
 }
@@ -192,7 +193,8 @@ impl GroupSpecExt for GroupSpec { /* … */ }
 
 pub struct RefView<'a> { /* 借用 RefData,只暴露本实例需要的部分 */ }
 impl<'a> RefView<'a> {
-    pub fn inst(&self, i: InstId) -> &'a InstMeta;           // 市场类型(Spot/LinearPerp)、tick、lot、最小名义、资产
+    pub fn new(rd: &'a RefData, account: AccountId) -> RefView<'a>;   // account = 本实例绑定的账户
+    pub fn inst(&self, i: InstId) -> &'a InstHot;            // refdata 热行:市场类型、tick、lot、最小名义、资产、计价资产
     pub fn asset(&self, a: AssetId) -> &'a AssetMeta;
     pub fn insts_of(&self, a: AssetId) -> &'a [InstId];      // refdata 中该资产在全部 venue 上的 inst(InstId 升序),含不在本账户 venues 内的
     pub fn caps(&self, v: VenueId) -> &'a VenueCaps;          // VenueId 按产品线(某所现货、某所 USDT 永续各一个)
@@ -202,7 +204,7 @@ impl<'a> RefView<'a> {
     /// try_inst:inst 不在 refdata → None;try_fee:inst 不在 refdata、a 不是本实例绑定的账户、
     /// 或 inst 的 venue 不在该账户 venues 内 → None。inst/fee 只用于本实例 GroupSpec 引用或已订阅的 inst(装配时已校验存在),
     /// 对其他输入不保证结果。
-    pub fn try_inst(&self, i: InstId) -> Option<&'a InstMeta>;
+    pub fn try_inst(&self, i: InstId) -> Option<&'a InstHot>;
     pub fn try_fee(&self, a: AccountId, i: InstId) -> Option<FeeView>;
 }
 
@@ -213,7 +215,11 @@ bitflags! { pub struct OwnEvMask: u8 { const ORDER = 1; const EXEC = 2; const MA
 /// Full:该 inst 的订阅条目(全部实例合计)已达 max_subs_per_inst,或需要新的订阅下标而 max_insts 已用尽(容量归 hft-sequencer
 /// ECF1 段 3);NoFeed 见 market。两者都由策略处理(不订阅并写 Note),不使 SetParams 失败。
 pub enum SubsErr { Full, NoFeed }
-impl SubsBuilder {
+/// 引擎侧的订阅限额(sequencer 按 ECF1 段 3 与其他实例已有的条目填写):feeds = 本 hft-core 实例有 feed 的 venue;
+/// room[inst] = 本实例对该 inst 还能加的条目数(没有订阅下标且 max_insts 已用尽时为 0)。
+pub struct SubsLimits<'a> { pub rd: &'a RefData, pub feeds: VenueSet, pub room: &'a [u16] }
+impl<'a> SubsBuilder<'a> {
+    pub fn new(lim: SubsLimits<'a>, cap_entries: usize) -> SubsBuilder<'a>;   // 命令路径分配一次;reset(lim) 复用
     /// 行情订阅;同一 inst 被多个 group 订阅时每个 group 各投递一次(按 gix 升序)。inst 可以是 refdata 中任一 inst,
     /// 包括不在 group 腿里、venue 不在本账户 venues 内的(参考行情:只读,不能下单);该 venue 在本 hft-core 实例没有 feed → NoFeed。
     pub fn market(&mut self, inst: InstId, gix: u16, ev: EvMask, part: Part) -> Result<(), SubsErr>;
@@ -523,17 +529,18 @@ impl<'a> CmdView<'a> {
 /// 本次 on_event 的意图尚未处理时的状态(EventRef::Bbo 的 b 与此时的 v.bbo(inst) 相同;意图在 on_event 返回后才处理)。
 pub trait Views {
     type Book<'a>: BookRead where Self: 'a;
+    type Portfolio<'a>: PortfolioRead where Self: 'a;      // 权益视图(下称 PortfolioView);理由同 Book
     fn now(&self) -> Now;
     fn bbo(&self, i: InstId) -> BboView;                     // 按值:最近报价 + 按成员聚合的 BBO 连接健康(见"报价健康")
     fn book(&self, i: InstId) -> Self::Book<'_>;             // 未订阅 L2 的 inst:status = Uninit
     fn funding(&self, i: InstId) -> &FundingView;            // 实时费率、下次结算时刻、实际结算周期
     fn mark(&self, i: InstId) -> Px;
-    fn portfolio(&self, a: AccountId) -> PortfolioView<'_>;
+    fn portfolio(&self, a: AccountId) -> Self::Portfolio<'_>;
     fn group_pos(&self, a: AccountId, g: GroupId) -> &GroupPosView;
     fn legs(&self, a: AccountId, g: GroupId) -> &LegView;    // 各腿净量、在途、残余、naked
     fn target(&self, a: AccountId, g: GroupId) -> Option<&TargetView>;
     fn order(&self, h: OrderRef) -> Option<OrderView>;       // gen 不符 → None
-    fn inst(&self, i: InstId) -> &InstMeta;
+    fn inst(&self, i: InstId) -> &InstHot;                    // refdata 热行(tick、lot、最小名义、资产)
     fn caps(&self, v: VenueId) -> &VenueCaps;                // 交易所差异的唯一入口;VenueId 按产品线,市场类型取自 inst/venue 元数据
     fn fee(&self, a: AccountId, i: InstId) -> FeeView;
     fn mode(&self, a: AccountId, g: GroupId) -> RunMode;     // 有效模式
@@ -565,10 +572,13 @@ pub struct Now {
     pub clock_ok: bool,
     clk: EngineClockAnchor,    // 本次启动的 EngineClock(base_engine_ns、记录 tsc、tsc_hz_milli)与当前段的 UTC 校准对;ens_of/tsc_of/utc_of 用
 }
+pub struct EngineClockAnchor { pub base_engine_ns: i64, pub base_tsc: Tsc, pub tsc_hz_milli: u64, pub utc_tsc: Tsc, pub utc_ns: i64 }
 impl Now {
+    /// sequencer/advisor 按当前记录构造:engine_ns = clk.ens_of(tsc)、utc_ns = clk.utc_of(tsc)、tsc_per_ms = tsc_hz_milli / 10^6。
+    pub const fn new(tsc: Tsc, seq: u64, boot_seq: u64, clock_ok: bool, clk: EngineClockAnchor) -> Now;
     /// 本次启动内的 TSC 时刻 → engine_ns:与 event-model 时间戳语义同一公式(以 clk 为基准),结果与该时刻记录的 engine_ns 逐位相同。
     pub fn ens_of(&self, t: Tsc) -> i64;
-    /// engine_ns → 本次启动的 TSC(登记定时器、与视图里的 *_tsc 比较用);早于本次启动的时刻饱和到 0(只能表示"已过去")。
+    /// engine_ns → 本次启动的 TSC(登记定时器、与视图里的 *_tsc 比较用;取 engine_ns ≥ e 的最小 TSC);早于本次启动的时刻饱和到 0(只能表示"已过去")。
     pub fn tsc_of(&self, e: i64) -> Tsc;
     /// 本次启动内的 TSC 时刻 → UTC ns:与 utc_ns 同一校准对(确定);clock_ok = false 时同样不可用于时刻判断。
     pub fn utc_of(&self, t: Tsc) -> i64;
@@ -638,20 +648,21 @@ pub struct FundingView {                 // 写者 sequencer(Funding/MarkPrice �
 pub struct TradeView { pub px: Px, pub qty: Qty, pub side: Side, pub ex_ts_ns: i64 }
 pub struct LiquidationView { pub px: Px, pub qty: Qty, pub side: Side, pub ex_ts_ns: i64 }   // 公开市场强平流(不是本账户的强平)
 
-/// 权益视图(写者 hft-ledger,数据定义见 hft-ledger)。引擎不计算"可用资金"或杠杆公式,策略自己从这里算。
+/// 权益视图(写者 hft-ledger,数据定义见 hft-ledger;下称 PortfolioView)。引擎不计算"可用资金"或杠杆公式,策略自己从这里算。
 /// 按 venue 记现金是准确的:同一账户不含同一交易所的两个市场(refdata `SameExchangeMarkets`),各 venue 的钱包互不共用。
-pub struct PortfolioView<'a> { /* 借用 ledger 的按 venue 账本 */ }
-impl<'a> PortfolioView<'a> {
-    pub fn account(&self) -> AccountId;
-    pub fn venues(&self) -> VenueSet;                                  // 该账户涉及的 venue(AccountMeta)
-    pub fn venue(&self, v: VenueId) -> &'a VenueEquityView;            // 每 venue 汇总行,ledger 增量维护
-    pub fn cash(&self, v: VenueId, asset: AssetId) -> CashView;        // { free: Qty, locked: Qty }
-    pub fn inventory(&self, v: VenueId, asset: AssetId) -> InventoryView;
-    pub fn inventory_of(&self, v: VenueId, g: GroupId) -> Qty;         // 归属该 group 的现货净量
-    pub fn perp(&self, v: VenueId, i: InstId) -> PerpPosView;
-    pub fn margin(&self, v: VenueId) -> MarginView;
-    pub fn equity_total(&self) -> Notional;                            // Σ venue.equity
+/// 是 trait(与 BookRead 同理:SDK 不能引用 hft-ledger 的类型、不用 dyn),Views::portfolio 返回实现者 V::Portfolio<'_>。
+pub trait PortfolioRead {
+    fn account(&self) -> AccountId;
+    fn venues(&self) -> VenueSet;                                      // 该账户涉及的 venue(AccountMeta.venues 位图)
+    fn venue(&self, v: VenueId) -> &VenueEquityView;                   // 每 venue 汇总行,ledger 增量维护
+    fn cash(&self, v: VenueId, asset: AssetId) -> CashView;            // { free: Qty, locked: Qty }
+    fn inventory(&self, v: VenueId, asset: AssetId) -> InventoryView;
+    fn inventory_of(&self, v: VenueId, g: GroupId) -> Qty;             // 归属该 group 的现货净量
+    fn perp(&self, v: VenueId, i: InstId) -> PerpPosView;
+    fn margin(&self, v: VenueId) -> MarginView;
+    fn equity_total(&self) -> Notional;                                // Σ venue.equity
 }
+pub struct VenueSet(pub u64);            // bit v = VenueId v(与 AccountMeta.venues 同编码)
 #[repr(C)]
 pub struct VenueEquityView {             // 56 B
     pub venue: VenueId, pub _pad0: u8,
@@ -723,8 +734,7 @@ pub struct ExternalFillView {            // 来源 hft-event ExternalFill;强平
                                          // 名义值:恢复期抑制期间截止不计时(口径归 hft-exec),实际截止可能晚于它,策略按它处理是保守的;
                                          // 0 = 引擎不做默认处理(如 cause = Manual,执行层对该 cell 的 manual_hold 见"目标意图";规则归 hft-exec)
 }
-#[repr(u8)]
-pub enum ExternalCause { Liquidation = 1, Adl = 2, Manual = 3, Delivery = 4, Unknown = 5 }   // 与 hft-event ExternalFill.cause 逐值相同;
+pub use hft_event::ExternalCause;        // { Liquidation = 1, Adl = 2, Manual = 3, Delivery = 4, Unknown = 5 }:就是 hft-event ExternalFill.cause 的类型;
                                          // Unknown 含对账自动补记的漏推送成交(条目标志 AUTO_EXTERNAL:置位条件归 reconciler,在 ReconcileReport
                                          // 这条 Input 内合成归 hft-sequencer,之后补推的真实成交按 auto_held 抵扣归 hft-ledger);
                                          // 策略按 Views::group_pos/legs 的实际仓位处理,不累加 qty
@@ -777,7 +787,7 @@ pub struct VenueNoticeView {             // 来源 ControlCmd{VenueNotice}(contr
 
 **判定只有一处**:引擎的对冲腿定价、风险递减单、Broken 自动平仓、L3 减仓与链接腿检查都用 `BboView::quote_live`,阈值 `conn_liveness_ms`(唯一配置位置与默认值在 [hft-risk](../hft-risk/README.md) `RiskParams`,经 `RiskStateView.conn_liveness_ms` 可读);`Views::quote_ok(a, i)` 就是"引擎阈值下的判定"。策略用同一函数,阈值取引擎值(`quote_ok`)或自己的参数;用自己的参数时取 min(参数, `conn_liveness_ms`)——比引擎宽松的阈值没有意义,因为引擎的对冲与风控按引擎阈值拒绝。报价某一侧为 0(无挂单)由调用方按所需的一侧另查。`rx_tsc` 用于按接收时刻的信号(领先-滞后、机会窗口),不用于判可用性;`hw_rx_ns` 的用途见[时间轴](#时间轴)。
 
-`MarginLevel`、`ExternalCause`、`NoticeKind`、`TargetState`、`TargetOrigin`、`StuckReason`、`BrokenReason`、`OrderStateView` 是 SDK 的视图枚举,引擎组件写入同一类型,不另定义;各值的判定语义归写者组件,线上码归登记者:`TargetOrigin` 的码表在 hft-event `ExecDecision.origin`(含 `Engine(AutoFix)`),与其代码形式 `TargetOriginWire` 的互转在本 crate(`From<TargetOrigin> for TargetOriginWire` 与 `From<TargetOriginWire> for TargetOrigin`,一一对应、无失败分支;非法 u8 由 `TargetOriginWire::try_from` 拒绝);`LinkRole` 的判别值就是 `OrderDecision.link_role` 的线上码(0 表示无链接,不是 `LinkRole` 的值);`StuckReason`、`BrokenReason`、`TargetReject` 与 `ExecDecision.detail` 的全部子码数值与 u32 打包规则唯一登记在 [hft-exec](../hft-exec/README.md),本 crate 的这三个枚举写出显式判别值、与之逐值相同、只追加;`ExternalCause` 的判别值与 hft-event `ExternalFill.cause` 逐值相同;`MarginLevel` 归 hft-risk(按每 (account, venue) 的到强平距离 `liq_dist` 分档,比率只作交叉校验,数据过期至少 L1)。`GROUP_NONE`(无组 / 不针对 group / 不可归属)、`GROUP_ALL`(只用于命令作用域 `*`,不出现在 Advice、StrategyCmd 与投递给策略的事件里)、`INST_NONE`(无 inst)与 `INST_ALL`(作用域与公告里的"全部 inst")的值在 [hft-types](../hft-types/README.md) 定义。
+`MarginLevel`、`NoticeKind`、`TargetState`、`TargetOrigin`、`StuckReason`、`BrokenReason`、`OrderStateView` 是 SDK 的视图枚举,引擎组件写入同一类型,不另定义;各值的判定语义归写者组件,线上码归登记者:`TargetOrigin` 的码表在 hft-event `ExecDecision.origin`(含 `Engine(AutoFix)`),与其代码形式 `TargetOriginWire` 的互转在本 crate(`From<TargetOrigin> for TargetOriginWire` 与 `From<TargetOriginWire> for TargetOrigin`,一一对应、无失败分支;非法 u8 由 `TargetOriginWire::try_from` 拒绝);`LinkRole` 的判别值就是 `OrderDecision.link_role` 的线上码(0 表示无链接,不是 `LinkRole` 的值);`StuckReason`、`BrokenReason`、`TargetReject` 与 `ExecDecision.detail` 的全部子码数值与 u32 打包规则唯一登记在 [hft-exec](../hft-exec/README.md),本 crate 的这三个枚举写出显式判别值、与之逐值相同、只追加;`ExternalCause` 就是 hft-event `ExternalFill.cause` 的类型(本 crate 重导出);`MarginLevel` 归 hft-risk(按每 (account, venue) 的到强平距离 `liq_dist` 分档,比率只作交叉校验,数据过期至少 L1)。`GROUP_NONE`(无组 / 不针对 group / 不可归属)、`GROUP_ALL`(只用于命令作用域 `*`,不出现在 Advice、StrategyCmd 与投递给策略的事件里)、`INST_NONE`(无 inst)与 `INST_ALL`(作用域与公告里的"全部 inst")的值在 [hft-types](../hft-types/README.md) 定义。
 
 ### EventRef
 
@@ -954,7 +964,7 @@ pub struct HedgePlan {                   // 48 B
 #[repr(u8)] pub enum PxMode { Cross = 1, Mid = 2, Limit = 3 }
 #[repr(u8)] pub enum OnFail { Retry = 1, Reverse = 2, Hold = 3 }
 #[repr(u8)] pub enum ResidualPolicy { Defer = 1, TrimExcess = 2, Hold = 3 }
-#[repr(C)] pub struct OrderRef { pub venue: VenueId, pub account: AccountId, pub _pad: [u8; 2], pub slot: u32, pub gen: u32 } // 12 B;= hft-oms 的槽句柄
+#[repr(C)] pub struct OrderRef { pub venue: VenueId, pub account: AccountId, pub _pad: [u8; 2], pub slot: u32, pub gen: u32 } // 12 B;= hft-oms 的槽句柄(代码中写作 r#gen,2024 版保留字)
 ```
 
 `LegLink`/`HedgePlan`/`OrderRef`/`IntentClass` 的**类型**定义在本 crate(意图词汇);第二腿怎么下(`OnFill` 按第一腿每个成交增量、`Simultaneous` 在第一腿 `place` 的同一事件内)、重试、对冲量上限、`LinkTable` 等**语义**归 [hft-oms](../hft-oms/README.md) 与 [hft-exec](../hft-exec/README.md)。
@@ -984,7 +994,7 @@ pub struct TargetIntent {                // 232 B
 #[repr(u8)] pub enum Urgency { Passive = 1, Normal = 2, Urgent = 3 }
 
 /// 136 B:判别字节 + 7 B 对齐填充(repr(C, u8) 的布局,不是字段)+ 128 B 载荷;本类型与含它的 TargetIntent 都不以原始字节
-/// 写进 journal(ExecDecision 逐字段记录;快照里的目标按 hft-exec ExecCellRow 的显式行逐字段写出)。
+/// 写进 journal(ExecDecision 逐字段记录;快照里的目标按 hft-exec ExecCellRow 的显式行逐字段写出),所以两者都不派生 IntoBytes。
 /// 判别值 TakerSlice = 1、PairOnFill = 2、Simultaneous = 3、MakerFirst = 4,与 hft-event ExecDecision.algo 的码相同。
 #[repr(C, u8)]
 pub enum ExecSpec {
@@ -1257,8 +1267,10 @@ pub mod testing {
 
 ### Ctx 的内存与排空
 
-- `Ctx` 借用 sequencer 为每个实例预分配的 `CtxBufs`:每类意图一个定长数组 + 一条按调用顺序的操作序列(`[OpRef; 128]`,`OpRef = (kind: u8, ix: u8)`)。sequencer 在 `on_event` 返回后按操作序列顺序处理,保证"先撤后下""先 clear 后 target"等调用顺序的语义在回放中不变。
-- `IntentHandle(u16)` = 操作序列下标;处理结果写入同一 `CtxBufs` 的 `outcomes` 区,下一次 `on_event` 前保留、再下一次覆盖。
+- `Ctx` 借用 sequencer 为每个实例预分配的 `CtxBufs`:每类意图一个定长数组 + 一条按调用顺序的操作序列(`[OpRef; 128]`,`OpRef = (kind, ix)`;Note 不进操作序列,另有自己的数组)。sequencer 在 `on_event` 前调 `CtxBufs::begin()`、之后按 `CtxBufs::ops()`(`(IntentHandle, Op)`,调用顺序)处理,保证"先撤后下""先 clear 后 target"等调用顺序的语义在回放中不变;`notes()` 与 `full_count()` 读 Note 与满计数。
+- `IntentHandle(u16)` = 操作序列下标;处理结果经 `CtxBufs::clear_outcomes()` + `set_outcome(h, o)` 写入同一 `CtxBufs` 的 `outcomes` 区,下一次 `on_event` 前保留、再下一次覆盖。
+- `cancel_timer` 每事件另有 8 个的容量(超出丢弃并计数,无返回值)。`TimerId(u64)` 由 `CtxBufs` 的计数器分配(`next_timer_id`/`set_next_timer_id`,随 sequencer 的实例状态进快照),跨重启稳定。
+- `MODEL_TICK = u32::MAX`:策略不以它登记定时器。
 - 容量常量在 `src/ctx.rs`;改容量是 SDK 改动(影响全部策略的预算),在本 README 表格同步。
 
 ### 快照节

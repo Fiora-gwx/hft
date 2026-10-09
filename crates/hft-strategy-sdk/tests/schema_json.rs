@@ -14,6 +14,7 @@ use common::*;
 use hft_strategy_sdk::params::*;
 use hft_strategy_sdk::*;
 use proptest::prelude::*;
+use proptest::strategy::Strategy;
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
