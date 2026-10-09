@@ -1,5 +1,5 @@
 //! EXE-506: `engine_reduce_pending` and `drain_ready`.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::{EngineOrigin, MarginLevel, TargetOrigin, TargetReason, TargetState};

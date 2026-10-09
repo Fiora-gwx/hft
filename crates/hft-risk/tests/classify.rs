@@ -9,7 +9,7 @@
 
 #[path = "model/classify_ref.rs"]
 mod classify_ref;
-mod common;
+use crate::common;
 
 use classify_ref::{Kind, draft_parts, reference};
 use common::*;

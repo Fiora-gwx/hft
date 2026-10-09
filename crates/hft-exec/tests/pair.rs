@@ -1,5 +1,5 @@
 //! EXE-155–EXE-169, EXE-511: PairOnFill.
-mod common;
+use crate::common;
 use common::*;
 use hft_event::Level;
 use hft_exec::*;

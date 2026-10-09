@@ -1,6 +1,6 @@
 //! EXE-042, EXE-400–EXE-405, EXE-507: target validation, identical targets, replacement,
 //! `clear_account`, reduce-only commands.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::{

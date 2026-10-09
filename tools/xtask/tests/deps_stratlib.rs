@@ -1,7 +1,7 @@
 //! hft-strat-lib dependency direction (crates/hft-strat-lib/TESTS.md SLB-133). Fixture `clean`:
 //! common::deps_repo (`strategies/latency-probe` there depends on the SDK only, so row .6 adds no cycle).
 
-mod common;
+use crate::common;
 
 use common::deps_repo::{D, DEV, apply, clean, violations};
 

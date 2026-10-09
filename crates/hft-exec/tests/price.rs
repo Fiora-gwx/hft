@@ -1,5 +1,5 @@
 //! EXE-125–EXE-132: limit price and per-order notional.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::{ExecSpec, MarginLevel, TargetState};

@@ -1,6 +1,6 @@
 //! BIN-077: request ids restored from responses.
 
-mod support;
+use crate::support;
 
 use hft_event::GwOp;
 use hft_venue_proto::{MsgOp, ReqRef, VenueProtocol};

@@ -4,7 +4,7 @@
     clippy::disallowed_methods
 )] // allow-list: test code
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
-mod common;
+use crate::common;
 
 use common::*;
 use hft_event::{ConnRole, ConnStateKind, OrderEventKind};

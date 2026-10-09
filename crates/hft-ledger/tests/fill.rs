@@ -1,6 +1,6 @@
 //! LED-010–LED-018, LED-021–LED-025: net quantity rule, NetAdjust, late fees and fee buckets.
 
-mod common;
+use crate::common;
 
 use common::*;
 use hft_event::{ExternalCause, NoteLevel};

@@ -1,5 +1,5 @@
 //! EXE-195–EXE-196: Simultaneous first leg; MakerFirst unsupported.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::{

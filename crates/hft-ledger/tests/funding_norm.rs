@@ -1,6 +1,6 @@
 //! LED-110–LED-114, LED-116: settle-time normalization grid.
 
-mod common;
+use crate::common;
 
 use common::*;
 use hft_ledger::snapshot::{LedgerRowHdr, SECTION_LEDGER_GROUPS, row_kind};

@@ -1,6 +1,6 @@
 //! BIN-092, BIN-093, BIN-095: the two code tables.
 
-mod support;
+use crate::support;
 
 use hft_event::{GwOp, OrderEventKind};
 use hft_refdata::LimitBucket;

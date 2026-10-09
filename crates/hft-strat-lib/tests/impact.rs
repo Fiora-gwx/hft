@@ -1,6 +1,6 @@
 //! `ImpactModel::vwap` (TESTS.md SLB-058–SLB-060).
 
-mod book;
+use crate::book;
 
 use book::{TestBook, bk1};
 use hft_strat_lib::{ImpactModel, Vwap, VwapParams};

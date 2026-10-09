@@ -6,7 +6,7 @@
     clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
 #![allow(clippy::type_complexity)]
-mod common;
+use crate::common;
 
 use common::*;
 use hft_book::{Top, TopOutcome as T};

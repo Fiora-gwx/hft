@@ -6,7 +6,7 @@
 )] // allow-list: test code, not a hot path
 #![cfg(target_os = "linux")]
 
-mod support;
+use crate::support;
 
 use std::time::{Duration, Instant};
 

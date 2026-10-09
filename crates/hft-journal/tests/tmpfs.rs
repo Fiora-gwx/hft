@@ -7,7 +7,7 @@
     clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
 
-mod common;
+use crate::common;
 
 use common::harness::*;
 use hft_event::EventKind;

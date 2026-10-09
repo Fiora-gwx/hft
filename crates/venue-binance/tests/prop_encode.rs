@@ -1,7 +1,7 @@
 //! BIN-074: every encoded frame parses back with the command's fields.
 #![allow(clippy::disallowed_types)] // serde_json::Value: reference parser of the frames under test
 
-mod support;
+use crate::support;
 
 use hft_event::{GwCmd, GwOp, OrderFlags};
 use hft_refdata::RefData;

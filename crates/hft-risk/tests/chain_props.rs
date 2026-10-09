@@ -11,7 +11,7 @@
 mod band_ref;
 #[path = "model/chain_ref.rs"]
 mod chain_ref;
-mod common;
+use crate::common;
 
 use chain_ref::{Env, Opt};
 use common::*;

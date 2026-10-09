@@ -1,6 +1,6 @@
 //! `Throttle` (TESTS.md SLB-039–SLB-050, SLB-052–SLB-054, SLB-153).
 
-mod common;
+use crate::common;
 
 use common::{ThrottleRow, snap_throttle, throttle_row};
 use hft_strat_lib::{

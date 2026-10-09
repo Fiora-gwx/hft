@@ -1,6 +1,6 @@
 //! BIN-090, BIN-091, BIN-094, BIN-096: WS API answers.
 
-mod support;
+use crate::support;
 
 use hft_event::{OrderEvent, OrderEventKind};
 use hft_refdata::LimitBucket;

@@ -1,7 +1,7 @@
 //! LED-150–LED-156, LED-158, LED-160, LED-161: margin report, estimates, liquidation distances,
 //! oldest mark time, staleness and `restore_marks`.
 
-mod common;
+use crate::common;
 
 use common::*;
 use hft_ledger::views::VenueEquityView;

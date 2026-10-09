@@ -1,5 +1,5 @@
 //! EXE-415, EXE-416, EXE-419, EXE-420: decisions and progress notifications.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::{

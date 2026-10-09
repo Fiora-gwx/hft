@@ -6,7 +6,7 @@
     clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
 
-mod common;
+use crate::common;
 
 use std::collections::HashMap;
 use std::hash::{BuildHasher, RandomState};

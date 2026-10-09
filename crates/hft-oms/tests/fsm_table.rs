@@ -5,7 +5,7 @@
 )] // allow-list: test code
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
 //! The report table, one test per row group (README "回报处理表").
-mod common;
+use crate::common;
 
 use OrderState::*;
 use common::*;

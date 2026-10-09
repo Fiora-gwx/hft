@@ -1,6 +1,6 @@
 //! `cargo xtask test-trace` (tools/TESTS.md TOOL-086–TOOL-091, TOOL-180; rules: docs/tests/README.md §6).
 
-mod common;
+use crate::common;
 
 use common::{Fixture, Run};
 use serde_json::{Value, json};

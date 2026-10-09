@@ -1,5 +1,5 @@
 //! EXE-361–EXE-367: `engine_flatten` and `flatten_lock`.
-mod common;
+use crate::common;
 use common::*;
 use hft_event::NoteLevel;
 use hft_exec::decision::note;

@@ -7,8 +7,7 @@
 )] // allow-list: test code, not a hot path
 #![allow(clippy::type_complexity)]
 
-#[path = "common/spb.rs"]
-mod spb;
+use crate::spb;
 
 use hft_event::*;
 use hft_types::GroupId;

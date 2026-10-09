@@ -1,5 +1,5 @@
 //! EXE-310–EXE-314: manual_hold.
-mod common;
+use crate::common;
 use common::*;
 use hft_event::NoteLevel;
 use hft_exec::decision::note;

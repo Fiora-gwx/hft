@@ -1,7 +1,7 @@
 //! BIN-060–BIN-062, BIN-190, BIN-191: logon frames, login answers, heartbeats.
 #![allow(clippy::disallowed_types)] // serde_json::Value: reference parser of the frames under test
 
-mod support;
+use crate::support;
 
 use base64::Engine;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};

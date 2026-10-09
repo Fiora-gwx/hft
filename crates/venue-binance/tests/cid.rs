@@ -1,6 +1,6 @@
 //! BIN-078, BIN-079: client id shape and round trip.
 
-mod support;
+use crate::support;
 
 use hft_types::{AccountId, ClientOrderId, VenueId};
 use hft_venue_proto::VenueProtocol;

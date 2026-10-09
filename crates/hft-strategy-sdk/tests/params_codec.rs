@@ -8,7 +8,7 @@
 )] // allow-list: test code, not a hot path
 #![allow(clippy::type_complexity)] // table-driven rows
 
-mod common;
+use crate::common;
 
 use std::collections::BTreeMap;
 

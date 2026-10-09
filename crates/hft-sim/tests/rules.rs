@@ -2,7 +2,7 @@
 
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
-mod common;
+use crate::common;
 
 use common::*;
 use hft_event::{OrderEventKind, OrderFlags};

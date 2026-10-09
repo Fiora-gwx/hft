@@ -1,7 +1,7 @@
 //! LED-179: write-offs and adoptions interleaved keep the base-asset invariant and the position
 //! source rules.
 
-mod common;
+use crate::common;
 
 use common::opgen::*;
 use common::*;

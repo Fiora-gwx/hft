@@ -2,7 +2,7 @@
 //! DST framework directory; the recording executor plays `cargo build` of `hft-dst` and the runner
 //! (`hft-dst list` prints the suites).
 
-mod common;
+use crate::common;
 
 use common::repos::git;
 use common::{Fixture, Script};

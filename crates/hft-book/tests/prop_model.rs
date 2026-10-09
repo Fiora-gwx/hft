@@ -5,11 +5,9 @@
     clippy::disallowed_macros,
     clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
-mod common;
-#[path = "model.rs"]
-mod model;
-#[path = "seqgen.rs"]
-mod seqgen;
+use crate::common;
+use crate::model;
+use crate::seqgen;
 
 use common::{batch_hdr, lv, snap_hdr};
 use hft_book::{BookParams, L2Book, Outcome};

@@ -6,7 +6,7 @@
     clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
 
-mod common;
+use crate::common;
 
 use core::mem::{align_of, offset_of, size_of};
 

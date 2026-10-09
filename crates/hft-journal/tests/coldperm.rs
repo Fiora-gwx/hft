@@ -6,7 +6,8 @@
     clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
 
-mod common;
+#[allow(unused_imports)] // used by the Linux-only tests below
+use crate::common;
 
 #[cfg(target_os = "linux")]
 #[test]

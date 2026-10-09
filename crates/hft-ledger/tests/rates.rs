@@ -1,6 +1,6 @@
 //! LED-210–LED-215: USDT conversion rates, par assets, staleness and fallback.
 
-mod common;
+use crate::common;
 
 use common::*;
 use hft_ledger::views::VenueEquityView;

@@ -1,6 +1,6 @@
 //! BIN-004, BIN-005, BIN-007: endpoints and the listenKey bootstrap.
 
-mod support;
+use crate::support;
 
 use hft_venue_proto::{EndpointSpec, Method, ProtoErr, Role, RouteId, VenueProtocol};
 use support::{cfg, ed1, hm1};

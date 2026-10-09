@@ -1,7 +1,7 @@
 //! LED-075–LED-079: the cold reader's handling of ExternalFill notes, AUTO_RECON notes and
 //! OMS foreign-fill notes.
 
-mod common;
+use crate::common;
 
 use common::journal::*;
 use common::*;

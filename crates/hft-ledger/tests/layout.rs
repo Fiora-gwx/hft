@@ -1,6 +1,6 @@
 //! LED-019, LED-020, LED-178, LED-233, LED-234: in-process and snapshot row layouts, codes.
 
-mod common;
+use crate::common;
 
 use std::mem::{align_of, offset_of, size_of};
 

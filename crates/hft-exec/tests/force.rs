@@ -1,5 +1,5 @@
 //! EXE-340–EXE-360, EXE-369: margin-stress default reduction.
-mod common;
+use crate::common;
 use common::*;
 use hft_event::NoteLevel;
 use hft_exec::decision::note;

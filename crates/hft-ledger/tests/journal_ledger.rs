@@ -1,6 +1,6 @@
 //! LED-263–LED-265: `JournalLedger` slot map, cumulative-fill dedup, unmapped fills.
 
-mod common;
+use crate::common;
 
 use common::journal::*;
 use common::*;

@@ -7,7 +7,7 @@
     clippy::too_many_arguments
 )] // allow-list: test code, not a hot path
 
-mod common;
+use crate::common;
 use common::*;
 
 use hft_event::OrderFlags;

@@ -3,7 +3,7 @@
 
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
-mod common;
+use crate::common;
 
 use std::collections::BTreeMap;
 

@@ -1,6 +1,6 @@
 //! `Expiring<T>` (TESTS.md SLB-062–SLB-067).
 
-mod common;
+use crate::common;
 
 use common::{now, snap_expiring, tsc_at};
 use hft_strat_lib::{Expiring, Fresh};

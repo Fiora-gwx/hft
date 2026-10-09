@@ -5,9 +5,8 @@
     clippy::disallowed_macros,
     clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
-mod common;
-#[path = "model.rs"]
-mod model;
+use crate::common;
+use crate::model;
 
 use common::{batch_hdr, lv, snap};
 use hft_book::{BookParams, L2Book, Outcome};

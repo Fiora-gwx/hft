@@ -1,5 +1,5 @@
 //! EXE-115–EXE-120: quote availability by connection health.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::{BookStatus, ExecSpec, MarginLevel, TargetState};

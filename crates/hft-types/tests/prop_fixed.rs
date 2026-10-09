@@ -6,7 +6,7 @@
     clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
 
-mod reference;
+use crate::reference;
 
 use hft_types::*;
 use proptest::prelude::*;

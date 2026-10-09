@@ -1,6 +1,6 @@
 //! LED-200–LED-203: round start/close against `round_dust_notional`, RoundClosed contents.
 
-mod common;
+use crate::common;
 
 use common::*;
 use hft_ledger::notes::code;

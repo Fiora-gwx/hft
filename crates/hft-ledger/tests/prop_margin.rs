@@ -4,7 +4,7 @@
 // The reference walks positions, marks and liquidation prices in parallel by index.
 #![allow(clippy::needless_range_loop)]
 
-mod common;
+use crate::common;
 
 use common::*;
 use hft_ledger::{FixedVec, Ledger, MarginState};

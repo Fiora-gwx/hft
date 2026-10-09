@@ -1,7 +1,7 @@
 //! BIN-064–BIN-071, BIN-073, BIN-075, BIN-076: order frames.
 #![allow(clippy::disallowed_types)] // serde_json::Value: reference parser of the frames under test
 
-mod support;
+use crate::support;
 
 use hft_event::{GwCmd, GwOp, OrderFlags};
 use hft_types::{ClientOrderId, InstId, Px, Qty, Side, SlotId, Tif, Tsc, VenueId};

@@ -3,7 +3,7 @@
 
 #![allow(clippy::disallowed_types)] // allow-list: test code, not a hot path
 
-mod common;
+use crate::common;
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;

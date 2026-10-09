@@ -1,5 +1,5 @@
 //! EXE-380–EXE-385: gate rejections, backoff, execution failures, no-fill.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::{MarginLevel, StuckReason, TargetState};

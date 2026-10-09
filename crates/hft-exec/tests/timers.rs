@@ -1,5 +1,5 @@
 //! EXE-440, EXE-441, EXE-443, EXE-444: timers.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::TargetState;

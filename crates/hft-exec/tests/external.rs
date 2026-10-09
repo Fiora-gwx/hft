@@ -1,5 +1,5 @@
 //! EXE-290–EXE-300, EXE-512: external fills.
-mod common;
+use crate::common;
 use common::*;
 use hft_event::NoteLevel;
 use hft_exec::decision::note;

@@ -1,5 +1,5 @@
 //! EXE-230–EXE-232: `resolve_broken` at HARD release.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::TargetState;

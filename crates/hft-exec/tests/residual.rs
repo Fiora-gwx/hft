@@ -1,5 +1,5 @@
 //! EXE-280–EXE-283: dust and residuals.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::{ExecSpec, ExecUpdateKind, ResidualPolicy, TargetReason, TargetState, Urgency};

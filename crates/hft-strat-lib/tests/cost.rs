@@ -1,6 +1,6 @@
 //! `CostLine` and `fee_round_trip` (TESTS.md SLB-004–SLB-010).
 
-mod rf;
+use crate::rf;
 
 use hft_refdata::FeeAssetRule;
 use hft_strat_lib::{CostErr, CostItem, CostLine, FeeErr, FeeLeg, Liquidity, cost_flags, fee_round_trip};

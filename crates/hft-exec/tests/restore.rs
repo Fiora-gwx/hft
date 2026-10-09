@@ -1,5 +1,5 @@
 //! EXE-509: `recovery_end` takes `stop_tsc` from the snapshot record header.
-mod common;
+use crate::common;
 use common::*;
 use hft_types::Tsc;
 

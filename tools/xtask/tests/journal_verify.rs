@@ -2,7 +2,7 @@
 //! written in-process with hft-journal's writer (heap hot segments, cold copies on disk): segments 1–3
 //! rolled and sealed, segment 4 open; every segment holds `Bbo` events after its boot block.
 
-mod common;
+use crate::common;
 
 use std::path::{Path, PathBuf};
 

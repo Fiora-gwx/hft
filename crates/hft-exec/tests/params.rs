@@ -1,5 +1,5 @@
 //! EXE-040–EXE-041: tag propagation, PairParams into the first leg's LegLink.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::{ExecSpec, ExecUpdateKind, HedgeKind, LinkRole, OnFail, PxMode, ResidualPolicy};

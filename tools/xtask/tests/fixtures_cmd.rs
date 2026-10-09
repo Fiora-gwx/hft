@@ -1,6 +1,6 @@
 //! `cargo xtask fixtures check | scrub` (tools/TESTS.md TOOL-074; rules: fixtures/README.md 敏感信息清洗).
 
-mod common;
+use crate::common;
 
 use common::Fixture;
 

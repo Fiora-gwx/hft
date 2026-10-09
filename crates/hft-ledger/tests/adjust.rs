@@ -1,6 +1,6 @@
 //! LED-170–LED-177: AdoptExchange position/balance entries and residual write-offs.
 
-mod common;
+use crate::common;
 
 use common::*;
 use hft_event::NoteLevel;

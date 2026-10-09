@@ -1,6 +1,6 @@
 //! `cargo xtask setup` (tools/TESTS.md TOOL-085).
 
-mod common;
+use crate::common;
 
 use common::{Fixture, Script};
 

@@ -2,7 +2,7 @@
 //! `strat_repo` fixture. Builds, tests and `hft-core --check` go through the recording executor;
 //! the engine-side diff is read from the fixture's real git status.
 
-mod common;
+use crate::common;
 
 use std::path::Path;
 

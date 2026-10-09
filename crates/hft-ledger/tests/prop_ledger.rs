@@ -1,6 +1,6 @@
 //! LED-240–LED-243, LED-245: ledger-wide invariants over random operation sequences.
 
-mod common;
+use crate::common;
 
 use common::opgen::*;
 use common::*;

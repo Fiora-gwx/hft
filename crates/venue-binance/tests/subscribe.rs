@@ -1,7 +1,7 @@
 //! BIN-200–BIN-202: subscription frames and stream names.
 #![allow(clippy::disallowed_types)] // serde_json::Value: reference parser of the frames under test
 
-mod support;
+use crate::support;
 
 use hft_types::InstId;
 use hft_venue_proto::{ProtoErr, RouteId, StreamKind, SubFrames, SubSpec, VenueProtocol};

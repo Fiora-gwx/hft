@@ -1,5 +1,5 @@
 //! EXE-450–EXE-461, EXE-463: snapshot section 21, restore and recovery.
-mod common;
+use crate::common;
 use std::mem::{align_of, offset_of, size_of};
 
 use common::*;

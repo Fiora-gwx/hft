@@ -1,6 +1,6 @@
 //! Snapshots carry no TSC (TESTS.md SLB-056).
 
-mod common;
+use crate::common;
 
 use common::{anchor_with, now_tsc, snap_confirm, snap_expiring, snap_throttle, snap_trigger, tsc_at};
 use hft_strat_lib::{

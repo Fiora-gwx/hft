@@ -1,7 +1,7 @@
 //! `cargo xtask decoupling-gate` (tools/TESTS.md TOOL-012–TOOL-019). git and GitHub answers come from
 //! the recording executor; deps.toml `[layers]` is the fixture `layers` version.
 
-mod common;
+use crate::common;
 
 use common::{Fixture, Run, Script};
 

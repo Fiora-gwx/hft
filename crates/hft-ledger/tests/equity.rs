@@ -1,6 +1,6 @@
 //! LED-220–LED-226: total equity, valuation switches, validity, per-venue summary and views.
 
-mod common;
+use crate::common;
 
 use common::*;
 use hft_event::ExternalCause;

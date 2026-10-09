@@ -1,6 +1,6 @@
 //! LED-185–LED-188: transfers and simulated-account reset.
 
-mod common;
+use crate::common;
 
 use common::*;
 use hft_event::ExternalCause;

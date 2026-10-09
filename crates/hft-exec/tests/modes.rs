@@ -1,5 +1,5 @@
 //! EXE-390–EXE-398: run modes, Drain and Unknown.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::{MarginLevel, OrderUpdateKind, StuckReason, TargetState};

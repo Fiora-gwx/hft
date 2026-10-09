@@ -1,6 +1,6 @@
 //! `cargo xtask deps` (tools/TESTS.md TOOL-030, TOOL-031). Fixture `clean`: common::deps_repo.
 
-mod common;
+use crate::common;
 
 use common::deps_repo::{D, DEV, PKGS, apply, clean, violations};
 

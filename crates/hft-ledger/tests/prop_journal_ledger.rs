@@ -2,7 +2,7 @@
 //! from that snapshot (positions, inventories, balances). The test plays the sequencer: each
 //! input becomes journal records plus the engine's ledger calls.
 
-mod common;
+use crate::common;
 
 use common::journal::*;
 use common::opgen::cases;

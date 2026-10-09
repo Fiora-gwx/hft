@@ -1,6 +1,6 @@
 //! LED-040–LED-046: balance initialization, drift check against dust, baselines.
 
-mod common;
+use crate::common;
 
 use common::*;
 use hft_ledger::notes::code;

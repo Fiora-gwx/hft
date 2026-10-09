@@ -4,7 +4,7 @@
 //! `strategies/fooarb`), the strategy fast-part float rule on the hot-check clean tree (strategy `x`)
 //! and clippy's clock ban with the hot `clippy.toml` on a standalone strategy crate.
 
-mod common;
+use crate::common;
 
 use std::process::Command;
 

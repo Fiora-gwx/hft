@@ -2,7 +2,7 @@
 //! runs through the recording executor; the fixture holds a workspace whose components make every
 //! step run.
 
-mod common;
+use crate::common;
 
 use common::{Fixture, Script};
 

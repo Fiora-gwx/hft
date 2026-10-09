@@ -6,6 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+# Plain test files build as one binary (tests/main.rs); files with process-wide
+# effects are separate [[test]] targets.
+autotests = false
 
 [lints]
 workspace = true
@@ -40,79 +43,11 @@ xxhash-rust.workspace = true
 name = "testwriter"
 required-features = ["writer"]
 
-
 # Tests and benches drive the writer and the heap backend (README "cargo feature", "段内存后端"):
 # run them with `--all-features` (or `--features writer,mem-backend`).
-[[test]]
-name = "layout"
-required-features = ["writer", "mem-backend"]
-
-[[test]]
-name = "framing"
-required-features = ["writer", "mem-backend"]
-
-[[test]]
-name = "naming"
-required-features = ["writer", "mem-backend"]
-
-[[test]]
-name = "config"
-required-features = ["writer", "mem-backend"]
-
-[[test]]
-name = "writer"
-required-features = ["writer", "mem-backend"]
-
-[[test]]
-name = "roll"
-required-features = ["writer", "mem-backend"]
-
-[[test]]
-name = "prepare"
-required-features = ["writer", "mem-backend"]
-
-[[test]]
-name = "persist"
-required-features = ["writer", "mem-backend"]
-
-[[test]]
-name = "retire"
-required-features = ["writer", "mem-backend"]
 
 [[test]]
 name = "recover"
-required-features = ["writer", "mem-backend"]
-
-[[test]]
-name = "prop_powerloss"
-required-features = ["writer", "mem-backend"]
-
-[[test]]
-name = "reader"
-required-features = ["writer", "mem-backend"]
-
-[[test]]
-name = "verify"
-required-features = ["writer", "mem-backend"]
-
-[[test]]
-name = "retain"
-required-features = ["writer", "mem-backend"]
-
-[[test]]
-name = "coldperm"
-required-features = ["writer", "mem-backend"]
-
-[[test]]
-name = "held"
-required-features = ["writer", "mem-backend"]
-
-[[test]]
-name = "offline"
-required-features = ["writer", "mem-backend"]
-
-[[test]]
-name = "tmpfs"
 required-features = ["writer", "mem-backend"]
 
 [[test]]
@@ -172,4 +107,21 @@ required-features = ["writer", "mem-backend"]
 [[bench]]
 name = "recover"
 harness = false
+required-features = ["writer", "mem-backend"]
+
+[[test]]
+name = "feature"
+path = "tests/feature.rs"
+
+[[test]]
+name = "hygiene"
+path = "tests/hygiene.rs"
+
+[[test]]
+name = "meta"
+path = "tests/meta.rs"
+
+[[test]]
+name = "journal"
+path = "tests/main.rs"
 required-features = ["writer", "mem-backend"]

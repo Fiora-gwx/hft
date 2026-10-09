@@ -1,5 +1,5 @@
 //! EXE-010–EXE-017: cell table, `touch_inst`, `view`, `has_pending`, Live-before-Sim.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::{ExecUpdateKind, TargetOrigin, TargetReject, TargetState};

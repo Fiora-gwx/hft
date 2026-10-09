@@ -1,5 +1,5 @@
 //! EXE-060–EXE-076: state machine.
-mod common;
+use crate::common;
 use common::*;
 use hft_event::NoteLevel;
 use hft_exec::decision::note;

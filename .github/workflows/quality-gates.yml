@@ -1,6 +1,6 @@
 # Quality gates, called by ci.yml (docs/development.md#质量门quality-gatesyml).
 # What runs and the time limits: docs/testing.md §6 (PR row: target <= 12 billed minutes,
-# timeout-minutes: 20). Jobs: decoupling-gate (also decides full/docs-only), docs, rust, ops-py.
+# timeout-minutes: 20, rust 30). Jobs: decoupling-gate (also decides full/docs-only), docs, rust, ops-py.
 #
 # Steps for components of later milestones are guarded by `steps.xtask.outputs.<subcommand>`
 # (.github/scripts/xtask-inventory.sh: a subcommand that is due but missing fails the job) or by
@@ -138,7 +138,7 @@ jobs:
       ${{ !cancelled() && needs.decoupling-gate.outputs.full == 'true' &&
       needs.decoupling-gate.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30  # safety cap: hosted-runner speed varies by about +-50% (docs/testing.md §6)
     permissions:
       contents: read
       id-token: write # S3 fixtures through GitHub OIDC (replay-verify samples)
@@ -175,7 +175,7 @@ jobs:
         with:
           key: x86-ci-v2
           # A cold run (new Cargo.lock, eviction) builds the cargo plugins and the whole test tree
-          # from scratch and is close to the 20 min limit; keep what it built even if it fails.
+          # from scratch and can reach the time limit; keep what it built even if it fails.
           # The first save of a key is final (later runs hit it fully and do not save), so the
           # dependency builds run before any gate can stop the job (next two steps).
           cache-on-failure: true

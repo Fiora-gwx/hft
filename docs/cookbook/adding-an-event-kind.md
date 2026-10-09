@@ -25,7 +25,7 @@
 3. 在 `hft-event` 的 `EventKind` 里加变体与常量,`schema_version = 1`;选布局:定长、`Var`(单条、定长前缀 + 有上限的尾部,无 `PartHdr`)或 `Multi`(`PartHdr` 多段)。
 4. 在 [event-model 编号表](../subsystems/event-model.md#kind-编号段)加一行:编号、布局、分类(Input/Output/Meta)。
 
-**验证**:在 [hft-event TESTS.md](../../crates/hft-event/TESTS.md) 的 EVT-004 加一行后 `cargo test -p hft-event --test kinds`(EVT-004 逐 kind、EVT-005 一一对应与编号段);`cargo xtask gen-schema` 把新编号追加进 `schemas/event-layout.lock`(只追加基线,删除或改名已有编号即退出 1,见 EVT-176)。
+**验证**:在 [hft-event TESTS.md](../../crates/hft-event/TESTS.md) 的 EVT-004 加一行后 `cargo test -p hft-event --test event kinds::`(EVT-004 逐 kind、EVT-005 一一对应与编号段);`cargo xtask gen-schema` 把新编号追加进 `schemas/event-layout.lock`(只追加基线,删除或改名已有编号即退出 1,见 EVT-176)。
 
 ## 2. 定义事件体
 
@@ -36,7 +36,7 @@
 5. 体 > 64 KiB 或长度可变 → 用变长/多段编码([journal-format](../subsystems/journal-format.md#变长与多段记录)),非末段置 `PART`。
 6. 文档注释写契约:每个字段的单位、指数来源、取值范围、谁写入。
 
-**验证**:`cargo build -p hft-event`(zerocopy derive 与编译期断言在此失败,EVT-170);在 hft-event TESTS.md 对应域的布局用例(EVT-040、EVT-050、EVT-060、EVT-070 或 EVT-160)加一行并 `cargo test -p hft-event --test layout`;已有行不变由 `gen-schema` 的只追加核对保证(EVT-175)。
+**验证**:`cargo build -p hft-event`(zerocopy derive 与编译期断言在此失败,EVT-170);在 hft-event TESTS.md 对应域的布局用例(EVT-040、EVT-050、EVT-060、EVT-070 或 EVT-160)加一行并 `cargo test -p hft-event --test event layout::`;已有行不变由 `gen-schema` 的只追加核对保证(EVT-175)。
 
 ## 3. 定写者与所在 journal
 
@@ -94,7 +94,7 @@
 3. 读者规则:记录 `len` 短于当前体 → 缺失字段补零;长于当前体 → 忽略多出部分。补零后语义必须仍然正确(新字段的"0"要么是合法默认,要么有一个标志位表示"缺失")。
 4. 重做 §2 的布局快照(追加时该 kind 大小变化;两种做法都不改已有字段的偏移)、§4、§6。
 
-**验证**:在 hft-event TESTS.md 的 EVT-071 加一行(旧长度记录读出新字段为 0)后 `cargo test -p hft-event --test version`;长体截断由 EVT-019 覆盖;`cargo xtask gen-schema` 的只追加核对通过(EVT-175);`replay-verify` 旧样本 journal 仍逐字节一致。
+**验证**:在 hft-event TESTS.md 的 EVT-071 加一行(旧长度记录读出新字段为 0)后 `cargo test -p hft-event --test event version::`;长体截断由 EVT-019 覆盖;`cargo xtask gen-schema` 的只追加核对通过(EVT-175);`replay-verify` 旧样本 journal 仍逐字节一致。
 
 ## 10. 废弃旧 kind
 
@@ -102,7 +102,7 @@
 2. 回放旧 journal 时,sequencer 对旧 kind 的处理保持原行为(验证回放要求逐字节一致)。
 3. `schemas/event-layout.lock` 中该行由 `gen-schema` 标 `deprecated`(EVT-175.14),不删除。
 
-**验证**:`cargo xtask replay-verify` 对包含旧 kind 的样本 journal 仍通过;`cargo test -p hft-event --test kinds`;`cargo xtask gen-schema`(编号未消失,EVT-176)。
+**验证**:`cargo xtask replay-verify` 对包含旧 kind 的样本 journal 仍通过;`cargo test -p hft-event --test event kinds::`;`cargo xtask gen-schema`(编号未消失,EVT-176)。
 
 ## 11. 不需要本页的情形(复核)
 

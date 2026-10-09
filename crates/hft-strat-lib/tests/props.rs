@@ -1,9 +1,9 @@
 //! Property tests of the fast-part components (TESTS.md SLB-011, SLB-016, SLB-017, SLB-029,
 //! SLB-036, SLB-037, SLB-051, SLB-055, SLB-057, SLB-061).
 
-mod book;
-mod common;
-mod rf;
+use crate::book;
+use crate::common;
+use crate::rf;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 

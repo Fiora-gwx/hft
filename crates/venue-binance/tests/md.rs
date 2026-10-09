@@ -1,6 +1,6 @@
 //! BIN-020–BIN-026, BIN-035, BIN-036: sequence rules, `peek`, `bookTicker` decoding, control hints.
 
-mod support;
+use crate::support;
 
 use hft_event::Bbo;
 use hft_types::{ConnId, InstId, Px, Qty, VenueId};

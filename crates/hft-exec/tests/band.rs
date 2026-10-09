@@ -1,5 +1,5 @@
 //! EXE-100–EXE-106, EXE-508, EXE-510: no-trade band and urgency.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::{ExecSpec, ExecUpdateKind, TargetReason, Urgency};

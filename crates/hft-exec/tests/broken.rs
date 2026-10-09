@@ -1,5 +1,5 @@
 //! EXE-237–EXE-262 (without the property case): Broken disposal and the auto bounded close-out.
-mod common;
+use crate::common;
 use common::*;
 use hft_event::NoteLevel;
 use hft_exec::decision::note;

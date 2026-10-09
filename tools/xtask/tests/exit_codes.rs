@@ -1,6 +1,6 @@
 //! Exit-code and output conventions of every subcommand (tools/TESTS.md TOOL-001, TOOL-002).
 
-mod common;
+use crate::common;
 
 use common::Fixture;
 use common::repos::{OMS_A, deps_clean, docs_clean, git, hot_clean, reverse_dep};

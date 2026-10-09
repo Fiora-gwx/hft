@@ -1,6 +1,6 @@
 //! LED-030–LED-039: average-cost positions, realized PnL, spot cash and inventory, reports.
 
-mod common;
+use crate::common;
 
 use common::*;
 use hft_ledger::{BalanceVerdict, Ledger};

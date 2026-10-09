@@ -6,8 +6,7 @@
     clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
 
-#[path = "common/spb.rs"]
-mod spb;
+use crate::spb;
 
 use hft_event::*;
 use hft_types::GroupId;

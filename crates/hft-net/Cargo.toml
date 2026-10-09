@@ -6,6 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+# Plain test files build as one binary (tests/main.rs); files with process-wide
+# effects are separate [[test]] targets.
+autotests = false
 
 [lints]
 workspace = true
@@ -43,73 +46,17 @@ serde_json = "1"
 xtask = { path = "../../tools/xtask" }
 
 [[test]]
-name = "layout"
-required-features = ["test-io"]
-
-[[test]]
 name = "compile_fail"
 
 [[test]]
-name = "ws_rx"
-required-features = ["test-io"]
-
-[[test]]
-name = "ws_tx"
-required-features = ["test-io"]
-
-[[test]]
-name = "rx_path"
-required-features = ["test-io"]
-
-[[test]]
-name = "rx_prop"
-required-features = ["test-io"]
-
-[[test]]
 name = "cmsg"
-
-[[test]]
-name = "timestamps"
-required-features = ["test-io"]
-
-[[test]]
-name = "tx_path"
-required-features = ["test-io"]
 
 [[test]]
 name = "warm"
 required-features = ["test-io"]
 
 [[test]]
-name = "connector"
-required-features = ["test-io"]
-
-[[test]]
-name = "ready"
-required-features = ["test-io"]
-
-[[test]]
-name = "loopback"
-required-features = ["test-io"]
-
-[[test]]
-name = "hot_syscalls"
-required-features = ["test-io"]
-
-[[test]]
-name = "arena"
-required-features = ["test-io"]
-
-[[test]]
 name = "alloc"
-required-features = ["test-io"]
-
-[[test]]
-name = "config"
-required-features = ["test-io"]
-
-[[test]]
-name = "txts"
 required-features = ["test-io"]
 
 [[test]]
@@ -131,4 +78,9 @@ required-features = ["test-io"]
 [[bench]]
 name = "ready"
 harness = false
+required-features = ["test-io"]
+
+[[test]]
+name = "net"
+path = "tests/main.rs"
 required-features = ["test-io"]

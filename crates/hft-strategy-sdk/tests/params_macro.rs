@@ -6,7 +6,7 @@
     clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
 
-mod common;
+use crate::common;
 
 use common::*;
 use hft_strategy_sdk::params::encode_body;

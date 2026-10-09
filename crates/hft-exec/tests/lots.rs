@@ -1,5 +1,5 @@
 //! EXE-180–EXE-186: two-leg lot alignment.
-mod common;
+use crate::common;
 use common::*;
 use hft_event::Level;
 use hft_exec::*;

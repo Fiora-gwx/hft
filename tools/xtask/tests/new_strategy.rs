@@ -1,7 +1,7 @@
 //! `cargo xtask new-strategy` (tools/TESTS.md TOOL-069–TOOL-071) on the `strat_repo` fixture; the
 //! unit-test and `deps` runs go through the recording executor.
 
-mod common;
+use crate::common;
 
 use common::Script;
 use common::repos::git;

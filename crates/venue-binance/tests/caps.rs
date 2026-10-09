@@ -1,6 +1,6 @@
 //! BIN-170–BIN-172: rate rules, capability defaults, expiry and dead man.
 
-mod support;
+use crate::support;
 
 use hft_refdata::{
     CapFlags, DeadManCap, FeeAssetRule, FundingSettleKind, LimitBucket as B, LimitScope as S, LiqMarker,

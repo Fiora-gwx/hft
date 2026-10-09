@@ -1,6 +1,6 @@
 //! LED-231: snapshot round trip, and a restored ledger behaves like the original afterwards.
 
-mod common;
+use crate::common;
 
 use common::opgen::*;
 use common::*;

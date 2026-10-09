@@ -8,9 +8,8 @@
 )] // allow-list: test code, not a hot path
 #![allow(clippy::type_complexity)]
 
-#[path = "bodies.rs"]
-mod bodies;
-mod common;
+use crate::bodies;
+use crate::common;
 
 use common::*;
 use hft_event::*;

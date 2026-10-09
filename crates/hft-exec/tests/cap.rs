@@ -1,5 +1,5 @@
 //! EXE-200: `hedge_cap_qty` of each order kind.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::{MarginLevel, TargetState};

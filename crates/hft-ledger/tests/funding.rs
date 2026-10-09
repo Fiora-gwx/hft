@@ -1,6 +1,6 @@
 //! LED-090–LED-104: funding booking by settle kind, synthesis, push pairing and dedup.
 
-mod common;
+use crate::common;
 
 use common::*;
 use hft_event::{FundingSettle, NoteLevel};

@@ -5,7 +5,8 @@
     clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
 
-mod support;
+#[allow(unused_imports)] // used by the Linux-only tests below
+use crate::support;
 
 use hft_net::{NetConfig, Quickack, TlsMode};
 

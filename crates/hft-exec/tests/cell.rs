@@ -1,5 +1,5 @@
 //! EXE-052: the ungrouped cell's in-flight comes from its own `own_infl` (Unknown included).
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::{MarginLevel, OrderUpdateKind};

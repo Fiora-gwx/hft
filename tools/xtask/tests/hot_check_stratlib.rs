@@ -2,7 +2,7 @@
 //! `clean` tree (common::repos::hot_clean) plus a pure `crates/hft-strat-lib` with the planned source
 //! files; the clippy row builds a standalone copy of that crate with the real pure `clippy.toml`.
 
-mod common;
+use crate::common;
 
 use std::process::Command;
 

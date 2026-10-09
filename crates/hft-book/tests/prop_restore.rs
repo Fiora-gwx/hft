@@ -5,9 +5,8 @@
     clippy::disallowed_macros,
     clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
-mod common;
-#[path = "seqgen.rs"]
-mod seqgen;
+use crate::common;
+use crate::seqgen;
 
 use common::{aligned_mem, batch_hdr, lv, refdata, snap_hdr};
 use hft_book::{BookSet, BookState, L2Book, Outcome};

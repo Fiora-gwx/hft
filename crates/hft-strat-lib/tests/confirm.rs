@@ -1,6 +1,6 @@
 //! `ConfirmWindow` (TESTS.md SLB-020–SLB-028, SLB-030–SLB-032).
 
-mod common;
+use crate::common;
 
 use common::{ConfirmRow, confirm_row, snap_confirm};
 use hft_strat_lib::{Confirm, ConfirmParams, ConfirmParamsNs, ConfirmWindow};

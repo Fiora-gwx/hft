@@ -6,6 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+# Plain test files build as one binary (tests/main.rs); files with process-wide
+# effects are separate [[test]] targets.
+autotests = false
 
 [lints]
 workspace = true
@@ -63,3 +66,19 @@ harness = false
 [[bench]]
 name = "views"
 harness = false
+
+[[test]]
+name = "alloc"
+path = "tests/alloc.rs"
+
+[[test]]
+name = "body_view"
+path = "tests/body_view.rs"
+
+[[test]]
+name = "model"
+path = "tests/model.rs"
+
+[[test]]
+name = "sdk"
+path = "tests/main.rs"

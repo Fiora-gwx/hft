@@ -1,6 +1,6 @@
 //! LED-050–LED-074: external fills — dedup, AUTO_EXTERNAL and auto_held, attribution, notes.
 
-mod common;
+use crate::common;
 
 use common::*;
 use hft_event::{ExternalCause, ExternalFill, NoteLevel};

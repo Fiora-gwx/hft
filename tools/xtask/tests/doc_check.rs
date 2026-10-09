@@ -1,6 +1,6 @@
 //! `cargo xtask doc-check` (tools/TESTS.md TOOL-067, TOOL-068; crates/hft-event/TESTS.md EVT-144).
 
-mod common;
+use crate::common;
 
 use std::path::{Path, PathBuf};
 

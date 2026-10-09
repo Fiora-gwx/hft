@@ -1,6 +1,6 @@
 //! EXE-110–EXE-112: class hints, exchange reduce-only flag, origin; spot sell caps; second-leg
 //! reduce-only.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::{

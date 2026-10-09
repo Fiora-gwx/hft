@@ -6,6 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+# Plain test files build as one binary (tests/main.rs); files with process-wide
+# effects are separate [[test]] targets.
+autotests = false
 
 [lints]
 workspace = true
@@ -28,3 +31,111 @@ static_assertions.workspace = true
 [[bench]]
 name = "rt"
 harness = false
+
+[[test]]
+name = "alloc"
+path = "tests/alloc.rs"
+
+[[test]]
+name = "calib"
+path = "tests/calib.rs"
+
+[[test]]
+name = "loom_kill"
+path = "tests/loom_kill.rs"
+
+[[test]]
+name = "loom_mailbox"
+path = "tests/loom_mailbox.rs"
+
+[[test]]
+name = "loom_seqcell"
+path = "tests/loom_seqcell.rs"
+
+[[test]]
+name = "loom_spsc"
+path = "tests/loom_spsc.rs"
+
+[[test]]
+name = "loom_wake"
+path = "tests/loom_wake.rs"
+
+[[test]]
+name = "mailbox"
+path = "tests/mailbox.rs"
+
+[[test]]
+name = "proc_cpu"
+path = "tests/proc_cpu.rs"
+
+[[test]]
+name = "proc_hb"
+path = "tests/proc_hb.rs"
+
+[[test]]
+name = "proc_host"
+path = "tests/proc_host.rs"
+
+[[test]]
+name = "proc_mem"
+path = "tests/proc_mem.rs"
+
+[[test]]
+name = "proc_park"
+path = "tests/proc_park.rs"
+
+[[test]]
+name = "proc_shm"
+path = "tests/proc_shm.rs"
+
+[[test]]
+name = "proc_syscall"
+path = "tests/proc_syscall.rs"
+
+[[test]]
+name = "proc_time"
+path = "tests/proc_time.rs"
+
+[[test]]
+name = "proc_wait"
+path = "tests/proc_wait.rs"
+
+[[test]]
+name = "proc_wake"
+path = "tests/proc_wake.rs"
+
+[[test]]
+name = "prop_host"
+path = "tests/prop_host.rs"
+
+[[test]]
+name = "prop_spsc"
+path = "tests/prop_spsc.rs"
+
+[[test]]
+name = "seqcell"
+path = "tests/seqcell.rs"
+
+[[test]]
+name = "spsc"
+path = "tests/spsc.rs"
+
+[[test]]
+name = "stress"
+path = "tests/stress.rs"
+
+[[test]]
+name = "taskloop"
+path = "tests/taskloop.rs"
+
+[[test]]
+name = "time"
+path = "tests/time.rs"
+
+[[test]]
+name = "wait"
+path = "tests/wait.rs"
+
+[[test]]
+name = "rt"
+path = "tests/main.rs"

@@ -5,7 +5,7 @@
     clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
 
-mod support;
+use crate::support;
 
 use hft_net::sock::ScriptIo;
 use hft_net::{ConnId, MaskedFrame, Opcode, SendErr};

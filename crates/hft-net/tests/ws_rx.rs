@@ -5,7 +5,7 @@
     clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
 
-mod support;
+use crate::support;
 
 use hft_net::{ConnPhase, ErrBits, Opcode};
 use support::mempeer::{self, MemPeer, cfg, deliver, pair, pair_cfg};

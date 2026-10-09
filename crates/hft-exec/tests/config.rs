@@ -1,5 +1,5 @@
 //! EXE-001–EXE-004: configuration defaults, `new` checks, account rows.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::SnapshotWriter;

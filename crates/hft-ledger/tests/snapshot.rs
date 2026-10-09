@@ -1,7 +1,7 @@
 //! LED-230, LED-232, LED-235–LED-237, LED-247: section order, row order, versions, i128 words,
 //! engine-time fields.
 
-mod common;
+use crate::common;
 
 use common::*;
 use hft_event::ExternalCause;

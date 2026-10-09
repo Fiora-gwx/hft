@@ -1,7 +1,7 @@
 //! hft-strategy-registry dependency edges (strategies/registry/TESTS.md REG-015). Fixture `clean`:
 //! common::deps_repo.
 
-mod common;
+use crate::common;
 
 use common::deps_repo::{D, DEV, apply, clean, violations};
 

@@ -7,7 +7,7 @@
 )] // allow-list: test code, not a hot path
 #![cfg(feature = "tools")]
 
-mod common;
+use crate::common;
 
 use common::*;
 use hft_refdata::{DiffItem, UidPolicy, diff, dump};

@@ -4,9 +4,8 @@
     clippy::disallowed_methods
 )] // allow-list: test code
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
-mod common;
-#[path = "model.rs"]
-mod model;
+use crate::common;
+use crate::model;
 
 use common::*;
 use hft_event::{ConnRole, ConnStateKind, GwOp, OrderEventKind, SendStatus};

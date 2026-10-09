@@ -6,7 +6,7 @@
     clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
 
-mod support;
+use crate::support;
 
 use hft_net::sock::{SendKind, SendStep, errno};
 use hft_net::{ConnPhase, ErrBits, MaskedFrame, Opcode, SendErr, SendOk};

@@ -1,5 +1,5 @@
 //! EXE-021–EXE-027: output capacity, multi-cell entries, Continue, cancel_resting dedup, ordering.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::{ExecUpdateKind, TargetState};

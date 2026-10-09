@@ -5,7 +5,7 @@
     clippy::disallowed_methods
 )]
 
-mod support;
+use crate::support;
 
 use hft_event::{ConnRole, ConnStateKind, OrderEventKind, RepMsg, SendStatus};
 use hft_net::ConnId;

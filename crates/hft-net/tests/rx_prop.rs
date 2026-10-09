@@ -6,7 +6,7 @@
     clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
 
-mod support;
+use crate::support;
 
 use hft_net::Opcode;
 use hft_net::sock::RecvStep;

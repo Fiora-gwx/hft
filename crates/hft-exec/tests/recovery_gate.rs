@@ -1,5 +1,5 @@
 //! EXE-315–EXE-319, EXE-325–EXE-329: per-venue recovery gate and the gate-held-naked alarm.
-mod common;
+use crate::common;
 use common::*;
 use hft_event::NoteLevel;
 use hft_exec::decision::note;

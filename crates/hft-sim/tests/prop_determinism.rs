@@ -2,7 +2,7 @@
 
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
-mod common;
+use crate::common;
 
 use common::scen::{Obs, Trace, run, scenario, setup_for};
 use common::*;

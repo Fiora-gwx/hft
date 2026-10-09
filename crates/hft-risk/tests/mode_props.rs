@@ -5,7 +5,7 @@
     clippy::disallowed_methods
 )] // allow-list: test code, not a hot path
 
-mod common;
+use crate::common;
 #[path = "model/mode_ref.rs"]
 mod mode_ref;
 

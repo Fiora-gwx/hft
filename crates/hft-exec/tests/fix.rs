@@ -1,5 +1,5 @@
 //! EXE-205–EXE-216, EXE-220–EXE-222: repair of the excess leg and the HedgeFix command.
-mod common;
+use crate::common;
 use common::*;
 use hft_event::NoteLevel;
 use hft_exec::decision::note;

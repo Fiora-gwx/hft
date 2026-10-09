@@ -1,7 +1,7 @@
 //! LED-120–LED-139, LED-268, LED-270: funding reconciliation corrections, no-history items,
 //! window sweep, record ring and watermark.
 
-mod common;
+use crate::common;
 
 use common::*;
 use hft_event::NoteLevel;

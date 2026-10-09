@@ -6,6 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+# Plain test files build as one binary (tests/main.rs); files with process-wide
+# effects are separate [[test]] targets.
+autotests = false
 
 [lib]
 path = "src/lib.rs"
@@ -45,3 +48,19 @@ harness = false
 
 [lints]
 workspace = true
+
+[[test]]
+name = "bench_gate"
+path = "tests/bench_gate.rs"
+
+[[test]]
+name = "gen_schema"
+path = "tests/gen_schema.rs"
+
+[[test]]
+name = "hot_check"
+path = "tests/hot_check.rs"
+
+[[test]]
+name = "xtask_tests"
+path = "tests/main.rs"

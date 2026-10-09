@@ -1,5 +1,5 @@
 //! EXE-145–EXE-148: TakerSlice.
-mod common;
+use crate::common;
 use common::*;
 use hft_exec::*;
 use hft_strategy_sdk::ExecSpec;

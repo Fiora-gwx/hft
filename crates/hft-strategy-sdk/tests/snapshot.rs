@@ -62,7 +62,7 @@ fn sdk_191_writer_reader_le() {
     assert!(r.find_section(9).unwrap().is_none());
 }
 
-mod common;
+use crate::common;
 
 #[test]
 fn sdk_024_max_groups_fit_snapshot_max() {
