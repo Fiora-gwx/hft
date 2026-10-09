@@ -3,6 +3,7 @@
 
 pub mod alloc;
 pub mod echo;
+pub mod events;
 pub mod model;
 pub mod params;
 pub mod path_script;
@@ -10,6 +11,7 @@ pub mod rd;
 pub mod target;
 
 pub use echo::*;
+pub use events::*;
 pub use model::*;
 pub use params::*;
 pub use path_script::*;
