@@ -55,6 +55,7 @@ fixtures/
   strategies/<name>/ckpt/layout.json  <name> 为策略包名,另有 sdk-probe/ = hft-strategy-sdk 的测试 Model `ProbeModel`;Model 检查点的布局描述金样(`ModelLayoutDesc`:节标签、元素类型、长度规则;布局描述变化而 `Model::LAYOUT_VERSION` 未升 → CI 失败,规则归 hft-strategy-sdk);不存原始样本节的字节
   strategies/<name>/ckpt/path.bin    Model 路径状态节金样(只在 `Model::PATH_VERSION > 0` 时提交):固定事件脚本跑完后 `snapshot_path` 写出的字节;
                                    字节变化而 `PATH_VERSION` 未升 → CI 失败(事件脚本与规则归 hft-strategy-sdk)
+  strategies/<name>/ckpt/meta.toml   上两份金样生成时的 `layout_version`、`path_version`(CI 据此区分"字节变了但版本未升"与"版本已升但金样未重生成");`HFT_REGEN_GOLDEN=1` 时与金样一起重写
   refdata/<version>.blob           金样所用的 refdata 快照(资产指数、tick/lot、InstId 映射、VenueCaps);<version> 也可是用途名(如 ctl-p0.blob = hft-ctl-proto 金样用的 refdata)
   decimal/<venue>.tsv              hft-types 十进制解析金样:每行原文、线格式指数、parse_exact 期望 raw 或错误位名、parse_round(HalfEven) 期望 raw(格式归 hft-types TESTS)
   ctl/                             控制面金样(归 hft-ctl-proto):<case>.request.json(JSON 线格式请求)、<case>.record.hex(规范化后的 ControlCmd 记录字节)、

@@ -1,0 +1,1 @@
+{"sections":[{"tag":1,"name":"ticks","scope":"Instance","elems":[{"name":"n_ticks","ty":"U64","len":"one"}]},{"tag":2,"name":"samples","scope":"Group","elems":[{"name":"utc_ns","ty":"I64","len":"prefixed"},{"name":"mid","ty":"I64","len":"prefixed"},{"name":"pct_bin","ty":"I64","len":"one"},{"name":"fp","ty":"U64","len":"one"}]}]}

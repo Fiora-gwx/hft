@@ -1,0 +1,4 @@
+# Versions the goldens in this directory were generated at (SDK-076, SDK-077).
+# Regenerate: HFT_REGEN_GOLDEN=1 cargo test -p hft-strategy-sdk --test checkpoint
+layout_version = 1
+path_version = 1
