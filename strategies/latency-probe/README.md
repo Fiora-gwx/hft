@@ -251,8 +251,8 @@ impl Strategy for LatencyProbe {
 | `on_event` 快侧未命中(`Bbo` 未到期) | ≤ 15 ns | ≤ 40 ns | `strategies/latency-probe/tick_miss` |
 | `on_event` 命中 → 一条订单意图(quote 或 pair 第一腿) | ≤ 150 ns | ≤ 500 ns | `strategies/latency-probe/tick_fire` |
 | `on_event(Order{Acked})` → 撤单(本策略额外登记;计入 `rep_to_order` 的 sequencer 部分) | ≤ 50 ns | ≤ 150 ns | `strategies/latency-probe/ack_cancel` |
-| `on_event` 慢侧更新 | 不适用(无慢侧) | — | — |
-| `on_event(Advice)` | 不适用(无 Model) | — | — |
+| `on_event` 慢侧更新(无慢侧:pair 组 B 腿的 `Bbo`,不重算触发价) | ≤ 60 ns | ≤ 150 ns | `strategies/latency-probe/slow_update` |
+| `on_event(Advice)`(无 Model:不会收到,忽略) | ≤ 100 ns | ≤ 300 ns | `strategies/latency-probe/advice` |
 | `on_event` → 构造 `TargetIntent`(target 组) | ≤ 250 ns | ≤ 800 ns | `strategies/latency-probe/target_set` |
 | `on_event(Exec)`(target 组) | ≤ 80 ns | ≤ 250 ns | `strategies/latency-probe/exec_update` |
 | `on_event(Risk)`,每个受影响 group | ≤ 150 ns | ≤ 400 ns | `strategies/latency-probe/risk_event` |

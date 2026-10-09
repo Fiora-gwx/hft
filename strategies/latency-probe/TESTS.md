@@ -30,7 +30,7 @@ spec: README.md
 | pair 探测 | LPR-033–LPR-040、LPR-043、LPR-048、LPR-067、LPR-069、LPR-071 |
 | target 探测 | LPR-041–LPR-048、LPR-062、LPR-068、LPR-071 |
 | 规划源文件 | LPR-064 |
-| 延迟与资源契约 | LPR-063、LPR-072–LPR-077、LPR-080 |
+| 延迟与资源契约 | LPR-063、LPR-072–LPR-077、LPR-080、LPR-082、LPR-083 |
 | 测试与验收 | 不适用:非规范(用例与验收在本文件) |
 | 依赖 | LPR-064 |
 | 延伸阅读 | 不适用:非规范 |
@@ -1232,11 +1232,27 @@ spec: README.md
 - 证据:`ops-log/tests/LPR-081-<UTC 日期>.md`
 - 实现:`strategies/latency-probe/tests/host/LPR-081.sh`
 
+### LPR-082 基准:`on_event` 慢侧更新(pair 组 B 腿 `Bbo`)
+
+- 规则:[延迟与资源契约](README.md#延迟与资源契约)
+- 级别:bench
+- 里程碑:M2
+- 基准名:`strategies/latency-probe/slow_update`
+- 实现:`strategies/latency-probe/benches/on_event.rs::lpr_082_slow_update`
+
+### LPR-083 基准:`on_event(Advice)`(忽略)
+
+- 规则:[延迟与资源契约](README.md#延迟与资源契约)
+- 级别:bench
+- 里程碑:M2
+- 基准名:`strategies/latency-probe/advice`
+- 实现:`strategies/latency-probe/benches/on_event.rs::lpr_083_advice`
+
 ## 验收
 
 - 里程碑已到的用例全部有同编号的实现且通过(`cargo xtask test-trace`,规则见 [docs/tests §6](../../docs/tests/README.md#6-与代码的对应));单元、属性、引擎级与 DST 用例在 M2 完成。
 - 属性测试:LPR-058–LPR-062 在 CI 每夜各跑 1 000 000 例(运行矩阵归 [testing §6](../../docs/testing.md#6-ci-运行矩阵))。
 - DST:LPR-071 的种子数与回归集按 [testing §3.4](../../docs/testing.md#34-dst) 运行;以生产策略运行的 DST 不计入门槛 ④ 的累计(hft-testkit)。
-- 基准:LPR-072–LPR-077 登记在 `benches/budgets.toml`;数值上限只在 README"延迟与资源契约"与 [benchmarks](../../benchmarks/README.md) 登记,参考机上由 `cargo xtask bench-gate --reference` 判定。
+- 基准:LPR-072–LPR-077、LPR-082、LPR-083 登记在 `benches/budgets.toml`;数值上限只在 README"延迟与资源契约"与 [benchmarks](../../benchmarks/README.md) 登记,参考机上由 `cargo xtask bench-gate --reference` 判定。
 - 功能验收:LPR-078 在 M3(M3 末满订阅探针之前)通过;LPR-079 在 M6 联调窗口通过;⑩ 的判定用哪些样本、要多少归 [testing §8](../../docs/testing.md#8-上线门槛)。
 - 绑定约束:`non_prod_only` 的绑定拒绝由 [registry](../registry/TESTS.md) 的 REG-012、REG-013 与 hft-core 的装配用例(退出 2 `ProbeOnProdAccount`)覆盖。

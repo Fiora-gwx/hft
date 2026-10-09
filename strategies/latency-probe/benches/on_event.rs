@@ -203,6 +203,37 @@ fn lpr_077_risk_event(c: &mut Criterion) {
     let _ = <latency_probe::LatencyProbe as Strategy>::DESC;
 }
 
+fn lpr_082_slow_update(c: &mut Criterion) {
+    // No slow side: the B leg's Bbo of a pair group (Idle, PAIR_TICK already registered).
+    let mut h = H::new(&[], vec![gps()]);
+    h.bbo(I2);
+    let mut bufs = CtxBufs::new();
+    let mut k = 0i64;
+    c.bench_function("strategies/latency-probe/slow_update", |b| {
+        b.iter_custom(|n| {
+            let mut d = Duration::ZERO;
+            for _ in 0..n {
+                k += 1;
+                h.at_ens(E0 + (k % 900) * 1_000_000);
+                let e = bbo_ev(&h, I2);
+                d += timed(&mut h, &mut bufs, &e);
+            }
+            d
+        })
+    });
+}
+
+fn lpr_083_advice(c: &mut Criterion) {
+    // No Model: an Advice is never delivered; the strategy ignores it.
+    let mut h = H::new(&[], vec![gq()]);
+    h.bbo(I2);
+    let mut bufs = CtxBufs::new();
+    let e = ev::advice_raw(0, 1, &[1, 0, 0, 0, 0, 0, 0, 0], 1, hft_types::Tsc(1));
+    c.bench_function("strategies/latency-probe/advice", |b| {
+        b.iter_custom(|n| (0..n).map(|_| timed(&mut h, &mut bufs, &e)).sum())
+    });
+}
+
 criterion_group!(
     benches,
     lpr_072_tick_miss,
@@ -210,6 +241,8 @@ criterion_group!(
     lpr_074_ack_cancel,
     lpr_075_target_set,
     lpr_076_exec_update,
-    lpr_077_risk_event
+    lpr_077_risk_event,
+    lpr_082_slow_update,
+    lpr_083_advice
 );
 criterion_main!(benches);

@@ -291,8 +291,10 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 | `sim/replay_day` | hft-sim | [hft-sim 延迟与资源契约](../crates/hft-sim/README.md#延迟与资源契约) | SIM-213 |
 | `startup-cold` | hft-core | [路径基准与门槛](#路径基准与门槛) | CORE-267 |
 | `strategies/latency-probe/ack_cancel` | latency-probe | [latency-probe 延迟与资源契约](../strategies/latency-probe/README.md#延迟与资源契约) | LPR-074 |
+| `strategies/latency-probe/advice` | latency-probe | [latency-probe 延迟与资源契约](../strategies/latency-probe/README.md#延迟与资源契约) | LPR-083 |
 | `strategies/latency-probe/exec_update` | latency-probe | [latency-probe 延迟与资源契约](../strategies/latency-probe/README.md#延迟与资源契约) | LPR-076 |
 | `strategies/latency-probe/risk_event` | latency-probe | [latency-probe 延迟与资源契约](../strategies/latency-probe/README.md#延迟与资源契约) | LPR-077 |
+| `strategies/latency-probe/slow_update` | latency-probe | [latency-probe 延迟与资源契约](../strategies/latency-probe/README.md#延迟与资源契约) | LPR-082 |
 | `strategies/latency-probe/target_set` | latency-probe | [latency-probe 延迟与资源契约](../strategies/latency-probe/README.md#延迟与资源契约) | LPR-075 |
 | `strategies/latency-probe/tick_fire` | latency-probe | [latency-probe 延迟与资源契约](../strategies/latency-probe/README.md#延迟与资源契约) | LPR-073 |
 | `strategies/latency-probe/tick_miss` | latency-probe | [latency-probe 延迟与资源契约](../strategies/latency-probe/README.md#延迟与资源契约) | LPR-072 |

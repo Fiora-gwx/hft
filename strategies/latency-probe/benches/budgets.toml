@@ -25,3 +25,11 @@ p99_ns = 250
 ["strategies/latency-probe/risk_event"]
 p50_ns = 150
 p99_ns = 400
+
+["strategies/latency-probe/slow_update"]
+p50_ns = 60
+p99_ns = 150
+
+["strategies/latency-probe/advice"]
+p50_ns = 100
+p99_ns = 300
