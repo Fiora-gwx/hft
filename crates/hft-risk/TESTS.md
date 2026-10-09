@@ -53,9 +53,9 @@ spec: README.md
 **基线 `R0`**(`crates/hft-risk/tests/common/mod.rs::r0()`;用例 `前置` 写"R0"时下列取值全部显式生效,用例另列的值覆盖它们;不依赖任何默认值):
 
 - **定点**:BTC、ETH 计价 USDT,Px 指数 −2,Qty 指数 −8;`Notional` 1e-6 USDT;`Rate` 1e-9。下文写十进制值:`50 000.00` = Px(5 000 000, −2),`0.01` BTC = Qty(1 000 000, −8),`500` USDT = Notional(500 000 000),`0.03` = Rate(30 000 000)。
-- **refdata**:venue A = `VenueId 1`(现货,交易所 X,`VenueCaps.reduce_only = false`)、B = `VenueId 2`(USDT 永续,交易所 Y,`reduce_only = true`,`margin_data = Push`)、C = `VenueId 3`(USDT 永续,交易所 Z,`reduce_only = true`,`margin_data = Poll{interval_ms = 2 000}`);inst `a1` = `InstId 11`(A,BTC/USDT,tick 0.01,lot 0.0001)、`a2` = 12(A,ETH/USDT,tick 0.01,lot 0.001)、`b1` = 21(B,BTC 永续,tick 0.10,lot 0.001)、`b2` = 22(B,ETH 永续,tick 0.01,lot 0.01)、`c1` = 31(C,BTC 永续,tick 0.10,lot 0.001),状态都是 `Trading`;账户 1(`Live`,`is_prod = false`,`uid_policy = Verified`,venues {A, B, C},绑定实例 s1 = `StrategyId 1`)、账户 2(`Live`,venues {A, B},绑定 s2 = 2)、账户 9(`Sim`,venues {A, B},绑定 s9 = 9);`venue_account_ix`:A、B 上账户 1 → 0、账户 2 → 1,C 上账户 1 → 0;gw 0 = A、gw 1 = B、gw 2 = C;group `g1 = 0x0100_0001`(s1,账户 1,腿 a1 + b1)、`g3 = 0x0100_0002`(s1,账户 1,腿 a2 + b2)、`g2 = 0x0200_0001`(s2,账户 2,腿 a1 + b1)、`g9 = 0x0900_0001`(s9,账户 9,腿 a1 + b1);`RateLimitTable` 每 (venue, account):10 s 窗口 100 单、1 min 窗口 600 单。
-- **`RiskParams` P0**:`rate_headroom = 0`、`conn_liveness_ms = 2 000`、`max_perp_leverage_x100 = 300`、`l3_max_cross = 0`;`classes[0] = {max_px_dev 0.03, ioc_max_cross 0.005, rr_max_cross 0.01}`、`classes[1] = {0.05, 0.01, 0.02}`;`risk_class`:a1、b1、c1 → 0,a2、b2 → 1;账户 1、2、9 的 `AcctLimits` 相同:`max_order_notional 10 000`、`default_group {max_group_notional 50 000, max_pos_qty 1, naked_gate 0.5, naked_gate_min 100}`、`max_account_notional 100 000`、`account_notional_from_equity 1.0`、`max_hedge_notional 20 000`、`max_reduce_notional 10 000`、`daily_loss_kill 0.05`、`daily_loss_abs 5 000`、`daily_loss_max_resumes 1`、`recon_closeonly_notional 100`、`unknown_blocks_open = true`、`funds_buffer 0.05`、`margin {block_open 0.25, reduce 0.15, force 0.10, hyst 0.02, crosscheck 0.80, ratio_hyst 0.05, deadline 30 000 ms, force_step 0.20, force_step_interval 5 000 ms, margin_stale 15 000 ms, mark_stale 10 000 ms}`;`groups`:(1, g1)、(2, g2)、(9, g9) = `{max_group_notional 50 000, max_pos_qty 1(BTC), naked_gate 0.5, naked_gate_min 100}`,(1, g3) = `{50 000, 20(ETH), 0.5, 100}`;`venues`:每 (venue, account) `{max_venue_notional 80 000, inst_bucket_per_s 1 000, backoff_base_ms 1 000, backoff_max_ms 8 000, rr_reserve 0.20}`。
-- **`ExecBounds`**(账户 1、2、9):`force_max_cross 0.01`、`force_max_chunk 10 000`、`dust_notional 10`。
+- **refdata**(id 稠密,venue 用真实 `VenueId` 以通过 refdata 加载校验):venue A = `VenueId 2`(`BINANCE_SPOT`,现货,交易所 X,`VenueCaps.reduce_only = false`)、B = `VenueId 3`(`GATE_USDT_FUT`,USDT 永续,交易所 Y,`reduce_only = true`,`margin_data = Push`)、C = `VenueId 5`(`OKX_SWAP`,USDT 永续,交易所 Z,`reduce_only = true`,`margin_data = Poll{interval_ms = 2 000}`);inst `a1` = `InstId 1`(A,BTC/USDT,tick 0.01,lot 0.0001)、`a2` = 2(A,ETH/USDT,tick 0.01,lot 0.001)、`b1` = 3(B,BTC 永续,tick 0.10,lot 0.001)、`b2` = 4(B,ETH 永续,tick 0.01,lot 0.01)、`c1` = 5(C,BTC 永续,tick 0.10,lot 0.001),状态都是 `Trading`;账户 1(`Live`,`is_prod = false`,`uid_policy = Verified`,venues {A, B, C},绑定实例 s1 = `StrategyId 1`)、账户 2(`Live`,venues {A, B},绑定 s2 = 2)、账户 3(`Sim`,venues {A, B},绑定 s3 = 3);`venue_account_ix`:A、B 上账户 1 → 0、账户 2 → 1,C 上账户 1 → 0;gw 0 = A、gw 1 = B、gw 2 = C;group `g1 = 0x0100_0001`(s1,账户 1,腿 a1 + b1)、`g3 = 0x0100_0002`(s1,账户 1,腿 a2 + b2)、`g2 = 0x0200_0001`(s2,账户 2,腿 a1 + b1)、`gs = 0x0300_0001`(s3,账户 3,腿 a1 + b1);`RateLimitTable` 每 (venue, account):10 s 窗口 100 单、1 min 窗口 600 单。
+- **`RiskParams` P0**:`rate_headroom = 0`、`conn_liveness_ms = 2 000`、`max_perp_leverage_x100 = 300`、`l3_max_cross = 0`;`classes[0] = {max_px_dev 0.03, ioc_max_cross 0.005, rr_max_cross 0.01}`、`classes[1] = {0.05, 0.01, 0.02}`;`risk_class`:a1、b1、c1 → 0,a2、b2 → 1;账户 1、2、3 的 `AcctLimits` 相同:`max_order_notional 10 000`、`default_group {max_group_notional 50 000, max_pos_qty 1, naked_gate 0.5, naked_gate_min 100}`、`max_account_notional 100 000`、`account_notional_from_equity 1.0`、`max_hedge_notional 20 000`、`max_reduce_notional 10 000`、`daily_loss_kill 0.05`、`daily_loss_abs 5 000`、`daily_loss_max_resumes 1`、`recon_closeonly_notional 100`、`unknown_blocks_open = true`、`funds_buffer 0.05`、`margin {block_open 0.25, reduce 0.15, force 0.10, hyst 0.02, crosscheck 0.80, ratio_hyst 0.05, deadline 30 000 ms, force_step 0.20, force_step_interval 5 000 ms, margin_stale 15 000 ms, mark_stale 10 000 ms}`;`groups`:(1, g1)、(2, g2)、(3, gs) = `{max_group_notional 50 000, max_pos_qty 1(BTC), naked_gate 0.5, naked_gate_min 100}`,(1, g3) = `{50 000, 20(ETH), 0.5, 100}`;`venues`:每 (venue, account) `{max_venue_notional 80 000, inst_bucket_per_s 1 000, backoff_base_ms 1 000, backoff_max_ms 8 000, rr_reserve 0.20}`。
+- **`ExecBounds`**(账户 1、2、3):`force_max_cross 0.01`、`force_max_chunk 10 000`、`dust_notional 10`。
 - **时间**:`Now` 由 testkit `now_at(ens)` 构造,`tsc_per_ms = 1 000 000`(1 tick = 1 ns),本次运行 `tsc = engine_ns`;当前时刻 `T0 = 1 000 000 000 000`(engine_ns);`set_run_start(0)`。"t0 + 5 s"等写法都是 engine_ns。
 - **视图**(`MockRiskView`):仓位、在途、已挂减仓量全为 0;`venue_ready = true`;`group_has_unknown = false`;`equity = {200 000, valid}`;`held_notional`、`open_notional` 为 0;`avail_quote(·, A, USDT) = 100 000`;`avail_margin(·, B) = avail_margin(·, C) = 100 000`;BBO 全部 `conn_up`、`resync = false`、`conn_live_tsc = 当前 tsc`:a1 49 999.00 / 50 001.00(mid 50 000.00)、a2 2 499.50 / 2 500.50(mid 2 500.00)、b1 49 995.0 / 50 005.0(mid 50 000.0)、b2 2 499.0 / 2 501.0(mid 2 500.0)、c1 49 995.0 / 50 005.0;USDT 的 `quote_rate = 1`。
 - **账户配置**:每个 Live (account, venue) 已经过 `on_account_cfg` 与 `apply(Gate(AccountCfg{hdr{mismatches = 0, uid_keys = SESSION|REST, 三种模式与 VenueCaps 一致}, keys_required = SESSION|REST}))`;永续 venue 的报告对 b1、b2、c1 各给 `leverage = 3.00`。
@@ -69,7 +69,7 @@ spec: README.md
 - 规则:[配置](README.md#配置riskparams版本化经-setrisk-替换并作为-configblob-写入-journal)、[保证金分档](README.md#保证金分档marginstress)、[当日亏损](README.md#当日亏损锁存)
 - 级别:table
 - 里程碑:M2
-- 前置:R0 的 refdata,另加账户 3(`Live`,venues {C});本 crate 的参数构建器(`src/params.rs`,hft-cfg 复用)对账户 1、2、3 只给 `max_order_notional = 10 000` 与 `classes[0].ioc_max_cross = 0.005`,其余字段缺省
+- 前置:R0 的 refdata,另加账户 4(`Live`,venues {C});本 crate 的参数构建器(`src/params.rs`,hft-cfg 复用)对账户 1、2、4 只给 `max_order_notional = 10 000` 与 `classes[0].ioc_max_cross = 0.005`,其余字段缺省
 - 实现:`crates/hft-risk/tests/params.rs::rsk_001_risk_params_defaults`
 
 | 行 | 字段 | 期望 |
@@ -88,7 +88,7 @@ spec: README.md
 | RSK-001.12 | `margin.deleverage_deadline_ms` / `force_step` / `force_step_interval_ms` | 30 000 / 0.20 / 5 000 |
 | RSK-001.13 | `margin.mark_stale_ms` | 10 000 |
 | RSK-001.14 | 账户 2(永续 venue 只有 B,`Push`)的 `margin.margin_stale_ms` | 15 000 |
-| RSK-001.15 | 账户 3(永续 venue 只有 C,`Poll{2 000}`)的 `margin_stale_ms` | 6 000 |
+| RSK-001.15 | 账户 4(永续 venue 只有 C,`Poll{2 000}`)的 `margin_stale_ms` | 6 000 |
 | RSK-001.16 | 账户 1(B 与 C)的 `margin_stale_ms` | 15 000(两者取大) |
 | RSK-001.17 | `unknown_blocks_open` | true |
 
@@ -217,7 +217,7 @@ spec: README.md
 | RSK-007.5 | `new`,`force_max_chunk = 10 000.000001` | `Err(ExecRiskMismatch)` |
 | RSK-007.6 | R0 后 `set_params(scope = *, classes[0].rr_max_cross = 0.009999999)` | `Err(ExecRiskMismatch)`;随后 `view_for(1, a1).rr_max_cross = 0.01` |
 | RSK-007.7 | R0 后 `set_params(scope = Account(1), max_order_notional = 9 999.999999)` | `Err(ExecRiskMismatch)`;随后 `view(1).max_order_notional = 10 000` |
-| RSK-007.8 | `new`,账户 9(Sim)`force_max_cross = 0.010000001` | `Err(ExecRiskMismatch)`(模拟账户同一规则) |
+| RSK-007.8 | `new`,账户 3(Sim)`force_max_cross = 0.010000001` | `Err(ExecRiskMismatch)`(模拟账户同一规则) |
 | RSK-007.9 | `new`,账户 2(只有 A、B)`force_max_cross = 0.01`、`classes[1].rr_max_cross = 0.005`(a2、b2 属类别 1) | `Err(ExecRiskMismatch)`(最小值变为 0.005) |
 
 ### RSK-008 快照行结构的大小与字段偏移
@@ -365,7 +365,7 @@ spec: README.md
 | RSK-021.9 | `origin = Exec`、`group = g1`、`role = HedgeFix` 的单(账户 1) | 放行 |
 | RSK-021.10 | `origin = Exec`、`group = g2`、账户 1 | 拒 `NOT_BOUND` |
 | RSK-021.11 | 冒烟单(`origin = Command`、`SMOKE`、PostOnly)账户 1、`strategy = 1`、a1 Buy 0.0002 @ 47 500.00 | 放行 |
-| RSK-021.12 | 冒烟单账户 9(Sim)、`strategy = 9` | 拒 `INVALID` |
+| RSK-021.12 | 冒烟单账户 3(Sim)、`strategy = 3` | 拒 `INVALID` |
 | RSK-021.13 | `qty = 0` 且 `strategy = 2` | 拒 `INVALID`(同一检查内按列出顺序) |
 | RSK-021.14 | `qty = 0`,存在 `Kill{Global, hard}` | 拒 `INVALID`(#0 先于 #1) |
 
@@ -374,7 +374,7 @@ spec: README.md
 - 规则:[检查链](README.md#检查链按廉价--昂贵短路适用范围以本表为唯一定义)(#1)、[断腿](README.md#断腿broken自动有界平仓l3-与-flatten)第 1 条
 - 级别:table
 - 里程碑:M2
-- 前置:R0;账户 1 在 b1 持仓 −0.02(供 Reduce/Flatten);Hedge 的 `hedge_cap_qty = 0.01`;"执行层 `Flatten`"指 `Flatten(a, g, b1, Buy, 0.01 @ 50 005.0, origin = Exec, reason = MarginStress)`(账户 9 用 g9 且同样持仓 −0.02)
+- 前置:R0;账户 1 在 b1 持仓 −0.02(供 Reduce/Flatten);Hedge 的 `hedge_cap_qty = 0.01`;"执行层 `Flatten`"指 `Flatten(a, g, b1, Buy, 0.01 @ 50 005.0, origin = Exec, reason = MarginStress)`(账户 3 用 gs 且同样持仓 −0.02)
 - 实现:`crates/hft-risk/tests/chain.rs::rsk_022_hard_blocks_all`
 
 | 行 | cap | 意图 | 期望 |
@@ -384,7 +384,7 @@ spec: README.md
 | RSK-022.3 | `Kill{Account(1), hard}` | `Open(2, g2, a1, Buy, 0.01 @ 50 000.00)` | 放行 |
 | RSK-022.4 | `Kill{Account(1), hard}` | `LinkOpen(2, g2, a1, Buy, 0.01 @ 50 000.00; link = (1, B, b1, Sell, 0.01, 495))` | 拒 `HARD` |
 | RSK-022.5 | `Kill{Account(1)}`(非 HARD) | 账户 1 的执行层 `Flatten` | 放行 |
-| RSK-022.6 | `Kill{Global, hard}` | 账户 9(Sim)的执行层 `Flatten` | 拒 `HARD` |
+| RSK-022.6 | `Kill{Global, hard}` | 账户 3(Sim)的执行层 `Flatten` | 拒 `HARD` |
 
 ### RSK-023 #2 ClockBad 只拦 Open
 
@@ -692,7 +692,7 @@ spec: README.md
 | RSK-036.8 | `on_rate_limit_hit(B, 1)` | `LinkOpen(1, g1, a1, Buy, 0.01 @ 50 000.00; link = (1, B, b1, Sell, 0.01, 495))` | 拒 `RATE_BACKOFF` |
 | RSK-036.9 | (B, 1) 上 79 次提交(余 21) | 同 .8 的链接 Open,`evaluate` + `commit` 后再 `evaluate` 一次 | 两次都放行((B, 1) 只查不扣,仍余 21) |
 | RSK-036.10 | (B, 1) 上 80 次提交(余 20) | 同 .8 | 拒 `RATE` |
-| RSK-036.11 | 账户 9(Sim)在 (A, 9) 上 80 次提交 | `Open(9, g9, a1, Buy, 0.0001 @ 50 000.00)` | 拒 `RATE`(模拟账户用同一限额) |
+| RSK-036.11 | 账户 3(Sim)在 (A, 3) 上 80 次提交 | `Open(3, gs, a1, Buy, 0.0001 @ 50 000.00)` | 拒 `RATE`(模拟账户用同一限额) |
 | RSK-036.12 | (A, 1) 上 80 次提交(余 20),另 `on_rate_limit_hit(B, 1)` | 同 .8 | 拒 `RATE`(本 venue 先于链接腿 venue) |
 | RSK-036.13 | (B, 1) 上 80 次提交(余 20),另 `on_rate_limit_hit(B, 1)` | 同 .8 | 拒 `RATE_BACKOFF`(同一 venue 退避先于令牌) |
 | RSK-036.14 | (A, 1) 上 `on_rate_limit_hit(A, 1)`,另 (B, 1) 上 80 次提交 | 同 .8 | 拒 `RATE_BACKOFF` |
@@ -727,7 +727,7 @@ spec: README.md
   5. 于 T0 + 34 s 命中一次(距上次退避结束 T0 + 26 s 恰为 8 000 ms)
   6. 于 T0 + 35 s + 7 999 999 999 ns 命中一次
 - 期望:
-  - 步骤 1:`backoff_until_ens = T0 + 1 000 ms`,`backoff_k = 0`,(A, 1) 两个窗口桶为 0;返回 `Note{RateLimitHit}`(P2,`v[0] = 1 | 1 << 8 = 257`,`v[1] = 0`,`v[2] = T0 + 1 000 ms`)
+  - 步骤 1:`backoff_until_ens = T0 + 1 000 ms`,`backoff_k = 0`,(A, 1) 两个窗口桶为 0;返回 `Note{RateLimitHit}`(P2,`v[0] = 2 | 1 << 8 = 258`,`v[1] = 0`,`v[2] = T0 + 1 000 ms`)
   - 步骤 2:拒 `RATE_BACKOFF`;`rate_backoff` 分别为 true、false、false
   - 步骤 3:H 放行(1 s 内补充 10 个);N 拒 `RATE`(10 ≤ 预留 20)
   - 步骤 4:`backoff_k` 依次 1、2、3、4,退避结束依次为 T0 + 3.5 s、T0 + 8 s、T0 + 17 s、T0 + 26 s(第四次时长 min(16 000, 8 000) = 8 000 ms)
@@ -992,7 +992,7 @@ spec: README.md
 | RSK-060.11 | `Kill{Account(1), hard}` | `CloseOnly{false}`;`venue_level(1, A) = Hard` |
 | RSK-060.12 | `Halted{s1, 1, g1}` | (1, 1, g1) `CloseOnly{false}`;(1, 1, g3) Live |
 | RSK-060.13 | `Halted{s1, 1, GROUP_NONE}`(作用域 group = GROUP_NONE) | (1, 1, g1)、(1, 1, g3) 都 Live(GROUP_NONE 不是通配) |
-| RSK-060.14 | `Kill{Global}` | 四个 cell(含 Sim 账户的 (9, 9, g9))都 `CloseOnly{false}`;`cells` 四项 |
+| RSK-060.14 | `Kill{Global}` | 四个 cell(含 Sim 账户的 (3, 3, gs))都 `CloseOnly{false}`;`cells` 四项 |
 | RSK-060.15 | `AccountCfg{1, B}`、`UnknownTimeout{1, B}`、`Delisting{B, b1}`(三个子例) | `effective = Live`;Delisting 子例 `inst_blocked(B, b1) = true`、`inst_blocked(B, b2) = false` |
 | RSK-060.16 | `Delisting{B, inst = 0}` | `inst_blocked(B, b1) = inst_blocked(B, b2) = true`;`inst_blocked(A, a1) = false` |
 | RSK-060.17 | `ClockBad`;`Storage`(档位 1);`Draining`(三个子例) | 四个 cell 都 `CloseOnly{false}` |
@@ -1054,18 +1054,18 @@ spec: README.md
 |---|---|---|
 | RSK-070.1 | `Kill{Account(1), cancel_resting: true}` | `{1, 3, 0, {account 1}, 500, [1, 0]}` |
 | RSK-070.2 | `Kill{Global, hard, cancel_resting: true}` | `{1, 4, HARD = 1, {}, 500, [1, 0]}` |
-| RSK-070.3 | `Kill{Venue(B) × 1, cancel_resting: false}` | `{1, 2, 0, {venue 2, account 1}, 500, [0, 0]}` |
+| RSK-070.3 | `Kill{Venue(B) × 1, cancel_resting: false}` | `{1, 2, 0, {venue 3, account 1}, 500, [0, 0]}` |
 | RSK-070.4 | `Kill{Account(1), cancel_resting: true, flatten: true}` | `{1, 3, 0, {account 1}, 500, [3, 0]}` |
 | RSK-070.5 | `on_pnl(1, −5 000.000001, …)` 返回的 `Auto(DailyLoss)` | `{2, 0, 0, {account 1}, 500, [(−5 000 000 000) as u64, 0]}` |
-| RSK-070.6 | `Recon{1, B}`;`UnknownTimeout{1, B}` | `{3, 0, 0, {account 1, venue 2}, …}`;`{4, 0, 0, {account 1, venue 2}, …}` |
+| RSK-070.6 | `Recon{1, B}`;`UnknownTimeout{1, B}` | `{3, 0, 0, {account 1, venue 3}, …}`;`{4, 0, 0, {account 1, venue 3}, …}` |
 | RSK-070.7 | `Broken{1, g1}` | `{5, 0, 0, {account 1, group g1}, …}`(同一 apply 的第二条为 `{11, 0, 0, {account 1}, …}`) |
 | RSK-070.8 | `Recovery{1}`;`Halted{s1, 1, g1}` | `{7, 0, 0, {account 1}, …}`;`{8, 0, 0, {strategy 1, account 1, group g1}, …}` |
 | RSK-070.9 | `Draining`(`cancel_resting = 1`) | `{9, 0, NON_CLEARABLE = 4, {}, 500, [1, 0]}` |
 | RSK-070.10 | `Clock{ok: false}` | `{10, 0, CONDITIONAL = 2, {}, 500, [0, 0]}` |
-| RSK-070.11 | 账户 1 在 B 进入 L2 的 `Auto(MarginStress)` | `{12, 2, 2, {account 1}, 500, [4, 0]}`(venue 位图 1 << 2) |
+| RSK-070.11 | 账户 1 在 B 进入 L2 的 `Auto(MarginStress)` | `{12, 2, 2, {account 1}, 500, [8, 0]}`(venue 位图 1 << 3) |
 | RSK-070.12 | `Storage{PersistLag, 1}` | `{13, 0, 2, {}, 500, [1, 0]}` |
-| RSK-070.13 | `Notice(Delisting{venue B, inst b1, at_ns = 1 700 000 000 000 000 000})` | `{14, 0, 0, {venue 2, inst 21}, 500, [1 700 000 000 000 000 000, 0]}` |
-| RSK-070.14 | 放行后 b1 杠杆 3.01 的 `Auto(AccountCfg{1, B})` | `{15, 0, 2, {account 1, venue 2}, 500, [LEVERAGE = 2, 0]}` |
+| RSK-070.13 | `Notice(Delisting{venue B, inst b1, at_ns = 1 700 000 000 000 000 000})` | `{14, 0, 0, {venue 3, inst 3}, 500, [1 700 000 000 000 000 000, 0]}` |
+| RSK-070.14 | 放行后 b1 杠杆 3.01 的 `Auto(AccountCfg{1, B})` | `{15, 0, 2, {account 1, venue 3}, 500, [LEVERAGE = 2, 0]}` |
 
 ### RSK-071 同一 (source, scope) 再次设置按来源合并取更严
 
@@ -1101,7 +1101,7 @@ spec: README.md
   - 步骤 1:`Ok`;`Kill{Global}` 仍在;(1, 1, g1) 仍 CloseOnly;`cells` 为空
   - 步骤 2:`Err(ModeErr::NoMatchingCap)`
   - 步骤 3:`Err(NoMatchingCap)`(cap 的 group 为 g1)
-  - 步骤 4:`Ok`;(1, 1, g3)、(2, 2, g2)、(9, 9, g9) 变为 Live,(1, 1, g1) 仍 CloseOnly(Halted)
+  - 步骤 4:`Ok`;(1, 1, g3)、(2, 2, g2)、(3, 3, gs) 变为 Live,(1, 1, g1) 仍 CloseOnly(Halted)
 - 实现:`crates/hft-risk/tests/mode.rs::rsk_072_resume_exact_match`
 
 ### RSK-073 不可清除的来源对 Resume 返回 NotResumable,可清除来源无记录时 NoMatchingCap
@@ -1146,11 +1146,11 @@ spec: README.md
 
 | 行 | 输入 | 期望 `risk_events` |
 |---|---|---|
-| RSK-075.1 | `Kill{Global}` | `(1, CapSet{Kill})`、`(2, CapSet{Kill})`、`(9, CapSet{Kill})` |
+| RSK-075.1 | `Kill{Global}` | `(1, CapSet{Kill})`、`(2, CapSet{Kill})`、`(3, CapSet{Kill})` |
 | RSK-075.2 | `Recon{1, B}` | `(1, CapSet{Recon})` |
-| RSK-075.3 | `Storage{PersistLag, 1}` | 账户 1、2、9 各一项 `CapSet{Storage}` |
+| RSK-075.3 | `Storage{PersistLag, 1}` | 账户 1、2、3 各一项 `CapSet{Storage}` |
 | RSK-075.4 | `Kill{Venue(B) × 1}` | `(1, CapSet{Kill})` |
-| RSK-075.5 | `Notice(Delisting{B, b1})` | 账户 1、2、9(`venues` 含 B)各一项 `CapSet{Delisting}` |
+| RSK-075.5 | `Notice(Delisting{B, b1})` | 账户 1、2、3(`venues` 含 B)各一项 `CapSet{Delisting}` |
 | RSK-075.7 | `Kill{Venue(C)}`(account = *) | 只有 `(1, CapSet{Kill})`(只有账户 1 的 `venues` 含 C) |
 | RSK-075.6 | .1 之后 `Resume{Kill, Global}` | 三项 `CapCleared{Kill}` |
 
@@ -1258,7 +1258,7 @@ spec: README.md
 - 规则:[干净 Drain 重启自动解除 Recovery](README.md#干净-drain-重启自动解除-recovery)
 - 级别:table
 - 里程碑:M2
-- 前置:G0(R0 含 Live 账户 1、2 与 Sim 账户 9,不是只含 Sim 账户的实例);每行按所列 `RecoveryFlags` 与开关,然后投递放行序列
+- 前置:G0(R0 含 Live 账户 1、2 与 Sim 账户 3,不是只含 Sim 账户的实例);每行按所列 `RecoveryFlags` 与开关,然后投递放行序列
 - 实现:`crates/hft-risk/tests/mode.rs::rsk_091_unclean_keeps_recovery`
 
 | 行 | `flags` / 开关 | 期望(放行的那次 apply) |
@@ -1290,15 +1290,15 @@ spec: README.md
 - 规则:[干净 Drain 重启自动解除 Recovery](README.md#干净-drain-重启自动解除-recovery)(只含 Sim 账户的实例)
 - 级别:table
 - 里程碑:M2
-- 前置:refdata 只有账户 9(Sim,venues {A, B},g9);对账户 9 做 G0 的复位(`Auto(Recovery{9})`、`RecoveryFlags{9, flags}`),再投递账户 9 的放行序列(Sim 账户的 `RECONCILED`、`ACCOUNT_CFG`、`IDENTITY` 已在复位时置位;`OrderConns` 的 `standby_up = true`)
+- 前置:refdata 只有一个账户 1(Sim,venues {A, B},绑定 s1,group g1;id 稠密);对账户 1 做 G0 的复位(`Auto(Recovery{1})`、`RecoveryFlags{1, flags}`),再投递账户 1 的放行序列(Sim 账户的 `RECONCILED`、`ACCOUNT_CFG`、`IDENTITY` 已在复位时置位;`OrderConns` 的 `standby_up = true`)
 - 实现:`crates/hft-risk/tests/mode.rs::rsk_093_sim_instance_recovery`
 
 | 行 | `flags` / 开关 | 期望(放行的那次 apply) |
 |---|---|---|
-| RSK-093.1 | 0,开关开 | `Recovery{9}` 删除,`CapCleared` |
+| RSK-093.1 | 0,开关开 | `Recovery{1}` 删除,`CapCleared` |
 | RSK-093.2 | `TAIL_LOST`,开关开 | 删除 |
 | RSK-093.3 | `FROM_SNAPSHOT \| TAIL_LOST`,开关开 | 删除 |
-| RSK-093.4 | `RECOVER_MISMATCH`,开关开 | 保留;`notes` 含一条 `RecoveryHeldSim`(P1,`v[0] = 9`,`v[1] = 2`) |
+| RSK-093.4 | `RECOVER_MISMATCH`,开关开 | 保留;`notes` 含一条 `RecoveryHeldSim`(P1,`v[0] = 1`,`v[1] = 2`) |
 | RSK-093.5 | `POISON \| TAIL_LOST`,开关开 | 保留;`RecoveryHeldSim` 的 `v[1] = 5` |
 | RSK-093.6 | 0,开关关 | 保留;无 `RecoveryHeldSim` |
 | RSK-093.7 | `CLEAN_DRAIN`,开关开 | 删除 |
@@ -1308,12 +1308,12 @@ spec: README.md
 - 规则:[干净 Drain 重启自动解除 Recovery](README.md#干净-drain-重启自动解除-recovery)
 - 级别:unit
 - 里程碑:M2
-- 前置:R0(账户 1、2 Live,账户 9 Sim);账户 9 与账户 1 都做复位,`RecoveryFlags{·, flags = TAIL_LOST}`,开关开
+- 前置:R0(账户 1、2 Live,账户 3 Sim);账户 3 与账户 1 都做复位,`RecoveryFlags{·, flags = TAIL_LOST}`,开关开
 - 步骤:
-  1. 投递账户 9 的放行序列
+  1. 投递账户 3 的放行序列
   2. 投递账户 1 的放行序列
 - 期望:
-  - 两次放行的 apply 中 `Recovery{9}`、`Recovery{1}` 都保留;`notes` 中无 `RecoveryHeldSim`
+  - 两次放行的 apply 中 `Recovery{3}`、`Recovery{1}` 都保留;`notes` 中无 `RecoveryHeldSim`
 - 实现:`crates/hft-risk/tests/mode.rs::rsk_094_mixed_instance_no_sim_rule`
 
 ### RSK-100 放行序列逐步推进 gate_bits,全部置位的那次 apply 放行
@@ -1333,7 +1333,7 @@ spec: README.md
 - 期望:
   - 步骤 1:`gate_changes = [{1, old 0, new 1, released false}]`
   - 步骤 2:A、B 两次 apply 的 `gate_changes` 为空;C 的 apply 为 `[{1, 1, 3, false}]`
-  - 步骤 3:`[{1, 3, 7, false}]`;步骤 4:前两组为空、C 组 `[{1, 7, 15, false}]`;步骤 5:`[{1, 15, 31, false}]`(账户 2、9 的位不变,不列出)
+  - 步骤 3:`[{1, 3, 7, false}]`;步骤 4:前两组为空、C 组 `[{1, 7, 15, false}]`;步骤 5:`[{1, 15, 31, false}]`(账户 2、3 的位不变,不列出)
   - 步骤 6:A、B 为空,C 为 `[{1, 31, 63, false}]`;`hedge_gate_open`、`venue_gate_open` 为空(kill 自检未到)
   - 步骤 7:`gate_changes = [{1, 63, 127, true}]`;`released = [1]`(只列一次);`hedge_gate_open` 与 `venue_gate_open` 都恰为 `[(1, A), (1, B), (1, C)]`;`Recovery{1}` 仍在(`flags = 0`)
   - 全程 `ctl_state_version` 不变
@@ -1364,8 +1364,8 @@ spec: README.md
 | RSK-101.13 | C 的报告 `uid_keys = SESSION`(缺 REST) | `IDENTITY` 未置位;`drain = None`;无 Kill cap |
 | RSK-101.14 | C 的报告 `mismatches = UID \| UNREADABLE` | `IDENTITY` 未置位;`drain = None`;无 Kill cap |
 | RSK-101.15 | 不投递 `KillSelfTest{1}` | `IDENTITY` 未置位 |
-| RSK-101.16 | Sim 账户 9 复位后只投递 `Feeds`、sim-gw 的 `OrderConns`(A、B,`standby_up = true`)、`Unknown`、`Clock`,不投递 `KillSelfTest` | 复位那次 apply 的 `gate_changes` 为 `{9, 127, 104, false}`(`RECONCILED`、`ACCOUNT_CFG`、`IDENTITY` 直接置位);最后一次 apply `released = [9]` |
-| RSK-101.17 | Sim 账户 9 复位后只投递 A 的 `OrderConns{true, true}` | 该 apply 的 `hedge_gate_open` 与 `venue_gate_open` 都为 `[(9, A)]`(模拟账户的子集只看连接) |
+| RSK-101.16 | Sim 账户 3 复位后只投递 `Feeds`、sim-gw 的 `OrderConns`(A、B,`standby_up = true`)、`Unknown`、`Clock`,不投递 `KillSelfTest` | 复位那次 apply 的 `gate_changes` 为 `{3, 127, 104, false}`(`RECONCILED`、`ACCOUNT_CFG`、`IDENTITY` 直接置位);最后一次 apply `released = [3]` |
+| RSK-101.17 | Sim 账户 3 复位后只投递 A 的 `OrderConns{true, true}` | 该 apply 的 `hedge_gate_open` 与 `venue_gate_open` 都为 `[(3, A)]`(模拟账户的子集只看连接) |
 
 ### RSK-102 venue 位图反映最近一次输入,放行后不再变假
 
@@ -1393,10 +1393,10 @@ spec: README.md
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| RSK-103.1 | A 的报告 `mismatches = UNREADABLE`、`uid_keys = 0`,kill 自检已通过 | A 进入 `identity_ok_venues`;该 apply 的 `notes` 含一条 `IdentityUnverified`(P1,`v[0] = 257`,即 venue 1、account 1 << 8) |
+| RSK-103.1 | A 的报告 `mismatches = UNREADABLE`、`uid_keys = 0`,kill 自检已通过 | A 进入 `identity_ok_venues`;该 apply 的 `notes` 含一条 `IdentityUnverified`(P1,`v[0] = 258`,即 venue 2、account 1 << 8) |
 | RSK-103.2 | .1 之后同样的报告再来一条 | 无新的 `IdentityUnverified` |
 | RSK-103.3 | C 从未收到报告 | C 不在 `identity_ok_venues`,`IDENTITY` 未置位 |
-| RSK-103.4 | C 的报告 `mismatches = 0`、`uid_keys = SESSION \| REST` | C 置位,`notes` 含 `IdentityUnverified`(`v[0] = 259`) |
+| RSK-103.4 | C 的报告 `mismatches = 0`、`uid_keys = SESSION \| REST` | C 置位,`notes` 含 `IdentityUnverified`(`v[0] = 261`) |
 | RSK-103.5 | B 的报告 `mismatches = UID`(无 `UNREADABLE`) | 按 UID 不符:`Auto(Kill{Account(1), hard})`、`drain = Some(IdentityMismatch{1, B})`,B 不置位 |
 | RSK-103.6 | 报告都到、kill 自检未通过;随后 `KillSelfTest{1}` | 无 venue 置位、无注记;`KillSelfTest` 的 apply 中三个 venue 置位、三条 `IdentityUnverified` |
 
@@ -1474,7 +1474,7 @@ spec: README.md
 - 步骤:
   1. `apply(Gate(Clock{ok: true}))`
 - 期望:
-  - `released = [1, 2]`;`gate_changes` 恰两项 `{1, 111, 127, true}`、`{2, 111, 127, true}`;账户 9 不列出(位不变)
+  - `released = [1, 2]`;`gate_changes` 恰两项 `{1, 111, 127, true}`、`{2, 111, 127, true}`;账户 3 不列出(位不变)
 - 实现:`crates/hft-risk/tests/gates.rs::rsk_108_clock_releases_many`
 
 ### RSK-109 闸门复位清空本次运行的闸门状态
@@ -1533,7 +1533,7 @@ spec: README.md
 | RSK-131.5 | C 一组含 Warn b1,已 `Adopted` 处置 | `Ok` |
 | RSK-131.6 | C 一组只有 `Funding` 差异 | `Ok` |
 | RSK-131.7 | C 先一组 Ignore(`view_seq 10 001`),再一组含未处置 Warn(`view_seq 10 050`) | `Err(ReconNotClean)`(以新组为准) |
-| RSK-131.8 | `Kill{Global, hard}`;账户 1 的 A、B、C 与账户 2 的 A、B 都有合格组,账户 9(Sim)无报告 | `Resume{Kill, Global}` 返回 `Ok` |
+| RSK-131.8 | `Kill{Global, hard}`;账户 1 的 A、B、C 与账户 2 的 A、B 都有合格组,账户 3(Sim)无报告 | `Resume{Kill, Global}` 返回 `Ok` |
 | RSK-131.9 | 非 HARD 的 `Kill{Account(1)}`,无任何报告 | `Resume{Kill, Account(1)}` 返回 `Ok` |
 
 ### RSK-140 kill 字由剩余 Kill 记录重算
@@ -1555,7 +1555,7 @@ spec: README.md
 | RSK-140.7 | `Kill{Account(2), hard}` | 0x0020_0200 / 0x0020_0200 / 0 | true |
 | RSK-140.8 | `Kill{Venue(B)}`(account = *) | 0 / 0x2 / 0 | true |
 | RSK-140.9 | `Kill{Venue(B) × 2}` | 0 / 0x200 / 0 | true |
-| RSK-140.10 | `Kill{Account(9)}`(Sim) | 0 / 0 / 0 | false |
+| RSK-140.10 | `Kill{Account(3)}`(Sim) | 0 / 0 / 0 | false |
 | RSK-140.11 | `Kill{Global}` + `Kill{Account(1), hard}` | 0x0010_0101 / 0x0010_0101 / 0x0010_0101 | — |
 | RSK-140.12 | .11 之后 `Resume{Kill, Global}` | 0x0010_0100 / 0x0010_0100 / 0x0010_0100 | true |
 | RSK-140.13 | `DailyLoss{1}`、`MarginStress{1}`、`Storage`(非 Kill 来源) | 0 / 0 / 0 | false |
@@ -1639,8 +1639,8 @@ spec: README.md
   2. `on_margin(1, B, liq 0.15)` 于 T0 + 1 s
   3. `on_margin(1, B, liq 0.10)` 于 T0 + 2 s
 - 期望:
-  - 步骤 1:`mode = [Auto(MarginStress{account 1, level 1, params[0] = 4})]`;`events = [(1, MarginStress{venue B, level L1, liq_dist 0.25, ratio 0.10, …})]`;`force = None`;`notes` 为空
-  - 步骤 2:`mode = [Auto(MarginStress{level 2, params[0] = 4})]`;`events = [(1, MarginStress{B, L2, 0.15, 0.10, deadline_tsc = tsc_of(T0 + 31 s)})]`;`timers` 含 `(MarginDeadline{1, B}, T0 + 31 s)`;`notes = [MarginLevel(P1, v = [513, 2, 0.15, 0.10, T0 + 31 s])]`(513 = 账户 1、venue 2 << 8);`MarginRow.deadline_ens = T0 + 31 s`、`l2_since_ens = T0 + 1 s`
+  - 步骤 1:`mode = [Auto(MarginStress{account 1, level 1, params[0] = 8})]`;`events = [(1, MarginStress{venue B, level L1, liq_dist 0.25, ratio 0.10, …})]`;`force = None`;`notes` 为空
+  - 步骤 2:`mode = [Auto(MarginStress{level 2, params[0] = 8})]`;`events = [(1, MarginStress{B, L2, 0.15, 0.10, deadline_tsc = tsc_of(T0 + 31 s)})]`;`timers` 含 `(MarginDeadline{1, B}, T0 + 31 s)`;`notes = [MarginLevel(P1, v = [769, 2, 0.15, 0.10, T0 + 31 s])]`(769 = 账户 1、venue 3 << 8);`MarginRow.deadline_ens = T0 + 31 s`、`l2_since_ens = T0 + 1 s`
   - 步骤 3:`mode` 含 `level 3`;`events` 的 level 为 L3;`force = Some(ForceDeleverage{account 1, venue B, frac 0.20})`;`timers` 含 `(MarginForce{1, B}, T0 + 7 s)`;`notes = [MarginLevel(P0, level 3)]`;`MarginRow.next_force_ens = T0 + 7 s`
 - 实现:`crates/hft-risk/tests/margin.rs::rsk_161_level_entry_outputs`
 
@@ -1762,8 +1762,8 @@ spec: README.md
   3. `on_margin(1, C, liq 0.50)`
   4. `on_margin(1, A, …)`(A 为现货 venue)
 - 期望:
-  - 步骤 1 后 cap `MarginStress{1}` 的 `level = 2`、`params[0] = 12`(venue 2 与 3 的位);`view(1)`:`margin_level = L2`、`liq_dist = 0.15`、`deadline_tsc = tsc_of(B 的 deadline_ens)`、`open_blocked = true`
-  - 步骤 2:`mode = [Auto(MarginStress{level 1, params[0] = 8})]`;`events = [(1, MarginStress{B, None, …})]`
+  - 步骤 1 后 cap `MarginStress{1}` 的 `level = 2`、`params[0] = 40`(venue 3 与 5 的位);`view(1)`:`margin_level = L2`、`liq_dist = 0.15`、`deadline_tsc = tsc_of(B 的 deadline_ens)`、`open_blocked = true`
+  - 步骤 2:`mode = [Auto(MarginStress{level 1, params[0] = 32})]`;`events = [(1, MarginStress{B, None, …})]`
   - 步骤 3:`mode = [AutoClear{MarginStress, account 1}]`;`events = [(1, MarginStress{C, None, …})]`;随后 apply 的 `risk_events` 含 `(1, CapCleared{MarginStress})`
   - 步骤 4:`MarginOut` 全空,无 (1, A) 的 `MarginRow`
 - 实现:`crates/hft-risk/tests/margin.rs::rsk_168_account_level_and_bitmap`
@@ -2279,7 +2279,7 @@ spec: README.md
 
 - 规则:[启动闸门](README.md#启动闸门)(模拟账户段)、[令牌桶](README.md#令牌桶)(模拟账户用同一限额)
 - 级别:prop
-- 性质:把同一意图分别投给账户 1(Live)与账户 9(Sim,相同参数与 venue),在相同 cap 组合下(`Kill{Account(a)}`、`Kill{Account(a), hard}`、`DailyLoss{a}`、`MarginStress{a}`、`Kill{Global}` 等)`evaluate` 的结果相同;只有 `kill_bits()` 不同(Sim 账户不占位)
+- 性质:把同一意图分别投给账户 1(Live)与账户 3(Sim,相同参数与 venue),在相同 cap 组合下(`Kill{Account(a)}`、`Kill{Account(a), hard}`、`DailyLoss{a}`、`MarginStress{a}`、`Kill{Global}` 等)`evaluate` 的结果相同;只有 `kill_bits()` 不同(Sim 账户不占位)
 - 里程碑:M2
 - 生成:意图种类 × 类别 × cap 子集 × 令牌消耗 0..100
 - 参考:两次调用结果相等

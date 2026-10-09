@@ -16,6 +16,7 @@ members = [
     "crates/hft-net",
     "crates/hft-venue",
     "crates/venue-binance",
+    "crates/hft-risk",
     "tools/xtask",
     "tools/hft-cfg",
     "tools/hostprobe",
@@ -58,6 +59,7 @@ hft-telemetry = { path = "crates/hft-telemetry" }
 hft-net = { path = "crates/hft-net" }
 hft-venue = { path = "crates/hft-venue" }
 venue-binance = { path = "crates/venue-binance" }
+hft-risk = { path = "crates/hft-risk" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

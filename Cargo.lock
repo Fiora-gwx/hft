@@ -713,6 +713,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hft-risk"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "hft-event",
+ "hft-refdata",
+ "hft-strategy-sdk",
+ "hft-testkit",
+ "hft-types",
+ "proptest",
+ "zerocopy",
+]
+
+[[package]]
 name = "hft-rt"
 version = "0.1.0"
 dependencies = [

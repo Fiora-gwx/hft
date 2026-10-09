@@ -1,0 +1,28 @@
+[package]
+name = "hft-risk"
+description = "Hot-path risk: intent classification, the check chain, versioned RiskParams, token buckets, daily loss, margin tiers, leverage cap, reconciliation grading and the mode module (desired modes, caps, gates, kill projection)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+hft-types.workspace = true
+hft-refdata.workspace = true
+hft-event.workspace = true
+hft-strategy-sdk.workspace = true
+# Snapshot row codecs.
+zerocopy.workspace = true
+
+[dev-dependencies]
+hft-testkit.workspace = true
+proptest.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "risk"
+harness = false

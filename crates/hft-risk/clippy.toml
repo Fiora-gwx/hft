@@ -1,0 +1,80 @@
+# clippy configuration of every `hot` crate (docs/hot-path-rules.md "检查机制"). Each hot crate keeps a
+# byte-identical copy as `<crate>/clippy.toml`; `cargo xtask hot-check` compares them. Edit this template,
+# then copy it over every hot crate's clippy.toml in the same commit. Startup-only exceptions carry
+# `#[allow(clippy::disallowed_*)]` registered in tools/xtask/allow-list.toml.
+# `allow-invalid = true`: the path names a crate that is not (yet) in the dependency graph.
+
+disallowed-methods = [
+    # T2: hot tasks never sleep, park or block.
+    { path = "std::thread::sleep", reason = "T2: no blocking in hot tasks" },
+    { path = "std::thread::park", reason = "T2: park only in the hft-rt idle handler" },
+    { path = "std::thread::park_timeout", reason = "T2: park only in the hft-rt idle handler" },
+    { path = "std::sync::Condvar::wait", reason = "T2" },
+    { path = "std::sync::Condvar::wait_timeout", reason = "T2" },
+    { path = "std::sync::Condvar::wait_while", reason = "T2" },
+    { path = "std::sync::mpsc::Receiver::recv", reason = "T2" },
+    { path = "std::sync::mpsc::Receiver::recv_timeout", reason = "T2" },
+    { path = "std::io::stdin", reason = "T2" },
+    # T4: no system clock on hot threads.
+    { path = "std::time::Instant::now", reason = "T4: time comes from events" },
+    { path = "std::time::SystemTime::now", reason = "T4: time comes from events" },
+    { path = "chrono::Utc::now", reason = "T4", allow-invalid = true },
+    { path = "chrono::Local::now", reason = "T4", allow-invalid = true },
+    { path = "quanta::Instant::now", reason = "T4", allow-invalid = true },
+    { path = "quanta::Clock::now", reason = "T4", allow-invalid = true },
+    { path = "libc::clock_gettime", reason = "T4" },
+    # T7: sd_notify only from housekeeping.
+    { path = "sd_notify::notify", reason = "T7", allow-invalid = true },
+    { path = "libsystemd::daemon::notify", reason = "T7", allow-invalid = true },
+    # D2: randomness is seeded explicitly from events.
+    { path = "rand::thread_rng", reason = "D2: seed explicitly", allow-invalid = true },
+    { path = "rand::rng", reason = "D2: seed explicitly", allow-invalid = true },
+    { path = "rand::random", reason = "D2: seed explicitly", allow-invalid = true },
+    { path = "getrandom::getrandom", reason = "D2: seed explicitly", allow-invalid = true },
+]
+
+disallowed-types = [
+    # T3 / M7: single writer, no locks or reference counting.
+    { path = "std::sync::Mutex", reason = "T3: SPSC rings or Mailbox" },
+    { path = "std::sync::RwLock", reason = "T3: SPSC rings or Mailbox" },
+    { path = "std::sync::Arc", reason = "M7: &'static from startup" },
+    { path = "std::rc::Rc", reason = "M7: &'static from startup" },
+    { path = "std::sync::mpsc::Sender", reason = "T3" },
+    { path = "std::sync::mpsc::SyncSender", reason = "T3" },
+    { path = "std::sync::mpsc::Receiver", reason = "T3" },
+    { path = "parking_lot::Mutex", reason = "T3", allow-invalid = true },
+    { path = "parking_lot::RwLock", reason = "T3", allow-invalid = true },
+    { path = "crossbeam_channel::Sender", reason = "T3", allow-invalid = true },
+    { path = "crossbeam_channel::Receiver", reason = "T3", allow-invalid = true },
+    # M5 / D4: no runtime hash or tree maps (allocation, iteration order).
+    { path = "std::collections::HashMap", reason = "M5: index arrays or startup-built tables" },
+    { path = "std::collections::HashSet", reason = "M5: index arrays or startup-built tables" },
+    { path = "std::collections::BTreeMap", reason = "M5: index arrays or startup-built tables" },
+    { path = "std::collections::BTreeSet", reason = "M5: index arrays or startup-built tables" },
+    { path = "hashbrown::HashMap", reason = "M5", allow-invalid = true },
+    { path = "hashbrown::HashSet", reason = "M5", allow-invalid = true },
+    # N7: per-message structs, no generic JSON values.
+    { path = "serde_json::Value", reason = "N7", allow-invalid = true },
+    { path = "sonic_rs::Value", reason = "N7", allow-invalid = true },
+    { path = "simd_json::OwnedValue", reason = "N7", allow-invalid = true },
+]
+
+disallowed-macros = [
+    # C3: cold operations write fixed-size records, never format strings.
+    { path = "std::format", reason = "C3: Note records, no formatting" },
+    { path = "std::println", reason = "C3" },
+    { path = "std::eprintln", reason = "C3" },
+    { path = "std::dbg", reason = "C3" },
+    { path = "log::info", reason = "C3", allow-invalid = true },
+    { path = "log::warn", reason = "C3", allow-invalid = true },
+    { path = "log::error", reason = "C3", allow-invalid = true },
+    { path = "log::debug", reason = "C3", allow-invalid = true },
+    { path = "log::trace", reason = "C3", allow-invalid = true },
+    { path = "tracing::info", reason = "C3", allow-invalid = true },
+    { path = "tracing::warn", reason = "C3", allow-invalid = true },
+    { path = "tracing::error", reason = "C3", allow-invalid = true },
+    { path = "tracing::debug", reason = "C3", allow-invalid = true },
+    { path = "tracing::trace", reason = "C3", allow-invalid = true },
+    # D3: no global mutable state.
+    { path = "std::thread_local", reason = "D3: no global mutable state" },
+]
