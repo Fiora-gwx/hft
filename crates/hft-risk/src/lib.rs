@@ -35,7 +35,7 @@ mod vec;
 
 use hft_event::{AccountConfigReportHdr, CmdScope, LeverageItem, Note, NoteLevel};
 use hft_refdata::{AccountKind, InstHot, InstStatus, RefData};
-use hft_strategy_sdk::{CapBits, GroupTable, InstRiskView, MarginLevel, Now, RiskStateView};
+use hft_strategy_sdk::{CapBits, GroupTable, InstRiskView, MarginLevel, Now, RiskEvent, RiskStateView};
 use hft_types::{
     AccountId, AssetExp, AssetId, CapSource, GroupId, HedgePxLimits, InstId, MarketKind, Notional, Px, Qty,
     Rate, StrategyId, Tsc, VenueId,
@@ -386,9 +386,16 @@ impl Risk {
             self.mode.apply(inp, seq, &v, out)
         };
         if r.is_ok() {
-            for a in out.daily_loss_resumed.iter() {
+            // The latch lasts exactly as long as the account's `DailyLoss` cap (restore derives it
+            // the same way).
+            for (a, e) in out.risk_events.iter() {
+                let latched = match e {
+                    RiskEvent::CapSet { source, .. } if *source == CapSource::DAILY_LOSS => true,
+                    RiskEvent::CapCleared { source, .. } if *source == CapSource::DAILY_LOSS => false,
+                    _ => continue,
+                };
                 if let Some(p) = self.s.pnl.get_mut(usize::from(a.0)) {
-                    p.latched = false;
+                    p.latched = latched;
                 }
             }
         }
