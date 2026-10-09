@@ -4333,7 +4333,7 @@ spec: README.md
 | SEQ-302.2 | `InjectWarmup{instance 1, ..}` | `Applied`;s1 快速部分收不到 |
 | SEQ-302.3 | 账户 1 闸门未放行、`Draining` | 都 `Applied` |
 | SEQ-302.4 | `instance 7` | `UnknownTarget` |
-| SEQ-302.5 | ctl 环 20 条 4 096 B 的 `InjectWarmup` 后跟一条 `Kill{Account(1)}` | 每轮至多 2 条预热块;`Kill` 在 ≤ 10 轮内被处理 |
+| SEQ-302.5 | ctl 环 20 条记录长 4 096 B 的 `InjectWarmup`(载荷 = 4 096 − 记录头)后跟一条 `Kill{Account(1)}` | 每轮至多 2 条预热块;`Kill` 在 ≤ 11 轮内被处理(10 轮预热块之后的下一轮) |
 
 ### SEQ-303 Viewer 紧急停止
 

@@ -297,7 +297,7 @@ fn seq_035_model_delivery_table() {
     let mut h = b0_model();
     let mut a = start(&h, MemCkpt::default(), Ring::big(), cfg());
     catch_up(&mut a, &h);
-    let mut row = |h: &mut H, a: &mut Adv, f: &dyn Fn(&mut H)| -> Vec<&'static str> {
+    let row = |h: &mut H, a: &mut Adv, f: &dyn Fn(&mut H)| -> Vec<&'static str> {
         catch_up(a, h);
         clear_log();
         f(h);

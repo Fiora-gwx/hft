@@ -313,3 +313,232 @@ fn seq_288_set_params_capacity() {
     assert_eq!(h.s.instances().get(S1).unwrap().params_version(), 1);
     let _ = StepOutcome::Idle;
 }
+
+#[test]
+fn seq_290_model_budget() {
+    let mib = 1u64 << 20;
+    // s2 and s9 take 200 MiB of memory and 300 MiB of checkpoint together.
+    reset_script();
+    let mut b = b0();
+    let mut p2 = Spb::s2(1);
+    p2.values[F_MEM] = (150 * mib) as i64;
+    p2.values[F_CKPT] = (200 * mib) as i64;
+    let mut p9 = Spb::s9(1);
+    p9.values[F_MEM] = (50 * mib) as i64;
+    p9.values[F_CKPT] = (100 * mib) as i64;
+    b.params = vec![Spb::s1(1), p2, p9];
+    let mut h = b.boot();
+    h.steady();
+    for (k, (mem, ckpt, ok)) in [(56 * mib, 100 * mib, true), (56 * mib + 1, 100 * mib, false), (10 * mib, 212 * mib, true), (10 * mib, 212 * mib + 1, false)]
+        .into_iter()
+        .enumerate()
+    {
+        let mut p = Spb::s1(2 + k as u64);
+        p.values[F_THR] = 10 + k as i64;
+        p.values[F_MEM] = mem as i64;
+        p.values[F_CKPT] = ckpt as i64;
+        let id = h.set_params_as(&p, "pipeline", ADMIN, true, |_| {});
+        h.run();
+        let (st, d) = h.res(id);
+        if ok {
+            assert_eq!(st, status::APPLIED, "row {}", k + 1);
+        } else {
+            assert_eq!(st, status::INVALID_ARGS, "row {}", k + 1);
+            assert_eq!(d & 0xFFFF, u32::from(detail::PARAM_INVALID));
+            assert_eq!((d >> 16) & 0xF, u32::from(detail::PARAM_KIND_MODEL_MEM_BUDGET));
+        }
+    }
+}
+
+#[test]
+fn seq_294_kill_combinations() {
+    let cases: [(KillLevel, AccountId, bool, bool, u8); 4] = [
+        (KillLevel::Global, AccountId(0), true, false, status::APPLIED),
+        (KillLevel::Account, AC1, true, false, status::APPLIED),
+        (KillLevel::Account, AC1, true, true, status::INVALID_ARGS),
+        (KillLevel::Global, AccountId(0), false, true, status::INVALID_ARGS),
+    ];
+    for (k, (level, a, hard, flatten, want)) in cases.into_iter().enumerate() {
+        let mut h = steady();
+        let c = ControlCmd::Kill { scope: scope(StrategyId(0), a, GroupId(0)), level, flatten, cancel_resting: true, hard };
+        let id = h.cmd_confirmed(a, &c);
+        h.run();
+        assert_eq!(h.res(id).0, want, "row {}", k + 1);
+        if want == status::INVALID_ARGS {
+            assert_eq!(h.res(id).1, u32::from(detail::BAD_COMBINATION));
+        }
+    }
+}
+
+#[test]
+fn seq_297_baseline_transfer_notice() {
+    let mut h = steady();
+    let id = h.cmd_confirmed(AC1, &ControlCmd::VenueNotice { venue: B, kind: 3, _pad: 0, inst: hft_types::InstId(0), a: UTC0 + 3_600_000_000_000, b: UTC0 + 5_400_000_000_000 });
+    h.run();
+    assert_eq!(h.res(id).0, status::APPLIED);
+    let id = h.cmd_confirmed(AC1, &ControlCmd::VenueNotice { venue: B, kind: 2, _pad: 0, inst: B1, a: 3_600, b: 0 });
+    h.run();
+    assert_eq!(h.res(id).0, status::APPLIED);
+    let kf = h.keyframe();
+    let n = snap(&kf).1.notices;
+    assert!(n.iter().any(|r| r.venue == B && r.kind == 3 && r.inst.0 == 0));
+    assert!(n.iter().any(|r| r.venue == B && r.kind == 2 && r.inst == B1));
+}
+
+#[test]
+fn seq_298_sim_reset_transfer() {
+    let mut h = steady();
+    let id = h.cmd_confirmed(AC1, &ControlCmd::SimReset { account: AC1 });
+    h.run();
+    assert_eq!(h.res(id), (status::INVALID_ARGS, u32::from(detail::NOT_SIM)));
+    // g9 is Live: not idle.
+    let id = h.cmd_confirmed(AC9, &ControlCmd::SimReset { account: AC9 });
+    h.run();
+    assert_eq!(h.res(id), (status::PRECONDITION_FAILED, u32::from(detail::SIM_NOT_IDLE)));
+    let id = h.cmd_confirmed(AC1, &ControlCmd::SimTransfer { account: AC1, from: A, to: B, asset: USDT, amount: q("1") });
+    h.run();
+    assert_eq!(h.res(id), (status::INVALID_ARGS, u32::from(detail::NOT_SIM)));
+}
+
+#[test]
+fn seq_299_write_off_residual() {
+    let mut h = steady();
+    let c = ControlCmd::WriteOffResidual { account: AC1, _pad: [0; 3], group: G1 };
+    let id = h.cmd(AC1, &c);
+    h.run();
+    assert_eq!(h.res(id).0, status::NEEDS_CONFIRM);
+    let c = ControlCmd::WriteOffResidual { account: AC1, _pad: [0; 3], group: G2 };
+    let id = h.cmd_confirmed(AC1, &c);
+    h.run();
+    assert_eq!(h.res(id), (status::INVALID_ARGS, u32::from(detail::UNKNOWN_GROUP)));
+}
+
+#[test]
+fn seq_300_smoke_order() {
+    let smoke = |a: AccountId| ControlCmd::SmokeOrder { account: a, venue: B, _pad: 0, inst: B1, side: hft_types::Side::Buy, _pad2: [0; 3], ttl_ms: 30_000 };
+    // .1 Shadow cell: still sent, flagged SMOKE, no strategy delivery.
+    let mut h = steady();
+    h.cmd(AC1, &ControlCmd::SetMode { scope: scope(S1, AC1, G1), mode: RunMode::Shadow });
+    h.run();
+    clear_log();
+    let n = h.io_ref().out.len();
+    let m = h.mark();
+    let id = h.cmd_confirmed(AC1, &smoke(AC1));
+    h.run();
+    let r = h.result_of(id).unwrap();
+    assert_eq!(r.status, status::APPLIED, "{r:?}");
+    let ds = decisions(&h.since(m));
+    assert_eq!(ds[0].1.trigger_seq, r.cmd_seq);
+    let out: Vec<_> = h.io_ref().out[n..].to_vec();
+    assert_eq!(out.len(), 1);
+    assert!(out[0].1.oflags & hft_event::OrderFlags::SMOKE.0 != 0);
+    assert!(!log().iter().any(|g| g.kind == "Order"));
+    // .4 a second smoke order on (1, B).
+    let id = h.cmd_confirmed(AC1, &smoke(AC1));
+    h.run();
+    assert_eq!(h.res(id), (status::PRECONDITION_FAILED, u32::from(detail::SMOKE_ACTIVE)));
+    // .6 Trader: role insufficient.
+    let id = h.cmd_with("cli:test", TRADER, AC1, &smoke(AC1), |x| x.confirmed = 1);
+    h.run();
+    assert_eq!(h.res(id).0, status::ROLE_INSUFFICIENT);
+    // .7 the Sim account.
+    let id = h.cmd_confirmed(AC9, &smoke(AC9));
+    h.run();
+    assert_eq!(h.res(id), (status::INVALID_ARGS, u32::from(detail::NOT_LIVE)));
+}
+
+#[test]
+fn seq_301_strategy_cmd() {
+    let mut h = steady();
+    let sc = |inst: StrategyId, g: GroupId, ro: u8| ControlCmd::StrategyCmd { instance: inst, reduce_only: ro, len: 32, group: g, payload: [0x11; 256] };
+    clear_log();
+    let id = h.cmd_with("cli:test", TRADER, AC1, &sc(S1, G1, 0), |x| {
+        x.confirmed = 1;
+    });
+    h.run();
+    let v = h.s.engine().risk.mode.ctl_state_version();
+    let _ = v;
+    let st = h.res(id).0;
+    assert!(st == status::APPLIED || st == status::CONFIRM_INVALID, "{st}");
+    let id = h.cmd_confirmed(AC1, &sc(S1, G1, 0));
+    h.run();
+    assert_eq!(h.res(id).0, status::APPLIED);
+    let got: Vec<Got> = log().into_iter().filter(|g| g.kind == "Manual" && !g.model).collect();
+    assert!(!got.is_empty() && got.iter().all(|g| g.s == S1 && g.gix == 0));
+    let id = h.cmd_confirmed(AC1, &sc(S1, G2, 0));
+    h.run();
+    assert_eq!(h.res(id), (status::INVALID_ARGS, u32::from(detail::UNKNOWN_GROUP)));
+    let id = h.cmd_confirmed(AccountId(0), &sc(StrategyId(7), G1, 0));
+    h.run();
+    assert_eq!(h.res(id).0, status::UNKNOWN_TARGET);
+    let id = h.cmd(AC1, &sc(S1, G1, 0));
+    h.run();
+    assert_eq!(h.res(id).0, status::NEEDS_CONFIRM);
+    clear_log();
+    let id = h.cmd_confirmed(AC1, &sc(S1, hft_types::GROUP_NONE, 1));
+    h.run();
+    assert_eq!(h.res(id).0, status::APPLIED);
+    let got: Vec<Got> = log().into_iter().filter(|g| g.kind == "Manual" && !g.model).collect();
+    assert!(got.iter().any(|g| g.gix == hft_strategy_sdk::GIX_NONE));
+}
+
+#[test]
+fn seq_302_inject_warmup() {
+    reset_script();
+    set_warmup_both(S2);
+    let mut h = b0().boot();
+    h.steady();
+    clear_log();
+    let w = |inst: StrategyId| ControlCmd::InjectWarmup { instance: inst, last: 1, local_kind: 3, chunk_no: 0, len: 4_096, _pad: [0; 6], payload: &[7u8; 4_096] };
+    let id = h.cmd(AccountId(0), &w(S2));
+    h.run();
+    assert_eq!(h.res(id).0, status::APPLIED);
+    assert!(log().iter().any(|g| g.s == S2 && g.kind == "Warmup" && !g.model));
+    clear_log();
+    let id = h.cmd(AccountId(0), &w(S1));
+    h.run();
+    assert_eq!(h.res(id).0, status::APPLIED);
+    assert!(!log().iter().any(|g| g.s == S1 && g.kind == "Warmup" && !g.model));
+    let id = h.cmd(AccountId(0), &w(StrategyId(7)));
+    h.run();
+    assert_eq!(h.res(id).0, status::UNKNOWN_TARGET);
+    // .5 20 warmup records of 4 096 B each, then a Kill: at most 2 chunks per round, the Kill in
+    // the round after the 10 rounds of chunks.
+    let probe = h.cmd_elem("cli:test", 4, AccountId(0), &w(S2), |_| {}).0.body.len();
+    let pay = vec![7u8; 4_096 - (probe - 4_096)];
+    let w4k = ControlCmd::InjectWarmup { instance: S2, last: 1, local_kind: 3, chunk_no: 0, len: pay.len() as u16, _pad: [0; 6], payload: &pay };
+    for _ in 0..20 {
+        let (e, _) = h.cmd_elem("cli:test", 4, AccountId(0), &w4k, |_| {});
+        assert_eq!(e.body.len(), 4_096);
+        h.push_e(hft_sequencer::driver::live::RingId::Ctl, e);
+    }
+    let k = h.cmd(AC1, &kill1());
+    let mut rounds = 0;
+    while h.result_of(k).is_none() && rounds < 20 {
+        let before = h.io_ref().rings.get(&hft_sequencer::driver::live::RingId::Ctl).map_or(0, |r| r.len());
+        h.step();
+        let after = h.io_ref().rings.get(&hft_sequencer::driver::live::RingId::Ctl).map_or(0, |r| r.len());
+        assert!(before - after <= 2, "{before} -> {after}");
+        rounds += 1;
+    }
+    assert!(rounds <= 11, "{rounds}");
+}
+
+#[test]
+fn seq_304_replace_refdata_recheck() {
+    let mut h = steady();
+    // .5 a valid new refdata: Applied, pending, Draining{cancel_resting = false}.
+    let mut rd2 = b0_rd();
+    rd2.version = 2;
+    let blob = rd2.blob();
+    let r = hft_event::BlobRef { kind: hft_event::BlobKind::Refdata, encoding: 1, len: blob.len() as u32, version: 2, sha256: sha(&blob) };
+    let parsed = hft_refdata::RefData::load(&blob, Some(&h.s.engine().rd));
+    h.io().mailbox.push(hft_sequencer::ParsedConfig::Refdata { sha256: r.sha256, result: Box::new(parsed) });
+    h.blob_input(r, scope(StrategyId(0), AccountId(0), GroupId(0)), &blob);
+    let id = h.cmd_confirmed(AccountId(0), &ControlCmd::ReplaceRefdata { blob: r });
+    h.run();
+    assert_eq!(h.res(id).0, status::APPLIED, "{:?}", h.res(id));
+    assert!(h.s.view().draining());
+    let draining = h.s.engine().risk.mode.caps().iter().find(|c| c.source == CapSource::DRAINING).copied().expect("Draining");
+    assert_eq!(draining.params[0], 0);
+}
