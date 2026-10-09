@@ -1,0 +1,2044 @@
+//! The command path (README "命令路径"), `ConfigBlob` intake, `ReconcileReport` grouping
+//! (README "process" ReconcileReport row), the `Sys` timers, funding synthesis and the Drain
+//! state machine (README "Drain").
+
+use std::collections::VecDeque;
+
+use hft_event::{
+    BlobKind, BlobRef, CmdHdr, CmdKind, CmdPreview, CmdResult, CmdScope, ControlCmd, EventKind, FundingSettle,
+    NoteLevel, RecordFlags, ReconcileReport,
+};
+use hft_ledger::{AdjustDelta, AdjustKind, FundingRecon, FundingReconItem, PnlDelta, TransferDelta, TransferKind};
+use hft_refdata::{AccountKind, RefData};
+use hft_risk::mode::{
+    GateEvent, KillCmd, ModeErr, ModeInput, ReconItemKey, StorageKind, VenueNoticeCmd,
+};
+use hft_risk::{AccountScope, ReconcileGroup};
+use hft_strategy_sdk::StrategySet;
+use hft_types::{AccountId, CapSource, GROUP_ALL, GROUP_NONE, GroupId, InstId, KillLevel, Qty, RunMode, StrategyId, Tsc, VenueId};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
+
+use crate::Driver;
+use crate::codes::{detail, note, status};
+use crate::engine::{Emit, Engine};
+use crate::process::Pending;
+use crate::strategies::{Direct, Instances};
+use crate::types::{DoneCause, FatalReason, InputSlot, OutRing, StepOutcome};
+
+type R<T> = Result<T, FatalReason>;
+
+pub const SECTION_ACTIVE_CONFIG: u16 = 9;
+pub const ACTIVE_CONFIG_VERSION: u16 = 1;
+pub const SECTION_CMD_DEDUP: u16 = 15;
+pub const CMD_DEDUP_VERSION: u16 = 2;
+pub const SECTION_RECON_PENDING: u16 = 19;
+pub const RECON_PENDING_VERSION: u16 = 2;
+pub const SECTION_VENUE_NOTICES: u16 = 24;
+pub const VENUE_NOTICES_VERSION: u16 = 1;
+/// Viewer emergency-stop confirmation TTL.
+pub const VIEWER_CONFIRM_TTL_MS: i64 = 60_000;
+
+/// Section 9 row (64 B).
+#[repr(C)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, IntoBytes, Immutable, KnownLayout, zerocopy::TryFromBytes)]
+pub struct ActiveConfigRow {
+    pub blob: BlobRef,
+    pub scope: CmdScope,
+}
+const _: () = assert!(core::mem::size_of::<ActiveConfigRow>() == 64);
+
+/// Section 15 header.
+#[repr(C)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default, FromBytes, IntoBytes, Immutable, KnownLayout)]
+pub struct CmdDedupHdr {
+    pub n_dedup: u32,
+    pub n_preview: u32,
+}
+const _: () = assert!(core::mem::size_of::<CmdDedupHdr>() == 8);
+
+/// Section 15 dedup row (32 B).
+#[repr(C)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default, FromBytes, IntoBytes, Immutable, KnownLayout)]
+pub struct CmdDedupRow {
+    pub cmd_id: [u8; 16],
+    pub cmd_seq: u64,
+    pub status: u8,
+    pub _pad: [u8; 7],
+}
+const _: () = assert!(core::mem::size_of::<CmdDedupRow>() == 32);
+const _: () = assert!(core::mem::offset_of!(CmdDedupRow, cmd_seq) == 16);
+const _: () = assert!(core::mem::offset_of!(CmdDedupRow, status) == 24);
+
+/// Section 15 Viewer preview row (64 B).
+#[repr(C)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default, FromBytes, IntoBytes, Immutable, KnownLayout)]
+pub struct ViewerPreviewRow {
+    pub cmd_hash: [u8; 32],
+    pub issuer: [u8; 24],
+    pub preview_engine_ns: i64,
+}
+const _: () = assert!(core::mem::size_of::<ViewerPreviewRow>() == 64);
+const _: () = assert!(core::mem::offset_of!(ViewerPreviewRow, issuer) == 32);
+const _: () = assert!(core::mem::offset_of!(ViewerPreviewRow, preview_engine_ns) == 56);
+
+/// Section 19 header (16 B), followed by `n_stored` ReconcileReport bodies.
+#[repr(C)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, FromBytes, IntoBytes, Immutable, KnownLayout)]
+pub struct ReconPendingHdr {
+    pub report_id: u64,
+    pub account: AccountId,
+    pub venue: VenueId,
+    pub n_stored: u16,
+    pub count: u16,
+    pub received: u16,
+}
+const _: () = assert!(core::mem::size_of::<ReconPendingHdr>() == 16);
+const _: () = assert!(core::mem::offset_of!(ReconPendingHdr, n_stored) == 10);
+
+/// Section 24 row (32 B; key (venue, inst, kind)).
+#[repr(C)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, FromBytes, IntoBytes, Immutable, KnownLayout)]
+pub struct VenueNoticeRow {
+    pub venue: VenueId,
+    /// Delisting=1 FundingInterval=2 Maintenance=3.
+    pub kind: u8,
+    pub _pad: u16,
+    pub inst: InstId,
+    pub a: i64,
+    pub b: i64,
+    pub cmd_seq: u64,
+}
+const _: () = assert!(core::mem::size_of::<VenueNoticeRow>() == 32);
+const _: () = assert!(core::mem::offset_of!(VenueNoticeRow, inst) == 4);
+const _: () = assert!(core::mem::offset_of!(VenueNoticeRow, cmd_seq) == 24);
+
+/// The active configuration (section 9) plus the pending refdata reference.
+#[derive(Copy, Clone, Debug)]
+pub struct ActiveConfig {
+    pub refdata: BlobRef,
+    pub engine: BlobRef,
+    pub risk: BlobRef,
+    /// `ReplaceRefdata` accepted, effective at the restart.
+    pub pending_refdata: Option<BlobRef>,
+}
+
+/// Logged config blobs by sha256 (boot blocks and the replay drivers' `take_parsed`).
+#[derive(Clone, Debug, Default)]
+pub struct BlobStore {
+    pub blobs: Vec<(BlobRef, Vec<u8>)>,
+}
+
+impl BlobStore {
+    pub fn put(&mut self, r: BlobRef, bytes: &[u8]) {
+        if self.get(&r.sha256).is_none() {
+            self.blobs.push((r, bytes.to_vec()));
+        }
+    }
+    pub fn get(&self, sha: &[u8; 32]) -> Option<&[u8]> {
+        self.blobs.iter().find(|(r, _)| r.sha256 == *sha).map(|(_, b)| b.as_slice())
+    }
+}
+
+/// One incomplete reconciliation group (section 19).
+#[derive(Clone, Debug)]
+pub struct ReconGroupState {
+    pub report_id: u64,
+    pub account: AccountId,
+    pub venue: VenueId,
+    pub count: u16,
+    pub received: u16,
+    pub stored: Vec<ReconcileReport>,
+}
+
+/// gw connection states per (account, venue) (OrderConns gate).
+#[derive(Copy, Clone, Debug, Default)]
+pub struct ConnRow {
+    pub primary: bool,
+    pub standby: bool,
+    pub us_seen: bool,
+    pub us_up: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ConnTable {
+    rows: Vec<((AccountId, VenueId), ConnRow)>,
+}
+
+impl ConnTable {
+    pub fn get(&self, a: AccountId, v: VenueId) -> ConnRow {
+        self.rows.iter().find(|(k, _)| *k == (a, v)).map_or(ConnRow::default(), |x| x.1)
+    }
+    pub fn set(&mut self, a: AccountId, v: VenueId, r: ConnRow) {
+        match self.rows.iter_mut().find(|(k, _)| *k == (a, v)) {
+            Some(x) => x.1 = r,
+            None => self.rows.push(((a, v), r)),
+        }
+    }
+}
+
+/// Command-path state.
+#[derive(Clone, Debug)]
+pub struct CmdState {
+    pub dedup: VecDeque<CmdDedupRow>,
+    pub dedup_cap: usize,
+    pub previews: Vec<ViewerPreviewRow>,
+    pub notices: Vec<VenueNoticeRow>,
+    pub active: ActiveConfig,
+    pub blobs: BlobStore,
+    pub recon: Vec<ReconGroupState>,
+    pub legs_touched: Vec<GroupId>,
+    pub conns: ConnTable,
+    pub unknown_last: Vec<u32>,
+    pub feeds_last: Vec<bool>,
+    /// Last `ReplaceRefdata` version accepted or active.
+    pub refdata_version: u64,
+    /// `report_id → view_seq` of the latest reconciliation groups.
+    pub recon_view: Vec<(u64, u64)>,
+    /// `(report_id, account, inst) → exch − engine` of position items.
+    pub recon_diff: Vec<((u64, AccountId, InstId), Qty)>,
+    /// `(account, inst) → seq of the last fill`.
+    pub fill_seq: Vec<((AccountId, InstId), u64)>,
+}
+
+impl CmdState {
+    pub fn new(recent: usize) -> CmdState {
+        let z = crate::strategies::zero_blob();
+        CmdState {
+            dedup: VecDeque::with_capacity(recent),
+            dedup_cap: recent,
+            previews: Vec::with_capacity(16),
+            notices: Vec::with_capacity(64),
+            active: ActiveConfig {
+                refdata: z,
+                engine: z,
+                risk: z,
+                pending_refdata: None,
+            },
+            blobs: BlobStore::default(),
+            recon: Vec::with_capacity(8),
+            legs_touched: Vec::with_capacity(16),
+            conns: ConnTable::default(),
+            unknown_last: vec![0; 256],
+            feeds_last: vec![false; 256],
+            refdata_version: 0,
+            recon_view: Vec::new(),
+            recon_diff: Vec::new(),
+            fill_seq: Vec::new(),
+        }
+    }
+    fn dedup_find(&self, id: &[u8; 16]) -> Option<&CmdDedupRow> {
+        self.dedup.iter().find(|r| r.cmd_id == *id)
+    }
+    fn dedup_push(&mut self, r: CmdDedupRow) {
+        if self.dedup.len() >= self.dedup_cap {
+            self.dedup.pop_front();
+        }
+        self.dedup.push_back(r);
+    }
+}
+
+// ------------------------------------------------------------------------------- ConfigBlob
+
+/// A `ConfigBlob` Input: stored by sha for `take_parsed` and the boot block.
+pub(crate) fn config_blob(e: &mut Engine, slot: &InputSlot) -> R<()> {
+    let body = slot.body();
+    let Some(h) = crate::types::read_body::<hft_event::BlobHdr>(body) else {
+        return Ok(());
+    };
+    let content = body.get(72..72 + h.blob.len as usize).unwrap_or(&[]);
+    e.cmd.blobs.put(h.blob, content);
+    Ok(())
+}
+
+// ------------------------------------------------------------------------------- results
+
+struct Res {
+    status: u8,
+    detail: u32,
+    preview: bool,
+    effect: u32,
+}
+
+fn ok() -> Res {
+    Res {
+        status: status::APPLIED,
+        detail: 0,
+        preview: false,
+        effect: 0,
+    }
+}
+fn res(status: u8, code: u16) -> Res {
+    Res {
+        status,
+        detail: u32::from(code),
+        preview: false,
+        effect: 0,
+    }
+}
+fn res_d(status: u8, d: u32) -> Res {
+    Res {
+        status,
+        detail: d,
+        preview: false,
+        effect: 0,
+    }
+}
+
+fn write_result(e: &mut Engine, inst_ver: u64, hdr: &CmdHdr, r: &Res) {
+    let mut c = <CmdResult as zerocopy::FromZeros>::new_zeroed();
+    c.cmd_id = hdr.cmd_id;
+    c.cmd_seq = e.cur_seq;
+    c.cmd = hdr.cmd;
+    c.status = r.status;
+    c.detail = r.detail;
+    c.engine_epoch = e.epoch;
+    c.effect_count = r.effect;
+    c.refdata_version = e.rd.version();
+    c.risk_version = e.risk.params().version;
+    c.params_version = inst_ver;
+    c.ctl_state_version = e.risk.mode.ctl_state_version();
+    c.rflags = if r.preview { CmdResult::PREVIEW } else { 0 } | if r.status == status::NEEDS_CONFIRM { CmdResult::NEEDS_CONFIRM } else { 0 };
+    c.preview = <CmdPreview as zerocopy::FromZeros>::new_zeroed();
+    e.trace.rec("cmd_result", u64::from(r.status), u64::from(r.detail));
+    e.out.push(RecordFlags(0), &c);
+}
+
+fn mode_err(m: ModeErr) -> Res {
+    match m {
+        ModeErr::GateNotReleased => res(status::PRECONDITION_FAILED, detail::GATE_NOT_RELEASED),
+        ModeErr::Draining => res(status::PRECONDITION_FAILED, detail::DRAINING),
+        ModeErr::NakedNotCleared => res(status::PRECONDITION_FAILED, detail::NAKED_NOT_CLEARED),
+        ModeErr::ReconNotClean => res(status::PRECONDITION_FAILED, detail::RECON_NOT_CLEAN),
+        ModeErr::ResumeLimit => res(status::PRECONDITION_FAILED, detail::RESUME_LIMIT),
+        ModeErr::NoMatchingCap => res(status::PRECONDITION_FAILED, detail::NO_MATCHING_CAP),
+        ModeErr::BrokenRemaining => res(status::REJECTED, detail::BROKEN_REMAINING),
+        ModeErr::NotResumable => res(status::INVALID_ARGS, detail::NOT_RESUMABLE),
+        ModeErr::InvalidScope => res(status::INVALID_ARGS, detail::BAD_COMBINATION),
+        ModeErr::UnknownPending => res(status::PRECONDITION_FAILED, detail::UNKNOWN_PRESENT),
+    }
+}
+
+fn issuer_str(h: &CmdHdr) -> &str {
+    let n = h.issuer.iter().position(|b| *b == 0).unwrap_or(h.issuer.len());
+    core::str::from_utf8(h.issuer.get(..n).unwrap_or(&[])).unwrap_or("")
+}
+
+const ROLE_VIEWER: u8 = CmdHdr::ROLE_VIEWER;
+const ROLE_TRADER: u8 = CmdHdr::ROLE_TRADER;
+const ROLE_ADMIN: u8 = CmdHdr::ROLE_ADMIN;
+
+/// The role recheck (control-plane permission table; process principals by issuer).
+fn role_ok(h: &CmdHdr, c: &ControlCmd<'_>) -> bool {
+    let issuer = issuer_str(h);
+    if h.role == 0 {
+        return match issuer {
+            "cli:systemd" => match c {
+                ControlCmd::Kill { flatten, hard, .. } => !*flatten && !*hard,
+                ControlCmd::CancelAll { .. } | ControlCmd::Drain { .. } => true,
+                _ => false,
+            },
+            "pipeline" => matches!(
+                c,
+                ControlCmd::SetParams { .. }
+                    | ControlCmd::InjectWarmup { .. }
+                    | ControlCmd::SetMode {
+                        mode: RunMode::CloseOnly | RunMode::Shadow,
+                        ..
+                    }
+            ),
+            "ops_bot" => matches!(c, ControlCmd::Annotate { .. }),
+            _ => false,
+        };
+    }
+    let viewer_only = h.role & (ROLE_TRADER | ROLE_ADMIN) == 0;
+    if viewer_only {
+        return match c {
+            ControlCmd::Kill {
+                level,
+                flatten,
+                hard,
+                cancel_resting,
+                ..
+            } => matches!(level, KillLevel::Global | KillLevel::Account) && !*flatten && !*hard && *cancel_resting,
+            ControlCmd::Annotate { .. } | ControlCmd::SnapshotNow => true,
+            _ => false,
+        };
+    }
+    let admin = h.role & ROLE_ADMIN != 0;
+    match c {
+        ControlCmd::SetRisk { .. }
+        | ControlCmd::ReplaceRefdata { .. }
+        | ControlCmd::WriteOffResidual { .. }
+        | ControlCmd::SmokeOrder { .. }
+        | ControlCmd::SimFault { .. } => admin,
+        _ => true,
+    }
+}
+
+/// The account a command is about (scope or payload).
+fn cmd_account(c: &ControlCmd<'_>) -> Option<AccountId> {
+    Some(match c {
+        ControlCmd::SetMode { scope, .. }
+        | ControlCmd::SetParams { scope, .. }
+        | ControlCmd::Kill { scope, .. }
+        | ControlCmd::Resume { scope, .. }
+        | ControlCmd::HedgeFix { scope }
+        | ControlCmd::CancelAll { scope } => scope.account,
+        ControlCmd::AdoptExchange { account, .. }
+        | ControlCmd::SimReset { account }
+        | ControlCmd::SimTransfer { account, .. }
+        | ControlCmd::SetBalanceBaseline { account, .. }
+        | ControlCmd::SmokeOrder { account, .. }
+        | ControlCmd::WriteOffResidual { account, .. }
+        | ControlCmd::SimFault { account, .. }
+        | ControlCmd::RecordTransfer { account, .. } => *account,
+        _ => return None,
+    })
+}
+
+/// Whether the command is an upgrade that needs confirmation in the current state.
+fn needs_confirm<S: StrategySet>(e: &Engine, inst: &Instances<S>, h: &CmdHdr, c: &ControlCmd<'_>, d: &mut dyn_free::Drv<'_>) -> bool {
+    match c {
+        ControlCmd::SetMode { scope, mode } => e.risk.mode.is_upgrade(&ModeInput::SetMode { scope: *scope, mode: *mode }),
+        ControlCmd::Resume { .. } => true,
+        ControlCmd::Kill { flatten, level, .. } => *flatten && *level == KillLevel::Account,
+        ControlCmd::HedgeFix { .. }
+        | ControlCmd::WriteOffResidual { .. }
+        | ControlCmd::SmokeOrder { .. }
+        | ControlCmd::ReplaceRefdata { .. }
+        | ControlCmd::AdoptExchange { .. }
+        | ControlCmd::SetBalanceBaseline { .. } => true,
+        ControlCmd::StrategyCmd { reduce_only, .. } => *reduce_only == 0,
+        ControlCmd::SetRisk { .. } => d.risk_loosens,
+        ControlCmd::SetParams { scope, .. } => {
+            let _ = inst;
+            let human = issuer_str(h) != "pipeline" && h.role != 0;
+            let live_inst = d.params_live_instance;
+            (live_inst && d.params_structural) || (human && d.params_opens) || (human && false && scope.account.0 == 0)
+        }
+        _ => false,
+    }
+}
+
+/// Facts about the parsed object that the confirmation rule needs (computed before deciding).
+mod dyn_free {
+    #[derive(Copy, Clone, Debug, Default)]
+    pub struct Drv<'a> {
+        pub risk_loosens: bool,
+        pub params_live_instance: bool,
+        pub params_structural: bool,
+        pub params_opens: bool,
+        pub _p: core::marker::PhantomData<&'a ()>,
+    }
+}
+
+fn is_upgrade_class(c: &ControlCmd<'_>, e: &Engine) -> bool {
+    match c {
+        ControlCmd::SetMode { scope, mode } => e.risk.mode.is_upgrade(&ModeInput::SetMode { scope: *scope, mode: *mode }),
+        ControlCmd::Resume { .. }
+        | ControlCmd::HedgeFix { .. }
+        | ControlCmd::WriteOffResidual { .. }
+        | ControlCmd::SmokeOrder { .. }
+        | ControlCmd::AdoptExchange { .. }
+        | ControlCmd::SetBalanceBaseline { .. } => true,
+        ControlCmd::StrategyCmd { reduce_only, .. } => *reduce_only == 0,
+        _ => false,
+    }
+}
+
+/// `ControlCmd` Input (README "命令路径").
+pub(crate) fn control<'a, D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    slot: &'a InputSlot,
+    p: &mut Pending<'a>,
+) -> R<()> {
+    let body = slot.body();
+    let Ok((h, c)) = ControlCmd::decode(body) else {
+        let mut hz = CmdHdr::zeroed();
+        if let Some(x) = body.get(..16) {
+            hz.cmd_id.copy_from_slice(x);
+        }
+        write_result(e, 0, &hz, &res(status::INVALID_ARGS, detail::UNKNOWN_DISCRIMINANT));
+        return Ok(());
+    };
+    // 2. expiry.
+    if h.expires_tsc.0 != 0 && slot.tsc.0 > h.expires_tsc.0 {
+        write_result(e, 0, &h, &res(status::EXPIRED, 0));
+        return Ok(());
+    }
+    // de-duplication.
+    if e.cmd.dedup_find(&h.cmd_id).is_some() {
+        write_result(e, 0, &h, &res(status::DUPLICATE, 0));
+        return Ok(());
+    }
+    let r = command(e, inst, drv, &h, &c, body, p)?;
+    if !r.preview && r.status != status::EXPIRED {
+        e.cmd.dedup_push(CmdDedupRow {
+            cmd_id: h.cmd_id,
+            cmd_seq: e.cur_seq,
+            status: r.status,
+            _pad: [0; 7],
+        });
+    }
+    let pv = cmd_account(&c)
+        .and_then(|a| inst.ix_of_account(a))
+        .and_then(|ix| inst.slots.get(ix))
+        .map_or(0, |s| s.params_version());
+    write_result(e, pv, &h, &r);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn command<'a, D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    h: &CmdHdr,
+    c: &ControlCmd<'a>,
+    body: &'a [u8],
+    p: &mut Pending<'a>,
+) -> R<Res> {
+    let preview = h.hflags & CmdHdr::PREVIEW != 0;
+    // role.
+    if !role_ok(h, c) {
+        return Ok(res(status::ROLE_INSUFFICIENT, 0));
+    }
+    // account semantics.
+    if let Some(a) = cmd_account(c)
+        && h.account.0 != 0
+        && a.0 != 0
+        && a != h.account
+    {
+        return Ok(res(status::INVALID_ARGS, detail::ACCOUNT_MISMATCH));
+    }
+    // Facts for SetParams / SetRisk confirmation.
+    let mut facts = dyn_free::Drv::default();
+    let mut parsed: Option<crate::parsed::ParsedConfig<S>> = None;
+    if let ControlCmd::SetParams { blob, .. } | ControlCmd::SetRisk { blob } | ControlCmd::ReplaceRefdata { blob } = c {
+        let base_ix = match c {
+            ControlCmd::SetParams { scope, .. } => inst.ix(scope.strategy),
+            _ => None,
+        };
+        let base = base_ix
+            .and_then(|ix| inst.slots.get(ix))
+            .and_then(|s| s.cur.as_ref())
+            .map(|p| crate::parsed::ParamBase::<S> {
+                params: &p.params,
+                groups: &p.groups,
+            });
+        let cx = crate::driver::ParseCx {
+            rd: &e.rd,
+            max_groups: e.caps.max_groups_per_instance,
+            base,
+            risk_account: h.account,
+            risk_decode: e.setup.risk_decode,
+        };
+        match drv.take_parsed(blob, &cx) {
+            Ok(pc) => parsed = Some(pc),
+            Err(crate::types::ConfigErr::Params(d)) => {
+                return Ok(res_d(status::INVALID_ARGS, d));
+            }
+            Err(_) => return Ok(res(status::INVALID_ARGS, detail::BAD_VALUE)),
+        }
+        let _ = blob;
+        match (c, parsed.as_ref()) {
+            (ControlCmd::SetRisk { .. }, Some(crate::parsed::ParsedConfig::Risk { params, .. })) => {
+                let sc = if h.account.0 == 0 { AccountScope::All } else { AccountScope::Account(h.account) };
+                facts.risk_loosens = e.risk.loosens(params, sc);
+            }
+            (ControlCmd::SetParams { scope, .. }, Some(crate::parsed::ParsedConfig::StrategyParams(pp))) => {
+                facts.params_structural = pp.structural_changed;
+                facts.params_live_instance = live_instance(e, inst, scope.strategy);
+                let old = inst.get(scope.strategy).and_then(|s| s.groups());
+                facts.params_opens = pp.groups.iter().any(|(_, g)| {
+                    g.open_allowed != 0
+                        && old
+                            .and_then(|o| o.gix_of(g.id).map(|gi| o.get(gi).open_allowed))
+                            .is_none_or(|prev| prev == 0)
+                });
+            }
+            _ => {}
+        }
+    }
+    // Draining blocks upgrades (Kill{Account, flatten} excepted).
+    let draining = e.risk.mode.cap(CapSource::DRAINING, &hft_risk::scope_any()).is_some() || e.drain.active;
+    let flatten_kill = matches!(c, ControlCmd::Kill { flatten: true, level: KillLevel::Account, .. });
+    // confirmation.
+    let viewer = h.role != 0 && h.role & (ROLE_TRADER | ROLE_ADMIN) == 0;
+    if viewer {
+        if let ControlCmd::Kill { .. } = c {
+            if preview {
+                if e.cmd.previews.len() >= 16 {
+                    e.cmd.previews.remove(0);
+                }
+                let mut issuer = [0u8; 24];
+                issuer.copy_from_slice(&h.issuer);
+                e.cmd.previews.push(ViewerPreviewRow {
+                    cmd_hash: h.cmd_hash,
+                    issuer,
+                    preview_engine_ns: e.now.engine_ns,
+                });
+                let mut r = ok();
+                r.preview = true;
+                return Ok(r);
+            }
+            if h.confirmed == 0 {
+                return Ok(res(status::NEEDS_CONFIRM, 0));
+            }
+            let ttl = VIEWER_CONFIRM_TTL_MS * 1_000_000;
+            let now = e.now.engine_ns;
+            let pos = e
+                .cmd
+                .previews
+                .iter()
+                .position(|x| x.cmd_hash == h.cmd_hash && x.issuer == h.issuer && now - x.preview_engine_ns <= ttl);
+            match pos {
+                Some(i) => {
+                    e.cmd.previews.remove(i);
+                }
+                None => return Ok(res(status::CONFIRM_INVALID, detail::NO_VALID_PREVIEW)),
+            }
+        }
+    } else if !preview {
+        let need = needs_confirm(e, inst, h, c, &mut facts);
+        if need {
+            if h.confirmed == 0 {
+                return Ok(res(status::NEEDS_CONFIRM, 0));
+            }
+            let is_kill = matches!(c, ControlCmd::Kill { .. });
+            if !is_kill && h.expect_state_version != e.risk.mode.ctl_state_version() {
+                return Ok(res(status::CONFIRM_INVALID, detail::STATE_CHANGED));
+            }
+        }
+    }
+    if draining && is_upgrade_class(c, e) && !flatten_kill {
+        return Ok(res(status::PRECONDITION_FAILED, detail::DRAINING));
+    }
+    if preview {
+        let mut r = preview_result(e, inst, c);
+        r.preview = true;
+        return Ok(r);
+    }
+    apply_cmd(e, inst, drv, h, c, parsed, body, p)
+}
+
+fn live_instance<S: StrategySet>(e: &Engine, inst: &Instances<S>, s: StrategyId) -> bool {
+    let Some(sl) = inst.get(s) else { return false };
+    if !matches!(e.rd.account(sl.account).kind, AccountKind::Live) {
+        return false;
+    }
+    // A Live instance: at least one cell desired Live (control-plane definition).
+    inst.cells()
+        .filter(|c| c.strategy == s)
+        .any(|c| e.risk.mode.desired(c) == Some(RunMode::Live))
+}
+
+fn preview_result<S: StrategySet>(e: &Engine, _inst: &Instances<S>, c: &ControlCmd<'_>) -> Res {
+    match c {
+        ControlCmd::Resume { scope, source } => {
+            let mut pv = hft_risk::mode::Preview::default();
+            let inp = ModeInput::Resume { source: *source, scope: *scope };
+            let ad = crate::views::ModeAdapter {
+                oms: &e.oms,
+                ledger: &e.ledger,
+                exec: &e.exec,
+            };
+            e.risk.preview(&inp, &ad, &mut pv);
+            if *source == CapSource::DAILY_LOSS && !e.risk.daily_loss_resumable(scope.account) {
+                return res(status::PRECONDITION_FAILED, detail::RESUME_LIMIT);
+            }
+            ok()
+        }
+        ControlCmd::SimFault { account, .. } => {
+            if !e.is_sim(*account) {
+                res(status::INVALID_ARGS, detail::NOT_SIM)
+            } else if e.setup.role_prod {
+                res(status::REJECTED, 0)
+            } else {
+                ok()
+            }
+        }
+        _ => ok(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    h: &CmdHdr,
+    c: &ControlCmd<'a>,
+    parsed: Option<crate::parsed::ParsedConfig<S>>,
+    body: &'a [u8],
+    p: &mut Pending<'a>,
+) -> R<Res> {
+    let now = e.now;
+    match c {
+        ControlCmd::SetMode { scope, mode } => {
+            let r = crate::mode_glue::apply_mode_r(e, inst, drv, ModeInput::SetMode { scope: *scope, mode: *mode })?;
+            Ok(match r {
+                Ok(()) => {
+                    let deferred = *mode == RunMode::Shadow && shadow_deferred(e, scope);
+                    if deferred { res(status::APPLIED, detail::SHADOW_DEFERRED) } else { ok() }
+                }
+                Err(m) => mode_err(m),
+            })
+        }
+        ControlCmd::Kill {
+            scope,
+            level,
+            flatten,
+            cancel_resting,
+            hard,
+        } => {
+            if *hard && *flatten {
+                return Ok(res(status::INVALID_ARGS, detail::BAD_COMBINATION));
+            }
+            let k = KillCmd {
+                level: *level,
+                scope: *scope,
+                cancel_resting: *cancel_resting,
+                flatten: *flatten,
+                hard: *hard,
+            };
+            let r = crate::mode_glue::apply_mode_r(e, inst, drv, ModeInput::Kill(k))?;
+            match r {
+                Ok(()) => {
+                    if *flatten && *level == KillLevel::Account {
+                        crate::exec_glue::flatten(e, inst, drv, scope.account)?;
+                    }
+                    Ok(ok())
+                }
+                Err(m) => Ok(mode_err(m)),
+            }
+        }
+        ControlCmd::Resume { scope, source } => {
+            let r = crate::mode_glue::apply_mode_r(e, inst, drv, ModeInput::Resume { source: *source, scope: *scope })?;
+            Ok(match r {
+                Ok(()) => ok(),
+                Err(m) => mode_err(m),
+            })
+        }
+        ControlCmd::SetParams { scope, blob } => {
+            let Some(crate::parsed::ParsedConfig::StrategyParams(pp)) = parsed else {
+                return Ok(res(status::INVALID_ARGS, detail::BAD_VALUE));
+            };
+            set_params(e, inst, drv, h, scope, blob, pp)
+        }
+        ControlCmd::SetRisk { .. } => {
+            let Some(crate::parsed::ParsedConfig::Risk { params, sha256 }) = parsed else {
+                return Ok(res(status::INVALID_ARGS, detail::BAD_VALUE));
+            };
+            let sc = if h.account.0 == 0 { AccountScope::All } else { AccountScope::Account(h.account) };
+            let r = e.risk.set_params(&params, sc);
+            e.trace.rec("risk.set_params", u64::from(h.account.0), 0);
+            let res = match r {
+                Ok(()) => {
+                    e.cmd.active.risk.sha256 = sha256;
+                    e.cmd.active.risk.version = params.version;
+                    ok()
+                }
+                Err(hft_risk::RiskParamError::Invalid(_)) => res(status::INVALID_ARGS, detail::PARAM_INVALID),
+                Err(hft_risk::RiskParamError::ExecRiskMismatch) => res(status::INVALID_ARGS, detail::EXEC_RISK_MISMATCH),
+                Err(hft_risk::RiskParamError::Capacity) => res(status::CAPACITY_EXCEEDED, 0),
+            };
+            drv.retire(crate::parsed::ParsedConfig::Risk { sha256, params });
+            Ok(res)
+        }
+        ControlCmd::SnapshotNow => {
+            e.snapshot_requested = true;
+            Ok(ok())
+        }
+        ControlCmd::Drain { cancel_resting } => {
+            start_drain(e, inst, drv, *cancel_resting, DoneCause::Drain)?;
+            Ok(ok())
+        }
+        ControlCmd::CancelAll { scope } => {
+            let sc = cancel_scope(scope);
+            let mut o = e.take_oms();
+            e.trace.rec("oms.cancel_all", 0, 0);
+            e.oms.cancel_all(sc, false, now.tsc, e.cur_seq, &mut o);
+            crate::intents::drain_oms(e, inst, drv, &mut o)?;
+            e.put_oms(o);
+            Ok(ok())
+        }
+        ControlCmd::Annotate { .. } => Ok(ok()),
+        ControlCmd::HedgeFix { scope } => {
+            let r = crate::exec_glue::hedge_fix(e, inst, drv, scope.account, scope.group)?;
+            Ok(match r {
+                Ok(()) => ok(),
+                Err(x) => exec_err(x),
+            })
+        }
+        ControlCmd::RecordTransfer {
+            account,
+            from,
+            to,
+            asset,
+            amount,
+            ..
+        } => {
+            e.ledger.apply_transfer(
+                &TransferDelta {
+                    account: *account,
+                    from_venue: *from,
+                    to_venue: *to,
+                    asset: *asset,
+                    amount: *amount,
+                    kind: TransferKind::Record,
+                },
+                now.engine_ns,
+            );
+            e.trace.rec("ledger.apply_transfer", u64::from(account.0), 0);
+            Ok(ok())
+        }
+        ControlCmd::AdoptExchange {
+            account,
+            venue,
+            inst: inst_id,
+            report_id,
+            item,
+            asset,
+            group,
+            entry_px,
+            ..
+        } => adopt(e, inst, drv, *account, *venue, *inst_id, *report_id, *item, *asset, *group, *entry_px),
+        ControlCmd::SetBalanceBaseline { account, venue } => {
+            let mut outv = hft_ledger::FixedVec::<hft_types::AssetId, 64>::new();
+            let r = e.ledger.set_balance_baseline(*account, *venue, e.cur_seq, &mut outv);
+            e.trace.rec("ledger.set_balance_baseline", u64::from(account.0), 0);
+            for a in outv.iter().copied().collect::<Vec<_>>() {
+                crate::mode_glue::apply_mode(
+                    e,
+                    inst,
+                    drv,
+                    ModeInput::Gate(GateEvent::Disposed {
+                        account: *account,
+                        venue: *venue,
+                        report_id: 0,
+                        item: ReconItemKey::new(ReconItemKey::BALANCE, u32::from(a.0) | hft_risk::ASSET_KEY),
+                        how: hft_risk::mode::Disposition::Baselined,
+                    }),
+                )?;
+            }
+            Ok(match r {
+                hft_ledger::BaselineResult::Set { .. } => ok(),
+                hft_ledger::BaselineResult::NoBalanceView => res(status::PRECONDITION_FAILED, detail::NO_BALANCE_VIEW),
+            })
+        }
+        ControlCmd::VenueNotice {
+            venue,
+            kind,
+            inst: inst_id,
+            a,
+            b,
+            ..
+        } => {
+            let row = VenueNoticeRow {
+                venue: *venue,
+                kind: *kind,
+                _pad: 0,
+                inst: *inst_id,
+                a: *a,
+                b: *b,
+                cmd_seq: e.cur_seq,
+            };
+            e.cmd.notices.retain(|x| !(x.venue == *venue && x.inst == *inst_id && x.kind == *kind));
+            e.cmd.notices.push(row);
+            e.cmd.notices.sort_by_key(|x| (x.venue, x.inst, x.kind));
+            let n = VenueNoticeCmd {
+                venue: *venue,
+                kind: *kind,
+                inst: *inst_id,
+                a: *a,
+                b: *b,
+            };
+            crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Notice(&n))?;
+            notice_delivery(e, inst, &row);
+            Ok(ok())
+        }
+        ControlCmd::SimReset { account } => sim_reset(e, inst, drv, *account),
+        ControlCmd::SimTransfer {
+            account,
+            from,
+            to,
+            asset,
+            amount,
+        } => {
+            if !e.is_sim(*account) {
+                return Ok(res(status::INVALID_ARGS, detail::NOT_SIM));
+            }
+            let cv = e.ledger.cash_view(*account, *from, *asset);
+            if cv.free.0 < amount.0 {
+                return Ok(res(status::PRECONDITION_FAILED, detail::INSUFFICIENT_BALANCE));
+            }
+            e.ledger.apply_transfer(
+                &TransferDelta {
+                    account: *account,
+                    from_venue: *from,
+                    to_venue: *to,
+                    asset: *asset,
+                    amount: *amount,
+                    kind: TransferKind::Sim,
+                },
+                now.engine_ns,
+            );
+            e.out.emits.push(Emit::Gw {
+                ring: OutRing::Sim,
+                cmd: hft_event::GwCmd::sim_transfer(*account, *from, *to, *asset, *amount),
+                rec: None,
+            });
+            Ok(ok())
+        }
+        ControlCmd::SimFault {
+            account,
+            venue,
+            fault,
+            delay_ms,
+            ..
+        } => {
+            if !e.is_sim(*account) {
+                return Ok(res(status::INVALID_ARGS, detail::NOT_SIM));
+            }
+            if e.setup.role_prod {
+                return Ok(res(status::REJECTED, 0));
+            }
+            e.out.emits.push(Emit::Gw {
+                ring: OutRing::Sim,
+                cmd: hft_event::GwCmd::sim_fault(*account, *venue, *fault, *delay_ms),
+                rec: None,
+            });
+            Ok(ok())
+        }
+        ControlCmd::StrategyCmd {
+            instance,
+            reduce_only,
+            len,
+            group,
+            payload,
+        } => {
+            let Some(ix) = inst.ix(*instance).filter(|ix| inst.slots.get(*ix).is_some_and(|s| s.inst.is_some())) else {
+                return Ok(res(status::UNKNOWN_TARGET, 0));
+            };
+            let acc = inst.slots.get(ix).map_or(AccountId(0), |s| s.account);
+            if h.account.0 != 0 && h.account != acc {
+                return Ok(res(status::INVALID_ARGS, detail::ACCOUNT_BOUND));
+            }
+            let gix = if *group == GROUP_NONE {
+                hft_strategy_sdk::GIX_NONE
+            } else {
+                match inst.slots.get(ix).and_then(|s| s.gix_of(*group)) {
+                    Some(g) => g,
+                    None => return Ok(res(status::INVALID_ARGS, detail::UNKNOWN_GROUP)),
+                }
+            };
+            let ro = *reduce_only != 0;
+            let n = usize::from(*len).min(hft_event::STRATEGY_CMD_MAX_PAYLOAD);
+            // The payload in the logged body: CmdHdr (128 B) + instance, reduce_only, len, group.
+            let pl: &'a [u8] = body.get(136..136 + n).unwrap_or(&[]);
+            let _ = payload;
+            p.direct = Some((ix, Direct::Manual { gix, payload: pl, reduce_only: ro }, ro));
+            Ok(ok())
+        }
+        ControlCmd::InjectWarmup {
+            instance,
+            last,
+            local_kind,
+            chunk_no,
+            payload,
+            ..
+        } => {
+            let Some(ix) = inst.ix(*instance).filter(|ix| inst.slots.get(*ix).is_some_and(|s| s.inst.is_some())) else {
+                return Ok(res(status::UNKNOWN_TARGET, 0));
+            };
+            if payload.len() > hft_event::WARMUP_MAX_PAYLOAD {
+                return Ok(res(status::INVALID_ARGS, detail::BAD_VALUE));
+            }
+            let both = inst.slots.get(ix).is_some_and(|s| s.warmup == hft_strategy_sdk::Part::Both);
+            if both {
+                p.direct = Some((
+                    ix,
+                    Direct::Warmup {
+                        local_kind: *local_kind,
+                        chunk_no: *chunk_no,
+                        last: *last != 0,
+                        payload,
+                    },
+                    false,
+                ));
+            }
+            Ok(ok())
+        }
+        ControlCmd::SmokeOrder {
+            account,
+            venue,
+            inst: inst_id,
+            side,
+            ttl_ms,
+            ..
+        } => smoke(e, inst, drv, *account, *venue, *inst_id, *side, *ttl_ms),
+        ControlCmd::WriteOffResidual { account, group, .. } => write_off(e, inst, drv, *account, *group),
+        ControlCmd::ReplaceRefdata { blob } => {
+            let Some(crate::parsed::ParsedConfig::Refdata { result, sha256 }) = parsed else {
+                return Ok(res(status::INVALID_ARGS, detail::BAD_VALUE));
+            };
+            if blob.version <= e.rd.version() {
+                drv.retire(crate::parsed::ParsedConfig::Refdata { sha256, result });
+                return Ok(res(status::STALE_VERSION, 0));
+            }
+            let arg = refdata_recheck(e, inst, &result);
+            drv.retire(crate::parsed::ParsedConfig::Refdata { sha256, result });
+            match arg {
+                Some(a) => Ok(res_d(status::REJECTED, detail::pack(detail::REFDATA_RECHECK, a))),
+                None => {
+                    e.cmd.active.pending_refdata = Some(*blob);
+                    start_drain(e, inst, drv, false, DoneCause::ReplaceRefdata)?;
+                    Ok(ok())
+                }
+            }
+        }
+        ControlCmd::RotateConn { .. } | ControlCmd::Resubscribe { .. } => Ok(ok()),
+    }
+}
+
+fn exec_err(x: hft_exec::ExecCmdErr) -> Res {
+    use hft_exec::ExecCmdErr as X;
+    match x {
+        X::UnknownGroup => res(status::INVALID_ARGS, detail::UNKNOWN_GROUP),
+        X::Hard => res(status::PRECONDITION_FAILED, detail::HARD),
+        X::NotQuiescent => res(status::PRECONDITION_FAILED, detail::NOT_QUIESCENT),
+        X::NothingToFix => res(status::PRECONDITION_FAILED, detail::NOTHING_TO_FIX),
+        X::QuoteUnavailable => res(status::PRECONDITION_FAILED, detail::QUOTE_UNAVAILABLE),
+        X::ChainLeg => res(status::PRECONDITION_FAILED, detail::CHAIN_LEG),
+    }
+}
+
+fn shadow_deferred(e: &Engine, scope: &CmdScope) -> bool {
+    if scope.group == GROUP_ALL || scope.group.0 == 0 {
+        return false;
+    }
+    let cell = hft_risk::mode::CellKey {
+        strategy: scope.strategy,
+        account: scope.account,
+        group: scope.group,
+    };
+    matches!(
+        e.risk.mode.effective(cell),
+        hft_risk::mode::Effective::CloseOnly { deferred_shadow: true }
+    )
+}
+
+pub(crate) fn cancel_scope(s: &CmdScope) -> hft_oms::CancelScope {
+    match (s.account.0, s.venue.0, s.inst.0) {
+        (0, 0, _) => hft_oms::CancelScope::Global,
+        (a, 0, _) => hft_oms::CancelScope::Account(AccountId(a)),
+        (0, v, 0) => hft_oms::CancelScope::Venue(VenueId(v)),
+        (0, v, i) => hft_oms::CancelScope::Inst(VenueId(v), InstId(i)),
+        (a, v, _) => hft_oms::CancelScope::VenueAccount(VenueId(v), AccountId(a)),
+    }
+}
+
+fn notice_delivery<S: StrategySet>(e: &mut Engine, inst: &Instances<S>, row: &VenueNoticeRow) {
+    use hft_strategy_sdk::{NoticeKind, VenueNoticeView};
+    let kind = match row.kind {
+        1 => NoticeKind::Delisting { at_ns: row.a },
+        2 => NoticeKind::FundingInterval { new_s: row.a as u32 },
+        _ => NoticeKind::Maintenance { from_ns: row.a, to_ns: row.b },
+    };
+    let n = VenueNoticeView {
+        venue: row.venue,
+        inst: row.inst,
+        kind,
+    };
+    for (ix, s) in inst.slots.iter().enumerate() {
+        for se in s.subs.iter() {
+            let hit = if row.inst.0 == 0 { e.rd.inst(se.inst).venue == row.venue } else { se.inst == row.inst };
+            if hit && se.part.fast() {
+                e.notify.push(ix as u16, crate::notify::Notif::Notice {
+                    inst: se.inst,
+                    gix: se.gix,
+                    n,
+                });
+                break;
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------- SetParams
+
+fn set_params<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    h: &CmdHdr,
+    scope: &CmdScope,
+    blob: &BlobRef,
+    pp: Box<crate::parsed::ParsedParams<S>>,
+) -> R<Res> {
+    let strategy = scope.strategy;
+    let account = if scope.account.0 != 0 { scope.account } else { pp.account };
+    let Some(ix) = inst.ix(strategy) else {
+        drv.retire(crate::parsed::ParsedConfig::StrategyParams(pp));
+        return Ok(res(status::INVALID_ARGS, detail::ACCOUNT_BOUND));
+    };
+    let fail = |drv: &mut D, pp: Box<crate::parsed::ParsedParams<S>>, r: Res| -> R<Res> {
+        drv.retire(crate::parsed::ParsedConfig::StrategyParams(pp));
+        Ok(r)
+    };
+    // ① binding, kind, non_prod_only, legs.
+    if let Err(x) = e.rd.check_binding(account, strategy, pp.kind_id) {
+        let d = if x.code == hft_refdata::LoadErrCode::KindMismatch { detail::KIND_MISMATCH } else { detail::ACCOUNT_BOUND };
+        return fail(drv, pp, res(status::INVALID_ARGS, d));
+    }
+    let desc = S::kinds().iter().find(|d| d.kind_id == pp.kind_id);
+    if desc.is_some_and(|d| d.non_prod_only) && e.rd.account(account).is_prod {
+        return fail(
+            drv,
+            pp,
+            res_d(status::INVALID_ARGS, detail::pack(detail::PARAM_INVALID, detail::param_arg(detail::PARAM_KIND_NON_PROD_ONLY, 0))),
+        );
+    }
+    if let Err(d) = crate::parsed::check_groups(&e.rd, account, &pp.groups) {
+        return fail(drv, pp, res_d(status::INVALID_ARGS, d));
+    }
+    // ② version.
+    let cur_ver = inst.slots.get(ix).map_or(0, |s| s.params_version());
+    if pp.version <= cur_ver && inst.slots.get(ix).is_some_and(|s| s.cur.is_some()) {
+        return fail(drv, pp, res(status::STALE_VERSION, 0));
+    }
+    if h.base_version != 0 && h.base_version != cur_ver {
+        return fail(drv, pp, res(status::VERSION_CONFLICT, 0));
+    }
+    // ③ GroupId.
+    let mut bad: Option<u16> = None;
+    let mut seen: Vec<GroupId> = Vec::new();
+    for (_, g) in pp.groups.iter() {
+        if g.id == GROUP_NONE || g.id == GROUP_ALL || g.id.strategy() != strategy {
+            bad = Some(detail::BAD_GROUP);
+            break;
+        }
+        if seen.contains(&g.id) {
+            bad = Some(detail::GROUP_ID_DUP);
+            break;
+        }
+        seen.push(g.id);
+    }
+    if let Some(d) = bad {
+        return fail(drv, pp, res(status::INVALID_ARGS, d));
+    }
+    // ④ InstOwned: one non-Shadow cell per (account, inst) within the instance.
+    let mut owned: Vec<InstId> = Vec::new();
+    let mut inst_owned = false;
+    for (_, g) in pp.groups.iter() {
+        let cell = hft_risk::mode::CellKey {
+            strategy,
+            account,
+            group: g.id,
+        };
+        let desired = e.risk.mode.desired(cell).or_else(|| e.risk.mode.default_mode(strategy, account));
+        if desired == Some(RunMode::Shadow) {
+            continue;
+        }
+        for l in g.legs.iter().take(usize::from(g.n_legs)) {
+            if owned.contains(&l.inst) {
+                inst_owned = true;
+            }
+            owned.push(l.inst);
+        }
+    }
+    if inst_owned {
+        return fail(drv, pp, res(status::INVALID_ARGS, detail::INST_OWNED));
+    }
+    // ⑤ removed / fingerprint-changed groups must be empty.
+    let old = inst.slots.get(ix).and_then(|s| s.cur.as_ref()).map(|c| c.groups.clone());
+    if let Some(old) = old.as_ref() {
+        use hft_strategy_sdk::GroupSpecExt;
+        let mut busy = false;
+        for (_, g) in old.iter() {
+            let gone = match pp.groups.gix_of(g.id) {
+                None => true,
+                Some(ng) => pp.groups.get(ng).fingerprint() != g.fingerprint(),
+            };
+            if gone && group_busy(e, account, g.id) {
+                busy = true;
+            }
+        }
+        if busy {
+            return fail(drv, pp, res(status::PRECONDITION_FAILED, detail::GROUP_HAS_POSITION));
+        }
+    }
+    // ⑥ capacity.
+    let other_cells = inst.n_cells() - inst.slots.get(ix).and_then(|s| s.groups()).map_or(0, |g| usize::from(g.len()));
+    if other_cells + usize::from(pp.groups.len()) > e.caps.max_cells_total as usize {
+        return fail(drv, pp, res(status::CAPACITY_EXCEEDED, 0));
+    }
+    {
+        let mut refs: Vec<(InstId, u16)> = Vec::new();
+        for s in inst.slots.iter() {
+            if s.id == strategy {
+                continue;
+            }
+            if let Some(g) = s.groups() {
+                for (_, sp) in g.iter() {
+                    for l in sp.legs.iter().take(usize::from(sp.n_legs)) {
+                        bump(&mut refs, l.inst);
+                    }
+                }
+            }
+        }
+        for (_, sp) in pp.groups.iter() {
+            for l in sp.legs.iter().take(usize::from(sp.n_legs)) {
+                bump(&mut refs, l.inst);
+            }
+        }
+        let over_refs = refs.iter().any(|(_, n)| *n > e.caps.max_subs_per_inst);
+        let new_insts = refs.iter().filter(|(i, _)| inst.subs.ix_of(*i).is_none()).count();
+        if over_refs || inst.subs.insts.len() + new_insts > e.caps.max_insts as usize {
+            return fail(drv, pp, res(status::CAPACITY_EXCEEDED, 0));
+        }
+    }
+    // ⑦ lot alignment and dust line (new and fingerprint-changed groups only).
+    {
+        use hft_strategy_sdk::GroupSpecExt;
+        let p = e
+            .setup
+            .exec
+            .accounts
+            .iter()
+            .find(|x| x.account == account)
+            .and_then(|x| x.params)
+            .unwrap_or(e.setup.exec.default);
+        let mut viol: Option<u16> = None;
+        for (_, g) in pp.groups.iter() {
+            if viol.is_some() {
+                break;
+            }
+            let is_new = old
+                .as_ref()
+                .and_then(|o| o.gix_of(g.id).map(|gi| o.get(gi).fingerprint() == g.fingerprint()))
+                != Some(true);
+            if !is_new {
+                continue;
+            }
+            let legs: Vec<InstId> = g.legs.iter().take(usize::from(g.n_legs)).map(|l| l.inst).collect();
+            let mut max_min = 0i64;
+            for i in legs.iter() {
+                max_min = max_min.max(e.rd.inst(*i).min_notional.0);
+            }
+            if max_min > p.dust_notional.0 {
+                viol = Some(detail::DUST_BELOW_MIN_NOTIONAL);
+                break;
+            }
+            for x in 0..legs.len() {
+                for y in x + 1..legs.len() {
+                    let (ia, ib) = (legs[x], legs[y]);
+                    let (la, lb) = (e.rd.inst(ia).lot, e.rd.inst(ib).lot);
+                    if la <= 0 || lb <= 0 {
+                        continue;
+                    }
+                    let divides = la % lb == 0 || lb % la == 0;
+                    if divides {
+                        continue;
+                    }
+                    let px = ref_px(e, ia).or_else(|| ref_px(e, ib));
+                    let ok = match (hft_types::pair_lot(la, lb, 1, 1), px) {
+                        (Some(l), Some(px)) => {
+                            let exp = e.rd.asset(e.rd.inst(ia).asset).exp;
+                            let n = hft_risk::Risk::notional(l, px, exp, crate::views::quote_rate(&e.rd, &e.ledger, ia));
+                            n.0 <= p.force_slice.max_chunk_notional.0
+                        }
+                        _ => false,
+                    };
+                    if !ok {
+                        viol = Some(detail::LOT_MISMATCH);
+                    }
+                }
+            }
+        }
+        if let Some(d) = viol {
+            return fail(drv, pp, res(status::INVALID_ARGS, d));
+        }
+    }
+    // ⑧ Model memory and checkpoint budget.
+    {
+        let mib = |m: u32| u64::from(m) << 20;
+        let mut mem = pp.model_mem;
+        let mut ckpt = pp.model_ckpt;
+        for s in inst.slots.iter() {
+            if s.id != strategy {
+                mem += s.model_mem;
+                ckpt += s.model_ckpt;
+            }
+        }
+        if mem > mib(e.sp.advisor_mem_budget_mib) || ckpt.saturating_mul(2) > mib(e.sp.advisor_ckpt_max_mib) {
+            return fail(
+                drv,
+                pp,
+                res_d(
+                    status::INVALID_ARGS,
+                    detail::pack(detail::PARAM_INVALID, detail::param_arg(detail::PARAM_KIND_MODEL_MEM_BUDGET, 0)),
+                ),
+            );
+        }
+    }
+    // Apply.
+    let content = e.cmd.blobs.get(&blob.sha256).map(|b| b.to_vec());
+    if let Some(c) = content {
+        e.cmd.blobs.put(*blob, &c);
+    }
+    match crate::strategies::apply_params(e, inst, drv, ix, pp, *blob, e.cur_seq)? {
+        Ok(old) => {
+            if let Some(o) = old {
+                e.trace.rec("drv.retire", 0, 0);
+                drv.retire(crate::parsed::ParsedConfig::StrategyParams(o));
+            }
+            crate::subs::rebuild_all(e, inst);
+            Ok(ok())
+        }
+        Err(d) => Ok(res_d(status::INVALID_ARGS, d)),
+    }
+}
+
+fn bump(v: &mut Vec<(InstId, u16)>, i: InstId) {
+    match v.iter_mut().find(|x| x.0 == i) {
+        Some(x) => x.1 += 1,
+        None => v.push((i, 1)),
+    }
+}
+
+fn ref_px(e: &Engine, i: InstId) -> Option<hft_types::Px> {
+    let m = e.market.row(i).map_or(0, |r| r.mark_px.0);
+    if m > 0 {
+        return Some(hft_types::Px(m));
+    }
+    let t = e.books.top(i);
+    (t.bid_px.0 > 0 && t.ask_px.0 > 0).then(|| hft_types::Px::mid_floor(t.bid_px, t.ask_px))
+}
+
+/// Position, inventory, in-flight or an active target in the group.
+fn group_busy(e: &Engine, a: AccountId, g: GroupId) -> bool {
+    let gp = e.ledger.group_pos(a, g);
+    let legs = &e.oms.legs(a, g).view;
+    gp.legs.iter().any(|l| l.qty.0 != 0)
+        || legs.leg.iter().any(|l| l.net.0 != 0 || l.inflight_immediate.0 != 0 || l.inflight_resting.0 != 0)
+        || legs.has_pending
+        || e.exec.view(a, g).is_some()
+}
+
+// ------------------------------------------------------------------------------- others
+
+#[allow(clippy::too_many_arguments)]
+fn adopt<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    account: AccountId,
+    venue: VenueId,
+    inst_id: InstId,
+    report_id: u64,
+    item: u8,
+    asset: hft_types::AssetId,
+    group: GroupId,
+    entry_px: hft_types::Px,
+) -> R<Res> {
+    // Stale: a fill on the inst after the report's view seq.
+    let view_seq = e.cmd.recon_view.iter().find(|x| x.0 == report_id).map_or(0, |x| x.1);
+    let last_fill = e.cmd.fill_seq.iter().find(|x| x.0 == (account, inst_id)).map_or(0, |x| x.1);
+    if last_fill > view_seq && view_seq != 0 {
+        return Ok(res(status::PRECONDITION_FAILED, detail::STALE_REPORT));
+    }
+    let diff = e.cmd.recon_diff.iter().find(|x| x.0 == (report_id, account, inst_id)).map_or(Qty(0), |x| x.1);
+    let kind = if item == 1 { AdjustKind::Position } else { AdjustKind::Balance };
+    let d = AdjustDelta {
+        account,
+        venue,
+        kind: kind as u8,
+        px_src: if entry_px.0 != 0 { hft_ledger::PxSrc::Cmd as u8 } else { hft_ledger::PxSrc::Mark as u8 },
+        inst: inst_id,
+        asset,
+        _pad: 0,
+        group,
+        qty: diff,
+        px: if entry_px.0 != 0 { entry_px } else { e.market.row(inst_id).map_or(hft_types::Px(0), |r| r.mark_px) },
+        report_id,
+        cmd_seq: e.cur_seq,
+        settle_ts_ns: 0,
+    };
+    let pnl = e.ledger.apply_adjust(&d, e.now.engine_ns);
+    e.trace.rec("ledger.apply_adjust", u64::from(account.0), 0);
+    crate::process::pnl(e, inst, drv, pnl)?;
+    if group != GROUP_NONE && item == 1 {
+        e.trace.rec("oms.adopt_adjust", u64::from(account.0), u64::from(group.0));
+        e.oms.adopt_adjust(account, group, inst_id, diff);
+    }
+    let key = if item == 1 {
+        ReconItemKey::new(ReconItemKey::POSITION, inst_id.0)
+    } else {
+        ReconItemKey::new(ReconItemKey::BALANCE, u32::from(asset.0) | hft_risk::ASSET_KEY)
+    };
+    crate::mode_glue::apply_mode(
+        e,
+        inst,
+        drv,
+        ModeInput::Gate(GateEvent::Disposed {
+            account,
+            venue,
+            report_id,
+            item: key,
+            how: hft_risk::mode::Disposition::Adopted,
+        }),
+    )?;
+    Ok(ok())
+}
+
+fn sim_reset<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, a: AccountId) -> R<Res> {
+    let AccountKind::Sim(cfg) = e.rd.account(a).kind.clone() else {
+        return Ok(res(status::INVALID_ARGS, detail::NOT_SIM));
+    };
+    // Preconditions: no Live cell, no target, no Unknown, no non-terminal IOC.
+    let live = inst
+        .cells()
+        .filter(|c| c.account == a)
+        .any(|c| matches!(e.risk.mode.effective(c), hft_risk::mode::Effective::Live));
+    let target = inst.cells().filter(|c| c.account == a).any(|c| e.exec.view(a, c.group).is_some());
+    let q = e.oms.quiescent(a);
+    let unknown = q & hft_oms::quiesce::UNKNOWN != 0;
+    let ioc = q & hft_oms::quiesce::IOC_NONTERMINAL != 0;
+    if live || target || unknown || ioc {
+        return Ok(res(status::PRECONDITION_FAILED, detail::SIM_NOT_IDLE));
+    }
+    e.out.emits.push(Emit::Gw {
+        ring: OutRing::Sim,
+        cmd: hft_event::GwCmd::sim_reset(a),
+        rec: None,
+    });
+    e.trace.rec("ledger.sim_reset", u64::from(a.0), 0);
+    e.ledger.sim_reset(a, &cfg.initial_balances, e.now.engine_ns);
+    e.trace.rec("oms.sim_reset", u64::from(a.0), 0);
+    let _ = e.oms.sim_reset(a);
+    e.trace.rec("exec.clear_account", u64::from(a.0), 0);
+    let mut xo = e.take_exec();
+    e.exec.clear_account(a, e.now, &mut xo);
+    crate::exec_glue::drain_out(e, inst, drv, &mut xo)?;
+    e.put_exec(xo);
+    let groups: Vec<GroupId> = inst.cells().filter(|c| c.account == a).map(|c| c.group).collect();
+    for g in groups {
+        crate::mode_glue::on_legs(e, inst, drv, a, g)?;
+    }
+    Ok(ok())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn smoke<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    account: AccountId,
+    venue: VenueId,
+    inst_id: InstId,
+    side: hft_types::Side,
+    ttl_ms: u32,
+) -> R<Res> {
+    if !matches!(e.rd.account(account).kind, AccountKind::Live) {
+        return Ok(res(status::INVALID_ARGS, detail::NOT_LIVE));
+    }
+    let req = hft_oms::SmokeReq {
+        account,
+        venue,
+        inst: inst_id,
+        side,
+        ttl_ms,
+    };
+    let bbo = e.market.bbo_view(&e.books, inst_id);
+    let liveness = e.risk.view(account, &e.now).conn_liveness_ms;
+    let r = e.oms.smoke_intent(&req, &bbo, e.rd.inst(inst_id), liveness, e.now.tsc);
+    let it = match r {
+        Ok(it) => it,
+        Err(hft_oms::SmokeErr::Busy) => return Ok(res(status::PRECONDITION_FAILED, detail::SMOKE_ACTIVE)),
+        Err(hft_oms::SmokeErr::NoQuote) => return Ok(res(status::PRECONDITION_FAILED, detail::SMOKE_NO_PRICE)),
+        Err(hft_oms::SmokeErr::BadInst) => return Ok(res(status::INVALID_ARGS, detail::BAD_VALUE)),
+    };
+    let strategy = e.rd.account(account).bound_instance;
+    let out = crate::intents::pipeline(e, inst, drv, strategy, &it, crate::intents::Src::Smoke { ttl_ms }, 0)?;
+    Ok(match out {
+        crate::intents::PipeOut::Placed(_) => ok(),
+        _ => res(status::REJECTED, detail::SMOKE_RISK_REJECT),
+    })
+}
+
+fn write_off<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, a: AccountId, g: GroupId) -> R<Res> {
+    let bound = e.rd.account(a).bound_instance;
+    let in_params = inst.get(bound).and_then(|s| s.gix_of(g)).is_some();
+    if !in_params {
+        return Ok(res(status::INVALID_ARGS, detail::UNKNOWN_GROUP));
+    }
+    let w = match e.oms.write_off_residual(a, g) {
+        Ok(w) => w,
+        Err(_) => return Ok(res(status::PRECONDITION_FAILED, detail::NOT_QUIESCENT)),
+    };
+    e.trace.rec("oms.write_off_residual", u64::from(a.0), w.qty.0 as u64);
+    let d = AdjustDelta {
+        account: a,
+        venue: w.venue,
+        kind: AdjustKind::WriteOff as u8,
+        px_src: hft_ledger::PxSrc::Mark as u8,
+        inst: w.inst,
+        asset: e.rd.inst(w.inst).asset,
+        _pad: 0,
+        group: g,
+        qty: w.qty,
+        px: e.market.row(w.inst).map_or(hft_types::Px(0), |r| r.mark_px),
+        report_id: 0,
+        cmd_seq: e.cur_seq,
+        settle_ts_ns: 0,
+    };
+    let pnl = e.ledger.apply_adjust(&d, e.now.engine_ns);
+    e.trace.rec("ledger.apply_adjust", u64::from(a.0), 4);
+    crate::process::pnl(e, inst, drv, pnl)?;
+    e.exec.on_leg_adjust(a, g);
+    e.trace.rec("exec.on_leg_adjust", u64::from(a.0), u64::from(g.0));
+    crate::mode_glue::on_legs(e, inst, drv, a, g)?;
+    Ok(ok())
+}
+
+/// `ReplaceRefdata` recheck: `None` = pass, else the arg (LoadErrCode, binding code, 0).
+fn refdata_recheck<S: StrategySet>(e: &Engine, inst: &Instances<S>, r: &Result<RefData, hft_refdata::LoadReport>) -> Option<u16> {
+    let new = match r {
+        Ok(n) => n,
+        Err(rep) => return Some(rep.code() as u16),
+    };
+    // Binding change with position, orders or Unknown.
+    for a in 1..=crate::engine::account_count(&e.rd) {
+        let a = AccountId(a as u8);
+        if new.account(a).bound_instance != e.rd.account(a).bound_instance {
+            let busy = (1..=e.rd.inst_count()).any(|i| e.ledger.pos(a, InstId(i as u32)).qty.0 != 0)
+                || e.oms.quiescent(a) != 0
+                || e.oms.inflight().open_notional_venue(a, VenueId(0)).0 != 0;
+            if busy {
+                return Some(hft_refdata::LoadErrCode::BindingChangedWithPosition as u16);
+            }
+        }
+    }
+    let _ = inst;
+    if new.inst_count() as u32 > e.caps.max_insts.max(new.inst_count() as u32) {
+        return Some(0);
+    }
+    None
+}
+
+/// `keep` of the smoke TTL cancel: Draining with `cancel_resting = false`.
+pub(crate) fn draining_keep(e: &Engine) -> bool {
+    e.risk
+        .mode
+        .caps()
+        .iter()
+        .any(|c| c.source == CapSource::DRAINING && c.params[0] == 0)
+}
+
+// ------------------------------------------------------------------------------- Drain
+
+/// Starts a Drain (command, SIGTERM, ReplaceRefdata, storage critical, identity mismatch).
+pub(crate) fn start_drain<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    cancel_resting: bool,
+    cause: DoneCause,
+) -> R<()> {
+    if e.drain.active {
+        return Ok(());
+    }
+    e.drain = crate::engine::DrainState {
+        active: true,
+        cancel_resting,
+        cause: Some(cause),
+        started_ens: e.now.engine_ns,
+        ..Default::default()
+    };
+    e.trace.rec("drain.start", u64::from(cancel_resting), 0);
+    let rec = crate::mode_glue::auto_rec(CapSource::DRAINING, hft_risk::scope_any(), e.cur_seq, u64::from(cancel_resting));
+    crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Auto(rec))?;
+    let mut o = e.take_oms();
+    if cancel_resting {
+        e.oms.cancel_all(hft_oms::CancelScope::Global, false, e.now.tsc, e.cur_seq, &mut o);
+    } else {
+        // Linked resting first legs only: cancel the open orders of every linked cell.
+        e.oms.cancel_all(hft_oms::CancelScope::Global, true, e.now.tsc, e.cur_seq, &mut o);
+    }
+    crate::intents::drain_oms(e, inst, drv, &mut o)?;
+    e.put_oms(o);
+    Ok(())
+}
+
+/// Drain step 3–6 after every Input.
+pub(crate) fn drain_check<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D) -> R<()> {
+    if !e.drain.active || e.finished.is_some() {
+        return Ok(());
+    }
+    let timeout = e.setup.drain_timeout_ms != 0
+        && e.now.engine_ns - e.drain.started_ens >= i64::from(e.setup.drain_timeout_ms) * 1_000_000;
+    let ready = drain_ready(e, inst);
+    if !ready && !timeout {
+        return Ok(());
+    }
+    if timeout && !ready && !e.drain.timed_out {
+        e.drain.timed_out = true;
+        drain_timeout_note(e, inst);
+    }
+    if e.drain.cause == Some(DoneCause::ReplaceRefdata) && !e.drain.recheck_done {
+        e.drain.recheck_due = true;
+        return Ok(());
+    }
+    if e.notify.backlog_len() > 0 || e.naked_scan.is_some() || e.oms.wants_continue() {
+        return Ok(());
+    }
+    finish_drain(e, inst, drv)
+}
+
+fn drain_ready<S: StrategySet>(e: &Engine, _inst: &Instances<S>) -> bool {
+    for a in 1..=crate::engine::account_count(&e.rd) {
+        let a = AccountId(a as u8);
+        let q = e.oms.quiescent(a);
+        let blocking = hft_oms::quiesce::LINKS_ACTIVE | hft_oms::quiesce::IOC_NONTERMINAL | hft_oms::quiesce::HEDGE_RETRY_PENDING;
+        if q & blocking != 0 {
+            return false;
+        }
+        for v in 0..64u8 {
+            if e.rd.account(a).venues & (1u64 << v) != 0
+                && let Some(t) = e.oms.table_view(VenueId(v), a)
+                && pending_slots(e, VenueId(v), a, t.n_slots)
+            {
+                return false;
+            }
+        }
+    }
+    e.exec.drain_ready() && e.notify.backlog_len() == 0 && e.naked_scan.is_none()
+}
+
+fn pending_slots(e: &Engine, v: VenueId, a: AccountId, n: u32) -> bool {
+    for s in 0..n {
+        if let Some((sl, _, _)) = e.oms.raw_slot(v, a, s)
+            && matches!(
+                sl.state,
+                hft_oms::OrderState::PendingNew | hft_oms::OrderState::PendingCancel | hft_oms::OrderState::PendingAmend
+            )
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn drain_timeout_note<S: StrategySet>(e: &mut Engine, _inst: &Instances<S>) {
+    let mut bitmap = [0u64; 4];
+    let mut links = 0u64;
+    for a in 1..=crate::engine::account_count(&e.rd) {
+        let acc = AccountId(a as u8);
+        let q = e.oms.quiescent(acc);
+        if q & (hft_oms::quiesce::LINKS_ACTIVE | hft_oms::quiesce::IOC_NONTERMINAL | hft_oms::quiesce::HEDGE_RETRY_PENDING) != 0
+            || !e.exec.drain_ready_acct(acc)
+        {
+            if let Some(w) = bitmap.get_mut(a / 64) {
+                *w |= 1u64 << (a % 64);
+            }
+        }
+        if q & hft_oms::quiesce::LINKS_ACTIVE != 0 {
+            links += 1;
+        }
+    }
+    let engine_targets = u64::from(e.exec.engine_reduce_pending());
+    let level = if links > 0 || engine_targets > 0 { NoteLevel::P0 } else { NoteLevel::P1 };
+    e.seq_note(note::DRAIN_TIMEOUT, level, GroupId(0), InstId(0), [
+        bitmap[0], bitmap[1], bitmap[2], bitmap[3], links, 0, engine_targets, 0,
+    ]);
+}
+
+fn finish_drain<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D) -> R<()> {
+    crate::snapshot::write_snapshot(e, inst, drv, crate::snapshot::PURPOSE_DRAIN)?;
+    let cause = e.drain.cause.unwrap_or(DoneCause::Drain);
+    let (restart, cause) = match cause {
+        DoneCause::ReplaceRefdata if e.drain.recheck_ok => (true, DoneCause::ReplaceRefdata),
+        DoneCause::ReplaceRefdata => (false, DoneCause::Drain),
+        c => (false, c),
+    };
+    e.finished = Some(StepOutcome::Done { restart, cause });
+    Ok(())
+}
+
+// ------------------------------------------------------------------------------- Sys timers
+
+pub(crate) fn sys_timer<'a, D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    id: u32,
+    slot: &'a InputSlot,
+    _p: &mut Pending<'a>,
+) -> R<()> {
+    let k = id & 0xFF;
+    let arg = id >> 8;
+    match k {
+        1 => crate::snapshot::write_snapshot(e, inst, drv, crate::snapshot::PURPOSE_KEYFRAME)?,
+        2 => crate::snapshot::roll(e, inst, drv, slot.tsc)?,
+        3 => {
+            let day = arg;
+            if day > e.last_day_rolled {
+                e.trace.rec("risk.on_day_roll", u64::from(day), 0);
+                let eq = crate::process::LedgerEquity(&e.ledger);
+                e.risk.on_day_roll(day, &eq);
+                e.trace.rec("ledger.on_day_roll", 0, 0);
+                e.ledger.on_day_roll(e.now.engine_ns);
+                e.last_day_rolled = day;
+            }
+        }
+        4 => {
+            let v = VenueId((arg & 0xFF) as u8);
+            let a = AccountId(((arg >> 8) & 0xFF) as u8);
+            let caps = e.rd.caps(v);
+            let refresh = caps.dms_refresh_ms.max(1);
+            let timeout = caps.dms_timeout_ms.max(2 * refresh);
+            let mut c = hft_event::GwCmd::sim_reset(a);
+            c.op = hft_event::GwOp::DeadManRefresh;
+            c.arg = timeout;
+            e.out.emits.push(Emit::Gw {
+                ring: OutRing::Venue(v),
+                cmd: c,
+                rec: None,
+            });
+            let ms = e.now.tsc_per_ms.max(1);
+            e.heap
+                .push(crate::timers::TimerEntry {
+                    deadline: e.now.tsc.0 + u64::from(refresh) * ms,
+                    owner: 1,
+                    timer_id: id,
+                    group: 0,
+                })
+                .map_err(|_| FatalReason::TimerOverflow)?;
+        }
+        5 => {
+            let v = VenueId((arg & 0xFF) as u8);
+            let pending = crate::engine::live_gw_venues(&e.rd)
+                .iter()
+                .find(|x| x.0 == v)
+                .is_some_and(|x| x.1.iter().any(|a| e.oms.table_view(v, *a).is_some_and(|t| pending_slots(e, v, *a, t.n_slots))));
+            if !pending {
+                let mut c = hft_event::GwCmd::sim_reset(AccountId(0));
+                c.op = hft_event::GwOp::Rotate;
+                e.out.emits.push(Emit::Gw {
+                    ring: OutRing::Venue(v),
+                    cmd: c,
+                    rec: None,
+                });
+            }
+        }
+        6 => {}
+        7 => {
+            crate::snapshot::write_snapshot(e, inst, drv, crate::snapshot::PURPOSE_ON_DEMAND)?;
+            e.snapshot_requested = false;
+        }
+        8 | 9 => {
+            e.clock_ok = k == 8;
+            e.now = e.now_of(slot.tsc, e.cur_seq);
+            e.trace.rec("apply.Clock", u64::from(e.clock_ok), 0);
+            crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Clock { ok: e.clock_ok })?;
+        }
+        10 => {
+            let n = e.conflated;
+            e.conflated = 0;
+            e.seq_note(note::CONFLATED, NoteLevel::Info, GroupId(0), InstId(0), [n, 0, 0, 0, 0, 0, 0, 0]);
+        }
+        11 => {
+            let v = VenueId((arg & 0xFF) as u8);
+            let a = AccountId(((arg >> 8) & 0xFF) as u8);
+            let mut c = hft_event::GwCmd::sim_reset(a);
+            c.op = hft_event::GwOp::SessionKeepalive;
+            e.out.emits.push(Emit::Gw {
+                ring: OutRing::Venue(v),
+                cmd: c,
+                rec: None,
+            });
+        }
+        12 | 13 => {
+            let kind = if k == 12 { StorageKind::PersistLag } else { StorageKind::DiskLow };
+            let level = (arg & 0xFF) as u8;
+            e.trace.rec("apply.Storage", k.into(), u64::from(level));
+            crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Storage { kind, level })?;
+        }
+        14 => {
+            e.trace.rec("apply.Storage", 14, 0);
+            crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Storage { kind: StorageKind::Both, level: 0 })?;
+        }
+        15 => {
+            let v = VenueId((arg & 0xFF) as u8);
+            let at = crate::driver::next_funding_settle_of(e, v);
+            if let Some(t) = at {
+                synth_funding(e, inst, drv, v, t)?;
+            }
+        }
+        16 => {
+            let a = AccountId(((arg >> 8) & 0xFF) as u8);
+            e.trace.rec("apply.KillSelfTest", u64::from(a.0), 0);
+            crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Gate(GateEvent::KillSelfTest { account: a }))?;
+        }
+        17 => {
+            let n = usize::from(e.sp.notify_per_continue);
+            let mut v: Vec<crate::notify::Queued> = Vec::new();
+            e.notify.pop_backlog(n, &mut v);
+            e.trace.rec("notify_continue", v.len() as u64, 0);
+            // Delivered in this Input's first round (queued ahead of new notifications).
+            for q in v {
+                e.notify.push_front_queue(q);
+            }
+            crate::process::naked_scan(e, inst, drv)?;
+        }
+        18 => {
+            refdata_recheck_timer(e, inst, drv, (arg & 0xFF) as u16)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn refdata_recheck_timer<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, assembly: u16) -> R<()> {
+    e.drain.recheck_due = false;
+    e.drain.recheck_done = true;
+    let mut stage_arg: Option<(u64, u64)> = None;
+    if assembly != 0 {
+        stage_arg = Some((1, u64::from(assembly)));
+    } else if let Some(r) = e.cmd.active.pending_refdata {
+        let content = e.cmd.blobs.get(&r.sha256).map(|b| b.to_vec()).unwrap_or_default();
+        let res = RefData::load(&content, Some(&e.rd));
+        match &res {
+            Err(rep) => stage_arg = Some((2, rep.code() as u64)),
+            Ok(_) => {
+                if let Some(a) = refdata_recheck(e, inst, &res) {
+                    stage_arg = Some(if a == 0 { (4, 0) } else { (3, u64::from(a)) });
+                }
+            }
+        }
+    }
+    match stage_arg {
+        None => e.drain.recheck_ok = true,
+        Some((st, arg)) => {
+            e.drain.recheck_ok = false;
+            e.cmd.active.pending_refdata = None;
+            e.seq_note(note::REFDATA_RECHECK_FAILED, NoteLevel::P1, GroupId(0), InstId(0), [st, arg, 0, 0, 0, 0, 0, 0]);
+        }
+    }
+    drain_check(e, inst, drv)
+}
+
+// ------------------------------------------------------------------------------- funding
+
+/// Synthesis of every unsettled (account, inst) of venue `v` up to settle time `at`.
+pub(crate) fn synth_funding<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, v: VenueId, at: i64) -> R<()> {
+    let insts: Vec<InstId> = e.rd.insts_of_venue(v).to_vec();
+    let n_acc = crate::engine::account_count(&e.rd);
+    for a in 1..=n_acc {
+        let a = AccountId(a as u8);
+        for i in insts.iter().copied() {
+            let Some(r) = e.market.row(i).copied() else { continue };
+            if r.next_funding_ns == 0 || r.next_funding_ns > at || r.settled_cut_ns >= r.next_funding_ns {
+                continue;
+            }
+            if e.ledger.pos(a, i).qty.0 == 0 {
+                continue;
+            }
+            e.trace.rec("ledger.synth_funding", u64::from(a.0), u64::from(i.0));
+            if let Some(mut f) = e.ledger.synth_funding(a, i, r.mark_px, r.funding_rate, r.next_funding_ns) {
+                f.rx_tsc = Tsc(0);
+                f.synth = 1;
+                e.out.push(RecordFlags(0), &f);
+                if let Some(d) = e.ledger.apply_funding(&f, e.now.engine_ns) {
+                    crate::process::pnl(e, inst, drv, d)?;
+                }
+            }
+        }
+    }
+    for i in insts {
+        if let Some(r) = e.market.row_mut(i)
+            && r.next_funding_ns != 0
+            && r.next_funding_ns <= at
+        {
+            r.settled_cut_ns = r.next_funding_ns;
+        }
+    }
+    Ok(())
+}
+
+// ------------------------------------------------------------------------------- recon
+
+pub(crate) fn reconcile<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>, drv: &mut D, slot: &InputSlot) -> R<()> {
+    let Some(r) = slot.read::<ReconcileReport>() else { return Ok(()) };
+    let key = (r.report_id, r.account, r.venue);
+    let gi = match e.cmd.recon.iter().position(|g| (g.report_id, g.account, g.venue) == key) {
+        Some(i) => i,
+        None => {
+            e.cmd.recon.push(ReconGroupState {
+                report_id: r.report_id,
+                account: r.account,
+                venue: r.venue,
+                count: r.count,
+                received: 0,
+                stored: Vec::with_capacity(usize::from(r.count)),
+            });
+            e.cmd.recon.len() - 1
+        }
+    };
+    if let Some(g) = e.cmd.recon.get_mut(gi) {
+        g.received += 1;
+    }
+    if r.item == ITEM_FUNDING {
+        let it = FundingReconItem {
+            account: r.account,
+            venue: r.venue,
+            inst: r.inst,
+            settle_ts_ns: r.exch_ts_ns,
+            exch_amount: r.exch_amount,
+            engine_amount: r.engine_amount,
+            report_id: r.report_id,
+        };
+        e.trace.rec("ledger.reconcile_funding", u64::from(r.account.0), 0);
+        let fr = e.ledger.reconcile_funding(&it, e.now.utc_ns, e.now.engine_ns);
+        if let FundingRecon::Corrected { pnl, .. } = fr {
+            crate::process::pnl(e, inst, drv, pnl)?;
+        }
+    } else if let Some(g) = e.cmd.recon.get_mut(gi) {
+        g.stored.push(r);
+    }
+    if r.item == ITEM_POSITION {
+        e.cmd.recon_diff.retain(|x| x.0 != (r.report_id, r.account, r.inst));
+        e.cmd
+            .recon_diff
+            .push(((r.report_id, r.account, r.inst), Qty(r.exch_qty.0 - r.engine_qty.0)));
+        e.cmd.recon_view.retain(|x| x.0 != r.report_id);
+        e.cmd.recon_view.push((r.report_id, r.view_seq));
+    }
+    let done = e.cmd.recon.get(gi).is_some_and(|g| g.received >= g.count);
+    if !done {
+        return Ok(());
+    }
+    let g = e.cmd.recon.remove(gi);
+    // ① AUTO_EXTERNAL.
+    let summary_flags = g.stored.iter().find(|x| x.item == ITEM_SUMMARY).map_or(0, |x| x.sflags);
+    for it in g.stored.iter().filter(|x| x.item == ITEM_POSITION && x.sflags & ReconcileReport::AUTO_EXTERNAL != 0) {
+        if auto_external_check(e, it, summary_flags) {
+            let mark = e.market.row(it.inst).map_or(hft_types::Px(0), |r| r.mark_px);
+            let x = hft_ledger::Ledger::auto_external_fill(
+                it.account,
+                it.venue,
+                it.inst,
+                Qty(it.engine_qty.0 - it.exch_qty.0),
+                mark,
+                it.report_id,
+            );
+            crate::process::external_fill(e, inst, drv, &x, true)?;
+            crate::mode_glue::apply_mode(
+                e,
+                inst,
+                drv,
+                ModeInput::Gate(GateEvent::Disposed {
+                    account: it.account,
+                    venue: it.venue,
+                    report_id: it.report_id,
+                    item: ReconItemKey::new(ReconItemKey::POSITION, it.inst.0),
+                    how: hft_risk::mode::Disposition::AutoExternal,
+                }),
+            )?;
+        }
+    }
+    // ② OMS and risk grading.
+    let h = hft_event::RecordHeader {
+        len: 0,
+        kind: EventKind::RECONCILE_REPORT.0,
+        flags: 0,
+        seq: e.cur_seq,
+        tsc: e.now.tsc.0,
+    };
+    for it in g.stored.iter() {
+        let mut o = e.take_oms();
+        e.oms.on_reconcile(it, &h, &mut o);
+        crate::intents::drain_oms(e, inst, drv, &mut o)?;
+        e.put_oms(o);
+    }
+    e.trace.rec("oms.on_reconcile", g.stored.len() as u64, 0);
+    let v = e.risk.on_reconcile(&ReconcileGroup { items: &g.stored });
+    e.trace.rec("risk.on_reconcile", u64::from(v.gate.is_some()), 0);
+    if let Some(m) = v.recon {
+        crate::mode_glue::apply_mode(e, inst, drv, m)?;
+    }
+    if let Some(gi) = v.gate {
+        e.trace.rec("apply.Gate.Recon", 0, 0);
+        crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Gate(GateEvent::Recon(&gi)))?;
+    }
+    // ③ funding window sweep.
+    let mut outv = hft_ledger::FixedVec::<FundingRecon, 64>::new();
+    e.trace.rec("ledger.funding_window_sweep", u64::from(g.account.0), 0);
+    e.ledger
+        .funding_window_sweep(g.account, g.venue, e.now.utc_ns, e.now.engine_ns, &mut outv);
+    for fr in outv.iter().copied().collect::<Vec<_>>() {
+        if let FundingRecon::Corrected { pnl, .. } = fr {
+            crate::process::pnl(e, inst, drv, pnl)?;
+        }
+    }
+    crate::process::unknown_gate(e, inst, drv, g.account)
+}
+
+const ITEM_POSITION: u8 = 1;
+const ITEM_SUMMARY: u8 = 5;
+const ITEM_FUNDING: u8 = 6;
+
+fn auto_external_check(e: &Engine, it: &ReconcileReport, summary_flags: u16) -> bool {
+    let (a, v, i) = (it.account, it.venue, it.inst);
+    if !e.risk.auto_external_ok(a, v, summary_flags) {
+        return false;
+    }
+    if e.oms.table_view(v, a).is_some_and(|t| t.unknown_count > 0) {
+        return false;
+    }
+    let fl = e.oms.inflight().pos(a, i);
+    if fl.open_buy.0 != 0 || fl.open_sell.0 != 0 {
+        return false;
+    }
+    let last_fill = e.cmd.fill_seq.iter().find(|x| x.0 == (a, i)).map_or(0, |x| x.1);
+    if last_fill > it.view_seq {
+        return false;
+    }
+    let eng = e.ledger.pos(a, i).qty.0;
+    if eng != it.engine_qty.0 {
+        return false;
+    }
+    let ex = it.exch_qty.0;
+    let same_sign = ex == 0 || (ex > 0) == (eng > 0);
+    same_sign && ex.abs() < eng.abs()
+}
+
+// Fill seq tracking for StaleReport / AUTO_EXTERNAL (kept in CmdState).
+impl CmdState {
+    /// Records a fill of (account, inst) at the current seq.
+    pub fn note_fill(&mut self, a: AccountId, i: InstId, seq: u64) {
+        match self.fill_seq.iter_mut().find(|x| x.0 == (a, i)) {
+            Some(x) => x.1 = seq,
+            None => self.fill_seq.push(((a, i), seq)),
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn _unused(_: BlobKind, _: StrategyId, _: PnlDelta, _: FundingSettle) {}
+
+impl Default for ReconPendingHdr {
+    fn default() -> ReconPendingHdr {
+        <ReconPendingHdr as zerocopy::FromZeros>::new_zeroed()
+    }
+}
+
+impl Default for VenueNoticeRow {
+    fn default() -> VenueNoticeRow {
+        <VenueNoticeRow as zerocopy::FromZeros>::new_zeroed()
+    }
+}

@@ -854,6 +854,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "hft-sequencer"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "hft-book",
+ "hft-event",
+ "hft-exec",
+ "hft-journal",
+ "hft-ledger",
+ "hft-oms",
+ "hft-refdata",
+ "hft-risk",
+ "hft-rt",
+ "hft-sequencer",
+ "hft-strategy-sdk",
+ "hft-testkit",
+ "hft-types",
+ "proptest",
+ "xxhash-rust",
+ "zerocopy",
+]
+
+[[package]]
 name = "hft-sim"
 version = "0.1.0"
 dependencies = [
