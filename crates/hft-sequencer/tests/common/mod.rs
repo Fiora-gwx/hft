@@ -769,6 +769,8 @@ pub struct TestIo<S: StrategySet> {
     pub build: [u8; 20],
     /// The old journal of a cold start.
     pub old: Option<Log>,
+    /// `(take number, tsc)`: TSC jumps after that hand-over.
+    pub jump: Option<(u64, u64)>,
 }
 
 impl<S: StrategySet> TestIo<S> {
@@ -797,6 +799,7 @@ impl<S: StrategySet> TestIo<S> {
             tsc_reads: 0,
             build: [0; 20],
             old: None,
+            jump: None,
         }
     }
     pub fn ring(&mut self, r: RingId) -> &mut VecDeque<Elem> {
@@ -893,6 +896,12 @@ impl<S: StrategySet> LiveIo<S> for TestIo<S> {
         self.handed.push(r);
         self.tsc += self.tsc_per_take;
         let n = self.takes;
+        if let Some((k, t)) = self.jump
+            && k == n
+        {
+            self.tsc = t;
+            self.jump = None;
+        }
         let due: Vec<Arrival> = self.arrivals.iter().filter(|a| a.after_take == n).cloned().collect();
         self.arrivals.retain(|a| a.after_take != n);
         for a in due {
@@ -1009,6 +1018,13 @@ impl<S: StrategySet> H<S> {
     }
     pub fn step(&mut self) -> StepOutcome {
         self.s.step()
+    }
+    /// One step with a TSC jump to `tsc` right after hand-over number `take`.
+    pub fn step_until_take(&mut self, take: u64, tsc: u64) -> StepOutcome {
+        self.io().jump = Some((take, tsc));
+        let o = self.s.step();
+        self.io().jump = None;
+        o
     }
     /// Steps until a round is Idle (at most `max` rounds).
     pub fn run_max(&mut self, max: usize) -> StepOutcome {
@@ -1434,4 +1450,12 @@ impl<S: StrategySet> H<S> {
         self.push(r, &ev);
         self.run();
     }
+}
+
+/// A `Trade` of `i` (md ring).
+pub fn trade(i: InstId, id: u64) -> hft_event::Trade {
+    let mut h = MarketHdr::new_zeroed();
+    h.venue = inst_venue(i);
+    h.inst = i;
+    hft_event::Trade { h, px: px("50000"), qty: q("0.001"), trade_id: id, taker_side: hft_types::Side::Buy, _pad: [0; 7] }
 }
