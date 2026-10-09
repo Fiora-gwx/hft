@@ -1979,21 +1979,25 @@ pub(crate) fn reconcile<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut
         seq: e.cur_seq,
         tsc: e.now.tsc.0,
     };
-    for it in g.stored.iter() {
-        let mut o = e.take_oms();
-        e.oms.on_reconcile(it, &h, &mut o);
-        crate::intents::drain_oms(e, inst, drv, &mut o)?;
-        e.put_oms(o);
-    }
-    e.trace.rec("oms.on_reconcile", g.stored.len() as u64, 0);
-    let v = e.risk.on_reconcile(&ReconcileGroup { items: &g.stored });
-    e.trace.rec("risk.on_reconcile", u64::from(v.gate.is_some()), 0);
-    if let Some(m) = v.recon {
-        crate::mode_glue::apply_mode(e, inst, drv, m)?;
-    }
-    if let Some(gi) = v.gate {
-        e.trace.rec("apply.Gate.Recon", 0, 0);
-        crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Gate(GateEvent::Recon(&gi)))?;
+    // A group of Funding items only touches neither the gate nor the Recon cap (SEQ-163).
+    let graded = !g.stored.is_empty();
+    if graded {
+        for it in g.stored.iter() {
+            let mut o = e.take_oms();
+            e.oms.on_reconcile(it, &h, &mut o);
+            crate::intents::drain_oms(e, inst, drv, &mut o)?;
+            e.put_oms(o);
+        }
+        e.trace.rec("oms.on_reconcile", g.stored.len() as u64, 0);
+        let v = e.risk.on_reconcile(&ReconcileGroup { items: &g.stored });
+        e.trace.rec("risk.on_reconcile", u64::from(v.gate.is_some()), 0);
+        if let Some(m) = v.recon {
+            crate::mode_glue::apply_mode(e, inst, drv, m)?;
+        }
+        if let Some(gi) = v.gate {
+            e.trace.rec("apply.Gate.Recon", 0, 0);
+            crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Gate(GateEvent::Recon(&gi)))?;
+        }
     }
     // ③ funding window sweep.
     let mut outv = hft_ledger::FixedVec::<FundingRecon, 64>::new();
@@ -2005,7 +2009,10 @@ pub(crate) fn reconcile<D: Driver<S>, S: StrategySet>(e: &mut Engine, inst: &mut
             crate::process::pnl(e, inst, drv, pnl)?;
         }
     }
-    crate::process::unknown_gate(e, inst, drv, g.account)
+    if graded {
+        crate::process::unknown_gate(e, inst, drv, g.account)?;
+    }
+    Ok(())
 }
 
 const ITEM_POSITION: u8 = 1;

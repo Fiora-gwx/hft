@@ -18,6 +18,7 @@ mod clock;
 mod conflate;
 mod env;
 mod liveness;
+mod recon;
 mod recover;
 mod strategies;
 mod views;

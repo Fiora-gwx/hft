@@ -482,6 +482,14 @@ impl Engine {
         })
     }
 
+    /// `(n_stored, count, received)` of an incomplete reconciliation group (section 19).
+    pub fn cmd_recon_pending(&self, report_id: u64) -> Option<(u16, u16, u16)> {
+        self.cmd
+            .recon
+            .iter()
+            .find(|g| g.report_id == report_id)
+            .map(|g| (g.stored.len() as u16, g.count, g.received))
+    }
     /// Whether a command id is in the de-duplication table (tests, tools).
     pub fn cmd_dedup_has(&self, id: [u8; 16]) -> bool {
         self.cmd.dedup.iter().any(|r| r.cmd_id == id)
