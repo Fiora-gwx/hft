@@ -185,7 +185,7 @@ impl MState {
             || mark_old
     }
     /// `MarginStale` deadline: `min(report + margin_stale, mark + mark_stale) + 1 ns`.
-    fn stale_deadline(&self, m: &MarginLimits) -> i64 {
+    pub(crate) fn stale_deadline(&self, m: &MarginLimits) -> i64 {
         let r = self.report_ens.saturating_add(ms(m.margin_stale_ms));
         let k = if self.mark_ens == i64::MAX {
             i64::MAX

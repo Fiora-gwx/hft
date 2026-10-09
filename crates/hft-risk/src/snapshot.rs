@@ -27,7 +27,7 @@ pub const RISK_STATE_VERSION: u16 = 1;
 pub const MODE_TABLE_VERSION: u16 = 2;
 pub const RISK_COUNTERS_VERSION: u16 = 4;
 pub const GATES_VERSION: u16 = 5;
-pub const MARGIN_VERSION: u16 = 4;
+pub const MARGIN_VERSION: u16 = 3;
 
 /// `RiskRowHdr.kind` values (4 and 5 reserved).
 pub mod row_kind {
@@ -146,18 +146,16 @@ const _: () = assert!(core::mem::offset_of!(RiskUsRow, uflags) == 16);
 const _: () = assert!(core::mem::offset_of!(RiskUsRow, _pad) == 17);
 
 row! {
-    /// Margin state of (account, venue) (row version 4, 96 B; times are engine_ns).
+    /// Margin state of (account, venue) (row version 3, 88 B; times are engine_ns).
     pub struct MarginRow {
         pub account: u8, pub venue: u8, pub level: u8, pub mflags: u8, pub _pad: u32,
         pub report_seq: u64, pub report_ens: i64, pub reported_ratio: i64, pub est_ratio: i64,
         pub rep_liq_dist: i64, pub est_liq_dist: i64,
         pub l2_since_ens: i64, pub deadline_ens: i64, pub next_force_ens: i64,
         pub mark_ens: i64,
-        /// Deadline of the `MarginStale` timer in the heap (0 = none).
-        pub stale_due_ens: i64,
     }
 }
-const _: () = assert!(size_of::<MarginRow>() == 96);
+const _: () = assert!(size_of::<MarginRow>() == 88);
 const _: () = assert!(core::mem::offset_of!(MarginRow, venue) == 1);
 const _: () = assert!(core::mem::offset_of!(MarginRow, level) == 2);
 const _: () = assert!(core::mem::offset_of!(MarginRow, mflags) == 3);
@@ -172,7 +170,6 @@ const _: () = assert!(core::mem::offset_of!(MarginRow, l2_since_ens) == 56);
 const _: () = assert!(core::mem::offset_of!(MarginRow, deadline_ens) == 64);
 const _: () = assert!(core::mem::offset_of!(MarginRow, next_force_ens) == 72);
 const _: () = assert!(core::mem::offset_of!(MarginRow, mark_ens) == 80);
-const _: () = assert!(core::mem::offset_of!(MarginRow, stale_due_ens) == 88);
 
 row! {
     /// Desired mode of a cell, or a (strategy, account) `default_mode` (8 B, row version 2).
@@ -442,7 +439,6 @@ impl Risk {
                     deadline_ens: st.deadline_ens,
                     next_force_ens: st.next_force_ens,
                     mark_ens: st.mark_ens,
-                    stale_due_ens: st.stale_due_ens,
                 });
             }
         }
@@ -700,6 +696,7 @@ impl Risk {
                 if !acct_ok(m.account) || m.venue >= 64 || m.level > 3 {
                     return Err(RestoreError::BadValue);
                 }
+                let lim = risk.s.lim().acct(AccountId(m.account)).margin;
                 if let Some(t) = risk
                     .s
                     .margin
@@ -718,8 +715,10 @@ impl Risk {
                         deadline_ens: m.deadline_ens,
                         next_force_ens: m.next_force_ens,
                         mark_ens: m.mark_ens,
-                        stale_due_ens: m.stale_due_ens,
+                        stale_due_ens: 0,
                     };
+                    // The `MarginStale` deadline in the heap is derived, not stored.
+                    t.stale_due_ens = t.stale_deadline(&lim);
                 }
             }
         }
