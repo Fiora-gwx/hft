@@ -94,7 +94,7 @@ fn rsk_008_snapshot_row_layouts() {
         ],
         [0, 8, 16, 17]
     );
-    assert_eq!(size_of::<MarginRow>(), 88);
+    assert_eq!(size_of::<MarginRow>(), 96);
     assert_eq!(
         [
             offset_of!(MarginRow, account),
@@ -111,9 +111,10 @@ fn rsk_008_snapshot_row_layouts() {
             offset_of!(MarginRow, l2_since_ens),
             offset_of!(MarginRow, deadline_ens),
             offset_of!(MarginRow, next_force_ens),
-            offset_of!(MarginRow, mark_ens)
+            offset_of!(MarginRow, mark_ens),
+            offset_of!(MarginRow, stale_due_ens)
         ],
-        [0, 1, 2, 3, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80]
+        [0, 1, 2, 3, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88]
     );
     // Field sums equal the sizes (no implicit padding): zerocopy's IntoBytes derive already
     // rejects padding at compile time; recheck the sums.
@@ -123,7 +124,7 @@ fn rsk_008_snapshot_row_layouts() {
     assert_eq!(1 + 1 + 6 + 8, size_of::<ReconRow>());
     assert_eq!(8 + 8 + 2 + 2 + 4 + 8, size_of::<ReconGateRowHdr>());
     assert_eq!(8 + 8 + 1 + 7, size_of::<RiskUsRow>());
-    assert_eq!(4 + 4 + 10 * 8, size_of::<MarginRow>());
+    assert_eq!(4 + 4 + 11 * 8, size_of::<MarginRow>());
 }
 
 /// A snapshot with one section-17 row of `kind`, or one margin row with `level`.
@@ -171,8 +172,13 @@ fn rsk_009_code_values() {
     );
     // .2
     assert_eq!(
-        [mflags::TRUNCATED, mflags::RATIO_L2, mflags::DEADLINE_L3],
-        [1, 2, 4]
+        [
+            mflags::TRUNCATED,
+            mflags::RATIO_L2,
+            mflags::DEADLINE_L3,
+            mflags::HAS_REPORT
+        ],
+        [1, 2, 4, 8]
     );
     // .3
     assert_eq!((eq_flags::SOD_VALID, us_flags::PREV_US_DOWN), (1, 1));

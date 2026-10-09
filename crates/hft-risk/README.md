@@ -671,13 +671,14 @@ pub struct PxBand { pub max_px_dev: Rate, pub ioc_max_cross: Rate, pub rr_max_cr
 - **节 23 `MarginState`**:每 (account, venue) 一行,键 (account, venue):
 
 ```rust
-#[repr(C)] pub struct MarginRow {                                   // 行版本 3,88 B;时刻全部为 engine_ns
+#[repr(C)] pub struct MarginRow {                                   // 行版本 4,96 B;时刻全部为 engine_ns
     pub account: AccountId, pub venue: VenueId, pub level: u8 /* 0..3 = L0..L3 */,
-    pub mflags: u8 /* TRUNCATED=1 RATIO_L2=2(比率触发 L2)DEADLINE_L3=4(截止过期进入 L3) */, pub _pad: u32,                    // 0..8
+    pub mflags: u8 /* TRUNCATED=1 RATIO_L2=2(比率触发 L2)DEADLINE_L3=4(截止过期进入 L3) HAS_REPORT=8(收到过 MarginReport) */, pub _pad: u32,                    // 0..8
     pub report_seq: u64, pub report_ens: i64, pub reported_ratio: Rate, pub est_ratio: Rate,                                    // 8..40
     pub rep_liq_dist: Rate, pub est_liq_dist: Rate,                                                                              // 40..56
     pub l2_since_ens: i64, pub deadline_ens: i64, pub next_force_ens: i64,                                                       // 56..80
     pub mark_ens: i64,               // 最近一份 MarginSample 的 mark_ens(MarginStale 截止与重启后 L3 确认用;i64::MAX = 无永续持仓)    // 80..88
+    pub stale_due_ens: i64,          // 堆中 `Timer{Risk, MarginStale}` 的截止(0 = 不在堆);存下而不是按样本重算,恢复后与不中断时同一截止(回放逐字节一致)    // 88..96
 }
 // AccountId、VenueId 各 u8(hft-types);每个结构旁有 const _: () = assert!(size_of::<T>() == N)。
 ```

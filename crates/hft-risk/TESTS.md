@@ -236,7 +236,7 @@ spec: README.md
   - `ReconRow` 16 B:`ignore_streak` 0、`warn_streak` 1、`_pad` 2、`last_diff` 8
   - `ReconGateRowHdr` 32 B:`report_id` 0、`disposed_mask` 8、`n_items` 16、`flags` 18、`_pad` 20、`view_seq` 24;其后每个 `ReconItemKey` 8 B
   - `RiskUsRow` 24 B:`us_up_seq` 0、`prev_view_seq` 8、`uflags` 16、`_pad` 17
-  - `MarginRow` 88 B:`account` 0、`venue` 1、`level` 2、`mflags` 3、`_pad` 4、`report_seq` 8、`report_ens` 16、`reported_ratio` 24、`est_ratio` 32、`rep_liq_dist` 40、`est_liq_dist` 48、`l2_since_ens` 56、`deadline_ens` 64、`next_force_ens` 72、`mark_ens` 80
+  - `MarginRow` 96 B(行版本 4):`account` 0、`venue` 1、`level` 2、`mflags` 3、`_pad` 4、`report_seq` 8、`report_ens` 16、`reported_ratio` 24、`est_ratio` 32、`rep_liq_dist` 40、`est_liq_dist` 48、`l2_since_ens` 56、`deadline_ens` 64、`next_force_ens` 72、`mark_ens` 80、`stale_due_ens` 88
   - 以上结构的字段之和等于 `size_of`(无隐式填充)
 - 实现:`crates/hft-risk/tests/layout.rs::rsk_008_snapshot_row_layouts`
 
@@ -251,7 +251,7 @@ spec: README.md
 | 行 | 类型 | 期望 |
 |---|---|---|
 | RSK-009.1 | `RiskRowHdr.kind` | `Acct = 1`、`Bucket = 2`、`Recon = 3`、`ReconGate = 6`、`Lev = 7`、`UserStream = 8`;4、5 未分配 |
-| RSK-009.2 | `MarginRow.level` / `mflags` | 0..3 = L0..L3;`TRUNCATED = 1`、`RATIO_L2 = 2`、`DEADLINE_L3 = 4` |
+| RSK-009.2 | `MarginRow.level` / `mflags` | 0..3 = L0..L3;`TRUNCATED = 1`、`RATIO_L2 = 2`、`DEADLINE_L3 = 4`、`HAS_REPORT = 8` |
 | RSK-009.3 | `RiskAcctRow.eq_flags` / `RiskUsRow.uflags` | `SOD_VALID = 1` / `PREV_US_DOWN = 1` |
 | RSK-009.4 | `ReconGateRowHdr.flags` | `TRUNCATED = 1`、`INFLIGHT = 2`、`USERSTREAM_DOWN = 4`、`OVERFLOW = 8` |
 | RSK-009.5 | `Origin` | `Strategy = 1`、`Exec = 2`、`Oms = 3`、`Command = 4` |
