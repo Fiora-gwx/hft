@@ -109,6 +109,8 @@ pub struct Instances<S: StrategySet> {
     pub(crate) touched: Vec<u16>,
     /// Market-delivery subscription index (CSR etc.).
     pub subs: crate::subs::SubIndex,
+    /// The Models of an advisor mirror (off in every other sequencer).
+    pub models: crate::advisor::MirrorModels<S>,
 }
 
 impl<S: StrategySet> core::fmt::Debug for Instances<S> {
@@ -183,6 +185,7 @@ impl<S: StrategySet> Instances<S> {
             queue: Vec::with_capacity(1024),
             touched: Vec::with_capacity(256),
             subs: crate::subs::SubIndex::new(rd, caps),
+            models: crate::advisor::MirrorModels::default(),
         })
     }
     /// Slot index of a strategy.
@@ -379,6 +382,7 @@ pub(crate) fn apply_params<D: crate::Driver<S>, S: StrategySet>(
     }
     let cells: Vec<(AccountId, GroupId)> = inst_cells(inst);
     e.gpos.set_cells(cells.into_iter());
+    crate::advisor::on_params(e, inst, ix);
     if !added.is_empty() || !removed.is_empty() {
         e.trace.rec("apply.GroupsChanged", added.len() as u64, removed.len() as u64);
         crate::mode_glue::apply_mode(e, inst, drv, ModeInput::GroupsChanged {
@@ -458,6 +462,16 @@ pub(crate) enum Direct<'a> {
     Warmup { local_kind: u16, chunk_no: u32, last: bool, payload: &'a [u8] },
 }
 
+/// `market_ev` for the advisor's Model deliveries.
+pub(crate) fn market_ev_pub<'a>(m: &'a MarketEv, gix: u16, market: &'a crate::market::Market) -> EventRef<'a> {
+    market_ev(m, gix, market)
+}
+
+/// `notif_ev` for the advisor's Model deliveries (own events and Notice carry their gix).
+pub(crate) fn notif_ev_pub(n: &Notif) -> EventRef<'_> {
+    notif_ev(n, |_| hft_strategy_sdk::GIX_NONE)
+}
+
 /// Notifications → `EventRef`.
 fn notif_ev(n: &Notif, gix_of: impl Fn(GroupId) -> u16) -> EventRef<'_> {
     match n {
@@ -500,6 +514,13 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
     direct: Option<(usize, Direct<'_>, bool)>,
 ) -> Result<(), crate::types::FatalReason> {
     e.gpos.refresh(&e.ledger);
+    if inst.models.on {
+        let manual = match direct {
+            Some((dix, Direct::Manual { gix, payload, reduce_only }, _)) => Some((dix, gix, payload, reduce_only)),
+            _ => None,
+        };
+        crate::advisor::deliver(e, inst, market, queued, manual);
+    }
     inst.touched.clear();
     let order: Vec<u16> = inst.dispatch_order.clone();
     let mut ro_ix: Option<usize> = None;

@@ -958,6 +958,23 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
                 return Ok(res(status::INVALID_ARGS, detail::BAD_VALUE));
             }
             let both = inst.slots.get(ix).is_some_and(|s| s.warmup == hft_strategy_sdk::Part::Both);
+            if inst.models.on
+                && let ControlCmd::InjectWarmup {
+                    local_kind,
+                    chunk_no,
+                    last,
+                    payload,
+                    ..
+                } = c
+            {
+                let d = Direct::Warmup {
+                    local_kind: *local_kind,
+                    chunk_no: *chunk_no,
+                    last: *last != 0,
+                    payload,
+                };
+                crate::advisor::warmup(e, inst, ix, &d);
+            }
             if both {
                 p.direct = Some((
                     ix,
@@ -1735,7 +1752,7 @@ pub(crate) fn sys_timer<'a, D: Driver<S>, S: StrategySet>(
                 });
             }
         }
-        6 => {}
+        6 => crate::advisor::model_tick(e, inst),
         7 => {
             crate::snapshot::write_snapshot(e, inst, drv, crate::snapshot::PURPOSE_ON_DEMAND)?;
             e.snapshot_requested = false;

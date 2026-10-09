@@ -289,6 +289,29 @@ impl ReplayDriver {
             hand_meta: mode != ReplayMode::Mirror,
         }
     }
+    /// Appends newly committed records (advisor mirror tailing the journal).
+    pub fn extend(&mut self, recs: &[MemRecord], segs: &[crate::journal::SegClock], seg_start: &[usize]) {
+        let base = self.sink.log.recs.len();
+        for r in recs {
+            if r.kind == EventKind::CONFIG_BLOB
+                && let Some(h) = crate::types::read_body::<BlobHdr>(&r.body)
+            {
+                let c = r.body.get(72..72 + h.blob.len as usize).unwrap_or(&[]);
+                self.blobs.put(h.blob, c);
+            }
+        }
+        self.sink.log.recs.extend_from_slice(recs);
+        // Segment boundaries of the appended part.
+        for (k, st) in seg_start.iter().enumerate() {
+            if *st >= base && *st < self.sink.log.recs.len() && !self.sink.log.seg_start.contains(st) {
+                self.sink.log.seg_start.push(*st);
+                if let Some(c) = segs.get(k) {
+                    self.sink.log.segs.push(*c);
+                }
+            }
+        }
+        self.end = self.sink.log.recs.len();
+    }
     pub fn set_run_tsc(&mut self, t: Option<Tsc>) {
         self.run_tsc = t;
     }
