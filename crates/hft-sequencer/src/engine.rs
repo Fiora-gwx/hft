@@ -482,6 +482,26 @@ impl Engine {
         })
     }
 
+    /// `InputHash` of the half event a cold start truncated (reported to hft-core).
+    pub fn truncated_input_hash(&self) -> Option<u64> {
+        self.rec.poison
+    }
+    /// `(venue, account, count)` of every `force_unknown` of the last recovery.
+    pub fn recovery_forced(&self) -> &[(VenueId, AccountId, u32)] {
+        &self.rec.forced
+    }
+    /// `RecoveryFlags` bits given per account at the end of the last recovery.
+    pub fn recovery_flags(&self) -> &[(AccountId, u8)] {
+        &self.rec.flags
+    }
+    /// Inputs replayed from the tail by the last recovery.
+    pub fn recovery_replayed(&self) -> u64 {
+        self.rec.replayed
+    }
+    /// Output mismatches of the last recovery's tail replay.
+    pub fn recovery_mismatches(&self) -> &[crate::driver::Mismatch] {
+        &self.rec.mismatches
+    }
     /// `(n_stored, count, received)` of an incomplete reconciliation group (section 19).
     pub fn cmd_recon_pending(&self, report_id: u64) -> Option<(u16, u16, u16)> {
         self.cmd

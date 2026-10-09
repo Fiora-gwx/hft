@@ -556,9 +556,10 @@ pub(crate) fn boot_journal<D: Driver<S>, S: StrategySet>(
             return Err(BootError::VersionNeedsDrain);
         }
     }
-    let plan_epoch = plan.epoch;
     let live = mode == DriverMode::Live;
-    let epoch_of = |snap: u32| if live { Some(snap.max(plan_epoch) + 1) } else { None };
+    // The tail is replayed with the snapshot's epoch (the logged reports carry it); the new
+    // epoch takes effect at the end of the recovery.
+    let epoch_of = |_snap: u32| None;
     let (ix, mut e, mut inst) = choose_and_restore::<S>(&log, &plan, setup, &epoch_of)?;
     e.rec.poison = poison;
     e.rec.drain_tail = ends_with_drain(&log) && snapshot_indices(&log).last() == Some(&ix);
@@ -668,6 +669,20 @@ fn recovery_end<D: Driver<S>, S: StrategySet>(
     let fatal = |_| BootError::Journal(JournalErr::Chain);
     e.rec.recovery_now = now;
     e.out.clear();
+    // New epoch (apps/hft-core formula): max(snapshot, persisted) + 1, written into the OMS
+    // counters (section 3) by reloading its sections with the new configuration.
+    let new_epoch = e.rec.snap_epoch.max(plan.epoch) + 1;
+    {
+        let mut w = hft_strategy_sdk::SnapshotWriter::new(64 << 20);
+        e.oms.snapshot(&mut w);
+        let mut cfg = e.setup.oms.clone();
+        cfg.engine_epoch = new_epoch;
+        cfg.tsc_hz_milli = e.setup.clock.tsc_hz_milli;
+        let mut r = SnapshotReader::new(w.as_bytes());
+        e.oms = Oms::restore(&mut r, &cfg, &e.rd).map_err(|_| BootError::SnapshotUndecodable { section: 3 })?;
+        e.prev_epoch = e.epoch;
+        e.epoch = new_epoch;
+    }
     let cause = e.cur_seq;
     let mut o = e.take_oms();
     e.trace.rec("oms.recovery_end", now.0, stop.0);

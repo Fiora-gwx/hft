@@ -1,17 +1,223 @@
-//! Cold-start recovery (TESTS.md "冷启动恢复": SEQ-256–SEQ-266).
+//! Cold-start recovery (TESTS.md "冷启动恢复": SEQ-256–SEQ-266, SEQ-342, SEQ-366).
 
-use hft_sequencer::SnapshotSel;
+use hft_event::{ControlCmd, EventKind, RecordFlags, Role};
+use hft_journal::RollReason;
+use hft_sequencer::driver::live::RingId;
+use hft_sequencer::driver::replay::{Log, ReplayDriver, ReplayMode};
+use hft_sequencer::{BootError, BootSource, MemJournal, RecoveryFlags, Sequencer, SnapshotSel, StepOutcome};
+use hft_types::{AccountId, CapSource, Side};
+use proptest::prelude::*;
 
 use crate::common::*;
 
-/// B0 steady + a few events; verify from the first snapshot passes.
-#[test]
-fn verify_smoke() {
+fn steady() -> H {
+    reset_script();
     let mut h = b0().boot();
     h.steady();
-    h.quote(A1, "50000", "50003");
-    h.run();
-    let m = h.verify();
-    assert!(m.is_empty(), "{m:?}");
-    let _ = SnapshotSel::Latest;
+    h
 }
+
+fn hash_of<D: hft_sequencer::Driver<TestSet>>(s: &Sequencer<D, TestSet>) -> [u8; 16] {
+    let mut w = hft_strategy_sdk::SnapshotWriter::new(64 << 20);
+    s.write_sections(&mut w);
+    hft_sequencer::snapshot::state_hash(w.as_bytes())
+}
+
+/// Verify replay of `log` from its first snapshot to the end; the final state hash.
+fn replay_hash(log: Log, setup: &hft_sequencer::EngineSetup) -> [u8; 16] {
+    let first = log.recs.iter().find(|r| r.kind == EventKind::STATE_SNAPSHOT).unwrap().seq;
+    let drv = ReplayDriver::new(ReplayMode::Verify, log, 0, 64);
+    let p = plan(SnapshotSel::AtSeq(first), true, 0, 0);
+    let mut s: Sequencer<ReplayDriver, TestSet> = Sequencer::boot(BootSource::Journal(p), setup, drv, hb()).unwrap();
+    while s.step() == StepOutcome::Busy {}
+    hash_of(&s)
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(12))]
+    #[test]
+    fn seq_256_truncate_to_event_end(cut in 0usize..1_000) {
+        let mut h = steady();
+        // One Input per step; the hash after each event, keyed by the journal length.
+        let mut at: Vec<(usize, [u8; 16])> = vec![(h.j().len(), hash_of(&h.s))];
+        for k in 0..40u64 {
+            h.push(RingId::Rep(0), &conn(A, 1, hft_event::ConnStateKind::Alive, hft_event::ConnRole::Md, hft_types::InstId(0), AccountId(0), 10 + k));
+            h.run();
+            at.push((h.j().len(), hash_of(&h.s)));
+            if k % 3 == 0 {
+                h.quote(A1, "50000", if k % 2 == 0 { "50003" } else { "50004" });
+                h.run();
+                at.push((h.j().len(), hash_of(&h.s)));
+            }
+        }
+        let mut log = Log::from_segments(&h.j().segments);
+        let n = log.recs.len();
+        let base = at[0].0;
+        let cut_at = base + cut % (n - base + 1);
+        // The truncated half event (records after the last EVENT_END before the cut).
+        log.recs.truncate(cut_at);
+        let end = hft_sequencer::recover_event_end(&log);
+        log.recs.truncate(end);
+        let want = at.iter().rev().find(|x| x.0 <= end).map(|x| x.1).unwrap();
+        let got = replay_hash(log, &h.setup);
+        prop_assert_eq!(got, want);
+    }
+}
+
+#[test]
+fn seq_257_snapshot_selection() {
+    let mut h = steady();
+    let s1 = h.keyframe();
+    h.quote(A1, "50000", "50004");
+    h.run();
+    h.cmd(AC1, &ControlCmd::SnapshotNow);
+    h.run();
+    h.run();
+    let s2 = h.snapshots().pop().unwrap();
+    assert!(s2.seq > s1.seq);
+    let j = h.j().clone();
+    let setup = h.setup.clone();
+    // .1 Latest → S2 (no tail).
+    let h1 = H::<TestSet>::restart_over(j.clone(), setup.clone(), plan(SnapshotSel::Latest, true, 1, 0), Rerun::default()).unwrap();
+    assert_eq!(h1.s.engine().recovery_replayed(), 0);
+    // .3 AtSeq(S2 − 1) → S1 (the tail after S1 is replayed).
+    let h3 = H::<TestSet>::restart_over(j.clone(), setup.clone(), plan(SnapshotSel::AtSeq(s2.seq - 1), true, 1, 0), Rerun::default()).unwrap();
+    assert!(h3.s.engine().recovery_replayed() > 0);
+    // .5 Latest with a desc_version two behind the binary → SnapshotUndecodable{5}.
+    let r = H::<TestSetV5>::restart_over(j, setup, plan(SnapshotSel::Latest, true, 1, 0), Rerun::default());
+    assert_eq!(r.err(), Some(BootError::SnapshotUndecodable { section: 5 }));
+}
+
+#[test]
+fn seq_258_tail_replay_no_emit() {
+    let mut h = steady();
+    h.keyframe();
+    h.open_position(AC1, A1, Side::Buy, "0.001");
+    for k in 0..5u64 {
+        h.quote(B1, "50010", if k % 2 == 0 { "50012" } else { "50013" });
+        h.run();
+    }
+    let kf = h.snapshots().into_iter().find(|r| snap(r).0.purpose == 2).unwrap();
+    let v = h.verify_from(Some(kf.seq));
+    assert!(v.is_empty(), "verify from the keyframe: {v:?}");
+    let h2 = H::crash_restart(h, plan(SnapshotSel::Latest, true, 1, 0), Rerun::default()).unwrap();
+    assert!(h2.s.engine().recovery_mismatches().is_empty(), "{:?}", h2.s.engine().recovery_mismatches());
+    assert!(h2.s.engine().recovery_replayed() > 0);
+    assert!(h2.io_ref().out.is_empty());
+    assert!(h2.io_ref().feed.is_empty());
+    assert_eq!(h2.s.engine().ledger.pos(AC1, A1).qty, q("0.001"));
+}
+
+#[test]
+fn seq_259_no_tail_tail_lost() {
+    let mut h = steady();
+    h.keyframe();
+    h.open_position(AC1, A1, Side::Buy, "0.001");
+    let h2 = H::crash_restart(h, plan(SnapshotSel::Latest, false, 1, RecoveryFlags::TAIL_LOST), Rerun::default()).unwrap();
+    assert_eq!(h2.s.engine().recovery_replayed(), 0);
+    for a in [AC1, AC2, AC9] {
+        let f = h2.s.engine().recovery_flags().iter().find(|x| x.0 == a).map(|x| x.1).unwrap();
+        assert!(f & RecoveryFlags::TAIL_LOST != 0);
+    }
+    assert_eq!(h2.s.engine().ledger.pos(AC1, A1).qty.0, 0);
+}
+
+#[test]
+fn seq_260_recovery_end_now() {
+    let mut h = steady();
+    h.keyframe();
+    let rr = Rerun { tsc: 500_000, hz: 3 * HZ, ..Rerun::default() };
+    let h2 = H::crash_restart(h, plan(SnapshotSel::Latest, true, 1, 0), rr).unwrap();
+    let rs = h2.snapshots().pop().unwrap();
+    let (hd, _) = snap(&rs);
+    assert_eq!(hd.purpose, 4);
+    assert_eq!(hd.snap_tsc, 500_000);
+    // Timers were shifted into this run's TSC.
+    let sw = h2.s.engine().heap.sorted().into_iter().find(|e| e.owner == 3 && e.timer_id == 2).unwrap();
+    assert!(sw.deadline < 500_000 + 3_000_000_000_000, "{}", sw.deadline);
+}
+
+#[test]
+fn seq_262_recovery_cap_no_cells() {
+    let mut h = steady();
+    h.cmd(AC2, &ControlCmd::SetMode { scope: scope(S2, AC2, G2), mode: hft_types::RunMode::Shadow });
+    h.run();
+    h.keyframe();
+    let d1 = h.s.engine().risk.mode.desired(hft_risk::mode::CellKey { strategy: S1, account: AC1, group: G1 });
+    let d2 = h.s.engine().risk.mode.desired(hft_risk::mode::CellKey { strategy: S2, account: AC2, group: G2 });
+    let h2 = H::crash_restart(h, plan(SnapshotSel::Latest, true, 1, 0), Rerun::default()).unwrap();
+    let e = h2.s.engine();
+    for a in [AC1, AC2, AC9] {
+        assert!(e.risk.mode.caps().iter().any(|c| c.source == CapSource::RECOVERY && c.scope.account == a), "{a:?}");
+    }
+    assert_eq!(e.risk.mode.desired(hft_risk::mode::CellKey { strategy: S1, account: AC1, group: G1 }), d1);
+    assert_eq!(e.risk.mode.desired(hft_risk::mode::CellKey { strategy: S2, account: AC2, group: G2 }), d2);
+}
+
+#[test]
+fn seq_263_epoch() {
+    for (persisted, want) in [(9u32, 10u32), (0, 2)] {
+        let mut h = steady();
+        h.keyframe();
+        let snap_epoch = h.s.view().engine_epoch();
+        assert_eq!(snap_epoch, 1);
+        let mut h2 = H::crash_restart(h, plan(SnapshotSel::Latest, true, persisted, 0), Rerun::default()).unwrap();
+        assert_eq!(h2.s.view().engine_epoch(), want);
+        let n = h2.io_ref().out.len();
+        let m = h2.mark();
+        h2.step();
+        let ep = h2.notes_since(m).into_iter().find(|n| n.code == hft_sequencer::codes::seq_note(1)).unwrap();
+        assert_eq!(ep.v[0], u64::from(want));
+        let se: Vec<_> = h2.io_ref().out[n..].iter().filter(|o| o.1.op == hft_event::GwOp::SetEpoch).collect();
+        assert!(!se.is_empty());
+        assert!(se.iter().all(|o| o.1.epoch() == want as u16 && o.1.prev_epoch() == snap_epoch as u16 && o.1.accept_prev()));
+    }
+}
+
+#[test]
+fn seq_264_recovery_segment() {
+    let mut h = steady();
+    h.keyframe();
+    h.quote(A1, "50000", "50004");
+    h.run();
+    let mut h2 = H::crash_restart(h, plan(SnapshotSel::Latest, true, 1, 0), Rerun::default()).unwrap();
+    let stop = h2.s.view().stop_engine_ns();
+    h2.step();
+    let seg = h2.j().segments.last().unwrap().clone();
+    assert_eq!(seg.reason, RollReason::Recovery as u8);
+    let done = seg.records.iter().position(|r| r.kind == EventKind::SEGMENT_ROLL && r.body.get(32) == Some(&3)).unwrap();
+    let ec = &seg.records[done + 1];
+    assert_eq!(ec.kind, EventKind::ENGINE_CLOCK);
+    assert_eq!(ec.read::<hft_event::EngineClock>().unwrap().base_engine_ns, stop);
+    let _ = (RecordFlags(0), Role::Input, MemJournal::default());
+}
+
+#[test]
+fn seq_265_mirror_restore_batches() {
+    let mut h = steady();
+    // A resting GTC order of account 1 on A.
+    add_hook(|hx, ev, ctx| {
+        if let hft_strategy_sdk::EventRef::Bbo { inst, b, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+            && b.ask_px == px("50039")
+        {
+            let mut it = intent(hx, A1, Side::Buy, hft_types::Tif::Gtc, hft_strategy_sdk::IntentClass::Open, px("49000"), q("0.001"));
+            it.group = G1;
+            let _ = ctx.place(it);
+        }
+    });
+    let m = h.mark();
+    h.quote(A1, "50000", "50039");
+    h.run();
+    let d = decisions(&h.since(m))[0].1;
+    h.ack(&d);
+    h.keyframe();
+    let mut h2 = H::crash_restart(h, plan(SnapshotSel::Latest, true, 1, 0), Rerun::default()).unwrap();
+    h2.step();
+    let mr: Vec<_> = h2.io_ref().out.iter().filter(|o| o.1.op == hft_event::GwOp::MirrorRestore).collect();
+    assert_eq!(mr.len(), 1);
+    assert_eq!(mr[0].0, hft_sequencer::OutRing::Venue(A));
+    assert_eq!(mr[0].1.slot, d.slot);
+}
+

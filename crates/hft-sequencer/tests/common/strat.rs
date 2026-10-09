@@ -122,6 +122,11 @@ pub static KINDS_V3: [StrategyDesc; 3] = [
     desc("probe-target", TARGET, 3, false, &SCHEMA_TARGET),
     desc("probe-np", NP, 3, true, &SCHEMA_NP),
 ];
+pub static KINDS_V5: [StrategyDesc; 3] = [
+    desc("probe-taker", TAKER, 5, false, &SCHEMA_TAKER),
+    desc("probe-target", TARGET, 5, false, &SCHEMA_TARGET),
+    desc("probe-np", NP, 5, true, &SCHEMA_NP),
+];
 pub static KINDS_V4: [StrategyDesc; 3] = [
     desc("probe-taker", TAKER, 4, false, &SCHEMA_TAKER),
     desc("probe-target", TARGET, 4, false, &SCHEMA_TARGET),
@@ -619,3 +624,4 @@ macro_rules! test_set {
 
 test_set!(TestSet, KINDS_V3);
 test_set!(TestSetV4, KINDS_V4);
+test_set!(TestSetV5, KINDS_V5);

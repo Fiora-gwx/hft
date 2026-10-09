@@ -50,6 +50,7 @@ pub use engine::{Engine, EngineSetup};
 pub use journal::{BootSink, JournalSink, MemJournal, MemRecord, MemSegment, RollMeta, SegClock};
 pub use params::{CapacitiesRow, RingClass, RingLimit, SeqParamsRow};
 pub use parsed::{ParsedConfig, ParsedParams, RiskDecode};
+pub use recover::event_end as recover_event_end;
 pub use strategies::{InstanceSlot, Instances};
 pub use types::*;
 
