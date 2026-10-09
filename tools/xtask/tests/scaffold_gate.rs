@@ -67,7 +67,9 @@ fn tool_020_probe_generated_in_test_range() {
 fn tool_021_registry_copy_and_shared_target() {
     let f = strat_repo("sg-021");
     let s = Script::new(&f, &[], 0);
-    let r = gate(&f, &s, true, Some("/w/target"));
+    // The main target directory ("/w/target" in the spec), absolute on every host.
+    let main_target = f.path("w").join("target").display().to_string();
+    let r = gate(&f, &s, true, Some(&main_target));
     assert_eq!(r.code, 0, "{}", r.stderr);
     // Registry copy: the repository list plus one last line `ci_probe::CiProbe`.
     let orig: Vec<String> = f
@@ -129,7 +131,11 @@ fn tool_021_registry_copy_and_shared_target() {
     let cargo: Vec<_> = calls.iter().filter(|(c, _)| c.starts_with("cargo ")).collect();
     assert!(cargo.len() >= 3, "{calls:?}");
     for (c, env) in &cargo {
-        assert_eq!(env["CARGO_TARGET_DIR"].as_str(), Some("/w/target"), "{c}");
+        assert_eq!(
+            env["CARGO_TARGET_DIR"].as_str(),
+            Some(main_target.as_str()),
+            "{c}"
+        );
     }
     assert!(!f.path(DEC).join("target").exists());
 }

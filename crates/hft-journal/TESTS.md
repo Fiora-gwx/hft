@@ -130,13 +130,13 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:行类型在 hft-risk(`hft-risk::mode`),断言写在该 crate 的测试里
-- 实现:`crates/hft-risk/tests/snapshot_rows.rs::jnl_005_mode_row_layout`
+- 实现:`crates/hft-risk/tests/layout.rs::jnl_005_mode_row_layout`
 
 | 行 | 断言 | 期望 |
 |---|---|---|
 | JNL-005.1 | 大小 | 8 |
 | JNL-005.2 | `strategy`、`account`、`mode`、`flags`、`group` | 0、1、2、3、4 |
-| JNL-005.3 | `flags` 的 `DEFAULT` 位与 `group` | `DEFAULT = 1`;置位时 `group == 0`(`GROUP_NONE`) |
+| JNL-005.3 | `flags` 的位与 `group` | `DEFAULT = 1`、`LANDED = 2`;`DEFAULT` 置位时 `group == 0`(`GROUP_NONE`) |
 
 ### JNL-006 快照节 18 GateRow 的布局
 
@@ -144,13 +144,13 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:行类型在 hft-risk
-- 实现:`crates/hft-risk/tests/snapshot_rows.rs::jnl_006_gate_row_layout`
+- 实现:`crates/hft-risk/tests/layout.rs::jnl_006_gate_row_layout`
 
 | 行 | 断言 | 期望 |
 |---|---|---|
-| JNL-006.1 | 大小 | 56 |
+| JNL-006.1 | 大小 | 64 |
 | JNL-006.2 | `account`、`released`、`clean_restart`、`recovery_flags`、`gate_bits` | 0、1、2、3、4 |
-| JNL-006.3 | `reconciled_venues`、`cfg_ok_venues`、`identity_ok_venues`、`conns_ok_venues`、`ctl_state_version`、`standby_ok_venues` | 8、16、24、32、40、48 |
+| JNL-006.3 | `reconciled_venues`、`cfg_ok_venues`、`identity_ok_venues`、`conns_ok_venues`、`ctl_state_version`、`standby_ok_venues`、`gflags` | 8、16、24、32、40、48、56 |
 
 ### JNL-007 快照节 20 SeqDayRow 与节 25 EngineClockRow 的布局
 

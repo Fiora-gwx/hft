@@ -1305,7 +1305,15 @@ name = \"hft-core\"
         f.write("fixtures/strategy-schemas/5-b.schema.json", B);
         let out = f.root.join("target").join("schemas");
         let mut ex = ScriptExec::new(vec![Rule {
-            prefix: format!("{} schemas --out {}", f.root.join(bin).display(), out.display()),
+            prefix: format!(
+                "{} schemas --out {}",
+                f.root
+                    .join("target")
+                    .join("debug")
+                    .join(bin.rsplit('/').next().unwrap())
+                    .display(),
+                out.display()
+            ),
             out: Output::default(),
             files: export
                 .iter()

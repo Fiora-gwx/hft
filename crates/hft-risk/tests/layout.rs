@@ -1,4 +1,5 @@
-//! Snapshot row layouts and code values (RSK-008, RSK-009).
+//! Snapshot row layouts and code values (RSK-008, RSK-009; crates/hft-journal/TESTS.md JNL-005,
+//! JNL-006: the section 14 and 18 rows defined in docs/subsystems/journal-format.md).
 #![allow(
     clippy::disallowed_types,
     clippy::disallowed_macros,
@@ -242,4 +243,56 @@ fn rsk_009_code_values() {
         let res = hft_risk::Risk::restore(&mut rd, &w.p, w.rd, &gws_for(w.rd), &CAPS, &exec_bounds(3), MC);
         assert!(res.is_err(), "RSK-009.10 kind {kind:?} level {level:?}");
     }
+}
+
+#[test]
+fn jnl_005_mode_row_layout() {
+    // JNL-005.1
+    assert_eq!(size_of::<ModeRow>(), 8);
+    // JNL-005.2
+    assert_eq!(
+        [
+            offset_of!(ModeRow, strategy),
+            offset_of!(ModeRow, account),
+            offset_of!(ModeRow, mode),
+            offset_of!(ModeRow, flags),
+            offset_of!(ModeRow, group)
+        ],
+        [0, 1, 2, 3, 4]
+    );
+    // JNL-005.3: a DEFAULT row carries GROUP_NONE (0).
+    assert_eq!((mode_row_flags::DEFAULT, mode_row_flags::LANDED), (1, 2));
+    assert_eq!(hft_types::GROUP_NONE.0, 0);
+    assert_eq!(MODE_TABLE_VERSION, 2);
+}
+
+#[test]
+fn jnl_006_gate_row_layout() {
+    // JNL-006.1
+    assert_eq!(size_of::<GateRow>(), 64);
+    // JNL-006.2
+    assert_eq!(
+        [
+            offset_of!(GateRow, account),
+            offset_of!(GateRow, released),
+            offset_of!(GateRow, clean_restart),
+            offset_of!(GateRow, recovery_flags),
+            offset_of!(GateRow, gate_bits)
+        ],
+        [0, 1, 2, 3, 4]
+    );
+    // JNL-006.3
+    assert_eq!(
+        [
+            offset_of!(GateRow, reconciled_venues),
+            offset_of!(GateRow, cfg_ok_venues),
+            offset_of!(GateRow, identity_ok_venues),
+            offset_of!(GateRow, conns_ok_venues),
+            offset_of!(GateRow, ctl_state_version),
+            offset_of!(GateRow, standby_ok_venues),
+            offset_of!(GateRow, gflags)
+        ],
+        [8, 16, 24, 32, 40, 48, 56]
+    );
+    assert_eq!(GATES_VERSION, 5);
 }
