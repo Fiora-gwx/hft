@@ -43,3 +43,23 @@ trybuild.workspace = true
 [[bench]]
 name = "params"
 harness = false
+
+[[bench]]
+name = "advice"
+harness = false
+
+[[bench]]
+name = "cmd"
+harness = false
+
+[[bench]]
+name = "ctx"
+harness = false
+
+[[bench]]
+name = "set"
+harness = false
+
+[[bench]]
+name = "views"
+harness = false
