@@ -555,7 +555,8 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
             inst: f.inst,
             group: f.group,
             qty: f.qty,
-            net_qty: f.net_qty,
+            // OMS `FillOut.net_qty` is signed (buy +); the ledger takes the absolute net.
+            net_qty: Qty(f.net_qty.0.saturating_mul(f.side.sign())),
             px: f.px,
             fee: f.fee,
             fee_asset: f.fee_asset,

@@ -1901,6 +1901,7 @@ spec: README.md
 | SEQ-130.1 | `OrderEvent{Fill}`,ledger `apply_fill` 返回 `net_adjust = −0.00001` | `oms.net_adjust(2, g2, a1, −0.00001)` 与 `exec.on_leg_adjust(2, g2)` 各一次 |
 | SEQ-130.2 | `OrderEvent{FeeOnly}`,`apply_fee` 返回 `NetAdjust(−0.00002)` | OMS 不迁移槽;`oms.net_adjust` 与 `exec.on_leg_adjust` 各一次 |
 | SEQ-130.3 | `OrderEvent{FeeOnly}`,`apply_fee` 不返回 `NetAdjust` | 不调 `net_adjust` 与 `on_leg_adjust` |
+| SEQ-130.4 | 账户 1 的 b1 卖单 0.001 的 `OrderEvent{Fill}`(计价资产手续费) | `FillDelta.net_qty` = +0.001(OMS `FillOut.net_qty` 有符号,交 ledger 时取绝对值);`apply_fill` 不返回 `net_adjust`,LegTracker b1 腿 `net` = −0.001 |
 
 ### SEQ-131 OrderUpdate 按槽的拥有者路由
 

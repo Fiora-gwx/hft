@@ -307,6 +307,8 @@ pub fn count_sections(sections: &[u8]) -> u32 {
 pub(crate) fn build_snapshot<S: StrategySet>(e: &mut Engine, inst: &Instances<S>, purpose: u8, snap_tsc: Tsc) -> Vec<u8> {
     let mut w = SnapshotWriter::new(64 << 20);
     write_sections(e, inst, &mut w);
+    // The gate-input caches restart from the snapshotted state, as in a replay from here.
+    crate::recover::derive_gate_caches(e);
     let sections = w.as_bytes();
     let n_books = if purpose == PURPOSE_BOOT || purpose == PURPOSE_RECOVERY {
         live_books(e).len() as u32

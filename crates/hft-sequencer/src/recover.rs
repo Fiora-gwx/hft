@@ -393,38 +393,7 @@ pub(crate) fn restore_at<S: StrategySet>(
     let cells: Vec<(AccountId, GroupId)> = inst.cells().map(|c| (c.account, c.group)).collect();
     e.gpos.set_cells(cells.into_iter());
     // Gate input caches from the restored gate state.
-    for a in 1..=account_count(&e.rd) {
-        let acc = AccountId(a as u8);
-        let bits = e.risk.mode.gate_bits(acc);
-        if let Some(x) = e.cmd.feeds_last.get_mut(a) {
-            *x = bits & hft_risk::mode::gate_bits::FEEDS != 0;
-        }
-        let mut n = 0u32;
-        for v in 0..64u8 {
-            if e.rd.account(acc).venues & (1u64 << v) != 0 {
-                n += e.oms.table_view(VenueId(v), acc).map_or(0, |t| t.unknown_count);
-            }
-        }
-        // The live cache starts at "never reported" (u32::MAX); NO_UNKNOWN set = reported 0.
-        let fired = bits & hft_risk::mode::gate_bits::NO_UNKNOWN != 0 || n != 0;
-        if let Some(x) = e.cmd.unknown_last.get_mut(a) {
-            *x = if fired { n } else { u32::MAX };
-        }
-        let vb = e.risk.mode.venue_bitmaps(acc);
-        for v in 0..64u8 {
-            if e.rd.account(acc).venues & (1u64 << v) == 0 {
-                continue;
-            }
-            let primary = vb[3] & (1u64 << v) != 0;
-            let standby = vb[4] & (1u64 << v) != 0;
-            e.cmd.conns.set(acc, VenueId(v), crate::commands::ConnRow {
-                primary,
-                standby,
-                us_seen: primary,
-                us_up: primary,
-            });
-        }
-    }
+    derive_gate_caches(&mut e);
     // Subscription index; the feed commands of a start are sent at EngineClock.
     crate::subs::rebuild_all(&mut e, &mut inst);
     let insts_over = inst.subs.overflow > 0;
@@ -652,6 +621,51 @@ pub(crate) fn boot_journal<D: Driver<S>, S: StrategySet>(
         j.publish();
     }
     Ok(seq)
+}
+
+/// The sequencer's gate-input caches (`feeds_last`, `unknown_last`, order-connection rows) as a
+/// function of the snapshotted state. Called on every restore and right after every snapshot is
+/// built, so a run and a replay started from that snapshot hold the same caches (INV-6).
+pub(crate) fn derive_gate_caches(e: &mut Engine) {
+    for a in 1..=account_count(&e.rd) {
+        let acc = AccountId(a as u8);
+        let bits = e.risk.mode.gate_bits(acc);
+        if let Some(x) = e.cmd.feeds_last.get_mut(a) {
+            *x = bits & hft_risk::mode::gate_bits::FEEDS != 0;
+        }
+        let mut n = 0u32;
+        for v in 0..64u8 {
+            if e.rd.account(acc).venues & (1u64 << v) != 0 {
+                n += e.oms.table_view(VenueId(v), acc).map_or(0, |t| t.unknown_count);
+            }
+        }
+        // NO_UNKNOWN set = 0 was the last count applied; otherwise the current count if any,
+        // else "never reported" (u32::MAX), so the next count of 0 is applied.
+        let last = if bits & hft_risk::mode::gate_bits::NO_UNKNOWN != 0 {
+            0
+        } else if n != 0 {
+            n
+        } else {
+            u32::MAX
+        };
+        if let Some(x) = e.cmd.unknown_last.get_mut(a) {
+            *x = last;
+        }
+        let vb = e.risk.mode.venue_bitmaps(acc);
+        for v in 0..64u8 {
+            if e.rd.account(acc).venues & (1u64 << v) == 0 {
+                continue;
+            }
+            let primary = vb[3] & (1u64 << v) != 0;
+            let standby = vb[4] & (1u64 << v) != 0;
+            e.cmd.conns.set(acc, VenueId(v), crate::commands::ConnRow {
+                primary,
+                standby,
+                us_seen: primary,
+                us_up: primary,
+            });
+        }
+    }
 }
 
 /// README "冷启动恢复" 4: shifts, mismatches, Recovery caps and flags (no cell is written).

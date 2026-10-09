@@ -511,3 +511,28 @@ fn seq_159_balance_position_reports() {
     assert_eq!(h.notes_since(m).len(), 1);
     assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty.0, 0);
 }
+
+#[test]
+fn seq_130_net_adjust_same_event() {
+    // .4 a perp sell with a quote fee: the ledger gets the absolute net and returns no adjust.
+    let mut h = steady();
+    h.trace_on();
+    let d = h.open_position(AC1, B1, Side::Sell, "0.001");
+    assert_eq!(d.side, Side::Sell);
+    assert!(!h.trace().contains(&"oms.net_adjust"), "{:?}", h.trace());
+    let l = h.s.engine().oms.legs(AC1, G1);
+    assert_eq!(l.view.leg[1].net, hft_types::Qty(-q("0.001").0));
+    assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, hft_types::Qty(-q("0.001").0));
+    // .3 a FeeOnly in the quote asset: no net adjustment.
+    h.trace_on();
+    let mut ev = order_event(&d, hft_event::OrderEventKind::FeeOnly, h.epoch());
+    ev.qty = hft_types::Qty(0);
+    ev.cum_filled = d.qty;
+    ev.fee = hft_types::Qty(1_000);
+    ev.fee_asset = USDT;
+    let r = h.rep_ring(AC1);
+    h.push(r, &ev);
+    h.run();
+    assert!(!h.trace().contains(&"oms.net_adjust"), "{:?}", h.trace());
+    assert!(!h.trace().contains(&"exec.on_leg_adjust"), "{:?}", h.trace());
+}

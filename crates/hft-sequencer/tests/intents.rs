@@ -205,3 +205,4 @@ fn seq_180_result_backfill() {
     assert_eq!(ds[0].1.trigger_seq, r.cmd_seq);
     let _ = (GroupId(0), KillLevel::Global, RejectBits::RATE);
 }
+

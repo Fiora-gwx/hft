@@ -221,3 +221,73 @@ fn seq_265_mirror_restore_batches() {
     assert_eq!(mr[0].1.slot, d.slot);
 }
 
+
+/// SEQ-261.4: the new segment's verify replay starts from the `purpose = Recovery` snapshot and
+/// reproduces the restarted run, including the gate inputs after the restart (README "恢复结束").
+#[test]
+fn seq_261_remaining_durations_preserved() {
+    let mut h = steady();
+    h.keyframe();
+    h.open_position(AC1, A1, Side::Buy, "0.001");
+    let mut h2 = H::crash_restart(h, plan(SnapshotSel::Latest, true, 1, 0), Rerun::default()).unwrap();
+    h2.run();
+    let t = h2.now();
+    for v in [A, B] {
+        h2.push(hft_sequencer::driver::live::RingId::Rep(0), &conn(v, 0, hft_event::ConnStateKind::Up, hft_event::ConnRole::Md, hft_types::InstId(0), hft_types::AccountId(0), t));
+        for a in [AC1, AC2] {
+            for (k, role) in [(0u8, hft_event::ConnRole::Order), (1, hft_event::ConnRole::Order), (0, hft_event::ConnRole::UserStream)] {
+                h2.push(hft_sequencer::driver::live::RingId::Rep(0), &conn(v, k, hft_event::ConnStateKind::Up, role, hft_types::InstId(0), a, t));
+            }
+        }
+    }
+    h2.run();
+    h2.sys(8);
+    for a in [AC1, AC2] {
+        h2.sys(16 | (u32::from(a.0) << 16));
+    }
+    h2.quote(A1, "50000", "50001");
+    h2.run();
+    let rs = h2.snapshots().into_iter().filter(|r| snap(r).0.purpose == 4).last().expect("recovery snapshot");
+    let v = h2.verify_from(Some(rs.seq));
+    assert!(v.is_empty(), "verify from the Recovery snapshot: {v:?}");
+}
+
+/// SEQ-261.4: the Recovery snapshot restores exactly the state the restarted run holds.
+#[test]
+fn seq_261_recovery_snapshot_state() {
+    let mut h = steady();
+    h.keyframe();
+    h.open_position(AC1, A1, Side::Buy, "0.001");
+    let h2 = H::crash_restart(h, plan(SnapshotSel::Latest, true, 1, 0), Rerun::default()).unwrap();
+    let rs = h2.snapshots().into_iter().filter(|r| snap(r).0.purpose == 4).last().expect("recovery snapshot");
+    let mut wa = hft_strategy_sdk::SnapshotWriter::new(64 << 20);
+    h2.s.write_sections(&mut wa);
+    let log = hft_sequencer::driver::replay::Log::from_segments(&h2.j().segments);
+    let drv = hft_sequencer::driver::replay::ReplayDriver::new(hft_sequencer::driver::replay::ReplayMode::Verify, log, 0, 1024);
+    let s: hft_sequencer::Sequencer<hft_sequencer::driver::replay::ReplayDriver, TestSet> =
+        hft_sequencer::Sequencer::boot(hft_sequencer::BootSource::Journal(plan(SnapshotSel::AtSeq(rs.seq), false, 0, 0)), &h2.setup, drv, hb()).unwrap();
+    let mut wb = hft_strategy_sdk::SnapshotWriter::new(64 << 20);
+    s.write_sections(&mut wb);
+    let (a, b) = (wa.as_bytes(), wb.as_bytes());
+    let secs = |x: &[u8]| {
+        let mut v = Vec::new();
+        let mut off = 0usize;
+        while off + 16 <= x.len() {
+            let n = u16::from_le_bytes([x[off], x[off + 1]]);
+            let len = u32::from_le_bytes([x[off + 8], x[off + 9], x[off + 10], x[off + 11]]) as usize;
+            v.push((n, x[off..off + 16 + len].to_vec()));
+            off += 16 + len;
+        }
+        v
+    };
+    let (sa, sb) = (secs(a), secs(b));
+    for (n, x) in &sa {
+        let y = sb.iter().find(|(m, _)| m == n).map(|(_, y)| y.clone()).unwrap_or_default();
+        if *x != y {
+            let k = x.iter().zip(y.iter()).position(|(p, q)| p != q).unwrap_or(0);
+            eprintln!("section {n} differs at {k}: live {:?} replay {:?}", &x[k.saturating_sub(4)..(k + 24).min(x.len())], &y[k.saturating_sub(4)..(k + 24).min(y.len())]);
+        }
+    }
+    assert_eq!(a, b);
+}
+
