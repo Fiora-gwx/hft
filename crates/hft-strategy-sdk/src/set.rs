@@ -14,6 +14,8 @@ use crate::snapshot::{RestoreError, SnapshotReader, SnapshotWriter};
 use crate::strategy::{ModelParamEffect, SnapshotProgress, StrategyInstance};
 use crate::views::{ModelViews, RefView, Views};
 
+pub use crate::set_macro::reset_preview_of;
+
 /// Structural-change preview of a `SetParams` (same names and widths as hft-event `CmdPreview`).
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct ResetPreview {

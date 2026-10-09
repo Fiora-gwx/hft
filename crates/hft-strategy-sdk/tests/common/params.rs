@@ -1,6 +1,5 @@
-//! The `TP` test schema, the SDK-092 auxiliary schema, `GT3` group ids and the `EchoProbe`
-//! descriptors. M1: `TP` is a hand-written `ParamSchemaDesc` (the same schema `define_params!`
-//! generates from M2 on).
+//! The `TP` test schema (`define_params!`: `TPParams` for EchoProbe, `TP2Params` for TargetProbe),
+//! the SDK-092 auxiliary schema, `GT3` group ids and the `EchoProbe` descriptors.
 
 use hft_strategy_sdk::params::RawParams;
 use hft_strategy_sdk::*;
@@ -23,53 +22,36 @@ const fn field(name: &'static str, unit: Unit, min: i64, max: i64, default: i64)
     }
 }
 
-pub const TP_FIELDS: [FieldDesc; 6] = [
-    FieldDesc {
-        per_group: true,
-        relax: Relax::Down,
-        minor_change: MinorChange::RelPct(10),
-        doc: "开仓阈值",
-        ..field("open_th", Unit::Rate, 0, 100_000_000, 5_000_000)
-    },
-    FieldDesc {
-        relax: Relax::Down,
-        minor_change: MinorChange::Abs(1_000),
-        doc: "同一 group 两次开仓的最小间隔",
-        ..field("cooldown_ms", Unit::DurationMs, 0, 600_000, 20_000)
-    },
-    FieldDesc {
-        per_group: true,
-        structural: true,
-        doc: "分位箱宽",
-        ..field("pct_bin", Unit::Rate, 10_000, 1_000_000, 100_000)
-    },
-    FieldDesc {
-        per_group: true,
-        relax: Relax::Up,
-        minor_change: MinorChange::Any,
-        doc: "单 group 数量上限",
-        ..field("max_qty", Unit::Qty, 0, 1_000_000_000_000, 0)
-    },
-    FieldDesc {
-        manual_only: true,
-        minor_change: MinorChange::Any,
-        doc: "总开关",
-        ..field("enabled", Unit::Bool, 0, 1, 1)
-    },
-    FieldDesc {
-        manual_only: true,
-        since: 2,
-        doc: "模式",
-        ..field("mode", Unit::Enum(&["a", "b", "c"]), 0, 2, 0)
-    },
-];
+/// Declares one `TP`-shaped parameter type (EchoProbe uses schema id 0xFF01, TargetProbe 0xFF02).
+macro_rules! tp_params {
+    ($name:ident, $fields:ident, $sid:expr) => {
+        hft_strategy_sdk::define_params! {
+            pub struct $name(schema_id = $sid, version = 2, fields = $fields) {
+                /// 开仓阈值
+                open_th: Rate [min = 0, max = 100_000_000, default = 5_000_000, per_group, relax = Down, minor = RelPct(10)],
+                /// 同一 group 两次开仓的最小间隔
+                cooldown_ms: DurationMs [min = 0, max = 600_000, default = 20_000, relax = Down, minor = Abs(1_000)],
+                /// 分位箱宽
+                pct_bin: Rate [min = 10_000, max = 1_000_000, default = 100_000, per_group, structural],
+                /// 单 group 数量上限
+                max_qty: Qty [min = 0, max = 1_000_000_000_000, default = 0, per_group, relax = Up, minor = Any],
+                /// 总开关
+                enabled: Bool [default = 1, manual_only, minor = Any],
+                /// 模式
+                mode: Enum(["a", "b", "c"]) [default = 0, since = 2, manual_only],
+            }
+        }
+    };
+}
+
+tp_params!(TPParams, TPFields, 0xFF01);
+tp_params!(TP2Params, TP2Fields, 0xFF02);
+
+/// The `TP` fields (`TPParams::FIELDS`).
+pub const TP_FIELDS: &[FieldDesc] = TPParams::FIELDS;
 
 /// `TP` v2.
-pub static TP: ParamSchemaDesc = ParamSchemaDesc {
-    id: 0xFF01,
-    version: 2,
-    fields: &TP_FIELDS,
-};
+pub static TP: ParamSchemaDesc = TPParams::SCHEMA;
 
 /// `TP` as it was at v1 (the first 5 fields).
 pub static TP_V1: ParamSchemaDesc = ParamSchemaDesc {
@@ -176,55 +158,6 @@ pub const ECHO_CMDS: [CmdDesc; 3] = [
         doc: "切换模式",
     },
 ];
-
-/// The SDK test strategy `EchoProbe` (M1: descriptors only; the `Strategy` impl arrives in M2).
-pub struct EchoProbe;
-
-impl EchoProbe {
-    pub const DESC: StrategyDesc = StrategyDesc {
-        name: "echo_probe",
-        kind_id: 0xFF01,
-        version: 3,
-        non_prod_only: false,
-        schema: &TP,
-        notes: &ECHO_NOTES,
-        report: &ECHO_REPORT,
-        cmds: &ECHO_CMDS,
-    };
-}
-
-/// `ProbeModel::LAYOUT` (TESTS.md "共用夹具"): instance section tag 1, per-group section tag 2.
-pub static PROBE_LAYOUT: ModelLayoutDesc = ModelLayoutDesc {
-    sections: &[
-        SectionDesc {
-            tag: 1,
-            name: "ticks",
-            scope: SectionScope::Instance,
-            elems: &[ElemDesc {
-                name: "n_ticks",
-                ty: ElemTy::U64,
-                len: LenRule::One,
-            }],
-        },
-        SectionDesc {
-            tag: 2,
-            name: "samples",
-            scope: SectionScope::Group,
-            elems: &[
-                ElemDesc {
-                    name: "utc_ns",
-                    ty: ElemTy::I64,
-                    len: LenRule::Prefixed,
-                },
-                ElemDesc {
-                    name: "mid",
-                    ty: ElemTy::I64,
-                    len: LenRule::Prefixed,
-                },
-            ],
-        },
-    ],
-};
 
 /// 8-byte aligned copy of `b` (a body as it sits in an SPB1 blob).
 pub fn aligned(b: &[u8]) -> Vec<u64> {

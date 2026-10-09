@@ -13,12 +13,19 @@ workspace = true
 [features]
 # Canonical schema JSON, `schema_digest` and `OwnedSchema` (cold tools, ctl-gateway, hft-py).
 schema-json = ["dep:sha2"]
+# Test stubs (`testing` module: MockViews, CtxHarness, ModelHarness, layout checks, event builders);
+# dev-dependencies only.
+testing = []
+# SDK-188: a `strategy_set!` row gated on a feature of this crate (tests only).
+probe-target = []
 
 [dependencies]
 hft-types.workspace = true
 hft-refdata.workspace = true
 hft-event.workspace = true
 zerocopy.workspace = true
+# Pure-Rust transcendental functions for `model_math` (bit-identical across platforms).
+libm = "0.2"
 
 # Not `workspace = true`: the workspace entry enables `asm`, whose sha2-asm build needs a C
 # toolchain for the target (same reasoning as hft-refdata); the digest is identical either way.
@@ -26,7 +33,7 @@ sha2 = { version = "0.10", optional = true }
 
 [dev-dependencies]
 # Enables `schema-json` for this crate's own tests and benches.
-hft-strategy-sdk = { path = ".", features = ["schema-json"] }
+hft-strategy-sdk = { path = ".", features = ["schema-json", "testing"] }
 proptest.workspace = true
 criterion.workspace = true
 toml.workspace = true

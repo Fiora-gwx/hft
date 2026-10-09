@@ -177,7 +177,7 @@ impl<P: ParamSet> Model for NoModel<P> { type Params = P; const LAYOUT_VERSION: 
 
 pub struct GroupTable { /* 本实例本参数版本的 GroupSpec 列表;gix = 在 SetParams blob 中的下标 */ }
 impl GroupTable {
-    pub fn new(specs: &[GroupSpec], capacity: u16) -> Result<GroupTable, ParamError>;   // 命令路径;超过 capacity → TooManyGroups
+    pub fn new(specs: &[GroupSpec], capacity: u16) -> GroupTable;   // 命令路径;长度可超过 capacity,由 ParamSet::decode 返回 TooManyGroups
     pub fn len(&self) -> u16;
     pub fn capacity(&self) -> u16;                           // = max_groups_per_instance(见下)
     pub fn get(&self, gix: u16) -> &GroupSpec;               // GroupSpec / LegDef 的布局在 hft-event;越界 → 全零 GroupSpec

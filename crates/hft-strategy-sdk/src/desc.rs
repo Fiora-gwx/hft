@@ -84,3 +84,62 @@ impl CmdSchema for CmdDesc {
         self.fields.get(usize::from(ix)).map(|f| f.as_ref(ix))
     }
 }
+
+/// `CmdView::parse` failure.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum CmdError {
+    /// Shorter than the 8 B header.
+    TooShort,
+    /// `ver ≠ 1`.
+    BadVersion,
+    /// `n > 31`.
+    TooMany,
+    /// Length ≠ 8 + 8 × n.
+    LenMismatch,
+}
+
+/// Borrowed `StrategyCmd` payload: `{ver: u8 = 1, op: u8, n: u8, _pad: [u8; 5]}` + `vals: [i64; n]`
+/// (little-endian, n ≤ 31). Fast-part parsing: allocation-free, O(1).
+#[derive(Clone, Copy, Debug)]
+pub struct CmdView<'a> {
+    op: u8,
+    n: u8,
+    vals: &'a [u8],
+}
+
+impl<'a> CmdView<'a> {
+    /// Checks in order: length < 8 → `TooShort`; `ver ≠ 1` → `BadVersion`; `n > 31` → `TooMany`;
+    /// length ≠ 8 + 8n → `LenMismatch`. The padding and the values are not checked (the gateway's
+    /// `params::decode_cmd` already did).
+    pub fn parse(payload: &'a [u8]) -> Result<CmdView<'a>, CmdError> {
+        let [ver, op, n, _, _, _, _, _, vals @ ..] = payload else {
+            return Err(CmdError::TooShort);
+        };
+        if *ver != 1 {
+            return Err(CmdError::BadVersion);
+        }
+        if usize::from(*n) > crate::check::MAX_CMD_FIELDS {
+            return Err(CmdError::TooMany);
+        }
+        if vals.len() != 8 * usize::from(*n) {
+            return Err(CmdError::LenMismatch);
+        }
+        Ok(CmdView { op: *op, n: *n, vals })
+    }
+    pub fn op(&self) -> u8 {
+        self.op
+    }
+    /// Number of values.
+    pub fn len(&self) -> u8 {
+        self.n
+    }
+    pub fn is_empty(&self) -> bool {
+        self.n == 0
+    }
+    /// Raw fixed-point value `ix`; `ix ≥ n` → `None`.
+    pub fn val(&self, ix: u8) -> Option<i64> {
+        let s = usize::from(ix).checked_mul(8)?;
+        let b: [u8; 8] = self.vals.get(s..s + 8)?.try_into().ok()?;
+        Some(i64::from_le_bytes(b))
+    }
+}

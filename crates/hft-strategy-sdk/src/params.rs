@@ -25,6 +25,7 @@ pub use schema_json::{schema_digest, schema_json};
 pub use text::{format_value, parse_value};
 
 pub use crate::desc::CmdSchema;
+pub use crate::params_macro::{FieldValue, ParamCheck, rate};
 
 /// `group_ix` of errors on a default value or a command field (not group-specific).
 pub const GROUP_IX_NONE: u16 = 0xFFFF;

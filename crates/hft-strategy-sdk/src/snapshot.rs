@@ -31,6 +31,32 @@ pub enum RestoreError {
 
 const HDR: usize = size_of::<SectionHdr>();
 
+/// Type of one `put_*` call (recording writers, `testing::check_layout`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum PutTy {
+    U8,
+    U16,
+    U32,
+    U64,
+    U128,
+    I8,
+    I16,
+    I32,
+    I64,
+    I128,
+    /// `put_bytes` / `put_row` (the length is in the record).
+    Bytes,
+}
+
+/// One event of a recording writer, in call order.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum WriteRec {
+    /// `section(tag)`.
+    Section(u16),
+    /// A `put_*` call and its byte length (dropped writes past the limit are recorded too).
+    Put(PutTy, usize),
+}
+
 /// Byte writer with a fixed upper limit, allocated once at construction (`new`) and reused
 /// (`clear`); no allocation afterwards.
 #[derive(Debug)]
@@ -41,6 +67,8 @@ pub struct SnapshotWriter {
     /// Open engine section: offset of its `SectionHdr` and rows counted so far.
     open: Option<(usize, u32)>,
     tag: Option<u16>,
+    /// `Some` for a recording writer (`SnapshotWriter::recording`).
+    rec: Option<Vec<WriteRec>>,
 }
 
 impl SnapshotWriter {
@@ -52,6 +80,28 @@ impl SnapshotWriter {
             full: false,
             open: None,
             tag: None,
+            rec: None,
+        }
+    }
+
+    /// A writer that also records every `section` and `put_*` call (cold; tests and
+    /// `testing::check_layout`).
+    pub fn recording(limit: usize) -> SnapshotWriter {
+        SnapshotWriter {
+            rec: Some(Vec::new()),
+            ..SnapshotWriter::new(limit)
+        }
+    }
+
+    /// Recorded calls (empty for a plain writer).
+    pub fn records(&self) -> &[WriteRec] {
+        self.rec.as_deref().unwrap_or(&[])
+    }
+
+    #[inline]
+    fn note(&mut self, ty: PutTy, len: usize) {
+        if let Some(r) = self.rec.as_mut() {
+            r.push(WriteRec::Put(ty, len));
         }
     }
 
@@ -61,6 +111,9 @@ impl SnapshotWriter {
         self.full = false;
         self.open = None;
         self.tag = None;
+        if let Some(r) = self.rec.as_mut() {
+            r.clear();
+        }
     }
 
     /// `Ok(bytes written)`, or `Err(SnapshotFull)` once a write crossed the limit.
@@ -96,6 +149,11 @@ impl SnapshotWriter {
     }
 
     pub fn put_bytes(&mut self, b: &[u8]) {
+        self.note(PutTy::Bytes, b.len());
+        self.raw(b);
+    }
+
+    fn raw(&mut self, b: &[u8]) {
         if self.full {
             return;
         }
@@ -107,34 +165,44 @@ impl SnapshotWriter {
     }
 
     pub fn put_u8(&mut self, v: u8) {
-        self.put_bytes(&[v]);
+        self.note(PutTy::U8, size_of::<u8>());
+        self.raw(&v.to_le_bytes());
     }
     pub fn put_u16(&mut self, v: u16) {
-        self.put_bytes(&v.to_le_bytes());
+        self.note(PutTy::U16, size_of::<u16>());
+        self.raw(&v.to_le_bytes());
     }
     pub fn put_u32(&mut self, v: u32) {
-        self.put_bytes(&v.to_le_bytes());
+        self.note(PutTy::U32, size_of::<u32>());
+        self.raw(&v.to_le_bytes());
     }
     pub fn put_u64(&mut self, v: u64) {
-        self.put_bytes(&v.to_le_bytes());
+        self.note(PutTy::U64, size_of::<u64>());
+        self.raw(&v.to_le_bytes());
     }
     pub fn put_u128(&mut self, v: u128) {
-        self.put_bytes(&v.to_le_bytes());
+        self.note(PutTy::U128, size_of::<u128>());
+        self.raw(&v.to_le_bytes());
     }
     pub fn put_i8(&mut self, v: i8) {
-        self.put_bytes(&v.to_le_bytes());
+        self.note(PutTy::I8, size_of::<i8>());
+        self.raw(&v.to_le_bytes());
     }
     pub fn put_i16(&mut self, v: i16) {
-        self.put_bytes(&v.to_le_bytes());
+        self.note(PutTy::I16, size_of::<i16>());
+        self.raw(&v.to_le_bytes());
     }
     pub fn put_i32(&mut self, v: i32) {
-        self.put_bytes(&v.to_le_bytes());
+        self.note(PutTy::I32, size_of::<i32>());
+        self.raw(&v.to_le_bytes());
     }
     pub fn put_i64(&mut self, v: i64) {
-        self.put_bytes(&v.to_le_bytes());
+        self.note(PutTy::I64, size_of::<i64>());
+        self.raw(&v.to_le_bytes());
     }
     pub fn put_i128(&mut self, v: i128) {
-        self.put_bytes(&v.to_le_bytes());
+        self.note(PutTy::I128, size_of::<i128>());
+        self.raw(&v.to_le_bytes());
     }
 
     /// Writes one `#[repr(C)]` row (explicit padding, no implicit padding) and counts it in the
@@ -154,6 +222,9 @@ impl SnapshotWriter {
     /// Layout marker of a strategy/Model section (`SectionDesc.tag`); writes no bytes.
     pub fn section(&mut self, tag: u16) {
         self.tag = Some(tag);
+        if let Some(r) = self.rec.as_mut() {
+            r.push(WriteRec::Section(tag));
+        }
     }
 
     /// Starts an engine snapshot section (`SectionHdr{section, version}`; `count` and `len`
@@ -168,7 +239,7 @@ impl SnapshotWriter {
             len: 0,
             _rsv: 0,
         };
-        self.put_bytes(hdr.as_bytes());
+        self.raw(hdr.as_bytes());
         if !self.full {
             self.open = Some((at, 0));
         }
@@ -182,7 +253,7 @@ impl SnapshotWriter {
         };
         let body = self.buf.len().saturating_sub(at.saturating_add(HDR));
         let pad = body.next_multiple_of(8) - body;
-        self.put_bytes([0u8; 8].get(..pad).unwrap_or(&[]));
+        self.raw([0u8; 8].get(..pad).unwrap_or(&[]));
         if self.full {
             return;
         }

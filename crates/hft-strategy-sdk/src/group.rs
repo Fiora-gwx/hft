@@ -4,8 +4,6 @@
 use hft_event::{GroupSpec, LegDef};
 use hft_types::{AssetId, GroupId, InstId, VenueId};
 
-use crate::params::ParamError;
-
 const ZERO_LEG: LegDef = LegDef {
     inst: InstId(0),
     venue: VenueId(0),
@@ -35,21 +33,21 @@ pub struct GroupTable {
 }
 
 impl GroupTable {
-    /// Builds the table. `capacity` = `max_groups_per_instance` (ECF1 `Capacities`); more specs
-    /// than that → `TooManyGroups`. Duplicate `GroupId`s are not checked here (the gateway and the
-    /// sequencer reject them); `gix_of` then returns one of them.
-    pub fn new(specs: &[GroupSpec], capacity: u16) -> Result<GroupTable, ParamError> {
-        if specs.len() > usize::from(capacity) {
-            return Err(ParamError::TooManyGroups);
-        }
+    /// Builds the table (command path). `capacity` = `max_groups_per_instance` (ECF1
+    /// `Capacities`); a table longer than its capacity is representable so that
+    /// `ParamSet::decode` can reject it with `TooManyGroups`. Specs beyond `u16::MAX` are dropped.
+    /// Duplicate `GroupId`s are not checked here (the gateway and the sequencer reject them);
+    /// `gix_of` then returns one of them.
+    pub fn new(specs: &[GroupSpec], capacity: u16) -> GroupTable {
+        let specs = specs.get(..specs.len().min(usize::from(u16::MAX))).unwrap_or(&[]);
         let specs: Box<[GroupSpec]> = specs.into();
         let mut by_id: Vec<u16> = (0..specs.len()).filter_map(|i| u16::try_from(i).ok()).collect();
         by_id.sort_by_key(|&g| specs.get(usize::from(g)).map_or(0, |s| s.id.0));
-        Ok(GroupTable {
+        GroupTable {
             specs,
             by_id: by_id.into_boxed_slice(),
             cap: capacity,
-        })
+        }
     }
     /// Number of groups.
     pub fn len(&self) -> u16 {

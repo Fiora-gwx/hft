@@ -26,17 +26,23 @@
 compile_error!("hft-strategy-sdk: the parameter body and snapshot encodings are little-endian only");
 
 pub mod advice;
+pub mod check;
 pub mod ctx;
 pub mod desc;
 pub mod event;
 pub mod group;
 pub mod intent;
 pub mod layout;
+pub mod model_math;
 pub mod params;
+mod params_macro;
 pub mod set;
+mod set_macro;
 pub mod snapshot;
 pub mod strategy;
 pub mod target;
+#[cfg(feature = "testing")]
+pub mod testing;
 pub mod view_types;
 pub mod views;
 
@@ -44,7 +50,7 @@ pub use advice::{
     AdviceBufs, AdviceFull, AdviceOut, AdvicePayload, PayloadError, PayloadFull, PayloadReader, PayloadWriter,
 };
 pub use ctx::{Ctx, CtxBufs, CtxFull, EvMask, OwnEvMask, Part, SubsBuilder, SubsErr, SubsLimits, TimerId};
-pub use desc::{CmdDesc, NoteDesc, ReportAgg, ReportFieldDesc, ReportScope};
+pub use desc::{CmdDesc, CmdError, CmdView, NoteDesc, ReportAgg, ReportFieldDesc, ReportScope};
 pub use event::{EventRef, ExecUpdate, ExecUpdateKind, GIX_NONE, MODEL_TICK, OrderUpdate, OrderUpdateKind};
 pub use group::{GroupSpecExt, GroupTable};
 pub use intent::{
@@ -54,7 +60,9 @@ pub use intent::{
 pub use layout::{ElemDesc, ElemTy, LenRule, ModelLayoutDesc, SectionDesc, SectionScope};
 pub use params::{FieldDesc, MinorChange, ParamError, ParamSchemaDesc, Relax, Unit};
 pub use set::{ResetPreview, StrategySet};
-pub use snapshot::{RestoreError, SectionView, SnapshotFull, SnapshotReader, SnapshotWriter};
+pub use snapshot::{
+    PutTy, RestoreError, SectionView, SnapshotFull, SnapshotReader, SnapshotWriter, WriteRec,
+};
 pub use strategy::{
     GroupResets, Model, ModelParamEffect, NoModel, ParamSet, ResetCause, SnapshotProgress, Strategy,
     StrategyInstance,
