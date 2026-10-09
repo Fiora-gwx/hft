@@ -56,11 +56,11 @@ fn rest(h: &mut H, inst: hft_types::InstId, n: usize) -> Vec<hft_event::OrderDec
         });
         let mk = h.mark();
         k += 1;
-        let ask = if k % 2 == 0 { "50001" } else { "50002" };
+        let ask = if k.is_multiple_of(2) { "50001" } else { "50002" };
         if inst == A1 {
             h.quote(A1, "50000", ask);
         } else {
-            h.quote(B1, "50010", if k % 2 == 0 { "50011" } else { "50012" });
+            h.quote(B1, "50010", if k.is_multiple_of(2) { "50011" } else { "50012" });
         }
         h.run();
         clear_hook();
