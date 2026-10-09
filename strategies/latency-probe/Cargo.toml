@@ -1,0 +1,28 @@
+[package]
+name = "latency-probe"
+description = "Latency probe strategy: measurement-only probes (quote PostOnly place/cancel, pair IOC + LegLink, target via hft-exec) on non-production accounts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+hft-strategy-sdk.workspace = true
+hft-strat-lib.workspace = true
+
+[dev-dependencies]
+hft-strategy-sdk = { workspace = true, features = ["testing", "schema-json"] }
+hft-types.workspace = true
+hft-refdata.workspace = true
+hft-event.workspace = true
+hft-testkit.workspace = true
+proptest.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "on_event"
+harness = false

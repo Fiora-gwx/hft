@@ -1,0 +1,27 @@
+# Reference-machine budgets of latency-probe's benchmarks (source constants read by `cargo xtask bench-gate`).
+# One table per registered benchmark name (benchmarks/README.md "基准名登记"); values in ns, equal to the
+# README "延迟与资源契约" table (`cargo xtask doc-check` compares them).
+
+["strategies/latency-probe/tick_miss"]
+p50_ns = 15
+p99_ns = 40
+
+["strategies/latency-probe/tick_fire"]
+p50_ns = 150
+p99_ns = 500
+
+["strategies/latency-probe/ack_cancel"]
+p50_ns = 50
+p99_ns = 150
+
+["strategies/latency-probe/target_set"]
+p50_ns = 250
+p99_ns = 800
+
+["strategies/latency-probe/exec_update"]
+p50_ns = 80
+p99_ns = 250
+
+["strategies/latency-probe/risk_event"]
+p50_ns = 150
+p99_ns = 400

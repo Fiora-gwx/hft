@@ -232,6 +232,8 @@ deps = [
 [pkg."strategies/*"]
 tier = "hot"
 deps = ["crates/hft-strategy-sdk", "crates/hft-strat-lib"]
+# Tests build refdata fixtures (RDB1 encoder) and group tables for the SDK test stubs.
+dev = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event"]
 
 [pkg."strategies/registry"]
 tier = "hot"

@@ -860,6 +860,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hft-strategy-registry"
+version = "0.1.0"
+dependencies = [
+ "hft-strategy-sdk",
+ "latency-probe",
+ "serde_json",
+]
+
+[[package]]
 name = "hft-strategy-sdk"
 version = "0.1.0"
 dependencies = [
@@ -1024,6 +1033,20 @@ dependencies = [
  "cfg-if",
  "futures-util",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "latency-probe"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "hft-event",
+ "hft-refdata",
+ "hft-strat-lib",
+ "hft-strategy-sdk",
+ "hft-testkit",
+ "hft-types",
+ "proptest",
 ]
 
 [[package]]

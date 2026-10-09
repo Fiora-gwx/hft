@@ -19,6 +19,16 @@ lints = ["clippy::disallowed_types", "clippy::disallowed_macros", "clippy::disal
 reason = "benchmark drivers time with Instant and build fixtures; not on a hot path"
 
 [[allow]]
+file = "strategies/*/tests/**"
+lints = ["clippy::disallowed_types", "clippy::disallowed_macros", "clippy::disallowed_methods"]
+reason = "strategy integration tests are not on a hot path"
+
+[[allow]]
+file = "strategies/*/benches/**"
+lints = ["clippy::disallowed_types", "clippy::disallowed_macros", "clippy::disallowed_methods"]
+reason = "benchmark drivers time with Instant and build fixtures; not on a hot path"
+
+[[allow]]
 file = "crates/*/examples/**"
 lints = ["clippy::disallowed_types", "clippy::disallowed_macros", "clippy::disallowed_methods"]
 reason = "example/test-writer binaries (hft-journal testwriter); not part of a release artefact"

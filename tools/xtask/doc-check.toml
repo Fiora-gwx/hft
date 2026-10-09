@@ -70,6 +70,13 @@ skip_sections = '(?i)optional|可选'
 exempt_line = '(?i)optional|可选|旧框架|现有 cdex|旧 bot'
 pattern = '(?:^|[^A-Za-z0-9_])cdex(?:[^A-Za-z0-9]|$)'
 
+# ---- 交易所名 (strategy READMEs; exchange differences go through VenueCaps and venue-*)
+[[rule]]
+check = "strategy-name"
+id = "VENUENAME"
+files = ["strategies/*/README.md"]
+pattern = '(?:^|[^A-Za-z0-9_\-])(?:Binance|OKX|Bitget|Gate(?:\.io)?|Bybit|KuCoin|Kucoin|Hyperliquid|binance|okx|bitget|bybit|kucoin|hyperliquid)(?:[^A-Za-z0-9_]|$)'
+
 # ---- 写当前状态 (history narrative, cross-document sync queues)
 [[rule]]
 check = "history"

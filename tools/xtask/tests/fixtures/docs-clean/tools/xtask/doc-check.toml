@@ -56,3 +56,10 @@ pattern = '第\s*\d+(?:\s*[–\-~至]\s*\d+)?\s*周'
 id = "OLDTERM"
 skip = [".agents/notes"]
 pattern = 'HypoDriver'
+
+# ---- 交易所名 (strategy READMEs; exchange differences go through VenueCaps and venue-*)
+[[rule]]
+check = "strategy-name"
+id = "VENUENAME"
+files = ["strategies/*/README.md"]
+pattern = '(?:^|[^A-Za-z0-9_\-])(?:Binance|OKX|Bitget|Gate(?:\.io)?|Bybit|KuCoin|Kucoin|Hyperliquid|binance|okx|bitget|bybit|kucoin|hyperliquid)(?:[^A-Za-z0-9_]|$)'

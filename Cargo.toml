@@ -23,6 +23,8 @@ members = [
     "crates/hft-venue",
     "crates/venue-binance",
     "crates/hft-risk",
+    "strategies/latency-probe",
+    "strategies/registry",
     "tools/xtask",
     "tools/hft-cfg",
     "tools/hostprobe",
@@ -59,6 +61,7 @@ hft-journal = { path = "crates/hft-journal" }
 hft-ctl-proto = { path = "crates/hft-ctl-proto" }
 hft-strategy-sdk = { path = "crates/hft-strategy-sdk" }
 hft-strat-lib = { path = "crates/hft-strat-lib" }
+latency-probe = { path = "strategies/latency-probe" }
 hft-book = { path = "crates/hft-book" }
 hft-sim = { path = "crates/hft-sim" }
 hft-ledger = { path = "crates/hft-ledger" }

@@ -1,0 +1,22 @@
+[package]
+name = "hft-strategy-registry"
+description = "The only list of real strategies: one strategy_set! invocation (Strategies) and export_schemas()"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# Optional strategies are gated by features named after their crates (README "kind_id 登记"); none of
+# them has a crate yet, so the default and the all-features builds are the same list.
+[features]
+
+[dependencies]
+hft-strategy-sdk = { workspace = true, features = ["schema-json"] }
+latency-probe.workspace = true
+
+[dev-dependencies]
+serde_json = "1"

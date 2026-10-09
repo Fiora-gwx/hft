@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 9bae8cbc357d85fe635f9308f0dbec4b5ca0bba6d8afb2a26c36b266d4d6f5c8 # shrinks to period = 100, burst_sel = 0, burst_v = 1, steps = [Bbo { leg: 0, dt: 0, same_rx: false, gate: 1 }, Restart, Bbo { leg: 0, dt: 100, same_rx: false, gate: 1 }]
+cc 01a4d9c1112d36ee8b87d93426badd32f933c3a04212229a278d1ec1417e6afe # shrinks to n = 1, xgw = false, steps = [Bbo { leg: 0, dt: 0, same_rx: false, gate: 0 }, Bbo { leg: 0, dt: 0, same_rx: false, gate: 0 }, Bbo { leg: 0, dt: 0, same_rx: false, gate: 0 }, Bbo { leg: 0, dt: 0, same_rx: false, gate: 0 }, Mode(true), Bbo { leg: 0, dt: 0, same_rx: false, gate: 1 }, Restart, Mode(true), Bbo { leg: 0, dt: 0, same_rx: false, gate: 1 }]

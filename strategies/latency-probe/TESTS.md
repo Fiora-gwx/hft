@@ -290,7 +290,7 @@ spec: README.md
 | LPR-013.1 | 连接静默:`conn_live_tsc` 早于 now 7 s | 无 `place`;`Note{Skipped, v0 = 0, v1 = 1}` |
 | LPR-013.2 | bid 6_000_000、ask 6_100_000(价差 16 528 926 > 10^7) | 无 `place`;`Note{Skipped, v0 = 1, v1 = 0}` |
 | LPR-013.3 | bid 0、ask 6_000_010 | 无 `place`;`Note{Skipped, v0 = 1, v1 = 0}` |
-| LPR-013.4 | 连接静默,但 +0 刚挂过单(未到期) | 无 `place`;+600_000 ms 无 `Skipped` |
+| LPR-013.4 | 连接静默,但 +500 ms 刚挂过单并已撤完(未到期) | 无 `place`;+600_000 ms 无 `Skipped` |
 | LPR-013.5 | 连接静默,该腿有在途单 | 无 `place`;+600_000 ms 无 `Skipped` |
 | LPR-013.6 | 健康(对照) | 1 次 `place`;+600_000 ms 无 `Skipped` |
 
@@ -976,7 +976,7 @@ spec: README.md
 - 级别:prop
 - 里程碑:M2
 - 性质:对任意事件序列与任意长度 T 的时间窗,单腿 PostOnly 数 ≤ ⌈T / P⌉ + 1,P = min(`probe_period_ms`, 非 0 的 `burst_period_ms`);拒单(含交易所拒单)之后同一腿下一次挂单与上一次的间隔仍 ≥ P
-- 生成:同 LPR-058;`Bbo` 间隔 0–500 ms,其中 30% 与上一条同 `rx_tsc`;`burst_period_ms` ∈ {0} ∪ [1, `probe_period_ms`]
+- 生成:同 LPR-058 但不含 `Mode`(回到 `Live` 按事件处理表清零 `last_probe_ens`,不受本界约束);`Bbo` 间隔 0–500 ms,其中 30% 与上一条同 `rx_tsc`;`burst_period_ms` ∈ {0} ∪ [1, `probe_period_ms`]
 - 参考:滑窗计数
 - 例数:PR 2 000;每夜 1 000 000
 - 实现:`strategies/latency-probe/tests/props.rs::lpr_059_rate_bound`
