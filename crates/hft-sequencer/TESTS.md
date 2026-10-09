@@ -5045,7 +5045,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:B0;尾部重放产生的 Output 与日志不一致如列
-- 实现:`crates/hft-sequencer/tests/recover.rs::seq_362_recover_mismatch_count`
+- 实现:`crates/hft-sequencer/tests/mismatch.rs::seq_362_one_note_per_pair`
 
 | 行 | 不一致 | 期望 |
 |---|---|---|

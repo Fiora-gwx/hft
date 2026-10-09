@@ -1,0 +1,98 @@
+# Reference-machine budgets of hft-sequencer's benchmarks (source constants read by `cargo xtask bench-gate`).
+# One table per registered benchmark name (benchmarks/README.md "基准名登记"); values in ns, equal to the
+# README "延迟与资源契约" table (`cargo xtask doc-check` compares them). Format: tools/README.md "cargo xtask doc-check".
+
+["seq/overhead_per_event"]
+p50_ns = 150
+p99_ns = 400
+allocs = 0
+
+["seq/conn_alive"]
+p50_ns = 80
+p99_ns = 250
+allocs = 0
+
+["seq/conn_down"]
+p50_ns = 3000
+p99_ns = 8000
+allocs = 0
+
+["seq/bbo_view"]
+p50_ns = 15
+p99_ns = 40
+allocs = 0
+
+["seq/notify_continue"]
+p50_ns = 10000
+p99_ns = 30000
+allocs = 0
+
+["seq/bbo_miss"]
+p50_ns = 250
+p99_ns = 600
+allocs = 0
+
+["seq/bbo_target_idle"]
+p50_ns = 350
+p99_ns = 800
+allocs = 0
+
+["seq/bbo_fire"]
+p50_ns = 2000
+p99_ns = 5000
+allocs = 0
+
+["seq/bbo_exec_fire"]
+p50_ns = 2000
+p99_ns = 5000
+allocs = 0
+
+["seq/l2batch_20"]
+p50_ns = 1000
+p99_ns = 3000
+allocs = 0
+
+["seq/fill_to_hedge"]
+p50_ns = 1500
+p99_ns = 4000
+allocs = 0
+
+["seq/advice_route"]
+p50_ns = 300
+p99_ns = 800
+allocs = 0
+
+["seq/margin_report"]
+p50_ns = 2000
+p99_ns = 5000
+allocs = 0
+
+["seq/external_fill"]
+p50_ns = 2000
+p99_ns = 5000
+allocs = 0
+
+["seq/recon_funding_item"]
+p50_ns = 600
+p99_ns = 1500
+allocs = 0
+
+["seq/recon_group"]
+p50_ns = 15000
+p99_ns = 40000
+allocs = 0
+
+["seq/inject_warmup"]
+p50_ns = 2000
+p99_ns = 5000
+allocs = 0
+
+["seq/strategy_cmd"]
+p50_ns = 500
+p99_ns = 1200
+allocs = 0
+
+["seq/snapshot_keyframe"]
+p50_ns = 150000
+p99_ns = 300000
+allocs = 0

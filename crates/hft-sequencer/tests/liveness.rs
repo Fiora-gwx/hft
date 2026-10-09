@@ -81,7 +81,7 @@ fn seq_113_conn_live_transitions() {
 }
 
 #[test]
-fn seq_113_conn_live_transitions_alive_resync() {
+fn conn_live_alive_and_resync_rows() {
     // .8 Alive: live_tsc moves, no Conn delivery.
     let mut h = base();
     clear_log();

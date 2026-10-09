@@ -262,7 +262,7 @@ fn seq_261_remaining_durations_preserved() {
 
 /// SEQ-261.4: the Recovery snapshot restores exactly the state the restarted run holds.
 #[test]
-fn seq_261_recovery_snapshot_state() {
+fn recovery_snapshot_restores_the_run_state() {
     let mut h = steady();
     h.keyframe();
     h.open_position(AC1, A1, Side::Buy, "0.001");
