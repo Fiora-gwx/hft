@@ -60,6 +60,8 @@ pub const A1: InstId = InstId(11);
 pub const A2: InstId = InstId(12);
 pub const A3: InstId = InstId(13);
 pub const B1: InstId = InstId(21);
+/// ETH-USDT perpetual on B (not in TESTS.md B0; groups that need a second, disjoint pair).
+pub const B2: InstId = InstId(22);
 pub const BTC: AssetId = AssetId(1);
 pub const USDT: AssetId = AssetId(2);
 pub const ETH: AssetId = AssetId(3);
@@ -222,13 +224,14 @@ pub fn order_limits(v: VenueId, l10: u32, l60: u32) -> Vec<(VenueId, RateLimit)>
 /// The B0 refdata (ids dense from 1: filler insts, accounts and instances fill the gaps).
 pub fn b0_rd() -> Rd {
     let mut insts = Vec::new();
-    for id in 1..=21u32 {
+    for id in 1..=22u32 {
         let i = InstId(id);
         let s = match id {
             11 => inst_spec(i, A, "BTCUSDT", false, BTC, ("0.01", 1), ("0.0001", 10_000)),
             12 => inst_spec(i, A, "ETHUSDT", false, ETH, ("0.01", 1), ("0.001", 100_000)),
             13 => inst_spec(i, A, "SOLUSDT", false, FILL, ("0.01", 1), ("0.001", 100_000)),
             21 => inst_spec(i, B, "BTC_USDT", true, BTC, ("0.1", 10), ("0.001", 100_000)),
+            22 => inst_spec(i, B, "ETH_USDT", true, ETH, ("0.01", 1), ("0.01", 1_000_000)),
             _ => {
                 let mut s = inst_spec(i, A, &format!("F{id}USDT"), false, FILL, ("0.01", 1), ("0.001", 100_000));
                 s.status = InstStatus::Trading;
@@ -524,6 +527,11 @@ pub fn group(id: GroupId, asset: AssetId, legs: &[LegDef]) -> GroupSpec {
     let mut l = [none; 4];
     l[..legs.len()].copy_from_slice(legs);
     GroupSpec { id, asset, n_legs: legs.len() as u8, open_allowed: 1, legs: l, _rsv: 0 }
+}
+
+/// A second, disjoint group (legs a2 + b2, ETH).
+pub fn gspec_eth(id: GroupId) -> GroupSpec {
+    group(id, ETH, &[leg(A2, A), leg(B2, B)])
 }
 
 /// The B0 group (legs a1 + b1, BTC).
@@ -1103,7 +1111,7 @@ impl<S: StrategySet> H<S> {
         let t = self.now();
         for v in [A, B] {
             self.push(RingId::Rep(0), &conn(v, 0, ConnStateKind::Up, ConnRole::Md, InstId(0), AccountId(0), t));
-            for i in [A1, A2, A3, B1] {
+            for i in [A1, A2, A3, B1, B2] {
                 if self.rd.inst(i).venue == v {
                     self.push(RingId::Rep(0), &conn(v, 0, ConnStateKind::Up, ConnRole::Md, i, AccountId(0), t));
                 }
@@ -1122,7 +1130,11 @@ impl<S: StrategySet> H<S> {
         let mut rid = 1_000;
         for a in [AC1, AC2] {
             for v in [A, B] {
-                let levs: Vec<LeverageItem> = if v == B { vec![LeverageItem { inst: B1, _pad: 0, leverage: r("3.00") }] } else { Vec::new() };
+                let levs: Vec<LeverageItem> = if v == B {
+                    vec![LeverageItem { inst: B1, _pad: 0, leverage: r("3.00") }, LeverageItem { inst: B2, _pad: 0, leverage: r("3.00") }]
+                } else {
+                    Vec::new()
+                };
                 let h = cfg_hdr(a, v, levs.len() as u16);
                 let mut body = h.as_bytes().to_vec();
                 for l in &levs {
@@ -1137,6 +1149,8 @@ impl<S: StrategySet> H<S> {
         self.run();
         self.quote(A1, "50000", "50001");
         self.quote(B1, "50010", "50011");
+        self.quote(A2, "3000", "3000.5");
+        self.quote(B2, "3000.1", "3000.6");
         self.run();
         let cells: Vec<(StrategyId, AccountId, GroupId)> = self
             .s
@@ -1208,7 +1222,7 @@ pub fn intent(hx: &Hx<'_>, inst: InstId, side: hft_types::Side, tif: hft_types::
 
 /// The B0 venue of an inst.
 pub fn inst_venue(i: InstId) -> VenueId {
-    if i == B1 { B } else { A }
+    if i == B1 || i == B2 { B } else { A }
 }
 
 /// IOC open buy of 0.001 at the ask.

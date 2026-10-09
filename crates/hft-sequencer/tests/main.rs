@@ -15,5 +15,6 @@ mod boot;
 mod recover;
 mod strategies;
 mod views;
+mod advisor;
 mod advisor_lag;
 mod snapshot_rows;

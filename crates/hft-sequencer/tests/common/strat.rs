@@ -253,6 +253,13 @@ pub struct Script {
     pub fail_on_params: bool,
     /// `model_on_params` effect for a params version.
     pub reset_effect: Vec<(u64, ModelParamEffect)>,
+    /// `Model::PATH_VERSION` of the binary.
+    pub path_version: u32,
+    pub fail_model_restore: bool,
+    /// Another `model_layout` (stands in for `LAYOUT_VERSION + 1`).
+    pub layout_alt: bool,
+    /// `model_on_params` calls: (strategy, params version).
+    pub model_params: Vec<(StrategyId, i64)>,
 }
 
 thread_local! {
@@ -490,7 +497,15 @@ macro_rules! test_set {
                 p.get(F_CKPT) as u64
             }
             fn model_layout(_: u16) -> &'static ModelLayoutDesc {
-                &ModelLayoutDesc::EMPTY
+                static ALT: ModelLayoutDesc = ModelLayoutDesc {
+                    sections: &[hft_strategy_sdk::SectionDesc {
+                        tag: 1,
+                        name: "alt",
+                        scope: hft_strategy_sdk::SectionScope::Instance,
+                        elems: &[],
+                    }],
+                };
+                if SCRIPT.with(|x| x.borrow().layout_alt) { &ALT } else { &ModelLayoutDesc::EMPTY }
             }
             fn model_on_event<V: ModelViews>(m: &mut TestModel, ev: &EventRef<'_>, v: &V, out: &mut AdviceOut<'_>) {
                 m.n_events += 1;
@@ -526,12 +541,14 @@ macro_rules! test_set {
                     });
                 }
             }
-            fn model_on_params(m: &mut TestModel, _p: &P, g: &GroupTable, _: &RefView<'_>) -> ModelParamEffect {
+            fn model_on_params(m: &mut TestModel, p: &P, g: &GroupTable, _: &RefView<'_>) -> ModelParamEffect {
                 m.groups = g.clone();
                 SCRIPT.with(|x| {
                     let mut x = x.borrow_mut();
                     x.calls.push((m.i.strategy, "model_on_params"));
-                    x.reset_effect.first().map(|e| e.1.clone()).unwrap_or(ModelParamEffect::None)
+                    x.model_params.push((m.i.strategy, p.get(F_THR)));
+                    let v = p.get(F_THR);
+                    x.reset_effect.iter().find(|e| e.0 as i64 == v).map(|e| e.1.clone()).unwrap_or(ModelParamEffect::None)
                 })
             }
             fn model_snapshot_chunk(m: &TestModel, from_gix: u16, w: &mut SnapshotWriter, _max: u32) -> SnapshotProgress {
@@ -543,11 +560,14 @@ macro_rules! test_set {
                 }
             }
             fn model_restore(m: &mut TestModel, r: &mut SnapshotReader<'_>) -> Result<(), RestoreError> {
+                if SCRIPT.with(|x| x.borrow().fail_model_restore) {
+                    return Err(RestoreError::VersionUnsupported);
+                }
                 m.n_events = r.get_u64()?;
                 Ok(())
             }
             fn model_path_version(_: u16) -> u32 {
-                0
+                SCRIPT.with(|x| x.borrow().path_version)
             }
             fn model_snapshot_path(_: &TestModel, _: &mut SnapshotWriter) {}
             fn model_restore_path(_: &mut TestModel, _: &mut SnapshotReader<'_>) -> Result<(), RestoreError> {
