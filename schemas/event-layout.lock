@@ -734,6 +734,19 @@ note Ledger 12 FundingMismatch
 note Ledger 13 FundingCorrected
 note Ledger 14 ChainReorg
 note Ledger 15 ChainReorgNaked
+note Exec 1 ExecBroken
+note Exec 2 ExecExternalDefault
+note Exec 3 ExecAutoFixFailed
+note Exec 4 ExecStuck
+note Exec 5 ExecForceStep
+note Exec 6 ExecAutoFixDone
+note Exec 7 ExecSerialFallback
+note Exec 8 ExecEngineOrderRejected
+note Exec 9 ExecManualExternal
+note Exec 10 ExecManualHold
+note Exec 11 ExecUngroupedReduce
+note Exec 12 ExecGateHeldNaked
+note Exec 13 ExecChainLegExcess
 struct StrategyParamsHdr 48
   0 strategy id:strategy
   1 account id:account

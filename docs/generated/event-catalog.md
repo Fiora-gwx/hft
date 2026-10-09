@@ -1345,19 +1345,19 @@
 | `FundingCorrected` | Ledger | 13 | P1 |  |
 | `ChainReorg` | Ledger | 14 | P1 |  |
 | `ChainReorgNaked` | Ledger | 15 | P0 |  |
-| `ExecBroken` | Exec |  | P0 |  |
-| `ExecExternalDefault` | Exec |  | 按条件 |  |
-| `ExecAutoFixFailed` | Exec |  | P0 |  |
-| `ExecStuck` | Exec |  | P1 |  |
-| `ExecForceStep` | Exec |  | P1 |  |
-| `ExecAutoFixDone` | Exec |  | P1 |  |
-| `ExecSerialFallback` | Exec |  | P0 |  |
-| `ExecEngineOrderRejected` | Exec |  | P0 |  |
-| `ExecManualExternal` | Exec |  | 按条件 |  |
-| `ExecManualHold` | Exec |  | 按条件 |  |
-| `ExecUngroupedReduce` | Exec |  | P0 |  |
-| `ExecGateHeldNaked` | Exec |  | P0 |  |
-| `ExecChainLegExcess` | Exec |  | P0 |  |
+| `ExecBroken` | Exec | 1 | P0 |  |
+| `ExecExternalDefault` | Exec | 2 | 按条件 |  |
+| `ExecAutoFixFailed` | Exec | 3 | P0 |  |
+| `ExecStuck` | Exec | 4 | P1 |  |
+| `ExecForceStep` | Exec | 5 | P1 |  |
+| `ExecAutoFixDone` | Exec | 6 | P1 |  |
+| `ExecSerialFallback` | Exec | 7 | P0 |  |
+| `ExecEngineOrderRejected` | Exec | 8 | P0 |  |
+| `ExecManualExternal` | Exec | 9 | 按条件 |  |
+| `ExecManualHold` | Exec | 10 | 按条件 |  |
+| `ExecUngroupedReduce` | Exec | 11 | P0 |  |
+| `ExecGateHeldNaked` | Exec | 12 | P0 |  |
+| `ExecChainLegExcess` | Exec | 13 | P0 |  |
 | `CtlAudit` | CtlAudit |  | Info | `cmd_id` [0, +128)、`cmd_kind` [128, +16)、`result_code` [144, +8)、`role` [152, +8)、`view_account` [160, +8)、`chat_type` [168, +8)、`target_account` [176, +8)、`issuer` [192, +64)、`cmd_hash` [256, +192)、`peer_uid` [448, +32) |
 | `PartialEventDropped` | Boot |  | P1 |  |
 | `TailSkipped` | Boot |  | P0 | `seq_from` [0, +64)、`seq_to` [64, +64)、`reason` [128, +64) |

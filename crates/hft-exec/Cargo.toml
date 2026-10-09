@@ -1,0 +1,36 @@
+[package]
+name = "hft-exec"
+description = "Execution layer: per-(account, group) target cells, taker/pair/simultaneous slicing, hedge repair, residuals, external-fill defaults, Broken disposal and margin-stress engine reduction"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Test-only state access (`Exec::cell_mut`, `Exec::acct_mut`, …); enabled only from [dev-dependencies].
+testing = []
+
+[dependencies]
+hft-types.workspace = true
+hft-refdata.workspace = true
+hft-event.workspace = true
+hft-strategy-sdk.workspace = true
+zerocopy.workspace = true
+
+[dev-dependencies]
+# Enables `testing` for this crate's own tests and benches.
+hft-exec = { path = ".", features = ["testing"] }
+# MockViews (`testing` stubs of the SDK).
+hft-strategy-sdk = { workspace = true, features = ["testing"] }
+# CountingAlloc (EXE-475).
+hft-testkit.workspace = true
+proptest.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "exec"
+harness = false

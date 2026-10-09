@@ -124,3 +124,65 @@ reason = "hugetlbfs retirement audit on the housekeeping thread"
 file = "crates/hft-journal/src/verify.rs"
 lints = ["clippy::disallowed_types"]
 reason = "offline verification (journal-verify, journal-archiver)"
+
+# ---------------------------------------------------------------- hft-exec snapshot section 21 (D6)
+
+[[tsc]]
+row = "ExecCellRow"
+field = "set_tsc"
+class = 1
+reason = "hft-exec recovery_end shifts it (downtime not counted)"
+
+[[tsc]]
+row = "ExecCellRow"
+field = "last_slice_tsc"
+class = 1
+reason = "hft-exec recovery_end shifts it (downtime not counted)"
+
+[[tsc]]
+row = "ExecCellRow"
+field = "wake_at"
+class = 1
+reason = "hft-exec recovery_end shifts it (downtime not counted)"
+
+[[tsc]]
+row = "ExecCellRow"
+field = "gated_since"
+class = 1
+reason = "hft-exec recovery_end shifts it (downtime not counted)"
+
+[[tsc]]
+row = "ExecCellRow"
+field = "stuck_since"
+class = 1
+reason = "hft-exec recovery_end shifts it (downtime not counted)"
+
+[[tsc]]
+row = "ExecCellRow"
+field = "fix_first_tsc"
+class = 1
+reason = "hft-exec recovery_end shifts it (downtime not counted)"
+
+[[tsc]]
+row = "ExecCellRow"
+field = "fix_next_tsc"
+class = 1
+reason = "hft-exec recovery_end shifts it (downtime not counted)"
+
+[[tsc]]
+row = "ExecCellRow"
+field = "ext_deadline"
+class = 1
+reason = "hft-exec recovery_end shifts it (downtime not counted)"
+
+[[tsc]]
+row = "ExecCellRow"
+field = "broken_since"
+class = 1
+reason = "hft-exec recovery_end shifts it (downtime not counted)"
+
+[[tsc]]
+row = "ExecGateRow"
+field = "gate_closed_tsc"
+class = 1
+reason = "hft-exec recovery_end resets it to the recovery time"

@@ -700,6 +700,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "hft-exec"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "hft-event",
+ "hft-exec",
+ "hft-refdata",
+ "hft-strategy-sdk",
+ "hft-testkit",
+ "hft-types",
+ "proptest",
+ "zerocopy",
+]
+
+[[package]]
 name = "hft-journal"
 version = "0.1.0"
 dependencies = [

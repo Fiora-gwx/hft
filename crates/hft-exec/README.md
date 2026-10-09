@@ -54,13 +54,15 @@ impl Exec {
     /// 策略本事件对该 group 下了单(`Ctx::place` 或链上意图):外来成交视为已处理;解除该 cell 的 `manual_hold`。
     pub fn note_strategy_action(&mut self, a: AccountId, g: GroupId, now: Now, out: &mut ExecOut);
     pub fn touch_inst(&mut self, inst: InstId);                               // Bbo / L2Batch / Mark 之后:引用该 inst 的活动 cell 待推进
-    pub fn on_order_update(&mut self, u: &OrderUpdate, now: Now, out: &mut ExecOut);   // 只投递带 EXEC 标志的槽
+    /// 只投递带 EXEC 标志的槽;v 与 advance 同一视图适配器(成交后按 legs 判定到达与补腿触发)。
+    pub fn on_order_update<V: Views>(&mut self, u: &OrderUpdate, v: &V, now: Now, out: &mut ExecOut);
     pub fn on_link(&mut self, l: &LinkNotice, now: Now, out: &mut ExecOut);            // 链接状态与 RESUME_HOLD 变化(sequencer 从 OMS 输出投影)
     pub fn on_place_result(&mut self, id: ExecOrderId, r: PlaceResult, now: Now, out: &mut ExecOut); // 意图管线结果,同一事件内回填
     pub fn on_timer(&mut self, timer_id: u64, now: Now, out: &mut ExecOut);            // Timer{owner = Exec}
     /// 每一笔经 hft-ledger 入账的外来成交都调用,含不可归属的(`f.group = GROUP_NONE`,此时恒返回 0);f 即投递给策略的同一 SDK 视图。
     /// 返回默认处理的截止时刻(0 = 引擎不做默认处理,见"外来成交的默认处理"),sequencer 写进 f.deadline_tsc 后再投递给策略。
-    pub fn on_external(&mut self, a: AccountId, f: &ExternalFillView, now: Now, out: &mut ExecOut) -> Tsc;
+    /// v:同 advance 的视图适配器(manual_hold 的 Note 与默认处理判定读 legs 的 naked)。
+    pub fn on_external<V: Views>(&mut self, a: AccountId, f: &ExternalFillView, v: &V, now: Now, out: &mut ExecOut) -> Tsc;
     pub fn on_leg_adjust(&mut self, a: AccountId, g: GroupId);                // FeeOnly 净量补差、AdoptExchange、WriteOffResidual 之后
     /// MarginStress 档位、HedgeBroken、CapSet/CapCleared(含 Broken 进出、HARD 解除:Broken 处置的计时;
     /// 该账户 Kill cap 的 CapCleared = Resume{Kill}:清 flatten_lock)。同一 Input 内 sequencer 先投递 EXEC 槽的
@@ -109,8 +111,9 @@ impl Exec {
     pub fn snapshot(&self, w: &mut SnapshotWriter);                       // 一次写本 crate 的全部节(节 21)
 
     // ── 恢复 ──
-    /// 只装载快照(恢复、验证回放、advisor 镜像共用);不改任何 TSC 量。
-    pub fn restore(r: &mut SnapshotReader, cfg: &ExecConfig, cap: &Capacities, groups: &GroupTable) -> Result<Exec, RestoreError>;
+    /// 只装载快照(恢复、验证回放、advisor 镜像共用);不改任何 TSC 量。rd:重建 cell 表与 inst 缓存(同 on_groups_changed)。
+    pub fn restore(r: &mut SnapshotReader, cfg: &ExecConfig, cap: &Capacities, groups: &GroupTable, rd: &RefView)
+                   -> Result<Exec, RestoreError>;
     /// 冷启动恢复结束(只由恢复驱动调用:尾部重放之后、写 purpose = Recovery 的快照之前)。
     /// now = 本次运行的 TscClock 读数(与 Recovery 快照头同值);stop_tsc = 重放到的最后一条 Input 的 tsc(不重放尾部时 = 所选快照
     /// 所在记录的记录头 tsc;快照头的 snap_tsc 是测量字段,不用);
@@ -156,7 +159,8 @@ pub struct ExecOrder {
     pub origin: ExecOrigin,       // Target(为策略目标服务)| Engine(补腿、残余修剪、外来成交默认处理、自动有界平仓、默认减仓、命令、Kill 清仓;
                                   //   账户 force_active/flatten_lock 时策略目标的订单也是 Engine,见"增仓与减仓的分类")
     pub kind: ExecOrderKind,      // 码值见"ExecDecision.detail 打包与子码"的 ExecOrderKind 表;sequencer 原样写进 OrderDecision.reason
-    pub reason: TargetReason,     // 来自目标;Engine 订单为 MarginStress | Hard | Manual
+    pub reason: TargetReason,     // 来自目标(引擎目标即 MarginStress | Hard);补腿类订单取 cell 当前目标的 reason,无目标时与
+                                  //   hedge_fix_cmd、自动有界平仓为 Manual
     pub hedge_cap_qty: Qty,       // Hedge 类订单的数量上限(见"对冲量上限"),sequencer 填进 IntentView;其余为 0
 }
 pub enum PlaceResult { Placed(OrderRef), Rejected(RejectBits), Shadowed }
@@ -265,13 +269,14 @@ pub enum PlaceResult { Placed(OrderRef), Rejected(RejectBits), Shadowed }
 pub struct TargetCell {
     // ── 定义(on_groups_changed 写)──
     pub account: AccountId, pub group: GroupId, pub owner: StrategyInstanceId,
-    pub n_legs: u8, pub legs: [LegRef; 4],       // LegRef { venue, inst, kind: Spot | LinearPerp | Chain, lot, min_qty, min_notional, reduce_only_cap }
+    pub n_legs: u8, pub legs: [CellLeg; 4],      // CellLeg { venue, inst, kind: Spot | LinearPerp | Chain, lot, min_qty, reduce_only_cap }(min_notional 读 inst 行)
     // ── 当前目标 ──
     pub has_target: bool, pub target: TargetIntent, pub origin: TargetOrigin, // Strategy | Engine(MarginStress | External | Command | KillFlatten)
                                                  // (AutoFix 不是目标来源,只出现在自动有界平仓的 ExecDecision/ExecUpdate 上,见"ExecDecision 与进度通知")
     pub set_seq: u64, pub set_tsc: Tsc,
     pub pair_lot: Qty,                           // 配对算法的第一腿取整单位(见"两腿 lot 对齐");非配对目标 = 0。不进快照,restore 时重算
-    pub deferred: u8,                            // 待写的决定与通知种类位(ENGINE_SET | ENGINE_CLEARED | CLEARED_BY_CMD | STATE | TIMERS | ALARM),advance 写出后清零(见"输出容量与续推")
+    pub deferred: u8,                            // 待写的决定与通知种类位(ENGINE_SET=1 | ENGINE_CLEARED=2 | CLEARED_BY_CMD=4 | STATE=8 | TIMERS=16 | ALARM=32
+                                                 // | HOLD_REL=64 待写 manual_hold 解除 Note | EXT_CLR=128 待写 External/0/Cleared),advance 写出后清零(见"输出容量与续推")
     // ── 进度 ──
     pub state: CellState,                        // Idle | Working | Stuck | Broken;判别值取 hft-event TargetState 线上码(不另设码表)
     pub stuck: StuckReason, pub broken: BrokenReason, pub gated_bits: RejectBits,
@@ -292,6 +297,8 @@ pub struct TargetCell {
     // ── Broken 处置 ──
     pub broken_since: Tsc,                       // 进入 Broken 的时刻(0 = 不在 Broken)
     pub auto_fix: AutoFixState,                  // 见"Broken 处置"
+    pub slot: [u32; 4],                          // 无组 cell:各腿被跟踪切片的 OMS 槽号(区分已释放的 Unknown 单与该腿的新切片;
+                                                 //   进快照:LegRef.slot)
 }
 #[repr(C)]
 pub struct AutoFixState {                        // 56 B(布局为草案,以代码与编译期断言为准)
@@ -329,7 +336,7 @@ pub struct AcctState {                           // 每账户
 
 - **已成、在途、残余**:`filled` 由本 crate 记;各腿净量 `leg[i].net`、即时在途 `leg[i].inflight_immediate`、挂单在途 `leg[i].inflight_resting`、残余 `leg[i].residual`、naked 读 [OMS LegTracker](../hft-oms/README.md#legtracker)(`Views::legs`;两类在途按槽状态的划分唯一定义在那里),不复制。本 crate 的"在途"一律指 `inflight_immediate`:挂单不算对冲覆盖、不算推进中的切片(策略在目标管理的 group 上自挂的 resting 单,成交后由下一次推进按新差值处理)。`TargetView`(SDK 类型)由 cell 投影,`view()` 返回其引用。无组 cell 没有 LegTracker:仓位取 hft-ledger(见"保证金危急的默认减仓"),在途取本 cell 的 `own_infl`。
 - 容量:cell 数 = `Capacities.max_cells_total`(取值见 [apps/hft-core 容量表](../../apps/hft-core/README.md#内存与-journal-段按主机类唯一归属))+ 账户数个无组 cell;全部在 `new` 时分配。
-- 不变量(属性测试逐条检查):`active.kind ≠ None ⇒ state ∈ {Working, Stuck}`,或 `state == Broken` 且该 cell 有引擎目标或 `auto_fix.phase == Running`;`state == Idle ⇒ !has_target ∨ 全部腿在带内`;`state == Broken ⇒ 不产生 origin = Target 的订单`;`hold & MANUAL_HOLD` 的 cell 不产生 `HedgeFix`/`ResidualTrim`/`ExternalDefault`/`AutoFix` 订单,这四类订单也不落在 `venue_open` 无该位的 venue 上;Engine 订单从不增加任何腿的 |仓位|;任何一笔订单不穿越零(含 Unknown 切片按最坏情况全部成交);本 crate 从不对链上腿产生订单;每个 Broken 期 `AutoFix` 至多执行一次,其成交总量 ≤ `budget`;`flatten_lock` 账户上任何被接受的目标每腿 |目标| ≤ 接受时的参照量(见"目标的接受与替换"),因此该账户没有增仓切片;配对算法的第一腿订单量是 `pair_lot` 的整数倍(按较粗 lot 取整的减仓目标除外,见"两腿 lot 对齐");`serial ≠ 0` 的 cell 不产生带 LegLink 的订单;每笔订单的限价是 `cap_cross_px` 的结果、`qty × 限价` 折 USDT 后 ≤ 本笔的单笔名义上限(见"限价与单笔名义");无组 cell 只产生 reduce-only 的永续 `Flatten` 单。
+- 不变量(属性测试逐条检查):**新发的** `origin = Target` 切片只在 `state ∈ {Working, Stuck}` 时产生;`state == Broken` 时只产生引擎目标的订单、补腿类订单(`AutoFix` 等)与 `CmdHedgeFix`(进入 Idle/Broken 时已在途的 IOC 不撤,`active` 保留到其终态);`state == Idle ⇒ !has_target ∨ 全部腿在带内`;`state == Broken ⇒ 不产生 origin = Target 的订单`;`hold & MANUAL_HOLD` 的 cell 不产生 `HedgeFix`/`ResidualTrim`/`ExternalDefault`/`AutoFix` 订单,这四类订单也不落在 `venue_open` 无该位的 venue 上;Engine 订单从不增加任何腿的 |仓位|;任何一笔订单不穿越零(含 Unknown 切片按最坏情况全部成交);本 crate 从不对链上腿产生订单;每个 Broken 期 `AutoFix` 至多执行一次,其成交总量 ≤ `budget`;`flatten_lock` 账户上任何被接受的目标每腿 |目标| ≤ 接受时的参照量(见"目标的接受与替换"),因此该账户没有增仓切片;配对算法的第一腿订单量是 `pair_lot` 的整数倍(按较粗 lot 取整的减仓目标除外,见"两腿 lot 对齐");`serial ≠ 0` 的 cell 不产生带配对链接(`role = First`)的订单(补腿类订单的 `role = HedgeFix` 单笔链接不算);每笔订单的限价是 `cap_cross_px` 的结果、`qty × 限价` 折 USDT 后 ≤ 本笔的单笔名义上限(见"限价与单笔名义");无组 cell 只产生 reduce-only 的永续 `Flatten` 单。
 
 ### 状态机
 
@@ -360,7 +367,7 @@ pub struct AcctState {                           // 每账户
 1. `state == Broken` 且无引擎目标、`auto_fix.phase ∉ {Primed 且已到期, Running}` → 跳过;或该 cell 不是因成交/链接/模式/风控/新目标被标记且 `now < wake_at` → 跳过(到期由定时器重新标记)。Broken 的 cell 走"Broken 处置"一节的步骤,不走下面 2–8。
 2. 每腿读 `pos_i = legs.leg[i].net`、`infl_i = legs.leg[i].inflight_immediate`(无组 cell:ledger 仓位与 `own_infl[i]`);`eff_i = pos_i + infl_i`;`diff_i = target_i − eff_i`。
 3. **完成判定**:每腿 `reached_i = |target_i − pos_i| ≤ band × max(|target_i|, floor_i)`;`target_i == 0` 时改为 `|pos_i| × mark ≤ dust_notional`。全部 `reached` 且全部 `infl_i == 0` → `Done`:`state = Idle`、`ExecDecision{State, → Idle}`、通知 `Done`、`serial` 清零;随后按"残余与尘埃"检查一次。
-4. 全部 `|diff_i|` 在带内(目标为 0 的腿按尘埃线,见"不交易带与紧急度")但仍有在途 → 等待。`active.kind ≠ None`(配对算法每 cell 同时只有一笔在途;`TakerSlice` 与串行腿每腿一笔)→ 等待。例外(只用于 `reason ∈ {MarginStress, Hard}` 引擎目标的串行腿、单腿 `TakerSlice` 与无组 cell;配对第一腿带链接,仍等待):永续腿的在途切片进入 `Unknown`、且该 venue `VenueCaps.reduce_only` 支持时,该腿不等待——`active` 释放该切片(其剩余量仍计在 `inflight_immediate`/`own_infl` 里),下一片数量 ≤ `|pos_i| − |该腿同向即时在途|`(Unknown 剩余按全部成交计),所以即使 Unknown 的单全部成交也不穿越零;现货腿与不支持 reduceOnly 的腿照旧等待收敛。
+4. 全部 `|diff_i|` 在带内(目标为 0 的腿按尘埃线,见"不交易带与紧急度")但仍有在途 → 等待。`active.kind ≠ None`(配对算法每 cell 同时只有一笔在途;`TakerSlice` 与串行腿每腿一笔)→ 等待。例外(只用于 `reason ∈ {MarginStress, Hard}` 引擎目标的串行腿、单腿 `TakerSlice` 与无组 cell;配对第一腿带链接,仍等待):永续腿的在途切片进入 `Unknown`、且该 venue `VenueCaps.reduce_only` 支持时,该腿不等待——`active` 释放该切片(其剩余量仍计在 `inflight_immediate`/`own_infl` 里),下一片数量 ≤ `|pos_i| − |该腿同向即时在途|`(Unknown 剩余按全部成交计),所以即使 Unknown 的单全部成交也不穿越零;现货腿与不支持 reduceOnly 的腿照旧等待收敛。无组 cell 每腿至多一笔已释放的 Unknown 切片(该腿已有释放剩余时,新的 Unknown 切片照旧等待),于是那一笔的终态恰好结清该腿的释放剩余;更新按切片的 OMS 槽号区分已释放的单与该腿的新切片(`TargetCell.slot`)。
 5. **预检**(只读,避免门控风暴):增仓腿看 `v.mode(a, g)`(CloseOnly;Shadow 与 `open_allowed = false` 按"运行模式、Drain 与 Unknown"只交出一片,之后 `Stuck{Shadow}`)与 `v.risk(a)`(HARD、`open_blocked`(含 Kill cap)、MarginStress ≥ L1);减仓腿只看 HARD;两类都要求所用腿 `quote_ok`——例外:`reason ∈ {MarginStress, Hard}` 的配对目标只要求第一腿(永续腿),第二腿不可用、在途链接处于 `LINK_HOLD` 或其第一腿 Unknown 时退回串行腿(`SerialFallback`,触发条件见"保证金危急的默认减仓"第 2 条)。不满足 → 记 `gated_since`,持续 ≥ `stuck_after_ms` → `Stuck{Gated(bits)}`(只因报价不可用时为 `Stuck{StaleQuote}`)。
 6. **穿越零**:`sign(target_i) ≠ sign(pos_i)` 且 `pos_i ≠ 0` 时本腿先只做"减到 0"的部分;开向另一侧在减到 0 之后的下一笔。
 7. 按 `exec` 选算法计算切片(下文各节;限价与单笔名义一律按"限价与单笔名义"),写 `ExecOrder`、`active`、`last_slice_tsc`、`wake_at = now + 冷却`,写 `ExecDecision{Slice}`,登记定时器。
@@ -632,6 +639,8 @@ Broken 的 (account, group) 有三条出路,优先级从高到低:人工 `HedgeF
    - Broken 的 cell 引擎目标清除后仍为 Broken,自动有界平仓若已到期立即检查。
 6. 默认减仓期间该账户的 `set_target`:每腿 `|t_i| ≤ |引擎目标_i|` 且不变号(减得更多,`reason = Exit` 的退出目标同样适用)才接受并替换引擎目标,腿顺序仍强制 `PerpFirst`、`urgency` 仍为 `Urgent`、`serial` 保持,订单按 `origin = Engine` 发出(见"增仓与减仓的分类");否则 `TargetReject::ForcedReduceActive`。Broken 的 cell 照旧拒绝 `CellBroken`。
 
+**引擎目标只向 0 推进**:引擎单从不增加 |仓位|,所以账户处于 `force_active`/`flatten_lock` 或 cell 有引擎目标时,各腿目标按 `[0, 当前量]`(当前量含即时在途)截取——外来成交等使某腿先于引擎越过目标(更接近 0 或越过 0)时,该腿按已到达处理,不会被开回。`SerialFallback` 置位后该 cell 的任何目标(含 `force_active` 期间被接受、替换了引擎目标的策略目标)都走串行腿,直到 `serial` 清零。
+
 **引擎目标与 cell 状态**(本节全部引擎目标:L3、清仓、对齐目标与无组 cell;Broken 的 cell 状态保持 Broken):设定时替换了策略目标的 cell 进入 `Stuck{EngineOverride}`,原本无策略目标的进入 `Working`(各写一条 `State` 决定);引擎目标在 `Stuck{EngineOverride}` 下照常推进;到达时按"推进"第 3 步写 `State → Idle` 并通知 `Done`(设定时已到达的 cell 在同一 `advance` 内写 `Working` 与 `Idle` 两条)。清仓目标与对齐目标到达后随之清除(不另写 `TargetCleared`,通知的 `cleared_by_engine = true`);L3 的引擎目标到达后保留,到第 5 条清除。
 
 `engine_flatten`(`Kill{Account, flatten}`)用同一机制(登记 `force_req = Flatten`,advance 设定):对该账户**全部** cell(含 Broken)与全部 venue 上的无组永续持仓设引擎目标 0、`reason = Hard`(同一账户再次调用幂等),同样先请求撤策略挂单;非 Broken 的 cell 用 PairOnFill 永续先(第二腿不可用或链接 `LINK_HOLD` 时同样 `SerialFallback`),Broken 的 cell 用上面的串行腿(永续 reduce-only 先、再现货)。两腿都到 0 后 naked 为 0,Broken cap 由 hft-risk 解除;cell 的引擎目标(0)保留到到达,`CapCleared{Broken}` 不清它。HARD 生效时引擎单全部停止,目标保留并按门控记 `Stuck{Gated(HARD)}`(`ExecStuck` P1)。
@@ -685,9 +694,9 @@ Broken 的 (account, group) 有三条出路,优先级从高到低:人工 `HedgeF
 
 无组 cell 的决定 `group = GROUP_NONE`、`owner` = 该账户绑定的实例,只有 `ForceStep`、`Slice`、`State`、`TargetCleared` 四种 action。
 
-`ExecUpdate`(SDK 类型)经 `EventRef::Exec` 投递给拥有者策略:`Progress`(每笔切片终态且有成交时一次)、`Done`(到达目标,或目标被引擎清除,带 `cleared_by_engine`)、`Stuck(reason)`(进入 Stuck 与原因变化时)、`Broken(reason)`;带 `origin`(自动有界平仓的成交为 `Engine(AutoFix)`)、`tag`、各腿目标/已成/在途。执行层订单(`EXEC` 槽)的 `OrderUpdate` 只投递给本 crate,策略看 `Exec` 事件与 `Views::order`。
+`ExecUpdate`(SDK 类型)经 `EventRef::Exec` 投递给拥有者策略:`Progress`(每笔切片终态且有成交时一次)、`Done`(每次到达目标一条——到达后因仓位变化离开带、再次到达时再发一条;或目标被引擎清除,带 `cleared_by_engine`)、`Stuck(reason)`(进入 Stuck 与原因变化时)、`Broken(reason)`;带 `origin`(自动有界平仓的成交为 `Engine(AutoFix)`)、`tag`、各腿目标/已成/在途。执行层订单(`EXEC` 槽)的 `OrderUpdate` 只投递给本 crate,策略看 `Exec` 事件与 `Views::order`。
 
-**冷读者重建**([ops_bot](../../python/ops_bot/README.md) 停机兜底判定等读 journal 的冷读者用;只读本 crate 的 `ExecDecision` 与 hft-risk 的 cap 注记,不读快照之外的内部状态)。重建结果不漏报:内部状态成立时重建一定成立;允许多报,多报的方向一律是"仍在处置中"(引擎目标接手自动有界平仓的那一片终态之前,重建可以多报"执行中")。策略目标(如 `Exit`)替换了引擎目标(含清仓目标)后,按该 cell 的引擎目标已结束处理——与内部状态相同:被接受的策略目标不是引擎目标。Broken 的 cell 不需要单独重建(Broken 本身已在兜底条件中)。
+**冷读者重建**([ops_bot](../../python/ops_bot/README.md) 停机兜底判定等读 journal 的冷读者用;只读本 crate 的 `ExecDecision` 与 hft-risk 的 cap 注记,不读快照之外的内部状态)。重建结果不漏报:内部状态成立时重建一定成立;允许多报,多报的方向一律是"仍在处置中"(引擎目标接手自动有界平仓的那一片终态之前,重建可以多报"执行中")。策略目标(如 `Exit`)替换了引擎目标(含清仓目标)后,按该 cell 的引擎目标已结束处理——与内部状态相同:被接受的策略目标不是引擎目标。Broken 的 cell 不需要单独重建(Broken 本身已在兜底条件中)。新的外来成交开始新一轮计时(`External/<cause>/Timed`)时,上一轮截止后尚待发出的默认处理作废(由新一轮截止重新判定),所以计时中的 cell 不会先收到上一轮的 `ExternalDefault`。
 
 | 状态 | 开始 | 结束 |
 |---|---|---|
@@ -724,7 +733,7 @@ SDK 的 `StuckReason`/`BrokenReason`/`TargetReject` 新增值时同一改动在�
 
 ### 快照与恢复
 
-本 crate 的快照节是节 21(编号由 [journal-format](../../docs/subsystems/journal-format.md) 分配;**行格式与行版本只在本节登记**)。`snapshot(&self, w)` 一次写完整节:每个"非空" cell 一行(有目标、非 Idle、`FixState` 非零、`ext_deadline ≠ 0`、`auto_fix.phase ≠ None`、`serial ≠ 0`、`hold ≠ 0` 或 `deferred ≠ 0`;无组 cell 同样,键 `(account, GROUP_NONE)`,含其当前装入的腿定义),再每个 `force_active`、`flatten_lock` 或 `force_req` 非空的账户一行,再每个账户一条 Gate 行(`gate_open`、`venue_open`、`gate_closed_tsc`:验证回放与 advisor 镜像从快照值继续;恢复驱动在 `recovery_end` 时清零并重设);全部小端、按键升序。`pending` 位随 cell 行写出(因输出容量停下、等 `Timer{Exec, Continue}` 的 cell 在事件边界仍待推进);`pair_lot` 不进快照(restore 时由目标与 refdata 重算)。含枚举字段的行用 `zerocopy::TryFromBytes` 读回,非法判别值 → `RestoreError`。
+本 crate 的快照节是节 21(编号由 [journal-format](../../docs/subsystems/journal-format.md) 分配;**行格式与行版本只在本节登记**)。`snapshot(&self, w)` 一次写完整节:每个"非空" cell 一行(有目标、待推进,或行内任一字段与新建 cell 不同——如非 Idle、`FixState` 非零、`ext_deadline ≠ 0`、`auto_fix.phase ≠ None`、`serial ≠ 0`、`hold ≠ 0`、`deferred ≠ 0`、冷却时刻、`active` 的切片序号或已登记的定时器位;只写前几项会让清除目标后的冷却与订单序号在 restore 后丢失;无组 cell 同样,键 `(account, GROUP_NONE)`,含其当前装入的腿定义),再每个 `force_active`、`flatten_lock` 或 `force_req` 非空的账户一行,再每个账户一条 Gate 行(`gate_open`、`venue_open`、`gate_closed_tsc`:验证回放与 advisor 镜像从快照值继续;恢复驱动在 `recovery_end` 时清零并重设);全部小端、按键升序。`pending` 位随 cell 行写出(因输出容量停下、等 `Timer{Exec, Continue}` 的 cell 在事件边界仍待推进);`pair_lot` 不进快照(restore 时由目标与 refdata 重算)。含枚举字段的行用 `zerocopy::TryFromBytes` 读回,非法判别值 → `RestoreError`。
 
 **目标按逐字段的显式行写出,不原样写 SDK 类型**:SDK 的 `ExecSpec` 是 `#[repr(C, u8)]` 数据枚举,判别字节后的 7 B 是隐式填充,较小的变体在 128 B 载荷里留下未初始化的尾部,原样写进快照会使 `state_hash` 不确定,也派生不了 `IntoBytes`。所以 cell 行之后接 `ExecTargetRow`:字段顺序与偏移同 SDK `TargetIntent`,只把 `exec` 换成显式的 `ExecSpecRow`。写出时逐字段拷贝,全部 `_pad` 与 `params` 的尾部写 0;读回时 `algo` 必须是合法的 `ExecSpec` 判别值(`has_target = 0` 时整行为 0),按 `algo` 用 `TryFromBytes` 读对应参数结构,尾部非零 → `RestoreError`。
 
@@ -734,14 +743,15 @@ SDK 的 `StuckReason`/`BrokenReason`/`TargetReject` 新增值时同一改动在�
 #[repr(C)] pub struct LegRef {                   // 32 B;无组 cell 写当前装入的腿,普通 cell 由 GroupSpec 重建、行内全零
     pub venue: VenueId, pub kind: u8 /* Spot=1 LinearPerp=2 Chain=3 */, pub reduce_only_cap: u8, pub _pad: u8, //  0
     pub inst: InstId,                                                                                          //  4
-    pub lot: Qty, pub min_qty: Qty, pub min_notional: Notional,                                                //  8 / 16 / 24
+    pub lot: Qty, pub min_qty: Qty,                                                                            //  8 / 16
+    pub slot: u32, pub _pad2: u32,               // 24 无组 cell:该腿被跟踪切片的 OMS 槽号(TargetCell.slot);min_notional 由 refdata 读
 }
 #[repr(C)] pub struct ActiveSliceRow {           // 32 B
     pub kind: u8,                                //  0 None=0 Slice=1 Pair=2 Simul=3 Maker=4 Serial=5 AutoFix=6 Force=7
     pub leg_ix: u8, pub n: u16,                  //  1 / 2
     pub link_id: u32,                            //  4 0 = 无链接
     pub first: OrderRef,                         //  8 12 B(SDK)
-    pub _pad: u32,                               // 20
+    pub ext: [u8; 4],                            // 20 [订单 kind 码, 在途腿位, 卖出腿位, 已有成交腿位](TakerSlice 与串行腿每腿一笔)
     pub planned: Qty,                            // 24
 }
 #[repr(C)] pub struct ExecCellRow {              // 400 B;其后是 ExecTargetRow(232 B),ExecRowHdr.len = 632
@@ -754,19 +764,21 @@ SDK 的 `StuckReason`/`BrokenReason`/`TargetReject` 新增值时同一改动在�
     pub n_legs: u8, pub has_target: u8,          //   9 / 10
     pub origin: u8,                              //  11 TargetOrigin 线上码(hft-event ExecDecision.origin 码表)
     pub flags: u8,                               //  12 PENDING=1 SERIAL=2 MANUAL_HOLD=4 LINK_HOLD=8 MANUAL_HOLD_DEFERRED=16
-    pub deferred: u8,                            //  13 ENGINE_SET=1 ENGINE_CLEARED=2 CLEARED_BY_CMD=4 STATE=8 TIMERS=16 ALARM=32
+    pub deferred: u8,                            //  13 ENGINE_SET=1 ENGINE_CLEARED=2 CLEARED_BY_CMD=4 STATE=8 TIMERS=16 ALARM=32 HOLD_REL=64 EXT_CLR=128
     pub cap_block: u8,                           //  14 BROKEN=1 REORG=2
     pub fix_count: u8,                           //  15
-    pub fail_streak: u8, pub nofill_streak: u8, pub fund_shrink: u8, pub _pad0: u8,   //  16..20
+    pub fail_streak: u8, pub nofill_streak: u8, pub fund_shrink: u8,
+    pub def_from: u8,                            //  19 待写 State 决定(deferred 的 STATE 位)的 state_from 码;0 = 无
     pub gated_bits: u32,                         //  20 RejectBits
     pub n_slices: u32,                           //  24
-    pub force_steps: u16, pub _pad1: u16,        //  28 / 30
+    pub force_steps: u16,                        //  28
+    pub aux16: u16,                              //  30 cell 内部位:0–7 已登记的定时器 kind,8–11 Unknown 腿,12–13 链接残余策略,14 截止后待发默认处理
     pub set_seq: u64,                            //  32
     pub set_tsc: Tsc, pub last_slice_tsc: Tsc, pub wake_at: Tsc, pub gated_since: Tsc, pub stuck_since: Tsc, //  40..80
     pub fix_first_tsc: Tsc, pub fix_next_tsc: Tsc, pub ext_deadline: Tsc, pub broken_since: Tsc,          //  80..112
     pub tolerance: Rate,                         // 112
-    pub filled: [Qty; 4],                        // 120
-    pub own_infl: [Qty; 4],                      // 152 只有无组 cell 非零
+    pub filled: [Qty; 4],                        // 120 普通 cell:本目标以来已成;无组 cell:已释放的 Unknown 切片剩余量
+    pub own_infl: [Qty; 4],                      // 152 无组 cell:own_infl;普通 cell:各腿在途切片已成交量
     pub active: ActiveSliceRow,                  // 184
     pub auto_fix: AutoFixState,                  // 216 56 B(见"目标单元")
     pub legs: [LegRef; 4],                       // 272
@@ -774,7 +786,7 @@ SDK 的 `StuckReason`/`BrokenReason`/`TargetReject` 新增值时同一改动在�
 #[repr(C)] pub struct ExecAcctRow {              // 24 B;键 account
     pub account: AccountId, pub force_active: u8, pub flatten_lock: u8,
     pub force_kind: u8,                          //  3 0 = 无 force_req,Venues=1(按比例,venue 位图与 frac 有效),Flatten=2
-    pub _pad: u32,                               //  4
+    pub force_flags: u8, pub _pad: [u8; 3],      //  4 FULL=1:清仓请求覆盖全部 cell
     pub force_venues: u64,                       //  8 VenueId 位图
     pub force_frac: Rate,                        // 16
 }
@@ -818,16 +830,13 @@ const _: () = assert!(size_of::<ExecRowHdr>() == 8 && size_of::<LegRef>() == 32 
 
 | 文件 | 职责 |
 |---|---|
-| `src/lib.rs` | `Exec` 入口、`ExecOut`、回填 |
+| `src/lib.rs` | `Exec`:cell 表(按 (account, group) 升序,其后每账户一个无组 cell)、inst → cell 索引、待推进位图、`on_groups_changed`、只读入口、决定/Note/通知/定时器的公共构造 |
 | `src/types.rs` | `TargetCell`、`AutoFixState`、`AcctState`、`ExecOrder`、`CancelResting`、`LinkNotice`、`ExecConfig` 行、`AutoFixFail`、快照行 `ExecRowHdr`/`ExecCellRow`/`ExecAcctRow`/`ExecGateRow`/`ExecTargetRow`/`ExecSpecRow`/`LegRef`/`ActiveSliceRow`(`StuckReason`、`BrokenReason`、`TargetReject`、`TargetState` 用 SDK 类型) |
-| `src/index.rs` | `CellIndex`(有序表、inst CSR、live/pending 位图)、`on_groups_changed` |
-| `src/advance.rs` | `advance` 主流程、带与紧急度、穿越零、预检、输出容量检查与续推、`deferred` 记录的写出 |
-| `src/quote.rs` | `quote_ok`(调用 SDK `BboView` 的连接健康判定)与簿状态检查 |
-| `src/price.rs` | 限价与单笔名义:按 inst 的 `max_cross_eff`/`rr_eff`/`max_chunk_eff` 截取、调用 hft-types `cap_cross_px`、按类别的 `cap_n` 与计价资产换算、第二腿名义上界估算、`RiskReject` 判定 |
-| `src/lots.rs` | `pair_min`、配对第一腿取整、`set_target` 的 `LotMismatch` 校验。`pair_lot(lot_f, lot_h, num, den) -> Option<Qty>`(溢出 → None,按 `LotMismatch` 处理)本身是 [hft-types](../hft-types/README.md) 数量取整模块的纯函数:本 crate、sequencer 的 SetParams 校验与直接下 LegLink 单的策略共用这一份实现;规则语义归本 README |
-| `src/algo/{taker,pair,simul,maker}.rs` | 各算法与腿顺序 |
-| `src/depth.rs` | 可见深度(≤ 10 档,整数) |
-| `src/cap.rs` | 对冲量上限的 `basis` 与 `hedge_cap_qty` |
+| `src/out.rs` | `ExecOut`、`FixedVec`、`OutCaps`(README 容量与单 cell 上限) |
+| `src/calc.rs` | 定点计算:限价(调用 hft-types `cap_cross_px`)、按类别的单笔名义与计价资产换算、不交易带、可见深度(≤ 10 档,整数)。`pair_lot(lot_f, lot_h, num, den) -> Option<Qty>`(溢出 → None,按 `LotMismatch` 处理)本身是 [hft-types](../hft-types/README.md) 数量取整模块的纯函数:本 crate、sequencer 的 SetParams 校验与直接下 LegLink 单的策略共用这一份实现;规则语义归本 README |
+| `src/targets.rs` | `set_target`/`clear_target`/`clear_account`/`note_strategy_action`、接受校验(含更接近 0 与 `LotMismatch`)、`pair_lot` 重算 |
+| `src/advance.rs` | `advance` 主流程、带与紧急度、穿越零、报价可用与预检、TakerSlice/PairOnFill/Simultaneous 与腿顺序、`pair_min`、对冲量上限、输出容量检查与续推、`deferred` 记录的写出 |
+| `src/events.rs` | `on_order_update`、`on_place_result`、`on_link`、`on_timer`、`on_risk`、`on_mode`、`touch_inst`、`on_leg_adjust` |
 | `src/fix.rs` | 补腿、残余与尘埃、链上腿规则、命令补腿 |
 | `src/broken.rs` | Broken 处置:自动有界平仓的计时、等待条件、可执行时长、切片、重试与结束;HARD 解除时的 `resolve_broken` 判定 |
 | `src/external.rs` | 外来成交默认处理(按条件表:Broken、引擎目标、Manual、计时)、`manual_hold` 的置位、延迟置位与解除、按 venue 的恢复期抑制与 `on_venue_gate_open`/`on_gate_open` 的截止重设、闸门滞留告警 |
@@ -897,6 +906,7 @@ const _: () = assert!(size_of::<ExecRowHdr>() == 8 && size_of::<LegRef>() == 32 
 - `flatten_lock` 只由 `Resume{Kill}` 解除:清仓完成后该账户的策略在人工解除前不能重新开仓,这是有意的(清仓是人工决定,恢复也须人工)。
 - 两腿 lot 不能整除且 lcm 名义过大的组合不做增仓("按名义近似对冲 + 残余修剪"只用于减仓与风险目标);这类组合需要换市场或调大切片上限。
 - "报价可用"依赖 BBO 连接按 `bbo_ping_ms` 有回帧;某所在安静期既不推数据也不回 pong 时,该所的报价按不可用处理(门控等待,不会误下单),表现为对冲与减仓延后,由 `hedge_deadline_ms` 与 P0 告警兜底。
+- M2 实现未含:`replay verify` 回放用例(EXE-464,依赖 replayer 与 `fixtures/replay/exec/`)与 DST 级场景(EXE-500–EXE-505,依赖 hft-testkit 的 DST 框架),随各自依赖的里程碑补上。
 - `SerialFallback` 以短时现货裸多换永续减仓不停摆:另一所长时间不可用时现货腿一直等报价恢复,裸多期间价格下跌的损失由人工处理(P0 已报)。
 - 无组永续持仓每次至多装入 4 条腿;同一账户有更多无组永续持仓时分批减完,前一批到达目标后才换入下一批。
 - 越价上限 `rr_max_cross`(按 inst 价格带类别)是风控对风险递减单的硬界:对手价已越过 mid × (1 + `rr_max_cross`) 时引擎单按该上限挂 IOC,吃不到就零成交等待,不会为了成交而突破风控界;L3 可另启用更宽的 `l3_max_cross`(默认关)。

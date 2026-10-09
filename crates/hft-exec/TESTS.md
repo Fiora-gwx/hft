@@ -326,7 +326,7 @@ spec: README.md
 - 规则:[输出 `ExecOut`](README.md#输出-execout容量固定sequencer-预分配每次调用本-crate-之后排空)
 - 级别:prop
 - 里程碑:M2
-- 性质:同一输入序列,在每个向量容量取 README 值的实现上(按 `Continue` 续推)与容量无限的参考实现上运行,`ExecDecision` 序列、通知序列、订单序列逐条相同,只是分批
+- 性质:同一输入序列,在每个向量容量取 README 值的实现上(按 `Continue` 续推)与容量无限的参考实现上运行,每个 cell 的 `ExecDecision` 序列、通知序列、订单序列逐条相同,只是分批(意图管线的结果在每批之后回填,不同 cell 的记录可按批交错)
 - 生成:1–64 个 cell;事件序列 1–200 条,从 {set_target, clear_target, 成交回报, LinkNotice, on_risk(CapSet/CapCleared/MarginStress), force_deleverage, engine_flatten, clear_account, on_venue_gate_open, 定时器到期} 抽取
 - 参考:`tests/model.rs` 的无限容量运行
 - 例数:PR 1 000
@@ -427,7 +427,7 @@ spec: README.md
 - 规则:[目标单元](README.md#目标单元targetcell)
 - 级别:prop
 - 里程碑:M2
-- 性质:每次入口调用之后:`active.kind ≠ None ⇒ state ∈ {Working, Stuck}` 或(`state = Broken` 且有引擎目标或 `auto_fix.phase = Running`);`state = Idle ⇒ !has_target ∨ 全部腿在带内`;`state = Broken ⇒` 无 `origin = Target` 订单;`hold & MANUAL_HOLD ⇒` 无 `HedgeFix`/`ResidualTrim`/`ExternalDefault`/`AutoFix` 订单;这四类订单不落在 `venue_open` 无该位的 venue;Engine 订单不增加任何腿的 |仓位|;无订单穿越零(Unknown 切片按全部成交计);`flatten_lock` 账户上被接受的目标每腿 |目标| ≤ 接受时的参照量;配对第一腿订单量是 `pair_lot` 的整数倍(按较粗 lot 的减仓与风险目标除外);`serial ≠ 0 ⇒` 无带 LegLink 的订单;每笔订单限价 = `cap_cross_px` 的结果且 `⌈qty × px × quote_rate⌉ ≤ cap_n`;无组 cell 只产生 reduce-only 永续 `Flatten` 单
+- 性质:每次入口调用之后:新发的 `origin = Target` 订单只出现在 `state ∈ {Working, Stuck}` 的 cell 上,`state = Broken` 的 cell 只发引擎目标的订单、补腿类订单与 `CmdHedgeFix`(进入 Idle/Broken 时已在途的 IOC 不撤);`state = Idle ⇒ !has_target ∨ 全部腿在带内`;`state = Broken ⇒` 无 `origin = Target` 订单;`hold & MANUAL_HOLD ⇒` 无 `HedgeFix`/`ResidualTrim`/`ExternalDefault`/`AutoFix` 订单;这四类订单不落在 `venue_open` 无该位的 venue;Engine 订单不增加任何腿的 |仓位|;无订单穿越零(Unknown 切片按全部成交计);`flatten_lock` 账户上被接受的目标每腿 |目标| ≤ 接受时的参照量;配对第一腿订单量是 `pair_lot` 的整数倍(按较粗 lot 的减仓与风险目标除外);`serial ≠ 0 ⇒` 无带配对链接(`role = First`)的订单;每笔订单限价 = `cap_cross_px` 的结果且 `⌈qty × px × quote_rate⌉ ≤ cap_n`;无组 cell 只产生 reduce-only 永续 `Flatten` 单
 - 生成:1–8 个 cell(1–4 腿,现货/永续混合,lot 从 {0.001, 0.003, 0.01, 0.1} 抽取);事件 1–300 条:BBO/深度变化、成交拆分(部分、零、全部、Unknown 后迟到)、门控拒绝位、LinkNotice、外来成交(各 cause)、on_risk(MarginStress 各档、CapSet/CapCleared Broken/Reorg/Kill/Hard)、`force_deleverage`、`engine_flatten`、`on_venue_gate_open`、定时器到期、`set_target`/`clear_target`/`note_strategy_action`/`hedge_fix_cmd`
 - 参考:逐条断言上列性质(mock 视图按成交更新 `legs` 与 `portfolio`)
 - 例数:PR 2 000
@@ -878,7 +878,7 @@ spec: README.md
 - 规则:[不交易带与紧急度](README.md#不交易带与紧急度)
 - 级别:table
 - 里程碑:M2
-- 前置:C0(`band_floor_notional = 20 USDT`);g7 `TakerSlice`,目标 S +0.10,`band = 0.1`;无在途
+- 前置:C0(`band_floor_notional = 20 USDT`);g7 `TakerSlice`,目标 S +0.10,`band = 0.1`;无在途;S 的 `min_notional = 1 USDT`(夹具默认 5 USDT 时 .2/.4 的 0.03/0.02 S 低于交易所最小名义)
 - 实现:`crates/hft-exec/tests/band.rs::exe_101_band_floor`
 
 | 行 | mark | S 净量 | 期望 |
@@ -1326,7 +1326,7 @@ spec: README.md
 - 规则:[PairOnFill](README.md#paironfill)
 - 级别:table
 - 里程碑:M2
-- 前置:C0;g13 = `GroupId(0x0100_000D)` 两条现货腿 S(深度名义 ≈ 20 000)与 S2(`InstId(12)`,venue C,深度名义 ≈ 30 000);g11 两条永续腿 P(≈ 24 900)与 Q(≈ 30 000)
+- 前置:C0;g13 = `GroupId(0x0100_000D)` 两条现货腿 S(深度名义 ≈ 20 000)与 S2(`InstId(12)`,现货 venue D,深度名义 ≈ 30 000);g11 两条永续腿 P(≈ 24 900)与 Q(≈ 30 000)
 - 实现:`crates/hft-exec/tests/pair.rs::exe_158_fallback_by_liquidity`
 
 | 行 | 场景 | 期望 `first_leg_ix` |
@@ -1678,7 +1678,7 @@ spec: README.md
 - 规则:[补腿](README.md#补腿hedgefixc4)
 - 级别:table
 - 里程碑:M2
-- 前置:C0(`dust_notional = 5 USDT`、`fix_tolerance_default = 0.05`);mark 100.00;g7 静止;cell `tolerance` 如列
+- 前置:C0(`dust_notional = 5 USDT`、`fix_tolerance_default = 0.05`);mark 100.00;g7 静止;cell `tolerance` 如列;S 的 `min_notional = 4 USDT`(.2 的 0.05 S 按封顶卖价 99.41 折 4.97 USDT)
 - 实现:`crates/hft-exec/tests/fix.rs::exe_206_trigger_thresholds`
 
 | 行 | 净量 S / P | cell `tolerance` | 期望 |
@@ -3054,7 +3054,7 @@ spec: README.md
 - 规则:[保证金危急的默认减仓](README.md#保证金危急的默认减仓a5与-engine_flatten)
 - 级别:unit
 - 里程碑:M2
-- 前置:C0;a1:g7(S +10.00、P −10.0)、g8(P 0,无目标)、g11 Broken(P −2.0、Q +2.5);无组持仓 P −1.0(B)、Q −1.0(C);a2 不受影响
+- 前置:C0;a1:g7(S +10.00、P −10.0)、g8(P 0,无目标)、g11 Broken(P −2.0、Q +2.5);无组持仓 P4 −1.0(B)(账户 Q 持仓即 g11 的 +2.5,无组 Q 为 0);a2 不受影响
 - 步骤:
   1. `engine_flatten(a1)`;`advance`
   2. 再次 `engine_flatten(a1)`;`advance`
@@ -3523,12 +3523,12 @@ spec: README.md
 | EXE-416.6 | 链接 Broken | `Broken(LinkBroken)` 一条 |
 | EXE-416.7 | Broken 期间自动平仓一片成交 0.3 | `Progress{d = 0.3}`,`origin = Engine(AutoFix)` |
 
-### EXE-417 到达目标恰好通知一次 Done
+### EXE-417 每次到达目标通知一次 Done
 
 - 规则:[`ExecDecision` 与进度通知](README.md#execdecision-与进度通知)
 - 级别:prop
 - 里程碑:M2
-- 性质:任意序列中,每个目标(从 `TargetSet`/`TargetReplaced` 到下一次替换或清除)至多一条 `Done{cleared_by_engine: false}`;每次 `State → Idle`(到达)恰有一条 `Done`
+- 性质:任意序列中,每条 `Done{cleared_by_engine: false}` 都伴随同一 cell 的 `State → Idle`(到达),一次到达至多一条(到达后因仓位变化离开带、再次到达的再发一条)
 - 生成:同 EXE-050
 - 参考:断言
 - 例数:PR 2 000
@@ -3751,7 +3751,7 @@ spec: README.md
 | 行 | 断言 | 期望 |
 |---|---|---|
 | EXE-450.1 | `size_of::<ExecRowHdr>()`;`offset_of!(len)` | 8;4 |
-| EXE-450.2 | `size_of::<LegRef>()`;`inst`、`lot`、`min_qty`、`min_notional` 偏移 | 32;4、8、16、24 |
+| EXE-450.2 | `size_of::<LegRef>()`;`inst`、`lot`、`min_qty`、`slot` 偏移 | 32;4、8、16、24 |
 | EXE-450.3 | `size_of::<ActiveSliceRow>()`;`link_id`、`first`、`planned` 偏移 | 32;4、8、24 |
 | EXE-450.4 | `size_of::<ExecCellRow>()` | 400 |
 | EXE-450.5 | `ExecCellRow` 偏移:`state`、`group`、`owner`、`flags`、`deferred`、`cap_block`、`gated_bits`、`set_seq` | 1、4、8、12、13、14、20、32 |
@@ -3980,7 +3980,7 @@ spec: README.md
 - 步骤:
   1. `Exec::new` 之后,依次调用除 `on_groups_changed`、`restore` 外的每个公开入口各 1000 次(随机合法参数),含 `advance`、`snapshot`(写入预分配缓冲)、`recovery_end`、`recovery_timers`
 - 期望:
-  - 步骤 1 期间分配次数 = 0、释放次数 = 0
+  - 步骤 1 期间本线程分配次数 = 0(hft-testkit `CountingAlloc`;无分配即无释放)
 - 实现:`crates/hft-exec/tests/alloc.rs::exe_475_zero_alloc`
 
 ### EXE-476 依赖闭包只含允许的 crate
@@ -3997,21 +3997,21 @@ spec: README.md
 | EXE-476.2 | 闭包含 `hft-oms`、`hft-ledger`、`hft-risk`、`hft-sequencer`、`hft-journal`、`hft-rt`、`hft-strat-lib`、`hft-venue`、`venue-*`、`hft-strategy-registry` 或任何 `strategies/*` | 否 |
 | EXE-476.3 | 闭包含 `tokio` | 否 |
 
-### EXE-477 clippy 禁用项拦住 f64、HashMap、std::time 与 dyn
+### EXE-477 热路径规则集拦住 f64、HashMap、std::time 与 dyn
 
 - 规则:[依赖](README.md#依赖)、[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:table
 - 里程碑:M2
-- 前置:`crates/hft-exec/clippy.toml`;探针文件 `crates/hft-exec/tests/lint_probe/`(不参与构建,只供 `cargo clippy` 检查)
+- 前置:`crates/hft-exec/clippy.toml`(= `tools/lint/clippy-hot.toml`)与 `src/lib.rs` 的 lint 头;clippy 的 `disallowed-types` 写不了基本类型与 trait object,f64 与 `dyn` 由 `cargo xtask hot-check` 的源码检查(N3/N6)拦,本用例检查配置与源码本身(不在测试里嵌套运行 clippy)
 - 实现:`crates/hft-exec/tests/lint.rs::exe_477_disallowed`
 
-| 行 | 探针内容 | 期望 `cargo clippy -p hft-exec` |
+| 行 | 检查 | 期望 |
 |---|---|---|
-| EXE-477.1 | `let x: f64 = 1.0;` | 报 `disallowed_types` |
-| EXE-477.2 | `std::collections::HashMap::new()` | 报错 |
-| EXE-477.3 | `std::time::Instant::now()` | 报错 |
-| EXE-477.4 | `Box<dyn Fn()>` | 报错 |
-| EXE-477.5 | 正式源码 | 零告警 |
+| EXE-477.1 | `lib.rs` 含 `#![deny(clippy::float_arithmetic)]`;`src/` 去注释后无 `f32`/`f64` 记号 | 成立 |
+| EXE-477.2 | `clippy.toml` 与 `tools/lint/clippy-hot.toml` 逐字节相同,且禁 `std::collections::HashMap` | 成立 |
+| EXE-477.3 | `clippy.toml` 禁 `std::time::Instant::now` | 成立 |
+| EXE-477.4 | `src/` 去注释后无 `dyn` 记号 | 成立 |
+| EXE-477.5 | `lib.rs` 含 `#![forbid(unsafe_code)]`;`src/` 无 `HashMap`/`HashSet`/`Instant`/`SystemTime`(正式源码在 CI 的 `clippy -D warnings` 下零告警) | 成立 |
 
 ### EXE-480 基准:touch_inst,该 inst 无活动 cell
 
