@@ -102,6 +102,13 @@ incremental = false
 debug-assertions = true
 overflow-checks = true
 panic = "unwind"
+# opt-level 1 reaches workspace members only: `package."*"` below keeps every dependency (also
+# build scripts and proc macros) at 3. debug = false applies to all.
+opt-level = 1
+debug = false
+
+[profile.ci.package."*"]
+opt-level = 3
 
 [profile.bench]
 lto = "fat"

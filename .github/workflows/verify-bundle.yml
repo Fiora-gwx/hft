@@ -127,6 +127,11 @@ jobs:
           done <"$RUNNER_TEMP/core-targets"
       - name: Build hft-dst and hft-verify (ci profile)
         shell: bash
+        # The ci profile builds workspace members at opt-level 1 for PR speed; the server's DST
+        # throughput needs 3 (docs/development.md#构建剖面).
+        env:
+          CARGO_PROFILE_CI_OPT_LEVEL: "3"
+          CARGO_PROFILE_CI_DEBUG: line-tables-only
         run: |
           cargo build --locked --profile ci --bin hft-dst --bin hft-verify
           mkdir -p "$STAGE/bin"
