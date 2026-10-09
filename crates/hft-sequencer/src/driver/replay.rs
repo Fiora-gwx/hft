@@ -76,8 +76,8 @@ pub struct ReplaySink {
 fn venue_account(kind: EventKind, body: &[u8]) -> (VenueId, AccountId) {
     let b = |o: usize| body.get(o).copied().unwrap_or(0);
     match kind {
-        EventKind::ORDER_DECISION => (VenueId(b(65)), AccountId(b(66))),
-        EventKind::EXEC_DECISION => (VenueId(0), AccountId(b(29))),
+        EventKind::ORDER_DECISION => (VenueId(b(57)), AccountId(b(58))),
+        EventKind::EXEC_DECISION => (VenueId(0), AccountId(b(25))),
         EventKind::FUNDING_SETTLE => (VenueId(b(0)), AccountId(b(1))),
         _ => (VenueId(0), AccountId(0)),
     }

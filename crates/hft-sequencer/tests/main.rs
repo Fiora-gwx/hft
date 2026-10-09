@@ -11,6 +11,7 @@
 
 mod common;
 mod params;
+mod poison;
 mod preempt;
 mod process;
 mod boot;
@@ -22,6 +23,7 @@ mod env;
 mod exec_glue;
 mod funding;
 mod liveness;
+mod mismatch;
 mod mode;
 mod recon;
 mod recover;
@@ -31,6 +33,7 @@ mod snapshot;
 mod subs;
 mod timers;
 mod strategies;
+mod version;
 mod views;
 mod advisor;
 mod advisor_lag;
