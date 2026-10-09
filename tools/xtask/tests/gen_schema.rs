@@ -181,7 +181,7 @@ fn evt_172_outputs_and_python_dtype() {
     let mut m = real(vec![test_strategy()]);
     m.note_consts = stand_in_consts(&m, &["Oms", "Ledger"]);
     let (f, lock_text) = generated("evt172", &m);
-    assert_eq!(hft_event::NOTE_NAMES.len(), 85);
+    assert_eq!(hft_event::NOTE_NAMES.len(), 88);
     assert_eq!(m.kinds.len(), 39);
 
     // event-catalog.md: 39 kind sections, each with number, domain, role, layout, schema_version, field table.
