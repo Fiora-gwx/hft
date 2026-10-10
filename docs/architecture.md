@@ -128,6 +128,8 @@ tier(frontmatter 标注):`pure` 无 I/O 无线程;`hot` 在 tick-to-trade 路径
 
 **模拟重演**(`replayer sim`)把录下的 journal 行情喂给模拟网关与同一策略,用于排障与复现,**不评估收益**;策略表现只在模拟账户上观察([hft-sim](../crates/hft-sim/README.md))。没有历史回测。
 
+Drain 退出前的发布边界由 [sequencer 主循环](../crates/hft-sequencer/README.md#主循环step) 保证,退出前最后一个完整事件及 Drain 快照对恢复读者可见;封段与关闭由装配层执行。
+
 journal 记录分三类:**Input**(进入决策的一切,含实盘驱动当场做出的环境相关决定,记为 `Timer`)、**Output**(决策、意图与执行层决定)、**Meta**(测量,不参与验证比对与状态)。确定性前提:时钟、随机数、配置内容、定时器全部来自 Input 记录;无 `HashMap` 迭代依赖;无全局可变状态。细节见 [`hft-sequencer`](../crates/hft-sequencer/README.md) 与 [`replayer`](../apps/replayer/README.md)。
 
 ## 10. 核心类型归属

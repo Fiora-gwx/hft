@@ -66,3 +66,4 @@
 | 2026-10-10 | M2 整合验收修正:ForeignFill 回归独立编号 SEQ-372,与 Drain 的 SEQ-370 分开;SeqRig 覆盖表保留纯用例编号;VEN-341 以本 crate 为根检查依赖与特性,避免 workspace 其他测试的特性合并造成误报,禁依赖规则不变;风控只读预览 `check_mode` 补公开接口、延迟预算、RSK-264 基准并纳入 RSK-241 零分配检查 | SEQ-372、VEN-341、RSK-241/264、CI 文档门 | crates/hft-sequencer、crates/hft-testkit/TESTS.md、crates/hft-venue、crates/hft-risk、crates/hft-strategy-sdk/TESTS.md | 否 |
 | 2026-10-10 | 控制面 E2E 的 Linux 夹具使用 schema 模块的 AnnotateKind,Reply 导入限非 Linux;SDK 测试去无用导入;固定种子 HashTrail 采用整合提交的 CI 生成值,种子与步数保持 | CTL-156、CI run 38045281154 | crates/hft-ctl/tests/e2e/front.rs、crates/hft-sequencer/tests/sdk_contract/delivery.rs、fixtures/dst/hashtrail.toml | 否 |
 | 2026-10-10 | SDK 四个依赖 gateway 的用例,实现定位指向 hft-ctl 的真实 E2E 文件;断言与 M2 要求保持 | SDK-019、SDK-054、SDK-060、SDK-119,M2 静态追踪发现路径未随夹具迁移 | crates/hft-strategy-sdk/TESTS.md | 否 |
+| 2026-10-10 | 架构页同步 Drain 退出与恢复读者的发布边界,具体顺序仍归 sequencer 规格 | SEQ-370,主循环变更同步架构页 | docs/architecture.md | 否 |

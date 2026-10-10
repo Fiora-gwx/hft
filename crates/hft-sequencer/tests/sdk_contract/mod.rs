@@ -115,6 +115,7 @@ pub fn execs(recs: &[hft_sequencer::MemRecord]) -> Vec<hft_event::ExecDecision> 
 }
 
 /// An order intent of the hook's instance in group `g`.
+#[allow(clippy::too_many_arguments)] // Test fixture: keep each order field explicit at call sites.
 pub fn order_in(
     hx: &Hx<'_>,
     g: GroupId,
