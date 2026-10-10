@@ -206,6 +206,7 @@ gateway 不在 tick-to-trade 路径,无微秒预算;约束的是**它对热核�
 
 - 内部:`hft-ctl-proto`(帧、模式、规范化、权限)、`hft-types`、`hft-event`(含 SPB1 解析)、`hft-refdata`(`check_binding`/`check_group`)、[hft-strategy-sdk](../hft-strategy-sdk/README.md)(`StrategySet` trait 与 `params` 的 schema JSON;具体的策略集合由 apps/hft-core 从 hft-strategy-registry 以泛型参数传入)、`hft-risk`(`RiskParams` 解码)、`hft-sequencer`(仅 `ParsedConfig<S>` 及其载荷 `ParsedParams<S>` 类型)、`hft-journal`(只读者)、`hft-rt`(`ByteSpsc` 生产端、`Mailbox`、`PollTask`、TSC↔UTC)。
 - 外部:`serde_json`(仅 gateway 与客户端;warm/cold)、`sha2`(blob 的 sha256)、`base64`、`toml`(签发者表)、`zerocopy`、`libc`(`SO_PEERCRED`、`getpwnam`)。
+- 测试:`hft-testkit` 提供测试策略;真实 sequencer 的 E2E 夹具用 `hft-oms`、`hft-ledger`、`hft-exec` 构造 `EngineSetup` 的组件配置,这三项只在 dev 依赖中。
 - 禁止:`tokio`(gateway 在热进程内)、任何 `strategies/*`(只经 `S: StrategySet` 泛型)、任何 hot crate 反向依赖本 crate(sequencer 只看到 ctl 环里的记录与 Mailbox 里的对象)。
 
 ## 延伸阅读

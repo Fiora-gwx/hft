@@ -67,3 +67,4 @@
 | 2026-10-10 | 控制面 E2E 的 Linux 夹具使用 schema 模块的 AnnotateKind,Reply 导入限非 Linux;SDK 测试去无用导入;固定种子 HashTrail 采用整合提交的 CI 生成值,种子与步数保持 | CTL-156、CI run 38045281154 | crates/hft-ctl/tests/e2e/front.rs、crates/hft-sequencer/tests/sdk_contract/delivery.rs、fixtures/dst/hashtrail.toml | 否 |
 | 2026-10-10 | SDK 四个依赖 gateway 的用例,实现定位指向 hft-ctl 的真实 E2E 文件;断言与 M2 要求保持 | SDK-019、SDK-054、SDK-060、SDK-119,M2 静态追踪发现路径未随夹具迁移 | crates/hft-strategy-sdk/TESTS.md | 否 |
 | 2026-10-10 | 架构页同步 Drain 退出与恢复读者的发布边界,具体顺序仍归 sequencer 规格 | SEQ-370,主循环变更同步架构页 | docs/architecture.md | 否 |
+| 2026-10-10 | 控制面真实引擎 E2E 的 OMS、Ledger、Exec 测试依赖登记到 deps.toml 的 dev 列表,同步组件依赖说明、验收范围与分层图 | CTL-161,CI 依赖门发现 Cargo.toml 与允许列表未同步 | tools/xtask/deps.toml、crates/hft-ctl/README.md、crates/hft-ctl/TESTS.md、crates/AGENTS.md、docs/architecture.md | 否 |

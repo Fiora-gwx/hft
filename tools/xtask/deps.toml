@@ -175,6 +175,8 @@ deps = [
     "crates/hft-ctl-proto", "crates/hft-types", "crates/hft-event", "crates/hft-refdata",
     "crates/hft-strategy-sdk", "crates/hft-risk", "crates/hft-sequencer", "crates/hft-journal", "crates/hft-rt",
 ]
+# E2E EngineSetup builds the real domain components; these are fixture-only dependencies.
+dev = ["crates/hft-exec", "crates/hft-ledger", "crates/hft-oms"]
 
 [pkg."crates/hft-telemetry"]
 tier = "cold"
