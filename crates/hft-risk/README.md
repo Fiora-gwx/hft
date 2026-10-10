@@ -55,6 +55,9 @@ impl Risk {
     /// 意图真的要出环(非 Shadow、模式门放行或不经模式门)时调用:扣令牌、计本地在途。Shadow 与被拒意图从不调用。
     pub fn commit(&mut self, a: &Admission, now: &Now);
 
+    /// 控制命令 PREVIEW 的前置检查;合并 risk 自有状态与外部 ModeView,返回与 apply 相同的 ModeErr,不改状态。
+    pub fn check_mode(&self, inp: &mode::ModeInput<'_>, ext: &impl mode::ModeView) -> Result<(), mode::ModeErr>;
+
     // ── 非模式状态更新(sequencer 在对应 Input 上调用;产生的 cap 请求经 mode.apply 生效)──
     pub fn on_pnl(&mut self, acct: AccountId, day_pnl: Notional, eq: EquityView) -> Option<mode::ModeInput<'static>>; // 越线 → DailyLoss
     /// `ModeOutcome.daily_loss_resumed` 列出的账户:sequencer 在同一 Input 内调用(day_pnl = ledger 当前值),见"当日亏损"的解除。
@@ -714,6 +717,7 @@ pub struct PxBand { pub max_px_dev: Rate, pub ioc_max_cross: Rate, pub rr_max_cr
 | `evaluate` 第 1 层即拒(HARD) | ≤ 30 ns | ≤ 80 ns | `risk/check_reject_kill` |
 | `evaluate` + `commit` Hedge 类 | ≤ 150 ns | ≤ 400 ns | `risk/check_pass_hedge` |
 | `mode.apply`(cap 增删,含 kill 投影,256 条) | ≤ 2 µs | ≤ 5 µs | `risk/mode_apply` |
+| `Risk::check_mode`(Resume Kill Account 预览,只读) | ≤ 2 µs | ≤ 5 µs | `risk/check_mode` |
 | `mode.effective` | ≤ 5 ns | ≤ 15 ns | `risk/effective` |
 | `on_pnl` | ≤ 20 ns | ≤ 60 ns | `risk/on_pnl` |
 | `on_legs` | ≤ 15 ns | ≤ 40 ns | `risk/on_legs` |

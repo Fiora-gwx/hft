@@ -2510,7 +2510,7 @@ spec: README.md
 | SDK-164.7 | Live,`open_allowed = 0` | Reduce | `outcome = Placed(_)` |
 | SDK-164.8 | Live,`open_allowed = 0` | Flatten | `outcome = Placed(_)` |
 
-### SDK-165 Shadow 下的意图走风控评估但不扣资源
+### SDK-165 Shadow 下的意图在模式门记录且不扣资源
 
 - 规则:[运行模式下意图的行为表](README.md#运行模式下意图的行为表)
 - 级别:integ

@@ -10,84 +10,59 @@ use std::path::Path;
 
 const MANIFEST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
 
-struct Meta {
-    names: BTreeMap<String, String>,
-    edges: BTreeMap<String, Vec<(String, bool)>>,
-    features: BTreeMap<String, Vec<String>>,
-    root: String,
+struct Tree {
+    names: BTreeSet<String>,
+    features: BTreeMap<String, BTreeSet<String>>,
 }
 
-fn meta() -> Meta {
+/// Resolve the selected package, not the workspace-wide feature union returned by metadata.
+/// Other test crates enable hft-testkit's real sequencer adapter; hft-venue does not.
+fn tree(edges: &str) -> Tree {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
     let out = std::process::Command::new(cargo)
-        .args(["metadata", "--format-version", "1", "--manifest-path", MANIFEST])
+        .args([
+            "tree",
+            "--locked",
+            "--color",
+            "never",
+            "--manifest-path",
+            MANIFEST,
+            "-p",
+            "hft-venue",
+            "--edges",
+            edges,
+            "--prefix",
+            "none",
+            "--format",
+            "{p}|{f}",
+        ])
         .output()
-        .expect("cargo metadata");
+        .expect("cargo tree");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    let names: BTreeMap<String, String> = v["packages"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|p| {
-            (
-                p["id"].as_str().unwrap().to_string(),
-                p["name"].as_str().unwrap().to_string(),
-            )
-        })
-        .collect();
-    let mut edges = BTreeMap::new();
-    let mut features = BTreeMap::new();
-    for n in v["resolve"]["nodes"].as_array().unwrap() {
-        let id = n["id"].as_str().unwrap().to_string();
-        let mut to = Vec::new();
-        for d in n["deps"].as_array().unwrap() {
-            let kinds = d["dep_kinds"].as_array().unwrap();
-            let normal = kinds
-                .iter()
-                .any(|k| (k["kind"].is_null() || k["kind"] == "build") && k["target"] != "cfg(loom)");
-            to.push((d["pkg"].as_str().unwrap().to_string(), normal));
-        }
-        edges.insert(id.clone(), to);
-        features.insert(
-            id,
-            n["features"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|f| f.as_str().unwrap().to_string())
-                .collect(),
+    let output = String::from_utf8(out.stdout).unwrap();
+    let mut names = BTreeSet::new();
+    let mut features: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for line in output.lines() {
+        let (package, enabled) = line.split_once('|').expect("cargo tree row");
+        let name = package
+            .split_whitespace()
+            .next()
+            .expect("package name")
+            .to_string();
+        names.insert(name.clone());
+        features.entry(name).or_default().extend(
+            enabled
+                .trim_end_matches(" (*)")
+                .split(',')
+                .filter(|f| !f.is_empty())
+                .map(str::to_string),
         );
     }
-    let root = names
-        .iter()
-        .find(|(_, n)| *n == "hft-venue")
-        .map(|(id, _)| id.clone())
-        .unwrap();
-    Meta {
-        names,
-        edges,
-        features,
-        root,
-    }
-}
-
-/// Closure from the root: normal edges only, or normal + dev (dev edges only from the root).
-fn closure(m: &Meta, with_dev: bool) -> BTreeSet<String> {
-    let mut seen = BTreeSet::new();
-    let mut stack = vec![m.root.clone()];
-    while let Some(id) = stack.pop() {
-        if !seen.insert(id.clone()) {
-            continue;
-        }
-        for (to, normal) in m.edges.get(&id).cloned().unwrap_or_default() {
-            if normal || (with_dev && id == m.root) {
-                stack.push(to);
-            }
-        }
-    }
-    seen.remove(&m.root);
-    seen.iter().map(|id| m.names[id].clone()).collect()
+    assert!(
+        names.remove("hft-venue"),
+        "tree must include the selected package"
+    );
+    Tree { names, features }
 }
 
 fn src_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
@@ -103,15 +78,14 @@ fn src_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
 
 #[test]
 fn ven_341_dependency_closure() {
-    let m = meta();
-    let normal = closure(&m, false);
-    let all = closure(&m, true);
-    assert!(!all.iter().any(|n| n.starts_with("venue-")), "VEN-341.1");
+    let normal = tree("normal,build");
+    let all = tree("normal,build,dev");
+    assert!(!all.names.iter().any(|n| n.starts_with("venue-")), "VEN-341.1");
     for n in ["hft-sequencer", "hft-oms", "hft-risk"] {
-        assert!(!all.contains(n), "VEN-341.2: {n}");
+        assert!(!all.names.contains(n), "VEN-341.2: {n}");
     }
     for n in ["tokio", "serde_json"] {
-        assert!(!normal.contains(n), "VEN-341.3: {n}");
+        assert!(!normal.names.contains(n), "VEN-341.3: {n}");
     }
     let mut files = Vec::new();
     src_files(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files);
@@ -119,13 +93,7 @@ fn ven_341_dependency_closure() {
         let s = std::fs::read_to_string(f).unwrap();
         assert!(!s.contains("libc::"), "VEN-341.4: {}", f.display());
     }
-    let jid = m
-        .names
-        .iter()
-        .find(|(_, n)| *n == "hft-journal")
-        .map(|(id, _)| id.clone())
-        .unwrap();
-    assert!(m.features[&jid].iter().any(|f| f == "writer"), "VEN-341.5");
+    assert!(normal.features["hft-journal"].contains("writer"), "VEN-341.5");
     let manifest = std::fs::read_to_string(MANIFEST).unwrap();
     let t: toml::Table = manifest.parse().unwrap();
     let j = &t["dependencies"]["hft-journal"];

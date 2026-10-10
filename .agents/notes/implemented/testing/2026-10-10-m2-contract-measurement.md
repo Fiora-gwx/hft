@@ -16,6 +16,8 @@ JNL-105 测量执行 append 的线程。PY-161 每次测量启动独立子进程
 
 SDK-004 的真实装配验收与 SDK-005 的 M2 要求保留。工具侧的假仓库测试不替代它们,本批不提高 current_milestone。
 
+整合后的固定种子 HashTrail 取自提交 `1d31604` 的 [CI 产物](https://github.com/Fiora-gwx/hft/actions/runs/38045281154)。50 个种子成功生成,其中 34 个摘要改变,种子、套件和步数保持。本批修复改变了 OMS 扩展区的 intent_no 等快照内容,原 DST 分支的摘要不能直接沿用;更新摘要仍须由下一次 CI 的不变量、回归种子与 HashTrail 检查共同验证。
+
 ## Alternatives considered
 
 **只沿用 SDK 的旧表格** 会让两份规格继续矛盾,并把无链接 Hedge 误写成可绕过 CloseOnly。模式门和分类规则已有明确归属,此处统一引用它们。

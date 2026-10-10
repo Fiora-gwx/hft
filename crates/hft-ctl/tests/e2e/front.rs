@@ -8,7 +8,9 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use hft_ctl::{ParsedConfig, Reply};
+use hft_ctl::ParsedConfig;
+#[cfg(not(target_os = "linux"))]
+use hft_ctl::Reply;
 use hft_ctl_proto::{CmdRequest, CmdResponse, EngineInfo, Uuid, parse_request};
 use hft_event::CmdResult;
 use hft_refdata::RefData;
@@ -456,7 +458,7 @@ mod sock_front {
         let req = cl.request(
             hft_ctl_proto::AccountSel::Missing,
             hft_ctl_proto::CmdBody::Annotate {
-                kind: hft_ctl_proto::AnnotateKind::OpsNote,
+                kind: hft_ctl_proto::schema::AnnotateKind::OpsNote,
                 text: "x".into(),
                 digest: None,
                 account: Some("*".into()),

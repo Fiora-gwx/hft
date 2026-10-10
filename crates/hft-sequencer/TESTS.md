@@ -28,7 +28,7 @@ spec: README.md
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
 | 连接活性 | SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173 |
-| 每条 Input 的处理顺序(`process`) | SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371 |
+| 每条 Input 的处理顺序(`process`) | SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
@@ -5160,7 +5160,7 @@ spec: README.md
   - `oms.on_reconcile` 应用该条目;`risk.on_reconcile` 返回 `gate = None`;无 `apply(Gate(Recon))`;`RECONCILED(1, B)` 仍未放行
 - 实现:`crates/hft-sequencer/tests/recon.rs::seq_369_group_without_summary`
 
-### SEQ-370 同一外来单的两次防御路径报告各按累计量增量入账(OMS 自己的 ForeignFill 不登记 ext_held)
+### SEQ-372 同一外来单的两次防御路径报告各按累计量增量入账(OMS 自己的 ForeignFill 不登记 ext_held)
 
 - 规则:[每条 Input 的处理顺序(`process`)](README.md#每条-input-的处理顺序process)
 - 级别:unit
@@ -5172,7 +5172,7 @@ spec: README.md
 - 期望:
   - 两步各一条 `Note{OmsForeignFill}`,`v[1]`(入账量)分别为 0.002 与 0.003 的 raw;无 `Note{OmsExtDedup}`;`ledger.pos(1, b1).qty` = 0.005
 - 备注:回归——sequencer 曾把 OMS 自己的 `ForeignFill` 经 `oms.external_adjust` 登记进 `ext_held[9]`,第二次报告被再扣 0.002(只入账 0.001)
-- 实现:`crates/hft-sequencer/tests/process.rs::seq_370_foreign_fill_increments_not_held`
+- 实现:`crates/hft-sequencer/tests/process.rs::seq_372_foreign_fill_increments_not_held`
 
 ### SEQ-371 对账 Funding 条目的 Note{FundingCorrected} 写在同一 Input 内
 

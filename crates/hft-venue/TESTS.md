@@ -3244,7 +3244,7 @@ spec: README.md
 - 规则:[依赖](README.md#依赖)、[§8](README.md#8-源文件规划)
 - 级别:table
 - 里程碑:M1.5
-- 前置:`cargo metadata` 输出;`cargo tree -p hft-venue -e normal,dev`
+- 前置:分别取 `cargo tree -p hft-venue -e normal,build` 与 `-e normal,build,dev` 输出,只解析该包所启用的特性;其他 workspace 成员启用的 testkit seq 特性不计入本包闭包
 - 实现:`crates/hft-venue/tests/deps.rs::ven_341_dependency_closure`
 
 | 行 | 检查 | 期望 |

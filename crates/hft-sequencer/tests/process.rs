@@ -979,7 +979,7 @@ fn seq_156_margin_report() {
 }
 
 #[test]
-fn seq_370_foreign_fill_increments_not_held() {
+fn seq_372_foreign_fill_increments_not_held() {
     let mut h = steady();
     let ff = hft_oms::notes::code_of(hft_oms::notes::FOREIGN_FILL);
     let dedup = hft_oms::notes::code_of(hft_oms::notes::EXT_DEDUP);

@@ -41,7 +41,7 @@ spec: README.md
 | 引擎单与执行配置的一致性(`ExecRiskMismatch`) | RSK-007 |
 | 快照行格式(节 4、17、18、23;草案,实现时以代码与编译期断言为准) | RSK-008、RSK-009、RSK-230 |
 | 规划源文件 | RSK-001–RSK-013、RSK-020、RSK-036、RSK-060、RSK-100、RSK-130、RSK-160、RSK-180、RSK-190、RSK-200、RSK-270 |
-| 延迟与资源契约 | RSK-241、RSK-250–RSK-263 |
+| 延迟与资源契约 | RSK-241、RSK-250–RSK-264 |
 | 测试与验收 | 不适用:非规范 |
 | 依赖 | 不适用:非规范 |
 | 延伸阅读 | 不适用:非规范 |
@@ -2147,7 +2147,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:R0;`new` 之后 testkit `CountingAlloc` 计数清零
 - 步骤:
-  1. 各调 10 000 次:`classify`、`evaluate` + `commit`(单腿与链接 Open、Hedge)、`mode.apply`(Kill 增删)、`effective`、`on_pnl`、`on_legs`、`on_margin`、`on_timer`、`on_account_cfg`(1 024 条杠杆)、`hedge_px_limits`、`leverage`、`view`、`view_for`、`on_reconcile`
+  1. 各调 10 000 次:`classify`、`evaluate` + `commit`(单腿与链接 Open、Hedge)、`check_mode` + `mode.apply`(Kill 增删)、`effective`、`on_pnl`、`on_legs`、`on_margin`、`on_timer`、`on_account_cfg`(1 024 条杠杆)、`hedge_px_limits`、`leverage`、`view`、`view_for`、`on_reconcile`
 - 期望:
   - 分配次数 0
 - 实现:`crates/hft-risk/tests/alloc.rs::rsk_241_zero_alloc`
@@ -2264,6 +2264,16 @@ spec: README.md
 - 基准名:`risk/on_account_cfg`
 - 实现:`crates/hft-risk/benches/risk.rs::rsk_263_on_account_cfg`
 
+### RSK-264 基准 check_mode 只读预览
+
+- 规则:[延迟与资源契约](README.md#延迟与资源契约)
+- 级别:bench
+- 里程碑:M2
+- 输入:R0,账户 2 已有 Kill cap,反复检查 Resume{Kill, Account(2)},不执行 apply
+- 基准名:`risk/check_mode`
+- 通过标准:参考机 p50 ≤ 2 µs、p99 ≤ 5 µs,零分配
+- 实现:`crates/hft-risk/benches/risk.rs::rsk_264_check_mode`
+
 ### RSK-270 mode 在任意输入序列下保持不变量
 
 - 规则:[mode 模块](README.md#mode-模块唯一的模式状态)、[有效模式](README.md#有效模式)、[cap 记录](README.md#cap-记录)、[kill 字](README.md#kill-字唯一的跨线程共享可变量)、[Kill](README.md#kill)、[启动闸门](README.md#启动闸门)
@@ -2354,7 +2364,7 @@ spec: README.md
 - **里程碑 M2 完成标准**:本文件全部用例(级别 `unit`/`table`/`prop`/`bench`/`dst`)都有同编号的实现且通过,`cargo xtask test-trace` 无未实现、多余与不一致项([docs/tests §6](../../docs/tests/README.md#6-与代码的对应))。
 - **属性测试大例数**(每夜运行;PR 例数见各用例):RSK-045 200 000、RSK-270 50 000、RSK-272 20 000,RSK-011、RSK-013、RSK-030、RSK-044、RSK-172、RSK-271 各 50 000;任一失败的最小化输入加入回归集。
 - **DST**:RSK-280、RSK-281 计入上线门槛 ④ 的累计量,零违反;累计量与种子规则只在 [testing §8](../../docs/testing.md#8-上线门槛)。
-- **基准**:RSK-250–RSK-263 在参考机上满足 [benchmarks 单 crate 基准上限表](../../benchmarks/README.md#单-crate-基准上限表) 的"风控链"一行与本 crate `benches/budgets.toml`(不宽于上限表);RSK-241 零分配在 PR 中阻断。
+- **基准**:RSK-250–RSK-264 在参考机上满足 [benchmarks 单 crate 基准上限表](../../benchmarks/README.md#单-crate-基准上限表) 的"风控链"一行与本 crate `benches/budgets.toml`(不宽于上限表);RSK-241 零分配在 PR 中阻断。
 - **跨组件**:sequencer 驱动下的模式、kill、恢复与断腿场景(紧急停止、多个 cap 叠加、日亏 Resume、Drain 期间、冷启动、停机标记等)由 [testing §4.1](../../docs/testing.md#41-模式账户与人工干预) 登记的跨组件场景验证,本文件不重复。
 
 

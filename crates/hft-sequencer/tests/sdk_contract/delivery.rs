@@ -1,8 +1,8 @@
 //! Event delivery to the fast part and the Model (SDK-040–SDK-055, SDK-144).
 
 use hft_event::{
-    ConnRole, ConnStateKind, ControlCmd, EventKind, ExternalCause, ExternalFill, Funding, IndexPrice,
-    L2SnapHdr, Level, Liquidation, MarkPrice, MarketHdr, Note, NoteSource, Trade,
+    ConnRole, ConnStateKind, ControlCmd, EventKind, ExternalCause, ExternalFill, IndexPrice, L2SnapHdr,
+    Level, Liquidation, MarketHdr, Note, NoteSource, Trade,
 };
 use hft_sequencer::advisor::AdvisorCfg;
 use hft_sequencer::codes::{note, seq_note, status};

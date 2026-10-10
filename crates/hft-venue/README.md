@@ -708,6 +708,8 @@ struct IdTable {
 
 **禁止**:依赖任何具体 `venue-*`(具体 venue 只在 apps/hft-core 以泛型参数装入)、`hft-sequencer`、`hft-oms`、`hft-risk`(kill 字以 `&KillWord` + 掩码传入,位常量在 hft-types);`tokio`、`serde_json`(JSON 解码在 venue crate 用 `sonic-rs`)、`tracing` 于热路径;直接调用 `libc`(系统调用封装在 hft-net 与 hft-rt)。
 
+VEN-341 用以本 crate 为根的 `cargo tree` 检查依赖闭包与特性,不把其他 workspace 成员给共享测试基建启用的特性计入本 crate。
+
 ## 延伸阅读
 
 - [04 行情接入层](../../design/04-行情接入层.md)(§2 线程内部、§6 断裂与恢复、§7 raw journal)

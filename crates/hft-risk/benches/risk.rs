@@ -1,4 +1,4 @@
-//! hft-risk benchmarks (README "延迟与资源契约"; RSK-250–RSK-263).
+//! hft-risk benchmarks (README "延迟与资源契约"; RSK-250–RSK-264).
 
 #![allow(
     clippy::disallowed_types,
@@ -119,6 +119,16 @@ fn rsk_256_effective(c: &mut Criterion) {
     });
 }
 
+fn rsk_264_check_mode(c: &mut Criterion) {
+    let mut w = r0();
+    w.ok(kill_acct(2, false));
+    w.mm.sync(&w.risk);
+    let input = resume(CapSource::KILL, sc_acct(2));
+    c.bench_function("risk/check_mode", |x| {
+        x.iter(|| black_box(w.risk.check_mode(black_box(&input), &w.mm)))
+    });
+}
+
 fn rsk_257_on_pnl(c: &mut Criterion) {
     let mut w = r0();
     let eq = EquityView {
@@ -204,7 +214,8 @@ criterion_group!(
     rsk_260_hedge_px_limits,
     rsk_261_leverage,
     rsk_262_view_for,
-    rsk_263_on_account_cfg
+    rsk_263_on_account_cfg,
+    rsk_264_check_mode
 );
 criterion_main!(benches);
 

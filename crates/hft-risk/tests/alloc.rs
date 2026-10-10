@@ -73,6 +73,7 @@ fn rsk_241_zero_alloc() {
             }
         }
         for inp in [kill_in, resume_in] {
+            let _ = std::hint::black_box(w.risk.check_mode(&inp, &w.mm));
             let _ = w.risk.mode.apply(inp, seq, &w.mm, &mut w.out);
             seq += 1;
         }
