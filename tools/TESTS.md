@@ -2887,7 +2887,7 @@ spec: README.md
 - 规则:[质量门](../docs/development.md#质量门quality-gatesyml)
 - 级别:table
 - 里程碑:M1
-- 前置:PR 的 git diff 路径列表替身;运行 changed-paths 入口,读取工作流输出
+- 前置:路径列表替身与真实临时 Git 仓库;运行 changed-paths 入口,读取工作流输出
 - 实现:`tools/xtask/tests/test_ci_paths.py::test_tool_191_host_checks_follow_code_and_config_changes`
 
 | 行 | 输入 | 期望 |
@@ -2895,7 +2895,7 @@ spec: README.md
 | TOOL-191.1 | deploy 的 Markdown + OMS 源码;或 hft-core 的 Markdown + CI 工作流 | `gen_host = false`;`docs_only = false`;OMS 的回放与脚手架检查仍触发 |
 | TOOL-191.2 | 只改 deploy/hft-core 的 Markdown | `gen_host = false`;`docs_only = true` |
 | TOOL-191.3 | deploy 主机 TOML、生成器、systemd 单元;或 hft-core 的 Rust/Cargo.toml | `gen_host = true`;`docs_only = false`;夹带 Markdown 不影响结果 |
-| TOOL-191.4 | 删除或改名后的主机 TOML 路径,文件在检出内容中不存在 | `gen_host = true`;不因文件不存在漏跑 |
+| TOOL-191.4 | PR 与 push:把主机 TOML 从 deploy 移到 docs,同时删除 hft-core 源文件 | 路径列表含改名两端与被删源码;`gen_host = true`;不因旧路径已不存在漏跑 |
 
 ## 验收
 

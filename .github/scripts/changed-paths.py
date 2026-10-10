@@ -3,7 +3,8 @@
 
 Rules: docs/testing.md §6 (PR row) and docs/development.md#质量门quality-gatesyml.
 Diff: pull_request -> `git diff BASE...HEAD` (merge base); push -> the commit against its first
-parent (a merge commit on main is judged against main's previous head). Needs full history.
+parent (a merge commit on main is judged against main's previous head). Renames are reported as
+delete/add pairs so both paths trigger their checks. Needs full history.
 
 Environment: EVENT (github.event_name), BASE (PR base SHA), HEAD (SHA under test).
 Writes step outputs (true/false unless noted):
@@ -43,12 +44,14 @@ def git(*args: str) -> str:
 
 
 def changed_files(event: str, base: str, head: str) -> list[str]:
+    # A move out of a watched directory must still trigger its checks. Reporting renames
+    # as delete/add pairs preserves both affected paths in --name-only output.
     if event == "pull_request" and base:
-        out = git("diff", "--name-only", f"{base}...{head}")
+        out = git("diff", "--no-renames", "--name-only", f"{base}...{head}")
     else:
         parents = git("rev-list", "--parents", "-n", "1", head).split()[1:]
         if parents:
-            out = git("diff", "--name-only", parents[0], head)
+            out = git("diff", "--no-renames", "--name-only", parents[0], head)
         else:
             out = git("ls-tree", "-r", "--name-only", head)
     return [line for line in out.splitlines() if line]

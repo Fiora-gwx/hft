@@ -4,6 +4,8 @@ import importlib.util
 import io
 import os
 from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -25,9 +27,6 @@ class PathPolicyTests(unittest.TestCase):
             (["deploy/units/hft-core.service"], True, False),
             (["apps/hft-core/src/threads.rs"], True, False),
             (["apps/hft-core/Cargo.toml"], True, False),
-            # Deleted/renamed inputs still arrive as paths in git diff. Classification must
-            # not require the input to exist in the checked-out head.
-            (["deploy/hosts/deleted-host.toml", "deploy/hosts/renamed-host.toml"], True, False),
         ]
         for files, gen_host, docs_only in rows:
             stream = io.StringIO()
@@ -44,6 +43,50 @@ class PathPolicyTests(unittest.TestCase):
             if "crates/hft-oms/src/lib.rs" in files:
                 self.assertEqual(outputs["replay"], "true")
                 self.assertEqual(outputs["scaffold"], "true")
+
+        # A real rename out of deploy/ must keep the deleted source path. A synthetic list
+        # containing both names would conceal git diff --name-only dropping the old name.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            def git(*args):
+                return subprocess.run(
+                    ["git", "-C", directory, "-c", "user.name=CI", "-c", "user.email=ci@example.invalid",
+                     "-c", "commit.gpgsign=false", "-c", "diff.renames=true", *args],
+                    check=True, capture_output=True, text=True,
+                ).stdout
+
+            git("init", "-q")
+            source = root / "deploy/hosts/retired.toml"
+            deleted = root / "apps/hft-core/src/removed.rs"
+            source.parent.mkdir(parents=True)
+            deleted.parent.mkdir(parents=True)
+            source.write_text('[host]\nname = "retired"\n', encoding="utf-8")
+            deleted.write_text("// retired thread plan\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-qm", "base")
+            base = git("rev-parse", "HEAD").strip()
+            destination = root / "docs/retired-host.toml"
+            destination.parent.mkdir()
+            source.rename(destination)
+            deleted.unlink()
+            git("add", "-A")
+            git("commit", "-qm", "move host input and remove thread plan")
+            head = git("rev-parse", "HEAD").strip()
+            for event in ["pull_request", "push"]:
+                stream = io.StringIO()
+                with self.subTest(event=event), patch.object(paths, "git", side_effect=git), \
+                        patch.dict(os.environ, {"EVENT": event, "BASE": base, "HEAD": head}, clear=True), \
+                        patch.object(paths, "fuzz_targets", return_value=[]), \
+                        patch.object(paths, "hot_crates", return_value=[]), \
+                        redirect_stdout(stream), redirect_stderr(io.StringIO()):
+                    changed = paths.changed_files(event, base, head)
+                    self.assertEqual(set(changed), {"deploy/hosts/retired.toml", "docs/retired-host.toml",
+                                                    "apps/hft-core/src/removed.rs"})
+                    self.assertEqual(paths.main(), 0)
+                outputs = dict(line.split("=", 1) for line in stream.getvalue().splitlines())
+                self.assertEqual(outputs["gen_host"], "true")
+                self.assertEqual(outputs["docs_only"], "false")
 
 
 if __name__ == "__main__":
