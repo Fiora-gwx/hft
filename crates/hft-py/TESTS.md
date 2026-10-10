@@ -1588,7 +1588,7 @@ spec: README.md
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:table
 - 里程碑:M2
-- 前置:本测试单独一个测试二进制;合成 `Bbo` 写入已封存段;`batch_rows = 100 000`;行宽 = 查询的 Arrow schema 各列每行字节数之和;测量迭代期间进程 `RssAnon` 的峰值增量(每次测量在独立子进程中先对同一份 1M 行夹具做一遍不计入的预热扫描,保持相同的分配器历史,避免前一行测试留下的驻留堆改变基线;每行取三次独立测量中的最大值,采样线程可能漏掉重新分配时的短峰;读完每批即丢弃;采样线程每 200 µs 读一次 `/proc/self/status`;计数分配器需要 `unsafe impl GlobalAlloc`,本 crate 不允许 `unsafe`,hft-testkit 的 `CountingAlloc` 只计次数)
+- 前置:本测试单独一个测试二进制;合成 `Bbo` 写入已封存段;`batch_rows = 100 000`;行宽 = 查询的 Arrow schema 各列每行字节数之和;测量迭代期间匿名驻留量的峰值增量(每次测量在独立子进程中先对同一份 1M 行夹具做一遍不计入的预热扫描,采样线程完成首次读取后才取基线;每行取三次独立测量中的最大值,读完每批即采样并丢弃;采样线程每次读取 `/proc/self/smaps_rollup` 的 `Anonymous` 后间隔 200 µs,读取或字段解析失败则测试失败,不以 0 代替;不使用 `/proc/self/status` 的异步 RSS 计数;计数分配器需要 `unsafe impl GlobalAlloc`,本 crate 不允许 `unsafe`,hft-testkit 的 `CountingAlloc` 只计次数)
 - 实现:`crates/hft-py/tests/memory.rs::py_161_batch_memory_bound`
 
 | 行 | 段中 `Bbo` 条数 | 期望 |

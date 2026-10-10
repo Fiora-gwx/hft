@@ -165,7 +165,7 @@ hft_py.schema_hash(); hft_py.schema.catalog()              # 生成器导出的�
 | `ledger` 一天 seq journal | < 2 分钟 | pytest 计时 |
 | 内存 | 每批 ≤ `batch_rows` × 行宽 × 2;不整段加载 | — |
 
-PY-161 的各次峰值测量使用独立子进程和相同预热,避免前一次扫描留下的驻留堆改变下一次的内存基线。
+PY-161 的各次峰值测量使用独立子进程和相同预热,采样线程就绪后取基线;匿名驻留量取自 `/proc/self/smaps_rollup` 的 `Anonymous`,读取或字段解析失败则测试失败。
 
 hft-py 以只读映射打开热段,对热进程的影响只有页表与共享 L3;研究负载不在 `tokyo-cex` 生产主机上跑(ops_bot 与 treasury 的 `tail` 例外,受 cgroup CPU 配额与 dev2 护栏约束,[12 §1](../../design/12-风险与未决问题.md))。
 

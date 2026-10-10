@@ -12,7 +12,9 @@ SDK 的模式表与拥有意图处理顺序的 sequencer 规格存在冲突。SD
 
 SDK 的说明和引擎侧测试遵循 [sequencer 意图管线](../../../../crates/hft-sequencer/README.md#意图管线) 与 [risk 意图分类](../../../../crates/hft-risk/README.md)。Shadow 在模式门记录决策,不占用下单资源;无链接 Hedge 仍按 Open 分类,OMS 自动第二腿走已有的风险递减路径。这个口径不能证明 Shadow 已覆盖完整风控检查链。
 
-JNL-105 测量执行 append 的线程。PY-161 每次测量启动独立子进程,先用同一份 100 万行夹具预热,再读取指定 journal。批大小上限和两组测量差异小于 5% 的要求保持。
+JNL-105 测量执行 append 的线程。PY-161 每次测量启动独立子进程,先用同一份 100 万行夹具预热,采样线程就绪后再取基线。匿名驻留量使用 smaps_rollup 的 Anonymous,读取失败必须报错。批大小上限和两组测量差异小于 5% 的要求保持。
+
+[CI run 38048428020](https://github.com/Fiora-gwx/hft/actions/runs/38048428020) 的 PY-161 峰值为 11,288,576 与 12,349,440 B。[Linux proc 文档](https://docs.kernel.org/filesystems/proc.html) 明确说明 status 的 RSS 异步计数可能不精确,精确时点数据应通过 smaps 页表扫描获取;smaps_rollup 汇总各映射的同类数据。因此这个小比例比较不再使用 status 计数,每次扫描另记录基线与峰值以便复核。
 
 SDK-004 的真实装配验收与 SDK-005 的 M2 要求保留。工具侧的假仓库测试不替代它们,本批不提高 current_milestone。
 

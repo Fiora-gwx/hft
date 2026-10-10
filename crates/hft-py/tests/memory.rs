@@ -6,8 +6,8 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use hft_py::journal::{Events, Journal, QueryArgs, kind_by};
@@ -93,12 +93,15 @@ fn journal(n: u64, tag: &str) -> PathBuf {
 }
 
 fn rss_anon_bytes() -> u64 {
-    let s = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    // status/RssAnon uses asynchronous RSS counters; their error can exceed the 5% comparison.
+    // smaps_rollup walks page tables and sums the same anonymous resident pages precisely.
+    let s = std::fs::read_to_string("/proc/self/smaps_rollup").expect("read precise anonymous RSS");
     s.lines()
-        .find(|l| l.starts_with("RssAnon:"))
+        .find(|l| l.starts_with("Anonymous:"))
         .and_then(|l| l.split_whitespace().nth(1))
         .and_then(|v| v.parse::<u64>().ok())
-        .map_or(0, |k| k * 1024)
+        .expect("Anonymous in smaps_rollup")
+        * 1024
 }
 
 /// Peak growth of anonymous resident memory while every batch of `events("Bbo")` is read and
@@ -121,18 +124,24 @@ fn scan_peak(path: &Path, batch_rows: i64) -> (u64, u64) {
         .iter()
         .map(|f| f.ty.width().unwrap_or(0) as u64)
         .sum();
-    let base = rss_anon_bytes();
-    let peak = Arc::new(AtomicU64::new(base));
+    let peak = Arc::new(AtomicU64::new(0));
     let stop = Arc::new(AtomicBool::new(false));
+    let (ready_tx, ready_rx) = mpsc::sync_channel(0);
     let sampler = {
         let (peak, stop) = (peak.clone(), stop.clone());
         std::thread::spawn(move || {
+            // Warm the sampler's stack and proc reader before the baseline is captured.
+            let _ = rss_anon_bytes();
+            ready_tx.send(()).unwrap();
             while !stop.load(Ordering::Relaxed) {
                 peak.fetch_max(rss_anon_bytes(), Ordering::Relaxed);
                 std::thread::sleep(Duration::from_micros(200));
             }
         })
     };
+    ready_rx.recv().expect("sampler ready");
+    let base = rss_anon_bytes();
+    peak.store(base, Ordering::Relaxed);
     let mut ev = Events::new(&j, q);
     let mut rows = 0;
     while let Some(b) = ev.next_batch().unwrap() {
@@ -143,7 +152,9 @@ fn scan_peak(path: &Path, batch_rows: i64) -> (u64, u64) {
     stop.store(true, Ordering::Relaxed);
     sampler.join().unwrap();
     assert!(rows > 0);
-    (peak.load(Ordering::Relaxed).saturating_sub(base), width)
+    let peak = peak.load(Ordering::Relaxed);
+    eprintln!("PY-161 sample: rows {rows}, batch {batch_rows}, base {base}, peak {peak}");
+    (peak.saturating_sub(base), width)
 }
 
 /// Each measurement starts with the same allocator history. Repeated scans in the parent can
@@ -163,6 +174,7 @@ fn isolated_peak(warmup: &Path, path: &Path, batch_rows: i64) -> (u64, u64) {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
+    eprint!("{}", String::from_utf8_lossy(&out.stderr));
     let stdout = String::from_utf8(out.stdout).unwrap();
     let values = stdout
         .lines()
