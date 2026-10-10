@@ -364,7 +364,7 @@ jobs:
           path: ${{ runner.temp }}/regen.patch
           retention-days: 7
 
-      - name: PR minute target (12 billed minutes, docs/testing.md §6)
+      - name: PR runtime target (12 minutes, docs/testing.md §6)
         if: always()
         run: |
           mins=$(( ($(date +%s) - JOB_START + 59) / 60 ))

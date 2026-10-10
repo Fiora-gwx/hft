@@ -54,13 +54,13 @@ trail = "897ff249a5cdc1668d4e4f5c56ad0b1a"
 seed = "0x0000000000000009"
 suite = "core"
 steps = 2000
-trail = "1276f9077d81e5f38a806aa2f0227508"
+trail = "b31f65fa687887cca0e8ed5dfe382be1"
 
 [[seed]]
 seed = "0x000000000000000a"
 suite = "core"
 steps = 2000
-trail = "87a3167522f58f8835d652faaf27781a"
+trail = "c5196d93092275ce6b320172f50d0170"
 
 [[seed]]
 seed = "0x000000000000000b"
@@ -96,7 +96,7 @@ trail = "0ef38b174ad26784ab8971104bed9fe4"
 seed = "0x0000000000000010"
 suite = "core"
 steps = 2000
-trail = "25455739bfc1b2b59e401bee60451661"
+trail = "80b5060d09e5d06cebab40e8dd34d8d9"
 
 [[seed]]
 seed = "0x0000000000000011"
@@ -288,7 +288,7 @@ trail = "617d9ec46b641df1f88b0ab67e1c6b77"
 seed = "0x0000000000000030"
 suite = "core"
 steps = 2000
-trail = "7b5425ab22675a69a80dff61198b0270"
+trail = "f066fefda48da1d43bde698677f91dd1"
 
 [[seed]]
 seed = "0x0000000000000031"
