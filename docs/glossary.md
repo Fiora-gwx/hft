@@ -19,7 +19,7 @@
 | 上线 | 新开交易所子账户的流程:开通与核验(无提现权限的 key、IP 白名单、`venue_uid` 登记、账户配置核验)→ 模拟账户运行 → 统一升级主机上的零成交冒烟(每个正式账户 × venue 一张冒烟单 `SmokeOrder`)与正式实例 Shadow 3–7 天 → 切 Live(风险上限由运营在 `RiskParams` 设定,初始上限与第一次放宽的条件写进上线签字记录);回退 = Drain | [runbooks/launch](runbooks/launch.md) |
 | 上线门槛 | core 组件开始正式实盘前必须通过的测试与运行门槛(含三所测试网/模拟盘联调、模拟账户 ≥ 14 天与压力用例、升级主机上的延迟验收、解耦门槛;fuzz 与 DST 按服务器上运行验证包得到的累计量计,只卡正式实盘、不卡模拟) | [testing §8](testing.md#8-上线门槛) |
 | 测试网/模拟盘联调 | 在 dev2 上起一个指向交易所测试网端点、只持测试网 key、refdata 只含测试网账户的 `prod` 角色实例,只在联调窗口运行;门槛 ⑥ 的行情也取测试网(`feed_env = "testnet"`);三所为 Binance 测试网、OKX 模拟盘、Bitget 模拟盘(可用性与 API 覆盖逐所待核实,方法:各所测试网联调,见 testing §8) | [testing §8](testing.md#8-上线门槛)、[hft-core](../apps/hft-core/README.md) |
-| CI | 负责人个人账户下的私有仓库 `Fiora-gwx/hft`(免费每月分钟额度,与 Trading 仓库共享)上的托管 runner:PR 与 `main` 推送的质量门,解耦门单独的小工作流,按 tag 或手动触发在 `ubuntu-24.04-arm` 产出 aarch64 发布构建与验证包;不用自托管 runner;是唯一构建环境,服务器不编译 | [development](development.md)(工作流、剖面与分钟预算的唯一归属) |
+| CI | 负责人个人账户下的公开仓库 `Fiora-gwx/hft`(标准托管 runner 分钟免费)上的托管 runner:PR 与 `main` 推送的质量门,解耦门单独的小工作流,按 tag 或手动触发在 `ubuntu-24.04-arm` 产出 aarch64 发布构建与验证包;不用自托管 runner;是唯一构建环境,服务器不编译 | [development](development.md)(工作流、剖面与资源规则的唯一归属) |
 | 验证包(`hft-verify`) | CI 在 aarch64 上构建的 `hft-verify-<ver>-aarch64.tar.zst`(fuzz 二进制、DST 运行器 `hft-dst`、驱动 `hft-verify`、初始语料),装到服务器上以最低优先级在预算内运行,累计门槛 ③④ 的账本在服务器上 | [tools](../tools/README.md)、[deploy](../deploy/README.md)、[testing](testing.md) |
 | cdex 迁移 | 可选扩展:把 cdex 从旧框架切换到新框架(链上组件随之启用);切换而非并行 | [runbooks/migration](runbooks/migration.md) |
 | collector | 现有的独立行情采集系统(`Trading` 仓库),服务研究;不并入新框架 | [journal-archiver](../apps/journal-archiver/README.md)(范围说明) |

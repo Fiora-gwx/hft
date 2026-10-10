@@ -52,7 +52,9 @@ cargo xtask ci [--pure-only] [--fast] [--no-doc-check]
 
 按顺序运行,任一步失败即停止:`fmt --check` → `clippy --workspace --all-targets -D warnings` → `deny check licenses bans` → `deps` → `hot-check` → `fixtures check` → 单元/属性测试(`--profile ci`,剖面定义归 [development 构建剖面](../docs/development.md#构建剖面))→ 金样 → `dst` 冒烟(种子数与回归集归 [testing §2](../docs/testing.md#2-金字塔))→ `dst --hashtrail check --first K`(K = PR 核对的一致性种子数,取值归 [testing §6](../docs/testing.md#6-ci-运行矩阵))→ `gen-schema --check` → `doc-check`。`--pure-only` 只选 frontmatter `tier: pure` 的 crate 与 Python 包;`--fast` 跳过 DST 与金样(本地迭代,CI 不用);`--no-doc-check` 跳过 doc-check 步(只供 CI 的 `rust` 作业:同一提交的 `docs` 作业每次都运行 `doc-check`,不在两个作业里各跑一遍)。`cargo deny check advisories` 不在 `ci` 内:它是独立的非阻塞任务([development](../docs/development.md))。
 
-**按路径触发的步骤不在 `ci` 内**:`scaffold-gate`、改动目标的 fuzz 冒烟、`fixtures/replay/` 样本的 `replay-verify`、基准短跑由工作流按 [testing §6](../docs/testing.md#6-ci-运行矩阵) 的路径规则分别调用对应子命令;`decoupling-gate` 是独立作业(下节)。工作流文件、触发、作业图与分钟预算归 [development](../docs/development.md#ci-概要);本地(Windows)只写代码并推送。
+**按路径触发的步骤不在 `ci` 内**:`scaffold-gate`、改动目标的 fuzz 冒烟、`fixtures/replay/` 样本的 `replay-verify`、基准短跑由工作流按 [testing §6](../docs/testing.md#6-ci-运行矩阵) 的路径规则分别调用对应子命令;`decoupling-gate` 是独立作业(下节)。工作流文件、触发、作业图与资源规则归 [development](../docs/development.md#ci-概要);本地(Windows)只写代码并推送。
+
+发布检查与夜间汇总的辅助脚本在 `.github/scripts/`;契约归 [development 发布检查](../docs/development.md#发布工作流release-aarch64yml)与[每夜任务](../docs/development.md#每夜任务nightlyyml)。`ops-py` 对相关改动运行 `tools/xtask/tests/test_ci_release.py`(TOOL-187–TOOL-190),用离线 GitHub 替身验证发布证据、Admin 覆盖与汇总结论。
 
 **每夜**只做回归冒烟:`dst --hashtrail check`(不带 `--first`,核对全部登记种子);DST 以 `dst --seeds N --seed S --steps M` 跑一批由 UTC 日期派生起点 `S` 的新种子,fuzz 以 `fuzz --nightly` 按 `fuzz-targets.toml` 轮转(N、M 读 `tools/xtask/dst-nightly.toml`,时长上限归 [testing §6](../docs/testing.md#6-ci-运行矩阵)),**不计入上线门槛 ③④**,也不保存任何累计账本;③④ 的累计在服务器上由 [hft-verify](#hft-verify) 运行。
 
@@ -565,7 +567,7 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 
 ## 延迟与资源契约
 
-无热路径约束。`cargo xtask ci` 在 CI 上的目标时长归 [development](../docs/development.md#免费额度) 的预算表(不含首次编译与缓存冷启动);`decoupling-gate` 不构建,≤ 1 min;hostprobe `collect` ≤ 2 s(在 hft-core 启动前运行,计入冷启动 < 30 s 预算,[00 §1](../design/00-目标与延迟预算.md));az-probe 周复测对生产主机的影响限定在冷核、≤ 1 核、≤ 10 min;`hft-cfg build --kind strategy`(500 group)≤ 1 s。hft-verify 在根级 `hftbatch.slice`(`CPUWeight=idle`)内运行(slice、`Nice` 与 I/O 带宽上限的单元设置归 deploy)、同一时刻只有一个子进程;内存上限取 [hft-core 内存表](../apps/hft-core/README.md#内存与-journal-段按主机类唯一归属)的 `hft-verify` 行,单元设置归 deploy;驱动自身 < 32 MiB。
+无热路径约束。`cargo xtask ci` 在 CI 上的目标时长归 [testing §6](../docs/testing.md#6-ci-运行矩阵) 的运行矩阵;`decoupling-gate` 不构建,≤ 1 min;hostprobe `collect` ≤ 2 s(在 hft-core 启动前运行,计入冷启动 < 30 s 预算,[00 §1](../design/00-目标与延迟预算.md));az-probe 周复测对生产主机的影响限定在冷核、≤ 1 核、≤ 10 min;`hft-cfg build --kind strategy`(500 group)≤ 1 s。hft-verify 在根级 `hftbatch.slice`(`CPUWeight=idle`)内运行(slice、`Nice` 与 I/O 带宽上限的单元设置归 deploy)、同一时刻只有一个子进程;内存上限取 [hft-core 内存表](../apps/hft-core/README.md#内存与-journal-段按主机类唯一归属)的 `hft-verify` 行,单元设置归 deploy;驱动自身 < 32 MiB。
 
 ## 测试与验收
 

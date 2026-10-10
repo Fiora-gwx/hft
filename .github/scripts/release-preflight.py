@@ -3,15 +3,13 @@
 
 Rules: docs/development.md#发布工作流release-aarch64yml step 1. It never re-runs quality gates; it
 only proves existing verdicts for the SHA being released:
-  1. a successful ci.yml run for the SHA whose `rust` job concluded `success` (skipped by the quota
-     rule does not count);
+  1. a successful ci.yml run for the SHA whose `rust` job concluded `success` (skipped is not a pass);
   2. the latest check run named `decoupling-gate` on the SHA concluded `success`;
   3. formal vX.Y.Z: the SHA is an ancestor of origin/main and the latest nightly.yml run on main
-     that actually executed (its `nightly` job was not skipped by quota-gate) succeeded;
-  4. dev builds: this month's estimated CI usage < 1,500 min; a dispatched dev build also needs
-     the tag vX.Y.Z-dev.<dev_n> not to exist yet.
-Admin override (`quota_override`, only logins of .github/hft-admins.txt): 3's nightly condition and
-4's usage condition are not evaluated; 1 and 2 always are. A non-Admin override fails.
+     that actually executed (its `nightly` job was not skipped) succeeded;
+  4. a dispatched dev build needs the tag vX.Y.Z-dev.<dev_n> not to exist yet.
+Admin override (`skip_nightly`, only logins of .github/hft-admins.txt): only 3's nightly condition
+is not evaluated; 1 and 2 always are. A non-Admin override fails.
 
 verify-bundle.yml's workflow_dispatch(sha) uses WORKFLOW=verify-bundle: green ci.yml + an existing
 release tag on the SHA (outputs sha, tag).
@@ -20,7 +18,7 @@ Environment (all strings, empty when absent):
   WORKFLOW        aarch64 | x86-cross | verify-bundle
   EVENT           github.event_name
   REF_TYPE, REF_NAME   github.ref_type / github.ref_name (tag pushes)
-  IN_SHA, IN_DEV_N, IN_TAG, IN_VERSION, IN_QUOTA_OVERRIDE, IN_SKIP_VERIFY   dispatch inputs
+  IN_SHA, IN_DEV_N, IN_TAG, IN_VERSION, IN_SKIP_NIGHTLY, IN_SKIP_VERIFY   dispatch inputs
   ACTOR           github.actor
   GITHUB_TOKEN, GITHUB_REPOSITORY
 Needs a checkout with full history and tags (fetch-depth: 0).
@@ -30,22 +28,14 @@ Exit: 0 pass; 1 a condition failed; 2 input/environment/API error.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import re
 import subprocess
 import sys
 import tomllib
-from pathlib import Path
+import github_common as gh
 
-HERE = Path(__file__).resolve().parent
-_spec = importlib.util.spec_from_file_location("ci_usage", HERE / "ci-usage.py")
-assert _spec and _spec.loader
-cu = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(cu)
-
-THRESHOLD = 1500
 FORMAL = re.compile(r"^v(\d+\.\d+\.\d+)$")
 DEV = re.compile(r"^v(\d+\.\d+\.\d+)-dev\.([1-9]\d*)$")
 
@@ -109,14 +99,14 @@ def job_named(jobs: list[dict], name: str) -> dict | None:
 
 
 def check_ci(repo: str, sha: str) -> int:
-    runs = cu.paged(
+    runs = gh.paged(
         f"/repos/{repo}/actions/workflows/ci.yml/runs",
         "workflow_runs",
         {"head_sha": sha, "status": "success"},
         limit=50,
     )
     for run in runs:
-        jobs = list(cu.paged(f"/repos/{repo}/actions/runs/{run['id']}/jobs", "jobs"))
+        jobs = list(gh.paged(f"/repos/{repo}/actions/runs/{run['id']}/jobs", "jobs"))
         rust = job_named(jobs, "rust")
         if rust and rust.get("conclusion") == "success":
             return int(run["id"])
@@ -126,7 +116,7 @@ def check_ci(repo: str, sha: str) -> int:
 def check_decoupling(repo: str, sha: str) -> int:
     runs = [
         c
-        for c in cu.paged(f"/repos/{repo}/commits/{sha}/check-runs", "check_runs", limit=1000)
+        for c in gh.paged(f"/repos/{repo}/commits/{sha}/check-runs", "check_runs", limit=1000)
         if c.get("name") == "decoupling-gate" or c.get("name", "").endswith(" / decoupling-gate")
     ]
     if not runs:
@@ -141,17 +131,17 @@ def check_decoupling(repo: str, sha: str) -> int:
 
 
 def check_nightly(repo: str) -> int:
-    runs = cu.paged(
+    runs = gh.paged(
         f"/repos/{repo}/actions/workflows/nightly.yml/runs",
         "workflow_runs",
         {"branch": "main", "status": "completed"},
         limit=60,
     )
     for run in runs:
-        jobs = list(cu.paged(f"/repos/{repo}/actions/runs/{run['id']}/jobs", "jobs"))
+        jobs = list(gh.paged(f"/repos/{repo}/actions/runs/{run['id']}/jobs", "jobs"))
         nightly = job_named(jobs, "nightly")
         if nightly is None or nightly.get("conclusion") == "skipped":
-            continue  # QuotaSkip: neither the latest nor a pass
+            continue  # An unexecuted job provides no nightly verdict.
         if run.get("conclusion") != "success":
             raise Fail(f"3: latest executed nightly run {run['id']} concluded {run.get('conclusion')}")
         return int(run["id"])
@@ -249,7 +239,7 @@ def verify_bundle_dispatch() -> int:
         summary(f"### Verification bundle: refused\n\n{e}")
         print(f"::error::{e}")
         return 1
-    except (Bad, cu.ApiError) as e:
+    except (Bad, gh.ApiError) as e:
         print(f"::error::{e}")
         return 2
     out(sha=sha, tag=tag)
@@ -263,12 +253,12 @@ def main() -> int:
     try:
         repo = env("GITHUB_REPOSITORY")
         actor = env("ACTOR")
-        override = env("IN_QUOTA_OVERRIDE") == "true"
+        skip_nightly = env("IN_SKIP_NIGHTLY") == "true"
         skip_verify = env("IN_SKIP_VERIFY") == "true"
         d = decide()
-        admin = cu.is_admin(actor)
+        admin = gh.is_admin(actor)
         overrides = []
-        for flag, used in (("quota_override", override), ("skip_verify", skip_verify)):
+        for flag, used in (("skip_nightly", skip_nightly), ("skip_verify", skip_verify)):
             if used and not admin:
                 raise Fail(f"`{flag}` by `{actor}`, who is not in .github/hft-admins.txt")
             if used:
@@ -282,16 +272,11 @@ def main() -> int:
         ci_run = check_ci(repo, sha)
         dg_run = check_decoupling(repo, sha)
         nightly_run = None
-        minutes = None
         if d["channel"] == "release":
             if not is_ancestor_of_main(sha):
                 raise Fail(f"3: {sha} is not an ancestor of origin/main")
-            if not override:
+            if not skip_nightly:
                 nightly_run = check_nightly(repo)
-        elif not override:
-            minutes, _ = cu.estimate()
-            if minutes >= THRESHOLD:
-                raise Fail(f"4: CI usage this month {minutes} min >= {THRESHOLD} min (QuotaSkip)")
         evidence = {
             "ci_run_id": ci_run,
             "decoupling_check_run_id": dg_run,
@@ -302,7 +287,7 @@ def main() -> int:
         summary(f"### Release preflight: failed\n\n{e}")
         print(f"::error::preflight {e}")
         return 1
-    except (Bad, cu.ApiError) as e:
+    except (Bad, gh.ApiError) as e:
         summary(f"### Release preflight: error\n\n{e}")
         print(f"::error::preflight {e}")
         return 2
@@ -322,8 +307,6 @@ def main() -> int:
         f"- ci.yml run {ci_run}; decoupling-gate check run {dg_run}",
         f"- nightly run: {nightly_run if nightly_run else 'not evaluated'}",
     ]
-    if minutes is not None:
-        lines.append(f"- CI usage this month: {minutes} min (< {THRESHOLD})")
     for o in overrides:
         lines.append(f"- Admin override `{o['input']}` by `{o['actor']}`")
     summary("\n".join(lines))

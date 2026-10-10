@@ -2184,6 +2184,10 @@ def brief_owner_files(cell):
 def brief_name_rx(t):
     """Candidate regexes for a naming-table entry: the literal first, then its distinctive part."""
     t = t.replace("\\|", "|").strip()
+    # The historical brief keeps its original name; the public-CI decision renames the
+    # surviving formal-release exemption (.agents/notes/implemented/process/2026-10-10-public-repository-ci.md).
+    if t == "quota_override":
+        t = "skip_nightly"
     cands = [re.escape(t)]
     m = re.fullmatch(r"Note\{\s*(\w+)\s*\}", t)
     if m:

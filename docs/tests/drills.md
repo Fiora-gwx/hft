@@ -53,7 +53,7 @@
 | [incident-response R](../runbooks/incident-response.md#r-老板紧急停止stop之后) | DRL-92–DRL-97 |
 | [incident-response S](../runbooks/incident-response.md#s-交易主机失联) | DRL-26–DRL-29、DRL-60 |
 | [incident-response kill 演练](../runbooks/incident-response.md#kill-演练) | DRL-88–DRL-100 |
-| [development 应急交叉编译、免费额度](../development.md#应急交叉编译release-x86-crossyml) | DRL-110(DRL-111 已删除) |
+| [development 应急交叉编译](../development.md#应急交叉编译release-x86-crossyml) | DRL-110(DRL-111 已删除) |
 | [migration](../runbooks/migration.md)、[bsc-node](../runbooks/bsc-node.md) | 里程碑外(可选扩展;启用时补写) |
 
 ## 3. 上线(launch)
@@ -580,7 +580,7 @@
 
 ### DRL-31 GitHub 侧的 Admin 名单与 ctl 签发者表的 Admin 是同一组人
 
-- 规则:[launch D 第 32 步](../runbooks/launch.md#d-正式实盘m8)、[control-plane 角色](../subsystems/control-plane.md#角色)、[development 免费额度](../development.md#免费额度)
+- 规则:[launch D 第 32 步](../runbooks/launch.md#d-正式实盘m8)、[control-plane 角色](../subsystems/control-plane.md#角色)、[development 发布检查](../development.md#发布工作流release-aarch64yml)
 - 级别:drill
 - 里程碑:M8
 - 环境:`.github/hft-admins.txt` 与升级主机上的 ctl 签发者表 `/etc/hft/ctl-principals.toml`(deploy 生成,hft-core 只在启动时加载)
@@ -1893,7 +1893,7 @@
 
 ### DRL-111 额度耗尽路径的季度演练:镜像仓库出的开发构建发布到组织仓库并在 dev2 通过验收
 
-已删除:负责人决定 hft 改放个人账户的私有仓库 `Fiora-gwx/hft`(2026-10-07),原"镜像到个人账户出包"的应急路径不再成立——额度与 Trading 共享,耗尽后到月初前任何仓库都无法在 CI 出包,没有可演练的替代路径;预防靠 quota-gate 与每周对账,紧急时由负责人决定是否临时设置付费上限([development 免费额度](../development.md#免费额度))。
+已删除,编号保留。公开仓库的标准托管 runner 没有月度分钟门槛,不设额度耗尽后的镜像出包路径([development 免费额度](../development.md#免费额度))。
 
 ## 10. 通用
 

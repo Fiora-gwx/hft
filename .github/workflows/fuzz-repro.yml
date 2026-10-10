@@ -4,7 +4,6 @@
 # Conclusion goes to the job summary (reproduced / not-reproduced, both `success`); the operator
 # then runs `hft-verify crash resolve <crash-id> --reproduced|--not-reproduced --evidence <run URL>`
 # on the server. A build/download failure or an input whose SHA-1 does not match is `failure`.
-# Minutes count toward the release reserve; the 1,500 min rule does not skip it.
 name: Fuzz repro
 
 on:

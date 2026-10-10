@@ -2,6 +2,12 @@
 
 这里只放一种设计文档。**Agent Note** 记录一个影响本仓库的决定或提案——**为什么**、**放弃了什么**、**需要什么验证**,也就是代码与 README 承载不了的部分。本文件规定 Agent Note 放在哪里、何时写、文件格式。改编自 DeepSeek Harness 的 `.agents/notes/README.md`(样例在 architecture-v2/research/_dsh/notes_README.md(未入库的资料缓存:`architecture-v2/research/_dsh/notes_README.md`));改编理由见 [dsh-style-documentation](proposed/process/2026-09-30-dsh-style-documentation.md)。
 
+## 公开仓库 CI 决定(2026-10-11)
+
+| 当前 Note | 决定 | 被部分取代的 Note |
+|---|---|---|
+| [公开仓库 CI](implemented/process/2026-10-10-public-repository-ci.md) | 公开仓库使用标准托管 runner;取消分钟门禁,保留发布质量检查 | [ci-quota-self-estimate](proposed/process/2026-10-03-ci-quota-self-estimate.md)、[ci-org-and-profiles](proposed/architecture/2026-10-03-ci-org-and-profiles.md)、[ci-free-hosted](proposed/architecture/2026-10-03-ci-free-hosted.md) |
+
 ## 布局与命名
 
 每条 Agent Note 有两个维度,都编码在**路径**里:`{lifecycle}/{class}/yyyy-mm-dd-topic.md`。

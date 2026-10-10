@@ -1,6 +1,6 @@
 # Quality gates, called by ci.yml (docs/development.md#质量门quality-gatesyml).
-# What runs and the time limits: docs/testing.md §6 (PR row: target <= 12 billed minutes,
-# timeout-minutes: 20, rust 30). Jobs: decoupling-gate (also decides full/docs-only), docs, rust, ops-py.
+# What runs and the time limits: docs/testing.md §6 (PR row: target <= 12 minutes,
+# timeout-minutes: 20, rust 30). Jobs: decoupling-gate (also classifies changed paths), docs, rust, ops-py.
 #
 # Steps for components of later milestones are guarded by `steps.xtask.outputs.<subcommand>`
 # (.github/scripts/xtask-inventory.sh: a subcommand that is due but missing fails the job) or by
@@ -26,9 +26,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-      actions: read
     outputs:
-      full: ${{ steps.quota.outputs.full }}
       docs_only: ${{ steps.paths.outputs.docs_only }}
     steps:
       - uses: actions/checkout@v4
@@ -43,38 +41,6 @@ jobs:
           BASE: ${{ env.BASE_SHA }}
           HEAD: ${{ env.HEAD_SHA }}
         run: python3 .github/scripts/changed-paths.py
-
-      # full = main push, or a PR with the `hotfix` label, or usage < 1,500 min
-      # (docs/development.md#免费额度). An estimation error fails open (full=true, warning).
-      - name: Estimate CI usage and decide full or docs-only run
-        id: quota
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT: ${{ github.event_name }}
-          HOTFIX: ${{ contains(github.event.pull_request.labels.*.name, 'hotfix') }}
-        run: |
-          if [[ $EVENT != pull_request ]]; then
-            echo "full=true" >>"$GITHUB_OUTPUT"
-            echo "main push: full quality gates" >>"$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          if [[ $HOTFIX == true ]]; then
-            echo "full=true" >>"$GITHUB_OUTPUT"
-            echo "PR has the \`hotfix\` label: full quality gates" >>"$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          rc=0
-          res=$(python3 .github/scripts/ci-usage.py gate --threshold 1500 --override false) || rc=$?
-          if ((rc != 0)); then
-            echo "::warning::CI usage estimate failed (exit $rc); running the full quality gates"
-            echo "full=true" >>"$GITHUB_OUTPUT"
-            exit 0
-          fi
-          ran=$(printf '%s\n' "$res" | sed -n 's/^ran=//p')
-          echo "full=$ran" >>"$GITHUB_OUTPUT"
-          if [[ $ran != true ]]; then
-            echo "QuotaSkip: \`rust\` and \`ops-py\` are skipped for this PR (add the \`hotfix\` label and push to run them)" >>"$GITHUB_STEP_SUMMARY"
-          fi
 
       - name: Install pinned Rust toolchain
         run: bash .github/scripts/install-rust.sh
@@ -132,11 +98,10 @@ jobs:
 
   rust:
     needs: decoupling-gate
-    # Runs on the quota verdict, not on the gate's own result: a coupling violation still gets its
-    # build and test feedback. No verdict (the gate job broke before deciding) -> skipped.
+    # A coupling violation still gets build/test feedback. Only confirmed docs-only changes
+    # skip these jobs; a failed path classification runs the full checks.
     if: >-
-      ${{ !cancelled() && needs.decoupling-gate.outputs.full == 'true' &&
-      needs.decoupling-gate.outputs.docs_only != 'true' }}
+      ${{ !cancelled() && needs.decoupling-gate.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30  # safety cap: hosted-runner speed varies by about +-50% (docs/testing.md §6)
     permissions:
@@ -405,16 +370,15 @@ jobs:
           mins=$(( ($(date +%s) - JOB_START + 59) / 60 ))
           echo "rust job: about $mins min" >>"$GITHUB_STEP_SUMMARY"
           if ((mins > 12)); then
-            echo "::warning::rust job took about $mins min, over the 12 billed-minute PR target"
-            echo "**Over the 12 billed-minute PR target.**" >>"$GITHUB_STEP_SUMMARY"
+            echo "::warning::rust job took about $mins min, over the 12-minute PR target"
+            echo "**Over the 12-minute PR target.**" >>"$GITHUB_STEP_SUMMARY"
           fi
 
   ops-py:
     needs: decoupling-gate
     # Same condition as `rust`.
     if: >-
-      ${{ !cancelled() && needs.decoupling-gate.outputs.full == 'true' &&
-      needs.decoupling-gate.outputs.docs_only != 'true' }}
+      ${{ !cancelled() && needs.decoupling-gate.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -442,6 +406,9 @@ jobs:
           steps.paths.outputs.gen_host == 'true'
         with:
           python-version: "3.12"
+      - name: CI release policy regression tests
+        if: steps.paths.outputs.ops == 'true'
+        run: python -m unittest discover -s tools/xtask/tests -p 'test_ci_*.py' -v
       - name: Install pinned Rust toolchain (hft_py)
         if: steps.paths.outputs.python == 'true' && hashFiles('crates/hft-py/Cargo.toml') != ''
         run: bash .github/scripts/install-rust.sh

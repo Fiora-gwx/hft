@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | 不适用:非规范 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | TOOL-001–TOOL-002 |
-| cargo xtask ci | TOOL-003–TOOL-011, TOOL-186 |
+| cargo xtask ci | TOOL-003–TOOL-011, TOOL-186–TOOL-190 |
 | cargo xtask decoupling-gate | TOOL-012–TOOL-019 |
 | cargo xtask scaffold-gate | TOOL-020–TOOL-029 |
 | cargo xtask deps | TOOL-030–TOOL-031、TOOL-118 |
@@ -2822,6 +2822,65 @@ spec: README.md
 - 期望:
   - 退出 0;步骤序列为 TOOL-004 的前十一步(没有 `xtask doc-check` 调用);stderr 的摘要把 doc-check 步记为跳过
 - 实现:`tools/xtask/tests/ci.rs::tool_186_no_doc_check_skips_doc_check`
+
+### TOOL-187 开发构建要求实际通过的 CI,不读取分钟用量
+
+- 规则:[发布检查](../docs/development.md#发布工作流release-aarch64yml)
+- 级别:table
+- 里程碑:M1
+- 前置:候选 SHA 为已推送分支头;GitHub 替身只允许查询该 SHA 的 CI、解耦结论
+- 实现:`tools/xtask/tests/test_ci_release.py::test_tool_187_dev_requires_executed_ci_without_usage_scan`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| TOOL-187.1 | CI rust 成功,最近解耦检查成功 | 退出 0;输出两个证据 ID;不查询每夜与月度用量 |
+| TOOL-187.2 | CI rust 跳过或失败 | 退出 1;不输出发布参数 |
+| TOOL-187.3 | 最近解耦检查失败,之前成功 | 退出 1 |
+| TOOL-187.4 | GitHub API 错误 | 退出 2 |
+
+### TOOL-188 正式版 Admin 覆盖只影响指定检查
+
+- 规则:[发布检查](../docs/development.md#发布工作流release-aarch64yml)
+- 级别:table
+- 里程碑:M1
+- 前置:GitHub 结论替身;候选为正式版
+- 实现:`tools/xtask/tests/test_ci_release.py::test_tool_188_admin_nightly_override_preserves_other_gates`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| TOOL-188.1 | 无覆盖,各检查成功 | 退出 0;记录 nightly 运行 ID |
+| TOOL-188.2 | 无覆盖,每夜失败 | 退出 1 |
+| TOOL-188.3 | 非 Admin 请求 `skip_nightly` 或 `skip_verify` | 退出 1 |
+| TOOL-188.4 | Admin 请求 `skip_nightly`,每夜失败,其他检查成功 | 退出 0;不查询每夜;记录覆盖名与操作人 |
+| TOOL-188.5 | 同上,但 rust 跳过、最近解耦失败或 SHA 不在 main | 均退出 1 |
+| TOOL-188.6 | Admin 请求 `skip_verify`,检查全通过 | 退出 0;输出 `skip_verify = true`,记录覆盖名与操作人 |
+
+### TOOL-189 正式版读取最近实际执行的每夜结论
+
+- 规则:[发布检查](../docs/development.md#发布工作流release-aarch64yml)
+- 级别:table
+- 里程碑:M1
+- 前置:main 每夜列表按时间逆序;最新一次跳过,再上一次按行给出,更早一次成功
+- 实现:`tools/xtask/tests/test_ci_release.py::test_tool_189_latest_executed_nightly_must_pass`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| TOOL-189.1 | 最近实际执行成功 | 返回该次运行 ID |
+| TOOL-189.2 | 最近实际执行失败或被取消 | 拒绝;不退回更早的成功记录 |
+| TOOL-189.3 | 没有执行记录 | 拒绝 |
+
+### TOOL-190 每夜摘要直接汇总作业结果
+
+- 规则:[每夜任务](../docs/development.md#每夜任务nightlyyml)
+- 级别:table
+- 里程碑:M1
+- 前置:无额度环境变量;x86 成功,ARM 失败且缓存未命中
+- 实现:`tools/xtask/tests/test_ci_release.py::test_tool_190_nightly_summary_reports_jobs_without_quota_state`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| TOOL-190.1 | 解耦豁免查询成功 | 退出 0;列出两项作业结果、缓存提示和豁免;没有分钟额度字段 |
+| TOOL-190.2 | 豁免查询 API 错误 | 退出 0;保留作业结果,豁免项标为 unavailable |
 
 ## 验收
 

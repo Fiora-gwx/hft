@@ -1,7 +1,6 @@
 # Nightly regression smoke on main (docs/development.md#每夜任务nightlyyml; contents and limits:
 # docs/testing.md §6). Results never count toward launch gates ③④ (those accumulate on the
-# server from the verification bundle). Skipped by quota-gate at >= 1,500 CI minutes this month
-# unless an Admin dispatches with quota_override.
+# server from the verification bundle).
 name: Nightly
 
 on:
@@ -9,10 +8,6 @@ on:
     - cron: "30 18 * * *" # 18:30 UTC = 02:30 Beijing
   workflow_dispatch:
     inputs:
-      quota_override:
-        description: Run even at >= 1,500 CI minutes this month (Admins in .github/hft-admins.txt only)
-        type: boolean
-        default: false
       sha:
         description: Commit to test (default the head of main)
         type: string
@@ -29,44 +24,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  quota-gate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    permissions:
-      contents: read
-      actions: read
-      checks: read
-    outputs:
-      ran: ${{ steps.gate.outputs.ran }}
-      minutes: ${{ steps.gate.outputs.minutes }}
-      over: ${{ steps.gate.outputs.over }}
-      override: ${{ steps.gate.outputs.override }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: .github
-      - name: Estimate CI usage (ran = below threshold or Admin override)
-        id: gate
-        env:
-          GH_TOKEN: ${{ github.token }}
-          OVERRIDE: ${{ inputs.quota_override }}
-        run: >-
-          python3 .github/scripts/ci-usage.py gate --threshold 1500
-          --override "${OVERRIDE:-false}" --actor "$GITHUB_ACTOR" --non-admin-override ignore
-      - name: Alert QuotaSkip
-        if: steps.gate.outputs.ran == 'false'
-        env:
-          HFT_ALERT_TG_TOKEN: ${{ secrets.HFT_ALERT_TG_TOKEN }}
-          HFT_ALERT_TG_CHAT: ${{ secrets.HFT_ALERT_TG_CHAT }}
-          MINUTES: ${{ steps.gate.outputs.minutes }}
-        run: >-
-          bash .github/scripts/notify.sh
-          "hft nightly QuotaSkip: CI usage this month ${MINUTES} min >= 1500; nightly and nightly-arm skipped
-          (${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
-
   nightly:
-    needs: quota-gate
-    if: needs.quota-gate.result == 'success' && needs.quota-gate.outputs.ran == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -183,8 +141,6 @@ jobs:
           retention-days: 7
 
   nightly-arm:
-    needs: quota-gate
-    if: needs.quota-gate.result == 'success' && needs.quota-gate.outputs.ran == 'true'
     runs-on: ubuntu-24.04-arm
     container:
       image: ubuntu:24.04
@@ -229,11 +185,10 @@ jobs:
             cargo test --locked --profile ci -p hostprobe
           fi
 
-  # One message to the alert group: job verdicts, CI usage and quota state, the day's decoupling
-  # exemptions. Not run after a QuotaSkip (quota-gate already alerted).
+  # One message to the alert group: job verdicts and the day's decoupling exemptions.
   summary:
-    needs: [quota-gate, nightly, nightly-arm]
-    if: ${{ always() && needs.quota-gate.outputs.ran != 'false' }}
+    needs: [nightly, nightly-arm]
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
@@ -249,10 +204,6 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           HFT_ALERT_TG_TOKEN: ${{ secrets.HFT_ALERT_TG_TOKEN }}
           HFT_ALERT_TG_CHAT: ${{ secrets.HFT_ALERT_TG_CHAT }}
-          QUOTA_RAN: ${{ needs.quota-gate.outputs.ran }}
-          QUOTA_MINUTES: ${{ needs.quota-gate.outputs.minutes }}
-          QUOTA_OVER: ${{ needs.quota-gate.outputs.over }}
-          QUOTA_OVERRIDE: ${{ needs.quota-gate.outputs.override }}
           NIGHTLY_RESULT: ${{ needs.nightly.result }}
           ARM_RESULT: ${{ needs.nightly-arm.result }}
           ARM_CACHE_HIT: ${{ needs.nightly-arm.outputs.cache-hit }}

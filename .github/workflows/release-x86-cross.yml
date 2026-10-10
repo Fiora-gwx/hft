@@ -1,6 +1,6 @@
 # Emergency path when ubuntu-24.04-arm is unavailable (queue, outage): cross-compile the same
 # aarch64 binaries on ubuntu-latest (docs/development.md#应急交叉编译release-x86-crossyml).
-# Uses the same CI quota as the arm build; it is NOT the quota-exhausted path. Same preflight as
+# Same preflight as
 # release-aarch64.yml; no aarch64 conformance set, native smoke, verification bundle or benchmark
 # artifact (the server's `releasectl verify` and `hft-core --check` take over the native checks).
 # Quarterly drill: DRL-110 (docs/tests/drills.md).
@@ -21,8 +21,8 @@ on:
         description: N for a development build vX.Y.Z-dev.N (empty = formal vX.Y.Z)
         type: string
         required: false
-      quota_override:
-        description: Skip the nightly (formal) / CI-usage (dev) condition (Admins in .github/hft-admins.txt only)
+      skip_nightly:
+        description: Skip the formal-release nightly condition (Admins in .github/hft-admins.txt only)
         type: boolean
         default: false
 
@@ -60,7 +60,7 @@ jobs:
           IN_SHA: ${{ inputs.sha }}
           IN_VERSION: ${{ inputs.version }}
           IN_DEV_N: ${{ inputs.dev_n }}
-          IN_QUOTA_OVERRIDE: ${{ inputs.quota_override }}
+          IN_SKIP_NIGHTLY: ${{ inputs.skip_nightly }}
           ACTOR: ${{ github.actor }}
         run: python3 .github/scripts/release-preflight.py
 

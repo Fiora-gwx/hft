@@ -18,8 +18,7 @@ jobs:
     if: github.event_name == 'pull_request_review' || github.event.label.name == 'engine-change'
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # Only the review list is read here; the usage estimate (actions: read) is done by the
-    # decoupling-gate job of ci.yml, which decides full/docs-only runs.
+    # The exemption check reads the PR labels and approving reviews.
     permissions:
       contents: read
       pull-requests: read

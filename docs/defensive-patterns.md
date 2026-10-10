@@ -208,7 +208,7 @@
 1. 作业条件显式写 `needs.<job>.result == 'success'`(或列举允许的结果),不依赖隐式 `success()`。
 2. 改动作业图条件后,验证**每个作业**的结论,不看工作流总结论。
 3. 发布工作流的最后一步断言资产存在且哈希匹配;缺资产即失败。
-4. 免费额度有月上限,用尽时连发布构建也会停:本月用量到阈值时每夜任务与开发构建自动跳过,余额只留给正式版与热修;另保留一条定期演练的 x86 交叉编译应急发布路径;阈值与处置的唯一归属是 [development.md](development.md#免费额度)。
+4. 公开仓库的标准托管 runner 分钟免费;作业仍有超时、冒烟批量与制品保留期限。arm runner 故障时保留定期演练的 x86 交叉编译发布路径;资源规则归 [development.md](development.md#免费额度)。
 
 **落点**:`.github/workflows/`;[development.md](development.md#ci-概要)。
 

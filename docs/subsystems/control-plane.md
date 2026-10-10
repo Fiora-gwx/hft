@@ -40,7 +40,7 @@
 
 进程主体(`ops_bot` 自身、pipeline、reconciler、`cli:systemd`)不是角色,权限按主体逐命令列出。逐命令的允许矩阵、群聊限制与主体表见 [hft-ctl-proto 权限表](../../crates/hft-ctl-proto/README.md#权限表);鉴权流程见 [hft-ctl](../../crates/hft-ctl/README.md)。
 
-ctl 的角色只以 gateway 的签发者表为准:文件 `/etc/hft/ctl-principals.toml`(hft-core 配置 `paths.ctl_principals`,只在启动时加载、改动需重启 hft-core,deploy 生成;[hft-core 配置文件字段](../../apps/hft-core/README.md#配置文件字段)),格式与加载见 [hft-ctl 鉴权](../../crates/hft-ctl/README.md#鉴权);GitHub 侧的 Admin 名单 `.github/hft-admins.txt`(`quota_override` 与 CI 校验的签字字段用它,记 GitHub 登录名,归 [development](../development.md))不参与 ctl 鉴权。两份名单的人员由负责人维护一致(launch 检查清单核对一次)。
+ctl 的角色只以 gateway 的签发者表为准:文件 `/etc/hft/ctl-principals.toml`(hft-core 配置 `paths.ctl_principals`,只在启动时加载、改动需重启 hft-core,deploy 生成;[hft-core 配置文件字段](../../apps/hft-core/README.md#配置文件字段)),格式与加载见 [hft-ctl 鉴权](../../crates/hft-ctl/README.md#鉴权);GitHub 侧的 Admin 名单 `.github/hft-admins.txt`(`skip_nightly`、`skip_verify` 与 CI 校验的签字字段用它,记 GitHub 登录名,归 [development](../development.md))不参与 ctl 鉴权。两份名单的人员由负责人维护一致(launch 检查清单核对一次)。
 
 ### 账户语义
 

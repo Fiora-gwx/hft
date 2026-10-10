@@ -2,6 +2,8 @@
 
 Status: proposed
 
+实现期修订(2026-10-11):私有仓库与月度分钟门槛部分由 [公开仓库 CI](../../implemented/process/2026-10-10-public-repository-ci.md) 取代;构建与验证边界保留。正式版的 Admin 每夜豁免名为 `skip_nightly`,不再承担用量豁免。
+
 > **第八轮第五次修订(2026-10-03)**:收窄第 2、6 条——`ci` 剖面显式 `panic = "unwind"`,PR 的基准冒烟用 `ci` 剖面;发布 `build` 超时 90 min、验证包 60 min;`nightly-arm` ≤ 10 min 并与 arm 发布共用缓存键;本月用量 ≥ 1,500 min 时每夜任务与开发构建自动跳过;应急工作流 `release-x86-cross.yml` 每季度演练;`main` 推送不取消进行中的运行。分钟数以 [development 免费额度](../../../../docs/development.md#免费额度)为准;依据 [round8e 简报](../../../../design/_work/round8e-spec-brief.md) E11。
 
 > **第八轮第六次修订(2026-10-03)**:收窄第 6 条——用量由 quota-gate 按作业时长自估(GitHub 用量接口已关闭),quota-gate 与发布 `preflight` 接受 Admin 的 `quota_override`,过 1,500 min 后不带 `hotfix` 标签的 PR 只跑 docs 与 `decoupling-gate`,额度耗尽时经负责人个人账户的私有镜像仓库出包;`release-x86-cross.yml` 只用于 arm runner 不可用;`nightly-arm` 改用自己的缓存键。见 [ci-quota-self-estimate](../process/2026-10-03-ci-quota-self-estimate.md)。

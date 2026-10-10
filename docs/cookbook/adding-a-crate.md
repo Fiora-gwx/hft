@@ -96,7 +96,7 @@ crates/<name>/
 ## 8. Fuzz(venue、解码器、journal 读者必做)
 
 1. `fuzz/fuzz_targets/<target>.rs`,入口与实盘解码入口相同;语料目录由 `cargo xtask fixtures` 从金样生成,不手工复制。
-2. 在 `tools/xtask/fuzz-targets.toml` 登记:CI 每夜据此短跑轮转做回归冒烟(分钟预算见 [development](../development.md));验证包据此打包 fuzz 二进制,core 解码器在服务器上的累计 fuzz CPU 时间(只累计相关源路径与候选版本相同的运行,[testing §6.1](../testing.md#61-服务器上的累计运行))计入[上线门槛](../testing.md#8-上线门槛) ③(只卡正式实盘)。
+2. 在 `tools/xtask/fuzz-targets.toml` 登记:CI 每夜据此短跑轮转做回归冒烟(冒烟时长见 [testing §6](../testing.md#6-ci-运行矩阵));验证包据此打包 fuzz 二进制,core 解码器在服务器上的累计 fuzz CPU 时间(只累计相关源路径与候选版本相同的运行,[testing §6.1](../testing.md#61-服务器上的累计运行))计入[上线门槛](../testing.md#8-上线门槛) ③(只卡正式实盘)。
 
 **验证**(CI):`cargo xtask fuzz <target> --time 60` 零崩溃。
 

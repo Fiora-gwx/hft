@@ -1,16 +1,8 @@
-# hft Admin list (docs/development.md#免费额度, #质量门quality-gatesyml).
-#
+# hft Admin list (docs/development.md#仓库与-ci).
 # One GitHub login per line; `#` starts a comment; case-insensitive.
-# Read by:
-#   - cargo xtask decoupling-gate   (engine-change exemption needs an approving review by a login here)
-#   - .github/scripts/ci-usage.py   (quota_override / skip_verify are honoured only for a login here)
-#
-# Current Admin: the owner (负责人), who owns the private repository Fiora-gwx/hft under a personal
-# account (no GitHub organization; owner's decision 2026-10-07). The boss is a collaborator; a
-# personal private repository has no read-only role, so collaborators can push and merge, and this
-# list (not repository permissions) is what gates exemptions, quota_override and skip_verify.
-# Do not add collaborators here.
-#
+# Read by cargo xtask decoupling-gate (engine-change approving reviews) and
+# .github/scripts/github_common.py (release skip_nightly / skip_verify overrides).
+# The public repository's owner is the sole Admin; collaborators are not added here.
 # Changing this file is a normal PR (review it like code).
 
 Fiora-gwx

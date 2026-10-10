@@ -2,6 +2,8 @@
 
 Status: proposed
 
+实现期修订(2026-10-11):私有仓库与月度分钟门槛部分由 [公开仓库 CI](../../implemented/process/2026-10-10-public-repository-ci.md) 取代;构建与验证边界保留。正式版的 Admin 每夜豁免名为 `skip_nightly`,不再承担用量豁免。
+
 > **实现期修订(2026-10-07,负责人决定)**:取代第 4 条与季度演练——仓库已在负责人个人账户(`Fiora-gwx/hft`),额度与 Trading 共享,"镜像到个人账户出包"不再成立;耗尽后到月初前无法在 CI 出包,预防靠 quota-gate 与每周对账(对账时一并考虑 Trading 用量),紧急时负责人可决定临时为个人账户设置付费上限;DRL-111 已删除(编号保留)。见 [development 免费额度](../../../../docs/development.md#免费额度)。
 
 ## Problem

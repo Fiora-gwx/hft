@@ -107,7 +107,7 @@ def main() -> int:
         "cargo_lock": "Cargo.lock" in files,
         "gen_host": under(files, "deploy/", "apps/hft-core/"),
         "python": under(files, "python/", "crates/hft-py/", "tools/az-probe/") or pipeline,
-        "ops": under(files, "deploy/", ".github/"),
+        "ops": under(files, "deploy/", ".github/", "tools/xtask/tests/test_ci_"),
     }
     lines = [f"{k}={str(v).lower() if isinstance(v, bool) else v}" for k, v in res.items()]
     out = os.environ.get("GITHUB_OUTPUT")

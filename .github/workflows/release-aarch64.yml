@@ -23,8 +23,8 @@ on:
         description: Re-run for an already pushed formal tag vX.Y.Z (instead of sha/dev_n)
         type: string
         required: false
-      quota_override:
-        description: Skip the nightly (formal) / CI-usage (dev) condition (Admins in .github/hft-admins.txt only)
+      skip_nightly:
+        description: Skip the formal-release nightly condition (Admins in .github/hft-admins.txt only)
         type: boolean
         default: false
       skip_verify:
@@ -58,7 +58,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Preflight (ci.yml rust, decoupling-gate, nightly / quota, Admin overrides)
+      - name: Preflight (ci.yml rust, decoupling-gate, nightly, Admin overrides)
         id: pf
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -69,7 +69,7 @@ jobs:
           IN_SHA: ${{ inputs.sha }}
           IN_DEV_N: ${{ inputs.dev_n }}
           IN_TAG: ${{ inputs.tag }}
-          IN_QUOTA_OVERRIDE: ${{ inputs.quota_override }}
+          IN_SKIP_NIGHTLY: ${{ inputs.skip_nightly }}
           IN_SKIP_VERIFY: ${{ inputs.skip_verify }}
           ACTOR: ${{ github.actor }}
         run: python3 .github/scripts/release-preflight.py

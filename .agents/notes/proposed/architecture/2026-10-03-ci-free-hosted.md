@@ -2,6 +2,8 @@
 
 Status: proposed
 
+实现期修订(2026-10-11):私有仓库与月度分钟门槛部分由 [公开仓库 CI](../../implemented/process/2026-10-10-public-repository-ci.md) 取代;构建与验证边界保留。正式版的 Admin 每夜豁免名为 `skip_nightly`,不再承担用量豁免。
+
 > **第八轮第三次修订(2026-10-03)**:收窄第 2、3、6 条——账户是 GitHub Free(私有仓库 2,000 min/月,与 Trading 仓库共享):每夜 x86 ≤ 20 min + arm ≤ 5 min(约 750 min/月),PR 质量门目标 ≤ 10 计费分钟,每月为两个仓库的发布构建预留 ≥ 300 min,用量超过 80% 先缩每夜批量;预算表唯一归属 [development](../../../../docs/development.md#免费额度);③④ 累计门槛只在正式实盘前要求,漏跑一夜不清零、只有失败清零,账本丢失按 CI artifact 历史重建、无法重建才清零(规则归 testing §6);见 [no-small-live](2026-10-03-no-small-live.md)。
 
 > **第八轮第四次修订(2026-10-03)**:部分取代——hft 仓库改放免费 GitHub 组织(独立的 2,000 min/月,老板为 Read;没有受保护分支,以发布 `preflight` 为准);每夜 x86 ≤ 15 min + arm ≤ 5 min,只做回归冒烟;③④ 的累计改在服务器上运行 CI 构建的验证包,CI 不再保存累计账本 artifact,`cargo xtask ledger rebuild` 不再存在;第 4 条"dev2 不跑 fuzz、DST"作废(dev2 在护栏内以最低优先级运行验证包);预算表仍唯一归属 development;见 [ci-org-and-profiles](2026-10-03-ci-org-and-profiles.md)、[verify-on-server](../process/2026-10-03-verify-on-server.md)。
