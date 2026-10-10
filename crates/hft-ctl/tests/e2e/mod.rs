@@ -986,8 +986,7 @@ impl E2e {
     pub fn jres(&self, id: Uuid) -> Option<hft_event::CmdResult> {
         self.results_since(0)
             .into_iter()
-            .filter(|r| r.cmd_id == *id.as_bytes())
-            .last()
+            .rfind(|r| r.cmd_id == *id.as_bytes())
     }
     pub fn notes_since(&self, m: usize) -> Vec<hft_event::Note> {
         self.kinds_since(m, EventKind::NOTE)

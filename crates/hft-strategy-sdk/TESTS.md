@@ -363,7 +363,7 @@ spec: README.md
   1. 发送该 `SetParams`
 - 期望:
   - `CmdResult{InvalidArgs, detail = ParamInvalid}`,`arg = 1 | 0 << 4`(kind `Strategy`、字段 0);`RecProbe` 调用记录在本命令前后相同
-- 实现:`crates/hft-sequencer/tests/sdk_contract/lifecycle.rs::sdk_019_gateway_reject_no_strategy_call`
+- 实现:`crates/hft-ctl/tests/e2e/sdk.rs::sdk_019_gateway_reject_no_strategy_call`
 
 ### SDK-020 关键帧中 `snapshot` 每实例调用一次,行头带 `desc_version`
 
@@ -846,7 +846,7 @@ spec: README.md
   1. 发送 `StrategyCmd{S3, A1, group = none, payload = [1, 1, 0, 0, 0, 0, 0, 0]}`
 - 期望:
   - 客户端收到 gateway 的 `CmdResult{InvalidArgs, detail = ParamInvalid}`;`RecProbe` 没有 `Manual`
-- 实现:`crates/hft-sequencer/tests/sdk_contract/delivery.rs::sdk_054_no_cmds_no_manual`
+- 实现:`crates/hft-ctl/tests/e2e/sdk.rs::sdk_054_no_cmds_no_manual`
 
 ### SDK-055 `Warmup` 默认只投递给 Model,`warmup(Part::Both)` 时快速部分也收
 
@@ -923,7 +923,7 @@ spec: README.md
   1. 发送 9 个 group 的 `SetParams{version = 2}`
 - 期望:
   - 客户端收到 `CmdResult{InvalidArgs, detail = ParamInvalid}`,`arg & 0xF = 1`(kind `Strategy`);S3 生效版本仍为 1;`RecProbe` 无调用
-- 实现:`crates/hft-sequencer/tests/sdk_contract/lifecycle.rs::sdk_060_too_many_groups_at_gateway`
+- 实现:`crates/hft-ctl/tests/e2e/sdk.rs::sdk_060_too_many_groups_at_gateway`
 
 ### SDK-061 `non_prod_only` 的策略不能绑定正式账户
 
@@ -1834,7 +1834,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:`SeqRig`;`RecProbe.cmds` 同 `EchoProbe`(SDK-114);每行一条命令
-- 实现:`crates/hft-sequencer/tests/sdk_contract/ctx.rs::sdk_119_gateway_cmd_checks`
+- 实现:`crates/hft-ctl/tests/e2e/sdk.rs::sdk_119_gateway_cmd_checks`
 
 | 行 | 命令 | 期望 |
 |---|---|---|
