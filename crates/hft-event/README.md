@@ -180,7 +180,7 @@ pub struct OrderDecision {          // 0x0201,88 B,Output。每个意图一条,�
     pub tif: Tif,                   // 61
     pub oflags: u16,                // 62 OrderFlags(位定义见下,唯一归属本 crate)
     pub reason: u32,                // 64 理由码:执行层订单 = hft-exec 登记的 ExecOrderKind 码;策略意图、OMS 产生的对冲单与冒烟单 = 0(见"已知限制")
-    pub intent_no: u32,             // 68 该策略实例内的意图序号,从 0 递增(确定性)
+    pub intent_no: u32,             // 68 策略意图:该次 `on_event` 的 `IntentHandle`(每次调用从 0 起,确定性);其余来源 0
     pub req_px: Px,                 // 72 取整前给出的价格(审计取整方向)
     pub link_role: u8,              // 80 LinkRole 线上码(类型归 hft-strategy-sdk,语义归 hft-oms):0 无 / 1 First / 2 Second / 3 SecondRetry / 4 HedgeFix / 5 Reverse
     pub _pad: [u8; 7],              // 81
@@ -638,7 +638,7 @@ pub struct Note {                   // 0x0506,80 B;热路径唯一的"日志",�
 | `AdvisorLag` | Advisor | P1 | 唯一定义见下 |
 | `ModelGroupReset` | Advisor | P2 | Model 重置了某 group 的状态(`ModelParamEffect::ResetGroups/ResetAll`、指纹变化或分位配置不一致);pipeline 据此对该 group 自动预热。`Note.strategy`、`Note.group` 指明对象;v[0] = 原因 Structural=1 Fingerprint=2 PctConfig=3 ResetAll=4,v[1] = 触发它的参数 version(规则归 hft-strategy-sdk) |
 | `AdvisorStats` | Advisor | Info | 周期计数(`advice_coalesced` 等,`v[]` 归 hft-sequencer advisor) |
-| `ModelCkptSkipped` | Advisor | P1 | 模型检查点超过盘上限被跳过(规则与 `v[]` 归 apps/hft-core) |
+| `ModelCkptSkipped` | Advisor | P1 | 模型检查点本代作废(超过盘上限、两节合计超过 `Model::snapshot_bytes` 或写失败;盘上限归 apps/hft-core,`v[]` 归 [hft-sequencer 模型检查点](../hft-sequencer/README.md#模型检查点)) |
 
 登记表的代码形式(`src/system.rs`;gen-schema 据它导出 Note 码表并与各 source crate 的 `const` 表核对):
 

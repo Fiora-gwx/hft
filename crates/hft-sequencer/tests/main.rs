@@ -31,6 +31,7 @@ mod process;
 mod recon;
 mod recover;
 mod ring_full;
+mod sdk_contract;
 mod sim_route;
 mod snapshot;
 mod snapshot_rows;

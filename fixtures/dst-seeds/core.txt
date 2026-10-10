@@ -1,0 +1,5 @@
+# DST failure regressions of suite `core` (fixtures/README.md): seed, first failure date, cause.
+0x00000000000000ce 2026-10-10 外来成交(自身强平)未计入模拟余额真值(SIM-220)
+0x00000000000002d6 2026-10-10 ADL 部分减仓后移出成本取整与 ledger 不一致(SIM-221)
+0x000000000000034b 2026-10-10 OmsHedgeNakedCapped 按 group 累计,链接结束后 INV-8 失配
+0x00000000000006dd 2026-10-10 外来成交去重键未进 Obs,重复的 ExternalFill 报 INV-2

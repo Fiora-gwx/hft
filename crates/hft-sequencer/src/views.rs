@@ -11,8 +11,9 @@ use hft_refdata::{InstHot, InstKind, RefData, VenueCaps};
 use hft_risk::mode::CellKey;
 use hft_risk::{EquityView, LegSummary, ModeView, Risk, RiskView, Scope};
 use hft_strategy_sdk::{
-    BboView, BookRead, BookStatus, FeeView, FundingView, GroupPosView, InstRiskView, LegView, ModelViews,
-    Now, OrderRef, OrderStateView, OrderView, RiskStateView, TargetView, Views,
+    BboView, BookRead, BookStatus, CashView, FeeView, FundingView, GroupPosView, InstRiskView, InventoryView,
+    LegView, MarginView, ModelViews, Now, OrderRef, OrderStateView, OrderView, PerpPosView, PortfolioRead,
+    RiskStateView, TargetView, VenueEquityView, VenueSet, Views,
 };
 use hft_types::{AccountId, AssetId, GroupId, InstId, Notional, Px, Qty, Rate, RunMode, Side, Tsc, VenueId};
 
@@ -115,6 +116,50 @@ impl BookRead for SeqBook<'_> {
     }
 }
 
+/// `PortfolioRead` over hft-ledger's portfolio; `margin(v).stale` additionally judged against
+/// hft-risk's `margin_stale_ms` of the account (README "只读视图").
+#[derive(Copy, Clone, Debug)]
+pub struct SeqPortfolio<'a> {
+    p: hft_ledger::Portfolio<'a>,
+    now_ens: i64,
+    stale_ns: i64,
+}
+
+impl PortfolioRead for SeqPortfolio<'_> {
+    fn account(&self) -> AccountId {
+        self.p.account()
+    }
+    fn venues(&self) -> VenueSet {
+        self.p.venues()
+    }
+    fn venue(&self, v: VenueId) -> &VenueEquityView {
+        self.p.venue(v)
+    }
+    fn cash(&self, v: VenueId, asset: AssetId) -> CashView {
+        self.p.cash(v, asset)
+    }
+    fn inventory(&self, v: VenueId, asset: AssetId) -> InventoryView {
+        self.p.inventory(v, asset)
+    }
+    fn inventory_of(&self, v: VenueId, g: GroupId) -> Qty {
+        self.p.inventory_of(v, g)
+    }
+    fn perp(&self, v: VenueId, i: InstId) -> PerpPosView {
+        self.p.perp(v, i)
+    }
+    fn margin(&self, v: VenueId) -> MarginView {
+        let mut m = self.p.margin(v);
+        // Boundary inclusive: exactly `margin_stale_ms` old is still fresh.
+        if self.now_ens.saturating_sub(m.src_ens) > self.stale_ns {
+            m.stale = true;
+        }
+        m
+    }
+    fn equity_total(&self) -> Notional {
+        self.p.equity_total()
+    }
+}
+
 /// The engine views of one Input (`exec = None` for the adapter handed to `exec.advance`).
 #[derive(Copy, Clone)]
 pub struct SeqViews<'a> {
@@ -195,7 +240,7 @@ impl Views for SeqViews<'_> {
     where
         Self: 'a;
     type Portfolio<'a>
-        = hft_ledger::Portfolio<'a>
+        = SeqPortfolio<'a>
     where
         Self: 'a;
     fn now(&self) -> Now {
@@ -214,8 +259,21 @@ impl Views for SeqViews<'_> {
     fn mark(&self, i: InstId) -> Px {
         self.market.row(i).map_or(Px(0), |r| r.mark_px)
     }
-    fn portfolio(&self, a: AccountId) -> hft_ledger::Portfolio<'_> {
-        self.ledger.portfolio(a)
+    fn portfolio(&self, a: AccountId) -> SeqPortfolio<'_> {
+        let stale_ms = self
+            .risk
+            .params()
+            .accounts
+            .iter()
+            .find(|x| x.account == a)
+            .map_or(hft_risk::DEFAULT_MARGIN.margin_stale_ms, |x| {
+                x.margin.margin_stale_ms
+            });
+        SeqPortfolio {
+            p: self.ledger.portfolio(a),
+            now_ens: self.now.engine_ns,
+            stale_ns: i64::from(stale_ms).saturating_mul(1_000_000),
+        }
     }
     fn group_pos(&self, a: AccountId, g: GroupId) -> &GroupPosView {
         self.gpos.get(a, g)
@@ -232,7 +290,12 @@ impl Views for SeqViews<'_> {
         if self.model {
             return None;
         }
-        self.exec?.view(a, g)
+        let x = self.exec?;
+        // A cell without a current target (never set, or cleared) has no target view.
+        if !x.cell(a, g).is_some_and(|c| c.has_target) {
+            return None;
+        }
+        x.view(a, g)
     }
     fn order(&self, h: OrderRef) -> Option<OrderView> {
         if self.model {

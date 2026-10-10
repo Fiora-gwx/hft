@@ -513,6 +513,9 @@ impl<S: StrategySet> SeqSut<S> {
         let Some(s) = self.s.take() else {
             return Err(BootFail("no engine to restart".into()));
         };
+        let st = s.engine().oms.stats();
+        self.carry.dup_base += st.dup;
+        self.carry.stale_gen_base += st.stale_gen;
         let drv = s.into_driver();
         let mut j = drv.io.j;
         let keep = j.committed;

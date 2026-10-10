@@ -86,10 +86,10 @@ fn oms_361_snapshot_rows() {
     let b = snap(&h.o);
     let (_, s, e, count) = sec(&b, SECTION_ORDER_SLOTS);
     assert_eq!(count, 40, "OMS-361.1");
-    assert_eq!(e - s, 40 * 160, "OMS-361.1");
+    assert_eq!(e - s, 40 * SLOT_ROW_LEN, "OMS-361.1");
     let keys: Vec<(u8, u8, u32)> = (0..40)
         .map(|i| {
-            let r = &b[s + i * 160..];
+            let r = &b[s + i * SLOT_ROW_LEN..];
             (r[6], r[7], u32::from_le_bytes([r[12], r[13], r[14], r[15]]))
         })
         .map(|(v, a, sl)| (vix(v), a, sl))
@@ -142,9 +142,13 @@ fn vix(v: u8) -> u8 {
 fn oms_362_row_versions() {
     let (h, _, _) = mixed();
     let b = snap(&h.o);
-    for id in [SECTION_ORDER_SLOTS, SECTION_OMS_COUNTERS, SECTION_OMS_LINKS] {
+    for (id, v) in [
+        (SECTION_ORDER_SLOTS, 2),
+        (SECTION_OMS_COUNTERS, 1),
+        (SECTION_OMS_LINKS, 1),
+    ] {
         let (vo, _, _, _) = sec(&b, id);
-        assert_eq!(u16::from_le_bytes([b[vo], b[vo + 1]]), 1, "OMS-362.1");
+        assert_eq!(u16::from_le_bytes([b[vo], b[vo + 1]]), v, "OMS-362.1");
     }
     assert!(restore(&b).is_ok(), "OMS-362.1");
     for (row, id) in [
@@ -154,7 +158,7 @@ fn oms_362_row_versions() {
     ] {
         let mut c = b.clone();
         let (vo, _, _, _) = sec(&c, id);
-        c[vo] = 2;
+        c[vo] += 1;
         assert!(restore(&c).is_err(), "{row}");
     }
 }
@@ -317,4 +321,36 @@ fn dump(b: &[u8]) -> String {
         }
     }
     s
+}
+
+/// OMS-461: section 2 rows of row version 1 (160 B, no `fee_cum`) restore with `fee_cum = filled`.
+#[test]
+fn oms_461_restore_slot_rows_v1() {
+    let mut h = H::new();
+    let r = h.place_ok(&buy_x(), 0);
+    h.ack(r, 7, 1);
+    h.fill(r, q("0.004"), p("60000.00"), 2);
+    let b = snap(&h.o);
+    let (ver, s, e, count) = sec(&b, SECTION_ORDER_SLOTS);
+    assert_eq!(count, 1);
+    let mut body = Vec::new();
+    for k in 0..count as usize {
+        body.extend_from_slice(&b[s + k * SLOT_ROW_LEN..s + k * SLOT_ROW_LEN + SLOT_ROW_LEN_V1]);
+    }
+    let mut v1 = b[..s].to_vec();
+    v1[ver..ver + 2].copy_from_slice(&1u16.to_le_bytes());
+    v1[s - 8..s - 4].copy_from_slice(&(body.len() as u32).to_le_bytes());
+    v1.extend_from_slice(&body);
+    v1.extend_from_slice(&b[e..]);
+    let o = restore(&v1).unwrap();
+    let (sl, ex, _) = o.raw_slot(r.venue, r.account, r.slot).unwrap();
+    assert_eq!(sl.filled, q("0.004"));
+    assert_eq!(ex.fee_cum, q("0.004"), "OMS-461: fee_cum = filled");
+    assert_eq!(ex.tag, h.ext(r).tag, "OMS-461: the first 32 bytes as written");
+    // Version 2 (as written) restores fee_cum as written.
+    let o2 = restore(&b).unwrap();
+    assert_eq!(
+        o2.raw_slot(r.venue, r.account, r.slot).unwrap().1.fee_cum,
+        q("0.004")
+    );
 }

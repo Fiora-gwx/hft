@@ -170,6 +170,8 @@ pub enum PlaceResult { Placed(OrderRef), Rejected(RejectBits), Shadowed }
 
 **输出容量与续推**(固定容量从不丢弃输出):各向量的容量是**单次调用**的上限,sequencer 在每次调用后排空(Output 追加、订单进意图管线、通知入队),所以与一个输入事件内的调用次数无关。
 
+`FixedVec::as_mut_slice` 只暴露已有元素,不改变长度或容量;sequencer 原地补决策标志,排空时直接读取预分配向量,不另建临时副本。
+
 | 入口 | 单次产出上限 |
 |---|---|
 | 单 cell 入口:`set_target`、`clear_target`、`on_external`、`hedge_fix_cmd`、`on_place_result`、`on_order_update`、`on_link`、`on_timer`、`on_mode`、`note_strategy_action` | decisions ≤ 2、notify ≤ 1、orders ≤ 1、cancels ≤ 4、cancel_resting 0、broken ≤ 1、timers ≤ 2、notes ≤ 2 |

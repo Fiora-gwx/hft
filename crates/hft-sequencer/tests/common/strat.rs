@@ -8,11 +8,11 @@ use std::cell::RefCell;
 
 use hft_strategy_sdk::params::{RawParams, decode_body, encode_body, schema_digest, schema_json};
 use hft_strategy_sdk::{
-    AdviceOut, BboView, CmdDesc, Ctx, EvMask, EventRef, FieldDesc, FundingView, GroupTable, LegView,
-    MinorChange, ModelLayoutDesc, ModelParamEffect, ModelViews, Now, OrderRef, OrderView, ParamError,
-    ParamSchemaDesc, Part, RefView, Relax, ResetPreview, RestoreError, RiskStateView, SnapshotProgress,
-    SnapshotReader, SnapshotWriter, StrategyDesc, StrategyInstance, StrategySet, SubsBuilder, TargetView,
-    Unit, Views,
+    AdviceOut, BboView, BookRead, CmdDesc, Ctx, EvMask, EventRef, FieldDesc, FundingView, GroupTable,
+    LegView, MinorChange, ModelLayoutDesc, ModelParamEffect, ModelViews, Now, OrderRef, OrderView,
+    ParamError, ParamSchemaDesc, Part, PortfolioRead, RefView, Relax, ResetPreview, RestoreError,
+    RiskStateView, SnapshotProgress, SnapshotReader, SnapshotWriter, StrategyDesc, StrategyInstance,
+    StrategySet, SubsBuilder, TargetView, Unit, Views,
 };
 use hft_types::{AccountId, GroupId, InstId, RunMode, StrategyId};
 
@@ -147,6 +147,11 @@ impl P {
     }
 }
 
+/// The `thr` value of decoded parameters (call records).
+pub fn _p_thr(p: &P) -> i64 {
+    p.get(F_THR)
+}
+
 /// Body bytes of `values` (one default per field, no overrides).
 pub fn body(values: [i64; 5], n_groups: u16) -> Vec<u8> {
     encode_body(
@@ -194,6 +199,34 @@ pub trait DynViews {
     fn legs(&self, a: AccountId, g: GroupId) -> LegView;
     fn risk(&self, a: AccountId) -> RiskStateView;
     fn mark(&self, i: InstId) -> hft_types::Px;
+    // Further accessors (SDK engine-side contract cases).
+    fn quote_ok(&self, a: AccountId, i: InstId) -> bool;
+    fn venue_ready(&self, a: AccountId, v: hft_types::VenueId) -> bool;
+    fn risk_for(&self, a: AccountId, i: InstId) -> hft_strategy_sdk::InstRiskView;
+    fn book_status(&self, i: InstId) -> hft_strategy_sdk::BookStatus;
+    fn book_best(&self, i: InstId, s: hft_types::Side) -> Option<hft_event::Level>;
+    fn book_levels(&self, i: InstId, s: hft_types::Side, out: &mut [hft_event::Level]) -> usize;
+    fn pf_account(&self, a: AccountId) -> AccountId;
+    fn pf_venues(&self, a: AccountId) -> hft_strategy_sdk::VenueSet;
+    fn pf_venue(&self, a: AccountId, v: hft_types::VenueId) -> hft_strategy_sdk::VenueEquityView;
+    fn pf_cash(
+        &self,
+        a: AccountId,
+        v: hft_types::VenueId,
+        asset: hft_types::AssetId,
+    ) -> hft_strategy_sdk::CashView;
+    fn pf_margin(&self, a: AccountId, v: hft_types::VenueId) -> hft_strategy_sdk::MarginView;
+    fn pf_equity_total(&self, a: AccountId) -> hft_types::Notional;
+    /// Calls every `Views` accessor (and every `PortfolioRead`/`BookRead` method) once and folds
+    /// the results into a checksum (zero-allocation probe).
+    fn sweep_all(&self, a: AccountId, g: GroupId, i: InstId, v: hft_types::VenueId, r: OrderRef) -> u64;
+    fn group_pos(&self, a: AccountId, g: GroupId) -> hft_strategy_sdk::GroupPosView;
+    fn inventory(
+        &self,
+        a: AccountId,
+        v: hft_types::VenueId,
+        asset: hft_types::AssetId,
+    ) -> hft_strategy_sdk::InventoryView;
 }
 
 struct W<'a, V: Views>(&'a V);
@@ -228,6 +261,102 @@ impl<V: Views> DynViews for W<'_, V> {
     }
     fn mark(&self, i: InstId) -> hft_types::Px {
         self.0.mark(i)
+    }
+    fn quote_ok(&self, a: AccountId, i: InstId) -> bool {
+        self.0.quote_ok(a, i)
+    }
+    fn venue_ready(&self, a: AccountId, v: hft_types::VenueId) -> bool {
+        self.0.venue_ready(a, v)
+    }
+    fn risk_for(&self, a: AccountId, i: InstId) -> hft_strategy_sdk::InstRiskView {
+        self.0.risk_for(a, i)
+    }
+    fn book_status(&self, i: InstId) -> hft_strategy_sdk::BookStatus {
+        self.0.book(i).status()
+    }
+    fn book_best(&self, i: InstId, s: hft_types::Side) -> Option<hft_event::Level> {
+        self.0.book(i).best(s)
+    }
+    fn book_levels(&self, i: InstId, s: hft_types::Side, out: &mut [hft_event::Level]) -> usize {
+        self.0.book(i).levels(s, out)
+    }
+    fn pf_account(&self, a: AccountId) -> AccountId {
+        self.0.portfolio(a).account()
+    }
+    fn pf_venues(&self, a: AccountId) -> hft_strategy_sdk::VenueSet {
+        self.0.portfolio(a).venues()
+    }
+    fn pf_venue(&self, a: AccountId, v: hft_types::VenueId) -> hft_strategy_sdk::VenueEquityView {
+        *self.0.portfolio(a).venue(v)
+    }
+    fn pf_cash(
+        &self,
+        a: AccountId,
+        v: hft_types::VenueId,
+        asset: hft_types::AssetId,
+    ) -> hft_strategy_sdk::CashView {
+        self.0.portfolio(a).cash(v, asset)
+    }
+    fn pf_margin(&self, a: AccountId, v: hft_types::VenueId) -> hft_strategy_sdk::MarginView {
+        self.0.portfolio(a).margin(v)
+    }
+    fn pf_equity_total(&self, a: AccountId) -> hft_types::Notional {
+        self.0.portfolio(a).equity_total()
+    }
+    fn sweep_all(&self, a: AccountId, g: GroupId, i: InstId, v: hft_types::VenueId, r: OrderRef) -> u64 {
+        let x = &self.0;
+        let mut h = 0u64;
+        let mut mix = |k: u64| h = h.rotate_left(7) ^ k;
+        let now = x.now();
+        mix(now.tsc.0);
+        mix(x.bbo(i).update_id);
+        let b = x.book(i);
+        mix(b.status() as u64);
+        mix(b.upd_tsc().0);
+        mix(b.best(hft_types::Side::Buy).map_or(0, |l| l.px.0 as u64));
+        let mut lv = [hft_event::Level {
+            px: hft_types::Px(0),
+            qty: hft_types::Qty(0),
+        }; 4];
+        mix(b.levels(hft_types::Side::Sell, &mut lv) as u64);
+        mix(x.funding(i).interval_s.into());
+        mix(x.mark(i).0 as u64);
+        let p = x.portfolio(a);
+        mix(u64::from(p.account().0));
+        mix(p.venues().0);
+        mix(p.venue(v).equity.0 as u64);
+        mix(p.cash(v, hft_types::AssetId(2)).free.0 as u64);
+        mix(p.inventory(v, hft_types::AssetId(1)).total.0 as u64);
+        mix(p.inventory_of(v, g).0 as u64);
+        mix(p.perp(v, i).qty.0 as u64);
+        mix(p.margin(v).src_ens as u64);
+        mix(p.equity_total().0 as u64);
+        mix(x.group_pos(a, g).held_notional.0 as u64);
+        mix(x.legs(a, g).naked_qty.0 as u64);
+        mix(x.target(a, g).map_or(0, |t| u64::from(t.intent.tag)));
+        mix(x.order(r).map_or(0, |o| o.qty.0 as u64));
+        mix(x.inst(i).lot as u64);
+        mix(x.caps(v).dms_min_ms.into());
+        mix(x.fee(a, i).taker.0 as u64);
+        mix(x.mode(a, g) as u64);
+        mix(x.risk(a).conn_liveness_ms.into());
+        mix(x.risk_for(a, i).rr_max_cross.0 as u64);
+        mix(u64::from(x.venue_ready(a, v)));
+        mix(x.leverage(a, i).map_or(0, u64::from));
+        mix(u64::from(x.quote_ok(a, i)));
+        h
+    }
+    fn group_pos(&self, a: AccountId, g: GroupId) -> hft_strategy_sdk::GroupPosView {
+        *self.0.group_pos(a, g)
+    }
+    fn inventory(
+        &self,
+        a: AccountId,
+        v: hft_types::VenueId,
+        asset: hft_types::AssetId,
+    ) -> hft_strategy_sdk::InventoryView {
+        use hft_strategy_sdk::PortfolioRead;
+        self.0.portfolio(a).inventory(v, asset)
     }
 }
 
@@ -268,6 +397,14 @@ pub struct Script {
     pub layout_alt: bool,
     /// `model_on_params` calls: (strategy, params version).
     pub model_params: Vec<(StrategyId, i64)>,
+    /// `create`/`on_params` calls: (strategy, method, `thr` value).
+    pub fast_params: Vec<(StrategyId, &'static str, i64)>,
+    /// Results of `SubsBuilder::market` in `subscriptions`: (strategy, inst, gix, result).
+    pub subs_results: Vec<(StrategyId, InstId, u16, Result<(), hft_strategy_sdk::SubsErr>)>,
+    /// `restore` calls: (strategy, `desc_version` read).
+    pub restore_desc: Vec<(StrategyId, u16)>,
+    /// `model_restore_path` returns an error.
+    pub fail_restore_path: bool,
 }
 
 thread_local! {
@@ -394,7 +531,7 @@ macro_rules! test_set {
             }
             fn create(
                 i: StrategyInstance,
-                _: &P,
+                _p: &P,
                 g: &GroupTable,
                 _: &RefView<'_>,
             ) -> Result<TestInst, ParamError> {
@@ -409,6 +546,11 @@ macro_rules! test_set {
                         code: 9,
                     });
                 }
+                SCRIPT.with(|s| {
+                    s.borrow_mut()
+                        .fast_params
+                        .push((i.strategy, "create", _p_thr(_p)))
+                });
                 Ok(TestInst {
                     i,
                     n_events: 0,
@@ -470,10 +612,12 @@ macro_rules! test_set {
                     x.persist = persist;
                 });
             }
-            fn on_params(s: &mut TestInst, _: &P, g: &GroupTable, _: &RefView<'_>) -> Result<(), ParamError> {
+            fn on_params(s: &mut TestInst, p: &P, g: &GroupTable, _: &RefView<'_>) -> Result<(), ParamError> {
                 let fail = SCRIPT.with(|x| {
                     let mut x = x.borrow_mut();
                     x.calls.push((s.i.strategy, "on_params"));
+                    x.fast_params
+                        .push((s.i.strategy, "on_params", p.get(F_THR)));
                     x.fail_on_params
                 });
                 if fail {
@@ -487,7 +631,8 @@ macro_rules! test_set {
             }
             fn subscriptions(s: &TestInst, g: &GroupTable, out: &mut SubsBuilder<'_>) {
                 let script = SCRIPT.with(|x| {
-                    let x = x.borrow();
+                    let mut x = x.borrow_mut();
+                    x.calls.push((s.i.strategy, "subscriptions"));
                     (
                         x.subs
                             .iter()
@@ -507,7 +652,8 @@ macro_rules! test_set {
                 match script.0 {
                     Some(v) => {
                         for (i, gix, m, p) in v {
-                            let _ = out.market(i, gix, m, p);
+                            let r = out.market(i, gix, m, p);
+                            SCRIPT.with(|x| x.borrow_mut().subs_results.push((s.i.strategy, i, gix, r)));
                         }
                     }
                     None => {
@@ -529,6 +675,7 @@ macro_rules! test_set {
                 }
             }
             fn snapshot(s: &TestInst, w: &mut SnapshotWriter) {
+                SCRIPT.with(|x| x.borrow_mut().calls.push((s.i.strategy, "snapshot")));
                 w.put_u64(s.n_events);
             }
             fn restore(s: &mut TestInst, r: &mut SnapshotReader<'_>) -> Result<(), RestoreError> {
@@ -537,6 +684,11 @@ macro_rules! test_set {
                     .find(|d| d.kind_id == s.i.kind_id)
                     .map_or(0, |d| d.version);
                 let v = r.desc_version();
+                SCRIPT.with(|x| {
+                    let mut x = x.borrow_mut();
+                    x.calls.push((s.i.strategy, "restore"));
+                    x.restore_desc.push((s.i.strategy, v));
+                });
                 if v != cur && v + 1 != cur {
                     return Err(RestoreError::VersionUnsupported);
                 }
@@ -636,6 +788,7 @@ macro_rules! test_set {
                 }
             }
             fn model_restore(m: &mut TestModel, r: &mut SnapshotReader<'_>) -> Result<(), RestoreError> {
+                SCRIPT.with(|x| x.borrow_mut().calls.push((m.i.strategy, "model_restore")));
                 if SCRIPT.with(|x| x.borrow().fail_model_restore) {
                     return Err(RestoreError::VersionUnsupported);
                 }
@@ -646,7 +799,15 @@ macro_rules! test_set {
                 SCRIPT.with(|x| x.borrow().path_version)
             }
             fn model_snapshot_path(_: &TestModel, _: &mut SnapshotWriter) {}
-            fn model_restore_path(_: &mut TestModel, _: &mut SnapshotReader<'_>) -> Result<(), RestoreError> {
+            fn model_restore_path(m: &mut TestModel, _: &mut SnapshotReader<'_>) -> Result<(), RestoreError> {
+                let fail = SCRIPT.with(|x| {
+                    let mut x = x.borrow_mut();
+                    x.calls.push((m.i.strategy, "model_restore_path"));
+                    x.fail_restore_path
+                });
+                if fail {
+                    return Err(RestoreError::VersionUnsupported);
+                }
                 Ok(())
             }
             fn model_path_settle_ms(_: &P) -> u64 {

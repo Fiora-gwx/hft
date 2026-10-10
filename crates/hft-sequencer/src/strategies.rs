@@ -90,7 +90,7 @@ pub(crate) enum OpOwned {
     Cancel(CancelReq),
     Timer(TimerReq),
     CancelTimer(TimerId),
-    Halt { group: GroupId },
+    Halt { group: GroupId, reason: u16 },
 }
 
 /// The instance table.
@@ -776,7 +776,7 @@ pub(crate) fn apply_ctx<D: crate::Driver<S>, S: StrategySet>(
             Op::Cancel(c) => OpOwned::Cancel(*c),
             Op::Timer(t) => OpOwned::Timer(*t),
             Op::CancelTimer(id) => OpOwned::CancelTimer(id),
-            Op::Halt { group, .. } => OpOwned::Halt { group },
+            Op::Halt { group, reason } => OpOwned::Halt { group, reason },
         };
         inst.ops.push((h, o));
     }
@@ -789,7 +789,8 @@ pub(crate) fn apply_ctx<D: crate::Driver<S>, S: StrategySet>(
             OpOwned::Place(it) => {
                 e.trace
                     .rec("ctx.place", u64::from(strategy.0), u64::from(it.inst.0));
-                let r = crate::intents::place_strategy(e, inst, drv, strategy, &it, ro)?;
+                // `OrderDecision.intent_no` = the SDK intent number (`IntentHandle`) of this call.
+                let r = crate::intents::place_strategy(e, inst, drv, strategy, &it, ro, u32::from(h.0))?;
                 inst.outcomes.push((h, r));
                 crate::exec_glue::note_action(e, inst, drv, it.account, it.group)?;
             }
@@ -836,7 +837,7 @@ pub(crate) fn apply_ctx<D: crate::Driver<S>, S: StrategySet>(
                     e.strat_timers = e.strat_timers.saturating_sub(n as u32);
                 }
             }
-            OpOwned::Halt { group, .. } => {
+            OpOwned::Halt { group, reason } => {
                 e.trace
                     .rec("ctx.request_halt", u64::from(strategy.0), u64::from(group.0));
                 let rec = hft_event::CapRecord {
@@ -846,7 +847,9 @@ pub(crate) fn apply_ctx<D: crate::Driver<S>, S: StrategySet>(
                     _pad: [0; 5],
                     scope: hft_risk::mode::cell_scope(strategy, account, group),
                     set_seq: e.cur_seq,
-                    params: [0, 0],
+                    // The strategy's reason code (SDK `request_halt`): into the CapRecord and so
+                    // into its CapSet Note.
+                    params: [u64::from(reason), 0],
                 };
                 crate::mode_glue::apply_mode(e, inst, drv, ModeInput::Auto(rec))?;
             }
@@ -855,8 +858,9 @@ pub(crate) fn apply_ctx<D: crate::Driver<S>, S: StrategySet>(
     // Notes.
     let notes: Vec<NoteReq> = inst.notes.clone();
     for n in notes {
+        // `Note.code` = source << 24 | the strategy's code (low 24 bits, hft-event Note codes).
         let note = Note {
-            code: n.code,
+            code: ((NoteSource::Strategy as u32) << 24) | (n.code & 0xFF_FFFF),
             level: n.level,
             source: NoteSource::Strategy,
             strategy,

@@ -48,9 +48,6 @@ pub struct SimMatcher {
     /// (inst, base, quote, perp) of this venue.
     insts: Vec<(InstId, AssetId, AssetId, bool)>,
     out: VecDeque<VenueOut>,
-    /// External truth changes: perp positions by (account, inst), spot inventory by (account, asset).
-    ext_pos: BTreeMap<(u8, u32), i128>,
-    ext_inv: BTreeMap<(u8, u16), i128>,
     bbo: BTreeMap<u32, i64>,
     next_trade: u64,
     upd: u64,
@@ -192,8 +189,6 @@ impl Matcher for SimMatcher {
                 .map(|i| (i.id, i.base, i.quote, i.perp))
                 .collect(),
             out: VecDeque::new(),
-            ext_pos: BTreeMap::new(),
-            ext_inv: BTreeMap::new(),
             bbo: BTreeMap::new(),
             next_trade: 1,
             upd: 0,
@@ -283,8 +278,7 @@ impl Matcher for SimMatcher {
         let mut bases: Vec<AssetId> = Vec::new();
         for (i, base, _, perp) in &self.insts {
             if *perp {
-                let q = view.as_ref().map_or(0, |v| i128::from(v.position(*i).qty.0))
-                    + self.ext_pos.get(&(a.0, i.0)).copied().unwrap_or(0);
+                let q = view.as_ref().map_or(0, |v| i128::from(v.position(*i).qty.0));
                 if q != 0 {
                     t.positions.push((*i, q));
                 }
@@ -302,14 +296,6 @@ impl Matcher for SimMatcher {
                     t.inventory.push((asset, i128::from(total.0)));
                 } else {
                     t.balances.push((asset, i128::from(total.0)));
-                }
-            }
-        }
-        for ((acc, x), q) in &self.ext_inv {
-            if *acc == a.0 {
-                match t.inventory.iter_mut().find(|(k, _)| k.0 == *x) {
-                    Some(r) => r.1 += *q,
-                    None => t.inventory.push((AssetId(*x), *q)),
                 }
             }
         }
@@ -358,16 +344,14 @@ impl Matcher for SimMatcher {
         push: bool,
         now_ns: u64,
     ) {
-        let Some((_, base, _, perp)) = self.inst(inst) else {
+        if self.inst(inst).is_none() {
             return;
-        };
-        let s: i128 = if side == Side::Buy { 1 } else { -1 };
-        if perp {
-            *self.ext_pos.entry((a.0, inst.0)).or_default() += s * i128::from(qty);
-        } else {
-            *self.ext_inv.entry((a.0, base.0)).or_default() += s * i128::from(qty);
         }
         let px = self.bbo.get(&inst.0).copied().unwrap_or(0);
+        // The exchange truth settles it like a fill (position, cost, realised PnL, balances).
+        if let Some(ex) = self.ex.as_mut() {
+            ex.external_fill(a, inst, side, Qty(qty), Px(px));
+        }
         let trade_id = self.next_trade;
         self.next_trade += 1;
         if push {
@@ -396,9 +380,7 @@ impl Matcher for SimMatcher {
         }
     }
     fn state_hash(&self) -> u64 {
-        let base = self.ex.as_ref().map_or(0, |e| e.state_hash());
-        let s = format!("{:?}{:?}", self.ext_pos, self.ext_inv);
-        base ^ xxhash_rust::xxh3::xxh3_64(s.as_bytes())
+        self.ex.as_ref().map_or(0, |e| e.state_hash())
     }
 }
 

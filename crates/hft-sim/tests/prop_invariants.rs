@@ -68,13 +68,8 @@ impl Model {
             if e.0 != 0 && e.0.signum() != sgn {
                 let abs = e.0.abs();
                 let c = left.min(abs);
-                let num = e.1 * c;
-                let (qq, r) = (num.div_euclid(abs), num.rem_euclid(abs));
-                let removed = if 2 * r > abs || (2 * r == abs && qq % 2 != 0) {
-                    qq + 1
-                } else {
-                    qq
-                };
+                // Removed cost and the wallet amount round toward zero (README §7).
+                let removed = e.1 * c / abs;
                 let cp = c * p;
                 pnl = if e.0 > 0 { cp - removed } else { removed - cp };
                 e.1 -= removed;
@@ -88,7 +83,7 @@ impl Model {
                 e.1 += left * p;
                 e.0 += left * sgn;
             }
-            self.add(a, P2, USDT, pnl.div_euclid(1_000_000));
+            self.add(a, P2, USDT, pnl / 1_000_000);
         } else {
             let base = base_of(inst);
             match side {

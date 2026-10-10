@@ -144,3 +144,37 @@ fn seq_305_drain_cancel() {
         assert_eq!(cancels[0].1.target_slot, l.slot);
     }
 }
+
+#[test]
+fn seq_370_done_publishes_the_last_event() {
+    // Drain without cancel_resting and with nothing in flight: Done in the command's event, which
+    // emits nothing to a gw.
+    let mut h = steady();
+    let p0 = h.j().publishes;
+    let id = h.cmd_with(
+        "cli:ops",
+        ADMIN,
+        AccountId(0),
+        &ControlCmd::Drain {
+            cancel_resting: false,
+        },
+        |x| x.confirmed = 1,
+    );
+    let o = h.run();
+    assert!(matches!(o, hft_sequencer::StepOutcome::Done { .. }), "{o:?}");
+    assert_eq!(h.res(id).0, status::APPLIED);
+    assert_eq!(h.j().committed, h.j().len(), "SEQ-370: everything published");
+    assert!(h.j().publishes > p0);
+    let last = h
+        .j()
+        .published()
+        .filter(|r| r.kind == hft_event::EventKind::STATE_SNAPSHOT)
+        .last()
+        .cloned()
+        .expect("a published snapshot");
+    assert_eq!(
+        snap(&last).0.purpose,
+        hft_sequencer::snapshot::PURPOSE_DRAIN,
+        "SEQ-370: the Drain snapshot is published"
+    );
+}

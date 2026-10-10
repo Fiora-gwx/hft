@@ -19,6 +19,8 @@ pub mod scenarios;
 #[cfg(feature = "sdk-mock")]
 pub mod sdk_mock;
 pub mod seed;
+#[cfg(feature = "seq")]
+pub mod seq_rig;
 pub mod strategies;
 
 pub use alloc::{AllocScope, CountingAlloc};

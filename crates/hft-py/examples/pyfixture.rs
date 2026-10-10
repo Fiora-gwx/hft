@@ -10,6 +10,8 @@
 //! pyfixture ref <cold_root> <prod|sim> <out_dir>       RUST_REF dump: <out_dir>/<Kind>.jsonl
 //! pyfixture led <seed> <dir>                           J_LED20 seed: <dir>/script.txt, led<n>.bulk
 //! pyfixture ledger-ref <cold_root> <prod|sim> <from_seq> <out.json>   ledger RUST_REF
+//! pyfixture seq <ext | ff|sample|fills <row>> <dir>      hot-process fixtures (pyfixture/seq.rs)
+//! pyfixture seq-check <cold_root> <prod|sim> <dir>      the written journal = the rig's journal
 //!
 //! Exit codes: 0 success, 1 usage or I/O error, 2 reference check failed.
 
@@ -18,6 +20,9 @@
     clippy::disallowed_macros,
     clippy::disallowed_methods
 )]
+
+#[path = "pyfixture/seq.rs"]
+mod seq;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -113,6 +118,11 @@ fn raw_str(raw: i64, exp: i32) -> String {
 /// 102 BTC/P2, 202 ETH/P2 (ids dense from 1: the others are delisted fillers), strategy instance
 /// `alpha` (1); prod: account 1 `bn-1` (Live), sim: account 1 `sim-a` (Sim).
 pub fn refdata(sim: bool, version: u64) -> Vec<u8> {
+    refdata_fs(sim, version, FundingSettleKind::PerSymbolPush, 20)
+}
+
+/// `RD_PY` with the funding settlement kind of `P2` and the L2 depth of the insts given.
+pub fn refdata_fs(sim: bool, version: u64, p2_funding: FundingSettleKind, l2_depth: u16) -> Vec<u8> {
     let mut b = RdbBuilder::new(version);
     b.created_utc_ns(D);
     for (id, name, class, px, qty, dust) in [
@@ -143,7 +153,7 @@ pub fn refdata(sim: bool, version: u64) -> Vec<u8> {
     pc.fee_asset_rule = FeeAssetRule::Quote;
     pc.required_position_mode = PositionMode::OneWay;
     pc.required_margin_mode = MarginMode::Cross;
-    pc.funding_settle = FundingSettleKind::PerSymbolPush;
+    pc.funding_settle = p2_funding;
     pc.margin_data = MarginData::Poll { interval_ms: 2_000 };
     pc.reduce_only = true;
     b.caps(pc);
@@ -191,7 +201,7 @@ pub fn refdata(sim: bool, version: u64) -> Vec<u8> {
             max_qty: Qty(1_000_000_000_000),
             min_notional: Notional(5_000_000),
             book_window: 64,
-            l2_depth: 20,
+            l2_depth,
             crossed_tolerance: 0,
             tick_str: raw_str(1, px_exp),
             lot_str: raw_str(lot, qty_exp),
@@ -1254,7 +1264,7 @@ fn snapshot_body(
 ) -> Vec<u8> {
     let mut w = hft_strategy_sdk::SnapshotWriter::new(64 << 20);
     l.snapshot(&mut w);
-    w.begin_section(hft_ledger::OMS_SECTION_SLOTS, 1);
+    w.begin_section(hft_ledger::OMS_SECTION_SLOTS, 2);
     for o in orders {
         let mut row = vec![0u8; hft_ledger::OMS_SLOT_ROW_LEN];
         put(&mut row, 1, if o.buy { 1 } else { 2 }, 1);
@@ -1274,6 +1284,7 @@ fn snapshot_body(
         let n = i128::from(o.avg) * i128::from(o.cum);
         put(&mut row, 64, n as u64, 8);
         put(&mut row, 72, (n >> 64) as u64, 8);
+        put(&mut row, 160, o.cum as u64, 8); // SlotExt.fee_cum
         w.put_bytes(&row);
         w.add_rows(1);
     }
@@ -1753,6 +1764,20 @@ fn ledger_ref(cold_root: &Path, instance: &str, from_seq: u64, out: &Path) {
         die("no ledger start point")
     };
     let led = l.ledger();
+    let (pos, inv, port) = views_json(led, &rdx);
+    let mut w = hft_strategy_sdk::SnapshotWriter::new(64 << 20);
+    led.snapshot(&mut w);
+    let doc = json!({"events": events, "positions": pos, "inventory": inv, "portfolio": port,
+        "snapshot_hex": hex(w.as_bytes())});
+    std::fs::write(out, doc.to_string()).unwrap_or_else(|e| die(&e.to_string()));
+}
+
+/// `positions()`, `inventory()` and `portfolio()` of account 1 as the hft-py tests compare them
+/// (`RUST_REF` and the hot ledger of the `seq` fixtures).
+pub fn views_json(
+    led: &hft_ledger::Ledger,
+    rdx: &hft_refdata::RefData,
+) -> (Vec<Value>, Vec<Value>, Vec<Value>) {
     let mut pos = Vec::new();
     for v in [S1, P2] {
         for i in rdx.insts_of_venue(v) {
@@ -1777,11 +1802,7 @@ fn ledger_ref(cold_root: &Path, instance: &str, from_seq: u64, out: &Path) {
         port.push(json!({"venue": s.venue.0, "flags": s.flags, "equity": s.equity.0, "quote_cash": s.quote_cash.0,
             "spot_value": s.spot_value.0, "perp_upnl": s.perp_upnl.0, "margin_balance": s.margin_balance.0, "as_of_ens": s.as_of_ens}));
     }
-    let mut w = hft_strategy_sdk::SnapshotWriter::new(64 << 20);
-    led.snapshot(&mut w);
-    let doc = json!({"events": events, "positions": pos, "inventory": inv, "portfolio": port,
-        "snapshot_hex": hex(w.as_bytes())});
-    std::fs::write(out, doc.to_string()).unwrap_or_else(|e| die(&e.to_string()));
+    (pos, inv, port)
 }
 
 fn main() {
@@ -1814,6 +1835,8 @@ fn main() {
             arg(3).parse().unwrap_or_else(|_| die("from_seq")),
             &PathBuf::from(arg(4)),
         ),
+        "seq" => seq::main(&a[1..]),
+        "seq-check" => seq::check(&PathBuf::from(arg(1)), arg(2), &PathBuf::from(arg(3))),
         other => die(&format!("unknown command {other}")),
     }
 }

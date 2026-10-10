@@ -11,6 +11,7 @@ mod auth;
 mod client;
 mod common;
 mod config;
+mod e2e;
 mod expiry;
 mod generic;
 mod order;

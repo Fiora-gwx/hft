@@ -146,17 +146,52 @@ fn scan_peak(path: &Path, batch_rows: i64) -> (u64, u64) {
     (peak.load(Ordering::Relaxed).saturating_sub(base), width)
 }
 
+/// Each measurement starts with the same allocator history. Repeated scans in the parent can
+/// leave different amounts of resident heap behind, changing the baseline independently of
+/// the number of rows being read.
+fn isolated_peak(warmup: &Path, path: &Path, batch_rows: i64) -> (u64, u64) {
+    let out = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "py_161_batch_memory_bound", "--nocapture"])
+        .env("HFT_PY_MEMORY_WARMUP", warmup)
+        .env("HFT_PY_MEMORY_SCAN", path)
+        .env("HFT_PY_MEMORY_BATCH", batch_rows.to_string())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "memory child failed: {}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let values = stdout
+        .lines()
+        .find_map(|s| s.strip_prefix("HFT_PY_MEMORY_RESULT "))
+        .unwrap();
+    let mut values = values.split_whitespace();
+    (
+        values.next().unwrap().parse().unwrap(),
+        values.next().unwrap().parse().unwrap(),
+    )
+}
+
 #[test]
 fn py_161_batch_memory_bound() {
+    if let Some(path) = std::env::var_os("HFT_PY_MEMORY_SCAN") {
+        let warmup = PathBuf::from(std::env::var_os("HFT_PY_MEMORY_WARMUP").unwrap());
+        let batch = std::env::var("HFT_PY_MEMORY_BATCH").unwrap().parse().unwrap();
+        let _ = scan_peak(&warmup, 100_000);
+        let (peak, width) = scan_peak(&PathBuf::from(path), batch);
+        println!("HFT_PY_MEMORY_RESULT {peak} {width}");
+        return;
+    }
     let j1 = journal(1_000_000, "1m");
     let j2 = journal(2_000_000, "2m");
-    // Warm-up pass: glibc raises its mmap threshold after the first large free, so the first scan
-    // of a process moves later batches from mmap to the heap; only the steady state is compared.
-    let _ = scan_peak(&j1, 100_000);
-    // The sampler can miss the short reallocation peaks: the largest of three scans is used.
+    // Every child first warms up on the same 1M-row journal. The sampler can miss the short
+    // reallocation peaks, so use the largest of three independent measurements per row.
     let peak3 = |p: &Path, rows: i64| {
         (0..3)
-            .map(|_| scan_peak(p, rows))
+            .map(|_| isolated_peak(&j1, p, rows))
             .fold((0, 0), |a, b| (a.0.max(b.0), b.1))
     };
     let (p1, w) = peak3(&j1, 100_000);
@@ -167,7 +202,7 @@ fn py_161_batch_memory_bound() {
     let diff = p1.abs_diff(p2) as f64 / p1.max(1) as f64;
     eprintln!("PY-161: peaks {p1} {p2}, row width {w}");
     assert!(diff < 0.05, "PY-161.2: {p1} vs {p2}");
-    let (p3, _) = scan_peak(&j1, 1_000_000);
+    let (p3, _) = isolated_peak(&j1, &j1, 1_000_000);
     let bound3 = 1_000_000 * w * 2;
     assert!(p3 <= bound3, "PY-161.3: peak {p3} > {bound3}");
     for p in [j1, j2] {

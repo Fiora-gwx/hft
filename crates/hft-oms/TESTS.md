@@ -29,7 +29,7 @@ spec: README.md
 | 延迟样本 | OMS-012, OMS-071, OMS-080–OMS-089 |
 | REPORT_DECODE | OMS-090, OMS-091 |
 | 恢复后的 gw 映射 | OMS-092, OMS-093 |
-| 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253 |
+| 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460 |
 | 成交净量(B4) | OMS-067, OMS-120–OMS-124, OMS-184, OMS-404 |
 | Unknown 收敛流程 | OMS-032, OMS-065, OMS-066, OMS-068, OMS-070, OMS-073, OMS-089, OMS-130–OMS-154, OMS-400, OMS-402, OMS-420 |
 | 墓碑与迟到成交(C1) | OMS-013, OMS-148, OMS-160–OMS-164, OMS-287, OMS-322 |
@@ -52,7 +52,7 @@ spec: README.md
 | 链上槽(optional) | 不适用:里程碑外 |
 | 每次迁移产生的输出 | OMS-040, OMS-055, OMS-057, OMS-059, OMS-062, OMS-105, OMS-113, OMS-130, OMS-160, OMS-162, OMS-193, OMS-265, OMS-281, OMS-315, OMS-320, OMS-343 |
 | Note 码表 | OMS-023, OMS-025, OMS-026, OMS-114, OMS-145, OMS-152, OMS-222, OMS-230, OMS-267 |
-| 快照行格式(节 2、3、12;草案,实现时以代码与编译期断言为准) | OMS-017, OMS-086, OMS-274, OMS-333, OMS-360–OMS-366, OMS-389, OMS-390 |
+| 快照行格式(节 2、3、12;草案,实现时以代码与编译期断言为准) | OMS-017, OMS-086, OMS-274, OMS-333, OMS-360–OMS-366, OMS-389, OMS-390, OMS-461 |
 | 规划源文件 | 不适用:非规范 |
 | 延迟与资源契约 | OMS-006, OMS-440–OMS-455 |
 | 测试与验收 | 不适用:非规范 |
@@ -217,7 +217,7 @@ spec: README.md
   - 偏移:`state` 0、`prev_state` 3、`oflags` 4、`gen` 8、`slot_id` 12、`inst` 16、`query_count` 21、`epoch` 22、`group` 24、`link_id` 28、`qty` 32、`filled` 40、`px` 48、`exch_order_id` 56、`filled_notional` 64、`pending_px` 80、`fee_accum` 96、`fee_asset` 104、`sflags` 106、`reject_code` 108、`t_state` 112、`seq_last` 120
 - 实现:`crates/hft-oms/tests/layout.rs::oms_010_order_slot_layout`
 
-### OMS-011 SlotExt 大小 32 B 与关键偏移
+### OMS-011 SlotExt 大小 64 B 与关键偏移
 
 - 规则:[数据布局](README.md#数据布局草案实现时以代码与编译期断言为准)
 - 级别:unit
@@ -226,7 +226,7 @@ spec: README.md
 - 步骤:
   1. 读取 `size_of::<SlotExt>()`、`align_of` 与字段偏移
 - 期望:
-  - 大小 32、对齐 32;`net_filled` 0、`tag` 8、`leg_ix` 12、`role` 13、`origin` 14、`class` 15、`lev_x100` 16、`max_rest_ms` 20
+  - 大小 64、对齐 32;`net_filled` 0、`tag` 8、`leg_ix` 12、`role` 13、`origin` 14、`class` 15、`lev_x100` 16、`max_rest_ms` 20、`fee_cum` 32
 - 实现:`crates/hft-oms/tests/layout.rs::oms_011_slot_ext_layout`
 
 ### OMS-012 SlotStamps 大小 80 B 与关键偏移
@@ -302,7 +302,7 @@ spec: README.md
 | OMS-017.1 | `TableRow` | `size_of = 32`,`smoke_slot` 偏移 28 |
 | OMS-017.2 | `LinkRowHdr` | `size_of = 8` |
 | OMS-017.3 | `OmsCountersHdr` | `size_of = 16`,`resume_hold_until` 偏移 8 |
-| OMS-017.4 | 节 2 行 | `SLOT_ROW_LEN = 160`,写出 160 字节(128 + 32,不补到 192) |
+| OMS-017.4 | 节 2 行 | `SLOT_ROW_LEN = 192`,写出 192 字节(128 + 64);`SectionHdr.version = 2` |
 | OMS-017.5 | 节 12 `Link` 行体 | 80 字节 |
 | OMS-017.6 | 节 12 `Plan` 行体 | 64 字节 |
 | OMS-017.7 | 节 12 `Leg` 行体 | 200 字节 |
@@ -3621,12 +3621,12 @@ spec: README.md
 
 | 行 | 节 | 期望 |
 |---|---|---|
-| OMS-361.1 | 2 | `count = 40`;只含非 `Free` 槽;按 `(venue_ix, account_ix, slot_id)` 升序;每行 160 字节 = `OrderSlot` 128 ‖ `SlotExt` 32 |
+| OMS-361.1 | 2 | `count = 40`;只含非 `Free` 槽;按 `(venue_ix, account_ix, slot_id)` 升序;每行 192 字节 = `OrderSlot` 128 ‖ `SlotExt` 64 |
 | OMS-361.2 | 3 | 首行 `OmsCountersHdr{engine_epoch 7, n_tables 5(夹具的 (venue, account) 表数), resume_hold_until}`;每表一行 `TableRow`(键升序),其后 `free`(FIFO,队头在前)、`gens`(含 `Free` 槽)、`foreign`、`ext_held`(FIFO)、`decode_fails` 与 7 字节零,补零到 8 字节 |
 | OMS-361.3 | 12 | 行顺序 `Link*` → `Plan*` → `Leg*` → `Tomb*` → `Out*`;`Done` 链接不写;`Plan` 只写被活动链接引用的;全零 `LegState` 不写;过期墓碑不写;`Out` 行按 FIFO 顺序、不排序 |
 | OMS-361.4 | 12 | 每行 `LinkRowHdr{kind, len}`:`len` 依次为 80、64、200、64、32 |
 
-### OMS-362 行版本:写 1,读到更高版本拒读
+### OMS-362 行版本:节 2 写 2、节 3 与 12 写 1,读到更高版本拒读
 
 - 规则:[快照行格式](README.md#快照行格式节-2312草案实现时以代码与编译期断言为准)
 - 级别:table
@@ -3636,8 +3636,8 @@ spec: README.md
 
 | 行 | 修改 | 期望 |
 |---|---|---|
-| OMS-362.1 | 不改 | 节 2、3、12 的 `version` 均为 1;`restore` 返回 `Ok` |
-| OMS-362.2 | 节 2 `version = 2` | `Err(RestoreError)` |
+| OMS-362.1 | 不改 | 节 2 的 `version` 为 2,节 3、12 为 1;`restore` 返回 `Ok` |
+| OMS-362.2 | 节 2 `version = 3` | `Err(RestoreError)` |
 | OMS-362.3 | 节 3 `version = 2` | `Err(RestoreError)` |
 | OMS-362.4 | 节 12 `version = 2` | `Err(RestoreError)` |
 
@@ -4116,6 +4116,36 @@ spec: README.md
 | OMS-459.5 | 起始序列改为:t = 0 成交 0.005,第二腿 t = 100 被拒;t = 2000 第一腿再成交 0.005;重试单持续被拒,失败处理在 t = 3001 | `first_fill_tsc` 保持 0 ms(t = 2000 的成交不改起点);t = 3001 `Broken{Deadline}` |
 | OMS-459.6 | 同 .5,但 t = 2500 第二腿重试单成交 0.010(未对冲量回到 0) | `first_fill_tsc = 0`;t = 3001 无 `Broken` |
 | OMS-459.3 | 无新成交,t = 10 000 `on_sweep` | 无 `Broken`(`owed = 0` 且 `hedge_open = 0`) |
+
+### OMS-460 数量已由非成交回报带来的成交回报只入账费用,重复回报不入账
+
+- 规则:[回报匹配与成交增量](README.md#回报匹配与成交增量)
+- 级别:unit
+- 里程碑:M2
+- 前置:P0;a1@VS 买 X 0.01 @ 60 000(GTC)已 Ack;发出撤单(`PendingCancel`)后收到 `CancelReject{detail = GONE, cum_filled = 0.01, avg_px = 60 000, fee = 0}`:槽 → `Filled`,`FillOut` 一条、`fee = 0`
+- 步骤:
+  1. 投递 `Fill{cum_filled = 0.01, fee = 1000, fee_asset = USDT}`
+  2. 再投递同一条 `Fill`
+  3. 另一张同样的单走到同一状态后,依次投递 `PartialFill{cum_filled = 0.004, fee = 400}`、同一条 `PartialFill`、`Fill{cum_filled = 0.01, fee = 600}`
+- 期望:
+  - 步骤 1:无 `FillOut`;`FeeOut` 一条(inst X、`fee = 1000`、`fee_asset = USDT`);`SlotExt.fee_cum = 0.01`;`fee_accum = 1000`
+  - 步骤 2:无 `FillOut`、无 `FeeOut`
+  - 步骤 3:第一条 `PartialFill` 产出 `FeeOut{fee = 400}`;重复的那条不产出;`Fill` 产出 `FeeOut{fee = 600}`;`fee_accum = 1000`
+- 实现:`crates/hft-oms/tests/matching.rs::oms_460_fee_of_fill_after_non_fill_report`
+
+### OMS-461 行版本 1 的节 2 行恢复时 fee_cum 取 filled
+
+- 规则:[快照行格式](README.md#快照行格式节-2312草案实现时以代码与编译期断言为准)
+- 级别:unit
+- 前置:P0;a1@VS 买 X 0.01 已 Ack、成交 0.004(`fee_cum = 0.004`);快照后把节 2 改写为行版本 1(每行只留前 160 字节,`SectionHdr.version = 1`、`len` 按 160 B 行)
+- 里程碑:M2
+- 步骤:
+  1. 以改写后的快照 `restore`
+  2. 以原快照(行版本 2)`restore`
+- 期望:
+  - 步骤 1 成功;该槽 `filled = 0.004`、`SlotExt.fee_cum = 0.004`,其余 `SlotExt` 字段与写出时相同
+  - 步骤 2 成功;`fee_cum = 0.004`
+- 实现:`crates/hft-oms/tests/snapshot.rs::oms_461_restore_slot_rows_v1`
 
 ## 验收
 

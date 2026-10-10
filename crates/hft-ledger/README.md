@@ -293,11 +293,13 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 
 `FillDelta`/`FeeDelta` 不写 journal(它们是 OMS 处理 `OrderEvent` 的同一事件内的派生量),冷读者按下表从 journal 记录重建同样的调用,得到与引擎相同的持仓、库存与余额:
 
+恢复 OMS 节 2 时只接受行版本 1 与 2;版本 1 以槽的 `filled` 初始化费用水位,版本 2 读取 `fee_cum`,其他版本返回 `VersionUnsupported`。
+
 | 记录 | 处理 |
 |---|---|
 | `Note{EpochStart}` | 记当前 epoch(`v[0]`) |
 | `OrderDecision{action = New}`(Output,`reject = 0` 且未置 `SHADOW`) | 槽映射登记 `(epoch, slot, gen) → (account, venue, inst, side, group)`;容量 = Σ 各表 `slots` × (`tombstone_gens` + 1)(OMS 配置),满时淘汰最早登记的一项(`map_evicted` +1) |
-| `OrderEvent`(Input) | 按 `(ev.epoch, ev.slot, ev.gen)` 查映射;`cum_filled` 大于该槽已记累计量时,增量 = `cum_filled − 已记`,增量名义 = `avg_px × cum_filled − 已记名义`,手续费按 [hft-oms 回报匹配与成交增量](../hft-oms/README.md#回报匹配与成交增量) 与 [成交净量](../hft-oms/README.md#成交净量b4) 的同一口径,构造 `FillDelta`/`FeeDelta` 调 `apply_fill`/`apply_fee`;`cum_filled` 不增(重复、乱序)→ 不入账;映射缺失 → `unmapped_fills` +1,不入账(这类成交由 OMS 的 `Note{OmsForeignFill}` 另行给出,见下行) |
+| `OrderEvent`(Input) | 按 `(ev.epoch, ev.slot, ev.gen)` 查映射;`cum_filled` 大于该槽已记累计量时,增量 = `cum_filled − 已记`,增量名义 = `avg_px × cum_filled − 已记名义`,手续费按 [hft-oms 回报匹配与成交增量](../hft-oms/README.md#回报匹配与成交增量) 与 [成交净量](../hft-oms/README.md#成交净量b4) 的同一口径,构造 `FillDelta`/`FeeDelta`(`seq` = 该 `OrderEvent` 的 seq,与引擎由 OMS `FillOut`/`FeeOut` 带出的值相同;group 轮次的 `open_seq` 取它)调 `apply_fill`/`apply_fee`;`cum_filled` 不增(重复、乱序)→ 不入账,例外:`PartialFill`/`Fill` 的 `cum_filled` 大于该槽此前成交类回报的最大 `cum_filled`(数量已由非成交回报带来,hft-oms 回报匹配与成交增量第 9 条)→ 只按 `FeeDelta` 入账其费用;映射缺失 → `unmapped_fills` +1,不入账(这类成交由 OMS 的 `Note{OmsForeignFill}` 另行给出,见下行) |
 | `ExternalFill`(Input) | `apply_external(e, false, t)` |
 | `ReconcileReport` 中带 `AUTO_RECON` 注记的 `AUTO_EXTERNAL` 条目 | "外部成交"第 6 步 |
 | `Note{OmsForeignFill}` | "外部成交"第 7 步(`external_from_oms_note`) |

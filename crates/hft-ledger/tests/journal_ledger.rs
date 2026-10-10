@@ -1,10 +1,11 @@
-//! LED-263–LED-265: `JournalLedger` slot map, cumulative-fill dedup, unmapped fills.
+//! LED-263–LED-265, LED-271: `JournalLedger` slot map, cumulative-fill dedup, unmapped fills,
+//! fees of fill reports whose quantity came earlier.
 
 use crate::common;
 
 use common::journal::*;
 use common::*;
-use hft_event::OrderEventKind::{self, Ack, Fill, PartialFill};
+use hft_event::OrderEventKind::{self, Ack, CancelReject, Fill, PartialFill};
 use hft_ledger::{JournalLedger, Ledger};
 use hft_types::{ASSET_NONE, Px, Qty};
 
@@ -89,4 +90,74 @@ fn led_265_unmapped_and_foreign_note() {
     h.on_run_start(T);
     h.apply_external(&Ledger::external_from_oms_note(&n).expect("note"), false, T);
     assert_snap_eq(j.ledger(), &h);
+}
+
+#[test]
+fn led_271_fee_of_fill_after_non_fill_report() {
+    let mut j = with_decision();
+    feed(&mut j, &ev(CancelReject, 5, 1, "0.01", px("60000")), true);
+    assert_eq!(j.ledger().pos(A1, BTC_S1).qty, btc("0.01"));
+    assert_eq!(cash(j.ledger(), A1, S1, USDT).total, usdt("99400"));
+    let mut f = ev(Fill, 5, 1, "0.01", px("60000"));
+    f.fee = usdt("0.5");
+    f.fee_asset = USDT;
+    feed(&mut j, &f, true);
+    assert_eq!(j.ledger().pos(A1, BTC_S1).qty, btc("0.01"));
+    assert_eq!(cash(j.ledger(), A1, S1, USDT).total, usdt("99399.5"));
+    feed(&mut j, &f, true);
+    assert_eq!(cash(j.ledger(), A1, S1, USDT).total, usdt("99399.5"));
+}
+
+#[test]
+fn led_272_slot_snapshot_fee_watermark_versions() {
+    use hft_ledger::{OMS_SECTION_SLOTS, OMS_SLOT_ROW_LEN};
+    use hft_strategy_sdk::{RestoreError, SnapshotReader, SnapshotWriter};
+
+    let mut before = with_decision();
+    feed(&mut before, &ev(CancelReject, 5, 1, "0.01", px("60000")), true);
+    let mut fill = ev(Fill, 5, 1, "0.01", px("60000"));
+    fill.fee = usdt("0.5");
+    fill.fee_asset = USDT;
+    // A single OMS row using the section-2 contract. v1 has no fee watermark and assumes the
+    // filled quantity's fee is already booked; v2 can preserve a still-outstanding fee.
+    for (version, fee_cum, cash_after) in [
+        (1, 0, "99400"),
+        (2, 0, "99399.5"),
+        (2, btc("0.01").0, "99400"),
+        (3, 0, "99400"),
+    ] {
+        let mut w = SnapshotWriter::new(64 << 20);
+        before.ledger().snapshot(&mut w);
+        w.begin_section(OMS_SECTION_SLOTS, version);
+        let mut row = vec![0u8; if version == 1 { 160 } else { OMS_SLOT_ROW_LEN }];
+        row[6] = S1.0;
+        row[7] = A1.0;
+        row[8..12].copy_from_slice(&1u32.to_le_bytes());
+        row[12..16].copy_from_slice(&5u32.to_le_bytes());
+        row[16..20].copy_from_slice(&BTC_S1.0.to_le_bytes());
+        row[1] = Buy as u8;
+        row[22..24].copy_from_slice(&7u16.to_le_bytes());
+        row[24..28].copy_from_slice(&G1.0.to_le_bytes());
+        row[40..48].copy_from_slice(&btc("0.01").0.to_le_bytes());
+        if version != 1 {
+            row[160..168].copy_from_slice(&fee_cum.to_le_bytes());
+        }
+        w.put_bytes(&row);
+        w.add_rows(1);
+        w.end_section();
+        assert!(w.status().is_ok());
+        let mut r = SnapshotReader::new(w.as_bytes());
+        let restored = JournalLedger::from_snapshot(&mut r, rd_lf(), &cfg_lf(), &caps_lf());
+        if version == 3 {
+            assert!(matches!(restored, Err(RestoreError::VersionUnsupported)));
+            continue;
+        }
+        let mut j = restored.unwrap();
+        clock(&mut j, T);
+        feed(&mut j, &fill, true);
+        assert_eq!(cash(j.ledger(), A1, S1, USDT).total, usdt(cash_after));
+        feed(&mut j, &fill, true);
+        assert_eq!(cash(j.ledger(), A1, S1, USDT).total, usdt(cash_after));
+        assert_eq!(j.ledger().pos(A1, BTC_S1).qty, btc("0.01"));
+    }
 }

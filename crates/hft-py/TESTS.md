@@ -37,12 +37,14 @@ spec: README.md
 **共用夹具**(用例的 `前置` 引用这里的名字;用例依赖的参数值仍在 `前置` 里写出):
 
 - **时间与校准**:`D = 2026-10-01T00:00:00Z` = `1_790_812_800_000_000_000` ns。全部 journal 夹具的段头 `tsc_hz_milli = 3_000_000_000_000`(3 GHz),校准对 `calib_tsc = 0` ↔ `calib_realtime_ns = D`,每秒一条与该校准对一致(无漂移)的 `ClockStatus`;因此记录头 `tsc = 3 × (t − D)` 的记录 `proc_ns = t`。下文"时刻 t 的记录"即按此写记录头。
-- **夹具的生成**:下列 journal 夹具都在 pytest 会话中生成(不入库):`examples/pyfixture.rs` 产出 refdata/引擎/策略参数 blob、`TW` 脚本与批量记录文件,`TW` 写出 journal;`RUST_REF` 的读出同样由它给出(`ref`、`ledger-ref` 子命令)。`TW` 与它由 `HFT_PY_TOOLS` 指定,否则测试先 `cargo build` 这两个 example。热目录在 `/dev/shm` 下;大于 8 MiB 的段要求 `RLIMIT_MEMLOCK` 不受限(热段 `mlock`)。
+- **夹具的生成**:下列 journal 夹具都在 pytest 会话中生成(不入库):`examples/pyfixture.rs` 产出 refdata/引擎/策略参数 blob、`TW` 脚本与批量记录文件,`TW` 写出 journal;`RUST_REF` 的读出同样由它给出(`ref`、`ledger-ref` 子命令);热进程夹具(`J_EXT`、`F_FF`、`F_SAMPLE`、`F_FILLS`)由它的 `seq` 子命令以真实 hft-sequencer 生成(见 `SEQ_FX`)。`TW` 与它由 `HFT_PY_TOOLS` 指定,否则测试先 `cargo build` 这两个 example。热目录在 `/dev/shm` 下;大于 8 MiB 的段要求 `RLIMIT_MEMLOCK` 不受限(热段 `mlock`)。
 - **`RD_PY`**(refdata,经 hft-refdata 的 `RdbBuilder` 生成,写进各夹具的引导块):资产 `BTC`(`AssetId(1)`,`px_exp = −2`,`qty_exp = −8`)、`ETH`(`AssetId(2)`,`px_exp = −2`,`qty_exp = −6`)、`USDT`(`AssetId(3)`,`px_exp = −4`,`qty_exp = −6`);venue `S1`(`VenueId(2)` = `BINANCE_SPOT`,现货)、`P2`(`VenueId(5)` = `OKX_SWAP`,USDT 永续;`VenueId` 由 hft-types 常量表按名字固定);inst `101` = BTC/S1、`102` = BTC/P2、`202` = ETH/P2(inst id 须从 1 起稠密,其余 id 为 `Delisted` 的占位现货 inst);策略实例 `alpha`(`StrategyId(1)`);prod 实例的 refdata 只有账户 `A1`(`AccountId(1)`,label `bn-1`,Live,venues {S1, P2}),sim 实例的 refdata 只有账户 `A9`(`AccountId(1)`(账户 id 同样稠密),label `sim-a`,Sim,venues {S1, P2})。
 - **`J_MD`**(`pyfixture md prod 60000`,prod 实例 seq journal,1 个 64 MiB 的已封存段,只有冷副本;引导块含 `RD_PY` 与一条 `HostProfile`;每整秒一条 `ClockStatus`):引导块之后,inst 101 的 `Bbo` 在 `t_k = D + 10 s + k × 10 ms`(k = 0…59 999),inst 102 的 `Bbo` 在 `t_k + 5 ms`;每条 `Bbo` 的 `ex_ts_ns = t − 2 ms`,`hw_rx_ns = t − 1 ms`(k 为偶数)或 0(k 为奇数,无 HW 戳);inst 101 的 `Trade` 在 `D + 10 s + j × 1 s`(j = 0…599);账户 A1 的 `OrderDecision` 100 条与 `OrderEvent` 100 条(`D + 20 s` 起每 1 s 一对)。`Bbo` 价格:inst 101 bid = 60 000.00(raw 6 000 000,指数 −2)、ask = 60 000.01,数量 0.5(raw 50 000 000,指数 −8)。
 - **`J_SIM`**(`pyfixture md sim 1000`):sim 实例 seq journal,结构同 `J_MD`,只含账户 A9,`Bbo` 每 inst 1 000 条(k = 0…999)。
 - **`J_ALL`**(`pyfixture all`):prod 实例 seq journal,2 个已封存段;`hft_event::KINDS` 中允许出现在 seq journal 的每个非 optional kind 各 ≥ 3 条(写者自己的 `SegmentRoll` 除外;变长 kind 至少一条带非空尾部,`MarginReport` 另有一条 0 个条目);一条 `ControlCmd` 拆成 3 段(`PART`);`Bbo` 覆盖 inst 101、102、202,`OrderEvent` 属账户 A1 且 `fee_asset = USDT`(`USDT` 的 `qty_exp = −6`);期望值目录 `<kind>.jsonl` 由 `pyfixture ref`(Rust `JournalReader` + 按 hft-event 字段表的读出)生成,其中 `Bbo`、`OrderDecision`、`ExternalFill`、`MarginReport`、`ConfigBlob` 五个 kind 的读出另与 hft-event 的类型化解码逐字段比对(不一致即生成失败)。
-- **`J_EXT`**(`fixtures/replay/hft-py/ext/prod/seq/`,账户 A1,初始状态同 LED-055:`G1` 的永续腿 `BTC/P2` 多 10.0):事件 E1 = Input `ReconcileReport{report_id = 4242}` + `Note{ExternalFill}`(`aflags = AUTO_RECON`,与 LED-076 步骤 1 的注记相同)+ `EVENT_END`;事件 E2 = Input `ExternalFill{Adl, Sell, BTC/P2, 1.0, trade_id 77}`(补推的同向 ADL)+ 热进程写出的 `Note{LedgerAutoHeldOffset}` 与 `Note{ExternalFill}`;事件 E3 = Input `OrderEvent`(`StaleGen` 带成交)+ `Note{OmsForeignFill}`(LED-077.1 的字段:`path = 2`、`trade_id = 0`、`qty = 0.3`、`px = 60 100`、`fee = 0.09`、`exch_order_id = 99`、`cum_filled = 0.5`);事件 E4 = Input `ExternalFill{Liquidation, Buy, BTC/P2, 0.4, trade_id 910}` + `Note{ExternalFill}`(`aflags = 0`)。夹具由 testkit 的 `SeqRig` 生成,同时保存热进程在每个事件边界后的 ledger 节 1、13、22 字节(`expected/ledger-<event>.bin`)。
+- **`SEQ_FX`**(热进程夹具的共同做法):`pyfixture seq <名> [<行>] <dir>` 以 hft-testkit 的 [`SeqRig`](../hft-testkit/README.md#10-seqrig)(真实 `Sequencer` 跑在实盘驱动上,内存环、手动 TSC、`MemJournal`)空启动:refdata = `RD_PY` prod(各 inst `l2_depth = 0`,`F_SAMPLE` 第 4 行另把 `P2` 的 `funding_settle` 设为 `BalanceOnlyPush`),`alpha` 为夹具里的脚本策略(kind 0xFF01,group `G1` = 101/S1 + 102/P2、`G2` = 202/P2;它在下一条 `Bbo` 上按脚本下 GTC 限价单),`epoch = 3`,ledger 配置为默认值但 `funding_recon_lag_ms = 1 000`,风控限额不构成约束;TSC 与校准对按"时间与校准"(引导块在 `D`),之后每条 Input 时刻 +1 ms。启动后先交出 hft-core 环境在启动时产生的同一组 Input(连接 Up、`ClockOk`、账户配置与对账汇总、kill 自检、余额与保证金、三个 inst 的报价与 102/202 的标记价、`G1`/`G2` 的 `SetMode{Live}`),再按夹具交出各 Input;journal 记录原样转成 `TW` 脚本(引导块 → `boot`,其余 → `bulk`,每个事件以 `end` 结束)写出一个封存段,`pyfixture seq-check` 再逐条比对写出的 journal 与 `MemJournal`(seq、kind、`EVENT_END`、记录体;在两个事件之间追加的 Meta 记录,写者给它置 `EVENT_END`,不比该位)。夹具在每个具名步骤之后保存热进程的 ledger 节 1、13、22 字节(`expected/ledger-<步骤>.bin`)与它的 `positions()`/`inventory()`/`portfolio()` 读数及自启动起的 `PnlBreakdown`(`steps.json`,含该步骤 Input 的 seq 与 `proc_ns`)。"与热进程一致"= `hft_py.ledger(j, account="bn-1", t1 = 该步骤 Input 的 proc_ns + 1)` 的 `_testing.ledger_snapshot` 与该步骤的三节字节逐字节相同,四个读数逐值相同;`portfolio` 的 `flags` 不比 `BALANCE_UNRECONCILED`(冷读者不做静默期余额校验,[hft-ledger 冷消费者](../hft-ledger/README.md#冷消费者journalledger))。
+- **`J_EXT`**(`pyfixture seq ext`,`SEQ_FX`,账户 A1):初始状态同 LED-055——策略在 `G1` 买入 `BTC/P2` 10.0 的 GTC 单经 `Ack` 与 `Fill` 全部成交于 60 000,之后 `BTC/P2` 标记价 60 500,P2 一轮无差异的对账(只有汇总条目;它的 `view_seq` 在用户流 Up 之后,`AUTO_EXTERNAL` 的前置条件)。事件 E1 = 对账报告 4242 的末条 Input(汇总条目;同组首条是 `BTC/P2` 的仓位条目:`engine_qty = 10.0`、`exch_qty = 6.0`、`AUTO_EXTERNAL`)+ 热进程按 `auto_external_fill` 合成入账并写出的 `Note{ExternalFill}`(`aflags = AUTO_RECON`,同 LED-076 步骤 1 的注记)等;事件 E2 = Input `ExternalFill{Adl, Sell, BTC/P2, 1.0, trade_id 77}`(补推的同向 ADL)+ 热进程写出的 `Note{LedgerAutoHeldOffset}`;事件 E3 = Input `OrderEvent{Fill, slot 9(本次运行从未用过), gen 1, detail = Buy, cum_filled 0.3, px 60 100, fee 0.09 USDT, exch_order_id 99}`(`StaleGen` 带成交)+ `Note{OmsForeignFill}`(`path = 2`、`trade_id = 0`、`qty = 0.3`、`px = 60 100`、`fee = 0.09`、`exch_order_id = 99`、`cum_filled = fill_seq = 0.3`);事件 E4 = Input `ExternalFill{Liquidation, Buy, BTC/P2, 0.4, trade_id 910}` + `Note{ExternalFill}`(`aflags = 0`)。具名步骤 E0(E1 之前)–E4。
+- **`F_FF`**(`pyfixture seq ff <行>`,PY-109 各行)、**`F_SAMPLE`**(`pyfixture seq sample <行>`,PY-111 各行)、**`F_FILLS`**(`pyfixture seq fills <行>`,PY-112 各行):`SEQ_FX`,账户 A1,各行的 Input 见用例表;具名步骤 `start`/`placed`(各行的 Input 之前)、中间步骤与 `end`(最后一条 Input 之后)。
 - **`J_LED20`**:`pyfixture led <种子>`(种子 1–20)的 20 个 journal 夹具:账户 A1、`alpha` 的 group `G1`(`0x0100_0001`,101/S1 + 102/P2)与 `G2`(`0x0100_0002`,202/P2);下单(`OrderDecision{New}`)与分次成交、永续上的外部成交、资金费推送、余额、BBO 与标记价,约 30 h(跨 UTC 日);3 个段,每段引导块重述配置并带当前账本的 `StateSnapshot{Boot}`(含 hft-oms 节 2 的未完成订单行),段 2、段 3 各有一条关键帧 `StateSnapshot{Keyframe}`。Rust 参照由 `pyfixture ledger-ref`(hft-ledger `JournalLedger` 从同一起点逐事件消费)给出每事件各 group 的 `PnlBreakdown` 增量与最终视图、三节快照字节。
 - **`RUST_REF`**:Rust 参考读法 = `hft_journal::JournalReader`(`StartAt::Oldest`、`EndAt::Follow`、`OnGap::Error`)+ `hft_event` 解码 + [hft-ledger 冷消费者](../hft-ledger/README.md#冷消费者journalledger) `JournalLedger`(hft-ledger 测试中的同名驱动)。比较 hft-py 输出时一律以它为参照。
 - **`TW`**(测试写者):hft-journal 的测试写者 `examples/testwriter.rs`(`required-features = ["writer"]`,只在测试中以子进程运行,不是 hft-py 的依赖),本文件用它的 `--script` 模式([hft-journal 测试写者](../hft-journal/README.md#读者)):命令从文件或 stdin 读,可交错写入、发布、滚动、暂停 persist、`abort` 与输出单调时钟标记;记录头 `tsc` 与段头校准对按"时间与校准"夹具写。参数:源记录(`J_MD` 或合成 `Bbo`)、热目录(tmpfs 下的临时目录 `<tmp>/hot/prod/seq/`)、冷目录 `<tmp>/cold/prod/seq/`、每事件一条记录、每 `publish_every` 个事件 `publish` 一次、`segment_bytes`、persist 同步间隔。默认用于本文件:`segment_bytes = 8 MiB`,`publish_every = 1`,persist `sync_interval_ms = 50`。"合成 `Bbo`"= inst 101,bid 60 000.00(raw 6 000 000)、ask 60 000.01(raw 6 000 001)、`bid_qty`/`ask_qty` 0.5(raw 50 000 000),第 i 条(从 0 起)的时刻 `D + 10 s + i × 1 ms`,`ex_ts_ns` 与 `hw_rx_ns` 同 `J_MD` 的规则。
@@ -1142,8 +1144,7 @@ spec: README.md
 - 步骤:
   1. `led = hft_py.ledger(j, account="bn-1", t1 = T2)`(只消费到 E1)
 - 期望:
-  - `positions()` 中 `BTC/P2` 的数量 = 6.0(raw 600 000 000,指数 −8),与 `expected/ledger-E1.bin` 经 Rust 解出的 `InstPos` 相同;`breakdown()` 等于 Rust hft-ledger `JournalLedger` 在 E1 之后的同一值
-- 备注:夹具与"热进程每个事件边界后的 ledger 三节字节"由 testkit 的 `SeqRig` 生成(需要 hft-sequencer);它落地之前本用例未实现
+  - E1 的事件内有热进程写出的 `Note{ExternalFill}`;`positions()` 中 `BTC/P2` 的数量 = 6.0(raw 600 000 000,指数 −8);与热进程在 E1 之后一致(`SEQ_FX`;`breakdown()` = 热进程自启动起的 `PnlBreakdown`)
 - 实现:`crates/hft-py/tests/python/test_ledger.py::test_py_106_auto_recon_note_booked`
 
 ### PY-107 补推的同向 ADL 被 auto_held 抵扣,不重复入账
@@ -1155,8 +1156,7 @@ spec: README.md
 - 步骤:
   1. `led = hft_py.ledger(j, account="bn-1", t1 = T3)`(消费到 E2)
 - 期望:
-  - `BTC/P2` 数量仍为 6.0;`breakdown()` 的 `external` 列与 PY-106 相同;结果与 `expected/ledger-E2.bin` 一致
-- 备注:夹具与"热进程每个事件边界后的 ledger 三节字节"由 testkit 的 `SeqRig` 生成(需要 hft-sequencer);它落地之前本用例未实现
+  - E2 的事件内有 `Note{LedgerAutoHeldOffset}`;`BTC/P2` 数量仍为 6.0;`breakdown()` 的 `external` 列与 PY-106 相同;与热进程在 E2 之后一致
 - 实现:`crates/hft-py/tests/python/test_ledger.py::test_py_107_adl_offset_by_auto_held`
 
 ### PY-108 不带 AUTO_RECON 的 ExternalFill 注记不被当作成交
@@ -1168,8 +1168,7 @@ spec: README.md
 - 步骤:
   1. `led = hft_py.ledger(j, account="bn-1")`
 - 期望:
-  - `BTC/P2` 数量 = 6.0 + 0.3(E3)+ 0.4(E4)= 6.7;E4 只按 Input 入账一次(若也按注记入账会是 7.1);与 `expected/ledger-E4.bin` 一致
-- 备注:夹具与"热进程每个事件边界后的 ledger 三节字节"由 testkit 的 `SeqRig` 生成(需要 hft-sequencer);它落地之前本用例未实现
+  - E4 的事件内有 `Note{ExternalFill}`(`aflags = 0`);`BTC/P2` 数量 = 6.0 + 0.3(E3)+ 0.4(E4)= 6.7;E4 只按 Input 入账一次(若也按注记入账会是 7.1);与热进程在 E4 之后一致
 - 实现:`crates/hft-py/tests/python/test_ledger.py::test_py_108_plain_note_not_booked`
 
 ### PY-109 OMS 防御路径的外来成交经注记入账,与热进程逐值相同
@@ -1177,17 +1176,16 @@ spec: README.md
 - 规则:[2. ledger / pnl](README.md#2-ledger--pnl)
 - 级别:table
 - 里程碑:M2
-- 前置:各行一个 `SeqRig` 生成的 journal 夹具 `fixtures/replay/hft-py/ff/<行号>/`(账户 A1,事件 = 带成交的 `OrderEvent` Input + 一条 `Note{OmsForeignFill}`,`qty = 0.3`、`px = 60 100`),同目录保存热进程的 ledger 三节字节;`led = hft_py.ledger(j, account="bn-1")`
-- 备注:夹具与"热进程每个事件边界后的 ledger 三节字节"由 testkit 的 `SeqRig` 生成(需要 hft-sequencer);它落地之前本用例未实现
+- 前置:各行一个 `F_FF` 夹具(`SEQ_FX`;账户 A1 原无 `BTC/P2` 持仓;所列 `OrderEvent` 均为 `BTC/P2` 上 `detail = Buy`、`px = avg_px = 60 100`、`fee = 0.09` USDT、`exch_order_id = 99` 的 `Fill`);`led = hft_py.ledger(j, account="bn-1")`;热进程对每条产出 `ForeignFill` 的报告在同一事件内写 `Note{OmsForeignFill}`(`qty` = 按 `foreign` 表求得的增量,`trade_id = 0`,`fill_seq` = `cum_filled`)
 - 实现:`crates/hft-py/tests/python/test_ledger.py::test_py_109_oms_foreign_fill`
 
-| 行 | 注记 | 期望 |
+| 行 | Input 与注记 | 期望 |
 |---|---|---|
-| PY-109.1 | `path = 1`(防御路径),`trade_id = 0`,`cum_filled = 0.5` | `BTC/P2` 数量 +0.3;与热进程三节一致 |
-| PY-109.2 | `path = 2`(`StaleGen`),`trade_id = 0` | +0.3;一致 |
-| PY-109.3 | `path = 2`,`trade_id = 12 345` | +0.3;一致 |
-| PY-109.4 | `path = 1`,同一订单此前已有 Input `ExternalFill{Unknown, eoid 99, fill_seq 0.5}` 入账 | 数量不再变化(去重);一致 |
-| PY-109.5 | 同一事件内两条注记(`cum_filled` 0.2 与 0.5,`qty` 0.2 与 0.3) | +0.5,两条都入账;一致 |
+| PY-109.1 | `slot = SLOT_UNRESOLVED`、`cum_filled = 0.3` → 注记 `path = 1`(防御路径) | `BTC/P2` 数量 +0.3;每个步骤与热进程一致 |
+| PY-109.2 | slot 9(从未用过)、gen 1、`cum_filled = 0.3`(`StaleGen`)→ 注记 `path = 2` | +0.3;一致 |
+| PY-109.3 | 已删除:hft-oms 的 `Note{OmsForeignFill}` 恒写 `trade_id = 0`(`OrderEvent` 不带成交 id),热进程不产生 `trade_id ≠ 0` 的这条注记 | — |
+| PY-109.4 | 先 Input `ExternalFill{Unknown, Buy, 0.3, exch_order_id 99, fill_seq 0.5}` 入账,再 `slot = SLOT_UNRESOLVED`、`cum_filled = 0.5` → 注记 `path = 1`、`qty = 0.2`(OMS 先扣 `ext_held` 0.3) | 自外部成交之后数量不再变化(ledger 按 `(inst, 99, 0.5)` 去重);一致 |
+| PY-109.5 | 同一外来单的两条报告(两个事件):`slot = SLOT_UNRESOLVED`、`cum_filled` 0.2 与 0.5 → 两条注记 `path = 1`、`qty` 0.2 与 0.3 | +0.5,两条都入账;一致 |
 
 ### PY-110 同一 journal 计算两次结果相同
 
@@ -1206,18 +1204,17 @@ spec: README.md
 - 规则:[2. ledger / pnl](README.md#2-ledger--pnl)
 - 级别:table
 - 里程碑:M2
-- 前置:各行一个 `SeqRig` 生成的夹具 `fixtures/replay/hft-py/samples/<行号>/`(账户 A1),同目录保存热进程每个事件边界后的 ledger 三节字节;比较对象为 `hft_py.ledger(j, account="bn-1")` 的 `positions()`、`inventory()`、`portfolio()`、`breakdown()` 与由三节字节经 Rust 解出的同名值
-- 备注:夹具与"热进程每个事件边界后的 ledger 三节字节"由 testkit 的 `SeqRig` 生成(需要 hft-sequencer);它落地之前本用例未实现
+- 前置:各行一个 `F_SAMPLE` 夹具(`SEQ_FX`,账户 A1);比较对象为 `hft_py.ledger(j, account="bn-1", t1 = …)` 在该夹具每个具名步骤的 `positions()`、`inventory()`、`portfolio()`、`breakdown()` 与三节字节,与热进程在同一步骤的读数("一致"按 `SEQ_FX`)
 - 实现:`crates/hft-py/tests/python/test_ledger.py::test_py_111_booking_samples`
 
 | 行 | 事件 | 期望 |
 |---|---|---|
-| PY-111.1 | 现货买入,手续费以基础币(BTC)扣 | 库存与费用列一致 |
-| PY-111.2 | `ExternalFill{Liquidation}` 归属到 group 腿 | 一致;`external` 列一致 |
-| PY-111.3 | `SetBalanceBaseline` 之后的余额 | 一致 |
-| PY-111.4 | `FundingSettle{synth = 1}` 与之后的资金费自动校正 `AdjustDelta::Funding` | 一致;`funding` 列一致 |
-| PY-111.5 | `WriteOffResidual` 产生的 `AdjustDelta::WriteOff` | group 腿与 `unassigned` 一致 |
-| PY-111.6 | `AdoptExchange`(仓位条目) | 一致;`adjust` 列一致 |
+| PY-111.1 | 策略在 `G1` 现货买入 101/S1 0.01 BTC,成交回报的手续费 0.000 01 BTC(基础币) | `101` 数量 0.009 99;`fee_cex` 非 0;一致 |
+| PY-111.2 | `G1` 的永续腿经成交多 1.0,之后 Input `ExternalFill{Liquidation, Sell, BTC/P2, 0.4, px 59 000, fee 0.01}` 归属到该腿 | 数量 0.6;`external` 非 0;一致 |
+| PY-111.3 | S1 的 `BalanceReport`(USDT、BTC)→ `SetBalanceBaseline{A1, S1}` → 又一条 USDT `BalanceReport` | 一致 |
+| PY-111.4 | (`P2` 为 `BalanceOnlyPush`)`G1` 永续多 1.0;`Funding{rate 0.000 1, next_funding_ns = D}` 使热进程在结算时刻 `D` 合成 `FundingSettle{synth = 1}`(Output);2 s 后对账 `Funding` 钱包条目(`inst = INST_NONE`、`exch_ts_ns = D`、`exch_amount` = 合成额)经 `reconcile_funding` 入账 `AdjustDelta::Funding` | 合成之后 `funding` 列 = 合成额且非 0;两步都一致 |
+| PY-111.5 | 策略在 `G1` 现货买入 0.01 BTC 成交(无永续腿)→ `WriteOffResidual{A1, G1}` 产生 `AdjustDelta::WriteOff` | 之后 `G1` 无非 0 库存(移到 `unassigned`);一致 |
+| PY-111.6 | 对账报告(`BTC/P2` 仓位条目 `exch_qty = 0.5`、`engine_qty = 0` + 汇总)→ `AdoptExchange{A1, P2, BTC/P2, item = Position, G1, entry_px 60 000}` | 数量 0.5;一致 |
 
 ### PY-120 load_schemas 读取导出目录金样
 
@@ -1591,7 +1588,7 @@ spec: README.md
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:table
 - 里程碑:M2
-- 前置:本测试单独一个测试二进制;合成 `Bbo` 写入已封存段;`batch_rows = 100 000`;行宽 = 查询的 Arrow schema 各列每行字节数之和;测量迭代期间进程 `RssAnon` 的峰值增量(先对 1M 行夹具做一遍不计入的预热扫描,glibc 在首次释放大块后抬高 mmap 阈值;每行取三次扫描中的最大值,采样线程可能漏掉重新分配时的短峰;读完每批即丢弃;采样线程每 200 µs 读一次 `/proc/self/status`;计数分配器需要 `unsafe impl GlobalAlloc`,本 crate 不允许 `unsafe`,hft-testkit 的 `CountingAlloc` 只计次数)
+- 前置:本测试单独一个测试二进制;合成 `Bbo` 写入已封存段;`batch_rows = 100 000`;行宽 = 查询的 Arrow schema 各列每行字节数之和;测量迭代期间进程 `RssAnon` 的峰值增量(每次测量在独立子进程中先对同一份 1M 行夹具做一遍不计入的预热扫描,保持相同的分配器历史,避免前一行测试留下的驻留堆改变基线;每行取三次独立测量中的最大值,采样线程可能漏掉重新分配时的短峰;读完每批即丢弃;采样线程每 200 µs 读一次 `/proc/self/status`;计数分配器需要 `unsafe impl GlobalAlloc`,本 crate 不允许 `unsafe`,hft-testkit 的 `CountingAlloc` 只计次数)
 - 实现:`crates/hft-py/tests/memory.rs::py_161_batch_memory_bound`
 
 | 行 | 段中 `Bbo` 条数 | 期望 |
@@ -1618,16 +1615,15 @@ spec: README.md
 - 规则:[2. ledger / pnl](README.md#2-ledger--pnl)
 - 级别:table
 - 里程碑:M2
-- 前置:`SeqRig` 生成的夹具 `fixtures/replay/hft-py/fills/`(账户 A1):Output `OrderDecision{New}` 槽 (epoch 3, slot 7, gen 1) → (A1, `BTC/P2`, Buy, `G1`);之后按行投递 `OrderEvent`;比较对象为 `hft_py.ledger(j, account="bn-1").positions()` 中 `BTC/P2` 的数量与 `G1` 的永续腿
-- 备注:夹具与"热进程每个事件边界后的 ledger 三节字节"由 testkit 的 `SeqRig` 生成(需要 hft-sequencer);它落地之前本用例未实现
+- 前置:各行一个 `F_FILLS` 夹具(`SEQ_FX`,账户 A1):策略下单得到 Output `OrderDecision{New}` 槽 (epoch 3, slot 1, gen 1) → (A1, `BTC/P2`, Buy 0.5, `G1`),`Ack` 之后为步骤 `placed`,再按行投递 `OrderEvent`(`detail = 0`,即回报不带方向);比较对象为 `hft_py.ledger(j, account="bn-1").positions()` 中 `BTC/P2` 自 `placed` 起的变化,以及 `placed` 与 `end` 两步与热进程一致(三节字节含 `G1` 的永续腿)
 - 实现:`crates/hft-py/tests/python/test_ledger.py::test_py_112_fills_dedup_by_cum_filled`
 
-| 行 | 槽 (3, 7, 1) 的 `OrderEvent` 序列(`cum_filled`) | 期望 |
+| 行 | 槽 (3, 1, 1) 的 `OrderEvent` 序列(`cum_filled`) | 期望 |
 |---|---|---|
-| PY-112.1 | PartialFill 0.2 → Fill 0.5 | +0.5,归 `G1`;与热进程三节逐值相同 |
-| PY-112.2 | PartialFill 0.2 → 重复的 PartialFill 0.2 → Fill 0.5 | +0.5(重复的 0.2 不再入账) |
-| PY-112.3 | Fill 0.5 → 乱序到达的 PartialFill 0.2 | +0.5(`cum_filled` 不增加的回报不入账) |
-| PY-112.4 | 槽 (3, 7, 2)(gen 不同,无对应 `OrderDecision{New}`)的 Fill 0.5 | 不按槽 (3, 7, 1) 入账;结果与 hft-ledger `JournalLedger` 对同一输入相同 |
+| PY-112.1 | PartialFill 0.2 → Fill 0.5 | +0.5,归 `G1`;与热进程一致 |
+| PY-112.2 | PartialFill 0.2 → 重复的 PartialFill 0.2 → Fill 0.5 | +0.5(重复的 0.2 不再入账);一致 |
+| PY-112.3 | Fill 0.5 → 乱序到达的 PartialFill 0.2 | +0.5(`cum_filled` 不增加的回报不入账);一致 |
+| PY-112.4 | 槽 (3, 1, 2)(gen 不同,无对应 `OrderDecision{New}`)的 Fill 0.5 | 不按槽 (3, 1, 1) 入账(热进程按 `StaleGen` 处理,回报无方向,不入账);一致 |
 
 ### PY-113 本 crate 不含第二个入账实现
 

@@ -102,8 +102,11 @@ pub struct StepView<'a> {
     pub step: u64,
     /// Virtual time = engine time (ns) of the step.
     pub now_ns: u64,
-    /// This step's journal records, the Input first.
+    /// This step's journal records, the Input first (with the live driver, Inputs the driver
+    /// itself writes — due timers, `EngineClock`, keyframes — may come before the delivered one).
     pub records: &'a [JRec],
+    /// Kind and body of the Input the world delivered this step (`None` = a timer step).
+    pub delivered: Option<(EventKind, &'a [u8])>,
     pub frames: &'a [FrameRec],
     pub info: &'a StepInfo,
     pub before: &'a Obs,
@@ -115,8 +118,15 @@ pub struct StepView<'a> {
 }
 
 impl<'a> StepView<'a> {
+    /// The record of the delivered Input (a timer step: the first record).
     pub fn input(&self) -> Option<&'a JRec> {
-        self.records.first()
+        let Some((k, body)) = self.delivered else {
+            return self.records.first();
+        };
+        self.records
+            .iter()
+            .find(|r| r.kind == k && (k != EventKind::TIMER || r.body == body))
+            .or_else(|| self.records.first())
     }
     pub fn input_kind(&self) -> Option<EventKind> {
         self.input().map(|r| r.kind)

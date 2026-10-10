@@ -171,6 +171,8 @@ impl Oms {
                 max_rest_ms: oi.max_rest_ms,
                 reason: it.reason,
                 intent_no: it.intent_no,
+                fee_cum: Qty(0),
+                _rsv: [0; 3],
             };
         }
         if let Some(st) = t.stamps.get_mut(s as usize) {
@@ -401,7 +403,15 @@ impl Oms {
                 S::Live | S::PendingCancel | S::PendingAmend => self.table_anomaly(ti, s, ev, now, seq, out),
                 _ => self.stats.dup += 1,
             },
-            OrderEventKind::PartialFill | OrderEventKind::Fill => self.fill_report(ti, s, ev, now, seq, out),
+            OrderEventKind::PartialFill | OrderEventKind::Fill => {
+                self.fee_of_applied_fill(ti, s, ev, out);
+                self.fill_report(ti, s, ev, now, seq, out);
+                if let Some(x) = self.tm(ti).and_then(|t| t.ext.get_mut(s as usize))
+                    && ev.cum_filled.0 > x.fee_cum.0
+                {
+                    x.fee_cum = ev.cum_filled;
+                }
+            }
             OrderEventKind::CancelAck | OrderEventKind::Expired => {
                 if st.terminal() {
                     if ev.cum_filled.0 > sl.filled.0 {
@@ -496,6 +506,20 @@ impl Oms {
                 _ => self.stats.dup += 1,
             },
             OrderEventKind::FeeOnly => {}
+        }
+    }
+
+    /// A `PartialFill`/`Fill` whose quantity an earlier non-fill report (`CancelReject`,
+    /// `CancelAck`, `QueryResult`, …) already applied without a fee: its fee is booked like a
+    /// `FeeOnly` (README "回报匹配与成交增量" 9). A repeated fill report (`cum_filled ≤ fee_cum`)
+    /// books nothing.
+    fn fee_of_applied_fill(&mut self, ti: usize, s: u32, ev: &OrderEvent, out: &mut OmsOut) {
+        let Some(t) = self.t(ti) else { return };
+        let (Some(sl), Some(ex)) = (t.slot(s), t.ext.get(s as usize)) else {
+            return;
+        };
+        if ev.fee.0 != 0 && ev.cum_filled.0 > ex.fee_cum.0 && ev.cum_filled.0 <= sl.filled.0 {
+            self.fee_only_slot(ti, s, ev, out);
         }
     }
 

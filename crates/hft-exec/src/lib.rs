@@ -655,6 +655,7 @@ impl Exec {
             kind,
             target,
             filled: c.view.filled,
+            // Filled by the sequencer from the OMS leg tracker when it queues the event.
             inflight: [Qty(0); 4],
         };
         out.notify.push(ExecNotify {

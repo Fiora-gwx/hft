@@ -335,7 +335,7 @@ pub struct OrderSlot {                 // 128 B = 2 条缓存行
 }
 
 #[repr(C, align(32))]
-pub struct SlotExt {                   // 32 B,与槽平行;成交、费用与链接时触碰,进快照
+pub struct SlotExt {                   // 64 B,与槽平行;成交、费用与链接时触碰,进快照
     pub net_filled: Qty,               //  0 累计成交净量(见"成交净量";LegTracker 与对冲基数用)
     pub tag: u32,                      //  8 意图 tag 原样
     pub leg_ix: u8,                    // 12 该槽在 group 中的腿下标(归属表给出)
@@ -347,6 +347,8 @@ pub struct SlotExt {                   // 32 B,与槽平行;成交、费用与�
     pub max_rest_ms: u32,              // 20 = 意图的 max_rest_ms(0 = 不限;sweep ② 用)
     pub reason: u32,                   // 24 = ApprovedIntent.reason(New 决策排队后交出时用)
     pub intent_no: u32,                // 28 = ApprovedIntent.intent_no(同上)
+    pub fee_cum: Qty,                  // 32 最后一条 PartialFill/Fill 的 cum_filled(费用入账到此,见"回报匹配与成交增量"第 9 条)
+    pub _rsv: [u64; 3],                // 40 保留(0)
 }
 
 #[repr(C)]
@@ -370,7 +372,7 @@ pub struct Tomb {                      // 56 B;已回收的一代(C1)
 
 const _: () = assert!(size_of::<OrderSlot>() == 128 && align_of::<OrderSlot>() == 64
                       && offset_of!(OrderSlot, oflags) == 4 && offset_of!(OrderSlot, sflags) == 106);
-const _: () = assert!(size_of::<SlotExt>() == 32 && size_of::<SlotStamps>() == 80);
+const _: () = assert!(size_of::<SlotExt>() == 64 && size_of::<SlotStamps>() == 80);
 const _: () = assert!(size_of::<Tomb>() == 56 && offset_of!(Tomb, filled) == 24 && offset_of!(Tomb, freed_tsc) == 48);
 
 pub struct VenueAcctTable {            // 每 (venue, account) 一个
@@ -520,6 +522,7 @@ gw 对某 (venue, account) 的回报帧解码失败时写 `ConnState{role = User
 6. **超量成交**:`ev.cum_filled > slot.qty`(只可能是解码/单位错误)→ 成交照常入账(`FillOut.flags |= OVERFILL`,由对账裁决),但超出 `qty` 的部分**不进入对冲基数**;同一事件内先按 OnFill 第 1–5 步对不超过 `qty` 的部分产生第二腿,再把该槽所在链接置 `Broken{Overfill}`;`Note{OmsOverfill}`(P0)。
 7. `venue-<x>` 必须在每条成交回报里给出**累计成交量** `cum_filled` 与累计均价;给不出的在 gw 内按 exec id 去重合成;仍给不出则该 venue 不允许启用下单(加载时拒绝)。
 8. **冷读者的入账依据**:第 1、2 条每产出一条 `ForeignFill`,同一事件内另写一条 `Note{OmsForeignFill}`(Info,Output 类,回放比对;字段唯一定义在此):`Note.inst = inst`、`Note.group = GROUP_NONE`,`v = [venue | account << 8 | side << 16 | path << 24 | fee_asset << 32, qty, px, fee, exch_order_id, trade_id, fill_seq, cum_filled]`(`path`:防御路径 = 1、`StaleGen` = 2;数值为 raw;`fill_seq` = `trade_id = 0` 时 `cum_filled` 的 raw 值,否则 0)。这笔外来成交与对账 `AUTO_EXTERNAL` 同理,由 sequencer 在本条 Input 内按这些字段确定地构造为 `ExternalFill{cause = Unknown}`(其余字段为 0)并入账,不另写 Input;冷读者(reconciler 的引擎视图、hft-py)在同一事件内读到本 Note 时构造同一 `ExternalFill`,经 hft-ledger 的 journal 消费路径入账(消费规则归 [hft-ledger 外部成交](../hft-ledger/README.md#外部成交externalfill),码名登记归 hft-event)。
+9. **数量先由非成交回报带来时的费用**:`CancelReject`、`CancelAck`/`Expired`、`AmendAck`/`AmendReject`、`QueryResult` 与对账收敛带来的增量不带费用(第 3 条照常入账,`fee = 0`);随后到达、数量已被覆盖(`d ≤ 0`)的 `PartialFill`/`Fill`,若 `ev.cum_filled > SlotExt.fee_cum`,它的 `fee` 按 `FeeOnly` 入账(`FeeOut`,净量补差同"成交净量");`fee_cum ≥ ev.cum_filled` 的是重复回报,不入账。每条 `PartialFill`/`Fill` 之后 `fee_cum = max(fee_cum, ev.cum_filled)`;其他回报不改 `fee_cum`。
 
 ### 成交净量(B4)
 
@@ -668,7 +671,7 @@ const _: () = assert!(size_of::<LinkEntry>() == 80 && offset_of!(LinkEntry, firs
 自身被强平、被 ADL、人工在网页下单成交、交割,都不是我们的 client id。识别方法属于各 venue(`VenueCaps.own_liquidation_marker`,写在 `venue-<x>`);gw 把**有成交的外来单**写成 `ExternalFill{cause: Liquidation | Adl | Manual | Delivery | Unknown}`(Input);无法匹配到槽的成交在 gw 暂存 `gw.unmatched_hold_ms`(默认 5 000)后同样报为 `cause = Unknown`([hft-venue](../hft-venue/README.md))。group 归属与入账归 [hft-ledger](../hft-ledger/README.md)(`apply_external` → `ExternalApplied{group, net_qty}`,P0 `Note{ExternalFill}` 由 ledger 写)。本 crate 的部分:
 
 1. `external_adjust(a, v, g, inst, net, exch_order_id, cause)`:`g ≠ GROUP_NONE` 时该腿 `leg[i].net += net`,重算 naked;不改任何槽与链接(链接的对冲账照旧,LegTracker 反映真实敞口)。`g == GROUP_NONE` 时 LegTracker 不变。
-2. `cause = Unknown` 且 `exch_order_id ≠ 0` → `ext_held[exch_order_id] += |net|`(容量 `ext_held_track`,FIFO 淘汰写 Note):若该单之后被查询或迟到回报匹配到我们的槽,按"回报匹配"第 4 条去重,不重复入账;对冲受该方向裸量约束,不重复对冲。该单之后经防御路径或 `StaleGen` 再到达时同样先扣("回报匹配"第 1、2 条)。
+2. `cause = Unknown` 且 `exch_order_id ≠ 0` → `ext_held[exch_order_id] += |net|`(容量 `ext_held_track`,FIFO 淘汰写 Note;本 crate 自己产出的 `ForeignFill` 入账时 sequencer 传 `exch_order_id = 0`,不登记——其累计量已在 `foreign` 表):若该单之后被查询或迟到回报匹配到我们的槽,按"回报匹配"第 4 条去重,不重复入账;对冲受该方向裸量约束,不重复对冲。该单之后经防御路径或 `StaleGen` 再到达时同样先扣("回报匹配"第 1、2 条)。
 3. 本 crate 不产生任何订单;"平掉多出的一腿"的默认处理(以及 `Manual` 不做默认处理)在 [hft-exec](../hft-exec/README.md#外来成交的默认处理b3)。
 
 防御路径:若 gw 仍以 `OrderEvent{SLOT_UNRESOLVED}` 报来带成交的外来单,按 `foreign` 表(`exch_order_id → 已入账累计成交`,FIFO 淘汰,淘汰写 Note)求增量、先扣 `ext_held`,产出 `ForeignFill`,sequencer 按 `ExternalFill{cause: Unknown}` 走同一流程。
@@ -880,9 +883,9 @@ feature `chain`,随链上腿的策略迁移启用(触发条件见 [hft-chain-evm
 
 ```rust
 // 节 2 OrderSlots:每个 state ≠ Free 的槽一行(含 Unknown);键 (venue_ix, account_ix, slot_id)
-// 行 = OrderSlot 的 128 字节 ‖ SlotExt 的 32 字节 = 160 B,按字节写出;读者把两段分别按值拷贝进对齐的 OrderSlot / SlotExt。
-// 不定义 `struct SlotRow { slot: OrderSlot, ext: SlotExt }`:OrderSlot 是 align(64),这样的行会被补到 192 B。
-pub const SLOT_ROW_LEN: usize = 160;
+// 行 = OrderSlot 的 128 字节 ‖ SlotExt 的 64 字节 = 192 B,按字节写出;读者把两段分别按值拷贝进对齐的 OrderSlot / SlotExt。
+// 行版本 1 的 SlotExt 只有前 32 字节(无 fee_cum,行长 160 B):读者补零,并取 fee_cum = filled。
+pub const SLOT_ROW_LEN: usize = 192;
 
 // 节 3 OmsCounters:节首 1 行 OmsCountersHdr,其后每 (venue, account) 表 1 行 TableRow + 变长尾
 #[repr(C)] pub struct OmsCountersHdr { pub engine_epoch: u32, pub n_tables: u32, pub resume_hold_until: Tsc } // 16 B;0 = 无续接窗口
@@ -909,7 +912,7 @@ const _: () = assert!(size_of::<TableRow>() == 32 && size_of::<LinkRowHdr>() == 
 - `InflightBook` 与 LegTracker 各腿的两类在途不单独恢复:它们由非终态槽的剩余量与状态决定(不变量),`restore` 时由节 2 重算并与快照中的 `LegState` 校验。
 - `(account, inst) → (group, leg_ix)` 归属表不进快照,由恢复时的 GroupSpec 重建。
 - 进快照的 TSC 字段只有"恢复"第 2 步列出的已登记字段;其余时刻不进快照。
-- **行版本**(只在本 crate 登记,写进 `SectionHdr.version`):节 2 = 1、节 3 = 1、节 12 = 1。行格式只追加、零值表示未提供;版本递增时读者按旧版本的行长读出并补零,未知的更高版本拒读(`RestoreError`)。
+- **行版本**(只在本 crate 登记,写进 `SectionHdr.version`):节 2 = 2、节 3 = 1、节 12 = 1。行格式只追加、零值表示未提供;版本递增时读者按旧版本的行长读出并补零,未知的更高版本拒读(`RestoreError`)。
 
 ### 规划源文件
 
@@ -963,7 +966,7 @@ const _: () = assert!(size_of::<TableRow>() == 32 && size_of::<LinkRowHdr>() == 
 - `ClientOrderId` 编码与解码在 hft-types,预算与基准(`types/clid_encode`、`types/clid_decode`)归那里。
 - 第一腿成交回报取出 → 第二腿 `OrderDecision` 入出环:主机内 ≤ 20 µs([05 §1](../../design/05-CEX执行层.md)),OMS 份额(OnFill + `price_hedge` + `place`)≤ 1 µs;风控检查链(含 #6 `HEDGE_LIMIT`)另计。
 - 风控可负担性读数(`avail_quote`、`avail_margin`)读 InflightBook 的增量和,O(1),与在途单数无关。
-- 分配:只在 `new`/`restore` 与命令路径 `on_groups_changed`(容量预分配,只重写内容);运行期零分配。内存:每 (venue, account) 表 = N × (128 + 32 + 80 + 56 × T + 4) B,N = 4096、T = 2 时 ≈ 1.39 MiB(另加 `foreign`/`ext_held` 各 64 × 16 B);`LinkTable` 每账户 = `links_per_account` × (80 + 56) B(链接 + 计划表项),4096 时 ≈ 544 KiB;LegTracker 每 group ≈ 240 B(`LegState` 192 B + 归属表项);`pending_out` = 32 B × (2 × 全部表槽数 + 全部账户链接数),每张 4096 槽表约摊 256 KiB + 128 KiB(链接)。
+- 分配:只在 `new`/`restore` 与命令路径 `on_groups_changed`(容量预分配,只重写内容);运行期零分配。内存:每 (venue, account) 表 = N × (128 + 64 + 80 + 56 × T + 4) B,N = 4096、T = 2 时 ≈ 1.52 MiB(另加 `foreign`/`ext_held` 各 64 × 16 B);`LinkTable` 每账户 = `links_per_account` × (80 + 56) B(链接 + 计划表项),4096 时 ≈ 544 KiB;LegTracker 每 group ≈ 240 B(`LegState` 192 B + 归属表项);`pending_out` = 32 B × (2 × 全部表槽数 + 全部账户链接数),每张 4096 槽表约摊 256 KiB + 128 KiB(链接)。
 - 无系统调用、无锁、无共享缓存行(只被 sequencer 线程触碰)。
 
 ## 测试与验收

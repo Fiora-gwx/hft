@@ -432,7 +432,7 @@ pub fn level_of(r: &CapRecord) -> CapLevel;    // Kill + HARD → Hard;其余 �
 | `AccountCfg` | (账户, venue),条件型 | 闸门放行后 `AccountConfigReport` 报配置不符(`mismatches` 除 `UID` 外任一位,含 `AUTO_BORROW`、`UNREADABLE`),或交易中的永续 inst 实际杠杆未知或超过 `max_perp_leverage_x100`;`params[0]` = 原因位(`MISMATCH = 1`、`LEVERAGE = 2`,本模块定义) | 该 (account, venue) 两项都不再不符时自动删除 |
 | `Recovery` | 账户 | 冷启动 | 启动闸门已放行时,满足[干净 Drain 重启](#干净-drain-重启自动解除-recovery)或只含 Sim 账户实例的条件则自动解除;否则人工 `Resume{Recovery}` |
 | `Reorg` | (账户, group) | 终局前重组超时(链上腿,optional) | 同 `Broken` |
-| `Halted` | (strategy, 账户, group) | 策略执行连续失败 | `Resume{Halted}` |
+| `Halted` | (strategy, 账户, group)(`params[0]` = 策略 `request_halt` 给的 reason) | 策略执行连续失败(`Ctx::request_halt`) | `Resume{Halted}` |
 
 - **合并**:对同一 (source, scope) 再次设置取更严——`cflags`、`cancel_resting`、`flatten` 按位或,`params` 按来源取更严值(DailyLoss 取更高触发线;MarginStress 取更高档;AccountCfg 原因位按位或)。合并使记录有变化时按一次设置处理(`CapSet` 注记与 `RiskEvent::CapSet` 带合并后的记录,`set_seq` 不变);没有变化时本次 apply 无任何输出。`MarginStress` 的档位下降与 venue 位图变化同样按一次设置处理(档位按保证金分档的规则,不取更严)。
 - **`cflags` 与 `level`**:`HARD` 只用于 `Kill`;`CONDITIONAL` 用于 `ClockBad`、`MarginStress`、`Storage`、`AccountCfg`;`NON_CLEARABLE` 用于 `Draining`;其余来源为 0。`level`:`Kill` 为 `KillLevel`,`MarginStress` 为账户档位 1..3,其余 0。

@@ -65,7 +65,21 @@ spec: README.md
 - **账户与实例**:`A1`(`AccountKind::Sim`,`is_prod = false`,venues {V1, V2},绑定实例 `S3` = `StrategyId(3)`);需要正式账户的用例另设 `A9`(`is_prod = true`,测试网端点)。
 - **SDK 内的测试策略**(`crates/hft-strategy-sdk/tests/common/`,只用于本 crate 的单元、属性与分派测试):`EchoProbe`(kind_id 0xFF01,`DESC.version = 3`,参数 `TP`,只发订单意图;BBO 中价 × `open_th` 越过阈值时对该 group 发一张 `Open` IOC,冷却 `cooldown_ms` 按 `engine_ns` 计;`cmds` 见 SDK-160;Note 码 1 `EchoFire`(Info)、2 `EchoOverflow`(P2)、3 `EchoNoFeed`(P2))与 `TargetProbe`(kind_id 0xFF02,只发 `TargetIntent`,带 `ProbeModel`,`cmds` 为空)。两者经本 crate `tests/set_dispatch.rs` 的 `strategy_set!` 装配成 `ProbeSet`。
 - **`ProbeModel`**(TargetProbe 的 Model):`LAYOUT_VERSION = 1`、`PATH_VERSION = 1`、`WARMUP = true`;原始样本节 = 实例级节 tag 1 `{n_ticks: U64 One}` + 每 group 节 tag 2 `{GroupId: u32, utc_ns: I64 Prefixed, mid: I64 Prefixed, pct_bin: I64 One, fp: U64 One}`(每 group 至多 256 个 1 s 样本;`pct_bin` 是样本的存储解释配置,SDK-082 据它报告 `PctConfig`;`fp` 是写出时的 group 指纹;满窗口一条记录 4 124 B);路径状态节 = `n: u32` + 每 group `{id: u32, _pad: u32, band: i64, band_upd_ns: i64, last_sent: u64}`,`band` 在 UTC 60 s 边界由样本重算;`path_settle_ms = 60_000`;`cold_start_ms(p, gix) = 100_000 × (gix + 1)`;`mem_bytes(p, n) = n × 8_192 + 65_536`;`snapshot_bytes(p, n) = 256 + n × 4_352`;每个模型 tick(`model_tick(1_000)`)对每个 group 发一条 `local_kind = 1` 的 Advice `{ver: u8 = 1, flags: u8, _pad: [u8; 6], band: i64}`(样本不足 → `flags` 的 NOT_READY 位 = 1、`band = 0`);预热载荷 `local_kind = 1`:`{ver: u8 = 1, _pad: [u8; 3], group: u32, n: u16, _pad2: [u8; 6], (utc_ns: i64, mid: i64) × n}`。`ColdModel` 与它相同但 `WARMUP = false`。
-- **引擎侧契约夹具**(`crates/hft-testkit/tests/sdk_contract/`):`RecProbe`(kind_id 0xFF03,参数 `TP`,只依赖 SDK)记录每次被调用的(方法、`EventRef` 变体、gix、`v.now().seq`;没有 `Views` 参数的方法只记方法名与所在 Input)到定长数组,意图按测试脚本发出;`RecModel` 是它的 Model(同 `ProbeModel` 的节与常量),同样记录每次调用;二者以测试内手写的 `impl StrategySet for RecSet` 装配(不调用 `strategy_set!`)。`SeqRig` = 真实 `Sequencer<RecSet>` + hft-testkit `DstDriver` + `MockVenue`(V1、V2、V3 有 feed);`AdvRig` = 真实 `Advisor<RecSet, MemCkpt>` 尾随同一 journal,`MemCkpt` 是内存里的 `CheckpointStore`(文件头与分节按 [apps/hft-core](../../apps/hft-core/README.md#内存与-journal-段按主机类唯一归属) 的 `CkptHdr`/`PathSecHdr`)。`SeqRig` 的 EngineConfig:`max_groups_per_instance = 8`、`conn_liveness_ms = 2_000`、`tsc_per_ms = 3_000_000`。
+- **引擎侧契约夹具**(`crates/hft-sequencer/tests/sdk_contract/`,hft-sequencer 测试二进制 `seq` 的模块;计数分配器的 SDK-140 在独立测试目标 `sdk_alloc`):`SeqRig` = hft-sequencer 测试基线 B0(`crates/hft-sequencer/tests/common/`:真实 `Sequencer<TestSet>` + 实盘驱动 `LiveDriver` + 内存环境 `TestIo`;`steady()` 后启动闸门全部放行、cell 为 Live、BBO 连接健康),另加 inst 23(venue B 的 FILL 永续)。`RecProbe`/`RecModel` = 其 `TestSet`(手写 `impl StrategySet`,不调用 `strategy_set!`;种类 probe-taker 0xFF01、probe-target 0xFF02、probe-np 0xFF03(`non_prod_only`),参数字段 `win`(结构)、`thr`、`bad`(`validate` 拒绝非 0)、`mem`、`ckpt`,命令 op 1 `open`(字段 `qty` 1..=100)、op 2 `close`(`reduce_only`));它逐次记录投递(`log()`:实例、快速部分或 Model、`EventRef` 变体、gix、inst、`v.now()`、事件的 Debug 文本)与方法调用(`calls()`:`create`、`on_params`、`subscriptions`、`snapshot`、`restore`、`create_model`、`model_on_params`、`model_restore`、`model_restore_path`),订阅、意图、Advice 与失败注入由测试脚本与钩子给出;`TestSetV5` 是 `DESC.version = 5` 的同一集合。`AdvRig` = 真实 `Advisor<TestSet, MemCkpt, Ring>` 尾随同一 journal 的已提交部分(`MemCkpt` 是内存 `CheckpointStore`,`Ring` 是内存 advice 环;Advice 由测试搬进 sequencer 的 advice 环)。本节其余夹具名字在 `SeqRig` 中按下表落地(用例写 SDK 夹具名,数值按表换算):
+
+  | 用例中的名字 | `SeqRig` 中 |
+  |---|---|
+  | S3(`RecProbe` 实例)、A1 | s1(`StrategyId 1`,probe-taker)、acct-1(`AccountId 1`,Live 测试网账户,venues {A, B}) |
+  | S4、A2 | s2(`StrategyId 2`,probe-target)、acct-2 |
+  | 模拟账户上的实例 | s9、sim-9(`AccountId 9`) |
+  | V1、V2 | A(`BINANCE_SPOT`,现货)、B(`GATE_USDT_FUT`,USDT 永续) |
+  | I1、I2 | a1(inst 11,BTCUSDT 现货,tick 0.01、lot 0.0001)、b1(inst 21,BTC 永续,tick 0.1、lot 0.001) |
+  | I5(不在任何 group 的另一资产永续) | b2(inst 22,ETH 永续;用例需要它不在 group 内时 s1 只用 G1) |
+  | `GT3` 的 G1、G2、G3 | s1 的 `0x0100_0001`(a1 + b1,BTC)、`0x0100_0002`(a2 + b2,ETH)、`0x0100_0003`(inst 14 + inst 23,FILL)。hft-sequencer 的 `InstOwned` 规则不允许同一实例的两个非 Shadow cell 引用同一 (account, inst),原写的三个 group 共用 I1/I2 无法同时生效 |
+  | `TP` 的字段 | `TestSet` 的字段:非结构字段的改动(`cooldown_ms`、`open_th`、`max_qty`)用 `thr`,结构字段(`pct_bin`)用 `win` |
+  | I3(他所、有 feed)、I4(无 feed) | 用例内另加的现货 venue(见 SDK-034、SDK-035) |
+
+  `SeqRig` 的 EngineConfig:`max_groups_per_instance = 8`、`conn_liveness_ms = 2_000`、`max_timers = 512`,TSC 1 GHz(`tsc_per_ms = 1_000_000`)。
 - 定点数写法:`Rate` 1e-9(1 bp = 100_000),`Notional` 1e-6 USDT,BTC 的 `Qty` 指数 −8、`Px` 指数 −2。
 
 ### SDK-001 违反依赖方向的依赖边使 `cargo xtask deps` 失败
@@ -305,13 +319,13 @@ spec: README.md
 - 规则:[Strategy 与 Model](README.md#strategy-与-model)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;`max_groups_per_instance = 8`;refdata 已登记实例 S3(kind 0xFF03)绑定 A1;S3 尚无参数
+- 前置:`SeqRig`;`max_groups_per_instance = 8`;refdata 已登记实例 S3 绑定 A1;S3 尚无参数
 - 步骤:
   1. 发送 `SetParams{S3, A1, version = 1}`(`GT3`,`TP` 默认值)
 - 期望:
   - `CmdResult{Applied}`
-  - `RecProbe` 调用记录(按序)恰为 `new`、`subscriptions`,两者都发生在处理该 `ControlCmd` 的同一 Input 内(`SeqRig` 按 Input 单步驱动并在 Input 边界给调用记录打标);`new` 收到的 `GroupTable` 满足 `len() = 3`、`capacity() = 8`;没有 `on_params`
-- 实现:`crates/hft-testkit/tests/sdk_contract/lifecycle.rs::sdk_016_first_params_create_then_subscribe`
+  - `RecProbe` 调用记录(按序)恰为 `create`(SDK `Strategy::new` 经 `StrategySet::create`)、`subscriptions`,命令交出前没有调用、该 `ControlCmd` 处理完时两者都已发生;`create` 收到的 `GroupTable` 满足 `len() = 3`、`capacity() = 8`;没有 `on_params`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/lifecycle.rs::sdk_016_first_params_create_then_subscribe`
 
 ### SDK-017 后续 `SetParams` 依次调用 `on_params` 与 `subscriptions`,不再 `new`
 
@@ -323,21 +337,21 @@ spec: README.md
   1. 发送 `SetParams{S3, A1, version = 2}`
 - 期望:
   - `CmdResult{Applied}`;本 Input 内调用记录恰为 `on_params`、`subscriptions`;`on_params` 收到的参数 `defaults().cooldown_ms = 30_000`
-- 实现:`crates/hft-testkit/tests/sdk_contract/lifecycle.rs::sdk_017_later_params_on_params_then_subscribe`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/lifecycle.rs::sdk_017_later_params_on_params_then_subscribe`
 
 ### SDK-018 `on_params` 返回错误时旧参数继续生效
 
 - 规则:[Strategy 与 Model](README.md#strategy-与-model)
 - 级别:integ
 - 里程碑:M2
-- 前置:SDK-016 之后(version 1 生效,`cooldown_ms = 20_000`);`RecProbe` 脚本:下一次 `on_params` 返回 `Err(ParamError::Invalid{field_ix: 1, code: 7})`
+- 前置:SDK-016 之后(version 1 生效,`cooldown_ms = 20_000`);`RecProbe` 脚本:下一次 `on_params` 返回 `Err(ParamError::Invalid{field_ix: 1, code: 9})`
 - 步骤:
   1. 发送 `SetParams{S3, A1, version = 2, cooldown_ms = 30_000}`
   2. 投递一条 I1 的 Bbo
 - 期望:
   - 步骤 1:`CmdResult{InvalidArgs, detail = ParamInvalid}`,`arg & 0xF = 1`(kind `Strategy`);本 Input 内没有 `subscriptions` 调用;S3 生效参数的 `version` 仍为 1
-  - 步骤 2:`RecProbe` 记录的 `p.defaults().cooldown_ms = 20_000`
-- 实现:`crates/hft-testkit/tests/sdk_contract/lifecycle.rs::sdk_018_on_params_err_keeps_old`
+  - 步骤 2:S3 照常收到该 Bbo(生效参数仍是 version 1:`cooldown_ms`(`thr`)= 20_000)
+- 实现:`crates/hft-sequencer/tests/sdk_contract/lifecycle.rs::sdk_018_on_params_err_keeps_old`
 
 ### SDK-019 gateway 拒绝的 `SetParams` 不调用策略的任何方法
 
@@ -349,7 +363,7 @@ spec: README.md
   1. 发送该 `SetParams`
 - 期望:
   - `CmdResult{InvalidArgs, detail = ParamInvalid}`,`arg = 1 | 0 << 4`(kind `Strategy`、字段 0);`RecProbe` 调用记录在本命令前后相同
-- 实现:`crates/hft-testkit/tests/sdk_contract/lifecycle.rs::sdk_019_gateway_reject_no_strategy_call`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/lifecycle.rs::sdk_019_gateway_reject_no_strategy_call`
 
 ### SDK-020 关键帧中 `snapshot` 每实例调用一次,行头带 `desc_version`
 
@@ -361,7 +375,7 @@ spec: README.md
   1. 交出 `Timer{Sys, Snapshot}`
 - 期望:
   - 本 Input 内 `snapshot` 恰调用 1 次;`StateSnapshot` 节 5 中 S3 的 `StrategyRowHdr.desc_version = 5`,其后的节体与 `snapshot` 写出的字节逐字节相同
-- 实现:`crates/hft-testkit/tests/sdk_contract/lifecycle.rs::sdk_020_keyframe_snapshot_once`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/lifecycle.rs::sdk_020_keyframe_snapshot_once`
 
 ### SDK-021 从快照恢复时 `restore` 读到写出时的 `desc_version`
 
@@ -373,7 +387,7 @@ spec: README.md
   1. `RecoverDriver` 从该快照起步
 - 期望:
   - `restore` 恰调用 1 次,`r.desc_version() = 5`;恢复后的 `snapshot` 字节与快照节体逐字节相同
-- 实现:`crates/hft-testkit/tests/sdk_contract/lifecycle.rs::sdk_021_restore_sees_desc_version`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/lifecycle.rs::sdk_021_restore_sees_desc_version`
 
 ### SDK-022 `restore` 接受当前与上一版本,其他版本返回 `VersionUnsupported`
 
@@ -432,12 +446,12 @@ spec: README.md
 - 规则:[Strategy 与 Model](README.md#strategy-与-model)
 - 级别:integ
 - 里程碑:M2
-- 前置:SDK-016 之后;G2 的 leg 0 有 0.01 BTC 净仓(1_000_000,−8)
+- 前置:SDK-016 之后;G2 的 leg 0 有 0.01 净仓(`SeqRig` 中 G2 是 a2 + b2,即 0.01 ETH);G2 登记了一个 60 s 的策略定时器
 - 步骤:
   1. 发送只含 G1、G3 的 `SetParams{version = 2}`
 - 期望:
-  - `CmdResult{PreconditionFailed, detail = GroupHasPosition}`;`RecProbe` 本命令期间无调用;G2 的定时器与目标保留
-- 实现:`crates/hft-testkit/tests/sdk_contract/lifecycle.rs::sdk_026_remove_group_with_position_rejected`
+  - `CmdResult{PreconditionFailed, detail = GroupHasPosition}`;`RecProbe` 本命令期间无调用;S3 生效参数仍为 version 1、G2 仍在其中,G2 的定时器仍在定时器堆(节 6)中
+- 实现:`crates/hft-sequencer/tests/sdk_contract/lifecycle.rs::sdk_026_remove_group_with_position_rejected`
 
 ### SDK-027 `GroupTable` 的长度、容量、下标与按 GroupId 查找
 
@@ -521,7 +535,7 @@ spec: README.md
 - 期望:
   - `RecModel` 的第一个调用是 `new`(在该 `SetParams` 的记录上);随后恰 3 次 `on_event(Bbo, gix 0)`,`v.now().seq` 依次为 q1、q2、q3
   - `RecProbe`(快速部分)没有收到 Bbo
-- 实现:`crates/hft-testkit/tests/sdk_contract/advisor.rs::sdk_031_model_created_and_fed`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/advisor.rs::sdk_031_model_created_and_fed`
 
 ### SDK-032 `Model::on_params` 幂等:同一参数重复应用不改状态
 
@@ -545,73 +559,75 @@ spec: README.md
   1. 投递一条 I1 的 Bbo
 - 期望:
   - `RecProbe.on_event` 恰两次,gix 依次为 0、2;两次的 `b` 逐字段相同
-- 实现:`crates/hft-testkit/tests/sdk_contract/subs.rs::sdk_033_multi_group_same_inst_gix_order`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/subs.rs::sdk_033_multi_group_same_inst_gix_order`
 
 ### SDK-034 参考行情订阅:不在账户 venues 内但有 feed 的 inst 照常投递
 
 - 规则:[Strategy 与 Model](README.md#strategy-与-model)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;本 hft-core 实例配置了 V3 的 feed;`RecProbe.subscriptions` 先 `rd.insts_of(asset 1)`,再对返回中 venue = V3 的 inst 调 `market(I3, 0, BBO, Fast)`
+- 前置:`SeqRig`;本 hft-core 实例配置了 V3 的 feed(`SeqRig` 另加 V3 = `OKX_SPOT`、I3 = inst 24 与 V4 = `BYBIT_SPOT`、I4 = inst 25,都是 BTC 现货;feed = {A, B, V3});`RecProbe.subscriptions` 先 `rd.insts_of(asset 1)`,再对返回中 venue = V3 的 inst 调 `market(I3, 0, BBO, Fast)`
 - 步骤:
   1. `SetParams` 生效
   2. 投递一条 I3 的 Bbo
 - 期望:
-  - `insts_of(1)` 返回 `[101, 102, 103, 104]`(InstId 升序,含不在 A1 venues 内的 103、104);`market` 返回 `Ok(())`
-  - 步骤 1 后出环一条 `FeedCmd::Subscribe{inst = 103}`,`streams` 含 BBO
-  - 步骤 2:`RecProbe.on_event(Bbo{inst = 103, gix = 0})` 一次
-- 实现:`crates/hft-testkit/tests/sdk_contract/subs.rs::sdk_034_reference_market_subscription`
+  - `insts_of(BTC)` 返回 `[11, 13, 21, 24, 25]`(InstId 升序,含不在 A1 venues 内的 24、25);`market` 返回 `Ok(())`
+  - 步骤 1 后出环一条 `FeedCmd::Subscribe{inst = 24}`(venue V3),`streams` 含 BBO
+  - 步骤 2:`RecProbe.on_event(Bbo{inst = 24, gix = 0})` 一次
+- 实现:`crates/hft-sequencer/tests/sdk_contract/subs.rs::sdk_034_reference_market_subscription`
 
 ### SDK-035 订阅本实例无 feed 的 venue 返回 `NoFeed`,`SetParams` 照常生效
 
 - 规则:[Strategy 与 Model](README.md#strategy-与-model)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;V4 在本 hft-core 实例无 feed;`RecProbe.subscriptions` 调 `market(I4, 0, BBO, Fast)`,得到 `Err` 时写 `Note{code = 3}`
+- 前置:`SeqRig`;V4 在本 hft-core 实例无 feed;`RecProbe.subscriptions` 调 `market(I4, 0, BBO, Fast)`;`subscriptions` 没有 `Ctx`,脚本在其后的第一个事件里对记下的 `Err` 写 `Note{code = 3, group = G1, inst = I4}`
 - 步骤:
   1. 发送 `SetParams{version = 1}`
+  2. 投递一条 I1 的 Bbo
 - 期望:
-  - `market` 返回 `Err(SubsErr::NoFeed)`;`CmdResult{Applied}`;journal 中有一条 `Note{source = Strategy, code = 2 << 24 | 3, group = G1, inst = 104}`;没有针对 inst 104 的 `FeedCmd::Subscribe`
-- 实现:`crates/hft-testkit/tests/sdk_contract/subs.rs::sdk_035_no_feed_does_not_fail_params`
+  - 步骤 1:`market` 返回 `Err(SubsErr::NoFeed)`;`CmdResult{Applied}`;没有针对 inst 25 的 `FeedCmd::Subscribe`
+  - 步骤 2:journal 中有一条 `Note{source = Strategy, code = 2 << 24 | 3, strategy = S3, group = G1, inst = 25}`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/subs.rs::sdk_035_no_feed_does_not_fail_params`
 
 ### SDK-036 订阅超出该 inst 的条目容量返回 `Full`,`SetParams` 照常生效
 
 - 规则:[Strategy 与 Model](README.md#strategy-与-model)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;`max_subs_per_inst = 2`;实例 S4 已订阅 I1 的一个条目;`RecProbe.subscriptions` 依次 `market(I1, 0, BBO, Fast)`、`market(I1, 1, BBO, Fast)`
+- 前置:`SeqRig`;`max_subs_per_inst = 2`;订阅按派发顺序重建,先运行的实例先占条目:实例 S4(本用例为 s1,派发顺序在前)以其 G1 腿占 I1 的一个条目;本用例的 S3 为 s2(两个 group),其 `subscriptions` 依次 `market(I1, 0, BBO, Fast)`、`market(I1, 1, BBO, Fast)`;sim-9 无参数(I1 只被两个 group 引用,`SetParams` 的容量复核通过)
 - 步骤:
-  1. 发送 `SetParams{S3, version = 1}`
+  1. 发送 `SetParams{S3, version = 2}`
   2. 投递一条 I1 的 Bbo
 - 期望:
   - 第一次 `market` 返回 `Ok(())`,第二次返回 `Err(SubsErr::Full)`;`CmdResult{Applied}`
-  - 步骤 2:`RecProbe` 只收到 gix 0 的一次
-- 实现:`crates/hft-testkit/tests/sdk_contract/subs.rs::sdk_036_subs_full_does_not_fail_params`
+  - 步骤 2:S3 只收到 gix 0 的一次;S4 照常收到 I1 的 Bbo
+- 实现:`crates/hft-sequencer/tests/sdk_contract/subs.rs::sdk_036_subs_full_does_not_fail_params`
 
 ### SDK-037 模型 tick 在 UTC 对齐边界后的第一条 `AdvisorTick` 上投递
 
 - 规则:[Strategy 与 Model](README.md#strategy-与-model)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig` + `AdvRig`;`AdvisorTick` 间隔 100 ms;`RecProbe.subscriptions` 调 `model_tick(1_000)`;journal 中第一条 `AdvisorTick` 的 UTC = 09:59:59.950
+- 前置:`SeqRig` + `AdvRig`;`AdvisorTick` 间隔 1 s(hft-sequencer 实盘驱动的定时器表);`RecProbe.subscriptions` 调 `model_tick(2_000)`;启动时的 `AdvisorTick` 在 UTC0(`SeqRig` 的 UTC 起点,整秒)
 - 步骤:
-  1. 驱动 3.0 s(31 条 `AdvisorTick`,UTC 09:59:59.950 … 10:00:02.950)
+  1. 驱动到 UTC0 + 4.95 s(其后 4 条 `AdvisorTick`,UTC0 + 1.95 s、2.95 s、3.95 s、4.95 s)
 - 期望:
-  - `RecModel` 恰收到 3 次 `Timer{tag = MODEL_TICK, group = GROUP_NONE, gix = GIX_NONE}`,分别在 UTC 10:00:00.050、10:00:01.050、10:00:02.050 的 `AdvisorTick` 记录上(`v.now().seq` 等于该记录的 seq);journal 的第一条 `AdvisorTick` 上没有
+  - `RecModel` 恰收到 2 次 `Timer{tag = MODEL_TICK, group = GROUP_NONE, gix = GIX_NONE}`,在 UTC0 + 2.95 s 与 UTC0 + 4.95 s 的 `AdvisorTick` 记录上(各自越过 2 s 整数倍边界后的第一条;`v.now().seq` 等于该记录的 seq);UTC0 + 1.95 s 与 3.95 s 的记录上没有
   - `RecProbe`(快速部分)没有收到 `MODEL_TICK`
-- 实现:`crates/hft-testkit/tests/sdk_contract/advisor.rs::sdk_037_model_tick_utc_aligned`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/advisor.rs::sdk_037_model_tick_utc_aligned`
 
 ### SDK-038 `every_ms` 不是 tick 间隔整数倍时按刻度取整、SDK 不拒绝
 
 - 规则:[Strategy 与 Model](README.md#strategy-与-model)
 - 级别:integ
 - 里程碑:M2
-- 前置:同 SDK-037,但 `model_tick(250)`;`AdvisorTick` 间隔 100 ms,journal 中首条 UTC 10:00:00.040
+- 前置:同 SDK-037,但 `model_tick(1_500)`(不是 1 s 刻度的整数倍)
 - 步骤:
-  1. 驱动 1.0 s(11 条,10:00:00.040 … 10:00:01.040)
+  1. 驱动到 UTC0 + 6.04 s(其后 6 条 `AdvisorTick`,UTC0 + 1.04 s … 6.04 s)
 - 期望:
-  - `SetParams` 为 `Applied`;模型 tick 恰 4 次,落在 UTC 10:00:00.340、.540、.840 与 10:00:01.040 的记录上(每个 250 ms 整数倍边界之后的第一条)
-- 实现:`crates/hft-testkit/tests/sdk_contract/advisor.rs::sdk_038_model_tick_rounds_to_resolution`
+  - `SetParams` 为 `Applied`;模型 tick 恰 4 次,落在 UTC0 + 2.04 s、3.04 s、5.04 s、6.04 s 的记录上(1.5 s 整数倍边界 1.5、3.0、4.5、6.0 s 之后的第一条)
+- 实现:`crates/hft-sequencer/tests/sdk_contract/advisor.rs::sdk_038_model_tick_rounds_to_resolution`
 
 ### SDK-039 advisor 在不同位置重启,模型 tick 的投递记录不变
 
@@ -619,10 +635,10 @@ spec: README.md
 - 级别:prop
 - 里程碑:M2
 - 性质:同一段 journal(含 `AdvisorTick` 与 Bbo),advisor 在第 k 条记录处丢弃内存状态并从检查点(或空状态 + 全量重放)重启;各次运行中 `MODEL_TICK` 投递所在记录的 seq 集合相同
-- 生成:journal 长 200–2 000 条;`model_tick` ∈ {100, 250, 1 000, 60 000};k 在 [1, 长度) 均匀抽取;检查点位置随机
+- 生成:每个 `model_tick` ∈ {100, 250, 1 000, 60 000} 一段约 2 min 的 journal(每 100 ms 一条 I1 Bbo,约 1 500 条);k 在 [第一个快照之后, 长度) 均匀抽取;检查点取在 k(或不用检查点)
 - 参考:不重启的一次运行
 - 例数:PR 200;每夜 5 000
-- 实现:`crates/hft-testkit/tests/sdk_contract/advisor.rs::sdk_039_model_tick_restart_invariant`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/advisor.rs::sdk_039_model_tick_restart_invariant`
 
 ### SDK-040 订阅 `model_own` 的 Model 收到与快速部分同值同序的 Order、Exec、Manual
 
@@ -631,13 +647,13 @@ spec: README.md
 - 里程碑:M2
 - 前置:`SeqRig` + `AdvRig`;`RecProbe.subscriptions` 调 `model_own(ORDER | EXEC | MANUAL)`;`TP.cmds` 中 op 1 合法
 - 步骤:
-  1. `RecProbe` 下一张 IOC,`MockVenue` 回 Ack、部分成交、全部成交
+  1. `RecProbe` 下一张 I1 IOC 0.001(裸露名义低于敞口闸门下限),交易所回 Ack、部分成交 0.0004、全部成交
   2. `RecProbe` 设一个 `TakerSlice` 目标,成交一片
-  3. 发送 `StrategyCmd{S3, A1, group = G2, payload = op 1}`
+  3. 发送 `StrategyCmd{S3, A1, group = G2, payload = op 1}`(`qty` = 5)
 - 期望:
   - `RecModel` 收到的 `Order` × 3、`Exec` × ≥ 1、`Manual` × 1 与 `RecProbe` 收到的同名事件逐字段相同、顺序相同,`v.now().seq` 相同
-  - 以同一 journal 重放(`AdvRig` 从头重启)得到逐字节相同的 `RecModel` 调用记录
-- 实现:`crates/hft-testkit/tests/sdk_contract/delivery.rs::sdk_040_model_own_mirrors_fast`
+  - 脚本按固定的 `update_id` 触发,以同一 journal 重放(`AdvRig` 从头重启)得到逐字节相同的 `RecModel` 调用记录
+- 实现:`crates/hft-sequencer/tests/sdk_contract/delivery.rs::sdk_040_model_own_mirrors_fast`
 
 ### SDK-041 未调用 `model_own` 的 Model 收不到本实例的 Order、Exec、Manual
 
@@ -650,15 +666,15 @@ spec: README.md
 - 期望:
   - 第一组:`RecModel` 的调用记录中没有 `Order`、`Exec`、`Manual`
   - 第二组:只有 `Exec`,没有 `Order` 与 `Manual`
-- 实现:`crates/hft-testkit/tests/sdk_contract/delivery.rs::sdk_041_model_own_mask_respected`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/delivery.rs::sdk_041_model_own_mask_respected`
 
 ### SDK-042 行情变体按 `EvMask` 与 `Part` 投递给快速部分与 Model
 
 - 规则:[EventRef](README.md#eventref)、[Strategy 与 Model](README.md#strategy-与-model)
 - 级别:table
 - 里程碑:M2
-- 前置:`SeqRig` + `AdvRig`;每行一次独立运行,`RecProbe.subscriptions` 对 I2 调一次 `market(I2, 0, <掩码>, <Part>)`;随后依次投递 I2 的 Bbo、L2Snapshot{origin = TopN}、Trade、Funding、MarkPrice、IndexPrice、Liquidation 各一条
-- 实现:`crates/hft-testkit/tests/sdk_contract/delivery.rs::sdk_042_market_variants_by_mask_and_part`
+- 前置:`SeqRig` + `AdvRig`;每行一次独立运行,`RecProbe.subscriptions` 对 I2 调一次 `market(I2, 0, <掩码>, <Part>)`(本用例的 I2 为不在任何 group 内的 b2,`l2_depth = 5`;group 腿有 L2 簿时簿未建立前 cell 不能进 Live);随后依次投递 I2 的 Bbo、L2Snapshot{origin = TopN}、Trade、Funding、MarkPrice、IndexPrice、Liquidation 各一条
+- 实现:`crates/hft-sequencer/tests/sdk_contract/delivery.rs::sdk_042_market_variants_by_mask_and_part`
 
 | 行 | 掩码 / Part | 快速部分收到 | Model 收到 |
 |---|---|---|---|
@@ -674,13 +690,13 @@ spec: README.md
 - 规则:[EventRef](README.md#eventref)、[Strategy 与 Model](README.md#strategy-与-model)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;`market(I2, 0, BOOK, Fast)`;路由 `DepthTopN`(N = 5)
+- 前置:`SeqRig`;本用例的 I2 = 填充 inst 15(V1 现货、资产 4,不属于任何 group),其 `l2_depth = 5`(启动闸门 `Gate(Feeds)` 要等 group 腿的 L2 簿 Live 才放行,group 腿的簿在 steady 状态下不可能尚无快照);`market(I2, 0, BOOK, Fast)`;路由 `DepthTopN`(N = 5)
 - 步骤:
   1. 投递一条 5 档的 `L2Snapshot{origin = TopN}`
   2. `RecProbe` 在收到 `Book` 时调 `v.book(I2).levels(Bid, &mut [Level; 8])`
 - 期望:
-  - `on_event(Book{inst = 102, gix = 0})` 恰一次;`levels` 返回 5,5 档与快照逐字段相同、由内向外;`status() = Live`
-- 实现:`crates/hft-testkit/tests/sdk_contract/delivery.rs::sdk_043_book_once_per_message`
+  - `on_event(Book{inst = I2, gix = 0})` 恰一次;`levels` 返回 5,5 档与快照逐字段相同、由内向外;`status() = Live`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/views.rs::sdk_043_book_once_per_message`
 
 ### SDK-044 只因引擎持仓驱动订阅的行情不投递给策略
 
@@ -692,7 +708,7 @@ spec: README.md
   1. 投递 I5 的 MarkPrice、Funding、Bbo 各一条
 - 期望:
   - `RecProbe` 与 `RecModel` 都没有任何 `inst = 105` 的调用;ledger 的 I5 标记价已更新(`v.portfolio(A1).perp(V2, 105).upnl` 随 mark 变化)
-- 实现:`crates/hft-testkit/tests/sdk_contract/delivery.rs::sdk_044_engine_only_feed_not_delivered`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/delivery.rs::sdk_044_engine_only_feed_not_delivered`
 
 ### SDK-045 `Order` 只投递策略自己 `place` 的订单,执行层切片只汇总为 `Exec`
 
@@ -705,22 +721,22 @@ spec: README.md
 - 期望:
   - `RecProbe` 收到 `Order{gix = 0}` 两次(`Acked`;`Filled{done = true}`),`u.tag = 11`、`u.r` 等于 `outcome` 返回的 `Placed(r)`
   - 收到 `Exec{gix = 1, u.kind = Progress{leg_ix = 0, d = 成交净量}, u.tag = 22}`;没有 `tag = 22` 的 `Order` 事件
-- 实现:`crates/hft-testkit/tests/sdk_contract/delivery.rs::sdk_045_order_only_for_placed`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/delivery.rs::sdk_045_order_only_for_placed`
 
 ### SDK-046 `External` 投递给账户绑定的实例,不可归属时 `gix = GIX_NONE`,Model 永不收到
 
 - 规则:[EventRef](README.md#eventref)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig` + `AdvRig`;`RecProbe.subscriptions` 调 `model_own(ORDER | EXEC | MANUAL)`;G2 的 leg 1(I2)持有空头 0.02
+- 前置:`SeqRig` + `AdvRig`;`RecProbe.subscriptions` 调 `model_own(ORDER | EXEC | MANUAL)`;G2 的 leg 1(b2)持有空头 0.02
 - 步骤:
-  1. 投递 `ExternalFill{venue V2, inst 102, cause = Liquidation, qty = 0.02}`(可归属 G2)
-  2. 投递 `ExternalFill{venue V2, inst 105, cause = Manual}`(I5 不在任何 group 内)
+  1. 投递 `ExternalFill{venue V2, inst 22, cause = Liquidation, qty = 0.02}`(可归属 G2)
+  2. 投递 `ExternalFill{venue V1, inst 13, cause = Manual}`(a3 不在 S3 的任何 group 内)
 - 期望:
   - 步骤 1:`RecProbe.on_event(External{gix = 1})`,`f.group = G2`、`f.cause = Liquidation`、`f.deadline_tsc > 0`
   - 步骤 2:`RecProbe.on_event(External{gix = 0xFFFF})`,`f.group = GROUP_NONE`、`f.deadline_tsc = 0`
   - `RecModel` 两步都没有 `External` 调用
-- 实现:`crates/hft-testkit/tests/sdk_contract/delivery.rs::sdk_046_external_fast_only`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/delivery.rs::sdk_046_external_fast_only`
 
 ### SDK-047 `Risk`、`Mode`、`Conn` 只投递给快速部分
 
@@ -729,29 +745,29 @@ spec: README.md
 - 里程碑:M2
 - 前置:`SeqRig` + `AdvRig`;`RecProbe` 订阅 I1(BBO,Both),`model_own` 全部三位;实例 Live
 - 步骤:
-  1. 投递使 V2 进入 MarginStress L1 的 `MarginReport`
+  1. 投递使 V2 进入 MarginStress L2 的 `MarginReport`(`margin_ratio = 0.90` ≥ 交叉核对线 0.80)
   2. 发送 `SetMode{S3, G2, A1, CloseOnly}`
   3. 投递 V1 BBO 连接的 `ConnState{Down}`
 - 期望:
-  - 步骤 1:`RecProbe` 收到 `Risk{a = A1, e = MarginStress{venue = V2, level = L1}}`
+  - 步骤 1:`RecProbe` 收到 `Risk{a = A1, e = MarginStress{venue = V2, level = L2}}`
   - 步骤 2:`RecProbe` 收到 `Mode{gix = 1, old = Live, new = CloseOnly}`
   - 步骤 3:`RecProbe` 收到 `Conn{venue = V1, state = Down}`
   - `RecModel` 在三步中都没有 `Risk`、`Mode`、`Conn` 调用
-- 实现:`crates/hft-testkit/tests/sdk_contract/delivery.rs::sdk_047_risk_mode_conn_fast_only`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/delivery.rs::sdk_047_risk_mode_conn_fast_only`
 
 ### SDK-048 `Conn` 只投递给订阅了该 venue 任一 inst 的实例,`Alive` 不投递
 
 - 规则:[Strategy 与 Model](README.md#strategy-与-model)、[EventRef](README.md#eventref)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;实例 S3 订阅 I1(V1);实例 S4(kind 0xFF03,绑定 A2)只订阅 I2(V2)
+- 前置:`SeqRig`;实例 S3 订阅 I1(V1);实例 S4(s2,绑定 A2)只订阅 I2(V2)
 - 步骤:
   1. 投递 V1 BBO 连接的 `ConnState{Resync}`
   2. 投递 V1 BBO 连接的 `ConnState{Alive}`
 - 期望:
   - 步骤 1:S3 收到 `Conn{venue = V1, state = Resync}` 一次;S4 没有
   - 步骤 2:S3、S4 都没有 `Conn`
-- 实现:`crates/hft-testkit/tests/sdk_contract/delivery.rs::sdk_048_conn_by_venue_subscription`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/delivery.rs::sdk_048_conn_by_venue_subscription`
 
 ### SDK-049 `Notice` 投递给订阅了该 inst 的 group,快速部分与 Model 都收
 
@@ -764,7 +780,7 @@ spec: README.md
 - 期望:
   - `RecProbe` 收到 `Notice{inst = 101}` 两次,gix 依次 0、2;`n.kind = Delisting{at_ns = T}`
   - `RecModel` 同样收到 gix 0、2 两次(订阅的 `Part` 为 `Fast` 也收)
-- 实现:`crates/hft-testkit/tests/sdk_contract/delivery.rs::sdk_049_notice_both_parts`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/delivery.rs::sdk_049_notice_both_parts`
 
 ### SDK-050 策略定时器以 GroupId 登记、投递时现查 gix、只投递给快速部分
 
@@ -777,7 +793,7 @@ spec: README.md
   2. 推进到 t0 + 5 s
 - 期望:
   - 步骤 2:`RecProbe` 收到 `Timer{tag = 7, group = G3, gix = 1}` 一次;`RecModel` 没有 `tag = 7` 的调用
-- 实现:`crates/hft-testkit/tests/sdk_contract/delivery.rs::sdk_050_timer_by_group_id`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/delivery.rs::sdk_050_timer_by_group_id`
 
 ### SDK-051 被移除 group 的定时器在应用参数时撤销并写 Note,之后不投递
 
@@ -791,34 +807,34 @@ spec: README.md
 - 期望:
   - 步骤 1 的同一 Input 内 journal 有一条 sequencer 的 Note,`group = G2`
   - 步骤 2 期间 `RecProbe` 没有 `tag = 8` 的 `Timer`
-- 实现:`crates/hft-testkit/tests/sdk_contract/delivery.rs::sdk_051_removed_group_timer_cancelled`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/delivery.rs::sdk_051_removed_group_timer_cancelled`
 
 ### SDK-052 `Advice` 只投递给产出它的实例的快速部分
 
 - 规则:[EventRef](README.md#eventref)、[Advice 载荷](README.md#advice-载荷)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig` + `AdvRig`;实例 S3、S4 都是 `RecSet`;`RecModel`(S3)在一次模型 tick 上 `emit_raw(G2, 1, &[1, 0, 0, 0, 0, 0, 0, 0])` 与 `emit_raw(GROUP_NONE, 2, &[1])`
+- 前置:`SeqRig` + `AdvRig`;实例 S3、S4 都是 `TestSet`,`AdvRig` 运行两者的 Model;`RecModel`(S3)在一次模型 tick 上 `emit_raw(G2, 1, &[1, 0, 0, 0, 0, 0, 0, 0])` 与 `emit_raw(GROUP_NONE, 2, &[1])`
 - 步骤:
   1. 驱动到该 Advice 被 sequencer 处理
 - 期望:
   - S3 的 `RecProbe` 收到 `Advice{gix = 1, local_kind = 1, payload = [1, 0, 0, 0, 0, 0, 0, 0]}` 与 `Advice{gix = 0xFFFF, local_kind = 2, payload = [1]}`,`basis_seq` 等于 `RecModel` 产出它时正在处理的记录的 seq,`basis_tsc` 等于该记录头 tsc
   - S4 没有 `Advice`;S3、S4 的 Model 都没有 `Advice` 调用
-- 实现:`crates/hft-testkit/tests/sdk_contract/delivery.rs::sdk_052_advice_to_producer_fast_only`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/delivery.rs::sdk_052_advice_to_producer_fast_only`
 
 ### SDK-053 `Manual` 投递给命令指向的 group,`GROUP_NONE` 为实例级
 
 - 规则:[EventRef](README.md#eventref)、[策略描述符:Note、报表、策略命令](README.md#策略描述符note报表策略命令)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;`RecProbe` 的 `cmds` = op 1 `open`(字段 `notional`: Notional 0..=10_000_000_000,`reduce_only = false`)
+- 前置:`SeqRig`;`RecProbe` 的 `cmds` = op 1 `open`(字段 `qty`: 1..=100,`reduce_only = false`)
 - 步骤:
-  1. 发送 `StrategyCmd{S3, A1, group = G2, reduce_only = false, payload = encode_cmd(op 1, [1_000_000_000])}`
+  1. 发送 `StrategyCmd{S3, A1, group = G2, reduce_only = false, payload = encode_cmd(op 1, [5])}`
   2. 发送同一命令但 `group = none`
 - 期望:
-  - 步骤 1:`RecProbe.on_event(Manual{gix = 1, reduce_only = false})`,`CmdView::parse(payload)` 的 `op() = 1`、`val(0) = Some(1_000_000_000)`;`v.now().seq` = 该命令记录的 seq
+  - 步骤 1:`RecProbe.on_event(Manual{gix = 1, reduce_only = false})`,`CmdView::parse(payload)` 的 `op() = 1`、`val(0) = Some(5)`;`v.now().seq` = 该命令记录的 seq
   - 步骤 2:`Manual{gix = 0xFFFF}`
-- 实现:`crates/hft-testkit/tests/sdk_contract/delivery.rs::sdk_053_manual_by_group`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/delivery.rs::sdk_053_manual_by_group`
 
 ### SDK-054 `cmds` 为空的策略收不到 `Manual`
 
@@ -830,7 +846,7 @@ spec: README.md
   1. 发送 `StrategyCmd{S3, A1, group = none, payload = [1, 1, 0, 0, 0, 0, 0, 0]}`
 - 期望:
   - 客户端收到 gateway 的 `CmdResult{InvalidArgs, detail = ParamInvalid}`;`RecProbe` 没有 `Manual`
-- 实现:`crates/hft-testkit/tests/sdk_contract/delivery.rs::sdk_054_no_cmds_no_manual`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/delivery.rs::sdk_054_no_cmds_no_manual`
 
 ### SDK-055 `Warmup` 默认只投递给 Model,`warmup(Part::Both)` 时快速部分也收
 
@@ -843,7 +859,7 @@ spec: README.md
 - 期望:
   - 两组:`CmdResult{Applied}`;`RecModel` 收到 `Warmup{local_kind = 1, chunk_no = 0, last = true}` 一次,`payload` 与命令逐字节相同
   - 第一组:`RecProbe` 没有 `Warmup`;第二组:`RecProbe` 在该命令的同一 Input 内收到同一 `Warmup`
-- 实现:`crates/hft-testkit/tests/sdk_contract/delivery.rs::sdk_055_warmup_routing`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/delivery.rs::sdk_055_warmup_routing`
 
 ### SDK-056 `Views` 在 `on_event` 中反映引擎已应用本输入、本次意图尚未处理的状态
 
@@ -857,7 +873,7 @@ spec: README.md
 - 期望:
   - 步骤 1:`v.bbo(I1)` 与事件的 `b` 逐字段相同(bid 6_500_000、ask 6_500_100);`place` 之后读到的 `leg[0].inflight_immediate = 0`
   - 步骤 2:`leg[0].inflight_immediate = 1_000_000`(0.01)
-- 实现:`crates/hft-testkit/tests/sdk_contract/views.rs::sdk_056_views_state_point`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/views.rs::sdk_056_views_state_point`
 
 ### SDK-057 没有兜底分支的 `match EventRef` 编译失败
 
@@ -876,12 +892,12 @@ spec: README.md
 - 规则:[策略包的三部分](README.md#策略包的三部分)、[Model 检查点](README.md#model-检查点)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig` 生成一段含 50 条 Advice 的 journal;验证回放以一个 `RecSet` 变体运行,其 `model_on_event`、`model_on_params`、`model_restore` 被调用即 panic
+- 前置:`SeqRig` 写一个关键帧后经 advice 环交出 50 条 Advice;`RecSet` 记录每次 Model 方法调用
 - 步骤:
   1. `VerifyDriver` 回放整段 journal
 - 期望:
-  - 不 panic;意图流与 journal 中的 Output 逐字节一致;`RecProbe` 收到的 50 条 Advice 与实盘逐字节相同
-- 实现:`crates/hft-testkit/tests/sdk_contract/replay.rs::sdk_058_replay_never_runs_model`
+  - 验证回放没有不一致;没有任何 Model 方法调用或 Model 投递;`RecProbe` 收到的 50 条 Advice 与实盘逐字节相同
+- 实现:`crates/hft-sequencer/tests/sdk_contract/replay.rs::sdk_058_replay_never_runs_model`
 
 ### SDK-059 group 数超过 `max_groups_per_instance` 时解码返回 `TooManyGroups`
 
@@ -907,34 +923,34 @@ spec: README.md
   1. 发送 9 个 group 的 `SetParams{version = 2}`
 - 期望:
   - 客户端收到 `CmdResult{InvalidArgs, detail = ParamInvalid}`,`arg & 0xF = 1`(kind `Strategy`);S3 生效版本仍为 1;`RecProbe` 无调用
-- 实现:`crates/hft-testkit/tests/sdk_contract/lifecycle.rs::sdk_060_too_many_groups_at_gateway`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/lifecycle.rs::sdk_060_too_many_groups_at_gateway`
 
 ### SDK-061 `non_prod_only` 的策略不能绑定正式账户
 
 - 规则:[Strategy 与 Model](README.md#strategy-与-model)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;`RecProbe.DESC.non_prod_only = true`;实例 S3 绑定 A1(`is_prod = false`),实例 S5(同一种类)绑定 A9(`is_prod = true`)
+- 前置:`SeqRig`;种类 probe-np(`non_prod_only = true`);实例 S3(`StrategyId 3`)绑定账户 3(`is_prod = false`),实例 S5(`StrategyId 4`,同一种类)绑定账户 4(`is_prod = true`);两账户 venues {A, B}
 - 步骤:
   1. 对 S3 发 `SetParams`
   2. 对 S5 发 `SetParams`
 - 期望:
   - 步骤 1:`CmdResult{Applied}`
-  - 步骤 2:`CmdResult{InvalidArgs, detail = ParamInvalid}`,`arg & 0xF = 3`(kind `NonProdOnly`);S5 不被创建(无 `new` 调用)
-- 实现:`crates/hft-testkit/tests/sdk_contract/lifecycle.rs::sdk_061_non_prod_only_rejected_on_prod`
+  - 步骤 2:`CmdResult{InvalidArgs, detail = ParamInvalid}`,`arg & 0xF = 3`(kind `NonProdOnly`);S5 不被创建(无 `create` 调用)
+- 实现:`crates/hft-sequencer/tests/sdk_contract/lifecycle.rs::sdk_061_non_prod_only_rejected_on_prod`
 
 ### SDK-062 两腿各在自己的 venue 记现金,一个 venue 的成交不改另一个 venue 的余额
 
 - 规则:[Strategy 与 Model](README.md#strategy-与-model)、[视图类型](README.md#视图类型)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;A1 在 V1 有 USDT 10_000(10_000_000_000)、在 V2 有 USDT 5_000;G1 两腿 I1(V1)、I2(V2)
+- 前置:`SeqRig`;A1 在 V1 有 USDT 10_000(10_000_000_000)、在 V2 有 USDT 5_000(两条都是 A1 在该 venue 该资产的首条 `BalanceReport`:ledger 只用首条报告初始化现金,之后的报告只做漂移核对);G1 两腿 I1(V1)、I2(V2)
 - 步骤:
   1. `RecProbe` 在 I1 买入 0.01 BTC @ 65_000.00 的 IOC,`MockVenue` 全部成交、手续费 0 
   2. 下一事件读 `v.portfolio(A1).cash(V1, USDT)`、`cash(V2, USDT)`、`venues()`
 - 期望:
   - `cash(V1, USDT).free = 9_350_000_000`(10_000 − 650);`cash(V2, USDT).free = 5_000_000_000`(不变);`venues()` = {V1, V2}
-- 实现:`crates/hft-testkit/tests/sdk_contract/views.rs::sdk_062_cash_per_venue`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/views.rs::sdk_062_cash_per_venue`
 
 ### SDK-063 Model 在最大 group 数、满窗口、预热后实际分配不超过 `mem_bytes`
 
@@ -967,52 +983,52 @@ spec: README.md
 - 规则:[Model 检查点](README.md#model-检查点)
 - 级别:table
 - 里程碑:M2
-- 前置:`SeqRig` + `AdvRig`;实例 S3(`strategy = 3`、`account = A1`、kind 0xFF03、`LAYOUT_VERSION = 1`、`schema.id = 0xFF01`、`PATH_VERSION = 1`);在 seq 5 000 写出一份检查点(`last_seq = 5 000`),journal 继续到 seq 6 000;每行只改该行的一项后重启 advisor
-- 实现:`crates/hft-testkit/tests/sdk_contract/checkpoint.rs::sdk_065_checkpoint_key_matrix`
+- 前置:`SeqRig` + `AdvRig`;实例 S3(s1:`account = A1`、kind 0xFF01、`schema.id = 0xFF01`、`PATH_VERSION = 1`;布局摘要 `CkptHdr.layout` 代表 `LAYOUT_VERSION`);version 7(`thr = 7`)生效、Model 订阅 I1 的 BBO;在 seq L 写出一份检查点(`last_seq = L`),之后 journal 继续(3 条 I1 Bbo);每行只改该行的一项后重启 advisor。检查点文件格式(magic、`PathSecHdr`)归 apps/hft-core,`MemCkpt` 存 `CkptHdr` + 体(`path_len: u32`、`PATH_VERSION: u32`、路径状态节、原始样本节)
+- 实现:`crates/hft-sequencer/tests/sdk_contract/checkpoint.rs::sdk_065_checkpoint_key_matrix`
 
 | 行 | 重启前的改动 | 期望 |
 |---|---|---|
 | SDK-065.1 | 不改 | `model_restore` 与 `model_restore_path` 各 1 次;没有 `ModelCheckpointDiscarded`、`ModelPathReset` |
 | SDK-065.2 | 检查点文件头 `kind_id = 0xFF04` | `Note{source = Advisor, code = ModelCheckpointDiscarded}`,`v[0] = 3`、`v[1] = 3`(KeyMismatch);`create_model` 空状态起步,无 `model_restore` |
 | SDK-065.3 | 二进制的 `LAYOUT_VERSION = 2` | 同 .2(`v[1] = 3`) |
-| SDK-065.4 | 二进制的 `schema.id = 0xFF05` | 同 .2(`v[1] = 3`) |
+| SDK-065.4 | 文件头 `schema_id = 0xFF05`(与二进制的 `schema.id` 不同) | 同 .2(`v[1] = 3`) |
 | SDK-065.5 | 文件头 `strategy = 4` | 同 .2(`v[1] = 3`) |
 | SDK-065.6 | 文件头 `account = A2` | 同 .2(`v[1] = 3`) |
 | SDK-065.7 | 删除检查点文件 | `v[1] = 1`(Missing) |
-| SDK-065.8 | 文件头 magic 改一个字节 | `v[1] = 2`(Corrupt) |
+| SDK-065.8 | 文件头 `len` 与体长不符 | `v[1] = 2`(Corrupt) |
 | SDK-065.9 | 原始样本节翻转一位(CRC 不符) | `v[1] = 2` |
-| SDK-065.10 | `PathSecHdr.path_len` 大于体长 | `v[1] = 2` |
-| SDK-065.11 | seq 1–5 500 所在段已删除(热段与冷副本都不可读) | `v[1] = 4`(SeqNotInJournal) |
+| SDK-065.10 | 体内 `path_len` 大于体长(校验和按改后的体重算) | `v[1] = 2` |
+| SDK-065.11 | `last_seq` 不在可读的 journal 内(文件头 `last_seq = 2^40`) | `v[1] = 4`(SeqNotInJournal) |
 | SDK-065.12 | `RecModel` 脚本:`restore` 返回 `Err` | `v[1] = 5`(RestoreErr);随后 `create_model` |
 | SDK-065.13 | seq 5 000 之后有一条改非结构字段的 `SetParams` | 接受;重放到该记录时 `model_on_params` 被调用;无丢弃 Note |
-| SDK-065.14 | 二进制的 `schema.version` 3(新增字段,`since = 3`) | 接受;无丢弃 Note |
+| SDK-065.14 | 换成 `DESC.version` 4 的二进制(`TestSetV4`;`schema.version` 不在检查点键内,`CkptHdr` 没有该字段) | 接受;无丢弃 Note |
 | SDK-065.15 | 重启前发 `ReplaceRefdata`(refdata 版本 +1) | 接受;无丢弃 Note |
-| SDK-065.16 | 二进制 git SHA 不同(重新构建同一源码加一行注释) | 接受;无丢弃 Note |
-| SDK-065.17 | 二进制的 `PATH_VERSION = 2` | 接受原始样本节;不调 `model_restore_path`;`Note{ModelPathReset}`,`v[0] = 1`、`v[1] = 5 000`、`v[2] = 60_000`、`v[3] = 1`、`v[4] = 2` |
+| SDK-065.16 | hft-core 以另一个构建(`HostProfile.build_git` 不同)重启(版本变化须先 Drain:Drain 结束后以 `DrainTail` 起步) | 接受;无丢弃 Note |
+| SDK-065.17 | 二进制的 `PATH_VERSION = 2` | 接受原始样本节;不调 `model_restore_path`;`Note{ModelPathReset}`,`v[0] = 1`、`v[1] = L`、`v[2]` = `path_settle_ms`(`TestSet` 为 0)、`v[3] = 1`、`v[4] = 2` |
 
 ### SDK-066 恢复顺序:`restore` → `restore_path` → 以 `last_seq` 处参数调 `on_params` → 从 `last_seq + 1` 重放
 
 - 规则:[Model 检查点](README.md#model-检查点)
 - 级别:integ
 - 里程碑:M2
-- 前置:同 SDK-065;seq 4 000 处 `SetParams{version = 7}` 生效、seq 5 500 处 `SetParams{version = 8}`;`RecModel` 订阅 I1 的 BBO;检查点 `last_seq = 5 000`
+- 前置:同 SDK-065(检查点之前 `SetParams{version = 7}` 生效);检查点之后 `SetParams{version = 8}`(`thr = 8`)再一条 I1 Bbo
 - 步骤:
-  1. 重启 advisor,驱动到 seq 6 000
+  1. 以该检查点重启 advisor,追到 journal 尾
 - 期望:
-  - `RecModel` 的调用顺序:`restore`、`restore_path`、`on_params(version 7)`,然后从 seq 5 001 起的 I1 Bbo 依次 `on_event`,seq 5 500 处 `on_params(version 8)`;没有 seq ≤ 5 000 的 `on_event`
-- 实现:`crates/hft-testkit/tests/sdk_contract/checkpoint.rs::sdk_066_restore_order`
+  - `RecModel` 的调用顺序:`create_model`(空状态)、`restore`、`restore_path`、`on_params(version 7)`,`on_params(version 8)`;`on_event` 恰为 seq > L 的全部 I1 Bbo(含 version 8 之后的那条),没有 seq ≤ L 的 `on_event`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/checkpoint.rs::sdk_066_restore_order`
 
 ### SDK-067 追赶期间产出的 Advice 依据上次启动的记录,`basis_seq < boot_seq`
 
 - 规则:[Model 检查点](README.md#model-检查点)、[Advice 载荷](README.md#advice-载荷)
 - 级别:integ
 - 里程碑:M2
-- 前置:同 SDK-066;hft-core 在 seq 6 000 停机后重启,本次 `EpochStart` 的 seq = 6 003
+- 前置:同 SDK-065;检查点之后 hft-core 停机(崩溃)并从最新快照冷启动,本次 `EpochStart` 的 seq = E
 - 步骤:
-  1. advisor 从 seq 5 001 重放到实时,期间 `RecModel` 每个模型 tick 发一条 Advice
+  1. advisor 以该检查点重启,从 L + 1 重放到实时,期间 `RecModel` 对每条 I1 Bbo 发一条 Advice;把它们交给 sequencer
 - 期望:
-  - 依据 seq 5 001–6 002 产出的每条 Advice 都满足 `basis_seq < 6 003`;`RecProbe` 收到它们时 `v.now().boot_seq = 6 003`
-- 实现:`crates/hft-testkit/tests/sdk_contract/checkpoint.rs::sdk_067_catchup_advice_predates_boot`
+  - 每条 Advice 都满足 `L < basis_seq < E`;`RecProbe` 收到它们时 `v.now().boot_seq = E`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/checkpoint.rs::sdk_067_catchup_advice_predates_boot`
 
 ### SDK-068 `restore_path` 出错时只丢路径节,Model 状态等于只恢复原始样本节的结果
 
@@ -1038,8 +1054,8 @@ spec: README.md
 - 步骤:
   1. 重启 advisor
 - 期望:
-  - `Note{source = Advisor, code = ModelPathReset}`,`v[0] = 2`、`v[1] = 5 000`、`v[2] = 60_000`;没有 `ModelCheckpointDiscarded`;随后 `on_params` 与重放照常
-- 实现:`crates/hft-testkit/tests/sdk_contract/checkpoint.rs::sdk_069_restore_path_err_note`
+  - `Note{source = Advisor, code = ModelPathReset}`,`v[0] = 2`、`v[1] = L`、`v[2]` = `path_settle_ms`(0);没有 `ModelCheckpointDiscarded`;随后 `on_params(version 7)` 与 L 之后的重放照常
+- 实现:`crates/hft-sequencer/tests/sdk_contract/checkpoint.rs::sdk_069_restore_path_err_note`
 
 ### SDK-070 路径状态节总是检查点的第一块,原始样本节按 group 分块
 
@@ -1094,14 +1110,14 @@ spec: README.md
 - 规则:[Model 检查点](README.md#model-检查点)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig` + `AdvRig`;`RecModel` 声明 `snapshot_bytes = 10_000`;第一代检查点 6 000 B 已提交(`last_seq = 1 000`);之后状态增长到 10 001 B
+- 前置:`SeqRig` + `AdvRig`;`RecModel` 声明 `snapshot_bytes = 10_000`(`ckpt` 字段),每个 group 写 8 B 原始样本;第一代检查点已提交(`last_seq = L1`);之后 `SetParams` 把声明降到 16 B(3 个 group 的样本 24 B 超出)
 - 步骤:
-  1. 到下一个 `advisor.model_checkpoint_ms`(测试配置 60 000)周期写检查点
+  1. 写下一代检查点(`AdvRig` 直接开始一轮检查点,代替 `advisor.model_checkpoint_ms` 周期)
   2. 重启 advisor
 - 期望:
-  - 步骤 1 后 `MemCkpt` 中当前代仍是 `last_seq = 1 000` 的那份,没有 `last_seq > 1 000` 的提交
-  - 步骤 2 恢复的是 `last_seq = 1 000` 的检查点
-- 实现:`crates/hft-testkit/tests/sdk_contract/checkpoint.rs::sdk_074_oversize_generation_discarded`
+  - 步骤 1 后 `MemCkpt` 中当前代仍是 `last_seq = L1` 的那份,没有新的提交;一条 Meta `Note{ModelCkptSkipped}`(P1,`v[2] = 16`)
+  - 步骤 2 恢复的是 `last_seq = L1` 的检查点(无丢弃 Note)
+- 实现:`crates/hft-sequencer/tests/sdk_contract/checkpoint.rs::sdk_074_oversize_generation_discarded`
 
 ### SDK-075 原始样本节不存可重算的派生状态,改打分逻辑不需提升 `LAYOUT_VERSION`
 
@@ -1243,26 +1259,26 @@ spec: README.md
 - 规则:[参数变化时的 group 重置](README.md#参数变化时的-group-重置)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig` + `AdvRig`;S3 的 version 4 生效(`GT3`,G2 覆盖 `pct_bin`);`RecModel` 按 `ProbeModel` 的规则判定重置
+- 前置:`SeqRig` + `AdvRig`;S3 的 version 4 生效(`GT3`,G2 覆盖 `pct_bin`);`RecModel` 的 `model_on_params` 按脚本返回重置结果(version 5:G1、G3 `Structural`;version 6:`ResetAll`)
 - 步骤:
   1. `SetParams{version = 5}`:`pct_bin` 默认值改为 150_000
   2. `SetParams{version = 6}`:去掉 G2 覆盖并把默认值改回 100_000
 - 期望:
   - 步骤 1 后 journal 中恰两条 `Note{source = Advisor, code = ModelGroupReset}`:`group = G1` 与 `G3`,`v[0] = 1`(Structural)、`v[1] = 5`
   - 步骤 2 后恰三条:`group` = G1、G2、G3,`v[0] = 4`(ResetAll)、`v[1] = 6`
-- 实现:`crates/hft-testkit/tests/sdk_contract/group_reset.rs::sdk_085_reset_notes_per_group`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/group_reset.rs::sdk_085_reset_notes_per_group`
 
 ### SDK-086 依据旧指纹产出的 Advice 被 sequencer 丢弃,不投递
 
 - 规则:[参数变化时的 group 重置](README.md#参数变化时的-group-重置)、[Advice 载荷](README.md#advice-载荷)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig` + `AdvRig`;advisor 落后:`RecModel` 依据 seq 1 000 产出 G3 的 Advice;seq 1 200 处 `SetParams` 改了 G3 的 leg 1(`spec_seq` = 1 200);同时产出的 G1 的 Advice `basis_seq = 1 000`
+- 前置:`SeqRig` + `AdvRig`;advisor 落后:`RecModel` 依据 I1 Bbo(seq q)产出 G1 与 G3 的 Advice;之后、Advice 被处理之前 `SetParams` 把 G3 的 leg 1 换成另一个 inst(inst 24,fingerprint 改变,`spec_seq` 前移)
 - 步骤:
-  1. 两条 Advice 在 seq 1 300 处被 sequencer 处理
+  1. 两条 Advice 交给 sequencer
 - 期望:
-  - G3 的 Advice:不投递,journal 有 `Note{Sequencer, AdviceStale}`;G1 的 Advice 照常投递(`gix = 0`、`basis_seq = 1 000`)
-- 实现:`crates/hft-testkit/tests/sdk_contract/group_reset.rs::sdk_086_stale_fingerprint_advice_dropped`
+  - G3 的 Advice:不投递,journal 有 `Note{Sequencer, AdviceStale}`;G1 的 Advice 照常投递(`gix = 0`、`basis_seq = q`)
+- 实现:`crates/hft-sequencer/tests/sdk_contract/group_reset.rs::sdk_086_stale_fingerprint_advice_dropped`
 
 ### SDK-087 `reset_preview` 的 `reset_groups` 与 `no_open_ms`
 
@@ -1783,14 +1799,14 @@ spec: README.md
   1. 投递触发该脚本的 Bbo
 - 期望:
   - journal 有一条 `Note`:`code = 0x0200_0001`(`Strategy = 2` 左移 24 位或 1)、`level = Info`、`source = Strategy`、`strategy = 3`、`group = G2`、`inst = 101`、`v = [5, 0, 0, 0, 0, 0, 0, 0]`
-- 实现:`crates/hft-testkit/tests/sdk_contract/ctx.rs::sdk_116_strategy_note_record`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/ctx.rs::sdk_116_strategy_note_record`
 
 ### SDK-117 `reduce_only` 的 `Manual` 中策略发出的 Open 类意图被拒
 
 - 规则:[策略描述符:Note、报表、策略命令](README.md#策略描述符note报表策略命令)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;实例 Live、G1 `open_allowed = 1`;G1 的 I2 有空头 0.02;`RecProbe` 收到 `Manual` 时依次 `place` 一张 I1 买入 Open IOC(h1)与一张 I2 买入 0.01 的 Reduce IOC(h2)
+- 前置:`SeqRig`;实例 Live、G1 `open_allowed = 1`;G1 的 I2 有空头 0.02;A1 的敞口门不生效(`naked_gate_min` = 1 000 000 USDT;G1 只有一条腿持仓,否则 h1 先被 `EXPOSURE_GATE` 拒绝);`RecProbe` 收到 `Manual` 时依次 `place` 一张 I1 买入 Open IOC(h1)与一张 I2 买入 0.01 的 Reduce IOC(h2)
 - 步骤:
   1. 发送 `StrategyCmd{S3, A1, group = G1, reduce_only = true, payload = op 2}`
   2. 下一事件读 `ctx.outcome(h1)`、`ctx.outcome(h2)`
@@ -1798,7 +1814,7 @@ spec: README.md
   - h1 的 `OrderDecision.reject = CLOSE_ONLY`(1 << 4)、`slot = 0`、`trigger_seq` = 该命令的 seq;无对应 `GwCmd`
   - h2 的 `OrderDecision.reject = 0`,出环一条 `GwCmd`
   - `outcome(h1) = Some(Rejected(CLOSE_ONLY))`、`outcome(h2) = Some(Placed(_))`
-- 实现:`crates/hft-testkit/tests/sdk_contract/ctx.rs::sdk_117_manual_reduce_only_rejects_open`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/ctx.rs::sdk_117_manual_reduce_only_rejects_open`
 
 ### SDK-118 `reduce_only = false` 的命令产生的意图照常经模式门与检查链
 
@@ -1810,7 +1826,7 @@ spec: README.md
   1. 发送命令(确认后)
 - 期望:
   - h1 放行(`reject = 0`、出环);h2 放行
-- 实现:`crates/hft-testkit/tests/sdk_contract/ctx.rs::sdk_118_manual_not_reduce_only_normal`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/ctx.rs::sdk_118_manual_not_reduce_only_normal`
 
 ### SDK-119 gateway 拒绝与 `CmdDesc.reduce_only` 不一致或载荷非法的 `StrategyCmd`
 
@@ -1818,7 +1834,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:`SeqRig`;`RecProbe.cmds` 同 `EchoProbe`(SDK-114);每行一条命令
-- 实现:`crates/hft-testkit/tests/sdk_contract/ctx.rs::sdk_119_gateway_cmd_checks`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/ctx.rs::sdk_119_gateway_cmd_checks`
 
 | 行 | 命令 | 期望 |
 |---|---|---|
@@ -1893,7 +1909,7 @@ spec: README.md
 - 期望:
   - 步骤 1 中 100 次读数全为 `true`;`v.bbo(I2).rx_tsc` 始终等于 t = 0 那条 Bbo 的 `rx_tsc`
   - 步骤 2 中最后一次 `Alive` 之后 ≤ 2_000 ms 的读数为 `true`,超过 2_000 ms 的读数为 `false`
-- 实现:`crates/hft-testkit/tests/sdk_contract/views.rs::sdk_124_quiet_book_stays_live`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/views.rs::sdk_124_quiet_book_stays_live`
 
 ### SDK-125 `Now` 的时间换算:往返、UTC 与早于本次启动的饱和
 
@@ -1975,7 +1991,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:`SeqRig`;每行投递一条 I1 的 Bbo,`MarketHdr.hw_rx_ns = 1_700_000_000_123_456_789`(无戳的行为 0)
-- 实现:`crates/hft-testkit/tests/sdk_contract/views.rs::sdk_130_rx_ts_src_projection`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/views.rs::sdk_130_rx_ts_src_projection`
 
 | 行 | 记录头位 | 期望 `b.rx_ts_src` / `b.hw_rx_ns` |
 |---|---|---|
@@ -1989,7 +2005,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:`SeqRig`;每行投递一条 A1 在 V2 的 `AccountConfigReport`,`LeverageItem{inst = 102, lev}`;另有现货 inst 101
-- 实现:`crates/hft-testkit/tests/sdk_contract/views.rs::sdk_131_leverage_x100`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/views.rs::sdk_131_leverage_x100`
 
 | 行 | `lev`(Rate)/ 查询 | 期望 |
 |---|---|---|
@@ -2006,13 +2022,13 @@ spec: README.md
 - 规则:[Views 与 ModelViews](README.md#views-与-modelviews)、[视图类型](README.md#视图类型)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;`RiskParams` 价格带类别 A:`rr_max_cross = 2_000_000`、`ioc_max_cross = 1_000_000`、`max_px_dev = 5_000_000`;类别 B:`rr_max_cross = 10_000_000`、`ioc_max_cross = 5_000_000`、`max_px_dev = 20_000_000`;I1 属 A、I2 属 B;`l3_max_cross = 0`
+- 前置:`SeqRig`;`RiskParams` 价格带类别 A:`rr_max_cross = 2_000_000`、`ioc_max_cross = 1_000_000`、`max_px_dev = 5_000_000`;类别 B:`rr_max_cross = 10_000_000`、`ioc_max_cross = 5_000_000`、`max_px_dev = 20_000_000`;I1 属 A、I2 属 B;`l3_max_cross = 0`;`ExecParams.force_slice.max_cross = 2_000_000`(hft-risk 启动校验 `ExecRiskMismatch`:不得大于账户内最小的 `rr_max_cross`)
 - 步骤:
   1. 读 `v.risk_for(A1, I1)` 与 `v.risk_for(A1, I2)`
 - 期望:
   - I1:`rr_max_cross = 2_000_000`、`ioc_max_cross = 1_000_000`、`max_px_dev = 5_000_000`
   - I2:`rr_max_cross = 10_000_000`、`ioc_max_cross = 5_000_000`、`max_px_dev = 20_000_000`;两者 `l3_max_cross = 0`
-- 实现:`crates/hft-testkit/tests/sdk_contract/views.rs::sdk_132_risk_for_per_class`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/views.rs::sdk_132_risk_for_per_class`
 
 ### SDK-133 `Views::order` 在槽代数不符时返回 `None`
 
@@ -2022,11 +2038,11 @@ spec: README.md
 - 前置:`SeqRig`;`RecProbe` 下一张 GTC 得到 `OrderRef{slot = s, gen = g}`
 - 步骤:
   1. 读 `v.order(OrderRef{slot = s, gen = g})`
-  2. 撤单完成后该槽被另一张单复用(`gen = g + 1`),读 `v.order(OrderRef{slot = s, gen = g})`
+  2. 撤单完成(`CancelAck`)后推进 7 s(槽在 OMS `reuse_quarantine_ms` 之后由 sweep 放回空闲表队尾),再逐张下 GTC 直到一张落在槽 s 上(`gen = g + 1`),读 `v.order(OrderRef{slot = s, gen = g})`
 - 期望:
   - 步骤 1:`Some(o)`,`o.state = Live`、`o.group = G1`、`o.class = Open`、`o.tag` 等于下单时的值
   - 步骤 2:`None`
-- 实现:`crates/hft-testkit/tests/sdk_contract/views.rs::sdk_133_order_gen_mismatch_none`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/views.rs::sdk_133_order_gen_mismatch_none`
 
 ### SDK-134 `Views::target` 与 `ModelViews` 的 `target`/`order`
 
@@ -2040,14 +2056,14 @@ spec: README.md
 - 期望:
   - 步骤 1:快速部分 `Some(t)`,`t.intent.tag = 5`、`t.origin = Strategy`;Model 侧两者都是 `None`
   - 步骤 2:`None`
-- 实现:`crates/hft-testkit/tests/sdk_contract/views.rs::sdk_134_target_view_and_model_side`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/views.rs::sdk_134_target_view_and_model_side`
 
 ### SDK-135 `Views::book` 的状态与逐档读取
 
 - 规则:[Views 与 ModelViews](README.md#views-与-modelviews)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;I2 订阅 `BOOK`(`DepthTopN`,N = 5),I1 只订阅 `BBO`
+- 前置:`SeqRig`;本用例的 I2 = 填充 inst 15(同 SDK-043:`l2_depth = 5`,不属于任何 group),订阅 `BOOK`(`DepthTopN`,N = 5),I1 只订阅 `BBO`
 - 步骤:
   1. 投递 I2 的 5 档快照前读 `v.book(I2).status()`
   2. 投递后读 `best(Bid)`、`levels(Bid, &mut [Level; 3])`、`levels(Ask, &mut [Level; 8])`
@@ -2056,7 +2072,7 @@ spec: README.md
   - 步骤 1:`Uninit`
   - 步骤 2:`best(Bid)` = 第 1 档;3 档缓冲返回 3(最优的 3 档,由内向外);8 档缓冲返回 5
   - 步骤 3:`Uninit`
-- 实现:`crates/hft-testkit/tests/sdk_contract/views.rs::sdk_135_book_read`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/views.rs::sdk_135_book_read`
 
 ### SDK-136 `FundingView` 的 `prev_interval_s` 与 `upd_tsc`
 
@@ -2072,19 +2088,19 @@ spec: README.md
   - 步骤 1 后:`interval_s = 28_800`、`prev_interval_s = 28_800`、`upd_tsc = T1`
   - 步骤 2 后:`interval_s = 14_400`、`prev_interval_s = 28_800`、`upd_tsc = T2`
   - 步骤 3 后:`interval_s = 14_400`、`prev_interval_s = 28_800`、`upd_tsc = 0`
-- 实现:`crates/hft-testkit/tests/sdk_contract/views.rs::sdk_136_funding_view`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/views.rs::sdk_136_funding_view`
 
 ### SDK-137 `PortfolioView.equity_total` 等于各 venue 汇总行之和
 
 - 规则:[视图类型](README.md#视图类型)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;A1 在 V1 有 USDT 10_000 与 BTC 0.1、在 V2 有永续多头 0.1 与保证金 5_000;I1 bid 65_000.00,I2 mark 65_100.00
+- 前置:`SeqRig`;A1 在 V1 有 USDT 10_000 与 BTC 0.1(首条 `BalanceReport`,同 SDK-062)、在 V2 有永续多头 0.1 与保证金 5_000;I1 bid 65_000.00,I2 mark 65_100.00
 - 步骤:
   1. 读 `p = v.portfolio(A1)`:`equity_total()`、`venue(V1).equity`、`venue(V2).equity`
 - 期望:
   - `equity_total() = venue(V1).equity + venue(V2).equity`;`venue(V1).equity = 16_500_000_000`(10_000 + 0.1 × 65_000);`p.account() = A1`
-- 实现:`crates/hft-testkit/tests/sdk_contract/views.rs::sdk_137_equity_total_sum`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/views.rs::sdk_137_equity_total_sum`
 
 ### SDK-138 `MarginView.stale` 按 `margin_stale_ms` 判定
 
@@ -2092,7 +2108,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:`SeqRig`;`margin_stale_ms = 10_000`;V2 的 `MarginReport` 在引擎时间 E 到达;每行在给定引擎时间读 `v.portfolio(A1).margin(V2)`
-- 实现:`crates/hft-testkit/tests/sdk_contract/views.rs::sdk_138_margin_stale`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/views.rs::sdk_138_margin_stale`
 
 | 行 | 读取时的 engine_ns | 期望 |
 |---|---|---|
@@ -2112,19 +2128,19 @@ spec: README.md
   3. 查单收敛为 `Filled` 且下单连接回到 Up,读一次
 - 期望:
   - 步骤 1 `true`;步骤 2 `false`;步骤 3 `true`
-- 实现:`crates/hft-testkit/tests/sdk_contract/views.rs::sdk_139_venue_ready`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/views.rs::sdk_139_venue_ready`
 
 ### SDK-140 `Views` 的全部访问器在 `on_event` 中零分配
 
 - 规则:[Views 与 ModelViews](README.md#views-与-modelviews)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig` 以计数全局分配器运行;`RecProbe` 在每个事件里依次调用 `now`、`bbo`、`book`(+ `levels`)、`funding`、`mark`、`portfolio`(+ 其全部方法)、`group_pos`、`legs`、`target`、`order`、`inst`、`caps`、`fee`、`mode`、`risk`、`risk_for`、`venue_ready`、`leverage`、`quote_ok`
+- 前置:`SeqRig` 以计数全局分配器运行(独立测试目标 `sdk_alloc`);`RecProbe` 有一张 Live 的 GTC(供 `order` 读),在每个事件里依次调用 `now`、`bbo`、`book`(+ `levels`)、`funding`、`mark`、`portfolio`(+ 其全部方法)、`group_pos`、`legs`、`target`、`order`、`inst`、`caps`、`fee`、`mode`、`risk`、`risk_for`、`venue_ready`、`leverage`、`quote_ok`
 - 步骤:
   1. 计数器清零后投递 1 000 条 Bbo
 - 期望:
-  - `RecProbe.on_event` 期间分配次数 0(sequencer 自身的计数不在本断言范围,以进入/离开 `on_event` 时的计数差计)
-- 实现:`crates/hft-testkit/tests/sdk_contract/views.rs::sdk_140_views_zero_alloc`
+  - 1 000 次调用期间分配次数 0(以 `on_event` 内调用访问器前后的计数差计;sequencer 自身与测试集自身的投递日志不在本断言范围)
+- 实现:`crates/hft-sequencer/tests/sdk_alloc.rs::sdk_140_views_zero_alloc`
 
 ### SDK-141 `#[repr(C)]` 视图与意图结构的大小、对齐与关键偏移
 
@@ -2171,7 +2187,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:hft-testkit 依赖全部引擎 crate,能同时看到 SDK、hft-event 与 hft-exec 的常量
-- 实现:`crates/hft-testkit/tests/sdk_contract/codes.rs::sdk_143_enum_codes_match_wire`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/codes.rs::sdk_143_enum_codes_match_wire`
 
 | 行 | SDK 枚举 | 期望(判别值) | 对照 |
 |---|---|---|---|
@@ -2200,8 +2216,8 @@ spec: README.md
   1. 执行层发出第一腿 IOC 0.01,`MockVenue` 成交 0.01;第二腿 IOC 0.01 已发出、未回执
   2. 第一笔 `Exec{Progress}` 投递时读 `u.inflight`
 - 期望:
-  - `u.inflight[1] = 1_000_000`(第二腿 0.01 的即时在途);`u.inflight[0]` 不含 GTC 的 0.05(= 0);`u.origin = Strategy`
-- 实现:`crates/hft-testkit/tests/sdk_contract/delivery.rs::sdk_144_exec_inflight_immediate_only`
+  - 第二腿的 `u.inflight` = 该腿 0.01 的即时在途(带符号:卖出为 −1_000_000);第一腿的 `u.inflight` 不含 GTC 的 0.05(= 0);`u.origin = Strategy`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/delivery.rs::sdk_144_exec_inflight_immediate_only`
 
 ### SDK-145 `Ctx` 每类意图的容量:第 N+1 个返回 `CtxFull` 并计数,已接受的不受影响
 
@@ -2242,8 +2258,8 @@ spec: README.md
 - 步骤:
   1. 投递触发脚本的 Bbo
 - 期望:
-  - 第 17 次 `place` 返回 `Err(CtxFull)`;该 Input 的 Output 中恰 16 条策略来源的 `OrderDecision{New}`,`intent_no` 连续,`tag` 为前 16 个
-- 实现:`crates/hft-testkit/tests/sdk_contract/ctx.rs::sdk_147_ctx_full_engine_side`
+  - 第 17 次 `place` 返回 `Err(CtxFull)`;该 Input 的 Output 中恰 16 条策略来源的 `OrderDecision{New}`,`intent_no` 连续(= 各次 `place` 的 `IntentHandle`,0..15),下一事件经 `v.order` 读得的 `tag` 为前 16 个
+- 实现:`crates/hft-sequencer/tests/sdk_contract/ctx.rs::sdk_147_ctx_full_engine_side`
 
 ### SDK-148 意图按调用顺序处理:先撤后下、先 clear 后 target
 
@@ -2257,7 +2273,7 @@ spec: README.md
 - 期望:
   - 步骤 1:Output 顺序为 `OrderDecision{Cancel, target_slot = s1}`、`OrderDecision{New}`、`ExecDecision{TargetCleared}`、`ExecDecision{TargetSet}`;之后 `v.target(A1, G2)` 的 `intent` = T1
   - 步骤 2:`ExecDecision{TargetReplaced}` 在 `TargetCleared` 之前;之后 `v.target(A1, G2) = None`
-- 实现:`crates/hft-testkit/tests/sdk_contract/ctx.rs::sdk_148_ops_in_call_order`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/ctx.rs::sdk_148_ops_in_call_order`
 
 ### SDK-149 `Ctx::outcome` 只对紧邻的上一次 `on_event` 有效
 
@@ -2271,7 +2287,7 @@ spec: README.md
   3. 事件 3:读 `outcome(h)`
 - 期望:
   - 步骤 1 `h = IntentHandle(0)`;步骤 2 `Some(Placed(r))`,r 等于该 `OrderDecision` 的 (slot, gen);步骤 3 `None`
-- 实现:`crates/hft-testkit/tests/sdk_contract/ctx.rs::sdk_149_outcome_previous_call_only`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/ctx.rs::sdk_149_outcome_previous_call_only`
 
 ### SDK-150 `CtxHarness::set_outcomes` 模拟引擎对上一事件的处理结果
 
@@ -2293,13 +2309,13 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:`SeqRig`;实例 Live、`open_allowed = 1`;`RecProbe` 在 G1 上 `place` I1 买入 Open IOC 0.01,带 `LegLink{role: First, hedge: OnFill 卖出 I2 0.01}`;`conn_liveness_ms = 2_000`;每行只改该行条件
-- 实现:`crates/hft-testkit/tests/sdk_contract/ctx.rs::sdk_151_gate_bits_link_checks`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/ctx.rs::sdk_151_gate_bits_link_checks`
 
 | 行 | 条件 | 期望 `outcome` |
 |---|---|---|
 | SDK-151.1 | I2 连接健康、V2 可用保证金充足 | `Placed(_)` |
 | SDK-151.2 | I2 的 BBO 连接静默 2 001 ms | `Rejected(LINK_STALE)`(1 << 28) |
-| SDK-151.3 | I2 盘口 30 s 未变但连接每 500 ms 有 `Alive` | `Placed(_)` |
+| SDK-151.3 | I2 盘口 30 s 未变但连接每 500 ms 有 `Alive`(期间 V2 `MarginReport` 每 5 s 一条,保证金数据不过期) | `Placed(_)` |
 | SDK-151.4 | V2 可用保证金为 0 | `Rejected(LINK_FUNDS)`(1 << 29) |
 | SDK-151.5 | 账户 `Kill` 生效 | `Rejected(bits)`,`bits` 含 `KILLED` |
 
@@ -2314,10 +2330,10 @@ spec: README.md
   2. 发送 `SetMode{S3, G2, A1, Live}`
   3. 发送 `Resume{Halted, scope = (S3, A1, G2)}`(确认后)
 - 期望:
-  - 步骤 1 之后 `RecProbe` 恰收到一次 `Mode{gix = 1, old = Live, new = CloseOnly}`;`v.mode(A1, G2) = CloseOnly`;G1、G3 仍为 Live;cap 记录的 reason = 42
+  - 步骤 1 之后 `RecProbe` 恰收到一次 `Mode{gix = 1, old = Live, new = CloseOnly}`;`v.mode(A1, G2) = CloseOnly`;G1、G3 仍为 Live;该 `Halted` cap 的 `CapRecord.params[0] = 42`(经 `Note{Risk, CapSet}` 的 `v[0..6]` 读出),作用域 (S3, A1, G2)
   - 步骤 2 后 `v.mode(A1, G2)` 仍为 `CloseOnly`
   - 步骤 3 后 `Mode{old = CloseOnly, new = Live}`,`v.mode(A1, G2) = Live`
-- 实现:`crates/hft-testkit/tests/sdk_contract/ctx.rs::sdk_152_request_halt_cap`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/ctx.rs::sdk_152_request_halt_cap`
 
 ### SDK-153 `cancel_timer` 撤销已登记的定时器
 
@@ -2330,7 +2346,7 @@ spec: README.md
   2. 推进 10 s
 - 期望:
   - 步骤 2 期间 `RecProbe` 没有 `tag = 9` 的 `Timer`
-- 实现:`crates/hft-testkit/tests/sdk_contract/ctx.rs::sdk_153_cancel_timer`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/ctx.rs::sdk_153_cancel_timer`
 
 ### SDK-154 带 `LegLink` 的第一腿只由策略 `place`,第二腿由 OMS 产出
 
@@ -2343,19 +2359,19 @@ spec: README.md
 - 期望:
   - Output 依次:第一腿 `OrderDecision{link_role = 1}`;每个成交增量各一条第二腿 `OrderDecision{link_role = 2, side = Sell, inst = 102, qty = 1_000_000, tif = Ioc, target_slot = 第一腿槽}`,`oflags` 不含 `REDUCE_ONLY`
   - `RecProbe` 只收到第一腿的 `Order` 事件;第二腿不产生给策略的 `Order`
-- 实现:`crates/hft-testkit/tests/sdk_contract/intent.rs::sdk_154_second_leg_by_oms`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/intent.rs::sdk_154_second_leg_by_oms`
 
 ### SDK-155 平仓链接的第二腿带 reduceOnly
 
 - 规则:[Ctx 与订单意图](README.md#ctx-与订单意图)
 - 级别:integ
 - 里程碑:M2
-- 前置:同 SDK-154,但第一腿为 I1 卖出 `Reduce` 0.01(持有现货 0.01、永续空头 0.01),`HedgePlan{side: Buy, reduce_only: 1}`;V2 的 `VenueCaps.reduce_only` 支持
+- 前置:同 SDK-154,但第一腿为 I1 卖出 `Reduce` 0.01(持有现货 0.01、永续空头 0.01,逐腿建仓,建仓期间 A1 的敞口门不生效:`naked_gate_min` = 1 000 000 USDT),`HedgePlan{side: Buy, reduce_only: 1}`;V2 的 `VenueCaps.reduce_only` 支持
 - 步骤:
   1. 第一腿全部成交
 - 期望:
   - 第二腿 `OrderDecision{link_role = 2, side = Buy, qty = 1_000_000}`,`oflags` 含 `REDUCE_ONLY`
-- 实现:`crates/hft-testkit/tests/sdk_contract/intent.rs::sdk_155_close_link_second_reduce_only`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/intent.rs::sdk_155_close_link_second_reduce_only`
 
 ### SDK-156 `Simultaneous` 链接的第二腿在第一腿 `place` 的同一事件内发出
 
@@ -2363,11 +2379,11 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:`SeqRig`;实例 Live;`RecProbe` 在 G1 上 `place` 第一腿 I1 买入 Open IOC 0.01,`HedgePlan{kind: Simultaneous, tif: Ioc, side: Sell, inst: 102, ratio_num: 1, ratio_den: 1, …}`;每行改 `on_fail`
-- 实现:`crates/hft-testkit/tests/sdk_contract/intent.rs::sdk_156_simultaneous_same_event`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/intent.rs::sdk_156_simultaneous_same_event`
 
 | 行 | `on_fail` | 期望 |
 |---|---|---|
-| SDK-156.1 | `Reverse` | `outcome = Placed(_)`;同一 Input 的 Output 中第一腿 `OrderDecision{link_role = 1}` 之后紧跟第二腿 `OrderDecision{link_role = 2, inst = 102, qty = 1_000_000}` |
+| SDK-156.1 | `Reverse` | `outcome = Placed(_)`;同一 Input 的 Output 中第二腿 `OrderDecision{link_role = 2, inst = 102, qty = 1_000_000, reject = 0}` 紧邻第一腿 `OrderDecision{link_role = 1}` 之前(hft-sequencer "OMS 输出的排空":`hedges` 先于 `decisions`) |
 | SDK-156.2 | `Hold` | 同 .1 |
 
 ### SDK-157 GTC 挂单超过 `max_rest_ms` 后收到 `Order{Aged}`
@@ -2380,15 +2396,15 @@ spec: README.md
   1. 推进 6 s
 - 期望:
   - `RecProbe` 恰收到一次 `Order{u.kind = Aged}`,所在 Input 的引擎时间在 [3 000 ms, 4 000 ms] 内;此前只有 `Acked`
-- 实现:`crates/hft-testkit/tests/sdk_contract/intent.rs::sdk_157_max_rest_aged`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/intent.rs::sdk_157_max_rest_aged`
 
 ### SDK-158 `set_target` 的每个拒绝原因经 `Ctx::outcome` 返回
 
 - 规则:[目标意图](README.md#目标意图)、[Ctx 与订单意图](README.md#ctx-与订单意图)
 - 级别:table
 - 里程碑:M2
-- 前置:`SeqRig`;实例 Live、`open_allowed = 1`;基准目标 T = `TargetIntent{account: A1, group: G1, n_legs: 2, legs: [(0, +0.01), (1, −0.01)], reason: Rebalance, urgency: Normal, band: 1_000_000, exec: PairOnFill{..}}`;两腿 lot 0.001 与 0.001;每行只改该行,下一事件读 `outcome`
-- 实现:`crates/hft-testkit/tests/sdk_contract/target.rs::sdk_158_target_rejects`
+- 前置:`SeqRig`;实例 Live、`open_allowed = 1`;基准目标 T = `TargetIntent{account: A1, group: G1, n_legs: 2, legs: [(0, +0.01), (1, −0.01)], reason: Rebalance, urgency: Normal, band: 1_000_000, exec: PairOnFill{..}}`;两腿 lot 0.0001(a1)与 0.001(b1);每行只改该行,下一事件读 `outcome`。行 .8 的 G1 另有第三腿 a3(inst 13,A 现货,BTC)。行 .11:G1 的 OnFill 链接第一腿 a1 买 0.02 成交、第二腿 b1 只成交 0.01 后过期,`hedge_deadline_ms` 到期链接 Broken。行 .12/.13:G1 现货多 0.01、永续空 0.01,b1 标记价 50 010,V2 的 `MarginReport` 项 b1 `liq_px = 52 000`(距离 ≈ 4%)使其进入 L3,引擎目标为 (0, +0.008)、(1, −0.008)。行 .15/.16:a1 lot 0.004、b1 lot 0.01(公共 lot 0.02 ≈ 1 000 USDT),T 两腿 ±0.04、`max_chunk_notional = 500`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/target.rs::sdk_158_target_rejects`
 
 | 行 | 改动 | 期望 `outcome` |
 |---|---|---|
@@ -2403,11 +2419,11 @@ spec: README.md
 | SDK-158.9 | `PairOnFill{first_leg: Fixed, first_leg_ix: 5}` | `TargetRejected(SpecInvalid)` |
 | SDK-158.10 | `ExecSpec::MakerFirst`(未启用) | `TargetRejected(AlgoUnsupported)` |
 | SDK-158.11 | G1 的 cell 处于 Broken | `TargetRejected(CellBroken)` |
-| SDK-158.12 | 账户 MarginStress L3 默认减仓期,T 的永续腿比引擎目标更远离 0 | `TargetRejected(ForcedReduceActive)` |
-| SDK-158.13 | 同 .12,T 每腿比引擎目标更接近 0 且不变号 | `TargetAccepted` |
+| SDK-158.12 | 账户 MarginStress L3 默认减仓期,T 的永续腿(−0.01)比引擎目标(−0.008)更远离 0 | `TargetRejected(ForcedReduceActive)` |
+| SDK-158.13 | 同 .12,T = (0, +0.005)、(1, −0.005):每腿比引擎目标更接近 0 且不变号 | `TargetAccepted` |
 | SDK-158.14 | `Kill{Account, flatten}` 之后(未 `Resume{Kill}`),T 增仓 | `TargetRejected(FlattenLocked)` |
-| SDK-158.15 | 两腿 lot 0.004 与 0.01,公共 lot 名义 > `max_chunk_notional` | `TargetRejected(LotMismatch)` |
-| SDK-158.16 | 同 .15 但 `reason = Exit` 且为减仓 | `TargetAccepted` |
+| SDK-158.15 | 两腿 lot 0.004 与 0.01,公共 lot 名义 > `max_chunk_notional`,G1 持仓 0 | `TargetRejected(LotMismatch)` |
+| SDK-158.16 | 同 .15 但 `reason = Exit` 且为减仓:G1 持 +0.04 / −0.04,T 为 (0, +0.02)、(1, −0.02) | `TargetAccepted` |
 
 ### SDK-159 与当前目标逐字段相同的 `target` 不替换、不复位失败计数
 
@@ -2423,45 +2439,45 @@ spec: README.md
   - 步骤 1:`outcome = TargetAccepted`;没有 `ExecDecision{TargetReplaced}`;`v.target(A1, G1).state` 仍为 `Stuck(SliceFails)`
   - 步骤 2:`ExecDecision{TargetReplaced}`;`state = Working`
   - 步骤 3:`ExecDecision{TargetCleared}` 后 `ExecDecision{TargetSet}`,`state = Working`
-- 实现:`crates/hft-testkit/tests/sdk_contract/target.rs::sdk_159_identical_target_not_reset`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/target.rs::sdk_159_identical_target_not_reset`
 
 ### SDK-160 引擎设 MarginStress/Hard 目标时先撤策略在该 inst 上的挂单
 
 - 规则:[目标意图](README.md#目标意图)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;`RecProbe` 在 I2 上有一张 reduce-only 的 GTC 平仓单(槽 s1)与一张 Open GTC(槽 s2),G1 有永续空头
+- 前置:`SeqRig`;`RecProbe` 在 I2 上有一张 reduce-only 的 GTC 平仓单(槽 s1)与一张 Open GTC(槽 s2),G1 有永续空头(G1 现货多 0.01、永续空 0.01;两张挂单为 b1 买 0.01 @ 49 500 reduce-only、b1 卖 0.001 @ 50 500,均已 Ack);V2 的 L3 同 SDK-158.12
 - 步骤:
   1. 投递使 V2 进入 MarginStress L3 的 `MarginReport`
 - 期望:
   - 同一 Input 内两条 `OrderDecision{Cancel}`(`target_slot` = s1、s2),先于引擎的第一笔减仓单;`MockVenue` 回撤单确认后 `RecProbe` 收到 `Order{Cancelled}` × 2
-- 实现:`crates/hft-testkit/tests/sdk_contract/target.rs::sdk_160_engine_target_cancels_strategy_resting`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/target.rs::sdk_160_engine_target_cancels_strategy_resting`
 
 ### SDK-161 Broken 期间执行层自动有界平仓,成交以 `Exec{Progress}` 报告,解除时 `Done{cleared_by_engine: true}`
 
 - 规则:[目标意图](README.md#目标意图)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;`broken_auto_fix_ms = 30_000`;G1 现货多 0.02、永续空 0.01(裸 0.01),cell 进入 Broken,group 静默,无人工 `HedgeFix`
+- 前置:`SeqRig`;`broken_auto_fix_ms = 30_000`;G1 现货多 0.02、永续空 0.01(裸 0.01;构造同 SDK-158.11),cell 进入 Broken,group 静默,无人工 `HedgeFix`;a1、b1 每 1 s 一条 Bbo(报价健康),30 s 从进入 Broken 起算
 - 步骤:
   1. 推进 30 s
   2. `MockVenue` 成交自动平仓单
 - 期望:
   - 步骤 1:`RecProbe` 之前已收到 `Exec{Broken(LinkBroken)}`;30 s 时出一张 `origin = Engine(AutoFix)` 的平仓单
   - 步骤 2:`RecProbe` 收到 `Exec{Progress{leg_ix = 0, d = −1_000_000}, origin = Engine(AutoFix)}`,随后 `Exec{Done{cleared_by_engine: true}}`;`v.legs(A1, G1)` 两腿净量相抵;journal 有 `Note{ExecAutoFixDone}`
-- 实现:`crates/hft-testkit/tests/sdk_contract/target.rs::sdk_161_broken_auto_fix_progress_done`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/target.rs::sdk_161_broken_auto_fix_progress_done`
 
 ### SDK-162 人工核销不经成交改变腿净量,Broken 随之解除
 
 - 规则:[目标意图](README.md#目标意图)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;G1 现货多 0.0105、永续空 0.01;多出的 0.0005 低于最小下单量、高于尘埃线,cell Broken、静止
+- 前置:`SeqRig`,a1 的最小下单量改为 0.001(B0 为 0.0001);G1 现货多 0.0105、永续空 0.01(OnFill 链接第一腿 a1 买 0.0105 成交,第二腿 b1 卖 0.01 成交);多出的 0.0005 低于最小下单量、高于尘埃线,补腿无法下单,`fix_deadline_ms`(10 s)后 cell Broken(`FixExhausted`)、静止
 - 步骤:
   1. Admin 发送 `WriteOffResidual{A1, G1}`(确认后)
 - 期望:
   - 本 Input 内没有任何 `OrderDecision`;`RecProbe` 收到 `Exec{Done{cleared_by_engine: true}}`;之后 `v.group_pos(A1, G1).legs[0].qty` 减少 50_000、`v.legs(A1, G1).leg[0].residual = 0`、`leg[1].residual = 0`;`v.portfolio(A1).inventory(V1, BTC).unassigned` 增加 50_000
-- 实现:`crates/hft-testkit/tests/sdk_contract/target.rs::sdk_162_write_off_changes_legs_without_fill`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/target.rs::sdk_162_write_off_changes_legs_without_fill`
 
 ### SDK-163 `External{cause = Manual}` 的 `deadline_tsc = 0`,引擎不做默认处理
 
@@ -2473,22 +2489,22 @@ spec: README.md
   1. 投递该外来成交,推进 60 s
 - 期望:
   - `RecProbe` 收到 `External{gix = 0, f.cause = Manual, f.deadline_tsc = 0}`;60 s 内没有 `origin = Engine(External)` 的订单
-- 实现:`crates/hft-testkit/tests/sdk_contract/target.rs::sdk_163_manual_external_no_default`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/target.rs::sdk_163_manual_external_no_default`
 
 ### SDK-164 运行模式下策略意图的处理表
 
 - 规则:[运行模式下意图的行为表](README.md#运行模式下意图的行为表)、[Ctx 与订单意图](README.md#ctx-与订单意图)
 - 级别:table
 - 里程碑:M2
-- 前置:`SeqRig`;G1 两腿 I1 现货、I2 永续;G1 持有现货 0.01 与永续空头 0.01(Reduce 与 Hedge 有量可减);每行先把 G1 的有效模式设为该行的值(Shadow 行另设持仓为 0 以免 `ShadowDeferred`,只测 Open),再在一次 `on_event` 内 `place` 一张该行类别的 IOC;下一事件读 `outcome`
-- 实现:`crates/hft-testkit/tests/sdk_contract/mode.rs::sdk_164_mode_table_orders`
+- 前置:`SeqRig`;G1 两腿 I1 现货、I2 永续;G1 持有现货 0.01 与永续空头 0.01(Reduce 与 Hedge 有量可减);每行先把 G1 的有效模式设为该行的值(Shadow 行另设持仓为 0 以免 `ShadowDeferred`,只测 Open),再在一次 `on_event` 内 `place` 一张该行类别的 IOC(0.001;Open = a1 买、Reduce/Flatten = a1 卖、Hedge = b1 买,均无链接);下一事件读 `outcome`。`open_allowed = 0` 的行在建仓之后经 `SetParams` 把 G1 的 `open_allowed` 改为 0
+- 实现:`crates/hft-sequencer/tests/sdk_contract/mode.rs::sdk_164_mode_table_orders`
 
 | 行 | 有效模式 | `class` | 期望 |
 |---|---|---|---|
 | SDK-164.1 | Shadow | Open | `OrderDecision` 记录头带 `SHADOW` 位、`reject = 0`、`slot = 0`;无 `GwCmd`;`outcome = Shadowed` |
 | SDK-164.2 | CloseOnly | Open | `reject = CLOSE_ONLY`、`slot = 0`;无 `GwCmd`;`outcome = Rejected(CLOSE_ONLY)` |
 | SDK-164.3 | CloseOnly | Reduce | `reject = 0`、`slot ≠ 0`;一条 `GwCmd`;`outcome = Placed(_)` |
-| SDK-164.4 | CloseOnly | Hedge | `outcome = Placed(_)` |
+| SDK-164.4 | CloseOnly | Hedge(策略 `place`、无链接:hft-risk `classify` 归为 Open) | `reject = CLOSE_ONLY`、`slot = 0`;无 `GwCmd`;`outcome = Rejected(CLOSE_ONLY)` |
 | SDK-164.5 | Live,`open_allowed = 1` | Open | `outcome = Placed(_)` |
 | SDK-164.6 | Live,`open_allowed = 0` | Open | `reject = MODE_SHADOW`(1 << 24)、`slot = 0`;无 `GwCmd`;`outcome = Shadowed` |
 | SDK-164.7 | Live,`open_allowed = 0` | Reduce | `outcome = Placed(_)` |
@@ -2499,42 +2515,42 @@ spec: README.md
 - 规则:[运行模式下意图的行为表](README.md#运行模式下意图的行为表)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;G1 有效模式 Shadow、持仓 0;V1 令牌桶剩余 5;OMS 空闲槽 64
+- 前置:`SeqRig`;G1 有效模式 Shadow、持仓 0;V1 令牌桶剩余 5;OMS 空闲槽 64(B0 中把 A 的订单限额改为 10 s 5 个、OMS 每表 64 槽;令牌数读 hft-risk 快照节 17 的 (acct-1, A) 桶行,空闲槽读 `oms.table_view(A, acct-1).free_len`)
 - 步骤:
   1. 一次 `on_event` 内 `place` 3 张 Open IOC
 - 期望:
   - 3 条 `OrderDecision` 都带 `SHADOW` 位;之后令牌剩余仍为 5、空闲槽仍为 64、`v.legs(A1, G1).leg[0].inflight_immediate = 0`
-- 实现:`crates/hft-testkit/tests/sdk_contract/mode.rs::sdk_165_shadow_no_commit`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/mode.rs::sdk_165_shadow_no_commit`
 
 ### SDK-166 目标在各有效模式下的增仓与减仓部分
 
 - 规则:[运行模式下意图的行为表](README.md#运行模式下意图的行为表)、[目标意图](README.md#目标意图)
 - 级别:table
 - 里程碑:M2
-- 前置:`SeqRig`;G1 持仓 0;每行设该行模式后发 `TakerSlice` 目标 +0.02(现货腿);随后投递 10 条 I1 的 Bbo
-- 实现:`crates/hft-testkit/tests/sdk_contract/mode.rs::sdk_166_mode_table_targets`
+- 前置:`SeqRig`;G1 持仓 0;每行设该行模式(`open_allowed = 0` 经 `SetParams`)后发 `TakerSlice` 目标 +0.02(只含现货腿);随后投递 10 条 I1 的 Bbo(间隔 400 ms,超过切片冷却与 `stuck_after_ms`)
+- 实现:`crates/hft-sequencer/tests/sdk_contract/mode.rs::sdk_166_mode_table_targets`
 
 | 行 | 有效模式 | 期望 |
 |---|---|---|
 | SDK-166.1 | Shadow | `outcome = TargetShadowed`;恰一条带 `SHADOW` 位的切片 `OrderDecision`;随后 `Exec{Stuck(Shadow)}`;10 条 Bbo 后没有更多切片 |
 | SDK-166.2 | CloseOnly | `outcome = TargetAccepted`;无切片;`Exec{Stuck(Gated(CLOSE_ONLY))}`;`v.target(A1, G1)` 仍为该目标 |
-| SDK-166.3 | Live,`open_allowed = 0` | `outcome = TargetShadowed`;同 .1 的切片与 `Stuck(Shadow)` |
+| SDK-166.3 | Live,`open_allowed = 0` | `outcome = TargetShadowed`(`ExecDecision{TargetSet}` 带 SHADOW);恰一条切片 `OrderDecision`,`reject = MODE_SHADOW`、`slot = 0`、记录头无 `SHADOW` 位;随后 `Exec{Stuck(Shadow)}`;10 条 Bbo 后没有更多切片 |
 | SDK-166.4 | Live,`open_allowed = 1` | `outcome = TargetAccepted`;切片 `reject = 0` 并出环 |
-| SDK-166.5 | CloseOnly,G1 持现货 0.02、目标 0 | `outcome = TargetAccepted`;减仓切片出环 |
+| SDK-166.5 | CloseOnly,G1 持现货 0.02、永续空 0.02(两腿相抵,执行层不补腿),现货腿目标 0 | `outcome = TargetAccepted`;减仓切片(a1 卖)出环 |
 
 ### SDK-167 有效模式变化投递 `Mode`,降级时撤该 cell 的 Open 挂单,回到 Live 后按原目标继续
 
 - 规则:[运行模式下意图的行为表](README.md#运行模式下意图的行为表)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;G1 Live;`RecProbe` 在 I1 有一张 Open GTC(s1)与一张 Reduce GTC(s2),G2 有一个增仓目标正在推进
+- 前置:`SeqRig`;G1 Live,现货多 0.01、永续空 0.01;`RecProbe` 在 I1 有一张 Open GTC(s1,买 0.001 @ 49 500)与一张 Reduce GTC(s2,卖 0.001 @ 50 500),均已 Ack;G2 有一个增仓目标正在推进(`TakerSlice` a2 +0.1,`max_chunk_notional = 70`,第一片已成交)
 - 步骤:
-  1. `SetMode{S3, G1, A1, CloseOnly}` 与 `SetMode{S3, G2, A1, CloseOnly}`
-  2. `SetMode{.., Live}`(确认后),再投递一条 I1 的 Bbo
+  1. `SetMode{S3, G1, A1, CloseOnly}` 与 `SetMode{S3, G2, A1, CloseOnly}`,之后 2 s 内每 400 ms 投递 a1、a2 各一条 Bbo
+  2. `SetMode{S3, G1, A1, Live}` 与 `SetMode{S3, G2, A1, Live}`(确认后)
 - 期望:
   - 步骤 1:`Mode{gix = 0, old = Live, new = CloseOnly}` 与 `gix = 1` 各一次;只有 s1 的 `OrderDecision{Cancel}`,s2 保留;G2 的目标仍在(`v.target(A1, G2)` 为 `Some`),无新增仓切片
-  - 步骤 2:`Mode{old = CloseOnly, new = Live}`;G2 在该 Bbo 上出一笔增仓切片
-- 实现:`crates/hft-testkit/tests/sdk_contract/mode.rs::sdk_167_mode_event_and_resting_cancel`
+  - 步骤 2:gix 0 与 1 各收到 `Mode{old = CloseOnly, new = Live}`;G2 在 `SetMode{S3, G2, A1, Live}` 的同一 Input 内出一笔增仓切片(a2 买,`reject = 0`;执行层在 `on_mode` 后立即推进,不等下一条 Bbo)
+- 实现:`crates/hft-sequencer/tests/sdk_contract/mode.rs::sdk_167_mode_event_and_resting_cancel`
 
 ### SDK-168 期望 Shadow 但 cell 有仓位时有效模式为 CloseOnly,归零后自动落到 Shadow
 
@@ -2548,7 +2564,7 @@ spec: README.md
 - 期望:
   - 步骤 1:`CmdResult{Applied, detail = ShadowDeferred}`;`Mode{old = Live, new = CloseOnly}`;Reduce 单放行
   - 步骤 2:最后一笔成交的同一 Input 内 `Mode{old = CloseOnly, new = Shadow}`;journal 有 `Note{ShadowDeferred}`,`v[2] = 1`
-- 实现:`crates/hft-testkit/tests/sdk_contract/mode.rs::sdk_168_shadow_deferred`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/mode.rs::sdk_168_shadow_deferred`
 
 ### SDK-169 OMS 第二腿不经模式门,已成交的第一腿不因模式切换裸着
 
@@ -2561,14 +2577,14 @@ spec: README.md
   2. 第一腿成交 0.01
 - 期望:
   - 步骤 2:第二腿 `OrderDecision{link_role = 2}` 的 `reject = 0`、无 `SHADOW` 位,出环一条 `GwCmd`
-- 实现:`crates/hft-testkit/tests/sdk_contract/mode.rs::sdk_169_second_leg_bypasses_mode_gate`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/mode.rs::sdk_169_second_leg_bypasses_mode_gate`
 
 ### SDK-170 `SetMode{group = *}` 写 `default_mode`,`SetParams` 新增的 group 取它
 
 - 规则:[运行模式下意图的行为表](README.md#运行模式下意图的行为表)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;S3 有 G1–G3,全部 Live
+- 前置:`SeqRig`;S3 有 G1–G3,全部 Live;G4 = `0x0100_0004`,单腿 inst 15(A 现货,资产 FILL),新增前先投递一条 inst 15 的 Bbo
 - 步骤:
   1. `SetMode{S3, *, A1, CloseOnly}`
   2. `SetParams` 新增 G4
@@ -2577,7 +2593,7 @@ spec: README.md
   - 步骤 1 后 G1–G3 都收到 `Mode{new = CloseOnly}`
   - 步骤 2 后 `v.mode(A1, G4) = CloseOnly`
   - 步骤 3 后 G4 的 cell 已删除:`RecProbe` 之后不再收到 `gix` 指向 G4 的任何事件
-- 实现:`crates/hft-testkit/tests/sdk_contract/mode.rs::sdk_170_default_mode_for_new_groups`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/mode.rs::sdk_170_default_mode_for_new_groups`
 
 ### SDK-171 `AdvicePayload` 编解码往返,未知版本按"无数据"处理
 
@@ -2655,7 +2671,7 @@ spec: README.md
   1. 驱动到该 Advice 进入 journal
 - 期望:
   - journal 中的 `Advice` 记录:`AdviceHdr{strategy = 3, account = A1, local_kind = 1, group = G2, len = 16, basis_seq = q, basis_tsc = t}`,载荷与 `encode` 输出逐字节相同
-- 实现:`crates/hft-testkit/tests/sdk_contract/advice.rs::sdk_175_advice_header_fields`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/advice.rs::sdk_175_advice_header_fields`
 
 ### SDK-176 `model_math::to_*` 的 HalfEven、饱和与非有限值
 
@@ -2742,7 +2758,7 @@ spec: README.md
 - 期望:
   - 步骤 1:每块 `CmdResult{Applied}`;`RecModel` 依次收到 `Warmup{chunk_no = 0, last = false}`、`1, false`、`2, true`,每次在对应 `CmdResult{Applied}` 之后
   - 步骤 2:`RecModel` 的调用记录与 Model 状态字节与步骤 1 结束时逐字节相同
-- 实现:`crates/hft-testkit/tests/sdk_contract/warmup.rs::sdk_181_warmup_via_journal`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/warmup.rs::sdk_181_warmup_via_journal`
 
 ### SDK-182 `InjectWarmup` 只校验实例存在与长度
 
@@ -2750,13 +2766,13 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:`SeqRig`;实例 S3 存在、有 Model;每行发一条 `InjectWarmup`(`account = *`)
-- 实现:`crates/hft-testkit/tests/sdk_contract/warmup.rs::sdk_182_inject_warmup_checks`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/warmup.rs::sdk_182_inject_warmup_checks`
 
 | 行 | 命令 | 期望 |
 |---|---|---|
 | SDK-182.1 | `instance = S3`,载荷 4 096 B | `Applied` |
-| SDK-182.2 | `instance = S3`,载荷 4 097 B | `InvalidArgs{TooLong}`;`RecModel` 无 `Warmup` |
-| SDK-182.3 | `instance = S7`(不存在) | `InvalidArgs{UnknownName}`;无投递 |
+| SDK-182.2 | `instance = S3`,载荷 4 097 B | 命令编码失败(gateway 以 `TooLong` 拒绝,不进 ctl 环);`RecModel` 无 `Warmup` |
+| SDK-182.3 | `instance = S7`(不存在) | `UnknownTarget`;无投递 |
 | SDK-182.4 | `instance = S3`,`chunk_no = 5`(之前没有 0–4) | `Applied`;`RecModel` 收到 `Warmup{chunk_no = 5}` |
 
 ### SDK-183 注入后写出的检查点含预热样本,重启不需再注入
@@ -2782,7 +2798,7 @@ spec: README.md
   1. 发送一块 `InjectWarmup`
 - 期望:
   - 该 Input 的 Output 中没有 `OrderDecision`、`ExecDecision`
-- 实现:`crates/hft-testkit/tests/sdk_contract/warmup.rs::sdk_184_warmup_no_intents`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/warmup.rs::sdk_184_warmup_no_intents`
 
 ### SDK-185 `strategy_set!` 生成的分派与直接调用结果相同
 
@@ -2861,12 +2877,12 @@ spec: README.md
 - 规则:[版本与兼容规则](README.md#版本与兼容规则)
 - 级别:unit
 - 里程碑:M2
-- 前置:hft-testkit 同时依赖 SDK 与 hft-event(编译期 `const` 断言放在 hft-oms/hft-exec 中把意图投影为记录体的位置)
+- 前置:`SeqRig`(hft-sequencer 的测试同时看到 SDK、hft-event、hft-oms 与 hft-exec;编译期 `const` 断言在 hft-oms/hft-exec 把意图投影为记录体的位置)
 - 步骤:
-  1. 构造一个每个字段取不同非零值的 `OrderIntent`(带链接)与 `TargetIntent`(`PairOnFill`),经 hft-oms/hft-exec 的投影函数写成 `OrderDecision`/`ExecDecision` 体,再按 hft-event 解码
+  1. 构造一个每个字段取不同非零值的 `OrderIntent`(带链接)与 `TargetIntent`(`PairOnFill`),由 `RecProbe` 在一次 `on_event` 内发出,经 hft-oms/hft-exec 的投影写成 journal 中的 `OrderDecision`/`ExecDecision` 体,再按 hft-event 解码
 - 期望:
   - `OrderDecision` 的 `px`、`qty`、`group`、`inst`、`side`、`tif`、`link_role`(= 1)与意图相同;`ExecDecision` 的 `reason`、`urgency`、`algo`(= 2)、`tag` 与目标相同;投影过程中的 `const` 断言全部编译通过
-- 实现:`crates/hft-testkit/tests/sdk_contract/codes.rs::sdk_190_intent_record_consistency`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/codes.rs::sdk_190_intent_record_consistency`
 
 ### SDK-191 `SnapshotWriter`/`SnapshotReader` 小端定长读写与节版本
 
@@ -2899,13 +2915,13 @@ spec: README.md
 - 规则:[测试桩(testing 特性)](README.md#测试桩testing-特性)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;`RecProbe` 订阅 I1(BBO)与 `model_own` 全部位
+- 前置:`SeqRig`;`RecProbe` 订阅 I1(BBO)、`warmup(Part::Both)` 与 `model_own` 全部位
 - 步骤:
-  1. 投递一条 I1 的 Bbo、一条 `StrategyCmd{op 1, [1_000_000_000], reduce_only = false}`、一块 `InjectWarmup`
-  2. 用 `ev::bbo(..)`、`ev::manual(1, &[1_000_000_000], false)`、`ev::warmup(..)` 以相同字段构造
+  1. 投递一条 I1 的 Bbo、一条 `StrategyCmd{op 1, [5], reduce_only = false, group = none}`、一块 `InjectWarmup`
+  2. 用 `ev::bbo(..)`、`ev::manual(1, &[5], false)`、`ev::warmup(..)` 以相同字段构造
 - 期望:
   - 步骤 1 中 `RecProbe` 收到的三个 `EventRef` 与步骤 2 的 `.as_ref()` 逐字段相等(`Manual.payload` 逐字节相等)
-- 实现:`crates/hft-testkit/tests/sdk_contract/harness.rs::sdk_193_ev_matches_engine`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/harness.rs::sdk_193_ev_matches_engine`
 
 ### SDK-194 `MockViews` 只回放设定的状态,不撮合
 
@@ -3039,12 +3055,12 @@ spec: README.md
 - 规则:[Strategy 与 Model](README.md#strategy-与-model)
 - 级别:integ
 - 里程碑:M2
-- 前置:`SeqRig`;实例 S3 绑定 Sim 账户 A1,实例 S6(同一种类、同一参数)绑定 Live 测试网账户 A3(`is_prod = false`,venues {V1, V2});两者订阅 I1;两者 Live、`open_allowed = 1`
+- 前置:`SeqRig`;实例 S3 = s9 绑定 Sim 账户 sim-9,实例 S6 = s1(同一种类、同一参数值)绑定 Live 测试网账户 acct-1(`is_prod = false`,venues {A, B});两者订阅 I1;两者 Live、`open_allowed = 1`
 - 步骤:
   1. 投递 20 条 I1 的 Bbo,其中 5 条满足触发条件
 - 期望:
-  - S3 与 S6 的 `OrderDecision` 序列条数相同(各 5 条),除 `strategy`、`account`、`slot`、`gen`、`intent_no` 外逐字段相同;同一 Bbo 上 S6(实盘实例)的决策排在 S3 之前
-- 实现:`crates/hft-testkit/tests/sdk_contract/lifecycle.rs::sdk_207_sim_and_live_identical`
+  - S3 与 S6 的 `OrderDecision` 序列条数相同(各 5 条),除 `strategy`、`account`、`slot`、`gen`、`intent_no` 与 `group`(GroupId 含实例号)外逐字段相同,`trigger_seq` 相同;同一 Bbo 上 S6(实盘实例)的决策排在 S3 之前
+- 实现:`crates/hft-sequencer/tests/sdk_contract/lifecycle.rs::sdk_207_sim_and_live_identical`
 
 ### SDK-208 `RefView` 只暴露本实例需要的参考数据
 
@@ -3075,7 +3091,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:`SeqRig`;实例 Live;每行一个独立运行,触发该行事件后读下一事件中的 `v.risk(A1)`
-- 实现:`crates/hft-testkit/tests/sdk_contract/views.rs::sdk_209_risk_events_and_state`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/views.rs::sdk_209_risk_events_and_state`
 
 | 行 | 触发 | 期望 |
 |---|---|---|

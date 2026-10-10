@@ -25,16 +25,9 @@ pub(crate) fn drain_out<D: Driver<S>, S: StrategySet>(
     if out.is_empty() {
         return Ok(());
     }
-    let decisions: Vec<hft_event::ExecDecision> = out.decisions.as_slice().to_vec();
-    let cancel_resting: Vec<hft_exec::CancelResting> = out.cancel_resting.as_slice().to_vec();
-    let orders: Vec<hft_exec::ExecOrder> = out.orders.as_slice().to_vec();
-    let cancels: Vec<hft_strategy_sdk::OrderRef> = out.cancels.as_slice().to_vec();
-    let broken: Vec<hft_exec::BrokenReq> = out.broken.as_slice().to_vec();
-    let timers: Vec<hft_exec::ExecTimerReq> = out.timers.as_slice().to_vec();
-    let notify: Vec<hft_exec::ExecNotify> = out.notify.as_slice().to_vec();
-    let notes: Vec<hft_event::Note> = out.notes.as_slice().to_vec();
-    out.clear();
-    for d in decisions.iter() {
+    // `out` is checked out of the engine's pool. Nested calls use other pooled buffers, so
+    // processing this one in place preserves the fixed drain order without heap copies.
+    for d in out.decisions.iter() {
         let flags = if d.eflags & hft_exec::decision::eflags::SHADOW != 0 {
             RecordFlags::SHADOW
         } else {
@@ -44,7 +37,7 @@ pub(crate) fn drain_out<D: Driver<S>, S: StrategySet>(
             .rec("exec_decision", u64::from(d.action), u64::from(d.group.0));
         e.out.push(flags, d);
     }
-    for c in cancel_resting.iter() {
+    for c in out.cancel_resting.iter() {
         e.trace.rec(
             "oms.cancel_resting_on",
             u64::from(c.account.0),
@@ -56,7 +49,7 @@ pub(crate) fn drain_out<D: Driver<S>, S: StrategySet>(
         crate::intents::drain_oms(e, inst, drv, &mut o)?;
         e.put_oms(o);
     }
-    for o in orders.iter() {
+    for o in out.orders.iter() {
         e.trace.rec("exec.order", u64::from(o.id.packed()), 0);
         let r = crate::intents::place_exec(e, inst, drv, o)?;
         e.trace.rec("exec.on_place_result", u64::from(o.id.packed()), 0);
@@ -65,7 +58,7 @@ pub(crate) fn drain_out<D: Driver<S>, S: StrategySet>(
         drain_out(e, inst, drv, &mut xo)?;
         e.put_exec(xo);
     }
-    for c in cancels.iter() {
+    for c in out.cancels.iter() {
         e.trace.rec("oms.cancel", u64::from(c.slot), 1);
         let mut o = e.take_oms();
         let trig = e.trig;
@@ -75,12 +68,12 @@ pub(crate) fn drain_out<D: Driver<S>, S: StrategySet>(
         crate::intents::drain_oms(e, inst, drv, &mut o)?;
         e.put_oms(o);
     }
-    for b in broken.iter() {
+    for b in out.broken.iter() {
         e.trace
             .rec("exec.broken", u64::from(b.account.0), u64::from(b.group.0));
         crate::mode_glue::broken(e, inst, drv, b.account, b.group)?;
     }
-    for t in timers.iter() {
+    for t in out.timers.iter() {
         e.heap.remove_key(5, t.timer_id, t.group.0);
         if !t.cancel {
             e.heap
@@ -93,7 +86,7 @@ pub(crate) fn drain_out<D: Driver<S>, S: StrategySet>(
                 .map_err(|_| FatalReason::TimerOverflow)?;
         }
     }
-    for n in notify.iter() {
+    for n in out.notify.iter() {
         if let Some(ix) = inst.ix(n.owner) {
             let gix = inst
                 .slots
@@ -101,12 +94,20 @@ pub(crate) fn drain_out<D: Driver<S>, S: StrategySet>(
                 .and_then(|s| s.gix_of(n.u.group))
                 .unwrap_or(hft_strategy_sdk::GIX_NONE);
             e.trace.rec("queue.exec", u64::from(n.owner.0), 0);
-            e.notify.push(ix as u16, Notif::Exec { gix, u: n.u });
+            // `ExecUpdate.inflight` = the legs' immediate in-flight (OMS `LegTrack`) after this
+            // Input's orders were placed.
+            let mut u = n.u;
+            let lv = &e.oms.legs(n.account, n.u.group).view;
+            for (d, l) in u.inflight.iter_mut().zip(lv.leg.iter()) {
+                *d = l.inflight_immediate;
+            }
+            e.notify.push(ix as u16, Notif::Exec { gix, u });
         }
     }
-    for n in notes.iter() {
+    for n in out.notes.iter() {
         e.out.push(RecordFlags(0), n);
     }
+    out.clear();
     Ok(())
 }
 
@@ -125,6 +126,18 @@ pub(crate) fn set_target<D: Driver<S>, S: StrategySet>(
         let v = crate::noexec_views!(e);
         e.exec.set_target(owner, t, ro, &v, e.now, &mut xo)
     };
+    // Live with `open_allowed = false`: an accepted target that increases a leg is recorded like
+    // one set in Shadow (hft-exec "运行模式、Drain 与 Unknown"); the executor does not see
+    // `open_allowed`, so the flag goes on its TargetSet/TargetReplaced record here.
+    if r.is_ok() && closed_increase(e, inst, t) {
+        for d in xo.decisions.as_mut_slice() {
+            if d.action == hft_exec::decision::action::TARGET_SET
+                || d.action == hft_exec::decision::action::TARGET_REPLACED
+            {
+                d.eflags |= hft_exec::decision::eflags::SHADOW;
+            }
+        }
+    }
     let shadow = xo
         .decisions
         .iter()
@@ -135,6 +148,31 @@ pub(crate) fn set_target<D: Driver<S>, S: StrategySet>(
         Ok(()) if shadow => IntentOutcome::TargetShadowed,
         Ok(()) => IntentOutcome::TargetAccepted,
         Err(x) => IntentOutcome::TargetRejected(x),
+    })
+}
+
+/// The cell of `t` is Live with `open_allowed = false` and `t` moves some leg away from its
+/// current net (LegTracker) or flips its sign.
+fn closed_increase<S: StrategySet>(e: &Engine, inst: &Instances<S>, t: &TargetIntent) -> bool {
+    if inst
+        .spec(t.account, t.group)
+        .is_none_or(|sp| sp.open_allowed != 0)
+    {
+        return false;
+    }
+    let cell = hft_risk::mode::CellKey {
+        strategy: e.rd.account(t.account).bound_instance,
+        account: t.account,
+        group: t.group,
+    };
+    if e.risk.mode.effective(cell) != hft_risk::mode::Effective::Live {
+        return false;
+    }
+    let lv = &e.oms.legs(t.account, t.group).view;
+    t.legs().iter().any(|l| {
+        let pos = lv.leg.get(usize::from(l.leg_ix)).map_or(0, |x| x.net.0);
+        let q = l.qty.0;
+        !(q == 0 || (q.signum() == pos.signum() && q.unsigned_abs() <= pos.unsigned_abs()))
     })
 }
 

@@ -21,7 +21,9 @@ fn mk(on_y: bool, st: OrderState, acked: bool, prev: OrderState, filled: &str) -
     let it = if on_y { sell_y() } else { buy_x() };
     let r = h.place_ok(&it, 0);
     let f = q(filled);
-    h.o.test_slot_mut(r.venue, r.account, r.slot, |sl, _| {
+    h.o.test_slot_mut(r.venue, r.account, r.slot, |sl, ex| {
+        // `filled` as if fill reports brought it (their fees are booked up to here).
+        ex.fee_cum = q(filled);
         sl.state = st;
         if st == Unknown {
             sl.prev_state = prev;

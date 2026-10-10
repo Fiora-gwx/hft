@@ -33,6 +33,13 @@ libc.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 criterion.workspace = true
+# End-to-end tests (TESTS.md baseline E2E): the real sequencer with its test hooks, the test strategy
+# set `TestStrategies`, and the component configurations an `EngineSetup` needs.
+hft-sequencer = { workspace = true, features = ["testing"] }
+hft-testkit.workspace = true
+hft-oms.workspace = true
+hft-exec.workspace = true
+hft-ledger.workspace = true
 
 [[bench]]
 name = "ingest"

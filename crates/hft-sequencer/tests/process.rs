@@ -977,3 +977,47 @@ fn seq_156_margin_report() {
         .unwrap();
     assert!(notes.iter().any(|n| n.code == cap_set), "{notes:?}");
 }
+
+#[test]
+fn seq_370_foreign_fill_increments_not_held() {
+    let mut h = steady();
+    let ff = hft_oms::notes::code_of(hft_oms::notes::FOREIGN_FILL);
+    let dedup = hft_oms::notes::code_of(hft_oms::notes::EXT_DEDUP);
+    let mut booked = Vec::new();
+    for cum in ["0.002", "0.005"] {
+        let ev = hft_event::OrderEvent {
+            venue: B,
+            account: AC1,
+            what: hft_event::OrderEventKind::Fill,
+            detail: Side::Buy as u8,
+            slot: hft_types::SlotId(0),
+            r#gen: 0,
+            inst: B1,
+            px: px("50010"),
+            qty: q(cum),
+            cum_filled: q(cum),
+            fee: Qty(0),
+            fee_asset: USDT,
+            epoch: h.epoch(),
+            reject_code: 0,
+            exch_order_id: 9,
+            ex_ts_ns: 0,
+            hw_rx_ns: 0,
+            rx_tsc: 0,
+            avg_px: px("50010"),
+        };
+        let m = h.mark();
+        h.push(RingId::Rep(0), &ev);
+        h.run();
+        let notes = h.notes_since(m);
+        assert!(
+            !notes.iter().any(|n| n.code == dedup),
+            "no OmsExtDedup: {notes:?}"
+        );
+        let n: Vec<_> = notes.iter().filter(|n| n.code == ff).collect();
+        assert_eq!(n.len(), 1, "one OmsForeignFill per report");
+        booked.push(n[0].v[1] as i64);
+    }
+    assert_eq!(booked, vec![q("0.002").0, q("0.003").0]);
+    assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, q("0.005"));
+}

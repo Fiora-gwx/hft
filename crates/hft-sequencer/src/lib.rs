@@ -146,6 +146,9 @@ impl<D: Driver<S>, S: StrategySet> Sequencer<D, S> {
                 return StepOutcome::Fatal(f);
             }
             if let Some(o) = self.e.finished {
+                // The event that ended the run (Drain snapshot included) is complete: publish it
+                // before returning, like the end of any round.
+                self.drv.journal().publish();
                 return o;
             }
         }

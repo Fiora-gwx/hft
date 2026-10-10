@@ -56,6 +56,11 @@ impl<T: Copy> FixedVec<T> {
     pub fn as_slice(&self) -> &[T] {
         &self.v
     }
+    /// Mutates the existing elements without changing length or capacity.
+    #[inline]
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        &mut self.v
+    }
     #[inline]
     pub fn iter(&self) -> core::slice::Iter<'_, T> {
         self.v.iter()

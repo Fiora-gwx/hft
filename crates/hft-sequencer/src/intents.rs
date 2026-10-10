@@ -359,6 +359,14 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
     {
         iv.link_venue = req.peer_venue;
         iv.link_account = req.peer_account;
+        // The peer is the first leg: its inst is the one whose quote health #5 checks
+        // (`LINK_STALE`); without it the check reads the empty quote of inst 0.
+        if let Some(first) = e.oms.link(req.link_id).map(|l| l.first)
+            && let Some(s) = e.oms.slot(first)
+        {
+            iv.link_inst = s.inst;
+            iv.link_side = s.side;
+        }
     }
     // 5. evaluate.
     if e.trace.on {
@@ -458,6 +466,7 @@ pub(crate) fn place_strategy<D: Driver<S>, S: StrategySet>(
     strategy: StrategyId,
     it: &OrderIntent,
     ro: bool,
+    intent_no: u32,
 ) -> R<IntentOutcome> {
     let r = pipeline(
         e,
@@ -466,7 +475,7 @@ pub(crate) fn place_strategy<D: Driver<S>, S: StrategySet>(
         strategy,
         it,
         Src::Strategy { reduce_only_ctx: ro },
-        0,
+        intent_no,
     )?;
     Ok(match r {
         PipeOut::Placed(h) => IntentOutcome::Placed(h),
@@ -651,6 +660,13 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
             _pad3: 0,
             seq: f.seq,
         };
+        // Seq of the latest fill per (account, inst): `AdoptExchange`'s `StaleReport` check and
+        // the `AUTO_EXTERNAL` precondition read it.
+        let key = (f.account, f.inst);
+        match e.cmd.fill_seq.iter_mut().find(|x| x.0 == key) {
+            Some(x) => x.1 = e.cur_seq,
+            None => e.cmd.fill_seq.push((key, e.cur_seq)),
+        }
         let before = e.ledger.pos(f.account, f.inst).qty.0 != 0;
         let r = e.ledger.apply_fill(&fd, e.now.engine_ns);
         e.trace
@@ -771,7 +787,7 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
             .find(|n| n.code == hft_oms::notes::code_of(hft_oms::notes::FOREIGN_FILL) && n.inst == f.inst);
         let ef = n.and_then(hft_ledger::Ledger::external_from_oms_note);
         let ef = ef.unwrap_or_else(|| foreign_to_external(f));
-        crate::process::external_fill(e, inst, drv, &ef, false)?;
+        crate::process::external_fill(e, inst, drv, &ef, false, true)?;
     }
     // Decisions → Output + out ring.
     let mut decs: Vec<OrderDecision> = out.decisions.as_slice().to_vec();

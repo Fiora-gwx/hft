@@ -16,7 +16,7 @@ spec: README.md
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
 | 模拟账户是什么 | SIM-005、SIM-114、SIM-167 |
-| 纯核心 API | SIM-002、SIM-003、SIM-012、SIM-113、SIM-188 |
+| 纯核心 API | SIM-002、SIM-003、SIM-012、SIM-113、SIM-188、SIM-220 |
 | sim-gw 任务(`task` feature) | SIM-214–SIM-217、SIM-105、SIM-140–SIM-148、SIM-205 |
 | 重启恢复 | SIM-160–SIM-169、SIM-218 |
 | 配置 | SIM-001、SIM-003、SIM-004、SIM-033、SIM-034、SIM-052、SIM-053、SIM-077、SIM-082、SIM-111、SIM-144 |
@@ -33,7 +33,7 @@ spec: README.md
 | 4. 挂单(预留给 MakerFirst) | SIM-040、SIM-041、SIM-162 |
 | 5. 手续费与扣费资产 | SIM-050–SIM-053、SIM-125 |
 | 6. 资金费 | SIM-060–SIM-063、SIM-125、SIM-166、SIM-203 |
-| 7. 永续全仓保证金与强平 | SIM-070–SIM-075、SIM-125 |
+| 7. 永续全仓保证金与强平 | SIM-070–SIM-075、SIM-125、SIM-221 |
 | 8. 现货余额与划转 | SIM-036、SIM-080–SIM-083 |
 | 9. 确定性 | SIM-004、SIM-120–SIM-123、SIM-165、SIM-205 |
 | 10. 不变量 | SIM-124、SIM-204 |
@@ -821,6 +821,34 @@ spec: README.md
   - 步骤 1:`ConnState{Down}` 一条;`Place` 得 `SendReport{status: NoConn}`,无 `Ack`、无成交;`Cancel`、`Query` 同样得 `NoConn`
   - 步骤 2:`ConnState{Up}` 一条;第二张单得 `Ack` 并成交 0.1
 - 实现:`crates/hft-sim/tests/events.rs::sim_113_order_conn_down`
+
+### SIM-220 external_fill 按无手续费的成交结算仓位、已实现盈亏与现货余额,不产出回报
+
+- 规则:[纯核心 API](README.md#纯核心-api)
+- 级别:unit
+- 里程碑:M2
+- 前置:SIM-072 的账户 A9(USDT 18 000);`seed` 使 A9 在 BTC_P2 持仓 −1.0、均价 60 000
+- 步骤:
+  1. `external_fill(A9, BTC_P2, Buy, 0.4, 59 000)`
+  2. `external_fill(A9, BTC_S1, Buy, 0.1, 60 000)`
+- 期望:
+  - 步骤 1 后 BTC_P2 仓位 −0.6;USDT 余额 18 400(已实现 +400,无手续费)
+  - 步骤 2 后 S1 的 BTC 余额 +0.1、USDT −6 000
+  - 两步都没有新的回报(`drain_due` 无输出)
+- 实现:`crates/hft-sim/tests/events.rs::sim_220_external_fill`
+
+### SIM-221 部分减仓的移出成本与已实现盈亏向零取整
+
+- 规则:[7. 永续全仓保证金与强平](README.md#7-永续全仓保证金与强平)
+- 级别:unit
+- 里程碑:M2
+- 前置:账户 A9 永续钱包 USDT 18 000,无持仓
+- 步骤:
+  1. `external_fill(A9, BTC_P2, Sell, 0.1, 60 000)`;`external_fill(A9, BTC_P2, Sell, 0.2, 60 000.0001)`
+  2. `external_fill(A9, BTC_P2, Buy, 0.1, 60 000.0002)`
+- 期望:
+  - 步骤 2 后仓位 −0.2;移出成本 = 18 000 000 002 × 10⁶ / 3 向零取整 = 6 000 000 006 666 666(10⁻¹²);已实现 −13 333 334(10⁻¹²)向零取整到 USDT 最小单位 = −0.000013,钱包 = 17 999.999987
+- 实现:`crates/hft-sim/tests/events.rs::sim_221_partial_close_rounds_toward_zero`
 
 ### SIM-120 同一输入与种子两次运行的回报序列与 state_hash 轨迹逐项相等
 

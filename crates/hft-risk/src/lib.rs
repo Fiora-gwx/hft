@@ -428,6 +428,13 @@ impl Risk {
         out.items = items;
     }
 
+    /// The checks `apply` makes before changing anything (`InvalidScope` … source preconditions),
+    /// without applying: the status of a `PREVIEW` (control-plane "版本与确认").
+    pub fn check_mode(&self, inp: &ModeInput<'_>, ext: &impl ModeView) -> Result<(), mode::ModeErr> {
+        let v = Combined { s: &self.s, ext };
+        self.mode.check(inp, &v)
+    }
+
     // ------------------------------------------------------------------------- non-mode inputs
 
     /// `day_pnl` below the trigger line → `Auto(DailyLoss)` (latched).

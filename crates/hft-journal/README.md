@@ -385,7 +385,7 @@ pub fn held_by_instance(hot_dirs: &[&Path], instance: InstanceName) -> Result<hf
 | 读者顺序扫描 | ≥ 1 GB/s(页缓存命中) | `journal_read_scan`;回放目标 10 GB < 10 min([08 §5](../../design/08-数据面与回放.md)) |
 | 恢复(1 GiB 未复制) | ≤ 5 s;冷启动总目标 < 30 s([08 §6](../../design/08-数据面与回放.md)) | `journal_recover_1g` |
 
-热路径入口零分配、零系统调用、零缺页。写者与读者共享的只有写者行(批次边界写一次)与 persist 行(warm 写)。热段内存:见 [journal-format 三类 journal](../../docs/subsystems/journal-format.md#三类-journal) 的预算。
+热路径入口零分配、零系统调用、零缺页;JNL-105 的缺页计数只取执行 append 的线程。写者与读者共享的只有写者行(批次边界写一次)与 persist 行(warm 写)。热段内存:见 [journal-format 三类 journal](../../docs/subsystems/journal-format.md#三类-journal) 的预算。
 
 ## 测试与验收
 

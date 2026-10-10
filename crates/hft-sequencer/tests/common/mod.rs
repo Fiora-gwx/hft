@@ -249,6 +249,8 @@ pub struct Rd {
     pub instances: Vec<InstanceSpec>,
     pub caps: Vec<VenueCaps>,
     pub limits: Vec<(VenueId, RateLimit)>,
+    /// Venues besides A and B (spot; their caps go in `caps`, their insts in `insts`).
+    pub extra_venues: Vec<(VenueId, Exchange)>,
 }
 
 pub fn order_limits(v: VenueId, l10: u32, l60: u32) -> Vec<(VenueId, RateLimit)> {
@@ -364,6 +366,7 @@ pub fn b0_rd() -> Rd {
         instances,
         caps: vec![caps_spec(A, false), caps_spec(B, true)],
         limits,
+        extra_venues: Vec::new(),
     }
 }
 
@@ -377,6 +380,9 @@ impl Rd {
         b.asset(asset(4, "FILL", AssetClass::Crypto, 1_000));
         b.venue(venue_spec(A, Exchange::Binance, InstKind::Spot));
         b.venue(venue_spec(B, Exchange::Gate, InstKind::Perp));
+        for (v, ex) in &self.extra_venues {
+            b.venue(venue_spec(*v, *ex, InstKind::Spot));
+        }
         for c in &self.caps {
             b.caps(c.clone());
         }
@@ -1432,7 +1438,7 @@ impl<S: StrategySet> H<S> {
                 RingId::Rep(0),
                 &conn(v, 0, ConnStateKind::Up, ConnRole::Md, InstId(0), AccountId(0), t),
             );
-            for i in [A1, A2, A3, B1, B2] {
+            for i in self.steady_insts() {
                 if self.rd.inst(i).venue == v {
                     self.push(
                         RingId::Rep(0),
@@ -1459,18 +1465,15 @@ impl<S: StrategySet> H<S> {
         for a in [AC1, AC2] {
             for v in [A, B] {
                 let levs: Vec<LeverageItem> = if v == B {
-                    vec![
-                        LeverageItem {
-                            inst: B1,
+                    self.steady_insts()
+                        .into_iter()
+                        .filter(|i| self.rd.inst(*i).venue == B)
+                        .map(|inst| LeverageItem {
+                            inst,
                             _pad: 0,
                             leverage: r("3.00"),
-                        },
-                        LeverageItem {
-                            inst: B2,
-                            _pad: 0,
-                            leverage: r("3.00"),
-                        },
-                    ]
+                        })
+                        .collect()
                 } else {
                     Vec::new()
                 };
@@ -1506,6 +1509,10 @@ impl<S: StrategySet> H<S> {
         self.quote(B1, "50010", "50011");
         self.quote(A2, "3000", "3000.5");
         self.quote(B2, "3000.1", "3000.6");
+        if self.rd.inst_count() > 22 {
+            self.quote(InstId(14), "10", "10.01");
+            self.quote(InstId(23), "10.01", "10.02");
+        }
         self.run();
         let cells: Vec<(StrategyId, AccountId, GroupId)> = self
             .s
@@ -1538,6 +1545,15 @@ impl<S: StrategySet> H<S> {
                 "steady: SetMode Live of {s:?}"
             );
         }
+    }
+
+    /// The insts `steady` brings up (B0's five, plus the FILL pair 14 / 23 when inst 23 exists).
+    pub fn steady_insts(&self) -> Vec<InstId> {
+        let mut v = vec![A1, A2, A3, B1, B2];
+        if self.rd.inst_count() > 22 {
+            v.extend([InstId(14), InstId(23)]);
+        }
+        v
     }
 
     /// A `MarginReport` of (a, B) without items.

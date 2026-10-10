@@ -762,7 +762,7 @@ impl Mode {
 
     /// Validation in the documented order (InvalidScope → NotResumable → Draining →
     /// GateNotReleased → NoMatchingCap → source preconditions).
-    fn check(&self, inp: &ModeInput<'_>, v: &impl ModeView) -> Result<(), ModeErr> {
+    pub(crate) fn check(&self, inp: &ModeInput<'_>, v: &impl ModeView) -> Result<(), ModeErr> {
         match inp {
             ModeInput::Kill(k) => {
                 let bad = (k.hard && k.level == KillLevel::Venue)

@@ -47,8 +47,9 @@ sha2 = { version = "0.10", optional = true }
 sdk-mock = ["hft-strategy-sdk/testing"]
 # The engine adapter `SeqSut<S>` over the real sequencer and `hft_sim::SimExchange`.
 seq = ["dep:hft-sequencer", "dep:hft-sim", "dep:hft-oms", "dep:hft-risk", "dep:hft-ledger", "dep:hft-exec", "dep:sha2"]
-# The `hft-dst` runner binary (verification bundle only; README "8. hft-dst 运行器").
-dst-bin = []
+# The `hft-dst` runner binary (verification bundle only; README "8. hft-dst 运行器"); it runs the
+# real engine.
+dst-bin = ["seq"]
 
 [[bin]]
 name = "hft-dst"
@@ -72,6 +73,7 @@ path = "tests/main.rs"
 [[test]]
 name = "dst"
 path = "../../tests/dst/main.rs"
+required-features = ["seq"]
 
 [dev-dependencies]
 hft-testkit = { path = ".", features = ["sdk-mock"] }

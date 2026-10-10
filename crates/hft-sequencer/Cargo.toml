@@ -46,6 +46,11 @@ criterion.workspace = true
 name = "seq"
 path = "tests/main.rs"
 
+# SDK-140: the counting global allocator is process-wide, so it gets its own binary.
+[[test]]
+name = "sdk_alloc"
+path = "tests/sdk_alloc.rs"
+
 [[bench]]
 name = "seq"
 harness = false

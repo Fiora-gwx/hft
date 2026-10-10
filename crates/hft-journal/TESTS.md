@@ -1516,7 +1516,7 @@ spec: README.md
 - 前置:Linux;同一个事件脚本(500 个事件、两次滚动、`TMulti` 与 `TCrc`)分别在内存后端与 tmpfs(`page = Normal`)上运行;`RollInfo` 与 `WriterEnv` 相同
 - 步骤:
   1. 比较两边每个段的字节(写者行与 persist 行除外)
-  2. tmpfs 一边在稳态再写 10 000 个事件,前后读 `getrusage().ru_minflt`
+  2. tmpfs 一边在稳态再写 10 000 个事件,前后读写入线程的 `getrusage(RUSAGE_THREAD).ru_minflt`,排除同进程其他测试线程的缺页
 - 期望:步骤 1 逐字节相同;步骤 2 缺页次数之差为 0
 - 实现:`crates/hft-journal/tests/tmpfs.rs::jnl_105_tmpfs_equals_mem`
 

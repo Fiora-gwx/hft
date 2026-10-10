@@ -1,0 +1,4 @@
+# DST failure regressions of suite `storage` (fixtures/README.md): seed, first failure date, cause.
+0x0000000000000185 2026-10-10 崩溃重启后 OMS 计数归零,INV-2 误报
+0x0000000000000072 2026-10-10 连续干净重启推迟 OmsSweep,终态槽超时(SEQ-239)
+0x0000000000000371 2026-10-10 实盘驱动先写到期定时器,INV-1 把它当作该步的 Input

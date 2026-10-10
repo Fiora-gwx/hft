@@ -374,3 +374,66 @@ fn oms_114_foreign_fill_note_fields() {
     assert_eq!(n.v[0], 4_311_810_306);
     assert_eq!(&n.v[1..8], &[400_000, 6_000_000, 400, 555, 0, 400_000, 400_000]);
 }
+
+/// OMS-460: a fill report whose quantity a `CancelReject{GONE}` already brought books its fee
+/// once (`FeeOut`), repeats book nothing.
+#[test]
+fn oms_460_fee_of_fill_after_non_fill_report() {
+    let fill = |h: &mut H, r: OrderRef, cum: &str, fee: i64, t: u64| {
+        let mut e = h.oe(r, OrderEventKind::PartialFill);
+        if q(cum) == q("0.01") {
+            e.what = OrderEventKind::Fill;
+        }
+        e.cum_filled = q(cum);
+        e.avg_px = p("60000.00");
+        e.fee = Qty(fee);
+        e.fee_asset = USDT;
+        h.ev(&e, t);
+    };
+    let gone = |h: &mut H, r: OrderRef, t: u64| {
+        h.cancel(r, t).unwrap();
+        let mut e = h.oe(r, OrderEventKind::CancelReject);
+        e.detail = 1;
+        e.cum_filled = q("0.01");
+        e.avg_px = p("60000.00");
+        h.ev(&e, t + 1);
+        assert_eq!(h.state(r), OrderState::Filled);
+        assert_eq!(h.out.fills.len(), 1);
+        assert_eq!(h.out.fills[0].fee, 0);
+    };
+    // Steps 1–3: one execution.
+    let mut h = H::new();
+    let r = h.place_ok(&buy_x(), 0);
+    h.ack(r, 7, 1);
+    gone(&mut h, r, 2);
+    fill(&mut h, r, "0.01", 1000, 4);
+    assert!(h.out.fills.is_empty(), "OMS-460 step 2: no second fill");
+    let f = h.out.fees.as_slice();
+    assert_eq!(f.len(), 1, "OMS-460 step 2");
+    assert_eq!(
+        (f[0].inst, f[0].fee, f[0].fee_asset),
+        (X, 1000, USDT),
+        "OMS-460 step 2"
+    );
+    assert_eq!(h.ext(r).fee_cum, q("0.01"), "OMS-460 step 2");
+    assert_eq!(h.slot(r).fee_accum, 1000, "OMS-460 step 2");
+    fill(&mut h, r, "0.01", 1000, 5);
+    assert!(
+        h.out.fees.is_empty() && h.out.fills.is_empty(),
+        "OMS-460 step 3: repeat"
+    );
+    // Steps 4–6: two executions behind one CancelReject.
+    let mut h = H::new();
+    let r = h.place_ok(&buy_x(), 0);
+    h.ack(r, 8, 1);
+    gone(&mut h, r, 2);
+    fill(&mut h, r, "0.004", 400, 4);
+    assert_eq!(h.out.fees.as_slice().len(), 1, "OMS-460 step 5");
+    assert_eq!(h.out.fees[0].fee, 400, "OMS-460 step 5");
+    fill(&mut h, r, "0.004", 400, 5);
+    assert!(h.out.fees.is_empty(), "OMS-460 step 5: repeat");
+    fill(&mut h, r, "0.01", 600, 6);
+    assert_eq!(h.out.fees.as_slice().len(), 1, "OMS-460 step 6");
+    assert_eq!(h.out.fees[0].fee, 600, "OMS-460 step 6");
+    assert_eq!(h.slot(r).fee_accum, 1000, "OMS-460 step 6");
+}

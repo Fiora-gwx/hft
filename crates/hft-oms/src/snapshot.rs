@@ -11,8 +11,8 @@ use crate::table::GroupEntry;
 use crate::types::{
     LegRowBody, LegState, LinkEntry, LinkRowHdr, LinkState, OmsCountersHdr, OrderSlot, OrderState, OutItem,
     PlanRowBody, ROW_VERSION_COUNTERS, ROW_VERSION_LINKS, ROW_VERSION_SLOTS, SECTION_OMS_COUNTERS,
-    SECTION_OMS_LINKS, SECTION_ORDER_SLOTS, SLOT_ROW_LEN, SlotExt, SlotFlags, TableRow, Tomb, TombRowBody,
-    out_kind,
+    SECTION_OMS_LINKS, SECTION_ORDER_SLOTS, SLOT_ROW_LEN, SLOT_ROW_LEN_V1, SlotExt, SlotFlags, TableRow,
+    Tomb, TombRowBody, out_kind,
 };
 
 const ROW_LINK: u8 = 1;
@@ -189,7 +189,7 @@ impl Oms {
         let s12 = r
             .find_section(SECTION_OMS_LINKS)?
             .ok_or(RestoreError::BadSection)?;
-        if s2.version != ROW_VERSION_SLOTS
+        if !(s2.version == ROW_VERSION_SLOTS || s2.version == 1)
             || s3.version != ROW_VERSION_COUNTERS
             || s12.version != ROW_VERSION_LINKS
         {
@@ -259,10 +259,20 @@ impl Oms {
         // ---- section 2
         let mut rr = s2.reader();
         for _ in 0..s2.count {
-            let b = rr.get_bytes(SLOT_ROW_LEN)?;
+            // Row version 1 has the 32-byte `SlotExt` without `fee_cum`: its fees are taken as
+            // booked up to `filled` (README "快照行格式").
+            let v1 = s2.version == 1;
+            let b = rr.get_bytes(if v1 { SLOT_ROW_LEN_V1 } else { SLOT_ROW_LEN })?;
             let (b1, b2) = b.split_at(128);
             let sl = OrderSlot::try_read_from_bytes(b1).map_err(|_| RestoreError::BadValue)?;
-            let ex = SlotExt::read_from_bytes(b2).map_err(|_| RestoreError::BadValue)?;
+            let mut ext = [0u8; SLOT_ROW_LEN - 128];
+            ext.get_mut(..b2.len())
+                .ok_or(RestoreError::BadValue)?
+                .copy_from_slice(b2);
+            let mut ex = SlotExt::read_from_bytes(&ext).map_err(|_| RestoreError::BadValue)?;
+            if v1 {
+                ex.fee_cum = sl.filled;
+            }
             if sl.state == OrderState::Free || ex.role > LinkRole::Reverse as u8 || ex.origin > 4 {
                 return Err(RestoreError::BadValue);
             }

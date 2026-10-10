@@ -22,13 +22,13 @@ spec: README.md
 | advisor | SEQ-030、SEQ-031、SEQ-051、SEQ-339 |
 | 实现说明 | 不适用:见子节 |
 | 记录分类 | SEQ-020、SEQ-052–SEQ-054 |
-| 主循环(`step`) | SEQ-008–SEQ-010、SEQ-012、SEQ-055–SEQ-077、SEQ-101、SEQ-217、SEQ-319、SEQ-343、SEQ-344、SEQ-346 |
+| 主循环(`step`) | SEQ-008–SEQ-010、SEQ-012、SEQ-055–SEQ-077、SEQ-101、SEQ-217、SEQ-319、SEQ-343、SEQ-344、SEQ-346、SEQ-370 |
 | 心跳 | SEQ-010、SEQ-073、SEQ-078 |
 | 环境决定写成 Input | SEQ-036、SEQ-055、SEQ-079–SEQ-098、SEQ-244 |
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
 | 连接活性 | SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173 |
-| 每条 Input 的处理顺序(`process`) | SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369 |
+| 每条 Input 的处理顺序(`process`) | SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
@@ -51,7 +51,7 @@ spec: README.md
 | 启动闸门 | SEQ-094、SEQ-157、SEQ-160、SEQ-207、SEQ-210、SEQ-275、SEQ-345 |
 | 存储降级 | SEQ-093、SEQ-276、SEQ-277 |
 | 命令路径 | SEQ-009、SEQ-040、SEQ-122、SEQ-185、SEQ-186、SEQ-189、SEQ-211、SEQ-235、SEQ-255、SEQ-278–SEQ-304、SEQ-348、SEQ-354、SEQ-355、SEQ-357、SEQ-358、SEQ-365 |
-| Drain | SEQ-187、SEQ-209、SEQ-222、SEQ-284、SEQ-305–SEQ-309 |
+| Drain | SEQ-187、SEQ-209、SEQ-222、SEQ-284、SEQ-305–SEQ-309、SEQ-370 |
 | 确定性规则 | SEQ-043、SEQ-053、SEQ-076、SEQ-097、SEQ-254、SEQ-267、SEQ-310–SEQ-313、SEQ-344 |
 | 状态哈希 | SEQ-054、SEQ-245、SEQ-247、SEQ-249、SEQ-311、SEQ-314 |
 | 规划源文件 | SEQ-310、SEQ-317–SEQ-339 |
@@ -3370,16 +3370,18 @@ spec: README.md
 | SEQ-238.2 | deadline 6 000 | 一条,5 000 |
 | SEQ-238.3 | 键不同(`AutoFix`) | 两条各自保留 |
 
-### SEQ-239 周期性系统定时器每次启动重新登记,替换旧条目
+### SEQ-239 周期性系统定时器每次启动重新登记,替换旧条目;更早的 OmsSweep 保留
 
 - 规则:[定时器](README.md#定时器)
 - 级别:unit
 - 里程碑:M2
 - 前置:快照堆中有 `OmsSweep` 与 (B, 1) 的 `DeadMan` 各一条;venue B `refresh_ms = 10 000`
 - 步骤:
-  1. 恢复并处理 `EngineClock`
+  1. 快照中 `OmsSweep` 平移后剩余 1 500 ms:恢复并处理 `EngineClock`
+  2. 快照中 `OmsSweep` 平移后剩余 400 ms:恢复并处理 `EngineClock`
 - 期望:
-  - 堆中 `OmsSweep` 恰好一条(deadline = 本次运行的登记时刻 + 1 000 ms),(B, 1) 的 `DeadMan` 恰好一条(+10 000 ms);没有快照中的旧条目
+  - 步骤 1 后堆中 `OmsSweep` 恰好一条(deadline = 本次运行的登记时刻 + 1 000 ms),(B, 1) 的 `DeadMan` 恰好一条(+10 000 ms);没有快照中的旧条目
+  - 步骤 2 后 `OmsSweep` 恰好一条,deadline = 快照条目平移后的值(登记时刻 + 400 ms);`DeadMan` 同步骤 1
 - 实现:`crates/hft-sequencer/tests/timers.rs::seq_239_periodic_timers_reregistered`
 
 ### SEQ-240 按 engine_ns 记截止的登记向上取整到本次运行的 TSC
@@ -4409,6 +4411,19 @@ spec: README.md
 | SEQ-306.8 | 一个 `Unknown` 槽 | 不等待;快照中该槽为 `Unknown` |
 | SEQ-306.9 | 每一行完成之后 | 下一个满足条件的 Input 之后写 `StateSnapshot{purpose = Drain}`,`step` 返回 `Done{restart: false, cause: Drain}` |
 
+### SEQ-370 结束运行的事件在 step 返回 Done 之前 publish
+
+- 规则:[主循环](README.md#主循环step)、[Drain](README.md#drain)
+- 级别:unit
+- 里程碑:M2
+- 前置:B0 稳态;无挂单、无在途
+- 步骤:
+  1. ctl 环投递已确认的 Admin `Drain{cancel_resting: false}`;`step()` 直到返回非 `Busy`
+- 期望:
+  - 返回 `Done{restart: false, cause: Drain}`;`CmdResult{Applied}`
+  - 返回时 `committed` = 全部记录数(该命令事件与 `StateSnapshot{purpose = Drain}` 都已 publish,虽然这一事件没有出环)
+- 实现:`crates/hft-sequencer/tests/drain.rs::seq_370_done_publishes_the_last_event`
+
 ### SEQ-307 Drain 期间不发增仓切片,减仓照常
 
 - 规则:[Drain](README.md#drain)
@@ -5144,6 +5159,33 @@ spec: README.md
 - 期望:
   - `oms.on_reconcile` 应用该条目;`risk.on_reconcile` 返回 `gate = None`;无 `apply(Gate(Recon))`;`RECONCILED(1, B)` 仍未放行
 - 实现:`crates/hft-sequencer/tests/recon.rs::seq_369_group_without_summary`
+
+### SEQ-370 同一外来单的两次防御路径报告各按累计量增量入账(OMS 自己的 ForeignFill 不登记 ext_held)
+
+- 规则:[每条 Input 的处理顺序(`process`)](README.md#每条-input-的处理顺序process)
+- 级别:unit
+- 里程碑:M2
+- 前置:B0 稳态;账户 1 在 B 上无 `b1` 持仓
+- 步骤:
+  1. 交出 `OrderEvent{slot = SLOT_UNRESOLVED, detail = Buy, inst = b1, exch_order_id = 9, cum_filled = 0.002}`
+  2. 交出同一单的 `OrderEvent{…, cum_filled = 0.005}`
+- 期望:
+  - 两步各一条 `Note{OmsForeignFill}`,`v[1]`(入账量)分别为 0.002 与 0.003 的 raw;无 `Note{OmsExtDedup}`;`ledger.pos(1, b1).qty` = 0.005
+- 备注:回归——sequencer 曾把 OMS 自己的 `ForeignFill` 经 `oms.external_adjust` 登记进 `ext_held[9]`,第二次报告被再扣 0.002(只入账 0.001)
+- 实现:`crates/hft-sequencer/tests/process.rs::seq_370_foreign_fill_increments_not_held`
+
+### SEQ-371 对账 Funding 条目的 Note{FundingCorrected} 写在同一 Input 内
+
+- 规则:[每条 Input 的处理顺序(`process`)](README.md#每条-input-的处理顺序process)
+- 级别:unit
+- 里程碑:M2
+- 前置:B0 稳态;账户 1 在 B 上无资金费入账记录
+- 步骤:
+  1. 交出只含一条 `Funding` 条目(`inst = b1`,`exch_ts_ns` = 当前 UTC 前 30 min 的结算时刻,`exch_amount = −1.5`,`engine_amount = 0`)的 `ReconcileReport`
+- 期望:
+  - `ledger.reconcile_funding` 返回 `Corrected`;同一 Input 的输出含 `Note{source = Ledger, code = FundingCorrected}`(`v[5]` = −1.5 的 raw)
+- 备注:回归——该注记曾留在 ledger 的注记缓冲里,到下一个冲刷注记的 Input 才写出,冷读者因而晚一个事件入账
+- 实现:`crates/hft-sequencer/tests/recon.rs::seq_371_funding_corrected_note_same_input`
 
 ## 验收
 

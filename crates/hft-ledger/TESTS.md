@@ -23,7 +23,7 @@ spec: README.md
 | 仓位与已实现(平均成本法) | LED-010、LED-021–LED-025、LED-030–LED-039、LED-240、LED-241、LED-243 |
 | 余额初始化、校验与基线 | LED-039–LED-046、LED-260–LED-262 |
 | 外部成交(`ExternalFill`) | LED-050–LED-081、LED-188、LED-240、LED-245 |
-| 冷消费者(`JournalLedger`) | LED-263–LED-267 |
+| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271、LED-272 |
 | 资金费 | LED-090–LED-104、LED-136–LED-138、LED-240、LED-245、LED-260 |
 | 资金费时刻归一化 | LED-091、LED-110–LED-116 |
 | 资金费对账校正 | LED-270、LED-268、LED-114、LED-120–LED-139、LED-244、LED-261 |
@@ -2583,6 +2583,37 @@ spec: README.md
 - 期望:
   - `NotApplicable`;`G1.pnl.funding`、`funding_residual`、`wallet` 与 USDT `total` 都不变;挂起表为空;无 `Note{FundingCorrected}`
 - 实现:`crates/hft-ledger/tests/funding_recon.rs::led_270_balance_only_inst_item_not_applicable`
+
+### LED-271 JournalLedger:数量已由非成交回报带来的成交回报只入账费用
+
+- 规则:[冷消费者(`JournalLedger`)](README.md#冷消费者journalledger)
+- 级别:unit
+- 里程碑:M2
+- 前置:同 LED-263 的快照、`EpochStart` 与 `OrderDecision`
+- 步骤:
+  1. `apply(OrderEvent{CancelReject, cum_filled 0.01, avg_px 60 000, fee 0})`
+  2. `apply(OrderEvent{Fill, cum_filled 0.01, avg_px 60 000, fee 0.5, fee_asset USDT})`
+  3. 再 `apply` 同一条 `Fill`
+- 期望:
+  - 步骤 1 后 `pos(A1, BTC/S1)` = 0.01,USDT `total` = 100 000 − 600
+  - 步骤 2 后持仓不变,USDT `total` = 100 000 − 600.5(费用按 `FeeDelta` 入账,与 hft-oms 第 9 条同一口径)
+  - 步骤 3 后不变
+- 实现:`crates/hft-ledger/tests/journal_ledger.rs::led_271_fee_of_fill_after_non_fill_report`
+
+### LED-272 冷读者恢复 OMS 费用水位的新旧快照
+
+- 规则:[冷消费者(`JournalLedger`)](README.md#冷消费者journalledger)
+- 级别:table
+- 里程碑:M2
+- 前置:LED-271 步骤 1 后的 Ledger 快照,另写 OMS 节 2 的一个已成交 0.01 的槽;恢复后两次输入同一 Fill,费用 0.5 USDT
+- 实现:`crates/hft-ledger/tests/journal_ledger.rs::led_272_slot_snapshot_fee_watermark_versions`
+
+| 行 | OMS 行版本与费用水位 | 期望 |
+|---|---|---|
+| LED-272.1 | v1,160 B | 以 filled 初始化水位,不补记费用 |
+| LED-272.2 | v2,192 B,fee_cum = 0 | 只补记一次 0.5 USDT,持仓不变 |
+| LED-272.3 | v2,192 B,fee_cum = filled | 两次回报均不再扣费 |
+| LED-272.4 | v3 | VersionUnsupported |
 
 ## 验收
 

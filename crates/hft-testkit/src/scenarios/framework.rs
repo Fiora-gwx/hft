@@ -1,6 +1,6 @@
 //! Framework scenarios (crates/hft-testkit/TESTS.md TK-043, TK-054, TK-055, TK-056): determinism,
 //! cross-architecture conformance, crash and rebuild, poison repeat. They run on the engine the
-//! caller instantiates ([`super::DstEngine`] for the cargo-test smoke).
+//! caller instantiates (`super::DstEngine` for the cargo-test smoke).
 
 use crate::dst::faults::{CrashFault, Fault};
 use crate::dst::invariants::{InvId, InvariantSet};
@@ -102,6 +102,7 @@ pub fn tk_056_poison_repeat() -> Scenario {
 
 /// Runs one scenario for `n` consecutive seeds from `start` on [`super::DstEngine`] (cargo-test
 /// smoke).
+#[cfg(feature = "seq")]
 pub fn smoke(s: &Scenario, start: u64, n: u64, steps: u64) -> Result<(), String> {
     let suites = super::suites();
     for seed in start..start + n {

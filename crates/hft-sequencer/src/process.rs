@@ -333,7 +333,7 @@ fn dispatch<'a, D: Driver<S>, S: StrategySet>(
         EventKind::FUNDING_SETTLE => funding_settle(e, inst, drv, slot),
         EventKind::EXTERNAL_FILL => {
             if let Some(x) = slot.read::<ExternalFill>() {
-                external_fill(e, inst, drv, &x, false)?;
+                external_fill(e, inst, drv, &x, false, false)?;
             }
             Ok(())
         }
@@ -397,15 +397,19 @@ fn engine_clock<D: Driver<S>, S: StrategySet>(
 fn register_periodic(e: &mut Engine) -> R<()> {
     let ms = e.now.tsc_per_ms.max(1);
     let t0 = e.now.tsc.0;
-    e.heap.remove_key(3, 2, 0);
-    e.heap
-        .push(crate::timers::TimerEntry {
-            deadline: t0 + 1_000 * ms,
-            owner: 3,
-            timer_id: 2,
-            group: 0,
-        })
-        .map_err(|_| FatalReason::TimerOverflow)?;
+    // OmsSweep keeps an earlier restored deadline: restarts must not postpone the sweep.
+    let sweep = t0 + 1_000 * ms;
+    if e.heap.find_key(3, 2, 0).is_none_or(|x| x.deadline > sweep) {
+        e.heap.remove_key(3, 2, 0);
+        e.heap
+            .push(crate::timers::TimerEntry {
+                deadline: sweep,
+                owner: 3,
+                timer_id: 2,
+                group: 0,
+            })
+            .map_err(|_| FatalReason::TimerOverflow)?;
+    }
     for (v, accounts) in crate::engine::live_gw_venues(&e.rd) {
         let caps = e.rd.caps(v);
         if caps.dms != hft_refdata::DeadManCap::None {
@@ -823,7 +827,8 @@ pub(crate) fn pnl<D: Driver<S>, S: StrategySet>(
     Ok(())
 }
 
-fn ledger_notes(e: &mut Engine) {
+/// Writes the ledger's pending Notes into the current Input's output.
+pub(crate) fn ledger_notes(e: &mut Engine) {
     let notes: Vec<Note> = e.ledger.notes().to_vec();
     e.ledger.clear_notes();
     for n in notes.iter() {
@@ -832,13 +837,16 @@ fn ledger_notes(e: &mut Engine) {
 }
 
 /// `ExternalFill` handling (README "process" ExternalFill row); also the OMS foreign fills and
-/// `AUTO_EXTERNAL`.
+/// `AUTO_EXTERNAL`. `oms_foreign`: `x` is the OMS's own `ForeignFill`, whose cumulative quantity
+/// the OMS already tracks per `exch_order_id` (`foreign` table): it is not registered as
+/// `ext_held` (that would deduct it again from the next report of the same order).
 pub(crate) fn external_fill<D: Driver<S>, S: StrategySet>(
     e: &mut Engine,
     inst: &mut Instances<S>,
     drv: &mut D,
     x: &ExternalFill,
     auto_recon: bool,
+    oms_foreign: bool,
 ) -> R<()> {
     let a = x.account;
     let before = e.ledger.pos(a, x.inst).qty.0 != 0;
@@ -863,7 +871,7 @@ pub(crate) fn external_fill<D: Driver<S>, S: StrategySet>(
             app.group,
             x.inst,
             app.net_qty,
-            x.exch_order_id,
+            if oms_foreign { 0 } else { x.exch_order_id },
             x.cause,
             &mut o,
         );
@@ -1077,14 +1085,16 @@ fn conn_state<D: Driver<S>, S: StrategySet>(
             crate::mode_glue::cancel_obligation_on_live(e, inst, drv, c.account, c.venue)?;
         }
     }
-    // Strategy Conn events (instances trading the venue).
+    // Strategy Conn events: instances subscribed to any inst of the venue (SDK "EventRef"); an
+    // account's own connections only to the instance bound to it.
     for ix in 0..inst.slots.len() {
         let Some(s) = inst.slots.get(ix) else { continue };
         if s.inst.is_none() {
             continue;
         }
         let a = s.account;
-        if e.rd.account(a).venues & (1u64 << (c.venue.0 & 63)) != 0 && (c.account.0 == 0 || c.account == a) {
+        let subscribed = s.subs.iter().any(|x| e.rd.inst(x.inst).venue == c.venue);
+        if subscribed && (c.account.0 == 0 || c.account == a) {
             e.notify.push(
                 ix as u16,
                 Notif::Conn {

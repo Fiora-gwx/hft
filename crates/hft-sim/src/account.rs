@@ -264,7 +264,8 @@ impl SimExchange {
             .map_or(AssetId(0), |v| v.margin_asset)
     }
 
-    /// Position update of a fill; realised PnL goes to the wallet (floor).
+    /// Position update of a fill; realised PnL goes to the wallet. Removed cost and the wallet
+    /// amount round toward zero, as hft-ledger books them (README "7. 永续全仓保证金与强平").
     fn perp_fill(&mut self, ai: usize, ii: usize, side: Side, px: i64, q: i64) {
         let Some((venue, ve, quote)) = self.insts.get(ii).map(|r| (r.venue, r.ve(), r.quote)) else {
             return;
@@ -279,7 +280,11 @@ impl SimExchange {
         if p.qty != 0 && p.qty.signum() != sgn {
             let abs = i128::from(p.qty).abs();
             let c = left.min(abs);
-            let removed = div_round(p.cost * c, abs, RoundMode::HalfEven);
+            let removed = if c == abs {
+                p.cost
+            } else {
+                div_round(p.cost * c, abs, RoundMode::TowardZero)
+            };
             let cp = c * i128::from(px);
             pnl = if p.qty > 0 { cp - removed } else { removed - cp };
             p.cost -= removed;
@@ -294,7 +299,7 @@ impl SimExchange {
             p.qty = sat64(i128::from(p.qty) + left * i128::from(sgn));
         }
         if pnl != 0 {
-            let w = sat64(rescale(pnl, ve, qe_q, RoundMode::Floor));
+            let w = sat64(rescale(pnl, ve, qe_q, RoundMode::TowardZero));
             self.add_bal(ai, venue, quote, w);
         }
     }

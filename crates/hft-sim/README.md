@@ -76,6 +76,9 @@ impl SimExchange {
     /// 压力用例的 GwDown 故障:在事件时间 t 把 (a, venue) 的模拟下单连接置 Down/Up(产出 ConnState),
     /// Down 期间到达的订单类指令按实盘 gw 在下单连接 Down 时的同一回报形态处理(形态归 hft-venue)。
     pub fn set_order_conn(&mut self, a: AccountId, venue: VenueId, up: bool, t: Tsc);
+    /// DST 的外来成交(强平、ADL、人工):在当前事件时间把 inst 的 qty 按 px 记入账户 a,与一笔无手续费的吃单成交同样
+    /// 结算仓位与均价、已实现盈亏和现货余额;不产出回报(推送由调用方的 venue 行为层决定)。
+    pub fn external_fill(&mut self, a: AccountId, inst: InstId, side: Side, qty: Qty, px: Px);
     pub fn state_hash(&self) -> u64;
 }
 
@@ -438,6 +441,7 @@ pub struct StressVerdict {
 每 (Sim 账户, 永续 venue) 的全仓保证金账户:
 
 - `wallet`(计价资产);`unrealized = Σ qty × (mark − entry)`;`margin_balance = wallet + Σ unrealized`。
+- 仓位按平均成本记账,口径与 [hft-ledger 仓位与已实现](../hft-ledger/README.md#仓位与已实现平均成本法) 相同:减仓移出成本 = `cost × c / |qty|`(i128 一次相除,向零取整;全平时恰为 `cost`),已实现盈亏换算到计价资产最小单位时向零取整后记入 `wallet`(同一笔成交两边逐单位相等,DST 不变量 16 据此比较)。
 - `maint = Σ |qty| × mark × mmr(inst, 名义档)`;`initial = Σ |qty| × mark / leverage`;`avail = margin_balance − initial − 挂单占用`。
 - `margin_ratio = maint / margin_balance`(与 [权益视图](../hft-ledger/README.md) 统一口径)。
 - **强平价**(写进 `MarginReport` 每 inst 条目,与下一条的强平触发同一口径):对持仓 `q_i`(带符号)的 inst i,固定其他 inst 的 mark,解 `margin_balance(m) = maint(m)` 得

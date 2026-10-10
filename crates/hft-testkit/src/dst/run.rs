@@ -493,6 +493,7 @@ impl<E: Sut> Loop<'_, E> {
         if !self.cfg.trace && self.rec.trace.len() > 400 {
             self.rec.trace.drain(..200);
         }
+        let delivered = input.as_ref().map(|i| (i.kind, i.body.clone()));
         if let Some(i) = input {
             self.rec.deliveries.push((now, i));
         }
@@ -573,6 +574,7 @@ impl<E: Sut> Loop<'_, E> {
             step,
             now_ns: now,
             records: &self.out.records,
+            delivered: delivered.as_ref().map(|(k, b)| (*k, b.as_slice())),
             frames: &self.out.frames,
             info: &self.out.info,
             before: &self.before,

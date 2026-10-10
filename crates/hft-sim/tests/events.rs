@@ -1,4 +1,4 @@
-//! SIM-077, SIM-110–SIM-113, SIM-200: produced events and Sim counters.
+//! SIM-077, SIM-110–SIM-113, SIM-200, SIM-220: produced events, Sim counters and external fills.
 
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
@@ -215,4 +215,37 @@ fn sim_200_sim_counters() {
     s.mark(ms(1), BTC_P2, "77611.9403");
     s.run_to(ms(10));
     assert_eq!(s.view(A9).counters().liquidations, 1, "SIM-200.3");
+}
+
+#[test]
+fn sim_220_external_fill() {
+    let mut s = Sim::std();
+    s.seed(A9, &seed9_state("18000", &[(BTC_P2, "-1.0", "60000")]));
+    s.drain(ms(1));
+    s.out.clear();
+    s.ex.external_fill(A9, BTC_P2, Buy, q("0.4"), px("59000"));
+    assert_eq!(s.view(A9).position(BTC_P2).qty, q("-0.6"));
+    assert_eq!(s.view(A9).balance(P2, USDT).total, usdt("18400"));
+    let (b0, u0) = (
+        s.view(A9).balance(S1, BTC).total.0,
+        s.view(A9).balance(S1, USDT).total.0,
+    );
+    s.ex.external_fill(A9, BTC_S1, Buy, q("0.1"), px("60000"));
+    assert_eq!(s.view(A9).balance(S1, BTC).total.0 - b0, q("0.1").0);
+    assert_eq!(s.view(A9).balance(S1, USDT).total.0 - u0, -usdt("6000").0);
+    s.drain(ms(2));
+    assert!(s.out.is_empty());
+}
+
+#[test]
+fn sim_221_partial_close_rounds_toward_zero() {
+    let mut s = Sim::std();
+    s.seed(A9, &seed9_state("18000", &[]));
+    s.ex.external_fill(A9, BTC_P2, Sell, q("0.1"), px("60000"));
+    s.ex.external_fill(A9, BTC_P2, Sell, q("0.2"), px("60000.0001"));
+    s.ex.external_fill(A9, BTC_P2, Buy, q("0.1"), px("60000.0002"));
+    assert_eq!(s.view(A9).position(BTC_P2).qty, q("-0.2"));
+    // removed = 18 000 000 002 × 10^6 / 3 → 6 000 000 006 666 666 (toward zero); realised
+    // −13 333 334 × 10^-12 USDT → −13 × 10^-6 (toward zero).
+    assert_eq!(s.view(A9).balance(P2, USDT).total.0, usdt("18000").0 - 13);
 }

@@ -49,7 +49,7 @@ fn oms_010_order_slot_layout() {
 
 #[test]
 fn oms_011_slot_ext_layout() {
-    assert_eq!((size_of::<SlotExt>(), align_of::<SlotExt>()), (32, 32));
+    assert_eq!((size_of::<SlotExt>(), align_of::<SlotExt>()), (64, 32));
     assert_eq!(
         [
             offset_of!(SlotExt, net_filled),
@@ -59,9 +59,10 @@ fn oms_011_slot_ext_layout() {
             offset_of!(SlotExt, origin),
             offset_of!(SlotExt, class),
             offset_of!(SlotExt, lev_x100),
-            offset_of!(SlotExt, max_rest_ms)
+            offset_of!(SlotExt, max_rest_ms),
+            offset_of!(SlotExt, fee_cum)
         ],
-        [0, 8, 12, 13, 14, 15, 16, 20]
+        [0, 8, 12, 13, 14, 15, 16, 20, 32]
     );
 }
 
@@ -207,8 +208,9 @@ fn oms_017_snapshot_row_sizes() {
     h.o.snapshot(&mut w);
     let rd = SnapshotReader::new(w.as_bytes());
     let s2 = rd.find_section(SECTION_ORDER_SLOTS).unwrap().unwrap();
-    assert_eq!(SLOT_ROW_LEN, 160, "OMS-017.4");
-    assert_eq!(s2.body.len(), 160 * s2.count as usize, "OMS-017.4");
+    assert_eq!(SLOT_ROW_LEN, 192, "OMS-017.4");
+    assert_eq!(s2.body.len(), 192 * s2.count as usize, "OMS-017.4");
+    assert_eq!(s2.version, 2, "OMS-017.4");
     let s12 = rd.find_section(SECTION_OMS_LINKS).unwrap().unwrap();
     let mut seen = [0usize; 6];
     let mut b = s12.body;

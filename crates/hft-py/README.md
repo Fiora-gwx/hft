@@ -78,7 +78,7 @@ hft_py.schema_hash(); hft_py.schema.catalog()              # 生成器导出的�
 - **批对象**:迭代 `events()` 与 `tail()` 得到 `hft_py` 的 `RecordBatch`(`num_rows`、`column_names`、`metadata`、`b["列名"]` 给出该列的 Python 值列表;`__arrow_c_array__` 交给 `pyarrow.record_batch(b)`/`pl.DataFrame(b)`);`events()` 的读者另有 `__arrow_c_stream__`(每次调用从头读同一查询,DuckDB 等对同一对象多次取流也可)与 `__arrow_c_schema__`。
 - **`tail(kinds, …)`**:按 seq 顺序把新记录切成连续的同 kind 段,每段产出一个 `RecordBatch`(schema 元数据 `kind` = kind 名);没有新记录时等待 `poll_ms` 后再查,不产出空批;只交付 `committed_len` 之内的完整事件;`kinds` 含未知 kind → `ValueError`。
 - **`config_at(seq)`**:返回 `seq` 时刻生效的配置:该运行的引导块 `ConfigBlob{boot = 1}`,叠加其后到 `seq` 为止得到 `CmdResult{Applied}` 的 `SetParams`/`SetRisk` 所引用的 blob(按 `BlobRef.sha256`,[hft-event](../hft-event/README.md));`ReplaceRefdata` 的 blob 到下一次引导块才生效。结果按 `BlobKind`,每项是带 `seq`(生效位置:引导块中的记录或 `Applied` 的 `CmdResult`)、`sha256`(十六进制)、`version`(`BlobRef.version`)与 `encoding` 的 dict:`refdata` 另有资产、inst、账户、策略实例表(经 hft-refdata 加载);`engine` 另有 `host_class` 与 `sections`(节名 → 原始字节;各节行格式归各自 crate);`strategy_params` 按 `"<实例名>/<账户 label>"` 给出 `hdr`、`groups`(`GroupSpec` 字段)、`body`(原始字节,按 schema 解码用 `params.decode`)与 `version`;`risk`、`host_manifest`、`sim_config` 另有 `bytes`(原始字节:`RiskParams` 的 blob 编解码尚未在 hft-risk 提供)。`seq` 早于第一个完整引导块 → `ValueError`。
-- **`ledger(j, account, t0, t1)`**:从 `t0` 之前(含)最近一条带 ledger 节的 `StateSnapshot` 起步(没有则从最早可读段的引导块:其中的 `StateSnapshot`,或在 `BootDone` 处以空账本起步),逐事件消费到 `t1` 之前(事件按首条记录的 `proc_ns` 归入窗口);起步所用配置是该点生效的配置(refdata、`EngineConfig` 的 `ledger` 节,没有则 `LedgerConfig::default`;各策略参数 blob 的 `GroupSpec` 经 `on_groups_changed` 交给账本,之后 `Applied` 的 `SetParams` 与新引导块同样更新);快照不含估值价与资金费周期表,所以从快照起步时,窗口内依赖它们的估值要等到新的行情与资金费事件才与从头起步的结果一致;`positions()`/`inventory()`/`portfolio()` 是 `t1` 时的状态,`breakdown()` 是 `[t0, t1)` 内入账的 `PnlDelta` 之和(`PnlBreakdown` 各列,USDT 1e-6 原值);每个事件的 `PnlDelta` = 该事件前后各 (账户, group) 累计 `pnl` 之差(group 取当时生效的全部 `GroupSpec` 与 `GROUP_NONE`)。四个方法都返回 `RecordBatch`,带 `account` 与 `account_kind` 列:`positions` 为非零的 `InstPos`(`venue`、`inst`、`qty`、`cost`/`realized_quote` 为 `decimal128(38, 0)`、`fees_quote`、`last_fill_ens`),`inventory` 为 `venue`、`asset`、`group`、`unassigned`(未分配给 group 的部分)、`qty`,`portfolio` 为各 venue 的 `VenueEquityView` 字段。`pnl(j, by)` 对整份 journal 与全部账户,每行是该键下 `PnlDelta` 之和:`group` 键 (账户, group),`account` 键账户,`round` 键 (账户, group, 事件结束时该 group 的 `round_id`),`day` 键 (账户, 事件 `proc_ns` 的 UTC 日,`YYYY-MM-DD`);`by` 取其他值或不是字符串 → `ValueError`。账本容量(`Capacities`)取固定值(`max_cells_total` 8 192、`max_groups_per_instance` 1 024 等,`max_insts` 按 refdata):ECF1 段 3 的行格式归 hft-sequencer,尚无解码。
+- **`ledger(j, account, t0, t1)`**:从 `t0` 之前(含)最近一条带 ledger 节的 `StateSnapshot` 起步(没有则从最早可读段的引导块:其中的 `StateSnapshot`,或在 `BootDone` 处以空账本起步),逐事件消费到 `t1` 之前(事件按首条记录的 `proc_ns` 归入窗口);起步所用配置是该点生效的配置(refdata、`EngineConfig` 的 `ledger` 节,没有则 `LedgerConfig::default`;各策略参数 blob 的 `GroupSpec` 经 `on_groups_changed` 交给账本,之后 `Applied` 的 `SetParams` 与新引导块同样更新);快照不含估值价与资金费周期表,所以从快照起步时,窗口内依赖它们的估值要等到新的行情与资金费事件才与从头起步的结果一致;`positions()`/`inventory()`/`portfolio()` 是 `t1` 时的状态,`breakdown()` 是 `[t0, t1)` 内入账的 `PnlDelta` 之和(`PnlBreakdown` 各列,USDT 1e-6 原值);每个事件的 `PnlDelta` = 该事件前后各 (账户, group) 累计 `pnl` 之差(group 取当时生效的全部 `GroupSpec` 与 `GROUP_NONE`)。四个方法都返回 `RecordBatch`,带 `account` 与 `account_kind` 列:`positions` 为非零的 `InstPos`(`venue`、`inst`、`qty`、`cost`/`realized_quote` 为 `decimal128(38, 0)`、`fees_quote`、`last_fill_ens`),`inventory` 为 `venue`、`asset`、`group`、`unassigned`(未分配给 group 的部分)、`qty`,`portfolio` 为各 venue 的 `VenueEquityView` 字段(`flags` 中的 `BALANCE_UNRECONCILED` 恒不置位:冷读者不做静默期余额校验,[hft-ledger 冷消费者](../hft-ledger/README.md#冷消费者journalledger))。`pnl(j, by)` 对整份 journal 与全部账户,每行是该键下 `PnlDelta` 之和:`group` 键 (账户, group),`account` 键账户,`round` 键 (账户, group, 事件结束时该 group 的 `round_id`),`day` 键 (账户, 事件 `proc_ns` 的 UTC 日,`YYYY-MM-DD`);`by` 取其他值或不是字符串 → `ValueError`。账本容量(`Capacities`)取固定值(`max_cells_total` 8 192、`max_groups_per_instance` 1 024 等,`max_insts` 按 refdata):ECF1 段 3 的行格式归 hft-sequencer,尚无解码。
 - **心跳**:`heartbeat.read(instance, root="/dev/shm/hft")` 只读映射 `<root>/<instance>/heartbeat`(`HeartbeatBlock::open_ro`,布局归 [hft-rt](../hft-rt/README.md)),返回 `{"state"(`Starting`/`Warmup`/`Running`/`Draining`/`Stopped`), "seq_beats"(区 0 计数), "pid", "instance_id", "boot_id"(十六进制), "started_utc_ns", "hk_utc_ns", "n_slots", "mono_ns"(读取时的 `CLOCK_MONOTONIC`)}`;文件不存在 → `FileNotFoundError`,magic 或 `layout_version` 不符 → `SchemaError`(每次读取都复查;同一文件只映射一次,文件被换成新的 inode 时重新映射)。`Watch(instance, root=…).check()` 返回 `{"state", "advanced", "age_ms"}`:`age_ms` = 本 `Watch` 最近一次看到 `seq_beats` 变化(首次 `check` 记基线并视为变化;`pid` 或 `boot_id` 变化同样视为变化)以来的单调时钟毫秒数,规则同 hft-rt `HeartbeatWatch`;判活口径(`state` 与 `hb_stale_ms`)归 hft-rt。
 
 ### 参数编码(`params`)
@@ -141,7 +141,7 @@ hft_py.schema_hash(); hft_py.schema.catalog()              # 生成器导出的�
 | `src/testing.rs` | `testing` 特性的测试钩子 |
 | `python/hft_py/__init__.py`、`*.pyi`、`py.typed` | 包入口(再导出 `_native` 的公开名字)与类型存根(随 wheel 发布) |
 | `pyproject.toml` | maturin 构建(混合布局,扩展模块 `hft_py._native`) |
-| `examples/pyfixture.rs` | 测试夹具生成器(refdata/引擎 blob、TW 脚本与批量记录文件、`RUST_REF` 读出);不进 wheel |
+| `examples/pyfixture.rs`、`examples/pyfixture/seq.rs` | 测试夹具生成器(refdata/引擎 blob、TW 脚本与批量记录文件、`RUST_REF` 读出;`seq.rs`:经 hft-testkit `SeqRig` 的热进程夹具);不进 wheel |
 | `tests/python/`、`tests/*.rs` | pytest 套件与 Rust 测试 |
 
 ### 4. 打包与发布
@@ -165,6 +165,8 @@ hft_py.schema_hash(); hft_py.schema.catalog()              # 生成器导出的�
 | `ledger` 一天 seq journal | < 2 分钟 | pytest 计时 |
 | 内存 | 每批 ≤ `batch_rows` × 行宽 × 2;不整段加载 | — |
 
+PY-161 的各次峰值测量使用独立子进程和相同预热,避免前一次扫描留下的驻留堆改变下一次的内存基线。
+
 hft-py 以只读映射打开热段,对热进程的影响只有页表与共享 L3;研究负载不在 `tokyo-cex` 生产主机上跑(ops_bot 与 treasury 的 `tail` 例外,受 cgroup CPU 配额与 dev2 护栏约束,[12 §1](../../design/12-风险与未决问题.md))。
 
 ## 测试与验收
@@ -184,8 +186,9 @@ hft-py 以只读映射打开热段,对热进程的影响只有页表与共享 L3
 | [`hft-ledger`](../hft-ledger/README.md) | 记账 | — |
 | [`hft-risk`](../hft-risk/README.md) | `config_at` 解码 `RiskParams` blob(编码归该 crate;在它提供 blob 编解码之前不链接,`risk` 给原始字节) | 只用 `RiskParams` 类型与其解码;不用检查链与模式状态 |
 | [`hft-rt`](../hft-rt/README.md) | `HeartbeatBlock::open_ro`(`heartbeat.read`) | 只用只读心跳块,不用环与线程原语 |
+| [`hft-testkit`](../hft-testkit/README.md)(feature `seq`)、`sha2`(dev 依赖) | `examples/pyfixture` 的夹具:`SeqRig` 以真实 hft-sequencer 生成热进程 journal 与逐步骤的 ledger 节([TESTS](TESTS.md) `SEQ_FX`);blob 摘要 | 只在 `[dev-dependencies]`,不进 wheel 与库 |
 
-禁止:任何 `strategies/*`、`hft-sequencer`、`hft-sim`、`hft-net`、`hft-venue`、链上 crate 的运行时部分、任何能向 journal 或热进程写入的 API。
+禁止:任何 `strategies/*`、`hft-sequencer`、`hft-sim`、`hft-net`、`hft-venue`、链上 crate 的运行时部分(经 dev 依赖 hft-testkit 进入夹具生成器的 hft-sequencer/hft-sim 除外)、任何能向 journal 或热进程写入的 API。
 
 ## 延伸阅读
 

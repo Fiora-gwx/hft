@@ -23,9 +23,10 @@ use crate::types::*;
 
 /// Slot-map capacity (≥ Σ OMS table slots × (`tombstone_gens` + 1) of any supported host class).
 pub const SLOT_MAP_CAP: usize = 1 << 16;
-/// hft-oms snapshot section 2 (`OrderSlots`) and its row length.
+/// hft-oms snapshot section 2 (`OrderSlots`) and its row length (row version 2; version 1 rows
+/// are 160 B and have no `SlotExt.fee_cum`).
 pub const OMS_SECTION_SLOTS: u16 = 2;
-pub const OMS_SLOT_ROW_LEN: usize = 160;
+pub const OMS_SLOT_ROW_LEN: usize = 192;
 
 /// Counters of the cold consumer.
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
@@ -50,6 +51,8 @@ struct SlotEntry {
     cum: i64,
     /// Σ px × qty of the booked part (inst `px_exp + qty_exp`).
     notional: i128,
+    /// `cum_filled` of the last `PartialFill`/`Fill` (hft-oms `SlotExt.fee_cum`).
+    fee_cum: i64,
 }
 
 /// FIFO slot map with an open-addressing index.
@@ -196,10 +199,15 @@ impl JournalLedger {
         let ledger = Ledger::restore(r, rd, cfg, caps)?;
         let mut map = SlotMap::new(SLOT_MAP_CAP);
         if let Some(s) = r.find_section(OMS_SECTION_SLOTS)? {
+            let len = match s.version {
+                1 => 160,
+                2 => OMS_SLOT_ROW_LEN,
+                _ => return Err(RestoreError::VersionUnsupported),
+            };
             for k in 0..s.count as usize {
                 let row = s
                     .body
-                    .get(k * OMS_SLOT_ROW_LEN..(k + 1) * OMS_SLOT_ROW_LEN)
+                    .get(k * len..(k + 1) * len)
                     .ok_or(RestoreError::Truncated)?;
                 let u8_at = |o: usize| row.get(o).copied().unwrap_or(0);
                 let u16_at = |o: usize| u16::from_le_bytes([u8_at(o), u8_at(o + 1)]);
@@ -222,6 +230,11 @@ impl JournalLedger {
                     group: GroupId(u32_at(24)),
                     cum: u64_at(40) as i64,
                     notional: words_i128([u64_at(64), u64_at(72)]),
+                    fee_cum: if s.version == 1 {
+                        u64_at(40) as i64
+                    } else {
+                        u64_at(160) as i64
+                    },
                 });
             }
         }
@@ -306,7 +319,7 @@ impl JournalLedger {
             }
             EventKind::ORDER_EVENT => {
                 if let Ok(e) = rec.read::<OrderEvent>() {
-                    self.on_order_event(&e, t);
+                    self.on_order_event(&e, rec.hdr.seq, t);
                 }
             }
             EventKind::EXTERNAL_FILL => {
@@ -503,12 +516,15 @@ impl JournalLedger {
             group: d.group,
             cum: 0,
             notional: 0,
+            fee_cum: 0,
         }) {
             self.stats.map_evicted = self.stats.map_evicted.saturating_add(1);
         }
     }
 
-    fn on_order_event(&mut self, ev: &OrderEvent, t: i64) {
+    /// `seq` = the `OrderEvent`'s seq: `FillDelta.seq`/`FeeDelta.seq` as the engine sets them (OMS
+    /// `FillOut.seq`/`FeeOut` of the same Input; the round's `open_seq` comes from it).
+    fn on_order_event(&mut self, ev: &OrderEvent, seq: u64, t: i64) {
         let Some(s) = self.ledger.inst(ev.inst).copied() else {
             return;
         };
@@ -528,14 +544,36 @@ impl JournalLedger {
                     side: e.side,
                     fee: ev.fee.0,
                     fee_asset: ev.fee_asset,
-                    seq: 0,
+                    seq,
                 },
                 t,
             );
             return;
         }
+        let fill_report = matches!(ev.what, OrderEventKind::PartialFill | OrderEventKind::Fill);
+        let fresh_fee = fill_report && ev.cum_filled.0 > e.fee_cum;
+        if fresh_fee && let Some(x) = self.map.get_mut(ev.epoch, ev.slot.0, ev.r#gen) {
+            x.fee_cum = ev.cum_filled.0;
+        }
         let d = ev.cum_filled.0.saturating_sub(e.cum);
         if d <= 0 {
+            // A fill report whose quantity a non-fill report already brought: its fee alone
+            // (hft-oms "回报匹配与成交增量" 9).
+            if fresh_fee && ev.fee.0 != 0 {
+                self.ledger.apply_fee(
+                    &FeeDelta {
+                        account: e.account,
+                        venue: e.venue,
+                        inst: e.inst,
+                        group: e.group,
+                        side: e.side,
+                        fee: ev.fee.0,
+                        fee_asset: ev.fee_asset,
+                        seq,
+                    },
+                    t,
+                );
+            }
             return;
         }
         let total = if ev.avg_px.0 != 0 {
@@ -581,7 +619,7 @@ impl JournalLedger {
                 slot: ev.slot.0,
                 r#gen: ev.r#gen,
                 _pad3: 0,
-                seq: 0,
+                seq,
             },
             t,
         );

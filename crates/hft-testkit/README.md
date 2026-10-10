@@ -24,6 +24,7 @@ status: spec
   - [7. 状态哈希对比](#7-状态哈希对比)
   - [8. hft-dst 运行器](#8-hft-dst-运行器)
   - [9. 分配计数与基准驱动](#9-分配计数与基准驱动)
+  - [10. SeqRig](#10-seqrig)
 - [实现说明](#实现说明)
 - [延迟与资源契约](#延迟与资源契约)
 - [测试与验收](#测试与验收)
@@ -193,7 +194,7 @@ pub struct Scenario { pub id, pub title, pub suite: SuiteSel /* All | Named */, 
 pub struct DstSuite { pub name, pub title, pub faults: FaultRates, pub steps: u64, pub base: fn(u64) -> DstConfig, pub must_pass: &'static [&'static str] }
 ```
 
-**场景套件**:`src/scenarios/<主题>.rs` 定义以 `TestStrategies` 运行的全部套件与场景(全仓 `dst`/`integ` 用例的 `实现` 落点,场景以用例编号注册)(`DstSuite`:名称、市场源、故障率、策略设置、必过用例 QF-1/MS-2(测试策略版)/MS-3 等,[testing §3.4、§4](../../docs/testing.md#34-dst));`hft_testkit::scenarios::{suites(), scenarios()}` 是唯一清单:仓库根 `tests/dst/main.rs` 只是 cargo test 入口(本 crate 的 `[[test]] dst` 目标,每个套件一个 `#[test]`,跑该套件场景的短种子区间),`cargo xtask dst` 与 [`hft-dst`](#8-hft-dst-运行器) 调用同一组套件,保证 PR、CI 每夜与服务器累计跑的是同一份场景。套件:`core`、`modes`、`storage`。在 sequencer 适配器落地之前,三个入口以 `ToyEngine` 运行(框架自测引擎:两腿 taker、OMS 槽表、OnFill 对冲与余数、ledger、kill 与模式、Broken 自动平仓、L3、Drain,带 `toy::PLANTED` 植入缺陷;不是生产引擎的模型)。
+**场景套件**:`src/scenarios/<主题>.rs` 定义以 `TestStrategies` 运行的全部套件与场景(全仓 `dst`/`integ` 用例的 `实现` 落点,场景以用例编号注册)(`DstSuite`:名称、市场源、故障率、策略设置、必过用例 QF-1/MS-2(测试策略版)/MS-3 等,[testing §3.4、§4](../../docs/testing.md#34-dst));`hft_testkit::scenarios::{suites(), scenarios()}` 是唯一清单:仓库根 `tests/dst/main.rs` 只是 cargo test 入口(本 crate 的 `[[test]] dst` 目标,每个套件一个 `#[test]`,跑该套件场景的短种子区间),`cargo xtask dst` 与 [`hft-dst`](#8-hft-dst-运行器) 调用同一组套件,保证 PR、CI 每夜与服务器累计跑的是同一份场景。套件:`core`、`modes`、`storage`。三个入口都以引擎适配器 `SeqEngine`(= `SeqSut<TestStrategies>`,feature `seq`;`hft-dst` 的 `dst-bin` 与本 crate 的测试都打开它)运行真实 sequencer;框架自测引擎 `ToyEngine`(两腿 taker、OMS 槽表、OnFill 对冲与余数、ledger、kill 与模式、Broken 自动平仓、L3、Drain,带 `toy::PLANTED` 植入缺陷;不是生产引擎的模型)只用于框架自身的测试。
 
 `cargo xtask dst --seeds N …` 是开发与 CI 的入口(签名与参数唯一归属 [tools](../../tools/README.md#cargo-xtask-dst));失败时打印且只打印一行可复制的复现命令(种子为 16 位十六进制,`--steps` = 违反所在步 + 1,`--suite` 为该种子实际运行的套件):
 
@@ -294,6 +295,32 @@ impl HistBench { pub fn smoke(name: &str) -> HistBench;                       //
 pub struct BenchOutput { /* … */ }
 ```
 
+### 10. SeqRig
+
+`SeqRig<S>`(feature `seq`,`src/seq_rig.rs`)= 真实 `hft_sequencer::Sequencer<S>` 跑在实盘驱动上,`RigIo`(实现 `LiveIo`)提供内存环、手动 TSC、收集出环帧与 sequencer 的 `MemJournal`;给引擎 crate 之外需要"热进程写出的 journal 与它在每个事件边界后的状态"的测试与夹具生成器用(hft-py 的 ledger 夹具,[hft-py TESTS](../hft-py/TESTS.md) 的 `J_EXT` 等)。它不模拟交易所、不自动走启动闸门:Input 由调用方按 gw、hk、ctl-gateway 的角色压环,出环帧只收集;同一配置与同一 Input 序列得到逐字节相同的 journal。
+
+```rust
+pub struct RigConfig {                       // 空启动:引擎 blob(ECF1 段 3、5 与 ledger 节)与 EngineSetup 由这些值派生
+    pub refdata_blob: Vec<u8>, pub params: Vec<Vec<u8>>,          // SPB1
+    pub risk: RiskParams, pub risk_blob: Vec<u8>,                  // risk_blob 只记录不解码
+    pub caps: hft_ledger::Capacities, pub ledger: LedgerConfig,
+    pub venues: Vec<VenueId>, pub keys: Vec<(AccountId, VenueId)>, // 环下标 = venues 中的位置;启动闸门期望的交易 key
+    pub epoch: u32,                                                // OmsConfig::engine_epoch
+    pub tsc_hz_milli: u64, pub calib_tsc: u64, pub calib_utc_ns: i64, pub boot_tsc: u64,
+    pub max_groups: u16,
+}
+impl<S: StrategySet> SeqRig<S> {
+    pub fn boot(c: &RigConfig) -> Result<SeqRig<S>, String>;      // 空启动,引导块写在 boot_tsc
+    pub fn set_tsc(&mut self, t: u64); pub fn tsc(&self) -> u64;   // 交出的每条 Input 取当前 TSC
+    pub fn push(&mut self, r: RingId, kind: EventKind, body: Vec<u8>); pub fn push_body<B: Body>(&mut self, r: RingId, b: &B);
+    pub fn cmd(&mut self, a: AccountId, c: &ControlCmd<'_>) -> Result<[u8; 16], String>; // 已确认的 Admin 命令(cli:rig)
+    pub fn run(&mut self) -> Result<(), String>;                   // 跑到一轮空闲且环全空;Fatal/Done 为 Err
+    pub fn journal(&self) -> &MemJournal; pub fn out(&self) -> &[(OutRing, GwCmd)];
+    pub fn ledger(&self) -> &Ledger; pub fn ledger_sections(&self) -> Vec<u8>;   // 热账本与其节 1、13、22
+    pub fn epoch(&self) -> u32; pub fn result_of(&self, id: [u8; 16]) -> Option<CmdResult>;
+}
+```
+
 ## 实现说明
 
 <details><summary>实现要点</summary>
@@ -334,6 +361,7 @@ pub struct BenchOutput { /* … */ }
 | `src/scenarios/<主题>.rs` | 以 `TestStrategies` 运行的场景套件与按用例编号注册的场景(仓库根 `tests/dst/` 只是 cargo test 入口) |
 | `src/bin/hft-dst.rs`(feature `dst-bin`) | `hft-dst` 运行器:`run`/`repro`/`list`、`DstRunResult` 输出与周期落盘、进行中种子标记、每种子的 `catch_unwind` |
 | `src/hash.rs` | `HashTrail`、`diff_trails`、`bisect_divergence` |
+| `src/seq_rig.rs`(feature `seq`) | `SeqRig`、`RigIo`、`RigConfig` |
 | `src/alloc.rs`、`src/bench.rs` | `CountingAlloc`、`HistBench` |
 | `src/chain_mocks/*`(`chain` feature) | 公共 RPC 端点集合、节点、builder、`SwapGuard` 语义模型 |
 
@@ -384,7 +412,7 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 - 控制面(tokio 的 ctl-gateway 客户端侧)的网络混沌不在本框架;需要时用 `turmoil` 单独测。
 - 多进程场景(可选扩展:hft-core ↔ chain-core)只在集成环境测;DST 以 `SeqActor` + 真实 `ChainSeq` 同进程模拟链路。
 - `MockVenue` 的交易所行为层是"规格中的交易所",与真实交易所的差异只能由金样、测试网/模拟盘联调与正式实盘的运行监控发现。
-- 当前构建:引擎适配器 `SeqSut<S>`(`src/dst/seq/`,feature `seq`)已落地:真实 sequencer 跑在实盘驱动上(`DstIo` 实现 `LiveIo`:环中放 World 交出的 Input,TSC = `DstDriver::stamp()`,出环帧进 `DstDriver` 的收集缓冲,journal 是 sequencer 的 `MemJournal`;启动与每次重启后以一段固定的启动输入走完闸门;gw 角色的接收时间戳、epoch 与查询回执的 client id 由 `DstIo`/`SimMatcher` 补上),`Matcher` 为 `SimMatcher`(`hft_sim::SimExchange` 适配,私有 refdata 中所有账户为 Sim 账户,外来成交以覆盖量计入真值),`observe` 抄录 ledger 持仓/库存/余额、OMS 槽/表/墓碑/链接/LegTracker 与 world 限额;risk 的 cap/cell/kill、执行层 cell、保证金分档、在途行与逐笔决策事实(`DecisionInfo`)组件尚无公开视图,这些行留空,读它们的检查器(INV-4 的 Open 部分、INV-5、INV-11、INV-12 的模式部分、INV-15、INV-17、INV-18、INV-19、INV-20)对真实引擎空过。三个 DST 入口仍以 `ToyEngine` + `ToyMatcher` 运行(`scenarios::DstEngine`):`SeqEngine` 在 `core`/`storage` 套件的扫描中通过,`modes` 套件约 6% 的种子有 `INV-16`(现货计价资产余额与 `SimExchange` 真值相差一笔手续费量级)待查,清零后切换;`toy::PLANTED` 各行的真实引擎版本(各 crate 的 `planted-*` feature)、`run_sim_case`(TK-009)、`ProbeBuild` 注入(TK-095)与模板探针的构建检查(TK-042)未落地;`hft-dst` 的 `SIGINT`/`SIGTERM` 处理属 M6。
+- 当前构建:引擎适配器 `SeqSut<S>`(`src/dst/seq/`,feature `seq`)是三个 DST 入口的引擎:真实 sequencer 跑在实盘驱动上(`DstIo` 实现 `LiveIo`:环中放 World 交出的 Input,TSC = `DstDriver::stamp()`,出环帧进 `DstDriver` 的收集缓冲,journal 是 sequencer 的 `MemJournal`;启动与每次重启后以一段固定的启动输入走完闸门;Drain 完成(`Done`)后的重启从已 publish 的 journal 起步,与 hft-core 的 `seal_and_close` 之后重启相同;gw 角色的接收时间戳、epoch 与查询回执的 client id 由 `DstIo`/`SimMatcher` 补上),`Matcher` 为 `SimMatcher`(`hft_sim::SimExchange` 适配,私有 refdata 中所有账户为 Sim 账户,外来成交经 `SimExchange::external_fill` 计入真值),`observe` 抄录 ledger 持仓/库存/余额与外来成交去重键、OMS 槽/表/墓碑/链接/LegTracker(计数跨重启单调)与 world 限额;`StepView::input()` 取 World 交出的那条 Input(实盘驱动在它之前自己写出的到期定时器等不算)。risk 的 cap/cell/kill、执行层 cell、保证金分档、在途行与逐笔决策事实(`DecisionInfo`)组件尚无公开视图,这些行留空,读它们的检查器(INV-4 的 Open 部分、INV-5、INV-11、INV-12 的模式部分、INV-15、INV-17、INV-18、INV-19、INV-20)对真实引擎空过;`toy::PLANTED` 各行的真实引擎版本(各 crate 的 `planted-*` feature)、`run_sim_case`(TK-009)、`ProbeBuild` 注入(TK-095)与模板探针的构建检查(TK-042)未落地(TK-053 仍以 `ToyEngine` 运行);`hft-dst` 的 `SIGINT`/`SIGTERM` 处理属 M6。
 
 ### 开发备忘
 

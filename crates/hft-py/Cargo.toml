@@ -44,6 +44,9 @@ proptest.workspace = true
 criterion.workspace = true
 # Fixture generator (examples/pyfixture.rs): config blob digests. Not `workspace = true` (asm).
 sha2 = "0.10"
+# Fixture generator: hot-process journals from the real sequencer (`SeqRig`, examples/pyfixture/seq.rs).
+hft-testkit = { workspace = true, features = ["seq"] }
+hft-risk.workspace = true
 
 [[test]]
 name = "hft_py_tests"

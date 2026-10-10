@@ -49,8 +49,10 @@ fn script(h: &mut H) {
 fn minflt() -> i64 {
     // SAFETY: zeroed rusage is a valid out-buffer.
     let mut u: libc::rusage = unsafe { std::mem::zeroed() };
-    // SAFETY: RUSAGE_SELF with a writable buffer.
-    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut u) };
+    // SAFETY: RUSAGE_THREAD with a writable buffer. Other tests in this binary may allocate
+    // concurrently; only the thread performing these appends belongs to this measurement.
+    let rc = unsafe { libc::getrusage(libc::RUSAGE_THREAD, &mut u) };
+    assert_eq!(rc, 0, "getrusage(RUSAGE_THREAD)");
     u.ru_minflt
 }
 

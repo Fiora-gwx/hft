@@ -228,7 +228,7 @@ impl CmdState {
             feeds_last: vec![false; 256],
             recon_view: Vec::new(),
             recon_diff: Vec::new(),
-            fill_seq: Vec::new(),
+            fill_seq: Vec::with_capacity(256),
         }
     }
     fn dedup_find(&self, id: &[u8; 16]) -> Option<&CmdDedupRow> {
@@ -262,23 +262,18 @@ struct Res {
     detail: u32,
     preview: bool,
     effect: u32,
+    /// `rflags` besides `PREVIEW`/`NEEDS_CONFIRM` of the status (preview: `NEEDS_CONFIRM`,
+    /// `PREVIEW_TTL`).
+    rflags: u32,
+    /// The preview block (only written with `preview`).
+    pv: CmdPreview,
 }
 
 fn ok() -> Res {
-    Res {
-        status: status::APPLIED,
-        detail: 0,
-        preview: false,
-        effect: 0,
-    }
+    res_d(status::APPLIED, 0)
 }
 fn res(status: u8, code: u16) -> Res {
-    Res {
-        status,
-        detail: u32::from(code),
-        preview: false,
-        effect: 0,
-    }
+    res_d(status, u32::from(code))
 }
 fn res_d(status: u8, d: u32) -> Res {
     Res {
@@ -286,6 +281,8 @@ fn res_d(status: u8, d: u32) -> Res {
         detail: d,
         preview: false,
         effect: 0,
+        rflags: 0,
+        pv: <CmdPreview as zerocopy::FromZeros>::new_zeroed(),
     }
 }
 
@@ -306,8 +303,13 @@ fn write_result(e: &mut Engine, inst_ver: u64, hdr: &CmdHdr, r: &Res) {
             CmdResult::NEEDS_CONFIRM
         } else {
             0
-        };
-    c.preview = <CmdPreview as zerocopy::FromZeros>::new_zeroed();
+        }
+        | r.rflags;
+    c.preview = if r.preview {
+        r.pv
+    } else {
+        <CmdPreview as zerocopy::FromZeros>::new_zeroed()
+    };
     e.trace
         .rec("cmd_result", u64::from(r.status), u64::from(r.detail));
     e.out.push(RecordFlags(0), &c);
@@ -355,7 +357,15 @@ fn role_ok(h: &CmdHdr, c: &ControlCmd<'_>) -> bool {
                         ..
                     }
             ),
-            "ops_bot" => matches!(c, ControlCmd::Annotate { .. }),
+            // hft-ctl-proto principal table: default-parameter `Kill{Global | Account}` (the
+            // re-sent `/stop`) and `Annotate{OpsNote}`.
+            "ops_bot" => match c {
+                ControlCmd::Kill {
+                    level, flatten, hard, ..
+                } => matches!(level, KillLevel::Global | KillLevel::Account) && !*flatten && !*hard,
+                ControlCmd::Annotate { .. } => true,
+                _ => false,
+            },
             _ => false,
         };
     }
@@ -425,10 +435,12 @@ fn needs_confirm<S: StrategySet>(
         }),
         ControlCmd::Resume { .. } => true,
         ControlCmd::Kill { flatten, level, .. } => *flatten && *level == KillLevel::Account,
-        ControlCmd::HedgeFix { .. }
-        | ControlCmd::WriteOffResidual { .. }
+        // control-plane "类别": the upgrades, plus `ReplaceRefdata` and `SimReset` (neutral but
+        // confirmed); `HedgeFix` is neutral.
+        ControlCmd::WriteOffResidual { .. }
         | ControlCmd::SmokeOrder { .. }
         | ControlCmd::ReplaceRefdata { .. }
+        | ControlCmd::SimReset { .. }
         | ControlCmd::AdoptExchange { .. }
         | ControlCmd::SetBalanceBaseline { .. } => true,
         ControlCmd::StrategyCmd { reduce_only, .. } => *reduce_only == 0,
@@ -464,7 +476,6 @@ fn is_upgrade_class(c: &ControlCmd<'_>, e: &Engine) -> bool {
             mode: *mode,
         }),
         ControlCmd::Resume { .. }
-        | ControlCmd::HedgeFix { .. }
         | ControlCmd::WriteOffResidual { .. }
         | ControlCmd::SmokeOrder { .. }
         | ControlCmd::AdoptExchange { .. }
@@ -546,6 +557,12 @@ fn command<'a, D: Driver<S>, S: StrategySet>(
     {
         return Ok(res(status::INVALID_ARGS, detail::ACCOUNT_MISMATCH));
     }
+    // control-plane: `AdoptExchange` and `SetBalanceBaseline` only apply to Live accounts.
+    if let ControlCmd::AdoptExchange { account, .. } | ControlCmd::SetBalanceBaseline { account, .. } = c
+        && !matches!(e.rd.account(*account).kind, AccountKind::Live)
+    {
+        return Ok(res(status::INVALID_ARGS, detail::NOT_LIVE));
+    }
     // Facts for SetParams / SetRisk confirmation.
     let mut facts = dyn_free::Drv::default();
     let mut parsed: Option<crate::parsed::ParsedConfig<S>> = None;
@@ -619,58 +636,75 @@ fn command<'a, D: Driver<S>, S: StrategySet>(
     );
     // confirmation.
     let viewer = h.role != 0 && h.role & (ROLE_TRADER | ROLE_ADMIN) == 0;
-    if viewer {
-        if let ControlCmd::Kill { .. } = c {
-            if preview {
-                if e.cmd.previews.len() >= 16 {
-                    e.cmd.previews.remove(0);
-                }
-                let mut issuer = [0u8; 24];
-                issuer.copy_from_slice(&h.issuer);
-                e.cmd.previews.push(ViewerPreviewRow {
-                    cmd_hash: h.cmd_hash,
-                    issuer,
-                    preview_engine_ns: e.now.engine_ns,
-                });
-                let mut r = ok();
-                r.preview = true;
-                return Ok(r);
+    if viewer && let ControlCmd::Kill { .. } = c {
+        if preview {
+            if e.cmd.previews.len() >= 16 {
+                e.cmd.previews.remove(0);
             }
-            if h.confirmed == 0 {
-                return Ok(res(status::NEEDS_CONFIRM, 0));
-            }
-            let ttl = VIEWER_CONFIRM_TTL_MS * 1_000_000;
-            let now = e.now.engine_ns;
-            let pos = e.cmd.previews.iter().position(|x| {
-                x.cmd_hash == h.cmd_hash && x.issuer == h.issuer && now - x.preview_engine_ns <= ttl
+            let mut issuer = [0u8; 24];
+            issuer.copy_from_slice(&h.issuer);
+            e.cmd.previews.push(ViewerPreviewRow {
+                cmd_hash: h.cmd_hash,
+                issuer,
+                preview_engine_ns: e.now.engine_ns,
             });
-            match pos {
-                Some(i) => {
-                    e.cmd.previews.remove(i);
-                }
-                None => return Ok(res(status::CONFIRM_INVALID, detail::NO_VALID_PREVIEW)),
-            }
+            let mut r = preview_result(e, inst, c);
+            r.preview = true;
+            r.rflags = CmdResult::NEEDS_CONFIRM | CmdResult::PREVIEW_TTL;
+            r.pv = preview_block(e, inst, h, c, parsed.as_ref());
+            return Ok(r);
         }
-    } else if !preview {
-        let need = needs_confirm(e, inst, h, c, &mut facts);
-        if need {
-            if h.confirmed == 0 {
-                return Ok(res(status::NEEDS_CONFIRM, 0));
+        if h.confirmed == 0 {
+            return Ok(res(status::NEEDS_CONFIRM, 0));
+        }
+        let ttl = VIEWER_CONFIRM_TTL_MS * 1_000_000;
+        let now = e.now.engine_ns;
+        let pos = e.cmd.previews.iter().position(|x| {
+            x.cmd_hash == h.cmd_hash && x.issuer == h.issuer && now - x.preview_engine_ns <= ttl
+        });
+        match pos {
+            Some(i) => {
+                e.cmd.previews.remove(i);
             }
-            let is_kill = matches!(c, ControlCmd::Kill { .. });
-            if !is_kill && h.expect_state_version != e.risk.mode.ctl_state_version() {
-                return Ok(res(status::CONFIRM_INVALID, detail::STATE_CHANGED));
-            }
+            None => return Ok(res(status::CONFIRM_INVALID, detail::NO_VALID_PREVIEW)),
+        }
+    }
+    let need = !viewer && needs_confirm(e, inst, h, c, &mut facts);
+    if !viewer && !preview && need {
+        if h.confirmed == 0 {
+            return Ok(res(status::NEEDS_CONFIRM, 0));
+        }
+        let is_kill = matches!(c, ControlCmd::Kill { .. });
+        if !is_kill && h.expect_state_version != e.risk.mode.ctl_state_version() {
+            return Ok(res(status::CONFIRM_INVALID, detail::STATE_CHANGED));
         }
     }
     // `Resume{Draining}` is answered by the cap rules (not resumable), not by the drain gate.
     let resume_draining = matches!(c, ControlCmd::Resume { source, .. } if *source == CapSource::DRAINING);
-    if draining && is_upgrade_class(c, e) && !flatten_kill && !resume_draining {
+    // `SetParams` and `SetRisk` are upgrades exactly when they need confirmation.
+    let upgrade = is_upgrade_class(c, e)
+        || (need && matches!(c, ControlCmd::SetParams { .. } | ControlCmd::SetRisk { .. }));
+    if draining && upgrade && !flatten_kill && !resume_draining {
         return Ok(res(status::PRECONDITION_FAILED, detail::DRAINING));
+    }
+    // control-plane "类别": an upgrade while the target account's start gate is not released
+    // (`SetMode`/`Resume` get it from the mode checks, in their order; `SetParams`/`SetRisk` are
+    // not gated here: an account's first parameters precede its gate).
+    let target = cmd_account(c).unwrap_or(h.account);
+    if is_upgrade_class(c, e)
+        && !matches!(c, ControlCmd::SetMode { .. } | ControlCmd::Resume { .. })
+        && target.0 != 0
+        && !e.risk.mode.released(target)
+    {
+        return Ok(res(status::PRECONDITION_FAILED, detail::GATE_NOT_RELEASED));
     }
     if preview {
         let mut r = preview_result(e, inst, c);
         r.preview = true;
+        if need {
+            r.rflags |= CmdResult::NEEDS_CONFIRM;
+        }
+        r.pv = preview_block(e, inst, h, c, parsed.as_ref());
         return Ok(r);
     }
     apply_cmd(e, inst, drv, h, c, parsed, body, p)
@@ -688,6 +722,42 @@ fn live_instance<S: StrategySet>(e: &Engine, inst: &Instances<S>, s: StrategyId)
 }
 
 fn preview_result<S: StrategySet>(e: &Engine, _inst: &Instances<S>, c: &ControlCmd<'_>) -> Res {
+    let ad = crate::views::ModeAdapter {
+        oms: &e.oms,
+        ledger: &e.ledger,
+        exec: &e.exec,
+    };
+    // The mode checks `apply` would make (control-plane: the preview's status is the code the
+    // confirmed command would get now).
+    let mode_inp = match c {
+        ControlCmd::SetMode { scope, mode } => Some(ModeInput::SetMode {
+            scope: *scope,
+            mode: *mode,
+        }),
+        ControlCmd::Kill {
+            scope,
+            level,
+            flatten,
+            cancel_resting,
+            hard,
+        } => Some(ModeInput::Kill(KillCmd {
+            level: *level,
+            scope: *scope,
+            cancel_resting: *cancel_resting,
+            flatten: *flatten,
+            hard: *hard,
+        })),
+        ControlCmd::Resume { scope, source } => Some(ModeInput::Resume {
+            source: *source,
+            scope: *scope,
+        }),
+        _ => None,
+    };
+    if let Some(inp) = mode_inp
+        && let Err(m) = e.risk.check_mode(&inp, &ad)
+    {
+        return mode_err(m);
+    }
     match c {
         ControlCmd::Resume { scope, source } => {
             let mut pv = hft_risk::mode::Preview::default();
@@ -719,6 +789,44 @@ fn preview_result<S: StrategySet>(e: &Engine, _inst: &Instances<S>, c: &ControlC
     }
 }
 
+/// The `CmdPreview` block: target account and its kind, the cells and caps in scope, and for
+/// `SetParams` the SDK `reset_preview` estimate the gateway computed.
+fn preview_block<S: StrategySet>(
+    e: &Engine,
+    inst: &Instances<S>,
+    h: &CmdHdr,
+    c: &ControlCmd<'_>,
+    parsed: Option<&crate::parsed::ParsedConfig<S>>,
+) -> CmdPreview {
+    let mut p = <CmdPreview as zerocopy::FromZeros>::new_zeroed();
+    let a = match c {
+        ControlCmd::Kill { scope, .. } | ControlCmd::Resume { scope, .. } => scope.account,
+        _ => cmd_account(c).unwrap_or(h.account),
+    };
+    let a = if a.0 == 0 { h.account } else { a };
+    p.target_account = a;
+    if a.0 != 0 {
+        p.target_kind = match e.rd.account(a).kind {
+            AccountKind::Live => 1,
+            AccountKind::Sim(_) => 2,
+        };
+    }
+    p.affected_cells = inst.cells().filter(|x| a.0 == 0 || x.account == a).count() as u32;
+    for cap in e.risk.mode.caps() {
+        if a.0 == 0 || cap.scope.account.0 == 0 || cap.scope.account == a {
+            p.active_caps += 1;
+            if cap.source.0 < 32 {
+                p.cap_sources |= 1u32 << cap.source.0;
+            }
+        }
+    }
+    if let Some(crate::parsed::ParsedConfig::StrategyParams(pp)) = parsed {
+        p.reset_groups = pp.reset_preview.reset_groups;
+        p.no_open_ms = pp.reset_preview.no_open_ms;
+    }
+    p
+}
+
 #[allow(clippy::too_many_arguments)]
 fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
     e: &mut Engine,
@@ -733,6 +841,7 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
     let now = e.now;
     match c {
         ControlCmd::SetMode { scope, mode } => {
+            let before = e.risk.mode.ctl_state_version();
             let r = crate::mode_glue::apply_mode_r(
                 e,
                 inst,
@@ -747,6 +856,9 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
                     let deferred = *mode == RunMode::Shadow && shadow_deferred(e, scope);
                     if deferred {
                         res(status::APPLIED, detail::SHADOW_DEFERRED)
+                    } else if e.risk.mode.ctl_state_version() == before {
+                        // Already in the target state (control-plane "幂等").
+                        res(status::NO_OP, 0)
                     } else {
                         ok()
                     }
@@ -807,6 +919,11 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
             let Some(crate::parsed::ParsedConfig::Risk { params, sha256 }) = parsed else {
                 return Ok(res(status::INVALID_ARGS, detail::BAD_VALUE));
             };
+            // control-plane "版本与确认": a version at or below the current one is stale.
+            if params.version <= e.risk.params().version {
+                drv.retire(crate::parsed::ParsedConfig::Risk { sha256, params });
+                return Ok(res(status::STALE_VERSION, 0));
+            }
             let sc = if h.account.0 == 0 {
                 AccountScope::All
             } else {
@@ -1182,24 +1299,35 @@ fn notice_delivery<S: StrategySet>(e: &mut Engine, inst: &Instances<S>, row: &Ve
         inst: row.inst,
         kind,
     };
+    // One delivery per (instance, subscribed group) in gix order, whatever the entry's `Part`
+    // (SDK "EventRef": both parts receive `Notice`).
     for (ix, s) in inst.slots.iter().enumerate() {
-        for se in s.subs.iter() {
-            let hit = if row.inst.0 == 0 {
-                e.rd.inst(se.inst).venue == row.venue
-            } else {
-                se.inst == row.inst
-            };
-            if hit && se.part.fast() {
-                e.notify.push(
-                    ix as u16,
-                    crate::notify::Notif::Notice {
-                        inst: se.inst,
-                        gix: se.gix,
-                        n,
-                    },
-                );
-                break;
-            }
+        let mut last = None;
+        loop {
+            // Subscription order need not be gix order. Pick the next distinct group without
+            // allocating a temporary collection; ties keep the first matching subscription.
+            let next = s
+                .subs
+                .iter()
+                .filter(|se| {
+                    last.is_none_or(|gix| se.gix > gix)
+                        && if row.inst.0 == 0 {
+                            e.rd.inst(se.inst).venue == row.venue
+                        } else {
+                            se.inst == row.inst
+                        }
+                })
+                .min_by_key(|se| se.gix);
+            let Some(se) = next else { break };
+            last = Some(se.gix);
+            e.notify.push(
+                ix as u16,
+                crate::notify::Notif::Notice {
+                    inst: se.inst,
+                    gix: se.gix,
+                    n,
+                },
+            );
         }
     }
 }
@@ -1550,7 +1678,9 @@ fn adopt<D: Driver<S>, S: StrategySet>(
         .iter()
         .find(|x| x.0 == (report_id, account, inst_id))
         .map_or(Qty(0), |x| x.1);
-    let kind = if item == 1 {
+    // `AdoptExchange.item` (hft-event `codes::ADOPT_ITEM`): Position = 0, Balance = 1.
+    let position = item == 0;
+    let kind = if position {
         AdjustKind::Position
     } else {
         AdjustKind::Balance
@@ -1580,13 +1710,14 @@ fn adopt<D: Driver<S>, S: StrategySet>(
     };
     let pnl = e.ledger.apply_adjust(&d, e.now.engine_ns);
     e.trace.rec("ledger.apply_adjust", u64::from(account.0), 0);
+    crate::process::ledger_notes(e);
     crate::process::pnl(e, inst, drv, pnl)?;
-    if group != GROUP_NONE && item == 1 {
+    if group != GROUP_NONE && position {
         e.trace
             .rec("oms.adopt_adjust", u64::from(account.0), u64::from(group.0));
         e.oms.adopt_adjust(account, group, inst_id, diff);
     }
-    let key = if item == 1 {
+    let key = if position {
         ReconItemKey::new(ReconItemKey::POSITION, inst_id.0)
     } else {
         ReconItemKey::new(ReconItemKey::BALANCE, u32::from(asset.0) | hft_risk::ASSET_KEY)
@@ -1697,6 +1828,11 @@ fn smoke<D: Driver<S>, S: StrategySet>(
     )?;
     Ok(match out {
         crate::intents::PipeOut::Placed(_) => ok(),
+        // control-plane: arg = the lowest set `RejectBits` bit.
+        crate::intents::PipeOut::Rejected(b) if b.0 != 0 => res_d(
+            status::REJECTED,
+            detail::pack(detail::SMOKE_RISK_REJECT, b.0.trailing_zeros() as u16),
+        ),
         _ => res(status::REJECTED, detail::SMOKE_RISK_REJECT),
     })
 }
@@ -1736,6 +1872,8 @@ fn write_off<D: Driver<S>, S: StrategySet>(
     };
     let pnl = e.ledger.apply_adjust(&d, e.now.engine_ns);
     e.trace.rec("ledger.apply_adjust", u64::from(a.0), 4);
+    // `Note{ResidualWrittenOff}` belongs to this Input.
+    crate::process::ledger_notes(e);
     crate::process::pnl(e, inst, drv, pnl)?;
     e.exec.on_leg_adjust(a, g);
     e.trace.rec("exec.on_leg_adjust", u64::from(a.0), u64::from(g.0));
@@ -2288,6 +2426,8 @@ pub(crate) fn reconcile<D: Driver<S>, S: StrategySet>(
         };
         e.trace.rec("ledger.reconcile_funding", u64::from(r.account.0), 0);
         let fr = e.ledger.reconcile_funding(&it, e.now.utc_ns, e.now.engine_ns);
+        // `Note{FundingCorrected}` belongs to this Input (cold readers book the correction from it).
+        crate::process::ledger_notes(e);
         if let FundingRecon::Corrected { pnl, .. } = fr {
             crate::process::pnl(e, inst, drv, pnl)?;
         }
@@ -2331,7 +2471,7 @@ pub(crate) fn reconcile<D: Driver<S>, S: StrategySet>(
                 mark,
                 it.report_id,
             );
-            crate::process::external_fill(e, inst, drv, &x, true)?;
+            crate::process::external_fill(e, inst, drv, &x, true, false)?;
             crate::mode_glue::apply_mode(
                 e,
                 inst,
@@ -2380,6 +2520,7 @@ pub(crate) fn reconcile<D: Driver<S>, S: StrategySet>(
         .rec("ledger.funding_window_sweep", u64::from(g.account.0), 0);
     e.ledger
         .funding_window_sweep(g.account, g.venue, e.now.utc_ns, e.now.engine_ns, &mut outv);
+    crate::process::ledger_notes(e);
     for fr in outv.iter().copied().collect::<Vec<_>>() {
         if let FundingRecon::Corrected { pnl, .. } = fr {
             crate::process::pnl(e, inst, drv, pnl)?;

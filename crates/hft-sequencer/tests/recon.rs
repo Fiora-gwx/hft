@@ -146,3 +146,41 @@ fn seq_164_recon_pending_across_restart() {
     assert_eq!(pending(&h2, 903), None);
     let _ = (AssetId(0), Qty(0), EventKind::NOTE);
 }
+
+#[test]
+fn seq_371_funding_corrected_note_same_input() {
+    let mut h = steady();
+    let mut f = item(AC1, B, 910, 6, 1);
+    f.inst = B1;
+    // The settlement 30 min before the current UTC (an 8 h grid point; past the recon lag).
+    f.exch_ts_ns = UTC0 - 1_800_000_000_000;
+    f.exch_amount = n("-1.5");
+    f.engine_amount = hft_types::Notional(0);
+    let m = h.mark();
+    h.push(RingId::Rep(0), &f);
+    h.run();
+    let input = h
+        .since(m)
+        .iter()
+        .find(|r| r.kind == EventKind::RECONCILE_REPORT)
+        .map(|r| r.seq)
+        .expect("report journaled");
+    let recs = h.since(m);
+    let end = recs
+        .iter()
+        .find(|r| r.seq >= input && r.flags.0 & hft_event::RecordFlags::EVENT_END.0 != 0)
+        .map(|r| r.seq)
+        .expect("event end");
+    let corrected: Vec<hft_event::Note> = recs
+        .iter()
+        .filter(|r| r.kind == EventKind::NOTE && r.seq > input && r.seq <= end)
+        .filter_map(|r| r.read::<hft_event::Note>())
+        .filter(|n| n.code == hft_ledger::notes::code::FUNDING_CORRECTED)
+        .collect();
+    assert_eq!(
+        corrected.len(),
+        1,
+        "Note{{FundingCorrected}} in the report's own event"
+    );
+    assert_eq!(corrected[0].v[5] as i64, n("-1.5").0);
+}

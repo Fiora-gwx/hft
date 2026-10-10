@@ -155,7 +155,9 @@ fn call<S: StrategySet>(e: &Engine, inst: &mut Instances<S>, ix: usize, ev: &Eve
         };
         let Some(m) = ms.model.as_mut() else { return };
         ms.bufs.begin();
-        let v = crate::strategies::full_views(e);
+        let mut v = crate::strategies::full_views(e);
+        // Model side: `target()`/`order()` return `None` (SDK `ModelViews`).
+        v.model = true;
         S::model_on_event(m, ev, &v, &mut ms.bufs.out());
         ms.delivered += 1;
     }
@@ -539,7 +541,10 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
                         || h.layout != layout_digest::<S>(kind)
                     {
                         Some(crate::codes::discard::KEY_MISMATCH)
-                    } else if ckpt_checksum(&buf) != h.checksum || h.len != buf.len() as u64 {
+                    } else if ckpt_checksum(&buf) != h.checksum
+                        || h.len != buf.len() as u64
+                        || !path_section_fits(&buf)
+                    {
                         Some(crate::codes::discard::CORRUPT)
                     } else if h.last_seq < first_seq || !log.recs.iter().any(|r| r.seq == h.last_seq) {
                         Some(crate::codes::discard::SEQ_NOT_IN_JOURNAL)
@@ -588,11 +593,14 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
             for ix in 0..inst.slots.len() {
                 let Some(sl) = inst.slots.get(ix) else { continue };
                 let s = sl.id;
-                let enabled = cfg.shard.as_ref().is_none_or(|v| v.contains(&s)) && sl.cur.is_some();
+                // Enabled by shard membership: an instance whose first parameters arrive later
+                // gets its Model when the mirror applies them (`on_params` → `create_model`).
+                let enabled = cfg.shard.as_ref().is_none_or(|v| v.contains(&s));
+                let has_params = sl.cur.is_some();
                 if let Some(ms) = inst.models.slots.get_mut(ix) {
                     ms.enabled = enabled;
                 }
-                if !enabled {
+                if !enabled || !has_params {
                     continue;
                 }
                 on_params(e, inst, ix);
@@ -925,18 +933,23 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
             }
         }
         job.written += bytes.len() as u64;
-        if job.limit != 0 && job.written > job.limit.saturating_add(8 + (1 << 20)) {
-            // Over the declared size: this generation is void.
+        // Both sections (the 8 B path-section prefix excluded) over the declared
+        // `snapshot_bytes`: this generation is void, the previous one stays (SDK "Model 检查点").
+        if job.limit != 0 && job.written.saturating_sub(8) > job.limit {
+            self.skipped(&job);
             self.next_job(job.ix + 1);
             return;
         }
         if self.ckpt.write_chunk(&bytes).is_err() {
+            self.skipped(&job);
             self.next_job(job.ix + 1);
             return;
         }
         if done {
             if self.ckpt.commit().is_ok() {
                 self.commits += 1;
+            } else {
+                self.skipped(&job);
             }
             self.next_job(job.ix + 1);
             return;
@@ -944,10 +957,30 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
         self.job = Some(job);
     }
 
+    /// A void generation (over `snapshot_bytes`, or the store failed): `Note{ModelCkptSkipped}`
+    /// (P1; `v[0]` = strategy, `v[1]` = bytes written so far, `v[2]` = declared `snapshot_bytes`).
+    fn skipped(&mut self, job: &CkptJob) {
+        let s = job.hdr.strategy;
+        self.notes.push(advisor_note(
+            advisor_note::MODEL_CKPT_SKIPPED,
+            NoteLevel::P1,
+            s,
+            GROUP_NONE,
+            [u64::from(s.0), job.written, job.limit, 0, 0, 0, 0, 0],
+        ));
+    }
+
     /// A checkpoint is being written.
     pub fn checkpointing(&self) -> bool {
         self.job.is_some()
     }
+}
+
+/// The path section's length prefix stays within the body (else the file is corrupt).
+fn path_section_fits(body: &[u8]) -> bool {
+    let Some(b) = body.get(..4) else { return false };
+    let plen = u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize;
+    plen.checked_add(8).is_some_and(|end| end <= body.len())
 }
 
 fn sl_kind<S: StrategySet>(inst: &Instances<S>, ix: usize) -> u16 {

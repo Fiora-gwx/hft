@@ -349,7 +349,7 @@ impl OrderSlot {
     }
 }
 
-/// Per-slot extension (32 B), parallel to the slots; in the snapshot.
+/// Per-slot extension (64 B), parallel to the slots; in the snapshot.
 #[repr(C, align(32))]
 #[derive(Copy, Clone, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
 pub struct SlotExt {
@@ -369,9 +369,18 @@ pub struct SlotExt {
     pub reason: u32,
     /// `OrderDecision.intent_no` of the New decision.
     pub intent_no: u32,
+    /// `cum_filled` of the last `PartialFill`/`Fill` report applied: fees are booked up to here
+    /// (README "回报匹配与成交增量" 9).
+    pub fee_cum: Qty,
+    /// Reserved (zero).
+    pub _rsv: [u64; 3],
 }
-const _: () = assert!(size_of::<SlotExt>() == 32 && size_of::<SlotStamps>() == 80);
-const _: () = assert!(offset_of!(SlotExt, leg_ix) == 12 && offset_of!(SlotExt, max_rest_ms) == 20);
+const _: () = assert!(size_of::<SlotExt>() == 64 && size_of::<SlotStamps>() == 80);
+const _: () = assert!(
+    offset_of!(SlotExt, leg_ix) == 12
+        && offset_of!(SlotExt, max_rest_ms) == 20
+        && offset_of!(SlotExt, fee_cum) == 32
+);
 
 impl SlotExt {
     /// `leg_ix` of a slot outside any group leg.
@@ -388,6 +397,8 @@ impl SlotExt {
         max_rest_ms: 0,
         reason: 0,
         intent_no: 0,
+        fee_cum: Qty(0),
+        _rsv: [0; 3],
     };
 }
 
@@ -671,13 +682,15 @@ const _: () =
 const _: () =
     assert!(offset_of!(TableRow, smoke_slot) == 28 && offset_of!(OmsCountersHdr, resume_hold_until) == 8);
 
-/// Section 2 row length: `OrderSlot` (128 B) ‖ `SlotExt` (32 B).
-pub const SLOT_ROW_LEN: usize = 160;
+/// Section 2 row length: `OrderSlot` (128 B) ‖ `SlotExt` (64 B).
+pub const SLOT_ROW_LEN: usize = 192;
+/// Section 2 row length of row version 1 (`SlotExt` without `fee_cum`, 32 B).
+pub const SLOT_ROW_LEN_V1: usize = 160;
 /// Snapshot section numbers (journal-format) and their row versions (registered here).
 pub const SECTION_ORDER_SLOTS: u16 = 2;
 pub const SECTION_OMS_COUNTERS: u16 = 3;
 pub const SECTION_OMS_LINKS: u16 = 12;
-pub const ROW_VERSION_SLOTS: u16 = 1;
+pub const ROW_VERSION_SLOTS: u16 = 2;
 pub const ROW_VERSION_COUNTERS: u16 = 1;
 pub const ROW_VERSION_LINKS: u16 = 1;
 

@@ -8,10 +8,9 @@ import shutil
 from decimal import Decimal
 from pathlib import Path
 
+import hft_py
 import polars as pl
 import pytest
-
-import hft_py
 from conftest import Journal, Shm, pyfixture, run_tw
 
 PNL = ["price_realized", "funding", "fee_cex", "gas", "bribe", "unrealized", "adjust", "external"]
@@ -103,7 +102,7 @@ def test_py_101_start_snapshot(j_led, tmp_path: Path, row: str) -> None:  # type
     segs = j.info()["segments"]
     assert len(segs) == 3
     kf = _keyframes(j)
-    k3, t3 = [(s, t) for s, t, _ in kf if s >= segs[2]["first_seq"]][0]
+    k3, t3 = next((s, t) for s, t, _ in kf if s >= segs[2]["first_seq"])
     assert [s for s, _, _ in kf if segs[1]["first_seq"] <= s < segs[2]["first_seq"]], "no keyframe in segment 2"
     if row == "PY-101.1":
         views_equal(hft_py.ledger(j, account="bn-1", t0=t3), lj.ref(k3))
@@ -204,8 +203,8 @@ def test_py_105_pnl_bad_by(j_led, row: str, by: object) -> None:  # type: ignore
         hft_py.pnl(j, by=by)
 
 
-def test_py_110_deterministic(j_led, j_sim: Journal) -> None:  # type: ignore[no-untyped-def]
-    for path, acct in ((j_led(5).j.path, "bn-1"), (j_sim.path, "sim-a")):
+def test_py_110_deterministic(j_led, j_sim: Journal, seq_fx) -> None:  # type: ignore[no-untyped-def]
+    for path, acct in ((seq_fx("ext").j.path, "bn-1"), (j_led(5).j.path, "bn-1"), (j_sim.path, "sim-a")):
         j = hft_py.open_journal(path)
         a, b = hft_py.ledger(j, account=acct), hft_py.ledger(j, account=acct)
         assert pl.DataFrame(a.positions()).equals(pl.DataFrame(b.positions()))
@@ -225,3 +224,172 @@ def test_led_246_pyo3_matches_rust(j_led) -> None:  # type: ignore[no-untyped-de
         for e in ref["events"][::10]:
             hi = e["proc_ns"] + 1
             assert bd(hft_py.ledger(j, account="bn-1", t1=hi)) == ref_sum(ref, None, hi), (seed, e["seq"])
+
+
+# ------------------------------------------------------------------ hot-process fixtures (SeqRig)
+
+OMS_FOREIGN_FILL = (4 << 24) | 11
+LEDGER_EXTERNAL_FILL = (9 << 24) | 7
+LEDGER_AUTO_HELD_OFFSET = (9 << 24) | 8
+BTC_P2 = 102
+G1 = 0x0100_0001
+# `VenueEquityView.flags` bit (hft-strategy-sdk).
+BALANCE_UNRECONCILED = 4
+
+
+class SeqFx:
+    """A ``pyfixture seq`` journal (hft-sequencer on hft-testkit's ``SeqRig``, written by ``TW``) and
+    the hot process's ledger at its named steps (``steps.json``, ``expected/ledger-<step>.bin``)."""
+
+    def __init__(self, base: Path) -> None:
+        self.gen = base / "gen"
+        self.j = Journal(base / "cold", "prod")
+        self.steps = {s["name"]: s for s in json.loads((self.gen / "steps.json").read_text())}
+        self.meta = json.loads((self.gen / "meta.json").read_text())
+
+    def journal(self) -> object:
+        return hft_py.open_journal(self.j.path)
+
+    def expected(self, step: str) -> bytes:
+        return (self.gen / self.steps[step]["file"]).read_bytes()
+
+    def at(self, step: str) -> int:
+        """``proc_ns`` of the step's Input."""
+        return int(self.steps[step]["proc_ns"])
+
+
+@pytest.fixture(scope="session")
+def seq_fx(tools: Path, shm: Shm, tmp_path_factory: pytest.TempPathFactory):  # type: ignore[no-untyped-def]
+    """``J_EXT`` / ``F_FF`` / ``F_SAMPLE`` / ``F_FILLS``: ``pyfixture seq <name> [<row>]``."""
+    cache: dict[tuple[str, ...], SeqFx] = {}
+
+    def get(*args: str) -> SeqFx:
+        if args not in cache:
+            base = tmp_path_factory.mktemp("seq-" + "-".join(args))
+            gen = base / "gen"
+            pyfixture(tools, "seq", *args, str(gen))
+            hot = shm.dir("seq")
+            run_tw(tools, hot, base / "cold", (gen / "script.txt").read_text())
+            shutil.rmtree(hot, ignore_errors=True)
+            pyfixture(tools, "seq-check", str(base / "cold"), "prod", str(gen))
+            cache[args] = SeqFx(base)
+        return cache[args]
+
+    return get
+
+
+def hot_equal(led: object, fx: SeqFx, step: str) -> None:
+    """The cold ledger equals the hot process's after ``step``: ledger sections 1, 13, 22 byte for
+    byte, ``positions()``/``inventory()``/``portfolio()`` and the PnL since boot."""
+    testing = getattr(hft_py, "_testing", None)
+    assert testing is not None, "hft_py was built without the `testing` feature"
+    st = fx.steps[step]
+    assert testing.ledger_snapshot(led).hex() == fx.expected(step).hex(), step
+    assert _norm(rows(led.positions())) == st["positions"], step  # type: ignore[attr-defined]
+    assert _norm(rows(led.inventory())) == st["inventory"], step  # type: ignore[attr-defined]
+    # Cold readers do not run the quiet-period balance check (hft-ledger "冷消费者": `on_balance`
+    # with `quiet = false`), so `BALANCE_UNRECONCILED` is the hot process's only.
+    hot_port = [dict(r, flags=r["flags"] & ~BALANCE_UNRECONCILED) for r in st["portfolio"]]
+    assert _norm(rows(led.portfolio())) == hot_port, step  # type: ignore[attr-defined]
+    assert bd(led) == st["pnl"], step
+
+
+def upto(fx: SeqFx, step: str) -> object:
+    """The cold ledger over every event up to and including ``step``'s."""
+    return hft_py.ledger(fx.journal(), account="bn-1", t1=fx.at(step) + 1)
+
+
+def qty(led: object, inst: int = BTC_P2) -> int:
+    return sum(int(r["qty"]) for r in rows(led.positions()) if r["inst"] == inst)  # type: ignore[attr-defined]
+
+
+def notes(fx: SeqFx, lo: int, hi: int, code: int) -> list[dict]:
+    """``Note`` rows with ``lo <= seq < hi`` and the given code."""
+    d = pl.DataFrame(fx.journal().events("Note"))  # type: ignore[attr-defined]
+    return d.filter((pl.col("seq") >= lo) & (pl.col("seq") < hi) & (pl.col("code") == code)).to_dicts()
+
+
+def test_py_106_auto_recon_note_booked(seq_fx) -> None:  # type: ignore[no-untyped-def]
+    fx = seq_fx("ext")
+    s1, s2 = fx.steps["E1"]["seq"], fx.steps["E2"]["seq"]
+    assert notes(fx, s1, s2, LEDGER_EXTERNAL_FILL), "E1 carries the hot process's Note{ExternalFill}"
+    led = hft_py.ledger(fx.journal(), account="bn-1", t1=fx.at("E2"))
+    assert qty(led) == 600_000_000
+    hot_equal(led, fx, "E1")
+
+
+def test_py_107_adl_offset_by_auto_held(seq_fx) -> None:  # type: ignore[no-untyped-def]
+    fx = seq_fx("ext")
+    s2, s3 = fx.steps["E2"]["seq"], fx.steps["E3"]["seq"]
+    assert notes(fx, s2, s3, LEDGER_AUTO_HELD_OFFSET), "E2 carries Note{LedgerAutoHeldOffset}"
+    e1 = hft_py.ledger(fx.journal(), account="bn-1", t1=fx.at("E2"))
+    led = hft_py.ledger(fx.journal(), account="bn-1", t1=fx.at("E3"))
+    assert qty(led) == 600_000_000
+    assert rows(led.breakdown())[0]["external"] == rows(e1.breakdown())[0]["external"]  # type: ignore[attr-defined]
+    hot_equal(led, fx, "E2")
+
+
+def test_py_108_plain_note_not_booked(seq_fx) -> None:  # type: ignore[no-untyped-def]
+    fx = seq_fx("ext")
+    s4 = fx.steps["E4"]["seq"]
+    plain = notes(fx, s4, s4 + 64, LEDGER_EXTERNAL_FILL)
+    assert plain, "E4 carries the hot process's Note{ExternalFill}"
+    led = hft_py.ledger(fx.journal(), account="bn-1")
+    assert qty(led) == 670_000_000
+    hot_equal(led, fx, "E4")
+
+
+# row → (fixture row, step the change is measured from, Note{OmsForeignFill} path, change of BTC/P2)
+FF_ROWS = {
+    "PY-109.1": ("1", "start", 1, 30_000_000),
+    "PY-109.2": ("2", "start", 2, 30_000_000),
+    "PY-109.4": ("4", "ext", 1, 0),
+    "PY-109.5": ("5", "start", 1, 50_000_000),
+}
+
+
+@pytest.mark.parametrize("row", list(FF_ROWS))
+def test_py_109_oms_foreign_fill(seq_fx, row: str) -> None:  # type: ignore[no-untyped-def]
+    r, base, path, delta = FF_ROWS[row]
+    fx = seq_fx("ff", r)
+    ff = notes(fx, fx.steps[base]["seq"], 1 << 62, OMS_FOREIGN_FILL)
+    # `Note.v` is the raw `[u64; 8]` (binary column); v[0] = venue | account << 8 | side << 16 | path << 24 | …
+    assert ff and all(n["v"][3] == path for n in ff), (row, [n["v"][:8].hex() for n in ff])
+    led = hft_py.ledger(fx.journal(), account="bn-1")
+    assert qty(led) - qty(upto(fx, base)) == delta, row
+    for step in fx.steps:
+        hot_equal(upto(fx, step), fx, step)
+    hot_equal(led, fx, "end")
+
+
+@pytest.mark.parametrize("row", ["PY-111.1", "PY-111.2", "PY-111.3", "PY-111.4", "PY-111.5", "PY-111.6"])
+def test_py_111_booking_samples(seq_fx, row: str) -> None:  # type: ignore[no-untyped-def]
+    fx = seq_fx("sample", row.split(".")[1])
+    for step in fx.steps:
+        hot_equal(upto(fx, step), fx, step)
+    led = hft_py.ledger(fx.journal(), account="bn-1")
+    hot_equal(led, fx, "end")
+    b = rows(led.breakdown())[0]  # type: ignore[attr-defined]
+    if row == "PY-111.1":
+        assert qty(led, 101) == 999_000 and b["fee_cex"] != 0
+    elif row == "PY-111.2":
+        assert qty(led) == 60_000_000 and b["external"] != 0
+    elif row == "PY-111.4":
+        assert b["funding"] == fx.steps["synth"]["pnl"][1] != 0
+    elif row == "PY-111.5":
+        inv = rows(led.inventory())  # type: ignore[attr-defined]
+        assert not [r for r in inv if r["group"] == G1 and int(r["qty"]) != 0]
+    elif row == "PY-111.6":
+        assert qty(led) == 50_000_000
+
+
+@pytest.mark.parametrize("row", ["PY-112.1", "PY-112.2", "PY-112.3", "PY-112.4"])
+def test_py_112_fills_dedup_by_cum_filled(seq_fx, row: str) -> None:  # type: ignore[no-untyped-def]
+    fx = seq_fx("fills", row.split(".")[1])
+    m = fx.meta
+    assert (m["epoch"], m["slot"], m["gen"], m["inst"], m["side"], m["group"]) == (3, 1, 1, BTC_P2, 1, G1)
+    led = hft_py.ledger(fx.journal(), account="bn-1")
+    want = 0 if row == "PY-112.4" else 50_000_000
+    assert qty(led) - qty(upto(fx, "placed")) == want, row
+    hot_equal(upto(fx, "placed"), fx, "placed")
+    hot_equal(led, fx, "end")
