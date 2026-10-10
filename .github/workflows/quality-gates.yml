@@ -223,7 +223,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo check --locked --target aarch64-unknown-linux-gnu --workspace
 
-      # M3 (gen-host lands with deploy/gen): deploy/ or apps/hft-core changed.
+      # M3 (gen-host lands with deploy/gen): non-Markdown deploy/ or apps/hft-core changes.
       - name: cargo xtask gen-host --check
         id: genhost
         if: steps.paths.outputs.gen_host == 'true' && steps.xtask.outputs.gen-host == 'true'
@@ -406,7 +406,7 @@ jobs:
           steps.paths.outputs.gen_host == 'true'
         with:
           python-version: "3.12"
-      - name: CI release policy regression tests
+      - name: CI script policy regression tests
         if: steps.paths.outputs.ops == 'true'
         run: python -m unittest discover -s tools/xtask/tests -p 'test_ci_*.py' -v
       - name: Install pinned Rust toolchain (hft_py)
@@ -472,7 +472,7 @@ jobs:
           skip=()
           if [[ "$DEPLOY_CONTAINER" != true ]]; then
             skip=(--ignore=deploy/tests/container --ignore=deploy/dev2/tests/container)
-            echo "deploy container tests skipped (no deploy/ or apps/hft-core/ change; nightly runs them)"
+            echo "deploy container tests skipped (no deploy/ or apps/hft-core/ code or config change; nightly runs them)"
           fi
           if [[ -d deploy/tests ]]; then
             python -m pip install pytest

@@ -54,7 +54,7 @@ cargo xtask ci [--pure-only] [--fast] [--no-doc-check]
 
 **按路径触发的步骤不在 `ci` 内**:`scaffold-gate`、改动目标的 fuzz 冒烟、`fixtures/replay/` 样本的 `replay-verify`、基准短跑由工作流按 [testing §6](../docs/testing.md#6-ci-运行矩阵) 的路径规则分别调用对应子命令;`decoupling-gate` 是独立作业(下节)。工作流文件、触发、作业图与资源规则归 [development](../docs/development.md#ci-概要);本地(Windows)只写代码并推送。
 
-发布检查与夜间汇总的辅助脚本在 `.github/scripts/`;契约归 [development 发布检查](../docs/development.md#发布工作流release-aarch64yml)与[每夜任务](../docs/development.md#每夜任务nightlyyml)。`ops-py` 对相关改动运行 `tools/xtask/tests/test_ci_release.py`(TOOL-187–TOOL-190),用离线 GitHub 替身验证发布证据、Admin 覆盖与汇总结论。
+发布检查与夜间汇总的辅助脚本在 `.github/scripts/`;契约归 [development 发布检查](../docs/development.md#发布工作流release-aarch64yml)与[每夜任务](../docs/development.md#每夜任务nightlyyml)。`ops-py` 对相关改动运行 `tools/xtask/tests/test_ci_*.py`(TOOL-187–TOOL-191),用离线替身验证发布证据、Admin 覆盖、汇总结论与主机检查的路径判定。
 
 **每夜**只做回归冒烟:`dst --hashtrail check`(不带 `--first`,核对全部登记种子);DST 以 `dst --seeds N --seed S --steps M` 跑一批由 UTC 日期派生起点 `S` 的新种子,fuzz 以 `fuzz --nightly` 按 `fuzz-targets.toml` 轮转(N、M 读 `tools/xtask/dst-nightly.toml`,时长上限归 [testing §6](../docs/testing.md#6-ci-运行矩阵)),**不计入上线门槛 ③④**,也不保存任何累计账本;③④ 的累计在服务器上由 [hft-verify](#hft-verify) 运行。
 
@@ -208,7 +208,7 @@ cargo xtask gen-schema [--check]
 cargo xtask gen-host [--host <name>] [--check]
 ```
 
-主机配置生成器的入口:读 `deploy/hosts/<name>.toml`(主机清单:主机类、网卡 ENI-A/B/C 与预留的 ENI-B2、出口地址、存储;字段归 [deploy](../deploy/README.md))与 [apps/hft-core](../apps/hft-core/README.md) 给出的该主机类档(线程计划、内存表、slice 与 tmpfs 数值、dev2 护栏数值),调用 `deploy/gen/` 的生成器写出生成物:GRUB 片段、各 slice 的 `AllowedCPUs`/cpuset、IRQ 计划(各 ENI 队列 → 核)、两个实例配置的 `[host]`/`[[threads]]`/出口地址段、`/etc/hft/egress.toml`、watchtower 的隔离核线程白名单、hostprobe 的期望剖面(生成物清单与格式归 [deploy](../deploy/README.md))。生成前先用 hft-core 加载校验的同一实现检查线程计划(核号冲突、隔离集合与 sim/批处理核相交、`feed-bbo:*` 与 `feed-md:*` 同线程等),不通过退出 1。生成物不含网卡 MAC(网卡按设备序号识别,MAC 只由 hostprobe 在运行期经 IMDS 读出并核对,规则归 deploy),因此换 AZ 重建或租用探针机不需要先发版。不带 `--host` 时处理全部清单;`--check` 生成到临时目录并与已提交的生成物比较,有差异退出 1(CI 在改动 `deploy/` 或 hft-core 线程计划时运行);它同时核对生成的 2 MiB/1 GiB 大页数等于 hft-core 内存表按实际 journal 列表求和的结果。
+主机配置生成器的入口:读 `deploy/hosts/<name>.toml`(主机清单:主机类、网卡 ENI-A/B/C 与预留的 ENI-B2、出口地址、存储;字段归 [deploy](../deploy/README.md))与 [apps/hft-core](../apps/hft-core/README.md) 给出的该主机类档(线程计划、内存表、slice 与 tmpfs 数值、dev2 护栏数值),调用 `deploy/gen/` 的生成器写出生成物:GRUB 片段、各 slice 的 `AllowedCPUs`/cpuset、IRQ 计划(各 ENI 队列 → 核)、两个实例配置的 `[host]`/`[[threads]]`/出口地址段、`/etc/hft/egress.toml`、watchtower 的隔离核线程白名单、hostprobe 的期望剖面(生成物清单与格式归 [deploy](../deploy/README.md))。生成前先用 hft-core 加载校验的同一实现检查线程计划(核号冲突、隔离集合与 sim/批处理核相交、`feed-bbo:*` 与 `feed-md:*` 同线程等),不通过退出 1。生成物不含网卡 MAC(网卡按设备序号识别,MAC 只由 hostprobe 在运行期经 IMDS 读出并核对,规则归 deploy),因此换 AZ 重建或租用探针机不需要先发版。不带 `--host` 时处理全部清单;`--check` 生成到临时目录并与已提交的生成物比较,有差异退出 1(CI 触发口径归 [development](../docs/development.md#ci-概要));它同时核对生成的 2 MiB/1 GiB 大页数等于 hft-core 内存表按实际 journal 列表求和的结果。
 
 ### cargo xtask doc-check
 

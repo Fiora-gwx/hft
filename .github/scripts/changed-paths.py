@@ -15,7 +15,7 @@ Writes step outputs (true/false unless noted):
   benchmarks    benchmarks/
   toolchain     rust-toolchain.toml                         -> base vs head relative benchmark
   cargo_lock    Cargo.lock                                  -> cargo deny check advisories
-  gen_host      deploy/ or apps/hft-core/                   -> gen-host --check, deploy container tests
+  gen_host      non-Markdown deploy/ or apps/hft-core/      -> gen-host --check, deploy container tests
   python        python/ strategies/*/pipeline/ crates/hft-py/ tools/az-probe/
   ops           deploy/ .github/
 """
@@ -95,6 +95,7 @@ def main() -> int:
     base = os.environ.get("BASE", "")
     head = os.environ.get("HEAD", "") or "HEAD"
     files = changed_files(event, base, head)
+    code_files = [f for f in files if not f.endswith(".md")]
     pipeline = any(f.startswith("strategies/") and "/pipeline/" in f for f in files)
     res = {
         "docs_only": event == "pull_request" and bool(files) and all(f.endswith(".md") for f in files),
@@ -105,7 +106,7 @@ def main() -> int:
         "benchmarks": under(files, "benchmarks/"),
         "toolchain": "rust-toolchain.toml" in files,
         "cargo_lock": "Cargo.lock" in files,
-        "gen_host": under(files, "deploy/", "apps/hft-core/"),
+        "gen_host": under(code_files, "deploy/", "apps/hft-core/"),
         "python": under(files, "python/", "crates/hft-py/", "tools/az-probe/") or pipeline,
         "ops": under(files, "deploy/", ".github/", "tools/xtask/tests/test_ci_"),
     }

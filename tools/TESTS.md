@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | 不适用:非规范 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | TOOL-001–TOOL-002 |
-| cargo xtask ci | TOOL-003–TOOL-011, TOOL-186–TOOL-190 |
+| cargo xtask ci | TOOL-003–TOOL-011, TOOL-186–TOOL-191 |
 | cargo xtask decoupling-gate | TOOL-012–TOOL-019 |
 | cargo xtask scaffold-gate | TOOL-020–TOOL-029 |
 | cargo xtask deps | TOOL-030–TOOL-031、TOOL-118 |
@@ -2881,6 +2881,21 @@ spec: README.md
 |---|---|---|
 | TOOL-190.1 | 解耦豁免查询成功 | 退出 0;列出两项作业结果、缓存提示和豁免;没有分钟额度字段 |
 | TOOL-190.2 | 豁免查询 API 错误 | 退出 0;保留作业结果,豁免项标为 unavailable |
+
+### TOOL-191 主机生成检查只按代码与配置变更触发
+
+- 规则:[质量门](../docs/development.md#质量门quality-gatesyml)
+- 级别:table
+- 里程碑:M1
+- 前置:PR 的 git diff 路径列表替身;运行 changed-paths 入口,读取工作流输出
+- 实现:`tools/xtask/tests/test_ci_paths.py::test_tool_191_host_checks_follow_code_and_config_changes`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| TOOL-191.1 | deploy 的 Markdown + OMS 源码;或 hft-core 的 Markdown + CI 工作流 | `gen_host = false`;`docs_only = false`;OMS 的回放与脚手架检查仍触发 |
+| TOOL-191.2 | 只改 deploy/hft-core 的 Markdown | `gen_host = false`;`docs_only = true` |
+| TOOL-191.3 | deploy 主机 TOML、生成器、systemd 单元;或 hft-core 的 Rust/Cargo.toml | `gen_host = true`;`docs_only = false`;夹带 Markdown 不影响结果 |
+| TOOL-191.4 | 删除或改名后的主机 TOML 路径,文件在检出内容中不存在 | `gen_host = true`;不因文件不存在漏跑 |
 
 ## 验收
 
