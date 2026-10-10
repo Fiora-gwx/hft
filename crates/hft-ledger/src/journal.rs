@@ -31,7 +31,7 @@ pub const OMS_SLOT_ROW_LEN: usize = 192;
 /// Counters of the cold consumer.
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
 pub struct JournalLedgerStats {
-    /// Fill reports whose `(epoch, slot, gen)` had no registered order (not booked).
+    /// Fill reports whose `(venue, account, epoch, slot, gen)` had no registered order (not booked).
     pub unmapped_fills: u64,
     /// Registrations evicted because the slot map was full.
     pub map_evicted: u64,
@@ -53,6 +53,27 @@ struct SlotEntry {
     notional: i128,
     /// `cum_filled` of the last `PartialFill`/`Fill` (hft-oms `SlotExt.fee_cum`).
     fee_cum: i64,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+struct SlotKey {
+    venue: VenueId,
+    account: AccountId,
+    epoch: u16,
+    slot: u32,
+    r#gen: u32,
+}
+
+impl SlotEntry {
+    fn key(&self) -> SlotKey {
+        SlotKey {
+            venue: self.venue,
+            account: self.account,
+            epoch: self.epoch,
+            slot: self.slot,
+            r#gen: self.r#gen,
+        }
+    }
 }
 
 /// FIFO slot map with an open-addressing index.
@@ -79,20 +100,24 @@ impl SlotMap {
         }
     }
 
-    fn h(epoch: u16, slot: u32, g: u32) -> usize {
-        mix64(u64::from(epoch) << 48 ^ u64::from(slot) << 20 ^ mix64(u64::from(g))) as usize
+    fn h(key: SlotKey) -> usize {
+        let table_epoch_slot = u64::from(key.venue.0) << 56
+            | u64::from(key.account.0) << 48
+            | u64::from(key.epoch) << 32
+            | u64::from(key.slot);
+        mix64(table_epoch_slot ^ mix64(u64::from(key.r#gen))) as usize
     }
 
-    fn find(&self, epoch: u16, slot: u32, g: u32) -> Option<usize> {
+    fn find(&self, key: SlotKey) -> Option<usize> {
         let mask = self.index.len() - 1;
-        let mut i = Self::h(epoch, slot, g) & mask;
+        let mut i = Self::h(key) & mask;
         for _ in 0..self.index.len() {
             match self.index.get(i).copied().unwrap_or(EMPTY) {
                 EMPTY => return None,
                 TOMB => {}
                 v => {
                     let e = self.ring.get(v as usize - 1)?;
-                    if e.epoch == epoch && e.slot == slot && e.r#gen == g {
+                    if e.key() == key {
                         return Some(i);
                     }
                 }
@@ -102,15 +127,15 @@ impl SlotMap {
         None
     }
 
-    fn get_mut(&mut self, epoch: u16, slot: u32, g: u32) -> Option<&mut SlotEntry> {
-        let i = self.find(epoch, slot, g)?;
+    fn get_mut(&mut self, key: SlotKey) -> Option<&mut SlotEntry> {
+        let i = self.find(key)?;
         let v = *self.index.get(i)?;
         self.ring.get_mut(v as usize - 1)
     }
 
     fn place(&mut self, e: &SlotEntry, pos: usize) {
         let mask = self.index.len() - 1;
-        let mut i = Self::h(e.epoch, e.slot, e.r#gen) & mask;
+        let mut i = Self::h(e.key()) & mask;
         while !matches!(self.index.get(i).copied(), Some(EMPTY) | Some(TOMB) | None) {
             i = (i + 1) & mask;
         }
@@ -121,7 +146,7 @@ impl SlotMap {
 
     /// Registers `e`; returns whether an older entry was evicted.
     fn insert(&mut self, e: SlotEntry) -> bool {
-        if let Some(i) = self.find(e.epoch, e.slot, e.r#gen) {
+        if let Some(i) = self.find(e.key()) {
             if let Some(v) = self.index.get(i).copied()
                 && let Some(x) = self.ring.get_mut(v as usize - 1)
             {
@@ -142,7 +167,7 @@ impl SlotMap {
         } else {
             let pos = self.head;
             if let Some(old) = self.ring.get(pos).copied()
-                && let Some(i) = self.find(old.epoch, old.slot, old.r#gen)
+                && let Some(i) = self.find(old.key())
                 && let Some(s) = self.index.get_mut(i)
             {
                 *s = TOMB;
@@ -528,7 +553,14 @@ impl JournalLedger {
         let Some(s) = self.ledger.inst(ev.inst).copied() else {
             return;
         };
-        let Some(e) = self.map.get_mut(ev.epoch, ev.slot.0, ev.r#gen).copied() else {
+        let key = SlotKey {
+            venue: ev.venue,
+            account: ev.account,
+            epoch: ev.epoch,
+            slot: ev.slot.0,
+            r#gen: ev.r#gen,
+        };
+        let Some(e) = self.map.get_mut(key).copied() else {
             if ev.cum_filled.0 > 0 && ev.what != OrderEventKind::FeeOnly {
                 self.stats.unmapped_fills = self.stats.unmapped_fills.saturating_add(1);
             }
@@ -552,7 +584,7 @@ impl JournalLedger {
         }
         let fill_report = matches!(ev.what, OrderEventKind::PartialFill | OrderEventKind::Fill);
         let fresh_fee = fill_report && ev.cum_filled.0 > e.fee_cum;
-        if fresh_fee && let Some(x) = self.map.get_mut(ev.epoch, ev.slot.0, ev.r#gen) {
+        if fresh_fee && let Some(x) = self.map.get_mut(key) {
             x.fee_cum = ev.cum_filled.0;
         }
         let d = ev.cum_filled.0.saturating_sub(e.cum);
@@ -583,7 +615,7 @@ impl JournalLedger {
         };
         let inc = total - e.notional;
         let px = Px(sat64(div_round(inc, i128::from(d), RoundMode::HalfEven)));
-        if let Some(x) = self.map.get_mut(ev.epoch, ev.slot.0, ev.r#gen) {
+        if let Some(x) = self.map.get_mut(key) {
             x.cum = ev.cum_filled.0;
             x.notional = total;
         }

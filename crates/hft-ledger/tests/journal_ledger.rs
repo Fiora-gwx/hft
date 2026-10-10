@@ -1,4 +1,4 @@
-//! LED-263–LED-265, LED-271: `JournalLedger` slot map, cumulative-fill dedup, unmapped fills,
+//! LED-263–LED-265, LED-271–LED-273: slot identity, cumulative-fill dedup, unmapped fills,
 //! fees of fill reports whose quantity came earlier.
 
 use crate::common;
@@ -159,5 +159,86 @@ fn led_272_slot_snapshot_fee_watermark_versions() {
         feed(&mut j, &fill, true);
         assert_eq!(cash(j.ledger(), A1, S1, USDT).total, usdt(cash_after));
         assert_eq!(j.ledger().pos(A1, BTC_S1).qty, btc("0.01"));
+    }
+}
+
+#[test]
+fn led_273_slot_identity_includes_venue_and_account() {
+    use hft_ledger::{OMS_SECTION_SLOTS, OMS_SLOT_ROW_LEN};
+    use hft_strategy_sdk::{SnapshotReader, SnapshotWriter};
+
+    let mut base = booted();
+    boot_a2(&mut base, 0, "100000", "100000");
+    // Same epoch/slot/generation, first across venues, then across accounts on one venue.
+    let rows = [
+        (A1, S1, BTC_S1, G1, "0.01", "0.5", "99399.5"),
+        (A1, P2, BTC_P2, G1, "0.02", "0.7", "49999.3"),
+        (A2, P2, BTC_P2, G7, "0.03", "0.9", "99999.1"),
+    ];
+    for version in 0..=2u16 {
+        let mut j = if version == 0 {
+            cold_from(&base)
+        } else {
+            let mut w = SnapshotWriter::new(64 << 20);
+            base.snapshot(&mut w);
+            w.begin_section(OMS_SECTION_SLOTS, version);
+            for &(a, v, inst, group, qty, _, _) in &rows {
+                let mut row = vec![0u8; if version == 1 { 160 } else { OMS_SLOT_ROW_LEN }];
+                row[0] = 1; // PendingNew, no fill or fee booked yet.
+                row[1] = Buy as u8;
+                row[6] = v.0;
+                row[7] = a.0;
+                row[8..12].copy_from_slice(&1u32.to_le_bytes());
+                row[12..16].copy_from_slice(&5u32.to_le_bytes());
+                row[16..20].copy_from_slice(&inst.0.to_le_bytes());
+                row[20..22].copy_from_slice(&((group.0 >> 24) as u16).to_le_bytes());
+                row[22..24].copy_from_slice(&7u16.to_le_bytes());
+                row[24..28].copy_from_slice(&group.0.to_le_bytes());
+                row[32..40].copy_from_slice(&btc(qty).0.to_le_bytes());
+                row[48..56].copy_from_slice(&px("60000").0.to_le_bytes());
+                w.put_bytes(&row);
+                w.add_rows(1);
+            }
+            w.end_section();
+            assert!(w.status().is_ok());
+            let mut r = SnapshotReader::new(w.as_bytes());
+            JournalLedger::from_snapshot(&mut r, rd_lf(), &cfg_lf(), &caps_lf()).unwrap()
+        };
+        clock(&mut j, T);
+        feed(&mut j, &epoch_start(7), true);
+        if version == 0 {
+            for &(a, v, inst, group, qty, _, _) in &rows {
+                feed(
+                    &mut j,
+                    &decision_new(5, 1, a, v, inst, Buy, group, btc(qty)),
+                    true,
+                );
+            }
+        }
+        for &(a, v, inst, _, qty, _, _) in &rows {
+            let e = order_event(CancelReject, 7, 5, 1, a, v, inst, btc(qty), px("60000"));
+            feed(&mut j, &e, true);
+        }
+        // Reverse the reports, then repeat them: both the quantity and fee watermarks belong
+        // to the full identity and must not suppress or transfer another table's fee.
+        for _ in 0..2 {
+            for &(a, v, inst, _, qty, fee, _) in rows.iter().rev() {
+                let mut e = order_event(Fill, 7, 5, 1, a, v, inst, btc(qty), px("60000"));
+                e.fee = usdt(fee);
+                e.fee_asset = USDT;
+                feed(&mut j, &e, true);
+            }
+        }
+        for &(a, v, inst, _, qty, _, balance) in &rows {
+            assert_eq!(j.ledger().pos(a, inst).qty, btc(qty), "LED-273.{}", version + 1);
+            assert_eq!(
+                cash(j.ledger(), a, v, USDT).total,
+                usdt(balance),
+                "LED-273.{}",
+                version + 1
+            );
+        }
+        assert_eq!(j.stats().unmapped_fills, 0, "LED-273.{}", version + 1);
+        assert_eq!(j.stats().map_evicted, 0, "LED-273.{}", version + 1);
     }
 }

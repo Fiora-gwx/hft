@@ -23,7 +23,7 @@ spec: README.md
 | 仓位与已实现(平均成本法) | LED-010、LED-021–LED-025、LED-030–LED-039、LED-240、LED-241、LED-243 |
 | 余额初始化、校验与基线 | LED-039–LED-046、LED-260–LED-262 |
 | 外部成交(`ExternalFill`) | LED-050–LED-081、LED-188、LED-240、LED-245 |
-| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271、LED-272 |
+| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273 |
 | 资金费 | LED-090–LED-104、LED-136–LED-138、LED-240、LED-245、LED-260 |
 | 资金费时刻归一化 | LED-091、LED-110–LED-116 |
 | 资金费对账校正 | LED-270、LED-268、LED-114、LED-120–LED-139、LED-244、LED-261 |
@@ -2614,6 +2614,25 @@ spec: README.md
 | LED-272.2 | v2,192 B,fee_cum = 0 | 只补记一次 0.5 USDT,持仓不变 |
 | LED-272.3 | v2,192 B,fee_cum = filled | 两次回报均不再扣费 |
 | LED-272.4 | v3 | VersionUnsupported |
+
+### LED-273 冷读者的同号槽按账户与 venue 隔离
+
+- 规则:[冷消费者(`JournalLedger`)](README.md#冷消费者journalledger)
+- 级别:table
+- 里程碑:M2
+- 前置:`boot_a1(0)` 与 `boot_a2(0, 100000 USDC, 100000 USDT)`;三个订单分别为 `(A1, S1, BTC_S1, G1)`、`(A1, P2, BTC_P2, G1)`、`(A2, P2, BTC_P2, G7)`,均为 Buy、epoch 7、slot 5、gen 1
+- 步骤:
+  1. 按行建立三个槽的映射
+  2. 依次输入 CancelReject,累计成交量分别为 0.01、0.02、0.03 BTC,均价均为 60000
+  3. 逆序输入对应 Fill,费用分别为 0.5、0.7、0.9 USDT;再重复一次
+- 期望:三个仓位分别为 0.01、0.02、0.03 BTC;对应 USDT 余额分别为 99399.5、49999.3、99999.1;累计量和费用独立去重,`unmapped_fills = map_evicted = 0`
+- 实现:`crates/hft-ledger/tests/journal_ledger.rs::led_273_slot_identity_includes_venue_and_account`
+
+| 行 | 映射来源 |
+|---|---|
+| LED-273.1 | 三条成功的 New OrderDecision |
+| LED-273.2 | OMS 节 2 v1 快照,三个未成交槽 |
+| LED-273.3 | OMS 节 2 v2 快照,三个未成交槽 |
 
 ## 验收
 

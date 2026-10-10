@@ -149,7 +149,7 @@ kind 编号**永不复用**;废弃的 kind 在 `hft-event` 中保留为 `#[depre
 // cum_filled 是毛量且必须是累计量:给不出累计量的 venue 由 gw 按 exec id 合成(方法写在各 venue-* README)
 // 净量 = 毛量按 refdata VenueCaps.fee_asset_rule 与本条 fee/fee_asset 扣减,由 hft-ledger 计算(FillDelta.net_qty)
 // OrderEventKind: Ack, Reject, PartialFill, Fill, CancelAck, CancelReject, AmendAck, AmendReject, Expired, QueryResult, OutcomeUnknown, FeeOnly(编码见 hft-event)
-// OMS 按 (epoch, slot, gen) 匹配槽;epoch 不是当前或上一 epoch 的回报按外来单处理(本账户的外来成交另以 ExternalFill 报告)
+// OMS 在 (venue, account) 的表内按 (epoch, slot, gen) 匹配槽;epoch 不是当前或上一 epoch 的回报按外来单处理(本账户的外来成交另以 ExternalFill 报告)
 
 #[repr(C)] pub struct Timer { pub timer_id: u32, pub owner: u16, pub _pad: u16, pub group: GroupId /* GROUP_NONE(0)= 不适用 */, pub _pad2: u32, pub deadline_tsc: u64 } // 24 B;owner/timer_id 编码(Sys、Keyframe、Oms、Risk、Exec、Strategy)见 hft-event 定时器编码
 #[repr(C)] pub struct ConnState {        // 24 B(schema_version 2)
