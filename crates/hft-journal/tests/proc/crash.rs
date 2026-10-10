@@ -204,12 +204,23 @@ impl Rng {
     }
 }
 
+// Six logical records, each at most three physical records. Leave room for the roll tail;
+// checking the unpublished offset matters because `needs_roll` uses the committed cursor.
+const RANDOM_SEGMENT_BYTES: u64 = 2 << 20;
+const RANDOM_EVENT_BOUND: u64 = 6 * 3 * 65_536;
+const RANDOM_ROLL_HEADROOM: u64 = 8_192;
+
 fn random_writer(seed: u64) -> ! {
     let mut cfg = child_cfg();
-    cfg.segment_bytes = 256 << 10;
+    cfg.segment_bytes = RANDOM_SEGMENT_BYTES;
     let mut h = H::open0(cfg);
     let mut rng = Rng(seed | 1);
     loop {
+        if h.w().offset() + RANDOM_EVENT_BOUND + RANDOM_ROLL_HEADROOM > RANDOM_SEGMENT_BYTES {
+            h.w().publish();
+            say(&format!("P {}", h.w().next_seq().0 - 1));
+            h.roll(RollReason::Size);
+        }
         let n = 1 + rng.below(6);
         let first = h.w().next_seq().0;
         for _ in 0..n {
@@ -261,60 +272,76 @@ fn jnl_072_random_kill() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(50);
     for seed in 1..=seeds {
-        let (hot, cold) = dirs();
-        let mut ev = envs(&hot, &cold);
-        ev.push(("JNL_SEED", seed.to_string()));
-        let mut kid = spawn("jnl_072_random_kill", "writer", &ev);
-        let mut ended: Vec<(u64, u64)> = Vec::new();
-        let mut published = 0u64;
-        let stop_after = 50 + (seed * 7919) % 2000;
-        while let Some(l) = kid.try_hear() {
-            let f: Vec<u64> = l[2..].split(' ').map(|x| x.parse().unwrap()).collect();
-            if l.starts_with('R') {
-                ended.push((f[0], f[1]));
-            } else {
-                published = f[0];
-            }
-            if ended.len() as u64 >= stop_after {
-                break;
-            }
-        }
-        kid.kill();
-        // The preparer copies the configuration in `bare`: set the segment size before.
-        let mut cfg = c0(&hot, &cold);
-        cfg.segment_bytes = 256 << 10;
-        let mut h = H::bare(cfg, false);
-        let rep = h.open().unwrap();
-        h.roll(rep.boot_reason);
-        let mut r = h.reader(StartAt::Oldest);
-        // Event ends seen by the reader (records with EVENT_END that are not roll/boot records).
-        let mut ends = Vec::new();
-        loop {
-            match r.poll() {
-                Next::Record(v) => {
-                    if v.hdr.flags & EVENT_END != 0 && v.hdr.kind != 0x0509 {
-                        ends.push(v.hdr.seq);
-                    }
-                }
-                Next::Event(e) => {
-                    if e.flags.0 & EVENT_END != 0 {
-                        ends.push(e.seq + u64::from(e.parts) - 1);
-                    }
-                }
-                Next::Pending => break,
-                o => panic!("seed {seed}: {o:?}"),
-            }
-        }
-        // Meta outside events also carries EVENT_END: keep only ends of recorded events.
-        let lasts: Vec<u64> = ended.iter().map(|e| e.1).collect();
-        let ends: Vec<u64> = ends.into_iter().filter(|s| lasts.contains(s)).collect();
-        assert!(ends.len() <= lasts.len(), "seed {seed}");
-        assert_eq!(
-            ends[..],
-            lasts[..ends.len()],
-            "seed {seed}: prefix of the ended events"
-        );
-        let p_events = lasts.iter().filter(|l| **l <= published).count();
-        assert!(ends.len() >= p_events, "seed {seed}: all published events kept");
+        // Test-owned tmpfs directories are released with their thread. Bound their lifetime to
+        // one seed, including on panic, instead of retaining all 50/1,000 journals until exit.
+        std::thread::spawn(move || random_kill_seed(seed)).join().unwrap();
     }
+}
+
+fn random_kill_seed(seed: u64) {
+    let (hot, cold) = dirs();
+    let mut ev = envs(&hot, &cold);
+    ev.push(("JNL_SEED", seed.to_string()));
+    let mut kid = spawn("jnl_072_random_kill", "writer", &ev);
+    let mut ended: Vec<(u64, u64)> = Vec::new();
+    let mut published = 0u64;
+    let stop_after = 50 + (seed * 7919) % 2000;
+    while let Some(l) = kid.try_hear() {
+        let f: Vec<u64> = l[2..].split(' ').map(|x| x.parse().unwrap()).collect();
+        if l.starts_with('R') {
+            ended.push((f[0], f[1]));
+        } else {
+            published = f[0];
+        }
+        if ended.len() as u64 >= stop_after {
+            break;
+        }
+    }
+    assert_eq!(
+        ended.len() as u64,
+        stop_after,
+        "seed {seed}: writer exited before kill point"
+    );
+    kid.signal(libc::SIGKILL);
+    assert_eq!(
+        kid.wait(),
+        Err(libc::SIGKILL),
+        "seed {seed}: writer was not killed"
+    );
+    // The preparer copies the configuration in `bare`: set the segment size before.
+    let mut cfg = c0(&hot, &cold);
+    cfg.segment_bytes = RANDOM_SEGMENT_BYTES;
+    let mut h = H::bare(cfg, false);
+    let rep = h.open().unwrap();
+    h.roll(rep.boot_reason);
+    let mut r = h.reader(StartAt::Oldest);
+    // Event ends seen by the reader (records with EVENT_END that are not roll/boot records).
+    let mut ends = Vec::new();
+    loop {
+        match r.poll() {
+            Next::Record(v) => {
+                if v.hdr.flags & EVENT_END != 0 && v.hdr.kind != 0x0509 {
+                    ends.push(v.hdr.seq);
+                }
+            }
+            Next::Event(e) => {
+                if e.flags.0 & EVENT_END != 0 {
+                    ends.push(e.seq + u64::from(e.parts) - 1);
+                }
+            }
+            Next::Pending => break,
+            o => panic!("seed {seed}: {o:?}"),
+        }
+    }
+    // Meta outside events also carries EVENT_END: keep only ends of recorded events.
+    let lasts: Vec<u64> = ended.iter().map(|e| e.1).collect();
+    let ends: Vec<u64> = ends.into_iter().filter(|s| lasts.contains(s)).collect();
+    assert!(ends.len() <= lasts.len(), "seed {seed}");
+    assert_eq!(
+        ends[..],
+        lasts[..ends.len()],
+        "seed {seed}: prefix of the ended events"
+    );
+    let p_events = lasts.iter().filter(|l| **l <= published).count();
+    assert!(ends.len() >= p_events, "seed {seed}: all published events kept");
 }

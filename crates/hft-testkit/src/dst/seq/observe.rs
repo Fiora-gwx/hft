@@ -295,6 +295,8 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
                                 slot: ix,
                                 r#gen: tb.r#gen,
                                 epoch: tb.epoch,
+                                inst: tb.inst,
+                                group: tb.group,
                                 filled: i128::from(tb.filled.0),
                             });
                         }

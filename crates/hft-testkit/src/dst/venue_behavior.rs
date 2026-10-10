@@ -589,7 +589,6 @@ enum NextOrder {
     UnknownCode,
     Reject,
     FillBeforeAck,
-    LateFee,
     /// The next fill is also reported without a client id (`SlotId::UNRESOLVED`).
     NoClientId,
 }
@@ -607,6 +606,7 @@ pub struct MockVenue<M: Matcher> {
     next_ping: u64,
     windows: Vec<(u64, u64, Fault)>,
     next_order: Vec<NextOrder>,
+    late_fees: VecDeque<u32>,
     md_down_until: u64,
     order_down_until: u64,
     quiet: BTreeMap<u32, u64>,
@@ -631,6 +631,7 @@ impl<M: Matcher> MockVenue<M> {
             dead_man: BTreeMap::new(),
             windows: Vec::new(),
             next_order: Vec::new(),
+            late_fees: VecDeque::new(),
             md_down_until: 0,
             order_down_until: 0,
             quiet: BTreeMap::new(),
@@ -880,10 +881,28 @@ impl<M: Matcher> MockVenue<M> {
                     due += (due - now) * 99;
                 }
             }
+            // The matcher has already charged the fee once. Split that same fee out of the
+            // fill without changing its truth. Ack/reject/zero-fee reports do not consume it.
+            // ReportDup duplicates the fee-free fill; the separately delayed fee is emitted
+            // once (FeeOnly is a delta, without a duplicate-report idempotency key).
+            let mut fee_due = due;
+            if let RepMsg::OrderEvent(e) = &mut rep
+                && matches!(e.what, OrderEventKind::Fill | OrderEventKind::PartialFill)
+                && e.fee.0 != 0
+                && let Some(delay_ms) = self.late_fees.pop_front()
+            {
+                let mut fee = *e;
+                fee.what = OrderEventKind::FeeOnly;
+                fee.qty = Qty(0);
+                fee_due = due.saturating_add(u64::from(delay_ms) * 1_000_000);
+                out.push((fee_due, InputRec::of(&fee, self.src())));
+                e.fee.0 = 0;
+                e.fee_asset = AssetId(0);
+            }
             let input = rep_input(&rep, self.src());
             if let Some(a) = rep_account(&rep) {
                 let e = self.last_due.entry(a.0).or_insert(0);
-                *e = (*e).max(due);
+                *e = (*e).max(fee_due);
             }
             if !self.clean
                 && let RepMsg::OrderEvent(e) = &rep
@@ -1007,7 +1026,7 @@ impl<M: Matcher> MockVenue<M> {
             Fault::UnknownCode { .. } => self.next_order.push(NextOrder::UnknownCode),
             Fault::SecondLegReject { .. } => self.next_order.push(NextOrder::Reject),
             Fault::FillBeforeAck { .. } => self.next_order.push(NextOrder::FillBeforeAck),
-            Fault::LateFeeOnly { .. } => self.next_order.push(NextOrder::LateFee),
+            Fault::LateFeeOnly { delay_ms, .. } => self.late_fees.push_back(delay_ms),
             Fault::NoClientIdFill { .. } => self.next_order.push(NextOrder::NoClientId),
             Fault::SelfLiquidation { account, inst } | Fault::ManualFill { account, inst } => {
                 let prefix = if matches!(f, Fault::SelfLiquidation { .. }) {

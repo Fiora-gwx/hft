@@ -10,6 +10,7 @@ mod deps;
 mod dst_report;
 mod dst_world;
 mod faults;
+mod fees;
 mod r#gen;
 mod hash;
 mod invariants_map;

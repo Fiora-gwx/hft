@@ -1034,9 +1034,9 @@ spec: README.md
 - 规则:[实现说明](README.md#实现说明)、[journal-format 提交游标](../../docs/subsystems/journal-format.md#提交游标)、[journal-format 变长与多段记录](../../docs/subsystems/journal-format.md#变长与多段记录)
 - 级别:proc
 - 里程碑:M1
-- 前置:Linux tmpfs;C0 但 `segment_bytes = 256 KiB`(使滚动频繁);子进程按种子生成事件流(每事件 1–6 条记录,`TIn`/`TOut`/`TMeta`/`TMulti` 1–3 段,10% 事件后 `publish`,安全阀到期即滚动),每完成一个 `end_event` 就把该事件的 (首 seq, 末 seq) 写进父进程的管道;父进程在随机时刻 `SIGKILL`
+- 前置:Linux tmpfs;C0 但 `segment_bytes = 2 MiB`;子进程按种子生成事件流(每事件 1–6 条记录,`TIn`/`TOut`/`TMeta`/`TMulti` 1–3 段,10% 事件后 `publish`,安全阀到期即滚动)。每个事件开始前按未发布写游标预留 `6 × 3 × 65536 B` 的整事件上界与 8192 B 滚动余量,不足则先发布、滚动;每完成一个 `end_event` 就把该事件的 (首 seq, 末 seq) 写进父进程的管道;父进程在种子决定的杀点 `SIGKILL`
 - 步骤:
-  1. 每个种子:运行、杀死、`open`、`roll`、从 `Oldest` 读完
+  1. 每个种子:运行到 `50 + (seed × 7919) % 2000` 个完整事件、杀死、确认退出信号恰为 `SIGKILL`、`open`、`roll`、从 `Oldest` 读完;未到杀点就 EOF 或普通退出均失败;每个种子的目录在该种子结束时释放(`HFT_TEST_KEEP_TMP=1` 除外)
 - 期望:记被杀前最后一次 `publish` 覆盖的事件为 P、已 `end_event` 的事件为 R(P ⊆ R,按序),读到的事件序列是 R 的一个前缀且包含 P 的全部;没有半个事件、没有半条记录;seq 在每段内逐条 +1、跨段 `first_seq = prev_last_seq + 1`;多段组要么完整要么不在;恢复后新段 `Begin.seq_mark` = 上一段 `End` 的 seq
 - 实现:`crates/hft-journal/tests/proc/crash.rs::jnl_072_random_kill`
 - 备注:PR 运行 50 个种子;每夜 1 000 个(`## 验收`)

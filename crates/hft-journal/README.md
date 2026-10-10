@@ -391,6 +391,8 @@ pub fn held_by_instance(hot_dirs: &[&Path], instance: InstanceName) -> Result<hf
 
 用例与验收见 [TESTS.md](TESTS.md)。
 
+进程崩溃用例的随机写者在事件开始前按未发布写游标检查整事件容量,父进程必须确认到达预定杀点且退出信号为 `SIGKILL`;提前 EOF、panic 或普通退出均失败。段容量、种子数与恢复断言归 [JNL-072](TESTS.md#jnl-072-任意时刻被杀后保留的恰是全部完整事件)。
+
 ## 依赖
 
 - 内部:[hft-types](../hft-types/README.md)、[hft-event](../hft-event/README.md)(记录编解码、多段、kind 注册表)、[hft-rt](../hft-rt/README.md)(`HugeRegion`、`Spsc`、`CalibPair`)。

@@ -86,6 +86,8 @@ pub struct TombRow {
     pub slot: u32,
     pub r#gen: u32,
     pub epoch: u16,
+    pub inst: InstId,
+    pub group: GroupId,
     pub filled: i128,
 }
 

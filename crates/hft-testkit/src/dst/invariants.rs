@@ -506,6 +506,9 @@ pub fn inv_2_every_report_matched_or_alarmed() -> Scenario {
 fn check_2(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
     let Some(inp) = v.input() else { return Ok(()) };
     if let Some(e) = inp.try_read::<OrderEvent>() {
+        if e.what == OrderEventKind::FeeOnly {
+            return check_fee_only(v, &e);
+        }
         let has_fill =
             matches!(e.what, OrderEventKind::PartialFill | OrderEventKind::Fill) || e.cum_filled.0 > 0;
         if e.slot == SlotId::UNRESOLVED {
@@ -539,7 +542,11 @@ fn check_2(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
             };
         }
         let tomb = v.before.tombs.iter().find(|t| {
-            t.venue == e.venue && t.account == e.account && t.slot == e.slot.0 && t.r#gen == e.r#gen
+            t.venue == e.venue
+                && t.account == e.account
+                && t.slot == e.slot.0
+                && t.r#gen == e.r#gen
+                && t.epoch == e.epoch
         });
         if let Some(t) = tomb {
             let late = i128::from(e.cum_filled.0) > t.filled;
@@ -595,6 +602,70 @@ fn check_2(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
             return Ok(());
         }
         return Err("ExternalFill neither booked, deduplicated nor offset".into());
+    }
+    Ok(())
+}
+
+/// FeeOnly does not move an order's state or cumulative fill. Observe its actual ledger effect
+/// independently of the Input: accepting the report or incrementing dup is not evidence of a
+/// booked fee. The OMS component tests additionally check the exact FeeOut count/attribution.
+fn check_fee_only(v: &StepView<'_>, e: &OrderEvent) -> Result<(), String> {
+    let cur = v.before.slots.iter().find(|s| {
+        s.venue == e.venue
+            && s.account == e.account
+            && s.slot == e.slot.0
+            && s.r#gen == e.r#gen
+            && s.epoch == e.epoch
+    });
+    let tomb = v.before.tombs.iter().find(|s| {
+        s.venue == e.venue
+            && s.account == e.account
+            && s.slot == e.slot.0
+            && s.r#gen == e.r#gen
+            && s.epoch == e.epoch
+    });
+    let inst = cur
+        .map(|s| s.inst)
+        .or_else(|| tomb.map(|s| s.inst))
+        .unwrap_or(e.inst);
+    if cur.is_none() && tomb.is_none() && !v.has_note("OmsFeeUnattributed") {
+        return Err("unmatched FeeOnly without Note{OmsFeeUnattributed}".into());
+    }
+    if let Some(s) = cur
+        && let Some(after) = v.after.slot(e.venue, e.account, e.slot.0)
+        && after.r#gen == s.r#gen
+        && after.epoch == s.epoch
+        && (after.state != s.state || after.filled != s.filled)
+    {
+        return Err("FeeOnly changed order state or cumulative fill".into());
+    }
+    let spec = v.before.inst(inst).ok_or("FeeOnly instrument is not observed")?;
+    let fee = if e.fee_asset.0 == 0 {
+        0
+    } else {
+        i128::from(e.fee.0)
+    };
+    let base = !spec.perp && e.fee_asset == spec.asset;
+    if e.fee_asset.0 != 0 {
+        let rows = |o: &Obs| {
+            let rows = if base { &o.inventory } else { &o.balances };
+            rows.iter()
+                .filter(|r| r.account == e.account && r.venue == e.venue && r.asset == e.fee_asset)
+                .map(|r| r.qty)
+                .sum::<i128>()
+        };
+        let delta = rows(v.after) - rows(v.before);
+        if delta != -fee {
+            return Err(format!(
+                "FeeOnly asset {} delta {delta}, expected {}",
+                e.fee_asset.0, -fee
+            ));
+        }
+    }
+    let delta = v.after.pos(e.account, e.venue, inst) - v.before.pos(e.account, e.venue, inst);
+    let want = if base { -fee } else { 0 };
+    if delta != want {
+        return Err(format!("FeeOnly position delta {delta}, expected {want}"));
     }
     Ok(())
 }

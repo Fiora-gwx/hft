@@ -51,6 +51,123 @@ fn rejects(ins: &[(u64, InputRec)]) -> Vec<u32> {
         .collect()
 }
 
+#[test]
+fn tk_103_late_fee_delivery() {
+    use hft_testkit::dst::world::{BTC, USDT};
+    for (base, dup, clean) in [
+        (false, false, false),
+        (true, false, false),
+        (false, true, false),
+        (false, false, true),
+    ] {
+        let mut w = WorldSpec::w1();
+        w.venues.iter_mut().find(|v| v.id == VS).unwrap().fee_in_base = base;
+        let mut v: MockVenue<ToyMatcher> = MockVenue::new(MockVenueCfg::w1(VS), &w, 1);
+        v.clean = clean;
+        let before = v.m.truth(ACCT_A);
+        v.apply_fault(
+            &Fault::LateFeeOnly {
+                venue: VS,
+                delay_ms: 6_000,
+            },
+            0,
+        );
+        if dup {
+            v.apply_fault(
+                &Fault::ReportDup {
+                    venue: VS,
+                    dur_ms: 10_000,
+                },
+                0,
+            );
+        }
+        // The resting order's Ack must not consume the queued fee fault.
+        let ack = v.on_frame(&place(1, 1_000, 500_000_000), 0);
+        assert!(ack.iter().all(|(_, i)| {
+            i.read_try::<OrderEvent>()
+                .is_none_or(|e| e.what != OrderEventKind::FeeOnly)
+        }));
+        let out = v.on_frame(&place(2, 100_000, 600_000_000), 10_000_000);
+        let fills: Vec<_> = out
+            .iter()
+            .filter_map(|(t, i)| {
+                i.read_try::<OrderEvent>()
+                    .filter(|e| e.what == OrderEventKind::Fill)
+                    .map(|e| (*t, e))
+            })
+            .collect();
+        let fees: Vec<_> = out
+            .iter()
+            .filter_map(|(t, i)| {
+                i.read_try::<OrderEvent>()
+                    .filter(|e| e.what == OrderEventKind::FeeOnly)
+                    .map(|e| (*t, e))
+            })
+            .collect();
+        assert_eq!(fills.len(), if dup { 2 } else { 1 });
+        if clean {
+            assert!(fees.is_empty());
+            assert!(fills[0].1.fee.0 > 0);
+            continue;
+        }
+        assert_eq!(fees.len(), 1);
+        let (due, fee) = fees[0];
+        let first = fills.iter().map(|(t, _)| *t).min().unwrap();
+        assert_eq!(due - first, 6_000_000_000);
+        assert!(fills.iter().all(|(_, e)| e.fee.0 == 0 && e.fee_asset.0 == 0));
+        assert_eq!(
+            (fee.slot, fee.r#gen, fee.epoch, fee.cum_filled),
+            (
+                fills[0].1.slot,
+                fills[0].1.r#gen,
+                fills[0].1.epoch,
+                fills[0].1.cum_filled
+            )
+        );
+        assert_eq!(fee.qty, Qty(0));
+        assert!(fee.fee.0 > 0);
+        assert_eq!(fee.fee_asset, if base { BTC } else { USDT });
+        assert!(
+            v.truth(due - 1)
+                .iter()
+                .find(|t| t.account == ACCT_A)
+                .unwrap()
+                .undelivered
+        );
+        assert!(
+            !v.truth(due + 1)
+                .iter()
+                .find(|t| t.account == ACCT_A)
+                .unwrap()
+                .undelivered
+        );
+        let truth = v.m.truth(ACCT_A);
+        let amount =
+            |xs: &[(hft_types::AssetId, i128)], a| xs.iter().find(|(x, _)| *x == a).map_or(0, |(_, q)| *q);
+        if base {
+            assert_eq!(
+                amount(&truth.inventory, BTC) - amount(&before.inventory, BTC),
+                100_000 - i128::from(fee.fee.0)
+            );
+        } else {
+            assert_eq!(
+                amount(&before.balances, USDT) - amount(&truth.balances, USDT),
+                100_000 * 600_000_000i128 / 1_000_000 + i128::from(fee.fee.0)
+            );
+        }
+        // The one-shot fault is consumed; the next fill carries its fee normally.
+        let next = v.on_frame(&place(3, 100_000, 600_000_000), due + 1);
+        assert!(!next.iter().any(|(_, i)| {
+            i.read_try::<OrderEvent>()
+                .is_some_and(|e| e.what == OrderEventKind::FeeOnly)
+        }));
+        assert!(next.iter().any(|(_, i)| {
+            i.read_try::<OrderEvent>()
+                .is_some_and(|e| e.what == OrderEventKind::Fill && e.fee.0 > 0)
+        }));
+    }
+}
+
 trait ReadTry {
     fn read_try<B: hft_event::Body>(&self) -> Option<B>;
 }

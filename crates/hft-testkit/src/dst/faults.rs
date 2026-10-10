@@ -144,6 +144,8 @@ pub enum Fault {
     },
     LateFeeOnly {
         venue: VenueId,
+        /// Delay after the perturbed fill; one queued fault splits one non-zero fee.
+        delay_ms: u32,
     },
     StaleGenFill {
         venue: VenueId,
@@ -601,7 +603,10 @@ fn draw<R: RngExt>(c: FaultCategory, rng: &mut R, w: &WorldSpec, steps: u64, at:
                 venue: v,
                 dur_ms: ms(rng, 500, 10_000),
             },
-            6 => LateFeeOnly { venue: v },
+            6 => LateFeeOnly {
+                venue: v,
+                delay_ms: 50,
+            },
             7 => StaleGenFill { venue: v },
             _ => LateFillAfterRecycle { venue: v },
         },

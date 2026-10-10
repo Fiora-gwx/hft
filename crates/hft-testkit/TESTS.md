@@ -20,7 +20,7 @@ spec: README.md
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
 | 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TOOL-024、TOOL-027–TOOL-029 |
-| 6. DST 框架 | TK-043–TK-070、TK-100–TK-102 |
+| 6. DST 框架 | TK-043–TK-070、TK-100–TK-105 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
 | 8. hft-dst 运行器 | TK-075–TK-088 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
@@ -1371,6 +1371,38 @@ spec: README.md
   1. 每步检查全部不变量,保留最终 `Obs`
 - 期望:10000 步完成且没有不变量违反;`Obs.tombs` 包含至少一个无对应占用槽的墓碑,其代数等于 journal 中该槽最近一次成功 New 的代数
 - 实现:`crates/hft-testkit/tests/seq_sut.rs::tk_102_observes_recycled_slot_tombs`
+
+### TK-103 晚到手续费故障实际交付且只扣费一次
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:unit
+- 里程碑:M2
+- 前置:W1、`MockVenue<ToyMatcher>`;逐行测试报价币费用、基础币费用、与 ReportDup 组合、clean 模式;故障延迟 6000 ms
+- 步骤:排入一次 `LateFeeOnly`;先发只会 Ack 的挂单,再发两次可成交订单
+- 期望:Ack 不消费故障;首次成交费用为零,恰好一条 FeeOnly 在原成交交付后 6000 ms 到达且身份、累计量与费用资产正确;重复成交仍无费用;真值只扣一次费且未交付标记覆盖 FeeOnly;第二次成交正常携带费用;clean 模式不拆费
+- 实现:`crates/hft-testkit/tests/actors.rs::tk_103_late_fee_delivery`
+
+### TK-104 FeeOnly 检查器拒绝漏费、重复费和错误匹配
+
+- 规则:[INV-2](../../docs/tests/invariants.md#inv-2-每条订单回报都匹配一个槽或墓碑否则产生告警并进入对账从不被静默丢弃)
+- 级别:unit
+- 里程碑:M2
+- 前置:当前槽、墓碑、旧代数、墓碑 epoch 不同、UNRESOLVED 五条路径 × 基础币/报价币 × 正费用/返佣/零费用
+- 步骤:构造独立的 ledger 前后观察行,运行 INV-2;再分别删去入账效果、重复扣费、删去未知订单告警、改动当前槽累计量
+- 期望:正确入账全部通过;非零费用漏记或重复扣除均失败;未知归属无告警失败;FeeOnly 改动累计量失败;epoch 不同不算命中墓碑
+- 实现:`crates/hft-testkit/tests/fees.rs::tk_104_fee_only_checker`
+
+### TK-105 真实引擎消费晚到手续费
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)、[INV-2](../../docs/tests/invariants.md#inv-2-每条订单回报都匹配一个槽或墓碑否则产生告警并进入对账从不被静默丢弃)
+- 级别:dst
+- 里程碑:M2
+- 前置:`SeqSut<TestStrategies>` 与真实 SimExchange;W1、种子 1;基础币/报价币费用 × 50/6000 ms 延迟四行;每行脚本在时间 0 注入一次故障
+- 故障:`LateFeeOnly{venue = VS, delay_ms}`;四行的延迟与费用币种如前置
+- 种子:固定种子 1
+- 步骤:每行运行 10000 步,每步检查全部不变量
+- 断言:四行都完成全部步数;每行 journal 都有且仅有一条非零 FeeOnly,资产等于该行配置的 BTC 或 USDT;没有只排故障却不生成回报的空过
+- 实现:`crates/hft-testkit/tests/seq_sut.rs::tk_105_real_engine_late_fee`
 
 ## 验收
 

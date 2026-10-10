@@ -552,6 +552,10 @@ impl ToyEngine {
     }
 
     fn on_order_event(&mut self, out: &mut StepOut, seq: u64, tsc: u64, e: OrderEvent) {
+        if e.what == OrderEventKind::FeeOnly {
+            self.on_fee_only(out, seq, e);
+            return;
+        }
         let now = self.now_ns as i64;
         let ix = self.slots.iter().position(|s| {
             s.venue == e.venue && s.account == e.account && s.ix == e.slot.0 && s.r#gen == e.r#gen
@@ -691,6 +695,46 @@ impl ToyEngine {
         if !self.slots[ix].state.is_terminal() {
             self.slots[ix].state = st;
             self.slots[ix].terminal_ens = now.max(1);
+        }
+    }
+
+    fn on_fee_only(&mut self, out: &mut StepOut, seq: u64, mut e: OrderEvent) {
+        let cur = self.slots.iter().find(|s| {
+            s.venue == e.venue
+                && s.account == e.account
+                && s.ix == e.slot.0
+                && s.r#gen == e.r#gen
+                && e.epoch == 0
+        });
+        let tomb = self.tombs.iter().find(|s| {
+            s.venue == e.venue
+                && s.account == e.account
+                && s.slot == e.slot.0
+                && s.r#gen == e.r#gen
+                && s.epoch == e.epoch
+        });
+        let owner = cur
+            .map(|s| (s.inst, s.group))
+            .or_else(|| tomb.map(|s| (s.inst, s.group)));
+        let group = if let Some((inst, group)) = owner {
+            e.inst = inst;
+            group
+        } else {
+            note(out, seq, "OmsFeeUnattributed", e.account, GroupId(0));
+            GroupId(0)
+        };
+        // A zero fill applies only its fee and produces zero Fill evidence.
+        self.book_fill(out, &e, 0);
+        if group.0 != 0
+            && !self.has("ignore-fee")
+            && e.fee_asset.0 != 0
+            && self
+                .inst(e.inst)
+                .is_some_and(|i| !i.perp && i.base == e.fee_asset)
+        {
+            let leg = u8::from(self.group(e.account, group).is_some_and(|g| g.second == e.inst));
+            let delta = -i128::from(e.fee.0);
+            *self.leg_net.entry((e.account.0, group.0, leg)).or_default() += delta;
         }
     }
 
@@ -836,6 +880,8 @@ impl ToyEngine {
                                 slot: s.ix,
                                 r#gen: s.r#gen,
                                 epoch: 0,
+                                inst: s.inst,
+                                group: s.group,
                                 filled: i128::from(s.filled),
                             });
                         }

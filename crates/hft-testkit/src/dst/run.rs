@@ -381,7 +381,7 @@ impl<E: Sut> Loop<'_, E> {
             | FillBeforeAck { venue }
             | CancelRejectFilled { venue }
             | PartialFills { venue, .. }
-            | LateFeeOnly { venue }
+            | LateFeeOnly { venue, .. }
             | StaleGenFill { venue }
             | LateFillAfterRecycle { venue }
             | RateLimit { venue, .. }
