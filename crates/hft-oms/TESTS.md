@@ -32,7 +32,7 @@ spec: README.md
 | 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460 |
 | 成交净量(B4) | OMS-067, OMS-120–OMS-124, OMS-184, OMS-404 |
 | Unknown 收敛流程 | OMS-032, OMS-065, OMS-066, OMS-068, OMS-070, OMS-073, OMS-089, OMS-130–OMS-154, OMS-400, OMS-402, OMS-420 |
-| 墓碑与迟到成交(C1) | OMS-013, OMS-148, OMS-160–OMS-164, OMS-287, OMS-322 |
+| 墓碑与迟到成交(C1) | OMS-013, OMS-148, OMS-160–OMS-164, OMS-287, OMS-322, OMS-462 |
 | StaleOrderSweep(`Timer{Oms, Sweep}`,1 s) | OMS-132, OMS-161, OMS-164, OMS-170–OMS-172, OMS-207, OMS-271 |
 | LegLink 与 HedgePlan | OMS-457, OMS-014, OMS-043, OMS-153, OMS-180, OMS-181, OMS-185, OMS-191, OMS-194, OMS-201, OMS-207, OMS-363 |
 | OnFill | OMS-458, OMS-044, OMS-075–OMS-077, OMS-104, OMS-151, OMS-181–OMS-207, OMS-229, OMS-382–OMS-385, OMS-387, OMS-400 |
@@ -4146,6 +4146,25 @@ spec: README.md
   - 步骤 1 成功;该槽 `filled = 0.004`、`SlotExt.fee_cum = 0.004`,其余 `SlotExt` 字段与写出时相同
   - 步骤 2 成功;`fee_cum = 0.004`
 - 实现:`crates/hft-oms/tests/snapshot.rs::oms_461_restore_slot_rows_v1`
+
+### OMS-462 墓碑上的重复回报计数,FeeOnly 仍独立入账
+
+- 规则:[墓碑与迟到成交(C1)](README.md#墓碑与迟到成交c1)
+- 级别:table
+- 里程碑:M2
+- 前置:P0;a1@VS 一张 X 的 Buy 单已成交 0.01,均价 60000;超过隔离期后 sweep 回收为 Free,墓碑仍保留
+- 步骤:投递表中回报,均带 fee 1000、fee_asset USDT
+- 期望:槽保持 Free,墓碑 filled 保持 0.01;无 FillOut、ForeignFill、下单或 Note;除 FeeOnly 外无 FeeOut
+- 实现:`crates/hft-oms/tests/tomb.rs::oms_462_tomb_duplicate_count_and_fee_only`
+
+| 行 | 回报 | cum_filled | 额外期望 |
+|---|---|---|---|
+| OMS-462.1 | Ack | 0 | dup +1 |
+| OMS-462.2 | CancelAck | 0 | dup +1 |
+| OMS-462.3 | QueryResult | 0.01 | dup +1 |
+| OMS-462.4 | Fill | 0.01 | dup +1 |
+| OMS-462.5 | PartialFill | 0.004 | dup +1 |
+| OMS-462.6 | FeeOnly | 0.01 | dup 不变,一条归属 a1@VS/X 的 FeeOut,fee = 1000 |
 
 ## 验收
 

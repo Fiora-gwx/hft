@@ -552,7 +552,20 @@ fn check_2(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
             } else if v.after.oms_dup > v.before.oms_dup {
                 Ok(())
             } else {
-                Err("tombstone report not counted as dup".into())
+                Err(format!(
+                    "tombstone {:?} report on venue {} account {} slot {} gen {} epoch {} \
+                     (cum {} <= {}) not counted as dup ({} -> {})",
+                    e.what,
+                    e.venue.0,
+                    e.account.0,
+                    e.slot.0,
+                    e.r#gen,
+                    e.epoch,
+                    e.cum_filled.0,
+                    t.filled,
+                    v.before.oms_dup,
+                    v.after.oms_dup
+                ))
             };
         }
         // StaleGen.

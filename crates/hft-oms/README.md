@@ -550,6 +550,7 @@ LegTracker、对冲基数与 `FillOut.net_qty` 一律用**净量**(仓位与库�
 - 槽在 sweep 回收为 `Free` 时,把这一代的摘要写进 `tombs[slot × T + gen % T]`(`T = tombstone_gens`),覆盖最老的一代。墓碑超过 `tombstone_keep_ms`(以 `freed_tsc` 计)由 sweep 清零。
 - 回报的 `(epoch, slot, gen)` 与当前槽不符、但与某个墓碑相符:`d = ev.cum_filled − tomb.filled > 0` → **照常入账**:`FillOut{flags: LATE}` 交 ledger、按墓碑的 group/腿更新 LegTracker、`tomb.filled`/`net_filled` 前移;`Note{OmsLateFill}`(**P0**)。不改当前槽、不重开已结束的链接、不产生任何订单;由此出现的多出一腿由 hft-exec 的补腿规则(抑制条件照常)或 `HedgeFix` 命令处理。`FeeOnly` 同样可按墓碑归属。
 - 墓碑也没有(超过 T 代或已过期)→ 按"回报匹配"第 2 条的 `StaleGen` 处理(经 `ForeignFill` 入账、P0、请求对账)。
+- 匹配墓碑但累计成交不增(`d ≤ 0`)的非 `FeeOnly` 回报计入 `OmsStats.dup`,不产生入账或下单输出。`FeeOnly` 按墓碑归属输出 `FeeOut`,不计为重复回报(OMS-462)。
 
 ### StaleOrderSweep(`Timer{Oms, Sweep}`,1 s)
 

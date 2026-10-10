@@ -148,6 +148,59 @@ fn oms_163_tomb_overwritten() {
 }
 
 #[test]
+fn oms_462_tomb_duplicate_count_and_fee_only() {
+    use OrderEventKind::{Ack, CancelAck, FeeOnly, Fill, PartialFill, QueryResult};
+
+    for (row, what, cum) in [
+        ("OMS-462.1", Ack, "0"),
+        ("OMS-462.2", CancelAck, "0"),
+        ("OMS-462.3", QueryResult, "0.01"),
+        ("OMS-462.4", Fill, "0.01"),
+        ("OMS-462.5", PartialFill, "0.004"),
+        ("OMS-462.6", FeeOnly, "0.01"),
+    ] {
+        let mut h = H::with(|c| c.slots.set(VS, A1, 1));
+        let s = h.place_ok(&buy_x(), 0);
+        h.ack(s, 777, 0);
+        let mut fill = h.oe(s, Fill);
+        fill.cum_filled = q("0.01");
+        fill.avg_px = p("60000");
+        h.ev(&fill, 1);
+        h.sweep(5002);
+        assert_eq!(h.slot(s).state, OrderState::Free, "{row}");
+        let dup = h.o.stats().dup;
+        let mut e = h.oe(s, what);
+        e.inst = X;
+        e.cum_filled = q(cum);
+        e.avg_px = p("60000");
+        e.fee = Qty(1000);
+        e.fee_asset = USDT;
+        h.ev(&e, 5003);
+        assert_eq!(h.o.stats().dup, dup + u64::from(what != FeeOnly), "{row}");
+        assert_eq!(h.slot(s).state, OrderState::Free, "{row}");
+        assert_eq!(
+            h.o.tomb(VS, A1, s.slot, s.r#gen).unwrap().filled,
+            q("0.01"),
+            "{row}"
+        );
+        assert!(h.out.fills.is_empty() && h.out.foreign_fills.is_empty(), "{row}");
+        assert!(h.out.decisions.is_empty() && h.out.hedges.is_empty(), "{row}");
+        assert!(h.out.notes.is_empty(), "{row}");
+        if what == FeeOnly {
+            assert_eq!(h.out.fees.len(), 1, "{row}");
+            let fee = h.out.fees[0];
+            assert_eq!(
+                (fee.account, fee.venue, fee.inst, fee.fee),
+                (A1, VS, X, 1000),
+                "{row}"
+            );
+        } else {
+            assert!(h.out.fees.is_empty(), "{row}");
+        }
+    }
+}
+
+#[test]
 fn oms_164_tomb_keep() {
     for (row, now, kept) in [
         ("OMS-164.1", 3_599_999u64, true),

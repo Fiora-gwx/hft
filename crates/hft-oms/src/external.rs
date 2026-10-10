@@ -295,6 +295,7 @@ impl Oms {
         }
         let d = ev.cum_filled.0.saturating_sub(tb.filled.0);
         if d <= 0 {
+            self.stats.dup += 1;
             return true;
         }
         let info = *self.inst(tb.inst);
