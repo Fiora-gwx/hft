@@ -242,7 +242,7 @@ DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xt
 | I19 | 出环的第二腿、`SecondRetry`、`HedgeFix`、残余修剪、自动有界平仓单:数量 ≤ 发出时 LegTracker 调试视图中该方向的裸量;L3/flatten 减仓单:数量 ≤ 发出时该腿 \|仓位\| − 同向即时在途;同一笔成交(去重键按 [hft-venue-proto 契约 22](../hft-venue-proto/README.md#实现方必须遵守的契约),在账户内)不出现两次对冲 |
 | I20 | 执行层调试视图:每个 `Broken` cell 记录进入时刻与计时状态(按引擎运行时间;`manual_hold` 与恢复期的处理——不满足期间不计时、放行时重给完整窗口——唯一归属 [hft-exec Broken 处置](../hft-exec/README.md#broken-处置));非 HARD、无人工 `HedgeFix` 时,计时满 `broken_auto_fix_ms` 后恰好开始一次自动有界平仓,开始前的等待与开始后的门控拒绝、零成交不产生终态,每个 Broken 期至多一个终态(`ExecAutoFixDone` 或 `ExecAutoFixFailed`);L3 或 `engine_flatten` 期间 `Broken` cell 的永续腿有 reduce-only 减仓单 |
 
-`SeqSut::observe` 按 OMS 的有效槽号 `1..=n_slots` 抄录每张表的占用槽与墓碑,包含最后一个槽;槽 0 不进入观察结果。`Obs.tables` 的 `free` 与 `Obs.slots` 的同表占用数相加等于 `capacity`(TK-101)。
+`SeqSut::observe` 按 OMS 的有效槽号 `1..=n_slots` 抄录每张表的占用槽与墓碑,包含最后一个槽;槽 0 不进入观察结果。`Obs.tables` 的 `free` 与 `Obs.slots` 的同表占用数相加等于 `capacity`(TK-101)。墓碑包括已回收为 Free 的槽当前代数,以及按 OMS 配置保留的此前代数;代数回绕时跳过保留值 0(TK-102)。
 
 ### 7. 状态哈希对比
 

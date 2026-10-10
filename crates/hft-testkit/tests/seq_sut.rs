@@ -95,6 +95,41 @@ fn tk_101_observes_last_oms_slot() {
     }
 }
 
+#[test]
+fn tk_102_observes_recycled_slot_tombs() {
+    let suite = hft_testkit::scenarios::suites()
+        .into_iter()
+        .find(|s| s.name == "core")
+        .expect("core suite");
+    let mut c = suite.config(0xbe41_3439_dca2_4fad);
+    c.steps = 10_000;
+    c.rerun = RerunPolicy::Never;
+    let r = run_record::<E>(&c);
+    assert!(r.outcome.is_pass(), "{}", show(&r));
+    assert_eq!(r.steps_run, c.steps);
+    let mut latest = std::collections::BTreeMap::new();
+    for d in r
+        .journal
+        .iter()
+        .filter_map(|j| j.try_read::<hft_event::OrderDecision>())
+    {
+        if d.action == hft_event::OrderAction::New && d.reject == 0 {
+            latest.insert((d.venue.0, d.account.0, d.slot.0), d.r#gen);
+        }
+    }
+    assert!(
+        r.obs.tombs.iter().any(|t| {
+            latest.get(&(t.venue.0, t.account.0, t.slot)) == Some(&t.r#gen)
+                && !r
+                    .obs
+                    .slots
+                    .iter()
+                    .any(|s| s.venue == t.venue && s.account == t.account && s.slot == t.slot)
+        }),
+        "no tomb of a free slot's latest allocated generation was observed"
+    );
+}
+
 /// Seed sweep in `hft-dst run` order (`DST_SEED`, `DST_N`; manual: `cargo test -p hft-testkit
 /// --test testkit -- --ignored seq_sut_sweep --nocapture`).
 #[test]

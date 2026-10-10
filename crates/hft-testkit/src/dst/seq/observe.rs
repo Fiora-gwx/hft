@@ -283,8 +283,11 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
                 let Some((sl, ext, _)) = e.oms.raw_slot(*v, a.id, ix) else {
                     continue;
                 };
-                if sl.r#gen > 1 {
-                    for g in sl.r#gen.saturating_sub(2)..sl.r#gen {
+                if sl.r#gen != 0 {
+                    // recycle keeps the slot's generation: its newest tomb is the current
+                    // generation while Free. After reuse it is one of the preceding generations.
+                    let mut g = sl.r#gen;
+                    for _ in 0..=s.setup.oms.tombstone_gens {
                         if let Some(tb) = e.oms.tomb(*v, a.id, ix, g) {
                             o.tombs.push(TombRow {
                                 venue: *v,
@@ -295,6 +298,7 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
                                 filled: i128::from(tb.filled.0),
                             });
                         }
+                        g = if g == 1 { u32::MAX } else { g - 1 };
                     }
                 }
                 if sl.state == OrderState::Free {

@@ -20,7 +20,7 @@ spec: README.md
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
 | 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TOOL-024、TOOL-027–TOOL-029 |
-| 6. DST 框架 | TK-043–TK-070、TK-100–TK-101 |
+| 6. DST 框架 | TK-043–TK-070、TK-100–TK-102 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
 | 8. hft-dst 运行器 | TK-075–TK-088 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
@@ -1360,6 +1360,17 @@ spec: README.md
   - 至少一张表的最高有效槽 `capacity` 出现在 `Obs.slots`
   - 每张表的槽号均在 `1..=capacity`,占用数加空闲数等于容量
 - 实现:`crates/hft-testkit/tests/seq_sut.rs::tk_101_observes_last_oms_slot`
+
+### TK-102 回收槽的当前代数墓碑参与迟到回报匹配
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:unit
+- 里程碑:M2
+- 前置:TK-101 的真实引擎、core 套件与固定种子;完整运行 10000 步,包含第 1171 步的迟到回报
+- 步骤:
+  1. 每步检查全部不变量,保留最终 `Obs`
+- 期望:10000 步完成且没有不变量违反;`Obs.tombs` 包含至少一个无对应占用槽的墓碑,其代数等于 journal 中该槽最近一次成功 New 的代数
+- 实现:`crates/hft-testkit/tests/seq_sut.rs::tk_102_observes_recycled_slot_tombs`
 
 ## 验收
 
