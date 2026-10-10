@@ -20,7 +20,7 @@ spec: README.md
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
 | 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TOOL-024、TOOL-027–TOOL-029 |
-| 6. DST 框架 | TK-043–TK-070、TK-100–TK-105 |
+| 6. DST 框架 | TK-043–TK-070、TK-100–TK-106 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
 | 8. hft-dst 运行器 | TK-075–TK-088 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
@@ -1392,17 +1392,28 @@ spec: README.md
 - 期望:正确入账全部通过;非零费用漏记或重复扣除均失败;未知归属无告警失败;FeeOnly 改动累计量失败;epoch 不同不算命中墓碑
 - 实现:`crates/hft-testkit/tests/fees.rs::tk_104_fee_only_checker`
 
-### TK-105 真实引擎消费晚到手续费
+### TK-105 真实引擎消费晚到报价币手续费
 
 - 规则:[DST 的世界模型](README.md#dst-的世界模型)、[INV-2](../../docs/tests/invariants.md#inv-2-每条订单回报都匹配一个槽或墓碑否则产生告警并进入对账从不被静默丢弃)
 - 级别:dst
 - 里程碑:M2
-- 前置:`SeqSut<TestStrategies>` 与真实 SimExchange;W1、种子 1;基础币/报价币费用 × 50/6000 ms 延迟四行;每行脚本在时间 0 注入一次故障
-- 故障:`LateFeeOnly{venue = VS, delay_ms}`;四行的延迟与费用币种如前置
+- 前置:`SeqSut<TestStrategies>` 与真实 SimExchange;W1、报价币 USDT 费用;50/6000 ms 延迟两行;每行脚本在时间 0 注入一次故障
+- 故障:`LateFeeOnly{venue = VS, delay_ms}`;两行的延迟如前置
 - 种子:固定种子 1
 - 步骤:每行运行 10000 步,每步检查全部不变量
-- 断言:四行都完成全部步数;每行 journal 都有且仅有一条非零 FeeOnly,资产等于该行配置的 BTC 或 USDT;没有只排故障却不生成回报的空过
+- 断言:两行都完成全部步数;每行 journal 都有且仅有一条非零 FeeOnly,资产等于 USDT;没有只排故障却不生成回报的空过
 - 实现:`crates/hft-testkit/tests/seq_sut.rs::tk_105_real_engine_late_fee`
+
+### TK-106 真实引擎的基础币费用配置与对冲余数观察
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)、[INV-8](../../docs/tests/invariants.md#inv-8-onfill-第二腿的对冲数量之和等于触发它的第一腿累计净成交量)
+- 级别:dst
+- 里程碑:M2
+- 前置:`SeqSut<TestStrategies>` 与真实 SimExchange;W1 的 VS 配置 `fee_in_base = true`;50/6000 ms 延迟两行,包含槽回收与链接复用
+- 故障:`LateFeeOnly{venue = VS, delay_ms}`
+- 种子:固定种子 1
+- 断言:配置实际进入 refdata 的 VenueCaps,FeeOnly 的资产为 BTC;每行运行 10000 步且全部不变量通过;INV-8 观察包含晚到手续费补差与链接复用前的已完成累计量,不能固定 `fee_adjust = 0`;反例删除费用入账或改错余数时相应检查失败
+- 实现:待实现
 
 ## 验收
 

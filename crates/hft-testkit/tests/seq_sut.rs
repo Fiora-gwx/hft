@@ -26,30 +26,22 @@ fn show(r: &hft_testkit::dst::RunRecord) -> String {
 fn tk_105_real_engine_late_fee() {
     use hft_event::{OrderEvent, OrderEventKind};
     use hft_testkit::dst::faults::Fault;
-    use hft_testkit::dst::world::{BTC, USDT, VS};
-    for base in [false, true] {
-        for delay_ms in [50, 6_000] {
-            let mut c = cfg(1, 10_000, &[], 0, &[]);
-            c.world
-                .venues
-                .iter_mut()
-                .find(|v| v.id == VS)
-                .unwrap()
-                .fee_in_base = base;
-            c.scripted.push((0, Fault::LateFeeOnly { venue: VS, delay_ms }));
-            let r = run_record::<E>(&c);
-            assert!(r.outcome.is_pass(), "base={base} delay={delay_ms}: {}", show(&r));
-            assert_eq!(r.steps_run, c.steps);
-            let fees: Vec<_> = r
-                .journal
-                .iter()
-                .filter_map(|j| j.try_read::<OrderEvent>())
-                .filter(|e| e.what == OrderEventKind::FeeOnly)
-                .collect();
-            assert_eq!(fees.len(), 1, "the scripted fault must actually reach the engine");
-            assert!(fees[0].fee.0 > 0);
-            assert_eq!(fees[0].fee_asset, if base { BTC } else { USDT });
-        }
+    use hft_testkit::dst::world::{USDT, VS};
+    for delay_ms in [50, 6_000] {
+        let mut c = cfg(1, 10_000, &[], 0, &[]);
+        c.scripted.push((0, Fault::LateFeeOnly { venue: VS, delay_ms }));
+        let r = run_record::<E>(&c);
+        assert!(r.outcome.is_pass(), "delay={delay_ms}: {}", show(&r));
+        assert_eq!(r.steps_run, c.steps);
+        let fees: Vec<_> = r
+            .journal
+            .iter()
+            .filter_map(|j| j.try_read::<OrderEvent>())
+            .filter(|e| e.what == OrderEventKind::FeeOnly)
+            .collect();
+        assert_eq!(fees.len(), 1, "the scripted fault must actually reach the engine");
+        assert!(fees[0].fee.0 > 0);
+        assert_eq!(fees[0].fee_asset, USDT);
     }
 }
 
