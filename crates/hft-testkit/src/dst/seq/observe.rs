@@ -279,7 +279,7 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
                 unknown_count: t.unknown_count,
                 free_list_consistent: true,
             });
-            for ix in 0..t.n_slots {
+            for ix in 1..=t.n_slots {
                 let Some((sl, ext, _)) = e.oms.raw_slot(*v, a.id, ix) else {
                     continue;
                 };

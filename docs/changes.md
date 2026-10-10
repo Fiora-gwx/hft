@@ -69,3 +69,4 @@
 | 2026-10-10 | 架构页同步 Drain 退出与恢复读者的发布边界,具体顺序仍归 sequencer 规格 | SEQ-370,主循环变更同步架构页 | docs/architecture.md | 否 |
 | 2026-10-10 | 控制面真实引擎 E2E 的 OMS、Ledger、Exec 测试依赖登记到 deps.toml 的 dev 列表,同步组件依赖说明、验收范围与分层图 | CTL-161,CI 依赖门发现 Cargo.toml 与允许列表未同步 | tools/xtask/deps.toml、crates/hft-ctl/README.md、crates/hft-ctl/TESTS.md、crates/AGENTS.md、docs/architecture.md | 否 |
 | 2026-10-10 | PY-161 使用 smaps_rollup 的匿名驻留量,采样线程就绪后取基线,读失败直接报错;批大小上限与 5% 差异门槛保持 | PY-161,CI run 38048428020 的峰值比较失败;Linux status RSS 采用非精确异步计数 | crates/hft-py/tests/memory.rs、crates/hft-py/README.md、crates/hft-py/TESTS.md | 否 |
+| 2026-10-10 | DST 的真实引擎观察器按 `1..=n_slots` 读取 OMS 槽与墓碑,包含最高有效槽;回归检查最高槽确实占用且每表占用数加空闲数等于容量,失败种子进入固定回归集 | TK-101、INV-7,CI run 38049505528 在第 779 步发现观察器少计一个槽 | crates/hft-testkit/src/dst/seq/observe.rs、crates/hft-testkit/tests/seq_sut.rs、crates/hft-testkit/README.md、crates/hft-testkit/TESTS.md、fixtures/dst-seeds/core.txt | 否 |

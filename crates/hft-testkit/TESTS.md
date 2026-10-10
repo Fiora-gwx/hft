@@ -20,7 +20,7 @@ spec: README.md
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
 | 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TOOL-024、TOOL-027–TOOL-029 |
-| 6. DST 框架 | TK-043–TK-070、TK-100 |
+| 6. DST 框架 | TK-043–TK-070、TK-100–TK-101 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
 | 8. hft-dst 运行器 | TK-075–TK-088 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
@@ -1345,6 +1345,21 @@ spec: README.md
 - 期望:
   - 每个 `I<n>` 恰对应 E 中的 `INV-n` 与一个 `inv_<n>_…` 函数;E 中除可选扩展 INV-10(`chain` feature 未启用时)外每一项都有检查器
 - 实现:`crates/hft-testkit/tests/invariants_map.rs::tk_100_checkers_match_invariants_md`
+
+### TK-101 真实引擎的 OMS 观察结果包含最后一个槽
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:unit
+- 里程碑:M2
+- 前置:`SeqSut<TestStrategies>`;`core` 套件;种子 `0xbe413439dca24fad`;运行 780 步,包含最高有效槽被占用的前缀
+- 步骤:
+  1. 运行该种子,每步检查全部不变量
+  2. 检查最终 `Obs` 中每张表的槽号与计数
+- 期望:
+  - 780 步完成且没有不变量违反
+  - 至少一张表的最高有效槽 `capacity` 出现在 `Obs.slots`
+  - 每张表的槽号均在 `1..=capacity`,占用数加空闲数等于容量
+- 实现:`crates/hft-testkit/tests/seq_sut.rs::tk_101_observes_last_oms_slot`
 
 ## 验收
 

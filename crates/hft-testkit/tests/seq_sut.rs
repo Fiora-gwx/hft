@@ -63,6 +63,38 @@ fn seq_sut_same_seed_same_trail() {
     assert!(r.outcome.is_pass(), "{}", show(&r));
 }
 
+#[test]
+fn tk_101_observes_last_oms_slot() {
+    let suite = hft_testkit::scenarios::suites()
+        .into_iter()
+        .find(|s| s.name == "core")
+        .expect("core suite");
+    let mut c = suite.config(0xbe41_3439_dca2_4fad);
+    c.steps = 780;
+    c.rerun = RerunPolicy::Never;
+    let r = run_record::<E>(&c);
+    assert!(r.outcome.is_pass(), "{}", show(&r));
+    assert_eq!(r.steps_run, c.steps);
+    // This prefix reaches the highest valid slot. A check on an empty table would miss the
+    // observer's old 0..capacity range, which silently omitted that slot.
+    assert!(r.obs.tables.iter().any(|t| {
+        r.obs
+            .slots
+            .iter()
+            .any(|s| s.venue == t.venue && s.account == t.account && s.slot == t.capacity)
+    }));
+    for t in &r.obs.tables {
+        let occupied: Vec<_> = r
+            .obs
+            .slots
+            .iter()
+            .filter(|s| s.venue == t.venue && s.account == t.account)
+            .collect();
+        assert_eq!(occupied.len() + t.free as usize, t.capacity as usize);
+        assert!(occupied.iter().all(|s| (1..=t.capacity).contains(&s.slot)));
+    }
+}
+
 /// Seed sweep in `hft-dst run` order (`DST_SEED`, `DST_N`; manual: `cargo test -p hft-testkit
 /// --test testkit -- --ignored seq_sut_sweep --nocapture`).
 #[test]
