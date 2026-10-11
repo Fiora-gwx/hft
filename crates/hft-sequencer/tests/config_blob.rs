@@ -418,7 +418,13 @@ fn seq_398_snapshot_recovery_audit_uses_committed_tail() {
         } else {
             snaps[0].seq
         };
-        let committed_end = old.recs[hft_sequencer::recover::event_end(&old) - 1].seq;
+        let committed_end = old
+            .recs
+            .iter()
+            .rev()
+            .find(|r| r.flags.contains(RecordFlags::EVENT_END))
+            .unwrap()
+            .seq;
         if latest {
             assert_eq!(selected, committed_end);
         }

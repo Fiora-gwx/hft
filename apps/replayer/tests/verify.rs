@@ -122,10 +122,11 @@ fn rpl_025_restart_at_recover_from_snapshot() {
     );
     assert_eq!(note.v[1], log.record_end_seq(selected).unwrap() + 1);
     assert!(note.v[1] < note.v[2]);
-    let old_committed = hft_sequencer::recover::event_end(&Log {
-        recs: log.recs[..boundary - 1].to_vec(), // exclude the End appended by the real roll
-        ..Default::default()
-    }) - 1;
+    // Exclude the End appended by the real roll, and independently find the published event.
+    let old_committed = log.recs[..boundary - 1]
+        .iter()
+        .rposition(|r| r.flags.contains(hft_event::RecordFlags::EVENT_END))
+        .unwrap();
     assert_eq!(note.v[2], log.record_end_seq(old_committed).unwrap());
     assert_eq!(note.v[3], 3);
     assert_eq!(note.v[4].to_le_bytes(), *b"cli:syst");
