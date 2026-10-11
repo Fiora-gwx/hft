@@ -151,10 +151,8 @@ fn tk_115_every_snapshot_checked_with_periodic_rebuild_off() {
     assert_eq!(r.trail.points.len(), c.steps as usize);
     assert_eq!(r.trail.to_bytes(), off.trail.to_bytes());
     assert_eq!(off.snapshot_checks, 0);
-}
 
-#[test]
-fn tk_115_missing_duplicate_or_corrupt_snapshot_observations_fail() {
+    // The same case also requires every corrupt observation to fail at its own boundary.
     for (seed, message) in [
         (1, "missing or reordered"),
         (2, "missing or reordered"),
