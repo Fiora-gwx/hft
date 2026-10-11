@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-11 | 执行层在 cell 退避未结束时不启动新的补腿窗口,容量 Continue、回填强制推进和快照恢复遵守同一规则;已开始的窗口仍按原截止处理。固定四步反例覆盖两种输出容量及每个输入前恢复,原属性种子保留 | CI 38140865614 的 EXE-024 最小反例;EXE-516、EXE-517 | crates/hft-exec | 否 |
 | 2026-10-11 | 恢复引导块之后的 RecoverMismatch 注记在追加成功后计入 out_hash,与从恢复快照起步时的区间累计一致;独立哈希包含/遗漏注记对照及严格回放覆盖单账户与全账户差异 | CI 38138258803 的 RPL-024/264 首个恢复后快照仅 out_hash 不同;SEQ-396 | crates/hft-sequencer、docs/architecture.md | 否 |
 | 2026-10-11 | 离线回放按真实 RecoverMismatch 启动注记校验旧尾部来源、首处分歧 seq 与账户/venue 范围,有效差异单列 recovery_diffs;恢复后严格比较,缺历史、重复或越界证据失败。报告侧文件为 divergences/recovery_diffs 对象,共享诊断上限;真实文件故障通过正式恢复流程生成证据,不改 journal 或快照格式 | RPL-024、RPL-264–265、SEQ-394 | crates/hft-sequencer、apps/replayer | 否 |
 | 2026-10-11 | INV-6 在每条快照所属事件或启动完成边界保存只读状态并独立重建;包含同一步内多个快照与连续恢复,观察缺失、重复、越过后续 Input、溢出或哈希差异均失败;关闭定期采样仍检查快照,诊断仅在 testkit 构建启用 | INV-6、TK-115、TK-116 | crates/hft-sequencer、crates/hft-testkit、docs/architecture.md、docs/tests/invariants.md | 否 |

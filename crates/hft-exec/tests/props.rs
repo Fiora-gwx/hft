@@ -867,6 +867,63 @@ proptest! {
     }
 }
 
+#[test]
+fn exe_516_new_fix_waits_for_wake_under_capacity_and_restore() {
+    // CI seed 1b34924f66b9b633b256751eb7ad6eee445ccd6e8b1279e459094a35677c2100.
+    const OPS: [(u8, u16); 4] = [(7, 15590), (9, 65457), (12, 112), (3, 34016)];
+    let run_case = |capped, cut| {
+        let mut w = World::new(capped, Checks::default());
+        w.set_net(G7, 0, 100_000_000);
+        w.set_net(G7, 1, -100_000_000);
+        w.fx.spot(A1, A, G7, "1", "1");
+        for (k, (op, x)) in OPS.iter().enumerate() {
+            if k == cut {
+                let snapshot = w.fx.snap();
+                w.fx.ex = w.fx.restore(&snapshot);
+            }
+            w.step(*op, *x);
+            if k == 1 {
+                let c = w.fx.cell(A1, G7);
+                assert_eq!(c.gated_bits, RejectBits::RATE);
+                assert!(c.wake_at > Views::now(&w.fx.v.m).tsc);
+                assert_eq!(c.fix.first_tsc, Tsc(0));
+                assert!(w.open.is_empty(), "first force order was rejected");
+            }
+        }
+        assert_eq!(w.trace.orders.len(), 2, "rejected force slice and its retry");
+        assert!(w.trace.broken.is_empty(), "capacity must not cause FixExhausted");
+        assert_eq!(
+            w.trace
+                .timers
+                .iter()
+                .any(|t| t.kind() == Some(ExecTimerKind::Continue)),
+            capped,
+            "exercise the capacity continuation"
+        );
+        w
+    };
+    let mut baselines = Vec::new();
+    for capped in [false, true] {
+        let baseline = run_case(capped, OPS.len());
+        for cut in 0..OPS.len() {
+            let restored = run_case(capped, cut);
+            assert_eq!(baseline.trace.decisions, restored.trace.decisions, "cut {cut}");
+            assert_eq!(baseline.trace.orders, restored.trace.orders, "cut {cut}");
+            assert_eq!(baseline.trace.notify, restored.trace.notify, "cut {cut}");
+            assert_eq!(baseline.trace.timers, restored.trace.timers, "cut {cut}");
+            assert_eq!(baseline.trace.notes, restored.trace.notes, "cut {cut}");
+        }
+        let mut decisions = strip(&baseline.trace.decisions);
+        decisions.sort_by_key(|d| d.group.0);
+        let mut orders = baseline.trace.orders;
+        orders.sort_by_key(|o| o.intent.group.0);
+        let mut notify = baseline.trace.notify;
+        notify.sort_by_key(|n| n.u.group.0);
+        baselines.push((decisions, orders, notify));
+    }
+    assert_eq!(baselines[0], baselines[1]);
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(1_000))]
 

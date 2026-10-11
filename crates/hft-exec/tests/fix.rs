@@ -18,6 +18,27 @@ fn fix_now(fx: &mut Fx) -> Rec {
 }
 
 #[test]
+fn exe_517_started_fix_deadline_counts_during_backoff() {
+    let mut fx = Fx::new();
+    naked_g7(&mut fx, "1.0", "-1.5");
+    fx.at(1000);
+    let first = fix_now(&mut fx);
+    let order = first.ord(ExecOrderKind::HedgeFix)[0];
+    fx.place_res(&order, PlaceResult::Rejected(RejectBits::RATE));
+    assert_eq!(fx.cell(A1, G7).fix.first_tsc, t(1000));
+    // A later gate remains closed beyond the repair deadline.
+    fx.cm(A1, G7).wake_at = t(30_000);
+    fx.at(20_000);
+    let expired = fix_now(&mut fx);
+    assert!(expired.orders.is_empty());
+    assert_eq!(
+        fx.cell(A1, G7).view.state,
+        TargetState::Broken(hft_strategy_sdk::BrokenReason::FixExhausted)
+    );
+    assert_eq!(expired.broken.len(), 1);
+}
+
+#[test]
 fn exe_205_hedge_fix_after_link() {
     let mut fx = Fx::new();
     fx.at(1000);

@@ -119,6 +119,11 @@ impl Exec {
         {
             return;
         }
+        // A capacity continuation (or restore) can revisit a rejected target before its wake.
+        // Do not start a new repair window during that backoff; an existing window still expires.
+        if c.fix.first_tsc.0 == 0 && now.tsc.0 < c.wake_at.0 {
+            return;
+        }
         let (_, e) = self.naked(cix, v);
         if !self.venue_open(cix, c.legs[e].venue) {
             if let Some(cm) = self.cells.get_mut(cix)

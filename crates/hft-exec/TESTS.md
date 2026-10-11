@@ -16,7 +16,7 @@ spec: README.md
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
 | 入口(全部在 sequencer 线程调用,无分配) | EXE-506、EXE-507、EXE-002、EXE-003、EXE-010、EXE-011、EXE-012、EXE-013、EXE-014、EXE-015、EXE-016、EXE-017、EXE-231、EXE-317、EXE-318、EXE-396、EXE-405、EXE-475 |
-| 输出 `ExecOut`(容量固定,sequencer 预分配;**每次调用本 crate 之后排空**) | EXE-020、EXE-021、EXE-022、EXE-023、EXE-024、EXE-316、EXE-459 |
+| 输出 `ExecOut`(容量固定,sequencer 预分配;**每次调用本 crate 之后排空**) | EXE-020、EXE-021、EXE-022、EXE-023、EXE-024、EXE-316、EXE-459、EXE-516 |
 | 执行规格参数(类型定义在 SDK,本节定义语义) | EXE-040、EXE-041、EXE-042 |
 | 配置项(`ExecConfig`,`EngineConfig` blob 的 `exec` 段;每账户一行 + 全局默认行;变更 = Drain + 重启) | EXE-001、EXE-003、EXE-004、EXE-514、EXE-515 |
 | 消费与产生的事件 | EXE-014、EXE-068、EXE-205、EXE-220、EXE-283、EXE-290、EXE-316、EXE-340、EXE-416、EXE-434、EXE-440 |
@@ -35,7 +35,7 @@ spec: README.md
 | Simultaneous | EXE-195、EXE-502 |
 | MakerFirst(optional) | EXE-196 |
 | 对冲量上限(B6) | EXE-070、EXE-161、EXE-511、EXE-200、EXE-201、EXE-254 |
-| 补腿(`HedgeFix`,C4) | EXE-119、EXE-169、EXE-205、EXE-206、EXE-207、EXE-208、EXE-209、EXE-210、EXE-211、EXE-212、EXE-213、EXE-214、EXE-215、EXE-216、EXE-220、EXE-221、EXE-222、EXE-296、EXE-505 |
+| 补腿(`HedgeFix`,C4) | EXE-119、EXE-169、EXE-205、EXE-206、EXE-207、EXE-208、EXE-209、EXE-210、EXE-211、EXE-212、EXE-213、EXE-214、EXE-215、EXE-216、EXE-220、EXE-221、EXE-222、EXE-296、EXE-505、EXE-516、EXE-517 |
 | HARD 解除时的 Broken 判定(`resolve_broken`) | EXE-208、EXE-230、EXE-231、EXE-232 |
 | Broken 处置 | EXE-025、EXE-069、EXE-222、EXE-237、EXE-238、EXE-239、EXE-240、EXE-241、EXE-242、EXE-243、EXE-244、EXE-245、EXE-246、EXE-247、EXE-248、EXE-249、EXE-250、EXE-251、EXE-252、EXE-253、EXE-254、EXE-255、EXE-256、EXE-257、EXE-258、EXE-259、EXE-260、EXE-261、EXE-262、EXE-326、EXE-358、EXE-433、EXE-463、EXE-505 |
 | 残余与尘埃 | EXE-083、EXE-185、EXE-211、EXE-280、EXE-281、EXE-282、EXE-283 |
@@ -4338,6 +4338,26 @@ spec: README.md
 - 步骤:分别删默认行、重复账户、破坏 bool/填充、给无覆盖行写参数、写越界 u8
 - 期望:全部返回 None
 - 实现:`crates/hft-exec/tests/config_blob.rs::exe_515_config_section_rejects_malformed`
+
+### EXE-516 容量续推与恢复不在退避期提前启动补腿窗口
+
+- 规则:[补腿](README.md#补腿hedgefixc4)、[使用本组件](README.md#使用本组件)
+- 级别:unit
+- 里程碑:M2
+- 前置:EXE-024 属性世界,现货 +1、永续 −1;固定反例 `(7,15590)、(9,65457)、(12,112)、(3,34016)`
+- 步骤:分别用 README 容量和大容量执行外来成交、引擎清仓拒单、推进 30 秒、取消重试单;再分别在四个输入前插入 snapshot/restore
+- 期望:实际发生 RATE 拒单与容量 Continue;退避期间 `fix.first_tsc = 0`;两种容量各产生拒单切片与重试切片,均无 Broken;按 cell 比较决策、订单、通知一致;每个恢复分支的决策、订单、通知、定时器与 Note 和同容量连续运行一致
+- 实现:`crates/hft-exec/tests/props.rs::exe_516_new_fix_waits_for_wake_under_capacity_and_restore`
+
+### EXE-517 已开始的补腿窗口在退避期照常到期
+
+- 规则:[补腿](README.md#补腿hedgefixc4)
+- 级别:unit
+- 里程碑:M2
+- 前置:C0,现货 +1、永续 −1.5;t 1000 发出 HedgeFix,管线以 RATE 拒绝
+- 步骤:将 cell 的退避延至 t 30000,在 t 20000 由持仓调整触发强制推进
+- 期望:`first_tsc` 保持 t 1000;截止到期后进入 `Broken(FixExhausted)`,输出一次 Broken 请求,不发新订单
+- 实现:`crates/hft-exec/tests/fix.rs::exe_517_started_fix_deadline_counts_during_backoff`
 
 ## 验收
 
