@@ -94,3 +94,4 @@
 | 2026-10-11 | 完整 journal 回放的配置前提:RKP1 完整风控参数编解码,ECF1 段 1/7 的 OMS/执行配置行,段 8 Assembly 保存决策所需装配事实;解码拒绝缺项、重复键、越界与未知引用,不补进程内配置。段 2 沿用 ledger 的现有编码,快照与事件格式不变 | RSK-284–286、OMS-465–466、EXE-514–515、SEQ-376–378;REF-066–068 未知段随 Assembly 追加改为 9 | crates/hft-risk、crates/hft-oms、crates/hft-exec、crates/hft-sequencer、crates/hft-refdata(README、TESTS、实现) | 否 |
 | 2026-10-11 | hft-py `config_at` 按 `assembly` 名字提供 ECF1 段 8 的原始字节 | PY-088.3 覆盖 ledger 与 Assembly 行,完整配置编解码的冷读者适配 | crates/hft-py | 否 |
 | 2026-10-11 | 真实 DST 引导块使用完整 ECF1/RKP1;INV-6 从选中快照的已有 journal 配置重建,严格核对 blob 身份/SHA-256 与运行时钟 | TK-112、SEQ-379–SEQ-380,移除进程内风控参数作为回放输入的依赖 | crates/hft-testkit、crates/hft-sequencer | 否 |
+| 2026-10-11 | INV-6 在真实引擎或已有快照时拒绝空重建结果;回放必须完成且没有 Output 差异或遗漏,定期与结束检查均执行 | TK-113,防止配置/恢复/回放失败被空值跳过 | crates/hft-testkit、docs/tests/invariants.md | 否 |

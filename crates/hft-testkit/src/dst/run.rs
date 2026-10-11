@@ -16,7 +16,7 @@ use crate::dst::sut::{BootCtx, FrameRec, InputRec, JRec, OutRing, Source, StepOu
 use crate::dst::venue_behavior::{Matcher, MockVenue};
 use crate::dst::world::{AccountKind, World};
 use crate::dst::{DstConfig, DstFailure, DstOutcome, FailKind, RerunPolicy, TraceItem};
-use crate::hash::HashTrail;
+use crate::hash::{ComponentHashes, HashTrail};
 
 /// Everything a finished run leaves for scenario assertions and framework tests.
 #[derive(Clone, Debug)]
@@ -566,7 +566,13 @@ impl<E: Sut> Loop<'_, E> {
             && self.cfg.rebuild_every > 0
             && ordinal.is_multiple_of(self.cfg.rebuild_every)
         {
-            self.sut.rebuilt_hashes().map(|b| (self.sut.hashes(), b))
+            match self.rebuild() {
+                Ok(b) => b.map(|b| (self.sut.hashes(), b)),
+                Err(m) => {
+                    self.fail = Some((step, FailKind::Inv(InvId::I6), m));
+                    return;
+                }
+            }
         } else {
             None
         };
@@ -638,6 +644,21 @@ impl<E: Sut> Loop<'_, E> {
         }
     }
 
+    fn rebuild(&self) -> Result<Option<ComponentHashes>, String> {
+        let rebuilt = self.sut.rebuilt_hashes();
+        if rebuilt.is_none()
+            && (self.after.required.is_some()
+                || self
+                    .sut
+                    .journal()
+                    .iter()
+                    .any(|r| r.kind == hft_event::EventKind::STATE_SNAPSHOT))
+        {
+            return Err("journal rebuild unavailable or output verification failed".into());
+        }
+        Ok(rebuilt)
+    }
+
     fn finish(mut self) -> RunRecord {
         let now = self.world.now();
         if self.fail.is_none() && self.cfg.invariants != InvariantSet::none() {
@@ -650,16 +671,19 @@ impl<E: Sut> Loop<'_, E> {
             if let Err((i, m)) = check_end(self.cfg.invariants, &mut self.inv, &end) {
                 self.fail = Some((self.rec.steps_run.saturating_sub(1), FailKind::Inv(i), m));
             }
-            if self.fail.is_none()
-                && self.cfg.invariants.contains(InvId::I6)
-                && let Some(b) = self.sut.rebuilt_hashes()
-                && let Some(c) = self.sut.hashes().first_diff(&b)
-            {
-                self.fail = Some((
-                    self.rec.steps_run.saturating_sub(1),
-                    FailKind::Inv(InvId::I6),
-                    format!("end: rebuilt state differs in {}", c.name()),
-                ));
+            if self.fail.is_none() && self.cfg.invariants.contains(InvId::I6) {
+                let err = match self.rebuild() {
+                    Err(m) => Some(m),
+                    Ok(Some(b)) => self
+                        .sut
+                        .hashes()
+                        .first_diff(&b)
+                        .map(|c| format!("end: rebuilt state differs in {}", c.name())),
+                    Ok(None) => None,
+                };
+                if let Some(m) = err {
+                    self.fail = Some((self.rec.steps_run.saturating_sub(1), FailKind::Inv(InvId::I6), m));
+                }
             }
         }
         self.rec.journal = self.sut.journal().to_vec();

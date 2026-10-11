@@ -6,9 +6,12 @@ use hft_sequencer::{
 };
 use hft_strategy_sdk::SnapshotWriter;
 use hft_testkit::dst::SeqSut;
-use hft_testkit::dst::sut::{BootCtx, Sut};
+use hft_testkit::dst::obs::Obs;
+use hft_testkit::dst::sut::{BootCtx, BootFail, CrashPoint, InputRec, JRec, StepOut, Sut};
 use hft_testkit::dst::world::WorldSpec;
+use hft_testkit::hash::ComponentHashes;
 use hft_testkit::strategies::TestStrategies;
+use hft_types::AccountId;
 
 type E = SeqSut<TestStrategies>;
 
@@ -75,4 +78,69 @@ fn tk_112_worlds_do_not_share_risk_replay_state() {
     })
     .join()
     .unwrap();
+}
+
+struct MissingRebuild(E);
+
+impl Sut for MissingRebuild {
+    type Matcher = <E as Sut>::Matcher;
+    fn boot(c: &BootCtx<'_>) -> Result<Self, BootFail> {
+        E::boot(c).map(Self)
+    }
+    fn process(&mut self, n: u64, t: u64, i: &InputRec, o: &mut StepOut) {
+        self.0.process(n, t, i, o);
+    }
+    fn drain_observations(&mut self, o: &mut StepOut) {
+        self.0.drain_observations(o);
+    }
+    fn next_deadline(&self) -> Option<u64> {
+        self.0.next_deadline()
+    }
+    fn fire_timers(&mut self, n: u64, t: u64, o: &mut StepOut) -> bool {
+        self.0.fire_timers(n, t, o)
+    }
+    fn observe(&self, o: &mut Obs) {
+        self.0.observe(o);
+    }
+    fn hashes(&self) -> ComponentHashes {
+        self.0.hashes()
+    }
+    fn rebuilt_hashes(&self) -> Option<ComponentHashes> {
+        None
+    }
+    fn seq(&self) -> u64 {
+        self.0.seq()
+    }
+    fn journal(&self) -> &[JRec] {
+        self.0.journal()
+    }
+    fn crash_and_recover(&mut self, p: CrashPoint, i: Option<&InputRec>) -> Result<(), BootFail> {
+        self.0.crash_and_recover(p, i)
+    }
+    fn clean_restart(&mut self) -> Result<(), BootFail> {
+        self.0.clean_restart()
+    }
+    fn is_sim(&self, a: AccountId) -> bool {
+        self.0.is_sim(a)
+    }
+}
+
+#[test]
+fn tk_113_missing_rebuild_fails_instead_of_skipping() {
+    use hft_testkit::dst::invariants::{InvId, InvariantSet};
+    use hft_testkit::dst::{DstOutcome, FailKind, run_record};
+    for every in [1, 0] {
+        // During a run, and the mandatory end check with periodic checks off.
+        let mut c = crate::support::cfg(1, 4, &[], 0, &[]);
+        c.invariants = InvariantSet::only(InvId::I6);
+        c.rebuild_every = every;
+        let r = run_record::<MissingRebuild>(&c);
+        match r.outcome {
+            DstOutcome::Fail(f) => {
+                assert_eq!(f.invariant, FailKind::Inv(InvId::I6));
+                assert!(f.message.contains("rebuild unavailable"));
+            }
+            DstOutcome::Pass { .. } => panic!("missing rebuild was accepted, interval {every}"),
+        }
+    }
 }

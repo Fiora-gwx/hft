@@ -20,7 +20,7 @@ spec: README.md
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
 | 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TOOL-024、TOOL-027–TOOL-029 |
-| 6. DST 框架 | TK-043–TK-070、TK-100–TK-112 |
+| 6. DST 框架 | TK-043–TK-070、TK-100–TK-113 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
 | 8. hft-dst 运行器 | TK-075–TK-088 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
@@ -1475,6 +1475,16 @@ spec: README.md
 - 步骤:交错调用 A/B 的 INV-6 重建;丢弃两台引擎后把 A 的 journal 送入新线程,仅从快照和此前的配置记录装配 VerifyDriver
 - 期望:两份 INV-6 状态与各自运行状态完全相同;新线程逐条 Output 与最终组件哈希一致,没有遗漏输出;不需要 WorldSpec 或线程局部 RiskParams
 - 实现:`crates/hft-testkit/tests/journal_config.rs::tk_112_worlds_do_not_share_risk_replay_state`
+
+### TK-113 journal 重建不可用时不得跳过 INV-6
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:unit
+- 里程碑:M2
+- 前置:真实 W1 引擎,固定种子 1、4 步,仅开启 INV-6;包装器仅把重建结果替换为空值
+- 步骤:分别设置每步重建与关闭定期重建,运行到首次失败或场景结束
+- 期望:两行均以 INV-6 失败,诊断指出 journal 重建不可用;不能因没有哈希结果通过检查
+- 实现:`crates/hft-testkit/tests/journal_config.rs::tk_113_missing_rebuild_fails_instead_of_skipping`
 
 ## 验收
 

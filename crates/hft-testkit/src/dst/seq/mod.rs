@@ -717,6 +717,10 @@ impl<S: StrategySet> Sut for SeqSut<S> {
                 break;
             }
         }
+        if !s.driver().finished() || !s.driver().mismatches().is_empty() || !s.driver().leftover().is_empty()
+        {
+            return None;
+        }
         Some(Self::hashes_of(&s))
     }
 

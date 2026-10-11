@@ -285,7 +285,7 @@ impl EngineSetup {
         // Live account key requirements are facts, including an explicit empty bitmap.
         for a in 1..=u8::MAX {
             let meta = rd.account(AccountId(a));
-            if meta.id.0 == 0 || metmatches!(a.kind, AccountKind::Sim(_)) {
+            if meta.id.0 == 0 || matches!(meta.kind, AccountKind::Sim(_)) {
                 continue;
             }
             for v in 1..64u8 {
