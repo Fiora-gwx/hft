@@ -90,8 +90,10 @@ impl<S: StrategySet> LiveIo<S> for Io<S> {
 fn settle<S: StrategySet>(seq: &mut Sequencer<LiveDriver<S, Io<S>>, S>) {
     for _ in 0..1000 {
         match seq.step() {
-            StepOutcome::Busy => {}
-            StepOutcome::Idle => return,
+            StepOutcome::Idle if !seq.view().snapshot_requested() => return,
+            // SnapshotNow is emitted only after a previous idle round. The first Idle
+            // after the command is not evidence that the requested snapshot was written.
+            StepOutcome::Busy | StepOutcome::Idle => {}
             o => panic!("{o:?}"),
         }
     }

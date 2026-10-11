@@ -35,7 +35,10 @@ fn rpl_260_real_file_verify_report_and_divergence() {
     assert_eq!(value["summary"]["date"], "2026-10-01");
     assert_eq!(value["summary"]["recompute"], "skipped");
     assert!(value["summary"]["outputs_compared"].as_u64().unwrap() > 0);
-    assert!(value["summary"]["snapshots_checked"].as_u64().unwrap() >= 3);
+    assert!(
+        value["summary"]["snapshots_checked"].as_u64().unwrap() >= 3,
+        "{value}"
+    );
     assert_eq!(std::fs::read(&f.file).unwrap(), original);
     let summary: Value = serde_json::from_slice(&std::fs::read(&report).unwrap()).unwrap();
     assert_eq!(summary, value["summary"]);
