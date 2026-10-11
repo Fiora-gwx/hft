@@ -174,6 +174,7 @@ pub enum Next<'a> {
 - **kind 的处理**:本二进制不认识的 kind 照常以 `Next::Record` 交付(调用方按 `kind_info = None` 跳过);认识但不允许出现在该类 journal 的 kind → `Err(Corrupt)`;生产构建读到 `0x7Fxx` → `Err(DevKind)`。
 - **同进程尾随读者**(advisor、sim-gw、ctl-gateway;`ReaderConfig.same_process = true`)使用**预映射的固定段槽位**:复用本进程中预创建者/写者已建立的热段映射(进程内映射表,`hot_keep + 2` 个段),滚动时只切换指向,不反复 `mmap/munmap`(避免 TLB shootdown 打到热核);本进程没有该段映射时退回普通映射;冷进程读者照常映射。
 - **段头读取**:`SegmentHeader` 含原子字段(`committed_len`、`state`、persist 行),不能派生 `FromBytes`/`Immutable`;读者对映射首页做对齐与长度检查后以 `unsafe { &*(ptr as *const SegmentHeader) }` 取引用(`// SAFETY:` 写明:页对齐、4096 B 可读、原子字段 8 B 对齐、映射在引用存活期内不解除),不可变区 0..3072 另以 `zerocopy` 的 `SegmentHeaderFixed` 视图校验 CRC。该 `unsafe` 只在本 crate 的 `layout.rs`。
+- **损坏段不能当作不存在**:枚举 `<10 位数字>.jrn` 只跳过可识别的 `Preparing` 段;头部读不出、magic/CRC 错或截短的文件保留在有序段表中,由 open/poll 明确失败。`Oldest` 不能因此移到后一段,`LastCompleteEvent` 不能因此缩到前一段。
 - 验证回放驱动用 `in_boot_block()` 跳过引导块输入并比对重新生成的引导块;冷读者从 `LatestBoot`/`LatestKeyframe` 自举。
 
 ### persist 与后台维护(persist 线程调用)

@@ -16,7 +16,7 @@ spec: README.md
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
 | 写者 | JNL-008, JNL-010–JNL-038, JNL-063, JNL-068, JNL-120, JNL-121 |
-| 读者 | JNL-002, JNL-008, JNL-012, JNL-074–JNL-088, JNL-103, JNL-118, JNL-125 |
+| 读者 | JNL-002, JNL-008, JNL-012, JNL-074–JNL-088, JNL-103, JNL-118, JNL-125–JNL-126 |
 | persist 与后台维护(persist 线程调用) | JNL-008, JNL-012, JNL-042, JNL-044–JNL-054, JNL-091–JNL-093, JNL-107, JNL-114 |
 | 恢复与校验 | JNL-026, JNL-036, JNL-055, JNL-056, JNL-062–JNL-068, JNL-089, JNL-090, JNL-118, JNL-119, JNL-124 |
 | 持久元数据(engine_epoch 等) | JNL-092, JNL-094–JNL-098, JNL-122 |
@@ -1752,6 +1752,23 @@ spec: README.md
 - 步骤:读完两段,在每次交付 Record/Event 后读取 segment_header
 - 期望:segment_header 的段号与 position 相同,类型为 Seq 且 header_crc32c 等于 compute_crc();实际覆盖段 1 和段 2
 - 实现:`crates/hft-journal/tests/reader.rs::jnl_125_delivered_record_segment_header`
+
+### JNL-126 损坏段头不能从有序输入中消失
+
+- 规则:[读者](README.md#读者)
+- 级别:table
+- 里程碑:M1
+- 前置:mem-backend 写三段已提交 journal,另保留预创建段;Oldest + LastCompleteEvent + OnGap::Error
+- 实现:`crates/hft-journal/tests/reader.rs::jnl_126_corrupt_header_is_not_absent`
+- 共同期望:打开或读取明确失败,不交付受损段或其后的记录,不能返回成功 End/Pending;各位置分别跑三种损坏
+
+| 行 | 受损段 | 损坏方式 |
+|---|---|---|
+| JNL-126.1 | 首段 | magic 首字节置零 |
+| JNL-126.2 | 中间段 | magic 首字节置零 |
+| JNL-126.3 | 尾段 | magic 首字节置零 |
+| JNL-126.4 | 首段、中间段、尾段各一行 | 头部 CRC 翻转 1 bit |
+| JNL-126.5 | 首段、中间段、尾段各一行 | 文件截短为 4000 B |
 
 ## 验收
 

@@ -266,11 +266,13 @@ impl JournalReader {
     fn list(&self) -> BTreeMap<u64, Loc> {
         let mut m: BTreeMap<u64, Loc> = BTreeMap::new();
         for (no, p) in fs::hot_list(&self.hot_jdir) {
-            if let Some((_, st)) = scan::read_header(&p)
-                && st != SegState::Preparing as u32
-            {
-                m.entry(no).or_default().hot = Some(p);
+            if scan::read_header(&p).is_some_and(|(_, st)| st == SegState::Preparing as u32) {
+                continue;
             }
+            // A named segment with an unreadable/corrupt header still exists. Keep it in the
+            // ordered set so open/poll reports the error instead of silently moving Oldest
+            // to a later segment (or moving LastCompleteEvent to an earlier one).
+            m.entry(no).or_default().hot = Some(p);
         }
         for (no, c) in fs::cold_list(&self.cold_jdir) {
             m.entry(no).or_default().cold = Some(c);

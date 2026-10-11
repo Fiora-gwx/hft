@@ -55,6 +55,50 @@ fn jnl_125_delivered_record_segment_header() {
 }
 
 #[test]
+fn jnl_126_corrupt_header_is_not_absent() {
+    for no in [1, 2, 3] {
+        for damage in ["magic", "crc", "short"] {
+            let mut h = H::open0(mem_c0());
+            h.events(2);
+            h.roll(RollReason::Size);
+            h.events(2);
+            h.roll(RollReason::Size);
+            h.events(2);
+            let p = h.seg_path(no);
+            match damage {
+                "magic" => testing::poke(&p, 0, &[0]).unwrap(),
+                "crc" => {
+                    let b = h.seg(no)[3068] ^ 1;
+                    testing::poke(&p, 3068, &[b]).unwrap();
+                }
+                "short" => testing::truncate(&p, 4000).unwrap(),
+                _ => unreachable!(),
+            }
+            let mut cfg = h.reader_cfg(StartAt::Oldest);
+            cfg.end = EndAt::LastCompleteEvent;
+            let mut r = match JournalReader::open(&cfg) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            let mut failed = false;
+            for _ in 0..100 {
+                match r.poll() {
+                    Next::Err(_) | Next::Gap(_) => {
+                        failed = true;
+                        break;
+                    }
+                    Next::Record(_) | Next::Event(_) => {
+                        assert!(r.position().segment_no < no, "passed bad segment {no}/{damage}");
+                    }
+                    other => panic!("bad segment {no}/{damage} returned {other:?}"),
+                }
+            }
+            assert!(failed, "bad segment {no}/{damage} was silently omitted");
+        }
+    }
+}
+
+#[test]
 fn jnl_074_tail_bounded_by_committed() {
     let mut h = H::open0(mem_c0());
     let mut r = h.reader(StartAt::Tail);
