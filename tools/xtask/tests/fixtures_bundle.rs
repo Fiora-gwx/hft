@@ -358,7 +358,12 @@ fn tool_204_bundle_lock_and_links_never_touch_external_targets() {
             let f = Fixture::empty("bundle-links");
             cached(&f);
             f.write("outside/sentinel", "unchanged");
-            let p = f.path(&format!("target/fixtures-cache/bundle/{member}"));
+            // symlink() needs the entry itself, not a trailing-slash directory dereference.
+            let p = if member.is_empty() {
+                f.path("target/fixtures-cache/bundle")
+            } else {
+                f.path("target/fixtures-cache/bundle").join(member)
+            };
             let dir = p.is_dir();
             if dir {
                 fs::remove_dir_all(&p).unwrap();
