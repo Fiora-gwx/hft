@@ -244,7 +244,7 @@ DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xt
 
 `SeqSut::observe` 按 OMS 的有效槽号 `1..=n_slots` 抄录每张表的占用槽与墓碑,包含最后一个槽;槽 0 不进入观察结果。`Obs.tables` 的 `free` 与 `Obs.slots` 的同表占用数相加等于 `capacity`(TK-101)。墓碑包括已回收为 Free 的槽当前代数,以及按 OMS 配置保留的此前代数;代数回绕时跳过保留值 0(TK-102)。
 
-`fee_in_base` 在真实引擎与 SimExchange 使用同一份世界配置:现货 venue 的全部 inst 共用一个基础资产时映射为 `Configured(asset)`,买卖均扣该资产;永续、多基础资产或空 venue 拒绝启动。INV-8 的费用补差从 Input 与事件前的完整订单身份、group 和对冲计划独立计算。链接以第一腿 epoch/slot/gen 与创建事件区分,复用前的累计量按 group、对冲腿与比例归并到 `Obs.hedge_history`,不混入当前链接;已有历史桶不可消失,累计量不可倒退,具体断言归 [INV-8](../../docs/tests/invariants.md#inv-8-onfill-第二腿的对冲数量之和等于触发它的第一腿累计净成交量);重启沿已提交 journal 边界延续观察。诊断缓冲有界,溢出使检查失败(TK-106)。
+`fee_in_base` 在真实引擎与 SimExchange 使用同一份世界配置:现货 venue 的全部 inst 共用一个基础资产时映射为 `Configured(asset)`,买卖均扣该资产;永续、多基础资产或空 venue 拒绝启动。INV-8 的费用补差从 Input 与事件前的完整订单身份、group 和对冲计划独立计算;已计成交量但尚未付费的迟到 Fill/PartialFill,按事件前的成交水位与费用水位识别其纯费用补差。链接以第一腿 epoch/slot/gen 与创建事件区分,复用前的累计量按 group、对冲腿与比例归并到 `Obs.hedge_history`,不混入当前链接;已有历史桶不可消失,累计量不可倒退,具体断言归 [INV-8](../../docs/tests/invariants.md#inv-8-onfill-第二腿的对冲数量之和等于触发它的第一腿累计净成交量);重启沿已提交 journal 边界延续观察。诊断缓冲有界,溢出使检查失败(TK-106)。
 
 真实引擎的 `EventStep` 按实际 Input 顺序保存前后状态,包括内部定时器与重启引导输入;世界步只用于交换所真值和重建比较。每个世界步最多 4096 条 Input 观察,每条最多 1024 条 journal 记录与 512 帧,历史比例组合最多 4096 行,超限显式失败。`ObservationRequirements` 从世界配置列出适用账户、组、venue 与 inst,缺少模式、Kill、保证金、执行单元、在途量或 New 决策观察时对应检查失败,不能用空表跳过。
 

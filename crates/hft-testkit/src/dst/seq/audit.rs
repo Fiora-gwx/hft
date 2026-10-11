@@ -264,21 +264,31 @@ fn fee_correction(e: &Engine, input: &InputSlot) -> Option<(GroupKey, i128)> {
         return None;
     }
     let ev = input.read::<OrderEvent>()?;
-    if ev.what != OrderEventKind::FeeOnly || ev.fee.0 == 0 {
+    if ev.fee.0 == 0 {
         return None;
     }
-    let matched = e
+    let current = e
         .oms
         .raw_slot(ev.venue, ev.account, ev.slot.0)
-        .filter(|(s, _, _)| s.state != OrderState::Free && s.r#gen == ev.r#gen && s.epoch == ev.epoch)
-        .map(|(s, _, _)| (s.group, s.inst))
-        .or_else(|| {
+        .filter(|(s, _, _)| s.state != OrderState::Free && s.r#gen == ev.r#gen && s.epoch == ev.epoch);
+    let (group, inst) = if ev.what == OrderEventKind::FeeOnly {
+        current.map(|(s, _, _)| (s.group, s.inst)).or_else(|| {
             e.oms
                 .tomb(ev.venue, ev.account, ev.slot.0, ev.r#gen)
                 .filter(|t| t.epoch == ev.epoch)
                 .map(|t| (t.group, t.inst))
-        })?;
-    let (group, inst) = matched;
+        })?
+    } else if matches!(ev.what, OrderEventKind::PartialFill | OrderEventKind::Fill) {
+        // A cancel/query may have reported this quantity before its fill report. Only a
+        // previously unpaid cumulative quantity can now contribute a fee-only correction.
+        let (s, ext, _) = current?;
+        if ev.cum_filled.0 <= ext.fee_cum.0 || ev.cum_filled.0 > s.filled.0 {
+            return None;
+        }
+        (s.group, s.inst)
+    } else {
+        return None;
+    };
     if group.0 == 0 || ev.venue.market() != Some(MarketKind::Spot) || e.rd.inst(inst).asset != ev.fee_asset {
         return None;
     }

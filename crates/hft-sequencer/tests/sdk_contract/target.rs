@@ -875,7 +875,15 @@ fn seq_375_late_fill_resume_verify() {
             Rerun::default(),
         )
         .unwrap();
-    h.steady();
+    h.bring_up(false);
+    let (slot, _, _) =
+        h.s.engine()
+            .oms
+            .raw_slot(first.venue, first.account, first.slot.0)
+            .unwrap();
+    assert_eq!(slot.state, hft_oms::OrderState::Unknown);
+    let link = h.s.engine().oms.link(slot.link_id).unwrap();
+    assert_ne!(link.flags & hft_oms::link_flags::RESUME_HOLD, 0);
     let snapshot = h.keyframe();
     let m = h.mark();
     let mut fill = order_event(&first, hft_event::OrderEventKind::Fill, first_epoch);

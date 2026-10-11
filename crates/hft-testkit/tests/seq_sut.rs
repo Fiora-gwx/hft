@@ -9,7 +9,7 @@ use crate::support::cfg;
 
 type E = SeqSut<TestStrategies>;
 
-fn show(r: &hft_testkit::dst::RunRecord) -> String {
+pub(crate) fn show(r: &hft_testkit::dst::RunRecord) -> String {
     match &r.outcome {
         DstOutcome::Pass { .. } => format!("pass after {} steps", r.steps_run),
         DstOutcome::Fail(f) => {

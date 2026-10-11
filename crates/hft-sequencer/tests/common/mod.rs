@@ -1431,6 +1431,11 @@ impl<S: StrategySet> H<S> {
     /// The "steady" state of B0: EngineClock, every gate released, Live mode, BBO connections Up
     /// with every inst on slot 0, quotes on a1 / b1.
     pub fn steady(&mut self) {
+        self.bring_up(true);
+    }
+
+    /// Journal the venue startup inputs; recovery can retain the already restored modes.
+    pub fn bring_up(&mut self, set_modes: bool) {
         self.step();
         let t = self.now();
         for v in [A, B] {
@@ -1514,6 +1519,9 @@ impl<S: StrategySet> H<S> {
             self.quote(InstId(23), "10.01", "10.02");
         }
         self.run();
+        if !set_modes {
+            return;
+        }
         let cells: Vec<(StrategyId, AccountId, GroupId)> = self
             .s
             .instances()

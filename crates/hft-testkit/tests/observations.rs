@@ -15,6 +15,7 @@ thread_local! {
     static SAMPLES: RefCell<Vec<EventStep>> = const { RefCell::new(Vec::new()) };
     static TIMERS: RefCell<u64> = const { RefCell::new(0) };
     static RESTARTS: RefCell<u64> = const { RefCell::new(0) };
+    static LATE_FILL_FEES: RefCell<u64> = const { RefCell::new(0) };
 }
 struct Observed<
     const FORCE: bool = false,
@@ -24,6 +25,20 @@ struct Observed<
 
 fn capture(events: &[EventStep]) {
     for e in events {
+        if e.records.first().is_some_and(|r| {
+            r.try_read::<hft_event::OrderEvent>().is_some_and(|ev| {
+                matches!(
+                    ev.what,
+                    hft_event::OrderEventKind::Fill | hft_event::OrderEventKind::PartialFill
+                )
+            })
+        }) && e.after.hedge_balances.iter().any(|h| {
+            e.before.hedge_balances.iter().any(|b| {
+                (b.account, b.group, b.inst) == (h.account, h.group, h.inst) && b.fee_adjust != h.fee_adjust
+            })
+        }) {
+            LATE_FILL_FEES.with(|n| *n.borrow_mut() += 1);
+        }
         if e.records.first().is_some_and(|r| r.kind == EventKind::TIMER) {
             TIMERS.with(|n| *n.borrow_mut() += 1);
         }
@@ -53,7 +68,7 @@ fn tk_111_transport_cancel_needs_decision_evidence() {
         .unwrap();
     let c = suite.config(0xcef1_45cc_d5e6_8192);
     let r = run_record::<Observed>(&c);
-    assert!(r.outcome.is_pass(), "{:?}", r.outcome);
+    assert!(r.outcome.is_pass(), "{}", crate::seq_sut::show(&r));
     let samples = SAMPLES.with(|s| s.take());
     let e = samples
         .iter()
@@ -91,6 +106,7 @@ impl<const FORCE: bool, S: hft_strategy_sdk::StrategySet, const RECOVER: bool> S
         SAMPLES.with(|s| s.borrow_mut().clear());
         TIMERS.with(|n| *n.borrow_mut() = 0);
         RESTARTS.with(|n| *n.borrow_mut() = 0);
+        LATE_FILL_FEES.with(|n| *n.borrow_mut() = 0);
         SeqSut::<S>::boot(c).map(|e| Self(e, false, 0))
     }
     fn process(&mut self, n: u64, t: u64, i: &InputRec, o: &mut StepOut) {
@@ -240,9 +256,13 @@ impl<const FORCE: bool, S: hft_strategy_sdk::StrategySet, const RECOVER: bool> S
 fn tk_110_real_fee_history_across_restarts() {
     let c = crate::fee_cycle::config(6_000);
     let r = run_record::<Observed<false, crate::fee_cycle::FeeStrategies, true>>(&c);
-    assert!(r.outcome.is_pass(), "{:?}", r.outcome);
+    assert!(r.outcome.is_pass(), "{}", crate::seq_sut::show(&r));
     assert_eq!(r.steps_run, 10_000);
     assert_eq!(RESTARTS.with(|n| *n.borrow()), 4);
+    assert!(
+        LATE_FILL_FEES.with(|n| *n.borrow() > 0),
+        "late fill fee not exercised"
+    );
     assert!(r.obs.hedge_history.iter().any(|h| h.links > 0));
     assert!(r.obs.hedge_balances.iter().any(|h| h.fee_adjust != 0));
 }
@@ -251,7 +271,7 @@ fn tk_110_real_fee_history_across_restarts() {
 fn tk_109_real_force_target_reference() {
     let c = crate::support::cfg(1, 2_000, &[], 0, &[]);
     let r = run_record::<Observed<true>>(&c);
-    assert!(r.outcome.is_pass(), "{:?}", r.outcome);
+    assert!(r.outcome.is_pass(), "{}", crate::seq_sut::show(&r));
     let samples = SAMPLES.with(|s| s.take());
     let e = samples
         .iter()
@@ -294,7 +314,7 @@ fn check(id: InvId, e: &EventStep) -> Result<(), (InvId, String)> {
 fn tk_107_real_observations_and_counterexamples() {
     let c = crate::support::cfg(1, 2_000, &[], 0, &[]);
     let r = run_record::<Observed>(&c);
-    assert!(r.outcome.is_pass(), "{:?}", r.outcome);
+    assert!(r.outcome.is_pass(), "{}", crate::seq_sut::show(&r));
     assert!(
         TIMERS.with(|n| *n.borrow() > 0),
         "internal Timer was not observed"

@@ -89,3 +89,5 @@
 | 2026-10-11 | 恢复后第一腿成交与 Unknown 解除同事件时不重复发 SecondRetry;INV-1 允许有成功 Cancel 决策支持的 PendingCancel 迁移;保存两条完整强度 storage 回归种子 | CI 38103614553、OMS-464、SEQ-375、TK-111 | crates/hft-oms、crates/hft-sequencer、crates/hft-testkit、docs/tests/invariants.md、fixtures/dst-seeds/storage.txt | 否 |
 
 | 2026-10-11 | INV-8 对相邻 Input 的退休历史检查桶存在、行唯一和累计量单调;补费用补差重复与整桶丢失反例 | TK-106,只校验两边等式不能识别两边历史一起丢失 | crates/hft-testkit、docs/tests/invariants.md | 否 |
+
+| 2026-10-11 | DST 独立费用补差覆盖成交量已由撤单或查询回报记入、费用随后随 Fill/PartialFill 到达的情况,按事件前完整身份和费用水位识别;重启夹具保留恢复后的运行模式 | TK-110、SEQ-375,CI 38104966722 | crates/hft-testkit、crates/hft-sequencer/tests | 否 |
