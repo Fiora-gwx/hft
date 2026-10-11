@@ -956,7 +956,7 @@ spec: README.md
 |---|---|---|
 | PY-088.1 | `refdata` | dict;账户表含 label `bn-1`(`AccountId(1)`、`kind = Live`);inst 101 的 `px_exp = −2` |
 | PY-088.2 | `risk` | dict;`bytes` 为该 blob 的原始字节(`risk-params-v2`),SHA-256 = `sha256`(hft-risk 提供 `RiskParams` blob 编解码后改为解码字段) |
-| PY-088.3 | `engine` | dict;`sections` 含 `ledger`,为 512 字节的原始行(各节解码归各自 crate) |
+| PY-088.3 | `engine` | dict;`sections` 含 `ledger` 的 512 字节原始行及 `assembly` 的 16 字节样例行(field=1,value=0);各节解码归各自 crate |
 | PY-088.4 | `strategy_params["alpha/bn-1"]` | `hdr` 含 `strategy = 1`、`account = 1`、`kind_id`、`schema_id`、`schema_ver`、`source`、`version = 8`;`groups` 为 `GroupSpec` 字段的列表;`body` 为 `bytes`,长度 = `hdr.body_len` |
 | PY-088.5 | `host_manifest` | dict,`bytes` 的 SHA-256 = 该项 `sha256` |
 | PY-088.6 | `sim_config` | 不在结果中(prod 实例没有该 blob) |

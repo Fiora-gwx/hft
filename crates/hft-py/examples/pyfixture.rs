@@ -919,7 +919,7 @@ pub fn sp_blob(version: u64) -> Vec<u8> {
     v
 }
 
-/// ECF1 with the ledger section (`LedgerConfig::default`).
+/// ECF1 with ledger defaults and an assembly row for the cold-reader projection test.
 pub fn engine_blob(version: u64) -> Vec<u8> {
     use hft_refdata::{EcfBuilder, EngineSection};
     let row = hft_ledger::LedgerConfig::default().to_row();
@@ -932,6 +932,9 @@ pub fn engine_blob(version: u64) -> Vec<u8> {
         1,
         row.as_bytes().to_vec(),
     );
+    let mut assembly = [0u8; 16];
+    assembly[0] = 1; // Assembly field 1: role_prod = false; hft-py exposes raw section bytes.
+    b.section(EngineSection::Assembly, 1, 16, 1, assembly.to_vec());
     b.finish()
 }
 

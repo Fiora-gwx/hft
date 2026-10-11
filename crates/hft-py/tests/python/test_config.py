@@ -90,6 +90,7 @@ def test_py_088_blob_shapes(jcfg: Cfg) -> None:
     assert risk["bytes"] == b"risk-params-v2" and hashlib.sha256(risk["bytes"]).hexdigest() == risk["sha256"], "PY-088.2"
     eng = c["engine"]
     assert "ledger" in eng["sections"] and len(eng["sections"]["ledger"]) == 512, "PY-088.3"
+    assert eng["sections"]["assembly"] == b"\x01" + bytes(15), "PY-088.3 assembly"
     sp = c["strategy_params"]["alpha/bn-1"]
     h = sp["hdr"]
     assert (h["strategy"], h["account"], h["kind_id"], h["schema_id"], h["schema_ver"], h["source"], h["version"]) == (1, 1, 65281, 65281, 2, "Manual", 8), "PY-088.4"

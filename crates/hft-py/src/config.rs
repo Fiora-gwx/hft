@@ -295,6 +295,7 @@ fn section_name(s: EngineSection) -> &'static str {
         EngineSection::Sequencer => "sequencer",
         EngineSection::Conn => "conn",
         EngineSection::Exec => "exec",
+        EngineSection::Assembly => "assembly",
     }
 }
 
