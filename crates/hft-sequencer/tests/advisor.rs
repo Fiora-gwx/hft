@@ -752,6 +752,16 @@ fn seq_402_each_checkpoint_releases_at_its_own_record_boundary() {
     };
     h.push(RingId::Advice, &note);
     h.run();
+    // A standalone Meta note is published with the following complete Input. Keep its
+    // position as the checkpoint boundary, but wait for that publication before loading it.
+    let pending = h
+        .recs()
+        .iter()
+        .find(|r| r.kind == EventKind::NOTE && r.read::<Note>().is_some_and(|n| n.code == note.code))
+        .expect("AdvisorStats note was recorded")
+        .seq;
+    assert!(committed(h.j()).recs.iter().all(|r| r.seq < pending));
+    quote(&mut h); // S2 must have its checkpoint parameters before this following Input.
     // No Model event occurs between the saved state and this Meta record. A caller that
     // records the consumed journal boundary may legitimately put last_seq here.
     let l2 = committed(h.j())
@@ -759,11 +769,11 @@ fn seq_402_each_checkpoint_releases_at_its_own_record_boundary() {
         .iter()
         .rev()
         .find(|r| r.kind == EventKind::NOTE && r.read::<Note>().is_some_and(|n| n.code == note.code))
-        .unwrap()
+        .expect("AdvisorStats note was published with the following BBO")
         .seq;
+    assert_eq!(l2, pending);
     assert!(l1 < second.0.last_seq && second.0.last_seq < l2);
     second.0.last_seq = l2;
-    quote(&mut h); // S2 must have its own checkpoint parameters here.
     let change2 = set(&mut h, S2, 18, 18);
     quote(&mut h);
     catch_up(&mut continuous, &h);

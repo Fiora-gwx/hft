@@ -5566,8 +5566,8 @@ spec: README.md
 - 级别:integ
 - 里程碑:M2
 - 前置:B0 的 s1、s2 都订阅 a1 的 Model BBO;初始参数阈值分别 7、17;advisor batch = 65535
-- 步骤:先保存 s1 的检查点,投递一条 BBO、将 s1 参数改为 8、再投递 BBO;随后保存 s2 的检查点,把未改变 Model 状态的末条 AdvisorStats Meta 作为其 last_seq;再投递 BBO、将 s2 参数改为 18、再投递 BBO。两个 Model 从这两份不同边界的检查点共同恢复
-- 期望:两实例的参数调用分别恰为 7→8、17→18;每条回调仅在本实例 last_seq 之后,看到该事件生效参数;Meta 边界不使追赶卡住或越过下一 Input;最终检查点与不中断运行一致,引擎 journal 严格回放无分歧
+- 步骤:先保存 s1 的检查点,投递一条 BBO、将 s1 参数改为 8、再投递 BBO;随后保存 s2 的检查点,把未改变 Model 状态的末条 AdvisorStats Meta 作为其 last_seq;再投递 BBO 使该 Meta 随完整输入提交、将 s2 参数改为 18、再投递 BBO。两个 Model 从这两份不同边界的检查点共同恢复
+- 期望:Meta 提交前不向恢复读者可见,后继 BBO 完整提交后可见;两实例的参数调用分别恰为 7→8、17→18;每条回调仅在本实例 last_seq 之后,看到该事件生效参数;Meta 边界不使追赶卡住或越过下一 Input;最终检查点与不中断运行一致,引擎 journal 严格回放无分歧
 - 实现:`crates/hft-sequencer/tests/advisor.rs::seq_402_each_checkpoint_releases_at_its_own_record_boundary`
 
 ## 验收
