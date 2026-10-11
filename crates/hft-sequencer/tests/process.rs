@@ -1177,7 +1177,7 @@ fn seq_383_price_round_notes_are_journaled_before_snapshots() {
     for case in 0..3 {
         reset_script();
         let mut b = b0();
-        b.setup_edit.push(|s| s.ledger.round_dust = n("50"));
+        b.setup_edit.push(|s| s.ledger.round_dust_notional = n("50"));
         if case == 2 {
             b.rd.insts.iter_mut().find(|i| i.id == A1).unwrap().l2_depth = 5;
         }

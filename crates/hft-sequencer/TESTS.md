@@ -5299,7 +5299,7 @@ spec: README.md
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
 - 级别:replay
 - 里程碑:M2
-- 前置:B0 稳态,账本 round_dust = 50 USDT,g1 对应腿只买入 0.001 BTC;L2 行为现货腿启用 5 档;变价前写关键帧
+- 前置:B0 稳态,账本 round_dust_notional = 50 USDT,g1 对应腿只买入 0.001 BTC;L2 行为现货腿启用 5 档;变价前写关键帧
 - 输入:三行分别为现货 BBO、永续 MarkPrice、现货 TopN L2Snapshot,估值从不低于 50000 降至 49999
 - 步骤:检查原始行情事件的注记;写关键帧并投递对账汇总;从变价前后快照分别验证回放
 - 期望:没有 OrderDecision,持仓仍为 0.001;各行恰好一条 RoundClosed,开量 0.001、平量 0,与原始行情同一 EVENT_END;ledger 无待写注记且轮次 PnL 清零;后续对账不重复写出;两处快照起步均逐字节一致
