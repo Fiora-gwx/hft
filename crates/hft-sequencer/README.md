@@ -649,7 +649,7 @@ advice 环元素 = `AdviceHdr { strategy, account, local_kind, group, len, basis
 1. 确定受影响范围:不一致的记录带 (venue, account)(`OrderDecision`、`ExecDecision`、`FundingSettle`)→ 该 (venue, account);不带账户的记录(`CmdResult`、无账户的 `Note`、快照哈希)→ 全部 (venue, account)。
 2. 恢复结束时对每个受影响的 (venue, account):`oms.force_unknown(venue, account)` 把**全部**非终态槽(含 Live;范围归 [hft-oms](../hft-oms/README.md))置 `Unknown` 并查询;该 (venue, account) 的上一 epoch 回报一律按成交证据应用(迟到成交按墓碑入账并报 P0)。
 3. 受影响账户置 `RECOVER_MISMATCH`:禁用自动解除 Recovery;`RECONCILED` 需要该账户每个 venue 一组 `EpochStart` 之后的报告满足严格条件(未知挂单由对账以孤儿单报出,须先撤单或处置)。
-4. 每个受影响的 (venue, account) 恰好写一条 `Note{RecoverMismatch, seq, venue, account}`(`seq` = 使它受影响的第一条不一致记录的 seq),级别 **P0**;这些 Note 在 Recovery 引导块之后、`EngineClock` 之前写成一个事件(引导块的快照已含恢复结束的结果,新段的验证回放从该快照起步)。
+4. 每个受影响的 (venue, account) 恰好写一条 `Note{RecoverMismatch, seq, venue, account}`(`seq` = 使它受影响的第一条不一致记录的 seq),级别 **P0**;这些 Note 在 Recovery 引导块之后、`EngineClock` 之前写成一个事件,追加成功后按顺序计入 `out_hash` 的下一区间(引导块的快照已含恢复结束的结果,新段的验证回放从该快照起步)。
 
 ### 毒丸输入隔离
 

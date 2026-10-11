@@ -45,7 +45,7 @@ spec: README.md
 | 定时器 | SEQ-079、SEQ-215、SEQ-234–SEQ-241、SEQ-261、SEQ-349–SEQ-351 |
 | 快照 | SEQ-017、SEQ-085、SEQ-088–SEQ-090、SEQ-109、SEQ-112、SEQ-120、SEQ-164、SEQ-190、SEQ-242–SEQ-248、SEQ-250–SEQ-255、SEQ-337、SEQ-356 |
 | 冷启动恢复(RecoverDriver) | SEQ-108、SEQ-205、SEQ-206、SEQ-237、SEQ-256–SEQ-267、SEQ-342、SEQ-366 |
-| 恢复时决策不一致 | SEQ-268、SEQ-269、SEQ-362 |
+| 恢复时决策不一致 | SEQ-268、SEQ-269、SEQ-362、SEQ-396 |
 | 毒丸输入隔离 | SEQ-270–SEQ-272 |
 | 版本变化与回滚 | SEQ-257、SEQ-272–SEQ-274 |
 | 启动闸门 | SEQ-094、SEQ-157、SEQ-160、SEQ-207、SEQ-210、SEQ-275、SEQ-345 |
@@ -53,7 +53,7 @@ spec: README.md
 | 命令路径 | SEQ-009、SEQ-040、SEQ-122、SEQ-185、SEQ-186、SEQ-189、SEQ-211、SEQ-235、SEQ-255、SEQ-278–SEQ-304、SEQ-348、SEQ-354、SEQ-355、SEQ-357、SEQ-358、SEQ-365 |
 | Drain | SEQ-187、SEQ-209、SEQ-222、SEQ-284、SEQ-305–SEQ-309、SEQ-370 |
 | 确定性规则 | SEQ-043、SEQ-053、SEQ-076、SEQ-097、SEQ-254、SEQ-267、SEQ-310–SEQ-313、SEQ-344 |
-| 状态哈希 | SEQ-054、SEQ-245、SEQ-247、SEQ-249、SEQ-311、SEQ-314 |
+| 状态哈希 | SEQ-054、SEQ-245、SEQ-247、SEQ-249、SEQ-311、SEQ-314、SEQ-396 |
 | 规划源文件 | SEQ-310、SEQ-317–SEQ-339 |
 | 延迟与资源契约 | SEQ-315–SEQ-339 |
 | 测试与验收 | 不适用:非规范 |
@@ -5490,6 +5490,16 @@ spec: README.md
 - 步骤:以两倍频率、FROM_SNAPSHOT/TAIL_LOST 从首次快照恢复且不重放尾部;从新 Recovery 快照独立装配并逐字节验证其后输出;分别将空锚点快照放入普通 Hourly 引导块、标成 Keyframe、在其前插入 EngineClock 或 BootDone
 - 期望:旧运行尾部的 EngineClock 不妨碍新进程引导块保留全零锚点,装配使用新频率且回放一致;四种反例均报 SnapshotUndecodable 的节 25
 - 实现:`crates/hft-sequencer/tests/config_blob.rs::seq_395_unstarted_clock_is_local_to_process_boot`
+
+### SEQ-396 恢复注记计入引导快照之后的输出区间
+
+- 规则:[恢复时决策不一致](README.md#恢复时决策不一致)、[状态哈希](README.md#状态哈希)
+- 级别:replay
+- 里程碑:M2
+- 输入:SEQ-268 的真实恢复日志,分别篡改 OrderDecision 与无账户 CmdResult,正式恢复产生一条或多条 RecoverMismatch 注记
+- 步骤:恢复后写两条关键帧;独立按 schema 屏蔽测量字段与传输标志,累计引导快照之后的 Output;另算遗漏恢复注记的反例哈希,从恢复快照严格验证后续运行
+- 期望:两个区间的哈希均与日志一致,首区间与遗漏注记的哈希不同;注记数量等于受影响的账户/venue 数,恢复后的逐字节回放无分歧
+- 实现:`crates/hft-sequencer/tests/mismatch.rs::seq_396_recovery_notes_belong_to_next_output_interval`
 
 ## 验收
 

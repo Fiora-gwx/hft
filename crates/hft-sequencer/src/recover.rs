@@ -15,7 +15,7 @@ use hft_risk::mode::{ModeInput, RecoveryFlags};
 use hft_rt::Heartbeat;
 use hft_strategy_sdk::{RefView, SnapshotReader, StrategyInstance, StrategySet};
 use hft_types::{AccountId, CapSource, GroupId, InstId, Tsc, VenueId};
-use zerocopy::FromBytes;
+use zerocopy::{FromBytes, IntoBytes};
 
 use crate::driver::replay::{Log, Mismatch, ReplayDriver, ReplayMode};
 use crate::driver::{Driver, DriverMode};
@@ -708,6 +708,9 @@ pub(crate) fn boot_journal<D: Driver<S>, S: StrategySet>(
         for n in notes.iter() {
             j.append(RecordFlags(0), t, n)
                 .map_err(|_| BootError::Journal(JournalErr::Chain))?;
+            seq.e
+                .out_hash
+                .add(EventKind::NOTE, RecordFlags(0), &[n.as_bytes()]);
         }
         j.end_event();
         j.publish();

@@ -12,7 +12,7 @@ use crate::common::*;
 
 // Independent of OutHash and its reset/stamping helpers. Only the event schema supplies the
 // measurement fields and transport flag bits excluded from the byte stream.
-fn accumulate(hash: &mut Xxh3, r: &MemRecord) {
+pub(crate) fn accumulate(hash: &mut Xxh3, r: &MemRecord) {
     let mut body = r.body.clone();
     for (kind, off, len) in hft_event::MEASURE_MASK {
         if *kind == r.kind {

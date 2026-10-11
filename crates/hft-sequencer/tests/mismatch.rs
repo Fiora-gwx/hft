@@ -1,4 +1,4 @@
-//! Decision mismatches during recovery (TESTS.md SEQ-268, SEQ-269, SEQ-362).
+//! Decision mismatches during recovery (TESTS.md SEQ-268, SEQ-269, SEQ-362, SEQ-396).
 
 use hft_event::EventKind;
 use hft_sequencer::{RecoveryFlags, SnapshotSel};
@@ -108,4 +108,54 @@ fn seq_362_one_note_per_pair() {
     keys.dedup();
     assert_eq!(keys.len(), n);
     assert_eq!(n, h.s.engine().recovery_forced().len());
+}
+
+#[test]
+fn seq_396_recovery_notes_belong_to_next_output_interval() {
+    for kind in [EventKind::ORDER_DECISION, EventKind::CMD_RESULT] {
+        let (mut h, _) = tampered(kind);
+        let start = h.snapshots().last().unwrap().seq;
+        assert_eq!(snap(h.snapshots().last().unwrap()).0.purpose, 4);
+        let expected_notes = h.s.engine().recovery_forced().len();
+        assert!(expected_notes > 0);
+        h.keyframe();
+        h.keyframe();
+        let mut full = xxhash_rust::xxh3::Xxh3::new();
+        let mut without_notes = xxhash_rust::xxh3::Xxh3::new();
+        let mut note_count = 0;
+        let mut snapshots = 0;
+        for r in h.j().records().filter(|r| r.seq > start) {
+            if r.kind == EventKind::STATE_SNAPSHOT {
+                let actual = snap(r).0.out_hash;
+                assert_eq!(actual, full.digest128().to_le_bytes(), "{kind:?}, seq {}", r.seq);
+                if snapshots == 0 {
+                    assert_ne!(
+                        actual,
+                        without_notes.digest128().to_le_bytes(),
+                        "recovery Notes were omitted"
+                    );
+                }
+                full.reset();
+                without_notes.reset();
+                snapshots += 1;
+            } else if r.role() == hft_event::Role::Output {
+                crate::hash::accumulate(&mut full, r);
+                let recovery_note = r.kind == EventKind::NOTE
+                    && r.read::<hft_event::Note>().is_some_and(|n| {
+                        n.code == hft_sequencer::codes::seq_note(hft_sequencer::codes::note::RECOVER_MISMATCH)
+                    });
+                if recovery_note {
+                    note_count += 1;
+                } else {
+                    crate::hash::accumulate(&mut without_notes, r);
+                }
+            }
+        }
+        assert_eq!(note_count, expected_notes);
+        assert_eq!(snapshots, 2);
+        assert!(
+            h.verify_from(Some(start)).is_empty(),
+            "recovery run must verify strictly"
+        );
+    }
 }
