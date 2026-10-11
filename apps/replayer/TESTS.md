@@ -671,7 +671,7 @@ spec: README.md
 - 规则:[verify](README.md#verify)
 - 级别:proc
 - 里程碑:M2
-- 前置:真实 LiveDriver、JournalWriter 与 advisor 在虚拟时间生成的封闭 journal:实例编号为 9,Drain 后重启时路径节被丢弃,advisor 写 `Note{source = Advisor, code = ModelPathReset, strategy = tsa, v[0] = 1/2(两种原因各一行), v[1] = L, v[2] = 60 000}`;journal 中重启后的 Advice 在 60 s 引擎时间内与连续运行不同;回放时给出 `last_seq = L`、路径节版本与当前一致的检查点
+- 前置:真实 LiveDriver、JournalWriter 与 advisor 在虚拟时间生成的封闭 journal:稠密实例目录 1–9,仅实例 9 绑定账户,组 ID 前缀同为 9。Drain 后重启时路径节被丢弃,advisor 写 `Note{source = Advisor, code = ModelPathReset, strategy = tsa, v[0] = 1/2(两种原因各一行), v[1] = L, v[2] = 60 000}`;journal 中重启后的 Advice 在 60 s 引擎时间内与连续运行不同;回放时给出 `last_seq = L`、路径节版本与当前一致的检查点
 - 步骤:
   1. `verify --journal <合成> --advice recompute --model-checkpoint <检查点> --report $OUT/r.json`
 - 期望:

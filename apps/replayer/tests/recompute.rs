@@ -125,14 +125,14 @@ fn check(spec: ModelRestart, path_v2: bool) {
     assert_eq!(std::fs::read(&cp).unwrap(), bytes);
     // A checkpoint before the first selected process still supplies its Model origin.
     // Its reset Note is before the selected Input, but its rebuild interval remains active.
+    let reset_seq = log.recs.iter().find(|r| is_reset(r).is_some()).unwrap().seq;
     let window = log
         .recs
         .iter()
-        .filter(|r| r.kind == EventKind::ENGINE_CLOCK)
-        .nth(1)
+        .find(|r| r.kind == EventKind::BBO && r.seq > reset_seq)
         .unwrap()
-        .seq
-        + 2;
+        .seq;
+    assert!(c.key.last_seq < reset_seq && reset_seq < window && window < points[0]);
     let window_count = log
         .recs
         .iter()

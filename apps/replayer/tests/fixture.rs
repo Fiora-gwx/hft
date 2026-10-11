@@ -597,6 +597,7 @@ fn create_with_restart<S: StrategySet>(
         use hft_strategy_sdk::params::{RawParams, encode_body};
         world.strategies[0].instance = hft_types::StrategyId(9);
         world.groups[0].instance = world.strategies[0].instance;
+        world.groups[0].group = hft_types::GroupId::compose(world.strategies[0].instance, 1).unwrap();
         world.strategies[0].params = encode_body(
             S::kinds()[0].schema,
             world.groups.len() as u16,
@@ -607,9 +608,23 @@ fn create_with_restart<S: StrategySet>(
         )
         .unwrap();
     }
+    // The refdata catalog has dense instance IDs. Earlier identities are reserved but
+    // unbound; only the real world's instance receives parameters or owns an account.
+    let mut catalog = world.clone();
+    if model_restarts.is_some() {
+        let active = world.strategies[0].clone();
+        for id in 1..active.instance.0 {
+            let mut reserved = active.clone();
+            reserved.instance = hft_types::StrategyId(id);
+            reserved.account = AccountId(0);
+            reserved.params.clear();
+            catalog.strategies.push(reserved);
+        }
+        catalog.strategies.sort_by_key(|s| s.instance.0);
+    }
     let rd_blob = if model_hours.is_some() {
         build::refdata_blob_with_names(
-            &world,
+            &catalog,
             false,
             &[(world.strategies[0].instance, "tsa")],
             &[(world.accounts[0].id, "acct-l")],
@@ -619,6 +634,12 @@ fn create_with_restart<S: StrategySet>(
         build::refdata_blob(&world, false).unwrap()
     };
     let rd = build::load_refdata(&rd_blob).unwrap();
+    if model_restarts.is_some() {
+        assert_eq!(rd.instances_in_order().len(), 9);
+        for id in 1..9 {
+            assert!(rd.account_of(hft_types::StrategyId(id)).is_none());
+        }
+    }
     if model_hours.is_some() {
         assert_eq!(rd.account(world.accounts[0].id).label.as_ref(), "acct-l");
         assert_eq!(
