@@ -19,7 +19,7 @@ spec: README.md
 | 2. proptest 生成器 | TK-010–TK-021 |
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
-| 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TK-117–TK-118、TOOL-024、TOOL-027–TOOL-029 |
+| 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TK-117–TK-119、TOOL-024、TOOL-027–TOOL-029 |
 | 6. DST 框架 | TK-043–TK-070、TK-100–TK-116 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
 | 8. hft-dst 运行器 | TK-075–TK-088 |
@@ -1537,6 +1537,23 @@ spec: README.md
 - 步骤:1 秒、2 秒的 bid 分别为 101、102;比较规范布局 JSON、check_layout 和路径字节;恢复后重写,再向桶 1 注入属于桶 2 的时刻
 - 期望:规范布局及 1920 字节路径匹配;两次路径字节一致;错误桶时刻恢复失败且状态不变
 - 实现:`crates/hft-testkit/tests/replay_probe.rs::tk_118_replay_model_layout_and_path_goldens`
+
+### TK-119 预热测试 Model 的计数、顺序与恢复可独立检查
+
+- 规则:[5. 解耦门槛夹具](README.md#5-解耦门槛夹具)
+- 级别:table
+- 里程碑:M2
+- 前置:WarmupModel 空状态,local_kind 9,chunk_no 0/1/2 对应 payload 11/23/47,仅 chunk_no 2 的 last 为真;无 BBO
+- 实现:`crates/hft-testkit/tests/replay_probe.rs::tk_119_warmup_model_observes_chunks_and_restores_transactionally`
+
+| 行 | 投递顺序 | 最终 Advice 与原始检查点的五个 u64 |
+|---|---|---|
+| TK-119.1 | 0、1、2 | `[3,66051,81,4,0]` |
+| TK-119.2 | 0、2 | `[2,259,58,4,0]` |
+| TK-119.3 | 0、1、1、2 | `[4,16908803,104,4,0]` |
+| TK-119.4 | 2、1、0 | `[3,197121,81,4,0]` |
+
+每行通过 check_layout,原始检查点恰 40 字节;完整恢复重写逐字节一致,截断到 39 字节的恢复失败且不污染原状态。
 
 ## 验收
 

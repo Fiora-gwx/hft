@@ -133,6 +133,8 @@ impl<S: Strategy> ModelHarness<S> {
 
 长时回放另用独立的 `ReplayStrategies`,不加入 DST 的 `TestStrategies`。测试策略 A `replay-a`(0xFF04)复用 taker 快速部分,仅在组的有效模式为 Live 时根据 BBO 开仓;Model 原始样本节为 BBO 累计数,`LAYOUT_VERSION = 1`。路径节为 120 个一秒桶,每桶保存最后一笔 bid 与 `engine_ns`;`path_settle_ms` 默认 120000、范围 1–120000,到期桶在下一次 BBO 前清除,恢复原始样本时路径从空值开始。Advice 含累计数、引擎时间和桶内 bid 的 i128 和。`ReplayPathV2Strategies` 仅把路径版本从 1 提为 2,用于验证丢弃路径后在声明时间内收敛;快速部分和样本布局不变。路径恢复失败保持旧路径;布局与路径金样见 [sdk-replay](../../fixtures/strategies/sdk-replay/ckpt/meta.toml),TK-117/118 验证恢复、收敛与布局。命名文件夹具用 `refdata_blob_with_names` 覆盖实例名和账户标签,未知或重复身份报错,未指定时保持世界的默认名称。
 
+预热回放使用另一个独立集合 `ReplayWarmupStrategies`,其中 `replay-warmup`(0xFF05)复用 `ReplayA` 的快速部分与参数。Model 的样本和 Advice 都是五个 u64,依次表示块数、以 256 为基数累积的块序号加一、载荷和、last 标志位图、BBO 数;固定 40 B,`LAYOUT_VERSION = 1`,无路径状态。TK-119 用正常、漏块、重复和乱序输入的独立数表检查这些字段,并要求截断恢复不污染状态。
+
 - **两个测试策略**(本 crate 的 `src/strategies/` 模块,只引用 [hft-strategy-sdk](../hft-strategy-sdk/README.md) 与 [hft-strat-lib](../hft-strat-lib/README.md),TK-036 检查;不另设 workspace 包,依赖图不变):
   - `probe-taker`(kind_id 0xFF01):腿 A 买一高出腿 B 卖一超过 `spread_th`(`(A bid − B ask) × 10^9 / B ask`,Rate raw,严格大于)时卖 A,带 `LegLink`(OnFill,第二腿买 B);同一事件内另设一个持有定时器并写一条 Note(码 `NOTE_OPENED`);收到 `close_on` 选中的 `Exec`/`External`/`Risk` 事件时设 0/0 的退出目标;行使 OMS 链接、风控两腿检查与对冲重试。参数 `spread_th`(per_group)、`qty_lots`(per_group)、`close_on`(位:1 Exec、2 External、4 Risk)、`hold_ms`(`check`:0 < `hold_ms` < 10 为 `Invalid`)。
   - `probe-target`(kind_id 0xFF02):在引擎时间 `t_slice_ms`、`t_pair_ms`、`t_simul_ms` 各发一次 `TargetIntent`(依次 `TakerSlice`、`PairOnFill`、`Simultaneous`;0 = 不发),`need_advice` 时只在缓存的 Advice 未过期时发、否则跳过该点;`Model` 每 `advice_every` 个事件产出一条 16 B 不透明 `Advice`,`mem_bytes`/`snapshot_bytes` 由参数 `model_mem_kib`/`model_ckpt_kib` 声明;行使执行层、advisor 路径与 schema 驱动参数。

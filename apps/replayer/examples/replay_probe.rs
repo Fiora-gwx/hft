@@ -5,7 +5,17 @@ fn main() {
     if path_v2 {
         args.remove(0);
     }
-    let code = if path_v2 {
+    let warmup = args.iter().position(|s| s == "--fixture-warmup");
+    if let Some(i) = warmup {
+        args.remove(i);
+    }
+    let code = if warmup.is_some() {
+        replayer::run::<hft_testkit::strategies::ReplayWarmupStrategies>(
+            &args,
+            &mut std::io::stdout(),
+            &mut std::io::stderr(),
+        )
+    } else if path_v2 {
         replayer::run::<hft_testkit::strategies::ReplayPathV2Strategies>(
             &args,
             &mut std::io::stdout(),

@@ -35,13 +35,20 @@ impl CheckpointStore for Store {
         Ok(())
     }
 }
-#[derive(Default)]
-pub(super) struct Ring(pub(super) Vec<(EventKind, Vec<u8>)>);
+pub(super) struct Ring(pub(super) Vec<(EventKind, Vec<u8>)>, pub(super) usize);
+impl Default for Ring {
+    fn default() -> Self {
+        Self(Vec::new(), 1 << 24)
+    }
+}
 impl AdviceRing for Ring {
     fn free(&self) -> usize {
-        1 << 24
+        self.1.saturating_sub(self.0.iter().map(|(_, b)| b.len()).sum())
     }
     fn push(&mut self, kind: EventKind, bytes: &[u8]) -> bool {
+        if bytes.len() > self.free() {
+            return false;
+        }
         self.0.push((kind, bytes.to_vec()));
         true
     }

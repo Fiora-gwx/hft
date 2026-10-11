@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | RPL-095、RPL-104、RPL-241、RPL-242 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | RPL-001–RPL-004、RPL-070、RPL-079 |
-| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-273 |
+| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-274 |
 | sim | RPL-090–RPL-108、RPL-120–RPL-129、RPL-140–RPL-145、RPL-259 |
 | compare | RPL-160–RPL-173 |
 | latency | RPL-190–RPL-206 |
@@ -450,15 +450,16 @@ spec: README.md
 ### RPL-042 实盘 outbox 合并掉的 Advice 计入 coalesced、不算分歧
 
 - 规则:[verify](README.md#verify)
-- 级别:unit
+- 级别:proc
 - 里程碑:M2
-- 前置:合成运行:hft-testkit 让 advice 环在 10 s 内保持满(sequencer 侧不取),期间 advisor 的 outbox 对同一 `(tsa, acct-l, g1, local_kind = 1)` 覆盖 37 次;录下 journal
+- 前置:真实 LiveDriver、文件写者与 advisor;Advice 环容量恰好一条,首条 BBO 填满环后 sequencer 10 s 不取,随后 38 条 BBO 使 outbox 对同一 `(tsa, acct-l, GROUP_NONE, local_kind = 1)` 覆盖 37 次;解堵后交付两条 Advice
 - 步骤:
   1. `replayer verify --journal <该 journal> --advice recompute --report $OUT/r.json`
 - 期望:
   - 退出 0;`recompute = "pass"`;`coalesced = 37`
   - journal 中的每条 Advice 都配对成功
-- 实现:`apps/replayer/tests/recompute.rs::rpl_042_coalesced_not_divergence`
+  - 39 条 BBO 首末间隔恰 10 s,最终原始样本计数为 39;仅存下样本 1、39 的 Advice,二者 basis_seq 与实际输入对应;真实 advisor 的覆盖计数为 37,输入文件与 seal 不变
+- 实现:`apps/replayer/tests/model_boundary.rs::rpl_042_coalesced_not_divergence`
 
 ### RPL-043 journal 中的 Advice 在重算中找不到同键者即为分歧
 
@@ -604,26 +605,28 @@ spec: README.md
 ### RPL-053 未给检查点时从窗口内的实例创建点起算
 
 - 规则:[verify](README.md#verify)
-- 级别:unit
+- 级别:proc
 - 里程碑:M2
-- 前置:合成 journal(1 h):前 20 min 只有行情,第 20 min 一条 `SetParams` 创建 `tsa`
+- 前置:真实 LiveDriver、文件写者与 advisor 运行 1 h;refdata 已绑定实例 tsa,启动时无策略参数。每 10 s 两条行情,前 20 min 无 Advice,第 20 min 一条 Applied SetParams 创建 tsa
 - 步骤:
   1. `replayer verify --journal <合成> --advice recompute --report $OUT/r.json`
 - 期望:
   - 退出 0;`recompute = "pass"`;`tsa` 的第一条重算 Advice 的 `basis_seq` 晚于该 `SetParams` 的 seq;journal 中的 `tsa` Advice 全部配对
-- 实现:`apps/replayer/tests/recompute.rs::rpl_053_start_at_instance_creation`
+  - 创建前实际 240 条 BBO,创建后 480 条 Advice;首条样本计数为 1,最终检查点为 480;coalesced = 0,输入文件与 seal 不变
+- 实现:`apps/replayer/tests/model_boundary.rs::rpl_053_start_at_instance_creation`
 
 ### RPL-054 未给检查点时从 ModelCheckpointDiscarded 之后的第一条记录起算
 
 - 规则:[verify](README.md#verify)
-- 级别:unit
+- 级别:proc
 - 里程碑:M2
-- 前置:合成 journal:hft-core 重启时 `tsa.ckpt` 的 CRC 被破坏,advisor 写 Meta `Note{source = Advisor, code = ModelCheckpointDiscarded, v[0] = tsa, v[1] = 2(Corrupt)}`(seq `n`),其后 Model 空状态起步;journal 只含重启后的段
+- 前置:真实 DrainTail 恢复,实例 ID 为 9。advisor 从测试 Store 读到原始样本末字节损坏、校验和未更新的检查点,对应损坏文件的解码也失败;advisor 实际写 Meta `Note{source = Advisor, code = ModelCheckpointDiscarded, v[0] = 9, v[1] = 2(Corrupt)}`(seq n),其后 Model 空状态起步;独立进程仅输入重启后的段
 - 步骤:
   1. `replayer verify --journal <合成> --advice recompute --report $OUT/r.json`
 - 期望:
   - 退出 0;`recompute = "pass"`;重算从 seq `n + 1` 起;`model_no_start` 为空
-- 实现:`apps/replayer/tests/recompute.rs::rpl_054_start_after_checkpoint_discarded`
+  - 实际运行 5 min,每 10 s 两条 BBO,60 条 Advice 全部配对;首条计数 1、最终样本 60,旧检查点累计量未带入,coalesced = 0,输入文件与 seal 不变
+- 实现:`apps/replayer/tests/model_boundary.rs::rpl_054_start_after_checkpoint_discarded`
 
 ### RPL-055 既无检查点也无空起步点时报告 model_no_start、退出码不受影响
 
@@ -723,14 +726,15 @@ spec: README.md
 ### RPL-062 InjectWarmup 在重算中照常投递
 
 - 规则:[verify](README.md#verify)
-- 级别:unit
+- 级别:proc
 - 里程碑:M2
-- 前置:合成 journal:`tsa` 创建后收到 3 块 `ControlCmd{InjectWarmup{instance = tsa, local_kind = 9, chunk_no = 0..2, last = 2 时为真}}`(均 Applied),此后的 Advice 依赖预热样本
+- 前置:真实文件写者与 advisor,tsa 使用独立 ReplayWarmupStrategies。第一条 BBO 后收到 3 块 InjectWarmup(local_kind 9、chunk_no 0/1/2、仅最后块 last 为真,payload 为 u64 11/23/47),均 Applied;随后再两条 BBO。第 2 块后保存真实 Model 检查点
 - 步骤:
   1. `verify --journal <合成> --advice recompute`
 - 期望:
   - 退出 0;重算 Model 收到 3 次 `EventRef::Warmup`(`chunk_no` 0、1、2);全部 Advice 一致
-- 实现:`apps/replayer/tests/recompute.rs::rpl_062_warmup_delivered`
+  - 三条 Warmup Advice 的五个整数分别为 `[1,1,11,0,1]`、`[2,258,34,0,1]`、`[3,66051,81,4,1]`;最终检查点为 `[3,66051,81,4,3]`。无检查点比较 6 条,第 2 块检查点起比较 3 条;coalesced = 0,输入文件与 seal 不变
+- 实现:`apps/replayer/tests/model_boundary.rs::rpl_062_warmup_delivered`
 
 ### RPL-063 Model 分歧不影响 verify 的 Output 比对结论
 
@@ -2184,6 +2188,19 @@ spec: README.md
 - 步骤:独立进程用首次检查点重算全部文件;另篡改新运行中一条旧 basis 重发 Advice 的载荷,保留原 CRC 策略并重算 seal
 - 期望:原始文件两个 verdict 均 pass、三次独立运行、coalesced 为 0;实际出现 12 条旧 basis 重发,比较量等于检查点后所有 Advice。篡改后退出 1、verify 为 pass、recompute 为 fail,首个 Model 分歧 seq 恰为被修改记录;SEQ-403 的同运行重复反例仍不允许消费同一产出两次
 - 实现:`apps/replayer/tests/recompute.rs::rpl_273_checkpoint_catchup_reemits_prior_run_advice`
+
+### RPL-274 预热输入与合并后 Advice 的载荷错误被独立 Model 比较发现
+
+- 规则:[verify](README.md#verify)
+- 级别:table
+- 里程碑:M2
+- 前置:RPL-062 与 RPL-042 的真实文件副本;篡改后重算记录 CRC 与 seal,其余来源保留
+- 实现:`apps/replayer/tests/model_boundary.rs::rpl_274_warmup_and_coalesced_payload_counterexamples`
+
+| 行 | 改动 | 期望 |
+|---|---|---|
+| RPL-274.1 | 最后一块 Warmup 的 u64 载荷最低位翻转 | 退出 1,verify pass、recompute fail;首错为该块的 Advice,累计 3 处 Model 差异,报告与标准输出一致 |
+| RPL-274.2 | 合并后最后一条 Advice 的样本计数最低位翻转 | 退出 1,verify pass、recompute fail;恰 1 处分歧,首错为被改 Advice |
 
 ## 验收
 

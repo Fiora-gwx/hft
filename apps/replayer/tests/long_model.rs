@@ -29,6 +29,14 @@ pub(super) fn options(checkpoint: &Path, from: Option<u64>) -> Vec<String> {
     a
 }
 pub(super) fn execute(f: &fixture::Fixture, path_v2: bool, extra: &[String]) -> (i32, Value, String) {
+    execute_input(f, f.file.parent().unwrap(), path_v2, extra)
+}
+pub(super) fn execute_input(
+    f: &fixture::Fixture,
+    journal: &Path,
+    path_v2: bool,
+    extra: &[String],
+) -> (i32, Value, String) {
     // CI builds --tests --examples before executing tests; no test invokes a compiler.
     let exe = std::env::current_exe()
         .unwrap()
@@ -43,7 +51,7 @@ pub(super) fn execute(f: &fixture::Fixture, path_v2: bool, extra: &[String]) -> 
     if path_v2 {
         a.push("--fixture-path-v2".into());
     }
-    a.extend(crate::args(f.file.parent().unwrap()));
+    a.extend(crate::args(journal));
     a.extend(["--advice".into(), "recompute".into()]);
     a.extend_from_slice(extra);
     let out = Command::new(exe).args(&a).output().unwrap();

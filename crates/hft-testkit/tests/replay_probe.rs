@@ -124,3 +124,72 @@ fn tk_118_replay_model_layout_and_path_goldens() {
     assert!(restored.restore_path(&mut SnapshotReader::new(&bad)).is_err());
     assert_eq!(path(&restored), saved);
 }
+
+#[test]
+fn tk_119_warmup_model_observes_chunks_and_restores_transactionally() {
+    use hft_strategy_sdk::EventRef;
+    use hft_testkit::strategies::replay_warmup::WarmupModel;
+    let v = MockViews::new(gt3_fixture());
+    let p = ReplayParams::from_raw(
+        &RawParams {
+            defaults: vec![0, 1, 7, 5000, 120000],
+            overrides: vec![],
+        },
+        1,
+    );
+    let fresh = || {
+        WarmupModel::new(
+            StrategyInstance {
+                strategy: StrategyId(1),
+                account: A1,
+                kind_id: 0xFF05,
+            },
+            &p,
+            &gt1(),
+            &v.refview(),
+        )
+    };
+    for (row, (order, expected)) in [
+        (vec![0, 1, 2], [3, 0x010203, 81, 4, 0]),
+        (vec![0, 2], [2, 0x0103, 58, 4, 0]),
+        (vec![0, 1, 1, 2], [4, 0x01020203, 104, 4, 0]),
+        (vec![2, 1, 0], [3, 0x030201, 81, 4, 0]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = format!("TK-119.{}", row + 1);
+        let mut m = fresh();
+        let mut buf = Box::new(AdviceBufs::new());
+        for no in order {
+            buf.begin();
+            m.on_event(
+                &EventRef::Warmup {
+                    local_kind: 9,
+                    chunk_no: no as u32,
+                    last: no == 2,
+                    payload: &[11u64, 23, 47][no].to_le_bytes(),
+                },
+                &v,
+                &mut buf.out(),
+            );
+        }
+        let raw: Vec<_> = expected.into_iter().flat_map(u64::to_le_bytes).collect();
+        let items: Vec<_> = buf.iter().map(|(_, _, b)| b.to_vec()).collect();
+        assert_eq!(items, vec![raw.clone()], "{id}: warmup truth table");
+        check_layout(&m).unwrap();
+        let mut saved = SnapshotWriter::new(40);
+        m.snapshot_chunk(0, &mut saved, 40);
+        saved.status().unwrap();
+        assert_eq!(saved.as_bytes(), raw, "{id}: snapshot words");
+        let mut restored = fresh();
+        restored.restore(&mut SnapshotReader::new(&raw)).unwrap();
+        assert!(
+            restored.restore(&mut SnapshotReader::new(&raw[..39])).is_err(),
+            "{id}: truncated restore"
+        );
+        let mut after = SnapshotWriter::new(40);
+        restored.snapshot_chunk(0, &mut after, 40);
+        assert_eq!(after.as_bytes(), raw, "{id}: failed restore preserves state");
+    }
+}

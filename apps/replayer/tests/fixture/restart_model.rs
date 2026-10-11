@@ -93,7 +93,7 @@ pub(super) fn exercise<S: StrategySet>(
     spec: ModelRestart,
 ) -> Live<S> {
     assert!((1..=2).contains(&spec.count));
-    assert!(spec.reason <= 2);
+    assert!(spec.reason <= 3);
     let mut a = advisor(&mut s, f, setup, Store::default());
     let mut tick = 0;
     market(&mut s, &mut a, f, w, 300, &mut tick);
@@ -173,6 +173,14 @@ pub(super) fn exercise<S: StrategySet>(
             restored_body[8..16].copy_from_slice(&(-1i64).to_le_bytes());
         }
         restored_h.checksum = ckpt_checksum(&restored_body);
+        if spec.reason == 3 {
+            // Real store bytes no longer match their committed checksum.
+            let mut corrupt_file = checkpoint::encode(&restored_h, &restored_body, 1 << 20).unwrap();
+            *corrupt_file.last_mut().unwrap() ^= 1;
+            assert!(checkpoint::decode(&corrupt_file, 1 << 20).is_err());
+            std::fs::write(f.root.join("rejected.ckpt"), corrupt_file).unwrap();
+            *restored_body.last_mut().unwrap() ^= 1;
+        }
         let mut store = Store::default();
         store.loaded.insert(h.strategy, (restored_h, restored_body));
         drop(a);
@@ -188,7 +196,7 @@ pub(super) fn exercise<S: StrategySet>(
                         )
             })
         });
-        if spec.reason == 0 {
+        if spec.reason == 0 || spec.reason == 3 {
             assert!(note.is_none());
         } else {
             let note = note.unwrap();
@@ -205,13 +213,17 @@ pub(super) fn exercise<S: StrategySet>(
     let (h, body) = save(&mut s, &mut a, f);
     let final_file = checkpoint::encode(&h, &body, 1 << 20).unwrap();
     let d = checkpoint::decode(&final_file, 1 << 20).unwrap();
-    assert_eq!(u64::from_le_bytes(d.samples.try_into().unwrap()), tick * 2);
+    let expected_samples = if spec.reason == 3 { 60 } else { tick * 2 };
+    assert_eq!(
+        u64::from_le_bytes(d.samples.try_into().unwrap()),
+        expected_samples
+    );
     std::fs::write(f.root.join("final.ckpt"), final_file).unwrap();
     std::fs::write(
         f.root.join("generation.json"),
         serde_json::to_vec_pretty(&serde_json::json!({
             "restarts": boundaries, "path_settle_ms": spec.settle_ms, "reason": spec.reason,
-            "engine_ns": s.engine().last_ens, "market_ticks": tick,
+            "engine_ns": s.engine().last_ens, "market_ticks": tick, "expected_samples": expected_samples,
         }))
         .unwrap(),
     )

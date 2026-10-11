@@ -6,6 +6,7 @@
 pub mod probe_taker;
 pub mod probe_target;
 pub mod replay_probe;
+pub mod replay_warmup;
 
 pub use probe_taker::{NpParams, ProbeNp, ProbeTaker, TakerParams};
 pub use probe_target::{ProbeModel, ProbeTarget, TargetParams};
@@ -35,6 +36,14 @@ mod replay_path_v2_set {
 }
 pub use replay_path_v2_set::ReplayPathV2Strategies;
 pub use replay_set::ReplayStrategies;
+
+mod replay_warmup_set {
+    use super::replay_warmup;
+    hft_strategy_sdk::strategy_set! {
+        pub struct ReplayWarmupStrategies { replay_warmup::ReplayWarmup }
+    }
+}
+pub use replay_warmup_set::ReplayWarmupStrategies;
 
 /// The test kind_id range.
 pub const TEST_KIND_IDS: core::ops::RangeInclusive<u16> = 0xFF00..=0xFFFF;
