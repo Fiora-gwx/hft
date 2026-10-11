@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
-use hft_event::{EventKind, Timer};
+use hft_event::{EventKind, RecordFlags, Timer};
 use hft_sequencer::codes::status;
 use hft_sequencer::driver::replay::Log;
 use hft_strategy_sdk::{EvMask, Part};
@@ -205,15 +205,45 @@ fn restart_case(every_ms: u32, k_frac: f64, with_ckpt: bool) {
     };
     assert!(!reference.is_empty());
     let n = log.recs.len();
-    // The advisor needs a snapshot to start from: k counts from just after the first one.
+    // The first snapshot is published with the complete boot event, not on its own.
+    // Model the reader's committed prefix at every cut, including later partial Inputs.
     let first = log
         .recs
         .iter()
         .position(|r| r.kind == EventKind::STATE_SNAPSHOT)
         .expect("snapshot");
-    let k = (first + 1 + ((n - first - 1) as f64 * k_frac) as usize).clamp(first + 1, n - 1);
+    let first_committed = log
+        .recs
+        .iter()
+        .enumerate()
+        .skip(first)
+        .find(|(_, r)| r.flags.contains(RecordFlags::EVENT_END))
+        .map(|(i, _)| i + 1)
+        .expect("committed boot");
+    if k_frac == 0.0 {
+        let mut partial = log.clone();
+        partial.recs.truncate(first + 1);
+        assert!(first + 1 < first_committed);
+        assert!(matches!(
+            hft_sequencer::advisor::Advisor::<TestSet, _, _>::start(
+                &partial,
+                &setup,
+                adv_cfg(),
+                MemCkpt::default(),
+                Ring::big(),
+                hb()
+            ),
+            Err(hft_sequencer::BootError::Journal(
+                hft_sequencer::JournalErr::NoSnapshot
+            ))
+        ));
+    }
+    let k =
+        (first_committed + ((n - first_committed) as f64 * k_frac) as usize).clamp(first_committed, n - 1);
     let mut head = log.clone();
     head.recs.truncate(k);
+    let committed = hft_sequencer::recover_event_end(&head);
+    head.recs.truncate(committed);
     let mut a = start_on(&head, &setup, MemCkpt::default());
     let first = run_ticks(&mut a, &head);
     let got = if with_ckpt {
@@ -245,5 +275,10 @@ proptest! {
     ) {
         let every = [100u32, 250, 1_000, 60_000][ix];
         restart_case(every, k_frac, with_ckpt);
+        // The persisted regression fixes k at the earliest committed prefix. Exercise both
+        // checkpoint choices there without removing any generated cases.
+        if k_frac == 0.0 {
+            restart_case(every, k_frac, !with_ckpt);
+        }
     }
 }

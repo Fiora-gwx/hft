@@ -1,0 +1,3 @@
+# SDK-039: the first snapshot is not committed until the boot event ends.
+# CI 38131995120; retain this seed in addition to the generated cases.
+cc 676dc914845ff62d2bcdc151c94c4d83cbf34e8116ba008b0990b4a64e84a102 # shrinks to ix = 0, k_frac = 0.0, with_ckpt = false

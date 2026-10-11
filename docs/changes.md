@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-11 | SDK-039 重启夹具从完整引导事件之后采样,按 EVENT_END 交付已提交前缀;保留最早边界回归种子并覆盖有/无检查点,半个引导块仍拒绝,不改 advisor 行为或属性例数 | CI 38131995120 的 k_frac=0 最小反例 | crates/hft-sequencer/tests/sdk_contract/advisor.rs、crates/hft-strategy-sdk/TESTS.md | 否 |
 | 2026-10-11 | 空时钟锚点按当前进程引导块校验,允许从首次 Boot 快照恢复并丢弃含 EngineClock 的旧尾部;普通滚段、后续快照以及 BootDone/Input 后的空锚点仍失败 | CI 38131018801 的 RPL-263.2、SEQ-395 四种反例与回放 | crates/hft-sequencer、apps/replayer/TESTS.md | 否 |
 | 2026-10-11 | mem-backend 测试接口只读复制写者已发布原始前缀,消费方仅通过 dev 依赖使用;恢复文件夹具据此读取离线写者尚未封段的提交边界,最终仍由真实写者封段,无记录重排或重新编号 | CI 38127631455 的 RPL-263 暴露离线写者封段前没有文件;JNL-130 观察边界反例 | crates/hft-journal、apps/replayer | 否 |
 | 2026-10-11 | 独立运行 BootDone 至首条 EngineClock 之间的普通 Output 明确报 RunBoundary,防止快照起播跳过未比较的输出 | SEQ-394.10 额外 CmdResult 反例 | crates/hft-sequencer | 否 |

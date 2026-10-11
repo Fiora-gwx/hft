@@ -635,7 +635,7 @@ spec: README.md
 - 级别:prop
 - 里程碑:M2
 - 性质:同一段 journal(含 `AdvisorTick` 与 Bbo),advisor 在第 k 条记录处丢弃内存状态并从检查点(或空状态 + 全量重放)重启;各次运行中 `MODEL_TICK` 投递所在记录的 seq 集合相同
-- 生成:每个 `model_tick` ∈ {100, 250, 1 000, 60 000} 一段约 2 min 的 journal(每 100 ms 一条 I1 Bbo,约 1 500 条);k 在 [第一个快照之后, 长度) 均匀抽取;检查点取在 k(或不用检查点)
+- 生成:每个 `model_tick` ∈ {100, 250, 1 000, 60 000} 一段约 2 min 的 journal(每 100 ms 一条 I1 Bbo,约 1 500 条);k 在 [首个快照所属引导事件完整提交之后, 长度) 均匀抽取,日志按 k 之前最近的 EVENT_END 截断;检查点取在已应用位置(或不用检查点)。固定回归种子覆盖最早提交边界的两种检查点选择,并确认只含快照、缺 BootDone 的前缀不能启动
 - 参考:不重启的一次运行
 - 例数:PR 200;每夜 5 000
 - 实现:`crates/hft-sequencer/tests/sdk_contract/advisor.rs::sdk_039_model_tick_restart_invariant`
