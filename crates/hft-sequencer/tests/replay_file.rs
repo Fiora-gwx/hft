@@ -511,7 +511,7 @@ fn seq_394_invalid_run_boundaries_fail_before_replay() {
     use hft_event::{Note, SegmentRoll};
     use hft_journal::RollMark;
     use hft_sequencer::driver::verify::{VerifyError, VerifyOptions, verify};
-    use zerocopy::{FromZeros, IntoBytes};
+    use zerocopy::IntoBytes;
 
     let t = fixture();
     let mut reader = JournalReader::open(&reader_cfg(&t)).unwrap();
@@ -571,7 +571,13 @@ fn seq_394_invalid_run_boundaries_fail_before_replay() {
     let mut bad = log;
     let note = Note {
         code: hft_sequencer::codes::seq_note(hft_sequencer::codes::note::RECOVER_MISMATCH),
-        ..Note::zeroed()
+        level: hft_event::NoteLevel::P0,
+        source: hft_event::NoteSource::Sequencer,
+        strategy: hft_types::StrategyId(0),
+        _pad: 0,
+        group: hft_types::GroupId(0),
+        inst: InstId(0),
+        v: [0; 8],
     };
     bad.recs[clock].kind = EventKind::NOTE;
     bad.recs[clock].body = note.as_bytes().to_vec();
