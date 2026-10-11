@@ -1,4 +1,5 @@
 mod fixture;
+mod model;
 mod recovery;
 mod verify;
 
@@ -127,7 +128,7 @@ fn rpl_261_invalid_and_unimplemented_options_fail_loud() {
         vec![],
         vec!["verify"],
         vec!["verify", "--journal", "missing", "--advice", "foo"],
-        vec!["verify", "--journal", "missing", "--advice", "recompute"],
+        vec!["verify", "--journal", "missing", "--model-checkpoint", "a.ckpt"],
         vec!["verify", "--journal", "missing", "--instance", "live"],
         vec![
             "verify",

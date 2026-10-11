@@ -33,7 +33,7 @@ spec: README.md
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
 | advisor 与 Model | SEQ-030–SEQ-044、SEQ-290、SEQ-367 |
-| 模型检查点 | SEQ-045–SEQ-051、SEQ-363、SEQ-399–SEQ-402 |
+| 模型检查点 | SEQ-045–SEQ-051、SEQ-363、SEQ-399–SEQ-403 |
 | 资金费合成 | SEQ-092、SEQ-192–SEQ-196、SEQ-361 |
 | 模式与 cap 的驱动 | SEQ-132、SEQ-183、SEQ-197–SEQ-213、SEQ-342、SEQ-353、SEQ-368 |
 | 模拟账户 | SEQ-067、SEQ-179、SEQ-201、SEQ-214–SEQ-217、SEQ-298 |
@@ -5569,6 +5569,18 @@ spec: README.md
 - 步骤:先保存 s1 的检查点,投递一条 BBO、将 s1 参数改为 8、再投递 BBO;随后保存 s2 的检查点,把未改变 Model 状态的末条 AdvisorStats Meta 作为其 last_seq;再投递 BBO 使该 Meta 随完整输入提交、将 s2 参数改为 18、再投递 BBO。两个 Model 从这两份不同边界的检查点共同恢复
 - 期望:Meta 提交前不向恢复读者可见,后继 BBO 完整提交后可见;两实例的参数调用分别恰为 7→8、17→18;每条回调仅在本实例 last_seq 之后,看到该事件生效参数;Meta 边界不使追赶卡住或越过下一 Input;最终检查点与不中断运行一致,引擎 journal 严格回放无分歧
 - 实现:`crates/hft-sequencer/tests/advisor.rs::seq_402_each_checkpoint_releases_at_its_own_record_boundary`
+
+### SEQ-403 Model 重算同一基准事件只匹配最终产出且一对一消费
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)、[advisor](README.md#advisor)
+- 级别:integ
+- 里程碑:M2
+- 前置:B0 真实 advisor、同一 BBO 回调连续 emit 同键 P1/P2/P3,实际环只发 P3;启用 replay-io
+- 步骤:将真实环的 P3 经 LiveDriver 记入 journal 后重算;分别把记录载荷改成 P1、重复投递原始 P3
+- 期望:原始比较 1 条、coalesced = 2、无缺起点;P1 虽在原始产出中出现仍被判分歧,重算字节为 P3;第二次记录 P3 无可配对产出,不能重复消费第一条
+- 实现:`crates/hft-sequencer/tests/advisor.rs::seq_403_recompute_requires_latest_same_basis_and_one_to_one_matching`
+
+本地文件装配、检查点身份与窗口、只读保护的跨组件覆盖见 [RPL-266–RPL-269](../../apps/replayer/TESTS.md#rpl-266-真实-advisor-文件重算与检查点连续性)。
 
 ## 验收
 

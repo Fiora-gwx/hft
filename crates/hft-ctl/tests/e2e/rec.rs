@@ -172,6 +172,9 @@ impl StrategySet for RecSet {
     fn model_snapshot_bytes(p: &Self::Params, n_groups: u16) -> u64 {
         T::model_snapshot_bytes(p, n_groups)
     }
+    fn has_model(kind_id: u16) -> bool {
+        T::has_model(kind_id)
+    }
     fn model_layout(kind_id: u16) -> &'static ModelLayoutDesc {
         T::model_layout(kind_id)
     }

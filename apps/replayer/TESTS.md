@@ -28,7 +28,7 @@ spec: README.md
 | 测试与验收 | 不适用:非规范 |
 | 依赖 | RPL-105、RPL-106、RPL-240、RPL-241 |
 | 延伸阅读 | 不适用:非规范 |
-| 已知限制与后续工作 | RPL-260–RPL-265 |
+| 已知限制与后续工作 | RPL-260–RPL-269 |
 | 开发备忘 | 不适用:非规范 |
 
 ## 用例
@@ -2010,7 +2010,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:生产 replayer 二进制,不存在的输入路径
-- 步骤:无子命令/无 journal、非法 advice/instance、反向窗口、零容量、Model 重算、每日报告及 sim;另运行 --version
+- 步骤:无子命令/无 journal、非法 advice/instance、反向窗口、零容量、未启用重算却给检查点、每日报告及 sim;另运行 --version
 - 期望:非法及未接入功能均先于输入访问返回 2,无成功 JSON;version 返回 0 与本包版本串
 - 实现:`apps/replayer/tests/cli.rs::rpl_261_invalid_and_unimplemented_options_fail_loud`
 
@@ -2019,7 +2019,7 @@ spec: README.md
 | RPL-261.1 | 无子命令 | 2 |
 | RPL-261.2 | verify 缺 journal | 2 |
 | RPL-261.3 | advice foo | 2 |
-| RPL-261.4 | advice recompute | 2,尚未接入 |
+| RPL-261.4 | model-checkpoint a.ckpt,未给 advice recompute | 2 |
 | RPL-261.5 | instance live | 2 |
 | RPL-261.6 | from_seq 100,to_seq 99 | 2 |
 | RPL-261.7 | max_records 0 | 2 |
@@ -2089,6 +2089,56 @@ spec: README.md
 - 步骤:分别篡改首处分歧之前的 CmdResult、旧尾部随后无账户的 CmdResult,各运行默认停止与 keep-going;另删除全部恢复注记
 - 期望:篡改处均为普通首处分歧,不进 recovery_diffs;keep-going 仍验证两次运行;全部注记缺失时原始决策差异为普通分歧
 - 实现:`apps/replayer/tests/recovery.rs::rpl_265_recovery_does_not_waive_other_scope_or_earlier_outputs`
+
+### RPL-266 真实 advisor 文件重算与检查点连续性
+
+- 规则:[verify](README.md#verify)、[已知限制与后续工作](README.md#已知限制与后续工作)
+- 级别:integ
+- 里程碑:M2
+- 前置:W1 的绑定实例使用 ProbeTarget;真实 advisor 按 batch = 1 消费 12 s 行情,Advice 经环交给 LiveDriver,由真实文件写者记录;6 s 时保存实际 Model 检查点
+- 步骤:泛型 CLI 分别不给检查点与给目录,生成报告;另运行默认 journal 模式和 NoModel 的原始文件
+- 期望:两次重算均逐字节通过且比较量非零,有检查点的比较量更少、键数量等于文件数量;来源与检查点不变,侧文件与标准输出一致;journal 模式明确 skipped;NoModel 为 pass、比较量与 coalesced 均为 0
+- 实现:`apps/replayer/tests/model.rs::rpl_266_real_advisor_files_recompute_with_and_without_checkpoints`
+
+### RPL-267 Advice 完整头与载荷逐项篡改均定位分歧
+
+- 规则:[verify](README.md#verify)
+- 级别:table
+- 里程碑:M2
+- 前置:RPL-266 的真实封闭文件,每行独立修改第一条 Advice 并重算 CRC
+- 步骤:运行不带检查点的 recompute
+- 期望:每行退出 1、recompute = fail,first_model_divergent_seq 与首条 model_divergences 均指向被改的 Advice;字段差异非空,来源保持篡改后的字节
+- 实现:`apps/replayer/tests/model.rs::rpl_267_advice_header_and_payload_divergences_are_reported`
+
+| 行 | 单独修改的字段 |
+|---|---|
+| RPL-267.1 | strategy |
+| RPL-267.2 | account |
+| RPL-267.3 | local_kind |
+| RPL-267.4 | group |
+| RPL-267.5 | basis_seq |
+| RPL-267.6 | basis_tsc |
+| RPL-267.7 | payload |
+
+### RPL-268 检查点身份、窗口、资源上限与只读保护
+
+- 规则:[verify](README.md#verify)、[已知限制与后续工作](README.md#已知限制与后续工作)
+- 级别:integ
+- 里程碑:M2
+- 前置:RPL-266 的文件和规范检查点;from_seq 位于检查点之后,窗口不含创建或丢弃注记
+- 步骤:分别不给/给检查点;独立修改 kind/layout/schema/strategy/account 后重算检查点 CRC;last_seq 超过日志末尾或为 u64::MAX;破坏 CRC;将任意命名的单文件同时作为报告目标;两种诊断容量分别设为 1
+- 期望:无起点逐名 skipped 且不填 coalesced;有效检查点比较量非零且从更早快照开始;身份错误退出 2、CRC/容量退出 3、无成功报告;越界实例 skipped,其他实例仍比较;报告覆盖被拒绝且检查点字节不变
+- 实现:`apps/replayer/tests/model.rs::rpl_268_checkpoint_identity_origin_bounds_and_readonly_paths`
+
+### RPL-269 检查点所需预热前缀的 Output 也严格验证
+
+- 规则:[verify](README.md#verify)
+- 级别:integ
+- 里程碑:M2
+- 前置:RPL-266 的检查点早于 from_seq,中间有更晚的关键帧
+- 步骤:篡改预热前缀的 CmdResult 并重算 CRC,使用检查点与晚于该输出的 from_seq
+- 期望:退出 1,first_output_divergent_seq 指向前缀篡改位置;Model 比较仍 pass
+- 实现:`apps/replayer/tests/model.rs::rpl_269_checkpoint_prefix_outputs_are_verified_before_requested_window`
 
 ## 验收
 

@@ -162,6 +162,9 @@ impl StrategySet for FxSet {
     fn model_snapshot_bytes(_: &RawParams, _: u16) -> u64 {
         0
     }
+    fn has_model(_: u16) -> bool {
+        false
+    }
     fn model_layout(_: u16) -> &'static ModelLayoutDesc {
         &ModelLayoutDesc::EMPTY
     }

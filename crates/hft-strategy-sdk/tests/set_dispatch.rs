@@ -18,6 +18,9 @@ use hft_types::{GROUP_NONE, Tsc};
 use proptest::prelude::{ProptestConfig, TestCaseError, any};
 use proptest::{prop_assert, prop_assert_eq, proptest};
 
+#[path = "set_zero_model.rs"]
+mod zero_model;
+
 hft_strategy_sdk::strategy_set! {
     pub struct ProbeSet {
         EchoProbe,
@@ -72,6 +75,14 @@ fn sdk_186_static_queries() {
     assert_eq!(ProbeSet::model_layout_version(0xFF02), ProbeModel::LAYOUT_VERSION);
     assert_eq!(ProbeSet::model_layout_version(0xFF01), 0, "NoModel");
     assert_eq!(ProbeSet::model_layout_version(0xFF09), 0, "unknown kind");
+    assert!(ProbeSet::has_model(0xFF02), "real Model");
+    assert!(!ProbeSet::has_model(0xFF01), "NoModel");
+    assert!(!ProbeSet::has_model(0xFF09), "unknown kind");
+    assert_eq!(zero_model::EmptyLayout::mem_bytes(&p, 8), 0);
+    assert_eq!(zero_model::EmptyLayout::snapshot_bytes(&p, 8), 0);
+    assert_eq!(zero_model::ZeroSet::model_layout_version(0xFF01), 0);
+    assert!(zero_model::ZeroSet::model_layout(0xFF01).sections.is_empty());
+    assert!(zero_model::ZeroSet::has_model(0xFF01), "stateless real Model");
 }
 
 /// The macro's expansion template (the `strategy_set!` definition in `src/set_macro.rs`): no

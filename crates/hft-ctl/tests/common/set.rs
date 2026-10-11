@@ -211,6 +211,9 @@ macro_rules! test_set {
             fn model_snapshot_bytes(p: &P, _n_groups: u16) -> u64 {
                 p.get(F_CKPT) as u64
             }
+            fn has_model(kind_id: u16) -> bool {
+                Self::kinds().iter().any(|d| d.kind_id == kind_id)
+            }
             fn model_layout(_: u16) -> &'static ModelLayoutDesc {
                 &ModelLayoutDesc::EMPTY
             }

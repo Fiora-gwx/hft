@@ -83,29 +83,7 @@ pub fn verify<S: StrategySet>(
     if from > to || log.recs.last().is_none_or(|r| from > r.seq) {
         return Err(VerifyError::Window);
     }
-    // Reject unsupported strategy kinds before replaying even the first Input. A syntactically
-    // valid blob is checked by the normal parser when its command becomes visible.
-    for r in &log.recs {
-        if r.kind == EventKind::CONFIG_BLOB {
-            let b = r
-                .read::<BlobHdr>()
-                .ok_or(VerifyError::InvalidParams { seq: r.seq })?;
-            if b.blob.kind == BlobKind::StrategyParams {
-                let bytes = r
-                    .body
-                    .get(size_of::<BlobHdr>()..)
-                    .ok_or(VerifyError::InvalidParams { seq: r.seq })?;
-                let (p, _) = StrategyParamsHdr::try_read_from_prefix(bytes)
-                    .map_err(|_| VerifyError::InvalidParams { seq: r.seq })?;
-                if !S::kinds().iter().any(|k| k.kind_id == p.kind_id) {
-                    return Err(VerifyError::UnknownStrategy {
-                        seq: r.seq,
-                        kind: p.kind_id,
-                    });
-                }
-            }
-        }
-    }
+    validate_kinds::<S>(&log)?;
     let planned = super::verify_runs::plan(&log)?;
     let starts = planned.runs;
     let selected = if opts.from_seq.is_some() {
@@ -222,4 +200,31 @@ pub fn verify<S: StrategySet>(
         runs,
         sink: driver.sink,
     })
+}
+
+/// Reject unknown kinds before either replay path runs its first Input.
+pub(super) fn validate_kinds<S: StrategySet>(log: &Log) -> Result<(), VerifyError> {
+    for r in &log.recs {
+        if r.kind != EventKind::CONFIG_BLOB {
+            continue;
+        }
+        let b = r
+            .read::<BlobHdr>()
+            .ok_or(VerifyError::InvalidParams { seq: r.seq })?;
+        if b.blob.kind == BlobKind::StrategyParams {
+            let bytes = r
+                .body
+                .get(size_of::<BlobHdr>()..)
+                .ok_or(VerifyError::InvalidParams { seq: r.seq })?;
+            let (p, _) = StrategyParamsHdr::try_read_from_prefix(bytes)
+                .map_err(|_| VerifyError::InvalidParams { seq: r.seq })?;
+            if !S::kinds().iter().any(|k| k.kind_id == p.kind_id) {
+                return Err(VerifyError::UnknownStrategy {
+                    seq: r.seq,
+                    kind: p.kind_id,
+                });
+            }
+        }
+    }
+    Ok(())
 }

@@ -268,6 +268,79 @@ fn seq_031_outbox_keeps_latest() {
     SCRIPT.with(|x| x.borrow_mut().mhook = None);
 }
 
+#[cfg(feature = "replay-io")]
+#[test]
+fn seq_403_recompute_requires_latest_same_basis_and_one_to_one_matching() {
+    use hft_sequencer::driver::recompute::{RecomputeLimits, recompute};
+    use hft_sequencer::driver::verify::VerifyOptions;
+    let mut h = b0_model();
+    let mut a = start(&h, MemCkpt::default(), Ring::big(), cfg());
+    catch_up(&mut a, &h);
+    for (kind, bytes) in core::mem::take(&mut a.ring.recs) {
+        h.push_bytes(RingId::Advice, kind, bytes);
+    }
+    h.run();
+    set_mhook(|hx, ev, out| {
+        if matches!(ev, EventRef::Bbo { .. }) && hx.s.strategy == S2 {
+            for p in [b"P1", b"P2", b"P3"] {
+                let _ = out.emit_raw(G2, 7, p);
+            }
+        }
+    });
+    h.quote(A1, "50000", "50004");
+    h.run();
+    catch_up(&mut a, &h);
+    let bytes = a
+        .ring
+        .recs
+        .iter()
+        .find(|r| r.0 == EventKind::ADVICE)
+        .unwrap()
+        .1
+        .clone();
+    assert_eq!(&bytes[32..], b"P3");
+    h.push_bytes(RingId::Advice, EventKind::ADVICE, bytes.clone());
+    h.run();
+    let check = |log: &Log| {
+        recompute::<TestSet>(
+            log,
+            VerifyOptions::default(),
+            &[],
+            RecomputeLimits {
+                records: 1000,
+                bytes: 1 << 20,
+            },
+            hb(),
+        )
+        .unwrap()
+    };
+    let original = committed(h.j());
+    let good = check(&original);
+    assert_eq!(good.compared, 1);
+    assert_eq!(good.coalesced, 2);
+    assert!(good.differences.is_empty(), "{:?}", good.differences);
+    assert!(good.model_no_start.is_empty());
+    let mut changed = original.clone();
+    let advice = changed
+        .recs
+        .iter_mut()
+        .find(|r| r.kind == EventKind::ADVICE)
+        .unwrap();
+    let seq = advice.seq;
+    advice.body[32..].copy_from_slice(b"P1");
+    let bad = check(&changed);
+    assert_eq!(bad.differences.len(), 1);
+    assert_eq!(bad.differences[0].seq, seq);
+    assert_eq!(&bad.differences[0].regenerated.as_ref().unwrap()[32..], b"P3");
+    h.push_bytes(RingId::Advice, EventKind::ADVICE, bytes);
+    h.run();
+    let duplicate = check(&committed(h.j()));
+    assert_eq!(duplicate.differences.len(), 1);
+    assert!(duplicate.differences[0].seq > seq);
+    assert!(duplicate.differences[0].regenerated.is_none());
+    SCRIPT.with(|x| x.borrow_mut().mhook = None);
+}
+
 #[test]
 fn seq_032_advice_ring_space() {
     for (free, pushed) in [(543usize, false), (544, true), (545, true)] {

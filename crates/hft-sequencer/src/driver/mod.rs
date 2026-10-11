@@ -1,6 +1,10 @@
 //! The four drivers' contract (README "装配与运行" `Driver`) and the read-only `DriverView`.
 
 pub mod live;
+#[cfg(feature = "replay-io")]
+pub mod recompute;
+#[cfg(feature = "replay-io")]
+mod recompute_compare;
 pub mod replay;
 #[cfg(feature = "replay-io")]
 pub mod replay_io;

@@ -28,6 +28,8 @@ use hft_types::{AccountId, GroupId, InstId, KillBits, MarketKind, Px, Qty, Rate,
 use sha2::{Digest, Sha256};
 use zerocopy::{FromBytes, FromZeros, IntoBytes};
 
+mod model;
+
 static NEXT: AtomicU64 = AtomicU64::new(0);
 pub struct Fixture {
     pub root: PathBuf,
@@ -184,7 +186,11 @@ fn settle<S: StrategySet>(seq: &mut Sequencer<LiveDriver<S, Io<S>>, S>) {
 }
 
 pub fn create<S: StrategySet>() -> Fixture {
-    create_with_restart::<S>(None, false)
+    create_with_restart::<S>(None, false, false)
+}
+
+pub fn with_model() -> Fixture {
+    create_with_restart::<hft_testkit::TestStrategies>(None, false, true)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -197,13 +203,13 @@ pub enum Restart {
 }
 
 pub fn restarted<S: StrategySet>(restart: Restart) -> Fixture {
-    create_with_restart::<S>(Some(restart), false)
+    create_with_restart::<S>(Some(restart), false, false)
 }
 
 /// RPL-025/026: genuine file-backed executions with 20 min before the restart.
 pub fn long_restart<S: StrategySet>(restart: Restart) -> Fixture {
     assert!(matches!(restart, Restart::FromSnapshot | Restart::Version));
-    let f = create_with_restart::<S>(Some(restart), true);
+    let f = create_with_restart::<S>(Some(restart), true, false);
     // open_offline writes closed .jrn files, without running persist. Build the cold-copy
     // transport envelope from the actual header and End; leave every journal byte untouched.
     for entry in std::fs::read_dir(f.file.parent().unwrap()).unwrap() {
@@ -490,7 +496,7 @@ fn market_minutes<S: StrategySet>(
     );
 }
 
-fn create_with_restart<S: StrategySet>(restart: Option<Restart>, long: bool) -> Fixture {
+fn create_with_restart<S: StrategySet>(restart: Option<Restart>, long: bool, model: bool) -> Fixture {
     let root = std::env::temp_dir().join(format!(
         "replayer-{}-{}",
         std::process::id(),
@@ -503,7 +509,11 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>, long: bool) -> 
     };
     let mut world = WorldSpec::w1();
     for binding in &mut world.strategies {
-        binding.kind_id = S::kinds().first().unwrap().kind_id;
+        binding.kind_id = if model {
+            0xFF02
+        } else {
+            S::kinds().first().unwrap().kind_id
+        };
     }
     let rd_blob = build::refdata_blob(&world, false).unwrap();
     let rd = build::load_refdata(&rd_blob).unwrap();
@@ -561,6 +571,9 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>, long: bool) -> 
     )
     .unwrap();
     settle(&mut s);
+    if model {
+        model::exercise(&mut s, &f, &world, &setup);
+    }
     if long {
         market_minutes(&mut s, &world, 20, 10_000);
     } else {

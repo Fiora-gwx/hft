@@ -1,6 +1,7 @@
 //! CLI assembly only: input location, validation, sequencer invocation and report formatting.
 #![forbid(unsafe_code)]
 
+mod checkpoints;
 mod options;
 mod report;
 
@@ -9,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use hft_journal::{FileProblem, InstanceName, JournalKind, JournalReader};
 use hft_rt::Heartbeat;
+use hft_sequencer::driver::recompute::{RecomputeError, recompute};
 use hft_sequencer::driver::replay::Log;
 use hft_sequencer::driver::replay_io::LogReadError;
 use hft_sequencer::driver::verify::{VerifyError, verify};
@@ -29,6 +31,36 @@ pub fn run<S: StrategySet>(args: &[String], stdout: &mut impl Write, stderr: &mu
 }
 
 type Failure = (i32, String);
+fn model_error(e: RecomputeError) -> Failure {
+    let code = match e {
+        RecomputeError::CheckpointKey { .. } | RecomputeError::Verify(VerifyError::Window) => 2,
+        RecomputeError::Verify(VerifyError::UnknownStrategy { .. }) => 4,
+        _ => 3,
+    };
+    (code, format!("Model verification failed: {e:?}"))
+}
+
+fn protect_report(report: Option<&Path>, files: &[PathBuf]) -> Result<(), Failure> {
+    let Some(p) = report else {
+        return Ok(());
+    };
+    for target in [p.to_owned(), report::divergence_path(p)] {
+        let parent = target
+            .parent()
+            .filter(|x| !x.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let abs = std::fs::canonicalize(parent)
+            .map_err(|e| (2, e.to_string()))?
+            .join(target.file_name().ok_or((2, "report filename missing".into()))?);
+        for source in files {
+            let input = std::fs::canonicalize(source).map_err(|e| (3, e.to_string()))?;
+            if input == abs || input.with_extension("seal") == abs {
+                return Err((2, "report path overlaps an input".into()));
+            }
+        }
+    }
+    Ok(())
+}
 fn discover(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), Failure> {
     let meta = std::fs::symlink_metadata(path).map_err(|e| (3, format!("{}: {e}", path.display())))?;
     if meta.file_type().is_symlink() {
@@ -88,24 +120,8 @@ fn execute<S: StrategySet>(args: &[String], stdout: &mut impl Write) -> Result<i
     if opts.instance.as_deref().is_some_and(|v| v != instance) {
         return Err((2, "--instance differs from the segment header".into()));
     }
-    // A report may never overwrite an input or its seal, even when the source has been renamed.
-    if let Some(p) = &opts.report {
-        for target in [p.clone(), report::divergence_path(p)] {
-            let parent = target
-                .parent()
-                .filter(|x| !x.as_os_str().is_empty())
-                .unwrap_or(Path::new("."));
-            let abs = std::fs::canonicalize(parent)
-                .map_err(|e| (2, e.to_string()))?
-                .join(target.file_name().ok_or((2, "report filename missing".into()))?);
-            for source in &files {
-                let input = std::fs::canonicalize(source).map_err(|e| (3, e.to_string()))?;
-                if input == abs || input.with_extension("seal") == abs {
-                    return Err((2, "report path overlaps journal input".into()));
-                }
-            }
-        }
-    }
+    // A report may never overwrite an input or its seal, even after a rename.
+    protect_report(opts.report.as_deref(), &files)?;
     let instance = instance.to_owned();
     let log = Log::from_reader(&mut reader, opts.limits).map_err(|e| {
         (
@@ -118,6 +134,9 @@ fn execute<S: StrategySet>(args: &[String], stdout: &mut impl Write) -> Result<i
         )
     })?;
     drop(reader);
+    let (checkpoints, paths) =
+        checkpoints::load::<S>(opts.checkpoint.as_deref(), &log, opts.model_limits.bytes)?;
+    protect_report(opts.report.as_deref(), &paths)?;
     if opts.check {
         writeln!(
             stdout,
@@ -128,7 +147,16 @@ fn execute<S: StrategySet>(args: &[String], stdout: &mut impl Write) -> Result<i
         return Ok(0);
     }
     static HB: Heartbeat = Heartbeat::new();
-    let result = verify::<S>(log, opts.verify, &HB).map_err(|e| {
+    let model = if opts.recompute {
+        Some(recompute::<S>(&log, opts.verify, &checkpoints, opts.model_limits, &HB).map_err(model_error)?)
+    } else {
+        None
+    };
+    let mut verify_opts = opts.verify;
+    if let Some(m) = &model {
+        verify_opts.from_seq = m.verify_from_seq;
+    }
+    let result = verify::<S>(log, verify_opts, &HB).map_err(|e| {
         let code = match e {
             VerifyError::UnknownStrategy { .. } => 4,
             VerifyError::Window => 2,
@@ -136,14 +164,12 @@ fn execute<S: StrategySet>(args: &[String], stdout: &mut impl Write) -> Result<i
         };
         (code, format!("verification failed: {e:?}"))
     })?;
-    let fail = !result.sink.mismatches.is_empty();
-    let (summary, detail) = report::format(&instance, &result);
-    writeln!(
-        stdout,
-        "{}",
-        serde_json::json!({"summary": summary, "divergences": detail["divergences"], "recovery_diffs": detail["recovery_diffs"]})
-    )
-    .map_err(|e| (2, e.to_string()))?;
+    let fail =
+        !result.sink.mismatches.is_empty() || model.as_ref().is_some_and(|m| !m.differences.is_empty());
+    let (summary, detail) = report::format(&instance, &result, model.as_ref());
+    let mut output = detail.clone();
+    output["summary"] = summary.clone();
+    writeln!(stdout, "{}", output).map_err(|e| (2, e.to_string()))?;
     if let Some(path) = opts.report {
         report::write(&path, &summary).map_err(|e| (2, e.to_string()))?;
         // Always replace both lists in the sidecar; no stale divergence survives a success.

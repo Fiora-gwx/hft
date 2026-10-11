@@ -68,6 +68,9 @@ pub trait StrategySet: 'static {
     fn restore(s: &mut Self::Inst, r: &mut SnapshotReader<'_>) -> Result<(), RestoreError>;
     fn model_mem_bytes(p: &Self::Params, n_groups: u16) -> u64;
     fn model_snapshot_bytes(p: &Self::Params, n_groups: u16) -> u64;
+    /// Whether the kind has a slow part. `NoModel` and kinds outside the set return false;
+    /// an empty layout, zero version or zero snapshot size does not imply `NoModel`.
+    fn has_model(kind_id: u16) -> bool;
     fn model_layout(kind_id: u16) -> &'static ModelLayoutDesc;
     /// `Model::LAYOUT_VERSION` of the kind (outside the set or `NoModel` → 0).
     fn model_layout_version(kind_id: u16) -> u32;

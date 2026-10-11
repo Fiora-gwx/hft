@@ -1105,6 +1105,7 @@ pub trait StrategySet: 'static {
     fn restore(s: &mut Self::Inst, r: &mut SnapshotReader) -> Result<(), RestoreError>;
     fn model_mem_bytes(p: &Self::Params, n_groups: u16) -> u64;              // ctl-gateway 与 hft-core 装配的预算校验
     fn model_snapshot_bytes(p: &Self::Params, n_groups: u16) -> u64;
+    fn has_model(kind_id: u16) -> bool;                                   // NoModel 或集合外为 false;按具体类型判定,不以空布局、零版本或零检查点大小推断
     fn model_layout(kind_id: u16) -> &'static ModelLayoutDesc;
     fn model_layout_version(kind_id: u16) -> u32;                          // = Model::LAYOUT_VERSION;集合外或 NoModel 为 0,不以布局描述的哈希代替
     fn model_on_event<V: ModelViews>(m: &mut Self::ModelInst, ev: &EventRef<'_>, v: &V, out: &mut AdviceOut<'_>);

@@ -125,6 +125,8 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 
 `replay-io` 的冷规划器校验 RecoverMismatch 注记及其引用的旧尾部,按 [replayer verify](../../apps/replayer/README.md#verify) 的范围比较并单列 `recovery_diffs`;恢复后的普通输出不放行。仅经过验证的启动注记可在从新引导快照起步时略过,它们不由该快照重新生成。非法证据返回 `RecoveryRange`,普通与恢复差异共用诊断容量,溢出失败。默认构建不包含范围规划和恢复明细存储。
 
+同一 feature 的 `driver::recompute` 以独立镜像执行 Model,起点、检查点身份、比较窗口与路径重建点遵循 [replayer verify](../../apps/replayer/README.md#verify)。每次独立运行重新建立 Model 与待配对表;无起点的实例逐名报告。`StrategySet::has_model` 只排除实际 NoModel,空布局和零资源声明仍可带 Model。同一五元键的重复产出只保留最后一条参与配对,覆盖量计入 coalesced;每条产出只匹配一次。诊断记录数、待配对及差异载荷合计字节数由 `RecomputeLimits` 限制,溢出返回错误。文件与 JSON 仍归 app;此入口只用于冷回放,不改主循环、journal schema 或快照格式。
+
 回放比较器要求屏蔽测量字段后的逻辑体**长度和内容都相等**;不删体尾零。传输标志按 `NONCMP_FLAGS` 屏蔽,SHADOW 等业务标志仍参与比较。
 
 恢复、验证与镜像驱动解析配置时,只查当前已消费日志前缀里的 `ConfigBlob`;预读整份文件或追加镜像批次不提前放行配置。引用的 kind、encoding、len、version 与 SHA-256 必须全部相同,内容长度足够且摘要相等后才解码。向前或向后选择回放起点都按该位置重新限定可见范围;同一引用的最近记录损坏直接失败,不退回较早的副本。
@@ -839,6 +841,8 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 - 禁止:任何 `strategies/*`(策略只在装配处经 `strategy_set!` 进入)、`hft-strat-lib`、`hft-sim`(sim-gw 由 hft-core 装配)、`hft-net`、`hft-venue`、`venue-*`、`tokio`、任何 `cold` crate。
 
 ## 延伸阅读
+
+- [离线 Model 起点与配对决定](../../.agents/notes/implemented/architecture/2026-10-12-offline-model-origin.md)
 
 - [round8 裁决](../../design/_work/round8-decisions.md)(R8-2 延迟优先、R8-3 解耦、R8-5 模拟账户、R8-8 模拟让位于实盘、预热注入、断腿自动处置、R8-10、R8-11);评审证据 [review-2026-10-02](../../design/_work/review-2026-10-02-主策略适配与执行正确性.md) §4,[review-2026-10-03](../../design/_work/review-2026-10-03-M0独立评审.md),[M0-b 评审](../../design/_work/review-2026-10-03-M0b独立评审.md),[M0-c 五路汇总](../../design/_work/review-2026-10-03-M0c五路汇总.md)(L-P0-2 md 让位、L-P1-2 BBO 成员聚合、M-P1-1/3/5、S-P1-7、V5 P2-1/2/6),[M0-d 五路汇总](../../design/_work/review-2026-10-03-M0d五路汇总.md)(A-P0-1 关键帧一次写完、L-3 BBO/advice 让位、M-P2、W3 P1-12/16/18/21/22),[M0-e 五路汇总](../../design/_work/review-2026-10-03-M0e五路汇总.md)(X1 P1-A…E、X3 P1-6/15、X5 L-P2-5/6)
 - Agent Note:[引擎时间 engine_ns](../../.agents/notes/proposed/architecture/2026-10-03-engine-time.md)、[报价新鲜度 = 连接健康](../../.agents/notes/proposed/architecture/2026-10-03-quote-freshness-conn-health.md)、[sequencer md 让位](../../.agents/notes/proposed/architecture/2026-10-03-sequencer-md-preempt.md)、[resolve_broken 只在 HARD 解除时](../../.agents/notes/proposed/architecture/2026-10-03-resolve-broken-hard-only.md)、[AUTO_EXTERNAL 前置条件](../../.agents/notes/proposed/architecture/2026-10-03-auto-external-guard.md)、[持仓驱动订阅](../../.agents/notes/proposed/architecture/2026-10-03-position-driven-subscription.md)

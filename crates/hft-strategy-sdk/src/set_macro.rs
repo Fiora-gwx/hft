@@ -260,6 +260,15 @@ macro_rules! strategy_set {
                     })*
                 }
             }
+            fn has_model(kind_id: u16) -> bool {
+                match kind_id {
+                    $($($attr)* k if k == <$($path)* as $crate::Strategy>::DESC.kind_id => {
+                        core::any::TypeId::of::<<$($path)* as $crate::Strategy>::Model>()
+                            != core::any::TypeId::of::<$crate::NoModel<<$($path)* as $crate::Strategy>::Params>>()
+                    })*
+                    _ => false,
+                }
+            }
             fn model_layout(kind_id: u16) -> &'static $crate::ModelLayoutDesc {
                 match kind_id {
                     $($($attr)* k if k == <$($path)* as $crate::Strategy>::DESC.kind_id => {

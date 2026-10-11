@@ -1005,7 +1005,7 @@ fn sl_kind<S: StrategySet>(inst: &Instances<S>, ix: usize) -> u16 {
 
 /// Restores a Model from a checkpoint body; `Ok(Some((reason, version)))` = the path section
 /// was dropped (`ModelPathReset`).
-fn restore_model<S: StrategySet>(
+pub(crate) fn restore_model<S: StrategySet>(
     inst: &mut Instances<S>,
     ix: usize,
     h: &CkptHdr,
@@ -1033,7 +1033,7 @@ fn restore_model<S: StrategySet>(
 }
 
 /// UTC of the last `Timer{Sys, AdvisorTick}` at or before record `ix`.
-fn prev_tick_utc(log: &Log, ix: usize) -> Option<i64> {
+pub(crate) fn prev_tick_utc(log: &Log, ix: usize) -> Option<i64> {
     let k = (0..=ix).rev().find(|k| {
         log.recs.get(*k).is_some_and(|r| {
             r.kind == EventKind::TIMER

@@ -2835,6 +2835,8 @@ spec: README.md
 | SDK-186.11 | `model_layout_version(0xFF02)` | = `ProbeModel::LAYOUT_VERSION` |
 | SDK-186.12 | `model_layout_version(0xFF01)` | 0(`NoModel`) |
 | SDK-186.13 | `model_layout_version(0xFF09)` | 0(集合外) |
+| SDK-186.14 | `has_model(0xFF02)` / `(0xFF01)` / `(0xFF09)` | true / false(NoModel) / false(集合外) |
+| SDK-186.15 | 独立 `ZeroSet` 的真实无状态 Model,LAYOUT 为空、版本与内存/快照声明均为 0 | `has_model` 为 true |
 
 ### SDK-187 `strategy_set!` 拒绝重复的 `kind_id`、`name` 与 `schema.id`
 

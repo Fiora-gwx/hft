@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use hft_event::{EventKind, Layout, Role, SegmentRoll, kind_info};
+use hft_sequencer::driver::recompute::RecomputeResult;
 use hft_sequencer::driver::verify::VerifyResult;
 use serde_json::{Value, json};
 
@@ -71,7 +72,11 @@ fn field_diff(expected: &[u8], actual: &[u8]) -> Vec<Value> {
     out
 }
 
-pub(crate) fn format(instance: &str, result: &VerifyResult) -> (Value, Value) {
+pub(crate) fn format(
+    instance: &str,
+    result: &VerifyResult,
+    model: Option<&RecomputeResult>,
+) -> (Value, Value) {
     let sink = &result.sink;
     let describe = |m: &hft_sequencer::driver::Mismatch,
                     expected: &[u8],
@@ -145,11 +150,58 @@ pub(crate) fn format(instance: &str, result: &VerifyResult) -> (Value, Value) {
             })
         })
         .collect();
-    let summary = json!({"instance": instance, "date": &date[..10], "release": crate::VERSION, "verify": if details.is_empty() { "pass" } else { "fail" }, "first_divergent_seq": sink.mismatches.first().map(|m| m.seq), "recompute": "skipped", "skipped_reason": "advice_journal", "generated_utc": utc(generated), "start_snapshot_seq": result.start_snapshot, "inputs_replayed": result.inputs, "outputs_compared": sink.compared, "snapshots_checked": result.snapshots, "mismatches": details.len(), "runs": runs});
-    (
-        summary,
-        json!({"divergences": details, "recovery_diffs": recovery}),
-    )
+    let mut summary = json!({"instance": instance, "date": &date[..10], "release": crate::VERSION, "verify": if details.is_empty() { "pass" } else { "fail" }, "first_divergent_seq": sink.mismatches.first().map(|m| m.seq), "recompute": "skipped", "skipped_reason": "advice_journal", "generated_utc": utc(generated), "start_snapshot_seq": result.start_snapshot, "inputs_replayed": result.inputs, "outputs_compared": sink.compared, "snapshots_checked": result.snapshots, "mismatches": details.len(), "runs": runs});
+    let mut detail = json!({"divergences": details, "recovery_diffs": recovery});
+    if let Some(m) = model {
+        let model_first = m.differences.first().map(|d| d.seq);
+        let output_first = sink.mismatches.first().map(|d| d.seq);
+        let first = model_first.into_iter().chain(output_first).min();
+        summary["verify"] = json!(if first.is_some() { "fail" } else { "pass" });
+        summary["first_divergent_seq"] = json!(first);
+        summary["first_output_divergent_seq"] = json!(output_first);
+        summary["first_model_divergent_seq"] = json!(model_first);
+        summary["recompute"] = json!(if model_first.is_some() {
+            "fail"
+        } else if !m.model_no_start.is_empty() {
+            "skipped"
+        } else {
+            "pass"
+        });
+        summary["skipped_reason"] = json!(if model_first.is_none() && !m.model_no_start.is_empty() {
+            Some("model_no_start")
+        } else {
+            None
+        });
+        summary["model_advice_compared"] = json!(m.compared);
+        if !m.started_instances.is_empty() || m.model_no_start.is_empty() {
+            summary["coalesced"] = json!(m.coalesced);
+        }
+        summary["checkpoint_key"] = json!(m.checkpoint_keys.iter().map(|(name, k)| json!({
+            "strategy_instance": name, "kind_id": k.kind_id, "layout_version": k.layout_version,
+            "schema_id": k.schema_id, "strategy": k.strategy.0, "account": k.account.0, "last_seq": k.last_seq
+        })).collect::<Vec<_>>());
+        summary["recompute_from_seq"] = json!(m.recompute_from_seq);
+        detail["model_no_start"] = json!(m.model_no_start);
+        detail["model_divergences"] = json!(
+            m.differences
+                .iter()
+                .map(|d| {
+                    let mut logged = EventKind::ADVICE.0.to_le_bytes().to_vec();
+                    logged.extend_from_slice(&d.logged);
+                    let mut actual = Vec::new();
+                    if let Some(body) = &d.regenerated {
+                        actual.extend_from_slice(&EventKind::ADVICE.0.to_le_bytes());
+                        actual.extend_from_slice(body);
+                    }
+                    json!({"seq": d.seq, "strategy": d.strategy.0, "account": d.account.0,
+                "group": d.group.0, "local_kind": d.local_kind, "basis_seq": d.basis_seq,
+                "expected_hex": hex(&d.logged), "actual_hex": d.regenerated.as_deref().map(hex),
+                "field_diff": field_diff(&logged, &actual)})
+                })
+                .collect::<Vec<_>>()
+        );
+    }
+    (summary, detail)
 }
 
 pub(crate) fn divergence_path(path: &Path) -> PathBuf {
