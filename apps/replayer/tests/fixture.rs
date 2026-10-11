@@ -324,6 +324,21 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>) -> Fixture {
                 .rings
                 .entry((2, 0))
                 .or_default()
+                .push_back((
+                    EventKind::CONN_STATE,
+                    ConnState {
+                        inst: InstId(0),
+                        ..conn
+                    }
+                    .as_bytes()
+                    .to_vec(),
+                ));
+            s.driver_mut()
+                .io
+                .rings
+                .rings
+                .entry((2, 0))
+                .or_default()
                 .push_back((EventKind::CONN_STATE, conn.as_bytes().to_vec()));
             settle(&mut s);
             let mut h = MarketHdr::new_zeroed();
