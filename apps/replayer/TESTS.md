@@ -2107,7 +2107,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:RPL-266 的真实封闭文件,每行独立修改第一条 Advice 并重算 CRC
 - 步骤:运行不带检查点的 recompute
-- 期望:每行退出 1、recompute = fail,first_model_divergent_seq 与首条 model_divergences 均指向被改的 Advice;字段差异非空,来源保持篡改后的字节
+- 期望:每行退出 1、recompute = fail,first_model_divergent_seq 与首条 model_divergences 均指向被改的 Advice;字段差异非空,来源保持篡改后的字节;错路由引出的额外 Output 不吞掉下一 Input,verify 与 recompute 的结论独立
 - 实现:`apps/replayer/tests/model.rs::rpl_267_advice_header_and_payload_divergences_are_reported`
 
 | 行 | 单独修改的字段 |

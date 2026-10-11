@@ -129,6 +129,8 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 
 回放比较器要求屏蔽测量字段后的逻辑体**长度和内容都相等**;不删体尾零。传输标志按 `NONCMP_FLAGS` 屏蔽,SHADOW 等业务标志仍参与比较。
 
+离线 Model 镜像同样保留原始 Input 顺序。被篡改的 Advice 引出额外 Output(例如错路由注记)时,该输出不能占用下一条 Input 的位置;普通 Output 分歧仍由独立 VerifyDriver 报告。此选项仅由冷重算入口开启,在线 advisor 与恢复驱动沿用各自装配。
+
 恢复、验证与镜像驱动解析配置时,只查当前已消费日志前缀里的 `ConfigBlob`;预读整份文件或追加镜像批次不提前放行配置。引用的 kind、encoding、len、version 与 SHA-256 必须全部相同,内容长度足够且摘要相等后才解码。向前或向后选择回放起点都按该位置重新限定可见范围;同一引用的最近记录损坏直接失败,不退回较早的副本。
 
 ### 策略集(`StrategySet`)

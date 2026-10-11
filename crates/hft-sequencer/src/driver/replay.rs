@@ -114,6 +114,9 @@ pub struct ReplaySink {
     pub(super) recovery_notes: Vec<usize>,
     #[cfg(feature = "replay-io")]
     pub(super) diagnostic_overflow: bool,
+    /// Offline Model replay must keep Inputs even when a changed Advice creates extra Outputs.
+    #[cfg(feature = "replay-io")]
+    pub(super) preserve_inputs: bool,
     scratch_a: Vec<u8>,
     scratch_b: Vec<u8>,
 }
@@ -153,6 +156,8 @@ impl ReplaySink {
             recovery_notes: Vec::new(),
             #[cfg(feature = "replay-io")]
             diagnostic_overflow: false,
+            #[cfg(feature = "replay-io")]
+            preserve_inputs: false,
             scratch_a: Vec::with_capacity(1 << 16),
             scratch_b: Vec::with_capacity(1 << 16),
         }
@@ -264,7 +269,10 @@ impl ReplaySink {
         let seq = r.seq;
         // An extra generated Output must never eat the next Input. Once divergent, a
         // keep-going replay retains the original Input stream for useful diagnostics.
-        let advance = boot || self.mode != ReplayMode::Verify || r.role() != Role::Input;
+        let preserve = self.mode == ReplayMode::Verify;
+        #[cfg(feature = "replay-io")]
+        let preserve = preserve || self.preserve_inputs;
+        let advance = boot || !preserve || r.role() != Role::Input;
         if self.comparing(seq) && !self.halted {
             self.scratch_a.clear();
             for p in pieces {

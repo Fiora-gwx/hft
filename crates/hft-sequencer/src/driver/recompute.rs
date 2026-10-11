@@ -157,6 +157,7 @@ fn mirror<S: StrategySet>(
     let mut driver = ReplayDriver::new(ReplayMode::Mirror, log.clone(), 0, 1);
     driver.end = end;
     driver.sink.record_end = end;
+    driver.sink.preserve_inputs = true;
     let plan = RecoverPlan {
         start: SnapshotSel::AtSeq(at),
         replay_tail: true,
