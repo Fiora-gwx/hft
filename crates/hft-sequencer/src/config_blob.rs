@@ -1,12 +1,14 @@
 //! Reconstruct assembly inputs from the journal's complete ECF1 blob. No filesystem, environment,
 //! default config or process-local callbacks are consulted by the decoding path.
-use hft_event::BlobKind;
+use hft_event::{BlobHdr, BlobKind, BlobRef, EventKind, SnapshotHdr};
 use hft_refdata::{AccountKind, EcfBuilder, EngineConfig, EngineSection, LoadErrCode, RefData};
-use hft_strategy_sdk::VenueSet;
+use hft_strategy_sdk::{SnapshotReader, VenueSet};
 use hft_types::{AccountId, HostClass, VenueId};
+use sha2::{Digest, Sha256};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
-use crate::{ConfigErr, EngineSetup, SegClock};
+use crate::driver::replay::Log;
+use crate::{BootError, ConfigErr, EngineSetup, SegClock};
 
 pub const ASSEMBLY_ROW_VERSION: u16 = 1;
 
@@ -37,7 +39,93 @@ pub fn decode_risk_blob(b: &[u8], _a: AccountId, rd: &RefData) -> Result<hft_ris
     hft_risk::RiskParams::decode_blob(b, rd).map_err(|_| crate::codes::detail::BAD_VALUE)
 }
 
+fn content_before<'a>(log: &'a Log, ix: usize, wanted: &BlobRef) -> Result<&'a [u8], ConfigErr> {
+    for r in log.recs.iter().take(ix).rev() {
+        if r.kind != EventKind::CONFIG_BLOB {
+            continue;
+        }
+        let Some(h) = r.read::<BlobHdr>() else { continue };
+        if h.blob != *wanted {
+            continue;
+        }
+        let bytes = r
+            .body
+            .get(72..72 + wanted.len as usize)
+            .ok_or(ConfigErr::Missing)?;
+        let sha: [u8; 32] = Sha256::digest(bytes).into();
+        if sha != wanted.sha256 {
+            return Err(ConfigErr::Blob {
+                kind: wanted.kind as u16,
+                code: LoadErrCode::Structure as u16,
+            });
+        }
+        return Ok(bytes);
+    }
+    Err(ConfigErr::Missing)
+}
+
 impl EngineSetup {
+    /// Decode the active configuration at an exact snapshot record. Only preceding, fully
+    /// matching and SHA-256-checked ConfigBlob records may satisfy its references. Run facts
+    /// come from that snapshot and its segment; another world's assembly cannot fill any gap.
+    pub fn from_snapshot(log: &Log, seq: u64) -> Result<Self, BootError> {
+        let bad = |section| BootError::SnapshotUndecodable { section };
+        let ix = log
+            .recs
+            .iter()
+            .position(|r| r.seq == seq && r.kind == EventKind::STATE_SNAPSHOT)
+            .ok_or(BootError::Journal(crate::JournalErr::NoSnapshot))?;
+        let body = log
+            .recs
+            .get(ix)
+            .and_then(|r| r.body.get(size_of::<SnapshotHdr>()..))
+            .ok_or_else(|| bad(0))?;
+        let sections = crate::snapshot::read_seq_sections(body).map_err(bad)?;
+        for (blob, _) in &sections.active {
+            content_before(log, ix, blob).map_err(BootError::Config)?;
+        }
+        let active = |kind| {
+            let mut rows = sections.active.iter().filter(|(b, _)| b.kind == kind);
+            let (b, _) = rows.next().ok_or_else(|| bad(9))?;
+            if rows.next().is_some() || b.encoding != 1 {
+                return Err(bad(9));
+            }
+            Ok(*b)
+        };
+        let rd_ref = active(BlobKind::Refdata)?;
+        let engine_ref = active(BlobKind::Engine)?;
+        let rd_bytes = content_before(log, ix, &rd_ref).map_err(BootError::Config)?;
+        let engine_bytes = content_before(log, ix, &engine_ref).map_err(BootError::Config)?;
+        let rd = RefData::load(rd_bytes, None).map_err(|r| {
+            BootError::Config(ConfigErr::Blob {
+                kind: BlobKind::Refdata as u16,
+                code: r.code() as u16,
+            })
+        })?;
+        let r = SnapshotReader::new(body);
+        let counters = r
+            .find_section(hft_oms::SECTION_OMS_COUNTERS)
+            .map_err(|_| bad(3))?
+            .ok_or_else(|| bad(3))?;
+        if counters.version != hft_oms::ROW_VERSION_COUNTERS {
+            return Err(bad(3));
+        }
+        let epoch: hft_oms::OmsCountersHdr = counters.reader().get_row().map_err(|_| bad(3))?;
+        let clock = *log.segs.get(log.seg_of(ix)).ok_or_else(|| bad(16))?;
+        if sections.engine_clock.tsc_hz_milli == 0 || sections.engine_clock.tsc_hz_milli != clock.tsc_hz_milli
+        {
+            return Err(bad(25));
+        }
+        Self::decode_blob(
+            engine_bytes,
+            &rd,
+            clock,
+            epoch.engine_epoch,
+            sections.engine_clock.base_engine_ns,
+        )
+        .map_err(BootError::Config)
+    }
+
     /// Complete engine configuration for a boot block. The run's epoch and clock are supplied
     /// separately by the snapshot / segment header, never encoded as mutable configuration.
     pub fn encode_blob(&self, version: u64, host: HostClass, created_utc_ns: i64) -> Vec<u8> {
@@ -183,7 +271,10 @@ impl EngineSetup {
                 5 if r.index == 0 && r.account == 0 && r.value == 0 => feeds.0 |= 1u64 << r.venue,
                 6 if r.index == 0 && r.account != 0 && r.value <= 3 => {
                     let a = rd.account(AccountId(r.account));
-                    if a.id.0 == 0 || a.kind == AccountKind::Sim || a.venues & (1u64 << r.venue) == 0 {
+                    if a.id.0 == 0
+                        || matches!(a.kind, AccountKind::Sim(_))
+                        || a.venues & (1u64 << r.venue) == 0
+                    {
                         return Err(err());
                     }
                     keys_required.push((a.id, VenueId(r.venue), r.value as u8));
@@ -194,7 +285,7 @@ impl EngineSetup {
         // Live account key requirements are facts, including an explicit empty bitmap.
         for a in 1..=u8::MAX {
             let meta = rd.account(AccountId(a));
-            if meta.id.0 == 0 || meta.kind == AccountKind::Sim {
+            if meta.id.0 == 0 || metmatches!(a.kind, AccountKind::Sim(_)) {
                 continue;
             }
             for v in 1..64u8 {

@@ -174,7 +174,7 @@ impl ExecConfig {
             let a = rd.account(AccountId(id));
             let entry = cfg.accounts.iter().find(|x| x.account == AccountId(id));
             match (a.id.0 != 0, entry) {
-                (true, Some(x)) if x.sim == (a.kind == AccountKind::Sim) => {}
+                (true, Some(x)) if x.sim == matches!(a.kind, AccountKind::Sim(_)) => {}
                 (false, None) => {}
                 _ => return Err(err),
             }

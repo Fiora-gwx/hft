@@ -23,6 +23,8 @@ mod sdk_rd;
 #[cfg(feature = "seq")]
 mod fee_cycle;
 #[cfg(feature = "seq")]
+mod journal_config;
+#[cfg(feature = "seq")]
 mod observations;
 #[cfg(feature = "seq")]
 mod seq_sut;

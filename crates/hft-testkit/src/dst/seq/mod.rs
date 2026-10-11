@@ -609,8 +609,10 @@ impl<S: StrategySet> Sut for SeqSut<S> {
         let w = ctx.world.clone();
         let rd_blob = build::refdata_blob(&w, false).map_err(BootFail)?;
         let rd = build::load_refdata(&rd_blob).map_err(BootFail)?;
-        let configs = build::config_set::<S>(&w, &rd, rd_blob).map_err(BootFail)?;
         let setup = build::engine_setup(&w, ctx.tsc_hz, 1);
+        let configs = build::config_set::<S>(&w, &rd, rd_blob, &setup).map_err(BootFail)?;
+        let setup = EngineSetup::decode_blob(&configs.engine_blob, &rd, setup.clock, 1, 0)
+            .map_err(|e| BootFail(format!("engine configuration: {e:?}")))?;
         let hb: &'static Heartbeat = Box::leak(Box::new(Heartbeat::new()));
         let mut sut = SeqSut {
             s: None,
@@ -699,7 +701,8 @@ impl<S: StrategySet> Sut for SeqSut<S> {
             .filter(|r| r.kind == EventKind::STATE_SNAPSHOT)
             .map(|r| r.seq)
             .next_back()?;
-        let drv = ReplayDriver::new(ReplayMode::Verify, log, 0, self.setup.seq.replay_per_round);
+        let setup = EngineSetup::from_snapshot(&log, snap).ok()?;
+        let drv = ReplayDriver::new(ReplayMode::Verify, log, 0, setup.seq.replay_per_round);
         let plan = RecoverPlan {
             start: SnapshotSel::AtSeq(snap),
             replay_tail: true,
@@ -708,7 +711,7 @@ impl<S: StrategySet> Sut for SeqSut<S> {
             quarantine: Vec::new(),
         };
         let mut s: Sequencer<ReplayDriver, S> =
-            Sequencer::boot(BootSource::Journal(plan), &self.setup, drv, self.hb).ok()?;
+            Sequencer::boot(BootSource::Journal(plan), &setup, drv, self.hb).ok()?;
         for _ in 0..10_000_000 {
             if s.step() != StepOutcome::Busy {
                 break;

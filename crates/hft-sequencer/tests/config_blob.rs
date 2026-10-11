@@ -2,6 +2,7 @@ use crate::common::*;
 use hft_event::{BlobHdr, BlobKind, EventKind};
 use hft_refdata::{AccountKind, EcfBuilder, EngineConfig, EngineSection};
 use hft_sequencer::driver::live::LiveDriver;
+use hft_sequencer::driver::replay::Log;
 use hft_sequencer::{BootSource, EngineSetup, Sequencer};
 use hft_types::{AccountId, HostClass, VenueId};
 
@@ -10,7 +11,7 @@ fn full_setup(rd: &hft_refdata::RefData) -> EngineSetup {
     s.keys_required.clear();
     for id in 1..=u8::MAX {
         let a = rd.account(AccountId(id));
-        if a.id.0 == 0 || a.kind == AccountKind::Sim {
+        if a.id.0 == 0 || matches!(a.kind, AccountKind::Sim(_)) {
             continue;
         }
         for v in 1..64u8 {
@@ -98,15 +99,17 @@ fn seq_377_missing_config_does_not_use_defaults() {
     }
 }
 
-#[test]
-fn seq_378_replay_config_only_from_journal() {
+fn config_journal(complete: bool) -> hft_sequencer::journal::MemJournal {
+    reset_script();
     let b = b0();
     let rd = b.rd.load();
     let setup = full_setup(&rd);
     let mut configs = b.configs(&rd);
-    configs.engine_blob = setup.encode_blob(1, HostClass::Dev2, UTC0);
-    configs.risk_blob = configs.risk.encode_blob().unwrap();
-    configs.risk_sha256 = sha(&configs.risk_blob);
+    if complete {
+        configs.engine_blob = setup.encode_blob(1, HostClass::Dev2, UTC0);
+        configs.risk_blob = configs.risk.encode_blob().unwrap();
+        configs.risk_sha256 = sha(&configs.risk_blob);
+    }
     let heartbeat = hb();
     let drv = LiveDriver::new(TestIo::<TestSet>::new(setup.clock), b.live);
     let s = Sequencer::boot(BootSource::Empty { configs }, &setup, drv, heartbeat).unwrap();
@@ -119,37 +122,127 @@ fn seq_378_replay_config_only_from_journal() {
         upd: 1,
     };
     h.steady();
+    h.open_position(AC1, A1, hft_types::Side::Buy, "0.001");
+    h.open_position(AC1, B1, hft_types::Side::Sell, "0.001");
     h.keyframe();
     for k in 0..12 {
         h.quote(A1, "50000", if k % 2 == 0 { "50003" } else { "50004" });
         h.run();
     }
     h.keyframe();
+    h.j().clone()
+}
+
+#[test]
+fn seq_378_replay_config_only_from_journal() {
     // Drop every assembler configuration value. Decode fresh from the journal's original boot
     // block, then use the same VerifyDriver as replayer, including all output snapshots.
-    let recs = h.recs();
-    let mut rd_blob = None;
-    let mut ec_blob = None;
-    for r in &recs {
-        if r.kind != EventKind::CONFIG_BLOB {
-            continue;
-        }
-        let bh = r.read::<BlobHdr>().unwrap();
-        let data = r.body[72..72 + bh.blob.len as usize].to_vec();
-        match bh.blob.kind {
-            BlobKind::Refdata => rd_blob = Some(data),
-            BlobKind::Engine => ec_blob = Some(data),
-            _ => {}
-        }
-    }
-    let rd = hft_refdata::RefData::load(&rd_blob.unwrap(), None).unwrap();
-    let clock = h.j().segments[0].clock;
-    let setup = EngineSetup::decode_blob(&ec_blob.unwrap(), &rd, clock, 1, 0).unwrap();
-    assert!(verify_journal::<TestSet>(h.j(), &setup, None).is_empty());
+    let j = config_journal(true);
+    let log = Log::from_segments(&j.segments);
+    let at = log
+        .recs
+        .iter()
+        .find(|r| r.kind == EventKind::STATE_SNAPSHOT)
+        .unwrap()
+        .seq;
+    let setup = EngineSetup::from_snapshot(&log, at).unwrap();
+    assert!(verify_journal::<TestSet>(&j, &setup, None).is_empty());
     // A physically complete configuration carries all three component sections, not a marker.
     assert!(
-        recs.iter()
+        log.recs
+            .iter()
             .filter(|r| r.kind == EventKind::CONFIG_BLOB)
             .any(|r| r.body.windows(8).any(|w| w == hft_risk::RISK_BLOB_MAGIC))
     );
+}
+
+#[test]
+fn seq_379_snapshot_config_requires_preceding_verified_blob() {
+    let log = Log::from_segments(&config_journal(true).segments);
+    let at = log
+        .recs
+        .iter()
+        .find(|r| r.kind == EventKind::STATE_SNAPSHOT)
+        .unwrap()
+        .seq;
+    for kind in [
+        BlobKind::Engine,
+        BlobKind::Refdata,
+        BlobKind::RiskParams,
+        BlobKind::StrategyParams,
+    ] {
+        let ix = log
+            .recs
+            .iter()
+            .position(|r| r.kind == EventKind::CONFIG_BLOB && r.read::<BlobHdr>().unwrap().blob.kind == kind)
+            .unwrap();
+        for mutation in 0..4 {
+            let mut bad = log.clone();
+            match mutation {
+                0 => {
+                    bad.recs.remove(ix);
+                }
+                1 => {
+                    let r = bad.recs.remove(ix);
+                    bad.recs.push(r);
+                }
+                2 => bad.recs[ix].body[80] ^= 1,
+                _ => {
+                    bad.recs[ix].body.truncate(80);
+                }
+            }
+            assert!(
+                EngineSetup::from_snapshot(&bad, at).is_err(),
+                "{kind:?} mutation {mutation}"
+            );
+        }
+    }
+    assert!(EngineSetup::from_snapshot(&log, u64::MAX).is_err());
+    let mut bad = log.clone();
+    bad.segs[0].tsc_hz_milli += 1;
+    assert!(EngineSetup::from_snapshot(&bad, at).is_err());
+}
+
+#[test]
+fn seq_380_complete_config_preserves_business_outputs() {
+    let old = config_journal(false);
+    let new = config_journal(true);
+    let project = |j: &hft_sequencer::journal::MemJournal| {
+        j.records()
+            .filter(|r| !matches!(r.kind, EventKind::CONFIG_BLOB | EventKind::STATE_SNAPSHOT))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    assert!(new.records().any(|r| r.kind == EventKind::ORDER_DECISION));
+    assert_eq!(project(&old), project(&new));
+    let snapshots = |j: &hft_sequencer::journal::MemJournal| {
+        j.records()
+            .filter(|r| r.kind == EventKind::STATE_SNAPSHOT)
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let before = snapshots(&old);
+    let after = snapshots(&new);
+    assert_eq!(before.len(), after.len());
+    for (a, b) in before.iter().zip(&after) {
+        let mut x = hft_strategy_sdk::SnapshotReader::new(&a.body[96..]);
+        let mut y = hft_strategy_sdk::SnapshotReader::new(&b.body[96..]);
+        while let Some(s) = x.next_section().unwrap() {
+            let t = y.next_section().unwrap().unwrap();
+            assert_eq!((s.section, s.version, s.count), (t.section, t.version, t.count));
+            if s.section == 9 {
+                assert_ne!(
+                    s.body, t.body,
+                    "complete config must change active blob identities"
+                );
+            } else {
+                assert_eq!(s.body, t.body, "snapshot {} section {}", a.seq, s.section);
+            }
+        }
+        assert!(y.next_section().unwrap().is_none());
+        assert_ne!(
+            hft_sequencer::snapshot::state_hash(&a.body[96..]),
+            hft_sequencer::snapshot::state_hash(&b.body[96..])
+        );
+    }
 }

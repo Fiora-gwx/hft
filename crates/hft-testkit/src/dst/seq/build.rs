@@ -7,11 +7,11 @@ use hft_exec::{ExecAccount, ExecConfig, ExecParams};
 use hft_ledger::LedgerConfig;
 use hft_oms::{OmsConfig, PerTable};
 use hft_refdata::{
-    AccountSpec as RdAccount, AccountVenueSpec, AssetClass, AssetSpec, CapFlags, DeadManCap, EcfBuilder,
-    EngineSection, Exchange, FeeAssetRule, FeePair, FeeSpec, FundingSettleKind, InstKind, InstSpec as RdInst,
-    InstStatus, InstanceSpec, LimitBucket, LimitScope, LiqMarker, MarginData, MarginMode, PositionMode,
-    RateLimit, RdbBuilder, RefData, SimBalanceSpec, SimSpec, StaleGuardKind, TestnetKind, TsUnit, UidPolicy,
-    VenueCaps, VenueSpec as RdVenue,
+    AccountSpec as RdAccount, AccountVenueSpec, AssetClass, AssetSpec, CapFlags, DeadManCap, Exchange,
+    FeeAssetRule, FeePair, FeeSpec, FundingSettleKind, InstKind, InstSpec as RdInst, InstStatus,
+    InstanceSpec, LimitBucket, LimitScope, LiqMarker, MarginData, MarginMode, PositionMode, RateLimit,
+    RdbBuilder, RefData, SimBalanceSpec, SimSpec, StaleGuardKind, TestnetKind, TsUnit, UidPolicy, VenueCaps,
+    VenueSpec as RdVenue,
 };
 use hft_risk::{
     AcctLimits, DEFAULT_MARGIN, FixedVec, GroupLimits, GroupLimitsRow, GwMap, MarginLimits, PreVec, PxBand,
@@ -30,6 +30,7 @@ use zerocopy::IntoBytes;
 use crate::dst::world::{AccountKind, StrategyBinding, VenueMarket, WorldSpec};
 
 pub use crate::dst::world::UTC0;
+pub use hft_sequencer::config_blob::decode_risk_blob as risk_decode;
 /// The test kind of a binding with `kind_id = 0` (`probe-taker`).
 pub const DEFAULT_KIND: u16 = 0xFF01;
 /// Leverage the venues report for every perp (W1 "实际杠杆 5×").
@@ -402,15 +403,6 @@ pub fn seq_row() -> SeqParamsRow {
     }
 }
 
-/// The ECF1 blob of the run (sections 3 and 5).
-pub fn engine_blob(caps: &CapacitiesRow, seq: &SeqParamsRow) -> Vec<u8> {
-    let mut b = EcfBuilder::new(1, HostClass::Dev2);
-    b.created_utc_ns(UTC0 - 86_400_000_000_000);
-    b.section(EngineSection::Capacities, 1, 24, 1, caps.as_bytes().to_vec());
-    b.section(EngineSection::Sequencer, 1, 72, 1, seq.as_bytes().to_vec());
-    b.finish()
-}
-
 /// `RiskParams` of the world (`RiskSpec` values; the rest generous).
 pub fn risk_params(w: &WorldSpec) -> RiskParams {
     let r = &w.risk;
@@ -464,7 +456,7 @@ pub fn risk_params(w: &WorldSpec) -> RiskParams {
             });
         }
     }
-    let groups = w
+    let mut groups: Vec<_> = w
         .groups
         .iter()
         .map(|g| GroupLimitsRow {
@@ -476,6 +468,9 @@ pub fn risk_params(w: &WorldSpec) -> RiskParams {
             },
         })
         .collect();
+    accounts.sort_by_key(|r| r.account);
+    venues.sort_by_key(|r| (r.account, r.venue));
+    groups.sort_by_key(|r| (r.account, r.group));
     RiskParams {
         version: 1,
         generated_at_ns: 0,
@@ -491,9 +486,6 @@ pub fn risk_params(w: &WorldSpec) -> RiskParams {
         groups: PreVec::from_vec(groups),
     }
 }
-
-/// The DST `RiskParams` encoding: `b"DSTR"` + nothing (`SetRisk` decodes to the world values).
-pub const RISK_BLOB: &[u8] = b"DSTR\0\0\0\0";
 
 /// SHA-256 of a blob.
 pub fn sha256(b: &[u8]) -> [u8; 32] {
@@ -691,36 +683,16 @@ pub fn engine_setup(w: &WorldSpec, tsc_hz: u64, epoch: u32) -> EngineSetup {
     }
 }
 
-thread_local! {
-    /// The world of the current run (`SetRisk` decoding needs its values).
-    static RISK_OF_RUN: core::cell::RefCell<Option<RiskParams>> = const { core::cell::RefCell::new(None) };
-}
-
-/// Remembers the run's risk parameters for [`risk_decode`].
-pub fn set_run_risk(p: RiskParams) {
-    RISK_OF_RUN.with(|r| *r.borrow_mut() = Some(p));
-}
-
-/// `SetRisk` decoding of the DST encoding: `b"DSTR"` → the run's parameters.
-pub fn risk_decode(b: &[u8], _a: AccountId, _rd: &RefData) -> Result<RiskParams, u16> {
-    if b.get(..4) != Some(b"DSTR") {
-        return Err(hft_sequencer::codes::detail::BAD_VALUE);
-    }
-    RISK_OF_RUN
-        .with(|r| r.borrow().clone())
-        .ok_or(hft_sequencer::codes::detail::BAD_VALUE)
-}
-
 /// The empty-start configuration of the world.
 pub fn config_set<S: StrategySet>(
     w: &WorldSpec,
     rd: &RefData,
     rd_blob: Vec<u8>,
+    setup: &EngineSetup,
 ) -> Result<ConfigSet<S>, String> {
-    let caps = caps_row_of(w);
-    let seq = seq_row();
     let risk = risk_params(w);
-    set_run_risk(risk.clone());
+    let risk_blob = risk.encode_blob().map_err(|e| format!("risk encoding: {e:?}"))?;
+    let risk = RiskParams::decode_blob(&risk_blob, rd).map_err(|e| format!("risk decoding: {e:?}"))?;
     let mut params = Vec::new();
     for s in &w.strategies {
         let b = spb_blob::<S>(w, s, 1)?;
@@ -729,9 +701,9 @@ pub fn config_set<S: StrategySet>(
     }
     Ok(ConfigSet {
         refdata_blob: rd_blob,
-        engine_blob: engine_blob(&caps, &seq),
-        risk_blob: RISK_BLOB.to_vec(),
-        risk_sha256: sha256(RISK_BLOB),
+        engine_blob: setup.encode_blob(1, HostClass::Dev2, UTC0 - 86_400_000_000_000),
+        risk_sha256: sha256(&risk_blob),
+        risk_blob,
         risk,
         params,
     })
