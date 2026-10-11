@@ -71,6 +71,20 @@ fn seq_392_extra_output_preserves_input_and_missing_tail_fails() {
         1,
         "finalization double-counted a missing Output"
     );
+    // The next run's Output may be byte-identical. It must not satisfy an extra Output
+    // emitted by the old run, and a boundary at zero has no preceding record.
+    for end in [0, 1] {
+        let mut sink = ReplaySink::new(ReplayMode::Verify, log.clone());
+        sink.pos = end;
+        sink.record_end = end;
+        sink.append_var(output.kind, output.flags, Tsc(0), &[&output.body])
+            .unwrap();
+        assert_eq!(sink.pos, end);
+        assert_eq!(sink.compared, 0);
+        assert_eq!(sink.mismatches.len(), 1);
+        assert_eq!(sink.mismatches[0].seq, if end == 0 { 1 } else { 81 });
+        assert!(sink.detail[0].1.is_empty());
+    }
     let mut sink = ReplaySink::new(ReplayMode::Verify, log);
     sink.stop_on_first = true;
     sink.append_var(output.kind, output.flags, Tsc(0), &[&output.body])

@@ -1,9 +1,7 @@
 //! Cold, generic verification assembly. File discovery and JSON belong to the caller;
 //! state reconstruction and Output alignment remain in the sequencer crate.
 
-use hft_event::{
-    BlobHdr, BlobKind, EventKind, HostProfile, Role, SegmentRoll, SnapshotHdr, StrategyParamsHdr,
-};
+use hft_event::{BlobHdr, BlobKind, EventKind, Role, StrategyParamsHdr};
 use hft_rt::Heartbeat;
 use hft_strategy_sdk::StrategySet;
 use zerocopy::TryFromBytes;
@@ -35,7 +33,11 @@ pub enum VerifyError {
         seq: u64,
     },
     DiagnosticLimit,
-    /// Until independent recovery/version runs are assembled, never claim to verify them.
+    /// A missing/inconsistent boot block cannot establish an independent execution.
+    RunBoundary {
+        seq: u64,
+    },
+    /// Recovery mismatch ranges are not yet supported; never silently accept them.
     UnsupportedRun {
         seq: u64,
     },
@@ -50,8 +52,20 @@ pub struct VerifyResult {
     pub start_snapshot: u64,
     pub inputs: u64,
     pub snapshots: u64,
+    pub runs: Vec<RunReport>,
     /// Owns the original log and bounded mismatch details for the cold report formatter.
     pub sink: ReplaySink,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RunReport {
+    pub start_snapshot: u64,
+    /// The next independent run's first record, or None for the final run.
+    pub stop_before: Option<u64>,
+    pub inputs: u64,
+    pub outputs: u64,
+    pub snapshots: u64,
+    pub mismatches: usize,
 }
 
 /// Run from the latest snapshot at/before `from_seq`, or the first boot snapshot. Input
@@ -70,13 +84,7 @@ pub fn verify<S: StrategySet>(
     }
     // Reject unsupported strategy kinds before replaying even the first Input. A syntactically
     // valid blob is checked by the normal parser when its command becomes visible.
-    let mut build = None;
     for r in &log.recs {
-        if r.kind == EventKind::SEGMENT_ROLL
-            && r.read::<SegmentRoll>().is_some_and(|s| matches!(s.reason, 4 | 6))
-        {
-            return Err(VerifyError::UnsupportedRun { seq: r.seq });
-        }
         if r.kind == EventKind::CONFIG_BLOB {
             let b = r
                 .read::<BlobHdr>()
@@ -96,95 +104,116 @@ pub fn verify<S: StrategySet>(
                 }
             }
         }
-        if r.kind == EventKind::HOST_PROFILE {
-            let p = r
-                .read::<HostProfile>()
-                .ok_or(VerifyError::UnsupportedRun { seq: r.seq })?;
-            if build.is_some_and(|b| b != p.build_git) {
-                return Err(VerifyError::UnsupportedRun { seq: r.seq });
-            }
-            build = Some(p.build_git);
-        }
-        if r.kind == EventKind::STATE_SNAPSHOT
-            && r.read::<SnapshotHdr>()
-                .is_some_and(|h| h.purpose == crate::snapshot::PURPOSE_RECOVERY)
-        {
-            return Err(VerifyError::UnsupportedRun { seq: r.seq });
-        }
     }
+    let starts = super::verify_runs::plan(&log)?;
     let selected = if opts.from_seq.is_some() {
         log.recs
             .iter()
-            .rev()
-            .find(|r| r.seq <= from && r.kind == EventKind::STATE_SNAPSHOT)
+            .rposition(|r| r.seq <= from && r.kind == EventKind::STATE_SNAPSHOT)
     } else {
-        log.recs.iter().find(|r| {
-            r.kind == EventKind::STATE_SNAPSHOT
-                && r.read::<SnapshotHdr>()
-                    .is_some_and(|h| h.purpose == crate::snapshot::PURPOSE_BOOT)
-        })
+        starts.first().map(|r| r.snapshot)
     }
-    .ok_or(VerifyError::NoSnapshot)?
-    .seq;
-    if selected > to {
+    .ok_or(VerifyError::NoSnapshot)?;
+    let start_snapshot = log.recs[selected].seq;
+    if start_snapshot > to {
         return Err(VerifyError::NoSnapshot);
     }
-    check_snapshot::<S>(&log, selected).map_err(VerifyError::Snapshot)?;
-    let setup = EngineSetup::from_snapshot(&log, selected).map_err(VerifyError::Boot)?;
-    let end = log
+    let window_end = log
         .recs
         .iter()
         .position(|r| r.seq > to && r.role() == Role::Input)
         .unwrap_or(log.recs.len());
     let mut driver = ReplayDriver::new(ReplayMode::Verify, log, 0, 1);
-    driver.end = end;
     driver.sink.compare_from = from;
     driver.sink.compare_to = to;
     driver.sink.stop_on_first = !opts.keep_going;
     // At most one retained detail per logged record; overflow is reported, never silent.
     driver.sink.detail_limit = driver.sink.log.recs.len();
-    let plan = RecoverPlan {
-        start: SnapshotSel::AtSeq(selected),
-        replay_tail: true,
-        epoch: 0,
-        flags: RecoveryFlags(0),
-        quarantine: Vec::new(),
-    };
-    let mut seq = Sequencer::<ReplayDriver, S>::boot(BootSource::Journal(plan), &setup, driver, hb)
-        .map_err(VerifyError::Boot)?;
-    loop {
-        if seq.driver().sink.halted || seq.driver().finished() {
+    let first_run = starts
+        .iter()
+        .rposition(|r| r.first <= selected)
+        .ok_or(VerifyError::NoSnapshot)?;
+    let mut runs = Vec::new();
+    let mut snapshots = 0;
+    for ri in first_run..starts.len() {
+        let start = starts[ri];
+        let log = &driver.sink.log;
+        if log.recs[start.first].seq > to {
             break;
         }
-        let before = seq.driver().handed;
-        let outcome = seq.step();
-        if seq.driver().sink.halted {
-            break;
+        let ix = if ri == first_run { selected } else { start.snapshot };
+        let at = log.recs[ix].seq;
+        if at > to {
+            return Err(VerifyError::NoSnapshot);
         }
-        if matches!(outcome, StepOutcome::Fatal(_))
-            || (!seq.driver().finished()
-                && (seq.driver().handed == before || matches!(outcome, StepOutcome::Done { .. })))
-        {
-            let at = seq
-                .driver()
-                .sink
-                .log
-                .recs
-                .get(seq.driver().cursor)
-                .map_or(0, |r| r.seq);
-            return Err(VerifyError::Unfinished { seq: at, outcome });
+        check_snapshot::<S>(log, at).map_err(VerifyError::Snapshot)?;
+        let setup = EngineSetup::from_snapshot(log, at).map_err(VerifyError::Boot)?;
+        let next = starts.get(ri + 1).map(|r| r.first);
+        let stop_before = next.map(|i| log.recs[i].seq);
+        driver.end = next.unwrap_or(log.recs.len()).min(window_end);
+        driver.sink.record_end = driver.end;
+        let before = (
+            driver.handed,
+            driver.sink.compared,
+            driver.sink.snapshots_compared,
+            driver.sink.mismatches.len(),
+        );
+        let plan = RecoverPlan {
+            start: SnapshotSel::AtSeq(at),
+            replay_tail: true,
+            epoch: 0,
+            flags: RecoveryFlags(0),
+            quarantine: Vec::new(),
+        };
+        let mut seq = Sequencer::<ReplayDriver, S>::boot(BootSource::Journal(plan), &setup, driver, hb)
+            .map_err(VerifyError::Boot)?;
+        loop {
+            if seq.driver().sink.halted || seq.driver().finished() {
+                break;
+            }
+            let handed = seq.driver().handed;
+            let outcome = seq.step();
+            if seq.driver().sink.halted {
+                break;
+            }
+            if matches!(outcome, StepOutcome::Fatal(_))
+                || (!seq.driver().finished()
+                    && (seq.driver().handed == handed || matches!(outcome, StepOutcome::Done { .. })))
+            {
+                let at = seq
+                    .driver()
+                    .sink
+                    .log
+                    .recs
+                    .get(seq.driver().cursor)
+                    .map_or(0, |r| r.seq);
+                return Err(VerifyError::Unfinished { seq: at, outcome });
+            }
+        }
+        driver = seq.into_driver();
+        driver.finish_verification();
+        let checked = 1 + driver.sink.snapshots_compared - before.2;
+        snapshots += checked;
+        runs.push(RunReport {
+            start_snapshot: at,
+            stop_before,
+            inputs: driver.handed - before.0,
+            outputs: driver.sink.compared - before.1,
+            snapshots: checked,
+            mismatches: driver.sink.mismatches.len() - before.3,
+        });
+        if driver.sink.halted || driver.end == window_end {
+            break;
         }
     }
-    let mut driver = seq.into_driver();
-    driver.finish_verification();
     if driver.sink.detail.len() != driver.sink.mismatches.len() {
         return Err(VerifyError::DiagnosticLimit);
     }
-    let snapshots = 1 + driver.sink.snapshots_compared;
     Ok(VerifyResult {
-        start_snapshot: selected,
+        start_snapshot,
         inputs: driver.handed,
         snapshots,
+        runs,
         sink: driver.sink,
     })
 }

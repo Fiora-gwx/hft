@@ -367,6 +367,7 @@ fn seq_391_offline_runner_snapshot_and_window() {
         .collect();
     let got = verify::<TestSet>(log.clone(), VerifyOptions::default(), hb()).unwrap();
     assert_eq!(got.start_snapshot, snaps[0]);
+    assert_eq!(got.runs.len(), 1, "ordinary roll restarted the engine");
     assert!(got.sink.mismatches.is_empty(), "{:?}", got.sink.detail);
     assert_eq!(got.snapshots, snaps.len() as u64);
     assert!(got.inputs > 0 && got.sink.compared > 0);
@@ -483,7 +484,7 @@ fn seq_393_runner_snapshot_declarations_and_failures() {
     bad.recs[ix[1]].body[0] = hft_sequencer::snapshot::PURPOSE_RECOVERY;
     assert!(matches!(
         verify::<TestSet>(bad, VerifyOptions::default(), hb()),
-        Err(VerifyError::UnsupportedRun { .. })
+        Err(VerifyError::RunBoundary { .. })
     ));
     let mut bad = log;
     for r in &mut bad.recs {
@@ -503,6 +504,81 @@ fn seq_393_runner_snapshot_declarations_and_failures() {
     assert!(!got.sink.halted);
     assert!(got.sink.mismatches.len() >= 2);
     assert_eq!(got.sink.detail.len(), got.sink.mismatches.len());
+}
+
+#[test]
+fn seq_394_invalid_run_boundaries_fail_before_replay() {
+    use hft_event::{Note, SegmentRoll};
+    use hft_journal::RollMark;
+    use hft_sequencer::driver::verify::{VerifyError, VerifyOptions, verify};
+    use zerocopy::{FromZeros, IntoBytes};
+
+    let t = fixture();
+    let mut reader = JournalReader::open(&reader_cfg(&t)).unwrap();
+    let log = Log::from_reader(&mut reader, limits()).unwrap();
+    let start = log.seg_start[1];
+    let find = |kind| start + log.recs[start..].iter().position(|r| r.kind == kind).unwrap();
+    let host = find(EventKind::HOST_PROFILE);
+    let clock = find(EventKind::CLOCK_STATUS);
+    let snap = find(EventKind::STATE_SNAPSHOT);
+    let done = start
+        + log.recs[start..]
+            .iter()
+            .position(|r| {
+                r.kind == EventKind::SEGMENT_ROLL
+                    && r.read::<SegmentRoll>().unwrap().mark == RollMark::BootDone as u8
+            })
+            .unwrap();
+    assert_ne!(
+        log.recs[done + 1..]
+            .iter()
+            .find(|r| r.role() == Role::Input)
+            .unwrap()
+            .kind,
+        EventKind::ENGINE_CLOCK
+    );
+    for row in 0..8 {
+        let mut bad = log.clone();
+        match row {
+            0 => bad.recs[start].kind = EventKind::NOTE,
+            1 => bad.recs[done].kind = EventKind::NOTE,
+            2 => bad.recs[host].kind = EventKind::NOTE,
+            3 => bad.recs[snap].kind = EventKind::NOTE,
+            4 => {
+                bad.recs[clock].kind = EventKind::HOST_PROFILE;
+                bad.recs[clock].body = log.recs[host].body.clone();
+            }
+            5 => {
+                bad.recs[clock].kind = EventKind::STATE_SNAPSHOT;
+                bad.recs[clock].body = log.recs[snap].body.clone();
+            }
+            6 => bad.recs[snap].body[0] = hft_sequencer::snapshot::PURPOSE_RECOVERY,
+            7 => {
+                let mut h = bad.recs[host].read::<HostProfile>().unwrap();
+                h.build_git[0] ^= 1;
+                bad.recs[host].body = h.as_bytes().to_vec();
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            matches!(
+                verify::<TestSet>(bad, VerifyOptions::default(), hb()),
+                Err(VerifyError::RunBoundary { .. })
+            ),
+            "boundary mutation {row}"
+        );
+    }
+    let mut bad = log;
+    let note = Note {
+        code: hft_sequencer::codes::seq_note(hft_sequencer::codes::note::RECOVER_MISMATCH),
+        ..Note::zeroed()
+    };
+    bad.recs[clock].kind = EventKind::NOTE;
+    bad.recs[clock].body = note.as_bytes().to_vec();
+    assert!(matches!(
+        verify::<TestSet>(bad, VerifyOptions::default(), hb()),
+        Err(VerifyError::UnsupportedRun { .. })
+    ));
 }
 
 fn rehash_snapshot(body: &mut [u8]) {

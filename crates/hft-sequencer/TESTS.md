@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | SEQ-018、SEQ-310 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
-| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-393 |
+| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-394 |
 | 策略集(`StrategySet`) | SEQ-015–SEQ-018、SEQ-340 |
 | 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181 |
 | 环与容量 | SEQ-001–SEQ-007、SEQ-058、SEQ-059、SEQ-064、SEQ-066、SEQ-086、SEQ-087、SEQ-100、SEQ-221、SEQ-231、SEQ-279、SEQ-288、SEQ-345、SEQ-346、SEQ-367 |
@@ -5425,7 +5425,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:SEQ-385 的真实文件输入
 - 步骤:默认起点与逐快照起点分别调用 runner;篡改第一条 CmdResult,分别取完整窗口、分歧之前、之后和仅该 seq
-- 期望:正常输入全部快照通过,实际比较数大于零;完整与单 seq 窗口检出首个分歧并停止;窗口外分歧不计,预热仍完整
+- 期望:正常输入全部快照通过,实际比较数大于零,普通滚段只计一次运行;完整与单 seq 窗口检出首个分歧并停止;窗口外分歧不计,预热仍完整
 - 实现:`crates/hft-sequencer/tests/replay_file.rs::seq_391_offline_runner_snapshot_and_window`
 
 ### SEQ-392 多出输出不吞输入,尾部遗漏不可跳过
@@ -5434,8 +5434,8 @@ spec: README.md
 - 级别:unit
 - 里程碑:M2
 - 前置:相邻的 Input 与 Output 记录
-- 步骤:Input 前生成额外 Output,随后消费原 Input 和 Output;另只回放至尾部 Output 前并收尾两次;开首错停止后尝试继续追加
-- 期望:额外输出锚定下一 Input 的 seq,Input 保留且仍按原 seq 投递;末尾遗漏只报告一次并保留期望字节;停止后不再追加或取输入
+- 步骤:Input 前生成额外 Output,随后消费原 Input 和 Output;另只回放至尾部 Output 前并收尾两次;独立运行边界置于 0 和第二条记录前,生成与后段相同的 Output;开首错停止后尝试继续追加
+- 期望:额外输出锚定下一 Input 的 seq,Input 保留且仍按原 seq 投递;末尾遗漏只报告一次并保留期望字节;边界外输出不能匹配或消费,分歧锚定前段末 seq 加 1(空前段为 1);停止后不再追加或取输入
 - 实现:`crates/hft-sequencer/tests/replay_bytes.rs::seq_392_extra_output_preserves_input_and_missing_tail_fails`
 
 ### SEQ-393 零声明哈希仍自检,失败和未支持运行不得误报成功
@@ -5445,7 +5445,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:SEQ-385 的真实文件输入
 - 步骤:全部快照分别填零或正确哈希;独立损坏起点及后续快照声明;请求首条 Begin 为起点;将后续快照标为 Recovery;keep_going 下篡改多条 CmdResult
-- 期望:零和正确声明均通过;起点损坏失败,后续声明错误为该快照分歧;缺起点和未支持恢复明确失败;keep_going 保留多处诊断且不静默丢条
+- 期望:零和正确声明均通过;起点损坏失败,后续声明错误为该快照分歧;缺起点和引导块外的 Recovery 快照明确失败;keep_going 保留多处诊断且不静默丢条
 - 实现:`crates/hft-sequencer/tests/replay_file.rs::seq_393_runner_snapshot_declarations_and_failures`
 
 | 行 | 输入 | 期望 |
@@ -5455,8 +5455,30 @@ spec: README.md
 | SEQ-393.3 | 起点声明翻转 1 bit | Snapshot 错误 |
 | SEQ-393.4 | 后续快照声明翻转 1 bit | 该快照 seq 的分歧 |
 | SEQ-393.5 | 起点为首条 Begin | NoSnapshot |
-| SEQ-393.6 | 后续快照标 Recovery | UnsupportedRun |
+| SEQ-393.6 | 引导块外的后续快照标 Recovery | RunBoundary |
 | SEQ-393.7 | 多个 CmdResult 被改,keep_going | 多处诊断,不触发首错停止 |
+
+### SEQ-394 独立运行边界损坏在重放前失败
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)、[已知限制与后续工作](README.md#已知限制与后续工作)
+- 级别:table
+- 里程碑:M2
+- 前置:SEQ-385 的真实双段文件输入,第二段为普通滚段
+- 步骤:各行独立篡改第二段引导记录并调用 runner
+- 期望:前八行 RunBoundary;RecoverMismatch 行 UnsupportedRun,均无成功结果
+- 实现:`crates/hft-sequencer/tests/replay_file.rs::seq_394_invalid_run_boundaries_fail_before_replay`
+
+| 行 | 修改 | 期望 |
+|---|---|---|
+| SEQ-394.1 | Begin 替成 Note | RunBoundary |
+| SEQ-394.2 | BootDone 替成 Note | RunBoundary |
+| SEQ-394.3 | HostProfile 替成 Note | RunBoundary |
+| SEQ-394.4 | 引导快照替成 Note | RunBoundary |
+| SEQ-394.5 | 重复 HostProfile | RunBoundary |
+| SEQ-394.6 | 重复引导快照 | RunBoundary |
+| SEQ-394.7 | 普通滚段的引导快照标 Recovery | RunBoundary |
+| SEQ-394.8 | build_git 变化,首个 Input 仍为普通定时器 | RunBoundary |
+| SEQ-394.9 | ClockStatus 替成 RecoverMismatch 注记 | UnsupportedRun |
 
 ## 验收
 

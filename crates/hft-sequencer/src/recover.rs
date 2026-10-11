@@ -694,7 +694,12 @@ pub(crate) fn boot_journal<D: Driver<S>, S: StrategySet>(
         slot: InputSlot::with_capacity(1 << 20),
     };
     seq.e.set_epoch_due = true;
-    crate::snapshot::write_boot_block(&mut seq, RollReason::Recovery, PURPOSE_RECOVERY)
+    let reason = if plan.flags.0 & RecoveryFlags::FROM_SNAPSHOT != 0 {
+        RollReason::RecoverFromSnapshot
+    } else {
+        RollReason::Recovery
+    };
+    crate::snapshot::write_boot_block(&mut seq, reason, PURPOSE_RECOVERY)
         .map_err(|_| BootError::Journal(JournalErr::Chain))?;
     let notes = core::mem::take(&mut seq.e.rec.pending_notes);
     if !notes.is_empty() {

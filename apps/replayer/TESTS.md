@@ -28,7 +28,7 @@ spec: README.md
 | 测试与验收 | 不适用:非规范 |
 | 依赖 | RPL-105、RPL-106、RPL-240、RPL-241 |
 | 延伸阅读 | 不适用:非规范 |
-| 已知限制与后续工作 | RPL-260–RPL-262 |
+| 已知限制与后续工作 | RPL-260–RPL-263 |
 | 开发备忘 | 不适用:非规范 |
 
 ## 用例
@@ -2033,6 +2033,22 @@ spec: README.md
 - 步骤:生产策略集合与测试策略集合分别经同一入口验证;分别限制记录数、逻辑体、重组为 1;指定错误实例
 - 期望:生产二进制未知策略返回 4,测试集合实际验证通过;三种容量返回 3;实例不符返回 2
 - 实现:`apps/replayer/tests/cli.rs::rpl_262_limits_instance_and_strategy_incompatibility`
+
+### RPL-263 真实恢复与版本切换各自重建并严格验证
+
+- 规则:[verify](README.md#verify)、[已知限制与后续工作](README.md#已知限制与后续工作)
+- 级别:proc
+- 里程碑:M2
+- 前置:RPL-260 的真实引擎与文件写者,两次运行;新运行使用两倍 TSC 频率和新校准点
+- 步骤:各行现场执行恢复并写两个 SnapshotNow;生产二进制验证双段、独立第二段及只选一次运行的 from/to 窗口;篡改首段命令并重算 CRC,分别首错停止/keep-going;恢复首段后独立篡改第二段命令
+- 期望:原始双段退出 0,runs 有两行且各行输入/输出数非零、快照数至少 3;来源不变,单段和窗口只计一次运行。旧段篡改退出 1,首错停止只计首段;keep-going 的第二段无分歧。新段篡改仍退出 1,只有第二段分歧。所有新段快照用途为 Recovery,Begin 原因为下表值
+- 实现:`apps/replayer/tests/cli.rs::rpl_263_real_restart_runs_are_independent_and_strict`
+
+| 行 | 恢复方式 | 新段原因 |
+|---|---|---|
+| RPL-263.1 | 最近快照恢复并重放尾部 | Recovery |
+| RPL-263.2 | 指定首个快照,跳过后续尾部 | RecoverFromSnapshot |
+| RPL-263.3 | Drain 后更换 build_git | Recovery |
 
 ## 验收
 

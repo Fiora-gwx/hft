@@ -183,3 +183,111 @@ fn rpl_262_limits_instance_and_strategy_incompatibility() {
         assert_eq!(r.0, expected, "{a:?} {r:?}");
     }
 }
+
+fn flip_first_command(path: &std::path::Path, original: &[u8]) -> u64 {
+    let mut bytes = original.to_vec();
+    let mut offset = 4096;
+    loop {
+        let (h, _) = RecordHeader::read_from_prefix(&bytes[offset..]).unwrap();
+        assert!(h.len > 0, "missing fixture command");
+        if h.kind == EventKind::CONTROL_CMD.0 {
+            bytes[offset + 24] ^= 0x40;
+            assert!(RecordFlags(h.flags).contains(RecordFlags::CRC));
+            let end = offset + h.len as usize;
+            let crc = crc32c::crc32c(&bytes[offset..end - 4]);
+            bytes[end - 4..end].copy_from_slice(&crc.to_le_bytes());
+            let _ = std::fs::remove_file(path.with_extension("seal"));
+            std::fs::write(path, bytes).unwrap();
+            return h.seq;
+        }
+        offset += h.len as usize;
+    }
+}
+
+#[test]
+fn rpl_263_real_restart_runs_are_independent_and_strict() {
+    use fixture::Restart;
+    for restart in [Restart::Recovery, Restart::FromSnapshot, Restart::Version] {
+        let f = fixture::restarted::<Strategies>(restart);
+        let directory = f.file.parent().unwrap();
+        let second = directory.join("0000000002.jrn");
+        let a = args(directory);
+        let originals = [std::fs::read(&f.file).unwrap(), std::fs::read(&second).unwrap()];
+        let log = fixture::read(&f);
+        assert_eq!(log.seg_start.len(), 2);
+        let begin = log.recs[log.seg_start[1]]
+            .read::<hft_event::SegmentRoll>()
+            .unwrap();
+        let expected_reason = if matches!(restart, Restart::FromSnapshot) {
+            6
+        } else {
+            4
+        };
+        assert_eq!(begin.reason, expected_reason);
+        let second_snapshot = log.recs[log.seg_start[1]..]
+            .iter()
+            .find(|r| r.kind == EventKind::STATE_SNAPSHOT)
+            .unwrap()
+            .seq;
+        let (code, text, err) = run(&a);
+        assert_eq!(code, 0, "{restart:?}: {text} {err}");
+        let v: Value = serde_json::from_str(&text).unwrap();
+        let runs = v["summary"]["runs"].as_array().unwrap();
+        assert_eq!(runs.len(), 2, "{v}");
+        assert_eq!(runs[1]["start_snapshot_seq"], second_snapshot);
+        for r in runs {
+            assert!(r["inputs_replayed"].as_u64().unwrap() > 0, "{v}");
+            assert!(r["outputs_compared"].as_u64().unwrap() > 0, "{v}");
+            assert!(r["snapshots_checked"].as_u64().unwrap() >= 3, "{v}");
+            assert_eq!(r["mismatches"], 0);
+        }
+        assert_eq!(std::fs::read(&f.file).unwrap(), originals[0]);
+        assert_eq!(std::fs::read(&second).unwrap(), originals[1]);
+        let suffix = run(&args(&second));
+        assert_eq!(suffix.0, 0, "recovery-only suffix {restart:?}: {suffix:?}");
+        let suffix: Value = serde_json::from_str(&suffix.1).unwrap();
+        assert_eq!(suffix["summary"]["runs"].as_array().unwrap().len(), 1);
+        assert_eq!(suffix["summary"]["start_snapshot_seq"], second_snapshot);
+        for extra in [
+            vec!["--from-seq".into(), second_snapshot.to_string()],
+            vec![
+                "--to-seq".into(),
+                (log.recs[log.seg_start[1]].seq - 1).to_string(),
+            ],
+        ] {
+            let mut window = a.clone();
+            window.extend(extra);
+            let r = run(&window);
+            assert_eq!(r.0, 0, "{restart:?}: {r:?}");
+            let v: Value = serde_json::from_str(&r.1).unwrap();
+            assert_eq!(v["summary"]["runs"].as_array().unwrap().len(), 1);
+        }
+        let first_changed = flip_first_command(&f.file, &originals[0]);
+        let r = run(&a);
+        assert_eq!(r.0, 1, "{r:?}");
+        let v: Value = serde_json::from_str(&r.1).unwrap();
+        assert_eq!(v["summary"]["runs"].as_array().unwrap().len(), 1, "stop on first");
+        assert!(v["summary"]["first_divergent_seq"].as_u64().unwrap() > first_changed);
+        let mut keep = a.clone();
+        keep.push("--keep-going".into());
+        let r = run(&keep);
+        assert_eq!(r.0, 1, "{r:?}");
+        let v: Value = serde_json::from_str(&r.1).unwrap();
+        assert_eq!(v["summary"]["runs"].as_array().unwrap().len(), 2, "{v}");
+        assert!(v["summary"]["runs"][0]["mismatches"].as_u64().unwrap() > 0);
+        assert_eq!(
+            v["summary"]["runs"][1]["mismatches"], 0,
+            "old state crossed restart: {v}"
+        );
+        std::fs::write(&f.file, &originals[0]).unwrap();
+        flip_first_command(&second, &originals[1]);
+        let r = run(&a);
+        assert_eq!(r.0, 1, "{r:?}");
+        let v: Value = serde_json::from_str(&r.1).unwrap();
+        assert_eq!(v["summary"]["runs"][0]["mismatches"], 0);
+        assert!(
+            v["summary"]["runs"][1]["mismatches"].as_u64().unwrap() > 0,
+            "new outputs escaped comparison: {v}"
+        );
+    }
+}

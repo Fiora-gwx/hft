@@ -127,7 +127,7 @@ tier(frontmatter 标注):`pure` 无 I/O 无线程;`hot` 在 tick-to-trade 路径
 
 DST 按 Input 边界和下单前采集只读事实,`testkit` 构建独立检查,不进 journal。
 
-同一 `hft-sequencer` 代码在三种驱动下运行:实盘(环);恢复(截断到最后一个完整事件,从快照重放;版本变化只从 Drain 快照起步;对账通过后才放行交易;kill-switch 兜底停机留下的停机标记在启动时写成一条 `Kill` Input,不会因重启自动恢复开仓);验证回放(自检快照、预热窗口,逐字节核对 Output 与快照间输出哈希,[驱动契约](../crates/hft-sequencer/README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用))。`Advice` 是 Input:回放读日志,不重算模型;重启时 Model 从检查点 + journal 重放恢复,缺失则从空起步(可经 `InjectWarmup` 预热)。跨重启的时间用 `engine_ns`:对冲截止只按引擎运行时间累计;跨启动的 Advice 由策略按 `basis_seq < Now.boot_seq` 判过期。
+同一 `hft-sequencer` 代码在三种驱动下运行:实盘读环;恢复从快照重放完整事件、对账后放行,停机标记以 Kill Input 保留;验证回放自检快照、预热窗口并逐字节核对 Output 与哈希,普通滚段延续状态,重启或版本变化从新引导快照独立运行([驱动契约](../crates/hft-sequencer/README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用))。Advice 是 Input,回放读日志;Model 重启从检查点与 journal 恢复,缺失则从空起步。跨重启时间用 engine_ns,停机不计;跨启动 Advice 按 `basis_seq < Now.boot_seq` 判过期。
 
 **模拟重演**(`replayer sim`)把录下的 journal 行情喂给模拟网关与同一策略,用于排障与复现,**不评估收益**;策略表现只在模拟账户上观察([hft-sim](../crates/hft-sim/README.md))。没有历史回测。
 

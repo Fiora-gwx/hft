@@ -3,11 +3,18 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use hft_event::{BlobRef, ClockStatus, CmdHdr, ControlCmd, EventKind, FeedCmd, GwCmd, HostProfile};
-use hft_journal::{InstanceName, JournalConfig, JournalKind, JournalWriter, PageSize};
+use hft_journal::{
+    EndAt, InstanceName, JournalConfig, JournalKind, JournalReader, JournalWriter, PageSize, ReaderConfig,
+};
 use hft_rt::{CalibPair, Heartbeat};
 use hft_sequencer::driver::RollInfo;
 use hft_sequencer::driver::live::{LiveCfg, LiveDriver, LiveIo, RingId};
-use hft_sequencer::{BootSource, InputSlot, MemJournal, OutRing, ParsedConfig, Sequencer, StepOutcome};
+use hft_sequencer::driver::replay::Log;
+use hft_sequencer::driver::replay_io::LogReadLimits;
+use hft_sequencer::{
+    BootSource, InputSlot, MemJournal, OutRing, ParsedConfig, RecoverPlan, RecoveryFlags, Sequencer,
+    SnapshotSel, StepOutcome,
+};
 use hft_strategy_sdk::StrategySet;
 use hft_testkit::dst::seq::build;
 use hft_testkit::dst::world::WorldSpec;
@@ -28,6 +35,8 @@ impl Drop for Fixture {
 struct Io<S: StrategySet> {
     rings: RigIo<S>,
     writer: JournalWriter,
+    old: Option<Log>,
+    build: [u8; 20],
 }
 impl<S: StrategySet> LiveIo<S> for Io<S> {
     type J = JournalWriter;
@@ -77,7 +86,12 @@ impl<S: StrategySet> LiveIo<S> for Io<S> {
         self.rings.roll_info()
     }
     fn host_profile(&self) -> HostProfile {
-        self.rings.host_profile()
+        let mut h = self.rings.host_profile();
+        h.build_git = self.build;
+        h
+    }
+    fn recovery_log(&mut self) -> Option<Log> {
+        self.old.take()
     }
     fn clock_status(&self) -> ClockStatus {
         self.rings.clock_status()
@@ -101,6 +115,62 @@ fn settle<S: StrategySet>(seq: &mut Sequencer<LiveDriver<S, Io<S>>, S>) {
 }
 
 pub fn create<S: StrategySet>() -> Fixture {
+    create_with_restart::<S>(None)
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum Restart {
+    Recovery,
+    FromSnapshot,
+    Version,
+}
+
+pub fn restarted<S: StrategySet>(restart: Restart) -> Fixture {
+    create_with_restart::<S>(Some(restart))
+}
+
+pub fn read(f: &Fixture) -> Log {
+    let mut c = ReaderConfig::new(
+        f.root.clone(),
+        f.root.join("absent"),
+        InstanceName::Prod,
+        "seq".into(),
+    );
+    c.end = EndAt::LastCompleteEvent;
+    c.reassembly_cap = 16 << 20;
+    let mut r = JournalReader::open(&c).unwrap();
+    Log::from_reader(
+        &mut r,
+        LogReadLimits {
+            records: 20_000,
+            body_bytes: 64 << 20,
+        },
+    )
+    .unwrap()
+}
+
+fn command<S: StrategySet>(s: &mut Sequencer<LiveDriver<S, Io<S>>, S>, id: u64, c: &ControlCmd<'_>) {
+    let mut h = CmdHdr::zeroed();
+    h.cmd_id[..8].copy_from_slice(&id.to_le_bytes());
+    h.issuer[..7].copy_from_slice(b"cli:rpl");
+    h.role = CmdHdr::ROLE_ADMIN;
+    h.account = AccountId(0);
+    h.cmd_ver = 1;
+    h.confirmed = 1;
+    h.expect_state_version = s.engine().risk.mode.ctl_state_version();
+    let mut body = vec![0; 8192];
+    let n = c.encode(&h, &mut body).unwrap();
+    body.truncate(n);
+    s.driver_mut()
+        .io
+        .rings
+        .rings
+        .entry((0, 0))
+        .or_default()
+        .push_back((EventKind::CONTROL_CMD, body));
+}
+
+fn create_with_restart<S: StrategySet>(restart: Option<Restart>) -> Fixture {
     let root = std::env::temp_dir().join(format!(
         "replayer-{}-{}",
         std::process::id(),
@@ -117,7 +187,7 @@ pub fn create<S: StrategySet>() -> Fixture {
     }
     let rd_blob = build::refdata_blob(&world, false).unwrap();
     let rd = build::load_refdata(&rd_blob).unwrap();
-    let setup = build::engine_setup(&world, 1_000_000_000, 1);
+    let mut setup = build::engine_setup(&world, 1_000_000_000, 1);
     let configs = build::config_set::<S>(&world, &rd, rd_blob, &setup).unwrap();
     let cfg = JournalConfig {
         name: "seq".into(),
@@ -135,6 +205,8 @@ pub fn create<S: StrategySet>() -> Fixture {
     let writer = JournalWriter::open_offline(&cfg, &f.root).unwrap();
     let io = Io {
         writer,
+        old: None,
+        build: [0; 20],
         rings: RigIo {
             j: MemJournal::new(setup.clock),
             tsc: 0,
@@ -161,25 +233,74 @@ pub fn create<S: StrategySet>() -> Fixture {
     .unwrap();
     settle(&mut s);
     for id in 1..=2u64 {
-        let mut h = CmdHdr::zeroed();
-        h.cmd_id[..8].copy_from_slice(&id.to_le_bytes());
-        h.issuer[..7].copy_from_slice(b"cli:rpl");
-        h.role = CmdHdr::ROLE_ADMIN;
-        h.account = AccountId(0);
-        h.cmd_ver = 1;
-        h.confirmed = 1;
-        h.expect_state_version = s.engine().risk.mode.ctl_state_version();
-        let mut body = vec![0; 8192];
-        let n = ControlCmd::SnapshotNow.encode(&h, &mut body).unwrap();
-        body.truncate(n);
-        s.driver_mut()
-            .io
-            .rings
-            .rings
-            .entry((0, 0))
-            .or_default()
-            .push_back((EventKind::CONTROL_CMD, body));
+        command(&mut s, id, &ControlCmd::SnapshotNow);
         settle(&mut s);
+    }
+    if let Some(restart) = restart {
+        if matches!(restart, Restart::Version) {
+            command(&mut s, 3, &ControlCmd::Drain { cancel_resting: true });
+            let mut done = false;
+            for _ in 0..1000 {
+                match s.step() {
+                    StepOutcome::Busy | StepOutcome::Idle => {}
+                    StepOutcome::Done { .. } => {
+                        done = true;
+                        break;
+                    }
+                    o => panic!("drain: {o:?}"),
+                }
+            }
+            assert!(done, "drain did not finish");
+        }
+        s.driver_mut().io.writer.publish();
+        let old = read(&f);
+        let initial = old
+            .recs
+            .iter()
+            .find(|r| r.kind == EventKind::STATE_SNAPSHOT)
+            .unwrap()
+            .seq;
+        let mut io = s.into_driver().io;
+        io.old = Some(old);
+        // A new TSC epoch and frequency must come from the new segment and EngineClock.
+        io.rings.tsc = 100;
+        io.rings.hz *= 2;
+        io.rings.calib.tsc = Tsc(100);
+        io.rings.calib.realtime_ns += 20_000_000_000;
+        setup.clock.calib_tsc = 100;
+        setup.clock.tsc_hz_milli = io.rings.hz;
+        setup.clock.calib_realtime_ns = io.rings.calib.realtime_ns;
+        if matches!(restart, Restart::Version) {
+            io.build = [1; 20];
+        }
+        let from_snapshot = matches!(restart, Restart::FromSnapshot);
+        let plan = RecoverPlan {
+            start: if from_snapshot {
+                SnapshotSel::AtSeq(initial)
+            } else {
+                SnapshotSel::Latest
+            },
+            replay_tail: !from_snapshot,
+            epoch: 0,
+            flags: RecoveryFlags(if from_snapshot {
+                RecoveryFlags::FROM_SNAPSHOT | RecoveryFlags::TAIL_LOST
+            } else {
+                0
+            }),
+            quarantine: Vec::new(),
+        };
+        s = Sequencer::boot(
+            BootSource::Journal(plan),
+            &setup,
+            LiveDriver::new(io, LiveCfg::default()),
+            Box::leak(Box::new(Heartbeat::new())),
+        )
+        .unwrap();
+        settle(&mut s);
+        for id in 10..=11 {
+            command(&mut s, id, &ControlCmd::SnapshotNow);
+            settle(&mut s);
+        }
     }
     let mut d = s.into_driver();
     d.io.writer.publish();

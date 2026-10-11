@@ -78,6 +78,8 @@ pub struct ReplaySink {
     pub halted: bool,
     /// Diagnostic bound supplied by the cold caller; ordinary replay retains 16 details.
     pub detail_limit: usize,
+    /// Exclusive record boundary of an offline independent run. Other drivers use MAX.
+    pub record_end: usize,
     scratch_a: Vec<u8>,
     scratch_b: Vec<u8>,
 }
@@ -108,6 +110,7 @@ impl ReplaySink {
             stop_on_first: false,
             halted: false,
             detail_limit: 16,
+            record_end: usize::MAX,
             scratch_a: Vec::with_capacity(1 << 16),
             scratch_b: Vec::with_capacity(1 << 16),
         }
@@ -140,7 +143,10 @@ impl ReplaySink {
         self.halted = self.stop_on_first;
     }
     fn skip_meta(&mut self) {
-        while let Some(r) = self.log.recs.get(self.pos) {
+        while self.pos < self.record_end {
+            let Some(r) = self.log.recs.get(self.pos) else {
+                break;
+            };
             if r.role() == Role::Meta {
                 self.pos += 1;
             } else {
@@ -150,9 +156,13 @@ impl ReplaySink {
     }
     fn compare(&mut self, kind: EventKind, flags: RecordFlags, pieces: &[&[u8]], boot: bool) -> u64 {
         self.skip_meta();
-        let Some(r) = self.log.recs.get(self.pos) else {
+        let Some(r) = self.log.recs.get(self.pos).filter(|_| self.pos < self.record_end) else {
             let seq = if self.mode == ReplayMode::Verify {
-                self.log.recs.last().map_or(1, |r| r.seq.saturating_add(1))
+                self.record_end
+                    .min(self.log.recs.len())
+                    .checked_sub(1)
+                    .and_then(|i| self.log.recs.get(i))
+                    .map_or(1, |r| r.seq.saturating_add(1))
             } else {
                 0
             };
@@ -321,7 +331,8 @@ impl JournalSink for ReplaySink {
         // Rolls happen where the log has `SegmentRoll{End}` right after the Timer.
         let mut p = self.pos;
         let mut found = false;
-        while let Some(r) = self.log.recs.get(p) {
+        while p < self.record_end {
+            let Some(r) = self.log.recs.get(p) else { break };
             if r.kind == EventKind::SEGMENT_ROLL {
                 found = r.body.get(32).copied() == Some(1);
                 break;
@@ -331,7 +342,7 @@ impl JournalSink for ReplaySink {
             }
             p += 1;
         }
-        if !found {
+        if !found || p + 1 >= self.record_end {
             return Err(RollErr::NextNotReady);
         }
         // Skip End and the new segment's Begin/HostProfile/ClockStatus (all Meta).

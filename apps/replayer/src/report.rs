@@ -93,7 +93,18 @@ pub(crate) fn format(instance: &str, result: &VerifyResult) -> (Value, Value) {
     let generated = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs().min(i64::MAX as u64) as i64);
-    let summary = json!({"instance": instance, "date": &date[..10], "release": crate::VERSION, "verify": if details.is_empty() { "pass" } else { "fail" }, "first_divergent_seq": sink.mismatches.first().map(|m| m.seq), "recompute": "skipped", "skipped_reason": "advice_journal", "generated_utc": utc(generated), "start_snapshot_seq": result.start_snapshot, "inputs_replayed": result.inputs, "outputs_compared": sink.compared, "snapshots_checked": result.snapshots, "mismatches": details.len()});
+    let runs: Vec<_> = result
+        .runs
+        .iter()
+        .map(|r| {
+            json!({
+                "start_snapshot_seq": r.start_snapshot, "stop_before_seq": r.stop_before,
+                "inputs_replayed": r.inputs, "outputs_compared": r.outputs,
+                "snapshots_checked": r.snapshots, "mismatches": r.mismatches
+            })
+        })
+        .collect();
+    let summary = json!({"instance": instance, "date": &date[..10], "release": crate::VERSION, "verify": if details.is_empty() { "pass" } else { "fail" }, "first_divergent_seq": sink.mismatches.first().map(|m| m.seq), "recompute": "skipped", "skipped_reason": "advice_journal", "generated_utc": utc(generated), "start_snapshot_seq": result.start_snapshot, "inputs_replayed": result.inputs, "outputs_compared": sink.compared, "snapshots_checked": result.snapshots, "mismatches": details.len(), "runs": runs});
     (summary, json!(details))
 }
 

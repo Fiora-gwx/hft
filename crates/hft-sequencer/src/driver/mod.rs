@@ -8,6 +8,8 @@ pub mod replay_io;
 pub mod replay_snapshot;
 #[cfg(feature = "replay-io")]
 pub mod verify;
+#[cfg(feature = "replay-io")]
+mod verify_runs;
 
 use hft_event::{BlobRef, ClockStatus, HostProfile};
 use hft_refdata::RefData;

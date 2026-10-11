@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-11 | 文件验证按 Startup、Recovery、RecoverFromSnapshot 与 build_git 变化划分独立运行,分别自检并恢复引导快照;普通滚段保留状态,比较器不能跨独立运行消费,报告逐运行计数。FROM_SNAPSHOT 恢复使用已有原因码 RecoverFromSnapshot;无 schema 或快照布局变化。RecoverMismatch 与 RecoveryGap 仍明确拒绝 | SEQ-391–394、RPL-263 真实双运行、窗口及状态污染反例 | crates/hft-sequencer、apps/replayer、docs/architecture.md | 否 |
 | 2026-10-11 | 回放分歧字段按 schema 宽度截取,可变载荷单列 payload;快照状态差异不误标为 engine_ns | RPL-260 真实快照篡改反例 | apps/replayer | 否 |
 | 2026-10-11 | 本地 replayer verify 装配同一 sequencer 与 registry,严格文件预检后按快照和 seq 窗口运行;额外输出保留下一输入,尾部遗漏计分歧,首错停止或 keep-going,快照声明零值仍独立计算。xtask 调用真实 CLI 并映射退出码;恢复区间和 Model 重算仍明确拒绝,完整回放验收未完成 | SEQ-391–393、RPL-260–262、TOOL-192 | apps/replayer、crates/hft-sequencer、tools/xtask、docs/architecture.md | 否 |
 | 2026-10-11 | 离线 JournalReader 直接读取显式原路径,按 first_seq 排序并在交付前校验整组段头、链、封闭边界、seal 与有界多段重组;不以恢复截断点代替完整性。支持内部连续后缀,重开段核对原始文件 SHA,不修改格式。真实引擎从重命名乱序文件与独立后缀逐快照自检和 Verify | JNL-127–129、SEQ-390;replayer 本地文件入口前置 | crates/hft-journal、crates/hft-sequencer、docs/subsystems/journal-format.md | 否 |
