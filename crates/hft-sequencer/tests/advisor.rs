@@ -280,7 +280,8 @@ fn seq_403_recompute_requires_latest_same_basis_and_one_to_one_matching() {
     set_subs(S2, vec![(A1, 0, EvMask::BBO, Part::Model)]);
     let b = b0();
     let rd = b.rd.load();
-    let setup = b.setup(&rd);
+    let mut setup = b.setup(&rd);
+    setup.risk_decode = Some(hft_sequencer::config_blob::decode_risk_blob);
     let mut configs = b.configs(&rd);
     configs.engine_blob = setup.encode_blob(1, hft_types::HostClass::Dev2, UTC0);
     configs.risk_blob = configs.risk.encode_blob().unwrap();

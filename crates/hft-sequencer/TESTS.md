@@ -5575,7 +5575,7 @@ spec: README.md
 - 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)、[advisor](README.md#advisor)
 - 级别:integ
 - 里程碑:M2
-- 前置:B0 真实 advisor,完整引擎与风控配置由编码器写入 journal,在目标 BBO 前保存实际 Model 检查点;同一 BBO 回调连续 emit 同键 P1/P2/P3,实际环只发 P3;启用 replay-io
+- 前置:B0 真实 advisor,完整引擎与风控配置由正式编解码器写入并读取 journal,在目标 BBO 前保存实际 Model 检查点;同一 BBO 回调连续 emit 同键 P1/P2/P3,实际环只发 P3;启用 replay-io
 - 步骤:将真实环的 P3 经 LiveDriver 记入 journal 后重算;分别把记录载荷改成 P1、重复投递原始 P3
 - 期望:原始比较 1 条、coalesced = 2、无缺起点;P1 虽在原始产出中出现仍被判分歧,重算字节为 P3;第二次记录 P3 无可配对产出,不能重复消费第一条
 - 实现:`crates/hft-sequencer/tests/advisor.rs::seq_403_recompute_requires_latest_same_basis_and_one_to_one_matching`
