@@ -96,3 +96,5 @@
 | 2026-10-11 | 真实 DST 引导块使用完整 ECF1/RKP1;INV-6 从选中快照的已有 journal 配置重建,严格核对 blob 身份/SHA-256 与运行时钟 | TK-112、SEQ-379–SEQ-380,移除进程内风控参数作为回放输入的依赖 | crates/hft-testkit、crates/hft-sequencer | 否 |
 | 2026-10-11 | INV-6 在真实引擎或已有快照时拒绝空重建结果;回放必须完成且没有 Output 差异或遗漏,定期与结束检查均执行;失败保留阶段与 journal 序号 | TK-113,防止配置/恢复/回放失败被空值跳过 | crates/hft-testkit、docs/tests/invariants.md | 否 |
 | 2026-10-11 | journal 配置装配以段头与 ClockStatus 核对运行时钟;首次 EngineClock 前接受全零节 25,Recovery 快照的旧频率不覆盖新段频率 | SEQ-381,启动引导块先于 EngineClock,恢复快照先于新运行锚点 | crates/hft-sequencer | 否 |
+| 2026-10-11 | SIM-124 独立账本按已交付完整批次的 gen_seq 核算成交,原始交付顺序仍检查回报时序;固定乱序反例与错误手续费反例,模拟器行为不变 | SIM-222,CI 38109587789 中不同订单回报延迟导致测试平均成本误算 | crates/hft-sim(README、TESTS、测试) | 否 |
+| 2026-10-11 | DST 一致性集由 CI 38109185941 重生成完整配置下的 50 行 HashTrail;种子、场景、步数与顺序不变 | SEQ-380 在 CI 38109587789 通过,确认业务输出与非配置快照节逐字节不变 | fixtures/dst/hashtrail.toml | 否 |

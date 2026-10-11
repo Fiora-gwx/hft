@@ -7,7 +7,7 @@ use crate::common;
 
 use std::collections::BTreeMap;
 
-use common::scen::{Obs, cfg_gen, run, scenario, setup_for};
+use common::scen::{Ev, Obs, Scenario, cfg_gen, run, scenario, setup_for};
 use common::*;
 use hft_event::{GwCmd, GwOp, OrderEventKind, RepMsg};
 use hft_refdata::RefData;
@@ -127,59 +127,30 @@ impl Obs for Model {
         }
     }
 
-    fn on_reply(&mut self, acc: AccountId, due: u64, m: &RepMsg, _b: &[u8]) {
+    fn on_reply(&mut self, acc: AccountId, due: u64, _gen_seq: u64, m: &RepMsg, _b: &[u8]) {
         let a = acc.0;
-        match m {
-            RepMsg::OrderEvent(e) => {
-                let k = (a, e.slot.0);
-                if let Some(&(dec, qty)) = self.decided.get(&k) {
-                    if due < dec {
-                        self.fail(format!("{k:?}: due {due} < decided {dec}"));
-                    }
-                    if e.cum_filled.0 > qty {
-                        self.fail(format!("{k:?}: cum {} > qty {qty}", e.cum_filled.0));
-                    }
+        if let RepMsg::OrderEvent(e) = m {
+            let k = (a, e.slot.0);
+            if let Some(&(dec, qty)) = self.decided.get(&k) {
+                if due < dec {
+                    self.fail(format!("{k:?}: due {due} < decided {dec}"));
                 }
-                let order_report = self.decided.contains_key(&k)
-                    && !matches!(
-                        e.what,
-                        OrderEventKind::QueryResult
-                            | OrderEventKind::CancelReject
-                            | OrderEventKind::AmendReject
-                    );
-                let last = self.last_ex.get(&k).copied().unwrap_or(i64::MIN);
-                if order_report && e.ex_ts_ns < last {
-                    self.fail(format!("{k:?}: ex_ts went back"));
-                }
-                if order_report {
-                    self.last_ex.insert(k, last.max(e.ex_ts_ns));
-                }
-                if matches!(e.what, OrderEventKind::PartialFill | OrderEventKind::Fill) {
-                    let side = self.side_of(a, e.slot.0, e.inst);
-                    self.fill(
-                        a,
-                        e.inst,
-                        side,
-                        i128::from(e.qty.0),
-                        i128::from(e.px.0),
-                        i128::from(e.fee.0),
-                        e.fee_asset,
-                    );
+                if e.cum_filled.0 > qty {
+                    self.fail(format!("{k:?}: cum {} > qty {qty}", e.cum_filled.0));
                 }
             }
-            RepMsg::ExternalFill(f) => {
-                self.fill(
-                    a,
-                    f.inst,
-                    f.side,
-                    i128::from(f.qty.0),
-                    i128::from(f.px.0),
-                    i128::from(f.fee.0),
-                    f.fee_asset,
+            let order_report = self.decided.contains_key(&k)
+                && !matches!(
+                    e.what,
+                    OrderEventKind::QueryResult | OrderEventKind::CancelReject | OrderEventKind::AmendReject
                 );
+            let last = self.last_ex.get(&k).copied().unwrap_or(i64::MIN);
+            if order_report && e.ex_ts_ns < last {
+                self.fail(format!("{k:?}: ex_ts went back"));
             }
-            RepMsg::FundingSettle(f) => self.add(a, f.venue, USDT, i128::from(f.amount.0)),
-            _ => {}
+            if order_report {
+                self.last_ex.insert(k, last.max(e.ex_ts_ns));
+            }
         }
     }
 
@@ -211,12 +182,6 @@ impl Obs for Model {
     }
 }
 
-impl Model {
-    fn side_of(&self, _a: u8, _slot: u32, _inst: InstId) -> Side {
-        Side::Buy
-    }
-}
-
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(2_000))]
     #[test]
@@ -236,38 +201,165 @@ proptest! {
 struct SideModel {
     model: Model,
     sides: BTreeMap<(u8, u32), Side>,
+    pending: Vec<(u64, AccountId, RepMsg)>,
+    reordered: bool,
+    /// Counterexample only: reproduce the invalid assumption that delivery order is settlement order.
+    delivery_order: bool,
+    /// Counterexample only: one incorrectly recorded fee must still break conservation.
+    corrupt_fee: bool,
+}
+
+impl SideModel {
+    fn settle(&mut self) {
+        self.reordered |= self.pending.windows(2).any(|w| w[0].0 > w[1].0);
+        if !self.delivery_order {
+            self.pending.sort_by_key(|r| r.0);
+        }
+        // drain_all delivers the entire generated batch before each comparison or reset. Only
+        // its generation order can reproduce average-cost realised PnL. No account truth is read.
+        for (_, a, m) in self.pending.drain(..) {
+            match m {
+                RepMsg::OrderEvent(e) => {
+                    let side = self.sides[&(a.0, e.slot.0)];
+                    let fee = i128::from(e.fee.0) + i128::from(self.corrupt_fee);
+                    self.corrupt_fee = false;
+                    self.model.fill(
+                        a.0,
+                        e.inst,
+                        side,
+                        i128::from(e.qty.0),
+                        i128::from(e.px.0),
+                        fee,
+                        e.fee_asset,
+                    );
+                }
+                RepMsg::ExternalFill(f) => self.model.fill(
+                    a.0,
+                    f.inst,
+                    f.side,
+                    i128::from(f.qty.0),
+                    i128::from(f.px.0),
+                    i128::from(f.fee.0),
+                    f.fee_asset,
+                ),
+                RepMsg::FundingSettle(f) => self.model.add(a.0, f.venue, USDT, i128::from(f.amount.0)),
+                _ => unreachable!("only settlements are buffered"),
+            }
+        }
+    }
 }
 
 impl Obs for SideModel {
     fn on_cmd(&mut self, c: &GwCmd, t: u64) {
+        self.settle(); // Clock input may have filled orders immediately before Transfer or Reset.
         if c.op == GwOp::Place {
             self.sides.insert((c.account.0, c.slot.0), c.side);
         }
         self.model.on_cmd(c, t);
     }
-    fn on_reply(&mut self, a: AccountId, due: u64, m: &RepMsg, b: &[u8]) {
-        if let RepMsg::OrderEvent(e) = m
-            && matches!(e.what, OrderEventKind::PartialFill | OrderEventKind::Fill)
-        {
-            let side = self.sides.get(&(a.0, e.slot.0)).copied().unwrap_or(Side::Buy);
-            let mut e2 = *e;
-            // Route the fill through the model with its real side.
-            self.model.fill(
-                a.0,
-                e2.inst,
-                side,
-                i128::from(e2.qty.0),
-                i128::from(e2.px.0),
-                i128::from(e2.fee.0),
-                e2.fee_asset,
-            );
-            e2.what = OrderEventKind::Ack;
-            self.model.on_reply(a, due, &RepMsg::OrderEvent(e2), b);
-            return;
+    fn on_reply(&mut self, a: AccountId, due: u64, gen_seq: u64, m: &RepMsg, b: &[u8]) {
+        // Timing checks use actual delivery order; never sort these observations.
+        self.model.on_reply(a, due, gen_seq, m, b);
+        let settlement = match m {
+            RepMsg::OrderEvent(e) => matches!(e.what, OrderEventKind::PartialFill | OrderEventKind::Fill),
+            RepMsg::ExternalFill(_) | RepMsg::FundingSettle(_) => true,
+            _ => false,
+        };
+        if settlement {
+            self.pending.push((gen_seq, a, *m));
         }
-        self.model.on_reply(a, due, m, b);
     }
     fn on_step(&mut self, ex: &SimExchange, t: u64) {
+        self.settle();
         self.model.on_step(ex, t);
+    }
+}
+
+#[test]
+fn sim_222_settlement_order_is_not_reply_order() {
+    // CI seed cc 1b7eac1865117655a3cb55a188d695b709a66b97ea408aecec1eb187475d138e.
+    let sc = Scenario {
+        n_accts: 4,
+        n_insts: 4,
+        empirical: true,
+        evs: vec![
+            (
+                0,
+                Ev::Place {
+                    acct: 2,
+                    inst: 2,
+                    buy: false,
+                    lots: 1,
+                    off: 0,
+                    tif: 1,
+                },
+            ),
+            (
+                0,
+                Ev::Place {
+                    acct: 2,
+                    inst: 2,
+                    buy: false,
+                    lots: 4,
+                    off: -1,
+                    tif: 1,
+                },
+            ),
+            (
+                0,
+                Ev::Place {
+                    acct: 2,
+                    inst: 2,
+                    buy: true,
+                    lots: 1,
+                    off: 4,
+                    tif: 1,
+                },
+            ),
+            (
+                0,
+                Ev::Amend {
+                    acct: 2,
+                    back: 0,
+                    off: 0,
+                },
+            ),
+            (
+                17,
+                Ev::TopN {
+                    inst: 2,
+                    off: 2,
+                    n: 1,
+                    qty: 5,
+                },
+            ),
+        ],
+    };
+    let setup = setup_for(&sc, 11_815_488_002_174_123_349);
+    for (delivery_order, corrupt_fee) in [(false, false), (true, false), (false, true)] {
+        let mut m = SideModel {
+            delivery_order,
+            corrupt_fee,
+            ..SideModel::default()
+        };
+        for a in &common::scen::ACCTS[..sc.n_accts] {
+            m.model.init(a.0);
+        }
+        run(&sc, &setup, rd(), true, &mut m);
+        assert!(m.reordered, "the fixture must reorder settlements");
+        if delivery_order {
+            assert!(
+                m.model
+                    .err
+                    .as_ref()
+                    .is_some_and(|s| s.contains("model 19999927519 sim 19999927499")),
+                "{:?}",
+                m.model.err
+            );
+        } else if corrupt_fee {
+            assert!(m.model.err.is_some(), "one extra fee unit must be detected");
+        } else {
+            assert!(m.model.err.is_none(), "{:?}", m.model.err);
+        }
     }
 }

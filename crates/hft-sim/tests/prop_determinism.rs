@@ -75,7 +75,7 @@ impl Obs for Cum {
             self.sum.insert((c.account.0, c.slot.0), 0);
         }
     }
-    fn on_reply(&mut self, a: AccountId, _d: u64, m: &RepMsg, _b: &[u8]) {
+    fn on_reply(&mut self, a: AccountId, _d: u64, _gen_seq: u64, m: &RepMsg, _b: &[u8]) {
         if !self.ok_init {
             self.ok = true;
             self.ok_init = true;
@@ -107,7 +107,7 @@ struct Enc {
 }
 
 impl Obs for Enc {
-    fn on_reply(&mut self, _a: AccountId, _d: u64, m: &RepMsg, bulk: &[u8]) {
+    fn on_reply(&mut self, _a: AccountId, _d: u64, _gen_seq: u64, m: &RepMsg, bulk: &[u8]) {
         if !self.seen {
             self.ok = true;
             self.seen = true;

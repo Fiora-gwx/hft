@@ -184,10 +184,11 @@ pub fn reply_bytes(account: AccountId, due: u64, m: &RepMsg, bulk: &[u8]) -> Vec
     v
 }
 
-/// Observer of a run: `on_step` after each input, `on_reply` per delivered reply,
+/// Observer of a run: `on_step` after each input, `on_reply` per delivered reply (including its
+/// generation sequence, which is distinct from delivery order under empirical latency),
 /// `on_cmd` per command sent (`(account, slot, decided, qty)` for order ops).
 pub trait Obs {
-    fn on_reply(&mut self, _a: AccountId, _due: u64, _m: &RepMsg, _bulk: &[u8]) {}
+    fn on_reply(&mut self, _a: AccountId, _due: u64, _gen_seq: u64, _m: &RepMsg, _bulk: &[u8]) {}
     fn on_cmd(&mut self, _c: &GwCmd, _t: u64) {}
     fn on_step(&mut self, _ex: &SimExchange, _t: u64) {}
 }
@@ -201,13 +202,16 @@ pub fn run(sc: &Scenario, setup: &SimSetup, rd: &RefData, drain_all: bool, obs: 
     let mut slots = [0u32; 256];
     let mut snap_id = 0u64;
     let mut t = ms(10);
-    let deliver = |ex: &mut SimExchange, now: u64, obs: &mut dyn FnMut(AccountId, u64, &RepMsg, &[u8])| {
-        ex.drain_due(Tsc(now), |r| obs(r.account, r.due_tsc.0, &r.msg, r.bulk));
-    };
+    let deliver =
+        |ex: &mut SimExchange, now: u64, obs: &mut dyn FnMut(AccountId, u64, u64, &RepMsg, &[u8])| {
+            ex.drain_due(Tsc(now), |r| {
+                obs(r.account, r.due_tsc.0, r.gen_seq, &r.msg, r.bulk)
+            });
+        };
     deliver(
         &mut ex,
         if drain_all { u64::MAX } else { t },
-        &mut |a, d, m, b| obs.on_reply(a, d, m, b),
+        &mut |a, d, g, m, b| obs.on_reply(a, d, g, m, b),
     );
     for (gap, ev) in &sc.evs {
         t += ms(*gap) + 1;
@@ -400,7 +404,7 @@ pub fn run(sc: &Scenario, setup: &SimSetup, rd: &RefData, drain_all: bool, obs: 
                 deliver(
                     &mut ex,
                     if drain_all { u64::MAX } else { t },
-                    &mut |a, d, m, b| obs.on_reply(a, d, m, b),
+                    &mut |a, d, g, m, b| obs.on_reply(a, d, g, m, b),
                 );
                 let c = GwCmd::sim_transfer(ACCTS[*acct], S1, P2, USDT, Qty(amount * 1_000_000));
                 obs.on_cmd(&c, t);
@@ -411,7 +415,7 @@ pub fn run(sc: &Scenario, setup: &SimSetup, rd: &RefData, drain_all: bool, obs: 
                 deliver(
                     &mut ex,
                     if drain_all { u64::MAX } else { t },
-                    &mut |a, d, m, b| obs.on_reply(a, d, m, b),
+                    &mut |a, d, g, m, b| obs.on_reply(a, d, g, m, b),
                 );
                 let c = GwCmd::sim_reset(ACCTS[*acct]);
                 obs.on_cmd(&c, t);
@@ -421,12 +425,14 @@ pub fn run(sc: &Scenario, setup: &SimSetup, rd: &RefData, drain_all: bool, obs: 
         deliver(
             &mut ex,
             if drain_all { u64::MAX } else { t },
-            &mut |a, d, m, b| obs.on_reply(a, d, m, b),
+            &mut |a, d, g, m, b| obs.on_reply(a, d, g, m, b),
         );
         obs.on_step(&ex, t);
     }
     ex.advance(Tsc(t + ms(1_000)));
-    deliver(&mut ex, u64::MAX, &mut |a, d, m, b| obs.on_reply(a, d, m, b));
+    deliver(&mut ex, u64::MAX, &mut |a, d, g, m, b| {
+        obs.on_reply(a, d, g, m, b)
+    });
     obs.on_step(&ex, t + ms(1_000));
 }
 
@@ -440,7 +446,7 @@ pub struct Trace {
 }
 
 impl Obs for Trace {
-    fn on_reply(&mut self, a: AccountId, due: u64, m: &RepMsg, bulk: &[u8]) {
+    fn on_reply(&mut self, a: AccountId, due: u64, _gen_seq: u64, m: &RepMsg, bulk: &[u8]) {
         if self.only.is_none_or(|o| o == a) {
             self.replies.push(reply_bytes(a, due, m, bulk));
         }
