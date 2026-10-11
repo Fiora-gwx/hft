@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | RPL-095、RPL-104、RPL-241、RPL-242 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | RPL-001–RPL-004、RPL-070、RPL-079 |
-| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-278 |
+| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-280 |
 | sim | RPL-090–RPL-108、RPL-120–RPL-129、RPL-140–RPL-145、RPL-259 |
 | compare | RPL-160–RPL-173 |
 | latency | RPL-190–RPL-206 |
@@ -2251,6 +2251,33 @@ spec: README.md
 - 步骤:全组重算;只改变恢复后首条 Advice payload,重算 CRC 和 seal
 - 期望:原始输入的 Output 与 126 条 Model Advice 全部通过;反例 Output 仍通过,Model 退出 1 且首处分歧定位到被改记录
 - 实现:`apps/replayer/tests/recovery_gap.rs::rpl_278_discarded_checkpoint_after_gap_starts_a_new_model_comparison`
+
+### RPL-279 完整一小时生成文件的快照组件与字段报告
+
+- 规则:[verify](README.md#verify)
+- 级别:integ
+- 里程碑:M2
+- 前置:RPL-270 的真实引擎、advisor 和 SimExchange 生成完整 1 h、两个文件段;第二个关键帧存在 cap、组件状态和 ClockCal
+- 步骤:原始输入;分别改变 cap 的 set_seq/scope.account、ledger/OMS/strategy/book/exec/EngineClock/ClockCal 节体字节,重算 CRC 与 seal;正式读者复查只改变目标逻辑字节;再同时改较早 CmdResult 与风险快照并 keep-going;恢复来源重跑
+- 期望:原始与恢复输入退出 0;九行反例退出 1,首错精确为被改快照,此前及该点 Output 比较数由输入独立统计,恰一个普通分歧;组件、字段、两侧偏移与完整字段字节一致;ClockCal 无组件;较早 CmdResult 首错不能借用风险组件。文件与报告/侧文件一致,运行不改输入;生成证据保留目标 seq 与逻辑偏移。此用例不替代固定 T1 的 RPL-017
+- 实现:`apps/replayer/tests/snapshot_diff.rs::rpl_279_generated_hour_snapshot_component_and_field_diagnostics`
+
+### RPL-280 真实文件的损坏快照不猜组件
+
+- 规则:[verify](README.md#verify)
+- 级别:table
+- 里程碑:M2
+- 前置:RPL-279 的完整 1 h 输入,首个关键帧的传输 CRC 与 seal 保持正确
+- 步骤:逐项改节保留字段、节长、重复节号与快照节数;每行从引导快照验证,再从损坏快照起步
+- 期望:完整回放退出 1,首错在被改快照,component 为 null,明细指明 Logged 侧、实际偏移与解析原因;从损坏快照起步自检退出 3,无成功报告;源文件不被修复或改写
+- 实现:`apps/replayer/tests/snapshot_diff.rs::rpl_280_malformed_snapshot_diagnostics_do_not_invent_components`
+
+| 行 | 损坏 | 完整回放明细 |
+|---|---|---|
+| RPL-280.1 | 节保留位为 1 | SectionFraming,节 4 起点 |
+| RPL-280.2 | 节长最低字节为 1 | SectionFraming,节 4 起点 |
+| RPL-280.3 | 节 4 改为重复的 13 | DuplicateSection,原节 4 起点 |
+| RPL-280.4 | 快照声明节数加一 | SectionCount,偏移 4 |
 
 ## 验收
 

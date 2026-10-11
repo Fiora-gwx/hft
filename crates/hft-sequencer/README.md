@@ -119,6 +119,10 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 
 同一 feature 的 `driver::replay_snapshot::check_snapshot::<S>(&Log, seq)` 在投递输入前自检指定快照。先校验头部、全部节的边界、唯一性与节数,再计算 [state_hash](#状态哈希);非零声明值必须相等,零值仍需自算。装配参数只取该日志,调用正式恢复路径后重新序列化,重算哈希必须一致;差异返回首个不同节号。重建写缓冲上限为原节字节数,超限直接失败。缺快照、损坏、不支持的恢复布局与恢复后丢失状态均失败,不退到另一快照,不修改来源日志或正在运行的引擎。
 
+`driver::snapshot_diff::snapshot_difference(logged, regenerated)` 只在 `replay-io` 中提供,输入是 ReplaySink 已屏蔽测量字段的逻辑快照体。它不参与通过/失败判定,逐字节比较仍是依据。节边界、唯一性与总数须完整合法;错误返回哪一侧、逻辑体偏移和原因。仅按实际读到的节分配索引,不按未经校验的 n_sections 预分配;返回固定六个组件的 xxh3-64、两侧 state_hash 及首个字段差异,不复制整份快照。
+
+组件分组与优先级沿用 [testkit HashTrail](../hft-testkit/README.md#7-状态哈希对比),组件内部仍逐字节比较,哈希碰撞不能隐藏差异。先定位六个组件,再定位 sequencer 自有节和节间顺序,最后检查快照头;节 16 不归入状态组件,未知节不猜归属。当前 RiskState 行版本按 CapRecord 的生成字段表定位行号、嵌套字段、两侧逻辑体偏移及字段原始字节;节头按 SectionHdr 字段表定位。其他行只给节体字节偏移,未知版本标 unknown_row_version,行数量与长度不符标 invalid_row_layout。只保留第一个字段,后续原始差异仍由 ReplaySink 的有界明细保存。该定位证明的是已比较快照处的差异,不推断更早某条 Input 导致分歧。
+
 `driver::verify::verify::<S>(Log, VerifyOptions, &'static Heartbeat)` 装配离线验证。未指定 from_seq 时取首段引导快照(含 Recovery),否则取不晚于该 seq 的最近快照;先自检,再由日志配置装配。普通滚段沿用当前引擎;Startup、Recovery、RecoverFromSnapshot 或 HostProfile.build_git 变化开始独立运行,重新自检和恢复该段引导快照,不沿用上一运行的内存状态。每段须有 Begin、单份 HostProfile、单份用途与原因一致的引导快照及 BootDone;独立运行的首个普通 Input 必须是 EngineClock,损坏边界返回 RunBoundary。`Log.recovery_gaps` 保留段头标记及 Begin 索引、段号、首 seq、前段末 seq,数量受记录数上界约束;序号连续及只给后缀时也保留。标记必须对应 Recovery/RecoverFromSnapshot,前段在输入中时必须匹配其物理末 seq;重复、错位、缺标记的跳号均拒绝。冷 Model 重算在这些边界清除样本来源和历史 Advice 配对,重新要求缺口后的合法起点;检查点正好在前段 End 仍属于缺口前,不能续接。窗口外输入仍用于预热,窗口内 Output 按 seq 闭区间比较;to_seq 落在事件中间时处理完该事件,不比较其后输出。
 
 多生成的 Output 不消费下一个 Input 或下一独立运行的记录;未生成的输出包括运行尾部输出均计分歧。独立运行的 BootDone 至首条 EngineClock 之间不接受普通 Output,不允许在快照起播时跳过。默认首次分歧后停止取输入,keep_going 保留完整输入顺序;Fatal、未消费完的输入和诊断容量不足均不能返回通过。快照的两侧 state_hash 均独立重算,非零声明错误计分歧;零声明不替代状态检查。结果含各运行的起始快照、下一运行边界、输入/Output/快照/分歧计数,以及汇总和分歧体、语义标志;诊断容量以日志记录数为界。LiveDriver 与恢复装配流程不读取这些离线选项。

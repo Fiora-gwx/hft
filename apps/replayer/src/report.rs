@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use hft_event::{EventKind, Layout, Role, SegmentRoll, kind_info};
 use hft_sequencer::driver::recompute::RecomputeResult;
+use hft_sequencer::driver::snapshot_diff::snapshot_difference;
 use hft_sequencer::driver::verify::VerifyResult;
 use serde_json::{Value, json};
 
@@ -72,6 +73,40 @@ fn field_diff(expected: &[u8], actual: &[u8]) -> Vec<Value> {
     out
 }
 
+fn snapshot_detail(expected: &[u8], actual: &[u8], fields: &mut Vec<Value>) -> Value {
+    let kind = EventKind::STATE_SNAPSHOT.0.to_le_bytes();
+    if expected.get(..2) != Some(kind.as_slice()) || actual.get(..2) != Some(kind.as_slice()) {
+        return Value::Null;
+    }
+    match snapshot_difference(&expected[2..], &actual[2..]) {
+        Err(e) => {
+            json!({"error": {"side": format!("{:?}", e.side), "offset": e.offset, "reason": format!("{:?}", e.reason)}})
+        }
+        Ok(d) => {
+            let first = d.first.map(|f| {
+                json!({
+                    "component": f.component, "section": f.section, "row": f.row,
+                    "field": f.field, "layout": f.layout,
+                    "expected_offset": f.logged_offset, "actual_offset": f.regenerated_offset,
+                    "expected_hex": hex(f.logged), "actual_hex": hex(f.regenerated)
+                })
+            });
+            if let Some(f) = &first {
+                fields.push(f.clone());
+            }
+            json!({
+                "expected_state_hash": hex(&d.logged_state_hash),
+                "actual_state_hash": hex(&d.regenerated_state_hash),
+                "components": d.components.iter().map(|h| json!({
+                    "component": h.component, "expected": format!("{:016x}", h.logged),
+                    "actual": format!("{:016x}", h.regenerated)
+                })).collect::<Vec<_>>(),
+                "first": first
+            })
+        }
+    }
+}
+
 pub(crate) fn format(
     instance: &str,
     result: &VerifyResult,
@@ -83,6 +118,7 @@ pub(crate) fn format(
                     actual: &[u8],
                     (expected_flags, actual_flags): (Option<u16>, Option<u16>)| {
         let mut diff = field_diff(expected, actual);
+        let snapshot = snapshot_detail(expected, actual, &mut diff);
         if expected_flags != actual_flags {
             diff.push(json!({"field": "flags", "expected": expected_flags, "actual": actual_flags}));
         }
@@ -96,14 +132,19 @@ pub(crate) fn format(
             .map(|r| json!({"seq": r.seq, "kind": r.kind.0}))
             .collect();
         let prior: Vec<_> = prior.into_iter().rev().collect();
-        let snapshot = sink
+        let nearest_snapshot = sink
             .log
             .recs
             .iter()
             .rev()
             .find(|r| r.seq < m.seq && r.kind == EventKind::STATE_SNAPSHOT)
             .map(|r| r.seq);
-        json!({"seq": m.seq, "kind": m.kind.0, "kind_name": kind_info(m.kind).map(|k| k.name), "expected_hex": hex(expected), "actual_hex": hex(actual), "expected_flags": expected_flags, "actual_flags": actual_flags, "field_diff": diff, "previous_inputs": prior, "nearest_snapshot_seq": snapshot})
+        let mut detail = json!({"seq": m.seq, "kind": m.kind.0, "kind_name": kind_info(m.kind).map(|k| k.name), "expected_hex": hex(expected), "actual_hex": hex(actual), "expected_flags": expected_flags, "actual_flags": actual_flags, "field_diff": diff, "previous_inputs": prior, "nearest_snapshot_seq": nearest_snapshot});
+        if !snapshot.is_null() {
+            detail["component"] = snapshot["first"]["component"].clone();
+            detail["snapshot"] = snapshot;
+        }
+        detail
     };
     let details: Vec<_> = sink
         .mismatches
@@ -151,6 +192,9 @@ pub(crate) fn format(
         })
         .collect();
     let mut summary = json!({"instance": instance, "date": &date[..10], "release": crate::VERSION, "verify": if details.is_empty() { "pass" } else { "fail" }, "first_divergent_seq": sink.mismatches.first().map(|m| m.seq), "recompute": "skipped", "skipped_reason": "advice_journal", "generated_utc": utc(generated), "start_snapshot_seq": result.start_snapshot, "inputs_replayed": result.inputs, "outputs_compared": sink.compared, "snapshots_checked": result.snapshots, "mismatches": details.len(), "runs": runs});
+    // Component belongs to the first ordinary divergence, never a later snapshot or an
+    // accepted recovery difference. Non-snapshot and malformed/header-only cases have none.
+    summary["component"] = details.first().map_or(Value::Null, |d| d["component"].clone());
     let mut detail = json!({"divergences": details, "recovery_diffs": recovery});
     summary["input_continuity"] = json!(if sink.log.recovery_gaps.is_empty() {
         "unbroken"

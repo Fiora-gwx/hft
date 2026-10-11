@@ -5,6 +5,7 @@ mod model_boundary;
 mod recompute;
 mod recovery;
 mod recovery_gap;
+mod snapshot_diff;
 mod verify;
 
 use hft_event::{EventKind, RecordFlags, RecordHeader};

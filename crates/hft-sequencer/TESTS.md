@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | SEQ-018、SEQ-310 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
-| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-395 |
+| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-395、SEQ-404–SEQ-406 |
 | 策略集(`StrategySet`) | SEQ-015–SEQ-018、SEQ-340 |
 | 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181 |
 | 环与容量 | SEQ-001–SEQ-007、SEQ-058、SEQ-059、SEQ-064、SEQ-066、SEQ-086、SEQ-087、SEQ-100、SEQ-221、SEQ-231、SEQ-279、SEQ-288、SEQ-345、SEQ-346、SEQ-367 |
@@ -5583,6 +5583,60 @@ spec: README.md
 真实文件的恢复缺口、元数据反例及 Model 来源隔离由 [RPL-275–278](../../apps/replayer/TESTS.md#rpl-275-恢复缺口的逐运行验证与未知尾部报告) 覆盖。
 
 本地文件装配、检查点身份与窗口、只读保护的跨组件覆盖见 [RPL-266–RPL-269](../../apps/replayer/TESTS.md#rpl-266-真实-advisor-文件重算与检查点连续性)。真实 Drain 后的 advisor 跨运行追赶、Model 样本累计、两种路径丢弃原因与停机不计时由 [RPL-058–RPL-060](../../apps/replayer/TESTS.md#rpl-058-窗口内的-modelpathreset-注记按其-v1v2-计算重建点) 验证,缺起点与注记反例见 [RPL-272](../../apps/replayer/TESTS.md#rpl-272-重启后的来源缺失与路径注记反例)。
+
+### SEQ-404 离线快照组件诊断与独立 HashTrail 一致
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
+- 级别:table
+- 里程碑:M2
+- 前置:含 25 个正式节号的冷快照,节 4 有三条 CapRecord;启用 replay-io
+- 步骤:逐一改变六个组件的全部 15 个所属节及 sequencer 的节 8/25;再同时改 ledger/risk,双向删除 exec 节
+- 期望:逐节归属正确,六个哈希与独立 testkit 读者一致;原始记录不变,逻辑体偏移准确;同时变化按 ledger 优先,缺节有明确 presence 和单侧字节,完整相等时无差异
+- 实现:`crates/hft-sequencer/tests/snapshot_diff.rs::seq_404_snapshot_components_match_independent_hashtrail`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| SEQ-404.1 | 两份相同快照 | 无差异 |
+| SEQ-404.2 | 分别改变 15 个组件节和 8/25 两节 | 六组件哈希与独立 HashTrail 相同,归属及字节偏移按逐项期望 |
+| SEQ-404.3 | 同时改变节 22 与 23 | 首个组件 hft-ledger |
+| SEQ-404.4 | 任一侧缺少节 21 | missing_section,仅存在侧有字节 |
+
+### SEQ-405 快照字段与未知布局不混淆
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
+- 级别:table
+- 里程碑:M2
+- 前置:SEQ-404 快照,改变第二条 cap 的字段;期望名称与偏移手工按布局给出
+- 步骤:分别改 source、level、cflags、填充、scope.account/group/inst、set_seq、params;比较两侧相同未知版本、非法行数;另改变单侧版本、ClockCal、ClockCal 加 EngineClock、仅声明哈希、组件之间的节顺序和未知节
+- 期望:九个字段给准确行号/嵌套路径/完整字段字节;未知版本和非法行数只给带原因的字节偏移;节头差异指向 version;ClockCal 不改变状态哈希且无组件,同时存在的 EngineClock 差异优先;声明哈希仅指头部;节间顺序归 sequencer,未知节不猜组件
+- 实现:`crates/hft-sequencer/tests/snapshot_diff.rs::seq_405_snapshot_fields_versions_and_metadata_are_distinguished`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| SEQ-405.1 | 第二行九个 cap 字段分别变化 | 嵌套名称、宽度、两侧偏移与原始字节符合布局 |
+| SEQ-405.2 | 同为未知行版本或非法行数 | 无行号,字节偏移附 unknown_row_version/invalid_row_layout |
+| SEQ-405.3 | 仅单侧节版本变化 | sections[4].version |
+| SEQ-405.4 | 仅 ClockCal / ClockCal 加 EngineClock | 前者哈希相同且无组件,后者归 hft-sequencer 节 25 |
+| SEQ-405.5 | 仅声明哈希变化 | 头部 state_hash,无组件 |
+| SEQ-405.6 | 组件间节顺序变化 / 未知节体变化 | 前者归 sequencer 的 section 字段,后者不猜组件 |
+
+### SEQ-406 损坏快照的诊断边界明确失败
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
+- 级别:table
+- 里程碑:M2
+- 前置:SEQ-404 的完整快照,损坏分别出现在 logged 与 regenerated 侧
+- 步骤:截短快照头;把 n_sections 改成 u32 最大值;节长不对齐/超过文件;非零保留字段;重复节号;末节截短
+- 期望:全部返回明确的 side、逻辑体偏移与 Header/SectionCount/SectionFraming/DuplicateSection,不分配声明数量的数组、不输出误导性的组件或字段
+- 实现:`crates/hft-sequencer/tests/snapshot_diff.rs::seq_406_snapshot_diagnostics_reject_malformed_framing`
+
+| 行 | 两侧分别注入的损坏 | 错误 |
+|---|---|---|
+| SEQ-406.1 | 头部只有 95 字节 | Header,偏移 0 |
+| SEQ-406.2 | n_sections 为 u32 最大值 | SectionCount,偏移 4 |
+| SEQ-406.3 | 节长为 1 或 u32 最大值 / 节保留位为 1 | SectionFraming,节 4 起点 |
+| SEQ-406.4 | 节 4 改成重复的节 1 | DuplicateSection,原节 4 起点 |
+| SEQ-406.5 | 末节截短一字节 | SectionFraming,节 21 起点 |
 
 ## 验收
 

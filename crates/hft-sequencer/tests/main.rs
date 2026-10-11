@@ -41,6 +41,8 @@ mod ring_full;
 mod sdk_contract;
 mod sim_route;
 mod snapshot;
+#[cfg(feature = "replay-io")]
+mod snapshot_diff;
 mod snapshot_rows;
 mod storage;
 mod strategies;
