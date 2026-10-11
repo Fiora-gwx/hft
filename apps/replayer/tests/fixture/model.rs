@@ -93,14 +93,23 @@ pub(super) fn exercise<S: StrategySet>(
     poll(&mut a, &log);
     drain(&mut a, s);
     std::fs::create_dir(f.root.join("checkpoints")).unwrap();
+    let first_tsc = s.driver().io.rings.tsc;
+    let first_ens = s.engine().last_ens;
+    let hz_milli = s.driver().io.rings.hz;
     for second in 1..=12u64 {
-        s.driver_mut().io.rings.tsc = second * 1_000_000;
+        let t = first_tsc + (u128::from(second) * u128::from(hz_milli) / 1000) as u64;
+        let utc = s.driver().io.utc_of(Tsc(t));
+        s.driver_mut().io.rings.tsc = t;
+        s.driver_mut().io.rings.calib.tsc = Tsc(t);
+        s.driver_mut().io.rings.calib.realtime_ns = utc;
+        let status = s.driver().io.clock_status();
+        input(s, (1, 0), EventKind::CLOCK_STATUS, status.as_bytes().to_vec());
         for (vi, venue) in world.venues.iter().enumerate() {
             for i in world.insts.iter().filter(|i| i.venue == venue.id) {
                 let mut h = MarketHdr::new_zeroed();
                 h.venue = venue.id;
                 h.inst = i.id;
-                h.rx_tsc = second * 1_000_000;
+                h.rx_tsc = t;
                 let b = Bbo {
                     h,
                     bid_px: Px(i.bid + second as i64 * i.tick),
@@ -135,6 +144,7 @@ pub(super) fn exercise<S: StrategySet>(
             settle(s);
         }
     }
+    assert_eq!(s.engine().last_ens - first_ens, 12_000_000_000);
     let log = published(s, f);
     assert!(log.recs.iter().any(|r| r.kind == EventKind::ADVICE));
 }

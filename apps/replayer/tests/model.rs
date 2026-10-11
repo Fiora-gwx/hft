@@ -100,10 +100,11 @@ fn mutate(bytes: &[u8], kind: EventKind, seq: Option<u64>, body_offset: usize) -
         assert!(h.len > 0);
         if h.kind == kind.0 && seq.is_none_or(|s| s == h.seq) {
             out[at + 24 + body_offset] ^= 1;
-            assert!(RecordFlags(h.flags).contains(RecordFlags::CRC));
-            let end = at + h.len as usize;
-            let crc = crc32c::crc32c(&out[at..end - 4]);
-            out[end - 4..end].copy_from_slice(&crc.to_le_bytes());
+            if RecordFlags(h.flags).contains(RecordFlags::CRC) {
+                let end = at + h.len as usize;
+                let crc = crc32c::crc32c(&out[at..end - 4]);
+                out[end - 4..end].copy_from_slice(&crc.to_le_bytes());
+            }
             return (out, h.seq);
         }
         at += h.len as usize;

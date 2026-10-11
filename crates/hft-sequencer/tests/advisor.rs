@@ -271,15 +271,45 @@ fn seq_031_outbox_keeps_latest() {
 #[cfg(feature = "replay-io")]
 #[test]
 fn seq_403_recompute_requires_latest_same_basis_and_one_to_one_matching() {
-    use hft_sequencer::driver::recompute::{RecomputeLimits, recompute};
+    use hft_sequencer::advisor::checkpoint;
+    use hft_sequencer::driver::live::LiveDriver;
+    use hft_sequencer::driver::recompute::{ModelCheckpoint, RecomputeLimits, recompute};
     use hft_sequencer::driver::verify::VerifyOptions;
-    let mut h = b0_model();
+    use hft_sequencer::{BootSource, Sequencer};
+    reset_script();
+    set_subs(S2, vec![(A1, 0, EvMask::BBO, Part::Model)]);
+    let b = b0();
+    let rd = b.rd.load();
+    let setup = b.setup(&rd);
+    let mut configs = b.configs(&rd);
+    configs.engine_blob = setup.encode_blob(1, hft_types::HostClass::Dev2, UTC0);
+    configs.risk_blob = configs.risk.encode_blob().unwrap();
+    configs.risk_sha256 = sha(&configs.risk_blob);
+    let heartbeat = hb();
+    let driver = LiveDriver::new(TestIo::<TestSet>::new(setup.clock), b.live);
+    let s = Sequencer::boot(BootSource::Empty { configs }, &setup, driver, heartbeat).unwrap();
+    let mut h = H {
+        s,
+        rd,
+        setup,
+        cmd_no: 0,
+        hb: heartbeat,
+        upd: 1,
+    };
+    h.steady();
     let mut a = start(&h, MemCkpt::default(), Ring::big(), cfg());
     catch_up(&mut a, &h);
     for (kind, bytes) in core::mem::take(&mut a.ring.recs) {
         h.push_bytes(RingId::Advice, kind, bytes);
     }
     h.run();
+    catch_up(&mut a, &h);
+    let store = checkpoint_now(&mut a);
+    let (header, body) = store.gens.get(&S2).unwrap();
+    let checkpoints = [ModelCheckpoint {
+        instance: h.s.engine().rd.instance(S2).unwrap().name.to_string(),
+        bytes: checkpoint::encode(header, body, 1 << 20).unwrap(),
+    }];
     set_mhook(|hx, ev, out| {
         if matches!(ev, EventRef::Bbo { .. }) && hx.s.strategy == S2 {
             for p in [b"P1", b"P2", b"P3"] {
@@ -305,7 +335,7 @@ fn seq_403_recompute_requires_latest_same_basis_and_one_to_one_matching() {
         recompute::<TestSet>(
             log,
             VerifyOptions::default(),
-            &[],
+            &checkpoints,
             RecomputeLimits {
                 records: 1000,
                 bytes: 1 << 20,

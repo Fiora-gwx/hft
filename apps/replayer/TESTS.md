@@ -2105,7 +2105,7 @@ spec: README.md
 - 规则:[verify](README.md#verify)
 - 级别:table
 - 里程碑:M2
-- 前置:RPL-266 的真实封闭文件,每行独立修改第一条 Advice 并重算 CRC
+- 前置:RPL-266 的真实封闭文件,每行独立修改第一条 Advice;记录带 CRC 时重算 CRC
 - 步骤:运行不带检查点的 recompute
 - 期望:每行退出 1、recompute = fail,first_model_divergent_seq 与首条 model_divergences 均指向被改的 Advice;字段差异非空,来源保持篡改后的字节;错路由引出的额外 Output 不吞掉下一 Input,verify 与 recompute 的结论独立
 - 实现:`apps/replayer/tests/model.rs::rpl_267_advice_header_and_payload_divergences_are_reported`
@@ -2136,7 +2136,7 @@ spec: README.md
 - 级别:integ
 - 里程碑:M2
 - 前置:RPL-266 的检查点早于 from_seq,中间有更晚的关键帧
-- 步骤:篡改预热前缀的 CmdResult 并重算 CRC,使用检查点与晚于该输出的 from_seq
+- 步骤:篡改预热前缀的 CmdResult,记录带 CRC 时重算 CRC,使用检查点与晚于该输出的 from_seq
 - 期望:退出 1,first_output_divergent_seq 指向前缀篡改位置;Model 比较仍 pass
 - 实现:`apps/replayer/tests/model.rs::rpl_269_checkpoint_prefix_outputs_are_verified_before_requested_window`
 
