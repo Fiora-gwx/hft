@@ -121,7 +121,10 @@ pub(crate) fn process_parts<D: Driver<S>, S: StrategySet>(
     crate::commands::drain_check(e, inst, drv)?;
     finish_event(e, drv, slot.tsc)?;
     #[cfg(feature = "testkit")]
-    drv.observe_input(e, slot, false);
+    {
+        drv.observe_input(e, slot, false);
+        drv.observe_boundary(crate::audit::StateView { e, inst });
+    }
     Ok(())
 }
 

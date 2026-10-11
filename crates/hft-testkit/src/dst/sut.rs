@@ -119,6 +119,17 @@ pub struct StepOut {
     pub info: StepInfo,
     /// Actual Input boundaries, including internal timers and restart prologues.
     pub events: Vec<EventStep>,
+    /// One live-state observation per journal snapshot, at its completed event / boot boundary.
+    pub snapshots: Vec<SnapshotPoint>,
+    pub snapshot_error: Option<String>,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct SnapshotPoint {
+    pub snapshot_seq: u64,
+    /// Last record of the complete boundary, before any later Input can change state.
+    pub through_seq: u64,
+    pub live: ComponentHashes,
 }
 
 #[derive(Clone, Debug)]
@@ -131,6 +142,51 @@ pub struct EventStep {
 }
 
 impl StepOut {
+    /// Every new journal snapshot needs one ordered observation at a complete boundary.
+    pub fn verify_snapshot_observations(&self, journal: &[JRec], checked_through: u64) -> Result<(), String> {
+        if let Some(e) = &self.snapshot_error {
+            return Err(e.clone());
+        }
+        let tail = &journal[journal.partition_point(|r| r.seq <= checked_through)..];
+        let mut expected = tail.iter().filter(|r| r.kind == EventKind::STATE_SNAPSHOT);
+        for p in &self.snapshots {
+            let Some(r) = expected.next() else {
+                return Err(format!("extra snapshot observation {}", p.snapshot_seq));
+            };
+            if r.seq != p.snapshot_seq {
+                return Err(format!(
+                    "missing or reordered snapshot observation {}, got {}",
+                    r.seq, p.snapshot_seq
+                ));
+            }
+            let end = tail
+                .binary_search_by_key(&p.through_seq, |r| r.seq)
+                .ok()
+                .map(|i| &tail[i]);
+            if p.through_seq < p.snapshot_seq || end.is_none_or(|r| r.flags.0 & RecordFlags::EVENT_END.0 == 0)
+            {
+                return Err(format!(
+                    "snapshot {} has invalid boundary {}",
+                    p.snapshot_seq, p.through_seq
+                ));
+            }
+            if tail
+                .iter()
+                .skip_while(|r| r.seq <= p.snapshot_seq)
+                .take_while(|r| r.seq <= p.through_seq)
+                .any(|r| hft_event::classify(r.kind, &r.body) == Ok(hft_event::Role::Input))
+            {
+                return Err(format!(
+                    "snapshot {} observation crosses a later Input",
+                    p.snapshot_seq
+                ));
+            }
+        }
+        if let Some(r) = expected.next() {
+            return Err(format!("missing snapshot observation {}", r.seq));
+        }
+        Ok(())
+    }
     /// All journaled Inputs must have exactly one complete observation in journal order.
     pub fn verify_observations(&self) -> Result<(), String> {
         let mut seqs = std::collections::BTreeSet::new();
@@ -159,6 +215,8 @@ impl StepOut {
         self.frames.clear();
         self.info = StepInfo::default();
         self.events.clear();
+        self.snapshots.clear();
+        self.snapshot_error = None;
     }
 }
 
@@ -212,6 +270,11 @@ pub trait Sut: Sized {
     /// The runner rejects unavailable rebuilds
     /// for real-engine observations or any journal that already contains a snapshot.
     fn rebuilt_hashes(&self) -> Result<Option<ComponentHashes>, String>;
+    /// Independently restores this snapshot and verifies subsequent Outputs up to its boundary.
+    /// Real adapters must implement this; the default cannot silently skip an observation.
+    fn rebuilt_snapshot(&self, point: &SnapshotPoint) -> Result<ComponentHashes, String> {
+        Err(format!("snapshot {} rebuild unavailable", point.snapshot_seq))
+    }
     /// Journal seq of the last record.
     fn seq(&self) -> u64;
     /// The in-memory journal (all records so far).

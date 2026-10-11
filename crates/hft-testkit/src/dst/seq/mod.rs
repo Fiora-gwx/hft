@@ -18,6 +18,7 @@ mod events;
 pub mod io;
 pub mod matcher;
 pub mod observe;
+mod snapshots;
 mod state;
 
 use hft_event::{
@@ -27,7 +28,7 @@ use hft_event::{
 use hft_refdata::RefData;
 use hft_rt::Heartbeat;
 use hft_sequencer::driver::live::{LiveCfg, LiveDriver, RingId};
-use hft_sequencer::driver::replay::{Log, ReplayDriver, ReplayMode};
+use hft_sequencer::driver::replay::Log;
 use hft_sequencer::{
     BootSource, EngineSetup, ParsedConfig, RecoverPlan, RecoveryFlags, SegClock, Sequencer, SnapshotSel,
     StepOutcome,
@@ -38,7 +39,7 @@ use zerocopy::{FromZeros, IntoBytes};
 
 use crate::dst::driver::DstDriver;
 use crate::dst::obs::Obs;
-use crate::dst::sut::{BootCtx, BootFail, CrashPoint, InputRec, JRec, Source, StepOut, Sut};
+use crate::dst::sut::{BootCtx, BootFail, CrashPoint, InputRec, JRec, SnapshotPoint, Source, StepOut, Sut};
 use crate::dst::world::{AccountKind, WorldSpec};
 use crate::hash::ComponentHashes;
 
@@ -531,11 +532,13 @@ impl<S: StrategySet> SeqSut<S> {
         self.carry.stale_gen_base += st.stale_gen;
         let drv = s.into_driver();
         let events = drv.io.events;
+        let mut snapshots = drv.io.snapshots;
         let mut audit = drv.io.audit;
         let mut j = drv.io.j;
         let keep = j.committed;
         let committed_seq = io::committed_seq(&j);
         audit.restart(committed_seq);
+        snapshots.restart(committed_seq);
         let mut n = 0usize;
         for seg in j.segments.iter_mut() {
             let room = keep.saturating_sub(n);
@@ -556,6 +559,7 @@ impl<S: StrategySet> SeqSut<S> {
         }
         let mut io = self.new_io(now, clock);
         io.audit = audit;
+        io.snapshots = snapshots;
         io.events = events;
         io.events
             .retain(|ev| ev.records.last().is_none_or(|r| r.seq <= committed_seq));
@@ -598,6 +602,7 @@ impl<S: StrategySet> Sut for SeqSut<S> {
 
     fn drain_observations(&mut self, out: &mut StepOut) {
         out.events.append(&mut self.io().events);
+        self.io().snapshots.drain(out);
     }
 
     fn boot(ctx: &BootCtx<'_>) -> Result<Self, BootFail> {
@@ -704,55 +709,21 @@ impl<S: StrategySet> Sut for SeqSut<S> {
         else {
             return Ok(None);
         };
-        let setup =
-            EngineSetup::from_snapshot(&log, snap).map_err(|e| format!("snapshot {snap} config: {e:?}"))?;
-        let drv = ReplayDriver::new(ReplayMode::Verify, log, 0, setup.seq.replay_per_round);
-        let plan = RecoverPlan {
-            start: SnapshotSel::AtSeq(snap),
-            replay_tail: true,
-            epoch: 0,
-            flags: RecoveryFlags(0),
-            quarantine: Vec::new(),
-        };
-        let mut s: Sequencer<ReplayDriver, S> =
-            Sequencer::boot(BootSource::Journal(plan), &setup, drv, self.hb)
-                .map_err(|e| format!("snapshot {snap} restore: {e:?}"))?;
-        for _ in 0..10_000_000 {
-            if s.step() != StepOutcome::Busy {
-                break;
-            }
-        }
-        let d = s.driver();
-        if !d.finished() {
+        snapshots::rebuild::<S>(log, snap, self.hb).map(Some)
+    }
+
+    fn rebuilt_snapshot(&self, point: &SnapshotPoint) -> Result<ComponentHashes, String> {
+        let log = snapshots::prefix(&self.s().driver().io.j, point.through_seq);
+        if log.recs.last().is_none_or(|r| r.seq != point.through_seq)
+            || hft_sequencer::recover_event_end(&log) != log.recs.len()
+            || point.snapshot_seq > point.through_seq
+        {
             return Err(format!(
-                "snapshot {snap}: replay unfinished at cursor {}",
-                d.cursor
+                "snapshot {}: missing complete boundary {}",
+                point.snapshot_seq, point.through_seq
             ));
         }
-        if !d.mismatches().is_empty() || !d.leftover().is_empty() {
-            let detail = d.sink.detail.first().map(|(seq, a, b)| {
-                let at = a
-                    .iter()
-                    .zip(b)
-                    .position(|(x, y)| x != y)
-                    .unwrap_or(a.len().min(b.len()));
-                (
-                    *seq,
-                    a.len(),
-                    b.len(),
-                    at,
-                    &a[at.min(a.len())..(at + 16).min(a.len())],
-                    &b[at.min(b.len())..(at + 16).min(b.len())],
-                )
-            });
-            return Err(format!(
-                "snapshot {snap}: replay outputs differ: mismatches {:?}, leftover {:?}, detail {:?}",
-                d.mismatches().first(),
-                d.leftover().first(),
-                detail
-            ));
-        }
-        Ok(Some(Self::hashes_of(&s)))
+        snapshots::rebuild::<S>(log, point.snapshot_seq, self.hb)
     }
 
     fn seq(&self) -> u64 {

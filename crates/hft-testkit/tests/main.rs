@@ -29,5 +29,7 @@ mod observations;
 #[cfg(feature = "seq")]
 mod seq_sut;
 mod shrink;
+#[cfg(feature = "seq")]
+mod snapshot_checks;
 mod suites;
 mod support;

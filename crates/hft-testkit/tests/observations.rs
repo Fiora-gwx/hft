@@ -235,6 +235,9 @@ impl<const FORCE: bool, S: hft_strategy_sdk::StrategySet, const RECOVER: bool> S
     fn rebuilt_hashes(&self) -> Result<Option<ComponentHashes>, String> {
         self.0.rebuilt_hashes()
     }
+    fn rebuilt_snapshot(&self, p: &hft_testkit::dst::sut::SnapshotPoint) -> Result<ComponentHashes, String> {
+        self.0.rebuilt_snapshot(p)
+    }
     fn seq(&self) -> u64 {
         self.0.seq()
     }

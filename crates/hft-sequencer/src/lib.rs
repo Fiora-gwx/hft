@@ -124,10 +124,20 @@ impl<D: Driver<S>, S: StrategySet> Sequencer<D, S> {
         drv: D,
         hb: &'static Heartbeat,
     ) -> Result<Self, BootError> {
-        match boot {
+        let seq = match boot {
             BootSource::Empty { configs } => engine::boot_empty(configs, setup, drv, hb),
             BootSource::Journal(plan) => recover::boot_journal(plan, setup, drv, hb),
-        }
+        }?;
+        #[cfg(feature = "testkit")]
+        let seq = {
+            let mut seq = seq;
+            seq.drv.observe_boundary(audit::StateView {
+                e: &seq.e,
+                inst: &seq.inst,
+            });
+            seq
+        };
+        Ok(seq)
     }
 
     /// One main-loop round (README "主循环"): non-blocking; Inputs taken and processed one by one.

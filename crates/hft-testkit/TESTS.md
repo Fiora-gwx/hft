@@ -20,7 +20,7 @@ spec: README.md
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
 | 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TOOL-024、TOOL-027–TOOL-029 |
-| 6. DST 框架 | TK-043–TK-070、TK-100–TK-114 |
+| 6. DST 框架 | TK-043–TK-070、TK-100–TK-116 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
 | 8. hft-dst 运行器 | TK-075–TK-088 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
@@ -1495,6 +1495,26 @@ spec: README.md
 - 步骤:各运行完整 10,000 步,使用套件原有故障率和全部不变量;逐条检查 RoundClosed 的所属 Input
 - 期望:六行均实际结束轮次,注记属于 Fill、PartialFill 或 FeeOnly,不遗留到对账;含定期和结束 INV-6 的全部检查通过;相同种子保留在 storage 回归集
 - 实现:`crates/hft-testkit/tests/journal_config.rs::tk_114_round_notes_replay_across_storage_restarts`
+
+### TK-115 每条快照在其完成边界检查 INV-6
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)、[INV-6](../../docs/tests/invariants.md#inv-6-任一时刻从最近的快照加后续事件重建的状态与运行中状态逐组件相同)
+- 级别:replay
+- 里程碑:M2
+- 输入:真实 W1 引擎,4 个世界步,关闭定期重建,每步采样 HashTrail
+- 步骤:首次世界步在外部行情之前依次处理关键帧、按需快照与滚段 Timer,Drain 干净重启后连续崩溃恢复两次;另一行关闭全部检查器;反例行分别删除首条/全部观察、重复首条、改错边界、跨过后续 Input、改错首条风险哈希、标记溢出、返回重建错误
+- 期望:正常行实际包含五种目的的至少八条快照,检查数等于 journal 快照数;开关检查器前后的完整 journal 和非空 HashTrail 逐字节相同;八种反例均以 INV-6 在第 0 步失败,诊断指出原因,不能被后来的正确快照遮盖
+- 实现:`crates/hft-testkit/tests/snapshot_checks.rs::tk_115_every_snapshot_checked_with_periodic_rebuild_off`
+
+### TK-116 快照观察只保留已提交边界且缓冲有界
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:unit
+- 里程碑:M2
+- 前置:两个完成边界的快照观察,仅第一条已发布
+- 步骤:连续恢复两次,连续交付两次;再向已满的 4096 条输出观察追加一条
+- 期望:只交付第一条一次,未提交观察丢弃且扫描游标回到已提交边界;溢出显式报错,输出不超过容量
+- 实现:`crates/hft-testkit/src/dst/seq/snapshots.rs::tk_116_snapshot_observations_follow_commit_boundary_and_capacity`
 
 ## 验收
 

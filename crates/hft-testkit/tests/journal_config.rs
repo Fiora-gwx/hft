@@ -112,6 +112,9 @@ impl Sut for MissingRebuild {
             Ok(None)
         }
     }
+    fn rebuilt_snapshot(&self, p: &hft_testkit::dst::sut::SnapshotPoint) -> Result<ComponentHashes, String> {
+        self.0.rebuilt_snapshot(p)
+    }
     fn seq(&self) -> u64 {
         self.0.seq()
     }

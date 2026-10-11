@@ -87,6 +87,9 @@ pub trait Driver<S: StrategySet> {
     /// Immutable diagnostic views around each Input; compiled out of production.
     #[cfg(feature = "testkit")]
     fn observe_input(&mut self, _e: &Engine, _input: &InputSlot, _before: bool) {}
+    /// Completed Input / boot state; no mutable access to engine or strategy instances.
+    #[cfg(feature = "testkit")]
+    fn observe_boundary(&mut self, _state: crate::audit::StateView<'_, S>) {}
     /// `boot(Journal)`: the logged records to start from (live: the old journal of this
     /// instance, already truncated by hft-journal `open`; verify/mirror: their own log).
     fn start_log(&mut self) -> Option<replay::Log>;

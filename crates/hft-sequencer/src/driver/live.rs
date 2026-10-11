@@ -66,6 +66,8 @@ pub trait LiveIo<S: StrategySet> {
     fn clock_status(&self) -> ClockStatus;
     #[cfg(feature = "testkit")]
     fn observe_input(&mut self, _e: &crate::Engine, _input: &InputSlot, _before: bool) {}
+    #[cfg(feature = "testkit")]
+    fn observe_boundary(&mut self, _state: crate::audit::StateView<'_, S>) {}
     /// UTC of a TSC (TscClock calibration).
     fn utc_of(&self, t: Tsc) -> i64;
     /// Called after every hand-over (test hook for arrivals "during processing").
@@ -1021,6 +1023,11 @@ impl<S: StrategySet, IO: LiveIo<S>> Driver<S> for LiveDriver<S, IO> {
     #[cfg(feature = "testkit")]
     fn observe_input(&mut self, e: &crate::Engine, input: &InputSlot, before: bool) {
         self.io.observe_input(e, input, before);
+    }
+
+    #[cfg(feature = "testkit")]
+    fn observe_boundary(&mut self, state: crate::audit::StateView<'_, S>) {
+        self.io.observe_boundary(state);
     }
 
     fn start_log(&mut self) -> Option<super::replay::Log> {

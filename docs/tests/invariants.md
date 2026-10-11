@@ -90,6 +90,7 @@
 - 故障:全部 DST 套件;每 1 000 步、每次写出 `StateSnapshot` 之后与场景结束时检查。最能触发:任意时刻崩溃后 `RecoverDriver` 重启、关键帧与段滚动、命令与 `SetParams` 交错、advisor 落后
 - 种子:标准集([scenarios §2.4](scenarios.md#24-种子集))
 - 断言:取内存段 journal 中最近一条 `StateSnapshot`(关键帧的 `state_hash` 由读者侧计算),以验证驱动重放其后的全部 Input 到当前 seq:`ComponentHashes{book, oms, risk, ledger, exec, strategies, all}` 与运行中实例在同一 seq 的值逐项相等;重放产生的 Output 记录与 journal 中的 Output 逐字节相等(Meta 类不比对)。真实引擎或 journal 已含快照时,配置/恢复失败、未完成回放或未消费输出均失败,不得以空重建结果跳过定期或结束检查
+- 快照边界:每条快照以所属 Input 或启动完成的 EVENT_END 为比较位置,观察缺失、重复或跨过后续 Input 均失败;同一世界步内多个快照和重启逐条检查,关闭定期采样不能关闭该检查(TK-115)
 - 实现:`crates/hft-testkit/src/dst/invariants.rs::inv_6_state_is_function_of_journal`
 - 备注:检查器 `I6`;不一致时用 `bisect_divergence` 报出第一个分歧的 seq 与组件;主要触发场景 RC-1、RC-2、MD-25
 

@@ -10,6 +10,25 @@ use crate::{Engine, intents::Src};
 
 pub const CAPACITY: usize = 512;
 
+/// Immutable state at a completed Input or boot boundary. Available only to test drivers.
+pub struct StateView<'a, S: hft_strategy_sdk::StrategySet> {
+    pub(crate) e: &'a Engine,
+    pub(crate) inst: &'a crate::Instances<S>,
+}
+
+impl<S: hft_strategy_sdk::StrategySet> core::fmt::Debug for StateView<'_, S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("StateView").finish_non_exhaustive()
+    }
+}
+
+impl<S: hft_strategy_sdk::StrategySet> StateView<'_, S> {
+    /// Serializes the live components, independently of any journal snapshot body.
+    pub fn write_sections(&self, w: &mut hft_strategy_sdk::SnapshotWriter) {
+        crate::snapshot::write_sections(self.e, self.inst, w);
+    }
+}
+
 /// Original facts captured after pricing/classification, before risk commit and OMS place.
 #[derive(Copy, Clone, Debug)]
 pub struct DecisionFacts {

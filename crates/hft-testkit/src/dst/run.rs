@@ -37,6 +37,8 @@ pub struct RunRecord {
     pub trace: Vec<TraceItem>,
     pub obs: Obs,
     pub end_ns: u64,
+    /// Successful mandatory INV-6 checks, one per journal snapshot (including boot / restart).
+    pub snapshot_checks: u64,
 }
 
 impl RunRecord {
@@ -56,6 +58,7 @@ impl RunRecord {
             trace: Vec::new(),
             obs: Obs::default(),
             end_ns: 0,
+            snapshot_checks: 0,
         }
     }
     /// Output records (`role = Output` by kind) of the journal: the intent stream compared by INV-9.
@@ -139,6 +142,7 @@ struct Loop<'c, E: Sut> {
     timer_at: u64,
     venue_wake: Vec<u64>,
     fail: Option<(u64, FailKind, String)>,
+    snapshots_checked_through: u64,
 }
 
 fn venue_ix<M: crate::dst::venue_behavior::Matcher>(
@@ -219,6 +223,7 @@ fn run_once<E: Sut>(cfg: &DstConfig) -> RunRecord {
         timer_at: u64::MAX,
         venue_wake: vec![u64::MAX; n],
         fail: None,
+        snapshots_checked_through: 0,
     };
     lp.go();
     lp.finish()
@@ -247,6 +252,8 @@ impl<E: Sut> Loop<'_, E> {
             self.world.schedule(self.advisor.period_ns, Ev::Advisor);
         }
         self.observe_into_after();
+        self.sut.drain_observations(&mut self.out);
+        self.check_snapshot_boundaries();
         while self.rec.steps_run < self.cfg.steps && self.fail.is_none() {
             let Some(s) = self.world.pop() else { break };
             if s.at > self.cfg.horizon_ns {
@@ -562,6 +569,10 @@ impl<E: Sut> Loop<'_, E> {
         if self.cfg.invariants == InvariantSet::none() {
             return;
         }
+        self.check_snapshot_boundaries();
+        if self.fail.is_some() {
+            return;
+        }
         let rebuild = if self.cfg.invariants.contains(InvId::I6)
             && self.cfg.rebuild_every > 0
             && ordinal.is_multiple_of(self.cfg.rebuild_every)
@@ -641,6 +652,33 @@ impl<E: Sut> Loop<'_, E> {
         }
         if let Err((i, m)) = result {
             self.fail = Some((step, FailKind::Inv(i), m));
+        }
+    }
+
+    fn check_snapshot_boundaries(&mut self) {
+        if !self.cfg.invariants.contains(InvId::I6) {
+            return;
+        }
+        let result = (|| {
+            self.out
+                .verify_snapshot_observations(self.sut.journal(), self.snapshots_checked_through)?;
+            for p in &self.out.snapshots {
+                let b = self.sut.rebuilt_snapshot(p)?;
+                if let Some(c) = p.live.first_diff(&b) {
+                    return Err(format!(
+                        "snapshot {} at seq {}: rebuilt state differs in {}",
+                        p.snapshot_seq,
+                        p.through_seq,
+                        c.name()
+                    ));
+                }
+                self.rec.snapshot_checks += 1;
+            }
+            Ok(())
+        })();
+        match result {
+            Ok(()) => self.snapshots_checked_through = self.sut.seq(),
+            Err(m) => self.fail = Some((self.rec.steps_run.saturating_sub(1), FailKind::Inv(InvId::I6), m)),
         }
     }
 

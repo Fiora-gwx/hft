@@ -29,6 +29,7 @@ pub struct Elem {
 /// The live environment of one engine instance.
 pub struct DstIo<S: StrategySet> {
     pub audit: super::audit::Audit,
+    pub(super) snapshots: super::snapshots::Observations,
     pub events: Vec<crate::dst::sut::EventStep>,
     pending_event: Option<super::events::Pending>,
     world: crate::dst::world::WorldSpec,
@@ -111,6 +112,7 @@ impl<S: StrategySet> DstIo<S> {
     ) -> DstIo<S> {
         DstIo {
             audit: super::audit::Audit::default(),
+            snapshots: super::snapshots::Observations::default(),
             events: Vec::with_capacity(super::events::MAX_EVENTS),
             pending_event: None,
             world,
@@ -152,6 +154,9 @@ impl<S: StrategySet> DstIo<S> {
 }
 
 impl<S: StrategySet> LiveIo<S> for DstIo<S> {
+    fn observe_boundary(&mut self, state: hft_sequencer::audit::StateView<'_, S>) {
+        self.snapshots.capture(&self.j, state);
+    }
     fn observe_input(&mut self, e: &hft_sequencer::Engine, input: &InputSlot, before: bool) {
         if before {
             self.audit.before(e, input);

@@ -162,6 +162,7 @@ pub trait Sut {
     fn observe(&self, obs: &mut Obs);                    // 只读;src/dst/obs.rs 的行即适配器契约
     fn hashes(&self) -> ComponentHashes;
     fn rebuilt_hashes(&self) -> Result<Option<ComponentHashes>, String>; // INV-6:最近快照 + 其后 Input 重建
+    fn rebuilt_snapshot(&self, point: &SnapshotPoint) -> Result<ComponentHashes, String>; // 指定快照至其完整事件边界
     fn crash_and_recover(&mut self, p: CrashPoint, input: Option<&InputRec>) -> Result<(), BootFail>;
     fn clean_restart(&mut self) -> Result<(), BootFail>;
     /* seq()、journal()、is_sim() */
@@ -206,6 +207,8 @@ DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xt
 
 真实引擎或 journal 已含快照时,INV-6 不能因重建返回空值跳过。配置或恢复失败、回放未完成、Output 差异或未消费输出均使检查失败;错误保留阶段、快照序号及首条差异的序号/字节偏移,运行中的定期检查与结束检查使用同一规则(TK-113)。
 
+每条 `StateSnapshot` 在所属 Input 完成或启动完成时保存 `SnapshotPoint{snapshot_seq, through_seq, live}`。`live` 从运行中的组件独立序列化,不抄 journal 快照体;检查器仅取截至该 EVENT_END 的 journal 前缀恢复,不能读后续 Input。同一世界步中的关键帧、按需快照、滚段、Drain 与连续恢复逐条检查,启动时也检查;`rebuild_every = 0` 只关闭定期采样。漏记、重复、越过后续 Input、恢复失败和任一组件差异均失败;`RunRecord.snapshot_checks` 记录成功检查数(TK-115)。每步快照观察上限 4096,溢出失败;重启只保留已提交边界内的观察,连续恢复不得重复交付(TK-116)。
+
 storage 回归集包含轮次结束后经历快照与重启的种子;按完整 10,000 步故障时序运行,确认实际产生 RoundClosed,其所属 Input 为原始成交或手续费回报,独立重建不得漏掉注记(TK-114)。
 
 **套件选择**:不指定套件时,一个种子运行的套件 = 按名字排序的全部套件中下标为 `xxh3_64(seed 的 8 字节小端) mod 套件数` 的那个;`cargo xtask dst` 与 `hft-dst run` 用同一函数 `seed::suite_index`。**缺省步数** 10,000(两个入口相同,`seed::DST_DEFAULT_STEPS`)。
@@ -235,7 +238,7 @@ storage 回归集包含轮次结束后经历快照与重启的种子;按完整 1
 | I3 | 每步读风控调试视图,对比 `RiskParams` |
 | I4 | 事件轨迹:`Unknown` 的 group 在收敛前无开仓/反向意图 |
 | I5 | 出环帧检查 `RISK_REDUCING`/`HARD` 位与账户位 |
-| I6 | 每 N 步从最近快照 + 后续事件重建,比较状态哈希 |
+| I6 | 每 N 步、每条快照的完整事件边界与场景结束从 journal 独立重建,比较组件哈希与 Output |
 | I7 | OMS 调试视图:占用槽数 = 在途订单数,空闲槽数不单调下降 |
 | I8 | `LegLink` 发出量之和 vs 触发它的累计**净**成交量 |
 | I9 | 每次运行抽 5% 种子重跑,比较意图流与 `HashTrail`;一致性集(`fixtures/dst/hashtrail.toml` 登记的种子)的 `HashTrail` 与金样逐字节比较:PR 核对前若干个、每夜与版本标签核对全部(版本标签在同一提交上于 x86_64 与 aarch64 各跑一次;种子数归 [testing §6](../../docs/testing.md#6-ci-运行矩阵),命令归 [tools](../../tools/README.md#cargo-xtask-dst)) |

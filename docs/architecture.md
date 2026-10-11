@@ -125,7 +125,7 @@ tier(frontmatter 标注):`pure` 无 I/O 无线程;`hot` 在 tick-to-trade 路径
 
 ## 9. 回放、恢复与确定性
 
-DST 按 Input 边界和下单前采集只读事实,`testkit` 构建独立检查,不进 journal。
+DST 按 Input 边界和下单前采集只读事实,快照后的事件边界保存状态供独立重建;观察仅在 `testkit` 构建使用,不进 journal。
 
 同一 `hft-sequencer` 代码在三种驱动下运行:实盘读环;恢复从快照重放完整事件、对账后放行,停机标记以 Kill Input 保留;验证回放自检快照、预热窗口并逐字节核对 Output 与哈希,普通滚段延续状态,重启或版本变化从新引导快照独立运行([驱动契约](../crates/hft-sequencer/README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用))。Advice 是 Input,回放读日志;Model 重启从检查点与 journal 恢复,缺失则从空起步。跨重启时间用 engine_ns,停机不计;跨启动 Advice 按 `basis_seq < Now.boot_seq` 判过期。
 
