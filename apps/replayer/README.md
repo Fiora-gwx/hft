@@ -207,7 +207,7 @@ replayer compare --a s3://<bucket>/<prefix>/<host>/prod/… --b s3://<bucket>/<p
 
 - RPL-270/271 在 CI 现场生成完整 1 h/3 h 的路径 Model 文件,由同一入口的独立测试进程执行。单个 Live 账户 acct-l 绑定实例 tsa,真实 SimExchange 产生回报,advisor 每 10 min 写检查点,sequencer 每 5 min 请求关键帧并保留整点滚段;检查点后窗口的比较数与路径版本变化后的 120 s 重建点从输入独立计算。CI 先构建 examples 再运行测试。生成文件尚未发布为带哈希的固定 T1/T3 样本,不计 RPL-010/040/046 的固定样本验收。
 
-- RPL-042/053/054/062 用真实写者和 advisor 验证 Model 输入边界:运行 20 min 后首份参数创建实例,三块不同预热数据及中途检查点,Advice 环阻塞 10 s 后实际合并 37 次,损坏检查点恢复后的单段空起步。预热内容和最终 Advice 的篡改由 RPL-274 检出,普通 Output 比对与 Model 分歧分别报告。
+- RPL-042/053/054/062 用真实写者和 advisor 验证 Model 输入边界:运行 20 min 后首份参数创建实例,三块不同预热数据及中途检查点,Advice 环阻塞 10 s 后实际合并 37 次,损坏检查点恢复后的单段空起步。RPL-274 的预热内容和最终 Advice 反例经正式读者确认只改目标载荷字节,普通 Output 比对与 Model 分歧分别报告。
 - 当前可执行入口覆盖本地连续、封闭 seq 文件的 `verify --advice journal|recompute`,支持单文件或目录递归搜集 `.jrn`、from/to seq、instance 校验、keep-going、JSON 报告与只读 `--check`。生产二进制只装配 registry;集成测试可向同一泛型入口注入测试策略集。读取直接使用原路径,先完成整组文件预检;目录内不按文件名推断顺序。
 - 输入缓冲默认上限为 1,000,000 条逻辑记录、512 MiB 逻辑体、128 MiB 单条重组;可分别用 `--max-records`、`--max-body-bytes`、`--reassembly-bytes` 覆盖为正整数。超限退出 3,不返回部分验证结果。来源须保持不可变;不读取符号链接。`--check` 仅验证输入加载,输出明确标记未进行重放;不写报告。
 - 连续封闭文件的恢复、指定快照恢复和 build_git 变化按 [sequencer 独立运行契约](../../crates/hft-sequencer/README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用) 重建。报告的 runs 数组逐运行列出 start_snapshot_seq、stop_before_seq(下一运行首 seq,末次为 null)、inputs_replayed、outputs_compared、snapshots_checked、mismatches 和 recovery_diffs。RPL-025 覆盖 20 min 后从 10 min 快照恢复再运行 20 min,含末片 seq 审计和旧行情篡改;RPL-026 覆盖真实 Drain 后换 build_git 再运行 10 min。两者保留新运行的整点滚段,三段文件仍计两次运行,只保留新运行的两段文件时独立验证。离线写者不运行 persist,长时夹具根据实际段头、完整 End 与文件摘要生成测试封签,不改 journal 字节,由正式读者校验。时间来自确定性虚拟时钟,每次重建均使用当前二进制,不证明跨版本语义兼容。

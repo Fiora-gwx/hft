@@ -2194,7 +2194,7 @@ spec: README.md
 - 规则:[verify](README.md#verify)
 - 级别:table
 - 里程碑:M2
-- 前置:RPL-062 与 RPL-042 的真实文件副本;篡改后重算记录 CRC 与 seal,其余来源保留
+- 前置:RPL-062 与 RPL-042 的真实文件副本;ControlCmd 的物理偏移包含 PartHdr,篡改后重算记录 CRC 与 seal。正式读者再次解码,断言逻辑体仅目标载荷字节变化一位、身份和体长不变
 - 实现:`apps/replayer/tests/model_boundary.rs::rpl_274_warmup_and_coalesced_payload_counterexamples`
 
 | 行 | 改动 | 期望 |

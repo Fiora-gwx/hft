@@ -227,7 +227,7 @@ fn rpl_274_warmup_and_coalesced_payload_counterexamples() {
     ] {
         let f = fixture::model_boundary(mode);
         let log = fixture::read(&f);
-        let (kind, seq, offset, first_advice) = if mode == ModelBoundary::Warmup {
+        let (kind, seq, logical_offset, first_advice) = if mode == ModelBoundary::Warmup {
             let r = log
                 .recs
                 .iter()
@@ -250,9 +250,29 @@ fn rpl_274_warmup_and_coalesced_payload_counterexamples() {
             (r.kind, r.seq, size_of::<AdviceHdr>(), r.seq)
         };
         let bytes = std::fs::read(&f.file).unwrap();
+        // ControlCmd is a Multi record even when this short command fits in one part.
+        let offset = logical_offset
+            + if kind == EventKind::CONTROL_CMD {
+                size_of::<hft_event::PartHdr>()
+            } else {
+                0
+            };
         let (bad, _) = crate::model::mutate(&bytes, kind, Some(seq), offset);
         std::fs::write(&f.file, &bad).unwrap();
         fixture::seal(&f.file);
+        let changed = fixture::read(&f);
+        let before = &log.recs.iter().find(|r| r.seq == seq).unwrap().body;
+        let after = &changed.recs.iter().find(|r| r.seq == seq).unwrap().body;
+        assert_eq!(before.len(), after.len(), "{id}: logical record length");
+        let differences: Vec<_> = before
+            .iter()
+            .zip(after)
+            .enumerate()
+            .filter(|(_, (a, b))| a != b)
+            .map(|(offset, _)| offset)
+            .collect();
+        assert_eq!(differences, [logical_offset], "{id}: payload-only mutation");
+        assert_eq!(before[logical_offset] ^ after[logical_offset], 1, "{id}");
         let mut args = report(&f, "bad-payload");
         if mode == ModelBoundary::Warmup {
             args.push("--fixture-warmup".into());
