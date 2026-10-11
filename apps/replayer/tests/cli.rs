@@ -188,18 +188,23 @@ fn flip_first_command(path: &std::path::Path, original: &[u8]) -> u64 {
     let mut bytes = original.to_vec();
     let mut offset = 4096;
     loop {
-        let (h, _) = RecordHeader::read_from_prefix(&bytes[offset..]).unwrap();
-        assert!(h.len > 0, "missing fixture command");
+        let record = hft_event::decode_record(&bytes[offset..]).unwrap();
+        let h = record.hdr;
         if h.kind == EventKind::CONTROL_CMD.0 {
-            assert!(RecordFlags(h.flags).contains(RecordFlags::PART));
-            let (part, _) = hft_event::PartHdr::read_from_prefix(&bytes[offset + 24..]).unwrap();
+            // Every Multi record carries PartHdr, including a one-part command. PART
+            // only means another part follows; it is clear on the final/only part.
+            let (part, _) = hft_event::PartHdr::read_from_prefix(record.body).unwrap();
             assert_eq!(part.part, 0);
+            assert!(part.parts > 0);
+            assert!(part.chunk_len as usize >= size_of::<hft_event::CmdHdr>());
+            assert_eq!(RecordFlags(h.flags).contains(RecordFlags::PART), part.parts > 1);
             let body = offset + 24 + size_of::<hft_event::PartHdr>();
             bytes[body + std::mem::offset_of!(hft_event::CmdHdr, cmd_id)] ^= 0x40;
             assert!(RecordFlags(h.flags).contains(RecordFlags::CRC));
             let end = offset + h.len as usize;
             let crc = crc32c::crc32c(&bytes[offset..end - 4]);
             bytes[end - 4..end].copy_from_slice(&crc.to_le_bytes());
+            hft_event::decode_record(&bytes[offset..end]).unwrap();
             let _ = std::fs::remove_file(path.with_extension("seal"));
             std::fs::write(path, bytes).unwrap();
             return h.seq;
