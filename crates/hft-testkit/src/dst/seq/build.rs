@@ -196,6 +196,27 @@ pub fn kind_of(b: &StrategyBinding) -> u16 {
 /// The refdata blob of the world. `all_sim` = every account becomes a Sim account with the world
 /// balances as `SimBalances` (the private refdata of a `SimMatcher`).
 pub fn refdata_blob(w: &WorldSpec, all_sim: bool) -> Result<Vec<u8>, String> {
+    refdata_blob_with_names(w, all_sim, &[], &[])
+}
+
+/// Named replay fixtures use the same world facts and codecs as DST. Overrides must reference
+/// distinct existing identities; the default builder's names and bytes remain unchanged.
+pub fn refdata_blob_with_names(
+    w: &WorldSpec,
+    all_sim: bool,
+    instances: &[(StrategyId, &str)],
+    accounts: &[(AccountId, &str)],
+) -> Result<Vec<u8>, String> {
+    for (ix, (id, _)) in instances.iter().enumerate() {
+        if !w.strategies.iter().any(|s| s.instance == *id) || instances[..ix].iter().any(|x| x.0 == *id) {
+            return Err(format!("unknown or repeated instance name override: {id:?}"));
+        }
+    }
+    for (ix, (id, _)) in accounts.iter().enumerate() {
+        if !w.accounts.iter().any(|a| a.id == *id) || accounts[..ix].iter().any(|x| x.0 == *id) {
+            return Err(format!("unknown or repeated account name override: {id:?}"));
+        }
+    }
     let mut b = RdbBuilder::new(1);
     b.created_utc_ns(UTC0 - 86_400_000_000_000);
     for a in assets(w) {
@@ -287,7 +308,11 @@ pub fn refdata_blob(w: &WorldSpec, all_sim: bool) -> Result<Vec<u8>, String> {
         b.instance(InstanceSpec {
             id: s.instance,
             kind_id: kind_of(s),
-            name: format!("s{}", s.instance.0).into(),
+            name: instances
+                .iter()
+                .find(|x| x.0 == s.instance)
+                .map_or_else(|| format!("s{}", s.instance.0), |x| x.1.to_owned())
+                .into(),
         });
     }
     for a in &w.accounts {
@@ -298,7 +323,9 @@ pub fn refdata_blob(w: &WorldSpec, all_sim: bool) -> Result<Vec<u8>, String> {
             bound_instance: binding_of(w, a.id).map_or(StrategyId(0), |s| s.instance),
             is_prod: false,
             venues: vbits(&a.venues),
-            label: if sim {
+            label: if let Some((_, name)) = accounts.iter().find(|x| x.0 == a.id) {
+                (*name).to_owned()
+            } else if sim {
                 format!("sim-{}", a.id.0)
             } else {
                 format!("acct-{}", a.id.0)

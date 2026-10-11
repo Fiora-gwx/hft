@@ -19,7 +19,7 @@ spec: README.md
 | 2. proptest 生成器 | TK-010–TK-021 |
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
-| 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TOOL-024、TOOL-027–TOOL-029 |
+| 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TK-117–TK-118、TOOL-024、TOOL-027–TOOL-029 |
 | 6. DST 框架 | TK-043–TK-070、TK-100–TK-116 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
 | 8. hft-dst 运行器 | TK-075–TK-088 |
@@ -484,17 +484,17 @@ spec: README.md
   - SDK 提供该类型时两者相等;SDK 不提供时 `hft_testkit::MockViews` 是本 crate 的定义,且 `src/sdk_mock.rs` 只有一处 `struct MockViews`
 - 实现:`crates/hft-testkit/tests/sdk_mock.rs::tk_035_single_mockviews`
 
-### TK-036 两个测试策略只依赖 SDK 与 hft-strat-lib,本 crate 不依赖 registry
+### TK-036 测试策略只依赖 SDK 与 hft-strat-lib,本 crate 不依赖 registry
 
 - 规则:[5. 解耦门槛夹具](README.md#5-解耦门槛夹具)、[依赖](README.md#依赖)
 - 级别:table
 - 里程碑:M2
-- 前置:测试策略模块 `src/strategies/probe_taker.rs`、`probe_target.rs` 的源文本;本 crate 与各引擎 crate 的 `Cargo.toml`;`tools/xtask/deps.toml`
+- 前置:测试策略模块 `src/strategies/probe_taker.rs`、`probe_target.rs`、`replay_probe.rs` 的源文本;本 crate 与各引擎 crate 的 `Cargo.toml`;`tools/xtask/deps.toml`
 - 实现:`crates/hft-testkit/tests/deps.rs::tk_036_dependency_rules`
 
 | 行 | 检查 | 期望 |
 |---|---|---|
-| TK-036.1 | 两个策略模块引用的 `hft_*` crate | ⊆ {`hft_strategy_sdk`, `hft_strat_lib`} |
+| TK-036.1 | 三个策略模块引用的 `hft_*` crate | ⊆ {`hft_strategy_sdk`, `hft_strat_lib`} |
 | TK-036.2 | 在 `probe-taker` 源文本后加一行 `use hft_oms::Oms;` | 检查报出 `hft_oms` |
 | TK-036.3 | 本 crate `Cargo.toml` | 不含 `hft-strategy-registry` |
 | TK-036.4 | 本 crate `Cargo.toml` | 没有 `strategies/` 路径依赖 |
@@ -1515,6 +1515,28 @@ spec: README.md
 - 步骤:连续恢复两次,连续交付两次;再向已满的 4096 条输出观察追加一条
 - 期望:只交付第一条一次,未提交观察丢弃且扫描游标回到已提交边界;溢出显式报错,输出不超过容量
 - 实现:`crates/hft-testkit/src/dst/seq/snapshots.rs::tk_116_snapshot_observations_follow_commit_boundary_and_capacity`
+
+### TK-117 回放 Model 的路径恢复与 120 秒收敛
+
+- 规则:[5. 解耦门槛夹具](README.md#5-解耦门槛夹具)
+- 级别:unit
+- 里程碑:M2
+- 前置:ReplayModel 路径版本 1 连续处理 10–60 秒的六条 BBO,保存原始样本与路径;一个实例恢复两节,另一个路径版本 2 实例仅恢复原始样本
+- 步骤:逐条投递 70–240 秒 BBO;同时检查原始节布局,截断路径恢复反例
+- 期望:完整恢复始终逐字节一致;仅恢复原始样本时计数与时间一致、180 秒前路径相关载荷不同,180 秒起完整载荷一致;截断恢复失败且原有路径不变
+- 实现:`crates/hft-testkit/tests/replay_probe.rs::tk_117_replay_model_path_restore_and_convergence`
+
+### TK-118 回放 Model 的样本布局与路径金样
+
+- 规则:[5. 解耦门槛夹具](README.md#5-解耦门槛夹具)
+- 级别:golden
+- 里程碑:M2
+- 前置:按规格独立写出的 sdk-replay 金样,原始布局与路径版本均为 1
+- 输入:引擎时间 1 s/2 s 的两条 BBO,bid 为 101/102
+- 期望文件:`fixtures/strategies/sdk-replay/ckpt/layout.json`、`path.bin`
+- 步骤:1 秒、2 秒的 bid 分别为 101、102;比较规范布局 JSON、check_layout 和路径字节;恢复后重写,再向桶 1 注入属于桶 2 的时刻
+- 期望:规范布局及 1920 字节路径匹配;两次路径字节一致;错误桶时刻恢复失败且状态不变
+- 实现:`crates/hft-testkit/tests/replay_probe.rs::tk_118_replay_model_layout_and_path_goldens`
 
 ## 验收
 

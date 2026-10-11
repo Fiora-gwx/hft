@@ -1,0 +1,4 @@
+# TK-118: bids 101 at engine_ns 1e9 and 102 at 2e9 in 120 fixed second buckets.
+# Hand-specified little-endian pairs (timestamp, bid); other buckets are (i64::MIN, 0).
+layout_version = 1
+path_version = 1

@@ -170,6 +170,7 @@ replayer compare --a s3://<bucket>/<prefix>/<host>/prod/… --b s3://<bucket>/<p
 | `src/latency.rs` | 行情记录与 `ClockStatus` 扫描、调用 `event_weighted()`、分组与直方图输出 |
 | `src/bench.rs`(可选扩展) | 绑核、计时、基线比较 |
 | `src/raw_decode.rs`(可选扩展) | raw 重解码对比 |
+| `examples/replay_probe.rs`、`tests/fixture/path_model.rs` | CI 的独立测试策略装配与 1 h/3 h 文件生成;不属于发布二进制 |
 
 </details>
 
@@ -201,6 +202,8 @@ replayer compare --a s3://<bucket>/<prefix>/<host>/prod/… --b s3://<bucket>/<p
 - [architecture.md §9](../../docs/architecture.md#9-回放恢复与确定性)、[testing](../../docs/testing.md)、[hft-sequencer](../../crates/hft-sequencer/README.md)、[hft-sim](../../crates/hft-sim/README.md)、[hft-py](../../crates/hft-py/README.md)
 
 ## 已知限制与后续工作
+
+- RPL-270/271 在 CI 现场生成完整 1 h/3 h 的路径 Model 文件,由同一入口的独立测试进程执行。单个 Live 账户 acct-l 绑定实例 tsa,真实 SimExchange 产生回报,advisor 每 10 min 写检查点,sequencer 每 5 min 请求关键帧并保留整点滚段;检查点后窗口的比较数与路径版本变化后的 120 s 重建点从输入独立计算。CI 先构建 examples 再运行测试。生成文件尚未发布为带哈希的固定 T1/T3 样本,不计 RPL-010/040/046 的固定样本验收。
 
 - 当前可执行入口覆盖本地连续、封闭 seq 文件的 `verify --advice journal|recompute`,支持单文件或目录递归搜集 `.jrn`、from/to seq、instance 校验、keep-going、JSON 报告与只读 `--check`。生产二进制只装配 registry;集成测试可向同一泛型入口注入测试策略集。读取直接使用原路径,先完成整组文件预检;目录内不按文件名推断顺序。
 - 输入缓冲默认上限为 1,000,000 条逻辑记录、512 MiB 逻辑体、128 MiB 单条重组;可分别用 `--max-records`、`--max-body-bytes`、`--reassembly-bytes` 覆盖为正整数。超限退出 3,不返回部分验证结果。来源须保持不可变;不读取符号链接。`--check` 仅验证输入加载,输出明确标记未进行重放;不写报告。

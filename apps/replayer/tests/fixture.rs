@@ -29,6 +29,7 @@ use sha2::{Digest, Sha256};
 use zerocopy::{FromBytes, FromZeros, IntoBytes};
 
 mod model;
+mod path_model;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 pub struct Fixture {
@@ -186,11 +187,24 @@ fn settle<S: StrategySet>(seq: &mut Sequencer<LiveDriver<S, Io<S>>, S>) {
 }
 
 pub fn create<S: StrategySet>() -> Fixture {
-    create_with_restart::<S>(None, false, false)
+    create_with_restart::<S>(None, false, false, None)
 }
 
 pub fn with_model() -> Fixture {
-    create_with_restart::<hft_testkit::TestStrategies>(None, false, true)
+    create_with_restart::<hft_testkit::TestStrategies>(None, false, true, None)
+}
+
+/// Full-duration, path-bearing Model files. Publication as frozen T1/T3 fixtures is separate.
+pub fn path_model(hours: u64) -> Fixture {
+    assert!(matches!(hours, 1 | 3));
+    let f = create_with_restart::<hft_testkit::strategies::ReplayStrategies>(None, false, false, Some(hours));
+    for entry in std::fs::read_dir(f.file.parent().unwrap()).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|e| e == "jrn") {
+            seal(&path);
+        }
+    }
+    f
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -203,13 +217,13 @@ pub enum Restart {
 }
 
 pub fn restarted<S: StrategySet>(restart: Restart) -> Fixture {
-    create_with_restart::<S>(Some(restart), false, false)
+    create_with_restart::<S>(Some(restart), false, false, None)
 }
 
 /// RPL-025/026: genuine file-backed executions with 20 min before the restart.
 pub fn long_restart<S: StrategySet>(restart: Restart) -> Fixture {
     assert!(matches!(restart, Restart::FromSnapshot | Restart::Version));
-    let f = create_with_restart::<S>(Some(restart), true, false);
+    let f = create_with_restart::<S>(Some(restart), true, false, None);
     // open_offline writes closed .jrn files, without running persist. Build the cold-copy
     // transport envelope from the actual header and End; leave every journal byte untouched.
     for entry in std::fs::read_dir(f.file.parent().unwrap()).unwrap() {
@@ -496,7 +510,12 @@ fn market_minutes<S: StrategySet>(
     );
 }
 
-fn create_with_restart<S: StrategySet>(restart: Option<Restart>, long: bool, model: bool) -> Fixture {
+fn create_with_restart<S: StrategySet>(
+    restart: Option<Restart>,
+    long: bool,
+    model: bool,
+    model_hours: Option<u64>,
+) -> Fixture {
     let root = std::env::temp_dir().join(format!(
         "replayer-{}-{}",
         std::process::id(),
@@ -508,6 +527,15 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>, long: bool, mod
         root,
     };
     let mut world = WorldSpec::w1();
+    if model_hours.is_some() {
+        world.accounts.truncate(1);
+        world.strategies.truncate(1);
+        world.groups.retain(|g| g.account == world.accounts[0].id);
+        for g in &mut world.groups {
+            std::mem::swap(&mut g.first, &mut g.second);
+        }
+        world.risk.conn_liveness_ms = 30_000;
+    }
     for binding in &mut world.strategies {
         binding.kind_id = if model {
             0xFF02
@@ -515,10 +543,57 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>, long: bool, mod
             S::kinds().first().unwrap().kind_id
         };
     }
-    let rd_blob = build::refdata_blob(&world, false).unwrap();
+    let rd_blob = if model_hours.is_some() {
+        build::refdata_blob_with_names(
+            &world,
+            false,
+            &[(world.strategies[0].instance, "tsa")],
+            &[(world.accounts[0].id, "acct-l")],
+        )
+        .unwrap()
+    } else {
+        build::refdata_blob(&world, false).unwrap()
+    };
     let rd = build::load_refdata(&rd_blob).unwrap();
+    if model_hours.is_some() {
+        assert_eq!(rd.account(world.accounts[0].id).label.as_ref(), "acct-l");
+        assert_eq!(
+            rd.account(world.accounts[0].id).bound_instance,
+            world.strategies[0].instance
+        );
+        assert_eq!(
+            rd.instance(world.strategies[0].instance).unwrap().name.as_ref(),
+            "tsa"
+        );
+        assert!(
+            build::refdata_blob_with_names(&world, false, &[(hft_types::StrategyId(255), "missing")], &[])
+                .is_err()
+        );
+        assert!(build::refdata_blob_with_names(&world, false, &[], &[(AccountId(255), "missing")]).is_err());
+        assert!(
+            build::refdata_blob_with_names(
+                &world,
+                false,
+                &[
+                    (world.strategies[0].instance, "a"),
+                    (world.strategies[0].instance, "b")
+                ],
+                &[]
+            )
+            .is_err()
+        );
+        assert!(
+            build::refdata_blob_with_names(
+                &world,
+                false,
+                &[],
+                &[(world.accounts[0].id, "a"), (world.accounts[0].id, "b")]
+            )
+            .is_err()
+        );
+    }
     let mut setup = build::engine_setup(&world, 1_000_000_000, 1);
-    if long {
+    if long || model_hours.is_some() {
         setup.seq.keyframe_period_ms = 300_000;
         setup.seq.keyframe_max_events = 1_500_000;
     }
@@ -574,7 +649,9 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>, long: bool, mod
     if model {
         model::exercise(&mut s, &f, &world, &setup);
     }
-    if long {
+    if let Some(hours) = model_hours {
+        path_model::exercise(&mut s, &f, &world, &setup, hours);
+    } else if long {
         market_minutes(&mut s, &world, 20, 10_000);
     } else {
         for id in 1..=2u64 {

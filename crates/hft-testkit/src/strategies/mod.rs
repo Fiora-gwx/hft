@@ -5,6 +5,7 @@
 
 pub mod probe_taker;
 pub mod probe_target;
+pub mod replay_probe;
 
 pub use probe_taker::{NpParams, ProbeNp, ProbeTaker, TakerParams};
 pub use probe_target::{ProbeModel, ProbeTarget, TargetParams};
@@ -16,6 +17,15 @@ hft_strategy_sdk::strategy_set! {
         probe_target::ProbeTarget,
         probe_taker::ProbeNp,
     }
+}
+
+hft_strategy_sdk::strategy_set! {
+    /// Full-file replay fixture, kept separate so DST's strategy set and HashTrail stay stable.
+    pub struct ReplayStrategies { replay_probe::ReplayA }
+}
+hft_strategy_sdk::strategy_set! {
+    /// Same sample layout and algorithm with an incompatible path version.
+    pub struct ReplayPathV2Strategies { replay_probe::ReplayPathV2 }
 }
 
 /// The test kind_id range.

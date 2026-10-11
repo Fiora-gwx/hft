@@ -41,6 +41,12 @@ fn normal_deps(toml: &str) -> String {
 fn tk_036_dependency_rules() {
     let taker = include_str!("../src/strategies/probe_taker.rs");
     let target = include_str!("../src/strategies/probe_target.rs");
+    let replay = include_str!("../src/strategies/replay_probe.rs");
+    assert!(
+        violations(replay).is_empty(),
+        "TK-036.1 replay-a: {:?}",
+        violations(replay)
+    );
     // TK-036.1
     assert!(
         violations(taker).is_empty(),

@@ -8,9 +8,9 @@ use hft_sequencer::advisor::{
 use hft_types::StrategyId;
 
 #[derive(Default)]
-struct Store {
+pub(super) struct Store {
     current: Option<(CkptHdr, Vec<u8>)>,
-    committed: BTreeMap<StrategyId, (CkptHdr, Vec<u8>)>,
+    pub(super) committed: BTreeMap<StrategyId, (CkptHdr, Vec<u8>)>,
 }
 impl CheckpointStore for Store {
     fn load(&mut self, _: StrategyId, _: &mut Vec<u8>) -> Option<CkptHdr> {
@@ -33,7 +33,7 @@ impl CheckpointStore for Store {
     }
 }
 #[derive(Default)]
-struct Ring(Vec<(EventKind, Vec<u8>)>);
+pub(super) struct Ring(pub(super) Vec<(EventKind, Vec<u8>)>);
 impl AdviceRing for Ring {
     fn free(&self) -> usize {
         1 << 24
@@ -44,17 +44,22 @@ impl AdviceRing for Ring {
     }
 }
 
-fn published<S: StrategySet>(s: &mut Sequencer<LiveDriver<S, Io<S>>, S>, f: &Fixture) -> Log {
+pub(super) fn published<S: StrategySet>(s: &mut Sequencer<LiveDriver<S, Io<S>>, S>, f: &Fixture) -> Log {
     s.driver_mut().io.writer.publish();
+    let active = f
+        .file
+        .parent()
+        .unwrap()
+        .join(format!("{:010}.jrn", s.driver().io.writer.segment_no()));
     std::fs::write(
-        &f.file,
+        &active,
         hft_journal::testing::published_bytes(&s.driver().io.writer).unwrap(),
     )
     .unwrap();
     read(f)
 }
 
-fn poll<S: StrategySet>(a: &mut Advisor<S, Store, Ring>, log: &Log) {
+pub(super) fn poll<S: StrategySet>(a: &mut Advisor<S, Store, Ring>, log: &Log) {
     for _ in 0..10000 {
         if !a.poll_once(log) && !a.checkpointing() {
             return;
@@ -63,7 +68,10 @@ fn poll<S: StrategySet>(a: &mut Advisor<S, Store, Ring>, log: &Log) {
     panic!("advisor did not finish");
 }
 
-fn drain<S: StrategySet>(a: &mut Advisor<S, Store, Ring>, s: &mut Sequencer<LiveDriver<S, Io<S>>, S>) {
+pub(super) fn drain<S: StrategySet>(
+    a: &mut Advisor<S, Store, Ring>,
+    s: &mut Sequencer<LiveDriver<S, Io<S>>, S>,
+) {
     for (kind, body) in core::mem::take(&mut a.ring.0) {
         input(s, (5, 0), kind, body);
     }

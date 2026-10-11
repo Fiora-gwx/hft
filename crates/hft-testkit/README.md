@@ -131,6 +131,8 @@ impl<S: Strategy> ModelHarness<S> {
 
 [testing §8](../../docs/testing.md#8-上线门槛) 门槛 ⑧ 的执行者:**新增一个策略时引擎 crate 的 diff 为零**。
 
+长时回放另用独立的 `ReplayStrategies`,不加入 DST 的 `TestStrategies`。测试策略 A `replay-a`(0xFF04)复用 taker 快速部分;Model 原始样本节为 BBO 累计数,`LAYOUT_VERSION = 1`。路径节为 120 个一秒桶,每桶保存最后一笔 bid 与 `engine_ns`;`path_settle_ms` 默认 120000、范围 1–120000,到期桶在下一次 BBO 前清除,恢复原始样本时路径从空值开始。Advice 含累计数、引擎时间和桶内 bid 的 i128 和。`ReplayPathV2Strategies` 仅把路径版本从 1 提为 2,用于验证丢弃路径后在声明时间内收敛;快速部分和样本布局不变。路径恢复失败保持旧路径;布局与路径金样见 [sdk-replay](../../fixtures/strategies/sdk-replay/ckpt/meta.toml),TK-117/118 验证恢复、收敛与布局。命名文件夹具用 `refdata_blob_with_names` 覆盖实例名和账户标签,未知或重复身份报错,未指定时保持世界的默认名称。
+
 - **两个测试策略**(本 crate 的 `src/strategies/` 模块,只引用 [hft-strategy-sdk](../hft-strategy-sdk/README.md) 与 [hft-strat-lib](../hft-strat-lib/README.md),TK-036 检查;不另设 workspace 包,依赖图不变):
   - `probe-taker`(kind_id 0xFF01):腿 A 买一高出腿 B 卖一超过 `spread_th`(`(A bid − B ask) × 10^9 / B ask`,Rate raw,严格大于)时卖 A,带 `LegLink`(OnFill,第二腿买 B);同一事件内另设一个持有定时器并写一条 Note(码 `NOTE_OPENED`);收到 `close_on` 选中的 `Exec`/`External`/`Risk` 事件时设 0/0 的退出目标;行使 OMS 链接、风控两腿检查与对冲重试。参数 `spread_th`(per_group)、`qty_lots`(per_group)、`close_on`(位:1 Exec、2 External、4 Risk)、`hold_ms`(`check`:0 < `hold_ms` < 10 为 `Invalid`)。
   - `probe-target`(kind_id 0xFF02):在引擎时间 `t_slice_ms`、`t_pair_ms`、`t_simul_ms` 各发一次 `TargetIntent`(依次 `TakerSlice`、`PairOnFill`、`Simultaneous`;0 = 不发),`need_advice` 时只在缓存的 Advice 未过期时发、否则跳过该点;`Model` 每 `advice_every` 个事件产出一条 16 B 不透明 `Advice`,`mem_bytes`/`snapshot_bytes` 由参数 `model_mem_kib`/`model_ckpt_kib` 声明;行使执行层、advisor 路径与 schema 驱动参数。
@@ -373,7 +375,7 @@ impl<S: StrategySet> SeqRig<S> {
 | `src/clock.rs` | `ManualTsc`、`ManualUtc` |
 | `src/seed.rs` | 种子派生与确定性 `TestRunner` |
 | `src/sdk_mock.rs` | `MockViews`、`StrategyHarness`、`ModelHarness`、`CtxCapture` |
-| `src/strategies/{mod.rs, probe_taker.rs, probe_target.rs}` | `TestStrategies` 与测试策略 |
+| `src/strategies/{mod.rs, probe_taker.rs, probe_target.rs, replay_probe.rs}` | `TestStrategies` 与独立的回放策略集 |
 | `src/dst/{world.rs, driver.rs, sut.rs, obs.rs, actors.rs, venue_behavior.rs, faults.rs, invariants.rs, run.rs, scenario.rs, shrink.rs, report.rs, toy.rs}` | DST 框架(`sut.rs` 引擎边界、`obs.rs` 调试视图行、`run.rs` 主循环、`scenario.rs` 场景与套件、`toy.rs` 框架自测引擎) |
 | `src/scenarios/<主题>.rs` | 以 `TestStrategies` 运行的场景套件与按用例编号注册的场景(仓库根 `tests/dst/` 只是 cargo test 入口) |
 | `src/bin/hft-dst.rs`(feature `dst-bin`) | `hft-dst` 运行器:`run`/`repro`/`list`、`DstRunResult` 输出与周期落盘、进行中种子标记、每种子的 `catch_unwind` |

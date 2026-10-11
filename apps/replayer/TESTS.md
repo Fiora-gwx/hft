@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | RPL-095、RPL-104、RPL-241、RPL-242 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | RPL-001–RPL-004、RPL-070、RPL-079 |
-| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079 |
+| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-271 |
 | sim | RPL-090–RPL-108、RPL-120–RPL-129、RPL-140–RPL-145、RPL-259 |
 | compare | RPL-160–RPL-173 |
 | latency | RPL-190–RPL-206 |
@@ -2139,6 +2139,26 @@ spec: README.md
 - 步骤:篡改预热前缀的 CmdResult,记录带 CRC 时重算 CRC,使用检查点与晚于该输出的 from_seq
 - 期望:退出 1,first_output_divergent_seq 指向前缀篡改位置;Model 比较仍 pass
 - 实现:`apps/replayer/tests/model.rs::rpl_269_checkpoint_prefix_outputs_are_verified_before_requested_window`
+
+### RPL-270 完整时长的路径 Model 文件与检查点窗口
+
+- 规则:[verify](README.md#verify)、[已知限制与后续工作](README.md#已知限制与后续工作)
+- 级别:proc
+- 里程碑:M2
+- 前置:现场通过真实 LiveDriver、advisor、JournalWriter 与 SimExchange 生成 1 h 和 3 h 文件;Live 账户 acct-l、实例 tsa 使用测试策略 A,样本布局和路径版本均为 1、path_settle_ms = 120000。关键帧周期 300000 ms、事件上限 1500000,检查点周期 600000 ms;每 10 s 投递 BBO,回报按撮合器的实际截止时刻交付;CI 已构建 replay_probe example
+- 步骤:独立进程对两份完整目录执行 verify/recompute;3 h 文件另取 1 h 之后的首份检查点,从 2 h 之后首个关键帧 H2 验证
+- 期望:实际 engine_ns 满足 1 h/3 h,分别有 2/4 段、每小时至少 12 个快照和 720 条 Advice、非零 OrderDecision 与真实 Fill;关键帧相邻间隔不超过 310 s,检查点相邻间隔为 600–610 s(10 s 投递粒度)。全部退出 0,双 verdict 为 pass,全窗口 coalesced = 0;窗口比较数恰为 Advice.seq > H2 的条数,检查点身份和 last_seq 匹配;输入文件、seal 与检查点字节不变。现场生成文件不替代尚未发布的固定 T1/T3 指针
+- 实现:`apps/replayer/tests/long_model.rs::rpl_270_full_duration_path_model_files_and_checkpoint_window`
+
+### RPL-271 路径版本变化后的重建点来自实际引擎时间
+
+- 规则:[verify](README.md#verify)、[已知限制与后续工作](README.md#已知限制与后续工作)
+- 级别:proc
+- 里程碑:M2
+- 前置:RPL-270 的 3 h 文件和 1 h 后检查点;另一测试装配仅将 PATH_VERSION 提为 2,样本布局与 Model 算法不变
+- 步骤:分别以路径版本 1、2 的独立进程从检查点执行 recompute;由 journal EngineClock 锚点和记录头独立计算检查点后首个 engine_ns ≥ L 时刻 + 120 s 的记录 R
+- 期望:均退出 0、双 verdict 为 pass;同版本无重建点,版本 2 的 recompute_from_seq = R、比较数恰为 seq > L 且 basis_seq ≥ R 的 Advice 数,非零且小于同版本比较数;检查点输入字节不变
+- 实现:`apps/replayer/tests/long_model.rs::rpl_271_path_version_rebuild_uses_actual_engine_time`
 
 ## 验收
 

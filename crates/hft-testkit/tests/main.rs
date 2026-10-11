@@ -16,6 +16,7 @@ mod hash;
 mod invariants_map;
 mod planted;
 mod probes;
+mod replay_probe;
 mod sdk_mock;
 mod sdk_rd;
 // The engine adapter's tests (feature `seq`, on in `--all-features` runs): enabling it here as a
