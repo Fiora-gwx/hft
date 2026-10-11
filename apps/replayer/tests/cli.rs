@@ -191,7 +191,11 @@ fn flip_first_command(path: &std::path::Path, original: &[u8]) -> u64 {
         let (h, _) = RecordHeader::read_from_prefix(&bytes[offset..]).unwrap();
         assert!(h.len > 0, "missing fixture command");
         if h.kind == EventKind::CONTROL_CMD.0 {
-            bytes[offset + 24] ^= 0x40;
+            assert!(RecordFlags(h.flags).contains(RecordFlags::PART));
+            let (part, _) = hft_event::PartHdr::read_from_prefix(&bytes[offset + 24..]).unwrap();
+            assert_eq!(part.part, 0);
+            let body = offset + 24 + size_of::<hft_event::PartHdr>();
+            bytes[body + std::mem::offset_of!(hft_event::CmdHdr, cmd_id)] ^= 0x40;
             assert!(RecordFlags(h.flags).contains(RecordFlags::CRC));
             let end = offset + h.len as usize;
             let crc = crc32c::crc32c(&bytes[offset..end - 4]);
