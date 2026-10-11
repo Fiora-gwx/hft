@@ -21,7 +21,7 @@ spec: README.md
 | cargo xtask deps | TOOL-030–TOOL-031、TOOL-118 |
 | cargo xtask hot-check | TOOL-032 |
 | cargo xtask bench-gate | TOOL-033–TOOL-038、TOOL-185 |
-| cargo xtask replay-verify | TOOL-039–TOOL-046 |
+| cargo xtask replay-verify | TOOL-039–TOOL-046、TOOL-192 |
 | cargo xtask dst | TOOL-009、TOOL-047–TOOL-056 |
 | cargo xtask gen-schema | TOOL-057–TOOL-061、TOOL-179 |
 | cargo xtask gen-host | TOOL-062–TOOL-065 |
@@ -2896,6 +2896,26 @@ spec: README.md
 | TOOL-191.2 | 只改 deploy/hft-core 的 Markdown | `gen_host = false`;`docs_only = true` |
 | TOOL-191.3 | deploy 主机 TOML、生成器、systemd 单元;或 hft-core 的 Rust/Cargo.toml | `gen_host = true`;`docs_only = false`;夹带 Markdown 不影响结果 |
 | TOOL-191.4 | PR 与 push:把主机 TOML 从 deploy 移到 docs,同时删除 hft-core 源文件 | 路径列表含改名两端与被删源码;`gen_host = true`;不因旧路径已不存在漏跑 |
+
+### TOOL-192 replay-verify 调用真实入口并映射退出码
+
+- 规则:[cargo xtask replay-verify](README.md#cargo-xtask-replay-verify)
+- 级别:table
+- 里程碑:M2
+- 前置:本地样本路径与 ScriptExec
+- 步骤:模拟 replayer 返回 0/1/2/3/4/进程异常;传入 from/to;另传入未支持的直方图选项
+- 期望:通过 locked ci 剖面调用 replayer verify,原路径与窗口逐参数传递;0→0,1/3/4→1,2/异常→2;未支持选项返回 2 且不启动子进程
+- 实现:`tools/xtask/tests/replay_verify.rs::tool_192_replay_wrapper_runs_binary_and_maps_exit_codes`
+
+| 行 | 应用退出或参数 | 包装退出 |
+|---|---|---|
+| TOOL-192.1 | 0 | 0 |
+| TOOL-192.2 | 1 | 1 |
+| TOOL-192.3 | 2 | 2 |
+| TOOL-192.4 | 3 | 1 |
+| TOOL-192.5 | 4 | 1 |
+| TOOL-192.6 | 进程异常 | 2 |
+| TOOL-192.7 | --record-decide-hist | 2,无子进程 |
 
 ## 验收
 

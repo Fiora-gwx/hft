@@ -66,8 +66,18 @@ pub struct ReplaySink {
     pub mismatches: Vec<Mismatch>,
     /// Outputs compared.
     pub compared: u64,
+    pub snapshots_compared: u64,
     /// `(seq, logged, regenerated)` masked bodies of the first mismatches (diagnostics).
     pub detail: Vec<(u64, Vec<u8>, Vec<u8>)>,
+    pub detail_flags: Vec<(Option<u16>, Option<u16>)>,
+    /// Inclusive comparison window. Warm-up still consumes every preceding Input.
+    pub compare_from: u64,
+    pub compare_to: u64,
+    /// Stop accepting Inputs after the first in-window divergence (offline verify only).
+    pub stop_on_first: bool,
+    pub halted: bool,
+    /// Diagnostic bound supplied by the cold caller; ordinary replay retains 16 details.
+    pub detail_limit: usize,
     scratch_a: Vec<u8>,
     scratch_b: Vec<u8>,
 }
@@ -90,10 +100,44 @@ impl ReplaySink {
             pos: 0,
             mismatches: Vec::new(),
             compared: 0,
+            snapshots_compared: 0,
             detail: Vec::new(),
+            detail_flags: Vec::new(),
+            compare_from: 0,
+            compare_to: u64::MAX,
+            stop_on_first: false,
+            halted: false,
+            detail_limit: 16,
             scratch_a: Vec::with_capacity(1 << 16),
             scratch_b: Vec::with_capacity(1 << 16),
         }
+    }
+    fn comparing(&self, seq: u64) -> bool {
+        self.mode != ReplayMode::Mirror && seq >= self.compare_from && seq <= self.compare_to
+    }
+    fn missing(&mut self, ix: usize) {
+        let Some(r) = self.log.recs.get(ix) else { return };
+        if r.role() != Role::Output || r.kind == EventKind::SEGMENT_ROLL || !self.comparing(r.seq) {
+            return;
+        }
+        if self.halted {
+            return;
+        }
+        if self.detail.len() < self.detail_limit {
+            let mut body = r.body.clone();
+            mask_measure(r.kind, &mut body);
+            body.splice(0..0, r.kind.0.to_le_bytes());
+            self.detail.push((r.seq, body, Vec::new()));
+            self.detail_flags.push((Some(r.flags.0 & !NONCMP_FLAGS), None));
+        }
+        let (venue, account) = venue_account(r.kind, &r.body);
+        self.mismatches.push(Mismatch {
+            seq: r.seq,
+            kind: r.kind,
+            venue,
+            account,
+        });
+        self.halted = self.stop_on_first;
     }
     fn skip_meta(&mut self) {
         while let Some(r) = self.log.recs.get(self.pos) {
@@ -104,22 +148,38 @@ impl ReplaySink {
             }
         }
     }
-    fn compare(&mut self, kind: EventKind, flags: RecordFlags, pieces: &[&[u8]]) -> u64 {
+    fn compare(&mut self, kind: EventKind, flags: RecordFlags, pieces: &[&[u8]], boot: bool) -> u64 {
         self.skip_meta();
         let Some(r) = self.log.recs.get(self.pos) else {
+            let seq = if self.mode == ReplayMode::Verify {
+                self.log.recs.last().map_or(1, |r| r.seq.saturating_add(1))
+            } else {
+                0
+            };
             let m = Mismatch {
-                seq: 0,
+                seq,
                 kind,
                 venue: VenueId(0),
                 account: AccountId(0),
             };
-            if self.mode != ReplayMode::Mirror {
+            if self.comparing(seq) && !self.halted {
                 self.mismatches.push(m);
+                if self.detail.len() < self.detail_limit {
+                    let mut body: Vec<u8> = pieces.iter().flat_map(|p| p.iter().copied()).collect();
+                    mask_measure(kind, &mut body);
+                    body.splice(0..0, kind.0.to_le_bytes());
+                    self.detail.push((seq, Vec::new(), body));
+                    self.detail_flags.push((None, Some(flags.0 & !NONCMP_FLAGS)));
+                }
+                self.halted = self.stop_on_first;
             }
             return 0;
         };
         let seq = r.seq;
-        if self.mode != ReplayMode::Mirror {
+        // An extra generated Output must never eat the next Input. Once divergent, a
+        // keep-going replay retains the original Input stream for useful diagnostics.
+        let advance = boot || self.mode != ReplayMode::Verify || r.role() != Role::Input;
+        if self.comparing(seq) && !self.halted {
             self.scratch_a.clear();
             for p in pieces {
                 self.scratch_a.extend_from_slice(p);
@@ -128,17 +188,31 @@ impl ReplaySink {
             self.scratch_b.extend_from_slice(&r.body);
             mask_measure(kind, &mut self.scratch_a);
             mask_measure(r.kind, &mut self.scratch_b);
-            let same = r.kind == kind
+            let snapshots_valid =
+                if self.mode == ReplayMode::Verify && kind == EventKind::STATE_SNAPSHOT && r.kind == kind {
+                    normalize_snapshot(&mut self.scratch_a) & normalize_snapshot(&mut self.scratch_b)
+                } else {
+                    true
+                };
+            let same = snapshots_valid
+                && r.kind == kind
                 && (r.flags.0 & !NONCMP_FLAGS) == (flags.0 & !NONCMP_FLAGS)
                 && self.scratch_a == self.scratch_b;
-            self.compared += 1;
+            if r.role() == Role::Output {
+                self.compared += 1;
+            }
+            if kind == EventKind::STATE_SNAPSHOT && r.kind == kind {
+                self.snapshots_compared += 1;
+            }
             if !same {
-                if self.detail.len() < 16 {
+                if self.detail.len() < self.detail_limit {
                     let mut lg = self.scratch_b.clone();
                     lg.splice(0..0, r.kind.0.to_le_bytes());
                     let mut rg = self.scratch_a.clone();
                     rg.splice(0..0, kind.0.to_le_bytes());
                     self.detail.push((seq, lg, rg));
+                    self.detail_flags
+                        .push((Some(r.flags.0 & !NONCMP_FLAGS), Some(flags.0 & !NONCMP_FLAGS)));
                 }
                 let (venue, account) = venue_account(kind, &self.scratch_a);
                 self.mismatches.push(Mismatch {
@@ -147,11 +221,31 @@ impl ReplaySink {
                     venue,
                     account,
                 });
+                self.halted = self.stop_on_first;
             }
         }
-        self.pos += 1;
+        if advance {
+            self.pos += 1;
+        }
         seq
     }
+}
+
+// Snapshot hash declarations may be zero. Always calculate both sides, reject an incorrect
+// nonzero declaration, then compare the calculated hash together with the state bytes.
+fn normalize_snapshot(body: &mut [u8]) -> bool {
+    let Some(sections) = body.get(core::mem::size_of::<hft_event::SnapshotHdr>()..) else {
+        return false;
+    };
+    let hash = crate::snapshot::state_hash(sections);
+    let Some(declared) = body.get_mut(16..32) else {
+        return false;
+    };
+    let valid = declared == [0; 16] || declared == hash;
+    if valid {
+        declared.copy_from_slice(&hash);
+    }
+    valid
 }
 
 /// Boot-block writer of a replay: compared with the logged boot block (Meta skipped).
@@ -162,6 +256,9 @@ pub struct ReplayBoot<'a> {
 
 impl BootSink for ReplayBoot<'_> {
     fn append_var(&mut self, kind: EventKind, _tsc: Tsc, pieces: &[&[u8]]) -> Result<Seq, AppendErr> {
+        if self.s.halted {
+            return Err(AppendErr::Full);
+        }
         let mut probe = Vec::new();
         for p in pieces {
             probe.extend_from_slice(p);
@@ -169,7 +266,7 @@ impl BootSink for ReplayBoot<'_> {
         if role_of(kind, &probe) == Role::Meta {
             return Ok(Seq(0));
         }
-        Ok(Seq(self.s.compare(kind, RecordFlags(0), pieces)))
+        Ok(Seq(self.s.compare(kind, RecordFlags(0), pieces, true)))
     }
     fn finish(self) -> Result<Seq, AppendErr> {
         // Skip BootDone (Meta).
@@ -187,6 +284,9 @@ impl JournalSink for ReplaySink {
         _tsc: Tsc,
         pieces: &[&[u8]],
     ) -> Result<Seq, AppendErr> {
+        if self.halted {
+            return Err(AppendErr::Full);
+        }
         let mut probe = [0u8; 80];
         let mut n = 0;
         'o: for p in pieces {
@@ -207,7 +307,7 @@ impl JournalSink for ReplaySink {
                 self.pos += 1;
                 Ok(Seq(seq))
             }
-            Role::Output => Ok(Seq(self.compare(kind, flags, pieces))),
+            Role::Output => Ok(Seq(self.compare(kind, flags, pieces, false))),
             _ => Ok(Seq(0)),
         }
     }
@@ -298,7 +398,7 @@ impl ReplayDriver {
         self.run_tsc = t;
     }
     pub fn finished(&self) -> bool {
-        self.next_input(self.cursor).is_none()
+        self.next_input(self.cursor.max(self.sink.pos)).is_none()
     }
     fn next_input(&self, from: usize) -> Option<usize> {
         let mut i = from;
@@ -325,6 +425,13 @@ impl ReplayDriver {
     pub fn mismatches(&self) -> &[Mismatch] {
         &self.sink.mismatches
     }
+    /// Collect unreached Outputs at the selected boundary, including a final missing Output.
+    pub fn finish_verification(&mut self) {
+        while self.sink.pos < self.end && !self.sink.halted {
+            self.sink.missing(self.sink.pos);
+            self.sink.pos += 1;
+        }
+    }
     /// Logged Outputs never reached by the replay (verify: a failure each).
     pub fn leftover(&self) -> Vec<Mismatch> {
         let mut v = Vec::new();
@@ -348,7 +455,7 @@ impl<S: StrategySet> Driver<S> for ReplayDriver {
         self.taken = 0;
     }
     fn take(&mut self, _v: &DriverView<'_>, out: &mut InputSlot) -> bool {
-        if self.taken >= self.per_round {
+        if self.taken >= self.per_round || self.sink.halted {
             return false;
         }
         // Align the sink with the next Input (Outputs between are compared by the sequencer's
@@ -369,17 +476,9 @@ impl<S: StrategySet> Driver<S> for ReplayDriver {
         // Unconsumed Outputs of the previous event are mismatches.
         let mut p = self.sink.pos;
         while p < i {
-            if let Some(x) = self.sink.log.recs.get(p)
-                && x.role() == Role::Output
-                && self.sink.mode != ReplayMode::Mirror
-                && x.kind != EventKind::SEGMENT_ROLL
-            {
-                self.sink.mismatches.push(Mismatch {
-                    seq: x.seq,
-                    kind: x.kind,
-                    venue: VenueId(0),
-                    account: AccountId(0),
-                });
+            self.sink.missing(p);
+            if self.sink.halted {
+                return false;
             }
             p += 1;
         }

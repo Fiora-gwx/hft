@@ -59,7 +59,7 @@ const SUBCOMMANDS: &[(&str, &str)] = &[
     ),
     (
         "replay-verify",
-        "<journal-dir | pointer> verification replay (input checks only for now)",
+        "<journal-file | dir | pointer> local verification replay via replayer (Model recompute pending)",
     ),
     (
         "doc-check",

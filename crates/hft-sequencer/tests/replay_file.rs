@@ -353,6 +353,158 @@ fn seq_386_file_read_failures_do_not_return_partial_log() {
     );
 }
 
+#[test]
+fn seq_391_offline_runner_snapshot_and_window() {
+    use hft_sequencer::driver::verify::{VerifyOptions, verify};
+    let t = fixture();
+    let mut reader = JournalReader::open(&reader_cfg(&t)).unwrap();
+    let log = Log::from_reader(&mut reader, limits()).unwrap();
+    let snaps: Vec<_> = log
+        .recs
+        .iter()
+        .filter(|r| r.kind == EventKind::STATE_SNAPSHOT)
+        .map(|r| r.seq)
+        .collect();
+    let got = verify::<TestSet>(log.clone(), VerifyOptions::default(), hb()).unwrap();
+    assert_eq!(got.start_snapshot, snaps[0]);
+    assert!(got.sink.mismatches.is_empty(), "{:?}", got.sink.detail);
+    assert_eq!(got.snapshots, snaps.len() as u64);
+    assert!(got.inputs > 0 && got.sink.compared > 0);
+    for at in snaps {
+        let got = verify::<TestSet>(
+            log.clone(),
+            VerifyOptions {
+                from_seq: Some(at),
+                ..Default::default()
+            },
+            hb(),
+        )
+        .unwrap();
+        assert_eq!(got.start_snapshot, at);
+        assert!(got.sink.mismatches.is_empty());
+    }
+    let ix = log
+        .recs
+        .iter()
+        .position(|r| r.kind == EventKind::CMD_RESULT)
+        .unwrap();
+    let at = log.recs[ix].seq;
+    let mut bad = log.clone();
+    bad.recs[ix].body[0] ^= 1;
+    let got = verify::<TestSet>(bad.clone(), VerifyOptions::default(), hb()).unwrap();
+    assert_eq!(got.sink.mismatches.len(), 1);
+    assert_eq!(got.sink.mismatches[0].seq, at);
+    assert!(got.sink.halted);
+    assert_eq!(got.sink.detail.len(), 1);
+    let before = verify::<TestSet>(
+        bad.clone(),
+        VerifyOptions {
+            to_seq: Some(at - 1),
+            ..Default::default()
+        },
+        hb(),
+    )
+    .unwrap();
+    assert!(before.sink.mismatches.is_empty());
+    let after = verify::<TestSet>(
+        bad.clone(),
+        VerifyOptions {
+            from_seq: Some(at + 1),
+            ..Default::default()
+        },
+        hb(),
+    )
+    .unwrap();
+    assert!(after.sink.mismatches.is_empty());
+    let inside = verify::<TestSet>(
+        bad,
+        VerifyOptions {
+            from_seq: Some(at),
+            to_seq: Some(at),
+            ..Default::default()
+        },
+        hb(),
+    )
+    .unwrap();
+    assert_eq!(inside.sink.mismatches[0].seq, at);
+}
+
+#[test]
+fn seq_393_runner_snapshot_declarations_and_failures() {
+    use hft_sequencer::driver::verify::{VerifyError, VerifyOptions, verify};
+    let t = fixture();
+    let mut reader = JournalReader::open(&reader_cfg(&t)).unwrap();
+    let log = Log::from_reader(&mut reader, limits()).unwrap();
+    let ix: Vec<_> = log
+        .recs
+        .iter()
+        .enumerate()
+        .filter_map(|(i, r)| (r.kind == EventKind::STATE_SNAPSHOT).then_some(i))
+        .collect();
+    for zero in [false, true] {
+        let mut changed = log.clone();
+        for i in &ix {
+            rehash_snapshot(&mut changed.recs[*i].body);
+            if zero {
+                changed.recs[*i].body[16..32].fill(0);
+            }
+        }
+        assert!(
+            verify::<TestSet>(changed, VerifyOptions::default(), hb())
+                .unwrap()
+                .sink
+                .mismatches
+                .is_empty()
+        );
+    }
+    let mut bad = log.clone();
+    bad.recs[ix[0]].body[16] ^= 1;
+    assert!(matches!(
+        verify::<TestSet>(bad, VerifyOptions::default(), hb()),
+        Err(VerifyError::Snapshot(_))
+    ));
+    let mut bad = log.clone();
+    rehash_snapshot(&mut bad.recs[ix[1]].body);
+    bad.recs[ix[1]].body[16] ^= 1;
+    let got = verify::<TestSet>(bad, VerifyOptions::default(), hb()).unwrap();
+    assert_eq!(got.sink.mismatches[0].seq, log.recs[ix[1]].seq);
+    assert!(matches!(
+        verify::<TestSet>(
+            log.clone(),
+            VerifyOptions {
+                from_seq: Some(log.recs[0].seq),
+                ..Default::default()
+            },
+            hb()
+        ),
+        Err(VerifyError::NoSnapshot)
+    ));
+    let mut bad = log.clone();
+    bad.recs[ix[1]].body[0] = hft_sequencer::snapshot::PURPOSE_RECOVERY;
+    assert!(matches!(
+        verify::<TestSet>(bad, VerifyOptions::default(), hb()),
+        Err(VerifyError::UnsupportedRun { .. })
+    ));
+    let mut bad = log;
+    for r in &mut bad.recs {
+        if r.kind == EventKind::CMD_RESULT {
+            r.body[0] ^= 1;
+        }
+    }
+    let got = verify::<TestSet>(
+        bad,
+        VerifyOptions {
+            keep_going: true,
+            ..Default::default()
+        },
+        hb(),
+    )
+    .unwrap();
+    assert!(!got.sink.halted);
+    assert!(got.sink.mismatches.len() >= 2);
+    assert_eq!(got.sink.detail.len(), got.sink.mismatches.len());
+}
+
 fn rehash_snapshot(body: &mut [u8]) {
     use hft_sequencer::snapshot::{count_sections, state_hash};
     let n = size_of::<hft_event::SnapshotHdr>();

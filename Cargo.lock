@@ -1549,6 +1549,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "663ba70707f96e871406fe10d68128412e619b06d1d47cb91c3a4c6501176240"
 
 [[package]]
+name = "replayer"
+version = "0.1.0"
+dependencies = [
+ "crc32c",
+ "hft-event",
+ "hft-journal",
+ "hft-rt",
+ "hft-sequencer",
+ "hft-strategy-registry",
+ "hft-strategy-sdk",
+ "hft-testkit",
+ "hft-types",
+ "serde_json",
+ "zerocopy",
+]
+
+[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"

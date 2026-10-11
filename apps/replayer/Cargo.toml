@@ -1,0 +1,32 @@
+[package]
+name = "replayer"
+description = "Offline journal verification using the production sequencer and strategy registry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+autotests = false
+
+[lints]
+workspace = true
+
+[dependencies]
+hft-event.workspace = true
+hft-journal.workspace = true
+hft-sequencer = { workspace = true, features = ["replay-io"] }
+hft-strategy-sdk.workspace = true
+hft-strategy-registry = { path = "../../strategies/registry" }
+hft-rt.workspace = true
+serde_json = "1"
+
+[dev-dependencies]
+hft-sequencer = { workspace = true, features = ["live"] }
+hft-testkit = { workspace = true, features = ["seq"] }
+hft-types.workspace = true
+zerocopy.workspace = true
+crc32c.workspace = true
+
+[[test]]
+name = "cli"
+path = "tests/cli.rs"

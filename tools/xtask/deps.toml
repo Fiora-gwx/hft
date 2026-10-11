@@ -260,6 +260,7 @@ deps = [
 [pkg."apps/replayer"]
 tier = "cold"
 deps = [
+    "crates/hft-rt",
     "crates/hft-types", "crates/hft-sequencer", "crates/hft-strategy-sdk", "crates/hft-exec",
     "crates/hft-strat-lib", "crates/hft-oms", "crates/hft-risk", "crates/hft-ledger", "crates/hft-book",
     "crates/hft-event", "crates/hft-refdata", "crates/hft-sim", "crates/hft-journal", "strategies/registry",

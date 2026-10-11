@@ -28,7 +28,7 @@ spec: README.md
 | 测试与验收 | 不适用:非规范 |
 | 依赖 | RPL-105、RPL-106、RPL-240、RPL-241 |
 | 延伸阅读 | 不适用:非规范 |
-| 已知限制与后续工作 | 不适用:非规范 |
+| 已知限制与后续工作 | RPL-260–RPL-262 |
 | 开发备忘 | 不适用:非规范 |
 
 ## 用例
@@ -1990,6 +1990,49 @@ spec: README.md
 - 期望:
   - `SimExchange` 构造后对 `sim-a` 恰好调用一次 `seed_account_from`,其余额、仓位与订单表等于 `P6` 处按 hft-sim 重启恢复规则得到的值;`SimSetup.tsc_hz_milli = 2 500 000 000`;`sim.json` 的 `approximate = true`
 - 实现:`apps/replayer/tests/sim.rs::rpl_259_seed_from_snapshot`
+
+### RPL-260 本地文件命令实际验证并写出分歧报告
+
+- 规则:[verify](README.md#verify)、[已知限制与后续工作](README.md#已知限制与后续工作)
+- 级别:proc
+- 里程碑:M2
+- 前置:真实 sequencer 与 JournalWriter 现场生成封闭文件,包含两个 SnapshotNow 命令,release registry、无账户
+- 步骤:运行生产 replayer 二进制并写报告;篡改 CmdResult 且重算 CRC;窗口结束于分歧前;恢复源数据重新验证;再损坏段头
+- 期望:原文件退出 0,输入/输出/快照计数非空且来源不变;篡改退出 1,首个 seq 和字段 diff 与侧文件一致;窗口外分歧不计;成功重跑清除旧侧文件内容;损坏退出 3 且无成功 JSON
+- 实现:`apps/replayer/tests/cli.rs::rpl_260_real_file_verify_report_and_divergence`
+
+### RPL-261 参数错误与未接入功能明确失败
+
+- 规则:[已知限制与后续工作](README.md#已知限制与后续工作)
+- 级别:table
+- 里程碑:M2
+- 前置:生产 replayer 二进制,不存在的输入路径
+- 步骤:无子命令/无 journal、非法 advice/instance、反向窗口、零容量、Model 重算、每日报告及 sim;另运行 --version
+- 期望:非法及未接入功能均先于输入访问返回 2,无成功 JSON;version 返回 0 与本包版本串
+- 实现:`apps/replayer/tests/cli.rs::rpl_261_invalid_and_unimplemented_options_fail_loud`
+
+| 行 | 参数 | 期望 |
+|---|---|---|
+| RPL-261.1 | 无子命令 | 2 |
+| RPL-261.2 | verify 缺 journal | 2 |
+| RPL-261.3 | advice foo | 2 |
+| RPL-261.4 | advice recompute | 2,尚未接入 |
+| RPL-261.5 | instance live | 2 |
+| RPL-261.6 | from_seq 100,to_seq 99 | 2 |
+| RPL-261.7 | max_records 0 | 2 |
+| RPL-261.8 | report-dir | 2,尚未接入 |
+| RPL-261.9 | sim | 2,尚未接入 |
+| RPL-261.10 | --version | 0,本包版本串 |
+
+### RPL-262 容量、实例与策略集合检查
+
+- 规则:[已知限制与后续工作](README.md#已知限制与后续工作)
+- 级别:integ
+- 里程碑:M2
+- 前置:真实 W1 测试策略账户的封闭文件
+- 步骤:生产策略集合与测试策略集合分别经同一入口验证;分别限制记录数、逻辑体、重组为 1;指定错误实例
+- 期望:生产二进制未知策略返回 4,测试集合实际验证通过;三种容量返回 3;实例不符返回 2
+- 实现:`apps/replayer/tests/cli.rs::rpl_262_limits_instance_and_strategy_incompatibility`
 
 ## 验收
 

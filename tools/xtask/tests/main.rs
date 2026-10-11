@@ -17,6 +17,7 @@ mod hot_check_stratlib;
 mod journal_verify;
 mod new_strategy;
 mod purity;
+mod replay_verify;
 mod scaffold_gate;
 mod setup;
 mod test_trace;

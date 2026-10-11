@@ -27,6 +27,7 @@ members = [
     "crates/hft-sequencer",
     "strategies/latency-probe",
     "strategies/registry",
+    "apps/replayer",
     "tools/xtask",
     "tools/hft-cfg",
     "tools/hostprobe",

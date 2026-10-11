@@ -119,6 +119,8 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 
 同一 feature 的 `driver::replay_snapshot::check_snapshot::<S>(&Log, seq)` 在投递输入前自检指定快照。先校验头部、全部节的边界、唯一性与节数,再计算 [state_hash](#状态哈希);非零声明值必须相等,零值仍需自算。装配参数只取该日志,调用正式恢复路径后重新序列化,重算哈希必须一致;差异返回首个不同节号。重建写缓冲上限为原节字节数,超限直接失败。缺快照、损坏、不支持的恢复布局与恢复后丢失状态均失败,不退到另一快照,不修改来源日志或正在运行的引擎。
 
+`driver::verify::verify::<S>(Log, VerifyOptions, &'static Heartbeat)` 装配离线验证。未指定 from_seq 时取首个 Boot 快照,否则取不晚于该 seq 的最近快照;先自检,再由日志配置装配。窗口外输入仍用于预热,窗口内 Output 按 seq 闭区间比较;to_seq 落在事件中间时处理完该事件,不比较其后输出。多生成的 Output 不消费下一个 Input;未生成的输出包括文件末尾输出均计分歧。默认首次分歧后停止取输入,keep_going 保留完整输入顺序;Fatal、未消费完的输入和诊断容量不足均不能返回通过。快照的两侧 state_hash 均独立重算,非零声明错误计分歧;零声明不替代状态检查。结果包含起点、输入数、Output 数、快照数与分歧体和语义标志,诊断容量以日志记录数为界。LiveDriver 与恢复装配流程不读取这些离线选项。
+
 回放比较器要求屏蔽测量字段后的逻辑体**长度和内容都相等**;不删体尾零。传输标志按 `NONCMP_FLAGS` 屏蔽,SHADOW 等业务标志仍参与比较。
 
 恢复、验证与镜像驱动解析配置时,只查当前已消费日志前缀里的 `ConfigBlob`;预读整份文件或追加镜像批次不提前放行配置。引用的 kind、encoding、len、version 与 SHA-256 必须全部相同,内容长度足够且摘要相等后才解码。向前或向后选择回放起点都按该位置重新限定可见范围;同一引用的最近记录损坏直接失败,不退回较早的副本。
@@ -833,7 +835,7 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 
 ## 已知限制与后续工作
 
-- `Log::from_reader` 当前在显式上限内保留整份逻辑日志;长时段文件的分段流式验证、replayer CLI 与完整文件回放验收仍待接入。内存段与文件输入均可进入同一 VerifyDriver,不能以局部驱动测试代替 replayer 验收。
+- `Log::from_reader` 当前在显式上限内保留整份逻辑日志;长时段文件的分段流式验证仍待接入。离线 runner 对恢复引导块与版本变化明确报 UnsupportedRun,这些区间的分段独立运行和容错比较未完成;[replayer 限制](../../apps/replayer/README.md#已知限制与后续工作)列出完整 CLI 验收缺口。
 
 - **关键帧一次写完**:每个周期或每 `keyframe_max_events` 条 Input 一次 ≤ 300 µs 的停顿,在空闲轮之后发生(最大推迟后在事件边界强制),期间到达的输入等待;段滚动的引导块(每段一次)与 Drain/Recovery 快照同样一次写完。可选扩展:由 advisor 镜像在旁路生成关键帧(镜像在每个 seq 的状态与 sequencer 相同,sequencer 只写滚动时的引导块;触发条件:实测关键帧停顿超出 p99.9 记录目标)。
 - **快照之后的 `BboView.rx_tsc`**:hft-book 的快照行不含 `Top.rx_tsc`(恢复后为 0),为了实盘与从快照起步的回放一致,早于最近快照的接收时刻一律给 0(关键帧见[快照](#快照),引导块每段一次);`FundingView.upd_tsc` 同样。用 `rx_tsc` 做信号的策略在安静 inst 上会周期性看到"未知";`hw_rx_ns`(在节 10)不受影响。可选扩展:把 `Top.rx_tsc` 作为登记的 TSC 行进快照(触发条件:某策略的信号因此失效)。
