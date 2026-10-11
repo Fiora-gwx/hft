@@ -847,6 +847,91 @@ fn seq_374_manual_hold_pair_tail_verify() {
 }
 
 #[test]
+fn seq_397_rejected_force_backoff_replays_from_both_sides() {
+    let mut b = b_gt3();
+    b.rd.limits.retain(|(venue, _)| *venue != B);
+    b.rd.limits.extend(order_limits(B, 1, 100));
+    let mut risk = b0_risk(&b.rd.load());
+    for venue in risk.venues.as_mut_slice() {
+        if venue.venue == B {
+            venue.rr_reserve = Rate(0);
+        }
+    }
+    b.risk = Some(risk);
+    let rd = b.rd.load();
+    let setup = b.setup(&rd);
+    let mut configs = b.configs(&rd);
+    configs.engine_blob = setup.encode_blob(1, hft_types::HostClass::Dev2, UTC0);
+    configs.risk_blob = configs.risk.encode_blob().unwrap();
+    configs.risk_sha256 = sha(&configs.risk_blob);
+    let heartbeat = hb();
+    let driver = hft_sequencer::driver::live::LiveDriver::new(TestIo::<TestSet>::new(setup.clock), b.live);
+    let s = hft_sequencer::Sequencer::boot(
+        hft_sequencer::BootSource::Empty { configs },
+        &setup,
+        driver,
+        heartbeat,
+    )
+    .unwrap();
+    let mut h = H {
+        s,
+        rd,
+        setup,
+        cmd_no: 0,
+        hb: heartbeat,
+        upd: 1,
+    };
+    h.steady();
+    open_legs(&mut h, GT1, &[(A1, Side::Buy, "0.01"), (B1, Side::Sell, "0.01")]);
+    let before = h.keyframe().seq;
+    let m = h.mark();
+    let mut external =
+        crate::process::ext(AC1, B1, Side::Sell, "0.005", hft_event::ExternalCause::Adl, 9_397);
+    external.rx_tsc = hft_types::Tsc(h.now());
+    h.push(RingId::Rep(0), &external);
+    h.run();
+    h.cmd_confirmed(
+        AC1,
+        &ControlCmd::Kill {
+            scope: scope(StrategyId(0), AC1, GroupId(0)),
+            level: KillLevel::Account,
+            flatten: true,
+            cancel_resting: true,
+            hard: false,
+        },
+    );
+    h.run();
+    let during = h.keyframe().seq;
+    let cell = h.s.engine().exec.cell(AC1, GT1).unwrap();
+    assert_eq!(cell.gated_bits, hft_types::RejectBits::RATE);
+    assert!(cell.wake_at.0 > h.now());
+    assert_eq!(cell.fix.first_tsc, hft_types::Tsc(0));
+    // The initial position consumed the sole venue token; the next wake is still rate-gated.
+    tick(&mut h, 500);
+    h.keyframe();
+    let cell = h.s.engine().exec.cell(AC1, GT1).unwrap();
+    assert_eq!(cell.fix.first_tsc, hft_types::Tsc(0));
+    assert!(!matches!(cell.view.state, TargetState::Broken(_)));
+    let rate_rejects = decs(&h.since(m))
+        .into_iter()
+        .filter(|d| d.account == AC1 && d.inst == B1 && d.reject & hft_types::RejectBits::RATE.0 != 0)
+        .count();
+    assert!(
+        rate_rejects >= 2,
+        "initial force and wake retry must both reach the rate gate"
+    );
+    for snapshot in [before, during] {
+        let log = hft_sequencer::driver::replay::Log::from_segments(&h.j().segments);
+        let setup = hft_sequencer::EngineSetup::from_snapshot(&log, snapshot).unwrap();
+        let mismatches = verify_journal::<TestSet>(h.j(), &setup, Some(snapshot));
+        assert!(
+            mismatches.is_empty(),
+            "backoff replay at {snapshot}: {mismatches:?}"
+        );
+    }
+}
+
+#[test]
 fn seq_375_late_fill_resume_verify() {
     let mut h = rig();
     let first_epoch = h.epoch();

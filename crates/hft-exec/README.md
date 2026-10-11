@@ -895,6 +895,8 @@ const _: () = assert!(size_of::<ExecRowHdr>() == 8 && size_of::<LegRef>() == 32 
 
 ## 延伸阅读
 
+- [容量续推不提前启动补腿窗口](../../.agents/notes/implemented/bug-fix/2026-10-11-repair-window-after-backoff.md)
+
 - [07 策略层:执行算法与两层输出](../../design/07-策略层.md)、[05 CEX 执行层 §2.3 多腿绑定](../../design/05-CEX执行层.md)、[09 风控与控制面(保证金分档)](../../design/09-可观测性、风控与控制面.md)、[12 风险与未决问题](../../design/12-风险与未决问题.md)
 - [第八轮裁决(含 R8-8 断腿处置、R8-11 人工保持与引擎兜底、R8-12 第五轮评审的引擎兜底修正)](../../design/_work/round8-decisions.md);Agent Note [manual-hold-and-stop-marker](../../.agents/notes/proposed/architecture/2026-10-03-manual-hold-and-stop-marker.md)、[resolve-broken-hard-only](../../.agents/notes/proposed/architecture/2026-10-03-resolve-broken-hard-only.md)
 - [hft-strategy-sdk](../hft-strategy-sdk/README.md)、[hft-oms](../hft-oms/README.md)、[hft-risk](../hft-risk/README.md)、[hft-ledger](../hft-ledger/README.md)、[hft-sequencer](../hft-sequencer/README.md)、[hft-sim](../hft-sim/README.md)

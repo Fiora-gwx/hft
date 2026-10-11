@@ -30,7 +30,7 @@ spec: README.md
 | 连接活性 | SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173 |
 | 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383, SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
-| 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365 |
+| 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
 | advisor 与 Model | SEQ-030–SEQ-044、SEQ-290、SEQ-367 |
 | 模型检查点 | SEQ-045–SEQ-051、SEQ-363 |
@@ -5500,6 +5500,16 @@ spec: README.md
 - 步骤:恢复启动 TSC 已越过关键帧期限,先处理自动关键帧,再经 hk 环请求两条关键帧;独立按 schema 屏蔽测量字段与传输标志,累计引导快照之后的 Output;另算遗漏恢复注记的反例哈希,从恢复快照严格验证后续运行
 - 期望:实际写出一条自动与两条请求关键帧,三个区间的哈希均与日志一致,首区间与遗漏注记的哈希不同;注记数量等于受影响的账户/venue 数,恢复后的逐字节回放无分歧
 - 实现:`crates/hft-sequencer/tests/mismatch.rs::seq_396_recovery_notes_belong_to_next_output_interval`
+
+### SEQ-397 清仓拒单的退避状态从两侧快照重放一致
+
+- 规则:[目标意图与执行层](README.md#目标意图与执行层)、[hft-exec 补腿](../hft-exec/README.md#补腿hedgefixc4)
+- 级别:replay
+- 里程碑:M2
+- 输入:真实 sequencer、OMS、ledger、risk、exec;永续 venue 的 10 秒桶只有一个令牌,建仓已消耗;已成交现货 +0.01、永续 −0.01
+- 步骤:完整启动配置写入 journal;快照后投递永续 ADL 卖出 0.005,提交非 HARD 的账户 Kill/flatten;退避期间请求关键帧,推进 500 ms 后再请求关键帧;分别只用 ADL 前和首次退避中的快照及其前置配置独立装配,逐字节验证后续 journal
+- 期望:至少两条永续清仓决策被 RATE 拒绝;退避中的补腿窗口未启动,没有 Broken;两次验证均无输出或快照分歧
+- 实现:`crates/hft-sequencer/tests/sdk_contract/target.rs::seq_397_rejected_force_backoff_replays_from_both_sides`
 
 ## 验收
 
