@@ -13,6 +13,7 @@ mod doc_check_perms;
 mod dst;
 mod exit_codes;
 mod fixtures_cmd;
+mod fixtures_fetch;
 mod hot_check_stratlib;
 mod journal_verify;
 mod new_strategy;

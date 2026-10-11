@@ -264,7 +264,7 @@ cargo xtask new-strategy <name> --kind-id <n> [--with-model] [--with-pipeline]
 
 | 子命令 | 做什么 |
 |---|---|
-| `fixtures fetch` | 按 `fixtures/replay/*.pointer.toml` 下载并校验 SHA-256 到 `target/fixtures-cache/`(CI 经 OIDC 读 S3,见 [development 凭证与权限](../docs/development.md#凭证与权限)) |
+| `fixtures fetch` | 经 AWS CLI 与 zstd 获取 `fixtures/replay/*.pointer.toml` 的对象;预检、缓存复用、大小/哈希与失败清理的契约归 [fixtures 大文件指针](../fixtures/README.md#大文件s3-指针),CI 经 [OIDC](../docs/development.md#凭证与权限)只读 S3 |
 | `fixtures extract --wal <s3-key> \| --journal <path> …` | 从旧 WAL v2 或 raw journal 抽取报文为 `.in` |
 | `fixtures scrub [<路径>…]` / `fixtures check` / `fixtures corpus <venue>` | 清洗、敏感信息扫描、生成 fuzz 语料(见 [fixtures/](../fixtures/README.md));`check` 逐条报告文件与字节偏移,JSON 在 `target/xtask/fixtures.json` |
 | `fixtures bbo-diff --wal <s3-key> --journal <path> --venue <v> --window <a..b>` | 离线对照:同一时段两边(现有 collector 与新框架)的 BBO 序列一致性,规则见 [fixtures](../fixtures/README.md) |
@@ -597,7 +597,7 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 - az-probe 的首帧单向分布依赖 PHC;探针实例若无 PHC,只能给 RTT 结论。
 - `doc-check` 的分段名与策略族名检查只能匹配名单内的写法,自然语言里的错误用法靠评审。
 - hft-cfg 不跑策略的跨字段 `validate`(它不链接策略代码);离线发现跨字段错误要靠 `send` 的预览或 CI 里对 `fixtures/params/*` 的 gateway 级测试。
-- xtask 尚未实现(随各自的里程碑加入):`fuzz`、`path-digest`(未知子命令,退出 2);`strategies/_template/` 尚未建立,`new-strategy` 在真实仓库中退出 2、`scaffold-gate` 跳过;`dst` 的 `--strategy` 退出 2(registry 尚无策略 DST 入口);`--hashtrail check` 只比较每个种子的 `HashTrail` 摘要,不报告分歧的 `seq` 与组件;`fixtures fetch/extract/corpus/bbo-diff` 退出 2;`replay-verify` 经 locked ci 剖面执行本地 `replayer verify`,指针仍先校验缓存 SHA-256;应用退出 1/3/4 映射为检查失败 1,应用参数/环境错误映射为 2。Model 重算、恢复区间、压缩输入、分歧前片段导出与 `--record-decide-hist` 尚未接入,不支持的选项退出 2;`gen-host` 只做输入核对(`--host` 的清单存在),`deploy/gen/` 与 hft-core 主机类档不在仓库时退出 2。
+- xtask 尚未实现(随各自的里程碑加入):`fuzz`、`path-digest`(未知子命令,退出 2);`strategies/_template/` 尚未建立,`new-strategy` 在真实仓库中退出 2、`scaffold-gate` 跳过;`dst` 的 `--strategy` 退出 2(registry 尚无策略 DST 入口);`--hashtrail check` 只比较每个种子的 `HashTrail` 摘要,不报告分歧的 `seq` 与组件;`fixtures extract/corpus/bbo-diff` 退出 2;`replay-verify` 经 locked ci 剖面执行本地 `replayer verify`,指针仍先校验缓存 SHA-256;应用退出 1/3/4 映射为检查失败 1,应用参数/环境错误映射为 2。Model 重算、恢复区间、压缩输入、分歧前片段导出与 `--record-decide-hist` 尚未接入,不支持的选项退出 2;`gen-host` 只做输入核对(`--host` 的清单存在),`deploy/gen/` 与 hft-core 主机类档不在仓库时退出 2。
 - hot-check 尚未覆盖 [hot-path-rules](../docs/hot-path-rules.md) 中写给 hot-check 而本节检查表未列的项:T5 warm 开关默认值、T7 rustls 握手/`connect` 与 REST 快照调用点只在 `conn-builder`/`snap-fetch` 模块、M6 含枚举字段的事件体 derive `FromBytes`(相关 crate 进入 workspace 时随表加入)。
 - hft-cfg 尚未接入:`build --kind risk`(hft-risk 构建器)、`refdata fetch`、`send`(hft-ctl-proto 帧)、从 journal 目录读取生效 blob(`--against`/`--refdata` 给目录)与 core `venue-*` 的 `default_caps()`(能力行的底取 `[caps.<venue>]`);前四项当前退出 2。
 - hft-verify 的吞吐受服务器空闲 CPU 限制(批处理所在 slice 为 `CPUWeight=idle`,dev2 上的吞吐随旧系统负载变化;达成时间估算见 testing §6.1);它不并行,也不在主机间协调——同时有两台主机运行时靠种子编码与按完成时刻折叠保证结果正确,不靠锁。

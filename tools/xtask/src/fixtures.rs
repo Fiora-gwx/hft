@@ -1,5 +1,5 @@
-//! `cargo xtask fixtures {check, scrub}` (tools/README.md "其他 xtask 子命令"; rules: fixtures/README.md
-//! "敏感信息清洗"). `fetch`, `extract`, `corpus` and `bbo-diff` arrive with their milestones (exit 2).
+//! `cargo xtask fixtures {fetch, check, scrub}` (tools/README.md "其他 xtask 子命令";
+//! rules: fixtures/README.md). `extract`, `corpus` and `bbo-diff` arrive with their milestones (exit 2).
 //!
 //! `check` scans every file under `fixtures/` (Markdown and `fixtures/scrub-rules.toml` excluded) for:
 //! login/signature field names (`"signature":`, `"apiKey":`, `"passphrase":`, `"listenKey":` and the same
@@ -8,6 +8,8 @@
 //! PKCS#8 Ed25519 prefix `MC4CAQAwBQYDK2Vw`) and the real account ids registered as SHA-256 in
 //! `scrub-rules.toml` (`[forbid] sha256 = [...]`). `scrub` removes the login/signature fields and
 //! applies the `[[replace]]` rules (`pattern` regex → `with`) to UTF-8 files in place.
+
+pub mod fetch;
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -213,6 +215,13 @@ pub fn scrub(root: &Path, paths: &[String]) -> Result<Vec<String>, EnvError> {
 /// Entry point.
 pub fn run(root: &Path, args: &[String]) -> i32 {
     match args.first().map(String::as_str) {
+        Some("fetch") if args.len() == 1 => match crate::exec::from_env(root) {
+            Ok(mut exec) => fetch::run_with(root, exec.as_mut()),
+            Err(e) => {
+                eprintln!("fixtures fetch: {e}");
+                EXIT_ENV
+            }
+        },
         Some("check") if args.len() == 1 => {
             let fs = match check(root) {
                 Ok(f) => f,
@@ -251,14 +260,14 @@ pub fn run(root: &Path, args: &[String]) -> i32 {
                 EXIT_ENV
             }
         },
-        Some(s @ ("fetch" | "extract" | "corpus" | "bbo-diff")) => {
+        Some(s @ ("extract" | "corpus" | "bbo-diff")) => {
             eprintln!(
                 "fixtures {s}: not implemented yet (arrives with its milestone, tools/README.md 已知限制)"
             );
             EXIT_ENV
         }
         _ => {
-            eprintln!("usage: cargo xtask fixtures check | scrub [<path>…]");
+            eprintln!("usage: cargo xtask fixtures fetch | check | scrub [<path>…]");
             EXIT_ENV
         }
     }

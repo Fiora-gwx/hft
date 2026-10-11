@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-12 | fixtures fetch 全量预检指针,经 AWS CLI/zstd 下载解压,逐次校验缓存大小与 SHA-256,合格后发布;失败清理本次临时文件且保留其他合格对象,拒绝缓存/指针链接,获取失败退出 2 | TOOL-072/193–197;固定回放样本的获取前置未实现,fixtures 说明的失败码与工具用例不一致 | tools/xtask、tools/README.md、tools/TESTS.md、fixtures/README.md、质量门系统依赖 | 否 |
 | 2026-10-12 | 离线快照差异提供六组件哈希、首个组件/节/字段和两侧逻辑体偏移;cap 字段直接取生成布局表,未知布局与损坏明确区分,报告组件只属于首个普通分歧。热路径、快照格式和通过判定不变 | SEQ-404–406、RPL-279/280;完整一小时生成文件与逐项反例,固定 T1 与逐 Input 二分仍待验收 | crates/hft-sequencer、apps/replayer | 否 |
 | 2026-10-12 | 已标记恢复缺口只允许向前跳号,不可复用前段 seq;不可变入口在交付前拒绝单段各自合法但合并重叠的输入 | JNL-131.5;RecoveryGap 不能成为序号倒退的豁免 | crates/hft-journal | 否 |
 | 2026-10-12 | 不可变文件显式读取已标记 RecoveryGap,保留严格预检;冷回放按恢复快照重建,报告未知尾部,Model 样本和历史 Advice 不能跨标记续接,相邻 seq 与首段后缀同样处理 | JNL-131、RPL-275–278;序号连续不能证明掉电尾部完整 | crates/hft-journal、crates/hft-sequencer、apps/replayer、docs/architecture.md | 否 |

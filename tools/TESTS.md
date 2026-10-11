@@ -27,7 +27,7 @@ spec: README.md
 | cargo xtask gen-host | TOOL-062–TOOL-065 |
 | cargo xtask doc-check | TOOL-066–TOOL-068、TOOL-178 |
 | cargo xtask new-strategy | TOOL-069–TOOL-071 |
-| 其他 xtask 子命令 | TOOL-072–TOOL-091、TOOL-180 |
+| 其他 xtask 子命令 | TOOL-072–TOOL-091、TOOL-180、TOOL-193–TOOL-197 |
 | az-probe | TOOL-092–TOOL-099 |
 | hostprobe | TOOL-100–TOOL-113 |
 | hft-secrets | TOOL-114–TOOL-118、TOOL-181 |
@@ -1144,8 +1144,8 @@ spec: README.md
 - 规则:[其他 xtask 子命令](README.md#其他-xtask-子命令)
 - 级别:table
 - 里程碑:M3
-- 前置:`fixtures/replay/a.pointer.toml` 指向替身 S3 对象,登记 SHA-256 = H
-- 实现:`tools/xtask/tests/fixtures_cmd.rs::tool_072_fetch_verifies_hash`
+- 前置:`fixtures/replay/a.pointer.toml` 指向替身 S3 对象,登记解压后大小与 SHA-256 = H;只有 S3 下载替身,压缩与解压运行真实 zstd;输入包含跨 64 KiB 缓冲边界的非 UTF-8 字节
+- 实现:`tools/xtask/tests/fixtures_fetch.rs::tool_072_fetch_verifies_hash`
 
 | 行 | 替身对象内容 | 期望 |
 |---|---|---|
@@ -2916,6 +2916,91 @@ spec: README.md
 | TOOL-192.5 | 4 | 1 |
 | TOOL-192.6 | 进程异常 | 2 |
 | TOOL-192.7 | --record-decide-hist | 2,无子进程 |
+
+### TOOL-193 缓存每次使用前重新校验
+
+- 规则:[大文件指针](../fixtures/README.md#大文件s3-指针)
+- 级别:integ
+- 里程碑:M3
+- 前置:一个带二进制内容的合成对象与对应指针
+- 步骤:获取合格对象;清空远端替身再运行;分别将缓存改成同长度错误内容与截断内容,在远端不可读及恢复可读时重跑
+- 期望:合格缓存不调用 AWS 或 zstd;坏缓存删除,失败退出 2 且不留下缓存;恢复后重新下载与真实解压,最终字节等于固定输入
+- 实现:`tools/xtask/tests/fixtures_fetch.rs::tool_193_fetch_revalidates_cache_and_reuses_only_exact_bytes`
+
+### TOOL-194 全部指针先预检再产生副作用
+
+- 规则:[大文件指针](../fixtures/README.md#大文件s3-指针)
+- 级别:table
+- 里程碑:M3
+- 前置:首个合法指针有错误旧缓存,随后指针分别包含错误协议、空桶、错误前缀、父路径、空路径段、错误扩展、查询参数、空白、错误哈希字符/长度、负数/零/非整数/缺大小、非法 TOML;另测非法名称、空目录与额外 CLI 参数
+- 期望:全部非法输入在任何下载和缓存删除之前退出 2,原缓存不变;非法名称不创建 target;空集合返回 0 且不创建 target;多余 CLI 参数退出 2
+- 实现:`tools/xtask/tests/fixtures_fetch.rs::tool_194_fetch_preflights_all_pointers_before_side_effects`
+
+| 行 | 独立输入 | 期望 |
+|---|---|---|
+| TOOL-194.1 | https 协议 | 退出 2,无副作用 |
+| TOOL-194.2 | 空桶名 | 同上 |
+| TOOL-194.3 | 非 hft-fixtures 前缀 | 同上 |
+| TOOL-194.4 | 父路径分量 | 同上 |
+| TOOL-194.5 | 空路径分量 | 同上 |
+| TOOL-194.6 | 非 zst 后缀 | 同上 |
+| TOOL-194.7 | 查询参数 | 同上 |
+| TOOL-194.8 | 路径含空白 | 同上 |
+| TOOL-194.9 | 哈希含非十六进制字符 | 同上 |
+| TOOL-194.10 | 哈希长度错误 | 同上 |
+| TOOL-194.11 | bytes 为负 | 同上 |
+| TOOL-194.12 | bytes 为零 | 同上 |
+| TOOL-194.13 | bytes 为字符串 | 同上 |
+| TOOL-194.14 | 缺 bytes | 同上 |
+| TOOL-194.15 | 非法 TOML | 同上 |
+| TOOL-194.16 | 名称分别为隐藏名称、含点、含空格及空名 | 同上 |
+| TOOL-194.17 | 空指针集合 | 退出 0,不创建 target |
+| TOOL-194.18 | 多余 CLI 参数 | 退出 2 |
+
+### TOOL-195 下载与解压失败不发布半成品
+
+- 规则:[大文件指针](../fixtures/README.md#大文件s3-指针)
+- 级别:table
+- 里程碑:M3
+- 前置:指针指向三字节合成输入 abc,每行独立运行
+- 步骤:替身依次返回非 zstd 内容、截断压缩帧、解压后少一个字节、多一个字节、AWS 程序缺失、成功但未产生文件
+- 期望:六行均退出 2,缓存和本次临时目录均不存在;实际运行 zstd 识别损坏帧
+- 实现:`tools/xtask/tests/fixtures_fetch.rs::tool_195_fetch_codec_size_and_transfer_failures_leave_no_partial_cache`
+
+| 行 | 替身结果 | 期望 |
+|---|---|---|
+| TOOL-195.1 | 非 zstd 内容 | 退出 2,不留缓存或临时目录 |
+| TOOL-195.2 | 截断压缩帧 | 同上 |
+| TOOL-195.3 | 解压后少一个字节 | 同上 |
+| TOOL-195.4 | 解压后多一个字节 | 同上 |
+| TOOL-195.5 | AWS 程序无法启动 | 同上 |
+| TOOL-195.6 | 下载返回成功但未产生文件 | 同上 |
+
+### TOOL-196 单对象失败保留已验证缓存
+
+- 规则:[大文件指针](../fixtures/README.md#大文件s3-指针)
+- 级别:integ
+- 里程碑:M3
+- 前置:三个固定合成对象,缓存为空
+- 步骤:以乱序写入 a/b/z 三个指针,只提供 a/z;首次执行后补齐 b 并重跑
+- 期望:首次按 a/b 顺序下载,退出 2,仅保留 a;第二次只下载 b/z,退出 0,三个缓存字节均通过校验
+- 实现:`tools/xtask/tests/fixtures_fetch.rs::tool_196_fetch_failure_preserves_other_verified_objects`
+
+### TOOL-197 缓存与指针符号链接拒绝
+
+- 规则:[大文件指针](../fixtures/README.md#大文件s3-指针)
+- 级别:table
+- 里程碑:M3
+- 前置:Unix 文件系统;target、fixtures-cache、对象文件、指针文件分别为指向树外哨兵的链接
+- 期望:各行退出 2,不执行 AWS 或 zstd,链接及树外哨兵保持原样
+- 实现:`tools/xtask/tests/fixtures_fetch.rs::tool_197_fetch_rejects_links_without_touching_their_targets`
+
+| 行 | 链接位置 | 期望 |
+|---|---|---|
+| TOOL-197.1 | target | 退出 2,链接和目标不变 |
+| TOOL-197.2 | fixtures-cache | 同上 |
+| TOOL-197.3 | 缓存对象 | 同上 |
+| TOOL-197.4 | 指针文件 | 同上 |
 
 ## 验收
 

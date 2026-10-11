@@ -141,7 +141,11 @@ hft-sim 的用例目录名带用例编号(`sim-125-<case>/`、`sim-123-mixed/`),
 | `window` | 时间窗与 seq 范围 |
 | `purpose` | 使用者(如 `benchmarks/tick-to-trade`、`replay-verify PR 样本`、`replayer sim 复现样本`) |
 
-`cargo xtask fixtures fetch` 下载到 `target/fixtures-cache/`,校验 SHA-256,不符即删除并退出码 1。fixture 桶与市场数据桶分开;发布归档不进这两个桶。CI 只对需要拉 fixture 的作业开 GitHub OIDC(`id-token: write`),扮演只读 fixture 桶的角色(该角色的创建是 `[需授权]` 的 IAM 变更;工作流与权限归 [development](../docs/development.md))。
+`cargo xtask fixtures fetch` 先按文件名排序并校验全部指针,再通过 AWS CLI 下载、zstd 解压到 `target/fixtures-cache/` 内本次独占的临时目录。解压后大小与 SHA-256 均匹配才发布为 `<name>`;已存在的缓存也逐字节重新计算哈希,合格时不调用 AWS 或 zstd。不合格的旧缓存删除后重新获取,下载、解压或校验失败退出 2,清理本次临时文件,保留其他已验证对象。空指针集合返回 0,不代表任何样本已验证。
+
+指针文件名只含 ASCII 字母、数字、连字符与下划线;`uri` 只接受 fixture 桶内 `hft-fixtures/` 下的 `.zst` 对象路径,不接受查询参数或 `..`。`sha256` 为 64 位十六进制,`bytes` 为正整数。缓存目录、对象及指针拒绝符号链接和不符预期的文件类型。解压器使用 128 MiB 内存上限,哈希以 64 KiB 缓冲读取;解压临时文件占用磁盘,大小在解压完成后核对。此命令只校验运输内容,事件 schema、段链与业务一致性仍由 journal 读者和回放验证器检查。
+
+fixture 桶与市场数据桶分开;发布归档不进这两个桶。CI 只对需要拉 fixture 的作业开 GitHub OIDC(`id-token: write`),扮演只读 fixture 桶的角色(该角色的创建是 `[需授权]` 的 IAM 变更;工作流与权限归 [development](../docs/development.md))。工具不创建桶或角色、不上传对象。`aws` 与 `zstd` 由运行环境提供;CI 的质量门与 ARM 发布环境安装 zstd。
 
 ### 来源
 

@@ -133,7 +133,7 @@ jobs:
       - name: Install system packages
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross strace python3-numpy
+          sudo apt-get install -y -q --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross strace python3-numpy zstd
       - name: Install pinned Rust toolchain
         run: bash .github/scripts/install-rust.sh
       - uses: Swatinem/rust-cache@v2
