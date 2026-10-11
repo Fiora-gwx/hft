@@ -983,7 +983,7 @@ spec: README.md
 - 规则:[Model 检查点](README.md#model-检查点)
 - 级别:table
 - 里程碑:M2
-- 前置:`SeqRig` + `AdvRig`;实例 S3(s1:`account = A1`、kind 0xFF01、`schema.id = 0xFF01`、`PATH_VERSION = 1`;布局摘要 `CkptHdr.layout` 代表 `LAYOUT_VERSION`);version 7(`thr = 7`)生效、Model 订阅 I1 的 BBO;在 seq L 写出一份检查点(`last_seq = L`),之后 journal 继续(3 条 I1 Bbo);每行只改该行的一项后重启 advisor。检查点文件格式(magic、`PathSecHdr`)归 apps/hft-core,`MemCkpt` 存 `CkptHdr` + 体(`path_len: u32`、`PATH_VERSION: u32`、路径状态节、原始样本节)
+- 前置:`SeqRig` + `AdvRig`;实例 S3(s1:`account = A1`、kind 0xFF01、`schema.id = 0xFF01`、`PATH_VERSION = 1`;`CkptHdr.layout_version = Model::LAYOUT_VERSION`);version 7(`thr = 7`)生效、Model 订阅 I1 的 BBO;在 seq L 写出一份检查点(`last_seq = L`),之后 journal 继续(3 条 I1 Bbo);每行只改该行的一项后重启 advisor。检查点文件格式归 [apps/hft-core](../../apps/hft-core/README.md#内存与-journal-段按主机类唯一归属),`MemCkpt` 存运行期 `CkptHdr` + 按该格式排列的路径前缀、路径节与原始样本节
 - 实现:`crates/hft-sequencer/tests/sdk_contract/checkpoint.rs::sdk_065_checkpoint_key_matrix`
 
 | 行 | 重启前的改动 | 期望 |
