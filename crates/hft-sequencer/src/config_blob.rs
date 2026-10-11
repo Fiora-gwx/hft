@@ -1,6 +1,7 @@
 //! Reconstruct assembly inputs from the journal's complete ECF1 blob. No filesystem, environment,
 //! default config or process-local callbacks are consulted by the decoding path.
-use hft_event::{BlobHdr, BlobKind, BlobRef, ClockStatus, EventKind, SnapshotHdr};
+use hft_event::{BlobHdr, BlobKind, BlobRef, ClockStatus, EventKind, Role, SegmentRoll, SnapshotHdr};
+use hft_journal::{RollMark, RollReason};
 use hft_refdata::{AccountKind, EcfBuilder, EngineConfig, EngineSection, LoadErrCode, RefData};
 use hft_strategy_sdk::{SnapshotReader, VenueSet};
 use hft_types::{AccountId, HostClass, VenueId};
@@ -138,14 +139,33 @@ impl EngineSetup {
         {
             return Err(bad(25));
         }
-        // A startup boot block precedes the first EngineClock Input. A Recovery snapshot still
-        // carries the previous run's anchor; its already-shifted TSC fields use the new segment.
+        // A restart can deliberately select the initial snapshot and discard the old tail,
+        // including its EngineClock. Only a process boot before BootDone/Input may keep the
+        // all-zero anchor; ordinary rolls and post-boot snapshots must have a real anchor.
+        let process_boot = log
+            .recs
+            .get(start)
+            .filter(|r| r.kind == EventKind::SEGMENT_ROLL)
+            .and_then(|r| r.read::<SegmentRoll>())
+            .is_some_and(|r| {
+                r.mark == RollMark::Begin as u8
+                    && match header.purpose {
+                        crate::snapshot::PURPOSE_BOOT => r.reason == RollReason::Startup as u8,
+                        crate::snapshot::PURPOSE_RECOVERY => {
+                            r.reason == RollReason::Recovery as u8
+                                || r.reason == RollReason::RecoverFromSnapshot as u8
+                        }
+                        _ => false,
+                    }
+            });
         let unstarted = sections.engine_clock == crate::clock::EngineClockRow::default()
-            && matches!(
-                header.purpose,
-                crate::snapshot::PURPOSE_BOOT | crate::snapshot::PURPOSE_RECOVERY
-            )
-            && !log.recs[..ix].iter().any(|r| r.kind == EventKind::ENGINE_CLOCK);
+            && process_boot
+            && !log.recs[start..ix].iter().any(|r| {
+                r.role() == Role::Input
+                    || (r.kind == EventKind::SEGMENT_ROLL
+                        && r.read::<SegmentRoll>()
+                            .is_some_and(|s| s.mark == RollMark::BootDone as u8))
+            });
         if (sections.engine_clock.tsc_hz_milli == 0 && !unstarted)
             || (sections.engine_clock.tsc_hz_milli != 0
                 && header.purpose != crate::snapshot::PURPOSE_RECOVERY

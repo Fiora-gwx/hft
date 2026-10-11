@@ -2047,7 +2047,7 @@ spec: README.md
 | 行 | 恢复方式 | 新段原因 |
 |---|---|---|
 | RPL-263.1 | 最近快照恢复并重放尾部 | Recovery |
-| RPL-263.2 | 指定首个快照,跳过后续尾部 | RecoverFromSnapshot |
+| RPL-263.2 | 指定尚无 EngineClock 的首个快照,跳过已含 EngineClock 的后续尾部 | RecoverFromSnapshot |
 | RPL-263.3 | Drain 后更换 build_git | Recovery |
 
 ## 验收

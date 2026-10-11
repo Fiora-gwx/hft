@@ -302,3 +302,98 @@ fn seq_381_config_clock_follows_boot_and_recovery_order() {
     h.run();
     assert!(verify_journal::<TestSet>(h.j(), &setup, Some(rec.seq)).is_empty());
 }
+
+#[test]
+fn seq_395_unstarted_clock_is_local_to_process_boot() {
+    use hft_event::{SegmentRoll, SnapshotHdr};
+    use hft_journal::{RollMark, RollReason};
+    use hft_sequencer::{BootError, RecoveryFlags, SnapshotSel};
+    use zerocopy::IntoBytes;
+
+    let j = config_journal(true);
+    let old = Log::from_segments(&j.segments);
+    let initial = old
+        .recs
+        .iter()
+        .find(|r| r.kind == EventKind::STATE_SNAPSHOT)
+        .unwrap()
+        .seq;
+    let clock = old
+        .recs
+        .iter()
+        .find(|r| r.kind == EventKind::ENGINE_CLOCK)
+        .unwrap()
+        .clone();
+    let setup = EngineSetup::from_snapshot(&old, initial).unwrap();
+    let mut h = H::<TestSet>::restart_over(
+        j,
+        setup,
+        plan(
+            SnapshotSel::AtSeq(initial),
+            false,
+            2,
+            RecoveryFlags::FROM_SNAPSHOT | RecoveryFlags::TAIL_LOST,
+        ),
+        Rerun {
+            hz: 2 * HZ,
+            ..Rerun::default()
+        },
+    )
+    .unwrap();
+    let log = Log::from_segments(&h.j().segments);
+    let start = *log.seg_start.last().unwrap();
+    let ix = log
+        .recs
+        .iter()
+        .rposition(|r| r.kind == EventKind::STATE_SNAPSHOT)
+        .unwrap();
+    let at = log.recs[ix].seq;
+    let secs = hft_sequencer::snapshot::read_seq_sections(&log.recs[ix].body[96..]).unwrap();
+    assert_eq!(secs.engine_clock, hft_sequencer::clock::EngineClockRow::default());
+    assert!(
+        log.recs[..start]
+            .iter()
+            .any(|r| r.kind == EventKind::ENGINE_CLOCK)
+    );
+    let setup = EngineSetup::from_snapshot(&log, at).unwrap();
+    assert_eq!(setup.clock.tsc_hz_milli, 2 * HZ);
+    let done = log.recs[start..]
+        .iter()
+        .find(|r| {
+            r.kind == EventKind::SEGMENT_ROLL
+                && r.read::<SegmentRoll>()
+                    .is_some_and(|s| s.mark == RollMark::BootDone as u8)
+        })
+        .unwrap()
+        .clone();
+    for case in 0..4 {
+        let mut bad = log.clone();
+        match case {
+            0 => {
+                let mut begin = bad.recs[start].read::<SegmentRoll>().unwrap();
+                begin.reason = RollReason::Hourly as u8;
+                bad.recs[start].body = begin.as_bytes().to_vec();
+                let mut snap = bad.recs[ix].read::<SnapshotHdr>().unwrap();
+                snap.purpose = hft_sequencer::snapshot::PURPOSE_BOOT;
+                bad.recs[ix].body[..size_of::<SnapshotHdr>()].copy_from_slice(snap.as_bytes());
+            }
+            1 => {
+                let mut snap = bad.recs[ix].read::<SnapshotHdr>().unwrap();
+                snap.purpose = hft_sequencer::snapshot::PURPOSE_KEYFRAME;
+                bad.recs[ix].body[..size_of::<SnapshotHdr>()].copy_from_slice(snap.as_bytes());
+            }
+            2 => bad.recs.insert(ix, clock.clone()),
+            3 => bad.recs.insert(ix, done.clone()),
+            _ => unreachable!(),
+        }
+        assert!(
+            matches!(
+                EngineSetup::from_snapshot(&bad, at),
+                Err(BootError::SnapshotUndecodable { section: 25 })
+            ),
+            "invalid empty clock accepted: {case}"
+        );
+    }
+    h.run();
+    assert!(verify_journal::<TestSet>(h.j(), &setup, Some(at)).is_empty());
+}

@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | SEQ-018、SEQ-310 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
-| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-394 |
+| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-395 |
 | 策略集(`StrategySet`) | SEQ-015–SEQ-018、SEQ-340 |
 | 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181 |
 | 环与容量 | SEQ-001–SEQ-007、SEQ-058、SEQ-059、SEQ-064、SEQ-066、SEQ-086、SEQ-087、SEQ-100、SEQ-221、SEQ-231、SEQ-279、SEQ-288、SEQ-345、SEQ-346、SEQ-367 |
@@ -5480,6 +5480,16 @@ spec: README.md
 | SEQ-394.8 | build_git 变化,首个 Input 仍为普通定时器 | RunBoundary |
 | SEQ-394.9 | ClockStatus 替成 RecoverMismatch 注记 | UnsupportedRun |
 | SEQ-394.10 | 首次运行 BootDone 后、EngineClock 前插入 CmdResult | RunBoundary,输出不得被起播跳过 |
+
+### SEQ-395 空时钟锚点只在当前进程的引导块有效
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
+- 级别:replay
+- 里程碑:M2
+- 输入:完整 journal 已处理 EngineClock 与后续输入,首次 Boot 快照的节 25 全零
+- 步骤:以两倍频率、FROM_SNAPSHOT/TAIL_LOST 从首次快照恢复且不重放尾部;从新 Recovery 快照独立装配并逐字节验证其后输出;分别将空锚点快照放入普通 Hourly 引导块、标成 Keyframe、在其前插入 EngineClock 或 BootDone
+- 期望:旧运行尾部的 EngineClock 不妨碍新进程引导块保留全零锚点,装配使用新频率且回放一致;四种反例均报 SnapshotUndecodable 的节 25
+- 实现:`crates/hft-sequencer/tests/config_blob.rs::seq_395_unstarted_clock_is_local_to_process_boot`
 
 ## 验收
 
