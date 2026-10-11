@@ -20,7 +20,7 @@ spec: README.md
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
 | 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TOOL-024、TOOL-027–TOOL-029 |
-| 6. DST 框架 | TK-043–TK-070、TK-100–TK-108 |
+| 6. DST 框架 | TK-043–TK-070、TK-100–TK-111 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
 | 8. hft-dst 运行器 | TK-075–TK-088 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
@@ -1434,6 +1434,37 @@ spec: README.md
 - 步骤:追加超出已发布 journal 边界的费用与历史量,尝试提交后连续恢复两次;再发布新边界并恢复;最后传入早于检查点的边界
 - 期望:未提交量回滚,已提交量不漏记也不重复;边界早于保存的检查点时明确报错
 - 实现:`crates/hft-testkit/src/dst/seq/audit.rs::tk_108_observation_commit_boundary`
+
+### TK-109 真实保证金强制目标独立重算
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:unit
+- 里程碑:M2
+- 前置:W1、种子 1、2000 步;账户有永续仓位
+- 步骤:记录 MarkPrice 与强平价距标记价 5% 的 MarginReport,触发真实 L3;读取执行层实际保存的目标,与原仓位、旧目标、原比例独立重算值比较
+- 期望:全部不变量通过且强制目标非空;翻转目标方向、删除全部目标与比例观察时 INV-17 失败
+- 实现:`crates/hft-testkit/tests/observations.rs::tk_109_real_force_target_reference`
+
+### TK-110 真实引擎重启后手续费与链接历史累计量守恒
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:dst
+- 里程碑:M2
+- 前置:TK-106 的基础币费用夹具,种子 1、6000 ms 延迟、10000 步
+- 故障:第 1000、3000 条外部 Input 后各连续非干净重启两次
+- 种子:固定种子 1
+- 断言:全部不变量通过且确实重启四次;每次恢复前后的累计费用、历史加当前链接的累计净成交和请求量相等;退休历史桶不丢失
+- 实现:`crates/hft-testkit/tests/observations.rs::tk_110_real_fee_history_across_restarts`
+
+### TK-111 传输 Input 内的主动撤单必须有决策证据
+
+- 规则:[INV-1](../../docs/tests/invariants.md#inv-1-仓位与库存的每一次变化都能追溯到成交证据传输错误从不改变仓位)
+- 级别:unit
+- 里程碑:M2
+- 前置:真实 storage 套件,固定种子 0xcef145ccd5e68192,10000 步
+- 步骤:定位传输或定时器 Input 内 PendingNew 到 PendingCancel 的观察;在副本删除 Cancel 决策
+- 期望:原始事件通过 INV-1;没有成功撤单决策的相同状态迁移失败,仓位与库存零变化规则不变
+- 实现:`crates/hft-testkit/tests/observations.rs::tk_111_transport_cancel_needs_decision_evidence`
 
 ## 验收
 

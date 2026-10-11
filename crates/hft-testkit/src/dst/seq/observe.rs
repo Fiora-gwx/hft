@@ -405,6 +405,20 @@ pub fn fill_engine(e: &Engine, w: &WorldSpec, audit: &History, carry: &Carry, o:
             .map(|l| i128::from(l.net.0))
             .sum();
         let mut imm = [0i128; 4];
+        for (k, inst) in legs_of(w, g.group).iter().enumerate().take(usize::from(v.n_legs)) {
+            o.hedge_balances.push(crate::dst::obs::HedgeBalanceRow {
+                account: g.account,
+                group: g.group,
+                inst: *inst,
+                residual: i128::from(v.leg[k].residual.0),
+                fee_adjust: audit
+                    .fees
+                    .get(&(g.account.0, g.group.0, inst.0))
+                    .copied()
+                    .unwrap_or(0),
+                naked_capped: audit.capped_inst(g.account, g.group, Some(*inst)),
+            });
+        }
         for (k, t) in v.leg.iter().enumerate() {
             imm[k] = i128::from(t.inflight_immediate.0);
             o.leg_net.push(LegNetRow {

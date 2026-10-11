@@ -962,7 +962,12 @@ impl Oms {
         }
         let reversing = e.has(lf::REVERSING);
         let owed = e.owed();
-        let q = if reversing {
+        // A late first fill can also clear the last Unknown slot in this Input. Its Second
+        // request has not reached place() yet, so owed/naked still include that quantity.
+        let queued = out.hedges.iter().any(|r| r.link_id == e.link_id);
+        let q = if queued {
+            Qty(0)
+        } else if reversing {
             let q = self.reverse_qty(i).map_or(Qty(0), |(_, q, _)| q);
             if q.0 > 0 {
                 self.emit_reverse(i, seq, out);

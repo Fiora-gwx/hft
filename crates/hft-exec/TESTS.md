@@ -4311,6 +4311,8 @@ spec: README.md
 
 ## 验收
 
+`testkit` 强制目标原始事实与独立计算的跨组件验收归 [TK-109](../hft-testkit/TESTS.md#tk-109-真实保证金强制目标独立重算)。
+
 `testkit` 强制目标、计时触发与执行单元的只读观察验收归 [TK-107](../hft-testkit/TESTS.md#tk-107-真实引擎逐事件观察与反例);诊断不进入持久状态。
 
 - **完成标准**:本文件中里程碑 M2 的用例全部有实现且通过([docs/tests §1](../../docs/tests/README.md#1-地位)),`cargo xtask test-trace` 对本组件无未实现、多余与不一致项。

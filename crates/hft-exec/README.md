@@ -878,7 +878,7 @@ const _: () = assert!(size_of::<ExecRowHdr>() == 8 && size_of::<LegRef>() == 32 
 
 ## 测试与验收
 
-默认关闭的 `testkit` feature 复制强制目标的仓位、前一目标、原始缩减比例与结果,以及自动平仓计时触发与开始门控的只读诊断;三类缓冲各为 `max(8, cell_count × 8)`,只在构造时分配,溢出显式失败,不进快照与生产构建。跨组件验收归 [TK-107](../hft-testkit/TESTS.md#tk-107-真实引擎逐事件观察与反例)。
+默认关闭的 `testkit` feature 复制强制目标的仓位、前一目标、原始缩减比例与实际保存的目标,以及自动平仓计时触发与开始门控的只读诊断;三类缓冲各为 `max(8, cell_count × 8)`,只在构造时分配,溢出显式失败,不进快照与生产构建。跨组件验收归 [TK-109](../hft-testkit/TESTS.md#tk-109-真实保证金强制目标独立重算)。
 
 用例与验收见 [TESTS.md](TESTS.md)。
 

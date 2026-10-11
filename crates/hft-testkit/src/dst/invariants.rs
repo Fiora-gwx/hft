@@ -372,6 +372,18 @@ fn observation_complete(id: InvId, v: &StepView<'_>) -> Result<(), String> {
                 return Err(format!("missing or duplicate margin observation for {a:?}"));
             }
         }
+        if id == InvId::I8 {
+            for &(a, g, i) in &req.hedge_legs {
+                if o.hedge_balances
+                    .iter()
+                    .filter(|l| (l.account, l.group, l.inst) == (a, g, i))
+                    .count()
+                    != 1
+                {
+                    return Err(format!("missing hedge accounting for {a:?}/{g:?}/{i:?}"));
+                }
+            }
+        }
         for venue in &req.venues {
             if [InvId::I5, InvId::I11, InvId::I12].contains(&id)
                 && o.kill.iter().filter(|k| k.venue == *venue).count() != 1
@@ -597,7 +609,21 @@ fn check_1(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
                 s.venue == b.venue && s.account == b.account && s.slot == b.slot && s.r#gen == b.r#gen
             });
             let to = a.map_or(SlotState::Free, |s| s.state);
-            let ok = to == b.state || to == SlotState::Unknown || (place_unsent && to == SlotState::Rejected);
+            let cancel_requested = to == SlotState::PendingCancel
+                && v.records.iter().any(|r| {
+                    r.try_read::<OrderDecision>().is_some_and(|d| {
+                        d.action == OrderAction::Cancel
+                            && d.reject == 0
+                            && d.venue == b.venue
+                            && d.account == b.account
+                            && d.slot.0 == b.slot
+                            && d.r#gen == b.r#gen
+                    })
+                });
+            let ok = to == b.state
+                || to == SlotState::Unknown
+                || cancel_requested
+                || (place_unsent && to == SlotState::Rejected);
             if !ok {
                 return Err(format!(
                     "transport input moved slot {}/{} from {:?} to {to:?}",
@@ -978,6 +1004,12 @@ pub fn inv_5_kill_blocks_non_risk_reducing() -> Scenario {
 /// Kill word recomputed from the remaining `Kill` caps.
 pub fn kill_from_caps(o: &Obs, venue: VenueId) -> KillRow {
     let mut k = KillRow::clear(venue);
+    let belongs = |a| {
+        venue.0 == 0
+            || o.required
+                .as_ref()
+                .is_none_or(|r| r.venue_accounts.contains(&(venue, a)))
+    };
     for c in o.caps.iter().filter(|c| c.kill) {
         match c.scope {
             CapScope::Global => {
@@ -985,7 +1017,10 @@ pub fn kill_from_caps(o: &Obs, venue: VenueId) -> KillRow {
                 k.hard |= c.hard;
             }
             CapScope::Venue(v) if v == venue => k.venue_bit = true,
-            CapScope::Account(a) => {
+            CapScope::AccountVenue(a, v) if v == venue && belongs(a) => {
+                k.accounts |= 1u64 << (a.0 & 63);
+            }
+            CapScope::Account(a) if belongs(a) => {
                 k.accounts |= 1u64 << (a.0 & 63);
                 if c.hard {
                     k.accounts_hard |= 1u64 << (a.0 & 63);
@@ -1142,7 +1177,7 @@ fn check_8(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
     if let Some(error) = &v.after.observation_error {
         return Err(error.clone());
     }
-    let mut per_group: BTreeMap<(u8, u32), (i128, i128, i64)> = BTreeMap::new();
+    let mut per_group: BTreeMap<(u8, u32, u32), (i128, i128, i64)> = BTreeMap::new();
     for l in v
         .after
         .links
@@ -1150,15 +1185,18 @@ fn check_8(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
         .filter(|l| l.plan == PlanKind::OnFill && !l.reversed)
     {
         let e = per_group
-            .entry((l.account.0, l.group.0))
+            .entry((l.account.0, l.group.0, l.hedge_inst.0))
             .or_insert((0, 0, l.ratio_den.max(1)));
+        if e.2 != l.ratio_den.max(1) {
+            return Err("OnFill links have incompatible ratio denominators".into());
+        }
         e.0 += l.hedge_req * i128::from(l.ratio_den.max(1));
         e.1 += l.first_net * i128::from(l.ratio_num);
         e.2 = l.ratio_den.max(1);
     }
     for h in &v.after.hedge_history {
         let e = per_group
-            .entry((h.account.0, h.group.0))
+            .entry((h.account.0, h.group.0, h.inst.0))
             .or_insert((0, 0, h.ratio_den.max(1)));
         if e.2 != h.ratio_den.max(1) {
             return Err("OnFill history has incompatible ratio denominators".into());
@@ -1166,11 +1204,24 @@ fn check_8(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
         e.0 += h.hedge_req * i128::from(h.ratio_den.max(1));
         e.1 += h.first_net * i128::from(h.ratio_num);
     }
-    for ((a, g), (req_den, net_num, den)) in per_group {
-        let Some(leg) = v.after.leg(AccountId(a), GroupId(g)) else {
-            continue;
+    for ((a, g, inst), (req_den, net_num, den)) in per_group {
+        let (residual, capped, fee) = if v.after.required.is_some() {
+            let rows: Vec<_> = v
+                .after
+                .hedge_balances
+                .iter()
+                .filter(|l| (l.account.0, l.group.0, l.inst.0) == (a, g, inst))
+                .collect();
+            if rows.len() != 1 {
+                return Err(format!("missing hedge accounting for {a}/{g:#x}/{inst}"));
+            }
+            (rows[0].residual, rows[0].naked_capped, rows[0].fee_adjust)
+        } else if let Some(leg) = v.after.leg(AccountId(a), GroupId(g)) {
+            (leg.residual, leg.naked_capped, leg.fee_adjust)
+        } else {
+            return Err(format!("missing hedge group {a}/{g:#x}"));
         };
-        let lhs = req_den + (leg.naked_capped + leg.residual - leg.fee_adjust) * i128::from(den);
+        let lhs = req_den + (capped + residual - fee) * i128::from(den);
         if lhs != net_num {
             return Err(format!(
                 "group {g:#x}: Σ hedge_req + capped + residual − fee ({}) != Σ first_net × ratio ({})",
@@ -1239,7 +1290,7 @@ pub fn effective_mode(
             CapScope::Cell(x, y, z) => {
                 (x.0 == 0 || x == a) && (y.0 == 0 || y == s) && (z == hft_types::GROUP_ALL || z == g)
             }
-            CapScope::Venue(_) => false,
+            CapScope::Venue(_) | CapScope::AccountVenue(_, _) => false,
         })
         .map(|c| c.level)
         .max()

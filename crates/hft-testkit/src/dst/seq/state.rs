@@ -29,6 +29,22 @@ pub fn fill(e: &Engine, w: &WorldSpec, history: &super::audit::History, o: &mut 
             })
             .collect(),
         venues: e.setup.gws.venues.clone(),
+        venue_accounts: e
+            .setup
+            .gws
+            .venues
+            .iter()
+            .flat_map(|v| {
+                w.accounts
+                    .iter()
+                    .filter_map(move |a| e.rd.venue_account_ix(*v, a.id).map(|_| (*v, a.id)))
+            })
+            .collect(),
+        hedge_legs: w
+            .groups
+            .iter()
+            .flat_map(|g| [g.first, g.second].map(|i| (g.account, g.group, i)))
+            .collect(),
     });
     for r in e.risk.mode.caps() {
         let s = r.scope;
@@ -42,7 +58,9 @@ pub fn fill(e: &Engine, w: &WorldSpec, history: &super::audit::History, o: &mut 
                 CapSource::RECON | CapSource::UNKNOWN_TIMEOUT | CapSource::ACCOUNT_CFG | CapSource::DELISTING
             )
         };
-        let scope = if s.venue.0 != 0 {
+        let scope = if s.venue.0 != 0 && s.account.0 != 0 {
+            CapScope::AccountVenue(s.account, s.venue)
+        } else if s.venue.0 != 0 {
             CapScope::Venue(s.venue)
         } else if s.group != GROUP_ALL || s.strategy.0 != 0 {
             CapScope::Cell(s.account, s.strategy, s.group)

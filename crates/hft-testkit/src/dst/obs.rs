@@ -233,6 +233,7 @@ pub enum CapLevel {
 pub enum CapScope {
     Global,
     Account(AccountId),
+    AccountVenue(AccountId, VenueId),
     Venue(VenueId),
     Cell(AccountId, StrategyId, GroupId),
 }
@@ -380,7 +381,9 @@ pub struct ObservationRequirements {
     pub accounts: Vec<AccountId>,
     pub cells: Vec<(AccountId, StrategyId, GroupId)>,
     pub instruments: Vec<(AccountId, InstId)>,
+    pub hedge_legs: Vec<(AccountId, GroupId, InstId)>,
     pub venues: Vec<VenueId>,
+    pub venue_accounts: Vec<(VenueId, AccountId)>,
 }
 
 /// Everything a checker reads from the engine at one instant.
@@ -397,6 +400,8 @@ pub struct Obs {
     pub tombs: Vec<TombRow>,
     pub links: Vec<LinkRow>,
     pub hedge_history: Vec<HedgeHistoryRow>,
+    /// Residual accounting by hedge instrument, independent of other group-level checks.
+    pub hedge_balances: Vec<HedgeBalanceRow>,
     /// A diagnostic loss is a failed observation, never an empty successful check.
     pub observation_error: Option<String>,
     pub legs: Vec<LegRow>,
@@ -415,6 +420,16 @@ pub struct Obs {
     pub drain: DrainRow,
     /// Ledger external-fill dedup keys (`ExtSeen`).
     pub ext_seen: Vec<(AccountId, u64)>,
+}
+
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub struct HedgeBalanceRow {
+    pub account: AccountId,
+    pub group: GroupId,
+    pub inst: InstId,
+    pub residual: i128,
+    pub fee_adjust: i128,
+    pub naked_capped: i128,
 }
 
 impl Obs {
@@ -458,6 +473,8 @@ impl Obs {
         self.tombs
             .sort_by_key(|t| (t.venue.0, t.account.0, t.slot, t.r#gen));
         self.links.sort_by_key(|l| l.id);
+        self.hedge_balances
+            .sort_by_key(|l| (l.account.0, l.group.0, l.inst.0));
         self.legs.sort_by_key(|l| (l.account.0, l.group.0));
         self.limits.sort_by_key(|l| (l.account.0, l.asset.0));
         self.inflight

@@ -16,7 +16,7 @@
 - 断言:
   - 每步比较本 Input 前后 ledger 的每个 (account, venue, inst) 持仓与每个 (account, venue, asset) 现货库存;任何非零变化都必须由本 Input 内的证据逐笔解释,变化量之和 = 证据净量之和(净量规则见规则链接,到最小单位):① OMS `FillOut` 转出的 `FillDelta`(其 Input 是带成交的 `OrderEvent`,或含匹配 `UnknownResolved` 条目的 `ReconcileReport`);② `ExternalFill`——Input 本身,或同一事件内带 `Note{OmsForeignFill}` 的防御路径与 `StaleGen` 合成,或带 `AUTO_RECON` 的 `Note{ExternalFill}` 的对账合成;③ `AdjustDelta`——`AdoptExchange` 命令(引用的 `report_id` 已生效);④ `FeeOnly` 经 `apply_fee` 返回的 `NetAdjust`(费用为基础资产时);⑤ 可选扩展(`chain` feature)的 `TxLifecycle{IncludedOk}`
   - kind 为 `ConnState`、`SendReport`(任何 status)、`Timer{Oms, …}` 与 `Timer{Sys, …}` 的 Input 不改变任何持仓与库存
-  - 上述 Input 把槽迁出 `PendingNew`/`PendingCancel`/`PendingAmend`/`Live` 时,目标状态只能是 `Unknown`;唯一例外是 `SendReport{op = Place}` 的确定未写出状态(`KillBlocked`、`RateLimited`、`NoConn`、`EncodeError`、`RingFull`)迁到 `Rejected`(该单从未写出)
+  - 上述 Input 把槽迁出 `PendingNew`/`PendingCancel`/`PendingAmend`/`Live` 时,目标状态只能是 `Unknown`;唯一例外是 `SendReport{op = Place}` 的确定未写出状态(`KillBlocked`、`RateLimited`、`NoConn`、`EncodeError`、`RingFull`)迁到 `Rejected`(该单从未写出)。同一 Input 内另有身份匹配且成功的 `OrderDecision{Cancel}` 时允许迁到 `PendingCancel`,只表示主动发起撤单;没有该决策证据时仍失败
   - group 归属的变化(LegTracker 各腿 `net`)只来自 ①–④ 与 `WriteOffResidual` 产生的 `WriteOff`;`WriteOff` 不改变账户级持仓合计
 - 实现:`crates/hft-testkit/src/dst/invariants.rs::inv_1_position_change_has_fill_evidence`
 - 备注:检查器 `I1`;hft-ledger 与 hft-oms 的属性测试在组件内断言同一性质;主要触发场景 FP-1、FP-9、RC-3、LK-4

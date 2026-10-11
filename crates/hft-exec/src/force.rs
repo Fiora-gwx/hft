@@ -126,10 +126,14 @@ impl Exec {
             };
             self.set_engine(cix, &tg, reason, origin, v, now);
             #[cfg(feature = "testkit")]
-            for (i, target) in tg.iter().enumerate().take(n) {
+            for i in 0..n {
                 if c.legs[i].kind == LEG_CHAIN {
                     continue;
                 }
+                let Some(target) = self.cells.get(cix).and_then(|cell| cell.target_of(i)) else {
+                    self.audit.fail();
+                    continue;
+                };
                 self.audit.push(crate::audit::ForceFacts {
                     account: c.account,
                     group: c.group,
@@ -142,7 +146,7 @@ impl Exec {
                     } else {
                         st.force_frac
                     },
-                    target: *target,
+                    target,
                 });
             }
         }
@@ -342,6 +346,8 @@ impl Exec {
         let mut act = <ActiveSliceRow as zerocopy::FromZeros>::new_zeroed();
         let mut unk = 0u16;
         let mut slots = [0u32; 4];
+        #[cfg(feature = "testkit")]
+        let mut force_facts = [None; 4];
         for (ix, b) in best.iter().enumerate().take(n) {
             legs[ix] = self.leg_ref(b.2, b.1, false);
             // Previous unfinished step target of the same inst, else u.
@@ -375,16 +381,18 @@ impl Exec {
                 calc::floor_lot(calc::mul_rate(base, keep), legs[ix].lot.0.max(1))
             };
             #[cfg(feature = "testkit")]
-            self.audit.push(crate::audit::ForceFacts {
-                account: info.id,
-                group: hft_types::GroupId(0),
-                inst: b.2,
-                position: b.3,
-                previous_target: prev.and_then(|j| u.target_of(j)),
-                previous_engine: true,
-                fraction: if flatten { Rate(1_000_000_000) } else { frac },
-                target: tg[ix],
-            });
+            {
+                force_facts[ix] = Some(crate::audit::ForceFacts {
+                    account: info.id,
+                    group: hft_types::GroupId(0),
+                    inst: b.2,
+                    position: b.3,
+                    previous_target: prev.and_then(|j| u.target_of(j)),
+                    previous_engine: true,
+                    fraction: if flatten { Rate(1_000_000_000) } else { frac },
+                    target: tg[ix],
+                });
+            }
         }
         if let Some(cm) = self.cells.get_mut(ucix) {
             cm.legs = legs;
@@ -424,6 +432,17 @@ impl Exec {
             return;
         }
         self.set_engine(ucix, &tg, reason, origin, v, now);
+        #[cfg(feature = "testkit")]
+        for (ix, fact) in force_facts.into_iter().enumerate() {
+            if let Some(mut fact) = fact {
+                if let Some(target) = self.cells.get(ucix).and_then(|cell| cell.target_of(ix)) {
+                    fact.target = target;
+                    self.audit.push(fact);
+                } else {
+                    self.audit.fail();
+                }
+            }
+        }
     }
 
     /// Records of a newly set engine target (`D_ENGINE_SET`).

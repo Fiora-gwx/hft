@@ -6,7 +6,7 @@ use hft_event::{EventKind, OrderEvent, OrderEventKind};
 use hft_oms::{LinkState, OrderState, audit::LinkAudit};
 use hft_sequencer::{Engine, types::InputSlot};
 use hft_strategy_sdk::HedgeKind;
-use hft_types::{AccountId, GroupId, MarketKind};
+use hft_types::{AccountId, GroupId, InstId, MarketKind};
 
 use crate::dst::obs::HedgeHistoryRow;
 
@@ -122,11 +122,16 @@ impl History {
     }
 
     pub fn capped(&self, a: AccountId, g: GroupId) -> i128 {
+        self.capped_inst(a, g, None)
+    }
+
+    pub fn capped_inst(&self, a: AccountId, g: GroupId, inst: Option<InstId>) -> i128 {
         self.live
             .values()
             .filter(|t| {
                 t.row.link.account == a
                     && t.row.link.group == g
+                    && inst.is_none_or(|i| t.row.plan.inst == i)
                     && t.row.plan.kind == HedgeKind::OnFill
                     && t.row.link.flags & hft_oms::link_flags::REVERSING == 0
             })
@@ -135,7 +140,7 @@ impl History {
             + self
                 .retired
                 .values()
-                .filter(|h| h.account == a && h.group == g)
+                .filter(|h| h.account == a && h.group == g && inst.is_none_or(|i| h.inst == i))
                 .map(|h| h.capped)
                 .sum::<i128>()
     }

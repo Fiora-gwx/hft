@@ -43,6 +43,9 @@ pub(crate) struct Audit {
 }
 
 impl Audit {
+    pub fn fail(&mut self) {
+        self.overflow = true;
+    }
     pub fn new(cells: usize) -> Self {
         Self {
             force: Vec::with_capacity(cells.saturating_mul(8).max(8)),

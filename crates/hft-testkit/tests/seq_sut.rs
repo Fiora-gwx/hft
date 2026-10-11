@@ -49,7 +49,6 @@ fn tk_105_real_engine_late_fee() {
 fn tk_106_real_base_fee_and_retired_links() {
     use hft_event::{OrderAction, OrderDecision, OrderEvent, OrderEventKind};
     use hft_refdata::FeeAssetRule;
-    use hft_testkit::dst::faults::Fault;
     use hft_testkit::dst::invariants::{InvId, InvState, StepView, checker};
     use hft_testkit::dst::obs::{Obs, StepInfo};
     use hft_testkit::dst::seq::build;
@@ -73,37 +72,11 @@ fn tk_106_real_base_fee_and_retired_links() {
         )
     };
     for delay_ms in [50, 6_000] {
-        let mut c = cfg(1, 10_000, &[], 0, &[]);
-        // Explicit spot-first fixture exercises both base-fee directions and table reuse
-        // within the fixed 10,000-step budget; ordinary suites retain their own strategies.
-        c.market = hft_testkit::dst::MarketSource::Generated(hft_testkit::dst::MarketGen {
-            tick_ms: 50,
-            walk_centi_bp: 0,
-        });
-        for s in &mut c.world.strategies {
-            use hft_testkit::strategies::probe_taker::TakerParams;
-            s.kind_id = 0xFF04;
-            s.params = hft_strategy_sdk::params::encode_body(
-                &TakerParams::SCHEMA,
-                1,
-                &hft_strategy_sdk::params::RawParams {
-                    defaults: vec![build::TAKER_SPREAD_TH, 20, 0, 100],
-                    overrides: Vec::new(),
-                },
-            )
-            .unwrap();
-        }
-        c.world
-            .venues
-            .iter_mut()
-            .find(|v| v.id == VS)
-            .unwrap()
-            .fee_in_base = true;
+        let c = crate::fee_cycle::config(delay_ms);
         for all_sim in [false, true] {
             let rd = build::load_refdata(&build::refdata_blob(&c.world, all_sim).unwrap()).unwrap();
             assert_eq!(rd.caps(VS).fee_asset_rule, FeeAssetRule::Configured(BTC));
         }
-        c.scripted.push((0, Fault::LateFeeOnly { venue: VS, delay_ms }));
         let r = run_record::<SeqSut<crate::fee_cycle::FeeStrategies>>(&c);
         assert!(r.outcome.is_pass(), "delay={delay_ms}: {}", show(&r));
         assert_eq!(r.steps_run, c.steps);
@@ -141,16 +114,16 @@ fn tk_106_real_base_fee_and_retired_links() {
         );
         let ix = r
             .obs
-            .legs
+            .hedge_balances
             .iter()
             .position(|l| l.fee_adjust != 0)
             .expect("no independently observed fee correction");
         assert!(check(&r.obs).is_ok());
         let mut wrong = r.obs.clone();
-        wrong.legs[ix].fee_adjust = 0;
+        wrong.hedge_balances[ix].fee_adjust = 0;
         assert!(check(&wrong).is_err(), "missing correction accepted");
         let mut wrong = r.obs.clone();
-        wrong.legs[ix].residual += 1;
+        wrong.hedge_balances[ix].residual += 1;
         assert!(check(&wrong).is_err(), "wrong residual accepted");
         let mut wrong = r.obs.clone();
         let h = wrong.hedge_history.iter_mut().find(|h| h.first_net != 0).unwrap();

@@ -83,3 +83,7 @@
 | 2026-10-11 | 真实 DST 按 Input 观察模式、Kill、保证金、执行与在途;决策前原始事实关联 journal seq,独立重算对冲与强制目标,缺失或溢出直接失败 | TK-107、SEQ-373、TK-070 | crates/hft-testkit、crates/hft-sequencer、crates/hft-oms、crates/hft-exec、docs/architecture.md | 否 |
 
 | 2026-10-11 | DST 观察检查点只在已发布 journal 边界内提交;补同 Input 链接复用与缺失决策限额/强制目标观察反例;CTL-214 在虚拟时间推进前有界等待实际入环 | TK-107、TK-108、OMS-463、CTL-214(CI 暴露) | crates/hft-testkit、crates/hft-oms、crates/hft-ctl | 否 |
+
+| 2026-10-11 | INV-8 按账户/组/对冲品种核对;强制目标观察读取执行层实际保存值;补真实 L3 目标反例、重复恢复累计量检查和人工保持修复的 sequencer 验证回放 | TK-106、TK-109、TK-110、SEQ-374 | crates/hft-testkit、crates/hft-exec、crates/hft-sequencer | 否 |
+
+| 2026-10-11 | 恢复后第一腿成交与 Unknown 解除同事件时不重复发 SecondRetry;INV-1 允许有成功 Cancel 决策支持的 PendingCancel 迁移;保存两条完整强度 storage 回归种子 | CI 38103614553、OMS-464、SEQ-375、TK-111 | crates/hft-oms、crates/hft-sequencer、crates/hft-testkit、docs/tests/invariants.md、fixtures/dst-seeds/storage.txt | 是 |

@@ -47,7 +47,7 @@ spec: README.md
 | LegTracker | OMS-007, OMS-016, OMS-046, OMS-130, OMS-186, OMS-251, OMS-280, OMS-290–OMS-295, OMS-365, OMS-381, OMS-383 |
 | InflightBook | OMS-290, OMS-291, OMS-300–OMS-303, OMS-364, OMS-381 |
 | Drain 静止判定(支持 C11) | OMS-305 |
-| 恢复:停机时间不计与闸门续接 | OMS-206, OMS-272, OMS-310–OMS-323, OMS-332, OMS-403, OMS-410 |
+| 恢复:停机时间不计与闸门续接 | OMS-464, OMS-206, OMS-272, OMS-310–OMS-323, OMS-332, OMS-403, OMS-410 |
 | 输出扇出 | OMS-015, OMS-047, OMS-074, OMS-268, OMS-273, OMS-330–OMS-335, OMS-340–OMS-344, OMS-388 |
 | 链上槽(optional) | 不适用:里程碑外 |
 | 每次迁移产生的输出 | OMS-040, OMS-055, OMS-057, OMS-059, OMS-062, OMS-105, OMS-113, OMS-130, OMS-160, OMS-162, OMS-193, OMS-265, OMS-281, OMS-315, OMS-320, OMS-343 |
@@ -4175,6 +4175,16 @@ spec: README.md
 - 步骤:一次诊断事件内完成第二腿并立即发下一张第一腿,复用链接槽
 - 期望:退休记录保存完成后的第一腿净量、第二腿请求与成交累计量,订单 epoch/slot/gen 与创建序号保持旧身份;当前行拥有新身份和零累计量;下一事件清空退休缓冲而保留当前身份
 - 实现:`crates/hft-oms/tests/audit.rs::oms_463_completed_link_reused_in_one_input`
+
+### OMS-464 恢复后迟到的第一腿成交不产生重复续接
+
+- 规则:[恢复:停机时间不计与闸门续接](README.md#恢复停机时间不计与闸门续接)
+- 级别:unit
+- 里程碑:M2
+- 前置:IOC 第一腿尚无回报,快照后恢复为 Unknown,第二腿 venue 对冲闸门已满足
+- 步骤:同一 Input 确认第一腿全成并解除 Unknown,随后第二腿成交
+- 期望:恰一条 Second,无重复 SecondRetry;RESUME_HOLD 与 RESUME_RETRY 清除,第二腿完成后链接 Done
+- 实现:`crates/hft-oms/tests/recover.rs::oms_464_late_first_fill_does_not_double_resume`
 
 ## 验收
 

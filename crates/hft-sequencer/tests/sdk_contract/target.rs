@@ -788,3 +788,103 @@ fn sdk_163_manual_external_no_default() {
     );
     assert!(execs(&recs).iter().all(|d| d.action != action::EXTERNAL_DEFAULT));
 }
+
+#[test]
+fn seq_374_manual_hold_pair_tail_verify() {
+    let mut h = rig();
+    open_legs(&mut h, GT1, &[(A1, Side::Buy, "0.01"), (B1, Side::Sell, "0.01")]);
+    let (outcome, _) = issue(&mut h, t_base());
+    assert_eq!(outcome, Some(IntentOutcome::TargetAccepted));
+    clear_hook();
+    h.keyframe();
+    let snapshot = h
+        .j()
+        .records()
+        .filter(|r| r.kind == EventKind::STATE_SNAPSHOT)
+        .last()
+        .unwrap()
+        .seq;
+    let m = h.mark();
+    for (trade_id, cause) in [
+        (9_101, hft_event::ExternalCause::Manual),
+        (9_102, hft_event::ExternalCause::Adl),
+    ] {
+        h.push(
+            RingId::Rep(0),
+            &hft_event::ExternalFill {
+                venue: A,
+                account: AC1,
+                side: Side::Sell,
+                cause,
+                inst: A1,
+                qty: q("0.002"),
+                px: px("50000"),
+                fee: Qty(0),
+                fee_asset: hft_types::AssetId(0),
+                _pad: [0; 6],
+                exch_order_id: 0,
+                trade_id,
+                ex_ts_ns: 0,
+                rx_tsc: hft_types::Tsc(h.now()),
+                fill_seq: 0,
+            },
+        );
+        h.run();
+        for _ in 0..4 {
+            tick(&mut h, 100);
+        }
+        let c = h.s.engine().exec.cell(AC1, GT1).unwrap();
+        assert_ne!(c.hold & hft_exec::MANUAL_HOLD, 0);
+    }
+    let ds = decs(&h.since(m));
+    assert!(
+        ds.iter()
+            .all(|d| d.action != hft_event::OrderAction::New || d.reject != 0),
+        "manual hold emitted orders: {ds:?}"
+    );
+    let mismatch = h.verify_from(Some(snapshot));
+    assert!(mismatch.is_empty(), "manual hold replay: {mismatch:?}");
+}
+
+#[test]
+fn seq_375_late_fill_resume_verify() {
+    let mut h = rig();
+    let trig = h.upd + 1;
+    set_hook(move |hx, ev, ctx| {
+        if let EventRef::Bbo { inst, b, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+            && b.update_id == trig
+        {
+            let _ = ctx.place(pair_first(hx, q("0.001")));
+        }
+    });
+    let m = h.mark();
+    h.quote(A1, "50000", "50001");
+    h.run();
+    clear_hook();
+    let first = decs(&h.since(m))
+        .into_iter()
+        .find(|d| d.action == hft_event::OrderAction::New && d.reject == 0)
+        .unwrap();
+    h.keyframe();
+    let mut h = h
+        .crash_restart(
+            plan(hft_sequencer::SnapshotSel::Latest, true, 2, 0),
+            Rerun::default(),
+        )
+        .unwrap();
+    h.steady();
+    let snapshot = h.keyframe();
+    let m = h.mark();
+    h.fill(&first, first.qty, first.qty, first.px);
+    let orders: Vec<_> = decs(&h.since(m))
+        .into_iter()
+        .filter(|d| d.action == hft_event::OrderAction::New && d.reject == 0 && d.group == GT1)
+        .collect();
+    assert_eq!(orders.len(), 1, "one first fill produced {orders:?}");
+    assert_eq!(orders[0].qty, first.qty);
+    assert_eq!(orders[0].link_role, hft_strategy_sdk::LinkRole::Second as u8);
+    let mismatch = h.verify_from(Some(snapshot.seq));
+    assert!(mismatch.is_empty(), "resume replay: {mismatch:?}");
+}

@@ -34,6 +34,28 @@ fn rec_end(h: &mut H, now: u64, stop: u64) {
 }
 
 #[test]
+fn oms_464_late_first_fill_does_not_double_resume() {
+    let mut h = H::new();
+    let (first, link) = place_first(&mut h, q("0.012"), Tif::Ioc, plan_l1(), 0);
+    let bytes = snapshot(&h);
+    h = restored(&bytes);
+    rec_end(&mut h, 10_000, 1);
+    h.o.on_hedge_gate_open(A1, VX, ms(10_000), 1, &mut h.out);
+    assert_ne!(h.link(link).flags & link_flags::RESUME_HOLD, 0);
+    h.fill(first, q("0.012"), p("60000"), 10_001);
+    let req = one_hedge(&h);
+    assert_eq!(req.role, LinkRole::Second);
+    assert_eq!(req.qty, q("0.012"));
+    assert_eq!(
+        h.link(link).flags & (link_flags::RESUME_HOLD | link_flags::RESUME_RETRY),
+        0
+    );
+    let second = place_hedge(&mut h, &req, 10_001).unwrap();
+    h.fill(second, q("0.012"), p("60000"), 10_002);
+    assert_eq!(h.link(link).state, LinkState::Done);
+}
+
+#[test]
 fn oms_092_mirror_restore_batches() {
     let mut h = H::with(|c| c.slots.set(VS, A1, 400));
     let mut open = Vec::new();

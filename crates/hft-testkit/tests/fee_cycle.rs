@@ -133,3 +133,32 @@ impl Strategy for FeeCycle {
 }
 
 hft_strategy_sdk::strategy_set! { pub struct FeeStrategies { FeeCycle } }
+
+pub fn config(delay_ms: u32) -> hft_testkit::dst::DstConfig {
+    use hft_testkit::dst::{MarketGen, MarketSource, faults::Fault, seq::build, world::VS};
+    let mut c = crate::support::cfg(1, 10_000, &[], 0, &[]);
+    c.market = MarketSource::Generated(MarketGen {
+        tick_ms: 50,
+        walk_centi_bp: 0,
+    });
+    for s in &mut c.world.strategies {
+        s.kind_id = 0xFF04;
+        s.params = hft_strategy_sdk::params::encode_body(
+            &TakerParams::SCHEMA,
+            1,
+            &hft_strategy_sdk::params::RawParams {
+                defaults: vec![build::TAKER_SPREAD_TH, 20, 0, 100],
+                overrides: Vec::new(),
+            },
+        )
+        .unwrap();
+    }
+    c.world
+        .venues
+        .iter_mut()
+        .find(|v| v.id == VS)
+        .unwrap()
+        .fee_in_base = true;
+    c.scripted.push((0, Fault::LateFeeOnly { venue: VS, delay_ms }));
+    c
+}

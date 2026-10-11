@@ -28,7 +28,7 @@ spec: README.md
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
 | 连接活性 | SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173 |
-| 每条 Input 的处理顺序(`process`) | SEQ-373, SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106 |
+| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375, SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
@@ -5196,6 +5196,26 @@ spec: README.md
 - 步骤:依次写入 512、513 条观察,重置后关联正确与缺失的 journal 序号
 - 期望:512 条有效;第 513 条置失败标志且不扩容;重置后恢复可用,缺失序号置失败标志
 - 实现:`crates/hft-sequencer/src/audit.rs::seq_373_diagnostic_capacity_is_explicit`
+
+### SEQ-374 人工保持阻止配对目标的尾差下单并逐字节回放
+
+- 规则:[每条 Input 的处理顺序(`process`)](README.md#每条-input-的处理顺序process)
+- 级别:replay
+- 里程碑:M2
+- 前置:真实引擎、已有两腿仓位和策略 PairOnFill 目标,保存快照
+- 步骤:依次投递 Manual 与 Adl 外来成交,每次后推进四次报价;从快照以 VerifyDriver 重放完整 Input 尾段
+- 期望:manual_hold 保持且没有成功 New 决策,包含尾差修复;回放 Output 逐字节一致
+- 实现:`crates/hft-sequencer/tests/sdk_contract/target.rs::seq_374_manual_hold_pair_tail_verify`
+
+### SEQ-375 迟到成交解除恢复保持时单次对冲并验证回放
+
+- 规则:[每条 Input 的处理顺序(`process`)](README.md#每条-input-的处理顺序process)
+- 级别:replay
+- 里程碑:M2
+- 前置:真实引擎中 OnFill 第一腿在途,快照后非干净重启并恢复连接
+- 步骤:保存恢复后的快照,投递旧 epoch 第一腿全成;从快照验证回放
+- 期望:同一成交只有一张成功 Second 且数量等于净成交量;无重复 SecondRetry;Output 逐字节一致
+- 实现:`crates/hft-sequencer/tests/sdk_contract/target.rs::seq_375_late_fill_resume_verify`
 
 ## 验收
 
