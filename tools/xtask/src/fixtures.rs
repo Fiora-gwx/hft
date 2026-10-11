@@ -9,8 +9,8 @@
 //! `scrub-rules.toml` (`[forbid] sha256 = [...]`). `scrub` removes the login/signature fields and
 //! applies the `[[replace]]` rules (`pattern` regex → `with`) to UTF-8 files in place.
 
-pub mod fetch;
 pub(crate) mod bundle;
+pub mod fetch;
 pub(crate) mod pointer;
 
 use std::path::Path;
