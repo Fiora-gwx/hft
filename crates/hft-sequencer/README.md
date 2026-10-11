@@ -372,7 +372,7 @@ g. rep-sim ≤ sim_max_per_round
    - **Δ 的取值范围**:同一次运行内 TSC 单调,`Δ ∈ [0, 2^58)`;8 GHz 下约 417 天、1 GHz 下约 9 年,超出 → `Fatal(ClockRange)`(实际运行远到不了)。
    - **±1 校正足够**:`mult > 2^58 × 10^12 / H − 1`,所以 `Δ × 10^12 / H − Δ × mult / 2^58 < Δ / 2^58 < 1`,得 `q' ∈ {q − 1, q}`;再以一次 u128 比较 `(q' + 1) × H ≤ Δ × 10^12`(两边 < 2^99)决定是否加 1,结果与定义式逐位相同。
    - 属性测试覆盖 `Δ` 的 0、1、`2^58 − 1` 与随机值,`H` 覆盖 15.625 MHz 以上的边界值到 8 GHz;O(1),计入每条 Input 的固定开销。SDK `Now::ens_of`/`tsc_of` 用同一基准。
-3. **交给下一次运行**:`view().stop_engine_ns()` = 最后一条已应用(带 `EVENT_END`)记录的 engine_ns——恢复后即上次运行的末值,`--recover-from-snapshot` 为 `SnapshotHdr.engine_ns`,空 journal 为 0;hft-core 的实盘驱动用它填新运行的 `EngineClock.base_engine_ns`。每个快照头的 `SnapshotHdr.engine_ns` = 其所在位置的 engine_ns。
+3. **交给下一次运行**:`view().stop_engine_ns()` = 最后一条已应用(带 `EVENT_END`)记录的 engine_ns——恢复后即上次运行的末值,`--recover-from-snapshot` 为 `SnapshotHdr.engine_ns`,空 journal 为 0;hft-core 的实盘驱动用它填新运行的 `EngineClock.base_engine_ns`。每个快照头的 `SnapshotHdr.engine_ns` = 其所在位置的 engine_ns。Recovery 快照使用已提交的 `stop_engine_ns`,不读取尚无新 Input 的事件上下文;写完该快照后、尚未消费 EngineClock 就再次崩溃,时间仍须保持。节 25 保留旧运行的时钟基准,由新 EngineClock 切换。
 4. **运行起点**:处理 `EngineClock` 或从快照起步时调 `ledger.on_run_start(E.base_engine_ns)` 与 `risk.set_run_start(E.base_engine_ns)`:早于它的换算率、保证金报告与标记价视为过期(引擎时间不计停机,停机前的数据不能当新的用)。
 5. **谁用它**:ledger 与 risk 的持久时刻(`*_ens`)、SDK `Now.engine_ns`(策略与 hft-strat-lib 的持久状态)、Viewer 预览的 TTL、advisor 的 `AdvisorLag`。本 crate 的定时器堆与 OMS/exec 的 TSC 量只在一次运行内有效,跨运行按"停机时间不计"平移([定时器](#定时器)),与 engine_ns 同口径。
 
@@ -842,6 +842,7 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 - [hft-strategy-sdk](../hft-strategy-sdk/README.md)、[hft-exec](../hft-exec/README.md)、[hft-sim](../hft-sim/README.md)、[apps/hft-core](../../apps/hft-core/README.md)、[apps/replayer](../../apps/replayer/README.md)
 
 - [指定快照恢复审计范围](../../.agents/notes/implemented/bug-fix/2026-10-11-snapshot-recovery-audit-range.md)
+- [恢复快照的引擎时间](../../.agents/notes/implemented/bug-fix/2026-10-11-recovery-snapshot-engine-time.md)
 
 ## 已知限制与后续工作
 

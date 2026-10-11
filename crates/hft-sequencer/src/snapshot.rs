@@ -346,7 +346,14 @@ pub(crate) fn build_snapshot<S: StrategySet>(
         snap_tsc: snap_tsc.0,
         boot_id: [0; 16],
         snap_utc_ns: e.now.utc_ns,
-        engine_ns: e.now.engine_ns,
+        // Recovery has no new Input yet; without a replayed tail `now` is still empty.
+        // The committed stop is also the next EngineClock's base, including a second
+        // crash after this snapshot but before that EngineClock is consumed.
+        engine_ns: if purpose == PURPOSE_RECOVERY {
+            e.last_ens
+        } else {
+            e.now.engine_ns
+        },
     };
     let mut body = Vec::with_capacity(96 + sections.len());
     body.extend_from_slice(hdr.as_bytes());

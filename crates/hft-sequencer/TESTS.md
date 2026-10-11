@@ -1589,7 +1589,8 @@ spec: README.md
 - 规则:[引擎时间](README.md#引擎时间engine_ns)、[冷启动恢复](README.md#冷启动恢复recoverdriver)
 - 级别:table
 - 里程碑:M2
-- 前置:B0;每行 boot 后读 `view().stop_engine_ns()`
+- 前置:B0;每行 boot 后读 `view().stop_engine_ns()`;第 2–4 行还核对 Recovery 快照头的 engine_ns。第 4 行在目标快照之后保留一个更晚的关键帧,确保确实选择旧快照
+- 补充步骤:第 2–4 行在恢复引导块写完、尚未消费新 EngineClock 时再次崩溃恢复;新 TSC = 7、频率为原来的两倍。两次恢复快照及新 EngineClock.base_engine_ns 均保持表中时间,推进 2 000 000 tick 后的快照增加 1 000 000 ns,从第二次恢复快照逐字节回放通过
 - 实现:`crates/hft-sequencer/tests/clock.rs::seq_108_stop_engine_ns`
 
 | 行 | 启动方式 | 期望 |

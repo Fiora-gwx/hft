@@ -153,7 +153,7 @@ fn seq_108_stop_engine_ns() {
     h.run();
     let last = h.s.engine().last_ens;
     let h2 = H::crash_restart(h, plan(SnapshotSel::Latest, true, 1, 0), Rerun::default()).unwrap();
-    assert_eq!(h2.s.view().stop_engine_ns(), last);
+    recovery_time(h2, last);
     // .3 replay_tail = false: the snapshot's engine_ns.
     reset_script();
     let mut h = b0().boot();
@@ -168,7 +168,59 @@ fn seq_108_stop_engine_ns() {
     h.quote(A1, "50000", "50004");
     h.run();
     let h2 = H::crash_restart(h, plan(SnapshotSel::Latest, false, 1, 1), Rerun::default()).unwrap();
-    assert_eq!(h2.s.view().stop_engine_ns(), ens);
+    recovery_time(h2, ens);
+    // .4 Select a genuinely older 42 us snapshot, with a later committed keyframe present.
+    reset_script();
+    let mut h = b0().boot();
+    h.run();
+    let base = h.s.engine().clock.row.base_tsc;
+    h.at(base + 42_000);
+    let selected = h.keyframe();
+    assert_eq!(snap(&selected).0.engine_ns, 42_000);
+    h.adv(5_000_000);
+    let newer = h.keyframe();
+    assert!(snap(&newer).0.engine_ns > 42_000);
+    let h2 = H::crash_restart(
+        h,
+        plan(
+            SnapshotSel::AtSeq(selected.seq),
+            false,
+            1,
+            hft_sequencer::RecoveryFlags::FROM_SNAPSHOT | hft_sequencer::RecoveryFlags::TAIL_LOST,
+        ),
+        Rerun::default(),
+    )
+    .unwrap();
+    recovery_time(h2, 42_000);
+}
+
+fn recovery_time(h: H, expected: i64) {
+    assert!(expected > 0);
+    assert_eq!(h.s.view().stop_engine_ns(), expected);
+    let first = h.snapshots().pop().unwrap();
+    assert_eq!(snap(&first).0.engine_ns, expected);
+    assert_eq!(snap(&first).0.purpose, hft_sequencer::snapshot::PURPOSE_RECOVERY);
+    // Crash before the first new EngineClock. Only the recovery snapshot can carry time
+    // forward; neither process-local last_ens nor a later Input can rescue a bad header.
+    let mut h = H::crash_restart(
+        h,
+        plan(SnapshotSel::Latest, false, 2, 0),
+        Rerun {
+            tsc: 7,
+            hz: 2 * HZ,
+            ..Rerun::default()
+        },
+    )
+    .unwrap();
+    let second = h.snapshots().pop().unwrap();
+    assert_eq!(h.s.view().stop_engine_ns(), expected);
+    assert_eq!(snap(&second).0.engine_ns, expected);
+    h.run();
+    assert_eq!(h.s.engine().clock.row.base_engine_ns, expected);
+    h.adv(2_000_000);
+    let after = h.keyframe();
+    assert_eq!(snap(&after).0.engine_ns, expected + 1_000_000);
+    assert!(h.verify_from(Some(second.seq)).is_empty());
 }
 
 #[test]
