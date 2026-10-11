@@ -2811,7 +2811,7 @@ spec: README.md
 - 例数:PR 1 000;每夜 50 000
 - 实现:`crates/hft-strategy-sdk/tests/set_dispatch.rs::sdk_185_dispatch_equivalent`
 
-### SDK-186 `StrategySet` 的静态查询:`kinds`、`cmds`、`schema_json`、`model_layout`、`model_path_version`
+### SDK-186 `StrategySet` 的静态查询与 Model 布局版本
 
 - 规则:[装配:StrategySet 与 strategy_set!](README.md#装配strategyset-与-strategy_set)
 - 级别:table
@@ -2831,6 +2831,9 @@ spec: README.md
 | SDK-186.8 | `model_layout(0xFF02)` | 与 `ProbeModel::LAYOUT` 是同一个 `&'static` |
 | SDK-186.9 | `decode_params(0xFF09, ..)` | `Err(SchemaMismatch{want: 0, got: 0xFF09})` |
 | SDK-186.10 | `model_mem_bytes(&p_target, 8)` | = `ProbeModel::mem_bytes(&p, 8)`(131_072) |
+| SDK-186.11 | `model_layout_version(0xFF02)` | = `ProbeModel::LAYOUT_VERSION` |
+| SDK-186.12 | `model_layout_version(0xFF01)` | 0(`NoModel`) |
+| SDK-186.13 | `model_layout_version(0xFF09)` | 0(集合外) |
 
 ### SDK-187 `strategy_set!` 拒绝重复的 `kind_id`、`name` 与 `schema.id`
 

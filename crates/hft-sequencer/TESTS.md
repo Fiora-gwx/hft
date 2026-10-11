@@ -33,7 +33,7 @@ spec: README.md
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
 | advisor 与 Model | SEQ-030–SEQ-044、SEQ-290、SEQ-367 |
-| 模型检查点 | SEQ-045–SEQ-051、SEQ-363 |
+| 模型检查点 | SEQ-045–SEQ-051、SEQ-363、SEQ-399–SEQ-401 |
 | 资金费合成 | SEQ-092、SEQ-192–SEQ-196、SEQ-361 |
 | 模式与 cap 的驱动 | SEQ-132、SEQ-183、SEQ-197–SEQ-213、SEQ-342、SEQ-353、SEQ-368 |
 | 模拟账户 | SEQ-067、SEQ-179、SEQ-201、SEQ-214–SEQ-217、SEQ-298 |
@@ -747,12 +747,13 @@ spec: README.md
 |---|---|---|
 | SEQ-047.1 | 删除 C | `S::create_model` 空状态;`Note{Advisor, ModelCheckpointDiscarded}` `v[0] = 2`、`v[1] = 1`(Missing) |
 | SEQ-047.2 | 翻转 C 的一个字节 | 同上,`v[1] = 2`(Corrupt) |
-| SEQ-047.3 | `Model::LAYOUT_VERSION` + 1 | `v[1] = 3`(KeyMismatch) |
+| SEQ-047.3 | 布局描述完全不变,只将 `Model::LAYOUT_VERSION` + 1 | `v[1] = 3`(KeyMismatch) |
 | SEQ-047.4 | `schema.id` 不同 | `v[1] = 3` |
 | SEQ-047.5 | 实例的 `kind_id` 不同 | `v[1] = 3` |
 | SEQ-047.6 | 检查点属于实例 1 | `v[1] = 3` |
 | SEQ-047.7 | 热段与冷副本都已不含 seq 40 000 | `v[1] = 4`(SeqNotInJournal) |
 | SEQ-047.8 | `model_restore` 返回错误 | `v[1] = 5`(RestoreErr) |
+| SEQ-047.9 | 改布局描述,显式 `LAYOUT_VERSION` 不变 | 不丢弃,不以描述的哈希充当键;布局兼容性由版本声明负责 |
 
 ### SEQ-048 参数版本、refdata 版本与二进制变化不使检查点失效
 
@@ -5521,6 +5522,43 @@ spec: README.md
 - 步骤:分别从首次快照和恰在提交尾部的最新快照恢复,不重放尾部;检查新段的 Boot 注记,请求新关键帧并独立验证恢复后日志;另将 FROM_SNAPSHOT 与 replay_tail = true 同时传入
 - 期望:每次恰有一条 RecoverFromSnapshot 注记,使用实际快照 seq;首次快照后的范围止于已提交边界,不含半事件,最新快照的空范围为 0/0;恢复后回放无分歧,矛盾配置返回 BootError::Config
 - 实现:`crates/hft-sequencer/tests/config_blob.rs::seq_398_snapshot_recovery_audit_uses_committed_tail`
+
+### SEQ-399 Model 检查点文件符合独立字节金样
+
+- 规则:[模型检查点](README.md#模型检查点)、[文件格式](../../apps/hft-core/README.md#内存与-journal-段按主机类唯一归属)
+- 级别:unit
+- 里程碑:M2
+- 前置:84 B 固定金样,按文件偏移与独立逐位 Castagnoli CRC 计算得到;路径版本 7、路径 3 B、样本 9 B
+- 步骤:解码所有键与分节;重新编码;更改运行期 len、checksum、last_ens 后再编码;另往返路径版本为 0 的空节
+- 期望:与固定金样逐字节相等,解码的体借用原文件;运行期元数据不进入保留字段,长度和 CRC 由字节计算;空节合法
+- 实现:`crates/hft-sequencer/tests/checkpoint_file.rs::seq_399_checkpoint_file_matches_independent_golden`
+
+### SEQ-400 Model 检查点损坏与长度上界显式失败
+
+- 规则:[模型检查点](README.md#模型检查点)
+- 级别:table
+- 里程碑:M2
+- 前置:SEQ-399 金样;校验结构字段时重算 CRC,校验 CRC 时只翻位
+- 实现:`crates/hft-sequencer/tests/checkpoint_file.rs::seq_400_checkpoint_file_rejects_corruption_and_limits`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| SEQ-400.1 | 每个截断位置,或尾部追加字节 | 失败,不接受部分文件或尾部垃圾 |
+| SEQ-400.2 | 上限小于体长,或声明体长为 0、19、21、u64::MAX | SizeLimit 或 Length,不按声明值分配 |
+| SEQ-400.3 | magic、文件版本或填充/保留位非法 | 对应格式错误 |
+| SEQ-400.4 | 键、CRC、路径或样本单点翻位 | Checksum |
+| SEQ-400.5 | path_len 越界/溢出、路径版本 0 却非空、体长 0–7 | Path |
+| SEQ-400.6 | 编码超过上限、首块不足 8 B、首块版本与元数据不同 | 失败,不产出文件 |
+
+### SEQ-401 检查点经真实文件恢复后 Model 连续性不变
+
+- 规则:[模型检查点](README.md#模型检查点)
+- 级别:integ
+- 里程碑:M2
+- 前置:B0 的 s2 Model,路径版本 7;每条 BBO 产出带当前 engine_ns 的 Advice
+- 步骤:消费 8 条 BBO 后分块生成检查点,编码并写入临时文件;重新读取、解码,从 journal 取得 last_seq 的 engine_ns,装配另一个 advisor;两路各处理相同的后续 20 条 BBO
+- 期望:文件首块为版本后长度,样本累计量非零且恢复时不重复消费前缀;后续 20 条 Advice 的完整头和载荷逐字节相等,累计状态及下一份检查点一致;原文件未改变,引擎 journal 验证无分歧
+- 实现:`crates/hft-sequencer/tests/advisor.rs::seq_401_checkpoint_file_resume_matches_continuous_model`
 
 ## 验收
 

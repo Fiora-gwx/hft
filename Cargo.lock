@@ -864,6 +864,7 @@ dependencies = [
 name = "hft-sequencer"
 version = "0.1.0"
 dependencies = [
+ "crc32c",
  "criterion",
  "hft-book",
  "hft-event",

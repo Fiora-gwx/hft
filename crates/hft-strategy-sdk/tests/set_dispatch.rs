@@ -69,6 +69,9 @@ fn sdk_186_static_queries() {
         "SDK-186.10"
     );
     assert_eq!(ProbeModel::mem_bytes(&p, 8), 131_072);
+    assert_eq!(ProbeSet::model_layout_version(0xFF02), ProbeModel::LAYOUT_VERSION);
+    assert_eq!(ProbeSet::model_layout_version(0xFF01), 0, "NoModel");
+    assert_eq!(ProbeSet::model_layout_version(0xFF09), 0, "unknown kind");
 }
 
 /// The macro's expansion template (the `strategy_set!` definition in `src/set_macro.rs`): no

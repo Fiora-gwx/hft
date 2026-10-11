@@ -69,6 +69,8 @@ pub trait StrategySet: 'static {
     fn model_mem_bytes(p: &Self::Params, n_groups: u16) -> u64;
     fn model_snapshot_bytes(p: &Self::Params, n_groups: u16) -> u64;
     fn model_layout(kind_id: u16) -> &'static ModelLayoutDesc;
+    /// `Model::LAYOUT_VERSION` of the kind (outside the set or `NoModel` → 0).
+    fn model_layout_version(kind_id: u16) -> u32;
     fn model_on_event<V: ModelViews>(
         m: &mut Self::ModelInst,
         ev: &EventRef<'_>,

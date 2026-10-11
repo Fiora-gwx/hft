@@ -577,6 +577,118 @@ fn checkpoint_now(a: &mut Adv) -> MemCkpt {
 }
 
 #[test]
+fn seq_401_checkpoint_file_resume_matches_continuous_model() {
+    use hft_sequencer::advisor::{checkpoint, ens_of_record};
+
+    let mut h = b0_model();
+    SCRIPT.with(|x| x.borrow_mut().path_version = 7);
+    set_mhook(|hx, ev, out| {
+        if hx.s.strategy == S2 && matches!(ev, EventRef::Bbo { .. }) {
+            let _ = out.emit_raw(G2, 7, &hx.v.now().engine_ns.to_le_bytes());
+        }
+    });
+    let count = |a: &Adv| {
+        a.mirror
+            .instances()
+            .models
+            .slots
+            .iter()
+            .filter_map(|s| s.model.as_ref())
+            .find(|m| m.i.strategy == S2)
+            .unwrap()
+            .n_events
+    };
+    let mut continuous = start(&h, MemCkpt::default(), Ring::big(), cfg());
+    catch_up(&mut continuous, &h);
+    for _ in 0..8 {
+        h.adv(10_000_000);
+        h.quote(A1, "50000", "50003");
+        h.run();
+        catch_up(&mut continuous, &h);
+    }
+    let before = count(&continuous);
+    assert!(before >= 8);
+    let saved = checkpoint_now(&mut continuous);
+    let (hdr, body) = saved.gens.get(&S2).unwrap();
+    assert_eq!(hdr.layout_version, 1);
+    assert_eq!(&body[..8], &[7, 0, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(&body[8..], &before.to_le_bytes());
+
+    struct TempFile(std::path::PathBuf);
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let path = TempFile(std::env::temp_dir().join(format!("hft-seq-401-{}.ckpt", std::process::id())));
+    let bytes = checkpoint::encode(hdr, body, 1024).unwrap();
+    std::fs::write(&path.0, &bytes).unwrap();
+    let loaded = std::fs::read(&path.0).unwrap();
+    let decoded = checkpoint::decode(&loaded, 1024).unwrap();
+    assert_eq!(decoded.samples, &before.to_le_bytes());
+    // engine_ns belongs to the journal, not the file's reserved header bytes.
+    let journal = committed(h.j());
+    let ix = journal
+        .recs
+        .iter()
+        .position(|r| r.seq == decoded.key.last_seq)
+        .unwrap();
+    let last_ens = ens_of_record(&journal, ix).unwrap();
+    assert!(last_ens > 0);
+    assert_eq!(last_ens, hdr.last_ens);
+    let restored_store = MemCkpt {
+        gens: HashMap::from([(S2, (decoded.header(last_ens), decoded.body.to_vec()))]),
+        ..MemCkpt::default()
+    };
+    let mut resumed = start(&h, restored_store, Ring::big(), cfg());
+    assert!(
+        !resumed
+            .notes
+            .iter()
+            .any(|n| n.strategy == S2 && n.code == hft_event::note_code(NoteSource::Advisor, 1))
+    );
+    catch_up(&mut resumed, &h);
+    assert_eq!(
+        count(&resumed),
+        before,
+        "do not replay the checkpoint prefix into the Model"
+    );
+    continuous.ring.recs.clear();
+    continuous.ring.used = 0;
+    resumed.ring.recs.clear();
+    resumed.ring.used = 0;
+    for _ in 0..20 {
+        h.adv(2_000_000);
+        h.quote(A1, "50000", "50004");
+        h.run();
+        catch_up(&mut continuous, &h);
+        catch_up(&mut resumed, &h);
+    }
+    assert_eq!(count(&continuous), before + 20);
+    assert_eq!(count(&resumed), count(&continuous));
+    let advice_bytes = |a: &Adv| {
+        a.ring
+            .recs
+            .iter()
+            .filter(|r| r.0 == EventKind::ADVICE)
+            .map(|r| r.1.clone())
+            .collect::<Vec<_>>()
+    };
+    let expected = advice_bytes(&continuous);
+    assert_eq!(expected.len(), 20);
+    assert_eq!(advice_bytes(&resumed), expected, "complete AdviceHdr and payload");
+    let a = checkpoint_now(&mut continuous);
+    let b = checkpoint_now(&mut resumed);
+    assert_eq!(a.gens.get(&S2), b.gens.get(&S2));
+    assert_eq!(
+        std::fs::read(&path.0).unwrap(),
+        bytes,
+        "restore only reads the checkpoint"
+    );
+    assert!(h.verify().is_empty());
+}
+
+#[test]
 fn seq_047_checkpoint_discard_reasons() {
     let disc = hft_event::note_code(NoteSource::Advisor, 1);
     let reason = |a: &Adv| -> Option<u64> {
@@ -611,14 +723,30 @@ fn seq_047_checkpoint_discard_reasons() {
         g.1[n] ^= 0xFF;
     }
     assert_eq!(reason(&start(&h, s, Ring::big(), cfg())), Some(2));
-    // .3 layout.
-    SCRIPT.with(|x| x.borrow_mut().layout_alt = true);
+    // .3 The version alone changes; the layout descriptor is exactly the same.
+    assert_eq!(store.gens[&S2].0.layout_version, 1);
+    SCRIPT.with(|x| x.borrow_mut().layout_version_delta = 1);
     let s3 = MemCkpt {
         gens: store.gens.clone(),
         ..MemCkpt::default()
     };
     assert_eq!(reason(&start(&h, s3, Ring::big(), cfg())), Some(3));
+    SCRIPT.with(|x| x.borrow_mut().layout_version_delta = 0);
+    // Descriptor text is not a checkpoint key. Its spelling must not invalidate raw samples.
+    SCRIPT.with(|x| x.borrow_mut().layout_alt = true);
+    let descriptor_only = MemCkpt {
+        gens: store.gens.clone(),
+        ..MemCkpt::default()
+    };
+    assert_eq!(reason(&start(&h, descriptor_only, Ring::big(), cfg())), None);
     SCRIPT.with(|x| x.borrow_mut().layout_alt = false);
+    // .4 schema.
+    let mut s4 = MemCkpt {
+        gens: store.gens.clone(),
+        ..MemCkpt::default()
+    };
+    s4.gens.get_mut(&S2).unwrap().0.schema_id ^= 1;
+    assert_eq!(reason(&start(&h, s4, Ring::big(), cfg())), Some(3));
     // .5 kind and .6 instance.
     let mut s5 = MemCkpt {
         gens: store.gens.clone(),

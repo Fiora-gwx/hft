@@ -393,8 +393,10 @@ pub struct Script {
     /// `Model::PATH_VERSION` of the binary.
     pub path_version: u32,
     pub fail_model_restore: bool,
-    /// Another `model_layout` (stands in for `LAYOUT_VERSION + 1`).
+    /// Another layout descriptor, independent of the checkpoint's version key.
     pub layout_alt: bool,
+    /// Increment to the Model's baseline LAYOUT_VERSION = 1.
+    pub layout_version_delta: u32,
     /// `model_on_params` calls: (strategy, params version).
     pub model_params: Vec<(StrategyId, i64)>,
     /// `create`/`on_params` calls: (strategy, method, `thr` value).
@@ -715,6 +717,9 @@ macro_rules! test_set {
                 } else {
                     &ModelLayoutDesc::EMPTY
                 }
+            }
+            fn model_layout_version(_: u16) -> u32 {
+                SCRIPT.with(|x| 1 + x.borrow().layout_version_delta)
             }
             fn model_on_event<V: ModelViews>(
                 m: &mut TestModel,

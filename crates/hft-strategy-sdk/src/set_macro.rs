@@ -268,6 +268,14 @@ macro_rules! strategy_set {
                     _ => &$crate::ModelLayoutDesc::EMPTY,
                 }
             }
+            fn model_layout_version(kind_id: u16) -> u32 {
+                match kind_id {
+                    $($($attr)* k if k == <$($path)* as $crate::Strategy>::DESC.kind_id => {
+                        <<$($path)* as $crate::Strategy>::Model as $crate::Model>::LAYOUT_VERSION
+                    })*
+                    _ => 0,
+                }
+            }
             fn model_on_event<V: $crate::ModelViews>(
                 m: &mut Self::ModelInst,
                 ev: &$crate::EventRef<'_>,

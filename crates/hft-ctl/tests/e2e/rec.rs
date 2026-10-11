@@ -175,6 +175,9 @@ impl StrategySet for RecSet {
     fn model_layout(kind_id: u16) -> &'static ModelLayoutDesc {
         T::model_layout(kind_id)
     }
+    fn model_layout_version(kind_id: u16) -> u32 {
+        T::model_layout_version(kind_id)
+    }
     fn model_on_event<V: ModelViews>(
         m: &mut Self::ModelInst,
         ev: &EventRef<'_>,

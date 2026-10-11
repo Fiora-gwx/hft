@@ -214,6 +214,9 @@ macro_rules! test_set {
             fn model_layout(_: u16) -> &'static ModelLayoutDesc {
                 &ModelLayoutDesc::EMPTY
             }
+            fn model_layout_version(_: u16) -> u32 {
+                0
+            }
             fn model_on_event<V: ModelViews>(_: &mut (), _: &EventRef<'_>, _: &V, _: &mut AdviceOut<'_>) {}
             fn model_on_params(_: &mut (), _: &P, _: &GroupTable, _: &RefView<'_>) -> ModelParamEffect {
                 ModelParamEffect::None

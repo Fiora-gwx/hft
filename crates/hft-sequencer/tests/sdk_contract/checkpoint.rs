@@ -137,10 +137,10 @@ fn sdk_065_checkpoint_key_matrix() {
     // .2 kind_id in the header.
     let (a, c0) = restart(&c, hdr_edit(&c, |h, _| h.kind_id = NP));
     discarded(&a, c0, discard::KEY_MISMATCH, "SDK-065.2");
-    // .3 the binary's layout.
-    SCRIPT.with(|x| x.borrow_mut().layout_alt = true);
+    // .3 the binary's explicit layout version, with an unchanged descriptor.
+    SCRIPT.with(|x| x.borrow_mut().layout_version_delta = 1);
     let (a, c0) = restart(&c, store_of(&c, |_| {}));
-    SCRIPT.with(|x| x.borrow_mut().layout_alt = false);
+    SCRIPT.with(|x| x.borrow_mut().layout_version_delta = 0);
     discarded(&a, c0, discard::KEY_MISMATCH, "SDK-065.3");
     // .4 schema id (header vs binary).
     let (a, c0) = restart(&c, hdr_edit(&c, |h, _| h.schema_id = 0xFF05));
@@ -170,7 +170,7 @@ fn sdk_065_checkpoint_key_matrix() {
         &c,
         hdr_edit(&c, |h, b| {
             let big = (b.len() as u32).to_le_bytes();
-            b[..4].copy_from_slice(&big);
+            b[4..8].copy_from_slice(&big);
             h.checksum = ckpt_checksum(b);
         }),
     );

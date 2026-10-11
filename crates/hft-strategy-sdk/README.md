@@ -1106,6 +1106,7 @@ pub trait StrategySet: 'static {
     fn model_mem_bytes(p: &Self::Params, n_groups: u16) -> u64;              // ctl-gateway 与 hft-core 装配的预算校验
     fn model_snapshot_bytes(p: &Self::Params, n_groups: u16) -> u64;
     fn model_layout(kind_id: u16) -> &'static ModelLayoutDesc;
+    fn model_layout_version(kind_id: u16) -> u32;                          // = Model::LAYOUT_VERSION;集合外或 NoModel 为 0,不以布局描述的哈希代替
     fn model_on_event<V: ModelViews>(m: &mut Self::ModelInst, ev: &EventRef<'_>, v: &V, out: &mut AdviceOut<'_>);
     fn model_on_params(m: &mut Self::ModelInst, p: &Self::Params, g: &GroupTable, rd: &RefView<'_>) -> ModelParamEffect;
     fn model_snapshot_chunk(m: &Self::ModelInst, from_gix: u16, w: &mut SnapshotWriter, max_bytes: u32) -> SnapshotProgress;

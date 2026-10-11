@@ -26,6 +26,8 @@ use crate::strategies::{Direct, Instances, MarketEv};
 use crate::types::{BootError, RecoverPlan, RecoveryFlags, SnapshotSel};
 use crate::{BootSource, Sequencer, StepOutcome};
 
+pub mod checkpoint;
+
 // ------------------------------------------------------------------------------- mirror hooks
 
 /// One Advice produced by a Model (before the outbox).
@@ -349,8 +351,8 @@ pub struct CkptHdr {
     pub account: AccountId,
     pub kind_id: u16,
     pub schema_id: u32,
-    /// Digest of `S::model_layout(kind_id)` (stands in for `Model::LAYOUT_VERSION`).
-    pub layout: u64,
+    /// The strategy-declared `Model::LAYOUT_VERSION`, never a descriptor digest.
+    pub layout_version: u32,
     pub path_version: u32,
     pub last_seq: u64,
     /// engine_ns of `last_seq` (AdvisorLag after a restart).
@@ -375,21 +377,6 @@ pub trait CheckpointStore {
 /// `xxh3_64` of a checkpoint body.
 pub fn ckpt_checksum(body: &[u8]) -> u64 {
     xxhash_rust::xxh3::xxh3_64(body)
-}
-
-/// The layout digest of a kind's Model.
-pub fn layout_digest<S: StrategySet>(kind_id: u16) -> u64 {
-    /// Streams the `Debug` text into the hash (no allocation).
-    struct H(xxhash_rust::xxh3::Xxh3);
-    impl core::fmt::Write for H {
-        fn write_str(&mut self, s: &str) -> core::fmt::Result {
-            self.0.update(s.as_bytes());
-            Ok(())
-        }
-    }
-    let mut h = H(xxhash_rust::xxh3::Xxh3::new());
-    let _ = core::fmt::write(&mut h, format_args!("{:?}", S::model_layout(kind_id)));
-    h.0.digest()
 }
 
 /// The advice ring as the advisor sees it (variable-length records).
@@ -538,7 +525,7 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
                         || h.account != a
                         || h.kind_id != kind
                         || h.schema_id != schema
-                        || h.layout != layout_digest::<S>(kind)
+                        || h.layout_version != S::model_layout_version(kind)
                     {
                         Some(crate::codes::discard::KEY_MISMATCH)
                     } else if ckpt_checksum(&buf) != h.checksum
@@ -891,7 +878,7 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
                     .iter()
                     .find(|d| d.kind_id == sl.kind_id)
                     .map_or(0, |d| d.schema.id),
-                layout: layout_digest::<S>(sl.kind_id),
+                layout_version: S::model_layout_version(sl.kind_id),
                 path_version: S::model_path_version(sl.kind_id),
                 last_seq: e.cur_seq,
                 last_ens: e.last_ens,
@@ -927,8 +914,8 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
             None => {
                 S::model_snapshot_path(m, &mut w);
                 let p = w.as_bytes();
-                bytes.extend_from_slice(&(p.len() as u32).to_le_bytes());
                 bytes.extend_from_slice(&job.hdr.path_version.to_le_bytes());
+                bytes.extend_from_slice(&(p.len() as u32).to_le_bytes());
                 bytes.extend_from_slice(p);
                 job.next_gix = Some(0);
             }
@@ -987,9 +974,7 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
 
 /// The path section's length prefix stays within the body (else the file is corrupt).
 fn path_section_fits(body: &[u8]) -> bool {
-    let Some(b) = body.get(..4) else { return false };
-    let plen = u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize;
-    plen.checked_add(8).is_some_and(|end| end <= body.len())
+    checkpoint::path_sections(body).is_ok()
 }
 
 fn sl_kind<S: StrategySet>(inst: &Instances<S>, ix: usize) -> u16 {
@@ -1005,14 +990,7 @@ fn restore_model<S: StrategySet>(
     body: &[u8],
     kind: u16,
 ) -> Result<Option<(u64, u32)>, ()> {
-    let plen = body
-        .get(..4)
-        .map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])) as usize;
-    let pver = body
-        .get(4..8)
-        .map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
-    let path = body.get(8..8 + plen).ok_or(())?;
-    let rest = body.get(8 + plen..).unwrap_or(&[]);
+    let (pver, path, rest) = checkpoint::path_sections(body).map_err(|_| ())?;
     let Some(ms) = inst.models.slots.get_mut(ix) else {
         return Err(());
     };

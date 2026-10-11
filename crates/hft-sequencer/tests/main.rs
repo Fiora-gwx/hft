@@ -10,6 +10,7 @@ mod advice;
 mod advisor;
 mod advisor_lag;
 mod boot;
+mod checkpoint_file;
 mod clock;
 mod commands;
 mod common;

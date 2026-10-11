@@ -1409,6 +1409,8 @@ spec: README.md
 | CORE-132.7 | `path_len = 4096 + 65536`(样本节为空,CRC 重算) | `Ok`,样本节长 0 |
 | CORE-132.8 | `path_version = 2`(CRC 重算) | `Ok`,只交出样本节;路径节丢弃 |
 | CORE-132.9 | `PATH_VERSION = 0` 的 Model:`path_version = 0`、`path_len = 0` | `Ok`,路径节为空 |
+| CORE-132.10 | `_pad0` 或 `_rsv` 非零,CRC 重算 | `Err(Corrupt)` |
+| CORE-132.11 | 体长不足 8 B,或 `path_version = 0` 且 `path_len > 0`,CRC 重算 | `Err(Corrupt)` |
 
 ### CORE-133 检查点的可用性只由五项键决定
 

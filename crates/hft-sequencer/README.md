@@ -493,6 +493,8 @@ advice 环元素 = `AdviceHdr { strategy, account, local_kind, group, len, basis
 
 检查点键的组成与失效规则归 [hft-strategy-sdk](../hft-strategy-sdk/README.md)(含 `LAYOUT_VERSION` 与路径状态节 `Model::PATH_VERSION` 的纪律;参数版本、refdata 版本、二进制 SHA **不**使检查点失效)。文件 `<strategy_instance>.ckpt` + 上一代 `.prev`、文件头 `CkptHdr` 的格式、目录、周期 `advisor.model_checkpoint_ms`、块大小 `advisor.checkpoint_chunk_kib` 与磁盘上限归 [apps/hft-core](../../apps/hft-core/README.md)。本 crate 的 advisor 实现读写流程:
 
+版本键经 `S::model_layout_version(kind_id)` 读取实际 `Model::LAYOUT_VERSION`;布局描述的内容或调试文本不充当版本键。`advisor::checkpoint::{encode, decode}` 是该文件格式的共用冷路径编解码器,不做 I/O;`decode` 验证完整文件后借用路径节与样本节,大小上限由调用方传入。`Decoded::header(last_ens)` 转为 advisor 的运行期元数据,其中 `last_ens` 必须取自 journal 的 `last_seq`,不占用文件保留字段。路径节首块按文件格式写出版本和长度;文件发现、读取前的大小检查、fsync、rename 与两代保留由 app 负责。
+
 1. **写(分块)**:按事件时间每 `advisor.model_checkpoint_ms` 与 Drain 时,对每个有 Model 的实例依次:`ckpt.begin(hdr)`(`last_seq` = 该实例 Model 已消费的最后一条记录)→ 每次 `poll_once` 调一次 `S::model_snapshot_chunk(&m, from_gix, &mut w, max_bytes)` 并 `write_chunk` 一块(`max_bytes` = `advisor.checkpoint_chunk_kib` × 1024;路径状态节作为第一块写出,分节规则归 SDK)→ `SnapshotProgress::More(next_gix)` 时下次从 `next_gix` 接着写,`Done` 时 `commit`。**写一份检查点的全部块期间,整个 advisor(镜像与它承载的全部 Model)停在 `last_seq`**:不读 journal、不投递任何事件——镜像是共享的,只停一个 Model 而让镜像前进会使它错过事件、续算不再确定;停顿时长 = 块数 × ≤ 1 ms,计入 `AdvisorLag`,写完后照常追赶。写失败(含超出磁盘上限、两节合计(路径状态节前缀的 8 B 不计)超过 `snapshot_bytes`)→ 本代作废、上一代保留,写 Meta `Note{ModelCkptSkipped}`(P1,`v[0]` = strategy、`v[1]` = 已写字节、`v[2]` = 声明的 `snapshot_bytes`),下周期重试。
 2. **读**:advisor 启动时对每个实例 `ckpt.load`;键中 `last_seq` 以外的各项与当前实例一致、`last_seq` 在可读的 journal(热段或冷副本)内、校验和正确 → `S::model_restore`(路径状态节版本不符时只丢该节并写 `Note{ModelPathReset}`,规则归 SDK),然后按 SDK 规定以 `last_seq` 处生效的参数调一次 `S::model_on_params`,镜像从不晚于 `last_seq` 的快照起步、只重放到 `last_seq` 而不投递给该 Model,此后照常投递(含 `SetParams` → `model_on_params`、`InjectWarmup` → `EventRef::Warmup`)。
 3. **丢弃**:任一条件不满足 → `S::create_model` 空状态起步,写 Meta `Note{source = Advisor, code = ModelCheckpointDiscarded}`(`v[0]` = strategy,`v[1]` = 原因码,码表在 hft-event);随后靠预热注入或实时样本就绪。
@@ -786,6 +788,7 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 | `src/commands.rs` | 命令应用与 `CmdResult`、`ModeErr` 映射、Viewer 预览表、`SetParams` 通用校验(含 `LotMismatch`、`DustBelowMinNotional`、`NonProdOnly`、`ModelMemBudget`、`GroupId` 高位)、`ReplaceRefdata` 复核(含 Drain 末二次复核与撤销待生效引用)、`WriteOffResidual`、`SmokeOrder`、停机标记的 `Kill` |
 | `src/drain.rs` | Drain 状态机 |
 | `src/advisor.rs` | `Advisor`(镜像、Model、outbox、分块模型检查点) |
+| `src/advisor/checkpoint.rs` | Model 检查点文件编解码、CRC32C、键与分节校验;无 I/O |
 | `benches/seq.rs`、`benches/l2burst.rs`、`tests/{recover,determinism,advisor,sim_route,drain,poison,clock,liveness,notify_backlog,viewer_confirm,keyframe,preempt,recon,commands}.rs` | 见测试 |
 
 </details>
@@ -822,6 +825,7 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 - 共享缓存行:心跳、kill 字(sequencer 写、gw 读,每个 `KillWord` 独占缓存行)、各环头尾索引(BBO、advice 与 md 每条之后读 ctl/rep(md 另读 bbo)的生产者索引)。
 - 周期性停顿:关键帧每个周期或每 `keyframe_max_events` 条 Input 一次、一次写完(上表),段滚动的引导块每段一次(整点滚动为主,段用量触发的滚动另计)、一次写完,`NotifyContinue` 背压时实盘回报仍被取;这些只影响 p99.9(只记录,[latency-budget](../../docs/latency-budget.md))。
 - advisor 镜像持有一份与 sequencer 同规模的状态(内存计入 hft-core 的主机类预算,见 [apps/hft-core 内存与 journal 段](../../apps/hft-core/README.md#内存与-journal-段按主机类唯一归属))。
+- 检查点文件编解码只在冷路径调用;`decode` 零分配、O(文件长),`encode` 分配一份文件大小的缓冲。两者均受调用方的体长上限约束,不计入 sequencer 热路径或 advisor 分块写入的预算。
 
 ## 测试与验收
 
@@ -830,7 +834,7 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 ## 依赖
 
 - 内部:`hft-types`、`hft-refdata`、`hft-event`、`hft-book`、`hft-oms`、`hft-risk`、`hft-ledger`、`hft-exec`、`hft-strategy-sdk`(`StrategySet`、`Views`、`EventRef`、`Ctx`、意图类型)、`hft-journal`(读者;写者在 feature `live` 下,只有 apps/hft-core 与 apps/replayer 打开)、`hft-rt`(环、`ByteSpsc`、`Mailbox`、`KillWord`、`TscClock`、`Heartbeat`)。
-- 外部:`xxhash-rust`(xxh3,无分配流式接口)、`sha2`(0.10,冷启动核对 journal 配置内容,不启用 asm)、`zerocopy`(快照与配置行布局)。
+- 外部:`xxhash-rust`(xxh3,无分配流式接口)、`sha2`(0.10,冷启动核对 journal 配置内容,不启用 asm)、`zerocopy`(快照与配置行布局)、`crc32c`(冷路径检查点文件校验)。
 - 禁止:任何 `strategies/*`(策略只在装配处经 `strategy_set!` 进入)、`hft-strat-lib`、`hft-sim`(sim-gw 由 hft-core 装配)、`hft-net`、`hft-venue`、`venue-*`、`tokio`、任何 `cold` crate。
 
 ## 延伸阅读

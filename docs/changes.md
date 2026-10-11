@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-11 | StrategySet 显式导出 Model::LAYOUT_VERSION,advisor 以真实版本校验键;路径首块按版本、长度顺序写出。共用冷路径检查点编解码器验证规范文件、CRC32C、保留位与体长上限,运行期 engine_ns 从 journal 取得;真实文件恢复验证 Advice 与累计状态连续性 | SDK-065/186、SEQ-047/399–401;布局描述哈希遗漏版本升级,路径首块与文件规格顺序相反 | crates/hft-strategy-sdk、crates/hft-sequencer、相关 StrategySet 测试替身、apps/hft-core 格式规格 | 否 |
 | 2026-10-11 | Recovery 快照的 engine_ns 取已提交停止点,不读尚无新 Input 的事件上下文;覆盖重放尾部、直接恢复及指定旧快照,并在 EngineClock 之前再次崩溃、换频率恢复后逐字节回放 | CI 38149555201 的 RPL-025/026 恢复快照时间为 0;SEQ-108 | crates/hft-sequencer、docs/architecture.md | 否 |
 | 2026-10-11 | EVT-196 的分配与释放按调用线程计数,常量初始化的 TLS 排除其他测试线程活动;同线程真实分配和外部线程重叠对照验证计数器,原 1,000 次入口调用与 Linux 系统调用检查保留 | CI 38148402294 记录到无法归属调用线程的 4 次分配 | crates/hft-event | 否 |
 | 2026-10-11 | 指定快照恢复在引导块记录所选快照与完整提交尾部的物理 seq 区间,空区间为 0/0;文件重组保留末片 seq,半事件不计入,矛盾的尾部重放配置拒绝。真实文件覆盖 20 min 后回到 10 min 再运行 20 min,以及 Drain 换版本后运行 10 min,新运行保留整点滚段,旧尾部行情篡改不污染新运行;无 journal 或快照格式变化 | RPL-025–026、SEQ-385、SEQ-398 | crates/hft-sequencer、apps/replayer、docs/architecture.md | 否 |
