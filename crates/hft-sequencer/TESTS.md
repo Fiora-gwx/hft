@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | SEQ-018、SEQ-310 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
-| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-386 |
+| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-387 |
 | 策略集(`StrategySet`) | SEQ-015–SEQ-018、SEQ-340 |
 | 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181 |
 | 环与容量 | SEQ-001–SEQ-007、SEQ-058、SEQ-059、SEQ-064、SEQ-066、SEQ-086、SEQ-087、SEQ-100、SEQ-221、SEQ-231、SEQ-279、SEQ-288、SEQ-345、SEQ-346、SEQ-367 |
@@ -5333,7 +5333,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:Linux、live/replay-io features;B0 每张 OMS 表 4096 槽(世代计数节保证快照跨片),以真实 JournalWriter::open_offline 写普通临时目录
 - 输入:启动放行、按需快照、BBO、关键帧、滚段与再写关键帧
-- 步骤:关闭写者,JournalReader 经 Log::from_reader 读取;每个 StateSnapshot 分别只从该日志装配 EngineSetup 与 VerifyDriver
+- 步骤:关闭写者,JournalReader 经 Log::from_reader 读取;每个 StateSnapshot 先独立恢复并重新序列化自检,再分别只从该日志装配 EngineSetup 与 VerifyDriver
 - 期望:至少 4 个快照和 2 段;实际包含大于单片的快照与物理 seq 间隔,有 CmdResult;所有起点均处理完全部 Input、Output 无分歧且无残留
 - 实现:`crates/hft-sequencer/tests/replay_file.rs::seq_385_file_journal_independent_verify`
 
@@ -5354,6 +5354,27 @@ spec: README.md
 | SEQ-386.3 | 重组上限 32 B | ReassemblyCap |
 | SEQ-386.4 | 首段 magic 损坏 | 失败 |
 | SEQ-386.5 | 恢复来源文件 | 读取成功,字节未被读取器修改 |
+
+### SEQ-387 指定起点快照自检拒绝损坏和恢复丢失
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
+- 级别:table
+- 里程碑:M2
+- 前置:SEQ-385 的实际文件 journal,同时包含头部 state_hash 为零的关键帧与非零引导快照;各行修改独立的内存副本
+- 实现:`crates/hft-sequencer/tests/replay_file.rs::seq_387_snapshot_self_check_rejects_corruption_and_loss`
+
+| 行 | 条件 | 期望 |
+|---|---|---|
+| SEQ-387.1 | 每个快照保持原值,或将声明哈希置零 | 自算非零哈希与恢复后重算值一致 |
+| SEQ-387.2 | 每个快照声明哈希翻转 1 bit | DeclaredHash,不回退快照 |
+| SEQ-387.3 | 快照尾追加 1 B 零 | Sections |
+| SEQ-387.4 | 头部节数置零 | Sections |
+| SEQ-387.5 | purpose 置零 | Header |
+| SEQ-387.6 | 头部截短 1 B | Header |
+| SEQ-387.7 | 重复首节并重算节数和哈希 | Sections |
+| SEQ-387.8 | 追加合法但恢复路径不识别的节 65535,重算节数和哈希 | RoundTrip,节号 65535 |
+| SEQ-387.9 | 风控节版本置为 65535,重算哈希 | Restore 失败 |
+| SEQ-387.10 | 请求不存在的快照 seq | Missing;原日志仍通过自检 |
 
 ## 验收
 

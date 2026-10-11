@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-11 | 离线快照自检在投递输入前验证节边界、唯一性、节数与非零声明哈希;使用日志配置和正式恢复路径重建,重新序列化后按既定算法核对 state_hash,差异定位到节。默认关闭的 replay-io 提供只读入口,缓冲有界,损坏或不兼容时不回退其他快照 | SEQ-385、SEQ-387;replayer 起点自检前置 | crates/hft-sequencer | 否 |
 | 2026-10-11 | 文件回放输入经 JournalReader 的实际段头、物理 seq 与多段重组进入同一 Log;默认关闭 replay-io,记录数/逻辑体字节数显式有界,损坏/缺段/schema 不符或未结束直接失败。RecordView::exact_body 只去对齐填充并拒绝非零填充;回放比较保留逻辑体长度与业务尾零,不再将尾零长度差异视为一致。实际磁盘输入从每个快照独立装配验证 | EVT-028、JNL-125、SEQ-384–386 | crates/hft-event、crates/hft-journal、crates/hft-sequencer | 否 |
 | 2026-10-04 | 设计基线 v1:进入实现前的最后一次统一(M0-f)与测试规格(M0-g)合并后的状态;此后只走本表记录的变更 | [负责人决定](../design/_work/round8-decisions.md)(进入实现、测试规格先行) | 全仓 | 是 |
 | 2026-10-04 | `test-trace` 追溯规则细化:扫描范围排除 `docs/tests/README.md` 与 xtask 夹具目录;DST 场景、基准、fuzz 用例的"位置"定义;`实现 = 待实现` 而找到测试时列为未实现;pytest skip 等同 `#[ignore]`;xtask 夹具可由测试代码在临时目录生成;xtask 依赖加 `regex` | M1 实现 `cargo xtask test-trace`(TOOL-086–TOOL-091、TOOL-180) | docs/tests/README.md、tools/README.md、tools/TESTS.md、tools/xtask | 否 |

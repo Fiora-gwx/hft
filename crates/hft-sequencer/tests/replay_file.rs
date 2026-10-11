@@ -8,6 +8,7 @@ use hft_sequencer::driver::RollInfo;
 use hft_sequencer::driver::live::{LiveDriver, LiveIo, RingId};
 use hft_sequencer::driver::replay::{Log, ReplayDriver, ReplayMode};
 use hft_sequencer::driver::replay_io::{LogReadError, LogReadLimits};
+use hft_sequencer::driver::replay_snapshot::{SnapshotCheckError, check_snapshot};
 use hft_sequencer::{
     BootSource, EngineSetup, InputSlot, OutRing, ParsedConfig, Sequencer, SnapshotSel, StepOutcome,
 };
@@ -192,9 +193,9 @@ fn fixture() -> Temp {
         });
         run(&mut s);
     }
-    s.driver_mut().io.writer.publish();
-    s.driver_mut().io.writer.seal_and_close().unwrap();
-    drop(s);
+    let mut driver = s.into_driver();
+    driver.io.writer.publish();
+    driver.io.writer.seal_and_close().unwrap();
     t
 }
 
@@ -223,6 +224,8 @@ fn seq_385_file_journal_independent_verify() {
     );
     assert!(log.recs.iter().any(|r| r.kind == EventKind::CMD_RESULT));
     for at in snapshots {
+        let checked = check_snapshot::<TestSet>(&log, at).unwrap_or_else(|e| panic!("snapshot {at}: {e:?}"));
+        assert_ne!(checked.state_hash, [0; 16]);
         let setup = EngineSetup::from_snapshot(&log, at).unwrap();
         let driver = ReplayDriver::new(ReplayMode::Verify, log.clone(), 0, setup.seq.replay_per_round);
         let mut s: Sequencer<ReplayDriver, TestSet> = Sequencer::boot(
@@ -294,5 +297,144 @@ fn seq_386_file_read_failures_do_not_return_partial_log() {
         std::fs::read(path).unwrap(),
         before,
         "reading modified the source"
+    );
+}
+
+fn rehash_snapshot(body: &mut [u8]) {
+    use hft_sequencer::snapshot::{count_sections, state_hash};
+    let n = size_of::<hft_event::SnapshotHdr>();
+    let hash = state_hash(&body[n..]);
+    let count = count_sections(&body[n..]);
+    body[4..8].copy_from_slice(&count.to_le_bytes());
+    body[16..32].copy_from_slice(&hash);
+}
+
+#[test]
+fn seq_387_snapshot_self_check_rejects_corruption_and_loss() {
+    use hft_event::{SectionHdr, SnapshotHdr};
+    use hft_strategy_sdk::SnapshotReader;
+    use zerocopy::IntoBytes;
+
+    let t = fixture();
+    let mut r = JournalReader::open(&reader_cfg(&t)).unwrap();
+    let log = Log::from_reader(&mut r, limits()).unwrap();
+    let indices: Vec<_> = log
+        .recs
+        .iter()
+        .enumerate()
+        .filter_map(|(i, r)| (r.kind == EventKind::STATE_SNAPSHOT).then_some(i))
+        .collect();
+    let ix = indices[0];
+    let seq = log.recs[ix].seq;
+    // A declared digest is checked, while zero always means compute it independently.
+    assert!(
+        indices
+            .iter()
+            .any(|i| log.recs[*i].read::<SnapshotHdr>().unwrap().state_hash == [0; 16])
+    );
+    assert!(
+        indices
+            .iter()
+            .any(|i| log.recs[*i].read::<SnapshotHdr>().unwrap().state_hash != [0; 16])
+    );
+    for i in indices {
+        let at = log.recs[i].seq;
+        let good = check_snapshot::<TestSet>(&log, at).unwrap();
+        let mut bad = log.clone();
+        let mut wrong = good.state_hash;
+        wrong[0] ^= 1;
+        bad.recs[i].body[16..32].copy_from_slice(&wrong);
+        assert!(matches!(
+            check_snapshot::<TestSet>(&bad, at),
+            Err(SnapshotCheckError::DeclaredHash { .. })
+        ));
+        bad.recs[i].body[16..32].fill(0);
+        assert_eq!(check_snapshot::<TestSet>(&bad, at).unwrap(), good);
+    }
+    let mut bad = log.clone();
+    bad.recs[ix].body.push(0);
+    assert_eq!(
+        check_snapshot::<TestSet>(&bad, seq),
+        Err(SnapshotCheckError::Sections)
+    );
+    bad = log.clone();
+    bad.recs[ix].body[4..8].copy_from_slice(&0u32.to_le_bytes());
+    assert_eq!(
+        check_snapshot::<TestSet>(&bad, seq),
+        Err(SnapshotCheckError::Sections)
+    );
+    bad = log.clone();
+    bad.recs[ix].body[0] = 0;
+    assert_eq!(
+        check_snapshot::<TestSet>(&bad, seq),
+        Err(SnapshotCheckError::Header)
+    );
+    bad = log.clone();
+    bad.recs[ix].body.truncate(size_of::<SnapshotHdr>() - 1);
+    assert_eq!(
+        check_snapshot::<TestSet>(&bad, seq),
+        Err(SnapshotCheckError::Header)
+    );
+
+    let n = size_of::<SnapshotHdr>();
+    let mut sections = SnapshotReader::new(&log.recs[ix].body[n..]);
+    let first = sections.next_section().unwrap().unwrap();
+    let first_end = n + sections.pos();
+    bad = log.clone();
+    bad.recs[ix]
+        .body
+        .extend_from_slice(&log.recs[ix].body[n..first_end]);
+    rehash_snapshot(&mut bad.recs[ix].body);
+    assert_eq!(
+        check_snapshot::<TestSet>(&bad, seq),
+        Err(SnapshotCheckError::Sections)
+    );
+    assert_ne!(first.section, u16::MAX);
+
+    // The restore path ignores sections it does not own. A validly framed, hashed extra
+    // section must still be detected as lost state by the independent serialization check.
+    bad = log.clone();
+    bad.recs[ix].body.extend_from_slice(
+        SectionHdr {
+            section: u16::MAX,
+            version: 1,
+            count: 1,
+            len: 8,
+            _rsv: 0,
+        }
+        .as_bytes(),
+    );
+    bad.recs[ix].body.extend_from_slice(&[0; 8]);
+    rehash_snapshot(&mut bad.recs[ix].body);
+    assert!(matches!(
+        check_snapshot::<TestSet>(&bad, seq),
+        Err(SnapshotCheckError::RoundTrip {
+            section: u16::MAX,
+            ..
+        })
+    ));
+
+    bad = log.clone();
+    let mut sections = SnapshotReader::new(&log.recs[ix].body[n..]);
+    loop {
+        let pos = n + sections.pos();
+        let s = sections.next_section().unwrap().expect("risk section");
+        if s.section == 4 {
+            bad.recs[ix].body[pos + 2..pos + 4].copy_from_slice(&u16::MAX.to_le_bytes());
+            break;
+        }
+    }
+    rehash_snapshot(&mut bad.recs[ix].body);
+    assert!(matches!(
+        check_snapshot::<TestSet>(&bad, seq),
+        Err(SnapshotCheckError::Restore(_))
+    ));
+    assert_eq!(
+        check_snapshot::<TestSet>(&log, u64::MAX),
+        Err(SnapshotCheckError::Missing)
+    );
+    assert!(
+        check_snapshot::<TestSet>(&log, seq).is_ok(),
+        "source log was modified"
     );
 }
