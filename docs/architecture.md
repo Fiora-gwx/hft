@@ -56,7 +56,7 @@ warm 任务(不在 tick-to-trade 路径,不占热核)
 |---|---|---|---|
 | t0 | 网卡 | HW RX 时间戳;IRQ 与软中断在专用核 | — |
 | t1 | feed-bbo / feed-md | 非阻塞 `recvmsg` → rustls 解密 → WS 解帧 → 分派 → 解码 → 定点归一化 → bbo/md 环;raw journal 追加 | `hft-net`、`hft-venue`、`venue-*` |
-| t2 | sequencer | 取出 → 赋 `seq` → 追加 seq journal → 更新簿 | `hft-sequencer`、`hft-journal`、`hft-book` |
+| t2 | sequencer | 取出 → 赋 `seq` → 追加 seq journal → 更新簿、记账并写账本注记 | `hft-sequencer`、`hft-journal`、`hft-book`、`hft-ledger` |
 | t3 | sequencer | 策略 `on_event` → `OrderIntent` 或 `TargetIntent` → 执行层产出订单意图(写 `ExecDecision`)→ 风控(含第二腿报价的连接健康与可负担性)→ OMS 分配槽与 client id → `OrderDecision` 写 journal → `OutMsg` 入 out 环 | `strategies/*`、`hft-exec`、`hft-risk`、`hft-oms` |
 | t4 | gw | 取 `OutMsg` → 填帧模板 → WS 掩码 → TLS 加密 → `writev` → `sent_tsc`(`SendReport` 回 rep 环) | `hft-venue`、`venue-*`、`hft-net` |
 | t5 | gw → sequencer | 回报(用户流每圈 poll)→ `OrderEvent` → 槽状态迁移 → `LegLink` 第二腿在同一事件内出环,数量 ≤ 当前裸量;成交与费用的账本注记在该事件内写出 | `hft-oms`、`hft-exec`、`hft-ledger` |

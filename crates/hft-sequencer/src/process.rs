@@ -503,6 +503,7 @@ fn bbo<'a, D: Driver<S>, S: StrategySet>(
     }
     e.trace.rec("ledger.on_ref_px", u64::from(i.0), 0);
     e.ledger.on_ref_px(i, b.bid_px, b.ask_px, e.now.engine_ns);
+    ledger_notes(e);
     e.trace.rec("exec.touch_inst", u64::from(i.0), 0);
     e.exec.touch_inst(i);
     feeds_gate(e, inst, drv)?;
@@ -529,6 +530,7 @@ fn after_book<D: Driver<S>, S: StrategySet>(
     if bid.0 > 0 && ask.0 > 0 {
         e.trace.rec("ledger.on_ref_px", u64::from(i.0), 1);
         e.ledger.on_ref_px(i, bid, ask, e.now.engine_ns);
+        ledger_notes(e);
     }
     e.trace.rec("exec.touch_inst", u64::from(i.0), 1);
     e.exec.touch_inst(i);
@@ -687,6 +689,7 @@ fn mark<'a, D: Driver<S>, S: StrategySet>(
     e.trace
         .rec("ledger.on_mark", u64::from(i.0), e.now.engine_ns as u64);
     e.ledger.on_mark(i, m.px, e.now.engine_ns, &mut touched);
+    ledger_notes(e);
     for (a, v) in touched.iter().copied().collect::<Vec<_>>() {
         margin_to_risk(e, inst, drv, a, v, false)?;
     }
@@ -846,11 +849,10 @@ pub(crate) fn pnl<D: Driver<S>, S: StrategySet>(
 
 /// Writes the ledger's pending Notes into the current Input's output.
 pub(crate) fn ledger_notes(e: &mut Engine) {
-    let notes: Vec<Note> = e.ledger.notes().to_vec();
-    e.ledger.clear_notes();
-    for n in notes.iter() {
+    for n in e.ledger.notes() {
         e.out.push(RecordFlags(0), n);
     }
+    e.ledger.clear_notes();
 }
 
 /// `ExternalFill` handling (README "process" ExternalFill row); also the OMS foreign fills and

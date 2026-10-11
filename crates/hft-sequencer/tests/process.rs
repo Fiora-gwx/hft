@@ -1145,3 +1145,123 @@ fn seq_382_ledger_notes_stay_in_originating_event_across_snapshots() {
         }
     }
 }
+
+#[test]
+fn seq_383_price_round_notes_are_journaled_before_snapshots() {
+    use hft_event::{L2SnapHdr, Level, Note};
+    use zerocopy::{FromZeros, IntoBytes};
+
+    fn topn(h: &mut H, bid: &str, ask: &str, id: u64) {
+        let mut hd = L2SnapHdr::new_zeroed();
+        hd.h.venue = A;
+        hd.h.inst = A1;
+        hd.h.rx_tsc = h.now();
+        hd.snap_id = id;
+        hd.origin = L2SnapHdr::TOP_N;
+        hd.n_bids = 1;
+        hd.n_asks = 1;
+        let mut body = hd.as_bytes().to_vec();
+        for price in [bid, ask] {
+            body.extend_from_slice(
+                Level {
+                    px: px(price),
+                    qty: q("1"),
+                }
+                .as_bytes(),
+            );
+        }
+        h.push_bytes(RingId::Md(0), EventKind::L2_SNAPSHOT, body);
+        h.run();
+    }
+
+    for case in 0..3 {
+        reset_script();
+        let mut b = b0();
+        b.setup_edit.push(|s| s.ledger.round_dust = n("50"));
+        if case == 2 {
+            b.rd.insts.iter_mut().find(|i| i.id == A1).unwrap().l2_depth = 5;
+        }
+        let mut h = b.boot();
+        if case == 2 {
+            topn(&mut h, "50000", "50001", 1);
+        }
+        h.steady();
+        let inst = if case == 1 { B1 } else { A1 };
+        h.open_position(AC1, inst, Side::Buy, "0.001");
+        if case == 1 {
+            h.mark_md(inst, "50010");
+        }
+        assert_eq!(h.s.engine().ledger.group(AC1, G1).round.round_id, 1);
+        let before = h.keyframe().seq;
+        let m = h.mark();
+        let expected_kind = match case {
+            0 => {
+                h.quote(A1, "49999", "50000");
+                h.run();
+                EventKind::BBO
+            }
+            1 => {
+                h.mark_md(inst, "49999");
+                EventKind::MARK_PRICE
+            }
+            _ => {
+                topn(&mut h, "49999", "50000", 2);
+                EventKind::L2_SNAPSHOT
+            }
+        };
+        let records = h.since(m);
+        assert!(records.iter().all(|r| r.kind != EventKind::ORDER_DECISION));
+        let notes: Vec<_> = records
+            .iter()
+            .enumerate()
+            .filter_map(|(ix, r)| {
+                if r.kind != EventKind::NOTE {
+                    return None;
+                }
+                let note = r.read::<Note>()?;
+                (note.code == hft_ledger::notes::code::ROUND_CLOSED).then_some((ix, r, note))
+            })
+            .collect();
+        assert_eq!(notes.len(), 1, "price case={case}");
+        let (ix, record, note) = &notes[0];
+        assert_eq!(
+            (note.group, note.inst, note.v[2], note.v[4]),
+            (G1, inst, q("0.001").0 as u64, 0)
+        );
+        let input_ix = records[..*ix]
+            .iter()
+            .rposition(|r| r.role() == Role::Input)
+            .unwrap();
+        assert_eq!(records[input_ix].kind, expected_kind);
+        assert_eq!(record.tsc, records[input_ix].tsc);
+        assert!(
+            records[input_ix..*ix]
+                .iter()
+                .all(|r| r.flags.0 & RecordFlags::EVENT_END.0 == 0)
+        );
+        assert!(h.s.engine().ledger.notes().is_empty());
+        assert_eq!(h.s.engine().ledger.pos(AC1, inst).qty, q("0.001"));
+        assert_eq!(
+            h.s.engine().ledger.group(AC1, G1).round.pnl,
+            hft_ledger::PnlBreakdown::zero()
+        );
+        let after = h.keyframe().seq;
+        let m = h.mark();
+        h.push(
+            RingId::Ctl,
+            &recon_summary(AC1, inst_venue(inst), 90_100 + case, after),
+        );
+        h.run();
+        assert!(
+            h.notes_since(m)
+                .iter()
+                .all(|n| n.code != hft_ledger::notes::code::ROUND_CLOSED)
+        );
+        for at in [before, after] {
+            assert!(
+                h.verify_from(Some(at)).is_empty(),
+                "price case={case}, snapshot={at}"
+            );
+        }
+    }
+}
