@@ -599,7 +599,7 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>, long: bool) -> 
             } else {
                 SnapshotSel::Latest
             },
-            replay_tail: !from_snapshot && !(long && matches!(restart, Restart::Version)),
+            replay_tail: !(from_snapshot || long && matches!(restart, Restart::Version)),
             epoch: 0,
             flags: RecoveryFlags(if from_snapshot {
                 RecoveryFlags::FROM_SNAPSHOT | RecoveryFlags::TAIL_LOST
