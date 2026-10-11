@@ -288,8 +288,7 @@ fn seq_381_config_clock_follows_boot_and_recovery_order() {
     let rec = log
         .recs
         .iter()
-        .filter(|r| r.kind == EventKind::STATE_SNAPSHOT)
-        .next_back()
+        .rfind(|r| r.kind == EventKind::STATE_SNAPSHOT)
         .unwrap();
     assert_eq!(
         rec.read::<hft_event::SnapshotHdr>().unwrap().purpose,
