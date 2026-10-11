@@ -196,7 +196,7 @@ fn run_ticks(a: &mut Adv, log: &Log) -> BTreeSet<u64> {
     tick_seqs().into_iter().collect()
 }
 
-fn restart_case(every_ms: u32, k_frac: f64, with_ckpt: bool) {
+fn restart_case(every_ms: u32, k_frac: f64, with_ckpt: bool) -> bool {
     let (MemJournalOwned(log), setup) = tick_journal(every_ms);
     tick_script(every_ms, true);
     let reference = {
@@ -220,7 +220,9 @@ fn restart_case(every_ms: u32, k_frac: f64, with_ckpt: bool) {
         .find(|(_, r)| r.flags.contains(RecordFlags::EVENT_END))
         .map(|(i, _)| i + 1)
         .expect("committed boot");
-    if k_frac == 0.0 {
+    let k =
+        (first_committed + ((n - first_committed) as f64 * k_frac) as usize).clamp(first_committed, n - 1);
+    if k == first_committed {
         let mut partial = log.clone();
         partial.recs.truncate(first + 1);
         assert!(first + 1 < first_committed);
@@ -238,8 +240,6 @@ fn restart_case(every_ms: u32, k_frac: f64, with_ckpt: bool) {
             ))
         ));
     }
-    let k =
-        (first_committed + ((n - first_committed) as f64 * k_frac) as usize).clamp(first_committed, n - 1);
     let mut head = log.clone();
     head.recs.truncate(k);
     let committed = hft_sequencer::recover_event_end(&head);
@@ -260,6 +260,7 @@ fn restart_case(every_ms: u32, k_frac: f64, with_ckpt: bool) {
         run_ticks(&mut b, &log)
     };
     assert_eq!(got, reference, "every_ms {every_ms} k {k} ckpt {with_ckpt}");
+    committed == first_committed
 }
 
 proptest! {
@@ -274,10 +275,9 @@ proptest! {
         with_ckpt in any::<bool>(),
     ) {
         let every = [100u32, 250, 1_000, 60_000][ix];
-        restart_case(every, k_frac, with_ckpt);
         // The persisted regression fixes k at the earliest committed prefix. Exercise both
         // checkpoint choices there without removing any generated cases.
-        if k_frac == 0.0 {
+        if restart_case(every, k_frac, with_ckpt) {
             restart_case(every, k_frac, !with_ckpt);
         }
     }
