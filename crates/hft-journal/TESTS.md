@@ -1842,6 +1842,7 @@ spec: README.md
 | JNL-131.2 | 4,true | 默认入口失败;恢复入口交付一次 RecoveryGap 后继续 |
 | JNL-131.3 | 4,false | 两入口均 Chain |
 | JNL-131.4 | 前两行各删除中段或改变中段前段头哈希 | 恢复入口预检 Chain |
+| JNL-131.5 | 已标记段回退到前段末 seq,全部记录头和 CRC 同步重算 | 单取该段可读,两段合读预检 Chain |
 
 ## 验收
 

@@ -1,6 +1,6 @@
 //! Immutable offline input, independent of filenames and live-reader tail recovery.
 use crate::common::harness::*;
-use hft_event::EventKind;
+use hft_event::{EventKind, RecordFlags};
 use hft_journal::*;
 use hft_types::Tsc;
 use std::path::PathBuf;
@@ -107,6 +107,27 @@ fn jnl_131_immutable_recovery_gaps_are_explicit_and_preflighted() {
         // A recovery flag cannot excuse a missing supplied segment or a bad header chain.
         assert_eq!(
             JournalReader::open_files_recoverable(&[paths[0].clone(), paths[2].clone()], CAP)
+                .unwrap_err()
+                .problem,
+            FileProblem::Chain
+        );
+        // Each segment is independently readable, but a flag cannot authorize seq reuse.
+        let overlap = b.write(false);
+        let mut changed = b.bytes[1].clone();
+        let delta = fixed(&changed).first_seq - previous;
+        set_header(&mut changed, |h| h.first_seq -= delta);
+        for (at, h) in records(&changed, changed.len()) {
+            changed[at + 8..at + 16].copy_from_slice(&(h.seq - delta).to_le_bytes());
+            if RecordFlags(h.flags).contains(RecordFlags::CRC) {
+                let end = at + h.len as usize;
+                let crc = crc32c::crc32c(&changed[at..end - 4]);
+                changed[end - 4..end].copy_from_slice(&crc.to_le_bytes());
+            }
+        }
+        std::fs::write(&overlap[1], changed).unwrap();
+        assert!(JournalReader::open_files(&overlap[1..2], CAP).is_ok());
+        assert_eq!(
+            JournalReader::open_files_recoverable(&overlap[..2], CAP)
                 .unwrap_err()
                 .problem,
             FileProblem::Chain

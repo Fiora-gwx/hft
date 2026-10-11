@@ -205,6 +205,7 @@ pub(crate) fn load(paths: &[PathBuf]) -> Result<Vec<FileSegment>, FileOpenError>
         }
         if p.segment_no.checked_add(1) != Some(h.segment_no)
             || p.first_seq >= h.first_seq
+            || h.first_seq <= a.last_seq
             || h.prev_header_sha256 != scan::header_sha(p.as_bytes())
             || h.prev_last_seq != a.last_seq
             || (h.flags & RECOVERY_GAP == 0 && a.last_seq.checked_add(1) != Some(h.first_seq))

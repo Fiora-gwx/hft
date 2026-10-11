@@ -244,9 +244,9 @@ impl JournalReader {
         Self::open_files_inner(paths, reassembly_cap, false)
     }
 
-    /// As `open_files`, but a header-marked RecoveryGap is delivered once before its next
-    /// boot. All supplied files, seals, hashes and records are still validated up front.
-    /// The caller must restore state at that boot, not continue across missing inputs.
+    /// As `open_files`, but a numerical jump marked RecoveryGap is delivered once before
+    /// its next boot. Callers must also inspect header flags: loss can leave adjacent seq.
+    /// All files, seals, hashes and records are preflighted; state must restart at the boot.
     pub fn open_files_recoverable(paths: &[PathBuf], reassembly_cap: usize) -> Result<Self, FileOpenError> {
         Self::open_files_inner(paths, reassembly_cap, true)
     }
