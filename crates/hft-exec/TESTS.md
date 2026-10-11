@@ -432,7 +432,7 @@ spec: README.md
 - 参考:逐条断言上列性质(mock 视图按成交更新 `legs` 与 `portfolio`)
 - 例数:PR 2 000
 - 实现:`crates/hft-exec/tests/props.rs::exe_050_cell_invariants`
-- 回归:固定操作 `(0,6402)、(7,15018)、(7,56772)、(7,35176)` 覆盖人工保持与其他外来成交交错;保持未解除时不发配对尾量的 `ResidualTrim`。实现 `crates/hft-exec/tests/props.rs::exe_050_manual_hold_survives_other_external_events`。
+- 回归:固定序列见 EXE-513。
 
 ### EXE-051 TargetCell 不超过 640 B,AutoFixState 为 56 B 且字段偏移固定
 
@@ -4308,6 +4308,16 @@ spec: README.md
 - 期望:
   - `ExecDecision{ExternalDefault, qty = 0}` 与 `Note{ExecExternalDefault}` P1 各一条;无订单;`ext_deadline = 0`
 - 实现:`crates/hft-exec/tests/external.rs::exe_512_deadline_within_threshold`
+
+### EXE-513 人工保持与其他外来成交交错时不自动修剪尾量
+
+- 规则:[目标单元](README.md#目标单元targetcell)
+- 级别:unit
+- 里程碑:M2
+- 前置:EXE-050 的属性测试世界,已有现货与永续仓位
+- 步骤:按固定操作 `(0,6402)、(7,15018)、(7,56772)、(7,35176)` 设置目标并交错投递外来成交;每步推进执行层并检查 EXE-050 性质
+- 期望:人工保持未解除时不发配对尾量的 ResidualTrim,其他外来成交改变展示状态后保持仍有效
+- 实现:`crates/hft-exec/tests/props.rs::exe_513_manual_hold_survives_other_external_events`
 
 ## 验收
 
