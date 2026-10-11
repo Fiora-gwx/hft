@@ -849,6 +849,7 @@ fn seq_374_manual_hold_pair_tail_verify() {
 #[test]
 fn seq_375_late_fill_resume_verify() {
     let mut h = rig();
+    let first_epoch = h.epoch();
     let trig = h.upd + 1;
     set_hook(move |hx, ev, ctx| {
         if let EventRef::Bbo { inst, b, .. } = ev
@@ -877,7 +878,10 @@ fn seq_375_late_fill_resume_verify() {
     h.steady();
     let snapshot = h.keyframe();
     let m = h.mark();
-    h.fill(&first, first.qty, first.qty, first.px);
+    let mut fill = order_event(&first, hft_event::OrderEventKind::Fill, first_epoch);
+    fill.cum_filled = first.qty;
+    h.push(h.rep_ring(first.account), &fill);
+    h.run();
     let orders: Vec<_> = decs(&h.since(m))
         .into_iter()
         .filter(|d| d.action == hft_event::OrderAction::New && d.reject == 0 && d.group == GT1)

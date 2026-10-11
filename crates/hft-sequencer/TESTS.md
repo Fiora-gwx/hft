@@ -5203,6 +5203,7 @@ spec: README.md
 - 级别:replay
 - 里程碑:M2
 - 前置:真实引擎、已有两腿仓位和策略 PairOnFill 目标,保存快照
+- 输入:快照后的 Manual、Adl 外来成交和报价 Input,以及在线执行产生的完整 Output 流
 - 步骤:依次投递 Manual 与 Adl 外来成交,每次后推进四次报价;从快照以 VerifyDriver 重放完整 Input 尾段
 - 期望:manual_hold 保持且没有成功 New 决策,包含尾差修复;回放 Output 逐字节一致
 - 实现:`crates/hft-sequencer/tests/sdk_contract/target.rs::seq_374_manual_hold_pair_tail_verify`
@@ -5213,6 +5214,7 @@ spec: README.md
 - 级别:replay
 - 里程碑:M2
 - 前置:真实引擎中 OnFill 第一腿在途,快照后非干净重启并恢复连接
+- 输入:恢复后的快照、旧 epoch 第一腿全成 Input 及其在线 Output 流
 - 步骤:保存恢复后的快照,投递旧 epoch 第一腿全成;从快照验证回放
 - 期望:同一成交只有一张成功 Second 且数量等于净成交量;无重复 SecondRetry;Output 逐字节一致
 - 实现:`crates/hft-sequencer/tests/sdk_contract/target.rs::seq_375_late_fill_resume_verify`

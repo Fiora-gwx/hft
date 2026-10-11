@@ -126,7 +126,7 @@ impl Exec {
             };
             self.set_engine(cix, &tg, reason, origin, v, now);
             #[cfg(feature = "testkit")]
-            for i in 0..n {
+            for (i, leg) in ln.iter().enumerate().take(n) {
                 if c.legs[i].kind == LEG_CHAIN {
                     continue;
                 }
@@ -138,7 +138,7 @@ impl Exec {
                     account: c.account,
                     group: c.group,
                     inst: c.legs[i].inst,
-                    position: ln[i].pos,
+                    position: leg.pos,
                     previous_target: c.target_of(i),
                     previous_engine: engine_now,
                     fraction: if flatten {

@@ -123,11 +123,14 @@ fn tk_106_real_base_fee_and_retired_links() {
         wrong.hedge_balances[ix].fee_adjust = 0;
         assert!(check(&wrong).is_err(), "missing correction accepted");
         let mut wrong = r.obs.clone();
+        wrong.hedge_balances[ix].fee_adjust *= 2;
+        assert!(check(&wrong).is_err(), "duplicate correction accepted");
+        let mut wrong = r.obs.clone();
         wrong.hedge_balances[ix].residual += 1;
         assert!(check(&wrong).is_err(), "wrong residual accepted");
         let mut wrong = r.obs.clone();
         let h = wrong.hedge_history.iter_mut().find(|h| h.first_net != 0).unwrap();
-        h.first_net += 1;
+        h.first_net -= 1;
         assert!(check(&wrong).is_err(), "lost historical fill accepted");
         let mut unsupported = c.world.clone();
         unsupported
