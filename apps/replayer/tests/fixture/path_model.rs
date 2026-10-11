@@ -216,8 +216,8 @@ pub(super) fn exercise<S: StrategySet>(
             }
             assert_eq!(h.path_version, 1);
             assert_eq!(h.layout_version, 1);
-            assert_eq!(checkpoint::path_sections(body).unwrap().1.len(), 120 * 16);
             let bytes = checkpoint::encode(h, body, 1 << 20).unwrap();
+            assert_eq!(checkpoint::decode(&bytes, 1 << 20).unwrap().path.len(), 120 * 16);
             let name = s.engine().rd.instance(h.strategy).unwrap().name.as_ref();
             assert_eq!(name, "tsa");
             std::fs::write(f.root.join("checkpoints").join(format!("{name}.ckpt")), &bytes).unwrap();
