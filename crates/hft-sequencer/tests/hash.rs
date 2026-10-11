@@ -74,6 +74,7 @@ fn seq_314_out_hash_and_verify() {
     );
     h.cmd(AC1, &ControlCmd::SnapshotNow);
     h.run();
+    h.run();
     let on_demand = h.snapshots().last().unwrap().seq;
     assert_eq!(snap(h.snapshots().last().unwrap()).0.purpose, 3);
     assert_intervals(h.j());

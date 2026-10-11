@@ -1035,8 +1035,12 @@ fn seq_382_ledger_notes_stay_in_originating_event_across_snapshots() {
         let closing = h.order_at_touch(AC1, A1, Side::Sell, if late_fee { "0.0009" } else { "0.001" });
         let mut fill = order_event(&closing, OrderEventKind::Fill, h.epoch());
         fill.cum_filled = closing.qty;
-        // USDT uses 6 decimals, while q() is the BTC quantity helper.
-        fill.fee = Qty(if late_fee { 0 } else { 10_000 });
+        // Asset quantity exponents come from refdata, independently of Notional's -6.
+        fill.fee = Qty(hft_types::parse_exact(
+            if late_fee { b"0" } else { b"0.01" },
+            h.rd.asset(USDT).exp.qty_exp,
+        )
+        .unwrap());
         fill.fee_asset = USDT;
         h.push(h.rep_ring(AC1), &fill);
         h.run();
