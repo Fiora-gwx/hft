@@ -1,6 +1,6 @@
 # hft 架构地图
 
-改 `crates/`、`strategies/` 或 `apps/` 之前读本页。它是有序地图:部署单元、线程、事件流、状态所有权、组件分层、扩展点。类型定义在各 crate README 与 [subsystems/](subsystems/README.md),决策理由在 [Agent Notes](../.agents/notes/README.md) 与 [../../architecture-v2/](../design/README.md)。
+改 `crates/`、`strategies/` 或 `apps/` 前读本页。类型归各 crate README 与 [subsystems/](subsystems/README.md),理由归 [Agent Notes](../.agents/notes/README.md) 与 [../../architecture-v2/](../design/README.md)。
 
 ## 1. 一句话
 
@@ -59,7 +59,7 @@ warm 任务(不在 tick-to-trade 路径,不占热核)
 | t2 | sequencer | 取出 → 赋 `seq` → 追加 seq journal → 更新簿 | `hft-sequencer`、`hft-journal`、`hft-book` |
 | t3 | sequencer | 策略 `on_event` → `OrderIntent` 或 `TargetIntent` → 执行层产出订单意图(写 `ExecDecision`)→ 风控(含第二腿报价的连接健康与可负担性)→ OMS 分配槽与 client id → `OrderDecision` 写 journal → `OutMsg` 入 out 环 | `strategies/*`、`hft-exec`、`hft-risk`、`hft-oms` |
 | t4 | gw | 取 `OutMsg` → 填帧模板 → WS 掩码 → TLS 加密 → `writev` → `sent_tsc`(`SendReport` 回 rep 环) | `hft-venue`、`venue-*`、`hft-net` |
-| t5 | gw → sequencer | 回报(用户流每圈 poll)→ `OrderEvent` → 槽状态迁移 → `LegLink` 第二腿在同一事件内出环,数量 ≤ 当前裸量 | `hft-oms`、`hft-exec` |
+| t5 | gw → sequencer | 回报(用户流每圈 poll)→ `OrderEvent` → 槽状态迁移 → `LegLink` 第二腿在同一事件内出环,数量 ≤ 当前裸量;成交与费用的账本注记在该事件内写出 | `hft-oms`、`hft-exec`、`hft-ledger` |
 
 分段名与主机内预算(`tick_to_trade`、回报触发下一单的 `rep_to_order` 及其对冲子集 `hedge_host`)唯一归属 [latency-budget](latency-budget.md)。不做"每 tick 空跑下单路径",**不对真实连接预加密**([T5、T6](hot-path-rules.md#线程t))。
 

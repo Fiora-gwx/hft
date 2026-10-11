@@ -4,3 +4,9 @@
 0x0000000000000371 2026-10-10 实盘驱动先写到期定时器,INV-1 把它当作该步的 Input
 0xcef145ccd5e68166 2026-10-11 恢复后同一第一腿成交重复生成 Second 与 SecondRetry(OMS-464)
 0xcef145ccd5e68192 2026-10-11 传输 Input 主动撤单需核对 Cancel 决策证据(TK-111)
+0x00cc7b25194f1b2c 2026-10-11 账本 RoundClosed 延迟到对账写出,跨快照 INV-6 丢失输出(TK-114)
+0x00cc7b25194f1b3a 2026-10-11 账本 RoundClosed 延迟到对账写出,跨快照 INV-6 丢失输出(TK-114)
+0x00cc7b25194f1b4b 2026-10-11 账本 RoundClosed 延迟到对账写出,跨快照 INV-6 丢失输出(TK-114)
+0x00cc7b25194f1b4d 2026-10-11 账本 RoundClosed 延迟到对账写出,跨快照 INV-6 丢失输出(TK-114)
+0x00cc7b25194f1bc8 2026-10-11 账本 RoundClosed 延迟到对账写出,跨快照 INV-6 丢失输出(TK-114)
+0x00cc7b25194f1be0 2026-10-11 账本 RoundClosed 延迟到对账写出,跨快照 INV-6 丢失输出(TK-114)

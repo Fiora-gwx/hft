@@ -153,3 +153,55 @@ fn tk_113_missing_rebuild_fails_instead_of_skipping() {
         }
     }
 }
+
+#[test]
+fn tk_114_round_notes_replay_across_storage_restarts() {
+    use hft_event::{Note, OrderEvent, OrderEventKind, Role};
+    use hft_testkit::dst::run_record;
+
+    let suite = hft_testkit::scenarios::suites()
+        .into_iter()
+        .find(|s| s.name == "storage")
+        .unwrap();
+    for seed in [
+        0x00cc_7b25_194f_1b2c,
+        0x00cc_7b25_194f_1b3a,
+        0x00cc_7b25_194f_1b4b,
+        0x00cc_7b25_194f_1b4d,
+        0x00cc_7b25_194f_1bc8,
+        0x00cc_7b25_194f_1be0,
+    ] {
+        let mut c = suite.config(seed);
+        // Fault timing depends on the full horizon, including crashes after the first failure.
+        c.steps = 10_000;
+        let r = run_record::<E>(&c);
+        assert!(
+            r.outcome.is_pass(),
+            "seed={seed:#x}: {}",
+            crate::seq_sut::show(&r)
+        );
+        assert_eq!(r.steps_run, c.steps);
+        let mut last_input = None;
+        let mut closed = 0;
+        for record in &r.journal {
+            if hft_event::classify(record.kind, &record.body).is_ok_and(|role| role == Role::Input) {
+                last_input = Some(record);
+            }
+            if let Some(note) = record.try_read::<Note>()
+                && note.code == hft_ledger::notes::code::ROUND_CLOSED
+            {
+                closed += 1;
+                let input = last_input.unwrap();
+                // These seeds close rounds through OMS; reconciliation must not inherit Notes.
+                let event = input
+                    .try_read::<OrderEvent>()
+                    .expect("RoundClosed belongs to OrderEvent");
+                assert!(matches!(
+                    event.what,
+                    OrderEventKind::Fill | OrderEventKind::PartialFill | OrderEventKind::FeeOnly
+                ));
+            }
+        }
+        assert!(closed > 0, "seed={seed:#x}: must actually close a round");
+    }
+}

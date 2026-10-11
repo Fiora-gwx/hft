@@ -857,6 +857,9 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
     for l in out.latency.as_slice().iter() {
         e.out.push(RecordFlags(0), l);
     }
+    // Ledger Notes are Outputs of this Input, not snapshot state. Do not leave them for a
+    // later reconciliation: restoring a snapshot in between would lose those Outputs.
+    crate::process::ledger_notes(e);
     for d in pnls {
         crate::process::pnl(e, inst, drv, d)?;
     }

@@ -28,7 +28,7 @@ spec: README.md
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
 | 连接活性 | SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173 |
-| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375, SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106 |
+| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382, SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
@@ -5277,6 +5277,17 @@ spec: README.md
 - 步骤:从各快照独立读取配置;删除引导块 ClockStatus 作反例;重启后读取 Recovery 快照并验证其后的 EngineClock 和输出
 - 期望:首次锚点尚未建立也能装配;缺 ClockStatus 失败;Recovery 节 25 保留旧频率,装配使用新段频率;新运行输出逐字节一致
 - 实现:`crates/hft-sequencer/tests/config_blob.rs::seq_381_config_clock_follows_boot_and_recovery_order`
+
+### SEQ-382 账本注记在原始成交事件内写出且跨快照不丢失
+
+- 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
+- 级别:replay
+- 里程碑:M2
+- 前置:B0 稳态,账户 1 的 g1 现货腿买入 0.001;平仓前写关键帧
+- 输入:两行分别卖出 0.001,或卖出 0.0009 后对买单补推 0.00001 BTC FeeOnly(剩余名义低于轮次尘埃阈值)
+- 步骤:检查轮次结束的事件边界;写关键帧后再投递对账汇总;从结束前、结束后快照分别验证回放;副本依次删除、重复、篡改 RoundClosed
+- 期望:各行恰好一条 RoundClosed,开平数量正确且与原始 OrderEvent 同一 EVENT_END,ledger 无待写注记;后续对账不重复输出;两处快照起步均逐字节一致,三种注记反例均失败
+- 实现:`crates/hft-sequencer/tests/process.rs::seq_382_ledger_notes_stay_in_originating_event_across_snapshots`
 
 ## 验收
 

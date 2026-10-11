@@ -99,3 +99,4 @@
 | 2026-10-11 | SIM-124 独立账本按已交付完整批次的 gen_seq 核算成交,原始交付顺序仍检查回报时序;固定乱序反例与错误手续费反例,模拟器行为不变 | SIM-222,CI 38109587789 中不同订单回报延迟导致测试平均成本误算 | crates/hft-sim(README、TESTS、测试) | 否 |
 | 2026-10-11 | DST 一致性集由 CI 38109185941 重生成完整配置下的 50 行 HashTrail;种子、场景、步数与顺序不变 | SEQ-380 在 CI 38109587789 通过,确认业务输出与非配置快照节逐字节不变 | fixtures/dst/hashtrail.toml | 否 |
 | 2026-10-11 | journal 预创建使用 `.jrn.preparing` 私有文件,完成后以 `renameat2(RENAME_NOREPLACE)` 发布;恢复清理严格匹配的遗留临时文件,启动空间核算包含段头未完成的临时段;固定覆盖发布前后五个崩溃边界与拒绝覆盖 | JNL-072 随机 SIGKILL 暴露正式名创建后、段头完成前的恢复空窗;JNL-124、JNL-042、JNL-099 | crates/hft-journal/(src、tests、README.md、TESTS.md)、docs/subsystems/journal-format.md、.agents/notes/implemented/architecture/2026-10-11-journal-preparation-publication.md | 否 |
+| 2026-10-11 | OMS 输出排空时在同一 Input 写出成交与费用产生的账本 Note,不遗留到后续对账;增加跨快照回放、注记删改重复反例与六个完整 storage 种子回归 | CI 38111692651 的 INV-6 暴露 RoundClosed 跨快照丢失;SEQ-382、TK-114 | crates/hft-sequencer、crates/hft-testkit、fixtures/dst-seeds/storage.txt、docs/architecture.md | 否 |

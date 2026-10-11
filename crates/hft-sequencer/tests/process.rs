@@ -1021,3 +1021,110 @@ fn seq_372_foreign_fill_increments_not_held() {
     assert_eq!(booked, vec![q("0.002").0, q("0.003").0]);
     assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, q("0.005"));
 }
+
+#[test]
+fn seq_382_ledger_notes_stay_in_originating_event_across_snapshots() {
+    use hft_event::{Note, OrderEvent, OrderEventKind};
+    use zerocopy::IntoBytes;
+
+    for late_fee in [false, true] {
+        let mut h = steady();
+        let opening = h.open_position(AC1, A1, Side::Buy, "0.001");
+        let before = h.keyframe().seq;
+        let mut mark = h.mark();
+        h.open_position(AC1, A1, Side::Sell, if late_fee { "0.0009" } else { "0.001" });
+        let expected_kind = if late_fee {
+            assert!(
+                h.notes_since(mark)
+                    .iter()
+                    .all(|n| n.code != hft_ledger::notes::code::ROUND_CLOSED)
+            );
+            mark = h.mark();
+            let mut fee = order_event(&opening, OrderEventKind::FeeOnly, h.epoch());
+            fee.qty = Qty(0);
+            fee.cum_filled = opening.qty;
+            fee.fee = q("0.00001");
+            fee.fee_asset = BTC;
+            h.push(h.rep_ring(AC1), &fee);
+            h.run();
+            OrderEventKind::FeeOnly
+        } else {
+            OrderEventKind::Fill
+        };
+        let records = h.since(mark);
+        let closed: Vec<_> = records
+            .iter()
+            .enumerate()
+            .filter_map(|(ix, r)| {
+                if r.kind != EventKind::NOTE {
+                    return None;
+                }
+                let n = r.read::<Note>()?;
+                (n.code == hft_ledger::notes::code::ROUND_CLOSED).then_some((ix, r, n))
+            })
+            .collect();
+        assert_eq!(closed.len(), 1, "late_fee={late_fee}: {records:?}");
+        let (note_ix, record, note) = &closed[0];
+        assert_eq!((note.group, note.inst), (G1, A1));
+        assert_eq!(note.v[2], q("0.001").0 as u64);
+        assert_eq!(note.v[4], q(if late_fee { "0.0009" } else { "0.001" }).0 as u64);
+        let input_ix = records[..*note_ix]
+            .iter()
+            .rposition(|r| r.role() == Role::Input)
+            .unwrap();
+        let input = &records[input_ix];
+        assert_eq!(input.kind, EventKind::ORDER_EVENT);
+        assert_eq!(input.read::<OrderEvent>().unwrap().what, expected_kind);
+        assert!(
+            records[input_ix..*note_ix]
+                .iter()
+                .all(|r| r.flags.0 & RecordFlags::EVENT_END.0 == 0)
+        );
+        assert_eq!(record.tsc, input.tsc);
+        assert!(h.s.engine().ledger.notes().is_empty());
+
+        let after = h.keyframe().seq;
+        let mark = h.mark();
+        h.push(RingId::Ctl, &recon_summary(AC1, A, 90_000, after));
+        h.run();
+        assert!(
+            h.notes_since(mark)
+                .iter()
+                .all(|n| n.code != hft_ledger::notes::code::ROUND_CLOSED)
+        );
+        for at in [before, after] {
+            assert!(
+                h.verify_from(Some(at)).is_empty(),
+                "late_fee={late_fee}, snapshot={at}"
+            );
+        }
+
+        // An unchanged final ledger hash cannot excuse missing, duplicated or corrupt Outputs.
+        for mutation in 0..3 {
+            let mut bad = h.j().clone();
+            let segment = bad
+                .segments
+                .iter_mut()
+                .find(|s| s.records.iter().any(|r| r.seq == record.seq))
+                .unwrap();
+            let ix = segment.records.iter().position(|r| r.seq == record.seq).unwrap();
+            match mutation {
+                0 => {
+                    segment.records.remove(ix);
+                }
+                1 => {
+                    segment.records.insert(ix, (*record).clone());
+                }
+                _ => {
+                    let mut altered = *note;
+                    altered.v[2] += 1;
+                    segment.records[ix].body = altered.as_bytes().to_vec();
+                }
+            }
+            assert!(
+                !verify_journal::<TestSet>(&bad, &h.setup, Some(before)).is_empty(),
+                "mutation={mutation}"
+            );
+        }
+    }
+}

@@ -20,7 +20,7 @@ spec: README.md
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
 | 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TOOL-024、TOOL-027–TOOL-029 |
-| 6. DST 框架 | TK-043–TK-070、TK-100–TK-113 |
+| 6. DST 框架 | TK-043–TK-070、TK-100–TK-114 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
 | 8. hft-dst 运行器 | TK-075–TK-088 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
@@ -1485,6 +1485,16 @@ spec: README.md
 - 步骤:分别设置每步重建与关闭定期重建,运行到首次失败或场景结束
 - 期望:四行均以 INV-6 失败,空值诊断指出 journal 重建不可用,错误保留原始诊断与序号;不能因没有哈希结果通过检查
 - 实现:`crates/hft-testkit/tests/journal_config.rs::tk_113_missing_rebuild_fails_instead_of_skipping`
+
+### TK-114 storage 重启中的轮次注记逐字节回放
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:replay
+- 里程碑:M2
+- 输入:storage 套件,固定种子 0x00cc7b25194f1b2c、0x00cc7b25194f1b3a、0x00cc7b25194f1b4b、0x00cc7b25194f1b4d、0x00cc7b25194f1bc8、0x00cc7b25194f1be0
+- 步骤:各运行完整 10,000 步,使用套件原有故障率和全部不变量;逐条检查 RoundClosed 的所属 Input
+- 期望:六行均实际结束轮次,注记属于 Fill、PartialFill 或 FeeOnly,不遗留到对账;含定期和结束 INV-6 的全部检查通过;相同种子保留在 storage 回归集
+- 实现:`crates/hft-testkit/tests/journal_config.rs::tk_114_round_notes_replay_across_storage_restarts`
 
 ## 验收
 

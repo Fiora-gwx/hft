@@ -206,6 +206,8 @@ DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xt
 
 真实引擎或 journal 已含快照时,INV-6 不能因重建返回空值跳过。配置或恢复失败、回放未完成、Output 差异或未消费输出均使检查失败;错误保留阶段、快照序号及首条差异的序号/字节偏移,运行中的定期检查与结束检查使用同一规则(TK-113)。
 
+storage 回归集包含轮次结束后经历快照与重启的种子;按完整 10,000 步故障时序运行,确认实际产生 RoundClosed,其所属 Input 为原始成交或手续费回报,独立重建不得漏掉注记(TK-114)。
+
 **套件选择**:不指定套件时,一个种子运行的套件 = 按名字排序的全部套件中下标为 `xxh3_64(seed 的 8 字节小端) mod 套件数` 的那个;`cargo xtask dst` 与 `hft-dst run` 用同一函数 `seed::suite_index`。**缺省步数** 10,000(两个入口相同,`seed::DST_DEFAULT_STEPS`)。
 
 **故障目录**(每项有速率参数与开关;期望行为由不变量检查,具体场景的期望写在 [testing §3.4、§4.3](../../docs/testing.md#34-dst)):
