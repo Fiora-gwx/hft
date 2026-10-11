@@ -286,7 +286,7 @@ impl DurableMeta {
 5. **启动空间检查扣除本实例已有的段**:崩溃或 Drain 后,本实例 `hot_dir/<instance>/` 下的段文件仍占着 tmpfs 或大页,它们会被恢复复用、persist 补齐后退役,不是新的需求。hft-core 启动时以 `held_by_instance` 统计本实例已有段的占用,检查条件是"可用 ≥ 需求 − 已占用"(hft-rt `HostNeeds.held`);只扣本实例目录,同机另一实例(`prod`/`sim`)的段不扣除。否则崩溃后的第一次重启会因空间不足起不来。
 
 ```rust
-pub fn held_by_instance(hot_dirs: &[&Path], instance: InstanceName) -> Result<hft_rt::HeldBySelf, io::Error>; // 冷路径;只统计 <hot_dir>/<instance>/<journal>/ 下文件名为 <10 位数字>.jrn 且前 8 字节为 HFTJRNL1 的段文件(含 Preparing),按所在挂载的页大小分别计(文件大小向上取整到页)
+pub fn held_by_instance(hot_dirs: &[&Path], instance: InstanceName) -> Result<hft_rt::HeldBySelf, io::Error>; // 冷路径;统计本实例 <journal>/ 下 <10 位数字>.jrn 且 magic 为 HFTJRNL1 的段(含 Preparing),以及段头可能未完成的 <10 位数字>.jrn.preparing;文件大小按所在挂载的页大小向上取整
 ```
 
 ### 配置项
@@ -327,11 +327,13 @@ pub fn held_by_instance(hot_dirs: &[&Path], instance: InstanceName) -> Result<hf
 4. 交换当前段指针;追加 `SegmentRoll{Begin}`;返回 `BootWriter`。
 5. raw journal 调用方随即 `finish()`(不写 `BootDone`,只保留 `Begin`);`seq`/`chain` 调用方写完引导块后 `finish()` 写 `BootDone`。
 
-**预创建**(`SegmentPreparer::poll`,warm):先 `fstatfs` 热目录,魔数必须是 `HUGETLBFS_MAGIC` 或 `TMPFS_MAGIC`,否则 `OpenErr::DiskBacked`(`JournalWriter::open` 同样检查);在 hugetlbfs 下 `open(O_CREAT|O_EXCL)` + `ftruncate(segment_bytes)` + `mmap(MAP_SHARED|MAP_POPULATE)`(内核在此缺页并清零,耗时落在 persist 线程);tmpfs 小段模式另加 `mlock(段)`→ 填段头 [P] 字段(含 `prev_header_sha256` = 当前活动段头 0..3072 的 SHA-256,此时它已不可变)→ `state = Preparing` → 经通道交给写者。每 journal 始终保持 1 个已准备好的下一段。
+**预创建**(`SegmentPreparer::poll`,warm):先 `fstatfs` 热目录,魔数必须是 `HUGETLBFS_MAGIC` 或 `TMPFS_MAGIC`,否则 `OpenErr::DiskBacked`(`JournalWriter::open` 同样检查);在同目录私有文件 `<segment_no:010>.jrn.preparing` 上 `open(O_CREAT|O_EXCL)` + `ftruncate(segment_bytes)` + `mmap(MAP_SHARED|MAP_POPULATE)`(内核在此缺页并清零,耗时落在 persist 线程);tmpfs 小段模式另加 `mlock(段)`→ 填段头 [P] 字段(含 `prev_header_sha256` = 当前活动段头 0..3072 的 SHA-256,此时它已不可变)→ `state = Preparing` → `renameat2(RENAME_NOREPLACE)` 原子发布为 `.jrn`,同时迁移进程内映射登记 → 经通道交给写者。正式文件已存在时返回 `Failed`,只清理自己的临时文件和映射。读者与 persist 不枚举 `.jrn.preparing`,它永不交给写者;每 journal 始终保持 1 个已准备好的下一段。
 
 **persist**(`Persister::poll`,warm;写冷副本出错时关闭该文件句柄,下一轮重新打开;冷副本已不存在则重建并从字节 0 重新复制):对每个 journal,读热段 `committed_len`(Acquire),把 `[persisted_len, committed_len)` 中最多 `chunk_bytes` 以 `pwrite` 写到冷副本同偏移(冷副本在该段第一次复制时创建:`open` + `fallocate(segment_bytes)`,文件名含 `first_seq`);累计未同步 ≥ `sync_bytes` 或距上次同步 ≥ `sync_interval_ms` → `fdatasync` → 更新热段 `synced_len` 并把它 `pwrite` 进冷副本头部 persist 行。热段 `Sealed` 且 `synced_len == committed_len` → 冷副本 `ftruncate(committed_len)`、`fsync`、目录 `fsync`、写 `.seal`(复制过程中以增量 SHA-256 累积,3072..3200 以零参与)。
 
 **恢复**(`JournalWriter::open`):
+
+开始枚举正式段前,删除本 journal 目录中名称严格为 `<10 位数字>.jrn.preparing` 的文件,包括空文件、全零段与未写完的段头;删除失败返回 `OpenErr::Io`。这些文件没有进入写者通道,不影响已提交前缀、序号和冷副本。其他名称的文件不在此清理范围。
 
 1. 枚举热目录中本 journal 的段(按 `segment_no`);校验段头 CRC,`Preparing` 状态的段直接删除(由 `SegmentPreparer` 重新准备)。段号不连续、段头链不连续(且无 `RECOVERY_GAP`)→ `OpenErr::ChainBroken`;同一段的热段与冷副本在 `[0, synced_len)` 上(除 3072..3200)不同,或热段 `synced_len > 0` 而冷副本缺失或短于 `synced_len`(冷副本根与热段不属于同一次运行,如测试网实例遗留的热段)→ `OpenErr::ColdHotConflict`(hft-core 以退出码 4 退出);`synced_len = 0` 且无冷副本是正常情形(persist 尚未复制)。**`seq`/`chain` 段若引导块未写完(没有已提交的 `BootDone`),按 `Preparing` 处理:热段与已复制的冷副本(及其 `.seal`/同步元数据)整段删除**,恢复从上一段(已封存,末条为 `SegmentRoll{End}`)继续,新段沿用同一 `segment_no` 重新打开。读者在一个段的 `BootDone` 提交前不交付该段任何记录,所以整段删除对读者不可见。
 2. 对最后一个 `Open` 段:从 `committed_len` 起扫描完整记录(`len != 0`、`len` 合法、kind 已注册、`seq` 连续、CRC 若有则正确),再**截断到扫描区间内最后一条 `EVENT_END` 记录之后**,区间内没有则截断到 `committed_len`(已发布的部分总在事件边界上,截断点不低于它;半个事件——输入已记、输出未写完——整体丢弃;未完成的多段组随之丢弃);得到 `end`,将 `[end, 下一个全零页)` 清零,`committed_len = end`。这个 `end` 就是"恢复截断点"(`last_complete_event()` 与 `EndAt::LastCompleteEvent` 用同一算法)。
@@ -406,6 +408,7 @@ pub fn held_by_instance(hot_dirs: &[&Path], instance: InstanceName) -> Result<hf
 - [research/06 §1.2、§2.5、§2.6](../../design/research/06-data-plane-replay-observability.md)(一热写多冷读、snapshot-at-roll、fsync 策略)
 - 现有教训来源:`E:\trading\Trading\crates\wal`(500 MiB 滚动无快照 → 84% 段隔离;`recovery.rs` 的尾部截断思路)
 - 决策记录 `hot-journal-in-ram`、`self-contained-journal`([Agent Notes](../../.agents/notes/README.md))
+- [预创建段的原子发布](../../.agents/notes/implemented/architecture/2026-10-11-journal-preparation-publication.md)
 
 ## 已知限制与后续工作
 

@@ -118,10 +118,11 @@ impl SegmentPreparer {
             None => (1, [0u8; 32]),
         };
         let path = self.hot_jdir.join(fs::hot_seg_name(no));
+        let staging = self.hot_jdir.join(fs::hot_staging_name(no));
         let Ok(len) = usize::try_from(self.cfg.segment_bytes) else {
             return PrepState::Failed;
         };
-        let Ok(map) = fs::hot_create(&path, len, self.cfg.page) else {
+        let Ok(map) = fs::hot_create(&staging, len, self.cfg.page) else {
             return PrepState::Failed;
         };
         let h = p_header(
@@ -133,6 +134,13 @@ impl SegmentPreparer {
             prev_sha,
         );
         map.write_fixed(&h);
+        // A crash during create/truncate/populate/header initialization leaves only the private
+        // staging name. Recovery can discard it without guessing whether a .jrn is committed.
+        if fs::hot_publish(&staging, &path).is_err() {
+            fs::release(Some(&staging), map);
+            let _ = fs::hot_unlink(&staging);
+            return PrepState::Failed;
+        }
         if self
             .env
             .to_writer

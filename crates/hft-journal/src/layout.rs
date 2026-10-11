@@ -495,6 +495,17 @@ pub(crate) fn mem_unlink(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Atomic rename with the same no-replacement contract as Linux `renameat2`.
+pub(crate) fn mem_rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
+    let mut s = mem();
+    if s.files.contains_key(to) {
+        return Err(io::Error::from(io::ErrorKind::AlreadyExists));
+    }
+    let id = s.files.remove(from).ok_or_else(not_found)?;
+    s.files.insert(to.to_path_buf(), id);
+    Ok(())
+}
+
 fn mem_release(id: u64) {
     if id == 0 {
         return;
@@ -579,7 +590,7 @@ pub(crate) enum FsKind {
 }
 
 #[cfg_attr(not(feature = "writer"), allow(unused_imports))]
-pub(crate) use os::{fallocate, fs_kind, map_file};
+pub(crate) use os::{fallocate, fs_kind, map_file, rename_noreplace};
 
 #[cfg(target_os = "linux")]
 mod os {
@@ -589,6 +600,28 @@ mod os {
 
     const HUGETLBFS_MAGIC: i64 = 0x9584_58f6;
     const TMPFS_MAGIC: i64 = 0x0102_1994;
+
+    pub(crate) fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
+        let from = std::ffi::CString::new(from.as_os_str().as_encoded_bytes())
+            .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+        let to = std::ffi::CString::new(to.as_os_str().as_encoded_bytes())
+            .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+        // SAFETY: both paths are NUL-terminated; the kernel validates them and atomically rejects
+        // an existing destination. Only the persist thread publishes a prepared segment.
+        if unsafe {
+            libc::renameat2(
+                libc::AT_FDCWD,
+                from.as_ptr(),
+                libc::AT_FDCWD,
+                to.as_ptr(),
+                libc::RENAME_NOREPLACE,
+            )
+        } != 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
 
     pub(crate) fn fs_kind(p: &Path) -> io::Result<FsKind> {
         let c = std::ffi::CString::new(p.as_os_str().as_encoded_bytes())
@@ -671,6 +704,10 @@ mod os {
 #[cfg(not(target_os = "linux"))]
 mod os {
     use super::*;
+
+    pub(crate) fn rename_noreplace(_: &Path, _: &Path) -> io::Result<()> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
 
     pub(crate) fn fs_kind(p: &Path) -> io::Result<FsKind> {
         std::fs::metadata(p)?;

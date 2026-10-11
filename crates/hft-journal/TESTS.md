@@ -18,7 +18,7 @@ spec: README.md
 | 写者 | JNL-008, JNL-010–JNL-038, JNL-063, JNL-068, JNL-120, JNL-121 |
 | 读者 | JNL-002, JNL-008, JNL-012, JNL-074–JNL-088, JNL-103, JNL-118 |
 | persist 与后台维护(persist 线程调用) | JNL-008, JNL-012, JNL-042, JNL-044–JNL-054, JNL-091–JNL-093, JNL-107, JNL-114 |
-| 恢复与校验 | JNL-026, JNL-036, JNL-055, JNL-056, JNL-062–JNL-068, JNL-089, JNL-090, JNL-118, JNL-119 |
+| 恢复与校验 | JNL-026, JNL-036, JNL-055, JNL-056, JNL-062–JNL-068, JNL-089, JNL-090, JNL-118, JNL-119, JNL-124 |
 | 持久元数据(engine_epoch 等) | JNL-092, JNL-094–JNL-098, JNL-122 |
 | cargo feature | JNL-087, JNL-101, JNL-102, JNL-122, JNL-123 |
 | raw journal 模式 | JNL-104 |
@@ -36,7 +36,7 @@ spec: README.md
 [journal-format](../../docs/subsystems/journal-format.md) 各节对应的用例(该页的规则由本文件验证):
 
 - 三类 journal:JNL-019、JNL-033、JNL-104
-- 目录与命名:JNL-010、JNL-041、JNL-101
+- 目录与命名:JNL-010、JNL-041、JNL-099、JNL-101、JNL-124
 - 段文件布局、SegmentHeader:JNL-001、JNL-002、JNL-008、JNL-031、JNL-040、JNL-041
 - 提交游标:JNL-014–JNL-019、JNL-057–JNL-061、JNL-070、JNL-072
 - 记录对齐与 CRC:JNL-009、JNL-014、JNL-058、JNL-082、JNL-121
@@ -1443,6 +1443,9 @@ spec: README.md
 | JNL-099.4 | `0000000009.tmp`(1 MiB) | 同上 | 同第 1 行 |
 | JNL-099.5 | `0000000009.jrn`,前 8 字节不是 `HFTJRNL1` | 同上 | 同第 1 行 |
 | JNL-099.6 | `0000000009.jrn`,大小 5 B(读不到 8 字节 magic) | 同上 | 同第 1 行 |
+| JNL-099.7 | `0000000009.jrn.preparing`,1 MiB 全零 | 同上 | `shm_bytes = 4 194 304`,未完成的段头仍计入 |
+| JNL-099.8 | `0000000009.jrn.preparing`,大小 5 B | 同上 | `shm_bytes = 3 149 824`,按 4 KiB 向上取整 |
+| JNL-099.9 | `notes.jrn.preparing`,1 MiB | 同上 | 同第 1 行,名称不属于预创建者 |
 
 ### JNL-100 崩溃遗留的本实例段不算新需求,另一实例的段照算
 
@@ -1721,6 +1724,23 @@ spec: README.md
   - 步骤 3 退出 0;最后写入的一段(段号最大的非 `Preparing` 段;写者另保持一个已准备好的下一段)`state = Open`、无 `.seal`,读者读到 1 000 条 `Bbo`
   - 步骤 4 退出 1;步骤 5 退出 2(`DiskBacked`)
 - 实现:`crates/hft-journal/tests/proc_testwriter.rs::jnl_123_testwriter_roundtrip`
+
+### JNL-124 预创建各崩溃边界均可同号重开,保留已提交前缀
+
+- 规则:[实现说明](README.md#实现说明)的预创建与恢复、[journal-format 目录与命名](../../docs/subsystems/journal-format.md#目录与命名)
+- 级别:table
+- 里程碑:M1
+- 前置:内存后端与 Linux tmpfs 各跑全表;`H(C0)` 写到 seq 20 并发布,准备段 2;按表将段 2 物化为相应崩溃文件,然后重建写者与后台环
+- 实现:`crates/hft-journal/tests/recover.rs::jnl_124_preparation_crash_publication`
+- 共同期望:恢复删除遗留的段 2 预创建文件;段 1 已提交前缀(屏蔽原子行)逐字节保留,仅追加 seq 21 的 `End{Recovery}`;下一次滚动仍是段 2,`first_seq = 22`,正式文件存在而临时名消失;旁边的 `notes.jrn.preparing` 保留。同名正式文件的拒绝覆盖与失败后的临时文件清理由 JNL-042.4 验证。
+
+| 行 | 杀点对应的段 2 文件 |
+|---|---|
+| JNL-124.1 | `.jrn.preparing` 已创建,长度 0 |
+| JNL-124.2 | `.jrn.preparing` 已扩到段长,内容全零 |
+| JNL-124.3 | `.jrn.preparing` 只写入 magic 前 4 B,其余全零 |
+| JNL-124.4 | `.jrn.preparing` 的 [P] 段头完整,尚未 rename |
+| JNL-124.5 | 已原子发布为 `.jrn`,尚未交给写者,`Preparing` |
 
 ## 验收
 

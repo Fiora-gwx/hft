@@ -21,6 +21,11 @@ pub(crate) fn hot_seg_name(no: u64) -> String {
     format!("{no:010}.jrn")
 }
 
+/// Private preparer file, never handed to the writer or enumerated by readers.
+pub(crate) fn hot_staging_name(no: u64) -> String {
+    format!("{no:010}.jrn.preparing")
+}
+
 /// Parses `<10 digits>.jrn`.
 pub(crate) fn parse_hot_name(name: &str) -> Option<u64> {
     let d = name.strip_suffix(".jrn")?;
@@ -121,6 +126,20 @@ pub(crate) fn hot_create(path: &Path, len: usize, page: PageSize) -> io::Result<
     Ok(m)
 }
 
+/// Atomically publishes a fully prepared mapping without replacing an existing segment.
+pub(crate) fn hot_publish(staging: &Path, path: &Path) -> io::Result<()> {
+    if is_mem(staging) {
+        layout::mem_rename_noreplace(staging, path)?;
+    } else {
+        layout::rename_noreplace(staging, path)?;
+    }
+    let mut maps = inproc();
+    if let Some(map) = maps.remove(staging) {
+        maps.insert(path.to_path_buf(), map);
+    }
+    Ok(())
+}
+
 fn create_new_rw(path: &Path) -> io::Result<File> {
     let mut o = OpenOptions::new();
     o.read(true).write(true).create_new(true);
@@ -214,6 +233,15 @@ pub(crate) fn still_linked(h: &HotOpen) -> bool {
 
 /// Hot segment files `<10 digits>.jrn` directly in `dir`, by segment number.
 pub(crate) fn hot_list(dir: &Path) -> BTreeMap<u64, PathBuf> {
+    hot_list_with_suffix(dir, "")
+}
+
+/// Unpublished preparer files; even an empty file is owned by the preparer.
+pub(crate) fn hot_staging_list(dir: &Path) -> BTreeMap<u64, PathBuf> {
+    hot_list_with_suffix(dir, ".preparing")
+}
+
+fn hot_list_with_suffix(dir: &Path, suffix: &str) -> BTreeMap<u64, PathBuf> {
     let names: Vec<PathBuf> = if is_mem(dir) {
         layout::mem_list(dir)
     } else {
@@ -225,7 +253,8 @@ pub(crate) fn hot_list(dir: &Path) -> BTreeMap<u64, PathBuf> {
     names
         .into_iter()
         .filter_map(|p| {
-            let n = parse_hot_name(p.file_name()?.to_str()?)?;
+            let name = p.file_name()?.to_str()?.strip_suffix(suffix)?;
+            let n = parse_hot_name(name)?;
             Some((n, p))
         })
         .collect()

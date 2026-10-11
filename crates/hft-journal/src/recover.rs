@@ -195,6 +195,11 @@ fn recover(w: &mut JournalWriter) -> Result<RecoveryReport, OpenErr> {
         rebuild_from: Position::default(),
         boot_reason: RollReason::Startup,
     };
+    // These names are never passed to the writer, even if a crash interrupted their header.
+    // Cleanup precedes preparing the next segment and does not inspect or delete any .jrn.
+    for (_, path) in fs::hot_staging_list(&w.hot_jdir) {
+        fs::hot_unlink(&path).map_err(|_| OpenErr::Io)?;
+    }
     // Step 1: enumerate hot segments, drop Preparing ones, check headers.
     let mut segs: Vec<HotSeg> = Vec::new();
     for (no, path) in fs::hot_list(&w.hot_jdir) {

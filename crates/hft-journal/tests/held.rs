@@ -30,12 +30,19 @@ fn seg_file(p: &Path, magic: bool, len: usize) {
 
 #[test]
 fn jnl_099_held_by_instance() {
-    for (row, extra) in [
-        ("JNL-099.1", None),
-        ("JNL-099.3", Some(("notes.txt", true, MIB))),
-        ("JNL-099.4", Some(("0000000009.tmp", true, MIB))),
-        ("JNL-099.5", Some(("0000000009.jrn", false, MIB))),
-        ("JNL-099.6", Some(("0000000009.jrn", true, 5))),
+    for (row, extra, extra_bytes) in [
+        ("JNL-099.1", None, 0),
+        ("JNL-099.3", Some(("notes.txt", true, MIB)), 0),
+        ("JNL-099.4", Some(("0000000009.tmp", true, MIB)), 0),
+        ("JNL-099.5", Some(("0000000009.jrn", false, MIB)), 0),
+        ("JNL-099.6", Some(("0000000009.jrn", true, 5)), 0),
+        (
+            "JNL-099.7",
+            Some(("0000000009.jrn.preparing", false, MIB)),
+            MIB as u64,
+        ),
+        ("JNL-099.8", Some(("0000000009.jrn.preparing", true, 5)), 4096),
+        ("JNL-099.9", Some(("notes.jrn.preparing", false, MIB)), 0),
     ] {
         let hot = linux_hot();
         let prod = hot.join("prod").join("seq");
@@ -52,7 +59,7 @@ fn jnl_099_held_by_instance() {
         let want = HeldBySelf {
             hugepages_1g: 0,
             hugepages_2m: 0,
-            shm_bytes: 3_145_728,
+            shm_bytes: 3_145_728 + extra_bytes,
         };
         assert_eq!(
             held_by_instance(&[&hot], InstanceName::Prod).unwrap(),

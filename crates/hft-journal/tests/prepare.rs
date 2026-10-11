@@ -46,6 +46,7 @@ fn jnl_040_prepared_segment_header() {
     let before = vm_lck_kib();
     assert_eq!(h.prep.poll(), PrepState::Prepared);
     let p = h.seg_path(2);
+    assert!(!testing::exists(&h.hot_jdir().join("0000000002.jrn.preparing")));
     let img = testing::read(&p).unwrap();
     assert_eq!(img.len(), 1_048_576);
     let f = fixed(&img);
@@ -115,6 +116,10 @@ fn jnl_042_one_prepared_at_a_time() {
         "JNL-042.4"
     );
     assert_eq!(testing::hot_files(&dir).len(), 3, "JNL-042.4");
+    assert!(
+        !testing::exists(&dir.join("0000000003.jrn.preparing")),
+        "JNL-042.4: failed publication removed only its staging file"
+    );
     testing::unlink(&foreign).unwrap();
     assert_eq!(h.prep.poll(), PrepState::Prepared, "JNL-042.5");
 }

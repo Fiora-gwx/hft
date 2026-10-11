@@ -50,6 +50,52 @@ fn jnl_055_preparing_deleted() {
 }
 
 #[test]
+fn jnl_124_preparation_crash_publication() {
+    for make_cfg in [mem_c0 as fn() -> JournalConfig, linux_c0] {
+        for phase in 0..5 {
+            let mut h = H::open0(make_cfg());
+            h.write_to_seq(20);
+            let before = h.seg(1);
+            let committed = h.committed(1) as usize;
+            assert_eq!(h.prep.poll(), PrepState::Prepared);
+            let staging = h.hot_jdir().join("0000000002.jrn.preparing");
+            if phase < 4 {
+                // Materialize each possible crash boundary before the atomic publication.
+                let mut bytes = testing::read(&h.seg_path(2)).unwrap();
+                testing::unlink(&h.seg_path(2)).unwrap();
+                match phase {
+                    0 => bytes.clear(),      // O_EXCL succeeded; ftruncate has not run.
+                    1 => bytes.fill(0),      // Sized/pre-faulted; header not started.
+                    2 => bytes[4..].fill(0), // Header copy interrupted, even magic is incomplete.
+                    _ => {}                  // Complete [P] header, rename has not run.
+                }
+                testing::create(&staging, &bytes).unwrap();
+                if bytes.is_empty() {
+                    testing::truncate(&staging, 0).unwrap();
+                }
+            }
+            let unrelated = h.hot_jdir().join("notes.jrn.preparing");
+            testing::create(&unrelated, b"retain").unwrap();
+            h.crash();
+            let rep = h.open().unwrap();
+            assert!(!testing::exists(&staging), "phase {phase}");
+            assert!(!testing::exists(&h.seg_path(2)), "phase {phase}");
+            assert_eq!(testing::read(&unrelated).unwrap(), b"retain");
+            assert_eq!(
+                masked(&h.seg(1)[..committed]),
+                masked(&before[..committed]),
+                "phase {phase}: committed prefix retained"
+            );
+            assert_eq!(rep.last_seq, Seq(21), "phase {phase}: recovery End only");
+            h.roll(rep.boot_reason);
+            assert_eq!(h.w().segment_no(), 2, "phase {phase}");
+            assert_eq!(h.hdr(2).first_seq, 22, "phase {phase}");
+            assert!(!testing::exists(&staging), "phase {phase}: atomic publication");
+        }
+    }
+}
+
+#[test]
 fn jnl_056_incomplete_boot_removed() {
     let mut h = H::open0(linux_c0());
     h.write_to_seq(30);

@@ -274,7 +274,9 @@ fn jnl_072_random_kill() {
     for seed in 1..=seeds {
         // Test-owned tmpfs directories are released with their thread. Bound their lifetime to
         // one seed, including on panic, instead of retaining all 50/1,000 journals until exit.
-        std::thread::spawn(move || random_kill_seed(seed)).join().unwrap();
+        std::thread::spawn(move || random_kill_seed(seed))
+            .join()
+            .unwrap_or_else(|_| panic!("JNL-072 failed at seed {seed}"));
     }
 }
 

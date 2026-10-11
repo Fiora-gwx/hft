@@ -12,7 +12,8 @@ use crate::fs;
 use crate::layout::{FsKind, SEGMENT_MAGIC};
 
 /// Sums `<hot_dir>/<instance>/<journal>/<10 digits>.jrn` files that start with `HFTJRNL1`
-/// (Preparing included), rounded up to the page of their mount, per page size.
+/// (Preparing included), plus unpublished `.jrn.preparing` files whose header can be incomplete,
+/// rounded up to the page of their mount, per page size.
 pub fn held_by_instance(hot_dirs: &[&Path], instance: InstanceName) -> Result<HeldBySelf, io::Error> {
     let mut h = HeldBySelf::default();
     for root in hot_dirs {
@@ -37,9 +38,12 @@ pub fn held_by_instance(hot_dirs: &[&Path], instance: InstanceName) -> Result<He
             }
         };
         for j in journals {
-            for (_, p) in fs::hot_list(&j) {
-                let head = fs::read_prefix(&p, 8)?;
-                if head.as_slice() != SEGMENT_MAGIC.as_slice() {
+            let files = fs::hot_list(&j)
+                .into_values()
+                .map(|p| (p, false))
+                .chain(fs::hot_staging_list(&j).into_values().map(|p| (p, true)));
+            for (p, staging) in files {
+                if !staging && fs::read_prefix(&p, 8)?.as_slice() != SEGMENT_MAGIC.as_slice() {
                     continue;
                 }
                 let len = fs::file_len(&p).unwrap_or(0);

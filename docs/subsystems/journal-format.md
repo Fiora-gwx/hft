@@ -41,6 +41,7 @@
 - 两个 hugetlbfs 挂载点由 [deploy](../../deploy/README.md) 的调优清单创建:`/dev/hugepages`(`pagesize=1G`)与 `/dev/hugepages2M`(`pagesize=2M`)。热段一律是 hugetlbfs 或 tmpfs 上的**具名文件**:进程崩溃后文件仍在,恢复程序据此补复制;**不用匿名 `memfd_create`**(随进程释放)。写者与预创建者用 `fstatfs` 校验魔数(`HUGETLBFS_MAGIC`/`TMPFS_MAGIC`),否则拒绝。唯一例外是 replayer `--emit-journal` 的离线写者([hft-journal `open_offline`](../../crates/hft-journal/README.md#cargo-feature)):它只写普通文件系统目录,并拒绝 hugetlbfs/tmpfs 与生产 journal 根。
 - `<instance>`:hft-core 实例名,只允许 `prod` | `sim`([hft-journal](../../crates/hft-journal/README.md) `InstanceName::{Prod, Sim}`;`sim` = 只含模拟账户、不加载交易所 key 的独立实例,见 [apps/hft-core](../../apps/hft-core/README.md));其他值在类型层面不可表达。两个实例各有自己的目录与 journal,永不写同一目录;测试、DST 与 replayer 用各自的临时根目录(实例名仍是这两者之一)。段头 `instance` 字段写同一名字的 ASCII。
 - 热段按 `segment_no`(每 journal 单调,从 1 起)命名,因为下一段在 `first_seq` 确定之前就要预创建;冷副本在复制时 `first_seq` 已知,带进文件名便于按序号定位。
+- 预创建临时名为同目录 `<segment_no:010>.jrn.preparing`,不属于读者或 persist 的段列表;正式名只在预创建完成后原子发布。发布与恢复清理规则归 [hft-journal 实现说明](../../crates/hft-journal/README.md#实现说明)。
 - `<yyyymmdd>` 是该段 `created_utc_ns` 的 UTC 日期;整点滚动使一个 `seq` 段 ≈ 一个 Parquet 小时分区。
 
 ## 段文件布局
