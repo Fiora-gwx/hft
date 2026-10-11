@@ -105,8 +105,13 @@ impl OutHash {
     pub fn reset(&mut self) {
         self.h.reset();
     }
-    /// Adds one Output record.
+    /// Adds one Output record. A StateSnapshot closes the interval and starts an empty one;
+    /// neither boundary snapshot is included in the next snapshot's out_hash.
     pub fn add(&mut self, kind: EventKind, flags: RecordFlags, pieces: &[&[u8]]) {
+        if kind == EventKind::STATE_SNAPSHOT {
+            self.reset();
+            return;
+        }
         self.h.update(&kind.0.to_le_bytes());
         self.h.update(&(flags.0 & !NONCMP_FLAGS).to_le_bytes());
         let masked = MEASURE_MASK.iter().any(|(k, ..)| *k == kind);

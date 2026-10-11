@@ -418,6 +418,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 - 腿名义 = |该腿净量| × 该 inst 当前估值价(现货按 `valuation.spot`,永续按 `valuation.perp`)折 USDT。
 - 开始:group 的各腿名义从全部 `< round_dust_notional` 到任一腿 `≥ round_dust_notional`。
 - 结束:所有腿 `< round_dust_notional`(残余由策略或执行层处理,或被核销)。结束时写 `Note{RoundClosed}`:`Note.group` = 该 group,内容为各腿开/平均价与量、`PnlBreakdown`、持仓时长(不带策略 `tag`:成交增量与 OMS 槽都不带它)。入场/出场价差等策略口径的指标由策略的报表插件从各腿均价计算,不在本 crate。
+- 成交、外来成交或基础资产费用使轮次结束时,先完成本次调用的数量、已实现与费用入账,再判定结束并生成注记。同笔费用计入该轮,结束后轮次累计清零,不带入下一轮(LED-274)。
 - 均价按当前轮次的配对成交算,不用交易所 `entryPrice`(加仓再部分平仓会使交易所入场价偏离轮次口径)。
 
 ### USDT 统一计价

@@ -740,7 +740,7 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 
 ### 状态哈希
 
-- `out_hash`:对每条 Output 记录的字节(测量字段按偏移置零后)做 xxh3-128 流式累积;写入快照头 `SnapshotHdr.out_hash`。
+- `out_hash`:按 journal 顺序对前一 `StateSnapshot` 与本快照之间的 Output 做 xxh3-128 流式累积,不含两端快照;字节流为 `kind:u16 LE ‖ flags:u16 LE ‖ logical_body`,flags 屏蔽 `EVENT_END/CRC/PART`,体按测量字段偏移置零。实际追加快照时填入 `SnapshotHdr.out_hash` 并清空累计器,同一事件内快照前的 Output 属于当前区间、快照后的属于下一区间。段首 `ConfigBlob` 计入前面的区间,快照后的 L2 关键帧计入后面的区间;从快照起播时,先把该快照之后、下一个 Input 之前的 Output 加入空累计器。
 - `state_hash`:各节内容按写出顺序(见[快照](#快照))的 xxh3-128,节 16 不计入;`purpose = Keyframe` 的快照头写 0(实盘不在关键帧停顿内计算,四种驱动写同一值),replayer 与测试需要时从该快照的节内容按同一规则计算;快照头的主机字段(`snap_tsc`、`boot_id`、`snap_utc_ns`)在 `MEASURE_MASK` 中屏蔽,换机验证不因它们不一致。
 - 验证回放逐条比较 Output(快照记录本身也逐字节比较),并在每个快照处比较 `out_hash` 与非关键帧的 `state_hash`;恢复驱动比较后按"恢复时决策不一致"处理;镜像驱动不比较。
 

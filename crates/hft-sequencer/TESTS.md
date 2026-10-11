@@ -4541,6 +4541,11 @@ spec: README.md
 | SEQ-314.3 | 改动 S1 与 S2 之间一条 Output | S2 处 `out_hash` 不一致;报告首个不一致记录的 seq |
 | SEQ-314.4 | `RecoverDriver` 遇到同样的不一致 | 不失败,按"恢复时决策不一致"处理 |
 | SEQ-314.5 | `MirrorDriver` 遇到同样的不一致 | 不比较,继续 |
+| SEQ-314.6 | 连续 Keyframe、OnDemand;从段首与各中间快照分别起播 | 区间重算相等,逐条 Output 无差异;边界快照不进入相邻区间 |
+| SEQ-314.7 | Live L2 簿后滚段,从新段快照起播至下一快照 | ConfigBlob 计入滚段快照前区间,L2 关键帧计入后区间,恢复后的累计量一致 |
+| SEQ-314.8 | 无挂单 Drain 在命令同一事件内写 CmdResult、模式注记与快照 | 快照 out_hash 包含本事件中先写出的 Output;从前一快照验证通过 |
+
+实现使用 1 000 条过期命令的 CmdResult 形成固定长度区间,另以独立 xxh3 累计器从日志重算全部快照头。反例修改首条 CmdResult 与按篡改流重算的区间末 out_hash,验证驱动必须同时报告首条差异与末快照差异;恢复驱动记 RECOVER_MISMATCH,镜像继续。
 
 ### SEQ-315 运行期零分配
 
@@ -5284,9 +5289,9 @@ spec: README.md
 - 级别:replay
 - 里程碑:M2
 - 前置:B0 稳态,账户 1 的 g1 现货腿买入 0.001;平仓前写关键帧
-- 输入:两行分别卖出 0.001,或卖出 0.0009 后对买单补推 0.00001 BTC FeeOnly(剩余名义低于轮次尘埃阈值)
+- 输入:两行分别卖出 0.001、随成交扣 0.01 USDT,或卖出 0.0009 后对买单补推 0.00001 BTC FeeOnly(剩余名义低于轮次尘埃阈值)
 - 步骤:检查轮次结束的事件边界;写关键帧后再投递对账汇总;从结束前、结束后快照分别验证回放;副本依次删除、重复、篡改 RoundClosed
-- 期望:各行恰好一条 RoundClosed,开平数量正确且与原始 OrderEvent 同一 EVENT_END,ledger 无待写注记;后续对账不重复输出;两处快照起步均逐字节一致,三种注记反例均失败
+- 期望:各行恰好一条 RoundClosed,开量 0.001、平量分别 0.001/0.0009、净盈亏分别 −0.011/−0.500905 USDT,与原始 OrderEvent 同一 EVENT_END;轮次累计清零,ledger 无待写注记;后续对账不重复输出;两处快照起步均逐字节一致,三种注记反例均失败
 - 实现:`crates/hft-sequencer/tests/process.rs::seq_382_ledger_notes_stay_in_originating_event_across_snapshots`
 
 ## 验收

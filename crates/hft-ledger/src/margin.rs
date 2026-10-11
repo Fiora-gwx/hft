@@ -225,7 +225,7 @@ impl Ledger {
             p.mark_ens = t;
             p.has_mark = true;
         }
-        self.revalue_inst(inst, t, Some(touched));
+        self.revalue_inst(inst, t, Some(touched), None);
     }
 
     /// After `restore`: rebuilds the caches that are not in the snapshot (holder unrealized

@@ -20,6 +20,7 @@ mod env;
 mod exec_glue;
 mod fanout;
 mod funding;
+mod hash;
 mod intents;
 mod keyframe;
 mod liveness;

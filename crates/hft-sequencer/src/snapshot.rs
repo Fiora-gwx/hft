@@ -19,7 +19,7 @@ use crate::commands::{
     VENUE_NOTICES_VERSION,
 };
 use crate::engine::Engine;
-use crate::journal::{BootSink, JournalSink, role_of};
+use crate::journal::{BootSink, JournalSink};
 use crate::market::{
     CONN_LIVE_VERSION, ConnLiveRow, MARKET_LAST_VERSION, SECTION_CONN_LIVE, SECTION_MARKET_LAST,
 };
@@ -383,10 +383,17 @@ pub(crate) fn write_snapshot<D: Driver<S>, S: StrategySet>(
 
 pub(crate) fn after_snapshot(e: &mut Engine, purpose: u8) {
     e.market.set_rx_from(e.cur_seq);
-    e.out_hash.reset();
     if purpose == PURPOSE_KEYFRAME {
         e.inputs_since_keyframe = 0;
         e.last_keyframe_tsc = e.now.tsc.0;
+    }
+}
+
+/// The Output interval ends when the snapshot is appended, after any preceding buffered
+/// Outputs. SnapshotHdr's layout fixes out_hash at bytes 40..56.
+pub(crate) fn set_out_hash(body: &mut [u8], hash: [u8; 16]) {
+    if let Some(dst) = body.get_mut(40..56) {
+        dst.copy_from_slice(&hash);
     }
 }
 
@@ -467,7 +474,7 @@ pub(crate) fn boot_block<D: Driver<S>, S: StrategySet>(
         tsc_hz_milli: info.tsc_hz_milli,
         configs: &refs,
     };
-    let snap = {
+    let mut snap = {
         let t = drv.measure();
         build_snapshot(
             e,
@@ -502,7 +509,6 @@ pub(crate) fn boot_block<D: Driver<S>, S: StrategySet>(
         .iter()
         .filter_map(|i| l2_keyframe_body(e, *i))
         .collect();
-    let mut hashes: Vec<(EventKind, Vec<u8>)> = Vec::new();
     {
         let j = drv.journal();
         let mut b = match j.roll(reason, &meta) {
@@ -517,20 +523,19 @@ pub(crate) fn boot_block<D: Driver<S>, S: StrategySet>(
         for c in cfg.iter() {
             b.append_var(EventKind::CONFIG_BLOB, tsc, &[c])
                 .map_err(|_| BootBlockErr::Append)?;
-            hashes.push((EventKind::CONFIG_BLOB, c.clone()));
+            e.out_hash.add(EventKind::CONFIG_BLOB, RecordFlags(0), &[c]);
         }
+        set_out_hash(&mut snap, e.out_hash.digest());
         b.append_var(EventKind::STATE_SNAPSHOT, tsc, &[&snap])
             .map_err(|_| BootBlockErr::Append)?;
+        e.out_hash
+            .add(EventKind::STATE_SNAPSHOT, RecordFlags(0), &[&snap]);
         for k in books.iter() {
             b.append_var(EventKind::L2_SNAPSHOT, tsc, &[k])
                 .map_err(|_| BootBlockErr::Append)?;
+            e.out_hash.add(EventKind::L2_SNAPSHOT, RecordFlags(0), &[k]);
         }
         b.finish().map_err(|_| BootBlockErr::Append)?;
-    }
-    for (k, body) in hashes {
-        if role_of(k, &body) == hft_event::Role::Output {
-            e.out_hash.add(k, RecordFlags(0), &[&body]);
-        }
     }
     e.seg = crate::journal::SegClock {
         tsc_hz_milli: info.tsc_hz_milli,

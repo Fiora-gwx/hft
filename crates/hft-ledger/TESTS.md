@@ -31,7 +31,7 @@ spec: README.md
 | 人工干预的采纳(`AdoptExchange`) | LED-123、LED-170–LED-179、LED-243 |
 | 划转与模拟账户 | LED-185–LED-188、LED-242、LED-260 |
 | 未实现与当日 PnL(增量维护) | LED-160、LED-190–LED-194 |
-| 轮次(round) | LED-176、LED-200–LED-203 |
+| 轮次(round) | LED-176、LED-200–LED-203、LED-274 |
 | USDT 统一计价 | LED-158、LED-210–LED-215 |
 | 链上腿(optional,feature `chain`) | 不适用:里程碑外 |
 | 快照行格式(节 1、13、22;草案,实现时以代码与编译期断言为准) | LED-053、LED-061、LED-104、LED-138、LED-139、LED-230–LED-238 |
@@ -2633,6 +2633,25 @@ spec: README.md
 | LED-273.1 | 三条成功的 New OrderDecision |
 | LED-273.2 | OMS 节 2 v1 快照,三个未成交槽 |
 | LED-273.3 | OMS 节 2 v2 快照,三个未成交槽 |
+
+### LED-274 轮次结束包含本次调用的最后一笔费用
+
+- 规则:[轮次](README.md#轮次round)、[仓位与已实现](README.md#仓位与已实现平均成本法)
+- 级别:table
+- 里程碑:M2
+- 前置:boot_a1,现货参考买卖价均为 50000;只开对应腿,买入 0.001 BTC、价 50000、费 0.01 USDT
+- 步骤:按行关闭轮次;检查注记与累计账;再以 50000 买入 0.001,费用为零
+- 期望:各行一条 RoundClosed,净盈亏如下;关闭后轮次 PnL 与腿累计全零;再次开仓为轮次 2,轮次 PnL 全零
+- 实现:`crates/hft-ledger/tests/rounds.rs::led_274_round_close_includes_ending_fee`
+
+| 行 | 结束输入 | RoundClosed 净盈亏(USDT) | group 累计净盈亏(含未实现,USDT) |
+|---|---|---|---|
+| LED-274.1 | 现货 Sell 0.001,价 51000,费 0.02 USDT | 0.97 | 0.97 |
+| LED-274.2 | 永续 Sell 0.001,价 51000,费 0.02 USDT | 0.97 | 0.97 |
+| LED-274.3 | 现货外来成交 Sell 0.001,价 51000,费 0.02 USDT | 0.97 | 0.97 |
+| LED-274.4 | 现货 Sell 0.0009,价 50000,费 0;随后基础币 FeeOnly 0.00001 BTC | −0.51 | −0.51 |
+| LED-274.5 | 无标记价和 BBO 的永续 Sell 0.00091,价 51000,费 0.02 USDT,余量按最近成交价估值低于尘埃线 | 0.88 | 0.97 |
+| LED-274.6 | 与上一行相同,成交来自 Manual ExternalFill | 0.88 | 0.97 |
 
 ## 验收
 

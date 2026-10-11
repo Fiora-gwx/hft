@@ -1796,10 +1796,15 @@ pub fn verify_journal<S: StrategySet>(
     }
     let d = s.driver();
     for (seq, a, b) in d.sink.detail.iter().take(4) {
+        let offsets: Vec<_> = (0..a.len().max(b.len()))
+            .filter(|i| a.get(*i) != b.get(*i))
+            .take(16)
+            .map(|i| (i, a.get(i), b.get(i)))
+            .collect();
         eprintln!(
-            "verify mismatch at {seq}:
-  log {a:?}
-  got {b:?}"
+            "verify mismatch at {seq}: lengths=({}, {}), first offsets={offsets:?}",
+            a.len(),
+            b.len()
         );
     }
     let mut v = d.mismatches().to_vec();
@@ -2072,6 +2077,19 @@ impl<S: StrategySet> H<S> {
         side: hft_types::Side,
         qty: &str,
     ) -> hft_event::OrderDecision {
+        let d = self.order_at_touch(a, i, side, qty);
+        self.fill(&d, d.qty, d.qty, d.px);
+        d
+    }
+
+    /// Submits and acknowledges an IOC at the touch, leaving the fill to the caller.
+    pub fn order_at_touch(
+        &mut self,
+        a: AccountId,
+        i: InstId,
+        side: hft_types::Side,
+        qty: &str,
+    ) -> hft_event::OrderDecision {
         let sid = self
             .s
             .instances()
@@ -2124,7 +2142,6 @@ impl<S: StrategySet> H<S> {
             .1;
         assert_eq!(d.reject, 0, "{d:?}");
         self.ack(&d);
-        self.fill(&d, d.qty, d.qty, d.px);
         d
     }
     /// `Funding` of `i` on the md ring.

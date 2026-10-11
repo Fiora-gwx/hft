@@ -156,6 +156,7 @@ impl Ledger {
                 t,
                 seq: 0,
                 cash: true,
+                defer_round: cell.map(|(c, _)| c),
             });
             d.add(&x);
         }
@@ -172,6 +173,7 @@ impl Ledger {
                 t,
                 seq: 0,
                 cash: true,
+                defer_round: cell.map(|(c, _)| c),
             });
             d.add(&x);
         }
@@ -186,6 +188,9 @@ impl Ledger {
             e.px,
         );
         d.add(&fd);
+        if let Some((c, _)) = cell {
+            self.cell_upkeep(c, t, 0);
+        }
         if auto_recon && let Some(x) = self.posd.get_mut(p) {
             match e.side {
                 Side::Buy => x.auto_buy = Qty(x.auto_buy.0.saturating_add(e.qty.0)),

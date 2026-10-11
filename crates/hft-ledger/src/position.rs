@@ -37,6 +37,8 @@ pub(crate) struct Trade {
     pub seq: u64,
     /// Spot: move the quote cash and the base inventory.
     pub cash: bool,
+    /// This cell's caller books a fee before checking whether the trade closes its round.
+    pub defer_round: Option<usize>,
 }
 
 /// Average-cost update of `(qty, cost)` by `s × q` at `p`; returns the realized amount
@@ -190,12 +192,14 @@ impl Ledger {
         // the price rows that `restore` rebuilds them from.
         self.track_open_perp(av, p);
         if self.val_by_last_px(tr.inst) {
-            self.revalue_inst(tr.inst, tr.t, None);
+            self.revalue_inst(tr.inst, tr.t, None, tr.defer_round);
         }
         self.revalue_pos(tr.acc, p, tr.inst);
         if let Some((c, l)) = tr.cell {
             self.revalue_leg(c, l);
-            self.cell_upkeep(c, tr.t, tr.seq);
+            if tr.defer_round != Some(c) {
+                self.cell_upkeep(c, tr.t, tr.seq);
+            }
         }
         if s.perp {
             self.margin_refresh(av);
@@ -367,6 +371,7 @@ impl Ledger {
             t,
             seq: f.seq,
             cash: true,
+            defer_round: cell.map(|(c, _)| c),
         });
         let fd = self.book_fee(
             f.account,
@@ -379,6 +384,9 @@ impl Ledger {
             f.px,
         );
         d.add(&fd);
+        if let Some((c, _)) = cell {
+            self.cell_upkeep(c, t, f.seq);
+        }
         FillApplied {
             pnl: PnlDelta {
                 account: f.account,
@@ -434,7 +442,6 @@ impl Ledger {
                 self.revalue_pos(f.account, p, f.inst);
                 if let Some((c, l)) = cell {
                     self.revalue_leg(c, l);
-                    self.cell_upkeep(c, t, f.seq);
                 }
             }
             if cell.is_some() {
@@ -458,6 +465,9 @@ impl Ledger {
             base,
             px,
         );
+        if base && let Some((c, _)) = cell {
+            self.cell_upkeep(c, t, f.seq);
+        }
         FeeApplied {
             pnl: PnlDelta {
                 account: f.account,
@@ -534,6 +544,7 @@ impl Ledger {
         inst: InstId,
         t: i64,
         mut touched: Option<&mut FixedVec<(AccountId, VenueId), 4>>,
+        defer_round: Option<usize>,
     ) {
         let Some(s) = self.inst(inst).copied() else { return };
         let Some(vs) = self.venue_s(s.venue) else { return };
@@ -576,7 +587,9 @@ impl Ledger {
                     .unwrap_or(false);
                 if nz {
                     self.revalue_leg(c, l);
-                    self.cell_upkeep(c, t, 0);
+                    if defer_round != Some(c) {
+                        self.cell_upkeep(c, t, 0);
+                    }
                     any_leg = true;
                 }
             }

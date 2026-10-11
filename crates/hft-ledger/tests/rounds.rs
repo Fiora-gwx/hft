@@ -105,3 +105,66 @@ fn led_203_round_avg_from_paired_fills() {
         ]
     );
 }
+
+#[test]
+fn led_274_round_close_includes_ending_fee() {
+    use hft_event::ExternalCause;
+    use hft_ledger::PnlBreakdown;
+
+    for case in 0..6 {
+        let mut l = pre();
+        l.on_ref_px(BTC_S1, px("50000"), px("50000"), 0);
+        let (inst, leg) = if case == 1 || case >= 4 {
+            (BTC_P2, 1)
+        } else {
+            (BTC_S1, 0)
+        };
+        l.apply_fill(&f(Buy, inst, "0.001", "50000", "0.01", USDT, G1, leg), s(1));
+        l.clear_notes();
+        let expected_net = match case {
+            0 | 1 => {
+                l.apply_fill(&f(Sell, inst, "0.001", "51000", "0.02", USDT, G1, leg), s(2));
+                n("0.97")
+            }
+            2 => {
+                let mut e = ext_tid(ExternalCause::Manual, Sell, inst, "0.001", "51000", 901);
+                e.fee = usdt("0.02");
+                e.fee_asset = USDT;
+                assert!(l.apply_external(&e, false, s(2)).is_some());
+                n("0.97")
+            }
+            3 => {
+                l.apply_fill(&f(Sell, inst, "0.0009", "50000", "0", USDT, G1, leg), s(2));
+                assert!(notes_of(&l, code::ROUND_CLOSED).is_empty());
+                l.apply_fee(&fee_delta(Buy, inst, G1, "0.00001", BTC), s(3));
+                n("-0.51")
+            }
+            4 => {
+                // No perpetual mark or BBO: last-trade revaluation must also defer closing.
+                l.apply_fill(&f(Sell, inst, "0.00091", "51000", "0.02", USDT, G1, leg), s(2));
+                n("0.88")
+            }
+            _ => {
+                let mut e = ext_tid(ExternalCause::Manual, Sell, inst, "0.00091", "51000", 902);
+                e.fee = usdt("0.02");
+                e.fee_asset = USDT;
+                assert!(l.apply_external(&e, false, s(2)).is_some());
+                n("0.88")
+            }
+        };
+        let notes = notes_of(&l, code::ROUND_CLOSED);
+        assert_eq!(notes.len(), 1, "case={case}");
+        assert_eq!(notes[0].v[7] as i64, expected_net.0, "case={case}");
+        let total = if case >= 4 { n("0.97") } else { expected_net };
+        assert_eq!(l.group(A1, G1).pnl.net(), total, "case={case}");
+        assert_eq!(l.group(A1, G1).round.pnl, PnlBreakdown::zero());
+        assert_eq!(l.group(A1, G1).round.legs, [LegAgg::ZERO; 4]);
+        l.apply_fill(&f(Buy, inst, "0.001", "50000", "0", USDT, G1, leg), s(4));
+        assert_eq!(l.group(A1, G1).round.round_id, 2);
+        assert_eq!(
+            l.group(A1, G1).round.pnl,
+            PnlBreakdown::zero(),
+            "no fee carried into round 2"
+        );
+    }
+}

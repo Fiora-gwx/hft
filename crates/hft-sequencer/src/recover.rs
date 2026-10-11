@@ -449,6 +449,18 @@ pub(crate) fn restore_at<S: StrategySet>(
         }
         k += 1;
     }
+    // Replay resumes at the next Input. Outputs after the selected snapshot (including the
+    // boot block's L2 keyframes) already belong to the next Output interval.
+    for r in log
+        .recs
+        .iter()
+        .skip(ix + 1)
+        .take_while(|r| r.role() != Role::Input)
+    {
+        if r.role() == Role::Output {
+            e.out_hash.add(r.kind, r.flags, &[&r.body]);
+        }
+    }
     // Capacity checks in CapKind order.
     let n_instances = inst.slots.iter().filter(|s| s.cur.is_some()).count();
     let shrink = if insts_over {

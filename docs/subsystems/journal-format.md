@@ -205,7 +205,7 @@ committed_len 之后   全零(热段由内核在缺页时清零;冷副本在封�
     pub state_hash: [u8; 16],         // 16 各节内容按写出顺序(= hft-sequencer 快照节写出顺序,节 16 除外)的 xxh3-128;purpose = Keyframe 时恒为 0(见下)
     pub n_books: u32,                 // 32 随后应出现的 L2 关键帧数(Boot、Recovery);其余 purpose 为 0
     pub _pad2: u32,                   // 36
-    pub out_hash: [u8; 16],           // 40 自上一个快照以来全部 Output 记录(屏蔽测量字段,见 hft-event 测量字段表)的滚动 xxh3-128;验证回放据此二分定位首个分歧区间
+    pub out_hash: [u8; 16],           // 40 两快照之间(不含边界)的 Output 滚动 xxh3-128,区间与字节流规则归 hft-sequencer "状态哈希"
     pub snap_tsc: u64,                // 56 测量字段:写快照时本次运行的 TSC;purpose = Recovery 时等于 recovery_end 所用的 now(本次运行 TscClock,不取日志值)
     pub boot_id: [u8; 16],            // 64 测量字段:写快照时主机的 /proc/sys/kernel/random/boot_id(只供诊断,不参与任何恢复计算)
     pub snap_utc_ns: i64,             // 80 测量字段:写快照时的 UTC(TSC 校准换算;只供人读与冷读者定位)

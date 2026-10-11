@@ -290,7 +290,7 @@ impl Ledger {
             self.recompute_next_stale();
         }
         if !s.perp || self.cfg.valuation.perp == PerpVal::ExitSide {
-            self.revalue_inst(inst, t, None);
+            self.revalue_inst(inst, t, None, None);
         }
         if s.ref_of.0 != 0 {
             self.refresh_all_summaries_with(s.ref_of);

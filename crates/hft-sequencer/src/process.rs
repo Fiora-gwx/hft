@@ -139,6 +139,12 @@ pub(crate) fn finish_event<D: Driver<S>, S: StrategySet>(e: &mut Engine, drv: &m
         {
             b.copy_from_slice(&measured.0.to_le_bytes());
         }
+        if r.kind == EventKind::STATE_SNAPSHOT
+            && let Some(body) = e.out.bytes.get_mut(r.off as usize..(r.off + r.len) as usize)
+        {
+            // Include Outputs buffered earlier in this same event, in journal order.
+            crate::snapshot::set_out_hash(body, e.out_hash.digest());
+        }
         let body = e.out.body(&r);
         let s = drv
             .journal()

@@ -84,6 +84,7 @@ impl Ledger {
             t,
             seq: a.cmd_seq,
             cash: false,
+            defer_round: None,
         });
         if spot
             && let Some(s) = self.inst(a.inst).copied()
@@ -136,6 +137,7 @@ impl Ledger {
                     t,
                     seq: a.cmd_seq,
                     cash: false,
+                    defer_round: None,
                 });
             }
             if let Some((c, _)) = cell

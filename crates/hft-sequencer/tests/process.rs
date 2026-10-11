@@ -1032,7 +1032,14 @@ fn seq_382_ledger_notes_stay_in_originating_event_across_snapshots() {
         let opening = h.open_position(AC1, A1, Side::Buy, "0.001");
         let before = h.keyframe().seq;
         let mut mark = h.mark();
-        h.open_position(AC1, A1, Side::Sell, if late_fee { "0.0009" } else { "0.001" });
+        let closing = h.order_at_touch(AC1, A1, Side::Sell, if late_fee { "0.0009" } else { "0.001" });
+        let mut fill = order_event(&closing, OrderEventKind::Fill, h.epoch());
+        fill.cum_filled = closing.qty;
+        // USDT uses 6 decimals, while q() is the BTC quantity helper.
+        fill.fee = Qty(if late_fee { 0 } else { 10_000 });
+        fill.fee_asset = USDT;
+        h.push(h.rep_ring(AC1), &fill);
+        h.run();
         let expected_kind = if late_fee {
             assert!(
                 h.notes_since(mark)
@@ -1068,6 +1075,12 @@ fn seq_382_ledger_notes_stay_in_originating_event_across_snapshots() {
         assert_eq!((note.group, note.inst), (G1, A1));
         assert_eq!(note.v[2], q("0.001").0 as u64);
         assert_eq!(note.v[4], q(if late_fee { "0.0009" } else { "0.001" }).0 as u64);
+        let expected_net = n(if late_fee { "-0.500905" } else { "-0.011" });
+        assert_eq!(note.v[7] as i64, expected_net.0, "round includes its ending fee");
+        assert_eq!(
+            h.s.engine().ledger.group(AC1, G1).round.pnl,
+            hft_ledger::PnlBreakdown::zero()
+        );
         let input_ix = records[..*note_ix]
             .iter()
             .rposition(|r| r.role() == Role::Input)
