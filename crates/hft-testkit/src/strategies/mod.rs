@@ -19,14 +19,22 @@ hft_strategy_sdk::strategy_set! {
     }
 }
 
-hft_strategy_sdk::strategy_set! {
-    /// Full-file replay fixture, kept separate so DST's strategy set and HashTrail stay stable.
-    pub struct ReplayStrategies { replay_probe::ReplayA }
+mod replay_set {
+    use super::replay_probe;
+    hft_strategy_sdk::strategy_set! {
+        /// Full-file replay fixture, independent of DST's strategy set and HashTrail.
+        pub struct ReplayStrategies { replay_probe::ReplayA }
+    }
 }
-hft_strategy_sdk::strategy_set! {
-    /// Same sample layout and algorithm with an incompatible path version.
-    pub struct ReplayPathV2Strategies { replay_probe::ReplayPathV2 }
+mod replay_path_v2_set {
+    use super::replay_probe;
+    hft_strategy_sdk::strategy_set! {
+        /// Same sample layout and algorithm with an incompatible path version.
+        pub struct ReplayPathV2Strategies { replay_probe::ReplayPathV2 }
+    }
 }
+pub use replay_path_v2_set::ReplayPathV2Strategies;
+pub use replay_set::ReplayStrategies;
 
 /// The test kind_id range.
 pub const TEST_KIND_IDS: core::ops::RangeInclusive<u16> = 0xFF00..=0xFFFF;
