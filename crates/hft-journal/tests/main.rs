@@ -18,6 +18,7 @@ mod persist;
 mod prepare;
 mod prop_powerloss;
 mod reader;
+mod reader_files;
 mod retain;
 mod retire;
 mod roll;

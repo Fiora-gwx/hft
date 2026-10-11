@@ -26,6 +26,7 @@ mod layout;
 mod meta;
 mod oplog;
 mod reader;
+mod reader_files;
 mod retire;
 mod scan;
 mod verify;
@@ -53,6 +54,7 @@ pub use layout::{
 };
 pub use meta::DurableMeta;
 pub use reader::{EndAt, JournalReader, LogicalEvent, Next, OnGap, ReaderConfig, StartAt};
+pub use reader_files::{FileOpenError, FileProblem, FileSegment};
 pub use retire::cold_retire;
 pub use verify::verify;
 

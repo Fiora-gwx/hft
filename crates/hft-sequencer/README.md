@@ -115,7 +115,7 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 
 `JournalSink` 由 `hft-journal::JournalWriter` 实现(实盘、恢复),验证与镜像驱动实现为按日志对齐序号的哑写者;`EVENT_END` 位与 Input/Output/Meta 分类属于 [hft-event](../hft-event/README.md) 的 `RecordFlags`/`KindInfo.role`。
 
-**离线文件输入**由默认关闭的 `replay-io` feature 提供 `Log::from_reader(&mut JournalReader, LogReadLimits)`。调用方配置固定的 LastCompleteEvent 边界、段首起点、Error-on-gap 和非零重组容量;记录数与逻辑体字节数上限分别由 `LogReadLimits.records/body_bytes` 给出。超过上限、Pending、空输入、损坏、缺段、未知 kind 或段头 schema 与当前二进制不符均返回 `LogReadError`,不返回成功的部分日志。物理 seq、事件标志、多段重组后的业务尾零及各段时钟保持原样;Fixed/Var 经 [exact_body](../hft-event/README.md#体-trait-与编解码) 去除传输填充。读取不打开写者、不修改来源文件,只在冷调用方执行,不进入 LiveDriver 的取环路径。
+**离线文件输入**由默认关闭的 `replay-io` feature 提供 `Log::from_reader(&mut JournalReader, LogReadLimits)`。完整文件验证使用 [JournalReader::open_files](../hft-journal/README.md#读者) 预检的固定边界与原路径清单;普通读者须配置 LastCompleteEvent、段首起点、Error-on-gap 和非零重组容量,其恢复截断点本身不证明文件完整。记录数与逻辑体字节数上限分别由 `LogReadLimits.records/body_bytes` 给出。超过上限、Pending、空输入、损坏、缺段、未知 kind 或段头 schema 与当前二进制不符均返回 `LogReadError`,不返回成功的部分日志。物理 seq、事件标志、多段重组后的业务尾零及各段时钟保持原样;Fixed/Var 经 [exact_body](../hft-event/README.md#体-trait-与编解码) 去除传输填充。读取不打开写者、不修改来源文件,只在冷调用方执行,不进入 LiveDriver 的取环路径。
 
 同一 feature 的 `driver::replay_snapshot::check_snapshot::<S>(&Log, seq)` 在投递输入前自检指定快照。先校验头部、全部节的边界、唯一性与节数,再计算 [state_hash](#状态哈希);非零声明值必须相等,零值仍需自算。装配参数只取该日志,调用正式恢复路径后重新序列化,重算哈希必须一致;差异返回首个不同节号。重建写缓冲上限为原节字节数,超限直接失败。缺快照、损坏、不支持的恢复布局与恢复后丢失状态均失败,不退到另一快照,不修改来源日志或正在运行的引擎。
 

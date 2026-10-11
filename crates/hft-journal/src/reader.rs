@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use hft_event::{EventKind, RecordFlags, RecordHeader, RecordView};
+use sha2::{Digest, Sha256};
 use zerocopy::FromBytes;
 
 use crate::config::{
@@ -19,6 +20,7 @@ use crate::layout::{
     FORMAT_VERSION, HEADER_FIXED_LEN, HEADER_LEN, OFF_COMMITTED, OFF_LAST_SEQ, OFF_RETIRED, OFF_STATE,
     OFF_SYNCED, RECOVERY_GAP, SEGMENT_MAGIC, SegMap, SegmentHeaderFixed,
 };
+use crate::reader_files::{self, FileOpenError, FileProblem, FileSegment};
 use crate::scan::header_sha;
 use crate::scan::{self, KindRules};
 
@@ -117,6 +119,7 @@ pub enum Next<'a> {
 struct Loc {
     hot: Option<PathBuf>,
     cold: Option<ColdSeg>,
+    file: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -127,6 +130,7 @@ enum Src {
     /// Borrowed in-process mapping (never released by the reader).
     Slot(PathBuf, SegMap),
     Cold(ColdSeg, HotOpen),
+    File(PathBuf, HotOpen),
 }
 
 impl Src {
@@ -136,7 +140,7 @@ impl Src {
 
     fn map_ref(&self) -> &SegMap {
         match self {
-            Src::Hot(_, h) | Src::Cold(_, h) => &h.map,
+            Src::Hot(_, h) | Src::Cold(_, h) | Src::File(_, h) => &h.map,
             Src::Slot(_, m) => m,
         }
     }
@@ -157,7 +161,8 @@ impl Cur {
     /// Header unusable: short mapping, unknown magic/version, CRC mismatch.
     fn bad(&self) -> bool {
         let f = &self.fixed;
-        self.src.map().len() < HEADER_LEN
+        self.bad_cache == Some(true)
+            || self.src.map().len() < HEADER_LEN
             || f.magic != SEGMENT_MAGIC
             || f.format_version != FORMAT_VERSION
             || f.header_crc32c != f.compute_crc()
@@ -202,6 +207,7 @@ pub struct JournalReader {
     row_reads: u64,
     known: BTreeSet<u64>,
     production: bool,
+    files: Option<Vec<FileSegment>>,
 }
 
 const FSTAT_EVERY_NS: u64 = 1_000_000_000;
@@ -209,9 +215,100 @@ const FSTAT_EVERY_NS: u64 = 1_000_000_000;
 impl JournalReader {
     /// Opens a reader at `cfg.start`.
     pub fn open(cfg: &ReaderConfig) -> Result<JournalReader, OpenErr> {
+        let mut r = Self::blank(cfg);
+        let segs = r.list();
+        if segs.is_empty() {
+            return Err(OpenErr::NotFound);
+        }
+        r.known = segs.keys().copied().collect();
+        // Journal kind from the first readable header.
+        for no in segs.keys() {
+            if let Some(f) = r.header_of(*no, &segs) {
+                r.kind = JournalKind::from_u8(f.journal_kind).unwrap_or(JournalKind::Seq);
+                break;
+            }
+        }
+        if r.cfg.end == EndAt::LastCompleteEvent {
+            r.end_limit = r
+                .compute_last_complete(&segs)
+                .map(|p| (p.segment_no, p.offset as usize));
+        }
+        r.position_start(&segs)?;
+        Ok(r)
+    }
+
+    /// Opens original, immutable local files in header `first_seq` order. Every supplied
+    /// segment (including its complete End and any seal) and every reassembled event is
+    /// checked before returning a reader. No tail repair, directory discovery or hot fallback.
+    pub fn open_files(paths: &[PathBuf], reassembly_cap: usize) -> Result<Self, FileOpenError> {
+        let fail = |problem| {
+            reader_files::error(
+                paths.first().map_or(std::path::Path::new(""), PathBuf::as_path),
+                problem,
+            )
+        };
+        if reassembly_cap == 0 {
+            return Err(fail(FileProblem::ReassemblyDisabled));
+        }
+        let files = reader_files::load(paths)?;
+        let first = files.first().ok_or_else(|| fail(FileProblem::Empty))?;
+        let (instance, name) =
+            reader_files::identity(&first.header).ok_or_else(|| fail(FileProblem::Identity))?;
+        let mut cfg = ReaderConfig::new(PathBuf::new(), PathBuf::new(), instance, name);
+        cfg.end = EndAt::LastCompleteEvent;
+        cfg.reassembly_cap = reassembly_cap;
+        let mut r = Self::blank(&cfg);
+        r.kind =
+            JournalKind::from_u8(first.header.journal_kind).ok_or_else(|| fail(FileProblem::Identity))?;
+        let first_no = first.header.segment_no;
+        r.end_limit = files.last().map(|f| (f.header.segment_no, f.end_offset as usize));
+        r.files = Some(files);
+        let segs = r.list();
+        r.known = segs.keys().copied().collect();
+        r.start_at(first_no, &segs, None)
+            .map_err(|_| fail(FileProblem::Io))?;
+        loop {
+            let problem = match r.poll() {
+                Next::Record(_) | Next::Event(_) => continue,
+                Next::End => break,
+                Next::Err(error) => FileProblem::Read {
+                    error,
+                    offset: r.off as u64,
+                },
+                Next::Gap(_) => FileProblem::Chain,
+                Next::Pending => FileProblem::Boundary,
+            };
+            let no = r.cur.as_ref().map_or(r.pos.segment_no, |c| c.no);
+            let path = r
+                .files
+                .as_ref()
+                .and_then(|v| v.iter().find(|f| f.header.segment_no == no))
+                .map_or(std::path::Path::new(""), |f| f.path.as_path());
+            return Err(reader_files::error(path, problem));
+        }
+        r.drop_cur();
+        r.prev_fixed = None;
+        r.group = None;
+        r.buf.clear();
+        r.in_boot = false;
+        r.boot_closing = false;
+        r.next_open = None;
+        r.ended = false;
+        r.pending_at = None;
+        r.start_at(first_no, &segs, None)
+            .map_err(|_| fail(FileProblem::Io))?;
+        Ok(r)
+    }
+
+    /// Validated offline input identity and extents in delivery order; absent for live readers.
+    pub fn file_segments(&self) -> Option<&[FileSegment]> {
+        self.files.as_deref()
+    }
+
+    fn blank(cfg: &ReaderConfig) -> Self {
         let hot_jdir = cfg.hot_dir.join(cfg.instance.as_str()).join(cfg.name.as_str());
         let cold_jdir = cfg.cold_root.join(cfg.instance.as_str()).join(cfg.name.as_str());
-        let mut r = JournalReader {
+        JournalReader {
             cfg: cfg.clone(),
             hot_jdir,
             cold_jdir,
@@ -236,26 +333,8 @@ impl JournalReader {
             row_reads: 0,
             known: BTreeSet::new(),
             production: !scan::dev_kinds_known(),
-        };
-        let segs = r.list();
-        if segs.is_empty() {
-            return Err(OpenErr::NotFound);
+            files: None,
         }
-        r.known = segs.keys().copied().collect();
-        // Journal kind from the first readable header.
-        for no in segs.keys() {
-            if let Some(f) = r.header_of(*no, &segs) {
-                r.kind = JournalKind::from_u8(f.journal_kind).unwrap_or(JournalKind::Seq);
-                break;
-            }
-        }
-        if r.cfg.end == EndAt::LastCompleteEvent {
-            r.end_limit = r
-                .compute_last_complete(&segs)
-                .map(|p| (p.segment_no, p.offset as usize));
-        }
-        r.position_start(&segs)?;
-        Ok(r)
     }
 
     fn now(&self) -> u64 {
@@ -265,6 +344,12 @@ impl JournalReader {
     /// Hot (non-Preparing) and cold segments by number.
     fn list(&self) -> BTreeMap<u64, Loc> {
         let mut m: BTreeMap<u64, Loc> = BTreeMap::new();
+        if let Some(files) = &self.files {
+            for (index, file) in files.iter().enumerate() {
+                m.entry(file.header.segment_no).or_default().file = Some(index);
+            }
+            return m;
+        }
         for (no, p) in fs::hot_list(&self.hot_jdir) {
             if scan::read_header(&p).is_some_and(|(_, st)| st == SegState::Preparing as u32) {
                 continue;
@@ -282,6 +367,9 @@ impl JournalReader {
 
     fn header_of(&self, no: u64, segs: &BTreeMap<u64, Loc>) -> Option<SegmentHeaderFixed> {
         let l = segs.get(&no)?;
+        if let Some(index) = l.file {
+            return self.files.as_ref()?.get(index).map(|f| f.header);
+        }
         let p = l.hot.clone().or_else(|| l.cold.as_ref().map(ColdSeg::jrn))?;
         let b = fs::read_prefix(&p, HEADER_FIXED_LEN).ok()?;
         SegmentHeaderFixed::read_from_bytes(b.get(..HEADER_FIXED_LEN)?).ok()
@@ -299,6 +387,20 @@ impl JournalReader {
     fn open_seg(&mut self, no: u64, segs: &BTreeMap<u64, Loc>) -> Option<Cur> {
         let l = segs.get(&no)?;
         let now = self.now();
+        if let Some(index) = l.file {
+            let f = self.files.as_ref()?.get(index)?;
+            let h = fs::cold_open(&f.path).ok()?;
+            let digest: [u8; 32] = Sha256::digest(h.map.bytes(0, h.map.len())).into();
+            let changed = h.map.len() as u64 != f.file_bytes || digest != f.digest;
+            return Some(Cur {
+                no,
+                fixed: h.map.fixed(),
+                src: Src::File(f.path.clone(), h),
+                bound: f.end_offset as usize,
+                last_fstat_ns: now,
+                bad_cache: changed.then_some(true),
+            });
+        }
         if let Some(p) = &l.hot {
             if self.cfg.same_process
                 && let Some(m) = fs::hot_inproc(p)
@@ -339,7 +441,7 @@ impl JournalReader {
         if let Some(c) = self.cur.take() {
             match c.src {
                 Src::Hot(_, h) => fs::release(None, h.map),
-                Src::Cold(_, h) => fs::release(None, h.map),
+                Src::Cold(_, h) | Src::File(_, h) => fs::release(None, h.map),
                 Src::Slot(..) => {}
             }
         }
@@ -352,6 +454,7 @@ impl JournalReader {
         let Some(c) = self.cur.as_mut() else { return Ok(()) };
         let mut switch = false;
         match &c.src {
+            Src::File(..) => {}
             Src::Hot(_, h) => {
                 self.row_reads += 1;
                 let m = h.map;
@@ -438,6 +541,14 @@ impl JournalReader {
                 }
                 false
             }
+            Src::File(path, h) => {
+                if due && !(fs::still_linked(h) && path.exists()) {
+                    let (at, no) = (self.pos, c.no);
+                    self.drop_cur();
+                    return Err(self.gap(at, no, GapReason::Deleted));
+                }
+                false
+            }
         };
         if gone {
             self.switch_to_cold()?;
@@ -452,7 +563,7 @@ impl JournalReader {
         let fixed = c.fixed;
         match c.src {
             Src::Hot(_, h) => fs::release(None, h.map),
-            Src::Cold(_, h) => fs::release(None, h.map),
+            Src::Cold(_, h) | Src::File(_, h) => fs::release(None, h.map),
             Src::Slot(..) => {}
         }
         let stem = fs::cold_stem(&self.cold_jdir, fixed.created_utc_ns, no, fixed.first_seq);
@@ -940,6 +1051,13 @@ impl JournalReader {
     }
 
     fn compute_last_complete(&self, segs: &BTreeMap<u64, Loc>) -> Option<Position> {
+        if let Some(files) = &self.files {
+            return files.last().map(|f| Position {
+                segment_no: f.header.segment_no,
+                offset: f.end_offset,
+                seq: f.last_seq,
+            });
+        }
         let (no, l) = segs.iter().next_back()?;
         let h = match &l.hot {
             Some(p) => fs::hot_open(p, false).ok()?,
@@ -1043,6 +1161,7 @@ enum Step {
 fn seg_bound(c: &Cur) -> usize {
     let m = c.src.map();
     match &c.src {
+        Src::File(..) => c.bound,
         Src::Cold(cs, _) => {
             if cs.seal().exists() {
                 m.len()

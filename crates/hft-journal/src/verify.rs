@@ -59,9 +59,12 @@ fn u64_at(b: &[u8], o: usize) -> u64 {
 
 /// What the record scan of one segment found.
 #[derive(Default)]
-struct SegScan {
-    last_seq: Option<u64>,
-    last_is_end: bool,
+pub(crate) struct SegScan {
+    pub first_seq: Option<u64>,
+    pub last_seq: Option<u64>,
+    pub last_is_end: bool,
+    pub last_flags: u16,
+    pub end_other: u64,
 }
 
 /// Checks the journal directory `dir` (cold `<cold_root>/<instance>/<journal>` or a hot journal
@@ -161,7 +164,12 @@ pub fn verify(dir: &Path, opts: &VerifyOpts) -> VerifyReport {
 }
 
 /// Items 3 and 4 over `[4096, len)`; reports through `issue(item, offset)`.
-fn scan_records(b: &[u8], kind: JournalKind, opts: &VerifyOpts, mut issue: impl FnMut(u8, usize)) -> SegScan {
+pub(crate) fn scan_records(
+    b: &[u8],
+    kind: JournalKind,
+    opts: &VerifyOpts,
+    mut issue: impl FnMut(u8, usize),
+) -> SegScan {
     let rules = KindRules {
         journal: kind,
         require_registered: true,
@@ -182,13 +190,19 @@ fn scan_records(b: &[u8], kind: JournalKind, opts: &VerifyOpts, mut issue: impl 
     let mut item3 = false;
     while off < b.len() {
         let Some(buf) = b.get(off..) else { break };
-        let want = seq.map_or_else(
-            || {
-                buf.get(8..16)
-                    .map_or(0, |x| u64::from_le_bytes(x.try_into().unwrap_or([0; 8])))
+        let want = match seq {
+            Some(s) => match s.checked_add(1) {
+                Some(next) => next,
+                None => {
+                    issue(3, off);
+                    item3 = true;
+                    break;
+                }
             },
-            |s| s + 1,
-        );
+            None => buf
+                .get(8..16)
+                .map_or(0, |x| u64::from_le_bytes(x.try_into().unwrap_or([0; 8]))),
+        };
         let v = match scan::check(buf, want, rules) {
             Ok(Some(v)) => v,
             Ok(None) | Err(_) => {
@@ -211,7 +225,7 @@ fn scan_records(b: &[u8], kind: JournalKind, opts: &VerifyOpts, mut issue: impl 
                 Some((_, next, parts)) => ph.part != next || ph.parts != parts,
             };
             let last = ph.part.wrapping_add(1) == ph.parts;
-            if bad || flags.contains(RecordFlags::PART) == last {
+            if bad || ph.parts == 0 || flags.contains(RecordFlags::PART) == last {
                 issue(3, off);
                 item3 = true;
                 break;
@@ -267,9 +281,14 @@ fn scan_records(b: &[u8], kind: JournalKind, opts: &VerifyOpts, mut issue: impl 
                 }
             }
         }
+        if first {
+            out.first_seq = Some(v.hdr.seq);
+        }
         first = false;
         out.last_seq = Some(v.hdr.seq);
         out.last_is_end = k == EventKind::SEGMENT_ROLL && v.body.get(32) == Some(&(RollMark::End as u8));
+        out.last_flags = v.hdr.flags;
+        out.end_other = if out.last_is_end { u64_at(v.body, 8) } else { 0 };
         seq = Some(v.hdr.seq);
         off += v.hdr.len as usize;
     }

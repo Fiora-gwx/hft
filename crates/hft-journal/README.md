@@ -151,6 +151,8 @@ pub struct LogicalEvent<'a> { pub seq: u64 /* 第 0 段 */, pub kind: EventKind,
 pub struct JournalReader { /* 只读映射;任意进程 */ }
 impl JournalReader {
     pub fn open(cfg: &ReaderConfig) -> Result<JournalReader, OpenErr>;
+    pub fn open_files(paths: &[PathBuf], reassembly_cap: usize) -> Result<JournalReader, FileOpenError>;
+    pub fn file_segments(&self) -> Option<&[FileSegment]>; // 离线文件的原路径、段头、物理长度、End 后偏移与 last_seq,按 first_seq 排序
     pub fn poll(&mut self) -> Next<'_>;
     pub fn position(&self) -> Position;                 // { segment_no, offset, seq }
     pub fn segment_header(&self) -> Option<&SegmentHeaderFixed>; // 最近交付记录所在段的不可变头,跨段 poll 后同样对应该记录;不新增 I/O/映射
@@ -176,6 +178,12 @@ pub enum Next<'a> {
 - **段头读取**:`SegmentHeader` 含原子字段(`committed_len`、`state`、persist 行),不能派生 `FromBytes`/`Immutable`;读者对映射首页做对齐与长度检查后以 `unsafe { &*(ptr as *const SegmentHeader) }` 取引用(`// SAFETY:` 写明:页对齐、4096 B 可读、原子字段 8 B 对齐、映射在引用存活期内不解除),不可变区 0..3072 另以 `zerocopy` 的 `SegmentHeaderFixed` 视图校验 CRC。该 `unsafe` 只在本 crate 的 `layout.rs`。
 - **损坏段不能当作不存在**:枚举 `<10 位数字>.jrn` 只跳过可识别的 `Preparing` 段;头部读不出、magic/CRC 错或截短的文件保留在有序段表中,由 open/poll 明确失败。`Oldest` 不能因此移到后一段,`LastCompleteEvent` 不能因此缩到前一段。
 - 验证回放驱动用 `in_boot_block()` 跳过引导块输入并比对重新生成的引导块;冷读者从 `LatestBoot`/`LatestKeyframe` 自举。
+
+**不可变本地文件入口** `open_files` 直接读取调用方列出的原路径,文件名不参与身份判断,不枚举目录或回退其他副本。打开时按段头 `first_seq` 排序,逐段验证段头、记录框架/CRC、完整引导块、完整 `End` 与非零容量下的多段重组;任一文件有错则整个打开失败,此前不向调用方交付记录。同组文件须有相同 instance、journal_name、journal_kind、venue,段号和 seq 连续,`prev_header_sha256`、`prev_last_seq` 及前段 End 的目标一致;可单取一段或内部连续的后缀,不要求提供首段以前的历史。实际 `RECOVERY_GAP` 序号跳跃仍返回失败,由上层另行划分恢复区间。
+
+文件按物理 EOF 校验。完整容量且标记 Sealed 的文件以 `committed_len` 为终点,之后只允许全零预留区;不能退到最后一条碰巧合法的记录。若存在同 stem 的 `.seal`,须完整核对长度、CRC、段号、首尾 seq 与屏蔽共享行后的 SHA-256,损坏 seal 不退化为无 seal 读取。无 seal 的文件也必须有完整 End。`FileOpenError` 带原路径及 `FileProblem` 分类,记录校验或重组错误附文件内偏移。空列表、未封闭尾部、缺段、重复段或 `reassembly_cap = 0` 均失败。
+
+调用方须保证输入文件在读者存活期间不可变。预检每次只映射一个段;之后每次打开段均核对预检时的全文件 SHA-256,内容被替换则 `Corrupt`,已删除则 `Gap{Deleted}`,不交付该段的记录。此入口只在冷路径使用;不启用 writer、不写共享行、固定读到最后一段 End,不进入 Follow 模式。`file_segments` 返回预检清单,普通 `open` 返回 None;此入口的 `last_complete_event` 是已验证的最终 End 位置。
 
 ### persist 与后台维护(persist 线程调用)
 

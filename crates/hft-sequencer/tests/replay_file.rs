@@ -207,13 +207,13 @@ fn seq_385_file_journal_independent_verify() {
     let cfg = reader_cfg(&t);
     let mut reader = JournalReader::open(&cfg).unwrap();
     let log = Log::from_reader(&mut reader, limits()).unwrap();
-    let snapshots: Vec<_> = log
-        .recs
-        .iter()
-        .filter(|r| r.kind == EventKind::STATE_SNAPSHOT)
-        .map(|r| r.seq)
-        .collect();
-    assert!(snapshots.len() >= 4);
+    assert!(
+        log.recs
+            .iter()
+            .filter(|r| r.kind == EventKind::STATE_SNAPSHOT)
+            .count()
+            >= 4
+    );
     assert_eq!(log.seg_start.len(), 2);
     assert!(
         log.recs.windows(2).any(|p| p[1].seq > p[0].seq + 1),
@@ -225,10 +225,21 @@ fn seq_385_file_journal_independent_verify() {
             .any(|r| r.kind == EventKind::STATE_SNAPSHOT && r.body.len() > hft_event::PART_MAX_CHUNK)
     );
     assert!(log.recs.iter().any(|r| r.kind == EventKind::CMD_RESULT));
+    verify_snapshots(&log);
+}
+
+fn verify_snapshots(log: &Log) {
+    let snapshots: Vec<_> = log
+        .recs
+        .iter()
+        .filter(|r| r.kind == EventKind::STATE_SNAPSHOT)
+        .map(|r| r.seq)
+        .collect();
+    assert!(!snapshots.is_empty());
     for at in snapshots {
-        let checked = check_snapshot::<TestSet>(&log, at).unwrap_or_else(|e| panic!("snapshot {at}: {e:?}"));
+        let checked = check_snapshot::<TestSet>(log, at).unwrap_or_else(|e| panic!("snapshot {at}: {e:?}"));
         assert_ne!(checked.state_hash, [0; 16]);
-        let setup = EngineSetup::from_snapshot(&log, at).unwrap();
+        let setup = EngineSetup::from_snapshot(log, at).unwrap();
         let driver = ReplayDriver::new(ReplayMode::Verify, log.clone(), 0, setup.seq.replay_per_round);
         let mut s: Sequencer<ReplayDriver, TestSet> = Sequencer::boot(
             BootSource::Journal(plan(SnapshotSel::AtSeq(at), true, 0, 0)),
@@ -256,6 +267,46 @@ fn seq_385_file_journal_independent_verify() {
             d.mismatches()
         );
         assert!(d.leftover().is_empty(), "snapshot {at}: {:?}", d.leftover());
+    }
+}
+
+#[test]
+fn seq_390_original_file_order_and_selected_segment_verify() {
+    let t = fixture();
+    let mut original = JournalReader::open(&reader_cfg(&t)).unwrap();
+    let expected = Log::from_reader(&mut original, limits()).unwrap();
+    drop(original);
+    let mut renamed = Vec::new();
+    let mut before = Vec::new();
+    for (i, name) in ["z-first.data", "a-second.data"].iter().enumerate() {
+        let p = t.0.join(name);
+        // Move the source, leaving no canonical path for a hidden fallback or directory scan.
+        std::fs::rename(t.0.join(format!("out/prod/seq/{:010}.jrn", i + 1)), &p).unwrap();
+        before.push(std::fs::read(&p).unwrap());
+        renamed.push(p);
+    }
+    for paths in [
+        vec![renamed[1].clone(), renamed[0].clone()],
+        vec![renamed[1].clone()],
+    ] {
+        let mut reader = JournalReader::open_files(&paths, 16 << 20).unwrap();
+        let log = Log::from_reader(&mut reader, limits()).unwrap();
+        let start = if paths.len() == 2 {
+            0
+        } else {
+            expected.seg_start[1]
+        };
+        assert_eq!(log.recs, expected.recs[start..]);
+        assert_eq!(log.segs, expected.segs[if paths.len() == 2 { 0 } else { 1 }..]);
+        if paths.len() == 2 {
+            assert_eq!(log.seg_start, expected.seg_start);
+        } else {
+            assert_eq!(log.seg_start, vec![0]);
+        }
+        verify_snapshots(&log);
+    }
+    for (i, p) in renamed.iter().enumerate() {
+        assert_eq!(std::fs::read(p).unwrap(), before[i]);
     }
 }
 

@@ -16,7 +16,7 @@ spec: README.md
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
 | 写者 | JNL-008, JNL-010–JNL-038, JNL-063, JNL-068, JNL-120, JNL-121 |
-| 读者 | JNL-002, JNL-008, JNL-012, JNL-074–JNL-088, JNL-103, JNL-118, JNL-125–JNL-126 |
+| 读者 | JNL-002, JNL-008, JNL-012, JNL-074–JNL-088, JNL-103, JNL-118, JNL-125–JNL-129 |
 | persist 与后台维护(persist 线程调用) | JNL-008, JNL-012, JNL-042, JNL-044–JNL-054, JNL-091–JNL-093, JNL-107, JNL-114 |
 | 恢复与校验 | JNL-026, JNL-036, JNL-055, JNL-056, JNL-062–JNL-068, JNL-089, JNL-090, JNL-118, JNL-119, JNL-124 |
 | 持久元数据(engine_epoch 等) | JNL-092, JNL-094–JNL-098, JNL-122 |
@@ -45,7 +45,7 @@ spec: README.md
 - 快照记录结构:JNL-004–JNL-007、JNL-038
 - 冷副本与热段:JNL-003、JNL-044–JNL-052、JNL-091
 - 校验与缺段检测:JNL-073、JNL-089、JNL-090
-- 读者 API 概要:JNL-074–JNL-086
+- 读者 API 概要:JNL-074–JNL-086、JNL-127–JNL-129
 - 格式演进:JNL-001、JNL-082
 
 ## 用例
@@ -1769,6 +1769,52 @@ spec: README.md
 | JNL-126.3 | 尾段 | magic 首字节置零 |
 | JNL-126.4 | 首段、中间段、尾段各一行 | 头部 CRC 翻转 1 bit |
 | JNL-126.5 | 首段、中间段、尾段各一行 | 文件截短为 4000 B |
+
+### JNL-127 原路径文件按段头排序且保持只读
+
+- 规则:[读者](README.md#读者)
+- 级别:integ
+- 里程碑:M2
+- 前置:真实写者生成三个封闭段,每段含 TIn、TOut、TCrc 和 70001 B 的 TMulti;使用 persist 冷副本
+- 步骤:文件命名为 z-first.bin、a-second.bin、middle-third.bin,以 3/1/2 顺序传入;有 seal 与无 seal 各跑一次;再分别单取段 1、只取段 2 和 3;最后读取带全零预留区的完整容量段
+- 期望:清单及交付顺序按 first_seq;后缀和单段与整份日志的相应部分逐字节一致,多段体恰好 70001 B 且与写入体逐字节相同;last_complete_event 等于最后交付位置;所有来源字节保持不变
+- 实现:`crates/hft-journal/tests/reader_files.rs::jnl_127_original_files_sorted_and_read_only`
+
+### JNL-128 整组文件在交付前完成严格校验
+
+- 规则:[读者](README.md#读者)
+- 级别:table
+- 里程碑:M2
+- 前置:JNL-127 夹具,每行只改独立副本;段头或 seal 的语义字段损坏均重新计算自身 CRC
+- 共同期望:open_files 直接失败,不能得到可交付前缀的读者
+- 实现:`crates/hft-journal/tests/reader_files.rs::jnl_128_all_input_validated_before_delivery`
+
+| 行 | 输入或损坏 | 期望 |
+|---|---|---|
+| JNL-128.1 | 空文件列表 | Empty |
+| JNL-128.2 | 首/中/尾段分别跑 magic、头 CRC、截短 4000 B、first_seq 零、删除 End、尾部截短 1 B、尾部追加零、记录 CRC、头和首记录 seq 不同、段号 MAX、首记录 seq MAX、末记录缺 EVENT_END | 每行均失败,序号边界不 panic |
+| JNL-128.3 | 缺中间段、重复输入首段 | Chain |
+| JNL-128.4 | 中段 prev_header_sha256、prev_last_seq、段号各改一项 | Chain |
+| JNL-128.5 | 中段 instance、journal_name、venue、未知 journal_kind、instance 尾部垃圾、journal_name 零填充损坏各一行 | Identity |
+| JNL-128.6 | 尾段 seal 的 CRC、长度、SHA、len、段号、first_seq、last_seq、magic 各一行 | Seal |
+| JNL-128.7 | 完整容量文件的预留区非零、committed_len MAX/零、状态 Open 各一行 | 失败,不截取合法前缀 |
+
+### JNL-129 重组预检及重开段的内容完整性
+
+- 规则:[读者](README.md#读者)
+- 级别:table
+- 里程碑:M2
+- 前置:JNL-127 夹具;后三类只改第三段的第二个 TMulti 分片,不依赖记录 CRC 发现错误
+- 实现:`crates/hft-journal/tests/reader_files.rs::jnl_129_preflight_reassembly_and_reopen_integrity`
+
+| 行 | 条件 | 期望 |
+|---|---|---|
+| JNL-129.1 | cap = 0 / 70000 / 70001 | ReassemblyDisabled / ReassemblyCap / 成功 |
+| JNL-129.2 | 第二分片 total_len 或 tsc 与首片不同 | 打开失败 |
+| JNL-129.3 | 第二分片 chunk_len MAX、part 回到零、parts 零 | 打开失败 |
+| JNL-129.4 | 第二分片 kind 改为 TIn | 打开失败 |
+| JNL-129.5 | 打开成功后替换段 2 中无 CRC 的 TIn 业务字节 | 仅交付段 1,进入段 2 时 Corrupt |
+| JNL-129.6 | 打开成功后删除段 2 | 仅交付段 1,进入段 2 时 Gap{Deleted} |
 
 ## 验收
 

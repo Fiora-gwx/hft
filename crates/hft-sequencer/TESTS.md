@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | SEQ-018、SEQ-310 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
-| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-389 |
+| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-390 |
 | 策略集(`StrategySet`) | SEQ-015–SEQ-018、SEQ-340 |
 | 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181 |
 | 环与容量 | SEQ-001–SEQ-007、SEQ-058、SEQ-059、SEQ-064、SEQ-066、SEQ-086、SEQ-087、SEQ-100、SEQ-221、SEQ-231、SEQ-279、SEQ-288、SEQ-345、SEQ-346、SEQ-367 |
@@ -5407,6 +5407,16 @@ spec: README.md
 |---|---|---|
 | SEQ-389.1 | ConfigBlob → SetParams | 实盘夹具 Applied,Verify 无分歧 |
 | SEQ-389.2 | SetParams → ConfigBlob | 实盘夹具仍 Applied,Verify 在该命令的 CmdResult seq 检出分歧 |
+
+### SEQ-390 重命名乱序文件与独立后缀通过真实回放
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
+- 级别:integ
+- 里程碑:M2
+- 前置:SEQ-385 的实际文件 journal,多段快照与两个完整引导段;读取基准日志后关闭读者
+- 步骤:将两段移动为 z-first.data 与 a-second.data,不保留原名称;分别反序传入两段、只传入第二段,经 open_files → Log::from_reader → 每个快照自检 → 独立装配 Verify
+- 期望:物理 seq、标志、TSC、逻辑体、段时钟及边界与基准对应部分一致;每个快照恢复后无 Output 分歧或遗漏,回放完成;来源字节保持不变
+- 实现:`crates/hft-sequencer/tests/replay_file.rs::seq_390_original_file_order_and_selected_segment_verify`
 
 ## 验收
 
