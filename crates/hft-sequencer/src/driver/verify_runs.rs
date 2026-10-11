@@ -1,7 +1,7 @@
 //! Cold planning of independent executions. A segment rollover keeps the existing engine;
 //! a process restart or build change restores the new boot snapshot instead.
 
-use hft_event::{EventKind, HostProfile, Note, SegmentRoll, SnapshotHdr};
+use hft_event::{EventKind, HostProfile, Note, RecordFlags, SegmentRoll, SnapshotHdr};
 use hft_journal::{RollMark, RollReason};
 
 use super::replay::Log;
@@ -14,7 +14,13 @@ pub(super) struct RunStart {
     pub snapshot: usize,
 }
 
-pub(super) fn plan(log: &Log) -> Result<Vec<RunStart>, VerifyError> {
+pub(super) struct RunPlan {
+    pub runs: Vec<RunStart>,
+    pub recoveries: Vec<super::verify_recovery::RecoveryRange>,
+    pub recovery_notes: Vec<usize>,
+}
+
+pub(super) fn plan(log: &Log) -> Result<RunPlan, VerifyError> {
     let bad = |ix: usize| VerifyError::RunBoundary {
         seq: log.recs.get(ix).map_or(0, |r| r.seq),
     };
@@ -25,6 +31,8 @@ pub(super) fn plan(log: &Log) -> Result<Vec<RunStart>, VerifyError> {
         return Err(bad(0));
     }
     let mut runs = Vec::new();
+    let mut recoveries = Vec::new();
+    let mut recovery_notes = Vec::new();
     let mut previous_build = None;
     for (si, &first) in log.seg_start.iter().enumerate() {
         let end = log.seg_start.get(si + 1).copied().unwrap_or(log.recs.len());
@@ -46,6 +54,11 @@ pub(super) fn plan(log: &Log) -> Result<Vec<RunStart>, VerifyError> {
             .ok_or_else(|| bad(first))?;
         let mut boot_snapshot = None;
         let mut build = None;
+        let input = records
+            .iter()
+            .position(|r| r.role() == hft_event::Role::Input)
+            .unwrap_or(records.len());
+        let mut notes = Vec::new();
         for (j, r) in records.iter().enumerate() {
             if r.kind == EventKind::HOST_PROFILE && j < done {
                 let h = r.read::<HostProfile>().ok_or_else(|| bad(first + j))?;
@@ -65,17 +78,34 @@ pub(super) fn plan(log: &Log) -> Result<Vec<RunStart>, VerifyError> {
                     return Err(bad(first + j));
                 }
             }
-            // Recovery-mismatch acceptance needs a separately verified recovery range. Until
-            // that is available, do not silently skip these pre-EngineClock output Notes.
             if r.kind == EventKind::NOTE
                 && r.read::<Note>()
                     .is_some_and(|n| n.code == crate::codes::seq_note(crate::codes::note::RECOVER_MISMATCH))
             {
-                return Err(VerifyError::UnsupportedRun { seq: r.seq });
+                if reason != RollReason::Recovery || j <= done || j >= input {
+                    return Err(VerifyError::RecoveryRange { seq: r.seq });
+                }
+                notes.push(first + j);
             }
         }
         let build = build.ok_or_else(|| bad(first))?;
         let snapshot = boot_snapshot.ok_or_else(|| bad(first))?;
+        if let Some(&last) = notes.last() {
+            // The recorder publishes exactly one complete event, with no interleaved records.
+            if notes[0] != first + done + 1
+                || last + 1 != first + input
+                || notes.windows(2).any(|w| w[0] + 1 != w[1])
+                || notes
+                    .iter()
+                    .any(|&i| log.recs[i].flags.contains(RecordFlags::EVENT_END) != (i == last))
+            {
+                return Err(VerifyError::RecoveryRange {
+                    seq: log.recs[last].seq,
+                });
+            }
+            recoveries.push(super::verify_recovery::range(log, first, &notes)?);
+            recovery_notes.extend_from_slice(&notes);
+        }
         let changed = previous_build.is_some_and(|b| b != build);
         if si == 0
             || changed
@@ -94,6 +124,7 @@ pub(super) fn plan(log: &Log) -> Result<Vec<RunStart>, VerifyError> {
             {
                 for (j, r) in records.iter().enumerate().skip(done + 1) {
                     match r.role() {
+                        hft_event::Role::Output if notes.contains(&(first + j)) => {}
                         hft_event::Role::Output | hft_event::Role::ByBody => return Err(bad(first + j)),
                         hft_event::Role::Input => {
                             if r.kind != EventKind::ENGINE_CLOCK {
@@ -109,5 +140,9 @@ pub(super) fn plan(log: &Log) -> Result<Vec<RunStart>, VerifyError> {
         }
         previous_build = Some(build);
     }
-    Ok(runs)
+    Ok(RunPlan {
+        runs,
+        recoveries,
+        recovery_notes,
+    })
 }

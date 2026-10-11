@@ -28,7 +28,7 @@ spec: README.md
 | 测试与验收 | 不适用:非规范 |
 | 依赖 | RPL-105、RPL-106、RPL-240、RPL-241 |
 | 延伸阅读 | 不适用:非规范 |
-| 已知限制与后续工作 | RPL-260–RPL-263 |
+| 已知限制与后续工作 | RPL-260–RPL-265 |
 | 开发备忘 | 不适用:非规范 |
 
 ## 用例
@@ -306,13 +306,14 @@ spec: README.md
 - 规则:[verify](README.md#verify)
 - 级别:unit
 - 里程碑:M2
-- 前置:合成 journal:hft-testkit 以 `CrashFault` 制造一次崩溃,恢复区间内(段标 `Recovery`)有一条 `OrderDecision` 与重算结果不同(`RecoverMismatch` 场景,seq `r`);其后为正常运行
+- 前置:真实 sequencer 与 JournalWriter,最近快照后投递有效 BBO 和 SmokeOrder;写者前注入一条 OrderDecision.qty 差异,由实际写者生成 CRC 与 seal。未 Drain 的旧运行在完整提交边界交接,正式恢复路径读取已发布的原始文件并生成一条 RecoverMismatch 注记;随后正常处理输入和两个 SnapshotNow
 - 步骤:
   1. `replayer verify --journal <合成> --report $OUT/r.json`
 - 期望:
   - 退出 0;`r.json.verify = "pass"`
-  - 分歧明细 `recovery_diffs` 恰好一项,seq = `r`;Recovery 区间之后的 Output 全部比较且一致
-- 实现:`apps/replayer/tests/verify.rs::rpl_024_recovery_range_accepted`
+  - 分歧明细 `recovery_diffs` 恰好一项,seq = `r`,字段含 qty,标准输出与侧文件一致;两次运行均完成比较,第二次快照至少 3 个且无分歧,来源字节不变
+  - to_seq = r 时报告该项,from_seq = r + 1 时不报告;仅新段缺旧证据退出 3;篡改新段首条命令仍退出 1,保留旧恢复差异
+- 实现:`apps/replayer/tests/recovery.rs::rpl_024_recovery_range_accepted`
 
 ### RPL-025 RecoverFromSnapshot 引导块处重新起步,前后两段各自一致
 
@@ -2049,6 +2050,43 @@ spec: README.md
 | RPL-263.1 | 最近快照恢复并重放尾部 | Recovery |
 | RPL-263.2 | 指定尚无 EngineClock 的首个快照,跳过已含 EngineClock 的后续尾部 | RecoverFromSnapshot |
 | RPL-263.3 | Drain 后更换 build_git | Recovery |
+
+### RPL-264 恢复证据缺失、重复或越界时拒绝
+
+- 规则:[verify](README.md#verify)
+- 级别:table
+- 里程碑:M2
+- 前置:RPL-024 的实际恢复日志;另对 CmdResult 注入差异,真实恢复生成四个账户/venue 的注记
+- 步骤:独立执行下表各行
+- 期望:非法证据返回 RecoveryRange,无成功结果;合法的全账户注记只报告一项 recovery_diffs,普通分歧为空
+- 实现:`apps/replayer/tests/recovery.rs::rpl_264_invalid_recovery_evidence_fails_closed`
+
+| 行 | 注记修改 |
+|---|---|
+| RPL-264.1 | seq 指向旧快照 |
+| RPL-264.2 | seq 指向 Input |
+| RPL-264.3 | seq 指向新段注记自身 |
+| RPL-264.4 | seq 指向无账户 CmdResult,缺其余账户/venue 证据 |
+| RPL-264.5 | 改为另一账户 |
+| RPL-264.6 | v0 高位非零 |
+| RPL-264.7 | v2 非零 |
+| RPL-264.8 | 非 P0 |
+| RPL-264.9 | pad 非零 |
+| RPL-264.10 | 删除 EVENT_END |
+| RPL-264.11 | 加 SHADOW 业务标志 |
+| RPL-264.12 | seq 超过日志末尾 |
+| RPL-264.13 | 全账户证据重复一个账户/venue |
+| RPL-264.14 | 全账户证据缺一个账户/venue |
+
+### RPL-265 恢复范围不放行更早或其他范围的输出
+
+- 规则:[verify](README.md#verify)
+- 级别:unit
+- 里程碑:M2
+- 前置:RPL-024 的实际恢复日志
+- 步骤:分别篡改首处分歧之前的 CmdResult、旧尾部随后无账户的 CmdResult,各运行默认停止与 keep-going;另删除全部恢复注记
+- 期望:篡改处均为普通首处分歧,不进 recovery_diffs;keep-going 仍验证两次运行;全部注记缺失时原始决策差异为普通分歧
+- 实现:`apps/replayer/tests/recovery.rs::rpl_265_recovery_does_not_waive_other_scope_or_earlier_outputs`
 
 ## 验收
 

@@ -31,6 +31,17 @@ pub struct Mismatch {
     pub account: AccountId,
 }
 
+/// A differing old-tail Output covered by validated recovery evidence (offline only).
+#[cfg(feature = "replay-io")]
+#[derive(Debug)]
+pub struct RecoveryDiff {
+    pub mismatch: Mismatch,
+    /// Masked kind followed by body; empty means missing on that side.
+    pub logged: Vec<u8>,
+    pub regenerated: Vec<u8>,
+    pub flags: (Option<u16>, Option<u16>),
+}
+
 /// A flat view of the logged records with segment boundaries.
 #[derive(Clone, Debug, Default)]
 pub struct Log {
@@ -80,11 +91,19 @@ pub struct ReplaySink {
     pub detail_limit: usize,
     /// Exclusive record boundary of an offline independent run. Other drivers use MAX.
     pub record_end: usize,
+    #[cfg(feature = "replay-io")]
+    pub recovery_diffs: Vec<RecoveryDiff>,
+    #[cfg(feature = "replay-io")]
+    pub(super) recoveries: Vec<super::verify_recovery::RecoveryRange>,
+    #[cfg(feature = "replay-io")]
+    pub(super) recovery_notes: Vec<usize>,
+    #[cfg(feature = "replay-io")]
+    pub(super) diagnostic_overflow: bool,
     scratch_a: Vec<u8>,
     scratch_b: Vec<u8>,
 }
 
-fn venue_account(kind: EventKind, body: &[u8]) -> (VenueId, AccountId) {
+pub(super) fn venue_account(kind: EventKind, body: &[u8]) -> (VenueId, AccountId) {
     let b = |o: usize| body.get(o).copied().unwrap_or(0);
     match kind {
         EventKind::ORDER_DECISION => (VenueId(b(57)), AccountId(b(58))),
@@ -111,6 +130,14 @@ impl ReplaySink {
             halted: false,
             detail_limit: 16,
             record_end: usize::MAX,
+            #[cfg(feature = "replay-io")]
+            recovery_diffs: Vec::new(),
+            #[cfg(feature = "replay-io")]
+            recoveries: Vec::new(),
+            #[cfg(feature = "replay-io")]
+            recovery_notes: Vec::new(),
+            #[cfg(feature = "replay-io")]
+            diagnostic_overflow: false,
             scratch_a: Vec::with_capacity(1 << 16),
             scratch_b: Vec::with_capacity(1 << 16),
         }
@@ -118,7 +145,45 @@ impl ReplaySink {
     fn comparing(&self, seq: u64) -> bool {
         self.mode != ReplayMode::Mirror && seq >= self.compare_from && seq <= self.compare_to
     }
+    fn record_mismatch(
+        &mut self,
+        m: Mismatch,
+        logged: Vec<u8>,
+        regenerated: Vec<u8>,
+        flags: (Option<u16>, Option<u16>),
+    ) {
+        let used = self.detail.len();
+        #[cfg(feature = "replay-io")]
+        let used = used + self.recovery_diffs.len();
+        #[cfg(feature = "replay-io")]
+        {
+            self.diagnostic_overflow |= used >= self.detail_limit;
+            if self.mode == ReplayMode::Verify && self.recoveries.iter().any(|r| r.accepts(&self.log, &m)) {
+                if used < self.detail_limit {
+                    self.recovery_diffs.push(RecoveryDiff {
+                        mismatch: m,
+                        logged,
+                        regenerated,
+                        flags,
+                    });
+                }
+                return;
+            }
+        }
+        if used < self.detail_limit {
+            self.detail.push((m.seq, logged, regenerated));
+            self.detail_flags.push(flags);
+        }
+        self.mismatches.push(m);
+        self.halted = self.stop_on_first;
+    }
     fn missing(&mut self, ix: usize) {
+        // These pre-EngineClock Notes are evidence already checked by the cold planner.
+        // They are emitted by live boot, not by replaying from its completed boot snapshot.
+        #[cfg(feature = "replay-io")]
+        if self.mode == ReplayMode::Verify && self.recovery_notes.binary_search(&ix).is_ok() {
+            return;
+        }
         let Some(r) = self.log.recs.get(ix) else { return };
         if r.role() != Role::Output || r.kind == EventKind::SEGMENT_ROLL || !self.comparing(r.seq) {
             return;
@@ -126,21 +191,22 @@ impl ReplaySink {
         if self.halted {
             return;
         }
-        if self.detail.len() < self.detail_limit {
-            let mut body = r.body.clone();
-            mask_measure(r.kind, &mut body);
-            body.splice(0..0, r.kind.0.to_le_bytes());
-            self.detail.push((r.seq, body, Vec::new()));
-            self.detail_flags.push((Some(r.flags.0 & !NONCMP_FLAGS), None));
-        }
+        let mut body = r.body.clone();
+        mask_measure(r.kind, &mut body);
+        body.splice(0..0, r.kind.0.to_le_bytes());
+        let flags = (Some(r.flags.0 & !NONCMP_FLAGS), None);
         let (venue, account) = venue_account(r.kind, &r.body);
-        self.mismatches.push(Mismatch {
-            seq: r.seq,
-            kind: r.kind,
-            venue,
-            account,
-        });
-        self.halted = self.stop_on_first;
+        self.record_mismatch(
+            Mismatch {
+                seq: r.seq,
+                kind: r.kind,
+                venue,
+                account,
+            },
+            body,
+            Vec::new(),
+            flags,
+        );
     }
     fn skip_meta(&mut self) {
         while self.pos < self.record_end {
@@ -173,15 +239,10 @@ impl ReplaySink {
                 account: AccountId(0),
             };
             if self.comparing(seq) && !self.halted {
-                self.mismatches.push(m);
-                if self.detail.len() < self.detail_limit {
-                    let mut body: Vec<u8> = pieces.iter().flat_map(|p| p.iter().copied()).collect();
-                    mask_measure(kind, &mut body);
-                    body.splice(0..0, kind.0.to_le_bytes());
-                    self.detail.push((seq, Vec::new(), body));
-                    self.detail_flags.push((None, Some(flags.0 & !NONCMP_FLAGS)));
-                }
-                self.halted = self.stop_on_first;
+                let mut body: Vec<u8> = pieces.iter().flat_map(|p| p.iter().copied()).collect();
+                mask_measure(kind, &mut body);
+                body.splice(0..0, kind.0.to_le_bytes());
+                self.record_mismatch(m, Vec::new(), body, (None, Some(flags.0 & !NONCMP_FLAGS)));
             }
             return 0;
         };
@@ -215,23 +276,23 @@ impl ReplaySink {
                 self.snapshots_compared += 1;
             }
             if !same {
-                if self.detail.len() < self.detail_limit {
-                    let mut lg = self.scratch_b.clone();
-                    lg.splice(0..0, r.kind.0.to_le_bytes());
-                    let mut rg = self.scratch_a.clone();
-                    rg.splice(0..0, kind.0.to_le_bytes());
-                    self.detail.push((seq, lg, rg));
-                    self.detail_flags
-                        .push((Some(r.flags.0 & !NONCMP_FLAGS), Some(flags.0 & !NONCMP_FLAGS)));
-                }
+                let mut lg = self.scratch_b.clone();
+                lg.splice(0..0, r.kind.0.to_le_bytes());
+                let mut rg = self.scratch_a.clone();
+                rg.splice(0..0, kind.0.to_le_bytes());
+                let semantic_flags = (Some(r.flags.0 & !NONCMP_FLAGS), Some(flags.0 & !NONCMP_FLAGS));
                 let (venue, account) = venue_account(kind, &self.scratch_a);
-                self.mismatches.push(Mismatch {
-                    seq,
-                    kind,
-                    venue,
-                    account,
-                });
-                self.halted = self.stop_on_first;
+                self.record_mismatch(
+                    Mismatch {
+                        seq,
+                        kind,
+                        venue,
+                        account,
+                    },
+                    lg,
+                    rg,
+                    semantic_flags,
+                );
             }
         }
         if advance {

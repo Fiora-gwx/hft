@@ -2,7 +2,10 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use hft_event::{BlobRef, ClockStatus, CmdHdr, ControlCmd, EventKind, FeedCmd, GwCmd, HostProfile};
+use hft_event::{
+    Bbo, BlobRef, ClockStatus, CmdHdr, ConnRole, ConnState, ConnStateKind, ControlCmd, EventKind, FeedCmd,
+    GwCmd, HostProfile, MarketHdr, RecordFlags,
+};
 use hft_journal::{
     EndAt, InstanceName, JournalConfig, JournalKind, JournalReader, JournalWriter, PageSize, ReaderConfig,
 };
@@ -11,6 +14,7 @@ use hft_sequencer::driver::RollInfo;
 use hft_sequencer::driver::live::{LiveCfg, LiveDriver, LiveIo, RingId};
 use hft_sequencer::driver::replay::Log;
 use hft_sequencer::driver::replay_io::LogReadLimits;
+use hft_sequencer::journal::{JournalSink, RollMeta};
 use hft_sequencer::{
     BootSource, InputSlot, MemJournal, OutRing, ParsedConfig, RecoverPlan, RecoveryFlags, Sequencer,
     SnapshotSel, StepOutcome,
@@ -19,7 +23,8 @@ use hft_strategy_sdk::StrategySet;
 use hft_testkit::dst::seq::build;
 use hft_testkit::dst::world::WorldSpec;
 use hft_testkit::seq_rig::RigIo;
-use hft_types::{AccountId, InstId, KillBits, Tsc, VenueId};
+use hft_types::{AccountId, InstId, KillBits, Px, Qty, Seq, Side, Tsc, VenueId};
+use zerocopy::{FromZeros, IntoBytes};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 pub struct Fixture {
@@ -32,14 +37,71 @@ impl Drop for Fixture {
     }
 }
 
+// Faults are applied before the real writer assigns seq/CRC/seals. Live recovery consumes
+// those actual published bytes and creates its own RecoverMismatch Notes.
+struct FaultWriter {
+    inner: JournalWriter,
+    fault: Option<EventKind>,
+    changed: Option<Seq>,
+}
+impl std::ops::Deref for FaultWriter {
+    type Target = JournalWriter;
+    fn deref(&self) -> &JournalWriter {
+        &self.inner
+    }
+}
+impl std::ops::DerefMut for FaultWriter {
+    fn deref_mut(&mut self) -> &mut JournalWriter {
+        &mut self.inner
+    }
+}
+impl JournalSink for FaultWriter {
+    type Boot<'a> = <JournalWriter as JournalSink>::Boot<'a>;
+    fn append_var(
+        &mut self,
+        kind: EventKind,
+        flags: RecordFlags,
+        tsc: Tsc,
+        pieces: &[&[u8]],
+    ) -> Result<Seq, hft_journal::AppendErr> {
+        if self.fault == Some(kind) {
+            self.fault = None;
+            let mut bytes: Vec<u8> = pieces.iter().flat_map(|p| p.iter().copied()).collect();
+            let offset = if kind == EventKind::ORDER_DECISION { 24 } else { 0 };
+            bytes[offset] ^= 1;
+            let seq = JournalSink::append_var(&mut self.inner, kind, flags, tsc, &[&bytes])?;
+            self.changed = Some(seq);
+            Ok(seq)
+        } else {
+            JournalSink::append_var(&mut self.inner, kind, flags, tsc, pieces)
+        }
+    }
+    fn end_event(&mut self) {
+        JournalSink::end_event(&mut self.inner);
+    }
+    fn publish(&mut self) {
+        self.inner.publish();
+    }
+    fn roll(
+        &mut self,
+        reason: hft_journal::RollReason,
+        info: &RollMeta<'_>,
+    ) -> Result<Self::Boot<'_>, hft_journal::RollErr> {
+        JournalSink::roll(&mut self.inner, reason, info)
+    }
+    fn needs_roll(&self, now: Tsc) -> Option<(hft_journal::RollReason, hft_journal::RollAt)> {
+        JournalSink::needs_roll(&self.inner, now)
+    }
+}
+
 struct Io<S: StrategySet> {
     rings: RigIo<S>,
-    writer: JournalWriter,
+    writer: FaultWriter,
     old: Option<Log>,
     build: [u8; 20],
 }
 impl<S: StrategySet> LiveIo<S> for Io<S> {
-    type J = JournalWriter;
+    type J = FaultWriter;
     fn journal(&mut self) -> &mut Self::J {
         &mut self.writer
     }
@@ -123,6 +185,8 @@ pub enum Restart {
     Recovery,
     FromSnapshot,
     Version,
+    Mismatch,
+    GlobalMismatch,
 }
 
 pub fn restarted<S: StrategySet>(restart: Restart) -> Fixture {
@@ -204,7 +268,11 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>) -> Fixture {
     };
     let writer = JournalWriter::open_offline(&cfg, &f.root).unwrap();
     let io = Io {
-        writer,
+        writer: FaultWriter {
+            inner: writer,
+            fault: None,
+            changed: None,
+        },
         old: None,
         build: [0; 20],
         rings: RigIo {
@@ -237,6 +305,70 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>) -> Fixture {
         settle(&mut s);
     }
     if let Some(restart) = restart {
+        if matches!(restart, Restart::Mismatch | Restart::GlobalMismatch) {
+            let i = &world.insts[0];
+            let conn = ConnState {
+                venue: i.venue,
+                conn: 0,
+                state: ConnStateKind::Up,
+                role: ConnRole::Md,
+                inst: i.id,
+                reason: 0,
+                account: AccountId(0),
+                _pad2: [0; 3],
+                rx_tsc: 0,
+            };
+            s.driver_mut()
+                .io
+                .rings
+                .rings
+                .entry((2, 0))
+                .or_default()
+                .push_back((EventKind::CONN_STATE, conn.as_bytes().to_vec()));
+            settle(&mut s);
+            let mut h = MarketHdr::new_zeroed();
+            h.venue = i.venue;
+            h.inst = i.id;
+            let bbo = Bbo {
+                h,
+                bid_px: Px(i.bid),
+                bid_qty: Qty(i.depth),
+                ask_px: Px(i.ask),
+                ask_qty: Qty(i.depth),
+                update_id: 1,
+            };
+            s.driver_mut()
+                .io
+                .rings
+                .rings
+                .entry((4, 0))
+                .or_default()
+                .push_back((EventKind::BBO, bbo.as_bytes().to_vec()));
+            settle(&mut s);
+            s.driver_mut().io.writer.fault = Some(if matches!(restart, Restart::Mismatch) {
+                EventKind::ORDER_DECISION
+            } else {
+                EventKind::CMD_RESULT
+            });
+            command(
+                &mut s,
+                3,
+                &ControlCmd::SmokeOrder {
+                    account: world.accounts[0].id,
+                    venue: i.venue,
+                    _pad: 0,
+                    inst: i.id,
+                    side: Side::Buy,
+                    _pad2: [0; 3],
+                    ttl_ms: 30_000,
+                },
+            );
+            settle(&mut s);
+            assert!(
+                s.driver().io.writer.changed.is_some(),
+                "fault never reached a real Output"
+            );
+        }
         if matches!(restart, Restart::Version) {
             command(&mut s, 3, &ControlCmd::Drain { cancel_resting: true });
             let mut done = false;
@@ -309,6 +441,6 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>) -> Fixture {
     }
     let mut d = s.into_driver();
     d.io.writer.publish();
-    d.io.writer.seal_and_close().unwrap();
+    d.io.writer.inner.seal_and_close().unwrap();
     f
 }

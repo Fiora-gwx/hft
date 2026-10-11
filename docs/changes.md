@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-11 | 离线回放按真实 RecoverMismatch 启动注记校验旧尾部来源、首处分歧 seq 与账户/venue 范围,有效差异单列 recovery_diffs;恢复后严格比较,缺历史、重复或越界证据失败。报告侧文件为 divergences/recovery_diffs 对象,共享诊断上限;真实文件故障通过正式恢复流程生成证据,不改 journal 或快照格式 | RPL-024、RPL-264–265、SEQ-394 | crates/hft-sequencer、apps/replayer | 否 |
 | 2026-10-11 | INV-6 在每条快照所属事件或启动完成边界保存只读状态并独立重建;包含同一步内多个快照与连续恢复,观察缺失、重复、越过后续 Input、溢出或哈希差异均失败;关闭定期采样仍检查快照,诊断仅在 testkit 构建启用 | INV-6、TK-115、TK-116 | crates/hft-sequencer、crates/hft-testkit、docs/architecture.md、docs/tests/invariants.md | 否 |
 | 2026-10-11 | SDK-039 重启夹具从完整引导事件之后采样,按 EVENT_END 交付已提交前缀;保留最早边界回归种子并覆盖有/无检查点,半个引导块仍拒绝,不改 advisor 行为或属性例数 | CI 38131995120 的 k_frac=0 最小反例 | crates/hft-sequencer/tests/sdk_contract/advisor.rs、crates/hft-strategy-sdk/TESTS.md | 否 |
 | 2026-10-11 | 空时钟锚点按当前进程引导块校验,允许从首次 Boot 快照恢复并丢弃含 EngineClock 的旧尾部;普通滚段、后续快照以及 BootDone/Input 后的空锚点仍失败 | CI 38131018801 的 RPL-263.2、SEQ-395 四种反例与回放 | crates/hft-sequencer、apps/replayer/TESTS.md | 否 |

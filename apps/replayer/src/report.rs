@@ -73,16 +73,56 @@ fn field_diff(expected: &[u8], actual: &[u8]) -> Vec<Value> {
 
 pub(crate) fn format(instance: &str, result: &VerifyResult) -> (Value, Value) {
     let sink = &result.sink;
-    let details: Vec<Value> = sink.mismatches.iter().enumerate().map(|(i, m)| {
-        let (expected, actual) = sink.detail.get(i).filter(|d| d.0 == m.seq).map_or((&[][..], &[][..]), |d| (d.1.as_slice(), d.2.as_slice()));
-        let (expected_flags, actual_flags) = sink.detail_flags.get(i).copied().unwrap_or_default();
+    let describe = |m: &hft_sequencer::driver::Mismatch,
+                    expected: &[u8],
+                    actual: &[u8],
+                    (expected_flags, actual_flags): (Option<u16>, Option<u16>)| {
         let mut diff = field_diff(expected, actual);
-        if expected_flags != actual_flags { diff.push(json!({"field": "flags", "expected": expected_flags, "actual": actual_flags})); }
-        let prior: Vec<_> = sink.log.recs.iter().filter(|r| r.seq < m.seq && r.seq > result.start_snapshot && r.role() == Role::Input).rev().take(1000).map(|r| json!({"seq": r.seq, "kind": r.kind.0})).collect();
+        if expected_flags != actual_flags {
+            diff.push(json!({"field": "flags", "expected": expected_flags, "actual": actual_flags}));
+        }
+        let prior: Vec<_> = sink
+            .log
+            .recs
+            .iter()
+            .filter(|r| r.seq < m.seq && r.seq > result.start_snapshot && r.role() == Role::Input)
+            .rev()
+            .take(1000)
+            .map(|r| json!({"seq": r.seq, "kind": r.kind.0}))
+            .collect();
         let prior: Vec<_> = prior.into_iter().rev().collect();
-        let snapshot = sink.log.recs.iter().rev().find(|r| r.seq < m.seq && r.kind == EventKind::STATE_SNAPSHOT).map(|r| r.seq);
+        let snapshot = sink
+            .log
+            .recs
+            .iter()
+            .rev()
+            .find(|r| r.seq < m.seq && r.kind == EventKind::STATE_SNAPSHOT)
+            .map(|r| r.seq);
         json!({"seq": m.seq, "kind": m.kind.0, "kind_name": kind_info(m.kind).map(|k| k.name), "expected_hex": hex(expected), "actual_hex": hex(actual), "expected_flags": expected_flags, "actual_flags": actual_flags, "field_diff": diff, "previous_inputs": prior, "nearest_snapshot_seq": snapshot})
-    }).collect();
+    };
+    let details: Vec<_> = sink
+        .mismatches
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            let (expected, actual) = sink
+                .detail
+                .get(i)
+                .filter(|d| d.0 == m.seq)
+                .map_or((&[][..], &[][..]), |d| (d.1.as_slice(), d.2.as_slice()));
+            describe(
+                m,
+                expected,
+                actual,
+                sink.detail_flags.get(i).copied().unwrap_or_default(),
+            )
+        })
+        .collect();
+    let recovery: Vec<_> = sink
+        .recovery_diffs
+        .iter()
+        .map(|d| describe(&d.mismatch, &d.logged, &d.regenerated, d.flags))
+        .collect();
     let utc_ns = sink
         .log
         .recs
@@ -100,12 +140,16 @@ pub(crate) fn format(instance: &str, result: &VerifyResult) -> (Value, Value) {
             json!({
                 "start_snapshot_seq": r.start_snapshot, "stop_before_seq": r.stop_before,
                 "inputs_replayed": r.inputs, "outputs_compared": r.outputs,
-                "snapshots_checked": r.snapshots, "mismatches": r.mismatches
+                "snapshots_checked": r.snapshots, "mismatches": r.mismatches,
+                "recovery_diffs": r.recovery_diffs
             })
         })
         .collect();
     let summary = json!({"instance": instance, "date": &date[..10], "release": crate::VERSION, "verify": if details.is_empty() { "pass" } else { "fail" }, "first_divergent_seq": sink.mismatches.first().map(|m| m.seq), "recompute": "skipped", "skipped_reason": "advice_journal", "generated_utc": utc(generated), "start_snapshot_seq": result.start_snapshot, "inputs_replayed": result.inputs, "outputs_compared": sink.compared, "snapshots_checked": result.snapshots, "mismatches": details.len(), "runs": runs});
-    (summary, json!(details))
+    (
+        summary,
+        json!({"divergences": details, "recovery_diffs": recovery}),
+    )
 }
 
 pub(crate) fn divergence_path(path: &Path) -> PathBuf {

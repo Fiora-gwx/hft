@@ -583,7 +583,7 @@ fn seq_394_invalid_run_boundaries_fail_before_replay() {
     bad.recs[clock].body = note.as_bytes().to_vec();
     assert!(matches!(
         verify::<TestSet>(bad, VerifyOptions::default(), hb()),
-        Err(VerifyError::UnsupportedRun { .. })
+        Err(VerifyError::RecoveryRange { .. })
     ));
     // An ordinary Output between BootDone and the initial EngineClock would otherwise be
     // skipped by snapshot restoration. This is neither a boot Output nor a recovery range.

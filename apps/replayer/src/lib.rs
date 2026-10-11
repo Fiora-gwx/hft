@@ -131,7 +131,7 @@ fn execute<S: StrategySet>(args: &[String], stdout: &mut impl Write) -> Result<i
     let result = verify::<S>(log, opts.verify, &HB).map_err(|e| {
         let code = match e {
             VerifyError::UnknownStrategy { .. } => 4,
-            VerifyError::Window | VerifyError::UnsupportedRun { .. } => 2,
+            VerifyError::Window => 2,
             _ => 3,
         };
         (code, format!("verification failed: {e:?}"))
@@ -141,12 +141,12 @@ fn execute<S: StrategySet>(args: &[String], stdout: &mut impl Write) -> Result<i
     writeln!(
         stdout,
         "{}",
-        serde_json::json!({"summary": summary, "divergences": detail})
+        serde_json::json!({"summary": summary, "divergences": detail["divergences"], "recovery_diffs": detail["recovery_diffs"]})
     )
     .map_err(|e| (2, e.to_string()))?;
     if let Some(path) = opts.report {
         report::write(&path, &summary).map_err(|e| (2, e.to_string()))?;
-        // Always replace the sidecar, including [] on success; no stale divergence survives.
+        // Always replace both lists in the sidecar; no stale divergence survives a success.
         report::write(&report::divergence_path(&path), &detail).map_err(|e| (2, e.to_string()))?;
     }
     Ok(i32::from(fail))

@@ -1,4 +1,5 @@
 mod fixture;
+mod recovery;
 
 use hft_event::{EventKind, RecordFlags, RecordHeader};
 use hft_strategy_registry::Strategies;
@@ -68,7 +69,8 @@ fn rpl_260_real_file_verify_report_and_divergence() {
     assert!(!v["divergences"][0]["field_diff"].as_array().unwrap().is_empty());
     let sidecar: Value =
         serde_json::from_slice(&std::fs::read(report.with_extension("divergence.json")).unwrap()).unwrap();
-    assert_eq!(sidecar, v["divergences"]);
+    assert_eq!(sidecar["divergences"], v["divergences"]);
+    assert_eq!(sidecar["recovery_diffs"], v["recovery_diffs"]);
     assert_eq!(std::fs::read(&f.file).unwrap(), changed);
     let mut window = args(&f.file);
     window.extend(["--to-seq".into(), (seq - 1).to_string()]);
@@ -77,10 +79,9 @@ fn rpl_260_real_file_verify_report_and_divergence() {
     std::fs::write(&f.file, &original).unwrap();
     assert_eq!(run(&a).0, 0);
     assert_eq!(
-        std::fs::read_to_string(report.with_extension("divergence.json"))
-            .unwrap()
-            .trim(),
-        "[]"
+        serde_json::from_slice::<Value>(&std::fs::read(report.with_extension("divergence.json")).unwrap())
+            .unwrap(),
+        serde_json::json!({"divergences": [], "recovery_diffs": []})
     );
     // A change in a variable-length snapshot section is not a change in its last header
     // field (engine_ns). Exercise the actual JSON formatter through the release binary.

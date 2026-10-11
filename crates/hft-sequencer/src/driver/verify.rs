@@ -37,8 +37,8 @@ pub enum VerifyError {
     RunBoundary {
         seq: u64,
     },
-    /// Recovery mismatch ranges are not yet supported; never silently accept them.
-    UnsupportedRun {
+    /// Invalid recovery evidence, or its referenced old tail is unavailable.
+    RecoveryRange {
         seq: u64,
     },
     Unfinished {
@@ -66,6 +66,7 @@ pub struct RunReport {
     pub outputs: u64,
     pub snapshots: u64,
     pub mismatches: usize,
+    pub recovery_diffs: usize,
 }
 
 /// Run from the latest snapshot at/before `from_seq`, or the first boot snapshot. Input
@@ -105,7 +106,8 @@ pub fn verify<S: StrategySet>(
             }
         }
     }
-    let starts = super::verify_runs::plan(&log)?;
+    let planned = super::verify_runs::plan(&log)?;
+    let starts = planned.runs;
     let selected = if opts.from_seq.is_some() {
         log.recs
             .iter()
@@ -127,6 +129,8 @@ pub fn verify<S: StrategySet>(
     driver.sink.compare_from = from;
     driver.sink.compare_to = to;
     driver.sink.stop_on_first = !opts.keep_going;
+    driver.sink.recoveries = planned.recoveries;
+    driver.sink.recovery_notes = planned.recovery_notes;
     // At most one retained detail per logged record; overflow is reported, never silent.
     driver.sink.detail_limit = driver.sink.log.recs.len();
     let first_run = starts
@@ -157,6 +161,7 @@ pub fn verify<S: StrategySet>(
             driver.sink.compared,
             driver.sink.snapshots_compared,
             driver.sink.mismatches.len(),
+            driver.sink.recovery_diffs.len(),
         );
         let plan = RecoverPlan {
             start: SnapshotSel::AtSeq(at),
@@ -201,12 +206,13 @@ pub fn verify<S: StrategySet>(
             outputs: driver.sink.compared - before.1,
             snapshots: checked,
             mismatches: driver.sink.mismatches.len() - before.3,
+            recovery_diffs: driver.sink.recovery_diffs.len() - before.4,
         });
         if driver.sink.halted || driver.end == window_end {
             break;
         }
     }
-    if driver.sink.detail.len() != driver.sink.mismatches.len() {
+    if driver.sink.detail.len() != driver.sink.mismatches.len() || driver.sink.diagnostic_overflow {
         return Err(VerifyError::DiagnosticLimit);
     }
     Ok(VerifyResult {
