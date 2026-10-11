@@ -737,13 +737,19 @@ fn seq_402_each_checkpoint_releases_at_its_own_record_boundary() {
     quote(&mut h);
     catch_up(&mut continuous, &h);
     let mut second = checkpoint_now(&mut continuous).gens.remove(&S2).unwrap();
-    let mut note = <Note as zerocopy::FromZeros>::new_zeroed();
-    note.source = NoteSource::Advisor;
-    note.code = hft_event::note_code(
-        NoteSource::Advisor,
-        hft_sequencer::codes::advisor_note::ADVISOR_STATS,
-    );
-    note.strategy = S2;
+    let note = Note {
+        source: NoteSource::Advisor,
+        code: hft_event::note_code(
+            NoteSource::Advisor,
+            hft_sequencer::codes::advisor_note::ADVISOR_STATS,
+        ),
+        level: hft_event::NoteLevel::Info,
+        strategy: S2,
+        _pad: 0,
+        group: hft_types::GROUP_NONE,
+        inst: InstId(0),
+        v: [0; 8],
+    };
     h.push(RingId::Advice, &note);
     h.run();
     // No Model event occurs between the saved state and this Meta record. A caller that
