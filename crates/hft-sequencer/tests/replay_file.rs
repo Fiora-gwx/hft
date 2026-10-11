@@ -157,7 +157,10 @@ fn fixture() -> Temp {
     let writer = JournalWriter::open_offline(&cfg, &t.0.join("out")).unwrap();
     let b = b0();
     let rd = b.rd.load();
-    let setup = b.setup(&rd);
+    let mut setup = b.setup(&rd);
+    // Counter rows retain every slot generation, even for free slots. Two tables alone now
+    // exceed PART_MAX_CHUNK, so multipart coverage cannot disappear with other state changes.
+    setup.oms.slots = hft_oms::PerTable::new(4096);
     let mut configs = b.configs(&rd);
     configs.engine_blob = setup.encode_blob(1, HostClass::Dev2, UTC0);
     configs.risk_blob = configs.risk.encode_blob().unwrap();
