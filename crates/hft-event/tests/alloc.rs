@@ -16,26 +16,45 @@ use common::*;
 use hft_event::*;
 use hft_types::*;
 use std::alloc::{GlobalAlloc, Layout as AllocLayout, System};
+use std::cell::Cell;
 use std::hint::black_box;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 struct Counting;
-static ON: AtomicBool = AtomicBool::new(false);
-static ALLOCS: AtomicU64 = AtomicU64::new(0);
-static FREES: AtomicU64 = AtomicU64::new(0);
+thread_local! {
+    // No destructor or lazy heap storage. The harness's allocations on other threads do
+    // not belong to the measured synchronous codec calls.
+    static ON: Cell<bool> = const { Cell::new(false) };
+    static COUNTS: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
+}
+
+fn note(alloc: bool) {
+    let _ = ON.try_with(|on| {
+        if on.get() {
+            let _ = COUNTS.try_with(|counts| {
+                let (a, f) = counts.get();
+                counts.set((a + u64::from(alloc), f + u64::from(!alloc)));
+            });
+        }
+    });
+}
+
+fn measured(work: impl FnOnce()) -> (u64, u64) {
+    COUNTS.with(|c| c.set((0, 0)));
+    ON.with(|on| on.set(true));
+    work();
+    ON.with(|on| on.set(false));
+    COUNTS.with(Cell::get)
+}
 
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, l: AllocLayout) -> *mut u8 {
-        if ON.load(Relaxed) {
-            ALLOCS.fetch_add(1, Relaxed);
-        }
+        note(true);
         // SAFETY: forwarded unchanged to the system allocator.
         unsafe { System.alloc(l) }
     }
     unsafe fn dealloc(&self, p: *mut u8, l: AllocLayout) {
-        if ON.load(Relaxed) {
-            FREES.fetch_add(1, Relaxed);
-        }
+        note(false);
         // SAFETY: forwarded unchanged to the system allocator.
         unsafe { System.dealloc(p, l) }
     }
@@ -173,14 +192,30 @@ fn work(c: &mut Ctx) {
 
 #[test]
 fn evt_196_zero_alloc_zero_syscall() {
+    // Positive control: neither side of an allocation/free may disappear from the counter.
+    assert_eq!(measured(|| drop(black_box(Box::new(1u64)))), (1, 1));
+    // Negative control: overlap an unrelated thread's real allocation with the measuring
+    // interval, without allocating synchronization objects inside that interval.
+    static START: AtomicBool = AtomicBool::new(false);
+    static DONE: AtomicBool = AtomicBool::new(false);
+    let other = std::thread::spawn(|| {
+        while !START.load(Ordering::Acquire) {
+            std::hint::spin_loop();
+        }
+        drop(black_box(Box::new(2u64)));
+        DONE.store(true, Ordering::Release);
+    });
+    let foreign = measured(|| {
+        START.store(true, Ordering::Release);
+        while !DONE.load(Ordering::Acquire) {
+            std::hint::spin_loop();
+        }
+    });
+    other.join().unwrap();
+    assert_eq!(foreign, (0, 0));
     let mut c = ctx();
     work(&mut c); // warm-up
-    ALLOCS.store(0, Relaxed);
-    FREES.store(0, Relaxed);
-    ON.store(true, Relaxed);
-    work(&mut c);
-    ON.store(false, Relaxed);
-    assert_eq!((ALLOCS.load(Relaxed), FREES.load(Relaxed)), (0, 0), "step 1");
+    assert_eq!(measured(|| work(&mut c)), (0, 0), "step 1");
     #[cfg(target_os = "linux")]
     seccomp_step(&mut c);
 }

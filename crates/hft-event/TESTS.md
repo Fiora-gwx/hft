@@ -2014,7 +2014,7 @@ spec: README.md
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)、[所有权与线程](README.md#所有权与线程)
 - 级别:unit
 - 里程碑:M1
-- 前置:计数型全局分配器;热身后清零计数;调用方提供全部缓冲(含 `Reassembler` 的 1 MiB 缓冲)
+- 前置:计数型全局分配器,启用开关和分配/释放次数为无分配初始化的线程局部量;热身后清零计数;调用方提供全部缓冲(含 `Reassembler` 的 1 MiB 缓冲)。先验证同线程一次真实分配及释放恰计 1/1,再以原子握手让另一线程的真实分配与本线程测量区间重叠,本线程计数须为 0/0
 - 步骤:
   1. 各调用 1 000 次:`record_len`、`encode_fixed`、`encode_var`、`decode_record`、`read`、`view`、`var`、`classify`、`kind_info`、`TimerCode::encode/decode`、`CtlRecord::encode_into/read`、`AdviceRecord::encode_into/read`、`ControlCmd::encode/decode`、`parse_spb1`、`multi_view`、`PartIter`、`Reassembler::push`
   2. 在 Linux 上以 `seccomp` 过滤器(只允许 `exit_group`)包住步骤 1 的子进程再跑一次

@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use hft_event::{
@@ -25,7 +25,8 @@ use hft_testkit::dst::seq::build;
 use hft_testkit::dst::world::WorldSpec;
 use hft_testkit::seq_rig::RigIo;
 use hft_types::{AccountId, GroupId, InstId, KillBits, MarketKind, Px, Qty, Rate, Seq, Side, Tsc, VenueId};
-use zerocopy::{FromZeros, IntoBytes};
+use sha2::{Digest, Sha256};
+use zerocopy::{FromBytes, FromZeros, IntoBytes};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 pub struct Fixture {
@@ -202,7 +203,62 @@ pub fn restarted<S: StrategySet>(restart: Restart) -> Fixture {
 /// RPL-025/026: genuine file-backed executions with 20 min before the restart.
 pub fn long_restart<S: StrategySet>(restart: Restart) -> Fixture {
     assert!(matches!(restart, Restart::FromSnapshot | Restart::Version));
-    create_with_restart::<S>(Some(restart), true)
+    let f = create_with_restart::<S>(Some(restart), true);
+    // open_offline writes closed .jrn files, without running persist. Build the cold-copy
+    // transport envelope from the actual header and End; leave every journal byte untouched.
+    for entry in std::fs::read_dir(f.file.parent().unwrap()).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|e| e == "jrn") {
+            seal(&path);
+        }
+    }
+    f
+}
+
+pub fn seal(path: &Path) {
+    let bytes = std::fs::read(path).unwrap();
+    let (header, _) = hft_journal::SegmentHeaderFixed::read_from_prefix(&bytes).unwrap();
+    assert_eq!(header.header_crc32c, header.compute_crc());
+    let mut offset = hft_journal::HEADER_LEN;
+    let mut last = None;
+    let mut last_tsc = header.calib_tsc;
+    while offset < bytes.len() {
+        let r = hft_event::decode_record(&bytes[offset..]).unwrap();
+        last_tsc = last_tsc.max(r.hdr.tsc);
+        last = Some((
+            r.hdr.seq,
+            (r.hdr.kind == EventKind::SEGMENT_ROLL.0).then(|| r.read::<hft_event::SegmentRoll>().unwrap()),
+        ));
+        offset += r.hdr.len as usize;
+    }
+    assert_eq!(offset, bytes.len());
+    let (last_seq, Some(end)) = last.unwrap() else {
+        panic!("offline file does not end with SegmentRoll");
+    };
+    assert_eq!(end.mark, hft_journal::RollMark::End as u8);
+    let mut hash = Sha256::new();
+    hash.update(&bytes[..3072]);
+    hash.update([0u8; 128]);
+    hash.update(&bytes[3200..]);
+    let utc = header.calib_realtime_ns
+        + ((i128::from(last_tsc) - i128::from(header.calib_tsc)) * 1_000_000_000_000
+            / i128::from(header.tsc_hz_milli)) as i64;
+    let mut seal = hft_journal::SealRecord {
+        magic: hft_journal::SEAL_MAGIC,
+        segment_no: header.segment_no,
+        first_seq: header.first_seq,
+        last_seq,
+        len: bytes.len() as u64,
+        sealed_utc_ns: end.utc_ns.max(utc),
+        sha256: hash.finalize().into(),
+        reason: end.reason,
+        flags: header.flags,
+        _pad: [0; 2],
+        _rsv: [0; 40],
+        crc32c: 0,
+    };
+    seal.crc32c = seal.compute_crc();
+    std::fs::write(path.with_extension("seal"), seal.as_bytes()).unwrap();
 }
 
 pub fn read(f: &Fixture) -> Log {

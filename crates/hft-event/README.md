@@ -1204,7 +1204,7 @@ impl<'b> Reassembler<'b> {
 | `ControlCmd::decode` | 冷路径,≤ 1 µs | `event_cmd_decode` |
 | `parse_spb1`(500 group) | 冷路径(ctl-gateway),≤ 50 µs | `event_spb1_parse_500` |
 
-零分配(`Reassembler` 使用调用方缓冲);零系统调用;`KINDS` 查表为数组下标 + 编号段偏移。
+零分配(`Reassembler` 使用调用方缓冲);零系统调用;`KINDS` 查表为数组下标 + 编号段偏移。分配与释放的资源计数以执行编解码调用的线程为边界,不计测试框架其他线程的活动。
 
 ## 测试与验收
 
@@ -1222,6 +1222,7 @@ impl<'b> Reassembler<'b> {
 - [hft-strategy-sdk](../hft-strategy-sdk/README.md)(`Model`、`ParamSet`、`ParamSchemaDesc`、`EventRef`)、[hft-exec](../hft-exec/README.md)(`ExecDecision` 的语义)、[hft-sim](../hft-sim/README.md)(模拟账户回报)
 - [13 R5/R6/O5](../../design/13-设计评审与优化.md)、[08 §2](../../design/08-数据面与回放.md)、[09 §1、§5](../../design/09-可观测性、风控与控制面.md)、[research/06 §2](../../design/research/06-data-plane-replay-observability.md)(DBN 记录布局、SBE 演进原则);决策出处:[round8-decisions](../../design/_work/round8-decisions.md)
 - 新增 kind:[cookbook/adding-an-event-kind.md](../../docs/cookbook/adding-an-event-kind.md);决策记录 `single-event-header`、`rust-first-event-schema`、`self-contained-journal`、`strategy-sdk-decoupling`([Agent Notes](../../.agents/notes/README.md))
+- [编解码分配计数的线程边界](../../.agents/notes/implemented/testing/2026-10-11-event-allocation-scope.md)
 
 ## 已知限制与后续工作
 

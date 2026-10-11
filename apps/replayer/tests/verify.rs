@@ -3,12 +3,10 @@
 use std::path::{Path, PathBuf};
 
 use hft_event::{Bbo, EngineClock, EventKind, HostProfile, Note, NoteSource, Role, SnapshotHdr};
-use hft_journal::{RollReason, SealRecord};
+use hft_journal::RollReason;
 use hft_sequencer::driver::replay::Log;
 use hft_strategy_registry::Strategies;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
-use zerocopy::{FromBytes, IntoBytes};
 
 use super::{args, fixture, run};
 
@@ -49,7 +47,7 @@ fn sources(dir: &Path, log: &Log, restart: RollReason) -> Vec<(PathBuf, Vec<u8>)
             [file.clone(), file.with_extension("seal")]
         })
         .map(|path| {
-            let bytes = std::fs::read(&path).unwrap();
+            let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
             (path, bytes)
         })
         .collect()
@@ -110,16 +108,8 @@ fn change_bbo(path: &Path, seq: u64, tick: i64) {
         }
         offset += h.len as usize;
     }
-    let seal_path = path.with_extension("seal");
-    let mut seal = SealRecord::read_from_bytes(&std::fs::read(&seal_path).unwrap()).unwrap();
-    let mut digest = Sha256::new();
-    digest.update(&bytes[..3072]);
-    digest.update([0u8; 128]);
-    digest.update(&bytes[3200..seal.len as usize]);
-    seal.sha256 = digest.finalize().into();
-    seal.crc32c = seal.compute_crc();
     std::fs::write(path, &bytes).unwrap();
-    std::fs::write(seal_path, seal.as_bytes()).unwrap();
+    fixture::seal(path);
 }
 
 #[test]
