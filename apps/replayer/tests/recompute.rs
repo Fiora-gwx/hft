@@ -291,7 +291,8 @@ fn rpl_273_checkpoint_catchup_reemits_prior_run_advice() {
         .recs
         .iter()
         .enumerate()
-        .filter_map(|(ix, r)| (r.kind == EventKind::ADVICE).then(|| (ix, r.read::<AdviceHdr>().unwrap())))
+        .filter(|(_, r)| r.kind == EventKind::ADVICE)
+        .map(|(ix, r)| (ix, r.read::<AdviceHdr>().unwrap()))
         .filter(|(_, a)| !seen.insert((a.strategy.0, a.account.0, a.group.0, a.local_kind, a.basis_seq)))
         .collect();
     assert_eq!(repeated.len(), 12, "six prior-run Advice per checkpoint catch-up");
