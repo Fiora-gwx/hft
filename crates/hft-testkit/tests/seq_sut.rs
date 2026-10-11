@@ -81,7 +81,6 @@ fn tk_106_real_base_fee_and_retired_links() {
             walk_centi_bp: 0,
         });
         for s in &mut c.world.strategies {
-            use hft_strategy_sdk::ParamSet;
             use hft_testkit::strategies::probe_taker::TakerParams;
             s.params = hft_strategy_sdk::params::encode_body(
                 &TakerParams::SCHEMA,
