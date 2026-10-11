@@ -184,6 +184,5 @@ pub fn create<S: StrategySet>(with_accounts: bool) -> Fixture {
     let mut d = s.into_driver();
     d.io.writer.publish();
     d.io.writer.seal_and_close().unwrap();
-    drop(d);
     f
 }
