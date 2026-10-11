@@ -162,6 +162,8 @@ fn fixture() -> Temp {
     // Counter rows retain every slot generation, even for free slots. Two tables alone now
     // exceed PART_MAX_CHUNK, so multipart coverage cannot disappear with other state changes.
     setup.oms.slots = hft_oms::PerTable::new(4096);
+    // The startup invariant reserves timers for every order slot (24,698 for this fixture).
+    setup.caps.max_timers = 32_768;
     let mut configs = b.configs(&rd);
     configs.engine_blob = setup.encode_blob(1, HostClass::Dev2, UTC0);
     configs.risk_blob = configs.risk.encode_blob().unwrap();

@@ -5331,7 +5331,7 @@ spec: README.md
 - 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
 - 级别:replay
 - 里程碑:M2
-- 前置:Linux、live/replay-io features;B0 每张 OMS 表 4096 槽(世代计数节保证快照跨片),以真实 JournalWriter::open_offline 写普通临时目录
+- 前置:Linux、live/replay-io features;B0 每张 OMS 表 4096 槽(世代计数节保证快照跨片),max_timers = 32768 满足对应启动预留,以真实 JournalWriter::open_offline 写普通临时目录
 - 输入:启动放行、按需快照、BBO、关键帧、滚段与再写关键帧
 - 步骤:关闭写者,JournalReader 经 Log::from_reader 读取;每个 StateSnapshot 先独立恢复并重新序列化自检,再分别只从该日志装配 EngineSetup 与 VerifyDriver
 - 期望:至少 4 个快照和 2 段;实际包含大于单片的快照与物理 seq 间隔,有 CmdResult;所有起点均处理完全部 Input、Output 无分歧且无残留
