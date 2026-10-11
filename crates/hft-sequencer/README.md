@@ -119,7 +119,7 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 
 同一 feature 的 `driver::replay_snapshot::check_snapshot::<S>(&Log, seq)` 在投递输入前自检指定快照。先校验头部、全部节的边界、唯一性与节数,再计算 [state_hash](#状态哈希);非零声明值必须相等,零值仍需自算。装配参数只取该日志,调用正式恢复路径后重新序列化,重算哈希必须一致;差异返回首个不同节号。重建写缓冲上限为原节字节数,超限直接失败。缺快照、损坏、不支持的恢复布局与恢复后丢失状态均失败,不退到另一快照,不修改来源日志或正在运行的引擎。
 
-`driver::snapshot_diff::snapshot_difference(logged, regenerated)` 只在 `replay-io` 中提供,输入是 ReplaySink 已屏蔽测量字段的逻辑快照体。它不参与通过/失败判定,逐字节比较仍是依据。节边界、唯一性与总数须完整合法;错误返回哪一侧、逻辑体偏移和原因。仅按实际读到的节分配索引,不按未经校验的 n_sections 预分配;返回固定六个组件的 xxh3-64、两侧 state_hash 及首个字段差异,不复制整份快照。
+`driver::snapshot_diff::snapshot_difference(logged, regenerated)` 只在 `replay-io` 中提供,输入是 ReplaySink 已屏蔽测量字段的逻辑快照体。它不参与通过/失败判定,逐字节比较仍是依据。节索引与字段名格式化按文件登记在 tools/xtask/allow-list.toml 的冷回放例外,默认 live 构建不包含此模块。节边界、唯一性与总数须完整合法;错误返回哪一侧、逻辑体偏移和原因。仅按实际读到的节分配索引,不按未经校验的 n_sections 预分配;返回固定六个组件的 xxh3-64、两侧 state_hash 及首个字段差异,不复制整份快照。
 
 组件分组与优先级沿用 [testkit HashTrail](../hft-testkit/README.md#7-状态哈希对比),组件内部仍逐字节比较,哈希碰撞不能隐藏差异。先定位六个组件,再定位 sequencer 自有节和节间顺序,最后检查快照头;节 16 不归入状态组件,未知节不猜归属。当前 RiskState 行版本按 CapRecord 的生成字段表定位行号、嵌套字段、两侧逻辑体偏移及字段原始字节;节头按 SectionHdr 字段表定位。其他行只给节体字节偏移,未知版本标 unknown_row_version,行数量与长度不符标 invalid_row_layout。只保留第一个字段,后续原始差异仍由 ReplaySink 的有界明细保存。该定位证明的是已比较快照处的差异,不推断更早某条 Input 导致分歧。
 

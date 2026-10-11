@@ -40,6 +40,11 @@ reason = "build scripts print cargo directives"
 
 # ---------------------------------------------------------------- cold replay
 [[allow]]
+file = "crates/hft-sequencer/src/driver/snapshot_diff.rs"
+lints = ["clippy::disallowed_types", "clippy::disallowed_macros"]
+reason = "bounded section index and field-name formatting for read-only offline snapshot diagnostics behind replay-io; absent from the default live build"
+
+[[allow]]
 file = "crates/hft-sequencer/src/driver/recompute_compare.rs"
 lints = ["clippy::disallowed_types"]
 reason = "bounded BTreeMap for deterministic offline Model comparison behind replay-io; not linked into the default live build"

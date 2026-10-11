@@ -1,5 +1,6 @@
 //! Read-only, cold diagnostics for two already compared snapshot bodies. This does not decide
 //! replay success: byte comparison remains authoritative, including when hashes collide.
+#![allow(clippy::disallowed_types, clippy::disallowed_macros)] // registered cold replay-io diagnostics; never called by a live driver
 
 use std::collections::BTreeSet;
 

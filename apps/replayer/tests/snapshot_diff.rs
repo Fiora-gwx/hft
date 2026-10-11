@@ -28,6 +28,8 @@ fn change(original: &[u8], seq: u64, changes: &[(usize, u8)]) -> Vec<u8> {
         if h.seq == seq {
             let begin = at + 24;
             let end = at + h.len as usize;
+            let has_crc = RecordFlags(h.flags).contains(RecordFlags::CRC);
+            let payload_end = end - if has_crc { 4 } else { 0 };
             let body = if h.kind == EventKind::STATE_SNAPSHOT.0 {
                 let (part, _) = PartHdr::read_from_prefix(&bytes[begin..]).unwrap();
                 assert_eq!((part.part, part.parts), (0, 1));
@@ -37,12 +39,13 @@ fn change(original: &[u8], seq: u64, changes: &[(usize, u8)]) -> Vec<u8> {
                 begin
             };
             for &(offset, value) in changes {
-                assert!(body + offset < end - 4);
+                assert!(body + offset < payload_end);
                 bytes[body + offset] = value;
             }
-            assert!(RecordFlags(h.flags).contains(RecordFlags::CRC));
-            let crc = crc32c::crc32c(&bytes[at..end - 4]);
-            bytes[end - 4..end].copy_from_slice(&crc.to_le_bytes());
+            if has_crc {
+                let crc = crc32c::crc32c(&bytes[at..payload_end]);
+                bytes[payload_end..end].copy_from_slice(&crc.to_le_bytes());
+            }
             hft_event::decode_record(&bytes[at..end]).unwrap();
             return bytes;
         }
