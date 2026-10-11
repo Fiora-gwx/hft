@@ -689,19 +689,23 @@ impl<S: StrategySet> Sut for SeqSut<S> {
         Self::hashes_of(self.s())
     }
 
-    fn rebuilt_hashes(&self) -> Option<ComponentHashes> {
+    fn rebuilt_hashes(&self) -> Result<Option<ComponentHashes>, String> {
         let j = &self.s().driver().io.j;
         if STATES.with(|s| s.borrow().is_some()) {
             JOURNALS.with(|x| x.borrow_mut().push(j.clone()));
         }
         let log = Log::from_segments(&j.segments);
-        let snap = log
+        let Some(snap) = log
             .recs
             .iter()
             .filter(|r| r.kind == EventKind::STATE_SNAPSHOT)
             .map(|r| r.seq)
-            .next_back()?;
-        let setup = EngineSetup::from_snapshot(&log, snap).ok()?;
+            .next_back()
+        else {
+            return Ok(None);
+        };
+        let setup =
+            EngineSetup::from_snapshot(&log, snap).map_err(|e| format!("snapshot {snap} config: {e:?}"))?;
         let drv = ReplayDriver::new(ReplayMode::Verify, log, 0, setup.seq.replay_per_round);
         let plan = RecoverPlan {
             start: SnapshotSel::AtSeq(snap),
@@ -711,17 +715,44 @@ impl<S: StrategySet> Sut for SeqSut<S> {
             quarantine: Vec::new(),
         };
         let mut s: Sequencer<ReplayDriver, S> =
-            Sequencer::boot(BootSource::Journal(plan), &setup, drv, self.hb).ok()?;
+            Sequencer::boot(BootSource::Journal(plan), &setup, drv, self.hb)
+                .map_err(|e| format!("snapshot {snap} restore: {e:?}"))?;
         for _ in 0..10_000_000 {
             if s.step() != StepOutcome::Busy {
                 break;
             }
         }
-        if !s.driver().finished() || !s.driver().mismatches().is_empty() || !s.driver().leftover().is_empty()
-        {
-            return None;
+        let d = s.driver();
+        if !d.finished() {
+            return Err(format!(
+                "snapshot {snap}: replay unfinished at cursor {}",
+                d.cursor
+            ));
         }
-        Some(Self::hashes_of(&s))
+        if !d.mismatches().is_empty() || !d.leftover().is_empty() {
+            let detail = d.sink.detail.first().map(|(seq, a, b)| {
+                let at = a
+                    .iter()
+                    .zip(b)
+                    .position(|(x, y)| x != y)
+                    .unwrap_or(a.len().min(b.len()));
+                (
+                    *seq,
+                    a.len(),
+                    b.len(),
+                    at,
+                    &a[at.min(a.len())..(at + 16).min(a.len())],
+                    &b[at.min(b.len())..(at + 16).min(b.len())],
+                )
+            });
+            return Err(format!(
+                "snapshot {snap}: replay outputs differ: mismatches {:?}, leftover {:?}, detail {:?}",
+                d.mismatches().first(),
+                d.leftover().first(),
+                detail
+            ));
+        }
+        Ok(Some(Self::hashes_of(&s)))
     }
 
     fn seq(&self) -> u64 {

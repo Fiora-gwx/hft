@@ -232,7 +232,7 @@ impl<const FORCE: bool, S: hft_strategy_sdk::StrategySet, const RECOVER: bool> S
     fn hashes(&self) -> ComponentHashes {
         self.0.hashes()
     }
-    fn rebuilt_hashes(&self) -> Option<ComponentHashes> {
+    fn rebuilt_hashes(&self) -> Result<Option<ComponentHashes>, String> {
         self.0.rebuilt_hashes()
     }
     fn seq(&self) -> u64 {

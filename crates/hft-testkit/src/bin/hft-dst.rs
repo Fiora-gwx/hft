@@ -261,6 +261,7 @@ fn cmd_hashtrail(a: &Args) -> Result<ExitCode, String> {
     let rec = hft_testkit::dst::run_record::<DstEngine>(&cfg);
     if let DstOutcome::Fail(f) = &rec.outcome {
         eprintln!("{}", repro_line(f));
+        eprintln!("{}", f.message);
         return Ok(ExitCode::from(1));
     }
     let digest = xxhash_rust::xxh3::xxh3_128(&rec.trail.to_bytes());

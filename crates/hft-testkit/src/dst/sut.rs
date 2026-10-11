@@ -208,9 +208,10 @@ pub trait Sut: Sized {
     /// Component hashes of the current state (snapshot sections, README "7. 状态哈希对比").
     fn hashes(&self) -> ComponentHashes;
     /// INV-6: hashes rebuilt from the latest snapshot plus the following Inputs of the journal
-    /// (verification replay); `None` = unavailable. The runner rejects unavailable rebuilds
+    /// (verification replay); `Ok(None)` = unavailable. Errors retain the failing stage / seq.
+    /// The runner rejects unavailable rebuilds
     /// for real-engine observations or any journal that already contains a snapshot.
-    fn rebuilt_hashes(&self) -> Option<ComponentHashes>;
+    fn rebuilt_hashes(&self) -> Result<Option<ComponentHashes>, String>;
     /// Journal seq of the last record.
     fn seq(&self) -> u64;
     /// The in-memory journal (all records so far).

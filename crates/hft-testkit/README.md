@@ -161,7 +161,7 @@ pub trait Sut {
     fn fire_timers(&mut self, now_ns: u64, tsc: u64, out: &mut StepOut) -> bool;
     fn observe(&self, obs: &mut Obs);                    // 只读;src/dst/obs.rs 的行即适配器契约
     fn hashes(&self) -> ComponentHashes;
-    fn rebuilt_hashes(&self) -> Option<ComponentHashes>; // INV-6:最近快照 + 其后 Input 重建
+    fn rebuilt_hashes(&self) -> Result<Option<ComponentHashes>, String>; // INV-6:最近快照 + 其后 Input 重建
     fn crash_and_recover(&mut self, p: CrashPoint, input: Option<&InputRec>) -> Result<(), BootFail>;
     fn clean_restart(&mut self) -> Result<(), BootFail>;
     /* seq()、journal()、is_sim() */
@@ -204,7 +204,7 @@ DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xt
 
 真实 DST 引导块保存完整 ECF1 与 RKP1 配置。启动先往返解码同一配置,INV-6 从选中快照的 journal 配置独立装配,不读 WorldSpec 或其他运行的风控参数。各世界可在同一线程交错运行;将日志交给新线程也能重建相同状态。配置内容变化会改变快照节 9 的引用与总 HashTrail,一致性集须由 CI 重生成后审查,不屏蔽这些字段(TK-112)。
 
-真实引擎或 journal 已含快照时,INV-6 不能因重建返回空值跳过。配置或恢复失败、回放未完成、Output 差异或未消费输出均使检查失败;运行中的定期检查与结束检查使用同一规则(TK-113)。
+真实引擎或 journal 已含快照时,INV-6 不能因重建返回空值跳过。配置或恢复失败、回放未完成、Output 差异或未消费输出均使检查失败;错误保留阶段、快照序号及首条差异的序号/字节偏移,运行中的定期检查与结束检查使用同一规则(TK-113)。
 
 **套件选择**:不指定套件时,一个种子运行的套件 = 按名字排序的全部套件中下标为 `xxh3_64(seed 的 8 字节小端) mod 套件数` 的那个;`cargo xtask dst` 与 `hft-dst run` 用同一函数 `seed::suite_index`。**缺省步数** 10,000(两个入口相同,`seed::DST_DEFAULT_STEPS`)。
 

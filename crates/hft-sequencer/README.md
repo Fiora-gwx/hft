@@ -811,7 +811,7 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 ## 依赖
 
 - 内部:`hft-types`、`hft-refdata`、`hft-event`、`hft-book`、`hft-oms`、`hft-risk`、`hft-ledger`、`hft-exec`、`hft-strategy-sdk`(`StrategySet`、`Views`、`EventRef`、`Ctx`、意图类型)、`hft-journal`(读者;写者在 feature `live` 下,只有 apps/hft-core 与 apps/replayer 打开)、`hft-rt`(环、`ByteSpsc`、`Mailbox`、`KillWord`、`TscClock`、`Heartbeat`)。
-- 外部:`xxhash-rust`(xxh3,无分配流式接口)。
+- 外部:`xxhash-rust`(xxh3,无分配流式接口)、`sha2`(0.10,冷启动核对 journal 配置内容,不启用 asm)、`zerocopy`(快照与配置行布局)。
 - 禁止:任何 `strategies/*`(策略只在装配处经 `strategy_set!` 进入)、`hft-strat-lib`、`hft-sim`(sim-gw 由 hft-core 装配)、`hft-net`、`hft-venue`、`venue-*`、`tokio`、任何 `cold` crate。
 
 ## 延伸阅读

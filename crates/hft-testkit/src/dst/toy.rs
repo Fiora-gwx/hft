@@ -1799,10 +1799,10 @@ impl Sut for ToyEngine {
         self.hashes_of()
     }
 
-    fn rebuilt_hashes(&self) -> Option<ComponentHashes> {
+    fn rebuilt_hashes(&self) -> Result<Option<ComponentHashes>, String> {
         let mut r = self.replay();
         r.shadow_counter = 0;
-        Some(r.hashes_of())
+        Ok(Some(r.hashes_of()))
     }
 
     fn seq(&self) -> u64 {

@@ -71,8 +71,8 @@ impl<const N: u64> Sut for PanicAt<N> {
     fn hashes(&self) -> ComponentHashes {
         self.inner.hashes()
     }
-    fn rebuilt_hashes(&self) -> Option<ComponentHashes> {
-        None
+    fn rebuilt_hashes(&self) -> Result<Option<ComponentHashes>, String> {
+        Ok(None)
     }
     fn seq(&self) -> u64 {
         self.inner.seq()

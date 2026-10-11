@@ -9,12 +9,12 @@ fn rsk_284_risk_blob_roundtrip() {
     let mut p = p0_for(rd, 3);
     p.version = 0x1234_5678_9abc_def0;
     p.generated_at_ns = -123_456_789;
-    p.author = *b"risk-codec-test!!";
+    p.author = *b"risk-codec-test!";
     let b = p.encode_blob().unwrap();
     assert_eq!(&b[..8], b"HFTRKP01");
     assert_eq!(&b[8..16], &0x1234_5678_9abc_def0u64.to_le_bytes());
     assert_eq!(&b[16..24], &(-123_456_789i64).to_le_bytes());
-    assert_eq!(&b[24..40], b"risk-codec-test!!");
+    assert_eq!(&b[24..40], b"risk-codec-test!");
     let q = RiskParams::decode_blob(&b, rd).unwrap();
     assert_eq!(p.version, q.version);
     assert_eq!(p.generated_at_ns, q.generated_at_ns);

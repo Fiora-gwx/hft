@@ -1481,9 +1481,9 @@ spec: README.md
 - 规则:[6. DST 框架](README.md#6-dst-框架)
 - 级别:unit
 - 里程碑:M2
-- 前置:真实 W1 引擎,固定种子 1、4 步,仅开启 INV-6;包装器仅把重建结果替换为空值
+- 前置:真实 W1 引擎,固定种子 1/2、4 步,仅开启 INV-6;包装器仅把重建结果替换为空值或带序号的错误
 - 步骤:分别设置每步重建与关闭定期重建,运行到首次失败或场景结束
-- 期望:两行均以 INV-6 失败,诊断指出 journal 重建不可用;不能因没有哈希结果通过检查
+- 期望:四行均以 INV-6 失败,空值诊断指出 journal 重建不可用,错误保留原始诊断与序号;不能因没有哈希结果通过检查
 - 实现:`crates/hft-testkit/tests/journal_config.rs::tk_113_missing_rebuild_fails_instead_of_skipping`
 
 ## 验收

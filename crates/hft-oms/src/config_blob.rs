@@ -116,7 +116,7 @@ impl OmsConfig {
             prev = Some(key);
             let is_default = r.venue == 0 && r.account == 0;
             let table = matches!(r.field, 1 | 10 | 23 | 24);
-            let venue = matches!(r.field, 4 | 5 | 6 | 11 | 12);
+            let venue = matches!(r.field, 4..=6 | 11 | 12);
             if !is_default
                 && (!(1..64).contains(&r.venue)
                     || (!table && !venue)

@@ -32,8 +32,8 @@ fn tk_112_worlds_do_not_share_risk_replay_state() {
     let mut other = WorldSpec::w1();
     other.risk.conn_liveness_ms += 17;
     let b = boot(&other);
-    assert_eq!(Some(expected), a.rebuilt_hashes());
-    assert_eq!(Some(b.hashes()), b.rebuilt_hashes());
+    assert_eq!(Ok(Some(expected)), a.rebuilt_hashes());
+    assert_eq!(Ok(Some(b.hashes())), b.rebuilt_hashes());
     let log = Log::from_segments(&a.sequencer().driver().io.j.segments);
     drop(a);
     drop(b);
@@ -80,12 +80,12 @@ fn tk_112_worlds_do_not_share_risk_replay_state() {
     .unwrap();
 }
 
-struct MissingRebuild(E);
+struct MissingRebuild(E, bool);
 
 impl Sut for MissingRebuild {
     type Matcher = <E as Sut>::Matcher;
     fn boot(c: &BootCtx<'_>) -> Result<Self, BootFail> {
-        E::boot(c).map(Self)
+        E::boot(c).map(|e| Self(e, c.seed == 2))
     }
     fn process(&mut self, n: u64, t: u64, i: &InputRec, o: &mut StepOut) {
         self.0.process(n, t, i, o);
@@ -105,8 +105,12 @@ impl Sut for MissingRebuild {
     fn hashes(&self) -> ComponentHashes {
         self.0.hashes()
     }
-    fn rebuilt_hashes(&self) -> Option<ComponentHashes> {
-        None
+    fn rebuilt_hashes(&self) -> Result<Option<ComponentHashes>, String> {
+        if self.1 {
+            Err("injected replay failure at seq 17".into())
+        } else {
+            Ok(None)
+        }
     }
     fn seq(&self) -> u64 {
         self.0.seq()
@@ -129,16 +133,21 @@ impl Sut for MissingRebuild {
 fn tk_113_missing_rebuild_fails_instead_of_skipping() {
     use hft_testkit::dst::invariants::{InvId, InvariantSet};
     use hft_testkit::dst::{DstOutcome, FailKind, run_record};
-    for every in [1, 0] {
+    for (every, seed) in [(1, 1), (0, 1), (1, 2), (0, 2)] {
         // During a run, and the mandatory end check with periodic checks off.
-        let mut c = crate::support::cfg(1, 4, &[], 0, &[]);
+        let mut c = crate::support::cfg(seed, 4, &[], 0, &[]);
         c.invariants = InvariantSet::only(InvId::I6);
         c.rebuild_every = every;
         let r = run_record::<MissingRebuild>(&c);
         match r.outcome {
             DstOutcome::Fail(f) => {
                 assert_eq!(f.invariant, FailKind::Inv(InvId::I6));
-                assert!(f.message.contains("rebuild unavailable"));
+                let message = if seed == 1 {
+                    "rebuild unavailable"
+                } else {
+                    "injected replay failure at seq 17"
+                };
+                assert!(f.message.contains(message), "{}", f.message);
             }
             DstOutcome::Pass { .. } => panic!("missing rebuild was accepted, interval {every}"),
         }

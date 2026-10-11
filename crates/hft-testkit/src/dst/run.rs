@@ -645,7 +645,7 @@ impl<E: Sut> Loop<'_, E> {
     }
 
     fn rebuild(&self) -> Result<Option<ComponentHashes>, String> {
-        let rebuilt = self.sut.rebuilt_hashes();
+        let rebuilt = self.sut.rebuilt_hashes()?;
         if rebuilt.is_none()
             && (self.after.required.is_some()
                 || self
