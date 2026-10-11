@@ -183,7 +183,7 @@ fn settle<S: StrategySet>(seq: &mut Sequencer<LiveDriver<S, Io<S>>, S>) {
 }
 
 pub fn create<S: StrategySet>() -> Fixture {
-    create_with_restart::<S>(None)
+    create_with_restart::<S>(None, false)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -196,7 +196,13 @@ pub enum Restart {
 }
 
 pub fn restarted<S: StrategySet>(restart: Restart) -> Fixture {
-    create_with_restart::<S>(Some(restart))
+    create_with_restart::<S>(Some(restart), false)
+}
+
+/// RPL-025/026: genuine file-backed executions with 20 min before the restart.
+pub fn long_restart<S: StrategySet>(restart: Restart) -> Fixture {
+    assert!(matches!(restart, Restart::FromSnapshot | Restart::Version));
+    create_with_restart::<S>(Some(restart), true)
 }
 
 pub fn read(f: &Fixture) -> Log {
@@ -212,8 +218,8 @@ pub fn read(f: &Fixture) -> Log {
     Log::from_reader(
         &mut r,
         LogReadLimits {
-            records: 20_000,
-            body_bytes: 64 << 20,
+            records: 200_000,
+            body_bytes: 256 << 20,
         },
     )
     .unwrap()
@@ -379,7 +385,56 @@ fn prepare_smoke<S: StrategySet>(s: &mut Sequencer<LiveDriver<S, Io<S>>, S>, wor
     );
 }
 
-fn create_with_restart<S: StrategySet>(restart: Option<Restart>) -> Fixture {
+fn market_minutes<S: StrategySet>(
+    s: &mut Sequencer<LiveDriver<S, Io<S>>, S>,
+    world: &WorldSpec,
+    minutes: u64,
+    base_id: u64,
+) {
+    let first_tsc = s.driver().io.rings.tsc;
+    let first_ens = s.engine().last_ens;
+    let hz = s.driver().io.rings.hz;
+    for seconds in (10..=minutes * 60).step_by(10) {
+        let t = first_tsc + (u128::from(seconds) * u128::from(hz) / 1000) as u64;
+        let utc = s.driver().io.utc_of(Tsc(t));
+        s.driver_mut().io.rings.tsc = t;
+        s.driver_mut().io.rings.calib.tsc = Tsc(t);
+        s.driver_mut().io.rings.calib.realtime_ns = utc;
+        let clock = s.driver().io.clock_status();
+        input(s, (1, 0), EventKind::CLOCK_STATUS, clock.as_bytes().to_vec());
+        for (vi, venue) in world.venues.iter().enumerate() {
+            for i in world.insts.iter().filter(|i| i.venue == venue.id) {
+                let mut h = MarketHdr::new_zeroed();
+                h.venue = venue.id;
+                h.inst = i.id;
+                h.rx_tsc = t;
+                h.ex_ts_ns = utc;
+                let shift = (seconds / 10) as i64 * i.tick;
+                let b = Bbo {
+                    h,
+                    bid_px: Px(i.bid + shift),
+                    bid_qty: Qty(i.depth),
+                    ask_px: Px(i.ask + shift),
+                    ask_qty: Qty(i.depth),
+                    update_id: base_id + seconds / 10,
+                };
+                input(s, (4, vi as u8), EventKind::BBO, b.as_bytes().to_vec());
+            }
+        }
+        settle(s);
+        // Exact 10/20 min anchors, independent of the automatic keyframe scheduler.
+        if seconds.is_multiple_of(600) {
+            command(s, base_id + seconds, &ControlCmd::SnapshotNow);
+            settle(s);
+        }
+    }
+    assert_eq!(
+        s.engine().last_ens - first_ens,
+        (minutes * 60 * 1_000_000_000) as i64
+    );
+}
+
+fn create_with_restart<S: StrategySet>(restart: Option<Restart>, long: bool) -> Fixture {
     let root = std::env::temp_dir().join(format!(
         "replayer-{}-{}",
         std::process::id(),
@@ -397,6 +452,10 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>) -> Fixture {
     let rd_blob = build::refdata_blob(&world, false).unwrap();
     let rd = build::load_refdata(&rd_blob).unwrap();
     let mut setup = build::engine_setup(&world, 1_000_000_000, 1);
+    if long {
+        setup.seq.keyframe_period_ms = 300_000;
+        setup.seq.keyframe_max_events = 1_500_000;
+    }
     let configs = build::config_set::<S>(&world, &rd, rd_blob, &setup).unwrap();
     let cfg = JournalConfig {
         name: "seq".into(),
@@ -446,9 +505,13 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>) -> Fixture {
     )
     .unwrap();
     settle(&mut s);
-    for id in 1..=2u64 {
-        command(&mut s, id, &ControlCmd::SnapshotNow);
-        settle(&mut s);
+    if long {
+        market_minutes(&mut s, &world, 20, 10_000);
+    } else {
+        for id in 1..=2u64 {
+            command(&mut s, id, &ControlCmd::SnapshotNow);
+            settle(&mut s);
+        }
     }
     if let Some(restart) = restart {
         if matches!(restart, Restart::Mismatch | Restart::GlobalMismatch) {
@@ -504,16 +567,23 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>) -> Fixture {
         let initial = old
             .recs
             .iter()
-            .find(|r| r.kind == EventKind::STATE_SNAPSHOT)
+            .find(|r| {
+                r.kind == EventKind::STATE_SNAPSHOT
+                    && (!long
+                        || r.read::<hft_event::SnapshotHdr>()
+                            .is_some_and(|h| h.engine_ns == 600_000_000_000))
+            })
             .unwrap()
             .seq;
+        let prior_last = old.record_end_seq(old.recs.len() - 1).unwrap();
         let mut io = s.into_driver().io;
         io.old = Some(old);
         // A new TSC epoch and frequency must come from the new segment and EngineClock.
+        let next_utc = io.rings.utc_of(Tsc(io.rings.tsc)) + 20_000_000_000;
         io.rings.tsc = 100;
         io.rings.hz *= 2;
         io.rings.calib.tsc = Tsc(100);
-        io.rings.calib.realtime_ns += 20_000_000_000;
+        io.rings.calib.realtime_ns = next_utc;
         setup.clock.calib_tsc = 100;
         setup.clock.tsc_hz_milli = io.rings.hz;
         setup.clock.calib_realtime_ns = io.rings.calib.realtime_ns;
@@ -524,10 +594,12 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>) -> Fixture {
         let plan = RecoverPlan {
             start: if from_snapshot {
                 SnapshotSel::AtSeq(initial)
+            } else if long && matches!(restart, Restart::Version) {
+                SnapshotSel::DrainTail
             } else {
                 SnapshotSel::Latest
             },
-            replay_tail: !from_snapshot,
+            replay_tail: !from_snapshot && !(long && matches!(restart, Restart::Version)),
             epoch: 0,
             flags: RecoveryFlags(if from_snapshot {
                 RecoveryFlags::FROM_SNAPSHOT | RecoveryFlags::TAIL_LOST
@@ -539,14 +611,25 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>) -> Fixture {
         s = Sequencer::boot(
             BootSource::Journal(plan),
             &setup,
-            LiveDriver::new(io, LiveCfg::default()),
+            LiveDriver::new(
+                io,
+                LiveCfg {
+                    prev_last_seq: prior_last,
+                    source: if from_snapshot { 3 } else { 2 },
+                    ..Default::default()
+                },
+            ),
             Box::leak(Box::new(Heartbeat::new())),
         )
         .unwrap();
         settle(&mut s);
-        for id in 10..=11 {
-            command(&mut s, id, &ControlCmd::SnapshotNow);
-            settle(&mut s);
+        if long {
+            market_minutes(&mut s, &world, if from_snapshot { 20 } else { 10 }, 20_000);
+        } else {
+            for id in 10..=11 {
+                command(&mut s, id, &ControlCmd::SnapshotNow);
+                settle(&mut s);
+            }
         }
     }
     let mut d = s.into_driver();

@@ -1,5 +1,6 @@
 mod fixture;
 mod recovery;
+mod verify;
 
 use hft_event::{EventKind, RecordFlags, RecordHeader};
 use hft_strategy_registry::Strategies;

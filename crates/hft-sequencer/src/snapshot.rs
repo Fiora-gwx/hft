@@ -520,6 +520,34 @@ pub(crate) fn boot_block<D: Driver<S>, S: StrategySet>(
             .map_err(|_| BootBlockErr::Append)?;
         b.append_var(EventKind::CLOCK_STATUS, tsc, &[clk.as_bytes()])
             .map_err(|_| BootBlockErr::Append)?;
+        if reason == RollReason::RecoverFromSnapshot {
+            let (from, to) = e.rec.skipped_range.ok_or(BootBlockErr::Append)?;
+            let n = hft_event::Note {
+                code: hft_event::note_code(
+                    hft_event::NoteSource::Boot,
+                    crate::codes::boot_note::RECOVER_FROM_SNAPSHOT,
+                ),
+                level: hft_event::NoteLevel::P1,
+                source: hft_event::NoteSource::Boot,
+                strategy: StrategyId(0),
+                _pad: 0,
+                group: hft_types::GROUP_NONE,
+                inst: InstId(0),
+                // Operator (TailSkipped reason 3); hft-core's recovery launcher identity.
+                v: [
+                    e.rec.snapshot_seq,
+                    from,
+                    to,
+                    3,
+                    u64::from_le_bytes(*b"cli:syst"),
+                    0,
+                    0,
+                    0,
+                ],
+            };
+            b.append_var(EventKind::NOTE, tsc, &[n.as_bytes()])
+                .map_err(|_| BootBlockErr::Append)?;
+        }
         for c in cfg.iter() {
             b.append_var(EventKind::CONFIG_BLOB, tsc, &[c])
                 .map_err(|_| BootBlockErr::Append)?;

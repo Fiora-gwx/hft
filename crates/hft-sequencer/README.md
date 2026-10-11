@@ -115,7 +115,7 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 
 `JournalSink` 由 `hft-journal::JournalWriter` 实现(实盘、恢复),验证与镜像驱动实现为按日志对齐序号的哑写者;`EVENT_END` 位与 Input/Output/Meta 分类属于 [hft-event](../hft-event/README.md) 的 `RecordFlags`/`KindInfo.role`。
 
-**离线文件输入**由默认关闭的 `replay-io` feature 提供 `Log::from_reader(&mut JournalReader, LogReadLimits)`。完整文件验证使用 [JournalReader::open_files](../hft-journal/README.md#读者) 预检的固定边界与原路径清单;普通读者须配置 LastCompleteEvent、段首起点、Error-on-gap 和非零重组容量,其恢复截断点本身不证明文件完整。记录数与逻辑体字节数上限分别由 `LogReadLimits.records/body_bytes` 给出。超过上限、Pending、空输入、损坏、缺段、未知 kind 或段头 schema 与当前二进制不符均返回 `LogReadError`,不返回成功的部分日志。物理 seq、事件标志、多段重组后的业务尾零及各段时钟保持原样;Fixed/Var 经 [exact_body](../hft-event/README.md#体-trait-与编解码) 去除传输填充。读取不打开写者、不修改来源文件,只在冷调用方执行,不进入 LiveDriver 的取环路径。
+**离线文件输入**由默认关闭的 `replay-io` feature 提供 `Log::from_reader(&mut JournalReader, LogReadLimits)`。完整文件验证使用 [JournalReader::open_files](../hft-journal/README.md#读者) 预检的固定边界与原路径清单;普通读者须配置 LastCompleteEvent、段首起点、Error-on-gap 和非零重组容量,其恢复截断点本身不证明文件完整。记录数与逻辑体字节数上限分别由 `LogReadLimits.records/body_bytes` 给出。超过上限、Pending、空输入、损坏、缺段、未知 kind 或段头 schema 与当前二进制不符均返回 `LogReadError`,不返回成功的部分日志。物理 seq 与跨片记录的末片 seq、事件标志、多段重组后的业务尾零及各段时钟保持原样;Fixed/Var 经 [exact_body](../hft-event/README.md#体-trait-与编解码) 去除传输填充。读取不打开写者、不修改来源文件,只在冷调用方执行,不进入 LiveDriver 的取环路径。
 
 同一 feature 的 `driver::replay_snapshot::check_snapshot::<S>(&Log, seq)` 在投递输入前自检指定快照。先校验头部、全部节的边界、唯一性与节数,再计算 [state_hash](#状态哈希);非零声明值必须相等,零值仍需自算。装配参数只取该日志,调用正式恢复路径后重新序列化,重算哈希必须一致;差异返回首个不同节号。重建写缓冲上限为原节字节数,超限直接失败。缺快照、损坏、不支持的恢复布局与恢复后丢失状态均失败,不退到另一快照,不修改来源日志或正在运行的引擎。
 
@@ -640,6 +640,8 @@ advice 环元素 = `AdviceHdr { strategy, account, local_kind, group, len, basis
 6. 对每个 (venue, account) 经 `oms.mirror_restore` 分批下发 `GwCmd{MirrorRestore}`;无法编码查询的槽保持 Unknown 并转交 reconciler。
 7. **不在启动时判 `Broken`**:`RESUME_HOLD` 的链接不判 `hedge_deadline_ms`;续接单所在 venue 的对冲闸门子集满足时(`ModeOutcome.hedge_gate_open`)sequencer 调 `oms.on_hedge_gate_open(a, v, …)`,OMS 对每个这样的链接续接一次(`SecondRetry` 或 `Reverse`),之后按正常截止判断;超过 `resume_hold_max_ms` 仍未续接的处理归 [hft-oms](../hft-oms/README.md)。执行层的恢复期自动处置按多出那一腿所在 venue 开始(`venue_gate_open` → `exec.on_venue_gate_open`),启动闸门放行时(`released`)调 `exec.on_gate_open(a, now)`(见[模式与 cap 的驱动](#模式与-cap-的驱动) ⑤)。
 
+`FROM_SNAPSHOT` 必须配合 `replay_tail = false`,矛盾配置返回 `BootError::Config`。hft-core 恢复入口经 `boot(Journal(plan))` 在引导块 ClockStatus 后写一条 `Note{Boot, RecoverFromSnapshot}`;`v[0]` 是所选快照的首片 seq,`v[1..3]` 是快照末片之后至最后完整提交事件末片的物理闭区间,空区间写 0/0,未提交的半事件不计入。`v[3]` 使用 TailSkipped 的 Operator 原因码 3,`v[4]` 是启动入口 `cli:systemd` 的前 8 字节。它属于 Meta,不计入输出哈希;临时范围不进快照。文件读取保留末片位置,不能用逻辑记录首 seq 代替末片 seq。
+
 验证回放(`VerifyDriver`,逐字节、不一致即失败)只是离线夜跑与 CI 工具([apps/replayer](../../apps/replayer/README.md)),不在启动路径上。
 
 ### 恢复时决策不一致
@@ -838,6 +840,8 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 - [01 §3.3、§5](../../design/01-总体架构.md)、[08 §2、§5、§6](../../design/08-数据面与回放.md)、[09 §4.2](../../design/09-可观测性、风控与控制面.md)、[13 R6、R7、R10、O9](../../design/13-设计评审与优化.md)
 - [event-model](../../docs/subsystems/event-model.md)、[journal-format](../../docs/subsystems/journal-format.md)、[control-plane](../../docs/subsystems/control-plane.md)、[hot-path-rules](../../docs/hot-path-rules.md)、[latency-budget](../../docs/latency-budget.md)、[testing](../../docs/testing.md#8-上线门槛)
 - [hft-strategy-sdk](../hft-strategy-sdk/README.md)、[hft-exec](../hft-exec/README.md)、[hft-sim](../hft-sim/README.md)、[apps/hft-core](../../apps/hft-core/README.md)、[apps/replayer](../../apps/replayer/README.md)
+
+- [指定快照恢复审计范围](../../.agents/notes/implemented/bug-fix/2026-10-11-snapshot-recovery-audit-range.md)
 
 ## 已知限制与后续工作
 

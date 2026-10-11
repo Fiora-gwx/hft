@@ -692,6 +692,14 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
         if log.recs.len() > self.seen {
             let new = log.recs.get(self.seen..).unwrap_or(&[]).to_vec();
             self.mirror.drv.extend(&new, &log.segs, &log.seg_start);
+            if let Some(first) = new.first() {
+                self.mirror
+                    .drv
+                    .sink
+                    .log
+                    .part_ends
+                    .extend(log.part_ends.range(first.seq..).map(|(&a, &b)| (a, b)));
+            }
             self.seen = log.recs.len();
         }
     }

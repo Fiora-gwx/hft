@@ -27,6 +27,7 @@ hft-testkit = { workspace = true, features = ["seq"] }
 hft-types.workspace = true
 zerocopy.workspace = true
 crc32c.workspace = true
+sha2.workspace = true
 
 [[test]]
 name = "cli"

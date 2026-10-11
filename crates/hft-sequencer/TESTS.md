@@ -44,7 +44,7 @@ spec: README.md
 | inst → 策略的稠密索引 | SEQ-016、SEQ-226–SEQ-233 |
 | 定时器 | SEQ-079、SEQ-215、SEQ-234–SEQ-241、SEQ-261、SEQ-349–SEQ-351 |
 | 快照 | SEQ-017、SEQ-085、SEQ-088–SEQ-090、SEQ-109、SEQ-112、SEQ-120、SEQ-164、SEQ-190、SEQ-242–SEQ-248、SEQ-250–SEQ-255、SEQ-337、SEQ-356 |
-| 冷启动恢复(RecoverDriver) | SEQ-108、SEQ-205、SEQ-206、SEQ-237、SEQ-256–SEQ-267、SEQ-342、SEQ-366 |
+| 冷启动恢复(RecoverDriver) | SEQ-108、SEQ-205、SEQ-206、SEQ-237、SEQ-256–SEQ-267、SEQ-342、SEQ-366、SEQ-398 |
 | 恢复时决策不一致 | SEQ-268、SEQ-269、SEQ-362、SEQ-396 |
 | 毒丸输入隔离 | SEQ-270–SEQ-272 |
 | 版本变化与回滚 | SEQ-257、SEQ-272–SEQ-274 |
@@ -5334,7 +5334,7 @@ spec: README.md
 - 前置:Linux、live/replay-io features;B0 每张 OMS 表 4096 槽(世代计数节保证快照跨片),max_timers = 32768 满足对应启动预留,以真实 JournalWriter::open_offline 写普通临时目录
 - 输入:启动放行、按需快照、BBO、关键帧、滚段与再写关键帧
 - 步骤:关闭写者,JournalReader 经 Log::from_reader 读取;每个 StateSnapshot 先独立恢复并重新序列化自检,再分别只从该日志装配 EngineSetup 与 VerifyDriver
-- 期望:至少 4 个快照和 2 段;实际包含大于单片的快照与物理 seq 间隔,有 CmdResult;所有起点均处理完全部 Input、Output 无分歧且无残留
+- 期望:至少 4 个快照和 2 段;实际包含大于单片的快照与物理 seq 间隔,逐条末片 seq 等于下一逻辑记录的首 seq 减一,末条单片和越界查询也核对,有 CmdResult;所有起点均处理完全部 Input、Output 无分歧且无残留
 - 实现:`crates/hft-sequencer/tests/replay_file.rs::seq_385_file_journal_independent_verify`
 
 ### SEQ-386 文件读取错误不能返回成功的部分日志
@@ -5510,6 +5510,16 @@ spec: README.md
 - 步骤:完整启动配置写入 journal;快照后投递永续 ADL 卖出 0.005,提交非 HARD 的账户 Kill/flatten;退避期间请求关键帧,推进 500 ms 后再请求关键帧;分别只用 ADL 前和首次退避中的快照及其前置配置独立装配,逐字节验证后续 journal
 - 期望:至少两条永续清仓决策被 RATE 拒绝;退避中的补腿窗口未启动,没有 Broken;两次验证均无输出或快照分歧
 - 实现:`crates/hft-sequencer/tests/sdk_contract/target.rs::seq_397_rejected_force_backoff_replays_from_both_sides`
+
+### SEQ-398 指定快照恢复审计只覆盖完整提交尾部
+
+- 规则:[冷启动恢复](README.md#冷启动恢复recoverdriver)
+- 级别:unit
+- 里程碑:M2
+- 前置:完整配置的真实 journal,含多个快照及后续 BBO;再追加一条未提交、没有 EVENT_END 的 BBO
+- 步骤:分别从首次快照和恰在提交尾部的最新快照恢复,不重放尾部;检查新段的 Boot 注记,请求新关键帧并独立验证恢复后日志;另将 FROM_SNAPSHOT 与 replay_tail = true 同时传入
+- 期望:每次恰有一条 RecoverFromSnapshot 注记,使用实际快照 seq;首次快照后的范围止于已提交边界,不含半事件,最新快照的空范围为 0/0;恢复后回放无分歧,矛盾配置返回 BootError::Config
+- 实现:`crates/hft-sequencer/tests/config_blob.rs::seq_398_snapshot_recovery_audit_uses_committed_tail`
 
 ## 验收
 

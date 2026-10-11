@@ -49,6 +49,9 @@ pub struct Log {
     /// Index of the first record of every segment.
     pub seg_start: Vec<usize>,
     pub segs: Vec<crate::journal::SegClock>,
+    /// Last physical seq of split logical records, keyed by the first part's seq.
+    /// MemJournal records and single-part file records need no entry.
+    pub part_ends: std::collections::BTreeMap<u64, u64>,
 }
 
 impl Log {
@@ -64,6 +67,12 @@ impl Log {
     /// Segment index of a record index.
     pub fn seg_of(&self, ix: usize) -> usize {
         self.seg_start.iter().rposition(|s| *s <= ix).unwrap_or(0)
+    }
+
+    /// Inclusive physical end of a retained logical record (including its final part).
+    pub fn record_end_seq(&self, ix: usize) -> Option<u64> {
+        let seq = self.recs.get(ix)?.seq;
+        Some(self.part_ends.get(&seq).copied().unwrap_or(seq))
     }
 }
 

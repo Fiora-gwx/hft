@@ -40,6 +40,9 @@ pub struct RecoverState {
     /// Seq of the start snapshot record and of the last replayed record.
     pub snapshot_seq: u64,
     pub tail_end_seq: u64,
+    /// Physical tail range deliberately skipped by FROM_SNAPSHOT, or (0, 0) when empty.
+    /// Boot-only evidence; not persisted in the state snapshot.
+    pub skipped_range: Option<(u64, u64)>,
     /// Inputs handed during the tail replay.
     pub replayed: u64,
     /// `(venue, account)` pairs for which `force_unknown` ran, with its return value.
@@ -65,6 +68,7 @@ impl Default for RecoverState {
             mismatches: Vec::new(),
             snapshot_seq: 0,
             tail_end_seq: 0,
+            skipped_range: None,
             replayed: 0,
             forced: Vec::new(),
             flags: Vec::new(),
@@ -608,6 +612,27 @@ pub(crate) fn boot_journal<D: Driver<S>, S: StrategySet>(
         });
     }
     // 3. Tail replay.
+    if plan.flags.0 & RecoveryFlags::FROM_SNAPSHOT != 0 {
+        if plan.replay_tail {
+            return Err(BootError::Config(ConfigErr::Component(
+                "FROM_SNAPSHOT replays tail",
+            )));
+        }
+        let last = log
+            .recs
+            .len()
+            .checked_sub(1)
+            .and_then(|i| log.record_end_seq(i))
+            .ok_or(BootError::Journal(JournalErr::NoSnapshot))?;
+        let snap_end = log
+            .record_end_seq(ix)
+            .ok_or(BootError::Journal(JournalErr::NoSnapshot))?;
+        e.rec.skipped_range = Some(if snap_end < last {
+            (snap_end + 1, last)
+        } else {
+            (0, 0)
+        });
+    }
     let snap_rec_tsc = log.recs.get(ix).map_or(0, |r| r.tsc);
     let snap_ens = e.last_ens;
     let mut stop_tsc = snap_rec_tsc;

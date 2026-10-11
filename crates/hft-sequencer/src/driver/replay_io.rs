@@ -83,6 +83,9 @@ impl Log {
                 Next::Pending => return Err(LogReadError::Pending),
             };
             let pos = reader.position();
+            if pos.seq > record.seq {
+                log.part_ends.insert(record.seq, pos.seq);
+            }
             let bad = || LogReadError::Header {
                 segment: pos.segment_no,
                 kind: record.kind,

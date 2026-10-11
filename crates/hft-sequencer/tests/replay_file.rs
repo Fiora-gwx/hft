@@ -225,6 +225,13 @@ fn seq_385_file_journal_independent_verify() {
             .any(|r| r.kind == EventKind::STATE_SNAPSHOT && r.body.len() > hft_event::PART_MAX_CHUNK)
     );
     assert!(log.recs.iter().any(|r| r.kind == EventKind::CMD_RESULT));
+    assert!(!log.part_ends.is_empty());
+    for (ix, records) in log.recs.windows(2).enumerate() {
+        assert_eq!(log.record_end_seq(ix), Some(records[1].seq - 1));
+    }
+    let tail = log.recs.len() - 1;
+    assert_eq!(log.record_end_seq(tail), Some(log.recs[tail].seq));
+    assert_eq!(log.record_end_seq(tail + 1), None);
     verify_snapshots(&log);
 }
 

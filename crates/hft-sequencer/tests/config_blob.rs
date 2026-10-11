@@ -397,3 +397,96 @@ fn seq_395_unstarted_clock_is_local_to_process_boot() {
     h.run();
     assert!(verify_journal::<TestSet>(h.j(), &setup, Some(at)).is_empty());
 }
+
+#[test]
+fn seq_398_snapshot_recovery_audit_uses_committed_tail() {
+    use hft_event::{Note, NoteSource, RecordFlags};
+    use hft_sequencer::journal::JournalSink;
+    use hft_sequencer::{BootError, RecoveryFlags, SnapshotSel};
+    use hft_types::Tsc;
+
+    for latest in [false, true] {
+        let mut j = config_journal(true);
+        let old = Log::from_segments(&j.segments);
+        let snaps: Vec<_> = old
+            .recs
+            .iter()
+            .filter(|r| r.kind == EventKind::STATE_SNAPSHOT)
+            .collect();
+        let selected = if latest {
+            snaps.last().unwrap().seq
+        } else {
+            snaps[0].seq
+        };
+        let committed_end = old.recs[hft_sequencer::recover::event_end(&old) - 1].seq;
+        if latest {
+            assert_eq!(selected, committed_end);
+        }
+        // An actual half event is present in storage but must stay outside the audit range.
+        let bbo = old.recs.iter().find(|r| r.kind == EventKind::BBO).unwrap();
+        let half = j
+            .append_var(EventKind::BBO, RecordFlags(0), Tsc(bbo.tsc), &[&bbo.body])
+            .unwrap();
+        assert!(half.0 > committed_end);
+        let setup = EngineSetup::from_snapshot(&old, selected).unwrap();
+        let mut h = H::<TestSet>::restart_over(
+            j.clone(),
+            setup.clone(),
+            plan(
+                SnapshotSel::AtSeq(selected),
+                false,
+                2,
+                RecoveryFlags::FROM_SNAPSHOT | RecoveryFlags::TAIL_LOST,
+            ),
+            Rerun::default(),
+        )
+        .unwrap();
+        let all = Log::from_segments(&h.j().segments);
+        let start = *all.seg_start.last().unwrap();
+        let recovery_snapshot = all.recs[start..]
+            .iter()
+            .find(|r| r.kind == EventKind::STATE_SNAPSHOT)
+            .unwrap()
+            .seq;
+        let notes: Vec<_> = all.recs[start..]
+            .iter()
+            .filter_map(|r| (r.kind == EventKind::NOTE).then(|| r.read::<Note>()).flatten())
+            .filter(|n| {
+                n.code
+                    == hft_event::note_code(
+                        NoteSource::Boot,
+                        hft_sequencer::codes::boot_note::RECOVER_FROM_SNAPSHOT,
+                    )
+            })
+            .collect();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].v[0], selected);
+        assert_eq!(
+            [notes[0].v[1], notes[0].v[2]],
+            if latest {
+                [0, 0]
+            } else {
+                [selected + 1, committed_end]
+            }
+        );
+        h.run();
+        h.keyframe();
+        let setup =
+            EngineSetup::from_snapshot(&Log::from_segments(&h.j().segments), recovery_snapshot).unwrap();
+        assert!(verify_journal::<TestSet>(h.j(), &setup, Some(recovery_snapshot)).is_empty());
+        assert!(matches!(
+            H::<TestSet>::restart_over(
+                j,
+                setup,
+                plan(
+                    SnapshotSel::AtSeq(selected),
+                    true,
+                    2,
+                    RecoveryFlags::FROM_SNAPSHOT | RecoveryFlags::TAIL_LOST
+                ),
+                Rerun::default(),
+            ),
+            Err(BootError::Config(_))
+        ));
+    }
+}

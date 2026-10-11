@@ -326,6 +326,7 @@ spec: README.md
 - 期望:
   - 退出 0;前一段从 `B1` 起比对到旧段末尾,后一段从新引导块的快照重新起步
   - 后一段的状态起点是新引导块中的快照,不是旧段末尾的重放状态(在旧段尾部篡改一条 `Bbo` 后,后一段的比对结果不变)
+  - 按 10 秒间隔投递行情与校准,以 journal 的 engine_ns 验证完整的 20/10/20 min 边界;新运行重置 TSC 并使用两倍频率。Boot 注记恰一条且跳过区间匹配物理提交边界;旧段末条 BBO 加价后重算 CRC 和 seal,keep-going 必须发现旧段分歧,新段整组计数和单段独立验证与未篡改时一致;验证不改来源字节
 - 实现:`apps/replayer/tests/verify.rs::rpl_025_restart_at_recover_from_snapshot`
 
 ### RPL-026 版本变化标记的引导块处重新起步
@@ -338,6 +339,7 @@ spec: README.md
   1. `replayer verify --journal <合成>`
 - 期望:
   - 退出 0;在版本变化引导块处从其快照重新起步;两段各自一致
+  - 旧运行 20 min 后真实 Drain,尾快照用途为 Drain;HostProfile.build_git 确实变化,新运行完整 10 min,两次运行及新段单独验证均有非零输入、输出和多个快照,来源字节不变
 - 实现:`apps/replayer/tests/verify.rs::rpl_026_restart_at_version_change`
 
 ### RPL-027 分歧明细字段齐全,输入摘要以 1 000 条为上限

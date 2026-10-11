@@ -136,6 +136,8 @@ pub const fn seq_note(n: u32) -> u32 {
 
 /// Boot-source Notes the sequencer writes (Meta).
 pub mod boot_note {
+    /// `Note{Boot, RecoverFromSnapshot}` (3rd Boot name in hft-event `NOTE_NAMES`).
+    pub const RECOVER_FROM_SNAPSHOT: u32 = 3;
     /// `Note{Boot, InputQuarantined}` (5th Boot name in hft-event `NOTE_NAMES`).
     pub const INPUT_QUARANTINED: u32 = 5;
 }
