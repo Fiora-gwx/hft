@@ -94,7 +94,7 @@ pub(super) fn plan(log: &Log) -> Result<Vec<RunStart>, VerifyError> {
             {
                 for (j, r) in records.iter().enumerate().skip(done + 1) {
                     match r.role() {
-                        hft_event::Role::Output => return Err(bad(first + j)),
+                        hft_event::Role::Output | hft_event::Role::ByBody => return Err(bad(first + j)),
                         hft_event::Role::Input => {
                             if r.kind != EventKind::ENGINE_CLOCK {
                                 return Err(bad(first + j));
