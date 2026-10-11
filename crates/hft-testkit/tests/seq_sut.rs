@@ -53,7 +53,7 @@ fn tk_106_real_base_fee_and_retired_links() {
     use hft_testkit::dst::obs::{Obs, StepInfo};
     use hft_testkit::dst::seq::build;
     use hft_testkit::dst::world::{BTC, VP, VS};
-    let check = |o: &Obs| {
+    let check = |before: &Obs, o: &Obs| {
         let info = StepInfo::default();
         (checker(InvId::I8).unwrap().step)(
             &mut InvState::default(),
@@ -64,7 +64,7 @@ fn tk_106_real_base_fee_and_retired_links() {
                 delivered: None,
                 frames: &[],
                 info: &info,
-                before: o,
+                before,
                 after: o,
                 truth: &[],
                 rebuild: None,
@@ -118,20 +118,23 @@ fn tk_106_real_base_fee_and_retired_links() {
             .iter()
             .position(|l| l.fee_adjust != 0)
             .expect("no independently observed fee correction");
-        assert!(check(&r.obs).is_ok());
+        assert!(check(&r.obs, &r.obs).is_ok());
         let mut wrong = r.obs.clone();
         wrong.hedge_balances[ix].fee_adjust = 0;
-        assert!(check(&wrong).is_err(), "missing correction accepted");
+        assert!(check(&r.obs, &wrong).is_err(), "missing correction accepted");
         let mut wrong = r.obs.clone();
         wrong.hedge_balances[ix].fee_adjust *= 2;
-        assert!(check(&wrong).is_err(), "duplicate correction accepted");
+        assert!(check(&r.obs, &wrong).is_err(), "duplicate correction accepted");
         let mut wrong = r.obs.clone();
         wrong.hedge_balances[ix].residual += 1;
-        assert!(check(&wrong).is_err(), "wrong residual accepted");
+        assert!(check(&r.obs, &wrong).is_err(), "wrong residual accepted");
         let mut wrong = r.obs.clone();
         let h = wrong.hedge_history.iter_mut().find(|h| h.first_net != 0).unwrap();
         h.first_net -= 1;
-        assert!(check(&wrong).is_err(), "lost historical fill accepted");
+        assert!(check(&r.obs, &wrong).is_err(), "lost historical fill accepted");
+        let mut wrong = r.obs.clone();
+        wrong.hedge_history.clear();
+        assert!(check(&r.obs, &wrong).is_err(), "lost historical buckets accepted");
         let mut unsupported = c.world.clone();
         unsupported
             .venues

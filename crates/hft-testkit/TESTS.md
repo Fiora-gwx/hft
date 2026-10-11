@@ -1412,7 +1412,7 @@ spec: README.md
 - 前置:`SeqSut<FeeStrategies>` 与真实 SimExchange;W1 的 VS 配置 `fee_in_base = true`;测试夹具每 100 ms 发一次现货第一腿 OnFill,每单 2 个永续 lot,组现货净量达到 20 单时转卖,行情保持初始价差;50/6000 ms 延迟两行,包含槽回收与链接复用
 - 故障:`LateFeeOnly{venue = VS, delay_ms}`
 - 种子:固定种子 1
-- 断言:配置实际进入 refdata 的 VenueCaps,FeeOnly 的资产为 BTC;每行运行 10000 步且全部不变量通过;INV-8 观察包含晚到手续费补差与链接复用前的已完成累计量,不能固定 `fee_adjust = 0`;反例删除费用入账或改错余数时相应检查失败
+- 断言:配置实际进入 refdata 的 VenueCaps,FeeOnly 的资产为 BTC;每行运行 10000 步且全部不变量通过;INV-8 观察包含晚到手续费补差与链接复用前的已完成累计量,不能固定 `fee_adjust = 0`;反例漏记或重复费用补差、改错余数、减少历史成交量或删除全部历史桶时相应检查失败
 - 实现:`crates/hft-testkit/tests/seq_sut.rs::tk_106_real_base_fee_and_retired_links`
 
 ### TK-107 真实引擎逐事件观察与反例

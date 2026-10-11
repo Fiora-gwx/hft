@@ -86,4 +86,6 @@
 
 | 2026-10-11 | INV-8 按账户/组/对冲品种核对;强制目标观察读取执行层实际保存值;补真实 L3 目标反例、重复恢复累计量检查和人工保持修复的 sequencer 验证回放 | TK-106、TK-109、TK-110、SEQ-374 | crates/hft-testkit、crates/hft-exec、crates/hft-sequencer | 否 |
 
-| 2026-10-11 | 恢复后第一腿成交与 Unknown 解除同事件时不重复发 SecondRetry;INV-1 允许有成功 Cancel 决策支持的 PendingCancel 迁移;保存两条完整强度 storage 回归种子 | CI 38103614553、OMS-464、SEQ-375、TK-111 | crates/hft-oms、crates/hft-sequencer、crates/hft-testkit、docs/tests/invariants.md、fixtures/dst-seeds/storage.txt | 是 |
+| 2026-10-11 | 恢复后第一腿成交与 Unknown 解除同事件时不重复发 SecondRetry;INV-1 允许有成功 Cancel 决策支持的 PendingCancel 迁移;保存两条完整强度 storage 回归种子 | CI 38103614553、OMS-464、SEQ-375、TK-111 | crates/hft-oms、crates/hft-sequencer、crates/hft-testkit、docs/tests/invariants.md、fixtures/dst-seeds/storage.txt | 否 |
+
+| 2026-10-11 | INV-8 对相邻 Input 的退休历史检查桶存在、行唯一和累计量单调;补费用补差重复与整桶丢失反例 | TK-106,只校验两边等式不能识别两边历史一起丢失 | crates/hft-testkit、docs/tests/invariants.md | 否 |

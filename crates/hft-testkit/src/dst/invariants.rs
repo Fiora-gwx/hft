@@ -1177,6 +1177,34 @@ fn check_8(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
     if let Some(error) = &v.after.observation_error {
         return Err(error.clone());
     }
+    for before in &v.before.hedge_history {
+        let mut matching = v.after.hedge_history.iter().filter(|after| {
+            (
+                after.account,
+                after.group,
+                after.inst,
+                after.ratio_num,
+                after.ratio_den,
+            ) == (
+                before.account,
+                before.group,
+                before.inst,
+                before.ratio_num,
+                before.ratio_den,
+            )
+        });
+        let Some(after) = matching.next() else {
+            return Err("retired hedge history disappeared".into());
+        };
+        if matching.next().is_some()
+            || after.links < before.links
+            || after.first_net < before.first_net
+            || after.hedge_req < before.hedge_req
+            || after.capped < before.capped
+        {
+            return Err("retired hedge history duplicated or decreased".into());
+        }
+    }
     let mut per_group: BTreeMap<(u8, u32, u32), (i128, i128, i64)> = BTreeMap::new();
     for l in v
         .after

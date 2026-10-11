@@ -118,6 +118,7 @@
   - 对每个 (a, g) 与其对冲腿 h,只计 `HedgePlan.kind = OnFill` 且从未发出 `Reverse` 的链接,每步成立(i128 精确):Σ 链接的 `hedge_req` + Σ 被裸量上限截去的量(该 group 全部 `Note{OmsHedgeNakedCapped}` 的 `v[1] − v[2]`)+ `residual[g][h]` = Σ 链接的 `first_net` × `ratio_num / ratio_den` + Σ 本 group 经 `net_adjust` 记入余数的手续费补差
   - 每条 `HedgeRequest{role = Second}` 的 `basis` = 触发它的成交增量 `d_net`(基础资产手续费已扣除;费用未到时 = 毛量)× ratio + 发出前的 `residual`;`qty` ≤ `basis` 向零取整到对冲腿 lot;任何 `Second` 的数量都不按意图数量或毛量计算(有基础资产手续费的成交,`basis` < 毛量 × ratio)
   - 超量成交的超出部分(`FillOut.flags` 含 `OVERFILL`)不计入 `first_net`
+  - 真实引擎的退休链接历史按账户、组、对冲品种与比例累计;相邻 Input 间已有历史桶不可消失,链接数、净成交、请求量与截断量不可减少或重复成行
 - 实现:`crates/hft-testkit/src/dst/invariants.rs::inv_8_second_leg_equals_net_fill`
 - 备注:检查器 `I8`;`Simultaneous` 与发出过 `Reverse` 的链接按各自规则另由 hft-oms 属性测试覆盖;主要触发场景 B4、FP-12、LT-1
 
