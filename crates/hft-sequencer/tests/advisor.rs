@@ -689,6 +689,134 @@ fn seq_401_checkpoint_file_resume_matches_continuous_model() {
 }
 
 #[test]
+fn seq_402_each_checkpoint_releases_at_its_own_record_boundary() {
+    reset_script();
+    for s in [S1, S2] {
+        set_subs(s, vec![(A1, 0, EvMask::BBO, Part::Model)]);
+    }
+    let mut h = b0().boot();
+    h.steady();
+    let set = |h: &mut H, s, version: u64, thr: i64| {
+        let mut p = if s == S1 {
+            Spb::s1(version)
+        } else {
+            Spb::s2(version)
+        };
+        p.values[F_THR] = thr;
+        let id = h.set_params(&p);
+        h.run();
+        assert_eq!(h.result_of(id).unwrap().status, 0);
+        committed(h.j())
+            .recs
+            .iter()
+            .rev()
+            .find(|r| r.kind == EventKind::CONTROL_CMD)
+            .unwrap()
+            .seq
+    };
+    let quote = |h: &mut H| {
+        h.adv(1_000_000);
+        h.quote(A1, "50000", "50003");
+        h.run();
+    };
+    set(&mut h, S1, 7, 7);
+    set(&mut h, S2, 17, 17);
+    let c = AdvisorCfg {
+        batch: u16::MAX,
+        shard: Some(vec![S1, S2]),
+        ..cfg()
+    };
+    let mut continuous = start(&h, MemCkpt::default(), Ring::big(), c.clone());
+    catch_up(&mut continuous, &h);
+    quote(&mut h);
+    catch_up(&mut continuous, &h);
+    let first = checkpoint_now(&mut continuous).gens.remove(&S1).unwrap();
+    let l1 = first.0.last_seq;
+    quote(&mut h); // S1 must have checkpoint parameters before this event.
+    let change1 = set(&mut h, S1, 8, 8);
+    quote(&mut h);
+    catch_up(&mut continuous, &h);
+    let mut second = checkpoint_now(&mut continuous).gens.remove(&S2).unwrap();
+    let mut note = <Note as zerocopy::FromZeros>::new_zeroed();
+    note.source = NoteSource::Advisor;
+    note.code = hft_event::note_code(
+        NoteSource::Advisor,
+        hft_sequencer::codes::advisor_note::ADVISOR_STATS,
+    );
+    note.strategy = S2;
+    h.push(RingId::Advice, &note);
+    h.run();
+    // No Model event occurs between the saved state and this Meta record. A caller that
+    // records the consumed journal boundary may legitimately put last_seq here.
+    let l2 = committed(h.j())
+        .recs
+        .iter()
+        .rev()
+        .find(|r| r.kind == EventKind::NOTE && r.read::<Note>().is_some_and(|n| n.code == note.code))
+        .unwrap()
+        .seq;
+    assert!(l1 < second.0.last_seq && second.0.last_seq < l2);
+    second.0.last_seq = l2;
+    quote(&mut h); // S2 must have its own checkpoint parameters here.
+    let change2 = set(&mut h, S2, 18, 18);
+    quote(&mut h);
+    catch_up(&mut continuous, &h);
+    let expected = checkpoint_now(&mut continuous);
+    let store = MemCkpt {
+        gens: HashMap::from([(S1, first), (S2, second)]),
+        ..MemCkpt::default()
+    };
+    SCRIPT.with(|x| x.borrow_mut().model_params.clear());
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let observed = seen.clone();
+    set_mhook(move |hx, ev, _| {
+        if matches!(ev, EventRef::Bbo { .. }) {
+            let value = SCRIPT.with(|x| {
+                x.borrow()
+                    .model_params
+                    .iter()
+                    .rev()
+                    .find(|p| p.0 == hx.s.strategy)
+                    .map(|p| p.1)
+            });
+            observed.borrow_mut().push((hx.s.strategy, hx.v.now().seq, value));
+        }
+    });
+    let mut resumed = start(&h, store, Ring::big(), c);
+    catch_up(&mut resumed, &h);
+    for (s, last, change, old, new) in [(S1, l1, change1, 7, 8), (S2, l2, change2, 17, 18)] {
+        let params: Vec<_> = SCRIPT.with(|x| {
+            x.borrow()
+                .model_params
+                .iter()
+                .filter(|p| p.0 == s)
+                .map(|p| p.1)
+                .collect()
+        });
+        assert_eq!(params, vec![old, new]);
+        let want: Vec<_> = committed(h.j())
+            .recs
+            .iter()
+            .filter(|r| r.seq > last && r.kind == EventKind::BBO)
+            .filter(|r| r.read::<hft_event::Bbo>().is_some_and(|b| b.h.inst == A1))
+            .map(|r| (s, r.seq, Some(if r.seq < change { old } else { new })))
+            .collect();
+        assert!(want.iter().any(|r| r.2 == Some(old)) && want.iter().any(|r| r.2 == Some(new)));
+        assert_eq!(
+            seen.borrow()
+                .iter()
+                .filter(|r| r.0 == s)
+                .copied()
+                .collect::<Vec<_>>(),
+            want
+        );
+    }
+    let actual = checkpoint_now(&mut resumed);
+    assert_eq!(actual.gens, expected.gens);
+    assert!(h.verify().is_empty());
+}
+
+#[test]
 fn seq_047_checkpoint_discard_reasons() {
     let disc = hft_event::note_code(NoteSource::Advisor, 1);
     let reason = |a: &Adv| -> Option<u64> {

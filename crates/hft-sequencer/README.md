@@ -500,6 +500,7 @@ advice 环元素 = `AdviceHdr { strategy, account, local_kind, group, len, basis
 3. **丢弃**:任一条件不满足 → `S::create_model` 空状态起步,写 Meta `Note{source = Advisor, code = ModelCheckpointDiscarded}`(`v[0]` = strategy,`v[1]` = 原因码,码表在 hft-event);随后靠预热注入或实时样本就绪。
 4. **模型 tick 的续算**:从检查点续算时,镜像在投递 `last_seq` 之后的第一条 `Timer{Sys, AdvisorTick}` 之前,先取 journal 中 `last_seq` 及以前最近一条 `AdvisorTick` 的 UTC 作为"前一条"(SDK `model_tick` 的跨界判定),所以续算与连续运行在同一条记录上投递;`last_seq` 以前没有 `AdvisorTick` 时按 SDK 规则不投递第一条。冷启动(无检查点)从镜像起点的快照起同样按此取前一条。
 5. journal 热段保留时长应覆盖 `advisor.model_checkpoint_ms`(冷段也可读,只是更慢);追赶期间产出的 Advice 的 `basis_seq` 早于本次启动的 `EpochStart`,策略按 `basis_seq < boot_seq` 判为过期([Advice 路由](#advice-路由)),不会被当成新的。
+6. **参数边界**:有待恢复参数的 Model 时,镜像每批至多消费到其中最早的 `last_seq`,在该边界应用参数后才允许下一条 Input。不同实例按各自边界解除等待;边界恰在起点快照时先应用再处理首条后续输入,边界落在 Output/Meta 时以该前缀的 Input 全部处理完为准。批大小不改变 Model 的调用顺序或 Advice。
 
 ### 资金费合成
 

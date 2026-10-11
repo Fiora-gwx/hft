@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-12 | advisor 在最早待恢复的 Model 检查点处结束镜像批次,先应用该处参数再交付后续 Input;不同实例分开解除等待,起点快照与 Output/Meta 边界同样处理,不改 journal 或快照格式 | SDK-066 扩为 15 组批次/位置组合并检查每次回调所见参数;SEQ-402 多实例不同检查点与连续运行对照 | crates/hft-sequencer、crates/hft-strategy-sdk/TESTS.md、docs/architecture.md | 否 |
 | 2026-10-11 | StrategySet 显式导出 Model::LAYOUT_VERSION,advisor 以真实版本校验键;路径首块按版本、长度顺序写出。共用冷路径检查点编解码器验证规范文件、CRC32C、保留位与体长上限,运行期 engine_ns 从 journal 取得;真实文件恢复验证 Advice 与累计状态连续性 | SDK-065/186、SEQ-047/399–401;布局描述哈希遗漏版本升级,路径首块与文件规格顺序相反 | crates/hft-strategy-sdk、crates/hft-sequencer、相关 StrategySet 测试替身、apps/hft-core 格式规格 | 否 |
 | 2026-10-11 | Recovery 快照的 engine_ns 取已提交停止点,不读尚无新 Input 的事件上下文;覆盖重放尾部、直接恢复及指定旧快照,并在 EngineClock 之前再次崩溃、换频率恢复后逐字节回放 | CI 38149555201 的 RPL-025/026 恢复快照时间为 0;SEQ-108 | crates/hft-sequencer、docs/architecture.md | 否 |
 | 2026-10-11 | EVT-196 的分配与释放按调用线程计数,常量初始化的 TLS 排除其他测试线程活动;同线程真实分配和外部线程重叠对照验证计数器,原 1,000 次入口调用与 Linux 系统调用检查保留 | CI 38148402294 记录到无法归属调用线程的 4 次分配 | crates/hft-event | 否 |

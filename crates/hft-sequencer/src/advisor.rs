@@ -707,34 +707,55 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
             return true;
         }
         self.feed(log);
+        // A checkpoint may be exactly at the mirror's starting snapshot. Its parameters
+        // must be applied before the first following event, not at the end of that batch.
+        let released = self.release_holds(self.mirror.e.cur_seq);
+        let boundary = self
+            .mirror
+            .inst
+            .models
+            .slots
+            .iter()
+            .filter_map(|m| (m.hold_until != 0).then_some(m.hold_until))
+            .min();
+        let end = self.mirror.drv.end;
+        if let Some(at) = boundary {
+            // Restrict Input delivery only; the last event still finishes all of its Outputs.
+            self.mirror.drv.end = end.min(self.mirror.drv.sink.log.recs.partition_point(|r| r.seq <= at));
+        }
         let before = self.mirror.drv.handed;
         let out = self.mirror.step();
+        let reached = boundary.filter(|_| self.mirror.drv.finished());
+        self.mirror.drv.end = end;
         let progressed = self.mirror.drv.handed != before;
         if matches!(out, StepOutcome::Fatal(_)) {
             return false;
         }
-        // Checkpoint holds release: models catching up get the parameters of last_seq once.
-        self.release_holds();
+        // Meta/Output records after the last Input do not advance e.cur_seq, but they also
+        // cannot change the parameters. Exhausting this prefix reaches their boundary too.
+        let released = self.release_holds(reached.unwrap_or(self.mirror.e.cur_seq)) || released;
         self.drain_mirror();
         self.lag(log);
         self.maybe_checkpoint();
         self.flush();
-        progressed
+        progressed || released
     }
 
-    fn release_holds(&mut self) {
+    fn release_holds(&mut self, through: u64) -> bool {
         let Sequencer { e, inst, .. } = &mut self.mirror;
+        let mut released = false;
         for ix in 0..inst.models.slots.len() {
             let held = inst
                 .models
                 .slots
                 .get(ix)
-                .is_some_and(|m| m.hold_until != 0 && e.cur_seq >= m.hold_until);
+                .is_some_and(|m| m.hold_until != 0 && through >= m.hold_until);
             if !held {
                 continue;
             }
             if let Some(m) = inst.models.slots.get_mut(ix) {
                 m.hold_until = 0;
+                released = true;
             }
             // `model_on_params` once with the parameters in effect at last_seq.
             let Some(sl) = inst.slots.get(ix) else { continue };
@@ -746,6 +767,7 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
                 let _ = S::model_on_params(m, &p.params, &p.groups, &rv);
             }
         }
+        released
     }
 
     fn drain_mirror(&mut self) {

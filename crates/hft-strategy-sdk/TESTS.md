@@ -1011,11 +1011,12 @@ spec: README.md
 - 规则:[Model 检查点](README.md#model-检查点)
 - 级别:integ
 - 里程碑:M2
-- 前置:同 SDK-065(检查点之前 `SetParams{version = 7}` 生效);检查点之后 `SetParams{version = 8}`(`thr = 8`)再一条 I1 Bbo
+- 前置:同 SDK-065(检查点之前 `SetParams{version = 7}` 生效);检查点之前的 I1 Bbo 数分别为 0、3、17,每行 advisor batch 取 1、2、7、64、65535;检查点之后三条 I1 Bbo,再 `SetParams{version = 8}`(`thr = 8`)及一条 I1 Bbo
 - 步骤:
   1. 以该检查点重启 advisor,追到 journal 尾
 - 期望:
   - `RecModel` 的调用顺序:`create_model`(空状态)、`restore`、`restore_path`、`on_params(version 7)`,`on_params(version 8)`;`on_event` 恰为 seq > L 的全部 I1 Bbo(含 version 8 之后的那条),没有 seq ≤ L 的 `on_event`
+  - 每条 Bbo 的 Model 回调执行前,最近应用参数为其 seq 处的版本;15 组组合均不因批处理越过检查点而晚调、漏调或重复调用;引擎 journal 严格回放无分歧
 - 实现:`crates/hft-sequencer/tests/sdk_contract/checkpoint.rs::sdk_066_restore_order`
 
 ### SDK-067 追赶期间产出的 Advice 依据上次启动的记录,`basis_seq < boot_seq`

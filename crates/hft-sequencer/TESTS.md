@@ -33,7 +33,7 @@ spec: README.md
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
 | advisor 与 Model | SEQ-030–SEQ-044、SEQ-290、SEQ-367 |
-| 模型检查点 | SEQ-045–SEQ-051、SEQ-363、SEQ-399–SEQ-401 |
+| 模型检查点 | SEQ-045–SEQ-051、SEQ-363、SEQ-399–SEQ-402 |
 | 资金费合成 | SEQ-092、SEQ-192–SEQ-196、SEQ-361 |
 | 模式与 cap 的驱动 | SEQ-132、SEQ-183、SEQ-197–SEQ-213、SEQ-342、SEQ-353、SEQ-368 |
 | 模拟账户 | SEQ-067、SEQ-179、SEQ-201、SEQ-214–SEQ-217、SEQ-298 |
@@ -5559,6 +5559,16 @@ spec: README.md
 - 步骤:消费 8 条 BBO 后分块生成检查点,编码并写入临时文件;重新读取、解码,从 journal 取得 last_seq 的 engine_ns,装配另一个 advisor;两路各处理相同的后续 20 条 BBO
 - 期望:文件首块为版本后长度,样本累计量非零且恢复时不重复消费前缀;后续 20 条 Advice 的完整头和载荷逐字节相等,累计状态及下一份检查点一致;原文件未改变,引擎 journal 验证无分歧
 - 实现:`crates/hft-sequencer/tests/advisor.rs::seq_401_checkpoint_file_resume_matches_continuous_model`
+
+### SEQ-402 不同 Model 在各自检查点边界应用参数
+
+- 规则:[模型检查点](README.md#模型检查点)
+- 级别:integ
+- 里程碑:M2
+- 前置:B0 的 s1、s2 都订阅 a1 的 Model BBO;初始参数阈值分别 7、17;advisor batch = 65535
+- 步骤:先保存 s1 的检查点,投递一条 BBO、将 s1 参数改为 8、再投递 BBO;随后保存 s2 的检查点,把未改变 Model 状态的末条 AdvisorStats Meta 作为其 last_seq;再投递 BBO、将 s2 参数改为 18、再投递 BBO。两个 Model 从这两份不同边界的检查点共同恢复
+- 期望:两实例的参数调用分别恰为 7→8、17→18;每条回调仅在本实例 last_seq 之后,看到该事件生效参数;Meta 边界不使追赶卡住或越过下一 Input;最终检查点与不中断运行一致,引擎 journal 严格回放无分歧
+- 实现:`crates/hft-sequencer/tests/advisor.rs::seq_402_each_checkpoint_releases_at_its_own_record_boundary`
 
 ## 验收
 

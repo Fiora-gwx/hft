@@ -57,6 +57,10 @@ fn ck_script() {
 }
 
 fn ck() -> Ck {
+    ck_with_prefix(3)
+}
+
+fn ck_with_prefix(prefix: u32) -> Ck {
     let b = b_gt3();
     ck_script();
     let mut h = b.boot();
@@ -66,7 +70,7 @@ fn ck() -> Ck {
     let id = h.set_params(&p);
     h.run();
     assert_eq!(h.res(id), (status::APPLIED, 0));
-    for k in 0..3 {
+    for k in 0..prefix {
         h.quote(A1, "50000", &format!("{}", 50_002 + k));
         h.run();
     }
@@ -312,60 +316,87 @@ fn sdk_065_checkpoint_key_matrix() {
 
 #[test]
 fn sdk_066_restore_order() {
-    let mut c = ck();
-    let mut p = gt3(8);
-    p.values[F_THR] = 8;
-    let m8 = c.h.mark();
-    let id = c.h.set_params(&p);
-    c.h.run();
-    assert_eq!(c.h.res(id), (status::APPLIED, 0));
-    let seq8 =
-        c.h.kinds_since(m8, EventKind::CONTROL_CMD)
-            .last()
-            .map(|r| r.seq)
-            .expect("SetParams");
-    c.h.quote(A1, "50000", "50020");
-    c.h.run();
-    SCRIPT.with(|x| x.borrow_mut().model_params.clear());
-    clear_log();
-    let st = store_of(&c, |_| {});
-    let (_a, c0) = restart(&c, st);
-    let calls = model_calls(c0);
-    assert_eq!(
-        calls,
-        vec![
-            "create_model",
-            "model_restore",
-            "model_restore_path",
-            "model_on_params",
-            "model_on_params"
-        ]
-    );
-    let mp: Vec<i64> = SCRIPT.with(|x| {
-        x.borrow()
-            .model_params
-            .iter()
-            .filter(|p| p.0 == S1)
-            .map(|p| p.1)
-            .collect()
-    });
-    assert_eq!(mp, vec![7, 8]);
-    // Only records after last_seq reach the Model: the a1 Bbos after it, in order.
-    let bbos: Vec<u64> = committed(c.h.j())
-        .recs
-        .iter()
-        .filter(|r| r.kind == EventKind::BBO && r.seq > c.last)
-        .filter(|r| r.read::<hft_event::Bbo>().is_some_and(|b| b.h.inst == A1))
-        .map(|r| r.seq)
-        .collect();
-    let got: Vec<u64> = model(S1)
-        .iter()
-        .filter(|g| g.kind == "Bbo")
-        .map(|g| g.now.seq)
-        .collect();
-    assert_eq!(got, bbos);
-    assert!(got.iter().all(|s| *s > c.last));
-    assert!(got.iter().any(|s| *s > seq8));
+    for batch in [1, 2, 7, 64, u16::MAX] {
+        for prefix in [0, 3, 17] {
+            let mut c = ck_with_prefix(prefix);
+            let mut p = gt3(8);
+            p.values[F_THR] = 8;
+            let m8 = c.h.mark();
+            let id = c.h.set_params(&p);
+            c.h.run();
+            assert_eq!(c.h.res(id), (status::APPLIED, 0));
+            let seq8 =
+                c.h.kinds_since(m8, EventKind::CONTROL_CMD)
+                    .last()
+                    .map(|r| r.seq)
+                    .expect("SetParams");
+            c.h.quote(A1, "50000", "50020");
+            c.h.run();
+            SCRIPT.with(|x| x.borrow_mut().model_params.clear());
+            clear_log();
+            let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let observed = seen.clone();
+            set_mhook(move |hx, ev, _| {
+                if hx.s.strategy == S1 && matches!(ev, EventRef::Bbo { .. }) {
+                    let value = SCRIPT.with(|x| {
+                        x.borrow()
+                            .model_params
+                            .iter()
+                            .rev()
+                            .find(|p| p.0 == S1)
+                            .map(|p| p.1)
+                    });
+                    observed.borrow_mut().push((hx.v.now().seq, value));
+                }
+            });
+            let st = store_of(&c, |_| {});
+            let c0 = calls().len();
+            let mut a = adv_with(&c.h, st, AdvisorCfg { batch, ..adv_cfg() });
+            catch_up(&mut a, &c.h);
+            let calls = model_calls(c0);
+            assert_eq!(
+                calls,
+                vec![
+                    "create_model",
+                    "model_restore",
+                    "model_restore_path",
+                    "model_on_params",
+                    "model_on_params"
+                ]
+            );
+            let mp: Vec<i64> = SCRIPT.with(|x| {
+                x.borrow()
+                    .model_params
+                    .iter()
+                    .filter(|p| p.0 == S1)
+                    .map(|p| p.1)
+                    .collect()
+            });
+            assert_eq!(mp, vec![7, 8]);
+            // Only records after last_seq reach the Model: the a1 Bbos after it, in order.
+            let bbos: Vec<u64> = committed(c.h.j())
+                .recs
+                .iter()
+                .filter(|r| r.kind == EventKind::BBO && r.seq > c.last)
+                .filter(|r| r.read::<hft_event::Bbo>().is_some_and(|b| b.h.inst == A1))
+                .map(|r| r.seq)
+                .collect();
+            let got: Vec<u64> = model(S1)
+                .iter()
+                .filter(|g| g.kind == "Bbo")
+                .map(|g| g.now.seq)
+                .collect();
+            assert_eq!(got, bbos);
+            assert!(got.iter().all(|s| *s > c.last));
+            assert!(got.iter().any(|s| *s > seq8));
+            let expected: Vec<_> = bbos
+                .iter()
+                .map(|&seq| (seq, Some(if seq < seq8 { 7 } else { 8 })))
+                .collect();
+            assert_eq!(*seen.borrow(), expected, "batch={batch} prefix={prefix}");
+            assert!(c.h.verify().is_empty());
+        }
+    }
 }
 
 #[test]
