@@ -11,6 +11,7 @@
 //! the published journal, cold-start from it (`BootSource::Journal`), then the restart prologue
 //! (connections, `ClockOk`, kill self-test).
 
+pub mod audit;
 pub mod build;
 pub mod io;
 pub mod matcher;
@@ -170,6 +171,7 @@ impl<S: StrategySet> SeqSut<S> {
         let mut last = StepOutcome::Idle;
         for _ in 0..MAX_ROUNDS {
             last = self.s_mut().step();
+            self.io().audit.commit();
             self.record_state();
             match last {
                 StepOutcome::Busy => {}
@@ -517,8 +519,11 @@ impl<S: StrategySet> SeqSut<S> {
         self.carry.dup_base += st.dup;
         self.carry.stale_gen_base += st.stale_gen;
         let drv = s.into_driver();
+        let mut audit = drv.io.audit;
         let mut j = drv.io.j;
         let keep = j.committed;
+        let committed_seq = j.records().take(keep).last().map_or(0, |r| r.seq);
+        audit.restart(committed_seq);
         let mut n = 0usize;
         for seg in j.segments.iter_mut() {
             let room = keep.saturating_sub(n);
@@ -538,6 +543,7 @@ impl<S: StrategySet> SeqSut<S> {
             JOURNALS.with(|x| x.borrow_mut().push(j.clone()));
         }
         let mut io = self.new_io(now, clock);
+        io.audit = audit;
         io.epoch0 = (self.epoch & 0x7FFF) as u16;
         io.old = Some(Log::from_segments(&j.segments));
         j.truncate_to_event_end();
@@ -582,7 +588,7 @@ impl<S: StrategySet> Sut for SeqSut<S> {
             )));
         }
         let w = ctx.world.clone();
-        let rd_blob = build::refdata_blob(&w, false);
+        let rd_blob = build::refdata_blob(&w, false).map_err(BootFail)?;
         let rd = build::load_refdata(&rd_blob).map_err(BootFail)?;
         let configs = build::config_set::<S>(&w, &rd, rd_blob).map_err(BootFail)?;
         let setup = build::engine_setup(&w, ctx.tsc_hz, 1);

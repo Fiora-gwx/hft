@@ -24,16 +24,9 @@ use crate::dst::obs::{
 use crate::dst::seq::SeqSut;
 use crate::dst::sut::{InputRec, StepOut};
 
-/// First leg of a link instance: (venue, account, slot, gen).
-pub type LinkFirst = (u8, u8, u32, u32);
-
 /// State carried across steps by the adapter.
 #[derive(Clone, Debug, Default)]
 pub struct Carry {
-    /// Σ (`OmsHedgeNakedCapped` v[1] − v[2]) per link instance: (link id, first leg
-    /// (venue, account, slot, gen)). A group's `LegRow.naked_capped` sums the links it currently
-    /// has, like the link sums INV-8 compares it with.
-    pub naked_capped: BTreeMap<(u32, LinkFirst), i128>,
     /// `OmsStats` dup / stale-gen counts of the engine instances before the last restart (the
     /// counters are not in the snapshot; the observed values stay monotonic across restarts).
     pub dup_base: u64,
@@ -135,17 +128,6 @@ pub fn step_info<S: StrategySet>(s: &mut SeqSut<S>, before: &Before, out: &mut S
         let Some(n) = r.try_read::<Note>() else { continue };
         let name = note_name(n.code);
         let account = account_of_group(s, n.group);
-        if name == "OmsHedgeNakedCapped" {
-            let d = i128::from(n.v[1] as i64) - i128::from(n.v[2] as i64);
-            let id = n.v[0] as u32;
-            if let Some(l) = s.s().engine().oms.link(id).filter(|l| l.link_id == id) {
-                let f = l.first;
-                *s.carry
-                    .naked_capped
-                    .entry((id, (f.venue.0, f.account.0, f.slot, f.r#gen)))
-                    .or_default() += d;
-            }
-        }
         out.info.notes.push(NoteInfo {
             seq: r.seq,
             name,
@@ -216,6 +198,9 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
     let seq = s.s();
     let e = seq.engine();
     let w = &s.world;
+    let audit = &seq.driver().io.audit.history;
+    o.hedge_history.extend(audit.retired.values().cloned());
+    o.observation_error.clone_from(&audit.error);
     let hz = u128::from(s.tsc_hz.max(1));
     let ens = |tsc: u64| i64::try_from(u128::from(tsc) * 1_000_000_000 / hz).unwrap_or(i64::MAX);
     // Ledger.
@@ -418,18 +403,12 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
             naked_sell: 0,
             max_pos_qty: g.max_pos_qty,
             residual: v.leg.get(hedge).map_or(0, |t| i128::from(t.residual.0)),
-            fee_adjust: 0,
-            naked_capped: o
-                .links
-                .iter()
-                .filter(|l| l.account == g.account && l.group == g.group)
-                .filter_map(|l| {
-                    let f = e.oms.link(l.id)?.first;
-                    s.carry
-                        .naked_capped
-                        .get(&(l.id, (f.venue.0, f.account.0, f.slot, f.r#gen)))
-                })
-                .sum(),
+            fee_adjust: audit
+                .fees
+                .get(&(g.account.0, g.group.0, legs_of(s, g.group)[hedge].0))
+                .copied()
+                .unwrap_or(0),
+            naked_capped: audit.capped(g.account, g.group),
             inflight_immediate: imm,
         });
         o.limits.push(LimitRow {

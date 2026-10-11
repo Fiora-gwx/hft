@@ -138,5 +138,17 @@ fn tk_070_checkers_read_only() {
         );
         assert_eq!(ra.outputs(), rb.outputs(), "seed {s}: intent streams equal");
         assert_eq!(ra.trail, rb.trail, "seed {s}: hash trails equal");
+        #[cfg(feature = "seq")]
+        {
+            type E = hft_testkit::dst::SeqSut<hft_testkit::strategies::TestStrategies>;
+            let (ra, rb) = (run_record::<E>(&a), run_record::<E>(&b));
+            assert!(ra.outcome.is_pass(), "real engine seed {s}: {:?}", ra.outcome);
+            assert_eq!(
+                ra.outputs(),
+                rb.outputs(),
+                "real engine seed {s}: intent streams equal"
+            );
+            assert_eq!(ra.trail, rb.trail, "real engine seed {s}: hash trails equal");
+        }
     }
 }

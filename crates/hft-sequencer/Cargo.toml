@@ -17,6 +17,7 @@ workspace = true
 live = ["hft-journal/writer"]
 # Test hooks (call trace, state access); only enabled from [dev-dependencies] (cargo xtask deps rule 12).
 testing = []
+testkit = ["hft-oms/testkit"]
 
 [dependencies]
 hft-types.workspace = true

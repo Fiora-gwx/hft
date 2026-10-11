@@ -17,6 +17,8 @@ workspace = true
 # State hooks for this crate's own tests (put a slot into a given state, read private fields);
 # only enabled from [dev-dependencies] (cargo xtask deps rule 12).
 testing = []
+# Read-only, bounded diagnostics for the DST verification binary; absent in production.
+testkit = []
 
 [dependencies]
 hft-types.workspace = true

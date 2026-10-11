@@ -1000,6 +1000,9 @@ pub fn inv_8_second_leg_equals_net_fill() -> Scenario {
 }
 
 fn check_8(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
+    if let Some(error) = &v.after.observation_error {
+        return Err(error.clone());
+    }
     let mut per_group: BTreeMap<(u8, u32), (i128, i128, i64)> = BTreeMap::new();
     for l in v
         .after
@@ -1013,6 +1016,16 @@ fn check_8(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
         e.0 += l.hedge_req * i128::from(l.ratio_den.max(1));
         e.1 += l.first_net * i128::from(l.ratio_num);
         e.2 = l.ratio_den.max(1);
+    }
+    for h in &v.after.hedge_history {
+        let e = per_group
+            .entry((h.account.0, h.group.0))
+            .or_insert((0, 0, h.ratio_den.max(1)));
+        if e.2 != h.ratio_den.max(1) {
+            return Err("OnFill history has incompatible ratio denominators".into());
+        }
+        e.0 += h.hedge_req * i128::from(h.ratio_den.max(1));
+        e.1 += h.first_net * i128::from(h.ratio_num);
     }
     for ((a, g), (req_den, net_num, den)) in per_group {
         let Some(leg) = v.after.leg(AccountId(a), GroupId(g)) else {

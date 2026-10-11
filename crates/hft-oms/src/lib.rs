@@ -19,6 +19,8 @@
 #[cfg(target_endian = "big")]
 compile_error!("hft-oms: snapshot rows are little-endian only");
 
+#[cfg(feature = "testkit")]
+pub mod audit;
 mod config;
 mod engine;
 mod external;
@@ -87,6 +89,8 @@ pub(crate) struct LinkAux {
 /// The order management system (one instance, owned by the sequencer thread).
 #[derive(Debug)]
 pub struct Oms {
+    #[cfg(feature = "testkit")]
+    pub(crate) audit: audit::Audit,
     pub(crate) p: Params,
     pub(crate) engine_epoch: u32,
     pub(crate) venue_ix: [u8; 256],
@@ -259,6 +263,8 @@ impl Oms {
         let n_tables = venues.len() * n_accounts;
         let max_groups = cfg.max_groups as usize;
         Ok(Oms {
+            #[cfg(feature = "testkit")]
+            audit: audit::Audit::new(n_links.max(1), 4 * total_slots + 2 * n_links + 64),
             engine_epoch: cfg.engine_epoch,
             venue_ix,
             n_accounts,

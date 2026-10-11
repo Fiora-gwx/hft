@@ -383,6 +383,8 @@ g. rep-sim ≤ sim_max_per_round
 
 ### 每条 Input 的处理顺序(`process`)
 
+`testkit` feature 在每条实际 Input 的分派前与完成后向驱动提供只读观察,包含实盘驱动生成的定时器;观察不进入 journal、快照与生产构建。驱动只读业务状态,诊断缓冲丢失须使 DST 失败。验收归 [TK-070](../hft-testkit/TESTS.md#tk-070-每步只读访问调试视图) 与 [TK-106](../hft-testkit/TESTS.md#tk-106-真实引擎的基础币费用配置与对冲余数观察)。
+
 1. `seq = journal.append(flags, slot.tsc, body)`——**先记录,后生效**;seq 只取自写者返回值;`slot.tsc` 是驱动交出该条时的 TSC(实盘)或日志值,批内没有排队等待,所以 `ingest`(`proc_tsc − rx_tsc`)含环内排队、`decide` 从这里开始([latency-budget](../../docs/latency-budget.md))。
 2. 过期检查(仅 `ControlCmd`):`hdr.tsc > expires_tsc` → 只写 `CmdResult{Expired}`。
 3. **引擎处理**(按 kind 分派,见下表):更新簿、OMS、ledger、风控;OMS 的第二腿/重试/反向单经意图管线出决策(对冲快路径排在本步最前);执行层按其[调用顺序](../hft-exec/README.md)更新进度;待投递给策略的通知进 `NotifyQueue`(固定容量 128 = OMS 16 + 执行层 8 + 风控 8 + 模式 64 + 行情订阅 8 + 其他 24,编译期断言;某分区满时其后的通知按产生顺序进 `NotifyBacklog`,**从不丢弃**,见[通知队列与续推](#通知队列与续推))。

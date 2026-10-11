@@ -76,6 +76,9 @@ pub trait Driver<S: StrategySet> {
     fn roll_info(&mut self) -> RollInfo;
     fn host_profile(&self) -> HostProfile;
     fn clock_status(&self) -> ClockStatus;
+    /// Immutable diagnostic views around each Input; compiled out of production.
+    #[cfg(feature = "testkit")]
+    fn observe_input(&mut self, _e: &Engine, _input: &InputSlot, _before: bool) {}
     /// `boot(Journal)`: the logged records to start from (live: the old journal of this
     /// instance, already truncated by hft-journal `open`; verify/mirror: their own log).
     fn start_log(&mut self) -> Option<replay::Log>;

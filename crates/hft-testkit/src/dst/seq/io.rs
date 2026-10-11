@@ -28,6 +28,7 @@ pub struct Elem {
 
 /// The live environment of one engine instance.
 pub struct DstIo<S: StrategySet> {
+    pub audit: super::audit::Audit,
     pub drv: DstDriver,
     pub j: MemJournal,
     pub rings: BTreeMap<RingKey, VecDeque<Elem>>,
@@ -81,6 +82,7 @@ impl<S: StrategySet> core::fmt::Debug for DstIo<S> {
 impl<S: StrategySet> DstIo<S> {
     pub fn new(drv: DstDriver, venues: Vec<VenueId>, clock: SegClock, utc0: i64) -> DstIo<S> {
         DstIo {
+            audit: super::audit::Audit::default(),
             j: MemJournal::new(clock),
             calib: CalibPair {
                 tsc: Tsc(clock.calib_tsc),
@@ -118,6 +120,13 @@ impl<S: StrategySet> DstIo<S> {
 }
 
 impl<S: StrategySet> LiveIo<S> for DstIo<S> {
+    fn observe_input(&mut self, e: &hft_sequencer::Engine, input: &InputSlot, before: bool) {
+        if before {
+            self.audit.before(e, input);
+        } else {
+            self.audit.after(e);
+        }
+    }
     type J = MemJournal;
     fn journal(&mut self) -> &mut MemJournal {
         &mut self.j

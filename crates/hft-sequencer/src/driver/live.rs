@@ -64,6 +64,8 @@ pub trait LiveIo<S: StrategySet> {
     fn roll_info(&mut self) -> RollInfo;
     fn host_profile(&self) -> HostProfile;
     fn clock_status(&self) -> ClockStatus;
+    #[cfg(feature = "testkit")]
+    fn observe_input(&mut self, _e: &crate::Engine, _input: &InputSlot, _before: bool) {}
     /// UTC of a TSC (TscClock calibration).
     fn utc_of(&self, t: Tsc) -> i64;
     /// Called after every hand-over (test hook for arrivals "during processing").
@@ -1015,6 +1017,10 @@ impl<S: StrategySet, IO: LiveIo<S>> Driver<S> for LiveDriver<S, IO> {
 
     fn clock_status(&self) -> ClockStatus {
         self.io.clock_status()
+    }
+    #[cfg(feature = "testkit")]
+    fn observe_input(&mut self, e: &crate::Engine, input: &InputSlot, before: bool) {
+        self.io.observe_input(e, input, before);
     }
 
     fn start_log(&mut self) -> Option<super::replay::Log> {

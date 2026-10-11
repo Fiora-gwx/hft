@@ -85,6 +85,11 @@ pub(crate) fn process_parts<D: Driver<S>, S: StrategySet>(
         e.now = e.now_of(slot.tsc, s.0);
     }
     e.trig = trig_of(slot, s.0);
+    #[cfg(feature = "testkit")]
+    {
+        e.oms.audit_begin();
+        drv.observe_input(e, slot, true);
+    }
     let mut p = Pending::default();
     // 2./3. per kind.
     dispatch(e, inst, drv, slot, &mut p)?;
@@ -113,6 +118,8 @@ pub(crate) fn process_parts<D: Driver<S>, S: StrategySet>(
     crate::subs::position_changed(e, inst);
     crate::commands::drain_check(e, inst, drv)?;
     finish_event(e, drv, slot.tsc)?;
+    #[cfg(feature = "testkit")]
+    drv.observe_input(e, slot, false);
     Ok(())
 }
 

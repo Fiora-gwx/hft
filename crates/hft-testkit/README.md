@@ -244,6 +244,8 @@ DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xt
 
 `SeqSut::observe` 按 OMS 的有效槽号 `1..=n_slots` 抄录每张表的占用槽与墓碑,包含最后一个槽;槽 0 不进入观察结果。`Obs.tables` 的 `free` 与 `Obs.slots` 的同表占用数相加等于 `capacity`(TK-101)。墓碑包括已回收为 Free 的槽当前代数,以及按 OMS 配置保留的此前代数;代数回绕时跳过保留值 0(TK-102)。
 
+`fee_in_base` 在真实引擎与 SimExchange 使用同一份世界配置:现货 venue 的全部 inst 共用一个基础资产时映射为 `Configured(asset)`,买卖均扣该资产;永续、多基础资产或空 venue 拒绝启动。INV-8 的费用补差从 Input 与事件前的完整订单身份、group 和对冲计划独立计算。链接以第一腿 epoch/slot/gen 与创建事件区分,复用前的累计量按 group、对冲腿与比例归并到 `Obs.hedge_history`,不混入当前链接;重启沿已提交 journal 边界延续观察。诊断缓冲有界,溢出使检查失败(TK-106)。
+
 ### 7. 状态哈希对比
 
 ```rust
@@ -414,7 +416,7 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 - 控制面(tokio 的 ctl-gateway 客户端侧)的网络混沌不在本框架;需要时用 `turmoil` 单独测。
 - 多进程场景(可选扩展:hft-core ↔ chain-core)只在集成环境测;DST 以 `SeqActor` + 真实 `ChainSeq` 同进程模拟链路。
 - `MockVenue` 的交易所行为层是"规格中的交易所",与真实交易所的差异只能由金样、测试网/模拟盘联调与正式实盘的运行监控发现。
-- 真实 `SeqSut` 的世界 refdata 固定 `FeeAssetRule::Quote`,`WorldSpec` 的 `fee_in_base` 尚未映射到 VenueCaps;真实引擎的基础币晚到费用与 INV-8 手续费余数、链接复用累计量观察待 [TK-106](TESTS.md#tk-106-真实引擎的基础币费用配置与对冲余数观察)。TK-103/104 只覆盖框架撮合与检查器的基础币分支,不作为真实引擎该路径的验收。
+- 真实 `SeqSut` 的基础币费用仅支持同一现货 venue 共用基础资产的世界;多基础资产与永续的该配置拒绝启动(TK-106)。
 - 当前构建:引擎适配器 `SeqSut<S>`(`src/dst/seq/`,feature `seq`)是三个 DST 入口的引擎:真实 sequencer 跑在实盘驱动上(`DstIo` 实现 `LiveIo`:环中放 World 交出的 Input,TSC = `DstDriver::stamp()`,出环帧进 `DstDriver` 的收集缓冲,journal 是 sequencer 的 `MemJournal`;启动与每次重启后以一段固定的启动输入走完闸门;Drain 完成(`Done`)后的重启从已 publish 的 journal 起步,与 hft-core 的 `seal_and_close` 之后重启相同;gw 角色的接收时间戳、epoch 与查询回执的 client id 由 `DstIo`/`SimMatcher` 补上),`Matcher` 为 `SimMatcher`(`hft_sim::SimExchange` 适配,私有 refdata 中所有账户为 Sim 账户,外来成交经 `SimExchange::external_fill` 计入真值),`observe` 抄录 ledger 持仓/库存/余额与外来成交去重键、OMS 槽/表/墓碑/链接/LegTracker(计数跨重启单调)与 world 限额;`StepView::input()` 取 World 交出的那条 Input(实盘驱动在它之前自己写出的到期定时器等不算)。risk 的 cap/cell/kill、执行层 cell、保证金分档、在途行与逐笔决策事实(`DecisionInfo`)组件尚无公开视图,这些行留空,读它们的检查器(INV-4 的 Open 部分、INV-5、INV-11、INV-12 的模式部分、INV-15、INV-17、INV-18、INV-19、INV-20)对真实引擎空过;`toy::PLANTED` 各行的真实引擎版本(各 crate 的 `planted-*` feature)、`run_sim_case`(TK-009)、`ProbeBuild` 注入(TK-095)与模板探针的构建检查(TK-042)未落地(TK-053 仍以 `ToyEngine` 运行);`hft-dst` 的 `SIGINT`/`SIGTERM` 处理属 M6。
 
 ### 开发备忘

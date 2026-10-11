@@ -133,6 +133,20 @@ pub struct LinkRow {
     pub has_unknown: bool,
 }
 
+/// Completed OnFill links aggregated by hedge leg and ratio, outside the active link table.
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub struct HedgeHistoryRow {
+    pub account: AccountId,
+    pub group: GroupId,
+    pub inst: InstId,
+    pub ratio_num: i64,
+    pub ratio_den: i64,
+    pub first_net: i128,
+    pub hedge_req: i128,
+    pub capped: i128,
+    pub links: u64,
+}
+
 /// LegTracker row of one (account, group).
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct LegRow {
@@ -369,6 +383,9 @@ pub struct Obs {
     pub tables: Vec<SlotTableRow>,
     pub tombs: Vec<TombRow>,
     pub links: Vec<LinkRow>,
+    pub hedge_history: Vec<HedgeHistoryRow>,
+    /// A diagnostic loss is a failed observation, never an empty successful check.
+    pub observation_error: Option<String>,
     pub legs: Vec<LegRow>,
     /// `OmsStats` dup and stale-gen counters.
     pub oms_dup: u64,

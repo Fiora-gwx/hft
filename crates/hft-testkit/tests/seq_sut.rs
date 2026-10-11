@@ -46,6 +46,108 @@ fn tk_105_real_engine_late_fee() {
 }
 
 #[test]
+fn tk_106_real_base_fee_and_retired_links() {
+    use hft_event::{OrderAction, OrderDecision, OrderEvent, OrderEventKind};
+    use hft_refdata::FeeAssetRule;
+    use hft_testkit::dst::faults::Fault;
+    use hft_testkit::dst::invariants::{InvId, InvState, StepView, checker};
+    use hft_testkit::dst::obs::{Obs, StepInfo};
+    use hft_testkit::dst::seq::build;
+    use hft_testkit::dst::world::{BTC, VP, VS};
+    let check = |o: &Obs| {
+        let info = StepInfo::default();
+        (checker(InvId::I8).unwrap().step)(
+            &mut InvState::default(),
+            &StepView {
+                step: 0,
+                now_ns: 0,
+                records: &[],
+                delivered: None,
+                frames: &[],
+                info: &info,
+                before: o,
+                after: o,
+                truth: &[],
+                rebuild: None,
+            },
+        )
+    };
+    for delay_ms in [50, 6_000] {
+        let mut c = cfg(1, 10_000, &[], 0, &[]);
+        c.world
+            .venues
+            .iter_mut()
+            .find(|v| v.id == VS)
+            .unwrap()
+            .fee_in_base = true;
+        for all_sim in [false, true] {
+            let rd = build::load_refdata(&build::refdata_blob(&c.world, all_sim).unwrap()).unwrap();
+            assert_eq!(rd.caps(VS).fee_asset_rule, FeeAssetRule::Configured(BTC));
+        }
+        c.scripted.push((0, Fault::LateFeeOnly { venue: VS, delay_ms }));
+        let r = run_record::<E>(&c);
+        assert!(r.outcome.is_pass(), "delay={delay_ms}: {}", show(&r));
+        assert_eq!(r.steps_run, c.steps);
+        let fees: Vec<_> = r
+            .journal
+            .iter()
+            .filter_map(|j| j.try_read::<OrderEvent>())
+            .filter(|e| e.what == OrderEventKind::FeeOnly)
+            .collect();
+        assert_eq!(fees.len(), 1, "delay={delay_ms}: fee fault must be delivered");
+        assert!(fees[0].fee.0 > 0);
+        assert_eq!(fees[0].fee_asset, BTC);
+        let orders: Vec<_> = r
+            .journal
+            .iter()
+            .filter_map(|j| j.try_read::<OrderDecision>())
+            .filter(|d| d.action == OrderAction::New && d.reject == 0 && d.venue == VS)
+            .collect();
+        for side in [hft_types::Side::Buy, hft_types::Side::Sell] {
+            assert!(
+                orders.iter().any(|d| d.side == side),
+                "base fee must cover {side:?}"
+            );
+        }
+        assert!(orders.iter().any(|d| d.r#gen > 1), "no recycled slot used");
+        assert!(
+            r.obs.hedge_history.iter().any(|h| h.links > 0),
+            "no retired link observed"
+        );
+        let ix = r
+            .obs
+            .legs
+            .iter()
+            .position(|l| l.fee_adjust != 0)
+            .expect("no independently observed fee correction");
+        assert!(check(&r.obs).is_ok());
+        let mut wrong = r.obs.clone();
+        wrong.legs[ix].fee_adjust = 0;
+        assert!(check(&wrong).is_err(), "missing correction accepted");
+        let mut wrong = r.obs.clone();
+        wrong.legs[ix].residual += 1;
+        assert!(check(&wrong).is_err(), "wrong residual accepted");
+        let mut wrong = r.obs.clone();
+        let h = wrong.hedge_history.iter_mut().find(|h| h.first_net != 0).unwrap();
+        h.first_net += 1;
+        assert!(check(&wrong).is_err(), "lost historical fill accepted");
+        let mut unsupported = c.world.clone();
+        unsupported
+            .venues
+            .iter_mut()
+            .find(|v| v.id == VP)
+            .unwrap()
+            .fee_in_base = true;
+        assert!(build::refdata_blob(&unsupported, false).is_err());
+        let mut unsupported = c.world.clone();
+        let mut other = unsupported.insts.iter().find(|i| i.venue == VS).unwrap().clone();
+        other.base = hft_types::AssetId(99);
+        unsupported.insts.push(other);
+        assert!(build::refdata_blob(&unsupported, false).is_err());
+    }
+}
+
+#[test]
 fn seq_sut_runs_without_faults() {
     let c = cfg(1, 2_000, &[], 0, &[]);
     let r = run_record::<E>(&c);

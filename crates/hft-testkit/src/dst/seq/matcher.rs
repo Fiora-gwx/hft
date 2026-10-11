@@ -173,8 +173,10 @@ impl SimMatcher {
 
 impl Matcher for SimMatcher {
     fn new(world: &WorldSpec, venue: VenueId, seed: u64) -> Self {
-        let blob = build::refdata_blob(world, true);
-        let rd = RefData::load(&blob, None).ok();
+        // SeqSut validates the same world before matchers are constructed. A direct caller
+        // receives a clear configuration error instead of an inert matcher with no exchange.
+        let blob = build::refdata_blob(world, true).expect("invalid SimMatcher world");
+        let rd = Some(RefData::load(&blob, None).expect("invalid SimMatcher refdata"));
         let s = setup(world, venue, seed);
         let ex = rd.as_ref().and_then(|rd| SimExchange::new(&s, rd).ok());
         let mut m = SimMatcher {

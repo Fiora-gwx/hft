@@ -172,7 +172,8 @@ pub enum VenueMarket {
 pub struct VenueSpec {
     pub id: VenueId,
     pub market: VenueMarket,
-    /// Base-asset fee (`fee_asset_rule = Base`) instead of quote.
+    /// Base-asset fee on both buy and sell. SeqSut supports a spot venue with one common base
+    /// asset through VenueCaps::Configured; unsupported worlds fail before matching starts.
     pub fee_in_base: bool,
     /// Venue supports `reduceOnly`.
     pub reduce_only: bool,

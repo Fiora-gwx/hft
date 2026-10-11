@@ -948,7 +948,7 @@ spec: README.md
 - 规则:[DST 的世界模型](README.md#dst-的世界模型)
 - 级别:unit
 - 里程碑:M2
-- 前置:种子 S;配置 A 启用全部不变量检查器,配置 B 全部关闭
+- 前置:种子 S;ToyEngine 与真实 SeqSut 各运行一行;配置 A 启用全部不变量检查器,配置 B 全部关闭
 - 步骤:
   1. 两种配置各运行 S
 - 期望:
@@ -1413,7 +1413,7 @@ spec: README.md
 - 故障:`LateFeeOnly{venue = VS, delay_ms}`
 - 种子:固定种子 1
 - 断言:配置实际进入 refdata 的 VenueCaps,FeeOnly 的资产为 BTC;每行运行 10000 步且全部不变量通过;INV-8 观察包含晚到手续费补差与链接复用前的已完成累计量,不能固定 `fee_adjust = 0`;反例删除费用入账或改错余数时相应检查失败
-- 实现:待实现
+- 实现:`crates/hft-testkit/tests/seq_sut.rs::tk_106_real_base_fee_and_retired_links`
 
 ## 验收
 

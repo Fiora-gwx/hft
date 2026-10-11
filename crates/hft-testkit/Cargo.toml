@@ -32,9 +32,9 @@ hdrhistogram = { version = "7.5", default-features = false }
 rand_chacha = { version = "0.9", default-features = false }
 rand_core = { version = "0.9", default-features = false }
 # The engine adapter `SeqSut` (feature `seq`).
-hft-sequencer = { workspace = true, optional = true }
+hft-sequencer = { workspace = true, optional = true, features = ["testkit"] }
 hft-sim = { workspace = true, optional = true }
-hft-oms = { workspace = true, optional = true }
+hft-oms = { workspace = true, optional = true, features = ["testkit"] }
 hft-risk = { workspace = true, optional = true }
 hft-ledger = { workspace = true, optional = true }
 hft-exec = { workspace = true, optional = true }

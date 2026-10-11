@@ -68,7 +68,7 @@ fn venue_row(id: VenueId, perp: bool) -> RdVenue {
     }
 }
 
-fn caps_row(v: VenueId, perp: bool, reduce_only: bool) -> VenueCaps {
+fn caps_row(v: VenueId, perp: bool, reduce_only: bool, fee_asset_rule: FeeAssetRule) -> VenueCaps {
     VenueCaps {
         venue: v,
         market: if perp {
@@ -76,7 +76,7 @@ fn caps_row(v: VenueId, perp: bool, reduce_only: bool) -> VenueCaps {
         } else {
             MarketKind::Spot
         },
-        fee_asset_rule: FeeAssetRule::Quote,
+        fee_asset_rule,
         reduce_only,
         required_position_mode: if perp {
             PositionMode::OneWay
@@ -194,7 +194,7 @@ pub fn kind_of(b: &StrategyBinding) -> u16 {
 
 /// The refdata blob of the world. `all_sim` = every account becomes a Sim account with the world
 /// balances as `SimBalances` (the private refdata of a `SimMatcher`).
-pub fn refdata_blob(w: &WorldSpec, all_sim: bool) -> Vec<u8> {
+pub fn refdata_blob(w: &WorldSpec, all_sim: bool) -> Result<Vec<u8>, String> {
     let mut b = RdbBuilder::new(1);
     b.created_utc_ns(UTC0 - 86_400_000_000_000);
     for a in assets(w) {
@@ -215,7 +215,27 @@ pub fn refdata_blob(w: &WorldSpec, all_sim: bool) -> Vec<u8> {
     }
     for v in &w.venues {
         b.venue(venue_row(v.id, v.market == VenueMarket::Perp));
-        b.caps(caps_row(v.id, v.market == VenueMarket::Perp, v.reduce_only));
+        let fee_rule = if v.fee_in_base {
+            let mut insts = w.insts.iter().filter(|i| i.venue == v.id);
+            let first = insts
+                .next()
+                .ok_or_else(|| format!("base fee venue {:?} has no instrument", v.id))?;
+            if v.market != VenueMarket::Spot || first.perp || insts.any(|i| i.perp || i.base != first.base) {
+                return Err(format!(
+                    "base fee venue {:?} requires spot instruments sharing one base asset",
+                    v.id
+                ));
+            }
+            FeeAssetRule::Configured(first.base)
+        } else {
+            FeeAssetRule::Quote
+        };
+        b.caps(caps_row(
+            v.id,
+            v.market == VenueMarket::Perp,
+            v.reduce_only,
+            fee_rule,
+        ));
         for tier in 0..=1u8 {
             let r = Rate(v.fee_ppm * 1_000);
             b.fee(FeeSpec {
@@ -309,7 +329,7 @@ pub fn refdata_blob(w: &WorldSpec, all_sim: bool) -> Vec<u8> {
             }
         }
     }
-    b.finish()
+    Ok(b.finish())
 }
 
 /// Exchange UID of a Live account on a venue (refdata and `AccountConfigReport` agree).

@@ -153,11 +153,15 @@ impl Oms {
         let account = t.account;
         let Some(sl) = t.slot(s) else { return 0 };
         let first = sl.handle();
+        #[cfg(feature = "testkit")]
+        let first_epoch = sl.epoch;
         let group = sl.group;
         let Some(ix) = self.free_link_ix(account) else {
             return 0;
         };
         let link_id = ix as u32 + 1;
+        #[cfg(feature = "testkit")]
+        self.audit_reuse(ix, first_epoch, seq);
         if let Some(e) = self.links.get_mut(ix) {
             *e = LinkEntry {
                 link_id,
@@ -384,6 +388,8 @@ impl Oms {
         if q < owed_l
             && let Some(n) = naked
         {
+            #[cfg(feature = "testkit")]
+            self.audit_cap(i, i128::from(owed - q));
             let note = notes::note(
                 notes::HEDGE_NAKED_CAPPED,
                 self.strategy_of(e.account),
@@ -511,6 +517,8 @@ impl Oms {
         if let Some(n) = naked {
             q = q_fill.min(floor_lot(n, info.lot));
             if q < q_fill {
+                #[cfg(feature = "testkit")]
+                self.audit_cap(i, i128::from(q_fill - q));
                 let note = notes::note(
                     notes::HEDGE_NAKED_CAPPED,
                     self.strategy_of(e.account),
