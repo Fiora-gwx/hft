@@ -27,7 +27,7 @@ status: spec
 ### 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用)
 
 
-`EngineSetup::encode_blob` 写完整的 ECF1 决策配置,`decode_blob` 仅凭该 blob、同一 journal 的 refdata、时钟与 epoch 还原装配。OMS、ledger、exec 的行格式由各归属 crate 编解码;容量/轮转参数为段 3/5。缺任何必需段即失败,不从本机配置或默认参数补齐。`config_blob::decode_risk_blob` 只调用 [hft-risk RKP1](../hft-risk/README.md#配置riskparams版本化经-setrisk-替换并作为-configblob-写入-journal)。网络连接与环容量段 4/6 由 app 装配,不参与决策回放。`EngineSetup::from_snapshot(log, seq)` 只接受指定快照,从节 9 取全部生效配置引用,核对该快照之前 ConfigBlob 的完整身份和 SHA-256;epoch 取 OMS 节 3,时钟取该段头和节 25。缺配置、未来才出现的配置、摘要不符或时钟频率冲突均失败。
+`EngineSetup::encode_blob` 写完整的 ECF1 决策配置,`decode_blob` 仅凭该 blob、同一 journal 的 refdata、时钟与 epoch 还原装配。OMS、ledger、exec 的行格式由各归属 crate 编解码;容量/轮转参数为段 3/5。缺任何必需段即失败,不从本机配置或默认参数补齐。`config_blob::decode_risk_blob` 只调用 [hft-risk RKP1](../hft-risk/README.md#配置riskparams版本化经-setrisk-替换并作为-configblob-写入-journal)。网络连接与环容量段 4/6 由 app 装配,不参与决策回放。`EngineSetup::from_snapshot(log, seq)` 只接受指定快照,从节 9 取全部生效配置引用,核对该快照之前 ConfigBlob 的完整身份和 SHA-256;epoch 取 OMS 节 3,装配时钟取该段头,与引导块 ClockStatus 核对。节 25 必须存在;首次 EngineClock Input 前允许全零锚点,Recovery 快照允许保留上一运行的频率,其余快照锚点必须与段头同频。缺配置、未来才出现的配置、摘要不符或时钟事实冲突均失败。
 
 **ECF1 段 8 Assembly**(行版本 1)保存决策所需的装配事实,行 16 B 小端 `{field:u16, index:u16, account:u8, venue:u8, reserved:[u8;2], value:u64}`。field 1/2/3 各一行,index/account/venue=0,value 分别为 role_prod(bool)、advisor_max_lag_ms(u32)、drain_timeout_ms(u32);field 4 每个 gw 一行,index 是从 0 连续的 kill 字下标,venue 给 id,account/value=0;field 5 每个 feed venue 一行,index/account/value=0;field 6 每个 Live (account, venue) 一行,index=0,value 为所需 key 槽位图(0–3,含显式空集合)。行按 (field,index,account,venue) 严格递增,reserved=0;缺标量、重复键/gw、未知引用或缺 key 槽位行一律拒绝。只记录槽位图,不记录秘密、签名或秘密引用。epoch、base_engine_ns、TSC 校准取 journal 快照/段头,不写入此配置。
 

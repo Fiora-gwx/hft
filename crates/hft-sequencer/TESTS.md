@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | SEQ-018、SEQ-310 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
-| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-380 |
+| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381 |
 | 策略集(`StrategySet`) | SEQ-015–SEQ-018、SEQ-340 |
 | 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181 |
 | 环与容量 | SEQ-001–SEQ-007、SEQ-058、SEQ-059、SEQ-064、SEQ-066、SEQ-086、SEQ-087、SEQ-100、SEQ-221、SEQ-231、SEQ-279、SEQ-288、SEQ-345、SEQ-346、SEQ-367 |
@@ -5267,6 +5267,16 @@ spec: README.md
 - 步骤:两边放行后现货买入、永续卖出各一笔,再处理相同的 12 次 BBO 和关键帧
 - 期望:实际产生订单;所有非配置/快照记录逐字节相同;每个快照仅节 9 不同,其他节的版本、行数和内容全相同;总状态摘要必须随配置引用改变
 - 实现:`crates/hft-sequencer/tests/config_blob.rs::seq_380_complete_config_preserves_business_outputs`
+
+### SEQ-381 journal 装配遵循启动与恢复时钟顺序
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)、[冷启动恢复](README.md#冷启动恢复recoverdriver)
+- 级别:replay
+- 里程碑:M2
+- 输入:SEQ-378 的完整 journal;首个引导快照的节 25 全零,后续关键帧已有锚点;以两倍 TSC 频率重启
+- 步骤:从各快照独立读取配置;删除引导块 ClockStatus 作反例;重启后读取 Recovery 快照并验证其后的 EngineClock 和输出
+- 期望:首次锚点尚未建立也能装配;缺 ClockStatus 失败;Recovery 节 25 保留旧频率,装配使用新段频率;新运行输出逐字节一致
+- 实现:`crates/hft-sequencer/tests/config_blob.rs::seq_381_config_clock_follows_boot_and_recovery_order`
 
 ## 验收
 

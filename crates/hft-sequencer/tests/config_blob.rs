@@ -246,3 +246,60 @@ fn seq_380_complete_config_preserves_business_outputs() {
         );
     }
 }
+
+#[test]
+fn seq_381_config_clock_follows_boot_and_recovery_order() {
+    let j = config_journal(true);
+    let log = Log::from_segments(&j.segments);
+    let snapshots: Vec<_> = log
+        .recs
+        .iter()
+        .filter(|r| r.kind == EventKind::STATE_SNAPSHOT)
+        .collect();
+    let initial = hft_sequencer::snapshot::read_seq_sections(&snapshots[0].body[96..]).unwrap();
+    assert_eq!(
+        initial.engine_clock,
+        hft_sequencer::clock::EngineClockRow::default()
+    );
+    for r in &snapshots {
+        assert_eq!(
+            EngineSetup::from_snapshot(&log, r.seq)
+                .unwrap()
+                .clock
+                .tsc_hz_milli,
+            HZ
+        );
+    }
+    let mut bad = log.clone();
+    bad.recs.retain(|r| r.kind != EventKind::CLOCK_STATUS);
+    assert!(EngineSetup::from_snapshot(&bad, snapshots[0].seq).is_err());
+    let setup = EngineSetup::from_snapshot(&log, snapshots.last().unwrap().seq).unwrap();
+    let mut h = H::<TestSet>::restart_over(
+        j,
+        setup,
+        plan(hft_sequencer::SnapshotSel::Latest, true, 2, 0),
+        Rerun {
+            hz: 2 * HZ,
+            ..Rerun::default()
+        },
+    )
+    .unwrap();
+    let log = Log::from_segments(&h.j().segments);
+    let rec = log
+        .recs
+        .iter()
+        .filter(|r| r.kind == EventKind::STATE_SNAPSHOT)
+        .next_back()
+        .unwrap();
+    assert_eq!(
+        rec.read::<hft_event::SnapshotHdr>().unwrap().purpose,
+        hft_sequencer::snapshot::PURPOSE_RECOVERY
+    );
+    let sections = hft_sequencer::snapshot::read_seq_sections(&rec.body[96..]).unwrap();
+    assert_eq!(sections.engine_clock.tsc_hz_milli, HZ); // Previous run until the next EngineClock Input.
+    let setup = EngineSetup::from_snapshot(&log, rec.seq).unwrap();
+    assert_eq!(setup.clock.tsc_hz_milli, 2 * HZ);
+    assert_eq!(setup.oms.tsc_hz_milli, 2 * HZ);
+    h.run();
+    assert!(verify_journal::<TestSet>(h.j(), &setup, Some(rec.seq)).is_empty());
+}

@@ -1,6 +1,6 @@
 //! Reconstruct assembly inputs from the journal's complete ECF1 blob. No filesystem, environment,
 //! default config or process-local callbacks are consulted by the decoding path.
-use hft_event::{BlobHdr, BlobKind, BlobRef, EventKind, SnapshotHdr};
+use hft_event::{BlobHdr, BlobKind, BlobRef, ClockStatus, EventKind, SnapshotHdr};
 use hft_refdata::{AccountKind, EcfBuilder, EngineConfig, EngineSection, LoadErrCode, RefData};
 use hft_strategy_sdk::{SnapshotReader, VenueSet};
 use hft_types::{AccountId, HostClass, VenueId};
@@ -80,6 +80,7 @@ impl EngineSetup {
             .get(ix)
             .and_then(|r| r.body.get(size_of::<SnapshotHdr>()..))
             .ok_or_else(|| bad(0))?;
+        let header = log.recs[ix].read::<SnapshotHdr>().ok_or_else(|| bad(0))?;
         let sections = crate::snapshot::read_seq_sections(body).map_err(bad)?;
         for (blob, _) in &sections.active {
             content_before(log, ix, blob).map_err(BootError::Config)?;
@@ -111,8 +112,44 @@ impl EngineSetup {
             return Err(bad(3));
         }
         let epoch: hft_oms::OmsCountersHdr = counters.reader().get_row().map_err(|_| bad(3))?;
-        let clock = *log.segs.get(log.seg_of(ix)).ok_or_else(|| bad(16))?;
-        if sections.engine_clock.tsc_hz_milli == 0 || sections.engine_clock.tsc_hz_milli != clock.tsc_hz_milli
+        let segment = log.seg_of(ix);
+        let clock = *log.segs.get(segment).ok_or_else(|| bad(16))?;
+        let start = *log.seg_start.get(segment).ok_or_else(|| bad(16))?;
+        let status = log
+            .recs
+            .get(start..ix)
+            .ok_or_else(|| bad(16))?
+            .iter()
+            .find(|r| r.kind == EventKind::CLOCK_STATUS)
+            .filter(|r| r.body.len() >= size_of::<ClockStatus>())
+            .and_then(|r| r.read::<ClockStatus>())
+            .ok_or_else(|| bad(16))?;
+        if clock.tsc_hz_milli == 0
+            || status.tsc_hz_milli != clock.tsc_hz_milli
+            || status.tsc.0 != clock.calib_tsc
+            || status.realtime_ns != clock.calib_realtime_ns
+        {
+            return Err(bad(16));
+        }
+        let anchor = r.find_section(25).map_err(|_| bad(25))?.ok_or_else(|| bad(25))?;
+        if anchor.version != 1
+            || anchor.count != 1
+            || anchor.body.len() != size_of::<crate::clock::EngineClockRow>()
+        {
+            return Err(bad(25));
+        }
+        // A startup boot block precedes the first EngineClock Input. A Recovery snapshot still
+        // carries the previous run's anchor; its already-shifted TSC fields use the new segment.
+        let unstarted = sections.engine_clock == crate::clock::EngineClockRow::default()
+            && matches!(
+                header.purpose,
+                crate::snapshot::PURPOSE_BOOT | crate::snapshot::PURPOSE_RECOVERY
+            )
+            && !log.recs[..ix].iter().any(|r| r.kind == EventKind::ENGINE_CLOCK);
+        if (sections.engine_clock.tsc_hz_milli == 0 && !unstarted)
+            || (sections.engine_clock.tsc_hz_milli != 0
+                && header.purpose != crate::snapshot::PURPOSE_RECOVERY
+                && sections.engine_clock.tsc_hz_milli != clock.tsc_hz_milli)
         {
             return Err(bad(25));
         }
