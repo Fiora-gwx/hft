@@ -23,6 +23,7 @@ fn is_reset(r: &hft_sequencer::journal::MemRecord) -> Option<Note> {
 fn timeline(log: &Log) -> Vec<i128> {
     let mut anchor = None;
     let mut stopped = 0i128;
+    let mut previous = 0i128;
     log.recs
         .iter()
         .enumerate()
@@ -50,14 +51,19 @@ fn timeline(log: &Log) -> Vec<i128> {
                         .engine_ns,
                 );
                 anchor = None;
+                previous = stopped;
+            }
+            if r.kind == EventKind::SEGMENT_ROLL {
+                return previous;
             }
             if r.kind == EventKind::ENGINE_CLOCK {
                 let c = r.read::<EngineClock>().unwrap();
                 anchor = Some((c.base_engine_ns, r.tsc, c.tsc_hz_milli));
             }
-            anchor.map_or(stopped, |(base, tsc, hz)| {
+            previous = anchor.map_or(stopped, |(base, tsc, hz)| {
                 i128::from(base) + (i128::from(r.tsc) - i128::from(tsc)) * 1_000_000_000_000 / i128::from(hz)
-            })
+            });
+            previous
         })
         .collect()
 }
@@ -81,6 +87,7 @@ fn check(spec: ModelRestart, path_v2: bool) {
     let bytes = std::fs::read(&cp).unwrap();
     let c = checkpoint::decode(&bytes, 1 << 20).unwrap();
     let times = timeline(&log);
+    assert!(times.windows(2).all(|p| p[0] <= p[1]));
     let resets: Vec<_> = log.recs.iter().filter_map(is_reset).collect();
     assert_eq!(resets.len(), usize::from(spec.count));
     assert!(

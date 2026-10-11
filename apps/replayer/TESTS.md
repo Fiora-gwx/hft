@@ -705,6 +705,8 @@ spec: README.md
 - 补充断言:每次停机 600 s,TSC 从 100 重新计数、频率翻倍,恢复前后原始样本计数连续;独立进程同时验证 Output 与 Advice。另选重启后、重建点前的窗口,检查点与路径注记在窗口前仍生效,比较量由输入逐条计算。
 - 实现:`apps/replayer/tests/recompute.rs::rpl_060_engine_time_excludes_downtime`
 
+真实写者的 End/BootDone 保留零 TSC,时间线在这些结构记录处不倒退;两次倍频恢复与最终封段由 RPL-273 一同覆盖。
+
 ### RPL-061 recompute 的状态起点取 --from-seq 与 last_seq + 1 中较小者之前的快照
 
 - 规则:[verify](README.md#verify)

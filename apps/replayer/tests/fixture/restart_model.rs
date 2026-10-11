@@ -165,8 +165,10 @@ pub(super) fn exercise<S: StrategySet>(
         let mut restored_h = h;
         let mut restored_body = body;
         if spec.reason == 1 {
-            restored_body[..4].copy_from_slice(&0u32.to_le_bytes());
-            restored_h.path_version = 0;
+            // Version zero declares an absent path and cannot prefix nonempty bytes.
+            // Use another nonzero version so the file is valid and only its path resets.
+            restored_body[..4].copy_from_slice(&3u32.to_le_bytes());
+            restored_h.path_version = 3;
         } else if spec.reason == 2 {
             restored_body[8..16].copy_from_slice(&(-1i64).to_le_bytes());
         }

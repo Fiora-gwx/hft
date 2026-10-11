@@ -209,8 +209,15 @@ fn timeline<S: StrategySet>(
                 )
             });
         let mut clock = (!fresh && e.clock.is_set()).then_some(e.clock);
+        let mut previous = e.last_ens;
         for (ix, time) in times.iter_mut().enumerate().take(end).skip(run.first) {
             let r = &log.recs[ix];
+            // The writer's structural End/BootDone markers carry TSC zero. They do not
+            // advance engine time or belong to an old/new process's clock epoch.
+            if r.kind == EventKind::SEGMENT_ROLL {
+                *time = previous;
+                continue;
+            }
             if r.kind == EventKind::ENGINE_CLOCK {
                 let ec = r
                     .read::<hft_event::EngineClock>()
@@ -231,6 +238,7 @@ fn timeline<S: StrategySet>(
                     .map_err(|_| RecomputeError::Clock { seq: r.seq })?,
                 None => e.last_ens,
             };
+            previous = *time;
         }
     }
     Ok(times)

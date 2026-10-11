@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-12 | Model 重算的 SegmentRoll 结构记录沿用相邻引擎时间,新运行起点取引导快照;End/BootDone 的零 TSC 不套用运行时钟。路径丢弃夹具使用合法非零异版本,保留原始样本 | RPL-058–060、RPL-273;真实写者封段的零 TSC 触发 ClockRange | hft-sequencer、replayer | 否 |
 | 2026-10-12 | advisor 追赶在重启边界重建引擎镜像;离线重算保留有合法来源、完整前缀及相同身份/参数的 Model。ModelPathReset 按原因码和引擎时间处理,窗口前的重置仍约束比较范围;跨运行追赶重发按有界历史字节验证,同一运行仍一对一;Drain 后 TSC 重置及停机不计时用真实文件验证 | RPL-058–060、RPL-272/273;跨重启误丢来源、路径注记原因码误判及追赶重发 | hft-sequencer、replayer、architecture | 否 |
 | 2026-10-12 | 独立回放测试策略保留原始样本与有限路径状态,路径版本变化后在 120 s 内收敛;真实引擎、advisor、文件写者和 SimExchange 生成完整 1 h/3 h 文件,独立测试进程检查检查点窗口及路径重建点。保持 DST 策略集合与金样不变,现场文件不计尚未发布的 T1/T3 固定样本验收 | TK-117/118、RPL-270/271;短时无路径 Model 不足以验证长时恢复 | crates/hft-testkit、apps/replayer、fixtures/strategies/sdk-replay | 否 |
 | 2026-10-12 | 离线 Model 镜像额外产出的 Output 不占用下一 Input,保证篡改 Advice 的错路由等反例仍能继续配对;该选项只在冷重算装配开启,不改在线 advisor 或恢复驱动 | RPL-267 的策略、账户和组字段反例;镜像静默对齐不能跳过原始输入 | crates/hft-sequencer、apps/replayer/TESTS.md | 否 |
