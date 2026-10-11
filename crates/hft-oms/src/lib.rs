@@ -22,6 +22,7 @@ compile_error!("hft-oms: snapshot rows are little-endian only");
 #[cfg(feature = "testkit")]
 pub mod audit;
 mod config;
+mod config_blob;
 mod engine;
 mod external;
 mod fsm;
@@ -48,6 +49,7 @@ use hft_strategy_sdk::{HedgePlan, OrderRef};
 use hft_types::{AccountId, AssetExp, GroupId, Rate, StrategyId, Tsc, VenueId};
 
 pub use config::{OmsConfig, PerTable, PerVenue};
+pub use config_blob::{OMS_CONFIG_ROW_VERSION, OmsConfigRow};
 pub use inflight::InflightBook;
 pub use price::{link_valid, price_hedge};
 pub use table::VenueBook;

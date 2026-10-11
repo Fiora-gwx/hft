@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | SEQ-018、SEQ-310 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
-| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347 |
+| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-378 |
 | 策略集(`StrategySet`) | SEQ-015–SEQ-018、SEQ-340 |
 | 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181 |
 | 环与容量 | SEQ-001–SEQ-007、SEQ-058、SEQ-059、SEQ-064、SEQ-066、SEQ-086、SEQ-087、SEQ-100、SEQ-221、SEQ-231、SEQ-279、SEQ-288、SEQ-345、SEQ-346、SEQ-367 |
@@ -5218,6 +5218,35 @@ spec: README.md
 - 步骤:保存恢复后的快照,投递旧 epoch 第一腿全成;从快照验证回放
 - 期望:同一成交只有一张成功 Second 且数量等于净成交量;无重复 SecondRetry;Output 逐字节一致
 - 实现:`crates/hft-sequencer/tests/sdk_contract/target.rs::seq_375_late_fill_resume_verify`
+
+### SEQ-376 完整 ECF1 决策配置只凭 blob 往返
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
+- 级别:unit
+- 里程碑:M2
+- 前置:B0,完整 key 槽位事实;反转 gw 次序,修改 OMS、账本、执行层与装配标量
+- 步骤:encode_blob 后,仅传 blob/refdata/原 journal 时钟与 epoch 给 decode_blob
+- 期望:全部决策配置字段相同,gw 顺序保持;同一版本与 created_utc_ns 重编码逐字节相同
+- 实现:`crates/hft-sequencer/tests/config_blob.rs::seq_376_complete_config_roundtrip`
+
+### SEQ-377 缺失配置不得退回默认值
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
+- 级别:unit
+- 里程碑:M2
+- 前置:SEQ-376 的完整配置
+- 步骤:分别删除段 1/2/3/5/7/8;删 key 槽位事实、重复 gw、非法 key 位、漏账户或未知 feed venue
+- 期望:decode_blob 全部返回 ConfigErr,没有隐式补配置
+- 实现:`crates/hft-sequencer/tests/config_blob.rs::seq_377_missing_config_does_not_use_defaults`
+
+### SEQ-378 完整配置 journal 可独立装配验证驱动
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)、[确定性规则](README.md#确定性规则)
+- 级别:replay
+- 里程碑:M2
+- 输入:B0 空启动写完整 ECF1/RKP1 的引导块,放行后 12 次 BBO 与两个关键帧
+- 期望:从 journal 取 refdata/engine blob 重新解码装配,VerifyDriver 从段首快照重放全部尾部,无输出/快照分歧;风险解码不使用进程内参数标记
+- 实现:`crates/hft-sequencer/tests/config_blob.rs::seq_378_replay_config_only_from_journal`
 
 ## 验收
 

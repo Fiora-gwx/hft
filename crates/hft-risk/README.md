@@ -638,6 +638,11 @@ pub struct PxBand { pub max_px_dev: Rate, pub ioc_max_cross: Rate, pub rr_max_cr
 - 账户作用域:`SetRisk` 只替换该账户的字段,作用域外有改动 → `InvalidArgs{OutOfScope}`(sequencer 校验);全局字段(含 `l3_max_cross`、`classes`)只能 `account = *`。放宽判定 `loosens()` 按作用域内逐字段,任一字段按下列方向变化即为放宽(反方向与不变不算):**变大**——全部 `max_*`(含 `max_perp_leverage_x100`)、`account_notional_from_equity`、`daily_loss_abs`、`daily_loss_kill`、`daily_loss_max_resumes`、`recon_closeonly_notional`、`naked_gate`、`naked_gate_min`、`inst_bucket_per_s`、`PxBand` 的三项、`l3_max_cross`(含 0 → 非 0)、`conn_liveness_ms`、`margin_ratio_crosscheck`、`deleverage_deadline_ms`、`force_step_interval_ms`、`margin_stale_ms`、`mark_stale_ms`;**变小**——`rate_headroom`、`rr_reserve`、`funds_buffer`、`backoff_base_ms`、`backoff_max_ms`、`liq_dist_block_open`、`liq_dist_reduce`、`liq_dist_force`、`liq_dist_hyst`、`margin_ratio_hyst`、`force_step`;`unknown_blocks_open` 由真变假;`risk_class` 的改动按改后每个 inst 的 `PxBand` 逐项比较。
 - 参数来源:`RiskParams` 是静态配置,由 `hft-cfg` 从 TOML 生成 blob,运维以 `cli:<login>`(Admin)经 ctl 发 `SetRisk` 并二次确认;Telegram 不发 `SetRisk`。策略参数是 `RiskParams` 之下的东西,策略越不过这里的上限。
 
+
+**RKP1 配置编码**由 `RiskParams::encode_blob` / `decode_blob` 唯一提供,只在冷路径分配。头部依次为 magic `HFTRKP01`、`version:u64`、`generated_at_ns:i64`、`author:[u8;16]`、`rate_headroom:i64`、`conn_liveness_ms:u64`、`max_perp_leverage_x100:u64`、`l3_max_cross:i64`,共 72 B。随后依次写 `classes`、`risk_class`、`accounts`、`venues`、`groups`;每表先写 `count:u64`,再按上列 Rust 结构的字段顺序展开行,嵌套结构原位展开。所有整数槽宽 8 B、小端,有符号定点用 i64;窄整数以 u64 写出,解码时检查范围;bool 只接受 0/1。五种行分别为 24、16、216、56、48 B,不写容器容量和填充字节。
+
+`classes` 保持类别下标顺序;其余表分别按 inst、account、(account, venue)、(account, group) 严格递增,重复或乱序拒绝。解码在分配前按剩余字节核对 count,拒绝截短、尾随字节、未知格式、越界整数及缺失/未知账户、venue、inst 引用。每个 refdata 账户及其 venue 都必须有显式限额行。参数值的风控语义、容量和 `ExecRiskMismatch` 仍由 `Risk::new` / `set_params` 检查。完整内容随 `ConfigBlob` 进入 journal,不以全局变量、线程局部值或外部配置文件补齐。
+
 ### 引擎单与执行配置的一致性(`ExecRiskMismatch`)
 
 执行层的默认减仓、补腿与自动有界平仓用 `ExecConfig.force_slice` 切片;它必须落在风控上限之内,否则这些单会被 #5/#6 反复拒绝。每个账户 `a` 要求:
@@ -700,6 +705,7 @@ pub struct PxBand { pub max_px_dev: Rate, pub ioc_max_cross: Rate, pub rr_max_cr
 | `src/margin.rs` | 按强平距离分档、比率交叉校验、过期判定(含标记价断流)、重启后 L3 确认、定时器、`ForceDeleverage` |
 | `src/leverage.rs` | 杠杆表、交易中的永续 inst、永续杠杆上限(含未知) |
 | `src/pnl_gate.rs` | 日亏锁存与权益额度、敞口门、对账分级与恢复计数、`AUTO_EXTERNAL` 的用户流前置条件 |
+| `src/blob.rs` | RKP1 完整配置的冷路径编解码 |
 | `src/params.rs` | 校验、加载、账户作用域替换、`loosens`、`ExecRiskMismatch` |
 | `benches/risk.rs`、`tests/*.rs` | 基准与测试,用例编号与函数名见 [TESTS.md](TESTS.md) |
 
@@ -725,7 +731,7 @@ pub struct PxBand { pub max_px_dev: Rate, pub ioc_max_cross: Rate, pub rr_max_cr
 | `hedge_px_limits` / `leverage` / `view_for` | ≤ 5 ns | ≤ 15 ns | `risk/hedge_px_limits`、`risk/leverage`、`risk/view_for` |
 | `on_account_cfg`(≤ 1 024 条杠杆,含杠杆上限重判;不在 tick-to-trade 路径) | ≤ 5 µs | ≤ 15 µs | `risk/on_account_cfg` |
 
-零分配(容量在 `new` 时一次分配);无系统调用;无原子量(kill 字由驱动写);所有算术为整数(`Rate`/`Notional` 定点)。
+事件入口零分配(容量在 `new` 时一次分配);RKP1 编解码只在加载/回放装配的冷路径分配;无系统调用;无原子量(kill 字由驱动写);所有算术为整数(`Rate`/`Notional` 定点)。
 
 ## 测试与验收
 

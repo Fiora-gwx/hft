@@ -227,6 +227,9 @@ pub enum PlaceResult { Placed(OrderRef), Rejected(RejectBits), Shadowed }
 | `passive_cooldown_mult` | u8 | 4 | `Passive` 时切片间隔与 Stuck 判定时长的倍数 |
 | `force_slice` | TakerSliceParams | depth_frac 0.3、depth_levels 5、max_cross 0.5%、max_chunk_notional 1 000 USDT、min_chunk_notional 0、cooldown 200 ms(待标定) | 默认减仓、外来成交默认处理、补腿、自动有界平仓、无组永续持仓减仓使用的切片参数;须满足下面的风控一致性约束 |
 
+
+ECF1 段 7 的行版本为 1,`ExecConfigRow` 为 176 B 小端。前 8 B 为 `{account:u8, sim:u8, has_params:u8, reserved:[u8;5]}`,其后为 21 个 i64 槽。前 15 槽依照本表从 band_floor_notional 到 passive_cooldown_mult 的顺序,后 6 槽为 force_slice 的 depth_frac、depth_levels、max_cross、max_chunk_notional、min_chunk_notional、cooldown_ms。窄整数必须在原类型范围内;sim/has_params 只取 0/1,填充为 0。account=0 必须恰有一行(sim=0、has_params=1),保存全局默认;其余行逐账户递增且不重复,has_params=0 的参数槽全为 0。`to_rows` / `from_rows` 是唯一行编解码器;`from_engine` 还核对 refdata 的账户全集及 Sim 身份。全部为冷路径,配置的业务范围由 `Exec::new` 继续校验。
+
 **与风控参数的一致性约束**(每个账户逐行检查):`force_slice.max_cross ≤ rr_max_cross`(该账户适用的各价格带类别取最小)且 `force_slice.max_chunk_notional ≤ max_order_notional`(该账户 `AcctLimits`)。hft-core 装配时不符 → 退出 2(`ExecRiskMismatch`,[apps/hft-core](../../apps/hft-core/README.md));运行中 `SetRisk` 使其不符 → `InvalidArgs{ExecRiskMismatch}`([control-plane](../../docs/subsystems/control-plane.md#结果码)),旧参数继续生效。策略目标里的切片参数不受此约束,执行时截取(见"限价与单笔名义")。
 
 **尘埃线与最小名义**:每个账户的 `dust_notional` 必须 ≥ 该账户交易腿(refdata 中该账户各 venue 被 GroupSpec 引用的 inst)`min_notional` 的最大值,使"高于尘埃线却低于最小名义"的已成交裸量不会出现在单腿上;校验在 hft-core 装配期,不符退出 2(`DustBelowMinNotional`,归 [apps/hft-core](../../apps/hft-core/README.md))。这条校验不覆盖 `min_qty`/lot × 价格:最小下单量可能大于最小名义,所以"高于尘埃线却低于最小下单量"的残余仍可能出现(还有两腿 lot 零头、价格变化后低于最小名义),由 `WriteOffResidual` 命令核销(见"残余与尘埃")。

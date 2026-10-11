@@ -13,6 +13,7 @@ mod boot;
 mod clock;
 mod commands;
 mod common;
+mod config_blob;
 mod conflate;
 mod drain;
 mod env;

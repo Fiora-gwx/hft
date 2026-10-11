@@ -23,15 +23,17 @@ struct Sec {
 }
 
 fn section() -> impl Strategy<Value = Sec> {
-    (0usize..7, 1u16..=4, 1u32..=32, 0usize..=64).prop_flat_map(|(ix, row_ver, words, count)| {
-        let row_size = words * 8;
-        prop::collection::vec(any::<u8>(), row_size as usize * count).prop_map(move |bytes| Sec {
-            id: EngineSection::ALL[ix],
-            row_ver,
-            row_size,
-            bytes,
-        })
-    })
+    (0usize..EngineSection::ALL.len(), 1u16..=4, 1u32..=32, 0usize..=64).prop_flat_map(
+        |(ix, row_ver, words, count)| {
+            let row_size = words * 8;
+            prop::collection::vec(any::<u8>(), row_size as usize * count).prop_map(move |bytes| Sec {
+                id: EngineSection::ALL[ix],
+                row_ver,
+                row_size,
+                bytes,
+            })
+        },
+    )
 }
 
 fn host() -> impl Strategy<Value = HostClass> {

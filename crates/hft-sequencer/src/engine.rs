@@ -27,8 +27,8 @@ use crate::trace::Trace;
 use crate::types::{BootError, ConfigErr, OutRing, StepOutcome};
 use crate::{ConfigSet, Sequencer};
 
-/// Assembly inputs that are not in the journal's config blobs (apps/hft-core builds them from its
-/// configuration and the ECF1 sections it parses).
+/// Decision-relevant assembly configuration. `encode_blob` records the complete ECF1 input;
+/// replay restores it with `decode_blob` and the journal's epoch / clock facts.
 #[derive(Clone, Debug)]
 pub struct EngineSetup {
     pub caps: CapacitiesRow,

@@ -26,6 +26,7 @@ pub mod audit;
 pub mod clock;
 pub mod codes;
 mod commands;
+pub mod config_blob;
 pub mod driver;
 mod engine;
 mod exec_glue;

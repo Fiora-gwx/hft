@@ -19,7 +19,7 @@ spec: README.md
 | 入口(全部在 sequencer 线程调用,`&mut self`,无分配) | OMS-005–OMS-007, OMS-252, OMS-040–OMS-050, OMS-088, OMS-092, OMS-133, OMS-135, OMS-152, OMS-189, OMS-200, OMS-240, OMS-248, OMS-285–OMS-287, OMS-310, OMS-315, OMS-342–OMS-344, OMS-360, OMS-390, OMS-410 |
 | 输出 `OmsOut`(容量固定,由 sequencer 预分配并在每个输入事件后清空) | OMS-020, OMS-024, OMS-109, OMS-202, OMS-330 |
 | 消费与产生的事件 | OMS-040, OMS-055–OMS-068, OMS-070–OMS-074, OMS-080, OMS-130, OMS-142, OMS-250 |
-| 配置项(`OmsConfig`) | OMS-001–OMS-004, OMS-024, OMS-091, OMS-110, OMS-111, OMS-132, OMS-137, OMS-138, OMS-140, OMS-150, OMS-161, OMS-164, OMS-170, OMS-189, OMS-194, OMS-195, OMS-204、OMS-459, OMS-227, OMS-263, OMS-320, OMS-334 |
+| 配置项(`OmsConfig`) | OMS-001–OMS-004, OMS-024, OMS-091, OMS-110, OMS-111, OMS-132, OMS-137, OMS-138, OMS-140, OMS-150, OMS-161, OMS-164, OMS-170, OMS-189, OMS-194, OMS-195, OMS-204、OMS-459, OMS-227, OMS-263, OMS-320, OMS-334、OMS-465、OMS-466 |
 | 实现说明 | 不适用:见子节 |
 | 数据布局(草案,实现时以代码与编译期断言为准) | OMS-003, OMS-005, OMS-010–OMS-017, OMS-021, OMS-022, OMS-034, OMS-051, OMS-381, OMS-421 |
 | ClientOrderId | OMS-030–OMS-035 |
@@ -4185,6 +4185,26 @@ spec: README.md
 - 步骤:同一 Input 确认第一腿全成并解除 Unknown,随后第二腿成交
 - 期望:恰一条 Second,无重复 SecondRetry;RESUME_HOLD 与 RESUME_RETRY 清除,第二腿完成后链接 Done
 - 实现:`crates/hft-oms/tests/recover.rs::oms_464_late_first_fill_does_not_double_resume`
+
+### OMS-465 ECF1 OMS 配置完整往返
+
+- 规则:[配置项](README.md#配置项omsconfig)
+- 级别:unit
+- 里程碑:M2
+- 前置:所有标量均非默认值,venue 与表覆盖含 Some/None
+- 步骤:经 to_rows/from_rows 与 EcfBuilder/from_engine 两条路径往返;同键再写一条覆盖
+- 期望:所有字段保持;可选 None 不被转为 0;重复覆盖编码成最后有效值
+- 实现:`crates/hft-oms/tests/config_blob.rs::oms_465_config_section_roundtrip`
+
+### OMS-466 OMS 配置不接受缺默认行或歧义覆盖
+
+- 规则:[配置项](README.md#配置项omsconfig)
+- 级别:unit
+- 里程碑:M2
+- 前置:完整 OMS 配置行
+- 步骤:逐个删除 25 个默认行;分别注入重复键、填充、错误作用域、越界值、未知字段及未知 venue
+- 期望:全部返回错误或 None,不以 OmsConfig::new 的默认值补洞
+- 实现:`crates/hft-oms/tests/config_blob.rs::oms_466_config_section_rejects_incomplete`
 
 ## 验收
 

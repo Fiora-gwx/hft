@@ -18,7 +18,7 @@ spec: README.md
 | 入口(全部在 sequencer 线程调用,无分配) | EXE-506、EXE-507、EXE-002、EXE-003、EXE-010、EXE-011、EXE-012、EXE-013、EXE-014、EXE-015、EXE-016、EXE-017、EXE-231、EXE-317、EXE-318、EXE-396、EXE-405、EXE-475 |
 | 输出 `ExecOut`(容量固定,sequencer 预分配;**每次调用本 crate 之后排空**) | EXE-020、EXE-021、EXE-022、EXE-023、EXE-024、EXE-316、EXE-459 |
 | 执行规格参数(类型定义在 SDK,本节定义语义) | EXE-040、EXE-041、EXE-042 |
-| 配置项(`ExecConfig`,`EngineConfig` blob 的 `exec` 段;每账户一行 + 全局默认行;变更 = Drain + 重启) | EXE-001、EXE-003、EXE-004 |
+| 配置项(`ExecConfig`,`EngineConfig` blob 的 `exec` 段;每账户一行 + 全局默认行;变更 = Drain + 重启) | EXE-001、EXE-003、EXE-004、EXE-514、EXE-515 |
 | 消费与产生的事件 | EXE-014、EXE-068、EXE-205、EXE-220、EXE-283、EXE-290、EXE-316、EXE-340、EXE-416、EXE-434、EXE-440 |
 | 调用顺序(sequencer 同一输入事件内;流程归属 [hft-sequencer](../hft-sequencer/README.md)) | EXE-025、EXE-026、EXE-027 |
 | 实现说明 | 不适用:见子节 |
@@ -4318,6 +4318,26 @@ spec: README.md
 - 步骤:按固定操作 `(0,6402)、(7,15018)、(7,56772)、(7,35176)` 设置目标并交错投递外来成交;每步推进执行层并检查 EXE-050 性质
 - 期望:人工保持未解除时不发配对尾量的 ResidualTrim,其他外来成交改变展示状态后保持仍有效
 - 实现:`crates/hft-exec/tests/props.rs::exe_513_manual_hold_survives_other_external_events`
+
+### EXE-514 ECF1 执行配置完整往返
+
+- 规则:[配置项](README.md#配置项execconfigengineconfig-blob-的-exec-段每账户一行--全局默认行变更--drain--重启)
+- 级别:unit
+- 里程碑:M2
+- 前置:全部 ExecParams 字段非默认值;一个 Live 账户使用默认行,一个 Sim 账户有覆盖
+- 步骤:to_rows/from_rows 往返;颠倒账户输入顺序再编码
+- 期望:所有字段、None 与 Sim 身份保持;账户输入顺序不改变规范行
+- 实现:`crates/hft-exec/tests/config_blob.rs::exe_514_config_section_roundtrip`
+
+### EXE-515 执行配置拒绝缺默认、重复账户和非法标志
+
+- 规则:[配置项](README.md#配置项execconfigengineconfig-blob-的-exec-段每账户一行--全局默认行变更--drain--重启)
+- 级别:unit
+- 里程碑:M2
+- 前置:完整默认行与一个无覆盖账户行
+- 步骤:分别删默认行、重复账户、破坏 bool/填充、给无覆盖行写参数、写越界 u8
+- 期望:全部返回 None
+- 实现:`crates/hft-exec/tests/config_blob.rs::exe_515_config_section_rejects_malformed`
 
 ## 验收
 

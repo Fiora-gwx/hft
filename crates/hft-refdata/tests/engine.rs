@@ -51,22 +51,22 @@ fn ref_066_ecf1_container() {
     let mut b = base.clone();
     b[8..10].copy_from_slice(&2u16.to_le_bytes());
     assert_eq!(ecf_errs(&b, None), vec![e(Structure, 0, 0)], "REF-066.5");
-    let with8 = |flags: u32| {
+    let with9 = |flags: u32| {
         let mut r = raw(&base);
         r.sections.push(RawSection {
-            id: 8,
+            id: 9,
             row_ver: 1,
             row_size: 8,
             count: 1,
             flags,
-            data: vec![8; 8],
+            data: vec![9; 8],
         });
         r.encode()
     };
-    assert_eq!(ecf_errs(&with8(0), None), vec![e(Structure, 8, 0)], "REF-066.6");
-    let ec = EngineConfig::load(&with8(SECTION_OPTIONAL), None).expect("REF-066.7");
+    assert_eq!(ecf_errs(&with9(0), None), vec![e(Structure, 9, 0)], "REF-066.6");
+    let ec = EngineConfig::load(&with9(SECTION_OPTIONAL), None).expect("REF-066.7");
     let e0c = EngineConfig::load(&base, None).expect("E0");
-    assert!(EngineSection::try_from(8u16).is_err(), "REF-066.7");
+    assert!(EngineSection::try_from(9u16).is_err(), "REF-066.7");
     for s in EngineSection::ALL {
         assert_eq!(ec.section(s), e0c.section(s), "REF-066.7 section {s:?}");
     }
@@ -98,7 +98,7 @@ fn ref_067_section_view() {
     assert_eq!(v.bytes, &(0u8..120).collect::<Vec<_>>()[..], "REF-067.1");
     assert!(ec.section(EngineSection::Conn).is_none(), "REF-067.2");
     let codes: Vec<u16> = EngineSection::ALL.iter().map(|s| *s as u16).collect();
-    assert_eq!(codes, vec![1, 2, 3, 4, 5, 6, 7], "REF-067.3");
+    assert_eq!(codes, vec![1, 2, 3, 4, 5, 6, 7, 8], "REF-067.3");
 }
 
 thread_local! {
@@ -128,6 +128,7 @@ ok_validator!(v4, 4);
 ok_validator!(v5, 5);
 ok_validator!(v6, 6);
 ok_validator!(v7, 7);
+ok_validator!(v8, 8);
 
 fn v2_err(_: &EngineConfig, _: &RefData) -> Result<(), LoadErr> {
     log(2);
@@ -141,7 +142,7 @@ fn v2_err(_: &EngineConfig, _: &RefData) -> Result<(), LoadErr> {
 type Check = fn(&EngineConfig, &RefData) -> Result<(), LoadErr>;
 
 fn validators(skip: &[u16], replace2: Option<Check>) -> Vec<EngineValidator> {
-    let fns: [Check; 7] = [v1, v2, v3, v4, v5, v6, v7];
+    let fns: [Check; 8] = [v1, v2, v3, v4, v5, v6, v7, v8];
     EngineSection::ALL
         .iter()
         .zip(fns)
@@ -166,13 +167,13 @@ fn ref_068_validate() {
     };
     taken();
     assert_eq!(run(&ec, &validators(&[], None)), vec![], "REF-068.1");
-    assert_eq!(taken(), vec![1, 2, 3, 4, 5, 6, 7], "REF-068.1");
+    assert_eq!(taken(), vec![1, 2, 3, 4, 5, 6, 7, 8], "REF-068.1");
     assert_eq!(
         run(&ec, &validators(&[5], None)),
         vec![e(NoValidator, 5, 0)],
         "REF-068.2"
     );
-    assert_eq!(taken(), vec![1, 2, 3, 4, 6, 7], "REF-068.2");
+    assert_eq!(taken(), vec![1, 2, 3, 4, 6, 7, 8], "REF-068.2");
     let mut b = e0_builder().finish_raw();
     b.sections.retain(|s| s.id != 6);
     let ec6 = EngineConfig::load(&b.encode(), None).expect("E0 without 6");

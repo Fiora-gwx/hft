@@ -49,7 +49,7 @@ spec: README.md
 | 新字段 | 全部资产 `dust` raw 1 000;Insts 的 `mmr_tiers` 为空(无段 18)、`price_band = {0, 0}`;VenueCaps 各行 `amend_qty_down_only = false` |
 | 其余 | RateLimits `(1, Account, Orders, 300, 10 000 ms, 1)`、`(1, Ip, Weight, 2 400, 60 000 ms, 1)`;Endpoints venue 1:`OrderWs`/Prod、`MdPublic`/Prod、`MdPublic`/Testnet 各一行;Maint、Tokens 无 |
 
-**`E0`**(`tests/common/e0.rs::e0()`,经 `EcfBuilder`):`magic = HFTECF01`、`version = 3`、`host_class = c8`(3),段 1–7 各一段(`row_ver = 1`,行内容为各段的测试字节,本 crate 不解析)。**`P0`**:与 F0 四个 venue 一致的 `ProtocolFacts`(`market`、`caps` 等于 F0 的 VenueCaps 行、`stale_guard` 同 F0);**`A0`** = `AssemblyFacts { host: C8, max_universe_insts: 8192, protocols: P0, kinds: [0xFF00, 0xFF01] }`。
+**`E0`**(`tests/common/e0.rs::e0()`,经 `EcfBuilder`):`magic = HFTECF01`、`version = 3`、`host_class = c8`(3),段 1–8 各一段(`row_ver = 1`,行内容为各段的测试字节,本 crate 不解析)。**`P0`**:与 F0 四个 venue 一致的 `ProtocolFacts`(`market`、`caps` 等于 F0 的 VenueCaps 行、`stale_guard` 同 F0);**`A0`** = `AssemblyFacts { host: C8, max_universe_insts: 8192, protocols: P0, kinds: [0xFF00, 0xFF01] }`。
 
 ### REF-001 RdbHeader 是 64 B 且字段偏移固定
 
@@ -1194,8 +1194,8 @@ spec: README.md
 | REF-066.3 | `host_class = 7` | `[{Structure, 0, 0}]` |
 | REF-066.4 | 把 F0(magic `HFTRDB01`)交给 `EngineConfig::load` | `[{Structure, 0, 0}]` |
 | REF-066.5 | `format = 2` | `[{Structure, 0, 0}]` |
-| REF-066.6 | 追加段 8 不带 OPTIONAL | `[{Structure, 8, 0}]` |
-| REF-066.7 | 追加段 8 带 OPTIONAL | `Ok`;`EngineSection` 无段 8,段 1–7 的视图与 E0 相同 |
+| REF-066.6 | 追加段 9 不带 OPTIONAL | `[{Structure, 9, 0}]` |
+| REF-066.7 | 追加段 9 带 OPTIONAL | `Ok`;`EngineSection` 无段 9,段 1–8 的视图与 E0 相同 |
 
 ### REF-067 段视图原样给出行版本、行大小、行数与字节
 
@@ -1209,7 +1209,7 @@ spec: README.md
 |---|---|---|
 | REF-067.1 | `section(Oms)` | `Some({row_ver: 2, row_size: 40, count: 3, bytes: [0, 1, …, 119]})` |
 | REF-067.2 | `section(Conn)` | `None` |
-| REF-067.3 | `EngineSection` 码值 | Oms 1、Ledger 2、Capacities 3、Rings 4、Sequencer 5、Conn 6、Exec 7 |
+| REF-067.3 | `EngineSection` 码值 | Oms 1、Ledger 2、Capacities 3、Rings 4、Sequencer 5、Conn 6、Exec 7、Assembly 8 |
 
 ### REF-068 validate 对每个存在的段调用同段的验证器
 
@@ -1221,8 +1221,8 @@ spec: README.md
 
 | 行 | 验证器 | 期望 |
 |---|---|---|
-| REF-068.1 | 段 1–7 各一个,全部 `Ok` | `Ok`;日志 `[1, 2, 3, 4, 5, 6, 7]`(升序) |
-| REF-068.2 | 缺段 5 的验证器 | `[{NoValidator, 5, 0}]`;其余 6 个照常调用 |
+| REF-068.1 | 段 1–8 各一个,全部 `Ok` | `Ok`;日志 `[1, 2, 3, 4, 5, 6, 7, 8]`(升序) |
+| REF-068.2 | 缺段 5 的验证器 | `[{NoValidator, 5, 0}]`;其余 7 个照常调用 |
 | REF-068.3 | E0 去掉段 6,不提供段 6 验证器 | `Ok` |
 | REF-068.4 | 段 2 的验证器返回 `{RefInstNotSubscribed, 2, 3}` | `[{RefInstNotSubscribed, 2, 3}]` |
 | REF-068.5 | 缺段 5 且段 2 返回错误 | `[{RefInstNotSubscribed, 2, 3}, {NoValidator, 5, 0}]`(按段 id 升序) |

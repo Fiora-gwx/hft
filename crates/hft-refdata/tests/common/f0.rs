@@ -644,7 +644,7 @@ pub fn f0() -> Vec<u8> {
     f0_spec().build()
 }
 
-/// E0: ECF1 v3, host c8, sections 1–7 (row_ver 1, one 8-byte row filled with the section id).
+/// E0: ECF1 v3, host c8, sections 1–8 (row_ver 1, one 8-byte row filled with the section id).
 pub fn e0_builder() -> EcfBuilder {
     let mut b = EcfBuilder::new(3, HostClass::C8);
     b.created_utc_ns(CREATED);

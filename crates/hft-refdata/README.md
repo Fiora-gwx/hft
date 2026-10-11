@@ -103,7 +103,7 @@ impl EngineConfig {
     pub fn host_class(&self) -> HostClass;                               // hft_types::HostClass:dev2 | c4 | c8 | c16 | c32 | metal(编码见下文 ECF1;各类的取值与选定归 apps/hft-core)
 }
 pub struct SectionView<'a> { pub row_ver: u16, pub row_size: u32, pub count: u32, pub bytes: &'a [u8] }
-#[repr(u16)] pub enum EngineSection { Oms = 1, Ledger = 2, Capacities = 3, Rings = 4, Sequencer = 5, Conn = 6, Exec = 7 }   // = ECF1 段 id(下文 ECF1 表,只追加)
+#[repr(u16)] pub enum EngineSection { Oms = 1, Ledger = 2, Capacities = 3, Rings = 4, Sequencer = 5, Conn = 6, Exec = 7, Assembly = 8 }   // = ECF1 段 id(下文 ECF1 表,只追加)
 pub struct EngineValidator { pub section: EngineSection, pub check: fn(&EngineConfig, &RefData) -> Result<(), LoadErr> }   // 归属 crate 提供;冷路径
 
 pub struct LoadErr { pub code: LoadErrCode, pub section: u16 /* 段 id;无 = 0 */, pub row: u32 /* 段内行下标;无 = 0 */ }
@@ -382,6 +382,7 @@ refdata 不含 group(在 `StrategyParams` 的 `GroupSpec`)、OMS/ledger/容量�
 | 5 | `sequencer` | hft-sequencer | sequencer 的引擎级参数(每环批量上限、关键帧触发、advisor 预算等;一行,字段表、行格式与默认值唯一归属 hft-sequencer) |
 | 6 | `conn` | [hft-venue](../hft-venue/README.md) | 连接轮换余量(相对 `ws_max_conn_age_s`) |
 | 7 | `exec` | [hft-exec](../hft-exec/README.md) | `ExecConfig`:执行层的引擎级参数(补腿阈值、冷却、截止、默认减仓切片等;变更 = Drain + 重启) |
+| 8 | `assembly` | [hft-sequencer](../hft-sequencer/README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用) | 决策装配事实(实例角色、gw 顺序、feed 集合、账户 key 槽位要求及 advisor/Drain 参数);不含秘密 |
 
 ECF1 段 id 只追加、永不复用。每段只有一种行格式(`SectionEntry` 只有一个 `row_ver` 与 `row_size`);一个归属 crate 需要两种行时各占一段,在上表追加。`EngineConfig::load` 只做容器级校验:同 RDB1 第 1 步(magic 为 `HFTECF01`,`host_class` 编码合法)与第 10 步的版本规则(`current` 存在时 `version > current.version`,SHA-256 相同 → `AlreadyActive`);冷读者只调用它。`EngineConfig::validate` 按段 id 升序对每个存在的段调用 `section` 相同的 `EngineValidator`;存在而没有验证器的段 → `NoValidator`(`section` = 段 id),验证器返回的错误原样收集。`host_class` 与运行主机不符由 `check_assembly` 拒绝(`HostClassMismatch`)。**容量可以缩小,但只经 Drain + 新 EngineConfig 重启**(变更 = 重启,与 refdata 相同;`load` 不比较新旧容量):恢复快照时,各归属 crate 的 `restore` 发现当前占用(槽、cell、定时器、实例、订阅 inst、积压的输出)超过新容量 → `CapacityShrink`,hft-core 退出 2(退出码归 [apps/hft-core](../../apps/hft-core/README.md));不超过则按新容量重新分配并继续。
 

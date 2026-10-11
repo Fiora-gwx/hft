@@ -7,6 +7,7 @@
     clippy::too_many_arguments,
     clippy::type_complexity
 )] // allow-list: test code, not a hot path (crate level, as in the former per-file binaries)
+mod blob;
 mod broken;
 mod bucket;
 mod chain;

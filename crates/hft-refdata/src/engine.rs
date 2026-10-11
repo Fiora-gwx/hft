@@ -20,10 +20,11 @@ pub enum EngineSection {
     Sequencer = 5,
     Conn = 6,
     Exec = 7,
+    Assembly = 8,
 }
 
 impl EngineSection {
-    pub const ALL: [EngineSection; 7] = [
+    pub const ALL: [EngineSection; 8] = [
         EngineSection::Oms,
         EngineSection::Ledger,
         EngineSection::Capacities,
@@ -31,6 +32,7 @@ impl EngineSection {
         EngineSection::Sequencer,
         EngineSection::Conn,
         EngineSection::Exec,
+        EngineSection::Assembly,
     ];
 }
 

@@ -21,6 +21,7 @@
 #[cfg(target_endian = "big")]
 compile_error!("hft-risk: snapshot rows are little-endian only");
 
+mod blob;
 mod bucket;
 mod chain;
 mod classify;
@@ -32,6 +33,8 @@ mod pnl_gate;
 pub mod snapshot;
 mod types;
 mod vec;
+
+pub use blob::{RISK_BLOB_MAGIC, RiskBlobError};
 
 use hft_event::{AccountConfigReportHdr, CmdScope, LeverageItem, Note, NoteLevel};
 use hft_refdata::{AccountKind, InstHot, InstStatus, RefData};

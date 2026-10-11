@@ -13,6 +13,7 @@ mod cid;
 mod codes;
 mod common;
 mod config;
+mod config_blob;
 mod external;
 mod flags;
 mod fsm;

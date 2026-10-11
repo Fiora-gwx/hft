@@ -284,6 +284,18 @@ pub struct ForeignFill {                           // 防御路径与 StaleGen �
 | `expire_window_ms[venue]` | u32 | 无 | 该所下单请求的过期保护窗口(`recvWindow`/`expTime` 的配置值),只用于推出 `not_found_grace_ms` 的默认值 |
 | `max_groups` | u32 | 4096 | LegTracker 容量((account, group) 条目数;`on_groups_changed` 不分配) |
 
+
+ECF1 段 1 的行版本为 1,`OmsConfigRow` 为 16 B 小端 `{field:u16, venue:u8, account:u8, reserved:u32, value:i64}`。默认行的 venue/account 均为 0;venue 覆盖只填 venue,表覆盖同时填 venue/account;reserved 必须为 0。`Option` 用 −1 表示 None,其余值按原类型范围检查。字段编号固定如下,不沿用上表的显示顺序。
+
+| field | 参数 |
+|---|---|
+| 1–6 | slots、links_per_account、max_groups、ack_timeout_ms、cancel_timeout_ms、ioc_timeout_ms |
+| 7–12 | unknown_query_interval_ms、unknown_max_queries、unknown_alarm_ms、out_quota、not_found_grace_ms、expire_window_ms |
+| 13–18 | smoke_far_bp、reuse_quarantine_ms、tombstone_gens、tombstone_keep_ms、sweep_batch、max_out_per_event |
+| 19–25 | hedge_retry_max、hedge_retry_min_ms、hedge_deadline_ms、resume_hold_max_ms、foreign_fill_track、ext_held_track、decode_fail_down_n |
+
+`to_rows` 明写全部 25 个默认值,按 (field, venue, account) 排序;同键覆盖取 `PerVenue` / `PerTable` 的最后有效值。`from_rows` / `from_engine` 拒绝缺默认行、重复键、未知字段、非法作用域或引用,不会补读当前配置。编解码只在冷路径分配;`engine_epoch` 与频率由 journal 快照与时钟提供。
+
 `OmsConfig` 另带本次运行的 `engine_epoch` 与 `tsc_hz_milli`(启动装配给出,不是可调参数);全部 `*_ms` 按后者换算成 TSC。
 
 对冲腿定价的报价连接健康阈值 `conn_liveness_ms`(默认 2 000)与越价上限 `rr_max_cross` 不在本表:它们是 [hft-risk `RiskParams`](../hft-risk/README.md) 字段,风控检查链 #5(含 B1 第二腿 `LINK_STALE`)与 `price_hedge` 用同一个值,由 sequencer 经 [hft-types `HedgePxLimits`](../hft-types/README.md#对冲定价限值) 传入。尘埃线、补腿阈值、残余规则与 Broken 处置时长不在本表:它们是 [hft-exec 配置](../hft-exec/README.md#配置项execconfigengineconfig-blob-的-exec-段每账户一行--全局默认行变更--drain--重启)与目标/链接参数。gw 暂存无法归属成交的时长 `gw.unmatched_hold_ms`(默认 5 000)归 [hft-venue](../hft-venue/README.md)。

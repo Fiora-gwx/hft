@@ -14,6 +14,7 @@ mod cell;
 mod class;
 mod common;
 mod config;
+mod config_blob;
 mod decision;
 mod deps;
 mod detail;

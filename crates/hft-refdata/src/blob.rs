@@ -517,7 +517,7 @@ pub(crate) fn parse_container<'a>(
                 }
                 rdb_row_size(e.id)
             }
-            Kind::Ecf => (1..=7).contains(&e.id).then_some(0),
+            Kind::Ecf => crate::EngineSection::try_from(e.id).ok().map(|_| 0),
         };
         let Some(known) = known else {
             if e.flags & SECTION_OPTIONAL == 0 {

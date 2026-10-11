@@ -37,7 +37,7 @@ spec: README.md
 | 令牌桶 | RSK-036–RSK-040、RSK-272 |
 | 存储降级(Storage) | RSK-220–RSK-222、RSK-281 |
 | 下架与公告(VenueNotice) | RSK-141、RSK-223 |
-| 配置(`RiskParams`,版本化,经 `SetRisk` 替换并作为 `ConfigBlob` 写入 journal) | RSK-001、RSK-003–RSK-006、RSK-028、RSK-032 |
+| 配置(`RiskParams`,版本化,经 `SetRisk` 替换并作为 `ConfigBlob` 写入 journal) | RSK-001、RSK-003–RSK-006、RSK-028、RSK-032、RSK-284–RSK-286 |
 | 引擎单与执行配置的一致性(`ExecRiskMismatch`) | RSK-007 |
 | 快照行格式(节 4、17、18、23;草案,实现时以代码与编译期断言为准) | RSK-008、RSK-009、RSK-230 |
 | 规划源文件 | RSK-001–RSK-013、RSK-020、RSK-036、RSK-060、RSK-100、RSK-130、RSK-160、RSK-180、RSK-190、RSK-200、RSK-270 |
@@ -2358,6 +2358,36 @@ spec: README.md
 | RSK-283.1 | T + 10 s − 1 ns | 早到:档位 L0 不变;`timers = [(MarginStale{2, B}, T + 10 s + 1 ns)]`;无 `mode` |
 | RSK-283.2 | T + 10 s(`now − mark_ens = mark_stale_ms`) | 同 .1(未过期) |
 | RSK-283.3 | T + 10 s + 1 ns | 档位 L1;`mode = [Auto(MarginStress{level 1})]` |
+
+### RSK-284 RKP1 完整字段往返与规范编码
+
+- 规则:[配置](README.md#配置riskparams版本化经-setrisk-替换并作为-configblob-写入-journal)
+- 级别:unit
+- 里程碑:M2
+- 前置:R0 的 P0,非零版本、负 generated_at_ns 与 16 B author
+- 步骤:编码后在只持有 refdata 与字节的路径解码;扩大原参数向量的容量后再次编码
+- 期望:头部的 magic、版本、时间与 author 字节符合 RKP1;全部全局字段、类别、账户、venue 与 group 行逐字段相同;编码不受向量容量影响,解码后重编码逐字节相同
+- 实现:`crates/hft-risk/tests/blob.rs::rsk_284_risk_blob_roundtrip`
+
+### RSK-285 RKP1 拒绝不完整、歧义或缺引用的配置
+
+- 规则:[配置](README.md#配置riskparams版本化经-setrisk-替换并作为-configblob-写入-journal)
+- 级别:unit
+- 里程碑:M2
+- 前置:RSK-284 的有效 blob
+- 步骤:分别枚举每个截断点,破坏 magic/version/u32 字段/count/bool,追加尾字节;重复账户、删账户、指定未知 inst
+- 期望:全部返回错误;缺失限额不由默认配置补齐,不存在窄整数截断
+- 实现:`crates/hft-risk/tests/blob.rs::rsk_285_risk_blob_rejects_malformed`
+
+### RSK-286 两份 RKP1 配置可在新线程独立解码
+
+- 规则:[配置](README.md#配置riskparams版本化经-setrisk-替换并作为-configblob-写入-journal)
+- 级别:unit
+- 里程碑:M2
+- 前置:同一 refdata 的两份参数,单笔名义上限与 conn_liveness_ms 不同
+- 步骤:四个新线程交替解码两份 blob,不传当前 RiskParams 或配置回调
+- 期望:每个线程重编码等于其输入,两份参数没有交叉污染
+- 实现:`crates/hft-risk/tests/blob.rs::rsk_286_risk_blob_no_process_state`
 
 ## 验收
 

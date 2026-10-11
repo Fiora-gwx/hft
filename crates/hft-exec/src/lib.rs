@@ -22,6 +22,9 @@ compile_error!("hft-exec: snapshot rows are little-endian only");
 mod advance;
 #[cfg(feature = "testkit")]
 pub mod audit;
+mod config_blob;
+
+pub use config_blob::{EXEC_CONFIG_ROW_VERSION, ExecConfigRow};
 mod broken;
 pub mod calc;
 pub mod decision;
