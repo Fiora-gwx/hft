@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use crate::fixture;
 
-fn three_hours() -> &'static fixture::Fixture {
+pub(super) fn three_hours() -> &'static fixture::Fixture {
     static F: OnceLock<fixture::Fixture> = OnceLock::new();
     F.get_or_init(|| fixture::path_model(3))
 }
@@ -97,7 +97,7 @@ fn advice_count(log: &Log, after: u64, min_basis: u64) -> usize {
         })
         .count()
 }
-fn h2(log: &Log) -> u64 {
+pub(super) fn h2(log: &Log) -> u64 {
     log.recs
         .iter()
         .find(|r| {

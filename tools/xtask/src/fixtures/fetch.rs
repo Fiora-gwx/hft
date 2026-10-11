@@ -10,19 +10,13 @@ use sha2::{Digest, Sha256};
 use crate::exec::{Cmd, Exec};
 use crate::{EXIT_ENV, EXIT_OK, EnvError};
 
-#[derive(Debug)]
-struct Pointer {
-    name: String,
-    uri: String,
-    sha256: String,
-    bytes: u64,
-}
+use super::pointer::{self, Content, Object, Pointer};
 
-fn error(path: &Path, e: impl std::fmt::Display) -> EnvError {
+pub(crate) fn error(path: &Path, e: impl std::fmt::Display) -> EnvError {
     EnvError(format!("{}: {e}", path.display()))
 }
 
-fn regular(path: &Path) -> Result<Option<fs::Metadata>, EnvError> {
+pub(crate) fn regular(path: &Path) -> Result<Option<fs::Metadata>, EnvError> {
     match fs::symlink_metadata(path) {
         Ok(m) if m.file_type().is_file() => Ok(Some(m)),
         Ok(_) => Err(error(path, "expected a regular file, not a link or directory")),
@@ -31,7 +25,7 @@ fn regular(path: &Path) -> Result<Option<fs::Metadata>, EnvError> {
     }
 }
 
-fn directory(path: &Path) -> Result<(), EnvError> {
+pub(crate) fn directory(path: &Path) -> Result<(), EnvError> {
     match fs::symlink_metadata(path) {
         Ok(m) if m.file_type().is_dir() => Ok(()),
         Ok(_) => Err(error(path, "expected a directory, not a link or file")),
@@ -40,61 +34,6 @@ fn directory(path: &Path) -> Result<(), EnvError> {
         }
         Err(e) => Err(error(path, e)),
     }
-}
-
-fn read_pointer(path: &Path) -> Result<Pointer, EnvError> {
-    regular(path)?.ok_or_else(|| error(path, "pointer missing"))?;
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .and_then(|n| n.strip_suffix(".pointer.toml"))
-        .filter(|n| {
-            !n.is_empty()
-                && n.bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_'))
-        })
-        .ok_or_else(|| error(path, "pointer name must use ASCII letters, digits, '-' or '_'"))?;
-    let text = fs::read_to_string(path).map_err(|e| error(path, e))?;
-    let t: toml::Table = text.parse().map_err(|e| error(path, e))?;
-    let string = |key| {
-        t.get(key)
-            .and_then(toml::Value::as_str)
-            .ok_or_else(|| error(path, format!("missing string {key}")))
-    };
-    let uri = string("uri")?;
-    let (bucket, key) = uri
-        .strip_prefix("s3://")
-        .and_then(|u| u.split_once('/'))
-        .ok_or_else(|| error(path, "uri must be s3://<bucket>/hft-fixtures/<key>.zst"))?;
-    if bucket.is_empty()
-        || !bucket
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'-'))
-        || !key.starts_with("hft-fixtures/")
-        || !key.ends_with(".zst")
-        || key.split('/').any(|p| p.is_empty() || matches!(p, "." | ".."))
-        || !key
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'-' | b'_' | b'.'))
-    {
-        return Err(error(path, "invalid fixture S3 URI"));
-    }
-    let sha256 = string("sha256")?;
-    if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(error(path, "sha256 must contain exactly 64 hexadecimal digits"));
-    }
-    let bytes = t
-        .get("bytes")
-        .and_then(toml::Value::as_integer)
-        .and_then(|n| u64::try_from(n).ok())
-        .filter(|n| *n > 0)
-        .ok_or_else(|| error(path, "bytes must be a positive integer"))?;
-    Ok(Pointer {
-        name: name.into(),
-        uri: uri.into(),
-        sha256: sha256.to_ascii_lowercase(),
-        bytes,
-    })
 }
 
 fn pointers(root: &Path) -> Result<Vec<Pointer>, EnvError> {
@@ -117,10 +56,20 @@ fn pointers(root: &Path) -> Result<Vec<Pointer>, EnvError> {
     }
     paths.sort();
     // Validate the entire manifest before a download, deletion or cache directory creation.
-    paths.iter().map(|p| read_pointer(p)).collect()
+    let mut names = std::collections::BTreeSet::new();
+    paths
+        .iter()
+        .map(|p| {
+            let pointer = pointer::read(p)?;
+            if !names.insert(pointer.name.to_ascii_lowercase()) {
+                return Err(error(p, "case-alias pointer names"));
+            }
+            Ok(pointer)
+        })
+        .collect()
 }
 
-fn matches(path: &Path, p: &Pointer) -> Result<bool, EnvError> {
+pub(crate) fn matches(path: &Path, p: &Object) -> Result<bool, EnvError> {
     let Some(meta) = regular(path)? else {
         return Ok(false);
     };
@@ -147,9 +96,9 @@ fn matches(path: &Path, p: &Pointer) -> Result<bool, EnvError> {
     Ok(read == p.bytes && format!("{:x}", hash.finalize()) == p.sha256)
 }
 
-struct Staging(PathBuf);
+pub(super) struct Staging(pub(super) PathBuf);
 impl Staging {
-    fn create(cache: &Path) -> Result<Self, EnvError> {
+    pub(super) fn create(cache: &Path) -> Result<Self, EnvError> {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         for _ in 0..128 {
             let n = NEXT.fetch_add(1, Ordering::Relaxed);
@@ -206,8 +155,15 @@ fn fetch(root: &Path, exec: &mut dyn Exec) -> Result<usize, EnvError> {
     directory(&target)?;
     let cache = target.join("fixtures-cache");
     directory(&cache)?;
-    for p in &pointers {
-        let dest = cache.join(&p.name);
+    for pointer in &pointers {
+        let dest = cache.join(&pointer.name);
+        let p = match &pointer.content {
+            Content::Object(p) => p,
+            Content::Files(b) => {
+                super::bundle::fetch(&cache, &pointer.name, b, exec)?;
+                continue;
+            }
+        };
         if matches(&dest, p)? {
             continue;
         }
@@ -215,30 +171,7 @@ fn fetch(root: &Path, exec: &mut dyn Exec) -> Result<usize, EnvError> {
             fs::remove_file(&dest).map_err(|e| error(&dest, e))?;
         }
         let staging = Staging::create(&cache)?;
-        let compressed = staging.0.join("object.zst");
-        let decoded = staging.0.join("object");
-        command(
-            exec,
-            Cmd::capture("aws", &["s3", "cp"])
-                .arg(&p.uri)
-                .arg(compressed.display().to_string())
-                .arg("--only-show-errors")
-                .arg("--no-progress"),
-        )?;
-        regular(&compressed)?.ok_or_else(|| error(&compressed, "download produced no file"))?;
-        command(
-            exec,
-            Cmd::capture("zstd", &["--decompress", "--quiet", "--keep", "--memory=128MB"])
-                .arg(compressed.display().to_string())
-                .arg("-o")
-                .arg(decoded.display().to_string()),
-        )?;
-        if !matches(&decoded, p)? {
-            return Err(error(
-                &decoded,
-                format!("decompressed SHA-256 or bytes differ from pointer {}", p.name),
-            ));
-        }
+        let decoded = download(&staging.0, p, exec)?;
         // Another fetch may have completed concurrently. Never overwrite an unverified path.
         if regular(&dest)?.is_some() {
             if matches(&dest, p)? {
@@ -256,4 +189,32 @@ fn fetch(root: &Path, exec: &mut dyn Exec) -> Result<usize, EnvError> {
         }
     }
     Ok(pointers.len())
+}
+
+pub(super) fn download(stage: &Path, p: &Object, exec: &mut dyn Exec) -> Result<PathBuf, EnvError> {
+    let compressed = stage.join("object.zst");
+    let decoded = stage.join("object");
+    command(
+        exec,
+        Cmd::capture("aws", &["s3", "cp"])
+            .arg(&p.uri)
+            .arg(compressed.display().to_string())
+            .arg("--only-show-errors")
+            .arg("--no-progress"),
+    )?;
+    regular(&compressed)?.ok_or_else(|| error(&compressed, "download produced no file"))?;
+    command(
+        exec,
+        Cmd::capture("zstd", &["--decompress", "--quiet", "--keep", "--memory=128MB"])
+            .arg(compressed.display().to_string())
+            .arg("-o")
+            .arg(decoded.display().to_string()),
+    )?;
+    if !matches(&decoded, p)? {
+        return Err(error(
+            &decoded,
+            format!("decompressed SHA-256 or bytes differ from pointer {}", p.uri),
+        ));
+    }
+    Ok(decoded)
 }

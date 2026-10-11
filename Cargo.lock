@@ -1564,6 +1564,7 @@ dependencies = [
  "hft-types",
  "serde_json",
  "sha2",
+ "xtask",
  "zerocopy",
 ]
 

@@ -195,6 +195,7 @@ replayer compare --a s3://<bucket>/<prefix>/<host>/prod/… --b s3://<bucket>/<p
 ## 依赖
 
 - 内部:`hft-sequencer`、`hft-strategy-sdk`、`hft-exec`、`hft-strat-lib`、`hft-oms`、`hft-risk`、`hft-ledger`、`hft-book`、`hft-event`、`hft-refdata`、`hft-sim`(默认 feature,纯核心)、`hft-journal`(`JournalReader`;启用 `writer` 特性只为 `--emit-journal` 的 `JournalWriter::open_offline`)、`hft-strategy-registry`(经它引入已注册的 `strategies/*`)、`hft-telemetry`(直方图、账户报告字段与 `event_weighted()` 的计算)、`venue-*`(仅 raw-decode,可选扩展)。
+- 测试专用:`xtask` 库用于整套 fixture 获取与验证包装器的集成检查,执行器调用 CI 预先构建的 example,测试不启动编译器。
 - 外部:`arrow`/`parquet`(输出)、`zstd`、`tokio` + AWS SDK S3(只在输入下载环节)、`hdrhistogram`、`clap`。
 - 禁止:`hft-net`、`hft-venue` 的运行时(不连任何网络)、`JournalWriter::open`(热段写者);`--emit-journal` 不写 hugetlbfs/tmpfs、不写生产 journal 根。
 
@@ -210,6 +211,8 @@ replayer compare --a s3://<bucket>/<prefix>/<host>/prod/… --b s3://<bucket>/<p
 ## 已知限制与后续工作
 
 - RPL-270/271 在 CI 现场生成完整 1 h/3 h 的路径 Model 文件,由同一入口的独立测试进程执行。单个 Live 账户 acct-l 绑定实例 tsa,真实 SimExchange 产生回报,advisor 每 10 min 写检查点,sequencer 每 5 min 请求关键帧并保留整点滚段;检查点后窗口的比较数与路径版本变化后的 120 s 重建点从输入独立计算。CI 先构建 examples 再运行测试。生成文件尚未发布为带哈希的固定 T1/T3 样本,不计 RPL-010/040/046 的固定样本验收。
+
+- RPL-281 将三小时生成样本的四个 journal 段、seal 和两份 Model 检查点经 [整套指针](../../fixtures/README.md#大文件s3-指针) 获取与复用,再由工具包装器驱动三项真实回放。只替换 S3 交付和预构建程序位置;此证据仍属生成样本,不代表已发布的固定样本或真实 OIDC 下载。
 
 - RPL-042/053/054/062 用真实写者和 advisor 验证 Model 输入边界:运行 20 min 后首份参数创建实例,三块不同预热数据及中途检查点,Advice 环阻塞 10 s 后实际合并 37 次,损坏检查点恢复后的单段空起步。RPL-274 的预热内容和最终 Advice 反例经正式读者确认只改目标载荷字节,普通 Output 比对与 Model 分歧分别报告。
 - 当前可执行入口覆盖本地连续、封闭 seq 文件的 `verify --advice journal|recompute`,支持单文件或目录递归搜集 `.jrn`、from/to seq、instance 校验、keep-going、JSON 报告与只读 `--check`。生产二进制只装配 registry;集成测试可向同一泛型入口注入测试策略集。读取直接使用原路径,先完成整组文件预检;目录内不按文件名推断顺序。

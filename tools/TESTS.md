@@ -21,13 +21,13 @@ spec: README.md
 | cargo xtask deps | TOOL-030–TOOL-031、TOOL-118 |
 | cargo xtask hot-check | TOOL-032 |
 | cargo xtask bench-gate | TOOL-033–TOOL-038、TOOL-185 |
-| cargo xtask replay-verify | TOOL-039–TOOL-046、TOOL-192 |
+| cargo xtask replay-verify | TOOL-039–TOOL-046、TOOL-192、TOOL-198–TOOL-204 |
 | cargo xtask dst | TOOL-009、TOOL-047–TOOL-056 |
 | cargo xtask gen-schema | TOOL-057–TOOL-061、TOOL-179 |
 | cargo xtask gen-host | TOOL-062–TOOL-065 |
 | cargo xtask doc-check | TOOL-066–TOOL-068、TOOL-178 |
 | cargo xtask new-strategy | TOOL-069–TOOL-071 |
-| 其他 xtask 子命令 | TOOL-072–TOOL-091、TOOL-180、TOOL-193–TOOL-197 |
+| 其他 xtask 子命令 | TOOL-072–TOOL-091、TOOL-180、TOOL-193–TOOL-204 |
 | az-probe | TOOL-092–TOOL-099 |
 | hostprobe | TOOL-100–TOOL-113 |
 | hft-secrets | TOOL-114–TOOL-118、TOOL-181 |
@@ -3001,6 +3001,161 @@ spec: README.md
 | TOOL-197.2 | fixtures-cache | 同上 |
 | TOOL-197.3 | 缓存对象 | 同上 |
 | TOOL-197.4 | 指针文件 | 同上 |
+
+### TOOL-198 整套获取与缓存复用
+
+- 规则:[大文件指针](../fixtures/README.md#大文件s3-指针)、[replay-verify](README.md#cargo-xtask-replay-verify)
+- 级别:integ
+- 里程碑:M2
+- 前置:两个合成 journal 段、两个 seal 和一个检查点,各对象经真实 zstd 压缩,只有 S3 下载以本地对象存储替换
+- 步骤:获取整套,删除可用远端对象后重复获取
+- 期望:首次下载五个对象,缓存路径与原始字节逐一相等,无锁或临时目录残留;第二次不运行 AWS/zstd,退出 0
+- 实现:`tools/xtask/tests/fixtures_bundle.rs::tool_198_bundle_fetch_is_complete_and_exact_cache_is_reused`
+
+### TOOL-199 整套失败不发布部分内容
+
+- 规则:[大文件指针](../fixtures/README.md#大文件s3-指针)、[replay-verify](README.md#cargo-xtask-replay-verify)
+- 级别:table
+- 里程碑:M2
+- 前置:空缓存与已损坏缓存各一行,清单最后一个对象不可取
+- 步骤:先失败获取并尝试回放,再补齐对象重取
+- 期望:两行首次退出 2;空缓存不发布部分目录,旧损坏缓存保留且回放拒绝;补齐后整套替换成功,三项检查均执行,临时目录与锁清理
+- 实现:`tools/xtask/tests/fixtures_bundle.rs::tool_199_bundle_failure_never_publishes_partial_set_and_refreshes_corruption`
+
+| 行 | 输入或扰动 | 期望 |
+|---|---|---|
+| TOOL-199.1 | 空缓存,最后对象下载失败 | 无部分缓存;回放拒绝;补齐后通过 |
+| TOOL-199.2 | 损坏旧缓存,最后对象下载失败 | 旧内容保留且回放拒绝;补齐后整套替换 |
+
+
+### TOOL-200 整套清单完整预检
+
+- 规则:[大文件指针](../fixtures/README.md#大文件s3-指针)、[replay-verify](README.md#cargo-xtask-replay-verify)
+- 级别:table
+- 里程碑:M2
+- 前置:排在前面的正确指针和排在后面的错误指针;缓存不存在
+- 步骤:逐项改变版本、策略集、路径、字段、成员和检查矩阵
+- 期望:每项退出 2,不创建 target、不调用外部程序;覆盖未知字段、空列表、缺 seal、重复与大小写别名、文件/目录重叠、设备名、路径越界、无效 URI/大小、无效检查点/窗口/Advice 和重复检查名
+- 实现:`tools/xtask/tests/fixtures_bundle.rs::tool_200_bundle_manifests_preflight_before_any_side_effects`
+
+| 行 | 输入或扰动 | 期望 |
+|---|---|---|
+| TOOL-200.1 | 未知格式版本 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.2 | 未知策略集 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.3 | journal 目录未声明 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.4 | 文件路径含 .. | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.5 | 绝对路径 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.6 | Windows 盘符 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.7 | 空路径段 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.8 | 路径含 . 段 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.9 | Windows 设备名 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.10 | 路径段以点结尾 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.11 | 文件与目录重叠 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.12 | 目录大小写别名 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.13 | 重复文件 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.14 | journal 缺 seal 配对 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.15 | 未知 Advice 模式 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.16 | 检查名大小写重复 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.17 | 检查点未声明 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.18 | 检查点为整数 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.19 | from_seq 为零 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.20 | from_seq 大于 to_seq | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.21 | from_seq 为字符串 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.22 | to_seq 为负数 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.23 | 大小为零 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.24 | 非 S3 URI | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.25 | format 为整数 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.26 | 外层未知 command 字段 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.27 | journal 模式带检查点 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.28 | 检查行未知字段 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.29 | 文件行未知字段 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.30 | 空 files 列表 | 获取与回放退出 2,无目录创建或外部调用 |
+| TOOL-200.31 | 空 checks 列表 | 获取与回放退出 2,无目录创建或外部调用 |
+
+
+### TOOL-201 回放复核精确成员集合
+
+- 规则:[大文件指针](../fixtures/README.md#大文件s3-指针)、[replay-verify](README.md#cargo-xtask-replay-verify)
+- 级别:table
+- 里程碑:M2
+- 前置:合格整套缓存
+- 步骤:分别同长改内容、删除一个段、添加额外文件、添加空目录、删除检查点目录
+- 期望:五行退出 2,均在启动回放子进程之前失败
+- 实现:`tools/xtask/tests/fixtures_bundle.rs::tool_201_bundle_replay_rejects_changed_missing_and_extra_members`
+
+| 行 | 输入或扰动 | 期望 |
+|---|---|---|
+| TOOL-201.1 | 同长改动 journal 字节 | 退出 2,不启动回放 |
+| TOOL-201.2 | 缺少 journal 段 | 退出 2,不启动回放 |
+| TOOL-201.3 | 多余普通文件 | 退出 2,不启动回放 |
+| TOOL-201.4 | 多余空目录 | 退出 2,不启动回放 |
+| TOOL-201.5 | 缺少检查点目录 | 退出 2,不启动回放 |
+
+
+### TOOL-202 整套策略映射与检查矩阵
+
+- 规则:[大文件指针](../fixtures/README.md#大文件s3-指针)、[replay-verify](README.md#cargo-xtask-replay-verify)
+- 级别:table
+- 里程碑:M2
+- 前置:两种允许的策略集,普通回放/重算/检查点窗口三项检查
+- 步骤:注入子进程退出 0/1/2/3/4/负值,逐项检查执行参数;额外传 CLI 窗口
+- 期望:程序名及参数精确匹配封闭映射;0/1/3/4 执行三项,2/负值在首项停止,总码依次为 0/1/2/1/1/2;额外 CLI 参数退出 2 且不执行
+- 实现:`tools/xtask/tests/fixtures_bundle.rs::tool_202_bundle_replay_dispatches_closed_strategy_and_all_declared_checks`
+
+| 行 | 输入或扰动 | 期望 |
+|---|---|---|
+| TOOL-202.1 | 子进程 0 | 三项全执行,总码 0 |
+| TOOL-202.2 | 子进程 1 | 三项全执行,总码 1 |
+| TOOL-202.3 | 子进程 3 | 三项全执行,总码 1 |
+| TOOL-202.4 | 子进程 4 | 三项全执行,总码 1 |
+| TOOL-202.5 | 子进程 2 | 首项后停止,总码 2 |
+| TOOL-202.6 | 子进程负值 | 首项后停止,总码 2 |
+| TOOL-202.7 | 额外 CLI from_seq | 退出 2,无子进程 |
+
+
+### TOOL-203 成功退出不能代替回放证据
+
+- 规则:[大文件指针](../fixtures/README.md#大文件s3-指针)、[replay-verify](README.md#cargo-xtask-replay-verify)
+- 级别:table
+- 里程碑:M2
+- 前置:子进程退出 0 的三项检查
+- 步骤:注入空输出、非法 JSON、null、空对象、缺计数、verify 失败、非零 mismatch、零 Output/快照、重算 skipped 或零 Advice;另注入退出 1 却无报告
+- 期望:每项退出 2 并停止;重算证据问题在第二项发现,其他问题在第一项发现
+- 实现:`tools/xtask/tests/fixtures_bundle.rs::tool_203_bundle_success_requires_nonempty_consistent_report`
+
+| 行 | 输入或扰动 | 期望 |
+|---|---|---|
+| TOOL-203.1 | 空 stdout | 总码 2,首项后停止 |
+| TOOL-203.2 | 非法 JSON | 总码 2,首项后停止 |
+| TOOL-203.3 | JSON null | 总码 2,首项后停止 |
+| TOOL-203.4 | 空对象 | 总码 2,首项后停止 |
+| TOOL-203.5 | 缺少比较数 | 总码 2,首项后停止 |
+| TOOL-203.6 | verify 失败 | 总码 2,首项后停止 |
+| TOOL-203.7 | mismatch 非零 | 总码 2,首项后停止 |
+| TOOL-203.8 | Output 比较数为零 | 总码 2,首项后停止 |
+| TOOL-203.9 | 快照比较数为零 | 总码 2,首项后停止 |
+| TOOL-203.10 | recompute 为 skipped | 总码 2,第二项后停止 |
+| TOOL-203.11 | Advice 比较数为零 | 总码 2,第二项后停止 |
+| TOOL-203.12 | 子进程退出 1 却无报告 | 总码 2,首项后停止 |
+
+
+### TOOL-204 整套独占锁与链接拒绝
+
+- 规则:[大文件指针](../fixtures/README.md#大文件s3-指针)、[replay-verify](README.md#cargo-xtask-replay-verify)
+- 级别:table
+- 里程碑:M2
+- 前置:已有整套缓存与独占锁;Unix 另设缓存根、子目录、成员文件为指向树外哨兵的符号链接
+- 步骤:调用获取与回放
+- 期望:已有锁令获取退出 2 且锁内容不变;各链接行两入口均退出 2,无外部调用,链接与树外哨兵不变
+- 实现:`tools/xtask/tests/fixtures_bundle.rs::tool_204_bundle_lock_and_links_never_touch_external_targets`
+
+| 行 | 输入或扰动 | 期望 |
+|---|---|---|
+| TOOL-204.1 | 已有独占锁 | 获取退出 2,原锁内容不变 |
+| TOOL-204.2 | Unix 成员文件为符号链接 | 获取和回放退出 2,目标与链接不变 |
+| TOOL-204.3 | Unix 子目录为符号链接 | 同上 |
+| TOOL-204.4 | Unix 缓存根为符号链接 | 同上 |
+
 
 ## 验收
 

@@ -10,6 +10,8 @@
 //! applies the `[[replace]]` rules (`pattern` regex → `with`) to UTF-8 files in place.
 
 pub mod fetch;
+pub(crate) mod bundle;
+pub(crate) mod pointer;
 
 use std::path::Path;
 use std::sync::LazyLock;

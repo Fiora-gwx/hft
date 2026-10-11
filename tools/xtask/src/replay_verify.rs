@@ -1,38 +1,18 @@
 //! `cargo xtask replay-verify <journal-dir | fixtures/replay/<name>.pointer.toml> …` (tools/README.md
-//! "cargo xtask replay-verify"). A pointer is
-//! resolved to its cached copy `target/fixtures-cache/<name>` (written by `fixtures fetch`), whose SHA-256
-//! must equal the pointer's `sha256` (missing or different → exit 2). Execution uses the same
-//! locked CI profile as other verification tools; the application owns replay semantics.
+//! "cargo xtask replay-verify"). Single objects and files-v1 sets share acquisition's manifest
+//! parser and revalidate cache bytes before executing. Bundle checks are closed, immutable input
+//! descriptions; they cannot select an arbitrary program or weaken the matrix through CLI overrides.
+//! Execution uses the locked CI profile; the application owns replay semantics.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use sha2::{Digest, Sha256};
+use serde_json::{Value, json};
+
+use crate::fixtures::{bundle, fetch, pointer};
+use pointer::{Content, StrategySet};
 
 use crate::exec::{Cmd, Exec};
 use crate::{EXIT_ENV, EnvError};
-
-fn check_pointer(root: &Path, rel: &str) -> Result<PathBuf, EnvError> {
-    let text = std::fs::read_to_string(root.join(rel)).map_err(|e| EnvError(format!("read {rel}: {e}")))?;
-    let t: toml::Table = text.parse().map_err(|e| EnvError(format!("parse {rel}: {e}")))?;
-    let want = t
-        .get("sha256")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| EnvError(format!("{rel}: missing sha256")))?
-        .to_ascii_lowercase();
-    let name = Path::new(rel)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .and_then(|n| n.strip_suffix(".pointer.toml"))
-        .ok_or_else(|| EnvError(format!("{rel}: not a <name>.pointer.toml")))?;
-    let cache = format!("target/fixtures-cache/{name}");
-    let b = std::fs::read(root.join(&cache))
-        .map_err(|e| EnvError(format!("{cache}: {e} (run `cargo xtask fixtures fetch` first)")))?;
-    let got: String = Sha256::digest(&b).iter().map(|x| format!("{x:02x}")).collect();
-    if got != want {
-        return Err(EnvError(format!("{cache}: SHA-256 {got} != pointer {want}")));
-    }
-    Ok(root.join(cache))
-}
 
 /// Entry point.
 pub fn run(root: &Path, args: &[String]) -> i32 {
@@ -66,7 +46,38 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
         i += 2;
     }
     let res = if input.ends_with(".pointer.toml") {
-        check_pointer(root, input)
+        let pointer = match pointer::read(&root.join(input)) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("replay-verify: {e}");
+                return EXIT_ENV;
+            }
+        };
+        let cache = match bundle::cache_root(root) {
+            Ok(p) => p.join(&pointer.name),
+            Err(e) => {
+                eprintln!("replay-verify: {e}");
+                return EXIT_ENV;
+            }
+        };
+        match pointer.content {
+            Content::Files(b) => {
+                if args.len() != 1 {
+                    eprintln!("replay-verify: bundle checks cannot be overridden by CLI options");
+                    return EXIT_ENV;
+                }
+                match bundle::verified(&cache, &b) {
+                    Ok(true) => return run_bundle(&pointer.name, &cache, &b, exec),
+                    Ok(false) => Err(EnvError("bundle cache missing or differs from manifest".into())),
+                    Err(e) => Err(e),
+                }
+            }
+            Content::Object(p) => match fetch::matches(&cache, &p) {
+                Ok(true) => Ok(cache),
+                Ok(false) => Err(EnvError("cached SHA-256 or bytes differ from pointer".into())),
+                Err(e) => Err(e),
+            },
+        }
     } else if root.join(input).is_dir() || root.join(input).is_file() {
         Ok(root.join(input))
     } else {
@@ -108,4 +119,80 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
             EXIT_ENV
         }
     }
+}
+
+fn run_bundle(name: &str, cache: &Path, b: &pointer::Bundle, exec: &mut dyn Exec) -> i32 {
+    let mut checks = Vec::new();
+    let mut code = 0;
+    for check in &b.checks {
+        let mut cmd = Cmd::capture("cargo", &["run", "--locked", "--profile", "ci", "-p", "replayer"]);
+        if b.strategy_set == StrategySet::TestkitReplayV1 {
+            cmd = cmd.arg("--example").arg("replay_probe");
+        }
+        cmd = cmd
+            .arg("--")
+            .arg("verify")
+            .arg("--journal")
+            .arg(cache.join(&b.journal).display().to_string())
+            .arg("--advice")
+            .arg(&check.advice);
+        if let Some(path) = &check.checkpoint {
+            cmd = cmd
+                .arg("--model-checkpoint")
+                .arg(cache.join(path).display().to_string());
+        }
+        for (option, bound) in [("--from-seq", check.from_seq), ("--to-seq", check.to_seq)] {
+            if let Some(n) = bound {
+                cmd = cmd.arg(option).arg(n.to_string());
+            }
+        }
+        let out = match exec.run(&cmd) {
+            Ok(out) => out,
+            Err(e) => {
+                checks.push(json!({"name": check.name, "exit_code": null, "status": 2,
+                    "report": null, "stderr": "", "error": e.to_string()}));
+                code = EXIT_ENV;
+                break;
+            }
+        };
+        let report = serde_json::from_str::<Value>(&out.stdout).ok();
+        let mut status = match out.code {
+            0 => 0,
+            1 | 3 | 4 => 1,
+            _ => EXIT_ENV,
+        };
+        // A successful subprocess without an actual replay report is not fixture acceptance.
+        let valid = report.as_ref().is_some_and(|r| {
+            let s = &r["summary"];
+            s["verify"] == "pass"
+                && s["mismatches"] == 0
+                && ["outputs_compared", "snapshots_checked"]
+                    .iter()
+                    .all(|k| s[*k].as_u64().is_some_and(|n| n > 0))
+                && (check.advice != "recompute"
+                    || (s["recompute"] == "pass"
+                        && s["model_advice_compared"].as_u64().is_some_and(|n| n > 0)))
+        });
+        let error = if (out.code == 0 && !valid)
+            || (out.code == 1 && !report.as_ref().is_some_and(Value::is_object))
+        {
+            status = EXIT_ENV;
+            Some("missing or inconsistent replay report")
+        } else {
+            None
+        };
+        checks.push(
+            json!({"name": check.name, "exit_code": out.code, "status": status,
+            "report": report, "stderr": out.stderr, "error": error}),
+        );
+        code = code.max(status);
+        if status == EXIT_ENV {
+            break;
+        }
+    }
+    println!(
+        "{}",
+        json!({"bundle": name, "exit_code": code, "checks_planned": b.checks.len(), "checks": checks})
+    );
+    code
 }

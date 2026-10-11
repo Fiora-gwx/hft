@@ -9,15 +9,15 @@ use xtask::exec::{Cmd, Exec, Output, SysExec};
 
 use crate::common::Fixture;
 
-struct Store {
-    objects: BTreeMap<String, Vec<u8>>,
-    calls: Vec<Cmd>,
+pub(super) struct Store {
+    pub(super) objects: BTreeMap<String, Vec<u8>>,
+    pub(super) calls: Vec<Cmd>,
     codec: SysExec,
     unavailable: bool,
     empty_success: bool,
 }
 impl Store {
-    fn new(f: &Fixture) -> Self {
+    pub(super) fn new(f: &Fixture) -> Self {
         Self {
             objects: BTreeMap::new(),
             calls: Vec::new(),
@@ -69,7 +69,7 @@ fn pointer(f: &Fixture, name: &str, data: &[u8]) {
         ),
     );
 }
-fn compressed(f: &Fixture, data: &[u8]) -> Vec<u8> {
+pub(super) fn compressed(f: &Fixture, data: &[u8]) -> Vec<u8> {
     let raw = f.path("source");
     let zst = f.path("source.zst");
     fs::write(&raw, data).unwrap();
@@ -86,7 +86,7 @@ fn compressed(f: &Fixture, data: &[u8]) -> Vec<u8> {
 fn run(f: &Fixture, s: &mut Store) -> i32 {
     xtask::fixtures::fetch::run_with(&f.root, s)
 }
-fn cache_names(f: &Fixture) -> Vec<String> {
+pub(super) fn cache_names(f: &Fixture) -> Vec<String> {
     let cache = f.path("target/fixtures-cache");
     if !cache.exists() {
         return Vec::new();

@@ -28,6 +28,7 @@ hft-types.workspace = true
 zerocopy.workspace = true
 crc32c.workspace = true
 sha2.workspace = true
+xtask = { path = "../../tools/xtask" }
 
 [[test]]
 name = "cli"

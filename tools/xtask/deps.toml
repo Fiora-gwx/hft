@@ -259,6 +259,7 @@ deps = [
 
 [pkg."apps/replayer"]
 tier = "cold"
+dev = ["tools/xtask"] # RPL-281 exercises the real fixture transport/wrapper without invoking cargo.
 deps = [
     "crates/hft-rt",
     "crates/hft-types", "crates/hft-sequencer", "crates/hft-strategy-sdk", "crates/hft-exec",

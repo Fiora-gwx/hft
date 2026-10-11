@@ -129,7 +129,7 @@ hft-sim 的用例目录名带用例编号(`sim-125-<case>/`、`sim-123-mixed/`),
 
 ### 大文件:S3 指针
 
-超过 1 MiB 的文件不进 git。`replay/<name>.pointer.toml`:
+超过 1 MiB 的文件不进 git。`replay/<name>.pointer.toml` 有单对象与整套文件两种格式。未填写 `format` 时是单对象,字段如下:
 
 | 键 | 含义 |
 |---|---|
@@ -141,9 +141,25 @@ hft-sim 的用例目录名带用例编号(`sim-125-<case>/`、`sim-123-mixed/`),
 | `window` | 时间窗与 seq 范围 |
 | `purpose` | 使用者(如 `benchmarks/tick-to-trade`、`replay-verify PR 样本`、`replayer sim 复现样本`) |
 
-`cargo xtask fixtures fetch` 先按文件名排序并校验全部指针,再通过 AWS CLI 下载、zstd 解压到 `target/fixtures-cache/` 内本次独占的临时目录。解压后大小与 SHA-256 均匹配才发布为 `<name>`;已存在的缓存也逐字节重新计算哈希,合格时不调用 AWS 或 zstd。不合格的旧缓存删除后重新获取,下载、解压或校验失败退出 2,清理本次临时文件,保留其他已验证对象。空指针集合返回 0,不代表任何样本已验证。
+`format = "files-v1"` 描述一套多段 journal、seal 与 Model 检查点。外层不接受单对象的 `uri/sha256/bytes`,字段如下:
 
-指针文件名只含 ASCII 字母、数字、连字符与下划线;`uri` 只接受 fixture 桶内 `hft-fixtures/` 下的 `.zst` 对象路径,不接受查询参数或 `..`。`sha256` 为 64 位十六进制,`bytes` 为正整数。缓存目录、对象及指针拒绝符号链接和不符预期的文件类型。解压器使用 128 MiB 内存上限,哈希以 64 KiB 缓冲读取;解压临时文件占用磁盘,大小在解压完成后核对。此命令只校验运输内容,事件 schema、段链与业务一致性仍由 journal 读者和回放验证器检查。
+| 键 | 含义 |
+|---|---|
+| `strategy_set` | 必填,只接受 `registry` 或 `testkit-replay-v1`;执行映射归 [replay-verify](../tools/README.md#cargo-xtask-replay-verify) |
+| `journal` | 必填,清单内 journal 目录的相对路径,如 `prod/seq` |
+| `[[files]]` | 非空;每行含 `path`、`uri`、`sha256`、`bytes`,后三者遵守单对象规则,哈希针对各自解压后的完整文件 |
+| `[[checks]]` | 非空,按声明顺序执行;`name` 为不含点的便携名称,忽略大小写后唯一;`advice` 必填且为 `journal` 或 `recompute` |
+| `checks.checkpoint` | 可选,仅用于 `recompute`,必须引用清单内文件或目录,传给 replayer 的 `--model-checkpoint` |
+| `checks.from_seq/to_seq` | 可选正整数,分别传给 replayer 的同名窗口参数;同时给出时起点不大于终点 |
+| `purpose`、`[source]` | 可选描述字符串与来源元数据表;来源可记录生成提交、CI 制品、检查人,不参与执行参数 |
+
+整套格式的外层、files 行和 checks 行拒绝未知操作字段。相对路径只由 ASCII 字母、数字、点、连字符、下划线和 `/` 组成,每段不以点开头或结尾,不接受空段、Windows 设备名、绝对路径与反斜线。文件/目录重叠、重复文件、任一级大小写别名都失败。journal 目录必须至少包含一对同名的数字段号 `.jrn/.seal`,其中每个成员均须配对。段的连续性与 seal 内容仍由正式读者检查。
+
+整套缓存为 `target/fixtures-cache/<name>/`,只允许清单声明的文件和必要父目录,复用与回放前均核对完整成员集合、大小和哈希。每套先持有独占的 `.bundle-<name小写>.lock`,在独占临时目录内逐文件下载解压,全部通过后以目录重命名发布;其他获取进程遇锁退出 2。旧缓存损坏时,只有完整新集合校验通过后才替换;下载失败保留旧缓存供排障,回放入口仍拒绝它。正常返回会清理锁与临时目录;进程被强杀遗留的锁须确认无获取进程后由运维清理。固定样本的检查矩阵不能用命令行窗口覆盖。
+
+`cargo xtask fixtures fetch` 先按文件名排序并校验全部指针,再通过 AWS CLI 下载、zstd 解压到 `target/fixtures-cache/` 内本次独占的临时目录。单对象的解压后大小与 SHA-256 均匹配才发布为 `<name>`;已存在的缓存也逐字节重新计算哈希,合格时不调用 AWS 或 zstd。不合格的旧缓存删除后重新获取,下载、解压或校验失败退出 2,清理本次临时文件,保留其他已验证对象。空指针集合返回 0,不代表任何样本已验证。
+
+指针文件名只含 ASCII 字母、数字、连字符与下划线,不含 Windows 设备名,同批名称不能互为大小写别名;`uri` 只接受 fixture 桶内 `hft-fixtures/` 下的 `.zst` 对象路径,不接受查询参数或 `..`。`sha256` 为 64 位十六进制,`bytes` 为正整数。缓存目录、对象及指针拒绝符号链接和不符预期的文件类型。解压器使用 128 MiB 内存上限,哈希以 64 KiB 缓冲读取;解压临时文件占用磁盘,大小在解压完成后核对。此命令只校验运输内容,事件 schema、段链与业务一致性仍由 journal 读者和回放验证器检查。
 
 fixture 桶与市场数据桶分开;发布归档不进这两个桶。CI 只对需要拉 fixture 的作业开 GitHub OIDC(`id-token: write`),扮演只读 fixture 桶的角色(该角色的创建是 `[需授权]` 的 IAM 变更;工作流与权限归 [development](../docs/development.md))。工具不创建桶或角色、不上传对象。`aws` 与 `zstd` 由运行环境提供;CI 的质量门与 ARM 发布环境安装 zstd。
 
@@ -227,6 +243,8 @@ fixture 桶与市场数据桶分开;发布归档不进这两个桶。CI 只对�
 - 写入者:`tools/xtask` 的 `fixtures` 子命令;参数金样由 `hft-cfg` 首次生成后冻结;策略 schema 金样由 `hft-core schemas --out` 生成;AWS CLI 凭据只在抽取者本机,不入库。
 
 ## 延伸阅读
+
+- [整套回放样本清单与测试入口的决定](../.agents/notes/implemented/testing/2026-10-12-replay-fixture-bundles.md)。
 
 - [testing.md](../docs/testing.md)、[event-model](../docs/subsystems/event-model.md)、[journal-format](../docs/subsystems/journal-format.md)、[hft-refdata `VenueCaps`](../crates/hft-refdata/README.md)
 - [architecture-v2/10 §5](../design/10-语言分工与代码组织.md)、[research/00 §6.1](../design/research/00-existing-codebase-inventory.md)(旧 collector 的 fixtures 与同步器状态机)

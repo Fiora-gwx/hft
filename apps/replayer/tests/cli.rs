@@ -1,4 +1,5 @@
 mod fixture;
+mod fixture_bundle;
 mod long_model;
 mod model;
 mod model_boundary;

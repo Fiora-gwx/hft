@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | RPL-095、RPL-104、RPL-241、RPL-242 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | RPL-001–RPL-004、RPL-070、RPL-079 |
-| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-280 |
+| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-281 |
 | sim | RPL-090–RPL-108、RPL-120–RPL-129、RPL-140–RPL-145、RPL-259 |
 | compare | RPL-160–RPL-173 |
 | latency | RPL-190–RPL-206 |
@@ -2278,6 +2278,16 @@ spec: README.md
 | RPL-280.2 | 节长最低字节为 1 | SectionFraming,节 4 起点 |
 | RPL-280.3 | 节 4 改为重复的 13 | DuplicateSection,原节 4 起点 |
 | RPL-280.4 | 快照声明节数加一 | SectionCount,偏移 4 |
+
+### RPL-281 真实三小时文件经过整套获取与回放入口
+
+- 规则:[verify](README.md#verify)、[整套指针](../../fixtures/README.md#大文件s3-指针)
+- 级别:integ
+- 里程碑:M2
+- 前置:RPL-270 的三小时生成文件,四个 journal 段及 seal、两份 Model 检查点;CI 已构建 replay_probe
+- 步骤:根据原始字节建立临时 files-v1 指针;真实 zstd 压缩,只以本地对象存储替代 S3 交付;经 xtask 获取、复用缓存,再由同一回放包装器执行普通回放、完整重算、第一小时检查点到 H2 之后窗口的三项检查;测试执行器将固定 cargo 命令映射到已构建 example,不启动编译器;最后篡改缓存
+- 期望:十个文件逐字节相等,再次获取零下载;三项真实回放成功,完整与窗口 Advice 数从 journal 独立统计,普通回放与重算的 Input/Output/快照计数相等;源文件不变,坏缓存退出 2 且不执行回放。CI 证据保存指针和各项报告,明确标记 generated_not_frozen;不代替 S3/OIDC 实测或固定 T1/T3 验收
+- 实现:`apps/replayer/tests/fixture_bundle.rs::rpl_281_generated_bundle_fetch_replays_full_and_checkpoint_window`
 
 ## 验收
 
