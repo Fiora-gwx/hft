@@ -306,7 +306,7 @@ spec: README.md
 - 规则:[verify](README.md#verify)
 - 级别:unit
 - 里程碑:M2
-- 前置:真实 sequencer 与 JournalWriter,最近快照后投递有效 BBO 和 SmokeOrder;写者前注入一条 OrderDecision.qty 差异,由实际写者生成 CRC 与 seal。未 Drain 的旧运行在完整提交边界交接,正式恢复路径读取已发布的原始文件并生成一条 RecoverMismatch 注记;随后正常处理输入和两个 SnapshotNow
+- 前置:真实 sequencer 与 JournalWriter,最近快照后投递账户配置、对账、连接、时钟和自检输入,断言启动闸门已放行,再投递 SmokeOrder;BBO 连接活性使用非零时间戳。写者前注入一条 OrderDecision.qty 差异,由实际写者生成 CRC 与 seal。未 Drain 的旧运行在完整提交边界交接,正式恢复路径读取已发布的原始文件并生成一条 RecoverMismatch 注记;随后正常处理输入和两个 SnapshotNow
 - 步骤:
   1. `replayer verify --journal <合成> --report $OUT/r.json`
 - 期望:

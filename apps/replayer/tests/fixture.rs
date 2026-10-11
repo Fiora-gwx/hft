@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use hft_event::{
-    Bbo, BlobRef, ClockStatus, CmdHdr, ConnRole, ConnState, ConnStateKind, ControlCmd, EventKind, FeedCmd,
-    GwCmd, HostProfile, MarketHdr, RecordFlags,
+    AccountConfigReportHdr, Bbo, BlobRef, ClockStatus, CmdHdr, ConnRole, ConnState, ConnStateKind,
+    ControlCmd, EventKind, FeedCmd, GwCmd, HostProfile, LeverageItem, MarketHdr, ReconcileReport,
+    RecordFlags, Timer,
 };
 use hft_journal::{
     EndAt, InstanceName, JournalConfig, JournalKind, JournalReader, JournalWriter, PageSize, ReaderConfig,
@@ -23,7 +24,7 @@ use hft_strategy_sdk::StrategySet;
 use hft_testkit::dst::seq::build;
 use hft_testkit::dst::world::WorldSpec;
 use hft_testkit::seq_rig::RigIo;
-use hft_types::{AccountId, InstId, KillBits, Px, Qty, Seq, Side, Tsc, VenueId};
+use hft_types::{AccountId, GroupId, InstId, KillBits, MarketKind, Px, Qty, Rate, Seq, Side, Tsc, VenueId};
 use zerocopy::{FromZeros, IntoBytes};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -43,6 +44,7 @@ struct FaultWriter {
     inner: JournalWriter,
     fault: Option<EventKind>,
     changed: Option<Seq>,
+    last_result: Option<hft_event::CmdResult>,
 }
 impl std::ops::Deref for FaultWriter {
     type Target = JournalWriter;
@@ -64,6 +66,10 @@ impl JournalSink for FaultWriter {
         tsc: Tsc,
         pieces: &[&[u8]],
     ) -> Result<Seq, hft_journal::AppendErr> {
+        if kind == EventKind::CMD_RESULT {
+            let bytes: Vec<u8> = pieces.iter().flat_map(|p| p.iter().copied()).collect();
+            self.last_result = hft_sequencer::types::read_body(&bytes);
+        }
         if self.fault == Some(kind) {
             self.fault = None;
             let mut bytes: Vec<u8> = pieces.iter().flat_map(|p| p.iter().copied()).collect();
@@ -234,6 +240,145 @@ fn command<S: StrategySet>(s: &mut Sequencer<LiveDriver<S, Io<S>>, S>, id: u64, 
         .push_back((EventKind::CONTROL_CMD, body));
 }
 
+fn input<S: StrategySet>(
+    s: &mut Sequencer<LiveDriver<S, Io<S>>, S>,
+    ring: (u8, u8),
+    kind: EventKind,
+    body: Vec<u8>,
+) {
+    s.driver_mut()
+        .io
+        .rings
+        .rings
+        .entry(ring)
+        .or_default()
+        .push_back((kind, body));
+}
+
+// SmokeOrder is an upgrade command: it needs the real startup gate, even when risk will
+// reject the resulting order. Supply the same journal inputs as the DST live prologue.
+fn prepare_smoke<S: StrategySet>(s: &mut Sequencer<LiveDriver<S, Io<S>>, S>, world: &WorldSpec) {
+    let t = 1;
+    s.driver_mut().io.rings.tsc = t;
+    let account = world.accounts[0].id;
+    for (vi, venue) in world.venues.iter().enumerate() {
+        let base = ConnState {
+            venue: venue.id,
+            conn: 0,
+            state: ConnStateKind::Up,
+            role: ConnRole::Md,
+            inst: InstId(0),
+            reason: 0,
+            account: AccountId(0),
+            _pad2: [0; 3],
+            rx_tsc: t,
+        };
+        input(s, (2, vi as u8), EventKind::CONN_STATE, base.as_bytes().to_vec());
+        for i in world.insts.iter().filter(|i| i.venue == venue.id) {
+            input(
+                s,
+                (2, vi as u8),
+                EventKind::CONN_STATE,
+                ConnState { inst: i.id, ..base }.as_bytes().to_vec(),
+            );
+        }
+        for (conn, role) in [
+            (0, ConnRole::Order),
+            (1, ConnRole::Order),
+            (0, ConnRole::UserStream),
+        ] {
+            input(
+                s,
+                (2, vi as u8),
+                EventKind::CONN_STATE,
+                ConnState {
+                    conn,
+                    role,
+                    account,
+                    ..base
+                }
+                .as_bytes()
+                .to_vec(),
+            );
+        }
+    }
+    settle(s);
+    for (vi, venue) in world.venues.iter().enumerate() {
+        let perp = venue.id.market() == Some(MarketKind::LinearPerp);
+        let levs: Vec<_> = world
+            .insts
+            .iter()
+            .filter(|i| i.venue == venue.id && i.perp)
+            .map(|i| LeverageItem {
+                inst: i.id,
+                _pad: 0,
+                leverage: Rate(build::LEVERAGE_X * 1_000_000_000),
+            })
+            .collect();
+        let mut h = AccountConfigReportHdr::new_zeroed();
+        h.venue = venue.id;
+        h.account = account;
+        h.position_mode = if perp { 2 } else { 1 };
+        h.margin_mode = h.position_mode;
+        h.multi_asset = h.position_mode;
+        h.source = 1;
+        h.uid_keys = 3;
+        h.n_lev = levs.len() as u16;
+        h.rx_tsc = Tsc(t);
+        let uid = build::uid_of(account, venue.id);
+        h.venue_uid[..uid.len()].copy_from_slice(uid.as_bytes());
+        let mut body = h.as_bytes().to_vec();
+        for l in levs {
+            body.extend_from_slice(l.as_bytes());
+        }
+        input(s, (2, vi as u8), EventKind::ACCOUNT_CONFIG_REPORT, body);
+        let mut r = ReconcileReport::new_zeroed();
+        r.report_id = 1000 + vi as u64;
+        r.venue = venue.id;
+        r.account = account;
+        r.item = 5;
+        r.count = 1;
+        input(
+            s,
+            (2, vi as u8),
+            EventKind::RECONCILE_REPORT,
+            r.as_bytes().to_vec(),
+        );
+        for i in world.insts.iter().filter(|i| i.venue == venue.id) {
+            let mut h = MarketHdr::new_zeroed();
+            h.venue = venue.id;
+            h.inst = i.id;
+            h.rx_tsc = t;
+            let b = Bbo {
+                h,
+                bid_px: Px(i.bid),
+                bid_qty: Qty(i.depth),
+                ask_px: Px(i.ask),
+                ask_qty: Qty(i.depth),
+                update_id: 1,
+            };
+            input(s, (4, vi as u8), EventKind::BBO, b.as_bytes().to_vec());
+        }
+    }
+    for timer_id in [8, 16 | (u32::from(account.0) << 16)] {
+        let timer = Timer {
+            timer_id,
+            owner: 1,
+            _pad: 0,
+            group: GroupId(0),
+            _pad2: 0,
+            deadline_tsc: t,
+        };
+        input(s, (1, 0), EventKind::TIMER, timer.as_bytes().to_vec());
+    }
+    settle(s);
+    assert!(
+        s.engine().risk.mode.released(account),
+        "startup gate not released: bits={:#x}",
+        s.engine().risk.mode.gate_bits(account)
+    );
+}
+
 fn create_with_restart<S: StrategySet>(restart: Option<Restart>) -> Fixture {
     let root = std::env::temp_dir().join(format!(
         "replayer-{}-{}",
@@ -272,6 +417,7 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>) -> Fixture {
             inner: writer,
             fault: None,
             changed: None,
+            last_result: None,
         },
         old: None,
         build: [0; 20],
@@ -306,60 +452,8 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>) -> Fixture {
     }
     if let Some(restart) = restart {
         if matches!(restart, Restart::Mismatch | Restart::GlobalMismatch) {
+            prepare_smoke(&mut s, &world);
             let i = &world.insts[0];
-            let conn = ConnState {
-                venue: i.venue,
-                conn: 0,
-                state: ConnStateKind::Up,
-                role: ConnRole::Md,
-                inst: i.id,
-                reason: 0,
-                account: AccountId(0),
-                _pad2: [0; 3],
-                rx_tsc: 0,
-            };
-            s.driver_mut()
-                .io
-                .rings
-                .rings
-                .entry((2, 0))
-                .or_default()
-                .push_back((
-                    EventKind::CONN_STATE,
-                    ConnState {
-                        inst: InstId(0),
-                        ..conn
-                    }
-                    .as_bytes()
-                    .to_vec(),
-                ));
-            s.driver_mut()
-                .io
-                .rings
-                .rings
-                .entry((2, 0))
-                .or_default()
-                .push_back((EventKind::CONN_STATE, conn.as_bytes().to_vec()));
-            settle(&mut s);
-            let mut h = MarketHdr::new_zeroed();
-            h.venue = i.venue;
-            h.inst = i.id;
-            let bbo = Bbo {
-                h,
-                bid_px: Px(i.bid),
-                bid_qty: Qty(i.depth),
-                ask_px: Px(i.ask),
-                ask_qty: Qty(i.depth),
-                update_id: 1,
-            };
-            s.driver_mut()
-                .io
-                .rings
-                .rings
-                .entry((4, 0))
-                .or_default()
-                .push_back((EventKind::BBO, bbo.as_bytes().to_vec()));
-            settle(&mut s);
             s.driver_mut().io.writer.fault = Some(if matches!(restart, Restart::Mismatch) {
                 EventKind::ORDER_DECISION
             } else {
@@ -381,7 +475,8 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>) -> Fixture {
             settle(&mut s);
             assert!(
                 s.driver().io.writer.changed.is_some(),
-                "fault never reached a real Output"
+                "fault never reached a real Output; command result: {:?}",
+                s.driver().io.writer.last_result
             );
         }
         if matches!(restart, Restart::Version) {
