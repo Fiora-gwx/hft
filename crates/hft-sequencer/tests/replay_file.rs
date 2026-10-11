@@ -568,7 +568,7 @@ fn seq_394_invalid_run_boundaries_fail_before_replay() {
             "boundary mutation {row}"
         );
     }
-    let mut bad = log;
+    let mut bad = log.clone();
     let note = Note {
         code: hft_sequencer::codes::seq_note(hft_sequencer::codes::note::RECOVER_MISMATCH),
         level: hft_event::NoteLevel::P0,
@@ -584,6 +584,34 @@ fn seq_394_invalid_run_boundaries_fail_before_replay() {
     assert!(matches!(
         verify::<TestSet>(bad, VerifyOptions::default(), hb()),
         Err(VerifyError::UnsupportedRun { .. })
+    ));
+    // An ordinary Output between BootDone and the initial EngineClock would otherwise be
+    // skipped by snapshot restoration. This is neither a boot Output nor a recovery range.
+    let clock = log
+        .recs
+        .iter()
+        .position(|r| r.kind == EventKind::ENGINE_CLOCK)
+        .unwrap();
+    let mut extra = log
+        .recs
+        .iter()
+        .find(|r| r.kind == EventKind::CMD_RESULT)
+        .unwrap()
+        .clone();
+    extra.seq = log.recs[clock].seq;
+    let mut bad = log;
+    for r in &mut bad.recs[clock..] {
+        r.seq += 1;
+    }
+    for start in &mut bad.seg_start {
+        if *start >= clock {
+            *start += 1;
+        }
+    }
+    bad.recs.insert(clock, extra);
+    assert!(matches!(
+        verify::<TestSet>(bad, VerifyOptions::default(), hb()),
+        Err(VerifyError::RunBoundary { .. })
     ));
 }
 

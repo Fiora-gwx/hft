@@ -121,7 +121,7 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 
 `driver::verify::verify::<S>(Log, VerifyOptions, &'static Heartbeat)` 装配离线验证。未指定 from_seq 时取首段引导快照(含 Recovery),否则取不晚于该 seq 的最近快照;先自检,再由日志配置装配。普通滚段沿用当前引擎;Startup、Recovery、RecoverFromSnapshot 或 HostProfile.build_git 变化开始独立运行,重新自检和恢复该段引导快照,不沿用上一运行的内存状态。每段须有 Begin、单份 HostProfile、单份用途与原因一致的引导快照及 BootDone;独立运行的首个普通 Input 必须是 EngineClock,损坏边界返回 RunBoundary。窗口外输入仍用于预热,窗口内 Output 按 seq 闭区间比较;to_seq 落在事件中间时处理完该事件,不比较其后输出。
 
-多生成的 Output 不消费下一个 Input 或下一独立运行的记录;未生成的输出包括运行尾部输出均计分歧。默认首次分歧后停止取输入,keep_going 保留完整输入顺序;Fatal、未消费完的输入和诊断容量不足均不能返回通过。快照的两侧 state_hash 均独立重算,非零声明错误计分歧;零声明不替代状态检查。结果含各运行的起始快照、下一运行边界、输入/Output/快照/分歧计数,以及汇总和分歧体、语义标志;诊断容量以日志记录数为界。LiveDriver 与恢复装配流程不读取这些离线选项。
+多生成的 Output 不消费下一个 Input 或下一独立运行的记录;未生成的输出包括运行尾部输出均计分歧。独立运行的 BootDone 至首条 EngineClock 之间不接受普通 Output,不允许在快照起播时跳过。默认首次分歧后停止取输入,keep_going 保留完整输入顺序;Fatal、未消费完的输入和诊断容量不足均不能返回通过。快照的两侧 state_hash 均独立重算,非零声明错误计分歧;零声明不替代状态检查。结果含各运行的起始快照、下一运行边界、输入/Output/快照/分歧计数,以及汇总和分歧体、语义标志;诊断容量以日志记录数为界。LiveDriver 与恢复装配流程不读取这些离线选项。
 
 回放比较器要求屏蔽测量字段后的逻辑体**长度和内容都相等**;不删体尾零。传输标志按 `NONCMP_FLAGS` 屏蔽,SHADOW 等业务标志仍参与比较。
 

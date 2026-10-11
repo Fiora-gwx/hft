@@ -262,7 +262,7 @@ impl DurableMeta {
 |---|---|---|---|
 | (无) | 是 | `JournalReader`、`verify`、`cold_retire`、`DurableMeta`、布局类型 | 冷进程(journal-archiver、watchtower、reconciler、replayer)、hft-py、advisor |
 | `writer` | 否 | `JournalWriter`、`BootWriter`、`SegmentPreparer`、`Persister`、`HotRetirer`、恢复 | 只有 apps/hft-core、apps/replayer 与 optional 的 apps/chain-core(这些 app 的依赖闭包之外启用即 `cargo xtask deps` 失败) |
-| `mem-backend` | 否 | 堆内存段后端与测试钩子模块 `testing`(见实现说明"段内存后端") | 只有本 crate 的测试、基准与 fuzz 目标(`required-features`) |
+| `mem-backend` | 否 | 堆内存段后端与测试钩子模块 `testing`(见实现说明"段内存后端") | 本 crate 的测试、基准、fuzz 目标,以及消费方的集成测试(仅 dev 依赖) |
 
 除 replayer 外的冷进程的 `Cargo.toml` 不得启用 `writer`(`cargo xtask deps` 检查);replayer 只用 `JournalWriter::open_offline`(`--emit-journal`):写 `--out` 指定的**普通文件系统目录**(`fstatfs` 为 hugetlbfs/tmpfs、或路径位于任何生产 journal 根之下——`cfg.hot_dir`、`cfg.cold_root`、`/dev/hugepages`、`/dev/hugepages2M`、`/dev/shm/hft` → `OpenErr::OfflineTarget`),段文件普通 `pwrite` + 关闭时 `fsync`,不预创建、不 persist、不退役。读者映射一律 `PROT_READ`,因此冷进程在类型与权限两层都不能写热段。kill-switch 不依赖本 crate,按 [journal-format](../../docs/subsystems/journal-format.md) 的已发布布局只读段头。
 
@@ -358,7 +358,7 @@ pub fn held_by_instance(hot_dirs: &[&Path], instance: InstanceName) -> Result<hf
 
 **三类 journal 的差异**:见 [journal-format 三类 journal](../../docs/subsystems/journal-format.md#三类-journal);同一 `JournalWriter` 实现,差异只在配置(页大小、CRC 策略、有无引导块、整点滚动由谁触发)。
 
-**段内存后端**:写者、读者、滚动与恢复扫描的核心逻辑对段内存泛型(基址、长度、Release/Acquire 原子字段);生产后端是 hugetlbfs/tmpfs 具名文件的共享映射,单元测试另有堆内存后端(feature `mem-backend`,任意平台可跑:`testing::mem_root(dir)` 把该目录及其下的热段放进进程内的堆"文件",冷副本仍是普通文件;`testing` 另提供每线程操作日志与段文件字节读写,供测试观察预创建/复制/同步/退役与映射调用)。`fstatfs`、`mmap`/`munmap`/`unlink`、`mlock`、跨进程映射与崩溃存活只由 Linux 上的真实文件后端覆盖;非 Linux 平台上真实文件后端返回 `Unsupported`(`open` 表现为 `DiskBacked`/`Io`)。
+**段内存后端**:写者、读者、滚动与恢复扫描的核心逻辑对段内存泛型(基址、长度、Release/Acquire 原子字段);生产后端是 hugetlbfs/tmpfs 具名文件的共享映射,单元测试另有堆内存后端(feature `mem-backend`,任意平台可跑:`testing::mem_root(dir)` 把该目录及其下的热段放进进程内的堆"文件",冷副本仍是普通文件;`testing` 另提供每线程操作日志与段文件字节读写,供测试观察预创建/复制/同步/退役与映射调用)。`testing::published_bytes(&JournalWriter)` 仅在写者所属线程调用,返回当前段 `[0, committed_len)` 的独立原始字节副本,未开段为 None;不 publish、不封段、不分配 seq、不写文件。离线写者尚未封段时也可用于测试恢复交接。`fstatfs`、`mmap`/`munmap`/`unlink`、`mlock`、跨进程映射与崩溃存活只由 Linux 上的真实文件后端覆盖;非 Linux 平台上真实文件后端返回 `Unsupported`(`open` 表现为 `DiskBacked`/`Io`)。
 
 **规划源文件**
 

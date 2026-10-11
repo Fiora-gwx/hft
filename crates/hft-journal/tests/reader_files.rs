@@ -85,6 +85,67 @@ fn complete(r: &mut JournalReader) -> Vec<(u64, u16, Vec<u8>)> {
 }
 
 #[test]
+fn jnl_130_published_capture_is_owned_read_only_and_bounded() {
+    let cfg = mem_c0();
+    let out = disk_dir("capture-writer");
+    let mut w = JournalWriter::open_offline(&cfg, &out).unwrap();
+    assert!(testing::published_bytes(&w).is_none());
+    let info = RollInfo {
+        utc_ns: UTC0,
+        calib: hft_rt::CalibPair {
+            tsc: Tsc(0),
+            realtime_ns: UTC0,
+            phc_ns: 0,
+            err_ns: 0,
+        },
+        tsc_hz_milli: 1_000_000_000_000,
+        configs: &[],
+    };
+    w.roll(RollReason::Startup, &info).unwrap().finish().unwrap();
+    let boot = testing::published_bytes(&w).unwrap();
+    let seq = w.append(F0, Tsc(1), &tin(7)).unwrap();
+    assert_eq!(testing::published_bytes(&w).unwrap(), boot);
+    w.end_event();
+    assert_eq!(testing::published_bytes(&w).unwrap(), boot, "end is not publish");
+    w.publish();
+    let published = testing::published_bytes(&w).unwrap();
+    assert_eq!(published.len(), u64_at(&published, 3072) as usize);
+    assert!(published.len() > boot.len());
+    let mut copy = testing::published_bytes(&w).unwrap();
+    copy[0] ^= 1;
+    assert_ne!(copy, published);
+    assert_eq!(testing::published_bytes(&w).unwrap(), published);
+    assert!(
+        !out.join("prod/seq/0000000001.jrn").exists(),
+        "capture performed IO"
+    );
+
+    w.append(F0, Tsc(2), &tin(8)).unwrap(); // unfinished event must stay outside the capture
+    w.publish();
+    assert_eq!(testing::published_bytes(&w).unwrap(), published);
+    let root = disk_dir("captured-prefix");
+    let dir = root.join("prod/seq");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("0000000001.jrn"), &published).unwrap();
+    let mut c = ReaderConfig::new(
+        root.clone(),
+        root.join("absent"),
+        InstanceName::Prod,
+        "seq".into(),
+    );
+    c.end = EndAt::LastCompleteEvent;
+    let mut reader = JournalReader::open(&c).unwrap();
+    let got = complete(&mut reader);
+    assert_eq!(got.last().unwrap().0, seq.0);
+    assert_eq!(got.iter().filter(|r| r.1 == EventKind::T_IN.0).count(), 1);
+    w.end_event();
+    w.publish();
+    w.seal_and_close().unwrap();
+    let sealed = std::fs::read(out.join("prod/seq/0000000001.jrn")).unwrap();
+    assert_eq!(&sealed[4096..published.len()], &published[4096..]);
+}
+
+#[test]
 fn jnl_127_original_files_sorted_and_read_only() {
     let bundle = Bundle::new();
     for sealed in [false, true] {

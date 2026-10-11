@@ -92,11 +92,17 @@ pub(super) fn plan(log: &Log) -> Result<Vec<RunStart>, VerifyError> {
                     RollReason::Startup | RollReason::Recovery | RollReason::RecoverFromSnapshot
                 )
             {
-                let next = records[done + 1..]
-                    .iter()
-                    .find(|r| r.role() == hft_event::Role::Input);
-                if next.is_some_and(|r| r.kind != EventKind::ENGINE_CLOCK) {
-                    return Err(bad(first + done + 1));
+                for (j, r) in records.iter().enumerate().skip(done + 1) {
+                    match r.role() {
+                        hft_event::Role::Output => return Err(bad(first + j)),
+                        hft_event::Role::Input => {
+                            if r.kind != EventKind::ENGINE_CLOCK {
+                                return Err(bad(first + j));
+                            }
+                            break;
+                        }
+                        hft_event::Role::Meta => {}
+                    }
                 }
             }
             runs.push(RunStart { first, snapshot });

@@ -5465,7 +5465,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:SEQ-385 的真实双段文件输入,第二段为普通滚段
 - 步骤:各行独立篡改第二段引导记录并调用 runner
-- 期望:前八行 RunBoundary;RecoverMismatch 行 UnsupportedRun,均无成功结果
+- 期望:边界损坏为 RunBoundary;RecoverMismatch 行 UnsupportedRun,均无成功结果
 - 实现:`crates/hft-sequencer/tests/replay_file.rs::seq_394_invalid_run_boundaries_fail_before_replay`
 
 | 行 | 修改 | 期望 |
@@ -5479,6 +5479,7 @@ spec: README.md
 | SEQ-394.7 | 普通滚段的引导快照标 Recovery | RunBoundary |
 | SEQ-394.8 | build_git 变化,首个 Input 仍为普通定时器 | RunBoundary |
 | SEQ-394.9 | ClockStatus 替成 RecoverMismatch 注记 | UnsupportedRun |
+| SEQ-394.10 | 首次运行 BootDone 后、EngineClock 前插入 CmdResult | RunBoundary,输出不得被起播跳过 |
 
 ## 验收
 

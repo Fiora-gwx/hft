@@ -2039,7 +2039,7 @@ spec: README.md
 - 规则:[verify](README.md#verify)、[已知限制与后续工作](README.md#已知限制与后续工作)
 - 级别:proc
 - 里程碑:M2
-- 前置:RPL-260 的真实引擎与文件写者,两次运行;新运行使用两倍 TSC 频率和新校准点
+- 前置:RPL-260 的真实引擎与文件写者,两次运行;恢复交接复制写者已发布的原始前缀供读者读取,最终文件由真实写者封段,不重新分配记录 seq;新运行使用两倍 TSC 频率和新校准点
 - 步骤:各行现场执行恢复并写两个 SnapshotNow;生产二进制验证双段、独立第二段及只选一次运行的 from/to 窗口;篡改首段命令并重算 CRC,分别首错停止/keep-going;恢复首段后独立篡改第二段命令
 - 期望:原始双段退出 0,runs 有两行且各行输入/输出数非零、快照数至少 3;来源不变,单段和窗口只计一次运行。旧段篡改退出 1,首错停止只计首段;keep-going 的第二段无分歧。新段篡改仍退出 1,只有第二段分歧。所有新段快照用途为 Recovery,Begin 原因为下表值
 - 实现:`apps/replayer/tests/cli.rs::rpl_263_real_restart_runs_are_independent_and_strict`

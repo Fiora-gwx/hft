@@ -253,6 +253,11 @@ fn create_with_restart<S: StrategySet>(restart: Option<Restart>) -> Fixture {
             assert!(done, "drain did not finish");
         }
         s.driver_mut().io.writer.publish();
+        // open_offline persists only when sealing. Capture the actual published raw bytes
+        // for this simulated process handoff; the later real roll replaces it with the
+        // sealed segment. No record is synthesized or assigned a different physical seq.
+        let prefix = hft_journal::testing::published_bytes(&s.driver().io.writer).unwrap();
+        std::fs::write(&f.file, prefix).unwrap();
         let old = read(&f);
         let initial = old
             .recs

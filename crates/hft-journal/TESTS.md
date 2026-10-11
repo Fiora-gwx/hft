@@ -20,7 +20,7 @@ spec: README.md
 | persist 与后台维护(persist 线程调用) | JNL-008, JNL-012, JNL-042, JNL-044–JNL-054, JNL-091–JNL-093, JNL-107, JNL-114 |
 | 恢复与校验 | JNL-026, JNL-036, JNL-055, JNL-056, JNL-062–JNL-068, JNL-089, JNL-090, JNL-118, JNL-119, JNL-124 |
 | 持久元数据(engine_epoch 等) | JNL-092, JNL-094–JNL-098, JNL-122 |
-| cargo feature | JNL-087, JNL-101, JNL-102, JNL-122, JNL-123 |
+| cargo feature | JNL-087, JNL-101, JNL-102, JNL-122, JNL-123, JNL-130 |
 | raw journal 模式 | JNL-104 |
 | 小段 + 4K 页模式(tmpfs 热段) | JNL-040, JNL-105 |
 | 段大小与热段内存 | JNL-043, JNL-099, JNL-100, JNL-106 |
@@ -1815,6 +1815,16 @@ spec: README.md
 | JNL-129.4 | 第二分片 kind 改为 TIn | 打开失败 |
 | JNL-129.5 | 打开成功后替换段 2 中无 CRC 的 TIn 业务字节 | 仅交付段 1,进入段 2 时 Corrupt |
 | JNL-129.6 | 打开成功后删除段 2 | 仅交付段 1,进入段 2 时 Gap{Deleted} |
+
+### JNL-130 已发布字节观察不修改写者且不越过提交边界
+
+- 规则:[cargo feature](README.md#cargo-feature)、[实现说明](README.md#实现说明)
+- 级别:unit
+- 里程碑:M2
+- 前置:离线写者与 mem-backend 测试接口
+- 步骤:开段前观察;写完引导块后保存观察值;append/end_event/publish 分别观察;修改返回副本;再写未完成事件并 publish;把前缀作为原始文件交普通读者,最后由真实写者封段
+- 期望:未开段为 None;只有 publish 使完整事件进入观察,未完成事件不进入;复制值长度等于 committed_len,改副本不改写者且接口不写文件;读者只返回已发布的首条 TIn 并保留 seq,封段后记录字节与此前复制值相同
+- 实现:`crates/hft-journal/tests/reader_files.rs::jnl_130_published_capture_is_owned_read_only_and_bounded`
 
 ## 验收
 

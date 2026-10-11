@@ -37,6 +37,19 @@ pub fn read(path: &Path) -> io::Result<Vec<u8>> {
     crate::fs::read_file(path)
 }
 
+/// Owned copy of the current writer's raw published prefix, including its unchanged header.
+/// Test-only, on the writer's owning thread: never publishes, seals, renumbers or modifies it.
+/// An offline writer keeps this prefix in memory until sealing; None means no segment yet.
+#[cfg(feature = "writer")]
+pub fn published_bytes(writer: &crate::JournalWriter) -> Option<Vec<u8>> {
+    let map = writer.cur?;
+    let len = usize::try_from(map.load64(crate::layout::OFF_COMMITTED)).ok()?;
+    if len > map.len() {
+        return None;
+    }
+    Some(map.bytes(0, len).to_vec())
+}
+
 /// Overwrites bytes of a segment file in place (heap backend: through the shared memory).
 pub fn poke(path: &Path, off: usize, bytes: &[u8]) -> io::Result<()> {
     if crate::fs::is_mem(path) {
