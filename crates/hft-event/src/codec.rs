@@ -36,6 +36,8 @@ pub enum DecodeErr {
     UnknownKind = 7,
     /// Inconsistent multi-part group (see `Reassembler`).
     BadPart = 8,
+    /// Nonzero bytes in the transport alignment padding.
+    BadPadding = 9,
 }
 
 /// Writes header + `parts` + zero padding (+ CRC) into `rec` (exactly `record_len` bytes).
@@ -181,6 +183,48 @@ pub fn decode_record(buf: &[u8]) -> Result<RecordView<'_>, DecodeErr> {
 }
 
 impl<'a> RecordView<'a> {
+    /// Exact current-schema body of a Fixed or Var record, excluding only transport padding.
+    /// Multi records must first be reassembled. Unlike `read`, this never extends or truncates
+    /// an older/newer layout, and unlike `var`, it rejects nonzero alignment padding.
+    pub fn exact_body(&self) -> Result<&'a [u8], DecodeErr> {
+        let kind = EventKind(self.hdr.kind);
+        let layout = kind_info(kind).ok_or(DecodeErr::UnknownKind)?.layout;
+        if RecordFlags(self.hdr.flags).contains(RecordFlags::PART) {
+            return Err(DecodeErr::BadPart);
+        }
+        let n = match layout {
+            Layout::Fixed { size } => usize::from(size),
+            Layout::Var { prefix, max } => {
+                let p = self.body.get(..usize::from(prefix)).ok_or(DecodeErr::Short)?;
+                let tail = var_tail_len(kind, p).ok_or(DecodeErr::Short)?;
+                if tail > max as usize {
+                    return Err(DecodeErr::TooLong);
+                }
+                usize::from(prefix) + tail
+            }
+            Layout::Multi { .. } => return Err(DecodeErr::BadPart),
+        };
+        let want = record_len(n, self.has_crc());
+        if self.hdr.len < want {
+            return Err(DecodeErr::Short);
+        }
+        if self.hdr.len > want {
+            return Err(DecodeErr::TooLong);
+        }
+        let wire_body = self.hdr.len as usize - 24 - if self.has_crc() { 4 } else { 0 };
+        if self.body.len() < wire_body {
+            return Err(DecodeErr::Short);
+        }
+        if self.body.len() > wire_body {
+            return Err(DecodeErr::TooLong);
+        }
+        let (body, padding) = self.body.split_at_checked(n).ok_or(DecodeErr::Short)?;
+        if padding.iter().any(|b| *b != 0) {
+            return Err(DecodeErr::BadPadding);
+        }
+        Ok(body)
+    }
+
     fn check_kind<B: Body>(&self) -> Result<(), DecodeErr> {
         if self.hdr.kind == B::KIND.0 {
             Ok(())

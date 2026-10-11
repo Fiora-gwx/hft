@@ -32,6 +32,9 @@ mod preempt;
 mod process;
 mod recon;
 mod recover;
+mod replay_bytes;
+#[cfg(all(target_os = "linux", feature = "live", feature = "replay-io"))]
+mod replay_file;
 mod ring_full;
 mod sdk_contract;
 mod sim_route;

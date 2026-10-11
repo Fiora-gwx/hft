@@ -918,6 +918,13 @@ impl JournalReader {
         self.pos
     }
 
+    /// Immutable header of the segment currently being read. After a delivered Record/Event
+    /// this is its segment, including when `poll` crossed a segment boundary. No file is opened
+    /// or mapped by this accessor; the reference lasts until the next mutable reader operation.
+    pub fn segment_header(&self) -> Option<&SegmentHeaderFixed> {
+        self.cur.as_ref().map(|c| &c.fixed)
+    }
+
     /// Whether the last delivered record belongs to a boot block.
     pub fn in_boot_block(&self) -> bool {
         self.in_boot

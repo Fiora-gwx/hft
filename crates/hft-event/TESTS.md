@@ -16,7 +16,7 @@ spec: README.md
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
 | 记录头、标志与 kind | EVT-001–EVT-008 |
-| 体 trait 与编解码 | EVT-010–EVT-027、EVT-200 |
+| 体 trait 与编解码 | EVT-010–EVT-028、EVT-200 |
 | 所有权与线程 | EVT-030 |
 | 事件体布局 | EVT-040、EVT-050、EVT-060、EVT-070、EVT-074 |
 | 行情(0x01xx) | EVT-040–EVT-041 |
@@ -514,6 +514,27 @@ spec: README.md
 - 期望:
   - 退出码 ≠ 0;stderr 的第一条 `error` 指向 `crates/hft-event/src/lib.rs` 中以 `cfg(target_endian = "big")` 守卫的 `compile_error!`;同一命令对 `aarch64-unknown-linux-gnu` 退出码为 0
 - 实现:`crates/hft-event/tests/endian.rs::evt_027_big_endian_build_fails`
+
+### EVT-028 离线精确体读取保留业务尾零并拒绝错误填充
+
+- 规则:[体 trait 与编解码](README.md#体-trait-与编解码)
+- 级别:table
+- 里程碑:M2
+- 前置:当前事件 schema,分别带/不带 CRC 的单条记录
+- 输入:OrderDecision 定长体;Advice 的 5 B 载荷 `[7, 0, 2, 0, 0]`;分别带/不带 CRC
+- 步骤:经真实编解码调用 exact_body;副本修改对齐填充、记录长与 kind
+- 期望:定长体逐字节相同,Advice 逻辑体恰为 37 B 且尾部两个零保留;非零填充为 BadPadding,短/长记录为 Short/TooLong;Multi 为 BadPart,未知 kind 为 UnknownKind
+- 实现:`crates/hft-event/tests/codec.rs::evt_028_exact_body_preserves_payload_zeros`
+
+| 行 | 记录或改动 | 期望 |
+|---|---|---|
+| EVT-028.1 | 定长 OrderDecision | 精确体与原始体相等 |
+| EVT-028.2 | 5 B Advice 载荷 | 37 B 逻辑体,两个尾零保留 |
+| EVT-028.3 | 非零传输填充 | BadPadding |
+| EVT-028.4 | 记录长加 8 B | TooLong |
+| EVT-028.5 | 记录长减 8 B | Short |
+| EVT-028.6 | Multi kind | BadPart,要求先重组 |
+| EVT-028.7 | 未知 kind | UnknownKind |
 
 ### EVT-030 编解码无内部状态:多线程并发编码与单线程逐字节相同
 

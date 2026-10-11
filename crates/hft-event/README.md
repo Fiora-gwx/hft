@@ -111,6 +111,8 @@ pub fn decode_record(buf: &[u8]) -> Result<RecordView<'_>, DecodeErr>;
     // buf < 24、len < 24、len > buf.len() 或 CRC 位置位而 len < 32 → Short;len > 65 536 → TooLong;len 不是 8 的倍数 → Misaligned;
     // CRC 位置位且末 4 字节 ≠ crc32c([0, len − 4)) → BadCrc;不检查 kind 是否登记(未登记的由调用方经 kind_info 判定后按 len 跳过)
 impl<'a> RecordView<'a> {
+    pub fn exact_body(&self) -> Result<&'a [u8], DecodeErr>; // 离线同 schema 比对:Fixed/Var 的精确逻辑体,只移除格式规定的对齐填充;
+                                                           // 不补零、不截断业务字段,非零填充 → BadPadding;Multi 须先重组 → BadPart
     pub fn read<B: Body>(&self) -> Result<B, DecodeErr>;   // hdr.kind ≠ B::KIND → KindMismatch;按值拷贝 min(body.len(), size_of::<B>()) 字节:
                                                            // 体比 B 短(旧写者)→ 缺失字段补零;更长(新写者)→ 截断;枚举字段为 0 或越界 → InvalidEnum
     pub fn view<B: Body>(&self) -> Result<&'a B, DecodeErr>; // 零拷贝:hdr.len 小于/大于 record_len(size_of::<B>(), CRC 位)→ Short/TooLong;
@@ -119,7 +121,7 @@ impl<'a> RecordView<'a> {
                                                            // body.len() 小于/大于 size_of::<P>() + L 向上取 8 → Short/TooLong;填充字节不检查
 }
 #[repr(u8)] pub enum DecodeErr { Short = 1, TooLong = 2, Misaligned = 3, BadCrc = 4, KindMismatch = 5, InvalidEnum = 6, UnknownKind = 7,
-                                 BadPart = 8 /* 多段组不一致,见变长记录前缀 Reassembler */ }
+                                 BadPart = 8 /* 多段组不一致,见变长记录前缀 Reassembler */, BadPadding = 9 }
 pub fn classify(kind: EventKind, logical_body: &[u8]) -> Result<Role, DecodeErr>;
     // 记录的实际类别(Input/Output/Meta,从不返回 ByBody);未登记 kind → UnknownKind;ByBody 的判定字段越界 → InvalidEnum(见下)
 ```

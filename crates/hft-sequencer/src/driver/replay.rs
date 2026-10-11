@@ -129,8 +129,6 @@ impl ReplaySink {
             self.scratch_b.extend_from_slice(&r.body);
             mask_measure(kind, &mut self.scratch_a);
             mask_measure(r.kind, &mut self.scratch_b);
-            trim_zeros(&mut self.scratch_a);
-            trim_zeros(&mut self.scratch_b);
             let same = r.kind == kind
                 && (r.flags.0 & !NONCMP_FLAGS) == (flags.0 & !NONCMP_FLAGS)
                 && self.scratch_a == self.scratch_b;
@@ -154,12 +152,6 @@ impl ReplaySink {
         }
         self.pos += 1;
         seq
-    }
-}
-
-fn trim_zeros(v: &mut Vec<u8>) {
-    while v.last() == Some(&0) {
-        v.pop();
     }
 }
 

@@ -15,6 +15,8 @@ workspace = true
 [features]
 # hft-journal's writer (`JournalWriter` as `JournalSink`): only apps/hft-core and apps/replayer enable it.
 live = ["hft-journal/writer"]
+# Offline adapter only; no file reads are added to the live sequencer path.
+replay-io = []
 # Test hooks (call trace, state access); only enabled from [dev-dependencies] (cargo xtask deps rule 12).
 testing = []
 testkit = ["hft-oms/testkit", "hft-exec/testkit"]

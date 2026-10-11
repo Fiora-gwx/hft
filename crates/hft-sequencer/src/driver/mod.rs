@@ -2,6 +2,8 @@
 
 pub mod live;
 pub mod replay;
+#[cfg(feature = "replay-io")]
+pub mod replay_io;
 
 use hft_event::{BlobRef, ClockStatus, HostProfile};
 use hft_refdata::RefData;

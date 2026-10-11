@@ -26,6 +26,35 @@ fn seq_of(n: Next<'_>) -> u64 {
 }
 
 #[test]
+fn jnl_125_delivered_record_segment_header() {
+    let mut h = H::open0(mem_c0());
+    h.w().append(F0, Tsc(10), &tin(1)).unwrap();
+    h.w().end_event();
+    h.w().publish();
+    h.roll(RollReason::Size);
+    h.w().append(F0, Tsc(20), &tin(2)).unwrap();
+    h.w().end_event();
+    h.w().publish();
+    let mut cfg = h.reader_cfg(StartAt::Oldest);
+    cfg.end = EndAt::LastCompleteEvent;
+    let mut r = JournalReader::open(&cfg).unwrap();
+    let mut seen = std::collections::BTreeSet::new();
+    loop {
+        match r.poll() {
+            Next::Record(_) | Next::Event(_) => {}
+            Next::End => break,
+            other => panic!("unexpected {other:?}"),
+        }
+        let header = r.segment_header().unwrap();
+        assert_eq!(header.segment_no, r.position().segment_no);
+        assert_eq!(header.journal_kind, JournalKind::Seq as u8);
+        assert_eq!(header.header_crc32c, header.compute_crc());
+        seen.insert(header.segment_no);
+    }
+    assert_eq!(seen.into_iter().collect::<Vec<_>>(), [1, 2]);
+}
+
+#[test]
 fn jnl_074_tail_bounded_by_committed() {
     let mut h = H::open0(mem_c0());
     let mut r = h.reader(StartAt::Tail);

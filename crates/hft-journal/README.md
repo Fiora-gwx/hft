@@ -153,6 +153,7 @@ impl JournalReader {
     pub fn open(cfg: &ReaderConfig) -> Result<JournalReader, OpenErr>;
     pub fn poll(&mut self) -> Next<'_>;
     pub fn position(&self) -> Position;                 // { segment_no, offset, seq }
+    pub fn segment_header(&self) -> Option<&SegmentHeaderFixed>; // 最近交付记录所在段的不可变头,跨段 poll 后同样对应该记录;不新增 I/O/映射
     pub fn in_boot_block(&self) -> bool;
     pub fn last_complete_event(&self) -> Option<Position>;  // 最后一条 EVENT_END 记录之后的位置;恢复与 RecoverDriver 用它截断
 }

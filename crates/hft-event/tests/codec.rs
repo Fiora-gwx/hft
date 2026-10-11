@@ -13,6 +13,70 @@ use hft_event::*;
 use hft_types::*;
 use zerocopy::{FromBytes, IntoBytes};
 
+#[test]
+fn evt_028_exact_body_preserves_payload_zeros() {
+    use zerocopy::FromZeros;
+    for crc in [false, true] {
+        let flags = if crc { RecordFlags::CRC } else { RecordFlags(0) };
+        let od = od_basic();
+        let mut wire = vec![0; record_len(size_of::<OrderDecision>(), crc) as usize];
+        encode_fixed(&mut wire, 1, 2, flags, &od);
+        assert_eq!(decode_record(&wire).unwrap().exact_body().unwrap(), od.as_bytes());
+        let mut advice = AdviceHdr::new_zeroed();
+        advice.len = 5;
+        let payload = [7, 0, 2, 0, 0];
+        let mut wire = vec![0; record_len(37, crc) as usize];
+        encode_var(&mut wire, 3, 4, flags, &advice, &payload).unwrap();
+        let record = decode_record(&wire).unwrap();
+        let logical = record.exact_body().unwrap();
+        assert_eq!(logical.len(), 37);
+        assert_eq!(&logical[32..], &payload);
+        // Construct views after transport validation to isolate alignment validation from CRC.
+        let mut body = record.body.to_vec();
+        body[37] = 1;
+        let bad = RecordView {
+            hdr: record.hdr,
+            body: &body,
+        };
+        assert_eq!(bad.exact_body(), Err(DecodeErr::BadPadding));
+        let mut hdr = record.hdr;
+        hdr.len += 8;
+        body.resize(body.len() + 8, 0);
+        assert_eq!(
+            RecordView { hdr, body: &body }.exact_body(),
+            Err(DecodeErr::TooLong)
+        );
+        hdr.len -= 16;
+        assert_eq!(
+            RecordView {
+                hdr,
+                body: &body[..body.len() - 16]
+            }
+            .exact_body(),
+            Err(DecodeErr::Short)
+        );
+        let mut hdr = record.hdr;
+        hdr.kind = EventKind::STATE_SNAPSHOT.0;
+        assert_eq!(
+            RecordView {
+                hdr,
+                body: record.body
+            }
+            .exact_body(),
+            Err(DecodeErr::BadPart)
+        );
+        hdr.kind = 0xffff;
+        assert_eq!(
+            RecordView {
+                hdr,
+                body: record.body
+            }
+            .exact_body(),
+            Err(DecodeErr::UnknownKind)
+        );
+    }
+}
+
 fn od_basic() -> OrderDecision {
     OrderDecision {
         trigger_seq: 0,

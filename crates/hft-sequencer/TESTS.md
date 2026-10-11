@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | SEQ-018、SEQ-310 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
-| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381 |
+| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-386 |
 | 策略集(`StrategySet`) | SEQ-015–SEQ-018、SEQ-340 |
 | 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181 |
 | 环与容量 | SEQ-001–SEQ-007、SEQ-058、SEQ-059、SEQ-064、SEQ-066、SEQ-086、SEQ-087、SEQ-100、SEQ-221、SEQ-231、SEQ-279、SEQ-288、SEQ-345、SEQ-346、SEQ-367 |
@@ -5304,6 +5304,56 @@ spec: README.md
 - 步骤:检查原始行情事件的注记;写关键帧并投递对账汇总;从变价前后快照分别验证回放
 - 期望:没有 OrderDecision,持仓仍为 0.001;各行恰好一条 RoundClosed,开量 0.001、平量 0,与原始行情同一 EVENT_END;ledger 无待写注记且轮次 PnL 清零;后续对账不重复写出;两处快照起步均逐字节一致
 - 实现:`crates/hft-sequencer/tests/process.rs::seq_383_price_round_notes_are_journaled_before_snapshots`
+
+### SEQ-384 回放比较保留逻辑体长度和业务尾零
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
+- 级别:table
+- 里程碑:M2
+- 前置:同 schema 的独立 ReplaySink
+- 输入:尾字节为零的 OrderDecision 与 StateSnapshot;独立 ReplaySink
+- 步骤:分别在日志侧和重算侧删 1 B、追加 1/8 B 零;改 SHADOW 位;只改测量字段或记录头 TSC
+- 期望:长度变化和 SHADOW 变化失败;测量字段、TSC 与传输标志变化通过;不能把业务尾零当填充删除
+- 实现:`crates/hft-sequencer/tests/replay_bytes.rs::seq_384_replay_body_length_is_significant`
+
+| 行 | 改动 | 期望 |
+|---|---|---|
+| SEQ-384.1 | 原始体不变 | 一致 |
+| SEQ-384.2 | 日志侧删除 1 B 零 | 分歧 |
+| SEQ-384.3 | 重算侧删除 1 B 零 | 分歧 |
+| SEQ-384.4 | 日志侧或重算侧追加 1/8 B 零 | 全部分歧 |
+| SEQ-384.5 | SHADOW 位变化 | 分歧 |
+| SEQ-384.6 | 测量字段、记录头 TSC 或传输标志变化 | 一致 |
+| SEQ-384.7 | Multi 快照体追加 1 B 零 | 分歧 |
+
+### SEQ-385 真实磁盘 journal 独立装配并逐快照起播验证
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
+- 级别:replay
+- 里程碑:M2
+- 前置:Linux、live/replay-io features;B0 实例以真实 JournalWriter::open_offline 写普通临时目录
+- 输入:启动放行、按需快照、BBO、关键帧、滚段与再写关键帧
+- 步骤:关闭写者,JournalReader 经 Log::from_reader 读取;每个 StateSnapshot 分别只从该日志装配 EngineSetup 与 VerifyDriver
+- 期望:至少 4 个快照和 2 段;实际包含大于单片的快照与物理 seq 间隔,有 CmdResult;所有起点均处理完全部 Input、Output 无分歧且无残留
+- 实现:`crates/hft-sequencer/tests/replay_file.rs::seq_385_file_journal_independent_verify`
+
+### SEQ-386 文件读取错误不能返回成功的部分日志
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
+- 级别:table
+- 里程碑:M2
+- 前置:SEQ-385 的实际磁盘输入
+- 步骤:分别限制为 1 条记录、1 B 逻辑体、32 B 重组上限;篡改首段 magic 后读取;恢复原文件再读取
+- 期望:前两行 Limit,重组行 ReassemblyCap,损坏行失败;完好输入成功,读取前后源文件字节不变
+- 实现:`crates/hft-sequencer/tests/replay_file.rs::seq_386_file_read_failures_do_not_return_partial_log`
+
+| 行 | 条件 | 期望 |
+|---|---|---|
+| SEQ-386.1 | 记录上限 1 | Limit |
+| SEQ-386.2 | 逻辑体上限 1 B | Limit |
+| SEQ-386.3 | 重组上限 32 B | ReassemblyCap |
+| SEQ-386.4 | 首段 magic 损坏 | 失败 |
+| SEQ-386.5 | 恢复来源文件 | 读取成功,字节未被读取器修改 |
 
 ## 验收
 

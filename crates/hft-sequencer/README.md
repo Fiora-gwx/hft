@@ -115,6 +115,10 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 
 `JournalSink` 由 `hft-journal::JournalWriter` 实现(实盘、恢复),验证与镜像驱动实现为按日志对齐序号的哑写者;`EVENT_END` 位与 Input/Output/Meta 分类属于 [hft-event](../hft-event/README.md) 的 `RecordFlags`/`KindInfo.role`。
 
+**离线文件输入**由默认关闭的 `replay-io` feature 提供 `Log::from_reader(&mut JournalReader, LogReadLimits)`。调用方配置固定的 LastCompleteEvent 边界、段首起点、Error-on-gap 和非零重组容量;记录数与逻辑体字节数上限分别由 `LogReadLimits.records/body_bytes` 给出。超过上限、Pending、空输入、损坏、缺段、未知 kind 或段头 schema 与当前二进制不符均返回 `LogReadError`,不返回成功的部分日志。物理 seq、事件标志、多段重组后的业务尾零及各段时钟保持原样;Fixed/Var 经 [exact_body](../hft-event/README.md#体-trait-与编解码) 去除传输填充。读取不打开写者、不修改来源文件,只在冷调用方执行,不进入 LiveDriver 的取环路径。
+
+回放比较器要求屏蔽测量字段后的逻辑体**长度和内容都相等**;不删体尾零。传输标志按 `NONCMP_FLAGS` 屏蔽,SHADOW 等业务标志仍参与比较。
+
 ### 策略集(`StrategySet`)
 
 `StrategySet` trait、`strategy_set!` 宏、`Strategy`/`Model`/`ParamSet` 的签名归 [hft-strategy-sdk](../hft-strategy-sdk/README.md);本 crate 只经下列入口使用策略(全部静态分派,无 `dyn`):
@@ -824,6 +828,8 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 - [hft-strategy-sdk](../hft-strategy-sdk/README.md)、[hft-exec](../hft-exec/README.md)、[hft-sim](../hft-sim/README.md)、[apps/hft-core](../../apps/hft-core/README.md)、[apps/replayer](../../apps/replayer/README.md)
 
 ## 已知限制与后续工作
+
+- `Log::from_reader` 当前在显式上限内保留整份逻辑日志;长时段文件的分段流式验证、replayer CLI 与完整文件回放验收仍待接入。内存段与文件输入均可进入同一 VerifyDriver,不能以局部驱动测试代替 replayer 验收。
 
 - **关键帧一次写完**:每个周期或每 `keyframe_max_events` 条 Input 一次 ≤ 300 µs 的停顿,在空闲轮之后发生(最大推迟后在事件边界强制),期间到达的输入等待;段滚动的引导块(每段一次)与 Drain/Recovery 快照同样一次写完。可选扩展:由 advisor 镜像在旁路生成关键帧(镜像在每个 seq 的状态与 sequencer 相同,sequencer 只写滚动时的引导块;触发条件:实测关键帧停顿超出 p99.9 记录目标)。
 - **快照之后的 `BboView.rx_tsc`**:hft-book 的快照行不含 `Top.rx_tsc`(恢复后为 0),为了实盘与从快照起步的回放一致,早于最近快照的接收时刻一律给 0(关键帧见[快照](#快照),引导块每段一次);`FundingView.upd_tsc` 同样。用 `rx_tsc` 做信号的策略在安静 inst 上会周期性看到"未知";`hw_rx_ns`(在节 10)不受影响。可选扩展:把 `Top.rx_tsc` 作为登记的 TSC 行进快照(触发条件:某策略的信号因此失效)。
