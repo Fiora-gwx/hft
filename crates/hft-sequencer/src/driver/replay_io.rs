@@ -84,7 +84,7 @@ impl Log {
             };
             let pos = reader.position();
             if pos.seq > record.seq {
-                log.part_ends.insert(record.seq, pos.seq);
+                log.part_ends.push((record.seq, pos.seq));
             }
             let bad = || LogReadError::Header {
                 segment: pos.segment_no,
