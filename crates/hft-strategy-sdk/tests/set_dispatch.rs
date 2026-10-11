@@ -78,8 +78,9 @@ fn sdk_186_static_queries() {
     assert!(ProbeSet::has_model(0xFF02), "real Model");
     assert!(!ProbeSet::has_model(0xFF01), "NoModel");
     assert!(!ProbeSet::has_model(0xFF09), "unknown kind");
-    assert_eq!(zero_model::EmptyLayout::mem_bytes(&p, 8), 0);
-    assert_eq!(zero_model::EmptyLayout::snapshot_bytes(&p, 8), 0);
+    let stateless_params = tp(3, &[]);
+    assert_eq!(zero_model::EmptyLayout::mem_bytes(&stateless_params, 8), 0);
+    assert_eq!(zero_model::EmptyLayout::snapshot_bytes(&stateless_params, 8), 0);
     assert_eq!(zero_model::ZeroSet::model_layout_version(0xFF01), 0);
     assert!(zero_model::ZeroSet::model_layout(0xFF01).sections.is_empty());
     assert!(zero_model::ZeroSet::has_model(0xFF01), "stateless real Model");

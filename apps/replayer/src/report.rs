@@ -155,9 +155,7 @@ pub(crate) fn format(
     if let Some(m) = model {
         let model_first = m.differences.first().map(|d| d.seq);
         let output_first = sink.mismatches.first().map(|d| d.seq);
-        let first = model_first.into_iter().chain(output_first).min();
-        summary["verify"] = json!(if first.is_some() { "fail" } else { "pass" });
-        summary["first_divergent_seq"] = json!(first);
+        // Model divergence affects the process exit code, not the independent Output verdict.
         summary["first_output_divergent_seq"] = json!(output_first);
         summary["first_model_divergent_seq"] = json!(model_first);
         summary["recompute"] = json!(if model_first.is_some() {

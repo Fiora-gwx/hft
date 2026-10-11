@@ -1,5 +1,5 @@
 //! A real, stateless Model: empty layout and zero declarations must not mean NoModel.
-use crate::common::{EchoProbe, TP};
+use crate::common::{EchoProbe, TPParams};
 use hft_strategy_sdk::*;
 
 #[derive(Debug)]
@@ -9,14 +9,14 @@ pub struct EmptyLayout;
 
 impl Strategy for Stateless {
     const DESC: StrategyDesc = EchoProbe::DESC;
-    type Params = TP;
+    type Params = TPParams;
     type Model = EmptyLayout;
-    fn new(_: StrategyInstance, _: &TP, _: &GroupTable, _: &RefView<'_>) -> Result<Self, ParamError> {
+    fn new(_: StrategyInstance, _: &TPParams, _: &GroupTable, _: &RefView<'_>) -> Result<Self, ParamError> {
         Ok(Self)
     }
     fn subscriptions(&self, _: &GroupTable, _: &mut SubsBuilder<'_>) {}
     fn on_event<V: Views>(&mut self, _: &EventRef<'_>, _: &V, _: &mut Ctx<'_>) {}
-    fn on_params(&mut self, _: &TP, _: &GroupTable, _: &RefView<'_>) -> Result<(), ParamError> {
+    fn on_params(&mut self, _: &TPParams, _: &GroupTable, _: &RefView<'_>) -> Result<(), ParamError> {
         Ok(())
     }
     fn snapshot(&self, _: &mut SnapshotWriter) {}
@@ -26,26 +26,26 @@ impl Strategy for Stateless {
 }
 
 impl Model for EmptyLayout {
-    type Params = TP;
+    type Params = TPParams;
     const LAYOUT_VERSION: u32 = 0;
     const LAYOUT: &'static ModelLayoutDesc = &ModelLayoutDesc::EMPTY;
     const PATH_VERSION: u32 = 0;
-    fn mem_bytes(_: &TP, _: u16) -> u64 {
+    fn mem_bytes(_: &TPParams, _: u16) -> u64 {
         0
     }
-    fn snapshot_bytes(_: &TP, _: u16) -> u64 {
+    fn snapshot_bytes(_: &TPParams, _: u16) -> u64 {
         0
     }
-    fn path_settle_ms(_: &TP) -> u64 {
+    fn path_settle_ms(_: &TPParams) -> u64 {
         0
     }
-    fn cold_start_ms(_: &TP, _: u16) -> u64 {
+    fn cold_start_ms(_: &TPParams, _: u16) -> u64 {
         0
     }
-    fn new(_: StrategyInstance, _: &TP, _: &GroupTable, _: &RefView<'_>) -> Self {
+    fn new(_: StrategyInstance, _: &TPParams, _: &GroupTable, _: &RefView<'_>) -> Self {
         Self
     }
-    fn on_params(&mut self, _: &TP, _: &GroupTable, _: &RefView<'_>) -> ModelParamEffect {
+    fn on_params(&mut self, _: &TPParams, _: &GroupTable, _: &RefView<'_>) -> ModelParamEffect {
         ModelParamEffect::None
     }
     fn on_event<V: ModelViews>(&mut self, _: &EventRef<'_>, v: &V, out: &mut AdviceOut<'_>) {

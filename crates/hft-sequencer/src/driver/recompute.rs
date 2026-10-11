@@ -194,7 +194,7 @@ fn timeline<S: StrategySet>(
                 )
             });
         let mut clock = (!fresh && e.clock.is_set()).then_some(e.clock);
-        for ix in run.first..end {
+        for (ix, time) in times.iter_mut().enumerate().take(end).skip(run.first) {
             let r = &log.recs[ix];
             if r.kind == EventKind::ENGINE_CLOCK {
                 let ec = r
@@ -210,7 +210,7 @@ fn timeline<S: StrategySet>(
                     .map_err(|_| RecomputeError::Clock { seq: r.seq })?,
                 );
             }
-            times[ix] = match clock {
+            *time = match clock {
                 Some(c) => c
                     .ens_of(Tsc(r.tsc))
                     .map_err(|_| RecomputeError::Clock { seq: r.seq })?,

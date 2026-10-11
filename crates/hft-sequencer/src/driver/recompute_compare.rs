@@ -1,4 +1,5 @@
 //! Bounded, one-to-one comparison before the advisor's outbox coalescing.
+#![allow(clippy::disallowed_types)] // registered cold replay-io exception; never on the live path
 
 use std::collections::BTreeMap;
 

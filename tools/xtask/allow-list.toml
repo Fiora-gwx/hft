@@ -38,6 +38,12 @@ file = "crates/*/build.rs"
 lints = ["clippy::disallowed_types", "clippy::disallowed_macros", "clippy::disallowed_methods"]
 reason = "build scripts print cargo directives"
 
+# ---------------------------------------------------------------- cold replay
+[[allow]]
+file = "crates/hft-sequencer/src/driver/recompute_compare.rs"
+lints = ["clippy::disallowed_types"]
+reason = "bounded BTreeMap for deterministic offline Model comparison behind replay-io; not linked into the default live build"
+
 # ---------------------------------------------------------------- hft-rt
 [[allow]]
 file = "crates/hft-rt/src/host.rs"

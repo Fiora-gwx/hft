@@ -122,6 +122,14 @@ fn rpl_267_advice_header_and_payload_divergences_are_reported() {
         let r = execute(&f.file, &options(&f, false));
         assert_eq!(r.0, 1, "offset={offset} {r:?}");
         assert_eq!(r.1["summary"]["recompute"], "fail", "{r:?}");
+        assert_eq!(
+            r.1["summary"]["verify"],
+            if r.1["divergences"].as_array().unwrap().is_empty() {
+                "pass"
+            } else {
+                "fail"
+            }
+        );
         assert_eq!(r.1["summary"]["first_model_divergent_seq"], seq, "{r:?}");
         assert_eq!(r.1["model_divergences"][0]["seq"], seq);
         assert!(
