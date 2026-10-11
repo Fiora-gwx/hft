@@ -5497,8 +5497,8 @@ spec: README.md
 - 级别:replay
 - 里程碑:M2
 - 输入:SEQ-268 的真实恢复日志,分别篡改 OrderDecision 与无账户 CmdResult,正式恢复产生一条或多条 RecoverMismatch 注记
-- 步骤:恢复后写两条关键帧;独立按 schema 屏蔽测量字段与传输标志,累计引导快照之后的 Output;另算遗漏恢复注记的反例哈希,从恢复快照严格验证后续运行
-- 期望:两个区间的哈希均与日志一致,首区间与遗漏注记的哈希不同;注记数量等于受影响的账户/venue 数,恢复后的逐字节回放无分歧
+- 步骤:恢复启动 TSC 已越过关键帧期限,先处理自动关键帧,再经 hk 环请求两条关键帧;独立按 schema 屏蔽测量字段与传输标志,累计引导快照之后的 Output;另算遗漏恢复注记的反例哈希,从恢复快照严格验证后续运行
+- 期望:实际写出一条自动与两条请求关键帧,三个区间的哈希均与日志一致,首区间与遗漏注记的哈希不同;注记数量等于受影响的账户/venue 数,恢复后的逐字节回放无分歧
 - 实现:`crates/hft-sequencer/tests/mismatch.rs::seq_396_recovery_notes_belong_to_next_output_interval`
 
 ## 验收

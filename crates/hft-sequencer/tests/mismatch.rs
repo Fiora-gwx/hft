@@ -118,6 +118,12 @@ fn seq_396_recovery_notes_belong_to_next_output_interval() {
         assert_eq!(snap(h.snapshots().last().unwrap()).0.purpose, 4);
         let expected_notes = h.s.engine().recovery_forced().len();
         assert!(expected_notes > 0);
+        // Rerun's TSC is already past the restored keyframe deadline. Consume the
+        // driver's automatic keyframe before requesting two more via the hk ring.
+        h.run();
+        let automatic = h.snapshots().pop().unwrap();
+        assert!(automatic.seq > start);
+        assert_eq!(snap(&automatic).0.purpose, 2);
         h.keyframe();
         h.keyframe();
         let mut full = xxhash_rust::xxh3::Xxh3::new();
@@ -152,7 +158,7 @@ fn seq_396_recovery_notes_belong_to_next_output_interval() {
             }
         }
         assert_eq!(note_count, expected_notes);
-        assert_eq!(snapshots, 2);
+        assert_eq!(snapshots, 3, "one automatic and two requested keyframes");
         assert!(
             h.verify_from(Some(start)).is_empty(),
             "recovery run must verify strictly"
