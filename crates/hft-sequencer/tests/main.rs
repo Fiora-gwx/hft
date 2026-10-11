@@ -33,6 +33,7 @@ mod process;
 mod recon;
 mod recover;
 mod replay_bytes;
+mod replay_config;
 #[cfg(all(target_os = "linux", feature = "live", feature = "replay-io"))]
 mod replay_file;
 mod ring_full;

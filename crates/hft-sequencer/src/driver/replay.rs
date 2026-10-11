@@ -8,7 +8,6 @@ use hft_strategy_sdk::StrategySet;
 use hft_types::{AccountId, KillBits, Seq, Tsc, VenueId};
 
 use super::{Driver, DriverMode, DriverView, ParseCx, RollInfo};
-use crate::commands::BlobStore;
 use crate::journal::{BootSink, JournalSink, MemRecord, MemSegment, NONCMP_FLAGS, mask_measure, role_of};
 use crate::parsed::{ParsedConfig, parse_blob};
 use crate::types::{ConfigErr, EmitResult, InputSlot, OutRecord};
@@ -255,7 +254,6 @@ pub struct ReplayDriver {
     pub end: usize,
     per_round: u16,
     taken: u16,
-    blobs: BlobStore,
     run_tsc: Option<Tsc>,
     /// Inputs handed (tests).
     pub handed: u64,
@@ -267,15 +265,6 @@ impl ReplayDriver {
     /// A replay of `log` starting at record `start` (the first record after the start snapshot's
     /// event).
     pub fn new(mode: ReplayMode, log: Log, start: usize, per_round: u16) -> ReplayDriver {
-        let mut blobs = BlobStore::default();
-        for r in log.recs.iter() {
-            if r.kind == EventKind::CONFIG_BLOB
-                && let Some(h) = crate::types::read_body::<BlobHdr>(&r.body)
-            {
-                let c = r.body.get(72..72 + h.blob.len as usize).unwrap_or(&[]);
-                blobs.put(h.blob, c);
-            }
-        }
         let end = log.recs.len();
         let mut sink = ReplaySink::new(mode, log);
         sink.pos = start;
@@ -285,7 +274,6 @@ impl ReplayDriver {
             end,
             per_round: per_round.max(1),
             taken: 0,
-            blobs,
             run_tsc: None,
             handed: 0,
             hand_meta: mode != ReplayMode::Mirror,
@@ -294,14 +282,6 @@ impl ReplayDriver {
     /// Appends newly committed records (advisor mirror tailing the journal).
     pub fn extend(&mut self, recs: &[MemRecord], segs: &[crate::journal::SegClock], seg_start: &[usize]) {
         let base = self.sink.log.recs.len();
-        for r in recs {
-            if r.kind == EventKind::CONFIG_BLOB
-                && let Some(h) = crate::types::read_body::<BlobHdr>(&r.body)
-            {
-                let c = r.body.get(72..72 + h.blob.len as usize).unwrap_or(&[]);
-                self.blobs.put(h.blob, c);
-            }
-        }
         self.sink.log.recs.extend_from_slice(recs);
         // Segment boundaries of the appended part.
         for (k, st) in seg_start.iter().enumerate() {
@@ -332,7 +312,15 @@ impl ReplayDriver {
         None
     }
     pub fn blob(&self, sha: &[u8; 32]) -> Option<&[u8]> {
-        self.blobs.get(sha)
+        let upto = self.sink.pos.min(self.end);
+        let wanted = self.sink.log.recs.iter().take(upto).rev().find_map(|r| {
+            (r.kind == EventKind::CONFIG_BLOB)
+                .then(|| r.read::<BlobHdr>())
+                .flatten()
+                .filter(|h| h.blob.sha256 == *sha)
+                .map(|h| h.blob)
+        })?;
+        crate::config_blob::content_before(&self.sink.log, upto, &wanted).ok()
     }
     pub fn mismatches(&self) -> &[Mismatch] {
         &self.sink.mismatches
@@ -411,10 +399,13 @@ impl<S: StrategySet> Driver<S> for ReplayDriver {
         EmitResult::Skipped
     }
     fn take_parsed(&mut self, r: &BlobRef, cx: &ParseCx<'_, S>) -> Result<ParsedConfig<S>, ConfigErr> {
-        let content = self.blobs.get(&r.sha256).ok_or(ConfigErr::Missing)?.to_vec();
+        // Only configuration already reached in journal order can satisfy this command.
+        // Prefetching the file or extending an advisor mirror does not make future blobs
+        // visible. Match the complete reference and verify the content before parsing it.
+        let content = crate::config_blob::content_before(&self.sink.log, self.sink.pos.min(self.end), r)?;
         parse_blob::<S>(
             r,
-            &content,
+            content,
             cx.rd,
             cx.max_groups,
             cx.base,

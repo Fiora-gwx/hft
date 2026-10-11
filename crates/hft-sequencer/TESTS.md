@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | SEQ-018、SEQ-310 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
-| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-387 |
+| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-389 |
 | 策略集(`StrategySet`) | SEQ-015–SEQ-018、SEQ-340 |
 | 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181 |
 | 环与容量 | SEQ-001–SEQ-007、SEQ-058、SEQ-059、SEQ-064、SEQ-066、SEQ-086、SEQ-087、SEQ-100、SEQ-221、SEQ-231、SEQ-279、SEQ-288、SEQ-345、SEQ-346、SEQ-367 |
@@ -5375,6 +5375,38 @@ spec: README.md
 | SEQ-387.8 | 追加合法但恢复路径不识别的节 65535,重算节数和哈希 | RoundTrip,节号 65535 |
 | SEQ-387.9 | 风控节版本置为 65535,重算哈希 | Restore 失败 |
 | SEQ-387.10 | 请求不存在的快照 seq | Missing;原日志仍通过自检 |
+
+### SEQ-388 回放配置只在已消费前缀内可见
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
+- 级别:table
+- 里程碑:M2
+- 前置:B0 的有效 StrategyParams;每行覆盖 Verify、Recover、Mirror 三种驱动
+- 实现:`crates/hft-sequencer/tests/replay_config.rs::seq_388_replay_config_is_visible_only_in_consumed_prefix`
+
+| 行 | 输入或动作 | 期望 |
+|---|---|---|
+| SEQ-388.1 | 配置记录位于当前游标或未来 | Missing,按 SHA 查询同样不可见 |
+| SEQ-388.2 | 游标推进到配置之后 | 成功解析,内容逐字节相同 |
+| SEQ-388.3 | 游标退回配置之前 | 再次 Missing |
+| SEQ-388.4 | extend 追加配置,尚未消费;随后推进 | 先 Missing,后成功 |
+| SEQ-388.5 | kind、encoding、len、version、SHA 各一行只改一项 | 全部 Missing |
+| SEQ-388.6 | 最近同引用内容翻转 1 bit 或截短 1 B,之前仍有合法副本 | 两行均失败,不回退 |
+| SEQ-388.7 | 相同内容不同 version 的两个引用均在前缀内 | 两者均可解析,不因 SHA 去重丢身份 |
+| SEQ-388.8 | end 小于当前游标,配置只在 end 之后 | Missing |
+
+### SEQ-389 验证驱动检出从未来配置满足的真实命令
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
+- 级别:table
+- 里程碑:M2
+- 前置:B0 稳态,有效参数版本 2 已放入测试 Mailbox;正常与故意颠倒网关写入顺序的两份真实引擎 journal
+- 实现:`crates/hft-sequencer/tests/replay_config.rs::seq_389_verify_rejects_a_command_satisfied_by_future_config`
+
+| 行 | 配置和命令顺序 | 期望 |
+|---|---|---|
+| SEQ-389.1 | ConfigBlob → SetParams | 实盘夹具 Applied,Verify 无分歧 |
+| SEQ-389.2 | SetParams → ConfigBlob | 实盘夹具仍 Applied,Verify 在该命令的 CmdResult seq 检出分歧 |
 
 ## 验收
 

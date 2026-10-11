@@ -121,6 +121,8 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 
 回放比较器要求屏蔽测量字段后的逻辑体**长度和内容都相等**;不删体尾零。传输标志按 `NONCMP_FLAGS` 屏蔽,SHADOW 等业务标志仍参与比较。
 
+恢复、验证与镜像驱动解析配置时,只查当前已消费日志前缀里的 `ConfigBlob`;预读整份文件或追加镜像批次不提前放行配置。引用的 kind、encoding、len、version 与 SHA-256 必须全部相同,内容长度足够且摘要相等后才解码。向前或向后选择回放起点都按该位置重新限定可见范围;同一引用的最近记录损坏直接失败,不退回较早的副本。
+
 ### 策略集(`StrategySet`)
 
 `StrategySet` trait、`strategy_set!` 宏、`Strategy`/`Model`/`ParamSet` 的签名归 [hft-strategy-sdk](../hft-strategy-sdk/README.md);本 crate 只经下列入口使用策略(全部静态分派,无 `dyn`):

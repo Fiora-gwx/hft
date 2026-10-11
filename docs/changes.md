@@ -107,3 +107,4 @@
 | 2026-10-11 | out_hash 按实际追加顺序覆盖两快照之间的 Output,快照本身只分隔区间;包含同事件前置输出与段首配置,从快照起播补入到下一 Input 前的输出;增加独立区间重算与验证/恢复/镜像反例 | CI 38112874219 的 SEQ-382 暴露从中间快照起播时仅 out_hash 不同;SEQ-314 八行 | crates/hft-sequencer/(src、tests、README.md、TESTS.md)、docs/architecture.md、docs/subsystems/journal-format.md | 否 |
 | 2026-10-11 | 固定 HashTrail 集采用 CI 38113953546 在轮次费用与输出边界修正后的重生成摘要,50 个种子的身份、场景、2000 步和顺序不变 | LED-274 与 TK-114 在该 CI 通过;SEQ-314/382 修正夹具的按需快照调度与费用资产指数后随同验证 | fixtures/dst/hashtrail.toml、crates/hft-sequencer/tests/(hash.rs、process.rs) | 否 |
 | 2026-10-11 | BBO、L2 和标记价估值产生的账本注记在原始行情事件内写出;排空直接遍历既有缓冲,不复制临时 Vec | 复核 RoundClosed 的所有产生入口发现行情封轮也可跨快照遗留注记;SEQ-383 三行逐字节回放 | crates/hft-sequencer/(src/process.rs、tests/process.rs、README.md、TESTS.md)、docs/architecture.md | 否 |
+| 2026-10-11 | 恢复、验证与镜像驱动仅从已消费日志前缀解析配置,按完整 BlobRef 和内容 SHA 核验,不提前使用预读或 extend 带来的未来配置,不以旧合法副本掩盖最近损坏 | SEQ-388 三驱动八类边界、SEQ-389 真实命令顺序反例 | crates/hft-sequencer/(src、tests、README.md、TESTS.md) | 否 |

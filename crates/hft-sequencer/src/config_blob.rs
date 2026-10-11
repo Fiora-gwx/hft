@@ -39,7 +39,7 @@ pub fn decode_risk_blob(b: &[u8], _a: AccountId, rd: &RefData) -> Result<hft_ris
     hft_risk::RiskParams::decode_blob(b, rd).map_err(|_| crate::codes::detail::BAD_VALUE)
 }
 
-fn content_before<'a>(log: &'a Log, ix: usize, wanted: &BlobRef) -> Result<&'a [u8], ConfigErr> {
+pub(crate) fn content_before<'a>(log: &'a Log, ix: usize, wanted: &BlobRef) -> Result<&'a [u8], ConfigErr> {
     for r in log.recs.iter().take(ix).rev() {
         if r.kind != EventKind::CONFIG_BLOB {
             continue;
