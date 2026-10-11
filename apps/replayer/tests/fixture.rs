@@ -204,7 +204,27 @@ pub fn path_model(hours: u64) -> Fixture {
             seal(&path);
         }
     }
+    if let Some(root) = std::env::var_os("HFT_REPLAY_EVIDENCE_DIR") {
+        let dest = PathBuf::from(root).join(f.root.file_name().unwrap());
+        copy_evidence(&f.root, &dest);
+    }
     f
+}
+
+// Copy only this fixture's generated files; no production journal or external source is read.
+fn copy_evidence(src: &Path, dest: &Path) {
+    std::fs::create_dir_all(dest).unwrap();
+    for entry in std::fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let to = dest.join(entry.file_name());
+        let ty = entry.file_type().unwrap();
+        assert!(!ty.is_symlink());
+        if ty.is_dir() {
+            copy_evidence(&entry.path(), &to);
+        } else {
+            std::fs::copy(entry.path(), &to).unwrap();
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

@@ -47,6 +47,21 @@ fn execute(f: &fixture::Fixture, path_v2: bool, extra: &[String]) -> (i32, Value
     a.extend(["--advice".into(), "recompute".into()]);
     a.extend_from_slice(extra);
     let out = Command::new(exe).args(&a).output().unwrap();
+    if let Some(root) = std::env::var_os("HFT_REPLAY_EVIDENCE_DIR") {
+        let dest = PathBuf::from(root).join(f.root.file_name().unwrap());
+        let window = extra
+            .iter()
+            .position(|s| s == "--from-seq")
+            .and_then(|i| extra.get(i + 1))
+            .map_or("all", String::as_str);
+        let label = format!(
+            "replay-path{}-ck{}-{window}",
+            if path_v2 { 2 } else { 1 },
+            u8::from(extra.iter().any(|s| s == "--model-checkpoint"))
+        );
+        std::fs::write(dest.join(format!("{label}.json")), &out.stdout).unwrap();
+        std::fs::write(dest.join(format!("{label}.stderr.txt")), &out.stderr).unwrap();
+    }
     (
         out.status.code().unwrap(),
         serde_json::from_slice(&out.stdout).unwrap_or(Value::Null),

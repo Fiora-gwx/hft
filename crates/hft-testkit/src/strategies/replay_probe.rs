@@ -78,6 +78,14 @@ impl<const PATH: u32> Strategy for ReplayProbe<PATH> {
         }
     }
     fn on_event<V: Views>(&mut self, ev: &EventRef<'_>, v: &V, ctx: &mut Ctx<'_>) {
+        if let EventRef::Bbo { gix, .. } = ev {
+            let Some(g) = self.0.groups.get(usize::from(*gix)) else {
+                return;
+            };
+            if v.mode(self.0.inst.account, GroupId(g.id)) != RunMode::Live {
+                return;
+            }
+        }
         self.0.on_event(ev, v, ctx);
     }
     fn on_params(&mut self, p: &ReplayParams, g: &GroupTable, r: &RefView<'_>) -> Result<(), ParamError> {

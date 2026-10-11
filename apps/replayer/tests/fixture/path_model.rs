@@ -132,6 +132,29 @@ pub(super) fn exercise<S: StrategySet>(
         .map(|v| SimMatcher::new(world, v.id, 1))
         .collect();
     pump(s, world, &mut venues);
+    for g in &world.groups {
+        command(
+            s,
+            u64::from(g.group.0),
+            &ControlCmd::SetMode {
+                scope: hft_event::CmdScope {
+                    strategy: g.instance,
+                    venue: VenueId(0),
+                    account: g.account,
+                    _pad: 0,
+                    group: g.group,
+                    inst: InstId(0),
+                    _pad2: 0,
+                },
+                mode: hft_types::RunMode::Live,
+            },
+        );
+        settle(s);
+        assert_eq!(
+            s.driver().io.writer.last_result.as_ref().unwrap().status,
+            hft_sequencer::codes::status::APPLIED
+        );
+    }
     let mut commits = Vec::new();
     let mut last_ckpt = 0;
     let mut saved_hour = false;
