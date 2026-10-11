@@ -215,6 +215,7 @@ pub struct ModelRestart {
     pub count: u8,
     pub settle_ms: u64,
     pub reason: u64,
+    pub recovery_gap: bool,
 }
 
 pub fn model_restart(spec: ModelRestart) -> Fixture {
@@ -296,6 +297,13 @@ pub enum Restart {
     Version,
     Mismatch,
     GlobalMismatch,
+    Gap(u64),
+}
+
+pub fn recovery_gap(skipped: u64) -> Fixture {
+    finish_evidence(restarted::<hft_strategy_registry::Strategies>(Restart::Gap(
+        skipped,
+    )))
 }
 
 pub fn restarted<S: StrategySet>(restart: Restart) -> Fixture {
@@ -853,6 +861,9 @@ fn create_with_restart<S: StrategySet>(
         let prior_last = old.record_end_seq(old.recs.len() - 1).unwrap();
         let mut io = s.into_driver().io;
         io.old = Some(old);
+        if let Restart::Gap(skipped) = restart {
+            io.writer.debug_gap_on_roll(skipped, true);
+        }
         // A new TSC epoch and frequency must come from the new segment and EngineClock.
         let next_utc = io.rings.utc_of(Tsc(io.rings.tsc)) + 20_000_000_000;
         io.rings.tsc = 100;

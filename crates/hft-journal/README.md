@@ -179,7 +179,7 @@ pub enum Next<'a> {
 - **损坏段不能当作不存在**:枚举 `<10 位数字>.jrn` 只跳过可识别的 `Preparing` 段;头部读不出、magic/CRC 错或截短的文件保留在有序段表中,由 open/poll 明确失败。`Oldest` 不能因此移到后一段,`LastCompleteEvent` 不能因此缩到前一段。
 - 验证回放驱动用 `in_boot_block()` 跳过引导块输入并比对重新生成的引导块;冷读者从 `LatestBoot`/`LatestKeyframe` 自举。
 
-**不可变本地文件入口** `open_files` 直接读取调用方列出的原路径,文件名不参与身份判断,不枚举目录或回退其他副本。打开时按段头 `first_seq` 排序,逐段验证段头、记录框架/CRC、完整引导块、完整 `End` 与非零容量下的多段重组;任一文件有错则整个打开失败,此前不向调用方交付记录。同组文件须有相同 instance、journal_name、journal_kind、venue,段号和 seq 连续,`prev_header_sha256`、`prev_last_seq` 及前段 End 的目标一致;可单取一段或内部连续的后缀,不要求提供首段以前的历史。实际 `RECOVERY_GAP` 序号跳跃仍返回失败,由上层另行划分恢复区间。
+**不可变本地文件入口** `open_files` 直接读取调用方列出的原路径,文件名不参与身份判断,不枚举目录或回退其他副本。打开时按段头 `first_seq` 排序,逐段验证段头、记录框架/CRC、完整引导块、完整 `End` 与非零容量下的多段重组;任一文件有错则整个打开失败,此前不向调用方交付记录。同组文件须有相同 instance、journal_name、journal_kind、venue,段号和 seq 连续,`prev_header_sha256`、`prev_last_seq` 及前段 End 的目标一致;可单取一段或内部连续的后缀,不要求提供首段以前的历史。默认入口对实际 `RECOVERY_GAP` 序号跳跃返回失败。显式 `open_files_recoverable` 保留相同的全组预检、段号、前段 End、哈希和 seal 约束,只允许段头已标记的 RecoveryGap,轮询时先交付一次 Gap 再交付下一 Begin;其他缺口仍使预检失败。序号连续时无 Gap 通知,调用方必须同时检查段头标记,不能据此认为没有丢失尾部。
 
 文件按物理 EOF 校验。完整容量且标记 Sealed 的文件以 `committed_len` 为终点,之后只允许全零预留区;不能退到最后一条碰巧合法的记录。若存在同 stem 的 `.seal`,须完整核对长度、CRC、段号、首尾 seq 与屏蔽共享行后的 SHA-256,损坏 seal 不退化为无 seal 读取。无 seal 的文件也必须有完整 End。`FileOpenError` 带原路径及 `FileProblem` 分类,记录校验或重组错误附文件内偏移。空列表、未封闭尾部、缺段、重复段或 `reassembly_cap = 0` 均失败。
 

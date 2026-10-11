@@ -182,6 +182,7 @@ fn rpl_062_warmup_delivered() {
 #[test]
 fn rpl_054_start_after_checkpoint_discarded() {
     let f = fixture::model_restart(ModelRestart {
+        recovery_gap: false,
         count: 1,
         settle_ms: 60000,
         reason: 3,

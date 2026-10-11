@@ -15,8 +15,11 @@ struct Bundle {
 }
 impl Bundle {
     fn new() -> Self {
+        Self::with_gap(None)
+    }
+    fn with_gap(gap: Option<(u64, bool)>) -> Self {
         let mut h = H::open0(mem_c0());
-        for _ in 0..3 {
+        for i in 0..3 {
             h.events(2);
             h.w().append(F0, Tsc(9), &tcrc(7)).unwrap();
             h.w().end_event();
@@ -24,7 +27,12 @@ impl Bundle {
                 .append_var(EventKind::T_MULTI, F0, Tsc(10), &[&multi_body(70_001)])
                 .unwrap();
             h.w().end_event();
-            h.roll(RollReason::Hourly);
+            if let Some((skip, flag)) = gap.filter(|_| i == 0) {
+                h.w().debug_gap_on_roll(skip, flag);
+                h.roll(RollReason::Recovery);
+            } else {
+                h.roll(RollReason::Hourly);
+            }
         }
         let padded = h.seg(1);
         h.persist_all();
@@ -52,6 +60,67 @@ impl Bundle {
                 p
             })
             .collect()
+    }
+}
+
+#[test]
+fn jnl_131_immutable_recovery_gaps_are_explicit_and_preflighted() {
+    for (skip, flag) in [(0, true), (4, true), (4, false)] {
+        let b = Bundle::with_gap(Some((skip, flag)));
+        let paths = b.write(true);
+        let strict = JournalReader::open_files(&paths, CAP);
+        assert_eq!(strict.is_ok(), skip == 0);
+        let opened = JournalReader::open_files_recoverable(&paths, CAP);
+        if !flag {
+            assert_eq!(opened.unwrap_err().problem, FileProblem::Chain);
+            continue;
+        }
+        let mut reader = opened.unwrap();
+        let headers = reader.file_segments().unwrap();
+        let (previous, next) = (headers[0].last_seq, headers[1].header.first_seq);
+        assert_eq!(headers[1].header.flags & RECOVERY_GAP, RECOVERY_GAP);
+        assert_eq!(next - previous - 1, skip);
+        let mut gaps = Vec::new();
+        let mut delivered = Vec::new();
+        loop {
+            match reader.poll() {
+                Next::Record(r) => delivered.push(r.hdr.seq),
+                Next::Event(e) => delivered.push(e.seq),
+                Next::Gap(g) => gaps.push((g, delivered.last().copied())),
+                Next::End => break,
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        assert_eq!(gaps.len(), usize::from(skip > 0));
+        if let Some((g, last)) = gaps.first() {
+            assert_eq!(g.reason, GapReason::RecoveryGap);
+            assert_eq!(g.expected_seq, previous + 1);
+            assert_eq!(g.resume_segment_no, 2);
+            assert_eq!(*last, Some(previous));
+        }
+        assert!(delivered.contains(&next));
+        assert!(delivered.windows(2).all(|w| w[0] < w[1]));
+        for (i, path) in paths.iter().enumerate() {
+            assert_eq!(std::fs::read(path).unwrap(), b.bytes[i]);
+            assert_eq!(std::fs::read(path.with_extension("seal")).unwrap(), b.seals[i]);
+        }
+        // A recovery flag cannot excuse a missing supplied segment or a bad header chain.
+        assert_eq!(
+            JournalReader::open_files_recoverable(&[paths[0].clone(), paths[2].clone()], CAP)
+                .unwrap_err()
+                .problem,
+            FileProblem::Chain
+        );
+        let unsealed = b.write(false);
+        let mut changed = b.bytes[1].clone();
+        set_header(&mut changed, |h| h.prev_header_sha256[0] ^= 1);
+        std::fs::write(&unsealed[1], changed).unwrap();
+        assert_eq!(
+            JournalReader::open_files_recoverable(&unsealed, CAP)
+                .unwrap_err()
+                .problem,
+            FileProblem::Chain
+        );
     }
 }
 

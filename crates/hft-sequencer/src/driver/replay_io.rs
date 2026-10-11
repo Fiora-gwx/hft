@@ -2,9 +2,9 @@
 //! stay in hft-journal; only the replay representation and its explicit bounds live here.
 
 use hft_event::{DecodeErr, EventKind, Layout, RecordFlags, classify, kind_info};
-use hft_journal::{GapInfo, JournalKind, JournalReader, Next, ReadErr};
+use hft_journal::{GapInfo, GapReason, JournalKind, JournalReader, Next, RECOVERY_GAP, ReadErr};
 
-use super::replay::Log;
+use super::replay::{Log, RecoveryBoundary};
 use crate::{MemRecord, SegClock};
 
 /// Bounds on retained logical input, in addition to JournalReader's reassembly cap. These are
@@ -36,13 +36,17 @@ pub enum LogReadError {
 
 impl Log {
     /// Read through JournalReader's fixed LastCompleteEvent boundary. The caller configures
-    /// Oldest/segment-boot start, Error-on-gap and nonzero reassembly capacity. Physical seq
+    /// Oldest/segment-boot start and nonzero reassembly capacity. Live-reader gaps fail;
+    /// immutable files may explicitly allow RecoveryGap via open_files_recoverable. Header
+    /// flags are retained even without a numerical jump. Physical seq
     /// numbers, event flags and each segment's calibration are preserved. No current config,
     /// process clock, writer, truncation or recovery mutation is consulted.
     pub fn from_reader(reader: &mut JournalReader, limits: LogReadLimits) -> Result<Self, LogReadError> {
         let mut log = Log::default();
         let mut bytes = 0usize;
         let mut last_segment = None;
+        // Only the fully preflighted immutable-file API can explicitly resume a gap.
+        let immutable = reader.file_segments().is_some();
         loop {
             let record = match reader.poll() {
                 Next::Record(r) => {
@@ -79,6 +83,7 @@ impl Log {
                     };
                 }
                 Next::Err(e) => return Err(LogReadError::Read(e)),
+                Next::Gap(g) if immutable && g.reason == GapReason::RecoveryGap => continue,
                 Next::Gap(g) => return Err(LogReadError::Gap(g)),
                 Next::Pending => return Err(LogReadError::Pending),
             };
@@ -109,6 +114,14 @@ impl Log {
                 return Err(bad());
             }
             if last_segment != Some(pos.segment_no) {
+                if header.flags & RECOVERY_GAP != 0 {
+                    log.recovery_gaps.push(RecoveryBoundary {
+                        first: log.recs.len(),
+                        segment_no: header.segment_no,
+                        first_seq: header.first_seq,
+                        prev_last_seq: header.prev_last_seq,
+                    });
+                }
                 log.seg_start.push(log.recs.len());
                 log.segs.push(SegClock {
                     tsc_hz_milli: header.tsc_hz_milli,

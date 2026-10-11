@@ -16,7 +16,7 @@ spec: README.md
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
 | 写者 | JNL-008, JNL-010–JNL-038, JNL-063, JNL-068, JNL-120, JNL-121 |
-| 读者 | JNL-002, JNL-008, JNL-012, JNL-074–JNL-088, JNL-103, JNL-118, JNL-125–JNL-129 |
+| 读者 | JNL-002, JNL-008, JNL-012, JNL-074–JNL-088, JNL-103, JNL-118, JNL-125–JNL-129, JNL-131 |
 | persist 与后台维护(persist 线程调用) | JNL-008, JNL-012, JNL-042, JNL-044–JNL-054, JNL-091–JNL-093, JNL-107, JNL-114 |
 | 恢复与校验 | JNL-026, JNL-036, JNL-055, JNL-056, JNL-062–JNL-068, JNL-089, JNL-090, JNL-118, JNL-119, JNL-124 |
 | 持久元数据(engine_epoch 等) | JNL-092, JNL-094–JNL-098, JNL-122 |
@@ -1825,6 +1825,23 @@ spec: README.md
 - 步骤:开段前观察;写完引导块后保存观察值;append/end_event/publish 分别观察;修改返回副本;再写未完成事件并 publish;把前缀作为原始文件交普通读者,最后由真实写者封段
 - 期望:未开段为 None;只有 publish 使完整事件进入观察,未完成事件不进入;复制值长度等于 committed_len,改副本不改写者且接口不写文件;读者只返回已发布的首条 TIn 并保留 seq,封段后记录字节与此前复制值相同
 - 实现:`crates/hft-journal/tests/reader_files.rs::jnl_130_published_capture_is_owned_read_only_and_bounded`
+
+### JNL-131 不可变文件的恢复缺口显式交付且仍全量预检
+
+- 规则:[读者](README.md#读者)
+- 级别:table
+- 里程碑:M2
+- 前置:真实写者生成三段、CRC 记录与多段事件,冷副本含 seal;第一处滚动的跳号与标记分别为 (0,true)、(4,true)、(4,false)
+- 步骤:用默认和 recoverable 两入口打开;消费全部记录;另删中段、改已标记段的前段头哈希并重算头 CRC
+- 期望:默认入口只接受序号连续行;recoverable 拒绝无标记跳号,有标记跳号仅交付一次 RecoveryGap,随后从真实 Begin 继续;连续行保留头标记但不虚构 Gap;缺段和哈希损坏在交付前失败,原段与 seal 字节不变
+- 实现:`crates/hft-journal/tests/reader_files.rs::jnl_131_immutable_recovery_gaps_are_explicit_and_preflighted`
+
+| 行 | 跳号与标记 / 损坏 | 期望 |
+|---|---|---|
+| JNL-131.1 | 0,true | 两入口成功;无 Gap 通知,段头保留标记 |
+| JNL-131.2 | 4,true | 默认入口失败;恢复入口交付一次 RecoveryGap 后继续 |
+| JNL-131.3 | 4,false | 两入口均 Chain |
+| JNL-131.4 | 前两行各删除中段或改变中段前段头哈希 | 恢复入口预检 Chain |
 
 ## 验收
 

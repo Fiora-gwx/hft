@@ -292,7 +292,7 @@ const _: () = assert!(size_of::<SnapshotHdr>() == 96);
 
 读者只读映射(`PROT_READ`),可在任意进程;从 `Oldest`、`Seq(n)`、`SegmentBoot(n)`、`LatestBoot`、`LatestKeyframe`、`Tail` 起步;逐条交付记录或重组后的逻辑事件;报告自己是否处于引导块;热段退役或删除时透明切到冷副本;遇到缺段按 `OnGap::{Error, SkipToNextBoot}` 处理。签名与语义见 [hft-journal](../../crates/hft-journal/README.md#读者);Python 访问经 [hft-py](../../crates/hft-py/README.md)。
 
-离线不可变文件由 `JournalReader::open_files` 按段头排序并预检整组后交付;返回 `FileOpenError` 或带 `FileSegment` 清单的读者。封闭边界、seal、原路径与输入不可变契约归 [hft-journal 读者](../../crates/hft-journal/README.md#读者),不改变段头、记录或快照格式。
+离线不可变文件由 `JournalReader::open_files` 按段头排序并预检整组后交付;返回 `FileOpenError` 或带 `FileSegment` 清单的读者。`open_files_recoverable` 显式保留已标记恢复缺口;封闭边界、seal、原路径与输入不可变契约归 [hft-journal 读者](../../crates/hft-journal/README.md#读者),不改变段头、记录或快照格式。
 
 ## 格式演进
 

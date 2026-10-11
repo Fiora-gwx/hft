@@ -12,6 +12,8 @@ advisor 追赶在进程边界切换到记录的引导快照和配置,身份匹�
 
 这收窄 [离线起点决定](../architecture/2026-10-12-offline-model-origin.md) 的逐运行对象隔离要求。引擎运行仍完全隔离,Model 来源则依照检查点和 journal 判断。
 
+标记的恢复缺口中断冷验证的来源连续性,包括 seq 相邻的情况,具体边界见 [恢复缺口验证](2026-10-12-recovery-gap-verification.md)。
+
 ## Alternatives considered
 
 **每个运行空起步。** 无法恢复检查点内的累计样本,违背跨重启续算契约。

@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | RPL-095、RPL-104、RPL-241、RPL-242 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | RPL-001–RPL-004、RPL-070、RPL-079 |
-| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-274 |
+| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-278 |
 | sim | RPL-090–RPL-108、RPL-120–RPL-129、RPL-140–RPL-145、RPL-259 |
 | compare | RPL-160–RPL-173 |
 | latency | RPL-190–RPL-206 |
@@ -2201,6 +2201,56 @@ spec: README.md
 |---|---|---|
 | RPL-274.1 | 最后一块 Warmup 的 u64 载荷最低位翻转 | 退出 1,verify pass、recompute fail;首错为该块的 Advice,累计 3 处 Model 差异,报告与标准输出一致 |
 | RPL-274.2 | 合并后最后一条 Advice 的样本计数最低位翻转 | 退出 1,verify pass、recompute fail;恰 1 处分歧,首错为被改 Advice |
+
+### RPL-275 恢复缺口的逐运行验证与未知尾部报告
+
+- 规则:[verify](README.md#verify)
+- 级别:integ
+- 里程碑:M2
+- 前置:真实 JournalWriter/LiveDriver,恢复滚动分别标记连续 seq 和跳过 4 个 seq
+- 步骤:独立进程验证全组、恢复后窗口及单段后缀;另改变恢复后的 CmdResult 字节并更新记录 CRC 和 seal
+- 期望:正常输出和快照通过,全组两次独立恢复、后缀与窗口一次;报告保留标记、缺口数及未知尾部,后缀不声称提供前段;输入不变;错误输出退出 1 且不进入 recovery_diffs
+- 实现:`apps/replayer/tests/recovery_gap.rs::rpl_275_recovery_gap_files_restore_each_run_and_report_unknown_tail`
+
+### RPL-276 恢复缺口元数据不能掩盖错误边界
+
+- 规则:[verify](README.md#verify)
+- 级别:table
+- 里程碑:M2
+- 前置:RPL-275 实际跳号日志
+- 步骤:分别改变 Begin 索引、首 seq、前段末 seq、段号,重复或删除标记,把恢复原因换成 Hourly
+- 期望:七行都返回 RunBoundary,不交付通过结果
+- 实现:`apps/replayer/tests/recovery_gap.rs::rpl_276_recovery_gap_metadata_cannot_hide_an_invalid_run`
+
+| 行 | 独立损坏 | 期望 |
+|---|---|---|
+| RPL-276.1 | Begin 索引加一 | RunBoundary |
+| RPL-276.2 | 首 seq 加一 | RunBoundary |
+| RPL-276.3 | 前段末 seq 减一 | RunBoundary |
+| RPL-276.4 | 段号加一 | RunBoundary |
+| RPL-276.5 | 重复标记 | RunBoundary |
+| RPL-276.6 | 删除跳号标记 | RunBoundary |
+| RPL-276.7 | 原因换成 Hourly | RunBoundary |
+
+### RPL-277 每次恢复缺口隔离 Model 来源与历史匹配
+
+- 规则:[verify](README.md#verify)
+- 级别:integ
+- 里程碑:M2
+- 前置:真实 advisor 两次 Drain/恢复、连续 seq 的 RECOVERY_GAP、旧检查点追赶重发;每次恢复后 150 s 保存真实检查点,再运行 150 s
+- 步骤:独立进程覆盖不带检查点、旧检查点、窗口与旧检查点窗口;把检查点消费边界置于前段 End 后只给后缀;再分别用最后缺口之后真实检查点验证全组窗口及后缀
+- 期望:前四行 Output pass,Model skipped/tsa,比较数依次 66/6/0/0;恰在前段 End 的检查点不激活,比较 0;缺口后的合法检查点两行都逐字节比较 30 条 Advice,无缺来源;两个标记不能被连续 seq 隐去
+- 实现:`apps/replayer/tests/recovery_gap.rs::rpl_277_model_origins_and_history_stop_at_each_marked_gap`
+
+### RPL-278 缺口后的检查点丢弃注记重新建立 Model 起点
+
+- 规则:[verify](README.md#verify)
+- 级别:integ
+- 里程碑:M2
+- 前置:真实 Store 校验和损坏触发恢复后的 ModelCheckpointDiscarded,RECOVERY_GAP 标记保持
+- 步骤:全组重算;只改变恢复后首条 Advice payload,重算 CRC 和 seal
+- 期望:原始输入的 Output 与 126 条 Model Advice 全部通过;反例 Output 仍通过,Model 退出 1 且首处分歧定位到被改记录
+- 实现:`apps/replayer/tests/recovery_gap.rs::rpl_278_discarded_checkpoint_after_gap_starts_a_new_model_comparison`
 
 ## 验收
 

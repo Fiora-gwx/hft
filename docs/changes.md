@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-12 | 不可变文件显式读取已标记 RecoveryGap,保留严格预检;冷回放按恢复快照重建,报告未知尾部,Model 样本和历史 Advice 不能跨标记续接,相邻 seq 与首段后缀同样处理 | JNL-131、RPL-275–278;序号连续不能证明掉电尾部完整 | crates/hft-journal、crates/hft-sequencer、apps/replayer、docs/architecture.md | 否 |
 | 2026-10-12 | 预热载荷反例的物理偏移包含 ControlCmd 分片头,再次解码确认逻辑体只变目标字节,身份和体长不变;保留 Output pass、Model 差异精确计数的原断言 | CI147 的 RPL-274.1 实际误改实例编号并触发 UnknownTarget | apps/replayer | 否 |
 | 2026-10-12 | Model 输入边界以真实文件验证:首份参数延迟 20 min、三块预热及中途检查点、Advice 环阻塞后的 37 次合并、损坏检查点恢复后空起步。独立测试 Model 的五整数数表覆盖漏块/重复/乱序,载荷反例区分普通 Output 与 Model 分歧;生产集合与文件格式不变 | TK-119、RPL-042/053/054/062/274 | crates/hft-testkit、apps/replayer | 否 |
 | 2026-10-12 | Model 重算的 SegmentRoll 结构记录沿用相邻引擎时间,新运行起点取引导快照;End/BootDone 的零 TSC 不套用运行时钟。路径丢弃夹具使用合法非零异版本,保留原始样本 | RPL-058–060、RPL-273;真实写者封段的零 TSC 触发 ClockRange | hft-sequencer、replayer | 否 |

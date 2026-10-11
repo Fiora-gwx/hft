@@ -5580,6 +5580,8 @@ spec: README.md
 - 期望:原始比较 1 条、coalesced = 2、无缺起点;P1 虽在原始产出中出现仍被判分歧,重算字节为 P3;第二次记录 P3 无可配对产出,不能重复消费第一条
 - 实现:`crates/hft-sequencer/tests/advisor.rs::seq_403_recompute_requires_latest_same_basis_and_one_to_one_matching`
 
+真实文件的恢复缺口、元数据反例及 Model 来源隔离由 [RPL-275–278](../../apps/replayer/TESTS.md#rpl-275-恢复缺口的逐运行验证与未知尾部报告) 覆盖。
+
 本地文件装配、检查点身份与窗口、只读保护的跨组件覆盖见 [RPL-266–RPL-269](../../apps/replayer/TESTS.md#rpl-266-真实-advisor-文件重算与检查点连续性)。真实 Drain 后的 advisor 跨运行追赶、Model 样本累计、两种路径丢弃原因与停机不计时由 [RPL-058–RPL-060](../../apps/replayer/TESTS.md#rpl-058-窗口内的-modelpathreset-注记按其-v1v2-计算重建点) 验证,缺起点与注记反例见 [RPL-272](../../apps/replayer/TESTS.md#rpl-272-重启后的来源缺失与路径注记反例)。
 
 ## 验收

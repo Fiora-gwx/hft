@@ -42,6 +42,16 @@ pub struct RecoveryDiff {
     pub flags: (Option<u16>, Option<u16>),
 }
 
+/// A header-marked recovery boundary retained independently of numerical seq gaps.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RecoveryBoundary {
+    /// Logical record index of the marked segment's Begin.
+    pub first: usize,
+    pub segment_no: u64,
+    pub first_seq: u64,
+    pub prev_last_seq: u64,
+}
+
 /// A flat view of the logged records with segment boundaries.
 #[derive(Clone, Debug, Default)]
 pub struct Log {
@@ -52,6 +62,9 @@ pub struct Log {
     /// Last physical seq of split logical records, sorted by the first part's seq.
     /// MemJournal records and single-part file records need no entry.
     pub part_ends: Vec<(u64, u64)>,
+    /// Header flags retained even when seq is contiguous or the supplied input is a suffix.
+    /// A marked boundary is evidence of a possibly lost tail, not its size.
+    pub recovery_gaps: Vec<RecoveryBoundary>,
 }
 
 impl Log {

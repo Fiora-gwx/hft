@@ -95,7 +95,7 @@ fn execute<S: StrategySet>(args: &[String], stdout: &mut impl Write) -> Result<i
     let opts = options::parse(args).map_err(|e| (2, e))?;
     let mut files = Vec::new();
     discover(&opts.journal, &mut files)?;
-    let mut reader = JournalReader::open_files(&files, opts.reassembly).map_err(|e| {
+    let mut reader = JournalReader::open_files_recoverable(&files, opts.reassembly).map_err(|e| {
         let code = if matches!(e.problem, FileProblem::Format(_)) {
             4
         } else {

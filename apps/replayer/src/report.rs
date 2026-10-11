@@ -152,6 +152,23 @@ pub(crate) fn format(
         .collect();
     let mut summary = json!({"instance": instance, "date": &date[..10], "release": crate::VERSION, "verify": if details.is_empty() { "pass" } else { "fail" }, "first_divergent_seq": sink.mismatches.first().map(|m| m.seq), "recompute": "skipped", "skipped_reason": "advice_journal", "generated_utc": utc(generated), "start_snapshot_seq": result.start_snapshot, "inputs_replayed": result.inputs, "outputs_compared": sink.compared, "snapshots_checked": result.snapshots, "mismatches": details.len(), "runs": runs});
     let mut detail = json!({"divergences": details, "recovery_diffs": recovery});
+    summary["input_continuity"] = json!(if sink.log.recovery_gaps.is_empty() {
+        "unbroken"
+    } else {
+        "recovery_gap"
+    });
+    summary["recovery_gaps"] = json!(
+        sink.log
+            .recovery_gaps
+            .iter()
+            .map(|g| json!({
+                "segment_no": g.segment_no, "first_seq": g.first_seq,
+                "prev_last_seq": g.prev_last_seq, "previous_segment_included": g.first > 0,
+                "unavailable_seq_count": g.first_seq - g.prev_last_seq - 1,
+                "tail_loss_unknown": true
+            }))
+            .collect::<Vec<_>>()
+    );
     if let Some(m) = model {
         let model_first = m.differences.first().map(|d| d.seq);
         let output_first = sink.mismatches.first().map(|d| d.seq);

@@ -386,9 +386,21 @@ pub fn recompute<S: StrategySet>(
         if log.recs[end - 1].seq < warm_from || log.recs[run.first].seq > to {
             continue;
         }
+        let gap = log
+            .recovery_gaps
+            .binary_search_by_key(&run.first, |g| g.first)
+            .is_ok();
+        if gap {
+            // Even adjacent seq values can hide a power-loss tail. Neither Model samples
+            // nor historical Advice can supply evidence across that boundary.
+            continuing.clear();
+            compare.finish();
+        }
         compare.new_run();
-        let in_run =
-            |last: u64| last >= log.recs[run.first].seq.saturating_sub(1) && last <= log.recs[end - 1].seq;
+        let in_run = |last: u64| {
+            let first = log.recs[run.first].seq;
+            last >= if gap { first } else { first.saturating_sub(1) } && last <= log.recs[end - 1].seq
+        };
         let wanted = decoded
             .iter()
             .filter(|(_, d)| in_run(d.key.last_seq))
@@ -448,6 +460,9 @@ pub fn recompute<S: StrategySet>(
             let forbidden = supplied.is_some_and(|i| {
                 decoded[i].1.key.last_seq < first_seq.saturating_sub(1)
                     || decoded[i].1.key.last_seq > last_seq
+                    || log.recovery_gaps.iter().any(|g| {
+                        decoded[i].1.key.last_seq > g.prev_last_seq && decoded[i].1.key.last_seq < g.first_seq
+                    })
             });
             let checkpoint = supplied.filter(|&i| !forbidden && in_run(decoded[i].1.key.last_seq));
             let has_model = S::has_model(sl.kind_id);

@@ -191,6 +191,7 @@ fn rpl_058_path_reset_note() {
     for reason in [1, 2] {
         check(
             ModelRestart {
+                recovery_gap: false,
                 count: 1,
                 settle_ms: 60_000,
                 reason,
@@ -204,6 +205,7 @@ fn rpl_058_path_reset_note() {
 fn rpl_059_last_rebuild_point() {
     check(
         ModelRestart {
+            recovery_gap: false,
             count: 2,
             settle_ms: 60_000,
             reason: 1,
@@ -216,6 +218,7 @@ fn rpl_059_last_rebuild_point() {
 fn rpl_060_engine_time_excludes_downtime() {
     check(
         ModelRestart {
+            recovery_gap: false,
             count: 1,
             settle_ms: 120_000,
             reason: 1,
@@ -227,6 +230,7 @@ fn rpl_060_engine_time_excludes_downtime() {
 #[test]
 fn rpl_272_restart_origin_and_reset_counterexamples() {
     let f = fixture::model_restart(ModelRestart {
+        recovery_gap: false,
         count: 1,
         settle_ms: 60_000,
         reason: 1,
@@ -284,6 +288,7 @@ fn rpl_272_restart_origin_and_reset_counterexamples() {
 #[test]
 fn rpl_273_checkpoint_catchup_reemits_prior_run_advice() {
     let f = fixture::model_restart(ModelRestart {
+        recovery_gap: false,
         count: 2,
         settle_ms: 120_000,
         reason: 0,

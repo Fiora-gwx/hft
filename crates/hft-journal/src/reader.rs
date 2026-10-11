@@ -241,6 +241,21 @@ impl JournalReader {
     /// segment (including its complete End and any seal) and every reassembled event is
     /// checked before returning a reader. No tail repair, directory discovery or hot fallback.
     pub fn open_files(paths: &[PathBuf], reassembly_cap: usize) -> Result<Self, FileOpenError> {
+        Self::open_files_inner(paths, reassembly_cap, false)
+    }
+
+    /// As `open_files`, but a header-marked RecoveryGap is delivered once before its next
+    /// boot. All supplied files, seals, hashes and records are still validated up front.
+    /// The caller must restore state at that boot, not continue across missing inputs.
+    pub fn open_files_recoverable(paths: &[PathBuf], reassembly_cap: usize) -> Result<Self, FileOpenError> {
+        Self::open_files_inner(paths, reassembly_cap, true)
+    }
+
+    fn open_files_inner(
+        paths: &[PathBuf],
+        reassembly_cap: usize,
+        recovery: bool,
+    ) -> Result<Self, FileOpenError> {
         let fail = |problem| {
             reader_files::error(
                 paths.first().map_or(std::path::Path::new(""), PathBuf::as_path),
@@ -257,6 +272,9 @@ impl JournalReader {
         let mut cfg = ReaderConfig::new(PathBuf::new(), PathBuf::new(), instance, name);
         cfg.end = EndAt::LastCompleteEvent;
         cfg.reassembly_cap = reassembly_cap;
+        if recovery {
+            cfg.on_gap = OnGap::SkipToNextBoot;
+        }
         let mut r = Self::blank(&cfg);
         r.kind =
             JournalKind::from_u8(first.header.journal_kind).ok_or_else(|| fail(FileProblem::Identity))?;
@@ -275,6 +293,7 @@ impl JournalReader {
                     error,
                     offset: r.off as u64,
                 },
+                Next::Gap(g) if recovery && g.reason == GapReason::RecoveryGap => continue,
                 Next::Gap(_) => FileProblem::Chain,
                 Next::Pending => FileProblem::Boundary,
             };

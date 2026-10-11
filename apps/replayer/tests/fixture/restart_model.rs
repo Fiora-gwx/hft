@@ -130,6 +130,10 @@ pub(super) fn exercise<S: StrategySet>(
         let mut io = s.into_driver().io;
         let previous_utc = io.rings.utc_of(Tsc(io.rings.tsc));
         io.old = Some(old);
+        if spec.recovery_gap {
+            // Cold recovery can lose its unpersisted tail yet reuse adjacent seq values.
+            io.writer.debug_gap_on_roll(0, true);
+        }
         io.rings.tsc = 100;
         io.rings.hz *= 2;
         io.rings.calib.tsc = Tsc(100);
@@ -208,7 +212,18 @@ pub(super) fn exercise<S: StrategySet>(
             "stop_engine_ns": stopped, "down_ns": 600_000_000_000u64,
             "restart_tsc": 100, "hz_milli": setup.clock.tsc_hz_milli }),
         );
-        market(&mut s, &mut a, f, w, 300, &mut tick);
+        if spec.recovery_gap {
+            market(&mut s, &mut a, f, w, 150, &mut tick);
+            let (after_h, after_body) = save(&mut s, &mut a, f);
+            std::fs::write(
+                f.root.join(format!("after-gap-{turn}.ckpt")),
+                checkpoint::encode(&after_h, &after_body, 1 << 20).unwrap(),
+            )
+            .unwrap();
+            market(&mut s, &mut a, f, w, 150, &mut tick);
+        } else {
+            market(&mut s, &mut a, f, w, 300, &mut tick);
+        }
     }
     let (h, body) = save(&mut s, &mut a, f);
     let final_file = checkpoint::encode(&h, &body, 1 << 20).unwrap();
@@ -223,6 +238,7 @@ pub(super) fn exercise<S: StrategySet>(
         f.root.join("generation.json"),
         serde_json::to_vec_pretty(&serde_json::json!({
             "restarts": boundaries, "path_settle_ms": spec.settle_ms, "reason": spec.reason,
+            "recovery_gap": spec.recovery_gap,
             "engine_ns": s.engine().last_ens, "market_ticks": tick, "expected_samples": expected_samples,
         }))
         .unwrap(),

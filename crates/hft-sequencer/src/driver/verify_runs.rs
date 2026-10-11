@@ -30,6 +30,18 @@ pub(super) fn plan(log: &Log) -> Result<RunPlan, VerifyError> {
     {
         return Err(bad(0));
     }
+    if log.recovery_gaps.windows(2).any(|w| w[0].first >= w[1].first) {
+        return Err(bad(0));
+    }
+    for gap in &log.recovery_gaps {
+        if log.seg_start.binary_search(&gap.first).is_err()
+            || log.recs.get(gap.first).is_none_or(|r| r.seq != gap.first_seq)
+            || gap.first_seq <= gap.prev_last_seq
+            || (gap.first > 0 && log.record_end_seq(gap.first - 1) != Some(gap.prev_last_seq))
+        {
+            return Err(bad(gap.first));
+        }
+    }
     let mut runs = Vec::new();
     let mut recoveries = Vec::new();
     let mut recovery_notes = Vec::new();
@@ -44,6 +56,19 @@ pub(super) fn plan(log: &Log) -> Result<RunPlan, VerifyError> {
             .filter(|r| r.mark == RollMark::Begin as u8)
             .ok_or_else(|| bad(first))?;
         let reason = RollReason::from_u8(begin.reason).ok_or_else(|| bad(first))?;
+        let gap = log.recovery_gaps.binary_search_by_key(&first, |g| g.first).ok();
+        if si > 0
+            && gap.is_none()
+            && log.record_end_seq(first - 1).and_then(|n| n.checked_add(1)) != Some(log.recs[first].seq)
+        {
+            return Err(bad(first));
+        }
+        if let Some(gi) = gap
+            && (log.recovery_gaps[gi].segment_no != begin.segment_no
+                || !matches!(reason, RollReason::Recovery | RollReason::RecoverFromSnapshot))
+        {
+            return Err(bad(first));
+        }
         let done = records
             .iter()
             .position(|r| {

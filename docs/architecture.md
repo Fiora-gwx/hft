@@ -127,7 +127,7 @@ tier(frontmatter 标注):`pure` 无 I/O 无线程;`hot` 在 tick-to-trade 路径
 
 DST 按 Input 边界和下单前采集只读事实,快照后的事件边界保存状态供独立重建;观察仅在 `testkit` 构建使用,不进 journal。
 
-`hft-sequencer` 的三种驱动:实盘读环;恢复从快照重放完整事件、对账后放行,停机标记以 Kill Input 保留;验证回放自检快照、预热窗口并逐字节核对 Output 与哈希,普通滚段延续状态,重启或版本变化从新引导快照独立运行([驱动契约](../crates/hft-sequencer/README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用))。Advice 是 Input,回放读日志;Model 以检查点参数续算,跨重启重建引擎镜像并按合法来源续接样本。跨重启时间用 engine_ns,停机不计;跨启动 Advice 按 `basis_seq < Now.boot_seq` 判过期。
+`hft-sequencer` 的三种驱动:实盘读环;恢复从快照重放完整事件、对账后放行,停机标记以 Kill Input 保留;验证回放自检快照、预热窗口并逐字节核对 Output 与哈希,普通滚段延续状态,重启或版本变化从新引导快照独立运行([驱动契约](../crates/hft-sequencer/README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用))。Advice 是 Input,回放读日志;Model 按合法来源续算,恢复缺口中断冷验证来源([规则](../apps/replayer/README.md#verify))。跨重启时间用 engine_ns,停机不计;跨启动 Advice 按 `basis_seq < Now.boot_seq` 判过期。
 
 **模拟重演**(`replayer sim`)把录下的 journal 行情喂给模拟网关与同一策略,用于排障与复现,**不评估收益**;策略表现只在模拟账户上观察([hft-sim](../crates/hft-sim/README.md))。没有历史回测。
 

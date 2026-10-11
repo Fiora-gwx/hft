@@ -2,6 +2,10 @@
 
 这里只放一种设计文档。**Agent Note** 记录一个影响本仓库的决定或提案——**为什么**、**放弃了什么**、**需要什么验证**,也就是代码与 README 承载不了的部分。本文件规定 Agent Note 放在哪里、何时写、文件格式。改编自 DeepSeek Harness 的 `.agents/notes/README.md`(样例在 architecture-v2/research/_dsh/notes_README.md(未入库的资料缓存:`architecture-v2/research/_dsh/notes_README.md`));改编理由见 [dsh-style-documentation](proposed/process/2026-09-30-dsh-style-documentation.md)。
 
+## 恢复缺口验证决定(2026-10-12)
+
+[恢复缺口验证](implemented/bug-fix/2026-10-12-recovery-gap-verification.md) 记录不可变输入的已标记缺口、未知尾部报告与 Model 来源中断。
+
 ## Model 跨重启来源决定(2026-10-12)
 
 | 当前 Note | 决定 | 被收窄的 Note |
