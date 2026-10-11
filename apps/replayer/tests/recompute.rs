@@ -273,3 +273,67 @@ fn rpl_272_restart_origin_and_reset_counterexamples() {
     assert_eq!(missing.1["model_no_start"], serde_json::json!(["tsa"]));
     assert_eq!(missing.1["summary"]["model_advice_compared"], 0);
 }
+
+#[test]
+fn rpl_273_checkpoint_catchup_reemits_prior_run_advice() {
+    let f = fixture::model_restart(ModelRestart {
+        count: 2,
+        settle_ms: 120_000,
+        reason: 0,
+    });
+    let log = fixture::read(&f);
+    assert!(log.recs.iter().all(|r| is_reset(r).is_none()));
+    let cp = f.root.join("checkpoints/tsa.ckpt");
+    let bytes = std::fs::read(&cp).unwrap();
+    let c = checkpoint::decode(&bytes, 1 << 20).unwrap();
+    let mut seen = std::collections::BTreeSet::new();
+    let repeated: Vec<_> = log
+        .recs
+        .iter()
+        .enumerate()
+        .filter_map(|(ix, r)| (r.kind == EventKind::ADVICE).then(|| (ix, r.read::<AdviceHdr>().unwrap())))
+        .filter(|(_, a)| !seen.insert((a.strategy.0, a.account.0, a.group.0, a.local_kind, a.basis_seq)))
+        .collect();
+    assert_eq!(repeated.len(), 12, "six prior-run Advice per checkpoint catch-up");
+    let args = options(&cp, None);
+    let r = execute(&f, false, &args);
+    passed(&r);
+    assert_eq!(r.1["summary"]["runs"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        r.1["summary"]["model_advice_compared"],
+        log.recs
+            .iter()
+            .filter(|r| r.kind == EventKind::ADVICE && r.seq > c.key.last_seq)
+            .count()
+    );
+    assert_eq!(r.1["summary"]["coalesced"], 0);
+    let ix = repeated[0].0;
+    let mut files: Vec<_> = std::fs::read_dir(f.file.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|s| s == "jrn"))
+        .collect();
+    files.sort();
+    let path = &files[log.seg_of(ix)];
+    let original = std::fs::read(path).unwrap();
+    let (changed, _) = crate::model::mutate(
+        &original,
+        EventKind::ADVICE,
+        Some(log.recs[ix].seq),
+        std::mem::size_of::<AdviceHdr>() + 16,
+    );
+    std::fs::write(path, changed).unwrap();
+    fixture::seal(path);
+    let mut args = args;
+    args.extend([
+        "--report".into(),
+        f.root.join("bad-catchup.json").display().to_string(),
+    ]);
+    let wrong = execute(&f, false, &args);
+    assert_eq!(wrong.0, 1, "{wrong:?}");
+    assert_eq!(wrong.1["summary"]["verify"], "pass");
+    assert_eq!(wrong.1["summary"]["recompute"], "fail");
+    assert_eq!(wrong.1["summary"]["first_model_divergent_seq"], log.recs[ix].seq);
+    std::fs::write(path, original).unwrap();
+    fixture::seal(path);
+}

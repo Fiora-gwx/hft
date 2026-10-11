@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | RPL-095、RPL-104、RPL-241、RPL-242 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | RPL-001–RPL-004、RPL-070、RPL-079 |
-| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-272 |
+| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-273 |
 | sim | RPL-090–RPL-108、RPL-120–RPL-129、RPL-140–RPL-145、RPL-259 |
 | compare | RPL-160–RPL-173 |
 | latency | RPL-190–RPL-206 |
@@ -2172,6 +2172,16 @@ spec: README.md
 - 步骤:独立修改 ModelPathReset 的原因码为 0、保留字段为非零、注记码使重置缺失,保留原记录 CRC 策略并重算 seal;另在重启后的窗口不给检查点
 - 期望:前两种输入退出 3;缺重置退出 1,verify 为 pass、recompute 为 fail 且有 Model 字节分歧;不给检查点时 verify 为 pass、recompute 为 skipped、model_no_start 恰为 tsa、比较量为 0
 - 实现:`apps/replayer/tests/recompute.rs::rpl_272_restart_origin_and_reset_counterexamples`
+
+### RPL-273 完整检查点的追赶重发逐字节验证
+
+- 规则:[verify](README.md#verify)
+- 级别:proc
+- 里程碑:M2
+- 前置:与 RPL-059 相同的两次真实 Drain/重启;路径节保持有效,没有 ModelPathReset;每次从停机前 30 s 的真实检查点追赶,完整输出经 advice 环入 journal
+- 步骤:独立进程用首次检查点重算全部文件;另篡改新运行中一条旧 basis 重发 Advice 的载荷,保留原 CRC 策略并重算 seal
+- 期望:原始文件两个 verdict 均 pass、三次独立运行、coalesced 为 0;实际出现 12 条旧 basis 重发,比较量等于检查点后所有 Advice。篡改后退出 1、verify 为 pass、recompute 为 fail,首个 Model 分歧 seq 恰为被修改记录;SEQ-403 的同运行重复反例仍不允许消费同一产出两次
+- 实现:`apps/replayer/tests/recompute.rs::rpl_273_checkpoint_catchup_reemits_prior_run_advice`
 
 ## 验收
 

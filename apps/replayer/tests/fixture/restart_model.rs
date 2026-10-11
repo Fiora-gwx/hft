@@ -93,7 +93,7 @@ pub(super) fn exercise<S: StrategySet>(
     spec: ModelRestart,
 ) -> Live<S> {
     assert!((1..=2).contains(&spec.count));
-    assert!((1..=2).contains(&spec.reason));
+    assert!(spec.reason <= 2);
     let mut a = advisor(&mut s, f, setup, Store::default());
     let mut tick = 0;
     market(&mut s, &mut a, f, w, 300, &mut tick);
@@ -167,7 +167,7 @@ pub(super) fn exercise<S: StrategySet>(
         if spec.reason == 1 {
             restored_body[..4].copy_from_slice(&0u32.to_le_bytes());
             restored_h.path_version = 0;
-        } else {
+        } else if spec.reason == 2 {
             restored_body[8..16].copy_from_slice(&(-1i64).to_le_bytes());
         }
         restored_h.checksum = ckpt_checksum(&restored_body);
@@ -176,23 +176,23 @@ pub(super) fn exercise<S: StrategySet>(
         drop(a);
         a = advisor(&mut s, f, setup, store);
         let log = published(&mut s, f);
-        let note = log
-            .recs
-            .iter()
-            .rev()
-            .find_map(|r| {
-                r.read::<hft_event::Note>().filter(|n| {
-                    r.kind == EventKind::NOTE
-                        && n.code
-                            == hft_event::note_code(
-                                hft_event::NoteSource::Advisor,
-                                hft_sequencer::codes::advisor_note::MODEL_PATH_RESET,
-                            )
-                })
+        let note = log.recs.iter().rev().find_map(|r| {
+            r.read::<hft_event::Note>().filter(|n| {
+                r.kind == EventKind::NOTE
+                    && n.code
+                        == hft_event::note_code(
+                            hft_event::NoteSource::Advisor,
+                            hft_sequencer::codes::advisor_note::MODEL_PATH_RESET,
+                        )
             })
-            .unwrap();
-        assert_eq!(note.strategy.0, 9);
-        assert_eq!(note.v[..3], [spec.reason, h.last_seq, spec.settle_ms]);
+        });
+        if spec.reason == 0 {
+            assert!(note.is_none());
+        } else {
+            let note = note.unwrap();
+            assert_eq!(note.strategy.0, 9);
+            assert_eq!(note.v[..3], [spec.reason, h.last_seq, spec.settle_ms]);
+        }
         boundaries.push(
             serde_json::json!({ "checkpoint_seq": h.last_seq, "checkpoint_engine_ns": h.last_ens,
             "stop_engine_ns": stopped, "down_ns": 600_000_000_000u64,

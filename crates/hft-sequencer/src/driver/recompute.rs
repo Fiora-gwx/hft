@@ -378,6 +378,7 @@ pub fn recompute<S: StrategySet>(
         if log.recs[end - 1].seq < warm_from || log.recs[run.first].seq > to {
             continue;
         }
+        compare.new_run();
         let in_run =
             |last: u64| last >= log.recs[run.first].seq.saturating_sub(1) && last <= log.recs[end - 1].seq;
         let wanted = decoded

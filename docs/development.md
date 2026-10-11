@@ -128,7 +128,7 @@
 
 ### 质量门(`quality-gates.yml`)
 
-RPL-058–060、RPL-270–272 的现场 Model 回放文件、检查点、生成参数及独立进程报告保存为 `replay-model-evidence` artifact,保留 7 天。测试只导出自己生成的合成文件,不读取生产 journal;该制品用于核对与后续固定样本评审,不代替 `fixtures/replay` 的指针和哈希。
+RPL-058–060、RPL-270–273 的现场 Model 回放文件、检查点、生成参数及独立进程报告保存为 `replay-model-evidence` artifact,保留 7 天。测试只导出自己生成的合成文件,不读取生产 journal;该制品用于核对与后续固定样本评审,不代替 `fixtures/replay` 的指针和哈希。
 
 全部在 `ubuntu-latest`;固定工具链 + `Swatinem/rust-cache`;内容与时长上限见 [testing §6](testing.md#6-ci-运行矩阵)。作业划分(同 Trading 的 `rust` / `python` / `operations` 三分,其中后两者合并为 `ops-py` 共用环境准备):
 

@@ -18,12 +18,14 @@ fn key(h: &AdviceHdr) -> Key {
 }
 
 struct Pending {
-    bytes: Vec<u8>,
     countable: bool,
 }
 
 pub(super) struct Compare {
     pending: BTreeMap<Key, Pending>,
+    // A restarted advisor can replay old Inputs and emit their Advice again. Preserve
+    // exact expected bytes, but grant only one consumption per recorded process run.
+    archive: BTreeMap<Key, Vec<u8>>,
     bytes: usize,
     detail_bytes: usize,
     limits: RecomputeLimits,
@@ -36,6 +38,7 @@ impl Compare {
     pub fn new(limits: RecomputeLimits) -> Self {
         Self {
             pending: BTreeMap::new(),
+            archive: BTreeMap::new(),
             bytes: 0,
             detail_bytes: 0,
             limits,
@@ -60,14 +63,15 @@ impl Compare {
         // All calls for the same basis event precede a flush. Matching an older payload
         // would accept an Advice which could not survive the actual outbox.
         if let Some(old) = self.pending.remove(&k) {
-            self.bytes -= old.bytes.len();
             self.coalesced += u64::from(old.countable);
         }
+        let previous = self.archive.get(&k).map_or(0, Vec::len);
         let size = self
             .bytes
+            .saturating_sub(previous)
             .checked_add(bytes.len())
             .ok_or(RecomputeError::DiagnosticLimit)?;
-        if self.pending.len() >= self.limits.records
+        if (previous == 0 && self.archive.len() >= self.limits.records)
             || size
                 .checked_add(self.detail_bytes)
                 .is_none_or(|n| n > self.limits.bytes)
@@ -75,7 +79,8 @@ impl Compare {
             return Err(RecomputeError::DiagnosticLimit);
         }
         self.bytes = size;
-        self.pending.insert(k, Pending { bytes, countable });
+        self.archive.insert(k, bytes);
+        self.pending.insert(k, Pending { countable });
         Ok(())
     }
 
@@ -85,15 +90,13 @@ impl Compare {
         if usize::from(h.len) != payload.len() {
             return Err(RecomputeError::Advice { seq: r.seq });
         }
-        let actual = self.pending.remove(&key(&h)).map(|p| {
-            self.bytes -= p.bytes.len();
-            p.bytes
-        });
+        let k = key(&h);
+        let actual = self.pending.remove(&k).and_then(|_| self.archive.get(&k));
         if !compare {
             return Ok(());
         }
         self.compared += 1;
-        if actual.as_deref() == Some(r.body.as_slice()) {
+        if actual.map(Vec::as_slice) == Some(r.body.as_slice()) {
             return Ok(());
         }
         if self.differences.len() >= self.limits.records {
@@ -102,7 +105,7 @@ impl Compare {
         let detail = r
             .body
             .len()
-            .checked_add(actual.as_ref().map_or(0, Vec::len))
+            .checked_add(actual.map_or(0, Vec::len))
             .and_then(|n| n.checked_add(self.detail_bytes))
             .ok_or(RecomputeError::DiagnosticLimit)?;
         if detail
@@ -120,7 +123,7 @@ impl Compare {
             local_kind: h.local_kind,
             basis_seq: h.basis_seq,
             logged: r.body.clone(),
-            regenerated: actual,
+            regenerated: actual.cloned(),
         });
         Ok(())
     }
@@ -128,6 +131,14 @@ impl Compare {
     pub fn finish(&mut self) {
         self.coalesced += self.pending.values().filter(|p| p.countable).count() as u64;
         self.pending.clear();
+        self.archive.clear();
         self.bytes = 0;
+    }
+
+    pub fn new_run(&mut self) {
+        self.coalesced += self.pending.values().filter(|p| p.countable).count() as u64;
+        self.pending.clear();
+        self.pending
+            .extend(self.archive.keys().map(|k| (*k, Pending { countable: false })));
     }
 }
