@@ -1996,9 +1996,9 @@ spec: README.md
 - 规则:[verify](README.md#verify)、[已知限制与后续工作](README.md#已知限制与后续工作)
 - 级别:proc
 - 里程碑:M2
-- 前置:真实 sequencer 与 JournalWriter 现场生成封闭文件,包含两个 SnapshotNow 命令,release registry、无账户
-- 步骤:运行生产 replayer 二进制并写报告;篡改 CmdResult 且重算 CRC;窗口结束于分歧前;恢复源数据重新验证;再损坏段头
-- 期望:原文件退出 0,输入/输出/快照计数非空且来源不变;篡改退出 1,首个 seq 和字段 diff 与侧文件一致;窗口外分歧不计;成功重跑清除旧侧文件内容;损坏退出 3 且无成功 JSON
+- 前置:真实 sequencer 与 JournalWriter 现场生成封闭文件,包含两个 SnapshotNow 命令;W1 账户绑定 release registry 的首个注册 kind,参数取其 schema 默认值
+- 步骤:运行生产 replayer 二进制并写报告;篡改 CmdResult 且重算 CRC;窗口结束于分歧前;恢复源数据重新验证;独立篡改后续快照状态节并重算 CRC;再损坏段头
+- 期望:原文件退出 0,输入/输出/快照计数非空且来源不变;篡改退出 1,首个 seq 和字段 diff 与侧文件一致;窗口外分歧不计;成功重跑清除旧侧文件内容;状态节差异单列 payload,不误标 engine_ns;段头损坏退出 3 且无成功 JSON
 - 实现:`apps/replayer/tests/cli.rs::rpl_260_real_file_verify_report_and_divergence`
 
 ### RPL-261 参数错误与未接入功能明确失败

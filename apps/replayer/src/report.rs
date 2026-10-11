@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use hft_event::{EventKind, Role, SegmentRoll, kind_info};
+use hft_event::{EventKind, Layout, Role, SegmentRoll, kind_info};
 use hft_sequencer::driver::verify::VerifyResult;
 use serde_json::{Value, json};
 
@@ -43,12 +43,9 @@ fn field_diff(expected: &[u8], actual: &[u8]) -> Vec<Value> {
         .or_else(|| actual.get(..2))
         .map(|k| EventKind(u16::from_le_bytes([k[0], k[1]])));
     if let Some(info) = kind.and_then(kind_info) {
-        for (i, f) in info.fields.iter().enumerate() {
+        for f in info.fields {
             let start = usize::from(f.offset);
-            let end = info
-                .fields
-                .get(i + 1)
-                .map_or(a.len().max(b.len()), |n| usize::from(n.offset));
+            let end = start + usize::from(f.ty.width());
             let slice = |x: &[u8]| x.get(start..end.min(x.len())).unwrap_or(&[]).to_vec();
             let (x, y) = (slice(a), slice(b));
             if x != y {
@@ -56,6 +53,16 @@ fn field_diff(expected: &[u8], actual: &[u8]) -> Vec<Value> {
                     json!({"field": f.name, "offset": start, "expected_hex": hex(&x), "actual_hex": hex(&y)}),
                 );
             }
+        }
+        let prefix = usize::from(match info.layout {
+            Layout::Fixed { size } => size,
+            Layout::Var { prefix, .. } | Layout::Multi { prefix } => prefix,
+        });
+        let (x, y) = (a.get(prefix..).unwrap_or(&[]), b.get(prefix..).unwrap_or(&[]));
+        if x != y {
+            out.push(
+                json!({"field": "payload", "offset": prefix, "expected_hex": hex(x), "actual_hex": hex(y)}),
+            );
         }
     }
     if a.len() != b.len() {

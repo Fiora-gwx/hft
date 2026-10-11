@@ -23,7 +23,7 @@ fn args(path: &std::path::Path) -> Vec<String> {
 
 #[test]
 fn rpl_260_real_file_verify_report_and_divergence() {
-    let f = fixture::create::<Strategies>(false);
+    let f = fixture::create::<Strategies>();
     let original = std::fs::read(&f.file).unwrap();
     let report = f.root.join("out.json");
     let mut a = args(&f.file);
@@ -79,6 +79,35 @@ fn rpl_260_real_file_verify_report_and_divergence() {
             .trim(),
         "[]"
     );
+    // A change in a variable-length snapshot section is not a change in its last header
+    // field (engine_ns). Exercise the actual JSON formatter through the release binary.
+    let mut state = original.clone();
+    let mut offset = 4096;
+    let snapshot_seq = loop {
+        let (h, _) = RecordHeader::read_from_prefix(&state[offset..]).unwrap();
+        assert!(h.len > 0);
+        if h.kind == EventKind::STATE_SNAPSHOT.0 {
+            let (part, _) = hft_event::PartHdr::read_from_prefix(&state[offset + 24..]).unwrap();
+            let body = offset + 24 + size_of::<hft_event::PartHdr>();
+            if part.part == 0 && state[body] != hft_sequencer::snapshot::PURPOSE_BOOT {
+                state[body + size_of::<hft_event::SnapshotHdr>() + size_of::<hft_event::SectionHdr>()] ^= 1;
+                let end = offset + h.len as usize;
+                let crc = crc32c::crc32c(&state[offset..end - 4]);
+                assert!(RecordFlags(h.flags).contains(RecordFlags::CRC));
+                state[end - 4..end].copy_from_slice(&crc.to_le_bytes());
+                break h.seq;
+            }
+        }
+        offset += h.len as usize;
+    };
+    std::fs::write(&f.file, state).unwrap();
+    let (code, text, err) = run(&args(&f.file));
+    assert_eq!(code, 1, "{text} {err}");
+    let v: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(v["summary"]["first_divergent_seq"], snapshot_seq);
+    let fields = v["divergences"][0]["field_diff"].as_array().unwrap();
+    assert!(fields.iter().any(|f| f["field"] == "payload"));
+    assert!(!fields.iter().any(|f| f["field"] == "engine_ns"));
     let mut corrupt = original;
     corrupt[0] ^= 1;
     std::fs::write(&f.file, corrupt).unwrap();
@@ -125,7 +154,7 @@ fn rpl_261_invalid_and_unimplemented_options_fail_loud() {
 
 #[test]
 fn rpl_262_limits_instance_and_strategy_incompatibility() {
-    let f = fixture::create::<hft_testkit::TestStrategies>(true);
+    let f = fixture::create::<hft_testkit::TestStrategies>();
     let a = args(&f.file);
     let r = run(&a);
     assert_eq!(r.0, 4, "{r:?}");

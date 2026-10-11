@@ -98,7 +98,7 @@ fn settle<S: StrategySet>(seq: &mut Sequencer<LiveDriver<S, Io<S>>, S>) {
     panic!("fixture did not settle");
 }
 
-pub fn create<S: StrategySet>(with_accounts: bool) -> Fixture {
+pub fn create<S: StrategySet>() -> Fixture {
     let root = std::env::temp_dir().join(format!(
         "replayer-{}-{}",
         std::process::id(),
@@ -110,10 +110,8 @@ pub fn create<S: StrategySet>(with_accounts: bool) -> Fixture {
         root,
     };
     let mut world = WorldSpec::w1();
-    if !with_accounts {
-        world.accounts.clear();
-        world.strategies.clear();
-        world.groups.clear();
+    for binding in &mut world.strategies {
+        binding.kind_id = S::kinds().first().unwrap().kind_id;
     }
     let rd_blob = build::refdata_blob(&world, false).unwrap();
     let rd = build::load_refdata(&rd_blob).unwrap();
