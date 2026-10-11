@@ -125,7 +125,7 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 
 `replay-io` 的冷规划器校验 RecoverMismatch 注记及其引用的旧尾部,按 [replayer verify](../../apps/replayer/README.md#verify) 的范围比较并单列 `recovery_diffs`;恢复后的普通输出不放行。仅经过验证的启动注记可在从新引导快照起步时略过,它们不由该快照重新生成。非法证据返回 `RecoveryRange`,普通与恢复差异共用诊断容量,溢出失败。默认构建不包含范围规划和恢复明细存储。
 
-同一 feature 的 `driver::recompute` 以独立镜像执行 Model,起点、检查点身份、比较窗口与路径重建点遵循 [replayer verify](../../apps/replayer/README.md#verify)。每次独立运行重新建立 Model 与待配对表;无起点的实例逐名报告。`StrategySet::has_model` 只排除实际 NoModel,空布局和零资源声明仍可带 Model。同一五元键的重复产出只保留最后一条参与配对,覆盖量计入 coalesced;每条产出只匹配一次。诊断记录数、待配对及差异载荷合计字节数由 `RecomputeLimits` 限制,溢出返回错误。文件与 JSON 仍归 app;此入口只用于冷回放,不改主循环、journal schema 或快照格式。
+同一 feature 的 `driver::recompute` 以独立镜像执行 Model,起点、检查点身份、比较窗口与路径重建点遵循 [replayer verify](../../apps/replayer/README.md#verify)。每次独立运行从其引导快照重建引擎。Model 只在已有合法起点、前缀连续且实例名/编号/账户/种类/参数引用均一致时续用已重算状态;不满足则重新寻找起点,无起点逐名报告。窗口前的检查点与路径重置注记参与预热;待配对表在整个选定前缀内按全局 seq 保持一对一消费。`StrategySet::has_model` 只排除实际 NoModel,空布局和零资源声明仍可带 Model。同一五元键的重复产出只保留最后一条参与配对,覆盖量计入 coalesced;每条产出只匹配一次。诊断记录数、待配对及差异载荷合计字节数由 `RecomputeLimits` 限制,溢出返回错误。文件与 JSON 仍归 app;此入口只用于冷回放,不改主循环、journal schema 或快照格式。
 
 回放比较器要求屏蔽测量字段后的逻辑体**长度和内容都相等**;不删体尾零。传输标志按 `NONCMP_FLAGS` 屏蔽,SHADOW 等业务标志仍参与比较。
 
@@ -482,7 +482,7 @@ advice 环元素 = `AdviceHdr { strategy, account, local_kind, group, len, basis
 
 ### advisor 与 Model
 
-1. **镜像**:`Advisor` 启动时 `mirror` 从 journal 中的完整 `StateSnapshot`(引导块)起步,`MirrorDriver` 按 seq 顺序把 Input 记录喂给同一份 `Sequencer` 代码(Output 不比对、不出环;Meta 跳过),于是镜像在每个 seq 处的状态与 sequencer 处理完该 Input 时相同。镜像的 `SeqViews` 实现 `ModelViews`。
+1. **镜像**:`Advisor` 启动时 `mirror` 从 journal 中的完整 `StateSnapshot`(引导块)起步,`MirrorDriver` 按 seq 顺序把 Input 记录喂给同一份 `Sequencer` 代码(Output 不比对、不出环;Meta 跳过),于是镜像在每个 seq 处的状态与 sequencer 处理完该 Input 时相同。镜像的 `SeqViews` 实现 `ModelViews`。追赶跨越进程重启或 build_git 变化时,上一批止于新引导块前,随后从新引导快照和其记录配置重建引擎,保留身份匹配的 Model;参数引用变化时重新应用该处参数。普通滚段继续当前镜像。重建失败存入 `Advisor.failure`,后续 poll 不再推进,调用方必须按失败处理。
 2. **Model 输入**:每条被镜像应用后的记录,按 SDK 的投递表(Model 收哪些变体以 [hft-strategy-sdk EventRef](../hft-strategy-sdk/README.md#eventref) 为唯一定义;`model_tick` 刻度来自 journal 中的 `Timer{Sys, AdvisorTick}`,被 Applied 的 `InjectWarmup` 见下)构造 `EventRef`,调 `S::model_on_event(&mut m, &ev, &mirror_views, &mut out)`。`now()` = 该记录;Model 不读系统时钟、不做 I/O、不依赖 `HashMap` 迭代——同一检查点 + 同一段 journal 产出同一序列的 Advice 载荷。
 3. **参数**:镜像应用 `SetParams`/`ReplaceRefdata` 后调 `S::model_on_params`;返回 `ModelParamEffect::ResetGroups(…)`/`ResetAll` 时,advisor 对每个被重置的 group 写一条 Meta `Note{source = Advisor, code = ModelGroupReset}`(`v[0]` 原因码:`ResetAll` 为 4,`ResetGroups` 的原因随 SDK 返回值给出;`v[1]` = 触发它的参数 version;字段以 hft-event 为准;pipeline 据此对它们自动预热)。重启追赶时镜像重放同一条 `SetParams` 会再写一次相同的注记,消费方按 (strategy, group, `v[1]`) 去重;新实例 `S::create_model`。
 4. **预热注入**:镜像应用一条 Applied 的 `ControlCmd{InjectWarmup{instance, local_kind, chunk_no, last, payload}}` 后,向该实例的 Model 投递 `EventRef::Warmup{local_kind, chunk_no, last, payload}`;载荷含义、分块约定与"预热完成"的判断归策略(SDK)。它是 journal 的 Input,所以重放与检查点续算时同样被投递,结果确定。
@@ -844,7 +844,7 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 
 ## 延伸阅读
 
-- [离线 Model 起点与配对决定](../../.agents/notes/implemented/architecture/2026-10-12-offline-model-origin.md)
+- [离线 Model 起点与配对决定](../../.agents/notes/implemented/architecture/2026-10-12-offline-model-origin.md)、[跨重启 Model 来源连续性](../../.agents/notes/implemented/bug-fix/2026-10-12-model-restart-continuity.md)
 
 - [round8 裁决](../../design/_work/round8-decisions.md)(R8-2 延迟优先、R8-3 解耦、R8-5 模拟账户、R8-8 模拟让位于实盘、预热注入、断腿自动处置、R8-10、R8-11);评审证据 [review-2026-10-02](../../design/_work/review-2026-10-02-主策略适配与执行正确性.md) §4,[review-2026-10-03](../../design/_work/review-2026-10-03-M0独立评审.md),[M0-b 评审](../../design/_work/review-2026-10-03-M0b独立评审.md),[M0-c 五路汇总](../../design/_work/review-2026-10-03-M0c五路汇总.md)(L-P0-2 md 让位、L-P1-2 BBO 成员聚合、M-P1-1/3/5、S-P1-7、V5 P2-1/2/6),[M0-d 五路汇总](../../design/_work/review-2026-10-03-M0d五路汇总.md)(A-P0-1 关键帧一次写完、L-3 BBO/advice 让位、M-P2、W3 P1-12/16/18/21/22),[M0-e 五路汇总](../../design/_work/review-2026-10-03-M0e五路汇总.md)(X1 P1-A…E、X3 P1-6/15、X5 L-P2-5/6)
 - Agent Note:[引擎时间 engine_ns](../../.agents/notes/proposed/architecture/2026-10-03-engine-time.md)、[报价新鲜度 = 连接健康](../../.agents/notes/proposed/architecture/2026-10-03-quote-freshness-conn-health.md)、[sequencer md 让位](../../.agents/notes/proposed/architecture/2026-10-03-sequencer-md-preempt.md)、[resolve_broken 只在 HARD 解除时](../../.agents/notes/proposed/architecture/2026-10-03-resolve-broken-hard-only.md)、[AUTO_EXTERNAL 前置条件](../../.agents/notes/proposed/architecture/2026-10-03-auto-external-guard.md)、[持仓驱动订阅](../../.agents/notes/proposed/architecture/2026-10-03-position-driven-subscription.md)

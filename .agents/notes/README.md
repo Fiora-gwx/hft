@@ -2,6 +2,12 @@
 
 这里只放一种设计文档。**Agent Note** 记录一个影响本仓库的决定或提案——**为什么**、**放弃了什么**、**需要什么验证**,也就是代码与 README 承载不了的部分。本文件规定 Agent Note 放在哪里、何时写、文件格式。改编自 DeepSeek Harness 的 `.agents/notes/README.md`(样例在 architecture-v2/research/_dsh/notes_README.md(未入库的资料缓存:`architecture-v2/research/_dsh/notes_README.md`));改编理由见 [dsh-style-documentation](proposed/process/2026-09-30-dsh-style-documentation.md)。
 
+## Model 跨重启来源决定(2026-10-12)
+
+| 当前 Note | 决定 | 被收窄的 Note |
+|---|---|---|
+| [Model 来源连续性](implemented/bug-fix/2026-10-12-model-restart-continuity.md) | 引擎逐运行恢复;Model 按合法起点与连续前缀续算 | [离线 Model 起点](implemented/architecture/2026-10-12-offline-model-origin.md) |
+
 ## 公开仓库 CI 决定(2026-10-11)
 
 | 当前 Note | 决定 | 被部分取代的 Note |

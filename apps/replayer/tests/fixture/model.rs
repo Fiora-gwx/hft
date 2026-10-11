@@ -10,11 +10,14 @@ use hft_types::StrategyId;
 #[derive(Default)]
 pub(super) struct Store {
     current: Option<(CkptHdr, Vec<u8>)>,
+    pub(super) loaded: BTreeMap<StrategyId, (CkptHdr, Vec<u8>)>,
     pub(super) committed: BTreeMap<StrategyId, (CkptHdr, Vec<u8>)>,
 }
 impl CheckpointStore for Store {
-    fn load(&mut self, _: StrategyId, _: &mut Vec<u8>) -> Option<CkptHdr> {
-        None
+    fn load(&mut self, s: StrategyId, out: &mut Vec<u8>) -> Option<CkptHdr> {
+        let (h, bytes) = self.loaded.get(&s)?;
+        out.extend_from_slice(bytes);
+        Some(*h)
     }
     fn begin(&mut self, _: StrategyId, h: &CkptHdr) -> Result<(), CkptIoErr> {
         self.current = Some((*h, Vec::new()));
@@ -62,6 +65,7 @@ pub(super) fn published<S: StrategySet>(s: &mut Sequencer<LiveDriver<S, Io<S>>, 
 pub(super) fn poll<S: StrategySet>(a: &mut Advisor<S, Store, Ring>, log: &Log) {
     for _ in 0..10000 {
         if !a.poll_once(log) && !a.checkpointing() {
+            assert!(a.failure.is_none(), "advisor catch-up failed: {:?}", a.failure);
             return;
         }
     }

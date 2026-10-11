@@ -28,6 +28,46 @@ use crate::{BootSource, Sequencer, StepOutcome};
 
 pub mod checkpoint;
 
+/// A rollover keeps the mirror; a recorded process boundary replaces its engine state.
+/// Only complete boot blocks occur in the published journal passed to the advisor.
+fn next_run(log: &Log, after: usize) -> Option<(usize, usize)> {
+    let mut build = None;
+    for (si, &first) in log.seg_start.iter().enumerate() {
+        let end = log.seg_start.get(si + 1).copied().unwrap_or(log.recs.len());
+        let rows = log.recs.get(first..end)?;
+        let current = rows
+            .iter()
+            .filter(|r| r.kind == EventKind::HOST_PROFILE)
+            .find_map(|r| r.read::<hft_event::HostProfile>().map(|h| h.build_git));
+        let changed = build.is_some() && current != build;
+        build = current;
+        let Some(begin) = rows
+            .first()
+            .filter(|r| r.kind == EventKind::SEGMENT_ROLL)
+            .and_then(|r| r.read::<hft_event::SegmentRoll>())
+        else {
+            continue;
+        };
+        if begin.mark != hft_journal::RollMark::Begin as u8 {
+            continue;
+        }
+        let reason = begin.reason;
+        let restart = matches!(
+            hft_journal::RollReason::from_u8(reason),
+            Some(
+                hft_journal::RollReason::Startup
+                    | hft_journal::RollReason::Recovery
+                    | hft_journal::RollReason::RecoverFromSnapshot
+            )
+        );
+        if first > after && (restart || changed) {
+            let snap = rows.iter().position(|r| r.kind == EventKind::STATE_SNAPSHOT)?;
+            return Some((first, first + snap));
+        }
+    }
+    None
+}
+
 // ------------------------------------------------------------------------------- mirror hooks
 
 /// One Advice produced by a Model (before the outbox).
@@ -449,6 +489,9 @@ pub struct Advisor<S: StrategySet, C: CheckpointStore, A: AdviceRing> {
     seen: usize,
     /// Checkpoints committed (tests).
     pub commits: u64,
+    /// A recorded restart that cannot be reconstructed stops catch-up explicitly.
+    pub failure: Option<BootError>,
+    next_run: Option<(usize, usize)>,
 }
 
 impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> core::fmt::Debug for Advisor<S, C, A> {
@@ -669,6 +712,8 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
             lag_note: Vec::new(),
             seen: log.recs.len(),
             commits: 0,
+            failure: None,
+            next_run: next_run(log, start_ix),
         };
         a.mirror.e.trace.rec("advisor.start", start_seq, 0);
         Ok(a)
@@ -700,6 +745,9 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
     /// One bounded unit of work (README "advisor" `poll_once`): flush the outbox, then one
     /// checkpoint chunk or one batch of mirrored Inputs. Never blocks.
     pub fn poll_once(&mut self, log: &Log) -> bool {
+        if self.failure.is_some() {
+            return false;
+        }
         self.flush();
         if self.job.is_some() {
             self.ckpt_step();
@@ -707,6 +755,24 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
             return true;
         }
         self.feed(log);
+        if self.next_run.is_none() {
+            self.next_run = next_run(log, self.mirror.drv.cursor.saturating_sub(1));
+        }
+        if let Some((first, snapshot)) = self.next_run {
+            let end = self.mirror.drv.end;
+            self.mirror.drv.end = first;
+            let done = self.mirror.drv.finished();
+            self.mirror.drv.end = end;
+            if done {
+                self.release_holds(log.recs[first.saturating_sub(1)].seq);
+                if let Err(e) = self.restore_run(log, snapshot) {
+                    self.failure = Some(e);
+                    return false;
+                }
+                self.next_run = next_run(log, snapshot);
+                return true;
+            }
+        }
         // A checkpoint may be exactly at the mirror's starting snapshot. Its parameters
         // must be applied before the first following event, not at the end of that batch.
         let released = self.release_holds(self.mirror.e.cur_seq);
@@ -719,14 +785,33 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
             .filter_map(|m| (m.hold_until != 0).then_some(m.hold_until))
             .min();
         let end = self.mirror.drv.end;
+        if let Some((first, _)) = self.next_run {
+            self.mirror.drv.end = self.mirror.drv.end.min(first);
+        }
         if let Some(at) = boundary {
             // Restrict Input delivery only; the last event still finishes all of its Outputs.
-            self.mirror.drv.end = end.min(self.mirror.drv.sink.log.recs.partition_point(|r| r.seq <= at));
+            self.mirror.drv.end = self
+                .mirror
+                .drv
+                .end
+                .min(self.mirror.drv.sink.log.recs.partition_point(|r| r.seq <= at));
         }
         let before = self.mirror.drv.handed;
+        let record_end = self.mirror.drv.sink.record_end;
+        self.mirror.drv.sink.record_end = self.mirror.drv.end;
         let out = self.mirror.step();
-        let reached = boundary.filter(|_| self.mirror.drv.finished());
+        let reached = boundary.filter(|at| {
+            self.mirror.drv.finished()
+                && self
+                    .mirror
+                    .drv
+                    .end
+                    .checked_sub(1)
+                    .and_then(|i| log.recs.get(i))
+                    .is_some_and(|r| r.seq >= *at)
+        });
         self.mirror.drv.end = end;
+        self.mirror.drv.sink.record_end = record_end;
         let progressed = self.mirror.drv.handed != before;
         if matches!(out, StepOutcome::Fatal(_)) {
             return false;
@@ -739,6 +824,46 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
         self.maybe_checkpoint();
         self.flush();
         progressed || released
+    }
+
+    fn restore_run(&mut self, log: &Log, snapshot: usize) -> Result<(), BootError> {
+        let at = log.recs[snapshot].seq;
+        let setup = EngineSetup::from_snapshot(log, at)?;
+        let drv = ReplayDriver::new(ReplayMode::Mirror, log.clone(), 0, self.cfg.batch.max(1));
+        let plan = RecoverPlan {
+            start: SnapshotSel::AtSeq(at),
+            replay_tail: true,
+            epoch: 0,
+            flags: RecoveryFlags(0),
+            quarantine: Vec::new(),
+        };
+        let mut next =
+            Sequencer::<ReplayDriver, S>::boot(BootSource::Journal(plan), &setup, drv, self.mirror.hb)?;
+        next.inst.models.on = true;
+        next.inst.models.slots = (0..next.inst.slots.len()).map(|_| ModelSlot::default()).collect();
+        next.inst.models.prev_tick_utc = prev_tick_utc(log, snapshot);
+        for ix in 0..next.inst.slots.len() {
+            let sl = &next.inst.slots[ix];
+            if let Some(old) = self.mirror.inst.slots.iter().position(|s| {
+                s.id == sl.id
+                    && s.account == sl.account
+                    && s.kind_id == sl.kind_id
+                    && self.mirror.e.rd.instance(s.id).map(|i| i.name.as_ref())
+                        == next.e.rd.instance(sl.id).map(|i| i.name.as_ref())
+            }) {
+                let changed = self.mirror.inst.slots[old].blob.as_bytes() != sl.blob.as_bytes();
+                next.inst.models.slots[ix] = core::mem::take(&mut self.mirror.inst.models.slots[old]);
+                if changed && next.inst.models.slots[ix].hold_until == 0 {
+                    on_params(&next.e, &mut next.inst, ix);
+                }
+            } else {
+                next.inst.models.slots[ix].enabled =
+                    self.cfg.shard.as_ref().is_none_or(|v| v.contains(&sl.id));
+                on_params(&next.e, &mut next.inst, ix);
+            }
+        }
+        self.mirror = next;
+        Ok(())
     }
 
     fn release_holds(&mut self, through: u64) -> bool {

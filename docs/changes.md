@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-12 | advisor 追赶在重启边界重建引擎镜像;离线重算保留有合法来源、完整前缀及相同身份/参数的 Model。ModelPathReset 按原因码和引擎时间处理,窗口前的重置仍约束比较范围;Drain 后 TSC 重置及停机不计时用真实文件验证 | RPL-058–060、RPL-272;跨重启误丢来源与路径注记原因码误判 | hft-sequencer、replayer、architecture | 否 |
 | 2026-10-12 | 独立回放测试策略保留原始样本与有限路径状态,路径版本变化后在 120 s 内收敛;真实引擎、advisor、文件写者和 SimExchange 生成完整 1 h/3 h 文件,独立测试进程检查检查点窗口及路径重建点。保持 DST 策略集合与金样不变,现场文件不计尚未发布的 T1/T3 固定样本验收 | TK-117/118、RPL-270/271;短时无路径 Model 不足以验证长时恢复 | crates/hft-testkit、apps/replayer、fixtures/strategies/sdk-replay | 否 |
 | 2026-10-12 | 离线 Model 镜像额外产出的 Output 不占用下一 Input,保证篡改 Advice 的错路由等反例仍能继续配对;该选项只在冷重算装配开启,不改在线 advisor 或恢复驱动 | RPL-267 的策略、账户和组字段反例;镜像静默对齐不能跳过原始输入 | crates/hft-sequencer、apps/replayer/TESTS.md | 否 |
 | 2026-10-12 | 本地 verify 装配独立 Model 镜像,按创建/丢弃注记或规范检查点确定起点,五元键逐字节一对一比较;无起点按实例报告,检查点提前时同时验证预热前缀 Output。StrategySet 显式识别 NoModel,空布局不作缺 Model 依据;冷诊断有界,报告不得覆盖检查点 | SDK-186、SEQ-403、RPL-266–269;真实 advisor 文件与检查点连续性、身份和载荷反例 | crates/hft-strategy-sdk、crates/hft-sequencer、apps/replayer | 否 |

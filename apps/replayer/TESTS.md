@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | RPL-095、RPL-104、RPL-241、RPL-242 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | RPL-001–RPL-004、RPL-070、RPL-079 |
-| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-271 |
+| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-272 |
 | sim | RPL-090–RPL-108、RPL-120–RPL-129、RPL-140–RPL-145、RPL-259 |
 | compare | RPL-160–RPL-173 |
 | latency | RPL-190–RPL-206 |
@@ -669,37 +669,40 @@ spec: README.md
 ### RPL-058 窗口内的 ModelPathReset 注记按其 v[1]、v[2] 计算重建点
 
 - 规则:[verify](README.md#verify)
-- 级别:unit
+- 级别:proc
 - 里程碑:M2
-- 前置:合成 journal:实盘重启时路径节被丢弃,advisor 写 `Note{source = Advisor, code = ModelPathReset, strategy = tsa, v[0] = 1, v[1] = L, v[2] = 60 000}`;journal 中重启后的 Advice 在 60 s 引擎时间内与连续运行不同;回放时给出 `last_seq = L`、路径节版本与当前一致的检查点
+- 前置:真实 LiveDriver、JournalWriter 与 advisor 在虚拟时间生成的封闭 journal:实例编号为 9,Drain 后重启时路径节被丢弃,advisor 写 `Note{source = Advisor, code = ModelPathReset, strategy = tsa, v[0] = 1/2(两种原因各一行), v[1] = L, v[2] = 60 000}`;journal 中重启后的 Advice 在 60 s 引擎时间内与连续运行不同;回放时给出 `last_seq = L`、路径节版本与当前一致的检查点
 - 步骤:
   1. `verify --journal <合成> --advice recompute --model-checkpoint <检查点> --report $OUT/r.json`
 - 期望:
   - 退出 0;`recompute_from_seq` = `L` 之后第一条引擎时间 ≥ (`L` 所指记录的引擎时间 + 60 000 × 10^6)的记录的 seq;其前的 Advice 不比较
+- 补充断言:每次停机 600 s,TSC 从 100 重新计数、频率翻倍,恢复前后原始样本计数连续;独立进程同时验证 Output 与 Advice。另选重启后、重建点前的窗口,检查点与路径注记在窗口前仍生效,比较量由输入逐条计算。
 - 实现:`apps/replayer/tests/recompute.rs::rpl_058_path_reset_note`
 
 ### RPL-059 一日内多次路径节丢弃时 recompute_from_seq 取最后一次
 
 - 规则:[verify](README.md#verify)
-- 级别:unit
+- 级别:proc
 - 里程碑:M2
-- 前置:合成 journal(一个 UTC 日):两次重启各写一条 `Note{ModelPathReset}`,重建点分别为 `R1 < R2`
+- 前置:真实 LiveDriver、JournalWriter 与 advisor 在虚拟时间生成的封闭 journal(一个 UTC 日):两次重启各写一条 `Note{ModelPathReset}`,重建点分别为 `R1 < R2`
 - 步骤:
   1. `verify --journal <合成> --advice recompute --model-checkpoint <检查点> --report $OUT/r.json`
 - 期望:
   - 退出 0;`r.json.recompute_from_seq = R2`;两次重建点之前的 Advice 都不比较
+- 补充断言:每次停机 600 s,TSC 从 100 重新计数、频率翻倍,恢复前后原始样本计数连续;独立进程同时验证 Output 与 Advice。另选重启后、重建点前的窗口,检查点与路径注记在窗口前仍生效,比较量由输入逐条计算。
 - 实现:`apps/replayer/tests/recompute.rs::rpl_059_last_rebuild_point`
 
 ### RPL-060 重建点按引擎时间计,停机时长不计入
 
 - 规则:[verify](README.md#verify)
-- 级别:unit
+- 级别:proc
 - 里程碑:M2
-- 前置:合成 journal:路径节丢弃的检查点 `last_seq = L`(引擎时间 `e0`);`path_settle_ms = 120 000`;`L` 之后 30 s 引擎时间处 Drain 停机,停机 10 min 后重启(`EngineClock` 续接,引擎时间不含停机),重启后再运行 5 min
+- 前置:真实 LiveDriver、JournalWriter 与 advisor 在虚拟时间生成的封闭 journal:路径节丢弃的检查点 `last_seq = L`(引擎时间 `e0`);`path_settle_ms = 120 000`;`L` 之后 30 s 引擎时间处 Drain 停机,停机 10 min 后重启(`EngineClock` 续接,引擎时间不含停机),重启后再运行 5 min
 - 步骤:
   1. `verify --journal <合成> --advice recompute --model-checkpoint <检查点> --report $OUT/r.json`
 - 期望:
-  - 退出 0;`recompute_from_seq` = 重启后引擎时间首次 ≥ `e0 + 120 × 10^9` 的记录的 seq(重启后约 90 s 处);不是 UTC 时刻 `L` + 120 s 之后的第一条记录(那会落在停机之前)
+  - 退出 0;`recompute_from_seq` = 重启后引擎时间首次 ≥ `e0 + 120 × 10^9` 的记录的 seq(重启后约 90 s 处);不是 UTC 时刻 `L` + 120 s 之后的第一条记录(那会落在重启刚开始)
+- 补充断言:每次停机 600 s,TSC 从 100 重新计数、频率翻倍,恢复前后原始样本计数连续;独立进程同时验证 Output 与 Advice。另选重启后、重建点前的窗口,检查点与路径注记在窗口前仍生效,比较量由输入逐条计算。
 - 实现:`apps/replayer/tests/recompute.rs::rpl_060_engine_time_excludes_downtime`
 
 ### RPL-061 recompute 的状态起点取 --from-seq 与 last_seq + 1 中较小者之前的快照
@@ -2159,6 +2162,16 @@ spec: README.md
 - 步骤:分别以路径版本 1、2 的独立进程从检查点执行 recompute;由 journal EngineClock 锚点和记录头独立计算检查点后首个 engine_ns ≥ L 时刻 + 120 s 的记录 R
 - 期望:均退出 0、双 verdict 为 pass;同版本无重建点,版本 2 的 recompute_from_seq = R、比较数恰为 seq > L 且 basis_seq ≥ R 的 Advice 数,非零且小于同版本比较数;检查点输入字节不变
 - 实现:`apps/replayer/tests/long_model.rs::rpl_271_path_version_rebuild_uses_actual_engine_time`
+
+### RPL-272 重启后的来源缺失与路径注记反例
+
+- 规则:[verify](README.md#verify)
+- 级别:proc
+- 里程碑:M2
+- 前置:RPL-058 的真实文件、实例 9、60 s 路径和完整检查点
+- 步骤:独立修改 ModelPathReset 的原因码为 0、保留字段为非零、注记码使重置缺失,保留原记录 CRC 策略并重算 seal;另在重启后的窗口不给检查点
+- 期望:前两种输入退出 3;缺重置退出 1,verify 为 pass、recompute 为 fail 且有 Model 字节分歧;不给检查点时 verify 为 pass、recompute 为 skipped、model_no_start 恰为 tsa、比较量为 0
+- 实现:`apps/replayer/tests/recompute.rs::rpl_272_restart_origin_and_reset_counterexamples`
 
 ## 验收
 

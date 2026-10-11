@@ -30,6 +30,7 @@ use zerocopy::{FromBytes, FromZeros, IntoBytes};
 
 mod model;
 mod path_model;
+mod restart_model;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 pub struct Fixture {
@@ -187,17 +188,45 @@ fn settle<S: StrategySet>(seq: &mut Sequencer<LiveDriver<S, Io<S>>, S>) {
 }
 
 pub fn create<S: StrategySet>() -> Fixture {
-    create_with_restart::<S>(None, false, false, None)
+    create_with_restart::<S>(None, false, false, None, None)
 }
 
 pub fn with_model() -> Fixture {
-    create_with_restart::<hft_testkit::TestStrategies>(None, false, true, None)
+    create_with_restart::<hft_testkit::TestStrategies>(None, false, true, None, None)
 }
 
 /// Full-duration, path-bearing Model files. Publication as frozen T1/T3 fixtures is separate.
 pub fn path_model(hours: u64) -> Fixture {
     assert!(matches!(hours, 1 | 3));
-    let f = create_with_restart::<hft_testkit::strategies::ReplayStrategies>(None, false, false, Some(hours));
+    let f = create_with_restart::<hft_testkit::strategies::ReplayStrategies>(
+        None,
+        false,
+        false,
+        Some(hours),
+        None,
+    );
+    finish_evidence(f)
+}
+
+#[derive(Clone, Copy)]
+pub struct ModelRestart {
+    pub count: u8,
+    pub settle_ms: u64,
+    pub reason: u64,
+}
+
+pub fn model_restart(spec: ModelRestart) -> Fixture {
+    let f = create_with_restart::<hft_testkit::strategies::ReplayStrategies>(
+        None,
+        false,
+        false,
+        Some(1),
+        Some(spec),
+    );
+    finish_evidence(f)
+}
+
+fn finish_evidence(f: Fixture) -> Fixture {
     for entry in std::fs::read_dir(f.file.parent().unwrap()).unwrap() {
         let path = entry.unwrap().path();
         if path.extension().is_some_and(|e| e == "jrn") {
@@ -237,13 +266,13 @@ pub enum Restart {
 }
 
 pub fn restarted<S: StrategySet>(restart: Restart) -> Fixture {
-    create_with_restart::<S>(Some(restart), false, false, None)
+    create_with_restart::<S>(Some(restart), false, false, None, None)
 }
 
 /// RPL-025/026: genuine file-backed executions with 20 min before the restart.
 pub fn long_restart<S: StrategySet>(restart: Restart) -> Fixture {
     assert!(matches!(restart, Restart::FromSnapshot | Restart::Version));
-    let f = create_with_restart::<S>(Some(restart), true, false, None);
+    let f = create_with_restart::<S>(Some(restart), true, false, None, None);
     // open_offline writes closed .jrn files, without running persist. Build the cold-copy
     // transport envelope from the actual header and End; leave every journal byte untouched.
     for entry in std::fs::read_dir(f.file.parent().unwrap()).unwrap() {
@@ -535,6 +564,7 @@ fn create_with_restart<S: StrategySet>(
     long: bool,
     model: bool,
     model_hours: Option<u64>,
+    model_restarts: Option<ModelRestart>,
 ) -> Fixture {
     let root = std::env::temp_dir().join(format!(
         "replayer-{}-{}",
@@ -562,6 +592,20 @@ fn create_with_restart<S: StrategySet>(
         } else {
             S::kinds().first().unwrap().kind_id
         };
+    }
+    if let Some(spec) = model_restarts {
+        use hft_strategy_sdk::params::{RawParams, encode_body};
+        world.strategies[0].instance = hft_types::StrategyId(9);
+        world.groups[0].instance = world.strategies[0].instance;
+        world.strategies[0].params = encode_body(
+            S::kinds()[0].schema,
+            world.groups.len() as u16,
+            &RawParams {
+                defaults: vec![0, 1, 7, 5000, spec.settle_ms as i64],
+                overrides: vec![],
+            },
+        )
+        .unwrap();
     }
     let rd_blob = if model_hours.is_some() {
         build::refdata_blob_with_names(
@@ -669,7 +713,9 @@ fn create_with_restart<S: StrategySet>(
     if model {
         model::exercise(&mut s, &f, &world, &setup);
     }
-    if let Some(hours) = model_hours {
+    if let Some(spec) = model_restarts {
+        s = restart_model::exercise(s, &f, &world, &mut setup, spec);
+    } else if let Some(hours) = model_hours {
         path_model::exercise(&mut s, &f, &world, &setup, hours);
     } else if long {
         market_minutes(&mut s, &world, 20, 10_000);

@@ -92,7 +92,7 @@ fn rpl_266_real_advisor_files_recompute_with_and_without_checkpoints() {
     assert_eq!(r.1["summary"]["coalesced"], 0);
 }
 
-fn mutate(bytes: &[u8], kind: EventKind, seq: Option<u64>, body_offset: usize) -> (Vec<u8>, u64) {
+pub(super) fn mutate(bytes: &[u8], kind: EventKind, seq: Option<u64>, body_offset: usize) -> (Vec<u8>, u64) {
     let mut out = bytes.to_vec();
     let mut at = 4096;
     loop {

@@ -21,14 +21,14 @@ fn files(f: &fixture::Fixture) -> Vec<PathBuf> {
     paths.sort();
     paths
 }
-fn options(checkpoint: &Path, from: Option<u64>) -> Vec<String> {
+pub(super) fn options(checkpoint: &Path, from: Option<u64>) -> Vec<String> {
     let mut a = vec!["--model-checkpoint".into(), checkpoint.display().to_string()];
     if let Some(seq) = from {
         a.extend(["--from-seq".into(), seq.to_string()]);
     }
     a
 }
-fn execute(f: &fixture::Fixture, path_v2: bool, extra: &[String]) -> (i32, Value, String) {
+pub(super) fn execute(f: &fixture::Fixture, path_v2: bool, extra: &[String]) -> (i32, Value, String) {
     // CI builds --tests --examples before executing tests; no test invokes a compiler.
     let exe = std::env::current_exe()
         .unwrap()
@@ -54,11 +54,15 @@ fn execute(f: &fixture::Fixture, path_v2: bool, extra: &[String]) -> (i32, Value
             .position(|s| s == "--from-seq")
             .and_then(|i| extra.get(i + 1))
             .map_or("all", String::as_str);
-        let label = format!(
+        let mut label = format!(
             "replay-path{}-ck{}-{window}",
             if path_v2 { 2 } else { 1 },
             u8::from(extra.iter().any(|s| s == "--model-checkpoint"))
         );
+        if let Some(at) = extra.iter().position(|s| s == "--report") {
+            label.push('-');
+            label.push_str(Path::new(&extra[at + 1]).file_stem().unwrap().to_str().unwrap());
+        }
         std::fs::write(dest.join(format!("{label}.json")), &out.stdout).unwrap();
         std::fs::write(dest.join(format!("{label}.stderr.txt")), &out.stderr).unwrap();
     }
@@ -68,7 +72,7 @@ fn execute(f: &fixture::Fixture, path_v2: bool, extra: &[String]) -> (i32, Value
         String::from_utf8(out.stderr).unwrap(),
     )
 }
-fn passed(r: &(i32, Value, String)) {
+pub(super) fn passed(r: &(i32, Value, String)) {
     assert_eq!(r.0, 0, "{r:?}");
     assert_eq!(r.1["summary"]["verify"], "pass", "{r:?}");
     assert_eq!(r.1["summary"]["recompute"], "pass", "{r:?}");

@@ -6,6 +6,7 @@ use hft_journal::RollReason;
 use hft_rt::Heartbeat;
 use hft_strategy_sdk::StrategySet;
 use hft_types::{AccountId, GroupId, StrategyId, Tsc};
+use zerocopy::IntoBytes;
 
 use super::recompute_compare::Compare;
 use super::replay::{Log, ReplayDriver, ReplayMode};
@@ -144,6 +145,19 @@ struct Source {
     forbidden: bool,
     after: Option<u64>,
     skip_basis_before: u64,
+}
+
+/// Only a Model whose origin and complete intervening Inputs were available may cross
+/// a process boundary. The engine itself always restores the new run's boot snapshot.
+struct Continuation<S: StrategySet> {
+    name: String,
+    strategy: StrategyId,
+    account: AccountId,
+    kind: u16,
+    params: hft_event::BlobRef,
+    after: u64,
+    skip_basis_before: u64,
+    slot: ModelSlot<S>,
 }
 
 fn mirror<S: StrategySet>(
@@ -353,9 +367,15 @@ pub fn recompute<S: StrategySet>(
         ..RecomputeResult::default()
     };
     let mut compare = Compare::new(limits);
+    let warm_from = decoded
+        .iter()
+        .filter(|(_, c)| c.key.last_seq >= first_seq.saturating_sub(1) && c.key.last_seq <= last_seq)
+        .map(|(_, c)| c.key.last_seq)
+        .fold(from, u64::min);
+    let mut continuing: Vec<Continuation<S>> = Vec::new();
     for (ri, run) in planned.runs.iter().enumerate() {
         let end = planned.runs.get(ri + 1).map_or(log.recs.len(), |r| r.first);
-        if log.recs[end - 1].seq < from || log.recs[run.first].seq > to {
+        if log.recs[end - 1].seq < warm_from || log.recs[run.first].seq > to {
             continue;
         }
         let in_run =
@@ -364,7 +384,14 @@ pub fn recompute<S: StrategySet>(
             .iter()
             .filter(|(_, d)| in_run(d.key.last_seq))
             .map(|(_, d)| d.key.last_seq.saturating_add(1))
-            .fold(from, u64::min);
+            .fold(
+                if continuing.is_empty() {
+                    from
+                } else {
+                    log.recs[run.snapshot].seq
+                },
+                u64::min,
+            );
         if let Some(window) = result.verify_from_seq {
             result.verify_from_seq = Some(window.min(wanted));
         }
@@ -417,15 +444,35 @@ pub fn recompute<S: StrategySet>(
             let has_model = S::has_model(sl.kind_id);
             let seen_params = sl.cur.is_some();
             let empty = has_model && !forbidden && checkpoint.is_none() && startup && seen_params;
+            let prior = (!startup && !forbidden && checkpoint.is_none())
+                .then(|| {
+                    continuing.iter().position(|c| {
+                        c.name == name
+                            && c.strategy == sl.id
+                            && c.account == sl.account
+                            && c.kind == sl.kind_id
+                            && c.params.as_bytes() == sl.blob.as_bytes()
+                    })
+                })
+                .flatten()
+                .map(|i| continuing.swap_remove(i));
+            let after = prior
+                .as_ref()
+                .map(|c| c.after)
+                .or_else(|| empty.then_some(log.recs[run.first].seq.saturating_sub(1)));
+            let skip_basis_before = prior.as_ref().map_or(0, |c| c.skip_basis_before);
             sources.push(Source {
                 name,
                 has_model,
                 seen_params,
                 checkpoint,
                 forbidden,
-                after: empty.then_some(log.recs[run.first].seq.saturating_sub(1)),
-                skip_basis_before: 0,
+                after,
+                skip_basis_before,
             });
+            if let Some(c) = prior {
+                seq.inst.models.slots[ix] = c.slot;
+            }
             if empty {
                 seq.inst.models.slots[ix].enabled = true;
                 advisor::on_params(&seq.e, &mut seq.inst, ix);
@@ -453,7 +500,7 @@ pub fn recompute<S: StrategySet>(
                                 NoteSource::Advisor,
                                 crate::codes::advisor_note::MODEL_CHECKPOINT_DISCARDED,
                             )
-                        && r.seq >= from
+                        && (r.seq >= from || source.after.is_some())
                     {
                         if note.source != NoteSource::Advisor
                             || note.v[0] != u64::from(note.strategy.0)
@@ -477,11 +524,11 @@ pub fn recompute<S: StrategySet>(
                                 NoteSource::Advisor,
                                 crate::codes::advisor_note::MODEL_PATH_RESET,
                             )
-                        && r.seq >= from
                     {
                         if note.source != NoteSource::Advisor
-                            || note.v[0] != u64::from(note.strategy.0)
+                            || !(1..=2).contains(&note.v[0])
                             || note.v[1] >= r.seq
+                            || note.v[5..].iter().any(|v| *v != 0)
                         {
                             return Err(RecomputeError::Note { seq: r.seq });
                         }
@@ -542,6 +589,7 @@ pub fn recompute<S: StrategySet>(
             seq.inst.models.notes.clear();
         }
         // A checkpoint at the last record is valid even when there are no following Inputs.
+        continuing.clear();
         for (mi, source) in sources.iter_mut().enumerate() {
             if let Some(ci) = source.checkpoint {
                 let c = decoded[ci].1;
@@ -552,6 +600,7 @@ pub fn recompute<S: StrategySet>(
             if source.has_model
                 && source.seen_params
                 && source.after.is_none()
+                && log.recs[end - 1].seq >= from
                 && !result.model_no_start.contains(&source.name)
             {
                 result.model_no_start.push(source.name.clone());
@@ -559,9 +608,22 @@ pub fn recompute<S: StrategySet>(
             if source.after.is_some() && !result.started_instances.contains(&source.name) {
                 result.started_instances.push(source.name.clone());
             }
+            if let Some(after) = source.after {
+                let sl = &seq.inst.slots[mi];
+                continuing.push(Continuation {
+                    name: source.name.clone(),
+                    strategy: sl.id,
+                    account: sl.account,
+                    kind: sl.kind_id,
+                    params: sl.blob,
+                    after,
+                    skip_basis_before: source.skip_basis_before,
+                    slot: core::mem::take(&mut seq.inst.models.slots[mi]),
+                });
+            }
         }
-        compare.finish(); // no pending output or Model state leaks across independent runs
     }
+    compare.finish();
     result.compared = compare.compared;
     result.coalesced = compare.coalesced;
     result.differences = compare.differences;

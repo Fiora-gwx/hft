@@ -2,6 +2,8 @@
 
 Status: implemented
 
+跨重启复用规则由 [Model 来源连续性](../bug-fix/2026-10-12-model-restart-continuity.md) 收窄。无合法来源仍不得借用状态;已验证来源的连续前缀不因进程边界丢弃。
+
 ## Problem
 
 普通状态快照不含 Model 的累计样本。在任意快照创建空 Model 会把缺起点误报为通过或算法分歧。Model 可以无持久字段却仍生成 Advice,因此空布局也不能代表 NoModel。同一回调连续 emit 同键时,比较任意一条相同载荷又会放过实盘 outbox 不可能留下的旧值。

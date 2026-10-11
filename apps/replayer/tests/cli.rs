@@ -1,6 +1,7 @@
 mod fixture;
 mod long_model;
 mod model;
+mod recompute;
 mod recovery;
 mod verify;
 
