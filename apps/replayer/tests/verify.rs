@@ -42,7 +42,7 @@ fn assert_run(v: &Value, ix: usize, snapshot: u64, minutes: u64) {
 
 // Recompute both transport checks after changing an Input. Headers and seqs are unchanged,
 // so the next segment's previous-header chain hash remains valid.
-fn change_bbo(path: &Path, seq: u64) -> Vec<u8> {
+fn change_bbo(path: &Path, seq: u64, tick: i64) -> Vec<u8> {
     let mut bytes = std::fs::read(path).unwrap();
     let mut offset = 4096;
     loop {
@@ -51,11 +51,14 @@ fn change_bbo(path: &Path, seq: u64) -> Vec<u8> {
             assert_eq!(h.kind, EventKind::BBO.0);
             let at = offset + 24 + std::mem::offset_of!(Bbo, bid_px);
             let px = i64::from_le_bytes(bytes[at..at + 8].try_into().unwrap());
-            bytes[at..at + 8].copy_from_slice(&(px + 1).to_le_bytes());
+            bytes[at..at + 8].copy_from_slice(&(px + tick).to_le_bytes());
             let end = offset + h.len as usize;
-            assert!(hft_event::RecordFlags(h.flags).contains(hft_event::RecordFlags::CRC));
-            let crc = crc32c::crc32c(&bytes[offset..end - 4]);
-            bytes[end - 4..end].copy_from_slice(&crc.to_le_bytes());
+            // Bbo normally has CrcPolicy::Never in a seq journal. Preserve the actual
+            // transport flags, and only rewrite a CRC when that record has one.
+            if hft_event::RecordFlags(h.flags).contains(hft_event::RecordFlags::CRC) {
+                let crc = crc32c::crc32c(&bytes[offset..end - 4]);
+                bytes[end - 4..end].copy_from_slice(&crc.to_le_bytes());
+            }
             hft_event::decode_record(&bytes[offset..end]).unwrap();
             break;
         }
@@ -153,14 +156,21 @@ fn rpl_025_restart_at_recover_from_snapshot() {
     assert_run(&baseline, 1, new[0].0, 20);
     assert_eq!(std::fs::read(&f.file).unwrap(), original[0]);
     assert_eq!(std::fs::read(&second).unwrap(), original[1]);
-    let changed_seq = log.recs[..boundary]
+    let changed_record = log.recs[..boundary]
         .iter()
         .rev()
         .find(|r| r.kind == EventKind::BBO)
+        .unwrap();
+    let changed_seq = changed_record.seq;
+    let inst = changed_record.read::<Bbo>().unwrap().h.inst;
+    let tick = hft_testkit::dst::world::WorldSpec::w1()
+        .insts
+        .iter()
+        .find(|i| i.id == inst)
         .unwrap()
-        .seq;
+        .tick;
     assert!((note.v[1]..=note.v[2]).contains(&changed_seq));
-    let changed = change_bbo(&f.file, changed_seq);
+    let changed = change_bbo(&f.file, changed_seq, tick);
     let result = verify(dir, true, 1);
     assert_eq!(result["summary"]["runs"].as_array().unwrap().len(), 2);
     assert!(result["summary"]["runs"][0]["mismatches"].as_u64().unwrap() > 0);
