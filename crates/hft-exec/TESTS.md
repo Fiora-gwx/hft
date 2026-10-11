@@ -432,6 +432,7 @@ spec: README.md
 - 参考:逐条断言上列性质(mock 视图按成交更新 `legs` 与 `portfolio`)
 - 例数:PR 2 000
 - 实现:`crates/hft-exec/tests/props.rs::exe_050_cell_invariants`
+- 回归:固定操作 `(0,6402)、(7,15018)、(7,56772)、(7,35176)` 覆盖人工保持与其他外来成交交错;保持未解除时不发配对尾量的 `ResidualTrim`。实现 `crates/hft-exec/tests/props.rs::exe_050_manual_hold_survives_other_external_events`。
 
 ### EXE-051 TargetCell 不超过 640 B,AutoFixState 为 56 B 且字段偏移固定
 

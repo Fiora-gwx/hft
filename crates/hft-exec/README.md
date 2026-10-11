@@ -604,7 +604,7 @@ Broken 的 (account, group) 有三条出路,优先级从高到低:人工 `HedgeF
 **`manual_hold`**(cell 级,`TargetCell.hold & MANUAL_HOLD`):
 
 1. **置位**:`on_external` 收到该 group 的 `ExternalFill{cause = Manual}`。cell 有引擎目标或账户处于 `force_active`/`flatten_lock` 时不立即置位(引擎减仓优先),改置 `MANUAL_HOLD_DEFERRED`;该 cell 的引擎目标清除时(L3 回落、对齐目标或清仓目标到达后清除)延迟位转为置位。置位时清 `FixState` 与 `ext_deadline`(撤 `Timer{Exec, Fix}`、`Timer{Exec, External}`),`origin = Strategy` 的目标暂停为 `Stuck{External}`,自动有界平仓 `Primed`/`Running` 转 `WaitHold`;写 `Note{ExecManualHold}`(**P1**,`v = [account | group << 8, 1(置位), leg_ix, inst, side, qty, naked_filled]`)。已置位时再收到 Manual 成交不重复写。
-2. **抑制**:见上;补腿与残余修剪的抑制条件、外来成交表的 Manual 行、自动有界平仓的 `WaitHold` 都读这一位。不超时:人工动过的 group 等人或策略接手。
+2. **抑制**:见上;补腿与残余修剪的抑制条件、外来成交表的 Manual 行、自动有界平仓的 `WaitHold` 都读这一位。策略目标推进也直接检查保持位,其他外来成交改变 `Stuck` 原因后仍暂停,包含配对目标的单腿尾量。不超时:人工动过的 group 等人或策略接手。
 3. **解除**(只认下列动作):策略对该 group 的**非清除类动作**——替换了当前目标的 `set_target`(与当前目标逐字段相同的不算:每 tick 重发同一目标的策略不会因此解除并把人工平掉的腿开回来)或 `note_strategy_action`(`Ctx::place`、链上意图);`clear_target` 不算;人工 `hedge_fix_cmd`;该 cell 被设下引擎目标(L3 一步、`engine_flatten`、L3 回落时的对齐目标);`clear_account`。除"设下引擎目标"外,这些动作同时清 `MANUAL_HOLD_DEFERRED`。解除时写 `Note{ExecManualHold}`(实际级别 Info,`v = [account | group << 8, 0(解除), 原因(Strategy=1 HedgeFixCmd=2 EngineTarget=3 AccountCleared=4)]`),`fix.first_tsc` 清零(补腿从下一次满足触发起重新计截止),自动有界平仓 `WaitHold` → `Primed`、`due_tsc = now + broken_auto_fix_ms`。
 4. 两个位都进快照(节 21 cell 行的 `flags`),重启后保持。
 

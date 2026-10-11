@@ -794,6 +794,17 @@ fn run(ops: &[(u8, u16)], ck: Checks) -> World {
     w
 }
 
+#[test]
+fn exe_050_manual_hold_survives_other_external_events() {
+    run(
+        &[(0, 6402), (7, 15018), (7, 56772), (7, 35176)],
+        Checks {
+            inv50: true,
+            ..Checks::default()
+        },
+    );
+}
+
 fn strip(d: &[ExecDecision]) -> Vec<ExecDecision> {
     d.iter()
         .map(|x| {

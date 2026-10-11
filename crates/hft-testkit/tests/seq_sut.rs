@@ -74,6 +74,25 @@ fn tk_106_real_base_fee_and_retired_links() {
     };
     for delay_ms in [50, 6_000] {
         let mut c = cfg(1, 10_000, &[], 0, &[]);
+        // Keep the opening opportunity and cycle the position fast enough to exercise reuse
+        // within the fixed 10,000-step budget; the ordinary suites keep their market settings.
+        c.market = hft_testkit::dst::MarketSource::Generated(hft_testkit::dst::MarketGen {
+            tick_ms: 50,
+            walk_centi_bp: 0,
+        });
+        for s in &mut c.world.strategies {
+            use hft_strategy_sdk::ParamSet;
+            use hft_testkit::strategies::probe_taker::TakerParams;
+            s.params = hft_strategy_sdk::params::encode_body(
+                &TakerParams::SCHEMA,
+                1,
+                &hft_strategy_sdk::params::RawParams {
+                    defaults: vec![build::TAKER_SPREAD_TH, 1, 7, 100],
+                    overrides: Vec::new(),
+                },
+            )
+            .unwrap();
+        }
         c.world
             .venues
             .iter_mut()
@@ -109,7 +128,13 @@ fn tk_106_real_base_fee_and_retired_links() {
                 "base fee must cover {side:?}"
             );
         }
-        assert!(orders.iter().any(|d| d.r#gen > 1), "no recycled slot used");
+        assert!(
+            orders.iter().any(|d| d.r#gen > 1),
+            "delay={delay_ms}: no recycled slot used; orders={}, end_ns={}, history={:?}",
+            orders.len(),
+            r.end_ns,
+            r.obs.hedge_history
+        );
         assert!(
             r.obs.hedge_history.iter().any(|h| h.links > 0),
             "no retired link observed"

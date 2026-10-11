@@ -1409,7 +1409,7 @@ spec: README.md
 - 规则:[DST 的世界模型](README.md#dst-的世界模型)、[INV-8](../../docs/tests/invariants.md#inv-8-onfill-第二腿的对冲数量之和等于触发它的第一腿累计净成交量)
 - 级别:dst
 - 里程碑:M2
-- 前置:`SeqSut<TestStrategies>` 与真实 SimExchange;W1 的 VS 配置 `fee_in_base = true`;50/6000 ms 延迟两行,包含槽回收与链接复用
+- 前置:`SeqSut<TestStrategies>` 与真实 SimExchange;W1 的 VS 配置 `fee_in_base = true`,测试策略持有 100 ms、行情保持初始价差;50/6000 ms 延迟两行,包含槽回收与链接复用
 - 故障:`LateFeeOnly{venue = VS, delay_ms}`
 - 种子:固定种子 1
 - 断言:配置实际进入 refdata 的 VenueCaps,FeeOnly 的资产为 BTC;每行运行 10000 步且全部不变量通过;INV-8 观察包含晚到手续费补差与链接复用前的已完成累计量,不能固定 `fee_adjust = 0`;反例删除费用入账或改错余数时相应检查失败

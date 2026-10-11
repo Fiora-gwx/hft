@@ -484,6 +484,11 @@ impl Exec {
         let Some(c) = self.cells.get(cix).copied() else {
             return;
         };
+        // Other external events can change the Stuck reason while a manual hold remains.
+        // The durable hold bit, rather than the presentation state alone, owns this gate.
+        if c.hold & MANUAL_HOLD != 0 && c.view.origin == TargetOrigin::Strategy {
+            return;
+        }
         let ln = self.legs_now(cix, v);
         let engine_risk = self.engine_risk_target(cix);
         // Unknown slices of engine reduce-only perp legs are released (README "推进" 4).
