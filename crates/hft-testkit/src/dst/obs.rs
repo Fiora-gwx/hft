@@ -299,6 +299,8 @@ impl KillRow {
 pub enum AutoFixPhase {
     Idle,
     Primed,
+    WaitHard,
+    WaitHold,
     Running,
     Cancelled,
     Done,
@@ -374,7 +376,18 @@ pub struct DrainRow {
 
 /// Everything a checker reads from the engine at one instant.
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
+pub struct ObservationRequirements {
+    pub accounts: Vec<AccountId>,
+    pub cells: Vec<(AccountId, StrategyId, GroupId)>,
+    pub instruments: Vec<(AccountId, InstId)>,
+    pub venues: Vec<VenueId>,
+}
+
+/// Everything a checker reads from the engine at one instant.
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct Obs {
+    pub engine_ns: Option<i64>,
+    pub required: Option<ObservationRequirements>,
     pub positions: Vec<PosRow>,
     pub inventory: Vec<AssetRow>,
     pub balances: Vec<AssetRow>,
@@ -560,14 +573,24 @@ pub struct Evidence {
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct StepInfo {
     pub decisions: Vec<DecisionInfo>,
+    /// All legs' raw immediate in-flight, before the decision's own order is admitted.
+    pub decision_inflight: Vec<(u64, [i128; 4])>,
+    /// Account risk caps captured at decision time (hedge, reduce notionals).
+    pub decision_limits: Vec<(u64, i128, i128)>,
+    /// A perp still needs reducing toward its engine target at the time of this decision.
+    pub decision_perp_pending: Vec<(u64, bool)>,
     pub notes: Vec<NoteInfo>,
     /// `ExecDecision{AutoFix, detail = AutoFix/Start}` of this step.
     pub autofix_starts: Vec<(AccountId, GroupId)>,
+    /// Cells actually advanced with phase Primed and no documented start gate.
+    pub autofix_ready: Vec<(AccountId, GroupId)>,
     pub evidence: Vec<Evidence>,
     /// `WriteOff` amounts per (account, group, leg) (INV-1 group attribution).
     pub writeoffs: Vec<LegNetRow>,
     /// Engine targets set by `ForceDeleverage` this step: (account, group, leg inst, base, target).
     pub force_targets: Vec<ForceTarget>,
+    /// Original force fraction (Rate raw), keyed like `force_targets` and in the same order.
+    pub force_fractions: Vec<i64>,
 }
 
 /// One leg target of a `ForceDeleverage` step (INV-17).

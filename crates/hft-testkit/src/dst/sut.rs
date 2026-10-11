@@ -117,13 +117,48 @@ pub struct StepOut {
     pub records: Vec<JRec>,
     pub frames: Vec<FrameRec>,
     pub info: StepInfo,
+    /// Actual Input boundaries, including internal timers and restart prologues.
+    pub events: Vec<EventStep>,
+}
+
+#[derive(Clone, Debug)]
+pub struct EventStep {
+    pub records: Vec<JRec>,
+    pub frames: Vec<FrameRec>,
+    pub info: StepInfo,
+    pub before: Obs,
+    pub after: Obs,
 }
 
 impl StepOut {
+    /// All journaled Inputs must have exactly one complete observation in journal order.
+    pub fn verify_observations(&self) -> Result<(), String> {
+        let mut seqs = std::collections::BTreeSet::new();
+        let mut previous = 0;
+        for e in &self.events {
+            let Some(first) = e.records.first() else {
+                return Err("empty Input observation".into());
+            };
+            if first.seq <= previous || !seqs.insert(first.seq) {
+                return Err(format!("duplicate or reordered Input observation {}", first.seq));
+            }
+            if hft_event::classify(first.kind, &first.body) != Ok(hft_event::Role::Input) {
+                return Err(format!("observation {} does not begin with an Input", first.seq));
+            }
+            previous = first.seq;
+        }
+        for r in &self.records {
+            if hft_event::classify(r.kind, &r.body) == Ok(hft_event::Role::Input) && !seqs.contains(&r.seq) {
+                return Err(format!("missing Input observation at seq {}", r.seq));
+            }
+        }
+        Ok(())
+    }
     pub fn clear(&mut self) {
         self.records.clear();
         self.frames.clear();
         self.info = StepInfo::default();
+        self.events.clear();
     }
 }
 
@@ -156,6 +191,8 @@ pub struct BootFail(pub String);
 /// The system under test. Implementations are deterministic functions of their inputs: no clock,
 /// no RNG, no environment (README "DST 的世界模型" 5).
 pub trait Sut: Sized {
+    /// Drain read-only observations made by internal Inputs or automatic recovery.
+    fn drain_observations(&mut self, _out: &mut StepOut) {}
     /// The matching core of the world's venues (`hft_sim::SimExchange` for engine runs).
     type Matcher: crate::dst::venue_behavior::Matcher;
     /// Builds the engine for `ctx.world` (accounts, strategies, parameters, risk).

@@ -152,6 +152,8 @@ pub struct DrainState {
 
 /// Every non-strategy state of the sequencer.
 pub struct Engine {
+    #[cfg(feature = "testkit")]
+    pub(crate) audit: crate::audit::Audit,
     pub rd: RefData,
     pub setup: EngineSetup,
     pub caps: CapacitiesRow,
@@ -472,6 +474,8 @@ impl Engine {
             prev_epoch: setup.oms.engine_epoch,
             dust,
             out: OutBuf::new(),
+            #[cfg(feature = "testkit")]
+            audit: crate::audit::Audit::new(),
             oms_pool: (0..6).map(|_| OmsOut::new()).collect(),
             exec_pool: (0..6).map(|_| ExecOut::with_caps(OutCaps::README)).collect(),
             mode_pool,

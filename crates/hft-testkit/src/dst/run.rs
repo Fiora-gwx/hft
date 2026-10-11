@@ -533,6 +533,7 @@ impl<E: Sut> Loop<'_, E> {
             self.fail = Some((step, FailKind::Boot, e.0));
             return;
         }
+        self.sut.drain_observations(&mut self.out);
         // Frames to venues and the sim.
         let frames: Vec<FrameRec> = self.out.frames.clone();
         for f in frames {
@@ -582,7 +583,57 @@ impl<E: Sut> Loop<'_, E> {
             truth: &truth,
             rebuild,
         };
-        if let Err((i, m)) = check_step(self.cfg.invariants, &mut self.inv, &v) {
+        let set = self.cfg.invariants;
+        if self.after.required.is_some() {
+            let err = self
+                .after
+                .observation_error
+                .clone()
+                .map_or_else(|| self.out.verify_observations(), Err);
+            if let Err(err) = err {
+                self.fail = Some((step, FailKind::Inv(InvId::I8), err));
+                return;
+            }
+        }
+        let mut result = Ok(());
+        if self.out.events.is_empty() {
+            result = check_step(set, &mut self.inv, &v);
+        } else {
+            // Exchange truth and replay compare the whole world step. Business checks run on
+            // each actual Input, before later Inputs and automatic restarts can hide state.
+            for event in &self.out.events {
+                let ev = StepView {
+                    records: &event.records,
+                    frames: &event.frames,
+                    info: &event.info,
+                    before: &event.before,
+                    after: &event.after,
+                    delivered: None,
+                    truth: &[],
+                    rebuild: None,
+                    ..v
+                };
+                result = check_step(set.without(InvId::I6).without(InvId::I16), &mut self.inv, &ev);
+                if result.is_err() {
+                    break;
+                }
+            }
+            if result.is_ok() {
+                let final_set = InvariantSet::none();
+                let final_set = if set.contains(InvId::I6) {
+                    final_set.with(InvId::I6)
+                } else {
+                    final_set
+                };
+                let final_set = if set.contains(InvId::I16) {
+                    final_set.with(InvId::I16)
+                } else {
+                    final_set
+                };
+                result = check_step(final_set, &mut self.inv, &v);
+            }
+        }
+        if let Err((i, m)) = result {
             self.fail = Some((step, FailKind::Inv(i), m));
         }
     }

@@ -278,6 +278,8 @@ impl Oms {
     // ------------------------------------------------------------------ requests
 
     fn push_hedge(&mut self, req: HedgeRequest, out: &mut OmsOut) {
+        #[cfg(feature = "testkit")]
+        self.audit_request(&req);
         let r = out.hedges.push(req);
         debug_assert!(r.is_ok(), "OmsOut.hedges overflow on a direct path");
     }
@@ -372,6 +374,8 @@ impl Oms {
             return (Qty(0), Qty(0));
         };
         let owed = e.owed().0;
+        #[cfg(feature = "testkit")]
+        self.audit_seed(i, i128::from(e.first_net.0), i128::from(e.first_net.0), 0);
         if owed <= 0 {
             return (Qty(0), Qty(owed.max(0)));
         }
@@ -545,6 +549,8 @@ impl Oms {
             x.hedge_req = Qty(x.hedge_req.0.saturating_add(q));
         }
         if let Some(mut r) = self.base_req(i, LinkRole::Second, seq) {
+            #[cfg(feature = "testkit")]
+            self.audit_seed(i, old, new, i128::from(res));
             r.qty = Qty(q);
             r.basis = Qty(raw);
             r.hedge_cap_qty = Qty(raw.saturating_add(info.lot));
@@ -579,6 +585,8 @@ impl Oms {
             x.hedge_req = Qty(x.hedge_req.0.saturating_add(q));
         }
         if let Some(mut r) = self.base_req(i, LinkRole::Second, seq) {
+            #[cfg(feature = "testkit")]
+            self.audit_seed(i, 0, i128::from(qty.0), i128::from(res));
             r.qty = Qty(q);
             r.basis = Qty(raw);
             r.hedge_cap_qty = Qty(raw.saturating_add(info.lot));

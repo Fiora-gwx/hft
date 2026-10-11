@@ -4311,6 +4311,8 @@ spec: README.md
 
 ## 验收
 
+`testkit` 强制目标、计时触发与执行单元的只读观察验收归 [TK-107](../hft-testkit/TESTS.md#tk-107-真实引擎逐事件观察与反例);诊断不进入持久状态。
+
 - **完成标准**:本文件中里程碑 M2 的用例全部有实现且通过([docs/tests §1](../../docs/tests/README.md#1-地位)),`cargo xtask test-trace` 对本组件无未实现、多余与不一致项。
 - **属性测试**:各 `prop` 用例的 PR 例数见用例;每夜与服务器累计运行中,EXE-050、EXE-024、EXE-261、EXE-368、EXE-417、EXE-418、EXE-462 合计 1 000 000 例无失败。
 - **DST**:EXE-500–EXE-505 与 `docs/tests/scenarios.md` 中执行层参与的场景按 [testing §8 上线门槛](../../docs/testing.md#8-上线门槛) ④ 全过;EXE-505 的检查器在其中每个场景的每一步运行。

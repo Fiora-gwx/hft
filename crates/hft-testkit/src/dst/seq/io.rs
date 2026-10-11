@@ -29,6 +29,10 @@ pub struct Elem {
 /// The live environment of one engine instance.
 pub struct DstIo<S: StrategySet> {
     pub audit: super::audit::Audit,
+    pub events: Vec<crate::dst::sut::EventStep>,
+    pending_event: Option<super::events::Pending>,
+    world: crate::dst::world::WorldSpec,
+    carry: super::observe::Carry,
     pub drv: DstDriver,
     pub j: MemJournal,
     pub rings: BTreeMap<RingKey, VecDeque<Elem>>,
@@ -80,9 +84,20 @@ impl<S: StrategySet> core::fmt::Debug for DstIo<S> {
 }
 
 impl<S: StrategySet> DstIo<S> {
-    pub fn new(drv: DstDriver, venues: Vec<VenueId>, clock: SegClock, utc0: i64) -> DstIo<S> {
+    pub fn new(
+        drv: DstDriver,
+        venues: Vec<VenueId>,
+        clock: SegClock,
+        utc0: i64,
+        world: crate::dst::world::WorldSpec,
+        carry: super::observe::Carry,
+    ) -> DstIo<S> {
         DstIo {
             audit: super::audit::Audit::default(),
+            events: Vec::with_capacity(super::events::MAX_EVENTS),
+            pending_event: None,
+            world,
+            carry,
             j: MemJournal::new(clock),
             calib: CalibPair {
                 tsc: Tsc(clock.calib_tsc),
@@ -123,8 +138,25 @@ impl<S: StrategySet> LiveIo<S> for DstIo<S> {
     fn observe_input(&mut self, e: &hft_sequencer::Engine, input: &InputSlot, before: bool) {
         if before {
             self.audit.before(e, input);
+            self.pending_event = Some(super::events::Pending::begin(
+                e,
+                &self.world,
+                &self.audit.history,
+                &self.carry,
+                input,
+            ));
         } else {
             self.audit.after(e);
+            if let Some(p) = self.pending_event.take() {
+                if self.events.len() == super::events::MAX_EVENTS {
+                    self.audit.history.error = Some("per-step Input observation buffer overflow".into());
+                } else {
+                    self.events
+                        .push(p.finish(e, &self.world, &self.audit.history, &self.carry, &self.j));
+                }
+            } else {
+                self.audit.history.error = Some("missing pre-Input observation".into());
+            }
         }
     }
     type J = MemJournal;
@@ -213,6 +245,13 @@ impl<S: StrategySet> LiveIo<S> for DstIo<S> {
         }
         let c = &c;
         self.drv.emit(r, *c, trig);
+        if let Some(p) = &mut self.pending_event {
+            p.frame(crate::dst::sut::FrameRec {
+                ring: r,
+                cmd: *c,
+                trigger_seq: trig,
+            });
+        }
         true
     }
     fn push_feed(&mut self, _v: VenueId, _c: &FeedCmd) -> bool {

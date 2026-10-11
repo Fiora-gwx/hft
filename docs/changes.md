@@ -80,3 +80,4 @@
 | 2026-10-11 | CI 路径分类把改名表示为删除与新增,同时检查两个受影响路径;TOOL-191 用真实 Git 仓库覆盖移出 deploy 目录及源码删除的 PR/push | TOOL-191,仅列改名后路径会漏掉原目录的检查 | .github/scripts/changed-paths.py、tools/README.md、tools/TESTS.md、tools/xtask/tests/test_ci_paths.py、docs/development.md | 否 |
 | 2026-10-11 | 真实 DST 世界映射基础币手续费并拒绝无法表达的配置;逐 Input 只读观察独立计算费用补差,保留链接复用前的累计量,诊断不进生产与快照 | TK-106、TK-070、INV-8 | crates/hft-testkit、crates/hft-oms、crates/hft-sequencer、docs/architecture.md | 否 |
 | 2026-10-11 | 策略目标推进直接检查人工保持位,其他外来成交改变状态后仍禁止自动追目标和配对尾量修剪;加入 CI 最小复现,基础币费用场景增加稳定复用压力 | EXE-050、TK-106 | crates/hft-exec、crates/hft-testkit/TESTS.md、crates/hft-testkit/tests/seq_sut.rs | 否 |
+| 2026-10-11 | 真实 DST 按 Input 观察模式、Kill、保证金、执行与在途;决策前原始事实关联 journal seq,独立重算对冲与强制目标,缺失或溢出直接失败 | TK-107、SEQ-373、TK-070 | crates/hft-testkit、crates/hft-sequencer、crates/hft-oms、crates/hft-exec、docs/architecture.md | 否 |

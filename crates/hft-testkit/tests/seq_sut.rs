@@ -74,19 +74,20 @@ fn tk_106_real_base_fee_and_retired_links() {
     };
     for delay_ms in [50, 6_000] {
         let mut c = cfg(1, 10_000, &[], 0, &[]);
-        // Keep the opening opportunity and cycle the position fast enough to exercise reuse
-        // within the fixed 10,000-step budget; the ordinary suites keep their market settings.
+        // Explicit spot-first fixture exercises both base-fee directions and table reuse
+        // within the fixed 10,000-step budget; ordinary suites retain their own strategies.
         c.market = hft_testkit::dst::MarketSource::Generated(hft_testkit::dst::MarketGen {
             tick_ms: 50,
             walk_centi_bp: 0,
         });
         for s in &mut c.world.strategies {
             use hft_testkit::strategies::probe_taker::TakerParams;
+            s.kind_id = 0xFF04;
             s.params = hft_strategy_sdk::params::encode_body(
                 &TakerParams::SCHEMA,
                 1,
                 &hft_strategy_sdk::params::RawParams {
-                    defaults: vec![build::TAKER_SPREAD_TH, 1, 7, 100],
+                    defaults: vec![build::TAKER_SPREAD_TH, 20, 0, 100],
                     overrides: Vec::new(),
                 },
             )
@@ -103,7 +104,7 @@ fn tk_106_real_base_fee_and_retired_links() {
             assert_eq!(rd.caps(VS).fee_asset_rule, FeeAssetRule::Configured(BTC));
         }
         c.scripted.push((0, Fault::LateFeeOnly { venue: VS, delay_ms }));
-        let r = run_record::<E>(&c);
+        let r = run_record::<SeqSut<crate::fee_cycle::FeeStrategies>>(&c);
         assert!(r.outcome.is_pass(), "delay={delay_ms}: {}", show(&r));
         assert_eq!(r.steps_run, c.steps);
         let fees: Vec<_> = r

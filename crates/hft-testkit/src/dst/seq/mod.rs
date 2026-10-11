@@ -13,9 +13,12 @@
 
 pub mod audit;
 pub mod build;
+mod decisions;
+mod events;
 pub mod io;
 pub mod matcher;
 pub mod observe;
+mod state;
 
 use hft_event::{
     AccountConfigReportHdr, BalanceReport, Bbo, CmdHdr, ConnRole, ConnState, ConnStateKind, ControlCmd,
@@ -507,7 +510,14 @@ impl<S: StrategySet> SeqSut<S> {
         drv.set_now(now_ns);
         let mut venues: Vec<VenueId> = self.world.venues.iter().map(|v| v.id).collect();
         venues.sort_by_key(|v| v.0);
-        io::DstIo::new(drv, venues, clock, build::UTC0)
+        io::DstIo::new(
+            drv,
+            venues,
+            clock,
+            build::UTC0,
+            self.world.clone(),
+            self.carry.clone(),
+        )
     }
     /// Cold start over the published part of the current journal at the current virtual time.
     fn restart(&mut self, sel: SnapshotSel) -> Result<(), BootFail> {
@@ -519,6 +529,7 @@ impl<S: StrategySet> SeqSut<S> {
         self.carry.dup_base += st.dup;
         self.carry.stale_gen_base += st.stale_gen;
         let drv = s.into_driver();
+        let events = drv.io.events;
         let mut audit = drv.io.audit;
         let mut j = drv.io.j;
         let keep = j.committed;
@@ -544,6 +555,9 @@ impl<S: StrategySet> SeqSut<S> {
         }
         let mut io = self.new_io(now, clock);
         io.audit = audit;
+        io.events = events;
+        io.events
+            .retain(|ev| ev.records.last().is_none_or(|r| r.seq <= committed_seq));
         io.epoch0 = (self.epoch & 0x7FFF) as u16;
         io.old = Some(Log::from_segments(&j.segments));
         j.truncate_to_event_end();
@@ -581,6 +595,10 @@ impl<S: StrategySet> SeqSut<S> {
 impl<S: StrategySet> Sut for SeqSut<S> {
     type Matcher = SimMatcher;
 
+    fn drain_observations(&mut self, out: &mut StepOut) {
+        out.events.append(&mut self.io().events);
+    }
+
     fn boot(ctx: &BootCtx<'_>) -> Result<Self, BootFail> {
         if let Some(p) = ctx.planted.iter().find(|p| !PLANTED.iter().any(|(n, _)| n == *p)) {
             return Err(BootFail(format!(
@@ -617,6 +635,7 @@ impl<S: StrategySet> Sut for SeqSut<S> {
         sut.s = Some(s);
         sut.prologue(true);
         sut.mirror(None);
+        sut.io().events.clear();
         Ok(sut)
     }
 
@@ -821,6 +840,7 @@ impl<S: StrategySet> SeqSut<S> {
         out.records = recs;
         self.io().drv.drain_emitted(&mut out.frames);
         observe::step_info(self, &before, out);
+        self.drain_observations(out);
     }
     /// The world's run mode of every cell (scenario helpers).
     pub fn mode_of(&self, a: AccountId, g: GroupId) -> Option<RunMode> {

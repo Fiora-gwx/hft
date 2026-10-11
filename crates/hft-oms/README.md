@@ -612,6 +612,8 @@ const _: () = assert!(size_of::<LinkEntry>() == 80 && offset_of!(LinkEntry, firs
 
 `testkit` feature 提供只读链接观察,记录创建事件、第一腿完整身份、裸量截断量与复用前的最终累计量;缓冲在构造期分配,溢出显式报告,不进入生产构建与快照。跨复用、恢复的累计量验收归 [TK-106](../hft-testkit/TESTS.md#tk-106-真实引擎的基础币费用配置与对冲余数观察)。
 
+对冲请求的诊断副本保留费用后的第一腿累计量变化、请求前余数、重试前已请求/已成交/在途量与原始计划,由外部检查器独立计算数量上界;单 Input 的请求缓冲与退休链接缓冲使用相同容量,满时显式失败(TK-107)。
+
 第一腿每个成交增量(含部分成交;链上第一腿为 `TxLifecycle::IncludedOk`,optional)在**同一事件处理内**:
 
 1. 取净量增量 `d_net`(见"成交净量");超量成交部分不计(见"回报匹配"第 6 条)。先把本增量写进 LegTracker(该腿 `net` 与在途),再 `first_net += d_net`。**截止起点**:未对冲量 `u = first_net × num / den − hedge_filled`;本增量使 `|u|` 从 < 第二腿 lot 变为 ≥ 1 lot 时 `first_fill_tsc = max(now, 1)`(最早一笔尚未对冲完的成交;0 是"无"的哨兵);第二腿成交(或 `Reverse` 成交)使 `|u|` 回到 < 1 lot 时 `first_fill_tsc = 0`。`|u|` ≥ 1 lot 期间的后续第一腿成交不改起点——起点按未对冲区间计,不按逐笔先进先出前移(更保守)。

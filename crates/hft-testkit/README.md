@@ -246,6 +246,10 @@ DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xt
 
 `fee_in_base` 在真实引擎与 SimExchange 使用同一份世界配置:现货 venue 的全部 inst 共用一个基础资产时映射为 `Configured(asset)`,买卖均扣该资产;永续、多基础资产或空 venue 拒绝启动。INV-8 的费用补差从 Input 与事件前的完整订单身份、group 和对冲计划独立计算。链接以第一腿 epoch/slot/gen 与创建事件区分,复用前的累计量按 group、对冲腿与比例归并到 `Obs.hedge_history`,不混入当前链接;重启沿已提交 journal 边界延续观察。诊断缓冲有界,溢出使检查失败(TK-106)。
 
+真实引擎的 `EventStep` 按实际 Input 顺序保存前后状态,包括内部定时器与重启引导输入;世界步只用于交换所真值和重建比较。每个世界步最多 4096 条 Input 观察,每条最多 1024 条 journal 记录与 512 帧,历史比例组合最多 4096 行,超限显式失败。`ObservationRequirements` 从世界配置列出适用账户、组、venue 与 inst,缺少模式、Kill、保证金、执行单元、在途量或 New 决策观察时对应检查失败,不能用空表跳过。
+
+`DecisionInfo` 以 journal seq 关联决策前的原始仓位、在途、对冲计划与风控限额;适配器独立计算累计比例补差、剩余对冲量和名义量,不使用订单自身的在途。强制减仓按原仓位、前一目标、原始比例与 lot 重算目标;自动平仓期限按计时触发与配置窗口重算。诊断默认关闭,不改变 journal schema、快照或状态哈希。验收归 TK-107 与 SEQ-373。
+
 ### 7. 状态哈希对比
 
 ```rust

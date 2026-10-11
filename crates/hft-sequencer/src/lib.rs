@@ -21,6 +21,8 @@
 compile_error!("hft-sequencer: snapshot rows are little-endian only");
 
 pub mod advisor;
+#[cfg(feature = "testkit")]
+pub mod audit;
 pub mod clock;
 pub mod codes;
 mod commands;

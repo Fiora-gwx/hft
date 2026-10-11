@@ -4168,6 +4168,8 @@ spec: README.md
 
 ## 验收
 
+`testkit` 对冲请求原始事实与实际决策的跨组件观察验收归 [TK-107](../hft-testkit/TESTS.md#tk-107-真实引擎逐事件观察与反例)。
+
 - **完成标准**:M2 里程碑的全部 `unit`/`table`/`prop`/`golden`/`integ`/`replay`/`bench`/`dst` 用例有同编号的实现并通过(`cargo xtask test-trace` 无未实现、多余或不一致项,规则见 [docs/tests §6](../../docs/tests/README.md#6-与代码的对应));`testnet`/`host` 用例(OMS-420、OMS-421)在 M6 按 `证据` 字段归档。
 - **属性测试**:各 `prop` 用例 PR 例数见其 `例数` 字段;每夜每个 `prop` 用例 100 000 例,发布前累计 1 000 000 例无失败;失败的最小化种子按 [testing 金字塔](../../docs/testing.md#2-金字塔) 的规则写进本 crate 的 `tests/regressions/` 永久保留。
 - **DST**:OMS-400–OMS-405 按 [testing §8 上线门槛](../../docs/testing.md#8-上线门槛) ④ 的种子累计零违反,OMS-401 为必过项。

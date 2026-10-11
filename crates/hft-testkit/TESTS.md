@@ -1409,13 +1409,23 @@ spec: README.md
 - 规则:[DST 的世界模型](README.md#dst-的世界模型)、[INV-8](../../docs/tests/invariants.md#inv-8-onfill-第二腿的对冲数量之和等于触发它的第一腿累计净成交量)
 - 级别:dst
 - 里程碑:M2
-- 前置:`SeqSut<TestStrategies>` 与真实 SimExchange;W1 的 VS 配置 `fee_in_base = true`,测试策略持有 100 ms、行情保持初始价差;50/6000 ms 延迟两行,包含槽回收与链接复用
+- 前置:`SeqSut<FeeStrategies>` 与真实 SimExchange;W1 的 VS 配置 `fee_in_base = true`;测试夹具每 100 ms 发一次现货第一腿 OnFill,每单 2 个永续 lot,组现货净量达到 20 单时转卖,行情保持初始价差;50/6000 ms 延迟两行,包含槽回收与链接复用
 - 故障:`LateFeeOnly{venue = VS, delay_ms}`
 - 种子:固定种子 1
 - 断言:配置实际进入 refdata 的 VenueCaps,FeeOnly 的资产为 BTC;每行运行 10000 步且全部不变量通过;INV-8 观察包含晚到手续费补差与链接复用前的已完成累计量,不能固定 `fee_adjust = 0`;反例删除费用入账或改错余数时相应检查失败
 - 实现:`crates/hft-testkit/tests/seq_sut.rs::tk_106_real_base_fee_and_retired_links`
 
 ## 验收
+
+### TK-107 真实引擎逐事件观察与反例
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:unit
+- 里程碑:M2
+- 前置:真实 `SeqSut<TestStrategies>`、W1、种子 1、2000 步
+- 步骤:读取内部 Timer 与 New 决策的逐 Input 观察,对副本分别改错 Kill、有效模式、对冲数量及强制减仓方向,删去模式/保证金/执行单元/在途/决策观察,制造溢出标记和 Input 漏记/重复
+- 期望:正常运行全部不变量通过;实际存在内部 Timer 和成功对冲;所有反例被相应检查拒绝,不修改被测引擎
+- 实现:`crates/hft-testkit/tests/observations.rs::tk_107_real_observations_and_counterexamples`
 
 - 本组件完成 = 里程碑已到的全部用例有同编号的实现且通过(`cargo xtask test-trace`)。
 - 框架可信度:TK-053 的每一行都在 2 000 个种子内被找到,TK-051 的每一行都缩到 ≤ 5 项;任一行未达成即框架验收不通过。

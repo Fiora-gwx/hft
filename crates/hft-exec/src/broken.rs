@@ -41,6 +41,8 @@ impl Exec {
         cm.fix = FixState::ZERO;
         cm.aux16 &= !crate::external::AUX_EXT_DEFAULT;
         Self::arm_broken(cm, &p, now);
+        #[cfg(feature = "testkit")]
+        self.audit.arm(cm, now, p.broken_auto_fix_ms);
         let due = cm.auto_fix.due_tsc;
         let ag = acct_group(c.account.0, c.group.0);
         self.notify(cix, ExecUpdateKind::Broken(reason), None, out);
@@ -151,6 +153,17 @@ impl Exec {
         let k = self.acct_of_cix(cix);
         let p = self.params(k);
         let engine_target = c.has_target && matches!(c.view.origin, TargetOrigin::Engine(_));
+        #[cfg(feature = "testkit")]
+        {
+            let wait = self.wait_reason(cix, v, now);
+            self.audit.poll(crate::audit::BrokenPoll {
+                account: c.account,
+                group: c.group,
+                phase: c.auto_fix.phase(),
+                engine_target,
+                wait,
+            });
+        }
         if engine_target {
             if c.auto_fix.phase() == AutoFixPhase::Running
                 && c.active.kind != ACT_AUTOFIX

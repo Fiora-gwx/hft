@@ -20,6 +20,8 @@
 compile_error!("hft-exec: snapshot rows are little-endian only");
 
 mod advance;
+#[cfg(feature = "testkit")]
+pub mod audit;
 mod broken;
 pub mod calc;
 pub mod decision;
@@ -85,6 +87,8 @@ pub(crate) struct AcctInfo {
 /// The execution layer (README "入口").
 #[derive(Debug)]
 pub struct Exec {
+    #[cfg(feature = "testkit")]
+    pub(crate) audit: audit::Audit,
     pub(crate) accts: Box<[AcctInfo]>,
     pub(crate) acct: Box<[AcctState]>,
     /// Grouped cells `[0, n_grouped)` sorted by (account, group), then one ungrouped cell per account.
@@ -206,6 +210,8 @@ impl Exec {
         let words = total.div_ceil(64).max(1);
         let none_inst = none_hot();
         Ok(Exec {
+            #[cfg(feature = "testkit")]
+            audit: audit::Audit::new(total),
             acct: vec![AcctState::ZERO; accts.len()].into_boxed_slice(),
             accts: accts.into_boxed_slice(),
             cells: {

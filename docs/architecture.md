@@ -125,7 +125,7 @@ tier(frontmatter 标注):`pure` 无 I/O 无线程;`hot` 在 tick-to-trade 路径
 
 ## 9. 回放、恢复与确定性
 
-DST 只读观察按 Input 边界采集,只在 `testkit` 构建启用,不进 journal。
+DST 按 Input 边界和下单前采集只读事实,`testkit` 构建独立检查,不进 journal。
 
 同一 `hft-sequencer` 代码在三种驱动下运行:实盘(环);恢复(截断到最后一个完整事件,从快照重放;版本变化只从 Drain 快照起步;对账通过后才放行交易;kill-switch 兜底停机留下的停机标记在启动时写成一条 `Kill` Input,不会因重启自动恢复开仓);验证回放(读 seq journal 全部 Input,Output 须与实盘逐字节一致)。`Advice` 是 Input:回放读日志,不重算模型;重启时 Model 从检查点 + journal 重放恢复,缺失则从空起步(可经 `InjectWarmup` 预热)。跨重启的时间用 `engine_ns`:对冲截止只按引擎运行时间累计;跨启动的 Advice 由策略按 `basis_seq < Now.boot_seq` 判过期。
 

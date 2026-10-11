@@ -163,7 +163,11 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
         && let Some(l) = it.link.get()
         && !link_valid(l)
     {
+        #[cfg(feature = "testkit")]
+        let audit_facts = crate::audit::capture(e, &it, src, it.class);
         record_only(e, strategy, &it, RejectBits::INVALID, false, 0, 0, intent_no);
+        #[cfg(feature = "testkit")]
+        e.audit.record((e.out.recs.len() - 1) as u32, audit_facts);
         return Ok(PipeOut::Rejected(RejectBits::INVALID));
     }
     // 1. Hedge pricing.
@@ -240,6 +244,8 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
         flags: u16::from(it.flags),
     };
     let class = Risk::classify(&draft, risk_origin(&src), &facts, e.rd.caps(venue));
+    #[cfg(feature = "testkit")]
+    let audit_facts = crate::audit::capture(e, &it, src, class.class);
     let oflags = oflags_of(&it, &class, extra_flags);
     // 2. Mode gate: strategy place and exec Target-origin increase orders.
     let gated = match src {
@@ -258,6 +264,8 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
         match eff {
             Effective::Shadow => {
                 record_only(e, strategy, &it, RejectBits(0), true, oflags, reason, intent_no);
+                #[cfg(feature = "testkit")]
+                e.audit.record((e.out.recs.len() - 1) as u32, audit_facts);
                 return Ok(PipeOut::Shadowed);
             }
             Effective::Live if class.class == IntentClass::Open && !open_allowed(inst, account, it.group) => {
@@ -271,6 +279,8 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
                     reason,
                     intent_no,
                 );
+                #[cfg(feature = "testkit")]
+                e.audit.record((e.out.recs.len() - 1) as u32, audit_facts);
                 return Ok(PipeOut::Shadowed);
             }
             _ => {}
@@ -291,6 +301,8 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
             reason,
             intent_no,
         );
+        #[cfg(feature = "testkit")]
+        e.audit.record((e.out.recs.len() - 1) as u32, audit_facts);
         return Ok(PipeOut::Rejected(RejectBits::CLOSE_ONLY));
     }
     // 4. IntentView.
@@ -381,6 +393,8 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
         Ok(a) => a,
         Err(bits) => {
             record_only(e, strategy, &it, bits, false, oflags, reason, intent_no);
+            #[cfg(feature = "testkit")]
+            e.audit.record((e.out.recs.len() - 1) as u32, audit_facts);
             if let Src::Hedge { req } = src {
                 if bits.0 & RejectBits::HEDGE_LIMIT.0 != 0 {
                     e.trace.rec("oms.hedge_vetoed", u64::from(req.link_id), 0);
@@ -443,6 +457,10 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
     e.trace.rec("oms.place", u64::from(inst_id.0), u64::from(lev));
     let mut o = e.take_oms();
     let r = e.oms.place(&ai, e.now.tsc, e.cur_seq, &mut o);
+    #[cfg(feature = "testkit")]
+    for d in o.decisions.as_slice() {
+        e.audit.pending(*d, audit_facts);
+    }
     drain_oms(e, inst, drv, &mut o)?;
     e.put_oms(o);
     match r {
@@ -798,6 +816,8 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
         }
         let d = &*d;
         let ix = e.out.push(RecordFlags(0), d);
+        #[cfg(feature = "testkit")]
+        e.audit.bind(d, ix);
         e.trace.rec("decision", u64::from(d.slot.0), d.action as u64);
         let ring = ring_of(e, d.account, d.venue);
         e.out.emits.push(Emit::Gw {

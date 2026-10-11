@@ -642,6 +642,8 @@ impl Exec {
                 c.view.state = TargetState::Broken(BrokenReason::LinkBroken);
                 c.fix = FixState::ZERO;
                 Self::arm_broken(c, p, now);
+                #[cfg(feature = "testkit")]
+                self.audit.arm(c, now, p.broken_auto_fix_ms);
             }
         } else {
             c.cap_block &= !CAP_BROKEN;

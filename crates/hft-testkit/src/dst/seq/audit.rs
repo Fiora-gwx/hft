@@ -37,6 +37,7 @@ pub struct History {
     live: BTreeMap<u32, Tracked>,
     pub retired: BTreeMap<HistoryKey, HedgeHistoryRow>,
     pub fees: BTreeMap<GroupKey, i128>,
+    pub autofix_due: BTreeMap<(u8, u32), i64>,
     pub last_seq: u64,
     pub error: Option<String>,
 }
@@ -99,6 +100,10 @@ impl History {
             i64::from(r.plan.ratio_num),
             i64::from(r.plan.ratio_den),
         );
+        if self.retired.len() >= 4_096 && !self.retired.contains_key(&key) {
+            self.error = Some("retired link ratio history exceeds 4096 rows".into());
+            return;
+        }
         let h = self.retired.entry(key).or_insert(HedgeHistoryRow {
             account: l.account,
             group: l.group,
@@ -177,6 +182,12 @@ impl Audit {
         }
         if e.oms.audit_overflow() {
             self.history.error = Some(format!("OMS diagnostic overflow at Input {}", e.cur_seq));
+        }
+        for f in e.exec.audit_arms() {
+            self.history.autofix_due.insert(
+                (f.account.0, f.group.0),
+                f.engine_ns.saturating_add(i64::from(f.window_ms) * 1_000_000),
+            );
         }
         for row in e.oms.audit_retired() {
             let t = self.history.tracked(*row);

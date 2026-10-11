@@ -88,6 +88,8 @@ pub(crate) fn process_parts<D: Driver<S>, S: StrategySet>(
     #[cfg(feature = "testkit")]
     {
         e.oms.audit_begin();
+        e.audit.begin();
+        e.exec.audit_begin();
         drv.observe_input(e, slot, true);
     }
     let mut p = Pending::default();
@@ -180,6 +182,8 @@ pub(crate) fn finish_event<D: Driver<S>, S: StrategySet>(e: &mut Engine, drv: &m
             }
         }
     }
+    #[cfg(feature = "testkit")]
+    e.audit.finish(&e.out.seqs);
     e.out.clear();
     Ok(())
 }

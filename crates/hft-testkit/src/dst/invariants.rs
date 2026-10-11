@@ -135,7 +135,9 @@ impl<'a> StepView<'a> {
     pub fn decisions(&self) -> Vec<(OrderDecision, Option<&'a DecisionInfo>)> {
         self.records
             .iter()
-            .filter(|r| r.kind == EventKind::ORDER_DECISION)
+            .filter(|r| {
+                r.kind == EventKind::ORDER_DECISION && r.flags.0 & hft_event::RecordFlags::SHADOW.0 == 0
+            })
             .filter_map(|r| {
                 let d = r.try_read::<OrderDecision>()?;
                 Some((d, self.info.decisions.iter().find(|i| i.seq == r.seq)))
@@ -322,7 +324,113 @@ pub fn checker(i: InvId) -> Option<&'static CheckerDesc> {
 pub fn check_step(set: InvariantSet, st: &mut InvState, v: &StepView<'_>) -> Result<(), (InvId, String)> {
     for c in CHECKERS {
         if set.contains(c.id) {
+            observation_complete(c.id, v).map_err(|m| (c.id, m))?;
             (c.step)(st, v).map_err(|m| (c.id, m))?;
+        }
+    }
+    Ok(())
+}
+
+/// A real adapter declares its applicable cells and accounts independently of the observed rows.
+/// Synthetic checker tests may supply only the rows relevant to their counterexample.
+fn observation_complete(id: InvId, v: &StepView<'_>) -> Result<(), String> {
+    for o in [v.before, v.after] {
+        if let Some(err) = &o.observation_error {
+            return Err(err.clone());
+        }
+        let Some(req) = &o.required else { continue };
+        if o.engine_ns.is_none() {
+            return Err("missing engine clock observation".into());
+        }
+        for &(a, s, g) in &req.cells {
+            if id == InvId::I11
+                && o.cells
+                    .iter()
+                    .filter(|c| (c.account, c.strategy, c.group) == (a, s, g))
+                    .count()
+                    != 1
+            {
+                return Err(format!("missing or duplicate mode observation for {a:?}/{g:?}"));
+            }
+            if [InvId::I17, InvId::I18, InvId::I20].contains(&id)
+                && o.exec.iter().filter(|c| (c.account, c.group) == (a, g)).count() != 1
+            {
+                return Err(format!(
+                    "missing or duplicate execution observation for {a:?}/{g:?}"
+                ));
+            }
+            if [InvId::I4, InvId::I8, InvId::I19].contains(&id)
+                && o.legs.iter().filter(|c| (c.account, c.group) == (a, g)).count() != 1
+            {
+                return Err(format!("missing or duplicate leg observation for {a:?}/{g:?}"));
+            }
+        }
+        for a in &req.accounts {
+            if [InvId::I17, InvId::I20].contains(&id)
+                && o.margin.iter().filter(|m| m.account == *a).count() != 1
+            {
+                return Err(format!("missing or duplicate margin observation for {a:?}"));
+            }
+        }
+        for venue in &req.venues {
+            if [InvId::I5, InvId::I11, InvId::I12].contains(&id)
+                && o.kill.iter().filter(|k| k.venue == *venue).count() != 1
+            {
+                return Err(format!("missing or duplicate Kill observation for {venue:?}"));
+            }
+        }
+        if [InvId::I3, InvId::I19].contains(&id) {
+            for &(a, inst) in &req.instruments {
+                for side in [Side::Buy, Side::Sell] {
+                    if o.inflight
+                        .iter()
+                        .filter(|r| (r.account, r.inst, r.side) == (a, inst, side))
+                        .count()
+                        != 1
+                    {
+                        return Err(format!(
+                            "missing or duplicate in-flight observation for {a:?}/{inst:?}/{side:?}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    if v.after.required.is_some()
+        && [
+            InvId::I3,
+            InvId::I4,
+            InvId::I8,
+            InvId::I13,
+            InvId::I15,
+            InvId::I17,
+            InvId::I19,
+        ]
+        .contains(&id)
+    {
+        for r in v.records {
+            if r.try_read::<OrderDecision>()
+                .is_some_and(|d| d.action == OrderAction::New)
+            {
+                if v.info.decisions.iter().filter(|i| i.seq == r.seq).count() != 1 {
+                    return Err(format!(
+                        "missing or duplicate decision observation at seq {}",
+                        r.seq
+                    ));
+                }
+                if v.info
+                    .decision_inflight
+                    .iter()
+                    .filter(|(seq, _)| *seq == r.seq)
+                    .count()
+                    != 1
+                {
+                    return Err(format!("missing decision-time in-flight at seq {}", r.seq));
+                }
+            }
+        }
+        if v.info.force_targets.len() != v.info.force_fractions.len() {
+            return Err("missing force-target fraction observation".into());
         }
     }
     Ok(())
@@ -964,7 +1072,7 @@ fn check_7(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
             ));
         }
     }
-    let now = v.now_ns as i64;
+    let now = v.after.engine_ns.unwrap_or(v.now_ns as i64);
     for s in o.slots.iter().filter(|s| s.state.is_terminal()) {
         let limit = slot_deadline_ns(o, s.venue, s.account);
         if s.terminal_ens > 0 && now - s.terminal_ens > limit {
@@ -982,7 +1090,7 @@ fn check_7(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
 }
 
 fn end_7(_: &mut InvState, v: &EndView<'_>) -> Result<(), String> {
-    let now = v.now_ns as i64;
+    let now = v.obs.engine_ns.unwrap_or(v.now_ns as i64);
     for s in v.obs.slots.iter().filter(|s| s.state.is_terminal()) {
         let limit = slot_deadline_ns(v.obs, s.venue, s.account);
         if s.terminal_ens > 0 && now - s.terminal_ens > limit {
@@ -1097,7 +1205,9 @@ pub fn effective_mode(
         .filter(|c| match c.scope {
             CapScope::Global => true,
             CapScope::Account(x) => x == a,
-            CapScope::Cell(x, y, z) => x == a && y == s && z == g,
+            CapScope::Cell(x, y, z) => {
+                (x.0 == 0 || x == a) && (y.0 == 0 || y == s) && (z == hft_types::GROUP_ALL || z == g)
+            }
             CapScope::Venue(_) => false,
         })
         .map(|c| c.level)
@@ -1396,6 +1506,13 @@ fn check_15(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
             continue;
         }
         let qty = i128::from(d.qty.0);
+        let (_, max_hedge, max_reduce) = v
+            .info
+            .decision_limits
+            .iter()
+            .find(|(seq, _, _)| *seq == i.seq)
+            .copied()
+            .unwrap_or((i.seq, r.max_hedge_notional, r.max_reduce_notional));
         match i.class {
             DecClass::Hedge => {
                 let lot = v.after.inst(d.inst).map_or(0, |x| x.lot);
@@ -1405,20 +1522,17 @@ fn check_15(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
                         i.seq, i.hedge, i.basis
                     ));
                 }
-                if r.max_hedge_notional > 0 && i.notional > r.max_hedge_notional {
+                if max_hedge > 0 && i.notional > max_hedge {
                     return Err(format!(
                         "hedge seq {}: notional {} > max_hedge_notional",
                         i.seq, i.notional
                     ));
                 }
-                if i.hedge == Some(HedgeKind::AutoFix)
-                    && r.max_reduce_notional > 0
-                    && i.notional > r.max_reduce_notional
-                {
+                if i.hedge == Some(HedgeKind::AutoFix) && max_reduce > 0 && i.notional > max_reduce {
                     return Err(format!("AutoFix seq {}: notional > max_reduce_notional", i.seq));
                 }
             }
-            DecClass::Flatten if r.max_reduce_notional > 0 && i.notional > r.max_reduce_notional => {
+            DecClass::Flatten if max_reduce > 0 && i.notional > max_reduce => {
                 return Err(format!("Flatten seq {}: notional > max_reduce_notional", i.seq));
             }
             _ => {}
@@ -1529,11 +1643,37 @@ fn check_17(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
                 i.same_dir_inflight
             ));
         }
-        first_engine.entry((d.account.0, d.group.0)).or_insert(d.inst);
+        let pending = v
+            .info
+            .decision_perp_pending
+            .iter()
+            .find(|(seq, _)| *seq == i.seq)
+            .map_or(true, |(_, p)| *p);
+        if pending {
+            first_engine.entry((d.account.0, d.group.0)).or_insert(d.inst);
+        }
     }
     let step_bp = i128::from(v.after.risk.force_step_bp);
-    for t in &v.info.force_targets {
+    for (ix, t) in v.info.force_targets.iter().enumerate() {
         let lot = v.after.inst(t.inst).map_or(1, |r| r.lot.max(1));
+        if let Some(frac) = v.info.force_fractions.get(ix) {
+            let keep = 1_000_000_000 - i128::from((*frac).clamp(0, 1_000_000_000));
+            let mut expected = (t.base * keep / 1_000_000_000) / lot * lot;
+            if let Some(previous) = t.strategy_target {
+                if previous.signum() != expected.signum() {
+                    expected = 0;
+                } else if previous.abs() < expected.abs() {
+                    expected = previous;
+                }
+            }
+            if t.target != expected {
+                return Err(format!(
+                    "force target {} != independently recomputed {expected}",
+                    t.target
+                ));
+            }
+            continue;
+        }
         if let Some(s) = t.strategy_target
             && s.abs() <= t.target.abs()
             && s.signum() * t.base.signum() >= 0
@@ -1552,7 +1692,12 @@ fn check_17(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
                 t.target, t.base
             ));
         }
-        let bound = (t.base.abs() * (10_000 - step_bp) / 10_000) / lot * lot;
+        let frac = v
+            .info
+            .force_fractions
+            .get(ix)
+            .map_or(step_bp * 100_000, |f| i128::from(*f));
+        let bound = (t.base.abs() * (1_000_000_000 - frac) / 1_000_000_000) / lot * lot;
         if t.target.abs() > bound {
             return Err(format!(
                 "force target |{}| > |base {}| × (1 − force_step) = {bound}",
@@ -1651,15 +1796,26 @@ fn check_19(st: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
                 | HedgeKind::CmdHedgeFix
                 | HedgeKind::AutoFix,
             ) => {
+                if v.after.required.is_some() && q > i.naked_dir {
+                    return Err(format!(
+                        "{:?} seq {} increases or crosses naked exposure",
+                        i.hedge, i.seq
+                    ));
+                }
                 if q > i.basis {
                     return Err(format!(
                         "{:?} seq {}: qty {q} > |Σ net| {}",
                         i.hedge, i.seq, i.basis
                     ));
                 }
-                if let Some(l) = v.before.leg(d.account, d.group)
-                    && l.inflight_immediate.iter().any(|x| *x != 0)
-                {
+                let immediate = v
+                    .info
+                    .decision_inflight
+                    .iter()
+                    .find(|(s, _)| *s == i.seq)
+                    .map(|(_, x)| x)
+                    .or_else(|| v.before.leg(d.account, d.group).map(|l| &l.inflight_immediate));
+                if immediate.is_some_and(|xs| xs.iter().any(|x| *x != 0)) {
                     return Err(format!(
                         "{:?} seq {} sent with immediate in-flight",
                         i.hedge, i.seq
@@ -1671,7 +1827,8 @@ fn check_19(st: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
         if i.class == DecClass::Flatten && q > i.pos.abs() - i.same_dir_inflight {
             return Err(format!("Flatten seq {}: qty {q} > |pos| − inflight", i.seq));
         }
-        if i.class == DecClass::Hedge
+        if v.after.required.is_none()
+            && i.class == DecClass::Hedge
             && let Some(l) = v.after.leg(d.account, d.group)
         {
             let opposite = match d.side {
@@ -1707,7 +1864,7 @@ pub fn inv_20_broken_auto_fix_bounded() -> Scenario {
 }
 
 fn check_20(st: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
-    let now = v.now_ns as i64;
+    let now = v.after.engine_ns.unwrap_or(v.now_ns as i64);
     for c in &v.after.exec {
         let key = (c.account.0, c.group.0);
         let was = v.before.exec_cell(c.account, c.group).is_some_and(|b| b.broken);
@@ -1783,7 +1940,9 @@ fn check_20(st: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
             .after
             .exec_cell(b.account, b.group)
             .is_some_and(|c| c.broken && c.phase == AutoFixPhase::Primed);
-        if now >= b.due_ens && !b.manual_hold && !hard && !started && still {
+        let advanced_ready =
+            v.after.required.is_none() || v.info.autofix_ready.contains(&(b.account, b.group));
+        if now >= b.due_ens && !b.manual_hold && !hard && !started && still && advanced_ready {
             return Err(format!("cell {:#x}: due auto-fix not started", b.group.0));
         }
     }

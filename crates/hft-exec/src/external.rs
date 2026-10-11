@@ -27,6 +27,8 @@ impl Exec {
         if c.auto_fix.phase() == AutoFixPhase::WaitHold {
             c.auto_fix.phase = AutoFixPhase::Primed as u8;
             c.auto_fix.due_tsc = Tsc(now.tsc.0.saturating_add(Self::ms(&now, p.broken_auto_fix_ms)));
+            #[cfg(feature = "testkit")]
+            self.audit.arm(c, now, p.broken_auto_fix_ms);
             c.deferred |= D_TIMERS;
         }
         let ag = acct_group(c.account.0, c.group.0);
@@ -363,6 +365,8 @@ impl Exec {
             }
             if c.auto_fix.phase() == AutoFixPhase::Primed {
                 c.auto_fix.due_tsc = Tsc(now.tsc.0.saturating_add(Self::ms(&now, p.broken_auto_fix_ms)));
+                #[cfg(feature = "testkit")]
+                self.audit.arm(c, now, p.broken_auto_fix_ms);
             }
             c.deferred |= D_TIMERS;
             self.mark_pending(cix, true);

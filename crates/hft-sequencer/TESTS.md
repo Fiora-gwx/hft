@@ -5189,6 +5189,16 @@ spec: README.md
 
 ## 验收
 
+### SEQ-373 测试诊断缓冲有界且输出关联缺失显式失败
+
+- 规则:[每条 Input 的处理顺序(`process`)](README.md#每条-input-的处理顺序process)
+- 级别:unit
+- 里程碑:M2
+- 前置:`testkit` feature;新建决策诊断缓冲
+- 步骤:依次写入 512、513 条观察,重置后关联正确与缺失的 journal 序号
+- 期望:512 条有效;第 513 条置失败标志且不扩容;重置后恢复可用,缺失序号置失败标志
+- 实现:`crates/hft-sequencer/src/audit.rs::seq_373_diagnostic_capacity_is_explicit`
+
 本组件在 M2 的完成标准(门槛编号与累计量的唯一定义在 [testing §8](../../docs/testing.md#8-上线门槛);数值上限在 [benchmarks](../../benchmarks/README.md)):
 
 1. **用例**:里程碑 ≤ 当前里程碑的全部用例有同编号的测试函数、场景或基准,`cargo xtask test-trace` 三张清单为空([docs/tests §6](../../docs/tests/README.md#6-与代码的对应))。

@@ -125,6 +125,26 @@ impl Exec {
                 )
             };
             self.set_engine(cix, &tg, reason, origin, v, now);
+            #[cfg(feature = "testkit")]
+            for (i, target) in tg.iter().enumerate().take(n) {
+                if c.legs[i].kind == LEG_CHAIN {
+                    continue;
+                }
+                self.audit.push(crate::audit::ForceFacts {
+                    account: c.account,
+                    group: c.group,
+                    inst: c.legs[i].inst,
+                    position: ln[i].pos,
+                    previous_target: c.target_of(i),
+                    previous_engine: engine_now,
+                    fraction: if flatten {
+                        Rate(1_000_000_000)
+                    } else {
+                        st.force_frac
+                    },
+                    target: *target,
+                });
+            }
         }
         // Ungrouped perps.
         let venues = if flatten { info.venues } else { st.force_venues };
@@ -354,6 +374,17 @@ impl Exec {
             } else {
                 calc::floor_lot(calc::mul_rate(base, keep), legs[ix].lot.0.max(1))
             };
+            #[cfg(feature = "testkit")]
+            self.audit.push(crate::audit::ForceFacts {
+                account: info.id,
+                group: hft_types::GroupId(0),
+                inst: b.2,
+                position: b.3,
+                previous_target: prev.and_then(|j| u.target_of(j)),
+                previous_engine: true,
+                fraction: if flatten { Rate(1_000_000_000) } else { frac },
+                target: tg[ix],
+            });
         }
         if let Some(cm) = self.cells.get_mut(ucix) {
             cm.legs = legs;

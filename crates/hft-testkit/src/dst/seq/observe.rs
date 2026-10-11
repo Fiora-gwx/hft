@@ -1,19 +1,13 @@
-//! Observations of the real engine (`Sut::observe`) and the description of each step
-//! (`StepInfo`). Rows are read from the components' public state (`Oms::raw_slot`/`table_view`/
-//! `link`/`legs`, `Ledger::pos`/`inventory_view`/`cash_view`, the world limits); lists that need a
-//! component debug view the components do not expose yet (risk caps and cells, kill words, the
-//! execution-layer cells, margin tiers, in-flight rows, per-decision facts) stay empty, so the
-//! checkers reading only them pass vacuously for the real engine (crates/hft-testkit README
-//! "已知限制").
-//!
-//! Fill evidence (INV-1): an Input that can carry fills (`OrderEvent`, `ExternalFill`,
-//! `ReconcileReport`, `ControlCmd`, `PositionReport`, `BalanceReport`, a `Timer`) explains the
-//! position changes of the accounts it names; every other Input explains none.
+//! Read-only component state and per-Input evidence for the real sequencer.
 
 use std::collections::BTreeMap;
 
+use super::audit::History;
+use crate::dst::world::WorldSpec;
 use hft_event::{EventKind, ExternalFill, Note, NoteSource};
 use hft_oms::{LinkState as OLink, OrderState};
+use hft_sequencer::Engine;
+
 use hft_strategy_sdk::{HedgeKind as SdkHedge, StrategySet};
 use hft_types::{AccountId, AssetId, GroupId, InstId, VenueId};
 
@@ -57,10 +51,13 @@ fn can_fill(k: EventKind) -> bool {
 }
 
 fn positions<S: StrategySet>(s: &SeqSut<S>) -> BTreeMap<(u8, u8, u32), i128> {
-    let e = s.s().engine();
+    positions_engine(s.s().engine(), &s.world)
+}
+
+fn positions_engine(e: &Engine, w: &WorldSpec) -> BTreeMap<(u8, u8, u32), i128> {
     let mut m = BTreeMap::new();
-    for a in &s.world.accounts {
-        for i in s.world.insts.iter().filter(|i| a.venues.contains(&i.venue)) {
+    for a in &w.accounts {
+        for i in w.insts.iter().filter(|i| a.venues.contains(&i.venue)) {
             let q = i128::from(e.ledger.pos(a.id, i.id).qty.0);
             m.insert((a.id.0, i.venue.0, i.id.0), q);
         }
@@ -80,6 +77,17 @@ impl Before {
             kind: Some(i.kind),
             ext_key,
             pos: positions(s),
+        }
+    }
+    pub fn input(e: &Engine, w: &WorldSpec, i: &hft_sequencer::types::InputSlot) -> Before {
+        let ext_key = i
+            .read::<ExternalFill>()
+            .map_or(0, |x| if x.trade_id != 0 { x.trade_id } else { x.fill_seq });
+        Before {
+            fills: can_fill(i.kind),
+            kind: Some(i.kind),
+            ext_key,
+            pos: positions_engine(e, w),
         }
     }
     pub fn none<S: StrategySet>(s: &SeqSut<S>) -> Before {
@@ -111,9 +119,8 @@ pub fn note_name(code: u32) -> &'static str {
     "?"
 }
 
-fn account_of_group<S: StrategySet>(s: &SeqSut<S>, g: GroupId) -> AccountId {
-    s.world
-        .groups
+fn account_of_group(w: &WorldSpec, g: GroupId) -> AccountId {
+    w.groups
         .iter()
         .find(|x| x.group == g)
         .map_or(AccountId(0), |x| x.account)
@@ -121,13 +128,17 @@ fn account_of_group<S: StrategySet>(s: &SeqSut<S>, g: GroupId) -> AccountId {
 
 /// Fills `out.info` from the step's records and the position changes.
 pub fn step_info<S: StrategySet>(s: &mut SeqSut<S>, before: &Before, out: &mut StepOut) {
+    step_info_engine(s.s().engine(), &s.world, before, out);
+}
+
+pub fn step_info_engine(e: &Engine, w: &WorldSpec, before: &Before, out: &mut StepOut) {
     for r in &out.records {
         if r.kind != EventKind::NOTE {
             continue;
         }
         let Some(n) = r.try_read::<Note>() else { continue };
         let name = note_name(n.code);
-        let account = account_of_group(s, n.group);
+        let account = account_of_group(w, n.group);
         out.info.notes.push(NoteInfo {
             seq: r.seq,
             name,
@@ -140,7 +151,7 @@ pub fn step_info<S: StrategySet>(s: &mut SeqSut<S>, before: &Before, out: &mut S
     if !before.fills {
         return;
     }
-    let after = positions(s);
+    let after = positions_engine(e, w);
     let kind = match before.kind {
         Some(EventKind::ORDER_EVENT) => EvidenceKind::Fill,
         Some(EventKind::EXTERNAL_FILL) => EvidenceKind::External,
@@ -180,8 +191,7 @@ fn slot_state(s: OrderState) -> SlotState {
 }
 
 /// Leg insts of a group in parameter-blob order.
-fn legs_of<S: StrategySet>(s: &SeqSut<S>, g: GroupId) -> [InstId; 2] {
-    let w = &s.world;
+fn legs_of(w: &WorldSpec, g: GroupId) -> [InstId; 2] {
     let Some(x) = w.groups.iter().find(|x| x.group == g) else {
         return [InstId(0); 2];
     };
@@ -195,14 +205,18 @@ fn legs_of<S: StrategySet>(s: &SeqSut<S>, g: GroupId) -> [InstId; 2] {
 
 /// `Sut::observe`.
 pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
-    let seq = s.s();
-    let e = seq.engine();
-    let w = &s.world;
-    let audit = &seq.driver().io.audit.history;
+    fill_engine(
+        s.s().engine(),
+        &s.world,
+        &s.s().driver().io.audit.history,
+        &s.carry,
+        o,
+    );
+}
+
+pub fn fill_engine(e: &Engine, w: &WorldSpec, audit: &History, carry: &Carry, o: &mut Obs) {
     o.hedge_history.extend(audit.retired.values().cloned());
     o.observation_error.clone_from(&audit.error);
-    let hz = u128::from(s.tsc_hz.max(1));
-    let ens = |tsc: u64| i64::try_from(u128::from(tsc) * 1_000_000_000 / hz).unwrap_or(i64::MAX);
     // Ledger.
     for a in &w.accounts {
         for i in w.insts.iter().filter(|i| a.venues.contains(&i.venue)) {
@@ -272,7 +286,7 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
                     // recycle keeps the slot's generation: its newest tomb is the current
                     // generation while Free. After reuse it is one of the preceding generations.
                     let mut g = sl.r#gen;
-                    for _ in 0..=s.setup.oms.tombstone_gens {
+                    for _ in 0..=e.setup.oms.tombstone_gens {
                         if let Some(tb) = e.oms.tomb(*v, a.id, ix, g) {
                             o.tombs.push(TombRow {
                                 venue: *v,
@@ -307,7 +321,7 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
                     immediate: matches!(sl.tif, hft_types::Tif::Ioc | hft_types::Tif::Fok),
                     risk_reducing: sl.oflags & hft_event::OrderFlags::RISK_REDUCING.0 != 0,
                     terminal_ens: if st.is_terminal() {
-                        ens(sl.t_state.0).max(1)
+                        e.now.ens_of(sl.t_state).max(1)
                     } else {
                         0
                     },
@@ -330,10 +344,10 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
         }
     }
     let st = e.oms.stats();
-    o.oms_dup = s.carry.dup_base + st.dup;
-    o.oms_stale_gen = s.carry.stale_gen_base + st.stale_gen;
+    o.oms_dup = carry.dup_base + st.dup;
+    o.oms_stale_gen = carry.stale_gen_base + st.stale_gen;
     // Links.
-    let n_links = s
+    let n_links = e
         .setup
         .oms
         .links_per_account
@@ -355,7 +369,7 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
             SdkHedge::Simultaneous => PlanKind::Simultaneous,
             _ => PlanKind::Other,
         };
-        let hedge_leg = legs_of(s, l.group)
+        let hedge_leg = legs_of(w, l.group)
             .iter()
             .position(|i| *i == plan.inst)
             .map_or(1, |k| k as u8);
@@ -383,7 +397,13 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
         let v = &ls.view;
         // The second leg of the parameter blob is the hedge leg of the takers' links.
         let hedge = 1usize;
-        let first = legs_of(s, g.group)[0];
+        let first = legs_of(w, g.group)[0];
+        let net: i128 = v
+            .leg
+            .iter()
+            .take(usize::from(v.n_legs))
+            .map(|l| i128::from(l.net.0))
+            .sum();
         let mut imm = [0i128; 4];
         for (k, t) in v.leg.iter().enumerate() {
             imm[k] = i128::from(t.inflight_immediate.0);
@@ -399,13 +419,13 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
             group: g.group,
             unknown_slots: u32::from(ls.unknown_slots),
             naked_qty: i128::from(v.naked_qty.0).abs(),
-            naked_buy: 0,
-            naked_sell: 0,
+            naked_buy: (-net).max(0),
+            naked_sell: net.max(0),
             max_pos_qty: g.max_pos_qty,
             residual: v.leg.get(hedge).map_or(0, |t| i128::from(t.residual.0)),
             fee_adjust: audit
                 .fees
-                .get(&(g.account.0, g.group.0, legs_of(s, g.group)[hedge].0))
+                .get(&(g.account.0, g.group.0, legs_of(w, g.group)[hedge].0))
                 .copied()
                 .unwrap_or(0),
             naked_capped: audit.capped(g.account, g.group),
@@ -434,7 +454,8 @@ pub fn fill<S: StrategySet>(s: &SeqSut<S>, o: &mut Obs) {
         max_reduce_notional: w.risk.max_reduce_notional,
         force_step_bp: w.risk.force_step_bp,
         broken_auto_fix_ms: w.risk.broken_auto_fix_ms,
-        reuse_quarantine_ms: i64::from(s.setup.oms.reuse_quarantine_ms),
-        sweep_batch: u32::from(s.setup.oms.sweep_batch),
+        reuse_quarantine_ms: i64::from(e.setup.oms.reuse_quarantine_ms),
+        sweep_batch: u32::from(e.setup.oms.sweep_batch),
     };
+    super::state::fill(e, w, audit, o);
 }

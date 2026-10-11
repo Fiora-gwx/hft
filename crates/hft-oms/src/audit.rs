@@ -1,6 +1,7 @@
 //! Read-only DST diagnostics. Neither identities nor retired rows enter snapshots.
 
-use hft_strategy_sdk::HedgePlan;
+use hft_strategy_sdk::{HedgePlan, LinkRole};
+use hft_types::InstId;
 
 use crate::{LinkEntry, LinkState, Oms};
 
@@ -14,6 +15,16 @@ pub struct LinkAudit {
     pub capped: i128,
 }
 
+/// Raw facts before hedge accounting changes residuals or requested quantities.
+#[derive(Copy, Clone, Debug)]
+pub struct HedgeFacts {
+    pub row: LinkAudit,
+    pub first_inst: InstId,
+    pub first_before: i128,
+    pub first_after: i128,
+    pub residual_before: i128,
+}
+
 #[derive(Debug)]
 pub(crate) struct Audit {
     pub keys: Vec<(u16, u64)>,
@@ -21,6 +32,8 @@ pub(crate) struct Audit {
     pub retired: Vec<LinkAudit>,
     pub overflow: bool,
     pub enabled: bool,
+    seeds: Vec<Option<HedgeFacts>>,
+    requests: Vec<(u32, u64, LinkRole, HedgeFacts, bool)>,
 }
 
 impl Audit {
@@ -31,6 +44,8 @@ impl Audit {
             retired: Vec::with_capacity(capacity),
             overflow: false,
             enabled: false,
+            seeds: vec![None; links],
+            requests: Vec::with_capacity(capacity),
         }
     }
 }
@@ -40,6 +55,8 @@ impl Oms {
     pub fn audit_begin(&mut self) {
         self.audit.enabled = true;
         self.audit.retired.clear();
+        self.audit.requests.clear();
+        self.audit.seeds.fill(None);
         self.audit.overflow = false;
     }
 
@@ -49,6 +66,59 @@ impl Oms {
 
     pub fn audit_overflow(&self) -> bool {
         self.audit.overflow
+    }
+
+    /// Consumes a diagnostic copy only; never changes an order, link or request.
+    pub fn audit_take_hedge(&mut self, r: &crate::HedgeRequest) -> Option<HedgeFacts> {
+        let row = self.audit.requests.iter_mut().find(|(id, seq, role, _, used)| {
+            !*used && *id == r.link_id && *seq == r.trigger_seq && *role == r.role
+        })?;
+        row.4 = true;
+        Some(row.3)
+    }
+
+    pub(crate) fn audit_seed(&mut self, i: usize, first_before: i128, first_after: i128, residual: i128) {
+        let Some(row) = self.audit_link(i as u32 + 1) else {
+            return;
+        };
+        let first_inst = self.first_inst(i);
+        if let Some(s) = self.audit.seeds.get_mut(i) {
+            *s = Some(HedgeFacts {
+                row,
+                first_inst,
+                first_before,
+                first_after,
+                residual_before: residual,
+            });
+        }
+    }
+
+    pub(crate) fn audit_request(&mut self, r: &crate::HedgeRequest) {
+        if !self.audit.enabled {
+            return;
+        }
+        let Some(i) = r.link_id.checked_sub(1).map(|x| x as usize) else {
+            return;
+        };
+        let facts = self.audit.seeds.get_mut(i).and_then(Option::take).or_else(|| {
+            let row = self.audit_link(r.link_id)?;
+            Some(HedgeFacts {
+                row,
+                first_inst: self.first_inst(i),
+                first_before: i128::from(row.link.first_net.0),
+                first_after: i128::from(row.link.first_net.0),
+                residual_before: 0,
+            })
+        });
+        if let Some(f) = facts {
+            if self.audit.requests.len() == self.audit.requests.capacity() {
+                self.audit.overflow = true;
+            } else {
+                self.audit
+                    .requests
+                    .push((r.link_id, r.trigger_seq, r.role, f, false));
+            }
+        }
     }
 
     pub fn audit_links(&self) -> impl Iterator<Item = LinkAudit> + '_ {
