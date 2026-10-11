@@ -143,8 +143,10 @@ impl History {
 
 impl Audit {
     /// Called only after the sequencer has published the completed round.
-    pub fn commit(&mut self) {
-        self.checkpoint.clone_from(&self.history);
+    pub fn commit(&mut self, committed_seq: u64) {
+        if self.history.last_seq <= committed_seq {
+            self.checkpoint.clone_from(&self.history);
+        }
     }
 
     pub fn restart(&mut self, committed_seq: u64) {
@@ -204,6 +206,50 @@ impl Audit {
         }
         self.history.last_seq = e.cur_seq;
     }
+}
+
+#[cfg(test)]
+#[test]
+fn tk_108_observation_commit_boundary() {
+    use crate::dst::world::{ACCT_A, G1, P1};
+    let key = (ACCT_A.0, G1.0, P1.0);
+    let mut a = Audit::default();
+    a.history.last_seq = 10;
+    a.history.fees.insert(key, -7);
+    a.history.retired.insert(
+        (key.0, key.1, key.2, 1, 1),
+        HedgeHistoryRow {
+            account: ACCT_A,
+            group: G1,
+            inst: P1,
+            ratio_num: 1,
+            ratio_den: 1,
+            first_net: 500,
+            hedge_req: 500,
+            capped: 0,
+            links: 3,
+        },
+    );
+    a.commit(12);
+    a.history.last_seq = 13;
+    *a.history.fees.get_mut(&key).unwrap() -= 7;
+    a.history.retired.values_mut().next().unwrap().links += 1;
+    // A fatal round can have complete observations beyond the published journal.
+    a.commit(12);
+    for _ in 0..2 {
+        a.restart(12);
+        assert_eq!(a.history.last_seq, 10);
+        assert_eq!(a.history.fees[&key], -7);
+        assert_eq!(a.history.retired.values().next().unwrap().links, 3);
+        assert!(a.history.error.is_none());
+    }
+    a.history.last_seq = 13;
+    *a.history.fees.get_mut(&key).unwrap() -= 7;
+    a.commit(15);
+    a.restart(15);
+    assert_eq!(a.history.fees[&key], -14);
+    a.restart(9);
+    assert!(a.history.error.is_some());
 }
 
 /// Expected correction comes from the Input and its pre-event attribution, never the observed

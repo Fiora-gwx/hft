@@ -60,6 +60,23 @@ pub struct DstIo<S: StrategySet> {
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
 pub struct RingKey(u8, u8);
 
+/// Last record inside the writer's published boundary, without scanning record bodies.
+pub fn committed_seq(j: &MemJournal) -> u64 {
+    let mut left = j.committed;
+    let mut seq = 0;
+    for s in &j.segments {
+        let n = left.min(s.records.len());
+        if n > 0 {
+            seq = s.records[n - 1].seq;
+        }
+        left -= n;
+        if left == 0 {
+            break;
+        }
+    }
+    seq
+}
+
 impl RingKey {
     pub fn of(r: RingId) -> RingKey {
         match r {

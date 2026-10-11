@@ -1554,7 +1554,7 @@ spec: README.md
 - 级别:integ
 - 里程碑:M2
 - 前置:`E2E` 稳态 `S0`;请求 `Kill{Account(acct-a)}`,`expires_at_ns` = 到达 + 30 s
-- 步骤:
+- 步骤:先有界等待 gateway 实际写入环再推进虚拟时间,不能依赖固定轮询次数;
   1. gateway 写环后暂停 sequencer 30 001 ms(虚拟时间),再恢复
   2. 对这段 journal 运行验证回放
 - 期望:

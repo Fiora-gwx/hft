@@ -427,10 +427,41 @@ fn observation_complete(id: InvId, v: &StepView<'_>) -> Result<(), String> {
                 {
                     return Err(format!("missing decision-time in-flight at seq {}", r.seq));
                 }
+                if v.info
+                    .decision_limits
+                    .iter()
+                    .filter(|(seq, _, _)| *seq == r.seq)
+                    .count()
+                    != 1
+                {
+                    return Err(format!("missing decision-time limits at seq {}", r.seq));
+                }
+                if v.info
+                    .decision_perp_pending
+                    .iter()
+                    .filter(|(seq, _)| *seq == r.seq)
+                    .count()
+                    != 1
+                {
+                    return Err(format!("missing decision-time perp target at seq {}", r.seq));
+                }
             }
         }
         if v.info.force_targets.len() != v.info.force_fractions.len() {
             return Err("missing force-target fraction observation".into());
+        }
+        for &(a, g, i) in &v.info.required_force {
+            if v.info
+                .force_targets
+                .iter()
+                .filter(|f| (f.account, f.group, f.inst) == (a, g, i))
+                .count()
+                != 1
+            {
+                return Err(format!(
+                    "missing or duplicate force-target observation for {a:?}/{g:?}/{i:?}"
+                ));
+            }
         }
     }
     Ok(())
@@ -1648,7 +1679,7 @@ fn check_17(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
             .decision_perp_pending
             .iter()
             .find(|(seq, _)| *seq == i.seq)
-            .map_or(true, |(_, p)| *p);
+            .is_none_or(|(_, p)| *p);
         if pending {
             first_engine.entry((d.account.0, d.group.0)).or_insert(d.inst);
         }

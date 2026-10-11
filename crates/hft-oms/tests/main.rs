@@ -7,6 +7,8 @@
     clippy::too_many_arguments,
     clippy::type_complexity
 )] // allow-list: test code, not a hot path (crate level, as in the former per-file binaries)
+#[cfg(feature = "testkit")]
+mod audit;
 mod cid;
 mod codes;
 mod common;

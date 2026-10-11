@@ -20,7 +20,7 @@ spec: README.md
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
 | 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TOOL-024、TOOL-027–TOOL-029 |
-| 6. DST 框架 | TK-043–TK-070、TK-100–TK-106 |
+| 6. DST 框架 | TK-043–TK-070、TK-100–TK-108 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
 | 8. hft-dst 运行器 | TK-075–TK-088 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
@@ -1415,8 +1415,6 @@ spec: README.md
 - 断言:配置实际进入 refdata 的 VenueCaps,FeeOnly 的资产为 BTC;每行运行 10000 步且全部不变量通过;INV-8 观察包含晚到手续费补差与链接复用前的已完成累计量,不能固定 `fee_adjust = 0`;反例删除费用入账或改错余数时相应检查失败
 - 实现:`crates/hft-testkit/tests/seq_sut.rs::tk_106_real_base_fee_and_retired_links`
 
-## 验收
-
 ### TK-107 真实引擎逐事件观察与反例
 
 - 规则:[6. DST 框架](README.md#6-dst-框架)
@@ -1426,6 +1424,18 @@ spec: README.md
 - 步骤:读取内部 Timer 与 New 决策的逐 Input 观察,对副本分别改错 Kill、有效模式、对冲数量及强制减仓方向,删去模式/保证金/执行单元/在途/决策观察,制造溢出标记和 Input 漏记/重复
 - 期望:正常运行全部不变量通过;实际存在内部 Timer 和成功对冲;所有反例被相应检查拒绝,不修改被测引擎
 - 实现:`crates/hft-testkit/tests/observations.rs::tk_107_real_observations_and_counterexamples`
+
+### TK-108 观察检查点只覆盖已发布 journal
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:unit
+- 里程碑:M2
+- 前置:有基础币费用与退休链接累计量的观察检查点
+- 步骤:追加超出已发布 journal 边界的费用与历史量,尝试提交后连续恢复两次;再发布新边界并恢复;最后传入早于检查点的边界
+- 期望:未提交量回滚,已提交量不漏记也不重复;边界早于保存的检查点时明确报错
+- 实现:`crates/hft-testkit/src/dst/seq/audit.rs::tk_108_observation_commit_boundary`
+
+## 验收
 
 - 本组件完成 = 里程碑已到的全部用例有同编号的实现且通过(`cargo xtask test-trace`)。
 - 框架可信度:TK-053 的每一行都在 2 000 个种子内被找到,TK-051 的每一行都缩到 ≤ 5 项;任一行未达成即框架验收不通过。

@@ -591,6 +591,8 @@ pub struct StepInfo {
     pub force_targets: Vec<ForceTarget>,
     /// Original force fraction (Rate raw), keyed like `force_targets` and in the same order.
     pub force_fractions: Vec<i64>,
+    /// Applicable force-target keys declared from the raw operation facts, before projection.
+    pub required_force: Vec<(AccountId, GroupId, InstId)>,
 }
 
 /// One leg target of a `ForceDeleverage` step (INV-17).

@@ -27,8 +27,13 @@ fn ctl_214_expired_in_ring() {
     // The gateway writes the command; the sequencer is paused for 30 001 ms.
     r.paused = true;
     let t = r.start(Call::Send(req));
-    for _ in 0..10 {
-        r.round();
+    for _ in 0..100_000 {
+        if r.ctl.borrow().recs.len() == 2 {
+            break;
+        }
+        if !r.round() {
+            r.front.as_mut().expect("gateway is down").idle_wait();
+        }
     }
     assert_eq!(
         r.ctl.borrow().recs.len(),

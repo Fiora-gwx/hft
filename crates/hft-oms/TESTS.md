@@ -34,7 +34,7 @@ spec: README.md
 | Unknown 收敛流程 | OMS-032, OMS-065, OMS-066, OMS-068, OMS-070, OMS-073, OMS-089, OMS-130–OMS-154, OMS-400, OMS-402, OMS-420 |
 | 墓碑与迟到成交(C1) | OMS-013, OMS-148, OMS-160–OMS-164, OMS-287, OMS-322, OMS-462 |
 | StaleOrderSweep(`Timer{Oms, Sweep}`,1 s) | OMS-132, OMS-161, OMS-164, OMS-170–OMS-172, OMS-207, OMS-271 |
-| LegLink 与 HedgePlan | OMS-457, OMS-014, OMS-043, OMS-153, OMS-180, OMS-181, OMS-185, OMS-191, OMS-194, OMS-201, OMS-207, OMS-363 |
+| LegLink 与 HedgePlan | OMS-463, OMS-457, OMS-014, OMS-043, OMS-153, OMS-180, OMS-181, OMS-185, OMS-191, OMS-194, OMS-201, OMS-207, OMS-363 |
 | OnFill | OMS-458, OMS-044, OMS-075–OMS-077, OMS-104, OMS-151, OMS-181–OMS-207, OMS-229, OMS-382–OMS-385, OMS-387, OMS-400、TK-106 |
 | Simultaneous | OMS-199, OMS-210–OMS-214, OMS-386 |
 | 对冲定价 | OMS-193, OMS-220–OMS-230, OMS-401, OMS-405 |
@@ -4165,6 +4165,16 @@ spec: README.md
 | OMS-462.4 | Fill | 0.01 | dup +1 |
 | OMS-462.5 | PartialFill | 0.004 | dup +1 |
 | OMS-462.6 | FeeOnly | 0.01 | dup 不变,一条归属 a1@VS/X 的 FeeOut,fee = 1000 |
+
+### OMS-463 同一 Input 内完成并复用链接的诊断量
+
+- 规则:[OnFill](README.md#onfill)
+- 级别:unit
+- 里程碑:M2
+- 前置:`testkit` feature;每账户一个链接;第一腿成交且第二腿在途
+- 步骤:一次诊断事件内完成第二腿并立即发下一张第一腿,复用链接槽
+- 期望:退休记录保存完成后的第一腿净量、第二腿请求与成交累计量,订单 epoch/slot/gen 与创建序号保持旧身份;当前行拥有新身份和零累计量;下一事件清空退休缓冲而保留当前身份
+- 实现:`crates/hft-oms/tests/audit.rs::oms_463_completed_link_reused_in_one_input`
 
 ## 验收
 

@@ -174,7 +174,8 @@ impl<S: StrategySet> SeqSut<S> {
         let mut last = StepOutcome::Idle;
         for _ in 0..MAX_ROUNDS {
             last = self.s_mut().step();
-            self.io().audit.commit();
+            let io = self.io();
+            io.audit.commit(io::committed_seq(&io.j));
             self.record_state();
             match last {
                 StepOutcome::Busy => {}
@@ -533,7 +534,7 @@ impl<S: StrategySet> SeqSut<S> {
         let mut audit = drv.io.audit;
         let mut j = drv.io.j;
         let keep = j.committed;
-        let committed_seq = j.records().take(keep).last().map_or(0, |r| r.seq);
+        let committed_seq = io::committed_seq(&j);
         audit.restart(committed_seq);
         let mut n = 0usize;
         for seg in j.segments.iter_mut() {

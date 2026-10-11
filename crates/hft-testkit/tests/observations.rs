@@ -152,6 +152,15 @@ fn tk_107_real_observations_and_counterexamples() {
         "missing decision-time in-flight accepted"
     );
     let mut bad = e.clone();
+    bad.info.decision_limits.clear();
+    assert!(
+        check(InvId::I15, &bad).is_err(),
+        "missing decision-time limits accepted"
+    );
+    let mut bad = e.clone();
+    bad.info.decision_perp_pending.clear();
+    assert!(check(InvId::I17, &bad).is_err(), "missing perp target accepted");
+    let mut bad = e.clone();
     bad.after.observation_error = Some("diagnostic overflow".into());
     assert!(check(InvId::I11, &bad).is_err(), "overflow accepted");
     let mut out = StepOut {

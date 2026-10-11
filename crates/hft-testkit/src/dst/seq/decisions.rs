@@ -18,6 +18,7 @@ pub fn fill(e: &Engine, records: &[JRec], info: &mut StepInfo) -> Result<(), Str
         return Err("force-target diagnostic buffer overflow".into());
     }
     for f in e.exec.audit_force() {
+        info.required_force.push((f.account, f.group, f.inst));
         info.force_targets.push(crate::dst::obs::ForceTarget {
             account: f.account,
             group: f.group,
