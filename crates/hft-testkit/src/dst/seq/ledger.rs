@@ -22,6 +22,56 @@ pub struct Counts {
     pub unmapped_fills: u64,
 }
 
+/// Complete ledger read API at one event boundary. The bounded snapshot-observation buffer
+/// owns these rows; they are never written to the journal or added to HashTrail.
+#[derive(Clone, Debug)]
+pub struct Readings {
+    positions: Vec<((u8, u32), hft_ledger::InstPos)>,
+    books: Vec<((u8, u8), VenueBook)>,
+}
+
+impl Readings {
+    pub fn of(ledger: &Ledger, rd: &RefData) -> Self {
+        let mut positions = Vec::new();
+        let mut books = Vec::new();
+        for &(account, venue, _) in rd.account_venues() {
+            for &inst in rd.insts_of_venue(venue) {
+                positions.push(((account.0, inst.0), *ledger.pos(account, inst)));
+            }
+            books.push(((account.0, venue.0), ledger.venue_book(account, venue).clone()));
+        }
+        positions.sort_by_key(|r| r.0);
+        books.sort_by_key(|r| r.0);
+        Self { positions, books }
+    }
+
+    fn compare(&self, expected: &Self) -> Result<(), String> {
+        if self.positions != expected.positions {
+            return Err(format!(
+                "positions cold={:?} live={:?}",
+                self.positions, expected.positions
+            ));
+        }
+        if self.books.len() != expected.books.len() {
+            return Err("missing account/venue observations".into());
+        }
+        for ((key, a), (expected_key, e)) in self.books.iter().zip(&expected.books) {
+            if key != expected_key {
+                return Err(format!("account/venue cold={key:?} live={expected_key:?}"));
+            }
+            compare_book(a, e, true).map_err(|e| format!("account/venue={key:?}: {e}"))?;
+        }
+        Ok(())
+    }
+}
+
+impl PartialEq for Readings {
+    fn eq(&self, other: &Self) -> bool {
+        self.compare(other).is_ok()
+    }
+}
+impl Eq for Readings {}
+
 /// Append-only journal observer. Use a new observer after a recovery truncation. A failed
 /// observer stays failed; neither a later snapshot nor a repeated call can erase a mismatch.
 #[derive(Debug, Default)]
@@ -43,6 +93,7 @@ struct State {
 }
 
 type OrderKey = (u8, u8, u16, u32, u32, u32);
+const EVENT_EVIDENCE_CAP: usize = hft_sequencer::audit::CAPACITY;
 
 #[derive(Debug, Default)]
 struct Evidence {
@@ -53,6 +104,20 @@ struct Evidence {
 }
 
 impl Check {
+    /// The persistent checkpoint and the complete live read API have independent references.
+    /// Derived summary timestamps/flags are checked against the live boundary, not a restore
+    /// that has deliberately discarded process-local caches.
+    pub fn check_boundary(&mut self, log: &Log, live: &Readings) -> Result<Counts, String> {
+        let counts = self.check(log)?;
+        let state = self.state.as_ref().ok_or("LED-267: cold state unavailable")?;
+        if let Err(e) = Readings::of(state.cold.ledger(), &state.rd).compare(live) {
+            let e = format!("LED-267 boundary {}: {e}", state.last.seq);
+            self.error = Some(e.clone());
+            return Err(e);
+        }
+        Ok(counts)
+    }
+
     /// Check every newly available snapshot and every unmapped-fill increment through a
     /// complete event boundary. Configuration comes only from matching preceding ConfigBlobs.
     pub fn check(&mut self, log: &Log) -> Result<Counts, String> {
@@ -230,13 +295,14 @@ fn compare(actual: &Ledger, expected: &Ledger, rd: &RefData) -> Result<(), Strin
         compare_book(
             actual.venue_book(account, venue),
             expected.venue_book(account, venue),
+            false,
         )
         .map_err(|e| format!("account={} venue={}: {e}", account.0, venue.0))?;
     }
     Ok(())
 }
 
-fn compare_book(a: &VenueBook, e: &VenueBook) -> Result<(), String> {
+fn compare_book(a: &VenueBook, e: &VenueBook, live: bool) -> Result<(), String> {
     let cash = |b: &VenueBook| {
         let mut rows: Vec<_> = b.cash.iter().copied().collect();
         rows.sort_by_key(|r| r.asset.0);
@@ -258,13 +324,27 @@ fn compare_book(a: &VenueBook, e: &VenueBook) -> Result<(), String> {
     if ai != ei {
         return Err(format!("inventory cold={ai:?} snapshot={ei:?}"));
     }
-    if a.margin != e.margin {
+    // MarginRow's persisted fields. Recomputed fields are compared with the live observation.
+    let persisted = |m: &hft_ledger::MarginState| {
+        (
+            m.has_report,
+            m.rep_margin_balance,
+            m.rep_maint,
+            m.rep_avail,
+            m.rep_ratio,
+            m.rep_ens,
+            m.rep_perp_notional,
+            m.items,
+            m.wallet,
+        )
+    };
+    if persisted(&a.margin) != persisted(&e.margin) || (live && a.margin != e.margin) {
         return Err(format!("margin cold={:?} snapshot={:?}", a.margin, e.margin));
     }
-    if a.summary != e.summary {
+    if live && a.summary != e.summary {
         return Err(format!("summary cold={:?} snapshot={:?}", a.summary, e.summary));
     }
-    if a.vflags != e.vflags {
+    if live && a.vflags != e.vflags {
         return Err(format!("venue flags cold={} snapshot={}", a.vflags, e.vflags));
     }
     Ok(())
@@ -279,6 +359,9 @@ impl Evidence {
             if d.action == OrderAction::New && d.reject == 0 {
                 let key = (d.venue.0, d.account.0, self.epoch, d.slot.0, d.r#gen, d.inst.0);
                 if r.flags.contains(RecordFlags::SHADOW) {
+                    if self.shadow.len() == hft_ledger::SLOT_MAP_CAP && !self.shadow.contains(&key) {
+                        return Err("LED-267: Shadow evidence capacity exceeded".into());
+                    }
                     self.shadow.insert(key);
                 } else {
                     self.shadow.remove(&key);
@@ -291,6 +374,9 @@ impl Evidence {
                 self.epoch = (n.v[0] & 0x7fff) as u16;
             }
             if n.source == NoteSource::Oms && n.code == hft_ledger::notes::code::OMS_FOREIGN_FILL {
+                if self.notes.len() == EVENT_EVIDENCE_CAP {
+                    return Err("LED-267: same-event note capacity exceeded".into());
+                }
                 self.notes.push(n);
             }
         }
@@ -302,6 +388,9 @@ impl Evidence {
                 ));
             }
             let e = r.read::<OrderEvent>().ok_or("LED-267: invalid unmapped fill")?;
+            if self.pending.len() == EVENT_EVIDENCE_CAP {
+                return Err("LED-267: same-event fill capacity exceeded".into());
+            }
             self.pending.push((r.seq, e));
         }
         if r.flags.contains(RecordFlags::EVENT_END) {
@@ -354,7 +443,7 @@ mod tests {
     use hft_event::{Body, NoteLevel, OrderEventKind};
     use hft_ledger::InvEntry;
     use hft_types::{AccountId, AssetId, GroupId, InstId, Px, Qty, Side, SlotId, Tif, VenueId};
-    use zerocopy::{FromZeros, IntoBytes};
+    use zerocopy::FromZeros;
 
     use crate::dst::sut::{BootCtx, Sut};
     use crate::dst::world::WorldSpec;
@@ -467,7 +556,7 @@ mod tests {
             };
             let mut flags = RecordFlags::EVENT_END;
             if shadow {
-                flags = flags | RecordFlags::SHADOW;
+                flags |= RecordFlags::SHADOW;
             }
             evidence.record(&rec(1, flags, &d), 0).unwrap();
             assert_eq!(
@@ -475,6 +564,16 @@ mod tests {
                 pass
             );
         }
+        let mut full = Evidence::default();
+        for _ in 0..EVENT_EVIDENCE_CAP {
+            full.record(&rec(1, RecordFlags(0), &note(&e)), 0).unwrap();
+        }
+        assert!(
+            full.record(&rec(2, RecordFlags(0), &note(&e)), 0)
+                .unwrap_err()
+                .contains("capacity")
+        );
+        assert_eq!(full.notes.len(), EVENT_EVIDENCE_CAP);
     }
 
     #[test]
@@ -489,12 +588,37 @@ mod tests {
         .unwrap();
         let log = Log::from_segments(&sut.sequencer().driver().io.j.segments);
         let mut check = Check::default();
-        let count = check.check(&log).unwrap();
+        let live = Readings::of(&sut.sequencer().engine().ledger, &sut.sequencer().engine().rd);
+        let count = check.check_boundary(&log, &live).unwrap();
         assert!(count.snapshots > 0);
         assert_eq!(
             check.check(&log).unwrap(),
             count,
             "a repeated boundary is not a second comparison"
+        );
+        let mut wrong = live.clone();
+        wrong.positions[0].1.last_fill_ens += 1;
+        assert!(
+            Check::default()
+                .check_boundary(&log, &wrong)
+                .unwrap_err()
+                .contains("positions")
+        );
+        let mut wrong = live.clone();
+        wrong.books[0].1.summary.as_of_ens += 1;
+        assert!(
+            Check::default()
+                .check_boundary(&log, &wrong)
+                .unwrap_err()
+                .contains("summary")
+        );
+        let mut missing_live = live.clone();
+        missing_live.books.pop();
+        assert!(
+            Check::default()
+                .check_boundary(&log, &missing_live)
+                .unwrap_err()
+                .contains("missing")
         );
         let state = check.state.as_ref().unwrap();
         let (account, venue, _) = &state.rd.account_venues()[0];
@@ -513,7 +637,11 @@ mod tests {
                 6 => cash.rep_ens += 1,
                 _ => cash.bflags ^= 1,
             }
-            assert!(compare_book(&actual, &expected).unwrap_err().starts_with("cash"));
+            assert!(
+                compare_book(&actual, &expected, true)
+                    .unwrap_err()
+                    .starts_with("cash")
+            );
         }
         let mut actual = expected.clone();
         assert!(actual.inv.push(InvEntry {
@@ -522,34 +650,34 @@ mod tests {
             qty: Qty(0)
         }));
         assert!(
-            compare_book(&actual, &expected).is_ok(),
+            compare_book(&actual, &expected, true).is_ok(),
             "canonical snapshots omit zero inventory"
         );
         let last = actual.inv.len() - 1;
         actual.inv.get_mut(last).unwrap().qty = Qty(1);
         assert!(
-            compare_book(&actual, &expected)
+            compare_book(&actual, &expected, true)
                 .unwrap_err()
                 .starts_with("inventory")
         );
         let mut actual = expected.clone();
         actual.margin.rep_ens += 1;
         assert!(
-            compare_book(&actual, &expected)
+            compare_book(&actual, &expected, true)
                 .unwrap_err()
                 .starts_with("margin")
         );
         let mut actual = expected.clone();
         actual.summary.as_of_ens += 1;
         assert!(
-            compare_book(&actual, &expected)
+            compare_book(&actual, &expected, true)
                 .unwrap_err()
                 .starts_with("summary")
         );
         let mut actual = expected.clone();
         actual.vflags ^= 1;
         assert!(
-            compare_book(&actual, &expected)
+            compare_book(&actual, &expected, true)
                 .unwrap_err()
                 .starts_with("venue flags")
         );

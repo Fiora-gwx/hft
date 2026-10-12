@@ -5244,6 +5244,7 @@ spec: README.md
 - 前置:`testkit` feature;新建决策、对冲 place 失败及冷恢复诊断缓冲
 - 步骤:各依次写入 512、513 条观察,重置事件观察后关联正确与缺失的 journal 序号
 - 期望:三种缓冲的 512 条有效;第 513 条失败且不扩容;事件重置清空决策/place 观察,决策缺失序号置失败标志;冷恢复记录与溢出错误不随事件重置清除,溢出读取返回错误
+- 关联:完整边界的 `StateView::ledger`/`refdata` 只读性、缺失视图失败及真实冷热逐项核对由 [TK-115](../hft-testkit/TESTS.md#tk-115-每条快照在其完成边界检查-inv-6) 与 [LED-267](../hft-ledger/TESTS.md#led-267-dst-中每个快照点-journalledger-等于引擎-ledger) 验证
 - 实现:`crates/hft-sequencer/src/audit.rs::seq_373_diagnostic_capacity_is_explicit`
 
 ### SEQ-374 人工保持阻止配对目标的尾差下单并逐字节回放

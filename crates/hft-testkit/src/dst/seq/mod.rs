@@ -705,7 +705,10 @@ impl<S: StrategySet> Sut for SeqSut<S> {
             JOURNALS.with(|x| x.borrow_mut().push(j.clone()));
         }
         let log = Log::from_segments(&j.segments);
-        self.cold_ledger.borrow_mut().check(&log)?;
+        self.cold_ledger.borrow_mut().check_boundary(
+            &log,
+            &ledger::Readings::of(&self.s().engine().ledger, &self.s().engine().rd),
+        )?;
         let Some(snap) = log
             .recs
             .iter()
@@ -729,7 +732,13 @@ impl<S: StrategySet> Sut for SeqSut<S> {
                 point.snapshot_seq, point.through_seq
             ));
         }
-        self.cold_ledger.borrow_mut().check(&log)?;
+        let live = point.ledger.as_ref().ok_or_else(|| {
+            format!(
+                "LED-267 snapshot {}: missing live ledger observation",
+                point.snapshot_seq
+            )
+        })?;
+        self.cold_ledger.borrow_mut().check_boundary(&log, live)?;
         snapshots::rebuild::<S>(log, point.snapshot_seq, self.hb)
     }
 

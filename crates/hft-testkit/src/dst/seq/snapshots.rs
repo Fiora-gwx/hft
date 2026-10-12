@@ -53,11 +53,13 @@ impl Observations {
         let mut w = SnapshotWriter::new(64 << 20);
         state.write_sections(&mut w);
         let live = crate::hash::component_hashes_of_sections(w.as_bytes());
+        let ledger = super::ledger::Readings::of(state.ledger(), state.refdata());
         self.points
             .extend(snaps.into_iter().map(|snapshot_seq| SnapshotPoint {
                 snapshot_seq,
                 through_seq,
                 live,
+                ledger: Some(ledger.clone()),
             }));
     }
 
@@ -162,6 +164,7 @@ mod tests {
             snapshot_seq: seq - 1,
             through_seq: seq,
             live: ComponentHashes::default(),
+            ledger: None,
         };
         let mut observations = Observations {
             points: vec![point(10), point(20)],

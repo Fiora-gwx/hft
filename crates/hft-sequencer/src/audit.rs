@@ -30,6 +30,16 @@ impl<S: hft_strategy_sdk::StrategySet> StateView<'_, S> {
     pub fn write_sections(&self, w: &mut hft_strategy_sdk::SnapshotWriter) {
         crate::snapshot::write_sections(self.e, self.inst, w);
     }
+
+    /// Complete ledger views at this boundary, including derived fields absent from snapshots.
+    pub fn ledger(&self) -> &hft_ledger::Ledger {
+        &self.e.ledger
+    }
+
+    /// The immutable reference data that defines the ledger's account/venue/inst universe.
+    pub fn refdata(&self) -> &hft_refdata::RefData {
+        &self.e.rd
+    }
 }
 
 /// Original facts captured after pricing/classification, before risk commit and OMS place.
