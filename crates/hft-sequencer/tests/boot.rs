@@ -67,7 +67,7 @@ fn capacity_ready(h: &mut H) {
     }
     let cells: Vec<_> = h.s.instances().cells().collect();
     for cell in cells {
-        let expected = if h.s.engine().risk.mode.desired(&cell) == Some(hft_types::RunMode::Live) {
+        let expected = if h.s.engine().risk.mode.desired(cell) == Some(hft_types::RunMode::Live) {
             hft_sequencer::codes::status::NO_OP
         } else {
             hft_sequencer::codes::status::APPLIED
