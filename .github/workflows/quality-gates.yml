@@ -218,6 +218,14 @@ jobs:
             target/xtask/dst.json
           if-no-files-found: ignore
           retention-days: 7
+      - name: Upload reconciliation actor migration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reconcile-migration
+          path: target/dst/reconcile-migration.json
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Save nested test builds
         if: steps.ci.outcome == 'success' && steps.nested.outputs.cache-hit != 'true'
         continue-on-error: true

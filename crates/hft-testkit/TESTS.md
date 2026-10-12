@@ -26,7 +26,7 @@ spec: README.md
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
 | 10. SeqRig | PY-106–PY-109、PY-111、PY-112 |
 | 实现说明 | 不适用:见子节 |
-| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-136 |
+| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-137 |
 | 金样运行器 | TK-001、TK-005 |
 | 源文件 | TK-066 |
 | 延迟与资源契约 | TK-092–TK-093 |
@@ -1750,6 +1750,17 @@ spec: README.md
 - 步骤:确认最早成交身份已被热账本 FIFO 淘汰;保留完整历史,执行两个稳定对账轮次
 - 期望:已入账身份由原始 journal 的完整事件边界保留;仅选中两笔漏记原件,不把淘汰的旧成交再算进缺口;I16 和独立冷账本/验证回放通过
 - 实现:`crates/hft-testkit/tests/reconcile_actor.rs::tk_136_receipt_selection_survives_hot_dedup_eviction`
+
+### TK-137 对账 actor 迁移须复现旧金样并保持检查器透明
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)、[HashTrail](README.md#7-状态哈希对比)
+- 级别:integ
+- 里程碑:M2
+- 前置:`fixtures/dst/recon-before.toml` 固定 CI 212 的 50 个种子、套件、每行 2000 步及摘要
+- 步骤:仅用测试适配器重现旧报告与旧输入环;同一配置运行真实已提交对账 actor;再次关闭检查器运行新 actor
+- 期望:旧 actor 重现 50 个旧摘要;首条 journal 差异为虚拟 30 s 的 ReconcileReport,此前逐字节相同;新 actor 开关检查器的全部 journal、网关意图、完整 HashTrail 与最终交易所真值逐字节相同;三个运行均达到原步数且不变量通过
+- 证据:CI 保存 `target/dst/reconcile-migration.json`,列出每行的新旧摘要、首次差异序号/时刻和记录数;当前金样保持原种子、套件、步数及哈希范围
+- 实现:`crates/hft-testkit/tests/reconcile_migration.rs::tk_137_recon_migration_preserves_prefix_and_checker_transparency`
 
 ## 验收
 

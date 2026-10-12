@@ -64,6 +64,7 @@ fixtures/
   dst-seeds/<suite>.txt            DST 失败种子回归集(每行:种子、首次失败日期、Agent Note 或 issue 链接)
   dst/hashtrail.toml               DST 一致性金样:固定种子 → 各自的 `HashTrail`(`cargo xtask dst` 输出,类型归 hft-testkit);改变 DST 轨迹的 PR 在同一提交里重新生成;
                                    CI 在 x86_64 上逐字节核对,标签工作流的 aarch64 一致性集与同一提交的这份金样比较(规则归 development 与 testing §6)
+  dst/recon-before.toml            已提交对账 actor 的迁移参考;TK-137 用旧 actor 重现摘要,新 actor 核对首条差异与检查器透明性;不覆盖当前 HashTrail 金样
 ```
 
 规则:`<case>` 用行为命名(`snapshot_then_gap_triggers_resync`、`price_in_scientific_notation`、`missing_E_field`、`base_asset_fee_on_buy`),不按日期编号。

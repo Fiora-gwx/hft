@@ -341,7 +341,15 @@ impl CommittedRecon {
                         && a == account.id
                         && v == venue
                     {
-                        activity.insert(i.0, (r.seq, r.tsc));
+                        // Funding blocks the lag window, but does not by itself invalidate
+                        // position stability across otherwise quiet adjacent rounds.
+                        let previous = activity.get(&i.0).copied().unwrap_or((0, 0));
+                        let position_seq = if r.kind == EventKind::FUNDING_SETTLE {
+                            previous.0
+                        } else {
+                            r.seq
+                        };
+                        activity.insert(i.0, (position_seq, r.tsc));
                     }
                 }
                 let down = stream_down || recent_down;
@@ -399,8 +407,7 @@ impl CommittedRecon {
                         .into_iter()
                         .flatten()
                         .copied()
-                        .max()
-                        .unwrap_or((0, 0));
+                        .fold((0u64, 0u64), |(seq, tsc), row| (seq.max(row.0), tsc.max(row.1)));
                     let blocked = busy.contains(&inst.id.0) || act.1 > cutoff;
                     let mut force_report = false;
                     if blocked {

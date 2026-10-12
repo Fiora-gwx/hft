@@ -20,6 +20,8 @@ mod planted;
 mod probes;
 #[cfg(feature = "seq")]
 mod reconcile_actor;
+#[cfg(feature = "seq")]
+mod reconcile_migration;
 mod replay_probe;
 mod sdk_mock;
 mod sdk_rd;

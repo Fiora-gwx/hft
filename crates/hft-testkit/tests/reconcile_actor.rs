@@ -96,7 +96,27 @@ impl Session {
             .process(self.now, self.now, &input, &mut StepOut::default());
     }
     fn quiet(&mut self, ms: u64) {
-        self.process(ms, HkActor::clock_status(ms * MS, 1_000_000_000));
+        // Price changes can enqueue margin reports even when external fills have no push.
+        // Deliver those real reports before comparing truth; never clear its skip flags.
+        let mut rows = Vec::new();
+        for venue in &mut self.venues {
+            let mut at = ms * MS;
+            for _ in 0..16 {
+                rows.extend(venue.tick(at));
+                match venue.m.next_due() {
+                    Some(due) => at = at.max(due),
+                    None => break,
+                }
+            }
+            assert!(venue.m.next_due().is_none(), "reports did not quiesce");
+        }
+        rows.sort_by_key(|(due, _)| *due);
+        for (due, row) in rows {
+            assert_ne!(row.kind, EventKind::EXTERNAL_FILL, "gap must stay unreported");
+            self.process(ms.max(due.div_ceil(MS)), row);
+        }
+        let end = ms.max(self.now / MS) + 1;
+        self.process(end, HkActor::clock_status(end * MS, 1_000_000_000));
     }
     fn round(&mut self) -> Result<Vec<InputRec>, String> {
         let truth = self.truth();
@@ -126,7 +146,10 @@ impl Session {
         let mut obs = hft_testkit::dst::obs::Obs::default();
         self.e.observe(&mut obs);
         let truth = self.truth();
-        assert!(truth.iter().all(|t| !t.undelivered && t.excluded.is_empty()));
+        assert!(
+            truth.iter().all(|t| !t.undelivered && t.excluded.is_empty()),
+            "truth comparison would be skipped: {truth:?}"
+        );
         use hft_testkit::dst::invariants::{EndView, InvId, InvState, InvariantSet, check_end};
         assert!(
             obs.slots.iter().all(|s| s.state.is_terminal()),
@@ -381,8 +404,9 @@ fn tk_136_receipt_selection_survives_hot_dedup_eviction() {
     let mut s = Session::new(Side::Buy, 100_000);
     let cap = s.e.sequencer().engine().setup.ledger.ext_dedup_cap;
     let opening = s.history()[0].fill;
+    let start = s.now / MS + 1;
     for n in 0..=cap {
-        let ms = 3_001 + u64::from(n);
+        let ms = start + u64::from(n);
         let fill = s
             .venue()
             .m
