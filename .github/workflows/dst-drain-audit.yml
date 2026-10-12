@@ -49,6 +49,12 @@ jobs:
           mkdir -p crates/hft-testkit/examples "$GITHUB_WORKSPACE/evidence"
           cp ../audit-tool/.github/diagnostics/dst-drain-audit.rs crates/hft-testkit/examples/dst-drain-audit.rs
           git rev-parse HEAD > "$GITHUB_WORKSPACE/evidence/SOURCE_COMMIT"
+          # The ordinary quality job runs this command before its locked build. Preserve both
+          # lockfiles and their exact delta so the comparison records dependency resolution.
+          cp Cargo.lock "$GITHUB_WORKSPACE/evidence/Cargo.lock.original"
+          cargo xtask help > "$GITHUB_WORKSPACE/evidence/xtask.txt"
+          cp Cargo.lock "$GITHUB_WORKSPACE/evidence/Cargo.lock.resolved"
+          git diff -- Cargo.lock > "$GITHUB_WORKSPACE/evidence/lock.patch"
           # Match the workspace feature unification used by the quality job and its lockfile.
           cargo build --locked --profile ci --workspace --all-features --tests --examples --keep-going
           ./target/ci/examples/dst-drain-audit "$GITHUB_WORKSPACE/evidence"
