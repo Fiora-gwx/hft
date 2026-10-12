@@ -137,7 +137,7 @@ fn tk_145_foreign_case_requires_every_execution_and_exact_ledger_boundary() {
                 2 => bad.external_receipts[0].fill.cash_amount.0 += 1,
                 3 => bad.journal.retain(|j| j.kind != EventKind::EXEC_DECISION),
                 4 => bad.journal.retain(|j| {
-                    !j.read::<Note>()
+                    !j.try_read::<Note>()
                         .is_some_and(|n| n.source == NoteSource::Oms && matches!(n.code, 6 | 10))
                 }),
                 5 => bad.truth[0].undelivered = true,

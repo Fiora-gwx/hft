@@ -86,7 +86,7 @@ fn notes(r: &RunRecord, seq: u64) -> Result<Vec<Note>, String> {
         + start;
     Ok(r.journal[start..=end]
         .iter()
-        .filter_map(|j| j.read::<Note>())
+        .filter_map(|j| j.try_read::<Note>())
         .filter(|n| n.source == NoteSource::Oms)
         .collect())
 }
