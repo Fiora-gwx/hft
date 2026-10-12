@@ -264,19 +264,26 @@ fn random_writer(seed: u64) -> ! {
 
 #[test]
 fn jnl_072_random_kill() {
-    if role().is_some() {
-        random_writer(var("JNL_SEED").parse().unwrap());
+    match role().as_deref() {
+        Some("writer") => random_writer(var("JNL_SEED").parse().unwrap()),
+        Some("seed") => {
+            random_kill_seed(var("JNL_SEED").parse().unwrap());
+            return;
+        }
+        Some(other) => panic!("unknown JNL-072 child role {other}"),
+        None => {}
     }
     let seeds: u64 = std::env::var("JNL_072_SEEDS")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(50);
     for seed in 1..=seeds {
-        // Test-owned tmpfs directories are released with their thread. Bound their lifetime to
-        // one seed, including on panic, instead of retaining all 50/1,000 journals until exit.
-        std::thread::spawn(move || random_kill_seed(seed))
-            .join()
-            .unwrap_or_else(|_| panic!("JNL-072 failed at seed {seed}"));
+        // Recovery hands mappings to the retired ring; this crash-only case never persists or
+        // retires them. Unlinking a thread's temporary directory cannot free those mapped pages.
+        // A process per seed bounds both the directories and mappings without changing the
+        // writer's kill point, publishing schedule or recovery assertions.
+        let kid = spawn("jnl_072_random_kill", "seed", &[("JNL_SEED", seed.to_string())]);
+        assert_eq!(kid.wait(), Ok(0), "JNL-072 failed at seed {seed}");
     }
 }
 
