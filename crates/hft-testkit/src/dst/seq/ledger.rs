@@ -132,7 +132,11 @@ impl Check {
     }
 
     fn advance(&mut self, log: &Log) -> Result<Counts, String> {
-        if log.recs.is_empty() || recover_event_end(log) != log.recs.len() {
+        let end = recover_event_end(log);
+        // The current writer places EVENT_END on the last non-Meta record (SEQ-124).
+        // Its event-local measurement tail is published too and cannot change the ledger.
+        // Never accept an unfinished Input/Output tail as a completed decision boundary.
+        if end == 0 || log.recs[end..].iter().any(|r| r.role() != hft_event::Role::Meta) {
             return Err("LED-267: journal does not end at a complete event".into());
         }
         if self.state.is_none() {
@@ -638,6 +642,25 @@ mod tests {
         let live = Readings::of(&sut.sequencer().engine().ledger, &sut.sequencer().engine().rd);
         let count = check.check_boundary(&log, &live).unwrap();
         assert!(count.snapshots > 0);
+        let mut meta_tail = log.clone();
+        let mut meta = log.recs.last().unwrap().clone();
+        meta.seq += 1;
+        meta.kind = EventKind::LATENCY_SAMPLE;
+        meta.flags = RecordFlags(0);
+        meta.body = vec![0; size_of::<hft_event::LatencySample>()];
+        meta_tail.recs.push(meta.clone());
+        Check::default().check_boundary(&meta_tail, &live).unwrap();
+        for kind in [EventKind::BBO, EventKind::ORDER_DECISION] {
+            let mut incomplete = meta_tail.clone();
+            incomplete.recs.last_mut().unwrap().kind = kind;
+            assert!(
+                Check::default()
+                    .check(&incomplete)
+                    .unwrap_err()
+                    .contains("complete event"),
+                "unfinished {kind:?} tail was accepted"
+            );
+        }
         assert_eq!(
             check.check(&log).unwrap(),
             count,

@@ -108,6 +108,8 @@ pub struct PerpCashSettlement {
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum JournalApplyError {
     Identity,
+    /// A BalanceCheck has no matching, initialized report in its own event.
+    BalanceEvidence,
     Unmapped,
     MissingCash,
     CashCoverage,

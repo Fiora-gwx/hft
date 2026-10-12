@@ -341,6 +341,8 @@ pub static NOTE_NAMES: &[NoteName] = notes![
     FundingCorrected: Ledger, P1, [];
     ChainReorg: Ledger, P1, [];
     ChainReorgNaked: Ledger, P0, [];
+    BalanceCheck: Ledger, Info, [f("venue", 0, 8), f("account", 8, 8), f("asset", 64, 64),
+        f("free", 128, 64), f("locked", 192, 64), f("ex_ts_ns", 256, 64)];
     ExecBroken: Exec, P0, [];
     ExecExternalDefault: Exec, None, [];
     ExecAutoFixFailed: Exec, P0, [];

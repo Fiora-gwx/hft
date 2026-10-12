@@ -209,7 +209,7 @@ DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xt
 
 真实 DST 引导块保存完整 ECF1 与 RKP1 配置。启动先往返解码同一配置,INV-6 从选中快照的 journal 配置独立装配,不读 WorldSpec 或其他运行的风控参数。各世界可在同一线程交错运行;将日志交给新线程也能重建相同状态。配置内容变化会改变快照节 9 的引用与总 HashTrail,一致性集须由 CI 重生成后审查,不屏蔽这些字段(TK-112)。
 
-真实引擎或 journal 已含快照时,INV-6 不能因重建返回空值跳过。配置或恢复失败、回放未完成、Output 差异或未消费输出均使检查失败;错误保留阶段、快照序号及首条差异的序号/字节偏移,运行中的定期检查与结束检查使用同一规则(TK-113)。
+真实引擎或 journal 已含快照时,INV-6 不能因重建返回空值跳过。配置或恢复失败、回放未完成、Output 差异或未消费输出均使检查失败;错误保留阶段、快照序号及首条差异的序号/字节偏移,运行中的定期检查与结束检查使用同一规则(TK-113)。当前写者允许最后一条非 Meta 的 EVENT_END 后有同事件测量 Meta;冷账本可消费该尾部,未完成的 Input/Output 尾部仍失败。
 
 每条 `StateSnapshot` 在所属 Input 完成或启动完成时保存 `SnapshotPoint{snapshot_seq, through_seq, live}`。`live` 从运行中的组件独立序列化,不抄 journal 快照体;检查器仅取截至该 EVENT_END 的 journal 前缀恢复,不能读后续 Input。同一世界步中的关键帧、按需快照、滚段、Drain 与连续恢复逐条检查,启动时也检查;`rebuild_every = 0` 只关闭定期采样。漏记、重复、越过后续 Input、恢复失败和任一组件差异均失败;`RunRecord.snapshot_checks` 记录成功检查数(TK-115)。每步快照观察上限 4096,溢出失败;重启只保留已提交边界内的观察,连续恢复不得重复交付(TK-116)。
 

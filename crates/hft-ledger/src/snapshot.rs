@@ -162,6 +162,21 @@ impl Ledger {
         self.recompute_next_stale();
     }
 
+    /// Adopt only the process-local clock/flag lifetime from an independent replay of our
+    /// latest checkpoint. All monetary values are recomputed from this ledger's own facts.
+    pub(crate) fn recover_read_views(&mut self, replay: &Ledger) {
+        self.now = replay.now;
+        self.run_start = replay.run_start;
+        for (book, source) in self.books.iter_mut().zip(&replay.books) {
+            book.vflags = (book.vflags & !vflags::DRIFT) | (source.vflags & vflags::DRIFT);
+        }
+        self.restore_marks(&[]);
+        self.recompute_next_stale();
+        for (book, source) in self.books.iter_mut().zip(&replay.books) {
+            book.summary.as_of_ens = source.summary.as_of_ens;
+        }
+    }
+
     /// Writes sections 1, 13 and 22 (in this order).
     pub fn snapshot(&self, w: &mut SnapshotWriter) {
         // Section 1.
