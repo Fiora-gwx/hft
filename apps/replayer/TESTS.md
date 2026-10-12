@@ -2296,7 +2296,7 @@ spec: README.md
 - 级别:replay
 - 里程碑:M2
 - 输入:CI 的实际 sequencer 与离线 journal 写入器生成正/零成交 ID 两份日志,原件入账后普通去重队列绕回,随后各交付防御与 StaleGen 累计重复及重复原件
-- 步骤:调用实际 replayer CLI 完整回放,并从入账前、入账后及普通键淘汰后的关键帧起步;比较调用前后的文件字节
+- 步骤:生成四个 SnapshotNow 按需快照,各点之前原始成交数依次为 0/1/4/6、累计回报数为 0/0/0/2;调用实际 replayer CLI 完整回放,并从入账前、入账后及普通键淘汰后的前三个快照起步;比较调用前后的文件字节
 - 期望:所有窗口 verify=pass、无分歧且至少核对起止两个快照;源文件不变;生成时钱包严格等于全部原始现金减费用
 - 实现:`apps/replayer/tests/receipt.rs::rpl_282_original_receipt_files_verify_full_and_snapshot_windows`
 

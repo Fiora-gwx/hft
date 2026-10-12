@@ -1,4 +1,5 @@
 use hft_event::{EventKind, OrderEvent, SnapshotHdr};
+use hft_sequencer::snapshot::PURPOSE_ON_DEMAND;
 use serde_json::Value;
 
 use super::{args, fixture, run};
@@ -25,11 +26,26 @@ fn rpl_282_original_receipt_files_verify_full_and_snapshot_windows() {
             .recs
             .iter()
             .filter(|r| {
-                r.kind == EventKind::STATE_SNAPSHOT && r.read::<SnapshotHdr>().is_some_and(|h| h.purpose == 2)
+                r.kind == EventKind::STATE_SNAPSHOT
+                    && r.read::<SnapshotHdr>()
+                        .is_some_and(|h| h.purpose == PURPOSE_ON_DEMAND)
             })
             .map(|r| r.seq)
             .collect();
-        assert!(checkpoints.len() >= 4);
+        assert_eq!(checkpoints.len(), 4, "one snapshot per SnapshotNow command");
+        for (seq, (raw, orders)) in checkpoints.iter().zip([(0, 0), (1, 0), (4, 0), (6, 2)]) {
+            let count = |kind| log.recs.iter().filter(|r| r.seq < *seq && r.kind == kind).count();
+            assert_eq!(
+                count(EventKind::EXTERNAL_FILL),
+                raw,
+                "raw receipts before {seq:?}"
+            );
+            assert_eq!(
+                count(EventKind::ORDER_EVENT),
+                orders,
+                "cumulative duplicates before {seq:?}"
+            );
+        }
         // The last frame is the endpoint. All earlier windows must replay the duplicates.
         for from in
             std::iter::once(None).chain(checkpoints[..checkpoints.len() - 1].iter().copied().map(Some))
