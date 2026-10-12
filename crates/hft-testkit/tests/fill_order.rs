@@ -115,6 +115,13 @@ fn tk_123_raw_matching_order_survives_report_jitter() {
         .find(|s| s.name == "modes")
         .unwrap();
     let mut c = suite.config(0x7dfe_e420_7b81_bfbd);
+    // Keep the old-record counterexample explicit even when the standard world supplies cash.
+    c.world
+        .venues
+        .iter_mut()
+        .find(|v| v.id == hft_testkit::dst::world::VP)
+        .unwrap()
+        .perp_cash = false;
     c.plan = Some(c.fault_plan());
     c.steps = 316;
     c.rerun = RerunPolicy::Never;
@@ -307,7 +314,7 @@ fn tk_127_explicit_cash_closes_the_original_wallet_difference() {
     let mut c = suite.config(0x7dfe_e420_7b81_bfbd);
     // Freeze the original full-length plan before shortening the diagnostic prefix.
     c.plan = Some(c.fault_plan());
-    c.world.venues.iter_mut().find(|v| v.id == VP).unwrap().perp_cash = true;
+    assert!(c.world.venues.iter().find(|v| v.id == VP).unwrap().perp_cash);
     for all_sim in [false, true] {
         let rd = build::load_refdata(&build::refdata_blob(&c.world, all_sim).unwrap()).unwrap();
         assert!(rd.caps(VP).flags.contains(CapFlags::PERP_CASH));
