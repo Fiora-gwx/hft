@@ -118,6 +118,18 @@ const _: () = assert!(core::mem::size_of::<ClockCalRow>() == 40);
 const _: () = assert!(core::mem::offset_of!(ClockCalRow, tsc_hz_milli) == 24);
 const _: () = assert!(core::mem::offset_of!(ClockCalRow, from_seq) == 32);
 
+impl ClockCalRow {
+    pub(crate) fn recorded(c: ClockStatus, from_seq: u64) -> Self {
+        Self {
+            tsc: c.tsc,
+            realtime_ns: c.realtime_ns,
+            phc_ns: c.phc_ns,
+            tsc_hz_milli: c.tsc_hz_milli,
+            from_seq,
+        }
+    }
+}
+
 /// Size limit of one strategy's fast-part snapshot.
 pub const STRATEGY_SNAPSHOT_MAX: usize = 256 * 1024;
 
@@ -535,18 +547,11 @@ pub(crate) fn boot_block<D: Driver<S>, S: StrategySet>(
         tsc_hz_milli: info.tsc_hz_milli,
         configs: &refs,
     };
-    let mut snap = {
-        let t = drv.measure();
-        build_snapshot(
-            e,
-            inst,
-            purpose,
-            if purpose == PURPOSE_RECOVERY {
-                e.rec.recovery_now
-            } else {
-                t
-            },
-        )
+    let measured = drv.measure();
+    let snapshot_tsc = if purpose == PURPOSE_RECOVERY {
+        e.rec.recovery_now
+    } else {
+        measured
     };
     let host = drv.host_profile();
     let clk = drv.clock_status();
@@ -579,8 +584,11 @@ pub(crate) fn boot_block<D: Driver<S>, S: StrategySet>(
         };
         b.append_var(EventKind::HOST_PROFILE, tsc, &[host.as_bytes()])
             .map_err(|_| BootBlockErr::Append)?;
-        b.append_var(EventKind::CLOCK_STATUS, tsc, &[clk.as_bytes()])
+        let clock_seq = b
+            .append_var(EventKind::CLOCK_STATUS, tsc, &[clk.as_bytes()])
             .map_err(|_| BootBlockErr::Append)?;
+        e.rec.clock_cal = ClockCalRow::recorded(clk, clock_seq.0);
+        let mut snap = build_snapshot(e, inst, purpose, snapshot_tsc);
         if reason == RollReason::RecoverFromSnapshot {
             let (from, to) = e.rec.skipped_range.ok_or(BootBlockErr::Append)?;
             let n = hft_event::Note {

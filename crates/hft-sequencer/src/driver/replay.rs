@@ -6,6 +6,7 @@ use hft_event::{BlobHdr, BlobKind, BlobRef, ClockStatus, EventKind, HostProfile,
 use hft_journal::{AppendErr, RollAt, RollErr, RollReason};
 use hft_strategy_sdk::StrategySet;
 use hft_types::{AccountId, KillBits, Seq, Tsc, VenueId};
+use zerocopy::FromBytes;
 
 use super::{Driver, DriverMode, DriverView, ParseCx, RollInfo};
 use crate::journal::{BootSink, JournalSink, MemRecord, MemSegment, NONCMP_FLAGS, mask_measure, role_of};
@@ -253,6 +254,20 @@ impl ReplaySink {
             }
         }
     }
+    // Retain a Meta source seq without comparing its body or crossing a business record.
+    fn meta_seq(&mut self, kind: EventKind) -> u64 {
+        for i in self.pos..self.record_end.min(self.log.recs.len()) {
+            let r = &self.log.recs[i];
+            if r.role() != Role::Meta {
+                break;
+            }
+            if r.kind == kind {
+                self.pos = i + 1;
+                return r.seq;
+            }
+        }
+        0
+    }
     fn compare(&mut self, kind: EventKind, flags: RecordFlags, pieces: &[&[u8]], boot: bool) -> u64 {
         self.skip_meta();
         let Some(r) = self.log.recs.get(self.pos).filter(|_| self.pos < self.record_end) else {
@@ -295,12 +310,14 @@ impl ReplaySink {
             self.scratch_b.extend_from_slice(&r.body);
             mask_measure(kind, &mut self.scratch_a);
             mask_measure(r.kind, &mut self.scratch_b);
-            let snapshots_valid =
-                if self.mode == ReplayMode::Verify && kind == EventKind::STATE_SNAPSHOT && r.kind == kind {
-                    normalize_snapshot(&mut self.scratch_a) & normalize_snapshot(&mut self.scratch_b)
-                } else {
-                    true
-                };
+            let mut snapshots_valid = true;
+            if kind == EventKind::STATE_SNAPSHOT && r.kind == kind {
+                if self.mode == ReplayMode::Verify {
+                    snapshots_valid =
+                        normalize_snapshot(&mut self.scratch_a) & normalize_snapshot(&mut self.scratch_b);
+                }
+                snapshots_valid &= mask_clock_cal(&mut self.scratch_a) & mask_clock_cal(&mut self.scratch_b);
+            }
             let same = snapshots_valid
                 && r.kind == kind
                 && (r.flags.0 & !NONCMP_FLAGS) == (flags.0 & !NONCMP_FLAGS)
@@ -355,6 +372,36 @@ fn normalize_snapshot(body: &mut [u8]) -> bool {
     valid
 }
 
+// Section 16 is the existing cold-calibration exclusion. Keep its framing comparable;
+// malformed lengths, duplicate rows and every byte outside that one payload still fail.
+fn mask_clock_cal(body: &mut [u8]) -> bool {
+    let mut off = core::mem::size_of::<hft_event::SnapshotHdr>();
+    let mut seen = false;
+    while off < body.len() {
+        let Some(bytes) = body.get(off..off + 16) else {
+            return false;
+        };
+        let Ok(h) = hft_event::SectionHdr::read_from_bytes(bytes) else {
+            return false;
+        };
+        let Some(end) = (off + 16).checked_add(h.len as usize) else {
+            return false;
+        };
+        let Some(payload) = body.get_mut(off + 16..end) else {
+            return false;
+        };
+        if h.section == crate::snapshot::SECTION_CLOCK_CAL {
+            if seen || h.version != crate::snapshot::CLOCK_CAL_VERSION || h.count != 1 || h.len != 40 {
+                return false;
+            }
+            seen = true;
+            payload.fill(0);
+        }
+        off = end;
+    }
+    seen
+}
+
 /// Boot-block writer of a replay: compared with the logged boot block (Meta skipped).
 #[derive(Debug)]
 pub struct ReplayBoot<'a> {
@@ -371,7 +418,7 @@ impl BootSink for ReplayBoot<'_> {
             probe.extend_from_slice(p);
         }
         if role_of(kind, &probe) == Role::Meta {
-            return Ok(Seq(0));
+            return Ok(Seq(self.s.meta_seq(kind)));
         }
         Ok(Seq(self.s.compare(kind, RecordFlags(0), pieces, true)))
     }
@@ -415,7 +462,7 @@ impl JournalSink for ReplaySink {
                 Ok(Seq(seq))
             }
             Role::Output => Ok(Seq(self.compare(kind, flags, pieces, false))),
-            _ => Ok(Seq(0)),
+            _ => Ok(Seq(self.meta_seq(kind))),
         }
     }
     fn end_event(&mut self) {}
@@ -442,9 +489,8 @@ impl JournalSink for ReplaySink {
         if !found || p + 1 >= self.record_end {
             return Err(RollErr::NextNotReady);
         }
-        // Skip End and the new segment's Begin/HostProfile/ClockStatus (all Meta).
+        // Boot appends consume the new segment's Meta sources without comparing them.
         self.pos = p + 1;
-        self.skip_meta();
         Ok(ReplayBoot { s: self })
     }
     fn needs_roll(&self, _now: Tsc) -> Option<(RollReason, RollAt)> {
@@ -506,13 +552,13 @@ impl ReplayDriver {
         self.run_tsc = t;
     }
     pub fn finished(&self) -> bool {
-        self.next_input(self.cursor.max(self.sink.pos)).is_none()
+        self.next_record(self.cursor.max(self.sink.pos)).is_none()
     }
-    fn next_input(&self, from: usize) -> Option<usize> {
+    fn next_record(&self, from: usize) -> Option<usize> {
         let mut i = from;
         while i < self.end {
             let r = self.sink.log.recs.get(i)?;
-            if r.role() == Role::Input {
+            if r.role() == Role::Input || (self.hand_meta && r.role() == Role::Meta) {
                 return Some(i);
             }
             i += 1;
@@ -568,7 +614,7 @@ impl<S: StrategySet> Driver<S> for ReplayDriver {
         }
         // Align the sink with the next Input (Outputs between are compared by the sequencer's
         // own appends; anything left unaligned is a mismatch).
-        let Some(i) = self.next_input(self.cursor.max(self.sink.pos)) else {
+        let Some(i) = self.next_record(self.cursor.max(self.sink.pos)) else {
             return false;
         };
         let Some(r) = self.sink.log.recs.get(i) else {
@@ -581,6 +627,7 @@ impl<S: StrategySet> Driver<S> for ReplayDriver {
             &r.body,
         );
         out.seq = r.seq;
+        let is_input = r.role() == Role::Input;
         // Unconsumed Outputs of the previous event are mismatches.
         let mut p = self.sink.pos;
         while p < i {
@@ -592,8 +639,12 @@ impl<S: StrategySet> Driver<S> for ReplayDriver {
         }
         self.sink.pos = i;
         self.cursor = i + 1;
-        self.taken += 1;
-        self.handed += 1;
+        // Calibration Meta does not spend the Input budget or change replayed-input counts.
+        // Consume it in journal order before this round's next Input (including at EOF).
+        if is_input {
+            self.taken += 1;
+            self.handed += 1;
+        }
         true
     }
     fn run_tsc(&mut self) -> Option<Tsc> {
@@ -652,6 +703,19 @@ impl<S: StrategySet> Driver<S> for ReplayDriver {
         crate::snapshot::host_profile(0)
     }
     fn clock_status(&self) -> ClockStatus {
+        let si = (self.sink.log.seg_of(self.sink.pos) + 1).min(self.sink.log.segs.len().saturating_sub(1));
+        if let Some(&start) = self.sink.log.seg_start.get(si) {
+            for r in self.sink.log.recs.iter().take(self.end).skip(start) {
+                if r.role() != Role::Meta {
+                    break;
+                }
+                if r.kind == EventKind::CLOCK_STATUS
+                    && let Some(c) = r.read::<ClockStatus>()
+                {
+                    return c;
+                }
+            }
+        }
         crate::snapshot::clock_status(hft_rt::CalibPair::default(), 0)
     }
     fn start_log(&mut self) -> Option<Log> {

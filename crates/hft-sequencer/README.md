@@ -294,7 +294,9 @@ pub trait CheckpointStore {
 | Output | `OrderDecision`、`ExecDecision`、`FundingSettle{synth = 1}`、`CmdResult`、`StateSnapshot`、引导块中的 `ConfigBlob{boot}`/`L2Snapshot{Keyframe}`、`Note`(source = Sequencer/Strategy/Risk/Oms/Ledger/Exec);optional:`SwapDecision` | 由 Input 确定地产生;验证回放逐字节比对 |
 | Meta | `SegmentRoll`、`LatencySample`、`Note{Measure}`、`ClockStatus`、`HostProfile`、经输入环到达的 `Note{Venue/CtlAudit/Housekeeping/Advisor/Boot}`、`Note{InputQuarantined}` | 占 seq,**不影响状态、不参与比对**(引导块比对同样屏蔽 Meta);`OrderDecision.decided_tsc`、`SnapshotHdr` 的 `snap_tsc`/`boot_id`/`snap_utc_ns` 等测量字段按 hft-event `MEASURE_MASK` 屏蔽 |
 
-分类表是 hft-event `KindInfo.role` 与 `MEASURE_MASK`。`SegmentRoll` 是结构记录(Meta),滚动决定本身是 Input `Timer{Sys, Roll}`。`ClockStatus` 是 Meta:它对状态的影响只经由实盘驱动写出的 `Timer{ClockOk|ClockBad}` Input 发生。
+分类表是 hft-event `KindInfo.role` 与 `MEASURE_MASK`。`SegmentRoll` 是结构记录(Meta),滚动决定本身是 Input `Timer{Sys, Roll}`。`ClockStatus` 是 Meta:它对决策状态的影响只经由实盘驱动写出的 `Timer{ClockOk|ClockBad}` Input 发生。记录成功后仅更新节 16 的冷读者校准行及 `from_seq`,不更新 `Now`、业务序号、Input 计数或策略回调。引导块在写出本段 ClockStatus 后采集快照;滚段未就绪时不改变校准行。
+
+恢复与验证按日志顺序保留校准来源,不把 Meta 计入每轮 Input 配额或重放 Input 数;所选快照之后、首条 Input 之前的已消费前缀同样保留来源,未提交尾部按 `EVENT_END` 丢弃。回放比对仅屏蔽节 16 的 40 B 行体,节头仍须合法且相同;其余快照字节和哈希声明照常检查。镜像可跳过 Meta,不影响业务状态。
 
 ### 主循环(`step`)
 
@@ -868,6 +870,7 @@ advisor 的定时投递、重启注记去重、落后量、两种环容量的独
 
 ## 延伸阅读
 
+- [快照校准元数据与回放比对](../../.agents/notes/implemented/bug-fix/2026-10-12-snapshot-clock-calibration.md)
 - [策略定时器身份持久化](../../.agents/notes/implemented/bug-fix/2026-10-12-strategy-timer-identity.md)
 - [策略定时器的共享配额与取消身份](../../.agents/notes/implemented/bug-fix/2026-10-12-strategy-timer-admission.md)
 

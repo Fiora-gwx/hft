@@ -473,6 +473,11 @@ pub(crate) fn restore_at<S: StrategySet>(
     {
         if r.role() == Role::Output {
             e.out_hash.add(r.kind, r.flags, &[&r.body]);
+        } else if r.kind == EventKind::CLOCK_STATUS
+            && let Some(c) = r.read::<hft_event::ClockStatus>()
+        {
+            // This prefix is consumed by restore before the first handed Input.
+            e.rec.clock_cal = ClockCalRow::recorded(c, r.seq);
         }
     }
     // Capacity checks in CapKind order.

@@ -10,6 +10,238 @@ use zerocopy::{FromZeros, IntoBytes};
 
 use crate::common::*;
 
+fn calibration_run(calibration: i64, measure: u64) -> (H, MemRecord, u64) {
+    reset_script();
+    add_hook(|hx, ev, ctx| {
+        if matches!(ev, hft_strategy_sdk::EventRef::Bbo { inst, .. } if *inst == A1)
+            && hx.s.strategy == S1
+            && hx.v.bbo(A1).ask_px == px("50007")
+        {
+            let _ = ctx.place(open_buy(hx, A1));
+        }
+    });
+    let mut h = b0().boot_self_contained();
+    h.steady();
+    let before = h.keyframe().seq;
+    let mut c = hft_event::ClockStatus::new_zeroed();
+    c.tsc = Tsc(123_456);
+    c.realtime_ns = calibration;
+    c.phc_ns = calibration + 321;
+    c.tsc_hz_milli = 999_999_999_000;
+    c.state = 2; // Unsynced Meta still cannot affect clock_ok or the decision clock.
+    h.push(RingId::Hk, &c);
+    h.run();
+    let input_seq = h.s.engine().cur_seq;
+    h.io().measure = Some(measure);
+    h.quote(A1, "50000", "50007");
+    h.run();
+    c.tsc = Tsc(c.tsc.0 + 1);
+    h.push(RingId::Hk, &c);
+    h.run();
+    let clock_seq = h.j().records().last().unwrap().seq;
+    h.cmd(AC1, &ControlCmd::SnapshotNow);
+    h.run();
+    h.run();
+    let snapshot = h.snapshots().pop().unwrap();
+    let cal = snap(&snapshot).1.clock_cal;
+    assert_eq!(cal.from_seq, clock_seq);
+    assert!(cal.from_seq > input_seq);
+    assert_eq!(cal.tsc, c.tsc);
+    assert_eq!(cal.realtime_ns, c.realtime_ns);
+    assert_eq!(cal.phc_ns, c.phc_ns);
+    assert_eq!(cal.tsc_hz_milli, c.tsc_hz_milli);
+    assert_eq!(h.mode(S1, AC1, G1), hft_risk::mode::Effective::Live);
+    assert_intervals(h.j());
+    (h, snapshot, before)
+}
+
+fn check_calibration_replay(h: &H, from: Option<u64>) {
+    assert!(h.verify_from(from).is_empty());
+    #[cfg(feature = "replay-io")]
+    {
+        use hft_sequencer::driver::verify::{VerifyOptions, verify};
+        let result = verify::<TestSet>(
+            Log::from_segments(&h.j().segments),
+            VerifyOptions {
+                from_seq: from,
+                ..VerifyOptions::default()
+            },
+            hb(),
+        )
+        .unwrap();
+        assert!(result.inputs > 0);
+        assert!(result.sink.mismatches.is_empty(), "{:?}", result.sink.mismatches);
+    }
+}
+
+#[test]
+fn seq_249_hash_exclusions() {
+    let (base, a, before) = calibration_run(17, T0 + 111);
+    let (other_cal, b, _) = calibration_run(8_765_432, T0 + 111);
+    // .1 Same Inputs, different real hk records and persisted calibration payloads.
+    let inputs = |h: &H| {
+        h.recs()
+            .into_iter()
+            .filter(|r| r.role() == Role::Input)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(inputs(&base), inputs(&other_cal));
+    assert_ne!(snap(&a).1.clock_cal, snap(&b).1.clock_cal);
+    assert_eq!(snap(&a).0.state_hash, snap(&b).0.state_hash);
+    assert_eq!(snap(&a).0.out_hash, snap(&b).0.out_hash);
+    for h in [&base, &other_cal] {
+        for from in [None, Some(before)] {
+            check_calibration_replay(h, from);
+        }
+    }
+    // Observe the actual replay state after both prefix and runtime Meta. A Meta-only,
+    // uncommitted tail is excluded by the existing EVENT_END recovery boundary.
+    let mut log = Log::from_segments(&base.j().segments);
+    let mut last = log
+        .recs
+        .iter()
+        .rev()
+        .find(|r| r.kind == EventKind::CLOCK_STATUS)
+        .unwrap()
+        .clone();
+    last.seq = log.recs.last().unwrap().seq + 1;
+    log.recs.push(last);
+    let drv = ReplayDriver::new(ReplayMode::Verify, log, 0, 1);
+    let mut replay = Sequencer::<ReplayDriver, TestSet>::boot(
+        BootSource::Journal(plan(SnapshotSel::AtSeq(before), true, 0, 0)),
+        &base.setup,
+        drv,
+        hb(),
+    )
+    .unwrap();
+    for _ in 0..1_000 {
+        if replay.driver().finished() {
+            break;
+        }
+        assert!(!matches!(replay.step(), StepOutcome::Fatal(_)));
+    }
+    assert!(replay.driver().finished());
+    let mut w = hft_strategy_sdk::SnapshotWriter::new(1 << 20);
+    replay.write_sections(&mut w);
+    assert_eq!(
+        hft_sequencer::snapshot::read_seq_sections(w.as_bytes())
+            .unwrap()
+            .clock_cal
+            .from_seq,
+        snap(&a).1.clock_cal.from_seq
+    );
+    assert!(replay.driver().mismatches().is_empty());
+
+    // .2 Only the driver's measurement clock changes the actual decision stamp.
+    let (measured, c, _) = calibration_run(17, T0 + 999);
+    assert_eq!(inputs(&base), inputs(&measured));
+    let da = decisions(&base.recs());
+    let dc = decisions(&measured.recs());
+    assert_eq!(da.len(), 1);
+    assert_eq!(dc.len(), 1);
+    assert_eq!(da[0].1.reject, 0);
+    assert_eq!(dc[0].1.reject, 0);
+    assert_eq!(da[0].1.decided_tsc, Tsc(T0 + 111));
+    assert_eq!(dc[0].1.decided_tsc, Tsc(T0 + 999));
+    assert_ne!(snap(&a).0.snap_tsc, snap(&c).0.snap_tsc);
+    assert_eq!(snap(&a).0.state_hash, snap(&c).0.state_hash);
+    assert_eq!(snap(&a).0.out_hash, snap(&c).0.out_hash);
+    check_calibration_replay(&measured, None);
+
+    // .3 Host header stamps have no decision authority. boot_id is supplied as an offline
+    // alternate-host stamp because the in-memory driver does not assign process UUIDs.
+    let mut host = base.j().clone();
+    for r in host.segments.iter_mut().flat_map(|s| &mut s.records) {
+        if r.kind == EventKind::STATE_SNAPSHOT {
+            let mut hdr = r.read::<hft_event::SnapshotHdr>().unwrap();
+            let original = hdr;
+            hdr.snap_tsc = 555;
+            hdr.boot_id = [0xA5; 16];
+            hdr.snap_utc_ns = 8_000_000;
+            r.body[..96].copy_from_slice(hdr.as_bytes());
+            assert_eq!(hdr.state_hash, original.state_hash);
+            assert_eq!(hdr.out_hash, original.out_hash);
+        }
+    }
+    assert!(verify_journal::<TestSet>(&host, &base.setup, None).is_empty());
+    assert!(verify_journal::<TestSet>(&host, &base.setup, Some(before)).is_empty());
+
+    // .4 A changed business field affects the independently calculated output interval,
+    // even if the corrupt log also carries its own matching out_hash declaration.
+    let mut qty = base.j().clone();
+    let mut hash = Xxh3::new();
+    let mut changed = 0;
+    for r in qty.segments.iter_mut().flat_map(|s| &mut s.records) {
+        if r.kind == EventKind::ORDER_DECISION && changed == 0 {
+            let mut d = r.read::<hft_event::OrderDecision>().unwrap();
+            d.qty.0 += q("0.001").0;
+            r.body.copy_from_slice(d.as_bytes());
+            changed = r.seq;
+        }
+        if r.kind == EventKind::STATE_SNAPSHOT {
+            r.body[40..56].copy_from_slice(&hash.digest128().to_le_bytes());
+            hash.reset();
+        } else if r.role() == Role::Output {
+            accumulate(&mut hash, r);
+        }
+    }
+    assert_ne!(changed, 0);
+    let corrupt = qty.records().find(|r| r.seq == a.seq).unwrap();
+    assert_ne!(snap(corrupt).0.out_hash, snap(&a).0.out_hash);
+    let failures = verify_journal::<TestSet>(&qty, &base.setup, Some(before));
+    assert_eq!(failures.first().unwrap().seq, changed);
+    assert!(failures.iter().any(|m| m.seq == a.seq));
+
+    // .5 The exemption covers only the calibration payload, never its structure.
+    let mut bad = base.j().clone();
+    let r = bad
+        .segments
+        .iter_mut()
+        .flat_map(|s| &mut s.records)
+        .find(|r| r.seq == a.seq)
+        .unwrap();
+    let mut off = 96;
+    loop {
+        let section = u16::from_le_bytes(r.body[off..off + 2].try_into().unwrap());
+        let len = u32::from_le_bytes(r.body[off + 8..off + 12].try_into().unwrap()) as usize;
+        if section == 16 {
+            r.body[off + 4..off + 8].copy_from_slice(&0u32.to_le_bytes());
+            break;
+        }
+        off += 16 + len;
+    }
+    assert!(
+        verify_journal::<TestSet>(&bad, &base.setup, Some(before))
+            .iter()
+            .any(|m| m.seq == a.seq)
+    );
+
+    // A real roll uses the source ClockStatus in its boot snapshot, including from_seq.
+    let mut rolled = measured;
+    rolled.sys(2);
+    let s = rolled.snapshots().pop().unwrap();
+    let clock = rolled
+        .j()
+        .records()
+        .take_while(|r| r.seq < s.seq)
+        .filter(|r| r.kind == EventKind::CLOCK_STATUS)
+        .last()
+        .unwrap();
+    let c = clock.read::<hft_event::ClockStatus>().unwrap();
+    assert_eq!(snap(&s).1.clock_cal.from_seq, clock.seq);
+    assert_eq!(snap(&s).1.clock_cal.realtime_ns, c.realtime_ns);
+    assert_eq!(snap(&s).1.clock_cal.tsc_hz_milli, c.tsc_hz_milli);
+    check_calibration_replay(&rolled, None);
+    let recovered = H::<TestSet>::restart_over(
+        rolled.j().clone(),
+        rolled.setup.clone(),
+        plan(SnapshotSel::AtSeq(before), true, 1, 0),
+        Rerun::default(),
+    )
+    .unwrap();
+    assert!(recovered.s.engine().recovery_mismatches().is_empty());
+}
+
 // Independent of OutHash and its reset/stamping helpers. Only the event schema supplies the
 // measurement fields and transport flag bits excluded from the byte stream.
 pub(crate) fn accumulate(hash: &mut Xxh3, r: &MemRecord) {

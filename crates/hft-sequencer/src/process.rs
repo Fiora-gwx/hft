@@ -57,8 +57,13 @@ pub(crate) fn process_parts<D: Driver<S>, S: StrategySet>(
         .journal()
         .append_var(slot.kind, slot.flags, slot.tsc, &[slot.body()])
         .map_err(|_| FatalReason::JournalFull)?;
-    // Meta records from the hk / advice rings are recorded only (README "记录分类").
+    // Meta never reaches the decision clock or callbacks. Calibration is cold-reader data.
     if crate::journal::role_of(slot.kind, slot.body()) == hft_event::Role::Meta {
+        if slot.kind == EventKind::CLOCK_STATUS
+            && let Some(c) = slot.read::<hft_event::ClockStatus>()
+        {
+            e.rec.clock_cal = crate::snapshot::ClockCalRow::recorded(c, s.0);
+        }
         return Ok(());
     }
     e.cur_seq = s.0;

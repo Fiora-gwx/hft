@@ -3542,6 +3542,9 @@ spec: README.md
 | SEQ-249.2 | `drv.measure()` 返回值不同(`decided_tsc` 不同) | `out_hash` 相同 |
 | SEQ-249.3 | 主机不同(`snap_tsc`、`boot_id`、`snap_utc_ns` 不同) | `state_hash`、`out_hash` 相同;验证比对通过 |
 | SEQ-249.4 | 某条 `OrderDecision.qty` 不同 | `out_hash` 不同 |
+| SEQ-249.5 | 节 16 的 count 不合法 | 对应快照比对失败,不能随校准行体一起屏蔽 |
+
+通过真实 hk 记录检查节 16 的全部字段和来源 seq,包含所选快照后首条 Input 之前与运行期两次记录;比较完整 Input 流,完整及窗口回放并读取回放引擎序列化状态。未提交 Meta 尾部不更新恢复状态;真实滚段快照取本段引导块的 ClockStatus。修改 qty 后独立重算日志的 out_hash,仍须在订单与快照两处发现分歧;恢复尾部比对同样覆盖校准豁免。主机行的 boot_id 由日志副本提供,内存驱动不生成进程 UUID。
 
 ### SEQ-250 从快照起步时重建派生缓存,不产生任何记录
 
