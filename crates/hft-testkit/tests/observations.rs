@@ -415,7 +415,7 @@ fn tk_121_hedge_place_failure_requires_exact_evidence() {
             account: AccountId(f.key.account),
             conn: hft_types::ConnId(0),
             status,
-            op: hft_event::GwOp::New,
+            op: hft_event::GwOp::Place,
             _pad: [0; 3],
             os_errno: 0,
             _pad2: 0,
