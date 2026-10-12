@@ -933,6 +933,7 @@ pub fn ledger_rows(
             row_kind::PX => 48,
             row_kind::CASH => 64,
             row_kind::EXT_SEEN => 24,
+            row_kind::AUTO_CASH => 80,
             k => panic!("unexpected row kind {k}"),
         };
         out.push((h, rr.get_bytes(len).expect("row body").to_vec()));

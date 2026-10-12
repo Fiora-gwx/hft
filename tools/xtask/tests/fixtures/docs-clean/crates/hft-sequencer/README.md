@@ -27,7 +27,7 @@ hft-sequencer 的目录。
 
 ### 消费与产生的事件
 
-- 产生:`Bbo`、`L2Delta`、`L2Snapshot`、`Trade`、`Funding`、`MarkPrice`、`IndexPrice`、`Liquidation`、`L2Batch`、`OrderDecision`、`SendReport`、`OrderEvent`、`PositionReport`、`BalanceReport`、`FundingSettle`、`ExternalFill`、`MarginReport`、`AccountConfigReport`、`ExecDecision`、`ChainHead`、`PoolQuote`、`SwapDecision`、`TxLifecycle`、`ControlCmd`、`CmdResult`、`ConfigBlob`、`ReconcileReport`、`Timer`、`ConnState`、`Advice`、`StateSnapshot`、`LatencySample`、`Note`、`HostProfile`、`ClockStatus`、`SegmentRoll`、`EngineClock`、`RawRx`、`RawTx`。
+- 产生:`Bbo`、`L2Delta`、`L2Snapshot`、`Trade`、`Funding`、`MarkPrice`、`IndexPrice`、`Liquidation`、`L2Batch`、`OrderDecision`、`SendReport`、`OrderEvent`、`PositionReport`、`BalanceReport`、`FundingSettle`、`ExternalFill`、`MarginReport`、`AccountConfigReport`、`ExecDecision`、`ChainHead`、`PoolQuote`、`SwapDecision`、`TxLifecycle`、`ControlCmd`、`CmdResult`、`ConfigBlob`、`ReconcileReport`、`ReconcileBatch`、`Timer`、`ConnState`、`Advice`、`StateSnapshot`、`LatencySample`、`Note`、`HostProfile`、`ClockStatus`、`SegmentRoll`、`EngineClock`、`RawRx`、`RawTx`。
 
 ## 实现说明
 

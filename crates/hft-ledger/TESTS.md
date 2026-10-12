@@ -2241,8 +2241,9 @@ spec: README.md
 | 行 | 输入 | 期望 |
 |---|---|---|
 | LED-235.1 | 读三节 `SectionHdr` 的行版本 | 节 1 = 2,节 13 = 8,节 22 = 2 |
-| LED-235.2 | 把节 13 的行版本改为 9 后 `restore` | `Err(RestoreError::VersionUnsupported)`,不 panic |
+| LED-235.2 | 把节 13 的行版本改为 10 后 `restore` | `Err(RestoreError::VersionUnsupported)`,不 panic |
 | LED-235.3 | 把节 1 的行版本改为 3 后 `restore` | 同上 |
+| LED-235.4 | 没有待确认凭据的节 13 强行标成 v9 | `Err(RestoreError::BadValue)`;不能冒充含凭据的规范编码 |
 
 ### LED-236 i128 字段以两个小端 u64 存放
 

@@ -219,7 +219,7 @@ fn led_235_row_versions() {
         [POSITIONS_VERSION, LEDGER_GROUPS_VERSION, LEDGER_INVENTORY_VERSION],
         [2, 8, 2]
     );
-    for (k, (sec, v)) in [(SECTION_LEDGER_GROUPS, 9u16), (SECTION_POSITIONS, 3)]
+    for (k, (sec, v)) in [(SECTION_LEDGER_GROUPS, 10u16), (SECTION_POSITIONS, 3)]
         .iter()
         .enumerate()
     {
@@ -234,6 +234,15 @@ fn led_235_row_versions() {
             k + 2
         );
     }
+    // Version 9 is valid only when the snapshot actually contains pending receipts.
+    let mut bad = bytes.clone();
+    let at = section_at(&bad, SECTION_LEDGER_GROUPS) + 2;
+    bad[at..at + 2].copy_from_slice(&9u16.to_le_bytes());
+    assert_eq!(
+        restore_with(&bad, rd_funding(FundingSettleKind::BalanceOnlyPush)).err(),
+        Some(RestoreError::BadValue),
+        "LED-235.4"
+    );
 }
 
 #[test]

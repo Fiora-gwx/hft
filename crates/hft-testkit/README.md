@@ -386,6 +386,8 @@ impl<S: StrategySet> SeqRig<S> {
 6. **检查**:每步后运行启用的不变量检查器(只读访问调试视图);失败即停,把违反前 200 条事件(按 `EVENT_END` 计)写成 journal 记录格式的片段(`journal.bin`,24 B 记录头 + 体 + 补零,`hft_event::decode_record` 可逐条读出;replayer 读入片段随 replayer 落地)、故障表(`faults.txt`,每行 `<virtual_ns> <类别> <故障>`)与复现行(`repro.txt`)存到 `<目录>/<种子 16 位十六进制>/`(`cargo xtask dst` 为 `target/dst/`);失败种子加入 `fixtures/dst-seeds/` 回归集。
 7. **收缩**:"删除一段故障 → 重跑 → 仍以同一不变量失败则保留删除",段长从一半起逐次减半到单项,直到不能再删或超出预算(墙钟秒;预算只决定收缩走多远,每次重跑本身确定)。
 
+`ReconActor::settled_input` 将完整账户/venue 报告与选定的 ExternalReceipt 原始历史打包为 ReconcileBatch;原始凭据的自动选择由调用方负责。
+
 ### 金样运行器
 
 1. 读 `meta.toml` 得 venue、通道、协议版本、捕获时间;按 fixtures 布局读原始帧。
@@ -451,8 +453,6 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 - [13 O8](../../design/13-设计评审与优化.md)(fuzz 与 DST)、[10 §5](../../design/10-语言分工与代码组织.md)(测试金字塔)、[research/04 §7](../../design/research/04-oss-frameworks-and-patterns.md)
 - Agent Note:[strategy-sdk-decoupling](../../.agents/notes/proposed/architecture/2026-10-02-strategy-sdk-decoupling.md)、[fuzz-and-deterministic-simulation](../../.agents/notes/proposed/testing/2026-09-30-fuzz-and-deterministic-simulation.md)
 
-`ReconActor::settled_input` 将完整账户/venue 报告与选定的 ExternalReceipt 原始历史打包为 ReconcileBatch。TK-133 用真实 SeqSut/SimMatcher 验证部分减仓和全平、补账后重启、原因细分的迟到补报和重复确认;不据此宣称随机 AUTO_EXTERNAL 故障矩阵或 LED-080/081 已全部验收。
-
 ## 已知限制与后续工作
 
 - DST 只覆盖进程内逻辑;真实 socket、TLS、内核行为的故障由交易所测试网冒烟与混沌测试覆盖,wire 级 [`mock-exchange`](../../apps/mock-exchange/README.md) 是可选扩展(冻结)。
@@ -460,6 +460,7 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 - 多进程场景(可选扩展:hft-core ↔ chain-core)只在集成环境测;DST 以 `SeqActor` + 真实 `ChainSeq` 同进程模拟链路。
 - `MockVenue` 的交易所行为层是"规格中的交易所",与真实交易所的差异只能由金样、测试网/模拟盘联调与正式实盘的运行监控发现。
 - 真实 `SeqSut` 的基础币费用仅支持同一现货 venue 共用基础资产的世界;多基础资产与永续的该配置拒绝启动(TK-106)。
+- TK-133 覆盖选定原始凭据的补账、重启和迟到确认;自动选择缺失凭据的随机 AUTO_EXTERNAL 故障矩阵及 LED-080/081 仍待验收。
 - 真实引擎的逐 Input 与逐决策观察契约见 [DST 框架](#6-dst-框架)。`toy::PLANTED` 各行的真实引擎版本(各 crate 的 `planted-*` feature)、`run_sim_case`(TK-009)、`ProbeBuild` 注入(TK-095)与模板探针的构建检查(TK-042)未落地(TK-053 仍以 `ToyEngine` 运行);`hft-dst` 的 `SIGINT`/`SIGTERM` 处理属 M6。
 
 ### 开发备忘

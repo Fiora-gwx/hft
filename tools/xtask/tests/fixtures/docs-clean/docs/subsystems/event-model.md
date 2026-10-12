@@ -36,6 +36,7 @@
 | 0x0402 | `CmdResult` | 定长 144 | Output | `schema_version` 3:预览追加 `reset_groups`、`no_open_ms` |
 | 0x0403 | `ConfigBlob` | Multi | 按体:`boot = 1` Output,否则 Input | |
 | 0x0404 | `ReconcileReport` | 定长 104 | Input | 条目:仓位、余额、挂单、Unknown 收敛(带 `history_checked`)、汇总(`schema_version` 3 追加 `sflags`、`skipped_inflight`;仓位条目可带 `AUTO_EXTERNAL`)、逐笔资金费(交易所金额;只告警与账本校正,不进闸门) |
+| 0x0405 | `ReconcileBatch` | Var 16 + ≤51200 | Input | 完整报告与原始结算凭据 |
 | 0x0501 | `Timer` | 定长 24 | Input | owner/timer_id/group 编码见 hft-event |
 | 0x0502 | `ConnState` | 定长 24 | Input | `schema_version` 2 追加 `rx_tsc`;`Alive` 是行情连接的活性证据 |
 | 0x0503 | `Advice` | Var | Input | 策略模型的不透明载荷(`AdviceHdr` 32 B,含 `basis_seq`/`basis_tsc` + ≤ 4096 B) |
