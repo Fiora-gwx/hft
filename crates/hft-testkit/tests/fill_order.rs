@@ -149,7 +149,10 @@ fn tk_123_raw_matching_order_survives_report_jitter() {
     assert_eq!(
         delivered
             .iter()
-            .map(|(seq, e)| (*seq, e.slot.0))
+            .map(|(seq, e)| (
+                crate::seq_sut::seq_before_balance_checks(&r.journal, *seq),
+                e.slot.0
+            ))
             .collect::<Vec<_>>(),
         [(544, 6), (555, 5), (597, 7)]
     );

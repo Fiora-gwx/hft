@@ -340,12 +340,20 @@ fn tk_121_hedge_place_failure_requires_exact_evidence() {
     let samples = PLACE_SAMPLES.with(|s| s.take());
     let e = samples
         .iter()
-        .find(|e| e.records.first().is_some_and(|r| r.seq == 1572))
+        .find(|e| {
+            e.records
+                .first()
+                .is_some_and(|first| crate::seq_sut::seq_before_balance_checks(&r.journal, first.seq) == 1572)
+        })
         .expect("original failing Input was not exercised");
     assert_eq!(e.records[0].kind, EventKind::TIMER);
     assert_eq!(e.info.place_failures.len(), 1);
     let f = e.info.place_failures[0];
-    assert_eq!(f.input_seq, 1572);
+    assert_eq!(f.input_seq, e.records[0].seq);
+    assert_eq!(
+        crate::seq_sut::seq_before_balance_checks(&r.journal, f.input_seq),
+        1572
+    );
     assert_eq!(f.key.id, 17);
     assert_eq!(f.free_slots, Some(0));
     assert_eq!(f.error, PlaceFailureKind::NoFreeSlot);

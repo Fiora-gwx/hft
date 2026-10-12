@@ -541,7 +541,7 @@ fn led_289_balance_gate_recomputes_drift_from_same_event_facts() {
         .iter()
         .find(|n| n.code == hft_ledger::notes::code::BALANCE_CHECK)
         .unwrap();
-    for field in 0..12 {
+    for field in 0..13 {
         let mut bad = cold(&base, rd);
         clock(&mut bad, s(20));
         feed(&mut bad, &b, field == 11);
@@ -554,11 +554,14 @@ fn led_289_balance_gate_recomputes_drift_from_same_event_facts() {
             _ => {}
         }
         let prior = snap(bad.ledger());
-        assert_eq!(
-            apply(&mut bad, &n),
-            Err(JournalApplyError::BalanceEvidence),
-            "field {field}"
-        );
+        let result = if field == 12 {
+            let mut bytes = [0; 256];
+            let len = encode_fixed(&mut bytes, 2, TSC + 1, RecordFlags::EVENT_END, &n) as usize;
+            bad.apply(&decode_record(&bytes[..len]).unwrap())
+        } else {
+            apply(&mut bad, &n)
+        };
+        assert_eq!(result, Err(JournalApplyError::BalanceEvidence), "field {field}");
         assert_eq!(snap(bad.ledger()), prior);
         assert_eq!(apply(&mut bad, &note), Err(JournalApplyError::BalanceEvidence));
     }
@@ -568,6 +571,14 @@ fn led_289_balance_gate_recomputes_drift_from_same_event_facts() {
     apply(&mut duplicate, &note).unwrap();
     assert_eq!(
         apply(&mut duplicate, &note),
+        Err(JournalApplyError::BalanceEvidence)
+    );
+    let empty = Ledger::new(rd, &cfg_lf(), &caps_lf()).unwrap();
+    let mut initial = cold(&empty, rd);
+    clock(&mut initial, s(20));
+    feed(&mut initial, &b, false);
+    assert_eq!(
+        apply(&mut initial, &note),
         Err(JournalApplyError::BalanceEvidence)
     );
 

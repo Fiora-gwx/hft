@@ -1578,6 +1578,7 @@ spec: README.md
 - 断言:全部不变量与强制复跑通过;Input 1572 为对冲重试 Timer,链接 17 调用前空闲槽为 0,place 返回 NoFreeSlot,重试从 1 到 2,没有 OrderDecision;删除/重复观察、改错 Input/epoch/slot/gen/创建事件/链接号/账户/组、非满表、错误失败种类、错误计数水位、多加计数和缺链接身份共 17 行反例失败;未增加计数的失败也不能漏观察。四种门控 SendReport 不能单独解释计数增加;链接号复用后不能借旧实例证据。关闭检查器后完整 journal 和非空 HashTrail 逐字节相同
 - 实现:`crates/hft-testkit/tests/observations.rs::tk_121_hedge_place_failure_requires_exact_evidence`
 - 对账覆盖:两次运行均保持原始对账 actor,确认 journal 包含 ReconcileReport;关闭检查器仍刷新 actor 所需仓位,逐记录比较数量、序号、种类、TSC、标志及全部体字节,失败仅输出首个差异位置
+- 历史定位:Input 1572 指追加 BalanceCheck 之前的序号;定位时仅扣除此前新增的该种 Note,观察的 input_seq 仍须等于当前记录的原始序号
 
 ### TK-122 恢复链接同事件内复用仍保留 place 时的身份
 
@@ -1599,6 +1600,7 @@ spec: README.md
 - 期望:生成顺序为 5/6/7,交付顺序为 6/5/7,旧能力模式的 INV-16 在第 315 步以精确 1 单位差额失败;诊断不改变 journal、HashTrail 或回报。此用例验证故障证据,不代表该余额差通过验收;常规回归集中的原种子仍在默认能力下完整运行 10000 步并接受严格核对
 - 实现:`crates/hft-testkit/tests/fill_order.rs::tk_123_raw_matching_order_survives_report_jitter`
 - 反例:实际余额 ±1、输入费用 ±1、错误 epoch、重复证据、错误生成顺序均不能满足独立演算。参考仅接受本例的单笔全成,其他回报形式明确拒绝
+- 历史定位:交付序号 544/555/597 仅扣除此前新增的 BalanceCheck 记录数后核对;成交身份、金额、完整 journal 与 HashTrail 的比较不作归一化
 
 ### TK-124 两种成交顺序的独立现金演算覆盖未平仓与正负取整
 

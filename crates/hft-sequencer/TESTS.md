@@ -5816,4 +5816,5 @@ spec: README.md
 - 前置:B0 严格现金能力、无在途订单、已初始化钱包;选取前置关键帧
 - 步骤:发送差额 1000 USDT 的余额报告,再发送与钱包相等的报告;每次冷读至完成边界,末尾保存关键帧并运行完整及前后窗口回放
 - 期望:每个报告有且仅有一条 BalanceCheck;Drift 先置位再清除,完整现金、summary/vflags 与冷账本相等,钱包始终不变;完整与两个窗口回放无差异
+- 反例:篡改校验事实的原始余额或把该 Output 伪装成 Meta,完整后缀回放必须发现分歧
 - 实现:`crates/hft-sequencer/tests/settlement.rs::seq_414_balance_check_gate_matches_cold_view_and_full_window_replay`
