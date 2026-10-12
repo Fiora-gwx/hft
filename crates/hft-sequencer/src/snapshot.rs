@@ -1,5 +1,5 @@
 //! Snapshots (README "快照"): section write order, this crate's sections (5, 8, 9, 10, 15, 16, 19,
-//! 20, 24, 25, 26), state/out hashes and header back-fill, keyframes written in one go, segment
+//! 20, 24, 25, 26, 27), state/out hashes and header back-fill, keyframes written in one go, segment
 //! rolls with their boot blocks, L2 keyframes.
 
 use hft_event::{
@@ -41,6 +41,36 @@ pub const SECTION_SEQ_DAY: u16 = 20;
 pub const SEQ_DAY_VERSION: u16 = 1;
 pub const SECTION_ENGINE_CLOCK: u16 = 25;
 pub const ENGINE_CLOCK_VERSION: u16 = 1;
+pub const SECTION_STRATEGY_TIMERS: u16 = 27;
+pub const STRATEGY_TIMERS_VERSION: u16 = 1;
+
+/// Section 27 instance header (16 B), followed by `n_timers` registration rows.
+#[repr(C)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, FromBytes, IntoBytes, Immutable, KnownLayout)]
+pub struct StrategyTimersHdr {
+    pub strategy: StrategyId,
+    pub _pad: [u8; 3],
+    pub n_timers: u32,
+    /// Next SDK identity, including when no registrations remain. `u64::MAX` means exhausted.
+    pub next_id: u64,
+}
+const _: () = assert!(core::mem::size_of::<StrategyTimersHdr>() == 16);
+const _: () = assert!(core::mem::offset_of!(StrategyTimersHdr, next_id) == 8);
+
+/// Section 27 registration (24 B). Its deadline is the same registered TSC as section 8;
+/// restore cross-checks the full multiset before shifting both copies at recovery end.
+#[repr(C)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, FromBytes, IntoBytes, Immutable, KnownLayout)]
+pub struct StrategyTimerRow {
+    pub id: u64,
+    pub deadline_tsc: u64,
+    pub tag: u32,
+    pub group: GroupId,
+}
+const _: () = assert!(core::mem::size_of::<StrategyTimerRow>() == 24);
+const _: () = assert!(core::mem::offset_of!(StrategyTimerRow, deadline_tsc) == 8);
+const _: () = assert!(core::mem::offset_of!(StrategyTimerRow, tag) == 16);
+const _: () = assert!(core::mem::offset_of!(StrategyTimerRow, group) == 20);
 
 /// Section 5 row header (24 B).
 #[repr(C)]
@@ -97,7 +127,7 @@ fn w_seq_sections<S: StrategySet>(e: &Engine, inst: &Instances<S>, w: &mut Snaps
     let mut sw = SnapshotWriter::new(STRATEGY_SNAPSHOT_MAX);
     let mut order: Vec<usize> = (0..inst.slots.len()).collect();
     order.sort_by_key(|i| inst.slots.get(*i).map_or(0, |s| s.id.0));
-    for ix in order {
+    for &ix in &order {
         let Some(s) = inst.slots.get(ix) else { continue };
         let (Some(st), Some(p)) = (s.inst.as_ref(), s.cur.as_ref()) else {
             continue;
@@ -227,6 +257,30 @@ fn w_seq_sections<S: StrategySet>(e: &Engine, inst: &Instances<S>, w: &mut Snaps
                 _pad: [0; 5],
                 live_tsc: Tsc(c.live_tsc),
             });
+        }
+    }
+    w.end_section();
+    // 27 StrategyTimers. Every bound instance has a counter, even before its first params
+    // or after its final timer fires. Keep SDK identities independent of heap ordering.
+    w.begin_section(SECTION_STRATEGY_TIMERS, STRATEGY_TIMERS_VERSION);
+    for ix in order {
+        let Some(s) = inst.slots.get(ix) else { continue };
+        w.put_row(&StrategyTimersHdr {
+            strategy: s.id,
+            _pad: [0; 3],
+            n_timers: s.timers.len() as u32,
+            next_id: s.bufs.next_timer_id(),
+        });
+        for t in &s.timers {
+            w.put_bytes(
+                StrategyTimerRow {
+                    id: t.id.0,
+                    deadline_tsc: t.at.0,
+                    tag: t.tag,
+                    group: t.group,
+                }
+                .as_bytes(),
+            );
         }
     }
     w.end_section();
@@ -634,9 +688,11 @@ pub struct SeqSections {
     pub notices: Vec<crate::commands::VenueNoticeRow>,
     pub engine_clock: EngineClockRow,
     pub conns: Vec<ConnLiveRow>,
+    /// `None` distinguishes an old snapshot with no identity history from an empty table.
+    pub strategy_timers: Option<Vec<(StrategyTimersHdr, Vec<StrategyTimerRow>)>>,
 }
 
-/// Parses sections 5–26 of this crate; `Err(section)` = undecodable.
+/// Parses sections 5–27 of this crate; `Err(section)` = undecodable.
 pub fn read_seq_sections(body: &[u8]) -> Result<SeqSections, u16> {
     let r = SnapshotReader::new(body);
     let mut out = SeqSections::default();
@@ -736,6 +792,49 @@ pub fn read_seq_sections(body: &[u8]) -> Result<SeqSections, u16> {
         for _ in 0..s.count {
             out.conns.push(rr.get_row().map_err(|_| SECTION_CONN_LIVE)?);
         }
+    }
+    let mut scan = SnapshotReader::new(body);
+    let mut timer_state = None;
+    while let Some(s) = scan.next_section().map_err(|_| SECTION_STRATEGY_TIMERS)? {
+        if s.section == SECTION_STRATEGY_TIMERS && timer_state.replace(s).is_some() {
+            return Err(SECTION_STRATEGY_TIMERS);
+        }
+    }
+    if let Some(s) = timer_state {
+        let err = SECTION_STRATEGY_TIMERS;
+        if s.version != STRATEGY_TIMERS_VERSION || s.count as usize > s.body.len() / 16 {
+            return Err(err);
+        }
+        let mut rr = s.reader();
+        let mut states = Vec::new();
+        let mut prev_strategy = 0;
+        for _ in 0..s.count {
+            let h: StrategyTimersHdr = rr.get_row().map_err(|_| err)?;
+            if h.strategy.0 <= prev_strategy
+                || h.strategy.0 == u8::MAX
+                || h._pad != [0; 3]
+                || h.next_id == 0
+                || h.n_timers as usize > rr.remaining() / 24
+            {
+                return Err(err);
+            }
+            prev_strategy = h.strategy.0;
+            let mut timers = Vec::new();
+            let mut prev_id = 0;
+            for _ in 0..h.n_timers {
+                let t: StrategyTimerRow = rr.get_row().map_err(|_| err)?;
+                if t.id <= prev_id || t.id >= h.next_id {
+                    return Err(err);
+                }
+                prev_id = t.id;
+                timers.push(t);
+            }
+            states.push((h, timers));
+        }
+        if !rr.is_empty() {
+            return Err(err);
+        }
+        out.strategy_timers = Some(states);
     }
     Ok(out)
 }

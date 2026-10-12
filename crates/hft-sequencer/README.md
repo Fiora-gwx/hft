@@ -586,6 +586,8 @@ Model 从检查点恢复、镜像尚未追到其 `last_seq` 时,落后量以该�
 
 **调用时预留**:每轮按既定实例与回调顺序共享一份剩余策略配额,行情、通知和直接投递都借入同一计数。成功的 `timer_at` 立即预留;有效取消按调用顺序释放一次。实例的多个回调共用本轮 Ctx 缓冲,不重复初始化配额。所有回调结束后仍按原顺序应用 Ctx;成功预留却无法入堆属于 `TimerOverflow`,不能静默丢弃。事件缓冲和配额的满计数都在每实例排空时汇总一次。登记表按 `max_timers` 在每实例创建时预分配,保持 TimerId 升序,保存本次运行的截止;跨重启时截止与堆使用同一公式平移。验收见 [SEQ-350](TESTS.md#seq-350-策略定时器超出共享配额时-timer_at-返回-ctxfull不进堆) 与 [SEQ-407](TESTS.md#seq-407-同-tag-的策略定时器按登记身份取消并按调用顺序释放配额)。
 
+**身份持久化**:节 27 按 StrategyId 升序保存每个绑定实例的 `next_id` 与按 TimerId 升序的登记行,包括没有参数或当前没有定时器的实例。ID 从 1 开始,成功分配后递增;取消和到期不回退计数器,`u64::MAX` 表示耗尽。恢复时登记行的 `(deadline_tsc, owner, tag, group)` 多重集合必须与节 8 的全部策略定时器完全相同,相同截止/tag 的两次登记保留两个 ID。实例集合、排序、填充、版本、计数器或集合对应关系错误均拒绝快照。节 27 的截止与节 8 同属已登记 TSC,恢复结束时一起平移,ID 原样保留。
+
 **跨重启(停机时间不计)**:堆以本次运行的 TSC 为键(`Timer` 体的 `deadline_tsc` 同口径),随快照节 8 保存(同一快照的节 25 给出该运行的时钟基准)。[恢复结束](#冷启动恢复recoverdriver)时,堆内每个条目与 OMS、执行层的已登记 TSC 字段按**同一平移公式**处理——时长按两次运行的 `tsc_hz_milli` 换算,过去的时刻落到 `now` 之前(恢复后立即到期)、将来的截止保持剩余时长、0 保持 0;公式的唯一定义在 [hft-exec 快照与恢复](../hft-exec/README.md#快照与恢复),OMS 字段的平移归 [hft-oms](../hft-oms/README.md)。执行层的定时器另经 `exec.recovery_timers()` 按平移后的时刻重新登记(与堆中同键 (owner, timer_id, group) 的条目合并、保留较早者;早到的由执行层忽略)。周期性系统定时器(OmsSweep、DeadMan、ConnRotate、SessionKeepalive)每次启动都重新登记,替换快照堆中同键 (owner, timer_id, group) 的旧条目(每键至多一条);例外:快照堆中平移后的 `OmsSweep` 早于本次登记时刻 + 1 000 ms 时保留它、不替换(重启不推迟 sweep,连续重启下终态槽照常回收)。
 
 **按 engine_ns 记截止的登记方**(hft-risk 的保证金截止与下一步、策略经 SDK `Now::tsc_of` 换算的定时器):登记时 engine_ns → 本次运行 TSC 向上取整,同一运行内不会早到;跨重启平移的取整差可能使其早到极小量,登记方到期时按 `now.engine_ns` 复核,未到则重新登记。令牌桶与退避在 hft-risk 里按 engine_ns 存,重启不需任何处理。
@@ -600,14 +602,14 @@ Model 从检查点恢复、镜像尚未追到其 `last_seq` 时,落后量以该�
 - **关键帧**(`StateSnapshot{purpose=Keyframe}`)**一次写完**:实盘驱动按[环境决定表](#环境决定写成-input)的 `Sys{Snapshot}` 行(时间或事件数到期、空闲轮、最大推迟 2 个周期)交出 `Timer{Sys, Snapshot}`;sequencer 处理它时在同一事件内写完整个快照,随后 `end_event`、`publish`。停顿 ≤ 300 µs,是 [latency-budget §3.1](../../docs/latency-budget.md#31-p999-记录项) 的 p99.9 记录项;写出期间到达的输入在环中等待。两种触发与最大推迟一起给出恢复重放尾部的上界(数值写在 [apps/hft-core](../../apps/hft-core/README.md) 启动步骤)。**关键帧不计算 `state_hash`**:头部该字段写 0(四种驱动相同,逐字节比对不受影响),需要它的读者从节内容按[状态哈希](#状态哈希)的规则计算。恢复、验证与镜像驱动读到 `Timer{Sys, Snapshot}` 时同样一次写完(验证驱动逐字节比对)。
 - **L2 关键帧**:每个 Live 簿的 `L2Snapshot{origin=Keyframe}` 由 `Timer{Keyframe, inst}` 在每个 `keyframe_period_ms` 窗口内均摊写出(每簿每窗口一条;引导块另有一条),不在同一时刻导出全部簿。
 - **按需**(`SnapshotNow`)、**Drain**、**Recovery** 与引导块的快照同样一次写完。
-- **写出**:sequencer 按固定顺序调用各组件的 `snapshot(&self, w)`,每个组件一次写完本 crate 的全部节:[hft-ledger](../hft-ledger/README.md)(节 1、13、22)→ [hft-oms](../hft-oms/README.md)(节 2、3、12)→ [hft-risk](../hft-risk/README.md)(节 4、14、17、18、23)→ 本 crate(节 5、8、9、10、15、16、19、20、24、25、26)→ [hft-book](../hft-book/README.md) `BookSet::snapshot`(节 6、7)→ [hft-exec](../hft-exec/README.md)(节 21)。快照体内各节按这个写出顺序排列(节号不要求递增;读者按 `SectionHdr.section` 定位);`state_hash` 按写出顺序对各节内容累积(节 16 除外;关键帧不算、写 0),写完全部节后与 `n_sections` 一起回填 `SnapshotHdr`(此时尚未 publish,读者不可见)。写完任一快照后 `rx_from_seq` = 该快照的 `at_seq`(见[只读视图](#只读视图seqviews实现-sdk-views))。
-- **内容**:分节表与 `SnapshotHdr`/`SectionHdr` 归 [journal-format 快照记录结构](../../docs/subsystems/journal-format.md#快照记录结构);行格式由节的归属 crate 定义。本 crate 负责节 5、8–10、15、16、19、20、24、25、26(全部 `#[repr(C)]`、显式填充、按所列键升序;节 20 与节 25 的行格式在 journal-format;节 5 的实例状态字节由策略经 SDK 的 `SnapshotWriter` 写出)。
-- **快照中的 TSC 字段**(本 crate 的已登记行;其余持久时刻一律 engine_ns):节 8 `TimerRow.deadline_tsc`(恢复结束时按[定时器](#定时器)的公式平移);节 26 `ConnLiveRow.live_tsc`(本次运行的值,处理 `EngineClock` 时清零,不平移);节 16 `ClockCalRow.tsc`(不计入 `state_hash`,只供冷读者换算 UTC)。
+- **写出**:sequencer 按固定顺序调用各组件的 `snapshot(&self, w)`,每个组件一次写完本 crate 的全部节:[hft-ledger](../hft-ledger/README.md)(节 1、13、22)→ [hft-oms](../hft-oms/README.md)(节 2、3、12)→ [hft-risk](../hft-risk/README.md)(节 4、14、17、18、23)→ 本 crate(节 5、8、9、10、15、16、19、20、24、25、26、27)→ [hft-book](../hft-book/README.md) `BookSet::snapshot`(节 6、7)→ [hft-exec](../hft-exec/README.md)(节 21)。快照体内各节按这个写出顺序排列(节号不要求递增;读者按 `SectionHdr.section` 定位);`state_hash` 按写出顺序对各节内容累积(节 16 除外;关键帧不算、写 0),写完全部节后与 `n_sections` 一起回填 `SnapshotHdr`(此时尚未 publish,读者不可见)。写完任一快照后 `rx_from_seq` = 该快照的 `at_seq`(见[只读视图](#只读视图seqviews实现-sdk-views))。
+- **内容**:分节表与 `SnapshotHdr`/`SectionHdr` 归 [journal-format 快照记录结构](../../docs/subsystems/journal-format.md#快照记录结构);行格式由节的归属 crate 定义。本 crate 负责节 5、8–10、15、16、19、20、24、25、26、27(全部 `#[repr(C)]`、显式填充、按所列键升序;节 20 与节 25 的行格式在 journal-format;节 5 的实例状态字节由策略经 SDK 的 `SnapshotWriter` 写出)。
+- **快照中的 TSC 字段**(本 crate 的已登记行;其余持久时刻一律 engine_ns):节 8 `TimerRow.deadline_tsc` 与节 27 `StrategyTimerRow.deadline_tsc`(恢复结束时按[定时器](#定时器)的公式平移);节 26 `ConnLiveRow.live_tsc`(本次运行的值,处理 `EngineClock` 时清零,不平移);节 16 `ClockCalRow.tsc`(不计入 `state_hash`,只供冷读者换算 UTC)。
 - **从快照起步**(恢复、验证、镜像同一流程):各组件 `restore` 之后、处理任何 Input 之前,`rx_from_seq` = 该快照的 `at_seq`,对每个实例按生效的 `StrategyParams` 调 `ledger.on_groups_changed`、`risk.on_groups_changed`,并重算 `model_mem`、`model_ckpt`;对每个 group 以恢复出的 LegTracker 摘要调一次 `risk.on_legs`(只重建 hft-risk 的 `on_legs` 缓存;返回的 `AutoClear` 不执行、不写记录——快照之前的 Input 已对同一状态判定过);引导块与之后读到的 `L2Snapshot{origin = Keyframe}` 只写档位、不改 `restore` 读回的簿元数据([hft-book](../hft-book/README.md));再以节 10 每 inst 的 `(mark_px, mark_ens)` 调一次 `ledger.restore_marks`、以 `interval_s ≠ 0` 的行逐 inst 调 `ledger.on_funding_interval`——这些只重建不进快照的派生索引与缓存,不产生任何记录。
 
 #### 节行格式(草案,实现时以代码与编译期断言为准)
 
-当前行版本:节 5 v2、节 8 v2、节 9 v1、节 10 v6、节 15 v2、节 16 v1、节 19 v2、节 24 v1、节 26 v2(节 20、25 的行格式与版本在 journal-format)。
+当前行版本:节 5 v2、节 8 v2、节 9 v1、节 10 v6、节 15 v2、节 16 v1、节 19 v2、节 24 v1、节 26 v2、节 27 v1(节 20、25 的行格式与版本在 journal-format)。
 
 ```rust
 #[repr(C)] pub struct StrategyRowHdr {                                                                                  // 节 5,24 B
@@ -619,6 +621,8 @@ Model 从检查点恢复、镜像尚未追到其 `last_seq` 时,落后量以该�
 }
 #[repr(C)] pub struct GroupSeqRow { pub group: GroupId, pub _pad: u32, pub spec_seq: u64 }                              // 节 5,16 B;每 group 一条,按 GroupId 升序
 #[repr(C)] pub struct TimerRow  { pub deadline_tsc: u64, pub timer_id: u32, pub owner: u16, pub _pad: u16, pub group: GroupId, pub _pad2: u32 } // 节 8,24 B;deadline_tsc = 本快照所在运行的 TSC(节 25 给出该运行的基准)
+#[repr(C)] pub struct StrategyTimersHdr { pub strategy: StrategyId, pub _pad: [u8; 3], pub n_timers: u32, pub next_id: u64 } // 节 27,16 B;count 为实例数,每行头后 n_timers 条登记
+#[repr(C)] pub struct StrategyTimerRow { pub id: u64, pub deadline_tsc: u64, pub tag: u32, pub group: GroupId } // 节 27 登记,24 B;deadline_tsc 与节 8 同一运行、同一平移
 #[repr(C)] pub struct ActiveConfigRow { pub blob: BlobRef, pub scope: CmdScope }                                       // 节 9,64 B
 
 #[repr(C)] pub struct MarketLastRow {                                                                                    // 节 10,112 B;键 inst
@@ -860,6 +864,7 @@ advisor 的定时投递、重启注记去重、落后量、两种环容量的独
 
 ## 延伸阅读
 
+- [策略定时器身份持久化](../../.agents/notes/implemented/bug-fix/2026-10-12-strategy-timer-identity.md)
 - [策略定时器的共享配额与取消身份](../../.agents/notes/implemented/bug-fix/2026-10-12-strategy-timer-admission.md)
 
 - [离线 Model 起点与配对决定](../../.agents/notes/implemented/architecture/2026-10-12-offline-model-origin.md)、[跨重启 Model 来源连续性](../../.agents/notes/implemented/bug-fix/2026-10-12-model-restart-continuity.md)
@@ -875,7 +880,7 @@ advisor 的定时投递、重启注记去重、落后量、两种环容量的独
 
 ## 已知限制与后续工作
 
-- SDK 要求 TimerId 跨重启稳定;当前快照尚未保存实例的 ID 分配计数器与登记映射,恢复仍按堆遍历重新编号。取消/到期形成的空洞或不同截止改变排序时,策略保存的旧 ID 不能据此认定可用;该恢复契约须由持久化与专项回放另行补齐,配额验收不代表它已完成。
+- 含绑定实例的旧开发快照若缺节 27,恢复返回 `SnapshotUndecodable{section: 27}`;即使堆为空也不能推断 ID 计数器为 1。旧版本会跳过未知节,但不具备稳定 TimerId 的恢复契约,不作为使用该能力的回滚版本。固定样本须由支持节 27 的版本生成;上一已验证版本的兼容升级与回滚仍须负责人评审。
 
 - `Log::from_reader` 当前在显式上限内保留整份逻辑日志;长时段文件的分段流式验证仍待接入。独立恢复运行支持连续、封闭文件;RecoveryGap 输入仍不接受。[replayer 限制](../../apps/replayer/README.md#已知限制与后续工作)列出完整 CLI 验收缺口。
 

@@ -47,6 +47,7 @@ mod snapshot_rows;
 mod storage;
 mod strategies;
 mod subs;
+mod timer_recovery;
 mod timers;
 mod version;
 mod viewer_confirm;

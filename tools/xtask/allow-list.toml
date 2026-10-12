@@ -208,12 +208,18 @@ field = "gate_closed_tsc"
 class = 1
 reason = "hft-exec recovery_end resets it to the recovery time"
 
-# hft-sequencer snapshot rows (journal-format sections 8, 15, 16, 25).
+# hft-sequencer snapshot rows.
 [[tsc]]
 row = "TimerRow"
 field = "deadline_tsc"
 class = 1
 reason = "hft-sequencer recovery_end shifts the heap deadlines (downtime not counted)"
+
+[[tsc]]
+row = "StrategyTimerRow"
+field = "deadline_tsc"
+class = 1
+reason = "section 27 identity registry; restore checks it against section 8 and recovery_end shifts both copies together"
 
 [[tsc]]
 row = "ConnLiveRow"

@@ -7,8 +7,8 @@ use hft_strategy_sdk::{SnapshotReader, SnapshotWriter};
 use hft_testkit::hash::component_hashes;
 use zerocopy::{FromZeros, IntoBytes};
 
-const SECTIONS: [u16; 25] = [
-    1, 13, 22, 2, 3, 12, 4, 14, 17, 18, 23, 5, 8, 9, 10, 15, 16, 19, 20, 24, 25, 26, 6, 7, 21,
+const SECTIONS: [u16; 26] = [
+    1, 13, 22, 2, 3, 12, 4, 14, 17, 18, 23, 5, 8, 9, 10, 15, 16, 19, 20, 24, 25, 26, 27, 6, 7, 21,
 ];
 
 fn snapshot(sections: &[u16]) -> Vec<u8> {
@@ -73,6 +73,7 @@ fn seq_404_snapshot_components_match_independent_hashtrail() {
         (21, "hft-exec"),
         (8, "hft-sequencer"),
         (25, "hft-sequencer"),
+        (27, "hft-sequencer"),
     ];
     for (id, owner) in rows {
         let at = section(&original, id) + 16;

@@ -335,21 +335,11 @@ pub(crate) fn restore_at<S: StrategySet>(
             timer_id: t.timer_id,
             group: t.group.0,
         });
-        if t.owner >= hft_event::TIMER_OWNER_STRATEGY_BASE {
-            e.strat_timers += 1;
-            let sid = hft_types::StrategyId((t.owner - hft_event::TIMER_OWNER_STRATEGY_BASE) as u8);
-            if let Some(slot) = inst.get_mut(sid) {
-                let id = hft_strategy_sdk::TimerId(slot.bufs.next_timer_id());
-                slot.bufs.set_next_timer_id(id.0 + 1);
-                slot.timers.push(hft_strategy_sdk::ctx::TimerReq {
-                    id,
-                    at: Tsc(t.deadline_tsc),
-                    tag: t.timer_id,
-                    group: t.group,
-                });
-            }
-        }
     }
+    // Identity history is not derivable from the live heap (even an empty heap can have
+    // consumed IDs). Restore the counter and registrations, checking both copies agree.
+    restore_strategy_timers(&secs, &mut inst)?;
+    e.strat_timers = inst.slots.iter().map(|s| s.timers.len() as u32).sum();
     e.heap.set_capacity(e.caps.max_timers as usize);
     // Section 10 market rows.
     for row in secs.market.iter() {
@@ -509,6 +499,61 @@ pub(crate) fn restore_at<S: StrategySet>(
         return Err(BootError::TimerCapacity { demand });
     }
     Ok((e, inst))
+}
+
+fn restore_strategy_timers<S: StrategySet>(
+    secs: &SeqSections,
+    inst: &mut Instances<S>,
+) -> Result<(), BootError> {
+    let error = BootError::SnapshotUndecodable {
+        section: crate::snapshot::SECTION_STRATEGY_TIMERS,
+    };
+    let expected: Vec<_> = secs
+        .timers
+        .iter()
+        .filter(|t| t.owner >= hft_event::TIMER_OWNER_STRATEGY_BASE)
+        .map(|t| (t.deadline_tsc, t.owner, t.timer_id, t.group))
+        .collect();
+    let Some(states) = &secs.strategy_timers else {
+        return if inst.slots.is_empty() && expected.is_empty() {
+            Ok(())
+        } else {
+            Err(error)
+        };
+    };
+    if states.len() != inst.slots.len() {
+        return Err(error);
+    }
+    let mut actual = Vec::new();
+    for (h, timers) in states {
+        let slot = inst.get_mut(h.strategy).ok_or(error)?;
+        if slot.inst.is_none() && (h.next_id != 1 || !timers.is_empty()) {
+            return Err(error);
+        }
+        slot.bufs.set_next_timer_id(h.next_id);
+        for t in timers {
+            actual.push((
+                t.deadline_tsc,
+                crate::strategies::strategy_owner(h.strategy),
+                t.tag,
+                t.group,
+            ));
+            slot.timers.push(hft_strategy_sdk::ctx::TimerReq {
+                id: hft_strategy_sdk::TimerId(t.id),
+                at: Tsc(t.deadline_tsc),
+                tag: t.tag,
+                group: t.group,
+            });
+        }
+    }
+    // Sorting preserves multiplicity: two identical physical timers need two distinct IDs.
+    actual.sort_unstable();
+    let mut expected = expected;
+    expected.sort_unstable();
+    if actual != expected {
+        return Err(error);
+    }
+    Ok(())
 }
 
 /// Index of the first Input after record `ix`.

@@ -5,7 +5,9 @@ use core::mem::{offset_of, size_of};
 use hft_event::{ControlCmd, EventKind, Role, SectionHdr};
 use hft_journal::{RollAt, RollReason};
 use hft_sequencer::market::{ConnLiveRow, MarketLastRow};
-use hft_sequencer::snapshot::{ClockCalRow, GroupSeqRow, StrategyRowHdr};
+use hft_sequencer::snapshot::{
+    ClockCalRow, GroupSeqRow, StrategyRowHdr, StrategyTimerRow, StrategyTimersHdr,
+};
 use hft_sequencer::timers::TimerRow;
 use hft_sequencer::{
     ActiveConfigRow, CmdDedupHdr, CmdDedupRow, ReconPendingHdr, VenueNoticeRow, ViewerPreviewRow,
@@ -126,10 +128,10 @@ fn seq_248_section_write_order() {
     assert_eq!(
         s,
         vec![
-            1, 13, 22, 2, 3, 12, 4, 14, 17, 18, 23, 5, 8, 9, 10, 15, 16, 19, 20, 24, 25, 26, 6, 7, 21
+            1, 13, 22, 2, 3, 12, 4, 14, 17, 18, 23, 5, 8, 9, 10, 15, 16, 19, 20, 24, 25, 26, 27, 6, 7, 21
         ]
     );
-    assert_eq!(snap(&o).0.n_sections, 25);
+    assert_eq!(snap(&o).0.n_sections, 26);
 }
 
 #[test]
@@ -146,6 +148,12 @@ fn seq_251_row_layouts() {
     assert_eq!(offset_of!(TimerRow, timer_id), 8);
     assert_eq!(offset_of!(TimerRow, owner), 12);
     assert_eq!(offset_of!(TimerRow, group), 16);
+    assert_eq!(size_of::<StrategyTimersHdr>(), 16);
+    assert_eq!(offset_of!(StrategyTimersHdr, next_id), 8);
+    assert_eq!(size_of::<StrategyTimerRow>(), 24);
+    assert_eq!(offset_of!(StrategyTimerRow, deadline_tsc), 8);
+    assert_eq!(offset_of!(StrategyTimerRow, tag), 16);
+    assert_eq!(offset_of!(StrategyTimerRow, group), 20);
     assert_eq!(size_of::<ActiveConfigRow>(), 64);
     assert_eq!(size_of::<MarketLastRow>(), 112);
     assert_eq!(offset_of!(MarketLastRow, funding_rate), 32);
@@ -194,6 +202,7 @@ fn seq_252_row_versions() {
         (19, 2),
         (24, 1),
         (26, 2),
+        (27, 1),
     ] {
         assert_eq!(
             s.iter().find(|x| x.0 == sec).map(|x| x.1),

@@ -300,7 +300,7 @@ pub fn snapshot_difference<'a>(
         b.iter().filter(state).copied(),
         None,
     ) {
-        if matches!(d.section, Some(8 | 9 | 10 | 15 | 19 | 20 | 24 | 25 | 26))
+        if matches!(d.section, Some(8 | 9 | 10 | 15 | 19 | 20 | 24 | 25 | 26 | 27))
             || d.field.ends_with(".section")
         {
             d.component = Some("hft-sequencer");

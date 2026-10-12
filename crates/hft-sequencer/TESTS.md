@@ -42,7 +42,7 @@ spec: README.md
 | journal 满 | SEQ-013、SEQ-083 |
 | 出环满 | SEQ-224、SEQ-225 |
 | inst → 策略的稠密索引 | SEQ-016、SEQ-226–SEQ-233 |
-| 定时器 | SEQ-079、SEQ-215、SEQ-234–SEQ-241、SEQ-261、SEQ-349–SEQ-351、SEQ-407 |
+| 定时器 | SEQ-079、SEQ-215、SEQ-234–SEQ-241、SEQ-261、SEQ-349–SEQ-351、SEQ-407–SEQ-410 |
 | 快照 | SEQ-017、SEQ-085、SEQ-088–SEQ-090、SEQ-109、SEQ-112、SEQ-120、SEQ-164、SEQ-190、SEQ-242–SEQ-248、SEQ-250–SEQ-255、SEQ-337、SEQ-356 |
 | 冷启动恢复(RecoverDriver) | SEQ-108、SEQ-205、SEQ-206、SEQ-237、SEQ-256–SEQ-267、SEQ-342、SEQ-366、SEQ-398 |
 | 恢复时决策不一致 | SEQ-268、SEQ-269、SEQ-362、SEQ-396 |
@@ -3512,7 +3512,7 @@ spec: README.md
 - 步骤:
   1. 写按需快照,按体内顺序读各 `SectionHdr.section`
 - 期望:
-  - 顺序为 1、13、22、2、3、12、4、14、17、18、23、5、8、9、10、15、16、19、20、24、25、26、6、7、21;`SnapshotHdr.n_sections = 25`
+  - 顺序为 1、13、22、2、3、12、4、14、17、18、23、5、8、9、10、15、16、19、20、24、25、26、27、6、7、21;`SnapshotHdr.n_sections = 26`
 - 实现:`crates/hft-sequencer/tests/snapshot.rs::seq_248_section_write_order`
 
 ### SEQ-249 state_hash 不计节 16,out_hash 屏蔽测量字段
@@ -3563,6 +3563,7 @@ spec: README.md
 | SEQ-251.9 | `ClockCalRow` | 40 B;`tsc_hz_milli` 24、`from_seq` 32 |
 | SEQ-251.10 | `VenueNoticeRow` | 32 B;`inst` 4、`a` 8、`cmd_seq` 24 |
 | SEQ-251.11 | `ConnLiveRow` | 16 B;`flags` 2、`live_tsc` 8 |
+| SEQ-251.12 | `StrategyTimersHdr` / `StrategyTimerRow` | 16 B / 24 B;头 next_id 8;登记 deadline_tsc 8、tag 16、group 20 |
 
 ### SEQ-252 各节的行版本
 
@@ -3583,6 +3584,7 @@ spec: README.md
 | SEQ-252.7 | 19 | 2 |
 | SEQ-252.8 | 24 | 1 |
 | SEQ-252.9 | 26 | 2 |
+| SEQ-252.10 | 27 | 1 |
 
 ### SEQ-253 快照行的兼容读取
 
@@ -5669,3 +5671,58 @@ spec: README.md
 5. **验证回放**:夜跑对当日 journal 跑 `replayer verify`,Output 逐字节一致(Meta 与测量字段除外);M4 起模拟账户在实时行情上连续运行期间每夜 `replay verify` 通过。
 6. **主机项**:SEQ-316 在 M3 联调窗口内留存证据;冷启动 < 30 s 的演练归 [apps/hft-core](../../apps/hft-core/README.md#启动顺序)。
 7. **跨组件场景**:与本组件相关的场景(RC-1–RC-12、MD-5、MD-13、MD-14、QF-1、BK-4、BK-7、AX-1、C2、C10、C13)的编号与期望在 [scenarios](../../docs/tests/README.md#2-文件与范围);本文件的用例只覆盖 sequencer 侧的期望。
+
+
+### SEQ-408 策略持有的 TimerId 经崩溃、Drain 与连续重启保持有效
+
+- 规则:[定时器](README.md#定时器)、[快照](README.md#快照)
+- 级别:table
+- 里程碑:M2
+- 前置:B0 真实引擎;测试策略在自己的 snapshot/restore 中保存 TimerId;六次登记的截止乱序,两条具有完全相同的 deadline/tag/group;一次取消和一次到期留下编号空洞
+- 步骤:分别从崩溃与 Drain 恢复,TSC 归零附近且频率变为三倍;策略用恢复的 ID 取消两个登记与两个旧 ID,再登记一次;第二次崩溃后恢复原频率,推进至到期;独立执行完整及关键帧窗口回放
+- 期望:首次恢复保留 ID 2/4/5/6,下一次分配为 7;第二次恢复保留 5/6/7;取消的一条相同 tag 登记不影响另一条,三条存活登记各到期一次;三次运行的 Output、快照字节与恢复状态均一致
+- 实现:`crates/hft-sequencer/tests/timer_recovery.rs::seq_408_timer_ids_survive_crash_drain_and_repeated_restart`
+
+| 行 | 第一次恢复起点 | 第二次恢复 | 期望 |
+|---|---|---|---|
+| SEQ-408.1 | 崩溃,最新关键帧并重放尾部 | 再次崩溃,最新关键帧 | 保存的 ID 可精确取消;存活 5/6/7 各触发一次;三次运行完整及窗口回放通过 |
+| SEQ-408.2 | DrainTail,不重放尾部 | 再次崩溃,最新关键帧 | 与上一行相同;Drain 不重置 ID 计数器 |
+
+### SEQ-409 缺失或不一致的定时器身份历史拒绝恢复
+
+- 规则:[定时器](README.md#定时器)、[快照](README.md#快照)
+- 级别:table
+- 里程碑:M2
+- 前置:真实引擎产生的关键帧;不借助非零声明哈希阻断,直接检验恢复路径
+- 步骤:逐项删除或重复节 27、改变行版本、清零计数器、令计数器不超过存活 ID、清零或重复 ID、修改截止/tag/group、污染填充、替换成未知实例、删除实例计数行、复制节 8 的物理定时器、伪造超出体长的登记数;另在定时器已全部到期的空堆样本中删除节 27
+- 期望:所有反例返回 `SnapshotUndecodable{section: 27}`,无静默补号或漏记;登记与堆核对保留重复键的条数
+- 实现:`crates/hft-sequencer/tests/timer_recovery.rs::seq_409_invalid_or_missing_timer_identity_history_is_rejected`
+
+| 行 | 反例 | 期望 |
+|---|---|---|
+| SEQ-409.1 | 存活登记非空时删除节 27 | SnapshotUndecodable{27} |
+| SEQ-409.2 | 存活登记已清空时删除节 27 | SnapshotUndecodable{27} |
+| SEQ-409.3 | 不支持的行版本 | SnapshotUndecodable{27} |
+| SEQ-409.4 | next_id 为 0 | SnapshotUndecodable{27} |
+| SEQ-409.5 | next_id 等于最大的存活 ID | SnapshotUndecodable{27} |
+| SEQ-409.6 | 存活 ID 为 0 | SnapshotUndecodable{27} |
+| SEQ-409.7 | 重复存活 ID | SnapshotUndecodable{27} |
+| SEQ-409.8 | 登记截止与堆不同 | SnapshotUndecodable{27} |
+| SEQ-409.9 | 登记 tag 与堆不同 | SnapshotUndecodable{27} |
+| SEQ-409.10 | 登记 group 与堆不同 | SnapshotUndecodable{27} |
+| SEQ-409.11 | 非零保留字段 | SnapshotUndecodable{27} |
+| SEQ-409.12 | 未绑定的实例 | SnapshotUndecodable{27} |
+| SEQ-409.13 | 缺一个实例的计数行 | SnapshotUndecodable{27} |
+| SEQ-409.14 | 堆中额外复制一个物理键相同的定时器 | SnapshotUndecodable{27} |
+| SEQ-409.15 | 重复节 27 | SnapshotUndecodable{27} |
+| SEQ-409.16 | 登记数超出体长 | SnapshotUndecodable{27} |
+
+### SEQ-410 空定时器堆恢复后不复用已消耗的 ID
+
+- 规则:[定时器](README.md#定时器)
+- 级别:unit
+- 里程碑:M2
+- 前置:策略实际登记 ID 1–7,全部已取消或到期,保存关键帧
+- 步骤:崩溃重启;策略登记一个新定时器并等其到期;保存末尾快照;执行完整及关键帧窗口回放
+- 期望:恢复的存活登记为空,计数器为 8,新返回值为 8;该定时器只到期一次;两次运行的 Output、快照字节与恢复状态均一致
+- 实现:`crates/hft-sequencer/tests/timer_recovery.rs::seq_410_empty_heap_retains_consumed_timer_ids`

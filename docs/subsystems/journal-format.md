@@ -214,7 +214,7 @@ committed_len 之后   全零(热段由内核在缺页时清零;冷副本在封�
 const _: () = assert!(size_of::<SnapshotHdr>() == 96);
 // snap_tsc、boot_id、snap_utc_ns 在 hft-event MEASURE_MASK 中屏蔽:换机或重跑验证回放时它们必然不同,不参与 state_hash/out_hash 与逐字节比对。
 // 跨重启保存的时刻(策略、ledger、risk 状态里的冷却与截止)一律存 engine_ns 或 UTC 日历量,恢复后原样有效,不需平移。
-// 唯一例外:OMS、hft-exec 与定时器堆(节 2、12、21、8)的已登记 TSC 行;恢复结束时由 recovery_end 把它们按"停机时间不计"平移到本次运行
+// 唯一例外:OMS、hft-exec 与定时器堆及身份登记(节 2、12、21、8、27)的已登记 TSC 行;恢复结束时由 recovery_end 把它们按"停机时间不计"平移到本次运行
 // (t → now + (t − stop_tsc),跨开机、换机同一规则;行清单与平移规则归 hft-sequencer、hft-oms、hft-exec)。
 // 节 3 的 resume_hold_until 是登记的 TSC 字段,但不平移:recovery_end 重新设定它(规则归 hft-oms)。
 // 节 21 Gate 行的 gate_closed_tsc 同样是登记的 TSC 字段、不平移:recovery_end 把它重设为 now(规则归 hft-exec)。
@@ -254,6 +254,8 @@ const _: () = assert!(size_of::<SnapshotHdr>() == 96);
 | 24 | `VenueNotices` | [hft-sequencer](../../crates/hft-sequencer/README.md) | 生效的 `VenueNotice`(下架时刻、结算周期覆盖、维护窗口) |
 | 25 | `EngineClock` | [hft-sequencer](../../crates/hft-sequencer/README.md);行格式在本页 | 当前运行的引擎时钟基准:`EngineClockRow { base_engine_ns: i64, base_tsc: u64 /* 该 EngineClock 记录的记录头 tsc */, tsc_hz_milli: u64, clock_seq: u64 /* 该 EngineClock 记录的 seq */ }`(32 B,一行,行版本 1);计入 `state_hash`(全部来自 Input,回放确定);从中途段起步的读者据此换算 `engine_ns` |
 | 26 | `ConnLive` | [hft-sequencer](../../crates/hft-sequencer/README.md) | 每 (venue, BBO 连接槽) 的 `ConnLive{up, resync, live_tsc}`(槽数 `MAX_BBO_CONN_SLOTS`);只含本次运行的值,处理 `EngineClock` 时清空;从关键帧起步的读者据此延续 `BboView` 的连接健康 |
+
+| 27 | `StrategyTimers` | [hft-sequencer](../../crates/hft-sequencer/README.md) | 每绑定实例的 SDK TimerId 计数器及存活登记;恢复与节 8 逐项核对,截止一起平移 |
 
 各节的行格式与行版本只在归属 crate 登记(本页只登记节号、节名与归属;本页给出行格式的节 14、18、20、25 除外)。模拟账户的状态与实盘账户在同一组节里(按 `account` 区分);sim-gw 自身的撮合状态不进本快照,启动时由 [hft-sim](../../crates/hft-sim/README.md) 从这些节重建。未知节号的读者按 `len` 跳过;节内行格式的演进规则同事件体(只追加、零值表示未提供,`version` 递增)。行只由显式字段与 `_pad` 组成(无隐式填充,未用字节补零);不原样嵌入数据枚举(`#[repr(C, u8)]`)或标明"不以原始字节写进 journal"的类型,这类内容按字段展开(判别值 + 显式填充 + 定长载荷)。L2 档位不进 `StateSnapshot`,由紧随其后的 `L2Snapshot` 关键帧承载。
 
