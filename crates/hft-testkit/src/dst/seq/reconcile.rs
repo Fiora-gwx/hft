@@ -244,7 +244,7 @@ impl CommittedRecon {
             .iter()
             .rev()
             .find_map(|r| {
-                r.read::<Note>()
+                r.try_read::<Note>()
                     .filter(|n| {
                         n.source == NoteSource::Sequencer && n.code == hft_ledger::notes::code::EPOCH_START
                     })
@@ -330,7 +330,7 @@ impl CommittedRecon {
                     }
                     let key = if let Some(d) = r.try_read::<OrderDecision>() {
                         Some((d.account, d.venue, d.inst))
-                    } else if let Some(f) = r.read::<OrderEvent>() {
+                    } else if let Some(f) = r.try_read::<OrderEvent>() {
                         Some((f.account, f.venue, f.inst))
                     } else if let Some(f) = r.try_read::<ExternalFill>() {
                         Some((f.account, f.venue, f.inst))

@@ -389,7 +389,7 @@ impl<S: StrategySet> SeqRig<S> {
 
 `ReconActor::round_committed` 按 Live 账户与 venue 分组,从独立 JournalLedger 读已提交边界的仓位与原始成交入账身份,包括交易所稀疏视图里已归零的合约。`view_seq` 是这个 journal 边界;订单与墓碑阻塞来自同一边界的 OMS 只读接口,用户流及最近活动来自原始记录。两轮数量稳定、无在途或 Unknown/VERIFY、用户流连续 Up 才提出 AUTO_EXTERNAL;真实引擎每轮经控制环提交,检查器开关不改变输入。重启或连续性丢失时清除两轮记忆。
 
-`ReceiptReader` 从有界 ExternalReceipt 历史筛出尚未入账的完整身份,按原始历史顺序提交现金与费用;重复分页只接受逐字节相同的原件。已入账身份按完整提交事件累积,不依赖热账本去重 FIFO 的当前保留窗口。`ReconActor::settled_input` 只负责打包;缺失、冲突、超量、无完整现金覆盖或错误账户/品种的凭据使本轮明确失败,不从仓位差或钱包差估算现金。TK-134/135 覆盖自动选择、两轮条件、重启与补报;LED-081 的标准随机种子验收仍待接入。资金费、余额与 UnknownResolved 的完整对账轮次仍未实现,真实轮次拒绝仅含金额差的 funding 注入。
+`ReceiptReader` 从有界 ExternalReceipt 历史筛出尚未入账的完整身份,按原始历史顺序提交现金与费用;重复分页只接受逐字节相同的原件。已入账身份按完整提交事件累积,不依赖热账本去重 FIFO 的当前保留窗口。`ReconActor::settled_input` 只负责打包;缺失、冲突、超量、无完整现金覆盖或错误账户/品种的凭据使本轮明确失败,不从仓位差或钱包差估算现金。TK-134–136 覆盖自动选择、两轮条件、FIFO 回收、重启与补报;LED-081 的标准随机种子验收仍待接入。资金费、余额与 UnknownResolved 的完整对账轮次仍未实现,真实轮次拒绝仅含金额差的 funding 注入。
 
 ### 金样运行器
 

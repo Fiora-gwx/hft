@@ -26,7 +26,7 @@ spec: README.md
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
 | 10. SeqRig | PY-106–PY-109、PY-111、PY-112 |
 | 实现说明 | 不适用:见子节 |
-| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-135 |
+| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-136 |
 | 金样运行器 | TK-001、TK-005 |
 | 源文件 | TK-066 |
 | 延迟与资源契约 | TK-092–TK-093 |
@@ -1740,6 +1740,16 @@ spec: README.md
 - 期望:前六种不得自动补账,缺失真值直接失败;另一账户断流不改变本账户资格;同一提交边界重复轮询不能充当第二轮;缺少原始历史直接失败
 - 边界:本用例不替代 LED-081 的 PairOnFill、标准种子集及节 1/13/22 逐事件验收
 - 实现:`crates/hft-testkit/tests/reconcile_actor.rs::tk_135_committed_round_requires_stable_complete_observations`
+
+### TK-136 普通去重环回收后仍能识别已入账原件
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:integ
+- 里程碑:M2
+- 前置:真实引擎存在两笔未推送的 ADL;再依次入账 `ext_dedup_cap + 1` 笔独立成交
+- 步骤:确认最早成交身份已被热账本 FIFO 淘汰;保留完整历史,执行两个稳定对账轮次
+- 期望:已入账身份由原始 journal 的完整事件边界保留;仅选中两笔漏记原件,不把淘汰的旧成交再算进缺口;I16 和独立冷账本/验证回放通过
+- 实现:`crates/hft-testkit/tests/reconcile_actor.rs::tk_136_receipt_selection_survives_hot_dedup_eviction`
 
 ## 验收
 

@@ -341,3 +341,32 @@ fn tk_135_committed_round_requires_stable_complete_observations() {
         "missing originals must fail"
     );
 }
+
+#[test]
+fn tk_136_receipt_selection_survives_hot_dedup_eviction() {
+    let mut s = Session::new(Side::Buy, 100_000);
+    let cap = s.e.sequencer().engine().setup.ledger.ext_dedup_cap;
+    let opening = s.history()[0].fill;
+    for n in 0..=cap {
+        let ms = 3_001 + u64::from(n);
+        let fill = s
+            .venue()
+            .m
+            .external(ACCT_A, P1, Side::Buy, 1, "booked-later", false, ms * MS);
+        s.process(ms, InputRec::of(&fill, Source::Venue(VP)));
+    }
+    let seen = s.e.sequencer().engine().ledger.ext_seen(ACCT_A, VP);
+    assert_eq!(seen.len(), cap as usize);
+    assert!(
+        !seen.iter().any(|k| k.kind == 1 && k.a == opening.trade_id),
+        "must actually evict the old identity"
+    );
+    s.quiet(9_000);
+    let first = s.round().unwrap();
+    s.deliver(first);
+    let second = s.round().unwrap();
+    let b = batch(&second).unwrap();
+    assert_eq!(b.fills().map(|f| f.trade_id).collect::<Vec<_>>(), vec![2, 3]);
+    s.deliver(second);
+    s.exact();
+}
