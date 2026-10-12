@@ -210,7 +210,7 @@ fn seq_412_bad_cash_stops_before_hedge_and_wallet_booking() {
                 e.avg_px = Px(0);
                 FatalReason::Settlement(hft_ledger::SettlementError::InvalidPrice)
             }
-            _ => FatalReason::UnsupportedExternalCash,
+            _ => FatalReason::Settlement(hft_ledger::SettlementError::MissingCash),
         };
         let before = wallet(&h.s.engine().ledger);
         let pos = *h.s.engine().ledger.pos(AC1, B1);
@@ -233,7 +233,7 @@ fn seq_412_bad_cash_stops_before_hedge_and_wallet_booking() {
                 ex_ts_ns: 0,
                 rx_tsc: hft_types::Tsc(0),
                 fill_seq: 0,
-                cash_qty: q("0.001"),
+                cash_qty: Qty(0),
                 cash_amount: Qty(0),
             };
             h.push(h.rep_ring(AC1), &x);
@@ -246,5 +246,69 @@ fn seq_412_bad_cash_stops_before_hedge_and_wallet_booking() {
         assert!(decisions(&h.since(m)).is_empty());
         assert!(!h.trace().contains(&"ledger.apply_fill"));
         assert!(!h.since(m).iter().any(|r| r.kind == EventKind::ORDER_DECISION));
+    }
+}
+
+#[test]
+fn seq_413_external_cash_dedup_cold_snapshots_and_full_window_replay() {
+    for order in [[0, 1, 2, 3, 4], [0, 1, 3, 2, 4], [4, 2, 3, 1, 0]] {
+        let mut h = cash_boot();
+        let initial = wallet(&h.s.engine().ledger);
+        let before = h.keyframe();
+        let mut expected = initial;
+        let mut net = 0;
+        let mut partial = None;
+        for (step, ix) in order.into_iter().enumerate() {
+            let (side, qty, price, fee, amount) = FACTS[ix];
+            let e = hft_event::ExternalFill {
+                venue: B,
+                account: AC1,
+                side,
+                cause: hft_event::ExternalCause::Manual,
+                inst: B1,
+                qty: Qty(qty),
+                px: Px(price),
+                fee: Qty(fee),
+                fee_asset: USDT,
+                _pad: [0; 6],
+                exch_order_id: 0,
+                trade_id: ix as u64 + 70,
+                ex_ts_ns: 0,
+                rx_tsc: hft_types::Tsc(0),
+                fill_seq: 0,
+                cash_qty: Qty(qty),
+                cash_amount: Qty(amount),
+            };
+            h.push(h.rep_ring(AC1), &e);
+            assert_eq!(h.run(), StepOutcome::Idle);
+            expected += amount - fee;
+            net += side.sign() * qty;
+            assert_eq!(wallet(&h.s.engine().ledger), expected, "{order:?} step {step}");
+            assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty.0, net);
+            if step == 2 {
+                // The following duplicate must be rejected by keys restored from this frame.
+                partial = Some(h.keyframe());
+            }
+            let m = h.mark();
+            h.push(h.rep_ring(AC1), &e);
+            assert_eq!(h.run(), StepOutcome::Idle);
+            assert_eq!(wallet(&h.s.engine().ledger), expected);
+            assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty.0, net);
+            assert!(decisions(&h.since(m)).is_empty());
+        }
+        h.keyframe();
+        assert_eq!(expected, initial - 1_180_000 - 18_007_900);
+        assert_eq!(net, 0);
+        for start in [&before, partial.as_ref().unwrap()] {
+            let cold = cold_at(&h, start);
+            assert_eq!(wallet(cold.ledger()), expected);
+            assert_eq!(cold.ledger().pos(AC1, B1), h.s.engine().ledger.pos(AC1, B1));
+            assert_eq!(
+                cold.ledger().ext_seen(AC1, B),
+                h.s.engine().ledger.ext_seen(AC1, B)
+            );
+            assert!(h.verify_from(Some(start.seq)).is_empty(), "window {}", start.seq);
+        }
+        assert!(h.verify().is_empty(), "full replay {order:?}");
     }
 }

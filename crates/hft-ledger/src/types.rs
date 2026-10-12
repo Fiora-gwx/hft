@@ -127,6 +127,9 @@ pub enum SettlementError {
     WrongAsset,
     InvalidQuantity,
     InvalidPrice,
+    MissingCash,
+    CashCoverage,
+    ExternalOverlap,
 }
 
 /// Late fee (OMS `FeeOut`).

@@ -299,7 +299,84 @@ fn led_282_journal_rejects_unprovable_cash_and_stops_consumption() {
     }
     let mut j = one_order(rd);
     let mut x = ext(hft_event::ExternalCause::Adl, Sell, BTC_P2, "0.001", "60000");
-    x.cash_qty = x.qty;
-    x.cash_amount = Qty(-100);
-    assert_eq!(apply(&mut j, &x), Err(JournalApplyError::UnsupportedExternalCash));
+    x.cash_qty = Qty(0);
+    assert_eq!(
+        apply(&mut j, &x),
+        Err(JournalApplyError::Settlement(SettlementError::MissingCash))
+    );
+}
+
+#[test]
+fn led_286_journal_external_cash_identity_and_missing_facts_stop_consumption() {
+    let rd = rd_cash();
+    let mut good = ext(hft_event::ExternalCause::Adl, Sell, BTC_P2, "0.001", "60000");
+    good.trade_id = 90;
+    good.cash_qty = good.qty;
+    for row in 0..5 {
+        let mut j = cold(&booted_with(rd), rd);
+        let mut e = good;
+        let want = match row {
+            0 => {
+                e.inst = InstId(u32::MAX);
+                SettlementError::UnknownInstrument
+            }
+            1 => {
+                e.venue = S1;
+                SettlementError::VenueMismatch
+            }
+            2 => {
+                e.account = hft_types::AccountId(0);
+                SettlementError::AccountVenue
+            }
+            3 => {
+                e.cash_qty = Qty(0);
+                SettlementError::MissingCash
+            }
+            _ => {
+                e.cash_qty.0 += 1;
+                SettlementError::CashCoverage
+            }
+        };
+        let before = snap(j.ledger());
+        let error = Err(JournalApplyError::Settlement(want));
+        assert_eq!(apply(&mut j, &e), error, "row {row}");
+        assert_eq!(snap(j.ledger()), before);
+        assert_eq!(apply(&mut j, &good), error);
+        assert_eq!(snap(j.ledger()), before);
+    }
+}
+
+#[test]
+fn led_287_cold_clock_accepts_only_completely_zero_unstarted_anchor() {
+    let rd = rd_cash();
+    for row in 0..4 {
+        let l = booted_with(rd);
+        let mut w = SnapshotWriter::new(1 << 20);
+        l.snapshot(&mut w);
+        w.begin_section(25, 1);
+        let mut anchor = [0u8; 32];
+        match row {
+            1 => anchor[0..8].copy_from_slice(&1i64.to_le_bytes()),
+            2 => anchor[8..16].copy_from_slice(&1u64.to_le_bytes()),
+            3 => anchor[24..32].copy_from_slice(&1u64.to_le_bytes()),
+            _ => {}
+        }
+        w.put_bytes(&anchor);
+        w.add_rows(1);
+        w.end_section();
+        let r =
+            JournalLedger::from_snapshot(&mut SnapshotReader::new(w.as_bytes()), rd, &cfg_lf(), &caps_lf());
+        if row == 0 {
+            let mut j = r.unwrap();
+            // EngineClock arrives after the boot frame and supplies the first valid anchor.
+            clock(&mut j, s(10));
+            let e = bal(A1, P2, USDT, usdt("50000"), Qty(0), s(10));
+            feed(&mut j, &e, true);
+            let mut expected = l;
+            expected.on_balance(&e, false, s(10));
+            assert_eq!(snap(j.ledger()), snap(&expected));
+        } else {
+            assert!(matches!(r, Err(RestoreError::BadValue)), "row {row}");
+        }
+    }
 }

@@ -110,7 +110,7 @@ impl Ledger {
 
     /// `cash` replaces only the perpetual wallet leg of this trade. Position/leg average
     /// cost and analytical PnL still follow the recorded fill order.
-    fn book_trade_with_cash(&mut self, tr: &Trade, cash: Option<Qty>) -> PnlBreakdown {
+    pub(crate) fn book_trade_with_cash(&mut self, tr: &Trade, cash: Option<Qty>) -> PnlBreakdown {
         let mut d = PnlBreakdown::zero();
         let Some(s) = self.inst(tr.inst).copied() else {
             return d;

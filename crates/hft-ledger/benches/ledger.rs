@@ -50,6 +50,17 @@ fn led_251_apply_external(c: &mut Criterion) {
             l.clear_notes();
         })
     });
+    e.cash_qty = e.qty;
+    e.cash_amount = hft_types::Qty(0);
+    c.bench_function("ledger/apply_settled_external", |b| {
+        b.iter(|| {
+            k += 1;
+            e.trade_id = k;
+            e.side = if k & 1 == 0 { Buy } else { Sell };
+            black_box(l.apply_settled_external(black_box(&e), s(2) + k as i64)).expect("valid cash");
+            l.clear_notes();
+        })
+    });
 }
 
 fn bop() -> Ledger {

@@ -227,3 +227,195 @@ fn led_278_settlement_snapshot_resume_and_late_fee() {
         );
     }
 }
+
+fn external_execution(fill: FillDelta, settled: PerpCashSettlement, id: u64) -> hft_event::ExternalFill {
+    let mut e = ext_tid(
+        hft_event::ExternalCause::Manual,
+        fill.side,
+        fill.inst,
+        "0.001",
+        "60000",
+        id,
+    );
+    e.qty = fill.qty;
+    e.px = fill.px;
+    e.fee = Qty(fill.fee);
+    e.fee_asset = fill.fee_asset;
+    e.cash_qty = e.qty;
+    e.cash_amount = settled.amount;
+    e
+}
+
+#[test]
+fn led_283_external_cash_all_permutations_dedup_and_restore() {
+    for mirror in [false, true] {
+        let fills = executions(mirror);
+        for order in permutations() {
+            let mut ledger = booted();
+            let mut expected = 50_000_000_000i64;
+            let mut quantity = 0;
+            for (step, ix) in order.into_iter().enumerate() {
+                let (f, c) = fills[ix];
+                let e = external_execution(f, c, ix as u64 + 1);
+                assert!(
+                    ledger
+                        .apply_settled_external(&e, s(step as i64 + 1))
+                        .unwrap()
+                        .is_some()
+                );
+                expected += c.amount.0 - f.fee;
+                quantity += f.side.sign() * f.qty.0;
+                assert_eq!(
+                    cash(&ledger, A1, P2, USDT).total.0,
+                    expected,
+                    "{order:?} at {step}"
+                );
+                assert_eq!(ledger.margin(A1, P2).wallet.0, expected);
+                assert_eq!(ledger.pos(A1, BTC_P2).qty.0, quantity);
+                let before = snap(&ledger);
+                if step == 2 {
+                    ledger = restore(&before).unwrap();
+                }
+                assert_eq!(ledger.apply_settled_external(&e, s(20)), Ok(None));
+                assert_eq!(
+                    snap(&ledger),
+                    before,
+                    "duplicate must not advance time or any book"
+                );
+            }
+            assert_eq!(quantity, 0);
+            assert_eq!(ledger.ext_seen(A1, P2).len(), 5);
+        }
+    }
+}
+
+#[test]
+fn led_284_external_cash_is_booked_once_across_attribution_parts() {
+    for (shadow, close_qty, cash_amount) in [
+        (false, "1.0", -999_999_999),
+        (false, "0.4", 0),
+        (true, "1.0", 1_234_567),
+    ] {
+        let mut l = booted();
+        l.apply_settled_fill(
+            &f(Sell, BTC_P2, "1.0", "60000", "0", USDT, G1, 1),
+            PerpCashSettlement {
+                asset: USDT,
+                amount: Qty(0),
+            },
+            s(1),
+        )
+        .unwrap();
+        l.set_cell_shadow(A1, G1, shadow);
+        let mut e = ext_tid(
+            hft_event::ExternalCause::Liquidation,
+            Buy,
+            BTC_P2,
+            close_qty,
+            "61000",
+            91,
+        );
+        // The split row crosses the group's zero by 0.4 BTC.
+        if !shadow && close_qty == "1.0" {
+            e.qty = btc("1.4");
+        }
+        e.cash_qty = e.qty;
+        e.cash_amount = Qty(cash_amount);
+        e.fee = usdt("0.2");
+        e.fee_asset = USDT;
+        let app = l.apply_settled_external(&e, s(2)).unwrap().unwrap();
+        if shadow {
+            assert_eq!(
+                (app.group, app.net_qty, app.none_qty),
+                (hft_types::GROUP_NONE, Qty(0), e.qty)
+            );
+        } else if close_qty == "1.0" {
+            assert_eq!(
+                (app.group, app.net_qty, app.none_qty),
+                (G1, btc("1.0"), btc("0.4"))
+            );
+        } else {
+            assert_eq!((app.group, app.net_qty, app.none_qty), (G1, e.qty, Qty(0)));
+        }
+        assert_eq!(
+            cash(&l, A1, P2, USDT).total.0,
+            50_000_000_000 + cash_amount - e.fee.0
+        );
+        let before = snap(&l);
+        l = restore(&before).unwrap();
+        assert_eq!(l.apply_settled_external(&e, s(10)), Ok(None));
+        assert_eq!(snap(&l), before);
+    }
+}
+
+#[test]
+fn led_285_external_cash_errors_do_not_change_time_dedup_or_books() {
+    let (f, c) = executions(false)[0];
+    for row in 0..13 {
+        let mut l = booted();
+        let mut e = external_execution(f, c, 73);
+        let want = match row {
+            0 => {
+                e.inst = InstId(u32::MAX);
+                SettlementError::UnknownInstrument
+            }
+            1 => {
+                e.inst = BTC_S1;
+                e.venue = S1;
+                SettlementError::NotPerpetual
+            }
+            2 => {
+                e.venue = S1;
+                SettlementError::VenueMismatch
+            }
+            3 => {
+                e.account = AccountId(0);
+                SettlementError::AccountVenue
+            }
+            4 => {
+                e.qty = Qty(0);
+                SettlementError::InvalidQuantity
+            }
+            5 => {
+                e.qty = Qty(-1);
+                SettlementError::InvalidQuantity
+            }
+            6 => {
+                e.px = Px(0);
+                SettlementError::InvalidPrice
+            }
+            7 => {
+                e.cash_qty = Qty(0);
+                SettlementError::MissingCash
+            }
+            8 => {
+                e.cash_qty.0 -= 1;
+                SettlementError::MissingCash
+            }
+            9 => {
+                e.cash_qty = Qty(-1);
+                SettlementError::CashCoverage
+            }
+            10 => {
+                e.cash_qty.0 += 1;
+                SettlementError::CashCoverage
+            }
+            11 => {
+                e.cash_qty = Qty(0);
+                e.cash_amount = Qty(1);
+                SettlementError::CashCoverage
+            }
+            _ => {
+                let auto =
+                    hft_ledger::Ledger::auto_external_fill(A1, P2, BTC_P2, btc("0.001"), px("60000"), 900);
+                assert!(l.apply_external(&auto, true, s(1)).is_some());
+                e.cause = hft_event::ExternalCause::Adl;
+                SettlementError::ExternalOverlap
+            }
+        };
+        let before = snap(&l);
+        assert_eq!(l.apply_settled_external(&e, s(40)), Err(want), "row {row}");
+        assert_eq!(snap(&l), before, "row {row}");
+        assert!(!l.ext_seen(A1, P2).iter().any(|k| k.a == 73));
+    }
+}

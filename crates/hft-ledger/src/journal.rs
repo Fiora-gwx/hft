@@ -369,10 +369,17 @@ impl JournalLedger {
             let base = rr.get_i64()?;
             let tsc = rr.get_u64()?;
             let hz_milli = rr.get_u64()?;
+            let clock_seq = rr.get_u64()?;
             if hz_milli == 0 {
-                return Err(RestoreError::BadValue);
+                // The initial Boot snapshot precedes EngineClock. Only its all-zero
+                // anchor is unstarted; a partial or corrupt zero-frequency row is invalid.
+                if base != 0 || tsc != 0 || clock_seq != 0 {
+                    return Err(RestoreError::BadValue);
+                }
+                None
+            } else {
+                Some(Clock { base, tsc, hz_milli })
             }
-            Some(Clock { base, tsc, hz_milli })
         } else {
             None
         };
@@ -463,7 +470,7 @@ impl JournalLedger {
                     let cash_inst = match (n.source, n.code) {
                         (NoteSource::Oms, code::OMS_FOREIGN_FILL) => Some(n.inst),
                         (NoteSource::Ledger, code::EXTERNAL_FILL)
-                            if (n.v[0] >> 24) & u64::from(aflags::AUTO_RECON) != 0 =>
+                            if (n.v[0] >> 24) & aflags::AUTO_RECON != 0 =>
                         {
                             Some(InstId(n.v[1] as u32))
                         }
@@ -490,10 +497,15 @@ impl JournalLedger {
             }
             EventKind::EXTERNAL_FILL => {
                 if let Ok(e) = rec.read::<ExternalFill>() {
-                    if self.ledger.inst(e.inst).is_some_and(|i| i.perp_cash) {
-                        return Err(JournalApplyError::UnsupportedExternalCash);
+                    if self.ledger.venue_s(e.venue).is_some_and(|v| v.perp_cash)
+                        || self.ledger.inst(e.inst).is_some_and(|i| i.perp_cash)
+                    {
+                        self.ledger
+                            .apply_settled_external(&e, t)
+                            .map_err(JournalApplyError::Settlement)?;
+                    } else {
+                        self.ledger.apply_external(&e, false, t);
                     }
-                    self.ledger.apply_external(&e, false, t);
                 }
             }
             EventKind::RECONCILE_REPORT => {

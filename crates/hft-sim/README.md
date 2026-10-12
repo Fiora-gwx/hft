@@ -530,7 +530,7 @@ pub struct StressVerdict {
 ## 已知限制与后续工作
 
 - **M2 实现范围**:纯核心 `SimExchange`;`task` feature(`SimGwTask`、受控故障注入 `SimFault`,`on_command` 目前忽略 `SimFault`)、压力用例(`stress.rs`)与 `queue-hftbacktest` 随 M4 落地。每个被跟踪的 inst(Sim 账户各 venue 的全部 inst)在 `new` 时分配一本 hft-book `L2Book`(窗口取 refdata `book_window`)。
-- 结算事实可由回报与 `SimSeedOrder` 保留;OMS、sequencer、冷读者的消费与生产恢复装配尚未接通,不能仅凭模拟回报带字段就计为 INV-16 或恢复验收通过。
+- 结算事实可由回报与 `SimSeedOrder` 保留;消费和恢复边界见 [hft-ledger](../hft-ledger/README.md#已知限制与后续工作),不能仅凭模拟回报带字段就计为 INV-16 或恢复验收通过。
 - **无市场冲击**:我们的模拟单不改变真实行情;已吃流动性记忆只近似"同一档被吃掉";单笔名义相对深度大时结论偏乐观,以 `take_avail_bp` 校准与 `top_only_fills` 计数约束。
 - **延迟是抽样的**:交易所内部排队与跨所时钟差不可见;校准前的模拟成交率与滑点只作方向性参考。
 - **挂单不建排队位置**(默认 `TradeThrough`,偏保守);需要时启用 `queue-hftbacktest`(触发条件:MakerFirst 立项)。

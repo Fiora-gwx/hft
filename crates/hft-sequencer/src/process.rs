@@ -876,17 +876,27 @@ pub(crate) fn external_fill<D: Driver<S>, S: StrategySet>(
     oms_foreign: bool,
 ) -> R<()> {
     let a = x.account;
-    if e.rd
-        .caps(x.venue)
-        .flags
-        .contains(hft_refdata::CapFlags::PERP_CASH)
-    {
+    let settled =
+        e.rd.caps(x.venue)
+            .flags
+            .contains(hft_refdata::CapFlags::PERP_CASH)
+            || e.rd
+                .caps(e.rd.inst(x.inst).venue)
+                .flags
+                .contains(hft_refdata::CapFlags::PERP_CASH);
+    if settled && (auto_recon || oms_foreign) {
         return Err(FatalReason::UnsupportedExternalCash);
     }
     let before = e.ledger.pos(a, x.inst).qty.0 != 0;
     e.trace
         .rec("ledger.apply_external", u64::from(a.0), u64::from(auto_recon));
-    let r = e.ledger.apply_external(x, auto_recon, e.now.engine_ns);
+    let r = if settled {
+        e.ledger
+            .apply_settled_external(x, e.now.engine_ns)
+            .map_err(FatalReason::Settlement)?
+    } else {
+        e.ledger.apply_external(x, auto_recon, e.now.engine_ns)
+    };
     ledger_notes(e);
     let Some(app) = r else {
         return Ok(());

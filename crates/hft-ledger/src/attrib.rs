@@ -34,6 +34,59 @@ impl Ledger {
     /// Liquidation, ADL, manual, delivery or unknown fill: de-duplication, `auto_held` offset,
     /// attribution and booking. `None` = duplicate or fully offset by `auto_held`.
     pub fn apply_external(&mut self, e: &ExternalFill, auto_recon: bool, t: i64) -> Option<ExternalApplied> {
+        self.external_with_cash(e, auto_recon, None, t)
+    }
+
+    /// An external perpetual execution carrying complete actual cash facts. The existing
+    /// trade key owns de-duplication, including after restore. Cash is booked once even if
+    /// attribution splits the position between a group and GROUP_NONE.
+    /// Unproven AUTO_EXTERNAL overlap fails before time, keys or balances change.
+    /// No allocation; budget: ledger/apply_settled_external.
+    pub fn apply_settled_external(
+        &mut self,
+        e: &ExternalFill,
+        t: i64,
+    ) -> Result<Option<ExternalApplied>, SettlementError> {
+        let s = self.inst(e.inst).ok_or(SettlementError::UnknownInstrument)?;
+        if !s.perp {
+            return Err(SettlementError::NotPerpetual);
+        }
+        if s.venue != e.venue {
+            return Err(SettlementError::VenueMismatch);
+        }
+        let av = self.av(e.account, e.venue).ok_or(SettlementError::AccountVenue)?;
+        if e.qty.0 <= 0 {
+            return Err(SettlementError::InvalidQuantity);
+        }
+        if e.px.0 <= 0 {
+            return Err(SettlementError::InvalidPrice);
+        }
+        if e.cash_qty.0 < 0 || e.cash_qty.0 > e.qty.0 || (e.cash_qty.0 == 0 && e.cash_amount.0 != 0) {
+            return Err(SettlementError::CashCoverage);
+        }
+        if e.cash_qty != e.qty {
+            return Err(SettlementError::MissingCash);
+        }
+        if self.avd.get(av).is_some_and(|d| d.ext.contains(&ext_key(e))) {
+            return Ok(None);
+        }
+        if matches!(
+            e.cause,
+            ExternalCause::Adl | ExternalCause::Liquidation | ExternalCause::Unknown
+        ) && self.auto_held(e.account, e.inst, e.side).0 > 0
+        {
+            return Err(SettlementError::ExternalOverlap);
+        }
+        Ok(self.external_with_cash(e, false, Some(e.cash_amount), t))
+    }
+
+    fn external_with_cash(
+        &mut self,
+        e: &ExternalFill,
+        auto_recon: bool,
+        cash: Option<Qty>,
+        t: i64,
+    ) -> Option<ExternalApplied> {
         self.tick(t);
         let s = self.inst(e.inst).copied()?;
         let av = self.av(e.account, e.venue)?;
@@ -144,37 +197,43 @@ impl Ledger {
         };
         let mut d = PnlBreakdown::zero();
         if g_qty > 0 {
-            let x = self.book_trade(&Trade {
-                acc: e.account,
-                inst: e.inst,
-                side: e.side,
-                gross: Qty(gross_g),
-                net: Qty(g_qty),
-                px: e.px,
-                cell,
-                col: Col::External,
-                t,
-                seq: 0,
-                cash: true,
-                defer_round: cell.map(|(c, _)| c),
-            });
+            let x = self.book_trade_with_cash(
+                &Trade {
+                    acc: e.account,
+                    inst: e.inst,
+                    side: e.side,
+                    gross: Qty(gross_g),
+                    net: Qty(g_qty),
+                    px: e.px,
+                    cell,
+                    col: Col::External,
+                    t,
+                    seq: 0,
+                    cash: true,
+                    defer_round: cell.map(|(c, _)| c),
+                },
+                cash,
+            );
             d.add(&x);
         }
         if none_qty > 0 {
-            let x = self.book_trade(&Trade {
-                acc: e.account,
-                inst: e.inst,
-                side: e.side,
-                gross: Qty(qty - gross_g),
-                net: Qty(none_qty),
-                px: e.px,
-                cell: None,
-                col: Col::External,
-                t,
-                seq: 0,
-                cash: true,
-                defer_round: cell.map(|(c, _)| c),
-            });
+            let x = self.book_trade_with_cash(
+                &Trade {
+                    acc: e.account,
+                    inst: e.inst,
+                    side: e.side,
+                    gross: Qty(qty - gross_g),
+                    net: Qty(none_qty),
+                    px: e.px,
+                    cell: None,
+                    col: Col::External,
+                    t,
+                    seq: 0,
+                    cash: true,
+                    defer_round: cell.map(|(c, _)| c),
+                },
+                cash.map(|amount| if g_qty > 0 { Qty(0) } else { amount }),
+            );
             d.add(&x);
         }
         let fd = self.book_fee(

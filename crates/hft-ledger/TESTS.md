@@ -22,8 +22,8 @@ spec: README.md
 | 数据结构 | LED-002–LED-004、LED-233、LED-237、LED-247 |
 | 仓位与已实现(平均成本法) | LED-010、LED-021–LED-025、LED-030–LED-039、LED-240、LED-241、LED-243、LED-275–LED-278 |
 | 余额初始化、校验与基线 | LED-039–LED-046、LED-260–LED-262 |
-| 外部成交(`ExternalFill`) | LED-050–LED-081、LED-188、LED-240、LED-245 |
-| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282 |
+| 外部成交(`ExternalFill`) | LED-050–LED-081、LED-188、LED-240、LED-245、LED-283–LED-285 |
+| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282、LED-286–LED-287 |
 | 资金费 | LED-090–LED-104、LED-136–LED-138、LED-240、LED-245、LED-260 |
 | 资金费时刻归一化 | LED-091、LED-110–LED-116 |
 | 资金费对账校正 | LED-270、LED-268、LED-114、LED-120–LED-139、LED-244、LED-261 |
@@ -2382,7 +2382,7 @@ spec: README.md
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
 - 里程碑:M2
-- 基准名:`ledger/apply_external`
+- 基准名:`ledger/apply_external`、`ledger/apply_settled_external`;两入口均保留,后者带全量已知零现金事实
 - 实现:`crates/hft-ledger/benches/ledger.rs::led_251_apply_external`
 
 ### LED-252 apply_funding_push 基准
@@ -2779,7 +2779,103 @@ spec: README.md
 | LED-282.7 | 已登记身份改为其他品种 | Identity |
 | LED-282.8 | 已登记身份改为未知品种 | Identity |
 | LED-282.9 | 非正增量价格 | Settlement(InvalidPrice) |
-| LED-282.10 | ExternalFill 带已知现金 | UnsupportedExternalCash |
+| LED-282.10 | ExternalFill 缺现金覆盖 | Settlement(MissingCash) |
+
+### LED-283 外来现金在全部交付排列下逐单位入账且恢复后不重复
+
+- 规则:[外部成交](README.md#外部成交externalfill)
+- 级别:table
+- 里程碑:M2
+- 前置:LF 钱包已初始化,无成交
+- 输入:LED-275 的五笔原始执行及镜像方向,每方向全部 120 种交付排列;每笔用不同 trade_id
+- 步骤:逐笔入账后重复交付,第三笔后恢复账本快照再重复;每步从原始现金与费用独立累计期望
+- 期望:钱包、保证金钱包、仓位逐单位相等;重复不改变含时间在内的全部账本快照;最终仓位归零且去重环恰有五个键
+- 实现:`crates/hft-ledger/tests/settlement.rs::led_283_external_cash_all_permutations_dedup_and_restore`
+
+| 行 | 原始事实 | 交付排列 |
+|---|---|---|
+| LED-283.1 | 原方向 | 120 |
+| LED-283.2 | 买卖及现金符号镜像 | 120 |
+
+### LED-284 归属分成两部分时本笔结算只入一次
+
+- 规则:[外部成交](README.md#外部成交externalfill)
+- 级别:table
+- 里程碑:M2
+- 前置:永续 group 空仓 1 BTC,初始钱包扣费前为 50000 USDT
+- 步骤:逐行送入带完整现金事实及 0.2 USDT 费用的买入,保存快照后恢复并重复
+- 期望:完整现金只入钱包一次,费用只扣一次;group 与 GROUP_NONE 分量之和等于成交量,重复后的快照不变
+- 实现:`crates/hft-ledger/tests/settlement.rs::led_284_external_cash_is_booked_once_across_attribution_parts`
+
+| 行 | 归属 | 量与已知结算 |
+|---|---|---|
+| LED-284.1 | group 1 BTC + GROUP_NONE 0.4 BTC | 1.4 BTC,−999999999 个 USDT 最小单位 |
+| LED-284.2 | 全部 group | 0.4 BTC,已知零额 |
+| LED-284.3 | group 为 Shadow,全部 GROUP_NONE | 1 BTC,+1234567 个最小单位 |
+
+### LED-285 外来结算错误在去重登记与时间推进前失败
+
+- 规则:[外部成交](README.md#外部成交externalfill)
+- 级别:table
+- 里程碑:M2
+- 前置:LF 钱包已初始化,坏成交的 trade_id 尚未入去重环;重叠行先合成同向 auto_held
+- 输入:未知品种、现货、venue 不符、账户未绑定、零/负数量、零价格、缺覆盖、部分覆盖、负覆盖、超量覆盖、零覆盖非零额及已有 auto_held 的同向 ADL,共 13 行
+- 步骤:保存账本快照,以更晚时刻调用 apply_settled_external
+- 期望:逐行返回对应身份/数量/价格、MissingCash、CashCoverage 或 ExternalOverlap;全部快照字节不变,坏事件的 trade_id 不进入去重环
+- 实现:`crates/hft-ledger/tests/settlement.rs::led_285_external_cash_errors_do_not_change_time_dedup_or_books`
+
+| 行 | 输入 | 错误 |
+|---|---|---|
+| LED-285.1 | 未知品种 | UnknownInstrument |
+| LED-285.2 | 现货 | NotPerpetual |
+| LED-285.3 | venue 不符 | VenueMismatch |
+| LED-285.4 | 账户未绑定 | AccountVenue |
+| LED-285.5 | 零数量 | InvalidQuantity |
+| LED-285.6 | 负数量 | InvalidQuantity |
+| LED-285.7 | 零价格 | InvalidPrice |
+| LED-285.8 | 缺覆盖 | MissingCash |
+| LED-285.9 | 部分覆盖 | MissingCash |
+| LED-285.10 | 负覆盖 | CashCoverage |
+| LED-285.11 | 超量覆盖 | CashCoverage |
+| LED-285.12 | 零覆盖非零额 | CashCoverage |
+| LED-285.13 | 同向 auto_held | ExternalOverlap |
+
+### LED-286 冷读外来结算缺失或身份错误时停止
+
+- 规则:[冷消费者](README.md#冷消费者journalledger)
+- 级别:table
+- 里程碑:M2
+- 前置:从已初始化 LF 快照创建冷读者,永续 venue 开启 PERP_CASH
+- 输入:PERP_CASH 外来成交的未知品种、错误 venue、未绑定账户、缺覆盖和超量覆盖五行
+- 步骤:送入坏事件后再送有效事件
+- 期望:错误均经 Settlement 返回,随后保持首错;两次调用均不改变账本快照,未知品种不能绕过 venue 的结算要求
+- 实现:`crates/hft-ledger/tests/settlement_journal.rs::led_286_journal_external_cash_identity_and_missing_facts_stop_consumption`
+
+| 行 | 输入 | Settlement 错误 |
+|---|---|---|
+| LED-286.1 | 未知品种 | UnknownInstrument |
+| LED-286.2 | 错误 venue | VenueMismatch |
+| LED-286.3 | 未绑定账户 | AccountVenue |
+| LED-286.4 | 缺覆盖 | MissingCash |
+| LED-286.5 | 超量覆盖 | CashCoverage |
+
+### LED-287 冷启动时钟只接受完整全零的未开始行
+
+- 规则:[冷消费者](README.md#冷消费者journalledger)
+- 级别:table
+- 里程碑:M2
+- 前置:已初始化 LF 的账本快照,追加节 25 的一条 32 B 行
+- 输入:节 25 v1 的全零行,及频率为零但 base_engine_ns、base_tsc、clock_seq 分别非零的三行
+- 步骤:尝试恢复;全零行后交付 EngineClock 与余额报告
+- 期望:全零行允许等待时钟输入,随后快照与在该引擎时刻直接入账相同;三种不完整行均返回 BadValue
+- 实现:`crates/hft-ledger/tests/settlement_journal.rs::led_287_cold_clock_accepts_only_completely_zero_unstarted_anchor`
+
+| 行 | 零频率行的其余字段 | 期望 |
+|---|---|---|
+| LED-287.1 | 全零 | 接受,后续 EngineClock 驱动时间 |
+| LED-287.2 | base_engine_ns 非零 | BadValue |
+| LED-287.3 | base_tsc 非零 | BadValue |
+| LED-287.4 | clock_seq 非零 | BadValue |
 
 ## 验收
 

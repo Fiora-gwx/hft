@@ -28,7 +28,7 @@ spec: README.md
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
 | 连接活性 | SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173 |
-| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-412、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115 |
+| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-413、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
@@ -5789,4 +5789,20 @@ spec: README.md
 | SEQ-412.2 | 同水位异额 | OmsCash(Conflict) |
 | SEQ-412.3 | 错误 epoch | OmsCash(Untracked) |
 | SEQ-412.4 | 价格为零 | Settlement(InvalidPrice) |
-| SEQ-412.5 | 外来成交带已知零现金 | UnsupportedExternalCash |
+| SEQ-412.5 | 外来成交缺现金覆盖 | Settlement(MissingCash) |
+
+### SEQ-413 外来结算贯通冷读与关键帧去重回放
+
+- 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
+- 级别:table
+- 里程碑:M2
+- 前置:与 SEQ-411 相同的 B0、现金事实和三种交付排列;事件为各自具有独立 trade_id 的 Manual ExternalFill
+- 步骤:逐笔交付并重复,第三笔入账后、重复前保存关键帧;从起始与该关键帧冷读,执行完整和两个窗口回放
+- 期望:每步钱包等于原始现金与费用的独立累计,最终扣 1180000 与 18007900;重复不生成订单,冷读仓位及去重键与热账本相同;恢复后重复仍不入账,Output 与快照无回放分歧
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_413_external_cash_dedup_cold_snapshots_and_full_window_replay`
+
+| 行 | 交付顺序 |
+|---|---|
+| SEQ-413.1 | 1、2、3、4、5 |
+| SEQ-413.2 | 1、2、4、3、5 |
+| SEQ-413.3 | 5、3、4、2、1 |

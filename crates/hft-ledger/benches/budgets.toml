@@ -10,6 +10,10 @@ p99_ns = 400
 p50_ns = 200
 p99_ns = 500
 
+["ledger/apply_settled_external"]
+p50_ns = 200
+p99_ns = 500
+
 ["ledger/apply_funding_push"]
 p50_ns = 200
 p99_ns = 600

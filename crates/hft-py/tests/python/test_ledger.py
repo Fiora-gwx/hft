@@ -119,7 +119,7 @@ def test_py_114_booking_error_exposes_failing_sequence(j_led, tmp_path: Path, ap
         if api == "ledger":
             hft_py.ledger(journal, account="bn-1")
         else:
-            hft_py.pnl(journal, account="bn-1", by="group")
+            hft_py.pnl(journal, by="group")
     assert error.value.seq == seq
 
 

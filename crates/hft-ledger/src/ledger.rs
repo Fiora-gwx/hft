@@ -28,6 +28,7 @@ pub const NOTE_BUF: usize = 64;
 pub(crate) struct VenueStatic {
     pub present: bool,
     pub perp: bool,
+    pub perp_cash: bool,
     pub margin_asset: AssetId,
     pub funding: FundingSettleKind,
     pub fee_rule: FeeAssetRule,
@@ -304,6 +305,7 @@ impl Ledger {
             .map(|_| VenueStatic {
                 present: false,
                 perp: false,
+                perp_cash: false,
                 margin_asset: ASSET_NONE,
                 funding: FundingSettleKind::NotApplicable,
                 fee_rule: FeeAssetRule::Quote,
@@ -321,6 +323,7 @@ impl Ledger {
             let caps_row = rd.caps(v);
             vs.present = true;
             vs.perp = rd.venue(v).product == InstKind::Perp;
+            vs.perp_cash = caps_row.flags.contains(hft_refdata::CapFlags::PERP_CASH);
             vs.funding = caps_row.funding_settle;
             vs.fee_rule = caps_row.fee_asset_rule;
             let list = rd.insts_of_venue(v);
