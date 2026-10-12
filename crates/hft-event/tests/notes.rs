@@ -201,8 +201,8 @@ fn evt_075_note_registry_rows() {
         ("EVT-075.82", "AdvisorStats", Advisor, Some(Info), &[]),
         ("EVT-075.88", "ModelCkptSkipped", Advisor, Some(P1), &[]),
     ];
-    assert_eq!(NOTE_NAMES.len(), 89);
-    assert_eq!(rows.len(), 89);
+    assert_eq!(NOTE_NAMES.len(), 90);
+    assert_eq!(rows.len(), 90);
     for (i, (row, name, src, lvl, v)) in rows.iter().enumerate() {
         let n = note_name(name).unwrap_or_else(|| panic!("{row}"));
         assert_eq!(NOTE_NAMES[i].name, *name, "{row} order");

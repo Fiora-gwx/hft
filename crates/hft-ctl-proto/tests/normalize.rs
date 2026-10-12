@@ -53,10 +53,7 @@ fn ctp_178_reconciliation_receipts_use_one_atomic_record() {
     );
     v["issuer"] = json!("reconciler");
     let req = parse(&v);
-    assert_eq!(
-        hft_ctl_proto::parse_request(req.to_json().as_bytes()).unwrap(),
-        req
-    );
+    assert_eq!(hft_ctl_proto::parse_request(&req.to_json()).unwrap(), req);
     let n = hft_ctl_proto::normalize(&req, &rd).unwrap();
     let records = n.ring_records();
     assert_eq!(records.len(), 1);

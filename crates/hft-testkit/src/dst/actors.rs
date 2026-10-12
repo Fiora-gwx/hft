@@ -310,6 +310,7 @@ impl ReconActor {
         reports: &[ReconcileReport],
         receipts: &[super::venue_behavior::ExternalReceipt],
     ) -> Result<InputRec, &'static str> {
+        use zerocopy::IntoBytes;
         let first = reports.first().ok_or("empty reconciliation")?;
         let hdr = hft_event::ReconcileBatchHdr {
             report_id: first.report_id,
