@@ -567,7 +567,7 @@ Model 从检查点恢复、镜像尚未追到其 `last_seq` 时,落后量以该�
 固定容量的结构从不丢弃数据:
 
 1. **`ModeOutcome`**:各向量容量取构造上界(`cells` = `max_cells_total`),一次 `apply` 不可能溢出(hft-risk 保证)。
-2. **`NotifyQueue`**(每个 Input 128 项,分区见 `process` 第 3 步):某分区满时,该 Input 其后产生的通知按产生顺序进 `NotifyBacklog`(容量 `4 × U`,`U = max_cells_total + 128` 是单个 Input 的通知上界,启动时分配)。积压非空 → `view().wants_continue()` 为真,实盘驱动下一轮最先写 `Timer{Sys, NotifyContinue}`;每个 `NotifyContinue` 按原顺序投递至多 `notify_per_continue` 条(实盘实例先),其 `Ctx` 照常处理。
+2. **`NotifyQueue`**(每个 Input 128 项,分区见 `process` 第 3 步):某分区满时,该 Input 其后产生的通知按产生顺序进 `NotifyBacklog`(容量 `4 × U`,`U = max_cells_total + 128` 是单个 Input 的通知上界,启动时分配);模式分区溢出后,随后产生的账户级 cap 通知也进入积压。积压非空 → `view().wants_continue()` 为真,实盘驱动下一轮最先写 `Timer{Sys, NotifyContinue}`;每个 `NotifyContinue` 先按产生顺序取至多 `notify_per_continue` 条,再按实例调度顺序投递(实盘实例先、同实例内顺序不变),其 `Ctx` 照常处理。
 3. **背压**:轮首积压余量(`view().notify_headroom()`)< 2U 时,驱动这一轮先写 `NotifyContinue`,随后**只取实盘回报**,且每取一条之前要求当时的余量 ≥ U(单条回报最坏也放得下);ctl、bbo、advice、md、rep-sim 这一轮不取。余量恰好 2U 不进入背压轮,恰好 U 允许取实盘回报;下一轮重新判断。对冲腿回报因此不被续推饿住;只在连续的大面积模式变化时出现,至多数轮。
 4. **`resolve_broken` 扫描**:`oms.naked_groups` 每次至多 64 个 group,游标未完时同样经 `NotifyContinue` 续取。
 5. 积压与游标是状态,但 `Sys{Snapshot}`/`Sys{Roll}` 只在 `wants_continue()` 为假时写、Drain 等它们为空才写快照,所以不进快照。积压清空只解除续推约束,周期快照与软滚段仍须满足各自的空闲条件;Drain 在最后一批通知投递并满足退出条件的 Input 内完成。OMS 的待发队列另由 `OmsContinue` 续发并进快照([输出扇出](#输出扇出))。

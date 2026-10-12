@@ -3143,7 +3143,7 @@ spec: README.md
 - 步骤:
   1. 投递 `Kill{Global}`;连续 `step()` 直到 `wants_continue()` 为假
 - 期望:
-  - Kill 的 Input 投递 64 条 `Mode` 通知;其后 3 个 `NotifyContinue` 各投递 64 条;256 条全部恰好投递一次,顺序与产生顺序相同(实盘实例的在前)
+  - Kill 的 Input 投递 64 条 `Mode` 通知;其后 4 个 `NotifyContinue` 分别投递 64/64/64/4 条。合计 256 条 Mode 与各账户一条 CapSet 全部恰好投递一次;每批按实例调度顺序投递,同一实例内保持产生顺序(实盘实例的在前)
   - 每批投递的 `Now.seq` 与实际续推 Input 对齐;通知清空后写关键帧,完整回放和 Kill 前关键帧窗口逐字节一致
 - 实现:`crates/hft-sequencer/tests/notify_backlog.rs::seq_220_mass_mode_change`
 
@@ -3152,7 +3152,7 @@ spec: README.md
 - 规则:[通知队列与续推](README.md#通知队列与续推)、[环与容量](README.md#环与容量)
 - 级别:table
 - 里程碑:M2
-- 前置:SEQ-220 装配,四实例组数为 `[64, n − 2, 1, 1]`;实际 Kill 先投递 64 条,留下 n 条;不直接填队列
+- 前置:SEQ-220 装配,四实例组数为 `[64, n − 6, 1, 1]`;实际 Kill 产生模式变化与 4 条 CapSet,先投递 64 条,留下 n 条;不直接填队列
 - 实现:`crates/hft-sequencer/tests/notify_backlog.rs::seq_221_notify_per_continue`
 
 | 行 | n | 期望 `NotifyContinue` 次数 |
@@ -3161,7 +3161,7 @@ spec: README.md
 | SEQ-221.2 | 64 | 1 |
 | SEQ-221.3 | 65 | 2(64 + 1) |
 
-每行核对完整通知身份、旧/新模式、实际续推 Input 数和队列清空,再验证完整 journal 与 Kill 前窗口。
+每行核对完整通知身份、旧/新模式、cap 来源/作用域、实际续推 Input 数和队列清空,再验证完整 journal 与 Kill 前窗口。
 
 ### SEQ-222 续推未完时不写 Snapshot 与 Roll,Drain 不结束
 
@@ -3184,7 +3184,7 @@ spec: README.md
 - 性质:任意命令与回报交错下,`NotifyBacklog` 占用始终 ≤ 4U;每条产生的通知恰好投递一次,同一实例内顺序与产生顺序相同
 - 生成:SEQ-220 装配;固定六条交替 Kill/Resume 命令确保触发背压,再从 {`Kill{Global}`、`Resume{Kill}`、`SetMode` 全部 cell 的 Live/CloseOnly/Shadow、实盘余额回报、bbo} 抽取 1–500 条输入。命令待取时不再预签下一条确认,允许通知继续积压;结束后有界续推至清空
 - 参考:不限容量的参考队列
-- 断言:仅由已提交命令及独立模式转换生成参考,不读实际队列或模式推算期望;逐实例比对每个通知的组、旧/新模式与次数。每轮核对占用、峰值、余量、产生/交付差及每个 NotifyContinue 的 64 条上限;重复与缺失不能相互抵消
+- 断言:仅由已提交命令及独立模式转换生成参考,不读实际队列或模式推算期望;逐实例比对每个 Mode 的组与旧/新模式、每个 CapSet/CapCleared 的账户、来源与作用域;重复 Kill 与不存在的 Resume 不产生 cap 通知。每轮核对占用、峰值、余量、产生/交付差及每个 NotifyContinue 的 64 条上限;重复与缺失不能相互抵消
 - 例数:PR 300;每夜 20 000
 - 实现:`crates/hft-sequencer/tests/notify_backlog.rs::seq_223_backlog_never_overflows`
 

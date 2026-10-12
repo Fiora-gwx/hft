@@ -10,7 +10,7 @@ use hft_risk::mode::Effective;
 use hft_sequencer::codes::{detail, status};
 use hft_sequencer::driver::live::{LiveDriver, RingId};
 use hft_sequencer::{BootSource, Sequencer, StepOutcome};
-use hft_strategy_sdk::EventRef;
+use hft_strategy_sdk::{CapScopeView, EventRef, RiskEvent};
 use hft_types::{AccountId, CapSource, GroupId, HostClass, InstId, KillLevel, Qty, RunMode, StrategyId, Tsc};
 use proptest::prelude::*;
 use zerocopy::IntoBytes;
@@ -204,9 +204,13 @@ fn ready(counts: [u16; 4], period_ms: u32) -> H {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Change {
     strategy: StrategyId,
-    gix: u16,
-    old: RunMode,
-    new: RunMode,
+    event: ChangeKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChangeKind {
+    Mode { gix: u16, old: RunMode, new: RunMode },
+    Risk { account: AccountId, event: RiskEvent },
 }
 
 type Seen = Rc<RefCell<Vec<(u64, Change)>>>;
@@ -215,17 +219,25 @@ fn observe() -> Seen {
     let seen = Rc::new(RefCell::new(Vec::new()));
     let out = seen.clone();
     set_hook(move |hx, ev, _| {
-        if let EventRef::Mode { gix, old, new } = ev {
-            out.borrow_mut().push((
-                hx.v.now().seq,
-                Change {
-                    strategy: hx.s.strategy,
-                    gix: *gix,
-                    old: *old,
-                    new: *new,
-                },
-            ));
-        }
+        let event = match ev {
+            EventRef::Mode { gix, old, new } => ChangeKind::Mode {
+                gix: *gix,
+                old: *old,
+                new: *new,
+            },
+            EventRef::Risk { a, e } => ChangeKind::Risk {
+                account: *a,
+                event: **e,
+            },
+            _ => return,
+        };
+        out.borrow_mut().push((
+            hx.v.now().seq,
+            Change {
+                strategy: hx.s.strategy,
+                event,
+            },
+        ));
     });
     seen
 }
@@ -237,11 +249,50 @@ fn expected(counts: [u16; 4], old: RunMode, new: RunMode) -> Vec<Change> {
         .flat_map(|(strategy, n)| {
             (0..n).map(move |gix| Change {
                 strategy,
-                gix,
-                old,
-                new,
+                event: ChangeKind::Mode { gix, old, new },
             })
         })
+        .collect()
+}
+
+fn cap_changes(source: CapSource, set: bool) -> Vec<Change> {
+    let scope = CapScopeView {
+        strategy: StrategyId(0),
+        venue: hft_types::VenueId(0),
+        account: AccountId(0),
+        group: hft_types::GROUP_ALL,
+        inst: InstId(0),
+    };
+    ORDER
+        .into_iter()
+        .enumerate()
+        .map(|(ix, strategy)| Change {
+            strategy,
+            event: ChangeKind::Risk {
+                account: AccountId(ix as u8 + 1),
+                event: if set {
+                    RiskEvent::CapSet { source, scope }
+                } else {
+                    RiskEvent::CapCleared { source, scope }
+                },
+            },
+        })
+        .collect()
+}
+
+/// A continuation takes 64 produced entries; delivery then visits the instances in Live/Sim
+/// order. Preserve production order within each instance, including its trailing cap event.
+fn delivered_order(mut produced: Vec<Change>) -> Vec<Change> {
+    for batch in produced.chunks_mut(64) {
+        batch.sort_by_key(|x| ORDER.iter().position(|s| *s == x.strategy).unwrap());
+    }
+    produced
+}
+
+fn kill_changes(counts: [u16; 4]) -> Vec<Change> {
+    expected(counts, RunMode::Live, RunMode::CloseOnly)
+        .into_iter()
+        .chain(cap_changes(CapSource::KILL, true))
         .collect()
 }
 
@@ -282,21 +333,21 @@ fn seq_220_mass_mode_change() {
     assert_eq!(h.step(), StepOutcome::Busy);
     assert_eq!(h.res(id), (status::APPLIED, 0));
     assert_eq!(seen.borrow().len(), 64);
-    assert_eq!(h.s.engine().notify.backlog_len(), 192);
-    for left in [128, 64, 0] {
+    assert_eq!(h.s.engine().notify.backlog_len(), 196);
+    for (left, delivered) in [(132, 64), (68, 64), (4, 64), (0, 4)] {
         let before = seen.borrow().len();
         assert_eq!(h.step(), StepOutcome::Busy);
-        assert_eq!(seen.borrow().len() - before, 64);
+        assert_eq!(seen.borrow().len() - before, delivered);
         assert_eq!(h.s.engine().notify.backlog_len(), left);
         bound(&h);
     }
     assert!(!h.s.view().wants_continue());
     let seqs = continue_seqs(&h, mark);
-    assert_eq!(seqs.len(), 3);
+    assert_eq!(seqs.len(), 4);
     let rows = seen.borrow();
     assert_eq!(
         rows.iter().map(|x| x.1).collect::<Vec<_>>(),
-        expected([64; 4], RunMode::Live, RunMode::CloseOnly)
+        delivered_order(kill_changes([64; 4]))
     );
     for (chunk, seq) in rows[64..].chunks(64).zip(seqs) {
         assert!(chunk.iter().all(|x| x.0 == seq));
@@ -308,7 +359,7 @@ fn seq_220_mass_mode_change() {
 #[test]
 fn seq_221_notify_per_continue() {
     for n in [63, 64, 65] {
-        let counts = [64, n - 2, 1, 1];
+        let counts = [64, n - 6, 1, 1];
         let mut h = ready(counts, 300_000);
         let start = h.keyframe().seq;
         let seen = observe();
@@ -339,7 +390,7 @@ fn seq_221_notify_per_continue() {
         assert!(!h.s.view().wants_continue());
         assert_eq!(
             seen.borrow().iter().map(|x| x.1).collect::<Vec<_>>(),
-            expected(counts, RunMode::Live, RunMode::CloseOnly)
+            delivered_order(kill_changes(counts))
         );
         check_replay(&mut h, start);
     }
@@ -357,7 +408,7 @@ fn seq_222_continue_blocks_snapshot_roll_drain() {
         h.cmd_confirmed(AccountId(0), &kill());
         let mark = h.mark();
         assert_eq!(h.step(), StepOutcome::Busy);
-        assert_eq!(h.s.engine().notify.backlog_len(), 192);
+        assert_eq!(h.s.engine().notify.backlog_len(), 196);
         if drain {
             h.cmd_confirmed(
                 AccountId(0),
@@ -367,7 +418,7 @@ fn seq_222_continue_blocks_snapshot_roll_drain() {
             );
         }
         let mut last = StepOutcome::Busy;
-        for _ in 0..3 {
+        for _ in 0..4 {
             assert!(h.s.view().wants_continue());
             last = h.step();
             bound(&h);
@@ -381,7 +432,14 @@ fn seq_222_continue_blocks_snapshot_roll_drain() {
             }
         }
         assert!(!h.s.view().wants_continue());
-        assert_eq!(seen.borrow().len(), 256);
+        let mut produced = kill_changes([64; 4]);
+        if drain {
+            produced.extend(cap_changes(CapSource::DRAINING, true));
+        }
+        assert_eq!(
+            seen.borrow().iter().map(|x| x.1).collect::<Vec<_>>(),
+            delivered_order(produced)
+        );
         let final_delivery = seen.borrow().last().unwrap().0;
         if drain {
             assert!(matches!(last, StepOutcome::Done { .. }));
@@ -480,6 +538,7 @@ impl Reference {
             let hdr = rec.read::<CmdHdr>().unwrap();
             let action = self.commands.remove(&hdr.cmd_id).expect("submitted command");
             let old = self.mode();
+            let was_killed = self.killed;
             let absent = action == 1 && !self.killed;
             match action {
                 0 => self.killed = true,
@@ -502,6 +561,12 @@ impl Reference {
             let new = self.mode();
             if old != new {
                 for x in expected([64; 4], old, new) {
+                    self.queues[usize::from(x.strategy.0 - 1)].push_back(x);
+                    self.produced += 1;
+                }
+            }
+            if was_killed != self.killed {
+                for x in cap_changes(CapSource::KILL, self.killed) {
                     self.queues[usize::from(x.strategy.0 - 1)].push_back(x);
                     self.produced += 1;
                 }
