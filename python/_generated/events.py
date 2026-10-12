@@ -67,7 +67,7 @@ LIQUIDATION = _s(["h", "px", "qty", "side", "_pad"], [_s(["venue", "conn", "_pad
 L2_BATCH = _s(["h", "prev_id", "last_id", "n_bids", "n_asks", "bflags", "_pad"], [_s(["venue", "conn", "_pad", "inst", "ex_ts_ns", "ex_send_ns", "hw_rx_ns", "rx_tsc", "sw_rx_ns", "rx_empty_gap_ns", "_rsv"], [_t("<u1", "id:venue"), _t("<u1", "id:conn"), "V2", _t("<u4", "id:inst"), "<i8", "<i8", "<i8", _t("<u8", "tsc"), "<i8", "<u4", "V4"], [0, 1, 2, 4, 8, 16, 24, 32, 40, 48, 52], 56), "<u8", "<u8", "<u2", "<u2", _t("<u2", "bits:L2BatchFlags"), "V2"], [0, 56, 64, 72, 74, 76, 78], 80)
 ORDER_DECISION = _s(["trigger_seq", "decided_tsc", "px", "qty", "group", "inst", "slot", "gen", "target_slot", "reject", "strategy", "venue", "account", "action", "side", "tif", "oflags", "reason", "intent_no", "req_px", "link_role", "_pad"], ["<u8", _t("<u8", "tsc"), _t("<i8", "px"), _t("<i8", "qty"), _t("<u4", "id:group"), _t("<u4", "id:inst"), _t("<u4", "id:slot"), "<u4", _t("<u4", "id:slot"), "<u4", _t("<u1", "id:strategy"), _t("<u1", "id:venue"), _t("<u1", "id:account"), _t("<u1", "enum:OrderAction"), _t("<u1", "enum:Side"), _t("<u1", "enum:Tif"), _t("<u2", "bits:OrderFlags"), "<u4", "<u4", _t("<i8", "px"), _t("<u1", "enum:LinkRole"), "V7"], [0, 8, 16, 24, 32, 36, 40, 44, 48, 52, 56, 57, 58, 59, 60, 61, 62, 64, 68, 72, 80, 81], 88)
 SEND_REPORT = _s(["decision_seq", "sent_tsc", "slot", "gen", "target_slot", "target_gen", "venue", "account", "conn", "status", "op", "_pad", "os_errno", "_pad2"], ["<u8", _t("<u8", "tsc"), _t("<u4", "id:slot"), "<u4", _t("<u4", "id:slot"), "<u4", _t("<u1", "id:venue"), _t("<u1", "id:account"), _t("<u1", "id:conn"), _t("<u1", "enum:SendStatus"), _t("<u1", "enum:GwOp"), "V3", "<i4", "V4"], [0, 8, 16, 20, 24, 28, 32, 33, 34, 35, 36, 37, 40, 44], 48)
-ORDER_EVENT = _s(["venue", "account", "what", "detail", "slot", "gen", "inst", "px", "qty", "cum_filled", "fee", "fee_asset", "epoch", "reject_code", "exch_order_id", "ex_ts_ns", "hw_rx_ns", "rx_tsc", "avg_px", "cash_qty", "cash_sum"], [_t("<u1", "id:venue"), _t("<u1", "id:account"), _t("<u1", "enum:OrderEventKind"), "<u1", _t("<u4", "id:slot"), "<u4", _t("<u4", "id:inst"), _t("<i8", "px"), _t("<i8", "qty"), _t("<i8", "qty"), _t("<i8", "qty"), _t("<u2", "id:asset"), "<u2", "<u4", "<u8", "<i8", "<i8", _t("<u8", "tsc"), _t("<i8", "px"), _t("<i8", "qty"), _t("<i8", "qty")], [0, 1, 2, 3, 4, 8, 12, 16, 24, 32, 40, 48, 50, 52, 56, 64, 72, 80, 88, 96, 104], 112)
+ORDER_EVENT = _s(["venue", "account", "what", "detail", "slot", "gen", "inst", "px", "qty", "cum_filled", "fee", "fee_asset", "epoch", "reject_code", "exch_order_id", "ex_ts_ns", "hw_rx_ns", "rx_tsc", "avg_px", "cash_qty", "cash_sum", "trade_id"], [_t("<u1", "id:venue"), _t("<u1", "id:account"), _t("<u1", "enum:OrderEventKind"), "<u1", _t("<u4", "id:slot"), "<u4", _t("<u4", "id:inst"), _t("<i8", "px"), _t("<i8", "qty"), _t("<i8", "qty"), _t("<i8", "qty"), _t("<u2", "id:asset"), "<u2", "<u4", "<u8", "<i8", "<i8", _t("<u8", "tsc"), _t("<i8", "px"), _t("<i8", "qty"), _t("<i8", "qty"), "<u8"], [0, 1, 2, 3, 4, 8, 12, 16, 24, 32, 40, 48, 50, 52, 56, 64, 72, 80, 88, 96, 104, 112], 120)
 POSITION_REPORT = _s(["venue", "account", "_pad", "inst", "qty", "entry_px", "upnl", "liq_px", "ex_ts_ns", "rx_tsc"], [_t("<u1", "id:venue"), _t("<u1", "id:account"), "V2", _t("<u4", "id:inst"), _t("<i8", "qty"), _t("<i8", "px"), _t("<i8", "notional"), _t("<i8", "px"), "<i8", _t("<u8", "tsc")], [0, 1, 2, 4, 8, 16, 24, 32, 40, 48], 56)
 BALANCE_REPORT = _s(["venue", "account", "asset", "_pad", "free", "locked", "ex_ts_ns", "rx_tsc"], [_t("<u1", "id:venue"), _t("<u1", "id:account"), _t("<u2", "id:asset"), "V4", _t("<i8", "qty"), _t("<i8", "qty"), "<i8", _t("<u8", "tsc")], [0, 1, 2, 4, 8, 16, 24, 32], 40)
 FUNDING_SETTLE = _s(["venue", "account", "_pad", "inst", "amount", "rate", "pos_qty", "settle_ts_ns", "rx_tsc", "synth", "_pad2"], [_t("<u1", "id:venue"), _t("<u1", "id:account"), "V2", _t("<u4", "id:inst"), _t("<i8", "notional"), _t("<i8", "rate"), _t("<i8", "qty"), "<i8", _t("<u8", "tsc"), "<u1", "V7"], [0, 1, 2, 4, 8, 16, 24, 32, 40, 48, 49], 56)
@@ -123,7 +123,7 @@ KINDS = {
     0x0109: ("L2Batch", 1, "var 80 64000", L2_BATCH),
     0x0201: ("OrderDecision", 1, "fixed 88", ORDER_DECISION),
     0x0202: ("SendReport", 1, "fixed 48", SEND_REPORT),
-    0x0203: ("OrderEvent", 2, "fixed 112", ORDER_EVENT),
+    0x0203: ("OrderEvent", 3, "fixed 120", ORDER_EVENT),
     0x0204: ("PositionReport", 1, "fixed 56", POSITION_REPORT),
     0x0205: ("BalanceReport", 1, "fixed 40", BALANCE_REPORT),
     0x0206: ("FundingSettle", 2, "fixed 56", FUNDING_SETTLE),
@@ -156,7 +156,7 @@ KINDS = {
 
 # FNV-1a 64 of (kind u16, schema_version u16, size u32) LE of every production kind in number
 # order (size = fixed body or Var/Multi prefix); equals hft_py.schema_hash().
-SCHEMA_HASH = 0xF32BAC462DC3C85A
+SCHEMA_HASH = 0x633916F1DB218CAF
 
 STRUCTS = {
     "StrategyParamsHdr": STRATEGY_PARAMS_HDR,

@@ -186,7 +186,7 @@ kind 0x0202 SendReport v1 fixed 48
   37 _pad pad:3
   40 os_errno i32
   44 _pad2 pad:4
-kind 0x0203 OrderEvent v2 fixed 112
+kind 0x0203 OrderEvent v3 fixed 120
   0 venue id:venue
   1 account id:account
   2 what enum:OrderEventKind
@@ -208,6 +208,7 @@ kind 0x0203 OrderEvent v2 fixed 112
   88 avg_px px
   96 cash_qty qty
   104 cash_sum qty
+  112 trade_id u64
 kind 0x0204 PositionReport v1 fixed 56
   0 venue id:venue
   1 account id:account
