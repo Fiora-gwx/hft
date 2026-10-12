@@ -19,6 +19,7 @@ pub mod io;
 pub mod ledger;
 pub mod matcher;
 pub mod observe;
+pub mod reconcile;
 mod snapshots;
 mod state;
 
@@ -90,11 +91,11 @@ fn ring_of(io: &io::DstIo<impl StrategySet>, i: &InputRec) -> RingId {
     }
     match i.src {
         Source::Hk => RingId::Hk,
-        Source::Ctl => RingId::Ctl,
+        Source::Ctl | Source::Recon => RingId::Ctl,
         Source::Advisor => RingId::Advice,
         Source::Sim => RingId::RepSim,
         Source::Venue(v) => RingId::Rep(io.venue_ix(v)),
-        Source::Recon | Source::Engine => RingId::Rep(0),
+        Source::Engine => RingId::Rep(0),
         Source::Market => {
             let v = <MarketHdr as zerocopy::FromBytes>::read_from_prefix(&i.body)
                 .map_or(VenueId(0), |(h, _)| h.venue);
@@ -693,6 +694,18 @@ impl<S: StrategySet> Sut for SeqSut<S> {
 
     fn observe(&self, o: &mut Obs) {
         observe::fill(self, o);
+    }
+
+    fn reconcile_inputs(
+        &self,
+        actor: &mut crate::dst::actors::ReconActor,
+        truth: &[crate::dst::obs::TruthRow],
+        history: &[crate::dst::venue_behavior::ExternalReceipt],
+    ) -> Result<Option<Vec<InputRec>>, String> {
+        // apps/reconciler's default user_stream_lag_ms, expressed in virtual nanoseconds.
+        actor
+            .round_committed(self, truth, history, 2_000_000_000)
+            .map(Some)
     }
 
     fn hashes(&self) -> ComponentHashes {

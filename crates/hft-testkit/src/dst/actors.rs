@@ -301,6 +301,9 @@ pub struct ReconActor {
     last_view: u64,
     /// Funding differences to report (`funding_flows` shape).
     pub funding_diffs: Vec<(AccountId, VenueId, i64)>,
+    /// Real-engine rounds use a committed cold reader, separately from invariant observers.
+    #[cfg(feature = "seq")]
+    pub(crate) committed: super::seq::reconcile::CommittedRecon,
 }
 
 impl ReconActor {
@@ -343,6 +346,8 @@ impl ReconActor {
             userstream_down_until: 0,
             last_view: 0,
             funding_diffs: Vec::new(),
+            #[cfg(feature = "seq")]
+            committed: Default::default(),
         }
     }
     /// One reconciliation round at `now` against the ledger quantities `engine` (per account,

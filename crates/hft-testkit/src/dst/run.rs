@@ -335,11 +335,32 @@ impl<E: Sut> Loop<'_, E> {
                 }
                 Ev::Recon => {
                     let truth = self.truth(now);
-                    let obs = self.after.clone();
-                    let reps = self.recon.round(now, &truth, &|a, v, i| obs.pos(a, v, i));
-                    for r in reps {
-                        self.world
-                            .schedule(now, Ev::Deliver(InputRec::of(&r, Source::Recon)));
+                    let history: Vec<_> = self
+                        .venues
+                        .iter()
+                        .flat_map(|v| v.m.external_history().iter().cloned())
+                        .collect();
+                    let inputs = match self.sut.reconcile_inputs(&mut self.recon, &truth, &history) {
+                        Ok(Some(inputs)) => inputs,
+                        Ok(None) if self.after.required.is_none() => {
+                            let obs = &self.after;
+                            self.recon
+                                .round(now, &truth, &|a, v, i| obs.pos(a, v, i))
+                                .iter()
+                                .map(|r| InputRec::of(r, Source::Recon))
+                                .collect()
+                        }
+                        other => {
+                            let msg = match other {
+                                Err(e) => e,
+                                _ => "reconcile: real adapter did not provide a committed view".into(),
+                            };
+                            self.fail = Some((self.rec.steps_run, FailKind::Scenario("TK-135"), msg));
+                            continue;
+                        }
+                    };
+                    for input in inputs {
+                        self.world.schedule(now, Ev::Deliver(input));
                     }
                     self.world.schedule(now + self.recon.period_ns, Ev::Recon);
                 }

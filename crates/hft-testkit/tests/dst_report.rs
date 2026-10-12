@@ -71,6 +71,14 @@ impl<const N: u64> Sut for PanicAt<N> {
     fn hashes(&self) -> ComponentHashes {
         self.inner.hashes()
     }
+    fn reconcile_inputs(
+        &self,
+        actor: &mut hft_testkit::dst::actors::ReconActor,
+        truth: &[hft_testkit::dst::obs::TruthRow],
+        history: &[hft_testkit::dst::venue_behavior::ExternalReceipt],
+    ) -> Result<Option<Vec<InputRec>>, String> {
+        self.inner.reconcile_inputs(actor, truth, history)
+    }
     fn rebuilt_hashes(&self) -> Result<Option<ComponentHashes>, String> {
         Ok(None)
     }

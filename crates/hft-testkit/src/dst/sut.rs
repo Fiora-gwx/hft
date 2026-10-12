@@ -252,6 +252,16 @@ pub struct BootFail(pub String);
 /// The system under test. Implementations are deterministic functions of their inputs: no clock,
 /// no RNG, no environment (README "DST 的世界模型" 5).
 pub trait Sut: Sized {
+    /// Real adapters provide a committed reconciliation view even with checkers disabled.
+    /// `None` is reserved for the framework toy; real observations cannot take that fallback.
+    fn reconcile_inputs(
+        &self,
+        _actor: &mut crate::dst::actors::ReconActor,
+        _truth: &[TruthRow],
+        _history: &[crate::dst::venue_behavior::ExternalReceipt],
+    ) -> Result<Option<Vec<InputRec>>, String> {
+        Ok(None)
+    }
     /// Drain read-only observations made by internal Inputs or automatic recovery.
     fn drain_observations(&mut self, _out: &mut StepOut) {}
     /// The matching core of the world's venues (`hft_sim::SimExchange` for engine runs).

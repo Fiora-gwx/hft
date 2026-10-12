@@ -105,6 +105,14 @@ impl Sut for MissingRebuild {
     fn hashes(&self) -> ComponentHashes {
         self.0.hashes()
     }
+    fn reconcile_inputs(
+        &self,
+        actor: &mut hft_testkit::dst::actors::ReconActor,
+        truth: &[hft_testkit::dst::obs::TruthRow],
+        history: &[hft_testkit::dst::venue_behavior::ExternalReceipt],
+    ) -> Result<Option<Vec<InputRec>>, String> {
+        self.0.reconcile_inputs(actor, truth, history)
+    }
     fn rebuilt_hashes(&self) -> Result<Option<ComponentHashes>, String> {
         if self.1 {
             Err("injected replay failure at seq 17".into())

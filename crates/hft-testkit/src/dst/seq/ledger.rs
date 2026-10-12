@@ -14,6 +14,9 @@ use hft_sequencer::journal::MemRecord;
 use hft_sequencer::{EngineSetup, recover_event_end};
 use hft_strategy_sdk::SnapshotReader;
 use sha2::{Digest, Sha256};
+use zerocopy::TryFromBytes;
+
+use super::reconcile::ReceiptKey;
 
 /// Counts actual comparisons, including the initial restore, and explained unknown fills.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -90,6 +93,9 @@ struct State {
     last: MemRecord,
     evidence: Evidence,
     counts: Counts,
+    /// Retained execution identities are independent of the hot ledger's evicting FIFO.
+    booked: BTreeSet<ReceiptKey>,
+    receipts: Vec<hft_event::ExternalFill>,
 }
 
 type OrderKey = (u8, u8, u16, u32, u32, u32);
@@ -104,6 +110,20 @@ struct Evidence {
 }
 
 impl Check {
+    pub(crate) fn receipt_view(&self) -> Result<(&Ledger, &BTreeSet<ReceiptKey>, u64), String> {
+        if let Some(e) = &self.error {
+            return Err(e.clone());
+        }
+        let s = self
+            .state
+            .as_ref()
+            .ok_or("reconcile: committed cold view unavailable")?;
+        if !s.receipts.is_empty() {
+            return Err("reconcile: unfinished receipt event".into());
+        }
+        Ok((s.cold.ledger(), &s.booked, s.last.seq))
+    }
+
     /// The persistent checkpoint and the complete live read API have independent references.
     /// Derived summary timestamps/flags are checked against the live boundary, not a restore
     /// that has deliberately discarded process-local caches.
@@ -158,6 +178,15 @@ impl Check {
             )
             .map_err(|e| format!("LED-267 initial snapshot {}: {e:?}", r.seq))?;
             restore_market(cold.ledger_mut(), r)?;
+            let mut booked = BTreeSet::new();
+            for &(a, v, _) in rd.account_venues() {
+                booked.extend(
+                    cold.ledger()
+                        .ext_seen(a, v)
+                        .into_iter()
+                        .map(|k| ReceiptKey::from_ext(a, v, k)),
+                );
+            }
             self.state = Some(State {
                 cold,
                 rd,
@@ -173,6 +202,8 @@ impl Check {
                     snapshots: 1,
                     unmapped_fills: 0,
                 },
+                booked,
+                receipts: Vec::new(),
             });
         }
         let state = self.state.as_mut().ok_or("LED-267: cold state unavailable")?;
@@ -216,10 +247,54 @@ impl Check {
             let delta = state.cold.stats().unmapped_fills - before;
             state.evidence.record(r, delta)?;
             state.counts.unmapped_fills += delta;
+            state.capture_receipts(r)?;
             state.cursor = ix + 1;
             state.last = r.clone();
         }
         Ok(state.counts)
+    }
+}
+
+impl State {
+    fn capture_receipts(&mut self, r: &MemRecord) -> Result<(), String> {
+        if r.kind == EventKind::EXTERNAL_FILL {
+            let fill = hft_event::ExternalFill::try_read_from_bytes(&r.body)
+                .map_err(|_| "reconcile: invalid original fill in committed journal")?;
+            self.receipts.push(fill);
+        } else if r.kind == EventKind::RECONCILE_BATCH {
+            let batch = hft_event::ReconcileBatchView::read(&r.body)
+                .map_err(|_| "reconcile: invalid receipt group in committed journal")?;
+            self.receipts.extend(batch.fills());
+        }
+        if self.receipts.len() > 256 {
+            return Err("reconcile: receipt event capacity exceeded".into());
+        }
+        if r.flags.contains(RecordFlags::EVENT_END) {
+            for e in self.receipts.drain(..) {
+                // Only the independently applied cold ledger can prove that an Input booked
+                // this key. A rejected batch is journaled too, and must never hide a gap.
+                let Some(key) = ReceiptKey::new(&e).ok() else {
+                    continue;
+                };
+                if self
+                    .cold
+                    .ledger()
+                    .ext_seen(e.account, e.venue)
+                    .into_iter()
+                    .any(|k| ReceiptKey::from_ext(e.account, e.venue, k) == key)
+                {
+                    if self.booked.len()
+                        >= crate::dst::venue_behavior::EXTERNAL_HISTORY_CAP
+                            .saturating_mul(self.rd.account_venues().len())
+                        && !self.booked.contains(&key)
+                    {
+                        return Err("reconcile: retained receipt identity capacity exceeded".into());
+                    }
+                    self.booked.insert(key);
+                }
+            }
+        }
+        Ok(())
     }
 }
 

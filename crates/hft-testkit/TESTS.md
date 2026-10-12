@@ -26,7 +26,7 @@ spec: README.md
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
 | 10. SeqRig | PY-106–PY-109、PY-111、PY-112 |
 | 实现说明 | 不适用:见子节 |
-| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-132、TK-133 |
+| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-135 |
 | 金样运行器 | TK-001、TK-005 |
 | 源文件 | TK-066 |
 | 延迟与资源契约 | TK-092–TK-093 |
@@ -1718,6 +1718,28 @@ spec: README.md
 - 步骤:仅交易所记入原始成交,由 ReconActor 打包补账;重启后交付 ADL 补报和重复副本;逐边界核对冷热账本及验证回放
 - 期望:原始历史经 ReconActor 打包补账,钱包等于真值;重启后的 ADL 补报及重复回报均不重复结算,auto_held 清零,每个边界独立账本和验证回放一致
 - 实现:`crates/hft-testkit/tests/external_receipts.rs::tk_133_raw_receipts_reconcile_gap_then_confirm_after_restart`
+
+### TK-134 已提交冷视图自动选择原始补账凭据
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:integ
+- 里程碑:M2
+- 前置:真实 SeqSut 与 SimMatcher,多空 × 部分/全量 ADL 四行,每次缺口包含不同现金额的两笔成交
+- 步骤:从完整交易所历史自动排除已入账成交,按账户、venue、inst 与原始身份选择凭据;补账后重启,倒序补报并重复交付
+- 期望:全量归零仍产生 Position;每个账户/venue 独立 Summary;第二个稳定轮次选中且只选中两笔原件;相同分页副本不重复,相同 trade_id 的其他账户不混入;补账与确认后 I16 不带排除项且实际执行,独立冷账本与验证回放一致
+- 反例:遗漏原件、冲突副本、缺少 cash_qty、反向成交、把虚拟时间当 view_seq、错误引擎数量、不完整身份、未知费用资产、历史容量溢出与未知品种都失败
+- 实现:`crates/hft-testkit/tests/reconcile_actor.rs::tk_134_select_original_receipts_from_committed_history`
+
+### TK-135 真实对账轮次必须稳定且观察完整
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:integ
+- 里程碑:M2
+- 前置:真实引擎存在全量 ADL 缺口,首轮 Position 已提交
+- 步骤:分别注入本账户 Down、Down/Up、引擎重启、已入账成交的重复推送、变化的交易所数量、缺失另一账户真值及另一账户断流
+- 期望:前六种不得自动补账,缺失真值直接失败;另一账户断流不改变本账户资格;同一提交边界重复轮询不能充当第二轮;缺少原始历史直接失败
+- 边界:本用例不替代 LED-081 的 PairOnFill、标准种子集及节 1/13/22 逐事件验收
+- 实现:`crates/hft-testkit/tests/reconcile_actor.rs::tk_135_committed_round_requires_stable_complete_observations`
 
 ## 验收
 
