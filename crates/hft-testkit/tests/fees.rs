@@ -98,6 +98,8 @@ fn tk_104_fee_only_checker() {
                     hw_rx_ns: 0,
                     rx_tsc: 0,
                     avg_px: Px(0),
+                    cash_qty: hft_types::Qty(0),
+                    cash_sum: hft_types::Qty(0),
                 };
                 let recs = [JRec {
                     seq: 1,

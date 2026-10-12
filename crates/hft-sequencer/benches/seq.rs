@@ -373,6 +373,8 @@ fn seq_332_external_fill(c: &mut Criterion) {
                     ex_ts_ns: 0,
                     rx_tsc: Tsc(h.now()),
                     fill_seq: 0,
+                    cash_qty: hft_types::Qty(0),
+                    cash_amount: hft_types::Qty(0),
                 };
                 h.push(RingId::Rep(0), &x);
             })

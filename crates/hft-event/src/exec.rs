@@ -134,7 +134,7 @@ layout!(SendReport, 48, 8; decision_seq @ 0, sent_tsc @ 8, slot @ 16, r#gen @ 20
 
 crate::event_body! {
     /// Order report (0x0203, Input).
-    pub struct OrderEvent : fixed(EventKind::ORDER_EVENT, 1), TryFromBytes {
+    pub struct OrderEvent : fixed(EventKind::ORDER_EVENT, 2), TryFromBytes {
         pub venue: VenueId,
         pub account: AccountId,
         pub what: OrderEventKind,
@@ -155,11 +155,16 @@ crate::event_body! {
         pub hw_rx_ns: i64,
         pub rx_tsc: u64,
         pub avg_px: Px,
+        /// v2: cumulative quantity covered by `cash_sum`; 0 = settlement facts unavailable.
+        pub cash_qty: Qty,
+        /// v2: cumulative realized perpetual cash in the quote asset's qty_exp, income positive;
+        /// excludes fees and funding. Known zero has `cash_qty = cum_filled > 0`.
+        pub cash_sum: Qty,
     }
 }
-layout!(OrderEvent, 96, 8; venue @ 0, account @ 1, what @ 2, detail @ 3, slot @ 4, r#gen @ 8, inst @ 12,
+layout!(OrderEvent, 112, 8; venue @ 0, account @ 1, what @ 2, detail @ 3, slot @ 4, r#gen @ 8, inst @ 12,
     px @ 16, qty @ 24, cum_filled @ 32, fee @ 40, fee_asset @ 48, epoch @ 50, reject_code @ 52,
-    exch_order_id @ 56, ex_ts_ns @ 64, hw_rx_ns @ 72, rx_tsc @ 80, avg_px @ 88);
+    exch_order_id @ 56, ex_ts_ns @ 64, hw_rx_ns @ 72, rx_tsc @ 80, avg_px @ 88, cash_qty @ 96, cash_sum @ 104);
 
 crate::event_body! {
     /// Exchange position push (0x0204, Input; check only).
@@ -217,7 +222,7 @@ layout!(FundingSettle, 56, 8; venue @ 0, account @ 1, _pad @ 2, inst @ 4, amount
 
 crate::event_body! {
     /// Fill on this account not caused by this system (0x0207, Input).
-    pub struct ExternalFill : fixed(EventKind::EXTERNAL_FILL, 2), TryFromBytes {
+    pub struct ExternalFill : fixed(EventKind::EXTERNAL_FILL, 3), TryFromBytes {
         pub venue: VenueId,
         pub account: AccountId,
         pub side: Side,
@@ -234,10 +239,15 @@ crate::event_body! {
         pub rx_tsc: Tsc,
         /// v2: cumulative filled raw after this fill when `trade_id = 0`.
         pub fill_seq: u64,
+        /// v3: quantity covered by `cash_amount`; `qty > 0` when known, 0 when unavailable.
+        pub cash_qty: Qty,
+        /// v3: this execution's realized perpetual cash in the quote asset's qty_exp, income
+        /// positive; excludes fees and funding. It is not an account balance difference.
+        pub cash_amount: Qty,
     }
 }
-layout!(ExternalFill, 80, 8; venue @ 0, account @ 1, side @ 2, cause @ 3, inst @ 4, qty @ 8, px @ 16, fee @ 24,
-    fee_asset @ 32, _pad @ 34, exch_order_id @ 40, trade_id @ 48, ex_ts_ns @ 56, rx_tsc @ 64, fill_seq @ 72);
+layout!(ExternalFill, 96, 8; venue @ 0, account @ 1, side @ 2, cause @ 3, inst @ 4, qty @ 8, px @ 16, fee @ 24,
+    fee_asset @ 32, _pad @ 34, exch_order_id @ 40, trade_id @ 48, ex_ts_ns @ 56, rx_tsc @ 64, fill_seq @ 72, cash_qty @ 80, cash_amount @ 88);
 
 crate::event_body! {
     /// `MarginReport` (0x0208, Var) prefix; followed by `[MarginItem; n]`.

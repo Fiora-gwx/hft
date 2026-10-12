@@ -19,11 +19,11 @@
 | 0x0109 | `L2Batch` | Var | Input | 增量深度(可选扩展)的产出:一条交易所增量消息一条记录 |
 | 0x0201 | `OrderDecision` | 定长 88 | Output | 意图 + 风控结果 + OMS 分配 |
 | 0x0202 | `SendReport` | 定长 48 | Input | gw/sim-gw 写出结果 |
-| 0x0203 | `OrderEvent` | 定长 96 | Input | 回执/拒绝/成交/撤单/改单/过期/查询结果/结果未知/仅费用 |
+| 0x0203 | `OrderEvent` | 定长 112 | Input | 回执/拒绝/成交/撤单/改单/过期/查询结果/结果未知/仅费用 |
 | 0x0204 | `PositionReport` | 定长 56 | Input | 交易所推送,只校验 |
 | 0x0205 | `BalanceReport` | 定长 40 | Input | |
 | 0x0206 | `FundingSettle` | 定长 56 | 按体:`synth = 1` Output,否则 Input | `inst = INST_NONE` = 只推账户级合计 |
-| 0x0207 | `ExternalFill` | 定长 80 | Input | 自身强平、ADL、人工、交割等非本系统下单的成交(`schema_version` 2 追加 `fill_seq`) |
+| 0x0207 | `ExternalFill` | 定长 96 | Input | 自身强平、ADL、人工、交割等非本系统下单的成交(`schema_version` 3 的结算字段归 hft-event) |
 | 0x0208 | `MarginReport` | Var | Input | 保证金余额/维持/可用/保证金率 + 每 inst 强平价与 ADL 档 |
 | 0x0209 | `AccountConfigReport` | Var | Input | 持仓模式、保证金模式、多资产、UID(含核对过的 key)与不一致位(含现货借币);尾部为每个永续 inst 的实际杠杆 |
 | 0x020A | `ExecDecision` | 定长 104 | Output | 执行层的每次决定(目标、算法、切片、状态迁移、原因) |

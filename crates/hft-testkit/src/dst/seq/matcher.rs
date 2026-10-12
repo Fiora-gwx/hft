@@ -393,6 +393,8 @@ impl Matcher for SimMatcher {
                 ex_ts_ns: now_ns as i64,
                 rx_tsc: Tsc(0),
                 fill_seq: 0,
+                cash_qty: hft_types::Qty(0),
+                cash_amount: hft_types::Qty(0),
             };
             self.out.push_back(VenueOut {
                 due_ns: now_ns + 1_000_000,

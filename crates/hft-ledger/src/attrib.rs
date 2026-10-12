@@ -269,6 +269,8 @@ impl Ledger {
             ex_ts_ns: 0,
             rx_tsc: Tsc(0),
             fill_seq: report_id,
+            cash_qty: hft_types::Qty(0),
+            cash_amount: hft_types::Qty(0),
         }
     }
 
@@ -300,6 +302,8 @@ impl Ledger {
             ex_ts_ns: 0,
             rx_tsc: Tsc(0),
             fill_seq: n.v[6],
+            cash_qty: hft_types::Qty(0),
+            cash_amount: hft_types::Qty(0),
         })
     }
 

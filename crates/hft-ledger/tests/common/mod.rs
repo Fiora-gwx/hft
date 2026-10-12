@@ -773,6 +773,8 @@ pub fn ext(cause: ExternalCause, side: Side, inst: InstId, q: &str, p: &str) -> 
         ex_ts_ns: 0,
         rx_tsc: Tsc(0),
         fill_seq: 0,
+        cash_qty: hft_types::Qty(0),
+        cash_amount: hft_types::Qty(0),
     }
 }
 

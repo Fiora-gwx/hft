@@ -323,6 +323,8 @@ fn sdk_044_engine_only_feed_not_delivered() {
         ex_ts_ns: 0,
         rx_tsc: Tsc(h.now()),
         fill_seq: 0,
+        cash_qty: hft_types::Qty(0),
+        cash_amount: hft_types::Qty(0),
     };
     h.push(RingId::Rep(0), &x);
     h.run();
@@ -443,6 +445,8 @@ fn ext(h: &H, inst: InstId, side: Side, cause: ExternalCause, qty: &str, trade_i
         ex_ts_ns: 0,
         rx_tsc: Tsc(h.now()),
         fill_seq: 0,
+        cash_qty: hft_types::Qty(0),
+        cash_amount: hft_types::Qty(0),
     }
 }
 

@@ -164,6 +164,8 @@ hft-sim **不占快照节**,`SimExchange` 的状态也不写进 journal:模拟�
 | 订单表 | 节 2 非终态槽([hft-oms](../hft-oms/README.md);`recovery_end` 已把它们置 `Unknown`,按 `prev_state` 判定) | `tif ∈ {GTC, PostOnly}` 且 `prev_state ∈ {Live, PendingCancel, PendingAmend}` → 挂单,剩余量 `qty − filled`,按 §8 锁定;其余(IOC/FOK,或 `PendingNew`)→ 终态记录:`filled = qty` 记 `Filled`,否则记 `Expired`,`cum_filled = filled`,`avg_px = filled_notional / filled`(`filled = 0` 时 0) |
 | 每永续 inst 的下次结算时刻、费率与 mark | 节 10 `MarketLast`([hft-sequencer](../hft-sequencer/README.md)) | `next_funding_ns`、`funding_rate`、`mark_px`(§6 的 T、费率与结算用 mark 在本次运行收到新 `Funding`/`Mark` 前取这里的值) |
 
+`SimSeedOrder.cash_qty/cash_sum` 由恢复订单的结算事实提供,不从账户余额或持仓成本反推。覆盖量为零、金额也为零表示缺失;部分覆盖继续保留为部分覆盖。负覆盖量、超过 `filled`、零覆盖量带非零金额、现货带结算事实均以 `SimCfgErr::SettlementFacts` 在修改任何状态前拒绝。
+
 步骤(装配处负责调用:hft-core 在步 5 之后、步 6 启动 sim-gw 之前;replayer sim 在起点快照处):
 
 1. `SimExchange::new(setup)`(全部账户先按 `initial_balances` 建立)。
@@ -428,6 +430,8 @@ pub struct StressVerdict {
 
 回报只带 `fee` 与 `fee_asset`(与 venue 一样);净量由 ledger 计算(`FillDelta.net_qty`)。`late_fee = true` 时,手续费在成交回报中为 0,另在 `due_tsc + 50 ms` 发一条 `FeeOnly` 回报。
 
+永续撮合同时保存本笔实际已实现现金,按订单累加,随成交、查询及终态回报带出;金额不包含即时或晚到的手续费。强平回报携带本笔结算额。字段、覆盖量与已知零额的语义归 [hft-event](../hft-event/README.md#执行0x02xx)。这些字段在撮合更新钱包时直接取得,不依赖回报的交付次序。
+
 ### 6. 资金费
 
 - 结算时刻 T 取该 inst 最近 `Funding` 事件给出的下次结算时间(实际结算周期随事件变化,无需单独处理周期变化)。
@@ -526,6 +530,7 @@ pub struct StressVerdict {
 ## 已知限制与后续工作
 
 - **M2 实现范围**:纯核心 `SimExchange`;`task` feature(`SimGwTask`、受控故障注入 `SimFault`,`on_command` 目前忽略 `SimFault`)、压力用例(`stress.rs`)与 `queue-hftbacktest` 随 M4 落地。每个被跟踪的 inst(Sim 账户各 venue 的全部 inst)在 `new` 时分配一本 hft-book `L2Book`(窗口取 refdata `book_window`)。
+- 结算事实可由回报与 `SimSeedOrder` 保留;OMS、sequencer、冷读者的消费与生产恢复装配尚未接通,不能仅凭模拟回报带字段就计为 INV-16 或恢复验收通过。
 - **无市场冲击**:我们的模拟单不改变真实行情;已吃流动性记忆只近似"同一档被吃掉";单笔名义相对深度大时结论偏乐观,以 `take_avail_bp` 校准与 `top_only_fills` 计数约束。
 - **延迟是抽样的**:交易所内部排队与跨所时钟差不可见;校准前的模拟成交率与滑点只作方向性参考。
 - **挂单不建排队位置**(默认 `TradeThrough`,偏保守);需要时启用 `queue-hftbacktest`(触发条件:MakerFirst 立项)。

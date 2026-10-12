@@ -144,7 +144,7 @@ impl SimExchange {
         Some(sat64(fee))
     }
 
-    /// Settles one fill of `q` at `px` (fee rate `rate`); returns `(fee, fee_asset)`. With
+    /// Settles one fill; returns `(fee, fee_asset, realized_cash)`. Cash excludes fees. With
     /// `late_fee` the fee is charged at `due + 50 ms`.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn settle_fill(
@@ -156,22 +156,22 @@ impl SimExchange {
         q: i64,
         rate: i64,
         due: u64,
-    ) -> (i64, AssetId) {
+    ) -> (i64, AssetId, i64) {
         let Some((venue, base, quote, ve, perp)) = self
             .insts
             .get(ii)
             .map(|r| (r.venue, r.base, r.quote, r.ve(), r.perp))
         else {
-            return (0, AssetId(0));
+            return (0, AssetId(0), 0);
         };
         let v = i128::from(q) * i128::from(px);
         let qe_q = self.qty_exp(quote);
         let quote_fee = sat64(rescale(v * i128::from(rate), ve - 9, qe_q, RoundMode::Ceil));
         if perp {
-            self.perp_fill(ai, ii, side, px, q);
+            let cash = self.perp_fill(ai, ii, side, px, q);
             let masset = self.margin_asset(venue);
             self.charge(ai, venue, masset, quote_fee, due);
-            return (quote_fee, masset);
+            return (quote_fee, masset, cash);
         }
         let base_fee = sat64(div_round(
             i128::from(q) * i128::from(rate),
@@ -220,7 +220,7 @@ impl SimExchange {
             }
         }
         self.charge(ai, venue, fee_asset, fee, due);
-        (fee, fee_asset)
+        (fee, fee_asset, 0)
     }
 
     /// Deducts a fee now, or at `due + 50 ms` with `late_fee`.
@@ -266,13 +266,13 @@ impl SimExchange {
 
     /// Position update of a fill; realised PnL goes to the wallet. Removed cost and the wallet
     /// amount round toward zero, as hft-ledger books them (README "7. 永续全仓保证金与强平").
-    fn perp_fill(&mut self, ai: usize, ii: usize, side: Side, px: i64, q: i64) {
+    fn perp_fill(&mut self, ai: usize, ii: usize, side: Side, px: i64, q: i64) -> i64 {
         let Some((venue, ve, quote)) = self.insts.get(ii).map(|r| (r.venue, r.ve(), r.quote)) else {
-            return;
+            return 0;
         };
         let qe_q = self.qty_exp(quote);
         let Some(p) = self.accts.get_mut(ai).and_then(|a| a.pos.get_mut(ii)) else {
-            return;
+            return 0;
         };
         let sgn = side.sign();
         let mut pnl: i128 = 0;
@@ -298,10 +298,9 @@ impl SimExchange {
             p.cost += left * i128::from(px);
             p.qty = sat64(i128::from(p.qty) + left * i128::from(sgn));
         }
-        if pnl != 0 {
-            let w = sat64(rescale(pnl, ve, qe_q, RoundMode::TowardZero));
-            self.add_bal(ai, venue, quote, w);
-        }
+        let cash = sat64(rescale(pnl, ve, qe_q, RoundMode::TowardZero));
+        self.add_bal(ai, venue, quote, cash);
+        cash
     }
 
     /// `|q| × px` value at `MARGIN_EXP` / leverage (ceiling) for `q` of inst `ii`.
@@ -530,7 +529,7 @@ impl SimExchange {
             };
             let px = sat64(px);
             let q = qty.abs();
-            let (fee, fee_asset) = self.settle_fill(ai, ii, side, px, q, fee_rate, due);
+            let (fee, fee_asset, cash) = self.settle_fill(ai, ii, side, px, q, fee_rate, due);
             let inst = self.insts.get(ii).map_or(InstId(0), |r| r.id);
             let trade_id = self.accts.get_mut(ai).map_or(0, |a| {
                 let x = a.next_trade_id;
@@ -554,6 +553,8 @@ impl SimExchange {
                 ex_ts_ns: ex_ts,
                 rx_tsc: Tsc(due),
                 fill_seq: 0,
+                cash_qty: Qty(q),
+                cash_amount: Qty(cash),
             };
             self.push_reply(id, due, RepMsg::ExternalFill(ef), Bulk::None);
         }
@@ -1057,6 +1058,17 @@ impl SimExchange {
             if !ok {
                 return Err(SimCfgErr::UnknownVenue);
             }
+            let perp = self
+                .inst_index(o.inst)
+                .and_then(|ii| self.insts.get(ii))
+                .is_some_and(|r| r.perp);
+            if o.cash_qty.0 < 0
+                || o.cash_qty.0 > o.filled.0
+                || (o.cash_qty.0 == 0 && o.cash_sum.0 != 0)
+                || (!perp && (o.cash_qty.0 != 0 || o.cash_sum.0 != 0))
+            {
+                return Err(SimCfgErr::SettlementFacts);
+            }
         }
         // Transients of the account.
         self.cmds.retain(|c| usize::from(c.0.acct) != ai);
@@ -1159,6 +1171,8 @@ impl SimExchange {
                 qty: so.qty.0,
                 filled: so.filled.0,
                 fill_val: i128::from(so.filled.0) * i128::from(so.avg_px.0),
+                cash_qty: so.cash_qty.0,
+                cash_sum: so.cash_sum.0,
                 exch_id: so.exch_order_id,
                 ins_seq: a.ins_seq,
                 term_seq: 0,

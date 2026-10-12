@@ -131,6 +131,8 @@ impl SimExchange {
             hw_rx_ns: 0,
             rx_tsc: due,
             avg_px: Px(avg),
+            cash_qty: Qty(o.cash_qty),
+            cash_sum: Qty(o.cash_sum),
         }
     }
 
@@ -240,6 +242,8 @@ impl SimExchange {
             qty: c.qty.0,
             filled: 0,
             fill_val: 0,
+            cash_qty: 0,
+            cash_sum: 0,
             exch_id,
             ins_seq: a.ins_seq,
             term_seq: 0,
@@ -399,10 +403,15 @@ impl SimExchange {
             .get(ai)
             .and_then(|a| a.fees.get(ii))
             .map_or(0, |f| if maker { f.maker.0 } else { f.taker.0 });
-        let (fee, fee_asset) = self.settle_fill(ai, ii, o.side, px, q, rate, due);
+        let (fee, fee_asset, cash) = self.settle_fill(ai, ii, o.side, px, q, rate, due);
+        let perp = self.insts.get(ii).is_some_and(|r| r.perp);
         if let Some(x) = self.accts.get_mut(ai).and_then(|a| a.orders.get_mut(k)) {
             x.filled = x.filled.saturating_add(q);
             x.fill_val = x.fill_val.saturating_add(i128::from(q) * i128::from(px));
+            if perp {
+                x.cash_qty = x.cash_qty.saturating_add(q);
+                x.cash_sum = x.cash_sum.saturating_add(cash);
+            }
         }
         let o = self.order_at(ai, k);
         if o.resting {

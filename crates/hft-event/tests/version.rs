@@ -57,6 +57,12 @@ fn rows() -> Vec<(&'static str, EventKind, Vec<u8>)> {
             EventKind::FUNDING_SETTLE,
             cut(FundingSettle::FIELDS, 48),
         ),
+        ("EVT-071.10", EventKind::ORDER_EVENT, cut(OrderEvent::FIELDS, 96)),
+        (
+            "EVT-071.11",
+            EventKind::EXTERNAL_FILL,
+            cut(ExternalFill::FIELDS, 80),
+        ),
     ]
 }
 
@@ -83,6 +89,7 @@ fn evt_071_old_versions_zero_fill() {
                 let e = r.read::<ExternalFill>().unwrap();
                 assert_eq!(&e.as_bytes()[..n], &body[..], "{row}");
                 assert_eq!(e.fill_seq, 0, "{row}");
+                assert_eq!((e.cash_qty.0, e.cash_amount.0), (0, 0), "{row}");
             }
             "EVT-071.2" | "EVT-071.3" => {
                 let x = r.read::<ReconcileReport>().unwrap();
@@ -115,6 +122,16 @@ fn evt_071_old_versions_zero_fill() {
                 assert_eq!(x.as_bytes(), &body[..], "{row}");
             }
             "EVT-071.8" => assert_eq!(r.read::<ConnState>().unwrap().rx_tsc, 0, "{row}"),
+            "EVT-071.10" => {
+                let e = r.read::<OrderEvent>().unwrap();
+                assert_eq!(&e.as_bytes()[..n], &body[..], "{row}");
+                assert_eq!((e.cash_qty.0, e.cash_sum.0), (0, 0), "{row}");
+            }
+            "EVT-071.11" => {
+                let e = r.read::<ExternalFill>().unwrap();
+                assert_eq!(&e.as_bytes()[..n], &body[..], "{row}");
+                assert_eq!((e.cash_qty.0, e.cash_amount.0), (0, 0), "{row}");
+            }
             _ => {
                 assert_eq!(r.read::<FundingSettle>().unwrap().synth, 0, "{row}");
                 assert_eq!(

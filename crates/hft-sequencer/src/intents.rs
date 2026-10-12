@@ -903,6 +903,8 @@ fn foreign_to_external(f: &hft_oms::ForeignFill) -> hft_event::ExternalFill {
         ex_ts_ns: 0,
         rx_tsc: Tsc(0),
         fill_seq: if f.trade_id == 0 { f.cum_filled.0 as u64 } else { 0 },
+        cash_qty: hft_types::Qty(0),
+        cash_amount: hft_types::Qty(0),
     }
 }
 

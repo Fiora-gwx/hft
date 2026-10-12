@@ -160,6 +160,8 @@ pub fn order_event(what: OrderEventKind) -> OrderEvent {
         hw_rx_ns: P0 + 400_000,
         rx_tsc: T0 + 412_000,
         avg_px: Px(0),
+        cash_qty: hft_types::Qty(0),
+        cash_sum: hft_types::Qty(0),
     }
 }
 

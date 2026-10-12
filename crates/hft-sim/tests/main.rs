@@ -14,6 +14,7 @@ mod prop_determinism;
 mod prop_invariants;
 mod prop_margin;
 mod rules;
+mod settlement;
 mod spot;
 mod taker;
 mod time;

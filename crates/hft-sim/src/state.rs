@@ -132,6 +132,9 @@ pub(crate) struct Order {
     pub filled: i64,
     /// Σ fill qty × px (raw product).
     pub fill_val: i128,
+    /// Perpetual order cash facts, including a known zero; 0 quantity = unavailable.
+    pub cash_qty: i64,
+    pub cash_sum: i64,
     pub exch_id: u64,
     pub ins_seq: u64,
     pub term_seq: u64,
@@ -157,6 +160,8 @@ impl Order {
         qty: 0,
         filled: 0,
         fill_val: 0,
+        cash_qty: 0,
+        cash_sum: 0,
         exch_id: 0,
         ins_seq: 0,
         term_seq: 0,

@@ -144,6 +144,8 @@ pub enum SimCfgErr {
     SameExchangeMarkets,
     TooManyAccounts,
     MmrTiersMissing,
+    /// A recovered order's cash coverage is negative, exceeds filled quantity, or is not perpetual.
+    SettlementFacts,
 }
 
 /// Reject reasons `n` of `reject_code = SIM_CODE_BASE + n` (README "拒单规则").
@@ -227,6 +229,10 @@ pub struct SimSeedOrder {
     pub filled: Qty,
     pub px: Px,
     pub avg_px: Px,
+    /// Known cumulative perpetual cash from the recovered order, not from the wallet.
+    /// `cash_qty = 0` preserves missing old facts; a known zero uses `cash_qty = filled`.
+    pub cash_qty: Qty,
+    pub cash_sum: Qty,
     pub exch_order_id: u64,
 }
 

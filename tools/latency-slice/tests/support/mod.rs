@@ -415,5 +415,7 @@ pub fn order_event(what: OrderEventKind, slot: u32, r#gen: u32, rx: u64, hw: i64
         hw_rx_ns: hw,
         rx_tsc: rx,
         avg_px: Px(0),
+        cash_qty: hft_types::Qty(0),
+        cash_sum: hft_types::Qty(0),
     }
 }

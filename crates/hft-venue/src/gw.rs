@@ -1959,6 +1959,8 @@ fn blank_event(venue: hft_types::VenueId, account: AccountId) -> OrderEvent {
         hw_rx_ns: 0,
         rx_tsc: 0,
         avg_px: Px(0),
+        cash_qty: hft_types::Qty(0),
+        cash_sum: hft_types::Qty(0),
     }
 }
 

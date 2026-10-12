@@ -785,6 +785,8 @@ impl Fx {
             hw_rx_ns: 0,
             rx_tsc: 0,
             avg_px: d.px,
+            cash_qty: hft_types::Qty(0),
+            cash_sum: hft_types::Qty(0),
         }
     }
     fn ack(&mut self, d: &OrderDecision) -> u64 {
@@ -838,6 +840,8 @@ impl Fx {
             ex_ts_ns: self.t,
             rx_tsc: Tsc(self.now_tsc()),
             fill_seq: 0,
+            cash_qty: hft_types::Qty(0),
+            cash_amount: hft_types::Qty(0),
         };
         f(&mut x);
         self.input_b(RingId::Rep(1), &x)
@@ -864,6 +868,8 @@ impl Fx {
             hw_rx_ns: 0,
             rx_tsc: 0,
             avg_px: p,
+            cash_qty: hft_types::Qty(0),
+            cash_sum: hft_types::Qty(0),
         };
         self.input_b(RingId::Rep(1), &ev)
     }

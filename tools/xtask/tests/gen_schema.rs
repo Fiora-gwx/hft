@@ -377,17 +377,20 @@ fn evt_175_append_only_rules() {
         "EVT-175.1",
         |m| {
             let k = kind(m, "ExternalFill");
-            append(k, field("foo", 80, Ty::U64), 8);
-            k.schema_version = 3;
+            append(k, field("foo", 96, Ty::U64), 8);
+            k.schema_version = 4;
         },
         0,
         &[],
     );
     let lt = f.read(LOCK_PATH);
-    assert!(lt.contains("kind 0x0207 ExternalFill v3 fixed 88\n"), "EVT-175.1");
+    assert!(
+        lt.contains("kind 0x0207 ExternalFill v4 fixed 104\n"),
+        "EVT-175.1"
+    );
     let base = lock::parse(&base_lock(&real(vec![]))).unwrap();
     let old = base.kinds.iter().find(|k| k.name == "ExternalFill").unwrap();
-    assert_eq!(old.fields.len(), 15);
+    assert_eq!(old.fields.len(), 17);
     let new = lock::parse(&lt).unwrap();
     let newk = new.kinds.iter().find(|k| k.name == "ExternalFill").unwrap();
     for (a, b) in old.fields.iter().zip(&newk.fields) {
@@ -400,7 +403,7 @@ fn evt_175_append_only_rules() {
     // .2 same without version bump.
     row_175(
         "EVT-175.2",
-        |m| append(kind(m, "ExternalFill"), field("foo", 80, Ty::U64), 8),
+        |m| append(kind(m, "ExternalFill"), field("foo", 96, Ty::U64), 8),
         1,
         &["ExternalFill", "schema_version"],
     );
@@ -497,8 +500,8 @@ fn evt_175_append_only_rules() {
         "EVT-175.10",
         |m| {
             let k = kind(m, "ExternalFill");
-            k.fields.push(field("foo_side", 80, Ty::Enum("Side".into())));
-            append(k, field("_pad2", 81, Ty::Pad(7)), 8);
+            k.fields.push(field("foo_side", 96, Ty::Enum("Side".into())));
+            append(k, field("_pad2", 97, Ty::Pad(7)), 8);
             k.schema_version += 1;
         },
         1,
@@ -894,7 +897,7 @@ fn evt_179_no_write_on_violation() {
     let (f, l) = generated("evt179", &base);
     let before = snapshot(&f.root);
     let mut m = base.clone();
-    append(kind(&mut m, "ExternalFill"), field("foo", 80, Ty::U64), 8);
+    append(kind(&mut m, "ExternalFill"), field("foo", 96, Ty::U64), 8);
     let r = run(&f.root, false, Some(l), &m);
     assert_eq!(r.code, 1, "{}", r.text());
     assert_eq!(

@@ -709,6 +709,8 @@ impl H {
             hw_rx_ns: 0,
             rx_tsc: 0,
             avg_px: Px(0),
+            cash_qty: hft_types::Qty(0),
+            cash_sum: hft_types::Qty(0),
         }
     }
     pub fn ev(&mut self, ev: &OrderEvent, t_ms: u64) {

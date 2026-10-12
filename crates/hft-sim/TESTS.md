@@ -18,7 +18,7 @@ spec: README.md
 | 模拟账户是什么 | SIM-005、SIM-114、SIM-167 |
 | 纯核心 API | SIM-002、SIM-003、SIM-012、SIM-113、SIM-188、SIM-220 |
 | sim-gw 任务(`task` feature) | SIM-214–SIM-217、SIM-105、SIM-140–SIM-148、SIM-205 |
-| 重启恢复 | SIM-160–SIM-169、SIM-218 |
+| 重启恢复 | SIM-160–SIM-169、SIM-218、SIM-224 |
 | 配置 | SIM-001、SIM-003、SIM-004、SIM-033、SIM-034、SIM-052、SIM-053、SIM-077、SIM-082、SIM-111、SIM-144 |
 | 产生的事件 | SIM-062、SIM-075–SIM-077、SIM-083、SIM-091、SIM-100–SIM-104、SIM-110–SIM-114 |
 | 拒单规则 | SIM-214、SIM-219、SIM-023、SIM-090、SIM-091、SIM-101、SIM-202 |
@@ -31,9 +31,9 @@ spec: README.md
 | 2. 簿副本 | SIM-020–SIM-023 |
 | 3. 吃单撮合 | SIM-030–SIM-036、SIM-125 |
 | 4. 挂单(预留给 MakerFirst) | SIM-040、SIM-041、SIM-162 |
-| 5. 手续费与扣费资产 | SIM-050–SIM-053、SIM-125 |
+| 5. 手续费与扣费资产 | SIM-050–SIM-053、SIM-125、SIM-223 |
 | 6. 资金费 | SIM-060–SIM-063、SIM-125、SIM-166、SIM-203 |
-| 7. 永续全仓保证金与强平 | SIM-070–SIM-075、SIM-125、SIM-221 |
+| 7. 永续全仓保证金与强平 | SIM-070–SIM-075、SIM-125、SIM-221、SIM-225 |
 | 8. 现货余额与划转 | SIM-036、SIM-080–SIM-083 |
 | 9. 确定性 | SIM-004、SIM-120–SIM-123、SIM-165、SIM-205 |
 | 10. 不变量 | SIM-124、SIM-204、SIM-222 |
@@ -1634,6 +1634,54 @@ spec: README.md
 | SIM-222.1 | 按 `gen_seq` 核算 | 与模拟真值逐单位相等 |
 | SIM-222.2 | 错误地按交付顺序核算 | 抓到 model 19999927519 / sim 19999927499 的反例 |
 | SIM-222.3 | 按 `gen_seq`,额外记入 1 单位手续费 | 资金守恒检查失败 |
+
+### SIM-223 永续回报提供累计结算事实,费用与查询不改变它
+
+- 规则:[手续费与扣费资产](README.md#5-手续费与扣费资产)、[hft-event 执行事件](../hft-event/README.md#执行0x02xx)
+- 级别:table
+- 里程碑:M2
+- 前置:`rd_sim`、`setup_sim`,P2 钱包 18000 USDT,开仓 0.2 BTC @60000
+- 输入:两档各 0.1 BTC 平仓,每行分别即时/晚到手续费;结束后同订单查两次
+- 共同期望:开仓为覆盖量 0.2、现金零;每笔覆盖量等于累计成交,钱包 = 初始 + 结算 − 独立费用和;两次查询重复相同累计事实
+- 实现:`crates/hft-sim/tests/settlement.rs::sim_223_order_cash_is_independent_of_fees_and_queries`
+
+| 行 | 输入 | 累计现金 USDT |
+|---|---|---|
+| SIM-223.1 | 多仓,卖 62000/61000 | 200、300 |
+| SIM-223.2 | 多仓,卖 59000/58000 | −100、−300 |
+| SIM-223.3 | 空仓,买 58000/59000 | 200、300 |
+| SIM-223.4 | 空仓,买 61000/62000 | −100、−300 |
+| SIM-223.5 | S1 现货成交 | 两现金字段均为零,不声明永续结算 |
+
+### SIM-224 恢复订单保留结算覆盖范围,无效事实原子拒绝
+
+- 规则:[重启恢复](README.md#重启恢复)
+- 级别:table
+- 里程碑:M2
+- 前置:P2 余额 18100 USDT,多仓 0.1 BTC @60000;恢复卖单共 0.2、已成交 0.1 @61000,余量挂单
+- 输入:先查询恢复单,再以 61001 的 Trade 穿过挂单价 61000
+- 共同期望:查询保留种子原值;后续只增加本笔 0.1 BTC 的现金 100 USDT;非法种子返回 SettlementFacts,完整状态哈希不变
+- 实现:`crates/hft-sim/tests/settlement.rs::sim_224_recovered_cash_coverage_is_not_inferred_from_wallet`
+
+| 行 | 原结算事实或错误 | 期望 |
+|---|---|---|
+| SIM-224.1 | 覆盖 0.1、金额 100 | 最终覆盖 0.2、金额 200 |
+| SIM-224.2 | 两字段均为 0 | 最终只覆盖 0.1、金额 100,不从余额补造旧事实 |
+| SIM-224.3 | 覆盖量为负 | 原子拒绝 |
+| SIM-224.4 | 覆盖量超过已成交量 | 原子拒绝 |
+| SIM-224.5 | 零覆盖量带非零金额 | 原子拒绝 |
+| SIM-224.6 | 现货订单带永续结算事实 | 原子拒绝 |
+
+### SIM-225 强平回报将本笔现金与费用分开
+
+- 规则:[永续全仓保证金与强平](README.md#7-永续全仓保证金与强平)
+- 级别:unit
+- 里程碑:M2
+- 前置:P2 余额 18000 USDT,空仓 1 BTC @60000
+- 输入:mark = 77611.9403,触发与 SIM-072.2 相同的强平
+- 步骤:恢复余额与空仓,输入 mark,推进到 10 ms 后收集 ExternalFill 与钱包
+- 期望:恰好一笔 ExternalFill,覆盖量 1 BTC、实际现金 −18000.0001 USDT、费用 390.000001 USDT;钱包逐单位等于初始加现金减费用
+- 实现:`crates/hft-sim/tests/settlement.rs::sim_225_liquidation_reports_exact_cash_separately_from_fee`
 
 ## 验收
 

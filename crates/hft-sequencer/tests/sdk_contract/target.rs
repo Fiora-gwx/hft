@@ -768,6 +768,8 @@ fn sdk_163_manual_external_no_default() {
         ex_ts_ns: 0,
         rx_tsc: hft_types::Tsc(h.now()),
         fill_seq: 0,
+        cash_qty: hft_types::Qty(0),
+        cash_amount: hft_types::Qty(0),
     };
     h.push(RingId::Rep(0), &x);
     h.run();
@@ -827,6 +829,8 @@ fn seq_374_manual_hold_pair_tail_verify() {
                 ex_ts_ns: 0,
                 rx_tsc: hft_types::Tsc(h.now()),
                 fill_seq: 0,
+                cash_qty: hft_types::Qty(0),
+                cash_amount: hft_types::Qty(0),
             },
         );
         h.run();

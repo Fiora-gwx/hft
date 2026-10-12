@@ -197,6 +197,8 @@ fn order_event(
         hw_rx_ns: 0,
         rx_tsc: 0,
         avg_px: Px(px),
+        cash_qty: hft_types::Qty(0),
+        cash_sum: hft_types::Qty(0),
     }
 }
 
@@ -534,6 +536,8 @@ impl Matcher for ToyMatcher {
                 ex_ts_ns: now_ns as i64,
                 rx_tsc: Tsc(0),
                 fill_seq: 0,
+                cash_qty: hft_types::Qty(0),
+                cash_amount: hft_types::Qty(0),
             };
             self.push(
                 now_ns + self.latency_ns,
@@ -832,6 +836,8 @@ impl<M: Matcher> MockVenue<M> {
             hw_rx_ns: 0,
             rx_tsc: 0,
             avg_px: Px(0),
+            cash_qty: hft_types::Qty(0),
+            cash_sum: hft_types::Qty(0),
         }
     }
 

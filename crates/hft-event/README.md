@@ -247,10 +247,12 @@ pub struct FundingSettle {          // 0x0206,56 B,Input(交易所推送)或 Out
 
 资金费的来源按 [hft-refdata `VenueCaps.funding_settle`](../hft-refdata/README.md#交易所能力表venuecaps):`PerSymbolPush` → 交易所推送带 inst 的实收,直接入账;`BalanceOnlyPush` → 交易所推送 `inst = INST_NONE` 的合计(Input,只用于校验),sequencer 合成每 inst 的 `synth = 1` 记录入账;`RateOnly` → 无推送,只合成。合成规则与校验差异的处理归 [hft-sequencer](../hft-sequencer/README.md) 与 [hft-ledger](../hft-ledger/README.md)。
 
+`OrderEvent` v2 在原 96 B 尾部追加 `cash_qty: Qty`(96)与 `cash_sum: Qty`(104),体长 112 B。`cash_sum` 是本订单被覆盖成交的永续实际已实现现金之和,按该 inst 计价资产的 `qty_exp` 计,收入为正,不含手续费、资金费和划转。它来自撮合/成交明细,不从余额差反推。完整事实满足 `cash_qty == cum_filled > 0`;已知零额仍携带正覆盖量;`cash_qty == 0` 表示未提供,部分覆盖不能视为完整累计结算。查询与终态回报复用同一订单累计事实,`FeeOnly` 不增加它。现货两字段均为 0。旧 v1 解码补零,不能据此宣称钱包实额已知。消费者的配对、缺失处理与去重归 [hft-oms](../hft-oms/README.md),账本入口归 [hft-ledger](../hft-ledger/README.md)。
+
 `OrderEventKind`(event-model 列出)编码:`Ack=1 Reject=2 PartialFill=3 Fill=4 CancelAck=5 CancelReject=6 AmendAck=7 AmendReject=8 Expired=9 QueryResult=10 OutcomeUnknown=11 FeeOnly=12`。`FeeOnly`:只携带费用(延迟到达的手续费回报);OMS 在任何状态下只把 `fee` 交给 ledger,不迁移状态、不请求对账;`gen` 不符时按 `(venue, account, exch_order_id)` 入账;ledger 与 LegTracker 据此补净量差(手续费资产 = 基础资产时)。`OutcomeUnknown`:gw 收到 venue 协议判为"结果未知"的响应码(含未登记码,[hft-venue-proto](../hft-venue-proto/README.md))时产出,`slot/gen` 取自 `ReportOutcome.outcome_unknown`,`reject_code` = 原始码,价量与成交字段为 0;OMS 据此把该槽置 `Unknown` 并查询。`QueryResult` 必须带 `cum_filled` 与 `avg_px`(交易所给不出均价时由 venue 协议按成交明细合成,不得填 0 而 `cum_filled > 0`)。`OrderEvent.detail`(偏移 3,u8,由 venue 协议按其 `codes.rs` 填写)按 `what` 取值:`QueryResult` = 订单状态码,与 `ReconcileReport.order_status` 同码(`New=1 PartiallyFilled=2 Filled=3 Cancelled=4 Rejected=5 Expired=6 NotFound=7`);`CancelReject`/`AmendReject` = 拒绝分类 `OTHER=0 GONE=1`(GONE:订单已成交或不存在);`PartialFill`/`Fill` = 订单方向(`Buy=1 Sell=2`,未知 0;OMS 对外来单与过期代次成交按此记净量);其余 `what` 写 0。各分类如何处理归 [hft-oms](../hft-oms/README.md)。
 
 ```rust
-pub struct ExternalFill {           // 0x0207,80 B(schema_version 2),Input;本账户上**不是本系统下的单**产生的成交:自身强平、ADL、网页/人工下单、交割
+pub struct ExternalFill {           // 0x0207,96 B(schema_version 3),Input;本账户上**不是本系统下的单**产生的成交:自身强平、ADL、网页/人工下单、交割
     pub venue: VenueId,             //  0
     pub account: AccountId,         //  1
     pub side: Side,                 //  2 本账户方向
@@ -266,10 +268,12 @@ pub struct ExternalFill {           // 0x0207,80 B(schema_version 2),Input;本�
     pub ex_ts_ns: i64,              // 56
     pub rx_tsc: Tsc,                // 64
     pub fill_seq: u64,              // 72 v2:trade_id = 0 时 = 该订单本笔之后的累计成交量 raw(hft-venue-proto 契约 22 的 fill_seq);trade_id > 0 时 0
-}                                   // 80 B
+    pub cash_qty: Qty,             // 80 v3:本笔结算覆盖量;完整事实时等于 qty,0 表示未提供
+    pub cash_amount: Qty,          // 88 v3:本笔永续已实现现金,按计价资产 qty_exp,收入为正,不含手续费与资金费
+}                                   // 96 B
 ```
 
-去重键的唯一定义在 [hft-venue-proto 契约 22](../hft-venue-proto/README.md):`trade_id > 0` 时 `(inst, trade_id)`,否则 `(inst, exch_order_id, fill_seq)`;同一 (venue, account) 内去重。本体带齐这两种键的全部字段,下游(OMS、ledger)按同一键去重;读 v1 记录(72 B)时 `fill_seq` 补零。
+去重键的唯一定义在 [hft-venue-proto 契约 22](../hft-venue-proto/README.md):`trade_id > 0` 时 `(inst, trade_id)`,否则 `(inst, exch_order_id, fill_seq)`;同一 (venue, account) 内去重。本体带齐这两种键的全部字段,下游(OMS、ledger)按同一键去重;读 v1 记录(72 B)时 `fill_seq` 补零;读 v1/v2 时两个现金字段补零,表示未提供。
 
 `ExternalFill` 由 venue 协议按 `VenueCaps.own_liquidation_marker` 识别;无法识别 cause 的外来成交,以及无法匹配到本系统订单的成交在暂存超时后,记 `cause = Unknown`(暂存与超时规则归 [hft-venue](../hft-venue/README.md)/[hft-oms](../hft-oms/README.md));对账报告中带 `AUTO_EXTERNAL` 的仓位条目在该 `ReconcileReport` Input 内确定地合成一笔 `cause = Unknown` 的外来成交,**不另写 `ExternalFill` 记录**(合成函数归 [hft-ledger](../hft-ledger/README.md),冷读者经同一消费路径得到同一笔;调用点与去重键取值归 [hft-sequencer](../hft-sequencer/README.md))。ledger 入账(净量按 `VenueCaps.fee_asset_rule`)、LegTracker 更新、按 cause 告警(`Note{ExternalFill}` 的级别见登记表)、投递给该账户绑定的策略实例(`EventRef::External`);策略在 `external_deadline_ms` 内未处理时由 [hft-exec](../hft-exec/README.md) 按"平掉多出的一腿"默认处理——`cause = Manual`(人工在网页操作)除外:引擎不做默认处理,该 cell 置 `manual_hold`(抑制与解除规则归 hft-exec,写 `Note{ExecManualHold}`),由策略按自己的规则处理。各环节的语义归对应 crate,本 crate 只定义体。
 

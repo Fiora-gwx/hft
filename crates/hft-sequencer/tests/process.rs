@@ -560,6 +560,8 @@ pub fn ext(
         ex_ts_ns: 0,
         rx_tsc: Tsc(0),
         fill_seq: 0,
+        cash_qty: hft_types::Qty(0),
+        cash_amount: hft_types::Qty(0),
     }
 }
 
@@ -912,6 +914,8 @@ fn seq_150_external_fill_attributed() {
         ex_ts_ns: 0,
         rx_tsc: Tsc(h.now()),
         fill_seq: 0,
+        cash_qty: hft_types::Qty(0),
+        cash_amount: hft_types::Qty(0),
     };
     h.push(RingId::Rep(0), &x);
     h.run();
@@ -1005,6 +1009,8 @@ fn seq_372_foreign_fill_increments_not_held() {
             hw_rx_ns: 0,
             rx_tsc: 0,
             avg_px: px("50010"),
+            cash_qty: hft_types::Qty(0),
+            cash_sum: hft_types::Qty(0),
         };
         let m = h.mark();
         h.push(RingId::Rep(0), &ev);

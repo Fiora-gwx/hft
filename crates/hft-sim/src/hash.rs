@@ -95,6 +95,8 @@ pub(crate) fn state_hash(ex: &SimExchange) -> u64 {
             i(&mut h, o.qty);
             i(&mut h, o.filled);
             w(&mut h, o.fill_val);
+            i(&mut h, o.cash_qty);
+            i(&mut h, o.cash_sum);
             u(&mut h, o.exch_id);
             i(&mut h, o.lock);
         }

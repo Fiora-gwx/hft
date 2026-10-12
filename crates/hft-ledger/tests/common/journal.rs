@@ -166,5 +166,7 @@ pub fn order_event(
         hw_rx_ns: 0,
         rx_tsc: 0,
         avg_px,
+        cash_qty: hft_types::Qty(0),
+        cash_sum: hft_types::Qty(0),
     }
 }

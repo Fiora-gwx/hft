@@ -458,6 +458,8 @@ impl E2e {
             hw_rx_ns: 0,
             rx_tsc: self.now(),
             avg_px: d.px,
+            cash_qty: hft_types::Qty(0),
+            cash_sum: hft_types::Qty(0),
         }
     }
 

@@ -178,6 +178,8 @@ fn blank(line: Line, account: AccountId, rx: &RxMeta) -> OrderEvent {
         hw_rx_ns: rx.hw_rx_ns,
         rx_tsc: rx.rx_tsc,
         avg_px: Px(0),
+        cash_qty: hft_types::Qty(0),
+        cash_sum: hft_types::Qty(0),
     }
 }
 
