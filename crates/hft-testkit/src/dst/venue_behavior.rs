@@ -92,6 +92,17 @@ pub struct VenueOut {
     pub client_id: String,
 }
 
+/// Original external execution, captured when exchange truth changes. Transport replay must
+/// reuse this receipt; it must not settle another fill or infer cash from a balance difference.
+#[derive(Clone, Debug)]
+pub struct ExternalReceipt {
+    pub fill: ExternalFill,
+    pub client_id: String,
+}
+
+/// Test-run evidence bound. Exhaustion fails before the next execution changes exchange truth.
+pub const EXTERNAL_HISTORY_CAP: usize = 4096;
+
 /// The matching core behind a `MockVenue`.
 pub trait Matcher: Sized {
     fn new(world: &WorldSpec, venue: VenueId, seed: u64) -> Self;
@@ -113,8 +124,11 @@ pub trait Matcher: Sized {
     fn cancel_all(&mut self, a: AccountId, now_ns: u64);
     /// Free quote balance of `a` (raw quote units).
     fn free_quote(&self, a: AccountId) -> i128;
-    /// A fill not caused by the engine (liquidation, ADL, manual): changes the truth; `push` =
-    /// the user stream reports it.
+    /// Executions injected through external(), in exchange order, including missed pushes.
+    /// Reading the history changes neither exchange state nor transport scheduling.
+    fn external_history(&self) -> &[ExternalReceipt];
+    /// A fill not caused by the engine (liquidation, ADL, manual): changes truth exactly once,
+    /// retains and returns its original receipt; `push` controls only the user-stream delivery.
     #[allow(clippy::too_many_arguments)]
     fn external(
         &mut self,
@@ -125,7 +139,7 @@ pub trait Matcher: Sized {
         client_id: &str,
         push: bool,
         now_ns: u64,
-    );
+    ) -> ExternalFill;
     fn state_hash(&self) -> u64;
 }
 
@@ -164,6 +178,7 @@ pub struct ToyMatcher {
     bal: BTreeMap<(u8, u16), i128>,
     next_exch: u64,
     next_trade: u64,
+    external_history: Vec<ExternalReceipt>,
     latency_ns: u64,
     /// Fault `BaseFee`: fees in the base asset.
     pub base_fee: bool,
@@ -315,6 +330,7 @@ impl Matcher for ToyMatcher {
             bal,
             next_exch: 1,
             next_trade: 1,
+            external_history: Vec::new(),
             latency_ns: 1_000_000,
             base_fee: false,
             partial: false,
@@ -500,6 +516,9 @@ impl Matcher for ToyMatcher {
             .first()
             .map_or(0, |(_, _, q, _)| self.bal.get(&(a.0, q.0)).copied().unwrap_or(0))
     }
+    fn external_history(&self) -> &[ExternalReceipt] {
+        &self.external_history
+    }
     fn external(
         &mut self,
         a: AccountId,
@@ -509,10 +528,17 @@ impl Matcher for ToyMatcher {
         client_id: &str,
         push: bool,
         now_ns: u64,
-    ) {
-        let Some((_, base, _, perp)) = self.inst(inst) else {
-            return;
-        };
+    ) -> ExternalFill {
+        let (_, base, _, perp) = self.inst(inst).expect("invalid external instrument");
+        assert!(self.accounts.contains(&a) && qty > 0, "invalid external fill");
+        assert!(
+            self.external_history.len() < EXTERNAL_HISTORY_CAP,
+            "external history full"
+        );
+        let next_trade = self
+            .next_trade
+            .checked_add(1)
+            .expect("external trade id exhausted");
         let s: i128 = if side == Side::Buy { 1 } else { -1 };
         if perp {
             *self.pos.entry((a.0, inst.0)).or_default() += s * i128::from(qty);
@@ -521,33 +547,38 @@ impl Matcher for ToyMatcher {
         }
         let px = self.bbo.get(&inst.0).map_or(0, |b| b.0);
         let trade_id = self.next_trade;
-        self.next_trade += 1;
+        self.next_trade = next_trade;
+        let x = ExternalFill {
+            venue: self.venue,
+            account: a,
+            side,
+            cause: ExternalCause::Unknown,
+            inst,
+            qty: Qty(qty),
+            px: Px(px),
+            fee: Qty(0),
+            fee_asset: AssetId(0),
+            _pad: [0; 6],
+            exch_order_id: 0,
+            trade_id,
+            ex_ts_ns: now_ns as i64,
+            rx_tsc: Tsc(0),
+            fill_seq: 0,
+            cash_qty: hft_types::Qty(0),
+            cash_amount: hft_types::Qty(0),
+        };
+        self.external_history.push(ExternalReceipt {
+            fill: x,
+            client_id: client_id.to_string(),
+        });
         if push {
-            let x = ExternalFill {
-                venue: self.venue,
-                account: a,
-                side,
-                cause: ExternalCause::Unknown,
-                inst,
-                qty: Qty(qty),
-                px: Px(px),
-                fee: Qty(0),
-                fee_asset: AssetId(0),
-                _pad: [0; 6],
-                exch_order_id: 0,
-                trade_id,
-                ex_ts_ns: now_ns as i64,
-                rx_tsc: Tsc(0),
-                fill_seq: 0,
-                cash_qty: hft_types::Qty(0),
-                cash_amount: hft_types::Qty(0),
-            };
             self.push(
                 now_ns + self.latency_ns,
                 RepMsg::ExternalFill(x),
                 client_id.to_string(),
             );
         }
+        x
     }
     fn state_hash(&self) -> u64 {
         let s = format!(
@@ -625,6 +656,10 @@ pub struct MockVenue<M: Matcher> {
     ack_ids: BTreeMap<(u8, u64), (u64, OrderEvent)>,
     md_down_until: u64,
     order_down_until: u64,
+    userstream_down_until: u64,
+    /// Original receipts waiting for the user stream. The optional gap remains in flight
+    /// until the replay is scheduled and its last_due boundary has passed.
+    adl_replays: Vec<(u64, ExternalFill)>,
     quiet: BTreeMap<u32, u64>,
     last_due: BTreeMap<u8, u64>,
     /// (account, inst) whose truth changed without a push (ADL in a user-stream gap): INV-16
@@ -651,6 +686,8 @@ impl<M: Matcher> MockVenue<M> {
             ack_ids: BTreeMap::new(),
             md_down_until: 0,
             order_down_until: 0,
+            userstream_down_until: 0,
+            adl_replays: Vec::new(),
             quiet: BTreeMap::new(),
             last_due: BTreeMap::new(),
             excluded: Vec::new(),
@@ -861,6 +898,21 @@ impl<M: Matcher> MockVenue<M> {
     fn collect(&mut self, now: u64) -> Vec<(u64, InputRec)> {
         let mut reps = Vec::new();
         self.m.drain_due(now.saturating_add(10_000_000), &mut reps);
+        if now >= self.userstream_down_until {
+            let mut pending = Vec::new();
+            for (at, fill) in self.adl_replays.drain(..) {
+                if at <= now {
+                    reps.push(VenueOut {
+                        due_ns: now,
+                        rep: RepMsg::ExternalFill(fill),
+                        client_id: "adl-replay".to_string(),
+                    });
+                } else {
+                    pending.push((at, fill));
+                }
+            }
+            self.adl_replays = pending;
+        }
         let mut out = Vec::new();
         let mut fba = self.next_order.contains(&NextOrder::FillBeforeAck);
         for r in reps {
@@ -1017,6 +1069,9 @@ impl<M: Matcher> MockVenue<M> {
     /// Next time `tick` has work.
     pub fn next_wake(&self, now: u64) -> u64 {
         let mut t = self.m.next_due().unwrap_or(u64::MAX);
+        if let Some(at) = self.adl_replays.iter().map(|(at, _)| *at).min() {
+            t = t.min(at.max(self.userstream_down_until));
+        }
         if !self.clean && self.cfg.bbo_ping_ms > 0 {
             t = t.min(self.next_ping);
         }
@@ -1048,7 +1103,10 @@ impl<M: Matcher> MockVenue<M> {
                         self.order_down_until = until;
                         ConnRole::Order
                     }
-                    ConnKind::UserStream => ConnRole::UserStream,
+                    ConnKind::UserStream => {
+                        self.userstream_down_until = self.userstream_down_until.max(until);
+                        ConnRole::UserStream
+                    }
                 };
                 for a in self.m.accounts() {
                     let acct = if role == ConnRole::Md { AccountId(0) } else { a };
@@ -1104,14 +1162,17 @@ impl<M: Matcher> MockVenue<M> {
                 out.extend(self.collect(now));
             }
             Fault::Adl {
-                account, inst, gap, ..
+                account,
+                inst,
+                gap,
+                replay,
             } => {
                 let t = self.m.truth(account);
                 if let Some((_, q)) = t.positions.iter().find(|(i, _)| *i == inst)
                     && *q != 0
                 {
                     let side = if *q > 0 { Side::Sell } else { Side::Buy };
-                    self.m.external(
+                    let fill = self.m.external(
                         account,
                         inst,
                         side,
@@ -1120,7 +1181,9 @@ impl<M: Matcher> MockVenue<M> {
                         !gap,
                         now,
                     );
-                    if gap {
+                    if replay {
+                        self.adl_replays.push((now.saturating_add(1_000_000), fill));
+                    } else if gap {
                         self.excluded.push((account.0, inst.0));
                     }
                 }
@@ -1148,6 +1211,7 @@ impl<M: Matcher> MockVenue<M> {
             .map(|a| {
                 let mut t = self.m.truth(a);
                 t.undelivered |= self.last_due.get(&a.0).is_some_and(|d| *d >= now);
+                t.undelivered |= self.adl_replays.iter().any(|(_, f)| f.account == a);
                 t.excluded
                     .extend(self.excluded.iter().filter(|(x, _)| *x == a.0).map(|(_, i)| *i));
                 t

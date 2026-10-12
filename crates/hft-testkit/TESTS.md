@@ -26,7 +26,7 @@ spec: README.md
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
 | 10. SeqRig | PY-106–PY-109、PY-111、PY-112 |
 | 实现说明 | 不适用:见子节 |
-| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-129 |
+| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-132 |
 | 金样运行器 | TK-001、TK-005 |
 | 源文件 | TK-066 |
 | 延迟与资源契约 | TK-092–TK-093 |
@@ -1673,6 +1673,41 @@ spec: README.md
 - 种子:`0xd05efd09f013189a`、`0xd05efd09f01318f6`、43,各 10000 步,强制复跑
 - 断言:全部不变量、强制复跑及非空 HashTrail 通过,实际发生快照重建;原第 591/597/590 步的已有或限内到达 Ack 不会错误进入无法匹配的防御路径
 - 实现:`crates/hft-testkit/tests/seq_sut.rs::tk_129_acknowledged_no_client_id_cash_reports_survive_the_full_fault_plan`
+
+### TK-130 外来成交历史保留原始现金且满表原子失败
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:unit
+- 里程碑:M2
+- 前置:真实 SimMatcher,多空镜像先开 200000 原始数量,价格从 600189000 变到 600275000 后平 100000
+- 步骤:不推送的开平仓均保留原始凭据,反复读取并比较全部字节;另一账户产生下一笔成交。另将 4096 行历史填满,尝试第 4097 笔
+- 期望:平仓现金分别为 +8600/−8600,历史含完整身份、client id 与现金覆盖量,读取和修改取出的副本不影响原始事实、交易所哈希或交付;满表不淘汰、不结算、不生成回报
+- 实现:`crates/hft-testkit/tests/external_receipts.rs::tk_130_external_history_keeps_original_cash_and_fails_before_overflow`
+
+### TK-131 ADL 重连补报复用原始成交且不重复结算
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:table
+- 里程碑:M2
+- 前置:真实 SimMatcher,与 TK-130 相同的非零现金成交,行为层延迟固定以明确交付边界
+- 共同期望:所有交付副本除 cause 由 venue 标记为 Adl 外,逐字节等于原始凭据;副本不增加历史、不改变交易所哈希、仓位或钱包。补报结束后不再标在途,对应品种未加入永久排除
+- 实现:`crates/hft-testkit/tests/external_receipts.rs::tk_131_adl_replay_waits_for_stream_and_never_settles_twice`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| TK-131.1 | 多空 × gap 开关 × replay 开关 × 用户流正常/断连,共 16 行 | 原始推送数为 !gap,补报数为 replay;补报最早在 1 ms 或恢复边界的较晚者到达,边界前不交付 |
+| TK-131.2 | 两笔断流 ADL,第二次断连延长恢复时刻 | 两笔分别保留 trade_id 2/3 与现金 −8600/−4300;旧恢复边界不补报,新边界各交付一次 |
+
+### TK-132 ADL 原始补报经真实引擎和恢复后钱包一致
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:integ
+- 里程碑:M2
+- 前置:真实 SeqSut 与 SimMatcher,多空镜像 × 首次补报前是否重启,共四行
+- 步骤:先将原始开仓送入引擎;断流 ADL 仅改变交易所真值,用户流恢复后送入保存的成交。首笔入账后重启,再交付两份相同副本
+- 期望:钱包精确为初始值加一次 +8600/−8600,仓位保留原方向的 100000;每个入账边界的独立 JournalLedger 与热账本一致,验证回放的 Output 和组件哈希一致,恢复后不重复入账
+- 边界:此例只覆盖补报去重和恢复,不包含 AUTO_EXTERNAL 合成或 auto_held 抵扣,LED-081 保持待实现
+- 实现:`crates/hft-testkit/tests/external_receipts.rs::tk_132_replayed_adl_keeps_real_engine_wallet_after_recovery`
 
 ## 验收
 

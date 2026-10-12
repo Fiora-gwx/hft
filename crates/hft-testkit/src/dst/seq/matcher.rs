@@ -17,7 +17,7 @@ use zerocopy::FromZeros;
 
 use crate::dst::obs::TruthRow;
 use crate::dst::seq::build;
-use crate::dst::venue_behavior::{Matcher, VenueOut};
+use crate::dst::venue_behavior::{EXTERNAL_HISTORY_CAP, ExternalReceipt, Matcher, VenueOut};
 use crate::dst::world::WorldSpec;
 
 /// Slots probed by `open_orders` (the OMS table size of a DST run).
@@ -49,6 +49,7 @@ pub struct SimMatcher {
     out: VecDeque<VenueOut>,
     bbo: BTreeMap<u32, i64>,
     next_trade: u64,
+    external_history: Vec<ExternalReceipt>,
     upd: u64,
     last_ns: u64,
     /// Epoch of each (account, slot) from its `Place` (`GwCmd.arg`): the gw stamps it on the
@@ -206,6 +207,7 @@ impl Matcher for SimMatcher {
             out: VecDeque::new(),
             bbo: BTreeMap::new(),
             next_trade: 1,
+            external_history: Vec::new(),
             upd: 0,
             last_ns: 0,
             epochs: BTreeMap::new(),
@@ -355,6 +357,9 @@ impl Matcher for SimMatcher {
             .and_then(|e| e.account(a))
             .map_or(0, |v| i128::from(v.balance(self.venue, q).free.0))
     }
+    fn external_history(&self) -> &[ExternalReceipt] {
+        &self.external_history
+    }
     fn external(
         &mut self,
         a: AccountId,
@@ -364,11 +369,19 @@ impl Matcher for SimMatcher {
         client_id: &str,
         push: bool,
         now_ns: u64,
-    ) {
+    ) -> ExternalFill {
         let (_, _, _, perp) = self
             .inst(inst)
             .expect("DST external fill instrument must belong to venue");
         let px = self.bbo.get(&inst.0).copied().unwrap_or(0);
+        assert!(
+            self.external_history.len() < EXTERNAL_HISTORY_CAP,
+            "external history full"
+        );
+        let next_trade = self
+            .next_trade
+            .checked_add(1)
+            .expect("external trade id exhausted");
         // The exchange truth settles it like a fill (position, cost, realised PnL, balances).
         let cash = self
             .ex
@@ -377,33 +390,38 @@ impl Matcher for SimMatcher {
             .external_fill(a, inst, side, Qty(qty), Px(px))
             .expect("invalid DST external fill");
         let trade_id = self.next_trade;
-        self.next_trade += 1;
+        self.next_trade = next_trade;
+        let x = ExternalFill {
+            venue: self.venue,
+            account: a,
+            side,
+            cause: ExternalCause::Unknown,
+            inst,
+            qty: Qty(qty),
+            px: Px(px),
+            fee: Qty(0),
+            fee_asset: AssetId(0),
+            _pad: [0; 6],
+            exch_order_id: 0,
+            trade_id,
+            ex_ts_ns: now_ns as i64,
+            rx_tsc: Tsc(0),
+            fill_seq: 0,
+            cash_qty: if perp { Qty(qty) } else { Qty(0) },
+            cash_amount: if perp { cash } else { Qty(0) },
+        };
+        self.external_history.push(ExternalReceipt {
+            fill: x,
+            client_id: client_id.to_string(),
+        });
         if push {
-            let x = ExternalFill {
-                venue: self.venue,
-                account: a,
-                side,
-                cause: ExternalCause::Unknown,
-                inst,
-                qty: Qty(qty),
-                px: Px(px),
-                fee: Qty(0),
-                fee_asset: AssetId(0),
-                _pad: [0; 6],
-                exch_order_id: 0,
-                trade_id,
-                ex_ts_ns: now_ns as i64,
-                rx_tsc: Tsc(0),
-                fill_seq: 0,
-                cash_qty: if perp { Qty(qty) } else { Qty(0) },
-                cash_amount: if perp { cash } else { Qty(0) },
-            };
             self.out.push_back(VenueOut {
                 due_ns: now_ns + 1_000_000,
                 rep: RepMsg::ExternalFill(x),
                 client_id: client_id.to_string(),
             });
         }
+        x
     }
     fn state_hash(&self) -> u64 {
         self.ex.as_ref().map_or(0, |e| e.state_hash())

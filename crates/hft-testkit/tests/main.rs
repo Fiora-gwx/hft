@@ -9,6 +9,8 @@ mod clock;
 mod deps;
 mod dst_report;
 mod dst_world;
+#[cfg(feature = "seq")]
+mod external_receipts;
 mod faults;
 mod fees;
 mod r#gen;
