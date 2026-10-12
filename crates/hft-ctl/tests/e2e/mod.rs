@@ -460,6 +460,7 @@ impl E2e {
             avg_px: d.px,
             cash_qty: hft_types::Qty(0),
             cash_sum: hft_types::Qty(0),
+            trade_id: 0,
         }
     }
 

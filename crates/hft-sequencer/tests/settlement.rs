@@ -287,6 +287,7 @@ fn foreign_event(slot: u32, cum: i64, cash: i64) -> hft_event::OrderEvent {
         avg_px: Px(6_000_000),
         cash_qty: Qty(cum),
         cash_sum: Qty(cash),
+        trade_id: 0,
     }
 }
 

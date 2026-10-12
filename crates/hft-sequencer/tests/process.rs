@@ -1011,6 +1011,7 @@ fn seq_372_foreign_fill_increments_not_held() {
             avg_px: px("50010"),
             cash_qty: hft_types::Qty(0),
             cash_sum: hft_types::Qty(0),
+            trade_id: 0,
         };
         let m = h.mark();
         h.push(RingId::Rep(0), &ev);

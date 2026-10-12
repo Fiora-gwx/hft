@@ -19,7 +19,7 @@
 | 0x0109 | `L2Batch` | Var | Input | 增量深度(可选扩展)的产出:一条交易所增量消息一条记录 |
 | 0x0201 | `OrderDecision` | 定长 88 | Output | 意图 + 风控结果 + OMS 分配 |
 | 0x0202 | `SendReport` | 定长 48 | Input | gw/sim-gw 写出结果 |
-| 0x0203 | `OrderEvent` | 定长 112 | Input | 回执/拒绝/成交/撤单/改单/过期/查询结果/结果未知/仅费用 |
+| 0x0203 | `OrderEvent` | 定长 120 | Input | 回执/拒绝/成交/撤单/改单/过期/查询结果/结果未知/仅费用 |
 | 0x0204 | `PositionReport` | 定长 56 | Input | 交易所推送,只校验 |
 | 0x0205 | `BalanceReport` | 定长 40 | Input | |
 | 0x0206 | `FundingSettle` | 定长 56 | 按体:`synth = 1` Output,否则 Input | `inst = INST_NONE` = 只推账户级合计 |

@@ -724,6 +724,7 @@ impl H {
             avg_px: Px(0),
             cash_qty: hft_types::Qty(0),
             cash_sum: hft_types::Qty(0),
+            trade_id: 0,
         }
     }
     pub fn ev(&mut self, ev: &OrderEvent, t_ms: u64) {

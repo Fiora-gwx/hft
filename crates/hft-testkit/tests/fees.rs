@@ -100,6 +100,7 @@ fn tk_104_fee_only_checker() {
                     avg_px: Px(0),
                     cash_qty: hft_types::Qty(0),
                     cash_sum: hft_types::Qty(0),
+                    trade_id: 0,
                 };
                 let recs = [JRec {
                     seq: 1,

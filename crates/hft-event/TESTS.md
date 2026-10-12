@@ -20,7 +20,7 @@ spec: README.md
 | 所有权与线程 | EVT-030 |
 | 事件体布局 | EVT-040、EVT-050、EVT-060、EVT-070、EVT-074 |
 | 行情(0x01xx) | EVT-040–EVT-041 |
-| 执行(0x02xx) | EVT-050–EVT-055 |
+| 执行(0x02xx) | EVT-050–EVT-055、EVT-205 |
 | 链上(0x03xx) | EVT-060–EVT-061、EVT-178 |
 | 控制与系统(0x04xx、0x05xx) | EVT-070–EVT-084 |
 | cap 记录 | EVT-090–EVT-091 |
@@ -113,7 +113,7 @@ spec: README.md
 | EVT-004.9 | `0x0109` | `L2Batch` / Market / Var prefix 80 max 64 000 / Input / 1 / SEQ / Never / false |
 | EVT-004.10 | `0x0201` | `OrderDecision` / Exec / Fixed 88 / Output / 1 / SEQ / Never / false |
 | EVT-004.11 | `0x0202` | `SendReport` / Exec / Fixed 48 / Input / 1 / SEQ / Never / false |
-| EVT-004.12 | `0x0203` | `OrderEvent` / Exec / Fixed 112 / Input / 2 / SEQ / Never / false |
+| EVT-004.12 | `0x0203` | `OrderEvent` / Exec / Fixed 120 / Input / 3 / SEQ / Never / false |
 | EVT-004.13 | `0x0204` | `PositionReport` / Exec / Fixed 56 / Input / 1 / SEQ / Never / false |
 | EVT-004.14 | `0x0205` | `BalanceReport` / Exec / Fixed 40 / Input / 1 / SEQ / Never / false |
 | EVT-004.15 | `0x0206` | `FundingSettle` / Exec / Fixed 56 / ByBody / 2 / SEQ / Never / false |
@@ -598,7 +598,7 @@ spec: README.md
 |---|---|---|
 | EVT-050.1 | `OrderDecision` | size 88;`trigger_seq`@0、`decided_tsc`@8、`px`@16、`qty`@24、`group`@32、`inst`@36、`slot`@40、`gen`@44、`target_slot`@48、`reject`@52、`strategy`@56、`venue`@57、`account`@58、`action`@59、`side`@60、`tif`@61、`oflags`@62、`reason`@64、`intent_no`@68、`req_px`@72、`link_role`@80、`_pad`@81 |
 | EVT-050.2 | `SendReport` | size 48;`decision_seq`@0、`sent_tsc`@8、`slot`@16、`gen`@20、`target_slot`@24、`target_gen`@28、`venue`@32、`account`@33、`conn`@34、`status`@35、`op`@36、`_pad`@37、`os_errno`@40、`_pad2`@44 |
-| EVT-050.3 | `OrderEvent` | size 112;`venue`@0、`account`@1、`what`@2、`detail`@3、`slot`@4、`gen`@8、`inst`@12、`px`@16、`qty`@24、`cum_filled`@32、`fee`@40、`fee_asset`@48、`epoch`@50、`reject_code`@52、`exch_order_id`@56、`ex_ts_ns`@64、`hw_rx_ns`@72、`rx_tsc`@80、`avg_px`@88、`cash_qty`@96、`cash_sum`@104 |
+| EVT-050.3 | `OrderEvent` | size 120;`venue`@0、`account`@1、`what`@2、`detail`@3、`slot`@4、`gen`@8、`inst`@12、`px`@16、`qty`@24、`cum_filled`@32、`fee`@40、`fee_asset`@48、`epoch`@50、`reject_code`@52、`exch_order_id`@56、`ex_ts_ns`@64、`hw_rx_ns`@72、`rx_tsc`@80、`avg_px`@88、`cash_qty`@96、`cash_sum`@104、`trade_id`@112 |
 | EVT-050.4 | `PositionReport` | size 56;`venue`@0、`account`@1、`_pad`@2、`inst`@4、`qty`@8、`entry_px`@16、`upnl`@24、`liq_px`@32、`ex_ts_ns`@40、`rx_tsc`@48 |
 | EVT-050.5 | `BalanceReport` | size 40;`venue`@0、`account`@1、`asset`@2、`_pad`@4、`free`@8、`locked`@16、`ex_ts_ns`@24、`rx_tsc`@32 |
 | EVT-050.6 | `FundingSettle` | size 56;`venue`@0、`account`@1、`_pad`@2、`inst`@4、`amount`@8、`rate`@16、`pos_qty`@24、`settle_ts_ns`@32、`rx_tsc`@40、`synth`@48、`_pad2`@49 |
@@ -762,8 +762,9 @@ spec: README.md
 | EVT-071.7 | `CmdResult` v2(144 B,体偏移 104..112 为 0) | `preview.reset_groups == 0`、`preview.no_open_ms == 0`,其余字段同样本 |
 | EVT-071.8 | `ConnState` v1(16 B) | `rx_tsc == 0`(未提供) |
 | EVT-071.9 | `FundingSettle` v1(48 B) | `synth == 0`;`classify` 为 `Input` |
-| EVT-071.10 | `OrderEvent` v1(96 B) | 原字段逐字节保留;`cash_qty == cash_sum == 0`,表示缺少结算事实 |
+| EVT-071.10 | `OrderEvent` v1(96 B) | 原字段逐字节保留;`cash_qty == cash_sum == trade_id == 0`,表示缺少结算与正成交 ID 事实 |
 | EVT-071.11 | `ExternalFill` v2(80 B) | 原字段逐字节保留;`cash_qty == cash_amount == 0`,表示缺少结算事实 |
+| EVT-071.12 | `OrderEvent` v2(112 B) | 原字段含非零结算事实逐字节保留;`trade_id == 0`,表示没有正成交 ID 事实 |
 
 ### EVT-072 LatencySample.action 只允许 0..=2
 
@@ -2077,6 +2078,16 @@ spec: README.md
 - 步骤:读取合法体,逐字节截断,并分别破坏计数、保留位、索引、账户和枚举;执行 CRC 编解码与控制环帧往返
 - 期望:合法体按原顺序读取,CRC 编解码一致;坏体明确失败
 - 实现:`crates/hft-event/tests/reconcile.rs::evt_204_reconciliation_batch_is_bounded_and_complete`
+
+### EVT-205 订单单笔成交 ID 完整保存并受 CRC 保护
+
+- 规则:[执行](README.md#执行0x02xx)
+- 级别:unit
+- 里程碑:M2
+- 前置:所有原字段非零的 Fill;成交 ID 分别为 0、1、2^63、u64 最大值
+- 步骤:分别编码带 CRC 与不带 CRC 的记录,解码完整体;带 CRC 时破坏 ID 的一位
+- 期望:ID 逐位保留,前 112 B 与原字段相同,分类仍为 Input;ID 被破坏时报 BadCrc,不能把它当作不参与验证的测量字段
+- 实现:`crates/hft-event/tests/version.rs::evt_205_order_execution_id_survives_record_and_crc`
 
 ## 验收
 

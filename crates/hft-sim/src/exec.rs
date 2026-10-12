@@ -133,6 +133,7 @@ impl SimExchange {
             avg_px: Px(avg),
             cash_qty: Qty(o.cash_qty),
             cash_sum: Qty(o.cash_sum),
+            trade_id: 0,
         }
     }
 

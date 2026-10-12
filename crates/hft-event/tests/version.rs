@@ -12,7 +12,7 @@ use crate::common;
 use common::*;
 use hft_event::*;
 use std::path::PathBuf;
-use zerocopy::IntoBytes;
+use zerocopy::{IntoBytes, TryFromBytes};
 
 fn dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/hft-event/EVT-071")
@@ -63,6 +63,7 @@ fn rows() -> Vec<(&'static str, EventKind, Vec<u8>)> {
             EventKind::EXTERNAL_FILL,
             cut(ExternalFill::FIELDS, 80),
         ),
+        ("EVT-071.12", EventKind::ORDER_EVENT, cut(OrderEvent::FIELDS, 112)),
     ]
 }
 
@@ -126,11 +127,19 @@ fn evt_071_old_versions_zero_fill() {
                 let e = r.read::<OrderEvent>().unwrap();
                 assert_eq!(&e.as_bytes()[..n], &body[..], "{row}");
                 assert_eq!((e.cash_qty.0, e.cash_sum.0), (0, 0), "{row}");
+                assert_eq!(e.trade_id, 0, "{row}");
             }
             "EVT-071.11" => {
                 let e = r.read::<ExternalFill>().unwrap();
                 assert_eq!(&e.as_bytes()[..n], &body[..], "{row}");
                 assert_eq!((e.cash_qty.0, e.cash_amount.0), (0, 0), "{row}");
+            }
+            "EVT-071.12" => {
+                let e = r.read::<OrderEvent>().unwrap();
+                assert_eq!(&e.as_bytes()[..n], &body[..], "{row}");
+                assert_eq!(e.trade_id, 0, "{row}");
+                assert_ne!(e.cash_qty.0, 0, "{row}");
+                assert_ne!(e.cash_sum.0, 0, "{row}");
             }
             _ => {
                 assert_eq!(r.read::<FundingSettle>().unwrap().synth, 0, "{row}");
@@ -139,6 +148,36 @@ fn evt_071_old_versions_zero_fill() {
                     Ok(Role::Input),
                     "{row}"
                 );
+            }
+        }
+    }
+}
+
+#[test]
+fn evt_205_order_execution_id_survives_record_and_crc() {
+    let mut e = OrderEvent::try_read_from_bytes(&canonical(OrderEvent::FIELDS)).unwrap();
+    e.what = OrderEventKind::Fill;
+    let prefix = e.as_bytes()[..112].to_vec();
+    for id in [0, 1, i64::MAX as u64 + 1, u64::MAX] {
+        e.trade_id = id;
+        for crc in [false, true] {
+            let flags = if crc {
+                RecordFlags::EVENT_END | RecordFlags::CRC
+            } else {
+                RecordFlags::EVENT_END
+            };
+            let mut record = enc(&e, 73, 91, flags);
+            let r = decode_record(&record).unwrap();
+            assert_eq!(r.read::<OrderEvent>().unwrap(), e);
+            assert_eq!(&r.body[..112], &prefix);
+            assert_eq!(&r.body[112..120], &id.to_le_bytes());
+            assert_eq!(classify(EventKind(r.hdr.kind), r.body), Ok(Role::Input));
+            // A legacy reader consumes its known 112-byte prefix, without interpreting the
+            // appended execution id as cumulative settlement or changing any old field.
+            assert_eq!(&record[24..136], &prefix);
+            if crc {
+                record[136] ^= 1;
+                assert_eq!(decode_record(&record).unwrap_err(), DecodeErr::BadCrc);
             }
         }
     }

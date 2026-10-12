@@ -217,6 +217,7 @@ fn order_event(
         avg_px: Px(px),
         cash_qty: hft_types::Qty(0),
         cash_sum: hft_types::Qty(0),
+        trade_id: 0,
     }
 }
 
@@ -888,6 +889,7 @@ impl<M: Matcher> MockVenue<M> {
             avg_px: Px(0),
             cash_qty: hft_types::Qty(0),
             cash_sum: hft_types::Qty(0),
+            trade_id: 0,
         }
     }
 

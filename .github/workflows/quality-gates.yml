@@ -377,7 +377,11 @@ jobs:
           HAS_DST: ${{ steps.xtask.outputs.dst }}
         run: |
           set +e
-          if [[ $HAS_GEN_SCHEMA == true ]]; then cargo xtask gen-schema; fi
+          if [[ $HAS_GEN_SCHEMA == true ]]; then
+            cargo xtask gen-schema
+            HFT_REGEN_GOLDEN=1 cargo test --locked --profile ci -p hft-event --test golden
+            HFT_REGEN_GOLDEN=1 cargo test --locked --profile ci -p hft-event --test event version::evt_071_old_versions_zero_fill
+          fi
           if [[ $HAS_GEN_HOST == true ]]; then cargo xtask gen-host; fi
           if [[ $HAS_DST == true && -f fixtures/dst/hashtrail.toml ]]; then
             cargo xtask dst --hashtrail write

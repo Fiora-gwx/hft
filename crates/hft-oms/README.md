@@ -223,7 +223,7 @@ pub struct LinkUpdate {
 pub struct ForeignFill {                           // 防御路径与 StaleGen 的外来成交增量(按 exch_order_id 的累计量去重后)
     pub venue: VenueId, pub account: AccountId, pub inst: InstId, pub side: Side,
     pub qty: Qty, pub px: Px, pub fee: i64, pub fee_asset: AssetId, pub exch_order_id: u64, pub seq: u64,
-    pub trade_id: u64,                             // 回报带成交 id 时填,否则 0(OrderEvent 不带成交 id,恒为 0)
+    pub trade_id: u64,                             // 当前防御路径恒为 0;不能用 OrderEvent 的单笔 ID 给累计差额命名
     pub cum_filled: Qty,                           // 本增量之后该交易所订单的累计成交量(毛量)
     pub cash: Option<Qty>,                         // 明确结算增量,不含费用和资金费
 }

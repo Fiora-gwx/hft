@@ -646,6 +646,7 @@ mod tests {
             avg_px: Px(0),
             cash_qty: Qty(0),
             cash_sum: Qty(0),
+            trade_id: 0,
         }
     }
 

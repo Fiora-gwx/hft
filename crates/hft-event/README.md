@@ -247,7 +247,9 @@ pub struct FundingSettle {          // 0x0206,56 B,Input(交易所推送)或 Out
 
 资金费的来源按 [hft-refdata `VenueCaps.funding_settle`](../hft-refdata/README.md#交易所能力表venuecaps):`PerSymbolPush` → 交易所推送带 inst 的实收,直接入账;`BalanceOnlyPush` → 交易所推送 `inst = INST_NONE` 的合计(Input,只用于校验),sequencer 合成每 inst 的 `synth = 1` 记录入账;`RateOnly` → 无推送,只合成。合成规则与校验差异的处理归 [hft-sequencer](../hft-sequencer/README.md) 与 [hft-ledger](../hft-ledger/README.md)。
 
-`OrderEvent` v2 在原 96 B 尾部追加 `cash_qty: Qty`(96)与 `cash_sum: Qty`(104),体长 112 B。`cash_sum` 是本订单被覆盖成交的永续实际已实现现金之和,按该 inst 计价资产的 `qty_exp` 计,收入为正,不含手续费、资金费和划转。它来自撮合/成交明细,不从余额差反推。完整事实满足 `cash_qty == cum_filled > 0`;已知零额仍携带正覆盖量;`cash_qty == 0` 表示未提供,部分覆盖不能视为完整累计结算。查询与终态回报复用同一订单累计事实,`FeeOnly` 不增加它。现货两字段均为 0。旧 v1 解码补零,不能据此宣称钱包实额已知。消费者的配对、缺失处理与去重归 [hft-oms](../hft-oms/README.md),账本入口归 [hft-ledger](../hft-ledger/README.md)。
+`OrderEvent` v3 体长 120 B。v2 字段为 `cash_qty: Qty`(96)与 `cash_sum: Qty`(104);`cash_sum` 表示本订单被覆盖成交的永续实际已实现现金之和,按该 inst 计价资产的 `qty_exp` 计,收入为正,不含手续费、资金费和划转。它来自撮合/成交明细,不从余额差反推。完整事实满足 `cash_qty == cum_filled > 0`;已知零额仍携带正覆盖量;`cash_qty == 0` 表示未提供,部分覆盖不能视为完整累计结算。查询与终态回报复用同一订单累计事实,`FeeOnly` 不增加它。现货两字段均为 0。旧 v1 解码补零,不能据此宣称钱包实额已知。消费者的配对、缺失处理与去重归 [hft-oms](../hft-oms/README.md),账本入口归 [hft-ledger](../hft-ledger/README.md)。
+
+v3 尾部 `trade_id: u64`(112)记录这条 `PartialFill`/`Fill` 对应的单笔交易所成交 ID,正值原样保留;缺失、非正 ID 与非成交类回报填 0,不从订单号、累计量或本地序号伪造。ID 的归一化与 `ExternalFill.trade_id` 相同。它只识别本笔,不能代表累计量跨过的其他成交,也不能单独证明现金或费用重叠。v1/v2 的缺失字段补零,表示没有正 ID 事实;旧字段偏移与语义保持不变。
 
 `OrderEventKind`(event-model 列出)编码:`Ack=1 Reject=2 PartialFill=3 Fill=4 CancelAck=5 CancelReject=6 AmendAck=7 AmendReject=8 Expired=9 QueryResult=10 OutcomeUnknown=11 FeeOnly=12`。`FeeOnly`:只携带费用(延迟到达的手续费回报);OMS 在任何状态下只把 `fee` 交给 ledger,不迁移状态、不请求对账;`gen` 不符时按 `(venue, account, exch_order_id)` 入账;ledger 与 LegTracker 据此补净量差(手续费资产 = 基础资产时)。`OutcomeUnknown`:gw 收到 venue 协议判为"结果未知"的响应码(含未登记码,[hft-venue-proto](../hft-venue-proto/README.md))时产出,`slot/gen` 取自 `ReportOutcome.outcome_unknown`,`reject_code` = 原始码,价量与成交字段为 0;OMS 据此把该槽置 `Unknown` 并查询。`QueryResult` 必须带 `cum_filled` 与 `avg_px`(交易所给不出均价时由 venue 协议按成交明细合成,不得填 0 而 `cum_filled > 0`)。`OrderEvent.detail`(偏移 3,u8,由 venue 协议按其 `codes.rs` 填写)按 `what` 取值:`QueryResult` = 订单状态码,与 `ReconcileReport.order_status` 同码(`New=1 PartiallyFilled=2 Filled=3 Cancelled=4 Rejected=5 Expired=6 NotFound=7`);`CancelReject`/`AmendReject` = 拒绝分类 `OTHER=0 GONE=1`(GONE:订单已成交或不存在);`PartialFill`/`Fill` = 订单方向(`Buy=1 Sell=2`,未知 0;OMS 对外来单与过期代次成交按此记净量);其余 `what` 写 0。各分类如何处理归 [hft-oms](../hft-oms/README.md)。
 
@@ -1236,6 +1238,8 @@ impl<'b> Reassembler<'b> {
 
 ## 延伸阅读
 
+- [订单成交身份](../../.agents/notes/implemented/architecture/2026-10-13-order-execution-identity.md)
+
 - [event-model](../../docs/subsystems/event-model.md)(记录头、编号段与分类、关键体、演进规则)、[journal-format](../../docs/subsystems/journal-format.md)(多段、快照、段头 schema 表)、[control-plane](../../docs/subsystems/control-plane.md)(命令语义与权限)、[external-venue-protocol](../../docs/subsystems/external-venue-protocol.md)(optional:`PoolQuote`/`TxLifecycle`/`SwapDecision` 的跨进程承载)
 - [hft-strategy-sdk](../hft-strategy-sdk/README.md)(`Model`、`ParamSet`、`ParamSchemaDesc`、`EventRef`)、[hft-exec](../hft-exec/README.md)(`ExecDecision` 的语义)、[hft-sim](../hft-sim/README.md)(模拟账户回报)
 - [13 R5/R6/O5](../../design/13-设计评审与优化.md)、[08 §2](../../design/08-数据面与回放.md)、[09 §1、§5](../../design/09-可观测性、风控与控制面.md)、[research/06 §2](../../design/research/06-data-plane-replay-observability.md)(DBN 记录布局、SBE 演进原则);决策出处:[round8-decisions](../../design/_work/round8-decisions.md)
@@ -1243,6 +1247,8 @@ impl<'b> Reassembler<'b> {
 - [编解码分配计数的线程边界](../../.agents/notes/implemented/testing/2026-10-11-event-allocation-scope.md)
 
 ## 已知限制与后续工作
+
+- `OrderEvent.trade_id` 的传递与历史读取由 EVT-071/205 核对;现有模拟回报及尚未提供成交 ID 的生产者填 0。跨原始/累计回报的资金抵扣仍须验证原始凭据和累计区间,LED-080 未由新增字段单独完成。
 
 - `Advice` 单条载荷 ≤ 4096 B;更大的模型输出(如全币分配表)由策略拆成多条并自行约定续条。若某策略经常需要 > 64 KiB 的一次性输出,可选扩展:把 `Advice` 改为 `Multi` 布局的新 kind(触发条件:拆分续条在策略侧造成可测的复杂度或延迟)。
 - SPB1 头只描述 group 结构;参数字段的类型能力(当前只有标量与按 group 的标量覆盖)由 [hft-strategy-sdk `params`](../hft-strategy-sdk/README.md) 决定。body 编码升级时由 SDK 定义新编码,本 crate 只在需要区分时追加 `encoding` 号。

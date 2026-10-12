@@ -53,9 +53,9 @@ fn evt_050_exec_layouts() {
     check!("EVT-050.2", SendReport, 48, 8; decision_seq @ 0, sent_tsc @ 8, slot @ 16, r#gen @ 20, target_slot @ 24,
         target_gen @ 28, venue @ 32, account @ 33, conn @ 34, status @ 35, op @ 36, _pad @ 37, os_errno @ 40,
         _pad2 @ 44);
-    check!("EVT-050.3", OrderEvent, 112, 8; venue @ 0, account @ 1, what @ 2, detail @ 3, slot @ 4, r#gen @ 8,
+    check!("EVT-050.3", OrderEvent, 120, 8; venue @ 0, account @ 1, what @ 2, detail @ 3, slot @ 4, r#gen @ 8,
         inst @ 12, px @ 16, qty @ 24, cum_filled @ 32, fee @ 40, fee_asset @ 48, epoch @ 50, reject_code @ 52,
-        exch_order_id @ 56, ex_ts_ns @ 64, hw_rx_ns @ 72, rx_tsc @ 80, avg_px @ 88, cash_qty @ 96, cash_sum @ 104);
+        exch_order_id @ 56, ex_ts_ns @ 64, hw_rx_ns @ 72, rx_tsc @ 80, avg_px @ 88, cash_qty @ 96, cash_sum @ 104, trade_id @ 112);
     check!("EVT-050.4", PositionReport, 56, 8; venue @ 0, account @ 1, _pad @ 2, inst @ 4, qty @ 8, entry_px @ 16,
         upnl @ 24, liq_px @ 32, ex_ts_ns @ 40, rx_tsc @ 48);
     check!("EVT-050.5", BalanceReport, 40, 8; venue @ 0, account @ 1, asset @ 2, _pad @ 4, free @ 8, locked @ 16,
