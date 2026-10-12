@@ -1556,6 +1556,7 @@ dependencies = [
  "crc32c",
  "hft-event",
  "hft-journal",
+ "hft-refdata",
  "hft-rt",
  "hft-sequencer",
  "hft-strategy-registry",
