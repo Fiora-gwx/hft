@@ -146,6 +146,97 @@ fn tk_126_external_reports_carry_exchange_cash_facts() {
     }
 }
 
+#[test]
+fn tk_128_no_client_id_uses_the_accounts_ack_identity_and_keeps_cash() {
+    use hft_testkit::dst::seq::matcher::SimMatcher;
+    use hft_testkit::dst::world::{ACCT_B, P1};
+    for (within_hold, delayed_ack) in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut world = WorldSpec::w1();
+        world.venues.iter_mut().find(|v| v.id == VP).unwrap().perp_cash = true;
+        let mut cfg = MockVenueCfg::w1(VP);
+        cfg.latency_ns = (1_000_000, 1_000_000);
+        let mut plain: MockVenue<SimMatcher> = MockVenue::new(cfg.clone(), &world, 1);
+        let mut faulted: MockVenue<SimMatcher> = MockVenue::new(cfg, &world, 1);
+        for v in [&mut plain, &mut faulted] {
+            v.tick(0);
+            for a in [ACCT_A, ACCT_B] {
+                v.m.external(a, P1, Side::Sell, 100_000, "manual", false, 10_000_000);
+            }
+            v.on_market(
+                P1,
+                (600_010_000, 10_000_000),
+                (600_010_100, 10_000_000),
+                20_000_000,
+            );
+        }
+        let mut exchange_ids = Vec::new();
+        for (ix, account) in [ACCT_A, ACCT_B].into_iter().enumerate() {
+            let mut cmd = place(10 + ix as u32, 100_000, 600_010_100);
+            cmd.account = account;
+            cmd.inst = P1;
+            cmd.arg = 7 + ix as u32;
+            let now = 40_000_000 + ix as u64 * 20_000_000;
+            faulted.apply_fault(
+                &Fault::NoClientIdFill {
+                    venue: VP,
+                    within_hold,
+                },
+                now,
+            );
+            if delayed_ack && ix == 1 {
+                for v in [&mut plain, &mut faulted] {
+                    v.apply_fault(&Fault::FillBeforeAck { venue: VP }, now);
+                }
+            }
+            let expected = plain.on_frame(&cmd, now);
+            let actual = faulted.on_frame(&cmd, now);
+            let events = |rows: &[(u64, InputRec)]| {
+                rows.iter()
+                    .filter_map(|(t, i)| i.read_try::<OrderEvent>().map(|e| (*t, e)))
+                    .collect::<Vec<_>>()
+            };
+            let expected = events(&expected);
+            let actual = events(&actual);
+            let ack = expected
+                .iter()
+                .find(|(_, e)| e.what == OrderEventKind::Ack)
+                .unwrap();
+            let fill = expected
+                .iter()
+                .find(|(_, e)| e.what == OrderEventKind::Fill)
+                .unwrap();
+            assert_ne!(fill.1.cash_sum.0, 0);
+            assert_eq!(fill.1.cash_qty, fill.1.cum_filled);
+            let copies: Vec<_> = actual
+                .iter()
+                .filter(|(_, e)| e.what == OrderEventKind::Fill)
+                .collect();
+            if delayed_ack && ix == 1 {
+                assert!(ack.0 > fill.0);
+                let mut unresolved = *fill;
+                unresolved.1.slot = SlotId::UNRESOLVED;
+                unresolved.1.r#gen = 0;
+                unresolved.1.epoch = 0;
+                assert_eq!(copies, [&unresolved, fill]);
+            } else {
+                assert_eq!(ack.0, fill.0);
+                assert_eq!(expected[0].1.what, OrderEventKind::Ack);
+                assert_eq!(copies, [fill, fill]);
+            }
+            assert_eq!(actual.len(), expected.len() + 1);
+            assert_eq!(
+                (fill.1.account, fill.1.epoch, fill.1.slot, fill.1.r#gen),
+                (account, cmd.arg as u16, cmd.slot, cmd.r#gen)
+            );
+            exchange_ids.push(fill.1.exch_order_id);
+            assert_eq!(plain.m.truth(account), faulted.m.truth(account));
+            assert_eq!(plain.m.state_hash(), faulted.m.state_hash());
+        }
+        // The same exchange order id in two accounts must never borrow the other's identity.
+        assert_eq!(exchange_ids[0], exchange_ids[1]);
+    }
+}
+
 fn venue(dead_man_ms: u32) -> MockVenue<ToyMatcher> {
     let mut c = MockVenueCfg::w1(VS);
     c.rate_per_s = 10;

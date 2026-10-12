@@ -26,7 +26,7 @@ spec: README.md
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
 | 10. SeqRig | PY-106–PY-109、PY-111、PY-112 |
 | 实现说明 | 不适用:见子节 |
-| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-127 |
+| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-129 |
 | 金样运行器 | TK-001、TK-005 |
 | 源文件 | TK-066 |
 | 延迟与资源契约 | TK-092–TK-093 |
@@ -1648,6 +1648,29 @@ spec: README.md
 - 断言:诊断窗口保留原交付乱序,从原始成交及完整订单身份独立计算每笔现金,逐笔与现金字段相等;独立按交付顺序估算仍多 1 单位,实际两边钱包均为 49999683575。关闭检查器后完整 journal、非空 HashTrail、撮合证据及真值逐字节相同;完整 10000 步全部不变量及快照重建通过。前缀与全程分别从首个、中间和最后一个仍有成交后缀的快照交给 JournalLedger 冷读,全部钱包、仓位和库存与热引擎逐单位相同
 - 实现:`crates/hft-testkit/tests/fill_order.rs::tk_127_explicit_cash_closes_the_original_wallet_difference`
 - 边界:原 TK-123 保留旧协议反例,不能因新用例通过而删除失败回归种子;推广到默认世界后仍须通过完整 CI
+
+### TK-128 无 client id 副本按已到达的同账户 Ack 匹配并保留现金
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:unit
+- 里程碑:M2
+- 前置:真实 SimMatcher、开启永续现金,两个账户先分别外来开空;之后按不同 slot/gen/epoch 平仓,两账户的交易所订单号相同,每笔实际现金非零
+- 输入:正常路径与 NoClientIdFill 的四行对照,`within_hold = false/true` × 第二账户 Ack 同时先排入队列/晚于成交;固定行为层延迟以明确交付边界
+- 步骤:两套相同匹配器分别走原回报及无 client id 副本路径,逐账户发平仓单,收集 Ack、原成交和故障副本并比较真值
+- 期望:每次故障实际多交付一份成交副本;已有 Ack 时完整身份、数量、费用与现金逐字节等于原成交。晚 Ack 行的副本为零 epoch/gen 与 UNRESOLVED,不能借未来 Ack 或另一账户的同号订单;正常成交仍原样交付。两边模拟状态哈希和真值相同
+- 边界:此用例不计等待、超时、终态映射过期或 LK-4 验收
+- 实现:`crates/hft-testkit/tests/actors.rs::tk_128_no_client_id_uses_the_accounts_ack_identity_and_keeps_cash`
+
+### TK-129 已有 Ack 的无 client id 现金成交通过完整故障计划
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:dst
+- 里程碑:M2
+- 前置:W1 显式启用永续现金,全部检查器开启
+- 故障:原 core 故障计划,不调整延迟或故障率
+- 种子:`0xd05efd09f013189a`、`0xd05efd09f01318f6`,各 10000 步,强制复跑
+- 断言:全部不变量、强制复跑及非空 HashTrail 通过,实际发生快照重建;原第 591/597 步的已有 Ack 成交不会错误进入无法匹配的防御路径
+- 实现:`crates/hft-testkit/tests/seq_sut.rs::tk_129_acknowledged_no_client_id_cash_reports_survive_the_full_fault_plan`
 
 ## 验收
 
