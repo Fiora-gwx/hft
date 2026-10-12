@@ -321,10 +321,7 @@ def hot_equal(led: object, fx: SeqFx, step: str) -> None:
     assert testing.ledger_snapshot(led).hex() == fx.expected(step).hex(), step
     assert _norm(rows(led.positions())) == st["positions"], step  # type: ignore[attr-defined]
     assert _norm(rows(led.inventory())) == st["inventory"], step  # type: ignore[attr-defined]
-    # Cold readers do not run the quiet-period balance check (hft-ledger "冷消费者": `on_balance`
-    # with `quiet = false`), so `BALANCE_UNRECONCILED` is the hot process's only.
-    hot_port = [dict(r, flags=r["flags"] & ~BALANCE_UNRECONCILED) for r in st["portfolio"]]
-    assert _norm(rows(led.portfolio())) == hot_port, step  # type: ignore[attr-defined]
+    assert _norm(rows(led.portfolio())) == st["portfolio"], step  # type: ignore[attr-defined]
     assert bd(led) == st["pnl"], step
 
 
@@ -408,6 +405,12 @@ def test_py_111_booking_samples(seq_fx, row: str) -> None:  # type: ignore[no-un
         assert qty(led, 101) == 999_000 and b["fee_cex"] != 0
     elif row == "PY-111.2":
         assert qty(led) == 60_000_000 and b["external"] != 0
+    elif row == "PY-111.3":
+        for step, expected in [("drift", BALANCE_UNRECONCILED), ("end", 0)]:
+            portfolio = rows(upto(fx, step).portfolio())  # type: ignore[attr-defined]
+            spot = next(r for r in portfolio if r["venue"] == 2)
+            assert spot["flags"] & BALANCE_UNRECONCILED == expected
+            assert spot["quote_cash"] == 10_000_000_000_000
     elif row == "PY-111.4":
         assert b["funding"] == fx.steps["synth"]["pnl"][1] != 0
     elif row == "PY-111.5":

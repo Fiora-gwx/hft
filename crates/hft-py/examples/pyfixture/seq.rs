@@ -1085,6 +1085,13 @@ fn sample(f: &mut Fx, row: u32) {
             f.balance(S1, USDT, 9_500_000_000_000);
             f.run();
             let s = f.last_seq();
+            f.step("drift", s);
+            f.tick();
+            // The original wallet is unchanged by either balance report. Record a matching
+            // report so Python verifies both setting and clearing the cold drift flag.
+            f.balance(S1, USDT, 10_000_000_000_000);
+            f.run();
+            let s = f.last_seq();
             f.step("end", s);
         }
         4 => {
