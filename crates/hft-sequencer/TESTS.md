@@ -1098,12 +1098,14 @@ spec: README.md
   - 步骤 2:余量 364 ≥ 320,这一轮不是背压轮,按 b–g 段依次取 ctl、bbo、advice、md、rep-sim
 - 实现:`crates/hft-sequencer/tests/preempt.rs::seq_071_backpressure_round`
 
+该调度边界用例直接准备带身份的策略 Timer 通知积压,逐条核对 Driver 交出的环及首条 NotifyContinue;实盘回报重复既有余额事实,不产生新通知。真实通知的生成、完整载荷与回放由 SEQ-220–223 覆盖,本例不把预填队列当作可回放输入。
+
 ### SEQ-072 背压的两个阈值
 
 - 规则:[主循环](README.md#主循环step)、[通知队列与续推](README.md#通知队列与续推)
 - 级别:table
 - 里程碑:M2
-- 前置:B0 稳态(U = 160);rep-A 积压 3 条,每条产生 0 条通知;每行给出这一轮开始时的余量 H0
+- 前置:SEQ-071 的全部竞争环与受控积压(U = 160);rep-A 积压 3 条,每条产生 0 条通知;每行给出这一轮开始时的余量 H0。核对 64 条通知投递及首条 Timer;背压行的其他环保持原积压,非背压行全部取出
 - 实现:`crates/hft-sequencer/tests/preempt.rs::seq_072_backpressure_thresholds`
 
 | 行 | H0 | 期望 |

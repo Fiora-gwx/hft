@@ -540,6 +540,145 @@ fn seq_070_no_mid_check_in_b() {
     assert!(k.contains(&EventKind::CONN_STATE));
 }
 
+/// Scheduler-only boundary fixture. End-to-end creation, payload order and replay of a real
+/// backlog are covered separately by SEQ-220–SEQ-223.
+fn pressure_backlog(h: &mut H, headroom: usize) {
+    assert!(!h.s.view().wants_continue());
+    let ix = h.s.instances().ix(S1).unwrap() as u16;
+    assert_eq!(h.s.engine().notify.backlog_cap(), 640);
+    h.s.engine_mut().notify.fill_backlog(ix, 640 - headroom);
+    assert_eq!(h.s.view().notify_headroom(), headroom);
+    clear_log();
+}
+
+/// Every competing ring is nonempty. The live reports repeat the baseline cash fact and
+/// produce no notification, so their admission cannot hide either headroom threshold.
+fn pressure_inputs(h: &mut H) {
+    h.cmd(AC1, &ControlCmd::SnapshotNow);
+    for _ in 0..3 {
+        h.push(
+            RingId::Rep(0),
+            &hft_event::BalanceReport {
+                venue: A,
+                account: AC1,
+                asset: USDT,
+                _pad: 0,
+                free: q("100000"),
+                locked: hft_types::Qty(0),
+                ex_ts_ns: 0,
+                rx_tsc: Tsc(h.now()),
+            },
+        );
+    }
+    for k in 0..5 {
+        h.quote(A1, "50000", "50002");
+        h.push(RingId::Md(0), &trade(A1, k + 1));
+    }
+    let mut a = <hft_event::AdviceHdr as zerocopy::FromZeros>::new_zeroed();
+    a.strategy = S2;
+    a.account = AC2;
+    a.group = G2;
+    a.local_kind = 7;
+    a.len = 8;
+    a.basis_seq = h.s.engine().cur_seq;
+    let mut body = zerocopy::IntoBytes::as_bytes(&a).to_vec();
+    body.extend_from_slice(&0u64.to_le_bytes());
+    h.push_bytes(RingId::Advice, EventKind::ADVICE, body);
+    for k in 0..2 {
+        h.push(RingId::RepSim, &alive(A, k));
+    }
+}
+
+const PRESSURE_RINGS: [(RingId, usize); 5] = [
+    (RingId::Ctl, 1),
+    (RingId::Bbo(0), 5),
+    (RingId::Advice, 1),
+    (RingId::Md(0), 5),
+    (RingId::RepSim, 2),
+];
+
+fn assert_notify_first(h: &H, mark: usize) {
+    let input = inputs_since(h, mark);
+    assert_eq!(input[0].kind, EventKind::TIMER);
+    let t = input[0].read::<hft_event::Timer>().unwrap();
+    assert_eq!((t.owner, t.timer_id), (1, 17));
+    assert_eq!(
+        log()
+            .iter()
+            .filter(|g| !g.model && g.s == S1 && g.kind == "Timer")
+            .count(),
+        64
+    );
+}
+
+#[test]
+fn seq_071_backpressure_round() {
+    let mut h = steady();
+    pressure_backlog(&mut h, 300);
+    pressure_inputs(&mut h);
+    let mark = h.mark();
+    let start = h.io_ref().handed.len();
+    assert_eq!(h.step(), StepOutcome::Busy);
+    assert_notify_first(&h, mark);
+    assert_eq!(h.s.engine().notify.backlog_len(), 276);
+    assert_eq!(h.s.view().notify_headroom(), 364);
+    assert_eq!(len(&mut h, RingId::Rep(0)), 0);
+    for (ring, n) in PRESSURE_RINGS {
+        assert_eq!(len(&mut h, ring), n);
+    }
+    assert_eq!(
+        &h.io_ref().handed[start..],
+        &[
+            None,
+            Some(RingId::Rep(0)),
+            Some(RingId::Rep(0)),
+            Some(RingId::Rep(0))
+        ]
+    );
+    // Admission is decided afresh at the next round, not latched for the whole backlog.
+    clear_log();
+    let mark = h.mark();
+    let start = h.io_ref().handed.len();
+    assert_eq!(h.step(), StepOutcome::Busy);
+    assert_notify_first(&h, mark);
+    let mut expected = vec![None];
+    for (ring, n) in PRESSURE_RINGS {
+        assert_eq!(len(&mut h, ring), 0);
+        expected.extend(std::iter::repeat_n(Some(ring), n));
+    }
+    assert_eq!(h.io_ref().handed[start..], expected);
+}
+
+#[test]
+fn seq_072_backpressure_thresholds() {
+    for (headroom, pressure, reports) in [
+        (319, true, 3),
+        (320, false, 3),
+        (321, false, 3),
+        (95, true, 0),
+        (96, true, 3),
+    ] {
+        let mut h = steady();
+        pressure_backlog(&mut h, headroom);
+        pressure_inputs(&mut h);
+        let mark = h.mark();
+        assert_eq!(h.step(), StepOutcome::Busy);
+        assert_notify_first(&h, mark);
+        assert_eq!(3 - len(&mut h, RingId::Rep(0)), reports, "headroom {headroom}");
+        for (ring, n) in PRESSURE_RINGS {
+            assert_eq!(
+                len(&mut h, ring),
+                if pressure { n } else { 0 },
+                "headroom {headroom}, {ring:?}"
+            );
+        }
+        if pressure {
+            assert_eq!(h.s.view().notify_headroom(), headroom + 64);
+            assert_eq!(inputs_since(&h, mark).len(), reports + 1);
+        }
+    }
+}
+
 #[test]
 fn seq_073_replay_per_round() {
     let mut h = steady();
