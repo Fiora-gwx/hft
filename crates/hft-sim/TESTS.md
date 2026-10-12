@@ -16,7 +16,7 @@ spec: README.md
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
 | 模拟账户是什么 | SIM-005、SIM-114、SIM-167 |
-| 纯核心 API | SIM-002、SIM-003、SIM-012、SIM-113、SIM-188、SIM-220 |
+| 纯核心 API | SIM-002、SIM-003、SIM-012、SIM-113、SIM-188、SIM-220、SIM-226 |
 | sim-gw 任务(`task` feature) | SIM-214–SIM-217、SIM-105、SIM-140–SIM-148、SIM-205 |
 | 重启恢复 | SIM-160–SIM-169、SIM-218、SIM-224 |
 | 配置 | SIM-001、SIM-003、SIM-004、SIM-033、SIM-034、SIM-052、SIM-053、SIM-077、SIM-082、SIM-111、SIM-144 |
@@ -832,8 +832,8 @@ spec: README.md
   1. `external_fill(A9, BTC_P2, Buy, 0.4, 59 000)`
   2. `external_fill(A9, BTC_S1, Buy, 0.1, 60 000)`
 - 期望:
-  - 步骤 1 后 BTC_P2 仓位 −0.6;USDT 余额 18 400(已实现 +400,无手续费)
-  - 步骤 2 后 S1 的 BTC 余额 +0.1、USDT −6 000
+  - 步骤 1 返回 `Some(400 USDT)`;BTC_P2 仓位 −0.6,USDT 余额 18 400(已实现 +400,无手续费)
+  - 步骤 2 返回 `Some(0)`;S1 的 BTC 余额 +0.1、USDT −6 000
   - 两步都没有新的回报(`drain_due` 无输出)
 - 实现:`crates/hft-sim/tests/events.rs::sim_220_external_fill`
 
@@ -847,7 +847,7 @@ spec: README.md
   1. `external_fill(A9, BTC_P2, Sell, 0.1, 60 000)`;`external_fill(A9, BTC_P2, Sell, 0.2, 60 000.0001)`
   2. `external_fill(A9, BTC_P2, Buy, 0.1, 60 000.0002)`
 - 期望:
-  - 步骤 2 后仓位 −0.2;移出成本 = 18 000 000 002 × 10⁶ / 3 向零取整 = 6 000 000 006 666 666(10⁻¹²);已实现 −13 333 334(10⁻¹²)向零取整到 USDT 最小单位 = −0.000013,钱包 = 17 999.999987
+  - 两次开仓返回 `Some(0)`;步骤 2 返回 `Some(−13)`(USDT 最小单位),仓位 −0.2;移出成本 = 18 000 000 002 × 10⁶ / 3 向零取整 = 6 000 000 006 666 666(10⁻¹²);已实现 −13 333 334(10⁻¹²)向零取整到 USDT 最小单位 = −0.000013,钱包 = 17 999.999987
 - 实现:`crates/hft-sim/tests/events.rs::sim_221_partial_close_rounds_toward_zero`
 
 ### SIM-120 同一输入与种子两次运行的回报序列与 state_hash 轨迹逐项相等
@@ -1682,6 +1682,28 @@ spec: README.md
 - 步骤:恢复余额与空仓,输入 mark,推进到 10 ms 后收集 ExternalFill 与钱包
 - 期望:恰好一笔 ExternalFill,覆盖量 1 BTC、实际现金 −18000.0001 USDT、费用 390.000001 USDT;钱包逐单位等于初始加现金减费用
 - 实现:`crates/hft-sim/tests/settlement.rs::sim_225_liquidation_reports_exact_cash_separately_from_fee`
+
+### SIM-226 外来成交直接返回撮合现金,无效输入不结算
+
+- 规则:[纯核心 API](README.md#纯核心-api)
+- 级别:table
+- 里程碑:M2
+- 前置:`rd_sim`、`setup_sim`,P2 钱包 18000 USDT、零仓;回报堆已清空
+- 输入:依次卖 0.001@60018.9、卖 0.001@60024.4、买 0.002@60027.5、卖 0.001@60027.4、买 0.001@60027.5;再镜像所有方向
+- 共同期望:逐笔返回值和钱包分别按原始成交的独立常量核对,仓位按带方向数量累计,不产生回报;无效输入返回 None 且完整状态哈希不变
+- 实现:`crates/hft-sim/tests/settlement.rs::sim_226_external_cash_is_returned_at_settlement`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| SIM-226.1 | 原方向五笔 | 现金原始单位 0、0、−11700、0、−100,最终零仓 |
+| SIM-226.2 | 多空镜像五笔 | 现金 0、0、+11700、0、+100,最终零仓 |
+| SIM-226.3 | 未装配账户 A8 | 原子拒绝 |
+| SIM-226.4 | 未知品种 999 | 原子拒绝 |
+| SIM-226.5 | 数量零 | 原子拒绝 |
+| SIM-226.6 | 数量 −1 | 原子拒绝 |
+| SIM-226.7 | 价格零 | 原子拒绝 |
+| SIM-226.8 | 价格 −1 | 原子拒绝 |
+| SIM-226.9 | A8 绑定 P2,A9 仅绑定 S1;A9 在 P2 成交 | 原子拒绝,不能因其他账户追踪该品种而结算 |
 
 ## 验收
 

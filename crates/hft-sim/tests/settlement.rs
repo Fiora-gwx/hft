@@ -1,4 +1,4 @@
-//! SIM-223–225: cash facts come from matching, are cumulative per order and survive seeding.
+//! SIM-223–226: cash facts come from matching, are cumulative per order and survive seeding.
 use crate::common::*;
 use hft_event::{GwOp, OrderEventKind, RepMsg};
 use hft_sim::{SimCfgErr, SimSeedOrder};
@@ -183,4 +183,75 @@ fn sim_225_liquidation_reports_exact_cash_separately_from_fee() {
     assert_eq!((f.cash_qty, f.cash_amount), (q("1"), usdt("-18000.0001")));
     assert_eq!(f.fee, usdt("390.000001"));
     assert_eq!(s.total(A9, P2, USDT), usdt("18000").0 + f.cash_amount.0 - f.fee.0);
+}
+
+#[test]
+fn sim_226_external_cash_is_returned_at_settlement() {
+    // Independent constants from the five original executions, in exchange matching order.
+    // The first close costs 11700 quote units; the final close costs 100, without fees.
+    let facts = [
+        (Sell, 100_000, 600_189_000, 0),
+        (Sell, 100_000, 600_244_000, 0),
+        (Buy, 200_000, 600_275_000, -11_700),
+        (Sell, 100_000, 600_274_000, 0),
+        (Buy, 100_000, 600_275_000, -100),
+    ];
+    for mirror in [false, true] {
+        let mut s = Sim::std();
+        let mut wallet = usdt("18000").0;
+        let mut position = 0;
+        for (side, qty, price, expected) in facts {
+            let side = if mirror { side.opposite() } else { side };
+            let expected = if mirror { -expected } else { expected };
+            assert_eq!(
+                s.ex.external_fill(A9, BTC_P2, side, Qty(qty), hft_types::Px(price)),
+                Some(Qty(expected))
+            );
+            wallet += expected;
+            position += if side == Buy { qty } else { -qty };
+            assert_eq!(s.total(A9, P2, USDT), wallet);
+            assert_eq!(s.view(A9).position(BTC_P2).qty, Qty(position));
+            assert_eq!(s.ex.pending_replies(), 0, "caller owns report delivery");
+        }
+        assert_eq!(position, 0);
+    }
+    // Invalid facts must not settle, including a tracked instrument on an unbound venue.
+    for row in 0..7 {
+        let mut s = if row == 6 {
+            let rd = rd_with(|r| {
+                r.accounts.iter_mut().find(|a| a.id == A9).unwrap().venues = vbits(&[S1]);
+            });
+            let mut setup = setup_with_a8();
+            setup.accounts[0].1.initial_balances = cfg_a9()
+                .initial_balances
+                .iter()
+                .filter(|b| b.venue != P2)
+                .cloned()
+                .collect::<Vec<_>>()
+                .into();
+            Sim::with(&setup, &rd)
+        } else {
+            Sim::std()
+        };
+        let mut account = A9;
+        let mut inst = BTC_P2;
+        let mut qty = q("0.001");
+        let mut price = px("60000");
+        match row {
+            0 => account = A8,
+            1 => inst = hft_types::InstId(999),
+            2 => qty = Qty(0),
+            3 => qty = Qty(-1),
+            4 => price = hft_types::Px(0),
+            5 => price = hft_types::Px(-1),
+            _ => {}
+        }
+        let before = s.ex.state_hash();
+        assert_eq!(
+            s.ex.external_fill(account, inst, Buy, qty, price),
+            None,
+            "row {row}"
+        );
+        assert_eq!(s.ex.state_hash(), before, "invalid fact row {row}");
+    }
 }

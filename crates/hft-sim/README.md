@@ -77,8 +77,9 @@ impl SimExchange {
     /// Down 期间到达的订单类指令按实盘 gw 在下单连接 Down 时的同一回报形态处理(形态归 hft-venue)。
     pub fn set_order_conn(&mut self, a: AccountId, venue: VenueId, up: bool, t: Tsc);
     /// DST 的外来成交(强平、ADL、人工):在当前事件时间把 inst 的 qty 按 px 记入账户 a,与一笔无手续费的吃单成交同样
-    /// 结算仓位与均价、已实现盈亏和现货余额;不产出回报(推送由调用方的 venue 行为层决定)。
-    pub fn external_fill(&mut self, a: AccountId, inst: InstId, side: Side, qty: Qty, px: Px);
+    /// 结算仓位与均价、已实现盈亏和现货余额;返回本次实际永续现金(现货为零),不含费用,不从钱包差额反推。
+    /// 未知账户/品种、未绑定 venue 或非正数量/价格返回 None,完整状态不变;不产出回报,推送由 venue 行为层决定。
+    pub fn external_fill(&mut self, a: AccountId, inst: InstId, side: Side, qty: Qty, px: Px) -> Option<Qty>;
     pub fn state_hash(&self) -> u64;
 }
 

@@ -35,6 +35,99 @@ fn place(slot: u32, qty: i64, px: i64) -> GwCmd {
     }
 }
 
+#[test]
+fn tk_126_external_reports_carry_exchange_cash_facts() {
+    use hft_event::RepMsg;
+    use hft_testkit::dst::seq::matcher::SimMatcher;
+    use hft_testkit::dst::world::{BTC, P1, USDT};
+
+    let world = WorldSpec::w1();
+    let facts = [
+        (Side::Sell, 100_000, 600_189_000, 0),
+        (Side::Sell, 100_000, 600_244_000, 0),
+        (Side::Buy, 200_000, 600_275_000, -11_700),
+        (Side::Sell, 100_000, 600_274_000, 0),
+        (Side::Buy, 100_000, 600_275_000, -100),
+    ];
+    for mirror in [false, true] {
+        let mut matchers = [
+            (true, SimMatcher::new(&world, VP, 1)),
+            (false, SimMatcher::new(&world, VP, 1)),
+        ];
+        for (_, m) in &mut matchers {
+            assert!(m.is_ready());
+            m.drain_due(0, &mut Vec::new());
+        }
+        let mut wallet = 50_000_000_000_i128;
+        let mut position = 0;
+        for (i, (side, qty, price, cash)) in facts.into_iter().enumerate() {
+            let side = if mirror { side.opposite() } else { side };
+            let cash = if mirror { -cash } else { cash };
+            wallet += i128::from(cash);
+            position += if side == Side::Buy { qty } else { -qty };
+            let now = (i as u64 + 1) * 10_000_000;
+            for (push, m) in &mut matchers {
+                m.on_bbo(P1, (price, 500_000_000), (price + 1_000, 500_000_000), now);
+                m.external(ACCT_A, P1, side, qty, "foreign", *push, now);
+                let mut out = Vec::new();
+                m.drain_due(now + 999_999, &mut out);
+                assert!(!out.iter().any(|r| matches!(r.rep, RepMsg::ExternalFill(_))));
+                out.clear();
+                m.drain_due(now + 1_000_000, &mut out);
+                let fills: Vec<_> = out
+                    .iter()
+                    .filter_map(|r| match r.rep {
+                        RepMsg::ExternalFill(e) => Some((r, e)),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(fills.len(), usize::from(*push));
+                if *push {
+                    let (r, e) = fills[0];
+                    assert_eq!(r.client_id, "foreign");
+                    assert_eq!((e.account, e.venue, e.inst), (ACCT_A, VP, P1));
+                    assert_eq!((e.side, e.qty, e.px), (side, Qty(qty), Px(price)));
+                    assert_eq!((e.cash_qty, e.cash_amount), (Qty(qty), Qty(cash)));
+                    assert_eq!(e.fee, Qty(0));
+                    assert_eq!(e.trade_id, i as u64 + 1);
+                }
+                let truth = m.truth(ACCT_A);
+                assert_eq!(truth.balances, vec![(USDT, wallet)]);
+                let expected = if position == 0 {
+                    vec![]
+                } else {
+                    vec![(P1, i128::from(position))]
+                };
+                assert_eq!(truth.positions, expected);
+            }
+            assert_eq!(matchers[0].1.state_hash(), matchers[1].1.state_hash());
+        }
+    }
+    let mut m = SimMatcher::new(&world, VS, 1);
+    m.drain_due(0, &mut Vec::new());
+    m.on_bbo(
+        S1,
+        (600_000_000, 500_000_000),
+        (600_000_100, 500_000_000),
+        10_000_000,
+    );
+    m.external(ACCT_A, S1, Side::Buy, 100_000, "spot", true, 10_000_000);
+    let mut out = Vec::new();
+    m.drain_due(11_000_000, &mut out);
+    let fills: Vec<_> = out
+        .iter()
+        .filter_map(|r| match r.rep {
+            RepMsg::ExternalFill(e) => Some(e),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(fills.len(), 1);
+    assert_eq!((fills[0].cash_qty, fills[0].cash_amount), (Qty(0), Qty(0)));
+    let truth = m.truth(ACCT_A);
+    assert_eq!(truth.inventory, vec![(BTC, 100_000)]);
+    assert_eq!(truth.balances, vec![(USDT, 99_940_000_000)]);
+}
+
 fn venue(dead_man_ms: u32) -> MockVenue<ToyMatcher> {
     let mut c = MockVenueCfg::w1(VS);
     c.rate_per_s = 10;

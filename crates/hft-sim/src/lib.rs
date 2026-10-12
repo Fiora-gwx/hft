@@ -592,16 +592,19 @@ impl SimExchange {
     /// A fill of account `a` that no order of this exchange caused (DST external fills:
     /// liquidation, ADL, manual trade): settles `qty` of `inst` at `px` like a taker fill without
     /// a fee (position and average cost, realised PnL, spot balances), at the current event time;
-    /// produces no report (README "纯核心 API").
-    pub fn external_fill(&mut self, a: AccountId, inst: InstId, side: Side, qty: Qty, px: Px) {
-        let (Some(ai), Some(ii)) = (self.acct(a), self.inst_index(inst)) else {
-            return;
-        };
-        if qty.0 <= 0 {
-            return;
+    /// produces no report (README "纯核心 API"). Returns actual perpetual cash (spot: zero),
+    /// excluding fees. None rejects an unknown identity, unbound venue or nonpositive quantity/
+    /// price without changing state. Callers must not recover this fact from balance differences.
+    pub fn external_fill(&mut self, a: AccountId, inst: InstId, side: Side, qty: Qty, px: Px) -> Option<Qty> {
+        let (ai, ii) = (self.acct(a)?, self.inst_index(inst)?);
+        let venue = self.insts.get(ii)?.venue;
+        let bound = self.accts.get(ai)?.vslot.get(usize::from(venue.0)).copied()?;
+        if qty.0 <= 0 || px.0 <= 0 || bound == u8::MAX {
+            return None;
         }
         let t = self.last_tsc;
-        let _ = self.settle_fill(ai, ii, side, px.0, qty.0, 0, t);
+        let (_, _, cash) = self.settle_fill(ai, ii, side, px.0, qty.0, 0, t);
+        Some(Qty(cash))
     }
 
     /// Simulated order connection of `(a, venue)` Down/Up at event time `t` (stress `GwDown`);

@@ -2,8 +2,7 @@
 //! "DST 的世界模型" 2). One exchange per world venue, built from the world refdata with every account
 //! as a Sim account (its private copy; the engine's refdata keeps Live accounts Live). Replies of
 //! other venues of the same account are dropped. Fills not caused by the engine (liquidation, ADL,
-//! manual; `Matcher::external`) are kept as an overlay on the exchange truth, because
-//! `SimExchange` books only its own matches.
+//! manual; `Matcher::external`) settle in the same exchange and carry its returned cash fact.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -366,14 +365,17 @@ impl Matcher for SimMatcher {
         push: bool,
         now_ns: u64,
     ) {
-        if self.inst(inst).is_none() {
+        let Some((_, _, _, perp)) = self.inst(inst) else {
             return;
-        }
+        };
         let px = self.bbo.get(&inst.0).copied().unwrap_or(0);
         // The exchange truth settles it like a fill (position, cost, realised PnL, balances).
-        if let Some(ex) = self.ex.as_mut() {
-            ex.external_fill(a, inst, side, Qty(qty), Px(px));
-        }
+        let cash = self
+            .ex
+            .as_mut()
+            .expect("SimMatcher exchange")
+            .external_fill(a, inst, side, Qty(qty), Px(px))
+            .expect("invalid DST external fill");
         let trade_id = self.next_trade;
         self.next_trade += 1;
         if push {
@@ -393,8 +395,8 @@ impl Matcher for SimMatcher {
                 ex_ts_ns: now_ns as i64,
                 rx_tsc: Tsc(0),
                 fill_seq: 0,
-                cash_qty: hft_types::Qty(0),
-                cash_amount: hft_types::Qty(0),
+                cash_qty: if perp { Qty(qty) } else { Qty(0) },
+                cash_amount: if perp { cash } else { Qty(0) },
             };
             self.out.push_back(VenueOut {
                 due_ns: now_ns + 1_000_000,
