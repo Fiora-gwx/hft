@@ -20,6 +20,88 @@ fn steady() -> H {
     h
 }
 
+fn verify_timer_windows(h: &H, starts: &[Option<u64>]) {
+    #[cfg(feature = "replay-io")]
+    {
+        use hft_sequencer::driver::replay::Log;
+        use hft_sequencer::driver::verify::{VerifyOptions, verify};
+
+        let log = Log::from_segments(&h.j().segments);
+        for &from_seq in starts {
+            let got = verify::<TestSet>(
+                log.clone(),
+                VerifyOptions {
+                    from_seq,
+                    ..Default::default()
+                },
+                hb(),
+            )
+            .unwrap();
+            assert!(got.inputs > 0 && got.sink.compared > 0);
+            assert!(got.sink.mismatches.is_empty(), "{:?}", got.sink.detail);
+            assert!(
+                got.sink.recovery_diffs.is_empty(),
+                "{:?}",
+                got.sink.recovery_diffs
+            );
+        }
+    }
+    #[cfg(not(feature = "replay-io"))]
+    let _ = (h, starts);
+}
+
+#[test]
+fn seq_234_timer_keyed_by_group() {
+    // The third pair is disjoint: adding it must not fail InstOwned validation.
+    let mut b = crate::sdk_contract::b_gt3();
+    let g2b = GroupId(0x0200_0002);
+    let g2c = GroupId(0x0200_03e9);
+    let mut p = Spb::s2(1);
+    p.groups = vec![gspec(G2), gspec_eth(g2b)];
+    b.params = vec![Spb::s1(1), p, Spb::s9(1)];
+    let mut h = b.boot();
+    h.steady();
+    let delivered = cap();
+    let got = delivered.clone();
+    add_hook(move |hx, ev, ctx| {
+        if hx.s.strategy != S2 {
+            return;
+        }
+        if let EventRef::Bbo { inst, b, .. } = ev
+            && *inst == A1
+            && b.ask_px == px("50041")
+        {
+            ctx.timer_at(Tsc(hx.v.now().tsc.0 + 100 * MS), 4, g2b).unwrap();
+        }
+        if let EventRef::Timer { tag, group, gix } = ev {
+            got.borrow_mut().push((*tag, *group, *gix));
+        }
+    });
+    h.quote(A1, "50000", "50041");
+    h.run();
+    let owner = hft_event::TIMER_OWNER_STRATEGY_BASE + u16::from(S2.0);
+    let timer = *h.s.engine().heap.find_key(owner, 4, g2b.0).unwrap();
+    assert_eq!(h.s.engine().heap.count_if(|t| t.owner == owner), 1);
+    let window = h.keyframe().seq;
+    let mut p = Spb::s2(2);
+    p.groups = vec![crate::sdk_contract::gspec_fill(g2c), gspec(G2), gspec_eth(g2b)];
+    let cmd = h.set_params(&p);
+    h.run();
+    assert_eq!(h.result_of(cmd).map(|r| r.status), Some(0));
+    assert_eq!(h.s.engine().heap.find_key(owner, 4, g2b.0), Some(&timer));
+    assert_eq!(h.s.engine().heap.count_if(|t| t.owner == owner), 1);
+    h.at(timer.deadline - 1);
+    h.run();
+    assert!(delivered.borrow().is_empty());
+    h.at(timer.deadline);
+    h.run();
+    assert_eq!(&*delivered.borrow(), &[(4, g2b, 2)]);
+    assert!(h.s.engine().heap.find_key(owner, 4, g2b.0).is_none());
+    assert!(h.s.instances().get(S2).unwrap().timers.is_empty());
+    h.keyframe();
+    verify_timer_windows(&h, &[None, Some(window)]);
+}
+
 #[test]
 fn seq_235_removed_group_timers_cancelled() {
     reset_script();
@@ -116,6 +198,79 @@ fn seq_237_heap_shift_formula() {
     assert_eq!(shift_tsc(10_000_000_000, now, stop, HZ, HZ), 500_000);
     assert_eq!(shift_tsc(10_300_000_000, now, stop, HZ, 3 * HZ), 900_500_000);
     assert_eq!(shift_tsc(0, now, stop, HZ, HZ), 0);
+}
+
+#[test]
+fn seq_239_periodic_timers_reregistered() {
+    use hft_sequencer::SnapshotSel;
+
+    for remaining_ms in [1_500_u64, 400] {
+        for scale in [1, 3] {
+            reset_script();
+            let mut b = b0();
+            b.rd.caps[1].dms = hft_refdata::DeadManCap::CountdownAccount;
+            b.rd.caps[1].dms_refresh_ms = 10_000;
+            b.rd.caps[1].dms_timeout_ms = 30_000;
+            let mut h = b.boot();
+            h.steady();
+            let stop = h.now();
+            let dead_man = 4 | (u32::from(B.0) << 8) | (u32::from(AC1.0) << 16);
+            // The specification starts from a prepared snapshot. Only the heap fixture is
+            // edited; independent verification starts at that actual saved keyframe.
+            for (owner, timer_id, ms) in [(3, 2, remaining_ms), (1, dead_man, 2_000)] {
+                let heap = &mut h.s.engine_mut().heap;
+                assert_eq!(heap.remove_key(owner, timer_id, 0), 1);
+                heap.push(TimerEntry {
+                    deadline: stop + ms * MS,
+                    owner,
+                    timer_id,
+                    group: 0,
+                })
+                .unwrap();
+            }
+            let window = h.keyframe().seq;
+            let start = 500_000;
+            let mut h = h
+                .crash_restart(
+                    plan(SnapshotSel::Latest, true, 2, 0),
+                    Rerun {
+                        tsc: start,
+                        hz: scale * HZ,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            assert_eq!(h.run(), StepOutcome::Idle);
+            let ms = scale * MS;
+            for (owner, id, delay) in [(3, 2, remaining_ms.min(1_000)), (1, dead_man, 10_000)] {
+                let heap = &h.s.engine().heap;
+                assert_eq!(
+                    heap.count_if(|t| t.owner == owner && t.timer_id == id && t.group == 0),
+                    1
+                );
+                assert_eq!(heap.find_key(owner, id, 0).unwrap().deadline, start + delay * ms);
+            }
+            let mark = h.io_ref().out.len();
+            let refreshes = |h: &H| {
+                h.io_ref().out[mark..]
+                    .iter()
+                    .filter(|(ring, cmd)| {
+                        *ring == hft_sequencer::OutRing::Venue(B)
+                            && cmd.account == AC1
+                            && cmd.op == hft_event::GwOp::DeadManRefresh
+                    })
+                    .count()
+            };
+            h.at(start + 9_999 * ms);
+            h.run();
+            assert_eq!(refreshes(&h), 0, "old DeadMan deadline must be replaced");
+            h.at(start + 10_000 * ms);
+            h.run();
+            assert_eq!(refreshes(&h), 1);
+            h.keyframe();
+            verify_timer_windows(&h, &[Some(window)]);
+        }
+    }
 }
 
 #[test]

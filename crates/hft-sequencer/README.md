@@ -854,6 +854,8 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 
 用例与验收见 [TESTS.md](TESTS.md)。
 
+定时器的 GroupId 到当前 gix 映射及跨频率周期重新登记由真实引擎和独立回放验证,见 [SEQ-234](TESTS.md#seq-234-策略定时器以-groupid-为键投递时现查-gix) 与 [SEQ-239](TESTS.md#seq-239-周期性系统定时器每次启动重新登记替换旧条目更早的-omssweep-保留)。
+
 advisor 的定时投递、重启注记去重、落后量、两种环容量的独立合并模型,以及三种检查点块大小的完整载荷续算见 [SEQ-036–046](TESTS.md#seq-036-model-的时间刻度只来自-journal-中的-timersys-advisortick)。这些验收在测试进程中生成 journal,不替代固定回放样本与参考主机延迟门槛。
 
 ## 依赖

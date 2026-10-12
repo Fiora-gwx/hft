@@ -3323,12 +3323,14 @@ spec: README.md
 - 规则:[定时器](README.md#定时器)
 - 级别:unit
 - 里程碑:M2
-- 前置:B0 稳态;s2 有 g2(gix 0)与 g2b(gix 1);s2 为 g2b 登记 tag 4 的定时器
+- 前置:B0 稳态;s2 有 g2(gix 0)与 g2b(gix 1);第三组使用互不重叠的 FILL 现货/永续腿;s2 为 g2b 登记 tag 4 的定时器
 - 步骤:
   1. `SetParams` 在 g2 之前插入新 group g2c,使 g2b 的 gix 变为 2
   2. 定时器到期
+  3. 从 journal 配置独立执行完整回放和参数替换前关键帧窗口回放
 - 期望:
   - 堆中条目键为 `(owner 18, timer_id 4, group g2b)`,`SetParams` 前后不变;到期时 s2 收到 `EventRef::Timer{tag: 4, group: g2b, gix: 2}`
+  - 截止前不投递,到期仅投递一次,堆与身份登记同时清空;两种回放的 Output、快照和恢复状态均一致
 - 实现:`crates/hft-sequencer/tests/timers.rs::seq_234_timer_keyed_by_group`
 
 ### SEQ-235 被 SetParams 移除的 group 的定时器在应用参数时撤销
@@ -3387,16 +3389,25 @@ spec: README.md
 ### SEQ-239 周期性系统定时器每次启动重新登记,替换旧条目;更早的 OmsSweep 保留
 
 - 规则:[定时器](README.md#定时器)
-- 级别:unit
+- 级别:table
 - 里程碑:M2
-- 前置:快照堆中有 `OmsSweep` 与 (B, 1) 的 `DeadMan` 各一条;venue B `refresh_ms = 10 000`
+- 前置:真实引擎关键帧的堆夹具中有 `OmsSweep` 与 (B, 1) 的 `DeadMan` 各一条;旧 DeadMan 剩余 2 000 ms,venue B `refresh_ms = 10 000`;恢复 TSC = 500 000
 - 步骤:
   1. 快照中 `OmsSweep` 平移后剩余 1 500 ms:恢复并处理 `EngineClock`
   2. 快照中 `OmsSweep` 平移后剩余 400 ms:恢复并处理 `EngineClock`
+  3. 每种剩余时长分别在同频率与三倍频率重启,推进到新运行 9 999/10 000 ms,从准备好的关键帧开始独立窗口回放
 - 期望:
   - 步骤 1 后堆中 `OmsSweep` 恰好一条(deadline = 本次运行的登记时刻 + 1 000 ms),(B, 1) 的 `DeadMan` 恰好一条(+10 000 ms);没有快照中的旧条目
   - 步骤 2 后 `OmsSweep` 恰好一条,deadline = 快照条目平移后的值(登记时刻 + 400 ms);`DeadMan` 同步骤 1
+  - 9 999 ms 时尚无 (B, 1) 的 DeadManRefresh,10 000 ms 时只有一次;窗口及后续实际重启的 Output、快照和恢复状态一致
 - 实现:`crates/hft-sequencer/tests/timers.rs::seq_239_periodic_timers_reregistered`
+
+| 行 | OmsSweep 剩余 | 新频率 / 旧频率 | 恢复后 OmsSweep | 恢复后 DeadMan |
+|---|---|---|---|---|
+| SEQ-239.1 | 1 500 ms | 1 | +1 000 ms,一条 | +10 000 ms,一条 |
+| SEQ-239.2 | 1 500 ms | 3 | +1 000 ms,一条 | +10 000 ms,一条 |
+| SEQ-239.3 | 400 ms | 1 | +400 ms,一条 | +10 000 ms,一条 |
+| SEQ-239.4 | 400 ms | 3 | +400 ms,一条 | +10 000 ms,一条 |
 
 ### SEQ-240 按 engine_ns 记截止的登记向上取整到本次运行的 TSC
 
