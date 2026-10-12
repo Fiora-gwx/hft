@@ -2154,8 +2154,8 @@ spec: README.md
 - 规则:[verify](README.md#verify)、[已知限制与后续工作](README.md#已知限制与后续工作)
 - 级别:proc
 - 里程碑:M2
-- 前置:现场通过真实 LiveDriver、advisor、JournalWriter 与 SimExchange 生成 1 h 和 3 h 文件;Live 账户 acct-l、实例 tsa 使用测试策略 A,样本布局和路径版本均为 1、path_settle_ms = 120000。关键帧周期 300000 ms、事件上限 1500000,检查点周期 600000 ms;每 10 s 投递 BBO,回报按撮合器的实际截止时刻交付。网关夹具消费 SetEpoch/MirrorRestore,以账户/slot/gen 保存 epoch,永续保持 PERP_CASH;CI 已构建 replay_probe example
-- 身份与资金断言:每笔真实成交 epoch 等于 journal 的 EpochStart,账户/venue/品种/slot/gen 匹配更早的有效 New 决策;实际存在永续成交,其现金覆盖量逐笔等于累计成交量,不以零 epoch 或关闭结算能力绕过已知订单匹配
+- 前置:现场通过真实 LiveDriver、advisor、JournalWriter 与 SimExchange 生成 1 h 和 3 h 文件;Live 账户 acct-l、实例 tsa 使用测试策略 A,样本布局和路径版本均为 1、path_settle_ms = 120000。关键帧周期 300000 ms、事件上限 1500000,检查点周期 600000 ms;每 10 s 投递 BBO,回报按撮合器的实际截止时刻交付。网关夹具从已记录的启动配置取得初始 epoch,之后消费 SetEpoch/MirrorRestore,以账户/slot/gen 保存 epoch,永续保持 PERP_CASH;CI 已构建 replay_probe example
+- 身份与资金断言:每笔真实成交 epoch 等于 journal 初始快照的有效 epoch,账户/venue/品种/slot/gen 匹配更早的有效 New 决策;实际存在永续成交,其现金覆盖量逐笔等于累计成交量,不以零 epoch 或关闭结算能力绕过已知订单匹配
 - 步骤:通过已记录的 SetMode 将组设为 Live,独立进程对两份完整目录执行 verify/recompute;3 h 文件另取 1 h 之后的首份检查点,从 2 h 之后首个关键帧 H2 验证;文件、检查点、参数与报告输出到 CI 的 replay-model-evidence 制品
 - 期望:实际 engine_ns 满足 1 h/3 h,分别有 2/4 段、每小时至少 12 个快照和 720 条 Advice、非零 OrderDecision 与真实 Fill;关键帧相邻间隔不超过 310 s,检查点相邻间隔为 600–610 s(10 s 投递粒度)。全部退出 0,双 verdict 为 pass,全窗口 coalesced = 0;窗口比较数恰为 Advice.seq > H2 的条数,检查点身份和 last_seq 匹配;输入文件、seal 与检查点字节不变。现场生成文件不替代尚未发布的固定 T1/T3 指针
 - 实现:`apps/replayer/tests/long_model.rs::rpl_270_full_duration_path_model_files_and_checkpoint_window`
