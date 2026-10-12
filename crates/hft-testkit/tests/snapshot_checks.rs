@@ -60,7 +60,7 @@ impl Sut for Snapshots {
                 o.snapshots.remove(0);
             }
             2 => {
-                o.snapshots.insert(1, o.snapshots[0]);
+                o.snapshots.insert(1, o.snapshots[0].clone());
             }
             3 => {
                 o.snapshots[0].through_seq = o.snapshots[0].snapshot_seq - 1;
@@ -76,6 +76,9 @@ impl Sut for Snapshots {
             }
             8 => {
                 o.snapshots[0].through_seq = o.snapshots[1].through_seq;
+            }
+            9 => {
+                o.snapshots[0].ledger = None;
             }
             _ => {}
         }
@@ -162,6 +165,7 @@ fn tk_115_every_snapshot_checked_with_periodic_rebuild_off() {
         (6, "injected rebuild failure"),
         (7, "missing snapshot observation"),
         (8, "crosses a later Input"),
+        (9, "missing live ledger observation"),
     ] {
         let mut c = crate::support::cfg(seed, 4, &[], 0, &[]);
         c.invariants = InvariantSet::only(InvId::I6);

@@ -124,12 +124,15 @@ pub struct StepOut {
     pub snapshot_error: Option<String>,
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SnapshotPoint {
     pub snapshot_seq: u64,
     /// Last record of the complete boundary, before any later Input can change state.
     pub through_seq: u64,
     pub live: ComponentHashes,
+    /// Full read-only views at the same boundary, independent of snapshot serialization.
+    #[cfg(feature = "seq")]
+    pub ledger: Option<super::seq::ledger::Readings>,
 }
 
 #[derive(Clone, Debug)]

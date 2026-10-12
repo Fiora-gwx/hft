@@ -1,4 +1,4 @@
-name: Strict cash fixture audit
+name: Full cold ledger audit
 on:
   push:
     branches: [codex/m2-cash-audit]
@@ -27,24 +27,23 @@ jobs:
         with:
           key: x86-ci-v2
           save-if: false
-      - name: Unknown-report defect and healthy control
-        run: cargo test --locked --profile ci -p hft-testkit --features seq tk_053 -- --nocapture
-      - name: Prepare replay test prerequisites
-        if: ${{ !cancelled() }}
-        run: bash .github/scripts/test-prereqs.sh
-      - name: Build real replay test binaries
-        if: ${{ !cancelled() }}
-        run: cargo build --locked --profile ci -p replayer --tests --examples
-      - name: Full replay CLI fixture suite
-        if: ${{ !cancelled() }}
+      - name: Ledger observer and real snapshot boundaries
         run: |
-          sudo prlimit --pid $$ --memlock=unlimited:unlimited
-          export HFT_REPLAY_EVIDENCE_DIR="$GITHUB_WORKSPACE/audit/replay"
-          mkdir -p "$HFT_REPLAY_EVIDENCE_DIR"
-          cargo test --locked --profile ci -p replayer --test cli -- --nocapture
+          mkdir -p audit
+          git rev-parse HEAD >audit/head.txt
+          set +e
+          cargo test --locked --profile ci -p hft-testkit --features seq --lib led_267 -- --nocapture >audit/ledger.txt 2>&1
+          ledger_rc=$?
+          cargo test --locked --profile ci -p hft-testkit --features seq --test testkit snapshot_checks::tk_115 -- --nocapture >audit/boundaries.txt 2>&1
+          boundary_rc=$?
+          cargo xtask dst --hashtrail check --first 50 >audit/hashtrail.txt 2>&1
+          trail_rc=$?
+          printf 'ledger=%s boundary=%s hashtrail=%s\n' "$ledger_rc" "$boundary_rc" "$trail_rc" | tee audit/status.txt
+          cat audit/ledger.txt audit/boundaries.txt audit/hashtrail.txt
+          test "$ledger_rc$boundary_rc$trail_rc" = '000'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: strict-fixture-audit
+          name: full-cold-ledger-audit
           path: audit/
           retention-days: 7

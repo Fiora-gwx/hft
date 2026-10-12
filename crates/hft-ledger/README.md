@@ -322,6 +322,8 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 
 `t` 取该记录的 `Now.engine_ns`(由记录头 tsc 与本段的 `EngineClock` 按 [event-model 时间戳语义](../../docs/subsystems/event-model.md) 计算)。**等价断言**:在每条 `StateSnapshot` 记录处,`JournalLedger` 的持仓、现货库存与余额(`pos`、`inventory`、`venue_book`)等于从该快照恢复的引擎 Ledger 的同一读数(属性测试与 DST 每个快照点检查)。
 
+真实引擎 DST 的逐快照冷检查与未映射成交解释由 [hft-testkit](../hft-testkit/README.md#6-dst-框架) 执行,覆盖 `InstPos` 的时间字段和完整 `VenueBook`(现金归属及报告字段、保证金、权益汇总、标志)。持久字段与快照比较;未持久化的派生字段与同一完成边界的真实引擎只读视图比较,不能用恢复时清空的缓存代替参考。验收归 [LED-267](TESTS.md#led-267-dst-中每个快照点-journalledger-等于引擎-ledger)。
+
 ### 资金费
 
 按 refdata `VenueCaps.funding_settle`:
@@ -529,6 +531,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 | 入口 | p50 | p99 | 基准名 |
 |---|---|---|---|
 | `apply_fill`(含现金、库存、净量复算) | ≤ 150 ns | ≤ 400 ns | `ledger/apply_fill` |
+| `apply_settled_fill`(含品种/账户/资产校验、持仓、结算与费用) | ≤ 150 ns | ≤ 400 ns | `ledger/apply_settled_fill` |
 | `apply_external`(含去重与归属) | ≤ 200 ns | ≤ 500 ns | `ledger/apply_external` |
 | `apply_settled_external`(完整现金事实,含去重与归属) | ≤ 200 ns | ≤ 500 ns | `ledger/apply_settled_external` |
 | `apply_funding_push`(去重环 ≤ 64 项线性查找 + 入账) | ≤ 200 ns | ≤ 600 ns | `ledger/apply_funding_push` |
@@ -564,7 +567,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 
 ## 已知限制与后续工作
 
-- 普通订单与原始外来成交的 `PERP_CASH` 已接到 sequencer 与 JournalLedger,但 DST 世界和生产协议尚未启用。外来归属重叠、OMS 防御路径、对账补量、模拟恢复装配仍待接通,严格 INV-16 的原失败继续阻断。冷读者不完整镜像 OMS 的状态机与回收时机,跨回收的增量均价、未接受的非成交回报及外来归属仍需专门验证;普通成交用例不代表全部冷热一致性验收。
+- 普通订单与原始外来成交的 `PERP_CASH` 已接到 sequencer 与 JournalLedger;测试世界的能力与资金验收归 [hft-testkit](../hft-testkit/README.md#6-dst-框架),生产协议尚未启用。外来归属重叠、OMS 防御路径、对账补量、模拟恢复装配仍待接通,未证明的严格结算路径明确失败。冷读者不完整镜像 OMS 的状态机与回收时机,跨回收的增量均价、未接受的非成交回报及外来归属仍需专门验证;普通成交用例不代表全部冷热一致性验收。
 - 平均成本法之外(FIFO 税务口径)不支持;需要时在 hft-py 侧另算。
 - 不建模余额域(同一钱包被多个产品线共用):这种情形被"一个账户在同一交易所只用一个市场"排除([hft-refdata](../hft-refdata/README.md))。若将来放开同所现货 × 永续,需要先把现金改为按余额域记账(触发条件:决定放开该规则)。
 - 资金费自动校正依赖交易所流水:`funding_recon_window_ms`(48 h)之外的差额不再比对;水位线之前(无历史)的差额挂起到窗口结束才入账,若其实早已入账会造成一次重复入账,由余额对账报出、人工 `AdoptExchange` 收敛;`RateOnly` 所在校正之前钱包是估计值,两次对账之间余额对账条目可能出现等于未校正资金费的差额(由 reconciler 与 watchtower 处理口径)。

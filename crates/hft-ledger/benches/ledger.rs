@@ -10,7 +10,7 @@ use std::hint::black_box;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use hft_event::{ExternalCause, OrderEventKind, RecordFlags, decode_record, encode_fixed};
-use hft_ledger::{FixedVec, FundingReconItem, JournalLedger, Ledger};
+use hft_ledger::{FixedVec, FundingReconItem, JournalLedger, Ledger, PerpCashSettlement};
 use hft_refdata::FundingSettleKind;
 use hft_strategy_sdk::SnapshotReader;
 use hft_types::{INST_NONE, Notional, Px, Qty};
@@ -32,6 +32,30 @@ fn led_250_apply_fill(c: &mut Criterion) {
             k += 1;
             let x = if k & 1 == 0 { &buy } else { &sell };
             black_box(l.apply_fill(black_box(x), s(1) + k));
+        })
+    });
+
+    let mut l = booted();
+    let buy = f(Buy, BTC_P2, "0.001", "60000", "0.06", USDT, G1, 1);
+    let sell = f(Sell, BTC_P2, "0.001", "60010", "0.06", USDT, G1, 1);
+    let opened = PerpCashSettlement {
+        asset: USDT,
+        amount: Qty(0),
+    };
+    let closed = PerpCashSettlement {
+        asset: USDT,
+        amount: usdt("0.01"),
+    };
+    let mut k = 0i64;
+    c.bench_function("ledger/apply_settled_fill", |b| {
+        b.iter(|| {
+            k += 1;
+            let (fill, cash) = if k & 1 == 1 {
+                (&buy, opened)
+            } else {
+                (&sell, closed)
+            };
+            black_box(l.apply_settled_fill(black_box(fill), black_box(cash), s(1) + k)).expect("valid cash");
         })
     });
 }
