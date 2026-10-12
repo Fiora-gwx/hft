@@ -3137,11 +3137,12 @@ spec: README.md
 - 规则:[通知队列与续推](README.md#通知队列与续推)
 - 级别:unit
 - 里程碑:M2
-- 前置:B0 改 `max_cells_total = 256`(U = 384,积压容量 1 536)、`notify_per_continue = 64`;256 个 cell 分属 3 个实盘实例与 1 个模拟实例
+- 前置:B0 改 `max_cells_total = 256`(U = 384,积压容量 1 536)、`max_groups_per_instance = 64`、`max_timers = 4096`、`notify_per_continue = 64`;4 个稠密账户只用 A 的现货,各有 64 个不重叠的单腿组。实盘实例 2/3/4、模拟实例 1,全部经原始连接、配置、对账、时钟、行情与 SetMode 输入到达 Live;配置内容完整写入 journal
 - 步骤:
   1. 投递 `Kill{Global}`;连续 `step()` 直到 `wants_continue()` 为假
 - 期望:
   - Kill 的 Input 投递 64 条 `Mode` 通知;其后 3 个 `NotifyContinue` 各投递 64 条;256 条全部恰好投递一次,顺序与产生顺序相同(实盘实例的在前)
+  - 每批投递的 `Now.seq` 与实际续推 Input 对齐;通知清空后写关键帧,完整回放和 Kill 前关键帧窗口逐字节一致
 - 实现:`crates/hft-sequencer/tests/notify_backlog.rs::seq_220_mass_mode_change`
 
 ### SEQ-221 每个 NotifyContinue 至多投递 notify_per_continue 条
@@ -3149,7 +3150,7 @@ spec: README.md
 - 规则:[通知队列与续推](README.md#通知队列与续推)、[环与容量](README.md#环与容量)
 - 级别:table
 - 里程碑:M2
-- 前置:B0(`notify_per_continue = 64`);某 Input 之后积压 n 条
+- 前置:SEQ-220 装配,四实例组数为 `[64, n − 2, 1, 1]`;实际 Kill 先投递 64 条,留下 n 条;不直接填队列
 - 实现:`crates/hft-sequencer/tests/notify_backlog.rs::seq_221_notify_per_continue`
 
 | 行 | n | 期望 `NotifyContinue` 次数 |
@@ -3158,16 +3159,19 @@ spec: README.md
 | SEQ-221.2 | 64 | 1 |
 | SEQ-221.3 | 65 | 2(64 + 1) |
 
+每行核对完整通知身份、旧/新模式、实际续推 Input 数和队列清空,再验证完整 journal 与 Kill 前窗口。
+
 ### SEQ-222 续推未完时不写 Snapshot 与 Roll,Drain 不结束
 
 - 规则:[通知队列与续推](README.md#通知队列与续推)、[Drain](README.md#drain)
 - 级别:unit
 - 里程碑:M2
-- 前置:SEQ-220 的配置;关键帧已到期、`needs_roll = (Size, IdleRound)`;Drain 第 3 步的其他条件都已满足
+- 前置:SEQ-220 的配置,关键帧周期 1000 ms;关键帧已到期、`needs_roll = (Size, IdleRound)`;分别覆盖普通续推、续推中收到真实 Drain 命令两行,Drain 的 OMS/执行层退出条件均已满足
 - 步骤:
   1. 投递 `Kill{Global}`;连续 `step()`,其间有空闲轮
 - 期望:
-  - 积压非空期间没有 `Timer{Sys, Snapshot}`、`Timer{Sys, Roll}`,Drain 不写快照;积压清空后的空闲轮才写
+  - 积压非空期间没有 `Timer{Sys, Snapshot}`、`Timer{Sys, Roll}` 或任何快照;不返回 Done
+  - 普通行清空后,周期 Snapshot 与软 Roll 在满足空闲条件后写入;Drain 行在最后一批通知投递后于同一 Input 完成快照与发布。两行均验证完整及续推前窗口
 - 实现:`crates/hft-sequencer/tests/notify_backlog.rs::seq_222_continue_blocks_snapshot_roll_drain`
 
 ### SEQ-223 积压从不溢出、从不丢弃
@@ -3176,8 +3180,9 @@ spec: README.md
 - 级别:prop
 - 里程碑:M2
 - 性质:任意命令与回报交错下,`NotifyBacklog` 占用始终 ≤ 4U;每条产生的通知恰好投递一次,同一实例内顺序与产生顺序相同
-- 生成:B0 改 `max_cells_total = 256`;每步从 {`Kill{Global}`、`Resume{Kill}`、`SetMode` 全部 cell、实盘回报、bbo} 中抽取,1–500 步
+- 生成:SEQ-220 装配;固定六条交替 Kill/Resume 命令确保触发背压,再从 {`Kill{Global}`、`Resume{Kill}`、`SetMode` 全部 cell 的 Live/CloseOnly/Shadow、实盘余额回报、bbo} 抽取 1–500 条输入。命令待取时不再预签下一条确认,允许通知继续积压;结束后有界续推至清空
 - 参考:不限容量的参考队列
+- 断言:仅由已提交命令及独立模式转换生成参考,不读实际队列或模式推算期望;逐实例比对每个通知的组、旧/新模式与次数。每轮核对占用、峰值、余量、产生/交付差及每个 NotifyContinue 的 64 条上限;重复与缺失不能相互抵消
 - 例数:PR 300;每夜 20 000
 - 实现:`crates/hft-sequencer/tests/notify_backlog.rs::seq_223_backlog_never_overflows`
 

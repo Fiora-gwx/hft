@@ -27,6 +27,7 @@ mod keyframe;
 mod liveness;
 mod mismatch;
 mod mode;
+mod notify_backlog;
 mod params;
 mod poison;
 mod preempt;
