@@ -22,6 +22,8 @@ mod probes;
 mod reconcile_actor;
 #[cfg(feature = "seq")]
 mod reconcile_migration;
+#[cfg(feature = "seq")]
+mod reconcile_world;
 mod replay_probe;
 mod sdk_mock;
 mod sdk_rd;

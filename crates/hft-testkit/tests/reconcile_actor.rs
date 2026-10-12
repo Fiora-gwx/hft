@@ -623,11 +623,17 @@ fn tk_138_reconciled_adl_waits_for_commit_then_restores_full_truth() {
                     assert_eq!(s.venue().m.external_history().len(), 2);
                     let proof = s.e.committed_receipts(&[original]).unwrap();
                     assert_eq!(proof, vec![true]);
+                    // Independent fixed-point reference from the two scripted execution prices.
+                    let expected_cash =
+                        i128::from(side.sign()) * i128::from(original.qty.0) * 186_000 / 1_000_000;
+                    assert_eq!(i128::from(original.cash_amount.0), expected_cash);
+                    let wallet = s.e.sequencer().engine().ledger.margin(ACCT_A, VP).wallet.0;
+                    assert_eq!(i128::from(wallet), 50_000_000_000 + expected_cash);
                     let mut other = original;
                     other.account = ACCT_B;
                     assert_eq!(s.e.committed_receipts(&[other]).unwrap(), vec![false]);
                     evidence.push(format!(
-                        "{{\"side\":{},\"full\":{full},\"replay\":{replay},\"restart\":{restart},\"qty\":{},\"cash\":{},\"batch_input_seq\":{},\"batch_end_seq\":{},\"offset_notes\":{},\"auto_held_qty\":{},\"truth_pairs\":{},\"truth_unskipped\":true}}",
+                        "{{\"side\":{},\"full\":{full},\"replay\":{replay},\"restart\":{restart},\"qty\":{},\"cash\":{},\"wallet\":{wallet},\"batch_input_seq\":{},\"batch_end_seq\":{},\"offset_notes\":{},\"auto_held_qty\":{},\"truth_pairs\":{},\"truth_unskipped\":true}}",
                         side as u8, original.qty.0, original.cash_amount.0,
                         points[0].records[0].seq, points[0].ledger.as_ref().unwrap().through_seq,
                         offset_notes(s.e.journal()).len(),

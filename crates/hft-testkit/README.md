@@ -395,7 +395,7 @@ TK-137 独立保存迁移前的 HashTrail 参考,用旧 actor 重现它;真实 a
 
 `ReconciledAdl{full,replay}` 在用户流断开且交易所永续仓位非零时结算一次,保存完整原件并省略首次推送。缺口按完整成交身份保持在途,不使用品种/资产数字排除项。实际 ReconcileBatch 事件提交后,独立冷消费者确认原件确已入账才解除缺口;拒绝的批次、仅生成的批次和其他账户/成交键都不能解除。`replay` 在此之后至少 1 ms 且用户流恢复后补推同一原件;无补推时直接恢复完整 I16。前置不满足或容量耗尽明确失败,检查器关闭仍执行相同的交付流程。原 `Adl{gap,replay}` 的普通补报时序独立保留。
 
-真实 ExternalFill 与 ReconcileBatch 每个完成事件都保留热账本节 1/13/22 的原始字节,INV-6 用独立冷消费者核对同一已提交边界,不等待下一个快照。每份观察上限 4 MiB,每步沿用事件缓冲上限,每次运行最多保留 4,096 条成功核对的 Input 序号;缺失、错误边界、溢出或字节差异均失败。冷端抵扣注记由 [JournalLedger 的 testkit 接口](../hft-ledger/README.md#冷消费者journalledger)独立产生,同事件与 journal 逐条相等,错误锁存。TK-138/139 与 LED-295 验证这层基建;CI 的 `reconcile-settlement` 制品包含 16 行直接开仓组合证据,不替代 LED-081 的 PairOnFill 和标准种子验收。
+真实 ExternalFill 与 ReconcileBatch 每个完成事件都保留热账本节 1/13/22 的原始字节,INV-6 用独立冷消费者核对同一已提交边界,不等待下一个快照。每份观察上限 4 MiB,每步沿用事件缓冲上限,每次运行最多保留 4,096 条成功核对的 Input 序号;缺失、错误边界、溢出或字节差异均失败。冷端抵扣注记由 [JournalLedger 的 testkit 接口](../hft-ledger/README.md#冷消费者journalledger)独立产生,同事件与 journal 逐条相等,错误锁存。TK-138/139 与 LED-295 验证这层基建,TK-140 用真实 PairOnFill 开仓核对整个循环在检查器开关前后的 journal、交付、意图与 HashTrail。CI 的 `reconcile-settlement` 制品包含 16 行直接开仓组合证据,不替代 LED-081 的开平仓和标准种子验收。
 
 ### 金样运行器
 

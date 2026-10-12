@@ -26,7 +26,7 @@ spec: README.md
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
 | 10. SeqRig | PY-106–PY-109、PY-111、PY-112 |
 | 实现说明 | 不适用:见子节 |
-| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-139 |
+| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140 |
 | 金样运行器 | TK-001、TK-005 |
 | 源文件 | TK-066 |
 | 延迟与资源契约 | TK-092–TK-093 |
@@ -1769,7 +1769,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:真实引擎与 SimExchange,多空 × 部分/全量 ADL × 有无补推 × 有无重启共 16 行,原件现金非零
 - 步骤:断流期间注入 ReconciledAdl,恢复后执行两个真实冷对账轮次,提交批次后确认入账,按行补推及重复交付
-- 期望:只结算一次,生成但未提交的批次不能解除缺口;重启后同样成立;补推抵扣一次,无补推保留待确认量;结束时无在途/排除项/活动订单,严格 I16 与冷重建通过;保存 16 行 CI 证据
+- 期望:只结算一次,生成但未提交的批次不能解除缺口;重启后同样成立;补推抵扣一次,无补推保留待确认量;按脚本成交价和数量独立计算现金及最终钱包;结束时无在途/排除项/活动订单,严格 I16 与冷重建通过;保存 16 行 CI 证据
 - 反例:被拒绝批次不解除缺口,其他账户和其他成交键不能充当凭据;未断流或零仓位注入明确失败且交易所事实不变
 - 边界:直接开仓只验证测试基建,不替代 LED-081
 - 实现:`crates/hft-testkit/tests/reconcile_actor.rs::tk_138_reconciled_adl_waits_for_commit_then_restores_full_truth`
@@ -1783,6 +1783,17 @@ spec: README.md
 - 步骤:核对冷账本同一边界;分别删除观察、提前/延后边界、翻转一个字节、截短和清空字节
 - 期望:原始观察逐字节相等,所有反例失败;字节差异锁存,之后补回原始数据仍失败
 - 实现:`crates/hft-testkit/tests/reconcile_actor.rs::tk_139_ledger_event_bytes_and_boundaries_cannot_be_skipped`
+
+### TK-140 整个 DST 循环中的补账交付不受检查器开关影响
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:integ
+- 里程碑:M2
+- 前置:种子 1,probe-target 用 PairOnFill 实际开仓,10 s 断流,11 s 部分/全量 ADL,15 s 恢复;有无延后补报共四行
+- 步骤:运行真实 DST 循环至 90 s 或 10,000 步;再次关闭全部检查器运行
+- 期望:实际产生一组原件补账,每次补账与确认事件均有账本字节核对;结束时严格真值比较不跳过;两次 journal、出环意图、交付流、HashTrail 全字节及真值相同
+- 边界:本用例覆盖循环交付与检查器透明性,不替代 LED-081 的开平仓和标准种子集
+- 实现:`crates/hft-testkit/tests/reconcile_world.rs::tk_140_committed_gap_delivery_is_independent_of_checkers`
 
 ## 验收
 
