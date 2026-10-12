@@ -598,7 +598,7 @@ enum NextOrder {
     UnknownCode,
     Reject,
     FillBeforeAck,
-    /// The next fill is also reported without a client id (`SlotId::UNRESOLVED`).
+    /// The next fill also arrives without a client id; a previously delivered Ack may resolve it.
     NoClientId,
 }
 
@@ -616,6 +616,10 @@ pub struct MockVenue<M: Matcher> {
     windows: Vec<(u64, u64, Fault)>,
     next_order: Vec<NextOrder>,
     late_fees: VecDeque<u32>,
+    /// Scheduled Ack arrival and identity, scoped to this venue and account. An Ack scheduled
+    /// after a fill cannot resolve that fill early. This models the gw's exchange-id lookup;
+    /// it must not treat the matcher-supplied slot as evidence for a no-client-id report.
+    ack_ids: BTreeMap<(u8, u64), (u64, OrderEvent)>,
     md_down_until: u64,
     order_down_until: u64,
     quiet: BTreeMap<u32, u64>,
@@ -641,6 +645,7 @@ impl<M: Matcher> MockVenue<M> {
             windows: Vec::new(),
             next_order: Vec::new(),
             late_fees: VecDeque::new(),
+            ack_ids: BTreeMap::new(),
             md_down_until: 0,
             order_down_until: 0,
             quiet: BTreeMap::new(),
@@ -892,6 +897,22 @@ impl<M: Matcher> MockVenue<M> {
                     due += (due - now) * 99;
                 }
             }
+            if let RepMsg::OrderEvent(e) = &rep
+                && e.what == OrderEventKind::Ack
+                && e.exch_order_id != 0
+                && e.slot != SlotId::UNRESOLVED
+            {
+                let key = (e.account.0, e.exch_order_id);
+                match self.ack_ids.get(&key) {
+                    Some((at, old))
+                        if (old.epoch, old.slot, old.r#gen, old.inst)
+                            == (e.epoch, e.slot, e.r#gen, e.inst)
+                            && *at <= due => {}
+                    _ => {
+                        self.ack_ids.insert(key, (due, *e));
+                    }
+                }
+            }
             // The matcher has already charged the fee once. Split that same fee out of the
             // fill without changing its truth. Ack/reject/zero-fee reports do not consume it.
             // ReportDup duplicates the fee-free fill; the separately delayed fee is emitted
@@ -923,6 +944,16 @@ impl<M: Matcher> MockVenue<M> {
                 self.next_order.remove(p);
                 let mut copy = *e;
                 copy.slot = SlotId::UNRESOLVED;
+                copy.r#gen = 0;
+                copy.epoch = 0;
+                if let Some((ack_due, ack)) = self.ack_ids.get(&(e.account.0, e.exch_order_id))
+                    && *ack_due <= due
+                    && ack.inst == e.inst
+                {
+                    copy.slot = ack.slot;
+                    copy.r#gen = ack.r#gen;
+                    copy.epoch = ack.epoch;
+                }
                 out.push((due, InputRec::of(&copy, self.src())));
             }
             if !self.clean

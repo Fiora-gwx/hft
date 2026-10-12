@@ -367,6 +367,7 @@ fn tk_127_explicit_cash_closes_the_original_wallet_difference() {
         .unwrap();
     assert_eq!(balance.qty, expected);
     assert!(truth.positions.is_empty());
+    assert_cold_money(&c, &r);
 
     c.invariants = InvariantSet::none();
     let unchecked = run_record::<SeqSut<TestStrategies>>(&c);
@@ -386,4 +387,81 @@ fn tk_127_explicit_cash_closes_the_original_wallet_difference() {
     assert_eq!(full.steps_run, 10_000);
     assert!(!full.trail.points.is_empty());
     assert!(full.snapshot_checks > 0);
+    assert_cold_money(&c, &full);
+}
+
+/// Replay the actual journal through the independent cold consumer from several saved windows.
+fn assert_cold_money(c: &hft_testkit::dst::DstConfig, r: &RunRecord) {
+    use hft_event::{EventKind, RecordHeader, RecordView};
+    use hft_ledger::JournalLedger;
+    use hft_strategy_sdk::SnapshotReader;
+    use hft_testkit::dst::seq::build;
+
+    let rd = build::load_refdata(&build::refdata_blob(&c.world, false).unwrap()).unwrap();
+    let setup = build::engine_setup(&c.world, c.tsc_hz, 1);
+    let last_fill = r
+        .journal
+        .iter()
+        .rev()
+        .find(|j| j.try_read::<OrderEvent>().is_some_and(|e| e.cum_filled.0 > 0))
+        .unwrap()
+        .seq;
+    let snapshots: Vec<_> = r
+        .journal
+        .iter()
+        .filter(|j| j.kind == EventKind::STATE_SNAPSHOT && j.seq < last_fill)
+        .collect();
+    assert!(!snapshots.is_empty());
+    let windows: BTreeSet<_> = [0, snapshots.len() / 2, snapshots.len() - 1]
+        .into_iter()
+        .collect();
+    for ix in windows {
+        let start = snapshots[ix];
+        let mut cold = JournalLedger::from_snapshot(
+            &mut SnapshotReader::new(&start.body[96..]),
+            &rd,
+            &setup.ledger,
+            &setup.caps.to_ledger(),
+        )
+        .unwrap();
+        for j in r.journal.iter().filter(|j| j.seq > start.seq) {
+            cold.apply(&RecordView {
+                hdr: RecordHeader {
+                    len: (24 + j.body.len()) as u32,
+                    kind: j.kind.0,
+                    flags: j.flags.0,
+                    seq: j.seq,
+                    tsc: j.tsc,
+                },
+                body: &j.body,
+            })
+            .unwrap_or_else(|e| panic!("cold window {} seq {}: {e:?}", start.seq, j.seq));
+        }
+        let ledger = cold.ledger();
+        for b in &r.obs.balances {
+            let actual = ledger
+                .venue_book(b.account, b.venue)
+                .cash
+                .iter()
+                .find(|cash| cash.asset == b.asset)
+                .map_or(0, |cash| i128::from(cash.total.0));
+            assert_eq!(actual, b.qty, "cold window {}, balance {b:?}", start.seq);
+        }
+        for p in &r.obs.positions {
+            assert_eq!(
+                i128::from(ledger.pos(p.account, p.inst).qty.0),
+                p.qty,
+                "cold window {}, position {p:?}",
+                start.seq
+            );
+        }
+        for i in &r.obs.inventory {
+            assert_eq!(
+                i128::from(ledger.inventory_view(i.account, i.venue, i.asset).total.0),
+                i.qty,
+                "cold window {}, inventory {i:?}",
+                start.seq
+            );
+        }
+    }
 }

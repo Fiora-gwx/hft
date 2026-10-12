@@ -46,6 +46,26 @@ fn tk_105_real_engine_late_fee() {
 }
 
 #[test]
+fn tk_129_acknowledged_no_client_id_cash_reports_survive_the_full_fault_plan() {
+    use hft_testkit::dst::world::VP;
+    for seed in [0xd05e_fd09_f013_189a, 0xd05e_fd09_f013_18f6] {
+        let suite = hft_testkit::scenarios::suites()
+            .into_iter()
+            .find(|s| s.name == "core")
+            .unwrap();
+        let mut c = suite.config(seed);
+        c.world.venues.iter_mut().find(|v| v.id == VP).unwrap().perp_cash = true;
+        c.steps = 10_000;
+        c.rerun = RerunPolicy::Always;
+        let r = run_record::<E>(&c);
+        assert!(r.outcome.is_pass(), "seed {seed:#x}: {}", show(&r));
+        assert_eq!(r.steps_run, 10_000);
+        assert!(!r.trail.points.is_empty());
+        assert!(r.snapshot_checks > 0);
+    }
+}
+
+#[test]
 fn tk_106_real_base_fee_and_retired_links() {
     use hft_event::{OrderAction, OrderDecision, OrderEvent, OrderEventKind};
     use hft_refdata::FeeAssetRule;

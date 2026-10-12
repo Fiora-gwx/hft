@@ -5,3 +5,5 @@
 0x00000000000006dd 2026-10-10 外来成交去重键未进 Obs,重复的 ExternalFill 报 INV-2
 0xbe413439dca24fad 2026-10-10 DST 观察器漏掉 OMS 最高有效槽,第 779 步误报 INV-7(TK-101;https://github.com/Fiora-gwx/hft/actions/runs/38049505528)
 0x1af231bb1d6440e2 2026-10-12 I14 缺少对冲 place 错误证据,第 608 步槽满后的重试被误判为门控失败(TK-121;https://github.com/Fiora-gwx/hft/actions/runs/38194738015)
+0xd05efd09f013189a 2026-10-12 已到达 Ack 的无 client id 现金成交被模型误标为无法匹配(TK-129;https://github.com/Fiora-gwx/hft/actions/runs/38230880362)
+0xd05efd09f01318f6 2026-10-12 同账户订单号映射遗漏导致严格现金模式第 597 步失败(TK-129;https://github.com/Fiora-gwx/hft/actions/runs/38230880362)

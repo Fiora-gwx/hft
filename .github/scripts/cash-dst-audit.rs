@@ -39,7 +39,7 @@ fn main() {
             planned.push((seed, ix));
         }
     }
-    assert_eq!(planned.len(), 220);
+    assert_eq!(planned.len(), 222);
     let mut failed = 0;
     for (seed, ix) in planned {
         let mut cfg = all[ix].config(seed);
@@ -83,7 +83,7 @@ fn main() {
             }
         }
     }
-    eprintln!("strict cash matrix: {failed}/220 failures");
+    eprintln!("strict cash matrix: {failed}/222 failures");
     assert_eq!(
         failed, 0,
         "strict cash failures remain; evidence is under audit/strict-failures"
