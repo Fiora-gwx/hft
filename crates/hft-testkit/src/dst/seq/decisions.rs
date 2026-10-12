@@ -6,13 +6,14 @@ use hft_strategy_sdk::{IntentClass, LinkRole};
 use hft_types::Side;
 
 use crate::dst::obs::{
-    DecClass, DecOrigin, DecisionInfo, HedgeKind, HedgePlaceFailure, PlaceFailureKind, StepInfo,
+    DecClass, DecOrigin, DecisionInfo, HedgeKind, HedgePlaceFailure, Obs, PlaceFailureKind, StepInfo,
 };
 use crate::dst::sut::JRec;
 
 pub fn fill(
     e: &Engine,
     history: &super::audit::History,
+    before: &Obs,
     records: &[JRec],
     info: &mut StepInfo,
 ) -> Result<(), String> {
@@ -61,6 +62,7 @@ pub fn fill(
     if e.decision_observation_failed() {
         return Err("decision diagnostic buffer overflow or unmatched decision".into());
     }
+    info.required_place_failures = e.hedge_place_failures().len() as u32;
     for (index, failure) in e.hedge_place_failures().iter().enumerate() {
         let f = failure.facts;
         let raw = f.link.ok_or("hedge place failure missing raw link identity")?;
@@ -70,7 +72,7 @@ pub fn fill(
         info.place_failures.push(HedgePlaceFailure {
             input_seq: f.input_seq,
             index: index as u32,
-            key: history.key(raw),
+            key: history.key_at_place(raw, before.links.iter().filter_map(|l| l.key)),
             group: f.group,
             venue: f.venue,
             inst: f.inst,

@@ -1542,6 +1542,9 @@ pub fn inv_14_gate_rejects_not_counted() -> Scenario {
 }
 
 fn check_14(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
+    if v.info.place_failures.len() != v.info.required_place_failures as usize {
+        return Err("hedge place failure observation count differs from raw producer".into());
+    }
     for (index, f) in v.info.place_failures.iter().enumerate() {
         let owner = v.before.links.iter().chain(&v.after.links).find(|l| {
             l.key == Some(f.key) && l.id == f.key.id && l.account.0 == f.key.account && l.group == f.group

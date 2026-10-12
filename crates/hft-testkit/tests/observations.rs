@@ -356,11 +356,23 @@ fn tk_121_hedge_place_failure_requires_exact_evidence() {
     assert!(e.records.iter().all(|r| r.kind != EventKind::ORDER_DECISION));
     assert!(check(InvId::I14, e).is_ok());
 
+    let mut unchanged = e.clone();
+    unchanged.after.links[at].retries = f.retries_before;
+    assert!(check(InvId::I14, &unchanged).is_ok());
+    unchanged.info.place_failures.clear();
+    assert!(
+        check(InvId::I14, &unchanged).is_err(),
+        "missing failure without a counter change accepted"
+    );
+
     for row in 0..17 {
         let mut bad = e.clone();
         match row {
             0 => bad.info.place_failures.clear(),
-            1 => bad.info.place_failures.push(f),
+            1 => {
+                bad.info.place_failures.push(f);
+                bad.info.required_place_failures += 1;
+            }
             2 => bad.info.place_failures[0].input_seq += 1,
             3 => bad.info.place_failures[0].key.epoch += 1,
             4 => bad.info.place_failures[0].key.slot += 1,
@@ -392,6 +404,7 @@ fn tk_121_hedge_place_failure_requires_exact_evidence() {
     ] {
         let mut bad = e.clone();
         bad.info.place_failures.clear();
+        bad.info.required_place_failures = 0;
         let mut report = hft_event::SendReport::new_zeroed();
         report.status = status;
         bad.records[0].kind = EventKind::SEND_REPORT;

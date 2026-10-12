@@ -69,7 +69,7 @@ impl Pending {
             after.observation_error = Some("per-Input diagnostic frame buffer overflow".into());
         }
         observe::step_info_engine(e, w, &self.pos, &mut out);
-        if let Err(err) = super::decisions::fill(e, h, &out.records, &mut out.info) {
+        if let Err(err) = super::decisions::fill(e, h, &self.before, &out.records, &mut out.info) {
             after.observation_error = Some(err);
         }
         after.normalize();

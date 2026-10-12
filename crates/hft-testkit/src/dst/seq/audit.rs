@@ -40,19 +40,32 @@ pub struct Audit {
 
 impl Tracked {
     fn same(&self, r: &LinkAudit) -> bool {
-        let f = r.link.first;
-        self.key.venue == f.venue.0
-            && self.key.account == f.account.0
-            && self.key.slot == f.slot
-            && self.key.generation == f.r#gen
-            && (r.first_epoch == 0 || self.key.epoch == r.first_epoch)
-            && (r.created_seq == 0 || self.key.created_seq == r.created_seq)
+        key_matches(self.key, r)
     }
+}
+
+fn key_matches(key: LinkKey, r: &LinkAudit) -> bool {
+    let f = r.link.first;
+    key.id == r.link.link_id
+        && key.venue == f.venue.0
+        && key.account == f.account.0
+        && key.slot == f.slot
+        && key.generation == f.r#gen
+        && (r.first_epoch == 0 || key.epoch == r.first_epoch)
+        && (r.created_seq == 0 || key.created_seq == r.created_seq)
 }
 
 impl History {
     pub fn key(&self, row: LinkAudit) -> LinkKey {
         self.tracked(row).key
+    }
+    /// A recovered link can fail, finish and be reused before the post-Input history is sampled.
+    /// Its pre-Input identity retains diagnostics which deliberately do not enter snapshots.
+    pub fn key_at_place(&self, row: LinkAudit, prior: impl IntoIterator<Item = LinkKey>) -> LinkKey {
+        prior
+            .into_iter()
+            .find(|key| key_matches(*key, &row))
+            .unwrap_or_else(|| self.key(row))
     }
     fn tracked(&self, r: LinkAudit) -> Tracked {
         if let Some(old) = self.live.get(&r.link.link_id).filter(|old| old.same(&r)) {
@@ -134,6 +147,60 @@ impl History {
                 .filter(|h| h.account == a && h.group == g && inst.is_none_or(|i| h.inst == i))
                 .map(|h| h.capped)
                 .sum::<i128>()
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn tk_122_place_identity_survives_restored_link_reuse() {
+    use crate::dst::world::{ACCT_A, G1, VS};
+    use hft_strategy_sdk::{HedgePlan, OrderRef};
+    use zerocopy::TryFromBytes;
+
+    let prior = LinkKey {
+        id: 17,
+        venue: VS.0,
+        account: ACCT_A.0,
+        epoch: 7,
+        slot: 3,
+        generation: 9,
+        created_seq: 41,
+    };
+    let mut link = hft_oms::LinkEntry::try_read_from_bytes(&[0; 80]).unwrap();
+    link.link_id = prior.id;
+    link.group = G1;
+    link.account = ACCT_A;
+    link.state = LinkState::Hedging;
+    link.first = OrderRef::new(VS, ACCT_A, prior.slot, prior.generation);
+    let restored = LinkAudit {
+        link,
+        plan: HedgePlan::NONE,
+        first_epoch: 0,
+        created_seq: 0,
+        capped: 0,
+    };
+    let mut reused = restored;
+    reused.link.first.r#gen += 1;
+    reused.first_epoch = 8;
+    reused.created_seq = 100;
+    let mut history = History::default();
+    history.live.insert(prior.id, history.tracked(reused));
+    assert_eq!(
+        history.key(restored).created_seq,
+        0,
+        "post-Input history alone has lost the old key"
+    );
+    assert_eq!(history.key_at_place(restored, [prior]), prior);
+    assert_eq!(history.key_at_place(reused, [prior]), history.key(reused));
+    // Known raw identity fields are never overridden by an older diagnostic checkpoint.
+    for row in 0..3 {
+        let mut other = restored;
+        match row {
+            0 => other.first_epoch = prior.epoch + 1,
+            1 => other.link.first.r#gen += 1,
+            _ => other.created_seq = prior.created_seq + 1,
+        }
+        assert_ne!(history.key_at_place(other, [prior]), prior);
     }
 }
 

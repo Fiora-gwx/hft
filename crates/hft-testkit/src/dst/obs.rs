@@ -606,6 +606,8 @@ pub struct StepInfo {
     pub decisions: Vec<DecisionInfo>,
     /// Failed OMS hedge places, including attempts which emitted no OrderDecision.
     pub place_failures: Vec<HedgePlaceFailure>,
+    /// Raw producer count; even a failure that leaves retries unchanged must be observed.
+    pub required_place_failures: u32,
     /// All legs' raw immediate in-flight, before the decision's own order is admitted.
     pub decision_inflight: Vec<(u64, [i128; 4])>,
     /// Account risk caps captured at decision time (hedge, reduce notionals).

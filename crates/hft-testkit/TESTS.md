@@ -20,7 +20,7 @@ spec: README.md
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
 | 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TK-117–TK-119、TOOL-024、TOOL-027–TOOL-029 |
-| 6. DST 框架 | TK-043–TK-070、TK-100–TK-116、TK-120–TK-121 |
+| 6. DST 框架 | TK-043–TK-070、TK-100–TK-116、TK-120–TK-122 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
 | 8. hft-dst 运行器 | TK-075–TK-088 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
@@ -1575,8 +1575,18 @@ spec: README.md
 - 前置:真实 `SeqSut<TestStrategies>` 与原始 core 套件,不改故障率与时限
 - 故障:套件原有计划
 - 种子:固定种子 `0x1af231bb1d6440e2`,完整 10000 步
-- 断言:全部不变量与强制复跑通过;Input 1572 为对冲重试 Timer,链接 17 调用前空闲槽为 0,place 返回 NoFreeSlot,重试从 1 到 2,没有 OrderDecision;删除/重复观察、改错 Input/epoch/slot/gen/创建事件/链接号/账户/组、非满表、错误失败种类、错误计数水位、多加计数和缺链接身份共 17 行反例失败;四种门控 SendReport 不能单独解释计数增加;链接号复用后不能借旧实例证据。关闭检查器后完整 journal 和非空 HashTrail 逐字节相同
+- 断言:全部不变量与强制复跑通过;Input 1572 为对冲重试 Timer,链接 17 调用前空闲槽为 0,place 返回 NoFreeSlot,重试从 1 到 2,没有 OrderDecision;删除/重复观察、改错 Input/epoch/slot/gen/创建事件/链接号/账户/组、非满表、错误失败种类、错误计数水位、多加计数和缺链接身份共 17 行反例失败;未增加计数的失败也不能漏观察。四种门控 SendReport 不能单独解释计数增加;链接号复用后不能借旧实例证据。关闭检查器后完整 journal 和非空 HashTrail 逐字节相同
 - 实现:`crates/hft-testkit/tests/observations.rs::tk_121_hedge_place_failure_requires_exact_evidence`
+
+### TK-122 恢复链接同事件内复用仍保留 place 时的身份
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:unit
+- 里程碑:M2
+- 前置:Input 前保存链接 17 的 epoch/slot/gen/创建事件,快照恢复后的原始诊断 epoch 与创建事件为零;该 Input 完成时相同链接号已被新一代订单复用
+- 步骤:分别解析旧调用与新调用的身份,再逐行给旧调用指定不同的 epoch、gen 和创建事件
+- 期望:旧调用准确取 Input 前的完整身份,新调用保留新身份;已知原始字段不被旧检查点覆盖,不改变快照格式
+- 实现:`crates/hft-testkit/src/dst/seq/audit.rs::tk_122_place_identity_survives_restored_link_reuse`
 
 ## 验收
 
