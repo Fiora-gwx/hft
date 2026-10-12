@@ -4293,7 +4293,7 @@ spec: README.md
 - 规则:[使用本组件](README.md#使用本组件)
 - 级别:unit
 - 里程碑:M2
-- 前置:实盘和模拟账户各有同订单号的外来累计结算
+- 前置:实盘 A1 和模拟 S1 均启用 VX 的严格永续结算,各有同订单号的外来累计结算
 - 步骤:重置模拟账户,再向两账户交付相同回报
 - 期望:模拟账户按新资金周期重新记账;另一账户保留水位且不重复入账
 - 实现:`crates/hft-oms/tests/settlement.rs::oms_475_sim_reset_clears_only_that_accounts_foreign_cash`

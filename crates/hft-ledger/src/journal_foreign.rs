@@ -198,6 +198,8 @@ impl Foreign {
             || n.inst != e.inst
             || n.group != GROUP_NONE
             || n.level != NoteLevel::Info
+            || ledger.acc_instance.get(usize::from(e.account.0)) != Some(&n.strategy)
+            || n._pad != 0
             || n.v
                 != [
                     v0,

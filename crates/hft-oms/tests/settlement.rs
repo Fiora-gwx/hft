@@ -472,7 +472,13 @@ fn oms_473_foreign_cash_capacity_never_evicts_a_booked_identity() {
 
 #[test]
 fn oms_475_sim_reset_clears_only_that_accounts_foreign_cash() {
-    let (mut h, _) = fixture();
+    let rd = build_rd(&RdOpts {
+        vx_perp_cash: true,
+        s1_perp: true,
+        ..RdOpts::default()
+    });
+    let mut h = H::from_cfg(&p0(), rd);
+    assert!(h.o.table_view(VX, S1).is_some());
     let r = h.place_ok(&sell_y(), 0);
     let mut e = event(&h, r, 1, -11700);
     e.slot = SlotId(0);
@@ -480,6 +486,7 @@ fn oms_475_sim_reset_clears_only_that_accounts_foreign_cash() {
     e.exch_order_id = 9900;
     h.ev(&e, 1);
     assert_eq!(h.out.cash_error, None);
+    assert_eq!(h.out.foreign_fills.len(), 1);
     e.account = S1;
     h.ev(&e, 2);
     assert_eq!(h.out.cash_error, None);

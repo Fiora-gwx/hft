@@ -56,7 +56,7 @@ fn foreign_pair(cum: i64, cash: i64, qty: i64) -> (OrderEvent, hft_event::Note) 
     let mut e = event(0, cum, cash);
     e.detail = Buy as u8;
     e.exch_order_id = 9900;
-    let n = oms_foreign_fill(
+    let mut n = oms_foreign_fill(
         P2,
         A1,
         BTC_P2,
@@ -70,6 +70,7 @@ fn foreign_pair(cum: i64, cash: i64, qty: i64) -> (OrderEvent, hft_event::Note) 
         0,
         e.cum_filled,
     );
+    n.strategy = rd_cash().account(A1).bound_instance;
     (e, n)
 }
 
@@ -86,7 +87,7 @@ fn fragment<B: Body>(j: &mut JournalLedger, b: &B, end: bool) -> Result<(), Jour
 
 #[test]
 fn led_290_foreign_cash_uses_original_input_and_requires_exact_event_evidence() {
-    for row in 0..12 {
+    for row in 0..14 {
         let mut j = cold(&booted_with(rd_cash()), rd_cash());
         let (first, note) = foreign_pair(100_000, -11700, 100_000);
         fragment(&mut j, &first, false).unwrap();
@@ -133,6 +134,14 @@ fn led_290_foreign_cash_uses_original_input_and_requires_exact_event_evidence() 
             }
             11 => {
                 n.inst = InstId(u32::MAX);
+                None
+            }
+            12 => {
+                n.strategy.0 ^= 1;
+                None
+            }
+            13 => {
+                n._pad = 1;
                 None
             }
             _ => None,
@@ -197,6 +206,7 @@ fn led_291_restored_cash_sources_cannot_be_rebooked_through_ordinary_orders() {
             &caps_lf(),
         )
         .unwrap();
+        clock(&mut restored, 0);
         feed(&mut restored, &epoch_start(7), true);
         feed(
             &mut restored,

@@ -2905,7 +2905,7 @@ spec: README.md
 - 级别:unit
 - 里程碑:M2
 - 前置:第一笔累计现金 −11700,第二笔累计 −11800
-- 输入:注记错误数量、订单号、方向、累计量;缺覆盖、同水位冲突、溢出、缺注记、重复注记、改成现货品种或未知品种及匹配的后续十二行
+- 输入:注记错误数量、订单号、方向、累计量;缺覆盖、同水位冲突、溢出、缺注记、重复注记、改成现货品种或未知品种、错误策略归属、非零保留字段及匹配的后续十四行
 - 步骤:按 Input/Output 的完整事件交付,错误后再尝试补交
 - 期望:第二笔匹配证据时仅入 −100,重复不入账;错误不改账本,错误持续锁存,注记不提供现金金额
 - 实现:`crates/hft-ledger/tests/settlement_journal.rs::led_290_foreign_cash_uses_original_input_and_requires_exact_event_evidence`
@@ -2916,7 +2916,7 @@ spec: README.md
 - 级别:unit
 - 里程碑:M2
 - 前置:原始 ExternalFill 与外来累计回报两行,相同账户、品种和交易所订单号
-- 步骤:分别连续消费及从含来源行的关键帧恢复,再交付已登记普通槽的同号成交
+- 步骤:分别连续消费及从含来源行的关键帧恢复,恢复后先交付 EngineClock、EpochStart 与普通槽决策,再交付该槽的同号成交
 - 期望:四行均报 UnsupportedExternalCash,账本快照字节不变
 - 实现:`crates/hft-ledger/tests/settlement_journal.rs::led_291_restored_cash_sources_cannot_be_rebooked_through_ordinary_orders`
 
