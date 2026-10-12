@@ -1352,6 +1352,7 @@
 | `FundingCorrected` | Ledger | 13 | P1 |  |
 | `ChainReorg` | Ledger | 14 | P1 |  |
 | `ChainReorgNaked` | Ledger | 15 | P0 |  |
+| `BalanceCheck` | Ledger | 16 | Info | `venue` [0, +8)、`account` [8, +8)、`asset` [64, +64)、`free` [128, +64)、`locked` [192, +64)、`ex_ts_ns` [256, +64) |
 | `ExecBroken` | Exec | 1 | P0 |  |
 | `ExecExternalDefault` | Exec | 2 | 按条件 |  |
 | `ExecAutoFixFailed` | Exec | 3 | P0 |  |

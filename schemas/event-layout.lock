@@ -738,6 +738,7 @@ note Ledger 12 FundingMismatch
 note Ledger 13 FundingCorrected
 note Ledger 14 ChainReorg
 note Ledger 15 ChainReorgNaked
+note Ledger 16 BalanceCheck
 note Exec 1 ExecBroken
 note Exec 2 ExecExternalDefault
 note Exec 3 ExecAutoFixFailed

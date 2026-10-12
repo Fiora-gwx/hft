@@ -25,3 +25,9 @@ Status: implemented — PR #2 内待 CI 与资金、恢复评审
 ## Consequences
 
 冷读者多保留一份有界状态副本。BalanceCheck 会增加业务 Output,HashTrail 如有变化必须在托管 CI 中审查来源,不修改既有种子、步数或哈希范围。生产引擎的余额金额计算和 quiet 判定保持原行为;此记录服务账本恢复,不属于 testkit 诊断缓冲。LED-288/289、SEQ-414 与完整 DST/回放共同验证,通过前不计入 M2 验收。
+
+## Validation
+
+[专项 CI](https://github.com/Fiora-gwx/hft/actions/runs/38253273817) 验证提交 `a193404` 的 193 项账本测试、4 项结算回放测试、93 项 testkit 测试及 50 个固定种子均通过。生成的新金样与关闭检查器的完整摘要 50/50 相同。另在临时构建中只移除 `on_balance` 新增的 BalanceCheck 输出,同一 50 个种子完整复现旧摘要,未改序号、状态字段或哈希范围;两轮共记录 400/0 条该输出。正式实现保留全部记录与检查器。
+
+据此更新固定集的摘要和生成的 Note 登记文件,种子、套件、步数均不变。专项制品 ZIP 的 SHA-256 为 `e7f546020c8e51cbce11c237b33880ad5140970dc47e66b5e2b4148f7f6840c6`;完整 PR CI 和负责人评审另行执行。
