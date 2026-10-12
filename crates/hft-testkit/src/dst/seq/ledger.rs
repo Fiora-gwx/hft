@@ -512,8 +512,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn led_267_unmapped_fills_need_exact_same_event_evidence() {
+    fn unmapped_evidence_cases() {
         let e = fill();
         let mut yes = Evidence::default();
         yes.record(&rec(1, RecordFlags(0), &e), 1).unwrap();
@@ -600,6 +599,7 @@ mod tests {
 
     #[test]
     fn led_267_full_venue_fields_and_recorded_configuration_are_required() {
+        unmapped_evidence_cases();
         let world = WorldSpec::w1();
         let sut = super::super::SeqSut::<TestStrategies>::boot(&BootCtx {
             seed: 1,
