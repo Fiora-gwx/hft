@@ -442,8 +442,9 @@ mod tests {
     use super::*;
     use hft_event::{Body, NoteLevel, OrderEventKind};
     use hft_ledger::InvEntry;
-    use hft_types::{AccountId, AssetId, GroupId, InstId, Px, Qty, Side, SlotId, Tif, VenueId};
-    use zerocopy::FromZeros;
+    use hft_types::{
+        AccountId, AssetId, GroupId, InstId, Px, Qty, Side, SlotId, StrategyId, Tif, Tsc, VenueId,
+    };
 
     use crate::dst::sut::{BootCtx, Sut};
     use crate::dst::world::WorldSpec;
@@ -475,7 +476,13 @@ mod tests {
             fee: Qty(1),
             fee_asset: AssetId(2),
             exch_order_id: 73,
-            ..OrderEvent::new_zeroed()
+            reject_code: 0,
+            ex_ts_ns: 0,
+            hw_rx_ns: 0,
+            rx_tsc: 0,
+            avg_px: Px(0),
+            cash_qty: Qty(0),
+            cash_sum: Qty(0),
         }
     }
 
@@ -499,7 +506,9 @@ mod tests {
                 e.cum_filled.0 as u64,
                 e.cum_filled.0 as u64,
             ],
-            ..Note::new_zeroed()
+            strategy: StrategyId(1),
+            _pad: 0,
+            group: hft_types::GROUP_NONE,
         }
     }
 
@@ -547,7 +556,20 @@ mod tests {
             action: OrderAction::New,
             side: Side::Buy,
             tif: Tif::Ioc,
-            ..OrderDecision::new_zeroed()
+            trigger_seq: 0,
+            decided_tsc: Tsc(0),
+            px: e.px,
+            qty: e.qty,
+            group: GroupId(1),
+            target_slot: SlotId(0),
+            reject: 0,
+            strategy: StrategyId(1),
+            oflags: 0,
+            reason: 0,
+            intent_no: 0,
+            req_px: e.px,
+            link_role: 0,
+            _pad: [0; 7],
         };
         for (epoch, shadow, pass) in [(3, true, true), (4, true, false), (3, false, false)] {
             let mut evidence = Evidence {
