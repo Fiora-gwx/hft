@@ -440,7 +440,32 @@ fn tk_121_hedge_place_failure_requires_exact_evidence() {
     let off = run_record::<SeqSut<TestStrategies>>(&c);
     assert!(off.outcome.is_pass());
     assert_eq!(off.steps_run, 10_000);
-    assert_eq!(r.journal, off.journal);
+    assert!(
+        r.journal
+            .iter()
+            .any(|r| r.try_read::<hft_event::ReconcileReport>().is_some()),
+        "reconciliation actor was not exercised"
+    );
+    assert_eq!(r.journal.len(), off.journal.len(), "journal record count");
+    for (i, (a, b)) in r.journal.iter().zip(&off.journal).enumerate() {
+        // A whole-journal Debug dump can exceed the hosted CI log limit. Keep the full equality
+        // check, but report only the first mismatching record and body offset.
+        assert!(
+            a == b,
+            "journal record {i}: seq {}/{}, kind {:?}/{:?}, tsc {}/{}, flags {:?}/{:?}, body lengths {}/{}, first body difference {:?}",
+            a.seq,
+            b.seq,
+            a.kind,
+            b.kind,
+            a.tsc,
+            b.tsc,
+            a.flags,
+            b.flags,
+            a.body.len(),
+            b.body.len(),
+            a.body.iter().zip(&b.body).position(|(x, y)| x != y)
+        );
+    }
     assert!(!r.trail.points.is_empty());
     assert_eq!(r.trail.to_bytes(), off.trail.to_bytes());
 }

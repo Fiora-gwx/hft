@@ -451,9 +451,8 @@ impl<E: Sut> Loop<'_, E> {
     }
 
     fn observe_into_after(&mut self) {
-        if self.cfg.invariants == InvariantSet::none() {
-            return;
-        }
+        // Actors such as Recon consume this view too. Disabling assertions must not change
+        // their inputs by leaving the engine's positions at the empty default.
         self.after = Obs::default();
         self.sut.observe(&mut self.after);
         self.after.normalize();

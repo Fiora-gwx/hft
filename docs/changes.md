@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-12 | DST 关闭检查器时仍刷新对账 actor 使用的持仓观察,避免输入随断言开关改变;完整 journal 比较保留且失败只输出首条差异 | TK-121 在 CI 38197392642 的完整 journal 对照失败;空观察使对账误报持仓差 | crates/hft-testkit | 否 |
 | 2026-10-12 | 对冲失败观察优先匹配 Input 前的链接身份,恢复后的链接在同事件内完成并复用时不丢失旧创建事件;原始诊断中已知的身份字段保持严格匹配 | TK-122;事件后历史已换成新一代,不能补回旧调用缺省的恢复诊断身份 | crates/hft-testkit | 否 |
 | 2026-10-12 | testkit 记录未产生 OrderDecision 的对冲 place 失败及调用前槽数、完整链接身份;INV-14 逐 Input 核对失败证据,限制每次失败的计数增量并隔离链接复用。生产下单、journal 与快照格式不变 | CI 38194738015 core 种子 0x1af231bb1d6440e2 第 608 步;TK-121 原种子 10000 步、17 行观察反例、四种门控与开关检查器逐字节对照;SEQ-373 容量边界 | crates/hft-sequencer、crates/hft-testkit、fixtures/dst-seeds/core.txt、docs/tests/invariants.md | 否 |
 | 2026-10-12 | Drain 缩容按 CapKind 顺序拒绝,暂用足够容量检查快照,避免组件解码错误掩盖容量不足;策略定时器保留引擎配额。新容量写入恢复引导配置;先设置 Recovery 与新闸门,再移除旧进程 Draining。补齐真实 Drain 边界、回到 Live 后第七个 cell 拒绝及独立回放。CI 38194159634 对照原始 journal 后更新 HashTrail 种子 7/28/34 摘要,保留种子和步数 | SEQ-006/007、TK-120;40 条定时器容量与 B0 引擎预留量冲突,旧 Draining 阻止重启后升级 | crates/hft-sequencer、crates/hft-testkit、fixtures/dst/hashtrail.toml、docs/architecture.md | 否 |

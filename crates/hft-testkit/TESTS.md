@@ -1577,6 +1577,7 @@ spec: README.md
 - 种子:固定种子 `0x1af231bb1d6440e2`,完整 10000 步
 - 断言:全部不变量与强制复跑通过;Input 1572 为对冲重试 Timer,链接 17 调用前空闲槽为 0,place 返回 NoFreeSlot,重试从 1 到 2,没有 OrderDecision;删除/重复观察、改错 Input/epoch/slot/gen/创建事件/链接号/账户/组、非满表、错误失败种类、错误计数水位、多加计数和缺链接身份共 17 行反例失败;未增加计数的失败也不能漏观察。四种门控 SendReport 不能单独解释计数增加;链接号复用后不能借旧实例证据。关闭检查器后完整 journal 和非空 HashTrail 逐字节相同
 - 实现:`crates/hft-testkit/tests/observations.rs::tk_121_hedge_place_failure_requires_exact_evidence`
+- 对账覆盖:两次运行均保持原始对账 actor,确认 journal 包含 ReconcileReport;关闭检查器仍刷新 actor 所需仓位,逐记录比较数量、序号、种类、TSC、标志及全部体字节,失败仅输出首个差异位置
 
 ### TK-122 恢复链接同事件内复用仍保留 place 时的身份
 
