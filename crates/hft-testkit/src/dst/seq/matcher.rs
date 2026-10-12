@@ -58,6 +58,8 @@ pub struct SimMatcher {
     /// (gen, epoch) of the latest `Query` per (account, slot): the gw answers a query with the
     /// client id it asked about, also when the exchange does not know the order.
     queries: BTreeMap<(u8, u32), (u32, u16)>,
+    /// A diagnostic tail, never used as accounting evidence or to drive the exchange.
+    matched: VecDeque<(u64, hft_event::OrderEvent)>,
 }
 
 impl core::fmt::Debug for SimMatcher {
@@ -134,6 +136,7 @@ impl SimMatcher {
         let out = &mut self.out;
         let epochs = &self.epochs;
         let queries = &self.queries;
+        let matched = &mut self.matched;
         ex.drain_due(Tsc(now_ns), |r| {
             // The venue configuration is static in a DST world (the engine gets it at startup);
             // margin reports travel without their per-inst items (the ring element only).
@@ -158,6 +161,17 @@ impl SimMatcher {
                 _ => {}
             }
             if rep_venue(&msg) == venue {
+                if let RepMsg::OrderEvent(e) = msg
+                    && matches!(
+                        e.what,
+                        hft_event::OrderEventKind::Fill | hft_event::OrderEventKind::PartialFill
+                    )
+                {
+                    if matched.len() == 64 {
+                        matched.pop_front();
+                    }
+                    matched.push_back((r.gen_seq, e));
+                }
                 out.push_back(VenueOut {
                     due_ns: r.due_tsc.0,
                     rep: msg,
@@ -197,6 +211,7 @@ impl Matcher for SimMatcher {
             last_ns: 0,
             epochs: BTreeMap::new(),
             queries: BTreeMap::new(),
+            matched: VecDeque::with_capacity(64),
         };
         for i in world.insts.iter().filter(|i| i.venue == venue) {
             m.on_bbo(i.id, (i.bid, i.depth), (i.ask, i.depth), 0);
@@ -309,6 +324,11 @@ impl Matcher for SimMatcher {
     }
     fn accounts(&self) -> Vec<AccountId> {
         self.accounts.clone()
+    }
+    fn matched_tail(&self) -> Vec<(u64, hft_event::OrderEvent)> {
+        let mut rows: Vec<_> = self.matched.iter().copied().collect();
+        rows.sort_by_key(|r| r.0);
+        rows
     }
     fn open_orders(&self, a: AccountId) -> Vec<(SlotId, u32)> {
         let Some(v) = self.ex.as_ref().and_then(|e| e.account(a)) else {

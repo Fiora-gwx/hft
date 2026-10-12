@@ -99,6 +99,11 @@ pub trait Matcher: Sized {
     fn next_due(&self) -> Option<u64>;
     /// Exchange truth of `a` on this venue.
     fn truth(&self, a: AccountId) -> TruthRow;
+    /// Last 64 generated fill reports per matcher, for failure diagnostics only. The sequence
+    /// belongs to the exchange, before the venue adds latency or reorders delivery.
+    fn matched_tail(&self) -> Vec<(u64, hft_event::OrderEvent)> {
+        Vec::new()
+    }
     fn accounts(&self) -> Vec<AccountId>;
     /// Resting orders of `a`: (slot, gen).
     fn open_orders(&self, a: AccountId) -> Vec<(SlotId, u32)>;

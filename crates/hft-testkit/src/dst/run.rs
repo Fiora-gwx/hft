@@ -39,6 +39,8 @@ pub struct RunRecord {
     pub end_ns: u64,
     /// Successful mandatory INV-6 checks, one per journal snapshot (including boot / restart).
     pub snapshot_checks: u64,
+    /// Bounded raw matching evidence for diagnosis; not an invariant reference.
+    pub matched_tail: Vec<(u64, hft_event::OrderEvent)>,
 }
 
 impl RunRecord {
@@ -59,6 +61,7 @@ impl RunRecord {
             obs: Obs::default(),
             end_ns: 0,
             snapshot_checks: 0,
+            matched_tail: Vec::new(),
         }
     }
     /// Output records (`role = Output` by kind) of the journal: the intent stream compared by INV-9.
@@ -724,6 +727,17 @@ impl<E: Sut> Loop<'_, E> {
             }
         }
         self.rec.journal = self.sut.journal().to_vec();
+        for v in self.venues.iter().chain(&self.sims) {
+            self.rec.matched_tail.extend(v.m.matched_tail());
+        }
+        if let Some((_, FailKind::Inv(InvId::I16), message)) = &mut self.fail {
+            for (generated, e) in &self.rec.matched_tail {
+                message.push_str(&format!(
+                    "\nmatch gen_seq={generated} account={} venue={} epoch={} slot={} gen={} inst={} px={} qty={} cum={}",
+                    e.account.0, e.venue.0, e.epoch, e.slot.0, e.r#gen, e.inst.0, e.px.0, e.qty.0, e.cum_filled.0
+                ));
+            }
+        }
         self.rec.obs = std::mem::take(&mut self.after);
         self.rec.end_ns = now;
         let keep = if self.cfg.trace { usize::MAX } else { 200 };

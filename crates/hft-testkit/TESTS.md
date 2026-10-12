@@ -20,7 +20,7 @@ spec: README.md
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
 | 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TK-117–TK-119、TOOL-024、TOOL-027–TOOL-029 |
-| 6. DST 框架 | TK-043–TK-070、TK-100–TK-116、TK-120–TK-122 |
+| 6. DST 框架 | TK-043–TK-070、TK-100–TK-116、TK-120–TK-123 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
 | 8. hft-dst 运行器 | TK-075–TK-088 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
@@ -1588,6 +1588,16 @@ spec: README.md
 - 步骤:分别解析旧调用与新调用的身份,再逐行给旧调用指定不同的 epoch、gen 和创建事件
 - 期望:旧调用准确取 Input 前的完整身份,新调用保留新身份;已知原始字段不被旧检查点覆盖,不改变快照格式
 - 实现:`crates/hft-testkit/src/dst/seq/audit.rs::tk_122_place_identity_survives_restored_link_reuse`
+
+### TK-123 原始撮合顺序证据不受回报延迟影响
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:integ
+- 里程碑:M2
+- 前置:modes 固定种子 `0x7dfee4207b81bfbd`,保留原故障表,运行 316 步
+- 步骤:从模拟回报生成序号取得单 5/6/7 的完整身份、数量与价格,与 journal 交付顺序及原始下单方向比较;关闭检查器重跑相同步数
+- 期望:生成顺序为 5/6/7,交付顺序为 6/5/7,原 INV-16 在第 315 步以精确 1 单位差额失败;诊断不改变 journal、HashTrail 或回报。此用例验证故障证据,不代表该余额差通过验收;回归集仍完整运行 10000 步并阻断 CI
+- 实现:`crates/hft-testkit/tests/fill_order.rs::tk_123_raw_matching_order_survives_report_jitter`
 
 ## 验收
 
