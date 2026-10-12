@@ -36,6 +36,10 @@ OMS 将水位留在槽和墓碑中,用 `PERP_CASH` 明确区分支持完整事�
 
 ## Deferred
 
+基于 `905fc14` 的[冷读资金审计](https://github.com/Fiora-gwx/hft/actions/runs/38236637318)对同一 223 种子、各 10000 步逐条消费真实 journal,完成 3811 次快照对照。按账户/venue/品种比较持仓量、成本、已实现损益和费用,按资产及 group 比较钱包与库存,全部相同;稀疏零行按键并集比较。诊断提交 `31906cc982b900eb183eb4d367dd1bb9aefe47e8`,制品 ZIP SHA-256 为 `5fb27444c22b093dd5f68380a45327b827352134514a91e2638ded3fa1077ab2`。此审计尚未作为 LED-267 的常驻门槛,也未核验每笔 unmapped_fills 的同事件归属证据,该用例仍待完成。
+
+`905fc14` 的 [CI 194](https://github.com/Fiora-gwx/hft/actions/runs/38235539632)未通过。TK-053.2 原先把缺 client id 等同于未知身份,在已有 Ack 可匹配后不再触发植入缺陷;长时 Model 夹具直接连接 SimMatcher,遗漏真实网关的 epoch 编码,五个回放用例被严格现金入口拒绝。修正夹具需保留 PERP_CASH 和原检查强度,标准 DST、HashTrail 比较与基准冒烟仍须通过新一轮 CI。
+
 W1 的永续来源使用真实 SimExchange 的结算事实,默认开启 PERP_CASH;旧协议反例 TK-123 显式关闭能力。[能力对照](https://github.com/Fiora-gwx/hft/actions/runs/38234131718)的 223 个原计划种子均完成 10000 步,50 个固定种子分别用旧能力与严格能力运行 2000 步并强制复跑。两边网关指令、原始撮合事实、业务 journal、交易所真值及最终钱包/仓位/库存逐字节相同;1000 个采样点的 ledger、book、risk、exec、strategies 哈希相同,920 个点的 OMS 哈希因现金水位而变化,56 次快照重建通过。独立对照没有更改真实检查器或哈希范围。
 
 HashTrail 金样使用该对照的严格能力摘要,保持原 50 个种子、套件与步数。旧能力摘要与前次金样有 6 个不同种子,分别为 5、9、11、14、18、43,来自[无 client id 与 FillBeforeAck 故障模型修正](../testing/2026-10-12-no-client-id-ack-resolution.md),不按纯快照格式差异解释。对照程序提交 `5e58d7153ff2e6f21234097adce4104b554f2d88`,制品 ZIP SHA-256 为 `f4403c0edcdd763768d78bde1be88647ebc99c837472ad28238e91427b4d4718`。这轮 TK-128 的价格夹具仍失败,修正后的专项及默认配置必须再过常规 CI;这些数据不替代完整 M2 验收。

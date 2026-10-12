@@ -16,6 +16,8 @@ Status: implemented
 
 ## Deferred
 
+价格夹具修正后的[独立验证](https://github.com/Fiora-gwx/hft/actions/runs/38234991297)通过 TK-120–129、50 个能力对照和全部 223 个严格现金种子。提交为 `ffa5a56b0a90780234758e037c240391b9b40dee`,制品 ZIP SHA-256 为 `2b51bce945307020dfef991a8cbc285e3dda12f459b972e39ead99f2883b0ec6`;两份 TSV 与上一轮对照逐字节相同。常规 CI 194 暴露 TK-053.2 需显式产生未匹配输入,该自测增加零等待的先成交后 Ack 和无缺陷对照,不恢复错误的默认匹配行为。
+
 `b5e3779` 的[独立托管验证](https://github.com/Fiora-gwx/hft/actions/runs/38232740224)通过全部 222 个严格现金种子和 TK-127 的真实冷读窗口,但固定一致性集停在种子 43 的晚 Ack 边界。制品 ZIP SHA-256 为 `65e5ed8df1605ee0bab4246def2540e6b1f22b04b816165c556b4c5a642b296c`。据此补充限内等待、零等待反例,并把 43 加入完整回归集;旧失败不按通过处理。
 
 `5e58d71` 的[晚 Ack 对照](https://github.com/Fiora-gwx/hft/actions/runs/38234131718)通过 223 个严格现金种子及全部 50 个固定能力对照。TK-128 仍失败,日志确认平仓价格 600010100 不符合 P1 的 tick 1000,实际收到 Reject 而非 Ack。夹具改为从世界读取 tick 并对齐价格,每次下单前刷新报价,继续保留非零现金、跨账户身份和延迟边界断言。制品 ZIP SHA-256 为 `f4403c0edcdd763768d78bde1be88647ebc99c837472ad28238e91427b4d4718`;该轮专项失败不能计为通过。

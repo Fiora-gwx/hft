@@ -712,7 +712,7 @@ spec: README.md
 | 行 | 植入缺陷 | 期望 |
 |---|---|---|
 | TK-053.1 | OMS 在 429 时把订单判为失败,ledger 据此改仓位 | 2 000 个种子内失败;`invariant = I1` |
-| TK-053.2 | OMS 静默丢弃未知 client id 的回报 | `I2` |
+| TK-053.2 | OMS 静默丢弃未知 client id 的回报;从时间 0 配对注入 FillBeforeAck 与 NoClientIdFill,固定回报延迟且等待限为零,保留原随机 TwoLeg 故障 | `I2`;去掉植入缺陷后同一输入计划通过,且实际交付未解析身份的正量成交 |
 | TK-053.3 | 风控不检查每资产未对冲量上限 | `I3` |
 | TK-053.4 | `Unknown` 期间同一 group 放行开仓 | `I4` |
 | TK-053.5 | kill 后放行不带 `RISK_REDUCING` 的 `Place` | `I5` |

@@ -1,4 +1,4 @@
-name: Cold ledger snapshot audit
+name: Strict cash fixture audit
 on:
   push:
     branches: [codex/m2-cash-audit]
@@ -27,15 +27,24 @@ jobs:
         with:
           key: x86-ci-v2
           save-if: false
-      - name: Compare cold money at every real engine snapshot
+      - name: Unknown-report defect and healthy control
+        run: cargo test --locked --profile ci -p hft-testkit --features seq tk_053 -- --nocapture
+      - name: Prepare replay test prerequisites
+        if: ${{ !cancelled() }}
+        run: bash .github/scripts/test-prereqs.sh
+      - name: Build real replay test binaries
+        if: ${{ !cancelled() }}
+        run: cargo test --locked --profile ci -p replayer --tests --examples --no-run
+      - name: Full replay CLI fixture suite
+        if: ${{ !cancelled() }}
         run: |
-          mkdir -p audit crates/hft-testkit/examples
-          git rev-parse HEAD >audit/head.txt
-          cp .github/scripts/cold-ledger-audit.rs crates/hft-testkit/examples/cold_ledger_audit.rs
-          cargo run --locked --profile ci -p hft-testkit --features seq --example cold_ledger_audit >audit/cold.tsv
+          sudo prlimit --pid $$ --memlock=unlimited:unlimited
+          export HFT_REPLAY_EVIDENCE_DIR="$GITHUB_WORKSPACE/audit/replay"
+          mkdir -p "$HFT_REPLAY_EVIDENCE_DIR"
+          cargo test --locked --profile ci -p replayer --test cli -- --nocapture
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: cold-ledger-audit
+          name: strict-fixture-audit
           path: audit/
           retention-days: 7

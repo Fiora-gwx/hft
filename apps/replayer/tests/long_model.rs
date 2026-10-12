@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
-use hft_event::{AdviceHdr, EngineClock, EventKind, OrderEvent, OrderEventKind, SnapshotHdr};
+use hft_event::{
+    AdviceHdr, EngineClock, EventKind, Note, NoteSource, OrderAction, OrderDecision, OrderEvent,
+    OrderEventKind, SnapshotHdr,
+};
 use hft_sequencer::advisor::checkpoint;
 use hft_sequencer::driver::replay::Log;
 use serde_json::Value;
@@ -139,6 +142,43 @@ fn rpl_270_full_duration_path_model_files_and_checkpoint_window() {
                 && r.read::<OrderEvent>()
                     .is_some_and(|e| e.what == OrderEventKind::Fill)),
             "no actual SimExchange fill"
+        );
+        let epoch = log
+            .recs
+            .iter()
+            .filter(|r| r.kind == EventKind::NOTE)
+            .filter_map(|r| r.read::<Note>())
+            .find(|n| n.source == NoteSource::Sequencer && n.code == hft_sequencer::codes::note::EPOCH_START)
+            .map(|n| u16::try_from(n.v[0]).unwrap())
+            .unwrap();
+        assert_ne!(epoch, 0);
+        let mut perpetual_fills = 0;
+        for r in log.recs.iter().filter(|r| r.kind == EventKind::ORDER_EVENT) {
+            let e = r.read::<OrderEvent>().unwrap();
+            if !matches!(e.what, OrderEventKind::PartialFill | OrderEventKind::Fill) {
+                continue;
+            }
+            assert_eq!(e.epoch, epoch, "fill seq {} lost gateway epoch", r.seq);
+            assert!(
+                log.recs.iter().any(|d| d.seq < r.seq
+                    && d.kind == EventKind::ORDER_DECISION
+                    && d.read::<OrderDecision>()
+                        .is_some_and(|d| d.action == OrderAction::New
+                            && d.reject == 0
+                            && (d.account, d.venue, d.inst, d.slot, d.r#gen)
+                                == (e.account, e.venue, e.inst, e.slot, e.r#gen))),
+                "unmapped fixture fill at {}",
+                r.seq
+            );
+            if e.venue.market() == Some(hft_types::MarketKind::LinearPerp) {
+                assert!(e.cum_filled.0 > 0);
+                assert_eq!(e.cash_qty, e.cum_filled);
+                perpetual_fills += 1;
+            }
+        }
+        assert!(
+            perpetual_fills > 0,
+            "strict cash fixture must produce perpetual fills"
         );
         let meta: Value =
             serde_json::from_slice(&std::fs::read(f.root.join("generation.json")).unwrap()).unwrap();

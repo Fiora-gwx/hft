@@ -38,6 +38,22 @@ fn l3(c: &mut DstConfig) {
 fn fast_broken(c: &mut DstConfig) {
     c.world.risk.broken_auto_fix_ms = 2_000;
 }
+/// Missing client id alone is resolvable after Ack. Make the unknown report actually arrive
+/// before Ack with no hold window, so the planted drop and the healthy path see the same input.
+fn unknown_before_ack(c: &mut DstConfig) {
+    for venue in &mut c.venues {
+        venue.latency_ns = (1_000_000, 1_000_000);
+        venue.unmatched_hold_ms = 0;
+        c.scripted.push((0, Fault::FillBeforeAck { venue: venue.venue }));
+        c.scripted.push((
+            0,
+            Fault::NoClientIdFill {
+                venue: venue.venue,
+                within_hold: false,
+            },
+        ));
+    }
+}
 fn none(_: &mut DstConfig) {}
 
 const MAX_SEEDS: u64 = 2_000;
@@ -61,7 +77,7 @@ fn tk_053_planted_defects_found() {
             "oms-drop-unknown-report",
             &[TwoLeg],
             1_000,
-            none,
+            unknown_before_ack,
             &[InvId::I2],
         ),
         ("TK-053.3", "risk-no-exposure-limit", &[], 0, none, &[InvId::I3]),
@@ -154,7 +170,24 @@ fn tk_053_planted_defects_found() {
             c
         };
         match first_failure(MAX_SEEDS, make) {
-            Some((_, f)) => {
+            Some((mut found, f)) => {
+                if *row == "TK-053.2" {
+                    found.planted.clear();
+                    let healthy = hft_testkit::dst::run_record::<hft_testkit::dst::ToyEngine>(&found);
+                    assert!(
+                        healthy.outcome.is_pass(),
+                        "healthy unknown-report control: {:?}",
+                        healthy.outcome
+                    );
+                    assert!(
+                        healthy.deliveries.iter().any(|(_, input)| {
+                            input.read_try::<hft_event::OrderEvent>().is_some_and(|e| {
+                                e.slot == hft_types::SlotId::UNRESOLVED && e.cum_filled.0 > 0
+                            })
+                        }),
+                        "unknown-report defect must receive a genuinely unresolved fill"
+                    );
+                }
                 let ok = matches!(f.invariant, FailKind::Inv(i) if want.contains(&i));
                 if !ok {
                     misses.push(format!(

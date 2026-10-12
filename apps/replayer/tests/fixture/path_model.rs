@@ -11,6 +11,41 @@ use hft_testkit::dst::seq::SimMatcher;
 use hft_testkit::dst::venue_behavior::{Matcher, rep_input};
 use hft_types::ConnId;
 
+/// The fixture replaces the gateway transport, including the epoch encoded in client ids.
+struct Venue {
+    matcher: SimMatcher,
+    epoch: Option<u16>,
+    orders: BTreeMap<(u8, u32, u32), u16>,
+}
+
+impl Venue {
+    fn command(&mut self, mut cmd: GwCmd, now: u64) {
+        match cmd.op {
+            GwOp::SetEpoch => self.epoch = Some(cmd.epoch()),
+            GwOp::MirrorRestore => {
+                self.orders
+                    .insert((cmd.account.0, cmd.slot.0, cmd.r#gen), cmd.epoch());
+            }
+            GwOp::Place => {
+                let epoch = self.epoch.expect("SetEpoch must precede Place");
+                cmd.arg = u32::from(epoch);
+                self.orders.insert((cmd.account.0, cmd.slot.0, cmd.r#gen), epoch);
+            }
+            GwOp::Query => {
+                let epoch = self
+                    .orders
+                    .get(&(cmd.account.0, cmd.slot.0, cmd.r#gen))
+                    .copied()
+                    .or(self.epoch)
+                    .expect("query needs a recorded gateway epoch");
+                cmd.arg = u32::from(epoch);
+            }
+            _ => {}
+        }
+        self.matcher.on_command(&cmd, now);
+    }
+}
+
 fn time<S: StrategySet>(s: &mut Sequencer<LiveDriver<S, Io<S>>, S>, t: u64) {
     assert!(t >= s.driver().io.rings.tsc);
     let utc = s.driver().io.utc_of(Tsc(t));
@@ -21,11 +56,7 @@ fn time<S: StrategySet>(s: &mut Sequencer<LiveDriver<S, Io<S>>, S>, t: u64) {
 }
 
 /// Deliver same-time gw sends and due exchange reports, and process any resulting commands.
-fn pump<S: StrategySet>(
-    s: &mut Sequencer<LiveDriver<S, Io<S>>, S>,
-    world: &WorldSpec,
-    venues: &mut [SimMatcher],
-) {
+fn pump<S: StrategySet>(s: &mut Sequencer<LiveDriver<S, Io<S>>, S>, world: &WorldSpec, venues: &mut [Venue]) {
     for _ in 0..1000 {
         let t = s.driver().io.rings.tsc;
         let cmds = core::mem::take(&mut s.driver_mut().io.rings.out);
@@ -57,11 +88,11 @@ fn pump<S: StrategySet>(
                 };
                 input(s, (2, vi as u8), EventKind::SEND_REPORT, sr.as_bytes().to_vec());
             }
-            venues[vi].on_command(&cmd, t);
+            venues[vi].command(cmd, t);
         }
         for (vi, venue) in venues.iter_mut().enumerate() {
             let mut reports = Vec::new();
-            venue.drain_due(t, &mut reports);
+            venue.matcher.drain_due(t, &mut reports);
             active |= !reports.is_empty();
             for r in reports {
                 assert!(r.due_ns <= t);
@@ -80,7 +111,7 @@ fn pump<S: StrategySet>(
 fn advance<S: StrategySet>(
     s: &mut Sequencer<LiveDriver<S, Io<S>>, S>,
     w: &WorldSpec,
-    venues: &mut [SimMatcher],
+    venues: &mut [Venue],
     until: u64,
 ) {
     for _ in 0..10000 {
@@ -91,7 +122,7 @@ fn advance<S: StrategySet>(
         }
         let next = venues
             .iter()
-            .filter_map(Matcher::next_due)
+            .filter_map(|v| v.matcher.next_due())
             .filter(|t| *t > now)
             .min()
             .unwrap_or(until)
@@ -129,7 +160,11 @@ pub(super) fn exercise<S: StrategySet>(
     let mut venues: Vec<_> = world
         .venues
         .iter()
-        .map(|v| SimMatcher::new(world, v.id, 1))
+        .map(|v| Venue {
+            matcher: SimMatcher::new(world, v.id, 1),
+            epoch: None,
+            orders: BTreeMap::new(),
+        })
         .collect();
     pump(s, world, &mut venues);
     for g in &world.groups {
@@ -200,7 +235,9 @@ pub(super) fn exercise<S: StrategySet>(
                     ask_qty: Qty(i.depth),
                     update_id: second / 10,
                 };
-                venues[vi].on_bbo(i.id, (b.bid_px.0, i.depth), (b.ask_px.0, i.depth), t);
+                venues[vi]
+                    .matcher
+                    .on_bbo(i.id, (b.bid_px.0, i.depth), (b.ask_px.0, i.depth), t);
                 input(s, (4, vi as u8), EventKind::BBO, b.as_bytes().to_vec());
             }
         }
