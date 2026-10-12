@@ -22,10 +22,10 @@ fn money(l: &Ledger, w: &WorldSpec) -> Vec<((u8, u8, u32, u32, u8), i128)> {
         }
         for v in &a.venues {
             let b = l.venue_book(a.id, *v);
-            for x in b.cash {
+            for x in b.cash.iter() {
                 rows.push(((a.id.0, v.0, u32::from(x.asset.0), 0, 4), i128::from(x.total.0)));
             }
-            for x in b.inv {
+            for x in b.inv.iter() {
                 rows.push((
                     (a.id.0, v.0, u32::from(x.asset.0), x.group.0, 5),
                     i128::from(x.qty.0),
@@ -33,6 +33,8 @@ fn money(l: &Ledger, w: &WorldSpec) -> Vec<((u8, u8, u32, u32, u8), i128)> {
             }
         }
     }
+    // Sparse snapshots may omit zero rows. Compare the union by key with zero as default.
+    rows.retain(|r| r.1 != 0);
     rows.sort_by_key(|r| r.0);
     rows
 }
