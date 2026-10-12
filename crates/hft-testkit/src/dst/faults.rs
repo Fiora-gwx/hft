@@ -262,6 +262,14 @@ pub enum Fault {
         gap: bool,
         replay: bool,
     },
+    /// No initial push. A partial/full ADL waits for committed independent booking proof;
+    /// only then may `replay` deliver the same original receipt after reconnection.
+    ReconciledAdl {
+        account: AccountId,
+        inst: InstId,
+        full: bool,
+        replay: bool,
+    },
     ManualFill {
         account: AccountId,
         inst: InstId,
@@ -404,6 +412,7 @@ impl Fault {
             | MarginStale { .. }
             | SelfLiquidation { .. }
             | Adl { .. }
+            | ReconciledAdl { .. }
             | ManualFill { .. }
             | AcctCfgMismatch { .. }
             | UidMismatch { .. }

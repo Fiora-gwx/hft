@@ -207,6 +207,8 @@ enum PendingCmd {
 #[derive(Clone, Debug)]
 pub struct JournalLedger {
     ledger: Ledger,
+    #[cfg(feature = "testkit")]
+    observed_notes: Vec<Note>,
     map: SlotMap,
     foreign: crate::journal_foreign::Foreign,
     reconcile: crate::journal_reconcile::Reconcile,
@@ -415,6 +417,8 @@ impl JournalLedger {
         }
         Ok(JournalLedger {
             ledger,
+            #[cfg(feature = "testkit")]
+            observed_notes: Vec::with_capacity(crate::ledger::NOTE_BUF),
             map,
             foreign,
             reconcile: crate::journal_reconcile::Reconcile::default(),
@@ -445,6 +449,13 @@ impl JournalLedger {
 
     pub fn stats(&self) -> &JournalLedgerStats {
         &self.stats
+    }
+
+    /// Notes independently generated while applying the last successful record. This bounded
+    /// read-only diagnostic is absent without `testkit`; it never reads journal Note answers.
+    #[cfg(feature = "testkit")]
+    pub fn observed_notes(&self) -> &[Note] {
+        &self.observed_notes
     }
 
     /// Engine time of a record (event-model "引擎时间"); before any `EngineClock` the last value.
@@ -653,6 +664,11 @@ impl JournalLedger {
             self.reconcile.end_event()?;
             self.report_id = None;
             self.balance = None;
+        }
+        #[cfg(feature = "testkit")]
+        {
+            self.observed_notes.clear();
+            self.observed_notes.extend_from_slice(self.ledger.notes());
         }
         self.ledger.clear_notes();
         Ok(())

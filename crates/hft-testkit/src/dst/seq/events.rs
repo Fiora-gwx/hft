@@ -1,5 +1,6 @@
 //! Per-Input snapshots, retained until the world checks this step. No sampler may drop an Input.
 
+use hft_event::{EventKind, RecordFlags};
 use hft_sequencer::{Engine, MemJournal, types::InputSlot};
 
 use super::{
@@ -7,7 +8,7 @@ use super::{
     observe::{self, Before, Carry},
 };
 use crate::dst::obs::Obs;
-use crate::dst::sut::{EventStep, FrameRec, JRec, StepOut};
+use crate::dst::sut::{EventStep, FrameRec, JRec, LedgerEvent, StepOut};
 use crate::dst::world::WorldSpec;
 
 /// Explicit diagnostic limits; exceeding one is a failed run.
@@ -18,6 +19,7 @@ const MAX_FRAMES: usize = 512;
 #[derive(Debug)]
 pub struct Pending {
     seq: u64,
+    kind: EventKind,
     pos: Before,
     before: Obs,
     frames: Vec<FrameRec>,
@@ -31,6 +33,7 @@ impl Pending {
         before.normalize();
         Self {
             seq: e.cur_seq,
+            kind: input.kind,
             pos: Before::input(e, w, input),
             before,
             frames: Vec::with_capacity(MAX_FRAMES),
@@ -73,12 +76,37 @@ impl Pending {
             after.observation_error = Some(err);
         }
         after.normalize();
+        let ledger = if matches!(self.kind, EventKind::EXTERNAL_FILL | EventKind::RECONCILE_BATCH) {
+            let through_seq = out
+                .records
+                .iter()
+                .rev()
+                .find(|r| r.flags.contains(RecordFlags::EVENT_END))
+                .map(|r| r.seq);
+            match (through_seq, super::ledger::event_sections(&e.ledger)) {
+                (Some(through_seq), Ok(sections)) => Some(LedgerEvent {
+                    through_seq,
+                    sections,
+                }),
+                (_, Err(err)) => {
+                    after.observation_error = Some(err);
+                    None
+                }
+                (None, _) => {
+                    after.observation_error = Some("ledger observation lacks an event boundary".into());
+                    None
+                }
+            }
+        } else {
+            None
+        };
         EventStep {
             records: out.records,
             frames: self.frames,
             info: out.info,
             before: self.before,
             after,
+            ledger,
         }
     }
 }

@@ -59,6 +59,12 @@ impl Sut for PriorActor {
     fn is_sim(&self, a: AccountId) -> bool {
         self.0.is_sim(a)
     }
+    fn verify_ledger_event(&self, e: &hft_testkit::dst::sut::EventStep) -> Result<(), String> {
+        self.0.verify_ledger_event(e)
+    }
+    fn committed_receipts(&self, fills: &[hft_event::ExternalFill]) -> Result<Vec<bool>, String> {
+        self.0.committed_receipts(fills)
+    }
     fn reconcile_inputs(
         &self,
         actor: &mut ReconActor,

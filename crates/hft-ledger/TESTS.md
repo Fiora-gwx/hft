@@ -23,7 +23,7 @@ spec: README.md
 | 仓位与已实现(平均成本法) | LED-010、LED-021–LED-025、LED-030–LED-039、LED-240、LED-241、LED-243、LED-275–LED-278 |
 | 余额初始化、校验与基线 | LED-039–LED-046、LED-260–LED-262 |
 | 外部成交(`ExternalFill`) | LED-050–LED-081、LED-188、LED-240、LED-245、LED-283–LED-285、LED-292、LED-293 |
-| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282、LED-286–LED-291 |
+| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282、LED-286–LED-291、LED-295 |
 | 资金费 | LED-090–LED-104、LED-136–LED-138、LED-240、LED-245、LED-260 |
 | 资金费时刻归一化 | LED-091、LED-110–LED-116 |
 | 资金费对账校正 | LED-270、LED-268、LED-114、LED-120–LED-139、LED-244、LED-261 |
@@ -2950,6 +2950,16 @@ spec: README.md
 - 输入:一笔完整原始凭据;两报告一凭据的有效预检
 - 期望:分别测量新入账与只读预检,每次新入账使用独立账本且构造和销毁不计入测量,CI 仅报告
 - 实现:`crates/hft-ledger/benches/ledger.rs::led_294_reconciled_cash`
+
+### LED-295 冷端抵扣注记由自身入账独立产生
+
+- 规则:[冷消费者](README.md#冷消费者journalledger)
+- 级别:integ
+- 里程碑:M2
+- 前置:testkit feature,真实引擎补入一笔全量 ADL 后收到同一原件
+- 步骤:独立冷消费到确认事件边界,比较账本字节和抵扣注记;分别漏写、重复写、改变抵扣量及改变品种
+- 期望:冷热节 1/13/22 相等且抵扣注记各一次;四种错误均由注记核对发现并锁存,后续正确输入不能掩盖
+- 实现:`crates/hft-testkit/tests/reconcile_actor.rs::led_295_cold_offset_notes_are_generated_and_compared_independently`
 
 ## 验收
 

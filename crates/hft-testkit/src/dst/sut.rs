@@ -142,6 +142,14 @@ pub struct EventStep {
     pub info: StepInfo,
     pub before: Obs,
     pub after: Obs,
+    /// Exact hot ledger sections at this Input's end (external fills and receipt batches).
+    pub ledger: Option<LedgerEvent>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LedgerEvent {
+    pub through_seq: u64,
+    pub sections: Vec<u8>,
 }
 
 impl StepOut {
@@ -252,6 +260,18 @@ pub struct BootFail(pub String);
 /// The system under test. Implementations are deterministic functions of their inputs: no clock,
 /// no RNG, no environment (README "DST 的世界模型" 5).
 pub trait Sut: Sized {
+    /// Whether each complete receipt identity was actually booked in the committed journal.
+    /// The real adapter uses an independent cold consumer, never an Input's mere presence.
+    fn committed_receipts(&self, _fills: &[hft_event::ExternalFill]) -> Result<Vec<bool>, String> {
+        Err("committed receipt observation is unavailable".into())
+    }
+
+    /// Compare captured hot ledger bytes with an independent journal-only cold ledger at the
+    /// same event boundary, including the independently generated auto-held offset Notes.
+    fn verify_ledger_event(&self, _event: &EventStep) -> Result<(), String> {
+        Err("ledger event observation is unavailable".into())
+    }
+
     /// Real adapters provide a committed reconciliation view even with checkers disabled.
     /// `None` is reserved for the framework toy; real observations cannot take that fallback.
     fn reconcile_inputs(

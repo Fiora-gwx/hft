@@ -306,6 +306,8 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 
 ### 冷消费者(`JournalLedger`)
 
+默认关闭的 `testkit` feature 提供只读 `JournalLedger::observed_notes()`。它保留最近一次成功消费记录时由冷账本自身产生的注记,上限为现有 `NOTE_BUF`,下一条成功记录覆盖;不复制 journal 的注记答案。诊断调用方须拒绝 `notes_dropped() != 0`,不能把溢出当作空列表。生产构建不含该缓冲,不改变消费结果、journal schema 或快照格式。
+
 `FillDelta`/`FeeDelta` 不写 journal(它们是 OMS 处理 `OrderEvent` 的同一事件内的派生量),冷读者按下表从 journal 记录重建同样的调用,得到与引擎相同的持仓、库存与余额:
 
 恢复 OMS 节 2 时接受行版本 1–3;版本 1 以 `filled` 初始化费用水位,版本 2/3 读取 `fee_cum`,版本 3 读取现金覆盖量与累计额。节 12 版本 1–3 的墓碑保留完整订单身份,版本 2/3 读取现金水位;版本 3 的 ForeignCash 行按 [OMS 格式](../hft-oms/README.md#快照行格式节-2312草案实现时以代码与编译期断言为准)恢复外来累计结算与原始来源;旧版现金水位补零。`PERP_CASH` 下已成交量必须全部覆盖,否则拒绝恢复。节 3 版本 1 提供当前 epoch,节 25 版本 1 提供时钟;首次 Boot 前的全零时钟行表示尚未开始,等待后续 EngineClock,零频率但其余字段非零的行拒读,关键帧后的新订单无须等下一次 EpochStart。未知版本返回 `VersionUnsupported`,重复身份或快照映射超容量返回 `BadValue`。

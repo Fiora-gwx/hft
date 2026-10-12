@@ -69,6 +69,8 @@ pub struct SeqSut<S: StrategySet> {
     hb: &'static Heartbeat,
     /// Independent, append-only cold observer; discarded when the engine restarts.
     cold_ledger: std::cell::RefCell<ledger::Check>,
+    /// Separate cursor for exact event boundaries; snapshot checks may consume later records.
+    event_ledger: std::cell::RefCell<ledger::Check>,
     /// Observation state carried across steps (`OmsHedgeNakedCapped` sums).
     pub(crate) carry: observe::Carry,
 }
@@ -528,6 +530,7 @@ impl<S: StrategySet> SeqSut<S> {
     /// Cold start over the published part of the current journal at the current virtual time.
     fn restart(&mut self, sel: SnapshotSel) -> Result<(), BootFail> {
         *self.cold_ledger.get_mut() = ledger::Check::default();
+        *self.event_ledger.get_mut() = ledger::Check::default();
         let now = self.now_ns();
         let Some(s) = self.s.take() else {
             return Err(BootFail("no engine to restart".into()));
@@ -605,6 +608,59 @@ impl<S: StrategySet> SeqSut<S> {
 impl<S: StrategySet> Sut for SeqSut<S> {
     type Matcher = SimMatcher;
 
+    fn committed_receipts(&self, fills: &[hft_event::ExternalFill]) -> Result<Vec<bool>, String> {
+        if fills.len() > crate::dst::venue_behavior::EXTERNAL_HISTORY_CAP {
+            return Err("committed receipt observation capacity exceeded".into());
+        }
+        let io = &self.s().driver().io;
+        let log = snapshots::prefix(&io.j, io::committed_seq(&io.j));
+        // This environment observation has its own consumer, independent of checker cursors.
+        let mut cold = ledger::Check::default();
+        cold.check_boundary(
+            &log,
+            &ledger::Readings::of(&self.s().engine().ledger, &self.s().engine().rd),
+        )?;
+        let (_, booked, _) = cold.receipt_view()?;
+        fills
+            .iter()
+            .map(|e| reconcile::ReceiptKey::new(e).map(|key| booked.contains(&key)))
+            .collect()
+    }
+
+    fn verify_ledger_event(&self, event: &crate::dst::sut::EventStep) -> Result<(), String> {
+        let point = event.ledger.as_ref().ok_or("missing ledger event observation")?;
+        let input = event.records.first().ok_or("missing ledger event Input")?;
+        if !matches!(input.kind, EventKind::EXTERNAL_FILL | EventKind::RECONCILE_BATCH)
+            || event
+                .records
+                .iter()
+                .rev()
+                .find(|r| r.flags.contains(hft_event::RecordFlags::EVENT_END))
+                .map(|r| r.seq)
+                != Some(point.through_seq)
+            || point.through_seq < input.seq
+            || event
+                .records
+                .iter()
+                .skip(1)
+                .any(|r| hft_event::classify(r.kind, &r.body) == Ok(hft_event::Role::Input))
+        {
+            return Err("invalid ledger event observation boundary".into());
+        }
+        let io = &self.s().driver().io;
+        if point.through_seq > io::committed_seq(&io.j) {
+            return Err("ledger event observation is not committed".into());
+        }
+        let log = snapshots::prefix(&io.j, point.through_seq);
+        if log.recs.last().is_none_or(|r| r.seq != point.through_seq) {
+            return Err("ledger event observation is outside the retained journal".into());
+        }
+        self.event_ledger
+            .borrow_mut()
+            .check_event(&log, &point.sections)?;
+        Ok(())
+    }
+
     fn drain_observations(&mut self, out: &mut StepOut) {
         out.events.append(&mut self.io().events);
         self.io().snapshots.drain(out);
@@ -634,6 +690,7 @@ impl<S: StrategySet> Sut for SeqSut<S> {
             cmd_no: 0,
             hb,
             cold_ledger: std::cell::RefCell::default(),
+            event_ledger: std::cell::RefCell::default(),
             carry: observe::Carry::default(),
         };
         let io = sut.new_io(0, setup.clock);

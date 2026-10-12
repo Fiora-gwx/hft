@@ -660,6 +660,9 @@ pub struct MockVenue<M: Matcher> {
     /// Original receipts waiting for the user stream. The optional gap remains in flight
     /// until the replay is scheduled and its last_due boundary has passed.
     adl_replays: Vec<(u64, ExternalFill)>,
+    /// (original receipt, replay after booking). These gaps have no numeric truth exclusions.
+    reconcile_gaps: Vec<(ExternalFill, bool)>,
+    fault_error: Option<String>,
     quiet: BTreeMap<u32, u64>,
     last_due: BTreeMap<u8, u64>,
     /// (account, inst) whose truth changed without a push (ADL in a user-stream gap): INV-16
@@ -688,6 +691,8 @@ impl<M: Matcher> MockVenue<M> {
             order_down_until: 0,
             userstream_down_until: 0,
             adl_replays: Vec::new(),
+            reconcile_gaps: Vec::new(),
+            fault_error: None,
             quiet: BTreeMap::new(),
             last_due: BTreeMap::new(),
             excluded: Vec::new(),
@@ -1087,7 +1092,7 @@ impl<M: Matcher> MockVenue<M> {
     /// Starts fault `f` at `now`; returns Inputs it produces immediately.
     pub fn apply_fault(&mut self, f: &Fault, now: u64) -> Vec<(u64, InputRec)> {
         let mut out = Vec::new();
-        if self.clean {
+        if self.clean || self.fault_error.is_some() {
             return out;
         }
         let ms = |x: u32| u64::from(x) * 1_000_000;
@@ -1189,6 +1194,52 @@ impl<M: Matcher> MockVenue<M> {
                 }
                 out.extend(self.collect(now));
             }
+            Fault::ReconciledAdl {
+                account,
+                inst,
+                full,
+                replay,
+            } => {
+                // Failing the prerequisite is a failed scenario, never an empty success.
+                if now >= self.userstream_down_until {
+                    self.fault_error = Some("reconciled ADL requires a stream gap".into());
+                    return out;
+                }
+                if self.reconcile_gaps.len() == EXTERNAL_HISTORY_CAP {
+                    self.fault_error = Some("ADL gap capacity exceeded".into());
+                    return out;
+                }
+                let t = self.m.truth(account);
+                let q = t
+                    .positions
+                    .iter()
+                    .find(|(i, _)| *i == inst)
+                    .map_or(0, |(_, q)| *q);
+                if q == 0 {
+                    self.fault_error = Some("reconciled ADL requires a nonzero exchange position".into());
+                    return out;
+                }
+                let qty = if full {
+                    q.unsigned_abs()
+                } else {
+                    (q.unsigned_abs() / 2).max(1)
+                };
+                let Ok(qty) = i64::try_from(qty) else {
+                    self.fault_error = Some("ADL quantity exceeds receipt capacity".into());
+                    return out;
+                };
+                let fill = self.m.external(
+                    account,
+                    inst,
+                    if q > 0 { Side::Sell } else { Side::Buy },
+                    qty,
+                    "adl-reconciled",
+                    false,
+                    now,
+                );
+                self.reconcile_gaps.push((fill, replay));
+                out.extend(self.collect(now));
+            }
             Fault::MarginPath { account, .. } => {
                 let mut h: hft_event::MarginReportHdr = zerocopy::FromZeros::new_zeroed();
                 h.venue = self.cfg.venue;
@@ -1203,6 +1254,42 @@ impl<M: Matcher> MockVenue<M> {
 
     fn m_partial(&mut self, _on: bool) {}
 
+    /// Latched fault prerequisite/capacity failure; no execution is created after it.
+    pub fn fault_error(&self) -> Option<&str> {
+        self.fault_error.as_deref()
+    }
+
+    /// Clear only receipts independently proved booked at a committed engine boundary.
+    /// Called after an actual ReconcileBatch event, regardless of enabled invariant checkers.
+    pub fn acknowledge_reconciled(
+        &mut self,
+        sut: &impl crate::dst::sut::Sut,
+        now: u64,
+    ) -> Result<bool, String> {
+        if self.reconcile_gaps.is_empty() {
+            return Ok(false);
+        }
+        let fills: Vec<_> = self.reconcile_gaps.iter().map(|(fill, _)| *fill).collect();
+        let booked = sut.committed_receipts(&fills)?;
+        if booked.len() != fills.len() {
+            return Err("reconciled ADL: missing committed receipt observations".into());
+        }
+        let mut pending = Vec::new();
+        let mut changed = false;
+        for ((fill, replay), booked) in self.reconcile_gaps.drain(..).zip(booked) {
+            if booked {
+                changed = true;
+                if replay {
+                    self.adl_replays.push((now.saturating_add(1_000_000), fill));
+                }
+            } else {
+                pending.push((fill, replay));
+            }
+        }
+        self.reconcile_gaps = pending;
+        Ok(changed)
+    }
+
     /// Exchange truth of every account of the venue (INV-16).
     pub fn truth(&self, now: u64) -> Vec<TruthRow> {
         self.m
@@ -1212,6 +1299,7 @@ impl<M: Matcher> MockVenue<M> {
                 let mut t = self.m.truth(a);
                 t.undelivered |= self.last_due.get(&a.0).is_some_and(|d| *d >= now);
                 t.undelivered |= self.adl_replays.iter().any(|(_, f)| f.account == a);
+                t.undelivered |= self.reconcile_gaps.iter().any(|(f, _)| f.account == a);
                 t.excluded
                     .extend(self.excluded.iter().filter(|(x, _)| *x == a.0).map(|(_, i)| *i));
                 t

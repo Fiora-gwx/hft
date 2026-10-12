@@ -226,6 +226,15 @@ jobs:
           path: target/dst/reconcile-migration.json
           if-no-files-found: ignore
           retention-days: 7
+      # Directed infrastructure evidence, not LED-081 seed acceptance.
+      - name: Upload settlement boundary evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reconcile-settlement
+          path: target/dst/reconcile-settlement.json
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Save nested test builds
         if: steps.ci.outcome == 'success' && steps.nested.outputs.cache-hit != 'true'
         continue-on-error: true

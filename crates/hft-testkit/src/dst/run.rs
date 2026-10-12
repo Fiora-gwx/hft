@@ -39,6 +39,8 @@ pub struct RunRecord {
     pub end_ns: u64,
     /// Successful mandatory INV-6 checks, one per journal snapshot (including boot / restart).
     pub snapshot_checks: u64,
+    /// Input seqs whose exact hot/cold ledger sections were compared at that event's end.
+    pub ledger_checks: Vec<u64>,
     /// Bounded raw matching evidence for diagnosis; not an invariant reference.
     pub matched_tail: Vec<(u64, hft_event::OrderEvent)>,
     /// Final exchange-side view, independently of the engine observations.
@@ -63,6 +65,7 @@ impl RunRecord {
             obs: Obs::default(),
             end_ns: 0,
             snapshot_checks: 0,
+            ledger_checks: Vec::new(),
             matched_tail: Vec::new(),
             truth: Vec::new(),
         }
@@ -433,11 +436,16 @@ impl<E: Sut> Loop<'_, E> {
             QuietBook { inst, .. }
             | SelfLiquidation { inst, .. }
             | ManualFill { inst, .. }
-            | Adl { inst, .. } => self.inst_venue(inst),
+            | Adl { inst, .. }
+            | ReconciledAdl { inst, .. } => self.inst_venue(inst),
             _ => None,
         };
         if let Some(v) = target {
             let ins = self.venues[v].apply_fault(&f, now);
+            if let Some(e) = self.venues[v].fault_error() {
+                self.fail = Some((self.rec.steps_run, FailKind::Scenario("TK-138"), e.to_string()));
+                return;
+            }
             self.deliver_all(ins);
             self.wake_venue(v);
         }
@@ -567,6 +575,25 @@ impl<E: Sut> Loop<'_, E> {
             return;
         }
         self.sut.drain_observations(&mut self.out);
+        // A batch merely queued by the actor cannot release a gap. Ask after actual commit,
+        // even with all checkers disabled, so observation choices never alter delivery.
+        if self
+            .out
+            .records
+            .iter()
+            .any(|r| r.kind == hft_event::EventKind::RECONCILE_BATCH)
+        {
+            for v in 0..self.venues.len() {
+                match self.venues[v].acknowledge_reconciled(&self.sut, now) {
+                    Ok(true) => self.wake_venue(v),
+                    Ok(false) => {}
+                    Err(e) => {
+                        self.fail = Some((step, FailKind::Scenario("TK-138"), e));
+                        return;
+                    }
+                }
+            }
+        }
         // Frames to venues and the sim.
         let frames: Vec<FrameRec> = self.out.frames.clone();
         for f in frames {
@@ -645,6 +672,24 @@ impl<E: Sut> Loop<'_, E> {
             // Exchange truth and replay compare the whole world step. Business checks run on
             // each actual Input, before later Inputs and automatic restarts can hide state.
             for event in &self.out.events {
+                if set.contains(InvId::I6)
+                    && event.records.first().is_some_and(|r| {
+                        matches!(
+                            r.kind,
+                            hft_event::EventKind::EXTERNAL_FILL | hft_event::EventKind::RECONCILE_BATCH
+                        )
+                    })
+                {
+                    if let Err(e) = self.sut.verify_ledger_event(event) {
+                        result = Err((InvId::I6, e));
+                        break;
+                    }
+                    if self.rec.ledger_checks.len() == crate::dst::venue_behavior::EXTERNAL_HISTORY_CAP {
+                        result = Err((InvId::I6, "ledger event evidence capacity exceeded".into()));
+                        break;
+                    }
+                    self.rec.ledger_checks.push(event.records[0].seq);
+                }
                 let ev = StepView {
                     records: &event.records,
                     frames: &event.frames,

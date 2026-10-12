@@ -12,7 +12,7 @@ use hft_refdata::RefData;
 use hft_sequencer::driver::replay::Log;
 use hft_sequencer::journal::MemRecord;
 use hft_sequencer::{EngineSetup, recover_event_end};
-use hft_strategy_sdk::SnapshotReader;
+use hft_strategy_sdk::{SnapshotReader, SnapshotWriter};
 use sha2::{Digest, Sha256};
 use zerocopy::TryFromBytes;
 
@@ -23,6 +23,18 @@ use super::reconcile::ReceiptKey;
 pub struct Counts {
     pub snapshots: u64,
     pub unmapped_fills: u64,
+    pub auto_held_offsets: u64,
+}
+
+/// Diagnostic bound, independent of production snapshot capacities.
+pub const EVENT_LEDGER_CAP: usize = 4 << 20;
+
+pub fn event_sections(ledger: &Ledger) -> Result<Vec<u8>, String> {
+    let mut w = SnapshotWriter::new(EVENT_LEDGER_CAP);
+    ledger.snapshot(&mut w);
+    w.status()
+        .map_err(|_| "ledger event observation capacity exceeded")?;
+    Ok(w.as_bytes().to_vec())
 }
 
 /// Complete ledger read API at one event boundary. The bounded snapshot-observation buffer
@@ -92,6 +104,7 @@ struct State {
     cursor: usize,
     last: MemRecord,
     evidence: Evidence,
+    offsets: Offsets,
     counts: Counts,
     /// Retained execution identities are independent of the hot ledger's evicting FIFO.
     booked: BTreeSet<ReceiptKey>,
@@ -109,7 +122,68 @@ struct Evidence {
     notes: Vec<Note>,
 }
 
+#[derive(Debug, Default)]
+struct Offsets {
+    cold: Vec<Note>,
+    journal: Vec<Note>,
+}
+
+impl Offsets {
+    fn record(&mut self, r: &MemRecord, generated: &[Note]) -> Result<u64, String> {
+        let offset =
+            |n: &&Note| n.source == NoteSource::Ledger && n.code == hft_ledger::notes::code::AUTO_HELD_OFFSET;
+        if self.cold.len() + generated.iter().filter(offset).count() > EVENT_EVIDENCE_CAP {
+            return Err("ledger offset observation capacity exceeded".into());
+        }
+        self.cold.extend(generated.iter().filter(offset).copied());
+        if r.kind == EventKind::NOTE
+            && let Some(n) = r.read::<Note>().filter(|n| offset(&n))
+        {
+            if self.journal.len() == EVENT_EVIDENCE_CAP {
+                return Err("ledger offset observation capacity exceeded".into());
+            }
+            self.journal.push(n);
+        }
+        if !r.flags.contains(RecordFlags::EVENT_END) {
+            return Ok(0);
+        }
+        if self.cold != self.journal {
+            return Err(format!(
+                "ledger offset evidence at seq {}: cold={:?} journal={:?}",
+                r.seq, self.cold, self.journal
+            ));
+        }
+        let count = self.cold.len() as u64;
+        self.cold.clear();
+        self.journal.clear();
+        Ok(count)
+    }
+}
+
 impl Check {
+    /// Exact sections 1/13/22 at an external-settlement Input boundary. No state is imported
+    /// from `expected`; even a one-byte difference is a failure and stays latched.
+    pub fn check_event(&mut self, log: &Log, expected: &[u8]) -> Result<Counts, String> {
+        let counts = self.check(log)?;
+        let (ledger, _, seq) = self.receipt_view()?;
+        let actual = event_sections(ledger)?;
+        if actual != expected {
+            let at = actual
+                .iter()
+                .zip(expected)
+                .position(|(a, b)| a != b)
+                .unwrap_or(actual.len().min(expected.len()));
+            let e = format!(
+                "ledger sections 1/13/22 differ at event boundary {seq}, byte {at} (cold={}, hot={})",
+                actual.len(),
+                expected.len()
+            );
+            self.error = Some(e.clone());
+            return Err(e);
+        }
+        Ok(counts)
+    }
+
     pub(crate) fn receipt_view(&self) -> Result<(&Ledger, &BTreeSet<ReceiptKey>, u64), String> {
         if let Some(e) = &self.error {
             return Err(e.clone());
@@ -194,6 +268,7 @@ impl Check {
                     epoch: (setup.oms.engine_epoch & 0x7fff) as u16,
                     ..Evidence::default()
                 },
+                offsets: Offsets::default(),
                 setup,
                 refs,
                 cursor: ix + 1,
@@ -201,6 +276,7 @@ impl Check {
                 counts: Counts {
                     snapshots: 1,
                     unmapped_fills: 0,
+                    auto_held_offsets: 0,
                 },
                 booked,
                 receipts: Vec::new(),
@@ -244,6 +320,10 @@ impl Check {
                     body: &r.body,
                 })
                 .map_err(|e| format!("LED-267 seq {} kind {}: {e:?}", r.seq, r.kind.0))?;
+            if state.cold.ledger().notes_dropped() != 0 {
+                return Err("cold ledger diagnostic notes overflowed".into());
+            }
+            state.counts.auto_held_offsets += state.offsets.record(r, state.cold.observed_notes())?;
             let delta = state.cold.stats().unmapped_fills - before;
             state.evidence.record(r, delta)?;
             state.counts.unmapped_fills += delta;

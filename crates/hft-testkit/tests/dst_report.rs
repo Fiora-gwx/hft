@@ -71,6 +71,12 @@ impl<const N: u64> Sut for PanicAt<N> {
     fn hashes(&self) -> ComponentHashes {
         self.inner.hashes()
     }
+    fn verify_ledger_event(&self, e: &hft_testkit::dst::sut::EventStep) -> Result<(), String> {
+        self.inner.verify_ledger_event(e)
+    }
+    fn committed_receipts(&self, fills: &[hft_event::ExternalFill]) -> Result<Vec<bool>, String> {
+        self.inner.committed_receipts(fills)
+    }
     fn reconcile_inputs(
         &self,
         actor: &mut hft_testkit::dst::actors::ReconActor,
