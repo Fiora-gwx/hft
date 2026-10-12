@@ -6,6 +6,10 @@
 p50_ns = 150
 p99_ns = 400
 
+["ledger/apply_settled_fill"]
+p50_ns = 150
+p99_ns = 400
+
 ["ledger/apply_external"]
 p50_ns = 200
 p99_ns = 500

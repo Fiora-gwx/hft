@@ -316,7 +316,7 @@ impl Ledger {
 
     /// Books an already matched/de-duplicated perpetual fill and its actual cash settlement.
     /// Fees remain separate. Zero does not fall back to the local average-cost estimate.
-    /// No allocation; same position/valuation work as `apply_fill` (budget: ledger/apply_fill).
+    /// No allocation; budget: ledger/apply_settled_fill (README "延迟与资源契约").
     pub fn apply_settled_fill(
         &mut self,
         f: &FillDelta,

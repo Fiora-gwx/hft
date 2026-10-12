@@ -529,6 +529,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 | 入口 | p50 | p99 | 基准名 |
 |---|---|---|---|
 | `apply_fill`(含现金、库存、净量复算) | ≤ 150 ns | ≤ 400 ns | `ledger/apply_fill` |
+| `apply_settled_fill`(含品种/账户/资产校验、持仓、结算与费用) | ≤ 150 ns | ≤ 400 ns | `ledger/apply_settled_fill` |
 | `apply_external`(含去重与归属) | ≤ 200 ns | ≤ 500 ns | `ledger/apply_external` |
 | `apply_settled_external`(完整现金事实,含去重与归属) | ≤ 200 ns | ≤ 500 ns | `ledger/apply_settled_external` |
 | `apply_funding_push`(去重环 ≤ 64 项线性查找 + 入账) | ≤ 200 ns | ≤ 600 ns | `ledger/apply_funding_push` |

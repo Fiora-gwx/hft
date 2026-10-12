@@ -2374,7 +2374,7 @@ spec: README.md
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
 - 里程碑:M2
-- 基准名:`ledger/apply_fill`
+- 基准名:`ledger/apply_fill`、`ledger/apply_settled_fill`;保留现货入口,后者在独立账本上交替调用永续开仓/平仓,同时覆盖已知零现金与非零现金。初始化与十进制解析在测量外,每次测量经公开入口包含结算校验、持仓与钱包更新
 - 实现:`crates/hft-ledger/benches/ledger.rs::led_250_apply_fill`
 
 ### LED-251 apply_external 基准
