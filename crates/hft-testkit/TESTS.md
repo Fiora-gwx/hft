@@ -1655,10 +1655,10 @@ spec: README.md
 - 级别:unit
 - 里程碑:M2
 - 前置:真实 SimMatcher、开启永续现金,两个账户先分别外来开空;之后按不同 slot/gen/epoch 平仓,两账户的交易所订单号相同,每笔实际现金非零
-- 输入:正常路径与 NoClientIdFill 的四行对照,`within_hold = false/true` × 第二账户 Ack 同时先排入队列/晚于成交;固定行为层延迟以明确交付边界
-- 步骤:两套相同匹配器分别走原回报及无 client id 副本路径,逐账户发平仓单,收集 Ack、原成交和故障副本并比较真值
-- 期望:每次故障实际多交付一份成交副本;已有 Ack 时完整身份、数量、费用与现金逐字节等于原成交。晚 Ack 行的副本为零 epoch/gen 与 UNRESOLVED,不能借未来 Ack 或另一账户的同号订单;正常成交仍原样交付。两边模拟状态哈希和真值相同
-- 边界:此用例不计等待、超时、终态映射过期或 LK-4 验收
+- 输入:原回报与 NoClientIdFill 的六行对照,`within_hold = false/true` × 第二账户 Ack 同时先排入队列/晚到但在等待限内/晚到且等待限为零;固定行为层延迟以明确交付边界
+- 步骤:两套相同匹配器分别走原回报及无 client id 副本路径,逐账户发平仓单,继续推进到实际回报到达,收集 Ack、原成交和故障副本并比较真值;FillBeforeAck 不得在空轮询中被提前消费
+- 期望:每次故障实际多交付一份成交副本;已有 Ack 时完整身份、数量、费用与现金逐字节等于原成交。限内晚 Ack 行的副本只在 Ack 到达时交付,到达前真值仍标在途;等待限为零则副本保持零 epoch/gen 与 UNRESOLVED,不能借未来 Ack 或另一账户的同号订单。原成交仍原样交付,两边模拟状态哈希和真值相同
+- 边界:仅覆盖已排队 Ack 的等待;未排队 Ack、超时转外来成交、终态映射过期和完整 LK-4 仍不计通过
 - 实现:`crates/hft-testkit/tests/actors.rs::tk_128_no_client_id_uses_the_accounts_ack_identity_and_keeps_cash`
 
 ### TK-129 已有 Ack 的无 client id 现金成交通过完整故障计划
@@ -1668,8 +1668,8 @@ spec: README.md
 - 里程碑:M2
 - 前置:W1 显式启用永续现金,全部检查器开启
 - 故障:原 core 故障计划,不调整延迟或故障率
-- 种子:`0xd05efd09f013189a`、`0xd05efd09f01318f6`,各 10000 步,强制复跑
-- 断言:全部不变量、强制复跑及非空 HashTrail 通过,实际发生快照重建;原第 591/597 步的已有 Ack 成交不会错误进入无法匹配的防御路径
+- 种子:`0xd05efd09f013189a`、`0xd05efd09f01318f6`、43,各 10000 步,强制复跑
+- 断言:全部不变量、强制复跑及非空 HashTrail 通过,实际发生快照重建;原第 591/597/590 步的已有或限内到达 Ack 不会错误进入无法匹配的防御路径
 - 实现:`crates/hft-testkit/tests/seq_sut.rs::tk_129_acknowledged_no_client_id_cash_reports_survive_the_full_fault_plan`
 
 ## 验收
