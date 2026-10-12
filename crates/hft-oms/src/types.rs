@@ -689,7 +689,7 @@ pub struct TableRow {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
 pub struct LinkRowHdr {
-    /// Link 1, Plan 2, Leg 3, Tomb 4, Out 5.
+    /// Link 1, Plan 2, Leg 3, Tomb 4, Out 5, ForeignCash 6, ForeignReceipt 7.
     pub kind: u8,
     pub _pad: [u8; 3],
     pub len: u32,
@@ -709,7 +709,7 @@ pub const SECTION_OMS_COUNTERS: u16 = 3;
 pub const SECTION_OMS_LINKS: u16 = 12;
 pub const ROW_VERSION_SLOTS: u16 = 3;
 pub const ROW_VERSION_COUNTERS: u16 = 1;
-pub const ROW_VERSION_LINKS: u16 = 3;
+pub const ROW_VERSION_LINKS: u16 = 4;
 
 /// Section 12 `Plan` row (64 B).
 #[repr(C)]
@@ -944,6 +944,44 @@ pub(crate) struct ForeignCashRow {
     pub cash_sum: Qty,
 }
 const _: () = assert!(size_of::<ForeignCashRow>() == 32);
+
+/// Section 12 kind 7. Financial facts of one actually booked Unknown execution. This is
+/// attached to an original-source ForeignCash row; it never authorizes a cumulative suffix.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, FromBytes, IntoBytes, KnownLayout, Immutable)]
+pub(crate) struct ForeignCashReceipt {
+    pub venue: VenueId,
+    pub account: AccountId,
+    pub side: u8,
+    pub _pad: u8,
+    pub inst: InstId,
+    pub exch_order_id: u64,
+    pub trade_id: u64,
+    pub fill_seq: u64,
+    pub qty: Qty,
+    pub px: Px,
+    pub cash: Qty,
+    pub fee: Qty,
+    pub fee_asset: AssetId,
+    pub _pad2: [u8; 6],
+}
+const _: () = assert!(size_of::<ForeignCashReceipt>() == 72 && align_of::<ForeignCashReceipt>() == 8);
+const _: () = assert!(
+    offset_of!(ForeignCashReceipt, venue) == 0
+        && offset_of!(ForeignCashReceipt, account) == 1
+        && offset_of!(ForeignCashReceipt, side) == 2
+        && offset_of!(ForeignCashReceipt, _pad) == 3
+        && offset_of!(ForeignCashReceipt, inst) == 4
+        && offset_of!(ForeignCashReceipt, exch_order_id) == 8
+        && offset_of!(ForeignCashReceipt, trade_id) == 16
+        && offset_of!(ForeignCashReceipt, fill_seq) == 24
+        && offset_of!(ForeignCashReceipt, qty) == 32
+        && offset_of!(ForeignCashReceipt, px) == 40
+        && offset_of!(ForeignCashReceipt, cash) == 48
+        && offset_of!(ForeignCashReceipt, fee) == 56
+        && offset_of!(ForeignCashReceipt, fee_asset) == 64
+        && offset_of!(ForeignCashReceipt, _pad2) == 66
+);
 
 /// Fee-only report (→ hft-ledger `apply_fee`).
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]

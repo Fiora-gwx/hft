@@ -312,11 +312,13 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 
 `FillDelta`/`FeeDelta` 不写 journal(它们是 OMS 处理 `OrderEvent` 的同一事件内的派生量),冷读者按下表从 journal 记录重建同样的调用,得到与引擎相同的持仓、库存与余额:
 
-恢复 OMS 节 2 时接受行版本 1–3;版本 1 以 `filled` 初始化费用水位,版本 2/3 读取 `fee_cum`,版本 3 读取现金覆盖量与累计额。节 12 版本 1–3 的墓碑保留完整订单身份,版本 2/3 读取现金水位;版本 3 的 ForeignCash 行按 [OMS 格式](../hft-oms/README.md#快照行格式节-2312草案实现时以代码与编译期断言为准)恢复外来累计结算与原始来源;旧版现金水位补零。`PERP_CASH` 下已成交量必须全部覆盖,否则拒绝恢复。节 3 版本 1 提供当前 epoch,节 25 版本 1 提供时钟;首次 Boot 前的全零时钟行表示尚未开始,等待后续 EngineClock,零频率但其余字段非零的行拒读,关键帧后的新订单无须等下一次 EpochStart。未知版本返回 `VersionUnsupported`,重复身份或快照映射超容量返回 `BadValue`。
+恢复 OMS 节 2 时接受行版本 1–3;版本 1 以 `filled` 初始化费用水位,版本 2/3 读取 `fee_cum`,版本 3 读取现金覆盖量与累计额。节 12 版本 1–4 的墓碑保留完整订单身份,版本 2–4 读取现金水位;版本 3/4 的 ForeignCash 行按 [OMS 格式](../hft-oms/README.md#快照行格式节-2312草案实现时以代码与编译期断言为准)恢复外来累计结算与原始来源,版本 4 的 ForeignReceipt 独立校验并恢复单笔金融事实;缺来源、重复与非法原件拒绝恢复,旧版不补造原件。旧版现金水位补零。`PERP_CASH` 下已成交量必须全部覆盖,否则拒绝恢复。节 3 版本 1 提供当前 epoch,节 25 版本 1 提供时钟;首次 Boot 前的全零时钟行表示尚未开始,等待后续 EngineClock,零频率但其余字段非零的行拒读,关键帧后的新订单无须等下一次 EpochStart。未知版本返回 `VersionUnsupported`,重复身份或快照映射超容量返回 `BadValue`。
 
 `apply` 遇到无法证明的入账返回 `JournalApplyError`,之后持续返回首个错误,调用方必须停止读取。`PERP_CASH` 的普通订单按完整身份及累计覆盖量计算现金增量,调用 `apply_settled_fill`;同水位不同金额、缺失/越界覆盖、减法溢出、找不到订单或重复登记身份都失败。FeeOnly 与查询后的补费不推进现金水位。失败成交不改账本或水位;未启用该能力的回报沿用本地计算。原始回报身份与登记品种不符时也明确报错。
 
 `PERP_CASH` 的原始 ExternalFill 使用 `apply_settled_external`,错误映射为 `Settlement`;非零订单号保留原始来源;已有任一种来源的订单不能再由普通槽入账,SimReset 清除被重置账户的来源和水位。未映射 Fill/PartialFill 的完整累计结算先与冷端自己的外来水位相减,等待同事件 OmsForeignFill,逐字段核对身份、账户绑定的策略、方向、路径、数量、价格、费用及累计量,保留字段必须为零,通过后调用 `apply_settled_external`。注记不携带现金答案;重复、缺失、错误或跨事件注记报 ForeignEvidence 并锁存。每次正量入账后才推进水位,重复/旧累计量不记账。冷端来源与水位总数上限为 SLOT_MAP_CAP,满时 ForeignCapacity;缺原始凭据的 AUTO_EXTERNAL 或同订单跨来源重叠仍返回 `UnsupportedExternalCash`;未验证的外来抵扣不得按数量比例分配现金或退回估算。此边界限制开关的启用范围,见已知限制。
+
+唯一已证明的跨来源重复是 [OMS 单笔原件契约](../hft-oms/README.md#回报匹配与成交增量) 的首次 Unknown 成交。冷端只从实际完整入账的原始 Input 保存金融事实,独立核对后来的累计前缀与全部金融字段,不从 OmsForeignFill 或热账本取答案。匹配时不记账、不等待入账注记,伪造该注记仍报 ForeignEvidence。原件的完全重复也在普通去重环绕回后保持无账务变化;不同成交键永久清除该订单的单笔证明,旧快照不能因后续重复生成证明。
 
 | 记录 | 处理 |
 |---|---|

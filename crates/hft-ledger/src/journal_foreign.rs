@@ -17,6 +17,21 @@ struct Cursor {
     side: u8,
     filled: i64,
     cash: i64,
+    receipt: Option<Receipt>,
+}
+
+/// The cold consumer retains only the original input's financial facts. No OMS helper or
+/// output amount participates in this proof.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Receipt {
+    side: u8,
+    trade: u64,
+    end: u64,
+    qty: i64,
+    px: i64,
+    cash: i64,
+    fee: i64,
+    asset: u16,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -93,30 +108,109 @@ impl Foreign {
             side,
             filled,
             cash,
+            receipt: None,
         });
         Ok(())
     }
 
-    pub(crate) fn external(&mut self, e: &ExternalFill) -> Result<(), Error> {
+    pub(crate) fn restore_receipt(&mut self, b: &[u8], ledger: &Ledger) -> Result<(), RestoreError> {
+        if b.len() != 72 || b[3] != 0 || b[66..] != [0; 6] {
+            return Err(RestoreError::BadValue);
+        }
+        let number = |at: usize| u64::from_le_bytes(b[at..at + 8].try_into().unwrap_or_default());
+        let key = Key(
+            VenueId(b[0]),
+            AccountId(b[1]),
+            InstId(u32::from_le_bytes(
+                b[4..8].try_into().map_err(|_| RestoreError::Truncated)?,
+            )),
+            number(8),
+        );
+        let receipt = Receipt {
+            side: b[2],
+            trade: number(16),
+            end: number(24),
+            qty: number(32) as i64,
+            px: number(40) as i64,
+            cash: number(48) as i64,
+            fee: number(56) as i64,
+            asset: u16::from_le_bytes(b[64..66].try_into().map_err(|_| RestoreError::Truncated)?),
+        };
+        if !matches!(receipt.side, 1 | 2)
+            || receipt.qty <= 0
+            || receipt.px <= 0
+            || (receipt.trade == 0 && receipt.end != receipt.qty as u64)
+            || (receipt.trade != 0 && receipt.end != 0)
+            || (receipt.asset == 0 && receipt.fee != 0)
+            || (receipt.asset != 0 && ledger.assets.get(usize::from(receipt.asset)).is_none())
+        {
+            return Err(RestoreError::BadValue);
+        }
+        let row = self
+            .rows
+            .iter_mut()
+            .find(|r| r.key == key && r.side == 0)
+            .ok_or(RestoreError::BadValue)?;
+        if row.receipt.is_some() {
+            return Err(RestoreError::BadValue);
+        }
+        row.receipt = Some(receipt);
+        Ok(())
+    }
+
+    pub(crate) fn validate_external(&self, e: &ExternalFill) -> Result<bool, Error> {
         if e.exch_order_id == 0 {
-            return Ok(());
+            return Ok(false);
         }
         let key = Key(e.venue, e.account, e.inst, e.exch_order_id);
         if let Some(r) = self.rows.iter().find(|r| r.key == key) {
-            return if r.side == 0 {
-                Ok(())
-            } else {
-                Err(Error::UnsupportedExternalCash)
-            };
+            if r.side != 0 {
+                return Err(Error::UnsupportedExternalCash);
+            }
+            if let Some(receipt) = r.receipt
+                && receipt.same_key(e)
+            {
+                if e.cash_qty != e.qty || e._pad != [0; 6] {
+                    return Err(Error::MissingCash);
+                }
+                if receipt != Receipt::from_input(e) {
+                    return Err(Error::CashConflict);
+                }
+                return Ok(true);
+            }
+            return Ok(false);
         }
         if self.rows.len() == super::journal::SLOT_MAP_CAP {
             return Err(Error::ForeignCapacity);
         }
+        Ok(false)
+    }
+
+    pub(crate) fn external(&mut self, e: &ExternalFill, booked: bool) -> Result<(), Error> {
+        self.validate_external(e)?;
+        if e.exch_order_id == 0 {
+            return Ok(());
+        }
+        let key = Key(e.venue, e.account, e.inst, e.exch_order_id);
+        if let Some(r) = self.rows.iter_mut().find(|r| r.key == key) {
+            if r.receipt.is_some_and(|p| !p.same_key(e)) {
+                r.receipt = None;
+            }
+            return Ok(());
+        }
+        let proof = booked
+            && e.cause == hft_event::ExternalCause::Unknown
+            && e.qty.0 > 0
+            && e.cash_qty == e.qty
+            && e.px.0 > 0
+            && e._pad == [0; 6]
+            && ((e.trade_id > 0 && e.fill_seq == 0) || (e.trade_id == 0 && e.fill_seq == e.qty.0 as u64));
         self.rows.push(Cursor {
             key,
             side: 0,
             filled: 0,
             cash: 0,
+            receipt: proof.then(|| Receipt::from_input(e)),
         });
         Ok(())
     }
@@ -138,7 +232,10 @@ impl Foreign {
         let old = self.rows.iter().find(|r| r.key == key);
         if let Some(r) = old {
             if r.side == 0 {
-                return Err(Error::UnsupportedExternalCash);
+                r.receipt
+                    .ok_or(Error::UnsupportedExternalCash)?
+                    .validate_first_duplicate(e)?;
+                return Ok(false);
             }
             if r.side != e.detail {
                 return Err(Error::Identity);
@@ -176,6 +273,7 @@ impl Foreign {
                 side: e.detail,
                 filled: e.cum_filled.0,
                 cash: e.cash_sum.0,
+                receipt: None,
             },
             qty: e.cum_filled.0 - filled,
             cash: e.cash_sum.0.checked_sub(cash).ok_or(Error::CashOverflow)?,
@@ -239,5 +337,48 @@ impl Foreign {
         } else {
             Ok(())
         }
+    }
+}
+
+impl Receipt {
+    fn from_input(e: &ExternalFill) -> Self {
+        Self {
+            side: e.side as u8,
+            trade: e.trade_id,
+            end: e.fill_seq,
+            qty: e.qty.0,
+            px: e.px.0,
+            cash: e.cash_amount.0,
+            fee: e.fee.0,
+            asset: e.fee_asset.0,
+        }
+    }
+
+    fn same_key(&self, e: &ExternalFill) -> bool {
+        self.trade == e.trade_id && (self.trade != 0 || self.end == e.fill_seq)
+    }
+
+    fn validate_first_duplicate(&self, e: &OrderEvent) -> Result<(), Error> {
+        if self.trade != e.trade_id
+            || (self.trade == 0 && self.end != e.cum_filled.0 as u64)
+            || self.qty != e.cum_filled.0
+            || self.qty != e.qty.0
+        {
+            return Err(Error::UnsupportedExternalCash);
+        }
+        if e.cash_qty.0 < 0 || e.cash_qty > e.cum_filled {
+            return Err(Error::CashCoverage);
+        }
+        if e.cash_qty != e.cum_filled {
+            return Err(Error::MissingCash);
+        }
+        if self.side != e.detail {
+            return Err(Error::Identity);
+        }
+        let px = if e.avg_px.0 != 0 { e.avg_px.0 } else { e.px.0 };
+        if self.cash != e.cash_sum.0 || self.px != px || self.fee != e.fee.0 || self.asset != e.fee_asset.0 {
+            return Err(Error::CashConflict);
+        }
+        Ok(())
     }
 }

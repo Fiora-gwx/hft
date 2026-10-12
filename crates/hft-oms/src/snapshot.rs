@@ -21,6 +21,7 @@ const ROW_LEG: u8 = 3;
 const ROW_TOMB: u8 = 4;
 const ROW_OUT: u8 = 5;
 const ROW_FOREIGN_CASH: u8 = 6;
+const ROW_FOREIGN_RECEIPT: u8 = 7;
 
 fn hdr(kind: u8, len: usize) -> LinkRowHdr {
     LinkRowHdr {
@@ -87,14 +88,21 @@ impl Oms {
             w.put_bytes([0u8; 8].get(..len.next_multiple_of(8) - len).unwrap_or(&[]));
         }
         // Section 12.
-        // Keep the established encoding when the appended row kind is absent.
+        // Keep each established encoding when its appended row kind is absent.
         let version = if self
+            .tables
+            .iter()
+            .flatten()
+            .any(|t| t.foreign_receipts.iter().any(|r| r.exch_order_id != 0))
+        {
+            ROW_VERSION_LINKS
+        } else if self
             .tables
             .iter()
             .flatten()
             .any(|t| t.foreign_cash.iter().any(|r| r.exch_order_id != 0))
         {
-            ROW_VERSION_LINKS
+            3
         } else {
             2
         };
@@ -189,6 +197,12 @@ impl Oms {
         for t in self.tables.iter().flatten() {
             for row in t.foreign_cash.iter().filter(|r| r.exch_order_id != 0) {
                 w.put_row(&hdr(ROW_FOREIGN_CASH, 32));
+                w.put_bytes(row.as_bytes());
+            }
+        }
+        for t in self.tables.iter().flatten() {
+            for row in t.foreign_receipts.iter().filter(|r| r.exch_order_id != 0) {
+                w.put_row(&hdr(ROW_FOREIGN_RECEIPT, 72));
                 w.put_bytes(row.as_bytes());
             }
         }
@@ -336,6 +350,7 @@ impl Oms {
                 }
                 ROW_OUT => 32,
                 ROW_FOREIGN_CASH if s12.version >= 3 => 32,
+                ROW_FOREIGN_RECEIPT if s12.version >= 4 => 72,
                 0 if hd.len == 0 => {
                     // Section tail padding.
                     break;
@@ -347,6 +362,37 @@ impl Oms {
             }
             let b = rr.get_bytes(want)?;
             match hd.kind {
+                ROW_FOREIGN_RECEIPT => {
+                    let row = crate::types::ForeignCashReceipt::read_from_bytes(b)
+                        .map_err(|_| RestoreError::BadValue)?;
+                    if row.exch_order_id == 0
+                        || row._pad != 0
+                        || row._pad2 != [0; 6]
+                        || !matches!(row.side, 1 | 2)
+                        || row.qty.0 <= 0
+                        || row.px.0 <= 0
+                        || (row.trade_id == 0 && row.fill_seq != row.qty.0 as u64)
+                        || (row.trade_id != 0 && row.fill_seq != 0)
+                        || (row.fee_asset.0 == 0 && row.fee.0 != 0)
+                        || rd.asset(row.fee_asset).id != row.fee_asset
+                    {
+                        return Err(RestoreError::BadValue);
+                    }
+                    let ti = o.tix(row.venue, row.account).ok_or(RestoreError::BadValue)?;
+                    let t = o.tm(ti).ok_or(RestoreError::BadValue)?;
+                    let ix = t
+                        .foreign_cash
+                        .iter()
+                        .position(|r| {
+                            r.side == 0 && r.inst == row.inst && r.exch_order_id == row.exch_order_id
+                        })
+                        .ok_or(RestoreError::BadValue)?;
+                    let dst = t.foreign_receipts.get_mut(ix).ok_or(RestoreError::Capacity)?;
+                    if dst.exch_order_id != 0 {
+                        return Err(RestoreError::BadValue);
+                    }
+                    *dst = row;
+                }
                 ROW_FOREIGN_CASH => {
                     let row = crate::types::ForeignCashRow::read_from_bytes(b)
                         .map_err(|_| RestoreError::BadValue)?;

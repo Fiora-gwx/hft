@@ -31,6 +31,7 @@ use zerocopy::{FromBytes, FromZeros, IntoBytes};
 mod model;
 mod model_boundary;
 mod path_model;
+mod receipt;
 mod restart_model;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -190,6 +191,18 @@ fn settle<S: StrategySet>(seq: &mut Sequencer<LiveDriver<S, Io<S>>, S>) {
 
 pub fn create<S: StrategySet>() -> Fixture {
     create_with_restart::<S>(None, false, false, None, None, None)
+}
+
+pub fn original_receipt(positive: bool) -> Fixture {
+    finish_evidence(create_with_receipt::<hft_strategy_registry::Strategies>(
+        None,
+        false,
+        false,
+        None,
+        None,
+        None,
+        Some(positive),
+    ))
 }
 
 pub fn with_model() -> Fixture {
@@ -608,6 +621,18 @@ fn create_with_restart<S: StrategySet>(
     model_restarts: Option<ModelRestart>,
     boundary: Option<ModelBoundary>,
 ) -> Fixture {
+    create_with_receipt::<S>(restart, long, model, model_hours, model_restarts, boundary, None)
+}
+
+fn create_with_receipt<S: StrategySet>(
+    restart: Option<Restart>,
+    long: bool,
+    model: bool,
+    model_hours: Option<u64>,
+    model_restarts: Option<ModelRestart>,
+    boundary: Option<ModelBoundary>,
+    original: Option<bool>,
+) -> Fixture {
     let root = std::env::temp_dir().join(format!(
         "replayer-{}-{}",
         std::process::id(),
@@ -720,6 +745,9 @@ fn create_with_restart<S: StrategySet>(
         );
     }
     let mut setup = build::engine_setup(&world, 1_000_000_000, 1);
+    if original.is_some() {
+        setup.ledger.ext_dedup_cap = 2;
+    }
     if long || model_hours.is_some() {
         setup.seq.keyframe_period_ms = 300_000;
         setup.seq.keyframe_max_events = 1_500_000;
@@ -782,7 +810,9 @@ fn create_with_restart<S: StrategySet>(
     if model {
         model::exercise(&mut s, &f, &world, &setup);
     }
-    if let Some(mode) = boundary {
+    if let Some(positive) = original {
+        receipt::exercise(&mut s, &world, positive);
+    } else if let Some(mode) = boundary {
         model_boundary::exercise(&mut s, &f, &world, &setup, mode, pending);
     } else if let Some(spec) = model_restarts {
         s = restart_model::exercise(s, &f, &world, &mut setup, spec);

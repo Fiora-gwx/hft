@@ -17,6 +17,166 @@ fn cash_boot() -> H {
     h
 }
 
+fn receipt_boot() -> H {
+    reset_script();
+    let mut b = b0();
+    let c = b.rd.caps.iter_mut().find(|c| c.venue == B).unwrap();
+    c.flags = c.flags | CapFlags::PERP_CASH;
+    b.setup_edit.push(|s| s.ledger.ext_dedup_cap = 2);
+    let mut h = b.boot_self_contained();
+    h.steady();
+    h
+}
+
+fn first_execution(positive: bool) -> hft_event::ExternalFill {
+    let mut raw = reconcile_receipt(Side::Sell, 40, 100_000, -11_700);
+    raw.cause = hft_event::ExternalCause::Unknown;
+    raw.trade_id = if positive { 40 } else { 0 };
+    raw.fill_seq = if positive { 0 } else { raw.qty.0 as u64 };
+    raw.fee = Qty(17);
+    raw
+}
+
+fn duplicate_report(slot: u32, raw: &hft_event::ExternalFill) -> hft_event::OrderEvent {
+    let mut e = foreign_event(slot, raw.qty.0, raw.cash_amount.0);
+    e.what = OrderEventKind::Fill;
+    e.exch_order_id = raw.exch_order_id;
+    e.trade_id = raw.trade_id;
+    e.qty = raw.qty;
+    e.px = raw.px;
+    e.avg_px = raw.px;
+    e.fee = raw.fee;
+    e.fee_asset = raw.fee_asset;
+    e
+}
+
+#[test]
+fn seq_419_original_duplicate_proof_survives_fifo_cold_restore_and_replay() {
+    for slot in [0, 700] {
+        for positive in [false, true] {
+            let mut h = receipt_boot();
+            let initial = wallet(&h.s.engine().ledger);
+            let start = h.keyframe();
+            let raw = first_execution(positive);
+            h.push(h.rep_ring(AC1), &raw);
+            assert_eq!(h.run(), StepOutcome::Idle);
+            assert_eq!(wallet(&h.s.engine().ledger), initial - 11_717);
+            let first = h.keyframe();
+            // Evict the raw execution's ordinary ledger key while retaining its OMS proof.
+            for id in 50..53 {
+                let mut other = reconcile_receipt(Side::Buy, id, 1, 1);
+                other.exch_order_id = 0;
+                h.push(h.rep_ring(AC1), &other);
+                assert_eq!(h.run(), StepOutcome::Idle);
+            }
+            assert_eq!(h.s.engine().ledger.ext_seen(AC1, B).len(), 2);
+            let evicted = h.keyframe();
+            let e = duplicate_report(slot, &raw);
+            for _ in 0..2 {
+                let mark = h.mark();
+                h.push(h.rep_ring(AC1), &e);
+                h.push(h.rep_ring(AC1), &raw);
+                assert_eq!(h.run(), StepOutcome::Idle);
+                assert_eq!(wallet(&h.s.engine().ledger), initial - 11_714);
+                assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, Qty(-99_997));
+                assert!(decisions(&h.since(mark)).is_empty());
+                assert!(
+                    !h.since(mark)
+                        .iter()
+                        .any(|r| r.read::<hft_event::Note>().is_some_and(|n| {
+                            matches!(
+                                n.code,
+                                hft_ledger::notes::code::OMS_FOREIGN_FILL
+                                    | hft_ledger::notes::code::EXTERNAL_FILL
+                            )
+                        }))
+                );
+                for from in [&start, &first, &evicted] {
+                    let cold = cold_at(&h, from);
+                    let mut a = hft_strategy_sdk::SnapshotWriter::new(1 << 22);
+                    let mut b = hft_strategy_sdk::SnapshotWriter::new(1 << 22);
+                    cold.ledger().snapshot(&mut a);
+                    h.s.engine().ledger.snapshot(&mut b);
+                    assert_eq!(a.as_bytes(), b.as_bytes());
+                }
+            }
+            h.keyframe();
+            assert!(h.verify().is_empty());
+            for from in [&start, &first, &evicted] {
+                assert!(h.verify_from(Some(from.seq)).is_empty(), "window {}", from.seq);
+            }
+        }
+    }
+}
+
+#[test]
+fn seq_420_unproven_receipt_overlap_stops_without_wallet_or_hedge_change() {
+    for row in 0..8 {
+        let mut h = receipt_boot();
+        let raw = first_execution(true);
+        h.push(h.rep_ring(AC1), &raw);
+        assert_eq!(h.run(), StepOutcome::Idle);
+        let mut e = duplicate_report(700, &raw);
+        let want = match row {
+            0 => {
+                e.trade_id += 1;
+                hft_oms::CashError::ExternalOverlap
+            }
+            1 => {
+                e.qty.0 += 1;
+                hft_oms::CashError::ExternalOverlap
+            }
+            2 => {
+                e.cash_sum.0 += 1;
+                hft_oms::CashError::Conflict
+            }
+            3 => {
+                e.fee.0 += 1;
+                hft_oms::CashError::Conflict
+            }
+            4 => {
+                e.detail = Side::Buy as u8;
+                hft_oms::CashError::Identity
+            }
+            5 => {
+                e.cash_qty = Qty(0);
+                hft_oms::CashError::Missing
+            }
+            6 => {
+                let mut later = raw;
+                later.trade_id += 1;
+                h.push(h.rep_ring(AC1), &later);
+                assert_eq!(h.run(), StepOutcome::Idle);
+                hft_oms::CashError::ExternalOverlap
+            }
+            _ => {
+                // A replay carrying the same trade key under another order is not a
+                // newly booked execution and must not manufacture a second proof.
+                let mut alias = raw;
+                alias.exch_order_id += 1;
+                let prior = wallet(&h.s.engine().ledger);
+                h.push(h.rep_ring(AC1), &alias);
+                assert_eq!(h.run(), StepOutcome::Idle);
+                assert_eq!(wallet(&h.s.engine().ledger), prior);
+                e.exch_order_id = alias.exch_order_id;
+                hft_oms::CashError::ExternalOverlap
+            }
+        };
+        let before = wallet(&h.s.engine().ledger);
+        let pos = *h.s.engine().ledger.pos(AC1, B1);
+        let mark = h.mark();
+        h.push(h.rep_ring(AC1), &e);
+        assert_eq!(
+            h.run(),
+            StepOutcome::Fatal(FatalReason::OmsCash(want)),
+            "row {row}"
+        );
+        assert_eq!(wallet(&h.s.engine().ledger), before);
+        assert_eq!(*h.s.engine().ledger.pos(AC1, B1), pos);
+        assert!(decisions(&h.since(mark)).is_empty());
+    }
+}
+
 fn reconcile_input(h: &mut H, receipt: &hft_event::ExternalFill, rest: Qty) -> Vec<u8> {
     use zerocopy::IntoBytes;
     // A complete prior report after UserStream Up supplies the established stability gate.

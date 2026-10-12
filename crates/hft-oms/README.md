@@ -543,7 +543,8 @@ gw 对某 (venue, account) 的回报帧解码失败时写 `ConnState{role = User
 10. **显式永续结算**:venue 声明 [PERP_CASH](../hft-refdata/README.md#交易所能力表venuecaps) 时,槽与墓碑按完整身份保存 `cash_qty/cash_sum`。回报的 `inst` 必须与命中的槽或墓碑一致。成交累计量前移时,要求回报覆盖全部累计成交,已有覆盖量等于本地 `filled`;`FillOut.cash = Some(ev.cash_sum − saved.cash_sum)`,单位为该 inst 报价资产的 `qty_exp`,不含费用与资金费。已知零额也输出 `Some(0)`,重复水位金额不一致为 `Conflict`,溢出为 `Overflow`,缺失/部分覆盖为 `Missing`,非法覆盖为 `Coverage`。旧累计量不倒退水位;`FeeOnly` 不推进结算。槽回收时复制水位到墓碑,迟到成交只产出差额。未声明该能力的旧配置保持 `FillOut.cash = None`,不能据此承诺钱包实额一致。
 11. **外来结算水位**:严格模式下防御路径与 StaleGen 的 Fill/PartialFill 要有非零交易所订单号、明确方向、正价格和完整累计结算覆盖。按 `(venue, account, inst, exch_order_id)` 保存累计毛量与现金,只产生差额;同水位异额报 Conflict,旧水位不回退。已知槽或墓碑的同品种订单号不能被错误身份重新登记为外来单;缺少已记录来源且回报代数不大于该槽已用代数时,不能证明它不是退役订单,报 Untracked。未知身份或报告种类无法证明来源时输出 `CashError::Untracked`;外来成交重叠未携带可扣的现金事实时输出 `ExternalOverlap`;现行 `ReconcileReport` 不带结算事实,需要推进成交量时输出 `Missing`。这些错误不推进相关槽、墓碑或成交/费用输出,调用方必须先处理 `OmsOut.cash_error`,不能当作无成交继续运行。跨路径支持需要成交区间与对应现金事实,不能按数量比例分摊现金。
 
-12. **来源与容量**:原始 ExternalFill 的非零交易所订单号经 `external_cash_guard` 先核验,账本验证成功后经 `remember_external_cash` 保留来源;该来源与外来累计水位不能互换,两个到达方向都报 ExternalOverlap。`has_foreign_cash` 只读查询原始与累计两类来源,防止它后来被槽或墓碑重复认领。来源与累计水位共用每表 `foreign_fill_track` 个预分配行,写满报 Capacity,不淘汰。未知身份的 FeeOnly 不具备费用去重事实,严格模式报 Untracked。
+12. **来源与容量**:原始 ExternalFill 的非零交易所订单号经 `external_cash_guard` 先核验,账本验证成功后经 `remember_external_cash(e, booked)` 保留来源。`booked` 只在本条 Input 实际完整入账时为真,重复、AUTO_EXTERNAL 与迟到确认均不能建立原件证明。`external_cash_guard` 返回 true 表示金融字段逐项相同的原件已入账,即使账本普通去重环绕回也不再记账;同键异额报 Conflict。原始来源与外来累计水位不互换;`has_foreign_cash` 防止其后来被普通槽或墓碑重复认领。来源与累计水位共用每表 `foreign_fill_track` 个预分配行,写满报 Capacity,不淘汰。未知身份 FeeOnly 报 Untracked。
+13. **单笔原件与累计重复**:仅当首次实际入账的原始 Unknown 成交具有完整结算、正价格及规范去重键时保留金融字段。之后的防御路径或 StaleGen Fill/PartialFill 必须证明累计前缀只有该笔,即 `OrderEvent.qty == cum_filled == 原件.qty`、相同正 trade_id(无正 ID 时原件 fill_seq 等于累计量),且账户、venue、品种、订单号、方向、价格、现金、费用与费用资产全部一致。此时不产出成交或费用,不推进水位或消耗 ext_held。该订单一旦出现不同成交键,单笔证明永久失效,后来的重复不能重建;旧快照只有来源没有原件时同样不能补造证明。跨多笔累计、先累计后原始、普通槽认领及其他未证明重叠仍失败,不按比例分摊现金。
 
 `FillOut.cash: Option<Qty>` 只提供结算增量,资产由该 inst 的报价资产确定。`CashError` 的其余变体 `Identity` 表示命中的完整订单身份与 inst 不一致。
 
@@ -927,8 +928,8 @@ pub const SLOT_ROW_LEN: usize = 192;
     //       foreign: [(u64, Qty); n_foreign]、ext_held: [(u64, Qty); n_ext_held](均为 FIFO 顺序,每项 16 B)、
     //       decode_fails: u8 与 7 B 零(连续 REPORT_DECODE 次数),尾部补零到 8 B
 
-// 节 12 OmsLinks:每行以 LinkRowHdr 开头,顺序 Link* → Plan* → Leg* → Tomb* → Out*
-#[repr(C)] pub struct LinkRowHdr { pub kind: u8 /* Link=1 Plan=2 Leg=3 Tomb=4 Out=5 */, pub _pad: [u8; 3], pub len: u32 } // 8 B
+// 节 12 OmsLinks:每行以 LinkRowHdr 开头,顺序 Link* → Plan* → Leg* → Tomb* → Out* → ForeignCash* → ForeignReceipt*
+#[repr(C)] pub struct LinkRowHdr { pub kind: u8 /* Link=1 Plan=2 Leg=3 Tomb=4 Out=5 ForeignCash=6 ForeignReceipt=7 */, pub _pad: [u8; 3], pub len: u32 } // 8 B
 // Link:LinkEntry 原样(80 B;state ≠ Done 的项;键 link_id)
 // Plan:{ link_id: u32, _pad: u32, tolerance: Rate, plan: HedgePlan }(64 B = 8 + 8 + HedgePlan 48 B;被活动 Link 引用的计划;键 link_id)
 // Leg: { account: AccountId, _pad: [u8; 3], group: GroupId, state: LegState }(200 B = 8 + LegState 192 B;键 (account, group);全零项不写)
@@ -936,6 +937,9 @@ pub const SLOT_ROW_LEN: usize = 192;
 // ForeignCash(kind = 6,v3):venue:u8,account:u8,side:u8,pad:u8,inst:u32,eid:u64,filled:i64,cash_sum:i64(32 B)。
 // side 1/2 = 外来累计水位,filled > 0;side 0 = 原始 ExternalFill 来源,filled/cash_sum 为零。
 // 行按表顺序及首次登记顺序写出;空行不写;重复键、非法方向/填充、错误品种、超容量拒绝恢复。
+// ForeignReceipt(kind = 7,v4):venue:u8,account:u8,side:u8,pad:u8,inst:u32,eid:u64,trade_id:u64,fill_seq:u64,
+// qty:i64,px:i64,cash:i64,fee:i64,fee_asset:u16,pad2:[u8;6](72 B);按对应来源的表及登记顺序写出。
+// 只跟在同键 side=0 的 ForeignCash 后;重复、无来源、非法金融字段/规范键/填充均拒绝恢复。
 // Out: OutItem 原样(32 B;pending_out 按 FIFO 顺序,队头在前;不排序——顺序本身是状态)
 const _: () = assert!(size_of::<TableRow>() == 32 && size_of::<LinkRowHdr>() == 8 && size_of::<OmsCountersHdr>() == 16);
 ```
@@ -944,7 +948,7 @@ const _: () = assert!(size_of::<TableRow>() == 32 && size_of::<LinkRowHdr>() == 
 - `InflightBook` 与 LegTracker 各腿的两类在途不单独恢复:它们由非终态槽的剩余量与状态决定(不变量),`restore` 时由节 2 重算并与快照中的 `LegState` 校验。
 - `(account, inst) → (group, leg_ix)` 归属表不进快照,由恢复时的 GroupSpec 重建。
 - 进快照的 TSC 字段只有"恢复"第 2 步列出的已登记字段;其余时刻不进快照。
-- **行版本**(只在本 crate 登记,写进 `SectionHdr.version`):节 2 = 3、节 3 = 1、节 12 读取 1–3。节 12 含 ForeignCash 行时写 v3,没有该行时保持 v2 编码。节 12 v1 的墓碑为 64 B 行体,读取时补零结算水位。严格结算模式恢复时要求每个非空槽与墓碑的覆盖量等于 filled;旧格式中已有成交而无结算水位的状态拒绝恢复,不能把缺失当已知零。行格式只追加、零值表示未提供;版本递增时读者按旧版本的行长读出并补零,未知的更高版本拒读(`RestoreError`)。
+- **行版本**(只在本 crate 登记,写进 `SectionHdr.version`):节 2 = 3、节 3 = 1、节 12 读取 1–4。含 ForeignReceipt 时写 v4,只有 ForeignCash 时写 v3,均无时保持 v2 编码。v1–3 不含单笔原件证明。节 12 v1 的墓碑为 64 B 行体,读取时补零结算水位。严格结算模式恢复时要求每个非空槽与墓碑的覆盖量等于 filled;旧格式中已有成交而无结算水位的状态拒绝恢复,不能把缺失当已知零。行格式只追加、零值表示未提供;版本递增时读者按旧版本的行长读出并补零,未知的更高版本拒读(`RestoreError`)。
 
 ### 规划源文件
 
@@ -1004,7 +1008,7 @@ const _: () = assert!(size_of::<TableRow>() == 32 && size_of::<LinkRowHdr>() == 
 - `ClientOrderId` 编码与解码在 hft-types,预算与基准(`types/clid_encode`、`types/clid_decode`)归那里。
 - 第一腿成交回报取出 → 第二腿 `OrderDecision` 入出环:主机内 ≤ 20 µs([05 §1](../../design/05-CEX执行层.md)),OMS 份额(OnFill + `price_hedge` + `place`)≤ 1 µs;风控检查链(含 #6 `HEDGE_LIMIT`)另计。
 - 风控可负担性读数(`avail_quote`、`avail_margin`)读 InflightBook 的增量和,O(1),与在途单数无关。
-- 分配:只在 `new`/`restore` 与命令路径 `on_groups_changed`(容量预分配,只重写内容);运行期零分配。内存:每 (venue, account) 表 = N × (128 + 64 + 80 + 56 × T + 4) B,N = 4096、T = 2 时 ≈ 1.52 MiB(另加 `foreign`/`ext_held` 各 64 × 16 B,另有结算来源表 64 × 32 B);`LinkTable` 每账户 = `links_per_account` × (80 + 56) B(链接 + 计划表项),4096 时 ≈ 544 KiB;LegTracker 每 group ≈ 240 B(`LegState` 192 B + 归属表项);`pending_out` = 32 B × (2 × 全部表槽数 + 全部账户链接数),每张 4096 槽表约摊 256 KiB + 128 KiB(链接)。
+- 分配:只在 `new`/`restore` 与命令路径 `on_groups_changed`(容量预分配,只重写内容);运行期零分配。内存:每 (venue, account) 表 = N × (128 + 64 + 80 + 56 × T + 4) B,N = 4096、T = 2 时 ≈ 1.52 MiB(另加 `foreign`/`ext_held` 各 64 × 16 B,另有结算来源表 64 × (32 + 72) B);`LinkTable` 每账户 = `links_per_account` × (80 + 56) B(链接 + 计划表项),4096 时 ≈ 544 KiB;LegTracker 每 group ≈ 240 B(`LegState` 192 B + 归属表项);`pending_out` = 32 B × (2 × 全部表槽数 + 全部账户链接数),每张 4096 槽表约摊 256 KiB + 128 KiB(链接)。
 - 无系统调用、无锁、无共享缓存行(只被 sequencer 线程触碰)。
 
 ## 测试与验收

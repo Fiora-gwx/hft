@@ -3,6 +3,7 @@ mod fixture_bundle;
 mod long_model;
 mod model;
 mod model_boundary;
+mod receipt;
 mod recompute;
 mod recovery;
 mod recovery_gap;

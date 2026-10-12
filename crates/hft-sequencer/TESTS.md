@@ -28,7 +28,7 @@ spec: README.md
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
 | 连接活性 | SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173 |
-| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-418 |
+| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
@@ -5731,6 +5731,26 @@ spec: README.md
 - 步骤:第二笔分别缺现金覆盖、缺手续费资产、重复本组身份、数量超出差额、方向相反、使用已入账身份
 - 期望:六行均返回 Fatal(Settlement);第一笔也不入账,钱包、仓位、去重身份和 auto_held 保持原值,不输出财务成交注记
 - 实现:`crates/hft-sequencer/tests/settlement.rs::seq_418_bad_receipt_batch_cannot_partially_book`
+
+### SEQ-419 单笔重复证明贯通真实引擎与快照窗口回放
+
+- 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
+- 级别:integ
+- 里程碑:M2
+- 前置:自足配置的真实引擎、严格结算、外来去重容量 2
+- 步骤:防御/StaleGen 两路径与正/零 ID 四组;原件入账后三笔其他成交淘汰普通键;两次重复原件和累计回报,从入账前、入账后、淘汰后三个快照冷读与回放,并完整回放
+- 期望:钱包始终等于原始现金与费用之和;重复无订单或入账注记;冷热节 1/13/22 逐字节相等,全部回放无差异
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_419_original_duplicate_proof_survives_fifo_cold_restore_and_replay`
+
+### SEQ-420 未证明的重复不改变钱包或发出对冲
+
+- 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
+- 级别:integ
+- 里程碑:M2
+- 前置:真实引擎已入账一笔严格结算 Unknown 原件
+- 步骤:八行分别改变成交 ID、数量、现金、费用、方向、覆盖,或先交付第二个不同成交键,以及同成交键不同订单号的未入账副本
+- 期望:对应 OmsCash 错误 Fatal,钱包和仓位不变,无新订单决策
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_420_unproven_receipt_overlap_stops_without_wallet_or_hedge_change`
 
 ## 验收
 

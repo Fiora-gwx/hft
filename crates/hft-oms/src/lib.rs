@@ -220,6 +220,11 @@ impl Oms {
                         usize::from(cfg.foreign_fill_track.get(v, a).max(1))
                     ]
                     .into_boxed_slice(),
+                    foreign_receipts: vec![
+                        <crate::types::ForeignCashReceipt as zerocopy::FromZeros>::new_zeroed();
+                        usize::from(cfg.foreign_fill_track.get(v, a).max(1))
+                    ]
+                    .into_boxed_slice(),
                     ext_held: FifoMap::new(usize::from(cfg.ext_held_track.get(v, a).max(1))),
                     unknown_count: 0,
                     conn_up: false,

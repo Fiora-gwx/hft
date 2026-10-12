@@ -196,6 +196,8 @@ pub(crate) struct Table {
     pub(crate) free: Fifo<u32>,
     pub(crate) foreign: FifoMap,
     pub(crate) foreign_cash: Box<[crate::types::ForeignCashRow]>,
+    /// Same index/capacity as foreign_cash. Empty or invalidated proof has eid 0.
+    pub(crate) foreign_receipts: Box<[crate::types::ForeignCashReceipt]>,
     pub(crate) ext_held: FifoMap,
     pub(crate) unknown_count: u32,
     pub(crate) conn_up: bool,

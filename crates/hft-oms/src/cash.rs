@@ -1,8 +1,10 @@
 //! Cumulative cash facts are additive across orders, independent of report delivery order.
 
 use hft_types::{AccountId, InstId, Qty, VenueId};
+use zerocopy::FromZeros;
 
 use crate::CashError;
+use crate::types::ForeignCashReceipt;
 
 impl crate::Oms {
     /// Preflight provenance and all distinct new order identities in one reconciliation.
@@ -15,7 +17,9 @@ impl crate::Oms {
         let free = t.foreign_cash.iter().filter(|r| r.exch_order_id == 0).count();
         let mut needed = 0;
         for (i, e) in batch.fills().enumerate() {
-            self.external_cash_guard(&e)?;
+            if self.external_cash_guard(&e)? {
+                return Err(CashError::ExternalOverlap);
+            }
             if e.exch_order_id != 0
                 && !self.has_foreign_cash(e.venue, e.account, e.inst, e.exch_order_id)
                 && !batch
@@ -46,52 +50,92 @@ impl crate::Oms {
     }
 
     /// Validate provenance/capacity before booking an original external cash execution.
+    /// `true` proves this same financial receipt was already booked, even after FIFO wrap.
     /// Budget: oms/external_cash_guard. No mutation or allocation.
-    pub fn external_cash_guard(&self, e: &hft_event::ExternalFill) -> Result<(), CashError> {
+    pub fn external_cash_guard(&self, e: &hft_event::ExternalFill) -> Result<bool, CashError> {
         if e.exch_order_id == 0 {
-            return Ok(());
+            return Ok(false);
         }
         let t = self
             .tix(e.venue, e.account)
             .and_then(|i| self.t(i))
             .ok_or(CashError::Identity)?;
-        if let Some(r) = t
+        if let Some((ix, r)) = t
             .foreign_cash
             .iter()
-            .find(|r| r.exch_order_id == e.exch_order_id && r.inst == e.inst)
+            .enumerate()
+            .find(|(_, r)| r.exch_order_id == e.exch_order_id && r.inst == e.inst)
         {
-            return if r.side == 0 {
-                Ok(())
-            } else {
-                Err(CashError::ExternalOverlap)
-            };
+            if r.side != 0 {
+                return Err(CashError::ExternalOverlap);
+            }
+            if let Some(receipt) = t.foreign_receipts.get(ix)
+                && receipt.exch_order_id != 0
+                && receipt.same_key(e)
+            {
+                if e.cash_qty != e.qty || e._pad != [0; 6] {
+                    return Err(CashError::Missing);
+                }
+                if *receipt != ForeignCashReceipt::from_external(e) {
+                    return Err(CashError::Conflict);
+                }
+                return Ok(true);
+            }
+            return Ok(false);
         }
         if t.foreign_cash.iter().any(|r| r.exch_order_id == 0) {
-            Ok(())
+            Ok(false)
         } else {
             Err(CashError::Capacity)
         }
     }
 
-    /// Retain the original-source identity after successful ledger validation. The caller
-    /// first calls external_cash_guard; this never evicts another identity.
+    /// Retain provenance after ledger validation. `booked` is true only when this Input
+    /// actually booked the full execution; a duplicate/confirmation cannot create new proof.
+    /// The caller first calls external_cash_guard; this never evicts another identity.
     /// Budget: oms/remember_external_cash.
-    pub fn remember_external_cash(&mut self, e: &hft_event::ExternalFill) -> Result<(), CashError> {
+    pub fn remember_external_cash(
+        &mut self,
+        e: &hft_event::ExternalFill,
+        booked: bool,
+    ) -> Result<(), CashError> {
         self.external_cash_guard(e)?;
         if e.exch_order_id == 0 {
             return Ok(());
         }
+        let proof = booked
+            && self.inst(e.inst).perp_cash
+            && e.cause == hft_event::ExternalCause::Unknown
+            && e.qty.0 > 0
+            && e.cash_qty == e.qty
+            && e.px.0 > 0
+            && e._pad == [0; 6]
+            && ((e.trade_id > 0 && e.fill_seq == 0) || (e.trade_id == 0 && e.fill_seq == e.qty.0 as u64));
         let t = self
             .tix(e.venue, e.account)
             .and_then(|i| self.tm(i))
             .ok_or(CashError::Identity)?;
-        if t.foreign_cash
+        if let Some(ix) = t
+            .foreign_cash
             .iter()
-            .any(|r| r.exch_order_id == e.exch_order_id && r.inst == e.inst)
+            .position(|r| r.exch_order_id == e.exch_order_id && r.inst == e.inst)
         {
+            // A later distinct execution makes this a multi-fill source. Retain the opaque
+            // order identity but discard the single-execution proof permanently.
+            if let Some(r) = t.foreign_receipts.get_mut(ix)
+                && r.exch_order_id != 0
+                && !r.same_key(e)
+            {
+                *r = ForeignCashReceipt::new_zeroed();
+            }
             return Ok(());
         }
-        if let Some(r) = t.foreign_cash.iter_mut().find(|r| r.exch_order_id == 0) {
+        if let Some((ix, r)) = t
+            .foreign_cash
+            .iter_mut()
+            .enumerate()
+            .find(|(_, r)| r.exch_order_id == 0)
+        {
             *r = crate::types::ForeignCashRow {
                 venue: e.venue,
                 account: e.account,
@@ -102,6 +146,9 @@ impl crate::Oms {
                 filled: Qty(0),
                 cash_sum: Qty(0),
             };
+            if proof && let Some(r) = t.foreign_receipts.get_mut(ix) {
+                *r = ForeignCashReceipt::from_external(e);
+            }
         }
         Ok(())
     }
@@ -139,9 +186,6 @@ impl crate::Oms {
         {
             return Err(CashError::Identity);
         }
-        if t.ext_held.get(e.exch_order_id).is_some_and(|q| q.0 > 0) {
-            return Err(CashError::ExternalOverlap);
-        }
         let ix = t
             .foreign_cash
             .iter()
@@ -149,7 +193,9 @@ impl crate::Oms {
         let (filled, sum) = if let Some(ix) = ix {
             let r = t.foreign_cash.get(ix).ok_or(CashError::Identity)?;
             if r.side == 0 {
-                return Err(CashError::ExternalOverlap);
+                let proof = t.foreign_receipts.get(ix).ok_or(CashError::ExternalOverlap)?;
+                proof.validate_first_duplicate(e)?;
+                return Ok((Qty(0), Qty(0)));
             }
             if r.side != e.detail {
                 return Err(CashError::Identity);
@@ -158,6 +204,9 @@ impl crate::Oms {
         } else {
             (Qty(0), Qty(0))
         };
+        if t.ext_held.get(e.exch_order_id).is_some_and(|q| q.0 > 0) {
+            return Err(CashError::ExternalOverlap);
+        }
         let cash = delta(
             true,
             (filled, filled, sum),
@@ -185,6 +234,56 @@ impl crate::Oms {
             cash_sum: e.cash_sum,
         };
         Ok((Qty(e.cum_filled.0 - filled.0), cash))
+    }
+}
+
+impl ForeignCashReceipt {
+    fn from_external(e: &hft_event::ExternalFill) -> Self {
+        Self {
+            venue: e.venue,
+            account: e.account,
+            side: e.side as u8,
+            _pad: 0,
+            inst: e.inst,
+            exch_order_id: e.exch_order_id,
+            trade_id: e.trade_id,
+            fill_seq: e.fill_seq,
+            qty: e.qty,
+            px: e.px,
+            cash: e.cash_amount,
+            fee: e.fee,
+            fee_asset: e.fee_asset,
+            _pad2: [0; 6],
+        }
+    }
+
+    fn same_key(&self, e: &hft_event::ExternalFill) -> bool {
+        self.trade_id == e.trade_id && (self.trade_id != 0 || self.fill_seq == e.fill_seq)
+    }
+
+    fn validate_first_duplicate(&self, e: &hft_event::OrderEvent) -> Result<(), CashError> {
+        if self.exch_order_id == 0
+            || self.trade_id != e.trade_id
+            || (self.trade_id == 0 && self.fill_seq != e.cum_filled.0 as u64)
+            || self.qty != e.qty
+            || self.qty != e.cum_filled
+        {
+            return Err(CashError::ExternalOverlap);
+        }
+        if e.cash_qty.0 < 0 || e.cash_qty > e.cum_filled {
+            return Err(CashError::Coverage);
+        }
+        if e.cash_qty != e.cum_filled {
+            return Err(CashError::Missing);
+        }
+        if self.side != e.detail {
+            return Err(CashError::Identity);
+        }
+        let px = if e.avg_px.0 != 0 { e.avg_px } else { e.px };
+        if self.cash != e.cash_sum || self.px != px || self.fee != e.fee || self.fee_asset != e.fee_asset {
+            return Err(CashError::Conflict);
+        }
+        Ok(())
     }
 }
 

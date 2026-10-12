@@ -29,7 +29,7 @@ spec: README.md
 | 延迟样本 | OMS-012, OMS-071, OMS-080–OMS-089 |
 | REPORT_DECODE | OMS-090, OMS-091 |
 | 恢复后的 gw 映射 | OMS-092, OMS-093 |
-| 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460、OMS-467、OMS-468、OMS-470–OMS-475、OMS-476 |
+| 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460、OMS-467、OMS-468、OMS-470–OMS-475、OMS-476–OMS-479 |
 | 成交净量(B4) | OMS-067, OMS-120–OMS-124, OMS-184, OMS-404 |
 | Unknown 收敛流程 | OMS-032, OMS-065, OMS-066, OMS-068, OMS-070, OMS-073, OMS-089, OMS-130–OMS-154, OMS-400, OMS-402, OMS-420 |
 | 墓碑与迟到成交(C1) | OMS-013, OMS-148, OMS-160–OMS-164, OMS-287, OMS-322, OMS-462、OMS-469 |
@@ -4293,9 +4293,9 @@ spec: README.md
 - 规则:[使用本组件](README.md#使用本组件)
 - 级别:unit
 - 里程碑:M2
-- 前置:实盘 A1 和模拟 S1 均启用 VX 的严格永续结算,各有同订单号的外来累计结算
+- 前置:实盘 A1 和模拟 S1 均启用 VX 的严格永续结算,各有同订单号的外来累计结算,以及另一订单的单笔原件证明
 - 步骤:重置模拟账户,再向两账户交付相同回报
-- 期望:模拟账户按新资金周期重新记账;另一账户保留水位且不重复入账
+- 期望:模拟账户按新资金周期重新记账;另一账户保留水位且不重复入账;单笔证明只随所属模拟账户清除
 - 实现:`crates/hft-oms/tests/settlement.rs::oms_475_sim_reset_clears_only_that_accounts_foreign_cash`
 
 ### OMS-476 对账整组来源容量预检
@@ -4307,6 +4307,36 @@ spec: README.md
 - 步骤:预检两笔同订单、两个不同新订单、现有订单与新订单三组凭据;比较每组前后的快照
 - 期望:同一订单只占一行,两个新订单报 Capacity;全部预检不改变快照
 - 实现:`crates/hft-oms/tests/settlement.rs::oms_476_reconcile_cash_capacity_counts_distinct_order_identities`
+
+### OMS-477 单笔原件在恢复后证明累计重复
+
+- 规则:[回报匹配与成交增量](README.md#回报匹配与成交增量)
+- 级别:unit
+- 里程碑:M2
+- 前置:严格结算、已实际完整入账的 Unknown 原件与 ext_held
+- 步骤:防御/StaleGen 两路径 × 正/零 ID × 正/零/负现金 × 正/零/负费用共 36 组,每组保存并两次恢复后重放同笔累计回报
+- 期望:节 12 v4 保留证明;无成交或费用输出、快照字节不变;原件预检证明已入账
+- 实现:`crates/hft-oms/tests/settlement.rs::oms_477_original_receipt_proves_only_the_same_first_execution_after_restore`
+
+### OMS-478 不完整或错误原件不能放行跨来源重叠
+
+- 规则:[回报匹配与成交增量](README.md#回报匹配与成交增量)
+- 级别:unit
+- 里程碑:M2
+- 前置:单笔原件,每个反例独立恢复
+- 步骤:改变成交 ID、委托量、累计量、现金覆盖/金额、费用/资产、方向、价格、报告类型、代次;另设未实际入账与不同后续成交两行;原件同键异额另行预检
+- 期望:13 行全部明确报错且无账务输出、快照不变;后续成交清除证明后,恢复和重复原件均不能重新建立证明
+- 实现:`crates/hft-oms/tests/settlement.rs::oms_478_original_receipt_never_authorizes_wrong_or_missing_facts`
+
+### OMS-479 原件快照校验与旧格式恢复
+
+- 规则:[快照行格式](README.md#快照行格式节-2312草案实现时以代码与编译期断言为准)
+- 级别:unit
+- 里程碑:M2
+- 前置:含单笔证明的 v4 快照
+- 步骤:13 行篡改方向、身份、数量、价格、规范键、填充、资产、重复行、来源或版本;另删去证明生成合法 v3 快照
+- 期望:损坏快照全部拒绝;v3 可读但不能证明跨来源重复,后续未入账的重复原件不能补造证明
+- 实现:`crates/hft-oms/tests/settlement.rs::oms_479_receipt_restore_rejects_corruption_and_legacy_has_no_proof`
 
 ## 验收
 

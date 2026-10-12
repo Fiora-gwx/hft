@@ -295,7 +295,7 @@ impl JournalLedger {
         // Recycled generations must retain their cash watermark too. OMS section 12 has
         // an 8-byte row header; non-tomb rows do not belong to this consumer.
         if let Some(section) = r.find_section(12)? {
-            if !(1..=3).contains(&section.version) {
+            if !(1..=4).contains(&section.version) {
                 return Err(RestoreError::VersionUnsupported);
             }
             let mut rr = section.reader();
@@ -307,6 +307,13 @@ impl JournalLedger {
                 }
                 let len = rr.get_u32()? as usize;
                 let row = rr.get_bytes(len)?;
+                if kind == 7 {
+                    if section.version < 4 {
+                        return Err(RestoreError::BadValue);
+                    }
+                    foreign.restore_receipt(row, &ledger)?;
+                    continue;
+                }
                 if kind == 6 {
                     if section.version < 3 {
                         return Err(RestoreError::BadValue);
@@ -580,10 +587,13 @@ impl JournalLedger {
                     if self.ledger.venue_s(e.venue).is_some_and(|v| v.perp_cash)
                         || self.ledger.inst(e.inst).is_some_and(|i| i.perp_cash)
                     {
-                        self.foreign.external(&e)?;
-                        self.ledger
-                            .apply_settled_external(&e, t)
-                            .map_err(JournalApplyError::Settlement)?;
+                        if !self.foreign.validate_external(&e)? {
+                            let applied = self
+                                .ledger
+                                .apply_settled_external(&e, t)
+                                .map_err(JournalApplyError::Settlement)?;
+                            self.foreign.external(&e, applied.is_some())?;
+                        }
                     } else {
                         self.ledger.apply_external(&e, false, t);
                     }

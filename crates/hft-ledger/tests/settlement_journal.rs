@@ -85,6 +85,200 @@ fn fragment<B: Body>(j: &mut JournalLedger, b: &B, end: bool) -> Result<(), Jour
     j.apply(&decode_record(&bytes[..n]).unwrap())
 }
 
+/// Decode OMS's durable proof independently of its implementation and serializer.
+fn original_checkpoint(l: &Ledger, e: &hft_event::ExternalFill, proof: bool) -> Vec<u8> {
+    let mut w = SnapshotWriter::new(1 << 22);
+    l.snapshot(&mut w);
+    w.begin_section(12, if proof { 4 } else { 3 });
+    w.put_bytes(&[6, 0, 0, 0, 32, 0, 0, 0]);
+    w.put_bytes(&[e.venue.0, e.account.0, 0, 0]);
+    w.put_u32(e.inst.0);
+    w.put_u64(e.exch_order_id);
+    w.put_i64(0);
+    w.put_i64(0);
+    w.add_rows(1);
+    if proof {
+        w.put_bytes(&[7, 0, 0, 0, 72, 0, 0, 0]);
+        w.put_bytes(&[e.venue.0, e.account.0, e.side as u8, 0]);
+        w.put_u32(e.inst.0);
+        for n in [
+            e.exch_order_id,
+            e.trade_id,
+            e.fill_seq,
+            e.qty.0 as u64,
+            e.px.0 as u64,
+            e.cash_amount.0 as u64,
+            e.fee.0 as u64,
+        ] {
+            w.put_u64(n);
+        }
+        w.put_bytes(&e.fee_asset.0.to_le_bytes());
+        w.put_bytes(&[0; 6]);
+        w.add_rows(1);
+    }
+    w.end_section();
+    w.as_bytes().to_vec()
+}
+
+#[test]
+fn led_296_original_receipt_proof_survives_fifo_and_is_independent_of_notes() {
+    let rd = rd_cash();
+    for positive in [false, true] {
+        let mut cfg = cfg_lf();
+        cfg.ext_dedup_cap = 2;
+        let mut j = JournalLedger::from_snapshot(
+            &mut SnapshotReader::new(&snap(&booted_with(rd))),
+            rd,
+            &cfg,
+            &caps_lf(),
+        )
+        .unwrap();
+        let mut raw = ext(hft_event::ExternalCause::Unknown, Buy, BTC_P2, "0.001", "60000");
+        raw.exch_order_id = 9900;
+        raw.trade_id = if positive { 99 } else { 0 };
+        raw.fill_seq = if positive { 0 } else { raw.qty.0 as u64 };
+        raw.cash_qty = raw.qty;
+        raw.cash_amount = Qty(-11_700);
+        raw.fee = Qty(17);
+        raw.fee_asset = USDT;
+        apply(&mut j, &raw).unwrap();
+        assert_eq!(cash(j.ledger(), A1, P2, USDT).total.0, 50_000_000_000 - 11_717);
+        let (mut duplicate, note) = foreign_pair(raw.qty.0, raw.cash_amount.0, raw.qty.0);
+        duplicate.qty = raw.qty;
+        duplicate.trade_id = raw.trade_id;
+        duplicate.fee = raw.fee;
+        duplicate.fee_asset = raw.fee_asset;
+        for i in 0..3 {
+            let mut other = raw;
+            other.exch_order_id = 0;
+            other.trade_id = 100 + i;
+            other.fill_seq = 0;
+            other.side = Sell;
+            other.qty = Qty(1);
+            other.cash_qty = other.qty;
+            other.cash_amount = Qty(1);
+            other.fee = Qty(0);
+            apply(&mut j, &other).unwrap();
+        }
+        assert_eq!(j.ledger().ext_seen(A1, P2).len(), 2);
+        let bytes = original_checkpoint(j.ledger(), &raw, true);
+        let restored =
+            JournalLedger::from_snapshot(&mut SnapshotReader::new(&bytes), rd, &cfg, &caps_lf()).unwrap();
+        for mut state in [j, restored] {
+            let before = snap(state.ledger());
+            for _ in 0..2 {
+                apply(&mut state, &duplicate).unwrap();
+                apply(&mut state, &raw).unwrap();
+                assert_eq!(snap(state.ledger()), before);
+            }
+            assert_eq!(state.stats().unmapped_fills, 0);
+            // An output claiming another booking cannot authorize it.
+            assert_eq!(apply(&mut state, &note), Err(JournalApplyError::ForeignEvidence));
+            assert_eq!(snap(state.ledger()), before);
+        }
+        let mut old = JournalLedger::from_snapshot(
+            &mut SnapshotReader::new(&original_checkpoint(&booted_with(rd), &raw, false)),
+            rd,
+            &cfg,
+            &caps_lf(),
+        )
+        .unwrap();
+        let before = snap(old.ledger());
+        assert_eq!(
+            apply(&mut old, &duplicate),
+            Err(JournalApplyError::UnsupportedExternalCash)
+        );
+        assert_eq!(snap(old.ledger()), before);
+    }
+}
+
+#[test]
+fn led_297_receipt_mismatch_fails_before_booking_and_latches() {
+    let rd = rd_cash();
+    let mut base = cold(&booted_with(rd), rd);
+    let mut raw = ext(hft_event::ExternalCause::Unknown, Buy, BTC_P2, "0.001", "60000");
+    raw.exch_order_id = 9900;
+    raw.trade_id = 99;
+    raw.fill_seq = 0;
+    raw.cash_qty = raw.qty;
+    raw.cash_amount = Qty(-11_700);
+    raw.fee = Qty(17);
+    raw.fee_asset = USDT;
+    apply(&mut base, &raw).unwrap();
+    for row in 0..12 {
+        let mut j = base.clone();
+        let (mut e, _) = foreign_pair(raw.qty.0, raw.cash_amount.0, raw.qty.0);
+        e.qty = raw.qty;
+        e.trade_id = raw.trade_id;
+        e.fee = raw.fee;
+        e.fee_asset = raw.fee_asset;
+        let want = match row {
+            0 => {
+                e.trade_id += 1;
+                JournalApplyError::UnsupportedExternalCash
+            }
+            1 => {
+                e.qty.0 += 1;
+                JournalApplyError::UnsupportedExternalCash
+            }
+            2 => {
+                e.cum_filled.0 += 1;
+                e.cash_qty = e.cum_filled;
+                JournalApplyError::UnsupportedExternalCash
+            }
+            3 => {
+                e.cash_qty = Qty(0);
+                JournalApplyError::MissingCash
+            }
+            4 => {
+                e.cash_qty.0 += 1;
+                JournalApplyError::CashCoverage
+            }
+            5 => {
+                e.cash_sum.0 += 1;
+                JournalApplyError::CashConflict
+            }
+            6 => {
+                e.fee.0 += 1;
+                JournalApplyError::CashConflict
+            }
+            7 => {
+                e.fee_asset = BTC;
+                JournalApplyError::CashConflict
+            }
+            8 => {
+                e.detail = Sell as u8;
+                JournalApplyError::Identity
+            }
+            9 => {
+                e.avg_px.0 += 1;
+                JournalApplyError::CashConflict
+            }
+            10 => {
+                let mut other = raw;
+                other.trade_id += 1;
+                apply(&mut j, &other).unwrap();
+                // Replaying the first input cannot create a single-execution proof again.
+                apply(&mut j, &raw).unwrap();
+                JournalApplyError::UnsupportedExternalCash
+            }
+            _ => {
+                let mut alias = raw;
+                alias.exch_order_id += 1;
+                let prior = snap(j.ledger());
+                apply(&mut j, &alias).unwrap();
+                assert_eq!(snap(j.ledger()), prior);
+                e.exch_order_id = alias.exch_order_id;
+                JournalApplyError::UnsupportedExternalCash
+            }
+        };
+        let before = snap(j.ledger());
+        assert_eq!(apply(&mut j, &e), Err(want), "row {row}");
+        assert_eq!(snap(j.ledger()), before);
+        assert_eq!(apply(&mut j, &raw), Err(want), "failure must latch");
+    }
+}
+
 #[test]
 fn led_290_foreign_cash_uses_original_input_and_requires_exact_event_evidence() {
     for row in 0..14 {

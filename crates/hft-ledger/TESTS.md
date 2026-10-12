@@ -23,7 +23,7 @@ spec: README.md
 | 仓位与已实现(平均成本法) | LED-010、LED-021–LED-025、LED-030–LED-039、LED-240、LED-241、LED-243、LED-275–LED-278 |
 | 余额初始化、校验与基线 | LED-039–LED-046、LED-260–LED-262 |
 | 外部成交(`ExternalFill`) | LED-050–LED-081、LED-188、LED-240、LED-245、LED-283–LED-285、LED-292、LED-293 |
-| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282、LED-286–LED-291、LED-295 |
+| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282、LED-286–LED-291、LED-295–LED-297 |
 | 资金费 | LED-090–LED-104、LED-136–LED-138、LED-240、LED-245、LED-260 |
 | 资金费时刻归一化 | LED-091、LED-110–LED-116 |
 | 资金费对账校正 | LED-270、LED-268、LED-114、LED-120–LED-139、LED-244、LED-261 |
@@ -2960,6 +2960,26 @@ spec: README.md
 - 步骤:独立冷消费到确认事件边界,比较账本字节和抵扣注记;分别漏写、重复写、改变抵扣量及改变品种
 - 期望:冷热节 1/13/22 相等且抵扣注记各一次;四种错误均由注记核对发现并锁存,后续正确输入不能掩盖
 - 实现:`crates/hft-testkit/tests/reconcile_actor.rs::led_295_cold_offset_notes_are_generated_and_compared_independently`
+
+### LED-296 冷端单笔证明跨去重淘汰与恢复
+
+- 规则:[冷消费者](README.md#冷消费者journalledger)
+- 级别:unit
+- 里程碑:M2
+- 前置:严格结算、普通去重容量 2、正/零 ID 原件各一组
+- 步骤:从原始 Input 入账,三笔其他成交使普通键淘汰;独立构造 OMS v4 行恢复,原状态与恢复状态各重复原件和累计回报两次;追加伪造入账注记,另以无证明 v3 起步
+- 期望:首次钱包扣 11717,重复后账本节 1/13/22 字节不变;额外注记 ForeignEvidence;旧格式不能放行跨来源
+- 实现:`crates/hft-ledger/tests/settlement_journal.rs::led_296_original_receipt_proof_survives_fifo_and_is_independent_of_notes`
+
+### LED-297 冷端拒绝错误重复证据且锁存失败
+
+- 规则:[冷消费者](README.md#冷消费者journalledger)
+- 级别:unit
+- 里程碑:M2
+- 前置:原始 Unknown 成交实际入账
+- 步骤:12 行改变 ID、委托量、累计量、覆盖、金额、费用/资产、方向、价格,或交付第二个不同成交键后重放首笔,另以同成交键不同订单号制造账本重复
+- 期望:各自对应错误在记账前发生,账本字节不变;后续完整原件不能掩盖失败,不同键使单笔证明永久失效
+- 实现:`crates/hft-ledger/tests/settlement_journal.rs::led_297_receipt_mismatch_fails_before_booking_and_latches`
 
 ## 验收
 

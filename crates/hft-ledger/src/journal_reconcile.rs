@@ -106,7 +106,10 @@ impl Reconcile {
         {
             return Err(Error::ReconcileEvidence);
         }
-        foreign.external(&e)?;
+        if foreign.validate_external(&e)? {
+            return Err(Error::UnsupportedExternalCash);
+        }
+        foreign.external(&e, false)?;
         let applied = ledger
             .apply_reconciled_external(&e, t)
             .map_err(Error::Settlement)?;

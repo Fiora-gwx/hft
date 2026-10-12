@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | RPL-095、RPL-104、RPL-241、RPL-242 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | RPL-001–RPL-004、RPL-070、RPL-079 |
-| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-281 |
+| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-282 |
 | sim | RPL-090–RPL-108、RPL-120–RPL-129、RPL-140–RPL-145、RPL-259 |
 | compare | RPL-160–RPL-173 |
 | latency | RPL-190–RPL-206 |
@@ -2289,6 +2289,16 @@ spec: README.md
 - 步骤:根据原始字节建立临时 files-v1 指针;真实 zstd 压缩,只以本地对象存储替代 S3 交付;经 xtask 获取、复用缓存,再由同一回放包装器执行普通回放、完整重算、第一小时检查点到 H2 之后窗口的三项检查;测试执行器将固定 cargo 命令映射到已构建 example,不启动编译器;最后篡改缓存
 - 期望:十个文件逐字节相等,再次获取零下载;三项真实回放成功,完整与窗口 Advice 数从 journal 独立统计,普通回放与重算的 Input/Output/快照计数相等;源文件不变,坏缓存退出 2 且不执行回放。CI 证据保存指针和各项报告,明确标记 generated_not_frozen;不代替 S3/OIDC 实测或固定 T1/T3 验收
 - 实现:`apps/replayer/tests/fixture_bundle.rs::rpl_281_generated_bundle_fetch_replays_full_and_checkpoint_window`
+
+### RPL-282 原件重复的真实文件完整与窗口回放
+
+- 规则:[verify](README.md#verify)
+- 级别:replay
+- 里程碑:M2
+- 输入:CI 的实际 sequencer 与离线 journal 写入器生成正/零成交 ID 两份日志,原件入账后普通去重队列绕回,随后各交付防御与 StaleGen 累计重复及重复原件
+- 步骤:调用实际 replayer CLI 完整回放,并从入账前、入账后及普通键淘汰后的关键帧起步;比较调用前后的文件字节
+- 期望:所有窗口 verify=pass、无分歧且至少核对起止两个快照;源文件不变;生成时钱包严格等于全部原始现金减费用
+- 实现:`apps/replayer/tests/receipt.rs::rpl_282_original_receipt_files_verify_full_and_snapshot_windows`
 
 ## 验收
 

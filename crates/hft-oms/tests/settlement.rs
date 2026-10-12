@@ -59,12 +59,260 @@ fn original_external(eid: u64) -> hft_event::ExternalFill {
     }
 }
 
+fn original_copy(h: &H, r: OrderRef, f: &hft_event::ExternalFill, stale: bool) -> OrderEvent {
+    let mut e = h.oe(r, OrderEventKind::Fill);
+    e.slot = if stale { SlotId(r.slot) } else { SlotId(0) };
+    e.r#gen += 7;
+    e.detail = f.side as u8;
+    e.exch_order_id = f.exch_order_id;
+    e.trade_id = f.trade_id;
+    e.qty = f.qty;
+    e.cum_filled = f.qty;
+    e.px = f.px;
+    e.avg_px = f.px;
+    e.cash_qty = f.cash_qty;
+    e.cash_sum = f.cash_amount;
+    e.fee = f.fee;
+    e.fee_asset = f.fee_asset;
+    e
+}
+
+#[test]
+fn oms_477_original_receipt_proves_only_the_same_first_execution_after_restore() {
+    for stale in [false, true] {
+        for positive_id in [false, true] {
+            for cash in [-11_700, 0, 11_800] {
+                for fee in [-17, 0, 17] {
+                    let (mut h, rd) = fixture();
+                    let r = h.place_ok(&sell_y(), 0);
+                    let mut f = original_external(9900);
+                    f.trade_id = u64::from(positive_id);
+                    f.fill_seq = if positive_id { 0 } else { f.qty.0 as u64 };
+                    f.cash_amount = Qty(cash);
+                    f.fee = Qty(fee);
+                    f.fee_asset = USDT;
+                    assert_eq!(h.o.external_cash_guard(&f), Ok(false));
+                    h.o.remember_external_cash(&f, true).unwrap();
+                    h.o.external_adjust(
+                        A1,
+                        VX,
+                        g1(),
+                        Y,
+                        Qty(-f.qty.0),
+                        f.exch_order_id,
+                        hft_event::ExternalCause::Unknown,
+                        &mut h.out,
+                    );
+                    let e = original_copy(&h, r, &f, stale);
+                    let before = snap(&h.o);
+                    assert_eq!(
+                        SnapshotReader::new(&before)
+                            .find_section(SECTION_OMS_LINKS)
+                            .unwrap()
+                            .unwrap()
+                            .version,
+                        4
+                    );
+                    for _ in 0..2 {
+                        h.o = restore(&snap(&h.o), rd);
+                        h.ev(&e, 5);
+                        assert_eq!(h.out.cash_error, None);
+                        assert!(
+                            h.out.fills.is_empty() && h.out.foreign_fills.is_empty() && h.out.fees.is_empty()
+                        );
+                        assert_eq!(snap(&h.o), before);
+                        assert_eq!(h.o.external_cash_guard(&f), Ok(true));
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn oms_478_original_receipt_never_authorizes_wrong_or_missing_facts() {
+    for row in 0..13 {
+        let (mut h, rd) = fixture();
+        let r = h.place_ok(&sell_y(), 0);
+        let mut f = original_external(9900);
+        f.fee_asset = USDT;
+        f.fee = Qty(17);
+        f.cash_amount = Qty(-11_700);
+        h.o.remember_external_cash(&f, row != 11).unwrap();
+        let mut e = original_copy(&h, r, &f, true);
+        let want = match row {
+            0 => {
+                e.trade_id += 1;
+                CashError::ExternalOverlap
+            }
+            1 => {
+                e.qty.0 += 1;
+                CashError::ExternalOverlap
+            }
+            2 => {
+                e.cum_filled.0 += 1;
+                e.cash_qty = e.cum_filled;
+                CashError::ExternalOverlap
+            }
+            3 => {
+                e.cash_qty = Qty(0);
+                CashError::Missing
+            }
+            4 => {
+                e.cash_sum.0 += 1;
+                CashError::Conflict
+            }
+            5 => {
+                e.fee.0 += 1;
+                CashError::Conflict
+            }
+            6 => {
+                e.fee_asset = BTC;
+                CashError::Conflict
+            }
+            7 => {
+                e.detail = 1;
+                CashError::Identity
+            }
+            8 => {
+                e.avg_px.0 += 1;
+                CashError::Conflict
+            }
+            9 => {
+                e.what = OrderEventKind::QueryResult;
+                CashError::Untracked
+            }
+            10 => {
+                e.r#gen = r.r#gen;
+                CashError::ExternalOverlap
+            }
+            11 => CashError::ExternalOverlap,
+            _ => {
+                let mut later = f;
+                later.trade_id += 1;
+                h.o.remember_external_cash(&later, true).unwrap();
+                // Restoring and replaying the first raw receipt must not recreate lost proof.
+                h.o = restore(&snap(&h.o), rd);
+                h.o.remember_external_cash(&f, false).unwrap();
+                CashError::ExternalOverlap
+            }
+        };
+        h.o = restore(&snap(&h.o), rd);
+        let before = snap(&h.o);
+        h.ev(&e, 4);
+        assert_eq!(h.out.cash_error, Some(want), "row {row}");
+        assert_eq!(snap(&h.o), before, "row {row}");
+        assert!(h.out.fills.is_empty() && h.out.foreign_fills.is_empty() && h.out.fees.is_empty());
+    }
+    let (mut h, rd) = fixture();
+    let f = original_external(9900);
+    h.o.remember_external_cash(&f, true).unwrap();
+    h.o = restore(&snap(&h.o), rd);
+    let before = snap(&h.o);
+    let mut conflict = f;
+    conflict.cash_amount.0 += 1;
+    assert_eq!(h.o.external_cash_guard(&conflict), Err(CashError::Conflict));
+    assert_eq!(
+        h.o.remember_external_cash(&conflict, false),
+        Err(CashError::Conflict)
+    );
+    assert_eq!(snap(&h.o), before);
+}
+
+fn receipt_snapshot(bytes: &[u8], mode: u8) -> Vec<u8> {
+    let reader = SnapshotReader::new(bytes);
+    let mut w = SnapshotWriter::new(1 << 22);
+    for id in [
+        SECTION_ORDER_SLOTS,
+        hft_oms::SECTION_OMS_COUNTERS,
+        SECTION_OMS_LINKS,
+    ] {
+        let s = reader.find_section(id).unwrap().unwrap();
+        w.begin_section(
+            id,
+            if id == SECTION_OMS_LINKS && matches!(mode, 11 | 13) {
+                3
+            } else {
+                s.version
+            },
+        );
+        if id != SECTION_OMS_LINKS {
+            w.put_bytes(s.body);
+            w.add_rows(s.count);
+        } else {
+            let mut tail = s.body;
+            for _ in 0..s.count {
+                let len = u32::from_le_bytes(tail[4..8].try_into().unwrap()) as usize;
+                let mut row = tail[..8 + len].to_vec();
+                tail = &tail[8 + len..];
+                let kind = row[0];
+                if (kind == 6 && mode == 10) || (kind == 7 && mode == 13) {
+                    continue;
+                }
+                if kind == 7 {
+                    let b = &mut row[8..];
+                    match mode {
+                        0 => b[3] = 1,
+                        1 => b[2] = 3,
+                        2 => b[4..8].copy_from_slice(&u32::MAX.to_le_bytes()),
+                        3 => b[8] ^= 1,
+                        4 => b[32..40].fill(0),
+                        5 => b[40..48].fill(0),
+                        6 => b[24] = 1,
+                        7 => b[66] = 1,
+                        8 => b[64..66].fill(0xFF),
+                        _ => {}
+                    }
+                }
+                if kind == 6 && mode == 12 {
+                    row[10] = 1;
+                    row[24..32].copy_from_slice(&1i64.to_le_bytes());
+                }
+                w.put_bytes(&row);
+                w.add_rows(1);
+                if kind == 7 && mode == 9 {
+                    w.put_bytes(&row);
+                    w.add_rows(1);
+                }
+            }
+        }
+        w.end_section();
+    }
+    w.as_bytes().to_vec()
+}
+
+#[test]
+fn oms_479_receipt_restore_rejects_corruption_and_legacy_has_no_proof() {
+    let (mut h, rd) = fixture();
+    let r = h.place_ok(&sell_y(), 0);
+    let f = original_external(9900);
+    let e = original_copy(&h, r, &f, true);
+    h.o.remember_external_cash(&f, true).unwrap();
+    let good = snap(&h.o);
+    let mut cfg = p0();
+    cfg.slots.set(VX, A1, 1);
+    for mode in 0..13 {
+        let bytes = receipt_snapshot(&good, mode);
+        assert!(
+            Oms::restore(&mut SnapshotReader::new(&bytes), &cfg, rd).is_err(),
+            "mode {mode}"
+        );
+    }
+    let old = receipt_snapshot(&good, 13);
+    h.o = restore(&old, rd);
+    assert_eq!(h.o.external_cash_guard(&f), Ok(false));
+    h.o.remember_external_cash(&f, false).unwrap();
+    h.ev(&e, 3);
+    assert_eq!(h.out.cash_error, Some(CashError::ExternalOverlap));
+    assert!(h.out.foreign_fills.is_empty());
+}
+
 #[test]
 fn oms_476_reconcile_cash_capacity_counts_distinct_order_identities() {
     use hft_event::{ReconcileBatchHdr, ReconcileBatchView, ReconcileReport};
     use zerocopy::{FromZeros, IntoBytes};
     let mut h = H::with(|c| c.foreign_fill_track.set(VX, A1, 2));
-    h.o.remember_external_cash(&original_external(70)).unwrap();
+    h.o.remember_external_cash(&original_external(70), true).unwrap();
     let mut summary = ReconcileReport::new_zeroed();
     summary.report_id = 7;
     summary.venue = VX;
@@ -459,7 +707,7 @@ fn oms_472_foreign_cash_bad_facts_and_cross_path_aliases_are_atomic() {
                 e.exch_order_id = 9901;
                 let ext = original_external(e.exch_order_id);
                 h.o.external_cash_guard(&ext).unwrap();
-                h.o.remember_external_cash(&ext).unwrap();
+                h.o.remember_external_cash(&ext, true).unwrap();
                 h.o = restore(&snap(&h.o), rd);
                 if row == 10 {
                     e.slot = SlotId(r.slot);
@@ -524,6 +772,11 @@ fn oms_475_sim_reset_clears_only_that_accounts_foreign_cash() {
     });
     let mut h = H::from_cfg(&p0(), rd);
     assert!(h.o.table_view(VX, S1).is_some());
+    let mut raw = original_external(9901);
+    h.o.remember_external_cash(&raw, true).unwrap();
+    raw.account = S1;
+    h.o.remember_external_cash(&raw, true).unwrap();
+    assert_eq!(h.o.external_cash_guard(&raw), Ok(true));
     let r = h.place_ok(&sell_y(), 0);
     let mut e = event(&h, r, 1, -11700);
     e.slot = SlotId(0);
@@ -537,6 +790,9 @@ fn oms_475_sim_reset_clears_only_that_accounts_foreign_cash() {
     assert_eq!(h.out.cash_error, None);
     assert_eq!(h.out.foreign_fills.len(), 1);
     h.o.sim_reset(S1).unwrap();
+    assert_eq!(h.o.external_cash_guard(&raw), Ok(false));
+    raw.account = A1;
+    assert_eq!(h.o.external_cash_guard(&raw), Ok(true));
     assert!(h.o.has_foreign_cash(VX, A1, Y, e.exch_order_id));
     assert!(!h.o.has_foreign_cash(VX, S1, Y, e.exch_order_id));
     h.ev(&e, 3);

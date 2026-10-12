@@ -395,7 +395,11 @@ fn oms_455_recovery_end_4096(c: &mut Criterion) {
 }
 
 fn oms_474_foreign_cash_provenance_64(c: &mut Criterion) {
-    let mut h = H::new();
+    let rd = build_rd(&RdOpts {
+        vx_perp_cash: true,
+        ..RdOpts::default()
+    });
+    let mut h = H::from_cfg(&p0(), rd);
     let mut e = hft_event::ExternalFill {
         venue: VX,
         account: A1,
@@ -417,7 +421,7 @@ fn oms_474_foreign_cash_provenance_64(c: &mut Criterion) {
     };
     for id in 1..=64 {
         e.exch_order_id = id;
-        h.o.remember_external_cash(&e).unwrap();
+        h.o.remember_external_cash(&e, true).unwrap();
     }
     c.bench_function("oms/foreign_cash_seen", |b| {
         b.iter(|| black_box(h.o.has_foreign_cash(VX, A1, Y, black_box(64))))
@@ -426,7 +430,7 @@ fn oms_474_foreign_cash_provenance_64(c: &mut Criterion) {
         b.iter(|| black_box(h.o.external_cash_guard(black_box(&e))))
     });
     c.bench_function("oms/remember_external_cash", |b| {
-        b.iter(|| black_box(h.o.remember_external_cash(black_box(&e))))
+        b.iter(|| black_box(h.o.remember_external_cash(black_box(&e), false)))
     });
     {
         use hft_event::{ReconcileBatchHdr, ReconcileBatchView, ReconcileReport};
@@ -451,7 +455,15 @@ fn oms_474_foreign_cash_provenance_64(c: &mut Criterion) {
             venue: VX,
             _pad: 0,
         };
-        let bytes = [hdr.as_bytes(), summary.as_bytes(), p.as_bytes(), e.as_bytes()].concat();
+        let mut incoming = e;
+        incoming.trade_id += 1;
+        let bytes = [
+            hdr.as_bytes(),
+            summary.as_bytes(),
+            p.as_bytes(),
+            incoming.as_bytes(),
+        ]
+        .concat();
         let batch = ReconcileBatchView::read(&bytes).unwrap();
         c.bench_function("oms/reconcile_cash_guard", |b| {
             b.iter(|| black_box(h.o.reconcile_cash_guard(black_box(&batch))).unwrap())
