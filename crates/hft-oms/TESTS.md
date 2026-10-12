@@ -29,7 +29,7 @@ spec: README.md
 | 延迟样本 | OMS-012, OMS-071, OMS-080–OMS-089 |
 | REPORT_DECODE | OMS-090, OMS-091 |
 | 恢复后的 gw 映射 | OMS-092, OMS-093 |
-| 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460、OMS-467、OMS-468、OMS-470–OMS-474 |
+| 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460、OMS-467、OMS-468、OMS-470–OMS-475 |
 | 成交净量(B4) | OMS-067, OMS-120–OMS-124, OMS-184, OMS-404 |
 | Unknown 收敛流程 | OMS-032, OMS-065, OMS-066, OMS-068, OMS-070, OMS-073, OMS-089, OMS-130–OMS-154, OMS-400, OMS-402, OMS-420 |
 | 墓碑与迟到成交(C1) | OMS-013, OMS-148, OMS-160–OMS-164, OMS-287, OMS-322, OMS-462、OMS-469 |
@@ -4263,7 +4263,7 @@ spec: README.md
 - 级别:unit
 - 里程碑:M2
 - 前置:PERP_CASH,已记录第一笔完整结算并恢复
-- 输入:缺覆盖、超覆盖、同水位异额、溢出、错方向、零订单号、零价格、不支持的查询、已记外来后匹配普通槽、原始成交后转外来十行
+- 输入:缺覆盖、超覆盖、同水位异额、溢出、错方向、零订单号、零价格、不支持的查询、已记外来后匹配普通槽、原始成交后转外来或普通槽、未知 FeeOnly 十二行
 - 步骤:先记录一条外来结算并恢复,分别施加错误
 - 期望:对应 Missing/Coverage/Conflict/Overflow/Identity/Untracked/ExternalOverlap;快照字节不变,无成交或费用输出
 - 实现:`crates/hft-oms/tests/settlement.rs::oms_472_foreign_cash_bad_facts_and_cross_path_aliases_are_atomic`
@@ -4287,6 +4287,16 @@ spec: README.md
 - 步骤:填满 64 行,查询最后一行的来源、核验与重复登记
 - 期望:三项基准满足归属预算、运行期零分配;CI smoke 只报告
 - 实现:`crates/hft-oms/benches/oms.rs::oms_474_foreign_cash_provenance_64`
+
+### OMS-475 模拟重置清空本账户结算来源
+
+- 规则:[使用本组件](README.md#使用本组件)
+- 级别:unit
+- 里程碑:M2
+- 前置:实盘和模拟账户各有同订单号的外来累计结算
+- 步骤:重置模拟账户,再向两账户交付相同回报
+- 期望:模拟账户按新资金周期重新记账;另一账户保留水位且不重复入账
+- 实现:`crates/hft-oms/tests/settlement.rs::oms_475_sim_reset_clears_only_that_accounts_foreign_cash`
 
 ## 验收
 

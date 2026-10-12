@@ -82,7 +82,7 @@ impl Oms {
     pub fn force_unknown(&mut self, v: VenueId, a: AccountId, now: Tsc, cause_seq: u64, out: &mut OmsOut) -> u32;
     /// 仅 Sim 账户(`SimReset`):要求该账户无 `Unknown` 槽且无非终态 IOC/FOK 槽(否则 Err,sequencer 以 `PreconditionFailed{SimNotIdle}` 拒绝,
     /// 前置条件的唯一定义在 [control-plane](../../docs/subsystems/control-plane.md))。先清除该账户已有墓碑,再把其余非终态槽(只可能是挂单)
-    /// 按撤销终结并写进墓碑(sim-gw 同时撤单,其 CancelAck 命中墓碑按 dup 处理),最后清零该账户 LegTracker、InflightBook 与冒烟单记录。
+    /// 按撤销终结并写进墓碑(sim-gw 同时撤单,其 CancelAck 命中墓碑按 dup 处理),最后清零该账户 LegTracker、InflightBook、结算来源水位与冒烟单记录。
     /// sim-gw 在重置后不再产生该账户此前订单的成交(规则归 hft-sim);若仍出现,按墓碑规则照常入账并报 P0。
     pub fn sim_reset(&mut self, a: AccountId) -> Result<(), OpError>;
     /// 残余核销(`WriteOffResidual{account, group}`,sequencer 命令路径;命令的权限与确认归 control-plane):该 group 须静止
@@ -541,9 +541,9 @@ gw 对某 (venue, account) 的回报帧解码失败时写 `ConnState{role = User
 9. **数量先由非成交回报带来时的费用**:`CancelReject`、`CancelAck`/`Expired`、`AmendAck`/`AmendReject`、`QueryResult` 与对账收敛带来的增量不带费用(第 3 条照常入账,`fee = 0`);随后到达、数量已被覆盖(`d ≤ 0`)的 `PartialFill`/`Fill`,若 `ev.cum_filled > SlotExt.fee_cum`,它的 `fee` 按 `FeeOnly` 入账(`FeeOut`,净量补差同"成交净量");`fee_cum ≥ ev.cum_filled` 的是重复回报,不入账。每条 `PartialFill`/`Fill` 之后 `fee_cum = max(fee_cum, ev.cum_filled)`;其他回报不改 `fee_cum`。
 
 10. **显式永续结算**:venue 声明 [PERP_CASH](../hft-refdata/README.md#交易所能力表venuecaps) 时,槽与墓碑按完整身份保存 `cash_qty/cash_sum`。回报的 `inst` 必须与命中的槽或墓碑一致。成交累计量前移时,要求回报覆盖全部累计成交,已有覆盖量等于本地 `filled`;`FillOut.cash = Some(ev.cash_sum − saved.cash_sum)`,单位为该 inst 报价资产的 `qty_exp`,不含费用与资金费。已知零额也输出 `Some(0)`,重复水位金额不一致为 `Conflict`,溢出为 `Overflow`,缺失/部分覆盖为 `Missing`,非法覆盖为 `Coverage`。旧累计量不倒退水位;`FeeOnly` 不推进结算。槽回收时复制水位到墓碑,迟到成交只产出差额。未声明该能力的旧配置保持 `FillOut.cash = None`,不能据此承诺钱包实额一致。
-11. **外来结算水位**:严格模式下防御路径与 StaleGen 的 Fill/PartialFill 要有非零交易所订单号、明确方向、正价格和完整累计结算覆盖。按 `(venue, account, inst, exch_order_id)` 保存累计毛量与现金,只产生差额;同水位异额报 Conflict,旧水位不回退。已知槽或墓碑的订单号不能被错误身份重新登记为外来单。未知身份或报告种类无法证明来源时输出 `CashError::Untracked`;外来成交重叠未携带可扣的现金事实时输出 `ExternalOverlap`;现行 `ReconcileReport` 不带结算事实,需要推进成交量时输出 `Missing`。这些错误不推进相关槽、墓碑或成交/费用输出,调用方必须先处理 `OmsOut.cash_error`,不能当作无成交继续运行。跨路径支持需要成交区间与对应现金事实,不能按数量比例分摊现金。
+11. **外来结算水位**:严格模式下防御路径与 StaleGen 的 Fill/PartialFill 要有非零交易所订单号、明确方向、正价格和完整累计结算覆盖。按 `(venue, account, inst, exch_order_id)` 保存累计毛量与现金,只产生差额;同水位异额报 Conflict,旧水位不回退。已知槽或墓碑的同品种订单号不能被错误身份重新登记为外来单;缺少已记录来源且回报代数不大于该槽已用代数时,不能证明它不是退役订单,报 Untracked。未知身份或报告种类无法证明来源时输出 `CashError::Untracked`;外来成交重叠未携带可扣的现金事实时输出 `ExternalOverlap`;现行 `ReconcileReport` 不带结算事实,需要推进成交量时输出 `Missing`。这些错误不推进相关槽、墓碑或成交/费用输出,调用方必须先处理 `OmsOut.cash_error`,不能当作无成交继续运行。跨路径支持需要成交区间与对应现金事实,不能按数量比例分摊现金。
 
-12. **来源与容量**:原始 ExternalFill 的非零交易所订单号经 `external_cash_guard` 先核验,账本验证成功后经 `remember_external_cash` 保留来源;该来源与外来累计水位不能互换,两个到达方向都报 ExternalOverlap。`has_foreign_cash` 只读查询累计来源,防止它后来被槽或墓碑重复认领。来源与累计水位共用每表 `foreign_fill_track` 个预分配行,写满报 Capacity,不淘汰。未知身份的 FeeOnly 不具备费用去重事实,严格模式报 Untracked。
+12. **来源与容量**:原始 ExternalFill 的非零交易所订单号经 `external_cash_guard` 先核验,账本验证成功后经 `remember_external_cash` 保留来源;该来源与外来累计水位不能互换,两个到达方向都报 ExternalOverlap。`has_foreign_cash` 只读查询原始与累计两类来源,防止它后来被槽或墓碑重复认领。来源与累计水位共用每表 `foreign_fill_track` 个预分配行,写满报 Capacity,不淘汰。未知身份的 FeeOnly 不具备费用去重事实,严格模式报 Untracked。
 
 `FillOut.cash: Option<Qty>` 只提供结算增量,资产由该 inst 的报价资产确定。`CashError` 的其余变体 `Identity` 表示命中的完整订单身份与 inst 不一致。
 

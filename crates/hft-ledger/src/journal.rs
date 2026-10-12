@@ -535,7 +535,8 @@ impl JournalLedger {
                     }
                     if n.source == NoteSource::Oms
                         && n.code == code::OMS_FOREIGN_FILL
-                        && self.ledger.inst(n.inst).is_some_and(|i| i.perp_cash)
+                        && (self.foreign.has_pending()
+                            || self.ledger.inst(n.inst).is_some_and(|i| i.perp_cash))
                     {
                         self.foreign.note(&n, &mut self.ledger, t)?;
                     } else {
@@ -848,6 +849,9 @@ impl JournalLedger {
         if e.inst != ev.inst || s.venue != e.venue {
             return Err(JournalApplyError::Identity);
         }
+        if s.perp_cash && self.foreign.overlaps_order(ev) {
+            return Err(JournalApplyError::UnsupportedExternalCash);
+        }
         let cash = cash_increment(s.perp_cash, &e, ev)?;
         let fee = FeeDelta {
             account: e.account,
@@ -1035,6 +1039,7 @@ impl JournalLedger {
                     .map(|(_, b)| b.clone())
                     .unwrap_or_default();
                 self.ledger.sim_reset(a, &init, t);
+                self.foreign.sim_reset(a);
             }
             PendingCmd::Baseline(a, v) => {
                 let mut out = crate::fixed::FixedVec::new();

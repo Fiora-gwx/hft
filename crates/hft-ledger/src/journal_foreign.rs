@@ -35,6 +35,22 @@ pub(crate) struct Foreign {
 }
 
 impl Foreign {
+    pub(crate) fn has_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    pub(crate) fn overlaps_order(&self, e: &OrderEvent) -> bool {
+        e.exch_order_id != 0
+            && self
+                .rows
+                .iter()
+                .any(|r| r.key == Key(e.venue, e.account, e.inst, e.exch_order_id))
+    }
+
+    pub(crate) fn sim_reset(&mut self, account: AccountId) {
+        self.rows.retain(|r| r.key.1 != account);
+    }
+
     pub(crate) fn restore_row(&mut self, b: &[u8], ledger: &Ledger) -> Result<(), RestoreError> {
         if b.len() != 32 {
             return Err(RestoreError::BadValue);

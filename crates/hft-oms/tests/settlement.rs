@@ -355,7 +355,7 @@ fn oms_471_foreign_cash_cursors_survive_restore_and_reordered_reports() {
 
 #[test]
 fn oms_472_foreign_cash_bad_facts_and_cross_path_aliases_are_atomic() {
-    for row in 0..10 {
+    for row in 0..12 {
         let (mut h, rd) = fixture();
         let r = h.place_ok(&sell_y(), 0);
         let mut first = event(&h, r, 1, -11700);
@@ -410,13 +410,22 @@ fn oms_472_foreign_cash_bad_facts_and_cross_path_aliases_are_atomic() {
                 e.r#gen = r.r#gen;
                 CashError::ExternalOverlap
             }
-            _ => {
+            9 | 10 => {
                 e.exch_order_id = 9901;
                 let ext = original_external(e.exch_order_id);
                 h.o.external_cash_guard(&ext).unwrap();
                 h.o.remember_external_cash(&ext).unwrap();
                 h.o = restore(&snap(&h.o), rd);
+                if row == 10 {
+                    e.slot = SlotId(r.slot);
+                    e.r#gen = r.r#gen;
+                }
                 CashError::ExternalOverlap
+            }
+            _ => {
+                e.what = OrderEventKind::FeeOnly;
+                e.fee = Qty(1);
+                CashError::Untracked
             }
         };
         let before = snap(&h.o);
@@ -459,4 +468,29 @@ fn oms_473_foreign_cash_capacity_never_evicts_a_booked_identity() {
     assert_eq!(h.o.external_cash_guard(&ext), Err(CashError::ExternalOverlap));
     ext.exch_order_id += 1;
     assert_eq!(h.o.external_cash_guard(&ext), Err(CashError::Capacity));
+}
+
+#[test]
+fn oms_475_sim_reset_clears_only_that_accounts_foreign_cash() {
+    let (mut h, _) = fixture();
+    let r = h.place_ok(&sell_y(), 0);
+    let mut e = event(&h, r, 1, -11700);
+    e.slot = SlotId(0);
+    e.detail = 2;
+    e.exch_order_id = 9900;
+    h.ev(&e, 1);
+    assert_eq!(h.out.cash_error, None);
+    e.account = S1;
+    h.ev(&e, 2);
+    assert_eq!(h.out.cash_error, None);
+    assert_eq!(h.out.foreign_fills.len(), 1);
+    h.o.sim_reset(S1).unwrap();
+    assert!(h.o.has_foreign_cash(VX, A1, Y, e.exch_order_id));
+    assert!(!h.o.has_foreign_cash(VX, S1, Y, e.exch_order_id));
+    h.ev(&e, 3);
+    assert_eq!(h.out.cash_error, None);
+    assert_eq!(h.out.foreign_fills[0].cash, Some(Qty(-11700)));
+    e.account = A1;
+    h.ev(&e, 4);
+    assert!(h.out.foreign_fills.is_empty());
 }

@@ -23,7 +23,7 @@ spec: README.md
 | 仓位与已实现(平均成本法) | LED-010、LED-021–LED-025、LED-030–LED-039、LED-240、LED-241、LED-243、LED-275–LED-278 |
 | 余额初始化、校验与基线 | LED-039–LED-046、LED-260–LED-262 |
 | 外部成交(`ExternalFill`) | LED-050–LED-081、LED-188、LED-240、LED-245、LED-283–LED-285 |
-| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282、LED-286–LED-290 |
+| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282、LED-286–LED-291 |
 | 资金费 | LED-090–LED-104、LED-136–LED-138、LED-240、LED-245、LED-260 |
 | 资金费时刻归一化 | LED-091、LED-110–LED-116 |
 | 资金费对账校正 | LED-270、LED-268、LED-114、LED-120–LED-139、LED-244、LED-261 |
@@ -2905,10 +2905,20 @@ spec: README.md
 - 级别:unit
 - 里程碑:M2
 - 前置:第一笔累计现金 −11700,第二笔累计 −11800
-- 输入:注记错误数量、订单号、方向、累计量;缺覆盖、同水位冲突、溢出、缺注记、重复注记及正确后续十行
+- 输入:注记错误数量、订单号、方向、累计量;缺覆盖、同水位冲突、溢出、缺注记、重复注记、改成现货品种或未知品种及匹配的后续十二行
 - 步骤:按 Input/Output 的完整事件交付,错误后再尝试补交
 - 期望:第二笔匹配证据时仅入 −100,重复不入账;错误不改账本,错误持续锁存,注记不提供现金金额
 - 实现:`crates/hft-ledger/tests/settlement_journal.rs::led_290_foreign_cash_uses_original_input_and_requires_exact_event_evidence`
+
+### LED-291 已记录外来来源不能被普通订单重复认领
+
+- 规则:[冷消费者](README.md#冷消费者journalledger)
+- 级别:unit
+- 里程碑:M2
+- 前置:原始 ExternalFill 与外来累计回报两行,相同账户、品种和交易所订单号
+- 步骤:分别连续消费及从含来源行的关键帧恢复,再交付已登记普通槽的同号成交
+- 期望:四行均报 UnsupportedExternalCash,账本快照字节不变
+- 实现:`crates/hft-ledger/tests/settlement_journal.rs::led_291_restored_cash_sources_cannot_be_rebooked_through_ordinary_orders`
 
 ## 验收
 

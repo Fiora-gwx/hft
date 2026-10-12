@@ -13,7 +13,7 @@ impl crate::Oms {
                 t.foreign_cash
                     .iter()
                     .take_while(|r| r.exch_order_id != 0)
-                    .any(|r| r.exch_order_id == eid && r.inst == inst && r.side != 0)
+                    .any(|r| r.exch_order_id == eid && r.inst == inst)
             })
     }
 
@@ -93,13 +93,15 @@ impl crate::Oms {
             return Err(CashError::Untracked);
         }
         // A wrong epoch/slot must never reclassify a known system order as new foreign cash.
-        if (e.slot.0 != 0 && t.slot(e.slot.0).is_some_and(|s| s.r#gen >= e.r#gen))
-            || t.slots
-                .iter()
-                .any(|s| s.state != crate::OrderState::Free && s.exch_order_id == e.exch_order_id)
+        if (e.slot.0 != 0
+            && !self.has_foreign_cash(e.venue, e.account, e.inst, e.exch_order_id)
+            && t.slot(e.slot.0).is_some_and(|s| s.r#gen >= e.r#gen))
+            || t.slots.iter().any(|s| {
+                s.state != crate::OrderState::Free && s.inst == e.inst && s.exch_order_id == e.exch_order_id
+            })
             || t.tombs
                 .iter()
-                .any(|s| s.r#gen != 0 && s.exch_order_id == e.exch_order_id)
+                .any(|s| s.r#gen != 0 && s.inst == e.inst && s.exch_order_id == e.exch_order_id)
         {
             return Err(CashError::Untracked);
         }

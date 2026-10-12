@@ -269,6 +269,9 @@ impl Oms {
             if t.account != a {
                 continue;
             }
+            for row in t.foreign_cash.iter_mut() {
+                *row = <crate::types::ForeignCashRow as zerocopy::FromZeros>::new_zeroed();
+            }
             for tb in t.tombs.iter_mut() {
                 *tb = Tomb::EMPTY;
             }

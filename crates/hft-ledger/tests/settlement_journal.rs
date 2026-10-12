@@ -86,7 +86,7 @@ fn fragment<B: Body>(j: &mut JournalLedger, b: &B, end: bool) -> Result<(), Jour
 
 #[test]
 fn led_290_foreign_cash_uses_original_input_and_requires_exact_event_evidence() {
-    for row in 0..10 {
+    for row in 0..12 {
         let mut j = cold(&booted_with(rd_cash()), rd_cash());
         let (first, note) = foreign_pair(100_000, -11700, 100_000);
         fragment(&mut j, &first, false).unwrap();
@@ -127,6 +127,14 @@ fn led_290_foreign_cash_uses_original_input_and_requires_exact_event_evidence() 
             }
             7 => Some(JournalApplyError::ForeignEvidence), // missing Note at EVENT_END
             8 => Some(JournalApplyError::ForeignEvidence), // duplicate Note
+            10 => {
+                n.inst = BTC_S1;
+                None
+            }
+            11 => {
+                n.inst = InstId(u32::MAX);
+                None
+            }
             _ => None,
         };
         let result = if row == 8 {
@@ -151,6 +159,56 @@ fn led_290_foreign_cash_uses_original_input_and_requires_exact_event_evidence() 
             assert_eq!(result, Err(want), "row {row}");
             assert_eq!(snap(j.ledger()), before, "row {row}");
             assert_eq!(fragment(&mut j, &n, true), Err(want), "failure must latch");
+        }
+    }
+}
+
+#[test]
+fn led_291_restored_cash_sources_cannot_be_rebooked_through_ordinary_orders() {
+    for original in [false, true] {
+        let mut j = one_order(rd_cash());
+        if original {
+            let mut e = ext(hft_event::ExternalCause::Manual, Buy, BTC_P2, "0.001", "60000");
+            e.exch_order_id = 9900;
+            e.trade_id = 99;
+            e.cash_qty = e.qty;
+            e.cash_amount = Qty(-11700);
+            apply(&mut j, &e).unwrap();
+        } else {
+            let (e, n) = foreign_pair(100_000, -11700, 100_000);
+            fragment(&mut j, &e, false).unwrap();
+            fragment(&mut j, &n, true).unwrap();
+        }
+        let mut w = SnapshotWriter::new(1 << 22);
+        j.ledger().snapshot(&mut w);
+        w.begin_section(12, 3);
+        w.put_bytes(&[6, 0, 0, 0, 32, 0, 0, 0]);
+        w.put_bytes(&[P2.0, A1.0, if original { 0 } else { 1 }, 0]);
+        w.put_u32(BTC_P2.0);
+        w.put_u64(9900);
+        w.put_i64(if original { 0 } else { 100_000 });
+        w.put_i64(if original { 0 } else { -11700 });
+        w.add_rows(1);
+        w.end_section();
+        let mut restored = JournalLedger::from_snapshot(
+            &mut SnapshotReader::new(w.as_bytes()),
+            rd_cash(),
+            &cfg_lf(),
+            &caps_lf(),
+        )
+        .unwrap();
+        feed(&mut restored, &epoch_start(7), true);
+        feed(
+            &mut restored,
+            &decision_new(5, 1, A1, P2, BTC_P2, Buy, G1, Qty(100_000)),
+            true,
+        );
+        let mut e = event(5, 100_000, -11700);
+        e.exch_order_id = 9900;
+        for state in [&mut j, &mut restored] {
+            let before = snap(state.ledger());
+            assert_eq!(apply(state, &e), Err(JournalApplyError::UnsupportedExternalCash));
+            assert_eq!(snap(state.ledger()), before);
         }
     }
 }

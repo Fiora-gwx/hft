@@ -823,6 +823,7 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
     // OMS cash is an increment of the original Input's cumulative facts. The cold consumer
     // independently rebuilds that increment and verifies the same-event OMS Note.
     let ff: Vec<hft_oms::ForeignFill> = out.foreign_fills.as_slice().to_vec();
+    let notes_snapshot: Vec<Note> = out.notes.as_slice().to_vec();
     for f in ff.iter() {
         let ef = foreign_to_external(f);
         crate::process::external_fill(e, inst, drv, &ef, false, true)?;
