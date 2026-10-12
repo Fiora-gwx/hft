@@ -996,6 +996,19 @@ fn recovery_end<D: Driver<S>, S: StrategySet>(
         .map_err(fatal)?;
     }
     // Mirror restore batches are sent after EngineClock (see `mirror_restore_all`).
+    // Draining is irreversible within the old process. The new run is already protected by
+    // Recovery and freshly reset gates; carrying Draining across this boundary would make
+    // every subsequent Resume / SetMode upgrade impossible.
+    crate::mode_glue::apply_mode(
+        e,
+        inst,
+        drv,
+        ModeInput::AutoClear {
+            source: CapSource::DRAINING,
+            scope: hft_risk::scope_any(),
+        },
+    )
+    .map_err(fatal)?;
     e.rec.mirror.clear();
     for (v, accounts) in crate::engine::live_gw_venues(&e.rd) {
         for a in accounts {

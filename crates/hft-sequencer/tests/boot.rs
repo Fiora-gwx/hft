@@ -21,6 +21,68 @@ fn capacity_params(version: u64) -> Spb {
     p
 }
 
+fn capacity_ready(h: &mut H) {
+    use hft_event::{ConnRole, ConnStateKind, LeverageItem};
+    use hft_types::{AccountId, CapSource, GroupId, StrategyId};
+    use zerocopy::IntoBytes;
+
+    h.bring_up(false);
+    // B0's helper only covers its original instruments. Bring up the extra group's two legs
+    // with ordinary journaled venue reports as well.
+    for (i, v) in [(InstId(1), A), (InstId(2), B)] {
+        h.push(
+            RingId::Rep(0),
+            &conn(v, 0, ConnStateKind::Up, ConnRole::Md, i, AccountId(0), h.now()),
+        );
+        h.quote(i, "10", "10.01");
+    }
+    for a in [AC1, AC2] {
+        let mut body = cfg_hdr(a, B, 3).as_bytes().to_vec();
+        for inst in [InstId(2), B1, B2] {
+            body.extend_from_slice(
+                LeverageItem {
+                    inst,
+                    _pad: 0,
+                    leverage: r("3.00"),
+                }
+                .as_bytes(),
+            );
+        }
+        h.push_bytes(RingId::Rep(0), EventKind::ACCOUNT_CONFIG_REPORT, body);
+    }
+    h.run();
+    for a in [AC1, AC2, AC9] {
+        let sc = scope(StrategyId(0), a, GroupId(0));
+        if h.s.engine().risk.mode.cap(CapSource::RECOVERY, &sc).is_some() {
+            let id = h.cmd_confirmed(
+                a,
+                &ControlCmd::Resume {
+                    scope: sc,
+                    source: CapSource::RECOVERY,
+                },
+            );
+            h.run();
+            assert_eq!(h.res(id).0, hft_sequencer::codes::status::APPLIED);
+        }
+    }
+    let cells: Vec<_> = h.s.instances().cells().collect();
+    for cell in cells {
+        let id = h.cmd_confirmed(
+            cell.account,
+            &ControlCmd::SetMode {
+                scope: scope(cell.strategy, cell.account, cell.group),
+                mode: hft_types::RunMode::Live,
+            },
+        );
+        h.run();
+        assert_eq!(h.res(id).0, hft_sequencer::codes::status::APPLIED);
+        assert_eq!(
+            h.s.engine().risk.mode.effective(cell),
+            hft_risk::mode::Effective::Live
+        );
+    }
+}
+
 /// Real Drain tail: ten subscriptions, six cells, three instances, forty heap entries.
 /// All decision configuration is encoded, so the post-shrink run can be verified in isolation.
 fn capacity_drain() -> H {
@@ -74,7 +136,7 @@ fn capacity_drain() -> H {
         hb: heartbeat,
         upd: 1,
     };
-    h.steady();
+    capacity_ready(&mut h);
     assert_eq!(h.s.instances().cells().count(), 6);
     assert_eq!(h.s.instances().slots.len(), 3);
     assert_eq!(h.s.instances().subs.insts.len(), 10);
@@ -229,7 +291,14 @@ fn seq_007_shrunk_capacity_applies() {
             assert_eq!(old.section(section), new.section(section), "{section:?}");
         }
     }
-    h.steady();
+    assert!(
+        h.s.engine()
+            .risk
+            .mode
+            .cap(hft_types::CapSource::DRAINING, &hft_risk::scope_any())
+            .is_none()
+    );
+    capacity_ready(&mut h);
     assert!(!h.s.view().draining());
     let mut p = capacity_params(2);
     p.groups.push(group(

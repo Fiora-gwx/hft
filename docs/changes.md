@@ -4,7 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
-| 2026-10-12 | Drain 缩容按 CapKind 顺序拒绝,暂用足够容量检查快照,避免组件解码错误掩盖容量不足;策略定时器保留引擎配额。新容量写入恢复引导配置并用于后续独立回放,补齐真实 Drain 边界及第七个 cell 拒绝验收 | SEQ-006/007;原 40 条定时器容量与 B0 引擎预留量冲突,按实际需求验证边界 | crates/hft-sequencer、docs/architecture.md | 否 |
+| 2026-10-12 | Drain 缩容按 CapKind 顺序拒绝,暂用足够容量检查快照,避免组件解码错误掩盖容量不足;策略定时器保留引擎配额。新容量写入恢复引导配置;先设置 Recovery 与新闸门,再移除旧进程 Draining。补齐真实 Drain 边界、回到 Live 后第七个 cell 拒绝及独立回放 | SEQ-006/007;40 条定时器容量与 B0 引擎预留量冲突,旧 Draining 阻止重启后升级 | crates/hft-sequencer、docs/architecture.md | 否 |
 | 2026-10-12 | advisor 恢复后的落后量按每个 Model 已恢复的检查点位置计算,时间取 journal,不把镜像补读旧前缀或停机时间计入。补齐既有定时投递、重启注记、持续告警、50 000 Input 双容量合并与 100 000 Input 三块大小续算验收 | SEQ-036/039/041/042/043/046;镜像进度低于已恢复 Model 进度时告警夸大 | crates/hft-sequencer | 否 |
 | 2026-10-12 | files-v1 指针声明整套 journal/seal/检查点与检查矩阵,完整校验后发布缓存;回放复查成员集合与哈希,只允许 registry 或固定测试入口,拒绝空成功报告与 CLI 缩窗。真实三小时生成样本经获取/缓存/包装器执行普通回放、Model 重算和检查点窗口;生产 registry、journal 与快照格式不变 | TOOL-198–204、RPL-281;单对象指针不能保持完整回放样本的目录关系与验收入口 | tools/xtask、fixtures/README.md、apps/replayer 测试及文档 | 否 |
 | 2026-10-12 | fixtures fetch 全量预检指针,经 AWS CLI/zstd 下载解压,逐次校验缓存大小与 SHA-256,合格后发布;失败清理本次临时文件且保留其他合格对象,拒绝缓存/指针链接,获取失败退出 2 | TOOL-072/193–197;固定回放样本的获取前置未实现,fixtures 说明的失败码与工具用例不一致 | tools/xtask、tools/README.md、tools/TESTS.md、fixtures/README.md、质量门系统依赖 | 否 |

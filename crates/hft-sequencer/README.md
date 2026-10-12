@@ -206,6 +206,8 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 - **两个 group 容量,不是同一个量**:`max_cells_total` 是本进程全部实例的 cell 总数;`max_groups_per_instance` 是每个实例的上限。`max_instances` 计入实盘与模拟实例(模拟实例池见 [hft-sim](../hft-sim/README.md))。
 - **恢复缩容**:按 `Insts → Cells → Instances → GroupsPerInstance → Timers` 报第一项 `CapacityShrink`,组件恢复暂用足以检查快照占用的容量,不能把缩容误报成快照损坏。成功恢复按新容量运行。定时器同时满足堆占用和 `engine_timer_demand + 已登记策略定时器数` 的容量,策略不能借用尚未登记的引擎预留量;没有策略定时器时仍要求 `max_timers > engine_timer_demand`。
 - **容量配置的恢复边界**:新容量与快照引用的 ECF1 段 3 不同时,恢复引导块写版本加一的 Engine ConfigBlob 并更新快照引用,其余 ECF1 节原样保留。版本溢出拒绝启动;容量相同不改配置身份。独立回放由该引用还原新限制,不依赖启动进程的内存。
+
+`Draining` 只约束发起 Drain 的运行。冷恢复结束时,先为全部账户设置 `Recovery` 并复位启动闸门,再经 `ModeInput::AutoClear` 移除进程级 `Draining`,结果写入 Recovery 快照;`Kill` 等其他 cap 保留。新运行仍须完成启动闸门和 Recovery 的解除条件;读取快照的验证/镜像驱动不执行该转换。
 - **段 3 的行格式**(草案,实现时以代码与编译期断言为准;行版本 1):段 3 只有一行 `CapacitiesRow`(ECF1 段头的 `row_size` = 24),字段语义见上表,只在尾部追加:
 
 ```rust

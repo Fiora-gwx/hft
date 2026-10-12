@@ -215,6 +215,7 @@ spec: README.md
 - 期望:
   - `CmdResult{CapacityExceeded}`;旧参数继续生效(s1 的 group 数仍为 3);输出中没有 `CapSet`、`OrderDecision`
   - 恢复引导块的 Engine ConfigBlob 版本加一,段 3 为新容量,其余配置节不变;仅凭 journal 解码得到 `max_cells_total = 6`
+  - 冷恢复先设置 Recovery 与新闸门,再移除旧进程的 Draining;补齐新增腿的连接、行情和杠杆报告,人工 Resume{Recovery} 后全部 cell 的有效模式为 Live,再验证容量拒绝
   - 启用 `replay-io` 时,原运行与恢复后的拒绝命令经独立验证器全部重算,另从 Recovery 快照起验证;两者 Output 与快照哈希均无分歧
 - 实现:`crates/hft-sequencer/tests/boot.rs::seq_007_shrunk_capacity_applies`
 
