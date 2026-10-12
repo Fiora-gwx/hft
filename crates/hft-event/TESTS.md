@@ -1813,7 +1813,7 @@ spec: README.md
   1. 生成
   2. 用 Python 导入 `<tmp>/python/_generated/events.py`,对每个 kind 读出 dtype
 - 期望:
-  - `docs/generated/event-catalog.md` 含 39 个 kind 小节,每节列出编号、域、角色、布局、`schema_version` 与字段表;Note 码表含 `NOTE_NAMES` 的全部 88 个名字
+  - `docs/generated/event-catalog.md` 含 39 个 kind 小节,每节列出编号、域、角色、布局、`schema_version` 与字段表;Note 码表含 `NOTE_NAMES` 的全部 89 个名字,包含 Ledger BalanceCheck
   - `schemas/arrow/` 下 39 个 `<kind>.json`;`Px`/`Qty` 列为 `Int64` 且带元数据 `hft.type = px`/`qty`
   - 每个 kind 的 dtype `itemsize` 等于 `size`(Var/Multi 等于 `prefix`),`names` 与 `offsets` 与 `FieldDesc` 逐项相同;`StrategyParamsHdr`、`GroupSpec`、`LegDef` 的 dtype itemsize 为 48、80、16
   - `refdata.py` 含 `LoadErrCode` 每个变体一项,数值与 hft-refdata 相同
