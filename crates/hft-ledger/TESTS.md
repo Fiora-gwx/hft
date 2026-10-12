@@ -2895,7 +2895,7 @@ spec: README.md
 - 级别:unit
 - 里程碑:M2
 - 前置:LF 已初始化余额,冷热账本独立持有钱包
-- 步骤:依次输入 quiet=true 的差额报告、quiet=false 的相等报告、quiet=true 的相等报告;分别丢弃同事件边界、篡改注记的 8 个载荷字与 group/inst/strategy、重放注记;另让冷钱包与热钱包不同,消费同一校验事实
+- 步骤:依次输入 quiet=true 的差额报告、quiet=false 的相等报告、quiet=true 的相等报告;分别丢弃同事件边界、篡改注记的 8 个载荷字与 group/inst/strategy/引擎时刻、重放注记及给初始化报告伪造校验注记;另让冷钱包与热钱包不同,消费同一校验事实
 - 期望:三次分别置位、保留、清除 Drift,现金不变且完整 summary/vflags 相等;坏证据或重复证据返回 BalanceEvidence 并锁存,不改已记金额;不同冷钱包按自己的事实得出 Drift,不照抄热结果
 - 实现:`crates/hft-ledger/tests/settlement_journal.rs::led_289_balance_gate_recomputes_drift_from_same_event_facts`
 

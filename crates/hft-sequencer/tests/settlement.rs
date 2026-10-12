@@ -55,6 +55,7 @@ fn cold_at(h: &H, start: &MemRecord) -> JournalLedger {
 fn seq_414_balance_check_gate_matches_cold_view_and_full_window_replay() {
     use hft_event::{BalanceReport, Note};
     use hft_ledger::{notes::code, vflags};
+    use zerocopy::IntoBytes;
     let mut h = cash_boot();
     let start = h.keyframe();
     let total = wallet(&h.s.engine().ledger);
@@ -93,6 +94,27 @@ fn seq_414_balance_check_gate_matches_cold_view_and_full_window_replay() {
     assert!(h.verify().is_empty());
     assert!(h.verify_from(Some(start.seq)).is_empty());
     assert!(h.verify_from(Some(last.unwrap().seq)).is_empty());
+    for hide in [false, true] {
+        let mut bad = h.j().clone();
+        let r = bad
+            .segments
+            .iter_mut()
+            .flat_map(|s| &mut s.records)
+            .find(|r| r.read::<Note>().is_some_and(|n| n.code == code::BALANCE_CHECK))
+            .unwrap();
+        if hide {
+            // Preserve sequence numbers while withholding this business Output from replay.
+            r.kind = EventKind::LATENCY_SAMPLE;
+        } else {
+            let mut n = r.read::<Note>().unwrap();
+            n.v[2] ^= 1;
+            r.body.copy_from_slice(n.as_bytes());
+        }
+        assert!(
+            !verify_journal::<TestSet>(&bad, &h.setup, Some(start.seq)).is_empty(),
+            "missing or corrupted BalanceCheck passed replay"
+        );
+    }
 }
 
 // B0 uses USDT qty_exp=-8. These are the original five matching facts rescaled from -6.

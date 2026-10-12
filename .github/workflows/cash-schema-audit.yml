@@ -56,6 +56,24 @@ jobs:
           printf 'recovery=%s settlement=%s notes=%s ledger=%s boundary=%s hashtrail=%s testkit=%s candidate=%s schema=%s\n' "$recovery_rc" "$settlement_rc" "$notes_rc" "$ledger_rc" "$boundary_rc" "$trail_rc" "$kit_rc" "$candidate_rc" "$schema_rc" | tee audit/status.txt
           cat audit/recovery.txt audit/settlement.txt audit/notes.txt audit/ledger.txt audit/boundaries.txt audit/hashtrail.txt audit/testkit.txt audit/candidate.txt audit/schema.txt
           test "$recovery_rc$settlement_rc$notes_rc$ledger_rc$boundary_rc$kit_rc$candidate_rc$schema_rc" = '00000000'
+      - name: Attribute the complete HashTrail changes
+        if: always()
+        run: |
+          cargo run --locked --profile ci -p hft-testkit --features seq --example balance-note-audit >audit/current.tsv
+          cp crates/hft-ledger/src/cash.rs audit/cash-before.rs
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('crates/hft-ledger/src/cash.rs')
+          source = path.read_text()
+          start = source.index('        // The cold consumer has no OMS.')
+          end = source.index('        verdict\n', start)
+          assert source[start:end].count('code::BALANCE_CHECK') == 1
+          path.write_text(source[:start] + source[end:])
+          PY
+          git diff -- crates/hft-ledger/src/cash.rs >audit/rollback.patch
+          cargo run --locked --profile ci -p hft-testkit --features seq --example balance-note-audit >audit/rollback.tsv
+          cp audit/cash-before.rs crates/hft-ledger/src/cash.rs
+          python3 .github/scripts/balance-note-compare.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

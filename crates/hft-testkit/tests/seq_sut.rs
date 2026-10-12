@@ -9,6 +9,20 @@ use crate::support::cfg;
 
 type E = SeqSut<TestStrategies>;
 
+/// Locate a historical fixture after adding BalanceCheck Outputs. Raw journal comparisons,
+/// replay and HashTrail still use the actual sequence numbers and all records.
+pub(crate) fn seq_before_balance_checks(journal: &[hft_testkit::dst::JRec], seq: u64) -> u64 {
+    let added = journal
+        .iter()
+        .filter(|r| r.seq < seq)
+        .filter_map(|r| r.try_read::<hft_event::Note>())
+        .filter(|n| {
+            n.source == hft_event::NoteSource::Ledger && n.code == hft_ledger::notes::code::BALANCE_CHECK
+        })
+        .count();
+    seq - added as u64
+}
+
 pub(crate) fn show(r: &hft_testkit::dst::RunRecord) -> String {
     match &r.outcome {
         DstOutcome::Pass { .. } => format!("pass after {} steps", r.steps_run),
