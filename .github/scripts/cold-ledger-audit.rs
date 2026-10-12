@@ -8,25 +8,28 @@ use hft_testkit::dst::{DstConfig, RunRecord, run_record};
 use hft_testkit::scenarios::{DstEngine, suites};
 use std::path::Path;
 
-fn money(l: &Ledger, w: &WorldSpec) -> Vec<((u8, u8, u32, u8), i128)> {
+fn money(l: &Ledger, w: &WorldSpec) -> Vec<((u8, u8, u32, u32, u8), i128)> {
     let mut rows = Vec::new();
     for a in &w.accounts {
         for i in &w.insts {
             if a.venues.contains(&i.venue) {
                 let p = l.pos(a.id, i.id);
-                rows.push(((a.id.0, i.venue.0, i.id.0, 0), i128::from(p.qty.0)));
-                rows.push(((a.id.0, i.venue.0, i.id.0, 1), p.cost));
-                rows.push(((a.id.0, i.venue.0, i.id.0, 2), p.realized_quote));
-                rows.push(((a.id.0, i.venue.0, i.id.0, 3), p.fees_quote));
+                rows.push(((a.id.0, i.venue.0, i.id.0, 0, 0), i128::from(p.qty.0)));
+                rows.push(((a.id.0, i.venue.0, i.id.0, 0, 1), p.cost));
+                rows.push(((a.id.0, i.venue.0, i.id.0, 0, 2), p.realized_quote));
+                rows.push(((a.id.0, i.venue.0, i.id.0, 0, 3), i128::from(p.fees_quote)));
             }
         }
         for v in &a.venues {
             let b = l.venue_book(a.id, *v);
             for x in b.cash {
-                rows.push(((a.id.0, v.0, u32::from(x.asset.0), 4), i128::from(x.total.0)));
+                rows.push(((a.id.0, v.0, u32::from(x.asset.0), 0, 4), i128::from(x.total.0)));
             }
             for x in b.inv {
-                rows.push(((a.id.0, v.0, u32::from(x.asset.0), 5), i128::from(x.total.0)));
+                rows.push((
+                    (a.id.0, v.0, u32::from(x.asset.0), x.group.0, 5),
+                    i128::from(x.qty.0),
+                ));
             }
         }
     }
