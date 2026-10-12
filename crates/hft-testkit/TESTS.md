@@ -1594,7 +1594,7 @@ spec: README.md
 - 规则:[6. DST 框架](README.md#6-dst-框架)
 - 级别:integ
 - 里程碑:M2
-- 前置:modes 固定种子 `0x7dfee4207b81bfbd`,保留原故障表,运行 316 步
+- 前置:modes 固定种子 `0x7dfee4207b81bfbd`,先生成原 10000 步故障表并固定,截取前 316 步核对证据;回报中的 Ack 数量不作为成交
 - 步骤:从模拟回报生成序号取得单 5/6/7 的完整身份、数量与价格,与 journal 交付顺序及原始下单方向比较;关闭检查器重跑相同步数。核对该账户全部成交集合,从完整订单身份关联到原始 GwCmd 和已提交 OrderDecision,分别独立计算两种顺序的钱包与费用,不读实际成本或余额变化作为期望
 - 期望:生成顺序为 5/6/7,交付顺序为 6/5/7,原 INV-16 在第 315 步以精确 1 单位差额失败;诊断不改变 journal、HashTrail 或回报。此用例验证故障证据,不代表该余额差通过验收;回归集仍完整运行 10000 步并阻断 CI
 - 实现:`crates/hft-testkit/tests/fill_order.rs::tk_123_raw_matching_order_survives_report_jitter`

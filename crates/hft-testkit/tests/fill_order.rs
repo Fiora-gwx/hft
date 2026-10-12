@@ -115,6 +115,7 @@ fn tk_123_raw_matching_order_survives_report_jitter() {
         .find(|s| s.name == "modes")
         .unwrap();
     let mut c = suite.config(0x7dfe_e420_7b81_bfbd);
+    c.plan = Some(c.fault_plan());
     c.steps = 316;
     c.rerun = RerunPolicy::Never;
     let r = run_record::<SeqSut<TestStrategies>>(&c);
@@ -136,7 +137,7 @@ fn tk_123_raw_matching_order_survives_report_jitter() {
         .journal
         .iter()
         .filter_map(|j| j.try_read::<OrderEvent>().map(|e| (j.seq, e)))
-        .filter(|(_, e)| selected(e) && e.qty.0 > 0)
+        .filter(|(_, e)| selected(e) && matches!(e.what, OrderEventKind::Fill | OrderEventKind::PartialFill))
         .collect();
     assert_eq!(
         delivered
