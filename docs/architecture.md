@@ -133,7 +133,7 @@ DST 按 Input 边界和下单前采集只读事实,快照后的事件边界保�
 
 Drain 退出前的发布边界由 [sequencer 主循环](../crates/hft-sequencer/README.md#主循环step) 保证,退出前最后一个完整事件及 Drain 快照对恢复读者可见;封段与关闭由装配层执行。
 
-恢复快照保留停止点 engine_ns;恢复分歧计入输出哈希;指定快照记录跳过区间。
+恢复先核容量,新容量入引导配置;快照保留停止点 engine_ns,分歧入输出哈希。
 
 journal 记录分三类:**Input**(进入决策的一切,含实盘驱动当场做出的环境相关决定,记为 `Timer`)、**Output**(决策、意图与执行层决定)、**Meta**(测量,不参与验证比对与状态)。确定性前提:时钟、随机数、配置内容、定时器全部来自 Input 记录;无 `HashMap` 迭代依赖;无全局可变状态。细节见 [`hft-sequencer`](../crates/hft-sequencer/README.md) 与 [`replayer`](../apps/replayer/README.md)。
 

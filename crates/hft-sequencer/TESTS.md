@@ -185,7 +185,7 @@ spec: README.md
 - 规则:[环与容量](README.md#环与容量)、[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
 - 级别:table
 - 里程碑:M2
-- 前置:B0 运行后写出 Drain 快照,其中订阅 inst 10 个、cell 6 个、策略实例 3 个、s1 有 3 个 group、定时器堆 40 条;以只改所列容量的新 EngineConfig 调 `boot(Journal(RecoverPlan{start: DrainTail, replay_tail: false, ..}))`
+- 前置:B0 的 `max_timers = 512`,使用完整 ECF1/RKP1 配置,各账户内 group 的 inst 不重复;真实行情经 Ctx 登记定时器后执行 Drain,已提交快照含订阅 inst 10 个、cell 6 个、策略实例 3 个、s1 有 3 个 group、定时器堆 40 条。`T = engine_timer_demand + 快照中的策略定时器数`,断言 `40 < T < 512`;以只改所列容量的新 EngineConfig 调 `boot(Journal(RecoverPlan{start: DrainTail, replay_tail: false, ..}))`
 - 实现:`crates/hft-sequencer/tests/boot.rs::seq_006_capacity_shrink`
 
 | 行 | 新容量 | 期望 |
@@ -196,9 +196,13 @@ spec: README.md
 | SEQ-006.4 | `max_cells_total = 6` | `Ok` |
 | SEQ-006.5 | `max_instances = 2` | `Err(CapacityShrink{what: Instances})` |
 | SEQ-006.6 | `max_groups_per_instance = 2` | `Err(CapacityShrink{what: GroupsPerInstance})` |
-| SEQ-006.7 | `max_timers = 39` | `Err(CapacityShrink{what: Timers})` |
-| SEQ-006.8 | `max_timers = 40` | `Ok` |
+| SEQ-006.7 | `max_timers = T - 1` | `Err(CapacityShrink{what: Timers})`,堆虽放得下但策略配额不足 |
+| SEQ-006.8 | `max_timers = T` | `Ok`,保留引擎预留量与全部策略定时器 |
 | SEQ-006.9 | `max_insts = 9` 且 `max_timers = 39` | `Err(CapacityShrink{what: Insts})`(按 `CapKind` 顺序报第一项) |
+| SEQ-006.10 | `max_cells_total = 5,max_instances = 2,max_groups_per_instance = 2,max_timers = 39` | `Cells`,不能先报组件解码或定时器构造错误 |
+| SEQ-006.11 | `max_instances = 2,max_groups_per_instance = 2,max_timers = 39` | `Instances` |
+| SEQ-006.12 | `max_groups_per_instance = 2,max_timers = 39` | `GroupsPerInstance` |
+| SEQ-006.13 | `max_timers = 39` | `Timers`,实际堆占用超限 |
 
 ### SEQ-007 缩容到恰好等于占用后按新容量运行
 
@@ -210,6 +214,8 @@ spec: README.md
   1. 投递 pipeline 主体的 `SetParams`,为 s1 新增一个 group(使 cell 数为 7)
 - 期望:
   - `CmdResult{CapacityExceeded}`;旧参数继续生效(s1 的 group 数仍为 3);输出中没有 `CapSet`、`OrderDecision`
+  - 恢复引导块的 Engine ConfigBlob 版本加一,段 3 为新容量,其余配置节不变;仅凭 journal 解码得到 `max_cells_total = 6`
+  - 启用 `replay-io` 时,原运行与恢复后的拒绝命令经独立验证器全部重算,另从 Recovery 快照起验证;两者 Output 与快照哈希均无分歧
 - 实现:`crates/hft-sequencer/tests/boot.rs::seq_007_shrunk_capacity_applies`
 
 ### SEQ-008 进程启动后的第一个事件是 EngineClock 与 EpochStart

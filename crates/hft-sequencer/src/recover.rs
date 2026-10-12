@@ -217,8 +217,23 @@ pub(crate) fn restore_at<S: StrategySet>(
         .unwrap_or(setup.oms.engine_epoch);
     let mut setup2 = setup.clone();
     setup2.oms.engine_epoch = epoch.unwrap_or(snap_epoch);
-    // Capacity checks run after the restore (CapKind order); build with relaxed bounds first.
-    let mut e = Engine::new(rd, &setup2, &risk_params)?;
+    // A small new cell/timer limit must not turn an otherwise readable snapshot into a
+    // component decode error. Allocate enough to inspect the saved occupancy, then reject in
+    // CapKind order below. A successful restore uses exactly the requested bounds.
+    let cells_saved: usize = secs.strategies.iter().map(|(_, gs, _)| gs.len()).sum();
+    let mut allocation = setup2.clone();
+    allocation.caps.max_cells_total = allocation
+        .caps
+        .max_cells_total
+        .max(u32::try_from(cells_saved).map_err(|_| BootError::SnapshotUndecodable { section: 5 })?);
+    let demand = crate::engine::timer_demand(&rd, &allocation);
+    allocation.caps.max_timers =
+        allocation.caps.max_timers.max(demand + 1).max(
+            u32::try_from(secs.timers.len()).map_err(|_| BootError::SnapshotUndecodable { section: 8 })?,
+        );
+    let mut e = Engine::new(rd, &allocation, &risk_params)?;
+    e.caps = setup2.caps;
+    e.setup = setup2.clone();
     let mut relaxed = e.caps;
     relaxed.max_instances = u16::MAX;
 
@@ -239,7 +254,7 @@ pub(crate) fn restore_at<S: StrategySet>(
     }
     // Components (fixed write order of their sections does not matter for reading).
     let mut r = SnapshotReader::new(body);
-    e.ledger = Ledger::restore(&mut r, &e.rd, &setup.ledger, &e.caps.to_ledger())
+    e.ledger = Ledger::restore(&mut r, &e.rd, &setup.ledger, &allocation.caps.to_ledger())
         .map_err(|_| BootError::SnapshotUndecodable { section: 1 })?;
     let mut r = SnapshotReader::new(body);
     let mut ocfg = setup2.oms.clone();
@@ -254,7 +269,7 @@ pub(crate) fn restore_at<S: StrategySet>(
     };
     let rcaps = hft_risk::Capacities {
         max_insts: e.caps.max_insts,
-        max_cells_total: e.caps.max_cells_total,
+        max_cells_total: allocation.caps.max_cells_total,
         max_caps: hft_risk::Capacities::MAX_CAPS,
     };
     let mut r = SnapshotReader::new(body);
@@ -477,13 +492,16 @@ pub(crate) fn restore_at<S: StrategySet>(
         Some(CapKind::Instances)
     } else if groups_over {
         Some(CapKind::GroupsPerInstance)
-    } else if timers_over {
+    } else if timers_over || e.strat_timers > e.caps.max_timers.saturating_sub(demand) {
         Some(CapKind::Timers)
     } else {
         None
     };
     if let Some(what) = shrink {
         return Err(BootError::CapacityShrink { what });
+    }
+    if e.caps.max_timers <= demand {
+        return Err(BootError::TimerCapacity { demand });
     }
     Ok((e, inst))
 }
@@ -711,6 +729,7 @@ pub(crate) fn boot_journal<D: Driver<S>, S: StrategySet>(
         calib_tsc: drv.roll_info().calib.tsc.0,
         calib_realtime_ns: drv.roll_info().calib.realtime_ns,
     };
+    record_capacity_config(&mut e, drv.roll_info().utc_ns)?;
     let mut seq = Sequencer {
         e,
         inst,
@@ -741,6 +760,43 @@ pub(crate) fn boot_journal<D: Driver<S>, S: StrategySet>(
         j.publish();
     }
     Ok(seq)
+}
+
+/// A recovery with new capacities is a new configuration boundary. Keep the other ECF1
+/// sections byte-for-byte and publish the new reference in the Recovery boot block, so an
+/// independent reader cannot silently reconstruct the previous run's limits.
+fn record_capacity_config(e: &mut Engine, utc_ns: i64) -> Result<(), BootError> {
+    use hft_refdata::{EcfBuilder, EngineConfig, EngineSection};
+
+    let bad = || BootError::Config(ConfigErr::Component("recovery capacities"));
+    let bytes = e.cmd.blobs.get(&e.cmd.active.engine.sha256).ok_or_else(bad)?;
+    let old = EngineConfig::load(bytes, None).map_err(|_| bad())?;
+    let caps = crate::params::capacities(&old).map_err(|_| bad())?;
+    if caps == e.caps {
+        return Ok(());
+    }
+    let version = old.version().checked_add(1).ok_or_else(bad)?;
+    let mut b = EcfBuilder::new(version, old.host_class());
+    b.created_utc_ns(utc_ns);
+    for id in EngineSection::ALL {
+        if id == EngineSection::Capacities {
+            b.section(
+                id,
+                crate::params::CAPACITIES_ROW_VERSION,
+                24,
+                1,
+                e.caps.as_bytes().to_vec(),
+            );
+        } else if let Some(s) = old.section(id) {
+            b.section(id, s.row_ver, s.row_size, s.count, s.bytes.to_vec());
+        }
+    }
+    let bytes = b.finish();
+    let ec = EngineConfig::load(&bytes, None).map_err(|_| bad())?;
+    let reference = Engine::blob_ref(BlobKind::Engine, version, &bytes, *ec.sha256());
+    e.cmd.blobs.put(reference, &bytes);
+    e.cmd.active.engine = reference;
+    Ok(())
 }
 
 /// The sequencer's gate-input caches (`feeds_last`, `unknown_last`, order-connection rows) as a

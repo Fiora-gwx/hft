@@ -7,6 +7,280 @@ use hft_types::{InstId, KillLevel};
 
 use crate::common::*;
 
+fn capacity_params(version: u64) -> Spb {
+    let mut p = Spb::s1(version);
+    p.groups = vec![
+        gspec(G1),
+        gspec_eth(hft_types::GroupId(G1.0 + 1)),
+        group(
+            hft_types::GroupId(G1.0 + 2),
+            FILL,
+            &[leg(InstId(1), A), leg(InstId(2), B)],
+        ),
+    ];
+    p
+}
+
+/// Real Drain tail: ten subscriptions, six cells, three instances, forty heap entries.
+/// All decision configuration is encoded, so the post-shrink run can be verified in isolation.
+fn capacity_drain() -> H {
+    use hft_sequencer::driver::live::LiveDriver;
+    use hft_sequencer::{BootSource, Sequencer};
+    use hft_strategy_sdk::{EvMask, EventRef, Part};
+    use hft_types::{AccountId, GroupId, HostClass, Tsc};
+
+    reset_script();
+    let mut b = b0();
+    b.caps.max_timers = 512;
+    for id in [2, 4] {
+        b.rd.insts[id as usize - 1] = inst_spec(
+            InstId(id),
+            B,
+            &format!("F{id}_USDT"),
+            true,
+            FILL,
+            ("0.01", 1),
+            ("0.001", 100_000),
+        );
+    }
+    let mut p2 = Spb::s2(1);
+    p2.groups.push(gspec_eth(GroupId(G2.0 + 1)));
+    b.params = vec![capacity_params(1), p2, Spb::s9(1)];
+    let mut subs = vec![(A1, 0, EvMask::BBO, Part::Fast)];
+    for id in 3..=6 {
+        subs.push((InstId(id), 0, EvMask::BBO, Part::Fast));
+    }
+    set_subs(S1, subs);
+    let rd = b.rd.load();
+    let mut setup = b.setup(&rd);
+    setup.risk_decode = Some(hft_sequencer::config_blob::decode_risk_blob);
+    let mut configs = b.configs(&rd);
+    configs.engine_blob = setup.encode_blob(1, HostClass::Dev2, UTC0);
+    configs.risk_blob = configs.risk.encode_blob().unwrap();
+    configs.risk_sha256 = sha(&configs.risk_blob);
+    let heartbeat = hb();
+    let s = Sequencer::boot(
+        BootSource::Empty { configs },
+        &setup,
+        LiveDriver::new(TestIo::new(setup.clock), b.live),
+        heartbeat,
+    )
+    .unwrap();
+    let mut h = H {
+        s,
+        rd,
+        setup,
+        cmd_no: 0,
+        hb: heartbeat,
+        upd: 1,
+    };
+    h.steady();
+    assert_eq!(h.s.instances().cells().count(), 6);
+    assert_eq!(h.s.instances().slots.len(), 3);
+    assert_eq!(h.s.instances().subs.insts.len(), 10);
+    // Every timer comes through Ctx and a recorded BBO. No snapshot or heap is fabricated.
+    add_hook(|hx, ev, ctx| {
+        if hx.s.strategy == S1
+            && let EventRef::Bbo { inst, b, .. } = ev
+            && *inst == A1
+            && b.ask_px == px("50009")
+        {
+            let now = hx.v.now();
+            ctx.timer_at(Tsc(now.tsc.0 + 1_000 * SEC), now.seq as u32, G1)
+                .unwrap();
+        }
+    });
+    let count = 40usize.checked_sub(h.s.engine().heap.len()).unwrap();
+    assert!(count > 0);
+    for _ in 0..count {
+        h.quote(A1, "50000", "50009");
+        h.run();
+    }
+    h.cmd_confirmed(
+        AccountId(0),
+        &ControlCmd::Drain {
+            cancel_resting: false,
+        },
+    );
+    assert!(matches!(h.run(), StepOutcome::Done { .. }));
+    assert_eq!(h.s.engine().heap.len(), 40);
+    assert_eq!(h.j().committed, h.j().len());
+    assert!(hft_sequencer::recover::ends_with_drain(
+        &hft_sequencer::driver::replay::Log::from_segments(&h.j().segments)
+    ));
+    h
+}
+
+#[test]
+fn seq_006_capacity_shrink() {
+    use hft_sequencer::{BootError, CapKind, SnapshotSel};
+
+    let h = capacity_drain();
+    // A restored strategy timer still consumes its shared quota. Spare engine capacity cannot
+    // be borrowed just because those engine timers are not all currently registered.
+    let timers = h.s.engine().engine_timer_demand + h.s.engine().strat_timers;
+    assert!(timers > 40 && timers < h.setup.caps.max_timers);
+    let base = h.setup.caps;
+    let mut rows = Vec::new();
+    for (value, want) in [(9, Some(CapKind::Insts)), (10, None)] {
+        let mut c = base;
+        c.max_insts = value;
+        rows.push((c, want));
+    }
+    for (value, want) in [(5, Some(CapKind::Cells)), (6, None)] {
+        let mut c = base;
+        c.max_cells_total = value;
+        rows.push((c, want));
+    }
+    let mut c = base;
+    c.max_instances = 2;
+    rows.push((c, Some(CapKind::Instances)));
+    let mut c = base;
+    c.max_groups_per_instance = 2;
+    rows.push((c, Some(CapKind::GroupsPerInstance)));
+    for (value, want) in [(timers - 1, Some(CapKind::Timers)), (timers, None)] {
+        let mut c = base;
+        c.max_timers = value;
+        rows.push((c, want));
+    }
+    let mut c = base;
+    c.max_insts = 9;
+    c.max_timers = 39;
+    rows.push((c, Some(CapKind::Insts)));
+    for what in [
+        CapKind::Cells,
+        CapKind::Instances,
+        CapKind::GroupsPerInstance,
+        CapKind::Timers,
+    ] {
+        let mut c = base;
+        c.max_timers = 39;
+        if what != CapKind::Timers {
+            c.max_groups_per_instance = 2;
+        }
+        if matches!(what, CapKind::Cells | CapKind::Instances) {
+            c.max_instances = 2;
+        }
+        if what == CapKind::Cells {
+            c.max_cells_total = 5;
+        }
+        rows.push((c, Some(what)));
+    }
+    for (i, (caps, want)) in rows.into_iter().enumerate() {
+        let mut setup = h.setup.clone();
+        setup.caps = caps;
+        let got = H::<TestSet>::restart_over(
+            h.j().clone(),
+            setup,
+            plan(SnapshotSel::DrainTail, false, 1, 0),
+            Rerun::default(),
+        );
+        match (got, want) {
+            (Err(got), Some(what)) => assert_eq!(got, BootError::CapacityShrink { what }, "row {}", i + 1),
+            (Ok(got), None) => {
+                assert_eq!(got.s.engine().caps, caps);
+                assert_eq!(got.s.engine().setup.caps, caps);
+                assert_eq!(got.s.instances().cells().count(), 6);
+                assert_eq!(got.s.instances().subs.insts.len(), 10);
+                assert_eq!(got.s.engine().heap.len(), 40);
+                assert!(got.s.engine().strat_timers <= caps.max_timers - got.s.engine().engine_timer_demand);
+            }
+            (got, want) => panic!("row {}: got {:?}, expected {want:?}", i + 1, got.err()),
+        }
+    }
+}
+
+#[test]
+fn seq_007_shrunk_capacity_applies() {
+    use hft_sequencer::SnapshotSel;
+    use hft_sequencer::codes::status;
+    use hft_types::GroupId;
+
+    let original = capacity_drain();
+    let mut setup = original.setup.clone();
+    setup.caps.max_cells_total = 6;
+    let mut h = H::<TestSet>::restart_over(
+        original.j().clone(),
+        setup,
+        plan(SnapshotSel::DrainTail, false, 1, 0),
+        Rerun::default(),
+    )
+    .unwrap();
+    let engine_blob = |h: &H| {
+        let r = h
+            .recs()
+            .into_iter()
+            .rev()
+            .find(|r| {
+                r.kind == EventKind::CONFIG_BLOB
+                    && r.read::<hft_event::BlobHdr>()
+                        .is_some_and(|h| h.blob.kind == hft_event::BlobKind::Engine)
+            })
+            .unwrap();
+        let header = r.read::<hft_event::BlobHdr>().unwrap();
+        hft_refdata::EngineConfig::load(&r.body[72..72 + header.blob.len as usize], None).unwrap()
+    };
+    let old = engine_blob(&original);
+    let new = engine_blob(&h);
+    assert_eq!(new.version(), old.version() + 1);
+    assert_eq!(hft_sequencer::params::capacities(&new).unwrap(), h.setup.caps);
+    for section in hft_refdata::EngineSection::ALL {
+        if section != hft_refdata::EngineSection::Capacities {
+            assert_eq!(old.section(section), new.section(section), "{section:?}");
+        }
+    }
+    h.steady();
+    assert!(!h.s.view().draining());
+    let mut p = capacity_params(2);
+    p.groups.push(group(
+        GroupId(G1.0 + 3),
+        FILL,
+        &[leg(InstId(3), A), leg(InstId(4), B)],
+    ));
+    let at = h.mark();
+    let id = h.set_params_as(&p, "pipeline", ADMIN, false, |_| {});
+    h.run();
+    assert_eq!(h.res(id).0, status::CAPACITY_EXCEEDED);
+    assert_eq!(h.s.instances().get(S1).unwrap().groups().unwrap().len(), 3);
+    assert_eq!(h.s.instances().get(S1).unwrap().params_version(), 1);
+    assert_eq!(h.s.instances().cells().count(), 6);
+    assert!(
+        !h.since(at)
+            .iter()
+            .any(|r| matches!(r.kind, EventKind::CAP_SET | EventKind::ORDER_DECISION))
+    );
+
+    #[cfg(feature = "replay-io")]
+    {
+        use hft_sequencer::driver::replay::Log;
+        use hft_sequencer::driver::verify::{VerifyOptions, verify};
+        let log = Log::from_segments(&h.j().segments);
+        let recovery = log
+            .recs
+            .iter()
+            .rev()
+            .find(|r| r.kind == EventKind::STATE_SNAPSHOT)
+            .unwrap()
+            .seq;
+        let rebuilt = hft_sequencer::EngineSetup::from_snapshot(&log, recovery).unwrap();
+        assert_eq!(rebuilt.caps, h.setup.caps, "journal retained the old limits");
+        let got = verify::<TestSet>(log.clone(), VerifyOptions::default(), hb()).unwrap();
+        assert_eq!(got.runs.len(), 2);
+        assert!(got.inputs > 0 && got.sink.compared > 0);
+        assert!(got.sink.mismatches.is_empty(), "{:?}", got.sink.detail);
+        let got = verify::<TestSet>(
+            log,
+            VerifyOptions {
+                from_seq: Some(recovery),
+                ..Default::default()
+            },
+            hb(),
+        )
+        .unwrap();
+        assert!(got.sink.mismatches.is_empty(), "{:?}", got.sink.detail);
+    }
+}
+
 fn after_boot(h: &H) -> usize {
     // Index just past `SegmentRoll{BootDone}`.
     let recs = h.recs();

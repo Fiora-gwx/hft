@@ -204,6 +204,8 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 | 5 | `allow_missing_standby` | bool | = hft-core `startup.allow_missing_standby`(hft-cfg 写入);启动闸门 `ORDER_CONNS` 是否不要求热备 Up(语义归 [hft-risk 启动闸门](../hft-risk/README.md#启动闸门)) |
 
 - **两个 group 容量,不是同一个量**:`max_cells_total` 是本进程全部实例的 cell 总数;`max_groups_per_instance` 是每个实例的上限。`max_instances` 计入实盘与模拟实例(模拟实例池见 [hft-sim](../hft-sim/README.md))。
+- **恢复缩容**:按 `Insts → Cells → Instances → GroupsPerInstance → Timers` 报第一项 `CapacityShrink`,组件恢复暂用足以检查快照占用的容量,不能把缩容误报成快照损坏。成功恢复按新容量运行。定时器同时满足堆占用和 `engine_timer_demand + 已登记策略定时器数` 的容量,策略不能借用尚未登记的引擎预留量;没有策略定时器时仍要求 `max_timers > engine_timer_demand`。
+- **容量配置的恢复边界**:新容量与快照引用的 ECF1 段 3 不同时,恢复引导块写版本加一的 Engine ConfigBlob 并更新快照引用,其余 ECF1 节原样保留。版本溢出拒绝启动;容量相同不改配置身份。独立回放由该引用还原新限制,不依赖启动进程的内存。
 - **段 3 的行格式**(草案,实现时以代码与编译期断言为准;行版本 1):段 3 只有一行 `CapacitiesRow`(ECF1 段头的 `row_size` = 24),字段语义见上表,只在尾部追加:
 
 ```rust
