@@ -67,6 +67,11 @@ fn capacity_ready(h: &mut H) {
     }
     let cells: Vec<_> = h.s.instances().cells().collect();
     for cell in cells {
+        let expected = if h.s.engine().risk.mode.desired(&cell) == Some(hft_types::RunMode::Live) {
+            hft_sequencer::codes::status::NO_OP
+        } else {
+            hft_sequencer::codes::status::APPLIED
+        };
         let id = h.cmd_confirmed(
             cell.account,
             &ControlCmd::SetMode {
@@ -75,7 +80,7 @@ fn capacity_ready(h: &mut H) {
             },
         );
         h.run();
-        assert_eq!(h.res(id).0, hft_sequencer::codes::status::APPLIED);
+        assert_eq!(h.res(id), (expected, 0), "SetMode Live for {cell:?}");
         assert_eq!(
             h.s.engine().risk.mode.effective(cell),
             hft_risk::mode::Effective::Live
@@ -314,7 +319,7 @@ fn seq_007_shrunk_capacity_applies() {
         &[leg(InstId(3), A), leg(InstId(4), B)],
     ));
     let at = h.mark();
-    let id = h.set_params_as(&p, "pipeline", ADMIN, false, |_| {});
+    let id = h.set_params_as(&p, "pipeline", 0, false, |_| {});
     h.run();
     assert_eq!(h.res(id).0, status::CAPACITY_EXCEEDED);
     assert_eq!(h.s.instances().get(S1).unwrap().groups().unwrap().len(), 3);
@@ -389,6 +394,11 @@ fn seq_007_shrunk_capacity_applies() {
         assert_eq!(got.runs.len(), 3);
         assert!(got.inputs > 0 && got.sink.compared > 0);
         assert!(got.sink.mismatches.is_empty(), "{:?}", got.sink.detail);
+        assert!(
+            got.sink.recovery_diffs.is_empty(),
+            "{:?}",
+            got.sink.recovery_diffs
+        );
         let got = verify::<TestSet>(
             log,
             VerifyOptions {
@@ -399,6 +409,11 @@ fn seq_007_shrunk_capacity_applies() {
         )
         .unwrap();
         assert!(got.sink.mismatches.is_empty(), "{:?}", got.sink.detail);
+        assert!(
+            got.sink.recovery_diffs.is_empty(),
+            "{:?}",
+            got.sink.recovery_diffs
+        );
     }
 }
 
