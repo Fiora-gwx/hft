@@ -1,7 +1,7 @@
 name: Timer identity schema audit
 on:
   push:
-    branches: [codex/m2-integration]
+    branches: [codex/m2-integration, codex/m2-timer-audit]
     paths:
       - .github/workflows/timer-identity-audit.yml
       - .github/scripts/timer-identity-audit.rs
@@ -21,6 +21,13 @@ jobs:
         run: bash .github/scripts/free-disk.sh
       - name: Install pinned Rust toolchain
         run: bash .github/scripts/install-rust.sh
+      - name: Prepare workspace metadata as in the quality gate and retain lock evidence
+        run: |
+          mkdir -p audit
+          cp Cargo.lock audit/before.lock
+          cargo xtask --help >audit/xtask.txt
+          cp Cargo.lock audit/resolved.lock
+          git diff -- Cargo.lock >audit/lock.patch
       - uses: Swatinem/rust-cache@v2
         with:
           key: x86-ci-v2
