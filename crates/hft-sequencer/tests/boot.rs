@@ -167,9 +167,16 @@ fn capacity_drain() -> H {
     assert!(matches!(h.run(), StepOutcome::Done { .. }));
     assert_eq!(h.s.engine().heap.len(), 40);
     assert_eq!(h.j().committed, h.j().len());
-    assert!(hft_sequencer::recover::ends_with_drain(
-        &hft_sequencer::driver::replay::Log::from_segments(&h.j().segments)
-    ));
+    let records = h.recs();
+    let last = records
+        .iter()
+        .rposition(|r| r.kind == EventKind::STATE_SNAPSHOT)
+        .unwrap();
+    assert_eq!(
+        records[last].read::<hft_event::SnapshotHdr>().unwrap().purpose,
+        hft_sequencer::snapshot::PURPOSE_DRAIN
+    );
+    assert!(records[last + 1..].iter().all(|r| r.role() != Role::Input));
     h
 }
 
@@ -256,7 +263,7 @@ fn seq_006_capacity_shrink() {
 fn seq_007_shrunk_capacity_applies() {
     use hft_sequencer::SnapshotSel;
     use hft_sequencer::codes::status;
-    use hft_types::GroupId;
+    use hft_types::{AccountId, CapSource, GroupId, StrategyId};
 
     let original = capacity_drain();
     let mut setup = original.setup.clone();
@@ -313,28 +320,73 @@ fn seq_007_shrunk_capacity_applies() {
     assert_eq!(h.s.instances().get(S1).unwrap().groups().unwrap().len(), 3);
     assert_eq!(h.s.instances().get(S1).unwrap().params_version(), 1);
     assert_eq!(h.s.instances().cells().count(), 6);
-    assert!(
-        !h.since(at)
-            .iter()
-            .any(|r| matches!(r.kind, EventKind::CAP_SET | EventKind::ORDER_DECISION))
+    assert!(!h.since(at).iter().any(|r| r.kind == EventKind::ORDER_DECISION));
+    let cap_set = hft_risk::NOTE_CODES
+        .iter()
+        .find(|x| x.2 == "CapSet")
+        .map(|x| ((x.0 as u32) << 24) | x.1)
+        .unwrap();
+    assert!(!h.notes_since(at).iter().any(|n| n.code == cap_set));
+
+    #[cfg(feature = "replay-io")]
+    let recovery = h
+        .recs()
+        .iter()
+        .rev()
+        .find(|r| r.kind == EventKind::STATE_SNAPSHOT)
+        .unwrap()
+        .seq;
+    // A second real Drain keeps the same capacities and a deliberate account Kill. Retiring
+    // Draining must neither drop that Kill nor create another capacity configuration version.
+    let sc = scope(StrategyId(0), AC2, GroupId(0));
+    let id = h.cmd_confirmed(
+        AC2,
+        &ControlCmd::Kill {
+            scope: sc,
+            level: KillLevel::Account,
+            flatten: false,
+            cancel_resting: true,
+            hard: false,
+        },
     );
+    h.run();
+    assert_eq!(h.res(id).0, status::APPLIED);
+    let kill = h.s.engine().risk.mode.cap(CapSource::KILL, &sc).copied().unwrap();
+    h.cmd_confirmed(
+        AccountId(0),
+        &ControlCmd::Drain {
+            cancel_resting: false,
+        },
+    );
+    assert!(matches!(h.run(), StepOutcome::Done { .. }));
+    let mut h = H::<TestSet>::restart_over(
+        h.j().clone(),
+        h.setup.clone(),
+        plan(SnapshotSel::DrainTail, false, 2, 0),
+        Rerun::default(),
+    )
+    .unwrap();
+    assert_eq!(engine_blob(&h).sha256(), new.sha256());
+    assert_eq!(h.s.engine().risk.mode.cap(CapSource::KILL, &sc), Some(&kill));
+    assert!(
+        h.s.engine()
+            .risk
+            .mode
+            .cap(CapSource::DRAINING, &hft_risk::scope_any())
+            .is_none()
+    );
+    assert!(h.s.engine().risk.mode.cap(CapSource::RECOVERY, &sc).is_some());
+    h.run(); // Record the third run's EngineClock and ordinary startup outputs.
 
     #[cfg(feature = "replay-io")]
     {
         use hft_sequencer::driver::replay::Log;
         use hft_sequencer::driver::verify::{VerifyOptions, verify};
         let log = Log::from_segments(&h.j().segments);
-        let recovery = log
-            .recs
-            .iter()
-            .rev()
-            .find(|r| r.kind == EventKind::STATE_SNAPSHOT)
-            .unwrap()
-            .seq;
         let rebuilt = hft_sequencer::EngineSetup::from_snapshot(&log, recovery).unwrap();
         assert_eq!(rebuilt.caps, h.setup.caps, "journal retained the old limits");
         let got = verify::<TestSet>(log.clone(), VerifyOptions::default(), hb()).unwrap();
-        assert_eq!(got.runs.len(), 2);
+        assert_eq!(got.runs.len(), 3);
         assert!(got.inputs > 0 && got.sink.compared > 0);
         assert!(got.sink.mismatches.is_empty(), "{:?}", got.sink.detail);
         let got = verify::<TestSet>(
