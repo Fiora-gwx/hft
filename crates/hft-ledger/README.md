@@ -279,7 +279,7 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 ### 余额初始化、校验与基线
 
 1. **初始化**:某 (account, venue, asset) 首次收到 `BalanceReport`(gw 会话建立时的余额快照;模拟账户由 sim-gw 按 `SimAccountCfg.initial_balances` 给出)且条目为 `UNINIT` → `total = free + locked`;计价/保证金资产直接为现金,其他资产记入 `unassigned`;写 `Note{BalanceInit}`。账户的全部 venue 都初始化后 `Equity.valid` 才可能为真。
-2. **校验**:其后的 `BalanceReport` 只更新 `rep_*`;`quiet = true`(sequencer 判定:该 (account, venue) `balance_check_quiet_ms` 内无成交、相关 inst 无非终态单)时比较 `free + locked` 与 `total`,差 ≥ 该资产的 `AssetMeta.dust`([hft-refdata](../hft-refdata/README.md#数据结构))→ `BalanceVerdict::Drift{asset, diff}`,sequencer 在差额首次越过它或较上次注记变化 ≥ 它时写 `Note{BalanceDrift}`。分级由 reconciler 报告 + hft-risk 完成,本 crate 不改账。
+2. **校验**:其后的 `BalanceReport` 只更新 `rep_*`;`quiet = true`(sequencer 判定:该 (account, venue) `balance_check_quiet_ms` 内无成交、相关 inst 无非终态单)时比较 `free + locked` 与 `total`,差 ≥ 该资产的 `AssetMeta.dust`([hft-refdata](../hft-refdata/README.md#数据结构))→ `BalanceVerdict::Drift{asset, diff}`。每次实际校验写 `Note{BalanceCheck}`(Ledger 的 n = 16),仅记录原始报告和 quiet 闸门通过的事实,不携带期望差额或结果;字段归 [Note 登记表](../hft-event/README.md#note-来源与码登记表)。首次初始化与 quiet=false 不写。漂移告警归 `Note{BalanceDrift}`,分级由 reconciler 报告 + hft-risk 完成,本 crate 不改账。
 3. **基线**(`SetBalanceBaseline{account, venue}`):对该 venue 上**不属于任何 group** 的非计价资产,把条目改为 `baseline = 最近报告值(free + locked)`、`unassigned = 0`、`total = baseline`,置 `NON_STRATEGY`;差额记入 `adjust`;写 `Note{BaselineSet}`(v[] = 资产数、合计名义)。返回涉及的资产列表,sequencer 据此向 hft-risk 报告对账闸门的处置(`Disposition::Baselined`)。属于某 group 的资产与计价/保证金资产不受影响(需要 `AdoptExchange`)。
 
 ### 外部成交(`ExternalFill`)
@@ -311,7 +311,7 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 | 记录 | 处理 |
 |---|---|
 | `Note{EpochStart}` | 记当前 epoch(`v[0]`) |
-| `StateSnapshot{purpose = Recovery}` | 从冷账本自身已入账事实重建恢复时的非持久读视图(估值时刻、run_start、余额漂移标志与派生缓存),不读取新快照的仓位/余额覆盖累计状态;随后 EngineClock 提供新启动的时刻。普通快照与滚段不触发此重建 |
+| `StateSnapshot` | 每个快照保留一份从自身已入账事实起步、清空非持久视图后继续消费后缀的冷副本。Recovery 只从该副本取得时钟、漂移标志与逐 venue 更新时间,其余派生金额从主冷账本的事实重算;不读新快照的仓位/余额覆盖累计状态。普通快照不重置主视图;副本最多一层,随下一个快照替换 |
 | `OrderDecision{action = New}`(Output,`reject = 0` 且未置 `SHADOW`) | 槽映射登记 `(venue, account, epoch, slot, gen) → (inst, side, group)`;容量 = Σ 各表 `slots` × (`tombstone_gens` + 1)(OMS 配置),满时淘汰最早登记的一项(`map_evicted` +1) |
 | `OrderEvent`(Input) | 按 `(ev.venue, ev.account, ev.epoch, ev.slot, ev.gen)` 查映射;`cum_filled` 大于该槽已记累计量时,增量 = `cum_filled − 已记`,增量名义 = `avg_px × cum_filled − 已记名义`,手续费按 [hft-oms 回报匹配与成交增量](../hft-oms/README.md#回报匹配与成交增量) 与 [成交净量](../hft-oms/README.md#成交净量b4) 的同一口径,构造 `FillDelta`/`FeeDelta`(`PERP_CASH` 使用上述结算入口;`seq` = 该 `OrderEvent` 的 seq,与引擎由 OMS `FillOut`/`FeeOut` 带出的值相同;group 轮次的 `open_seq` 取它)调 `apply_fill`/`apply_fee`;`cum_filled` 不增(重复、乱序)→ 不入账,例外:`PartialFill`/`Fill` 的 `cum_filled` 大于该槽此前成交类回报的最大 `cum_filled`(数量已由非成交回报带来,hft-oms 回报匹配与成交增量第 9 条)→ 只按 `FeeDelta` 入账其费用;映射缺失 → `unmapped_fills` +1,不入账(这类成交由 OMS 的 `Note{OmsForeignFill}` 另行给出,见下行) |
 | `ExternalFill`(Input) | venue 或品种要求 `PERP_CASH` 时调 `apply_settled_external(e, t)`;其他情况调 `apply_external(e, false, t)` |
@@ -319,7 +319,8 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 | `Note{OmsForeignFill}` | "外部成交"第 7 步(`external_from_oms_note`) |
 | `FundingSettle`(推送与 `synth = 1` 的 Output) | 按 `VenueCaps.funding_settle` 调 `apply_funding` / `apply_funding_push` |
 | `Note{Adjusted}`、`Note{FundingCorrected}`(未置 `NO_HISTORY`)| 还原 `AdjustDelta` 调 `apply_adjust` |
-| `BalanceReport`、`MarginReport`、`Bbo`/`MarkPrice`、`Applied` 的 `RecordTransfer`/`SimTransfer`/`SimReset`/`SetBalanceBaseline` 命令、`Timer{Sys, DayRoll}` | 与 sequencer 相同的入口(`on_balance` 的 `quiet` 一律按 false,只更新 `rep_*`) |
+| `BalanceReport`、`MarginReport`、`Bbo`/`MarkPrice`、`Applied` 的 `RecordTransfer`/`SimTransfer`/`SimReset`/`SetBalanceBaseline` 命令、`Timer{Sys, DayRoll}` | 与 sequencer 相同的入口;BalanceReport 先以 quiet=false 更新报告字段,保留同事件原始报告 |
+| `Note{BalanceCheck}` | 必须匹配同事件、尚未使用的已初始化 BalanceReport 的账户、venue、资产、free、locked、交易所时刻和引擎时刻;否则 BalanceEvidence 并锁存失败。用冷账本自身钱包重新执行 quiet=true 校验,得到漂移标志;EVENT_END 清除待匹配报告。没有该事实的旧日志只更新报告字段,不能证明漂移标志相等 |
 
 `t` 取该记录的 `Now.engine_ns`(由记录头 tsc 与本段的 `EngineClock` 按 [event-model 时间戳语义](../../docs/subsystems/event-model.md) 计算)。**等价断言**:在每条 `StateSnapshot` 记录处,`JournalLedger` 的持仓、现货库存与余额(`pos`、`inventory`、`venue_book`)等于从该快照恢复的引擎 Ledger 的同一读数(属性测试与 DST 每个快照点检查)。
 
@@ -561,6 +562,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 
 - [round8 裁决](../../design/_work/round8-decisions.md)(R8-3 解耦、R8-4 账户与资金、R8-8 不做同所现货 × 永续与资金费只告警、R8-11);评审证据 [review-2026-10-02](../../design/_work/review-2026-10-02-主策略适配与执行正确性.md) §1 表第 3 行、§3 P0-3/4/6,[review-2026-10-03](../../design/_work/review-2026-10-03-M0独立评审.md) P0-1、P1-5、P2,[M0-b 评审](../../design/_work/review-2026-10-03-M0b独立评审.md) P0-3、P1-3、P1-7,[M0-c 五路汇总](../../design/_work/review-2026-10-03-M0c五路汇总.md)(M-P1-6、V1 P2-4/10/11、V3 #21、#50),[M0-d 五路汇总](../../design/_work/review-2026-10-03-M0d五路汇总.md)(§4-13 核销残余与 ADL 自动入账、M-P2 资金费时刻归一化、W3 P1-16),[M0-e 五路汇总](../../design/_work/review-2026-10-03-M0e五路汇总.md)(X1 P1-C、P2-8,X3 P0-3)
 - Agent Note:[冷账本槽身份](../../.agents/notes/implemented/bug-fix/2026-10-10-journal-slot-identity.md)
+- Agent Note:[冷账本完整读视图](../../.agents/notes/implemented/bug-fix/2026-10-12-cold-ledger-read-views.md)
 - Agent Note:[永续钱包的结算事实](../../.agents/notes/implemented/architecture/2026-10-12-perp-cash-settlement.md)
 - Agent Note:[AUTO_EXTERNAL 前置条件与 auto_held](../../.agents/notes/proposed/architecture/2026-10-03-auto-external-guard.md)
 - [07 §5 仓位与盈亏记账](../../design/07-策略层.md)、[09 §4.3 对账与会计口径](../../design/09-可观测性、风控与控制面.md)

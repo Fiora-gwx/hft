@@ -213,6 +213,13 @@ pub struct JournalLedger {
     clock: Option<Clock>,
     last_t: i64,
     failed: Option<JournalApplyError>,
+    /// Eligible report from this event; its optional BalanceCheck supplies the OMS quiet gate.
+    balance: Option<(BalanceReport, i64)>,
+    /// Same independently booked checkpoint with fresh-process read views, followed by its
+    /// journal tail. One level only; no state is imported from later snapshot bodies.
+    recovery: Option<Box<JournalLedger>>,
+    recovery_started: bool,
+    track_snapshots: bool,
     report_id: Option<u64>,
     cmd: Option<(u64, PendingCmd)>,
     sims: Vec<(AccountId, Vec<SimBalance>)>,
@@ -404,6 +411,10 @@ impl JournalLedger {
             clock,
             last_t,
             failed: None,
+            balance: None,
+            recovery: None,
+            recovery_started: false,
+            track_snapshots: true,
             report_id: None,
             cmd: None,
             sims,
@@ -450,18 +461,36 @@ impl JournalLedger {
     }
 
     fn apply_record(&mut self, rec: &RecordView<'_>) -> Result<(), JournalApplyError> {
+        // Allow the caller to restore the snapshot's market/group facts before the first
+        // record, as it does for the primary ledger. Subsequent checkpoints use our own facts.
+        if self.track_snapshots && self.recovery.is_none() {
+            self.checkpoint_views();
+        }
         let t = self.t_of(rec.hdr.tsc);
         self.last_t = t;
         let kind = EventKind(rec.hdr.kind);
         let flags = RecordFlags(rec.hdr.flags);
+        if hft_event::classify(kind, rec.body).is_ok_and(|r| r == hft_event::Role::Input) {
+            self.recovery_started = true;
+        }
+        if kind != EventKind::STATE_SNAPSHOT
+            && self.recovery_started
+            && let Some(recovery) = self.recovery.as_mut()
+        {
+            recovery.apply(rec)?;
+        }
         match kind {
             EventKind::STATE_SNAPSHOT => {
-                // SnapshotPurpose::Recovery = 4 (hft-event's wire registry). Ordinary
-                // keyframes/rolls do not restart the ledger's process-local read views.
+                // Recovery restores the latest checkpoint and replays its Input tail. Its
+                // caches are neither the old process's caches nor necessarily all zero.
                 if let Ok(s) = rec.read::<SnapshotHdr>()
-                    && s.purpose == 4
+                    && self.track_snapshots
                 {
-                    self.ledger.restore_read_views();
+                    if s.purpose == 4 {
+                        let recovered = self.recovery.as_ref().ok_or(JournalApplyError::Identity)?;
+                        self.ledger.recover_read_views(&recovered.ledger);
+                    }
+                    self.checkpoint_views();
                 }
             }
             EventKind::ENGINE_CLOCK => {
@@ -477,6 +506,9 @@ impl JournalLedger {
             }
             EventKind::NOTE => {
                 if let Ok(n) = rec.read::<Note>() {
+                    if n.source == NoteSource::Ledger && n.code == code::BALANCE_CHECK {
+                        self.on_balance_check(&n, t)?;
+                    }
                     let cash_inst = match (n.source, n.code) {
                         (NoteSource::Oms, code::OMS_FOREIGN_FILL) => Some(n.inst),
                         (NoteSource::Ledger, code::EXTERNAL_FILL)
@@ -536,7 +568,8 @@ impl JournalLedger {
             }
             EventKind::BALANCE_REPORT => {
                 if let Ok(b) = rec.read::<BalanceReport>() {
-                    self.ledger.on_balance(&b, false, t);
+                    let verdict = self.ledger.on_balance(&b, false, t);
+                    self.balance = (verdict == BalanceVerdict::Reported).then_some((b, t));
                 }
             }
             EventKind::MARGIN_REPORT => {
@@ -583,8 +616,48 @@ impl JournalLedger {
         }
         if flags.contains(RecordFlags::EVENT_END) {
             self.report_id = None;
+            self.balance = None;
         }
         self.ledger.clear_notes();
+        Ok(())
+    }
+
+    fn checkpoint_views(&mut self) {
+        self.recovery = None;
+        let mut replay = self.clone();
+        replay.track_snapshots = false;
+        replay.balance = None;
+        replay.report_id = None;
+        replay.cmd = None;
+        replay.last_t = 0;
+        replay.ledger.restore_read_views();
+        self.recovery_started = false;
+        self.recovery = Some(Box::new(replay));
+    }
+
+    fn on_balance_check(&mut self, n: &Note, t: i64) -> Result<(), JournalApplyError> {
+        let (b, at) = self.balance.as_ref().ok_or(JournalApplyError::BalanceEvidence)?;
+        if t != *at
+            || n.strategy.0 != 0
+            || n.group != hft_types::GROUP_NONE
+            || n.inst != INST_NONE
+            || n.v
+                != [
+                    u64::from(b.venue.0) | u64::from(b.account.0) << 8,
+                    u64::from(b.asset.0),
+                    b.free.0 as u64,
+                    b.locked.0 as u64,
+                    b.ex_ts_ns as u64,
+                    0,
+                    0,
+                    0,
+                ]
+        {
+            return Err(JournalApplyError::BalanceEvidence);
+        }
+        let (b, at) = *self.balance.as_ref().ok_or(JournalApplyError::BalanceEvidence)?;
+        self.balance = None;
+        self.ledger.on_balance(&b, true, at);
         Ok(())
     }
 

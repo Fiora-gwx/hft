@@ -616,6 +616,7 @@ pub struct Note {                   // 0x0506,80 B;热路径唯一的"日志",�
 | `BalanceDrift`、`InvShortfall`、`NetQtyMismatch`、`FundingMismatch` | Ledger | P1 | 账本与推送/库存/净量/资金费不一致(hft-ledger) |
 | `FundingCorrected` | Ledger | P1 | 按 `ReconcileReport{Funding}` 自动校正一笔资金费,入账为 `AdjustDelta::Funding` |
 | `ChainReorg` / `ChainReorgNaked` | Ledger | P1 / P0 | optional 链上腿的重组 |
+| `BalanceCheck` | Ledger | Info | 已初始化余额的 quiet 校验实际执行;v[0] = venue \| account << 8,v[1] = asset,v[2] = free,v[3] = locked,v[4] = ex_ts_ns,其余 0。原始事实与同事件 BalanceReport 一致,不携带账本金额或校验结果 |
 | `ExecBroken` | Exec | P0 | cell 进入 Broken |
 | `ExecExternalDefault` | Exec | 按条件:发单 P0,裸量在阈值内不发单 P1 | 外来成交的默认处理(条件归 [hft-exec](../hft-exec/README.md)) |
 | `ExecAutoFixFailed` | Exec | P0 | 自动有界平仓失败 |

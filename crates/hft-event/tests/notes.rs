@@ -132,6 +132,13 @@ fn evt_075_note_registry_rows() {
         ("EVT-075.53", "FundingCorrected", Ledger, Some(P1), &[]),
         ("EVT-075.54", "ChainReorg", Ledger, Some(P1), &[]),
         ("EVT-075.55", "ChainReorgNaked", Ledger, Some(P0), &[]),
+        (
+            "EVT-075.92",
+            "BalanceCheck",
+            Ledger,
+            Some(Info),
+            &[(0, 8), (8, 8), (64, 64), (128, 64), (192, 64), (256, 64)],
+        ),
         ("EVT-075.56", "ExecBroken", Exec, Some(P0), &[]),
         ("EVT-075.57", "ExecExternalDefault", Exec, None, &[]),
         ("EVT-075.58", "ExecAutoFixFailed", Exec, Some(P0), &[]),
@@ -187,8 +194,8 @@ fn evt_075_note_registry_rows() {
         ("EVT-075.82", "AdvisorStats", Advisor, Some(Info), &[]),
         ("EVT-075.88", "ModelCkptSkipped", Advisor, Some(P1), &[]),
     ];
-    assert_eq!(NOTE_NAMES.len(), 88);
-    assert_eq!(rows.len(), 88);
+    assert_eq!(NOTE_NAMES.len(), 89);
+    assert_eq!(rows.len(), 89);
     for (i, (row, name, src, lvl, v)) in rows.iter().enumerate() {
         let n = note_name(name).unwrap_or_else(|| panic!("{row}"));
         assert_eq!(NOTE_NAMES[i].name, *name, "{row} order");

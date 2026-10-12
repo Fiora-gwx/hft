@@ -421,6 +421,13 @@ fn led_288_recovery_rebuilds_read_views_without_replacing_booked_facts() {
             },
             body: &body,
         };
+        let mut checkpoint_body = body.clone();
+        checkpoint_body[0] = 2;
+        let checkpoint = hft_event::RecordView {
+            body: &checkpoint_body,
+            ..record
+        };
+        cold.apply(&checkpoint).unwrap();
         for _ in 0..2 {
             cold.apply(&record).unwrap();
             assert_eq!(
@@ -455,4 +462,138 @@ fn led_288_recovery_rebuilds_read_views_without_replacing_booked_facts() {
             cash(before.ledger(), A1, P2, USDT).total
         );
     }
+
+    // A real recovery replays the checkpoint's tail. A later clock is an easy nonzero
+    // counterexample to resetting all caches at the Recovery record itself.
+    let mut cold = before.clone();
+    let mut hdr = hft_event::SnapshotHdr::new_zeroed();
+    hdr.purpose = 2;
+    let record = hft_event::RecordView {
+        hdr: hft_event::RecordHeader {
+            len: (24 + size_of::<hft_event::SnapshotHdr>()) as u32,
+            kind: hft_event::EventKind::STATE_SNAPSHOT.0,
+            flags: RecordFlags::EVENT_END.0,
+            seq: 18,
+            tsc: TSC,
+        },
+        body: hdr.as_bytes(),
+    };
+    cold.apply(&record).unwrap();
+    clock(&mut cold, s(30));
+    let mut recovered = restore_with(&durable, rd).unwrap();
+    recovered.on_run_start(s(30));
+    let mut recovery_header = hdr;
+    recovery_header.purpose = 4;
+    cold.apply(&hft_event::RecordView {
+        body: recovery_header.as_bytes(),
+        ..record
+    })
+    .unwrap();
+    assert_eq!(snap(cold.ledger()), durable);
+    assert_eq!(
+        cold.ledger().venue_book(A1, P2).summary,
+        recovered.venue_book(A1, P2).summary
+    );
+}
+
+#[test]
+fn led_289_balance_gate_recomputes_drift_from_same_event_facts() {
+    use hft_ledger::{BalanceVerdict, FeeDelta, vflags};
+    let rd = rd_cash();
+    let base = booted_with(rd);
+    let mut hot = base.clone();
+    let mut j = cold(&base, rd);
+    clock(&mut j, s(20));
+    hot.on_run_start(s(20));
+    let total = cash(&base, A1, P2, USDT).total;
+    for (free, quiet, drift) in [
+        (Qty(total.0 - usdt("1000").0), true, true),
+        (total, false, true),
+        (total, true, false),
+    ] {
+        let b = bal(A1, P2, USDT, free, Qty(0), s(20));
+        hot.clear_notes();
+        hot.on_balance(&b, quiet, s(20));
+        let evidence = hot
+            .notes()
+            .iter()
+            .find(|n| n.code == hft_ledger::notes::code::BALANCE_CHECK)
+            .copied();
+        assert_eq!(evidence.is_some(), quiet);
+        feed(&mut j, &b, !quiet);
+        if let Some(n) = evidence {
+            apply(&mut j, &n).unwrap();
+        }
+        let a = j.ledger().venue_book(A1, P2);
+        let e = hot.venue_book(A1, P2);
+        assert_eq!(a.summary, e.summary);
+        assert_eq!(a.vflags, e.vflags);
+        assert_eq!(a.vflags & vflags::DRIFT != 0, drift);
+        assert_eq!(a.cash, e.cash);
+        assert_eq!(cash(j.ledger(), A1, P2, USDT).total, total);
+    }
+
+    let b = bal(A1, P2, USDT, total, Qty(0), s(20));
+    hot.clear_notes();
+    assert_eq!(hot.on_balance(&b, true, s(20)), BalanceVerdict::Ok);
+    let note = *hot
+        .notes()
+        .iter()
+        .find(|n| n.code == hft_ledger::notes::code::BALANCE_CHECK)
+        .unwrap();
+    for field in 0..12 {
+        let mut bad = cold(&base, rd);
+        clock(&mut bad, s(20));
+        feed(&mut bad, &b, field == 11);
+        let mut n = note;
+        match field {
+            0..=7 => n.v[field] ^= 1,
+            8 => n.group.0 = 1,
+            9 => n.inst.0 = 1,
+            10 => n.strategy.0 = 1,
+            _ => {}
+        }
+        let prior = snap(bad.ledger());
+        assert_eq!(
+            apply(&mut bad, &n),
+            Err(JournalApplyError::BalanceEvidence),
+            "field {field}"
+        );
+        assert_eq!(snap(bad.ledger()), prior);
+        assert_eq!(apply(&mut bad, &note), Err(JournalApplyError::BalanceEvidence));
+    }
+    let mut duplicate = cold(&base, rd);
+    clock(&mut duplicate, s(20));
+    feed(&mut duplicate, &b, false);
+    apply(&mut duplicate, &note).unwrap();
+    assert_eq!(
+        apply(&mut duplicate, &note),
+        Err(JournalApplyError::BalanceEvidence)
+    );
+
+    // The note contains the gate and the raw report, never the hot result. A distinct local
+    // wallet must produce its own Drift verdict even when the producer's verdict was Ok.
+    let mut different = base.clone();
+    different.apply_fee(
+        &FeeDelta {
+            account: A1,
+            venue: P2,
+            inst: BTC_P2,
+            group: G1,
+            side: Buy,
+            fee: usdt("10").0,
+            fee_asset: USDT,
+            seq: 1,
+        },
+        s(10),
+    );
+    let mut independent = cold(&different, rd);
+    clock(&mut independent, s(20));
+    feed(&mut independent, &b, false);
+    apply(&mut independent, &note).unwrap();
+    assert_ne!(independent.ledger().venue_book(A1, P2).vflags & vflags::DRIFT, 0);
+    assert_eq!(
+        cash(independent.ledger(), A1, P2, USDT).total,
+        cash(&different, A1, P2, USDT).total
+    );
 }

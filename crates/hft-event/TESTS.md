@@ -850,7 +850,7 @@ spec: README.md
 - 规则:[Note 来源与码登记表](README.md#note-来源与码登记表)
 - 级别:table
 - 里程碑:M1
-- 前置:`NOTE_NAMES` 与 `note_name`;"期望"写 `source / level / v`,`level` 为 `None` 表示"按条件";`v` 写成 `(bit, bits)` 序列,只比较位置与宽度,不比较 `VField.name`;`[]` 表示本表不登记 `v[]` 字段;另断言 `NOTE_NAMES.len() == 88` 且顺序与 README 登记表行序一致(EVT-075.85–EVT-075.91 位于各自 source 组末尾)
+- 前置:`NOTE_NAMES` 与 `note_name`;"期望"写 `source / level / v`,`level` 为 `None` 表示"按条件";`v` 写成 `(bit, bits)` 序列,只比较位置与宽度,不比较 `VField.name`;`[]` 表示本表不登记 `v[]` 字段;另断言 `NOTE_NAMES.len() == 89` 且顺序与 README 登记表行序一致(EVT-075.85–EVT-075.92 位于各自 source 组末尾)
 - 实现:`crates/hft-event/tests/notes.rs::evt_075_note_registry_rows`
 
 | 行 | 码名 | 期望 |
@@ -913,6 +913,7 @@ spec: README.md
 | EVT-075.53 | `FundingCorrected` | Ledger / P1 / `[]` |
 | EVT-075.54 | `ChainReorg` | Ledger / P1 / `[]` |
 | EVT-075.55 | `ChainReorgNaked` | Ledger / P0 / `[]` |
+| EVT-075.92 | `BalanceCheck` | Ledger / Info / `(0,8) (8,8) (64,64) (128,64) (192,64) (256,64)` |
 | EVT-075.56 | `ExecBroken` | Exec / P0 / `[]` |
 | EVT-075.57 | `ExecExternalDefault` | Exec / None / `[]` |
 | EVT-075.58 | `ExecAutoFixFailed` | Exec / P0 / `[]` |

@@ -51,6 +51,50 @@ fn cold_at(h: &H, start: &MemRecord) -> JournalLedger {
     j
 }
 
+#[test]
+fn seq_414_balance_check_gate_matches_cold_view_and_full_window_replay() {
+    use hft_event::{BalanceReport, Note};
+    use hft_ledger::{notes::code, vflags};
+    let mut h = cash_boot();
+    let start = h.keyframe();
+    let total = wallet(&h.s.engine().ledger);
+    let mut last = None;
+    for free in [total - 100_000_000_000, total] {
+        let m = h.mark();
+        let b = BalanceReport {
+            venue: B,
+            account: AC1,
+            asset: USDT,
+            _pad: 0,
+            free: Qty(free),
+            locked: Qty(0),
+            ex_ts_ns: h.now() as i64,
+            rx_tsc: hft_types::Tsc(h.now()),
+        };
+        h.push(h.rep_ring(AC1), &b);
+        assert_eq!(h.run(), StepOutcome::Idle);
+        let notes: Vec<Note> = h
+            .since(m)
+            .iter()
+            .filter_map(|r| r.read::<Note>())
+            .filter(|n| n.code == code::BALANCE_CHECK)
+            .collect();
+        assert_eq!(notes.len(), 1);
+        let hot = h.s.engine().ledger.venue_book(AC1, B);
+        assert_eq!(hot.vflags & vflags::DRIFT != 0, free != total);
+        let cold = cold_at(&h, &start);
+        let got = cold.ledger().venue_book(AC1, B);
+        assert_eq!(got.summary, hot.summary);
+        assert_eq!(got.vflags, hot.vflags);
+        assert_eq!(got.cash, hot.cash);
+        assert_eq!(wallet(cold.ledger()), total);
+        last = Some(h.keyframe());
+    }
+    assert!(h.verify().is_empty());
+    assert!(h.verify_from(Some(start.seq)).is_empty());
+    assert!(h.verify_from(Some(last.unwrap().seq)).is_empty());
+}
+
 // B0 uses USDT qty_exp=-8. These are the original five matching facts rescaled from -6.
 const FACTS: [(Side, i64, i64, i64, i64); 5] = [
     (Side::Sell, 100_000, 6_001_890, 3_001_000, 0),
