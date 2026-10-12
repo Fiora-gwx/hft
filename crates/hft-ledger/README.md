@@ -556,7 +556,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 | `apply_chain`(feature `chain`) | ≤ 150 ns | ≤ 400 ns | `ledger/apply_chain` |
 | Python 重建 1 天 journal(hft-py) | — | — | 吞吐 ≥ 5 M 事件/分钟(`ledger/replay_day`) |
 
-零分配(容量由 refdata、`EngineConfig` 与编译期常量决定);无系统调用;只被 sequencer 线程写。外来成交去重环用按键的开放寻址索引(O(1));逐笔资金费记录环每个有永续市场的 (account, venue) `funding_hist_cap × 32 B`(默认 128 KiB)、无历史挂起表 64 × 32 B、外来成交去重环 `ext_dedup_cap × 24 B`(默认 24 KiB)、资金费周期表每 inst 8 B,都在 `new` 时分配(`on_funding_interval` O(1),`INST_NONE` 的 `funding_grid` 按 venue 的永续 inst 数线性扫描,每次结算一次,冷路径);快照只写窗口内的记录与去重环。
+零分配(容量由 refdata、`EngineConfig` 与编译期常量决定);无系统调用;只被 sequencer 线程写。外来成交去重环用按键的开放寻址索引(O(1));逐笔资金费记录环每个有永续市场的 (account, venue) `funding_hist_cap × 32 B`(默认 128 KiB)、无历史挂起表 64 × 32 B、外来成交去重环 `ext_dedup_cap × 24 B`(默认 24 KiB)、每个永续 (account, venue) 的待确认原始凭据 `ext_dedup_cap × 96 B`(默认 96 KiB)、资金费周期表每 inst 8 B,都在 `new` 时分配(`on_funding_interval` O(1),`INST_NONE` 的 `funding_grid` 按 venue 的永续 inst 数线性扫描,每次结算一次,冷路径);快照只写窗口内的记录与去重环。
 
 ## 测试与验收
 

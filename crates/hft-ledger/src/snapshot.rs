@@ -903,7 +903,11 @@ impl Ledger {
                     venue: h.venue,
                     account: h.account,
                     inst: InstId(h.id),
-                    side: hft_types::Side::try_from(x.side).map_err(|_| RestoreError::BadValue)?,
+                    side: match x.side {
+                        1 => hft_types::Side::Buy,
+                        2 => hft_types::Side::Sell,
+                        _ => return Err(RestoreError::BadValue),
+                    },
                     cause: hft_event::ExternalCause::try_from(x.cause).map_err(|_| RestoreError::BadValue)?,
                     qty: x.qty,
                     px: x.px,

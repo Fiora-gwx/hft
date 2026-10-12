@@ -46,12 +46,12 @@ pub struct CmdResponse { pub v: u8, pub cmd_id: Uuid, pub status: TransportStatu
 
 /// 规范化:JSON 命令体 → hft-event ControlCmd 字节(数值按 refdata 资产指数转定点,名字解析为稠密 id)。
 pub fn normalize(req: &CmdRequest, rd: &RefData) -> Result<Normalized, NormErr>;  // NormErr → InvalidArgs{detail}
-pub struct Normalized { pub kind: EventKind /* ControlCmd 或 ReconcileReport */, pub hdr: CmdHdr, pub record: Vec<u8> /* ControlCmd 逻辑体 = CmdHdr + 载荷 */,
+pub struct Normalized { pub kind: EventKind /* ControlCmd、ReconcileReport 或 ReconcileBatch */, pub hdr: CmdHdr, pub record: Vec<u8> /* ControlCmd 逻辑体 = CmdHdr + 载荷 */,
                         pub cmd_hash: [u8; 32], pub blobs: Vec<BlobPart> /* ≤ 64 段 ConfigBlob,体 = PartHdr + 段 */, pub blob: Option<Vec<u8>> /* 解码后的大参数 */,
                         pub reports: Vec<ReconcileReport> }
 impl Normalized { pub fn params_blob(&self) -> Option<&[u8]> /* SetParams:原始 SPB1 字节,交给 gateway 做结构与 body 校验 */;
                   pub fn set_gateway_fields(&mut self, expires_tsc: u64, peer_uid: u32, role: u8);
-                  pub fn ring_records(&self) -> Vec<(EventKind, RecordFlags, Vec<u8>)> /* 写环顺序:ConfigBlob 各段,再一段 ControlCmd(PartHdr + 逻辑体);或各条 ReconcileReport */ }
+                  pub fn ring_records(&self) -> Vec<(EventKind, RecordFlags, Vec<u8>)> /* 写环顺序:ConfigBlob 各段,再一段 ControlCmd(PartHdr + 逻辑体);或各条 ReconcileReport/单条 ReconcileBatch */ }
 
 /// 权限:纯函数,gateway 调用;不需要任何 sequencer 状态。
 pub fn class_of(cmd: &CmdBody) -> CmdClass;                  // Downgrade | Upgrade | Neutral | ReadOnly,按命令与目标值静态判定;

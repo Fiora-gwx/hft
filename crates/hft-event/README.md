@@ -577,7 +577,6 @@ pub struct Note {                   // 0x0506,80 B;热路径唯一的"日志",�
 | 码名 | source | 级别 | 含义与 `v[]`(语义归) |
 |---|---|---|---|
 | `EpochStart` | Sequencer | Info | 每次进程启动恰好一条,是处理 [`EngineClock`](#engineclock0x050ainput) 的同一事件的输出;v[0] = engine_epoch,v[1] = `EngineClock.base_engine_ns`,v[2] = 该 `EngineClock` 记录的 seq;SDK `Now.boot_seq` = 本条的 seq;reconciler 据此立即对账 |
-| `ReconcileCash` | Sequencer | Info | 原始结算批次是否应用;字段见[变长记录前缀](#变长记录前缀) |
 | `Conflated` | Sequencer | Info | BBO 积压合并计数(hft-sequencer) |
 | `DrainTimeout` | Sequencer | 按条件:有未结束的链接或未到达的引擎减仓目标 P0,否则 P1 | Drain 超时,`v[]` 列出未完成的账户(等待条件、定级与 `v[]` 归 hft-sequencer;退出码归 apps/hft-core) |
 | `RecoverMismatch` | Sequencer | P0 | 恢复时决策不一致:v[0] = venue \| account << 8,v[1] = 不一致记录的 seq |
@@ -590,6 +589,7 @@ pub struct Note {                   // 0x0506,80 B;热路径唯一的"日志",�
 | `TimersCancelled` | Sequencer | Info | `SetParams` 移除 group 时撤销了该 group 的策略定时器:`Note.group` = 被移除的 group,v[0] = 撤销条数(hft-sequencer) |
 | `TargetCleared` | Sequencer | Info | `SetParams` 移除 group 时撤销了该 group 在执行层的目标:`Note.group` = 被移除的 group,v[0] = strategy,v[1] = account(hft-sequencer) |
 | `PositionDiff` | Sequencer | P1 | `PositionReport` 的数量与账本仓位不同:v[0] = venue \| account << 8,v[1] = 账本量,v[2] = 报告量(原始值;差异的处理归对账) |
+| `ReconcileCash` | Sequencer | Info | 原始结算批次是否应用;字段见[变长记录前缀](#变长记录前缀) |
 | `RateLimitHit` | Risk | P2 | 限速命中(`v[]` 归 [hft-risk](../hft-risk/README.md)) |
 | `CapSet` / `CapCleared` | Risk | Info | v[0..6] = 该条 [`CapRecord`](#cap-记录) 的 48 字节;告警级别由 [watchtower](../../apps/watchtower/README.md) 按 cap 来源定 |
 | `MarginLevel` | Risk | 按档位:L2 P1、L3 P0 | v = [account \| venue << 8, level, liq_dist, ratio, deadline_ens];档位语义归 hft-risk |

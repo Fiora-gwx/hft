@@ -1,0 +1,44 @@
+{
+  "fields": [
+    {
+      "metadata": {},
+      "name": "report_id",
+      "nullable": false,
+      "type": "UInt64"
+    },
+    {
+      "metadata": {},
+      "name": "n_reports",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {},
+      "name": "n_fills",
+      "nullable": false,
+      "type": "UInt16"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:venue"
+      },
+      "name": "venue",
+      "nullable": false,
+      "type": "UInt8"
+    },
+    {
+      "metadata": {
+        "hft.type": "id:account"
+      },
+      "name": "account",
+      "nullable": false,
+      "type": "UInt8"
+    }
+  ],
+  "metadata": {
+    "hft.kind": "0x0405",
+    "hft.layout": "var 16 51200",
+    "hft.name": "ReconcileBatch",
+    "hft.schema_version": "1"
+  }
+}

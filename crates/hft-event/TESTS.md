@@ -948,7 +948,7 @@ spec: README.md
 | EVT-075.86 | `StopMarkerCorrupt` | Boot / P0 / `[]` |
 | EVT-075.87 | `EndpointOverride` | Boot / P1 / `(0,8)` |
 | EVT-075.88 | `ModelCkptSkipped` | Advisor / P1 / `[]` |
-| EVT-075.93 | `ReconcileCash` | Sequencer / Info / `(0,64) (64,64) (128,64) (192,64) (256,64)` |
+| EVT-075.93 | `ReconcileCash` | Sequencer / Info / `(0,64) (64,8) (72,8) (128,64) (192,64) (256,64)` |
 
 ### EVT-076 Note 码名登记表满足命名与字段不变量
 

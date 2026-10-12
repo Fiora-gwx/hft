@@ -832,6 +832,24 @@
 
 码表:[ReconItem](#码表-reconitem)、[ReconSeverity](#码表-reconseverity)、[ReconOrderStatus](#码表-reconorderstatus)、[ReconFlags](#码表-reconflags)
 
+### 0x0405 ReconcileBatch
+
+- 编号:`0x0405`
+- 域:Control
+- 角色:Input
+- 布局:var 16 51200
+- schema_version:1
+- journal:seq;CRC:never
+
+| 偏移 | 字段 | 类型 | 单位 | 测量 | 说明 |
+|---|---|---|---|---|---|
+| 0 | `report_id` | `u64` |  |  |  |
+| 8 | `n_reports` | `u16` |  |  |  |
+| 10 | `n_fills` | `u16` |  |  |  |
+| 12 | `venue` | `id:venue` |  |  |  |
+| 13 | `account` | `id:account` |  |  |  |
+| 14 | `_pad` | `pad:2` |  |  |  |
+
 ### 0x0501 Timer
 
 - 编号:`0x0501`
@@ -1308,6 +1326,7 @@
 | `TimersCancelled` | Sequencer |  | Info |  |
 | `TargetCleared` | Sequencer |  | Info |  |
 | `PositionDiff` | Sequencer |  | P1 | `venue` [0, +8)、`account` [8, +8)、`ledger_qty` [64, +64)、`report_qty` [128, +64) |
+| `ReconcileCash` | Sequencer |  | Info | `report_id` [0, +64)、`venue` [64, +8)、`account` [72, +8)、`n_reports` [128, +64)、`n_fills` [192, +64)、`applied` [256, +64) |
 | `RateLimitHit` | Risk | 1 | P2 |  |
 | `CapSet` | Risk | 2 | Info | `cap` [0, +384) |
 | `CapCleared` | Risk | 3 | Info | `cap` [0, +384) |

@@ -486,6 +486,13 @@ kind 0x0404 ReconcileReport v3 fixed 104
   96 sflags bits:ReconFlags
   98 skipped_inflight u16
   100 _pad4 pad:4
+kind 0x0405 ReconcileBatch v1 var 16 51200
+  0 report_id u64
+  8 n_reports u16
+  10 n_fills u16
+  12 venue id:venue
+  13 account id:account
+  14 _pad pad:2
 kind 0x0501 Timer v1 fixed 24
   0 timer_id u32
   4 owner u16

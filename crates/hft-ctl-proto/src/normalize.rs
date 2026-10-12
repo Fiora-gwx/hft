@@ -89,7 +89,7 @@ impl BlobPart {
 /// A normalized request.
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct Normalized {
-    /// `EventKind::CONTROL_CMD`, or `RECONCILE_REPORT` for a `ReconcileReport` request.
+    /// `CONTROL_CMD`, or `RECONCILE_REPORT` / `RECONCILE_BATCH` for reconciliation.
     pub kind: EventKind,
     /// `CmdHdr` as written in `record` (gateway fields `expires_tsc`, `peer_uid`, `role` 0).
     pub hdr: CmdHdr,
@@ -129,7 +129,7 @@ impl Normalized {
     }
 
     /// Ring bodies in write order: `ConfigBlob` segments, then the `ControlCmd` as one Multi
-    /// segment (`PartHdr` + logical body); for `ReconcileReport`, the report bodies.
+    /// segment (`PartHdr` + logical body); reconciliation uses report bodies or one receipt batch.
     pub fn ring_records(&self) -> Vec<(EventKind, RecordFlags, Vec<u8>)> {
         if self.kind == EventKind::RECONCILE_BATCH {
             return vec![(self.kind, RecordFlags(0), self.record.clone())];

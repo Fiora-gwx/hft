@@ -41,6 +41,7 @@ KIND_CONTROL_CMD = 0x0401
 KIND_CMD_RESULT = 0x0402
 KIND_CONFIG_BLOB = 0x0403
 KIND_RECONCILE_REPORT = 0x0404
+KIND_RECONCILE_BATCH = 0x0405
 KIND_TIMER = 0x0501
 KIND_CONN_STATE = 0x0502
 KIND_ADVICE = 0x0503
@@ -82,6 +83,7 @@ CONTROL_CMD = _s(["cmd_id", "issuer", "issued_at_ns", "expires_at_ns", "expires_
 CMD_RESULT = _s(["cmd_id", "cmd_seq", "cmd", "status", "_pad", "detail", "engine_epoch", "effect_count", "refdata_version", "risk_version", "params_version", "ctl_state_version", "rflags", "_pad2", "preview"], ["(16,)u1", "<u8", _t("<u2", "enum:CmdKind"), "<u1", "V1", "<u4", "<u4", "<u4", "<u8", "<u8", "<u8", "<u8", _t("<u4", "bits:CmdResultFlags"), "V4", _s(["target_account", "other_account", "target_mode", "other_mode", "target_kind", "_pad", "affected_cells", "open_orders", "active_caps", "cap_sources", "reset_groups", "no_open_ms", "wo_venue", "wo_leg_ix", "_pad2", "wo_inst", "wo_qty", "_rsv"], [_t("<u1", "id:account"), _t("<u1", "id:account"), "<u1", "<u1", _t("<u1", "enum:AccountKind"), "V3", "<u4", "<u4", "<u4", "<u4", "<u4", "<u4", _t("<u1", "id:venue"), "<u1", "V2", _t("<u4", "id:inst"), _t("<i8", "qty"), "V16"], [0, 1, 2, 3, 4, 5, 8, 12, 16, 20, 24, 28, 32, 33, 34, 36, 40, 48], 64)], [0, 16, 24, 26, 27, 28, 32, 36, 40, 48, 56, 64, 72, 76, 80], 144)
 CONFIG_BLOB = _s(["blob", "scope", "boot", "_pad"], [_s(["kind", "encoding", "len", "version", "sha256"], [_t("<u2", "enum:BlobKind"), "<u2", "<u4", "<u8", "(32,)u1"], [0, 2, 4, 8, 16], 48), _s(["strategy", "venue", "account", "_pad", "group", "inst", "_pad2"], [_t("<u1", "id:strategy"), _t("<u1", "id:venue"), _t("<u1", "id:account"), "V1", _t("<u4", "id:group"), _t("<u4", "id:inst"), "V4"], [0, 1, 2, 3, 4, 8, 12], 16), _t("<u1", "enum:Boot"), "V7"], [0, 48, 64, 65], 72)
 RECONCILE_REPORT = _s(["report_id", "venue", "account", "item", "severity", "inst", "asset", "idx", "count", "_pad", "engine_qty", "exch_qty", "diff", "exch_ts_ns", "slot", "order_status", "history_checked", "_pad2", "view_seq", "gen", "epoch", "_pad3", "exch_amount", "engine_amount", "sflags", "skipped_inflight", "_pad4"], ["<u8", _t("<u1", "id:venue"), _t("<u1", "id:account"), _t("<u1", "enum:ReconItem"), _t("<u1", "enum:ReconSeverity"), _t("<u4", "id:inst"), _t("<u2", "id:asset"), "<u2", "<u2", "V2", _t("<i8", "qty"), _t("<i8", "qty"), _t("<i8", "notional"), "<i8", _t("<u4", "id:slot"), _t("<u1", "enum:ReconOrderStatus"), "<u1", "V2", "<u8", "<u4", "<u2", "V2", _t("<i8", "notional"), _t("<i8", "notional"), _t("<u2", "bits:ReconFlags"), "<u2", "V4"], [0, 8, 9, 10, 11, 12, 16, 18, 20, 22, 24, 32, 40, 48, 56, 60, 61, 62, 64, 72, 76, 78, 80, 88, 96, 98, 100], 104)
+RECONCILE_BATCH = _s(["report_id", "n_reports", "n_fills", "venue", "account", "_pad"], ["<u8", "<u2", "<u2", _t("<u1", "id:venue"), _t("<u1", "id:account"), "V2"], [0, 8, 10, 12, 13, 14], 16)
 TIMER = _s(["timer_id", "owner", "_pad", "group", "_pad2", "deadline_tsc"], ["<u4", "<u2", "V2", _t("<u4", "id:group"), "V4", _t("<u8", "tsc")], [0, 4, 6, 8, 12, 16], 24)
 CONN_STATE = _s(["venue", "conn", "state", "role", "inst", "reason", "account", "_pad2", "rx_tsc"], [_t("<u1", "id:venue"), "<u1", _t("<u1", "enum:ConnStateKind"), _t("<u1", "enum:ConnRole"), _t("<u4", "id:inst"), "<u4", _t("<u1", "id:account"), "V3", _t("<u8", "tsc")], [0, 1, 2, 3, 4, 8, 12, 13, 16], 24)
 ADVICE = _s(["strategy", "account", "local_kind", "group", "len", "_pad", "basis_seq", "basis_tsc"], [_t("<u1", "id:strategy"), _t("<u1", "id:account"), "<u2", _t("<u4", "id:group"), "<u2", "V6", "<u8", _t("<u8", "tsc")], [0, 1, 2, 4, 8, 10, 16, 24], 32)
@@ -137,6 +139,7 @@ KINDS = {
     0x0402: ("CmdResult", 3, "fixed 144", CMD_RESULT),
     0x0403: ("ConfigBlob", 1, "multi 72", CONFIG_BLOB),
     0x0404: ("ReconcileReport", 3, "fixed 104", RECONCILE_REPORT),
+    0x0405: ("ReconcileBatch", 1, "var 16 51200", RECONCILE_BATCH),
     0x0501: ("Timer", 1, "fixed 24", TIMER),
     0x0502: ("ConnState", 2, "fixed 24", CONN_STATE),
     0x0503: ("Advice", 1, "var 32 4096", ADVICE),
@@ -153,7 +156,7 @@ KINDS = {
 
 # FNV-1a 64 of (kind u16, schema_version u16, size u32) LE of every production kind in number
 # order (size = fixed body or Var/Multi prefix); equals hft_py.schema_hash().
-SCHEMA_HASH = 0x6FD36E6C37BA07B2
+SCHEMA_HASH = 0xF32BAC462DC3C85A
 
 STRUCTS = {
     "StrategyParamsHdr": STRATEGY_PARAMS_HDR,

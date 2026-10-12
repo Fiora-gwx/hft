@@ -174,6 +174,9 @@ impl<'a> ReconcileBatchView<'a> {
                 || r._pad4 != 0
                 || (i == 0) != (r.item == 5)
                 || !(1..=6).contains(&r.item)
+                || r.severity > 2
+                || r.order_status > 7
+                || r.history_checked > 1
                 || r.sflags & !15 != 0
                 || (r.sflags & ReconcileReport::AUTO_EXTERNAL != 0 && r.item != 1)
             {
