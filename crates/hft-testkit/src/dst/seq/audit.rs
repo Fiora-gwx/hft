@@ -8,19 +8,7 @@ use hft_sequencer::{Engine, types::InputSlot};
 use hft_strategy_sdk::HedgeKind;
 use hft_types::{AccountId, GroupId, InstId, MarketKind};
 
-use crate::dst::obs::HedgeHistoryRow;
-
-/// Link identity includes the order epoch and the event which created the link.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LinkKey {
-    pub id: u32,
-    pub venue: u8,
-    pub account: u8,
-    pub epoch: u16,
-    pub slot: u32,
-    pub generation: u32,
-    pub created_seq: u64,
-}
+use crate::dst::obs::{HedgeHistoryRow, LinkKey};
 
 #[derive(Clone, Debug)]
 struct Tracked {
@@ -63,6 +51,9 @@ impl Tracked {
 }
 
 impl History {
+    pub fn key(&self, row: LinkAudit) -> LinkKey {
+        self.tracked(row).key
+    }
     fn tracked(&self, r: LinkAudit) -> Tracked {
         if let Some(old) = self.live.get(&r.link.link_id).filter(|old| old.same(&r)) {
             return Tracked {

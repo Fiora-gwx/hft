@@ -4,3 +4,4 @@
 0x000000000000034b 2026-10-10 OmsHedgeNakedCapped 按 group 累计,链接结束后 INV-8 失配
 0x00000000000006dd 2026-10-10 外来成交去重键未进 Obs,重复的 ExternalFill 报 INV-2
 0xbe413439dca24fad 2026-10-10 DST 观察器漏掉 OMS 最高有效槽,第 779 步误报 INV-7(TK-101;https://github.com/Fiora-gwx/hft/actions/runs/38049505528)
+0x1af231bb1d6440e2 2026-10-12 I14 缺少对冲 place 错误证据,第 608 步槽满后的重试被误判为门控失败(TK-121;https://github.com/Fiora-gwx/hft/actions/runs/38194738015)

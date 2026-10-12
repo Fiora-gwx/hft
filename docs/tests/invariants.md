@@ -192,6 +192,7 @@
   - 给策略的 `OrderUpdate::Rejected`:门控拒绝的 `bits ≠ 0`(风控 `RejectBits` 或 `LOCAL_SEND_FAIL`),交易所拒单的 `bits = 0`
 - 实现:`crates/hft-testkit/src/dst/invariants.rs::inv_14_gate_rejects_not_counted`
 - 备注:检查器 `I14`;策略侧 `Throttle` 的 `Gated` 不改变 `consec_fail` 由 hft-strat-lib 属性测试断言;主要触发场景 B-5、LK-3、FP-2
+- place 证据:真实引擎逐 Input 保存调用前原始事实,检查错误与空闲槽数并按完整链接身份限制计数增量;观察缺失、重复或跨链接复用失败,反例验收见 [TK-121](../../crates/hft-testkit/TESTS.md#tk-121-对冲-place-失败必须有同一链接实例的原始证据)。
 
 ### INV-15 对冲类单的数量不超过基数加 1 lot、名义不超过对冲单笔上限,Flatten 类名义不超过减仓单笔上限
 

@@ -18,7 +18,7 @@ use hft_types::{AccountId, AssetId, GroupId, InstId, RejectBits, RunMode, Side, 
 
 use crate::dst::obs::{
     AutoFixPhase, CapLevel, CapScope, DecClass, DecOrigin, DecisionInfo, EvidenceKind, HedgeKind, KillRow,
-    LinkState, Obs, PlanKind, SlotState, StepInfo, TruthRow,
+    LinkState, Obs, PlaceFailureKind, PlanKind, SlotState, StepInfo, TruthRow,
 };
 use crate::dst::scenario::{Scenario, SeedSet};
 use crate::dst::sut::{FrameRec, JRec, OutRing};
@@ -1542,6 +1542,36 @@ pub fn inv_14_gate_rejects_not_counted() -> Scenario {
 }
 
 fn check_14(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
+    for (index, f) in v.info.place_failures.iter().enumerate() {
+        let owner = v.before.links.iter().chain(&v.after.links).find(|l| {
+            l.key == Some(f.key) && l.id == f.key.id && l.account.0 == f.key.account && l.group == f.group
+        });
+        let valid_error = match f.error {
+            PlaceFailureKind::NoFreeSlot => f.free_slots == Some(0),
+            PlaceFailureKind::NoTable => {
+                f.free_slots.is_none()
+                    && !v
+                        .before
+                        .tables
+                        .iter()
+                        .chain(&v.after.tables)
+                        .any(|t| t.venue == f.venue && t.account.0 == f.key.account)
+            }
+            // An OMS hedge reuses its link; allocating a new link is a first-leg operation.
+            PlaceFailureKind::LinkTableFull => false,
+        };
+        if v.input().is_none_or(|r| r.seq != f.input_seq)
+            || f.index as usize != index
+            || owner.is_none()
+            || !valid_error
+            || v.after.inst(f.inst).is_none_or(|i| i.venue != f.venue)
+        {
+            return Err(format!(
+                "invalid hedge place failure evidence at Input {} index {}",
+                f.input_seq, f.index
+            ));
+        }
+    }
     let gate_send = v
         .input()
         .and_then(|r| r.try_read::<SendReport>())
@@ -1567,16 +1597,35 @@ fn check_14(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
             .and_then(|r| r.try_read::<SendReport>())
             .is_some_and(|s| s.status == SendStatus::EncodeError);
     for l in &v.after.links {
+        if v.after.required.is_some() && l.key.is_none() {
+            return Err(format!("link {} missing instance identity", l.id));
+        }
         let old = v
             .before
             .links
             .iter()
-            .find(|b| b.id == l.id)
-            .map_or(l.retries, |b| b.retries);
-        if l.retries > old && (gate_send || !exchange_result) {
+            .find(|b| b.id == l.id && b.key == l.key && b.account == l.account && b.group == l.group)
+            .map_or(if l.key.is_some() { 0 } else { l.retries }, |b| b.retries);
+        // Each observed pre-place counter can justify at most one increment of this exact link.
+        let places: BTreeSet<_> = v
+            .info
+            .place_failures
+            .iter()
+            .filter(|f| {
+                Some(f.key) == l.key
+                    && f.group == l.group
+                    && f.retries_before >= old
+                    && f.retries_before < l.retries
+            })
+            .map(|f| f.retries_before)
+            .collect();
+        let allowed = places.len() as u32 + u32::from(exchange_result && !gate_send);
+        if l.retries.saturating_sub(old) > allowed {
             return Err(format!(
-                "link {} retries {old} -> {} on a gate input",
-                l.id, l.retries
+                "link {} retries {old} -> {} without matching execution evidence ({} place failures)",
+                l.id,
+                l.retries,
+                places.len()
             ));
         }
     }

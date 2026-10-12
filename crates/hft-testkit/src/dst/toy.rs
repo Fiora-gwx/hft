@@ -1610,6 +1610,7 @@ impl Sut for ToyEngine {
             let g = self.group(AccountId(*a), GroupId(*gid));
             o.links.push(LinkRow {
                 id: 0x8000_0000 | (*gid & 0xFFFF) | u32::from(*a) << 16,
+                key: None,
                 account: AccountId(*a),
                 group: GroupId(*gid),
                 plan: PlanKind::OnFill,
@@ -1630,6 +1631,7 @@ impl Sut for ToyEngine {
             let g = self.group(l.account, l.group);
             o.links.push(LinkRow {
                 id: l.id,
+                key: None,
                 account: l.account,
                 group: l.group,
                 plan: PlanKind::OnFill,

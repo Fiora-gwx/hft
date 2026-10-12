@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-12 | testkit 记录未产生 OrderDecision 的对冲 place 失败及调用前槽数、完整链接身份;INV-14 逐 Input 核对失败证据,限制每次失败的计数增量并隔离链接复用。生产下单、journal 与快照格式不变 | CI 38194738015 core 种子 0x1af231bb1d6440e2 第 608 步;TK-121 原种子 10000 步、17 行观察反例、四种门控与开关检查器逐字节对照;SEQ-373 容量边界 | crates/hft-sequencer、crates/hft-testkit、fixtures/dst-seeds/core.txt、docs/tests/invariants.md | 否 |
 | 2026-10-12 | Drain 缩容按 CapKind 顺序拒绝,暂用足够容量检查快照,避免组件解码错误掩盖容量不足;策略定时器保留引擎配额。新容量写入恢复引导配置;先设置 Recovery 与新闸门,再移除旧进程 Draining。补齐真实 Drain 边界、回到 Live 后第七个 cell 拒绝及独立回放。CI 38194159634 对照原始 journal 后更新 HashTrail 种子 7/28/34 摘要,保留种子和步数 | SEQ-006/007、TK-120;40 条定时器容量与 B0 引擎预留量冲突,旧 Draining 阻止重启后升级 | crates/hft-sequencer、crates/hft-testkit、fixtures/dst/hashtrail.toml、docs/architecture.md | 否 |
 | 2026-10-12 | advisor 恢复后的落后量按每个 Model 已恢复的检查点位置计算,时间取 journal,不把镜像补读旧前缀或停机时间计入。补齐既有定时投递、重启注记、持续告警、50 000 Input 双容量合并与 100 000 Input 三块大小续算验收 | SEQ-036/039/041/042/043/046;镜像进度低于已恢复 Model 进度时告警夸大 | crates/hft-sequencer | 否 |
 | 2026-10-12 | files-v1 指针声明整套 journal/seal/检查点与检查矩阵,完整校验后发布缓存;回放复查成员集合与哈希,只允许 registry 或固定测试入口,拒绝空成功报告与 CLI 缩窗。真实三小时生成样本经获取/缓存/包装器执行普通回放、Model 重算和检查点窗口;生产 registry、journal 与快照格式不变 | TOOL-198–204、RPL-281;单对象指针不能保持完整回放样本的目录关系与验收入口 | tools/xtask、fixtures/README.md、apps/replayer 测试及文档 | 否 |

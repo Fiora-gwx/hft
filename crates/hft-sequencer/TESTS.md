@@ -5211,9 +5211,9 @@ spec: README.md
 - 规则:[每条 Input 的处理顺序(`process`)](README.md#每条-input-的处理顺序process)
 - 级别:unit
 - 里程碑:M2
-- 前置:`testkit` feature;新建决策诊断缓冲
-- 步骤:依次写入 512、513 条观察,重置后关联正确与缺失的 journal 序号
-- 期望:512 条有效;第 513 条置失败标志且不扩容;重置后恢复可用,缺失序号置失败标志
+- 前置:`testkit` feature;新建决策及对冲 place 失败诊断缓冲
+- 步骤:各依次写入 512、513 条观察,重置后关联正确与缺失的 journal 序号
+- 期望:两种缓冲的 512 条有效;第 513 条置失败标志且不扩容;重置后清空并恢复可用,决策缺失序号置失败标志
 - 实现:`crates/hft-sequencer/src/audit.rs::seq_373_diagnostic_capacity_is_explicit`
 
 ### SEQ-374 人工保持阻止配对目标的尾差下单并逐字节回放

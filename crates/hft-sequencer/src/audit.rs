@@ -2,9 +2,12 @@
 
 use hft_event::{OrderAction, OrderDecision};
 use hft_exec::ExecOrderKind;
-use hft_oms::audit::HedgeFacts;
+use hft_oms::{
+    ApprovedIntent, Origin, PlaceError,
+    audit::{HedgeFacts, LinkAudit},
+};
 use hft_strategy_sdk::{IntentClass, LegView, LinkRole, OrderIntent, TargetReason};
-use hft_types::{AssetExp, InstId, Qty, Rate};
+use hft_types::{AccountId, AssetExp, GroupId, InstId, Qty, Rate, VenueId};
 
 use crate::{Engine, intents::Src};
 
@@ -62,10 +65,30 @@ pub struct DecisionRow {
     index: u32,
 }
 
+/// Raw state immediately before an OMS hedge calls `place`. No outcome is inferred from counters.
+#[derive(Copy, Clone, Debug)]
+pub struct PlaceFacts {
+    pub input_seq: u64,
+    pub link_id: u32,
+    pub link: Option<LinkAudit>,
+    pub venue: VenueId,
+    pub account: AccountId,
+    pub group: GroupId,
+    pub inst: InstId,
+    pub free_slots: Option<u32>,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct PlaceFailure {
+    pub facts: PlaceFacts,
+    pub error: PlaceError,
+}
+
 #[derive(Debug)]
 pub(crate) struct Audit {
     rows: Vec<DecisionRow>,
     pending: Vec<(OrderDecision, DecisionFacts)>,
+    place_failures: Vec<PlaceFailure>,
     failed: bool,
 }
 
@@ -74,13 +97,22 @@ impl Audit {
         Self {
             rows: Vec::with_capacity(CAPACITY),
             pending: Vec::with_capacity(CAPACITY),
+            place_failures: Vec::with_capacity(CAPACITY),
             failed: false,
         }
     }
     pub fn begin(&mut self) {
         self.rows.clear();
         self.pending.clear();
+        self.place_failures.clear();
         self.failed = false;
+    }
+    pub fn place_failed(&mut self, facts: PlaceFacts, error: PlaceError) {
+        if self.place_failures.len() == CAPACITY {
+            self.failed = true;
+            return;
+        }
+        self.place_failures.push(PlaceFailure { facts, error });
     }
     pub fn record(&mut self, index: u32, facts: DecisionFacts) {
         if self.rows.len() == CAPACITY {
@@ -131,12 +163,31 @@ impl Audit {
 }
 
 impl Engine {
+    pub fn hedge_place_failures(&self) -> &[PlaceFailure] {
+        &self.audit.place_failures
+    }
     pub fn decision_observations(&self) -> &[DecisionRow] {
         &self.audit.rows
     }
     pub fn decision_observation_failed(&self) -> bool {
         self.audit.failed
     }
+}
+
+pub(crate) fn capture_place(e: &Engine, it: &ApprovedIntent) -> Option<PlaceFacts> {
+    (it.origin == Origin::Oms && it.link_id != 0).then(|| PlaceFacts {
+        input_seq: e.cur_seq,
+        link_id: it.link_id,
+        link: e.oms.audit_link(it.link_id),
+        venue: it.intent.venue,
+        account: it.intent.account,
+        group: it.intent.group,
+        inst: it.intent.inst,
+        free_slots: e
+            .oms
+            .table_view(it.intent.venue, it.intent.account)
+            .map(|t| t.free_len),
+    })
 }
 
 pub(crate) fn capture(e: &mut Engine, it: &OrderIntent, src: Src, class: IntentClass) -> DecisionFacts {
@@ -259,5 +310,27 @@ mod tests {
         a.record(1, f);
         a.finish(&[17]);
         assert!(a.failed, "missing journal sequence must fail");
+        a.begin();
+        let place = PlaceFacts {
+            input_seq: 17,
+            link_id: 1,
+            link: None,
+            venue: VenueId(1),
+            account: AccountId(1),
+            group: hft_types::GROUP_NONE,
+            inst: InstId(1),
+            free_slots: Some(0),
+        };
+        for _ in 0..CAPACITY {
+            a.place_failed(place, PlaceError::NoFreeSlot);
+        }
+        assert!(!a.failed);
+        a.place_failed(place, PlaceError::NoFreeSlot);
+        assert!(a.failed);
+        assert_eq!(a.place_failures.len(), CAPACITY);
+        assert_eq!(a.place_failures.capacity(), CAPACITY);
+        a.begin();
+        assert!(a.place_failures.is_empty());
+        assert!(!a.failed);
     }
 }

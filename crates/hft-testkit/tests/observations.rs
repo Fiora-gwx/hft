@@ -16,6 +16,7 @@ thread_local! {
     static TIMERS: RefCell<u64> = const { RefCell::new(0) };
     static RESTARTS: RefCell<u64> = const { RefCell::new(0) };
     static LATE_FILL_FEES: RefCell<u64> = const { RefCell::new(0) };
+    static PLACE_SAMPLES: RefCell<Vec<EventStep>> = const { RefCell::new(Vec::new()) };
 }
 struct Observed<
     const FORCE: bool = false,
@@ -25,6 +26,14 @@ struct Observed<
 
 fn capture(events: &[EventStep]) {
     for e in events {
+        if !e.info.place_failures.is_empty() {
+            PLACE_SAMPLES.with(|s| {
+                let mut s = s.borrow_mut();
+                if s.len() < 128 {
+                    s.push(e.clone());
+                }
+            });
+        }
         if e.records.first().is_some_and(|r| {
             r.try_read::<hft_event::OrderEvent>().is_some_and(|ev| {
                 matches!(
@@ -107,6 +116,7 @@ impl<const FORCE: bool, S: hft_strategy_sdk::StrategySet, const RECOVER: bool> S
         TIMERS.with(|n| *n.borrow_mut() = 0);
         RESTARTS.with(|n| *n.borrow_mut() = 0);
         LATE_FILL_FEES.with(|n| *n.borrow_mut() = 0);
+        PLACE_SAMPLES.with(|s| s.borrow_mut().clear());
         SeqSut::<S>::boot(c).map(|e| Self(e, false, 0))
     }
     fn process(&mut self, n: u64, t: u64, i: &InputRec, o: &mut StepOut) {
@@ -311,6 +321,102 @@ fn check(id: InvId, e: &EventStep) -> Result<(), (InvId, String)> {
             rebuild: None,
         },
     )
+}
+
+#[test]
+fn tk_121_hedge_place_failure_requires_exact_evidence() {
+    use hft_testkit::dst::RerunPolicy;
+    use hft_testkit::dst::obs::PlaceFailureKind;
+    use zerocopy::FromZeros;
+
+    let suite = hft_testkit::scenarios::suites()
+        .into_iter()
+        .find(|s| s.name == "core")
+        .unwrap();
+    let mut c = suite.config(0x1af2_31bb_1d64_40e2);
+    c.rerun = RerunPolicy::Always;
+    let r = run_record::<Observed>(&c);
+    assert!(r.outcome.is_pass(), "{}", crate::seq_sut::show(&r));
+    assert_eq!(r.steps_run, 10_000);
+    let samples = PLACE_SAMPLES.with(|s| s.take());
+    let e = samples
+        .iter()
+        .find(|e| e.records.first().is_some_and(|r| r.seq == 1572))
+        .expect("original failing Input was not exercised");
+    assert_eq!(e.records[0].kind, EventKind::TIMER);
+    assert_eq!(e.info.place_failures.len(), 1);
+    let f = e.info.place_failures[0];
+    assert_eq!(f.input_seq, 1572);
+    assert_eq!(f.key.id, 17);
+    assert_eq!(f.free_slots, Some(0));
+    assert_eq!(f.error, PlaceFailureKind::NoFreeSlot);
+    assert_eq!(f.retries_before, 1);
+    let at = e.after.links.iter().position(|l| l.key == Some(f.key)).unwrap();
+    assert_eq!(e.after.links[at].retries, 2);
+    assert!(e.records.iter().all(|r| r.kind != EventKind::ORDER_DECISION));
+    assert!(check(InvId::I14, e).is_ok());
+
+    for row in 0..17 {
+        let mut bad = e.clone();
+        match row {
+            0 => bad.info.place_failures.clear(),
+            1 => bad.info.place_failures.push(f),
+            2 => bad.info.place_failures[0].input_seq += 1,
+            3 => bad.info.place_failures[0].key.epoch += 1,
+            4 => bad.info.place_failures[0].key.slot += 1,
+            5 => bad.info.place_failures[0].key.generation += 1,
+            6 => bad.info.place_failures[0].key.created_seq += 1,
+            7 => bad.info.place_failures[0].key.id += 1,
+            8 => bad.info.place_failures[0].key.account += 1,
+            9 => bad.info.place_failures[0].group.0 ^= 1,
+            10 => bad.info.place_failures[0].free_slots = Some(1),
+            11 => bad.info.place_failures[0].error = PlaceFailureKind::NoTable,
+            12 => bad.info.place_failures[0].error = PlaceFailureKind::LinkTableFull,
+            13 => bad.info.place_failures[0].retries_before += 1,
+            14 => bad.after.links[at].retries += 1,
+            15 => bad.after.links[at].key = None,
+            16 => {
+                let other = bad.after.links.iter_mut().find(|l| l.key != Some(f.key)).unwrap();
+                other.retries += 1;
+            }
+            _ => unreachable!(),
+        }
+        assert!(check(InvId::I14, &bad).is_err(), "counterexample {row} accepted");
+    }
+    // The four send gates still cannot explain a retry, including in a full table.
+    for status in [
+        hft_event::SendStatus::KillBlocked,
+        hft_event::SendStatus::RateLimited,
+        hft_event::SendStatus::NoConn,
+        hft_event::SendStatus::RingFull,
+    ] {
+        let mut bad = e.clone();
+        bad.info.place_failures.clear();
+        let mut report = hft_event::SendReport::new_zeroed();
+        report.status = status;
+        bad.records[0].kind = EventKind::SEND_REPORT;
+        bad.records[0].body = report.as_bytes().to_vec();
+        assert!(
+            check(InvId::I14, &bad).is_err(),
+            "gate {status:?} counted as execution failure"
+        );
+    }
+    // Reusing a link number must not transfer the old instance's failure credit.
+    let mut reused = e.clone();
+    reused.after.links[at].key.as_mut().unwrap().created_seq += 1;
+    reused.after.links[at].retries = 1;
+    assert!(check(InvId::I14, &reused).is_err());
+    reused.after.links[at].retries = 0;
+    assert!(check(InvId::I14, &reused).is_ok());
+
+    c.invariants = InvariantSet::none();
+    c.rerun = RerunPolicy::Never;
+    let off = run_record::<SeqSut<TestStrategies>>(&c);
+    assert!(off.outcome.is_pass());
+    assert_eq!(off.steps_run, 10_000);
+    assert_eq!(r.journal, off.journal);
+    assert!(!r.trail.points.is_empty());
+    assert_eq!(r.trail.to_bytes(), off.trail.to_bytes());
 }
 
 #[test]

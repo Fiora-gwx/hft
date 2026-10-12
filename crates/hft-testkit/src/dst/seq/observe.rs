@@ -373,8 +373,13 @@ pub fn fill_engine(e: &Engine, w: &WorldSpec, audit: &History, carry: &Carry, o:
             .iter()
             .position(|i| *i == plan.inst)
             .map_or(1, |k| k as u8);
+        let Some(raw) = e.oms.audit_link(l.link_id) else {
+            o.observation_error = Some("missing OMS link identity".into());
+            continue;
+        };
         o.links.push(LinkRow {
             id: l.link_id,
+            key: Some(audit.key(raw)),
             account: l.account,
             group: l.group,
             plan: kind,

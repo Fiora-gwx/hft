@@ -5,10 +5,17 @@ use hft_sequencer::Engine;
 use hft_strategy_sdk::{IntentClass, LinkRole};
 use hft_types::Side;
 
-use crate::dst::obs::{DecClass, DecOrigin, DecisionInfo, HedgeKind, StepInfo};
+use crate::dst::obs::{
+    DecClass, DecOrigin, DecisionInfo, HedgeKind, HedgePlaceFailure, PlaceFailureKind, StepInfo,
+};
 use crate::dst::sut::JRec;
 
-pub fn fill(e: &Engine, records: &[JRec], info: &mut StepInfo) -> Result<(), String> {
+pub fn fill(
+    e: &Engine,
+    history: &super::audit::History,
+    records: &[JRec],
+    info: &mut StepInfo,
+) -> Result<(), String> {
     for p in e.exec.audit_broken_polls() {
         if p.phase == hft_exec::AutoFixPhase::Primed && !p.engine_target && p.wait == 0 {
             info.autofix_ready.push((p.account, p.group));
@@ -53,6 +60,28 @@ pub fn fill(e: &Engine, records: &[JRec], info: &mut StepInfo) -> Result<(), Str
     }
     if e.decision_observation_failed() {
         return Err("decision diagnostic buffer overflow or unmatched decision".into());
+    }
+    for (index, failure) in e.hedge_place_failures().iter().enumerate() {
+        let f = failure.facts;
+        let raw = f.link.ok_or("hedge place failure missing raw link identity")?;
+        if raw.link.link_id != f.link_id || raw.link.account != f.account || raw.link.group != f.group {
+            return Err("hedge place failure owner differs from raw link".into());
+        }
+        info.place_failures.push(HedgePlaceFailure {
+            input_seq: f.input_seq,
+            index: index as u32,
+            key: history.key(raw),
+            group: f.group,
+            venue: f.venue,
+            inst: f.inst,
+            free_slots: f.free_slots,
+            error: match failure.error {
+                hft_oms::PlaceError::NoTable => PlaceFailureKind::NoTable,
+                hft_oms::PlaceError::NoFreeSlot => PlaceFailureKind::NoFreeSlot,
+                hft_oms::PlaceError::LinkTableFull => PlaceFailureKind::LinkTableFull,
+            },
+            retries_before: u32::from(raw.link.retries),
+        });
     }
     for rec in records {
         let Some(d) = rec.try_read::<OrderDecision>() else {

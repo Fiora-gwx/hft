@@ -456,7 +456,13 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
     }
     e.trace.rec("oms.place", u64::from(inst_id.0), u64::from(lev));
     let mut o = e.take_oms();
+    #[cfg(feature = "testkit")]
+    let place_facts = crate::audit::capture_place(e, &ai);
     let r = e.oms.place(&ai, e.now.tsc, e.cur_seq, &mut o);
+    #[cfg(feature = "testkit")]
+    if let (Some(facts), Err(error)) = (place_facts, r) {
+        e.audit.place_failed(facts, error);
+    }
     #[cfg(feature = "testkit")]
     for d in o.decisions.as_slice() {
         e.audit.pending(*d, audit_facts);

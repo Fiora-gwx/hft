@@ -109,10 +109,24 @@ pub enum PlanKind {
     Other,
 }
 
+/// Link instance, including the epoch and event that created its first order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LinkKey {
+    pub id: u32,
+    pub venue: u8,
+    pub account: u8,
+    pub epoch: u16,
+    pub slot: u32,
+    pub generation: u32,
+    pub created_seq: u64,
+}
+
 /// One OMS link with its hedge accounting (INV-8, INV-14).
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct LinkRow {
     pub id: u32,
+    /// Complete first-order identity; mandatory for the real engine adapter.
+    pub key: Option<LinkKey>,
     pub account: AccountId,
     pub group: GroupId,
     pub plan: PlanKind,
@@ -590,6 +604,8 @@ pub struct Evidence {
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct StepInfo {
     pub decisions: Vec<DecisionInfo>,
+    /// Failed OMS hedge places, including attempts which emitted no OrderDecision.
+    pub place_failures: Vec<HedgePlaceFailure>,
     /// All legs' raw immediate in-flight, before the decision's own order is admitted.
     pub decision_inflight: Vec<(u64, [i128; 4])>,
     /// Account risk caps captured at decision time (hedge, reduce notionals).
@@ -610,6 +626,27 @@ pub struct StepInfo {
     pub force_fractions: Vec<i64>,
     /// Applicable force-target keys declared from the raw operation facts, before projection.
     pub required_force: Vec<(AccountId, GroupId, InstId)>,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub enum PlaceFailureKind {
+    NoTable,
+    NoFreeSlot,
+    LinkTableFull,
+}
+
+/// Raw pre-place facts, tied to one Input and one link instance.
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct HedgePlaceFailure {
+    pub input_seq: u64,
+    pub index: u32,
+    pub key: LinkKey,
+    pub group: GroupId,
+    pub venue: VenueId,
+    pub inst: InstId,
+    pub free_slots: Option<u32>,
+    pub error: PlaceFailureKind,
+    pub retries_before: u32,
 }
 
 /// One leg target of a `ForceDeleverage` step (INV-17).
