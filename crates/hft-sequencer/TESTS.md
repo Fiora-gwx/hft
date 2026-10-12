@@ -3543,6 +3543,7 @@ spec: README.md
 | SEQ-249.3 | 主机不同(`snap_tsc`、`boot_id`、`snap_utc_ns` 不同) | `state_hash`、`out_hash` 相同;验证比对通过 |
 | SEQ-249.4 | 某条 `OrderDecision.qty` 不同 | `out_hash` 不同 |
 | SEQ-249.5 | 节 16 的 count 不合法 | 对应快照比对失败,不能随校准行体一起屏蔽 |
+| SEQ-249.6 | 仅替换某条快照节 16 的行体,保留原 ClockStatus | 哈希与业务输出不变,快照比对通过 |
 
 通过真实 hk 记录检查节 16 的全部字段和来源 seq,包含所选快照后首条 Input 之前与运行期两次记录;比较完整 Input 流,完整及窗口回放并读取回放引擎序列化状态。未提交 Meta 尾部不更新恢复状态;真实滚段快照取本段引导块的 ClockStatus。修改 qty 后独立重算日志的 out_hash,仍须在订单与快照两处发现分歧;恢复尾部比对同样覆盖校准豁免。主机行的 boot_id 由日志副本提供,内存驱动不生成进程 UUID。
 
@@ -3557,6 +3558,8 @@ spec: README.md
 - 期望:
   - 对 s1、s2 各调一次 `ledger.on_groups_changed` 与 `risk.on_groups_changed`;`model_mem`、`model_ckpt` 已重算;`ledger.restore_marks` 一次(含 b1 的 `(50 000, 7 000 000)`);`ledger.on_funding_interval(b1, 3 600)` 一次、a1 不调;`rx_from_seq` = 快照 `at_seq`;journal 没有新增记录
 - 实现:`crates/hft-sequencer/tests/snapshot.rs::seq_250_start_from_snapshot_rebuild`
+
+`testkit` 的有界记录在真实调用完成处采集,测试比较完整有序调用表,并检查实例预算、资金费缓存与原 journal 字节;继续处理输入后记录仍在。完整与所选快照窗口均从 journal 的 ECF1/RKP1 配置独立验证。
 
 ### SEQ-251 本 crate 快照行的大小与关键字段偏移
 
@@ -3617,6 +3620,8 @@ spec: README.md
 | SEQ-253.3 | 含未知节号 99(`len = 40`) | 按 `SectionHdr.len` 跳过,恢复成功 |
 | SEQ-253.4 | 节 8 的 `len` 与 `count × 24` 不符 | `Err(BootError::SnapshotUndecodable{section: 8})` |
 
+前三行检查恢复后每条节 10 行的完整已知前缀,并验证新 Recovery 快照之后的输入/输出;旧格式或未知节不能逐字节再生,原快照的冷自检必须保持 Size/RoundTrip 失败,不算旧格式回放通过。
+
 ### SEQ-254 快照行按键升序、填充字节为零
 
 - 规则:[快照](README.md#快照)、[确定性规则](README.md#确定性规则)
@@ -3627,6 +3632,8 @@ spec: README.md
 - 参考:按规则检查快照字节
 - 例数:PR 300;每夜 10 000
 - 实现:`crates/hft-sequencer/tests/snapshot.rs::seq_254_rows_sorted_and_zero_padded`
+
+每例包含连接 Up/Down、成功 VenueNotice、成功 SetParams 与行情混排;每次参数替换的 ConfigBlob/命令各算一条实际 Input。按实际日志核对 100–5 000 条范围,保留至少 300 例并允许 `PROPTEST_CASES` 提高至夜间数量。检查上述四节的全部填充、行键及所有节头保留字;中途真实重启,处理新 EngineClock 后必须清空旧槽,后续只保留该次运行输入实际触及的连接槽。
 
 ### SEQ-255 生效公告在 inst 退出 refdata 或维护窗口结束后的下一次快照时清除
 
@@ -5227,9 +5234,9 @@ spec: README.md
 - 规则:[每条 Input 的处理顺序(`process`)](README.md#每条-input-的处理顺序process)
 - 级别:unit
 - 里程碑:M2
-- 前置:`testkit` feature;新建决策及对冲 place 失败诊断缓冲
-- 步骤:各依次写入 512、513 条观察,重置后关联正确与缺失的 journal 序号
-- 期望:两种缓冲的 512 条有效;第 513 条置失败标志且不扩容;重置后清空并恢复可用,决策缺失序号置失败标志
+- 前置:`testkit` feature;新建决策、对冲 place 失败及冷恢复诊断缓冲
+- 步骤:各依次写入 512、513 条观察,重置事件观察后关联正确与缺失的 journal 序号
+- 期望:三种缓冲的 512 条有效;第 513 条失败且不扩容;事件重置清空决策/place 观察,决策缺失序号置失败标志;冷恢复记录与溢出错误不随事件重置清除,溢出读取返回错误
 - 实现:`crates/hft-sequencer/src/audit.rs::seq_373_diagnostic_capacity_is_explicit`
 
 ### SEQ-374 人工保持阻止配对目标的尾差下单并逐字节回放

@@ -313,6 +313,12 @@ pub(crate) fn restore_at<S: StrategySet>(
         slot.blob = *b;
         slot.model_mem = p.model_mem;
         slot.model_ckpt = p.model_ckpt;
+        #[cfg(feature = "testkit")]
+        e.audit.restored(crate::audit::RestoreRow::ModelBudget {
+            strategy: slot.id,
+            mem: slot.model_mem,
+            ckpt: slot.model_ckpt,
+        });
         slot.spec_seq.clear();
         for g in gs.iter() {
             slot.spec_seq.push((g.group, g.spec_seq));
@@ -417,7 +423,17 @@ pub(crate) fn restore_at<S: StrategySet>(
         let Some(p) = s.cur.as_ref() else { continue };
         e.oms.on_groups_changed(&p.groups);
         e.ledger.on_groups_changed(s.id, &p.groups);
+        #[cfg(feature = "testkit")]
+        e.audit.restored(crate::audit::RestoreRow::LedgerGroups {
+            strategy: s.id,
+            groups: p.groups.len(),
+        });
         e.risk.on_groups_changed(s.account, &p.groups);
+        #[cfg(feature = "testkit")]
+        e.audit.restored(crate::audit::RestoreRow::RiskGroups {
+            account: s.account,
+            groups: p.groups.len(),
+        });
     }
     // risk.on_legs cache (outputs not executed).
     let keys: Vec<(AccountId, GroupId, hft_event::GroupSpec)> = inst
@@ -437,9 +453,23 @@ pub(crate) fn restore_at<S: StrategySet>(
         .map(|r| (r.inst, r.mark_px, r.mark_ens))
         .collect();
     e.ledger.restore_marks(&marks);
+    #[cfg(feature = "testkit")]
+    {
+        e.audit
+            .restored(crate::audit::RestoreRow::RestoreMarks { count: marks.len() });
+        for &(inst, px, engine_ns) in &marks {
+            e.audit
+                .restored(crate::audit::RestoreRow::Mark { inst, px, engine_ns });
+        }
+    }
     for row in secs.market.iter() {
         if row.interval_s != 0 {
             e.ledger.on_funding_interval(row.inst, row.interval_s);
+            #[cfg(feature = "testkit")]
+            e.audit.restored(crate::audit::RestoreRow::FundingInterval {
+                inst: row.inst,
+                seconds: row.interval_s,
+            });
         }
     }
     let cells: Vec<(AccountId, GroupId)> = inst.cells().map(|c| (c.account, c.group)).collect();

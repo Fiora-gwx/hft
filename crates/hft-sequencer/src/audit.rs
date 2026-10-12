@@ -7,7 +7,7 @@ use hft_oms::{
     audit::{HedgeFacts, LinkAudit},
 };
 use hft_strategy_sdk::{IntentClass, LegView, LinkRole, OrderIntent, TargetReason};
-use hft_types::{AccountId, AssetExp, GroupId, InstId, Qty, Rate, VenueId};
+use hft_types::{AccountId, AssetExp, GroupId, InstId, Px, Qty, Rate, StrategyId, VenueId};
 
 use crate::{Engine, intents::Src};
 
@@ -84,12 +84,49 @@ pub struct PlaceFailure {
     pub error: PlaceError,
 }
 
+/// Completed cold-restore calls. These survive event-level diagnostic resets.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum RestoreRow {
+    ModelBudget {
+        strategy: StrategyId,
+        mem: u64,
+        ckpt: u64,
+    },
+    LedgerGroups {
+        strategy: StrategyId,
+        groups: u16,
+    },
+    RiskGroups {
+        account: AccountId,
+        groups: u16,
+    },
+    RestoreMarks {
+        count: usize,
+    },
+    Mark {
+        inst: InstId,
+        px: Px,
+        engine_ns: i64,
+    },
+    FundingInterval {
+        inst: InstId,
+        seconds: u32,
+    },
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum RestoreObservationError {
+    Overflow,
+}
+
 #[derive(Debug)]
 pub(crate) struct Audit {
     rows: Vec<DecisionRow>,
     pending: Vec<(OrderDecision, DecisionFacts)>,
     place_failures: Vec<PlaceFailure>,
     failed: bool,
+    restore: Vec<RestoreRow>,
+    restore_failed: bool,
 }
 
 impl Audit {
@@ -99,6 +136,8 @@ impl Audit {
             pending: Vec::with_capacity(CAPACITY),
             place_failures: Vec::with_capacity(CAPACITY),
             failed: false,
+            restore: Vec::with_capacity(CAPACITY),
+            restore_failed: false,
         }
     }
     pub fn begin(&mut self) {
@@ -106,6 +145,20 @@ impl Audit {
         self.pending.clear();
         self.place_failures.clear();
         self.failed = false;
+    }
+    pub fn restored(&mut self, row: RestoreRow) {
+        if self.restore.len() == CAPACITY {
+            self.restore_failed = true;
+        } else {
+            self.restore.push(row);
+        }
+    }
+    fn restore_rows(&self) -> Result<&[RestoreRow], RestoreObservationError> {
+        if self.restore_failed {
+            Err(RestoreObservationError::Overflow)
+        } else {
+            Ok(&self.restore)
+        }
     }
     pub fn place_failed(&mut self, facts: PlaceFacts, error: PlaceError) {
         if self.place_failures.len() == CAPACITY {
@@ -171,6 +224,10 @@ impl Engine {
     }
     pub fn decision_observation_failed(&self) -> bool {
         self.audit.failed
+    }
+    /// Overflow rejects the whole observation instead of returning a partial success.
+    pub fn restore_observations(&self) -> Result<&[RestoreRow], RestoreObservationError> {
+        self.audit.restore_rows()
     }
 }
 
@@ -332,5 +389,17 @@ mod tests {
         a.begin();
         assert!(a.place_failures.is_empty());
         assert!(!a.failed);
+        for _ in 0..CAPACITY {
+            a.restored(RestoreRow::RestoreMarks { count: 1 });
+        }
+        assert_eq!(a.restore_rows().unwrap().len(), CAPACITY);
+        a.begin();
+        assert_eq!(a.restore_rows().unwrap().len(), CAPACITY);
+        a.restored(RestoreRow::RestoreMarks { count: 1 });
+        assert_eq!(a.restore_rows(), Err(RestoreObservationError::Overflow));
+        assert_eq!(a.restore.len(), CAPACITY);
+        assert_eq!(a.restore.capacity(), CAPACITY);
+        a.begin();
+        assert_eq!(a.restore_rows(), Err(RestoreObservationError::Overflow));
     }
 }

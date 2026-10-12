@@ -424,6 +424,8 @@ g. rep-sim ≤ sim_max_per_round
 
 OMS 对冲的 `place` 调用前另复制完整链接身份、重试计数、目标账户/venue/inst 与空闲槽数;调用失败时保存原错误及所属 Input seq,不要求产生 OrderDecision。失败观察每个 Input 至多 512 条,溢出失败,下一 Input 清空;检查器按链接实例逐次核对计数,验收见 [TK-121](../hft-testkit/TESTS.md#tk-121-对冲-place-失败必须有同一链接实例的原始证据)。
 
+`Engine::restore_observations` 只在 `testkit` 下提供冷恢复调用记录,覆盖实例 Model 预算、ledger/risk 的组变更、标记价缓存和非零资金费周期。每次引擎恢复至多 512 条,不随 Input 清空;溢出返回 `RestoreObservationError::Overflow`,不返回截断后的成功列表。记录在调用完成处采集,不影响业务返回值、journal 或快照;SEQ-250 在首条 Input 前核对次数、入参与派生结果,SEQ-373 检查容量边界。
+
 1. `seq = journal.append(flags, slot.tsc, body)`——**先记录,后生效**;seq 只取自写者返回值;`slot.tsc` 是驱动交出该条时的 TSC(实盘)或日志值,批内没有排队等待,所以 `ingest`(`proc_tsc − rx_tsc`)含环内排队、`decide` 从这里开始([latency-budget](../../docs/latency-budget.md))。
 2. 过期检查(仅 `ControlCmd`):`hdr.tsc > expires_tsc` → 只写 `CmdResult{Expired}`。
 3. **引擎处理**(按 kind 分派,见下表):更新簿、OMS、ledger、风控;OMS 的第二腿/重试/反向单经意图管线出决策(对冲快路径排在本步最前);执行层按其[调用顺序](../hft-exec/README.md)更新进度;待投递给策略的通知进 `NotifyQueue`(固定容量 128 = OMS 16 + 执行层 8 + 风控 8 + 模式 64 + 行情订阅 8 + 其他 24,编译期断言;某分区满时其后的通知按产生顺序进 `NotifyBacklog`,**从不丢弃**,见[通知队列与续推](#通知队列与续推))。
@@ -656,6 +658,8 @@ Model 从检查点恢复、镜像尚未追到其 `last_seq` 时,落后量以该�
 ```
 
 - **兼容规则**:节行只在尾部追加字段时,旧读者按前缀读取;语义不兼容的变化换新节号。读者不认识的节按 `SectionHdr.len` 跳过——这保证回滚到上一版本时最新快照通常仍可读(见[版本变化与回滚](#版本变化与回滚))。
+
+SEQ-253 覆盖节 10 v5 的周期默认值、追加行尾、未知节和节 8 行数/长度冲突。兼容恢复会重新写出当前行格式;旧字节不能原样再生时,离线快照自检仍返回 Size/RoundTrip,不借兼容读取豁免。恢复后新写出的 Recovery 快照及其后续输入可独立验证。
 
 ### 冷启动恢复(RecoverDriver)
 

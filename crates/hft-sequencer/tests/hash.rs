@@ -192,8 +192,9 @@ fn seq_249_hash_exclusions() {
     assert_eq!(failures.first().unwrap().seq, changed);
     assert!(failures.iter().any(|m| m.seq == a.seq));
 
-    // .5 The exemption covers only the calibration payload, never its structure.
+    // .5/.6 The exemption covers only the calibration payload, never its structure.
     let mut bad = base.j().clone();
+    let mut cal_only = bad.clone();
     let r = bad
         .segments
         .iter_mut()
@@ -206,6 +207,13 @@ fn seq_249_hash_exclusions() {
         let len = u32::from_le_bytes(r.body[off + 8..off + 12].try_into().unwrap()) as usize;
         if section == 16 {
             r.body[off + 4..off + 8].copy_from_slice(&0u32.to_le_bytes());
+            let payload = cal_only
+                .segments
+                .iter_mut()
+                .flat_map(|s| &mut s.records)
+                .find(|r| r.seq == a.seq)
+                .unwrap();
+            payload.body[off + 16..off + 56].fill(0x5A);
             break;
         }
         off += 16 + len;
@@ -215,6 +223,7 @@ fn seq_249_hash_exclusions() {
             .iter()
             .any(|m| m.seq == a.seq)
     );
+    assert!(verify_journal::<TestSet>(&cal_only, &base.setup, Some(before)).is_empty());
 
     // A real roll uses the source ClockStatus in its boot snapshot, including from_seq.
     let mut rolled = measured;
