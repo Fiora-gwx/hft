@@ -223,6 +223,10 @@ fn seq_238_recovery_timers_merge() {
         let stop = h.now();
         let wake = 1 | (u32::from(AC2.0) << 8);
         let automatic = 5 | (u32::from(AC2.0) << 8);
+        let alarm = 6 | (u32::from(AC2.0) << 8);
+        let start = 1_000;
+        // Broken cells also regain the gate-held alarm, timed from the new gate closure.
+        let alarm_deadline = start + u64::from(h.setup.exec.default.gate_naked_alarm_ms) * MS;
         {
             let e = h.s.engine_mut();
             let cell = e.exec.cell_mut(AC2, G2).unwrap();
@@ -261,7 +265,7 @@ fn seq_238_recovery_timers_merge() {
             .crash_restart(
                 plan(SnapshotSel::Latest, true, 2, 0),
                 Rerun {
-                    tsc: 1_000,
+                    tsc: start,
                     ..Default::default()
                 },
             )
@@ -277,7 +281,11 @@ fn seq_238_recovery_timers_merge() {
         if kind == ExecTimerKind::Wake {
             assert_eq!(entries, [(wake, expected)], "{case}");
         } else {
-            assert_eq!(entries, [(automatic, expected), (wake, 5_000)], "{case}");
+            assert_eq!(
+                entries,
+                [(automatic, expected), (wake, 5_000), (alarm, alarm_deadline)],
+                "{case}"
+            );
         }
         h.run();
         h.keyframe();
