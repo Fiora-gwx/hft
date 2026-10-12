@@ -213,6 +213,8 @@ DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xt
 
 每条 `StateSnapshot` 在所属 Input 完成或启动完成时保存 `SnapshotPoint{snapshot_seq, through_seq, live}`。`live` 从运行中的组件独立序列化,不抄 journal 快照体;检查器仅取截至该 EVENT_END 的 journal 前缀恢复,不能读后续 Input。同一世界步中的关键帧、按需快照、滚段、Drain 与连续恢复逐条检查,启动时也检查;`rebuild_every = 0` 只关闭定期采样。漏记、重复、越过后续 Input、恢复失败和任一组件差异均失败;`RunRecord.snapshot_checks` 记录成功检查数(TK-115)。每步快照观察上限 4096,溢出失败;重启只保留已提交边界内的观察,连续恢复不得重复交付(TK-116)。
 
+真实引擎的 INV-6 同时执行 [LED-267](../hft-ledger/TESTS.md#led-267-dst-中每个快照点-journalledger-等于引擎-ledger)。独立 `JournalLedger` 从首个快照及其引用的已记录配置起步,增量消费完整事件,在每条快照比较全部仓位、库存与 VenueBook 字段;后续快照只作为参考,不能覆盖冷状态。保证金估值按节 10 的 mark 恢复;零库存行按快照的稀疏表示比较。每笔 `unmapped_fills` 增量须有同一事件、相同成交身份及金额字段的 OmsForeignFill 注记,或完整订单身份匹配的 Shadow 决策;一条注记只能解释一笔。重启清空观察器后从保留日志重算,未提交尾部不沿用;失败锁存。更换账本/参考数据配置但缺少冷状态迁移时明确失败。标准 DST、定期和结束重建都经过此检查,开关检查器不改变意图流及 HashTrail。
+
 storage 回归集包含轮次结束后经历快照与重启的种子;按完整 10,000 步故障时序运行,确认实际产生 RoundClosed,其所属 Input 为原始成交或手续费回报,独立重建不得漏掉注记(TK-114)。
 
 一致性集中的 Drain 重启种子另外检查启动边界。Drain 快照保留退出 cap,Recovery 快照移除旧 Draining、原样保留其余 cap,全部账户仍有 Recovery 且闸门未放行;同种子复跑逐字节比较 Output 与 HashTrail(TK-120)。

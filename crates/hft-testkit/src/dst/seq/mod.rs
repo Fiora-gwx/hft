@@ -16,6 +16,7 @@ pub mod build;
 mod decisions;
 mod events;
 pub mod io;
+pub mod ledger;
 pub mod matcher;
 pub mod observe;
 mod snapshots;
@@ -65,6 +66,8 @@ pub struct SeqSut<S: StrategySet> {
     epoch: u32,
     cmd_no: u64,
     hb: &'static Heartbeat,
+    /// Independent, append-only cold observer; discarded when the engine restarts.
+    cold_ledger: std::cell::RefCell<ledger::Check>,
     /// Observation state carried across steps (`OmsHedgeNakedCapped` sums).
     pub(crate) carry: observe::Carry,
 }
@@ -523,6 +526,7 @@ impl<S: StrategySet> SeqSut<S> {
     }
     /// Cold start over the published part of the current journal at the current virtual time.
     fn restart(&mut self, sel: SnapshotSel) -> Result<(), BootFail> {
+        *self.cold_ledger.get_mut() = ledger::Check::default();
         let now = self.now_ns();
         let Some(s) = self.s.take() else {
             return Err(BootFail("no engine to restart".into()));
@@ -628,6 +632,7 @@ impl<S: StrategySet> Sut for SeqSut<S> {
             epoch: 1,
             cmd_no: 0,
             hb,
+            cold_ledger: std::cell::RefCell::default(),
             carry: observe::Carry::default(),
         };
         let io = sut.new_io(0, setup.clock);
@@ -700,6 +705,7 @@ impl<S: StrategySet> Sut for SeqSut<S> {
             JOURNALS.with(|x| x.borrow_mut().push(j.clone()));
         }
         let log = Log::from_segments(&j.segments);
+        self.cold_ledger.borrow_mut().check(&log)?;
         let Some(snap) = log
             .recs
             .iter()
@@ -723,6 +729,7 @@ impl<S: StrategySet> Sut for SeqSut<S> {
                 point.snapshot_seq, point.through_seq
             ));
         }
+        self.cold_ledger.borrow_mut().check(&log)?;
         snapshots::rebuild::<S>(log, point.snapshot_seq, self.hb)
     }
 
