@@ -327,7 +327,6 @@ fn check(id: InvId, e: &EventStep) -> Result<(), (InvId, String)> {
 fn tk_121_hedge_place_failure_requires_exact_evidence() {
     use hft_testkit::dst::RerunPolicy;
     use hft_testkit::dst::obs::PlaceFailureKind;
-    use zerocopy::FromZeros;
 
     let suite = hft_testkit::scenarios::suites()
         .into_iter()
@@ -405,8 +404,22 @@ fn tk_121_hedge_place_failure_requires_exact_evidence() {
         let mut bad = e.clone();
         bad.info.place_failures.clear();
         bad.info.required_place_failures = 0;
-        let mut report = hft_event::SendReport::new_zeroed();
-        report.status = status;
+        let report = hft_event::SendReport {
+            decision_seq: 0,
+            sent_tsc: hft_types::Tsc(0),
+            slot: hft_types::SlotId(f.key.slot),
+            r#gen: f.key.generation,
+            target_slot: hft_types::SlotId(0),
+            target_gen: 0,
+            venue: f.venue,
+            account: AccountId(f.key.account),
+            conn: hft_types::ConnId(0),
+            status,
+            op: hft_event::GwOp::New,
+            _pad: [0; 3],
+            os_errno: 0,
+            _pad2: 0,
+        };
         bad.records[0].kind = EventKind::SEND_REPORT;
         bad.records[0].body = report.as_bytes().to_vec();
         assert!(
