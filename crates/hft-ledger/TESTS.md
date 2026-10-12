@@ -15,12 +15,12 @@ spec: README.md
 | 概要 | LED-246、LED-247 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | LED-263、LED-003、LED-005、LED-074、LED-159、LED-231、LED-246 |
-| 成交增量与净量 | LED-010–LED-020 |
+| 成交增量与净量 | LED-010–LED-020、LED-275–LED-278 |
 | 权益数据(`PortfolioView` 的字段语义) | LED-041、LED-161、LED-179、LED-220–LED-226、LED-241、LED-242 |
 | 配置(`LedgerConfig`,`EngineConfig` blob 的 `ledger` 段) | LED-001、LED-052、LED-098、LED-101、LED-120、LED-121、LED-136、LED-193、LED-194、LED-200、LED-211–LED-213、LED-221、LED-269 |
 | 实现说明 | 不适用:见子节 |
 | 数据结构 | LED-002–LED-004、LED-233、LED-237、LED-247 |
-| 仓位与已实现(平均成本法) | LED-010、LED-021–LED-025、LED-030–LED-039、LED-240、LED-241、LED-243 |
+| 仓位与已实现(平均成本法) | LED-010、LED-021–LED-025、LED-030–LED-039、LED-240、LED-241、LED-243、LED-275–LED-278 |
 | 余额初始化、校验与基线 | LED-039–LED-046、LED-260–LED-262 |
 | 外部成交(`ExternalFill`) | LED-050–LED-081、LED-188、LED-240、LED-245 |
 | 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273 |
@@ -2652,6 +2652,72 @@ spec: README.md
 | LED-274.4 | 现货 Sell 0.0009,价 50000,费 0;随后基础币 FeeOnly 0.00001 BTC | −0.51 | −0.51 |
 | LED-274.5 | 无标记价和 BBO 的永续 Sell 0.00091,价 51000,费 0.02 USDT,余量按最近成交价估值低于尘埃线 | 0.88 | 0.97 |
 | LED-274.6 | 与上一行相同,成交来自 Manual ExternalFill | 0.88 | 0.97 |
+
+### LED-275 已知结算额在全部成交交付排列下逐单位入钱包
+
+- 规则:[成交增量与净量](README.md#成交增量与净量)、[仓位与已实现](README.md#仓位与已实现平均成本法)
+- 级别:table
+- 里程碑:M2
+- 前置:`boot_a1`;使用 TK-123 原始小例的五笔永续成交,原始价量与费用见实现表;每笔结算现金依次为 0、0、−11700、0、−100,与费用分开,USDT 指数 −6
+- 步骤:五笔全部 120 种交付顺序;再反转买卖方向及结算额符号,共 240 行
+- 期望:每次调用后 cash.total 与 margin.wallet 均等于初始 50000000000 + 已交付结算额之和 − 已交付费用之和;持仓等于有符号数量之和。每行费用合计 180079,最终持仓和成本为零、结算净额为 ∓11800,手续费不重复
+- 实现:`crates/hft-ledger/tests/settlement.rs::led_275_settlement_cash_is_exact_in_every_delivery_order`
+
+| 行 | 方向 | 交付排列数 | 已实现结算合计(raw) |
+|---|---|---|---|
+| LED-275.1 | 原始买卖方向 | 120 | −11800 |
+| LED-275.2 | 买卖反转 | 120 | +11800 |
+
+### LED-276 已知零结算不回退估算,本地分析账保持原规则
+
+- 规则:[仓位与已实现](README.md#仓位与已实现平均成本法)
+- 级别:unit
+- 里程碑:M2
+- 前置:两个 `boot_a1` 账本及 LED-275 原始成交
+- 步骤:LED-275 五笔按 1/2/4/3/5 的顺序分别调用 apply_fill 与 apply_settled_fill;另以已知零结算输入买 1 BTC @60000、卖 1 BTC @61000
+- 期望:两入口的数量、成本、分析用 PnL、费用与返回值相同;第 4 笔后实际钱包已实现 −11700,本地估算 −7866;五笔结束两钱包差 1。零结算行钱包保持 50000,分析用价差 PnL 为 1000,明确区分两者
+- 实现:`crates/hft-ledger/tests/settlement.rs::led_276_zero_is_known_and_local_cost_is_not_cash`
+
+### LED-277 无效结算配对在任何入账前拒绝
+
+- 规则:[成交增量与净量](README.md#成交增量与净量)
+- 级别:table
+- 里程碑:M2
+- 前置:`boot_a1`,LED-275 第一笔成交与其结算额
+- 步骤:分别改变品种为未知/现货、venue 错配、账户未绑定、结算币错误、毛量为零/负数、净量不等于毛量、价格为零,共 9 行
+- 期望:返回对应 SettlementError,调用前后快照逐字节相同
+- 实现:`crates/hft-ledger/tests/settlement.rs::led_277_settlement_validation_is_atomic`
+
+| 行 | 改动 | 错误 |
+|---|---|---|
+| LED-277.1 | 未知品种 | UnknownInstrument |
+| LED-277.2 | 现货品种 | NotPerpetual |
+| LED-277.3 | venue 不符 | VenueMismatch |
+| LED-277.4 | 账户 0 | AccountVenue |
+| LED-277.5 | 结算币 BTC | WrongAsset |
+| LED-277.6 | 毛量 0 | InvalidQuantity |
+| LED-277.7 | 毛量 −1 | InvalidQuantity |
+| LED-277.8 | 净量比毛量多 1 | InvalidQuantity |
+| LED-277.9 | 价格 0 | InvalidPrice |
+
+### LED-278 已结算成交跨快照恢复与晚到手续费
+
+- 规则:[成交增量与净量](README.md#成交增量与净量)、[快照行格式](README.md#快照行格式节-11322草案实现时以代码与编译期断言为准)
+- 级别:table
+- 里程碑:M2
+- 前置:两个 `boot_a1` 账本,连续运行与按行恢复
+- 步骤:LED-276 的五笔成交先只结算现金,在 0–5 每个位置分别快照恢复,随后逐笔补原始手续费
+- 期望:每笔及全部补费后恢复账本与连续运行快照逐字节相同;最终现金为 50000000000 − 11800 − 180079
+- 实现:`crates/hft-ledger/tests/settlement.rs::led_278_settlement_snapshot_resume_and_late_fee`
+
+| 行 | 快照时已应用的成交数 |
+|---|---|
+| LED-278.1 | 0 |
+| LED-278.2 | 1 |
+| LED-278.3 | 2 |
+| LED-278.4 | 3 |
+| LED-278.5 | 4 |
+| LED-278.6 | 5 |
 
 ## 验收
 

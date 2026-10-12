@@ -94,6 +94,28 @@ const _: () = assert!(core::mem::offset_of!(FillDelta, qty) == 16);
 const _: () = assert!(core::mem::offset_of!(FillDelta, fee_asset) == 48);
 const _: () = assert!(core::mem::offset_of!(FillDelta, seq) == 64);
 
+/// Realized cash of this exact perpetual fill, as reported by the execution source.
+/// Amount is signed (received positive) in `asset` units, excluding fees and funding.
+/// A known zero is a settlement fact; it is not an absent report. The caller must match
+/// the complete order/execution identity and de-duplicate before calling the ledger.
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub struct PerpCashSettlement {
+    pub asset: AssetId,
+    pub amount: Qty,
+}
+
+/// Invalid settlement/fill pairing. Validation happens before any ledger state changes.
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum SettlementError {
+    UnknownInstrument,
+    NotPerpetual,
+    VenueMismatch,
+    AccountVenue,
+    WrongAsset,
+    InvalidQuantity,
+    InvalidPrice,
+}
+
 /// Late fee (OMS `FeeOut`).
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct FeeDelta {

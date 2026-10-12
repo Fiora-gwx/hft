@@ -1,6 +1,6 @@
 # Agent Note: 成交乱序时余额验收的独立参考
 
-Status: proposed
+Status: rejected — 负责人要求钱包继续逐单位一致,通过结算事实修复;见[接替决定](../../implemented/architecture/2026-10-12-perp-cash-settlement.md)
 
 ## Problem
 

@@ -37,6 +37,7 @@ impl Ledger {
     pub fn set_cell_shadow(&mut self, a: AccountId, g: GroupId, shadow: bool);             // cell 有效模式进入/离开 Shadow(外来成交归属只在非 Shadow cell 中找)
     pub fn on_run_start(&mut self, run_start_ens: i64);                                    // 本次运行起点(当前 EngineClock.base_engine_ns):早于它的换算率、保证金报告与标记价视为过期
     pub fn apply_fill(&mut self, f: &FillDelta, t: i64) -> FillApplied;                   // CEX 成交增量;净量复算不一致时带 NetAdjust
+    pub fn apply_settled_fill(&mut self, f: &FillDelta, settled: PerpCashSettlement, t: i64) -> Result<FillApplied, SettlementError>; // 永续成交与其已知现金结算额
     pub fn apply_fee(&mut self, f: &FeeDelta, t: i64) -> FeeApplied;                      // 晚到手续费(OMS FeeOut);扣基础资产时带 NetAdjust
     /// 强平、ADL、人工、交割、未知:去重 + auto_held 抵扣 + 归属 + 入账(见"外部成交");auto_recon = 对账 AUTO_EXTERNAL 合成的本体。
     /// None = 重复(已入账过),或已被 auto_held 全部抵扣。
@@ -131,6 +132,8 @@ pub struct FillDelta {                  // sequencer 由 OMS 的 FillOut 构造(
 **净量规则(唯一定义)**:令 `base` 为 inst 的基础资产,`fee_base = fee`(若 `fee_asset == base`)否则 0。现货买入 `net_qty = qty − fee_base`;现货卖出 `net_qty = qty + fee_base`;永续 `net_qty = qty`。手续费扣哪个资产由 refdata `VenueCaps.fee_asset_rule` 预先说明(`Quote` | `ReceivedAsset` | `ReceivedAssetUnlessDiscount{token}` | `Configured(asset)`),回报里的实际 `fee_asset` 优先。现货持仓、库存、对冲量、平仓量一律按 `net_qty`;OMS 的 LegTracker 与执行层使用同一值。`net_qty` 由 OMS 在处理成交回报时按本规则填写(费用未随成交到达时先按 `net_qty = qty` 计,不预估);`apply_fill` 按同一规则复算,不一致时写 `Note{NetQtyMismatch}`(P1)、以复算值记账,并在 `FillApplied.net_adjust` 返回差额(`delta` = 该腿有符号持仓的补差 `(复算值 − OMS 值) × side.sign()`,与 OMS `net_adjust` 的 `leg.net += delta` 同一口径),sequencer 同一事件内交 OMS `net_adjust` 与执行层 `on_leg_adjust`——LegTracker 与账本不分叉。
 
 `FeeDelta { account, venue, inst, group, side, fee, fee_asset, seq }`(sequencer 由 OMS 的 `FeeOut` 构造;槽、墓碑与 gen 不符的归属由 OMS 完成):手续费入 `fee_cex` 并从费用资产的现金扣除(扣哪一桶见[仓位与已实现](#仓位与已实现平均成本法)第 4 步);费用资产是该 inst 的基础资产时,库存与持仓按净量规则补差(买入 `−fee`、卖出再多减 `fee`,有符号持仓的补差买卖都是 `delta = −fee`),并返回 `FeeApplied { pnl, net_adjust: Some(NetAdjust { account, venue, group, inst, delta }) }`,sequencer 同一事件内交 OMS `net_adjust`(LegTracker 与对冲余数)与执行层 `on_leg_adjust`。无归属的费用只记账户级。
+
+`PerpCashSettlement { asset: AssetId, amount: Qty }` 是已匹配到本次成交增量的实际已实现现金,按 `asset.qty_exp` 计,收入为正,不含手续费、资金费或划转。已知零额仍按零入钱包。`apply_settled_fill` 先验证品种存在且为永续、venue 与品种相符、账户绑定该 venue、结算资产为保证金/计价资产、`qty = net_qty > 0`、价格正数;失败返回 `SettlementError::{UnknownInstrument, NotPerpetual, VenueMismatch, AccountVenue, WrongAsset, InvalidQuantity, InvalidPrice}`,包括时间在内的全部状态不变。成交身份和去重由调用方在此之前完成,不能把余额差额当成结算事实传入。
 
 ### 权益数据(`PortfolioView` 的字段语义)
 
@@ -266,6 +269,8 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 4. 手续费:`fee` 按 `fee_asset` 当时换算率入 `fee_cex`(折扣代币等非 USDT 资产照样换算),并从该资产的 `CashEntry.total` 扣除。**扣哪一桶**(保持基础资产不变量):计价/保证金资产 → 只扣 `total`;本 inst 的基础资产 → 按净量规则体现在该 group 的库存与持仓上(第 5 步);其他基础资产(如平台币折扣)→ 先扣该资产的 `unassigned`,不足部分扣 `baseline`(保持 `NON_STRATEGY`),仍不足则 `unassigned` 记为负并写 `Note{InvShortfall}`(P1);**从不动其他 group 的 `inv`**。
 5. 现金与库存:现货买入 → 计价资产 `total −= p × qty`、基础资产 `total += net_qty`、`inv(base, group) += net_qty`;现货卖出反之(库存从该 group 的 `inv` 扣,不足部分从 `unassigned` 扣并写 `Note{InvShortfall}`);永续 → 已实现与费用进保证金资产 `total` 与 `MarginState.wallet`。
 6. 已实现与手续费同时累加到 group 的累计、当日、当前轮次三处。
+
+`apply_settled_fill` 仅以实际结算额替代第 5 步的永续现金已实现项,费用仍单独扣一次。数量、按 journal 顺序的平均成本、分析用已实现与轮次账沿用上述规则;这些分析量不是交易所钱包的结算来源。`apply_fill` 保留无结算事实时的既有计算语义。账户权益与强平距离仍使用本地成本估计未实现盈亏,不能把钱包逐单位一致外推为成本、未实现盈亏或强平价也与交易所一致。
 
 `InstPos` 与库存**只由成交、外部成交、采纳与核销更新**(核销只改归属,不改 `InstPos` 与 `total`);`PositionReport`、`BalanceReport`(初始化之后)与 `ReconcileReport` 只做比较,差异交风控分级(单写者 + 事件溯源,[01 §4](../../design/01-总体架构.md))。
 
@@ -543,12 +548,14 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 
 - [round8 裁决](../../design/_work/round8-decisions.md)(R8-3 解耦、R8-4 账户与资金、R8-8 不做同所现货 × 永续与资金费只告警、R8-11);评审证据 [review-2026-10-02](../../design/_work/review-2026-10-02-主策略适配与执行正确性.md) §1 表第 3 行、§3 P0-3/4/6,[review-2026-10-03](../../design/_work/review-2026-10-03-M0独立评审.md) P0-1、P1-5、P2,[M0-b 评审](../../design/_work/review-2026-10-03-M0b独立评审.md) P0-3、P1-3、P1-7,[M0-c 五路汇总](../../design/_work/review-2026-10-03-M0c五路汇总.md)(M-P1-6、V1 P2-4/10/11、V3 #21、#50),[M0-d 五路汇总](../../design/_work/review-2026-10-03-M0d五路汇总.md)(§4-13 核销残余与 ADL 自动入账、M-P2 资金费时刻归一化、W3 P1-16),[M0-e 五路汇总](../../design/_work/review-2026-10-03-M0e五路汇总.md)(X1 P1-C、P2-8,X3 P0-3)
 - Agent Note:[冷账本槽身份](../../.agents/notes/implemented/bug-fix/2026-10-10-journal-slot-identity.md)
+- Agent Note:[永续钱包的结算事实](../../.agents/notes/implemented/architecture/2026-10-12-perp-cash-settlement.md)
 - Agent Note:[AUTO_EXTERNAL 前置条件与 auto_held](../../.agents/notes/proposed/architecture/2026-10-03-auto-external-guard.md)
 - [07 §5 仓位与盈亏记账](../../design/07-策略层.md)、[09 §4.3 对账与会计口径](../../design/09-可观测性、风控与控制面.md)
 - [hft-strategy-sdk](../hft-strategy-sdk/README.md)(`PortfolioView`)、[hft-oms](../hft-oms/README.md)、[hft-risk](../hft-risk/README.md)、[hft-exec](../hft-exec/README.md)、[hft-sim](../hft-sim/README.md)、[hft-py](../hft-py/README.md)
 
 ## 已知限制与后续工作
 
+- `apply_settled_fill` 是记账原语;回报携带结算事实、OMS 的累计/重复/迟到匹配、sequencer 与冷读者接入尚未完成。生产与 DST 仍走 `apply_fill`,乱序钱包问题仍由严格 INV-16 阻断。接入必须覆盖已提交 journal、恢复边界与缺失事实,不能靠本接口的组件测试宣告整链路修复。
 - 平均成本法之外(FIFO 税务口径)不支持;需要时在 hft-py 侧另算。
 - 不建模余额域(同一钱包被多个产品线共用):这种情形被"一个账户在同一交易所只用一个市场"排除([hft-refdata](../hft-refdata/README.md))。若将来放开同所现货 × 永续,需要先把现金改为按余额域记账(触发条件:决定放开该规则)。
 - 资金费自动校正依赖交易所流水:`funding_recon_window_ms`(48 h)之外的差额不再比对;水位线之前(无历史)的差额挂起到窗口结束才入账,若其实早已入账会造成一次重复入账,由余额对账报出、人工 `AdoptExchange` 收敛;`RateOnly` 所在校正之前钱包是估计值,两次对账之间余额对账条目可能出现等于未校正资金费的差额(由 reconciler 与 watchtower 处理口径)。

@@ -28,6 +28,7 @@ mod prop_margin;
 mod prop_snapshot;
 mod rates;
 mod rounds;
+mod settlement;
 mod snapshot;
 mod transfer;
 mod upnl;

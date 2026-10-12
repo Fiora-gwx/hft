@@ -105,6 +105,12 @@ impl Ledger {
     /// Books one trade: position, leg, cash and inventory, realized PnL; then revaluation,
     /// round and margin upkeep. Returns the PnL booked (realized column only).
     pub(crate) fn book_trade(&mut self, tr: &Trade) -> PnlBreakdown {
+        self.book_trade_with_cash(tr, None)
+    }
+
+    /// `cash` replaces only the perpetual wallet leg of this trade. Position/leg average
+    /// cost and analytical PnL still follow the recorded fill order.
+    fn book_trade_with_cash(&mut self, tr: &Trade, cash: Option<Qty>) -> PnlBreakdown {
         let mut d = PnlBreakdown::zero();
         let Some(s) = self.inst(tr.inst).copied() else {
             return d;
@@ -161,12 +167,18 @@ impl Ledger {
         let pe = i32::from(s.px_exp) + i32::from(s.qty_exp);
         // Cash.
         if s.perp {
-            let me = i32::from(self.asset_s(s.quote).qty_exp);
-            let (r, lossy) = rescale(realized, pe, me, RoundMode::TowardZero);
-            if lossy {
-                self.rounding = self.rounding.saturating_add(1);
-            }
-            self.quote_add(av, s.quote, sat64(r));
+            let amount = match cash {
+                Some(actual) => actual.0,
+                None => {
+                    let me = i32::from(self.asset_s(s.quote).qty_exp);
+                    let (r, lossy) = rescale(realized, pe, me, RoundMode::TowardZero);
+                    if lossy {
+                        self.rounding = self.rounding.saturating_add(1);
+                    }
+                    sat64(r)
+                }
+            };
+            self.quote_add(av, s.quote, amount);
         } else if tr.cash {
             let qe = i32::from(self.asset_s(s.quote).qty_exp);
             let (amt, lossy) = rescale(
@@ -299,6 +311,43 @@ impl Ledger {
     /// CEX fill increment (README "成交增量与净量"): the net quantity is recomputed; a mismatch
     /// with OMS writes `NetQtyMismatch`, books the recomputed value and returns `net_adjust`.
     pub fn apply_fill(&mut self, f: &FillDelta, t: i64) -> FillApplied {
+        self.fill_with_cash(f, None, t)
+    }
+
+    /// Books an already matched/de-duplicated perpetual fill and its actual cash settlement.
+    /// Fees remain separate. Zero does not fall back to the local average-cost estimate.
+    /// No allocation; same position/valuation work as `apply_fill` (budget: ledger/apply_fill).
+    pub fn apply_settled_fill(
+        &mut self,
+        f: &FillDelta,
+        settled: PerpCashSettlement,
+        t: i64,
+    ) -> Result<FillApplied, SettlementError> {
+        let Some(s) = self.inst(f.inst) else {
+            return Err(SettlementError::UnknownInstrument);
+        };
+        if !s.perp {
+            return Err(SettlementError::NotPerpetual);
+        }
+        if s.venue != f.venue {
+            return Err(SettlementError::VenueMismatch);
+        }
+        if self.av(f.account, s.venue).is_none() {
+            return Err(SettlementError::AccountVenue);
+        }
+        if settled.asset != s.quote {
+            return Err(SettlementError::WrongAsset);
+        }
+        if f.qty.0 <= 0 || f.net_qty != f.qty {
+            return Err(SettlementError::InvalidQuantity);
+        }
+        if f.px.0 <= 0 {
+            return Err(SettlementError::InvalidPrice);
+        }
+        Ok(self.fill_with_cash(f, Some(settled.amount), t))
+    }
+
+    fn fill_with_cash(&mut self, f: &FillDelta, cash: Option<Qty>, t: i64) -> FillApplied {
         self.tick(t);
         let zero = FillApplied {
             pnl: PnlDelta {
@@ -359,20 +408,23 @@ impl Ledger {
             Ok(FillClass::Adjust) => Col::Adjust,
             _ => Col::Price,
         };
-        let mut d = self.book_trade(&Trade {
-            acc: f.account,
-            inst: f.inst,
-            side: f.side,
-            gross: f.qty,
-            net: Qty(recalc),
-            px: f.px,
-            cell,
-            col,
-            t,
-            seq: f.seq,
-            cash: true,
-            defer_round: cell.map(|(c, _)| c),
-        });
+        let mut d = self.book_trade_with_cash(
+            &Trade {
+                acc: f.account,
+                inst: f.inst,
+                side: f.side,
+                gross: f.qty,
+                net: Qty(recalc),
+                px: f.px,
+                cell,
+                col,
+                t,
+                seq: f.seq,
+                cash: true,
+                defer_round: cell.map(|(c, _)| c),
+            },
+            cash,
+        );
         let fd = self.book_fee(
             f.account,
             f.inst,
