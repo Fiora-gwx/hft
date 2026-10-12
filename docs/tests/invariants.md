@@ -218,6 +218,7 @@
 - 断言:
   - 对每个 (account, venue),在"无在途"的步——该账户在该 venue 没有非终态槽,`MockVenue`/`SimActor` 对该账户没有未交付的回报、`FeeOnly` 或 `ExternalFill`,gw 暂存(`unmatched_hold`)为空——ledger 的每个 inst 持仓、每个资产的现货库存与余额等于 `SimExchange::account()` 真值(数量到最小单位,手续费与资金费到 `Notional` 的最小单位)
   - 资金费:注入了逐笔差额的结算资产余额在该笔 `AdjustDelta::Funding` 入账(`Note{FundingCorrected}`)之后才比较,之后同样相等
+  - 稀疏行按两边键的并集比较,一边缺行视为零,交易所已归零不能掩盖引擎残留;适用账户/venue 缺真值、缺品种元数据或键重复均失败。现货按资产总库存比较,不把单品种策略归属当成总库存(TK-125)
   - 例外:DST 注入的用户流缺口 ADL 在 `AUTO_EXTERNAL` 合成入账之前、`ReconActor` 注入的待人工采纳差异在 `AdoptExchange` 之前,该 (account, venue, inst/asset) 不比较
 - 实现:`crates/hft-testkit/src/dst/invariants.rs::inv_16_ledger_matches_sim_truth`
 - 备注:检查器 `I16`;主要触发场景 FD-1、FD-2、AX-1、B4

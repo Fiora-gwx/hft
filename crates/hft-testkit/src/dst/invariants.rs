@@ -1714,6 +1714,35 @@ pub fn inv_16_ledger_matches_sim_truth() -> Scenario {
 }
 
 fn compare_truth(o: &Obs, truth: &[TruthRow]) -> Result<(), String> {
+    let mut pairs = BTreeSet::new();
+    for t in truth {
+        if !pairs.insert((t.account.0, t.venue.0)) {
+            return Err(format!(
+                "duplicate truth for account {} venue {}",
+                t.account.0, t.venue.0
+            ));
+        }
+    }
+    let mut required = BTreeSet::new();
+    if let Some(r) = &o.required {
+        required.extend(r.venue_accounts.iter().map(|(v, a)| (a.0, v.0)));
+        for (a, i) in &r.instruments {
+            let Some(inst) = o.inst(*i) else {
+                return Err(format!("missing instrument observation for {}", i.0));
+            };
+            required.insert((a.0, inst.venue.0));
+        }
+    }
+    required.extend(o.positions.iter().map(|r| (r.account.0, r.venue.0)));
+    required.extend(
+        o.inventory
+            .iter()
+            .chain(&o.balances)
+            .map(|r| (r.account.0, r.venue.0)),
+    );
+    if let Some((a, v)) = required.difference(&pairs).next() {
+        return Err(format!("missing truth for account {a} venue {v}"));
+    }
     for t in truth {
         let inflight = o
             .slots
@@ -1722,47 +1751,84 @@ fn compare_truth(o: &Obs, truth: &[TruthRow]) -> Result<(), String> {
         if t.undelivered || inflight {
             continue;
         }
-        for (i, q) in &t.positions {
-            if t.excluded.contains(&i.0) {
+        let actual_positions: Vec<_> = o
+            .positions
+            .iter()
+            .filter(|r| r.account == t.account && r.venue == t.venue)
+            .map(|r| (r.inst.0, r.qty))
+            .collect();
+        let actual = unique_truth_values(&actual_positions, "ledger position")?;
+        let expected = unique_truth_values(
+            &t.positions.iter().map(|(i, q)| (i.0, *q)).collect::<Vec<_>>(),
+            "truth position",
+        )?;
+        let mut instruments: BTreeSet<_> = expected.keys().copied().collect();
+        for i in actual.keys().chain(expected.keys()) {
+            let Some(inst) = o.inst(InstId(*i)) else {
+                return Err(format!("missing instrument observation for {i}"));
+            };
+            // A spot's instrument position is its strategy ownership; exchange inventory
+            // includes unassigned holdings too and is checked by the asset below.
+            if inst.perp {
+                instruments.insert(*i);
+            }
+        }
+        for i in instruments {
+            if t.excluded.contains(&i) {
                 continue;
             }
-            let l = o.pos(t.account, t.venue, *i);
-            if l != *q {
+            let l = actual.get(&i).copied().unwrap_or(0);
+            let q = expected.get(&i).copied().unwrap_or(0);
+            if l != q {
                 return Err(format!(
                     "account {} venue {} inst {}: ledger {l} != truth {q}",
-                    t.account.0, t.venue.0, i.0
+                    t.account.0, t.venue.0, i
                 ));
             }
         }
-        let find = |rows: &[crate::dst::obs::AssetRow], a: AssetId| {
-            rows.iter()
-                .find(|r| r.account == t.account && r.venue == t.venue && r.asset == a)
-                .map_or(0, |r| r.qty)
-        };
-        for (a, q) in &t.inventory {
-            if !t.excluded.contains(&u32::from(a.0)) && find(&o.inventory, *a) != *q {
-                return Err(format!(
-                    "account {} venue {} asset {}: inventory {} != truth {q}",
-                    t.account.0,
-                    t.venue.0,
-                    a.0,
-                    find(&o.inventory, *a)
-                ));
-            }
-        }
-        for (a, q) in &t.balances {
-            if !t.excluded.contains(&u32::from(a.0)) && find(&o.balances, *a) != *q {
-                return Err(format!(
-                    "account {} venue {} asset {}: balance {} != truth {q}",
-                    t.account.0,
-                    t.venue.0,
-                    a.0,
-                    find(&o.balances, *a)
-                ));
+        for (label, ledger, exchange) in [
+            ("inventory", &o.inventory, &t.inventory),
+            ("balance", &o.balances, &t.balances),
+        ] {
+            let actual = unique_truth_values(
+                &ledger
+                    .iter()
+                    .filter(|r| r.account == t.account && r.venue == t.venue)
+                    .map(|r| (u32::from(r.asset.0), r.qty))
+                    .collect::<Vec<_>>(),
+                label,
+            )?;
+            let expected = unique_truth_values(
+                &exchange
+                    .iter()
+                    .map(|(a, q)| (u32::from(a.0), *q))
+                    .collect::<Vec<_>>(),
+                label,
+            )?;
+            let assets: BTreeSet<_> = actual.keys().chain(expected.keys()).copied().collect();
+            for a in assets {
+                let l = actual.get(&a).copied().unwrap_or(0);
+                let q = expected.get(&a).copied().unwrap_or(0);
+                if !t.excluded.contains(&a) && l != q {
+                    return Err(format!(
+                        "account {} venue {} asset {a}: {label} {l} != truth {q}",
+                        t.account.0, t.venue.0
+                    ));
+                }
             }
         }
     }
     Ok(())
+}
+
+fn unique_truth_values(rows: &[(u32, i128)], label: &str) -> Result<BTreeMap<u32, i128>, String> {
+    let mut values = BTreeMap::new();
+    for (id, qty) in rows {
+        if values.insert(*id, *qty).is_some() {
+            return Err(format!("duplicate {label} key {id}"));
+        }
+    }
+    Ok(values)
 }
 
 fn check_16(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {

@@ -19,6 +19,7 @@ mod probes;
 mod replay_probe;
 mod sdk_mock;
 mod sdk_rd;
+mod truth;
 // The engine adapter's tests (feature `seq`, on in `--all-features` runs): enabling it here as a
 // dev-dependency feature would put hft-sequencer into every dependent's dev closure.
 #[cfg(feature = "seq")]

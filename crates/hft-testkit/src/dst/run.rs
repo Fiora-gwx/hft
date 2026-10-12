@@ -41,6 +41,8 @@ pub struct RunRecord {
     pub snapshot_checks: u64,
     /// Bounded raw matching evidence for diagnosis; not an invariant reference.
     pub matched_tail: Vec<(u64, hft_event::OrderEvent)>,
+    /// Final exchange-side view, independently of the engine observations.
+    pub truth: Vec<TruthRow>,
 }
 
 impl RunRecord {
@@ -62,6 +64,7 @@ impl RunRecord {
             end_ns: 0,
             snapshot_checks: 0,
             matched_tail: Vec::new(),
+            truth: Vec::new(),
         }
     }
     /// Output records (`role = Output` by kind) of the journal: the intent stream compared by INV-9.
@@ -701,6 +704,7 @@ impl<E: Sut> Loop<'_, E> {
 
     fn finish(mut self) -> RunRecord {
         let now = self.world.now();
+        self.rec.truth = self.truth(now);
         if self.fail.is_none() && self.cfg.invariants != InvariantSet::none() {
             let truth = self.truth(now);
             let end = EndView {
