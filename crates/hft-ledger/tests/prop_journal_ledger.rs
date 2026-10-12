@@ -384,7 +384,7 @@ proptest! {
         for (n, bytes) in &q.snaps {
             while fed < *n {
                 let rv = decode_record(&q.records[fed]).expect("decode");
-                j.apply(&rv);
+                j.apply(&rv).expect("valid journal");
                 fed += 1;
             }
             let restored = restore(bytes).expect("restore");

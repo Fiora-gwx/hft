@@ -652,7 +652,15 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
     drv: &mut D,
     out: &mut OmsOut,
 ) -> R<()> {
-    // Hedges (fast path first).
+    if let Some(error) = out.cash_error {
+        return Err(FatalReason::OmsCash(error));
+    }
+    // OMS has already matched the account/venue/instrument and positive net quantity.
+    // Reject an unusable increment price before a linked hedge can enter the pipeline.
+    if out.fills.iter().any(|f| f.cash.is_some() && f.px.0 <= 0) {
+        return Err(FatalReason::Settlement(hft_ledger::SettlementError::InvalidPrice));
+    }
+    // Hedges (fast path first, after the facts have been validated).
     let hedges: Vec<HedgeRequest> = out.hedges.as_slice().to_vec();
     for h in hedges.iter() {
         place_hedge(e, inst, drv, h)?;
@@ -692,7 +700,17 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
             None => e.cmd.fill_seq.push((key, e.cur_seq)),
         }
         let before = e.ledger.pos(f.account, f.inst).qty.0 != 0;
-        let r = e.ledger.apply_fill(&fd, e.now.engine_ns);
+        let r = if let Some(amount) = f.cash {
+            let cash = hft_ledger::PerpCashSettlement {
+                asset: e.rd.inst(f.inst).quote,
+                amount,
+            };
+            e.ledger
+                .apply_settled_fill(&fd, cash, e.now.engine_ns)
+                .map_err(FatalReason::Settlement)?
+        } else {
+            e.ledger.apply_fill(&fd, e.now.engine_ns)
+        };
         e.trace
             .rec("ledger.apply_fill", u64::from(f.account.0), u64::from(f.inst.0));
         pnls.push(r.pnl);

@@ -48,11 +48,15 @@ struct SlotEntry {
     inst: InstId,
     side: Side,
     group: GroupId,
+    order_px: Px,
     cum: i64,
     /// Σ px × qty of the booked part (inst `px_exp + qty_exp`).
     notional: i128,
     /// `cum_filled` of the last `PartialFill`/`Fill` (hft-oms `SlotExt.fee_cum`).
     fee_cum: i64,
+    cash_qty: i64,
+    cash_sum: i64,
+    tomb: bool,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -207,6 +211,7 @@ pub struct JournalLedger {
     stats: JournalLedgerStats,
     clock: Option<Clock>,
     last_t: i64,
+    failed: Option<JournalApplyError>,
     report_id: Option<u64>,
     cmd: Option<(u64, PendingCmd)>,
     sims: Vec<(AccountId, Vec<SimBalance>)>,
@@ -244,7 +249,7 @@ impl JournalLedger {
                     2 => Side::Sell,
                     _ => return Err(RestoreError::BadValue),
                 };
-                map.insert(SlotEntry {
+                let entry = SlotEntry {
                     epoch: u16_at(22),
                     slot: u32_at(12),
                     r#gen: u32_at(8),
@@ -253,6 +258,7 @@ impl JournalLedger {
                     inst: InstId(u32_at(16)),
                     side,
                     group: GroupId(u32_at(24)),
+                    order_px: Px(u64_at(48) as i64),
                     cum: u64_at(40) as i64,
                     notional: words_i128([u64_at(64), u64_at(72)]),
                     fee_cum: if s.version == 1 {
@@ -260,9 +266,117 @@ impl JournalLedger {
                     } else {
                         u64_at(160) as i64
                     },
-                });
+                    cash_qty: if s.version >= 3 { u64_at(168) as i64 } else { 0 },
+                    cash_sum: if s.version >= 3 { u64_at(176) as i64 } else { 0 },
+                    tomb: false,
+                };
+                validate_cursor(&ledger, &entry)?;
+                if map.find(entry.key()).is_some() {
+                    return Err(RestoreError::BadValue);
+                }
+                if map.insert(entry) {
+                    return Err(RestoreError::BadValue);
+                }
             }
         }
+        // Recycled generations must retain their cash watermark too. OMS section 12 has
+        // an 8-byte row header; non-tomb rows do not belong to this consumer.
+        if let Some(section) = r.find_section(12)? {
+            if !(1..=2).contains(&section.version) {
+                return Err(RestoreError::VersionUnsupported);
+            }
+            let mut rr = section.reader();
+            for _ in 0..section.count {
+                let kind = rr.get_u8()?;
+                let pad = rr.get_bytes(3)?;
+                if pad != [0; 3] {
+                    return Err(RestoreError::BadValue);
+                }
+                let len = rr.get_u32()? as usize;
+                let row = rr.get_bytes(len)?;
+                if kind != 4 {
+                    continue;
+                }
+                let want = if section.version == 1 { 64 } else { 80 };
+                if row.len() != want {
+                    return Err(RestoreError::BadValue);
+                }
+                let u8_at = |o: usize| row.get(o).copied().unwrap_or(0);
+                let u16_at = |o: usize| u16::from_le_bytes([u8_at(o), u8_at(o + 1)]);
+                let u32_at =
+                    |o: usize| u32::from_le_bytes([u8_at(o), u8_at(o + 1), u8_at(o + 2), u8_at(o + 3)]);
+                let u64_at = |o: usize| u64::from(u32_at(o)) | u64::from(u32_at(o + 4)) << 32;
+                let side = match u8_at(24) {
+                    1 => Side::Buy,
+                    2 => Side::Sell,
+                    _ => return Err(RestoreError::BadValue),
+                };
+                let entry = SlotEntry {
+                    epoch: u16_at(12),
+                    slot: u32_at(4),
+                    r#gen: u32_at(8),
+                    account: AccountId(u8_at(1)),
+                    venue: VenueId(u8_at(0)),
+                    inst: InstId(u32_at(16)),
+                    side,
+                    group: GroupId(u32_at(20)),
+                    order_px: Px(0),
+                    cum: u64_at(32) as i64,
+                    notional: 0,
+                    fee_cum: u64_at(32) as i64,
+                    cash_qty: if section.version == 2 {
+                        u64_at(64) as i64
+                    } else {
+                        0
+                    },
+                    cash_sum: if section.version == 2 {
+                        u64_at(72) as i64
+                    } else {
+                        0
+                    },
+                    tomb: true,
+                };
+                validate_cursor(&ledger, &entry)?;
+                if map.find(entry.key()).is_some() {
+                    return Err(RestoreError::BadValue);
+                }
+                if map.insert(entry) {
+                    return Err(RestoreError::BadValue);
+                }
+            }
+        }
+        // A keyframe may be followed by new orders before the next EpochStart/EngineClock.
+        // Their identity and time must come from the same committed snapshot.
+        let epoch = if let Some(section) = r.find_section(3)? {
+            if section.version != 1 {
+                return Err(RestoreError::VersionUnsupported);
+            }
+            if section.body.len() < 16 {
+                return Err(RestoreError::Truncated);
+            }
+            (section.reader().get_u32()? & 0x7fff) as u16
+        } else {
+            0
+        };
+        let clock = if let Some(section) = r.find_section(25)? {
+            if section.version != 1 {
+                return Err(RestoreError::VersionUnsupported);
+            }
+            if section.count != 1 || section.body.len() != 32 {
+                return Err(RestoreError::BadValue);
+            }
+            let mut rr = section.reader();
+            let base = rr.get_i64()?;
+            let tsc = rr.get_u64()?;
+            let hz_milli = rr.get_u64()?;
+            if hz_milli == 0 {
+                return Err(RestoreError::BadValue);
+            }
+            Some(Clock { base, tsc, hz_milli })
+        } else {
+            None
+        };
+        let last_t = ledger.now;
         let mut sims = Vec::new();
         let mut a = 1u8;
         while rd.account(AccountId(a)).id == AccountId(a) {
@@ -277,10 +391,11 @@ impl JournalLedger {
         Ok(JournalLedger {
             ledger,
             map,
-            epoch: 0,
+            epoch,
             stats: JournalLedgerStats::default(),
-            clock: None,
-            last_t: 0,
+            clock,
+            last_t,
+            failed: None,
             report_id: None,
             cmd: None,
             sims,
@@ -315,7 +430,18 @@ impl JournalLedger {
 
     /// Feeds one journal record (Input, Output or Meta; unrelated kinds are ignored). Records of
     /// one event are fed in journal order.
-    pub fn apply(&mut self, rec: &RecordView<'_>) {
+    pub fn apply(&mut self, rec: &RecordView<'_>) -> Result<(), JournalApplyError> {
+        if let Some(error) = self.failed {
+            return Err(error);
+        }
+        let result = self.apply_record(rec);
+        if let Err(error) = result {
+            self.failed = Some(error);
+        }
+        result
+    }
+
+    fn apply_record(&mut self, rec: &RecordView<'_>) -> Result<(), JournalApplyError> {
         let t = self.t_of(rec.hdr.tsc);
         self.last_t = t;
         let kind = EventKind(rec.hdr.kind);
@@ -334,21 +460,39 @@ impl JournalLedger {
             }
             EventKind::NOTE => {
                 if let Ok(n) = rec.read::<Note>() {
+                    let cash_inst = match (n.source, n.code) {
+                        (NoteSource::Oms, code::OMS_FOREIGN_FILL) => Some(n.inst),
+                        (NoteSource::Ledger, code::EXTERNAL_FILL)
+                            if (n.v[0] >> 24) & u64::from(aflags::AUTO_RECON) != 0 =>
+                        {
+                            Some(InstId(n.v[1] as u32))
+                        }
+                        _ => None,
+                    };
+                    if cash_inst
+                        .and_then(|i| self.ledger.inst(i))
+                        .is_some_and(|i| i.perp_cash)
+                    {
+                        return Err(JournalApplyError::UnsupportedExternalCash);
+                    }
                     self.on_note(&n, t);
                 }
             }
             EventKind::ORDER_DECISION => {
                 if let Ok(d) = rec.read::<OrderDecision>() {
-                    self.on_decision(&d, flags);
+                    self.on_decision(&d, flags)?;
                 }
             }
             EventKind::ORDER_EVENT => {
                 if let Ok(e) = rec.read::<OrderEvent>() {
-                    self.on_order_event(&e, rec.hdr.seq, t);
+                    self.on_order_event(&e, rec.hdr.seq, t)?;
                 }
             }
             EventKind::EXTERNAL_FILL => {
                 if let Ok(e) = rec.read::<ExternalFill>() {
+                    if self.ledger.inst(e.inst).is_some_and(|i| i.perp_cash) {
+                        return Err(JournalApplyError::UnsupportedExternalCash);
+                    }
                     self.ledger.apply_external(&e, false, t);
                 }
             }
@@ -419,6 +563,7 @@ impl JournalLedger {
             self.report_id = None;
         }
         self.ledger.clear_notes();
+        Ok(())
     }
 
     fn on_note(&mut self, n: &Note, t: i64) {
@@ -526,11 +671,11 @@ impl JournalLedger {
         }
     }
 
-    fn on_decision(&mut self, d: &OrderDecision, flags: RecordFlags) {
+    fn on_decision(&mut self, d: &OrderDecision, flags: RecordFlags) -> Result<(), JournalApplyError> {
         if d.action != OrderAction::New || d.reject != 0 || flags.contains(RecordFlags::SHADOW) {
-            return;
+            return Ok(());
         }
-        if self.map.insert(SlotEntry {
+        let entry = SlotEntry {
             epoch: self.epoch,
             slot: d.slot.0,
             r#gen: d.r#gen,
@@ -539,20 +684,26 @@ impl JournalLedger {
             inst: d.inst,
             side: d.side,
             group: d.group,
+            order_px: d.px,
             cum: 0,
             notional: 0,
             fee_cum: 0,
-        }) {
+            cash_qty: 0,
+            cash_sum: 0,
+            tomb: false,
+        };
+        if self.ledger.inst(d.inst).is_some_and(|i| i.perp_cash) && self.map.find(entry.key()).is_some() {
+            return Err(JournalApplyError::Identity);
+        }
+        if self.map.insert(entry) {
             self.stats.map_evicted = self.stats.map_evicted.saturating_add(1);
         }
+        Ok(())
     }
 
     /// `seq` = the `OrderEvent`'s seq: `FillDelta.seq`/`FeeDelta.seq` as the engine sets them (OMS
     /// `FillOut.seq`/`FeeOut` of the same Input; the round's `open_seq` comes from it).
-    fn on_order_event(&mut self, ev: &OrderEvent, seq: u64, t: i64) {
-        let Some(s) = self.ledger.inst(ev.inst).copied() else {
-            return;
-        };
+    fn on_order_event(&mut self, ev: &OrderEvent, seq: u64, t: i64) -> Result<(), JournalApplyError> {
         let key = SlotKey {
             venue: ev.venue,
             account: ev.account,
@@ -561,64 +712,82 @@ impl JournalLedger {
             r#gen: ev.r#gen,
         };
         let Some(e) = self.map.get_mut(key).copied() else {
+            if self.ledger.inst(ev.inst).is_some_and(|i| i.perp_cash)
+                && (ev.cum_filled.0 != 0
+                    || ev.cash_qty.0 != 0
+                    || ev.cash_sum.0 != 0
+                    || ev.what == OrderEventKind::FeeOnly)
+            {
+                return Err(JournalApplyError::Unmapped);
+            }
             if ev.cum_filled.0 > 0 && ev.what != OrderEventKind::FeeOnly {
                 self.stats.unmapped_fills = self.stats.unmapped_fills.saturating_add(1);
             }
-            return;
+            return Ok(());
+        };
+        let s = self
+            .ledger
+            .inst(ev.inst)
+            .copied()
+            .ok_or(JournalApplyError::Identity)?;
+        if e.inst != ev.inst || s.venue != e.venue {
+            return Err(JournalApplyError::Identity);
+        }
+        let cash = cash_increment(s.perp_cash, &e, ev)?;
+        let fee = FeeDelta {
+            account: e.account,
+            venue: e.venue,
+            inst: e.inst,
+            group: e.group,
+            side: e.side,
+            fee: ev.fee.0,
+            fee_asset: ev.fee_asset,
+            seq,
         };
         if ev.what == OrderEventKind::FeeOnly {
-            self.ledger.apply_fee(
-                &FeeDelta {
-                    account: e.account,
-                    venue: e.venue,
-                    inst: e.inst,
-                    group: e.group,
-                    side: e.side,
-                    fee: ev.fee.0,
-                    fee_asset: ev.fee_asset,
-                    seq,
-                },
-                t,
-            );
-            return;
+            self.ledger.apply_fee(&fee, t);
+            return Ok(());
+        }
+        // These reports never carry a booked fill in the OMS state machine.
+        if !e.tomb
+            && matches!(
+                ev.what,
+                OrderEventKind::Ack | OrderEventKind::Reject | OrderEventKind::OutcomeUnknown
+            )
+        {
+            return Ok(());
         }
         let fill_report = matches!(ev.what, OrderEventKind::PartialFill | OrderEventKind::Fill);
         let fresh_fee = fill_report && ev.cum_filled.0 > e.fee_cum;
-        if fresh_fee && let Some(x) = self.map.get_mut(key) {
-            x.fee_cum = ev.cum_filled.0;
-        }
         let d = ev.cum_filled.0.saturating_sub(e.cum);
         if d <= 0 {
-            // A fill report whose quantity a non-fill report already brought: its fee alone
-            // (hft-oms "回报匹配与成交增量" 9).
-            if fresh_fee && ev.fee.0 != 0 {
-                self.ledger.apply_fee(
-                    &FeeDelta {
-                        account: e.account,
-                        venue: e.venue,
-                        inst: e.inst,
-                        group: e.group,
-                        side: e.side,
-                        fee: ev.fee.0,
-                        fee_asset: ev.fee_asset,
-                        seq,
-                    },
-                    t,
-                );
+            if !e.tomb && fresh_fee && ev.fee.0 != 0 {
+                self.ledger.apply_fee(&fee, t);
             }
-            return;
+            if fresh_fee && let Some(x) = self.map.get_mut(key) {
+                x.fee_cum = ev.cum_filled.0;
+            }
+            return Ok(());
         }
+        let fallback = if ev.what == OrderEventKind::QueryResult {
+            e.order_px
+        } else {
+            ev.px
+        };
         let total = if ev.avg_px.0 != 0 {
             i128::from(ev.avg_px.0) * i128::from(ev.cum_filled.0)
         } else {
-            e.notional + i128::from(ev.px.0) * i128::from(d)
+            e.notional + i128::from(fallback.0) * i128::from(d)
         };
-        let inc = total - e.notional;
-        let px = Px(sat64(div_round(inc, i128::from(d), RoundMode::HalfEven)));
-        if let Some(x) = self.map.get_mut(key) {
-            x.cum = ev.cum_filled.0;
-            x.notional = total;
-        }
+        let px = if e.tomb {
+            if ev.px.0 != 0 { ev.px } else { ev.avg_px }
+        } else {
+            Px(sat64(div_round(
+                total - e.notional,
+                i128::from(d),
+                RoundMode::HalfEven,
+            )))
+        };
         let fee_base = if !s.perp && ev.fee_asset == s.base {
             ev.fee.0
         } else {
@@ -631,30 +800,54 @@ impl JournalLedger {
         } else {
             d.saturating_add(fee_base)
         };
-        self.ledger.apply_fill(
-            &FillDelta {
-                account: e.account,
-                venue: e.venue,
-                side: e.side,
-                class: FillClass::Open as u8,
-                flags: 0,
-                leg_ix: u8::MAX,
-                _pad: [0; 2],
-                inst: e.inst,
-                group: e.group,
-                qty: Qty(d),
-                net_qty: Qty(net),
-                px,
-                fee: ev.fee.0,
-                fee_asset: ev.fee_asset,
-                _pad2: 0,
-                slot: ev.slot.0,
-                r#gen: ev.r#gen,
-                _pad3: 0,
-                seq,
-            },
-            t,
-        );
+        let fd = FillDelta {
+            account: e.account,
+            venue: e.venue,
+            side: e.side,
+            class: FillClass::Open as u8,
+            flags: 0,
+            leg_ix: u8::MAX,
+            _pad: [0; 2],
+            inst: e.inst,
+            group: e.group,
+            qty: Qty(d),
+            net_qty: Qty(net),
+            px,
+            fee: ev.fee.0,
+            fee_asset: ev.fee_asset,
+            _pad2: 0,
+            slot: ev.slot.0,
+            r#gen: ev.r#gen,
+            _pad3: 0,
+            seq,
+        };
+        if let Some(amount) = cash {
+            self.ledger
+                .apply_settled_fill(
+                    &fd,
+                    PerpCashSettlement {
+                        asset: s.quote,
+                        amount,
+                    },
+                    t,
+                )
+                .map_err(JournalApplyError::Settlement)?;
+        } else {
+            self.ledger.apply_fill(&fd, t);
+        }
+        // The watermark follows a successful booking, never the other way around.
+        if let Some(x) = self.map.get_mut(key) {
+            x.cum = ev.cum_filled.0;
+            x.notional = total;
+            if fresh_fee {
+                x.fee_cum = ev.cum_filled.0;
+            }
+            if cash.is_some() {
+                x.cash_qty = ev.cash_qty.0;
+                x.cash_sum = ev.cash_sum.0;
+            }
+        }
+        Ok(())
     }
 
     fn on_cmd(&mut self, rec: &RecordView<'_>) {
@@ -734,4 +927,49 @@ impl JournalLedger {
             }
         }
     }
+}
+
+/// Snapshot cash coverage must describe the same already-booked quantity.
+fn validate_cursor(ledger: &Ledger, e: &SlotEntry) -> Result<(), RestoreError> {
+    let inst = ledger.inst(e.inst).ok_or(RestoreError::BadValue)?;
+    if inst.venue != e.venue
+        || e.cash_qty < 0
+        || e.cash_qty > e.cum
+        || (e.cash_qty == 0 && e.cash_sum != 0)
+        || (inst.perp_cash && e.cash_qty != e.cum)
+    {
+        return Err(RestoreError::BadValue);
+    }
+    Ok(())
+}
+
+fn cash_increment(
+    required: bool,
+    prev: &SlotEntry,
+    e: &OrderEvent,
+) -> Result<Option<Qty>, JournalApplyError> {
+    if !required {
+        return Ok(None);
+    }
+    if e.cum_filled.0 < 0
+        || e.cash_qty.0 < 0
+        || e.cash_qty.0 > e.cum_filled.0
+        || (e.cash_qty.0 == 0 && e.cash_sum.0 != 0)
+    {
+        return Err(JournalApplyError::CashCoverage);
+    }
+    if e.cum_filled.0 < prev.cum {
+        return Ok(Some(Qty(0)));
+    }
+    if e.cash_qty != e.cum_filled || prev.cash_qty != prev.cum {
+        return Err(JournalApplyError::MissingCash);
+    }
+    if e.cum_filled.0 == prev.cum && e.cash_sum.0 != prev.cash_sum {
+        return Err(JournalApplyError::CashConflict);
+    }
+    e.cash_sum
+        .0
+        .checked_sub(prev.cash_sum)
+        .map(|x| Some(Qty(x)))
+        .ok_or(JournalApplyError::CashOverflow)
 }

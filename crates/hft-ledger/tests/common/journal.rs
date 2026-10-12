@@ -26,7 +26,7 @@ pub fn feed<B: Body>(j: &mut JournalLedger, b: &B, end: bool) {
     };
     let n = encode_fixed(&mut buf, 1, TSC, flags, b) as usize;
     let rv = decode_record(&buf[..n]).expect("decode");
-    j.apply(&rv);
+    j.apply(&rv).expect("valid journal");
 }
 
 /// `EngineClock` placing the following records at engine time `t`.

@@ -149,6 +149,7 @@ pub struct RdOpts {
     pub s3_fee: FeeAssetRule,
     pub p2_fee: FeeAssetRule,
     pub p2_funding: FundingSettleKind,
+    pub p2_cash: bool,
     /// Extra assets listed on `S1` (each with one spot inst), for capacity cases.
     pub s1_extra_assets: u16,
     pub btc_p2_interval_s: u32,
@@ -164,6 +165,7 @@ impl Default for RdOpts {
             s3_fee: FeeAssetRule::Quote,
             p2_fee: FeeAssetRule::Quote,
             p2_funding: FundingSettleKind::PerSymbolPush,
+            p2_cash: false,
             s1_extra_assets: 0,
             btc_p2_interval_s: 28_800,
             eth_p2_interval_s: 28_800,
@@ -294,7 +296,11 @@ pub fn rd_with(o: &RdOpts) -> &'static RefData {
     b.venue(venue_spec(P2, Exchange::Okx, InstKind::Perp));
     b.caps(spot_caps(S1, o.s1_fee));
     b.caps(spot_caps(S3, o.s3_fee));
-    b.caps(perp_caps(P2, o.p2_fee, o.p2_funding));
+    let mut pc = perp_caps(P2, o.p2_fee, o.p2_funding);
+    if o.p2_cash {
+        pc.flags = pc.flags | hft_refdata::CapFlags::PERP_CASH;
+    }
+    b.caps(pc);
     let named = [
         I {
             id: 11,

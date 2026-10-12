@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import json
 import shutil
+import struct
 from decimal import Decimal
 from pathlib import Path
 
 import hft_py
+import jfile
 import polars as pl
 import pytest
 from conftest import Journal, Shm, pyfixture, run_tw
@@ -87,6 +89,38 @@ def test_py_100_ledger_views_match_rust(j_led) -> None:  # type: ignore[no-untyp
         lj = j_led(seed)
         led = hft_py.ledger(hft_py.open_journal(lj.j.path), account="bn-1")
         views_equal(led, lj.ref())
+
+
+@pytest.mark.parametrize("api", ["ledger", "pnl"])
+def test_py_114_booking_error_exposes_failing_sequence(j_led, tmp_path: Path, api: str) -> None:  # type: ignore[no-untyped-def]
+    source = j_led(1).j
+    reports = pl.DataFrame(hft_py.open_journal(source.path).events("OrderEvent"))
+    report = reports.filter(pl.col("cum_filled") > 0).row(0, named=True)
+    seq = report["seq"]
+    altered = source.copy(tmp_path / api)
+    changed = False
+    for segment in altered.segments():
+        raw = bytearray(segment.read_bytes())
+        for record in jfile.records(raw):
+            if record.seq != seq:
+                continue
+            # Preserve a valid event and CRC but contradict its registered order's instrument.
+            struct.pack_into("<I", raw, record.off + 24 + 12, 202 if report["inst"] != 202 else 102)
+            if record.crc:
+                jfile.set_record_crc(raw, record)
+            segment.write_bytes(raw)
+            changed = True
+            break
+        if changed:
+            break
+    assert changed
+    journal = hft_py.open_journal(altered.path)
+    with pytest.raises(hft_py.JournalError, match="ledger settlement: Identity") as error:
+        if api == "ledger":
+            hft_py.ledger(journal, account="bn-1")
+        else:
+            hft_py.pnl(journal, account="bn-1", by="group")
+    assert error.value.seq == seq
 
 
 def _keyframes(j: object) -> list[tuple[int, int, int]]:

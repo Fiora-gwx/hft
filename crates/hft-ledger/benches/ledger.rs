@@ -237,7 +237,7 @@ fn led_258_replay_day(c: &mut Criterion) {
             |mut j| {
                 for rec in &records {
                     if let Ok(rv) = decode_record(rec) {
-                        j.apply(&rv);
+                        j.apply(&rv).expect("valid journal");
                     }
                 }
                 black_box(j.ledger().pos(A1, BTC_S1).qty)

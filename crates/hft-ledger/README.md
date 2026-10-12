@@ -100,10 +100,10 @@ pub enum LedgerConfigError { TooManyAssets { venue: VenueId, n: u16 } }         
 ```rust
 pub struct JournalLedger { /* 内含一个 Ledger、槽映射、当前 epoch、计数 */ }
 impl JournalLedger {
-    /// 从一条 StateSnapshot 起步:按本 crate 的节恢复 Ledger,按 hft-oms 节 2 的非空闲槽行建槽映射。
+    /// 从一条 StateSnapshot 起步:按本 crate 的节恢复 Ledger,按 hft-oms 节 2/12 恢复槽与墓碑水位,节 3/25 恢复 epoch 与引擎时钟。
     pub fn from_snapshot(r: &mut SnapshotReader, rd: &RefData, cfg: &LedgerConfig, caps: &Capacities) -> Result<JournalLedger, RestoreError>;
     /// 逐条喂 journal 记录(Input、Output、Meta 都可以;与入账无关的 kind 忽略)。同一事件的记录按 journal 顺序喂。
-    pub fn apply(&mut self, rec: &RecordView<'_>);
+    pub fn apply(&mut self, rec: &RecordView<'_>) -> Result<(), JournalApplyError>;
     pub fn ledger(&self) -> &Ledger;                 // 持仓、库存、余额、PnL 的查询沿用 Ledger 的只读接口
     pub fn stats(&self) -> &JournalLedgerStats;      // { unmapped_fills, map_evicted, epochs_seen }
 }
@@ -298,13 +298,17 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 
 `FillDelta`/`FeeDelta` 不写 journal(它们是 OMS 处理 `OrderEvent` 的同一事件内的派生量),冷读者按下表从 journal 记录重建同样的调用,得到与引擎相同的持仓、库存与余额:
 
-恢复 OMS 节 2 时接受行版本 1–3;版本 1 以槽的 `filled` 初始化费用水位,版本 2/3 读取 `fee_cum`,其他版本返回 `VersionUnsupported`。结算水位的冷热消费接入边界见已知限制。
+恢复 OMS 节 2 时接受行版本 1–3;版本 1 以 `filled` 初始化费用水位,版本 2/3 读取 `fee_cum`,版本 3 读取现金覆盖量与累计额。节 12 版本 1/2 的墓碑保留完整订单身份,版本 2 读取现金水位;旧版现金水位补零。`PERP_CASH` 下已成交量必须全部覆盖,否则拒绝恢复。节 3 版本 1 提供当前 epoch,节 25 版本 1 提供时钟,关键帧后的新订单无须等下一次 EpochStart。未知版本返回 `VersionUnsupported`,重复身份或快照映射超容量返回 `BadValue`。
+
+`apply` 遇到无法证明的入账返回 `JournalApplyError`,之后持续返回首个错误,调用方必须停止读取。`PERP_CASH` 的普通订单按完整身份及累计覆盖量计算现金增量,调用 `apply_settled_fill`;同水位不同金额、缺失/越界覆盖、减法溢出、找不到订单或重复登记身份都失败。FeeOnly 与查询后的补费不推进现金水位。失败成交不改账本或水位;未启用该能力的回报沿用本地计算。原始回报身份与登记品种不符时也明确报错。
+
+当前 `PERP_CASH` 的 ExternalFill、OMS 外来注记与 AUTO_EXTERNAL 注记返回 `UnsupportedExternalCash`;未验证的外来抵扣不得按数量比例分配现金或退回估算。此边界限制开关的启用范围,见已知限制。
 
 | 记录 | 处理 |
 |---|---|
 | `Note{EpochStart}` | 记当前 epoch(`v[0]`) |
 | `OrderDecision{action = New}`(Output,`reject = 0` 且未置 `SHADOW`) | 槽映射登记 `(venue, account, epoch, slot, gen) → (inst, side, group)`;容量 = Σ 各表 `slots` × (`tombstone_gens` + 1)(OMS 配置),满时淘汰最早登记的一项(`map_evicted` +1) |
-| `OrderEvent`(Input) | 按 `(ev.venue, ev.account, ev.epoch, ev.slot, ev.gen)` 查映射;`cum_filled` 大于该槽已记累计量时,增量 = `cum_filled − 已记`,增量名义 = `avg_px × cum_filled − 已记名义`,手续费按 [hft-oms 回报匹配与成交增量](../hft-oms/README.md#回报匹配与成交增量) 与 [成交净量](../hft-oms/README.md#成交净量b4) 的同一口径,构造 `FillDelta`/`FeeDelta`(`seq` = 该 `OrderEvent` 的 seq,与引擎由 OMS `FillOut`/`FeeOut` 带出的值相同;group 轮次的 `open_seq` 取它)调 `apply_fill`/`apply_fee`;`cum_filled` 不增(重复、乱序)→ 不入账,例外:`PartialFill`/`Fill` 的 `cum_filled` 大于该槽此前成交类回报的最大 `cum_filled`(数量已由非成交回报带来,hft-oms 回报匹配与成交增量第 9 条)→ 只按 `FeeDelta` 入账其费用;映射缺失 → `unmapped_fills` +1,不入账(这类成交由 OMS 的 `Note{OmsForeignFill}` 另行给出,见下行) |
+| `OrderEvent`(Input) | 按 `(ev.venue, ev.account, ev.epoch, ev.slot, ev.gen)` 查映射;`cum_filled` 大于该槽已记累计量时,增量 = `cum_filled − 已记`,增量名义 = `avg_px × cum_filled − 已记名义`,手续费按 [hft-oms 回报匹配与成交增量](../hft-oms/README.md#回报匹配与成交增量) 与 [成交净量](../hft-oms/README.md#成交净量b4) 的同一口径,构造 `FillDelta`/`FeeDelta`(`PERP_CASH` 使用上述结算入口;`seq` = 该 `OrderEvent` 的 seq,与引擎由 OMS `FillOut`/`FeeOut` 带出的值相同;group 轮次的 `open_seq` 取它)调 `apply_fill`/`apply_fee`;`cum_filled` 不增(重复、乱序)→ 不入账,例外:`PartialFill`/`Fill` 的 `cum_filled` 大于该槽此前成交类回报的最大 `cum_filled`(数量已由非成交回报带来,hft-oms 回报匹配与成交增量第 9 条)→ 只按 `FeeDelta` 入账其费用;映射缺失 → `unmapped_fills` +1,不入账(这类成交由 OMS 的 `Note{OmsForeignFill}` 另行给出,见下行) |
 | `ExternalFill`(Input) | `apply_external(e, false, t)` |
 | `ReconcileReport` 中带 `AUTO_RECON` 注记的 `AUTO_EXTERNAL` 条目 | "外部成交"第 6 步 |
 | `Note{OmsForeignFill}` | "外部成交"第 7 步(`external_from_oms_note`) |
@@ -557,7 +561,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 
 - 冷读者接受 OMS v3 行的原有字段;显式结算水位和墓碑的冷消费仍需接通,严格结算整链路验收尚未通过。
 
-- `apply_settled_fill` 是记账原语;回报携带结算事实、OMS 的累计/重复/迟到匹配、sequencer 与冷读者接入尚未完成。生产与 DST 仍走 `apply_fill`,乱序钱包问题仍由严格 INV-16 阻断。接入必须覆盖已提交 journal、恢复边界与缺失事实,不能靠本接口的组件测试宣告整链路修复。
+- 普通订单的 `PERP_CASH` 已接到 sequencer 与 JournalLedger,但 DST 世界和生产协议尚未启用。外来成交与归属重叠、对账补量、模拟恢复装配仍待接通,严格 INV-16 的原失败继续阻断。冷读者不完整镜像 OMS 的状态机与回收时机,跨回收的增量均价、未接受的非成交回报及外来归属仍需专门验证;普通成交用例不代表全部冷热一致性验收。
 - 平均成本法之外(FIFO 税务口径)不支持;需要时在 hft-py 侧另算。
 - 不建模余额域(同一钱包被多个产品线共用):这种情形被"一个账户在同一交易所只用一个市场"排除([hft-refdata](../hft-refdata/README.md))。若将来放开同所现货 × 永续,需要先把现金改为按余额域记账(触发条件:决定放开该规则)。
 - 资金费自动校正依赖交易所流水:`funding_recon_window_ms`(48 h)之外的差额不再比对;水位线之前(无历史)的差额挂起到窗口结束才入账,若其实早已入账会造成一次重复入账,由余额对账报出、人工 `AdoptExchange` 收敛;`RateOnly` 所在校正之前钱包是估计值,两次对账之间余额对账条目可能出现等于未校正资金费的差额(由 reconciler 与 watchtower 处理口径)。

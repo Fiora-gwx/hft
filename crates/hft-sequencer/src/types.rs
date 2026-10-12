@@ -31,6 +31,11 @@ pub enum FatalReason {
     JournalFull,
     ClockRange,
     TimerOverflow,
+    /// Missing, inconsistent or unprovable execution cash facts; no fallback booking.
+    OmsCash(hft_oms::CashError),
+    Settlement(hft_ledger::SettlementError),
+    /// The cash-enabled venue supplied an external path whose attribution is not supported.
+    UnsupportedExternalCash,
 }
 
 /// Which capacity a restored state exceeds (checked in this order).

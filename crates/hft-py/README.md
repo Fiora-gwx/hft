@@ -120,7 +120,7 @@ hft_py.schema_hash(); hft_py.schema.catalog()              # 生成器导出的�
 
 - `ledger`/`pnl` 直接用 [hft-ledger](../hft-ledger/README.md#冷消费者journalledger) 的 journal 冷消费者 `JournalLedger`,本 crate 不另写入账实现:它从 Output `OrderDecision{New}` 维护按账户与 venue 隔离的订单槽映射(完整键归上述冷消费者契约),对 `OrderEvent` 的成交增量按 `cum_filled` 去重入账,另消费 `ExternalFill`、`FundingSettle`、`AdoptExchange` 调整、资金费自动校正 `AdjustDelta::Funding`、残余核销 `AdjustDelta::WriteOff` 与余额基线照常入账;`Funding` 事件同样喂给 `on_funding_interval`,资金费结算时刻的归一化参数取 `funding_grid`,与热进程一致);与热进程同一代码,PnL 与库存口径只有一套([07 §5](../../design/07-策略层.md))。带 `AUTO_EXTERNAL` 的 `ReconcileReport` 条目不另有成交记录:sequencer 在这条 Input 内确定地合成成交(规则归 [hft-sequencer](../hft-sequencer/README.md#每条-input-的处理顺序process)),本 crate 经同一消费路径调用 hft-ledger 的同一合成函数,因此看到同一笔成交与之后的 `auto_held` 抵扣([hft-ledger 外部成交](../hft-ledger/README.md#外部成交externalfill) 第 6 步)。OMS 防御路径的外来成交(`ForeignFill`、带成交的 `StaleGen`)同理不写 Input:本 crate 对同一事件内的每条 `Note{OmsForeignFill}` 经 hft-ledger 的同一消费路径入账(第 7 步;注记字段归 [hft-oms](../hft-oms/README.md#回报匹配与成交增量) 第 8 条)。不带 `AUTO_RECON` 的 `Note{ExternalFill}` 是热进程对已入账成交的记录,不据它入账。
 - 模拟账户的报告(PnL 分解、成交率、两腿间隔、裸敞口、保证金占用)用同一 API 计算,结果带 `account_kind = Sim` 标注。
-- `JournalLedger::apply` 读的是单段的 `ControlCmd` 原始记录(`PartHdr` + 载荷),本 crate 的扫描给的是重组后的逻辑体,交给它之前补上单段 `PartHdr`;其余 kind 原样交付。
+- `JournalLedger::apply` 的入账错误立即转为 `JournalError`,携带失败记录的 `seq`;`ledger` 与 `pnl` 均停止,不返回部分结果。它读的是单段的 `ControlCmd` 原始记录(`PartHdr` + 载荷),本 crate 的扫描给的是重组后的逻辑体,交给它之前补上单段 `PartHdr`;其余 kind 原样交付。
 
 ### 3. 源文件
 

@@ -29,6 +29,7 @@ mod prop_snapshot;
 mod rates;
 mod rounds;
 mod settlement;
+mod settlement_journal;
 mod snapshot;
 mod transfer;
 mod upnl;

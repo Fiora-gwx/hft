@@ -104,8 +104,21 @@ pub struct PerpCashSettlement {
     pub amount: Qty,
 }
 
-/// Invalid settlement/fill pairing. Validation happens before any ledger state changes.
+/// A journal consumer cannot prove a cash booking. The failed record is never silently skipped.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum JournalApplyError {
+    Identity,
+    Unmapped,
+    MissingCash,
+    CashCoverage,
+    CashConflict,
+    CashOverflow,
+    UnsupportedExternalCash,
+    Settlement(SettlementError),
+}
+
+/// Invalid settlement/fill pairing. Validation happens before any ledger state changes.
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum SettlementError {
     UnknownInstrument,
     NotPerpetual,

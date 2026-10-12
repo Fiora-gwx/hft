@@ -1358,7 +1358,9 @@ impl Led {
                 seq: self.seq,
                 tsc: ts,
             };
-            self.jl.apply(&hft_event::RecordView { hdr, body: &b });
+            self.jl
+                .apply(&hft_event::RecordView { hdr, body: &b })
+                .expect("valid fixture journal");
         }
         self.out.push(2);
     }
@@ -1739,7 +1741,8 @@ fn ledger_ref(cold_root: &Path, instance: &str, from_seq: u64, out: &Path) {
             seq,
             tsc,
         };
-        l.apply(&hft_event::RecordView { hdr, body: &body });
+        l.apply(&hft_event::RecordView { hdr, body: &body })
+            .expect("valid reference journal");
         if flags & hft_event::RecordFlags::EVENT_END.0 != 0 {
             let (s0, at) = first.take().unwrap_or((seq, 0));
             let mut cells = Vec::new();

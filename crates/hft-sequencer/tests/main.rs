@@ -40,6 +40,7 @@ mod replay_config;
 mod replay_file;
 mod ring_full;
 mod sdk_contract;
+mod settlement;
 mod sim_route;
 mod snapshot;
 #[cfg(feature = "replay-io")]

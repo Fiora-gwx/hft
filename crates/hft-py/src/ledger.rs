@@ -149,7 +149,7 @@ impl std::fmt::Debug for Run {
 
 /// The record handed to `JournalLedger::apply`: Multi records it reads raw (ControlCmd) get a
 /// single-part `PartHdr` in front of the logical body.
-fn feed(jl: &mut JournalLedger, rec: &Rec<'_>, scratch: &mut Vec<u8>) {
+fn feed(jl: &mut JournalLedger, rec: &Rec<'_>, scratch: &mut Vec<u8>) -> Res<()> {
     let multi = matches!(
         hft_event::kind_info(EventKind(rec.kind)).map(|i| i.layout),
         Some(hft_event::Layout::Multi { .. })
@@ -177,7 +177,8 @@ fn feed(jl: &mut JournalLedger, rec: &Rec<'_>, scratch: &mut Vec<u8>) {
         seq: rec.seq,
         tsc: rec.tsc,
     };
-    jl.apply(&RecordView { hdr, body });
+    jl.apply(&RecordView { hdr, body })
+        .map_err(|e| Error::journal(format!("ledger settlement: {e:?}"), None, Some(rec.seq)))
 }
 
 /// The latest ledger snapshot at or before `t0` (proc time): `(segment, seq)`.
@@ -309,7 +310,7 @@ pub fn run(j: &Journal, accounts: Option<Vec<u8>>, t0: Option<i64>, t1: Option<i
                 before.push((*k, g.pnl, g.round.round_id));
             }
         }
-        feed(l, &rec, &mut scratch);
+        feed(l, &rec, &mut scratch)?;
         if RecordFlags(rec.flags).contains(RecordFlags::EVENT_END) {
             let at = ev_first.take().unwrap_or(rec.proc_ns);
             let inside = t0.is_none_or(|t| at >= t) && t1.is_none_or(|t| at < t);

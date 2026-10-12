@@ -23,7 +23,7 @@ spec: README.md
 | 仓位与已实现(平均成本法) | LED-010、LED-021–LED-025、LED-030–LED-039、LED-240、LED-241、LED-243、LED-275–LED-278 |
 | 余额初始化、校验与基线 | LED-039–LED-046、LED-260–LED-262 |
 | 外部成交(`ExternalFill`) | LED-050–LED-081、LED-188、LED-240、LED-245 |
-| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273 |
+| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282 |
 | 资金费 | LED-090–LED-104、LED-136–LED-138、LED-240、LED-245、LED-260 |
 | 资金费时刻归一化 | LED-091、LED-110–LED-116 |
 | 资金费对账校正 | LED-270、LED-268、LED-114、LED-120–LED-139、LED-244、LED-261 |
@@ -2720,6 +2720,66 @@ spec: README.md
 | LED-278.4 | 3 |
 | LED-278.5 | 4 |
 | LED-278.6 | 5 |
+
+### LED-279 journal 现金结算不随回报交付顺序改变
+
+- 规则:[冷消费者](README.md#冷消费者journalledger)
+- 级别:unit
+- 里程碑:M2
+- 前置:PERP_CASH 永续、五个独立订单,LED-275 原始价量与现金事实
+- 步骤:枚举五笔全部 120 个交付排列,每笔再重复一次;期望值从原始现金与费用累计
+- 期望:每步钱包、保证金 wallet 和数量逐单位相等;重复不改快照;最终钱包 50000000000 − 11800 − 180079
+- 实现:`crates/hft-ledger/tests/settlement_journal.rs::led_279_journal_cash_is_exact_across_report_delivery_orders`
+
+### LED-280 查询结算水位与晚到费用分别去重
+
+- 规则:[冷消费者](README.md#冷消费者journalledger)
+- 级别:unit
+- 里程碑:M2
+- 前置:PERP_CASH 订单 0.003 BTC,价格 60000
+- 步骤:缺 avg_px 的 QueryResult 先报 0.001、现金 −11700;随后成交回报补费 123 并重复;累计 0.002、现金 −11800;重放旧成交,再 FeeOnly 补 7
+- 期望:查询使用已登记订单价格,现金只补 −100;费用 123 与 7 各入一次,重复与旧报告不重置水位;钱包精确为 50000000000 − 11800 − 130
+- 实现:`crates/hft-ledger/tests/settlement_journal.rs::led_280_journal_query_cash_and_late_fee_have_separate_watermarks`
+
+### LED-281 冷读者恢复活动槽与墓碑现金水位
+
+- 规则:[冷消费者](README.md#冷消费者journalledger)
+- 级别:table
+- 里程碑:M2
+- 前置:已入账 0.001 BTC、现金 −11700 的账本及对应 OMS 快照行
+- 步骤:按行恢复;重复原报告,登记新 epoch/gen 的同槽订单,再投递旧身份累计 0.002、现金 −11800 两次
+- 期望:完整水位只补 −100,不动新订单身份;旧格式在要求现金事实时拒绝,未启用时可读
+- 实现:`crates/hft-ledger/tests/settlement_journal.rs::led_281_journal_restores_cash_for_live_and_recycled_orders`
+
+| 行 | 快照行 | 期望 |
+|---|---|---|
+| LED-281.1 | 活动槽 v3 | 旧身份只补 −100,新身份未入账 |
+| LED-281.2 | 墓碑 v2 | 旧身份只补 −100,新身份未入账 |
+| LED-281.3 | 活动槽 v2 | 严格模式拒绝,旧模式可读 |
+| LED-281.4 | 墓碑 v1 | 严格模式拒绝,旧模式可读 |
+
+### LED-282 无法证明的 journal 结算中止消费
+
+- 规则:[冷消费者](README.md#冷消费者journalledger)
+- 级别:table
+- 里程碑:M2
+- 前置:已登记且已部分入账的 PERP_CASH 订单
+- 步骤:逐行送入坏事实,再送一笔正确报告
+- 期望:首次失败不改变账本快照,随后持续返回同一错误且不再入账;外来成交也不回退估算
+- 实现:`crates/hft-ledger/tests/settlement_journal.rs::led_282_journal_rejects_unprovable_cash_and_stops_consumption`
+
+| 行 | 输入 | 错误 |
+|---|---|---|
+| LED-282.1 | 缺现金覆盖 | MissingCash |
+| LED-282.2 | 只覆盖一部分 | MissingCash |
+| LED-282.3 | 覆盖超过累计成交 | CashCoverage |
+| LED-282.4 | 同量异额 | CashConflict |
+| LED-282.5 | 现金差减法溢出 | CashOverflow |
+| LED-282.6 | 错误 epoch | Unmapped |
+| LED-282.7 | 已登记身份改为其他品种 | Identity |
+| LED-282.8 | 已登记身份改为未知品种 | Identity |
+| LED-282.9 | 非正增量价格 | Settlement(InvalidPrice) |
+| LED-282.10 | ExternalFill 带已知现金 | UnsupportedExternalCash |
 
 ## 验收
 

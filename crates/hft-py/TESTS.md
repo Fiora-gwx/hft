@@ -22,7 +22,7 @@ spec: README.md
 | 错误 | PY-006、PY-009、PY-010、PY-050、PY-060–PY-065、PY-092、PY-121、PY-128 |
 | 实现说明 | 不适用:见子节 |
 | 1. journal → Arrow | PY-001、PY-008、PY-034、PY-036、PY-055、PY-056、PY-063、PY-070–PY-080 |
-| 2. ledger / pnl | PY-100–PY-113、LED-075–LED-081、LED-246 |
+| 2. ledger / pnl | PY-100–PY-114、LED-075–LED-081、LED-246 |
 | 3. 源文件 | PY-143 |
 | 4. 打包与发布 | PY-150–PY-153 |
 | 延迟与资源契约 | PY-080、PY-160–PY-162 |
@@ -1637,6 +1637,21 @@ spec: README.md
 - 期望:
   - 步骤 1 至少一处;步骤 2 零处命中。向 `src/ledger.rs` 加入一行 `pos.qty += …` 的补丁副本上本测试失败
 - 实现:`crates/hft-py/tests/source_scan.rs::py_113_no_second_booking`
+
+### PY-114 入账错误携带记录序号且不返回部分结果
+
+- 规则:[2. ledger / pnl](README.md#2-ledger--pnl)
+- 级别:table
+- 里程碑:M2
+- 前置:J_LED20 种子 1 的副本,修改首笔非零累计成交的品种为与已登记订单不同的合法品种,保留记录完整性并重算 CRC
+- 步骤:分别调用 ledger 与 pnl
+- 期望:两入口均抛 JournalError,消息包含 Identity,seq 为错误回报的序号;不返回部分账本或收益表
+- 实现:`crates/hft-py/tests/python/test_ledger.py::test_py_114_booking_error_exposes_failing_sequence`
+
+| 行 | API |
+|---|---|
+| PY-114.1 | ledger |
+| PY-114.2 | pnl |
 
 ## 验收
 

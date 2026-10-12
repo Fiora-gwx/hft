@@ -28,7 +28,7 @@ spec: README.md
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
 | 连接活性 | SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173 |
-| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383, SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115 |
+| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-412、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
@@ -5756,3 +5756,37 @@ spec: README.md
 - 步骤:崩溃重启;策略登记一个新定时器并等其到期;保存末尾快照;执行完整及关键帧窗口回放
 - 期望:恢复的存活登记为空,计数器为 8,新返回值为 8;该定时器只到期一次;两次运行的 Output、快照字节与恢复状态均一致
 - 实现:`crates/hft-sequencer/tests/timer_recovery.rs::seq_410_empty_heap_retains_consumed_timer_ids`
+
+### SEQ-411 实际现金贯通热引擎、冷读者和完整及窗口回放
+
+- 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
+- 级别:table
+- 里程碑:M2
+- 前置:B0 真实引擎,完整 ECF1/RKP1,永续 venue 开启 PERP_CASH;五笔事实取 LED-275 小例,金额按 B0 的 USDT 指数 −8 换算;策略由不同报价确定下单,无外部计数器
+- 步骤:真实下单与 Ack 后按行交付成交,每笔重复;一笔改为 FeeOnly 晚费;下单前、下单后及三笔已入账时保存关键帧
+- 期望:每笔钱包等于初始值 + 原始现金 − 费用,最终扣 1180000 与 18007900;冷读者从三个关键帧起步均得出相同仓位及钱包,下单前快照恢复当前 epoch;完整回放与三个窗口的 Output 和状态验证无分歧
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_411_cash_wallet_matches_cold_reader_and_full_window_replay`
+
+| 行 | 交付顺序 |
+|---|---|
+| SEQ-411.1 | 1、2、3、4、5 |
+| SEQ-411.2 | 1、2、4、3、5 |
+| SEQ-411.3 | 5、3、4、2、1 |
+
+### SEQ-412 坏结算事实在对冲和入账前停止
+
+- 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
+- 级别:table
+- 里程碑:M2
+- 前置:真实引擎、开启 PERP_CASH 的永续第一腿,OnFill 第二腿为现货
+- 步骤:逐行送入坏事实;冲突行先入一笔有效部分成交
+- 期望:明确 Fatal,坏事件无 OrderDecision,钱包和账本仓位不变,不调用 ledger.apply_fill
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_412_bad_cash_stops_before_hedge_and_wallet_booking`
+
+| 行 | 输入 | Fatal |
+|---|---|---|
+| SEQ-412.1 | 成交缺现金覆盖 | OmsCash(Missing) |
+| SEQ-412.2 | 同水位异额 | OmsCash(Conflict) |
+| SEQ-412.3 | 错误 epoch | OmsCash(Untracked) |
+| SEQ-412.4 | 价格为零 | Settlement(InvalidPrice) |
+| SEQ-412.5 | 外来成交带已知零现金 | UnsupportedExternalCash |

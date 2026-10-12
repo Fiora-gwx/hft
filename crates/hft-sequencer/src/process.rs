@@ -876,6 +876,13 @@ pub(crate) fn external_fill<D: Driver<S>, S: StrategySet>(
     oms_foreign: bool,
 ) -> R<()> {
     let a = x.account;
+    if e.rd
+        .caps(x.venue)
+        .flags
+        .contains(hft_refdata::CapFlags::PERP_CASH)
+    {
+        return Err(FatalReason::UnsupportedExternalCash);
+    }
     let before = e.ledger.pos(a, x.inst).qty.0 != 0;
     e.trace
         .rec("ledger.apply_external", u64::from(a.0), u64::from(auto_recon));
