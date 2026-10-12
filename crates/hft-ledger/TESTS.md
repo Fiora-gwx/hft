@@ -2543,7 +2543,7 @@ spec: README.md
 - 种子:PR 200(提交派生)+ 回归集;每夜日期派生
 - 断言:每条 `StateSnapshot` 处 JournalLedger 的 `pos`、`inventory`、`venue_book` 与引擎 Ledger 相等;`unmapped_fills` 的每一笔都在同一事件内有 `Note{OmsForeignFill}` 或属于 `Shadow` 扣留的单
 - 边界:持久字段与快照比较,完整视图另与同一事件完成边界的真实引擎比较,包括仓位时间、全部现金归属与报告字段、保证金、权益汇总及未持久化的标志/更新时间;标准真实引擎 INV-6 在每个快照、定期和结束重建中执行。启动配置仅从前置且哈希匹配的 ConfigBlob 取得,恢复清空冷观察器后重算保留前缀;后续快照不覆盖已消费状态
-- 反例:现金总额/归属/报告时间/标志、库存、保证金、权益和 venue 标志任一差异均失败;缺失/跨事件/错身份/错金额/重复使用的注记以及错误 epoch 的 Shadow 均不得解释未映射成交;坏配置或已失败观察器不能继续通过
+- 反例:现金总额/归属/报告时间/标志、库存、保证金、权益和 venue 标志任一差异均失败;缺失/跨事件/错身份/错金额/重复使用的注记以及错误 epoch 或未分配槽/代数的 Shadow 均不得解释未映射成交;坏配置或已失败观察器不能继续通过;同事件证据满时明确失败
 - 实现:`crates/hft-testkit/src/dst/seq/ledger.rs::led_267_full_venue_fields_and_recorded_configuration_are_required`
 
 ### LED-268 资金费逐笔差额以 AssetMeta.dust 为界判 Matched

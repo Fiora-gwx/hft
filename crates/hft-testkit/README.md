@@ -215,6 +215,8 @@ DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xt
 
 真实引擎的 INV-6 同时执行 [LED-267](../hft-ledger/TESTS.md#led-267-dst-中每个快照点-journalledger-等于引擎-ledger)。独立 `JournalLedger` 从首个快照及其引用的已记录配置起步,增量消费完整事件。每条快照的持久字段逐项比较;`SnapshotPoint.ledger` 从同边界的只读 `StateView` 复制完整仓位、库存与 VenueBook,连同未持久化的估值缓存、更新时间和标志一起比较,缺失即失败。后续快照只作为参考,不能覆盖冷状态;初始保证金估值按节 10 的 mark 恢复,零库存行按快照的稀疏表示比较。每笔 `unmapped_fills` 增量须有同一事件、相同成交身份及金额字段的 OmsForeignFill 注记,或完整订单身份匹配的 Shadow 决策;一条注记只能解释一笔。重启清空观察器后从保留日志重算,未提交尾部不沿用;失败锁存。更换账本/参考数据配置但缺少冷状态迁移时明确失败。标准 DST、定期和结束重建都经过此检查,开关检查器不改变意图流及 HashTrail。
 
+没有分配 slot/gen 的 Shadow 记录不能提供订单身份,不得解释未解析成交。同事件成交/注记证据上限沿用 sequencer 的诊断容量,Shadow 身份表上限沿用 `hft_ledger::SLOT_MAP_CAP`;满时失败,不静默淘汰证据。
+
 storage 回归集包含轮次结束后经历快照与重启的种子;按完整 10,000 步故障时序运行,确认实际产生 RoundClosed,其所属 Input 为原始成交或手续费回报,独立重建不得漏掉注记(TK-114)。
 
 一致性集中的 Drain 重启种子另外检查启动边界。Drain 快照保留退出 cap,Recovery 快照移除旧 Draining、原样保留其余 cap,全部账户仍有 Recovery 且闸门未放行;同种子复跑逐字节比较 Output 与 HashTrail(TK-120)。
