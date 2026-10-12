@@ -252,12 +252,17 @@ pub fn refdata_blob_with_names(
         } else {
             FeeAssetRule::Quote
         };
-        b.caps(caps_row(
-            v.id,
-            v.market == VenueMarket::Perp,
-            v.reduce_only,
-            fee_rule,
-        ));
+        let mut caps = caps_row(v.id, v.market == VenueMarket::Perp, v.reduce_only, fee_rule);
+        if v.perp_cash {
+            if v.market != VenueMarket::Perp || w.insts.iter().any(|i| i.venue == v.id && !i.perp) {
+                return Err(format!(
+                    "cash settlement venue {:?} requires perpetual instruments",
+                    v.id
+                ));
+            }
+            caps.flags = caps.flags | CapFlags::PERP_CASH;
+        }
+        b.caps(caps);
         for tier in 0..=1u8 {
             let r = Rate(v.fee_ppm * 1_000);
             b.fee(FeeSpec {

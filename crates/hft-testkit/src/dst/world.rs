@@ -175,6 +175,9 @@ pub struct VenueSpec {
     /// Base-asset fee on both buy and sell. SeqSut supports a spot venue with one common base
     /// asset through VenueCaps::Configured; unsupported worlds fail before matching starts.
     pub fee_in_base: bool,
+    /// The venue supplies complete actual perpetual execution cash (PERP_CASH). Disabled in
+    /// legacy worlds until the full external/reconciliation recovery path is verified.
+    pub perp_cash: bool,
     /// Venue supports `reduceOnly`.
     pub reduce_only: bool,
     /// Fee rate in units of 10^-6 (1000 = 0.1%).
@@ -292,6 +295,7 @@ impl WorldSpec {
                 id: VS,
                 market: VenueMarket::Spot,
                 fee_in_base: false,
+                perp_cash: false,
                 reduce_only: false,
                 fee_ppm: 1000,
             },
@@ -299,6 +303,7 @@ impl WorldSpec {
                 id: VP,
                 market: VenueMarket::Perp,
                 fee_in_base: false,
+                perp_cash: false,
                 reduce_only: true,
                 fee_ppm: 500,
             },

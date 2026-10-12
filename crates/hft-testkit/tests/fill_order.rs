@@ -293,3 +293,97 @@ fn tk_124_cash_order_math_keeps_open_cost_and_signed_rounding() {
     c.trade(Side::Buy, 1, 8, 0, 1);
     assert_eq!((c.qty, c.basis, c.wallet), (0, 0, 5));
 }
+
+#[test]
+fn tk_127_explicit_cash_closes_the_original_wallet_difference() {
+    use hft_refdata::CapFlags;
+    use hft_testkit::dst::seq::build;
+    use hft_testkit::dst::world::{VP, VS};
+
+    let suite = hft_testkit::scenarios::suites()
+        .into_iter()
+        .find(|s| s.name == "modes")
+        .unwrap();
+    let mut c = suite.config(0x7dfe_e420_7b81_bfbd);
+    // Freeze the original full-length plan before shortening the diagnostic prefix.
+    c.plan = Some(c.fault_plan());
+    c.world.venues.iter_mut().find(|v| v.id == VP).unwrap().perp_cash = true;
+    for all_sim in [false, true] {
+        let rd = build::load_refdata(&build::refdata_blob(&c.world, all_sim).unwrap()).unwrap();
+        assert!(rd.caps(VP).flags.contains(CapFlags::PERP_CASH));
+        assert!(!rd.caps(VS).flags.contains(CapFlags::PERP_CASH));
+    }
+    let mut bad = c.world.clone();
+    bad.venues.iter_mut().find(|v| v.id == VS).unwrap().perp_cash = true;
+    assert!(build::refdata_blob(&bad, false).is_err());
+    assert!(build::refdata_blob(&bad, true).is_err());
+
+    c.steps = 316;
+    c.rerun = RerunPolicy::Always;
+    let r = run_record::<SeqSut<TestStrategies>>(&c);
+    assert!(r.outcome.is_pass(), "prefix: {}", crate::seq_sut::show(&r));
+    assert_eq!(r.steps_run, 316);
+    assert!(!r.trail.points.is_empty());
+    let relevant = |e: &OrderEvent| e.account.0 == 1 && e.venue.0 == 5 && e.inst.0 == 2;
+    let source: Vec<_> = r.matched_tail.iter().map(|(_, e)| *e).filter(relevant).collect();
+    let delivery: Vec<_> = r
+        .journal
+        .iter()
+        .filter_map(|j| j.try_read::<OrderEvent>())
+        .filter(|e| relevant(e) && matches!(e.what, OrderEventKind::Fill | OrderEventKind::PartialFill))
+        .collect();
+    assert!(source.len() >= 5);
+    assert_eq!(
+        source.iter().map(key).collect::<BTreeSet<_>>(),
+        delivery.iter().map(key).collect()
+    );
+    let mut previous_cash = 0;
+    for (ix, e) in source.iter().enumerate() {
+        let independent = cash_of(&r, &source[..=ix]).unwrap();
+        assert_eq!(e.cash_qty, e.cum_filled);
+        assert_eq!(i128::from(e.cash_sum.0), independent.wallet - previous_cash);
+        previous_cash = independent.wallet;
+    }
+    let generated = cash_of(&r, &source).unwrap();
+    let arrived = cash_of(&r, &delivery).unwrap();
+    assert_eq!(
+        arrived.wallet - generated.wallet,
+        1,
+        "the original delivery reordering must remain exercised"
+    );
+    let expected = generated.balance(50_000_000_000);
+    assert_eq!(expected, 49_999_683_575);
+    let truth = r
+        .truth
+        .iter()
+        .find(|t| t.account.0 == 1 && t.venue == VP)
+        .unwrap();
+    assert_eq!(truth.balances.iter().find(|(a, _)| a.0 == 2).unwrap().1, expected);
+    let balance = r
+        .obs
+        .balances
+        .iter()
+        .find(|b| b.account.0 == 1 && b.venue == VP && b.asset.0 == 2)
+        .unwrap();
+    assert_eq!(balance.qty, expected);
+    assert!(truth.positions.is_empty());
+
+    c.invariants = InvariantSet::none();
+    let unchecked = run_record::<SeqSut<TestStrategies>>(&c);
+    assert!(unchecked.outcome.is_pass());
+    assert_eq!(r.journal.len(), unchecked.journal.len());
+    for (a, b) in r.journal.iter().zip(&unchecked.journal) {
+        assert!(a == b, "cash checker changes journal seq {}", a.seq);
+    }
+    assert_eq!(r.trail, unchecked.trail);
+    assert_eq!(r.matched_tail, unchecked.matched_tail);
+    assert_eq!(r.truth, unchecked.truth);
+
+    c.invariants = InvariantSet::all();
+    c.steps = 10_000;
+    let full = run_record::<SeqSut<TestStrategies>>(&c);
+    assert!(full.outcome.is_pass(), "full: {}", crate::seq_sut::show(&full));
+    assert_eq!(full.steps_run, 10_000);
+    assert!(!full.trail.points.is_empty());
+    assert!(full.snapshot_checks > 0);
+}
