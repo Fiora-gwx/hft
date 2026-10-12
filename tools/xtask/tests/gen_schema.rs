@@ -1132,7 +1132,7 @@ fn tool_060_check_is_read_only() {
 fn tool_061_append_only_violations() {
     let base = events_fixture();
     let old_lock = base_lock(&base);
-    let rows: [EditCodeRow; 3] = [
+    let rows: [EditCodeRow; 7] = [
         (
             "TOOL-061.1",
             |m| {
@@ -1152,6 +1152,42 @@ fn tool_061_append_only_violations() {
                 k.fields[1] = field("count", 4, Ty::U32);
             },
             0,
+            &[],
+        ),
+        (
+            "TOOL-061.4",
+            |m| {
+                let k = kind(m, "Alpha");
+                append(k, field("c", 16, Ty::U64), 8);
+                append(k, field("d", 24, Ty::U64), 8);
+                k.schema_version += 2;
+            },
+            0,
+            &[],
+        ),
+        (
+            "TOOL-061.5",
+            |m| {
+                let k = kind(m, "Alpha");
+                append(k, field("c", 16, Ty::U64), 8);
+            },
+            1,
+            &["schema_version"],
+        ),
+        (
+            "TOOL-061.6",
+            |m| kind(m, "Alpha").schema_version -= 1,
+            1,
+            &["schema_version"],
+        ),
+        (
+            "TOOL-061.7",
+            |m| {
+                let k = kind(m, "Alpha");
+                k.fields[0].name = "reused".into();
+                k.schema_version += 2;
+            },
+            1,
             &[],
         ),
     ];

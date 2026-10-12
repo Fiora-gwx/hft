@@ -381,6 +381,7 @@ jobs:
             cargo xtask gen-schema
             HFT_REGEN_GOLDEN=1 cargo test --locked --profile ci -p hft-event --test golden
             HFT_REGEN_GOLDEN=1 cargo test --locked --profile ci -p hft-event --test event version::evt_071_old_versions_zero_fill
+            SIM_GOLDEN_BLESS=1 cargo test --locked --profile ci -p hft-sim --test golden sim_123_cross_arch_golden
           fi
           if [[ $HAS_GEN_HOST == true ]]; then cargo xtask gen-host; fi
           if [[ $HAS_DST == true && -f fixtures/dst/hashtrail.toml ]]; then

@@ -507,12 +507,17 @@ pub fn compare(base: &Lock, m: &Model) -> Vec<String> {
         let flats = flatten(&n.fields, &m.enums);
         let (mut e, changed, reserved_only) =
             compare_fields(&label, &o.fields, o.size, &flats, n.layout.size());
-        if changed && !reserved_only && n.schema_version != o.version + 1 {
+        // A PR can contain several compatible additions since its merge base. Each
+        // addition advances the version; comparing the endpoints must allow all of them.
+        if changed && !reserved_only && n.schema_version <= o.version {
             e.push(format!(
-                "{label}: layout changed but schema_version {} -> {} (must be {})",
-                o.version,
-                n.schema_version,
-                o.version + 1
+                "{label}: layout changed but schema_version {} -> {} (must exceed {})",
+                o.version, n.schema_version, o.version
+            ));
+        } else if n.schema_version < o.version {
+            e.push(format!(
+                "{label}: schema_version decreased {} -> {}",
+                o.version, n.schema_version
             ));
         }
         errs.extend(e);
