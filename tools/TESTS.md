@@ -164,7 +164,7 @@ DST 冒烟步含基线与 LED-081 两次调用,二者均使用 200 个提交派�
 - 步骤:
   1. 运行 `cargo xtask ci`
 - 期望:
-  - `dst` 冒烟步的参数为 `--seeds 200 --regressions`,不含 `--seed`;紧随其后的一步参数为 `--hashtrail check --first 50`
+  - `dst` 冒烟步依次调用基线 `--seeds 200 --regressions` 与同参数加 `--case LED-081` 的专属场景,两次均不含 `--seed`;紧随其后的一步参数为 `--hashtrail check --first 50`
 - 实现:`tools/xtask/tests/ci.rs::tool_009_dst_smoke_args`
 
 ### TOOL-010 ci 在 optional 组件不存在时照常通过

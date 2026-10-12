@@ -255,5 +255,10 @@ fn tool_009_dst_smoke_args() {
         .expect("dst smoke step");
     assert_eq!(calls[i], "xtask dst --seeds 200 --regressions");
     assert!(!calls[i].contains("--seed "), "the smoke start is commit-derived");
-    assert_eq!(calls[i + 1], "xtask dst --hashtrail check --first 50");
+    assert_eq!(calls[i + 1], "xtask dst --seeds 200 --regressions --case LED-081");
+    assert!(
+        !calls[i + 1].contains("--seed "),
+        "the case uses the same commit-derived start"
+    );
+    assert_eq!(calls[i + 2], "xtask dst --hashtrail check --first 50");
 }
