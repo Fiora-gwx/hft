@@ -210,7 +210,7 @@ replayer compare --a s3://<bucket>/<prefix>/<host>/prod/… --b s3://<bucket>/<p
 
 ## 已知限制与后续工作
 
-- RPL-270/271 在 CI 现场生成完整 1 h/3 h 的路径 Model 文件,由同一入口的独立测试进程执行。单个 Live 账户 acct-l 绑定实例 tsa,真实 SimExchange 产生回报,advisor 每 10 min 写检查点,sequencer 每 5 min 请求关键帧并保留整点滚段;检查点后窗口的比较数与路径版本变化后的 120 s 重建点从输入独立计算。CI 先构建 examples 再运行测试。生成文件尚未发布为带哈希的固定 T1/T3 样本,不计 RPL-010/040/046 的固定样本验收。
+- RPL-270/271 在 CI 现场生成完整 1 h/3 h 的路径 Model 文件,由同一入口的独立测试进程执行。单个 Live 账户 acct-l 绑定实例 tsa,真实 SimExchange 产生回报;夹具的网关边界消费 SetEpoch/MirrorRestore,按完整订单身份为 Place/Query 携带 epoch,回报保留真实现金覆盖量,不能把已知订单误归为外来成交。advisor 每 10 min 写检查点,sequencer 每 5 min 请求关键帧并保留整点滚段;检查点后窗口的比较数与路径版本变化后的 120 s 重建点从输入独立计算。CI 先构建 examples 再运行测试。生成文件尚未发布为带哈希的固定 T1/T3 样本,不计 RPL-010/040/046 的固定样本验收。
 
 - RPL-281 将三小时生成样本的四个 journal 段、seal 和两份 Model 检查点经 [整套指针](../../fixtures/README.md#大文件s3-指针) 获取与复用,再由工具包装器驱动三项真实回放。只替换 S3 交付和预构建程序位置;此证据仍属生成样本,不代表已发布的固定样本或真实 OIDC 下载。
 
