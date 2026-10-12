@@ -20,7 +20,7 @@ spec: README.md
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
 | 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TK-117–TK-119、TOOL-024、TOOL-027–TOOL-029 |
-| 6. DST 框架 | TK-043–TK-070、TK-100–TK-116 |
+| 6. DST 框架 | TK-043–TK-070、TK-100–TK-116、TK-120 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
 | 8. hft-dst 运行器 | TK-075–TK-088 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
@@ -1554,6 +1554,18 @@ spec: README.md
 | TK-119.4 | 2、1、0 | `[3,197121,81,4,0]` |
 
 每行通过 check_layout,原始检查点恰 40 字节;完整恢复重写逐字节一致,截断到 39 字节的恢复失败且不污染原状态。
+
+### TK-120 一致性集的 Drain 重启保留恢复闸门
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:dst
+- 里程碑:M2
+- 前置:真实 `SeqSut<TestStrategies>`、原始 core 套件,不改故障率、时限或采样间隔
+- 故障:套件原有故障计划,实际触发 Drain 和自动重启
+- 种子:固定种子 7、28、34,每行 2000 步
+- 断言:每行实际完成至少一次 Drain 和对应恢复;Drain 快照含 Draining,其他 cap 非空,Recovery 快照不含旧 Draining,其余 cap 原样保留,全部账户仍有 Recovery 且闸门未放行;每条快照通过 INV-6,检查数与 journal 快照数相同;全部不变量通过,强制复跑的 Output 和非空 HashTrail 逐字节一致
+- 恢复后 New 意图:种子 28 的两条决策均以 CloseOnly 拒绝且没有分配槽,其余两行没有 New 决策;订单查询照常处理
+- 实现:`crates/hft-testkit/tests/journal_config.rs::tk_120_drain_restart_conformance_keeps_recovery_gates`
 
 ## 验收
 

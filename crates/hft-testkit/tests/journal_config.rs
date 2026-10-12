@@ -208,3 +208,93 @@ fn tk_114_round_notes_replay_across_storage_restarts() {
         assert!(closed > 0, "seed={seed:#x}: must actually close a round");
     }
 }
+
+#[test]
+fn tk_120_drain_restart_conformance_keeps_recovery_gates() {
+    use hft_event::{CapRecord, OrderAction, OrderDecision, SnapshotHdr};
+    use hft_risk::snapshot::{GateRow, SECTION_GATES, SECTION_RISK_STATE};
+    use hft_strategy_sdk::SnapshotReader;
+    use hft_testkit::dst::{RerunPolicy, run_record};
+    use hft_types::{CapSource, RejectBits};
+
+    let suite = hft_testkit::scenarios::suites()
+        .into_iter()
+        .find(|s| s.name == "core")
+        .unwrap();
+    for (seed, rejected_after_restart) in [(7, 0), (28, 2), (34, 0)] {
+        let mut c = suite.config(seed);
+        c.steps = 2_000;
+        c.rerun = RerunPolicy::Always;
+        let r = run_record::<E>(&c);
+        assert!(r.outcome.is_pass(), "seed={seed}: {}", crate::seq_sut::show(&r));
+        assert_eq!(r.steps_run, c.steps);
+        assert!(!r.trail.points.is_empty());
+        let mut drains = 0;
+        let mut recoveries = 0;
+        let mut snapshots = 0;
+        let mut rejected = 0;
+        let mut drained_caps = None;
+        for record in &r.journal {
+            if record.kind != EventKind::STATE_SNAPSHOT {
+                if recoveries > 0
+                    && let Some(decision) = record.try_read::<OrderDecision>()
+                    && decision.action == OrderAction::New
+                {
+                    rejected += 1;
+                    assert_eq!(decision.reject, RejectBits::CLOSE_ONLY.0);
+                    assert_eq!(decision.slot.0, 0, "a rejected order gets no slot");
+                }
+                continue;
+            }
+            snapshots += 1;
+            let (hdr, _) = hft_testkit::hash::sections(&record.body).unwrap();
+            let sections = SnapshotReader::new(&record.body[size_of::<SnapshotHdr>()..]);
+            let cap_section = sections.find_section(SECTION_RISK_STATE).unwrap().unwrap();
+            let mut reader = cap_section.reader();
+            let caps: Vec<CapRecord> = (0..cap_section.count)
+                .map(|_| reader.get_row().unwrap())
+                .collect();
+            assert!(reader.is_empty());
+            match hdr.purpose {
+                5 => {
+                    drains += 1;
+                    assert!(caps.iter().any(|cap| cap.source == CapSource::DRAINING));
+                    drained_caps = Some(
+                        caps.iter()
+                            .filter(|cap| !matches!(cap.source, CapSource::DRAINING | CapSource::RECOVERY))
+                            .copied()
+                            .collect::<Vec<_>>(),
+                    );
+                }
+                4 => {
+                    recoveries += 1;
+                    let saved = drained_caps.take().expect("recovery follows a real Drain");
+                    assert!(!saved.is_empty(), "seed={seed}: other caps must be exercised");
+                    assert!(caps.iter().all(|cap| cap.source != CapSource::DRAINING));
+                    let kept: Vec<_> = caps
+                        .iter()
+                        .filter(|cap| cap.source != CapSource::RECOVERY)
+                        .copied()
+                        .collect();
+                    assert_eq!(saved, kept, "seed={seed}: other caps survive unchanged");
+                    let gates = sections.find_section(SECTION_GATES).unwrap().unwrap();
+                    assert!(gates.count > 0);
+                    let mut reader = gates.reader();
+                    for _ in 0..gates.count {
+                        let gate: GateRow = reader.get_row().unwrap();
+                        assert_eq!(gate.released, 0, "seed={seed}: no automatic gate bypass");
+                        assert!(caps.iter().any(|cap| {
+                            cap.source == CapSource::RECOVERY && cap.scope.account == AccountId(gate.account)
+                        }));
+                    }
+                    assert!(reader.is_empty());
+                }
+                _ => {}
+            }
+        }
+        assert!(drains > 0, "seed={seed}: actual Drain required");
+        assert_eq!(drains, recoveries, "seed={seed}: every Drain restarts");
+        assert_eq!(r.snapshot_checks, snapshots);
+        assert_eq!(rejected, rejected_after_restart, "seed={seed}");
+    }
+}
