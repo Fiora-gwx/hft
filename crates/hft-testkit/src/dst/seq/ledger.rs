@@ -359,10 +359,14 @@ impl Evidence {
             if d.action == OrderAction::New && d.reject == 0 {
                 let key = (d.venue.0, d.account.0, self.epoch, d.slot.0, d.r#gen, d.inst.0);
                 if r.flags.contains(RecordFlags::SHADOW) {
-                    if self.shadow.len() == hft_ledger::SLOT_MAP_CAP && !self.shadow.contains(&key) {
-                        return Err("LED-267: Shadow evidence capacity exceeded".into());
+                    // A record-only Shadow decision usually has no allocated identity. Its
+                    // zero slot/gen cannot explain an arbitrary unresolved exchange fill.
+                    if d.slot.0 != 0 && d.r#gen != 0 {
+                        if self.shadow.len() == hft_ledger::SLOT_MAP_CAP && !self.shadow.contains(&key) {
+                            return Err("LED-267: Shadow evidence capacity exceeded".into());
+                        }
+                        self.shadow.insert(key);
                     }
-                    self.shadow.insert(key);
                 } else {
                     self.shadow.remove(&key);
                 }
@@ -585,6 +589,27 @@ mod tests {
                 pass
             );
         }
+        let mut unresolved = e;
+        unresolved.slot = SlotId(0);
+        unresolved.r#gen = 0;
+        let mut no_identity = d;
+        no_identity.slot = SlotId(0);
+        no_identity.r#gen = 0;
+        let mut evidence = Evidence {
+            epoch: e.epoch,
+            ..Evidence::default()
+        };
+        evidence
+            .record(
+                &rec(1, RecordFlags::SHADOW | RecordFlags::EVENT_END, &no_identity),
+                0,
+            )
+            .unwrap();
+        assert!(
+            evidence
+                .record(&rec(2, RecordFlags::EVENT_END, &unresolved), 1)
+                .is_err()
+        );
         let mut full = Evidence::default();
         for _ in 0..EVENT_EVIDENCE_CAP {
             full.record(&rec(1, RecordFlags(0), &note(&e)), 0).unwrap();

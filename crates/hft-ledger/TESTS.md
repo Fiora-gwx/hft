@@ -23,7 +23,7 @@ spec: README.md
 | 仓位与已实现(平均成本法) | LED-010、LED-021–LED-025、LED-030–LED-039、LED-240、LED-241、LED-243、LED-275–LED-278 |
 | 余额初始化、校验与基线 | LED-039–LED-046、LED-260–LED-262 |
 | 外部成交(`ExternalFill`) | LED-050–LED-081、LED-188、LED-240、LED-245、LED-283–LED-285 |
-| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282、LED-286–LED-287 |
+| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282、LED-286–LED-288 |
 | 资金费 | LED-090–LED-104、LED-136–LED-138、LED-240、LED-245、LED-260 |
 | 资金费时刻归一化 | LED-091、LED-110–LED-116 |
 | 资金费对账校正 | LED-270、LED-268、LED-114、LED-120–LED-139、LED-244、LED-261 |
@@ -2543,7 +2543,7 @@ spec: README.md
 - 种子:PR 200(提交派生)+ 回归集;每夜日期派生
 - 断言:每条 `StateSnapshot` 处 JournalLedger 的 `pos`、`inventory`、`venue_book` 与引擎 Ledger 相等;`unmapped_fills` 的每一笔都在同一事件内有 `Note{OmsForeignFill}` 或属于 `Shadow` 扣留的单
 - 边界:持久字段与快照比较,完整视图另与同一事件完成边界的真实引擎比较,包括仓位时间、全部现金归属与报告字段、保证金、权益汇总及未持久化的标志/更新时间;标准真实引擎 INV-6 在每个快照、定期和结束重建中执行。启动配置仅从前置且哈希匹配的 ConfigBlob 取得,恢复清空冷观察器后重算保留前缀;后续快照不覆盖已消费状态
-- 反例:现金总额/归属/报告时间/标志、库存、保证金、权益和 venue 标志任一差异均失败;缺失/跨事件/错身份/错金额/重复使用的注记以及错误 epoch 的 Shadow 均不得解释未映射成交;坏配置或已失败观察器不能继续通过
+- 反例:现金总额/归属/报告时间/标志、库存、保证金、权益和 venue 标志任一差异均失败;缺失/跨事件/错身份/错金额/重复使用的注记以及错误 epoch 或未分配槽/代数的 Shadow 均不得解释未映射成交;坏配置或已失败观察器不能继续通过;同事件证据满时明确失败
 - 实现:`crates/hft-testkit/src/dst/seq/ledger.rs::led_267_full_venue_fields_and_recorded_configuration_are_required`
 
 ### LED-268 资金费逐笔差额以 AssetMeta.dust 为界判 Matched
@@ -2878,6 +2878,16 @@ spec: README.md
 | LED-287.2 | base_engine_ns 非零 | BadValue |
 | LED-287.3 | base_tsc 非零 | BadValue |
 | LED-287.4 | clock_seq 非零 | BadValue |
+
+### LED-288 冷读者在恢复启动边界重建读视图
+
+- 规则:[冷消费者](README.md#冷消费者journalledger)
+- 级别:unit
+- 里程碑:M2
+- 前置:LF 严格永续现金,已有非零成交水位、余额报告和 Drift 标志,权益更新时间非零
+- 步骤:依次分别消费 Boot、Keyframe、OnDemand、Drain、Recovery 五种快照目的,其体携带与冷状态不同的仓位/余额;随后消费新 EngineClock、重复成交和后续累计增量
+- 期望:仅 Recovery 从自身已入账事实重建非持久视图,完整 VenueBook 等于同一持久状态的 Ledger::restore,重复边界幂等;其他目的保持视图。所有行持久节逐字节不变,订单现金水位不重置,重复成交不入账,后续增量只入一次;真实自动重启与完整/窗口回放继续由 LED-267 和既有 INV-6 验证
+- 实现:`crates/hft-ledger/tests/settlement_journal.rs::led_288_recovery_rebuilds_read_views_without_replacing_booked_facts`
 
 ## 验收
 

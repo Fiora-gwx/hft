@@ -5,7 +5,8 @@
 use hft_event::{
     BalanceReport, Bbo, CmdKind, CmdResult, ControlCmd, EngineClock, EventKind, ExternalFill, Funding,
     FundingSettle, MarginReportHdr, MarkPrice, Note, NoteSource, OrderAction, OrderDecision, OrderEvent,
-    OrderEventKind, PartHdr, ReconcileReport, RecordFlags, RecordView, SysTimer, Timer, TimerCode,
+    OrderEventKind, PartHdr, ReconcileReport, RecordFlags, RecordView, SnapshotHdr, SysTimer, Timer,
+    TimerCode,
 };
 use hft_refdata::{AccountKind, FundingSettleKind, RefData, SimBalance};
 use hft_strategy_sdk::{RestoreError, SnapshotReader};
@@ -454,6 +455,15 @@ impl JournalLedger {
         let kind = EventKind(rec.hdr.kind);
         let flags = RecordFlags(rec.hdr.flags);
         match kind {
+            EventKind::STATE_SNAPSHOT => {
+                // SnapshotPurpose::Recovery = 4 (hft-event's wire registry). Ordinary
+                // keyframes/rolls do not restart the ledger's process-local read views.
+                if let Ok(s) = rec.read::<SnapshotHdr>()
+                    && s.purpose == 4
+                {
+                    self.ledger.restore_read_views();
+                }
+            }
             EventKind::ENGINE_CLOCK => {
                 if let Ok(c) = rec.read::<EngineClock>() {
                     self.clock = Some(Clock {

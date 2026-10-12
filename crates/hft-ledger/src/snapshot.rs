@@ -145,6 +145,23 @@ fn pnl_nonzero(p: &PnlBreakdown) -> bool {
 }
 
 impl Ledger {
+    /// A cold reader crossing a recovery boot block must rebuild the same process-local
+    /// views as a fresh Ledger::restore. Use its own booked facts, never the new snapshot's
+    /// balances or positions; a divergent durable state must remain observable.
+    pub(crate) fn restore_read_views(&mut self) {
+        self.now = 0;
+        self.run_start = 0;
+        for book in &mut self.books {
+            book.vflags = if book.cash.iter().any(|c| c.bflags & bflags::UNINIT == 0) {
+                vflags::INIT
+            } else {
+                0
+            };
+        }
+        self.restore_marks(&[]);
+        self.recompute_next_stale();
+    }
+
     /// Writes sections 1, 13 and 22 (in this order).
     pub fn snapshot(&self, w: &mut SnapshotWriter) {
         // Section 1.

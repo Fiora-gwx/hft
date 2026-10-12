@@ -32,15 +32,19 @@ jobs:
           mkdir -p audit
           git rev-parse HEAD >audit/head.txt
           set +e
+          cargo test --locked --profile ci -p hft-ledger --test ledger led_288 -- --nocapture >audit/recovery.txt 2>&1
+          recovery_rc=$?
           cargo test --locked --profile ci -p hft-testkit --features seq --lib led_267 -- --nocapture >audit/ledger.txt 2>&1
           ledger_rc=$?
           cargo test --locked --profile ci -p hft-testkit --features seq --test testkit snapshot_checks::tk_115 -- --nocapture >audit/boundaries.txt 2>&1
           boundary_rc=$?
           cargo xtask dst --hashtrail check --first 50 >audit/hashtrail.txt 2>&1
           trail_rc=$?
-          printf 'ledger=%s boundary=%s hashtrail=%s\n' "$ledger_rc" "$boundary_rc" "$trail_rc" | tee audit/status.txt
-          cat audit/ledger.txt audit/boundaries.txt audit/hashtrail.txt
-          test "$ledger_rc$boundary_rc$trail_rc" = '000'
+          cargo test --locked --profile ci -p hft-testkit --features seq --test testkit -- --nocapture >audit/testkit.txt 2>&1
+          kit_rc=$?
+          printf 'recovery=%s ledger=%s boundary=%s hashtrail=%s testkit=%s\n' "$recovery_rc" "$ledger_rc" "$boundary_rc" "$trail_rc" "$kit_rc" | tee audit/status.txt
+          cat audit/recovery.txt audit/ledger.txt audit/boundaries.txt audit/hashtrail.txt audit/testkit.txt
+          test "$recovery_rc$ledger_rc$boundary_rc$trail_rc$kit_rc" = '00000'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
