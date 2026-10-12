@@ -1274,6 +1274,8 @@ pub mod testing {
 - `Ctx` 借用 sequencer 为每个实例预分配的 `CtxBufs`:每类意图一个定长数组 + 一条按调用顺序的操作序列(`[OpRef; 128]`,`OpRef = (kind, ix)`;Note 不进操作序列,另有自己的数组)。sequencer 在 `on_event` 前调 `CtxBufs::begin()`、之后按 `CtxBufs::ops()`(`(IntentHandle, Op)`,调用顺序)处理,保证"先撤后下""先 clear 后 target"等调用顺序的语义在回放中不变;`notes()` 与 `full_count()` 读 Note 与满计数。
 - `IntentHandle(u16)` = 操作序列下标;处理结果经 `CtxBufs::clear_outcomes()` + `set_outcome(h, o)` 写入同一 `CtxBufs` 的 `outcomes` 区,下一次 `on_event` 前保留、再下一次覆盖。
 - `cancel_timer` 每事件另有 8 个的容量(超出丢弃并计数,无返回值)。`TimerId(u64)` 由 `CtxBufs` 的计数器分配(`next_timer_id`/`set_next_timer_id`,随 sequencer 的实例状态进快照),跨重启稳定。
+- 引擎用 `CtxBufs::ctx_with_timer_quota(remaining, registered)` 借入本轮所有实例共享的剩余配额与本实例按 TimerId 升序的登记表。`timer_at` 在返回成功前预留一格;配额、事件缓冲或 ID 计数器耗尽时返回 `CtxFull`,不消耗 ID。取消已登记或本轮刚登记的 ID 立即释放一格,重复取消、未知 ID 和超出取消缓冲的请求不释放;取消未知 ID 不会预先取消以后分配的同值 ID。操作仍按调用顺序排空,独立 `ctx()` 测试桩只检查事件缓冲。
+- 配额登记不分配;取消使用有界事件缓冲和已登记 ID 的二分查找,后者为 O(log 已登记数)。每实例的 `full_count()` 在排空时计入引擎一次。引擎持久化的实现边界见 [sequencer 限制](../hft-sequencer/README.md#已知限制与后续工作)。
 - `MODEL_TICK = u32::MAX`:策略不以它登记定时器。
 - 容量常量在 `src/ctx.rs`;改容量是 SDK 改动(影响全部策略的预算),在本 README 表格同步。
 

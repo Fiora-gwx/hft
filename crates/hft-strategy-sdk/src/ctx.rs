@@ -115,6 +115,7 @@ pub struct CtxBufs {
     timers: [TimerReq; CAP_TIMER],
     n_timers: u8,
     cancel_timers: [TimerId; CAP_CANCEL_TIMER],
+    cancel_releases: [bool; CAP_CANCEL_TIMER],
     n_cancel_timers: u8,
     notes: [NoteReq; CAP_NOTE],
     n_notes: u8,
@@ -140,6 +141,7 @@ impl CtxBufs {
         self.n_cancels = 0;
         self.n_timers = 0;
         self.n_cancel_timers = 0;
+        self.cancel_releases = [false; CAP_CANCEL_TIMER];
         self.n_notes = 0;
         self.n_halts = 0;
         self.n_ops = 0;
@@ -147,7 +149,28 @@ impl CtxBufs {
     }
     /// A `Ctx` over these buffers for one `on_event` call.
     pub fn ctx(&mut self) -> Ctx<'_> {
-        Ctx { b: self }
+        Ctx {
+            b: self,
+            timer_quota: None,
+        }
+    }
+    /// Engine admission for a delivery round. `remaining` is shared by all instances in their
+    /// dispatch order; `registered` contains this instance's live timers sorted by `TimerId`.
+    /// Keep both consistent with the operations already applied before this round. Requests
+    /// and cancellations in these buffers reserve/release capacity immediately, without
+    /// changing the engine's later operation order or allocating memory.
+    pub fn ctx_with_timer_quota<'a>(
+        &'a mut self,
+        remaining: &'a mut u32,
+        registered: &'a [TimerReq],
+    ) -> Ctx<'a> {
+        Ctx {
+            b: self,
+            timer_quota: Some(TimerQuota {
+                remaining,
+                registered,
+            }),
+        }
     }
     /// Operations of the last call in call order, with their handles.
     pub fn ops(&self) -> impl Iterator<Item = (IntentHandle, Op<'_>)> + '_ {
@@ -281,6 +304,7 @@ fn empty_bufs() -> CtxBufs {
         timers: [tr; CAP_TIMER],
         n_timers: 0,
         cancel_timers: [TimerId(0); CAP_CANCEL_TIMER],
+        cancel_releases: [false; CAP_CANCEL_TIMER],
         n_cancel_timers: 0,
         notes: [nr; CAP_NOTE],
         n_notes: 0,
@@ -297,11 +321,19 @@ fn empty_bufs() -> CtxBufs {
     }
 }
 
-/// Fixed-capacity intent collector of one `on_event` call. Every method is O(1) and
-/// allocation-free; a full kind returns `CtxFull` and counts it.
+/// Fixed-capacity intent collector of one `on_event` call. Allocation-free; a full kind
+/// returns `CtxFull` and counts it. Engine timer cancellation checks a sorted live-id view
+/// in O(log registered timers); other methods and the standalone collector are O(1).
 #[derive(Debug)]
 pub struct Ctx<'a> {
     b: &'a mut CtxBufs,
+    timer_quota: Option<TimerQuota<'a>>,
+}
+
+#[derive(Debug)]
+struct TimerQuota<'a> {
+    remaining: &'a mut u32,
+    registered: &'a [TimerReq],
 }
 
 impl<'a> Ctx<'a> {
@@ -380,11 +412,17 @@ impl<'a> Ctx<'a> {
     /// restarts belongs to hft-sequencer.
     pub fn timer_at(&mut self, at: Tsc, tag: u32, group: GroupId) -> Result<TimerId, CtxFull> {
         let n = self.b.n_timers;
-        if usize::from(n) >= CAP_TIMER {
+        if usize::from(n) >= CAP_TIMER
+            || self.b.next_timer == u64::MAX
+            || self.timer_quota.as_ref().is_some_and(|q| *q.remaining == 0)
+        {
             return Err(self.full());
         }
+        if let Some(q) = self.timer_quota.as_mut() {
+            *q.remaining -= 1;
+        }
         let id = TimerId(self.b.next_timer);
-        self.b.next_timer = self.b.next_timer.wrapping_add(1);
+        self.b.next_timer += 1;
         if let Some(s) = self.b.timers.get_mut(usize::from(n)) {
             *s = TimerReq { id, at, tag, group };
         }
@@ -395,6 +433,34 @@ impl<'a> Ctx<'a> {
     /// Cancels a registered timer (excess beyond the per-event capacity is dropped and counted).
     pub fn cancel_timer(&mut self, id: TimerId) {
         let n = self.b.n_cancel_timers;
+        if usize::from(n) >= CAP_CANCEL_TIMER {
+            self.full();
+            return;
+        }
+        let already_released = self
+            .b
+            .cancel_timers
+            .iter()
+            .zip(&self.b.cancel_releases)
+            .take(usize::from(n))
+            .any(|(old, released)| *old == id && *released);
+        let pending = self
+            .b
+            .timers
+            .iter()
+            .take(usize::from(self.b.n_timers))
+            .any(|t| t.id == id);
+        let release = !already_released
+            && self
+                .timer_quota
+                .as_ref()
+                .is_some_and(|q| pending || q.registered.binary_search_by_key(&id, |t| t.id).is_ok());
+        if release && let Some(q) = self.timer_quota.as_mut() {
+            *q.remaining = q.remaining.saturating_add(1);
+        }
+        if let Some(s) = self.b.cancel_releases.get_mut(usize::from(n)) {
+            *s = release;
+        }
         match self.b.cancel_timers.get_mut(usize::from(n)) {
             Some(s) => {
                 *s = id;

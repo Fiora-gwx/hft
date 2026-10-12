@@ -582,7 +582,9 @@ Model 从检查点恢复、镜像尚未追到其 `last_seq` 时,落后量以该�
 
 ### 定时器
 
-策略定时器以 `(strategy, account, GroupId, tag)` 为键登记(不用 `gix`);投递时现查 `gix`。被 `SetParams` 移除的 group 的定时器在应用参数时撤销并写 `Note`。
+策略定时器的投递键为 `(strategy, account, GroupId, tag)`(不用 `gix`);投递时现查 `gix`。每次登记有独立的 SDK `TimerId`,同 tag 的登记各占一格;取消只移除指定 ID 对应截止的一条,到期只移除该截止的一条登记。被 `SetParams` 移除的 group 的定时器在应用参数时撤销并写 `Note`。
+
+**调用时预留**:每轮按既定实例与回调顺序共享一份剩余策略配额,行情、通知和直接投递都借入同一计数。成功的 `timer_at` 立即预留;有效取消按调用顺序释放一次。实例的多个回调共用本轮 Ctx 缓冲,不重复初始化配额。所有回调结束后仍按原顺序应用 Ctx;成功预留却无法入堆属于 `TimerOverflow`,不能静默丢弃。事件缓冲和配额的满计数都在每实例排空时汇总一次。登记表按 `max_timers` 在每实例创建时预分配,保持 TimerId 升序,保存本次运行的截止;跨重启时截止与堆使用同一公式平移。验收见 [SEQ-350](TESTS.md#seq-350-策略定时器超出共享配额时-timer_at-返回-ctxfull不进堆) 与 [SEQ-407](TESTS.md#seq-407-同-tag-的策略定时器按登记身份取消并按调用顺序释放配额)。
 
 **跨重启(停机时间不计)**:堆以本次运行的 TSC 为键(`Timer` 体的 `deadline_tsc` 同口径),随快照节 8 保存(同一快照的节 25 给出该运行的时钟基准)。[恢复结束](#冷启动恢复recoverdriver)时,堆内每个条目与 OMS、执行层的已登记 TSC 字段按**同一平移公式**处理——时长按两次运行的 `tsc_hz_milli` 换算,过去的时刻落到 `now` 之前(恢复后立即到期)、将来的截止保持剩余时长、0 保持 0;公式的唯一定义在 [hft-exec 快照与恢复](../hft-exec/README.md#快照与恢复),OMS 字段的平移归 [hft-oms](../hft-oms/README.md)。执行层的定时器另经 `exec.recovery_timers()` 按平移后的时刻重新登记(与堆中同键 (owner, timer_id, group) 的条目合并、保留较早者;早到的由执行层忽略)。周期性系统定时器(OmsSweep、DeadMan、ConnRotate、SessionKeepalive)每次启动都重新登记,替换快照堆中同键 (owner, timer_id, group) 的旧条目(每键至多一条);例外:快照堆中平移后的 `OmsSweep` 早于本次登记时刻 + 1 000 ms 时保留它、不替换(重启不推迟 sweep,连续重启下终态槽照常回收)。
 
@@ -858,6 +860,8 @@ advisor 的定时投递、重启注记去重、落后量、两种环容量的独
 
 ## 延伸阅读
 
+- [策略定时器的共享配额与取消身份](../../.agents/notes/implemented/bug-fix/2026-10-12-strategy-timer-admission.md)
+
 - [离线 Model 起点与配对决定](../../.agents/notes/implemented/architecture/2026-10-12-offline-model-origin.md)、[跨重启 Model 来源连续性](../../.agents/notes/implemented/bug-fix/2026-10-12-model-restart-continuity.md)
 
 - [round8 裁决](../../design/_work/round8-decisions.md)(R8-2 延迟优先、R8-3 解耦、R8-5 模拟账户、R8-8 模拟让位于实盘、预热注入、断腿自动处置、R8-10、R8-11);评审证据 [review-2026-10-02](../../design/_work/review-2026-10-02-主策略适配与执行正确性.md) §4,[review-2026-10-03](../../design/_work/review-2026-10-03-M0独立评审.md),[M0-b 评审](../../design/_work/review-2026-10-03-M0b独立评审.md),[M0-c 五路汇总](../../design/_work/review-2026-10-03-M0c五路汇总.md)(L-P0-2 md 让位、L-P1-2 BBO 成员聚合、M-P1-1/3/5、S-P1-7、V5 P2-1/2/6),[M0-d 五路汇总](../../design/_work/review-2026-10-03-M0d五路汇总.md)(A-P0-1 关键帧一次写完、L-3 BBO/advice 让位、M-P2、W3 P1-12/16/18/21/22),[M0-e 五路汇总](../../design/_work/review-2026-10-03-M0e五路汇总.md)(X1 P1-A…E、X3 P1-6/15、X5 L-P2-5/6)
@@ -870,6 +874,8 @@ advisor 的定时投递、重启注记去重、落后量、两种环容量的独
 - [恢复快照的引擎时间](../../.agents/notes/implemented/bug-fix/2026-10-11-recovery-snapshot-engine-time.md)
 
 ## 已知限制与后续工作
+
+- SDK 要求 TimerId 跨重启稳定;当前快照尚未保存实例的 ID 分配计数器与登记映射,恢复仍按堆遍历重新编号。取消/到期形成的空洞或不同截止改变排序时,策略保存的旧 ID 不能据此认定可用;该恢复契约须由持久化与专项回放另行补齐,配额验收不代表它已完成。
 
 - `Log::from_reader` 当前在显式上限内保留整份逻辑日志;长时段文件的分段流式验证仍待接入。独立恢复运行支持连续、封闭文件;RecoveryGap 输入仍不接受。[replayer 限制](../../apps/replayer/README.md#已知限制与后续工作)列出完整 CLI 验收缺口。
 

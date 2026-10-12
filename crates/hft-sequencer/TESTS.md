@@ -42,7 +42,7 @@ spec: README.md
 | journal 满 | SEQ-013、SEQ-083 |
 | 出环满 | SEQ-224、SEQ-225 |
 | inst → 策略的稠密索引 | SEQ-016、SEQ-226–SEQ-233 |
-| 定时器 | SEQ-079、SEQ-215、SEQ-234–SEQ-241、SEQ-261、SEQ-349–SEQ-351 |
+| 定时器 | SEQ-079、SEQ-215、SEQ-234–SEQ-241、SEQ-261、SEQ-349–SEQ-351、SEQ-407 |
 | 快照 | SEQ-017、SEQ-085、SEQ-088–SEQ-090、SEQ-109、SEQ-112、SEQ-120、SEQ-164、SEQ-190、SEQ-242–SEQ-248、SEQ-250–SEQ-255、SEQ-337、SEQ-356 |
 | 冷启动恢复(RecoverDriver) | SEQ-108、SEQ-205、SEQ-206、SEQ-237、SEQ-256–SEQ-267、SEQ-342、SEQ-366、SEQ-398 |
 | 恢复时决策不一致 | SEQ-268、SEQ-269、SEQ-362、SEQ-396 |
@@ -4910,11 +4910,9 @@ spec: README.md
 - 规则:[定时器](README.md#定时器)
 - 级别:unit
 - 里程碑:M2
-- 前置:B0,`max_timers = D + 2`(D 同 SEQ-349);稳态,堆内无策略定时器
-- 步骤:
-  1. s1 在同一事件内调 `Ctx::timer_at` 三次(tag 1、2、3)
-- 期望:
-  - 前两次 `Ok`,第三次 `Err(CtxFull)`,`CtxFull` 计数 +1;堆中策略条目 2 个;此后引擎登记方登记到上界仍成功,无 `Fatal`
+- 前置:B0,`max_timers = D + 2`(D 同 SEQ-349);稳态;每行独立真实引擎。同行情多回调行给 s1 配置两个合法 group 并订阅同一参考 inst
+- 步骤:分别通过单个 BBO 回调、s1/s2 竞争、s1 两个 group 回调、真实到期 Timer 通知和直接 Advice 请求超过两格的定时器;写关键帧后再发一次请求,执行完整日志与该快照窗口回放
+- 期望:各行前两次 `Ok`,其余在调用时 `Err(CtxFull)`;满计数等于实际拒绝次数,登记与堆中策略条目恰好两个。满配额快照恢复后仍在调用时拒绝,两个回放均无分歧;策略登记之外的物理堆容量可由引擎 owner 填满且无溢出
 - 实现:`crates/hft-sequencer/tests/timers.rs::seq_350_strategy_timer_quota`
 
 ### SEQ-351 引擎登记方使定时器堆满时 step 返回 Fatal(TimerOverflow)
@@ -5649,6 +5647,16 @@ spec: README.md
 | SEQ-406.3 | 节长为 1 或 u32 最大值 / 节保留位为 1 | SectionFraming,节 4 起点 |
 | SEQ-406.4 | 节 4 改成重复的节 1 | DuplicateSection,原节 4 起点 |
 | SEQ-406.5 | 末节截短一字节 | SectionFraming,节 21 起点 |
+
+### SEQ-407 同 tag 的策略定时器按登记身份取消并按调用顺序释放配额
+
+- 规则:[定时器](README.md#定时器)、[Ctx 应用](README.md#每条-input-的处理顺序process)
+- 级别:unit
+- 里程碑:M2
+- 前置:B0,策略配额两格;s1 对同 group、tag 登记 +10 ms 与 +20 ms 两个定时器,保存关键帧
+- 步骤:取消第二个 TimerId,重复取消该 ID 并取消未知 ID;登记一个 +30 ms 定时器后再尝试登记;推进至原来两个截止,生成末尾快照;分别从完整日志和关键帧窗口验证
+- 期望:只第一次取消释放一格,新登记成功且再登记返回 CtxFull;原第一个定时器仍按时投递,被取消的截止不投递;登记表与堆的条数一致,两个回放无分歧
+- 实现:`crates/hft-sequencer/tests/timers.rs::seq_407_cancel_one_timer_registration_and_reuse_quota`
 
 ## 验收
 

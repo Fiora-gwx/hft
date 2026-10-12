@@ -1,11 +1,13 @@
 //! The timer heap (TESTS.md "定时器": SEQ-234–SEQ-241, SEQ-349–SEQ-351).
 
+use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::rc::Rc;
 
 use hft_event::{ControlCmd, EventKind, Role};
 use hft_sequencer::timers::{TimerEntry, TimerHeap, shift_tsc};
 use hft_sequencer::{BootError, FatalReason, StepOutcome};
-use hft_strategy_sdk::{EngineClockAnchor, EventRef, Now};
+use hft_strategy_sdk::{CtxFull, EngineClockAnchor, EventRef, Now, TimerId};
 use hft_types::{GroupId, Tsc};
 use proptest::prelude::*;
 
@@ -74,7 +76,7 @@ fn seq_235_removed_group_timers_cancelled() {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(300))]
+    #![proptest_config(ProptestConfig::with_cases(ProptestConfig::default().cases.max(1_000)))]
     #[test]
     fn seq_236_heap_total_order(entries in proptest::collection::vec((0u64..4, 0u16..40, 0u32..10, 0u32..5), 0..256),
                                 cancel in proptest::collection::vec(any::<bool>(), 256)) {
@@ -186,6 +188,218 @@ fn seq_349_timer_capacity_at_boot() {
             }
         }
     }
+}
+
+#[test]
+fn seq_350_strategy_timer_quota() {
+    use hft_sequencer::driver::live::RingId;
+    use hft_strategy_sdk::{EvMask, Part};
+    use zerocopy::IntoBytes;
+
+    reset_script();
+    let d = demand(&b0().boot());
+    // One callback; two competing instances; two callbacks of one instance; queued Timer;
+    // direct Advice. Every row uses the actual engine and the same two-slot shared quota.
+    for row in 0..5 {
+        reset_script();
+        let mut b = b0();
+        b.caps.max_timers = d + 2;
+        if row == 2 {
+            b.params[0].groups.push(gspec_eth(GroupId(0x0100_0002)));
+            set_subs(
+                S1,
+                vec![(A1, 0, EvMask::BBO, Part::Fast), (A1, 1, EvMask::BBO, Part::Fast)],
+            );
+        }
+        let mut h = b.boot();
+        h.steady();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let out = seen.clone();
+        add_hook(move |hx, ev, ctx| {
+            let sid = hx.s.strategy;
+            if row == 3
+                && sid == S1
+                && let EventRef::Bbo { inst, b, .. } = ev
+                && *inst == A1
+                && b.ask_px == px("50010")
+            {
+                assert_eq!(
+                    ctx.timer_at(Tsc(hx.v.now().tsc.0 + 1_000_000), 77, G1),
+                    Ok(TimerId(1))
+                );
+            }
+            let trigger = match ev {
+                EventRef::Bbo { inst, b, .. } => row <= 2 && *inst == A1 && b.ask_px == px("50011"),
+                EventRef::Timer { tag, .. } => row == 3 && *tag == 77,
+                EventRef::Advice { local_kind, .. } => row == 4 && *local_kind == 7,
+                _ => false,
+            };
+            if trigger && (sid == S1 || row == 1 && sid == S2) {
+                let n = if row == 1 || row == 2 { 2 } else { 3 };
+                let group = if sid == S2 { G2 } else { G1 };
+                for tag in 1..=n {
+                    let r = ctx.timer_at(
+                        Tsc(hx.v.now().tsc.0 + 1_000_000_000_000 + u64::from(tag)),
+                        tag,
+                        group,
+                    );
+                    out.borrow_mut().push((sid, false, r));
+                }
+            }
+            if sid == S1
+                && let EventRef::Bbo { inst, b, gix } = ev
+                && *inst == A1
+                && *gix == 0
+                && b.ask_px == px("50013")
+            {
+                out.borrow_mut().push((
+                    sid,
+                    true,
+                    ctx.timer_at(Tsc(hx.v.now().tsc.0 + 1_000_000_000_000), 99, G1),
+                ));
+            }
+        });
+        let before = h.s.engine().ctx_full;
+        match row {
+            3 => {
+                h.quote(A1, "50000", "50010");
+                h.run();
+                assert_eq!(h.s.engine().strat_timers, 1);
+                h.at(h.now() + 1_000_000);
+                h.run();
+            }
+            4 => {
+                let mut hd = <hft_event::AdviceHdr as zerocopy::FromZeros>::new_zeroed();
+                hd.strategy = S1;
+                hd.account = AC1;
+                hd.group = G1;
+                hd.local_kind = 7;
+                hd.basis_seq = 1_000_000;
+                hd.basis_tsc = Tsc(h.now());
+                h.push_bytes(RingId::Advice, EventKind::ADVICE, hd.as_bytes().to_vec());
+                h.run();
+            }
+            _ => {
+                h.quote(A1, "50000", "50011");
+                h.run();
+            }
+        }
+        let expected_calls = if row == 1 || row == 2 { 4 } else { 3 };
+        assert_eq!(
+            seen.borrow().len(),
+            expected_calls,
+            "row {row}: delivery not exercised"
+        );
+        assert!(seen.borrow()[..2].iter().all(|r| r.2.is_ok()), "row {row}");
+        assert!(
+            seen.borrow()[2..].iter().all(|r| r.2 == Err(CtxFull)),
+            "row {row}"
+        );
+        assert_eq!(
+            h.s.engine().ctx_full - before,
+            (expected_calls - 2) as u64,
+            "row {row}"
+        );
+        assert_eq!(h.s.engine().strat_timers, 2, "row {row}");
+        let owner = hft_event::TIMER_OWNER_STRATEGY_BASE + u16::from(S1.0);
+        assert_eq!(h.s.engine().heap.count_if(|t| t.owner == owner), 2);
+        assert_eq!(h.s.instances().get(S1).unwrap().timers.len(), 2);
+        // A restored full heap must reject at the SDK call too, not only in apply_ctx.
+        let window = h.keyframe();
+        h.quote(A1, "50000", "50013");
+        h.run();
+        assert_eq!(seen.borrow().last().unwrap().2, Err(CtxFull));
+        assert_eq!(h.s.engine().ctx_full - before, (expected_calls - 1) as u64);
+        h.keyframe();
+        assert!(h.verify().is_empty(), "row {row}: full replay");
+        assert!(
+            h.verify_from(Some(window.seq)).is_empty(),
+            "row {row}: snapshot window"
+        );
+        if row == 0 {
+            // Strategy reservations leave every remaining physical slot for engine owners.
+            let heap = &mut h.s.engine_mut().heap;
+            let room = heap.capacity() - heap.len();
+            for k in 0..room {
+                assert!(
+                    heap.push(TimerEntry {
+                        deadline: u64::MAX,
+                        owner: 3,
+                        timer_id: 0x8000_0000 + k as u32,
+                        group: 0
+                    })
+                    .is_ok()
+                );
+            }
+            assert_eq!(heap.len(), heap.capacity());
+        }
+    }
+}
+
+#[test]
+fn seq_407_cancel_one_timer_registration_and_reuse_quota() {
+    reset_script();
+    let d = demand(&b0().boot());
+    let mut b = b0();
+    b.caps.max_timers = d + 2;
+    let mut h = b.boot();
+    h.steady();
+    let results = Rc::new(RefCell::new(Vec::new()));
+    let out = results.clone();
+    add_hook(move |hx, ev, ctx| {
+        if hx.s.strategy != S1 {
+            return;
+        }
+        if let EventRef::Bbo { inst, b, .. } = ev
+            && *inst == A1
+        {
+            let now = hx.v.now().tsc.0;
+            if b.ask_px == px("50021") {
+                out.borrow_mut().push(ctx.timer_at(Tsc(now + 10_000_000), 9, G1));
+                out.borrow_mut().push(ctx.timer_at(Tsc(now + 20_000_000), 9, G1));
+            } else if b.ask_px == px("50022") {
+                ctx.cancel_timer(TimerId(2));
+                ctx.cancel_timer(TimerId(2));
+                ctx.cancel_timer(TimerId(999));
+                out.borrow_mut().push(ctx.timer_at(Tsc(now + 30_000_000), 10, G1));
+                out.borrow_mut().push(ctx.timer_at(Tsc(now + 40_000_000), 11, G1));
+            }
+        }
+    });
+    let start = h.now();
+    h.quote(A1, "50000", "50021");
+    h.run();
+    assert_eq!(&*results.borrow(), &[Ok(TimerId(1)), Ok(TimerId(2))]);
+    let window = h.keyframe();
+    let before = h.s.engine().ctx_full;
+    h.quote(A1, "50000", "50022");
+    h.run();
+    assert_eq!(&results.borrow()[2..], &[Ok(TimerId(3)), Err(CtxFull)]);
+    assert_eq!(h.s.engine().ctx_full, before + 1);
+    let live = &h.s.instances().get(S1).unwrap().timers;
+    assert_eq!(
+        live.iter().map(|t| (t.id, t.tag, t.at.0)).collect::<Vec<_>>(),
+        vec![
+            (TimerId(1), 9, start + 10_000_000),
+            (TimerId(3), 10, start + 30_000_000)
+        ]
+    );
+    assert_eq!(h.s.engine().strat_timers, 2);
+    clear_log();
+    h.at(start + 10_000_000);
+    h.run();
+    assert_eq!(log().iter().filter(|g| g.s == S1 && g.kind == "Timer").count(), 1);
+    assert_eq!(h.s.engine().strat_timers, 1);
+    h.at(start + 20_000_000);
+    h.run();
+    assert_eq!(
+        log().iter().filter(|g| g.s == S1 && g.kind == "Timer").count(),
+        1,
+        "cancelled deadline fired"
+    );
+    h.keyframe();
+    assert!(h.verify().is_empty(), "full replay");
+    assert!(h.verify_from(Some(window.seq)).is_empty(), "snapshot window");
 }
 
 #[test]

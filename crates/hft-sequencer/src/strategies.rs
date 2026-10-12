@@ -42,8 +42,8 @@ pub struct InstanceSlot<S: StrategySet> {
     pub model_tick: Option<u32>,
     pub own: OwnEvMask,
     pub warmup: Part,
-    /// Registered strategy timers: id, tag, group.
-    pub timers: Vec<(TimerId, u32, GroupId)>,
+    /// Live strategy registrations in increasing TimerId order, including their exact deadline.
+    pub timers: Vec<TimerReq>,
     pub model_mem: u64,
     pub model_ckpt: u64,
     /// Calls (tests).
@@ -144,7 +144,7 @@ impl<S: StrategySet> Instances<S> {
                 model_tick: None,
                 own: OwnEvMask(0),
                 warmup: Part::Model,
-                timers: Vec::with_capacity(64),
+                timers: Vec::with_capacity(caps.max_timers as usize),
                 model_mem: 0,
                 model_ckpt: 0,
                 n_create: 0,
@@ -346,7 +346,7 @@ pub(crate) fn apply_params<D: crate::Driver<S>, S: StrategySet>(
     for c in removed.iter() {
         let owner = strategy_owner(strategy);
         n_timers += e.heap.remove_if(|t| t.owner == owner && t.group == c.group.0) as u64;
-        slot.timers.retain(|t| t.2 != c.group);
+        slot.timers.retain(|t| t.group != c.group);
     }
     e.strat_timers = e.strat_timers.saturating_sub(n_timers as u32);
     let groups = p.groups.clone();
@@ -580,6 +580,13 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
     }
     inst.touched.clear();
     let order: Vec<u16> = inst.dispatch_order.clone();
+    // Reserve in the same instance/callback order used below. One shared balance spans all
+    // market, queued and direct deliveries; a later instance cannot reuse an earlier promise.
+    let mut timer_remaining = e
+        .caps
+        .max_timers
+        .saturating_sub(e.engine_timer_demand)
+        .saturating_sub(e.strat_timers);
     let mut ro_ix: Option<usize> = None;
     for &ix16 in order.iter() {
         let ix = usize::from(ix16);
@@ -604,7 +611,12 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
                         .rec("deliver.market", u64::from(slot.id.0), u64::from(*gix));
                     let v = full_views(e);
                     let ev = market_ev(&m, *gix, &e.market);
-                    S::on_event(st, &ev, &v, &mut slot.bufs.ctx());
+                    S::on_event(
+                        st,
+                        &ev,
+                        &v,
+                        &mut slot.bufs.ctx_with_timer_quota(&mut timer_remaining, &slot.timers),
+                    );
                 }
             }
         }
@@ -627,7 +639,12 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
                     .and_then(|t| t.gix_of(g))
                     .unwrap_or(hft_strategy_sdk::GIX_NONE)
             });
-            S::on_event(st, &ev, &v, &mut slot.bufs.ctx());
+            S::on_event(
+                st,
+                &ev,
+                &v,
+                &mut slot.bufs.ctx_with_timer_quota(&mut timer_remaining, &slot.timers),
+            );
         }
         if let Some((dix, d, ro)) = direct
             && dix == ix
@@ -677,7 +694,12 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
                     payload,
                 },
             };
-            S::on_event(st, &ev, &v, &mut slot.bufs.ctx());
+            S::on_event(
+                st,
+                &ev,
+                &v,
+                &mut slot.bufs.ctx_with_timer_quota(&mut timer_remaining, &slot.timers),
+            );
             if ro {
                 ro_ix = Some(ix);
             }
@@ -767,6 +789,7 @@ pub(crate) fn apply_ctx<D: crate::Driver<S>, S: StrategySet>(
     };
     let strategy = slot.id;
     let account = slot.account;
+    e.ctx_full = e.ctx_full.saturating_add(u64::from(slot.bufs.full_count()));
     inst.ops.clear();
     for (h, op) in slot.bufs.ops() {
         let o = match op {
@@ -810,8 +833,9 @@ pub(crate) fn apply_ctx<D: crate::Driver<S>, S: StrategySet>(
             OpOwned::Timer(t) => {
                 let quota = (e.caps.max_timers.saturating_sub(e.engine_timer_demand)) as usize;
                 if e.strat_timers as usize >= quota {
-                    e.ctx_full += 1;
-                    continue;
+                    // A successful SDK reservation must be honored. Reaching this branch
+                    // means the engine's admission state disagrees with its heap.
+                    return Err(crate::types::FatalReason::TimerOverflow);
                 }
                 let owner = strategy_owner(strategy);
                 e.heap
@@ -825,16 +849,24 @@ pub(crate) fn apply_ctx<D: crate::Driver<S>, S: StrategySet>(
                 e.strat_timers += 1;
                 e.trace.rec("heap.push", u64::from(owner), u64::from(t.tag));
                 if let Some(s) = inst.slots.get_mut(ix) {
-                    s.timers.push((t.id, t.tag, t.group));
+                    s.timers.push(t);
                 }
             }
             OpOwned::CancelTimer(id) => {
                 if let Some(s) = inst.slots.get_mut(ix)
-                    && let Some(p) = s.timers.iter().position(|x| x.0 == id)
+                    && let Ok(p) = s.timers.binary_search_by_key(&id, |t| t.id)
                 {
-                    let (_, tag, g) = s.timers.remove(p);
-                    let n = e.heap.remove_key(strategy_owner(strategy), tag, g.0);
-                    e.strat_timers = e.strat_timers.saturating_sub(n as u32);
+                    let t = s.timers.remove(p);
+                    let removed = e.heap.remove_exact(&crate::timers::TimerEntry {
+                        deadline: t.at.0,
+                        owner: strategy_owner(strategy),
+                        timer_id: t.tag,
+                        group: t.group.0,
+                    });
+                    if !removed {
+                        return Err(crate::types::FatalReason::TimerOverflow);
+                    }
+                    e.strat_timers = e.strat_timers.saturating_sub(1);
                 }
             }
             OpOwned::Halt { group, reason } => {

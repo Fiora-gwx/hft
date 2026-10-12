@@ -116,3 +116,112 @@ fn sdk_146_capacity_constants() {
     );
     assert_eq!(CAP_CANCEL_TIMER, 8);
 }
+
+#[test]
+fn sdk_212_timer_admission_preserves_call_order() {
+    use hft_strategy_sdk::ctx::{Op, TimerReq};
+
+    let mut a = CtxBufs::new();
+    let mut b = CtxBufs::new();
+    let mut remaining = 2;
+    assert_eq!(
+        a.ctx_with_timer_quota(&mut remaining, &[])
+            .timer_at(Tsc(10), 1, G1),
+        Ok(TimerId(1))
+    );
+    assert_eq!(
+        b.ctx_with_timer_quota(&mut remaining, &[])
+            .timer_at(Tsc(20), 2, G1),
+        Ok(TimerId(1))
+    );
+    // Reborrowing one instance's Ctx for another callback cannot reset the shared balance.
+    assert_eq!(
+        a.ctx_with_timer_quota(&mut remaining, &[])
+            .timer_at(Tsc(30), 3, G1),
+        Err(CtxFull)
+    );
+    assert_eq!((remaining, a.next_timer_id(), a.full_count()), (0, 2, 1));
+    assert_eq!(a.ops().filter(|(_, op)| matches!(op, Op::Timer(_))).count(), 1);
+
+    let live = [TimerReq {
+        id: TimerId(11),
+        at: Tsc(100),
+        tag: 7,
+        group: G1,
+    }];
+    let mut c = CtxBufs::new();
+    c.set_next_timer_id(12);
+    let mut remaining = 0;
+    {
+        let mut ctx = c.ctx_with_timer_quota(&mut remaining, &live);
+        ctx.cancel_timer(TimerId(999));
+        assert_eq!(ctx.timer_at(Tsc(30), 3, G1), Err(CtxFull));
+        ctx.cancel_timer(TimerId(11));
+        assert_eq!(ctx.timer_at(Tsc(30), 3, G1), Ok(TimerId(12)));
+        ctx.cancel_timer(TimerId(11));
+        assert_eq!(ctx.timer_at(Tsc(40), 4, G1), Err(CtxFull));
+        ctx.cancel_timer(TimerId(12));
+        assert_eq!(ctx.timer_at(Tsc(40), 4, G1), Ok(TimerId(13)));
+    }
+    assert_eq!((remaining, c.full_count()), (0, 2));
+
+    // Cancelling an as-yet unallocated id is a no-op, not a credit and not a future cancel.
+    let mut c = CtxBufs::new();
+    let mut remaining = 1;
+    {
+        let mut ctx = c.ctx_with_timer_quota(&mut remaining, &[]);
+        ctx.cancel_timer(TimerId(1));
+        let id = ctx.timer_at(Tsc(10), 1, G1).unwrap();
+        ctx.cancel_timer(id);
+        assert_eq!(ctx.timer_at(Tsc(20), 2, G1), Ok(TimerId(2)));
+        ctx.cancel_timer(id);
+        assert_eq!(ctx.timer_at(Tsc(30), 3, G1), Err(CtxFull));
+    }
+    assert_eq!((remaining, c.next_timer_id()), (0, 3));
+
+    // Per-event buffers remain bounded even when every accepted timer is cancelled immediately.
+    let mut c = CtxBufs::new();
+    let mut remaining = 1;
+    for tag in 0..CAP_TIMER as u32 {
+        let mut ctx = c.ctx_with_timer_quota(&mut remaining, &[]);
+        let id = ctx.timer_at(Tsc(10), tag, G1).unwrap();
+        ctx.cancel_timer(id);
+    }
+    assert_eq!(remaining, 1);
+    assert_eq!(
+        c.ctx_with_timer_quota(&mut remaining, &[])
+            .timer_at(Tsc(20), 9, G1),
+        Err(CtxFull)
+    );
+    assert_eq!((remaining, c.next_timer_id(), c.full_count()), (1, 9, 1));
+    c.begin();
+    assert_eq!(
+        c.ctx_with_timer_quota(&mut remaining, &[])
+            .timer_at(Tsc(20), 9, G1),
+        Ok(TimerId(9))
+    );
+
+    let mut c = CtxBufs::new();
+    let mut remaining = 0;
+    for _ in 0..CAP_CANCEL_TIMER {
+        c.ctx_with_timer_quota(&mut remaining, &live)
+            .cancel_timer(TimerId(999));
+    }
+    c.ctx_with_timer_quota(&mut remaining, &live)
+        .cancel_timer(TimerId(11));
+    assert_eq!(
+        (remaining, c.full_count()),
+        (0, 1),
+        "dropped cancel released quota"
+    );
+
+    let mut c = CtxBufs::new();
+    c.set_next_timer_id(u64::MAX);
+    let mut remaining = 1;
+    assert_eq!(
+        c.ctx_with_timer_quota(&mut remaining, &[])
+            .timer_at(Tsc(10), 1, G1),
+        Err(CtxFull)
+    );
+    assert_eq!((remaining, c.next_timer_id(), c.full_count()), (1, u64::MAX, 1));
+}

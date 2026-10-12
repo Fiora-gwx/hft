@@ -23,7 +23,7 @@ spec: README.md
 | Views 与 ModelViews | SDK-056、SDK-123–SDK-140 |
 | 视图类型 | SDK-062、SDK-122、SDK-129–SDK-142、SDK-163、SDK-209 |
 | EventRef | SDK-031、SDK-040–SDK-058、SDK-143、SDK-144、SDK-157 |
-| Ctx 与订单意图 | SDK-116、SDK-141、SDK-142、SDK-145–SDK-157 |
+| Ctx 与订单意图 | SDK-116、SDK-141、SDK-142、SDK-145–SDK-157、SDK-212 |
 | 目标意图 | SDK-141、SDK-158–SDK-163 |
 | Advice 载荷 | SDK-052、SDK-067、SDK-086、SDK-171–SDK-176、SDK-211 |
 | 预热注入 | SDK-055、SDK-180–SDK-184、SDK-210 |
@@ -34,7 +34,7 @@ spec: README.md
 | chain 特性(optional) | 不适用:里程碑外(`chain` 特性随链上策略接入时启用) |
 | 测试桩(testing 特性) | SDK-063、SDK-078、SDK-115、SDK-127、SDK-129、SDK-150、SDK-192–SDK-195 |
 | 实现说明 | 不适用:见子节 |
-| Ctx 的内存与排空 | SDK-145、SDK-146、SDK-148、SDK-149 |
+| Ctx 的内存与排空 | SDK-145、SDK-146、SDK-148、SDK-149、SDK-212 |
 | 快照节 | SDK-014、SDK-020、SDK-024、SDK-025、SDK-070、SDK-071、SDK-191 |
 | define_params! 的展开 | SDK-089、SDK-104 |
 | 参数编解码器的使用方 | SDK-005、SDK-108、SDK-121 |
@@ -3134,6 +3134,16 @@ spec: README.md
 | SDK-211.2 | 测试变体 `encode` 写 17 B | `Err(PayloadFull)` |
 | SDK-211.3 | `decode(&bytes[..15])` | `Err(PayloadError)` |
 | SDK-211.4 | `decode(&[])` | `Err(PayloadError)` |
+
+### SDK-212 共享定时器配额按调用顺序预留与释放
+
+- 规则:[Ctx 的内存与排空](README.md#ctx-的内存与排空)
+- 级别:unit
+- 里程碑:M2
+- 前置:两个独立 CtxBufs 共享两格配额;只读登记表按 TimerId 升序
+- 步骤:交替借用两个实例与同一实例的多个回调;取消已有 ID、本轮 ID、未知 ID 及重复 ID;先取消尚未分配的 ID 再登记并取消;填满登记/取消缓冲;将计数器设为 u64::MAX
+- 期望:每次返回值与剩余配额一致,失败不消耗 ID 或预留量;有效取消只释放一次,未知/丢弃的取消不释放且不约束未来登记;begin 清理本轮操作但保留 ID 计数;耗尽不回绕;操作数组保留接受顺序
+- 实现:`crates/hft-strategy-sdk/tests/ctx.rs::sdk_212_timer_admission_preserves_call_order`
 
 ## 验收
 

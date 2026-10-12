@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-12 | 策略定时器在 SDK 调用时按投递顺序预留共享配额,有效取消只释放一次;行情、通知与直接投递共用余额,失败不分配 ID。按登记截止精确取消同 tag 的一条,登记表预分配并随堆平移;满计数统一汇总,成功预留不能静默丢弃。快照格式不变,TimerId 持久化缺口单列 | SEQ-350、SEQ-407、SDK-212;共享配额原在回调结束后拒绝,取消原按 tag 删除全部;SEQ-236 恢复至少 1000 属性例并允许夜间提高 | crates/hft-strategy-sdk、crates/hft-sequencer、docs/architecture.md | 否 |
 | 2026-10-12 | DST 关闭检查器时仍刷新对账 actor 使用的持仓观察,避免输入随断言开关改变;完整 journal 比较保留且失败只输出首条差异 | TK-121 在 CI 38197392642 的完整 journal 对照失败;空观察使对账误报持仓差 | crates/hft-testkit | 否 |
 | 2026-10-12 | 对冲失败观察优先匹配 Input 前的链接身份,恢复后的链接在同事件内完成并复用时不丢失旧创建事件;原始诊断中已知的身份字段保持严格匹配 | TK-122;事件后历史已换成新一代,不能补回旧调用缺省的恢复诊断身份 | crates/hft-testkit | 否 |
 | 2026-10-12 | testkit 记录未产生 OrderDecision 的对冲 place 失败及调用前槽数、完整链接身份;INV-14 逐 Input 核对失败证据,限制每次失败的计数增量并隔离链接复用。生产下单、journal 与快照格式不变 | CI 38194738015 core 种子 0x1af231bb1d6440e2 第 608 步;TK-121 原种子 10000 步、17 行观察反例、四种门控与开关检查器逐字节对照;SEQ-373 容量边界 | crates/hft-sequencer、crates/hft-testkit、fixtures/dst-seeds/core.txt、docs/tests/invariants.md | 否 |

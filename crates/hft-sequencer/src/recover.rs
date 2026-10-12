@@ -341,7 +341,12 @@ pub(crate) fn restore_at<S: StrategySet>(
             if let Some(slot) = inst.get_mut(sid) {
                 let id = hft_strategy_sdk::TimerId(slot.bufs.next_timer_id());
                 slot.bufs.set_next_timer_id(id.0 + 1);
-                slot.timers.push((id, t.timer_id, t.group));
+                slot.timers.push(hft_strategy_sdk::ctx::TimerReq {
+                    id,
+                    at: Tsc(t.deadline_tsc),
+                    tag: t.timer_id,
+                    group: t.group,
+                });
             }
         }
     }
@@ -894,6 +899,11 @@ fn recovery_end<D: Driver<S>, S: StrategySet>(
     // Heap shift (same formula as the components).
     e.heap
         .map_deadlines(|d| crate::timers::shift_tsc(d, now, stop, hz_prev, hz_cur));
+    for slot in &mut inst.slots {
+        for t in &mut slot.timers {
+            t.at = Tsc(crate::timers::shift_tsc(t.at.0, now, stop, hz_prev, hz_cur));
+        }
+    }
     // Executor recovery timers merge with same-key entries (earlier kept).
     let reqs: Vec<hft_exec::ExecTimerReq> = e.exec.recovery_timers().collect();
     for t in reqs {

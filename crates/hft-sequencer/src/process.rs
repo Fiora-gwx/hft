@@ -1356,8 +1356,12 @@ fn timer<'a, D: Driver<S>, S: StrategySet>(
                 e.strat_timers = e.strat_timers.saturating_sub(1);
             }
             if let Some(ix) = inst.ix(sid) {
-                if let Some(s) = inst.slots.get_mut(ix)
-                    && let Some(k) = s.timers.iter().position(|x| x.1 == id && x.2 == group)
+                if in_heap
+                    && let Some(s) = inst.slots.get_mut(ix)
+                    && let Some(k) = s
+                        .timers
+                        .iter()
+                        .position(|x| x.tag == id && x.group == group && x.at.0 == t.deadline_tsc)
                 {
                     s.timers.remove(k);
                 }
