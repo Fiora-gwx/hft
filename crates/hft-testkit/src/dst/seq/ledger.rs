@@ -273,7 +273,7 @@ impl State {
             for e in self.receipts.drain(..) {
                 // Only the independently applied cold ledger can prove that an Input booked
                 // this key. A rejected batch is journaled too, and must never hide a gap.
-                let Some(key) = ReceiptKey::new(&e).ok() else {
+                let Ok(key) = ReceiptKey::new(&e) else {
                     continue;
                 };
                 if self

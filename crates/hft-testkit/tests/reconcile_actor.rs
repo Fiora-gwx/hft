@@ -9,7 +9,7 @@ use hft_testkit::dst::venue_behavior::{
 use hft_testkit::dst::world::{ACCT_A, ACCT_B, P1, VP, WorldSpec};
 use hft_testkit::dst::{SeqSut, SimMatcher};
 use hft_testkit::strategies::TestStrategies;
-use hft_types::{AccountId, InstId, Qty, Side, Tsc};
+use hft_types::{AccountId, InstId, Qty, Side};
 use zerocopy::IntoBytes;
 
 const MS: u64 = 1_000_000;
@@ -38,7 +38,9 @@ impl Session {
             .map(|v| {
                 let mut cfg = MockVenueCfg::w1(v.id);
                 cfg.bbo_ping_ms = 0;
-                MockVenue::new(cfg, &world, 1)
+                let mut venue = MockVenue::new(cfg, &world, 1);
+                venue.tick(0);
+                venue
             })
             .collect();
         let mut s = Self {
@@ -116,7 +118,7 @@ impl Session {
             inst: InstId(0),
             reason: 0,
             _pad2: [0; 3],
-            rx_tsc: Tsc(0),
+            rx_tsc: 0,
         };
         self.process(self.now / MS + 1, InputRec::of(&c, Source::Venue(VP)));
     }
@@ -329,6 +331,38 @@ fn tk_135_committed_round_requires_stable_complete_observations() {
             case == 6,
             "case {case}: account-local conditions"
         );
+        if case == 3 {
+            s.deliver(rows);
+            for round in 2..=3 {
+                let rows = s.round().unwrap();
+                assert!(batch(&rows).is_none(), "forced reporting cannot authorize cash");
+                let positions = rows
+                    .iter()
+                    .filter_map(|r| r.read::<ReconcileReport>())
+                    .filter(|r| r.item == 1 && r.account == ACCT_A)
+                    .count();
+                assert_eq!(positions, usize::from(round == 3));
+                s.deliver(rows);
+            }
+        }
+    }
+    for exchange in [200_001, -1] {
+        let mut s = Session::new(Side::Buy, 100_000);
+        let mut truth = s.truth();
+        truth
+            .iter_mut()
+            .find(|t| t.account == ACCT_A && t.venue == VP)
+            .unwrap()
+            .positions = vec![(P1, exchange)];
+        let history = s.history();
+        for _ in 0..2 {
+            let rows = s.actor.round_committed(&s.e, &truth, &history, LAG).unwrap();
+            assert!(
+                batch(&rows).is_none(),
+                "growth and sign reversal never authorize AUTO_EXTERNAL"
+            );
+            s.deliver(rows);
+        }
     }
     let mut s = Session::new(Side::Buy, 100_000);
     let first = s.round().unwrap();

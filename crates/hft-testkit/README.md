@@ -379,7 +379,7 @@ impl<S: StrategySet> SeqRig<S> {
    - `FillBeforeAck` 只在实际遇到下一条 Ack 时消费并延迟该 Ack;空轮询和其他回报不消费此故障。
    - `SimActor`:与 hft-core 的 sim-gw 相同的 `SimExchange` 用法(不经故障注入),覆盖 Sim 账户路径;`CrashFault` 之后按 hft-sim 规定的恢复步骤由快照与 journal 重建模拟交易所状态(余额、仓位、挂单;规则归 [hft-sim](../hft-sim/README.md)),不保留崩溃前的内存对象。
    - `AdvisorActor`:按 sequencer 的 advisor 规则驱动策略的 `Model`,产出带依据(`basis_seq` 等,字段归 hft-event)的 `Advice` 送回 `SeqActor`;可注入"落后"(按种子延迟交付并成批追赶;或按 `AdvisorLagFault{from_ens, to_ens, lag_ms}` 在引擎时间 [from_ens, to_ens) 内使 Model 处理 journal 落后 `lag_ms`,其间产出的 Advice 同样推迟交付)。
-   - `CtlActor`:按 `gen::control_cmds` 注入命令(带主体与角色,含 Viewer);`ReconActor`:按真值生成 `ReconcileReport`(可注入差异,含按 `funding_flows` 的逐笔资金费条目;仓位条目的 `AUTO_EXTERNAL` 与 `Summary.sflags` 按 [reconciler](../../apps/reconciler/README.md#reconcilereport) 的置位条件填写,含两轮无 `USERSTREAM_DOWN` 与用户流稳定一个周期);`HkActor`:注入 `ClockStatus`、persist/磁盘状态;`MarketActor`:生成或回放行情。
+   - `CtlActor`:按 `gen::control_cmds` 注入命令(带主体与角色,含 Viewer);`ReconActor`:真实引擎使用下文的已提交对账轮次,置位条件归 [reconciler](../../apps/reconciler/README.md#reconcilereport);`round` 仅供 ToyEngine 框架自测。`HkActor`:注入 `ClockStatus`、persist/磁盘状态;`MarketActor`:生成或回放行情。
    - 可选扩展 `MockChain`(`chain` feature):`hft-sim` 链上模型 + 证据源;被测对象是 `hft-chain-evm` 时驱动真实 `ChainSeq`。
 3. **崩溃与毒丸**:`CrashFault{at_step, repeat, point}` 在某输入处理中途丢弃 sequencer 实例,只留 journal(内存段),再以 `RecoverDriver` 重建;`repeat = 2` 时同一输入再次崩溃,检验隔离路径。`point` 选崩溃位置:`SeqInput`(缺省,上述)、`SimMatchedUndelivered`(sim-gw 已撮合、回报仍在待交付堆)、`SimRepQueued`(回报已入 `rep-sim` 环、sequencer 未取走)、`BeforeFirstReport`(某 Sim 账户的第一条余额报告被处理之前);后三种同时丢弃 `SimActor` 的内存对象(整进程崩溃),按 hft-sim 的重启恢复步骤重建。`CleanRestartFault{at_step}` 做一次干净 Drain 重启。
 4. **故障计划**:运行开始时由种子一次性生成完整故障时间表(`Vec<(virtual_ns, Fault)>`),`shrink` 可以逐项删除并重跑。
