@@ -160,6 +160,10 @@ fn tk_128_no_client_id_uses_the_accounts_ack_identity_and_keeps_cash() {
     ] {
         let mut world = WorldSpec::w1();
         world.venues.iter_mut().find(|v| v.id == VP).unwrap().perp_cash = true;
+        let tick = world.insts.iter().find(|i| i.id == P1).unwrap().tick;
+        let bid = 600_010_000;
+        let ask = bid + tick;
+        assert_eq!(bid % tick, 0);
         let mut cfg = MockVenueCfg::w1(VP);
         cfg.latency_ns = (1_000_000, 1_000_000);
         cfg.unmatched_hold_ms = hold_ms;
@@ -170,20 +174,17 @@ fn tk_128_no_client_id_uses_the_accounts_ack_identity_and_keeps_cash() {
             for a in [ACCT_A, ACCT_B] {
                 v.m.external(a, P1, Side::Sell, 100_000, "manual", false, 10_000_000);
             }
-            v.on_market(
-                P1,
-                (600_010_000, 10_000_000),
-                (600_010_100, 10_000_000),
-                20_000_000,
-            );
         }
         let mut exchange_ids = Vec::new();
         for (ix, account) in [ACCT_A, ACCT_B].into_iter().enumerate() {
-            let mut cmd = place(10 + ix as u32, 100_000, 600_010_100);
+            let mut cmd = place(10 + ix as u32, 100_000, ask);
             cmd.account = account;
             cmd.inst = P1;
             cmd.arg = 7 + ix as u32;
             let now = 40_000_000 + ix as u64 * 50_000_000;
+            for v in [&mut plain, &mut faulted] {
+                v.on_market(P1, (bid, 10_000_000), (ask, 10_000_000), now);
+            }
             faulted.apply_fault(
                 &Fault::NoClientIdFill {
                     venue: VP,

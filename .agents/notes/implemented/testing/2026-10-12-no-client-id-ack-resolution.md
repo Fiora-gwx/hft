@@ -16,6 +16,8 @@ Status: implemented
 
 ## Deferred
 
-`b5e3779` 的[独立托管验证](https://github.com/Fiora-gwx/hft/actions/runs/38232740224)通过全部 222 个严格现金种子和 TK-127 的真实冷读窗口,但固定一致性集停在种子 43 的晚 Ack 边界,单元夹具还因未推进到回报交付时刻而缺 Ack。制品 ZIP SHA-256 为 `65e5ed8df1605ee0bab4246def2540e6b1f22b04b816165c556b4c5a642b296c`。据此补充限内等待、零等待反例,并把 43 加入完整回归集;旧失败不按通过处理。
+`b5e3779` 的[独立托管验证](https://github.com/Fiora-gwx/hft/actions/runs/38232740224)通过全部 222 个严格现金种子和 TK-127 的真实冷读窗口,但固定一致性集停在种子 43 的晚 Ack 边界。制品 ZIP SHA-256 为 `65e5ed8df1605ee0bab4246def2540e6b1f22b04b816165c556b4c5a642b296c`。据此补充限内等待、零等待反例,并把 43 加入完整回归集;旧失败不按通过处理。
+
+`5e58d71` 的[晚 Ack 对照](https://github.com/Fiora-gwx/hft/actions/runs/38234131718)通过 223 个严格现金种子及全部 50 个固定能力对照。TK-128 仍失败,日志确认平仓价格 600010100 不符合 P1 的 tick 1000,实际收到 Reject 而非 Ack。夹具改为从世界读取 tick 并对齐价格,每次下单前刷新报价,继续保留非零现金、跨账户身份和延迟边界断言。制品 ZIP SHA-256 为 `f4403c0edcdd763768d78bde1be88647ebc99c837472ad28238e91427b4d4718`;该轮专项失败不能计为通过。
 
 此处的映射是固定 DST 运行内的简化网关观察,只模拟已排队 Ack 的等待,未实现尚未排队的 Ack、超时转外来成交、终态映射过期或晚到后重新归属。`within_hold` 的两个值不计为这些分支通过。严格现金外来重叠、对账补量及完整恢复装配仍按[结算决定](../architecture/2026-10-12-perp-cash-settlement.md)保留明确错误。
