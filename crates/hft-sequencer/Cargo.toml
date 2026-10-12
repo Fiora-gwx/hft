@@ -41,6 +41,7 @@ sha2 = "0.10"
 
 [dev-dependencies]
 hft-sequencer = { path = ".", features = ["testing"] }
+hft-exec = { workspace = true, features = ["testing"] }
 hft-strategy-sdk = { workspace = true, features = ["testing", "schema-json"] }
 hft-testkit.workspace = true
 proptest.workspace = true

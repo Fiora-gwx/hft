@@ -3377,14 +3377,16 @@ spec: README.md
 - 规则:[定时器](README.md#定时器)
 - 级别:table
 - 里程碑:M2
-- 前置:恢复结束;堆中 `(Exec, Wake | 2 << 8, g2)` 平移后 deadline = 5 000
+- 前置:真实引擎准备关键帧,堆中 `(Exec, Wake | 2 << 8, g2)` 在恢复 TSC = 1 000 后 deadline = 5 000;执行层 cell 独立保存下表截止,AutoFix 行的状态为 Broken/Primed
+- 步骤:从该关键帧真实重启,断言恢复堆的完整键和数量;处理 EngineClock 并保存后续关键帧,由 journal 配置独立执行该窗口回放
+- 期望:同键仅一条且取较早截止,异键两条均保留;窗口与实际恢复的 Output、快照和恢复状态一致
 - 实现:`crates/hft-sequencer/tests/timers.rs::seq_238_recovery_timers_merge`
 
 | 行 | `exec.recovery_timers()` 给出的同键条目 | 期望堆中该键 |
 |---|---|---|
 | SEQ-238.1 | deadline 4 000 | 一条,4 000 |
 | SEQ-238.2 | deadline 6 000 | 一条,5 000 |
-| SEQ-238.3 | 键不同(`AutoFix`) | 两条各自保留 |
+| SEQ-238.3 | 键不同(`AutoFix`),deadline 4 000 | 两条各自保留,AutoFix 4 000 / Wake 5 000 |
 
 ### SEQ-239 周期性系统定时器每次启动重新登记,替换旧条目;更早的 OmsSweep 保留
 

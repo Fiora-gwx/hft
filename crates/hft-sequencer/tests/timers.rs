@@ -201,6 +201,84 @@ fn seq_237_heap_shift_formula() {
 }
 
 #[test]
+fn seq_238_recovery_timers_merge() {
+    use hft_exec::{AutoFixPhase, ExecTimerKind};
+    use hft_sequencer::SnapshotSel;
+    use hft_strategy_sdk::{BrokenReason, TargetState};
+
+    // The prepared keyframe makes the two independent timer sources disagree.
+    // No production registration or merge helper is used to calculate expectations.
+    for (kind, remaining, expected) in [
+        (ExecTimerKind::Wake, 3_000, 4_000),
+        (ExecTimerKind::Wake, 5_000, 5_000),
+        (ExecTimerKind::AutoFix, 3_000, 4_000),
+    ] {
+        let mut h = steady();
+        let stop = h.now();
+        let wake = 1 | (u32::from(AC2.0) << 8);
+        let automatic = 5 | (u32::from(AC2.0) << 8);
+        {
+            let e = h.s.engine_mut();
+            let cell = e.exec.cell_mut(AC2, G2).unwrap();
+            if kind == ExecTimerKind::Wake {
+                cell.wake_at = Tsc(stop + remaining);
+            } else {
+                cell.view.state = TargetState::Broken(BrokenReason::LinkBroken);
+                cell.broken_since = Tsc(stop);
+                cell.auto_fix.phase = AutoFixPhase::Primed as u8;
+                cell.auto_fix.due_tsc = Tsc(stop + remaining);
+            }
+            assert_eq!(e.heap.remove_key(5, wake, G2.0), 0);
+            e.heap
+                .push(TimerEntry {
+                    deadline: stop + 4_000,
+                    owner: 5,
+                    timer_id: wake,
+                    group: G2.0,
+                })
+                .unwrap();
+        }
+        let window = h.keyframe().seq;
+        let request_id = if kind == ExecTimerKind::Wake {
+            wake
+        } else {
+            automatic
+        };
+        assert!(
+            h.s.engine()
+                .exec
+                .recovery_timers()
+                .any(|t| { t.group == G2 && t.timer_id == request_id && t.at == Tsc(stop + remaining) })
+        );
+        let mut h = h
+            .crash_restart(
+                plan(SnapshotSel::Latest, true, 2, 0),
+                Rerun {
+                    tsc: 1_000,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let entries: Vec<_> =
+            h.s.engine()
+                .heap
+                .sorted()
+                .into_iter()
+                .filter(|t| t.owner == 5 && t.group == G2.0)
+                .map(|t| (t.timer_id, t.deadline))
+                .collect();
+        if kind == ExecTimerKind::Wake {
+            assert_eq!(entries, [(wake, expected)]);
+        } else {
+            assert_eq!(entries, [(automatic, expected), (wake, 5_000)]);
+        }
+        h.run();
+        h.keyframe();
+        verify_timer_windows(&h, &[Some(window)]);
+    }
+}
+
+#[test]
 fn seq_239_periodic_timers_reregistered() {
     use hft_sequencer::SnapshotSel;
 
