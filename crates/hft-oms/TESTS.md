@@ -3690,6 +3690,7 @@ spec: README.md
 - 级别:golden
 - 里程碑:M2
 - 输入:固定脚本 `fixtures/oms/OMS-366/script.txt`(P0;10 个事件:下单、Ack、部分成交、链接、外来成交、撤单待发)驱动后调用 `snapshot`
+- 固定脚本无墓碑且未启用显式结算;节 2 v3 与节 12 v2 的行体须与旧格式逐字节相同,仅节头版本变化。迟到回报用例在回收或 SimReset 前保存原订单的完整身份,不能从复用后的槽拼接。
 - 期望文件:`fixtures/oms/OMS-366/sections.bin`(节 2、3、12 的完整字节)与 `fixtures/oms/OMS-366/sections.txt`(逐字段的可读转储)
 - 实现:`crates/hft-oms/tests/snapshot.rs::oms_366_snapshot_golden`
 

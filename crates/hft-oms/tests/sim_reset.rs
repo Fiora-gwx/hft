@@ -73,6 +73,7 @@ fn setup() -> (H, OrderRef, OrderRef) {
 #[test]
 fn oms_286_sim_reset() {
     let (mut h, qs, k) = setup();
+    let e = h.oe(qs, OrderEventKind::CancelAck);
     let tombs_before = (1..=3u32)
         .flat_map(|s| (1..=5u32).map(move |g| (s, g)))
         .filter(|(s, g)| h.o.tomb(VS, S1, *s, *g).is_some())
@@ -96,8 +97,6 @@ fn oms_286_sim_reset() {
         (ib.open_buy(S1, X), ib.imm_buy(S1, X), ib.buy_notional(S1, VS).0),
         (Qty(0), Qty(0), 0)
     );
-    let mut e = h.oe(qs, OrderEventKind::CancelAck);
-    e.r#gen = qs.r#gen;
     h.ev(&e, 1);
     assert!(h.out.is_empty());
 }
@@ -105,11 +104,10 @@ fn oms_286_sim_reset() {
 #[test]
 fn oms_287_fill_after_sim_reset() {
     let (mut h, qs, _k) = setup();
-    h.o.sim_reset(S1).unwrap();
     let mut e = h.oe(qs, OrderEventKind::PartialFill);
-    e.r#gen = qs.r#gen;
     e.cum_filled = q("0.003");
     e.avg_px = p("60000.00");
+    h.o.sim_reset(S1).unwrap();
     h.ev(&e, 1);
     let f = h.out.fills[0];
     assert!(f.flags & fill_flags::LATE != 0);

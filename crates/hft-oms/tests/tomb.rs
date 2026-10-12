@@ -209,6 +209,10 @@ fn oms_164_tomb_keep() {
     ] {
         let mut h = H::with(|c| c.slots.set(VS, A1, 1));
         let s = h.place_ok(&buy_x(), 0);
+        let mut late_fill = h.oe(s, OrderEventKind::PartialFill);
+        late_fill.exch_order_id = 777;
+        late_fill.cum_filled = q("0.004");
+        late_fill.detail = 1;
         let mut e = h.oe(s, OrderEventKind::Ack);
         e.exch_order_id = 777;
         h.ev(&e, 0);
@@ -217,11 +221,7 @@ fn oms_164_tomb_keep() {
         h.o.test_tomb_mut(VS, A1, 1, 1, |tb| tb.freed_tsc = ms(0));
         h.sweep(now);
         assert_eq!(h.o.tomb(VS, A1, 1, 1).is_some(), kept, "{row}");
-        let mut e = h.oe(s, OrderEventKind::PartialFill);
-        e.exch_order_id = 777;
-        e.cum_filled = q("0.004");
-        e.detail = 1;
-        h.ev(&e, now);
+        h.ev(&late_fill, now);
         if kept {
             assert_eq!(h.n_notes(notes::LATE_FILL), 1, "{row}");
         } else {

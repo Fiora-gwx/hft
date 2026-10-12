@@ -660,6 +660,9 @@ fn oms_067_fee_only_row() {
     // .8 the generation was recycled: attributed through the tombstone.
     let mut h = H::with(|c| c.slots.set(VS, A1, 1));
     let s = h.place_ok(&buy_x(), 0);
+    let mut late_fee = h.oe(s, OrderEventKind::FeeOnly);
+    late_fee.fee = q("0.00001");
+    late_fee.fee_asset = BTC;
     h.what(s, OrderEventKind::CancelAck, 1);
     h.sweep(5002);
     let s2 = h.place_ok(
@@ -676,11 +679,7 @@ fn oms_067_fee_only_row() {
         5003,
     );
     assert_eq!(s2.slot, s.slot);
-    let mut e = h.oe(s2, OrderEventKind::FeeOnly);
-    e.r#gen = s.r#gen;
-    e.fee = q("0.00001");
-    e.fee_asset = BTC;
-    h.ev(&e, 5004);
+    h.ev(&late_fee, 5004);
     let f = h.out.fees[0];
     assert_eq!((f.group, f.inst, f.side), (g1(), X, 1), "OMS-067.8");
     assert_eq!(h.state(s2), PendingNew, "OMS-067.8");

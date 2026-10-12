@@ -551,11 +551,11 @@ fn oms_148_fill_after_not_found() {
     let mut h = H::new();
     let t = vx_unknown(&mut h);
     h.query(t, 7, Qty(0), Px(0), 3501);
-    h.sweep(8502);
-    assert_eq!(h.state(t), OrderState::Free);
     let mut e = h.oe(t, OrderEventKind::PartialFill);
     e.cum_filled = q("0.004");
     e.avg_px = p("60100.0");
+    h.sweep(8502);
+    assert_eq!(h.state(t), OrderState::Free);
     h.ev(&e, 8600);
     assert!(h.out.fills[0].flags & fill_flags::LATE != 0, "OMS-148.2");
     assert_eq!(h.notes(notes::LATE_FILL)[0].level, NoteLevel::P0);
