@@ -365,9 +365,9 @@ impl Matcher for SimMatcher {
         push: bool,
         now_ns: u64,
     ) {
-        let Some((_, _, _, perp)) = self.inst(inst) else {
-            return;
-        };
+        let (_, _, _, perp) = self
+            .inst(inst)
+            .expect("DST external fill instrument must belong to venue");
         let px = self.bbo.get(&inst.0).copied().unwrap_or(0);
         // The exchange truth settles it like a fill (position, cost, realised PnL, balances).
         let cash = self

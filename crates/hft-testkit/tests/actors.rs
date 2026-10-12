@@ -126,6 +126,24 @@ fn tk_126_external_reports_carry_exchange_cash_facts() {
     let truth = m.truth(ACCT_A);
     assert_eq!(truth.inventory, vec![(BTC, 100_000)]);
     assert_eq!(truth.balances, vec![(USDT, 99_940_000_000)]);
+
+    for (account, inst, qty) in [
+        (AccountId(0), P1, 100_000),
+        (ACCT_A, S1, 100_000),
+        (ACCT_A, P1, 0),
+    ] {
+        let mut m = SimMatcher::new(&world, VP, 1);
+        m.drain_due(0, &mut Vec::new());
+        let before = m.state_hash();
+        let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            m.external(account, inst, Side::Buy, qty, "invalid", true, 0);
+        }));
+        assert!(rejected.is_err(), "invalid external fact must fail the DST run");
+        assert_eq!(m.state_hash(), before);
+        let mut out = Vec::new();
+        m.drain_due(1_000_000, &mut out);
+        assert!(!out.iter().any(|r| matches!(r.rep, RepMsg::ExternalFill(_))));
+    }
 }
 
 fn venue(dead_man_ms: u32) -> MockVenue<ToyMatcher> {
