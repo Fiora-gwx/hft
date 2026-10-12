@@ -6,6 +6,7 @@ use hft_ledger::{JournalApplyError, JournalLedger, Ledger, SettlementError};
 use hft_refdata::RefData;
 use hft_strategy_sdk::{RestoreError, SnapshotReader, SnapshotWriter};
 use hft_types::{InstId, Qty};
+use zerocopy::{FromZeros, IntoBytes};
 
 fn rd_cash() -> &'static RefData {
     rd_with(&RdOpts {
@@ -378,5 +379,80 @@ fn led_287_cold_clock_accepts_only_completely_zero_unstarted_anchor() {
         } else {
             assert!(matches!(r, Err(RestoreError::BadValue)), "row {row}");
         }
+    }
+}
+
+#[test]
+fn led_288_recovery_rebuilds_read_views_without_replacing_booked_facts() {
+    let rd = rd_cash();
+    let mut before = one_order(rd);
+    clock(&mut before, s(10));
+    let e = event(5, 100_000, 0);
+    apply(&mut before, &e).unwrap();
+    let report = bal(A1, P2, USDT, usdt("49000"), Qty(0), s(20));
+    before.ledger_mut().on_balance(&report, true, s(20));
+    let original = before.ledger().venue_book(A1, P2);
+    assert_ne!(original.vflags & hft_ledger::vflags::DRIFT, 0);
+    assert_eq!(original.summary.as_of_ens, s(20));
+    let durable = snap(before.ledger());
+
+    for purpose in [1, 2, 3, 5, 4] {
+        let mut cold = before.clone();
+        let mut expected = if purpose == 4 {
+            restore_with(&durable, rd).unwrap()
+        } else {
+            before.ledger().clone()
+        };
+        // Supply a different ledger snapshot: the consumer must not overwrite its own facts
+        // with the checkpoint being audited. Only the recovery purpose controls view lifetime.
+        let hdr = hft_event::SnapshotHdr {
+            purpose,
+            ..hft_event::SnapshotHdr::new_zeroed()
+        };
+        let mut body = hdr.as_bytes().to_vec();
+        body.extend(snap(&booted_with(rd)));
+        let record = hft_event::RecordView {
+            hdr: hft_event::RecordHeader {
+                len: (24 + body.len()) as u32,
+                kind: hft_event::EventKind::STATE_SNAPSHOT.0,
+                flags: RecordFlags::EVENT_END.0,
+                seq: 17,
+                tsc: TSC,
+            },
+            body: &body,
+        };
+        for _ in 0..2 {
+            cold.apply(&record).unwrap();
+            assert_eq!(
+                snap(cold.ledger()),
+                durable,
+                "purpose {purpose}: durable facts changed"
+            );
+            for &(account, venue, _) in rd.account_venues() {
+                let a = cold.ledger().venue_book(account, venue);
+                let b = expected.venue_book(account, venue);
+                assert_eq!(a.cash, b.cash);
+                assert_eq!(a.inv, b.inv);
+                assert_eq!(a.margin, b.margin);
+                assert_eq!(a.summary, b.summary, "purpose {purpose}");
+                assert_eq!(a.vflags, b.vflags);
+            }
+        }
+        // The following clock supplies the new run's time; the existing order watermark still
+        // rejects a duplicate fill, and the next cumulative increment is booked exactly once.
+        clock(&mut cold, s(30));
+        expected.on_run_start(s(30));
+        assert_eq!(
+            cold.ledger().venue_book(A1, P2).summary,
+            expected.venue_book(A1, P2).summary
+        );
+        apply(&mut cold, &e).unwrap();
+        assert_eq!(snap(cold.ledger()), durable);
+        apply(&mut cold, &event(5, 200_000, 0)).unwrap();
+        assert_eq!(cold.ledger().pos(A1, BTC_P2).qty, Qty(200_000));
+        assert_eq!(
+            cash(cold.ledger(), A1, P2, USDT).total,
+            cash(before.ledger(), A1, P2, USDT).total
+        );
     }
 }
