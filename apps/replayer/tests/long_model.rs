@@ -3,11 +3,11 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 use hft_event::{
-    AdviceHdr, EngineClock, EventKind, Note, NoteSource, OrderAction, OrderDecision, OrderEvent,
-    OrderEventKind, SnapshotHdr,
+    AdviceHdr, EngineClock, EventKind, OrderAction, OrderDecision, OrderEvent, OrderEventKind, SnapshotHdr,
 };
 use hft_sequencer::advisor::checkpoint;
 use hft_sequencer::driver::replay::Log;
+use hft_strategy_sdk::SnapshotReader;
 use serde_json::Value;
 
 use crate::fixture;
@@ -143,14 +143,16 @@ fn rpl_270_full_duration_path_model_files_and_checkpoint_window() {
                     .is_some_and(|e| e.what == OrderEventKind::Fill)),
             "no actual SimExchange fill"
         );
-        let epoch = log
+        let start = log
             .recs
             .iter()
-            .filter(|r| r.kind == EventKind::NOTE)
-            .filter_map(|r| r.read::<Note>())
-            .find(|n| n.source == NoteSource::Sequencer && n.code == hft_sequencer::codes::note::EPOCH_START)
-            .map(|n| u16::try_from(n.v[0]).unwrap())
+            .find(|r| r.kind == EventKind::STATE_SNAPSHOT)
             .unwrap();
+        let snapshot = SnapshotReader::new(&start.body[96..]);
+        let epoch_section = snapshot.find_section(3).unwrap().unwrap();
+        assert_eq!(epoch_section.version, 1);
+        // Empty boot has a committed epoch in its snapshot without a recovery EpochStart note.
+        let epoch = u16::try_from(epoch_section.reader().get_u32().unwrap() & 0x7fff).unwrap();
         assert_ne!(epoch, 0);
         let mut perpetual_fills = 0;
         for r in log.recs.iter().filter(|r| r.kind == EventKind::ORDER_EVENT) {
