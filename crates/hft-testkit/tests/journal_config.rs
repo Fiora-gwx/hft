@@ -31,7 +31,9 @@ fn tk_112_worlds_do_not_share_risk_replay_state() {
     let expected = a.hashes();
     let mut other = WorldSpec::w1();
     other.risk.conn_liveness_ms += 17;
+    other.oms_tombstone_keep_ms = Some(10_000);
     let b = boot(&other);
+    assert_eq!(b.sequencer().engine().setup.oms.tombstone_keep_ms, 10_000);
     assert_eq!(Ok(Some(expected)), a.rebuilt_hashes());
     assert_eq!(Ok(Some(b.hashes())), b.rebuilt_hashes());
     let log = Log::from_segments(&a.sequencer().driver().io.j.segments);

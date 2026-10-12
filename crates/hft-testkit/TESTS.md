@@ -1471,9 +1471,9 @@ spec: README.md
 - 规则:[6. DST 框架](README.md#6-dst-框架)
 - 级别:replay
 - 里程碑:M2
-- 输入:真实 W1 引擎 A;引擎 B 仅修改 conn_liveness_ms,在同一线程随后启动
+- 输入:真实 W1 引擎 A;引擎 B 修改 conn_liveness_ms 与场景墓碑时长,在同一线程随后启动
 - 步骤:交错调用 A/B 的 INV-6 重建;丢弃两台引擎后把 A 的 journal 送入新线程,仅从快照和此前的配置记录装配 VerifyDriver
-- 期望:两份 INV-6 状态与各自运行状态完全相同;新线程逐条 Output 与最终组件哈希一致,没有遗漏输出;不需要 WorldSpec 或线程局部 RiskParams
+- 期望:启动解码保留 B 的墓碑时长;两份 INV-6 状态与各自运行状态完全相同;新线程逐条 Output 与最终组件哈希一致,没有遗漏输出;不需要 WorldSpec 或线程局部 RiskParams
 - 实现:`crates/hft-testkit/tests/journal_config.rs::tk_112_worlds_do_not_share_risk_replay_state`
 
 ### TK-113 journal 重建不可用时不得跳过 INV-6
@@ -1789,9 +1789,10 @@ spec: README.md
 - 规则:[DST 的世界模型](README.md#dst-的世界模型)
 - 级别:integ
 - 里程碑:M2
-- 前置:种子 1,probe-target 用 PairOnFill 实际开仓,10 s 断流,11 s 部分/全量 ADL,15 s 恢复;有无延后补报共四行
+- 前置:种子 1,probe-target 用 PairOnFill 实际开仓,场景墓碑时长 10 s 记录进配置;10 s 断流,11 s 部分/全量 ADL,15 s 恢复;有无延后补报共四行
 - 步骤:运行真实 DST 循环至 90 s 或 10,000 步;再次关闭全部检查器运行
 - 期望:实际产生一组原件补账,每次补账与确认事件均有账本字节核对;结束时严格真值比较不跳过;两次 journal、出环意图、交付流、HashTrail 全字节及真值相同
+- 反例:保持默认一小时墓碑时长时,实际报告在途阻塞,90 s 内不补账,缺口仍在途
 - 边界:本用例覆盖循环交付与检查器透明性,不替代 LED-081 的开平仓和标准种子集
 - 实现:`crates/hft-testkit/tests/reconcile_world.rs::tk_140_committed_gap_delivery_is_independent_of_checkers`
 

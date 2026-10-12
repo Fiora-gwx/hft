@@ -264,6 +264,8 @@ pub struct WorldSpec {
     pub strategies: Vec<StrategyBinding>,
     pub groups: Vec<GroupSpecW>,
     pub risk: RiskSpec,
+    /// Optional fixture override, recorded in the engine configuration. None keeps the OMS default.
+    pub oms_tombstone_keep_ms: Option<u32>,
 }
 
 /// `VS`, `VP`, `VQ` (scenarios §2.2): Binance spot, OKX USDT swap, Bitget spot (fixed `VenueId`s).
@@ -396,6 +398,7 @@ impl WorldSpec {
                 conn_liveness_ms: 1_000,
                 unknown_blocks_open: true,
             },
+            oms_tombstone_keep_ms: None,
         }
     }
 

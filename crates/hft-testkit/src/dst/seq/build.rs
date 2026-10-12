@@ -681,6 +681,9 @@ pub fn engine_setup(w: &WorldSpec, tsc_hz: u64, epoch: u32) -> EngineSetup {
     oms.max_out_per_event = 16;
     oms.links_per_account = 16;
     oms.slots = PerTable::new(64);
+    if let Some(ms) = w.oms_tombstone_keep_ms {
+        oms.tombstone_keep_ms = ms;
+    }
     oms.hedge_retry_min_ms = u32::try_from(w.risk.hedge_retry_ms.max(1)).unwrap_or(u32::MAX);
     oms.hedge_deadline_ms = u32::try_from(w.risk.hedge_deadline_ms.max(1)).unwrap_or(u32::MAX);
     let mut keys = Vec::new();

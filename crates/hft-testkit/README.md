@@ -208,7 +208,7 @@ pub struct DstSuite { pub name, pub title, pub faults: FaultRates, pub steps: u6
 DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xtask dst --seeds 1 --seed 0x9e3779b97f4a7c15 --suite core --steps 48214 --trace
 ```
 
-真实 DST 引导块保存完整 ECF1 与 RKP1 配置。启动先往返解码同一配置,INV-6 从选中快照的 journal 配置独立装配,不读 WorldSpec 或其他运行的风控参数。各世界可在同一线程交错运行;将日志交给新线程也能重建相同状态。配置内容变化会改变快照节 9 的引用与总 HashTrail,一致性集须由 CI 重生成后审查,不屏蔽这些字段(TK-112)。
+真实 DST 引导块保存完整 ECF1 与 RKP1 配置。启动先往返解码同一配置,INV-6 从选中快照的 journal 配置独立装配,不读 WorldSpec 或其他运行的风控参数。`WorldSpec.oms_tombstone_keep_ms` 可为场景指定墓碑时长,写入同一 ECF1;默认空值沿用 OMS 默认时长,对账始终遵守实际配置的墓碑阻塞。各世界可在同一线程交错运行;将日志交给新线程也能重建相同状态。配置内容变化会改变快照节 9 的引用与总 HashTrail,一致性集须由 CI 重生成后审查,不屏蔽这些字段(TK-112)。
 
 真实引擎或 journal 已含快照时,INV-6 不能因重建返回空值跳过。配置或恢复失败、回放未完成、Output 差异或未消费输出均使检查失败;错误保留阶段、快照序号及首条差异的序号/字节偏移,运行中的定期检查与结束检查使用同一规则(TK-113)。当前写者允许最后一条非 Meta 的 EVENT_END 后有同事件测量 Meta;冷账本可消费该尾部,未完成的 Input/Output 尾部仍失败。
 

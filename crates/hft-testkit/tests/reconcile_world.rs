@@ -1,5 +1,5 @@
 //! The complete DST loop must release committed gaps with checkers both on and off.
-use hft_event::{EventKind, ExecDecision, ExternalFill, ReconcileBatchView};
+use hft_event::{EventKind, ExecDecision, ExternalFill, ReconcileBatchView, ReconcileReport};
 use hft_strategy_sdk::params::{RawParams, SchemaView, encode_body};
 use hft_testkit::dst::faults::{ConnKind, Fault};
 use hft_testkit::dst::world::{ACCT_A, P1, S1, VP};
@@ -19,6 +19,9 @@ fn config(full: bool, replay: bool) -> DstConfig {
     c.world.accounts.truncate(1);
     c.world.groups.truncate(1);
     c.world.strategies.truncate(1);
+    // A real order leaves a tombstone. Wait for its configured expiry before the two rounds;
+    // the default one-hour retention is exercised separately below and must block AUTO.
+    c.world.oms_tombstone_keep_ms = Some(10_000);
     let first = c.world.insts.iter_mut().find(|i| i.id == S1).unwrap();
     first.lot = 200_000;
     first.min_qty = first.lot;
@@ -64,6 +67,29 @@ fn config(full: bool, replay: bool) -> DstConfig {
 
 #[test]
 fn tk_140_committed_gap_delivery_is_independent_of_checkers() {
+    let mut retained = config(false, false);
+    retained.world.oms_tombstone_keep_ms = None;
+    let blocked = run_record::<DstEngine>(&retained);
+    assert!(blocked.outcome.is_pass(), "{:?}", blocked.outcome);
+    assert!(
+        blocked
+            .journal
+            .iter()
+            .all(|r| r.kind != EventKind::RECONCILE_BATCH)
+    );
+    assert!(
+        blocked
+            .journal
+            .iter()
+            .filter_map(|r| r.read::<ReconcileReport>())
+            .any(|r| { r.account == ACCT_A && r.venue == VP && r.item == 5 && r.skipped_inflight > 0 })
+    );
+    assert!(
+        blocked
+            .truth
+            .iter()
+            .any(|t| t.account == ACCT_A && t.venue == VP && t.undelivered)
+    );
     for full in [false, true] {
         for replay in [false, true] {
             let mut c = config(full, replay);
@@ -84,7 +110,17 @@ fn tk_140_committed_gap_delivery_is_independent_of_checkers() {
                 .iter()
                 .filter(|r| r.kind == EventKind::RECONCILE_BATCH)
                 .collect();
-            assert_eq!(batches.len(), 1, "the real actor must actually book the gap");
+            assert_eq!(
+                batches.len(),
+                1,
+                "full={full} replay={replay} steps={} end={:?}: the real actor must actually book the gap; reports={:?}",
+                on.steps_run,
+                on.journal.last().map(|r| r.tsc),
+                on.journal
+                    .iter()
+                    .filter_map(|r| r.read::<ReconcileReport>())
+                    .collect::<Vec<_>>()
+            );
             assert!(on.ledger_checks.contains(&batches[0].seq));
             let b = ReconcileBatchView::read(&batches[0].body).unwrap();
             assert_eq!(b.hdr.n_fills, 1);
@@ -104,7 +140,11 @@ fn tk_140_committed_gap_delivery_is_independent_of_checkers() {
                     (original.trade_id, original.cash_qty, original.cash_amount)
                 );
             }
-            assert!(on.truth.iter().all(|t| !t.undelivered && t.excluded.is_empty()));
+            assert!(
+                on.truth.iter().all(|t| !t.undelivered && t.excluded.is_empty()),
+                "full={full} replay={replay}: {:?}",
+                on.truth
+            );
             assert!(on.obs.slots.iter().all(|s| s.state.is_terminal()));
             c.invariants = InvariantSet::none();
             let off = run_record::<DstEngine>(&c);
