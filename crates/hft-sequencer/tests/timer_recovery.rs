@@ -57,10 +57,10 @@ impl StrategySet for TimerSet {
         if s.fast.i.strategy != S1 {
             return;
         }
-        if let EventRef::Timer { tag, .. } = ev {
-            if let Some(n) = tag.checked_sub(11).and_then(|i| s.fired.get_mut(i as usize)) {
-                *n += 1;
-            }
+        if let EventRef::Timer { tag, .. } = ev
+            && let Some(n) = tag.checked_sub(11).and_then(|i| s.fired.get_mut(i as usize))
+        {
+            *n += 1;
         }
         let EventRef::Bbo { inst, b, .. } = ev else {
             return;

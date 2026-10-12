@@ -10,6 +10,7 @@ use std::cell::RefCell;
 
 thread_local! {
     static PAIRS: RefCell<Vec<(ComponentHashes, ComponentHashes)>> = const { RefCell::new(Vec::new()) };
+    static TIMER_STATS: RefCell<(u64, u64, u64)> = const { RefCell::new((0, 0, 0)) };
 }
 struct Audit(DstEngine);
 impl Sut for Audit {
@@ -50,12 +51,27 @@ impl Sut for Audit {
                 assert!(!found);
                 found = true;
                 let mut rows = section.reader();
+                let mut live = 0_u64;
+                let mut max_next = 0;
                 for _ in 0..section.count {
                     let h: hft_sequencer::snapshot::StrategyTimersHdr = rows.get_row().unwrap();
-                    assert_eq!(h.n_timers, 0, "audit seeds must not allocate strategy timers");
-                    assert_eq!(h.next_id, 1);
+                    assert!(h.next_id > 0);
+                    live += u64::from(h.n_timers);
+                    max_next = max_next.max(h.next_id);
+                    let mut previous = 0;
+                    for _ in 0..h.n_timers {
+                        let timer: hft_sequencer::snapshot::StrategyTimerRow = rows.get_row().unwrap();
+                        assert!(previous < timer.id && timer.id < h.next_id);
+                        previous = timer.id;
+                    }
                 }
                 assert!(rows.is_empty());
+                TIMER_STATS.with(|stats| {
+                    let mut stats = stats.borrow_mut();
+                    stats.0 += 1;
+                    stats.1 += u64::from(live > 0);
+                    stats.2 = stats.2.max(max_next);
+                });
             } else {
                 old.extend_from_slice(&w.as_bytes()[at..reader.pos()]);
             }
@@ -91,6 +107,7 @@ fn main() {
     let suite = suites().into_iter().find(|s| s.name == "core").unwrap();
     for seed in 1..=50 {
         PAIRS.with(|p| p.borrow_mut().clear());
+        TIMER_STATS.with(|stats| *stats.borrow_mut() = (0, 0, 0));
         let mut cfg = suite.config(seed);
         cfg.steps = 2_000;
         cfg.rerun = RerunPolicy::Never;
@@ -112,8 +129,9 @@ fn main() {
         });
         let full = xxhash_rust::xxh3::xxh3_128(&rec.trail.to_bytes());
         let legacy = xxhash_rust::xxh3::xxh3_128(&old.to_bytes());
+        let (snapshots, live_snapshots, max_next) = TIMER_STATS.with(|stats| *stats.borrow());
         println!(
-            "{seed}\t{full:032x}\t{legacy:032x}\t{}\t{}",
+            "{seed}\t{full:032x}\t{legacy:032x}\t{}\t{}\t{snapshots}\t{live_snapshots}\t{max_next}",
             rec.trail.points.len(),
             rec.snapshot_checks
         );

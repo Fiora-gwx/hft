@@ -11,7 +11,7 @@ permissions:
   contents: read
 jobs:
   audit:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -46,12 +46,13 @@ jobs:
           assert len(rows) == len(baseline) == 50
           results = []
           for got, want in zip(rows, baseline):
-              seed, full, old, points, checks = got
+              seed, full, old, points, checks, snapshots, live_snapshots, max_next = got
               assert int(seed) == int(want['seed'], 0)
               assert want['suite'] == 'core' and want['steps'] == 2000
               assert old == want['trail'], (seed, old, want['trail'])
               assert full != old and int(points) > 0 and int(checks) > 0
-              results.append(dict(seed=seed, full=full, old=old, points=int(points), snapshot_checks=int(checks)))
+              assert int(snapshots) >= int(points) and int(live_snapshots) > 0 and int(max_next) > 1
+              results.append(dict(seed=seed, full=full, old=old, points=int(points), snapshot_checks=int(checks), snapshots=int(snapshots), live_timer_snapshots=int(live_snapshots), max_next_timer_id=int(max_next)))
           (root / 'result.json').write_text(json.dumps(dict(baseline='6a48be8', head='${{ github.sha }}', rows=results), indent=2))
           print('50/50: excluding only the newly added section reproduces every old HashTrail digest; full-state invariants remained enabled')
           PY
