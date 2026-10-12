@@ -241,6 +241,8 @@ pub enum CmdBody {
     ReconcileReport {
         report_id: String,
         items: Vec<ReconItem>,
+        /// Optional original ExternalFill v3 bodies (96 B each), base64 encoded.
+        receipts_b64: Option<String>,
     },
     RotateConn {
         venue: String,
@@ -815,7 +817,12 @@ fn parse_body(v: &Value) -> R<CmdBody> {
         "ReconcileReport" => {
             let report_id = o.dec_req("report_id")?;
             let items = parse_items(o.get("items"))?;
-            CmdBody::ReconcileReport { report_id, items }
+            let receipts_b64 = o.str_opt("receipts_b64")?;
+            CmdBody::ReconcileReport {
+                report_id,
+                items,
+                receipts_b64,
+            }
         }
         "RotateConn" => CmdBody::RotateConn {
             venue: o.str_req("venue")?,
@@ -1267,7 +1274,11 @@ fn write_body(o: &mut Out, b: &CmdBody) {
             o.str_opt("strategy_kind", strategy_kind);
             o.str_opt("kind_id", kind_id);
         }
-        CmdBody::ReconcileReport { report_id, items } => {
+        CmdBody::ReconcileReport {
+            report_id,
+            items,
+            receipts_b64,
+        } => {
             o.str("report_id", report_id);
             o.key("items");
             o.s.push('[');
@@ -1278,6 +1289,7 @@ fn write_body(o: &mut Out, b: &CmdBody) {
                 write_item(o, it);
             }
             o.s.push(']');
+            o.str_opt("receipts_b64", receipts_b64);
         }
         CmdBody::Resubscribe { venue, inst, account } => {
             o.str_opt("account", account);

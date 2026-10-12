@@ -27,6 +27,7 @@ mod prop_ledger;
 mod prop_margin;
 mod prop_snapshot;
 mod rates;
+mod reconcile_cash;
 mod rounds;
 mod settlement;
 mod settlement_journal;

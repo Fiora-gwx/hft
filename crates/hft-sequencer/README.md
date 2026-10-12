@@ -65,7 +65,7 @@ pub enum BootError {
     Journal(JournalErr), Config(ConfigErr),
 }
 pub enum DoneCause { Drain, ReplaceRefdata, StorageCritical, IdentityMismatch }   // 各原因对应的退出码与是否重启归 apps/hft-core;Drain 超时不改原因
-pub enum FatalReason { JournalFull, ClockRange, TimerOverflow, OmsCash(hft_oms::CashError), Settlement(hft_ledger::SettlementError), UnsupportedExternalCash }   // ClockRange:engine_ns 换算的取值范围被突破(见"引擎时间");TimerOverflow:引擎登记方的定时器使堆满(见"定时器");hft-core abort
+pub enum FatalReason { JournalFull, ClockRange, TimerOverflow, OmsCash(hft_oms::CashError), Settlement(hft_ledger::SettlementError), UnsupportedExternalCash, ReconcileEvidence }   // ClockRange:engine_ns 换算的取值范围被突破(见"引擎时间");TimerOverflow:引擎登记方的定时器使堆满(见"定时器");hft-core abort
 
 pub trait Driver {
     type J: JournalSink;
@@ -453,7 +453,7 @@ OMS 对冲的 `place` 调用前另复制完整链接身份、重试计数、目�
 | `MarkPrice` | `MarketLast` 更新(`mark_px`、`mark_ts_ns`、`mark_ens = now.engine_ns`)→ `ledger.on_mark(…, now.engine_ns, &mut touched)` → 对受影响的 (account, venue) 把 ledger `MarginState` 投影为 `MarginSample`(两种强平距离、两种比率、`report_ens`、`mark_ens = mark_oldest_ens`)调 `risk.on_margin`(执行 `MarginOut`)→ `exec.touch_inst` → 订阅者入队 |
 | `OrderEvent`/`SendReport` | `oms.on_*` → 按第 3 步"OMS 输出的排空"处理 `OmsOut`(对冲快路径最前;`EXEC` 槽的 `OrderUpdate` 交 `exec.on_order_update`,链接变化交 `exec.on_link`)→ `risk.on_pnl`/`on_legs`(链接 `Broken` → `apply(Auto(Broken))` 并按第 7 步再调 `on_legs`)→ 执行由此产生的 `ModeOutcome` |
 | `OrderEvent{FeeOnly}` | OMS 不迁移;`OmsOut.fees` 按同一排空规则转 `FeeDelta` 交 `ledger.apply_fee` → 返回 `NetAdjust` 时同一事件内调 `oms.net_adjust` 与 `exec.on_leg_adjust` |
-| `ExternalFill`(另有两个来源按同一处理:OMS 防御路径的 `ForeignFill`:直接以其成交字段构造 `ExternalFill{cause = Unknown}`,显式结算额取 `ForeignFill.cash` 的累计差额;同事件的 `Note{OmsForeignFill}` 供冷读者核对原始 Input 并独立计算结算增量(其余入账字段与该 Note 一致,未列出的字段为 0),去重键取 `ForeignFill.trade_id`,为 0 时 `exch_order_id` + `fill_seq` = `ForeignFill.cum_filled` 的原始值;对账 `AUTO_EXTERNAL` 条目,见 `ReconcileReport` 行) | `PERP_CASH` 的原始事件经 `ledger.apply_settled_external` 校验完整现金并去重入账,错误返回 `Fatal(Settlement)`;OMS 防御路径传递完整累计结算的差额;原始 ExternalFill 在记账前核验 OMS 来源和容量,成功后保留来源,跨来源重叠报 `Fatal(OmsCash)`。AUTO_EXTERNAL 缺少所需现金事实,返回 `Fatal(UnsupportedExternalCash)`;其他 venue 调 `ledger.apply_external(e, auto_recon, t)`(去重、`auto_held` 抵扣、归属 group 与腿(以该腿减到 0 为限)、入账,由 ledger 写注记;`auto_recon` 只对 `AUTO_EXTERNAL` 合成的本体为真;规则归 [hft-ledger](../hft-ledger/README.md#外部成交externalfill));返回 `None`(重复,或已被 `auto_held` 全部抵扣)→ 本条到此为止(不调 OMS、执行层与风控,不入队);否则 `ExternalApplied` 的归属部分(`net_qty ≠ 0` 时;`group` 可为 `GROUP_NONE`)交 `oms.external_adjust`(LegTracker;`cause = Unknown` 时记下以便与之后的槽成交去重;OMS 自己的 `ForeignFill` 传 `exch_order_id = 0` 不记——其累计量已在 OMS 的 `foreign` 表,记下会在同一单的下一次报告里再扣一次)→ `exec.on_external(a, &view)`(视图的 `group`、`qty` 取归属部分;返回截止时刻,语义归 hft-exec);`none_qty ≠ 0`(超出该腿、记 `GROUP_NONE` 的部分)另以 `group = GROUP_NONE` 的视图同样调 `exec.on_external`;量为 0 的部分不调用、不入队 → `risk.on_pnl`/`on_legs` → 截止写进 `ExternalFillView.deadline_tsc` 后向该账户绑定的实例入队 `EventRef::External`(两部分都非 0 时两条)。OMS 防御路径的 `ForeignFill` 与 `AUTO_EXTERNAL` 一样在处理该 Input 时确定地构造、不另写 Input;带足入账字段的 Output 类注记由 hft-oms 写出(字段归 hft-oms),冷读者经 hft-ledger 的同一消费路径入账 |
+| `ExternalFill`(另有两个来源按同一处理:OMS 防御路径的 `ForeignFill`:直接以其成交字段构造 `ExternalFill{cause = Unknown}`,显式结算额取 `ForeignFill.cash` 的累计差额;同事件的 `Note{OmsForeignFill}` 供冷读者核对原始 Input 并独立计算结算增量(其余入账字段与该 Note 一致,未列出的字段为 0),去重键取 `ForeignFill.trade_id`,为 0 时 `exch_order_id` + `fill_seq` = `ForeignFill.cum_filled` 的原始值;对账 `AUTO_EXTERNAL` 条目,见 `ReconcileReport` 行) | `PERP_CASH` 的原始事件经 `ledger.apply_settled_external` 校验完整现金并去重入账,错误返回 `Fatal(Settlement)`;OMS 防御路径传递完整累计结算的差额;原始 ExternalFill 在记账前核验 OMS 来源和容量,成功后保留来源,跨来源重叠报 `Fatal(OmsCash)`。AUTO_EXTERNAL 有原始凭据时经 `ReconcileBatch` 整组预检并调用 `apply_reconciled_external`,缺少所需现金事实则返回 `Fatal(UnsupportedExternalCash)`;其他 venue 调 `ledger.apply_external(e, auto_recon, t)`(去重、`auto_held` 抵扣、归属 group 与腿(以该腿减到 0 为限)、入账,由 ledger 写注记;`auto_recon` 只对 `AUTO_EXTERNAL` 合成的本体为真;规则归 [hft-ledger](../hft-ledger/README.md#外部成交externalfill));返回 `None`(重复,或已被 `auto_held` 全部抵扣)→ 本条到此为止(不调 OMS、执行层与风控,不入队);否则 `ExternalApplied` 的归属部分(`net_qty ≠ 0` 时;`group` 可为 `GROUP_NONE`)交 `oms.external_adjust`(LegTracker;`cause = Unknown` 时记下以便与之后的槽成交去重;OMS 自己的 `ForeignFill` 传 `exch_order_id = 0` 不记——其累计量已在 OMS 的 `foreign` 表,记下会在同一单的下一次报告里再扣一次)→ `exec.on_external(a, &view)`(视图的 `group`、`qty` 取归属部分;返回截止时刻,语义归 hft-exec);`none_qty ≠ 0`(超出该腿、记 `GROUP_NONE` 的部分)另以 `group = GROUP_NONE` 的视图同样调 `exec.on_external`;量为 0 的部分不调用、不入队 → `risk.on_pnl`/`on_legs` → 截止写进 `ExternalFillView.deadline_tsc` 后向该账户绑定的实例入队 `EventRef::External`(两部分都非 0 时两条)。OMS 防御路径的 `ForeignFill` 与 `AUTO_EXTERNAL` 一样在处理该 Input 时确定地构造、不另写 Input;带足入账字段的 Output 类注记由 hft-oms 写出(字段归 hft-oms),冷读者经 hft-ledger 的同一消费路径入账 |
 | `MarginReport` | `ledger.on_margin(m, now.engine_ns)` → `risk.on_margin`(`truncated` = `ITEMS_TRUNCATED`)→ 执行 `MarginOut`:`mode` → `risk.mode.apply`;`events` → 该账户绑定的实例入队 `EventRef::Risk`,并调 `exec.on_risk(a, &e, now)`;`force` → `exec.force_deleverage(a, venue, frac, now, &mut out)`;`timers`(engine_ns 截止)→ 按 `now.tsc_of` 换成本次运行的 TSC 进堆;`notes` |
 | `AccountConfigReport` | `risk.on_account_cfg(hdr, &lev_items)`(实际杠杆:检查链 #7b 与永续杠杆上限)→ `risk.mode.apply(Gate(AccountCfg{hdr, keys_required}))`(`keys_required` 见[模式与 cap 的驱动](#模式与-cap-的驱动))(闸门 `ACCOUNT_CFG`/`IDENTITY`;放行后不符 → cap;UID 不符 → HARD + 内部 Drain) |
 | `FundingSettle`(推送) | 按 `VenueCaps.funding_settle`:`PerSymbolPush` → `ledger.apply_funding`(重复 → 无动作);`BalanceOnlyPush` → `ledger.apply_funding_push`(钱包入账与去重;`Mismatch` → `Note{FundingMismatch}`)→ `risk.on_pnl`。结算时刻一律经 hft-types [`funding_settle_norm_ns`](../hft-types/README.md#资金费结算时刻归一化) 归一化后比较与配对(ledger 入口内完成,周期与锚的取法归 [hft-ledger](../hft-ledger/README.md#资金费时刻归一化)) |
@@ -822,6 +822,10 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 
 </details>
 
+`ReconcileBatch` 作为一次 Input 处理,先验证完整体,不与已暂存的同 report_id 普通分组混用。全组 AUTO_EXTERNAL 的用户流稳定、无 Unknown/在途、view_seq 未被新成交越过、当前仓位等于 engine_qty 等条件全部成立,且 Summary 不含 DOWN/TRUNCATED/HISTORY_UNCHECKED 时才应用。处理任何资金费、OMS 或账本变动前,先完成 ledger 与 OMS 的整组预检。先写 ReconcileCash(应用或跳过),再按 Position 报告顺序、同品种原始成交顺序调 apply_reconciled_external,每笔仍走原有 OMS、执行层和策略通知路径。任一适用性条件不成立,整组不补账,仍完成对账分级。原始金额只来自输入凭据;旧 ReconcileReport 不给严格现金模式补造现金。
+
+待确认凭据恢复归 hft-ledger,原始来源恢复归 hft-oms;批次无跨 Input 暂存状态。
+
 ## 延迟与资源契约
 
 分段名以 [latency-budget](../../docs/latency-budget.md) 为准:本 crate 负责 `ingest` 中的环取出部分、`decide` 全段以及 `leg_gap`/`hedge_host`/`rep_to_order` 的 sequencer 内部分;`decide`、`tick_to_trade` 与 `rep_to_order` 的分配与验收数值只在 latency-budget §3 与 [testing ⑩](../../docs/testing.md#8-上线门槛),本页只给组件预算。
@@ -905,7 +909,7 @@ advisor 的定时投递、重启注记去重、落后量、两种环容量的独
 - **同进程混跑模拟**:实例划分保证 `prod` 不含 Sim 账户,混跑只出现在测试中;若混跑,同一 Input 的出环在 `end_event` + `publish` 之后统一推环(崩溃截断的正确性要求),模拟实例对同一条行情的处理时间计入该 Input 实盘订单的出环时刻,模拟实例的行情处理量也不受 `sim_max_per_round` 限制。
 - **跨重启的 TSC 平移**:定时器堆与 OMS/exec 的 TSC 量在恢复结束时平移,`EngineClock` 在引导块之后才写,两者之间的启动耗时(毫秒级)不计入任何截止;按 engine_ns 记截止的登记方因此可能收到早到的定时器,由其复核后重新登记。
 - **BBO 连接退役的成员清理**是 O(该 venue 订阅的 inst 数),只在连接退役时发生(每条连接约 24 h 一次)。
-- **`AUTO_EXTERNAL` 合成的成交价**取处理时的标记价,不是交易所的 ADL 成交价;差额留在已实现 PnL 里,由之后的对账与人工 `AdoptExchange` 校正;交易所之后补推的同向真实强平/ADL 由 hft-ledger 的 `auto_held` 抵扣,不重复入账(规则与残留情形归 [hft-ledger](../hft-ledger/README.md#外部成交externalfill))。
+- **旧能力 `AUTO_EXTERNAL` 合成的成交价**取处理时的标记价,不是交易所的 ADL 成交价;差额留在已实现 PnL 里,由之后的对账与人工 `AdoptExchange` 校正;交易所之后补推的同向真实强平/ADL 由 hft-ledger 的 `auto_held` 抵扣,不重复入账(规则与残留情形归 [hft-ledger](../hft-ledger/README.md#外部成交externalfill))。
 - 多 sequencer(按资产分片)不在本规格。
 
 ### 开发备忘

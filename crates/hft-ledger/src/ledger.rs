@@ -110,6 +110,8 @@ pub(crate) struct NoHist {
 #[derive(Clone, Debug)]
 pub(crate) struct AvDyn {
     pub ext: ExtRing,
+    /// Reconciled executions awaiting their original push; bounded, never evicted.
+    pub auto_cash: Vec<hft_event::ExternalFill>,
     /// Sorted by (settle_ts, inst); capacity `funding_hist_cap`.
     pub hist: Vec<FundRec>,
     /// `None` = no `FundMark` (watermark taken at the next `reconcile_funding`).
@@ -433,6 +435,7 @@ impl Ledger {
             let perp = vs.perp;
             avd.push(AvDyn {
                 ext: ExtRing::new(c.ext_cap),
+                auto_cash: Vec::with_capacity(if perp { c.ext_cap } else { 0 }),
                 hist: Vec::with_capacity(if perp { c.hist_cap } else { 0 }),
                 hist_from: None,
                 seen: Vec::with_capacity(if perp { c.seen_cap } else { 0 }),

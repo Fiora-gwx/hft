@@ -2382,6 +2382,60 @@ pub(crate) fn synth_funding<D: Driver<S>, S: StrategySet>(
 
 // ------------------------------------------------------------------------------- recon
 
+pub(crate) fn reconcile_batch<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    slot: &InputSlot,
+) -> R<()> {
+    let batch =
+        hft_event::ReconcileBatchView::read(slot.body()).map_err(|_| FatalReason::ReconcileEvidence)?;
+    if e.cmd.recon.iter().any(|g| {
+        g.report_id == batch.hdr.report_id && g.account == batch.hdr.account && g.venue == batch.hdr.venue
+    }) {
+        return Err(FatalReason::ReconcileEvidence);
+    }
+    let flags = batch
+        .reports()
+        .find(|r| r.item == ITEM_SUMMARY)
+        .map_or(0, |r| r.sflags);
+    let applicable = flags
+        & (ReconcileReport::USERSTREAM_DOWN
+            | ReconcileReport::TRUNCATED
+            | ReconcileReport::HISTORY_UNCHECKED)
+        == 0
+        && batch
+            .reports()
+            .filter(|r| r.item == ITEM_POSITION && r.sflags & ReconcileReport::AUTO_EXTERNAL != 0)
+            .all(|r| auto_external_check(e, &r, flags));
+    if applicable {
+        e.ledger
+            .validate_reconcile_batch(&batch)
+            .map_err(FatalReason::Settlement)?;
+        e.oms.reconcile_cash_guard(&batch).map_err(FatalReason::OmsCash)?;
+    }
+    e.seq_note(
+        note::RECONCILE_CASH,
+        NoteLevel::Info,
+        GROUP_NONE,
+        hft_types::INST_NONE,
+        [
+            batch.hdr.report_id,
+            u64::from(batch.hdr.venue.0) | u64::from(batch.hdr.account.0) << 8,
+            u64::from(batch.hdr.n_reports),
+            u64::from(batch.hdr.n_fills),
+            u64::from(applicable),
+            0,
+            0,
+            0,
+        ],
+    );
+    for r in batch.reports() {
+        reconcile_row(e, inst, drv, r, Some((&batch, applicable)))?;
+    }
+    Ok(())
+}
+
 pub(crate) fn reconcile<D: Driver<S>, S: StrategySet>(
     e: &mut Engine,
     inst: &mut Instances<S>,
@@ -2391,6 +2445,16 @@ pub(crate) fn reconcile<D: Driver<S>, S: StrategySet>(
     let Some(r) = slot.read::<ReconcileReport>() else {
         return Ok(());
     };
+    reconcile_row(e, inst, drv, r, None)
+}
+
+fn reconcile_row<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    r: ReconcileReport,
+    batch: Option<(&hft_event::ReconcileBatchView<'_>, bool)>,
+) -> R<()> {
     let key = (r.report_id, r.account, r.venue);
     let gi = match e
         .cmd
@@ -2461,17 +2525,26 @@ pub(crate) fn reconcile<D: Driver<S>, S: StrategySet>(
         .iter()
         .filter(|x| x.item == ITEM_POSITION && x.sflags & ReconcileReport::AUTO_EXTERNAL != 0)
     {
-        if auto_external_check(e, it, summary_flags) {
-            let mark = e.market.row(it.inst).map_or(hft_types::Px(0), |r| r.mark_px);
-            let x = hft_ledger::Ledger::auto_external_fill(
-                it.account,
-                it.venue,
-                it.inst,
-                Qty(it.engine_qty.0 - it.exch_qty.0),
-                mark,
-                it.report_id,
-            );
-            crate::process::external_fill(e, inst, drv, &x, true, false)?;
+        if batch.map_or_else(
+            || auto_external_check(e, it, summary_flags),
+            |(_, applies)| applies,
+        ) {
+            if let Some((batch, _)) = batch {
+                for fill in batch.fills().filter(|f| f.inst == it.inst) {
+                    crate::process::external_fill(e, inst, drv, &fill, true, false)?;
+                }
+            } else {
+                let mark = e.market.row(it.inst).map_or(hft_types::Px(0), |r| r.mark_px);
+                let x = hft_ledger::Ledger::auto_external_fill(
+                    it.account,
+                    it.venue,
+                    it.inst,
+                    Qty(it.engine_qty.0 - it.exch_qty.0),
+                    mark,
+                    it.report_id,
+                );
+                crate::process::external_fill(e, inst, drv, &x, true, false)?;
+            }
             crate::mode_glue::apply_mode(
                 e,
                 inst,

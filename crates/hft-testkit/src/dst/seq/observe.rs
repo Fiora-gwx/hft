@@ -42,6 +42,7 @@ fn can_fill(k: EventKind) -> bool {
         EventKind::ORDER_EVENT,
         EventKind::EXTERNAL_FILL,
         EventKind::RECONCILE_REPORT,
+        EventKind::RECONCILE_BATCH,
         EventKind::CONTROL_CMD,
         EventKind::POSITION_REPORT,
         EventKind::BALANCE_REPORT,

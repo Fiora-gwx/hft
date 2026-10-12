@@ -60,6 +60,51 @@ fn original_external(eid: u64) -> hft_event::ExternalFill {
 }
 
 #[test]
+fn oms_476_reconcile_cash_capacity_counts_distinct_order_identities() {
+    use hft_event::{ReconcileBatchHdr, ReconcileBatchView, ReconcileReport};
+    use zerocopy::{FromZeros, IntoBytes};
+    let mut h = H::with(|c| c.foreign_fill_track.set(VX, A1, 2));
+    h.o.remember_external_cash(&original_external(70)).unwrap();
+    let mut summary = ReconcileReport::new_zeroed();
+    summary.report_id = 7;
+    summary.venue = VX;
+    summary.account = A1;
+    summary.item = 5;
+    summary.count = 2;
+    let mut p = summary;
+    p.item = 1;
+    p.idx = 1;
+    p.inst = Y;
+    p.sflags = ReconcileReport::AUTO_EXTERNAL;
+    let hdr = ReconcileBatchHdr {
+        report_id: 7,
+        n_reports: 2,
+        n_fills: 2,
+        venue: VX,
+        account: A1,
+        _pad: 0,
+    };
+    let first = original_external(71);
+    let before = snap(&h.o);
+    for (eid, expected) in [(71, Ok(())), (72, Err(CashError::Capacity)), (70, Ok(()))] {
+        let second = original_external(eid);
+        let body = [
+            hdr.as_bytes(),
+            summary.as_bytes(),
+            p.as_bytes(),
+            first.as_bytes(),
+            second.as_bytes(),
+        ]
+        .concat();
+        assert_eq!(
+            h.o.reconcile_cash_guard(&ReconcileBatchView::read(&body).unwrap()),
+            expected
+        );
+        assert_eq!(snap(&h.o), before);
+    }
+}
+
+#[test]
 fn oms_467_cash_cumulative_queries_and_permutations() {
     let permutations = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
     for perm in permutations {

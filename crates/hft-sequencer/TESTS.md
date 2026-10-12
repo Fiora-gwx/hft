@@ -28,7 +28,7 @@ spec: README.md
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
 | 连接活性 | SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173 |
-| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115 |
+| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-418 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
@@ -5701,6 +5701,36 @@ spec: README.md
 - 步骤:SLOT_UNRESOLVED 与 StaleGen 各交付三个完整累计回报,重复每条,首笔后关键帧;从首个与中间快照冷读,执行完整和窗口 verify
 - 期望:每次正量仅一条 OmsForeignFill,钱包按累计原始现金改变,冷热钱包和仓位逐单位相等;重复不改变;所有真实回放通过,缺注记或错误数量的反例失败
 - 实现:`crates/hft-sequencer/tests/settlement.rs::seq_415_foreign_cash_survives_checkpoints_cold_consumption_and_replay`
+
+### SEQ-416 原始凭据补账及确认的完整回放
+
+- 规则:[实现规格](README.md#每条-input-的处理顺序process)
+- 级别:integ
+- 里程碑:M2
+- 前置:B0 严格永续结算,多空 × 部分减仓/全平四行
+- 步骤:按原始现金 −1170003、费用 397 补账;保存关键帧,交付确认、重复确认及旧批次重试;执行完整与窗口回放和独立冷账本重建
+- 期望:钱包只变动 −1170400,确认只清待确认量;补账前与待确认快照窗口、完整输入回放及独立冷账本一致
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_416_reconciliation_receipts_rebuild_wallet_and_pending_confirmation`
+
+### SEQ-417 原始凭据和输出证据损坏必须暴露
+
+- 规则:[实现规格](README.md#每条-input-的处理顺序process)
+- 级别:integ
+- 里程碑:M2
+- 前置:SEQ-416 产生的完整 journal
+- 步骤:分别隐藏或修改 ReconcileCash、派生成交注记,或只改原始费用而保留输出;执行验证回放和独立冷账本重建
+- 期望:五行验证回放均失败;坏注记冷端报错,原始金额变化由冷账本独立算出不同余额
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_417_reconciliation_cash_requires_all_raw_facts_and_output_evidence`
+
+### SEQ-418 整组预检拒绝坏凭据,不留下部分补账
+
+- 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
+- 级别:integ
+- 里程碑:M2
+- 前置:B0 严格永续结算,空头仓位数量 300000,同一组两笔买入补账
+- 步骤:第二笔分别缺现金覆盖、缺手续费资产、重复本组身份、数量超出差额、方向相反、使用已入账身份
+- 期望:六行均返回 Fatal(Settlement);第一笔也不入账,钱包、仓位、去重身份和 auto_held 保持原值,不输出财务成交注记
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_418_bad_receipt_batch_cannot_partially_book`
 
 ## 验收
 

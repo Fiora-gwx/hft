@@ -176,6 +176,8 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 | `ledger/apply_external` | hft-ledger | [hft-ledger 延迟与资源契约](../crates/hft-ledger/README.md#延迟与资源契约) | LED-251 |
 | `ledger/apply_fill` | hft-ledger | [hft-ledger 延迟与资源契约](../crates/hft-ledger/README.md#延迟与资源契约) | LED-250 |
 | `ledger/apply_funding_push` | hft-ledger | [hft-ledger 延迟与资源契约](../crates/hft-ledger/README.md#延迟与资源契约) | LED-252 |
+| `ledger/apply_reconciled_external` | hft-ledger | [hft-ledger 延迟与资源契约](../crates/hft-ledger/README.md#延迟与资源契约) | LED-294 |
+| `ledger/validate_reconcile_batch` | hft-ledger | [hft-ledger 延迟与资源契约](../crates/hft-ledger/README.md#延迟与资源契约) | LED-294 |
 | `ledger/apply_settled_external` | hft-ledger | [hft-ledger 延迟与资源契约](../crates/hft-ledger/README.md#延迟与资源契约) | LED-251 |
 | `ledger/apply_settled_fill` | hft-ledger | [hft-ledger 延迟与资源契约](../crates/hft-ledger/README.md#延迟与资源契约) | LED-250 |
 | `ledger/equity` | hft-ledger | [hft-ledger 延迟与资源契约](../crates/hft-ledger/README.md#延迟与资源契约) | LED-257 |
@@ -213,6 +215,7 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 | `oms/sweep_256` | hft-oms | [hft-oms 延迟与资源契约](../crates/hft-oms/README.md#延迟与资源契约) | OMS-449 |
 | `oms/tomb_late_fill` | hft-oms | [hft-oms 延迟与资源契约](../crates/hft-oms/README.md#延迟与资源契约) | OMS-447 |
 | `oms/unknown_query` | hft-oms | [hft-oms 延迟与资源契约](../crates/hft-oms/README.md#延迟与资源契约) | OMS-446 |
+| `oms/reconcile_cash_guard` | hft-oms | [hft-oms 延迟与资源契约](../crates/hft-oms/README.md#延迟与资源契约) | OMS-474 |
 | `oms/foreign_cash_seen` | hft-oms | [hft-oms 延迟与资源契约](../crates/hft-oms/README.md#延迟与资源契约) | OMS-474 |
 | `oms/external_cash_guard` | hft-oms | [hft-oms 延迟与资源契约](../crates/hft-oms/README.md#延迟与资源契约) | OMS-474 |
 | `oms/remember_external_cash` | hft-oms | [hft-oms 延迟与资源契约](../crates/hft-oms/README.md#延迟与资源契约) | OMS-474 |

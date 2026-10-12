@@ -504,6 +504,7 @@ impl Ledger {
             }
             if let Some(d) = self.avd.get_mut(av) {
                 d.ext.clear();
+                d.auto_cash.clear();
                 d.seen.clear();
                 d.pending.clear();
                 d.hist.clear();

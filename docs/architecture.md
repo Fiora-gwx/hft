@@ -76,7 +76,7 @@ warm 任务(不在 tick-to-trade 路径,不占热核)
 | 交易所字符串 id → slot 映射 | 对应 gw 线程 | 解码时写进 `OrderEvent.slot` |
 | refdata、策略参数、`RiskParams` | sequencer(经 `ConfigBlob`/`ControlCmd` 整体替换) | journal |
 | kill 字 | sequencer 写,每个 gw 读自己的那一个 | 唯一允许的跨线程共享可变量(位布局 `KillBits` 归 [hft-types](../crates/hft-types/README.md)) |
-| 交易所真值(REST 仓位、余额、挂单、成交、资金费流水) | reconciler | `ReconcileReport` 经控制环进入;资金费差异只告警,由 ledger 自动校正 |
+| 交易所真值 | reconciler | `ReconcileReport` / `ReconcileBatch` 经控制环进入,处理归 [sequencer](../crates/hft-sequencer/README.md#每条-input-的处理顺序process) |
 | 保证金率、强平价、ADL 档、账户配置(含实际杠杆) | venue gw | `MarginReport`、`AccountConfigReport` 事件 |
 | 链上池状态、nonce、tx 生命周期(optional) | chain-core | 经外部 venue 协议进入 |
 

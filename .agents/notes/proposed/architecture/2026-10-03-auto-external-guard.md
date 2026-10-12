@@ -2,6 +2,8 @@
 
 Status: proposed
 
+严格现金能力范围由[原始对账凭据](../../implemented/architecture/2026-10-13-reconcile-cash-receipts.md)收窄;本提案的数量型抵扣仅保留旧能力语义。
+
 ## Problem
 
 reconciler 的 `AUTO_EXTERNAL` 置位条件不排除带 `USERSTREAM_DOWN` 的轮次,sequencer 复核也不看:用户流仍断着时就合成一笔 `ExternalFill{Unknown}`,交易所随后补推真实的强平/ADL,两笔键不同、都会入账,策略与执行层的默认处理会按"被减了两次"卖出现货,形成真实裸空永续。合成成交要不要另写一条记录,sequencer、reconciler、defensive-patterns 与 testing 四处说法不一;冷读者(reconciler 的引擎视图、hft-py)只经 hft-ledger 消费 journal 事件,看不到 sequencer 内合成的那笔([X1 评审](../../../../design/_work/review-2026-10-03-M0e-X1资金正确性.md) P1-C;[X3 评审](../../../../design/_work/review-2026-10-03-M0e-X3一致性.md) P0-3)。

@@ -29,7 +29,7 @@ spec: README.md
 | 延迟样本 | OMS-012, OMS-071, OMS-080–OMS-089 |
 | REPORT_DECODE | OMS-090, OMS-091 |
 | 恢复后的 gw 映射 | OMS-092, OMS-093 |
-| 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460、OMS-467、OMS-468、OMS-470–OMS-475 |
+| 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460、OMS-467、OMS-468、OMS-470–OMS-475、OMS-476 |
 | 成交净量(B4) | OMS-067, OMS-120–OMS-124, OMS-184, OMS-404 |
 | Unknown 收敛流程 | OMS-032, OMS-065, OMS-066, OMS-068, OMS-070, OMS-073, OMS-089, OMS-130–OMS-154, OMS-400, OMS-402, OMS-420 |
 | 墓碑与迟到成交(C1) | OMS-013, OMS-148, OMS-160–OMS-164, OMS-287, OMS-322, OMS-462、OMS-469 |
@@ -4297,6 +4297,16 @@ spec: README.md
 - 步骤:重置模拟账户,再向两账户交付相同回报
 - 期望:模拟账户按新资金周期重新记账;另一账户保留水位且不重复入账
 - 实现:`crates/hft-oms/tests/settlement.rs::oms_475_sim_reset_clears_only_that_accounts_foreign_cash`
+
+### OMS-476 对账整组来源容量预检
+
+- 规则:[实现规格](README.md#回报匹配与成交增量)
+- 级别:unit
+- 里程碑:M2
+- 前置:来源容量为 2,已有 1 行
+- 步骤:预检两笔同订单、两个不同新订单、现有订单与新订单三组凭据;比较每组前后的快照
+- 期望:同一订单只占一行,两个新订单报 Capacity;全部预检不改变快照
+- 实现:`crates/hft-oms/tests/settlement.rs::oms_476_reconcile_cash_capacity_counts_distinct_order_identities`
 
 ## 验收
 

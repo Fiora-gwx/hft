@@ -97,3 +97,8 @@ allocs = 0
 p50_ns = 300
 p99_ns = 800
 allocs = 0
+
+["oms/reconcile_cash_guard"]
+p50_ns = 500
+p99_ns = 2000
+allocs = 0

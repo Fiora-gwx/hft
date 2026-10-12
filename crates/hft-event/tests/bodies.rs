@@ -52,6 +52,7 @@ pub fn bodies() -> Vec<BodyRow> {
         row::<MarginReportHdr>(1),
         row::<AccountConfigReportHdr>(1),
         row::<AdviceHdr>(1),
+        row::<ReconcileBatchHdr>(1),
         row::<L2SnapHdr>(2),
         row::<CmdHdr>(2),
         row::<BlobHdr>(2),

@@ -304,6 +304,36 @@ pub struct ReconActor {
 }
 
 impl ReconActor {
+    /// Package one complete account/venue report group with original exchange receipts.
+    /// The caller selects the missing executions from the exchange's retained history.
+    pub fn settled_input(
+        reports: &[ReconcileReport],
+        receipts: &[super::venue_behavior::ExternalReceipt],
+    ) -> Result<InputRec, &'static str> {
+        let first = reports.first().ok_or("empty reconciliation")?;
+        let hdr = hft_event::ReconcileBatchHdr {
+            report_id: first.report_id,
+            venue: first.venue,
+            account: first.account,
+            n_reports: u16::try_from(reports.len()).map_err(|_| "too many reports")?,
+            n_fills: u16::try_from(receipts.len()).map_err(|_| "too many receipts")?,
+            _pad: 0,
+        };
+        let mut body = hdr.as_bytes().to_vec();
+        for r in reports {
+            body.extend_from_slice(r.as_bytes());
+        }
+        for r in receipts {
+            body.extend_from_slice(r.fill.as_bytes());
+        }
+        hft_event::ReconcileBatchView::read(&body).map_err(|_| "invalid reconciliation group")?;
+        Ok(InputRec {
+            kind: hft_event::EventKind::RECONCILE_BATCH,
+            body,
+            src: Source::Recon,
+        })
+    }
+
     pub fn new(period_ns: u64) -> ReconActor {
         ReconActor {
             period_ns,

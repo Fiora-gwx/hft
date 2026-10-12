@@ -126,7 +126,7 @@ pub fn classify(kind: EventKind, logical_body: &[u8]) -> Result<Role, DecodeErr>
     // 记录的实际类别(Input/Output/Meta,从不返回 ByBody);未登记 kind → UnknownKind;ByBody 的判定字段越界 → InvalidEnum(见下)
 ```
 
-Var 尾部长度 L 由前缀计数推出:`Advice` = `AdviceHdr.len`;`MarginReport` = 16 × `n`;`AccountConfigReport` = 16 × `n_lev`;`L2Batch` = 16 × (`n_bids` + `n_asks`)。
+Var 尾部长度 L 由前缀计数推出:`Advice` = `AdviceHdr.len`;`MarginReport` = 16 × `n`;`AccountConfigReport` = 16 × `n_lev`;`L2Batch` = 16 × (`n_bids` + `n_asks`);`ReconcileBatch` = 104 × `n_reports` + 96 × `n_fills`。
 
 - 所有体 `#[repr(C)]`、无隐式填充(`IntoBytes` 派生强制)、大小是 8 的倍数、无指针/`String`/`Vec`;每个体写出全部 `_pad`,并对大小与本 README 注释中的每个偏移写 `size_of`/`offset_of` 编译期断言([hft-types 布局规则](../hft-types/README.md#布局规则全仓-reprc-结构适用))。含枚举字段的体只能派生 `TryFromBytes`(枚举 0 值与越界值非法),`read`/`view` 顺带完成枚举合法性检查——跨进程与 journal 读取的损坏数据在这里被拒绝。
 - 线格式只支持小端;大端目标编译失败。
@@ -577,6 +577,7 @@ pub struct Note {                   // 0x0506,80 B;热路径唯一的"日志",�
 | 码名 | source | 级别 | 含义与 `v[]`(语义归) |
 |---|---|---|---|
 | `EpochStart` | Sequencer | Info | 每次进程启动恰好一条,是处理 [`EngineClock`](#engineclock0x050ainput) 的同一事件的输出;v[0] = engine_epoch,v[1] = `EngineClock.base_engine_ns`,v[2] = 该 `EngineClock` 记录的 seq;SDK `Now.boot_seq` = 本条的 seq;reconciler 据此立即对账 |
+| `ReconcileCash` | Sequencer | Info | 原始结算批次是否应用;字段见[变长记录前缀](#变长记录前缀) |
 | `Conflated` | Sequencer | Info | BBO 积压合并计数(hft-sequencer) |
 | `DrainTimeout` | Sequencer | 按条件:有未结束的链接或未到达的引擎减仓目标 P0,否则 P1 | Drain 超时,`v[]` 列出未完成的账户(等待条件、定级与 `v[]` 归 hft-sequencer;退出码归 apps/hft-core) |
 | `RecoverMismatch` | Sequencer | P0 | 恢复时决策不一致:v[0] = venue \| account << 8,v[1] = 不一致记录的 seq |
@@ -961,7 +962,7 @@ pub enum FeedCmd {                   // sequencer → feed 的 feedctl-<venue> �
 
 ```rust
 #[repr(C)] pub struct CtlRecordHdr { pub kind: EventKind, pub flags: u16 /* PART 等,同 RecordFlags */, pub len: u32 } // 8 B,其后 len 字节体
-pub struct CtlRecord<'a> { pub kind: EventKind, pub flags: RecordFlags, pub body: &'a [u8] }  // kind ∈ {ControlCmd, ConfigBlob, ReconcileReport, Note{CtlAudit}}
+pub struct CtlRecord<'a> { pub kind: EventKind, pub flags: RecordFlags, pub body: &'a [u8] }  // kind ∈ {ControlCmd, ConfigBlob, ReconcileReport, ReconcileBatch, Note{CtlAudit}}
 impl<'a> CtlRecord<'a> {
     pub fn encoded_len(&self) -> usize;                                    // 8 + body.len(),向上取 8
     pub fn encode_into(&self, out: &mut [u8]) -> Result<usize, EncodeErr>; // 调用方从 ByteProducer::reserve 拿到 out 后 commit;本 crate 不依赖 hft-rt;
@@ -1155,6 +1156,18 @@ impl<'b> Reassembler<'b> {
 
 `Advice`(0x0503,Var)的前缀 `AdviceHdr` 见[策略载荷容器](#advice0x0503varinput);`MarginReport`(0x0208,Var)的前缀 `MarginReportHdr` 与 `AccountConfigReport`(0x0209,Var)的前缀 `AccountConfigReportHdr` 见[执行](#执行0x02xx)。`StateSnapshot`(0x0504,Multi)的逻辑体结构(`SnapshotHdr` + 分节)在 [journal-format](../../docs/subsystems/journal-format.md#快照记录结构) 定义,本 crate 实现其类型。raw journal 记录头的 `tsc` 是 `rx_tsc`(RawRx)或 `sent_tsc`(RawTx)。
 
+`ReconcileBatch` 为 0x0405、schema v1、Input、Var,不是 ControlCmd。`ReconcileBatchHdr` 为 16 B,随后依序是完整的 ReconcileReport v3 数组和 ExternalFill v3 原始成交数组。单组同账户同 venue,条目 2..=256、凭据 1..=256,尾长至多 51200 B。首项必须为唯一 Summary,idx 连续,count 一致,Position 品种不得重复。`ReconcileBatchView::read` 拒绝截断、多余字节、错误枚举、身份错配与非零保留字段,迭代器不分配。成交的金额核验归 hft-ledger,适用性复核归 hft-sequencer。
+
+```rust
+#[repr(C)] pub struct ReconcileBatchHdr { // 草案,16 B,align 8;以编译期断言为准
+    pub report_id: u64,                  // 0
+    pub n_reports: u16, pub n_fills: u16, // 8、10
+    pub venue: VenueId, pub account: AccountId, pub _pad: u16, // 12、13、14
+}
+```
+
+`Note{Sequencer,ReconcileCash}` 的源内码为 14,级别 Info。group/inst/strategy/pad 为零;v 依序为 report_id、venue | account<<8、报告数、凭据数、是否应用(0/1)、三个零。每组一条,先于本组财务派生记录;它只证明是否应用,不携带金额答案。
+
 ## 实现说明
 
 <details><summary>实现要点</summary>
@@ -1193,7 +1206,7 @@ impl<'b> Reassembler<'b> {
 | `src/var.rs` | `PartHdr`、`L2SnapHdr`、`BlobHdr`、`RawHdr`、`SnapshotHdr`/`SectionHdr`;`multi_view`、`PartIter`(拆分)与 `Reassembler`(重组,调用方提供缓冲) |
 | `src/codec.rs` | `encode_fixed`、`encode_var`、`decode_record`、`classify`、CRC32C(`crc32c` crate,ARMv8 CRC 指令) |
 | `src/ring.rs` | `FeedMsg`、`RepMsg`、`HkMsg`、`OutMsg`、`GwCmd`、`FeedCmd`、`CtlRecord`、`AdviceMsg`(进程内环元素与 ctl、advice 帧) |
-| `src/schema.rs` | `FieldDesc`/`EnumDesc`、`catalog()`(返回 `Catalog`:39 个生产 kind、`CmdKind`、`NOTE_NAMES`、SPB1 与分帧结构、全部码表、`MEASURE_MASK`;测试 kind 不导出) |
+| `src/schema.rs` | `FieldDesc`/`EnumDesc`、`catalog()`(返回 `Catalog`:40 个生产 kind、`CmdKind`、`NOTE_NAMES`、SPB1 与分帧结构、全部码表、`MEASURE_MASK`;测试 kind 不导出) |
 | `src/codes.rs` | 整数编码字段的码表与位集合(`EnumDesc`) |
 
 </details>

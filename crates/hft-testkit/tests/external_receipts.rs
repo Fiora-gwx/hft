@@ -272,3 +272,108 @@ fn tk_132_replayed_adl_keeps_real_engine_wallet_after_recovery() {
         }
     }
 }
+
+#[test]
+fn tk_133_raw_receipts_reconcile_gap_then_confirm_after_restart() {
+    use hft_event::ReconcileReport;
+    use hft_testkit::dst::sut::{BootCtx, CrashPoint, StepOut, Sut};
+    use hft_testkit::dst::{SeqSut, actors::ReconActor};
+    use hft_testkit::strategies::TestStrategies;
+    use zerocopy::FromZeros;
+    for side in [Side::Buy, Side::Sell] {
+        for qty in [100_000, 200_000] {
+            let world = WorldSpec::w1();
+            let mut e = SeqSut::<TestStrategies>::boot(&BootCtx {
+                seed: 1,
+                world: &world,
+                planted: &[],
+                tsc_hz: 1_000_000_000,
+            })
+            .unwrap();
+            let mut v = venue();
+            let opening = seed(&mut v, side);
+            let mut out = StepOut::default();
+            e.process(
+                10 * MS,
+                10 * MS,
+                &InputRec::of(&opening, Source::Venue(VP)),
+                &mut out,
+            );
+            v.m.external(ACCT_A, P1, side.opposite(), qty, "adl-missed", false, 20 * MS);
+            let original = v.m.external_history().last().unwrap().clone();
+            let expected = v.truth(101 * MS);
+            let truth = expected
+                .iter()
+                .find(|t| t.account == ACCT_A && t.venue == VP)
+                .unwrap();
+            let truth_wallet = truth.balances.iter().find(|(a, _)| *a == USDT).unwrap().1;
+            let truth_position = truth
+                .positions
+                .iter()
+                .find(|(i, _)| *i == P1)
+                .map_or(0, |(_, q)| *q);
+            // First complete stable view; the following report can request AUTO_EXTERNAL.
+            let mut summary = ReconcileReport::new_zeroed();
+            summary.report_id = 901;
+            summary.venue = VP;
+            summary.account = ACCT_A;
+            summary.item = 5;
+            summary.count = 1;
+            summary.view_seq = e.journal().last().unwrap().seq;
+            e.process(
+                100 * MS,
+                100 * MS,
+                &InputRec::of(&summary, Source::Recon),
+                &mut out,
+            );
+            assert!(e.sequencer().engine().risk.auto_external_ok(ACCT_A, VP, 0));
+            summary.report_id = 902;
+            summary.count = 2;
+            summary.view_seq = e.journal().last().unwrap().seq;
+            let mut position = summary;
+            position.idx = 1;
+            position.item = 1;
+            position.inst = P1;
+            position.engine_qty = Qty(side.sign() * 200_000);
+            position.exch_qty = Qty(side.sign() * (200_000 - qty));
+            position.sflags = ReconcileReport::AUTO_EXTERNAL;
+            let input = ReconActor::settled_input(&[summary, position], &[original.clone()]).unwrap();
+            e.process(101 * MS, 101 * MS, &input, &mut out);
+            let cash = if side == Side::Buy { 8_600 } else { -8_600 } * (qty / 100_000);
+            assert_eq!(truth_wallet, i128::from(50_000_000_000i64 + cash));
+            assert_eq!(truth_position, i128::from(position.exch_qty.0));
+            assert_eq!(
+                e.sequencer()
+                    .engine()
+                    .ledger
+                    .auto_held(ACCT_A, P1, side.opposite()),
+                Qty(qty)
+            );
+            assert_eq!(e.rebuilt_hashes(), Ok(Some(e.hashes())));
+            e.crash_and_recover(CrashPoint::SeqInput, None).unwrap();
+            // The transport classifier may refine Unknown to ADL; money and key stay exact.
+            let mut late = original.fill;
+            late.cause = ExternalCause::Adl;
+            for now in [102 * MS, 103 * MS] {
+                e.process(now, now, &InputRec::of(&late, Source::Venue(VP)), &mut out);
+                let l = &e.sequencer().engine().ledger;
+                assert_eq!(l.auto_held(ACCT_A, P1, side.opposite()), Qty(0));
+                assert_eq!(l.pos(ACCT_A, P1).qty, position.exch_qty);
+                assert_eq!(
+                    i128::from(
+                        l.venue_book(ACCT_A, VP)
+                            .cash
+                            .iter()
+                            .find(|c| c.asset == USDT)
+                            .unwrap()
+                            .total
+                            .0
+                    ),
+                    truth_wallet
+                );
+                assert_eq!(e.rebuilt_hashes(), Ok(Some(e.hashes())));
+            }
+            assert_eq!(v.truth(101 * MS), expected);
+        }
+    }
+}

@@ -62,7 +62,7 @@ macro_rules! fixed_all {
     ($($t:ty),* $(,)?) => { vec![$((<$t as Body>::KIND, fixed::<$t>(<$t>::FIELDS))),*] };
 }
 
-/// `(kind, record bytes)` for all 39 production kinds, ascending by number.
+/// `(kind, record bytes)` for all 40 production kinds, ascending by number.
 pub fn records() -> Vec<(EventKind, Vec<u8>)> {
     let mut v = fixed_all!(
         Bbo,
@@ -110,6 +110,11 @@ pub fn records() -> Vec<(EventKind, Vec<u8>)> {
         ),
     ));
     let bh = L2BatchHdr::FIELDS;
+    let rh = ReconcileBatchHdr::FIELDS;
+    v.push((
+        EventKind::RECONCILE_BATCH,
+        var::<ReconcileBatchHdr>(rh, 104 * count(rh, "n_reports") + 96 * count(rh, "n_fills")),
+    ));
     v.push((
         EventKind::L2_BATCH,
         var::<L2BatchHdr>(bh, 16 * (count(bh, "n_bids") + count(bh, "n_asks"))),

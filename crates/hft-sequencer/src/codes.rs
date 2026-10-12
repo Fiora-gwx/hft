@@ -106,6 +106,7 @@ pub mod note {
     pub const TIMERS_CANCELLED: u32 = 11;
     pub const TARGET_CLEARED: u32 = 12;
     pub const POSITION_DIFF: u32 = 13;
+    pub const RECONCILE_CASH: u32 = 14;
 }
 
 /// The `(source, n, name)` table of the Sequencer Notes.
@@ -127,6 +128,7 @@ pub const NOTE_CODES: &[(NoteSource, u32, &str)] = &[
     (NoteSource::Sequencer, note::TIMERS_CANCELLED, "TimersCancelled"),
     (NoteSource::Sequencer, note::TARGET_CLEARED, "TargetCleared"),
     (NoteSource::Sequencer, note::POSITION_DIFF, "PositionDiff"),
+    (NoteSource::Sequencer, note::RECONCILE_CASH, "ReconcileCash"),
 ];
 
 /// Full code of a Sequencer Note.

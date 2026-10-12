@@ -972,6 +972,8 @@ const _: () = assert!(size_of::<TableRow>() == 32 && size_of::<LinkRowHdr>() == 
 
 </details>
 
+`reconcile_cash_guard(&ReconcileBatchView)` 在任何财务处理前同时核对来源冲突和整组所需容量。同一原始订单的多笔成交只占一个来源行;批内 distinct 新身份总数必须不大于剩余 foreign_fill_track,失败无副作用。
+
 ## 延迟与资源契约
 
 分段:`decided_tsc − proc_tsc`(簿 + 策略 + 执行层 + 风控 + OMS,基准形态 1–5 µs,[00 §4](../../design/00-目标与延迟预算.md));OMS 占其中以下份额。测量:Criterion 基准(热缓存,单核)+ 实盘 `LatencySample` 分段直方图。
@@ -988,6 +990,7 @@ const _: () = assert!(size_of::<TableRow>() == 32 && size_of::<LinkRowHdr>() == 
 | 墓碑命中的迟到成交 | ≤ 120 ns | ≤ 350 ns | `oms/tomb_late_fill` |
 | `has_foreign_cash`(64 行) | ≤ 150 ns | ≤ 400 ns | `oms/foreign_cash_seen` |
 | `external_cash_guard`(64 行) | ≤ 150 ns | ≤ 400 ns | `oms/external_cash_guard` |
+| `reconcile_cash_guard`(64 现有行、2 报告、1 凭据) | ≤ 500 ns | ≤ 2000 ns | `oms/reconcile_cash_guard` |
 | `remember_external_cash`(64 行重复身份) | ≤ 300 ns | ≤ 800 ns | `oms/remember_external_cash` |
 | `external_adjust` / `net_adjust` | ≤ 30 ns | ≤ 80 ns | `oms/leg_adjust` |
 | `on_sweep`(256 槽) | ≤ 3 µs | ≤ 8 µs | `oms/sweep_256` |

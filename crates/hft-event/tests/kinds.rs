@@ -93,6 +93,17 @@ fn evt_004_kinds_registry() {
         (0x0402, "CmdResult", Control, L::F(144), O, 3, s, N, false),
         (0x0403, "ConfigBlob", Control, L::M(72), B, 1, sc, A, false),
         (0x0404, "ReconcileReport", Control, L::F(104), I, 3, s, N, false),
+        (
+            0x0405,
+            "ReconcileBatch",
+            Control,
+            L::V(16, 51_200),
+            I,
+            1,
+            s,
+            N,
+            false,
+        ),
         (0x0501, "Timer", System, L::F(24), I, 1, s, N, false),
         (0x0502, "ConnState", System, L::F(24), I, 2, s, N, false),
         (0x0503, "Advice", System, L::V(32, 4_096), I, 1, s, N, false),
@@ -125,9 +136,9 @@ fn evt_004_kinds_registry() {
         assert_eq!(e.optional, opt, "{row}");
     }
     if !cfg!(feature = "dev-kinds") {
-        assert_eq!(KINDS.len(), 39);
+        assert_eq!(KINDS.len(), 40);
     }
-    assert_eq!(KINDS.iter().filter(|k| k.domain != Domain::Test).count(), 39);
+    assert_eq!(KINDS.iter().filter(|k| k.domain != Domain::Test).count(), 40);
 }
 
 #[test]

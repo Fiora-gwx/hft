@@ -44,6 +44,8 @@ impl Ledger {
     pub fn apply_external(&mut self, e: &ExternalFill, auto_recon: bool, t: i64) -> Option<ExternalApplied>;
     /// 本笔外来永续成交的完整现金事实;不接受未证明的 auto_held 重叠。
     pub fn apply_settled_external(&mut self, e: &ExternalFill, t: i64) -> Result<Option<ExternalApplied>, SettlementError>;
+    pub fn apply_reconciled_external(&mut self, e: &ExternalFill, t: i64) -> Result<Option<ExternalApplied>, SettlementError>;
+    pub fn validate_reconcile_batch(&self, batch: &ReconcileBatchView) -> Result<(), SettlementError>;
     /// AUTO_EXTERNAL 合成成交的唯一实现(纯函数):sequencer 复核通过后调用,冷读者经 journal 消费路径调用同一函数(见"外部成交"第 6 步)。
     /// engine_minus_exch = 引擎仓位 − 交易所仓位(有符号,≠ 0)。
     pub fn auto_external_fill(a: AccountId, v: VenueId, inst: InstId, engine_minus_exch: Qty, mark_px: Px, report_id: u64) -> ExternalFill;
@@ -298,6 +300,10 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 
 **与本系统订单成交的去重**:gw 对成交按契约 22 的键去重,同一笔只报一次;无法归属到槽的成交 gw 先暂存 `gw.unmatched_hold_ms`(默认 5 000,[hft-venue](../hft-venue/README.md))仍无法归属才发 `ExternalFill{cause = Unknown}`;`cause = Unknown` 的外来成交之后若仍被 `QueryResult` 或迟到回报认定为本系统订单的成交,OMS 在产出 `FillOut` 时扣除已按外来成交入账的量并置 `EXT_DEDUP`([hft-oms](../hft-oms/README.md)),本 crate 收到的 `FillDelta` 已是去重后的量;先按外来入账的那部分 PnL 留在 `external` 列。OMS 防御路径的 `ForeignFill` 由 sequencer 构造成 `ExternalFill{cause = Unknown}` 走同一入口(同样过第 1 步去重)。
 
+`PERP_CASH` 对账用原始成交,不采用标记价估算。`validate_reconcile_batch` 在全组处理前核对完整现金覆盖、账户/品种/方向、费用资产、原始成交键、每品种凭据数量之和与报告差量,已入账键和批内重复键不得解释新差额。缺凭据、错误方向、重复键、容量不足均失败。`apply_reconciled_external` 只入账一次,按原始键保留待确认凭据,与普通去重环分开;每 (account,venue) 上限为 ext_dedup_cap,启动预分配,满时 ReceiptCapacity,不能淘汰。
+
+迟到 ExternalFill 命中待确认键时,数量、价格、费用、资产、订单号、现金覆盖/金额和交易所时间必须一致,否则 ReceiptConflict。rx_tsc 不参与比较;Unknown、ADL、Liquidation 之间的原因细分不改变资金身份。完全匹配只减少该笔 auto_held,不再次动钱包、仓位或费用。不同键照常入账,即使同方向仍有待确认记录;仅有旧数量而无原始凭据的重叠仍报 ExternalOverlap。SimReset 清除本账户待确认凭据。普通去重环绕回不淘汰待确认记录,确认后把原始键重新放回普通环。
+
 ### 冷消费者(`JournalLedger`)
 
 `FillDelta`/`FeeDelta` 不写 journal(它们是 OMS 处理 `OrderEvent` 的同一事件内的派生量),冷读者按下表从 journal 记录重建同样的调用,得到与引擎相同的持仓、库存与余额:
@@ -306,7 +312,7 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 
 `apply` 遇到无法证明的入账返回 `JournalApplyError`,之后持续返回首个错误,调用方必须停止读取。`PERP_CASH` 的普通订单按完整身份及累计覆盖量计算现金增量,调用 `apply_settled_fill`;同水位不同金额、缺失/越界覆盖、减法溢出、找不到订单或重复登记身份都失败。FeeOnly 与查询后的补费不推进现金水位。失败成交不改账本或水位;未启用该能力的回报沿用本地计算。原始回报身份与登记品种不符时也明确报错。
 
-`PERP_CASH` 的原始 ExternalFill 使用 `apply_settled_external`,错误映射为 `Settlement`;非零订单号保留原始来源;已有任一种来源的订单不能再由普通槽入账,SimReset 清除被重置账户的来源和水位。未映射 Fill/PartialFill 的完整累计结算先与冷端自己的外来水位相减,等待同事件 OmsForeignFill,逐字段核对身份、账户绑定的策略、方向、路径、数量、价格、费用及累计量,保留字段必须为零,通过后调用 `apply_settled_external`。注记不携带现金答案;重复、缺失、错误或跨事件注记报 ForeignEvidence 并锁存。每次正量入账后才推进水位,重复/旧累计量不记账。冷端来源与水位总数上限为 SLOT_MAP_CAP,满时 ForeignCapacity;AUTO_EXTERNAL 或同订单跨来源重叠仍返回 `UnsupportedExternalCash`;未验证的外来抵扣不得按数量比例分配现金或退回估算。此边界限制开关的启用范围,见已知限制。
+`PERP_CASH` 的原始 ExternalFill 使用 `apply_settled_external`,错误映射为 `Settlement`;非零订单号保留原始来源;已有任一种来源的订单不能再由普通槽入账,SimReset 清除被重置账户的来源和水位。未映射 Fill/PartialFill 的完整累计结算先与冷端自己的外来水位相减,等待同事件 OmsForeignFill,逐字段核对身份、账户绑定的策略、方向、路径、数量、价格、费用及累计量,保留字段必须为零,通过后调用 `apply_settled_external`。注记不携带现金答案;重复、缺失、错误或跨事件注记报 ForeignEvidence 并锁存。每次正量入账后才推进水位,重复/旧累计量不记账。冷端来源与水位总数上限为 SLOT_MAP_CAP,满时 ForeignCapacity;缺原始凭据的 AUTO_EXTERNAL 或同订单跨来源重叠仍返回 `UnsupportedExternalCash`;未验证的外来抵扣不得按数量比例分配现金或退回估算。此边界限制开关的启用范围,见已知限制。
 
 | 记录 | 处理 |
 |---|---|
@@ -314,6 +320,7 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 | `StateSnapshot` | 每个快照保留一份从自身已入账事实起步、清空非持久视图后继续消费后缀的冷副本。Recovery 只从该副本取得时钟、漂移标志与逐 venue 更新时间,其余派生金额从主冷账本的事实重算;不读新快照的仓位/余额覆盖累计状态。普通快照不重置主视图;副本最多一层,随下一个快照替换 |
 | `OrderDecision{action = New}`(Output,`reject = 0` 且未置 `SHADOW`) | 槽映射登记 `(venue, account, epoch, slot, gen) → (inst, side, group)`;容量 = Σ 各表 `slots` × (`tombstone_gens` + 1)(OMS 配置),满时淘汰最早登记的一项(`map_evicted` +1) |
 | `OrderEvent`(Input) | 按 `(ev.venue, ev.account, ev.epoch, ev.slot, ev.gen)` 查映射;`cum_filled` 大于该槽已记累计量时,增量 = `cum_filled − 已记`,增量名义 = `avg_px × cum_filled − 已记名义`,手续费按 [hft-oms 回报匹配与成交增量](../hft-oms/README.md#回报匹配与成交增量) 与 [成交净量](../hft-oms/README.md#成交净量b4) 的同一口径,构造 `FillDelta`/`FeeDelta`(`PERP_CASH` 使用上述结算入口;`seq` = 该 `OrderEvent` 的 seq,与引擎由 OMS `FillOut`/`FeeOut` 带出的值相同;group 轮次的 `open_seq` 取它)调 `apply_fill`/`apply_fee`;`cum_filled` 不增(重复、乱序)→ 不入账,例外:`PartialFill`/`Fill` 的 `cum_filled` 大于该槽此前成交类回报的最大 `cum_filled`(数量已由非成交回报带来,hft-oms 回报匹配与成交增量第 9 条)→ 只按 `FeeDelta` 入账其费用;映射缺失 → `unmapped_fills` +1,不入账(这类成交由 OMS 的 `Note{OmsForeignFill}` 另行给出,见下行) |
+| `ReconcileBatch`(Input) | 仅从原始凭据重建;同事件必须有唯一 ReconcileCash 与每笔应用的 ExternalFill 注记,字段逐项核对,缺失/重复/跨事件证据报 ReconcileEvidence 并锁存;金额不从注记或后续快照取值 |
 | `ExternalFill`(Input) | venue 或品种要求 `PERP_CASH` 时调 `apply_settled_external(e, t)`;其他情况调 `apply_external(e, false, t)` |
 | `ReconcileReport` 中带 `AUTO_RECON` 注记的 `AUTO_EXTERNAL` 条目 | "外部成交"第 6 步 |
 | `Note{OmsForeignFill}` | "外部成交"第 7 步(`external_from_oms_note`) |
@@ -459,7 +466,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 
 ### 快照行格式(节 1、13、22;草案,实现时以代码与编译期断言为准)
 
-`StateSnapshot` 的分节表与 `SectionHdr` 归 [journal-format](../../docs/subsystems/journal-format.md#快照记录结构);本 crate 定义节 1、13、22 的行(当前行版本:节 1 v2、节 13 v8、节 22 v2)。全部 `#[repr(C)]`、小端、按所列键升序;i128 以 `[u64; 2]` 小端存放。`snapshot(&self, w)` 按节 1 → 13 → 22 一次写完。
+`StateSnapshot` 的分节表与 `SectionHdr` 归 [journal-format](../../docs/subsystems/journal-format.md#快照记录结构);本 crate 定义节 1、13、22 的行(当前行版本:节 1 v2、节 13 无待确认凭据时 v8、有凭据时 v9,节 22 v2)。全部 `#[repr(C)]`、小端、按所列键升序;i128 以 `[u64; 2]` 小端存放。`snapshot(&self, w)` 按节 1 → 13 → 22 一次写完。
 
 ```rust
 // 节 1 Positions:每 (account, inst) 一行,只写 qty、cost、realized、fees 任一非零的项;键 (account, inst)
@@ -470,8 +477,8 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 
 // 节 13 LedgerGroups 与节 22 LedgerInventory:每行以 LedgerRowHdr 开头;所有 *_ens 字段为 engine_ns。
 // 节 13 顺序 Account* → Rate* → Px* → (Group 行紧跟其 Pending 行)* → Margin* → FundPending* → (FundMark 行紧跟其 FundHist 行)* → FundNoHist*
-//        → FundSeen* → ExtSeen* → AutoHeld*;节 22 顺序 Cash* → Inv*
-#[repr(C)] pub struct LedgerRowHdr { pub kind: u8 /* Account=1 Rate=2 Group=3 Pending=4 Cash=5 Inv=6 Margin=7 FundPending=8 FundMark=9 FundHist=10 FundNoHist=11 FundSeen=12 ExtSeen=13 AutoHeld=14 Px=15 */,
+//        → FundSeen* → ExtSeen* → AutoHeld* → AutoCash*;节 22 顺序 Cash* → Inv*
+#[repr(C)] pub struct LedgerRowHdr { pub kind: u8 /* Account=1 Rate=2 Group=3 Pending=4 Cash=5 Inv=6 Margin=7 FundPending=8 FundMark=9 FundHist=10 FundNoHist=11 FundSeen=12 ExtSeen=13 AutoHeld=14 Px=15 AutoCash=16 */,
                                      pub account: AccountId, pub venue: VenueId, pub _pad: u8,
                                      pub id: u32 /* Rate/Cash/Inv:asset;Group/Pending:group;FundHist/FundNoHist/ExtSeen/AutoHeld/Px:inst;其余 0 */ } // 8 B
 // Account:    { day: PnlBreakdown, held_notional, upnl, funding_residual }                                     88 B
@@ -526,6 +533,8 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 
 </details>
 
+节 13 的 AutoCash 行以 account/venue/inst 为头部键,同账户内按补账顺序写入。80 B 体依序为 side:u8、cause:u8、fee_asset:u16、零填充:u32、qty、px、fee、exch_order_id、trade_id、ex_ts_ns、fill_seq、cash_qty、cash_amount(末九项各 8 B)。不存 rx_tsc。恢复验证完整身份与现金覆盖、重复键、容量,每品种同向凭据数量合计必须等于 AutoHeld;写回的版本、行数和字节必须与输入一致。
+
 ## 延迟与资源契约
 
 在热进程中位于分段 `decided_tsc − proc_tsc`(成交处理)与行情处理路径上。
@@ -535,6 +544,8 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 | `apply_fill`(含现金、库存、净量复算) | ≤ 150 ns | ≤ 400 ns | `ledger/apply_fill` |
 | `apply_settled_fill`(含品种/账户/资产校验、持仓、结算与费用) | ≤ 150 ns | ≤ 400 ns | `ledger/apply_settled_fill` |
 | `apply_external`(含去重与归属) | ≤ 200 ns | ≤ 500 ns | `ledger/apply_external` |
+| `apply_reconciled_external`(一笔新凭据,空待确认表) | ≤ 500 ns | ≤ 2000 ns | `ledger/apply_reconciled_external` |
+| `validate_reconcile_batch`(2 报告、1 凭据) | ≤ 500 ns | ≤ 2000 ns | `ledger/validate_reconcile_batch` |
 | `apply_settled_external`(完整现金事实,含去重与归属) | ≤ 200 ns | ≤ 500 ns | `ledger/apply_settled_external` |
 | `apply_funding_push`(去重环 ≤ 64 项线性查找 + 入账) | ≤ 200 ns | ≤ 600 ns | `ledger/apply_funding_push` |
 | `reconcile_funding`(环内二分查找 + 入账;不在 tick-to-trade 路径) | ≤ 300 ns | ≤ 1 µs | `ledger/reconcile_funding` |
@@ -564,19 +575,20 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 - Agent Note:[冷账本槽身份](../../.agents/notes/implemented/bug-fix/2026-10-10-journal-slot-identity.md)
 - Agent Note:[冷账本完整读视图](../../.agents/notes/implemented/bug-fix/2026-10-12-cold-ledger-read-views.md)
 - Agent Note:[永续钱包的结算事实](../../.agents/notes/implemented/architecture/2026-10-12-perp-cash-settlement.md)
+- Agent Note:[按原始凭据对账](../../.agents/notes/implemented/architecture/2026-10-13-reconcile-cash-receipts.md)
 - Agent Note:[AUTO_EXTERNAL 前置条件与 auto_held](../../.agents/notes/proposed/architecture/2026-10-03-auto-external-guard.md)
 - [07 §5 仓位与盈亏记账](../../design/07-策略层.md)、[09 §4.3 对账与会计口径](../../design/09-可观测性、风控与控制面.md)
 - [hft-strategy-sdk](../hft-strategy-sdk/README.md)(`PortfolioView`)、[hft-oms](../hft-oms/README.md)、[hft-risk](../hft-risk/README.md)、[hft-exec](../hft-exec/README.md)、[hft-sim](../hft-sim/README.md)、[hft-py](../hft-py/README.md)
 
 ## 已知限制与后续工作
 
-- 普通订单与原始外来成交的 `PERP_CASH` 已接到 sequencer 与 JournalLedger;测试世界的能力与资金验收归 [hft-testkit](../hft-testkit/README.md#6-dst-框架),生产协议尚未启用。外来归属重叠、已过保留期的系统订单重新归属、对账补量、模拟恢复装配仍待接通;不重叠外来累计回报的单元与回放覆盖不代表 LED-080/081 的完整 DST 验收,未证明的严格结算路径明确失败。冷读者不完整镜像 OMS 的状态机与回收时机,跨回收的增量均价、未接受的非成交回报及外来归属仍需专门验证;普通成交用例不代表全部冷热一致性验收。
+- 普通订单与原始外来成交的 `PERP_CASH` 已接到 sequencer 与 JournalLedger;测试世界的能力与资金验收归 [hft-testkit](../hft-testkit/README.md#6-dst-框架),生产协议尚未启用。外来归属重叠、已过保留期的系统订单重新归属、生产对账服务的原始历史查询与模拟恢复装配仍待接通;不重叠外来累计回报的单元与回放覆盖不代表 LED-080/081 的完整 DST 验收,未证明的严格结算路径明确失败。冷读者不完整镜像 OMS 的状态机与回收时机,跨回收的增量均价、未接受的非成交回报及外来归属仍需专门验证;普通成交用例不代表全部冷热一致性验收。
 - 平均成本法之外(FIFO 税务口径)不支持;需要时在 hft-py 侧另算。
 - 不建模余额域(同一钱包被多个产品线共用):这种情形被"一个账户在同一交易所只用一个市场"排除([hft-refdata](../hft-refdata/README.md))。若将来放开同所现货 × 永续,需要先把现金改为按余额域记账(触发条件:决定放开该规则)。
 - 资金费自动校正依赖交易所流水:`funding_recon_window_ms`(48 h)之外的差额不再比对;水位线之前(无历史)的差额挂起到窗口结束才入账,若其实早已入账会造成一次重复入账,由余额对账报出、人工 `AdoptExchange` 收敛;`RateOnly` 所在校正之前钱包是估计值,两次对账之间余额对账条目可能出现等于未校正资金费的差额(由 reconciler 与 watchtower 处理口径)。
 - 资金费时刻按结算边界归一化:推送或流水的时刻偏离结算边界超过半个周期会被归到相邻的结算;交易所改周期后、带新周期的 `Funding` 到达之前的那次结算仍按旧周期归一化,可能与相邻结算合并,差额由对账的 `Funding` 条目校正;`INST_NONE` 按该 venue 最短周期归一化,要求各 inst 的结算边界都落在它的网格上(已知各所成立)。
 - `BalanceOnlyPush` 推送按 `(settle_ts_ns, amount)` 去重:同一结算时刻两笔金额恰好相同的不同推送会被当作重复,差额由下一轮对账的钱包条目补回(至多晚一个对账周期)。
-- **`auto_held` 不过期**:交易所不补推漏掉的强平/ADL 时,`auto_held` 会抵扣之后同向的下一笔真实强平/ADL(或无法匹配的未知成交),账本少记该笔,由下一轮对账报出(再次满足条件时 `AUTO_EXTERNAL` 补记,否则人工 `AdoptExchange`)。可选扩展:按时间或对账结果清除 `auto_held`(触发条件:测试网断流演练证实某所不补推)。
+- **旧能力的数量型 `auto_held` 不过期**:未启用 PERP_CASH 时,交易所不补推漏掉的强平/ADL 时,`auto_held` 会抵扣之后同向的下一笔真实强平/ADL(或无法匹配的未知成交),账本少记该笔,由下一轮对账报出(再次满足条件时 `AUTO_EXTERNAL` 补记,否则人工 `AdoptExchange`)。可选扩展:按时间或对账结果清除 `auto_held`(触发条件:测试网断流演练证实某所不补推)。
 - 外来成交去重环有容量(`ext_dedup_cap`):早于环内最旧键的同一笔成交被交易所再次回放时会重复入账,由余额对账报出、人工处理(触发条件极少:回放窗口远小于 1 024 笔外来成交)。
 - 核销只改归属,不改账:被核销的残余仍是交易所上的真实仓位,作为账户级无 group 持仓(永续)或 `unassigned`(现货)留在账上,计入权益;永续部分由 L3/`Kill{flatten}` 覆盖,现货部分由人工处理(例如以 `SetBalanceBaseline` 记为基线)。
 - 现金的 free/locked 拆分只来自交易所报告(`rep_free`/`rep_locked`),引擎侧不模拟各所的冻结规则;执行层按"报告 free − 本系统在途"保守估算可用量。

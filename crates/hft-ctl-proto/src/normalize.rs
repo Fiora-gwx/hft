@@ -131,6 +131,9 @@ impl Normalized {
     /// Ring bodies in write order: `ConfigBlob` segments, then the `ControlCmd` as one Multi
     /// segment (`PartHdr` + logical body); for `ReconcileReport`, the report bodies.
     pub fn ring_records(&self) -> Vec<(EventKind, RecordFlags, Vec<u8>)> {
+        if self.kind == EventKind::RECONCILE_BATCH {
+            return vec![(self.kind, RecordFlags(0), self.record.clone())];
+        }
         if self.kind == EventKind::RECONCILE_REPORT {
             return self
                 .reports
@@ -1020,7 +1023,13 @@ fn report_item(rd: &Rd<'_>, report_id: u64, idx: u16, count: u16, it: &ReconItem
     })
 }
 
-fn normalize_reports(req: &CmdRequest, rd: &Rd<'_>, report_id: &str, items: &[ReconItem]) -> R<Normalized> {
+fn normalize_reports(
+    req: &CmdRequest,
+    rd: &Rd<'_>,
+    report_id: &str,
+    items: &[ReconItem],
+    receipts: Option<&str>,
+) -> R<Normalized> {
     apply(combine(req)?, Rule::Star { missing_ok: true })?;
     let report_id: u64 = uint(report_id)?;
     let count = u16::try_from(items.len()).map_err(|_| NormErr::new(detail::TOO_LONG))?;
@@ -1028,10 +1037,53 @@ fn normalize_reports(req: &CmdRequest, rd: &Rd<'_>, report_id: &str, items: &[Re
     for (i, it) in items.iter().enumerate() {
         reports.push(report_item(rd, report_id, i as u16, count, it)?);
     }
+    let mut record = Vec::new();
+    if let Some(receipts) = receipts {
+        let receipts = b64(receipts)?;
+        if receipts.is_empty()
+            || !receipts.len().is_multiple_of(96)
+            || receipts.len() / 96 > hft_event::RECONCILE_BATCH_MAX_ITEMS
+            || reports.len() > hft_event::RECONCILE_BATCH_MAX_ITEMS
+        {
+            return err(detail::BAD_VALUE);
+        }
+        let first = reports.first().ok_or_else(|| NormErr::new(detail::BAD_VALUE))?;
+        let h = hft_event::ReconcileBatchHdr {
+            report_id,
+            n_reports: count,
+            n_fills: (receipts.len() / 96) as u16,
+            venue: first.venue,
+            account: first.account,
+            _pad: 0,
+        };
+        record.extend_from_slice(h.as_bytes());
+        for r in &reports {
+            record.extend_from_slice(r.as_bytes());
+        }
+        record.extend_from_slice(&receipts);
+        let batch =
+            hft_event::ReconcileBatchView::read(&record).map_err(|_| NormErr::new(detail::BAD_VALUE))?;
+        for e in batch.fills() {
+            if e.inst.0 == 0
+                || rd.0.inst(e.inst).venue != e.venue
+                || !rd
+                    .0
+                    .caps(e.venue)
+                    .flags
+                    .contains(hft_refdata::CapFlags::PERP_CASH)
+            {
+                return err(detail::BAD_VALUE);
+            }
+        }
+    }
     Ok(Normalized {
-        kind: EventKind::RECONCILE_REPORT,
+        kind: if receipts.is_some() {
+            EventKind::RECONCILE_BATCH
+        } else {
+            EventKind::RECONCILE_REPORT
+        },
         hdr: CmdHdr::zeroed(),
-        record: Vec::new(),
+        record,
         cmd_hash: [0; 32],
         blobs: Vec::new(),
         blob: None,
@@ -1043,8 +1095,13 @@ fn normalize_reports(req: &CmdRequest, rd: &Rd<'_>, report_id: &str, items: &[Re
 /// command (`UnknownDiscriminant`).
 pub fn normalize(req: &CmdRequest, rd: &RefData) -> Result<Normalized, NormErr> {
     let rd = Rd(rd);
-    if let CmdBody::ReconcileReport { report_id, items } = &req.cmd {
-        return normalize_reports(req, &rd, report_id, items);
+    if let CmdBody::ReconcileReport {
+        report_id,
+        items,
+        receipts_b64,
+    } = &req.cmd
+    {
+        return normalize_reports(req, &rd, report_id, items, receipts_b64.as_deref());
     }
     let mut scratch = Vec::new();
     let b = build(req, &rd, &mut scratch)?;

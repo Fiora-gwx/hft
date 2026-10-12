@@ -45,6 +45,7 @@ pub mod code {
     /// hft-sequencer `EpochStart` (registry order within the `Sequencer` source; the
     /// authoritative `n` belongs to hft-sequencer's `NOTE_CODES`).
     pub const EPOCH_START: u32 = note_code(NoteSource::Sequencer, 1);
+    pub const RECONCILE_CASH: u32 = note_code(NoteSource::Sequencer, 14);
     /// hft-oms `OmsStaleGenFill` (registry order within the `Oms` source; owned by hft-oms).
     pub const OMS_STALE_GEN_FILL: u32 = note_code(NoteSource::Oms, 5);
     /// hft-oms `OmsForeignFill` (registry order within the `Oms` source; owned by hft-oms).

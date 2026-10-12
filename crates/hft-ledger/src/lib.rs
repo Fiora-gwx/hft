@@ -27,6 +27,7 @@ mod fixed;
 mod funding;
 mod journal;
 mod journal_foreign;
+mod journal_reconcile;
 mod ledger;
 mod margin;
 pub mod notes;

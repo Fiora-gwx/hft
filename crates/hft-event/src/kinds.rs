@@ -49,6 +49,7 @@ impl EventKind {
     pub const CMD_RESULT: Self = EventKind(0x0402);
     pub const CONFIG_BLOB: Self = EventKind(0x0403);
     pub const RECONCILE_REPORT: Self = EventKind(0x0404);
+    pub const RECONCILE_BATCH: Self = EventKind(0x0405);
     pub const TIMER: Self = EventKind(0x0501);
     pub const CONN_STATE: Self = EventKind(0x0502);
     pub const ADVICE: Self = EventKind(0x0503);
@@ -223,7 +224,7 @@ const T_VAR_FIELDS: &[FieldDesc] = &[
 
 use crate::chain::{ChainHead, PoolQuote, SwapDecision, TxLifecycle};
 use crate::cmd::CmdHdr;
-use crate::control::{CmdResult, ReconcileReport};
+use crate::control::{CmdResult, ReconcileBatchHdr, ReconcileReport};
 use crate::exec::{
     AccountConfigReportHdr, BalanceReport, ExecDecision, ExternalFill, FundingSettle, MarginReportHdr,
     OrderDecision, OrderEvent, PositionReport, SendReport,
@@ -238,8 +239,8 @@ use CrcPolicy::{Always, Never};
 use Domain::*;
 use Role::{ByBody, Input, Meta, Output};
 
-const N_BASE: usize = 39;
-const N_ALL: usize = 45;
+const N_BASE: usize = 40;
+const N_ALL: usize = 46;
 
 const KINDS_ALL: [KindInfo; N_ALL] = [
     k(
@@ -540,6 +541,17 @@ const KINDS_ALL: [KindInfo; N_ALL] = [
         ReconcileReport::FIELDS,
     ),
     k(
+        0x0405,
+        "ReconcileBatch",
+        Control,
+        var(16, 51_200),
+        1,
+        Input,
+        SEQ,
+        Never,
+        ReconcileBatchHdr::FIELDS,
+    ),
+    k(
         0x0501,
         "Timer",
         System,
@@ -747,10 +759,10 @@ const fn domain_slot(hi: u16) -> Option<(usize, usize)> {
         0x01 => Some((0, 9)),
         0x02 => Some((9, 10)),
         0x03 => Some((19, 4)),
-        0x04 => Some((23, 4)),
-        0x05 => Some((27, 10)),
-        0x06 => Some((37, 2)),
-        0x7F if cfg!(feature = "dev-kinds") => Some((39, 6)),
+        0x04 => Some((23, 5)),
+        0x05 => Some((28, 10)),
+        0x06 => Some((38, 2)),
+        0x7F if cfg!(feature = "dev-kinds") => Some((40, 6)),
         _ => None,
     }
 }
@@ -795,6 +807,7 @@ pub(crate) fn var_tail_len(kind: EventKind, prefix: &[u8]) -> Option<usize> {
         EventKind::ADVICE => Some(h(8)),
         EventKind::MARGIN_REPORT => Some(16 * h(4)),
         EventKind::ACCOUNT_CONFIG_REPORT => Some(16 * h(6)),
+        EventKind::RECONCILE_BATCH => Some(104 * h(8) + 96 * h(10)),
         EventKind::L2_BATCH => Some(16 * (h(72) + h(74))),
         EventKind::T_VAR if cfg!(feature = "dev-kinds") => Some(u32_at(prefix, 0) as usize),
         _ => None,

@@ -50,7 +50,10 @@ pub use codec::{
     DecodeErr, EncodeErr, MAX_BODY, MAX_RECORD, RecordView, classify, decode_record, encode_fixed,
     encode_part, encode_var,
 };
-pub use control::{CapRecord, CmdPreview, CmdResult, ReconcileReport};
+pub use control::{
+    CapRecord, CmdPreview, CmdResult, RECONCILE_BATCH_MAX_ITEMS, ReconcileBatchHdr, ReconcileBatchView,
+    ReconcileReport,
+};
 pub use exec::{
     AccountConfigReportHdr, BalanceReport, ExecDecision, ExternalCause, ExternalFill, FundingSettle, GwOp,
     LeverageItem, MarginItem, MarginReportHdr, OrderAction, OrderDecision, OrderEvent, OrderEventKind,

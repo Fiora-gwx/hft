@@ -31,7 +31,7 @@ spec: README.md
 | StrategyParams(SPB1) | EVT-130–EVT-133、EVT-203 |
 | 环元素类型 | EVT-124, EVT-140–EVT-144 |
 | 控制命令编码 | EVT-150–EVT-158、EVT-201 |
-| 变长记录前缀 | EVT-160–EVT-165、EVT-202 |
+| 变长记录前缀 | EVT-160–EVT-165、EVT-202、EVT-204 |
 | 实现说明 | EVT-170–EVT-180 |
 | 延迟与资源契约 | EVT-190–EVT-196 |
 | 测试与验收 | 不适用:非规范 |
@@ -97,7 +97,7 @@ spec: README.md
 - 规则:[记录头、标志与 kind](README.md#记录头标志与-kind)、[event-model kind 编号段](../../docs/subsystems/event-model.md#kind-编号段)
 - 级别:table
 - 里程碑:M1
-- 前置:默认特性构建(不含 dev 测试 kind);每行断言 `kind_info(k)` 的 `name`、`domain`、`layout`、`role`、`schema_version`、`journals`、`crc`、`optional`;另断言 `KINDS.len() == 39`(下表即全集,没有为模拟账户另设的 kind,没有 `0x7Fxx`)
+- 前置:默认特性构建(不含 dev 测试 kind);每行断言 `kind_info(k)` 的 `name`、`domain`、`layout`、`role`、`schema_version`、`journals`、`crc`、`optional`;另断言 `KINDS.len() == 40`(下表即全集,没有为模拟账户另设的 kind,没有 `0x7Fxx`)
 - 实现:`crates/hft-event/tests/kinds.rs::evt_004_kinds_registry`
 
 | 行 | kind | 期望(name / domain / layout / role / version / journals / crc / optional) |
@@ -128,6 +128,7 @@ spec: README.md
 | EVT-004.24 | `0x0401` | `ControlCmd` / Control / Multi prefix 128 / Input / 1 / SEQ / Always / false |
 | EVT-004.25 | `0x0402` | `CmdResult` / Control / Fixed 144 / Output / 3 / SEQ / Never / false |
 | EVT-004.26 | `0x0403` | `ConfigBlob` / Control / Multi prefix 72 / ByBody / 1 / SEQ \| CHAIN / Always / false |
+| EVT-004.40 | `0x0405` | `ReconcileBatch` / Control / Var 16 + ≤51200 / Input / 1 / SEQ / Never / false |
 | EVT-004.27 | `0x0404` | `ReconcileReport` / Control / Fixed 104 / Input / 3 / SEQ / Never / false |
 | EVT-004.28 | `0x0501` | `Timer` / System / Fixed 24 / Input / 1 / SEQ / Never / false |
 | EVT-004.29 | `0x0502` | `ConnState` / System / Fixed 24 / Input / 2 / SEQ / Never / false |
@@ -947,6 +948,7 @@ spec: README.md
 | EVT-075.86 | `StopMarkerCorrupt` | Boot / P0 / `[]` |
 | EVT-075.87 | `EndpointOverride` | Boot / P1 / `(0,8)` |
 | EVT-075.88 | `ModelCkptSkipped` | Advisor / P1 / `[]` |
+| EVT-075.93 | `ReconcileCash` | Sequencer / Info / `(0,64) (64,64) (128,64) (192,64) (256,64)` |
 
 ### EVT-076 Note 码名登记表满足命名与字段不变量
 
@@ -1813,11 +1815,11 @@ spec: README.md
   1. 生成
   2. 用 Python 导入 `<tmp>/python/_generated/events.py`,对每个 kind 读出 dtype
 - 期望:
-  - `docs/generated/event-catalog.md` 含 39 个 kind 小节,每节列出编号、域、角色、布局、`schema_version` 与字段表;Note 码表含 `NOTE_NAMES` 的全部 89 个名字,包含 Ledger BalanceCheck
-  - `schemas/arrow/` 下 39 个 `<kind>.json`;`Px`/`Qty` 列为 `Int64` 且带元数据 `hft.type = px`/`qty`
+  - `docs/generated/event-catalog.md` 含 40 个 kind 小节,每节列出编号、域、角色、布局、`schema_version` 与字段表;Note 码表含 `NOTE_NAMES` 的全部 90 个名字,包含 Ledger BalanceCheck 与 Sequencer ReconcileCash
+  - `schemas/arrow/` 下 40 个 `<kind>.json`;`Px`/`Qty` 列为 `Int64` 且带元数据 `hft.type = px`/`qty`
   - 每个 kind 的 dtype `itemsize` 等于 `size`(Var/Multi 等于 `prefix`),`names` 与 `offsets` 与 `FieldDesc` 逐项相同;`StrategyParamsHdr`、`GroupSpec`、`LegDef` 的 dtype itemsize 为 48、80、16
   - `refdata.py` 含 `LoadErrCode` 每个变体一项,数值与 hft-refdata 相同
-  - `event-layout.lock` 含 39 个 kind、全部已分配的 `CmdKind`(24 个)与 `LoadErrCode`
+  - `event-layout.lock` 含 40 个 kind、全部已分配的 `CmdKind`(24 个)与 `LoadErrCode`
   - `crates/hft-telemetry/src/notes_catalog.rs` 对每个 source crate `const` 表中的每个 `(source, n)` 恰有一项,名字与默认级别同 `NOTE_NAMES`
 - 实现:`tools/xtask/tests/gen_schema.rs::evt_172_outputs_and_python_dtype`
 
@@ -1827,7 +1829,7 @@ spec: README.md
 - 级别:golden
 - 里程碑:M1
 - 输入:`crates/hft-event/tests/common/canonical.rs` 中每个 kind 一条规范样例(各字段取非零且按字段序递增的值,枚举取最大合法值;`seq = 1`、`tsc = 2`、`flags = EVENT_END`,`CRC` 按该 kind 的策略),Multi kind 为单段记录
-- 期望文件:`fixtures/hft-event/EVT-173/<kind>.bin`(39 个)
+- 期望文件:`fixtures/hft-event/EVT-173/<kind>.bin`(40 个)
 - 实现:`crates/hft-event/tests/golden.rs::evt_173_canonical_records`
 
 ### EVT-174 gen-schema --check 在生成物与仓库一致时通过、被手改时失败
@@ -2065,6 +2067,16 @@ spec: README.md
 - 语料:EVT-131、EVT-132 的 blob + 变异
 - 判定:零 panic、零单输入超时(口径见 [testing §3.3](../../docs/testing.md#33-fuzz))
 - 实现:`crates/hft-event/fuzz/fuzz_targets/spb1.rs::evt_203_fuzz_spb1`
+
+### EVT-204 原始结算批次的布局与完整性
+
+- 规则:[实现规格](README.md#事件体布局)
+- 级别:unit
+- 里程碑:M2
+- 前置:两项同账户报告和一笔原始成交
+- 步骤:读取合法体,逐字节截断,并分别破坏计数、保留位、索引、账户和枚举;执行 CRC 编解码与控制环帧往返
+- 期望:合法体按原顺序读取,CRC 编解码一致;坏体明确失败
+- 实现:`crates/hft-event/tests/reconcile.rs::evt_204_reconciliation_batch_is_bounded_and_complete`
 
 ## 验收
 

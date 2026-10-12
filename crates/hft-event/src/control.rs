@@ -119,6 +119,99 @@ impl ReconcileReport {
 }
 
 crate::event_body! {
+    /// Atomic reconciliation group with original executions. Tail is reports, then fills.
+    pub struct ReconcileBatchHdr : var(EventKind::RECONCILE_BATCH, 1, 51_200), FromBytes {
+        pub report_id: u64,
+        pub n_reports: u16,
+        pub n_fills: u16,
+        pub venue: VenueId,
+        pub account: AccountId,
+        pub _pad: u16,
+    }
+}
+layout!(ReconcileBatchHdr, 16, 8; report_id @ 0, n_reports @ 8, n_fills @ 10, venue @ 12, account @ 13, _pad @ 14);
+
+/// Protocol bounds of one atomic reconciliation group; no partial financial application.
+pub const RECONCILE_BATCH_MAX_ITEMS: usize = 256;
+
+/// Checked, borrowed body. Iterators copy rows, allocate nothing and never skip bad rows.
+#[derive(Clone, Copy, Debug)]
+pub struct ReconcileBatchView<'a> {
+    pub hdr: ReconcileBatchHdr,
+    reports: &'a [u8],
+    fills: &'a [u8],
+}
+
+impl<'a> ReconcileBatchView<'a> {
+    pub fn read(body: &'a [u8]) -> Result<Self, crate::DecodeErr> {
+        use zerocopy::{FromBytes, TryFromBytes};
+        let err = crate::DecodeErr::InvalidEnum;
+        let (h, tail) = body.split_at_checked(16).ok_or(crate::DecodeErr::Short)?;
+        let hdr = ReconcileBatchHdr::read_from_bytes(h).map_err(|_| err)?;
+        let nr = usize::from(hdr.n_reports);
+        let nf = usize::from(hdr.n_fills);
+        if hdr.report_id == 0
+            || hdr.account.0 == 0
+            || hdr.venue.0 == 0
+            || hdr._pad != 0
+            || !(2..=RECONCILE_BATCH_MAX_ITEMS).contains(&nr)
+            || !(1..=RECONCILE_BATCH_MAX_ITEMS).contains(&nf)
+            || tail.len() != nr * 104 + nf * 96
+        {
+            return Err(err);
+        }
+        let (reports, fills) = tail.split_at_checked(nr * 104).ok_or(crate::DecodeErr::Short)?;
+        for (i, b) in reports.chunks_exact(104).enumerate() {
+            let r = ReconcileReport::read_from_bytes(b).map_err(|_| err)?;
+            if r.report_id != hdr.report_id
+                || r.account != hdr.account
+                || r.venue != hdr.venue
+                || usize::from(r.idx) != i
+                || r.count != hdr.n_reports
+                || r._pad != 0
+                || r._pad2 != [0; 2]
+                || r._pad3 != 0
+                || r._pad4 != 0
+                || (i == 0) != (r.item == 5)
+                || !(1..=6).contains(&r.item)
+                || r.sflags & !15 != 0
+                || (r.sflags & ReconcileReport::AUTO_EXTERNAL != 0 && r.item != 1)
+            {
+                return Err(err);
+            }
+        }
+        for b in fills.chunks_exact(96) {
+            let e = crate::ExternalFill::try_read_from_bytes(b).map_err(|_| err)?;
+            if e.account != hdr.account || e.venue != hdr.venue || e._pad != [0; 6] {
+                return Err(err);
+            }
+        }
+        let view = Self { hdr, reports, fills };
+        // A position has only one authoritative row in this group.
+        for (i, r) in view.reports().enumerate().filter(|(_, r)| r.item == 1) {
+            if view.reports().take(i).any(|p| p.item == 1 && p.inst == r.inst) {
+                return Err(err);
+            }
+        }
+        Ok(view)
+    }
+
+    pub fn reports(&self) -> impl Iterator<Item = ReconcileReport> + Clone + '_ {
+        use zerocopy::FromBytes;
+        self.reports
+            .chunks_exact(104)
+            .filter_map(|b| ReconcileReport::read_from_bytes(b).ok())
+    }
+
+    pub fn fills(&self) -> impl Iterator<Item = crate::ExternalFill> + Clone + '_ {
+        use zerocopy::TryFromBytes;
+        self.fills
+            .chunks_exact(96)
+            .filter_map(|b| crate::ExternalFill::try_read_from_bytes(b).ok())
+    }
+}
+
+crate::event_body! {
     /// Mode cap (48 B): snapshot section 4 rows and `Note{CapSet/CapCleared}.v[0..6]`.
     pub struct CapRecord : plain, FromBytes {
         pub source: CapSource,

@@ -209,6 +209,7 @@ pub struct JournalLedger {
     ledger: Ledger,
     map: SlotMap,
     foreign: crate::journal_foreign::Foreign,
+    reconcile: crate::journal_reconcile::Reconcile,
     epoch: u16,
     stats: JournalLedgerStats,
     clock: Option<Clock>,
@@ -416,6 +417,7 @@ impl JournalLedger {
             ledger,
             map,
             foreign,
+            reconcile: crate::journal_reconcile::Reconcile::default(),
             epoch,
             stats: JournalLedgerStats::default(),
             clock,
@@ -481,6 +483,9 @@ impl JournalLedger {
         let kind = EventKind(rec.hdr.kind);
         let flags = RecordFlags(rec.hdr.flags);
         if hft_event::classify(kind, rec.body).is_ok_and(|r| r == hft_event::Role::Input) {
+            if self.reconcile.pending() {
+                return Err(JournalApplyError::ReconcileEvidence);
+            }
             self.recovery_started = true;
         }
         if kind != EventKind::STATE_SNAPSHOT
@@ -527,13 +532,21 @@ impl JournalLedger {
                         }
                         _ => None,
                     };
-                    if cash_inst
-                        .and_then(|i| self.ledger.inst(i))
-                        .is_some_and(|i| i.perp_cash)
-                    {
-                        return Err(JournalApplyError::UnsupportedExternalCash);
+                    if n.source == NoteSource::Sequencer && n.code == code::RECONCILE_CASH {
+                        self.reconcile.outcome(&n, &self.ledger)?;
                     }
-                    if n.source == NoteSource::Oms
+                    let reconciled_cash = cash_inst
+                        .and_then(|i| self.ledger.inst(i))
+                        .is_some_and(|i| i.perp_cash);
+                    if reconciled_cash {
+                        if !self.reconcile.pending() {
+                            return Err(JournalApplyError::UnsupportedExternalCash);
+                        }
+                        self.reconcile.fill(&n, &mut self.ledger, &mut self.foreign, t)?;
+                    }
+                    if reconciled_cash {
+                        // Already rebuilt from this batch's raw receipt.
+                    } else if n.source == NoteSource::Oms
                         && n.code == code::OMS_FOREIGN_FILL
                         && (self.foreign.has_pending()
                             || self.ledger.inst(n.inst).is_some_and(|i| i.perp_cash))
@@ -572,6 +585,12 @@ impl JournalLedger {
                 if let Ok(r) = rec.read::<ReconcileReport>() {
                     self.report_id = Some(r.report_id);
                 }
+            }
+            EventKind::RECONCILE_BATCH => {
+                self.reconcile.start(
+                    rec.exact_body()
+                        .map_err(|_| JournalApplyError::ReconcileEvidence)?,
+                )?;
             }
             EventKind::FUNDING_SETTLE => {
                 if let Ok(f) = rec.read::<FundingSettle>() {
@@ -634,6 +653,7 @@ impl JournalLedger {
         }
         if flags.contains(RecordFlags::EVENT_END) {
             self.foreign.end_event()?;
+            self.reconcile.end_event()?;
             self.report_id = None;
             self.balance = None;
         }
@@ -647,6 +667,7 @@ impl JournalLedger {
         replay.track_snapshots = false;
         replay.balance = None;
         replay.report_id = None;
+        replay.reconcile = crate::journal_reconcile::Reconcile::default();
         replay.cmd = None;
         replay.last_t = 0;
         replay.ledger.restore_read_views();

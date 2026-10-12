@@ -21,6 +21,7 @@ pub const SECTION_LEDGER_INVENTORY: u16 = 22;
 /// Current row versions (`SectionHdr.version`).
 pub const POSITIONS_VERSION: u16 = 2;
 pub const LEDGER_GROUPS_VERSION: u16 = 8;
+pub const LEDGER_CASH_RECEIPTS_VERSION: u16 = 9;
 pub const LEDGER_INVENTORY_VERSION: u16 = 2;
 
 /// `LedgerRowHdr.kind` codes.
@@ -40,6 +41,7 @@ pub mod row_kind {
     pub const EXT_SEEN: u8 = 13;
     pub const AUTO_HELD: u8 = 14;
     pub const PX: u8 = 15;
+    pub const AUTO_CASH: u8 = 16;
 }
 
 macro_rules! row {
@@ -113,6 +115,28 @@ row!(ExtSeenRow, 24 { kind: u8, _pad: [u8; 7], a: u64, b: u64 });
 const _: () = assert!(core::mem::offset_of!(ExtSeenRow, a) == 8);
 const _: () = assert!(core::mem::offset_of!(ExtSeenRow, b) == 16);
 row!(AutoHeldRow, 16 { buy: Qty, sell: Qty });
+row!(
+    /// Exact reconciled execution, with no process-local receive timestamp.
+    AutoCashRow, 80 { side: u8, cause: u8, fee_asset: AssetId, _pad: u32,
+        qty: Qty, px: Px, fee: Qty, exch_order_id: u64, trade_id: u64,
+        ex_ts_ns: i64, fill_seq: u64, cash_qty: Qty, cash_amount: Qty }
+);
+const _: () = {
+    assert!(core::mem::align_of::<AutoCashRow>() == 8);
+    assert!(core::mem::offset_of!(AutoCashRow, side) == 0);
+    assert!(core::mem::offset_of!(AutoCashRow, cause) == 1);
+    assert!(core::mem::offset_of!(AutoCashRow, fee_asset) == 2);
+    assert!(core::mem::offset_of!(AutoCashRow, _pad) == 4);
+    assert!(core::mem::offset_of!(AutoCashRow, qty) == 8);
+    assert!(core::mem::offset_of!(AutoCashRow, px) == 16);
+    assert!(core::mem::offset_of!(AutoCashRow, fee) == 24);
+    assert!(core::mem::offset_of!(AutoCashRow, exch_order_id) == 32);
+    assert!(core::mem::offset_of!(AutoCashRow, trade_id) == 40);
+    assert!(core::mem::offset_of!(AutoCashRow, ex_ts_ns) == 48);
+    assert!(core::mem::offset_of!(AutoCashRow, fill_seq) == 56);
+    assert!(core::mem::offset_of!(AutoCashRow, cash_qty) == 64);
+    assert!(core::mem::offset_of!(AutoCashRow, cash_amount) == 72);
+};
 row!(
     /// Valuation prices of one inst (every inst with a quote, mark or fill): `restore` rebuilds
     /// the unrealized and held-notional caches from them, so totals stay consistent.
@@ -204,7 +228,12 @@ impl Ledger {
         }
         w.end_section();
         // Section 13.
-        w.begin_section(SECTION_LEDGER_GROUPS, LEDGER_GROUPS_VERSION);
+        let version = if self.avd.iter().any(|d| !d.auto_cash.is_empty()) {
+            LEDGER_CASH_RECEIPTS_VERSION
+        } else {
+            LEDGER_GROUPS_VERSION
+        };
+        w.begin_section(SECTION_LEDGER_GROUPS, version);
         for acc in 1..=self.n_acc {
             let Some(b) = self.accounts.get(acc) else { continue };
             if b == &AccountBook::ZERO {
@@ -438,6 +467,30 @@ impl Ledger {
                 );
             }
         }
+        for d in &self.avd {
+            for e in &d.auto_cash {
+                put(
+                    w,
+                    hdr(row_kind::AUTO_CASH, e.account, e.venue, e.inst.0),
+                    AutoCashRow {
+                        side: e.side as u8,
+                        cause: e.cause as u8,
+                        fee_asset: e.fee_asset,
+                        _pad: 0,
+                        qty: e.qty,
+                        px: e.px,
+                        fee: e.fee,
+                        exch_order_id: e.exch_order_id,
+                        trade_id: e.trade_id,
+                        ex_ts_ns: e.ex_ts_ns,
+                        fill_seq: e.fill_seq,
+                        cash_qty: e.cash_qty,
+                        cash_amount: e.cash_amount,
+                    }
+                    .as_bytes(),
+                );
+            }
+        }
         w.end_section();
         // Section 22.
         w.begin_section(SECTION_LEDGER_INVENTORY, LEDGER_INVENTORY_VERSION);
@@ -506,6 +559,7 @@ impl Ledger {
         ] {
             if let Some(s) = s
                 && s.version != v
+                && !(v == LEDGER_GROUPS_VERSION && s.version == LEDGER_CASH_RECEIPTS_VERSION)
             {
                 return Err(RestoreError::VersionUnsupported);
             }
@@ -579,6 +633,19 @@ impl Ledger {
                 }
             }
         }
+        for d in &l.avd {
+            for e in &d.auto_cash {
+                let sum: i128 = d
+                    .auto_cash
+                    .iter()
+                    .filter(|r| r.inst == e.inst && r.side == e.side)
+                    .map(|r| i128::from(r.qty.0))
+                    .sum();
+                if sum != i128::from(l.auto_held(e.account, e.inst, e.side).0) {
+                    return Err(RestoreError::BadValue);
+                }
+            }
+        }
         // Derived state (the Px rows restored the valuation prices the caches are built from).
         for a in 1..=l.n_acc {
             l.rebuild_candidates(AccountId(a as u8));
@@ -597,7 +664,7 @@ impl Ledger {
             let mine = back.find_section(sec)?;
             match (input, mine) {
                 (Some(a), Some(b)) => {
-                    if a.count != b.count || a.body != b.body {
+                    if a.version != b.version || a.count != b.count || a.body != b.body {
                         return Err(RestoreError::BadValue);
                     }
                 }
@@ -829,6 +896,50 @@ impl Ledger {
                     return Err(RestoreError::BadValue);
                 }
                 d.ext.insert(key);
+            }
+            row_kind::AUTO_CASH => {
+                let x: AutoCashRow = rr.get_row()?;
+                let e = hft_event::ExternalFill {
+                    venue: h.venue,
+                    account: h.account,
+                    inst: InstId(h.id),
+                    side: hft_types::Side::try_from(x.side).map_err(|_| RestoreError::BadValue)?,
+                    cause: hft_event::ExternalCause::try_from(x.cause).map_err(|_| RestoreError::BadValue)?,
+                    qty: x.qty,
+                    px: x.px,
+                    fee: x.fee,
+                    fee_asset: x.fee_asset,
+                    _pad: [0; 6],
+                    exch_order_id: x.exch_order_id,
+                    trade_id: x.trade_id,
+                    ex_ts_ns: x.ex_ts_ns,
+                    rx_tsc: hft_types::Tsc(0),
+                    fill_seq: x.fill_seq,
+                    cash_qty: x.cash_qty,
+                    cash_amount: x.cash_amount,
+                };
+                let av = self
+                    .validate_external_cash(&e)
+                    .map_err(|_| RestoreError::BadValue)?;
+                if h._pad != 0
+                    || x._pad != 0
+                    || !crate::attrib::eligible_auto(&e)
+                    || (e.trade_id == 0 && (e.exch_order_id == 0 || e.fill_seq == 0))
+                    || (e.trade_id != 0 && e.fill_seq != 0)
+                {
+                    return Err(RestoreError::BadValue);
+                }
+                let d = self.avd.get_mut(av).ok_or(RestoreError::BadValue)?;
+                if d.auto_cash.len() >= self.cfg.ext_cap {
+                    return Err(RestoreError::Capacity);
+                }
+                if d.auto_cash
+                    .iter()
+                    .any(|r| crate::attrib::ext_key(r) == crate::attrib::ext_key(&e))
+                {
+                    return Err(RestoreError::BadValue);
+                }
+                d.auto_cash.push(e);
             }
             row_kind::AUTO_HELD => {
                 let x: AutoHeldRow = rr.get_row()?;

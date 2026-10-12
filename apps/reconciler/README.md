@@ -263,6 +263,8 @@ reconciler 不重复轮询保证金数据;gw 漏掉的外部成交会表现为�
 - [defensive-patterns](../../docs/defensive-patterns.md)、[hft-ledger](../../crates/hft-ledger/README.md)、[hft-risk](../../crates/hft-risk/README.md)、[hft-oms](../../crates/hft-oms/README.md)、[hft-refdata `VenueCaps`](../../crates/hft-refdata/README.md)
 - [round8-decisions](../../design/_work/round8-decisions.md)
 
+PERP_CASH 的 AUTO_EXTERNAL 请求必须附带交易所原始成交历史,每笔含完整实际现金和费用事实,经 hft-ctl-proto 的 receipts_b64 作为 ReconcileBatch 入 journal。缺口解释必须使用尚未记入引擎的原始键,不能从余额差或标记价生成现金。组内各 AUTO Position 缺口必须全部被凭据覆盖,数量、方向和成交键检查归 hft-ledger。旧能力报告格式仍可用于告警与人工处置。
+
 ## 已知限制与后续工作
 
 - 手续费返佣、结算时间差导致的短暂差异由 `dust` 与在途机制吸收;频繁 `Warn` 时按资产调 `dust`。

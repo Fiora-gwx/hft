@@ -181,14 +181,14 @@ fn evt_172_outputs_and_python_dtype() {
     let mut m = real(vec![test_strategy()]);
     m.note_consts = stand_in_consts(&m, &["Oms", "Ledger"]);
     let (f, lock_text) = generated("evt172", &m);
-    assert_eq!(hft_event::NOTE_NAMES.len(), 89);
-    assert_eq!(m.kinds.len(), 39);
+    assert_eq!(hft_event::NOTE_NAMES.len(), 90);
+    assert_eq!(m.kinds.len(), 40);
 
-    // event-catalog.md: 39 kind sections, each with number, domain, role, layout, schema_version, field table.
+    // event-catalog.md: 40 kind sections, each with number, domain, role, layout, schema_version, field table.
     let cat = f.read(render::CATALOG_MD);
     let kinds_part = cat.split("## 容器结构").next().unwrap();
     let sections: Vec<&str> = kinds_part.split("\n### 0x").skip(1).collect();
-    assert_eq!(sections.len(), 39);
+    assert_eq!(sections.len(), 40);
     for s in &sections {
         for key in [
             "- 编号:",
@@ -213,9 +213,9 @@ fn evt_172_outputs_and_python_dtype() {
         );
     }
 
-    // Arrow: 39 files; px/qty columns Int64 with hft.type.
+    // Arrow: 40 files; px/qty columns Int64 with hft.type.
     let arrow: Vec<_> = std::fs::read_dir(f.path(render::ARROW_DIR)).unwrap().collect();
-    assert_eq!(arrow.len(), 39);
+    assert_eq!(arrow.len(), 40);
     let mut px_qty = 0;
     for k in &m.kinds {
         let v: serde_json::Value = serde_json::from_str(&f.read(&render::arrow_path(&k.name))).unwrap();
@@ -283,9 +283,9 @@ print(json.dumps(out))
         assert_eq!(v["load_err"][val.to_string()], name);
     }
 
-    // Lock: 39 kinds, 24 CmdKind, every LoadErrCode.
+    // Lock: 40 kinds, 24 CmdKind, every LoadErrCode.
     let l = lock::parse(&lock_text).unwrap();
-    assert_eq!(l.kinds.len(), 39);
+    assert_eq!(l.kinds.len(), 40);
     assert_eq!(l.cmds.len(), 24);
     assert_eq!(l.load_errs.len(), hft_refdata::schema::load_err_codes().count());
 

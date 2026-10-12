@@ -22,7 +22,7 @@ spec: README.md
 | 数据结构 | LED-002–LED-004、LED-233、LED-237、LED-247 |
 | 仓位与已实现(平均成本法) | LED-010、LED-021–LED-025、LED-030–LED-039、LED-240、LED-241、LED-243、LED-275–LED-278 |
 | 余额初始化、校验与基线 | LED-039–LED-046、LED-260–LED-262 |
-| 外部成交(`ExternalFill`) | LED-050–LED-081、LED-188、LED-240、LED-245、LED-283–LED-285 |
+| 外部成交(`ExternalFill`) | LED-050–LED-081、LED-188、LED-240、LED-245、LED-283–LED-285、LED-292、LED-293 |
 | 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282、LED-286–LED-291 |
 | 资金费 | LED-090–LED-104、LED-136–LED-138、LED-240、LED-245、LED-260 |
 | 资金费时刻归一化 | LED-091、LED-110–LED-116 |
@@ -36,7 +36,7 @@ spec: README.md
 | 链上腿(optional,feature `chain`) | 不适用:里程碑外 |
 | 快照行格式(节 1、13、22;草案,实现时以代码与编译期断言为准) | LED-053、LED-061、LED-104、LED-138、LED-139、LED-230–LED-238 |
 | 规划源文件 | 不适用:非规范 |
-| 延迟与资源契约 | LED-004、LED-250–LED-258 |
+| 延迟与资源契约 | LED-004、LED-250–LED-258、LED-294 |
 | 测试与验收 | 不适用:非规范 |
 | 依赖 | 不适用:非规范 |
 | 延伸阅读 | 不适用:非规范 |
@@ -2919,6 +2919,36 @@ spec: README.md
 - 步骤:分别连续消费及从含来源行的关键帧恢复,恢复后先交付 EngineClock、EpochStart 与普通槽决策,再交付该槽的同号成交
 - 期望:四行均报 UnsupportedExternalCash,账本快照字节不变
 - 实现:`crates/hft-ledger/tests/settlement_journal.rs::led_291_restored_cash_sources_cannot_be_rebooked_through_ordinary_orders`
+
+### LED-292 待确认凭据只抵扣同一笔成交
+
+- 规则:[实现规格](README.md#外部成交externalfill)
+- 级别:unit
+- 里程碑:M2
+- 前置:多空镜像 × trade_id/订单 fill_seq 两种键
+- 步骤:补入原始成交并重复补入;从快照恢复,再交付同向不同成交、原始确认与重复确认
+- 期望:补入和新成交各记一次现金及费用,原始确认只消除待确认量;v9 恢复逐字节相同,全部确认后写 v8
+- 实现:`crates/hft-ledger/tests/reconcile_cash.rs::led_292_exact_receipts_survive_restart_and_do_not_offset_other_fills`
+
+### LED-293 错误凭据与容量不足不改变账本
+
+- 规则:[实现规格](README.md#外部成交externalfill)
+- 级别:unit
+- 里程碑:M2
+- 前置:容量为 2 的账本和两笔原始凭据
+- 步骤:分别改变现金、费用、数量、方向、价格、订单号和交易所时刻;容量满后收第三笔;普通去重环绕回后恢复并确认
+- 期望:错误前后快照相同;待确认记录不被环绕淘汰,原始确认不重复入钱包
+- 实现:`crates/hft-ledger/tests/reconcile_cash.rs::led_293_receipt_conflicts_capacity_and_eviction_are_atomic`
+
+### LED-294 原始对账结算入口基准
+
+- 规则:[实现规格](README.md#延迟与资源契约)
+- 级别:bench
+- 里程碑:M2
+- 基准名:`ledger/apply_reconciled_external`、`ledger/validate_reconcile_batch`
+- 输入:一笔完整原始凭据;两报告一凭据的有效预检
+- 期望:分别测量新入账与只读预检,构造账本不计入测量,CI 仅报告
+- 实现:`crates/hft-ledger/benches/ledger.rs::led_294_reconciled_cash`
 
 ## 验收
 

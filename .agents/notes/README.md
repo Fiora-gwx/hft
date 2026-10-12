@@ -18,6 +18,10 @@
 |---|---|---|
 | [公开仓库 CI](implemented/process/2026-10-10-public-repository-ci.md) | 公开仓库使用标准托管 runner;取消分钟门禁,保留发布质量检查 | [ci-quota-self-estimate](proposed/process/2026-10-03-ci-quota-self-estimate.md)、[ci-org-and-profiles](proposed/architecture/2026-10-03-ci-org-and-profiles.md)、[ci-free-hosted](proposed/architecture/2026-10-03-ci-free-hosted.md) |
 
+## 原始对账凭据决定(2026-10-13)
+
+[原始对账凭据](implemented/architecture/2026-10-13-reconcile-cash-receipts.md) 收窄 [auto_held 提案](proposed/architecture/2026-10-03-auto-external-guard.md) 的严格现金能力范围。
+
 ## 布局与命名
 
 每条 Agent Note 有两个维度,都编码在**路径**里:`{lifecycle}/{class}/yyyy-mm-dd-topic.md`。

@@ -451,6 +451,8 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 - [13 O8](../../design/13-设计评审与优化.md)(fuzz 与 DST)、[10 §5](../../design/10-语言分工与代码组织.md)(测试金字塔)、[research/04 §7](../../design/research/04-oss-frameworks-and-patterns.md)
 - Agent Note:[strategy-sdk-decoupling](../../.agents/notes/proposed/architecture/2026-10-02-strategy-sdk-decoupling.md)、[fuzz-and-deterministic-simulation](../../.agents/notes/proposed/testing/2026-09-30-fuzz-and-deterministic-simulation.md)
 
+`ReconActor::settled_input` 将完整账户/venue 报告与选定的 ExternalReceipt 原始历史打包为 ReconcileBatch。TK-133 用真实 SeqSut/SimMatcher 验证部分减仓和全平、补账后重启、原因细分的迟到补报和重复确认;不据此宣称随机 AUTO_EXTERNAL 故障矩阵或 LED-080/081 已全部验收。
+
 ## 已知限制与后续工作
 
 - DST 只覆盖进程内逻辑;真实 socket、TLS、内核行为的故障由交易所测试网冒烟与混沌测试覆盖,wire 级 [`mock-exchange`](../../apps/mock-exchange/README.md) 是可选扩展(冻结)。

@@ -428,6 +428,35 @@ fn oms_474_foreign_cash_provenance_64(c: &mut Criterion) {
     c.bench_function("oms/remember_external_cash", |b| {
         b.iter(|| black_box(h.o.remember_external_cash(black_box(&e))))
     });
+    {
+        use hft_event::{ReconcileBatchHdr, ReconcileBatchView, ReconcileReport};
+        use zerocopy::{FromZeros, IntoBytes};
+        let mut summary = ReconcileReport::new_zeroed();
+        summary.report_id = 7;
+        summary.account = A1;
+        summary.venue = VX;
+        summary.count = 2;
+        summary.item = 5;
+        let mut p = summary;
+        p.idx = 1;
+        p.item = 1;
+        p.inst = Y;
+        p.engine_qty = Qty(1);
+        p.sflags = ReconcileReport::AUTO_EXTERNAL;
+        let hdr = ReconcileBatchHdr {
+            report_id: 7,
+            n_reports: 2,
+            n_fills: 1,
+            account: A1,
+            venue: VX,
+            _pad: 0,
+        };
+        let bytes = [hdr.as_bytes(), summary.as_bytes(), p.as_bytes(), e.as_bytes()].concat();
+        let batch = ReconcileBatchView::read(&bytes).unwrap();
+        c.bench_function("oms/reconcile_cash_guard", |b| {
+            b.iter(|| black_box(h.o.reconcile_cash_guard(black_box(&batch))).unwrap())
+        });
+    }
 }
 
 criterion_group!(

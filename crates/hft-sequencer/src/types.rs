@@ -36,6 +36,7 @@ pub enum FatalReason {
     Settlement(hft_ledger::SettlementError),
     /// The cash-enabled venue supplied an external path whose attribution is not supported.
     UnsupportedExternalCash,
+    ReconcileEvidence,
 }
 
 /// Which capacity a restored state exceeds (checked in this order).

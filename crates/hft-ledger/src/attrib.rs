@@ -47,6 +47,190 @@ impl Ledger {
         e: &ExternalFill,
         t: i64,
     ) -> Result<Option<ExternalApplied>, SettlementError> {
+        let av = self.validate_external_cash(e)?;
+        let key = ext_key(e);
+        if let Some(ix) = self
+            .avd
+            .get(av)
+            .and_then(|d| d.auto_cash.iter().position(|r| ext_key(r) == key))
+        {
+            let receipt = self
+                .avd
+                .get(av)
+                .and_then(|d| d.auto_cash.get(ix))
+                .ok_or(SettlementError::ReceiptIdentity)?;
+            if !same_receipt(receipt, e) {
+                return Err(SettlementError::ReceiptConflict);
+            }
+            let after = self
+                .auto_held(e.account, e.inst, e.side)
+                .0
+                .checked_sub(e.qty.0)
+                .filter(|n| *n >= 0)
+                .ok_or(SettlementError::ExternalOverlap)?;
+            let p = self
+                .pos_ix(e.account, e.inst)
+                .ok_or(SettlementError::UnknownInstrument)?;
+            self.tick(t);
+            if let Some(d) = self.avd.get_mut(av) {
+                d.auto_cash.remove(ix);
+                // The ordinary FIFO may have wrapped while this receipt was pending.
+                if !d.ext.contains(&key) {
+                    d.ext.insert(key);
+                }
+            }
+            if let Some(d) = self.posd.get_mut(p) {
+                match e.side {
+                    Side::Buy => d.auto_buy = Qty(after),
+                    Side::Sell => d.auto_sell = Qty(after),
+                }
+            }
+            self.push_note(note(
+                code::AUTO_HELD_OFFSET,
+                NoteLevel::P0,
+                GROUP_NONE,
+                e.inst,
+                [
+                    u64::from(e.venue.0) | u64::from(e.account.0) << 8,
+                    u64::from(e.inst.0),
+                    e.side as u64,
+                    e.qty.0 as u64,
+                    e.qty.0 as u64,
+                    after as u64,
+                    0,
+                    0,
+                ],
+            ));
+            return Ok(None);
+        }
+        if self.avd.get(av).is_some_and(|d| d.ext.contains(&key)) {
+            return Ok(None);
+        }
+        if eligible_auto(e) && self.opaque_auto_held(av, e) {
+            return Err(SettlementError::ExternalOverlap);
+        }
+        Ok(self.external_with_cash(e, false, Some(e.cash_amount), t))
+    }
+
+    /// Book an independently supplied execution once and retain its exact receipt until the
+    /// matching original push arrives. Capacity and payload conflicts fail before mutation.
+    /// No allocation; budget: ledger/apply_reconciled_external.
+    pub fn apply_reconciled_external(
+        &mut self,
+        e: &ExternalFill,
+        t: i64,
+    ) -> Result<Option<ExternalApplied>, SettlementError> {
+        let av = self.validate_external_cash(e)?;
+        if !eligible_auto(e)
+            || (e.trade_id == 0 && (e.exch_order_id == 0 || e.fill_seq == 0))
+            || (e.trade_id != 0 && e.fill_seq != 0)
+            || e._pad != [0; 6]
+        {
+            return Err(SettlementError::ReceiptIdentity);
+        }
+        let d = self.avd.get(av).ok_or(SettlementError::AccountVenue)?;
+        if let Some(r) = d.auto_cash.iter().find(|r| ext_key(r) == ext_key(e)) {
+            return if same_receipt(r, e) {
+                Ok(None)
+            } else {
+                Err(SettlementError::ReceiptConflict)
+            };
+        }
+        if d.ext.contains(&ext_key(e)) {
+            return Ok(None);
+        }
+        if d.auto_cash.len() >= self.cfg.ext_cap {
+            return Err(SettlementError::ReceiptCapacity);
+        }
+        if self.opaque_auto_held(av, e)
+            || self
+                .auto_held(e.account, e.inst, e.side)
+                .0
+                .checked_add(e.qty.0)
+                .is_none()
+        {
+            return Err(SettlementError::ExternalOverlap);
+        }
+        let applied = self.external_with_cash(e, true, Some(e.cash_amount), t);
+        if applied.is_some()
+            && let Some(d) = self.avd.get_mut(av)
+        {
+            let mut receipt = *e;
+            receipt.rx_tsc = Tsc(0);
+            d.auto_cash.push(receipt);
+        }
+        Ok(applied)
+    }
+
+    /// Preflight every execution and its position delta before an atomic reconciliation.
+    /// Pending receipts cannot be evicted, and an already booked key cannot explain a new gap.
+    /// No allocation; budget: ledger/validate_reconcile_batch.
+    pub fn validate_reconcile_batch(
+        &self,
+        batch: &hft_event::ReconcileBatchView<'_>,
+    ) -> Result<(), SettlementError> {
+        let av = self
+            .av(batch.hdr.account, batch.hdr.venue)
+            .ok_or(SettlementError::AccountVenue)?;
+        let d = self.avd.get(av).ok_or(SettlementError::AccountVenue)?;
+        if d.auto_cash.len().saturating_add(usize::from(batch.hdr.n_fills)) > self.cfg.ext_cap {
+            return Err(SettlementError::ReceiptCapacity);
+        }
+        for (i, e) in batch.fills().enumerate() {
+            self.validate_external_cash(&e)?;
+            if !self.inst(e.inst).is_some_and(|s| s.perp_cash)
+                || !eligible_auto(&e)
+                || (e.trade_id == 0 && (e.exch_order_id == 0 || e.fill_seq == 0))
+                || (e.trade_id != 0 && e.fill_seq != 0)
+                || d.ext.contains(&ext_key(&e))
+                || d.auto_cash.iter().any(|r| ext_key(r) == ext_key(&e))
+                || batch.fills().take(i).any(|r| ext_key(&r) == ext_key(&e))
+            {
+                return Err(SettlementError::ReceiptIdentity);
+            }
+            if self.opaque_auto_held(av, &e) {
+                return Err(SettlementError::ExternalOverlap);
+            }
+            let r = batch
+                .reports()
+                .find(|r| {
+                    r.item == 1
+                        && r.inst == e.inst
+                        && r.sflags & hft_event::ReconcileReport::AUTO_EXTERNAL != 0
+                })
+                .ok_or(SettlementError::ReceiptIdentity)?;
+            let delta = i128::from(r.exch_qty.0) - i128::from(r.engine_qty.0);
+            if delta.signum() != i128::from(e.side.sign()) {
+                return Err(SettlementError::InvalidQuantity);
+            }
+        }
+        for r in batch
+            .reports()
+            .filter(|r| r.item == 1 && r.sflags & hft_event::ReconcileReport::AUTO_EXTERNAL != 0)
+        {
+            let qty: i128 = batch
+                .fills()
+                .filter(|e| e.inst == r.inst)
+                .map(|e| i128::from(e.qty.0))
+                .sum();
+            let delta = (i128::from(r.engine_qty.0) - i128::from(r.exch_qty.0)).abs();
+            if qty == 0
+                || qty != delta
+                || delta > i128::from(i64::MAX)
+                || (r.exch_qty.0 != 0 && r.engine_qty.0.signum() != r.exch_qty.0.signum())
+                || i128::from(r.exch_qty.0).abs() >= i128::from(r.engine_qty.0).abs()
+            {
+                return Err(SettlementError::InvalidQuantity);
+            }
+            let side = if r.engine_qty.0 > 0 { Side::Sell } else { Side::Buy };
+            if i128::from(self.auto_held(r.account, r.inst, side).0) + qty > i128::from(i64::MAX) {
+                return Err(SettlementError::InvalidQuantity);
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_external_cash(&self, e: &ExternalFill) -> Result<usize, SettlementError> {
         let s = self.inst(e.inst).ok_or(SettlementError::UnknownInstrument)?;
         if !s.perp {
             return Err(SettlementError::NotPerpetual);
@@ -67,17 +251,23 @@ impl Ledger {
         if e.cash_qty != e.qty {
             return Err(SettlementError::MissingCash);
         }
-        if self.avd.get(av).is_some_and(|d| d.ext.contains(&ext_key(e))) {
-            return Ok(None);
-        }
-        if matches!(
-            e.cause,
-            ExternalCause::Adl | ExternalCause::Liquidation | ExternalCause::Unknown
-        ) && self.auto_held(e.account, e.inst, e.side).0 > 0
+        if (e.fee_asset == ASSET_NONE && e.fee.0 != 0)
+            || (e.fee_asset != ASSET_NONE && self.assets.get(usize::from(e.fee_asset.0)).is_none())
         {
-            return Err(SettlementError::ExternalOverlap);
+            return Err(SettlementError::WrongAsset);
         }
-        Ok(self.external_with_cash(e, false, Some(e.cash_amount), t))
+        Ok(av)
+    }
+
+    fn opaque_auto_held(&self, av: usize, e: &ExternalFill) -> bool {
+        let exact = self.avd.get(av).map_or(0i128, |d| {
+            d.auto_cash
+                .iter()
+                .filter(|r| r.inst == e.inst && r.side == e.side)
+                .map(|r| i128::from(r.qty.0))
+                .sum()
+        });
+        exact != i128::from(self.auto_held(e.account, e.inst, e.side).0)
     }
 
     fn external_with_cash(
@@ -104,7 +294,8 @@ impl Ledger {
         // auto_held offset.
         let mut qty = e.qty.0;
         let mut fee = e.fee.0;
-        if !auto_recon
+        if cash.is_none()
+            && !auto_recon
             && matches!(
                 e.cause,
                 ExternalCause::Adl | ExternalCause::Liquidation | ExternalCause::Unknown
@@ -373,4 +564,23 @@ impl Ledger {
             .map(|d| d.ext.iter().copied().collect())
             .unwrap_or_default()
     }
+}
+
+pub(crate) fn same_receipt(a: &ExternalFill, b: &ExternalFill) -> bool {
+    let mut a = *a;
+    let mut b = *b;
+    a.rx_tsc = Tsc(0);
+    b.rx_tsc = Tsc(0);
+    if eligible_auto(&a) && eligible_auto(&b) {
+        a.cause = ExternalCause::Unknown;
+        b.cause = ExternalCause::Unknown;
+    }
+    a == b
+}
+
+pub(crate) fn eligible_auto(e: &ExternalFill) -> bool {
+    matches!(
+        e.cause,
+        ExternalCause::Adl | ExternalCause::Liquidation | ExternalCause::Unknown
+    )
 }

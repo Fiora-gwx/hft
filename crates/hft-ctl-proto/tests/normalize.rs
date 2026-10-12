@@ -14,6 +14,63 @@ use hft_types::{CapSource, KillLevel, RunMode, Side};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+#[test]
+fn ctp_178_reconciliation_receipts_use_one_atomic_record() {
+    use crate::common::p0::*;
+    use hft_event::{ExternalCause, ExternalFill, ReconcileBatchView};
+    use hft_types::{Px, Qty, Tsc};
+    use zerocopy::IntoBytes;
+    let mut spec = p0_spec();
+    let caps = spec.caps.iter_mut().find(|c| c.venue == V_BN_USDM).unwrap();
+    caps.flags = caps.flags | hft_refdata::CapFlags::PERP_CASH;
+    let rd = spec.load();
+    let e = ExternalFill {
+        account: ACCT_A,
+        venue: V_BN_USDM,
+        inst: I_BN_USDM,
+        side: Side::Sell,
+        cause: ExternalCause::Unknown,
+        qty: Qty(100_000),
+        px: Px(6_000_000),
+        fee: Qty(37),
+        fee_asset: USDT,
+        _pad: [0; 6],
+        exch_order_id: 90,
+        trade_id: 7,
+        ex_ts_ns: 123,
+        rx_tsc: Tsc(0),
+        fill_seq: 0,
+        cash_qty: Qty(100_000),
+        cash_amount: Qty(-999),
+    };
+    let mut v = e0(
+        None,
+        json!({"type":"ReconcileReport","report_id":"7","items":[
+        {"venue":"binance-usdm","account":"acct-a","item":"Summary","view_seq":"100"},
+        {"venue":"binance-usdm","account":"acct-a","item":"Position","inst":"binance-usdm:BTCUSDT",
+         "engine_qty":"0.002","exch_qty":"0.001","view_seq":"100","sflags":["AUTO_EXTERNAL"]}],
+        "receipts_b64":b64(e.as_bytes())}),
+    );
+    v["issuer"] = json!("reconciler");
+    let req = parse(&v);
+    assert_eq!(
+        hft_ctl_proto::parse_request(req.to_json().as_bytes()).unwrap(),
+        req
+    );
+    let n = hft_ctl_proto::normalize(&req, &rd).unwrap();
+    let records = n.ring_records();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].0, EventKind::RECONCILE_BATCH);
+    let b = ReconcileBatchView::read(&records[0].2).unwrap();
+    assert_eq!(b.fills().collect::<Vec<_>>(), vec![e]);
+    assert_eq!(b.reports().count(), 2);
+    assert_eq!(n.cmd_hash, [0; 32]);
+    for raw in [vec![], vec![0; 95], vec![0; 96 * 257], vec![0; 96]] {
+        v["cmd"]["receipts_b64"] = json!(b64(&raw));
+        assert!(hft_ctl_proto::normalize(&parse(&v), &rd).is_err());
+    }
+}
+
 fn dec(n: &Normalized) -> (CmdHdr, ControlCmd<'_>) {
     ControlCmd::decode(&n.record).unwrap()
 }

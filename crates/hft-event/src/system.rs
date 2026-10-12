@@ -295,6 +295,7 @@ pub static NOTE_NAMES: &[NoteName] = notes![
     TimersCancelled: Sequencer, Info, [];
     TargetCleared: Sequencer, Info, [];
     PositionDiff: Sequencer, P1, [f("venue", 0, 8), f("account", 8, 8), f("ledger_qty", 64, 64), f("report_qty", 128, 64)];
+    ReconcileCash: Sequencer, Info, [f("report_id", 0, 64), f("venue", 64, 8), f("account", 72, 8), f("n_reports", 128, 64), f("n_fills", 192, 64), f("applied", 256, 64)];
     RateLimitHit: Risk, P2, [];
     CapSet: Risk, Info, [f("cap", 0, 384)];
     CapCleared: Risk, Info, [f("cap", 0, 384)];

@@ -24,6 +24,7 @@ mod prop_cmd;
 mod prop_codec;
 mod prop_spb1;
 mod prop_var;
+mod reconcile;
 mod ring;
 #[path = "common/spb.rs"]
 mod spb;

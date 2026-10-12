@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | CTP-057、CTP-094、CTP-173 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | CTP-001–CTP-004、CTP-090、CTP-162、CTP-170 |
-| 请求与响应 | CTP-010–CTP-025、CTP-040–CTP-053、CTP-070–CTP-072、CTP-140–CTP-161、CTP-177 |
+| 请求与响应 | CTP-010–CTP-025、CTP-040–CTP-053、CTP-070–CTP-072、CTP-140–CTP-161、CTP-177、CTP-178 |
 | 二次确认 | CTP-001、CTP-011、CTP-016、CTP-071、CTP-072、CTP-080–CTP-082 |
 | 策略参数 schema JSON | CTP-175 |
 | 权限表 | CTP-081、CTP-082、CTP-090、CTP-093、CTP-095、CTP-100–CTP-139、CTP-176 |
@@ -2302,6 +2302,16 @@ spec: README.md
 | CTP-177.6 | `"Disconnect"` / `"5"` | `InvalidArgs{BadValue}` |
 | CTP-177.7 | `"Off"` / `"0"` | `Ok` |
 | CTP-177.8 | `"Pause"` / `"0"` | `invalid_request`,`detail = UnknownDiscriminant` |
+
+### CTP-178 带原始凭据的报告规范化
+
+- 规则:[实现规格](README.md#请求与响应)
+- 级别:unit
+- 里程碑:M2
+- 前置:两项同账户报告与完整原始成交,refdata 开启严格永续结算
+- 步骤:解析 JSON、重新序列化并规范化;检查环记录;分别提交空、截断、超量、零字节凭据
+- 期望:JSON 往返保留凭据,合法组写一条 ReconcileBatch 且原始成交字节一致;坏体拒绝
+- 实现:`crates/hft-ctl-proto/tests/normalize.rs::ctp_178_reconciliation_receipts_use_one_atomic_record`
 
 ## 验收
 

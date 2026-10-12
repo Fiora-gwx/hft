@@ -62,6 +62,13 @@ fn evt_075_note_registry_rows() {
         ("EVT-075.89", "TimersCancelled", Sequencer, Some(Info), &[]),
         ("EVT-075.90", "TargetCleared", Sequencer, Some(Info), &[]),
         (
+            "EVT-075.93",
+            "ReconcileCash",
+            Sequencer,
+            Some(Info),
+            &[(0, 64), (64, 8), (72, 8), (128, 64), (192, 64), (256, 64)],
+        ),
+        (
             "EVT-075.91",
             "PositionDiff",
             Sequencer,

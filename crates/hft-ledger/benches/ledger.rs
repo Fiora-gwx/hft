@@ -87,6 +87,53 @@ fn led_251_apply_external(c: &mut Criterion) {
     });
 }
 
+fn led_294_reconciled_cash(c: &mut Criterion) {
+    use hft_event::{ReconcileBatchHdr, ReconcileBatchView, ReconcileReport};
+    use zerocopy::IntoBytes;
+    let mut e = ext_tid(ExternalCause::Adl, Buy, BTC_P2, "0.001", "60000", 71);
+    e.cash_qty = e.qty;
+    c.bench_function("ledger/apply_reconciled_external", |b| {
+        b.iter_batched(
+            booted,
+            |mut l| {
+                black_box(l.apply_reconciled_external(black_box(&e), s(2))).unwrap();
+            },
+            BatchSize::SmallInput,
+        )
+    });
+    let rd = rd_with(&RdOpts {
+        p2_cash: true,
+        ..RdOpts::default()
+    });
+    let l = booted_with(rd);
+    let mut summary = ReconcileReport::new_zeroed();
+    summary.report_id = 7;
+    summary.account = A1;
+    summary.venue = P2;
+    summary.count = 2;
+    summary.item = 5;
+    let mut p = summary;
+    p.idx = 1;
+    p.item = 1;
+    p.inst = BTC_P2;
+    p.engine_qty = Qty(-e.qty.0);
+    p.sflags = ReconcileReport::AUTO_EXTERNAL;
+    let hdr = ReconcileBatchHdr {
+        report_id: 7,
+        n_reports: 2,
+        n_fills: 1,
+        account: A1,
+        venue: P2,
+        _pad: 0,
+    };
+    let bytes = [hdr.as_bytes(), summary.as_bytes(), p.as_bytes(), e.as_bytes()].concat();
+    let batch = ReconcileBatchView::read(&bytes).unwrap();
+    assert!(l.validate_reconcile_batch(&batch).is_ok());
+    c.bench_function("ledger/validate_reconcile_batch", |b| {
+        b.iter(|| black_box(l.validate_reconcile_batch(black_box(&batch))).unwrap())
+    });
+}
+
 fn bop() -> Ledger {
     let mut l = ledger_with(rd_funding(FundingSettleKind::BalanceOnlyPush), &cfg_lf());
     boot_a1(&mut l, 0);
@@ -286,6 +333,7 @@ criterion_group!(
     benches,
     led_250_apply_fill,
     led_251_apply_external,
+    led_294_reconciled_cash,
     led_252_apply_funding_push,
     led_253_reconcile_funding,
     led_254_funding_window_sweep,

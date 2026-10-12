@@ -269,12 +269,16 @@ impl<'a> CtlRecord<'a> {
         Ok(n)
     }
 
-    /// Kind must be ControlCmd, ConfigBlob, ReconcileReport or Note.
+    /// Kind must be ControlCmd, ConfigBlob, ReconcileReport, ReconcileBatch or Note.
     pub fn read(b: &'a [u8]) -> Result<Self, DecodeErr> {
         let (h, body) = frame_hdr(b)?;
         if !matches!(
             h.kind,
-            EventKind::CONTROL_CMD | EventKind::CONFIG_BLOB | EventKind::RECONCILE_REPORT | EventKind::NOTE
+            EventKind::CONTROL_CMD
+                | EventKind::CONFIG_BLOB
+                | EventKind::RECONCILE_REPORT
+                | EventKind::RECONCILE_BATCH
+                | EventKind::NOTE
         ) {
             return Err(DecodeErr::KindMismatch);
         }

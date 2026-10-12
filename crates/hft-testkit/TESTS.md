@@ -26,7 +26,7 @@ spec: README.md
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
 | 10. SeqRig | PY-106–PY-109、PY-111、PY-112 |
 | 实现说明 | 不适用:见子节 |
-| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-132 |
+| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-132、TK-133 |
 | 金样运行器 | TK-001、TK-005 |
 | 源文件 | TK-066 |
 | 延迟与资源契约 | TK-092–TK-093 |
@@ -1708,6 +1708,16 @@ spec: README.md
 - 期望:钱包精确为初始值加一次 +8600/−8600,仓位保留原方向的 100000;每个入账边界的独立 JournalLedger 与热账本一致,验证回放的 Output 和组件哈希一致,恢复后不重复入账
 - 边界:此例只覆盖补报去重和恢复,不包含 AUTO_EXTERNAL 合成或 auto_held 抵扣,LED-081 保持待实现
 - 实现:`crates/hft-testkit/tests/external_receipts.rs::tk_132_replayed_adl_keeps_real_engine_wallet_after_recovery`
+
+### TK-133 原始凭据补账后重启再确认
+
+- 规则:[实现规格](README.md#dst-的世界模型)
+- 级别:integ
+- 里程碑:M2
+- 前置:真实 SeqSut 与 SimMatcher,多空 × 100000/200000 缺口四行
+- 步骤:仅交易所记入原始成交,由 ReconActor 打包补账;重启后交付 ADL 补报和重复副本;逐边界核对冷热账本及验证回放
+- 期望:原始历史经 ReconActor 打包补账,钱包等于真值;重启后的 ADL 补报及重复回报均不重复结算,auto_held 清零,每个边界独立账本和验证回放一致
+- 实现:`crates/hft-testkit/tests/external_receipts.rs::tk_133_raw_receipts_reconcile_gap_then_confirm_after_restart`
 
 ## 验收
 

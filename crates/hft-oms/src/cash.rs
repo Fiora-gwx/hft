@@ -5,6 +5,34 @@ use hft_types::{AccountId, InstId, Qty, VenueId};
 use crate::CashError;
 
 impl crate::Oms {
+    /// Preflight provenance and all distinct new order identities in one reconciliation.
+    /// No mutation/allocation; budget: oms/reconcile_cash_guard.
+    pub fn reconcile_cash_guard(&self, batch: &hft_event::ReconcileBatchView<'_>) -> Result<(), CashError> {
+        let t = self
+            .tix(batch.hdr.venue, batch.hdr.account)
+            .and_then(|i| self.t(i))
+            .ok_or(CashError::Identity)?;
+        let free = t.foreign_cash.iter().filter(|r| r.exch_order_id == 0).count();
+        let mut needed = 0;
+        for (i, e) in batch.fills().enumerate() {
+            self.external_cash_guard(&e)?;
+            if e.exch_order_id != 0
+                && !self.has_foreign_cash(e.venue, e.account, e.inst, e.exch_order_id)
+                && !batch
+                    .fills()
+                    .take(i)
+                    .any(|r| r.inst == e.inst && r.exch_order_id == e.exch_order_id)
+            {
+                needed += 1;
+            }
+        }
+        if needed > free {
+            Err(CashError::Capacity)
+        } else {
+            Ok(())
+        }
+    }
+
     /// Read-only exchange-order provenance lookup; bounded by `foreign_fill_track`.
     /// Budget: oms/foreign_cash_seen.
     pub fn has_foreign_cash(&self, venue: VenueId, account: AccountId, inst: InstId, eid: u64) -> bool {

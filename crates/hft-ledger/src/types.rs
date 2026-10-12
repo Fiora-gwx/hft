@@ -114,6 +114,7 @@ pub enum JournalApplyError {
     /// Missing, duplicate, mismatched or cross-event OMS foreign-fill evidence.
     ForeignEvidence,
     ForeignCapacity,
+    ReconcileEvidence,
     MissingCash,
     CashCoverage,
     CashConflict,
@@ -135,6 +136,9 @@ pub enum SettlementError {
     MissingCash,
     CashCoverage,
     ExternalOverlap,
+    ReceiptConflict,
+    ReceiptCapacity,
+    ReceiptIdentity,
 }
 
 /// Late fee (OMS `FeeOut`).

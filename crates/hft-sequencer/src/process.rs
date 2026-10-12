@@ -366,6 +366,7 @@ fn dispatch<'a, D: Driver<S>, S: StrategySet>(
         EventKind::ACCOUNT_CONFIG_REPORT => account_cfg(e, inst, drv, slot),
         EventKind::CONN_STATE => conn_state(e, inst, drv, slot),
         EventKind::RECONCILE_REPORT => crate::commands::reconcile(e, inst, drv, slot),
+        EventKind::RECONCILE_BATCH => crate::commands::reconcile_batch(e, inst, drv, slot),
         EventKind::CONTROL_CMD => crate::commands::control(e, inst, drv, slot, p),
         EventKind::CONFIG_BLOB => crate::commands::config_blob(e, slot),
         EventKind::TIMER => timer(e, inst, drv, slot, p),
@@ -884,7 +885,7 @@ pub(crate) fn external_fill<D: Driver<S>, S: StrategySet>(
                 .caps(e.rd.inst(x.inst).venue)
                 .flags
                 .contains(hft_refdata::CapFlags::PERP_CASH);
-    if settled && auto_recon {
+    if settled && auto_recon && x.cash_qty != x.qty {
         return Err(FatalReason::UnsupportedExternalCash);
     }
     if settled && !oms_foreign {
@@ -893,7 +894,11 @@ pub(crate) fn external_fill<D: Driver<S>, S: StrategySet>(
     let before = e.ledger.pos(a, x.inst).qty.0 != 0;
     e.trace
         .rec("ledger.apply_external", u64::from(a.0), u64::from(auto_recon));
-    let r = if settled {
+    let r = if settled && auto_recon {
+        e.ledger
+            .apply_reconciled_external(x, e.now.engine_ns)
+            .map_err(FatalReason::Settlement)?
+    } else if settled {
         e.ledger
             .apply_settled_external(x, e.now.engine_ns)
             .map_err(FatalReason::Settlement)?
