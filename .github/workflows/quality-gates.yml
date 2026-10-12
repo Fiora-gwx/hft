@@ -250,6 +250,8 @@ jobs:
         with:
           name: ledger-case-seeds
           path: |
+            target/dst/LED-080/
+            target/xtask/dst-LED-080.json
             target/dst/LED-081/
             target/xtask/dst-LED-081.json
           if-no-files-found: ignore

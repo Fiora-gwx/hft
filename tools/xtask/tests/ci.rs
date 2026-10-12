@@ -37,7 +37,7 @@ fn ci_repo(tag: &str) -> Fixture {
     f
 }
 
-const STEPS: [&str; 13] = [
+const STEPS: [&str; 14] = [
     "cargo fmt --all --check",
     "cargo clippy --profile ci --workspace --all-targets --all-features -- -D warnings",
     "cargo deny check licenses bans",
@@ -47,6 +47,7 @@ const STEPS: [&str; 13] = [
     "cargo test --profile ci --workspace --all-features --no-fail-fast",
     "cargo test --profile ci --workspace --all-features --test golden",
     "xtask dst --seeds 200 --regressions",
+    "xtask dst --seeds 200 --regressions --case LED-080",
     "xtask dst --seeds 200 --regressions --case LED-081",
     "xtask dst --hashtrail check --first 50",
     "xtask gen-schema --check",
@@ -255,10 +256,11 @@ fn tool_009_dst_smoke_args() {
         .expect("dst smoke step");
     assert_eq!(calls[i], "xtask dst --seeds 200 --regressions");
     assert!(!calls[i].contains("--seed "), "the smoke start is commit-derived");
-    assert_eq!(calls[i + 1], "xtask dst --seeds 200 --regressions --case LED-081");
+    assert_eq!(calls[i + 1], "xtask dst --seeds 200 --regressions --case LED-080");
+    assert_eq!(calls[i + 2], "xtask dst --seeds 200 --regressions --case LED-081");
     assert!(
-        !calls[i + 1].contains("--seed "),
+        !calls[i + 1].contains("--seed ") && !calls[i + 2].contains("--seed "),
         "the case uses the same commit-derived start"
     );
-    assert_eq!(calls[i + 2], "xtask dst --hashtrail check --first 50");
+    assert_eq!(calls[i + 3], "xtask dst --hashtrail check --first 50");
 }

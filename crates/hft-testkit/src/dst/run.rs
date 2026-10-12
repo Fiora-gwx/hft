@@ -14,7 +14,7 @@ use crate::dst::faults::{Fault, FaultPlan};
 use crate::dst::invariants::{EndView, InvId, InvState, InvariantSet, StepView, check_end, check_step};
 use crate::dst::obs::{Obs, TruthRow};
 use crate::dst::sut::{BootCtx, FrameRec, InputRec, JRec, OutRing, Source, StepOut, Sut};
-use crate::dst::venue_behavior::{Matcher, MockVenue};
+use crate::dst::venue_behavior::{ExternalReceipt, Matcher, MockVenue};
 use crate::dst::world::{AccountKind, World};
 use crate::dst::{DstConfig, DstFailure, DstOutcome, FailKind, RerunPolicy, TraceItem};
 use crate::hash::{ComponentHashes, HashTrail};
@@ -44,6 +44,8 @@ pub struct RunRecord {
     pub ledger_checks: Vec<u64>,
     /// Bounded raw matching evidence for diagnosis; not an invariant reference.
     pub matched_tail: Vec<(u64, hft_event::OrderEvent)>,
+    /// Complete bounded original external execution history, independent of delivery copies.
+    pub external_receipts: Vec<ExternalReceipt>,
     /// Final exchange-side view, independently of the engine observations.
     pub truth: Vec<TruthRow>,
 }
@@ -68,6 +70,7 @@ impl RunRecord {
             snapshot_checks: 0,
             ledger_checks: Vec::new(),
             matched_tail: Vec::new(),
+            external_receipts: Vec::new(),
             truth: Vec::new(),
         }
     }
@@ -462,13 +465,19 @@ impl<E: Sut> Loop<'_, E> {
             | SelfLiquidation { inst, .. }
             | ManualFill { inst, .. }
             | Adl { inst, .. }
-            | ReconciledAdl { inst, .. } => self.inst_venue(inst),
+            | ReconciledAdl { inst, .. }
+            | ForeignOrderFill { inst, .. } => self.inst_venue(inst),
             _ => None,
         };
         if let Some(v) = target {
             let ins = self.venues[v].apply_fault(&f, now);
             if let Some(e) = self.venues[v].fault_error() {
-                self.fail = Some((self.rec.steps_run, FailKind::Scenario("TK-138"), e.to_string()));
+                let case = if matches!(f, ForeignOrderFill { .. }) {
+                    "LED-080"
+                } else {
+                    "TK-138"
+                };
+                self.fail = Some((self.rec.steps_run, FailKind::Scenario(case), e.to_string()));
                 return;
             }
             self.deliver_all(ins);
@@ -698,12 +707,10 @@ impl<E: Sut> Loop<'_, E> {
             // each actual Input, before later Inputs and automatic restarts can hide state.
             for event in &self.out.events {
                 if set.contains(InvId::I6)
-                    && event.records.first().is_some_and(|r| {
-                        matches!(
-                            r.kind,
-                            hft_event::EventKind::EXTERNAL_FILL | hft_event::EventKind::RECONCILE_BATCH
-                        )
-                    })
+                    && event
+                        .records
+                        .first()
+                        .is_some_and(|r| crate::dst::sut::ledger_input(r.kind))
                 {
                     if let Err(e) = self.sut.verify_ledger_event(event) {
                         result = Err((InvId::I6, e));
@@ -824,6 +831,9 @@ impl<E: Sut> Loop<'_, E> {
         self.rec.journal = self.sut.journal().to_vec();
         for v in self.venues.iter().chain(&self.sims) {
             self.rec.matched_tail.extend(v.m.matched_tail());
+            self.rec
+                .external_receipts
+                .extend_from_slice(v.m.external_history());
         }
         if let Some((_, FailKind::Inv(InvId::I16), message)) = &mut self.fail {
             for (generated, e) in &self.rec.matched_tail {

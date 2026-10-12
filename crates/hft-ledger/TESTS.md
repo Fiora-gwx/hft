@@ -969,7 +969,8 @@ spec: README.md
 - 故障:每个种子随机选 1–3 个时刻向 gw 注入 `StaleGen` 带成交的 `OrderEvent`(`exch_order_id ≠ 0`,`trade_id = 0` 与 `> 0` 各半)与 1 条 `SLOT_UNRESOLVED` 带成交的 `OrderEvent`;其中一半与之前 gw 已报的 `ExternalFill{Unknown}` 同一订单
 - 种子:PR 200(提交派生)+ 回归集;每夜日期派生
 - 断言:每个事件边界后,热进程 ledger 与冷读者 ledger 的节 1、13、22 快照字节相等;每条 `Note{OmsForeignFill}` 在冷读者中恰好产生一次 `apply_external` 调用;INV-1、INV-16
-- 实现:待实现
+- 边界:同订单重叠限于一笔完整原始成交与其累计确认;每组对齐的四个种子共享数量与时刻,正/零 ID 和先发原件分别占半数;故障须实际改变模拟真值且最后全部交付,不得放宽钱包一致或用空观察跳过
+- 实现:`crates/hft-testkit/src/scenarios/foreign_ledger.rs::led_080_foreign_order_cold_hot_equal`
 
 ### LED-081 AUTO_EXTERNAL:冷读者账本与 auto_held 与热进程逐值相同
 
@@ -2544,7 +2545,7 @@ spec: README.md
 - 种子:PR 200(提交派生)+ 回归集;每夜日期派生
 - 断言:每条 `StateSnapshot` 处 JournalLedger 的 `pos`、`inventory`、`venue_book` 与引擎 Ledger 相等;`unmapped_fills` 的每一笔都在同一事件内有 `Note{OmsForeignFill}` 或属于 `Shadow` 扣留的单
 - 边界:持久字段与快照比较,完整视图另与同一事件完成边界的真实引擎比较,包括仓位时间、全部现金归属与报告字段、保证金、权益汇总及未持久化的标志/更新时间;标准真实引擎 INV-6 在每个快照、定期和结束重建中执行。启动配置仅从前置且哈希匹配的 ConfigBlob 取得,恢复清空冷观察器后重算保留前缀;后续快照不覆盖已消费状态
-- 反例:现金总额/归属/报告时间/标志、库存、保证金、权益和 venue 标志任一差异均失败;缺失/跨事件/错身份/错金额/重复使用的注记以及错误 epoch 或未分配槽/代数的 Shadow 均不得解释未映射成交;坏配置或已失败观察器不能继续通过;同事件证据满时明确失败;完成事件后的纯 Meta 尾部可读,未完成的 Input/Output 尾部失败
+- 反例:现金总额/归属/报告时间/标志、库存、保证金、权益和 venue 标志任一差异均失败;缺失/跨事件/错身份/错金额/重复使用或没有冷入账的多余注记以及错误 epoch 或未分配槽/代数的 Shadow 均不得解释未映射成交;坏配置或已失败观察器不能继续通过;同事件证据满时明确失败;完成事件后的纯 Meta 尾部可读,未完成的 Input/Output 尾部失败
 - 实现:`crates/hft-testkit/src/dst/seq/ledger.rs::led_267_full_venue_fields_and_recorded_configuration_are_required`
 
 ### LED-268 资金费逐笔差额以 AssetMeta.dust 为界判 Matched

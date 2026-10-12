@@ -103,6 +103,9 @@ pub struct ExternalReceipt {
 /// Test-run evidence bound. Exhaustion fails before the next execution changes exchange truth.
 pub const EXTERNAL_HISTORY_CAP: usize = 4096;
 
+/// Disjoint order-id range for bounded external executions in the test exchange.
+pub const EXTERNAL_ORDER_ID_BASE: u64 = u64::MAX - EXTERNAL_HISTORY_CAP as u64;
+
 /// The matching core behind a `MockVenue`.
 pub trait Matcher: Sized {
     fn new(world: &WorldSpec, venue: VenueId, seed: u64) -> Self;
@@ -140,6 +143,17 @@ pub trait Matcher: Sized {
         push: bool,
         now_ns: u64,
     ) -> ExternalFill;
+    /// Settle one independently identified external order before publishing either transport
+    /// representation. A zero trade id uses the first execution's cumulative quantity as key.
+    fn external_order(
+        &mut self,
+        a: AccountId,
+        inst: InstId,
+        side: Side,
+        qty: i64,
+        positive_trade_id: bool,
+        now_ns: u64,
+    ) -> Result<ExternalFill, String>;
     fn state_hash(&self) -> u64;
 }
 
@@ -580,6 +594,32 @@ impl Matcher for ToyMatcher {
             );
         }
         x
+    }
+    fn external_order(
+        &mut self,
+        a: AccountId,
+        inst: InstId,
+        side: Side,
+        qty: i64,
+        positive_trade_id: bool,
+        now_ns: u64,
+    ) -> Result<ExternalFill, String> {
+        if !self.accounts.contains(&a)
+            || self.inst(inst).is_none()
+            || qty <= 0
+            || self.bbo.get(&inst.0).is_none_or(|b| b.0 <= 0)
+            || self.external_history.len() == EXTERNAL_HISTORY_CAP
+        {
+            return Err("invalid or full external order history".into());
+        }
+        let mut fill = self.external(a, inst, side, qty, "foreign-order", false, now_ns);
+        fill.exch_order_id = u64::MAX - fill.trade_id;
+        if !positive_trade_id {
+            fill.trade_id = 0;
+            fill.fill_seq = qty as u64;
+        }
+        self.external_history.last_mut().expect("new receipt").fill = fill;
+        Ok(fill)
     }
     fn state_hash(&self) -> u64 {
         let s = format!(
@@ -1145,6 +1185,80 @@ impl<M: Matcher> MockVenue<M> {
             Fault::FillBeforeAck { .. } => self.next_order.push(NextOrder::FillBeforeAck),
             Fault::LateFeeOnly { delay_ms, .. } => self.late_fees.push_back(delay_ms),
             Fault::NoClientIdFill { .. } => self.next_order.push(NextOrder::NoClientId),
+            Fault::ForeignOrderFill {
+                account,
+                inst,
+                qty,
+                buy,
+                positive_trade_id,
+                unresolved,
+                raw_first,
+            } => {
+                if now < self.userstream_down_until {
+                    self.fault_error = Some("foreign order fill requires a connected user stream".into());
+                    return out;
+                }
+                // A stale client id must name a real previously acknowledged slot, with a
+                // different generation. Never turn a missing prerequisite into a no-op.
+                let identity = if unresolved {
+                    (SlotId::UNRESOLVED, 0, 0)
+                } else {
+                    let Some((_, ack)) = self
+                        .ack_ids
+                        .values()
+                        .find(|(at, e)| *at <= now && e.account == account && e.inst == inst)
+                    else {
+                        self.fault_error = Some("stale fill requires an acknowledged order identity".into());
+                        return out;
+                    };
+                    (ack.slot, ack.r#gen ^ (1 << 31), ack.epoch)
+                };
+                let side = if buy { Side::Buy } else { Side::Sell };
+                let fill = match self
+                    .m
+                    .external_order(account, inst, side, qty, positive_trade_id, now)
+                {
+                    Ok(fill) => fill,
+                    Err(e) => {
+                        self.fault_error = Some(e);
+                        return out;
+                    }
+                };
+                if raw_first {
+                    out.push((now + 1_000_000, InputRec::of(&fill, self.src())));
+                }
+                let order = OrderEvent {
+                    venue: fill.venue,
+                    account,
+                    inst,
+                    what: OrderEventKind::Fill,
+                    detail: side as u8,
+                    slot: identity.0,
+                    r#gen: identity.1,
+                    epoch: identity.2,
+                    px: fill.px,
+                    qty: fill.qty,
+                    cum_filled: fill.qty,
+                    fee: fill.fee,
+                    fee_asset: fill.fee_asset,
+                    reject_code: 0,
+                    exch_order_id: fill.exch_order_id,
+                    ex_ts_ns: fill.ex_ts_ns,
+                    hw_rx_ns: 0,
+                    rx_tsc: 0,
+                    avg_px: fill.px,
+                    cash_qty: fill.cash_qty,
+                    cash_sum: fill.cash_amount,
+                    trade_id: fill.trade_id,
+                };
+                let due = now + 2_000_000;
+                out.push((due, InputRec::of(&order, self.src())));
+                self.last_due
+                    .entry(account.0)
+                    .and_modify(|d| *d = (*d).max(due))
+                    .or_insert(due);
+                self.produced += out.len() as u64;
+            }
             Fault::SelfLiquidation { account, inst } | Fault::ManualFill { account, inst } => {
                 let prefix = if matches!(f, Fault::SelfLiquidation { .. }) {
                     self.cfg.liquidation_prefix

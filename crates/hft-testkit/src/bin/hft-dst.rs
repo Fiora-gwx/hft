@@ -155,15 +155,28 @@ struct Violation {
 
 /// Bounded per-seed evidence for explicit cases; baseline report format stays compact.
 fn evidence_json(r: &RunRecord, case: Option<Scenario>) -> String {
-    use hft_event::{EventKind, ExternalFill, Note, NoteSource, ReconcileBatchView};
+    use hft_event::{EventKind, ExternalFill, Note, NoteSource, OrderEvent, ReconcileBatchView};
     let fill_json = |seq: u64, f: ExternalFill| {
         format!(
-            "{{\"seq\":{seq},\"account\":{},\"venue\":{},\"inst\":{},\"trade_id\":{},\"qty\":{},\"cash_qty\":{},\"cash\":{}}}",
-            f.account.0, f.venue.0, f.inst.0, f.trade_id, f.qty.0, f.cash_qty.0, f.cash_amount.0
+            "{{\"seq\":{seq},\"account\":{},\"venue\":{},\"inst\":{},\"order_id\":{},\"trade_id\":{},\"fill_seq\":{},\"side\":{},\"px\":{},\"qty\":{},\"fee\":{},\"fee_asset\":{},\"cash_qty\":{},\"cash\":{}}}",
+            f.account.0,
+            f.venue.0,
+            f.inst.0,
+            f.exch_order_id,
+            f.trade_id,
+            f.fill_seq,
+            f.side as u8,
+            f.px.0,
+            f.qty.0,
+            f.fee.0,
+            f.fee_asset.0,
+            f.cash_qty.0,
+            f.cash_amount.0
         )
     };
     let mut batches = Vec::new();
     let mut originals = Vec::new();
+    let mut foreign_orders = Vec::new();
     let mut offsets = 0;
     for j in &r.journal {
         if j.kind == EventKind::RECONCILE_BATCH
@@ -175,6 +188,14 @@ fn evidence_json(r: &RunRecord, case: Option<Scenario>) -> String {
         }
         if let Some(f) = j.try_read::<ExternalFill>() {
             originals.push(fill_json(j.seq, f));
+        }
+        if let Some(e) = j.try_read::<OrderEvent>()
+            && e.exch_order_id >= hft_testkit::dst::venue_behavior::EXTERNAL_ORDER_ID_BASE
+        {
+            foreign_orders.push(format!(
+                "{{\"seq\":{},\"order_id\":{},\"trade_id\":{},\"slot\":{},\"gen\":{},\"epoch\":{},\"qty\":{},\"cash_qty\":{},\"cash\":{}}}",
+                j.seq, e.exch_order_id, e.trade_id, e.slot.0, e.r#gen, e.epoch, e.qty.0, e.cash_qty.0, e.cash_sum.0
+            ));
         }
         if let Some(n) = j.try_read::<Note>()
             && n.source == NoteSource::Ledger
@@ -205,8 +226,9 @@ fn evidence_json(r: &RunRecord, case: Option<Scenario>) -> String {
         })
         .collect();
     let checks: Vec<_> = r.ledger_checks.iter().map(u64::to_string).collect();
+    let receipts: Vec<_> = r.external_receipts.iter().map(|r| fill_json(0, r.fill)).collect();
     format!(
-        "{{\"seed\":\"{:#018x}\",\"case\":{},\"suite\":\"{}\",\"steps\":{},\"end_ns\":{},\"pass\":{},\"trail\":\"{:032x}\",\"snapshots\":{},\"ledger_inputs\":[{}],\"auto_receipts\":[{}],\"late_originals\":[{}],\"offset_notes\":{offsets},\"truth_pairs\":{},\"truth_unskipped\":{},\"balances\":[{}]}}",
+        "{{\"seed\":\"{:#018x}\",\"case\":{},\"suite\":\"{}\",\"steps\":{},\"end_ns\":{},\"pass\":{},\"trail\":\"{:032x}\",\"snapshots\":{},\"ledger_inputs\":[{}],\"auto_receipts\":[{}],\"late_originals\":[{}],\"exchange_receipts\":[{}],\"foreign_orders\":[{}],\"offset_notes\":{offsets},\"truth_pairs\":{},\"truth_unskipped\":{},\"balances\":[{}]}}",
         r.seed,
         case.map_or("null".into(), |s| format!("\"{}\"", s.id)),
         r.suite,
@@ -218,6 +240,8 @@ fn evidence_json(r: &RunRecord, case: Option<Scenario>) -> String {
         checks.join(","),
         batches.join(","),
         originals.join(","),
+        receipts.join(","),
+        foreign_orders.join(","),
         r.truth.len(),
         !r.truth.is_empty()
             && r.truth.iter().all(|t| !t.undelivered && t.excluded.is_empty())

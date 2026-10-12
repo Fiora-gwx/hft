@@ -153,6 +153,17 @@ pub enum Fault {
     LateFillAfterRecycle {
         venue: VenueId,
     },
+    /// A real external execution delivered with stale or unresolved order identity. The
+    /// optional raw receipt precedes the cumulative copy; exchange truth settles only once.
+    ForeignOrderFill {
+        account: AccountId,
+        inst: InstId,
+        qty: i64,
+        buy: bool,
+        positive_trade_id: bool,
+        unresolved: bool,
+        raw_first: bool,
+    },
     // ---- 拒绝
     RateLimit {
         venue: VenueId,
@@ -387,7 +398,8 @@ impl Fault {
             | PartialFills { .. }
             | LateFeeOnly { .. }
             | StaleGenFill { .. }
-            | LateFillAfterRecycle { .. } => FaultCategory::Report,
+            | LateFillAfterRecycle { .. }
+            | ForeignOrderFill { .. } => FaultCategory::Report,
             RateLimit { .. }
             | ServerError { .. }
             | Timeout { .. }

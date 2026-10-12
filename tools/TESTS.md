@@ -104,7 +104,7 @@ spec: README.md
   - 退出 0;步骤序列恰为:`fmt --check` → `clippy …` → `deny check licenses bans` → `deps` → `hot-check` → `fixtures check` → 单元/属性(`cargo test --profile ci`)→ 金样 → `dst` 冒烟 → `dst --hashtrail check --first 50` → `gen-schema --check` → `doc-check`
 - 实现:`tools/xtask/tests/ci.rs::tool_004_runs_twelve_steps_in_order`
 
-DST 冒烟步含基线与 LED-081 两次调用,二者均使用 200 个提交派生种子加完整回归集;HashTrail 调用仍紧随其后。
+DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 个提交派生种子加完整回归集;HashTrail 调用仍紧随其后。
 
 ### TOOL-005 ci --pure-only 只选 tier = pure 的 crate 与 Python 包
 
@@ -164,7 +164,7 @@ DST 冒烟步含基线与 LED-081 两次调用,二者均使用 200 个提交派�
 - 步骤:
   1. 运行 `cargo xtask ci`
 - 期望:
-  - `dst` 冒烟步依次调用基线 `--seeds 200 --regressions` 与同参数加 `--case LED-081` 的专属场景,两次均不含 `--seed`;紧随其后的一步参数为 `--hashtrail check --first 50`
+  - `dst` 冒烟步依次调用基线 `--seeds 200 --regressions` 以及同参数分别加 `--case LED-080`、`--case LED-081` 的专属场景,三次均不含 `--seed`;紧随其后的一步参数为 `--hashtrail check --first 50`
 - 实现:`tools/xtask/tests/ci.rs::tool_009_dst_smoke_args`
 
 ### TOOL-010 ci 在 optional 组件不存在时照常通过

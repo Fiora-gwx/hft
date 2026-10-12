@@ -17,8 +17,8 @@ use crate::dst::{
 use crate::strategies::TargetParams;
 use crate::strategies::probe_target::CMDS;
 
-const SECOND: u64 = 1_000_000_000;
-const LOT: i64 = 100_000;
+pub(super) const SECOND: u64 = 1_000_000_000;
+pub(super) const LOT: i64 = 100_000;
 
 /// Independent case inputs. Consecutive even-length ranges include exactly half late replays.
 fn variant(seed: u64) -> (bool, bool, i64) {
@@ -29,10 +29,10 @@ fn variant(seed: u64) -> (bool, bool, i64) {
     )
 }
 
-fn command(c: &DstConfig, at: u64, id: u64, lots: Option<i64>) -> InputRec {
+pub(super) fn command(c: &DstConfig, at: u64, id: u64, lots: Option<i64>) -> InputRec {
     let desc = &CMDS[if lots.is_some() { 2 } else { 3 }];
     let vals: Vec<_> = lots.into_iter().collect();
-    let bytes = encode_cmd(desc, &vals).expect("LED-081 command schema");
+    let bytes = encode_cmd(desc, &vals).expect("ledger command schema");
     let mut payload = [0; 256];
     payload[..bytes.len()].copy_from_slice(&bytes);
     actors::encode_cmd(
@@ -51,8 +51,7 @@ fn command(c: &DstConfig, at: u64, id: u64, lots: Option<i64>) -> InputRec {
     )
 }
 
-fn configure(c: &mut DstConfig) {
-    let (full, replay, lots) = variant(c.seed);
+pub(super) fn configure_base(c: &mut DstConfig) {
     c.horizon_ns = 90 * SECOND + SECOND / 2;
     c.faults = FaultRates::off();
     c.world.accounts.truncate(1);
@@ -73,7 +72,7 @@ fn configure(c: &mut DstConfig) {
             overrides: vec![],
         },
     )
-    .expect("LED-081 parameters");
+    .expect("ledger parameters");
     let mut inputs = Vec::new();
     for tick in 1..=899 {
         let ns = tick * 100_000_000;
@@ -93,6 +92,15 @@ fn configure(c: &mut DstConfig) {
             inputs.push((ns, InputRec::of(&b, Source::Market)));
         }
     }
+    inputs.sort_by_key(|r| r.0);
+    c.market = MarketSource::Recorded(inputs);
+    c.confirmed_commands.clear();
+    c.scripted.clear();
+}
+
+fn configure(c: &mut DstConfig) {
+    let (full, replay, lots) = variant(c.seed);
+    configure_base(c);
     // Complete a real paired round trip before reopening for ADL. Full ADL may close the
     // second position entirely, so it must not make the required PairOnFill close vacuous.
     c.confirmed_commands.clear();
@@ -105,8 +113,6 @@ fn configure(c: &mut DstConfig) {
         let at = seconds * SECOND;
         c.confirmed_commands.push((at, command(c, at, id, quantity)));
     }
-    inputs.sort_by_key(|r| r.0);
-    c.market = MarketSource::Recorded(inputs);
     c.scripted = vec![
         (
             10 * SECOND,
@@ -129,8 +135,66 @@ fn configure(c: &mut DstConfig) {
     ];
 }
 
-fn require(ok: bool, message: &str) -> Result<(), String> {
+pub(super) fn require(ok: bool, message: &str) -> Result<(), String> {
     if ok { Ok(()) } else { Err(message.into()) }
+}
+
+/// Each paired leg must actually fill its requested quantity in the specified window.
+pub(super) fn assert_trade_window(
+    r: &RunRecord,
+    from: u64,
+    to: u64,
+    side: Side,
+    lots: i64,
+) -> Result<(), String> {
+    let in_window = |tsc: u64| tsc >= from && tsc < to;
+    require(
+        r.journal
+            .iter()
+            .filter(|j| in_window(j.tsc))
+            .filter_map(|j| j.read::<ExecDecision>())
+            .any(|d| {
+                d.account == ACCT_A && d.algo == 2 && d.qty.0 > 0 && d.leg_ix == 0 && d.side == side as u8
+            }),
+        "missing actual PairOnFill open/close decision",
+    )?;
+    for (inst, order_side) in [(S1, side), (P1, side.opposite())] {
+        let decisions: Vec<_> = r
+            .journal
+            .iter()
+            .filter(|j| in_window(j.tsc))
+            .filter_map(|j| j.try_read::<OrderDecision>())
+            .filter(|d| {
+                d.account == ACCT_A
+                    && d.inst == inst
+                    && d.side == order_side
+                    && d.action == OrderAction::New
+                    && d.reject == 0
+            })
+            .collect();
+        require(!decisions.is_empty(), "paired leg has no accepted order")?;
+        let filled: i64 = r
+            .journal
+            .iter()
+            .filter(|j| in_window(j.tsc))
+            .filter_map(|j| j.try_read::<OrderEvent>())
+            .filter(|e| {
+                e.account == ACCT_A
+                    && e.inst == inst
+                    && matches!(e.what, OrderEventKind::PartialFill | OrderEventKind::Fill)
+                    && e.qty.0 > 0
+                    && decisions
+                        .iter()
+                        .any(|d| d.venue == e.venue && d.slot == e.slot && d.r#gen == e.r#gen)
+            })
+            .map(|e| e.qty.0)
+            .sum();
+        require(
+            filled == lots * LOT,
+            "paired leg did not actually fill the configured quantity",
+        )?;
+    }
+    Ok(())
 }
 
 /// Checks actual execution and non-vacuous event comparisons, in addition to every invariant.
@@ -146,53 +210,7 @@ pub fn assert_record(r: &RunRecord) -> Result<(), String> {
         (4 * SECOND, 7 * SECOND, Side::Sell),
         (7 * SECOND, 10 * SECOND, Side::Buy),
     ] {
-        let in_window = |tsc: u64| tsc >= from && tsc < to;
-        require(
-            r.journal
-                .iter()
-                .filter(|j| in_window(j.tsc))
-                .filter_map(|j| j.read::<ExecDecision>())
-                .any(|d| {
-                    d.account == ACCT_A && d.algo == 2 && d.qty.0 > 0 && d.leg_ix == 0 && d.side == side as u8
-                }),
-            "missing actual PairOnFill open/close decision",
-        )?;
-        for (inst, order_side) in [(S1, side), (P1, side.opposite())] {
-            let decisions: Vec<_> = r
-                .journal
-                .iter()
-                .filter(|j| in_window(j.tsc))
-                .filter_map(|j| j.try_read::<OrderDecision>())
-                .filter(|d| {
-                    d.account == ACCT_A
-                        && d.inst == inst
-                        && d.side == order_side
-                        && d.action == OrderAction::New
-                        && d.reject == 0
-                })
-                .collect();
-            require(!decisions.is_empty(), "paired leg has no accepted order")?;
-            let filled: i64 = r
-                .journal
-                .iter()
-                .filter(|j| in_window(j.tsc))
-                .filter_map(|j| j.try_read::<OrderEvent>())
-                .filter(|e| {
-                    e.account == ACCT_A
-                        && e.inst == inst
-                        && matches!(e.what, OrderEventKind::PartialFill | OrderEventKind::Fill)
-                        && e.qty.0 > 0
-                        && decisions
-                            .iter()
-                            .any(|d| d.venue == e.venue && d.slot == e.slot && d.r#gen == e.r#gen)
-                })
-                .map(|e| e.qty.0)
-                .sum();
-            require(
-                filled == lots * LOT,
-                "paired leg did not actually fill the configured quantity",
-            )?;
-        }
+        assert_trade_window(r, from, to, side, lots)?;
     }
     let batches: Vec<_> = r
         .journal
@@ -256,6 +274,11 @@ pub fn assert_record(r: &RunRecord) -> Result<(), String> {
         offsets == usize::from(replay),
         "late receipt must offset exactly once on both ledger consumers",
     )?;
+    assert_final(r)
+}
+
+/// Final delivery and account observations must permit an exact, unskipped truth comparison.
+pub(super) fn assert_final(r: &RunRecord) -> Result<(), String> {
     require(
         r.truth.len() == 2
             && [VS, VP]

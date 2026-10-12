@@ -3,6 +3,8 @@
 //! `src/scenarios/<topic>.rs` function; [`suites`] and [`scenarios`] are the single list that
 //! `tests/dst/` (one `#[test]` per suite), `cargo xtask dst` and `hft-dst` iterate.
 
+#[cfg(feature = "seq")]
+pub mod foreign_ledger;
 pub mod framework;
 #[cfg(feature = "seq")]
 pub mod ledger;
@@ -86,7 +88,10 @@ pub fn scenarios() -> Vec<Scenario> {
     use crate::dst::invariants as i;
     let mut v = framework::all();
     #[cfg(feature = "seq")]
-    v.push(ledger::led_081_auto_external_cold_hot_equal());
+    v.extend([
+        foreign_ledger::led_080_foreign_order_cold_hot_equal(),
+        ledger::led_081_auto_external_cold_hot_equal(),
+    ]);
     v.extend([
         i::inv_1_position_change_has_fill_evidence(),
         i::inv_2_every_report_matched_or_alarmed(),

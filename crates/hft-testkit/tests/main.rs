@@ -15,6 +15,8 @@ mod dst_world;
 mod external_receipts;
 mod faults;
 mod fees;
+#[cfg(feature = "seq")]
+mod foreign_ledger;
 mod r#gen;
 mod hash;
 mod invariants_map;

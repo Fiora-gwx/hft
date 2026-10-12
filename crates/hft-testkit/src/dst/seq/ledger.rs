@@ -559,9 +559,6 @@ impl Evidence {
         if r.flags.contains(RecordFlags::EVENT_END) {
             for (seq, e) in &self.pending {
                 let key = (e.venue.0, e.account.0, e.epoch, e.slot.0, e.r#gen, e.inst.0);
-                if self.shadow.contains(&key) {
-                    continue;
-                }
                 let found = self.notes.iter().position(|n| {
                     n.inst == e.inst
                         && n.group == hft_types::GROUP_NONE
@@ -586,12 +583,18 @@ impl Evidence {
                         && n.v[7] == e.cum_filled.0 as u64
                 });
                 let Some(ix) = found else {
+                    if self.shadow.contains(&key) {
+                        continue;
+                    }
                     return Err(format!(
                         "LED-267 unmapped fill seq {seq} account={} venue={} epoch={} slot={} gen={} inst={}: missing same-event OmsForeignFill or exact Shadow order",
                         e.account.0, e.venue.0, e.epoch, e.slot.0, e.r#gen, e.inst.0
                     ));
                 };
                 self.notes.remove(ix);
+            }
+            if !self.notes.is_empty() {
+                return Err("LED-267: OmsForeignFill has no one-to-one cold booking".into());
             }
             self.pending.clear();
             self.notes.clear();
@@ -699,8 +702,15 @@ mod tests {
             );
         }
         let mut old = Evidence::default();
-        old.record(&rec(1, RecordFlags::EVENT_END, &note(&e)), 0).unwrap();
-        assert!(old.record(&rec(2, RecordFlags::EVENT_END, &e), 1).is_err());
+        assert!(old.record(&rec(1, RecordFlags::EVENT_END, &note(&e)), 0).is_err());
+        let mut duplicate = Evidence::default();
+        duplicate.record(&rec(1, RecordFlags(0), &e), 1).unwrap();
+        duplicate.record(&rec(2, RecordFlags(0), &note(&e)), 0).unwrap();
+        assert!(
+            duplicate
+                .record(&rec(3, RecordFlags::EVENT_END, &note(&e)), 0)
+                .is_err()
+        );
         let mut twice = Evidence::default();
         twice.record(&rec(1, RecordFlags(0), &e), 1).unwrap();
         twice.record(&rec(2, RecordFlags(0), &e), 1).unwrap();

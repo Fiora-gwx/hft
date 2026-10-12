@@ -201,7 +201,7 @@ pub struct Scenario { pub id, pub title, pub suite: SuiteSel /* All | Named */, 
 pub struct DstSuite { pub name, pub title, pub faults: FaultRates, pub steps: u64, pub base: fn(u64) -> DstConfig, pub must_pass: &'static [&'static str] }
 ```
 
-显式场景用 `--case <编号>` 选择,实际执行同一 `Scenario` 的配置与断言。未指定时保留套件基线;HashTrail 金样始终使用基线。场景声明的步数不会被 cargo-test 的通用短集上限截短,CLI 显式步数不足以触发场景时断言失败。PR 的标准种子及回归集在基线之外另跑 LED-081;每夜配置与调用入口归 [tools](../../tools/README.md#cargo-xtask-dst)。
+显式场景用 `--case <编号>` 选择,实际执行同一 `Scenario` 的配置与断言。未指定时保留套件基线;HashTrail 金样始终使用基线。场景声明的步数不会被 cargo-test 的通用短集上限截短,CLI 显式步数不足以触发场景时断言失败。PR 的标准种子及回归集在基线之外分别跑 LED-080 与 LED-081;每夜配置与调用入口归 [tools](../../tools/README.md#cargo-xtask-dst)。
 
 `confirmed_commands` 仅用于测试控制端明确要求确认的命令,不改行情片段或已有故障命令。`Sut::control_state_version` 只读当前版本,缺失即失败;未启用控制 actor、来源错误或信封截断也失败。实际提交的 `confirmed` 与版本字段进入 journal,引擎照常检查角色、版本、模式和命令,检查器开关不影响交付(TK-142)。
 
@@ -219,7 +219,7 @@ DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xt
 
 每条 `StateSnapshot` 在所属 Input 完成或启动完成时保存 `SnapshotPoint{snapshot_seq, through_seq, live}`。`live` 从运行中的组件独立序列化,不抄 journal 快照体;检查器仅取截至该 EVENT_END 的 journal 前缀恢复,不能读后续 Input。同一世界步中的关键帧、按需快照、滚段、Drain 与连续恢复逐条检查,启动时也检查;`rebuild_every = 0` 只关闭定期采样。漏记、重复、越过后续 Input、恢复失败和任一组件差异均失败;`RunRecord.snapshot_checks` 记录成功检查数(TK-115)。每步快照观察上限 4096,溢出失败;重启只保留已提交边界内的观察,连续恢复不得重复交付(TK-116)。
 
-真实引擎的 INV-6 同时执行 [LED-267](../hft-ledger/TESTS.md#led-267-dst-中每个快照点-journalledger-等于引擎-ledger)。独立 `JournalLedger` 从首个快照及其引用的已记录配置起步,增量消费完整事件。每条快照的持久字段逐项比较;`SnapshotPoint.ledger` 从同边界的只读 `StateView` 复制完整仓位、库存与 VenueBook,连同未持久化的估值缓存、更新时间和标志一起比较,缺失即失败。后续快照只作为参考,不能覆盖冷状态;初始保证金估值按节 10 的 mark 恢复,零库存行按快照的稀疏表示比较。每笔 `unmapped_fills` 增量须有同一事件、相同成交身份及金额字段的 OmsForeignFill 注记,或完整订单身份匹配的 Shadow 决策;一条注记只能解释一笔。重启清空观察器后从保留日志重算,未提交尾部不沿用;失败锁存。更换账本/参考数据配置但缺少冷状态迁移时明确失败。标准 DST、定期和结束重建都经过此检查,开关检查器不改变意图流及 HashTrail。
+真实引擎的 INV-6 同时执行 [LED-267](../hft-ledger/TESTS.md#led-267-dst-中每个快照点-journalledger-等于引擎-ledger)。独立 `JournalLedger` 从首个快照及其引用的已记录配置起步,增量消费完整事件。每条快照的持久字段逐项比较;`SnapshotPoint.ledger` 从同边界的只读 `StateView` 复制完整仓位、库存与 VenueBook,连同未持久化的估值缓存、更新时间和标志一起比较,缺失即失败。后续快照只作为参考,不能覆盖冷状态;初始保证金估值按节 10 的 mark 恢复,零库存行按快照的稀疏表示比较。每笔 `unmapped_fills` 增量须有同一事件、相同成交身份及金额字段的 OmsForeignFill 注记,或完整订单身份匹配的 Shadow 决策;每条 OmsForeignFill 必须对应一笔冷入账,多余或重复注记失败;Shadow 身份只在没有匹配注记时解释成交。重启清空观察器后从保留日志重算,未提交尾部不沿用;失败锁存。更换账本/参考数据配置但缺少冷状态迁移时明确失败。标准 DST、定期和结束重建都经过此检查,开关检查器不改变意图流及 HashTrail。
 
 没有分配 slot/gen 的 Shadow 记录不能提供订单身份,不得解释未解析成交。同事件成交/注记证据上限沿用 sequencer 的诊断容量,Shadow 身份表上限沿用 `hft_ledger::SLOT_MAP_CAP`;满时失败,不静默淘汰证据。
 
@@ -401,7 +401,11 @@ TK-137 独立保存迁移前的 HashTrail 参考,用旧 actor 重现它;真实 a
 
 `ReconciledAdl{full,replay}` 在用户流断开且交易所永续仓位非零时结算一次,保存完整原件并省略首次推送。缺口按完整成交身份保持在途,不使用品种/资产数字排除项。实际 ReconcileBatch 事件提交后,独立冷消费者确认原件确已入账才解除缺口;拒绝的批次、仅生成的批次和其他账户/成交键都不能解除。`replay` 在此之后至少 1 ms 且用户流恢复后补推同一原件;无补推时直接恢复完整 I16。前置不满足或容量耗尽明确失败,检查器关闭仍执行相同的交付流程。原 `Adl{gap,replay}` 的普通补报时序独立保留。
 
-真实 ExternalFill 与 ReconcileBatch 每个完成事件都保留热账本节 1/13/22 的原始字节,INV-6 用独立冷消费者核对同一已提交边界,不等待下一个快照。每份观察上限 4 MiB,每步沿用事件缓冲上限,每次运行最多保留 4,096 条成功核对的 Input 序号;缺失、错误边界、溢出或字节差异均失败。冷端抵扣注记由 [JournalLedger 的 testkit 接口](../hft-ledger/README.md#冷消费者journalledger)独立产生,同事件与 journal 逐条相等,错误锁存。TK-138/139 与 LED-295 验证这层基建,TK-140 用真实 PairOnFill 开仓核对整个循环在检查器开关前后的 journal、交付、意图与 HashTrail;报价片段结束后保留实际交付窗口,待周期报告消耗完再要求最终 I16 无在途或排除项。CI 的 `reconcile-settlement` 制品包含 16 行直接开仓组合证据,不替代 LED-081 的开平仓和标准种子验收。
+真实 OrderEvent、ExternalFill 与 ReconcileBatch 每个完成事件都保留热账本节 1/13/22 的原始字节,INV-6 用独立冷消费者核对同一已提交边界,不等待下一个快照。每份观察上限 4 MiB,每步沿用事件缓冲上限,每次运行最多保留 4,096 条成功核对的 Input 序号;缺失、错误边界、溢出或字节差异均失败。冷端抵扣注记由 [JournalLedger 的 testkit 接口](../hft-ledger/README.md#冷消费者journalledger)独立产生,同事件与 journal 逐条相等,错误锁存。TK-138/139 与 LED-295 验证这层基建,TK-140 用真实 PairOnFill 开仓核对整个循环在检查器开关前后的 journal、交付、意图与 HashTrail;报价片段结束后保留实际交付窗口,待周期报告消耗完再要求最终 I16 无在途或排除项。CI 的 `reconcile-settlement` 制品包含 16 行直接开仓组合证据,不替代 LED-081 的开平仓和标准种子验收。
+
+LED-080 先以确认命令在 1 s 开仓、4 s 平仓,两腿必须足量成交。`ForeignOrderFill` 在 12–20 s 随机注入 1–3 笔旧身份永续成交,25–26 s 以一笔未匹配成交反向平掉外来量;22 s 的独立报价变化使平仓结算额非零。撮合器只结算一次,`Matcher::external_order` 在发布前给保留原件与返回值同时设置独立非零订单号、正成交 ID 或零 ID 的累计量键。故障直接交付 Unknown 原件及累计副本,不经人工成交分类;旧身份取已确认槽的不同代数,缺少确认、用户流断开或历史容量满均失败。每组对齐的四个种子共享数量与时间,低两位独立覆盖正/零 ID 和有无先发原件,各占一半;普通基线的故障生成表不使用此专属故障。
+
+`RunRecord.external_receipts` 保留各匹配器有界原始历史。LED-080 逐项对照每份原件、累计副本和同事件路径注记,检查所有账本 Input 的实际比较序号,缺项、重复或乱序失败;最终无在途、无排除项且仓位为零。TK-144/145 覆盖真实结算、故障前置、反例及检查器开关后的完整 journal、意图、交付和 HashTrail 相同;TK-146 验证 CLI 场景与复现,逐种子 JSON 保留原件、订单身份、现金及账本比较边界。
 
 LED-081 使用真实策略命令在 1 s 开仓、4 s 以 PairOnFill 平仓、7 s 再开仓;两腿 lot 为 100000,开仓量为种子派生的 2、4 或 6 手。10–15 s 用户流断开,种子派生的 11–13 s 时刻注入部分或全量 ADL;种子低位决定补推,连续偶数个种子的范围恰有一半补推。75 s 发 PairOnFill 零目标并等待交付尾窗。断言要求前一轮两腿实际足量成交、AUTO 与每次确认均有完整账本检查、应有的抵扣注记存在、最终仓位为零且严格 I16 没有跳过项。反例与检查器透明性归 TK-142,标准种子结果由 CLI 逐行报告。
 
@@ -477,7 +481,7 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 - 多进程场景(可选扩展:hft-core ↔ chain-core)只在集成环境测;DST 以 `SeqActor` + 真实 `ChainSeq` 同进程模拟链路。
 - `MockVenue` 的交易所行为层是"规格中的交易所",与真实交易所的差异只能由金样、测试网/模拟盘联调与正式实盘的运行监控发现。
 - 真实 `SeqSut` 的基础币费用仅支持同一现货 venue 共用基础资产的世界;多基础资产与永续的该配置拒绝启动(TK-106)。
-- TK-133 覆盖选定原始凭据的补账、重启和迟到确认;自动选择缺失凭据的随机 AUTO_EXTERNAL 故障矩阵及 LED-080/081 仍待验收。
+- LED-080/081 的专属场景和标准种子入口按上述契约执行;普通基线的 `StaleGenFill`、`LateFillAfterRecycle` 与 `PartialFills` 尚未接通,基线通过不能视为这些故障已覆盖。多笔原件与累计回报的部分重叠仍明确失败,不在 LED-080 的单笔重复证明内。
 - 真实引擎的逐 Input 与逐决策观察契约见 [DST 框架](#6-dst-框架)。`toy::PLANTED` 各行的真实引擎版本(各 crate 的 `planted-*` feature)、`run_sim_case`(TK-009)、`ProbeBuild` 注入(TK-095)与模板探针的构建检查(TK-042)未落地(TK-053 仍以 `ToyEngine` 运行);`hft-dst` 的 `SIGINT`/`SIGTERM` 处理属 M6。
 
 ### 开发备忘

@@ -13,6 +13,14 @@ use crate::dst::obs::{Obs, StepInfo, TruthRow};
 use crate::dst::world::WorldSpec;
 use crate::hash::ComponentHashes;
 
+/// Inputs whose completed ledger sections must be compared without waiting for a snapshot.
+pub const fn ledger_input(kind: EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::ORDER_EVENT | EventKind::EXTERNAL_FILL | EventKind::RECONCILE_BATCH
+    )
+}
+
 /// Where an Input came from (the actor that produced it).
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum Source {

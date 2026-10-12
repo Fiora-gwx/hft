@@ -630,7 +630,7 @@ impl<S: StrategySet> Sut for SeqSut<S> {
     fn verify_ledger_event(&self, event: &crate::dst::sut::EventStep) -> Result<(), String> {
         let point = event.ledger.as_ref().ok_or("missing ledger event observation")?;
         let input = event.records.first().ok_or("missing ledger event Input")?;
-        if !matches!(input.kind, EventKind::EXTERNAL_FILL | EventKind::RECONCILE_BATCH)
+        if !crate::dst::sut::ledger_input(input.kind)
             || event
                 .records
                 .iter()

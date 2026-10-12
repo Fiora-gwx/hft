@@ -423,6 +423,34 @@ impl Matcher for SimMatcher {
         }
         x
     }
+    fn external_order(
+        &mut self,
+        a: AccountId,
+        inst: InstId,
+        side: Side,
+        qty: i64,
+        positive_trade_id: bool,
+        now_ns: u64,
+    ) -> Result<ExternalFill, String> {
+        if !self.accounts.contains(&a)
+            || self.inst(inst).is_none()
+            || qty <= 0
+            || self.bbo.get(&inst.0).is_none_or(|px| *px <= 0)
+            || self.external_history.len() == EXTERNAL_HISTORY_CAP
+        {
+            return Err("invalid or full external order history".into());
+        }
+        // external() has not published this execution. Give both retained evidence and the
+        // returned original their final identity before the venue creates delivery copies.
+        let mut fill = self.external(a, inst, side, qty, "foreign-order", false, now_ns);
+        fill.exch_order_id = u64::MAX - fill.trade_id;
+        if !positive_trade_id {
+            fill.trade_id = 0;
+            fill.fill_seq = qty as u64;
+        }
+        self.external_history.last_mut().expect("new receipt").fill = fill;
+        Ok(fill)
+    }
     fn state_hash(&self) -> u64 {
         self.ex.as_ref().map_or(0, |e| e.state_hash())
     }

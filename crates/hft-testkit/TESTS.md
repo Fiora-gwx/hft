@@ -22,11 +22,11 @@ spec: README.md
 | 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TK-117–TK-119、TK-141、TOOL-024、TOOL-027–TOOL-029 |
 | 6. DST 框架 | TK-043–TK-070、TK-100–TK-116、TK-120–TK-125 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
-| 8. hft-dst 运行器 | TK-075–TK-088、TK-143 |
+| 8. hft-dst 运行器 | TK-075–TK-088、TK-143、TK-146 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
 | 10. SeqRig | PY-106–PY-109、PY-111、PY-112 |
 | 实现说明 | 不适用:见子节 |
-| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140、TK-142 |
+| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140、TK-142、TK-144–TK-145 |
 | 金样运行器 | TK-001、TK-005 |
 | 源文件 | TK-066 |
 | 延迟与资源契约 | TK-092–TK-093 |
@@ -1831,6 +1831,42 @@ spec: README.md
 - 步骤:list 后运行 LED-081;把步数限制为 1 并复现;运行完整种子 2,比较 run 与 repro 的单种子证据
 - 期望:截短场景退出 1 且复现保留 --case,完整运行退出 0 且含实际补账、抵扣和无跳过真值;未知编号、套件冲突、hashtrail 带 case、超过 4096 的显式场景批次退出 2
 - 实现:`crates/hft-testkit/tests/dst_cli.rs::tk_143_cli_case_selection_and_repro_are_not_baseline_runs`
+
+### TK-144 外来订单的交付副本不得再次结算
+
+- 规则:[DST 世界模型](README.md#dst-的世界模型)
+- 级别:table
+- 里程碑:M2
+- 前置:真实 SimMatcher 永续仓位,独立报价变化后平一半
+- 输入:买/卖、正/零成交 ID、有/无先发原件共八行;另两行缺少已确认槽或用户流断开
+- 期望:每行结算一次,现金分别为正负 8600,历史原件与全部交付的身份和金融字段相同;交付后真值与撮合状态不变,在途清除;前置缺失在改变真值前失败
+- 实现:`crates/hft-testkit/tests/foreign_ledger.rs::tk_144_foreign_order_delivery_retains_original_settlement_and_identity`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| TK-144.1 | 买/卖 × 正/零 ID × 有/无原件先发,八行 | 原始现金与累计副本相同,交付不再次结算 |
+| TK-144.2 | 旧身份但没有已确认槽 | 故障失败,撮合状态与历史不变 |
+| TK-144.3 | 用户流断开 | 故障失败,不生成成交 |
+
+### TK-145 防御成交场景的执行与逐事件证据不可省略
+
+- 规则:[DST 世界模型](README.md#dst-的世界模型)、[LED-080](../hft-ledger/TESTS.md#led-080-oms-防御路径的外来成交冷读者账本与热进程逐值相同)
+- 级别:integ
+- 里程碑:M2
+- 前置:LED-080 种子 0–7,独立组合方向、成交 ID 和原件先发方式
+- 步骤:完整运行并逐原件检查;删除账本边界、原件、配对执行和分支注记,篡改原件现金和最终钱包,留下在途、重复边界或截短运行;关闭全部检查器重跑
+- 期望:完整场景有真实开平仓、非零结算现金和全部冷热核对;所有反例失败;检查器开关前后 journal、交付流、意图、HashTrail 与真值相同
+- 实现:`crates/hft-testkit/tests/foreign_ledger.rs::tk_145_foreign_case_requires_every_execution_and_exact_ledger_boundary`
+
+### TK-146 CLI 防御成交场景保留原始证据与复现身份
+
+- 规则:[hft-dst 运行器](README.md#8-hft-dst-运行器)
+- 级别:proc
+- 里程碑:M2
+- 前置:带 dst-bin 的 hft-dst
+- 步骤:list 后运行 LED-080 种子 0,先限制为 1 步,再完整运行与复现
+- 期望:短运行失败且复现命令保留 case;完整运行与复现的逐种子证据相同,包含非空原件、外来订单、账本边界及无跳过真值
+- 实现:`crates/hft-testkit/tests/dst_cli.rs::tk_146_cli_foreign_case_keeps_settlement_evidence_on_run_and_repro`
 
 ## 验收
 

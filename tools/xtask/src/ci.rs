@@ -221,6 +221,10 @@ pub fn plan(root: &Path, opts: Options) -> Result<(Vec<Step>, Optional), EnvErro
                     Cmd::new("xtask", &["dst", "--seeds", &seeds, "--regressions"]),
                     Cmd::new(
                         "xtask",
+                        &["dst", "--seeds", &seeds, "--regressions", "--case", "LED-080"],
+                    ),
+                    Cmd::new(
+                        "xtask",
                         &["dst", "--seeds", &seeds, "--regressions", "--case", "LED-081"],
                     ),
                 ],

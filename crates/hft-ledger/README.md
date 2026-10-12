@@ -304,7 +304,7 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 
 迟到 ExternalFill 命中待确认键时,数量、价格、费用、资产、订单号、现金覆盖/金额和交易所时间必须一致,否则 ReceiptConflict。rx_tsc 不参与比较;Unknown、ADL、Liquidation 之间的原因细分不改变资金身份。完全匹配只减少该笔 auto_held,不再次动钱包、仓位或费用。不同键照常入账,即使同方向仍有待确认记录;仅有旧数量而无原始凭据的重叠仍报 ExternalOverlap。SimReset 清除本账户待确认凭据。普通去重环绕回不淘汰待确认记录,确认后把原始键重新放回普通环。
 
-严格原件补账的跨组件验证由 [LED-081](TESTS.md#led-081-auto_external冷读者账本与-auto_held-与热进程逐值相同)约束。真实 PairOnFill 开平仓、用户流缺口与迟到确认的场景、种子入口和非空观察要求归 [testkit 世界模型](../hft-testkit/README.md#dst-的世界模型),测试证据不能替代生产历史来源验证。
+防御成交验证由 [LED-080](TESTS.md#led-080-oms-防御路径的外来成交冷读者账本与热进程逐值相同)约束,严格原件补账验证由 [LED-081](TESTS.md#led-081-auto_external冷读者账本与-auto_held-与热进程逐值相同)约束。真实 PairOnFill 开平仓、用户流缺口与迟到确认的场景、种子入口和非空观察要求归 [testkit 世界模型](../hft-testkit/README.md#dst-的世界模型),测试证据不能替代生产历史来源验证。
 
 ### 冷消费者(`JournalLedger`)
 
@@ -588,7 +588,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 
 ## 已知限制与后续工作
 
-- 普通订单与原始外来成交的 `PERP_CASH` 已接到 sequencer 与 JournalLedger;测试世界的能力与资金验收归 [hft-testkit](../hft-testkit/README.md#6-dst-框架),生产协议尚未启用。外来归属重叠、已过保留期的系统订单重新归属、生产对账服务的原始历史查询与模拟恢复装配仍待接通;不重叠外来累计回报的单元与回放覆盖不代表 LED-080/081 的完整 DST 验收,未证明的严格结算路径明确失败。冷读者不完整镜像 OMS 的状态机与回收时机,跨回收的增量均价、未接受的非成交回报及外来归属仍需专门验证;普通成交用例不代表全部冷热一致性验收。
+- 普通订单与原始外来成交的 `PERP_CASH` 已接到 sequencer 与 JournalLedger;测试世界的能力与资金验收归 [hft-testkit](../hft-testkit/README.md#6-dst-框架),生产协议尚未启用。外来归属重叠、已过保留期的系统订单重新归属、生产对账服务的原始历史查询与模拟恢复装配仍待接通;LED-080/081 的专属场景仅覆盖其明确列出的原件关系,不代表多笔原件与累计量部分重叠已获证明,未证明的严格结算路径明确失败。冷读者不完整镜像 OMS 的状态机与回收时机,跨回收的增量均价、未接受的非成交回报及外来归属仍需专门验证;普通成交用例不代表全部冷热一致性验收。
 - 平均成本法之外(FIFO 税务口径)不支持;需要时在 hft-py 侧另算。
 - 不建模余额域(同一钱包被多个产品线共用):这种情形被"一个账户在同一交易所只用一个市场"排除([hft-refdata](../hft-refdata/README.md))。若将来放开同所现货 × 永续,需要先把现金改为按余额域记账(触发条件:决定放开该规则)。
 - 资金费自动校正依赖交易所流水:`funding_recon_window_ms`(48 h)之外的差额不再比对;水位线之前(无历史)的差额挂起到窗口结束才入账,若其实早已入账会造成一次重复入账,由余额对账报出、人工 `AdoptExchange` 收敛;`RateOnly` 所在校正之前钱包是估计值,两次对账之间余额对账条目可能出现等于未校正资金费的差额(由 reconciler 与 watchtower 处理口径)。

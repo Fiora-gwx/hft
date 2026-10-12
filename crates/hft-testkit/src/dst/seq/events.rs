@@ -76,7 +76,7 @@ impl Pending {
             after.observation_error = Some(err);
         }
         after.normalize();
-        let ledger = if matches!(self.kind, EventKind::EXTERNAL_FILL | EventKind::RECONCILE_BATCH) {
+        let ledger = if crate::dst::sut::ledger_input(self.kind) {
             let through_seq = out
                 .records
                 .iter()
