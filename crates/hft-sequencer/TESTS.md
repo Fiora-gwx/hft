@@ -677,7 +677,7 @@ spec: README.md
 - 规则:[advisor 与 Model](README.md#advisor-与-model)、[引擎时间](README.md#引擎时间engine_ns)
 - 级别:unit
 - 里程碑:M2
-- 前置:B0;上次运行末条记录 engine_ns = 100 s;停机 10 min;新运行从检查点续算,检查点 `last_seq` 处的 engine_ns = 99 s
+- 前置:B0,引导块写入完整 ECF1/RKP1 配置供跨运行重建;上次运行末条记录 engine_ns = 100 s;停机 10 min;新运行从检查点续算,检查点 `last_seq` 处的 engine_ns = 99 s
 - 步骤:
   1. 新运行 TSC 重置、运行 6 s,已提交末条 engine_ns = 106 s;advisor 从旧检查点启动,每批 1 条 Input,首批镜像仍未追到检查点
   2. 存储适配器把非文件字段 `last_ens` 提示改成 −123,继续运行至追平

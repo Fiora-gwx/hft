@@ -61,6 +61,46 @@ fn counters() -> Vec<(u64, [u8; 256])> {
     SCRIPT.with(|x| core::mem::take(&mut x.borrow_mut().counter_outputs))
 }
 
+/// A cross-run mirror reconstructs assembly from the journal. B0's compact RSK1/ECF fixture
+/// intentionally needs injected decoders and is only suitable for single-run unit tests.
+fn complete_model_boot() -> H {
+    use hft_sequencer::driver::live::LiveDriver;
+    use hft_sequencer::{BootSource, Sequencer};
+    use hft_types::HostClass;
+
+    reset_script();
+    set_subs(S2, vec![(A1, 0, EvMask::BBO, Part::Model)]);
+    let mut b = b0();
+    for p in &mut b.params {
+        p.values[F_CKPT] = 64;
+    }
+    let rd = b.rd.load();
+    let mut setup = b.setup(&rd);
+    setup.risk_decode = Some(hft_sequencer::config_blob::decode_risk_blob);
+    let mut configs = b.configs(&rd);
+    configs.engine_blob = setup.encode_blob(1, HostClass::Dev2, UTC0);
+    configs.risk_blob = configs.risk.encode_blob().unwrap();
+    configs.risk_sha256 = sha(&configs.risk_blob);
+    let heartbeat = hb();
+    let s = Sequencer::boot(
+        BootSource::Empty { configs },
+        &setup,
+        LiveDriver::new(TestIo::new(setup.clock), b.live),
+        heartbeat,
+    )
+    .unwrap();
+    let mut h = H {
+        s,
+        rd,
+        setup,
+        cmd_no: 0,
+        hb: heartbeat,
+        upd: 1,
+    };
+    h.steady();
+    h
+}
+
 /// The payload's counter comes from restored Model state. The oracle below independently
 /// counts the subscribed journal inputs; it does not read that state or emitted Advice.
 fn long_source(inputs: usize) -> H {
@@ -276,7 +316,7 @@ fn seq_041_advisor_lag_rate_limited() {
 
 #[test]
 fn seq_042_lag_continuous_across_restart() {
-    let mut h = b0_model();
+    let mut h = complete_model_boot();
     h.at(T0 + 98 * SEC);
     h.run();
     let mut config = cfg();
