@@ -7,3 +7,4 @@
 0x1af231bb1d6440e2 2026-10-12 I14 缺少对冲 place 错误证据,第 608 步槽满后的重试被误判为门控失败(TK-121;https://github.com/Fiora-gwx/hft/actions/runs/38194738015)
 0xd05efd09f013189a 2026-10-12 已到达 Ack 的无 client id 现金成交被模型误标为无法匹配(TK-129;https://github.com/Fiora-gwx/hft/actions/runs/38230880362)
 0xd05efd09f01318f6 2026-10-12 同账户订单号映射遗漏导致严格现金模式第 597 步失败(TK-129;https://github.com/Fiora-gwx/hft/actions/runs/38230880362)
+0x000000000000002b 2026-10-12 无 client id 成交早于 Ack 时未等待映射,严格现金模式第 590 步失败(TK-129;https://github.com/Fiora-gwx/hft/actions/runs/38232740224)

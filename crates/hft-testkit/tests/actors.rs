@@ -150,11 +150,21 @@ fn tk_126_external_reports_carry_exchange_cash_facts() {
 fn tk_128_no_client_id_uses_the_accounts_ack_identity_and_keeps_cash() {
     use hft_testkit::dst::seq::matcher::SimMatcher;
     use hft_testkit::dst::world::{ACCT_B, P1};
-    for (within_hold, delayed_ack) in [(false, false), (true, false), (false, true), (true, true)] {
+    for (within_hold, delayed_ack, hold_ms) in [
+        (false, false, 5_000),
+        (true, false, 5_000),
+        (false, true, 5_000),
+        (true, true, 5_000),
+        (false, true, 0),
+        (true, true, 0),
+    ] {
         let mut world = WorldSpec::w1();
         world.venues.iter_mut().find(|v| v.id == VP).unwrap().perp_cash = true;
-        let mut plain: MockVenue<SimMatcher> = MockVenue::new(MockVenueCfg::w1(VP), &world, 1);
-        let mut faulted: MockVenue<SimMatcher> = MockVenue::new(MockVenueCfg::w1(VP), &world, 1);
+        let mut cfg = MockVenueCfg::w1(VP);
+        cfg.latency_ns = (1_000_000, 1_000_000);
+        cfg.unmatched_hold_ms = hold_ms;
+        let mut plain: MockVenue<SimMatcher> = MockVenue::new(cfg.clone(), &world, 1);
+        let mut faulted: MockVenue<SimMatcher> = MockVenue::new(cfg, &world, 1);
         for v in [&mut plain, &mut faulted] {
             v.tick(0);
             for a in [ACCT_A, ACCT_B] {
@@ -173,7 +183,7 @@ fn tk_128_no_client_id_uses_the_accounts_ack_identity_and_keeps_cash() {
             cmd.account = account;
             cmd.inst = P1;
             cmd.arg = 7 + ix as u32;
-            let now = 40_000_000 + ix as u64 * 20_000_000;
+            let now = 40_000_000 + ix as u64 * 50_000_000;
             faulted.apply_fault(
                 &Fault::NoClientIdFill {
                     venue: VP,
@@ -186,8 +196,10 @@ fn tk_128_no_client_id_uses_the_accounts_ack_identity_and_keeps_cash() {
                     v.apply_fault(&Fault::FillBeforeAck { venue: VP }, now);
                 }
             }
-            let expected = plain.on_frame(&cmd, now);
-            let actual = faulted.on_frame(&cmd, now);
+            let mut expected = plain.on_frame(&cmd, now);
+            let mut actual = faulted.on_frame(&cmd, now);
+            expected.extend(plain.tick(now + 20_000_000));
+            actual.extend(faulted.tick(now + 20_000_000));
             let events = |rows: &[(u64, InputRec)]| {
                 rows.iter()
                     .filter_map(|(t, i)| i.read_try::<OrderEvent>().map(|e| (*t, e)))
@@ -198,11 +210,11 @@ fn tk_128_no_client_id_uses_the_accounts_ack_identity_and_keeps_cash() {
             let ack = expected
                 .iter()
                 .find(|(_, e)| e.what == OrderEventKind::Ack)
-                .unwrap();
+                .unwrap_or_else(|| panic!("missing Ack: {expected:?}"));
             let fill = expected
                 .iter()
                 .find(|(_, e)| e.what == OrderEventKind::Fill)
-                .unwrap();
+                .unwrap_or_else(|| panic!("missing Fill: {expected:?}"));
             assert_ne!(fill.1.cash_sum.0, 0);
             assert_eq!(fill.1.cash_qty, fill.1.cum_filled);
             let copies: Vec<_> = actual
@@ -211,13 +223,27 @@ fn tk_128_no_client_id_uses_the_accounts_ack_identity_and_keeps_cash() {
                 .collect();
             if delayed_ack && ix == 1 {
                 assert!(ack.0 > fill.0);
-                let mut unresolved = *fill;
-                unresolved.1.slot = SlotId::UNRESOLVED;
-                unresolved.1.r#gen = 0;
-                unresolved.1.epoch = 0;
-                assert_eq!(copies, [&unresolved, fill]);
+                if hold_ms == 0 {
+                    let mut unresolved = *fill;
+                    unresolved.1.slot = SlotId::UNRESOLVED;
+                    unresolved.1.r#gen = 0;
+                    unresolved.1.epoch = 0;
+                    assert_eq!(copies, [&unresolved, fill]);
+                } else {
+                    let held = (ack.0, fill.1);
+                    assert_eq!(copies, [&held, fill]);
+                    assert!(
+                        faulted
+                            .truth(ack.0 - 1)
+                            .iter()
+                            .find(|t| t.account == account)
+                            .unwrap()
+                            .undelivered
+                    );
+                }
             } else {
-                assert!(ack.0 < fill.0);
+                assert_eq!(ack.0, fill.0);
+                assert_eq!(expected[0].1.what, OrderEventKind::Ack);
                 assert_eq!(copies, [fill, fill]);
             }
             assert_eq!(actual.len(), expected.len() + 1);

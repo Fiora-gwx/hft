@@ -19,7 +19,29 @@ fn main() {
             .unwrap()
             .perp_cash = true;
         let strict = run_record::<DstEngine>(&cfg);
-        assert!(strict.outcome.is_pass(), "strict {seed}: {:?}", strict.outcome);
+        if let Some(failure) = strict.outcome.failure() {
+            let artifacts = hft_testkit::dst::report::write_artifacts(
+                std::path::Path::new("audit/conformance-failures"),
+                failure,
+            )
+            .unwrap();
+            std::fs::write(
+                artifacts.dir.join("full-journal.bin"),
+                hft_testkit::dst::driver::encode_records(&strict.journal),
+            )
+            .unwrap();
+            std::fs::write(
+                artifacts.dir.join("detail.txt"),
+                format!(
+                    "{}\n{:#?}\n{:#?}",
+                    failure.message,
+                    strict.matched_tail,
+                    strict.deliveries.iter().rev().take(24).collect::<Vec<_>>()
+                ),
+            )
+            .unwrap();
+            panic!("strict {seed}, step {}: {}", failure.step, failure.message);
+        }
         assert!(legacy.snapshot_checks > 0 && strict.snapshot_checks > 0);
         assert_eq!(legacy.frames, strict.frames, "gateway frames {seed}");
         assert_eq!(

@@ -52,6 +52,8 @@ pub struct MockVenueCfg {
     pub latency_ns: (u64, u64),
     /// Market-data latency.
     pub md_latency_ns: (u64, u64),
+    /// Maximum wait for an already scheduled same-account Ack when the client id is absent.
+    pub unmatched_hold_ms: u32,
 }
 
 impl MockVenueCfg {
@@ -71,6 +73,7 @@ impl MockVenueCfg {
             liquidation_prefix: "autoclose-",
             latency_ns: (1_000_000, 3_000_000),
             md_latency_ns: (200_000, 800_000),
+            unmatched_hold_ms: 5_000,
         }
     }
     pub fn code(&self, r: RejectRule) -> u32 {
@@ -859,11 +862,8 @@ impl<M: Matcher> MockVenue<M> {
         let mut reps = Vec::new();
         self.m.drain_due(now.saturating_add(10_000_000), &mut reps);
         let mut out = Vec::new();
-        let fba = self.next_order.contains(&NextOrder::FillBeforeAck);
-        if fba {
-            self.next_order.retain(|x| *x != NextOrder::FillBeforeAck);
-        }
-        for (k, r) in reps.into_iter().enumerate() {
+        let mut fba = self.next_order.contains(&NextOrder::FillBeforeAck);
+        for r in reps {
             let mut rep = r.rep;
             if let RepMsg::ExternalFill(x) = &mut rep {
                 x.cause = if r.client_id.starts_with(self.cfg.liquidation_prefix) {
@@ -876,8 +876,10 @@ impl<M: Matcher> MockVenue<M> {
             }
             let mut due =
                 r.due_ns.max(now) + self.rng.range(0, self.cfg.latency_ns.1 - self.cfg.latency_ns.0);
-            if fba && k == 0 {
+            if fba && matches!(&rep, RepMsg::OrderEvent(e) if e.what == OrderEventKind::Ack) {
                 due += 2_000_000;
+                self.next_order.retain(|x| *x != NextOrder::FillBeforeAck);
+                fba = false;
             }
             if !self.clean {
                 if let Some(Fault::ReportReorder { window, .. }) =
@@ -946,15 +948,23 @@ impl<M: Matcher> MockVenue<M> {
                 copy.slot = SlotId::UNRESOLVED;
                 copy.r#gen = 0;
                 copy.epoch = 0;
+                let mut copy_due = due;
                 if let Some((ack_due, ack)) = self.ack_ids.get(&(e.account.0, e.exch_order_id))
-                    && *ack_due <= due
+                    && *ack_due <= due.saturating_add(u64::from(self.cfg.unmatched_hold_ms) * 1_000_000)
                     && ack.inst == e.inst
                 {
+                    // The world knows the Ack schedule. Delay the held copy so the engine
+                    // sees no resolved identity before that Ack actually arrives.
+                    copy_due = copy_due.max(*ack_due);
                     copy.slot = ack.slot;
                     copy.r#gen = ack.r#gen;
                     copy.epoch = ack.epoch;
                 }
-                out.push((due, InputRec::of(&copy, self.src())));
+                self.last_due
+                    .entry(e.account.0)
+                    .and_modify(|last| *last = (*last).max(copy_due))
+                    .or_insert(copy_due);
+                out.push((copy_due, InputRec::of(&copy, self.src())));
             }
             if !self.clean
                 && self

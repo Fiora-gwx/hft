@@ -48,7 +48,7 @@ fn tk_105_real_engine_late_fee() {
 #[test]
 fn tk_129_acknowledged_no_client_id_cash_reports_survive_the_full_fault_plan() {
     use hft_testkit::dst::world::VP;
-    for seed in [0xd05e_fd09_f013_189a, 0xd05e_fd09_f013_18f6] {
+    for seed in [0xd05e_fd09_f013_189a, 0xd05e_fd09_f013_18f6, 43] {
         let suite = hft_testkit::scenarios::suites()
             .into_iter()
             .find(|s| s.name == "core")
