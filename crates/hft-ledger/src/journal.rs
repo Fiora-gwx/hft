@@ -543,9 +543,6 @@ impl JournalLedger {
                             return Err(JournalApplyError::UnsupportedExternalCash);
                         }
                         self.reconcile.fill(&n, &mut self.ledger, &mut self.foreign, t)?;
-                    }
-                    if reconciled_cash {
-                        // Already rebuilt from this batch's raw receipt.
                     } else if n.source == NoteSource::Oms
                         && n.code == code::OMS_FOREIGN_FILL
                         && (self.foreign.has_pending()

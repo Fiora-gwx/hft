@@ -337,7 +337,8 @@ fn tk_133_raw_receipts_reconcile_gap_then_confirm_after_restart() {
             position.engine_qty = Qty(side.sign() * 200_000);
             position.exch_qty = Qty(side.sign() * (200_000 - qty));
             position.sflags = ReconcileReport::AUTO_EXTERNAL;
-            let input = ReconActor::settled_input(&[summary, position], &[original.clone()]).unwrap();
+            let input =
+                ReconActor::settled_input(&[summary, position], std::slice::from_ref(&original)).unwrap();
             e.process(101 * MS, 101 * MS, &input, &mut out);
             let cash = if side == Side::Buy { 8_600 } else { -8_600 } * (qty / 100_000);
             assert_eq!(truth_wallet, i128::from(50_000_000_000i64 + cash));

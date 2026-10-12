@@ -93,12 +93,12 @@ fn led_294_reconciled_cash(c: &mut Criterion) {
     let mut e = ext_tid(ExternalCause::Adl, Buy, BTC_P2, "0.001", "60000", 71);
     e.cash_qty = e.qty;
     c.bench_function("ledger/apply_reconciled_external", |b| {
-        b.iter_batched(
+        b.iter_batched_ref(
             booted,
-            |mut l| {
+            |l| {
                 black_box(l.apply_reconciled_external(black_box(&e), s(2))).unwrap();
             },
-            BatchSize::SmallInput,
+            BatchSize::PerIteration,
         )
     });
     let rd = rd_with(&RdOpts {

@@ -110,7 +110,7 @@ impl Reconcile {
         let applied = ledger
             .apply_reconciled_external(&e, t)
             .map_err(Error::Settlement)?;
-        if applied.is_none() || !ledger.notes().iter().any(|expected| expected == n) {
+        if applied.is_none() || !ledger.notes().contains(n) {
             return Err(Error::ReconcileEvidence);
         }
         self.next += 1;

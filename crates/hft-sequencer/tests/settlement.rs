@@ -105,7 +105,7 @@ fn seq_418_bad_receipt_batch_cannot_partially_book() {
         body.extend_from_slice(last.as_bytes());
         let wallet_before = wallet(&h.s.engine().ledger);
         let pos_before = *h.s.engine().ledger.pos(AC1, B1);
-        let seen_before = h.s.engine().ledger.ext_seen(AC1, B).to_vec();
+        let seen_before = h.s.engine().ledger.ext_seen(AC1, B);
         let mark = h.mark();
         h.push_bytes(RingId::Ctl, EventKind::RECONCILE_BATCH, body);
         assert!(matches!(h.run(), StepOutcome::Fatal(FatalReason::Settlement(_))));
@@ -123,6 +123,7 @@ fn seq_418_bad_receipt_batch_cannot_partially_book() {
 #[test]
 fn seq_416_reconciliation_receipts_rebuild_wallet_and_pending_confirmation() {
     use hft_sequencer::driver::live::RingId;
+    use zerocopy::IntoBytes;
     for side in [Side::Buy, Side::Sell] {
         for remaining in [0, 100_000] {
             let mut h = cash_boot();
@@ -133,7 +134,20 @@ fn seq_416_reconciliation_receipts_rebuild_wallet_and_pending_confirmation() {
             assert_eq!(h.run(), StepOutcome::Idle);
             let mut receipt = reconcile_receipt(side.opposite(), 41, 200_000 - remaining, -1_170_003);
             receipt.fee = Qty(397);
-            let body = reconcile_input(&mut h, &receipt, Qty(side.sign() * remaining));
+            let receipts = if remaining == 0 {
+                let mut first = reconcile_receipt(side.opposite(), 41, 100_000, -600_001);
+                first.fee = Qty(198);
+                let mut last = reconcile_receipt(side.opposite(), 42, 100_000, -570_002);
+                last.fee = Qty(199);
+                vec![first, last]
+            } else {
+                vec![receipt]
+            };
+            let mut body = reconcile_input(&mut h, &receipts[0], Qty(side.sign() * remaining));
+            body[10..12].copy_from_slice(&(receipts.len() as u16).to_le_bytes());
+            for raw in receipts.iter().skip(1) {
+                body.extend_from_slice(raw.as_bytes());
+            }
             h.push_bytes(RingId::Ctl, EventKind::RECONCILE_BATCH, body.clone());
             assert_eq!(h.run(), StepOutcome::Idle);
             assert_eq!(wallet(&h.s.engine().ledger), initial - 1_170_400);
@@ -141,11 +155,18 @@ fn seq_416_reconciliation_receipts_rebuild_wallet_and_pending_confirmation() {
             assert_eq!(h.s.engine().ledger.auto_held(AC1, B1, receipt.side), receipt.qty);
             let pending = h.keyframe();
             assert_eq!(wallet(cold_at(&h, &start).ledger()), initial - 1_170_400);
-            h.push(h.rep_ring(AC1), &receipt);
-            assert_eq!(h.run(), StepOutcome::Idle);
+            let mut held = receipt.qty.0;
+            // Confirmation may reverse execution order; each key consumes only its own receipt.
+            for raw in receipts.iter().rev() {
+                held -= raw.qty.0;
+                for _ in 0..2 {
+                    h.push(h.rep_ring(AC1), raw);
+                    assert_eq!(h.run(), StepOutcome::Idle);
+                    assert_eq!(h.s.engine().ledger.auto_held(AC1, B1, receipt.side), Qty(held));
+                    assert_eq!(wallet(&h.s.engine().ledger), initial - 1_170_400);
+                }
+            }
             assert_eq!(h.s.engine().ledger.auto_held(AC1, B1, receipt.side), Qty(0));
-            h.push(h.rep_ring(AC1), &receipt);
-            assert_eq!(h.run(), StepOutcome::Idle);
             assert_eq!(wallet(&h.s.engine().ledger), initial - 1_170_400);
             h.keyframe();
             for snapshot in [&start, &pending] {

@@ -2947,7 +2947,7 @@ spec: README.md
 - 里程碑:M2
 - 基准名:`ledger/apply_reconciled_external`、`ledger/validate_reconcile_batch`
 - 输入:一笔完整原始凭据;两报告一凭据的有效预检
-- 期望:分别测量新入账与只读预检,构造账本不计入测量,CI 仅报告
+- 期望:分别测量新入账与只读预检,每次新入账使用独立账本且构造和销毁不计入测量,CI 仅报告
 - 实现:`crates/hft-ledger/benches/ledger.rs::led_294_reconciled_cash`
 
 ## 验收
