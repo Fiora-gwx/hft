@@ -399,6 +399,9 @@ pub struct Script {
     pub layout_version_delta: u32,
     /// `model_on_params` calls: (strategy, params version).
     pub model_params: Vec<(StrategyId, i64)>,
+    /// Emit the restored Model's event counter, with a fixed payload, for advisor acceptance.
+    pub counter_advice: Option<GroupId>,
+    pub counter_outputs: Vec<(u64, [u8; 256])>,
     /// `create`/`on_params` calls: (strategy, method, `thr` value).
     pub fast_params: Vec<(StrategyId, &'static str, i64)>,
     /// Results of `SubsBuilder::market` in `subscriptions`: (strategy, inst, gix, result).
@@ -731,6 +734,18 @@ macro_rules! test_set {
                 out: &mut AdviceOut<'_>,
             ) {
                 m.n_events += 1;
+                if let Some(group) = SCRIPT.with(|x| x.borrow().counter_advice)
+                    && matches!(ev, EventRef::Bbo { .. })
+                {
+                    let mut payload = [0xA5; 256];
+                    payload[..8].copy_from_slice(&m.n_events.to_le_bytes());
+                    payload[8..16].copy_from_slice(&v.now().seq.to_le_bytes());
+                    out.emit_raw(group, 7, &payload)
+                        .expect("counter advice fits");
+                    SCRIPT.with(|x| {
+                        x.borrow_mut().counter_outputs.push((v.now().seq, payload));
+                    });
+                }
                 let (kind, gix, inst) = event_name(ev);
                 let got = Got {
                     s: m.i.strategy,

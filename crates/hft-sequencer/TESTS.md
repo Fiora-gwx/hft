@@ -603,12 +603,12 @@ spec: README.md
 - 规则:[advisor 与 Model](README.md#advisor-与-model)、[环境决定写成 Input](README.md#环境决定写成-input)
 - 级别:unit
 - 里程碑:M2
-- 前置:B0;一段 journal 在 engine_ns 1 s、2 s、3 s 各有一条 `Timer{Sys, AdvisorTick}`,2.5 s 处另有 1 000 条 `Bbo`
+- 前置:B0;s2 订阅 1 s 模型 tick 与 a1 BBO;engine_ns 0 s 的首条 `AdvisorTick` 建立跨界基准,随后写关键帧;1 s、2 s、3 s 各有一条 `Timer{Sys, AdvisorTick}`,2.5 s 处另有 1 000 条 `Bbo`
 - 步骤:
-  1. 镜像重放这段 journal,记录 `model_tick` 的投递位置
+  1. 分别以每批 1、137 条 Input 镜像重放这段 journal,记录 `model_tick` 的投递位置;追平后再空轮询 100 次
 - 期望:
   - 恰好 3 次 tick,分别在三条 `AdvisorTick` 记录处;Bbo 的数量与 advisor 的实际耗时不改变 tick 次数与位置
-- 实现:`crates/hft-sequencer/tests/advisor.rs::seq_036_model_tick_from_journal`
+- 实现:`crates/hft-sequencer/tests/advisor/acceptance.rs::seq_036_model_tick_from_journal`
 
 ### SEQ-037 model_on_params 返回 ResetGroups 时每个被重置的 group 写一条 ModelGroupReset
 
@@ -644,7 +644,7 @@ spec: README.md
   1. advisor 从检查点续算并重放到该 `SetParams` 之后
 - 期望:
   - 再写出 2 条 `Note{ModelGroupReset}`,其 (strategy, group, `v[1]`) 与 SEQ-037 的两条逐一相同
-- 实现:`crates/hft-sequencer/tests/advisor.rs::seq_039_reset_note_dedup_key_on_catchup`
+- 实现:`crates/hft-sequencer/tests/advisor/acceptance.rs::seq_039_reset_note_dedup_key_on_catchup`
 
 ### SEQ-040 Applied 的 InjectWarmup 依序投递给 Model
 
@@ -665,12 +665,12 @@ spec: README.md
 - 规则:[advisor 与 Model](README.md#advisor-与-model)
 - 级别:unit
 - 里程碑:M2
-- 前置:B0;hft-core `advisor_max_lag_ms = 5 000`;人为使 s2 的 Model 落后:已提交末条记录的 engine_ns 比 Model 已消费末条记录大 6 000 ms,持续 25 s(按已提交末条的 engine_ns);之后回落到 1 000 ms 持续 30 s
+- 前置:B0;hft-core `advisor_max_lag_ms = 5 000`;已提交时间从 engine_ns 6 s 起,以读者的消费边界使 s2 的 Model 落后 6 000 ms,持续 25 s;之后回落到 1 000 ms 持续 30 s,不改引擎状态或告警计数
 - 步骤:
   1. 运行全过程,收集 hk 环上的 `Note{Advisor, AdvisorLag}`
 - 期望:
-  - 落后期间恰好 3 条(engine_ns 0 s、10 s、20 s 处),`v[0] = 2`、`v[1] = 6 000`;回落之后 0 条
-- 实现:`crates/hft-sequencer/tests/advisor.rs::seq_041_advisor_lag_rate_limited`
+  - 落后期间恰好 3 条(相对观察起点 0 s、10 s、20 s 处),`v[0] = 2`、`v[1] = 6 000`;回落之后 0 条
+- 实现:`crates/hft-sequencer/tests/advisor/acceptance.rs::seq_041_advisor_lag_rate_limited`
 
 ### SEQ-042 AdvisorLag 跨重启按 engine_ns 连续计算
 
@@ -679,10 +679,11 @@ spec: README.md
 - 里程碑:M2
 - 前置:B0;上次运行末条记录 engine_ns = 100 s;停机 10 min;新运行从检查点续算,检查点 `last_seq` 处的 engine_ns = 99 s
 - 步骤:
-  1. 新运行的 `EngineClock` 之后,advisor 尚未追上时计算 s2 的落后量
+  1. 新运行 TSC 重置、运行 6 s,已提交末条 engine_ns = 106 s;advisor 从旧检查点启动,每批 1 条 Input,首批镜像仍未追到检查点
+  2. 存储适配器把非文件字段 `last_ens` 提示改成 −123,继续运行至追平
 - 期望:
-  - 落后量 = 已提交末条 engine_ns − 99 s(停机 10 min 不计入);`AdvisorLag` 的 `v[1]` 与此相符
-- 实现:`crates/hft-sequencer/tests/advisor.rs::seq_042_lag_continuous_across_restart`
+  - s2 落后量 = 106 s − 99 s = 7 s;另一个实例 s1 持有 98 s 的检查点,落后量为 8 s。两者各一条告警,`v[1]` 分别为 7 000、8 000,`v[3]` 与 seq 差额按各自检查点位置计算。停机 10 min、镜像正在补读的旧前缀及错误时间提示均不计入
+- 实现:`crates/hft-sequencer/tests/advisor/acceptance.rs::seq_042_lag_continuous_across_restart`
 
 ### SEQ-043 Model 两次运行产出相同的 Advice 载荷序列
 
@@ -694,7 +695,8 @@ spec: README.md
   1. 两次从同一引导块起运行 advisor,收集推入环的 `(AdviceHdr, payload)`
 - 期望:
   - 两次的 `(basis_seq, local_kind, payload)` 序列在去掉被 outbox 覆盖的条目后逐字节相同;被覆盖的条目数分别计入各自的 `advice_coalesced`
-- 实现:`crates/hft-sequencer/tests/advisor.rs::seq_043_model_deterministic`
+  - 每条生成的 256 B 载荷含 Model 累计消费数与 Input seq,独立从 journal 计数核对;按固定 64 次 poll 的消费周期,参考字节环与单键 outbox 逐批核对实际送出字节及覆盖数。4 KiB 行必须实际产生更多覆盖,两行最终均送出末条载荷
+- 实现:`crates/hft-sequencer/tests/advisor/acceptance.rs::seq_043_model_deterministic`
 
 ### SEQ-044 Advice 是 Input:验证回放不运行 Model
 
@@ -727,13 +729,15 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:B0;一段 100 000 条 Input 的 journal;在 seq 40 000 处写检查点,进程在 seq 60 000 处重启,advisor 从检查点续算到末尾
-- 实现:`crates/hft-sequencer/tests/advisor.rs::seq_046_checkpoint_resume_equals_continuous`
+- 实现:`crates/hft-sequencer/tests/advisor/acceptance.rs::seq_046_checkpoint_resume_equals_continuous`
 
 | 行 | `checkpoint_chunk_kib` | 期望 |
 |---|---|---|
 | SEQ-046.1 | 256 | seq 60 000 之后产出的 `(basis_seq, local_kind, payload)` 与不中断运行逐字节相同 |
 | SEQ-046.2 | 1 024 | 同上 |
 | SEQ-046.3 | 4 096 | 同上 |
+
+逐条比较合并前的全部生成载荷,不靠丢弃 outbox 覆盖条目缩小恢复验证范围;独立按 journal 计算 Model 累计量,最终检查点头与体也与连续运行相同。此用例使用小状态 Model,大状态分块停顿另由 SEQ-045 验收。
 
 ### SEQ-047 检查点丢弃的原因码
 

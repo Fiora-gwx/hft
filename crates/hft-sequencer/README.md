@@ -497,6 +497,8 @@ advice 环元素 = `AdviceHdr { strategy, account, local_kind, group, len, basis
 9. **模型检查点**(只是预热优化,不是正确性条件——Advice 是 Input,回放与验证从不需要 Model 状态):见下节。
 10. advisor 的输出是 journal 记录的 Input,回放从日志读取,advisor 自身的时序不影响确定性([13 R10](../../design/13-设计评审与优化.md))。
 
+Model 从检查点恢复、镜像尚未追到其 `last_seq` 时,落后量以该检查点已经消费的位置计算;该处 `engine_ns` 从对应 journal 记录及其运行的 `EngineClock` 取得,不采信检查点存储适配器的时间提示。镜像追到后再使用实时消费位置,各实例分别计算。
+
 ### 模型检查点
 
 检查点键的组成与失效规则归 [hft-strategy-sdk](../hft-strategy-sdk/README.md)(含 `LAYOUT_VERSION` 与路径状态节 `Model::PATH_VERSION` 的纪律;参数版本、refdata 版本、二进制 SHA **不**使检查点失效)。文件 `<strategy_instance>.ckpt` + 上一代 `.prev`、文件头 `CkptHdr` 的格式、目录、周期 `advisor.model_checkpoint_ms`、块大小 `advisor.checkpoint_chunk_kib` 与磁盘上限归 [apps/hft-core](../../apps/hft-core/README.md)。本 crate 的 advisor 实现读写流程:
@@ -839,6 +841,8 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 ## 测试与验收
 
 用例与验收见 [TESTS.md](TESTS.md)。
+
+advisor 的定时投递、重启注记去重、落后量、两种环容量的独立合并模型,以及三种检查点块大小的完整载荷续算见 [SEQ-036–046](TESTS.md#seq-036-model-的时间刻度只来自-journal-中的-timersys-advisortick)。这些验收在测试进程中生成 journal,不替代固定回放样本与参考主机延迟门槛。
 
 ## 依赖
 

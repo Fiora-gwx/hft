@@ -950,9 +950,7 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
             return;
         };
         let end_seq = log.recs.get(end_ix).map_or(0, |r| r.seq);
-        let consumed_seq = self.mirror.e.cur_seq;
-        let consumed_ens = self.mirror.e.last_ens;
-        let ids: Vec<StrategyId> = self
+        let positions: Vec<(StrategyId, u64)> = self
             .mirror
             .inst
             .slots
@@ -966,9 +964,23 @@ impl<S: StrategySet, C: CheckpointStore, A: AdviceRing> Advisor<S, C, A> {
                     .get(*i)
                     .is_some_and(|m| m.enabled && m.model.is_some())
             })
-            .map(|(_, s)| s.id)
+            .map(|(i, s)| (s.id, self.mirror.inst.models.slots[i].hold_until))
             .collect();
-        for s in ids {
+        for (s, held) in positions {
+            // A restored Model already includes its checkpoint prefix, even while the shared
+            // mirror is reconstructing earlier engine state. Read its time from the journal,
+            // never from checkpoint metadata or the new run's TSC calibration.
+            let (consumed_seq, consumed_ens) = if held > self.mirror.e.cur_seq {
+                let Some(ix) = log.recs.iter().position(|r| r.seq == held) else {
+                    continue;
+                };
+                let Some(ens) = ens_of_record(log, ix) else {
+                    continue;
+                };
+                (held, ens)
+            } else {
+                (self.mirror.e.cur_seq, self.mirror.e.last_ens)
+            };
             let lag_ns = end_ens - consumed_ens;
             if let Some(n) = lag_note(
                 s,

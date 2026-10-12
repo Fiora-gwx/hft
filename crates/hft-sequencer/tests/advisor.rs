@@ -16,6 +16,8 @@ use zerocopy::FromBytes;
 
 use crate::common::*;
 
+mod acceptance;
+
 // ------------------------------------------------------------------------------- doubles
 
 /// In-memory `CheckpointStore`: one committed generation per instance, call log, faults.
