@@ -1757,7 +1757,7 @@ spec: README.md
 - 级别:integ
 - 里程碑:M2
 - 前置:`fixtures/dst/recon-before.toml` 固定 CI 212 的 50 个种子、套件、每行 2000 步及摘要
-- 步骤:仅用测试适配器重现旧报告与旧输入环;同一配置运行真实已提交对账 actor;再次关闭检查器运行新 actor
+- 步骤:仅用测试适配器重现旧报告与旧输入环,旧轮次时刻按调度周期累加;同一配置运行真实已提交对账 actor;再次关闭检查器运行新 actor
 - 期望:旧 actor 重现 50 个旧摘要;首条 journal 差异为虚拟 30 s 的 ReconcileReport,此前逐字节相同;新 actor 开关检查器的全部 journal、网关意图、完整 HashTrail 与最终交易所真值逐字节相同;三个运行均达到原步数且不变量通过
 - 证据:CI 保存 `target/dst/reconcile-migration.json`,列出每行的新旧摘要、首次差异序号/时刻和记录数;当前金样保持原种子、套件、步数及哈希范围
 - 实现:`crates/hft-testkit/tests/reconcile_migration.rs::tk_137_recon_migration_preserves_prefix_and_checker_transparency`

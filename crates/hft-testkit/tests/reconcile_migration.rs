@@ -13,12 +13,12 @@ use hft_testkit::scenarios::DstEngine;
 use hft_types::AccountId;
 use std::fmt::Write;
 
-struct PriorActor(DstEngine);
+struct PriorActor(DstEngine, std::cell::Cell<u64>);
 
 impl Sut for PriorActor {
     type Matcher = <DstEngine as Sut>::Matcher;
     fn boot(c: &BootCtx<'_>) -> Result<Self, BootFail> {
-        DstEngine::boot(c).map(Self)
+        DstEngine::boot(c).map(|engine| Self(engine, std::cell::Cell::new(0)))
     }
     fn process(&mut self, n: u64, t: u64, i: &InputRec, o: &mut StepOut) {
         self.0.process(n, t, i, o);
@@ -67,7 +67,10 @@ impl Sut for PriorActor {
     ) -> Result<Option<Vec<InputRec>>, String> {
         let mut obs = Obs::default();
         self.0.observe(&mut obs);
-        let now = self.0.sequencer().driver().io.drv.now_ns();
+        // The world schedules this actor at period, 2 * period, ... . Its event may
+        // precede the engine's next clock Input, so the driver clock can still lag.
+        let now = self.1.get().checked_add(actor.period_ns).unwrap();
+        self.1.set(now);
         // The pre-change adapter submitted Source::Recon through Rep(0), not Ctl.
         let venue = self
             .0
