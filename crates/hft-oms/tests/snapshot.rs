@@ -158,7 +158,11 @@ fn oms_362_row_versions() {
     ] {
         let mut c = b.clone();
         let (vo, _, _, _) = sec(&c, id);
-        c[vo] += 1;
+        c[vo] = if id == SECTION_OMS_LINKS {
+            hft_oms::ROW_VERSION_LINKS as u8 + 1
+        } else {
+            c[vo] + 1
+        };
         assert!(restore(&c).is_err(), "{row}");
     }
 }

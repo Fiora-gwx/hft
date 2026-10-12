@@ -82,3 +82,18 @@ allocs = 0
 ["oms/recovery_end_4096"]
 budget_ns = 300000
 allocs = 0
+
+["oms/foreign_cash_seen"]
+p50_ns = 150
+p99_ns = 400
+allocs = 0
+
+["oms/external_cash_guard"]
+p50_ns = 150
+p99_ns = 400
+allocs = 0
+
+["oms/remember_external_cash"]
+p50_ns = 300
+p99_ns = 800
+allocs = 0

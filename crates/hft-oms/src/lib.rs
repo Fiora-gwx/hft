@@ -215,6 +215,11 @@ impl Oms {
                     tombs: vec![Tomb::EMPTY; nn * usize::from(cfg.tombstone_gens)].into_boxed_slice(),
                     free,
                     foreign: FifoMap::new(usize::from(cfg.foreign_fill_track.get(v, a).max(1))),
+                    foreign_cash: vec![
+                        <crate::types::ForeignCashRow as zerocopy::FromZeros>::new_zeroed();
+                        usize::from(cfg.foreign_fill_track.get(v, a).max(1))
+                    ]
+                    .into_boxed_slice(),
                     ext_held: FifoMap::new(usize::from(cfg.ext_held_track.get(v, a).max(1))),
                     unknown_count: 0,
                     conn_up: false,

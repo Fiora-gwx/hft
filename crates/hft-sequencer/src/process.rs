@@ -884,8 +884,11 @@ pub(crate) fn external_fill<D: Driver<S>, S: StrategySet>(
                 .caps(e.rd.inst(x.inst).venue)
                 .flags
                 .contains(hft_refdata::CapFlags::PERP_CASH);
-    if settled && (auto_recon || oms_foreign) {
+    if settled && auto_recon {
         return Err(FatalReason::UnsupportedExternalCash);
+    }
+    if settled && !oms_foreign {
+        e.oms.external_cash_guard(x).map_err(FatalReason::OmsCash)?;
     }
     let before = e.ledger.pos(a, x.inst).qty.0 != 0;
     e.trace
@@ -897,6 +900,9 @@ pub(crate) fn external_fill<D: Driver<S>, S: StrategySet>(
     } else {
         e.ledger.apply_external(x, auto_recon, e.now.engine_ns)
     };
+    if settled && !oms_foreign {
+        e.oms.remember_external_cash(x).map_err(FatalReason::OmsCash)?;
+    }
     ledger_notes(e);
     let Some(app) = r else {
         return Ok(());

@@ -17,6 +17,92 @@ fn cash_boot() -> H {
     h
 }
 
+fn foreign_event(slot: u32, cum: i64, cash: i64) -> hft_event::OrderEvent {
+    hft_event::OrderEvent {
+        venue: B,
+        account: AC1,
+        what: OrderEventKind::PartialFill,
+        detail: Side::Sell as u8,
+        slot: hft_types::SlotId(slot),
+        r#gen: 17,
+        inst: B1,
+        px: Px(6_000_000),
+        qty: Qty(100_000),
+        cum_filled: Qty(cum),
+        fee: Qty(0),
+        fee_asset: USDT,
+        epoch: 1,
+        reject_code: 0,
+        exch_order_id: 99_001,
+        ex_ts_ns: 0,
+        hw_rx_ns: 0,
+        rx_tsc: 0,
+        avg_px: Px(6_000_000),
+        cash_qty: Qty(cum),
+        cash_sum: Qty(cash),
+    }
+}
+
+#[test]
+fn seq_415_foreign_cash_survives_checkpoints_cold_consumption_and_replay() {
+    use hft_event::Note;
+    use zerocopy::IntoBytes;
+    for slot in [0, 700] {
+        let mut h = cash_boot();
+        let initial = wallet(&h.s.engine().ledger);
+        let start = h.keyframe();
+        let mut mid = None;
+        for (i, cash) in [0, -1_170_000, -1_180_000].into_iter().enumerate() {
+            let e = foreign_event(slot, (i as i64 + 1) * 100_000, cash);
+            let mark = h.mark();
+            h.push(h.rep_ring(AC1), &e);
+            assert_eq!(h.run(), StepOutcome::Idle);
+            let n = h
+                .since(mark)
+                .iter()
+                .filter_map(|r| r.read::<Note>())
+                .filter(|n| n.code == hft_ledger::notes::code::OMS_FOREIGN_FILL)
+                .count();
+            assert_eq!(n, 1);
+            assert_eq!(wallet(&h.s.engine().ledger), initial + cash);
+            let cold = cold_at(&h, &start);
+            assert_eq!(wallet(cold.ledger()), initial + cash);
+            assert_eq!(cold.ledger().pos(AC1, B1), h.s.engine().ledger.pos(AC1, B1));
+            h.push(h.rep_ring(AC1), &e);
+            assert_eq!(h.run(), StepOutcome::Idle);
+            if i == 0 {
+                mid = Some(h.keyframe());
+            }
+        }
+        h.keyframe();
+        let mid = mid.unwrap();
+        assert_eq!(wallet(cold_at(&h, &mid).ledger()), initial - 1_180_000);
+        assert!(h.verify().is_empty());
+        assert!(h.verify_from(Some(start.seq)).is_empty());
+        assert!(h.verify_from(Some(mid.seq)).is_empty());
+        for hide in [false, true] {
+            let mut bad = h.j().clone();
+            let row = bad
+                .segments
+                .iter_mut()
+                .flat_map(|s| &mut s.records)
+                .find(|r| {
+                    r.read::<Note>()
+                        .is_some_and(|n| n.code == hft_ledger::notes::code::OMS_FOREIGN_FILL)
+                })
+                .unwrap();
+            if hide {
+                row.kind = EventKind::LATENCY_SAMPLE;
+            } else {
+                let mut note = row.read::<Note>().unwrap();
+                note.v[1] += 1;
+                row.body.copy_from_slice(note.as_bytes());
+            }
+            assert!(!verify_journal::<TestSet>(&bad, &h.setup, Some(start.seq)).is_empty());
+        }
+    }
+}
+
 fn wallet(l: &Ledger) -> i64 {
     l.venue_book(AC1, B)
         .cash

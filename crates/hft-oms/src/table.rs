@@ -195,6 +195,7 @@ pub(crate) struct Table {
     pub(crate) tombs: Box<[Tomb]>,
     pub(crate) free: Fifo<u32>,
     pub(crate) foreign: FifoMap,
+    pub(crate) foreign_cash: Box<[crate::types::ForeignCashRow]>,
     pub(crate) ext_held: FifoMap,
     pub(crate) unknown_count: u32,
     pub(crate) conn_up: bool,

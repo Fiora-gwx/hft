@@ -394,6 +394,42 @@ fn oms_455_recovery_end_4096(c: &mut Criterion) {
     });
 }
 
+fn oms_474_foreign_cash_provenance_64(c: &mut Criterion) {
+    let mut h = H::new();
+    let mut e = hft_event::ExternalFill {
+        venue: VX,
+        account: A1,
+        side: Side::Sell,
+        cause: ExternalCause::Unknown,
+        inst: Y,
+        qty: Qty(1),
+        px: p("60000"),
+        fee: Qty(0),
+        fee_asset: USDT,
+        _pad: [0; 6],
+        exch_order_id: 1,
+        trade_id: 1,
+        ex_ts_ns: 0,
+        rx_tsc: Tsc(0),
+        fill_seq: 0,
+        cash_qty: Qty(1),
+        cash_amount: Qty(0),
+    };
+    for id in 1..=64 {
+        e.exch_order_id = id;
+        h.o.remember_external_cash(&e).unwrap();
+    }
+    c.bench_function("oms/foreign_cash_seen", |b| {
+        b.iter(|| black_box(h.o.has_foreign_cash(VX, A1, Y, black_box(64))))
+    });
+    c.bench_function("oms/external_cash_guard", |b| {
+        b.iter(|| black_box(h.o.external_cash_guard(black_box(&e))))
+    });
+    c.bench_function("oms/remember_external_cash", |b| {
+        b.iter(|| black_box(h.o.remember_external_cash(black_box(&e))))
+    });
+}
+
 criterion_group!(
     benches,
     oms_440_place,
@@ -410,7 +446,8 @@ criterion_group!(
     oms_451_continue_16,
     oms_452_cancel_resting_8,
     oms_453_smoke,
-    oms_454_write_off
+    oms_454_write_off,
+    oms_474_foreign_cash_provenance_64
 );
 criterion_group! {
     name = slow;

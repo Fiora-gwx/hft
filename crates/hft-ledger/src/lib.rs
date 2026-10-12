@@ -26,6 +26,7 @@ mod dedup;
 mod fixed;
 mod funding;
 mod journal;
+mod journal_foreign;
 mod ledger;
 mod margin;
 pub mod notes;

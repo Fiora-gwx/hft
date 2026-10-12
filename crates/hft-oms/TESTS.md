@@ -29,7 +29,7 @@ spec: README.md
 | 延迟样本 | OMS-012, OMS-071, OMS-080–OMS-089 |
 | REPORT_DECODE | OMS-090, OMS-091 |
 | 恢复后的 gw 映射 | OMS-092, OMS-093 |
-| 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460、OMS-467、OMS-468、OMS-470 |
+| 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460、OMS-467、OMS-468、OMS-470–OMS-474 |
 | 成交净量(B4) | OMS-067, OMS-120–OMS-124, OMS-184, OMS-404 |
 | Unknown 收敛流程 | OMS-032, OMS-065, OMS-066, OMS-068, OMS-070, OMS-073, OMS-089, OMS-130–OMS-154, OMS-400, OMS-402, OMS-420 |
 | 墓碑与迟到成交(C1) | OMS-013, OMS-148, OMS-160–OMS-164, OMS-287, OMS-322, OMS-462、OMS-469 |
@@ -4246,6 +4246,47 @@ spec: README.md
 - 步骤:改写为节 2 v1/v2、节 12 v1 的旧格式,分别用严格与旧配置恢复;另对 Unknown 槽输入无现金事实的对账补量、无法匹配的外来回报和已有 external held 的重叠回报
 - 期望:旧配置可恢复旧格式,严格配置拒绝丢失结算水位的状态;对账补量 Missing、未知身份 Untracked、缺少现金重叠水位 ExternalOverlap;不产生猜测的结算
 - 实现:`crates/hft-oms/tests/settlement.rs::oms_470_cash_legacy_snapshots_and_unproven_paths`
+
+### OMS-471 外来累计现金跨乱序和恢复去重
+
+- 规则:[回报匹配与成交增量](README.md#回报匹配与成交增量)
+- 级别:unit
+- 里程碑:M2
+- 前置:PERP_CASH,三个完整累计回报,现金 0/−11700/−11800
+- 步骤:防御路径与 StaleGen 各三种排列,每条后快照恢复,最后重发全部回报
+- 期望:毛量共 3000000、现金共 −11800;恢复字节相同;重复无入账
+- 实现:`crates/hft-oms/tests/settlement.rs::oms_471_foreign_cash_cursors_survive_restore_and_reordered_reports`
+
+### OMS-472 错误外来现金与跨路径身份不改状态
+
+- 规则:[回报匹配与成交增量](README.md#回报匹配与成交增量)
+- 级别:unit
+- 里程碑:M2
+- 前置:PERP_CASH,已记录第一笔完整结算并恢复
+- 输入:缺覆盖、超覆盖、同水位异额、溢出、错方向、零订单号、零价格、不支持的查询、已记外来后匹配普通槽、原始成交后转外来十行
+- 步骤:先记录一条外来结算并恢复,分别施加错误
+- 期望:对应 Missing/Coverage/Conflict/Overflow/Identity/Untracked/ExternalOverlap;快照字节不变,无成交或费用输出
+- 实现:`crates/hft-oms/tests/settlement.rs::oms_472_foreign_cash_bad_facts_and_cross_path_aliases_are_atomic`
+
+### OMS-473 外来现金表满不淘汰水位
+
+- 规则:[回报匹配与成交增量](README.md#回报匹配与成交增量)
+- 级别:unit
+- 里程碑:M2
+- 前置:结算来源容量 1,已有明确零结算的订单
+- 步骤:第二订单进入,再重发第一单;原始 ExternalFill 查询同号与新号
+- 期望:第二单 Capacity 且快照不变;第一单不重复入账;原始来源分别报 ExternalOverlap/Capacity
+- 实现:`crates/hft-oms/tests/settlement.rs::oms_473_foreign_cash_capacity_never_evicts_a_booked_identity`
+
+### OMS-474 64 行结算来源查询预算
+
+- 规则:[延迟与资源契约](README.md#延迟与资源契约)
+- 级别:bench
+- 里程碑:M2
+- 基准名:`oms/foreign_cash_seen`、`oms/external_cash_guard`、`oms/remember_external_cash`
+- 步骤:填满 64 行,查询最后一行的来源、核验与重复登记
+- 期望:三项基准满足归属预算、运行期零分配;CI smoke 只报告
+- 实现:`crates/hft-oms/benches/oms.rs::oms_474_foreign_cash_provenance_64`
 
 ## 验收
 

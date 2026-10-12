@@ -820,15 +820,11 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
             crate::mode_glue::broken(e, inst, drv, l.account, l.group)?;
         }
     }
-    // Foreign fills → ExternalFill{cause = Unknown} via the OMS Note (same as cold readers).
+    // OMS cash is an increment of the original Input's cumulative facts. The cold consumer
+    // independently rebuilds that increment and verifies the same-event OMS Note.
     let ff: Vec<hft_oms::ForeignFill> = out.foreign_fills.as_slice().to_vec();
-    let notes_snapshot: Vec<Note> = out.notes.as_slice().to_vec();
     for f in ff.iter() {
-        let n = notes_snapshot
-            .iter()
-            .find(|n| n.code == hft_oms::notes::code_of(hft_oms::notes::FOREIGN_FILL) && n.inst == f.inst);
-        let ef = n.and_then(hft_ledger::Ledger::external_from_oms_note);
-        let ef = ef.unwrap_or_else(|| foreign_to_external(f));
+        let ef = foreign_to_external(f);
         crate::process::external_fill(e, inst, drv, &ef, false, true)?;
     }
     // Decisions → Output + out ring.
@@ -921,8 +917,8 @@ fn foreign_to_external(f: &hft_oms::ForeignFill) -> hft_event::ExternalFill {
         ex_ts_ns: 0,
         rx_tsc: Tsc(0),
         fill_seq: if f.trade_id == 0 { f.cum_filled.0 as u64 } else { 0 },
-        cash_qty: hft_types::Qty(0),
-        cash_amount: hft_types::Qty(0),
+        cash_qty: if f.cash.is_some() { f.qty } else { Qty(0) },
+        cash_amount: f.cash.unwrap_or(Qty(0)),
     }
 }
 

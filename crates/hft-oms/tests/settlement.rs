@@ -37,6 +37,28 @@ fn event(h: &H, order: OrderRef, units: i64, cash: i64) -> OrderEvent {
     e
 }
 
+fn original_external(eid: u64) -> hft_event::ExternalFill {
+    hft_event::ExternalFill {
+        venue: VX,
+        account: A1,
+        side: hft_types::Side::Sell,
+        cause: hft_event::ExternalCause::Unknown,
+        inst: Y,
+        qty: q("0.01"),
+        px: p("60000"),
+        fee: Qty(0),
+        fee_asset: hft_types::AssetId(0),
+        _pad: [0; 6],
+        exch_order_id: eid,
+        trade_id: 1,
+        ex_ts_ns: 0,
+        rx_tsc: hft_types::Tsc(0),
+        fill_seq: 0,
+        cash_qty: q("0.01"),
+        cash_amount: Qty(0),
+    }
+}
+
 #[test]
 fn oms_467_cash_cumulative_queries_and_permutations() {
     let permutations = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
@@ -271,6 +293,7 @@ fn oms_470_cash_legacy_snapshots_and_unproven_paths() {
     assert_eq!(h.state(r), OrderState::Unknown);
     let mut e = event(&h, r, 1, 10);
     e.slot = SlotId(0);
+    e.exch_order_id = 0;
     h.ev(&e, 3);
     assert_eq!(h.out.cash_error, Some(CashError::Untracked));
     assert!(h.out.foreign_fills.is_empty());
@@ -288,7 +311,152 @@ fn oms_470_cash_legacy_snapshots_and_unproven_paths() {
     );
     let before = snap(&h.o);
     e.slot = SlotId(r.slot);
+    e.exch_order_id = 900;
     h.ev(&e, 5);
     assert_eq!(h.out.cash_error, Some(CashError::ExternalOverlap));
     assert_eq!(snap(&h.o), before);
+}
+
+#[test]
+fn oms_471_foreign_cash_cursors_survive_restore_and_reordered_reports() {
+    for stale in [false, true] {
+        for perm in [[0, 1, 2], [2, 0, 1], [1, 2, 0]] {
+            let (mut h, rd) = fixture();
+            let r = h.place_ok(&sell_y(), 0);
+            let mut saved = Vec::new();
+            let mut cash = 0;
+            let mut qty = 0;
+            for (step, i) in perm.into_iter().enumerate() {
+                let mut e = event(&h, r, i + 1, [0, -11700, -11800][i as usize]);
+                e.exch_order_id = 9900;
+                e.detail = 2;
+                e.slot = if stale { SlotId(r.slot) } else { SlotId(0) };
+                e.r#gen += 7;
+                h.ev(&e, step as u64 + 1);
+                assert_eq!(h.out.cash_error, None);
+                for f in h.out.foreign_fills.as_slice() {
+                    cash += f.cash.unwrap().0;
+                    qty += f.qty.0;
+                }
+                saved.push(e);
+                let bytes = snap(&h.o);
+                h.o = restore(&bytes, rd);
+                assert_eq!(snap(&h.o), bytes);
+            }
+            assert_eq!((qty, cash), (3_000_000, -11800));
+            for e in saved {
+                h.ev(&e, 9);
+                assert_eq!(h.out.cash_error, None);
+                assert!(h.out.foreign_fills.is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn oms_472_foreign_cash_bad_facts_and_cross_path_aliases_are_atomic() {
+    for row in 0..10 {
+        let (mut h, rd) = fixture();
+        let r = h.place_ok(&sell_y(), 0);
+        let mut first = event(&h, r, 1, -11700);
+        first.slot = SlotId(0);
+        first.detail = 2;
+        first.exch_order_id = 9900;
+        h.ev(&first, 1);
+        assert_eq!(h.out.cash_error, None);
+        h.o = restore(&snap(&h.o), rd);
+        let mut e = first;
+        e.cum_filled.0 *= 2;
+        e.cash_qty = e.cum_filled;
+        e.cash_sum = Qty(-11800);
+        let want = match row {
+            0 => {
+                e.cash_qty = Qty(0);
+                e.cash_sum = Qty(0);
+                CashError::Missing
+            }
+            1 => {
+                e.cash_qty.0 += 1;
+                CashError::Coverage
+            }
+            2 => {
+                e = first;
+                e.cash_sum.0 += 1;
+                CashError::Conflict
+            }
+            3 => {
+                e.cash_sum = Qty(i64::MAX);
+                CashError::Overflow
+            }
+            4 => {
+                e.detail = 1;
+                CashError::Identity
+            }
+            5 => {
+                e.exch_order_id = 0;
+                CashError::Untracked
+            }
+            6 => {
+                e.avg_px = hft_types::Px(0);
+                e.px = e.avg_px;
+                CashError::Identity
+            }
+            7 => {
+                e.what = OrderEventKind::QueryResult;
+                CashError::Untracked
+            }
+            8 => {
+                e.slot = SlotId(r.slot);
+                e.r#gen = r.r#gen;
+                CashError::ExternalOverlap
+            }
+            _ => {
+                e.exch_order_id = 9901;
+                let ext = original_external(e.exch_order_id);
+                h.o.external_cash_guard(&ext).unwrap();
+                h.o.remember_external_cash(&ext).unwrap();
+                h.o = restore(&snap(&h.o), rd);
+                CashError::ExternalOverlap
+            }
+        };
+        let before = snap(&h.o);
+        h.ev(&e, 3);
+        assert_eq!(h.out.cash_error, Some(want), "row {row}");
+        assert_eq!(snap(&h.o), before, "row {row}");
+        assert!(h.out.foreign_fills.is_empty());
+        assert!(h.out.fills.is_empty());
+        assert!(h.out.fees.is_empty());
+    }
+}
+
+#[test]
+fn oms_473_foreign_cash_capacity_never_evicts_a_booked_identity() {
+    let rd = build_rd(&RdOpts {
+        vx_perp_cash: true,
+        ..RdOpts::default()
+    });
+    let mut cfg = p0();
+    cfg.slots.set(VX, A1, 1);
+    cfg.foreign_fill_track.set(VX, A1, 1);
+    let mut h = H::from_cfg(&cfg, rd);
+    let r = h.place_ok(&sell_y(), 0);
+    let mut e = event(&h, r, 1, 0);
+    e.slot = SlotId(0);
+    e.detail = 2;
+    e.exch_order_id = 9900;
+    h.ev(&e, 1);
+    assert_eq!(h.out.cash_error, None);
+    let before = snap(&h.o);
+    e.exch_order_id += 1;
+    h.ev(&e, 2);
+    assert_eq!(h.out.cash_error, Some(CashError::Capacity));
+    assert_eq!(snap(&h.o), before);
+    e.exch_order_id -= 1;
+    h.ev(&e, 3);
+    assert_eq!(h.out.cash_error, None);
+    assert!(h.out.foreign_fills.is_empty());
+    let mut ext = original_external(9900);
+    assert_eq!(h.o.external_cash_guard(&ext), Err(CashError::ExternalOverlap));
+    ext.exch_order_id += 1;
+    assert_eq!(h.o.external_cash_guard(&ext), Err(CashError::Capacity));
 }

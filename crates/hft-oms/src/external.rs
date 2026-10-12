@@ -32,6 +32,10 @@ impl Oms {
         let (venue, account) = (t.venue, t.account);
         let st = self.strategy_of(account);
         if ev.what == OrderEventKind::FeeOnly {
+            if self.inst(ev.inst).perp_cash {
+                out.cash_error = Some(crate::CashError::Untracked);
+                return;
+            }
             self.fee_unattributed(ti, ev, out);
             return;
         }
@@ -57,7 +61,7 @@ impl Oms {
             self.note(n, out);
             return;
         }
-        let Some(d) = self.foreign_increment(ti, ev, out) else {
+        let Some((d, cash)) = self.foreign_increment(ti, ev, out) else {
             return;
         };
         let v0 = u64::from(venue.0) | u64::from(account.0) << 8;
@@ -78,14 +82,25 @@ impl Oms {
             ],
         );
         self.note(n, out);
-        self.book_foreign(ti, ev, d, 1, seq, out);
+        self.book_foreign(ti, ev, (d, cash), 1, seq, out);
     }
 
     /// Increment of a foreign order by its cumulative quantity (`foreign` table).
-    fn foreign_increment(&mut self, ti: usize, ev: &OrderEvent, out: &mut OmsOut) -> Option<Qty> {
+    fn foreign_increment(
+        &mut self,
+        ti: usize,
+        ev: &OrderEvent,
+        out: &mut OmsOut,
+    ) -> Option<(Qty, Option<Qty>)> {
         if self.inst(ev.inst).perp_cash {
-            out.cash_error = Some(crate::CashError::Untracked);
-            return None;
+            return match self.foreign_cash_increment(ti, ev) {
+                Ok((d, cash)) if d.0 > 0 => Some((d, Some(cash))),
+                Ok(_) => None,
+                Err(e) => {
+                    out.cash_error = Some(e);
+                    None
+                }
+            };
         }
         if ev.exch_order_id == 0 {
             return None;
@@ -102,7 +117,7 @@ impl Oms {
         if evicted {
             self.evict_note(ti, ev.exch_order_id, out);
         }
-        Some(Qty(d))
+        Some((Qty(d), None))
     }
 
     pub(crate) fn evict_note(&mut self, ti: usize, eid: u64, out: &mut OmsOut) {
@@ -124,11 +139,12 @@ impl Oms {
         &mut self,
         ti: usize,
         ev: &OrderEvent,
-        d: Qty,
+        fill: (Qty, Option<Qty>),
         path: u64,
         seq: u64,
         out: &mut OmsOut,
     ) -> bool {
+        let (d, cash) = fill;
         let Some(t) = self.t(ti) else { return false };
         let (venue, account) = (t.venue, t.account);
         let st = self.strategy_of(account);
@@ -170,6 +186,7 @@ impl Oms {
             seq,
             trade_id: 0,
             cum_filled: ev.cum_filled,
+            cash,
         };
         let r = out.foreign_fills.push(ff);
         debug_assert!(r.is_ok(), "OmsOut.foreign_fills overflow");
@@ -208,6 +225,10 @@ impl Oms {
         out: &mut OmsOut,
     ) {
         if ev.what == OrderEventKind::FeeOnly {
+            if self.inst(ev.inst).perp_cash {
+                out.cash_error = Some(crate::CashError::Untracked);
+                return;
+            }
             self.fee_unattributed(ti, ev, out);
             return;
         }
@@ -220,9 +241,9 @@ impl Oms {
         let st = self.strategy_of(account);
         let mut booked = false;
         if ev.exch_order_id != 0
-            && let Some(d) = self.foreign_increment(ti, ev, out)
+            && let Some((d, cash)) = self.foreign_increment(ti, ev, out)
         {
-            booked = self.book_foreign(ti, ev, d, 2, seq, out);
+            booked = self.book_foreign(ti, ev, (d, cash), 2, seq, out);
         }
         let v0 = u64::from(venue.0) | u64::from(account.0) << 8;
         let n = notes::note(

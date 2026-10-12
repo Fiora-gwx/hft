@@ -20,6 +20,7 @@ const ROW_PLAN: u8 = 2;
 const ROW_LEG: u8 = 3;
 const ROW_TOMB: u8 = 4;
 const ROW_OUT: u8 = 5;
+const ROW_FOREIGN_CASH: u8 = 6;
 
 fn hdr(kind: u8, len: usize) -> LinkRowHdr {
     LinkRowHdr {
@@ -86,7 +87,18 @@ impl Oms {
             w.put_bytes([0u8; 8].get(..len.next_multiple_of(8) - len).unwrap_or(&[]));
         }
         // Section 12.
-        w.begin_section(SECTION_OMS_LINKS, ROW_VERSION_LINKS);
+        // Keep the established encoding when the appended row kind is absent.
+        let version = if self
+            .tables
+            .iter()
+            .flatten()
+            .any(|t| t.foreign_cash.iter().any(|r| r.exch_order_id != 0))
+        {
+            ROW_VERSION_LINKS
+        } else {
+            2
+        };
+        w.begin_section(SECTION_OMS_LINKS, version);
         let live = |e: &&LinkEntry| !matches!(e.state, LinkState::Free | LinkState::Done);
         for e in self.links.iter().filter(live) {
             w.put_row(&hdr(ROW_LINK, 80));
@@ -172,6 +184,12 @@ impl Oms {
             for it in t.q_rr.iter().chain(t.q_open.iter()) {
                 w.put_row(&hdr(ROW_OUT, 32));
                 w.put_bytes(it.as_bytes());
+            }
+        }
+        for t in self.tables.iter().flatten() {
+            for row in t.foreign_cash.iter().filter(|r| r.exch_order_id != 0) {
+                w.put_row(&hdr(ROW_FOREIGN_CASH, 32));
+                w.put_bytes(row.as_bytes());
             }
         }
         w.end_section();
@@ -317,6 +335,7 @@ impl Oms {
                     }
                 }
                 ROW_OUT => 32,
+                ROW_FOREIGN_CASH if s12.version >= 3 => 32,
                 0 if hd.len == 0 => {
                     // Section tail padding.
                     break;
@@ -328,6 +347,36 @@ impl Oms {
             }
             let b = rr.get_bytes(want)?;
             match hd.kind {
+                ROW_FOREIGN_CASH => {
+                    let row = crate::types::ForeignCashRow::read_from_bytes(b)
+                        .map_err(|_| RestoreError::BadValue)?;
+                    let inst = o.inst(row.inst);
+                    if row.exch_order_id == 0
+                        || row._pad != 0
+                        || !matches!(row.side, 0..=2)
+                        || (row.side == 0 && (row.filled.0 != 0 || row.cash_sum.0 != 0))
+                        || (row.side != 0 && row.filled.0 <= 0)
+                        || !inst.valid
+                        || !inst.perp_cash
+                        || inst.venue != row.venue
+                    {
+                        return Err(RestoreError::BadValue);
+                    }
+                    let ti = o.tix(row.venue, row.account).ok_or(RestoreError::BadValue)?;
+                    let t = o.tm(ti).ok_or(RestoreError::BadValue)?;
+                    if t.foreign_cash
+                        .iter()
+                        .any(|r| r.exch_order_id == row.exch_order_id && r.inst == row.inst)
+                    {
+                        return Err(RestoreError::BadValue);
+                    }
+                    let dst = t
+                        .foreign_cash
+                        .iter_mut()
+                        .find(|r| r.exch_order_id == 0)
+                        .ok_or(RestoreError::Capacity)?;
+                    *dst = row;
+                }
                 ROW_LINK => {
                     let e = LinkEntry::try_read_from_bytes(b).map_err(|_| RestoreError::BadValue)?;
                     let i = (e.link_id as usize)

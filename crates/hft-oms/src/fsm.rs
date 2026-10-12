@@ -348,6 +348,22 @@ impl Oms {
         self.fee_ctx = None;
         let now = Tsc(hdr.tsc);
         let seq = hdr.seq;
+        if ev.slot.0 != 0
+            && self.has_foreign_cash(ev.venue, ev.account, ev.inst, ev.exch_order_id)
+            && self
+                .tix(ev.venue, ev.account)
+                .and_then(|ti| self.t(ti))
+                .is_some_and(|t| {
+                    t.slot(ev.slot.0).is_some_and(|s| {
+                        s.state != OrderState::Free && s.r#gen == ev.r#gen && s.epoch == ev.epoch
+                    }) || t.tombs.iter().any(|b| {
+                        b.r#gen == ev.r#gen && b.epoch == ev.epoch && b.exch_order_id == ev.exch_order_id
+                    })
+                })
+        {
+            out.cash_error = Some(crate::CashError::ExternalOverlap);
+            return;
+        }
         match self.tix(ev.venue, ev.account) {
             None => self.stats.unmatched_table += 1,
             Some(ti) => {

@@ -28,7 +28,7 @@ spec: README.md
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
 | 连接活性 | SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173 |
-| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-414、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115 |
+| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
@@ -5690,6 +5690,17 @@ spec: README.md
 - 步骤:取消第二个 TimerId,重复取消该 ID 并取消未知 ID;登记一个 +30 ms 定时器后再尝试登记;推进至原来两个截止,生成末尾快照;分别从完整日志和关键帧窗口验证
 - 期望:只第一次取消释放一格,新登记成功且再登记返回 CtxFull;原第一个定时器仍按时投递,被取消的截止不投递;登记表与堆的条数一致,两个回放无分歧
 - 实现:`crates/hft-sequencer/tests/timers.rs::seq_407_cancel_one_timer_registration_and_reuse_quota`
+
+### SEQ-415 外来累计结算的冷读与完整和窗口回放
+
+- 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
+- 级别:replay
+- 里程碑:M2
+- 前置:B0 的永续开启 PERP_CASH
+- 输入:两个身份路径,累计量 100000/200000/300000,累计现金 0/−1170000/−1180000
+- 步骤:SLOT_UNRESOLVED 与 StaleGen 各交付三个完整累计回报,重复每条,首笔后关键帧;从首个与中间快照冷读,执行完整和窗口 verify
+- 期望:每次正量仅一条 OmsForeignFill,钱包按累计原始现金改变,冷热钱包和仓位逐单位相等;重复不改变;所有真实回放通过,缺注记或错误数量的反例失败
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_415_foreign_cash_survives_checkpoints_cold_consumption_and_replay`
 
 ## 验收
 

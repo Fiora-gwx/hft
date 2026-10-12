@@ -213,6 +213,9 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 | `oms/sweep_256` | hft-oms | [hft-oms 延迟与资源契约](../crates/hft-oms/README.md#延迟与资源契约) | OMS-449 |
 | `oms/tomb_late_fill` | hft-oms | [hft-oms 延迟与资源契约](../crates/hft-oms/README.md#延迟与资源契约) | OMS-447 |
 | `oms/unknown_query` | hft-oms | [hft-oms 延迟与资源契约](../crates/hft-oms/README.md#延迟与资源契约) | OMS-446 |
+| `oms/foreign_cash_seen` | hft-oms | [hft-oms 延迟与资源契约](../crates/hft-oms/README.md#延迟与资源契约) | OMS-474 |
+| `oms/external_cash_guard` | hft-oms | [hft-oms 延迟与资源契约](../crates/hft-oms/README.md#延迟与资源契约) | OMS-474 |
+| `oms/remember_external_cash` | hft-oms | [hft-oms 延迟与资源契约](../crates/hft-oms/README.md#延迟与资源契约) | OMS-474 |
 | `oms/write_off` | hft-oms | [hft-oms 延迟与资源契约](../crates/hft-oms/README.md#延迟与资源契约) | OMS-454 |
 | `params/validate` | hft-strategy-sdk | [hft-strategy-sdk 延迟与资源契约](../crates/hft-strategy-sdk/README.md#延迟与资源契约) | SDK-205 |
 | `py_events` | hft-py | [hft-py 延迟与资源契约](../crates/hft-py/README.md#延迟与资源契约) | PY-160 |

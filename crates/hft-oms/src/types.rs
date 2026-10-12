@@ -709,7 +709,7 @@ pub const SECTION_OMS_COUNTERS: u16 = 3;
 pub const SECTION_OMS_LINKS: u16 = 12;
 pub const ROW_VERSION_SLOTS: u16 = 3;
 pub const ROW_VERSION_COUNTERS: u16 = 1;
-pub const ROW_VERSION_LINKS: u16 = 2;
+pub const ROW_VERSION_LINKS: u16 = 3;
 
 /// Section 12 `Plan` row (64 B).
 #[repr(C)]
@@ -924,7 +924,26 @@ pub enum CashError {
     Untracked,
     /// External attribution has not supplied the cash needed to subtract an overlap.
     ExternalOverlap,
+    /// A retained foreign-order cash cursor cannot be evicted without losing deduplication.
+    Capacity,
 }
+
+/// Section 12 kind 6. Foreign cash cursor (side 1/2), or an original ExternalFill identity
+/// (side 0, filled/cash_sum zero) that must not cross into that path. Empty runtime entries
+/// have `exch_order_id = 0`; only occupied entries are persisted. No FIFO eviction.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
+pub(crate) struct ForeignCashRow {
+    pub venue: VenueId,
+    pub account: AccountId,
+    pub side: u8,
+    pub _pad: u8,
+    pub inst: InstId,
+    pub exch_order_id: u64,
+    pub filled: Qty,
+    pub cash_sum: Qty,
+}
+const _: () = assert!(size_of::<ForeignCashRow>() == 32);
 
 /// Fee-only report (→ hft-ledger `apply_fee`).
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -972,6 +991,8 @@ pub struct ForeignFill {
     pub seq: u64,
     pub trade_id: u64,
     pub cum_filled: Qty,
+    /// Actual perpetual cash of this increment, excluding fees and funding.
+    pub cash: Option<Qty>,
 }
 
 /// One gw mirror entry rebuilt after a restore (`GwCmd{MirrorRestore}`).

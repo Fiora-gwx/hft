@@ -111,6 +111,9 @@ pub enum JournalApplyError {
     /// A BalanceCheck has no matching, initialized report in its own event.
     BalanceEvidence,
     Unmapped,
+    /// Missing, duplicate, mismatched or cross-event OMS foreign-fill evidence.
+    ForeignEvidence,
+    ForeignCapacity,
     MissingCash,
     CashCoverage,
     CashConflict,

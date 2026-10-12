@@ -208,6 +208,7 @@ enum PendingCmd {
 pub struct JournalLedger {
     ledger: Ledger,
     map: SlotMap,
+    foreign: crate::journal_foreign::Foreign,
     epoch: u16,
     stats: JournalLedgerStats,
     clock: Option<Clock>,
@@ -236,6 +237,7 @@ impl JournalLedger {
     ) -> Result<JournalLedger, RestoreError> {
         let ledger = Ledger::restore(r, rd, cfg, caps)?;
         let mut map = SlotMap::new(SLOT_MAP_CAP);
+        let mut foreign = crate::journal_foreign::Foreign::default();
         if let Some(s) = r.find_section(OMS_SECTION_SLOTS)? {
             let len = match s.version {
                 1 => 160,
@@ -290,7 +292,7 @@ impl JournalLedger {
         // Recycled generations must retain their cash watermark too. OMS section 12 has
         // an 8-byte row header; non-tomb rows do not belong to this consumer.
         if let Some(section) = r.find_section(12)? {
-            if !(1..=2).contains(&section.version) {
+            if !(1..=3).contains(&section.version) {
                 return Err(RestoreError::VersionUnsupported);
             }
             let mut rr = section.reader();
@@ -302,6 +304,13 @@ impl JournalLedger {
                 }
                 let len = rr.get_u32()? as usize;
                 let row = rr.get_bytes(len)?;
+                if kind == 6 {
+                    if section.version < 3 {
+                        return Err(RestoreError::BadValue);
+                    }
+                    foreign.restore_row(row, &ledger)?;
+                    continue;
+                }
                 if kind != 4 {
                     continue;
                 }
@@ -332,12 +341,12 @@ impl JournalLedger {
                     cum: u64_at(32) as i64,
                     notional: 0,
                     fee_cum: u64_at(32) as i64,
-                    cash_qty: if section.version == 2 {
+                    cash_qty: if section.version >= 2 {
                         u64_at(64) as i64
                     } else {
                         0
                     },
-                    cash_sum: if section.version == 2 {
+                    cash_sum: if section.version >= 2 {
                         u64_at(72) as i64
                     } else {
                         0
@@ -406,6 +415,7 @@ impl JournalLedger {
         Ok(JournalLedger {
             ledger,
             map,
+            foreign,
             epoch,
             stats: JournalLedgerStats::default(),
             clock,
@@ -510,7 +520,6 @@ impl JournalLedger {
                         self.on_balance_check(&n, t)?;
                     }
                     let cash_inst = match (n.source, n.code) {
-                        (NoteSource::Oms, code::OMS_FOREIGN_FILL) => Some(n.inst),
                         (NoteSource::Ledger, code::EXTERNAL_FILL)
                             if (n.v[0] >> 24) & aflags::AUTO_RECON != 0 =>
                         {
@@ -524,7 +533,14 @@ impl JournalLedger {
                     {
                         return Err(JournalApplyError::UnsupportedExternalCash);
                     }
-                    self.on_note(&n, t);
+                    if n.source == NoteSource::Oms
+                        && n.code == code::OMS_FOREIGN_FILL
+                        && self.ledger.inst(n.inst).is_some_and(|i| i.perp_cash)
+                    {
+                        self.foreign.note(&n, &mut self.ledger, t)?;
+                    } else {
+                        self.on_note(&n, t);
+                    }
                 }
             }
             EventKind::ORDER_DECISION => {
@@ -542,6 +558,7 @@ impl JournalLedger {
                     if self.ledger.venue_s(e.venue).is_some_and(|v| v.perp_cash)
                         || self.ledger.inst(e.inst).is_some_and(|i| i.perp_cash)
                     {
+                        self.foreign.external(&e)?;
                         self.ledger
                             .apply_settled_external(&e, t)
                             .map_err(JournalApplyError::Settlement)?;
@@ -615,6 +632,7 @@ impl JournalLedger {
             _ => {}
         }
         if flags.contains(RecordFlags::EVENT_END) {
+            self.foreign.end_event()?;
             self.report_id = None;
             self.balance = None;
         }
@@ -813,7 +831,9 @@ impl JournalLedger {
                     || ev.cash_sum.0 != 0
                     || ev.what == OrderEventKind::FeeOnly)
             {
-                return Err(JournalApplyError::Unmapped);
+                let pending = self.foreign.prepare(ev, &self.ledger, t)?;
+                self.stats.unmapped_fills = self.stats.unmapped_fills.saturating_add(u64::from(pending));
+                return Ok(());
             }
             if ev.cum_filled.0 > 0 && ev.what != OrderEventKind::FeeOnly {
                 self.stats.unmapped_fills = self.stats.unmapped_fills.saturating_add(1);

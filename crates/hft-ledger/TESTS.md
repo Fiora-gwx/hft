@@ -23,7 +23,7 @@ spec: README.md
 | 仓位与已实现(平均成本法) | LED-010、LED-021–LED-025、LED-030–LED-039、LED-240、LED-241、LED-243、LED-275–LED-278 |
 | 余额初始化、校验与基线 | LED-039–LED-046、LED-260–LED-262 |
 | 外部成交(`ExternalFill`) | LED-050–LED-081、LED-188、LED-240、LED-245、LED-283–LED-285 |
-| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282、LED-286–LED-289 |
+| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282、LED-286–LED-290 |
 | 资金费 | LED-090–LED-104、LED-136–LED-138、LED-240、LED-245、LED-260 |
 | 资金费时刻归一化 | LED-091、LED-110–LED-116 |
 | 资金费对账校正 | LED-270、LED-268、LED-114、LED-120–LED-139、LED-244、LED-261 |
@@ -2898,6 +2898,17 @@ spec: README.md
 - 步骤:依次输入 quiet=true 的差额报告、quiet=false 的相等报告、quiet=true 的相等报告;分别丢弃同事件边界、篡改注记的 8 个载荷字与 group/inst/strategy/引擎时刻、重放注记及给初始化报告伪造校验注记;另让冷钱包与热钱包不同,消费同一校验事实
 - 期望:三次分别置位、保留、清除 Drift,现金不变且完整 summary/vflags 相等;坏证据或重复证据返回 BalanceEvidence 并锁存,不改已记金额;不同冷钱包按自己的事实得出 Drift,不照抄热结果
 - 实现:`crates/hft-ledger/tests/settlement_journal.rs::led_289_balance_gate_recomputes_drift_from_same_event_facts`
+
+### LED-290 外来现金独立计算与同事件证据
+
+- 规则:[冷消费者](README.md#冷消费者journalledger)
+- 级别:unit
+- 里程碑:M2
+- 前置:第一笔累计现金 −11700,第二笔累计 −11800
+- 输入:注记错误数量、订单号、方向、累计量;缺覆盖、同水位冲突、溢出、缺注记、重复注记及正确后续十行
+- 步骤:按 Input/Output 的完整事件交付,错误后再尝试补交
+- 期望:第二笔匹配证据时仅入 −100,重复不入账;错误不改账本,错误持续锁存,注记不提供现金金额
+- 实现:`crates/hft-ledger/tests/settlement_journal.rs::led_290_foreign_cash_uses_original_input_and_requires_exact_event_evidence`
 
 ## 验收
 

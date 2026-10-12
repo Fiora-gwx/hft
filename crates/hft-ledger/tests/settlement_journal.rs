@@ -52,6 +52,109 @@ fn one_order(rd: &RefData) -> JournalLedger {
     j
 }
 
+fn foreign_pair(cum: i64, cash: i64, qty: i64) -> (OrderEvent, hft_event::Note) {
+    let mut e = event(0, cum, cash);
+    e.detail = Buy as u8;
+    e.exch_order_id = 9900;
+    let n = oms_foreign_fill(
+        P2,
+        A1,
+        BTC_P2,
+        Buy,
+        1,
+        e.fee_asset,
+        Qty(qty),
+        e.avg_px,
+        e.fee,
+        e.exch_order_id,
+        0,
+        e.cum_filled,
+    );
+    (e, n)
+}
+
+fn fragment<B: Body>(j: &mut JournalLedger, b: &B, end: bool) -> Result<(), JournalApplyError> {
+    let mut bytes = [0u8; 512];
+    let flags = if end {
+        RecordFlags::EVENT_END
+    } else {
+        RecordFlags(0)
+    };
+    let n = encode_fixed(&mut bytes, 1, TSC, flags, b) as usize;
+    j.apply(&decode_record(&bytes[..n]).unwrap())
+}
+
+#[test]
+fn led_290_foreign_cash_uses_original_input_and_requires_exact_event_evidence() {
+    for row in 0..10 {
+        let mut j = cold(&booted_with(rd_cash()), rd_cash());
+        let (first, note) = foreign_pair(100_000, -11700, 100_000);
+        fragment(&mut j, &first, false).unwrap();
+        fragment(&mut j, &note, true).unwrap();
+        assert_eq!(cash(j.ledger(), A1, P2, USDT).total.0, 50_000_000_000 - 11700);
+        let before = snap(j.ledger());
+        let (mut next, mut n) = foreign_pair(200_000, -11800, 100_000);
+        let error = match row {
+            0 => {
+                n.v[1] += 1;
+                None
+            }
+            1 => {
+                n.v[4] += 1;
+                None
+            }
+            2 => {
+                n.v[0] ^= 1 << 16;
+                None
+            }
+            3 => {
+                n.v[7] += 1;
+                None
+            }
+            4 => {
+                next.cash_qty = Qty(0);
+                next.cash_sum = Qty(0);
+                Some(JournalApplyError::MissingCash)
+            }
+            5 => {
+                next = first;
+                next.cash_sum.0 += 1;
+                Some(JournalApplyError::CashConflict)
+            }
+            6 => {
+                next.cash_sum = Qty(i64::MAX);
+                Some(JournalApplyError::CashOverflow)
+            }
+            7 => Some(JournalApplyError::ForeignEvidence), // missing Note at EVENT_END
+            8 => Some(JournalApplyError::ForeignEvidence), // duplicate Note
+            _ => None,
+        };
+        let result = if row == 8 {
+            fragment(&mut j, &note, true)
+        } else if row == 7 {
+            fragment(&mut j, &next, true)
+        } else {
+            let input = fragment(&mut j, &next, false);
+            if input.is_err() || error.is_some() {
+                input
+            } else {
+                fragment(&mut j, &n, true)
+            }
+        };
+        if row == 9 {
+            result.unwrap();
+            assert_eq!(cash(j.ledger(), A1, P2, USDT).total.0, 50_000_000_000 - 11800);
+            fragment(&mut j, &next, true).unwrap();
+            assert_eq!(cash(j.ledger(), A1, P2, USDT).total.0, 50_000_000_000 - 11800);
+        } else {
+            let want = error.unwrap_or(JournalApplyError::ForeignEvidence);
+            assert_eq!(result, Err(want), "row {row}");
+            assert_eq!(snap(j.ledger()), before, "row {row}");
+            assert_eq!(fragment(&mut j, &n, true), Err(want), "failure must latch");
+        }
+    }
+}
+
 #[test]
 fn led_279_journal_cash_is_exact_across_report_delivery_orders() {
     // Five independently recorded executions in matching order. Fees are excluded from cash.
