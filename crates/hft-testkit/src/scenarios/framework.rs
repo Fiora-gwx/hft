@@ -107,7 +107,9 @@ pub fn smoke(s: &Scenario, start: u64, n: u64, steps: u64) -> Result<(), String>
     let suites = super::suites();
     for seed in start..start + n {
         let mut sc = *s;
-        sc.steps = Some(steps.min(sc.steps.unwrap_or(u64::MAX)));
+        // A scenario with an explicit duration must reach its own assertions. Reducing it to
+        // the generic smoke cap can skip a late fault or the final delivery window.
+        sc.steps = Some(sc.steps.unwrap_or(steps));
         let r = sc.run_seed::<super::DstEngine>(&suites, seed);
         if let Some(f) = r.outcome.failure() {
             return Err(format!("{}: {}", crate::dst::report::repro_line(f), f.message));

@@ -4,6 +4,8 @@
 //! `tests/dst/` (one `#[test]` per suite), `cargo xtask dst` and `hft-dst` iterate.
 
 pub mod framework;
+#[cfg(feature = "seq")]
+pub mod ledger;
 
 /// The engine the three DST entries run (`tests/dst/`, `cargo xtask dst`, `hft-dst`): the real
 /// sequencer over `SimExchange` with the test strategies (feature `seq`).
@@ -83,6 +85,8 @@ pub fn suite_names() -> Vec<&'static str> {
 pub fn scenarios() -> Vec<Scenario> {
     use crate::dst::invariants as i;
     let mut v = framework::all();
+    #[cfg(feature = "seq")]
+    v.push(ledger::led_081_auto_external_cold_hot_equal());
     v.extend([
         i::inv_1_position_change_has_fill_evidence(),
         i::inv_2_every_report_matched_or_alarmed(),

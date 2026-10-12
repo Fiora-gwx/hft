@@ -217,7 +217,13 @@ pub fn plan(root: &Path, opts: Options) -> Result<(Vec<Step>, Optional), EnvErro
         if dst {
             steps.push(step(
                 "dst smoke",
-                vec![Cmd::new("xtask", &["dst", "--seeds", &seeds, "--regressions"])],
+                vec![
+                    Cmd::new("xtask", &["dst", "--seeds", &seeds, "--regressions"]),
+                    Cmd::new(
+                        "xtask",
+                        &["dst", "--seeds", &seeds, "--regressions", "--case", "LED-081"],
+                    ),
+                ],
             ));
             steps.push(step(
                 "dst --hashtrail check",

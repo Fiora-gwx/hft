@@ -162,7 +162,16 @@ fn tk_094_probe_fixed_capabilities() {
     assert!(field("thr").is_some_and(|f| !f.structural), "TK-094.2");
     assert!(field("advice_max_age_ms").is_some(), "TK-094.3");
     let ops: Vec<(u8, &str)> = tgt.cmds.iter().map(|c| (c.op, c.name)).collect();
-    assert_eq!(ops, vec![(1, "set_thr"), (2, "exit_all")], "TK-094.4");
+    assert_eq!(
+        ops,
+        vec![
+            (1, "set_thr"),
+            (2, "exit_all"),
+            (3, "pair_lots"),
+            (4, "pair_exit")
+        ],
+        "TK-094.4"
+    );
     let np = k.iter().find(|d| d.name == "probe-np").expect("probe-np");
     assert!(np.non_prod_only, "TK-094.5");
     assert!(TEST_KIND_IDS.contains(&np.kind_id));
@@ -172,6 +181,33 @@ fn tk_094_probe_fixed_capabilities() {
             .all(|d| d.kind_id != np.kind_id && !d.non_prod_only),
         "TK-094.5/6"
     );
+}
+
+#[test]
+fn tk_141_pair_commands_open_lots_and_exit_without_changing_schedule() {
+    let p = target([0, 0, 0], false, 1_000, 5);
+    let mut h = StrategyHarness::<ProbeTarget>::new(&p, &gt1(), gt3_fixture(), A1).expect("params");
+    for lots in [1, 2, 6] {
+        let got = h.feed(&ev::manual(3, &[lots], false).as_ref());
+        let orders: Vec<_> = got.targets().collect();
+        assert_eq!(orders.len(), 1);
+        assert_eq!(orders[0].exec.algo(), 2);
+        let lot = h.views_mut().inst(I1).lot;
+        assert_eq!(orders[0].legs[0].qty.0, lot * lots);
+        assert_eq!(orders[0].legs[1].qty.0, -lot * lots);
+    }
+    for lots in [0, -1, 1_000_001, i64::MAX] {
+        assert_eq!(
+            h.feed(&ev::manual(3, &[lots], false).as_ref()).targets().count(),
+            0
+        );
+    }
+    let got = h.feed(&ev::manual(4, &[], true).as_ref());
+    let orders: Vec<_> = got.targets().collect();
+    assert_eq!(orders.len(), 1);
+    assert_eq!(orders[0].exec.algo(), 2);
+    assert_eq!(orders[0].reason, TargetReason::Exit);
+    assert!(orders[0].legs().iter().all(|l| l.qty.0 == 0));
 }
 
 fn advice_case(basis_ms: Option<i64>) -> usize {

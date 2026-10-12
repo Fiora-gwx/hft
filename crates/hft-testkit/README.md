@@ -138,7 +138,7 @@ impl<S: Strategy> ModelHarness<S> {
 - **两个测试策略**(本 crate 的 `src/strategies/` 模块,只引用 [hft-strategy-sdk](../hft-strategy-sdk/README.md) 与 [hft-strat-lib](../hft-strat-lib/README.md),TK-036 检查;不另设 workspace 包,依赖图不变):
   - `probe-taker`(kind_id 0xFF01):腿 A 买一高出腿 B 卖一超过 `spread_th`(`(A bid − B ask) × 10^9 / B ask`,Rate raw,严格大于)时卖 A,带 `LegLink`(OnFill,第二腿买 B);同一事件内另设一个持有定时器并写一条 Note(码 `NOTE_OPENED`);收到 `close_on` 选中的 `Exec`/`External`/`Risk` 事件时设 0/0 的退出目标;行使 OMS 链接、风控两腿检查与对冲重试。参数 `spread_th`(per_group)、`qty_lots`(per_group)、`close_on`(位:1 Exec、2 External、4 Risk)、`hold_ms`(`check`:0 < `hold_ms` < 10 为 `Invalid`)。
   - `probe-target`(kind_id 0xFF02):在引擎时间 `t_slice_ms`、`t_pair_ms`、`t_simul_ms` 各发一次 `TargetIntent`(依次 `TakerSlice`、`PairOnFill`、`Simultaneous`;0 = 不发),`need_advice` 时只在缓存的 Advice 未过期时发、否则跳过该点;`Model` 每 `advice_every` 个事件产出一条 16 B 不透明 `Advice`,`mem_bytes`/`snapshot_bytes` 由参数 `model_mem_kib`/`model_ckpt_kib` 声明;行使执行层、advisor 路径与 schema 驱动参数。
-  - **场景用到的固定能力**(跨组件用例按名字引用,改动须同时改引用它的用例):`probe-target` 的参数 schema 含结构字段 `win`(`FieldDesc.structural = true`)与非结构字段 `thr`、参数 `advice_max_age_ms`(快速部分用 hft-strat-lib `Expiring` 缓存 Advice,目标点到时缓存中没有未过期 Advice 就跳过该点),命令描述符 `op 1`(`set_thr`)与 `op 2`(`exit_all`);`TestStrategies` 另含 `probe-np`——与 `probe-taker` 同一代码、`StrategyDesc.non_prod_only = true`、kind_id 不同;测试构建以 `ProbeBuild{build_git, desc_version, model_layout_version, model_path_version, model_mem_bytes, model_ckpt_bytes}` 在装配时注入版本、布局与 Model 的内存与检查点大小,两组不同取值即两个"构建"(版本变化冷启动与检查点沿用/丢弃的场景用它,不另编二进制)。
+  - **场景用到的固定能力**(跨组件用例按名字引用,改动须同时改引用它的用例):`probe-target` 的参数 schema 含结构字段 `win`(`FieldDesc.structural = true`)与非结构字段 `thr`、参数 `advice_max_age_ms`(快速部分用 hft-strat-lib `Expiring` 缓存 Advice,目标点到时缓存中没有未过期 Advice 就跳过该点),命令描述符 `op 1`(`set_thr`)、`op 2`(`exit_all`, TakerSlice)、`op 3`(`pair_lots`, 1–1000000 个第一腿 lot 的 PairOnFill 目标)与 `op 4`(`pair_exit`, reduce-only 的 PairOnFill 零目标);`TestStrategies` 另含 `probe-np`——与 `probe-taker` 同一代码、`StrategyDesc.non_prod_only = true`、kind_id 不同;测试构建以 `ProbeBuild{build_git, desc_version, model_layout_version, model_path_version, model_mem_bytes, model_ckpt_bytes}` 在装配时注入版本、布局与 Model 的内存与检查点大小,两组不同取值即两个"构建"(版本变化冷启动与检查点沿用/丢弃的场景用它,不另编二进制)。
 - 装配:本 crate 的 `src/strategies/mod.rs` 用 SDK 的 `strategy_set!` 生成只含测试策略的 `TestStrategies`(`probe-taker`、`probe-target`、`probe-np`(0xFF03);kind_id 在 0xFF00–0xFFFF,只在测试构建中出现);本 crate 的 DST 与场景测试经它驱动真实 sequencer。**不依赖 registry**:生产策略的唯一列表在 [hft-strategy-registry](../../strategies/registry/README.md),以生产策略运行的 DST 场景与压力用例写在 `strategies/registry/tests/`(以 registry 的 `Strategies` 实例化本 crate 的泛型 DST 框架)或 `apps/hft-core/tests/`。
 - 门槛 ⑧ 由两个 xtask 子命令共同执行,都通过才绿(子命令的步骤、参数、触发与"引擎侧零改动"检查的路径范围唯一归属 [tools](../../tools/README.md#cargo-xtask-scaffold-gate);本节只写本 crate 提供的夹具与门槛 ⑧ 对它的要求):
   - **A. `cargo xtask scaffold-gate`(模板探针;改动 `crates/`、`apps/`、`strategies/`、`tools/` 的 PR)**,本 crate 提供:
@@ -183,6 +183,7 @@ pub struct DstConfig {                   // 与引擎无关的数据;引擎是 r
     pub market: MarketSource,            // Generated(MarketGen:种子化随机游走)| Recorded(Vec<(virtual_ns, InputRec)>)
     pub faults: FaultRates,              // 每类别开关 + 每个故障槽(slot_ms)的千分概率;取值由各套件的 DstSuite 给出,没有全局缺省
     pub scripted: Vec<(u64, Fault)>,     // 场景的 `故障` 脚本,并入生成的计划
+    pub confirmed_commands: Vec<(u64, InputRec)>, // 测试控制端在交付前读取 ctl_state_version,确认信封先记录再处理
     pub plan: Option<FaultPlan>,         // 显式计划(shrink、按记录复现);None = 由种子生成
     pub invariants: InvariantSet,
     pub hash_every: u64, pub rebuild_every: u64, pub rerun: RerunPolicy,   // HashTrail 采样、INV-6 间隔、INV-9 复跑
@@ -199,6 +200,10 @@ pub struct Scenario { pub id, pub title, pub suite: SuiteSel /* All | Named */, 
                       pub configure: Option<fn(&mut DstConfig)>, pub assert: Option<fn(&RunRecord) -> Result<(), String>> }
 pub struct DstSuite { pub name, pub title, pub faults: FaultRates, pub steps: u64, pub base: fn(u64) -> DstConfig, pub must_pass: &'static [&'static str] }
 ```
+
+显式场景用 `--case <编号>` 选择,实际执行同一 `Scenario` 的配置与断言。未指定时保留套件基线;HashTrail 金样始终使用基线。场景声明的步数不会被 cargo-test 的通用短集上限截短,CLI 显式步数不足以触发场景时断言失败。PR 的标准种子及回归集在基线之外另跑 LED-081;每夜配置与调用入口归 [tools](../../tools/README.md#cargo-xtask-dst)。
+
+`confirmed_commands` 仅用于测试控制端明确要求确认的命令,不改行情片段或已有故障命令。`Sut::control_state_version` 只读当前版本,缺失即失败;未启用控制 actor、来源错误或信封截断也失败。实际提交的 `confirmed` 与版本字段进入 journal,引擎照常检查角色、版本、模式和命令,检查器开关不影响交付(TK-142)。
 
 **场景套件**:`src/scenarios/<主题>.rs` 定义以 `TestStrategies` 运行的全部套件与场景(全仓 `dst`/`integ` 用例的 `实现` 落点,场景以用例编号注册)(`DstSuite`:名称、市场源、故障率、策略设置、必过用例 QF-1/MS-2(测试策略版)/MS-3 等,[testing §3.4、§4](../../docs/testing.md#34-dst));`hft_testkit::scenarios::{suites(), scenarios()}` 是唯一清单:仓库根 `tests/dst/main.rs` 只是 cargo test 入口(本 crate 的 `[[test]] dst` 目标,每个套件一个 `#[test]`,跑该套件场景的短种子区间),`cargo xtask dst` 与 [`hft-dst`](#8-hft-dst-运行器) 调用同一组套件,保证 PR、CI 每夜与服务器累计跑的是同一份场景。套件:`core`、`modes`、`storage`。三个入口都以引擎适配器 `SeqEngine`(= `SeqSut<TestStrategies>`,feature `seq`;`hft-dst` 的 `dst-bin` 与本 crate 的测试都打开它)运行真实 sequencer;框架自测引擎 `ToyEngine`(两腿 taker、OMS 槽表、OnFill 对冲与余数、ledger、kill 与模式、Broken 自动平仓、L3、Drain,带 `toy::PLANTED` 植入缺陷;不是生产引擎的模型)只用于框架自身的测试。
 
@@ -299,13 +304,14 @@ pub fn component_hashes(snapshot_logical_body: &[u8]) -> Result<ComponentHashes,
 `hft-dst` 是本 crate 的二进制目标(`src/bin/hft-dst.rs`,feature `dst-bin`):把 DST 框架、`TestStrategies` 与 `src/scenarios/` 的全部套件编成一个不依赖 cargo 的独立程序。CI 以 `ci` 剖面(断言与溢出检查开启、panic 为 unwind,取值归 [development 构建剖面](../../docs/development.md#构建剖面))在 `ubuntu-24.04-arm` 上构建,放进验证包 `hft-verify-<ver>-aarch64.tar.zst` 的 `bin/hft-dst`;服务器上只由 `hft-verify` 调用(驱动、种子区间分配、运行记录与账本归 [tools](../../tools/README.md),账本规则归 [testing §6.1](../../docs/testing.md#61-服务器上的累计运行)),不编译、不联网。
 
 ```text
-hft-dst run   --seeds <from>..<to> [--suite <name>|all] [--steps 10000] [--deadline-s N] [--checkpoint-seeds 1000] --out <result.json> --crash-dir <dir>
-hft-dst repro --seed 0x… --suite <name> --steps N [--trace] --crash-dir <dir>
+hft-dst run   --seeds <from>..<to> [--suite <name>|all] [--case <id>] [--steps 10000] [--deadline-s N] [--checkpoint-seeds 1000] --out <result.json> --crash-dir <dir>
+hft-dst repro --seed 0x… [--suite <name>] [--case <id>] --steps N [--trace] [--out <evidence.json>] --crash-dir <dir>
 hft-dst list                                          # 编进本二进制的套件、必过用例与各自的故障率
 hft-dst hashtrail --seed 0x… --suite <name> --steps N # 一行:trail <32 位十六进制> points=<n>
 ```
 
 - **`list`**:每个套件一行,以 `suite <名称>` 开头(其后是 `must_pass=…`、`steps=…`、`slot_ms=…`、`faults=<类别>:<千分率>,…`);`cargo xtask dst` 的套件表就取这些行。
+- **场景选择与证据**:`list` 另列 `case <编号> suite=<名称或all>`。未知场景、与场景固定套件冲突、`hashtrail --case` 均退出 2。显式场景的结果、进行中标记及失败复现保留 `case`;专属断言与普通不变量同样使运行退出 1。`run` 每批最多 4096 个显式场景种子,超出退出 2;逐种子记录实际步数、HashTrail、成功账本检查序号、AUTO 原件、迟到确认、抵扣数和最终钱包两侧数值。`repro --out` 写相同单种子证据(TK-143),不声明上线累计验收。
 - **`hashtrail`**:以该种子、套件与步数运行一次(不做 INV-9 复跑),标准输出恰一行 `trail <xxh3-128(HashTrail::to_bytes()) 的 32 位小写十六进制> points=<点数>`,退出 0;有违反时 stderr 打印复现行、退出 1;参数错误退出 2。`cargo xtask dst --hashtrail check|write` 用它核对或重写 `fixtures/dst/hashtrail.toml`(`[[seed]]` 表:`seed = "0x<16 位十六进制>"`、`suite`、`steps`、`trail`,登记顺序即文件顺序)。
 
 - **`run`**:按升序逐个运行区间内的种子(每个种子轮转套件,由种子派生选择);到 `--deadline-s` 时在当前种子结束后停止。结果 `DstRunResult`(JSON,规范化字段顺序):`{bin_version, git_sha, profile, suites, seed_from, seed_to_done, seeds_run, steps, violations: [{seed, suite, step, invariant}], elapsed_s}`;`seed_to_done` 之后的种子视为未运行(不计入,也不算失败)。每完成 `checkpoint_seeds`(默认 1,000)个种子就把当前结果原子地写到 `--out`(先写 `.new` 再 rename);收到 `SIGINT`/`SIGTERM` 时在当前种子结束后写出结果并退出,被强杀时最近一次落盘的结果仍可计入。
@@ -389,13 +395,15 @@ impl<S: StrategySet> SeqRig<S> {
 
 `ReconActor::round_committed` 按 Live 账户与 venue 分组,从独立 JournalLedger 读已提交边界的仓位与原始成交入账身份,包括交易所稀疏视图里已归零的合约。`view_seq` 是这个 journal 边界;订单与墓碑阻塞来自同一边界的 OMS 只读接口,用户流及最近活动来自原始记录。两轮数量稳定、无在途或 Unknown/VERIFY、用户流连续 Up 才提出 AUTO_EXTERNAL;真实引擎每轮经控制环提交,检查器开关不改变输入。重启或连续性丢失时清除两轮记忆。
 
-`ReceiptReader` 从有界 ExternalReceipt 历史筛出尚未入账的完整身份,按原始历史顺序提交现金与费用;重复分页只接受逐字节相同的原件。已入账身份按完整提交事件累积,不依赖热账本去重 FIFO 的当前保留窗口。`ReconActor::settled_input` 只负责打包;缺失、冲突、超量、无完整现金覆盖或错误账户/品种的凭据使本轮明确失败,不从仓位差或钱包差估算现金。TK-134–136 覆盖自动选择、两轮条件、FIFO 回收、重启与补报;LED-081 的标准随机种子验收仍待接入。资金费、余额与 UnknownResolved 的完整对账轮次仍未实现,真实轮次拒绝仅含金额差的 funding 注入。
+`ReceiptReader` 从有界 ExternalReceipt 历史筛出尚未入账的完整身份,按原始历史顺序提交现金与费用;重复分页只接受逐字节相同的原件。已入账身份按完整提交事件累积,不依赖热账本去重 FIFO 的当前保留窗口。`ReconActor::settled_input` 只负责打包;缺失、冲突、超量、无完整现金覆盖或错误账户/品种的凭据使本轮明确失败,不从仓位差或钱包差估算现金。TK-134–136 覆盖自动选择、两轮条件、FIFO 回收、重启与补报;LED-081 的开平仓与标准种子入口见下文。资金费、余额与 UnknownResolved 的完整对账轮次仍未实现,真实轮次拒绝仅含金额差的 funding 注入。
 
 TK-137 独立保存迁移前的 HashTrail 参考,用旧 actor 重现它;真实 actor 在首轮对账前须保持 journal 前缀相同,检查器开关须保持完整 journal、意图、HashTrail 和交易所真值相同。当前金样对应真实 actor,迁移仅更新有该证据支持的摘要,不减少种子、步数或比较字段。
 
 `ReconciledAdl{full,replay}` 在用户流断开且交易所永续仓位非零时结算一次,保存完整原件并省略首次推送。缺口按完整成交身份保持在途,不使用品种/资产数字排除项。实际 ReconcileBatch 事件提交后,独立冷消费者确认原件确已入账才解除缺口;拒绝的批次、仅生成的批次和其他账户/成交键都不能解除。`replay` 在此之后至少 1 ms 且用户流恢复后补推同一原件;无补推时直接恢复完整 I16。前置不满足或容量耗尽明确失败,检查器关闭仍执行相同的交付流程。原 `Adl{gap,replay}` 的普通补报时序独立保留。
 
 真实 ExternalFill 与 ReconcileBatch 每个完成事件都保留热账本节 1/13/22 的原始字节,INV-6 用独立冷消费者核对同一已提交边界,不等待下一个快照。每份观察上限 4 MiB,每步沿用事件缓冲上限,每次运行最多保留 4,096 条成功核对的 Input 序号;缺失、错误边界、溢出或字节差异均失败。冷端抵扣注记由 [JournalLedger 的 testkit 接口](../hft-ledger/README.md#冷消费者journalledger)独立产生,同事件与 journal 逐条相等,错误锁存。TK-138/139 与 LED-295 验证这层基建,TK-140 用真实 PairOnFill 开仓核对整个循环在检查器开关前后的 journal、交付、意图与 HashTrail;报价片段结束后保留实际交付窗口,待周期报告消耗完再要求最终 I16 无在途或排除项。CI 的 `reconcile-settlement` 制品包含 16 行直接开仓组合证据,不替代 LED-081 的开平仓和标准种子验收。
+
+LED-081 使用真实策略命令在 1 s 开仓、4 s 以 PairOnFill 平仓、7 s 再开仓;两腿 lot 为 100000,开仓量为种子派生的 2、4 或 6 手。10–15 s 用户流断开,种子派生的 11–13 s 时刻注入部分或全量 ADL;种子低位决定补推,连续偶数个种子的范围恰有一半补推。75 s 发 PairOnFill 零目标并等待交付尾窗。断言要求前一轮两腿实际足量成交、AUTO 与每次确认均有完整账本检查、应有的抵扣注记存在、最终仓位为零且严格 I16 没有跳过项。反例与检查器透明性归 TK-142,标准种子结果由 CLI 逐行报告。
 
 ### 金样运行器
 

@@ -180,14 +180,20 @@ impl Scenario {
             }));
             return r;
         };
-        let mut rec = run_record::<E>(&cfg);
+        self.run_config::<E>(&cfg)
+    }
+
+    /// Runs a resolved case configuration (CLI step/trace overrides already applied) and
+    /// applies its assertions. A selected case must never fall back to the suite-only runner.
+    pub fn run_config<E: Sut>(&self, cfg: &DstConfig) -> RunRecord {
+        let mut rec = run_record::<E>(cfg);
         if rec.outcome.is_pass()
             && let Some(a) = self.assert
             && let Err(msg) = a(&rec)
         {
             let step = rec.steps_run.saturating_sub(1);
             rec.outcome = DstOutcome::Fail(Box::new(DstFailure {
-                seed,
+                seed: cfg.seed,
                 suite: cfg.suite,
                 step,
                 invariant: FailKind::Scenario(self.id),

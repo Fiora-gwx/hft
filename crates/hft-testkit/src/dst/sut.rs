@@ -260,6 +260,10 @@ pub struct BootFail(pub String);
 /// The system under test. Implementations are deterministic functions of their inputs: no clock,
 /// no RNG, no environment (README "DST 的世界模型" 5).
 pub trait Sut: Sized {
+    /// Read-only control version used by the test controller's explicit confirmed commands.
+    fn control_state_version(&self) -> Result<u64, String> {
+        Err("control state version observation is unavailable".into())
+    }
     /// Whether each complete receipt identity was actually booked in the committed journal.
     /// The real adapter uses an independent cold consumer, never an Input's mere presence.
     fn committed_receipts(&self, _fills: &[hft_event::ExternalFill]) -> Result<Vec<bool>, String> {

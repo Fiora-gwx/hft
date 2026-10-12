@@ -15,10 +15,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use hft_testkit::dst::report::{repro_line, write_artifacts};
+use hft_testkit::dst::report::{repro_line_case, write_artifacts_case};
 use hft_testkit::dst::scenario::{DstSuite, suite_for_seed};
-use hft_testkit::dst::{DstOutcome, run};
-use hft_testkit::scenarios::{DstEngine, suites};
+use hft_testkit::dst::{DstConfig, DstOutcome, RunRecord, Scenario, SuiteSel, run_record};
+use hft_testkit::scenarios::{DstEngine, scenarios, suites};
 use hft_testkit::seed::DST_DEFAULT_STEPS;
 
 struct Args {
@@ -26,6 +26,7 @@ struct Args {
     seeds: Option<(u64, u64)>,
     seed: Option<u64>,
     suite: Option<String>,
+    case: Option<String>,
     steps: u64,
     deadline_s: Option<u64>,
     checkpoint: u64,
@@ -49,6 +50,7 @@ fn parse() -> Result<Args, String> {
         seeds: None,
         seed: None,
         suite: None,
+        case: None,
         steps: DST_DEFAULT_STEPS,
         deadline_s: None,
         checkpoint: 1_000,
@@ -70,6 +72,7 @@ fn parse() -> Result<Args, String> {
             }
             "--seed" => a.seed = Some(parse_u64(&val()?).ok_or("bad --seed")?),
             "--suite" => a.suite = Some(val()?),
+            "--case" => a.case = Some(val()?),
             "--steps" => a.steps = parse_u64(&val()?).ok_or("bad --steps")?,
             "--deadline-s" => a.deadline_s = Some(parse_u64(&val()?).ok_or("bad --deadline-s")?),
             "--checkpoint-seeds" => a.checkpoint = parse_u64(&val()?).ok_or("bad --checkpoint-seeds")?.max(1),
@@ -79,7 +82,48 @@ fn parse() -> Result<Args, String> {
             _ => return Err(format!("unknown argument {k}")),
         }
     }
+    if a.case.is_some() && !matches!(a.cmd.as_str(), "run" | "repro") {
+        return Err("--case is supported only by run/repro; HashTrail remains the baseline".into());
+    }
     Ok(a)
+}
+
+fn selected(a: &Args) -> Result<Option<Scenario>, String> {
+    let Some(id) = &a.case else { return Ok(None) };
+    let mut case = scenarios()
+        .into_iter()
+        .find(|s| s.id == id.as_str())
+        .ok_or_else(|| format!("unknown case {id}"))?;
+    if let Some(name) = a.suite.as_deref().filter(|s| *s != "all") {
+        let all = suites();
+        let suite = pick(&all, Some(name), 0)?;
+        if let SuiteSel::Named(n) = case.suite
+            && n != name
+        {
+            return Err(format!("case {id} requires suite {n}, not {name}"));
+        }
+        case.suite = SuiteSel::Named(suite.name);
+    }
+    Ok(Some(case))
+}
+
+fn config(a: &Args, all: &[DstSuite], case: Option<Scenario>, seed: u64) -> Result<DstConfig, String> {
+    let mut cfg = if let Some(case) = case {
+        case.config(all, seed)
+            .ok_or_else(|| format!("{} has an unavailable suite", case.id))?
+    } else {
+        pick(all, a.suite.as_deref(), seed)?.config(seed)
+    };
+    cfg.steps = a.steps;
+    cfg.trace = a.trace;
+    Ok(cfg)
+}
+
+fn execute(cfg: &DstConfig, case: Option<Scenario>) -> RunRecord {
+    match case {
+        Some(s) => s.run_config::<DstEngine>(cfg),
+        None => run_record::<DstEngine>(cfg),
+    }
 }
 
 fn pick<'a>(all: &'a [DstSuite], name: Option<&str>, seed: u64) -> Result<&'a DstSuite, String> {
@@ -109,6 +153,80 @@ struct Violation {
     invariant: String,
 }
 
+/// Bounded per-seed evidence for explicit cases; baseline report format stays compact.
+fn evidence_json(r: &RunRecord, case: Option<Scenario>) -> String {
+    use hft_event::{EventKind, ExternalFill, Note, NoteSource, ReconcileBatchView};
+    let fill_json = |seq: u64, f: ExternalFill| {
+        format!(
+            "{{\"seq\":{seq},\"account\":{},\"venue\":{},\"inst\":{},\"trade_id\":{},\"qty\":{},\"cash_qty\":{},\"cash\":{}}}",
+            f.account.0, f.venue.0, f.inst.0, f.trade_id, f.qty.0, f.cash_qty.0, f.cash_amount.0
+        )
+    };
+    let mut batches = Vec::new();
+    let mut originals = Vec::new();
+    let mut offsets = 0;
+    for j in &r.journal {
+        if j.kind == EventKind::RECONCILE_BATCH
+            && let Ok(b) = ReconcileBatchView::read(&j.body)
+        {
+            for f in b.fills() {
+                batches.push(fill_json(j.seq, f));
+            }
+        }
+        if let Some(f) = j.try_read::<ExternalFill>() {
+            originals.push(fill_json(j.seq, f));
+        }
+        if let Some(n) = j.try_read::<Note>()
+            && n.source == NoteSource::Ledger
+            && n.code == hft_ledger::notes::code::AUTO_HELD_OFFSET
+        {
+            offsets += 1;
+        }
+    }
+    let balances: Vec<_> = r
+        .obs
+        .balances
+        .iter()
+        .map(|a| {
+            let truth = r
+                .truth
+                .iter()
+                .find(|t| t.account == a.account && t.venue == a.venue)
+                .and_then(|t| t.balances.iter().find(|(asset, _)| *asset == a.asset))
+                .map(|(_, qty)| *qty);
+            format!(
+                "{{\"account\":{},\"venue\":{},\"asset\":{},\"ledger\":{},\"truth\":{}}}",
+                a.account.0,
+                a.venue.0,
+                a.asset.0,
+                a.qty,
+                truth.map_or("null".into(), |q| q.to_string())
+            )
+        })
+        .collect();
+    let checks: Vec<_> = r.ledger_checks.iter().map(u64::to_string).collect();
+    format!(
+        "{{\"seed\":\"{:#018x}\",\"case\":{},\"suite\":\"{}\",\"steps\":{},\"end_ns\":{},\"pass\":{},\"trail\":\"{:032x}\",\"snapshots\":{},\"ledger_inputs\":[{}],\"auto_receipts\":[{}],\"late_originals\":[{}],\"offset_notes\":{offsets},\"truth_pairs\":{},\"truth_unskipped\":{},\"balances\":[{}]}}",
+        r.seed,
+        case.map_or("null".into(), |s| format!("\"{}\"", s.id)),
+        r.suite,
+        r.steps_run,
+        r.end_ns,
+        r.outcome.is_pass(),
+        xxhash_rust::xxh3::xxh3_128(&r.trail.to_bytes()),
+        r.snapshot_checks,
+        checks.join(","),
+        batches.join(","),
+        originals.join(","),
+        r.truth.len(),
+        !r.truth.is_empty()
+            && r.truth.iter().all(|t| !t.undelivered && t.excluded.is_empty())
+            && r.obs.slots.iter().all(|s| s.state.is_terminal()),
+        balances.join(",")
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
 fn result_json(
     a: &Args,
     from: u64,
@@ -117,6 +235,7 @@ fn result_json(
     v: &[Violation],
     elapsed: u64,
     names: &[&str],
+    evidence: &[String],
 ) -> String {
     let suites: Vec<String> = names.iter().map(|s| format!("\"{s}\"")).collect();
     let viol: Vec<String> = v
@@ -129,14 +248,16 @@ fn result_json(
         })
         .collect();
     format!(
-        "{{\"bin_version\":\"{}\",\"git_sha\":\"{}\",\"profile\":\"{}\",\"suites\":[{}],\"seed_from\":{from},\"seed_to_done\":{},\"seeds_run\":{n},\"steps\":{},\"violations\":[{}],\"elapsed_s\":{elapsed}}}\n",
+        "{{\"bin_version\":\"{}\",\"git_sha\":\"{}\",\"profile\":\"{}\",\"suites\":[{}],\"case\":{},\"seed_from\":{from},\"seed_to_done\":{},\"seeds_run\":{n},\"steps\":{},\"violations\":[{}],\"elapsed_s\":{elapsed},\"runs\":[{}]}}\n",
         env!("CARGO_PKG_VERSION"),
         option_env!("HFT_GIT_SHA").unwrap_or("unknown"),
         if cfg!(debug_assertions) { "ci" } else { "release" },
         suites.join(","),
+        a.case.as_ref().map_or("null".into(), |id| format!("\"{id}\"")),
         done.map_or("null".to_string(), |d| d.to_string()),
         a.steps,
-        viol.join(",")
+        viol.join(","),
+        evidence.join(",")
     )
 }
 
@@ -156,16 +277,34 @@ fn cmd_list() -> ExitCode {
             rates.join(",")
         );
     }
+    for s in scenarios() {
+        println!(
+            "case {} suite={}",
+            s.id,
+            match s.suite {
+                SuiteSel::All => "all",
+                SuiteSel::Named(n) => n,
+            }
+        );
+    }
     ExitCode::SUCCESS
 }
 
 fn cmd_run(a: &Args) -> Result<ExitCode, String> {
+    let case = selected(a)?;
     let (from, to) = a.seeds.ok_or("run needs --seeds")?;
+    if case.is_some() && to - from >= 4096 {
+        return Err("explicit case evidence is bounded to 4096 seeds per run".into());
+    }
     let out = a.out.clone().ok_or("run needs --out")?;
     let crash = a.crash_dir.clone().ok_or("run needs --crash-dir")?;
     std::fs::create_dir_all(&crash).map_err(|e| format!("crash dir: {e}"))?;
     let all = suites();
-    let names: Vec<&str> = match a.suite.as_deref() {
+    let name = match case.map(|c| c.suite) {
+        Some(SuiteSel::Named(n)) => Some(n),
+        _ => a.suite.as_deref(),
+    };
+    let names: Vec<&str> = match name {
         None | Some("all") => all.iter().map(|s| s.name).collect(),
         Some(n) => vec![pick(&all, Some(n), 0)?.name],
     };
@@ -173,47 +312,56 @@ fn cmd_run(a: &Args) -> Result<ExitCode, String> {
     let mut v = Vec::new();
     let mut done = None;
     let mut n = 0u64;
+    let mut evidence = Vec::new();
     let inflight = crash.join(".inflight.json");
     for seed in from..=to {
         if a.deadline_s.is_some_and(|d| start.elapsed().as_secs() >= d) {
             break;
         }
-        let s = pick(&all, a.suite.as_deref(), seed)?;
-        let mut cfg = s.config(seed);
-        cfg.steps = a.steps;
+        let cfg = config(a, &all, case, seed)?;
         let marker = format!(
-            "{{\"seed\":\"{seed:#018x}\",\"suite\":\"{}\",\"steps\":{}}}\n",
-            s.name, a.steps
+            "{{\"seed\":\"{seed:#018x}\",\"suite\":\"{}\",\"case\":{},\"steps\":{}}}\n",
+            cfg.suite,
+            a.case.as_ref().map_or("null".into(), |id| format!("\"{id}\"")),
+            a.steps
         );
         atomic_write(&inflight, &marker).map_err(|e| format!("inflight marker: {e}"))?;
-        let outcome = std::panic::catch_unwind(|| run::<DstEngine>(&cfg));
+        let outcome = std::panic::catch_unwind(|| execute(&cfg, case));
+        if case.is_some()
+            && let Ok(rec) = &outcome
+        {
+            evidence.push(evidence_json(rec, case));
+        }
         match outcome {
-            Ok(DstOutcome::Fail(f)) => {
-                eprintln!("{}", repro_line(&f));
-                let _ = write_artifacts(&crash, &f);
+            Ok(RunRecord {
+                outcome: DstOutcome::Fail(f),
+                ..
+            }) => {
+                eprintln!("{}", repro_line_case(&f, a.case.as_deref()));
+                let _ = write_artifacts_case(&crash, &f, a.case.as_deref());
                 v.push(Violation {
                     seed,
-                    suite: s.name,
+                    suite: cfg.suite,
                     step: f.step,
                     invariant: f.invariant.label(),
                 });
             }
             Err(_) => v.push(Violation {
                 seed,
-                suite: s.name,
+                suite: cfg.suite,
                 step: 0,
                 invariant: "panic".into(),
             }),
-            Ok(DstOutcome::Pass { .. }) => {}
+            Ok(_) => {}
         }
         n += 1;
         done = Some(seed);
         if n.is_multiple_of(a.checkpoint) {
-            let j = result_json(a, from, done, n, &v, start.elapsed().as_secs(), &names);
+            let j = result_json(a, from, done, n, &v, start.elapsed().as_secs(), &names, &evidence);
             atomic_write(&out, &j).map_err(|e| format!("out: {e}"))?;
         }
     }
-    let j = result_json(a, from, done, n, &v, start.elapsed().as_secs(), &names);
+    let j = result_json(a, from, done, n, &v, start.elapsed().as_secs(), &names, &evidence);
     atomic_write(&out, &j).map_err(|e| format!("out: {e}"))?;
     let _ = std::fs::remove_file(&inflight);
     Ok(if v.is_empty() {
@@ -224,13 +372,14 @@ fn cmd_run(a: &Args) -> Result<ExitCode, String> {
 }
 
 fn cmd_repro(a: &Args) -> Result<ExitCode, String> {
+    let case = selected(a)?;
     let seed = a.seed.ok_or("repro needs --seed")?;
     let all = suites();
-    let s = pick(&all, a.suite.as_deref(), seed)?;
-    let mut cfg = s.config(seed);
-    cfg.steps = a.steps;
-    cfg.trace = a.trace;
-    let rec = hft_testkit::dst::run_record::<DstEngine>(&cfg);
+    let cfg = config(a, &all, case, seed)?;
+    let rec = execute(&cfg, case);
+    if let Some(out) = &a.out {
+        atomic_write(out, &evidence_json(&rec, case)).map_err(|e| format!("out: {e}"))?;
+    }
     if a.trace {
         for t in &rec.trace {
             println!(
@@ -241,9 +390,9 @@ fn cmd_repro(a: &Args) -> Result<ExitCode, String> {
     }
     match rec.outcome {
         DstOutcome::Fail(f) => {
-            eprintln!("{}", repro_line(&f));
+            eprintln!("{}", repro_line_case(&f, a.case.as_deref()));
             if let Some(d) = &a.crash_dir {
-                let _ = write_artifacts(d, &f);
+                let _ = write_artifacts_case(d, &f, a.case.as_deref());
             }
             Ok(ExitCode::from(1))
         }
@@ -260,7 +409,7 @@ fn cmd_hashtrail(a: &Args) -> Result<ExitCode, String> {
     cfg.rerun = hft_testkit::dst::RerunPolicy::Never;
     let rec = hft_testkit::dst::run_record::<DstEngine>(&cfg);
     if let DstOutcome::Fail(f) = &rec.outcome {
-        eprintln!("{}", repro_line(f));
+        eprintln!("{}", repro_line_case(f, None));
         eprintln!("{}", f.message);
         return Ok(ExitCode::from(1));
     }

@@ -22,7 +22,7 @@ spec: README.md
 | cargo xtask hot-check | TOOL-032 |
 | cargo xtask bench-gate | TOOL-033–TOOL-038、TOOL-185 |
 | cargo xtask replay-verify | TOOL-039–TOOL-046、TOOL-192、TOOL-198–TOOL-204 |
-| cargo xtask dst | TOOL-009、TOOL-047–TOOL-056 |
+| cargo xtask dst | TOOL-009、TOOL-047–TOOL-056、TOOL-205 |
 | cargo xtask gen-schema | TOOL-057–TOOL-061、TOOL-179 |
 | cargo xtask gen-host | TOOL-062–TOOL-065 |
 | cargo xtask doc-check | TOOL-066–TOOL-068、TOOL-178 |
@@ -103,6 +103,8 @@ spec: README.md
 - 期望:
   - 退出 0;步骤序列恰为:`fmt --check` → `clippy …` → `deny check licenses bans` → `deps` → `hot-check` → `fixtures check` → 单元/属性(`cargo test --profile ci`)→ 金样 → `dst` 冒烟 → `dst --hashtrail check --first 50` → `gen-schema --check` → `doc-check`
 - 实现:`tools/xtask/tests/ci.rs::tool_004_runs_twelve_steps_in_order`
+
+DST 冒烟步含基线与 LED-081 两次调用,二者均使用 200 个提交派生种子加完整回归集;HashTrail 调用仍紧随其后。
 
 ### TOOL-005 ci --pure-only 只选 tier = pure 的 crate 与 Python 包
 
@@ -3156,6 +3158,24 @@ spec: README.md
 | TOOL-204.3 | Unix 子目录为符号链接 | 同上 |
 | TOOL-204.4 | Unix 缓存根为符号链接 | 同上 |
 
+
+### TOOL-205 显式 DST 场景保留回归种子与证据身份
+
+- 规则:[cargo xtask dst](README.md#cargo-xtask-dst)
+- 级别:table
+- 里程碑:M2
+- 前置:运行器清单包含固定 core 套件的 LED-081,core/storage 回归文件各一个种子
+- 步骤:两个连续种子加全部回归种子运行 --case LED-081;复现时加 --trace
+- 期望:四个种子都实际传递 case 和默认步数,场景固定套件应用于全部种子且原回归套件保留;回归子进程输出独立证据;报告和复现不丢失 case;未知编号、冲突套件及 hashtrail/case 组合退出 2,不运行任何种子
+- 实现:`tools/xtask/tests/dst.rs::tool_205_case_selection_preserves_regressions_and_evidence_identity`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| TOOL-205.1 | 两个区间种子加 core/storage 回归,case LED-081 | 四行均运行 core 场景,保留回归来源和独立证据 |
+| TOOL-205.2 | case LED-081 加 trace | repro 子进程保留 case |
+| TOOL-205.3 | 未知 case | 退出 2,不运行种子 |
+| TOOL-205.4 | 固定 core 场景配 storage | 退出 2,不运行种子 |
+| TOOL-205.5 | hashtrail 加 case | 退出 2,不运行种子 |
 
 ## 验收
 

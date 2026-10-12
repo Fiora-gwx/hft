@@ -55,6 +55,21 @@ jobs:
           read -r n m < <(python3 -c 'import tomllib; t = tomllib.load(open("tools/xtask/dst-nightly.toml", "rb")); print(t["seeds"], t["steps"])')
           s=$(( $(date -u +%Y%m%d) * 1000000 ))
           cargo xtask dst --seeds "$n" --seed "$s" --steps "$m"
+          mapfile -t cases < <(python3 -c 'import tomllib; print("\n".join(tomllib.load(open("tools/xtask/dst-nightly.toml", "rb"))["cases"]))')
+          for case in "${cases[@]}"; do
+            cargo xtask dst --seeds "$n" --seed "$s" --steps "$m" --case "$case"
+          done
+
+      - name: Upload DST date-derived seed evidence
+        if: ${{ !cancelled() && hashFiles('target/xtask/dst*.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-dst-seeds
+          path: |
+            target/dst/
+            target/xtask/dst*.json
+          if-no-files-found: error
+          retention-days: 7
 
       # M3 (cargo xtask fuzz --nightly): short runs by the rotation in tools/xtask/fuzz-targets.toml;
       # minimized corpora live only in actions/cache.

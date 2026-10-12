@@ -6,6 +6,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use hft_event::GwCmd;
 use hft_types::InstId;
+use zerocopy::{FromBytes, IntoBytes};
 
 use crate::dst::actors::{AdvisorActor, CtlActor, HkActor, MarketActor, MarketOut, ReconActor};
 use crate::dst::driver::{last_events, tsc_at};
@@ -84,6 +85,7 @@ impl RunRecord {
 #[derive(Clone, Debug)]
 enum Ev {
     Deliver(InputRec),
+    ConfirmedCommand(InputRec),
     SutTimer,
     Market,
     Venue(usize),
@@ -247,6 +249,9 @@ impl<E: Sut> Loop<'_, E> {
                 self.world.schedule(*t, Ev::Fault(i));
             }
         }
+        for (at, input) in &self.cfg.confirmed_commands {
+            self.world.schedule(*at, Ev::ConfirmedCommand(input.clone()));
+        }
         for i in 0..self.venues.len() {
             self.wake_venue(i);
         }
@@ -271,6 +276,26 @@ impl<E: Sut> Loop<'_, E> {
             let now = s.at;
             match s.ev {
                 Ev::Deliver(i) => self.step(now, Some(i)),
+                Ev::ConfirmedCommand(mut input) => {
+                    let prepared = (|| {
+                        if !self.cfg.actors.ctl
+                            || input.kind != hft_event::EventKind::CONTROL_CMD
+                            || input.src != Source::Ctl
+                        {
+                            return Err("invalid confirmed command or disabled control actor".into());
+                        }
+                        let (mut hdr, _) = hft_event::CmdHdr::read_from_prefix(&input.body)
+                            .map_err(|_| "truncated confirmed command")?;
+                        hdr.expect_state_version = self.sut.control_state_version()?;
+                        hdr.confirmed = 1;
+                        input.body[..size_of::<hft_event::CmdHdr>()].copy_from_slice(hdr.as_bytes());
+                        Ok::<_, String>(())
+                    })();
+                    match prepared {
+                        Ok(()) => self.step(now, Some(input)),
+                        Err(msg) => self.fail = Some((self.rec.steps_run, FailKind::Scenario("TK-142"), msg)),
+                    }
+                }
                 Ev::SutTimer => {
                     if self.sut.next_deadline().is_some_and(|d| d <= now) {
                         self.step(now, None);

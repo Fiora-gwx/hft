@@ -730,6 +730,10 @@ impl<S: StrategySet> Sut for SeqSut<S> {
         self.finish_step(before, out);
     }
 
+    fn control_state_version(&self) -> Result<u64, String> {
+        Ok(self.s().engine().risk.mode.ctl_state_version())
+    }
+
     fn next_deadline(&self) -> Option<u64> {
         let d = self.s().view().next_deadline()?;
         Some(self.ns_of(d.0).max(self.now_ns()))

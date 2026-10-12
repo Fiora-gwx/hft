@@ -40,6 +40,7 @@ pub struct Opts {
     pub steps: Option<u64>,
     pub seed: Option<u64>,
     pub suite: Option<String>,
+    pub case: Option<String>,
     pub regressions: bool,
     pub trace: bool,
     pub strategy: Option<String>,
@@ -77,6 +78,7 @@ pub fn parse(args: &[String]) -> Result<Opts, EnvError> {
             "--seed" => o.seed = Some(num(val(&mut it, a)?, a)?),
             "--first" => o.first = Some(num(val(&mut it, a)?, a)?),
             "--suite" => o.suite = Some(val(&mut it, a)?),
+            "--case" => o.case = Some(val(&mut it, a)?),
             "--strategy" => o.strategy = Some(val(&mut it, a)?),
             "--regressions" => o.regressions = true,
             "--trace" => o.trace = true,
@@ -92,9 +94,10 @@ pub fn parse(args: &[String]) -> Result<Opts, EnvError> {
     }
     match o.hashtrail {
         Some(t) => {
-            if o.seeds.is_some() || o.seed.is_some() || o.suite.is_some() || o.regressions {
+            if o.seeds.is_some() || o.seed.is_some() || o.suite.is_some() || o.regressions || o.case.is_some()
+            {
                 return Err(EnvError(
-                    "--hashtrail runs the registered seeds: it cannot be combined with --seeds/--seed/--suite/--regressions".into(),
+                    "--hashtrail runs the registered seeds: it cannot be combined with --seeds/--seed/--suite/--regressions/--case".into(),
                 ));
             }
             match (t, o.first) {
@@ -199,6 +202,21 @@ pub fn parse_suites(list: &str) -> Vec<String> {
     v.sort();
     v.dedup();
     v
+}
+
+/// Case identities and their required suite, from the same compiled runner as the suite table.
+pub fn parse_cases(list: &str) -> Vec<(String, Option<String>)> {
+    list.lines()
+        .filter_map(|l| {
+            let mut words = l.strip_prefix("case ")?.split_whitespace();
+            let id = words.next()?;
+            if !id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-') {
+                return None;
+            }
+            let suite = words.find_map(|w| w.strip_prefix("suite="))?;
+            Some((id.to_owned(), (suite != "all").then(|| suite.to_owned())))
+        })
+        .collect()
 }
 
 fn fail(msg: impl std::fmt::Display) -> i32 {
@@ -405,7 +423,7 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
         Ok(o) => o,
         Err(e) => {
             return fail(format!(
-                "{e}\nusage: cargo xtask dst --seeds N [--steps M] [--seed S] [--suite X] [--regressions] [--trace] [--strategy K]\n       cargo xtask dst --hashtrail check|write [--first K] [--strategy K]"
+                "{e}\nusage: cargo xtask dst --seeds N [--steps M] [--seed S] [--suite X] [--case ID] [--regressions] [--trace] [--strategy K]\n       cargo xtask dst --hashtrail check|write [--first K] [--strategy K]"
             ));
         }
     };
@@ -443,10 +461,25 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
         Ok(b) => b,
         Err(c) => return c,
     };
-    let suites = match exec.run(&Cmd::capture(&bin, &["list"])) {
-        Ok(r) if r.ok() => parse_suites(&r.stdout),
+    let list = match exec.run(&Cmd::capture(&bin, &["list"])) {
+        Ok(r) if r.ok() => r.stdout,
         Ok(r) => return fail(format!("`{bin} list` exited {}", r.code)),
         Err(e) => return fail(e),
+    };
+    let suites = parse_suites(&list);
+    let cases = parse_cases(&list);
+    let case_suite = if let Some(id) = &o.case {
+        let Some((_, suite)) = cases.iter().find(|(name, _)| name == id) else {
+            return fail(format!("unknown case {id}"));
+        };
+        if let (Some(required), Some(chosen)) = (suite, &o.suite)
+            && required != chosen
+        {
+            return fail(format!("case {id} requires suite {required}, not {chosen}"));
+        }
+        suite.clone()
+    } else {
+        None
     };
     if suites.is_empty() {
         return fail(format!("`{bin} list` printed no suite"));
@@ -475,7 +508,7 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
     }
     // Plan.
     let suite_of = |s: u64| -> String {
-        match &o.suite {
+        match case_suite.as_ref().or(o.suite.as_ref()) {
             Some(x) => x.clone(),
             None => suites[hft_testkit::seed::suite_index(s, suites.len())].clone(),
         }
@@ -484,9 +517,15 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
         .map(|i| start + i)
         .map(|s| (s, suite_of(s), "range"))
         .collect();
-    runs.extend(regs.iter().map(|(s, x)| (*s, x.clone(), "regression")));
+    runs.extend(
+        regs.iter()
+            .map(|(s, x)| (*s, case_suite.as_ref().unwrap_or(x).clone(), "regression")),
+    );
     // Execute.
-    let crash = root.join("target").join("dst");
+    let mut crash = root.join("target").join("dst");
+    if let Some(id) = &o.case {
+        crash = crash.join(id);
+    }
     let crash_s = crash.display().to_string();
     let steps_s = steps.to_string();
     let mut cmds: Vec<Cmd> = Vec::new();
@@ -497,6 +536,9 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
         );
         if trace {
             c = c.arg("--trace");
+        }
+        if let Some(id) = &o.case {
+            c = c.arg("--case").arg(id.clone());
         }
         c.arg("--crash-dir").arg(crash_s.clone())
     };
@@ -511,6 +553,9 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
         if let Some(x) = &o.suite {
             c = c.arg("--suite").arg(x.clone());
         }
+        if let Some(id) = &o.case {
+            c = c.arg("--case").arg(id.clone());
+        }
         cmds.push(
             c.arg("--steps")
                 .arg(steps_s.clone())
@@ -520,8 +565,17 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
                 .arg(crash_s.clone()),
         );
     }
-    for (s, x) in &regs {
-        cmds.push(repro(*s, x, o.trace));
+    for (index, (s, x)) in regs.iter().enumerate() {
+        let mut c = repro(*s, case_suite.as_ref().unwrap_or(x), o.trace);
+        if o.case.is_some() {
+            c = c.arg("--out").arg(
+                crash
+                    .join(format!("regression-{index}-{}.json", hex(*s)))
+                    .display()
+                    .to_string(),
+            );
+        }
+        cmds.push(c);
     }
     if let Err(e) = std::fs::create_dir_all(&crash) {
         return fail(format!("create {crash_s}: {e}"));
@@ -539,9 +593,11 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
     }
     let j = json!({
         "seeds": runs.iter().map(|(s, _, _)| hex(*s)).collect::<Vec<_>>(),
-        "runs": runs.iter().map(|(s, x, src)| json!({"seed": hex(*s), "suite": x, "source": src})).collect::<Vec<_>>(),
+        "runs": runs.iter().enumerate().map(|(i, (s, x, src))| json!({"seed": hex(*s), "suite": x, "source": src,
+            "case": o.case, "regression_suite": i.checked_sub(n as usize).and_then(|i| regs.get(i)).map(|(_, suite)| suite)})).collect::<Vec<_>>(),
         "steps": steps,
         "suite": o.suite,
+        "case": o.case,
         "trace": o.trace,
         "strategy_set": "TestStrategies",
         "result": match code { EXIT_OK => "pass", EXIT_FAIL => "fail", _ => "error" },
@@ -549,10 +605,16 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
     if let Err(e) = write_json(root, "dst", &j) {
         return fail(e);
     }
+    if let Some(id) = &o.case
+        && let Err(e) = write_json(root, &format!("dst-{id}"), &j)
+    {
+        return fail(e);
+    }
     eprintln!(
-        "dst: {} seeds ({} regression), steps {steps} -> {}",
+        "dst: {} seeds ({} regression), steps {steps}{} -> {}",
         runs.len(),
         regs.len(),
+        o.case.as_ref().map_or(String::new(), |id| format!(", case {id}")),
         if code == EXIT_OK { "PASS" } else { "FAIL" }
     );
     code

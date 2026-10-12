@@ -4,7 +4,8 @@
 //! events. With `need_advice`, a schedule point is sent only while the cached Advice (hft-strat-lib
 //! `Expiring`, `advice_max_age_ms` from its basis time) is fresh, otherwise the point is skipped.
 //! Fixed capabilities the scenarios use: structural field `win`, non-structural `thr`, commands
-//! `op 1` (`set_thr`) and `op 2` (`exit_all`). Uses only hft-strategy-sdk and hft-strat-lib.
+//! `op 1` (`set_thr`), `op 2` (`exit_all`), `op 3` (`pair_lots`) and `op 4` (`pair_exit`).
+//! Uses only hft-strategy-sdk and hft-strat-lib.
 
 use hft_strat_lib::{Expiring, Fresh};
 use hft_strategy_sdk::prelude::*;
@@ -57,7 +58,22 @@ const THR_FIELD: &[FieldDesc] = &[FieldDesc {
     doc: "new threshold",
 }];
 
-pub static CMDS: [CmdDesc; 2] = [
+const LOTS_FIELD: &[FieldDesc] = &[FieldDesc {
+    name: "lots",
+    unit: hft_strategy_sdk::Unit::Count,
+    min: 1,
+    max: 1_000_000,
+    default: 1,
+    per_group: false,
+    structural: false,
+    manual_only: false,
+    relax: hft_strategy_sdk::Relax::None,
+    minor_change: hft_strategy_sdk::MinorChange::None,
+    since: 1,
+    doc: "target quantity in first-leg lots",
+}];
+
+pub static CMDS: [CmdDesc; 4] = [
     CmdDesc {
         op: 1,
         name: "set_thr",
@@ -71,6 +87,20 @@ pub static CMDS: [CmdDesc; 2] = [
         reduce_only: true,
         fields: &[],
         doc: "exit every group",
+    },
+    CmdDesc {
+        op: 3,
+        name: "pair_lots",
+        reduce_only: false,
+        fields: LOTS_FIELD,
+        doc: "set a PairOnFill target in first-leg lots",
+    },
+    CmdDesc {
+        op: 4,
+        name: "pair_exit",
+        reduce_only: true,
+        fields: &[],
+        doc: "exit with PairOnFill",
     },
 ];
 
@@ -258,6 +288,18 @@ impl Strategy for ProbeTarget {
                         }
                         2 => {
                             let _ = ctx.target(self.intent(0, 0, TargetReason::Exit));
+                        }
+                        3 => {
+                            if let Some(q) = c
+                                .val(0)
+                                .filter(|n| (1..=1_000_000).contains(n))
+                                .and_then(|n| self.lot.checked_mul(n))
+                            {
+                                let _ = ctx.target(self.intent(1, q, TargetReason::Rebalance));
+                            }
+                        }
+                        4 => {
+                            let _ = ctx.target(self.intent(1, 0, TargetReason::Exit));
                         }
                         _ => {}
                     }

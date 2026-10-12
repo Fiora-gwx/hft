@@ -176,7 +176,7 @@ cargo xtask replay-verify <journal-file | journal-dir | fixtures/replay/<name>.p
 ### cargo xtask dst
 
 ```sh
-cargo xtask dst --seeds N [--steps M] [--seed S] [--suite X] [--regressions] [--trace] [--strategy K]
+cargo xtask dst --seeds N [--steps M] [--seed S] [--suite X] [--case ID] [--regressions] [--trace] [--strategy K]
 cargo xtask dst --hashtrail check|write [--first K] [--strategy K]
 ```
 
@@ -188,6 +188,7 @@ cargo xtask dst --hashtrail check|write [--first K] [--strategy K]
 | `--steps M` | 每个种子的步数上限(缺省值归 [hft-testkit](../crates/hft-testkit/README.md)) |
 | `--seed S` | 起点种子;缺省由提交 SHA 派生(PR 冒烟)。每夜作业以 UTC 日期派生 `S`;复现单个种子(含 `hft-verify crash list` 报告的服务器种子)= `--seeds 1 --seed S` |
 | `--suite X` | 每个种子都在套件 X 中运行;缺省时每个种子在由种子派生选出的一个套件中运行(派生与 `hft-dst run` 相同,归 hft-testkit);X 不存在 → 退出 2 |
+| `--case ID` | 执行已登记场景的配置和断言;省略时运行套件基线。未知编号、与场景固定套件冲突、与 `--hashtrail` 同用均退出 2。固定套件场景将全部种子放进该套件,包括来自其他套件文件的回归种子;报告另保留原 `regression_suite` |
 | `--regressions` | 追加运行 `fixtures/dst-seeds/<suite>.txt` 的全部种子,每个种子在其文件名所示的套件中运行 |
 | `--trace` | 打印逐步轨迹(复现时用) |
 | `--strategy K` | 跑 `strategies/registry/tests/` 中该策略的 DST(真实策略集);不带时只跑 hft-testkit 的 `TestStrategies` |
@@ -197,6 +198,8 @@ cargo xtask dst --hashtrail check|write [--first K] [--strategy K]
 失败输出:种子、套件、违反的不变量([testing §4](../docs/testing.md))、违反前 200 条事件的 journal 片段(可直接喂 `replayer`),以及一行可复制的复现命令 `cargo xtask dst --seeds 1 --seed S --suite X --steps M --trace`(格式归 [hft-testkit](../crates/hft-testkit/README.md#6-dst-框架))。CI 与本地运行都不写服务器账本、不计入门槛 ④。
 
 实现口径:缺省起点 = HEAD 提交 SHA 的前 16 位十六进制(作为 u64);种子写作 `0x` + 16 位小写十六进制,也接受十进制。`dst` 以 `ci` 剖面构建 hft-testkit 的 [`hft-dst`](../crates/hft-testkit/README.md#8-hft-dst-运行器)(`cargo build --profile ci -p hft-testkit --features dst-bin --bin hft-dst`)并调用它:套件表取 `hft-dst list` 中以 `suite <名称>` 开头的行,按名字排序后用 hft-testkit 的 `seed::suite_index` 派生种子的套件;区间种子以 `hft-dst run --seeds <起点>..<终点>`(十进制、含两端)运行,带 `--trace` 时改为逐个 `hft-dst repro --seed S --suite X --steps M --trace --crash-dir target/dst`;回归种子逐个 `hft-dst repro --seed S --suite <文件名所示套件> --steps M --crash-dir target/dst`;崩溃目录与运行结果都在 `target/dst/` 下。`fixtures/dst-seeds/<suite>.txt` 每行取第一个字段为种子,`#` 开头的行跳过。JSON `target/xtask/dst.json`:`seeds`(区间在前、回归在后)、`runs`(每项 `seed`、`suite`、`source = range | regression`)、`steps`、`suite`、`strategy_set`(不带 `--strategy` 时 `"TestStrategies"`)、`result`。`--hashtrail`:`fixtures/dst/hashtrail.toml` 是按登记顺序排列的 `[[seed]]` 表(`seed = "0x<16 位十六进制>"`、`suite`、`steps`、`trail = "<32 位十六进制>"`);对每个种子运行 `hft-dst hashtrail --seed S --suite X --steps N`(stdout 一行 `trail <HashTrail 字节的 xxh3_128 十六进制> points=<n>`,格式归 [hft-testkit](../crates/hft-testkit/README.md#8-hft-dst-运行器)),`check` 在第一个摘要不同的种子处停下并输出种子、套件与两侧摘要(退出 1),`write` 只改写各 `[[seed]]` 的 `trail` 值;JSON 含 `seeds` 与 `first_divergence`。hft-testkit 的 DST 框架(`crates/hft-testkit/src/dst/`)不在仓库时退出 2。
+
+显式场景的结果仍写 `target/xtask/dst.json`,并另存 `dst-<ID>.json`,每行含实际 `case`、套件和种子来源。子进程证据及失败片段隔离在 `target/dst/<ID>/`;区间在 `run.json`,每个回归种子在独立文件,错误不会退回基线运行。基线的既有路径和 HashTrail 金样不变。PR 的 DST 冒烟步先跑基线,再用相同的提交派生种子数与全部回归种子跑 LED-081。每夜的基线和显式场景共享日期派生种子区间,数量、步数与场景列表归 [dst-nightly.toml](xtask/dst-nightly.toml);只记回归证据,不计入服务器累计门槛。
 
 ### cargo xtask gen-schema
 

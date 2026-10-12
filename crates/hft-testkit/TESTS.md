@@ -19,14 +19,14 @@ spec: README.md
 | 2. proptest 生成器 | TK-010–TK-021 |
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
-| 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TK-117–TK-119、TOOL-024、TOOL-027–TOOL-029 |
+| 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TK-117–TK-119、TK-141、TOOL-024、TOOL-027–TOOL-029 |
 | 6. DST 框架 | TK-043–TK-070、TK-100–TK-116、TK-120–TK-125 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
-| 8. hft-dst 运行器 | TK-075–TK-088 |
+| 8. hft-dst 运行器 | TK-075–TK-088、TK-143 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
 | 10. SeqRig | PY-106–PY-109、PY-111、PY-112 |
 | 实现说明 | 不适用:见子节 |
-| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140 |
+| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140、TK-142 |
 | 金样运行器 | TK-001、TK-005 |
 | 源文件 | TK-066 |
 | 延迟与资源契约 | TK-092–TK-093 |
@@ -1258,7 +1258,7 @@ spec: README.md
 | TK-094.1 | `probe-target` 字段 `win` | 存在,`structural = true` |
 | TK-094.2 | `probe-target` 字段 `thr` | 存在,`structural = false` |
 | TK-094.3 | `probe-target` 字段 `advice_max_age_ms` | 存在 |
-| TK-094.4 | `probe-target` 的 `cmds` | 恰含 `op 1`(`set_thr`)与 `op 2`(`exit_all`) |
+| TK-094.4 | `probe-target` 的 `cmds` | 恰含 `op 1`(`set_thr`)、`op 2`(`exit_all`)、`op 3`(`pair_lots`)与 `op 4`(`pair_exit`) |
 | TK-094.5 | `probe-np` 的 `StrategyDesc` | `non_prod_only = true`;kind_id 与 `probe-taker`、`probe-target` 不同,且在 `0xFF00–0xFFFF` |
 | TK-094.6 | `probe-taker`、`probe-target` 的 `StrategyDesc` | `non_prod_only = false` |
 
@@ -1706,7 +1706,7 @@ spec: README.md
 - 前置:真实 SeqSut 与 SimMatcher,多空镜像 × 首次补报前是否重启,共四行
 - 步骤:先将原始开仓送入引擎;断流 ADL 仅改变交易所真值,用户流恢复后送入保存的成交。首笔入账后重启,再交付两份相同副本
 - 期望:钱包精确为初始值加一次 +8600/−8600,仓位保留原方向的 100000;每个入账边界的独立 JournalLedger 与热账本一致,验证回放的 Output 和组件哈希一致,恢复后不重复入账
-- 边界:此例只覆盖补报去重和恢复,不包含 AUTO_EXTERNAL 合成或 auto_held 抵扣,LED-081 保持待实现
+- 边界:此例只覆盖补报去重和恢复,AUTO_EXTERNAL 合成与 auto_held 抵扣归 LED-081
 - 实现:`crates/hft-testkit/tests/external_receipts.rs::tk_132_replayed_adl_keeps_real_engine_wallet_after_recovery`
 
 ### TK-133 原始凭据补账后重启再确认
@@ -1795,6 +1795,42 @@ spec: README.md
 - 反例:保持默认一小时墓碑时长时,实际报告在途阻塞,本场景期间不补账,缺口仍在途
 - 边界:本用例覆盖循环交付与检查器透明性,不替代 LED-081 的开平仓和标准种子集
 - 实现:`crates/hft-testkit/tests/reconcile_world.rs::tk_140_committed_gap_delivery_is_independent_of_checkers`
+
+### TK-141 PairOnFill 命令支持独立手数与退出
+
+- 规则:[解耦门槛夹具](README.md#5-解耦门槛夹具)
+- 级别:table
+- 里程碑:M2
+- 前置:ProbeTarget 的 SDK 测试桩,定时目标关闭
+- 输入:关闭定时目标,调用 pair_lots 的 1、2、6 手及 0、负数、超界值,随后 pair_exit
+- 期望:合法手数只发一条 PairOnFill,两腿量为正负相应 lot 倍数;非法值无意图;退出目标为零且算法仍是 PairOnFill;既有调度和参数默认值不变
+- 实现:`crates/hft-testkit/tests/probes.rs::tk_141_pair_commands_open_lots_and_exit_without_changing_schedule`
+
+| 行 | 命令 | 期望 |
+|---|---|---|
+| TK-141.1 | pair_lots 1、2、6 手 | 一条 PairOnFill,两腿正负对应 lot 倍数 |
+| TK-141.2 | pair_lots 0、负数或超界 | 无意图 |
+| TK-141.3 | pair_exit | PairOnFill 零目标,Exit 原因 |
+
+### TK-142 完整结算场景不能遗漏执行或观察
+
+- 规则:[DST 框架](README.md#6-dst-框架)、[LED-081](../hft-ledger/TESTS.md#led-081-auto_external冷读者账本与-auto_held-与热进程逐值相同)
+- 级别:integ
+- 里程碑:M2
+- 前置:LED-081 的种子 0–3,覆盖部分/全量 ADL 与有无补推
+- 步骤:开启检查器运行,逐条确认四个控制命令实际应用;关闭检查器重跑;分别删除执行证据、账本检查和抵扣注记,设置最终在途,扰动钱包 1 单位,截短运行,关闭控制 actor 或改变确认命令来源
+- 期望:完整场景通过,两次 journal、交付、意图、HashTrail 与真值逐字节相同;所有反例失败,不能从套件基线的 pass 推断场景已通过
+- 实现:`crates/hft-testkit/tests/ledger_case.rs::tk_142_confirmed_case_executes_and_rejects_missing_evidence`
+
+### TK-143 CLI 场景选择与复现必须执行专属断言
+
+- 规则:[hft-dst 运行器](README.md#8-hft-dst-运行器)
+- 级别:proc
+- 里程碑:M2
+- 前置:带 dst-bin 的 hft-dst
+- 步骤:list 后运行 LED-081;把步数限制为 1 并复现;运行完整种子 2,比较 run 与 repro 的单种子证据
+- 期望:截短场景退出 1 且复现保留 --case,完整运行退出 0 且含实际补账、抵扣和无跳过真值;未知编号、套件冲突、hashtrail 带 case、超过 4096 的显式场景批次退出 2
+- 实现:`crates/hft-testkit/tests/dst_cli.rs::tk_143_cli_case_selection_and_repro_are_not_baseline_runs`
 
 ## 验收
 

@@ -981,7 +981,7 @@ spec: README.md
 - 故障:用户流断开期间对 `A1` 永续仓位做部分或全量 ADL(不推送),恢复后一半种子由交易所补推同一笔真实 ADL
 - 种子:PR 200 + 回归集;每夜日期派生
 - 断言:合成成交入账的那个事件之后,热进程与冷读者的节 1、13、22 字节相等(含 `AutoHeld` 行);补推的 ADL 在两边都被抵扣、都写 `Note{LedgerAutoHeldOffset}`;INV-1、INV-16
-- 实现:待实现
+- 实现:`crates/hft-testkit/src/scenarios/ledger.rs::led_081_auto_external_cold_hot_equal`
 
 资金费用例另用夹具 `fund_a1(kind)`:`boot_a1(0 s)`;`P2` 的 `funding_settle = kind`;入账 `F(Sell, BTC/P2, 1.0, 60 000, 0, USDT, G1, 1)`(1 s);`on_mark(BTC/P2, 60 000, 1 s)`。`T1 = D + 8 h`,`T2 = D + 16 h`。推送写作 `Push(inst, amount, settle_ts)`,即 `FundingSettle { A1, P2, inst, amount, synth: 0, … }`。
 

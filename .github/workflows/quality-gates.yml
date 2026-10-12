@@ -244,6 +244,16 @@ jobs:
             target/tests/trybuild
             target/jnl-feature
           key: ${{ steps.nested.outputs.cache-primary-key }}
+      - name: Upload ledger case seed evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ledger-case-seeds
+          path: |
+            target/dst/LED-081/
+            target/xtask/dst-LED-081.json
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: aarch64 cross check (ISA-specific code stays compilable)
         # Also after a failed gate: its verdict is independent, and its dependencies get cached.

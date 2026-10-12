@@ -304,6 +304,8 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 
 迟到 ExternalFill 命中待确认键时,数量、价格、费用、资产、订单号、现金覆盖/金额和交易所时间必须一致,否则 ReceiptConflict。rx_tsc 不参与比较;Unknown、ADL、Liquidation 之间的原因细分不改变资金身份。完全匹配只减少该笔 auto_held,不再次动钱包、仓位或费用。不同键照常入账,即使同方向仍有待确认记录;仅有旧数量而无原始凭据的重叠仍报 ExternalOverlap。SimReset 清除本账户待确认凭据。普通去重环绕回不淘汰待确认记录,确认后把原始键重新放回普通环。
 
+严格原件补账的跨组件验证由 [LED-081](TESTS.md#led-081-auto_external冷读者账本与-auto_held-与热进程逐值相同)约束。真实 PairOnFill 开平仓、用户流缺口与迟到确认的场景、种子入口和非空观察要求归 [testkit 世界模型](../hft-testkit/README.md#dst-的世界模型),测试证据不能替代生产历史来源验证。
+
 ### 冷消费者(`JournalLedger`)
 
 默认关闭的 `testkit` feature 提供只读 `JournalLedger::observed_notes()`。它保留最近一次成功消费记录时由冷账本自身产生的注记,上限为现有 `NOTE_BUF`,下一条成功记录覆盖;不复制 journal 的注记答案。诊断调用方须拒绝 `notes_dropped() != 0`,不能把溢出当作空列表。生产构建不含该缓冲,不改变消费结果、journal schema 或快照格式。

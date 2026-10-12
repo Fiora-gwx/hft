@@ -177,6 +177,88 @@ fn tool_053_never_writes_ledger() {
     }
 }
 
+#[test]
+fn tool_205_case_selection_preserves_regressions_and_evidence_identity() {
+    let f = dst_repo("dst-205");
+    f.write("fixtures/dst-seeds/core.txt", "7\n");
+    f.write("fixtures/dst-seeds/storage.txt", "9\n");
+    let list = format!("{} list", runner(&f));
+    let s = Script::new(
+        &f,
+        &[(
+            list.as_str(),
+            0,
+            "suite core\nsuite storage\ncase LED-081 suite=core\n",
+            "",
+        )],
+        0,
+    );
+    let r = dst(
+        &f,
+        &s,
+        &[
+            "--seeds",
+            "2",
+            "--seed",
+            "100",
+            "--case",
+            "LED-081",
+            "--regressions",
+        ],
+    );
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert_eq!(seeds(&r), vec![100, 101, 7, 9]);
+    let j = r.json.unwrap();
+    assert_eq!(j["case"], "LED-081");
+    let runs = j["runs"].as_array().unwrap();
+    assert!(
+        runs.iter()
+            .all(|r| r["case"] == "LED-081" && r["suite"] == "core")
+    );
+    assert_eq!(runs[3]["regression_suite"], "storage");
+    let calls: Vec<_> = s
+        .calls()
+        .into_iter()
+        .filter(|c| c.contains(" run ") || c.contains(" repro "))
+        .collect();
+    assert_eq!(calls.len(), 3);
+    assert!(
+        calls
+            .iter()
+            .all(|c| c.contains("--case LED-081") && c.contains("--steps 10000")),
+        "{calls:?}"
+    );
+    assert!(calls[2].contains("--suite core") && calls[2].contains("--out"));
+    assert!(f.path("target/xtask/dst-LED-081.json").is_file());
+    let trace = dst(
+        &f,
+        &s,
+        &["--seeds", "1", "--seed", "100", "--case", "LED-081", "--trace"],
+    );
+    assert_eq!(trace.code, 0);
+    assert!(s.calls().last().unwrap().contains("--case LED-081"));
+    for args in [
+        vec!["--seeds", "1", "--case", "missing"],
+        vec!["--seeds", "1", "--case", "LED-081", "--suite", "storage"],
+        vec!["--hashtrail", "check", "--case", "LED-081"],
+    ] {
+        let before = s
+            .calls()
+            .iter()
+            .filter(|c| c.contains(" run ") || c.contains(" repro "))
+            .count();
+        let bad = dst(&f, &s, &args);
+        assert_eq!(bad.code, 2, "{args:?}: {}", bad.stderr);
+        assert_eq!(
+            s.calls()
+                .iter()
+                .filter(|c| c.contains(" run ") || c.contains(" repro "))
+                .count(),
+            before
+        );
+    }
+}
+
 /// Files under `root` (relative, `/`-separated), `.git/` excluded.
 fn files(root: &std::path::Path) -> Vec<String> {
     let mut v: Vec<String> = walkdir::WalkDir::new(root)

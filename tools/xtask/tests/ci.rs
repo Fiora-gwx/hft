@@ -37,7 +37,7 @@ fn ci_repo(tag: &str) -> Fixture {
     f
 }
 
-const STEPS: [&str; 12] = [
+const STEPS: [&str; 13] = [
     "cargo fmt --all --check",
     "cargo clippy --profile ci --workspace --all-targets --all-features -- -D warnings",
     "cargo deny check licenses bans",
@@ -47,6 +47,7 @@ const STEPS: [&str; 12] = [
     "cargo test --profile ci --workspace --all-features --no-fail-fast",
     "cargo test --profile ci --workspace --all-features --test golden",
     "xtask dst --seeds 200 --regressions",
+    "xtask dst --seeds 200 --regressions --case LED-081",
     "xtask dst --hashtrail check --first 50",
     "xtask gen-schema --check",
     "xtask doc-check",
@@ -149,7 +150,7 @@ fn tool_186_no_doc_check_skips_doc_check() {
     let s = Script::new(&f, &[], 0);
     let r = f.xtask_script(&["ci", "--no-doc-check"], &s, &[]);
     assert_eq!(r.code, 0, "{}", r.stderr);
-    assert_eq!(s.calls(), STEPS[..11].to_vec());
+    assert_eq!(s.calls(), STEPS[..12].to_vec());
     assert!(r.stderr.contains("doc-check: skipped"), "{}", r.stderr);
 }
 

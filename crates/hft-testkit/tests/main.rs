@@ -7,6 +7,8 @@ static ALLOC: hft_testkit::CountingAlloc = hft_testkit::CountingAlloc;
 mod actors;
 mod clock;
 mod deps;
+#[cfg(feature = "dst-bin")]
+mod dst_cli;
 mod dst_report;
 mod dst_world;
 #[cfg(feature = "seq")]
@@ -16,6 +18,8 @@ mod fees;
 mod r#gen;
 mod hash;
 mod invariants_map;
+#[cfg(feature = "seq")]
+mod ledger_case;
 mod planted;
 mod probes;
 #[cfg(feature = "seq")]

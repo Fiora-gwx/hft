@@ -1,0 +1,5 @@
+# Date-derived regression smoke; the baseline and each explicit case keep 10,000 steps.
+# The combined DST/HashTrail wall-time budget belongs to docs/testing.md §6.
+seeds = 20
+steps = 10000
+cases = ["LED-081"]

@@ -119,6 +119,9 @@ pub struct DstConfig {
     pub faults: FaultRates,
     /// Scenario fault script, merged into the generated plan.
     pub scripted: Vec<(u64, Fault)>,
+    /// Explicit test-controller commands. At delivery the controller reads the current control
+    /// version and records a confirmed envelope before the normal engine command checks.
+    pub confirmed_commands: Vec<(u64, InputRec)>,
     /// Explicit plan (`shrink`, repro of a recorded schedule); `None` = generate.
     pub plan: Option<FaultPlan>,
     pub invariants: InvariantSet,
@@ -151,6 +154,7 @@ impl DstConfig {
             market: MarketSource::Generated(MarketGen::default()),
             faults: FaultRates::off(),
             scripted: Vec::new(),
+            confirmed_commands: Vec::new(),
             plan: None,
             invariants: InvariantSet::all(),
             hash_every: 100,
