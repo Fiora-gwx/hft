@@ -99,32 +99,48 @@ fn rpl_279_generated_hour_snapshot_component_and_field_diagnostics() {
         .iter()
         .filter(|r| r.seq > boot && r.seq <= keyframe.seq && r.role() == Role::Output)
         .count();
+    let cal = section(&keyframe.body, 16).0 + 16;
+    let cal_byte = keyframe.body[cal].wrapping_add(1);
     let mut evidence = Vec::new();
-    for (id, offset, owner, field, width) in [
-        (4, 24, Some("hft-risk"), "sections[4].rows[0].set_seq", 8),
-        (4, 10, Some("hft-risk"), "sections[4].rows[0].scope.account", 1),
-        (13, 0, Some("hft-ledger"), "sections[13].body[0]", 1),
-        (3, 0, Some("hft-oms"), "sections[3].body[0]", 1),
-        (5, 0, Some("strategies"), "sections[5].body[0]", 1),
-        (7, 0, Some("hft-book"), "sections[7].body[0]", 1),
-        (21, 0, Some("hft-exec"), "sections[21].body[0]", 1),
-        (25, 0, Some("hft-sequencer"), "sections[25].body[0]", 1),
-        (16, 0, None, "sections[16].body[0]", 1),
+    for (id, offset, owner, field, width, with_cal) in [
+        (4, 24, Some("hft-risk"), "sections[4].rows[0].set_seq", 8, false),
+        (
+            4,
+            10,
+            Some("hft-risk"),
+            "sections[4].rows[0].scope.account",
+            1,
+            false,
+        ),
+        (13, 0, Some("hft-ledger"), "sections[13].body[0]", 1, false),
+        (3, 0, Some("hft-oms"), "sections[3].body[0]", 1, false),
+        (5, 0, Some("strategies"), "sections[5].body[0]", 1, false),
+        (7, 0, Some("hft-book"), "sections[7].body[0]", 1, false),
+        (21, 0, Some("hft-exec"), "sections[21].body[0]", 1, false),
+        (25, 0, Some("hft-sequencer"), "sections[25].body[0]", 1, false),
+        (25, 0, Some("hft-sequencer"), "sections[25].body[0]", 1, true),
     ] {
         let (start, count, len) = section(&keyframe.body, id);
         assert!(count > 0 && offset + width <= len);
         let at = start + 16 + offset;
         let byte = keyframe.body[at].wrapping_add(1);
-        let changed = change(&original, keyframe.seq, &[(at, byte)]);
+        let mut changes = vec![(at, byte)];
+        if with_cal {
+            changes.push((cal, cal_byte));
+        }
+        let changed = change(&original, keyframe.seq, &changes);
         replace(&f, &changed);
         // Independently read the changed logical record through the formal reader. A
         // mistaken physical offset must not turn this into an unrelated metadata test.
         let reread = fixture::read(&f);
         let actual = &reread.recs.iter().find(|r| r.seq == keyframe.seq).unwrap().body;
         let mut wanted = keyframe.body.clone();
-        wanted[at] = byte;
+        for &(offset, value) in &changes {
+            wanted[offset] = value;
+        }
         assert_eq!(*actual, wanted);
-        let label = format!("snapshot-{id}-{offset}");
+        let suffix = if with_cal { "-with-cal" } else { "" };
+        let label = format!("snapshot-{id}-{offset}{suffix}");
         let out = execute(&f, &label, &[]);
         assert_eq!(out.0, 1, "{out:?}");
         assert_eq!(out.1["summary"]["verify"], "fail");
@@ -157,9 +173,27 @@ fn rpl_279_generated_hour_snapshot_component_and_field_diagnostics() {
         assert_eq!(std::fs::read(&f.file).unwrap(), changed);
         evidence.push(
             json!({"label": label, "seq": keyframe.seq, "offset": at, "value": byte,
-            "component": owner, "field": field, "prefix_outputs": prefix_outputs}),
+            "component": owner, "field": field, "prefix_outputs": prefix_outputs,
+            "changes": changes}),
         );
     }
+    // ClockCal is observational. Its body alone cannot create a business mismatch;
+    // the mixed EngineClock case above ensures it cannot hide one either.
+    let changed = change(&original, keyframe.seq, &[(cal, cal_byte)]);
+    replace(&f, &changed);
+    let reread = fixture::read(&f);
+    let actual = &reread.recs.iter().find(|r| r.seq == keyframe.seq).unwrap().body;
+    let mut wanted = keyframe.body.clone();
+    wanted[cal] = cal_byte;
+    assert_eq!(*actual, wanted);
+    let out = execute(&f, "snapshot-clock-cal-only", &[]);
+    assert_eq!(out.0, 0, "{out:?}");
+    assert!(out.1["divergences"].as_array().unwrap().is_empty());
+    for field in ["inputs_replayed", "outputs_compared", "snapshots_checked"] {
+        assert!(base.1["summary"][field].as_u64().unwrap() > 0);
+        assert_eq!(out.1["summary"][field], base.1["summary"][field]);
+    }
+    assert_eq!(std::fs::read(&f.file).unwrap(), changed);
     // A later risk snapshot must not relabel an earlier ordinary Output mismatch.
     let risk = section(&keyframe.body, 4).0 + 16 + 24;
     let changed = change(&original, keyframe.seq, &[(risk, keyframe.body[risk] ^ 1)]);

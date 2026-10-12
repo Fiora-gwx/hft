@@ -5703,7 +5703,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:B0 真实引擎,journal 含完整 ECF1/RKP1;测试策略在自己的 snapshot/restore 中保存 TimerId;六次登记的截止乱序,两条具有完全相同的 deadline/tag/group;一次取消和一次到期留下编号空洞
 - 步骤:分别从崩溃与 Drain 恢复,TSC 归零附近且频率变为三倍;策略用恢复的 ID 取消两个登记与两个旧 ID,再登记一次;第二次崩溃后恢复原频率,推进至到期;独立执行完整及关键帧窗口回放
-- 期望:首次恢复保留 ID 2/4/5/6,下一次分配为 7;第二次恢复保留 5/6/7;取消的一条相同 tag 登记不影响另一条,三条存活登记各到期一次;三次运行的 Output、快照字节与恢复状态均一致
+- 期望:首次恢复保留 ID 2/4/5/6,下一次分配为 7;第二次恢复保留 5/6/7;取消的一条相同 tag 登记不影响另一条,三条存活登记各到期一次;三次运行的 Output、快照字节与恢复状态均一致;Drain 结束后的段尾 Meta 不导致 Unfinished,该运行的 Input 与 Output 仍全部检查
 - 实现:`crates/hft-sequencer/tests/timer_recovery.rs::seq_408_timer_ids_survive_crash_drain_and_repeated_restart`
 
 | 行 | 第一次恢复起点 | 第二次恢复 | 期望 |

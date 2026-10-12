@@ -552,7 +552,16 @@ impl ReplayDriver {
         self.run_tsc = t;
     }
     pub fn finished(&self) -> bool {
-        self.next_record(self.cursor.max(self.sink.pos)).is_none()
+        // Drain may finish before the segment's trailing Meta. Only an unread Input
+        // means the run stopped early; finish_verification checks unreached Outputs.
+        !self
+            .sink
+            .log
+            .recs
+            .iter()
+            .take(self.end)
+            .skip(self.cursor.max(self.sink.pos))
+            .any(|r| r.role() == Role::Input)
     }
     fn next_record(&self, from: usize) -> Option<usize> {
         let mut i = from;

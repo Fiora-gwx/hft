@@ -296,7 +296,7 @@ pub trait CheckpointStore {
 
 分类表是 hft-event `KindInfo.role` 与 `MEASURE_MASK`。`SegmentRoll` 是结构记录(Meta),滚动决定本身是 Input `Timer{Sys, Roll}`。`ClockStatus` 是 Meta:它对决策状态的影响只经由实盘驱动写出的 `Timer{ClockOk|ClockBad}` Input 发生。记录成功后仅更新节 16 的冷读者校准行及 `from_seq`,不更新 `Now`、业务序号、Input 计数或策略回调。引导块在写出本段 ClockStatus 后采集快照;滚段未就绪时不改变校准行。
 
-恢复与验证按日志顺序保留校准来源,不把 Meta 计入每轮 Input 配额或重放 Input 数;所选快照之后、首条 Input 之前的已消费前缀同样保留来源,未提交尾部按 `EVENT_END` 丢弃。回放比对仅屏蔽节 16 的 40 B 行体,节头仍须合法且相同;其余快照字节和哈希声明照常检查。镜像可跳过 Meta,不影响业务状态。
+恢复与验证按日志顺序保留校准来源,不把 Meta 计入每轮 Input 配额或重放 Input 数;所选快照之后、首条 Input 之前的已消费前缀同样保留来源,未提交尾部按 `EVENT_END` 丢弃。Drain 返回 Done 后,完成检查只看是否仍有 Input;段尾 Meta 不构成未完成,未消费的 Output 仍须报告分歧。回放比对仅屏蔽节 16 的 40 B 行体,节头仍须合法且相同;其余快照字节和哈希声明照常检查。镜像可跳过 Meta,不影响业务状态。
 
 ### 主循环(`step`)
 

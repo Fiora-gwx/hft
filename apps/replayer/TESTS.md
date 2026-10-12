@@ -2258,8 +2258,8 @@ spec: README.md
 - 级别:integ
 - 里程碑:M2
 - 前置:RPL-270 的真实引擎、advisor 和 SimExchange 生成完整 1 h、两个文件段;第二个关键帧存在 cap、组件状态和 ClockCal
-- 步骤:原始输入;分别改变 cap 的 set_seq/scope.account、ledger/OMS/strategy/book/exec/EngineClock/ClockCal 节体字节,重算 CRC 与 seal;正式读者复查只改变目标逻辑字节;再同时改较早 CmdResult 与风险快照并 keep-going;每条记录保留原 CRC 策略,CmdResult 不强加 CRC;恢复来源重跑
-- 期望:原始与恢复输入退出 0;九行反例退出 1,首错精确为被改快照,此前及该点 Output 比较数由输入独立统计,恰一个普通分歧;组件、字段、两侧偏移与完整字段字节一致;ClockCal 无组件;较早 CmdResult 首错不能借用风险组件。文件与报告/侧文件一致,运行不改输入;生成证据保留目标 seq 与逻辑偏移。此用例不替代固定 T1 的 RPL-017
+- 步骤:原始输入;分别改变 cap 的 set_seq/scope.account、ledger/OMS/strategy/book/exec/EngineClock 节体字节,再同时改 EngineClock 与 ClockCal;单独改 ClockCal 作为正例;重算 CRC 与 seal,正式读者复查只改变目标逻辑字节;再同时改较早 CmdResult 与风险快照并 keep-going;每条记录保留原 CRC 策略,CmdResult 不强加 CRC;恢复来源重跑
+- 期望:原始、恢复输入与仅改 ClockCal 行体均退出 0;校准正例的 Input、Output、快照比较数与基线相同且非零。九行业务反例退出 1,首错精确为被改快照,此前及该点 Output 比较数由输入独立统计,恰一个普通分歧;组件、字段、两侧偏移与完整字段字节一致,混合校准差异不能掩盖 EngineClock 分歧;较早 CmdResult 首错不能借用风险组件。文件与报告/侧文件一致,运行不改输入;生成证据保留目标 seq 与逻辑偏移。此用例不替代固定 T1 的 RPL-017
 - 实现:`apps/replayer/tests/snapshot_diff.rs::rpl_279_generated_hour_snapshot_component_and_field_diagnostics`
 
 ### RPL-280 真实文件的损坏快照不猜组件
