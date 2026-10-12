@@ -52,6 +52,10 @@ jobs:
           (root / 'result.json').write_text(json.dumps(dict(baseline='d05efd0', head='${{ github.sha }}', rows=results), indent=2))
           print('50/50: projecting only cash snapshot additions reproduces old digests; all real-state invariants stayed enabled')
           PY
+      - name: Strict cash with the full CI 191 seed matrix
+        run: |
+          cp .github/scripts/cash-dst-audit.rs crates/hft-testkit/examples/cash_dst_audit.rs
+          cargo run --locked --profile ci -p hft-testkit --features seq --example cash_dst_audit >audit/strict.tsv
       - uses: actions/upload-artifact@v4
         if: always()
         with:
