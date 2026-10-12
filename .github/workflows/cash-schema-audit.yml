@@ -34,7 +34,7 @@ jobs:
         run: bash .github/scripts/test-prereqs.sh
       - name: Build real replay test binaries
         if: ${{ !cancelled() }}
-        run: cargo test --locked --profile ci -p replayer --tests --examples --no-run
+        run: cargo build --locked --profile ci -p replayer --tests --examples
       - name: Full replay CLI fixture suite
         if: ${{ !cancelled() }}
         run: |

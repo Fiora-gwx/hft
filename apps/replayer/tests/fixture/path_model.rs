@@ -27,7 +27,7 @@ impl Venue {
                     .insert((cmd.account.0, cmd.slot.0, cmd.r#gen), cmd.epoch());
             }
             GwOp::Place => {
-                let epoch = self.epoch.expect("SetEpoch must precede Place");
+                let epoch = self.epoch.expect("gateway needs its recorded startup epoch");
                 cmd.arg = u32::from(epoch);
                 self.orders.insert((cmd.account.0, cmd.slot.0, cmd.r#gen), epoch);
             }
@@ -162,7 +162,9 @@ pub(super) fn exercise<S: StrategySet>(
         .iter()
         .map(|v| Venue {
             matcher: SimMatcher::new(world, v.id, 1),
-            epoch: None,
+            // Empty boot's epoch is part of the recorded startup configuration. SetEpoch
+            // changes it after recovery; a fresh fixture has no recovery follow-up command.
+            epoch: Some(u16::try_from(setup.oms.engine_epoch).unwrap()),
             orders: BTreeMap::new(),
         })
         .collect();

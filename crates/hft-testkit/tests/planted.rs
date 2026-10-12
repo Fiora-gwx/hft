@@ -9,6 +9,7 @@ use hft_testkit::dst::faults::FaultCategory;
 use hft_testkit::dst::invariants::{InvId, InvariantSet};
 use hft_testkit::dst::world::{ACCT_A, VP, VS};
 use hft_testkit::dst::{DstConfig, FailKind, RerunPolicy};
+use zerocopy::TryFromBytes;
 
 use crate::support::{cfg, first_failure};
 
@@ -177,13 +178,16 @@ fn tk_053_planted_defects_found() {
                     assert!(
                         healthy.outcome.is_pass(),
                         "healthy unknown-report control: {:?}",
-                        healthy.outcome
+                        healthy.outcome.failure().map(|f| (f.step, &f.message))
                     );
                     assert!(
                         healthy.deliveries.iter().any(|(_, input)| {
-                            input.read_try::<hft_event::OrderEvent>().is_some_and(|e| {
-                                e.slot == hft_types::SlotId::UNRESOLVED && e.cum_filled.0 > 0
-                            })
+                            input.kind == hft_event::EventKind::ORDER_EVENT
+                                && hft_event::OrderEvent::try_read_from_bytes(&input.body)
+                                    .ok()
+                                    .is_some_and(|e| {
+                                        e.slot == hft_types::SlotId::UNRESOLVED && e.cum_filled.0 > 0
+                                    })
                         }),
                         "unknown-report defect must receive a genuinely unresolved fill"
                     );
