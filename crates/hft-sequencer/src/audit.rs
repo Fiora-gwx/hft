@@ -392,9 +392,9 @@ mod tests {
         for _ in 0..CAPACITY {
             a.restored(RestoreRow::RestoreMarks { count: 1 });
         }
-        assert_eq!(a.restore_rows().unwrap().len(), CAPACITY);
+        assert_eq!(a.restore_rows().map(|rows| rows.len()), Ok(CAPACITY));
         a.begin();
-        assert_eq!(a.restore_rows().unwrap().len(), CAPACITY);
+        assert_eq!(a.restore_rows().map(|rows| rows.len()), Ok(CAPACITY));
         a.restored(RestoreRow::RestoreMarks { count: 1 });
         assert_eq!(a.restore_rows(), Err(RestoreObservationError::Overflow));
         assert_eq!(a.restore.len(), CAPACITY);
