@@ -29,10 +29,10 @@ spec: README.md
 | 延迟样本 | OMS-012, OMS-071, OMS-080–OMS-089 |
 | REPORT_DECODE | OMS-090, OMS-091 |
 | 恢复后的 gw 映射 | OMS-092, OMS-093 |
-| 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460 |
+| 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460、OMS-467、OMS-468、OMS-470 |
 | 成交净量(B4) | OMS-067, OMS-120–OMS-124, OMS-184, OMS-404 |
 | Unknown 收敛流程 | OMS-032, OMS-065, OMS-066, OMS-068, OMS-070, OMS-073, OMS-089, OMS-130–OMS-154, OMS-400, OMS-402, OMS-420 |
-| 墓碑与迟到成交(C1) | OMS-013, OMS-148, OMS-160–OMS-164, OMS-287, OMS-322, OMS-462 |
+| 墓碑与迟到成交(C1) | OMS-013, OMS-148, OMS-160–OMS-164, OMS-287, OMS-322, OMS-462、OMS-469 |
 | StaleOrderSweep(`Timer{Oms, Sweep}`,1 s) | OMS-132, OMS-161, OMS-164, OMS-170–OMS-172, OMS-207, OMS-271 |
 | LegLink 与 HedgePlan | OMS-463, OMS-457, OMS-014, OMS-043, OMS-153, OMS-180, OMS-181, OMS-185, OMS-191, OMS-194, OMS-201, OMS-207, OMS-363 |
 | OnFill | OMS-458, OMS-044, OMS-075–OMS-077, OMS-104, OMS-151, OMS-181–OMS-207, OMS-229, OMS-382–OMS-385, OMS-387, OMS-400、TK-106 |
@@ -52,7 +52,7 @@ spec: README.md
 | 链上槽(optional) | 不适用:里程碑外 |
 | 每次迁移产生的输出 | OMS-040, OMS-055, OMS-057, OMS-059, OMS-062, OMS-105, OMS-113, OMS-130, OMS-160, OMS-162, OMS-193, OMS-265, OMS-281, OMS-315, OMS-320, OMS-343 |
 | Note 码表 | OMS-023, OMS-025, OMS-026, OMS-114, OMS-145, OMS-152, OMS-222, OMS-230, OMS-267 |
-| 快照行格式(节 2、3、12;草案,实现时以代码与编译期断言为准) | OMS-017, OMS-086, OMS-274, OMS-333, OMS-360–OMS-366, OMS-389, OMS-390, OMS-461 |
+| 快照行格式(节 2、3、12;草案,实现时以代码与编译期断言为准) | OMS-017, OMS-086, OMS-274, OMS-333, OMS-360–OMS-366, OMS-389, OMS-390, OMS-461、OMS-469、OMS-470 |
 | 规划源文件 | 不适用:非规范 |
 | 延迟与资源契约 | OMS-006, OMS-440–OMS-455 |
 | 测试与验收 | 不适用:非规范 |
@@ -226,7 +226,7 @@ spec: README.md
 - 步骤:
   1. 读取 `size_of::<SlotExt>()`、`align_of` 与字段偏移
 - 期望:
-  - 大小 64、对齐 32;`net_filled` 0、`tag` 8、`leg_ix` 12、`role` 13、`origin` 14、`class` 15、`lev_x100` 16、`max_rest_ms` 20、`fee_cum` 32
+  - 大小 64、对齐 32;`net_filled` 0、`tag` 8、`leg_ix` 12、`role` 13、`origin` 14、`class` 15、`lev_x100` 16、`max_rest_ms` 20、`fee_cum` 32、`cash_qty` 40、`cash_sum` 48
 - 实现:`crates/hft-oms/tests/layout.rs::oms_011_slot_ext_layout`
 
 ### OMS-012 SlotStamps 大小 80 B 与关键偏移
@@ -241,7 +241,7 @@ spec: README.md
   - 大小 80;`trig_ex_ts_ns` 0、`trig_sw_rx_ns` 24、`trig_rx_tsc` 32、`decided_tsc` 48、`sent_tsc` 56、`trigger_seq` 64、`trig_kind` 72、`op` 74
 - 实现:`crates/hft-oms/tests/layout.rs::oms_012_slot_stamps_layout`
 
-### OMS-013 Tomb 大小 56 B 与关键偏移
+### OMS-013 Tomb 大小 72 B 与关键偏移
 
 - 规则:[数据布局](README.md#数据布局草案实现时以代码与编译期断言为准)、[墓碑与迟到成交](README.md#墓碑与迟到成交c1)
 - 级别:unit
@@ -250,7 +250,7 @@ spec: README.md
 - 步骤:
   1. 读取 `size_of::<Tomb>()` 与字段偏移
 - 期望:
-  - 大小 56;`gen` 0、`epoch` 4、`oflags` 6、`inst` 8、`group` 12、`side` 16、`leg_ix` 17、`strategy` 18、`role` 19、`link_id` 20、`filled` 24、`net_filled` 32、`exch_order_id` 40、`freed_tsc` 48
+  - 大小 72;`gen` 0、`epoch` 4、`oflags` 6、`inst` 8、`group` 12、`side` 16、`leg_ix` 17、`strategy` 18、`role` 19、`link_id` 20、`filled` 24、`net_filled` 32、`exch_order_id` 40、`freed_tsc` 48、`cash_qty` 56、`cash_sum` 64
 - 实现:`crates/hft-oms/tests/layout.rs::oms_013_tomb_layout`
 
 ### OMS-014 LinkEntry 大小 80 B 与关键偏移
@@ -302,11 +302,11 @@ spec: README.md
 | OMS-017.1 | `TableRow` | `size_of = 32`,`smoke_slot` 偏移 28 |
 | OMS-017.2 | `LinkRowHdr` | `size_of = 8` |
 | OMS-017.3 | `OmsCountersHdr` | `size_of = 16`,`resume_hold_until` 偏移 8 |
-| OMS-017.4 | 节 2 行 | `SLOT_ROW_LEN = 192`,写出 192 字节(128 + 64);`SectionHdr.version = 2` |
+| OMS-017.4 | 节 2 行 | `SLOT_ROW_LEN = 192`,写出 192 字节(128 + 64);`SectionHdr.version = 3` |
 | OMS-017.5 | 节 12 `Link` 行体 | 80 字节 |
 | OMS-017.6 | 节 12 `Plan` 行体 | 64 字节 |
 | OMS-017.7 | 节 12 `Leg` 行体 | 200 字节 |
-| OMS-017.8 | 节 12 `Tomb` 行体 | 64 字节 |
+| OMS-017.8 | 节 12 `Tomb` 行体 | 80 字节 |
 | OMS-017.9 | 节 12 `Out` 行体 | 32 字节 |
 
 ### OMS-018 OrderState 码值往返
@@ -3624,9 +3624,9 @@ spec: README.md
 | OMS-361.1 | 2 | `count = 40`;只含非 `Free` 槽;按 `(venue_ix, account_ix, slot_id)` 升序;每行 192 字节 = `OrderSlot` 128 ‖ `SlotExt` 64 |
 | OMS-361.2 | 3 | 首行 `OmsCountersHdr{engine_epoch 7, n_tables 5(夹具的 (venue, account) 表数), resume_hold_until}`;每表一行 `TableRow`(键升序),其后 `free`(FIFO,队头在前)、`gens`(含 `Free` 槽)、`foreign`、`ext_held`(FIFO)、`decode_fails` 与 7 字节零,补零到 8 字节 |
 | OMS-361.3 | 12 | 行顺序 `Link*` → `Plan*` → `Leg*` → `Tomb*` → `Out*`;`Done` 链接不写;`Plan` 只写被活动链接引用的;全零 `LegState` 不写;过期墓碑不写;`Out` 行按 FIFO 顺序、不排序 |
-| OMS-361.4 | 12 | 每行 `LinkRowHdr{kind, len}`:`len` 依次为 80、64、200、64、32 |
+| OMS-361.4 | 12 | 每行 `LinkRowHdr{kind, len}`:`len` 依次为 80、64、200、80、32 |
 
-### OMS-362 行版本:节 2 写 2、节 3 与 12 写 1,读到更高版本拒读
+### OMS-362 行版本:节 2 写 3、节 3 写 1、节 12 写 2,读到更高版本拒读
 
 - 规则:[快照行格式](README.md#快照行格式节-2312草案实现时以代码与编译期断言为准)
 - 级别:table
@@ -3636,10 +3636,10 @@ spec: README.md
 
 | 行 | 修改 | 期望 |
 |---|---|---|
-| OMS-362.1 | 不改 | 节 2 的 `version` 为 2,节 3、12 为 1;`restore` 返回 `Ok` |
-| OMS-362.2 | 节 2 `version = 3` | `Err(RestoreError)` |
+| OMS-362.1 | 不改 | 节 2 的 `version` 为 3,节 3 为 1、节 12 为 2;`restore` 返回 `Ok` |
+| OMS-362.2 | 节 2 `version = 4` | `Err(RestoreError)` |
 | OMS-362.3 | 节 3 `version = 2` | `Err(RestoreError)` |
-| OMS-362.4 | 节 12 `version = 2` | `Err(RestoreError)` |
+| OMS-362.4 | 节 12 `version = 3` | `Err(RestoreError)` |
 
 ### OMS-363 非法判别值从快照读回时报 RestoreError
 
@@ -4205,6 +4205,46 @@ spec: README.md
 - 步骤:逐个删除 25 个默认行;分别注入重复键、填充、错误作用域、越界值、未知字段及未知 venue
 - 期望:全部返回错误或 None,不以 OmsConfig::new 的默认值补洞
 - 实现:`crates/hft-oms/tests/config_blob.rs::oms_466_config_section_rejects_incomplete`
+
+### OMS-467 累计结算不受查询及同单交付排列影响
+
+- 规则:[回报匹配与成交增量](README.md#回报匹配与成交增量)
+- 级别:unit
+- 里程碑:M2
+- 前置:P0,VX 声明 PERP_CASH,一张卖 Y 0.03 的订单
+- 步骤:三条累计量 0.01/0.02/0.03、累计现金 0/−11700/−11800 的 PartialFill/QueryResult/Fill 按全部六种排列交付;重复终态回报后再输入费用 123 的 FeeOnly
+- 期望:每种排列成交输出总量 0.03、现金总额 −11800;查询跨越的成交量只记一次;明确零额保持 Some(0);重复无现金输出,晚到费用不改变水位
+- 实现:`crates/hft-oms/tests/settlement.rs::oms_467_cash_cumulative_queries_and_permutations`
+
+### OMS-468 无效结算事实不改变订单状态
+
+- 规则:[回报匹配与成交增量](README.md#回报匹配与成交增量)
+- 级别:unit
+- 里程碑:M2
+- 前置:严格结算订单已成交 0.01,累计结算 −11700
+- 步骤:逐一注入缺失、部分覆盖、过量覆盖、负覆盖、零覆盖非零金额、同水位冲突、金额差溢出、错误 inst 和错误 epoch;冲突行同时携带非零费用
+- 期望:返回对应 CashError;槽与快照逐字节不变,无成交/费用/对冲输出;错误使 OmsOut 非空,clear 后才清除
+- 实现:`crates/hft-oms/tests/settlement.rs::oms_468_cash_bad_facts_leave_slot_unchanged`
+
+### OMS-469 已知结算跨部分成交恢复、墓碑和槽复用
+
+- 规则:[回报匹配与成交增量](README.md#回报匹配与成交增量)、[快照行格式](README.md#快照行格式节-2312草案实现时以代码与编译期断言为准)
+- 级别:unit
+- 里程碑:M2
+- 前置:VX 一槽,卖 Y 0.02,已成交 0.01、结算 −11700
+- 步骤:部分成交快照恢复并重送回报,撤单后回收并复用槽;复用后连续与恢复两条路径输入旧代累计 0.02、结算 −11800;再次恢复后重复与篡改该回报
+- 期望:旧代只补 −100;新代数量和现金水位仍为零;不重开链接或产生订单;连续与恢复快照一致;重复不记账、同水位篡改明确失败
+- 实现:`crates/hft-oms/tests/settlement.rs::oms_469_cash_tomb_reuse_and_restore`
+
+### OMS-470 未知结算状态与未具备事实的收敛路径明确失败
+
+- 规则:[回报匹配与成交增量](README.md#回报匹配与成交增量)、[快照行格式](README.md#快照行格式节-2312草案实现时以代码与编译期断言为准)
+- 级别:unit
+- 里程碑:M2
+- 前置:严格模式的已成交槽或墓碑,累计结算明确为零
+- 步骤:改写为节 2 v1/v2、节 12 v1 的旧格式,分别用严格与旧配置恢复;另对 Unknown 槽输入无现金事实的对账补量、无法匹配的外来回报和已有 external held 的重叠回报
+- 期望:旧配置可恢复旧格式,严格配置拒绝丢失结算水位的状态;对账补量 Missing、未知身份 Untracked、缺少现金重叠水位 ExternalOverlap;不产生猜测的结算
+- 实现:`crates/hft-oms/tests/settlement.rs::oms_470_cash_legacy_snapshots_and_unproven_paths`
 
 ## 验收
 

@@ -83,6 +83,10 @@ impl Oms {
 
     /// Increment of a foreign order by its cumulative quantity (`foreign` table).
     fn foreign_increment(&mut self, ti: usize, ev: &OrderEvent, out: &mut OmsOut) -> Option<Qty> {
+        if self.inst(ev.inst).perp_cash {
+            out.cash_error = Some(crate::CashError::Untracked);
+            return None;
+        }
         if ev.exch_order_id == 0 {
             return None;
         }
@@ -280,6 +284,21 @@ impl Oms {
             return false;
         }
         let (venue, account) = (t.venue, t.account);
+        if ev.inst != tb.inst {
+            out.cash_error = Some(crate::CashError::Identity);
+            return true;
+        }
+        let cash = match crate::cash::delta(
+            self.inst(tb.inst).perp_cash,
+            (tb.filled, tb.cash_qty, tb.cash_sum),
+            (ev.cum_filled, ev.cash_qty, ev.cash_sum),
+        ) {
+            Ok(x) => x,
+            Err(e) => {
+                out.cash_error = Some(e);
+                return true;
+            }
+        };
         if ev.what == OrderEventKind::FeeOnly {
             let fo = FeeOut {
                 account,
@@ -324,6 +343,7 @@ impl Oms {
             fee: ev.fee.0,
             fee_asset: ev.fee_asset,
             seq,
+            cash,
         };
         let _ = out.fills.push(fo);
         self.leg_fill(account, tb.group, tb.leg_ix, Qty(signed), px, now);
@@ -331,6 +351,10 @@ impl Oms {
             && let Some(x) = t.tombs.get_mut(ix)
         {
             x.filled = ev.cum_filled;
+            if cash.is_some() {
+                x.cash_qty = ev.cash_qty;
+                x.cash_sum = ev.cash_sum;
+            }
             x.net_filled = Qty(x.net_filled.0.saturating_add(net.0));
         }
         let v0 = u64::from(venue.0) | u64::from(account.0) << 8;

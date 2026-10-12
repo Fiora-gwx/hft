@@ -21,6 +21,7 @@ compile_error!("hft-oms: snapshot rows are little-endian only");
 
 #[cfg(feature = "testkit")]
 pub mod audit;
+mod cash;
 mod config;
 mod config_blob;
 mod engine;
@@ -254,6 +255,7 @@ impl Oms {
                 min_qty: h.min_qty,
                 min_notional: h.min_notional,
                 no_amend: h.flags & hft_refdata::InstHot::NO_AMEND != 0,
+                perp_cash: rd.caps(h.venue).flags.contains(CapFlags::PERP_CASH),
             });
         }
         let mut acct_strategy = Vec::with_capacity(n_accounts);

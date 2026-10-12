@@ -32,6 +32,7 @@ mod price;
 mod prop_fsm;
 mod quiesce;
 mod send;
+mod settlement;
 mod sim_reset;
 mod simul;
 mod smoke;

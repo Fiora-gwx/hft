@@ -297,7 +297,7 @@ pub struct VenueCaps {                       // #[repr(C)]:能力位与死手字
     pub own_liquidation_marker: LiqMarker,   // 识别自身强平/ADL 订单的方法(判定由 venue crate 实现)
     pub liq_marker_arg: Box<str>,            // 方法参数(如 client id 前缀);无则 ""
     pub ignorable_user_events: Box<[Box<str>]>, // 用户流中可忽略的事件名:计数,不当解码失败
-    pub flags: CapFlags,                     // AMEND=1 POST_ONLY=2 IOC=4 FOK=8 BATCH_CANCEL=16
+    pub flags: CapFlags,                     // AMEND=1 POST_ONLY=2 IOC=4 FOK=8 BATCH_CANCEL=16 PERP_CASH=32
     pub amend_qty_down_only: bool,           // 改单只能减量、不能改价(AMEND 置位时才有意义);hft-oms 拒绝该 venue 上改价或增量的 Amend(AMEND_UNSUPPORTED)
     pub dms: DeadManCap,                     // 交易所侧死手;None → 只有 kill-switch 兜底
     pub dms_min_ms: u32, pub dms_max_ms: u32,      // 交易所允许的超时范围(ms;max = 0 表示无上限);None 时为 0
@@ -332,6 +332,8 @@ pub enum MarginData { Push, Poll { interval_ms: u32 }, NotApplicable }   // 线�
 | `flags`、`dms` | hft-oms、hft-exec(选算法)、hft-venue、kill-switch | 能力位为 0 的操作不下发 |
 | `amend_qty_down_only` | hft-oms | 为真时只放行价格不变、数量减少的 Amend,其余 Amend 拒绝(`AMEND_UNSUPPORTED`,规则归 hft-oms) |
 | `testnet` | 上线流程的测试网冒烟 | 只描述有无;端点在 `Endpoint{env}` |
+
+**`PERP_CASH`**:仅允许永续 venue,表示协议对成交、累计查询及外来成交提供完整的实际结算事实,格式归 [执行事件](../hft-event/README.md#执行0x02xx)。消费者必须按覆盖范围验证并去重,缺失不能退回平均成本猜现金。旧配置未声明时保留旧记账语义,不保证乱序交付下钱包实额一致。该位仍须属于编译协议明确支持的能力子集;模拟装配也要记录生效配置。
 
 **死手**:`dms` 与各 `venue-*` 的 `VenueProtocol::dead_man()`([hft-venue-proto `DeadManSpec`](../hft-venue-proto/README.md))变体同名、同义,四个时长字段一律以 ms 计;`hft-cfg` 以协议默认值为底写入生效的整行(超时与刷新可按账户需要收紧)。hft-core 启动时核对 `dms` 变体与编译进来的协议一致(不符 → `CapsExceedProtocol`)。
 

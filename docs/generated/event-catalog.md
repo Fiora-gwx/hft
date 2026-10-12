@@ -331,8 +331,8 @@
 - 编号:`0x0203`
 - 域:Exec
 - 角色:Input
-- 布局:fixed 96
-- schema_version:1
+- 布局:fixed 112
+- schema_version:2
 - journal:seq;CRC:never
 
 | 偏移 | 字段 | 类型 | 单位 | 测量 | 说明 |
@@ -356,6 +356,8 @@
 | 72 | `hw_rx_ns` | `i64` |  |  |  |
 | 80 | `rx_tsc` | `tsc` | TSC |  |  |
 | 88 | `avg_px` | `px` | 价格(资产 px_exp) |  |  |
+| 96 | `cash_qty` | `qty` | 数量(资产 qty_exp) |  | v2: cumulative quantity covered by `cash_sum`; 0 = settlement facts unavailable. |
+| 104 | `cash_sum` | `qty` | 数量(资产 qty_exp) |  | v2: cumulative realized perpetual cash in the quote asset's qty_exp, income positive; excludes fees and funding. Known zero has `cash_qty = cum_filled > 0`. |
 
 码表:[OrderEventKind](#码表-ordereventkind)
 
@@ -429,8 +431,8 @@
 - 编号:`0x0207`
 - 域:Exec
 - 角色:Input
-- 布局:fixed 80
-- schema_version:2
+- 布局:fixed 96
+- schema_version:3
 - journal:seq;CRC:never
 
 | 偏移 | 字段 | 类型 | 单位 | 测量 | 说明 |
@@ -450,6 +452,8 @@
 | 56 | `ex_ts_ns` | `i64` |  |  |  |
 | 64 | `rx_tsc` | `tsc` | TSC |  |  |
 | 72 | `fill_seq` | `u64` |  |  | v2: cumulative filled raw after this fill when `trade_id = 0`. |
+| 80 | `cash_qty` | `qty` | 数量(资产 qty_exp) |  | v3: quantity covered by `cash_amount`; `qty > 0` when known, 0 when unavailable. |
+| 88 | `cash_amount` | `qty` | 数量(资产 qty_exp) |  | v3: this execution's realized perpetual cash in the quote asset's qty_exp, income positive; excludes fees and funding. It is not an account balance difference. |
 
 码表:[Side](#码表-side)、[ExternalCause](#码表-externalcause)
 

@@ -199,7 +199,7 @@ core 的深度来源([hft-venue-proto 契约 26](../hft-venue-proto/README.md#�
 | `dms` | `CountdownPerInst`(`countdownCancelAll`,REST,按 symbol;时长取下方 `dead_man()`,`dms_max_ms = 0`) | `None` → kill-switch 兜底 | 待核实(端点名来自 research/02;语义、最小倒计时与权重见开发备忘第 10 条)/ — |
 | `testnet` | `Demo`(Demo Trading,端点见"测试网/模拟盘") | `Demo`(同左) | 官方文档列出两者的 Demo 端点(原文待缓存);可用范围待核实(开发备忘第 14 条) |
 
-"不适用"的字段取 hft-refdata 的 `NotApplicable`/`None` 变体(`funding_settle = NotApplicable`、`margin_data = NotApplicable`、`required_position_mode`/`required_margin_mode = NotApplicable`);能力位 `flags` 两者都是 `AMEND | POST_ONLY | IOC | FOK | BATCH_CANCEL`(31)。`fee_asset_rule` 里的平台币以资产名 `BNB` 交给 `default_caps` 的资产查找参数,解析为该版本 refdata 的 `AssetId`(查不到写 `ASSET_NONE`,[契约 15](../hft-venue-proto/README.md#实现方必须遵守的契约))。
+"不适用"的字段取 hft-refdata 的 `NotApplicable`/`None` 变体(`funding_settle = NotApplicable`、`margin_data = NotApplicable`、`required_position_mode`/`required_margin_mode = NotApplicable`);能力位 `flags` 两者都是 `AMEND | POST_ONLY | IOC | FOK | BATCH_CANCEL`(31),不声明 `PERP_CASH`;结算来源与查询覆盖尚未接通,不能因通用能力全集扩展而自动启用。`fee_asset_rule` 里的平台币以资产名 `BNB` 交给 `default_caps` 的资产查找参数,解析为该版本 refdata 的 `AssetId`(查不到写 `ASSET_NONE`,[契约 15](../hft-venue-proto/README.md#实现方必须遵守的契约))。
 
 `stale_guard()` 两者均为 `RecvWindow{default_ms: 5000}`(运行时以 `gw.stale_guard_ms` 收紧;查询"不存在"不定终态,见上节);`dead_man()`:`Usdm` = `CountdownPerInst{min_ms: 5000, timeout_ms: 30000, refresh_ms: 10000, via: Rest}`(`timeout_ms ≥ 2 × refresh_ms`,丢一次刷新不触发全撤),`Spot` = `None`。
 

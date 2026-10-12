@@ -229,6 +229,8 @@ impl Oms {
                 net_filled: ex.net_filled,
                 exch_order_id: sl.exch_order_id,
                 freed_tsc: now,
+                cash_qty: ex.cash_qty,
+                cash_sum: ex.cash_sum,
             };
         }
         if let Some(x) = t.slots.get_mut(s as usize) {

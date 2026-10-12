@@ -186,7 +186,7 @@ kind 0x0202 SendReport v1 fixed 48
   37 _pad pad:3
   40 os_errno i32
   44 _pad2 pad:4
-kind 0x0203 OrderEvent v1 fixed 96
+kind 0x0203 OrderEvent v2 fixed 112
   0 venue id:venue
   1 account id:account
   2 what enum:OrderEventKind
@@ -206,6 +206,8 @@ kind 0x0203 OrderEvent v1 fixed 96
   72 hw_rx_ns i64
   80 rx_tsc tsc
   88 avg_px px
+  96 cash_qty qty
+  104 cash_sum qty
 kind 0x0204 PositionReport v1 fixed 56
   0 venue id:venue
   1 account id:account
@@ -238,7 +240,7 @@ kind 0x0206 FundingSettle v2 fixed 56
   40 rx_tsc tsc
   48 synth u8
   49 _pad2 pad:7
-kind 0x0207 ExternalFill v2 fixed 80
+kind 0x0207 ExternalFill v3 fixed 96
   0 venue id:venue
   1 account id:account
   2 side enum:Side
@@ -254,6 +256,8 @@ kind 0x0207 ExternalFill v2 fixed 80
   56 ex_ts_ns i64
   64 rx_tsc tsc
   72 fill_seq u64
+  80 cash_qty qty
+  88 cash_amount qty
 kind 0x0208 MarginReport v1 var 64 16384
   0 venue id:venue
   1 account id:account

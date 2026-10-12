@@ -23,7 +23,7 @@ use crate::types::*;
 
 /// Slot-map capacity (≥ Σ OMS table slots × (`tombstone_gens` + 1) of any supported host class).
 pub const SLOT_MAP_CAP: usize = 1 << 16;
-/// hft-oms snapshot section 2 (`OrderSlots`) and its row length (row version 2; version 1 rows
+/// hft-oms snapshot section 2 (`OrderSlots`) and its row length (row versions 2/3; version 1 rows
 /// are 160 B and have no `SlotExt.fee_cum`).
 pub const OMS_SECTION_SLOTS: u16 = 2;
 pub const OMS_SLOT_ROW_LEN: usize = 192;
@@ -226,7 +226,7 @@ impl JournalLedger {
         if let Some(s) = r.find_section(OMS_SECTION_SLOTS)? {
             let len = match s.version {
                 1 => 160,
-                2 => OMS_SLOT_ROW_LEN,
+                2 | 3 => OMS_SLOT_ROW_LEN,
                 _ => return Err(RestoreError::VersionUnsupported),
             };
             for k in 0..s.count as usize {

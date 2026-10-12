@@ -372,14 +372,20 @@ pub struct SlotExt {
     /// `cum_filled` of the last `PartialFill`/`Fill` report applied: fees are booked up to here
     /// (README "回报匹配与成交增量" 9).
     pub fee_cum: Qty,
+    /// Cumulative gross fill coverage and actual realized cash (quote asset quantity units).
+    /// Zero coverage means unknown; positive coverage with zero sum means known zero.
+    pub cash_qty: Qty,
+    pub cash_sum: Qty,
     /// Reserved (zero).
-    pub _rsv: [u64; 3],
+    pub _rsv: [u64; 1],
 }
 const _: () = assert!(size_of::<SlotExt>() == 64 && size_of::<SlotStamps>() == 80);
 const _: () = assert!(
     offset_of!(SlotExt, leg_ix) == 12
         && offset_of!(SlotExt, max_rest_ms) == 20
         && offset_of!(SlotExt, fee_cum) == 32
+        && offset_of!(SlotExt, cash_qty) == 40
+        && offset_of!(SlotExt, cash_sum) == 48
 );
 
 impl SlotExt {
@@ -398,7 +404,9 @@ impl SlotExt {
         reason: 0,
         intent_no: 0,
         fee_cum: Qty(0),
-        _rsv: [0; 3],
+        cash_qty: Qty(0),
+        cash_sum: Qty(0),
+        _rsv: [0; 1],
     };
 }
 
@@ -443,7 +451,7 @@ impl SlotStamps {
     };
 }
 
-/// One recycled generation of a slot (56 B); `gen = 0` = empty.
+/// One recycled generation of a slot (72 B); `gen = 0` = empty.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, TryFromBytes, IntoBytes, KnownLayout, Immutable)]
 pub struct Tomb {
@@ -461,9 +469,16 @@ pub struct Tomb {
     pub net_filled: Qty,
     pub exch_order_id: u64,
     pub freed_tsc: Tsc,
+    pub cash_qty: Qty,
+    pub cash_sum: Qty,
 }
-const _: () =
-    assert!(size_of::<Tomb>() == 56 && offset_of!(Tomb, filled) == 24 && offset_of!(Tomb, freed_tsc) == 48);
+const _: () = assert!(
+    size_of::<Tomb>() == 72
+        && offset_of!(Tomb, filled) == 24
+        && offset_of!(Tomb, freed_tsc) == 48
+        && offset_of!(Tomb, cash_qty) == 56
+        && offset_of!(Tomb, cash_sum) == 64
+);
 
 impl Tomb {
     pub(crate) const EMPTY: Tomb = Tomb {
@@ -481,6 +496,8 @@ impl Tomb {
         net_filled: Qty(0),
         exch_order_id: 0,
         freed_tsc: Tsc(0),
+        cash_qty: Qty(0),
+        cash_sum: Qty(0),
     };
 }
 
@@ -690,9 +707,9 @@ pub const SLOT_ROW_LEN_V1: usize = 160;
 pub const SECTION_ORDER_SLOTS: u16 = 2;
 pub const SECTION_OMS_COUNTERS: u16 = 3;
 pub const SECTION_OMS_LINKS: u16 = 12;
-pub const ROW_VERSION_SLOTS: u16 = 2;
+pub const ROW_VERSION_SLOTS: u16 = 3;
 pub const ROW_VERSION_COUNTERS: u16 = 1;
-pub const ROW_VERSION_LINKS: u16 = 1;
+pub const ROW_VERSION_LINKS: u16 = 2;
 
 /// Section 12 `Plan` row (64 B).
 #[repr(C)]
@@ -712,7 +729,7 @@ pub struct LegRowBody {
     pub group: GroupId,
     pub state: LegState,
 }
-/// Section 12 `Tomb` row (64 B).
+/// Section 12 `Tomb` row (80 B).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, TryFromBytes, IntoBytes, KnownLayout, Immutable)]
 pub struct TombRowBody {
@@ -723,7 +740,7 @@ pub struct TombRowBody {
     pub tomb: Tomb,
 }
 const _: () = assert!(
-    size_of::<PlanRowBody>() == 64 && size_of::<LegRowBody>() == 200 && size_of::<TombRowBody>() == 64
+    size_of::<PlanRowBody>() == 64 && size_of::<LegRowBody>() == 200 && size_of::<TombRowBody>() == 80
 );
 
 // ---------------------------------------------------------------------------- outputs
@@ -890,6 +907,23 @@ pub struct FillOut {
     pub fee: i64,
     pub fee_asset: AssetId,
     pub seq: u64,
+    /// Known actual cash for this increment, quote asset qty_exp, excluding fees/funding.
+    /// `None` is the legacy cost-based path; `Some(0)` is an explicit zero settlement.
+    pub cash: Option<Qty>,
+}
+
+/// A report cannot be consumed under the venue's explicit perpetual settlement contract.
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub enum CashError {
+    Identity,
+    Missing,
+    Coverage,
+    Conflict,
+    Overflow,
+    /// An untracked identity has no trustworthy cumulative settlement watermark.
+    Untracked,
+    /// External attribution has not supplied the cash needed to subtract an overlap.
+    ExternalOverlap,
 }
 
 /// Fee-only report (→ hft-ledger `apply_fee`).
@@ -953,6 +987,8 @@ pub struct MirrorRestore {
 /// Output of one OMS call; capacities are per-call limits, never dropped (see "输出扇出").
 #[derive(Debug, Clone)]
 pub struct OmsOut {
+    /// Caller must stop before consuming any business output when this is present.
+    pub cash_error: Option<CashError>,
     pub decisions: FixedVec<OrderDecision, 32>,
     pub hedges: FixedVec<HedgeRequest, 8>,
     pub fills: FixedVec<FillOut, 16>,
@@ -968,6 +1004,7 @@ pub struct OmsOut {
 impl OmsOut {
     pub fn new() -> OmsOut {
         OmsOut {
+            cash_error: None,
             decisions: FixedVec::new(),
             hedges: FixedVec::new(),
             fills: FixedVec::new(),
@@ -983,6 +1020,7 @@ impl OmsOut {
     /// Every vector without a capacity limit (reference implementation; may allocate).
     pub fn unbounded() -> OmsOut {
         OmsOut {
+            cash_error: None,
             decisions: FixedVec::unbounded(),
             hedges: FixedVec::unbounded(),
             fills: FixedVec::unbounded(),
@@ -996,6 +1034,7 @@ impl OmsOut {
         }
     }
     pub fn clear(&mut self) {
+        self.cash_error = None;
         self.decisions.clear();
         self.hedges.clear();
         self.fills.clear();
@@ -1009,7 +1048,8 @@ impl OmsOut {
     }
     /// Whether every vector is empty.
     pub fn is_empty(&self) -> bool {
-        self.decisions.is_empty()
+        self.cash_error.is_none()
+            && self.decisions.is_empty()
             && self.hedges.is_empty()
             && self.fills.is_empty()
             && self.fees.is_empty()

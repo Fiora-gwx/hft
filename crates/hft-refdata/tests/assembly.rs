@@ -213,3 +213,29 @@ fn ref_093_amend_qty_down_only() {
         assert_eq!(rd.caps(V2).amend_qty_down_only, row, "{case}");
     }
 }
+
+#[test]
+fn ref_094_perp_cash_capability_is_explicit() {
+    let mut s = f0_spec();
+    let c = s.caps_mut(1);
+    c.flags = c.flags | CapFlags::PERP_CASH;
+    let rd = ok(&s.build());
+    assert!(rd.caps(V1).flags.contains(CapFlags::PERP_CASH), "REF-094.1");
+    let mut protocols = p0(&rd);
+    assert!(
+        run(&rd, HostClass::C8, 8192, &protocols, KINDS).is_empty(),
+        "REF-094.1"
+    );
+    for p in protocols.iter_mut().filter(|p| p.venue == V1) {
+        p.caps.flags = CapFlags(p.caps.flags.0 & !CapFlags::PERP_CASH.0);
+    }
+    assert_eq!(
+        run(&rd, HostClass::C8, 8192, &protocols, KINDS),
+        vec![e(CapsExceedProtocol, 13, 0)],
+        "REF-094.2"
+    );
+    let mut s = f0_spec();
+    let c = s.caps_mut(2);
+    c.flags = c.flags | CapFlags::PERP_CASH;
+    assert_single(&s.build(), CapsMarketMismatch, "REF-094.3");
+}

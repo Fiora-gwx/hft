@@ -19,7 +19,7 @@ spec: README.md
 | 公开 API | REF-003, REF-011, REF-032, REF-045–REF-061, REF-064, REF-065, REF-067, REF-068, REF-072, REF-080 |
 | LoadErrCode 码表 | REF-005, REF-008, REF-009, REF-032, REF-037, REF-039, REF-042, REF-062, REF-065, REF-076, REF-077 |
 | 数据结构 | REF-009, REF-016, REF-019, REF-026, REF-027, REF-031, REF-033, REF-034, REF-037, REF-038, REF-050–REF-053, REF-056, REF-060, REF-074, REF-075, REF-078, REF-090–REF-092 |
-| 交易所能力表(VenueCaps) | REF-009, REF-020–REF-024, REF-051, REF-062, REF-075, REF-077, REF-089, REF-093 |
+| 交易所能力表(VenueCaps) | REF-009, REF-020–REF-024, REF-051, REF-062, REF-075, REF-077, REF-089, REF-093、REF-094 |
 | 配置项 | REF-012, REF-063 |
 | 实现说明 | REF-001–REF-048, REF-059–REF-071, REF-074, REF-077–REF-079, REF-090–REF-093 |
 | 延迟与资源契约 | REF-071–REF-073, REF-081–REF-087, REF-089 |
@@ -1338,7 +1338,7 @@ spec: README.md
 | REF-075.16 | `DeadManCap` | None 1、CountdownPerInst 2、CountdownAccount 3、OnDisconnect 4、Schedule 5 |
 | REF-075.17 | `TestnetKind` | None 1、Testnet 2、Demo 3 |
 | REF-075.18 | `Option<bool>` 线编码(`required_multi_asset`、`required_spot_borrow`) | None 1、Some(false) 2、Some(true) 3 |
-| REF-075.19 | `CapFlags` 位 | AMEND 1、POST_ONLY 2、IOC 4、FOK 8、BATCH_CANCEL 16,两两不重叠 |
+| REF-075.19 | `CapFlags` 位 | AMEND 1、POST_ONLY 2、IOC 4、FOK 8、BATCH_CANCEL 16、PERP_CASH 32,两两不重叠 |
 | REF-075.20 | `InstHot.flags` 位 | NO_AMEND 1 |
 | REF-075.21 | `FeeAssetRule` 四个变体 | 各写一行(`ReceivedAssetUnlessDiscount{token: BTC}`、`Configured(USDT)`)读回相等 |
 
@@ -1569,6 +1569,20 @@ spec: README.md
 | REF-093.2 | true | false | `Ok`(收紧) |
 | REF-093.3 | false | false | `Ok` |
 | REF-093.4 | false | true | `[{CapsExceedProtocol, 13, 1}]` |
+
+### REF-094 永续结算能力必须明确且受协议支持
+
+- 规则:[交易所能力表(VenueCaps)](README.md#交易所能力表venuecaps)
+- 级别:table
+- 里程碑:M2
+- 前置:F0、E0、A0,只改变所列能力位
+- 实现:`crates/hft-refdata/tests/assembly.rs::ref_094_perp_cash_capability_is_explicit`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| REF-094.1 | venue 1 与协议均支持 PERP_CASH | 加载往返保留该位,装配成功 |
+| REF-094.2 | refdata 支持,协议不支持 | CapsExceedProtocol |
+| REF-094.3 | 现货 venue 2 声明 PERP_CASH | CapsMarketMismatch |
 
 ## 验收
 

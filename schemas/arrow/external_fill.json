@@ -103,12 +103,28 @@
       "name": "fill_seq",
       "nullable": false,
       "type": "UInt64"
+    },
+    {
+      "metadata": {
+        "hft.type": "qty"
+      },
+      "name": "cash_qty",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "qty"
+      },
+      "name": "cash_amount",
+      "nullable": false,
+      "type": "Int64"
     }
   ],
   "metadata": {
     "hft.kind": "0x0207",
-    "hft.layout": "fixed 80",
+    "hft.layout": "fixed 96",
     "hft.name": "ExternalFill",
-    "hft.schema_version": "2"
+    "hft.schema_version": "3"
   }
 }

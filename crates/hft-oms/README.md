@@ -175,7 +175,8 @@ pub struct TrigStamps { pub ex_ts_ns: i64, pub ex_send_ns: i64, pub hw_rx_ns: i6
 ### 输出 `OmsOut`(容量固定,由 sequencer 预分配并在每个输入事件后清空)
 
 ```rust
-pub struct OmsOut {                               // 各向量容量 = 单次调用上限;满了的工作项进 pending_out 续发,从不丢弃(见"输出扇出")
+pub struct OmsOut {
+    pub cash_error: Option<CashError>,            // 有值时调用方须停止消费本轮业务输出                               // 各向量容量 = 单次调用上限;满了的工作项进 pending_out 续发,从不丢弃(见"输出扇出")
     pub decisions: FixedVec<OrderDecision, 32>,   // 容量 ≥ max_out_per_event 的上限 32,K 不被向量容量截断;→ seq journal;放行且非 SHADOW 的由 sequencer 投影成 GwCmd(OutMsg)推 gw 出环
     pub swaps:     FixedVec<SwapDecision, 4>,     // optional(chain):→ seq journal + chain 出环
     pub hedges:    FixedVec<HedgeRequest, 8>,     // Second / SecondRetry / Reverse → price_hedge → 风控(含 #6 HEDGE_LIMIT)→ place()
@@ -360,7 +361,8 @@ pub struct SlotExt {                   // 64 B,与槽平行;成交、费用与�
     pub reason: u32,                   // 24 = ApprovedIntent.reason(New 决策排队后交出时用)
     pub intent_no: u32,                // 28 = ApprovedIntent.intent_no(同上)
     pub fee_cum: Qty,                  // 32 最后一条 PartialFill/Fill 的 cum_filled(费用入账到此,见"回报匹配与成交增量"第 9 条)
-    pub _rsv: [u64; 3],                // 40 保留(0)
+    pub cash_qty: Qty, pub cash_sum: Qty, // 40 / 48 已覆盖的成交毛量及累计实收结算,见下
+    pub _rsv: [u64; 1],                // 56 保留(0)
 }
 
 #[repr(C)]
@@ -374,18 +376,19 @@ pub struct SlotStamps {                // 80 B,与槽平行;只在下单/撤单/
 }
 
 #[repr(C)]
-pub struct Tomb {                      // 56 B;已回收的一代(C1)
+pub struct Tomb {                      // 72 B;已回收的一代(C1)
     pub gen: u32, pub epoch: u16, pub oflags: OrderFlags,                           //  0 / 4 / 6
     pub inst: InstId, pub group: GroupId,                                           //  8 / 12
     pub side: Side, pub leg_ix: u8, pub strategy: StrategyId, pub role: LinkRole,   // 16 / 17 / 18 / 19
     pub link_id: u32,                                                               // 20
     pub filled: Qty, pub net_filled: Qty, pub exch_order_id: u64, pub freed_tsc: Tsc, // 24 / 32 / 40 / 48
+    pub cash_qty: Qty, pub cash_sum: Qty, // 56 / 64 该代最终结算水位;迟到成交只入增量
 }
 
 const _: () = assert!(size_of::<OrderSlot>() == 128 && align_of::<OrderSlot>() == 64
                       && offset_of!(OrderSlot, oflags) == 4 && offset_of!(OrderSlot, sflags) == 106);
 const _: () = assert!(size_of::<SlotExt>() == 64 && size_of::<SlotStamps>() == 80);
-const _: () = assert!(size_of::<Tomb>() == 56 && offset_of!(Tomb, filled) == 24 && offset_of!(Tomb, freed_tsc) == 48);
+const _: () = assert!(size_of::<Tomb>() == 72 && offset_of!(Tomb, filled) == 24 && offset_of!(Tomb, freed_tsc) == 48);
 
 pub struct VenueAcctTable {            // 每 (venue, account) 一个
     slots: Box<[OrderSlot]>,           // 启动期一次分配
@@ -535,6 +538,11 @@ gw 对某 (venue, account) 的回报帧解码失败时写 `ConnState{role = User
 7. `venue-<x>` 必须在每条成交回报里给出**累计成交量** `cum_filled` 与累计均价;给不出的在 gw 内按 exec id 去重合成;仍给不出则该 venue 不允许启用下单(加载时拒绝)。
 8. **冷读者的入账依据**:第 1、2 条每产出一条 `ForeignFill`,同一事件内另写一条 `Note{OmsForeignFill}`(Info,Output 类,回放比对;字段唯一定义在此):`Note.inst = inst`、`Note.group = GROUP_NONE`,`v = [venue | account << 8 | side << 16 | path << 24 | fee_asset << 32, qty, px, fee, exch_order_id, trade_id, fill_seq, cum_filled]`(`path`:防御路径 = 1、`StaleGen` = 2;数值为 raw;`fill_seq` = `trade_id = 0` 时 `cum_filled` 的 raw 值,否则 0)。这笔外来成交与对账 `AUTO_EXTERNAL` 同理,由 sequencer 在本条 Input 内按这些字段确定地构造为 `ExternalFill{cause = Unknown}`(其余字段为 0)并入账,不另写 Input;冷读者(reconciler 的引擎视图、hft-py)在同一事件内读到本 Note 时构造同一 `ExternalFill`,经 hft-ledger 的 journal 消费路径入账(消费规则归 [hft-ledger 外部成交](../hft-ledger/README.md#外部成交externalfill),码名登记归 hft-event)。
 9. **数量先由非成交回报带来时的费用**:`CancelReject`、`CancelAck`/`Expired`、`AmendAck`/`AmendReject`、`QueryResult` 与对账收敛带来的增量不带费用(第 3 条照常入账,`fee = 0`);随后到达、数量已被覆盖(`d ≤ 0`)的 `PartialFill`/`Fill`,若 `ev.cum_filled > SlotExt.fee_cum`,它的 `fee` 按 `FeeOnly` 入账(`FeeOut`,净量补差同"成交净量");`fee_cum ≥ ev.cum_filled` 的是重复回报,不入账。每条 `PartialFill`/`Fill` 之后 `fee_cum = max(fee_cum, ev.cum_filled)`;其他回报不改 `fee_cum`。
+
+10. **显式永续结算**:venue 声明 [PERP_CASH](../hft-refdata/README.md#交易所能力表venuecaps) 时,槽与墓碑按完整身份保存 `cash_qty/cash_sum`。回报的 `inst` 必须与命中的槽或墓碑一致。成交累计量前移时,要求回报覆盖全部累计成交,已有覆盖量等于本地 `filled`;`FillOut.cash = Some(ev.cash_sum − saved.cash_sum)`,单位为该 inst 报价资产的 `qty_exp`,不含费用与资金费。已知零额也输出 `Some(0)`,重复水位金额不一致为 `Conflict`,溢出为 `Overflow`,缺失/部分覆盖为 `Missing`,非法覆盖为 `Coverage`。旧累计量不倒退水位;`FeeOnly` 不推进结算。槽回收时复制水位到墓碑,迟到成交只产出差额。未声明该能力的旧配置保持 `FillOut.cash = None`,不能据此承诺钱包实额一致。
+11. **无法证明的结算不猜值**:严格模式下未知身份、防御路径与 StaleGen 无可信结算水位时输出 `CashError::Untracked`;外来成交重叠未携带可扣的现金事实时输出 `ExternalOverlap`;现行 `ReconcileReport` 不带结算事实,需要推进成交量时输出 `Missing`。这些错误不推进相关槽、墓碑或成交/费用输出,调用方必须先处理 `OmsOut.cash_error`,不能当作无成交继续运行。支持这些路径需要完整的结算事实与去重状态,不能按数量比例分摊现金。
+
+`FillOut.cash: Option<Qty>` 只提供结算增量,资产由该 inst 的报价资产确定。`CashError` 的其余变体 `Identity` 表示命中的完整订单身份与 inst 不一致。
 
 ### 成交净量(B4)
 
@@ -902,6 +910,7 @@ feature `chain`,随链上腿的策略迁移启用(触发条件见 [hft-chain-evm
 // 节 2 OrderSlots:每个 state ≠ Free 的槽一行(含 Unknown);键 (venue_ix, account_ix, slot_id)
 // 行 = OrderSlot 的 128 字节 ‖ SlotExt 的 64 字节 = 192 B,按字节写出;读者把两段分别按值拷贝进对齐的 OrderSlot / SlotExt。
 // 行版本 1 的 SlotExt 只有前 32 字节(无 fee_cum,行长 160 B):读者补零,并取 fee_cum = filled。
+// 行版本 2 的 cash_qty/cash_sum 是保留零字节,读者视为未知;版本 3 保存明确的结算水位。
 pub const SLOT_ROW_LEN: usize = 192;
 
 // 节 3 OmsCounters:节首 1 行 OmsCountersHdr,其后每 (venue, account) 表 1 行 TableRow + 变长尾
@@ -920,7 +929,7 @@ pub const SLOT_ROW_LEN: usize = 192;
 // Link:LinkEntry 原样(80 B;state ≠ Done 的项;键 link_id)
 // Plan:{ link_id: u32, _pad: u32, tolerance: Rate, plan: HedgePlan }(64 B = 8 + 8 + HedgePlan 48 B;被活动 Link 引用的计划;键 link_id)
 // Leg: { account: AccountId, _pad: [u8; 3], group: GroupId, state: LegState }(200 B = 8 + LegState 192 B;键 (account, group);全零项不写)
-// Tomb:{ venue: VenueId, account: AccountId, _pad: u16, slot: u32, tomb: Tomb }(64 B = 8 + Tomb 56 B;未过期的非空墓碑;键 (venue, account, slot, gen))
+// Tomb:{ venue: VenueId, account: AccountId, _pad: u16, slot: u32, tomb: Tomb }(80 B = 8 + Tomb 72 B;未过期的非空墓碑;键 (venue, account, slot, gen))
 // Out: OutItem 原样(32 B;pending_out 按 FIFO 顺序,队头在前;不排序——顺序本身是状态)
 const _: () = assert!(size_of::<TableRow>() == 32 && size_of::<LinkRowHdr>() == 8 && size_of::<OmsCountersHdr>() == 16);
 ```
@@ -929,7 +938,7 @@ const _: () = assert!(size_of::<TableRow>() == 32 && size_of::<LinkRowHdr>() == 
 - `InflightBook` 与 LegTracker 各腿的两类在途不单独恢复:它们由非终态槽的剩余量与状态决定(不变量),`restore` 时由节 2 重算并与快照中的 `LegState` 校验。
 - `(account, inst) → (group, leg_ix)` 归属表不进快照,由恢复时的 GroupSpec 重建。
 - 进快照的 TSC 字段只有"恢复"第 2 步列出的已登记字段;其余时刻不进快照。
-- **行版本**(只在本 crate 登记,写进 `SectionHdr.version`):节 2 = 2、节 3 = 1、节 12 = 1。行格式只追加、零值表示未提供;版本递增时读者按旧版本的行长读出并补零,未知的更高版本拒读(`RestoreError`)。
+- **行版本**(只在本 crate 登记,写进 `SectionHdr.version`):节 2 = 3、节 3 = 1、节 12 = 2。节 12 v1 的墓碑为 64 B 行体,读取时补零结算水位。严格结算模式恢复时要求每个非空槽与墓碑的覆盖量等于 filled;旧格式中已有成交而无结算水位的状态拒绝恢复,不能把缺失当已知零。行格式只追加、零值表示未提供;版本递增时读者按旧版本的行长读出并补零,未知的更高版本拒读(`RestoreError`)。
 
 ### 规划源文件
 
@@ -1006,6 +1015,8 @@ const _: () = assert!(size_of::<TableRow>() == 32 && size_of::<LinkRowHdr>() == 
 - [hft-exec](../hft-exec/README.md)、[hft-sequencer](../hft-sequencer/README.md)、[event-model](../../docs/subsystems/event-model.md)、[defensive-patterns](../../docs/defensive-patterns.md)
 
 ## 已知限制与后续工作
+
+- 显式结算水位与拒绝机制在 OMS 组件可用;sequencer、冷账本、外来成交重叠和对账补量仍需接通,完整回放验证前不启用该能力作为 M2 通过依据。
 
 - 批量下单不在本规格:每个意图一个槽一个帧。可选扩展:`place_batch`(触发条件:启用需要批量的策略或 venue,且逐帧发送的限速或延迟成为瓶颈)。
 - `cancelReplace`/`amend.keepPriority` 语义按 `amend()` 处理。接入原子撤改的 venue 时(触发条件:策略需要该 venue 的改单路径)为"撤成功新单失败"的半成功情形补单独的状态迁移格。

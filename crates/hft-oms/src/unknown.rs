@@ -105,6 +105,8 @@ impl Oms {
             px: ev.px,
             fee: ev.fee,
             fee_asset: ev.fee_asset,
+            cash_qty: ev.cash_qty,
+            cash_sum: ev.cash_sum,
             query: true,
             seq,
         };
@@ -237,12 +239,25 @@ impl Oms {
             self.flush(out);
             return;
         }
+        // This reconciliation format carries no cash facts. Do not advance a strict venue's
+        // order from quantity alone; a complete execution/query report must supply the facts.
+        if self.inst(sl.inst).perp_cash && ev.exch_qty.0 > sl.filled.0 {
+            out.cash_error = Some(crate::CashError::Missing);
+            return;
+        }
+        let ex = self.t(ti).and_then(|t| t.ext.get(s as usize)).copied();
         let f = FillIn {
             cum: ev.exch_qty,
             avg_px: Px(0),
             px: Px(0),
             fee: Qty(0),
             fee_asset: hft_types::AssetId(0),
+            cash_qty: ex
+                .filter(|_| ev.exch_qty == sl.filled)
+                .map_or(Qty(0), |x| x.cash_qty),
+            cash_sum: ex
+                .filter(|_| ev.exch_qty == sl.filled)
+                .map_or(Qty(0), |x| x.cash_sum),
             query: true,
             seq,
         };

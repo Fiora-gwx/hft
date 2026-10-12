@@ -17,7 +17,7 @@ const USDM_DMS: (u32, u32, u32) = (5_000, 30_000, 10_000);
 
 pub(crate) fn default_caps(line: Line, asset: impl Fn(&str) -> Option<AssetId>) -> VenueCaps {
     let mut c = VenueCaps::none(line.venue());
-    c.flags = CapFlags::ALL;
+    c.flags = CapFlags::AMEND | CapFlags::POST_ONLY | CapFlags::IOC | CapFlags::FOK | CapFlags::BATCH_CANCEL;
     c.testnet = TestnetKind::Demo;
     match line {
         Line::Usdm => {

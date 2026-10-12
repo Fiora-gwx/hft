@@ -22,6 +22,8 @@ pub(crate) struct FillIn {
     pub(crate) px: Px,
     pub(crate) fee: Qty,
     pub(crate) fee_asset: AssetId,
+    pub(crate) cash_qty: Qty,
+    pub(crate) cash_sum: Qty,
     /// QueryResult / reconciliation: without `avg_px` the order price is used (`PX_EST`).
     pub(crate) query: bool,
     pub(crate) seq: u64,
@@ -172,7 +174,9 @@ impl Oms {
                 reason: it.reason,
                 intent_no: it.intent_no,
                 fee_cum: Qty(0),
-                _rsv: [0; 3],
+                cash_qty: Qty(0),
+                cash_sum: Qty(0),
+                _rsv: [0; 1],
             };
         }
         if let Some(st) = t.stamps.get_mut(s as usize) {
@@ -368,6 +372,34 @@ impl Oms {
     fn slot_report(&mut self, ti: usize, s: u32, ev: &OrderEvent, hdr: &RecordHeader, out: &mut OmsOut) {
         let now = Tsc(hdr.tsc);
         let seq = hdr.seq;
+        let Some((sl, ex)) = self
+            .t(ti)
+            .and_then(|t| Some((*t.slot(s)?, *t.ext.get(s as usize)?)))
+        else {
+            return;
+        };
+        if ev.inst != sl.inst {
+            out.cash_error = Some(crate::CashError::Identity);
+            return;
+        }
+        if let Err(e) = crate::cash::delta(
+            self.inst(sl.inst).perp_cash,
+            (sl.filled, ex.cash_qty, ex.cash_sum),
+            (ev.cum_filled, ev.cash_qty, ev.cash_sum),
+        ) {
+            out.cash_error = Some(e);
+            return;
+        }
+        if self.inst(sl.inst).perp_cash
+            && ev.cum_filled.0 > sl.filled.0
+            && self
+                .t(ti)
+                .and_then(|t| t.ext_held.get(sl.exch_order_id))
+                .is_some_and(|x| x.0 > 0)
+        {
+            out.cash_error = Some(crate::CashError::ExternalOverlap);
+            return;
+        }
         if ev.what == OrderEventKind::FeeOnly {
             self.fee_only_slot(ti, s, ev, out);
             return;
@@ -624,6 +656,8 @@ impl Oms {
             px: ev.px,
             fee: ev.fee,
             fee_asset: ev.fee_asset,
+            cash_qty: ev.cash_qty,
+            cash_sum: ev.cash_sum,
             query: false,
             seq,
         };
@@ -650,6 +684,8 @@ impl Oms {
             px: ev.px,
             fee: ev.fee,
             fee_asset: ev.fee_asset,
+            cash_qty: ev.cash_qty,
+            cash_sum: ev.cash_sum,
             query: false,
             seq,
         };
@@ -674,6 +710,9 @@ impl Oms {
         };
         let st = sl.state;
         let Some(fd) = self.apply_fill(ti, s, f, now, out) else {
+            if out.cash_error.is_some() {
+                return;
+            }
             if forced.is_none() {
                 self.stats.dup += 1;
             }
@@ -771,6 +810,17 @@ impl Oms {
         let t = self.t(ti)?;
         let sl = *t.slot(s)?;
         let ex = *t.ext.get(s as usize)?;
+        let cash = match crate::cash::delta(
+            self.inst(sl.inst).perp_cash,
+            (sl.filled, ex.cash_qty, ex.cash_sum),
+            (f.cum, f.cash_qty, f.cash_sum),
+        ) {
+            Ok(x) => x,
+            Err(e) => {
+                out.cash_error = Some(e);
+                return None;
+            }
+        };
         let d = f.cum.0.saturating_sub(sl.filled.0);
         if d <= 0 {
             return None;
@@ -850,6 +900,10 @@ impl Oms {
             }
             if let Some(e) = t.ext.get_mut(s as usize) {
                 e.net_filled = Qty(e.net_filled.0.saturating_add(d_net.0));
+                if cash.is_some() {
+                    e.cash_qty = f.cash_qty;
+                    e.cash_sum = f.cash_sum;
+                }
             }
         }
         let after = self.contrib(ti, s);
@@ -894,6 +948,7 @@ impl Oms {
                 fee: f.fee.0,
                 fee_asset: f.fee_asset,
                 seq: f.seq,
+                cash,
             };
             let r = out.fills.push(fo);
             debug_assert!(r.is_ok(), "OmsOut.fills overflow");

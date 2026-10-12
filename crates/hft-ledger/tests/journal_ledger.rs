@@ -124,7 +124,9 @@ fn led_272_slot_snapshot_fee_watermark_versions() {
         (1, 0, "99400"),
         (2, 0, "99399.5"),
         (2, btc("0.01").0, "99400"),
-        (3, 0, "99400"),
+        (3, 0, "99399.5"),
+        (3, btc("0.01").0, "99400"),
+        (4, 0, "99400"),
     ] {
         let mut w = SnapshotWriter::new(64 << 20);
         before.ledger().snapshot(&mut w);
@@ -148,7 +150,7 @@ fn led_272_slot_snapshot_fee_watermark_versions() {
         assert!(w.status().is_ok());
         let mut r = SnapshotReader::new(w.as_bytes());
         let restored = JournalLedger::from_snapshot(&mut r, rd_lf(), &cfg_lf(), &caps_lf());
-        if version == 3 {
+        if version == 4 {
             assert!(matches!(restored, Err(RestoreError::VersionUnsupported)));
             continue;
         }

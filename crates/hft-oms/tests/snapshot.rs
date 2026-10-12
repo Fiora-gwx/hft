@@ -125,7 +125,7 @@ fn oms_361_snapshot_rows() {
     );
     assert!(kinds.iter().filter(|k| **k == 5).count() >= 20, "OMS-361.3");
     for (k, _, len) in rows {
-        let want = [0, 80, 64, 200, 64, 32][k as usize];
+        let want = [0, 80, 64, 200, 80, 32][k as usize];
         assert_eq!(len, want, "OMS-361.4");
     }
 }
@@ -143,9 +143,9 @@ fn oms_362_row_versions() {
     let (h, _, _) = mixed();
     let b = snap(&h.o);
     for (id, v) in [
-        (SECTION_ORDER_SLOTS, 2),
+        (SECTION_ORDER_SLOTS, 3),
         (SECTION_OMS_COUNTERS, 1),
-        (SECTION_OMS_LINKS, 1),
+        (SECTION_OMS_LINKS, 2),
     ] {
         let (vo, _, _, _) = sec(&b, id);
         assert_eq!(u16::from_le_bytes([b[vo], b[vo + 1]]), v, "OMS-362.1");

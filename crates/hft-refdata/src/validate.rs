@@ -560,7 +560,8 @@ impl<'a> Tables<'a> {
                     || c.margin_mode != MarginMode::NotApplicable as u8
                     || c.funding_settle != FundingSettleKind::NotApplicable as u8
                     || c.margin_data != MarginData::NotApplicable.code()
-                    || c.multi_asset != 1)
+                    || c.multi_asset != 1
+                    || c.flags & crate::caps::CapFlags::PERP_CASH.0 != 0)
             {
                 push(e, C::CapsMarketMismatch, sec::VENUE_CAPS, i);
             }

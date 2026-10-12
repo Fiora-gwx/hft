@@ -2613,7 +2613,9 @@ spec: README.md
 | LED-272.1 | v1,160 B | 以 filled 初始化水位,不补记费用 |
 | LED-272.2 | v2,192 B,fee_cum = 0 | 只补记一次 0.5 USDT,持仓不变 |
 | LED-272.3 | v2,192 B,fee_cum = filled | 两次回报均不再扣费 |
-| LED-272.4 | v3 | VersionUnsupported |
+| LED-272.4 | v3,192 B,fee_cum = 0 | 只补记一次 0.5 USDT |
+| LED-272.5 | v3,192 B,fee_cum = filled | 两次回报均不再扣费 |
+| LED-272.6 | v4 | VersionUnsupported |
 
 ### LED-273 冷读者的同号槽按账户与 venue 隔离
 

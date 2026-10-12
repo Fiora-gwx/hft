@@ -86,6 +86,7 @@ pub struct RdOpts {
     pub x_min_qty: Qty,
     pub x_min_notional: i64,
     pub vx_amend_down_only: bool,
+    pub vx_perp_cash: bool,
     /// Total accounts (a1, a2, s1, then Live fillers on VS/VX).
     pub n_accounts: u8,
     /// 3 = VS, VX, VG; 2 = VS, VX.
@@ -100,6 +101,7 @@ impl Default for RdOpts {
             x_min_qty: Qty(1000),
             x_min_notional: 5_000_000,
             vx_amend_down_only: false,
+            vx_perp_cash: false,
             n_accounts: 3,
             n_venues: 3,
         }
@@ -222,7 +224,16 @@ pub fn build_rd(o: &RdOpts) -> &'static RefData {
     b.caps(caps(
         VX,
         MarketKind::LinearPerp,
-        CapFlags::AMEND | CapFlags::POST_ONLY | CapFlags::IOC | CapFlags::FOK | CapFlags::BATCH_CANCEL,
+        CapFlags::AMEND
+            | CapFlags::POST_ONLY
+            | CapFlags::IOC
+            | CapFlags::FOK
+            | CapFlags::BATCH_CANCEL
+            | if o.vx_perp_cash {
+                CapFlags::PERP_CASH
+            } else {
+                CapFlags(0)
+            },
         DeadManCap::CountdownAccount,
         o.vx_amend_down_only,
     ));

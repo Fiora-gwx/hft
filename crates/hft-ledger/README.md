@@ -298,7 +298,7 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 
 `FillDelta`/`FeeDelta` 不写 journal(它们是 OMS 处理 `OrderEvent` 的同一事件内的派生量),冷读者按下表从 journal 记录重建同样的调用,得到与引擎相同的持仓、库存与余额:
 
-恢复 OMS 节 2 时只接受行版本 1 与 2;版本 1 以槽的 `filled` 初始化费用水位,版本 2 读取 `fee_cum`,其他版本返回 `VersionUnsupported`。
+恢复 OMS 节 2 时接受行版本 1–3;版本 1 以槽的 `filled` 初始化费用水位,版本 2/3 读取 `fee_cum`,其他版本返回 `VersionUnsupported`。结算水位的冷热消费接入边界见已知限制。
 
 | 记录 | 处理 |
 |---|---|
@@ -554,6 +554,8 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 - [hft-strategy-sdk](../hft-strategy-sdk/README.md)(`PortfolioView`)、[hft-oms](../hft-oms/README.md)、[hft-risk](../hft-risk/README.md)、[hft-exec](../hft-exec/README.md)、[hft-sim](../hft-sim/README.md)、[hft-py](../hft-py/README.md)
 
 ## 已知限制与后续工作
+
+- 冷读者接受 OMS v3 行的原有字段;显式结算水位和墓碑的冷消费仍需接通,严格结算整链路验收尚未通过。
 
 - `apply_settled_fill` 是记账原语;回报携带结算事实、OMS 的累计/重复/迟到匹配、sequencer 与冷读者接入尚未完成。生产与 DST 仍走 `apply_fill`,乱序钱包问题仍由严格 INV-16 阻断。接入必须覆盖已提交 journal、恢复边界与缺失事实,不能靠本接口的组件测试宣告整链路修复。
 - 平均成本法之外(FIFO 税务口径)不支持;需要时在 hft-py 侧另算。

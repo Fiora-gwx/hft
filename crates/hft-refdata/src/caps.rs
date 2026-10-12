@@ -113,8 +113,11 @@ impl CapFlags {
     pub const IOC: CapFlags = CapFlags(4);
     pub const FOK: CapFlags = CapFlags(8);
     pub const BATCH_CANCEL: CapFlags = CapFlags(16);
+    /// Perpetual execution/query reports supply complete realized-cash settlement facts.
+    /// Consumers require coverage and never reconstruct wallet cash from local average cost.
+    pub const PERP_CASH: CapFlags = CapFlags(32);
     /// Union of every defined bit.
-    pub const ALL: CapFlags = CapFlags(31);
+    pub const ALL: CapFlags = CapFlags(63);
 
     #[inline]
     pub const fn contains(self, other: CapFlags) -> bool {

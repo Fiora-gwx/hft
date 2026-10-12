@@ -1725,7 +1725,7 @@ spec: README.md
 | BIN-171.9 | `margin_data` | `Poll{interval_ms: 5000}` / `NotApplicable` |
 | BIN-171.10 | `own_liquidation_marker`、`liq_marker_arg` | `ClientIdPrefix`、`"autoclose-\|adl_autoclose\|settlement_autoclose-"` / `NotIdentifiable`、`""` |
 | BIN-171.11 | `ignorable_user_events` | `["TRADE_LITE", "STRATEGY_UPDATE", "GRID_UPDATE", "CONDITIONAL_ORDER_TRIGGER_REJECT"]` / `["balanceUpdate", "listStatus", "externalLockUpdate"]` |
-| BIN-171.12 | `flags` | 31(`AMEND | POST_ONLY | IOC | FOK | BATCH_CANCEL`)/ 31 |
+| BIN-171.12 | `flags` | 31(`AMEND | POST_ONLY | IOC | FOK | BATCH_CANCEL`)/ 31;两者均不自动声明 PERP_CASH |
 | BIN-171.13 | `dms` 与四个时长 | `CountdownPerInst`,`dms_min_ms = 5000`,`dms_max_ms = 0`,`dms_timeout_ms = 30000`,`dms_refresh_ms = 10000` / `None`,四个 0 |
 | BIN-171.14 | `testnet` | `Demo` / `Demo` |
 | BIN-171.15 | `amend_qty_down_only` | `Usdm` false / `Spot` true |

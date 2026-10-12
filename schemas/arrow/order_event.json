@@ -137,12 +137,28 @@
       "name": "avg_px",
       "nullable": false,
       "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "qty"
+      },
+      "name": "cash_qty",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "qty"
+      },
+      "name": "cash_sum",
+      "nullable": false,
+      "type": "Int64"
     }
   ],
   "metadata": {
     "hft.kind": "0x0203",
-    "hft.layout": "fixed 96",
+    "hft.layout": "fixed 112",
     "hft.name": "OrderEvent",
-    "hft.schema_version": "1"
+    "hft.schema_version": "2"
   }
 }

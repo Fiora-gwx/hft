@@ -60,9 +60,11 @@ fn oms_011_slot_ext_layout() {
             offset_of!(SlotExt, class),
             offset_of!(SlotExt, lev_x100),
             offset_of!(SlotExt, max_rest_ms),
-            offset_of!(SlotExt, fee_cum)
+            offset_of!(SlotExt, fee_cum),
+            offset_of!(SlotExt, cash_qty),
+            offset_of!(SlotExt, cash_sum),
         ],
-        [0, 8, 12, 13, 14, 15, 16, 20, 32]
+        [0, 8, 12, 13, 14, 15, 16, 20, 32, 40, 48]
     );
 }
 
@@ -86,7 +88,7 @@ fn oms_012_slot_stamps_layout() {
 
 #[test]
 fn oms_013_tomb_layout() {
-    assert_eq!(size_of::<Tomb>(), 56);
+    assert_eq!(size_of::<Tomb>(), 72);
     assert_eq!(
         [
             offset_of!(Tomb, r#gen),
@@ -102,9 +104,11 @@ fn oms_013_tomb_layout() {
             offset_of!(Tomb, filled),
             offset_of!(Tomb, net_filled),
             offset_of!(Tomb, exch_order_id),
-            offset_of!(Tomb, freed_tsc)
+            offset_of!(Tomb, freed_tsc),
+            offset_of!(Tomb, cash_qty),
+            offset_of!(Tomb, cash_sum),
         ],
-        [0, 4, 6, 8, 12, 16, 17, 18, 19, 20, 24, 32, 40, 48]
+        [0, 4, 6, 8, 12, 16, 17, 18, 19, 20, 24, 32, 40, 48, 56, 64]
     );
 }
 
@@ -210,7 +214,7 @@ fn oms_017_snapshot_row_sizes() {
     let s2 = rd.find_section(SECTION_ORDER_SLOTS).unwrap().unwrap();
     assert_eq!(SLOT_ROW_LEN, 192, "OMS-017.4");
     assert_eq!(s2.body.len(), 192 * s2.count as usize, "OMS-017.4");
-    assert_eq!(s2.version, 2, "OMS-017.4");
+    assert_eq!(s2.version, 3, "OMS-017.4");
     let s12 = rd.find_section(SECTION_OMS_LINKS).unwrap().unwrap();
     let mut seen = [0usize; 6];
     let mut b = s12.body;
@@ -226,6 +230,6 @@ fn oms_017_snapshot_row_sizes() {
     assert_eq!(seen[1], 80, "OMS-017.5");
     assert_eq!(seen[2], 64, "OMS-017.6");
     assert_eq!(seen[3], 200, "OMS-017.7");
-    assert_eq!(seen[4], 64, "OMS-017.8");
+    assert_eq!(seen[4], 80, "OMS-017.8");
     assert_eq!(seen[5], 32, "OMS-017.9");
 }

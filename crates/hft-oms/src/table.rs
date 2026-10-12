@@ -159,6 +159,7 @@ pub(crate) struct InstInfo {
     pub(crate) min_qty: Qty,
     pub(crate) min_notional: Notional,
     pub(crate) no_amend: bool,
+    pub(crate) perp_cash: bool,
 }
 
 impl InstInfo {
@@ -175,6 +176,7 @@ impl InstInfo {
         min_qty: Qty(0),
         min_notional: Notional(0),
         no_amend: false,
+        perp_cash: false,
     };
 }
 

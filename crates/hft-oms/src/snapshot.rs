@@ -150,7 +150,7 @@ impl Oms {
                 let l = l.get_mut(..n).unwrap_or(&mut []);
                 l.sort_by_key(|t| t.r#gen);
                 for tb in l.iter() {
-                    w.put_row(&hdr(ROW_TOMB, 64));
+                    w.put_row(&hdr(ROW_TOMB, 80));
                     w.put_bytes(
                         TombRowBody {
                             venue: t.venue,
@@ -189,9 +189,9 @@ impl Oms {
         let s12 = r
             .find_section(SECTION_OMS_LINKS)?
             .ok_or(RestoreError::BadSection)?;
-        if !(s2.version == ROW_VERSION_SLOTS || s2.version == 1)
+        if !(1..=ROW_VERSION_SLOTS).contains(&s2.version)
             || s3.version != ROW_VERSION_COUNTERS
-            || s12.version != ROW_VERSION_LINKS
+            || !(1..=ROW_VERSION_LINKS).contains(&s12.version)
         {
             return Err(RestoreError::VersionUnsupported);
         }
@@ -273,7 +273,14 @@ impl Oms {
             if v1 {
                 ex.fee_cum = sl.filled;
             }
+            if s2.version < 3 {
+                ex.cash_qty = hft_types::Qty(0);
+                ex.cash_sum = hft_types::Qty(0);
+            }
             if sl.state == OrderState::Free || ex.role > LinkRole::Reverse as u8 || ex.origin > 4 {
+                return Err(RestoreError::BadValue);
+            }
+            if !crate::cash::valid_cursor(o.inst(sl.inst).perp_cash, sl.filled, ex.cash_qty, ex.cash_sum) {
                 return Err(RestoreError::BadValue);
             }
             let ti = o.tix(sl.venue, sl.account).ok_or(RestoreError::BadValue)?;
@@ -302,7 +309,13 @@ impl Oms {
                 ROW_LINK => 80,
                 ROW_PLAN => 64,
                 ROW_LEG => 200,
-                ROW_TOMB => 64,
+                ROW_TOMB => {
+                    if s12.version == 1 {
+                        64
+                    } else {
+                        80
+                    }
+                }
                 ROW_OUT => 32,
                 0 if hd.len == 0 => {
                     // Section tail padding.
@@ -360,7 +373,20 @@ impl Oms {
                     leg_rows.push((0, l.state));
                 }
                 ROW_TOMB => {
-                    let tr = TombRowBody::try_read_from_bytes(b).map_err(|_| RestoreError::BadValue)?;
+                    let mut bytes = [0u8; 80];
+                    bytes
+                        .get_mut(..b.len())
+                        .ok_or(RestoreError::BadValue)?
+                        .copy_from_slice(b);
+                    let tr = TombRowBody::try_read_from_bytes(&bytes).map_err(|_| RestoreError::BadValue)?;
+                    if !crate::cash::valid_cursor(
+                        o.inst(tr.tomb.inst).perp_cash,
+                        tr.tomb.filled,
+                        tr.tomb.cash_qty,
+                        tr.tomb.cash_sum,
+                    ) {
+                        return Err(RestoreError::BadValue);
+                    }
                     let tg = o.p.tomb_gens;
                     let ti = o.tix(tr.venue, tr.account).ok_or(RestoreError::BadValue)?;
                     let t = o.tm(ti).ok_or(RestoreError::BadValue)?;
