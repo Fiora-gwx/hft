@@ -5691,7 +5691,7 @@ spec: README.md
 - 规则:[定时器](README.md#定时器)、[快照](README.md#快照)
 - 级别:table
 - 里程碑:M2
-- 前置:B0 真实引擎;测试策略在自己的 snapshot/restore 中保存 TimerId;六次登记的截止乱序,两条具有完全相同的 deadline/tag/group;一次取消和一次到期留下编号空洞
+- 前置:B0 真实引擎,journal 含完整 ECF1/RKP1;测试策略在自己的 snapshot/restore 中保存 TimerId;六次登记的截止乱序,两条具有完全相同的 deadline/tag/group;一次取消和一次到期留下编号空洞
 - 步骤:分别从崩溃与 Drain 恢复,TSC 归零附近且频率变为三倍;策略用恢复的 ID 取消两个登记与两个旧 ID,再登记一次;第二次崩溃后恢复原频率,推进至到期;独立执行完整及关键帧窗口回放
 - 期望:首次恢复保留 ID 2/4/5/6,下一次分配为 7;第二次恢复保留 5/6/7;取消的一条相同 tag 登记不影响另一条,三条存活登记各到期一次;三次运行的 Output、快照字节与恢复状态均一致
 - 实现:`crates/hft-sequencer/tests/timer_recovery.rs::seq_408_timer_ids_survive_crash_drain_and_repeated_restart`
@@ -5735,7 +5735,7 @@ spec: README.md
 - 规则:[定时器](README.md#定时器)
 - 级别:unit
 - 里程碑:M2
-- 前置:策略实际登记 ID 1–7,全部已取消或到期,保存关键帧
+- 前置:journal 含完整 ECF1/RKP1;策略实际登记 ID 1–7,全部已取消或到期,保存关键帧
 - 步骤:崩溃重启;策略登记一个新定时器并等其到期;保存末尾快照;执行完整及关键帧窗口回放
 - 期望:恢复的存活登记为空,计数器为 8,新返回值为 8;该定时器只到期一次;两次运行的 Output、快照字节与恢复状态均一致
 - 实现:`crates/hft-sequencer/tests/timer_recovery.rs::seq_410_empty_heap_retains_consumed_timer_ids`

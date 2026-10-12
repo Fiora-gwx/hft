@@ -856,6 +856,8 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 
 定时器的 GroupId 到当前 gix 映射、执行层恢复合并及跨频率周期重新登记由真实引擎和独立回放验证,见 [SEQ-234](TESTS.md#seq-234-策略定时器以-groupid-为键投递时现查-gix)、[SEQ-238](TESTS.md#seq-238-执行层的恢复定时器与堆中同键条目合并保留较早者) 与 [SEQ-239](TESTS.md#seq-239-周期性系统定时器每次启动重新登记替换旧条目更早的-omssweep-保留)。`hft-exec/testing` 仅在 dev 依赖中用于准备冲突截止的快照夹具。
 
+独立定时器回放夹具经 `B0::boot_self_contained` 写入完整 ECF1/RKP1,回放端从 journal 装配配置。精简 B0 的注入解码器用于其余单元用例。
+
 advisor 的定时投递、重启注记去重、落后量、两种环容量的独立合并模型,以及三种检查点块大小的完整载荷续算见 [SEQ-036–046](TESTS.md#seq-036-model-的时间刻度只来自-journal-中的-timersys-advisortick)。这些验收在测试进程中生成 journal,不替代固定回放样本与参考主机延迟门槛。
 
 ## 依赖

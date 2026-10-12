@@ -20,7 +20,7 @@ fn steady() -> H {
     h
 }
 
-fn verify_timer_windows(h: &H, starts: &[Option<u64>]) {
+fn verify_timer_windows(h: &H, starts: &[Option<u64>], case: &str) {
     #[cfg(feature = "replay-io")]
     {
         use hft_sequencer::driver::replay::Log;
@@ -36,18 +36,18 @@ fn verify_timer_windows(h: &H, starts: &[Option<u64>]) {
                 },
                 hb(),
             )
-            .unwrap();
-            assert!(got.inputs > 0 && got.sink.compared > 0);
-            assert!(got.sink.mismatches.is_empty(), "{:?}", got.sink.detail);
+            .unwrap_or_else(|e| panic!("{case}: {e:?}"));
+            assert!(got.inputs > 0 && got.sink.compared > 0, "{case}");
+            assert!(got.sink.mismatches.is_empty(), "{case}: {:?}", got.sink.detail);
             assert!(
                 got.sink.recovery_diffs.is_empty(),
-                "{:?}",
+                "{case}: {:?}",
                 got.sink.recovery_diffs
             );
         }
     }
     #[cfg(not(feature = "replay-io"))]
-    let _ = (h, starts);
+    let _ = (h, starts, case);
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn seq_234_timer_keyed_by_group() {
     let mut p = Spb::s2(1);
     p.groups = vec![gspec(G2), gspec_eth(g2b)];
     b.params = vec![Spb::s1(1), p, Spb::s9(1)];
-    let mut h = b.boot();
+    let mut h = b.boot_self_contained();
     h.steady();
     let delivered = cap();
     let got = delivered.clone();
@@ -99,7 +99,7 @@ fn seq_234_timer_keyed_by_group() {
     assert!(h.s.engine().heap.find_key(owner, 4, g2b.0).is_none());
     assert!(h.s.instances().get(S2).unwrap().timers.is_empty());
     h.keyframe();
-    verify_timer_windows(&h, &[None, Some(window)]);
+    verify_timer_windows(&h, &[None, Some(window)], "SEQ-234");
 }
 
 #[test]
@@ -208,12 +208,18 @@ fn seq_238_recovery_timers_merge() {
 
     // The prepared keyframe makes the two independent timer sources disagree.
     // No production registration or merge helper is used to calculate expectations.
-    for (kind, remaining, expected) in [
+    for (row, (kind, remaining, expected)) in [
         (ExecTimerKind::Wake, 3_000, 4_000),
         (ExecTimerKind::Wake, 5_000, 5_000),
         (ExecTimerKind::AutoFix, 3_000, 4_000),
-    ] {
-        let mut h = steady();
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let case = format!("SEQ-238.{}", row + 1);
+        reset_script();
+        let mut h = b0().boot_self_contained();
+        h.steady();
         let stop = h.now();
         let wake = 1 | (u32::from(AC2.0) << 8);
         let automatic = 5 | (u32::from(AC2.0) << 8);
@@ -248,7 +254,8 @@ fn seq_238_recovery_timers_merge() {
             h.s.engine()
                 .exec
                 .recovery_timers()
-                .any(|t| { t.group == G2 && t.timer_id == request_id && t.at == Tsc(stop + remaining) })
+                .any(|t| { t.group == G2 && t.timer_id == request_id && t.at == Tsc(stop + remaining) }),
+            "{case}"
         );
         let mut h = h
             .crash_restart(
@@ -258,7 +265,7 @@ fn seq_238_recovery_timers_merge() {
                     ..Default::default()
                 },
             )
-            .unwrap();
+            .unwrap_or_else(|e| panic!("{case}: {e:?}"));
         let entries: Vec<_> =
             h.s.engine()
                 .heap
@@ -268,13 +275,13 @@ fn seq_238_recovery_timers_merge() {
                 .map(|t| (t.timer_id, t.deadline))
                 .collect();
         if kind == ExecTimerKind::Wake {
-            assert_eq!(entries, [(wake, expected)]);
+            assert_eq!(entries, [(wake, expected)], "{case}");
         } else {
-            assert_eq!(entries, [(automatic, expected), (wake, 5_000)]);
+            assert_eq!(entries, [(automatic, expected), (wake, 5_000)], "{case}");
         }
         h.run();
         h.keyframe();
-        verify_timer_windows(&h, &[Some(window)]);
+        verify_timer_windows(&h, &[Some(window)], &case);
     }
 }
 
@@ -282,14 +289,15 @@ fn seq_238_recovery_timers_merge() {
 fn seq_239_periodic_timers_reregistered() {
     use hft_sequencer::SnapshotSel;
 
-    for remaining_ms in [1_500_u64, 400] {
-        for scale in [1, 3] {
+    for (i, remaining_ms) in [1_500_u64, 400].into_iter().enumerate() {
+        for (j, scale) in [1, 3].into_iter().enumerate() {
+            let case = format!("SEQ-239.{}", 2 * i + j + 1);
             reset_script();
             let mut b = b0();
             b.rd.caps[1].dms = hft_refdata::DeadManCap::CountdownAccount;
             b.rd.caps[1].dms_refresh_ms = 10_000;
             b.rd.caps[1].dms_timeout_ms = 30_000;
-            let mut h = b.boot();
+            let mut h = b.boot_self_contained();
             h.steady();
             let stop = h.now();
             let dead_man = 4 | (u32::from(B.0) << 8) | (u32::from(AC1.0) << 16);
@@ -317,16 +325,21 @@ fn seq_239_periodic_timers_reregistered() {
                         ..Default::default()
                     },
                 )
-                .unwrap();
-            assert_eq!(h.run(), StepOutcome::Idle);
+                .unwrap_or_else(|e| panic!("{case}: {e:?}"));
+            assert_eq!(h.run(), StepOutcome::Idle, "{case}");
             let ms = scale * MS;
             for (owner, id, delay) in [(3, 2, remaining_ms.min(1_000)), (1, dead_man, 10_000)] {
                 let heap = &h.s.engine().heap;
                 assert_eq!(
                     heap.count_if(|t| t.owner == owner && t.timer_id == id && t.group == 0),
-                    1
+                    1,
+                    "{case}"
                 );
-                assert_eq!(heap.find_key(owner, id, 0).unwrap().deadline, start + delay * ms);
+                assert_eq!(
+                    heap.find_key(owner, id, 0).unwrap().deadline,
+                    start + delay * ms,
+                    "{case}"
+                );
             }
             let mark = h.io_ref().out.len();
             let refreshes = |h: &H| {
@@ -341,12 +354,12 @@ fn seq_239_periodic_timers_reregistered() {
             };
             h.at(start + 9_999 * ms);
             h.run();
-            assert_eq!(refreshes(&h), 0, "old DeadMan deadline must be replaced");
+            assert_eq!(refreshes(&h), 0, "{case}: old DeadMan deadline must be replaced");
             h.at(start + 10_000 * ms);
             h.run();
-            assert_eq!(refreshes(&h), 1);
+            assert_eq!(refreshes(&h), 1, "{case}");
             h.keyframe();
-            verify_timer_windows(&h, &[Some(window)]);
+            verify_timer_windows(&h, &[Some(window)], &case);
         }
     }
 }

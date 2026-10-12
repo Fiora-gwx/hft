@@ -203,7 +203,7 @@ fn registered(h: &H<TimerSet>) -> Vec<u64> {
 
 fn rig() -> H<TimerSet> {
     reset_script();
-    let mut h = B0::<TimerSet>::new().boot();
+    let mut h = B0::<TimerSet>::new().boot_self_contained();
     h.steady();
     h.quote(A1, "50000", "50031");
     h.run();

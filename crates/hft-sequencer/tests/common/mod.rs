@@ -900,6 +900,34 @@ impl<S: StrategySet> B0<S> {
             Err(e) => panic!("B0 boot failed: {e:?}"),
         }
     }
+    /// Full ECF1/RKP1 configuration for readers that reconstruct solely from the journal.
+    /// The compact `boot` fixture remains available for tests of injected config decoders.
+    pub fn boot_self_contained(self) -> H<S> {
+        let rd = self.rd.load();
+        let mut setup = self.setup(&rd);
+        setup.risk_decode = Some(hft_sequencer::config_blob::decode_risk_blob);
+        let mut configs = self.configs(&rd);
+        configs.engine_blob = setup.encode_blob(1, HostClass::Dev2, UTC0);
+        configs.risk_blob = configs.risk.encode_blob().unwrap();
+        configs.risk_sha256 = sha(&configs.risk_blob);
+        let heartbeat = hb();
+        let drv = LiveDriver::new(TestIo::new(setup.clock), self.live);
+        let s = Sequencer::boot(
+            hft_sequencer::BootSource::Empty { configs },
+            &setup,
+            drv,
+            heartbeat,
+        )
+        .unwrap();
+        H {
+            s,
+            rd,
+            setup,
+            cmd_no: 0,
+            hb: heartbeat,
+            upd: 1,
+        }
+    }
 }
 
 impl<S: StrategySet> Default for B0<S> {
