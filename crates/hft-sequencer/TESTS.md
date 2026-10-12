@@ -3377,7 +3377,7 @@ spec: README.md
 - 规则:[定时器](README.md#定时器)
 - 级别:table
 - 里程碑:M2
-- 前置:真实引擎准备关键帧,堆中 `(Exec, Wake | 2 << 8, g2)` 在恢复 TSC = 1 000 后 deadline = 5 000;执行层 cell 独立保存下表截止,AutoFix 行的状态为 Broken/Primed
+- 前置:真实引擎设置 `gate_naked_alarm_ms = 7 000` 后准备关键帧,堆中 `(Exec, Wake | 2 << 8, g2)` 在恢复 TSC = 1 000 后 deadline = 5 000;执行层 cell 独立保存下表截止,AutoFix 行的状态为 Broken/Primed
 - 步骤:从该关键帧真实重启,断言恢复堆的完整键和数量;处理 EngineClock 并保存后续关键帧,由 journal 配置独立执行该窗口回放
 - 期望:同键仅一条且取较早截止,异键两条均保留;Broken 行另有一条按新闸门关闭时刻登记的 Alarm,截止由配置 `gate_naked_alarm_ms` 独立计算;窗口与实际恢复的 Output、快照和恢复状态一致
 - 实现:`crates/hft-sequencer/tests/timers.rs::seq_238_recovery_timers_merge`

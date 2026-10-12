@@ -218,7 +218,9 @@ fn seq_238_recovery_timers_merge() {
     {
         let case = format!("SEQ-238.{}", row + 1);
         reset_script();
-        let mut h = b0().boot_self_contained();
+        let mut b = b0();
+        b.setup_edit.push(|s| s.exec.default.gate_naked_alarm_ms = 7_000);
+        let mut h = b.boot_self_contained();
         h.steady();
         let stop = h.now();
         let wake = 1 | (u32::from(AC2.0) << 8);
