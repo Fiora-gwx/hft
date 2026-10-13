@@ -28,7 +28,7 @@ spec: README.md
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
 | 连接活性 | SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173 |
-| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420 |
+| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420、SEQ-425 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
@@ -5806,6 +5806,21 @@ spec: README.md
 - 步骤:每段先写引导 Meta,随后写独立 ClockStatus,再写 Timer 及其同事件尾部 ClockStatus
 - 期望:Begin 与引导 Meta 不提前标 EVENT_END,BootDone 标记;独立 Meta 自带标记且无需 end_event 即能发布;开放事件中的 Meta 不带标记,完成点落在 Timer
 - 实现:`crates/hft-sequencer/tests/mem_journal.rs::seq_424_physical_meta_boundaries_distinguish_boot_and_open_events`
+
+### SEQ-425 终态与基础币费用在同一事件刷新敞口
+
+- 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
+- 级别:table
+- 里程碑:M2
+- 前置:真实 sequencer,敞口闸门最小名义 100 USDT
+- 步骤:分别让 0.010 BTC 订单成交 0.001 后 Expired,以及 0.004 BTC 完整成交后补扣 0.003 BTC FeeOnly;处理前后各写关键帧,随后请求新开仓
+- 期望:两行净仓 0.001 BTC、无在途,同事件实际调用 risk.on_legs,新单按约 50 USDT 敞口通过;从首次启动及两侧关键帧重放输出全部相等
+- 实现:`crates/hft-sequencer/tests/process.rs::seq_425_terminal_reports_and_base_fees_refresh_exposure_before_snapshot_replay`
+
+| 行 | 回报 | 处理前名义 USDT | 处理后名义 USDT | 后续开仓 |
+|---|---|---|---|---|
+| SEQ-425.1 | 0.010 BTC 部分成交 0.001 后 Expired | 约 500,含在途 | 约 50 | 通过 |
+| SEQ-425.2 | 0.004 BTC 成交后扣 0.003 BTC FeeOnly | 约 200 | 约 50 | 通过 |
 
 ## 验收
 

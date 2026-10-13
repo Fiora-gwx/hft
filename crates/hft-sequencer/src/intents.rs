@@ -748,6 +748,7 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
                 .rec("oms.net_adjust", u64::from(n.account.0), u64::from(n.group.0));
             e.oms.net_adjust(n.account, n.group, n.inst, n.delta);
             e.exec.on_leg_adjust(n.account, n.group);
+            crate::process::touch_legs(e, n.account, n.group);
         }
     }
     // Updates → exec (EXEC slots), nobody (SMOKE), else the owner strategy.

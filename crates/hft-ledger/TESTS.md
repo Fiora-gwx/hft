@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | LED-246、LED-247 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | LED-263、LED-003、LED-005、LED-074、LED-159、LED-231、LED-246 |
-| 成交增量与净量 | LED-010–LED-020、LED-275–LED-278 |
+| 成交增量与净量 | LED-010–LED-020、LED-275–LED-278、LED-298 |
 | 权益数据(`PortfolioView` 的字段语义) | LED-041、LED-161、LED-179、LED-220–LED-226、LED-241、LED-242 |
 | 配置(`LedgerConfig`,`EngineConfig` blob 的 `ledger` 段) | LED-001、LED-052、LED-098、LED-101、LED-120、LED-121、LED-136、LED-193、LED-194、LED-200、LED-211–LED-213、LED-221、LED-269 |
 | 实现说明 | 不适用:见子节 |
@@ -2981,6 +2981,27 @@ spec: README.md
 - 步骤:12 行改变 ID、委托量、累计量、覆盖、金额、费用/资产、方向、价格,或交付第二个不同成交键后重放首笔,另以同成交键不同订单号制造账本重复
 - 期望:各自对应错误在记账前发生,账本字节不变;后续完整原件不能掩盖失败,不同键使单笔证明永久失效
 - 实现:`crates/hft-ledger/tests/settlement_journal.rs::led_297_receipt_mismatch_fails_before_booking_and_latches`
+
+### LED-298 现货小额成交按方向结算且冷热相等
+
+- 规则:[仓位与已实现](README.md#仓位与已实现平均成本法)
+- 级别:table
+- 里程碑:M2
+- 前置:LF,每行成交 0.00001 BTC,热 Ledger 与从同一初态独立恢复的 JournalLedger
+- 步骤:59998.1300/60000.0000 两个价格 × 买卖 × 0/0.000003 USDT 费用,分别交付成交增量与原始 journal 回报
+- 期望:第一价格买入扣 599982、卖出收 599981 个 USDT 最小单位;第二价格均为 600000,费用另扣一次;冷热现金、仓位与 group PnL 相等
+- 实现:`crates/hft-ledger/tests/journal_ledger.rs::led_298_spot_cash_rounds_each_gross_execution_in_hot_and_cold_ledgers`
+
+| 行 | 价格 | 方向 | 费用最小单位 | 钱包变化最小单位 |
+|---|---|---|---|---|
+| LED-298.1 | 59998.1300 | 买 | 0 | −599982 |
+| LED-298.2 | 59998.1300 | 买 | 3 | −599985 |
+| LED-298.3 | 59998.1300 | 卖 | 0 | 599981 |
+| LED-298.4 | 59998.1300 | 卖 | 3 | 599978 |
+| LED-298.5 | 60000.0000 | 买 | 0 | −600000 |
+| LED-298.6 | 60000.0000 | 买 | 3 | −600003 |
+| LED-298.7 | 60000.0000 | 卖 | 0 | 600000 |
+| LED-298.8 | 60000.0000 | 卖 | 3 | 599997 |
 
 ## 验收
 

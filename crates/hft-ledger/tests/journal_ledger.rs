@@ -11,6 +11,50 @@ use hft_types::{ASSET_NONE, Px, Qty};
 
 const T: i64 = 10_000_000_000;
 
+#[test]
+fn led_298_spot_cash_rounds_each_gross_execution_in_hot_and_cold_ledgers() {
+    for price in ["59998.1300", "60000.0000"] {
+        for side in [Buy, Sell] {
+            for fee in ["0", "0.000003"] {
+                let mut hot = booted();
+                if side == Sell {
+                    hot.apply_fill(&f(Buy, BTC_S1, "0.001", "60000", "0", USDT, G1, 0), 0);
+                }
+                let mut cold = cold_from(&hot);
+                clock(&mut cold, T);
+                hot.on_run_start(T);
+                feed(&mut cold, &epoch_start(7), true);
+                let fill = f(side, BTC_S1, "0.00001", price, fee, USDT, G1, 0);
+                let before = cash(&hot, A1, S1, USDT).total.0;
+                feed(
+                    &mut cold,
+                    &decision_new(5, 1, A1, S1, BTC_S1, side, G1, fill.qty),
+                    true,
+                );
+                let mut report = order_event(Fill, 7, 5, 1, A1, S1, BTC_S1, fill.qty, fill.px);
+                report.qty = fill.qty;
+                report.fee = Qty(fill.fee);
+                report.fee_asset = USDT;
+                hot.apply_fill(&fill, T);
+                feed(&mut cold, &report, true);
+                // The input amounts are 599981.3 or 600000 raw USDT units.
+                // Expected cash comes from those amounts, never either ledger's delta.
+                let gross = match (price, side) {
+                    ("59998.1300", Buy) => -599_982,
+                    ("59998.1300", Sell) => 599_981,
+                    (_, Buy) => -600_000,
+                    (_, Sell) => 600_000,
+                };
+                let expected = before + gross - if fee == "0" { 0 } else { 3 };
+                assert_eq!(cash(&hot, A1, S1, USDT).total.0, expected);
+                assert_eq!(cash(cold.ledger(), A1, S1, USDT).total.0, expected);
+                assert_eq!(hot.pos(A1, BTC_S1).qty, cold.ledger().pos(A1, BTC_S1).qty);
+                assert_eq!(hot.group(A1, G1).pnl, cold.ledger().group(A1, G1).pnl);
+            }
+        }
+    }
+}
+
 /// Snapshot of `boot_a1`, `EpochStart{7}`, `OrderDecision{slot 5, gen 1, Buy BTC/S1, G1, 0.01}`.
 fn with_decision() -> JournalLedger {
     let mut j = cold_from(&booted());

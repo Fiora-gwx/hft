@@ -181,11 +181,18 @@ impl Ledger {
             self.quote_add(av, s.quote, amount);
         } else if tr.cash {
             let qe = i32::from(self.asset_s(s.quote).qty_exp);
+            // Settle each gross spot execution in the quote asset's smallest unit.
+            // Paying rounds up; receiving rounds down, independently of PnL conversion.
+            let rounding = if sign > 0 {
+                RoundMode::Ceil
+            } else {
+                RoundMode::Floor
+            };
             let (amt, lossy) = rescale(
                 i128::from(px).saturating_mul(i128::from(tr.gross.0)),
                 pe,
                 qe,
-                RoundMode::TowardZero,
+                rounding,
             );
             if lossy {
                 self.rounding = self.rounding.saturating_add(1);

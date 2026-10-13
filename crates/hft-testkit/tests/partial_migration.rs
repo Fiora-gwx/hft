@@ -37,7 +37,11 @@ fn tk_157_partial_migration_reproduces_prior_goldens_and_preserves_prefix() {
         let before = run_record::<DstEngine>(&old_cfg);
         let after = run_record::<DstEngine>(&cfg);
         for r in [&before, &after] {
-            assert!(r.outcome.is_pass(), "seed {seed}: {:?}", r.outcome.failure());
+            assert!(
+                r.outcome.is_pass(),
+                "seed {seed}: {:?}",
+                r.outcome.failure().map(|f| (&f.invariant, f.message.as_str()))
+            );
             assert_eq!(r.steps_run, steps);
         }
         assert_eq!(

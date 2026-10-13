@@ -130,7 +130,17 @@ fn tk_155_partial_fills_use_matcher_fees_cash_and_ioc_fok_rules() {
                 let sign = if side == Side::Buy { 1_i128 } else { -1_i128 };
                 let notional = i128::from(px) * i128::from(lot) / 1_000_000;
                 let ppm = if venue_id == VS { 1_000 } else { 500 };
-                let fee = if base_fee { i128::from(lot) } else { notional } * ppm / 1_000_000;
+                let (fee_n, fee_d) = if base_fee {
+                    // Configured(BTC) converts gross notional at the input BBO mid.
+                    // Preserve the half tick and round only once, at the final asset unit.
+                    (
+                        2 * i128::from(px) * i128::from(lot) * ppm,
+                        1_199_000_000 * 1_000_000,
+                    )
+                } else {
+                    (i128::from(px) * i128::from(lot) * ppm, 1_000_000 * 1_000_000)
+                };
+                let fee = (fee_n + fee_d - 1) / fee_d;
                 assert_eq!(
                     (e.fee_asset, i128::from(e.fee.0)),
                     (if base_fee { BTC } else { USDT }, fee)
@@ -267,7 +277,7 @@ fn tk_156_real_partial_fee_windows_keep_wallets_replay_and_checkers_equal() {
         assert!(
             on.outcome.is_pass(),
             "delay={delay_ms}: {:?}",
-            on.outcome.failure()
+            on.outcome.failure().map(|f| (&f.invariant, f.message.as_str()))
         );
         assert_eq!(on.steps_run, 10_000);
         let partials: Vec<_> = on
@@ -285,7 +295,8 @@ fn tk_156_real_partial_fee_windows_keep_wallets_replay_and_checkers_equal() {
             .filter(|e| e.what == OrderEventKind::FeeOnly)
             .collect();
         assert_eq!(fees.len(), 1);
-        assert_eq!((fees[0].fee_asset, fees[0].fee.0), (BTC, 1));
+        // First buy: ceil(2 * 600000000 * 1000 * 1000 / (1199999900 * 1000000)).
+        assert_eq!((fees[0].fee_asset, fees[0].fee.0), (BTC, 2));
         assert!(
             on.journal
                 .iter()

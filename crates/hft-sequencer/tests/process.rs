@@ -707,6 +707,54 @@ fn seq_130_net_adjust_same_event() {
     assert!(!h.trace().contains(&"exec.on_leg_adjust"), "{:?}", h.trace());
 }
 
+#[test]
+fn seq_425_terminal_reports_and_base_fees_refresh_exposure_before_snapshot_replay() {
+    use hft_event::OrderEventKind;
+
+    for late_fee in [false, true] {
+        let mut h = steady();
+        let d = h.order_at_touch(AC1, A1, Side::Buy, if late_fee { "0.004" } else { "0.010" });
+        let filled = if late_fee { d.qty } else { q("0.001") };
+        h.fill(&d, filled, filled, d.px);
+        let before = h.keyframe().seq;
+        h.trace_on();
+        let what = if late_fee {
+            OrderEventKind::FeeOnly
+        } else {
+            OrderEventKind::Expired
+        };
+        let mut report = order_event(&d, what, h.epoch());
+        report.qty = Qty(0);
+        report.cum_filled = filled;
+        report.avg_px = d.px;
+        if late_fee {
+            report.fee = q("0.003");
+            report.fee_asset = BTC;
+        }
+        h.push(h.rep_ring(AC1), &report);
+        h.run();
+        assert!(
+            h.trace().contains(&"risk.on_legs"),
+            "late_fee={late_fee}: {:?}",
+            h.trace()
+        );
+        let legs = h.s.engine().oms.legs(AC1, G1);
+        assert_eq!(legs.view.leg[0].net, q("0.001"));
+        assert_eq!(legs.view.leg[0].inflight_immediate, Qty(0));
+        let after = h.keyframe().seq;
+        // Filled exposure is now about 50 USDT, below the fixture's 100 USDT gate.
+        // Before the report it was about 500 (including pending) or 200 (before fee).
+        h.order_at_touch(AC1, A1, Side::Buy, "0.001");
+        assert!(h.verify().is_empty(), "full replay, late_fee={late_fee}");
+        for at in [before, after] {
+            assert!(
+                h.verify_from(Some(at)).is_empty(),
+                "late_fee={late_fee}, snapshot={at}"
+            );
+        }
+    }
+}
+
 fn rref(d: &OrderDecision) -> hft_strategy_sdk::OrderRef {
     hft_strategy_sdk::OrderRef {
         venue: d.venue,

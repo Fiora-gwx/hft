@@ -271,7 +271,7 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 2. 反向减仓且 `q ≤ |Q|`:移出成本 `removed = cost × q / |Q|`(i128 一次相除,`TowardZero`;`q = |Q|` 时恰为 `cost`,全平不留残余成本);`realized += sign(Q) × (p × q − removed)`(即 `(p − avg) × q × sign(Q)`,`avg = cost / |Q|`);`cost −= removed`;`qty += s×q`。`cost` 存绝对值(多空都 ≥ 0);`cost` 与 `realized_quote` 的指数是该 inst 的 `px_exp + qty_exp`(`Px × Qty` 的 i128 积本身,不取整)。
 3. 穿越零(`q > |Q|`):拆成"平掉 |Q|"(规则 2)+"新开 q − |Q|"(规则 1)。
 4. 手续费:`fee` 按 `fee_asset` 当时换算率入 `fee_cex`(折扣代币等非 USDT 资产照样换算),并从该资产的 `CashEntry.total` 扣除。**扣哪一桶**(保持基础资产不变量):计价/保证金资产 → 只扣 `total`;本 inst 的基础资产 → 按净量规则体现在该 group 的库存与持仓上(第 5 步);其他基础资产(如平台币折扣)→ 先扣该资产的 `unassigned`,不足部分扣 `baseline`(保持 `NON_STRATEGY`),仍不足则 `unassigned` 记为负并写 `Note{InvShortfall}`(P1);**从不动其他 group 的 `inv`**。
-5. 现金与库存:现货买入 → 计价资产 `total −= p × qty`、基础资产 `total += net_qty`、`inv(base, group) += net_qty`;现货卖出反之(库存从该 group 的 `inv` 扣,不足部分从 `unassigned` 扣并写 `Note{InvShortfall}`);永续 → 已实现与费用进保证金资产 `total` 与 `MarginState.wallet`。
+5. 现金与库存:现货每笔成交按毛量 `p × qty` 换算到计价资产最小单位,买入支出 `Ceil`、卖出收入 `Floor`,损失精度时递增 `rounding`;独立于成本与分析用已实现的取整。买入 → 计价资产 `total` 扣款、基础资产 `total += net_qty`、`inv(base, group) += net_qty`;卖出反之(库存从该 group 的 `inv` 扣,不足部分从 `unassigned` 扣并写 `Note{InvShortfall}`);永续 → 已实现与费用进保证金资产 `total` 与 `MarginState.wallet`。
 6. 已实现与手续费同时累加到 group 的累计、当日、当前轮次三处。
 
 `apply_settled_fill` 仅以实际结算额替代第 5 步的永续现金已实现项,费用仍单独扣一次。数量、按 journal 顺序的平均成本、分析用已实现与轮次账沿用上述规则;这些分析量不是交易所钱包的结算来源。`apply_fill` 保留无结算事实时的既有计算语义。账户权益与强平距离仍使用本地成本估计未实现盈亏,不能把钱包逐单位一致外推为成本、未实现盈亏或强平价也与交易所一致。

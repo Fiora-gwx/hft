@@ -5,8 +5,8 @@
 use hft_event::{
     AccountConfigReportHdr, AdviceHdr, BalanceReport, Bbo, ConnRole, ConnState, ConnStateKind, EngineClock,
     EventKind, ExternalFill, Funding, FundingSettle, IndexPrice, L2BatchHdr, L2SnapHdr, Level, Liquidation,
-    MarginReportHdr, MarkPrice, Note, NoteLevel, OrderEvent, OrderEventKind, PositionReport, RecordFlags,
-    RecordHeader, SendReport, Timer, Trade,
+    MarginReportHdr, MarkPrice, Note, NoteLevel, OrderEvent, PositionReport, RecordFlags, RecordHeader,
+    SendReport, Timer, Trade,
 };
 use hft_ledger::PnlDelta;
 use hft_refdata::FundingSettleKind;
@@ -315,6 +315,7 @@ fn dispatch<'a, D: Driver<S>, S: StrategySet>(
                 let mut o = e.take_oms();
                 e.trace.rec("oms.on_send_report", u64::from(r.slot.0), 0);
                 e.oms.on_send_report(&r, &h, &mut o);
+                touch_report_groups(e, &o);
                 crate::intents::drain_oms(e, inst, drv, &mut o)?;
                 e.put_oms(o);
                 after_oms(e, inst, drv, r.account, r.venue)?;
@@ -789,12 +790,19 @@ fn order_event<D: Driver<S>, S: StrategySet>(
     e.trace
         .rec("oms.on_order_event", u64::from(ev.slot.0), ev.what as u64);
     e.oms.on_order_event(&ev, &h, &mut o);
+    touch_report_groups(e, &o);
     crate::intents::drain_oms(e, inst, drv, &mut o)?;
     e.put_oms(o);
-    if ev.what != OrderEventKind::FeeOnly {
-        after_oms(e, inst, drv, ev.account, ev.venue)?;
-    }
+    after_oms(e, inst, drv, ev.account, ev.venue)?;
     Ok(())
+}
+
+/// Terminal/non-fill reports also change pending and in-flight legs. Refresh after the
+/// complete OMS output (including execution-layer callbacks), as for an ordinary fill.
+fn touch_report_groups(e: &mut Engine, out: &hft_oms::OmsOut) {
+    for update in out.updates.iter() {
+        touch_legs(e, update.r.account, update.group);
+    }
 }
 
 /// After an OMS report: `risk.on_legs` for the touched groups, `CellFlat`, the Unknown gate.
