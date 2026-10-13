@@ -26,7 +26,7 @@ spec: README.md
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
 | 10. SeqRig | PY-106–PY-109、PY-111、PY-112 |
 | 实现说明 | 不适用:见子节 |
-| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140、TK-142、TK-144–TK-145 |
+| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140、TK-142、TK-144–TK-145、TK-155–TK-157 |
 | 金样运行器 | TK-001、TK-005 |
 | 源文件 | TK-066 |
 | 延迟与资源契约 | TK-092–TK-093 |
@@ -1757,7 +1757,7 @@ spec: README.md
 - 级别:integ
 - 里程碑:M2
 - 前置:`fixtures/dst/recon-before.toml` 固定 CI 212 的 50 个种子、套件、每行 2000 步及摘要
-- 步骤:仅用测试适配器重现旧报告与旧输入环,旧轮次时刻按调度周期累加;同一配置运行真实已提交对账 actor;再次关闭检查器运行新 actor
+- 步骤:仅用测试适配器重现旧报告与旧输入环,旧轮次时刻按调度周期累加;PartialFills 时长置零并保留原计划条目以复现历史空操作;同一配置运行真实已提交对账 actor;再次关闭检查器运行新 actor
 - 期望:旧 actor 重现 50 个旧摘要;首条 journal 差异为虚拟 30 s 的 ReconcileReport,此前逐字节相同;新 actor 开关检查器的全部 journal、网关意图、完整 HashTrail 与最终交易所真值逐字节相同;三个运行均达到原步数且不变量通过
 - 证据:CI 保存 `target/dst/reconcile-migration.json`,列出每行的新旧摘要、首次差异序号/时刻和记录数;当前金样保持原种子、套件、步数及哈希范围
 - 实现:`crates/hft-testkit/tests/reconcile_migration.rs::tk_137_recon_migration_preserves_prefix_and_checker_transparency`
@@ -1974,6 +1974,47 @@ spec: README.md
 - 步骤:分别填满条数与字节容量,继续写入;改变已读首条记录;让 outbox 在满环后仍有待发记录
 - 期望:超额写入返回失败且已存数据不变,前缀变化与未排空输出都明确失败
 - 实现:`crates/hft-testkit/src/dst/seq/advisor.rs::tk_154_model_buffers_and_prefix_changes_fail_explicitly`
+
+### TK-155 部分成交由真实撮合产生且窗口有界
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:table
+- 里程碑:M2
+- 前置:W1 的 MockVenue 与真实 SimExchange,现货计价币/基础币费用、永续费用,买卖两个方向
+- 步骤:限制撮合可见量为一个 lot,向 IOC/FOK 提交十个 lot;测试窗口重叠、期间 BBO 更新、结束前发出但结束后才到所的订单、无新行情恢复、clean、零时长、非正 lot 与时刻溢出
+- 期望:IOC 恰成交一个 lot 后 Expired,完整身份保留;费用、仓位、库存、钱包与永续现金覆盖按输入独立算出并逐单位相等;FOK 零成交且资金不变。引擎 BBO 保持原深度,重叠期不提前结束,窗口后按最新报价完整成交;clean/零时长完整成交,非法窗口明确失败
+- 实现:`crates/hft-testkit/tests/partial_fills.rs::tk_155_partial_fills_use_matcher_fees_cash_and_ioc_fok_rules`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| TK-155.1 | 现货计价币手续费,买/卖 × IOC/FOK | IOC 一个 lot 的原始成交、费用与钱包逐单位相等;FOK 零成交 |
+| TK-155.2 | 现货基础币手续费,买/卖 × IOC/FOK | IOC 一个 lot,费用从基础币扣;FOK 不扣费 |
+| TK-155.3 | 永续计价币手续费,买/卖 × IOC/FOK | IOC 一个 lot 的仓位、费用与零开仓现金相等;FOK 零成交 |
+| TK-155.4 | 100 ms 窗口叠加从 50 ms 开始的 150 ms 窗口 | 120 ms 仍部分成交,200 ms 才恢复 |
+| TK-155.5 | 窗口内更新 BBO,199.5 ms 发单,1 ms 入所延迟,无后续行情 | 引擎收到原深度,200.5 ms 按最新报价全成 |
+| TK-155.6 | clean 或零时长 | 故障不生效,完整成交 |
+| TK-155.7 | 非正 lot 或时刻溢出 | 注入报错,不生成故障成交 |
+
+### TK-156 部分成交与晚到基础币手续费的真实引擎验收
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:integ
+- 里程碑:M2
+- 前置:固定种子 1,每行 10,000 步,基础币手续费延迟 50/6000 ms,现货部分成交窗口 5000 ms
+- 步骤:真实引擎与 SimExchange 运行,开关检查器分别执行同一世界
+- 期望:实际出现一个 lot 的 PartialFill 与非零 BTC FeeOnly,窗口后实际恢复大于一个 lot 的完整成交;全部不变量通过且 INV-16 保持钱包严格相等,快照与完整 journal 回放实际执行;检查器开关后的完整 journal、交付、意图、HashTrail 和最终交易所真值逐字节相同
+- 实现:`crates/hft-testkit/tests/partial_fills.rs::tk_156_real_partial_fee_windows_keep_wallets_replay_and_checkers_equal`
+
+### TK-157 部分成交接通前后保留完整金样迁移证据
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)、[HashTrail](README.md#7-状态哈希对比)
+- 级别:integ
+- 里程碑:M2
+- 前置:`fixtures/dst/partial-before.toml` 固定提交 4244872 的 50 个种子、套件、每行 2000 步及摘要
+- 步骤:只将 PartialFills 时长置零,保留计划条目、顺序与随机流,重现旧摘要;再运行正常故障并关闭全部检查器复跑
+- 期望:旧摘要逐行相等,至少一行轨迹变化且首条差异不早于首次部分成交故障,此前 journal 前缀逐字节相同;全部运行达到原步数并通过不变量,检查器开关的完整 journal、交付、意图、HashTrail 与交易所真值相同
+- 证据:CI 保存 `target/dst/partial-fill-migration.json` 的原提交、新旧摘要、差异边界、实际部分成交数量及逐行比较结果,核对后才更新当前金样
+- 实现:`crates/hft-testkit/tests/partial_migration.rs::tk_157_partial_migration_reproduces_prior_goldens_and_preserves_prefix`
 
 ## 验收
 

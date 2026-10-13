@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | RPL-095、RPL-104、RPL-241、RPL-242 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | RPL-001–RPL-004、RPL-070、RPL-079 |
-| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-283 |
+| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-284 |
 | sim | RPL-090–RPL-108、RPL-120–RPL-129、RPL-140–RPL-145、RPL-259 |
 | compare | RPL-160–RPL-173 |
 | latency | RPL-190–RPL-206 |
@@ -161,6 +161,16 @@ spec: README.md
 - 步骤:第 250 步连续崩溃两次并恢复;导出全部已提交段,逐条核对真实写者序号和读回记录,独立进程无检查点重算
 - 期望:至少两个 Recovery 段,Output、快照和全部非空 Advice 均比较成功;导出记录与完整 RunRecord 逐条一致,保留已发布的尾部测量 Meta,文件只增加最终 End,其他正文与物理首末序号保持原件
 - 实现:`apps/replayer/tests/dst.rs::rpl_283_dst_files_preserve_records_and_model_across_recovery`
+
+### RPL-284 部分成交故障的真实文件与 Model 跨恢复回放
+
+- 规则:[verify](README.md#verify)
+- 级别:proc
+- 里程碑:M2
+- 前置:沿用 RPL-283 的真实引擎、Model 与文件导出,固定种子 1、10,000 步,现货 PartialFills 窗口 5000 ms
+- 步骤:第 250 步连续崩溃两次并恢复;导出完整原件,独立 replayer 进程无检查点重算
+- 期望:日志中非零 PartialFill 数大于零、至少两个 Recovery 段,完成全部步数且全部 DST 不变量通过;Output、快照和全部非空 Advice 逐字节比较成功,源文件与完整 RunRecord 一致;case.json 的部分成交计数从原始日志独立统计
+- 实现:`apps/replayer/tests/dst.rs::rpl_284_partial_fills_replay_real_files_and_model_across_recovery`
 
 ### RPL-013 未给 --from-seq 时从第一个段首快照起步并比对其后全部 Output
 

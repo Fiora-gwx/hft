@@ -441,6 +441,7 @@ jobs:
             target/dst/*/faults.txt
             target/dst/*/journal.bin
             target/dst/*/rpl-283-*/
+            target/dst/*/rpl-284-*/
             target/dst/*.json
             target/xtask/dst.json
           if-no-files-found: ignore
@@ -451,6 +452,16 @@ jobs:
         with:
           name: reconcile-migration
           path: target/dst/reconcile-migration.json
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Upload partial-fill migration and file replay evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: partial-fill-migration
+          path: |
+            target/dst/partial-fill-migration.json
+            target/dst/*/rpl-284-*/
           if-no-files-found: ignore
           retention-days: 7
       # Directed infrastructure evidence, not LED-081 seed acceptance.

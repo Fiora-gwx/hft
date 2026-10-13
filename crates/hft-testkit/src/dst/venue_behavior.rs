@@ -196,7 +196,7 @@ pub struct ToyMatcher {
     latency_ns: u64,
     /// Fault `BaseFee`: fees in the base asset.
     pub base_fee: bool,
-    /// Fault `PartialFills`: takers fill at most half.
+    /// Toy-only half-fill knob; the venue's `PartialFills` fault limits matching liquidity.
     pub partial: bool,
 }
 
@@ -677,6 +677,15 @@ enum NextOrder {
     NoClientId,
 }
 
+/// Latest advertised book, kept separately from the faulted matching liquidity.
+#[derive(Clone, Copy, Debug)]
+struct MatchBook {
+    inst: InstId,
+    lot: i64,
+    bid: (i64, i64),
+    ask: (i64, i64),
+}
+
 /// A venue in the DST: matcher + behaviour layer + fault perturbation.
 #[derive(Debug)]
 pub struct MockVenue<M: Matcher> {
@@ -691,6 +700,8 @@ pub struct MockVenue<M: Matcher> {
     windows: Vec<(u64, u64, Fault)>,
     next_order: Vec<NextOrder>,
     late_fees: VecDeque<u32>,
+    books: Vec<MatchBook>,
+    partial_until: Option<u64>,
     /// Scheduled Ack arrival and identity, scoped to this venue and account. An Ack scheduled
     /// after a fill cannot resolve that fill early. This models the gw's exchange-id lookup;
     /// it must not treat the matcher-supplied slot as evidence for a no-client-id report.
@@ -727,6 +738,18 @@ impl<M: Matcher> MockVenue<M> {
             windows: Vec::new(),
             next_order: Vec::new(),
             late_fees: VecDeque::new(),
+            books: world
+                .insts
+                .iter()
+                .filter(|i| i.venue == v)
+                .map(|i| MatchBook {
+                    inst: i.id,
+                    lot: i.lot,
+                    bid: (i.bid, i.depth),
+                    ask: (i.ask, i.depth),
+                })
+                .collect(),
+            partial_until: None,
             ack_ids: BTreeMap::new(),
             md_down_until: 0,
             order_down_until: 0,
@@ -752,6 +775,28 @@ impl<M: Matcher> MockVenue<M> {
             .iter()
             .find(|(s, e, x)| *s <= now && now < *e && f(x))
             .map(|(_, _, x)| *x)
+    }
+
+    /// Restore the latest book at the window boundary, even when no market update arrives.
+    /// Collection is capped at this boundary, so it cannot match with stale thin liquidity
+    /// beyond the window. SimExchange processes commands strictly before a market record.
+    fn finish_partial(&mut self, now: u64) {
+        if let Some(end) = self.partial_until
+            && now >= end
+        {
+            for b in &self.books {
+                self.m.on_bbo(b.inst, b.bid, b.ask, end);
+            }
+            self.partial_until = None;
+        }
+    }
+
+    fn matching_book(&self, b: MatchBook, now: u64) -> ((i64, i64), (i64, i64)) {
+        if self.partial_until.is_some_and(|end| now < end) {
+            ((b.bid.0, b.bid.1.min(b.lot)), (b.ask.0, b.ask.1.min(b.lot)))
+        } else {
+            (b.bid, b.ask)
+        }
     }
     fn conn_state(&self, role: ConnRole, state: ConnStateKind, account: AccountId) -> InputRec {
         InputRec::of(
@@ -779,7 +824,14 @@ impl<M: Matcher> MockVenue<M> {
         ask: (i64, i64),
         now: u64,
     ) -> Option<(u64, InputRec)> {
-        self.m.on_bbo(inst, bid, ask, now);
+        self.finish_partial(now);
+        let book = self.books.iter_mut().find(|b| b.inst == inst).map(|b| {
+            b.bid = bid;
+            b.ask = ask;
+            *b
+        });
+        let (match_bid, match_ask) = book.map_or((bid, ask), |b| self.matching_book(b, now));
+        self.m.on_bbo(inst, match_bid, match_ask, now);
         if now < self.md_down_until || self.quiet.get(&inst.0).is_some_and(|t| now < *t) {
             return None;
         }
@@ -803,6 +855,7 @@ impl<M: Matcher> MockVenue<M> {
 
     /// A frame from the engine: gw `SendReport`, behaviour layer, then the matcher.
     pub fn on_frame(&mut self, cmd: &GwCmd, now: u64) -> Vec<(u64, InputRec)> {
+        self.finish_partial(now);
         let mut out = Vec::new();
         let a = cmd.account;
         if !self.clean {
@@ -943,8 +996,13 @@ impl<M: Matcher> MockVenue<M> {
 
     /// Matcher reports that are due, perturbed by the active report faults.
     fn collect(&mut self, now: u64) -> Vec<(u64, InputRec)> {
+        self.finish_partial(now);
         let mut reps = Vec::new();
-        self.m.drain_due(now.saturating_add(10_000_000), &mut reps);
+        let horizon = now.saturating_add(10_000_000);
+        self.m.drain_due(
+            self.partial_until.map_or(horizon, |end| horizon.min(end)),
+            &mut reps,
+        );
         if now >= self.userstream_down_until {
             let mut pending = Vec::new();
             for (at, fill) in self.adl_replays.drain(..) {
@@ -1080,6 +1138,7 @@ impl<M: Matcher> MockVenue<M> {
 
     /// Periodic work at `now`: pongs, dead-man, due reports, recoveries.
     pub fn tick(&mut self, now: u64) -> Vec<(u64, InputRec)> {
+        self.finish_partial(now);
         let mut out = Vec::new();
         if !self.clean && self.cfg.bbo_ping_ms > 0 {
             while self.next_ping <= now {
@@ -1116,6 +1175,9 @@ impl<M: Matcher> MockVenue<M> {
     /// Next time `tick` has work.
     pub fn next_wake(&self, now: u64) -> u64 {
         let mut t = self.m.next_due().unwrap_or(u64::MAX);
+        if let Some(end) = self.partial_until {
+            t = t.min(end);
+        }
         if let Some(at) = self.adl_replays.iter().map(|(at, _)| *at).min() {
             t = t.min(at.max(self.userstream_down_until));
         }
@@ -1177,7 +1239,28 @@ impl<M: Matcher> MockVenue<M> {
             | Fault::GrayConn { dur_ms, .. }
             | Fault::RateLimit { dur_ms, .. }
             | Fault::PersistentSecondReject { dur_ms, .. } => self.windows.push((now, now + ms(dur_ms), *f)),
-            Fault::PartialFills { .. } => self.m_partial(true),
+            Fault::PartialFills { dur_ms, .. } => {
+                self.finish_partial(now);
+                if dur_ms == 0 {
+                    return out;
+                }
+                let Some(end) = now.checked_add(ms(dur_ms)) else {
+                    self.fault_error = Some("partial fill window exceeds virtual time".into());
+                    return out;
+                };
+                if self.books.iter().any(|b| b.lot <= 0) {
+                    self.fault_error = Some("partial fills require positive instrument lots".into());
+                    return out;
+                }
+                let was_active = self.partial_until.is_some();
+                self.partial_until = Some(self.partial_until.map_or(end, |old| old.max(end)));
+                if !was_active {
+                    for b in &self.books {
+                        let (bid, ask) = self.matching_book(*b, now);
+                        self.m.on_bbo(b.inst, bid, ask, now);
+                    }
+                }
+            }
             Fault::Timeout { .. } => self.next_order.push(NextOrder::Timeout),
             Fault::ServerError { .. } => self.next_order.push(NextOrder::ServerError),
             Fault::UnknownCode { .. } => self.next_order.push(NextOrder::UnknownCode),
@@ -1367,8 +1450,6 @@ impl<M: Matcher> MockVenue<M> {
         }
         out
     }
-
-    fn m_partial(&mut self, _on: bool) {}
 
     /// Latched fault prerequisite/capacity failure; no execution is created after it.
     pub fn fault_error(&self) -> Option<&str> {

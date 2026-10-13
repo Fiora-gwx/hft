@@ -393,6 +393,7 @@ impl<S: StrategySet> SeqRig<S> {
    - `VenueSpec.perp_cash` 在引擎与匹配器的 refdata 中同时启用 `PERP_CASH`,只接受永续 venue 与品种。W1 的真实 SimExchange 默认提供该能力;TK-123 显式关闭以保留旧记录反例,TK-127 核对默认能力和原完整种子的严格资金结果。该用例的真实 journal 还从首个、中间及最后一个仍有成交后缀的快照交给冷读者,核对全部钱包、仓位和库存。测试世界声明能力不代表真实协议、外来重叠、对账补量或完整恢复装配通过验收,未证明的路径仍明确失败。
    - `NoClientIdFill` 保留同一成交的无 client id 副本。副本先清空 `(epoch, slot, gen)`,再按本 venue、账户和交易所订单号查同品种 Ack 映射,现金与费用原样保留。已到达 Ack 可即时匹配;已排入世界队列的稍后 Ack 在 `MockVenueCfg.unmatched_hold_ms` 内则把副本延至该 Ack 到达时交付,等待期间仍记为在途。不能提前使用未来身份或借另一账户的同号订单。该参数的 W1 默认值为 5000 ms;未命中已排队 Ack、超时转外来成交及重新归属仍属于 LK-4 的未完成覆盖,`within_hold` 两种标记不冒充这些分支验收。
    - `FillBeforeAck` 只在实际遇到下一条 Ack 时消费并延迟该 Ack;空轮询和其他回报不消费此故障。
+   - `PartialFills{venue,dur_ms}` 在半开窗口 `[开始,开始+dur_ms)` 内把该 venue 各品种撮合盘口的可见量限制为 `min(原量,lot)`;引擎收到的原始 BBO 保持不变。真实匹配器自行产生部分成交、费用、永续现金事实与 IOC 到期;FOK 仍须全成或零成。重叠窗口取结束时刻最大值,窗口结束按最近原始 BBO 恢复,没有新行情也恢复;回报收集不得提前推进撮合越过该边界。零时长不生效,非正 lot 或时刻溢出明确失败,`SimActor` 的 clean 路径不注入(TK-155)。真实引擎的基础币延迟手续费、严格钱包核对、完整 journal 与检查器透明性归 TK-156,实际文件及 Model 重算归 [RPL-284](../../apps/replayer/TESTS.md#rpl-284-部分成交故障的真实文件与-model-跨恢复回放)。
    - `SimActor`:与 hft-core 的 sim-gw 相同的 `SimExchange` 用法(不经故障注入),覆盖 Sim 账户路径;`CrashFault` 之后按 hft-sim 规定的恢复步骤由快照与 journal 重建模拟交易所状态(余额、仓位、挂单;规则归 [hft-sim](../hft-sim/README.md)),不保留崩溃前的内存对象。
    - `AdvisorActor`:按 sequencer 的 advisor 规则驱动策略的 `Model`,产出带依据(`basis_seq` 等,字段归 hft-event)的 `Advice` 送回 `SeqActor`;可注入"落后"(按种子延迟交付并成批追赶;或按 `AdvisorLagFault{from_ens, to_ens, lag_ms}` 在引擎时间 [from_ens, to_ens) 内使 Model 处理 journal 落后 `lag_ms`,其间产出的 Advice 同样推迟交付)。
    - `CtlActor`:按 `gen::control_cmds` 注入命令(带主体与角色,含 Viewer);`ReconActor`:真实引擎使用下文的已提交对账轮次,置位条件归 [reconciler](../../apps/reconciler/README.md#reconcilereport);`round` 仅供 ToyEngine 框架自测。`HkActor`:注入 `ClockStatus`、persist/磁盘状态;`MarketActor`:生成或回放行情。
@@ -407,7 +408,7 @@ impl<S: StrategySet> SeqRig<S> {
 
 `ReceiptReader` 从有界 ExternalReceipt 历史筛出尚未入账的完整身份,按原始历史顺序提交现金与费用;重复分页只接受逐字节相同的原件。已入账身份按完整提交事件累积,不依赖热账本去重 FIFO 的当前保留窗口。`ReconActor::settled_input` 只负责打包;缺失、冲突、超量、无完整现金覆盖或错误账户/品种的凭据使本轮明确失败,不从仓位差或钱包差估算现金。TK-134–136 覆盖自动选择、两轮条件、FIFO 回收、重启与补报;LED-081 的开平仓与标准种子入口见下文。资金费、余额与 UnknownResolved 的完整对账轮次仍未实现,真实轮次拒绝仅含金额差的 funding 注入。
 
-TK-137 独立保存迁移前的 HashTrail 参考,用旧 actor 重现它;真实 actor 在首轮对账前须保持 journal 前缀相同,检查器开关须保持完整 journal、意图、HashTrail 和交易所真值相同。当前金样对应真实 actor,迁移仅更新有该证据支持的摘要,不减少种子、步数或比较字段。
+TK-137 独立保存迁移前的 HashTrail 参考,用旧 actor 重现它;真实 actor 在首轮对账前须保持 journal 前缀相同,检查器开关须保持完整 journal、意图、HashTrail 和交易所真值相同。该历史证明把 PartialFills 时长置零,保留原故障条目与调度。TK-157 用同一方式重现部分成交接通前的 50 行参考,默认故障生效后的首条差异不得早于首次 PartialFills;完整检查器开关比较包含 journal、交付、意图、HashTrail 和交易所真值。当前金样只接受有 CI 迁移证据支持的摘要,不减少种子、步数或比较字段。
 
 `ReconciledAdl{full,replay}` 在用户流断开且交易所永续仓位非零时结算一次,保存完整原件并省略首次推送。缺口按完整成交身份保持在途,不使用品种/资产数字排除项。实际 ReconcileBatch 事件提交后,独立冷消费者确认原件确已入账才解除缺口;拒绝的批次、仅生成的批次和其他账户/成交键都不能解除。`replay` 在此之后至少 1 ms 且用户流恢复后补推同一原件;无补推时直接恢复完整 I16。前置不满足或容量耗尽明确失败,检查器关闭仍执行相同的交付流程。原 `Adl{gap,replay}` 的普通补报时序独立保留。
 
@@ -492,7 +493,7 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 - 多进程场景(可选扩展:hft-core ↔ chain-core)只在集成环境测;DST 以 `SeqActor` + 真实 `ChainSeq` 同进程模拟链路。
 - `MockVenue` 的交易所行为层是"规格中的交易所",与真实交易所的差异只能由金样、测试网/模拟盘联调与正式实盘的运行监控发现。
 - 真实 `SeqSut` 的基础币费用仅支持同一现货 venue 共用基础资产的世界;多基础资产与永续的该配置拒绝启动(TK-106)。
-- LED-080/081 的专属场景和标准种子入口按上述契约执行;普通基线的 `StaleGenFill`、`LateFillAfterRecycle` 与 `PartialFills` 尚未接通,基线通过不能视为这些故障已覆盖。多笔原件与累计回报的部分重叠仍明确失败,不在 LED-080 的单笔重复证明内。
+- LED-080/081 的专属场景和标准种子入口按上述契约执行;普通基线的 `StaleGenFill` 与 `LateFillAfterRecycle` 尚未接通,基线通过不能视为这些故障已覆盖。多笔原件与累计回报的部分重叠仍明确失败,不在 LED-080 的单笔重复证明内。
 - 真实引擎的逐 Input 与逐决策观察契约见 [DST 框架](#6-dst-框架)。`toy::PLANTED` 各行的真实引擎版本(各 crate 的 `planted-*` feature)、`run_sim_case`(TK-009)、`ProbeBuild` 注入(TK-095)与模板探针的构建检查(TK-042)未落地(TK-053 仍以 `ToyEngine` 运行);`hft-dst` 的 `SIGINT`/`SIGTERM` 处理属 M6。
 
 ### 开发备忘

@@ -1,5 +1,5 @@
 //! RPL-012: actual DST -> physical files -> independent replayer process, no checkpoints.
-use hft_event::{EventKind, SegmentRoll};
+use hft_event::{EventKind, OrderEvent, OrderEventKind, SegmentRoll};
 use hft_testkit::dst::{DstConfig, DstOutcome, RerunPolicy, run_record};
 use hft_testkit::scenarios::{SeqEngine, replay_config, suites};
 use serde_json::{Value, json};
@@ -119,6 +119,13 @@ fn verify_case(cfg: &DstConfig, dir: &Path) -> Value {
                 && r.reason == hft_journal::RollReason::Recovery as u8
         })
         .count();
+    let partial_fills = log
+        .recs
+        .iter()
+        .filter(|r| r.kind == EventKind::ORDER_EVENT)
+        .filter_map(|r| r.read::<OrderEvent>())
+        .filter(|e| e.what == OrderEventKind::PartialFill && e.qty.0 > 0)
+        .count();
     let files: Vec<_> = (1..=log.segs.len())
         .map(|si| {
             let file = journal.join(format!("{si:010}.jrn"));
@@ -132,7 +139,7 @@ fn verify_case(cfg: &DstConfig, dir: &Path) -> Value {
         "steps_limit": cfg.steps, "steps_run": rec.steps_run, "end_ns": rec.end_ns,
         "records": log.recs.len(), "segments": log.segs.len(), "recovery_runs": recovery,
         "physical_last_seq": log.record_end_seq(log.recs.len() - 1),
-        "advices": advice, "faults_planned": plan.items.len(),
+        "advices": advice, "partial_fills": partial_fills, "faults_planned": plan.items.len(),
         "faults_scheduled_before_end": plan.items.iter().filter(|(t, _)| *t <= rec.end_ns).count(),
         "files": files, "summary": summary});
     std::fs::write(dir.join("case.json"), serde_json::to_vec_pretty(&result).unwrap()).unwrap();
@@ -159,6 +166,40 @@ fn rpl_283_dst_files_preserve_records_and_model_across_recovery() {
         std::process::id()
     ));
     let result = verify_case(&cfg, &dir);
+    assert!(result["recovery_runs"].as_u64().unwrap() >= 2, "{result}");
+}
+
+#[test]
+fn rpl_284_partial_fills_replay_real_files_and_model_across_recovery() {
+    use hft_testkit::dst::faults::{CrashFault, Fault};
+    let mut cfg = replay_config(&suites()[0], 1);
+    cfg.steps = 10_000;
+    cfg.faults = hft_testkit::dst::FaultRates::off();
+    cfg.rerun = RerunPolicy::Never;
+    cfg.scripted = vec![
+        (
+            0,
+            Fault::PartialFills {
+                venue: hft_testkit::dst::world::VS,
+                dur_ms: 5_000,
+            },
+        ),
+        (
+            0,
+            Fault::Crash(CrashFault {
+                at_step: 250,
+                repeat: 2,
+                point: hft_testkit::dst::CrashPoint::SeqInput,
+            }),
+        ),
+    ];
+    let dir = root().join(format!(
+        "target/dst/0000000000000001/rpl-284-{}",
+        std::process::id()
+    ));
+    let result = verify_case(&cfg, &dir);
+    assert_eq!(result["steps_run"], 10_000);
+    assert!(result["partial_fills"].as_u64().unwrap() > 0, "{result}");
     assert!(result["recovery_runs"].as_u64().unwrap() >= 2, "{result}");
 }
 

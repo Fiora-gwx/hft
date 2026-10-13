@@ -22,6 +22,10 @@ mod hash;
 mod invariants_map;
 #[cfg(feature = "seq")]
 mod ledger_case;
+#[cfg(feature = "seq")]
+mod partial_fills;
+#[cfg(feature = "seq")]
+mod partial_migration;
 mod planted;
 mod probes;
 #[cfg(feature = "seq")]
