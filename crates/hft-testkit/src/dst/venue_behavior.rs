@@ -712,6 +712,33 @@ pub struct StaleGenReport {
     pub executions: Vec<StaleGenExecution>,
 }
 
+fn foreign_order_event(fill: ExternalFill, identity: (SlotId, u32, u16)) -> OrderEvent {
+    OrderEvent {
+        venue: fill.venue,
+        account: fill.account,
+        inst: fill.inst,
+        what: OrderEventKind::Fill,
+        detail: fill.side as u8,
+        slot: identity.0,
+        r#gen: identity.1,
+        epoch: identity.2,
+        px: fill.px,
+        qty: fill.qty,
+        cum_filled: fill.qty,
+        fee: fill.fee,
+        fee_asset: fill.fee_asset,
+        reject_code: 0,
+        exch_order_id: fill.exch_order_id,
+        ex_ts_ns: fill.ex_ts_ns,
+        hw_rx_ns: 0,
+        rx_tsc: 0,
+        avg_px: fill.px,
+        cash_qty: fill.cash_qty,
+        cash_sum: fill.cash_amount,
+        trade_id: fill.trade_id,
+    }
+}
+
 /// A venue in the DST: matcher + behaviour layer + fault perturbation.
 #[derive(Debug)]
 pub struct MockVenue<M: Matcher> {
@@ -737,6 +764,7 @@ pub struct MockVenue<M: Matcher> {
     /// (request time, variant). Seed and request ordinal cover side and positive/zero trade ID.
     stale_pending: VecDeque<(u64, u8)>,
     stale_executions: Vec<StaleGenExecution>,
+    stale_replies: VecDeque<VenueOut>,
     md_down_until: u64,
     order_down_until: u64,
     userstream_down_until: u64,
@@ -786,6 +814,7 @@ impl<M: Matcher> MockVenue<M> {
             stale_requested: 0,
             stale_pending: VecDeque::new(),
             stale_executions: Vec::new(),
+            stale_replies: VecDeque::new(),
             md_down_until: 0,
             order_down_until: 0,
             userstream_down_until: 0,
@@ -1034,10 +1063,19 @@ impl<M: Matcher> MockVenue<M> {
         self.finish_partial(now);
         let mut reps = Vec::new();
         let horizon = now.saturating_add(10_000_000);
-        self.m.drain_due(
-            self.partial_until.map_or(horizon, |end| horizon.min(end)),
-            &mut reps,
-        );
+        let horizon = self.partial_until.map_or(horizon, |end| horizon.min(end));
+        self.m.drain_due(horizon, &mut reps);
+        let mut stale = false;
+        while self.stale_replies.front().is_some_and(|r| r.due_ns <= horizon) {
+            if let Some(report) = self.stale_replies.pop_front() {
+                reps.push(report);
+                stale = true;
+            }
+        }
+        if stale {
+            // Preserve the existing matcher order when no generated report is present.
+            reps.sort_by_key(|r| r.due_ns);
+        }
         if now >= self.userstream_down_until {
             let mut pending = Vec::new();
             for (at, fill) in self.adl_replays.drain(..) {
@@ -1158,12 +1196,23 @@ impl<M: Matcher> MockVenue<M> {
                     .or_insert(copy_due);
                 out.push((copy_due, InputRec::of(&copy, self.src())));
             }
-            if !self.clean
+            let duplicate = !self.clean
                 && self
                     .active(now, |f| matches!(f, Fault::ReportDup { .. }))
-                    .is_some()
-            {
+                    .is_some();
+            if duplicate {
                 out.push((due + 1, input.clone()));
+            }
+            if let RepMsg::OrderEvent(e) = &rep
+                && let Some(execution) = self
+                    .stale_executions
+                    .iter_mut()
+                    .find(|x| x.account == e.account && x.order_id == e.exch_order_id)
+            {
+                execution.delivered_ns = due + u64::from(duplicate);
+                self.last_due
+                    .entry(e.account.0)
+                    .and_modify(|last| *last = (*last).max(execution.delivered_ns));
             }
             out.push((due, input));
         }
@@ -1174,7 +1223,8 @@ impl<M: Matcher> MockVenue<M> {
     /// Periodic work at `now`: pongs, dead-man, due reports, recoveries.
     pub fn tick(&mut self, now: u64) -> Vec<(u64, InputRec)> {
         self.finish_partial(now);
-        let mut out = self.drain_stale(now);
+        self.drain_stale(now);
+        let mut out = Vec::new();
         if !self.clean && self.cfg.bbo_ping_ms > 0 {
             while self.next_ping <= now {
                 let silent = self.next_ping < self.md_down_until
@@ -1210,6 +1260,9 @@ impl<M: Matcher> MockVenue<M> {
     /// Next time `tick` has work.
     pub fn next_wake(&self, now: u64) -> u64 {
         let mut t = self.m.next_due().unwrap_or(u64::MAX);
+        if let Some(report) = self.stale_replies.front() {
+            t = t.min(report.due_ns);
+        }
         if !self.clean
             && !self.stale_pending.is_empty()
             && self.fault_error.is_none()
@@ -1328,7 +1381,11 @@ impl<M: Matcher> MockVenue<M> {
                         .push_back((now, ((self.stale_seed ^ ordinal) & 3) as u8));
                 }
                 self.stale_requested = total;
-                out.extend(self.drain_stale(now));
+                let before = self.stale_executions.len();
+                self.drain_stale(now);
+                if self.stale_executions.len() != before {
+                    out.extend(self.collect(now));
+                }
             }
             Fault::ForeignOrderFill {
                 account,
@@ -1372,30 +1429,7 @@ impl<M: Matcher> MockVenue<M> {
                 if raw_first {
                     out.push((now + 1_000_000, InputRec::of(&fill, self.src())));
                 }
-                let order = OrderEvent {
-                    venue: fill.venue,
-                    account,
-                    inst,
-                    what: OrderEventKind::Fill,
-                    detail: side as u8,
-                    slot: identity.0,
-                    r#gen: identity.1,
-                    epoch: identity.2,
-                    px: fill.px,
-                    qty: fill.qty,
-                    cum_filled: fill.qty,
-                    fee: fill.fee,
-                    fee_asset: fill.fee_asset,
-                    reject_code: 0,
-                    exch_order_id: fill.exch_order_id,
-                    ex_ts_ns: fill.ex_ts_ns,
-                    hw_rx_ns: 0,
-                    rx_tsc: 0,
-                    avg_px: fill.px,
-                    cash_qty: fill.cash_qty,
-                    cash_sum: fill.cash_amount,
-                    trade_id: fill.trade_id,
-                };
+                let order = foreign_order_event(fill, identity);
                 let due = now + 2_000_000;
                 out.push((due, InputRec::of(&order, self.src())));
                 self.last_due
@@ -1528,10 +1562,9 @@ impl<M: Matcher> MockVenue<M> {
         }
     }
 
-    fn drain_stale(&mut self, now: u64) -> Vec<(u64, InputRec)> {
-        let mut out = Vec::new();
+    fn drain_stale(&mut self, now: u64) {
         if self.clean || self.fault_error.is_some() || now < self.userstream_down_until {
-            return out;
+            return;
         }
         while let Some(&(requested_ns, variant)) = self.stale_pending.front() {
             let Some((ack_ns, ack)) = self.ack_ids.values().find(|(at, _)| *at <= now).copied() else {
@@ -1541,37 +1574,27 @@ impl<M: Matcher> MockVenue<M> {
                 self.fault_error = Some("stale Ack instrument is not in the venue".into());
                 break;
             };
-            if now.checked_add(2_000_000).is_none() {
+            let Some(due) = now.checked_add(2_000_000) else {
                 self.fault_error = Some("stale fill delivery exceeds virtual time".into());
                 break;
-            }
-            let rows = self.apply_fault(
-                &Fault::ForeignOrderFill {
-                    account: ack.account,
-                    inst: ack.inst,
-                    qty: book.lot,
-                    buy: variant & 1 == 0,
-                    positive_trade_id: variant & 2 == 0,
-                    unresolved: false,
-                    raw_first: false,
-                },
-                now,
-            );
-            if self.fault_error.is_some() {
-                break;
-            }
-            let Some((due, input)) = rows.first() else {
-                self.fault_error = Some("stale fill produced no order report".into());
-                break;
             };
-            let Some(order) = input.read::<OrderEvent>() else {
-                self.fault_error = Some("stale fill produced an invalid order report".into());
-                break;
-            };
+            let side = if variant & 1 == 0 { Side::Buy } else { Side::Sell };
+            let fill =
+                match self
+                    .m
+                    .external_order(ack.account, ack.inst, side, book.lot, variant & 2 == 0, now)
+                {
+                    Ok(fill) => fill,
+                    Err(error) => {
+                        self.fault_error = Some(error);
+                        break;
+                    }
+                };
+            let order = foreign_order_event(fill, (ack.slot, ack.r#gen ^ (1 << 31), ack.epoch));
             self.stale_executions.push(StaleGenExecution {
                 requested_ns,
                 matched_ns: now,
-                delivered_ns: *due,
+                delivered_ns: due,
                 ack_ns,
                 account: ack.account,
                 inst: ack.inst,
@@ -1581,10 +1604,17 @@ impl<M: Matcher> MockVenue<M> {
                 ack_order_id: ack.exch_order_id,
                 order_id: order.exch_order_id,
             });
+            self.stale_replies.push_back(VenueOut {
+                due_ns: due,
+                rep: RepMsg::OrderEvent(order),
+                client_id: "stale-gen-fault".into(),
+            });
+            self.last_due
+                .entry(ack.account.0)
+                .and_modify(|last| *last = (*last).max(due))
+                .or_insert(due);
             self.stale_pending.pop_front();
-            out.extend(rows);
         }
-        out
     }
 
     /// Clear only receipts independently proved booked at a committed engine boundary.

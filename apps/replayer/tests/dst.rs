@@ -132,7 +132,8 @@ fn verify_case(cfg: &DstConfig, dir: &Path) -> Value {
                 r.fill.venue == v.venue && r.fill.account == x.account && r.fill.exch_order_id == x.order_id)
                 .expect("stale execution must retain its original receipt").fill;
             let delivered_seq = rec.journal.iter().find_map(|j| j.try_read::<OrderEvent>()
-                .filter(|e| e.venue == v.venue && e.account == x.account && e.exch_order_id == x.order_id)
+                .filter(|e| e.venue == v.venue && e.account == x.account && e.exch_order_id == x.order_id
+                    && (e.epoch, e.slot, e.r#gen) == (x.epoch, x.slot, x.ack_gen ^ (1 << 31)))
                 .map(|_| j.seq));
             json!({"requested_ns": x.requested_ns, "matched_ns": x.matched_ns,
                 "delivered_ns": x.delivered_ns, "ack_ns": x.ack_ns, "account": x.account.0,

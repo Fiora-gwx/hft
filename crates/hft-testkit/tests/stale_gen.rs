@@ -1,5 +1,5 @@
 //! Default stale-generation faults must create independent, exactly-once executions.
-use hft_event::{GwCmd, GwOp, Note, NoteSource, OrderEvent, OrderEventKind, RecordFlags};
+use hft_event::{EventKind, GwCmd, GwOp, Note, NoteSource, OrderEvent, OrderEventKind, RecordFlags};
 use hft_testkit::dst::seq::matcher::SimMatcher;
 use hft_testkit::dst::venue_behavior::{EXTERNAL_HISTORY_CAP, Matcher, MockVenue, MockVenueCfg, ToyMatcher};
 use hft_testkit::dst::world::{ACCT_A, BTC, P1, S1, USDT, VP, VS, WorldSpec};
@@ -8,6 +8,7 @@ use hft_testkit::dst::{
 };
 use hft_testkit::scenarios::{DstEngine, foreign_ledger, suites};
 use hft_types::{InstId, Px, Qty, Side, SlotId, Tif, Tsc, VenueId};
+use zerocopy::TryFromBytes;
 
 const MS: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MS;
@@ -56,9 +57,10 @@ fn place(inst: InstId, qty: i64) -> GwCmd {
 fn ack(v: &mut MockVenue<SimMatcher>, inst: InstId, lot: i64) -> u64 {
     let rows = v.on_frame(&place(inst, lot), 10 * MS);
     rows.iter()
+        .filter(|(_, input)| input.kind == EventKind::ORDER_EVENT)
         .find_map(|(at, input)| {
-            input
-                .read::<OrderEvent>()
+            OrderEvent::try_read_from_bytes(&input.body)
+                .ok()
                 .filter(|e| e.what == OrderEventKind::Ack)
                 .map(|_| *at)
         })
@@ -105,8 +107,13 @@ fn tk_160_default_stale_fills_preserve_original_settlement_and_scoped_identity()
                 30 * MS,
             );
             assert!(v.fault_error().is_none(), "{row} venue={venue_id:?} seed={seed}");
-            assert_eq!(rows.len(), 1);
-            let order = rows[0].1.read::<OrderEvent>().unwrap();
+            let orders: Vec<_> = rows
+                .iter()
+                .filter(|(_, input)| input.kind == EventKind::ORDER_EVENT)
+                .map(|(_, input)| OrderEvent::try_read_from_bytes(&input.body).unwrap())
+                .collect();
+            assert_eq!(orders.len(), 1);
+            let order = orders[0];
             assert_eq!(
                 (order.what, order.detail, order.venue),
                 (OrderEventKind::Fill, side as u8, venue_id)
@@ -212,7 +219,8 @@ fn tk_161_stale_queue_waits_for_ack_and_stream_and_fails_before_invalid_executio
     let rows = v.tick(up);
     assert_eq!(
         rows.iter()
-            .filter_map(|(_, i)| i.read::<OrderEvent>())
+            .filter(|(_, i)| i.kind == EventKind::ORDER_EVENT)
+            .filter_map(|(_, i)| OrderEvent::try_read_from_bytes(&i.body).ok())
             .filter(|e| e.r#gen == 3 ^ (1 << 31))
             .count(),
         1
@@ -436,4 +444,105 @@ fn tk_164_framework_model_books_default_stale_fills_as_external_evidence() {
         r.outcome.failure().map(|f| (&f.invariant, &f.message))
     );
     assert_eq!(r.stale_gen.iter().map(|v| v.executions.len()).sum::<usize>(), 4);
+}
+
+#[test]
+fn tk_165_stale_reports_share_transport_faults_without_repeating_settlement() {
+    let world = WorldSpec::w1();
+    let mut v = venue::<SimMatcher>(&world, VP, 0);
+    let ack_due = ack(&mut v, P1, 100_000);
+    v.tick(ack_due);
+    v.m.on_bbo(P1, (600_189_000, 1_000_000), (600_190_000, 1_000_000), 20 * MS);
+    v.m.external(ACCT_A, P1, Side::Sell, 200_000, "seed", false, 20 * MS);
+    // Drain the seed receipt before arming delivery faults.
+    v.tick(25 * MS);
+    v.m.on_bbo(P1, (600_275_000, 1_000_000), (600_276_000, 1_000_000), 30 * MS);
+    for fault in [
+        Fault::GrayConn {
+            venue: VP,
+            dur_ms: 1_000,
+            factor: 100,
+        },
+        Fault::ReportDup {
+            venue: VP,
+            dur_ms: 1_000,
+        },
+        Fault::NoClientIdFill {
+            venue: VP,
+            within_hold: false,
+        },
+    ] {
+        assert!(v.apply_fault(&fault, 30 * MS).is_empty());
+    }
+    let originals = v.m.external_history().len();
+    let before = v.m.truth(ACCT_A);
+    let rows = v.apply_fault(&Fault::StaleGenFill { venue: VP, count: 1 }, 30 * MS);
+    assert!(v.fault_error().is_none());
+    assert_eq!(v.m.external_history().len(), originals + 1);
+    let fill = v.m.external_history().last().unwrap().fill;
+    assert_eq!(fill.cash_amount, Qty(-8_600));
+    let orders: Vec<_> = rows
+        .iter()
+        .filter(|(_, input)| input.kind == EventKind::ORDER_EVENT)
+        .map(|(at, input)| (*at, OrderEvent::try_read_from_bytes(&input.body).unwrap()))
+        .collect();
+    assert_eq!(orders.len(), 3);
+    for (_, order) in &orders {
+        assert_eq!(
+            (
+                order.exch_order_id,
+                order.qty,
+                order.cum_filled,
+                order.px,
+                order.cash_qty,
+                order.cash_sum,
+                order.fee,
+                order.trade_id
+            ),
+            (
+                fill.exch_order_id,
+                fill.qty,
+                fill.qty,
+                fill.px,
+                fill.cash_qty,
+                fill.cash_amount,
+                fill.fee,
+                fill.trade_id
+            )
+        );
+    }
+    let unresolved: Vec<_> = orders
+        .iter()
+        .filter(|(_, e)| e.slot == SlotId::UNRESOLVED)
+        .collect();
+    assert_eq!(unresolved.len(), 1);
+    assert_eq!(
+        (unresolved[0].0, unresolved[0].1.epoch, unresolved[0].1.r#gen),
+        (230 * MS, 0, 0)
+    );
+    let mut stale: Vec<_> = rows
+        .iter()
+        .filter(|(_, input)| input.kind == EventKind::ORDER_EVENT)
+        .filter(|(_, input)| OrderEvent::try_read_from_bytes(&input.body).unwrap().r#gen == 3 ^ (1 << 31))
+        .collect();
+    stale.sort_by_key(|(at, _)| *at);
+    assert_eq!(stale.len(), 2);
+    assert_eq!((stale[0].0, stale[1].0), (230 * MS, 230 * MS + 1));
+    assert_eq!(stale[0].1.body, stale[1].1.body);
+    let report = v.stale_gen_report();
+    assert_eq!(
+        (report.requested, report.pending, report.executions.len()),
+        (1, 0, 1)
+    );
+    assert_eq!(report.executions[0].delivered_ns, 230 * MS + 1);
+    let settled = v.m.truth(ACCT_A);
+    assert_eq!(
+        amount(&settled.balances, USDT),
+        amount(&before.balances, USDT) - 8_600
+    );
+    v.tick(300 * MS);
+    let after = v.m.truth(ACCT_A);
+    assert_eq!(after.positions, settled.positions);
+    assert_eq!(after.balances, settled.balances);
+    assert_eq!(v.m.external_history().len(), originals + 1);
 }

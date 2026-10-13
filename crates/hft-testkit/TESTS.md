@@ -26,7 +26,7 @@ spec: README.md
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
 | 10. SeqRig | PY-106–PY-109、PY-111、PY-112 |
 | 实现说明 | 不适用:见子节 |
-| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140、TK-142、TK-144–TK-145、TK-155–TK-164 |
+| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140、TK-142、TK-144–TK-145、TK-155–TK-165 |
 | 金样运行器 | TK-001、TK-005 |
 | 源文件 | TK-066 |
 | 延迟与资源契约 | TK-092–TK-093 |
@@ -1757,7 +1757,7 @@ spec: README.md
 - 级别:integ
 - 里程碑:M2
 - 前置:`fixtures/dst/recon-before.toml` 固定 CI 212 的 50 个种子、套件、每行 2000 步及摘要
-- 步骤:仅用测试适配器重现旧报告与旧输入环,旧轮次时刻按调度周期累加;PartialFills 时长置零并保留原计划条目以复现历史空操作;同一配置运行真实已提交对账 actor;再次关闭检查器运行新 actor
+- 步骤:仅用测试适配器重现旧报告与旧输入环,旧轮次时刻按调度周期累加;PartialFills 时长与 StaleGenFill count 置零并保留原计划条目以复现历史空操作;同一配置运行真实已提交对账 actor;再次关闭检查器运行新 actor
 - 期望:旧 actor 重现 50 个旧摘要;首条 journal 差异为虚拟 30 s 的 ReconcileReport,此前逐字节相同;新 actor 开关检查器的全部 journal、网关意图、完整 HashTrail 与最终交易所真值逐字节相同;三个运行均达到原步数且不变量通过
 - 证据:CI 保存 `target/dst/reconcile-migration.json`,列出每行的新旧摘要、首次差异序号/时刻和记录数;当前金样保持原种子、套件、步数及哈希范围
 - 实现:`crates/hft-testkit/tests/reconcile_migration.rs::tk_137_recon_migration_preserves_prefix_and_checker_transparency`
@@ -2087,6 +2087,16 @@ spec: README.md
 - 步骤:现货、永续分别排入两条默认旧代数请求
 - 期望:实际产生四笔独立成交,外来证据和去重路径一致,全部不变量通过;框架模型不冒充真实引擎的 TK-162 验收
 - 实现:`crates/hft-testkit/tests/stale_gen.rs::tk_164_framework_model_books_default_stale_fills_as_external_evidence`
+
+### TK-165 旧代数回报经过共同传输扰动且结算一次
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:unit
+- 里程碑:M2
+- 前置:SimMatcher 永续空仓两 lot,真实 Ack 已到,默认旧代数请求买入一 lot
+- 步骤:同时启用 GrayConn、ReportDup 与 NoClientIdFill,再触发默认旧代数成交;推进到最后一次交付之后
+- 期望:2 ms 原始回报延迟放大为 200 ms,产生一份无 client ID 副本及两份原身份副本;三份交付的数量、价格、现金与成交 ID 都等于唯一原件;副本字节相同,观察时间覆盖最后交付,钱包和仓位只结算一次
+- 实现:`crates/hft-testkit/tests/stale_gen.rs::tk_165_stale_reports_share_transport_faults_without_repeating_settlement`
 
 ## 验收
 
