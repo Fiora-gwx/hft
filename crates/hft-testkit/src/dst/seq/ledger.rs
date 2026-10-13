@@ -120,6 +120,55 @@ struct Evidence {
     shadow: BTreeSet<OrderKey>,
     pending: Vec<(u64, OrderEvent)>,
     notes: Vec<Note>,
+    duplicates: Vec<Note>,
+    booked: BTreeSet<[u64; 16]>,
+}
+
+// Client identity and delivery clocks may differ between copies. All exchange identity
+// and financial facts must be identical to a previously explained, committed receipt.
+fn receipt_facts(e: &OrderEvent) -> [u64; 16] {
+    [
+        u64::from(e.venue.0),
+        u64::from(e.account.0),
+        u64::from(e.inst.0),
+        u64::from(e.detail),
+        e.exch_order_id,
+        e.trade_id,
+        e.qty.0 as u64,
+        e.cum_filled.0 as u64,
+        e.px.0 as u64,
+        e.avg_px.0 as u64,
+        e.fee.0 as u64,
+        u64::from(e.fee_asset.0),
+        e.cash_qty.0 as u64,
+        e.cash_sum.0 as u64,
+        e.ex_ts_ns as u64,
+        e.what as u64,
+    ]
+}
+
+fn duplicate_note(n: &Note, e: &OrderEvent) -> bool {
+    if n.inst != e.inst || n.group != hft_types::GROUP_NONE {
+        return false;
+    }
+    let v0 = u64::from(e.venue.0) | u64::from(e.account.0) << 8;
+    if e.slot.0 == 0 {
+        n.code == hft_oms::notes::code_of(hft_oms::notes::FOREIGN_FILL_VIA_ORDER_EVENT)
+            && n.v == [v0, e.exch_order_id, 0, e.cum_filled.0 as u64, 0, 0, 0, 0]
+    } else {
+        n.code == hft_oms::notes::code_of(hft_oms::notes::STALE_GEN_FILL)
+            && n.v
+                == [
+                    v0,
+                    u64::from(e.slot.0),
+                    0,
+                    u64::from(e.r#gen),
+                    u64::from(e.epoch),
+                    e.exch_order_id,
+                    e.cum_filled.0 as u64,
+                    0,
+                ]
+    }
 }
 
 #[derive(Debug, Default)]
@@ -542,6 +591,16 @@ impl Evidence {
                 }
                 self.notes.push(n);
             }
+            if n.source == NoteSource::Oms
+                && n.v[2] == 0
+                && (n.code == hft_oms::notes::code_of(hft_oms::notes::STALE_GEN_FILL)
+                    || n.code == hft_oms::notes::code_of(hft_oms::notes::FOREIGN_FILL_VIA_ORDER_EVENT))
+            {
+                if self.duplicates.len() == EVENT_EVIDENCE_CAP {
+                    return Err("LED-267: duplicate note capacity exceeded".into());
+                }
+                self.duplicates.push(n);
+            }
         }
         if unmapped != 0 {
             if unmapped != 1 || r.kind != EventKind::ORDER_EVENT {
@@ -557,6 +616,7 @@ impl Evidence {
             self.pending.push((r.seq, e));
         }
         if r.flags.contains(RecordFlags::EVENT_END) {
+            let mut newly_booked = Vec::new();
             for (seq, e) in &self.pending {
                 let key = (e.venue.0, e.account.0, e.epoch, e.slot.0, e.r#gen, e.inst.0);
                 let found = self.notes.iter().position(|n| {
@@ -586,18 +646,34 @@ impl Evidence {
                     if self.shadow.contains(&key) {
                         continue;
                     }
+                    if self.booked.contains(&receipt_facts(e))
+                        && let Some(ix) = self.duplicates.iter().position(|n| duplicate_note(n, e))
+                    {
+                        self.duplicates.remove(ix);
+                        continue;
+                    }
                     return Err(format!(
-                        "LED-267 unmapped fill seq {seq} account={} venue={} epoch={} slot={} gen={} inst={}: missing same-event OmsForeignFill or exact Shadow order",
+                        "LED-267 unmapped fill seq {seq} account={} venue={} epoch={} slot={} gen={} inst={}: missing same-event booking, proven duplicate, or exact Shadow order",
                         e.account.0, e.venue.0, e.epoch, e.slot.0, e.r#gen, e.inst.0
                     ));
                 };
                 self.notes.remove(ix);
+                let facts = receipt_facts(e);
+                if self.booked.contains(&facts) || newly_booked.contains(&facts) {
+                    return Err("LED-267: previously booked receipt has another booking note".into());
+                }
+                newly_booked.push(facts);
             }
             if !self.notes.is_empty() {
                 return Err("LED-267: OmsForeignFill has no one-to-one cold booking".into());
             }
+            if self.booked.len() + newly_booked.len() > crate::dst::venue_behavior::EXTERNAL_HISTORY_CAP {
+                return Err("LED-267: booked receipt evidence capacity exceeded".into());
+            }
+            self.booked.extend(newly_booked);
             self.pending.clear();
             self.notes.clear();
+            self.duplicates.clear();
         }
         Ok(())
     }
@@ -790,6 +866,94 @@ mod tests {
                 .contains("capacity")
         );
         assert_eq!(full.notes.len(), EVENT_EVIDENCE_CAP);
+
+        // A copied unresolved/stale report is explained by BOTH a previous complete
+        // booking and this event's exact zero-increment defensive note.
+        for unresolved in [false, true] {
+            for damage in 0..19 {
+                let mut proof = Evidence::default();
+                if damage != 1 {
+                    proof.record(&rec(1, RecordFlags(0), &e), 1).unwrap();
+                    proof
+                        .record(&rec(2, RecordFlags::EVENT_END, &note(&e)), 0)
+                        .unwrap();
+                }
+                let mut copy = e;
+                if unresolved {
+                    copy.slot = SlotId(0);
+                    copy.r#gen = 0;
+                    copy.epoch = 0;
+                }
+                // Change the claimed original facts, keeping the current note internally
+                // consistent. None may borrow the previous receipt's booking.
+                match damage {
+                    2 => copy.fee.0 += 1,
+                    3 => copy.trade_id += 1,
+                    4 => copy.cash_sum.0 += 1,
+                    5 => copy.exch_order_id += 1,
+                    6 => copy.qty.0 += 1,
+                    7 => copy.cum_filled.0 += 1,
+                    8 => copy.px.0 += 1,
+                    9 => copy.avg_px.0 += 1,
+                    10 => copy.fee_asset.0 += 1,
+                    11 => copy.cash_qty.0 += 1,
+                    12 => copy.ex_ts_ns += 1,
+                    13 => copy.account.0 += 1,
+                    14 => copy.inst.0 += 1,
+                    15 => copy.detail = Side::Sell as u8,
+                    _ => {}
+                }
+                let mut n = note(&copy);
+                let v0 = u64::from(copy.venue.0) | u64::from(copy.account.0) << 8;
+                if unresolved {
+                    n.code = hft_oms::notes::code_of(hft_oms::notes::FOREIGN_FILL_VIA_ORDER_EVENT);
+                    n.v = [v0, copy.exch_order_id, 0, copy.cum_filled.0 as u64, 0, 0, 0, 0];
+                } else {
+                    n.code = hft_oms::notes::code_of(hft_oms::notes::STALE_GEN_FILL);
+                    n.v = [
+                        v0,
+                        u64::from(copy.slot.0),
+                        0,
+                        u64::from(copy.r#gen),
+                        u64::from(copy.epoch),
+                        copy.exch_order_id,
+                        copy.cum_filled.0 as u64,
+                        0,
+                    ];
+                }
+                if damage == 16 {
+                    n.v[4] ^= 1;
+                }
+                if damage == 17 {
+                    n.v[2] = 1;
+                }
+                if damage == 18 {
+                    n = note(&copy);
+                }
+                proof.record(&rec(3, RecordFlags(0), &copy), 1).unwrap();
+                let result = proof.record(&rec(4, RecordFlags::EVENT_END, &n), 0);
+                assert_eq!(
+                    result.is_ok(),
+                    damage == 0,
+                    "copy unresolved={unresolved} damage={damage}"
+                );
+            }
+        }
+        let mut missing = Evidence::default();
+        missing.record(&rec(1, RecordFlags(0), &e), 1).unwrap();
+        missing
+            .record(&rec(2, RecordFlags::EVENT_END, &note(&e)), 0)
+            .unwrap();
+        assert!(missing.record(&rec(3, RecordFlags::EVENT_END, &e), 1).is_err());
+        let mut full = Evidence::default();
+        full.booked
+            .extend((0..crate::dst::venue_behavior::EXTERNAL_HISTORY_CAP).map(|i| [i as u64; 16]));
+        full.record(&rec(1, RecordFlags(0), &e), 1).unwrap();
+        assert!(
+            full.record(&rec(2, RecordFlags::EVENT_END, &note(&e)), 0)
+                .unwrap_err()
+                .contains("capacity")
+        );
     }
 
     #[test]

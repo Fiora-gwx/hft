@@ -340,7 +340,7 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 
 `t` 取该记录的 `Now.engine_ns`(由记录头 tsc 与本段的 `EngineClock` 按 [event-model 时间戳语义](../../docs/subsystems/event-model.md) 计算)。**等价断言**:在每条 `StateSnapshot` 记录处,`JournalLedger` 的持仓、现货库存与余额(`pos`、`inventory`、`venue_book`)等于从该快照恢复的引擎 Ledger 的同一读数(属性测试与 DST 每个快照点检查)。
 
-真实引擎 DST 的逐快照冷检查与未映射成交解释由 [hft-testkit](../hft-testkit/README.md#6-dst-框架) 执行,覆盖 `InstPos` 的时间字段和完整 `VenueBook`(现金归属及报告字段、保证金、权益汇总、标志)。持久字段与快照比较;未持久化的派生字段与同一完成边界的真实引擎只读视图比较,不能用恢复时清空的缓存代替参考。验收归 [LED-267](TESTS.md#led-267-dst-中每个快照点-journalledger-等于引擎-ledger)。
+真实引擎 DST 的逐快照冷检查与未映射成交解释由 [hft-testkit](../hft-testkit/README.md#6-dst-框架) 执行,覆盖 `InstPos` 的时间字段和完整 `VenueBook`(现金归属及报告字段、保证金、权益汇总、标志)。持久字段与快照比较;未持久化的派生字段与同一完成边界的真实引擎只读视图比较,不能用恢复时清空的缓存代替参考。现货未映射计数包含重复交付,重复必须由已提交原件和同事件零增量注记共同解释。验收归 [LED-267](TESTS.md#led-267-dst-中每个快照点-journalledger-等于引擎-ledger)。
 
 ### 资金费
 

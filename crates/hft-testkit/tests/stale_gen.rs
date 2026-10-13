@@ -55,7 +55,9 @@ fn place(inst: InstId, qty: i64) -> GwCmd {
 }
 
 fn ack(v: &mut MockVenue<SimMatcher>, inst: InstId, lot: i64) -> u64 {
-    let rows = v.on_frame(&place(inst, lot), 10 * MS);
+    // The passive identity source also has to meet the venue's minimum notional.
+    // The generated external execution still uses exactly one instrument lot.
+    let rows = v.on_frame(&place(inst, lot.max(100_000)), 10 * MS);
     rows.iter()
         .filter(|(_, input)| input.kind == EventKind::ORDER_EVENT)
         .find_map(|(at, input)| {

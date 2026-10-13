@@ -1564,7 +1564,7 @@ spec: README.md
 - 故障:套件原有故障计划,实际触发 Drain 和自动重启
 - 种子:固定种子 7、28、34,每行 2000 步
 - 断言:每行实际完成至少一次 Drain 和对应恢复;Drain 快照含 Draining,其他 cap 非空,Recovery 快照不含旧 Draining,其余 cap 原样保留,全部账户仍有 Recovery 且闸门未放行;每条快照通过 INV-6,检查数与 journal 快照数相同;全部不变量通过,强制复跑的 Output 和非空 HashTrail 逐字节一致
-- 恢复后 New 意图:种子 28 的两条决策均以 CloseOnly 拒绝且没有分配槽,其余两行没有 New 决策;订单查询照常处理
+- 恢复后 New 意图:种子 28 的两条开仓决策均以 CloseOnly 拒绝且没有分配槽,其余两行没有开仓决策;默认外来成交可触发已分配槽的 risk_reducing 防御单,方向和数量仍经过完整不变量检查;订单查询照常处理
 - 实现:`crates/hft-testkit/tests/journal_config.rs::tk_120_drain_restart_conformance_keeps_recovery_gates`
 
 ### TK-121 对冲 place 失败必须有同一链接实例的原始证据
@@ -2093,7 +2093,7 @@ spec: README.md
 - 规则:[DST 的世界模型](README.md#dst-的世界模型)
 - 级别:unit
 - 里程碑:M2
-- 前置:SimMatcher 永续空仓两 lot,真实 Ack 已到,默认旧代数请求买入一 lot
+- 前置:SimMatcher 永续空头两 lot,真实 Ack 已到,默认旧代数请求买入一 lot
 - 步骤:同时启用 GrayConn、ReportDup 与 NoClientIdFill,再触发默认旧代数成交;推进到最后一次交付之后
 - 期望:2 ms 原始回报延迟放大为 200 ms,产生一份无 client ID 副本及两份原身份副本;三份交付的数量、价格、现金与成交 ID 都等于唯一原件;副本字节相同,观察时间覆盖最后交付,钱包和仓位只结算一次
 - 实现:`crates/hft-testkit/tests/stale_gen.rs::tk_165_stale_reports_share_transport_faults_without_repeating_settlement`

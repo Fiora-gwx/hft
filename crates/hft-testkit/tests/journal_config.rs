@@ -231,7 +231,7 @@ fn tk_120_drain_restart_conformance_keeps_recovery_gates() {
     use hft_risk::snapshot::{GateRow, SECTION_GATES, SECTION_RISK_STATE};
     use hft_strategy_sdk::SnapshotReader;
     use hft_testkit::dst::{RerunPolicy, run_record};
-    use hft_types::{CapSource, RejectBits};
+    use hft_types::{CapSource, OrderFlags, RejectBits};
 
     let suite = hft_testkit::scenarios::suites()
         .into_iter()
@@ -256,9 +256,20 @@ fn tk_120_drain_restart_conformance_keeps_recovery_gates() {
                     && let Some(decision) = record.try_read::<OrderDecision>()
                     && decision.action == OrderAction::New
                 {
-                    rejected += 1;
-                    assert_eq!(decision.reject, RejectBits::CLOSE_ONLY.0);
-                    assert_eq!(decision.slot.0, 0, "a rejected order gets no slot");
+                    if decision.reject == 0 {
+                        // Recovery CloseOnly permits the defensive hedge of an actual
+                        // external fill. Opening orders remain covered by INV-4.
+                        assert_ne!(
+                            decision.oflags & OrderFlags::RISK_REDUCING.0,
+                            0,
+                            "seed={seed}: recovery accepted a non-reducing order"
+                        );
+                        assert_ne!(decision.slot.0, 0);
+                    } else {
+                        rejected += 1;
+                        assert_eq!(decision.reject, RejectBits::CLOSE_ONLY.0, "seed={seed}");
+                        assert_eq!(decision.slot.0, 0, "a rejected order gets no slot");
+                    }
                 }
                 continue;
             }

@@ -227,7 +227,7 @@ DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xt
 
 每条 `StateSnapshot` 在所属 Input 完成或启动完成时保存 `SnapshotPoint{snapshot_seq, through_seq, live}`。`live` 从运行中的组件独立序列化,不抄 journal 快照体;检查器仅取截至该 EVENT_END 的 journal 前缀恢复,不能读后续 Input。同一世界步中的关键帧、按需快照、滚段、Drain 与连续恢复逐条检查,启动时也检查;`rebuild_every = 0` 只关闭定期采样。漏记、重复、越过后续 Input、恢复失败和任一组件差异均失败;`RunRecord.snapshot_checks` 记录成功检查数(TK-115)。每步快照观察上限 4096,溢出失败;重启只保留已提交边界内的观察,连续恢复不得重复交付(TK-116)。
 
-真实引擎的 INV-6 同时执行 [LED-267](../hft-ledger/TESTS.md#led-267-dst-中每个快照点-journalledger-等于引擎-ledger)。独立 `JournalLedger` 从首个快照及其引用的已记录配置起步,增量消费完整事件。每条快照的持久字段逐项比较;`SnapshotPoint.ledger` 从同边界的只读 `StateView` 复制完整仓位、库存与 VenueBook,连同未持久化的估值缓存、更新时间和标志一起比较,缺失即失败。后续快照只作为参考,不能覆盖冷状态;初始保证金估值按节 10 的 mark 恢复,零库存行按快照的稀疏表示比较。每笔 `unmapped_fills` 增量须有同一事件、相同成交身份及金额字段的 OmsForeignFill 注记,或完整订单身份匹配的 Shadow 决策;每条 OmsForeignFill 必须对应一笔冷入账,多余或重复注记失败;Shadow 身份只在没有匹配注记时解释成交。重启清空观察器后从保留日志重算,未提交尾部不沿用;失败锁存。更换账本/参考数据配置但缺少冷状态迁移时明确失败。标准 DST、定期和结束重建都经过此检查,开关检查器不改变意图流及 HashTrail。
+真实引擎的 INV-6 同时执行 [LED-267](../hft-ledger/TESTS.md#led-267-dst-中每个快照点-journalledger-等于引擎-ledger)。独立 `JournalLedger` 从首个快照及其引用的已记录配置起步,增量消费完整事件。每条快照的持久字段逐项比较;`SnapshotPoint.ledger` 从同边界的只读 `StateView` 复制完整仓位、库存与 VenueBook,连同未持久化的估值缓存、更新时间和标志一起比较,缺失即失败。后续快照只作为参考,不能覆盖冷状态;初始保证金估值按节 10 的 mark 恢复,零库存行按快照的稀疏表示比较。每笔 `unmapped_fills` 增量须有同一事件、相同成交身份及金额字段的 OmsForeignFill 注记,或完整订单身份匹配的 Shadow 决策;每条 OmsForeignFill 必须对应一笔冷入账,多余或重复注记失败;现货重复回报须匹配此前完整事件中已解释入账的交易所订单、成交 ID、品种、方向和全部原始金额字段,并有本事件完整身份匹配的零增量防御注记,两项缺一即失败。已入账原件证据有 EXTERNAL_HISTORY_CAP 上限,满时失败;Shadow 身份只在没有匹配注记时解释成交。重启清空观察器后从保留日志重算,未提交尾部不沿用;失败锁存。更换账本/参考数据配置但缺少冷状态迁移时明确失败。标准 DST、定期和结束重建都经过此检查,开关检查器不改变意图流及 HashTrail。
 
 没有分配 slot/gen 的 Shadow 记录不能提供订单身份,不得解释未解析成交。同事件成交/注记证据上限沿用 sequencer 的诊断容量,Shadow 身份表上限沿用 `hft_ledger::SLOT_MAP_CAP`;满时失败,不静默淘汰证据。
 
@@ -481,6 +481,8 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 只允许出现在 `[dev-dependencies]`、`tools/xtask` 与本 crate 自己的 `hft-dst` 二进制(只进验证包,不进生产归档);任何非 dev 依赖它的 crate 由 `cargo xtask ci` 拒绝([crates/AGENTS.md](../AGENTS.md))。**禁止**依赖 [hft-strategy-registry](../../strategies/registry/README.md) 与任何 `strategies/*`:两个测试策略在本 crate 内;`strategies/registry` 与 `apps/hft-core` 以 dev 依赖使用本 crate 跑生产策略的集成测试(方向单一,无依赖环)。
 
 ## 延伸阅读
+
+- [未映射副本证据的取舍](../../.agents/notes/implemented/testing/2026-10-13-unmapped-copy-evidence.md)。
 
 - [testing.md](../../docs/testing.md)(测试层级、不变量与门槛的唯一定义)、[fixtures/](../../fixtures/README.md)
 - [hft-strategy-sdk](../hft-strategy-sdk/README.md)、[strategies/AGENTS.md](../../strategies/AGENTS.md)、[cookbook/adding-a-strategy](../../docs/cookbook/adding-a-strategy.md)
