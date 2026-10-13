@@ -1945,6 +1945,36 @@ spec: README.md
 - 期望:发布边界是末片;截到第一片或第二片的前缀不包含快照和分片索引,对应观察均拒绝;末片前缀保留完整逻辑体及首末片索引,观察通过
 - 实现:`crates/hft-testkit/src/dst/seq/snapshots.rs::tk_151_snapshot_prefix_requires_the_final_physical_part`
 
+### TK-152 真实 Model 从创建处重算并跨重启连续
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:unit
+- 里程碑:M2
+- 前置:物理编号 W1,第二实例为 probe-target,启用真实 Advisor,无检查点
+- 步骤:四轮各交付 16 条 BBO,逐次把真实 Advisor 输出交回引擎;轮间依次 clean restart、两次 CrashFault 恢复,每轮保存快照并从创建处独立重算
+- 期望:Advice 为真实 16 B 载荷,四段全部 Input 参与重算,每条已记录 Advice 都比较且无分歧;篡改首条载荷或 basis_seq 均失败
+- 实现:`crates/hft-testkit/tests/model_journal.rs::tk_152_real_model_replays_across_restarts_and_rejects_changed_advice`
+
+### TK-153 Model 世界不依赖检查器并拒绝缺少适配器
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:unit
+- 里程碑:M2
+- 前置:Live taker 与 Sim target,真实 Model、物理编号,600 步,第 120 步崩溃恢复
+- 步骤:开关全部检查器各执行一次,独立重算 Model;另用不支持 Model/物理段的 ToyEngine 分别请求两种模式
+- 期望:真实世界非空 Advice 全量重算成功,完整 journal、出环、交付和非空 HashTrail 逐字节相同;缺少适配器明确失败,无合成回退或空列表跳过
+- 实现:`crates/hft-testkit/tests/model_journal.rs::tk_153_model_world_keeps_checker_independence_and_requires_adapters`
+
+### TK-154 Model 输出缓冲与已读前缀受检查
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:unit
+- 里程碑:M2
+- 前置:真实 Advisor 与有界输出环
+- 步骤:分别填满条数与字节容量,继续写入;改变已读首条记录;让 outbox 在满环后仍有待发记录
+- 期望:超额写入返回失败且已存数据不变,前缀变化与未排空输出都明确失败
+- 实现:`crates/hft-testkit/src/dst/seq/advisor.rs::tk_154_model_buffers_and_prefix_changes_fail_explicitly`
+
 ## 验收
 
 - 本组件完成 = 里程碑已到的全部用例有同编号的实现且通过(`cargo xtask test-trace`)。

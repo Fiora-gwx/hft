@@ -113,6 +113,8 @@
 
 ## 6. CI 运行矩阵
 
+RPL-012 的文件与真实 Model 随机回放在独立 `replay-dst` 作业运行,PR/每夜的种子数归 [用例](../apps/replayer/TESTS.md#rpl-012-dst-生成的种子-journal-全部回放一致)。作业使用 `ubuntu-latest`,安全上限 30 分钟,为独立冷构建和逐种子文件回放留出时间;它不占用或削减下表既有 DST、HashTrail 与基准验证。调度与制品归 [development](development.md#质量门quality-gatesyml)。
+
 只用 GitHub 托管 runner(PR 质量门在 `ubuntu-latest`,aarch64 发布构建与验证包在 `ubuntu-24.04-arm`);**不注册自托管 runner**,服务器不跑 CI、不编译。服务器只安装 CI 产出的发布制品与验证包,并以 `hft-verify` 运行累计 fuzz 与 DST(§6.1)。工作流文件、作业图、构建剖面与发布步骤归 [development](development.md),制品与验证包的格式与安装归 [deploy](../deploy/README.md);公开仓库的免费范围与资源规则唯一归属 [development 免费额度](development.md#免费额度)。本节定义每类作业跑什么与时长上限。
 
 | 时机 | 在哪里 | 运行 | 时长上限 | 阻断 |

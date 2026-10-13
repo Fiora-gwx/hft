@@ -309,6 +309,16 @@ pub trait Sut: Sized {
     }
     /// Drain read-only observations made by internal Inputs or automatic recovery.
     fn drain_observations(&mut self, _out: &mut StepOut) {}
+    /// Real Model outputs, including Advisor Meta Notes. Requested real mode must not fall
+    /// back to the synthetic actor when an adapter returns `None`.
+    fn advisor_inputs(&mut self) -> Result<Option<Vec<InputRec>>, String> {
+        Ok(None)
+    }
+    /// Optional committed physical-numbered source for the app's offline file writer.
+    #[cfg(feature = "seq")]
+    fn physical_journal(&self) -> Result<Option<hft_sequencer::driver::replay::Log>, String> {
+        Ok(None)
+    }
     /// The matching core of the world's venues (`hft_sim::SimExchange` for engine runs).
     type Matcher: crate::dst::venue_behavior::Matcher;
     /// Builds the engine for `ctx.world` (accounts, strategies, parameters, risk).

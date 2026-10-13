@@ -150,6 +150,18 @@ spec: README.md
 - 断言:每个种子运行结束后,以其内存段写出的 journal 运行 `replayer verify --advice recompute`(无检查点,Model 从实例创建处起算)均退出 0;`verify = "pass"`、`recompute = "pass"`;失败种子的 journal 与故障表留在 `target/dst/<seed>/`
 - 实现:`apps/replayer/tests/dst.rs::rpl_012_dst_journals_verify`
 
+测试标记为 ignored,由独立托管 `replay-dst.yml` 显式执行;普通单元测试不重复整批。环境 `HFT_REPLAY_DST_SEED`、`HFT_REPLAY_DST_COUNT` 与 `HFT_REPLAY_DST_SUITE` 只供明确的种子复现,CI 固定数量并不设置 suite 覆盖。每行保存故障表、完整物理段、逐文件 SHA-256、完整回放 JSON 与复现命令,总表同时记录实际完成步数、比较数量和失败行。Model 必须实际产出 Advice,每条记录均参加重算;无来源、导出重编号、读回差异、任何 DST 不变量或子进程失败均使该种子失败。
+
+### RPL-283 DST 文件保留原件并跨连续恢复重算
+
+- 规则:[verify](README.md#verify)
+- 级别:proc
+- 里程碑:M2
+- 前置:一个 Live taker、一个 Sim target,真实 Advisor,物理编号,固定种子 1、1000 步
+- 步骤:第 250 步连续崩溃两次并恢复;导出全部已提交段,逐条核对真实写者序号和读回记录,独立进程无检查点重算
+- 期望:至少两个 Recovery 段,Output、快照和全部非空 Advice 均比较成功;文件只增加最终 End,其他正文与物理首末序号保持原件
+- 实现:`apps/replayer/tests/dst.rs::rpl_283_dst_files_preserve_records_and_model_across_recovery`
+
 ### RPL-013 未给 --from-seq 时从第一个段首快照起步并比对其后全部 Output
 
 - 规则:[verify](README.md#verify)

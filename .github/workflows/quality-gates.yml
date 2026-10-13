@@ -1,6 +1,6 @@
 # Quality gates, called by ci.yml (docs/development.md#质量门quality-gatesyml).
 # What runs and the time limits: docs/testing.md §6 (PR row: target <= 12 minutes,
-# timeout-minutes: 20, rust 30). Jobs: decoupling-gate (also classifies changed paths), docs, rust, ops-py.
+# timeout-minutes: 20, rust/replay-dst 30). Jobs: decoupling-gate, docs, rust, ops-py, replay-dst.
 #
 # Steps for components of later milestones are guarded by `steps.xtask.outputs.<subcommand>`
 # (.github/scripts/xtask-inventory.sh: a subcommand that is due but missing fails the job) or by
@@ -20,6 +20,14 @@ env:
   BASE_SHA: ${{ github.event.pull_request.base.sha }}
 
 jobs:
+  replay-dst:
+    needs: decoupling-gate
+    if: ${{ !cancelled() && needs.decoupling-gate.outputs.docs_only != 'true' }}
+    uses: ./.github/workflows/replay-dst.yml
+    with:
+      sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      seed_mode: commit
+
   decoupling-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -214,6 +222,7 @@ jobs:
             target/dst/*/repro.txt
             target/dst/*/faults.txt
             target/dst/*/journal.bin
+            target/dst/*/rpl-283-*/
             target/dst/*.json
             target/xtask/dst.json
           if-no-files-found: ignore

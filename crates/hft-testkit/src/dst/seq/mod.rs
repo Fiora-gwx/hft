@@ -11,6 +11,7 @@
 //! the published journal, cold-start from it (`BootSource::Journal`), then the restart prologue
 //! (connections, `ClockOk`, kill self-test).
 
+mod advisor;
 pub mod audit;
 pub mod build;
 mod decisions;
@@ -72,6 +73,8 @@ pub struct SeqSut<S: StrategySet> {
     cold_ledger: std::cell::RefCell<ledger::Check>,
     /// Separate cursor for exact event boundaries; snapshot checks may consume later records.
     event_ledger: std::cell::RefCell<ledger::Check>,
+    /// Independent journal-only Model consumer, retained across recorded process boundaries.
+    advisor: Option<advisor::ModelDriver<S>>,
     /// Observation state carried across steps (`OmsHedgeNakedCapped` sums).
     pub(crate) carry: observe::Carry,
 }
@@ -610,6 +613,26 @@ impl<S: StrategySet> SeqSut<S> {
 impl<S: StrategySet> Sut for SeqSut<S> {
     type Matcher = SimMatcher;
 
+    fn advisor_inputs(&mut self) -> Result<Option<Vec<InputRec>>, String> {
+        if !self.world.model_advice {
+            return Ok(None);
+        }
+        let log = advisor::committed_log(&self.s().driver().io.j)?;
+        self.advisor
+            .as_mut()
+            .ok_or_else(|| "real Model advisor unavailable".to_owned())?
+            .poll(&log)
+            .map(Some)
+    }
+
+    fn physical_journal(&self) -> Result<Option<Log>, String> {
+        if self.world.physical_journal {
+            advisor::committed_log(&self.s().driver().io.j).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
     fn committed_receipts(&self, fills: &[hft_event::ExternalFill]) -> Result<Vec<bool>, String> {
         if fills.len() > crate::dst::venue_behavior::EXTERNAL_HISTORY_CAP {
             return Err("committed receipt observation capacity exceeded".into());
@@ -693,6 +716,7 @@ impl<S: StrategySet> Sut for SeqSut<S> {
             hb,
             cold_ledger: std::cell::RefCell::default(),
             event_ledger: std::cell::RefCell::default(),
+            advisor: None,
             carry: observe::Carry::default(),
         };
         let io = sut.new_io(0, setup.clock);
@@ -706,6 +730,11 @@ impl<S: StrategySet> Sut for SeqSut<S> {
         let s = Sequencer::boot(BootSource::Empty { configs }, &setup, drv, hb)
             .map_err(|e| BootFail(format!("boot: {e:?}")))?;
         sut.s = Some(s);
+        if sut.world.model_advice {
+            // Start at instance creation, before a periodic snapshot could hide Model Inputs.
+            let log = advisor::committed_log(&sut.s().driver().io.j).map_err(BootFail)?;
+            sut.advisor = Some(advisor::ModelDriver::start(&log, &setup, hb).map_err(BootFail)?);
+        }
         sut.prologue(true);
         sut.mirror(None);
         sut.io().events.clear();

@@ -9,7 +9,17 @@ fn main() {
     if let Some(i) = warmup {
         args.remove(i);
     }
-    let code = if warmup.is_some() {
+    let dst = args.iter().position(|s| s == "--fixture-dst");
+    if let Some(i) = dst {
+        args.remove(i);
+    }
+    let code = if dst.is_some() {
+        replayer::run::<hft_testkit::strategies::TestStrategies>(
+            &args,
+            &mut std::io::stdout(),
+            &mut std::io::stderr(),
+        )
+    } else if warmup.is_some() {
         replayer::run::<hft_testkit::strategies::ReplayWarmupStrategies>(
             &args,
             &mut std::io::stdout(),

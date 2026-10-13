@@ -128,6 +128,8 @@
 
 ### 质量门(`quality-gates.yml`)
 
+`replay-dst` 是独立的 GitHub 托管作业,与 `rust` 使用相同的代码/文档路径判定,调用 `replay-dst.yml`。按 [RPL-012](../apps/replayer/TESTS.md#rpl-012-dst-生成的种子-journal-全部回放一致) 跑提交派生种子与全部回归集,不减少普通 DST、资金场景、HashTrail 或基准冒烟。`replay-dst-commit` artifact 保存每行原始文件、SHA-256、故障表与独立进程报告,总表为 `target/xtask/replay-dst.json`,保留 7 天;只用 `contents: read`,不使用 S3。默认忽略的整批测试在该作业显式运行,普通测试中的定向文件用例不能代替它。
+
 RPL-058–060、RPL-270–273 的现场 Model 回放文件、检查点、生成参数及独立进程报告保存为 `replay-model-evidence` artifact,保留 7 天。测试只导出自己生成的合成文件,不读取生产 journal;该制品用于核对与后续固定样本评审,不代替 `fixtures/replay` 的指针和哈希。
 
 全部在 `ubuntu-latest`;固定工具链 + `Swatinem/rust-cache`;内容与时长上限见 [testing §6](testing.md#6-ci-运行矩阵)。作业划分(同 Trading 的 `rust` / `python` / `operations` 三分,其中后两者合并为 `ops-py` 共用环境准备):
@@ -190,6 +192,8 @@ RPL-058–060、RPL-270–273 的现场 Model 回放文件、检查点、生成�
 - **结论回写**:运维在服务器上执行 `hft-verify crash resolve <crash-id> --reproduced|--not-reproduced --evidence <本次运行 URL>`;本工作流不持有服务器凭据,不直接改账本。复现与未复现的作业结论都是 `success`(结论在摘要);构建失败或输入不符为 `failure`,该疑似保持未决。
 
 ### 每夜任务(`nightly.yml`)
+
+同一 `replay-dst.yml` 另开独立托管作业,以 UTC 日期 `YYYYMMDD × 10^6` 为起点执行 RPL-012 的每夜种子与全部回归集,产物名 `replay-dst-date`;其余每夜项目照常运行。
 
 三个作业:`nightly` 与 `nightly-arm` 并行启动、互不依赖;最后 `summary`(≤ 2 min)无论上游成功、失败或被取消都汇总实际结论。各自跑什么与时长上限见 [testing §6](testing.md#6-ci-运行矩阵),资源规则见[免费额度](#免费额度)。每夜只做回归冒烟,结果不计入上线门槛 ③④(累计只在服务器上,见[仓库与 CI](#仓库与-ci))。
 

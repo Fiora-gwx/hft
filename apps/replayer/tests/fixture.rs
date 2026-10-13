@@ -28,6 +28,7 @@ use hft_types::{AccountId, GroupId, InstId, KillBits, MarketKind, Px, Qty, Rate,
 use sha2::{Digest, Sha256};
 use zerocopy::{FromBytes, FromZeros, IntoBytes};
 
+pub mod dst;
 mod model;
 mod model_boundary;
 mod path_model;
@@ -385,9 +386,13 @@ pub fn seal(path: &Path) {
 }
 
 pub fn read(f: &Fixture) -> Log {
+    read_root(&f.root)
+}
+
+fn read_root(root: &Path) -> Log {
     let mut c = ReaderConfig::new(
-        f.root.clone(),
-        f.root.join("absent"),
+        root.to_path_buf(),
+        root.join("absent"),
         InstanceName::Prod,
         "seq".into(),
     );

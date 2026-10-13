@@ -24,6 +24,12 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  replay-dst:
+    uses: ./.github/workflows/replay-dst.yml
+    with:
+      sha: ${{ inputs.sha || 'main' }}
+      seed_mode: date
+
   nightly:
     runs-on: ubuntu-latest
     timeout-minutes: 15

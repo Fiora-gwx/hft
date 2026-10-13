@@ -1,3 +1,4 @@
+mod dst;
 mod fixture;
 mod fixture_bundle;
 mod long_model;

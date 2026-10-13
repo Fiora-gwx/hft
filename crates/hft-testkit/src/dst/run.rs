@@ -28,6 +28,9 @@ pub struct RunRecord {
     pub outcome: DstOutcome,
     /// The engine's journal at the end.
     pub journal: Vec<JRec>,
+    /// Complete committed segment metadata, only retained when physical_journal was requested.
+    #[cfg(feature = "seq")]
+    pub physical_journal: Option<hft_sequencer::driver::replay::Log>,
     /// Frames with their emission time.
     pub frames: Vec<(u64, FrameRec)>,
     /// Inputs handed to the engine with their delivery time (timer steps excluded).
@@ -62,6 +65,8 @@ impl RunRecord {
                 state_hash_trail: HashTrail::default(),
             },
             journal: Vec::new(),
+            #[cfg(feature = "seq")]
+            physical_journal: None,
             frames: Vec::new(),
             deliveries: Vec::new(),
             plan: FaultPlan::default(),
@@ -399,9 +404,28 @@ impl<E: Sut> Loop<'_, E> {
                     self.world.schedule(now + self.recon.period_ns, Ev::Recon);
                 }
                 Ev::Advisor => {
-                    let adv = self.advisor.advice(self.sut.seq(), now, self.cfg.tsc_hz);
+                    let inputs = if self.cfg.world.model_advice {
+                        match self.sut.advisor_inputs() {
+                            Ok(Some(inputs)) => inputs,
+                            other => {
+                                self.fail = Some((
+                                    self.rec.steps_run,
+                                    FailKind::Scenario("TK-152"),
+                                    match other {
+                                        Err(e) => e,
+                                        _ => "real Model advisor unavailable".into(),
+                                    },
+                                ));
+                                continue;
+                            }
+                        }
+                    } else {
+                        vec![self.advisor.advice(self.sut.seq(), now, self.cfg.tsc_hz)]
+                    };
                     let at = self.advisor.delivery(now);
-                    self.world.schedule(at, Ev::Deliver(adv));
+                    for input in inputs {
+                        self.world.schedule(at, Ev::Deliver(input));
+                    }
                     self.world.schedule(now + self.advisor.period_ns, Ev::Advisor);
                 }
             }
@@ -855,6 +879,23 @@ impl<E: Sut> Loop<'_, E> {
             }
         }
         self.rec.journal = self.sut.journal().to_vec();
+        #[cfg(feature = "seq")]
+        if self.cfg.world.physical_journal {
+            match self.sut.physical_journal() {
+                Ok(Some(log)) => self.rec.physical_journal = Some(log),
+                other if self.fail.is_none() => {
+                    self.fail = Some((
+                        self.rec.steps_run.saturating_sub(1),
+                        FailKind::Scenario("TK-153"),
+                        match other {
+                            Err(e) => e,
+                            _ => "physical journal unavailable".into(),
+                        },
+                    ));
+                }
+                _ => {}
+            }
+        }
         for v in self.venues.iter().chain(&self.sims) {
             self.rec.matched_tail.extend(v.m.matched_tail());
             self.rec

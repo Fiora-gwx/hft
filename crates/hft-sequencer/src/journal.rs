@@ -322,6 +322,8 @@ impl MemJournal {
         let seq = self.next_seq;
         self.next_seq += u64::from(parts);
         let role = role_of(kind, &body);
+        let standalone_meta =
+            self.physical_seq && !self.in_boot && self.last_non_meta.is_none() && role == Role::Meta;
         let len = 24 + body.len().div_ceil(8) as u64 * 8;
         if self.segments.is_empty() {
             self.segments.push(MemSegment::default());
@@ -336,7 +338,14 @@ impl MemJournal {
         seg.records.push(MemRecord {
             seq,
             kind,
-            flags: RecordFlags(flags.0 & !RecordFlags::EVENT_END.0),
+            flags: RecordFlags(
+                (flags.0 & !RecordFlags::EVENT_END.0)
+                    | if standalone_meta {
+                        RecordFlags::EVENT_END.0
+                    } else {
+                        0
+                    },
+            ),
             tsc,
             body,
         });
@@ -344,6 +353,9 @@ impl MemJournal {
             self.last_non_meta = Some((si, seg.records.len() - 1));
         }
         self.total += 1;
+        if standalone_meta {
+            self.boundary = self.total;
+        }
         self.pending_len += len;
         Ok(seq)
     }
@@ -500,6 +512,7 @@ impl JournalSink for MemJournal {
             begin.seq_mark = self.next_seq - u64::from(self.physical_seq);
             begin.utc_ns = info.utc_ns;
             begin.reason = reason as u8;
+            self.in_boot = self.physical_seq;
             self.push(
                 EventKind::SEGMENT_ROLL,
                 RecordFlags(0),
@@ -550,6 +563,7 @@ impl JournalSink for MemJournal {
         begin.seq_mark = self.next_seq - u64::from(self.physical_seq);
         begin.utc_ns = info.utc_ns;
         begin.reason = reason as u8;
+        self.in_boot = self.physical_seq;
         self.push(
             EventKind::SEGMENT_ROLL,
             RecordFlags(0),
@@ -557,7 +571,6 @@ impl JournalSink for MemJournal {
             &[begin.as_bytes()],
         )
         .map_err(|_| RollErr::Io)?;
-        self.in_boot = false;
         Ok(MemBoot { j: self, n: 1 })
     }
     fn needs_roll(&self, _now: Tsc) -> Option<(RollReason, RollAt)> {

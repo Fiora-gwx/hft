@@ -35,6 +35,49 @@ fn base(seed: u64) -> DstConfig {
     DstConfig::new(seed, "core")
 }
 
+/// RPL-012 uses the normal suite faults and step count, with one Live taker and one Sim
+/// target instance. The target's real Model starts at creation; all advice reaches the same
+/// world delivery queue as the synthetic actor. Legacy baseline/HashTrail settings are unchanged.
+#[cfg(feature = "seq")]
+pub fn replay_config(suite: &DstSuite, seed: u64) -> DstConfig {
+    use hft_strategy_sdk::{
+        StrategySet,
+        params::{RawParams, encode_body},
+    };
+    let mut cfg = suite.config(seed);
+    cfg.world.physical_journal = true;
+    cfg.world.model_advice = true;
+    cfg.world.accounts[1].kind = crate::dst::world::AccountKind::Sim;
+    cfg.world.strategies[1].kind_id = 0xFF02;
+    let schema = crate::strategies::TestStrategies::kinds()
+        .iter()
+        .find(|d| d.kind_id == 0xFF02)
+        .expect("test target descriptor")
+        .schema;
+    let defaults = (0..schema.n_fields())
+        .map(|ix| {
+            let field = schema.field(ix).expect("test target field");
+            match field.name {
+                "t_slice_ms" => 1_000,
+                "t_pair_ms" => 3_000,
+                "t_simul_ms" => 5_000,
+                "need_advice" => 1,
+                _ => field.default,
+            }
+        })
+        .collect();
+    cfg.world.strategies[1].params = encode_body(
+        schema,
+        1,
+        &RawParams {
+            defaults,
+            overrides: Vec::new(),
+        },
+    )
+    .expect("test target parameters");
+    cfg
+}
+
 /// Every suite, sorted by name.
 pub fn suites() -> Vec<DstSuite> {
     use FaultCategory::*;

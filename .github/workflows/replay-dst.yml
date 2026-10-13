@@ -1,0 +1,59 @@
+# RPL-012: same DST suites, real Model advice, physical files and a separate replayer process.
+name: DST file replay
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        required: true
+        type: string
+      seed_mode:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  replay-dst:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+      - name: Free runner disk
+        run: bash .github/scripts/free-disk.sh
+      - name: Install pinned Rust toolchain
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: x86-replay-dst-v1
+          cache-on-failure: true
+      - name: Build replayer and DST test assemblies
+        run: cargo build --locked --profile ci -p replayer --tests --examples
+      - name: Derive 100 seeds
+        env:
+          SEED_MODE: ${{ inputs.seed_mode }}
+        run: |
+          case "$SEED_MODE" in
+            commit) sha=$(git rev-parse HEAD); seed="0x${sha:0:16}" ;;
+            date) seed=$(( $(date -u +%Y%m%d) * 1000000 )) ;;
+            *) echo "::error::seed_mode must be commit or date"; exit 2 ;;
+          esac
+          echo "HFT_REPLAY_DST_SEED=$seed" >> "$GITHUB_ENV"
+          echo "HFT_REPLAY_DST_COUNT=100" >> "$GITHUB_ENV"
+      - name: RPL-012 files, Model recomputation and all regression seeds
+        run: cargo test --locked --profile ci -p replayer --test cli dst::rpl_012_dst_journals_verify -- --ignored --exact --nocapture
+      - name: Upload seed journals, fault tables and replay reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: replay-dst-${{ inputs.seed_mode }}
+          path: |
+            target/dst/*/rpl-012/
+            target/xtask/replay-dst.json
+          if-no-files-found: error
+          retention-days: 7

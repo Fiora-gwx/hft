@@ -3,6 +3,43 @@ use hft_event::{EventKind, PART_MAX_CHUNK, RecordFlags};
 use hft_sequencer::driver::replay::Log;
 use hft_sequencer::{JournalSink, MemJournal, SegClock};
 use hft_types::Tsc;
+use zerocopy::{FromZeros, IntoBytes};
+
+#[test]
+fn seq_424_physical_meta_boundaries_distinguish_boot_and_open_events() {
+    use hft_sequencer::journal::{BootSink, RollMeta};
+    let mut j = MemJournal::with_physical_seq(SegClock::default());
+    let meta = hft_event::ClockStatus::new_zeroed();
+    let input = hft_event::Timer::new_zeroed();
+    let info = RollMeta {
+        utc_ns: 0,
+        calib: hft_rt::CalibPair::default(),
+        tsc_hz_milli: 1_000_000_000_000,
+        configs: &[],
+    };
+    for _ in 0..2 {
+        let mut b = j.roll(hft_journal::RollReason::Manual, &info).unwrap();
+        b.append_var(EventKind::CLOCK_STATUS, Tsc(0), &[meta.as_bytes()])
+            .unwrap();
+        b.finish().unwrap();
+        let seg = j.segments.last().unwrap();
+        assert!(!seg.records[0].flags.contains(RecordFlags::EVENT_END));
+        assert!(!seg.records[1].flags.contains(RecordFlags::EVENT_END));
+        assert!(seg.records[2].flags.contains(RecordFlags::EVENT_END));
+        let standalone = j.append(RecordFlags(0), Tsc(1), &meta).unwrap().0;
+        j.publish();
+        assert_eq!(j.records().nth(j.committed - 1).unwrap().seq, standalone);
+        assert!(j.records().last().unwrap().flags.contains(RecordFlags::EVENT_END));
+        j.append(RecordFlags(0), Tsc(2), &input).unwrap();
+        j.append(RecordFlags(0), Tsc(2), &meta).unwrap();
+        assert!(!j.records().last().unwrap().flags.contains(RecordFlags::EVENT_END));
+        j.end_event();
+        j.publish();
+        let rows = &j.segments.last().unwrap().records;
+        assert!(rows[rows.len() - 2].flags.contains(RecordFlags::EVENT_END));
+        assert!(!rows.last().unwrap().flags.contains(RecordFlags::EVENT_END));
+    }
+}
 
 #[test]
 fn seq_423_memory_multipart_boundaries_and_truncation() {

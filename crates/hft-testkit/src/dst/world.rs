@@ -268,6 +268,8 @@ pub struct WorldSpec {
     pub oms_tombstone_keep_ms: Option<u32>,
     /// Reserve Multi-record physical seq spans during execution for file replay fixtures.
     pub physical_journal: bool,
+    /// Read committed journal Inputs through the real Advisor instead of synthetic advice.
+    pub model_advice: bool,
 }
 
 /// `VS`, `VP`, `VQ` (scenarios §2.2): Binance spot, OKX USDT swap, Bitget spot (fixed `VenueId`s).
@@ -402,6 +404,7 @@ impl WorldSpec {
             },
             oms_tombstone_keep_ms: None,
             physical_journal: false,
+            model_advice: false,
         }
     }
 
