@@ -26,7 +26,7 @@ spec: README.md
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
 | 10. SeqRig | PY-106–PY-109、PY-111、PY-112 |
 | 实现说明 | 不适用:见子节 |
-| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140、TK-142、TK-144–TK-145、TK-155–TK-157 |
+| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140、TK-142、TK-144–TK-145、TK-155–TK-159 |
 | 金样运行器 | TK-001、TK-005 |
 | 源文件 | TK-066 |
 | 延迟与资源契约 | TK-092–TK-093 |
@@ -1981,8 +1981,8 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:W1 的 MockVenue 与真实 SimExchange,现货计价币/基础币费用、永续费用,买卖两个方向
-- 步骤:限制撮合可见量为一个 lot,向 IOC/FOK 提交十个 lot;测试窗口重叠、期间 BBO 更新、结束前发出但结束后才到所的订单、无新行情恢复、clean、零时长、非正 lot 与时刻溢出
-- 期望:IOC 恰成交一个 lot 后 Expired,完整身份保留;费用、仓位、库存、钱包与永续现金覆盖按输入独立算出并逐单位相等;FOK 零成交且资金不变。引擎 BBO 保持原深度,重叠期不提前结束,窗口后按最新报价完整成交;clean/零时长完整成交,非法窗口明确失败
+- 步骤:限制撮合可见量为一个 lot,向 IOC/FOK 提交十个 lot
+- 期望:IOC 恰成交一个 lot 后 Expired,完整身份保留;费用、仓位、库存、钱包与永续现金覆盖按输入独立算出并逐单位相等;FOK 零成交且资金不变。窗口与异常配置分别归 TK-158/159
 - 实现:`crates/hft-testkit/tests/partial_fills.rs::tk_155_partial_fills_use_matcher_fees_cash_and_ioc_fok_rules`
 
 | 行 | 输入 | 期望 |
@@ -1990,10 +1990,6 @@ spec: README.md
 | TK-155.1 | 现货计价币手续费,买/卖 × IOC/FOK | IOC 一个 lot 的原始成交、费用与钱包逐单位相等;FOK 零成交 |
 | TK-155.2 | 现货基础币手续费,买/卖 × IOC/FOK | IOC 一个 lot,Configured(BTC) 按输入 BBO 中间价换算一次向上取整,买扣 2、卖扣 1 个最小单位;FOK 不扣费 |
 | TK-155.3 | 永续计价币手续费,买/卖 × IOC/FOK | IOC 一个 lot 的仓位、费用与零开仓现金相等;FOK 零成交 |
-| TK-155.4 | 100 ms 窗口叠加从 50 ms 开始的 150 ms 窗口 | 120 ms 仍部分成交,200 ms 才恢复 |
-| TK-155.5 | 窗口内更新 BBO,199.5 ms 发单,1 ms 入所延迟,无后续行情 | 引擎收到原深度,200.5 ms 按最新报价全成 |
-| TK-155.6 | clean 或零时长 | 故障不生效,完整成交 |
-| TK-155.7 | 非正 lot 或时刻溢出 | 注入报错,不生成故障成交 |
 
 ### TK-156 部分成交与晚到基础币手续费的真实引擎验收
 
@@ -2015,6 +2011,26 @@ spec: README.md
 - 期望:旧摘要逐行相等,至少一行轨迹变化且首条差异不早于首次部分成交故障,此前 journal 前缀逐字节相同;全部运行达到原步数并通过不变量,检查器开关的完整 journal、交付、意图、HashTrail 与交易所真值相同
 - 证据:CI 保存 `target/dst/partial-fill-migration.json` 的原提交、新旧摘要、差异边界、实际部分成交数量及逐行比较结果,核对后才更新当前金样
 - 实现:`crates/hft-testkit/tests/partial_migration.rs::tk_157_partial_migration_reproduces_prior_goldens_and_preserves_prefix`
+
+### TK-158 部分成交窗口按最新盘口和实际到所时刻结束
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:unit
+- 里程碑:M2
+- 前置:W1 真实 SimExchange,入所延迟 1 ms
+- 步骤:100 ms 窗口叠加从 50 ms 开始的 150 ms 窗口;期间两次更新 BBO;199.5 ms 发单,结束后不再提供行情
+- 期望:120 ms 仍只成交一个 lot,窗口在 200 ms 才结束;引擎收到原深度,199.5 ms 收集不提前撮合,200.5 ms 到所的订单按最近报价全成
+- 实现:`crates/hft-testkit/tests/partial_fills.rs::tk_158_partial_window_restores_latest_book_and_respects_arrival_boundary`
+
+### TK-159 部分成交空窗口与非法配置明确处理
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:unit
+- 里程碑:M2
+- 前置:W1 的 MockVenue,买入 IOC 十个 lot
+- 步骤:分别使用 clean、零时长、非正 lot 与结束时刻溢出配置
+- 期望:clean 与零时长不产生 PartialFill,原订单全成;非正 lot 和时刻溢出分别返回明确错误
+- 实现:`crates/hft-testkit/tests/partial_fills.rs::tk_159_partial_clean_zero_and_invalid_windows_are_explicit`
 
 ## 验收
 

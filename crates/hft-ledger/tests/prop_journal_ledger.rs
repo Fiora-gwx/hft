@@ -383,7 +383,7 @@ fn started() -> (Seq, Vec<u8>) {
 }
 
 #[test]
-fn led_266_fractional_report_notional_survives_the_hot_driver_and_cold_snapshot() {
+fn led_301_fractional_report_notional_survives_the_hot_driver_and_cold_snapshot() {
     for buy in [true, false] {
         let (mut q, first) = started();
         let mut r = SnapshotReader::new(&first);

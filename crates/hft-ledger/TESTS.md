@@ -23,7 +23,7 @@ spec: README.md
 | 仓位与已实现(平均成本法) | LED-010、LED-021–LED-025、LED-030–LED-039、LED-240、LED-241、LED-243、LED-275–LED-278 |
 | 余额初始化、校验与基线 | LED-039–LED-046、LED-260–LED-262 |
 | 外部成交(`ExternalFill`) | LED-050–LED-081、LED-188、LED-240、LED-245、LED-283–LED-285、LED-292、LED-293 |
-| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282、LED-286–LED-291、LED-295–LED-297 |
+| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282、LED-286–LED-291、LED-295–LED-297、LED-301 |
 | 资金费 | LED-090–LED-104、LED-136–LED-138、LED-240、LED-245、LED-260 |
 | 资金费时刻归一化 | LED-091、LED-110–LED-116 |
 | 资金费对账校正 | LED-270、LED-268、LED-114、LED-120–LED-139、LED-244、LED-261 |
@@ -2533,7 +2533,7 @@ spec: README.md
 - 性质:从第一条 `StateSnapshot` 起步的 `JournalLedger` 喂完到第 k 条 `StateSnapshot` 为止的全部记录后,其 `pos`、`inventory`、`venue_book`(余额)与从第 k 条快照 `restore` 的 Ledger 逐项相等
 - 生成:测试内的 sequencer 替身(写出 sequencer 会写的 journal 记录并按同样的调用驱动引擎 Ledger;hft-testkit 的 sequencer 夹具落地后改用它)在 `rd_lf()` 上运行 1–200 条随机输入(下单、部分成交、重复与乱序回报、`FeeOnly`、`ExternalFill`、资金费推送、`AdoptExchange`、`StaleGen` 带成交),每 20 条写一次 `StateSnapshot`
 - 参考:引擎 Ledger 在同一快照处的读数
-- 调用契约:测试驱动与 sequencer 一样,现货把取整前的增量名义交给 apply_spot_fill,成本仍使用取整后的增量价;保留 CI 回归种子。另固定核对 6%/66% 两次成交的原始累计报告,买入共扣 404374、卖出共收 404373 个计价资产最小单位,冷热与快照读数均相等
+- 备注:测试驱动与 sequencer 一样,现货把取整前的增量名义交给 apply_spot_fill,成本仍使用取整后的增量价;保留 CI 回归种子。小数单位的固定买卖反例归 LED-301
 - 例数:PR 500
 - 实现:`crates/hft-ledger/tests/prop_journal_ledger.rs::led_266_cold_equals_engine_at_snapshots`
 
@@ -3024,6 +3024,16 @@ spec: README.md
 - 基准名:`ledger/apply_spot_fill`
 - 期望:`ledger/apply_spot_fill` 满足本组件预算;CI smoke 只报告开发数据
 - 实现:`crates/hft-ledger/benches/ledger.rs::led_300_apply_spot_fill`
+
+### LED-301 现货累计金额的小数单位反例
+
+- 规则:[冷消费者(`JournalLedger`)](README.md#冷消费者journalledger)
+- 级别:unit
+- 里程碑:M2
+- 前置:LF 现货买卖各一行,订单 1000 个数量最小单位,按剩余量的 6%/66% 先后成交,价格 raw 为 596400000/594500000
+- 步骤:热测试驱动按累计回报的原始名义入账,冷读者消费实际生成的 journal;每笔后读取快照
+- 期望:最终累计量 680、累计均价 raw 594667647;买入共扣 404374、卖出共收 404373 个计价资产最小单位,两边第一笔均为 35784;每次冷热现金及快照读数相等,保留金额中的小数单位直到现金取整
+- 实现:`crates/hft-ledger/tests/prop_journal_ledger.rs::led_301_fractional_report_notional_survives_the_hot_driver_and_cold_snapshot`
 
 ## 验收
 
