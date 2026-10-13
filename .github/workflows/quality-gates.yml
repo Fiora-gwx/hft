@@ -182,8 +182,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.related.outputs.has_tests == 'true'
         with:
-          shared-key: rust
-          key: x86-ci-v2
+          # rust-cache's default suffix is <key>-<job>; shared-key replaces both.
+          shared-key: x86-ci-v2-rust
           save-if: false
       - name: Restore nested test builds
         if: steps.related.outputs.has_tests == 'true'
@@ -234,8 +234,7 @@ jobs:
         run: bash .github/scripts/install-rust.sh
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rust
-          key: x86-ci-v2
+          shared-key: x86-ci-v2-rust
           save-if: false
       - name: aarch64 cross check (ISA-specific code stays compilable)
         # Also after a failed gate: its verdict is independent, and its dependencies get cached.
@@ -266,8 +265,7 @@ jobs:
         run: bash .github/scripts/install-rust.sh
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: rust
-          key: x86-ci-v2
+          shared-key: x86-ci-v2-rust
           save-if: false
       - name: xtask subcommands
         id: xtask

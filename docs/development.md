@@ -146,7 +146,7 @@ RPL-058–060、RPL-270–273 的现场 Model 回放文件、检查点、生成�
 | `decoupling-gate` | `cargo xtask decoupling-gate --base … --head … --pr …`(PR 级解耦检查,上线门槛 ⑧ 的一部分,[tools](../tools/README.md#cargo-xtask-decoupling-gate));不构建、不测试;见下。与路径分类和快速反馈独立运行 |
 | `docs` | 快速静态反馈。先运行 CI 脚本回归与 `actionlint`(固定发布二进制并核对 SHA-256),Rust 构建前执行 `cargo fmt --all --check`,再检查依赖方向、热路径规则、文档与测试映射。每个 PR 与 main 推送都执行,不等待整棵测试树 |
 
-`related-tests`、`arch-check` 与 `benchmarks` 使用 `shared-key: rust` 加 `key: x86-ci-v2` 只读恢复完整 Rust 作业的依赖缓存,`save-if: false` 防止子集写回。缓存未命中照常构建;不以命中代替测试。嵌套测试缓存由 related-tests 只读恢复,仍只由完整 Rust 作业成功后保存。快速反馈计划、完整验收汇总和基准数据均保留 7 天。
+`related-tests`、`arch-check` 与 `benchmarks` 使用 `shared-key: x86-ci-v2-rust` 只读恢复完整 Rust 作业的依赖缓存。该值对应完整作业的 `key: x86-ci-v2` 与作业名 `rust` 的组合;修改缓存版本时一起更新。`save-if: false` 防止子集写回。缓存未命中照常构建;不以命中代替测试。嵌套测试缓存由 related-tests 只读恢复,仍只由完整 Rust 作业成功后保存。快速反馈计划、完整验收汇总和基准数据均保留 7 天。
 
 `rust` 的质量门失败且存在 DST 输出时,上传 `dst-failures` 制品,保留 7 天。内容为运行结果、复现命令与失败原因、故障计划和最后 200 条事件的 journal 片段,路径与格式归 [tools 的 DST 入口](../tools/README.md#cargo-xtask-dst)。
 
