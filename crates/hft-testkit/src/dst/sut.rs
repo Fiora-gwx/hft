@@ -265,6 +265,18 @@ pub struct BootCtx<'a> {
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct BootFail(pub String);
 
+/// Complete committed journal verification, separate from latest-snapshot state rebuilding.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct JournalVerification {
+    pub through_seq: u64,
+    pub records: u64,
+    pub segments: u64,
+    pub runs: u64,
+    pub inputs: u64,
+    pub outputs: u64,
+    pub snapshots: u64,
+}
+
 /// The system under test. Implementations are deterministic functions of their inputs: no clock,
 /// no RNG, no environment (README "DST 的世界模型" 5).
 pub trait Sut: Sized {
@@ -315,6 +327,11 @@ pub trait Sut: Sized {
     /// The runner rejects unavailable rebuilds
     /// for real-engine observations or any journal that already contains a snapshot.
     fn rebuilt_hashes(&self) -> Result<Option<ComponentHashes>, String>;
+    /// Verify every retained committed run from the first boot, with no comparison window.
+    /// `None` is only available to the framework toy; real adapters must provide evidence.
+    fn verify_journal(&self) -> Result<Option<JournalVerification>, String> {
+        Ok(None)
+    }
     /// Independently restores this snapshot and verifies subsequent Outputs up to its boundary.
     /// Real adapters must implement this; the default cannot silently skip an observation.
     fn rebuilt_snapshot(&self, point: &SnapshotPoint) -> Result<ComponentHashes, String> {

@@ -43,6 +43,8 @@ mod fill_order;
 #[cfg(feature = "seq")]
 mod journal_config;
 #[cfg(feature = "seq")]
+mod journal_replay;
+#[cfg(feature = "seq")]
 mod observations;
 #[cfg(feature = "seq")]
 mod seq_sut;

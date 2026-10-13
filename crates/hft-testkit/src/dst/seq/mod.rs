@@ -20,6 +20,7 @@ pub mod ledger;
 pub mod matcher;
 pub mod observe;
 pub mod reconcile;
+pub mod replay;
 mod snapshots;
 mod state;
 
@@ -793,6 +794,12 @@ impl<S: StrategySet> Sut for SeqSut<S> {
             return Ok(None);
         };
         snapshots::rebuild::<S>(log, snap, self.hb).map(Some)
+    }
+
+    fn verify_journal(&self) -> Result<Option<crate::dst::sut::JournalVerification>, String> {
+        let j = &self.s().driver().io.j;
+        let log = snapshots::prefix(j, io::committed_seq(j));
+        replay::verify_all::<S>(log, self.hb).map(Some)
     }
 
     fn rebuilt_snapshot(&self, point: &SnapshotPoint) -> Result<ComponentHashes, String> {

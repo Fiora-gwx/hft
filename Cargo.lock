@@ -970,6 +970,7 @@ dependencies = [
  "hdrhistogram",
  "hft-event",
  "hft-exec",
+ "hft-journal",
  "hft-ledger",
  "hft-oms",
  "hft-refdata",

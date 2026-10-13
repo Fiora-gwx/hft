@@ -227,8 +227,12 @@ fn evidence_json(r: &RunRecord, case: Option<Scenario>) -> String {
         .collect();
     let checks: Vec<_> = r.ledger_checks.iter().map(u64::to_string).collect();
     let receipts: Vec<_> = r.external_receipts.iter().map(|r| fill_json(0, r.fill)).collect();
+    let replay = r.journal_verification.map_or("null".into(), |v| format!(
+        "{{\"through_seq\":{},\"records\":{},\"segments\":{},\"runs\":{},\"inputs\":{},\"outputs\":{},\"snapshots\":{}}}",
+        v.through_seq, v.records, v.segments, v.runs, v.inputs, v.outputs, v.snapshots
+    ));
     format!(
-        "{{\"seed\":\"{:#018x}\",\"case\":{},\"suite\":\"{}\",\"steps\":{},\"end_ns\":{},\"pass\":{},\"trail\":\"{:032x}\",\"snapshots\":{},\"ledger_inputs\":[{}],\"auto_receipts\":[{}],\"late_originals\":[{}],\"exchange_receipts\":[{}],\"foreign_orders\":[{}],\"offset_notes\":{offsets},\"truth_pairs\":{},\"truth_unskipped\":{},\"balances\":[{}]}}",
+        "{{\"seed\":\"{:#018x}\",\"case\":{},\"suite\":\"{}\",\"steps\":{},\"end_ns\":{},\"pass\":{},\"trail\":\"{:032x}\",\"snapshots\":{},\"journal_verification\":{replay},\"ledger_inputs\":[{}],\"auto_receipts\":[{}],\"late_originals\":[{}],\"exchange_receipts\":[{}],\"foreign_orders\":[{}],\"offset_notes\":{offsets},\"truth_pairs\":{},\"truth_unskipped\":{},\"balances\":[{}]}}",
         r.seed,
         case.map_or("null".into(), |s| format!("\"{}\"", s.id)),
         r.suite,

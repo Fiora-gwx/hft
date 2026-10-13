@@ -38,6 +38,9 @@ impl Sut for PriorActor {
     fn hashes(&self) -> ComponentHashes {
         self.0.hashes()
     }
+    fn verify_journal(&self) -> Result<Option<hft_testkit::dst::sut::JournalVerification>, String> {
+        self.0.verify_journal()
+    }
     fn rebuilt_hashes(&self) -> Result<Option<ComponentHashes>, String> {
         self.0.rebuilt_hashes()
     }

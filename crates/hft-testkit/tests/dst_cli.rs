@@ -52,6 +52,8 @@ fn tk_146_cli_foreign_case_keeps_settlement_evidence_on_run_and_repro() {
         assert!(body.contains(&format!("\"{field}\":[")) && !body.contains(&format!("\"{field}\":[]")));
     }
     assert!(body.contains("\"truth_unskipped\":true"));
+    assert!(body.contains("\"journal_verification\":{\"through_seq\":"));
+    assert!(!body.contains("\"inputs\":0") && !body.contains("\"outputs\":0"));
     let repro = call(&[
         "repro",
         "--case",

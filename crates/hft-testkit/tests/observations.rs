@@ -256,6 +256,9 @@ impl<const FORCE: bool, S: hft_strategy_sdk::StrategySet, const RECOVER: bool> S
     ) -> Result<Option<Vec<InputRec>>, String> {
         self.0.reconcile_inputs(actor, truth, history)
     }
+    fn verify_journal(&self) -> Result<Option<hft_testkit::dst::sut::JournalVerification>, String> {
+        self.0.verify_journal()
+    }
     fn rebuilt_hashes(&self) -> Result<Option<ComponentHashes>, String> {
         self.0.rebuilt_hashes()
     }

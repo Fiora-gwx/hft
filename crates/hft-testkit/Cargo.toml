@@ -32,7 +32,8 @@ hdrhistogram = { version = "7.5", default-features = false }
 rand_chacha = { version = "0.9", default-features = false }
 rand_core = { version = "0.9", default-features = false }
 # The engine adapter `SeqSut` (feature `seq`).
-hft-sequencer = { workspace = true, optional = true, features = ["testkit"] }
+hft-sequencer = { workspace = true, optional = true, features = ["testkit", "replay-io"] }
+hft-journal = { workspace = true, optional = true }
 hft-sim = { workspace = true, optional = true }
 hft-oms = { workspace = true, optional = true, features = ["testkit"] }
 hft-risk = { workspace = true, optional = true }
@@ -46,7 +47,7 @@ sha2 = { version = "0.10", optional = true }
 # `testing` stubs, so only dev-dependencies turn it on.
 sdk-mock = ["hft-strategy-sdk/testing"]
 # The engine adapter `SeqSut<S>` over the real sequencer and `hft_sim::SimExchange`.
-seq = ["dep:hft-sequencer", "dep:hft-sim", "dep:hft-oms", "dep:hft-risk", "dep:hft-ledger", "dep:hft-exec", "dep:sha2"]
+seq = ["dep:hft-sequencer", "dep:hft-journal", "dep:hft-sim", "dep:hft-oms", "dep:hft-risk", "dep:hft-ledger", "dep:hft-exec", "dep:sha2"]
 # The `hft-dst` runner binary (verification bundle only; README "8. hft-dst 运行器"); it runs the
 # real engine.
 dst-bin = ["seq"]

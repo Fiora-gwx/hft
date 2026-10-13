@@ -40,6 +40,8 @@ pub struct RunRecord {
     pub end_ns: u64,
     /// Successful mandatory INV-6 checks, one per journal snapshot (including boot / restart).
     pub snapshot_checks: u64,
+    /// End-of-run full replay; absent when disabled, unavailable or failed.
+    pub journal_verification: Option<crate::dst::sut::JournalVerification>,
     /// Input seqs whose exact hot/cold ledger sections were compared at that event's end.
     pub ledger_checks: Vec<u64>,
     /// Bounded raw matching evidence for diagnosis; not an invariant reference.
@@ -68,6 +70,7 @@ impl RunRecord {
             obs: Obs::default(),
             end_ns: 0,
             snapshot_checks: 0,
+            journal_verification: None,
             ledger_checks: Vec::new(),
             matched_tail: Vec::new(),
             external_receipts: Vec::new(),
@@ -825,6 +828,29 @@ impl<E: Sut> Loop<'_, E> {
                 };
                 if let Some(m) = err {
                     self.fail = Some((self.rec.steps_run.saturating_sub(1), FailKind::Inv(InvId::I6), m));
+                }
+                if self.fail.is_none() {
+                    let result = self.sut.verify_journal().and_then(|v| {
+                        if v.is_none()
+                            && (self.after.required.is_some()
+                                || self
+                                    .sut
+                                    .journal()
+                                    .iter()
+                                    .any(|r| r.kind == hft_event::EventKind::STATE_SNAPSHOT))
+                        {
+                            Err("full journal verification unavailable".into())
+                        } else {
+                            Ok(v)
+                        }
+                    });
+                    match result {
+                        Ok(v) => self.rec.journal_verification = v,
+                        Err(m) => {
+                            self.fail =
+                                Some((self.rec.steps_run.saturating_sub(1), FailKind::Inv(InvId::I6), m))
+                        }
+                    }
                 }
             }
         }

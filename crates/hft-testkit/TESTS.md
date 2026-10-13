@@ -20,7 +20,7 @@ spec: README.md
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
 | 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TK-117–TK-119、TK-141、TOOL-024、TOOL-027–TOOL-029 |
-| 6. DST 框架 | TK-043–TK-070、TK-100–TK-116、TK-120–TK-125、TK-147 |
+| 6. DST 框架 | TK-043–TK-070、TK-100–TK-116、TK-120–TK-125、TK-147–TK-149 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
 | 8. hft-dst 运行器 | TK-075–TK-088、TK-143、TK-146 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
@@ -1865,7 +1865,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:带 dst-bin 的 hft-dst
 - 步骤:list 后运行 LED-080 种子 0,先限制为 1 步,再完整运行与复现
-- 期望:短运行失败且复现命令保留 case;完整运行与复现的逐种子证据相同,包含非空原件、外来订单、账本边界及无跳过真值
+- 期望:短运行失败且复现命令保留 case;完整运行与复现的逐种子证据相同,包含非空原件、外来订单、账本边界、完整 journal 验证计数及无跳过真值
 - 实现:`crates/hft-testkit/tests/dst_cli.rs::tk_146_cli_foreign_case_keeps_settlement_evidence_on_run_and_repro`
 
 ### TK-147 外来成交检查器保留完整去重作用域与键分支
@@ -1887,6 +1887,43 @@ spec: README.md
 | TK-147.6 | 零 ID 且缺订单号或累计量;已入账 External 缺身份 | 观察无有效键,I19 拒绝缺失身份 |
 | TK-147.7 | 其他 kind 的字节碰巧可解为 ExternalFill | 不产生外来成交身份 |
 | TK-147.8 | I2 的保留键与当前未记账输入分别差账户、venue、inst、键分支、订单号或累计量 | 六种差异均不能充当去重证据,完整同键才通过 |
+
+### TK-148 完整 journal 验证早期输出与每次独立运行
+
+- 规则:[DST 框架](README.md#6-dst-框架)
+- 级别:table
+- 里程碑:M2
+- 前置:真实 W1 引擎产生关键帧、按需快照、普通滚段、Drain 重启和两次崩溃恢复,共五段、四次独立运行;验证器只取得原始 journal 和段时钟
+- 期望:正例的 Input、Output、快照及全部覆盖计数由原始记录独立统计,交给新线程仍完全相同;下表各反例失败,前三行从最新快照开始的局部验证仍通过
+- 实现:`crates/hft-testkit/tests/journal_replay.rs::tk_148_full_journal_checks_every_run_and_earlier_divergences`
+
+| 行 | 改动 | 期望 |
+|---|---|---|
+| TK-148.1 | 较早 CmdResult 体翻转一位 | 精确定位原 seq |
+| TK-148.2 | 较早 CmdResult 的 SHADOW 标志翻转 | 精确定位原 seq |
+| TK-148.3 | 较早 Keyframe 的 engine_ns 翻转一位 | 精确定位快照 seq |
+| TK-148.4 | 最后一条 Input 之后额外追加 Output | EOF 仍报告额外 Output 的 seq |
+| TK-148.5 | 仅保留完整的后续段 | 拒绝缺少初始 Startup |
+| TK-148.6 | 空 journal | 明确失败 |
+| TK-148.7 | 滚段索引加一 | RunBoundary |
+
+### TK-149 DST 结束必须取得完整回放结果且不改变执行
+
+- 规则:[DST 框架](README.md#6-dst-框架)
+- 级别:table
+- 里程碑:M2
+- 前置:真实 W1 引擎运行 64 步,关闭定期重建,每步采样 HashTrail
+- 步骤:开关检查器各跑一次;随后分别返回空验证结果、验证错误和篡改旧 CmdResult 的真实验证错误
+- 期望:正例的已验证末 seq 与记录数等于完整 journal,Input 和 Output 比较数非零;关闭时结果为空,完整 journal、交付、出环与非空 HashTrail 逐字节相同;三行反例在最后一步以 INV-6 失败,不保存成功证据
+- 实现:`crates/hft-testkit/tests/journal_replay.rs::tk_149_end_guard_requires_full_replay_and_leaves_the_run_unchanged`
+
+| 行 | 完整回放结果 | 期望 |
+|---|---|---|
+| TK-149.1 | 真实验证 | 非空成功计数 |
+| TK-149.2 | 关闭检查器 | 无验证结果,执行字节与第一行相同 |
+| TK-149.3 | 空结果 | INV-6,unavailable |
+| TK-149.4 | 返回错误 | INV-6,保留错误信息 |
+| TK-149.5 | 旧 CmdResult 被篡改的真实回放 | INV-6,保留首错序号 |
 
 ## 验收
 
