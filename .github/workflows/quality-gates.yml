@@ -622,7 +622,7 @@ jobs:
           cache-on-failure: true
       - name: Build the heavy test assemblies
         run: cargo build --locked --profile ci -p hft-testkit -p replayer --features "$HEAVY_FEATURES" --tests --examples
-      - name: Run the heavy:: tests
+      - name: "Run the heavy:: tests"
         env:
           HFT_REPLAY_EVIDENCE_DIR: ${{ github.workspace }}/target/replay-model
         run: cargo test --locked --profile ci -p hft-testkit -p replayer --features "$HEAVY_FEATURES" --tests --no-fail-fast -- heavy::
