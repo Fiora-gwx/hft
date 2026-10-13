@@ -1,13 +1,20 @@
-use hft_event::{GwCmd, GwOp, OrderEvent, OrderEventKind};
+use hft_event::{EventKind, GwCmd, GwOp, OrderEvent, OrderEventKind};
 use hft_testkit::dst::seq::matcher::SimMatcher;
 use hft_testkit::dst::venue_behavior::{EXTERNAL_HISTORY_CAP, MockVenue, MockVenueCfg};
 use hft_testkit::dst::world::{ACCT_A, BTC, P1, S1, VP, VS, WorldSpec};
 use hft_testkit::dst::{ConnKind, DstConfig, Fault, InvariantSet, run_record};
 use hft_testkit::scenarios::{DstEngine, cancel_filled};
 use hft_types::{InstId, Px, Qty, Side, SlotId, Tif, Tsc, VenueId};
-use zerocopy::IntoBytes;
+use zerocopy::{IntoBytes, TryFromBytes};
 
 const MS: u64 = 1_000_000;
+
+fn order(r: &hft_testkit::dst::sut::InputRec) -> Option<OrderEvent> {
+    if r.kind != EventKind::ORDER_EVENT {
+        return None;
+    }
+    OrderEvent::try_read_from_bytes(&r.body).ok()
+}
 
 pub(super) fn without_cancel(cfg: &DstConfig) -> DstConfig {
     let mut c = cfg.clone();
@@ -61,10 +68,11 @@ fn held(venue: VenueId, inst: InstId, side: Side, base: bool) -> (MockVenue<SimM
         arg2: 0,
     };
     let first = v.on_frame(&cmd, MS);
-    assert!(!first.iter().any(|(_, r)| {
-        r.read::<OrderEvent>()
-            .is_some_and(|e| e.what == OrderEventKind::Fill)
-    }));
+    assert!(
+        !first
+            .iter()
+            .any(|(_, r)| { order(r).is_some_and(|e| e.what == OrderEventKind::Fill) })
+    );
     assert_eq!(v.cancel_filled_report().cases.len(), 1);
     assert!(
         v.truth(10 * MS)
@@ -136,17 +144,18 @@ fn tk_170_cancel_race_uses_real_matcher_reject_and_original_cash() {
                 assert!(copies.iter().all(|(t, _)| *t > x.rejection_due_ns.unwrap()));
                 let fees: Vec<_> = rows
                     .iter()
-                    .filter_map(|(_, r)| r.read::<OrderEvent>())
+                    .filter_map(|(_, r)| order(r))
                     .filter(|e| e.what == OrderEventKind::FeeOnly)
                     .collect();
                 assert_eq!(fees.len(), 1);
                 assert_eq!(fees[0].fee, x.original.fee);
                 assert_eq!(balances(&v, 100 * MS), before);
                 assert_eq!(v.cancel_filled_report().awaiting_release, 0);
-                assert!(!v.tick(1_000 * MS).iter().any(|(_, r)| {
-                    r.read::<OrderEvent>()
-                        .is_some_and(|e| e.what == OrderEventKind::Fill)
-                }));
+                assert!(
+                    !v.tick(1_000 * MS)
+                        .iter()
+                        .any(|(_, r)| { order(r).is_some_and(|e| e.what == OrderEventKind::Fill) })
+                );
                 assert!(v.truth(1_000 * MS).iter().all(|t| !t.undelivered));
             }
         }
@@ -173,6 +182,7 @@ fn tk_171_cancel_race_requires_matching_command_and_bounded_wait() {
                 venue: VS,
                 conn: ConnKind::UserStream,
                 down_ms: 1_000,
+                resync: false,
             },
             deadline,
         );
