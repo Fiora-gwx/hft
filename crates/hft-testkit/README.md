@@ -411,6 +411,8 @@ impl<S: StrategySet> SeqRig<S> {
 
 `ReceiptReader` 从有界 ExternalReceipt 历史筛出尚未入账的完整身份,按原始历史顺序提交现金与费用;重复分页只接受逐字节相同的原件。已入账身份按完整提交事件累积,不依赖热账本去重 FIFO 的当前保留窗口。`ReconActor::settled_input` 只负责打包;缺失、冲突、超量、无完整现金覆盖或错误账户/品种的凭据使本轮明确失败,不从仓位差或钱包差估算现金。TK-134–136 覆盖自动选择、两轮条件、FIFO 回收、重启与补报;LED-081 的开平仓与标准种子入口见下文。资金费、余额与 UnknownResolved 的完整对账轮次仍未实现,真实轮次拒绝仅含金额差的 funding 注入。
 
+定向撤单竞态使用真实引擎运行,步数和时限分别约束运行;达到时限但没有跑满约定步数不能算通过,具体行数和步数归 TK-172。
+
 TK-137/157/163/169 的历史证明均将后续 CancelRejectFilled count 置零;TK-173 以 0231835 的 50 行参考核对新故障、首差异前缀与检查器透明性。TK-137/157/163 的历史证明均将 LateFillAfterRecycle count 置零,保留原计划条目、时间与随机流。TK-169 重现回收槽重送之前的 50 行参考,新轨迹首差异不得早于首次非零 LateFillAfterRecycle。TK-137 独立保存迁移前的 HashTrail 参考,用旧 actor 重现它;真实 actor 在首轮对账前须保持 journal 前缀相同,检查器开关须保持完整 journal、意图、HashTrail 和交易所真值相同。该历史证明把 PartialFills 时长与 StaleGenFill count 置零,保留原故障条目与调度。TK-157 把 StaleGenFill count 置零,重现部分成交接通前的 50 行参考,默认部分成交生效后的首条差异不得早于首次 PartialFills。TK-163 只把 StaleGenFill count 置零以重现其接通前的 50 行参考,新轨迹的首条差异不得早于首次非零 StaleGenFill。完整检查器开关比较包含 journal、交付、意图、HashTrail 和交易所真值。当前金样只接受有 CI 迁移证据支持的摘要,不减少种子、步数或比较字段。
 
 `ReconciledAdl{full,replay}` 在用户流断开且交易所永续仓位非零时结算一次,保存完整原件并省略首次推送。缺口按完整成交身份保持在途,不使用品种/资产数字排除项。实际 ReconcileBatch 事件提交后,独立冷消费者确认原件确已入账才解除缺口;拒绝的批次、仅生成的批次和其他账户/成交键都不能解除。`replay` 在此之后至少 1 ms 且用户流恢复后补推同一原件;无补推时直接恢复完整 I16。前置不满足或容量耗尽明确失败,检查器关闭仍执行相同的交付流程。原 `Adl{gap,replay}` 的普通补报时序独立保留。

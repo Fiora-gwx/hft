@@ -14,7 +14,7 @@ pub fn config(seed: u64, restart: bool) -> DstConfig {
         .config(&super::suites(), seed)
         .expect("core suite");
     c.rerun = RerunPolicy::Never;
-    c.horizon_ns = 0;
+    c.horizon_ns = DstConfig::default().horizon_ns;
     c.steps = 10_000;
     c.scripted.clear();
     for venue in [VS, VP] {
@@ -77,7 +77,14 @@ pub fn validate(r: &RunRecord) -> Result<usize, String> {
     let mut count = 0;
     for v in &r.cancel_filled {
         if v.requested != v.cases.len() as u64 || v.awaiting_fill != 0 || v.awaiting_release != 0 {
-            return Err("cancel request conservation".into());
+            return Err(format!(
+                "cancel request conservation at venue {}: requested {}, captured {}, awaiting fill {}, awaiting release {}",
+                v.venue.0,
+                v.requested,
+                v.cases.len(),
+                v.awaiting_fill,
+                v.awaiting_release
+            ));
         }
         for x in &v.cases {
             let (Some(cmd), Some(rej), Some(fill)) = (x.command, x.rejection, x.report) else {
