@@ -51,7 +51,7 @@ spec: README.md
 | 启动闸门 | SEQ-094、SEQ-157、SEQ-160、SEQ-207、SEQ-210、SEQ-275、SEQ-345 |
 | 存储降级 | SEQ-093、SEQ-276、SEQ-277 |
 | 命令路径 | SEQ-009、SEQ-040、SEQ-122、SEQ-185、SEQ-186、SEQ-189、SEQ-211、SEQ-235、SEQ-255、SEQ-278–SEQ-304、SEQ-348、SEQ-354、SEQ-355、SEQ-357、SEQ-358、SEQ-365 |
-| Drain | SEQ-187、SEQ-209、SEQ-222、SEQ-284、SEQ-305–SEQ-309、SEQ-370 |
+| Drain | SEQ-187、SEQ-209、SEQ-222、SEQ-284、SEQ-305–SEQ-309、SEQ-370、SEQ-421 |
 | 确定性规则 | SEQ-043、SEQ-053、SEQ-076、SEQ-097、SEQ-254、SEQ-267、SEQ-310–SEQ-313、SEQ-344 |
 | 状态哈希 | SEQ-054、SEQ-245、SEQ-247、SEQ-249、SEQ-311、SEQ-314、SEQ-396 |
 | 规划源文件 | SEQ-310、SEQ-317–SEQ-339 |
@@ -5761,6 +5761,13 @@ spec: README.md
 - 步骤:从该关键帧恢复并重放旧 Drain;新运行再发相反 cancel_resting 的 Drain;独立执行从初始启动和关键帧开始的全部运行回放
 - 期望:旧尾部实际重放且无分歧;恢复结束的 DrainState 全字段为初始值,Draining cap 消失而 Recovery 保留;新运行首轮不自行结束,新命令按本次参数与 engine_ns 重新开始;两种窗口均验证两次运行,无普通或恢复分歧
 - 实现:`crates/hft-sequencer/tests/recover.rs::seq_421_recovery_clears_old_drain_progress_before_the_new_run`
+
+| 行 | 旧 Drain 的 cancel_resting | 重启前状态 | 新 Drain 的 cancel_resting |
+|---|---|---|---|
+| SEQ-421.1 | false | 无在途,已完成 | true |
+| SEQ-421.2 | true | 无在途,已完成 | false |
+| SEQ-421.3 | false | IOC 未应答,未完成 | true |
+| SEQ-421.4 | true | IOC 未应答,未完成 | false |
 
 ## 验收
 
