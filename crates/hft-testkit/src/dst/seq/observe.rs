@@ -12,8 +12,8 @@ use hft_strategy_sdk::{HedgeKind as SdkHedge, StrategySet};
 use hft_types::{AccountId, AssetId, GroupId, InstId, VenueId};
 
 use crate::dst::obs::{
-    AssetRow, Evidence, EvidenceKind, InstRow, LegNetRow, LegRow, LimitRow, LinkRow, LinkState, NoteInfo,
-    Obs, PlanKind, PosRow, RiskRow, SlotRow, SlotState, SlotTableRow, TombRow,
+    AssetRow, Evidence, EvidenceKind, ExternalKey, InstRow, LegNetRow, LegRow, LimitRow, LinkRow, LinkState,
+    NoteInfo, Obs, PlanKind, PosRow, RiskRow, SlotRow, SlotState, SlotTableRow, TombRow,
 };
 use crate::dst::seq::SeqSut;
 use crate::dst::sut::{InputRec, StepOut};
@@ -33,7 +33,7 @@ pub struct Before {
     /// The Input may carry fills.
     pub fills: bool,
     pub kind: Option<EventKind>,
-    pub ext_key: u64,
+    pub ext_key: Option<ExternalKey>,
     pub pos: BTreeMap<(u8, u8, u32), i128>,
 }
 
@@ -68,11 +68,14 @@ fn positions_engine(e: &Engine, w: &WorldSpec) -> BTreeMap<(u8, u8, u32), i128> 
 
 impl Before {
     pub fn take<S: StrategySet>(s: &SeqSut<S>, i: &InputRec) -> Before {
-        let ext_key = i
-            .body
-            .get(..size_of::<ExternalFill>())
-            .and_then(|b| <ExternalFill as zerocopy::TryFromBytes>::try_read_from_bytes(b).ok())
-            .map_or(0, |x| if x.trade_id != 0 { x.trade_id } else { x.fill_seq });
+        let ext_key = (i.kind == EventKind::EXTERNAL_FILL)
+            .then(|| {
+                i.body
+                    .get(..size_of::<ExternalFill>())
+                    .and_then(|b| <ExternalFill as zerocopy::TryFromBytes>::try_read_from_bytes(b).ok())
+            })
+            .flatten()
+            .and_then(|x| ExternalKey::from_fill(&x));
         Before {
             fills: can_fill(i.kind),
             kind: Some(i.kind),
@@ -81,9 +84,10 @@ impl Before {
         }
     }
     pub fn input(e: &Engine, w: &WorldSpec, i: &hft_sequencer::types::InputSlot) -> Before {
-        let ext_key = i
-            .read::<ExternalFill>()
-            .map_or(0, |x| if x.trade_id != 0 { x.trade_id } else { x.fill_seq });
+        let ext_key = (i.kind == EventKind::EXTERNAL_FILL)
+            .then(|| i.read::<ExternalFill>())
+            .flatten()
+            .and_then(|x| ExternalKey::from_fill(&x));
         Before {
             fills: can_fill(i.kind),
             kind: Some(i.kind),
@@ -95,7 +99,7 @@ impl Before {
         Before {
             fills: true,
             kind: Some(EventKind::TIMER),
-            ext_key: 0,
+            ext_key: None,
             pos: positions(s),
         }
     }
@@ -170,7 +174,7 @@ pub fn step_info_engine(e: &Engine, w: &WorldSpec, before: &Before, out: &mut St
                 ext_key: if kind == EvidenceKind::External {
                     before.ext_key
                 } else {
-                    0
+                    None
                 },
             });
         }
@@ -331,16 +335,19 @@ pub fn fill_engine(e: &Engine, w: &WorldSpec, audit: &History, carry: &Carry, o:
             }
         }
     }
-    // Ledger external-fill dedup keys (INV-2): trade id, else the fill sequence.
+    // Ledger external-fill dedup keys (INV-2), with the complete scope and key domain.
     for a in &w.accounts {
         for v in &a.venues {
             for k in e.ledger.ext_seen(a.id, *v) {
                 let key = if k.kind == hft_ledger::KEY_TRADE_ID {
-                    k.a
+                    ExternalKey::Trade(k.a)
                 } else {
-                    k.b
+                    ExternalKey::OrderSeq {
+                        exch_order_id: k.a,
+                        fill_seq: k.b,
+                    }
                 };
-                o.ext_seen.push((a.id, key));
+                o.ext_seen.push((a.id, *v, InstId(k.inst), key));
             }
         }
     }

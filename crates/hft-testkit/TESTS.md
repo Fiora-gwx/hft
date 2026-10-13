@@ -20,7 +20,7 @@ spec: README.md
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
 | 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TK-117–TK-119、TK-141、TOOL-024、TOOL-027–TOOL-029 |
-| 6. DST 框架 | TK-043–TK-070、TK-100–TK-116、TK-120–TK-125 |
+| 6. DST 框架 | TK-043–TK-070、TK-100–TK-116、TK-120–TK-125、TK-147 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
 | 8. hft-dst 运行器 | TK-075–TK-088、TK-143、TK-146 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
@@ -1839,7 +1839,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:真实 SimMatcher 的启动报告已交付且无在途,永续开仓后独立报价变化,再平一半
 - 输入:买/卖、正/零成交 ID、有/无先发原件共八行;另两行缺少已确认槽或用户流断开
-- 期望:每行结算一次,现金分别为正负 8600,历史原件与全部交付的身份和金融字段相同;交付后仓位、库存与钱包真值不变,在途清除,匹配器时钟正常前进;前置缺失在改变真值前失败
+- 期望:每行结算一次,现金分别为正负 8600,历史原件与全部交付的身份和金融字段相同;按实际响应期限排空报价与仓位变化触发的保证金报告,在最后交付时点之后检查无在途;交付后仓位、库存与钱包真值不变,匹配器时钟正常前进;前置缺失在改变真值前失败
 - 实现:`crates/hft-testkit/tests/foreign_ledger.rs::tk_144_foreign_order_delivery_retains_original_settlement_and_identity`
 
 | 行 | 输入 | 期望 |
@@ -1867,6 +1867,26 @@ spec: README.md
 - 步骤:list 后运行 LED-080 种子 0,先限制为 1 步,再完整运行与复现
 - 期望:短运行失败且复现命令保留 case;完整运行与复现的逐种子证据相同,包含非空原件、外来订单、账本边界及无跳过真值
 - 实现:`crates/hft-testkit/tests/dst_cli.rs::tk_146_cli_foreign_case_keeps_settlement_evidence_on_run_and_repro`
+
+### TK-147 外来成交检查器保留完整去重作用域与键分支
+
+- 规则:[DST 框架](README.md#6-dst-框架)、[INV-19](../../docs/tests/invariants.md#inv-19-对冲不越过裸量减仓不越过仓位同一笔成交不被对冲两次)
+- 级别:table
+- 里程碑:M2
+- 前置:真实适配器的 InputRec/InputSlot 观察及 I2、跨步 I19 检查器
+- 输入与期望见下表;合法项随后重复一次必须失败,不能通过换方向或金额绕过去重
+- 实现:`crates/hft-testkit/tests/foreign_ledger.rs::tk_147_external_dedup_observation_keeps_scope_and_key_domain`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| TK-147.1 | 正 ID 相同,改变订单号与累计量 | 仍观察到同一 Trade 键 |
+| TK-147.2 | 零 ID,两个订单累计量相同;同订单的后续累计量 | 分别为独立 OrderSeq 键,允许首次入账 |
+| TK-147.3 | 正 ID 与零 ID 的累计量数字相同 | 两个键分支独立,允许各入账一次 |
+| TK-147.4 | 两种键分别只改变账户、venue 或 inst | 六个独立作用域,不互相误判重复 |
+| TK-147.5 | 同键在同事件或跨步重复入账,含改变方向与金额 | I19 失败 |
+| TK-147.6 | 零 ID 且缺订单号或累计量;已入账 External 缺身份 | 观察无有效键,I19 拒绝缺失身份 |
+| TK-147.7 | 其他 kind 的字节碰巧可解为 ExternalFill | 不产生外来成交身份 |
+| TK-147.8 | I2 的保留键与当前未记账输入分别差账户、venue、inst、键分支、订单号或累计量 | 六种差异均不能充当去重证据,完整同键才通过 |
 
 ## 验收
 

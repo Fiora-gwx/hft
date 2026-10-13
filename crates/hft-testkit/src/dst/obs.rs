@@ -433,7 +433,7 @@ pub struct Obs {
     pub insts: Vec<InstRow>,
     pub drain: DrainRow,
     /// Ledger external-fill dedup keys (`ExtSeen`).
-    pub ext_seen: Vec<(AccountId, u64)>,
+    pub ext_seen: Vec<(AccountId, VenueId, InstId, ExternalKey)>,
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
@@ -498,7 +498,7 @@ impl Obs {
         self.exec.sort_by_key(|c| (c.account.0, c.group.0));
         self.margin.sort_by_key(|m| m.account.0);
         self.insts.sort_by_key(|r| r.inst.0);
-        self.ext_seen.sort_by_key(|k| (k.0.0, k.1));
+        self.ext_seen.sort_by_key(|k| (k.0.0, k.1.0, k.2.0, k.3));
     }
 }
 
@@ -587,6 +587,29 @@ pub enum EvidenceKind {
     FeeNet,
 }
 
+/// The two external-fill key domains from venue-proto contract 22, without hashing.
+/// Account, venue and instrument are carried by the containing evidence row.
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+pub enum ExternalKey {
+    Trade(u64),
+    OrderSeq { exch_order_id: u64, fill_seq: u64 },
+}
+
+impl ExternalKey {
+    pub fn from_fill(x: &hft_event::ExternalFill) -> Option<Self> {
+        if x.trade_id != 0 {
+            Some(Self::Trade(x.trade_id))
+        } else if x.exch_order_id != 0 && x.fill_seq != 0 {
+            Some(Self::OrderSeq {
+                exch_order_id: x.exch_order_id,
+                fill_seq: x.fill_seq,
+            })
+        } else {
+            None
+        }
+    }
+}
+
 /// One evidence item of a step.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Evidence {
@@ -596,8 +619,8 @@ pub struct Evidence {
     pub inst: InstId,
     /// Signed position delta (raw).
     pub delta: i128,
-    /// External-fill dedup key (契约 22), 0 = none.
-    pub ext_key: u64,
+    /// Full external-fill key domain (contract 22); required for External evidence.
+    pub ext_key: Option<ExternalKey>,
 }
 
 /// What the engine did inside one step besides its journal records.

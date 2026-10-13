@@ -21,9 +21,9 @@ use hft_types::{
 use crate::dst::driver::MemJournal;
 use crate::dst::obs::{
     AssetRow, AutoFixPhase, CapLevel, CapRow, CapScope, CellModeRow, DecClass, DecOrigin, DecisionInfo,
-    DrainRow, Evidence, EvidenceKind, ExecCellRow, ForceTarget, HedgeKind, InflightRow, InstRow, LegNetRow,
-    LegRow, LimitRow, LinkRow, LinkState, MarginRow, NoteInfo, Obs, PlanKind, PosRow, RiskRow, SlotRow,
-    SlotState, SlotTableRow, TombRow,
+    DrainRow, Evidence, EvidenceKind, ExecCellRow, ExternalKey, ForceTarget, HedgeKind, InflightRow, InstRow,
+    LegNetRow, LegRow, LimitRow, LinkRow, LinkState, MarginRow, NoteInfo, Obs, PlanKind, PosRow, RiskRow,
+    SlotRow, SlotState, SlotTableRow, TombRow,
 };
 use crate::dst::sut::{BootCtx, BootFail, CrashPoint, InputRec, JRec, OutRing, StepOut, Sut};
 use crate::dst::venue_behavior::ToyMatcher;
@@ -147,7 +147,7 @@ pub struct ToyEngine {
     effective: BTreeMap<(u8, u32), RunMode>,
     cells: BTreeMap<(u8, u32), Cell>,
     l3: BTreeMap<u8, bool>,
-    ext_seen: Vec<(AccountId, u64)>,
+    ext_seen: Vec<(AccountId, VenueId, InstId, ExternalKey)>,
     oms_dup: u64,
     stale_gen: u64,
     timers: Vec<(u64, u32, u32)>,
@@ -517,7 +517,7 @@ impl ToyEngine {
             venue: v,
             inst: e.inst,
             delta,
-            ext_key: 0,
+            ext_key: None,
         });
         let notional = i128::from(d) * i128::from(e.px.0) / 1_000_000;
         let fee = i128::from(e.fee.0);
@@ -536,7 +536,7 @@ impl ToyEngine {
                     venue: v,
                     inst: e.inst,
                     delta: -fee,
-                    ext_key: 0,
+                    ext_key: None,
                 });
             } else {
                 *self.bal.entry((a.0, v.0, e.fee_asset.0)).or_default() -= fee;
@@ -1199,11 +1199,14 @@ impl ToyEngine {
     }
 
     fn on_external(&mut self, out: &mut StepOut, seq: u64, tsc: u64, x: ExternalFill) {
-        let key = if x.trade_id != 0 { x.trade_id } else { x.fill_seq };
-        if self.ext_seen.iter().any(|(a, k)| *a == x.account && *k == key) {
-            return;
+        let key = ExternalKey::from_fill(&x);
+        if let Some(key) = key {
+            let full = (x.account, x.venue, x.inst, key);
+            if self.ext_seen.contains(&full) {
+                return;
+            }
+            self.ext_seen.push(full);
         }
-        self.ext_seen.push((x.account, key));
         let s: i128 = if x.side == Side::Buy { 1 } else { -1 };
         let d = s * i128::from(x.qty.0);
         *self.pos.entry((x.account.0, x.venue.0, x.inst.0)).or_default() += d;

@@ -17,8 +17,8 @@ use hft_event::{
 use hft_types::{AccountId, AssetId, GroupId, InstId, RejectBits, RunMode, Side, SlotId, VenueId};
 
 use crate::dst::obs::{
-    AutoFixPhase, CapLevel, CapScope, DecClass, DecOrigin, DecisionInfo, EvidenceKind, HedgeKind, KillRow,
-    LinkState, Obs, PlaceFailureKind, PlanKind, SlotState, StepInfo, TruthRow,
+    AutoFixPhase, CapLevel, CapScope, DecClass, DecOrigin, DecisionInfo, EvidenceKind, ExternalKey,
+    HedgeKind, KillRow, LinkState, Obs, PlaceFailureKind, PlanKind, SlotState, StepInfo, TruthRow,
 };
 use crate::dst::scenario::{Scenario, SeedSet};
 use crate::dst::sut::{FrameRec, JRec, OutRing};
@@ -177,7 +177,7 @@ pub struct InvState {
     /// I12: frames by decision seq: (oflags, account, venue, kill row at emission).
     i12_frames: BTreeMap<u64, (u16, AccountId, OutRing, Option<KillRow>)>,
     /// I19: external dedup keys already booked.
-    i19_ext: BTreeSet<(u8, u64)>,
+    i19_ext: BTreeSet<(u8, u8, u32, ExternalKey)>,
     /// I20: per (account, group) Broken period: (autofix starts, terminals).
     i20_period: BTreeMap<(u8, u32), (u32, u32)>,
 }
@@ -757,12 +757,8 @@ fn check_2(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
         };
     }
     if let Some(x) = inp.try_read::<ExternalFill>() {
-        let key = if x.trade_id != 0 { x.trade_id } else { x.fill_seq };
-        let seen = v
-            .before
-            .ext_seen
-            .iter()
-            .any(|(a, k)| *a == x.account && *k == key);
+        let seen = ExternalKey::from_fill(&x)
+            .is_some_and(|key| v.before.ext_seen.contains(&(x.account, x.venue, x.inst, key)));
         if v.has_note("ExternalFill") || seen || v.has_note("LedgerAutoHeldOffset") {
             return Ok(());
         }
@@ -2075,10 +2071,12 @@ fn check_19(st: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
         .info
         .evidence
         .iter()
-        .filter(|e| e.kind == EvidenceKind::External && e.ext_key != 0)
+        .filter(|e| e.kind == EvidenceKind::External)
     {
-        if !st.i19_ext.insert((e.account.0, e.ext_key)) {
-            return Err(format!("external fill key {} booked twice", e.ext_key));
+        let key = e.ext_key.ok_or("booked external fill lacks its dedup identity")?;
+        let full = (e.account.0, e.venue.0, e.inst.0, key);
+        if !st.i19_ext.insert(full) {
+            return Err(format!("external fill key {full:?} booked twice"));
         }
     }
     Ok(())
