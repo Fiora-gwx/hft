@@ -592,6 +592,7 @@ pub struct Note {                   // 0x0506,80 B;热路径唯一的"日志",�
 | `TargetCleared` | Sequencer | Info | `SetParams` 移除 group 时撤销了该 group 在执行层的目标:`Note.group` = 被移除的 group,v[0] = strategy,v[1] = account(hft-sequencer) |
 | `PositionDiff` | Sequencer | P1 | `PositionReport` 的数量与账本仓位不同:v[0] = venue \| account << 8,v[1] = 账本量,v[2] = 报告量(原始值;差异的处理归对账) |
 | `ReconcileCash` | Sequencer | Info | 原始结算批次是否应用;字段见[变长记录前缀](#变长记录前缀) |
+| `ReconcileRejected` | Sequencer | P0 | 原始结算批次被判为不可应用(不停机);字段见[变长记录前缀](#变长记录前缀) |
 | `RateLimitHit` | Risk | P2 | 限速命中(`v[]` 归 [hft-risk](../hft-risk/README.md)) |
 | `CapSet` / `CapCleared` | Risk | Info | v[0..6] = 该条 [`CapRecord`](#cap-记录) 的 48 字节;告警级别由 [watchtower](../../apps/watchtower/README.md) 按 cap 来源定 |
 | `MarginLevel` | Risk | 按档位:L2 P1、L3 P0 | v = [account \| venue << 8, level, liq_dist, ratio, deadline_ens];档位语义归 hft-risk |
@@ -620,6 +621,7 @@ pub struct Note {                   // 0x0506,80 B;热路径唯一的"日志",�
 | `FundingCorrected` | Ledger | P1 | 按 `ReconcileReport{Funding}` 自动校正一笔资金费,入账为 `AdjustDelta::Funding` |
 | `ChainReorg` / `ChainReorgNaked` | Ledger | P1 / P0 | optional 链上腿的重组 |
 | `BalanceCheck` | Ledger | Info | 已初始化余额的 quiet 校验实际执行;v[0] = venue \| account << 8,v[1] = asset,v[2] = free,v[3] = locked,v[4] = ex_ts_ns,其余 0。原始事实与同事件 BalanceReport 一致,不携带账本金额或校验结果 |
+| `ReceiptMismatch` | Ledger | P0 | 原始推送与同身份的待确认对账凭据金额字段不同,不入账、不消耗凭据;v[0] = venue \| account << 8,v[1] = inst,v[2] = trade_id,v[3] = exch_order_id,v[4] = fill_seq,v[5] = 不同字段位图(规则与位值归 [hft-ledger](../hft-ledger/README.md)),其余 0 |
 | `ExecBroken` | Exec | P0 | cell 进入 Broken |
 | `ExecExternalDefault` | Exec | 按条件:发单 P0,裸量在阈值内不发单 P1 | 外来成交的默认处理(条件归 [hft-exec](../hft-exec/README.md)) |
 | `ExecAutoFixFailed` | Exec | P0 | 自动有界平仓失败 |
@@ -1169,6 +1171,8 @@ impl<'b> Reassembler<'b> {
 ```
 
 `Note{Sequencer,ReconcileCash}` 的源内码为 14,级别 Info。group/inst/strategy/pad 为零;v 依序为 report_id、venue | account<<8、报告数、凭据数、是否应用(0/1)、三个零。每组一条,先于本组财务派生记录;它只证明是否应用,不携带金额答案。
+
+`Note{Sequencer,ReconcileRejected}` 的源内码为 15,级别 P0。group/inst/strategy/pad 为零;v 依序为 report_id、venue | account<<8、原因、细节、四个零。原因:1 = 体不可解码(report_id、venue、account 取自可读的头,不可读时为 0;不写 ReconcileCash)、2 = 同 report_id 的分组仍在途、3 = ledger 整组预检失败(细节 = `SettlementError` 判别值)、4 = OMS 整组预检失败(细节 = `CashError` 判别值)。原因 2–4 紧接着写 `ReconcileCash{applied = 0}`。判定与后续处理归 [hft-sequencer](../hft-sequencer/README.md)。
 
 ## 实现说明
 

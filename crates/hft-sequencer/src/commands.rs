@@ -2382,37 +2382,102 @@ pub(crate) fn synth_funding<D: Driver<S>, S: StrategySet>(
 
 // ------------------------------------------------------------------------------- recon
 
+/// `ReconcileRejected.v[2]` reasons (hft-event README "变长记录前缀").
+pub mod recon_reject {
+    pub const UNDECODABLE: u64 = 1;
+    pub const IN_FLIGHT: u64 = 2;
+    pub const LEDGER_PREFLIGHT: u64 = 3;
+    pub const OMS_PREFLIGHT: u64 = 4;
+}
+
+fn recon_rejected(
+    e: &mut Engine,
+    report_id: u64,
+    venue: VenueId,
+    account: AccountId,
+    reason: u64,
+    detail: u64,
+) {
+    e.seq_note(
+        note::RECONCILE_REJECTED,
+        NoteLevel::P0,
+        GROUP_NONE,
+        hft_types::INST_NONE,
+        [
+            report_id,
+            u64::from(venue.0) | u64::from(account.0) << 8,
+            reason,
+            detail,
+            0,
+            0,
+            0,
+            0,
+        ],
+    );
+}
+
+/// One `ReconcileBatch` Input (README "原始凭据补账"). Untrusted warm-plane evidence never stops
+/// the engine: an undecodable body, a report_id whose group is still in flight, or a group the
+/// ledger/OMS preflight refuses is not applied (`ReconcileRejected` P0, then `ReconcileCash`
+/// with applied = 0 when the header is readable). Fatal stays for broken in-engine invariants.
 pub(crate) fn reconcile_batch<D: Driver<S>, S: StrategySet>(
     e: &mut Engine,
     inst: &mut Instances<S>,
     drv: &mut D,
     slot: &InputSlot,
 ) -> R<()> {
-    let batch =
-        hft_event::ReconcileBatchView::read(slot.body()).map_err(|_| FatalReason::ReconcileEvidence)?;
-    if e.cmd.recon.iter().any(|g| {
-        g.report_id == batch.hdr.report_id && g.account == batch.hdr.account && g.venue == batch.hdr.venue
-    }) {
-        return Err(FatalReason::ReconcileEvidence);
-    }
+    let Ok(batch) = hft_event::ReconcileBatchView::read(slot.body()) else {
+        let h = crate::types::read_body_plain::<hft_event::ReconcileBatchHdr>(slot.body());
+        let (id, v, a) = h.map_or((0, VenueId(0), AccountId(0)), |h| {
+            (h.report_id, h.venue, h.account)
+        });
+        recon_rejected(e, id, v, a, recon_reject::UNDECODABLE, 0);
+        return Ok(());
+    };
+    let (report_id, venue, account) = (batch.hdr.report_id, batch.hdr.venue, batch.hdr.account);
+    let in_flight = e
+        .cmd
+        .recon
+        .iter()
+        .any(|g| g.report_id == report_id && g.account == account && g.venue == venue);
     let flags = batch
         .reports()
         .find(|r| r.item == ITEM_SUMMARY)
         .map_or(0, |r| r.sflags);
-    let applicable = flags
-        & (ReconcileReport::USERSTREAM_DOWN
-            | ReconcileReport::TRUNCATED
-            | ReconcileReport::HISTORY_UNCHECKED)
-        == 0
+    let mut applicable = !in_flight
+        && flags
+            & (ReconcileReport::USERSTREAM_DOWN
+                | ReconcileReport::TRUNCATED
+                | ReconcileReport::HISTORY_UNCHECKED)
+            == 0
         && batch
             .reports()
             .filter(|r| r.item == ITEM_POSITION && r.sflags & ReconcileReport::AUTO_EXTERNAL != 0)
             .all(|r| auto_external_check(e, &r, flags));
-    if applicable {
-        e.ledger
-            .validate_reconcile_batch(&batch)
-            .map_err(FatalReason::Settlement)?;
-        e.oms.reconcile_cash_guard(&batch).map_err(FatalReason::OmsCash)?;
+    if in_flight {
+        recon_rejected(e, report_id, venue, account, recon_reject::IN_FLIGHT, 0);
+    } else if applicable {
+        if let Err(x) = e.ledger.validate_reconcile_batch(&batch) {
+            recon_rejected(
+                e,
+                report_id,
+                venue,
+                account,
+                recon_reject::LEDGER_PREFLIGHT,
+                x as u64,
+            );
+            applicable = false;
+        } else if let Err(x) = e.oms.reconcile_cash_guard(&batch) {
+            recon_rejected(
+                e,
+                report_id,
+                venue,
+                account,
+                recon_reject::OMS_PREFLIGHT,
+                x as u64,
+            );
+            applicable = false;
+        }
     }
     e.seq_note(
         note::RECONCILE_CASH,
@@ -2420,8 +2485,8 @@ pub(crate) fn reconcile_batch<D: Driver<S>, S: StrategySet>(
         GROUP_NONE,
         hft_types::INST_NONE,
         [
-            batch.hdr.report_id,
-            u64::from(batch.hdr.venue.0) | u64::from(batch.hdr.account.0) << 8,
+            report_id,
+            u64::from(venue.0) | u64::from(account.0) << 8,
             u64::from(batch.hdr.n_reports),
             u64::from(batch.hdr.n_fills),
             u64::from(applicable),
@@ -2430,6 +2495,10 @@ pub(crate) fn reconcile_batch<D: Driver<S>, S: StrategySet>(
             0,
         ],
     );
+    // A duplicate of a group still being collected must not be merged into its counts.
+    if in_flight {
+        return Ok(());
+    }
     for r in batch.reports() {
         reconcile_row(e, inst, drv, r, Some((&batch, applicable)))?;
     }

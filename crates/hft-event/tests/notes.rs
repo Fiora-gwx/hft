@@ -75,6 +75,13 @@ fn evt_075_note_registry_rows() {
             Some(Info),
             &[(0, 64), (64, 8), (72, 8), (128, 64), (192, 64), (256, 64)],
         ),
+        (
+            "EVT-075.94",
+            "ReconcileRejected",
+            Sequencer,
+            Some(P0),
+            &[(0, 64), (64, 8), (72, 8), (128, 64), (192, 64)],
+        ),
         ("EVT-075.12", "RateLimitHit", Risk, Some(P2), &[]),
         ("EVT-075.13", "CapSet", Risk, Some(Info), &[(0, 384)]),
         ("EVT-075.14", "CapCleared", Risk, Some(Info), &[(0, 384)]),
@@ -146,6 +153,21 @@ fn evt_075_note_registry_rows() {
             Some(Info),
             &[(0, 8), (8, 8), (64, 64), (128, 64), (192, 64), (256, 64)],
         ),
+        (
+            "EVT-075.95",
+            "ReceiptMismatch",
+            Ledger,
+            Some(P0),
+            &[
+                (0, 8),
+                (8, 8),
+                (64, 64),
+                (128, 64),
+                (192, 64),
+                (256, 64),
+                (320, 64),
+            ],
+        ),
         ("EVT-075.56", "ExecBroken", Exec, Some(P0), &[]),
         ("EVT-075.57", "ExecExternalDefault", Exec, None, &[]),
         ("EVT-075.58", "ExecAutoFixFailed", Exec, Some(P0), &[]),
@@ -201,8 +223,8 @@ fn evt_075_note_registry_rows() {
         ("EVT-075.82", "AdvisorStats", Advisor, Some(Info), &[]),
         ("EVT-075.88", "ModelCkptSkipped", Advisor, Some(P1), &[]),
     ];
-    assert_eq!(NOTE_NAMES.len(), 90);
-    assert_eq!(rows.len(), 90);
+    assert_eq!(NOTE_NAMES.len(), 92);
+    assert_eq!(rows.len(), 92);
     for (i, (row, name, src, lvl, v)) in rows.iter().enumerate() {
         let n = note_name(name).unwrap_or_else(|| panic!("{row}"));
         assert_eq!(NOTE_NAMES[i].name, *name, "{row} order");

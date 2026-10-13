@@ -22,8 +22,8 @@ spec: README.md
 | 数据结构 | LED-002–LED-004、LED-233、LED-237、LED-247 |
 | 仓位与已实现(平均成本法) | LED-010、LED-021–LED-025、LED-030–LED-039、LED-240、LED-241、LED-243、LED-275–LED-278 |
 | 余额初始化、校验与基线 | LED-039–LED-046、LED-260–LED-262 |
-| 外部成交(`ExternalFill`) | LED-050–LED-081、LED-188、LED-240、LED-245、LED-283–LED-285、LED-292、LED-293 |
-| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282、LED-286–LED-291、LED-295–LED-297、LED-301 |
+| 外部成交(`ExternalFill`) | LED-050–LED-081、LED-188、LED-240、LED-245、LED-283–LED-285、LED-292、LED-293、LED-302 |
+| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282、LED-286–LED-291、LED-295–LED-297、LED-301、LED-304、LED-305 |
 | 资金费 | LED-090–LED-104、LED-136–LED-138、LED-240、LED-245、LED-260 |
 | 资金费时刻归一化 | LED-091、LED-110–LED-116 |
 | 资金费对账校正 | LED-270、LED-268、LED-114、LED-120–LED-139、LED-244、LED-261 |
@@ -34,7 +34,7 @@ spec: README.md
 | 轮次(round) | LED-176、LED-200–LED-203、LED-274 |
 | USDT 统一计价 | LED-158、LED-210–LED-215 |
 | 链上腿(optional,feature `chain`) | 不适用:里程碑外 |
-| 快照行格式(节 1、13、22;草案,实现时以代码与编译期断言为准) | LED-053、LED-061、LED-104、LED-138、LED-139、LED-230–LED-238 |
+| 快照行格式(节 1、13、22;草案,实现时以代码与编译期断言为准) | LED-053、LED-061、LED-104、LED-138、LED-139、LED-230–LED-238、LED-303 |
 | 规划源文件 | 不适用:非规范 |
 | 延迟与资源契约 | LED-004、LED-250–LED-258、LED-294、LED-300 |
 | 测试与验收 | 不适用:非规范 |
@@ -2939,9 +2939,62 @@ spec: README.md
 - 级别:unit
 - 里程碑:M2
 - 前置:容量为 2 的账本和两笔原始凭据
-- 步骤:分别改变现金、费用、数量、方向、价格、订单号和交易所时刻;容量满后收第三笔;普通去重环绕回后恢复并确认
-- 期望:错误前后快照相同;待确认记录不被环绕淘汰,原始确认不重复入钱包
+- 步骤:分别改变现金、费用、数量(连同现金覆盖量)、方向、价格和订单号后,以原始推送(`apply_settled_external`)与新凭据(`apply_reconciled_external`)各交付一次;容量满后收第三笔;普通去重环绕回后恢复并确认
+- 期望:原始推送返回 `Ok(None)`,快照不变,待确认凭据与 auto_held 保留,写恰好一条 P0 `ReceiptMismatch`,其 `v[5]` 含对应字段位(现金 16、费用 4、数量 1、方向 32、价格 2、身份 64);新凭据返回错误且快照不变;待确认记录不被环绕淘汰,原始确认不重复入钱包
 - 实现:`crates/hft-ledger/tests/reconcile_cash.rs::led_293_receipt_conflicts_capacity_and_eviction_are_atomic`
+
+### LED-302 待确认凭据的确认不比较送达时刻
+
+- 规则:[实现规格](README.md#外部成交externalfill)
+- 级别:table
+- 里程碑:M2
+- 前置:一笔卖出 ADL 待确认凭据(0.001 BTC,trade_id 51,现金 8600 raw,费用 37)已由 `apply_reconciled_external` 入账
+- 实现:`crates/hft-ledger/tests/reconcile_cash.rs::led_302_receipt_confirmation_ignores_delivery_timestamps`
+
+| 行 | 原始推送与凭据的差别(另把 cause 改为 Unknown) | 期望 |
+|---|---|---|
+| LED-302.1 | `ex_ts_ns` + 1 | `Ok(None)`;auto_held 归零;钱包与仓位不变;无 `ReceiptMismatch` |
+| LED-302.2 | `rx_tsc` = 77 | 同上 |
+| LED-302.3 | `ex_ts_ns` + 5 且 `rx_tsc` = 9 | 同上 |
+
+### LED-303 节 13 v8 中出现待确认凭据行拒绝恢复
+
+- 规则:[快照行格式(节 1、13、22;草案,实现时以代码与编译期断言为准)](README.md#快照行格式节-11322草案实现时以代码与编译期断言为准)
+- 级别:table
+- 里程碑:M2
+- 前置:一笔待确认凭据入账后的快照,节 13 为 v9
+- 实现:`crates/hft-ledger/tests/reconcile_cash.rs::led_303_section13_v8_rejects_pending_receipt_rows`
+
+| 行 | 节 13 版本 | 期望 |
+|---|---|---|
+| LED-303.1 | 9(原样) | 恢复成功 |
+| LED-303.2 | 改为 8,其余字节不变 | `RestoreError::BadValue` |
+
+### LED-304 冷消费者对非成交回报带来的费用只记一次
+
+- 规则:[冷消费者(`JournalLedger`)](README.md#冷消费者journalledger)
+- 级别:table
+- 里程碑:M2
+- 前置:冷消费者已登记槽 5 第 1 代 0.01 BTC 现货买单;USDT 初始 100000
+- 实现:`crates/hft-ledger/tests/journal_ledger.rs::led_304_fee_carried_by_non_fill_report_is_booked_once`
+
+| 行 | 回报序列 | 期望 |
+|---|---|---|
+| LED-304.1 | `CancelReject{cum = 0.01, fee = 0.5 USDT}`,再两次 `Fill{cum = 0.01, fee = 0.5}` | 仓位 0.01;USDT 99399.5(费用只记一次) |
+| LED-304.2 | `CancelReject{cum = 0.01, fee = 0}`,再两次 `Fill{cum = 0.01, fee = 0.5}` | 仓位 0.01;USDT 99399.5 |
+
+### LED-305 冷消费者回报未给品种时按映射品种处理
+
+- 规则:[冷消费者(`JournalLedger`)](README.md#冷消费者journalledger)
+- 级别:table
+- 里程碑:M2
+- 前置:冷消费者已登记槽 5 第 1 代 0.01 BTC 现货买单(BTC_S1,非 PERP_CASH)
+- 实现:`crates/hft-ledger/tests/journal_ledger.rs::led_305_order_event_inst_none_uses_the_mapped_inst`
+
+| 行 | 回报 | 期望 |
+|---|---|---|
+| LED-305.1 | `CancelReject{inst = 0, cum = 0.01}` | 无错误;BTC_S1 仓位 0.01 |
+| LED-305.2 | `Fill{inst = BTC_P2, cum = 0.01}` | 无错误;BTC_S1 仓位 0;USDT 不变 |
 
 ### LED-294 原始对账结算入口基准
 

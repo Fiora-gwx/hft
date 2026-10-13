@@ -254,6 +254,7 @@ fn seq_418_bad_receipt_batch_cannot_partially_book() {
     use zerocopy::IntoBytes;
     for mutation in 0..6 {
         let mut h = cash_boot();
+        let start = h.keyframe();
         let open = reconcile_receipt(Side::Sell, 40, 300_000, 0);
         h.push(h.rep_ring(AC1), &open);
         assert_eq!(h.run(), StepOutcome::Idle);
@@ -281,7 +282,16 @@ fn seq_418_bad_receipt_batch_cannot_partially_book() {
         let seen_before = h.s.engine().ledger.ext_seen(AC1, B);
         let mark = h.mark();
         h.push_bytes(RingId::Ctl, EventKind::RECONCILE_BATCH, body);
-        assert!(matches!(h.run(), StepOutcome::Fatal(FatalReason::Settlement(_))));
+        // Untrusted warm-plane evidence is not applied; the engine keeps running.
+        assert_eq!(h.run(), StepOutcome::Idle, "row {mutation}");
+        let out = h.since(mark);
+        let rejected = seq_notes(&out, hft_sequencer::codes::note::RECONCILE_REJECTED);
+        assert_eq!(rejected.len(), 1, "row {mutation}");
+        assert_eq!(rejected[0].level, hft_event::NoteLevel::P0);
+        assert_eq!(rejected[0].v[2], 3, "row {mutation}: ledger preflight");
+        let cash = seq_notes(&out, hft_sequencer::codes::note::RECONCILE_CASH);
+        assert_eq!(cash.len(), 1, "row {mutation}");
+        assert_eq!(cash[0].v[4], 0, "row {mutation}: applied");
         assert_eq!(wallet(&h.s.engine().ledger), wallet_before, "row {mutation}");
         assert_eq!(*h.s.engine().ledger.pos(AC1, B1), pos_before);
         assert_eq!(h.s.engine().ledger.auto_held(AC1, B1, Side::Buy), Qty(0));
@@ -290,7 +300,164 @@ fn seq_418_bad_receipt_batch_cannot_partially_book() {
             r.read::<hft_event::Note>()
                 .is_some_and(|n| n.code == hft_ledger::notes::code::EXTERNAL_FILL)
         }));
+        h.keyframe();
+        assert_eq!(wallet(cold_at(&h, &start).ledger()), wallet_before, "row {mutation}");
+        assert!(h.verify().is_empty(), "row {mutation}");
+        assert!(h.verify_from(Some(start.seq)).is_empty(), "row {mutation}");
     }
+}
+
+/// `(report_id, count, received)` of the in-flight groups, read from a fresh keyframe.
+fn pending_recon(h: &mut H) -> Vec<(u64, u16, u16)> {
+    let k = h.keyframe();
+    hft_sequencer::snapshot::read_seq_sections(&k.body[96..])
+        .unwrap()
+        .recon
+        .iter()
+        .map(|(g, _)| (g.report_id, g.count, g.received))
+        .collect()
+}
+
+fn seq_notes(recs: &[MemRecord], n: u32) -> Vec<hft_event::Note> {
+    let code = hft_sequencer::codes::seq_note(n);
+    recs.iter()
+        .filter_map(|r| r.read::<hft_event::Note>())
+        .filter(|x| x.code == code)
+        .collect()
+}
+
+#[test]
+fn seq_426_undecodable_or_in_flight_batch_is_not_applied_and_does_not_stop() {
+    use hft_sequencer::driver::live::RingId;
+    for row in 0..2u64 {
+        let mut h = cash_boot();
+        let start = h.keyframe();
+        let open = reconcile_receipt(Side::Sell, 40, 300_000, 0);
+        h.push(h.rep_ring(AC1), &open);
+        assert_eq!(h.run(), StepOutcome::Idle);
+        let receipt = reconcile_receipt(Side::Buy, 41, 100_000, -111);
+        let mut body = reconcile_input(&mut h, &receipt, Qty(-200_000));
+        if row == 0 {
+            // SEQ-426.1: a truncated body (header still readable).
+            body.truncate(body.len() - 1);
+        } else {
+            // SEQ-426.2: the same report_id is still being collected as plain reports.
+            let mut part = recon_summary(AC1, B, 802, h.j().records().last().unwrap().seq);
+            part.count = 3;
+            h.push(hft_sequencer::driver::live::RingId::Ctl, &part);
+            assert_eq!(h.run(), StepOutcome::Idle);
+            assert_eq!(pending_recon(&mut h), vec![(802, 3, 1)]);
+        }
+        let wallet_before = wallet(&h.s.engine().ledger);
+        let pos_before = *h.s.engine().ledger.pos(AC1, B1);
+        let mark = h.mark();
+        h.push_bytes(RingId::Ctl, EventKind::RECONCILE_BATCH, body);
+        assert_eq!(h.run(), StepOutcome::Idle, "SEQ-426.{}", row + 1);
+        let out = h.since(mark);
+        let rejected = seq_notes(&out, hft_sequencer::codes::note::RECONCILE_REJECTED);
+        assert_eq!(rejected.len(), 1, "SEQ-426.{}", row + 1);
+        assert_eq!(rejected[0].v[0], 802);
+        assert_eq!(rejected[0].v[2], row + 1);
+        let cash = seq_notes(&out, hft_sequencer::codes::note::RECONCILE_CASH);
+        if row == 0 {
+            assert!(cash.is_empty());
+        } else {
+            assert_eq!(cash.len(), 1);
+            assert_eq!(cash[0].v[4], 0);
+            // The in-flight group keeps its own count.
+            assert_eq!(pending_recon(&mut h), vec![(802, 3, 1)]);
+        }
+        assert_eq!(wallet(&h.s.engine().ledger), wallet_before);
+        assert_eq!(*h.s.engine().ledger.pos(AC1, B1), pos_before);
+        h.keyframe();
+        assert_eq!(wallet(cold_at(&h, &start).ledger()), wallet_before);
+        assert!(h.verify().is_empty(), "SEQ-426.{}", row + 1);
+        assert!(h.verify_from(Some(start.seq)).is_empty(), "SEQ-426.{}", row + 1);
+    }
+}
+
+#[test]
+fn seq_427_receipt_confirmation_ignores_timestamps_and_mismatch_does_not_stop() {
+    use hft_sequencer::driver::live::RingId;
+    for row in 0..2 {
+        let mut h = cash_boot();
+        let start = h.keyframe();
+        let open = reconcile_receipt(Side::Sell, 40, 200_000, 0);
+        h.push(h.rep_ring(AC1), &open);
+        assert_eq!(h.run(), StepOutcome::Idle);
+        let receipt = reconcile_receipt(Side::Buy, 41, 100_000, -1_170_003);
+        let body = reconcile_input(&mut h, &receipt, Qty(-100_000));
+        h.push_bytes(RingId::Ctl, EventKind::RECONCILE_BATCH, body);
+        assert_eq!(h.run(), StepOutcome::Idle);
+        assert_eq!(h.s.engine().ledger.auto_held(AC1, B1, Side::Buy), receipt.qty);
+        let wallet_before = wallet(&h.s.engine().ledger);
+        let pending = h.keyframe();
+        // The WS push of the same execution, with other delivery timestamps.
+        let mut push = receipt;
+        push.ex_ts_ns = 1_700_000_000_000;
+        push.rx_tsc = hft_types::Tsc(42);
+        if row == 1 {
+            push.cash_amount.0 -= 1;
+        }
+        let mark = h.mark();
+        h.push(h.rep_ring(AC1), &push);
+        assert_eq!(h.run(), StepOutcome::Idle, "SEQ-427.{}", row + 1);
+        let mismatch: Vec<_> = h
+            .since(mark)
+            .iter()
+            .filter_map(|r| r.read::<hft_event::Note>())
+            .filter(|n| n.code == hft_ledger::notes::code::RECEIPT_MISMATCH)
+            .collect();
+        assert_eq!(wallet(&h.s.engine().ledger), wallet_before);
+        if row == 0 {
+            assert!(mismatch.is_empty());
+            assert_eq!(h.s.engine().ledger.auto_held(AC1, B1, Side::Buy), Qty(0));
+        } else {
+            assert_eq!(mismatch.len(), 1);
+            assert_eq!(mismatch[0].v[5], u64::from(hft_ledger::receipt_field::CASH));
+            assert_eq!(h.s.engine().ledger.auto_held(AC1, B1, Side::Buy), receipt.qty);
+        }
+        h.keyframe();
+        for from in [&start, &pending] {
+            assert_eq!(wallet(cold_at(&h, from).ledger()), wallet_before);
+            assert!(h.verify_from(Some(from.seq)).is_empty(), "SEQ-427.{}", row + 1);
+        }
+        assert!(h.verify().is_empty());
+    }
+}
+
+#[test]
+fn seq_428_report_without_inst_does_not_stop_a_strict_cash_engine() {
+    let mut h = cash_boot();
+    let initial = wallet(&h.s.engine().ledger);
+    let start = h.keyframe();
+    let ds = place_orders(&mut h);
+    // SEQ-428.1: a WS API error reply carries no inst (Binance `blank`).
+    let mut e = order_event(&ds[0], OrderEventKind::Reject, h.epoch());
+    e.inst = hft_types::INST_NONE;
+    h.push(h.rep_ring(AC1), &e);
+    assert_eq!(h.run(), StepOutcome::Idle, "SEQ-428.1");
+    // SEQ-428.2: a fill without inst is booked on the slot's inst with its cash facts.
+    let (_, qty, price, fee, amount) = FACTS[0];
+    let mut e = order_event(&ds[0], OrderEventKind::Fill, h.epoch());
+    e.inst = hft_types::INST_NONE;
+    e.px = Px(price);
+    e.avg_px = e.px;
+    e.cum_filled = Qty(qty);
+    e.cash_qty = e.cum_filled;
+    e.cash_sum = Qty(amount);
+    e.fee = Qty(fee);
+    e.fee_asset = USDT;
+    h.push(h.rep_ring(AC1), &e);
+    assert_eq!(h.run(), StepOutcome::Idle, "SEQ-428.2");
+    assert_eq!(wallet(&h.s.engine().ledger), initial + amount - fee);
+    assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, Qty(-qty));
+    h.keyframe();
+    let cold = cold_at(&h, &start);
+    assert_eq!(wallet(cold.ledger()), initial + amount - fee);
+    assert_eq!(cold.ledger().pos(AC1, B1), h.s.engine().ledger.pos(AC1, B1));
+    assert!(h.verify().is_empty());
+    assert!(h.verify_from(Some(start.seq)).is_empty());
 }
 
 #[test]

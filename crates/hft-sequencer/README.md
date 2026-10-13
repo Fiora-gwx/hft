@@ -65,7 +65,7 @@ pub enum BootError {
     Journal(JournalErr), Config(ConfigErr),
 }
 pub enum DoneCause { Drain, ReplaceRefdata, StorageCritical, IdentityMismatch }   // 各原因对应的退出码与是否重启归 apps/hft-core;Drain 超时不改原因
-pub enum FatalReason { JournalFull, ClockRange, TimerOverflow, OmsCash(hft_oms::CashError), Settlement(hft_ledger::SettlementError), UnsupportedExternalCash, ReconcileEvidence }   // ClockRange:engine_ns 换算的取值范围被突破(见"引擎时间");TimerOverflow:引擎登记方的定时器使堆满(见"定时器");hft-core abort
+pub enum FatalReason { JournalFull, ClockRange, TimerOverflow, OmsCash(hft_oms::CashError), Settlement(hft_ledger::SettlementError), UnsupportedExternalCash, ReconcileEvidence }   // ClockRange:engine_ns 换算的取值范围被突破(见"引擎时间");TimerOverflow:引擎登记方的定时器使堆满(见"定时器");hft-core abort;ReconcileEvidence 只保留给引擎内部不变量(当前 sequencer 不再因 ReconcileBatch 的输入内容产生它,见"每条 Input 的处理顺序"末段)
 
 pub trait Driver {
     type J: JournalSink;
@@ -824,7 +824,7 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 
 </details>
 
-`ReconcileBatch` 作为一次 Input 处理,先验证完整体,不与已暂存的同 report_id 普通分组混用。全组 AUTO_EXTERNAL 的用户流稳定、无 Unknown/在途、view_seq 未被新成交越过、当前仓位等于 engine_qty 等条件全部成立,且 Summary 不含 DOWN/TRUNCATED/HISTORY_UNCHECKED 时才应用。处理任何资金费、OMS 或账本变动前,先完成 ledger 与 OMS 的整组预检。先写 ReconcileCash(应用或跳过),再按 Position 报告顺序、同品种原始成交顺序调 apply_reconciled_external,每笔仍走原有 OMS、执行层和策略通知路径。任一适用性条件不成立,整组不补账,仍完成对账分级。原始金额只来自输入凭据;旧 ReconcileReport 不给严格现金模式补造现金。
+`ReconcileBatch` 作为一次 Input 处理,先验证完整体,不与已暂存的同 report_id 普通分组混用。**批次来自 warm 平面(reconciler 重发、一张 REST 凭据与 WS 推送不一致都可能发生),其内容错误永不使引擎停机**:体不可解码 → 写 P0 `Note{ReconcileRejected, reason = 1}`(report_id/venue/account 取自可读的头,否则 0),不写 ReconcileCash,不做任何处理;同 (report_id, account, venue) 的普通分组仍在途 → `ReconcileRejected{reason = 2}` + `ReconcileCash{applied = 0}`,不处理本批任何条目(不并入在途分组的计数);ledger 或 OMS 整组预检失败 → `ReconcileRejected{reason = 3 | 4, detail = 错误判别值}` + `ReconcileCash{applied = 0}`,其余按"不适用"处理(不补账,仍完成对账分级)。字段归 [hft-event](../hft-event/README.md#变长记录前缀)。`Fatal` 只留给引擎内部不变量被破坏的情形。全组 AUTO_EXTERNAL 的用户流稳定、无 Unknown/在途、view_seq 未被新成交越过、当前仓位等于 engine_qty 等条件全部成立,且 Summary 不含 DOWN/TRUNCATED/HISTORY_UNCHECKED 时才应用。处理任何资金费、OMS 或账本变动前,先完成 ledger 与 OMS 的整组预检。先写 ReconcileCash(应用或跳过),再按 Position 报告顺序、同品种原始成交顺序调 apply_reconciled_external,每笔仍走原有 OMS、执行层和策略通知路径。任一适用性条件不成立,整组不补账,仍完成对账分级。原始金额只来自输入凭据;旧 ReconcileReport 不给严格现金模式补造现金。
 
 严格结算原始输入先经 OMS 来源预检。已保留的同键同金融字段原件直接结束,不调用账本或重复通知;它不能作为 AUTO_EXTERNAL 的新缺口凭据。首次确实完整入账后才允许 OMS 保存原件,普通重复与确认不提供新证明。跨来源累计重复的范围归 [OMS 回报匹配](../hft-oms/README.md#回报匹配与成交增量),其余重叠仍失败。
 

@@ -63,6 +63,7 @@ pub static NOTES_CATALOG: &[NoteEntry] = &[
     NoteEntry { code: 0x0900000E, source: 9, n: 14, name: "ChainReorg", level: 2, v: &[] },
     NoteEntry { code: 0x0900000F, source: 9, n: 15, name: "ChainReorgNaked", level: 1, v: &[] },
     NoteEntry { code: 0x09000010, source: 9, n: 16, name: "BalanceCheck", level: 4, v: &[("venue", 0, 8), ("account", 8, 8), ("asset", 64, 64), ("free", 128, 64), ("locked", 192, 64), ("ex_ts_ns", 256, 64)] },
+    NoteEntry { code: 0x09000011, source: 9, n: 17, name: "ReceiptMismatch", level: 1, v: &[("venue", 0, 8), ("account", 8, 8), ("inst", 64, 64), ("trade_id", 128, 64), ("exch_order_id", 192, 64), ("fill_seq", 256, 64), ("fields", 320, 64)] },
     NoteEntry { code: 0x0A000001, source: 10, n: 1, name: "ExecBroken", level: 1, v: &[] },
     NoteEntry { code: 0x0A000002, source: 10, n: 2, name: "ExecExternalDefault", level: 0, v: &[] },
     NoteEntry { code: 0x0A000003, source: 10, n: 3, name: "ExecAutoFixFailed", level: 1, v: &[] },

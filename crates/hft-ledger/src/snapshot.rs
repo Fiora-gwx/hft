@@ -585,6 +585,10 @@ impl Ledger {
             let mut k = 0u32;
             while k < s.count {
                 let h: LedgerRowHdr = rr.get_row()?;
+                // Pending receipts exist only from row version 9 on.
+                if h.kind == row_kind::AUTO_CASH && s.version < LEDGER_CASH_RECEIPTS_VERSION {
+                    return Err(RestoreError::BadValue);
+                }
                 k += 1;
                 l.restore_row13(&h, &mut rr, &mut k, s.count)?;
             }

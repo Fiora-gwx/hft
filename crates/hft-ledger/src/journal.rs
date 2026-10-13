@@ -605,10 +605,13 @@ impl JournalLedger {
                 }
             }
             EventKind::RECONCILE_BATCH => {
-                self.reconcile.start(
-                    rec.exact_body()
-                        .map_err(|_| JournalApplyError::ReconcileEvidence)?,
-                )?;
+                // The engine never applies an undecodable batch (ReconcileRejected, no
+                // ReconcileCash); a decodable one must carry its outcome Note.
+                if let Ok(body) = rec.exact_body()
+                    && hft_event::ReconcileBatchView::read(body).is_ok()
+                {
+                    self.reconcile.start(body)?;
+                }
             }
             EventKind::FUNDING_SETTLE => {
                 if let Ok(f) = rec.read::<FundingSettle>() {
@@ -885,12 +888,24 @@ impl JournalLedger {
             }
             return Ok(());
         };
+        // Mirrors the OMS identity rule: `INST_NONE` = not supplied by the venue; another
+        // nonzero inst stops a strict-cash journal and is otherwise ignored (OmsAnomaly).
+        let mut norm = *ev;
+        if norm.inst == hft_types::INST_NONE {
+            norm.inst = e.inst;
+        } else if norm.inst != e.inst {
+            if self.ledger.inst(e.inst).is_some_and(|i| i.perp_cash) {
+                return Err(JournalApplyError::Identity);
+            }
+            return Ok(());
+        }
+        let ev = &norm;
         let s = self
             .ledger
             .inst(ev.inst)
             .copied()
             .ok_or(JournalApplyError::Identity)?;
-        if e.inst != ev.inst || s.venue != e.venue {
+        if s.venue != e.venue {
             return Err(JournalApplyError::Identity);
         }
         if s.perp_cash && self.foreign.overlaps_order(ev) {
@@ -1002,11 +1017,12 @@ impl JournalLedger {
         } else {
             self.ledger.apply_fill(&fd, t);
         }
-        // The watermark follows a successful booking, never the other way around.
+        // The watermark follows a successful booking, never the other way around. A fee booked
+        // with this increment (any report kind) covers it: a repeated fill report books no fee.
         if let Some(x) = self.map.get_mut(key) {
             x.cum = ev.cum_filled.0;
             x.notional = total;
-            if fresh_fee {
+            if (fresh_fee || ev.fee.0 != 0) && ev.cum_filled.0 > x.fee_cum {
                 x.fee_cum = ev.cum_filled.0;
             }
             if cash.is_some() {

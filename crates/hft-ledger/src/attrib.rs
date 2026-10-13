@@ -59,8 +59,28 @@ impl Ledger {
                 .get(av)
                 .and_then(|d| d.auto_cash.get(ix))
                 .ok_or(SettlementError::ReceiptIdentity)?;
-            if !same_receipt(receipt, e) {
-                return Err(SettlementError::ReceiptConflict);
+            let diff = receipt_diff(receipt, e);
+            if diff != 0 {
+                // The original push disagrees on money with the pending receipt of the same
+                // execution: neither is trusted to settle the other. Book nothing, keep the
+                // receipt pending and raise a P0 alarm (README "原始凭据补账").
+                self.push_note(note(
+                    code::RECEIPT_MISMATCH,
+                    NoteLevel::P0,
+                    GROUP_NONE,
+                    e.inst,
+                    [
+                        u64::from(e.venue.0) | u64::from(e.account.0) << 8,
+                        u64::from(e.inst.0),
+                        e.trade_id,
+                        e.exch_order_id,
+                        e.fill_seq,
+                        u64::from(diff),
+                        0,
+                        0,
+                    ],
+                ));
+                return Ok(None);
             }
             let after = self
                 .auto_held(e.account, e.inst, e.side)
@@ -130,7 +150,7 @@ impl Ledger {
         }
         let d = self.avd.get(av).ok_or(SettlementError::AccountVenue)?;
         if let Some(r) = d.auto_cash.iter().find(|r| ext_key(r) == ext_key(e)) {
-            return if same_receipt(r, e) {
+            return if receipt_diff(r, e) == 0 {
                 Ok(None)
             } else {
                 Err(SettlementError::ReceiptConflict)
@@ -566,16 +586,57 @@ impl Ledger {
     }
 }
 
-pub(crate) fn same_receipt(a: &ExternalFill, b: &ExternalFill) -> bool {
-    let mut a = *a;
-    let mut b = *b;
-    a.rx_tsc = Tsc(0);
-    b.rx_tsc = Tsc(0);
-    if eligible_auto(&a) && eligible_auto(&b) {
-        a.cause = ExternalCause::Unknown;
-        b.cause = ExternalCause::Unknown;
+/// `ReceiptMismatch.v[5]` bits: which fields of two same-key executions differ.
+pub mod receipt_field {
+    pub const QTY: u32 = 1;
+    pub const PX: u32 = 2;
+    pub const FEE: u32 = 4;
+    pub const FEE_ASSET: u32 = 8;
+    pub const CASH: u32 = 16;
+    pub const SIDE: u32 = 32;
+    pub const IDENTITY: u32 = 64;
+    pub const CAUSE: u32 = 128;
+}
+
+/// Compares a pending receipt with another report of the same de-duplication key on the
+/// execution identity and the money fields only. Timestamps (`ex_ts_ns`, `rx_tsc`) are delivery
+/// facts and may differ between a REST receipt and the WS push; `fill_seq` only identifies an
+/// execution without a trade id. Liquidation, ADL and Unknown are one cause class. `0` = same.
+pub(crate) fn receipt_diff(a: &ExternalFill, b: &ExternalFill) -> u32 {
+    use receipt_field as f;
+    let mut d = 0;
+    if a.qty != b.qty {
+        d |= f::QTY;
     }
-    a == b
+    if a.px != b.px {
+        d |= f::PX;
+    }
+    if a.fee != b.fee {
+        d |= f::FEE;
+    }
+    if a.fee_asset != b.fee_asset {
+        d |= f::FEE_ASSET;
+    }
+    if a.cash_qty != b.cash_qty || a.cash_amount != b.cash_amount {
+        d |= f::CASH;
+    }
+    if a.side != b.side {
+        d |= f::SIDE;
+    }
+    if a.venue != b.venue
+        || a.account != b.account
+        || a.inst != b.inst
+        || a.exch_order_id != b.exch_order_id
+        || a.trade_id != b.trade_id
+        || (a.trade_id == 0 && a.fill_seq != b.fill_seq)
+        || a._pad != b._pad
+    {
+        d |= f::IDENTITY;
+    }
+    if a.cause != b.cause && !(eligible_auto(a) && eligible_auto(b)) {
+        d |= f::CAUSE;
+    }
+    d
 }
 
 pub(crate) fn eligible_auto(e: &ExternalFill) -> bool {

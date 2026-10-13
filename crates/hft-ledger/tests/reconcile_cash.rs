@@ -68,24 +68,87 @@ fn led_292_exact_receipts_survive_restart_and_do_not_offset_other_fills() {
 }
 
 #[test]
+fn led_302_receipt_confirmation_ignores_delivery_timestamps() {
+    for (row, ex_ts, rx) in [("LED-302.1", 1, 0), ("LED-302.2", 0, 77), ("LED-302.3", 5, 9)] {
+        let mut l = booted();
+        let e = receipt(Sell, 51);
+        l.apply_reconciled_external(&e, s(1)).unwrap();
+        let wallet = cash(&l, A1, P2, USDT).total;
+        let pos = *l.pos(A1, BTC_P2);
+        l.clear_notes();
+        let mut push = e;
+        push.ex_ts_ns += ex_ts;
+        push.rx_tsc = Tsc(rx);
+        push.cause = ExternalCause::Unknown;
+        assert_eq!(l.apply_settled_external(&push, s(2)), Ok(None), "{row}");
+        assert_eq!(l.auto_held(A1, BTC_P2, Sell), Qty(0), "{row}");
+        assert_eq!(cash(&l, A1, P2, USDT).total, wallet, "{row}");
+        assert_eq!(*l.pos(A1, BTC_P2), pos, "{row}");
+        assert!(
+            !l.notes()
+                .iter()
+                .any(|n| n.code == hft_ledger::notes::code::RECEIPT_MISMATCH),
+            "{row}"
+        );
+    }
+}
+
+#[test]
+fn led_303_section13_v8_rejects_pending_receipt_rows() {
+    let mut l = booted();
+    l.apply_reconciled_external(&receipt(Buy, 51), s(1)).unwrap();
+    let mut bytes = snap(&l);
+    assert_eq!(section(&bytes, 13).version, 9);
+    assert!(restore(&bytes).is_ok(), "LED-303.1");
+    let at = section_at(&bytes, 13);
+    bytes[at + 2..at + 4].copy_from_slice(&8u16.to_le_bytes());
+    assert_eq!(
+        restore(&bytes).err(),
+        Some(hft_strategy_sdk::RestoreError::BadValue),
+        "LED-303.2"
+    );
+}
+
+#[test]
 fn led_293_receipt_conflicts_capacity_and_eviction_are_atomic() {
+    use hft_ledger::receipt_field as rf;
     let e = receipt(Buy, 51);
-    for mutation in 0..7 {
+    for (mutation, bit) in [rf::CASH, rf::FEE, rf::QTY, rf::SIDE, rf::PX, rf::IDENTITY]
+        .into_iter()
+        .enumerate()
+    {
         let mut l = booted();
         l.apply_reconciled_external(&e, s(1)).unwrap();
+        l.clear_notes();
         let before = snap(&l);
         let mut bad = e;
         match mutation {
             0 => bad.cash_amount.0 += 1,
             1 => bad.fee.0 += 1,
-            2 => bad.qty.0 += 1,
+            2 => {
+                bad.qty.0 += 1;
+                bad.cash_qty = bad.qty;
+            }
             3 => bad.side = Sell,
             4 => bad.px.0 += 1,
-            5 => bad.exch_order_id += 1,
-            _ => bad.ex_ts_ns += 1,
+            _ => bad.exch_order_id += 1,
         }
-        assert!(l.apply_settled_external(&bad, s(90)).is_err());
+        // A money/identity mismatch with the pending receipt books nothing and keeps it.
+        assert_eq!(
+            l.apply_settled_external(&bad, s(90)),
+            Ok(None),
+            "mutation {mutation}"
+        );
         assert_eq!(snap(&l), before, "mutation {mutation}");
+        let n: Vec<_> = l
+            .notes()
+            .iter()
+            .filter(|n| n.code == hft_ledger::notes::code::RECEIPT_MISMATCH)
+            .collect();
+        assert_eq!(n.len(), 1, "mutation {mutation}");
+        assert_eq!(n[0].level, hft_event::NoteLevel::P0);
+        assert_eq!(n[0].v[5] & u64::from(bit), u64::from(bit), "mutation {mutation}");
+        assert_eq!(l.auto_held(A1, BTC_P2, Buy), e.qty);
         assert!(l.apply_reconciled_external(&bad, s(90)).is_err());
         assert_eq!(snap(&l), before);
     }

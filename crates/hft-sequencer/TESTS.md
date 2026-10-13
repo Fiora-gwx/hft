@@ -28,7 +28,7 @@ spec: README.md
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
 | 连接活性 | SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173 |
-| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420、SEQ-425 |
+| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420、SEQ-425–SEQ-428 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
@@ -5728,8 +5728,8 @@ spec: README.md
 - 级别:integ
 - 里程碑:M2
 - 前置:B0 严格永续结算,空头仓位数量 300000,同一组两笔买入补账
-- 步骤:第二笔分别缺现金覆盖、缺手续费资产、重复本组身份、数量超出差额、方向相反、使用已入账身份
-- 期望:六行均返回 Fatal(Settlement);第一笔也不入账,钱包、仓位、去重身份和 auto_held 保持原值,不输出财务成交注记
+- 步骤:第二笔分别缺现金覆盖、缺手续费资产、重复本组身份、数量超出差额、方向相反、使用已入账身份;处理后写关键帧
+- 期望:六行均返回 Idle(不停机);同一事件恰好一条 P0 `ReconcileRejected{reason = 3}` 与一条 `ReconcileCash{applied = 0}`;第一笔也不入账,钱包、仓位、去重身份和 auto_held 保持原值,不输出财务成交注记;冷账本从处理前关键帧起步得到同一钱包,完整与从关键帧起步的验证回放无差异
 - 实现:`crates/hft-sequencer/tests/settlement.rs::seq_418_bad_receipt_batch_cannot_partially_book`
 
 ### SEQ-419 单笔重复证明贯通真实引擎与快照窗口回放
@@ -5821,6 +5821,47 @@ spec: README.md
 |---|---|---|---|---|
 | SEQ-425.1 | 0.010 BTC 部分成交 0.001 后 Expired | 约 500,含在途 | 约 50 | 通过 |
 | SEQ-425.2 | 0.004 BTC 成交后扣 0.003 BTC FeeOnly | 约 200 | 约 50 | 通过 |
+
+### SEQ-426 不可解码或同号在途的凭据批次不应用且不停机
+
+- 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
+- 级别:table
+- 里程碑:M2
+- 前置:B0 严格永续结算;空头 300000 已入账;已有一次完整的干净报告(report 801);批次 report_id = 802,一笔买入凭据
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_426_undecodable_or_in_flight_batch_is_not_applied_and_does_not_stop`
+
+| 行 | 批次 | 期望 |
+|---|---|---|
+| SEQ-426.1 | 体截去最后 1 字节 | Idle;一条 `ReconcileRejected{report_id = 802, reason = 1}`;无 ReconcileCash;钱包与仓位不变;冷账本与验证回放无差异 |
+| SEQ-426.2 | 先以普通 ReconcileReport 送入 report 802 的首条(count = 3),再送完整批次 | Idle;一条 `ReconcileRejected{reason = 2}` 与 `ReconcileCash{applied = 0}`;在途分组仍为 (802, count 3, received 1);钱包与仓位不变;冷账本与验证回放无差异 |
+
+### SEQ-427 凭据确认不比较送达时刻,金额不一致只告警
+
+- 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
+- 级别:table
+- 里程碑:M2
+- 前置:B0 严格永续结算;一笔买入 0.001 BTC 凭据(trade_id 41,现金 −1170003 raw)已由批次补账,auto_held = 100000
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_427_receipt_confirmation_ignores_timestamps_and_mismatch_does_not_stop`
+
+| 行 | 同一成交的 WS 推送 | 期望 |
+|---|---|---|
+| SEQ-427.1 | `ex_ts_ns` 与 `rx_tsc` 不同,其余相同 | Idle;auto_held 归零;钱包不变;无 `ReceiptMismatch` |
+| SEQ-427.2 | 同上且现金少 1 raw | Idle;恰好一条 `ReceiptMismatch{v[5] = 16}`;auto_held 仍 100000;钱包不变 |
+
+两行都从补账前与待确认后的关键帧起步做冷账本与验证回放,无差异。
+
+### SEQ-428 不带品种的回报不使严格现金引擎停机
+
+- 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
+- 级别:table
+- 里程碑:M2
+- 前置:B0 严格永续结算,AC1 在 B1 上 5 张已 Ack 的订单(第一张卖 0.001 BTC)
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_428_report_without_inst_does_not_stop_a_strict_cash_engine`
+
+| 行 | 回报 | 期望 |
+|---|---|---|
+| SEQ-428.1 | 第一张 `Reject{inst = 0}`(Binance WS API 错误响应的形态) | Idle |
+| SEQ-428.2 | 第一张 `Fill{inst = 0}`,带完整现金事实 | Idle;钱包按现金与费用变化,仓位 −100000;冷账本相同;验证回放无差异 |
 
 ## 验收
 

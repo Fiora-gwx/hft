@@ -167,7 +167,7 @@ optional 的 chain-core 会话(链上策略接入时启用)沿用同一帧与模
 
 pipeline、reconciler、`ops_bot` 自身与 `cli:systemd` 是**进程主体**,权限以本表逐命令列出,不是角色。`CmdHdr.role` 码:Viewer = 1、Trader = 2、Admin = 4;3 退役、永不复用;进程主体写 0 并以 issuer 区分;角色集合按 `1 << (code − 1)` 成位。人工主体的 `CmdHdr.role` 写有效权限中允许该命令的最高角色(Admin > Trader > Viewer),`needs_confirm_static` 以它为 `role`。
 
-`ReconcileReport` 请求可带 `receipts_b64`,内容为按顺序连接的 ExternalFill v3 固定体。提供时只能提交一个完整账户/venue 分组,规范化为单条 ReconcileBatch;不提供时保持普通报告逐条编码。空、非整行、超过事件协议上限、身份错配、未知品种或未启用 PERP_CASH 的凭据返回 InvalidArgs。权限仍仅 reconciler,无 cmd_hash,不经过命令去重缓存。字段按机器原始凭据传输,金额和费用不由 gateway 根据余额差生成。
+`ReconcileReport` 请求可带 `receipts_b64`,内容为按顺序连接的 ExternalFill v3 固定体。提供时只能提交一个完整账户/venue 分组,规范化为单条 ReconcileBatch;不提供时保持普通报告逐条编码。空、非整行、超过事件协议上限、身份错配、未知品种或未启用 PERP_CASH 的凭据返回 InvalidArgs;成交语义不成立的凭据同样返回 InvalidArgs{BadValue}:数量或价格 ≤ 0、现金覆盖量不等于数量、填充字节非零、account/venue 与分组不同、成因不是 Adl/Liquidation/Unknown、身份形状不对(有 trade_id 时 fill_seq 必须为 0;无 trade_id 时 exch_order_id 与 fill_seq 都必须非 0)。权限仍仅 reconciler,无 cmd_hash,不经过命令去重缓存。字段按机器原始凭据传输,金额和费用不由 gateway 根据余额差生成。
 
 ## 实现说明
 

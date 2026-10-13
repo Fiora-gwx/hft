@@ -296,6 +296,7 @@ pub static NOTE_NAMES: &[NoteName] = notes![
     TargetCleared: Sequencer, Info, [];
     PositionDiff: Sequencer, P1, [f("venue", 0, 8), f("account", 8, 8), f("ledger_qty", 64, 64), f("report_qty", 128, 64)];
     ReconcileCash: Sequencer, Info, [f("report_id", 0, 64), f("venue", 64, 8), f("account", 72, 8), f("n_reports", 128, 64), f("n_fills", 192, 64), f("applied", 256, 64)];
+    ReconcileRejected: Sequencer, P0, [f("report_id", 0, 64), f("venue", 64, 8), f("account", 72, 8), f("reason", 128, 64), f("detail", 192, 64)];
     RateLimitHit: Risk, P2, [];
     CapSet: Risk, Info, [f("cap", 0, 384)];
     CapCleared: Risk, Info, [f("cap", 0, 384)];
@@ -344,6 +345,8 @@ pub static NOTE_NAMES: &[NoteName] = notes![
     ChainReorgNaked: Ledger, P0, [];
     BalanceCheck: Ledger, Info, [f("venue", 0, 8), f("account", 8, 8), f("asset", 64, 64),
         f("free", 128, 64), f("locked", 192, 64), f("ex_ts_ns", 256, 64)];
+    ReceiptMismatch: Ledger, P0, [f("venue", 0, 8), f("account", 8, 8), f("inst", 64, 64), f("trade_id", 128, 64),
+        f("exch_order_id", 192, 64), f("fill_seq", 256, 64), f("fields", 320, 64)];
     ExecBroken: Exec, P0, [];
     ExecExternalDefault: Exec, None, [];
     ExecAutoFixFailed: Exec, P0, [];

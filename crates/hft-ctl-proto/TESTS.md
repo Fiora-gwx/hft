@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | CTP-057、CTP-094、CTP-173 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | CTP-001–CTP-004、CTP-090、CTP-162、CTP-170 |
-| 请求与响应 | CTP-010–CTP-025、CTP-040–CTP-053、CTP-070–CTP-072、CTP-140–CTP-161、CTP-177、CTP-178 |
+| 请求与响应 | CTP-010–CTP-025、CTP-040–CTP-053、CTP-070–CTP-072、CTP-140–CTP-161、CTP-177、CTP-178、CTP-179 |
 | 二次确认 | CTP-001、CTP-011、CTP-016、CTP-071、CTP-072、CTP-080–CTP-082 |
 | 策略参数 schema JSON | CTP-175 |
 | 权限表 | CTP-081、CTP-082、CTP-090、CTP-093、CTP-095、CTP-100–CTP-139、CTP-176 |
@@ -2312,6 +2312,26 @@ spec: README.md
 - 步骤:解析 JSON、重新序列化并规范化;检查环记录;分别提交空、截断、超量、零字节凭据
 - 期望:JSON 往返保留凭据,合法组写一条 ReconcileBatch 且原始成交字节一致;坏体拒绝
 - 实现:`crates/hft-ctl-proto/tests/normalize.rs::ctp_178_reconciliation_receipts_use_one_atomic_record`
+
+### CTP-179 成交语义不成立的原始凭据在规范化时拒绝
+
+- 规则:[实现规格](README.md#请求与响应)
+- 级别:table
+- 里程碑:M2
+- 前置:与 CTP-178 相同的 refdata(严格永续结算)与两项报告;合法凭据数量 0.001 BTC、价格 60000、trade_id = 7、fill_seq = 0、现金覆盖量等于数量
+- 实现:`crates/hft-ctl-proto/tests/normalize.rs::ctp_179_reconciliation_receipts_reject_bad_fill_semantics`
+
+| 行 | 凭据改动 | 期望 |
+|---|---|---|
+| CTP-179.1 | 数量与现金覆盖量为 0 | `InvalidArgs{BadValue}` |
+| CTP-179.2 | 价格为 0 | `InvalidArgs{BadValue}` |
+| CTP-179.3 | 现金覆盖量比数量少 1 raw | `InvalidArgs{BadValue}` |
+| CTP-179.4 | 成因为 Manual | `InvalidArgs{BadValue}` |
+| CTP-179.5 | 有 trade_id 且 fill_seq = 1 | `InvalidArgs{BadValue}` |
+| CTP-179.6 | trade_id = 0 且 fill_seq = 0 | `InvalidArgs{BadValue}` |
+| CTP-179.7 | account 与分组不同 | `InvalidArgs{BadValue}` |
+
+未改动的合法凭据规范化成功。
 
 ## 验收
 
