@@ -61,6 +61,10 @@ pub struct RunRecord {
     pub cancel_filled: Vec<CancelFilledReport>,
     /// Final exchange-side view, independently of the engine observations.
     pub truth: Vec<TruthRow>,
+    /// Non-vacuity: items each invariant checker compared, index n = `I<n>` (TK-176). INV-6
+    /// includes the run's snapshot checks and end-of-run journal comparisons, INV-9 the hash-trail
+    /// points and Outputs an in-process rerun compared.
+    pub compared: [u64; 32],
 }
 
 impl RunRecord {
@@ -91,7 +95,12 @@ impl RunRecord {
             late_recycle: Vec::new(),
             cancel_filled: Vec::new(),
             truth: Vec::new(),
+            compared: [0; 32],
         }
+    }
+    /// Items `I<n>` compared in this run (see [`RunRecord::compared`]).
+    pub fn compared_of(&self, i: InvId) -> u64 {
+        self.compared.get(usize::from(i.0)).copied().unwrap_or(0)
     }
     /// Output records (`role = Output` by kind) of the journal: the intent stream compared by INV-9.
     pub fn outputs(&self) -> Vec<&JRec> {
@@ -136,6 +145,8 @@ pub fn run_record<E: Sut>(cfg: &DstConfig) -> RunRecord {
         c2.rerun = RerunPolicy::Never;
         let r2 = run_once::<E>(&c2);
         let same_out = rec.outputs() == r2.outputs();
+        rec.compared[usize::from(InvId::I9.0)] +=
+            (rec.trail.points.len().max(r2.trail.points.len()) + rec.outputs().len()) as u64;
         if r2.trail != rec.trail || !same_out {
             let step = rec.steps_run.saturating_sub(1);
             rec.outcome = DstOutcome::Fail(Box::new(DstFailure {
@@ -929,6 +940,14 @@ impl<E: Sut> Loop<'_, E> {
             }
         }
         self.rec.journal = self.sut.journal().to_vec();
+        self.rec.compared = self.inv.compared;
+        if self.cfg.invariants.contains(InvId::I6) {
+            let i6 = &mut self.rec.compared[usize::from(InvId::I6.0)];
+            *i6 += self.rec.snapshot_checks + self.rec.ledger_checks.len() as u64;
+            if let Some(j) = self.rec.journal_verification {
+                *i6 += j.inputs + j.outputs + j.snapshots;
+            }
+        }
         #[cfg(feature = "seq")]
         if self.cfg.world.physical_journal {
             match self.sut.physical_journal() {

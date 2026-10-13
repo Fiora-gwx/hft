@@ -300,6 +300,8 @@ TK-121/123 定位历史反例时,只从定位序号扣除此前新增的 Ledger 
 
 **真实引擎的植入缺陷**:`DstConfig.planted` 在真实引擎上由 hft-oms、hft-risk、hft-exec、hft-ledger、hft-sequencer 的 `planted` feature 提供(`src/planted.rs`;名字到 crate 与开关位的表为 `hft_sequencer::planted::DEFECTS`,本 crate 的 `seq::PLANTED` 与之相同)。本 crate 的 `planted` feature(= `seq` + `hft-sequencer/planted`)只由本 crate 的测试打开,`seq`、`dst-bin` 与任何生产清单都不含它(TK-178)。`Sut::plant` 在一次运行开始前按名字打开、运行结束(含 INV-9 复跑各自的作用域)时恢复;开关按线程生效,同一线程上的运行、INV-6 重建与冷验证器都带同一缺陷(相当于同一个有缺陷的二进制),其他线程的并行测试不受影响;未知名字使启动失败。各缺陷与其被发现的世界、种子上限归 TK-179 与 TK-053.21–TK-053.23。
 
+**非空比较计数**:每个检查器每步通过后按 `subjects` 的定义累计它实际比较的条目(触发违反所需的事实,不是扫过的行),存于 `InvState.compared` 并在运行结束时复制到 `RunRecord.compared`(`compared_of(InvId)`);I6 另加该运行的快照检查、账本事件检查与结束时完整 journal 核对的输入/输出/快照数,I9 另加复跑比较的 HashTrail 点与 Output 数。I16 只计无在途、无未交付的账户(被跳过的账户不计)。关闭的检查器比较数为 0,开启的检查器的数值与其他检查器是否开启无关(TK-176);标准冒烟种子集上核心不变量的比较数必须大于 0(TK-177)。`Obs.risk`(`RiskRow`)从引擎读取:名义上限与 `force_step` 取第一个账户的当前 `RiskParams`(随 `SetRisk` 变化),`broken_auto_fix_ms` 取执行层该账户当前参数(`Exec::account_params`,`testkit` feature),不再抄世界配置;引擎缺少该账户时观察失败。
+
 `MarketSource::Recorded` 中的 `MarkPrice` 与 `Bbo` 一样交给各匹配器(`Matcher::on_mark`;`SimMatcher` 转给 `SimExchange`,驱动保证金报告与强平),再交付引擎;没有标记价的录制行情行为不变。
 
 ### 7. 状态哈希对比
@@ -329,7 +331,7 @@ hft-dst hashtrail --seed 0x… --suite <name> --steps N # 一行:trail <32 位�
 - **场景选择与证据**:`list` 另列 `case <编号> suite=<名称或all>`。未知场景、与场景固定套件冲突、`hashtrail --case` 均退出 2。显式场景的结果、进行中标记及失败复现保留 `case`;专属断言与普通不变量同样使运行退出 1。`run` 每批最多 4096 个显式场景种子,超出退出 2;逐种子记录实际步数、HashTrail、成功账本检查序号、AUTO 原件、迟到确认、抵扣数和最终钱包两侧数值。`repro --out` 写相同单种子证据(TK-143),不声明上线累计验收。
 - **`hashtrail`**:以该种子、套件与步数运行一次(不做 INV-9 复跑),标准输出恰一行 `trail <xxh3-128(HashTrail::to_bytes()) 的 32 位小写十六进制> points=<点数>`,退出 0;有违反时 stderr 打印复现行、退出 1;参数错误退出 2。`cargo xtask dst --hashtrail check|write` 用它核对或重写 `fixtures/dst/hashtrail.toml`(`[[seed]]` 表:`seed = "0x<16 位十六进制>"`、`suite`、`steps`、`trail`,登记顺序即文件顺序)。
 
-- **`run`**:按升序逐个运行区间内的种子(每个种子轮转套件,由种子派生选择);到 `--deadline-s` 时在当前种子结束后停止。结果 `DstRunResult`(JSON,规范化字段顺序):`{bin_version, git_sha, profile, suites, seed_from, seed_to_done, seeds_run, steps, violations: [{seed, suite, step, invariant}], compared: {"I1": n, …}, elapsed_s}`;`seed_to_done` 之后的种子视为未运行(不计入,也不算失败)。每完成 `checkpoint_seeds`(默认 1,000)个种子就把当前结果原子地写到 `--out`(先写 `.new` 再 rename);收到 `SIGINT`/`SIGTERM` 时在当前种子结束后写出结果并退出,被强杀时最近一次落盘的结果仍可计入。
+- **`run`**:按升序逐个运行区间内的种子(每个种子轮转套件,由种子派生选择);到 `--deadline-s` 时在当前种子结束后停止。结果 `DstRunResult`(JSON,规范化字段顺序):`{bin_version, git_sha, profile, suites, seed_from, seed_to_done, seeds_run, steps, violations: [{seed, suite, step, invariant}], compared: {"I1": n, …}, elapsed_s}`;`compared` 为本次各种子 `RunRecord.compared` 之和,按 `I<n>` 列出全部检查器(非空比较的证据,见 [6. DST 框架](#6-dst-框架));`seed_to_done` 之后的种子视为未运行(不计入,也不算失败)。每完成 `checkpoint_seeds`(默认 1,000)个种子就把当前结果原子地写到 `--out`(先写 `.new` 再 rename);收到 `SIGINT`/`SIGTERM` 时在当前种子结束后写出结果并退出,被强杀时最近一次落盘的结果仍可计入。
 - **进行中种子标记**:每个种子开始前,`run` 原子地写 `--crash-dir/.inflight.json` = `{seed, suite, steps, started_utc}`(先写 `.new`、`fsync`、再 rename);下一个种子开始时覆盖,正常退出时删除。它以隐藏文件命名,journal-archiver 的 files source 不上传它(会被改写的文件上传会 `Conflict`,[journal-archiver](../../apps/journal-archiver/README.md#文件归档files-source))。进程被信号终止时该文件指明当时在跑的种子:以致命信号结束(如 `SIGABRT`/`SIGSEGV`:双重 panic、栈溢出、内存错误)时 `hft-verify` 按它记失败种子,被强杀或中止时该种子由下一次运行重跑(信号的分类表归 [tools](../../tools/README.md#hft-verify),清零规则归 [testing §6.1](../../docs/testing.md#61-服务器上的累计运行))。
 - **失败**:任一不变量违反,或被测代码在某个种子内 panic(每个种子在 `catch_unwind` 内运行,panic 记为 `invariant = "panic"` 的违反)→ 该种子的故障表、违反前 200 条事件的 journal 片段与一行复现命令写进 `--crash-dir/<seed>/`;`run` 继续跑剩余种子(一次运行内的全部违反都记录),退出码 1。
 - **确定性**:同一二进制、同一种子、同一套件 → 同一结果与 `HashTrail`(与 `cargo xtask dst` 在 CI 上的同种子运行逐字节相同,不变量 9);不读系统时钟(`--deadline-s` 只决定在哪个种子之后停止,不影响任何种子的结果)、不读环境变量、不访问网络。
@@ -533,7 +535,8 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 - `CancelRejectFilled` 请求和超时释放不算撤单竞态成功;必须有真实 Cancel、撮合器拒绝及后续原件交付的日志证据。它不覆盖尚未完成的撤改竞态全集。
 - 固定行情耗尽后的 LED-267 派生权益观察存在待定位差异,冷热读者的过期标志与 as_of_ens 可能不同,金额相等仍会失败。[CI 266](https://github.com/Fiora-gwx/hft/actions/runs/38397768438/job/115297630578) 的 TK-172 记录了该边界;持续行情的撤单竞态验收不代表断行情后的观察一致性已通过。
 - 运行期 `BaseFee` 尚未接入 MockVenue 的执行分支,计划条目不能计为覆盖。基础币费用的配置与资金验收仍按 TK-106 执行,不等于运行期费用扰动已覆盖。
-- 真实引擎的逐 Input 与逐决策观察契约见 [DST 框架](#6-dst-框架)。`toy::PLANTED` 各行的真实引擎版本(各 crate 的 `planted-*` feature)、`run_sim_case`(TK-009)、`ProbeBuild` 注入(TK-095)与模板探针的构建检查(TK-042)未落地(TK-053 仍以 `ToyEngine` 运行);`hft-dst` 的 `SIGINT`/`SIGTERM` 处理属 M6。
+- 真实引擎的逐 Input 与逐决策观察契约见 [DST 框架](#6-dst-框架)。真实引擎的植入缺陷覆盖 I2、I3、I6、I16、I20 与 QF-1、MS-2、对冲重试三条场景断言(TK-179、TK-053.21–TK-053.23);`toy::PLANTED` 其余各行(I1、I4、I5、I7–I9、I11–I15、I17–I19)的真实引擎版本、`run_sim_case`(TK-009)、`ProbeBuild` 注入(TK-095)与模板探针的构建检查(TK-042)未落地;`hft-dst` 的 `SIGINT`/`SIGTERM` 处理属 M6。
+- 标准套件的冒烟种子集上 I17、I20 比较数为 0、I13、I15、I18、I19 很少(TK-177 逐运行打印):W1 的测试策略很少开仓,保证金与 Broken 路径只由定向世界覆盖。真实引擎 DST 里交易所以未登记码拒单后槽保持 `Unknown`、`QueryResult` 回 NotFound 时不能收敛,依赖该槽收敛的路径(Broken 自动平仓等)在这类世界里一直等待;TK-179 的 Broken 世界改用行情断连使第二腿无法定价。MS-2(测试策略版)带缺陷的运行在强平后出现钱包为负的交易所真值与引擎余额 0 的差异(I16),强平亏空的入账语义待定。
 
 ### 开发备忘
 

@@ -39,6 +39,8 @@ mod planted;
 mod planted_seq;
 #[cfg(feature = "planted")]
 mod planted_seq;
+#[cfg(feature = "planted")]
+mod planted_seq;
 mod probes;
 #[cfg(feature = "seq")]
 mod reconcile_actor;
@@ -50,7 +52,10 @@ mod replay_probe;
 mod sdk_mock;
 mod sdk_rd;
 mod tmp;
+mod tmp;
 mod truth;
+#[cfg(feature = "seq")]
+mod vacuity;
 // The engine adapter's tests (feature `seq`, on in `--all-features` runs): enabling it here as a
 // dev-dependency feature would put hft-sequencer into every dependent's dev closure.
 #[cfg(feature = "seq")]

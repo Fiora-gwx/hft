@@ -278,6 +278,12 @@ impl Exec {
         self.accts.get(k).map_or_else(ExecParams::default, |a| a.params)
     }
 
+    /// The parameters account `a` currently runs with (read-only DST observation).
+    #[cfg(feature = "testkit")]
+    pub fn account_params(&self, a: AccountId) -> Option<ExecParams> {
+        self.acct_ix(a).map(|k| self.params(k))
+    }
+
     pub(crate) fn inst(&self, i: InstId) -> &InstHot {
         self.insts.get(i.0 as usize).unwrap_or(&self.none_inst)
     }

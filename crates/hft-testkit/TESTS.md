@@ -20,9 +20,9 @@ spec: README.md
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
 | 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TK-117–TK-119、TK-141、TOOL-024、TOOL-027–TOOL-029 |
-| 6. DST 框架 | TK-043–TK-070、TK-100–TK-116、TK-120–TK-125、TK-147–TK-154 |
+| 6. DST 框架 | TK-043–TK-070、TK-100–TK-116、TK-120–TK-125、TK-147–TK-154、TK-176–TK-179 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
-| 8. hft-dst 运行器 | TK-075–TK-088、TK-143、TK-146 |
+| 8. hft-dst 运行器 | TK-075–TK-088、TK-143、TK-146、TK-180 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
 | 10. SeqRig | PY-106–PY-109、PY-111、PY-112 |
 | 11. 临时目录 | TK-174 |
@@ -2198,6 +2198,30 @@ spec: README.md
   - 步骤 6 得到 `target/dst/x-migration-<pid>.json`
 - 实现:`crates/hft-testkit/tests/tmp.rs::tk_174_test_directories_removed_unless_kept`
 
+### TK-176 每个检查器报告实际比较的条目数
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:unit
+- 里程碑:M2
+- 前置:`core` 套件种子 1(2 000 步,不复跑)
+- 步骤:
+  1. 关闭全部检查器运行;再对每个检查器只开它运行
+  2. 与全部检查器开启的运行比较 `RunRecord.compared`
+- 期望:
+  - TK-176.1:关闭的检查器比较数为 0
+  - TK-176.2:每个检查器的比较数与其他检查器是否开启无关
+- 实现:`crates/hft-testkit/tests/vacuity.rs::tk_176_compared_counts_follow_enabled_checkers`
+
+### TK-177 标准冒烟种子集上核心不变量都实际比较过
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:dst
+- 里程碑:M2
+- 故障:各套件自身的故障率
+- 种子:三个套件各种子 1、2,2 000 步(与仓库根 `tests/dst/` 的冒烟相同),强制复跑
+- 断言:全部运行通过;I1、I2、I3、I4、I5、I6、I7、I8、I11、I12、I14、I15、I16、I19 的比较数之和均大于 0;其余检查器(I9、I13、I17、I18、I20)的比较数逐运行打印,由定向用例(TK-053、TK-179、LED-080/081 等)覆盖
+- 实现:`crates/hft-testkit/tests/vacuity.rs::tk_177_standard_smoke_compares_every_core_invariant`
+
 ### TK-178 植入缺陷不进入任何生产构建
 
 - 规则:[6. DST 框架](README.md#6-dst-框架)
@@ -2233,9 +2257,21 @@ spec: README.md
 | TK-179.5 | `broken-never-autofix`:Broken 从不开始自动平仓(hft-exec) | `broken` | `I20` |
 | TK-179.6 | `broken-repeat-autofix`:终态后在同一 Broken 期再次开始自动平仓(hft-exec) | `broken-fail` | `I20` |
 
+### TK-180 hft-dst run 的结果按不变量报告比较数
+
+- 规则:[8. hft-dst 运行器](README.md#8-hft-dst-运行器)
+- 级别:unit
+- 里程碑:M2
+- 前置:`hft-dst run --seeds 3..4 --suite core --steps 300 --out r.json --crash-dir c`
+- 步骤:
+  1. 运行并读 `r.json`;同一配置以 `run_record` 分别运行种子 3、4
+- 期望:
+  - 退出 0;`compared` 对象按 `I<n>` 列出全部检查器,值等于两个种子 `RunRecord.compared` 之和;`I1`、`I16` 大于 0
+- 实现:`crates/hft-testkit/tests/dst_cli.rs::tk_180_cli_reports_compared_items_per_invariant`
+
 ## 验收
 
 - 本组件完成 = 里程碑已到的全部用例有同编号的实现且通过(`cargo xtask test-trace`)。
-- 框架可信度:TK-053 的每一行都在 2 000 个种子内被找到,TK-051 的每一行都缩到 ≤ 5 项;任一行未达成即框架验收不通过。
+- 框架可信度:TK-053 的每一行都在其种子上限内被找到(ToyEngine 行 2 000,真实引擎行 16),TK-179 的每一行在 16 个种子内被真实引擎 DST 找到,TK-051 的每一行都缩到 ≤ 5 项;TK-177 的核心不变量都实际比较过;任一行未达成即框架验收不通过。
 - 跨架构一致:版本标签作业的 TK-054 通过(不变量 9,[testing §6](../../docs/testing.md#6-ci-运行矩阵))。
 - 运行时间预算(PR 冒烟、每夜、版本标签、`scaffold-gate`、全部金样、单步开销)以 [延迟与资源契约](README.md#延迟与资源契约) 的表为准,由 CI 作业时长与 TK-092、TK-093 的基准输出给出证据;服务器累计的门槛 ④ 由 hft-verify 账本给出([testing §6.1](../../docs/testing.md#61-服务器上的累计运行))。
