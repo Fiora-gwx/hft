@@ -307,7 +307,7 @@ pub fn bisect_divergence(run: impl FnMut(u64) -> (ComponentHashes, ComponentHash
 pub fn component_hashes(snapshot_logical_body: &[u8]) -> Result<ComponentHashes, SnapErr>;
 ```
 
-组件哈希取自 [`hft-sequencer`](../hft-sequencer/README.md) 快照的分组件段(顺序由 sequencer 固定):每个组件 = 其各节(`SectionHdr` + 节体,按写出顺序拼接)的 xxh3-64;节到组件的对应(节号归 [journal-format](../../docs/subsystems/journal-format.md#快照记录结构)):ledger 1、13、22;oms 2、3、12;risk 4、14、17、18、23;strategies 5;book 6、7;exec 21;其余节只进 `all`。`all` 即快照头的 `state_hash`(xxh3-128);`purpose = Keyframe` 的头写 0,读者对除节 16、28 外的全部节按写出顺序算 xxh3-128(与 sequencer 的 `state_hash` 同一排除)。组件的"写出顺序"按其最小节号:ledger、oms、risk、strategies、book、exec。DST 的 `HashTrail` 以已处理 Input 的序号为点(每 `hash_every` 个),`replay-verify` 以 journal seq 为点。本 crate 不定义新的哈希协议,只提供采样、比较与二分。`cargo xtask replay-verify` 用它报告"第一处分歧在 seq N 的 oms 组件"。
+组件哈希取自 [`hft-sequencer`](../hft-sequencer/README.md) 快照的分组件段(顺序由 sequencer 固定):每个组件 = 其各节(`SectionHdr` + 节体,按写出顺序拼接)的 xxh3-64;节到组件的对应(节号归 [journal-format](../../docs/subsystems/journal-format.md#快照记录结构)):ledger 1、13、22;oms 2、3、12;risk 4、14、17、18、23;strategies 5;book 6、7;exec 21;其余节只进 `all`。`all` 即快照头的 `state_hash`(xxh3-128);`purpose = Keyframe` 的头写 0,读者对除节 16、28、29 外的全部节按写出顺序算 xxh3-128(与 sequencer 的 `state_hash` 同一排除)。组件的"写出顺序"按其最小节号:ledger、oms、risk、strategies、book、exec。DST 的 `HashTrail` 以已处理 Input 的序号为点(每 `hash_every` 个),`replay-verify` 以 journal seq 为点。本 crate 不定义新的哈希协议,只提供采样、比较与二分。`cargo xtask replay-verify` 用它报告"第一处分歧在 seq N 的 oms 组件"。
 
 ### 8. hft-dst 运行器
 

@@ -1172,7 +1172,7 @@ impl<'b> Reassembler<'b> {
 
 `Note{Sequencer,ReconcileCash}` 的源内码为 14,级别 Info。group/inst/strategy/pad 为零;v 依序为 report_id、venue | account<<8、报告数、凭据数、是否应用(0/1)、三个零。每组一条,先于本组财务派生记录;它只证明是否应用,不携带金额答案。
 
-`Note{Sequencer,ReconcileRejected}` 的源内码为 15,级别 P0。group/inst/strategy/pad 为零;v 依序为 report_id、venue | account<<8、原因、细节、四个零。原因:1 = 体不可解码(report_id、venue、account 取自可读的头,不可读时为 0;不写 ReconcileCash)、2 = 同 report_id 的分组仍在途、3 = ledger 整组预检失败(细节 = `SettlementError` 判别值)、4 = OMS 整组预检失败(细节 = `CashError` 判别值)。原因 2–4 紧接着写 `ReconcileCash{applied = 0}`。判定与后续处理归 [hft-sequencer](../hft-sequencer/README.md)。
+`Note{Sequencer,ReconcileRejected}` 的源内码为 15,级别 P0。group/inst/strategy/pad 为零;v 依序为 report_id、venue | account<<8、原因、细节、四个零。原因:1 = 体不可解码(report_id、venue、account 取自可读的头,不可读时为 0;不写 ReconcileCash)、2 = 同 report_id 的分组仍在途、3 = ledger 整组预检失败(细节 = `SettlementError` 判别值)、4 = OMS 整组预检失败(细节 = `CashError` 判别值)、5 = 普通报告的 Position 差量超出保留视图容量(细节 = 容量;该报告不能用于 AdoptExchange,不写 ReconcileCash)。原因 2–4 紧接着写 `ReconcileCash{applied = 0}`。判定与后续处理归 [hft-sequencer](../hft-sequencer/README.md)。
 
 ## 实现说明
 

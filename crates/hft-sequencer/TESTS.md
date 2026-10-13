@@ -28,7 +28,7 @@ spec: README.md
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
 | 连接活性 | SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173 |
-| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420、SEQ-425–SEQ-429 |
+| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420、SEQ-425–SEQ-431 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
@@ -3532,7 +3532,7 @@ spec: README.md
 - 步骤:
   1. 写按需快照,按体内顺序读各 `SectionHdr.section`
 - 期望:
-  - 顺序为 1、13、22、2、3、12、4、14、17、18、23、5、8、9、10、15、16、19、20、24、25、26、27、6、7、21;`SnapshotHdr.n_sections = 26`
+  - 顺序为 1、13、22、2、3、12、4、14、17、18、23、5、8、9、10、15、16、19、20、24、25、26、27、29、6、7、21(稳态有启动对账留下的视图,无成交所以没有节 28);`SnapshotHdr.n_sections = 27`
 - 实现:`crates/hft-sequencer/tests/snapshot.rs::seq_248_section_write_order`
 
 ### SEQ-249 state_hash 不计节 16,out_hash 屏蔽测量字段
@@ -5880,6 +5880,38 @@ spec: README.md
   - 第 3 步后仓位为 −0.0005(SEQ-429.4,对照)
   - 三种验证回放均无差异(从 K1 起步时守卫判定与连续运行相同)
 - 实现:`crates/hft-sequencer/tests/settlement.rs::seq_429_latest_fill_seq_survives_snapshot_recovery`
+
+### SEQ-430 AdoptExchange 的对账视图经快照恢复后守卫判定不变
+
+- 规则:[快照](README.md#快照)、[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
+- 级别:integ
+- 里程碑:M2
+- 前置:B0(非严格现金)稳态;策略在 B1 卖出 0.001 BTC 并全部成交;`RECON_VIEW_REPORTS = 16`
+- 步骤:
+  1. report 802 的 `view_seq` 取成交之前、report 803 取成交之后,两者 Position 条目都是交易所 −0.0005、引擎 −0.001;写关键帧 K
+  2. 确认后的 `AdoptExchange{report 802}`,再 `AdoptExchange{report 803}`
+  3. 登记 report 804(当前视图,交易所 −0.0004),再送 16 个只有 Summary 的报告,然后 `AdoptExchange{report 804}`
+  4. 写关键帧,做完整与从初始关键帧、K 起步的验证回放
+- 期望:
+  - K 的节 29 最后两份报告为 802、803(SEQ-430.1)
+  - 802 → `PreconditionFailed{StaleReport}`,仓位不变(SEQ-430.2);803 → `Applied`,仓位 −0.0005(SEQ-430.3)
+  - 804 被淘汰 → `PreconditionFailed{StaleReport}`,仓位仍 −0.0005(SEQ-430.4)
+  - 三种验证回放均无差异;关闭节 29 的恢复时从 K 起步的回放出现差异
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_430_adopt_stale_guard_and_retained_views_survive_recovery`
+
+### SEQ-431 对账视图表的淘汰与溢出有界且确定
+
+- 规则:[快照](README.md#快照)
+- 级别:table
+- 里程碑:M2
+- 前置:空 `ReconViews`;`RECON_VIEW_DIFFS = 4096`、`RECON_VIEW_REPORTS = 16`;每行 Position 引擎 10、交易所 4(差量 −6)
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_431_recon_view_table_overflow_is_defined_and_bounded`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| SEQ-431.1 | report 1 一行,再 report 2 的 4096 个不同品种 | 均不报溢出;report 1 被淘汰;report 2 的差量 −6 |
+| SEQ-431.2 | report 2 再来第 4097、4098 个不同品种 | 第 4097 行返回溢出(仅一次);report 2 标记 OVERFLOW,差量全部丢弃(查得 0) |
+| SEQ-431.3 | 再登记 19 个新 report(非 Position 条目) | 只保留 16 份,最旧的 report 2 与前 3 个新 report 被淘汰 |
 
 ## 验收
 

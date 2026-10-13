@@ -130,10 +130,10 @@ fn seq_248_section_write_order() {
     assert_eq!(
         s,
         vec![
-            1, 13, 22, 2, 3, 12, 4, 14, 17, 18, 23, 5, 8, 9, 10, 15, 16, 19, 20, 24, 25, 26, 27, 6, 7, 21
+            1, 13, 22, 2, 3, 12, 4, 14, 17, 18, 23, 5, 8, 9, 10, 15, 16, 19, 20, 24, 25, 26, 27, 29, 6, 7, 21
         ]
     );
-    assert_eq!(snap(&o).0.n_sections, 26);
+    assert_eq!(snap(&o).0.n_sections, 27);
 }
 
 #[cfg(feature = "testkit")]

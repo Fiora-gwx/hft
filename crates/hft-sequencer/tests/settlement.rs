@@ -1143,3 +1143,163 @@ fn seq_413_external_cash_dedup_cold_snapshots_and_full_window_replay() {
         assert!(h.verify().is_empty(), "full replay {order:?}");
     }
 }
+
+fn adopt_cmd(report_id: u64) -> hft_event::ControlCmd<'static> {
+    hft_event::ControlCmd::AdoptExchange {
+        account: AC1,
+        venue: B,
+        inst: B1,
+        report_id,
+        item: 0,
+        _pad: 0,
+        asset: hft_types::AssetId(0),
+        group: hft_types::GROUP_NONE,
+        entry_px: Px(0),
+    }
+}
+
+/// Plain report group `report_id`: Summary + one B1 Position row (no AUTO_EXTERNAL).
+fn position_report(h: &mut H, report_id: u64, view_seq: u64, exch: i64) {
+    use hft_sequencer::driver::live::RingId;
+    let mut summary = recon_summary(AC1, B, report_id, view_seq);
+    summary.count = 2;
+    let mut p = summary;
+    p.idx = 1;
+    p.item = 1;
+    p.inst = B1;
+    p.engine_qty = h.s.engine().ledger.pos(AC1, B1).qty;
+    p.exch_qty = Qty(exch);
+    h.push(RingId::Ctl, &summary);
+    h.push(RingId::Ctl, &p);
+    assert_eq!(h.run(), StepOutcome::Idle);
+}
+
+fn adopt_result(h: &mut H, report_id: u64) -> (u8, u32) {
+    let id = h.cmd_confirmed(AC1, &adopt_cmd(report_id));
+    assert_eq!(h.run(), StepOutcome::Idle);
+    let r = h.result_of(id).unwrap();
+    (r.status, r.detail)
+}
+
+#[test]
+fn seq_430_adopt_stale_guard_and_retained_views_survive_recovery() {
+    use hft_sequencer::codes::{detail, status};
+    use hft_sequencer::driver::live::RingId;
+    reset_script();
+    let mut h = b0().boot_self_contained();
+    h.steady();
+    add_hook(|hx, ev, ctx| {
+        if let EventRef::Bbo { inst, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+            && hx.v.bbo(A1).bid_px == px("50002")
+        {
+            let mut it = open_buy(hx, B1);
+            it.side = Side::Sell;
+            it.qty = Qty(100_000);
+            it.px = hx.v.bbo(B1).bid_px;
+            let _ = ctx.place(it);
+        }
+    });
+    let start = h.keyframe();
+    let mark = h.mark();
+    h.quote(A1, "50002", "50003");
+    assert_eq!(h.run(), StepOutcome::Idle);
+    let d: Vec<_> = decisions(&h.since(mark))
+        .into_iter()
+        .filter(|(_, d)| d.inst == B1 && d.account == AC1 && d.reject == 0)
+        .map(|(_, d)| d)
+        .collect();
+    assert_eq!(d.len(), 1);
+    h.ack(&d[0]);
+    assert_eq!(h.run(), StepOutcome::Idle);
+    let before_fill = h.j().records().last().unwrap().seq;
+    let mut e = order_event(&d[0], OrderEventKind::Fill, h.epoch());
+    e.cum_filled = Qty(100_000);
+    h.push(h.rep_ring(AC1), &e);
+    assert_eq!(h.run(), StepOutcome::Idle);
+    let now = h.j().records().last().unwrap().seq;
+    // 802 was viewed before the fill, 803 after it; both see 0.0005 BTC less short.
+    position_report(&mut h, 802, before_fill, -50_000);
+    position_report(&mut h, 803, now, -50_000);
+    let k = h.keyframe();
+    let secs = hft_sequencer::snapshot::read_seq_sections(&k.body[96..]).unwrap();
+    let ids: Vec<u64> = secs.recon_views.iter().map(|(v, _)| v.report_id).collect();
+    // Startup reconciliation groups precede them, oldest first.
+    assert_eq!(ids[ids.len() - 2..], [802, 803], "SEQ-430.1");
+    assert!(
+        !hft_sequencer::snapshot::read_seq_sections(&start.body[96..])
+            .unwrap()
+            .recon_views
+            .iter()
+            .any(|(v, _)| matches!(v.report_id, 802 | 803))
+    );
+    // .2 the stale report is refused, the fresh one applies its retained diff.
+    assert_eq!(
+        adopt_result(&mut h, 802),
+        (status::PRECONDITION_FAILED, u32::from(detail::STALE_REPORT)),
+        "SEQ-430.2"
+    );
+    assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, Qty(-100_000));
+    assert_eq!(adopt_result(&mut h, 803), (status::APPLIED, 0), "SEQ-430.3");
+    assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, Qty(-50_000));
+    // .4 an evicted report (oldest of more than RECON_VIEW_REPORTS) cannot be adopted.
+    let seen = h.j().records().last().unwrap().seq;
+    position_report(&mut h, 804, seen, -40_000);
+    for id in 0..hft_sequencer::RECON_VIEW_REPORTS as u64 {
+        h.push(RingId::Ctl, &recon_summary(AC1, B, 900 + id, seen));
+        assert_eq!(h.run(), StepOutcome::Idle);
+    }
+    assert_eq!(
+        adopt_result(&mut h, 804),
+        (status::PRECONDITION_FAILED, u32::from(detail::STALE_REPORT)),
+        "SEQ-430.4"
+    );
+    assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, Qty(-50_000));
+    h.keyframe();
+    assert!(h.verify().is_empty());
+    for from in [&start, &k] {
+        assert!(
+            h.verify_from(Some(from.seq)).is_empty(),
+            "SEQ-430.3 from {}",
+            from.seq
+        );
+    }
+}
+
+#[test]
+fn seq_431_recon_view_table_overflow_is_defined_and_bounded() {
+    use zerocopy::FromZeros;
+    let mut t = hft_sequencer::ReconViews::default();
+    let row = |report_id: u64, inst: u32| {
+        let mut r = hft_event::ReconcileReport::new_zeroed();
+        r.report_id = report_id;
+        r.account = AC1;
+        r.venue = B;
+        r.item = 1;
+        r.inst = hft_types::InstId(inst);
+        r.view_seq = 7;
+        r.engine_qty = Qty(10);
+        r.exch_qty = Qty(4);
+        r
+    };
+    // .1 an older report is evicted to make room for the current one's rows.
+    assert!(!t.record(&row(1, 1), true));
+    for i in 0..hft_sequencer::RECON_VIEW_DIFFS as u32 {
+        assert!(!t.record(&row(2, i + 1), true), "SEQ-431.1 row {i}");
+    }
+    assert!(t.view(1).is_none(), "SEQ-431.1");
+    assert_eq!(t.diff(2, AC1, hft_types::InstId(5)), Qty(-6));
+    // .2 one report alone exceeding the capacity overflows once; its diffs are dropped.
+    assert!(t.record(&row(2, u32::MAX), true), "SEQ-431.2");
+    assert!(!t.record(&row(2, u32::MAX - 1), true));
+    let v = t.view(2).unwrap();
+    assert!(v.overflow, "SEQ-431.2");
+    assert_eq!(t.diff(2, AC1, hft_types::InstId(5)), Qty(0));
+    // .3 more than RECON_VIEW_REPORTS reports keep only the newest.
+    for id in 10..10 + hft_sequencer::RECON_VIEW_REPORTS as u64 + 3 {
+        t.record(&row(id, 1), false);
+    }
+    assert_eq!(t.views().count(), hft_sequencer::RECON_VIEW_REPORTS, "SEQ-431.3");
+    assert!(t.view(2).is_none() && t.view(12).is_none() && t.view(13).is_some());
+}
