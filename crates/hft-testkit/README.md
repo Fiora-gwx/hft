@@ -297,6 +297,10 @@ TK-121/123 定位历史反例时,只从定位序号扣除此前新增的 Ledger 
 
 未知 client id 的缺陷自测使用实际无法匹配的成交输入,不能依赖缺少 client id 就必然无法解析的假设。TK-053.2 用零等待与先成交后 Ack 的交付边界构造该输入,并要求去掉植入缺陷后同一计划通过;标准世界的已有 Ack 匹配规则保持有效。
 
+**真实引擎的植入缺陷**:`DstConfig.planted` 在真实引擎上由 hft-oms、hft-risk、hft-exec、hft-ledger、hft-sequencer 的 `planted` feature 提供(`src/planted.rs`;名字到 crate 与开关位的表为 `hft_sequencer::planted::DEFECTS`,本 crate 的 `seq::PLANTED` 与之相同)。本 crate 的 `planted` feature(= `seq` + `hft-sequencer/planted`)只由本 crate 的测试打开,`seq`、`dst-bin` 与任何生产清单都不含它(TK-178)。`Sut::plant` 在一次运行开始前按名字打开、运行结束(含 INV-9 复跑各自的作用域)时恢复;开关按线程生效,同一线程上的运行、INV-6 重建与冷验证器都带同一缺陷(相当于同一个有缺陷的二进制),其他线程的并行测试不受影响;未知名字使启动失败。各缺陷与其被发现的世界、种子上限归 TK-179 与 TK-053.21–TK-053.23。
+
+`MarketSource::Recorded` 中的 `MarkPrice` 与 `Bbo` 一样交给各匹配器(`Matcher::on_mark`;`SimMatcher` 转给 `SimExchange`,驱动保证金报告与强平),再交付引擎;没有标记价的录制行情行为不变。
+
 ### 7. 状态哈希对比
 
 ```rust
@@ -324,7 +328,7 @@ hft-dst hashtrail --seed 0x… --suite <name> --steps N # 一行:trail <32 位�
 - **场景选择与证据**:`list` 另列 `case <编号> suite=<名称或all>`。未知场景、与场景固定套件冲突、`hashtrail --case` 均退出 2。显式场景的结果、进行中标记及失败复现保留 `case`;专属断言与普通不变量同样使运行退出 1。`run` 每批最多 4096 个显式场景种子,超出退出 2;逐种子记录实际步数、HashTrail、成功账本检查序号、AUTO 原件、迟到确认、抵扣数和最终钱包两侧数值。`repro --out` 写相同单种子证据(TK-143),不声明上线累计验收。
 - **`hashtrail`**:以该种子、套件与步数运行一次(不做 INV-9 复跑),标准输出恰一行 `trail <xxh3-128(HashTrail::to_bytes()) 的 32 位小写十六进制> points=<点数>`,退出 0;有违反时 stderr 打印复现行、退出 1;参数错误退出 2。`cargo xtask dst --hashtrail check|write` 用它核对或重写 `fixtures/dst/hashtrail.toml`(`[[seed]]` 表:`seed = "0x<16 位十六进制>"`、`suite`、`steps`、`trail`,登记顺序即文件顺序)。
 
-- **`run`**:按升序逐个运行区间内的种子(每个种子轮转套件,由种子派生选择);到 `--deadline-s` 时在当前种子结束后停止。结果 `DstRunResult`(JSON,规范化字段顺序):`{bin_version, git_sha, profile, suites, seed_from, seed_to_done, seeds_run, steps, violations: [{seed, suite, step, invariant}], elapsed_s}`;`seed_to_done` 之后的种子视为未运行(不计入,也不算失败)。每完成 `checkpoint_seeds`(默认 1,000)个种子就把当前结果原子地写到 `--out`(先写 `.new` 再 rename);收到 `SIGINT`/`SIGTERM` 时在当前种子结束后写出结果并退出,被强杀时最近一次落盘的结果仍可计入。
+- **`run`**:按升序逐个运行区间内的种子(每个种子轮转套件,由种子派生选择);到 `--deadline-s` 时在当前种子结束后停止。结果 `DstRunResult`(JSON,规范化字段顺序):`{bin_version, git_sha, profile, suites, seed_from, seed_to_done, seeds_run, steps, violations: [{seed, suite, step, invariant}], compared: {"I1": n, …}, elapsed_s}`;`seed_to_done` 之后的种子视为未运行(不计入,也不算失败)。每完成 `checkpoint_seeds`(默认 1,000)个种子就把当前结果原子地写到 `--out`(先写 `.new` 再 rename);收到 `SIGINT`/`SIGTERM` 时在当前种子结束后写出结果并退出,被强杀时最近一次落盘的结果仍可计入。
 - **进行中种子标记**:每个种子开始前,`run` 原子地写 `--crash-dir/.inflight.json` = `{seed, suite, steps, started_utc}`(先写 `.new`、`fsync`、再 rename);下一个种子开始时覆盖,正常退出时删除。它以隐藏文件命名,journal-archiver 的 files source 不上传它(会被改写的文件上传会 `Conflict`,[journal-archiver](../../apps/journal-archiver/README.md#文件归档files-source))。进程被信号终止时该文件指明当时在跑的种子:以致命信号结束(如 `SIGABRT`/`SIGSEGV`:双重 panic、栈溢出、内存错误)时 `hft-verify` 按它记失败种子,被强杀或中止时该种子由下一次运行重跑(信号的分类表归 [tools](../../tools/README.md#hft-verify),清零规则归 [testing §6.1](../../docs/testing.md#61-服务器上的累计运行))。
 - **失败**:任一不变量违反,或被测代码在某个种子内 panic(每个种子在 `catch_unwind` 内运行,panic 记为 `invariant = "panic"` 的违反)→ 该种子的故障表、违反前 200 条事件的 journal 片段与一行复现命令写进 `--crash-dir/<seed>/`;`run` 继续跑剩余种子(一次运行内的全部违反都记录),退出码 1。
 - **确定性**:同一二进制、同一种子、同一套件 → 同一结果与 `HashTrail`(与 `cargo xtask dst` 在 CI 上的同种子运行逐字节相同,不变量 9);不读系统时钟(`--deadline-s` 只决定在哪个种子之后停止,不影响任何种子的结果)、不读环境变量、不访问网络。

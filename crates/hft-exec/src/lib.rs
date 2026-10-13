@@ -33,6 +33,8 @@ mod external;
 mod fix;
 mod force;
 mod out;
+#[cfg(feature = "planted")]
+pub mod planted;
 mod snapshot;
 mod targets;
 pub mod types;

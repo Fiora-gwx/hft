@@ -230,6 +230,12 @@ pub(crate) struct Ctx<'a> {
 /// Tier the measures alone demand ("上行" conditions).
 fn up_level(st: &MState, stale: bool, m: &MarginLimits) -> u8 {
     let (liq, r) = (st.liq(), st.ratio());
+    #[cfg(feature = "planted")]
+    let liq = if crate::planted::on(crate::planted::MARGIN_RATIO_ONLY) {
+        Rate::MAX
+    } else {
+        liq
+    };
     let mut up = 0;
     if stale || liq <= m.liq_dist_block_open {
         up = 1;

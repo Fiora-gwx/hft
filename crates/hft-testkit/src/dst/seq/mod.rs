@@ -55,8 +55,21 @@ pub type SeqDrv<S> = LiveDriver<S, io::DstIo<S>>;
 /// Rounds one `process` / `fire_timers` call may take at most (a runaway guard).
 const MAX_ROUNDS: usize = 10_000;
 
-/// Planted defects the real engine crates understand (`planted-<name>` features). None are built
-/// yet: a run that asks for one fails to boot.
+/// Planted defects the real engine crates understand (feature `planted`): `(name, invariant or
+/// 0 = a scenario assertion)`. Without the feature the list is empty and a run that asks for one
+/// fails to boot.
+#[cfg(feature = "planted")]
+pub const PLANTED: &[(&str, u8)] = &[
+    ("risk-no-exposure-limit", 3),
+    ("snapshot-field", 6),
+    ("ignore-fee", 16),
+    ("broken-never-autofix", 20),
+    ("broken-repeat-autofix", 20),
+    ("hedge-px-book-age", 0),
+    ("margin-ratio-only", 0),
+    ("retry-reduce-only", 3),
+];
+#[cfg(not(feature = "planted"))]
 pub const PLANTED: &[(&str, u8)] = &[];
 
 /// The engine adapter.
@@ -704,6 +717,21 @@ impl<S: StrategySet> Sut for SeqSut<S> {
     fn drain_observations(&mut self, out: &mut StepOut) {
         out.events.append(&mut self.io().events);
         self.io().snapshots.drain(out);
+    }
+
+    #[cfg(feature = "planted")]
+    fn plant(planted: &[&'static str]) -> Result<crate::dst::sut::PlantScope, BootFail> {
+        if planted.is_empty() {
+            return Ok(crate::dst::sut::PlantScope::none());
+        }
+        let prev = hft_sequencer::planted::set(planted).map_err(|p| {
+            BootFail(format!(
+                "planted defect `{p}` is not built into the engine crates"
+            ))
+        })?;
+        Ok(crate::dst::sut::PlantScope::new(move || {
+            hft_sequencer::planted::restore(prev)
+        }))
     }
 
     fn boot(ctx: &BootCtx<'_>) -> Result<Self, BootFail> {

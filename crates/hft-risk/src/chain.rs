@@ -62,6 +62,10 @@ fn within_ioc(side: OSide, px: Px, bid: Px, ask: Px, cap: hft_types::Rate) -> bo
 }
 
 fn open_pos_ok(pos: i64, open: i64, qty: i64, side: OSide, max: i64) -> bool {
+    #[cfg(feature = "planted")]
+    if crate::planted::on(crate::planted::NO_POSITION_LIMIT) {
+        return true;
+    }
     let v = match side {
         OSide::Buy => i128::from(pos) + i128::from(open) + i128::from(qty),
         OSide::Sell => i128::from(open) + i128::from(qty) - i128::from(pos),

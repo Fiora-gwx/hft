@@ -241,6 +241,19 @@ impl Matcher for SimMatcher {
             ex.on_record(&Self::hdr(t), SimInput::Market(MarketEventRef::Bbo(&b)));
         }
     }
+    fn on_mark(&mut self, inst: InstId, px: i64, now_ns: u64) {
+        let mut h = MarketHdr::new_zeroed();
+        h.venue = self.venue;
+        h.inst = inst;
+        h.ex_ts_ns = now_ns as i64;
+        h.rx_tsc = now_ns;
+        let m = hft_event::MarkPrice { h, px: Px(px) };
+        let t = now_ns.max(self.last_ns);
+        self.last_ns = t;
+        if let Some(ex) = self.ex.as_mut() {
+            ex.on_record(&Self::hdr(t), SimInput::Market(MarketEventRef::Mark(&m)));
+        }
+    }
     fn on_command(&mut self, cmd: &GwCmd, now_ns: u64) {
         match cmd.op {
             GwOp::Place => {

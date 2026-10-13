@@ -14,6 +14,9 @@ autotests = false
 workspace = true
 
 [features]
+# Planted defects for the DST self-test (src/planted.rs): only hft-testkit's `planted` feature
+# enables this; never in a production build (crates/hft-testkit TESTS.md TK-178).
+planted = []
 # State hooks for this crate's own tests (put a slot into a given state, read private fields);
 # only enabled from [dev-dependencies] (cargo xtask deps rule 12).
 testing = []

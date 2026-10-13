@@ -29,6 +29,8 @@ mod leverage;
 mod margin;
 pub mod mode;
 mod params;
+#[cfg(feature = "planted")]
+pub mod planted;
 mod pnl_gate;
 pub mod snapshot;
 mod types;

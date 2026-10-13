@@ -33,6 +33,8 @@ mod legs;
 mod link;
 pub mod notes;
 mod out;
+#[cfg(feature = "planted")]
+pub mod planted;
 mod price;
 mod recover;
 mod send;

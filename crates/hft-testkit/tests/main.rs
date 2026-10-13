@@ -35,6 +35,8 @@ mod partial_fills;
 #[cfg(feature = "seq")]
 mod partial_migration;
 mod planted;
+#[cfg(feature = "planted")]
+mod planted_seq;
 mod probes;
 #[cfg(feature = "seq")]
 mod reconcile_actor;

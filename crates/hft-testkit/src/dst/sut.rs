@@ -255,8 +255,8 @@ pub enum CrashPoint {
 pub struct BootCtx<'a> {
     pub seed: u64,
     pub world: &'a WorldSpec,
-    /// Planted-defect names this run asks for (framework self-tests; real engines map them to
-    /// `planted-<name>` features and fail boot when the build lacks one).
+    /// Planted-defect names this run asks for (framework self-tests; the real engine maps them to
+    /// the engine crates' `planted` switches and fails boot when the build lacks one).
     pub planted: &'a [&'static str],
     /// Virtual clock: TSC frequency and start (DstDriver).
     pub tsc_hz: u64,
@@ -278,9 +278,44 @@ pub struct JournalVerification {
     pub snapshots: u64,
 }
 
+/// Planted defects switched on for one run; dropping it switches them back off.
+pub struct PlantScope(Option<Box<dyn FnOnce()>>);
+
+impl PlantScope {
+    /// Nothing switched (engines whose planted defects are per instance, like `ToyEngine`).
+    pub fn none() -> PlantScope {
+        PlantScope(None)
+    }
+    /// Runs `undo` when the scope ends.
+    pub fn new(undo: impl FnOnce() + 'static) -> PlantScope {
+        PlantScope(Some(Box::new(undo)))
+    }
+}
+
+impl core::fmt::Debug for PlantScope {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("PlantScope").field(&self.0.is_some()).finish()
+    }
+}
+
+impl Drop for PlantScope {
+    fn drop(&mut self) {
+        if let Some(undo) = self.0.take() {
+            undo();
+        }
+    }
+}
+
 /// The system under test. Implementations are deterministic functions of their inputs: no clock,
 /// no RNG, no environment (README "DST 的世界模型" 5).
 pub trait Sut: Sized {
+    /// Switches the planted defects of one run on for the calling thread, before boot and until
+    /// the run (with its rebuilds and cold verifiers) ends. The real engine's defects live in the
+    /// engine crates (feature `planted`) and act on every engine instance of the thread, like one
+    /// buggy binary; an unknown name fails the run's boot.
+    fn plant(_planted: &[&'static str]) -> Result<PlantScope, BootFail> {
+        Ok(PlantScope::none())
+    }
     /// Read-only control version used by the test controller's explicit confirmed commands.
     fn control_state_version(&self) -> Result<u64, String> {
         Err("control state version observation is unavailable".into())

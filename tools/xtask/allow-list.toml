@@ -40,6 +40,11 @@ reason = "build scripts print cargo directives"
 
 # ---------------------------------------------------------------- cold replay
 [[allow]]
+file = "crates/*/src/planted.rs"
+lints = ["clippy::disallowed_types"]
+reason = "per-thread planted-defect switch table (static Mutex) behind the test-only `planted` feature; only hft-testkit's own tests enable it, never a production build (crates/hft-testkit TESTS.md TK-178)"
+
+[[allow]]
 file = "crates/hft-sequencer/src/driver/snapshot_diff.rs"
 lints = ["clippy::disallowed_types", "clippy::disallowed_macros"]
 reason = "bounded section index and field-name formatting for read-only offline snapshot diagnostics behind replay-io; absent from the default live build"

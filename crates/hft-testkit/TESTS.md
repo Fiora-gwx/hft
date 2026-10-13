@@ -38,7 +38,7 @@ spec: README.md
 
 ## 用例
 
-约定:"桩协议"指本 crate 测试里实现 `VenueProtocol` 的最小解码器(逐字节把 `.in` 文本 `BBO,<bid>,<ask>` 解成一条 `Bbo`);"植入缺陷替身"指以 feature `planted-<名>` 编译、在被测 crate 的调试钩子里注入错误行为的构建(只在本 crate 的测试中使用)。
+约定:"桩协议"指本 crate 测试里实现 `VenueProtocol` 的最小解码器(逐字节把 `.in` 文本 `BBO,<bid>,<ask>` 解成一条 `Bbo`);"植入缺陷替身"指框架自测引擎 `ToyEngine` 的 `toy::PLANTED` 行,或以引擎 crate 的 `planted` feature 编译、按名字在本线程打开的真实引擎缺陷(`seq::PLANTED`;只由本 crate 的 `planted` feature 打开,只在本 crate 的测试中使用,TK-178)。
 
 ### TK-001 golden_cases 按 fixtures 布局读出金样
 
@@ -706,7 +706,7 @@ spec: README.md
 - 规则:[6. DST 框架](README.md#6-dst-框架)
 - 级别:table
 - 里程碑:M2
-- 前置:每行以该植入缺陷替身构建,从种子 1 起最多跑 2 000 个种子(套件按种子派生);在 sequencer 适配器落地之前,植入缺陷在框架自测引擎 `ToyEngine` 中(`toy::PLANTED`;每行开启能触发它的故障类别,TK-053.9 关闭 I6——它在同一进程重放、会先报同一非确定性),TK-053.21–TK-053.23 随适配器与 QF-1、MS-2 场景运行;期望列为第一个失败种子所报的不变量或场景断言;I10 属可选扩展(`chain` feature),启用该 feature 时另加一行;不变量定义归 [testing §4](../../docs/testing.md#4-必须在-dst-与属性测试中持续成立的不变量)
+- 前置:每行以该植入缺陷替身构建,从种子 1 起最多跑 2 000 个种子(套件按种子派生)。TK-053.1–TK-053.20 的缺陷在框架自测引擎 `ToyEngine` 中(`toy::PLANTED`;每行开启能触发它的故障类别,TK-053.9 关闭 I6——它在同一进程重放、会先报同一非确定性);真实引擎的同类缺陷与种子上限归 TK-179。TK-053.21–TK-053.23 在真实引擎(`SeqEngine`,feature `planted`)上运行定向世界,从种子 1 起最多 16 个种子,带缺陷的运行须使断言失败(同时报出的不变量照常记录),同一种子去掉缺陷后全部不变量与断言通过:TK-053.21 为 QF-1 的核心断言(`S1` 报价 0.1 s 后不再变化、`VS` 每 1 000 ms 回 pong,12 s 时永续开仓),TK-053.22 为 MS-2(测试策略版,按 W1 的 lot 缩放:一个账户 20 手 `P1` 空头 1 200 USDT、`VP` 余额 360 USDT、`close_on = 0`,两腿 600 s 线性上涨 30% 后保持至 720 s,`P1` 标记价每秒一条),TK-053.23 为第二腿报价在开仓后 45 ms 起断 1.5 s(重试须在对冲期限内被接受);期望列为第一个失败种子所报的不变量或场景断言;I10 属可选扩展(`chain` feature),启用该 feature 时另加一行;不变量定义归 [testing §4](../../docs/testing.md#4-必须在-dst-与属性测试中持续成立的不变量)
 - 实现:`crates/hft-testkit/tests/planted.rs::tk_053_planted_defects_found`
 
 | 行 | 植入缺陷 | 期望 |
@@ -731,9 +731,9 @@ spec: README.md
 | TK-053.18 | 无 client id 成交先按外来成交对冲、匹配到槽后再对冲一次 | `I19` |
 | TK-053.19 | Broken 后从不自动平仓 | `I20` |
 | TK-053.20 | Broken 后反复自动平仓 | `I20` |
-| TK-053.21 | 对冲定价按"盘口最后变化时刻"判过期 | QF-1 场景断言失败(安静盘口下第二腿未发出) |
-| TK-053.22 | MarginStress 只看比率 | MS-2(测试策略版)断言失败(出现强平) |
-| TK-053.23 | 对冲重试单带 `reduceOnly`(被假交易所拒绝,裸腿得不到对冲) | 2 000 个种子内失败;报告的不变量 ∈ {`I3`, `I20`} |
+| TK-053.21 | 对冲定价按"盘口最后变化时刻"判过期(`hedge-px-book-age`) | QF-1 核心断言失败:成交 Input 内无第二腿;去掉缺陷后第二腿在同一 Input 发出、无 `OmsHedgePxStale`、无 Broken |
+| TK-053.22 | MarginStress 只看比率(`margin-ratio-only`) | MS-2(测试策略版)断言失败:交易所侧强平平掉永续空头(其后 I16 报余额差);去掉缺陷后引擎逐步减永续、无强平 |
+| TK-053.23 | 对冲重试单带 `reduceOnly`(`retry-reduce-only`) | 断言失败:`SecondRetry` 被风控以 `REDUCE_INVALID` 拒绝、cell 进入 Broken;真实引擎上随后由自动平仓收敛,I3、I20 均不报,原期望"不变量 ∈ {I3, I20}"只适用于不拒绝的引擎;去掉缺陷后重试被接受、无 Broken |
 
 ### TK-054 一致性集在 x86_64 与 aarch64 上的 HashTrail 与金样相同
 
@@ -2177,6 +2177,41 @@ spec: README.md
 - 步骤:count 置零重现旧摘要,保留故障条目、时间与随机流;默认故障及关闭检查器各复跑,统计原件暂缓、实际拒绝和原件交付
 - 期望:旧摘要逐行一致,首差异不早于首次非零故障且必须实际暂缓成交,首差异前缀及检查器开关后的 journal、意图、交付、HashTrail 和真值一致;CI 保存逐行证据,不凭请求数声称实际竞态覆盖
 - 实现:`crates/hft-testkit/tests/cancel_migration.rs::tk_173_cancel_migration_reproduces_prior_goldens_and_preserves_prefix`
+
+### TK-178 植入缺陷不进入任何生产构建
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:unit
+- 里程碑:M2
+- 前置:工作区全部 `Cargo.toml`
+- 步骤:
+  1. 读 hft-oms、hft-risk、hft-exec、hft-ledger、hft-sequencer 的 `[features]` 与 `src/lib.rs`
+  2. 读本 crate 的 `[features]`
+  3. 扫描 `crates/`、`apps/`、`strategies/`、`tools/` 下其余全部清单
+  4. 开启 `planted` 时比较 `seq::PLANTED` 与 `hft_sequencer::planted::DEFECTS` 的名字
+- 期望:
+  - TK-178.1:五个引擎 crate 都有 `planted`,hft-sequencer 的只转发到另外四个,其余为空;`planted` 模块只在该 feature 下编译
+  - TK-178.2:本 crate 的 `planted = ["seq", "hft-sequencer/planted"]`;`seq`、`dst-bin`、`sdk-mock` 不含它
+  - TK-178.3:其余清单都不出现 `planted`
+  - TK-178.4:两张名字表相同
+- 实现:`crates/hft-testkit/tests/deps.rs::tk_178_planted_defects_never_in_production_builds`
+
+### TK-179 真实引擎的植入缺陷在有界种子内被不变量发现
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:table
+- 里程碑:M2
+- 前置:feature `planted`;`SeqEngine`;每行从种子 1 起最多 16 个种子,每种子 2 000 步、不复跑;缺陷只在运行线程打开(`Sut::plant`),同一线程的重建与冷验证器同样带缺陷;找到的种子去掉缺陷后必须全部不变量通过;期望列为第一个失败种子所报的不变量。世界:`tight`= `core` 且组 `max_pos_qty = 50 000`(小于一手永续);`storage`= `storage` 且 `rebuild_every = 200`;`late-fee`= `core` 加 0–199 s 每秒两个 venue 各一条 `LateFeeOnly{delay_ms = 50}`;`broken`= `core`、`broken_auto_fix_ms = 2 000`,45 ms 起 `VS` 行情连接断开 20 s(第二腿无法定价,到对冲期限进入 Broken);`broken-fail`= `broken` 且 `max_reduce_notional = 30 USDT`(小于一手永续,自动平仓以失败收场而 cell 仍为 Broken)
+- 实现:`crates/hft-testkit/tests/planted_seq.rs::tk_179_real_engine_planted_defects_found`
+
+| 行 | 植入缺陷(所在 crate) | 世界 | 期望 |
+|---|---|---|---|
+| TK-179.1 | `risk-no-exposure-limit`:检查链 #7 不检查持仓上限(hft-risk) | `tight` | `I3` |
+| TK-179.2 | `snapshot-field`:恢复的执行单元丢失 `set_seq`(hft-exec) | `storage` | `I6` |
+| TK-179.3 | `ignore-fee`:晚到的纯费用回报不入余额(hft-ledger) | `late-fee` | `I2`(FeeOnly 的余额增量) |
+| TK-179.4 | 同 TK-179.3,关闭 I2 | `late-fee` | `I16` |
+| TK-179.5 | `broken-never-autofix`:Broken 从不开始自动平仓(hft-exec) | `broken` | `I20` |
+| TK-179.6 | `broken-repeat-autofix`:终态后在同一 Broken 期再次开始自动平仓(hft-exec) | `broken-fail` | `I20` |
 
 ## 验收
 

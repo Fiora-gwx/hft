@@ -197,6 +197,23 @@ fn run_once<E: Sut>(cfg: &DstConfig) -> RunRecord {
         planted: &cfg.planted,
         tsc_hz: cfg.tsc_hz,
     };
+    // The planted defects stay switched on until this run (rebuilds and verifiers included) ends.
+    let _plant = match E::plant(&cfg.planted) {
+        Ok(p) => p,
+        Err(e) => {
+            rec.outcome = DstOutcome::Fail(Box::new(DstFailure {
+                seed: cfg.seed,
+                suite: cfg.suite,
+                step: 0,
+                invariant: FailKind::Boot,
+                message: e.0,
+                trace: Vec::new(),
+                fault_schedule: plan,
+                journal_tail: Vec::new(),
+            }));
+            return rec;
+        }
+    };
     let sut = match E::boot(&boot) {
         Ok(s) => s,
         Err(e) => {
@@ -351,6 +368,14 @@ impl<E: Sut> Loop<'_, E> {
                                     let (bid, ask) = ((b.bid_px.0, b.bid_qty.0), (b.ask_px.0, b.ask_qty.0));
                                     self.venues[v].m.on_bbo(b.h.inst, bid, ask, now);
                                     self.sims[v].m.on_bbo(b.h.inst, bid, ask, now);
+                                }
+                                // So do recorded mark prices (margin and liquidation truth).
+                                if let Some(m) = i.read::<hft_event::MarkPrice>()
+                                    && let Some(v) = venue_ix(&self.venues, m.h.venue)
+                                {
+                                    self.venues[v].m.on_mark(m.h.inst, m.px.0, now);
+                                    self.sims[v].m.on_mark(m.h.inst, m.px.0, now);
+                                    self.wake_venue(v);
                                 }
                                 self.world.schedule(now, Ev::Deliver(i));
                             }
