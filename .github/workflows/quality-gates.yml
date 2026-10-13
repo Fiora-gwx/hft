@@ -625,7 +625,8 @@ jobs:
       - name: "Run the heavy:: tests"
         env:
           HFT_REPLAY_EVIDENCE_DIR: ${{ github.workspace }}/target/replay-model
-        run: cargo test --locked --profile ci -p hft-testkit -p replayer --features "$HEAVY_FEATURES" --tests --no-fail-fast -- heavy::
+        run: |
+          cargo test --locked --profile ci -p hft-testkit -p replayer --features "$HEAVY_FEATURES" --tests --no-fail-fast -- heavy::
       - name: Upload generated long-fixture Model replay evidence
         if: always()
         uses: actions/upload-artifact@v4
