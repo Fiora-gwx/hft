@@ -1267,6 +1267,7 @@ impl ToyEngine {
         }
         let rec = JRec {
             seq,
+            end_seq: seq,
             tsc,
             kind,
             flags: RecordFlags::default(),

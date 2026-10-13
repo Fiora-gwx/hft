@@ -67,6 +67,8 @@ impl InputRec {
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct JRec {
     pub seq: u64,
+    /// Inclusive last physical seq; equals seq for the default logical-numbered journal.
+    pub end_seq: u64,
     pub tsc: u64,
     pub kind: EventKind,
     pub flags: RecordFlags,
@@ -179,11 +181,10 @@ impl StepOut {
                 ));
             }
             let end = tail
-                .binary_search_by_key(&p.through_seq, |r| r.seq)
+                .binary_search_by_key(&p.through_seq, |r| r.end_seq)
                 .ok()
                 .map(|i| &tail[i]);
-            if p.through_seq < p.snapshot_seq || end.is_none_or(|r| r.flags.0 & RecordFlags::EVENT_END.0 == 0)
-            {
+            if p.through_seq < r.end_seq || end.is_none_or(|r| r.flags.0 & RecordFlags::EVENT_END.0 == 0) {
                 return Err(format!(
                     "snapshot {} has invalid boundary {}",
                     p.snapshot_seq, p.through_seq
@@ -337,7 +338,7 @@ pub trait Sut: Sized {
     fn rebuilt_snapshot(&self, point: &SnapshotPoint) -> Result<ComponentHashes, String> {
         Err(format!("snapshot {} rebuild unavailable", point.snapshot_seq))
     }
-    /// Journal seq of the last record.
+    /// Inclusive final physical journal seq (logical seq in the default in-memory mode).
     fn seq(&self) -> u64;
     /// The in-memory journal (all records so far).
     fn journal(&self) -> &[JRec];

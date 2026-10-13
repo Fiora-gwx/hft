@@ -10,7 +10,8 @@ use hft_sequencer::driver::replay::{Log, ReplayDriver, ReplayMode};
 use hft_sequencer::driver::replay_io::{LogReadError, LogReadLimits};
 use hft_sequencer::driver::replay_snapshot::{SnapshotCheckError, check_snapshot};
 use hft_sequencer::{
-    BootSource, EngineSetup, InputSlot, OutRing, ParsedConfig, Sequencer, SnapshotSel, StepOutcome,
+    BootSink, BootSource, EngineSetup, InputSlot, JournalSink, MemJournal, OutRing, ParsedConfig, RollMeta,
+    Sequencer, SnapshotSel, StepOutcome,
 };
 use hft_types::{HostClass, InstId, KillBits, Tsc, VenueId};
 use std::path::PathBuf;
@@ -34,10 +35,10 @@ impl Drop for Temp {
 
 struct FileIo {
     io: TestIo<TestSet>,
-    writer: JournalWriter,
+    writer: PairedJournal,
 }
 impl LiveIo<TestSet> for FileIo {
-    type J = JournalWriter;
+    type J = PairedJournal;
     fn journal(&mut self) -> &mut Self::J {
         &mut self.writer
     }
@@ -93,6 +94,69 @@ impl LiveIo<TestSet> for FileIo {
         self.io.utc_of(t)
     }
 }
+
+// Every seq is checked at append time, before the engine can embed it in another record.
+struct PairedJournal {
+    file: JournalWriter,
+    mem: MemJournal,
+}
+struct PairedBoot<'a> {
+    file: hft_journal::BootWriter<'a>,
+    mem: hft_sequencer::journal::MemBoot<'a>,
+}
+impl BootSink for PairedBoot<'_> {
+    fn append_var(
+        &mut self,
+        kind: EventKind,
+        tsc: Tsc,
+        pieces: &[&[u8]],
+    ) -> Result<hft_types::Seq, hft_journal::AppendErr> {
+        let seq = self.file.append_var(kind, tsc, pieces)?;
+        assert_eq!(self.mem.append_var(kind, tsc, pieces)?, seq);
+        Ok(seq)
+    }
+    fn finish(self) -> Result<hft_types::Seq, hft_journal::AppendErr> {
+        let seq = self.file.finish()?;
+        assert_eq!(self.mem.finish()?, seq);
+        Ok(seq)
+    }
+}
+impl JournalSink for PairedJournal {
+    type Boot<'a> = PairedBoot<'a>;
+    fn append_var(
+        &mut self,
+        kind: EventKind,
+        flags: RecordFlags,
+        tsc: Tsc,
+        pieces: &[&[u8]],
+    ) -> Result<hft_types::Seq, hft_journal::AppendErr> {
+        let seq = self.file.append_var(kind, flags, tsc, pieces)?;
+        assert_eq!(self.mem.append_var(kind, flags, tsc, pieces)?, seq);
+        Ok(seq)
+    }
+    fn end_event(&mut self) {
+        self.file.end_event();
+        self.mem.end_event();
+    }
+    fn publish(&mut self) {
+        self.file.publish();
+        self.mem.publish();
+    }
+    fn roll(
+        &mut self,
+        reason: hft_journal::RollReason,
+        info: &RollMeta<'_>,
+    ) -> Result<PairedBoot<'_>, hft_journal::RollErr> {
+        Ok(PairedBoot {
+            file: JournalSink::roll(&mut self.file, reason, info)?,
+            mem: self.mem.roll(reason, info)?,
+        })
+    }
+    fn needs_roll(&self, now: Tsc) -> Option<(hft_journal::RollReason, hft_journal::RollAt)> {
+        self.file.needs_roll(now)
+    }
+}
+
 type FileSeq = Sequencer<LiveDriver<TestSet, FileIo>, TestSet>;
 fn run(s: &mut FileSeq) {
     for _ in 0..10_000 {
@@ -122,6 +186,9 @@ fn reader_cfg(t: &Temp) -> ReaderConfig {
     c
 }
 fn fixture() -> Temp {
+    paired_fixture().0
+}
+fn paired_fixture() -> (Temp, MemJournal) {
     reset_script();
     let mut source = b0().boot();
     source.steady();
@@ -170,7 +237,10 @@ fn fixture() -> Temp {
     configs.risk_sha256 = sha(&configs.risk_blob);
     let io = FileIo {
         io: TestIo::new(setup.clock),
-        writer,
+        writer: PairedJournal {
+            file: writer,
+            mem: MemJournal::with_physical_seq(setup.clock),
+        },
     };
     let mut s = Sequencer::boot(
         BootSource::Empty { configs },
@@ -197,8 +267,47 @@ fn fixture() -> Temp {
     }
     let mut driver = s.into_driver();
     driver.io.writer.publish();
-    driver.io.writer.seal_and_close().unwrap();
-    t
+    let PairedJournal { file, mem } = driver.io.writer;
+    file.seal_and_close().unwrap();
+    (t, mem)
+}
+
+#[test]
+fn seq_422_memory_physical_sequences_match_real_writer_and_reader() {
+    let (t, mem) = paired_fixture();
+    let mut reader = JournalReader::open(&reader_cfg(&t)).unwrap();
+    let file = Log::from_reader(&mut reader, limits()).unwrap();
+    let memory = Log::from_segments(&mem.segments);
+    assert_eq!(file.recs.len(), memory.recs.len() + 1, "file adds final End");
+    assert_eq!(file.part_ends, memory.part_ends);
+    assert!(!memory.part_ends.is_empty());
+    assert_eq!(file.seg_start, memory.seg_start);
+    assert_eq!(file.segs, memory.segs);
+    let wire_flags = RecordFlags::CRC.0 | RecordFlags::PART.0;
+    for (ix, (a, b)) in file.recs.iter().zip(&memory.recs).enumerate() {
+        assert_eq!((a.seq, a.kind, a.tsc), (b.seq, b.kind, b.tsc));
+        assert_eq!(a.body, b.body, "logical body at seq {}", a.seq);
+        assert_eq!(a.flags.0 & !wire_flags, b.flags.0 & !wire_flags, "seq {}", a.seq);
+        assert_eq!(file.record_end_seq(ix), memory.record_end_seq(ix));
+        assert_eq!(mem.record_end_seq(b.seq), file.record_end_seq(ix).unwrap());
+    }
+    for s in &mem.segments {
+        let done = s
+            .records
+            .iter()
+            .find(|r| {
+                r.kind == EventKind::SEGMENT_ROLL && r.read::<hft_event::SegmentRoll>().unwrap().mark == 3
+            })
+            .unwrap();
+        let count = done.seq - s.records[0].seq + 1;
+        assert_eq!(
+            u64::from(done.read::<hft_event::SegmentRoll>().unwrap().boot_records),
+            count
+        );
+        assert!(s.records.iter().take_while(|r| r.seq <= done.seq).count() < count as usize);
+    }
+    verify_snapshots(&memory);
+    verify_snapshots(&file);
 }
 
 #[test]

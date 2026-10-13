@@ -19,9 +19,12 @@ type E = SeqSut<TestStrategies>;
 static HB: Heartbeat = Heartbeat::new();
 
 fn boot() -> E {
+    boot_world(&WorldSpec::w1())
+}
+fn boot_world(world: &WorldSpec) -> E {
     E::boot(&BootCtx {
         seed: 0,
-        world: &WorldSpec::w1(),
+        world,
         planted: &[],
         tsc_hz: 3_000_000_000,
     })
@@ -42,7 +45,9 @@ fn timer(e: &mut E, id: u32) {
 }
 
 fn history() -> Log {
-    let mut e = boot();
+    history_of(boot())
+}
+fn history_of(mut e: E) -> Log {
     // Both snapshot purposes, an ordinary roll, a drained restart and two crash recoveries.
     for id in [1, 7, 2] {
         timer(&mut e, id);
@@ -53,6 +58,49 @@ fn history() -> Log {
     }
     timer(&mut e, 7);
     Log::from_segments(&e.sequencer().driver().io.j.segments)
+}
+
+#[test]
+fn tk_150_physical_journal_replays_each_run_and_snapshot_boundary() {
+    let mut world = WorldSpec::w1();
+    world.physical_journal = true;
+    let log = history_of(boot_world(&world));
+    let checked = verify_all::<TestStrategies>(log.clone(), &HB).unwrap();
+    assert_eq!((checked.segments, checked.runs), (5, 4));
+    for (ix, r) in log.recs.iter().enumerate() {
+        let parts = match hft_event::kind_info(r.kind).unwrap().layout {
+            hft_event::Layout::Multi { .. } => r.body.len().div_ceil(hft_event::PART_MAX_CHUNK).max(1) as u64,
+            _ => 1,
+        };
+        assert_eq!(log.record_end_seq(ix), Some(r.seq + parts - 1));
+        if let Some(after) = log.recs.get(ix + 1) {
+            assert_eq!(after.seq, r.seq + parts);
+        }
+    }
+    assert_eq!(
+        checked.through_seq,
+        log.record_end_seq(log.recs.len() - 1).unwrap()
+    );
+    // The world loop checks all snapshot observations and ledger-event boundaries too.
+    let mut cfg = crate::support::cfg(0, 128, &[], 0, &[]);
+    cfg.world = world;
+    cfg.hash_every = 1;
+    let checked = run_record::<E>(&cfg);
+    assert!(checked.outcome.is_pass(), "{}", crate::seq_sut::show(&checked));
+    assert!(checked.snapshot_checks > 0);
+    assert!(!checked.ledger_checks.is_empty());
+    assert!(checked.journal_verification.is_some());
+    cfg.invariants = InvariantSet::none();
+    let unchecked = run_record::<E>(&cfg);
+    assert!(
+        unchecked.outcome.is_pass(),
+        "{}",
+        crate::seq_sut::show(&unchecked)
+    );
+    assert_eq!(checked.journal, unchecked.journal);
+    assert_eq!(checked.frames, unchecked.frames);
+    assert_eq!(checked.deliveries, unchecked.deliveries);
+    assert_eq!(checked.trail.to_bytes(), unchecked.trail.to_bytes());
 }
 
 fn latest_only(log: Log) {

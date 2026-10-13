@@ -32,7 +32,7 @@ impl Observations {
         else {
             return;
         };
-        let through_seq = end.seq;
+        let through_seq = j.record_end_seq(end.seq);
         let snaps: Vec<_> = j
             .segments
             .iter()
@@ -85,13 +85,17 @@ impl Observations {
 pub fn prefix(j: &MemJournal, through_seq: u64) -> Log {
     let mut log = Log::default();
     for s in &j.segments {
-        let n = s.records.partition_point(|r| r.seq <= through_seq);
+        let n = s
+            .records
+            .partition_point(|r| j.record_end_seq(r.seq) <= through_seq);
         if n == 0 {
             break;
         }
         log.seg_start.push(log.recs.len());
         log.segs.push(s.clock);
         log.recs.extend_from_slice(&s.records[..n]);
+        log.part_ends
+            .extend(s.part_ends.iter().filter(|p| p.1 <= through_seq).copied());
         if n < s.records.len() {
             break;
         }
@@ -157,6 +161,56 @@ pub fn rebuild<S: StrategySet>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tk_151_snapshot_prefix_requires_the_final_physical_part() {
+        use hft_sequencer::{JournalSink, SegClock};
+        use hft_types::Tsc;
+        let mut j = MemJournal::with_physical_seq(SegClock::default());
+        let mut body = vec![0; 2 * hft_event::PART_MAX_CHUNK + 1];
+        body[0] = 2;
+        let first = j
+            .append_var(EventKind::STATE_SNAPSHOT, RecordFlags(0), Tsc(1), &[&body])
+            .unwrap()
+            .0;
+        assert_eq!(first, 1);
+        let last = first + 2;
+        j.end_event();
+        j.publish();
+        assert_eq!(super::super::io::committed_seq(&j), last);
+        for half in first..last {
+            let log = prefix(&j, half);
+            assert!(log.recs.is_empty());
+            assert!(log.part_ends.is_empty());
+        }
+        let log = prefix(&j, last);
+        assert_eq!(log.recs.len(), 1);
+        assert_eq!(log.part_ends, [(first, last)]);
+        let records = vec![crate::dst::sut::JRec {
+            seq: first,
+            end_seq: last,
+            tsc: 1,
+            kind: EventKind::STATE_SNAPSHOT,
+            flags: RecordFlags::EVENT_END,
+            body,
+        }];
+        let mut out = StepOut::default();
+        out.snapshots.push(SnapshotPoint {
+            snapshot_seq: first,
+            through_seq: last,
+            live: ComponentHashes::default(),
+            ledger: None,
+        });
+        out.verify_snapshot_observations(&records, 0).unwrap();
+        for half in first..last {
+            out.snapshots[0].through_seq = half;
+            assert!(
+                out.verify_snapshot_observations(&records, 0)
+                    .unwrap_err()
+                    .contains("invalid boundary")
+            );
+        }
+    }
 
     #[test]
     fn tk_116_snapshot_observations_follow_commit_boundary_and_capacity() {

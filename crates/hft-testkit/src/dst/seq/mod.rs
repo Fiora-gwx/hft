@@ -206,6 +206,7 @@ impl<S: StrategySet> SeqSut<S> {
             .skip(have)
             .map(|r| JRec {
                 seq: r.seq,
+                end_seq: j.record_end_seq(r.seq),
                 tsc: r.tsc,
                 kind: r.kind,
                 flags: r.flags,
@@ -629,6 +630,7 @@ impl<S: StrategySet> Sut for SeqSut<S> {
     }
 
     fn verify_ledger_event(&self, event: &crate::dst::sut::EventStep) -> Result<(), String> {
+        let io = &self.s().driver().io;
         let point = event.ledger.as_ref().ok_or("missing ledger event observation")?;
         let input = event.records.first().ok_or("missing ledger event Input")?;
         if !crate::dst::sut::ledger_input(input.kind)
@@ -637,7 +639,7 @@ impl<S: StrategySet> Sut for SeqSut<S> {
                 .iter()
                 .rev()
                 .find(|r| r.flags.contains(hft_event::RecordFlags::EVENT_END))
-                .map(|r| r.seq)
+                .map(|r| io.j.record_end_seq(r.seq))
                 != Some(point.through_seq)
             || point.through_seq < input.seq
             || event
@@ -648,12 +650,11 @@ impl<S: StrategySet> Sut for SeqSut<S> {
         {
             return Err("invalid ledger event observation boundary".into());
         }
-        let io = &self.s().driver().io;
         if point.through_seq > io::committed_seq(&io.j) {
             return Err("ledger event observation is not committed".into());
         }
         let log = snapshots::prefix(&io.j, point.through_seq);
-        if log.recs.last().is_none_or(|r| r.seq != point.through_seq) {
+        if log.record_end_seq(log.recs.len().saturating_sub(1)) != Some(point.through_seq) {
             return Err("ledger event observation is outside the retained journal".into());
         }
         self.event_ledger
@@ -804,7 +805,7 @@ impl<S: StrategySet> Sut for SeqSut<S> {
 
     fn rebuilt_snapshot(&self, point: &SnapshotPoint) -> Result<ComponentHashes, String> {
         let log = snapshots::prefix(&self.s().driver().io.j, point.through_seq);
-        if log.recs.last().is_none_or(|r| r.seq != point.through_seq)
+        if log.record_end_seq(log.recs.len().saturating_sub(1)) != Some(point.through_seq)
             || hft_sequencer::recover_event_end(&log) != log.recs.len()
             || point.snapshot_seq > point.through_seq
         {
@@ -824,7 +825,7 @@ impl<S: StrategySet> Sut for SeqSut<S> {
     }
 
     fn seq(&self) -> u64 {
-        self.jrecs.last().map_or(0, |r| r.seq)
+        self.jrecs.last().map_or(0, |r| r.end_seq)
     }
 
     fn journal(&self) -> &[JRec] {

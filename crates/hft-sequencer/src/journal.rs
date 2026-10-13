@@ -165,6 +165,8 @@ pub struct MemSegment {
     pub reason: u8,
     pub clock: SegClock,
     pub records: Vec<MemRecord>,
+    /// First and last physical seq of split records, sorted by their first seq.
+    pub part_ends: Vec<(u64, u64)>,
 }
 
 /// Fault hooks of a [`MemJournal`] (tests).
@@ -203,6 +205,7 @@ pub struct MemJournal {
     pub committed_len: u64,
     pending_len: u64,
     in_boot: bool,
+    physical_seq: bool,
 }
 
 impl MemJournal {
@@ -214,10 +217,33 @@ impl MemJournal {
                 reason: RollReason::Startup as u8,
                 clock,
                 records: Vec::new(),
+                part_ends: Vec::new(),
             }],
             next_seq: 1,
             ..MemJournal::default()
         }
+    }
+    /// Keeps logical bodies in memory while reserving every physical Multi part's seq before
+    /// the sequencer sees the append result. The default constructor keeps logical numbering.
+    pub fn with_physical_seq(clock: SegClock) -> MemJournal {
+        MemJournal {
+            physical_seq: true,
+            ..MemJournal::new(clock)
+        }
+    }
+    /// Inclusive final physical seq of a retained logical record.
+    pub fn record_end_seq(&self, first: u64) -> u64 {
+        self.segments
+            .iter()
+            .rev()
+            .find_map(|s| {
+                s.part_ends
+                    .binary_search_by_key(&first, |p| p.0)
+                    .ok()
+                    .and_then(|ix| s.part_ends.get(ix))
+                    .map(|p| p.1)
+            })
+            .unwrap_or(first)
     }
     /// Every record in seq order.
     pub fn records(&self) -> impl Iterator<Item = &MemRecord> + '_ {
@@ -256,20 +282,45 @@ impl MemJournal {
                 }
             }
         }
-        self.total -= dropped;
-        self.next_seq = self.records().last().map_or(1, |r| r.seq + 1);
+        for s in &mut self.segments {
+            let last = s.records.last().map(|r| r.seq);
+            s.part_ends.retain(|p| last.is_some_and(|seq| p.0 <= seq));
+        }
+        // A crash caller may already have removed the unpublished records from the segments.
+        self.total = self.segments.iter().map(|s| s.records.len()).sum();
+        self.next_seq = self
+            .records()
+            .last()
+            .map_or(1, |r| self.record_end_seq(r.seq) + 1);
         self.boundary = self.total;
         self.committed = self.committed.min(self.total);
         self.last_non_meta = None;
         dropped
     }
-    fn push(&mut self, kind: EventKind, flags: RecordFlags, tsc: u64, pieces: &[&[u8]]) -> u64 {
+    fn push(
+        &mut self,
+        kind: EventKind,
+        flags: RecordFlags,
+        tsc: u64,
+        pieces: &[&[u8]],
+    ) -> Result<u64, AppendErr> {
         let mut body = Vec::with_capacity(pieces.iter().map(|p| p.len()).sum());
         for p in pieces {
             body.extend_from_slice(p);
         }
+        let parts = if self.physical_seq
+            && !matches!(
+                hft_event::kind_info(kind).map(|i| i.layout),
+                Some(hft_event::Layout::Fixed { .. } | hft_event::Layout::Var { .. })
+            ) {
+            hft_event::PartIter::new(&body)
+                .map_err(|_| AppendErr::TooLarge)?
+                .parts()
+        } else {
+            1
+        };
         let seq = self.next_seq;
-        self.next_seq += 1;
+        self.next_seq += u64::from(parts);
         let role = role_of(kind, &body);
         let len = 24 + body.len().div_ceil(8) as u64 * 8;
         if self.segments.is_empty() {
@@ -277,8 +328,11 @@ impl MemJournal {
         }
         let si = self.segments.len() - 1;
         let Some(seg) = self.segments.last_mut() else {
-            return seq;
+            return Ok(seq);
         };
+        if parts > 1 {
+            seg.part_ends.push((seq, self.next_seq - 1));
+        }
         seg.records.push(MemRecord {
             seq,
             kind,
@@ -291,7 +345,7 @@ impl MemJournal {
         }
         self.total += 1;
         self.pending_len += len;
-        seq
+        Ok(seq)
     }
 }
 
@@ -304,8 +358,9 @@ pub struct MemBoot<'a> {
 
 impl BootSink for MemBoot<'_> {
     fn append_var(&mut self, kind: EventKind, tsc: Tsc, pieces: &[&[u8]]) -> Result<Seq, AppendErr> {
-        self.n += 1;
-        Ok(Seq(self.j.push(kind, RecordFlags(0), tsc.0, pieces)))
+        let seq = self.j.push(kind, RecordFlags(0), tsc.0, pieces)?;
+        self.n += (self.j.next_seq - seq) as u32;
+        Ok(Seq(seq))
     }
     fn finish(self) -> Result<Seq, AppendErr> {
         let mut sr = SegmentRoll::new_zeroed_body();
@@ -313,12 +368,22 @@ impl BootSink for MemBoot<'_> {
         sr.journal_kind = 2;
         sr.boot_records = self.n + 1;
         sr.segment_no = self.j.segments.last().map_or(0, |s| s.no);
+        if self.j.physical_seq {
+            sr.other_segment_no = sr.segment_no.saturating_sub(1);
+            sr.seq_mark = self.j.next_seq.saturating_sub(1);
+            if let Some(begin) = self.j.segments.last().and_then(|s| s.records.first())
+                && let Some(begin) = begin.read::<SegmentRoll>()
+            {
+                sr.reason = begin.reason;
+                sr.utc_ns = begin.utc_ns;
+            }
+        }
         let seq = self.j.push(
             EventKind::SEGMENT_ROLL,
             RecordFlags::EVENT_END,
             0,
             &[sr.as_bytes()],
-        );
+        )?;
         // The BootDone record ends the boot block (Meta, but it carries EVENT_END).
         if let Some(r) = self.j.segments.last_mut().and_then(|s| s.records.last_mut()) {
             r.flags = RecordFlags(r.flags.0 | RecordFlags::EVENT_END.0);
@@ -373,7 +438,7 @@ impl JournalSink for MemJournal {
                 return Err(AppendErr::Full);
             }
         }
-        let seq = self.push(kind, flags, tsc.0, pieces);
+        let seq = self.push(kind, flags, tsc.0, pieces)?;
         if role == Role::Input
             && let Some(s) = self.faults.force_seq.take()
         {
@@ -432,7 +497,7 @@ impl JournalSink for MemJournal {
             begin.mark = 2;
             begin.journal_kind = 2;
             begin.segment_no = no;
-            begin.seq_mark = self.next_seq;
+            begin.seq_mark = self.next_seq - u64::from(self.physical_seq);
             begin.utc_ns = info.utc_ns;
             begin.reason = reason as u8;
             self.push(
@@ -440,7 +505,8 @@ impl JournalSink for MemJournal {
                 RecordFlags(0),
                 info.calib.tsc.0,
                 &[begin.as_bytes()],
-            );
+            )
+            .map_err(|_| RollErr::Io)?;
             return Ok(MemBoot { j: self, n: 1 });
         }
         let old_no = self.segments.last().map_or(0, |s| s.no);
@@ -457,7 +523,8 @@ impl JournalSink for MemJournal {
             RecordFlags::EVENT_END,
             0,
             &[end.as_bytes()],
-        );
+        )
+        .map_err(|_| RollErr::Io)?;
         if let Some(r) = self.segments.last_mut().and_then(|s| s.records.last_mut()) {
             r.flags = RecordFlags(r.flags.0 | RecordFlags::EVENT_END.0);
         }
@@ -473,13 +540,14 @@ impl JournalSink for MemJournal {
                 calib_realtime_ns: info.calib.realtime_ns,
             },
             records: Vec::new(),
+            part_ends: Vec::new(),
         });
         let mut begin = SegmentRoll::new_zeroed_body();
         begin.mark = 2;
         begin.journal_kind = 2;
         begin.segment_no = old_no + 1;
         begin.other_segment_no = old_no;
-        begin.seq_mark = self.next_seq;
+        begin.seq_mark = self.next_seq - u64::from(self.physical_seq);
         begin.utc_ns = info.utc_ns;
         begin.reason = reason as u8;
         self.push(
@@ -487,7 +555,8 @@ impl JournalSink for MemJournal {
             RecordFlags(0),
             info.calib.tsc.0,
             &[begin.as_bytes()],
-        );
+        )
+        .map_err(|_| RollErr::Io)?;
         self.in_boot = false;
         Ok(MemBoot { j: self, n: 1 })
     }

@@ -25,6 +25,7 @@ mod hash;
 mod intents;
 mod keyframe;
 mod liveness;
+mod mem_journal;
 mod mismatch;
 mod mode;
 mod notify_backlog;

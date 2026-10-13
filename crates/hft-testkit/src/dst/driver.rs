@@ -97,6 +97,7 @@ impl MemJournal {
         let seq = self.recs.last().map_or(1, |r| r.seq + 1);
         self.recs.push(JRec {
             seq,
+            end_seq: seq,
             tsc,
             kind,
             flags,

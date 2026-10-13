@@ -266,6 +266,8 @@ pub struct WorldSpec {
     pub risk: RiskSpec,
     /// Optional fixture override, recorded in the engine configuration. None keeps the OMS default.
     pub oms_tombstone_keep_ms: Option<u32>,
+    /// Reserve Multi-record physical seq spans during execution for file replay fixtures.
+    pub physical_journal: bool,
 }
 
 /// `VS`, `VP`, `VQ` (scenarios §2.2): Binance spot, OKX USDT swap, Bitget spot (fixed `VenueId`s).
@@ -399,6 +401,7 @@ impl WorldSpec {
                 unknown_blocks_open: true,
             },
             oms_tombstone_keep_ms: None,
+            physical_journal: false,
         }
     }
 

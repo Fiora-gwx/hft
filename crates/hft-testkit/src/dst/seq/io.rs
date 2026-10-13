@@ -68,7 +68,7 @@ pub fn committed_seq(j: &MemJournal) -> u64 {
     for s in &j.segments {
         let n = left.min(s.records.len());
         if n > 0 {
-            seq = s.records[n - 1].seq;
+            seq = j.record_end_seq(s.records[n - 1].seq);
         }
         left -= n;
         if left == 0 {
@@ -110,6 +110,11 @@ impl<S: StrategySet> DstIo<S> {
         world: crate::dst::world::WorldSpec,
         carry: super::observe::Carry,
     ) -> DstIo<S> {
+        let j = if world.physical_journal {
+            MemJournal::with_physical_seq(clock)
+        } else {
+            MemJournal::new(clock)
+        };
         DstIo {
             audit: super::audit::Audit::default(),
             snapshots: super::snapshots::Observations::default(),
@@ -117,7 +122,7 @@ impl<S: StrategySet> DstIo<S> {
             pending_event: None,
             world,
             carry,
-            j: MemJournal::new(clock),
+            j,
             calib: CalibPair {
                 tsc: Tsc(clock.calib_tsc),
                 realtime_ns: clock.calib_realtime_ns,

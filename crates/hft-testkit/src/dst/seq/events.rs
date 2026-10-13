@@ -62,6 +62,7 @@ impl Pending {
             }
             out.records.push(JRec {
                 seq: r.seq,
+                end_seq: j.record_end_seq(r.seq),
                 tsc: r.tsc,
                 kind: r.kind,
                 flags: r.flags,
@@ -82,7 +83,7 @@ impl Pending {
                 .iter()
                 .rev()
                 .find(|r| r.flags.contains(RecordFlags::EVENT_END))
-                .map(|r| r.seq);
+                .map(|r| j.record_end_seq(r.seq));
             match (through_seq, super::ledger::event_sections(&e.ledger)) {
                 (Some(through_seq), Ok(sections)) => Some(LedgerEvent {
                     through_seq,

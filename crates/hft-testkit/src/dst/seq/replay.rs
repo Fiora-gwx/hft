@@ -30,7 +30,7 @@ pub fn verify_all<S: StrategySet>(log: Log, hb: &'static Heartbeat) -> Result<Jo
         .filter(|r| r.kind == EventKind::STATE_SNAPSHOT)
         .count() as u64;
     let mut checked = JournalVerification {
-        through_seq: log.recs.last().map_or(0, |r| r.seq),
+        through_seq: log.record_end_seq(log.recs.len().saturating_sub(1)).unwrap_or(0),
         records: log.recs.len() as u64,
         segments: log.seg_start.len() as u64,
         runs: 0,

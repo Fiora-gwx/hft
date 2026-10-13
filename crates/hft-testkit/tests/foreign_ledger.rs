@@ -388,6 +388,7 @@ fn tk_147_external_dedup_observation_keeps_scope_and_key_domain() {
     // retained key. Exercise the same scoped identity in the read-only dedup view.
     let record = JRec {
         seq: 1,
+        end_seq: 1,
         tsc: 1,
         kind: EventKind::EXTERNAL_FILL,
         flags: hft_event::RecordFlags(0),

@@ -61,7 +61,7 @@ pub struct Log {
     pub seg_start: Vec<usize>,
     pub segs: Vec<crate::journal::SegClock>,
     /// Last physical seq of split logical records, sorted by the first part's seq.
-    /// MemJournal records and single-part file records need no entry.
+    /// Logical-numbered MemJournal records and single-part file records need no entry.
     pub part_ends: Vec<(u64, u64)>,
     /// Header flags retained even when seq is contiguous or the supplied input is a suffix.
     /// A marked boundary is evidence of a possibly lost tail, not its size.
@@ -75,6 +75,13 @@ impl Log {
             l.seg_start.push(l.recs.len());
             l.segs.push(s.clock);
             l.recs.extend(s.records.iter().cloned());
+            let last = s.records.last().map(|r| r.seq);
+            l.part_ends.extend(
+                s.part_ends
+                    .iter()
+                    .filter(|p| last.is_some_and(|seq| p.0 <= seq))
+                    .copied(),
+            );
         }
         l
     }

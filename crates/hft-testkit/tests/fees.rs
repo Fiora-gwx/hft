@@ -104,6 +104,7 @@ fn tk_104_fee_only_checker() {
                 };
                 let recs = [JRec {
                     seq: 1,
+                    end_seq: 1,
                     tsc: 1,
                     kind: EventKind::ORDER_EVENT,
                     flags: RecordFlags(0),

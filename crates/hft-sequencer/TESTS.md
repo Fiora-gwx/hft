@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | SEQ-018、SEQ-310 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
-| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-395、SEQ-404–SEQ-406 |
+| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-395、SEQ-404–SEQ-406、SEQ-422–SEQ-423 |
 | 策略集(`StrategySet`) | SEQ-015–SEQ-018、SEQ-340 |
 | 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181 |
 | 环与容量 | SEQ-001–SEQ-007、SEQ-058、SEQ-059、SEQ-064、SEQ-066、SEQ-086、SEQ-087、SEQ-100、SEQ-221、SEQ-231、SEQ-279、SEQ-288、SEQ-345、SEQ-346、SEQ-367 |
@@ -5768,6 +5768,34 @@ spec: README.md
 | SEQ-421.2 | true | 无在途,已完成 | false |
 | SEQ-421.3 | false | IOC 未应答,未完成 | true |
 | SEQ-421.4 | true | IOC 未应答,未完成 | false |
+
+### SEQ-422 内存物理序号逐条对照真实文件写者
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
+- 级别:unit
+- 里程碑:M2
+- 前置:SEQ-385 的真实引擎、4096 槽表、多片快照及双段 journal;每次写入同时交给真实文件写者和物理编号 MemJournal
+- 步骤:引擎完成输入、关键帧和滚段后封闭文件;真实读者重组,与保留的内存原件对照并逐快照回放
+- 期望:每次 append 和引导块结束返回的 seq 当场相同;真实读者重组后,逻辑体、首末片 seq、TSC、业务标志及事件边界逐条相同,仅排除传输 CRC/PART;每段 BootDone 计数等于物理记录数且大于逻辑记录数;两个来源的全部快照独立起播均无分歧
+- 实现:`crates/hft-sequencer/tests/replay_file.rs::seq_422_memory_physical_sequences_match_real_writer_and_reader`
+
+### SEQ-423 多片记录截尾与已裁发布前缀恢复
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
+- 级别:table
+- 里程碑:M2
+- 前置:独立 MemJournal,无故障钩子,逻辑体使用 Keyframe 快照标记
+- 步骤:默认逻辑与显式物理模式分别逐行写快照并提交;追加未完成两片记录,分别由 journal 截尾或调用方先裁到发布前缀再截尾
+- 期望:序号在 append 返回前分配;完整末尾续号在末片之后,未完成记录的分片索引被清除;保留数、发布数与全部原件相同,Log 不携带已裁尾部索引;默认模式每行只占一个 seq
+- 实现:`crates/hft-sequencer/tests/mem_journal.rs::seq_423_memory_multipart_boundaries_and_truncation`
+
+| 行 | 逻辑体长度 | 物理片数 |
+|---|---|---|
+| SEQ-423.1 | SnapshotHdr 长度 | 1 |
+| SEQ-423.2 | PART_MAX_CHUNK | 1 |
+| SEQ-423.3 | PART_MAX_CHUNK + 1 | 2 |
+| SEQ-423.4 | 2 × PART_MAX_CHUNK | 2 |
+| SEQ-423.5 | 2 × PART_MAX_CHUNK + 1 | 3 |
 
 ## 验收
 

@@ -20,7 +20,7 @@ spec: README.md
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
 | 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TK-117–TK-119、TK-141、TOOL-024、TOOL-027–TOOL-029 |
-| 6. DST 框架 | TK-043–TK-070、TK-100–TK-116、TK-120–TK-125、TK-147–TK-149 |
+| 6. DST 框架 | TK-043–TK-070、TK-100–TK-116、TK-120–TK-125、TK-147–TK-151 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
 | 8. hft-dst 运行器 | TK-075–TK-088、TK-143、TK-146 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
@@ -1924,6 +1924,26 @@ spec: README.md
 | TK-149.3 | 空结果 | INV-6,unavailable |
 | TK-149.4 | 返回错误 | INV-6,保留错误信息 |
 | TK-149.5 | 旧 CmdResult 被篡改的真实回放 | INV-6,保留首错序号 |
+
+### TK-150 物理编号的真实世界逐运行回放与观察边界
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:unit
+- 里程碑:M2
+- 前置:W1 开启 physical_journal,按 TK-148 产生五段、四次运行;另在默认无故障世界运行 128 步
+- 步骤:冷验证完整历史并按体长度核对每条记录跨度;开关检查器分别运行同一种子
+- 期望:每条 Multi 的占号按体长度独立计算,相邻记录连续,完整回放计数覆盖五段四次运行;世界循环实际核对快照与资金事件且保留完整回放结果;检查器开关后的完整 journal、出环、交付与 HashTrail 相同
+- 实现:`crates/hft-testkit/tests/journal_replay.rs::tk_150_physical_journal_replays_each_run_and_snapshot_boundary`
+
+### TK-151 快照前缀与观察必须等到末片
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:unit
+- 里程碑:M2
+- 前置:物理编号的三片快照,末片带 EVENT_END,已经发布
+- 步骤:分别按三片的序号选择前缀和设置观察边界
+- 期望:发布边界是末片;截到第一片或第二片的前缀不包含快照和分片索引,对应观察均拒绝;末片前缀保留完整逻辑体及首末片索引,观察通过
+- 实现:`crates/hft-testkit/src/dst/seq/snapshots.rs::tk_151_snapshot_prefix_requires_the_final_physical_part`
 
 ## 验收
 
