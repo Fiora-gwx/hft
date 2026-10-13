@@ -150,7 +150,7 @@ spec: README.md
 - 断言:每个种子运行结束后,以其内存段写出的 journal 运行 `replayer verify --advice recompute`(无检查点,Model 从实例创建处起算)均退出 0;`verify = "pass"`、`recompute = "pass"`;失败种子的 journal 与故障表留在 `target/dst/<seed>/`
 - 实现:`apps/replayer/tests/dst.rs::rpl_012_dst_journals_verify`
 
-测试标记为 ignored,由独立托管 `replay-dst.yml` 显式执行;普通单元测试不重复整批。环境 `HFT_REPLAY_DST_SEED`、`HFT_REPLAY_DST_COUNT` 与 `HFT_REPLAY_DST_SUITE` 只供明确的种子复现,CI 固定数量并不设置 suite 覆盖。每行保存故障表、完整物理段、逐文件 SHA-256、完整回放 JSON 与复现命令,总表同时记录实际完成步数、比较数量和失败行。Model 必须实际产出 Advice,每条记录均参加重算;无来源、导出重编号、读回差异、任何 DST 不变量或子进程失败均使该种子失败。
+普通测试默认运行 1 个提交派生种子与全部回归集,无 ignore 标记;独立托管 `replay-dst.yml` 显式设置上面的完整种子数量,小批结果不能替代整批验收。环境 `HFT_REPLAY_DST_SEED`、`HFT_REPLAY_DST_COUNT` 与 `HFT_REPLAY_DST_SUITE` 用于明确的种子复现,CI 固定数量并不设置 suite 覆盖。每行保存故障表、完整物理段、逐文件 SHA-256、完整回放 JSON 与复现命令,总表同时记录实际完成步数、比较数量和失败行。Model 必须实际产出 Advice,每条记录均参加重算;无来源、导出重编号、读回差异、任何 DST 不变量或子进程失败均使该种子失败。
 
 ### RPL-283 DST 文件保留原件并跨连续恢复重算
 

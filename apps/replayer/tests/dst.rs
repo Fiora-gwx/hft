@@ -34,7 +34,7 @@ fn verify_case(cfg: &DstConfig, dir: &Path) -> Value {
     )
     .unwrap();
     let repro = format!(
-        "HFT_REPLAY_DST_SEED={:#018x} HFT_REPLAY_DST_COUNT=1 HFT_REPLAY_DST_SUITE={} cargo test --locked --profile ci -p replayer --test cli dst::rpl_012_dst_journals_verify -- --ignored --exact --nocapture\n",
+        "HFT_REPLAY_DST_SEED={:#018x} HFT_REPLAY_DST_COUNT=1 HFT_REPLAY_DST_SUITE={} cargo test --locked --profile ci -p replayer --test cli dst::rpl_012_dst_journals_verify -- --exact --nocapture\n",
         cfg.seed, cfg.suite
     );
     std::fs::write(dir.join("repro.txt"), repro).unwrap();
@@ -163,7 +163,6 @@ fn rpl_283_dst_files_preserve_records_and_model_across_recovery() {
 }
 
 #[test]
-#[ignore = "100 commit/date seeds plus all regressions run in the dedicated hosted CI job"]
 fn rpl_012_dst_journals_verify() {
     let root = root();
     let start = std::env::var("HFT_REPLAY_DST_SEED")
@@ -173,7 +172,7 @@ fn rpl_012_dst_journals_verify() {
     let count = std::env::var("HFT_REPLAY_DST_COUNT")
         .ok()
         .map(|s| s.parse::<u64>().unwrap())
-        .unwrap_or(100);
+        .unwrap_or(1);
     assert!(count > 0);
     let override_suite = std::env::var("HFT_REPLAY_DST_SUITE").ok();
     let suites = suites();

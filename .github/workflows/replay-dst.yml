@@ -59,7 +59,7 @@ jobs:
           echo "HFT_REPLAY_DST_SEED=$seed" >> "$GITHUB_ENV"
           echo "HFT_REPLAY_DST_COUNT=100" >> "$GITHUB_ENV"
       - name: RPL-012 files, Model recomputation and all regression seeds
-        run: cargo test --locked --profile ci -p replayer --test cli dst::rpl_012_dst_journals_verify -- --ignored --exact --nocapture
+        run: cargo test --locked --profile ci -p replayer --test cli dst::rpl_012_dst_journals_verify -- --exact --nocapture
       - name: Upload seed journals, fault tables and replay reports
         if: always()
         uses: actions/upload-artifact@v4
