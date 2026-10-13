@@ -94,8 +94,9 @@ impl Oms {
     ) -> Option<(Qty, Option<Qty>)> {
         if self.inst(ev.inst).perp_cash {
             return match self.foreign_cash_increment(ti, ev) {
-                Ok((d, cash)) if d.0 > 0 => Some((d, Some(cash))),
-                Ok(_) => None,
+                // A proven duplicate still needs its defensive-path alarm. Keep zero
+                // distinct from a rejected report; book_foreign must not consume it.
+                Ok((d, cash)) => Some((d, Some(cash))),
                 Err(e) => {
                     out.cash_error = Some(e);
                     None
@@ -145,6 +146,9 @@ impl Oms {
         out: &mut OmsOut,
     ) -> bool {
         let (d, cash) = fill;
+        if d.0 <= 0 {
+            return false;
+        }
         let Some(t) = self.t(ti) else { return false };
         let (venue, account) = (t.venue, t.account);
         let st = self.strategy_of(account);

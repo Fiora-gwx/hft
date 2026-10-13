@@ -151,7 +151,12 @@ fn tool_186_no_doc_check_skips_doc_check() {
     let s = Script::new(&f, &[], 0);
     let r = f.xtask_script(&["ci", "--no-doc-check"], &s, &[]);
     assert_eq!(r.code, 0, "{}", r.stderr);
-    assert_eq!(s.calls(), STEPS[..12].to_vec());
+    let want: Vec<_> = STEPS
+        .iter()
+        .copied()
+        .filter(|c| *c != "xtask doc-check")
+        .collect();
+    assert_eq!(s.calls(), want);
     assert!(r.stderr.contains("doc-check: skipped"), "{}", r.stderr);
 }
 

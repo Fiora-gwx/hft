@@ -4254,7 +4254,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:PERP_CASH,三个完整累计回报,现金 0/−11700/−11800
 - 步骤:防御路径与 StaleGen 各三种排列,每条后快照恢复,最后重发全部回报
-- 期望:毛量共 3000000、现金共 −11800;恢复字节相同;重复无入账
+- 期望:毛量共 3000000、现金共 −11800;恢复字节相同;重复无入账,对应路径告警各一条且 v[2] 为零
 - 实现:`crates/hft-oms/tests/settlement.rs::oms_471_foreign_cash_cursors_survive_restore_and_reordered_reports`
 
 ### OMS-472 错误外来现金与跨路径身份不改状态
@@ -4315,7 +4315,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:严格结算、已实际完整入账的 Unknown 原件与 ext_held
 - 步骤:防御/StaleGen 两路径 × 正/零 ID × 正/零/负现金 × 正/零/负费用共 36 组,每组保存并两次恢复后重放同笔累计回报
-- 期望:节 12 v4 保留证明;无成交或费用输出、快照字节不变;原件预检证明已入账
+- 期望:节 12 v4 保留证明;无成交或费用输出、快照字节不变;每条累计重复仍有一条对应路径告警且 v[2] 为零,无入账或 ExtDedup 注记;原件预检证明已入账
 - 实现:`crates/hft-oms/tests/settlement.rs::oms_477_original_receipt_proves_only_the_same_first_execution_after_restore`
 
 ### OMS-478 不完整或错误原件不能放行跨来源重叠

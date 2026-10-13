@@ -1,6 +1,7 @@
 //! External order reports use original exchange settlement facts and exact event boundaries.
 use hft_event::{
-    Bbo, ExternalCause, ExternalFill, Note, NoteSource, OrderEvent, OrderEventKind, RecordFlags,
+    Bbo, ExternalCause, ExternalFill, Note, NoteSource, OrderAction, OrderDecision, OrderEvent,
+    OrderEventKind, RecordFlags,
 };
 use hft_types::{Side, SlotId};
 use zerocopy::IntoBytes;
@@ -24,8 +25,10 @@ fn plan(seed: u64) -> Vec<(u64, Fault)> {
     (0..=n)
         .map(|ix| {
             let unresolved = ix == n;
-            let at = if unresolved { 25 } else { 12 + 3 * ix as u64 } * SECOND
-                + crate::seed::derive(seed >> 2, &format!("led-080/when/{ix}")) % SECOND;
+            // Complete the foreign round trip before the unchanged engine-default
+            // deadline can close it. Keep every opening before the separate price move.
+            let at = if unresolved { 16 } else { 12 + ix as u64 } * SECOND
+                + crate::seed::derive(seed >> 2, &format!("led-080/when/{ix}")) % (SECOND / 10);
             (
                 at,
                 Fault::ForeignOrderFill {
@@ -60,7 +63,7 @@ fn configure(c: &mut DstConfig) {
     let shift = (5 + (crate::seed::derive(c.seed >> 2, "led-080/price") % 5) as i64) * tick;
     if let MarketSource::Recorded(inputs) = &mut c.market {
         for (at, input) in inputs {
-            if *at >= 22 * SECOND
+            if *at >= 15 * SECOND
                 && let Some(mut b) = input.read::<Bbo>()
                 && b.h.inst == P1
             {
@@ -102,6 +105,14 @@ pub fn assert_record(r: &RunRecord) -> Result<(), String> {
     require(r.snapshot_checks > 0, "no independent snapshot checks")?;
     assert_trade_window(r, SECOND, 4 * SECOND, Side::Buy, lots(r.seed))?;
     assert_trade_window(r, 4 * SECOND, 7 * SECOND, Side::Sell, lots(r.seed))?;
+    require(
+        !r.journal
+            .iter()
+            .filter(|j| j.tsc >= 7 * SECOND)
+            .filter_map(|j| j.try_read::<OrderDecision>())
+            .any(|d| d.action == OrderAction::New && d.reject == 0),
+        "unexpected engine order during the foreign round trip",
+    )?;
     require(
         r.external_receipts.len() == expected.len(),
         "missing or extra original executions",

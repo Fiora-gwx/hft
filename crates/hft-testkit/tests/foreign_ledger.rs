@@ -1,5 +1,7 @@
 //! The defensive cash scenario must perform real executions and reject incomplete evidence.
-use hft_event::{EventKind, ExternalCause, ExternalFill, Note, NoteSource, OrderEvent};
+use hft_event::{
+    EventKind, ExternalCause, ExternalFill, Note, NoteSource, OrderAction, OrderDecision, OrderEvent,
+};
 use hft_testkit::dst::seq::matcher::SimMatcher;
 use hft_testkit::dst::venue_behavior::{Matcher, MockVenue, MockVenueCfg};
 use hft_testkit::dst::world::{ACCT_A, P1, VP, WorldSpec};
@@ -64,13 +66,18 @@ fn tk_144_foreign_order_delivery_retains_original_settlement_and_identity() {
                         .unwrap()
                         .undelivered
                 );
-                let after = v.m.state_hash();
+                let after = v.m.truth(ACCT_A);
                 assert!(
                     v.tick(last.0 + MS)
                         .iter()
                         .all(|(_, i)| !matches!(i.kind, EventKind::ORDER_EVENT | EventKind::EXTERNAL_FILL))
                 );
-                assert_eq!(v.m.state_hash(), after, "delivery settled another execution");
+                let delivered = v.m.truth(ACCT_A);
+                // The matching clock advances while replies drain. Compare all financial
+                // truth, not the clock-bearing state hash, to detect a second settlement.
+                assert_eq!(delivered.positions, after.positions);
+                assert_eq!(delivered.inventory, after.inventory);
+                assert_eq!(delivered.balances, after.balances);
                 assert_eq!(v.m.external_history().len(), 2);
                 assert!(
                     !v.truth(last.0 + MS)
@@ -127,7 +134,7 @@ fn tk_145_foreign_case_requires_every_execution_and_exact_ledger_boundary() {
         cfg.rerun = RerunPolicy::Never;
         let r = case.run_config::<DstEngine>(&cfg);
         assert!(r.outcome.is_pass(), "seed {seed}: {:?}", r.outcome);
-        for change in 0..8 {
+        for change in 0..9 {
             let mut bad = r.clone();
             match change {
                 0 => bad.ledger_checks.clear(),
@@ -142,8 +149,22 @@ fn tk_145_foreign_case_requires_every_execution_and_exact_ledger_boundary() {
                 }),
                 5 => bad.truth[0].undelivered = true,
                 6 => bad.obs.balances[0].qty += 1,
-                _ => {
+                7 => {
                     bad.ledger_checks.push(bad.ledger_checks[0]);
+                }
+                _ => {
+                    let mut extra = bad
+                        .journal
+                        .iter()
+                        .find(|j| {
+                            j.try_read::<OrderDecision>()
+                                .is_some_and(|d| d.action == OrderAction::New && d.reject == 0)
+                        })
+                        .unwrap()
+                        .clone();
+                    extra.seq = bad.journal.last().unwrap().seq + 1;
+                    extra.tsc = 8_000 * MS;
+                    bad.journal.push(extra);
                 }
             }
             assert!(
