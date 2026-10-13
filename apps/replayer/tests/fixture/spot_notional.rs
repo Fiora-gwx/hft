@@ -57,22 +57,30 @@ pub(super) fn exercise<S: StrategySet>(
     .enumerate()
     {
         assert_eq!(qty % i.lot, 0);
-        let mut e = OrderEvent::new_zeroed();
-        e.venue = i.venue;
-        e.account = a;
-        e.inst = i.id;
-        e.slot = hft_types::SlotId(slot_id);
-        e.r#gen = slot.r#gen;
-        e.epoch = (s.engine().oms.engine_epoch() & 0x7fff) as u16;
-        e.what = what;
-        e.qty = Qty(qty);
-        e.cum_filled = Qty(cum);
-        e.px = Px(avg);
-        e.avg_px = Px(avg);
-        e.fee = Qty(3);
-        e.fee_asset = i.quote;
-        e.trade_id = ix as u64 + 1;
-        e.exch_order_id = 80_000;
+        let e = OrderEvent {
+            venue: i.venue,
+            account: a,
+            what,
+            detail: 0,
+            slot: hft_types::SlotId(slot_id),
+            r#gen: slot.r#gen,
+            inst: i.id,
+            px: Px(avg),
+            qty: Qty(qty),
+            cum_filled: Qty(cum),
+            fee: Qty(3),
+            fee_asset: i.quote,
+            epoch: (s.engine().oms.engine_epoch() & 0x7fff) as u16,
+            reject_code: 0,
+            exch_order_id: 80_000,
+            ex_ts_ns: 0,
+            hw_rx_ns: 0,
+            rx_tsc: 0,
+            avg_px: Px(avg),
+            cash_qty: Qty(0),
+            cash_sum: Qty(0),
+            trade_id: ix as u64 + 1,
+        };
         input(s, (2, vi), EventKind::ORDER_EVENT, e.as_bytes().to_vec());
         settle(s);
         // W1: px_exp=-4, base qty_exp=-8, quote qty_exp=-6. Both cumulative
