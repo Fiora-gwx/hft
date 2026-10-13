@@ -132,8 +132,12 @@ class ReleasePolicyTests(unittest.TestCase):
             preflight.check_nightly("owner/hft")
 
     def test_tool_190_nightly_summary_reports_jobs_without_quota_state(self):
-        for exemptions in [["PR #2 approved"], preflight.gh.ApiError("unavailable")]:
+        rows = [("success", ["PR #2 approved"]), ("success", preflight.gh.ApiError("unavailable")),
+                ("failure", []), ("cancelled", []), (None, [])]
+        for replay, exemptions in rows:
             env = {"NIGHTLY_RESULT": "success", "ARM_RESULT": "failure", "ARM_CACHE_HIT": "false"}
+            if replay is not None:
+                env["REPLAY_DST_RESULT"] = replay
             kwargs = {"side_effect": exemptions} if isinstance(exemptions, Exception) else {"return_value": exemptions}
             stream = io.StringIO()
             with patch.dict(os.environ, env, clear=True), \
@@ -142,7 +146,9 @@ class ReleasePolicyTests(unittest.TestCase):
             message = stream.getvalue()
             self.assertIn("nightly (x86): success", message)
             self.assertIn("nightly-arm: failure (rust-cache miss", message)
-            self.assertIn("unavailable" if isinstance(exemptions, Exception) else "PR #2 approved", message)
+            self.assertIn(f"replay-dst (date): {replay or '?'}", message)
+            expected = "unavailable" if isinstance(exemptions, Exception) else "; ".join(exemptions) or "none"
+            self.assertIn(f"decoupling exemptions (24 h): {expected}", message)
             self.assertNotIn("QuotaSkip", message)
             self.assertNotIn("CI usage", message)
 

@@ -6,7 +6,7 @@ prints the alert-group message on stdout.
 Exemptions are found through the `decoupling-exemption` notice annotations that the
 decoupling-gate jobs (quality-gates.yml, decoupling.yml) emit; annotations need `checks: read`.
 
-Environment: NIGHTLY_RESULT, ARM_RESULT,
+Environment: NIGHTLY_RESULT, ARM_RESULT, REPLAY_DST_RESULT,
 ARM_CACHE_HIT, RUN_URL, GITHUB_TOKEN, GITHUB_REPOSITORY.
 """
 
@@ -48,6 +48,7 @@ def main() -> int:
     if arm != "success" and e("ARM_CACHE_HIT") == "false":
         arm += " (rust-cache miss: infrastructure failure, re-run tonight)"
     lines.append(f"nightly-arm: {arm}")
+    lines.append(f"replay-dst (date): {e('REPLAY_DST_RESULT', '?')}")
     try:
         ex = exemptions(repo, now - dt.timedelta(days=1))
         lines.append("decoupling exemptions (24 h): " + ("; ".join(ex) if ex else "none"))

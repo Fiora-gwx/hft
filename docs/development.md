@@ -195,7 +195,7 @@ RPL-058–060、RPL-270–273 的现场 Model 回放文件、检查点、生成�
 
 同一 `replay-dst.yml` 另开独立托管作业,以 UTC 日期 `YYYYMMDD × 10^6` 为起点执行 RPL-012 的每夜种子与全部回归集,产物名 `replay-dst-date`;其余每夜项目照常运行。
 
-三个作业:`nightly` 与 `nightly-arm` 并行启动、互不依赖;最后 `summary`(≤ 2 min)无论上游成功、失败或被取消都汇总实际结论。各自跑什么与时长上限见 [testing §6](testing.md#6-ci-运行矩阵),资源规则见[免费额度](#免费额度)。每夜只做回归冒烟,结果不计入上线门槛 ③④(累计只在服务器上,见[仓库与 CI](#仓库与-ci))。
+四个作业:`nightly`、`nightly-arm` 与 `replay-dst` 并行启动、互不依赖;最后 `summary`(≤ 2 min)等待三者结束,无论上游成功、失败或被取消都汇总实际结论。摘要脚本与验证使用同一提交,缺少结果显示 `?`,不能报告成功。各自跑什么与时长上限见 [testing §6](testing.md#6-ci-运行矩阵),资源规则见[免费额度](#免费额度)。每夜只做回归冒烟,结果不计入上线门槛 ③④(累计只在服务器上,见[仓库与 CI](#仓库与-ci))。
 
 - **`nightly`**(`ubuntu-latest`,时长上限见 [testing §6](testing.md#6-ci-运行矩阵)):对当时的 `main` 头提交运行(`workflow_dispatch` 可指定 SHA);DST 一批新种子(≤ 6 min,批量写在 `tools/xtask/dst-nightly.toml` 的 `seeds`、`steps`;起点 `S` = UTC 日期 `YYYYMMDD` × 10^6)、fuzz 按目标短跑轮转(≤ 4 min,写在 `tools/xtask/fuzz-targets.toml`)、`tests/recover/` 进程内恢复用例、`dst --hashtrail check`(一致性集的全部种子,不一致即当夜失败)、deploy 检查全量运行(与 `quality-gates.yml` 的 "Deploy checks" 步骤相同的命令,含 PR 上按路径跳过的 systemd 容器测试;`deploy/` 存在才执行,M3 起)、`cargo deny check advisories`;作业在超时前自行收尾。fuzz 的最小化语料只存 `actions/cache`(全部目标一个缓存项,路径 `fuzz/corpus/<target>/`,键 `fuzz-corpus-<run_id>`,按前缀 `fuzz-corpus-` 恢复——`actions/cache` 的步骤是静态的,不能按目标数生成;被逐出时从仓库种子语料重来);不上传账本或语料 artifact。发现崩溃时上传最小化的崩溃输入(`retention-days: 7`),由人经 PR 写进对应 crate 的回归金样。
 - **`nightly-arm`**(`ubuntu-24.04-arm`,时长上限见 [testing §6](testing.md#6-ci-运行矩阵)):只跑与架构有关的测试(`ci` 剖面);`rust-cache` 用自己的键 `arm64-ci`(与发布构建的剖面不同,共用一个键会让先保存者决定缓存内容);缓存未命中导致超时视为基础设施失败(摘要中标出),当夜由人在运行页重跑一次(工作流不持有 `actions: write`)。

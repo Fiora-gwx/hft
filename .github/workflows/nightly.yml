@@ -208,7 +208,7 @@ jobs:
 
   # One message to the alert group: job verdicts and the day's decoupling exemptions.
   summary:
-    needs: [nightly, nightly-arm]
+    needs: [nightly, nightly-arm, replay-dst]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -219,6 +219,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.sha || 'main' }}
           sparse-checkout: .github
       - name: Nightly summary
         env:
@@ -227,6 +228,7 @@ jobs:
           HFT_ALERT_TG_CHAT: ${{ secrets.HFT_ALERT_TG_CHAT }}
           NIGHTLY_RESULT: ${{ needs.nightly.result }}
           ARM_RESULT: ${{ needs.nightly-arm.result }}
+          REPLAY_DST_RESULT: ${{ needs.replay-dst.result }}
           ARM_CACHE_HIT: ${{ needs.nightly-arm.outputs.cache-hit }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
