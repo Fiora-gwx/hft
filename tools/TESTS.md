@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | 不适用:非规范 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | TOOL-001–TOOL-002 |
-| cargo xtask ci | TOOL-003–TOOL-011, TOOL-186–TOOL-191 |
+| cargo xtask ci | TOOL-003–TOOL-011, TOOL-186–TOOL-191、TOOL-206/207 |
 | cargo xtask decoupling-gate | TOOL-012–TOOL-019 |
 | cargo xtask scaffold-gate | TOOL-020–TOOL-029 |
 | cargo xtask deps | TOOL-030–TOOL-031、TOOL-118 |
@@ -3183,6 +3183,44 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 | TOOL-205.3 | 未知 case | 退出 2,不运行种子 |
 | TOOL-205.4 | 固定 core 场景配 storage | 退出 2,不运行种子 |
 | TOOL-205.5 | hashtrail 加 case | 退出 2,不运行种子 |
+
+### TOOL-206 快速测试按本次推送选包并保守回退
+
+- 规则:[cargo xtask ci](README.md#cargo-xtask-ci)、[质量门](../docs/development.md#质量门quality-gatesyml)
+- 级别:table
+- 里程碑:M1
+- 前置:两个测试 crate 与 xtask 的临时 Git 仓库,含前一推送、当前推送及强推前的独立历史
+- 步骤:运行包选择与计划执行器,子进程用记录型替身
+- 期望:增量只选本次推送涉及包,改名两端均计入;无可靠祖先时回退完整 PR,共享输入选择全部包;不把快速范围用于完整验收。失败保存退出码并停止后续命令,成功才标记 complete
+- 实现:`tools/xtask/tests/test_ci_feedback.py::test_tool_206_related_tests_select_the_push_and_keep_full_fallbacks`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| TOOL-206.1 | synchronize 且旧头是祖先 | 仅两头之间的差异,不包含之前的包改动 |
+| TOOL-206.2 | opened/reopened、缺旧头、零 SHA、强推、不合法旧头 | 完整 PR 差异 |
+| TOOL-206.3 | 删除或改名 | 两个路径都参与包选择 |
+| TOOL-206.4 | 根 Cargo、工具链或 .cargo 配置,共享 fixture/测试 | 全部当前 workspace 包 |
+| TOOL-206.5 | 仅文档或 Python | 无 Rust 包,明确空计划 |
+| TOOL-206.6 | CI 脚本或工作流 | xtask;政策回归另由静态作业先执行 |
+| TOOL-206.7 | 构建成功/失败 | 成功后运行测试,失败留证并停止;tests/examples 与全部特性保留 |
+
+### TOOL-207 完整汇总拒绝缺失或跳过的适用检查
+
+- 规则:[cargo xtask ci](README.md#cargo-xtask-ci)、[质量门](../docs/development.md#质量门quality-gatesyml)
+- 级别:table
+- 里程碑:M1
+- 前置:真实作业清单,路径分类输出与各作业结论的离线表
+- 步骤:逐项替换状态并运行完整结论计算
+- 期望:只有全部适用检查通过才通过,快检成功不能代替完整验收
+- 实现:`tools/xtask/tests/test_ci_feedback.py::test_tool_207_acceptance_requires_every_applicable_job`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| TOOL-207.1 | 全部 success | 通过 |
+| TOOL-207.2 | 任一适用项失败、取消、skipped 或缺失 | 失败 |
+| TOOL-207.3 | 已确认无基准改动,benchmarks skipped | 通过;分类字段缺失则失败 |
+| TOOL-207.4 | 纯文档,代码作业 skipped | 通过;路径、静态或解耦失败仍失败 |
+| TOOL-207.5 | 只完成快速反馈,完整作业 skipped | 失败 |
 
 ## 验收
 

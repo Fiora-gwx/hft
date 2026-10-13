@@ -54,7 +54,9 @@ cargo xtask ci [--pure-only] [--fast] [--no-doc-check]
 
 **按路径触发的步骤不在 `ci` 内**:`scaffold-gate`、改动目标的 fuzz 冒烟、`fixtures/replay/` 样本的 `replay-verify`、基准短跑由工作流按 [testing §6](../docs/testing.md#6-ci-运行矩阵) 的路径规则分别调用对应子命令;`decoupling-gate` 是独立作业(下节)。工作流文件、触发、作业图与资源规则归 [development](../docs/development.md#ci-概要);本地(Windows)只写代码并推送。
 
-发布检查与夜间汇总的辅助脚本在 `.github/scripts/`;契约归 [development 发布检查](../docs/development.md#发布工作流release-aarch64yml)与[每夜任务](../docs/development.md#每夜任务nightlyyml)。`ops-py` 对相关改动运行 `tools/xtask/tests/test_ci_*.py`(TOOL-187–TOOL-191),用离线 GitHub 替身与临时 Git 仓库验证发布证据、Admin 覆盖、包含文件回放失败及缺失结果的汇总结论与主机检查的路径判定。
+发布检查与夜间汇总的辅助脚本在 `.github/scripts/`;契约归 [development 发布检查](../docs/development.md#发布工作流release-aarch64yml)与[每夜任务](../docs/development.md#每夜任务nightlyyml)。`docs` 提前运行、`ops-py` 对相关改动再运行 `tools/xtask/tests/test_ci_*.py`(TOOL-187–TOOL-191、TOOL-206/207),用离线 GitHub 替身与临时 Git 仓库验证发布证据、Admin 覆盖、包含文件回放失败及缺失结果的汇总结论与主机检查的路径判定。
+
+快速反馈选择与完整结论同样由 `.github/scripts/` 承担。`related-tests.py` 记录经过祖先检查的增量范围或完整回退范围,只选择当前 workspace 中的包并使用参数列表调用 Cargo;测试失败保留退出码,无包时明确记录空选择。`ci-summary.py` 核对全部适用作业,拒绝缺失、失败、取消和非预期跳过(TOOL-206/207)。两者不更改 `cargo xtask ci` 的计划或完整种子强度;工作流归 [development](../docs/development.md#质量门quality-gatesyml)。
 
 **每夜**只做回归冒烟:`dst --hashtrail check`(不带 `--first`,核对全部登记种子);DST 以 `dst --seeds N --seed S --steps M` 跑一批由 UTC 日期派生起点 `S` 的新种子,fuzz 以 `fuzz --nightly` 按 `fuzz-targets.toml` 轮转(N、M 读 `tools/xtask/dst-nightly.toml`,时长上限归 [testing §6](../docs/testing.md#6-ci-运行矩阵)),**不计入上线门槛 ③④**,也不保存任何累计账本;③④ 的累计在服务器上由 [hft-verify](#hft-verify) 运行。
 
