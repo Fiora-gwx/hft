@@ -203,6 +203,7 @@ deps = [
 tier = "dev"
 deps = [
     "crates/hft-types", "crates/hft-sim", "crates/hft-sequencer", "crates/hft-oms", "crates/hft-risk",
+    "crates/hft-journal",
     "crates/hft-ledger", "crates/hft-exec", "crates/hft-strategy-sdk", "crates/hft-strat-lib",
     "crates/hft-venue-proto", "crates/hft-event", "crates/hft-refdata", "crates/hft-rt", "crates/hft-chain-evm",
 ]
