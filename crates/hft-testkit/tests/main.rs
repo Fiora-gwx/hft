@@ -26,16 +26,13 @@ mod hash;
 /// `heavy-tests` job runs every `heavy::` test and `cargo xtask ci` skips them
 /// (docs/development.md).
 #[cfg(feature = "dst-heavy")]
+// `path = "."`: the nested modules are this directory's files.
+#[path = "."]
 mod heavy {
-    #[path = "../cancel_migration.rs"]
     mod cancel_migration;
-    #[path = "../late_migration.rs"]
     mod late_migration;
-    #[path = "../partial_migration.rs"]
     mod partial_migration;
-    #[path = "../reconcile_migration.rs"]
     mod reconcile_migration;
-    #[path = "../stale_migration.rs"]
     mod stale_migration;
 }
 #[cfg(feature = "seq")]

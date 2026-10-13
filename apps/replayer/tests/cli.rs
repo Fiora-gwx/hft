@@ -10,10 +10,10 @@ mod recovery_gap;
 mod verify;
 /// Tests over the generated 1 h / 3 h fixtures (feature `long-fixtures`; see `long_model::heavy`).
 #[cfg(feature = "long-fixtures")]
+// `path = "."`: the nested modules are this directory's files.
+#[path = "."]
 mod heavy {
-    #[path = "../fixture_bundle.rs"]
     mod fixture_bundle;
-    #[path = "../snapshot_diff.rs"]
     mod snapshot_diff;
 }
 
