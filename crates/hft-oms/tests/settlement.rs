@@ -121,15 +121,19 @@ fn oms_477_original_receipt_proves_only_the_same_first_execution_after_restore()
                             h.out.fills.is_empty() && h.out.foreign_fills.is_empty() && h.out.fees.is_empty()
                         );
                         let path = if stale {
-                            hft_oms::notes::STALE_GEN_FILL.n
+                            hft_oms::notes::code_of(hft_oms::notes::STALE_GEN_FILL)
                         } else {
-                            hft_oms::notes::FOREIGN_FILL_VIA_ORDER_EVENT.n
+                            hft_oms::notes::code_of(hft_oms::notes::FOREIGN_FILL_VIA_ORDER_EVENT)
                         };
                         let routed: Vec<_> = h.out.notes.iter().filter(|n| n.code == path).collect();
                         assert_eq!(routed.len(), 1);
                         assert_eq!(routed[0].v[2], 0);
                         assert!(h.out.notes.iter().all(|n| {
-                            ![hft_oms::notes::FOREIGN_FILL.n, hft_oms::notes::EXT_DEDUP.n].contains(&n.code)
+                            ![
+                                hft_oms::notes::code_of(hft_oms::notes::FOREIGN_FILL),
+                                hft_oms::notes::code_of(hft_oms::notes::EXT_DEDUP),
+                            ]
+                            .contains(&n.code)
                         }));
                         assert_eq!(snap(&h.o), before);
                         assert_eq!(h.o.external_cash_guard(&f), Ok(true));
@@ -653,9 +657,9 @@ fn oms_471_foreign_cash_cursors_survive_restore_and_reordered_reports() {
                 assert_eq!(h.out.cash_error, None);
                 assert!(h.out.foreign_fills.is_empty());
                 let path = if stale {
-                    hft_oms::notes::STALE_GEN_FILL.n
+                    hft_oms::notes::code_of(hft_oms::notes::STALE_GEN_FILL)
                 } else {
-                    hft_oms::notes::FOREIGN_FILL_VIA_ORDER_EVENT.n
+                    hft_oms::notes::code_of(hft_oms::notes::FOREIGN_FILL_VIA_ORDER_EVENT)
                 };
                 let routed: Vec<_> = h.out.notes.iter().filter(|n| n.code == path).collect();
                 assert_eq!(routed.len(), 1);

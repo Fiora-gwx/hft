@@ -209,9 +209,9 @@ pub fn assert_record(r: &RunRecord) -> Result<(), String> {
         }
         let event_notes = notes(r, *seq)?;
         let path = if unresolved {
-            hft_oms::notes::FOREIGN_FILL_VIA_ORDER_EVENT.n
+            hft_oms::notes::code_of(hft_oms::notes::FOREIGN_FILL_VIA_ORDER_EVENT)
         } else {
-            hft_oms::notes::STALE_GEN_FILL.n
+            hft_oms::notes::code_of(hft_oms::notes::STALE_GEN_FILL)
         };
         let paths: Vec<_> = event_notes.iter().filter(|n| n.code == path).collect();
         require(paths.len() == 1, "missing intended defensive OMS path")?;
@@ -233,7 +233,7 @@ pub fn assert_record(r: &RunRecord) -> Result<(), String> {
         require(
             event_notes
                 .iter()
-                .filter(|n| n.code == hft_oms::notes::FOREIGN_FILL.n)
+                .filter(|n| n.code == hft_oms::notes::code_of(hft_oms::notes::FOREIGN_FILL))
                 .count()
                 == usize::from(!raw_first),
             "foreign booking is missing or duplicated",

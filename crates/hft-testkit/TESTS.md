@@ -1837,7 +1837,7 @@ spec: README.md
 - 规则:[DST 世界模型](README.md#dst-的世界模型)
 - 级别:table
 - 里程碑:M2
-- 前置:真实 SimMatcher 永续仓位,独立报价变化后平一半
+- 前置:真实 SimMatcher 的启动报告已交付且无在途,永续开仓后独立报价变化,再平一半
 - 输入:买/卖、正/零成交 ID、有/无先发原件共八行;另两行缺少已确认槽或用户流断开
 - 期望:每行结算一次,现金分别为正负 8600,历史原件与全部交付的身份和金融字段相同;交付后仓位、库存与钱包真值不变,在途清除,匹配器时钟正常前进;前置缺失在改变真值前失败
 - 实现:`crates/hft-testkit/tests/foreign_ledger.rs::tk_144_foreign_order_delivery_retains_original_settlement_and_identity`
@@ -1855,7 +1855,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:LED-080 种子 0–7,独立组合方向、成交 ID 和原件先发方式
 - 步骤:完整运行并逐原件检查;删除账本边界、原件、配对执行和分支注记,篡改原件现金和最终钱包,留下在途、重复边界、插入外来往返期间接受的新单或截短运行;关闭全部检查器重跑
-- 期望:完整场景有真实开平仓、非零结算现金和全部冷热核对,外来往返期间没有引擎新单;所有反例失败;检查器开关前后 journal、交付流、意图、HashTrail 与真值相同
+- 期望:完整场景有真实开平仓、非零结算现金和全部冷热核对,外来往返期间没有引擎新单;注记按完整 `Note.code` 识别,删除反例必须实际删除匹配记录;所有反例失败;检查器开关前后 journal、交付流、意图、HashTrail 与真值相同
 - 实现:`crates/hft-testkit/tests/foreign_ledger.rs::tk_145_foreign_case_requires_every_execution_and_exact_ledger_boundary`
 
 ### TK-146 CLI 防御成交场景保留原始证据与复现身份

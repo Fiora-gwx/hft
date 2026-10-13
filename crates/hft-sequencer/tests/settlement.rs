@@ -81,9 +81,9 @@ fn seq_419_original_duplicate_proof_survives_fifo_cold_restore_and_replay() {
                 assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, Qty(-99_997));
                 assert!(decisions(&h.since(mark)).is_empty());
                 let path = if slot == 0 {
-                    hft_oms::notes::FOREIGN_FILL_VIA_ORDER_EVENT.n
+                    hft_oms::notes::code_of(hft_oms::notes::FOREIGN_FILL_VIA_ORDER_EVENT)
                 } else {
-                    hft_oms::notes::STALE_GEN_FILL.n
+                    hft_oms::notes::code_of(hft_oms::notes::STALE_GEN_FILL)
                 };
                 let routed: Vec<_> = h
                     .since(mark)

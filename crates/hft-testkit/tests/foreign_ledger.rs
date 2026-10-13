@@ -22,6 +22,20 @@ fn tk_144_foreign_order_delivery_retains_original_settlement_and_identity() {
                 cfg.latency_ns = (MS, MS);
                 let mut v = MockVenue::<SimMatcher>::new(cfg, &WorldSpec::w1(), 1);
                 v.tick(0);
+                // Bootstrap account reports have their own response latency. Finish
+                // their delivery before isolating the foreign-order delivery window.
+                assert!(
+                    v.tick(2 * MS)
+                        .iter()
+                        .all(|(_, i)| !matches!(i.kind, EventKind::ORDER_EVENT | EventKind::EXTERNAL_FILL))
+                );
+                assert!(
+                    !v.truth(3 * MS)
+                        .iter()
+                        .find(|t| t.account == ACCT_A)
+                        .unwrap()
+                        .undelivered
+                );
                 let open = if buy { Side::Sell } else { Side::Buy };
                 v.m.on_bbo(P1, (600_189_000, 1_000_000), (600_190_000, 1_000_000), 10 * MS);
                 v.m.external(ACCT_A, P1, open, 200_000, "seed", false, 10 * MS);
@@ -143,10 +157,18 @@ fn tk_145_foreign_case_requires_every_execution_and_exact_ledger_boundary() {
                 }
                 2 => bad.external_receipts[0].fill.cash_amount.0 += 1,
                 3 => bad.journal.retain(|j| j.kind != EventKind::EXEC_DECISION),
-                4 => bad.journal.retain(|j| {
-                    !j.try_read::<Note>()
-                        .is_some_and(|n| n.source == NoteSource::Oms && matches!(n.code, 6 | 10))
-                }),
+                4 => {
+                    let before = bad.journal.len();
+                    let paths = [
+                        hft_oms::notes::code_of(hft_oms::notes::STALE_GEN_FILL),
+                        hft_oms::notes::code_of(hft_oms::notes::FOREIGN_FILL_VIA_ORDER_EVENT),
+                    ];
+                    bad.journal.retain(|j| {
+                        !j.try_read::<Note>()
+                            .is_some_and(|n| n.source == NoteSource::Oms && paths.contains(&n.code))
+                    });
+                    assert!(bad.journal.len() < before, "no path evidence removed");
+                }
                 5 => bad.truth[0].undelivered = true,
                 6 => bad.obs.balances[0].qty += 1,
                 7 => {
