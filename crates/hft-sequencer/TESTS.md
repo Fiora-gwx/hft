@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | SEQ-018、SEQ-310 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
-| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-395、SEQ-404–SEQ-406、SEQ-422–SEQ-423 |
+| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-395、SEQ-404–SEQ-406、SEQ-422–SEQ-424 |
 | 策略集(`StrategySet`) | SEQ-015–SEQ-018、SEQ-340 |
 | 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181 |
 | 环与容量 | SEQ-001–SEQ-007、SEQ-058、SEQ-059、SEQ-064、SEQ-066、SEQ-086、SEQ-087、SEQ-100、SEQ-221、SEQ-231、SEQ-279、SEQ-288、SEQ-345、SEQ-346、SEQ-367 |
@@ -5789,6 +5789,14 @@ spec: README.md
 - 期望:序号在 append 返回前分配;完整末尾续号在末片之后,未完成记录的分片索引被清除;保留数、发布数与全部原件相同,Log 不携带已裁尾部索引;默认模式每行只占一个 seq
 - 实现:`crates/hft-sequencer/tests/mem_journal.rs::seq_423_memory_multipart_boundaries_and_truncation`
 
+| 行 | 逻辑体长度 | 物理片数 |
+|---|---|---|
+| SEQ-423.1 | SnapshotHdr 长度 | 1 |
+| SEQ-423.2 | PART_MAX_CHUNK | 1 |
+| SEQ-423.3 | PART_MAX_CHUNK + 1 | 2 |
+| SEQ-423.4 | 2 × PART_MAX_CHUNK | 2 |
+| SEQ-423.5 | 2 × PART_MAX_CHUNK + 1 | 3 |
+
 ### SEQ-424 物理模式 Meta 的独立、引导与事件边界
 
 - 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
@@ -5798,14 +5806,6 @@ spec: README.md
 - 步骤:每段先写引导 Meta,随后写独立 ClockStatus,再写 Timer 及其同事件尾部 ClockStatus
 - 期望:Begin 与引导 Meta 不提前标 EVENT_END,BootDone 标记;独立 Meta 自带标记且无需 end_event 即能发布;开放事件中的 Meta 不带标记,完成点落在 Timer
 - 实现:`crates/hft-sequencer/tests/mem_journal.rs::seq_424_physical_meta_boundaries_distinguish_boot_and_open_events`
-
-| 行 | 逻辑体长度 | 物理片数 |
-|---|---|---|
-| SEQ-423.1 | SnapshotHdr 长度 | 1 |
-| SEQ-423.2 | PART_MAX_CHUNK | 1 |
-| SEQ-423.3 | PART_MAX_CHUNK + 1 | 2 |
-| SEQ-423.4 | 2 × PART_MAX_CHUNK | 2 |
-| SEQ-423.5 | 2 × PART_MAX_CHUNK + 1 | 3 |
 
 ## 验收
 

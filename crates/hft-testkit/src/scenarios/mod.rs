@@ -42,7 +42,7 @@ fn base(seed: u64) -> DstConfig {
 pub fn replay_config(suite: &DstSuite, seed: u64) -> DstConfig {
     use hft_strategy_sdk::{
         StrategySet,
-        params::{RawParams, encode_body},
+        params::{RawParams, SchemaView, encode_body},
     };
     let mut cfg = suite.config(seed);
     cfg.world.physical_journal = true;
