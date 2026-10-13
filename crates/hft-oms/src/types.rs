@@ -910,6 +910,9 @@ pub struct FillOut {
     /// Known actual cash for this increment, quote asset qty_exp, excluding fees/funding.
     /// `None` is the legacy cost-based path; `Some(0)` is an explicit zero settlement.
     pub cash: Option<Qty>,
+    /// Original gross Px×Qty increment before rounding its average price. None on tombstone
+    /// or external-offset paths that retain only an increment price; not persisted.
+    pub notional: Option<i128>,
 }
 
 /// A report cannot be consumed under the venue's explicit perpetual settlement contract.

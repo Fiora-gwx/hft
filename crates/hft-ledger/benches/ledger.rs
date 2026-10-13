@@ -60,6 +60,21 @@ fn led_250_apply_fill(c: &mut Criterion) {
     });
 }
 
+fn led_300_apply_spot_fill(c: &mut Criterion) {
+    let mut l = booted();
+    let buy = f(Buy, BTC_S1, "0.006", "60001.6667", "0", USDT, G1, 0);
+    let sell = f(Sell, BTC_S1, "0.006", "60001.6667", "0", USDT, G1, 0);
+    let mut k = 0i64;
+    c.bench_function("ledger/apply_spot_fill", |b| {
+        b.iter(|| {
+            k += 1;
+            let fill = if k & 1 == 1 { &buy } else { &sell };
+            black_box(l.apply_spot_fill(black_box(fill), black_box(360_010_000_000_000), s(1) + k))
+                .expect("valid spot notional");
+        })
+    });
+}
+
 fn led_251_apply_external(c: &mut Criterion) {
     let mut l = booted();
     l.apply_fill(&f(Sell, BTC_P2, "1.0", "60000", "0", USDT, G1, 1), s(1));
@@ -332,6 +347,7 @@ fn led_258_replay_day(c: &mut Criterion) {
 criterion_group!(
     benches,
     led_250_apply_fill,
+    led_300_apply_spot_fill,
     led_251_apply_external,
     led_294_reconciled_cash,
     led_252_apply_funding_push,

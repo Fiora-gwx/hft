@@ -59,7 +59,7 @@ warm 任务(不在 tick-to-trade 路径,不占热核)
 | t2 | sequencer | 取出 → 赋 `seq` → 追加 seq journal → 更新簿、校验结算、记账并写账本注记 | `hft-sequencer`、`hft-journal`、`hft-book`、`hft-ledger` |
 | t3 | sequencer | 策略 `on_event` → `OrderIntent` 或 `TargetIntent` → 执行层产出订单意图(写 `ExecDecision`)→ 风控(含第二腿报价的连接健康与可负担性)→ OMS 分配槽与 client id → `OrderDecision` 写 journal → `OutMsg` 入 out 环 | `strategies/*`、`hft-exec`、`hft-risk`、`hft-oms` |
 | t4 | gw | 取 `OutMsg` → 填帧模板 → WS 掩码 → TLS 加密 → `writev` → `sent_tsc`(`SendReport` 回 rep 环) | `hft-venue`、`venue-*`、`hft-net` |
-| t5 | gw → sequencer | 回报 → `OrderEvent` → OMS 身份与结算校验 → 槽迁移 → `LegLink` 第二腿出环(量 ≤ 裸量);同事件记账,外来结算核对原件与增量;无成交的槽更新和基础币费用调整也刷新风控敞口 | `hft-oms`、`hft-exec`、`hft-ledger`、`hft-risk` |
+| t5 | gw → sequencer | `OrderEvent` → OMS 身份/结算校验与槽迁移 → `LegLink` 第二腿出环(量 ≤ 裸量);同事件入账,现货按原始名义结算,外来核原件与增量;槽变化及基础币费用刷新风控敞口 | `hft-oms`、`hft-exec`、`hft-ledger`、`hft-risk` |
 
 分段名与主机内预算(`tick_to_trade`、回报触发下一单的 `rep_to_order` 及其对冲子集 `hedge_host`)唯一归属 [latency-budget](latency-budget.md)。不做"每 tick 空跑下单路径",**不对真实连接预加密**([T5、T6](hot-path-rules.md#线程t))。
 

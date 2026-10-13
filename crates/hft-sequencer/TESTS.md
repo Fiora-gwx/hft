@@ -5812,7 +5812,7 @@ spec: README.md
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
 - 级别:table
 - 里程碑:M2
-- 前置:真实 sequencer,敞口闸门最小名义 100 USDT
+- 前置:真实 sequencer,敞口闸门最小名义 100 USDT;仅此夹具将执行层尘埃阈值设为 1000 USDT,隔离自动减仓,不改变风控闸门
 - 步骤:分别让 0.010 BTC 订单成交 0.001 后 Expired,以及 0.004 BTC 完整成交后补扣 0.003 BTC FeeOnly;处理前后各写关键帧,随后请求新开仓
 - 期望:两行净仓 0.001 BTC、无在途,同事件实际调用 risk.on_legs,新单按约 50 USDT 敞口通过;从首次启动及两侧关键帧重放输出全部相等
 - 实现:`crates/hft-sequencer/tests/process.rs::seq_425_terminal_reports_and_base_fees_refresh_exposure_before_snapshot_replay`

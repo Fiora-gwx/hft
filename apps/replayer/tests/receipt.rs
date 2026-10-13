@@ -5,6 +5,59 @@ use serde_json::Value;
 use super::{args, fixture, run};
 
 #[test]
+fn rpl_285_spot_notional_files_verify_full_and_between_fill_snapshots() {
+    for side in [hft_types::Side::Buy, hft_types::Side::Sell] {
+        let f = fixture::spot_notional(side);
+        let before = std::fs::read(&f.file).unwrap();
+        let log = fixture::read(&f);
+        let fills: Vec<_> = log
+            .recs
+            .iter()
+            .filter(|r| r.kind == EventKind::ORDER_EVENT)
+            .map(|r| r.read::<OrderEvent>().unwrap())
+            .collect();
+        assert_eq!(fills.len(), 2);
+        assert_eq!(
+            (fills[0].cum_filled.0, fills[1].cum_filled.0),
+            (400_000, 1_000_000)
+        );
+        let snapshots: Vec<_> = log
+            .recs
+            .iter()
+            .filter(|r| {
+                r.kind == EventKind::STATE_SNAPSHOT
+                    && r.read::<SnapshotHdr>()
+                        .is_some_and(|h| h.purpose == PURPOSE_ON_DEMAND)
+            })
+            .map(|r| r.seq)
+            .collect();
+        assert_eq!(snapshots.len(), 3);
+        for (seq, count) in snapshots.iter().zip(0..=2) {
+            assert_eq!(
+                log.recs
+                    .iter()
+                    .filter(|r| r.seq < *seq && r.kind == EventKind::ORDER_EVENT)
+                    .count(),
+                count
+            );
+        }
+        for from in [None, Some(snapshots[0]), Some(snapshots[1])] {
+            let mut a = args(&f.file);
+            if let Some(seq) = from {
+                a.extend(["--from-seq".into(), seq.to_string()]);
+            }
+            let (code, text, err) = run(&a);
+            assert_eq!(code, 0, "{side:?}, {from:?}: {text} {err}");
+            let v: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(v["summary"]["verify"], "pass");
+            assert!(v["divergences"].as_array().unwrap().is_empty());
+            assert!(v["summary"]["snapshots_checked"].as_u64().unwrap() >= 2);
+        }
+        assert_eq!(std::fs::read(&f.file).unwrap(), before);
+    }
+}
+
+#[test]
 fn rpl_282_original_receipt_files_verify_full_and_snapshot_windows() {
     for positive in [false, true] {
         let f = fixture::original_receipt(positive);

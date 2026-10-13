@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | RPL-095、RPL-104、RPL-241、RPL-242 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | RPL-001–RPL-004、RPL-070、RPL-079 |
-| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-284 |
+| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-285 |
 | sim | RPL-090–RPL-108、RPL-120–RPL-129、RPL-140–RPL-145、RPL-259 |
 | compare | RPL-160–RPL-173 |
 | latency | RPL-190–RPL-206 |
@@ -2321,6 +2321,16 @@ spec: README.md
 - 步骤:生成四个 SnapshotNow 按需快照,各点之前原始成交数依次为 0/1/4/6、累计回报数为 0/0/0/2;调用实际 replayer CLI 完整回放,并从入账前、入账后及普通键淘汰后的前三个快照起步;比较调用前后的文件字节
 - 期望:所有窗口 verify=pass、无分歧且至少核对起止两个快照;源文件不变;生成时钱包严格等于全部原始现金减费用
 - 实现:`apps/replayer/tests/receipt.rs::rpl_282_original_receipt_files_verify_full_and_snapshot_windows`
+
+### RPL-285 累计均价现货现金的实际文件回放
+
+- 规则:[verify](README.md#verify)
+- 级别:replay
+- 里程碑:M2
+- 输入:真实 sequencer 与离线 journal 写入器,买卖各一份文件;合法 0.01 BTC 冒烟单按 0.004/0.006 BTC 分两次成交,累计金额精确到计价资产单位但增量均价存在取整误差
+- 步骤:成交前、两笔之间和全部成交后写按需快照;现金期望直接从累计均价 × 累计量与两笔费用独立计算;实际 replayer CLI 完整回放及从前两个快照开始回放
+- 期望:买入现金等于初值减原始累计金额及费用,卖出等于初值加金额减费用;每窗 verify=pass、无分歧且至少比较两个快照,日志文件字节不变;第二笔不得从已取整的增量价格反算现金
+- 实现:`apps/replayer/tests/receipt.rs::rpl_285_spot_notional_files_verify_full_and_between_fill_snapshots`
 
 ## 验收
 

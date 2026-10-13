@@ -995,6 +995,10 @@ impl JournalLedger {
                     t,
                 )
                 .map_err(JournalApplyError::Settlement)?;
+        } else if !s.perp && !e.tomb {
+            self.ledger
+                .apply_spot_fill(&fd, total - e.notional, t)
+                .map_err(JournalApplyError::Settlement)?;
         } else {
             self.ledger.apply_fill(&fd, t);
         }

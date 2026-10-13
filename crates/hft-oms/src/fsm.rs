@@ -965,6 +965,7 @@ impl Oms {
                 fee_asset: f.fee_asset,
                 seq: f.seq,
                 cash,
+                notional: (booked == d).then_some(incr),
             };
             let r = out.fills.push(fo);
             debug_assert!(r.is_ok(), "OmsOut.fills overflow");

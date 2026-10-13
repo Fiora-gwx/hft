@@ -111,6 +111,15 @@ impl Ledger {
     /// `cash` replaces only the perpetual wallet leg of this trade. Position/leg average
     /// cost and analytical PnL still follow the recorded fill order.
     pub(crate) fn book_trade_with_cash(&mut self, tr: &Trade, cash: Option<Qty>) -> PnlBreakdown {
+        self.book_trade_settled(tr, cash, None)
+    }
+
+    fn book_trade_settled(
+        &mut self,
+        tr: &Trade,
+        cash: Option<Qty>,
+        spot_notional: Option<i128>,
+    ) -> PnlBreakdown {
         let mut d = PnlBreakdown::zero();
         let Some(s) = self.inst(tr.inst).copied() else {
             return d;
@@ -189,7 +198,7 @@ impl Ledger {
                 RoundMode::Floor
             };
             let (amt, lossy) = rescale(
-                i128::from(px).saturating_mul(i128::from(tr.gross.0)),
+                spot_notional.unwrap_or_else(|| i128::from(px).saturating_mul(i128::from(tr.gross.0))),
                 pe,
                 qe,
                 rounding,
@@ -321,6 +330,39 @@ impl Ledger {
         self.fill_with_cash(f, None, t)
     }
 
+    /// Books a matched spot increment using its original gross Px×Qty notional.
+    /// Cash rounds once in the quote asset; the rounded increment price still drives cost.
+    /// No allocation; budget: ledger/apply_spot_fill (README "延迟与资源契约").
+    pub fn apply_spot_fill(
+        &mut self,
+        f: &FillDelta,
+        notional: i128,
+        t: i64,
+    ) -> Result<FillApplied, SettlementError> {
+        let Some(s) = self.inst(f.inst) else {
+            return Err(SettlementError::UnknownInstrument);
+        };
+        if s.perp {
+            return Err(SettlementError::NotSpot);
+        }
+        if s.venue != f.venue {
+            return Err(SettlementError::VenueMismatch);
+        }
+        if self.av(f.account, s.venue).is_none() {
+            return Err(SettlementError::AccountVenue);
+        }
+        if f.qty.0 <= 0 {
+            return Err(SettlementError::InvalidQuantity);
+        }
+        if f.px.0 <= 0 {
+            return Err(SettlementError::InvalidPrice);
+        }
+        if notional <= 0 {
+            return Err(SettlementError::InvalidNotional);
+        }
+        Ok(self.fill_settled(f, None, Some(notional), t))
+    }
+
     /// Books an already matched/de-duplicated perpetual fill and its actual cash settlement.
     /// Fees remain separate. Zero does not fall back to the local average-cost estimate.
     /// No allocation; budget: ledger/apply_settled_fill (README "延迟与资源契约").
@@ -355,6 +397,16 @@ impl Ledger {
     }
 
     fn fill_with_cash(&mut self, f: &FillDelta, cash: Option<Qty>, t: i64) -> FillApplied {
+        self.fill_settled(f, cash, None, t)
+    }
+
+    fn fill_settled(
+        &mut self,
+        f: &FillDelta,
+        cash: Option<Qty>,
+        spot_notional: Option<i128>,
+        t: i64,
+    ) -> FillApplied {
         self.tick(t);
         let zero = FillApplied {
             pnl: PnlDelta {
@@ -415,7 +467,7 @@ impl Ledger {
             Ok(FillClass::Adjust) => Col::Adjust,
             _ => Col::Price,
         };
-        let mut d = self.book_trade_with_cash(
+        let mut d = self.book_trade_settled(
             &Trade {
                 acc: f.account,
                 inst: f.inst,
@@ -431,6 +483,7 @@ impl Ledger {
                 defer_round: cell.map(|(c, _)| c),
             },
             cash,
+            spot_notional,
         );
         let fd = self.book_fee(
             f.account,

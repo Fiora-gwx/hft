@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | LED-246、LED-247 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | LED-263、LED-003、LED-005、LED-074、LED-159、LED-231、LED-246 |
-| 成交增量与净量 | LED-010–LED-020、LED-275–LED-278、LED-298 |
+| 成交增量与净量 | LED-010–LED-020、LED-275–LED-278、LED-298、LED-299 |
 | 权益数据(`PortfolioView` 的字段语义) | LED-041、LED-161、LED-179、LED-220–LED-226、LED-241、LED-242 |
 | 配置(`LedgerConfig`,`EngineConfig` blob 的 `ledger` 段) | LED-001、LED-052、LED-098、LED-101、LED-120、LED-121、LED-136、LED-193、LED-194、LED-200、LED-211–LED-213、LED-221、LED-269 |
 | 实现说明 | 不适用:见子节 |
@@ -36,7 +36,7 @@ spec: README.md
 | 链上腿(optional,feature `chain`) | 不适用:里程碑外 |
 | 快照行格式(节 1、13、22;草案,实现时以代码与编译期断言为准) | LED-053、LED-061、LED-104、LED-138、LED-139、LED-230–LED-238 |
 | 规划源文件 | 不适用:非规范 |
-| 延迟与资源契约 | LED-004、LED-250–LED-258、LED-294 |
+| 延迟与资源契约 | LED-004、LED-250–LED-258、LED-294、LED-300 |
 | 测试与验收 | 不适用:非规范 |
 | 依赖 | 不适用:非规范 |
 | 延伸阅读 | 不适用:非规范 |
@@ -3002,6 +3002,27 @@ spec: README.md
 | LED-298.6 | 60000.0000 | 买 | 3 | −600003 |
 | LED-298.7 | 60000.0000 | 卖 | 0 | 600000 |
 | LED-298.8 | 60000.0000 | 卖 | 3 | 599997 |
+
+### LED-299 原始现货名义结算与无副作用拒绝
+
+- 规则:[成交增量与净量](README.md#成交增量与净量)、[仓位与已实现](README.md#仓位与已实现平均成本法)
+- 级别:unit
+- 里程碑:M2
+- 前置:LF,0.006 BTC 增量价 60001.6667,原始名义 360.01 USDT,费用 3 个 USDT 最小单位
+- 步骤:买卖各入账一次;另逐一提交未知品种、永续品种、错误 venue、未绑定账户、零数量、零价格、零/负名义八类非法输入
+- 期望:买卖现金按原始 360010000 单位扣/收,另扣 3 单位费用;仓位按净量变化;八个错误均在时间或账本变动前返回,快照字节不变。LED-263 的原始累计现金期望不变
+- 实现:`crates/hft-ledger/tests/journal_ledger.rs::led_299_original_spot_notional_is_independent_of_rounded_price_and_errors_are_atomic`
+
+### LED-300 现货原始名义入口预算
+
+- 规则:[延迟与资源契约](README.md#延迟与资源契约)
+- 级别:bench
+- 里程碑:M2
+- 前置:LF,交替买卖 0.006 BTC,增量价 60001.6667,原始名义 360.01 USDT
+- 步骤:在同一个已初始化账本上测量成功的 apply_spot_fill 调用
+- 基准名:`ledger/apply_spot_fill`
+- 期望:`ledger/apply_spot_fill` 满足本组件预算;CI smoke 只报告开发数据
+- 实现:`crates/hft-ledger/benches/ledger.rs::led_300_apply_spot_fill`
 
 ## 验收
 

@@ -34,6 +34,7 @@ mod model_boundary;
 mod path_model;
 mod receipt;
 mod restart_model;
+mod spot_notional;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 pub struct Fixture {
@@ -202,7 +203,19 @@ pub fn original_receipt(positive: bool) -> Fixture {
         None,
         None,
         None,
-        Some(positive),
+        Some(ReceiptCase::Original(positive)),
+    ))
+}
+
+pub fn spot_notional(side: Side) -> Fixture {
+    finish_evidence(create_with_receipt::<hft_strategy_registry::Strategies>(
+        None,
+        false,
+        false,
+        None,
+        None,
+        None,
+        Some(ReceiptCase::SpotNotional(side)),
     ))
 }
 
@@ -629,6 +642,12 @@ fn create_with_restart<S: StrategySet>(
     create_with_receipt::<S>(restart, long, model, model_hours, model_restarts, boundary, None)
 }
 
+#[derive(Copy, Clone)]
+enum ReceiptCase {
+    Original(bool),
+    SpotNotional(Side),
+}
+
 fn create_with_receipt<S: StrategySet>(
     restart: Option<Restart>,
     long: bool,
@@ -636,7 +655,7 @@ fn create_with_receipt<S: StrategySet>(
     model_hours: Option<u64>,
     model_restarts: Option<ModelRestart>,
     boundary: Option<ModelBoundary>,
-    original: Option<bool>,
+    receipt: Option<ReceiptCase>,
 ) -> Fixture {
     let root = std::env::temp_dir().join(format!(
         "replayer-{}-{}",
@@ -649,6 +668,10 @@ fn create_with_receipt<S: StrategySet>(
         root,
     };
     let mut world = WorldSpec::w1();
+    if matches!(receipt, Some(ReceiptCase::SpotNotional(_))) {
+        // A valid ten-millibitcoin smoke order allows two lot-aligned increments.
+        world.insts[0].min_qty = 1_000_000;
+    }
     if model_hours.is_some() {
         world.accounts.truncate(1);
         world.strategies.truncate(1);
@@ -750,7 +773,7 @@ fn create_with_receipt<S: StrategySet>(
         );
     }
     let mut setup = build::engine_setup(&world, 1_000_000_000, 1);
-    if original.is_some() {
+    if matches!(receipt, Some(ReceiptCase::Original(_))) {
         setup.ledger.ext_dedup_cap = 2;
     }
     if long || model_hours.is_some() {
@@ -815,8 +838,11 @@ fn create_with_receipt<S: StrategySet>(
     if model {
         model::exercise(&mut s, &f, &world, &setup);
     }
-    if let Some(positive) = original {
-        receipt::exercise(&mut s, &world, positive);
+    if let Some(case) = receipt {
+        match case {
+            ReceiptCase::Original(positive) => receipt::exercise(&mut s, &world, positive),
+            ReceiptCase::SpotNotional(side) => spot_notional::exercise(&mut s, &world, side),
+        }
     } else if let Some(mode) = boundary {
         model_boundary::exercise(&mut s, &f, &world, &setup, mode, pending);
     } else if let Some(spec) = model_restarts {

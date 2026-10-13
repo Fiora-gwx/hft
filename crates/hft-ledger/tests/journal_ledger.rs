@@ -86,6 +86,71 @@ fn led_263_fills_from_journal() {
 }
 
 #[test]
+fn led_299_original_spot_notional_is_independent_of_rounded_price_and_errors_are_atomic() {
+    use hft_ledger::SettlementError;
+    for side in [Buy, Sell] {
+        let mut l = booted();
+        l.apply_fill(&f(Buy, BTC_S1, "0.01", "60000", "0", USDT, G1, 0), 0);
+        let fill = f(side, BTC_S1, "0.006", "60001.6667", "0.000003", USDT, G1, 0);
+        let before = cash(&l, A1, S1, USDT).total.0;
+        l.apply_spot_fill(&fill, 360_010_000_000_000, T).unwrap();
+        let signed = if side == Buy { -360_010_000 } else { 360_010_000 };
+        assert_eq!(cash(&l, A1, S1, USDT).total.0, before + signed - 3);
+        assert_eq!(
+            l.pos(A1, BTC_S1).qty,
+            btc(if side == Buy { "0.016" } else { "0.004" })
+        );
+    }
+    let mut l = booted();
+    let fill = f(Buy, BTC_S1, "0.006", "60001.6667", "0", USDT, G1, 0);
+    for row in 0..8 {
+        let mut invalid = fill;
+        let mut notional = 360_010_000_000_000;
+        let expected = match row {
+            0 => {
+                invalid.inst = hft_types::InstId(u32::MAX);
+                SettlementError::UnknownInstrument
+            }
+            1 => {
+                invalid.inst = BTC_P2;
+                SettlementError::NotSpot
+            }
+            2 => {
+                invalid.venue = P2;
+                SettlementError::VenueMismatch
+            }
+            3 => {
+                invalid.account = hft_types::AccountId(0);
+                SettlementError::AccountVenue
+            }
+            4 => {
+                invalid.qty = Qty(0);
+                SettlementError::InvalidQuantity
+            }
+            5 => {
+                invalid.px = Px(0);
+                SettlementError::InvalidPrice
+            }
+            6 => {
+                notional = 0;
+                SettlementError::InvalidNotional
+            }
+            _ => {
+                notional = -1;
+                SettlementError::InvalidNotional
+            }
+        };
+        let before = snap(&l);
+        assert_eq!(
+            l.apply_spot_fill(&invalid, notional, T),
+            Err(expected),
+            "row {row}"
+        );
+        assert_eq!(snap(&l), before, "invalid input advanced state, row {row}");
+    }
+}
+
+#[test]
 fn led_264_cum_filled_dedup() {
     let rows: [(&[(OrderEventKind, &str)], &str); 4] = [
         (&[(PartialFill, "0.004"), (PartialFill, "0.004")], "0.004"),

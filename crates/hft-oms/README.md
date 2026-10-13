@@ -210,6 +210,8 @@ pub struct FillOut {                               // sequencer 转成 hft-ledge
     pub side: Side, pub class: IntentClass, pub flags: FillFlags,   // PX_EST | LATE(墓碑)| OVERFILL | EXT_DEDUP(部分已按外来成交入账)
     pub qty: Qty, pub net_qty: Qty,                // 入账量(EXT_DEDUP 时已扣除先前按外来成交入账的部分);net_qty 见"成交净量"
     pub px: Px, pub fee: i64, pub fee_asset: AssetId, pub seq: u64,
+    pub cash: Option<Qty>,                       // 永续已知现金增量,包括已知零额
+    pub notional: Option<i128>,                  // 价格取整前的毛成交名义,不进 journal/快照
 }
 pub struct LinkUpdate {
     pub link_id: u32, pub account: AccountId, pub group: GroupId, pub first: SlotRef,
@@ -532,7 +534,7 @@ gw 对某 (venue, account) 的回报帧解码失败时写 `ConnState{role = User
 
 1. `ev.slot == SLOT_UNRESOLVED`(0)→ 外来单:无成交 → `Note{OmsForeignOrder}`;带 `cum_filled > 0`(本应由 gw 写成 `ExternalFill`,这里是防御路径)→ 按 `foreign` 表求增量,先按第 4 条扣除 `ext_held`(只对未入账部分)后产出 `ForeignFill`,sequencer 按 `ExternalFill{cause: Unknown}` 走 hft-ledger 的归属与入账;写 `Note{OmsForeignFillViaOrderEvent}`(P1,venue crate 契约偏差)。
 2. **匹配键是 `(ev.epoch, ev.slot, ev.gen)`**。与当前槽不符 → 查该槽的墓碑(见"墓碑与迟到成交");墓碑也没有 → `StaleGen`:不改本槽;不带成交的只计数(`OmsStats.stale_gen`),无 Note;带 `cum_filled > 0` 时**照样入账**——`ev.exch_order_id ≠ 0` 时按 `foreign` 表求增量并先扣除 `ext_held`(同第 1 条防御路径;扣完为 0 则不产出),产出 `ForeignFill`,sequencer 按 `ExternalFill{cause: Unknown}` 走 hft-ledger 的归属与入账(随后 hft-exec 的外来成交规则照常适用);`exch_order_id = 0` 时无法去重,不入账;两种情况都写 `Note{OmsStaleGenFill}`(P0,`v[2]` = 是否已入账);"请求对账"的载体就是这条 P0 Note,OMS 不另发命令或查询(仓位真值由 reconciler 下一轮对账裁决,重复入账或漏账都由对账采纳校正)。
-3. 成交增量 `d = ev.cum_filled − slot.filled`:`d ≤ 0` → 成交部分视为重复/乱序,仅状态部分按表处理;`d > 0` → 增量名义 = `ev.avg_px × ev.cum_filled − slot.filled_notional`(`OrderEvent.avg_px` 为交易所给的累计均价,i128 积),`filled_notional` 取新值。
+3. 成交增量 `d = ev.cum_filled − slot.filled`:`d ≤ 0` → 成交部分视为重复/乱序,仅状态部分按表处理;`d > 0` → 增量名义 = `ev.avg_px × ev.cum_filled − slot.filled_notional`(`OrderEvent.avg_px` 为交易所给的累计均价,i128 积),`filled_notional` 取新值。未被外来成交抵扣的完整增量通过 `FillOut.notional = Some(增量名义)` 保留原值,现货现金不从已取整的 `FillOut.px × qty` 反算;`px` 仍按增量名义除以数量 HalfEven 取整,供成本与分析使用。墓碑及被部分抵扣的增量没有完整原始名义,输出 `None` 并保留增量价路径;不按比例猜金额。
 4. **与外来成交去重**(成交去重键的唯一定义是 [hft-venue-proto](../hft-venue-proto/README.md) 契约 22:`(inst, trade_id)`,强平/ADL 等 0 或负的成交 id 改用 `(inst, exch_order_id, fill_seq)`;本 crate 不另设键):gw 无法匹配到槽的成交先暂存 `gw.unmatched_hold_ms`(默认 5 000,等同账户的 Ack 补上 exch id),超时才报为 `ExternalFill{cause: Unknown}`(规则在 [hft-venue](../hft-venue/README.md))。若之后该单被查询或迟到回报匹配到槽,且 `ext_held[slot.exch_order_id] = b > 0`(这部分已按外来成交入账):槽的 `filled`、链接的 `first_net` 照常按全量 `d` 推进,但 `FillOut` 与 LegTracker 只计 `d − min(d, b)`(为 0 时不产出 `FillOut`),`b` 同量递减,`FillOut.flags |= EXT_DEDUP`,写 `Note{OmsExtDedup}`(P1)。第 1、2 条的 `ForeignFill` 同样按 `ext_held[ev.exch_order_id]` 先扣,只产出 `d − min(d, b)`,并写同一 Note。对冲按 OnFill 规则发出,数量受**该方向裸量**约束:若这段敞口已被 hft-exec 的外来成交默认处理或策略平掉,裸量为 0,不再重复对冲;若仍裸露,照常补发。
 5. **`avg_px` 为 0**(交易所没给均价):`OrderEvent` 成交类回报 → 退回 `ev.px × d`(`ev.px` 是本笔成交价);`QueryResult`(`ev.px` 可能只是委托价)→ 以委托价计、`FillOut.flags |= PX_EST`、写 `Note{OmsFillPxEstimated}`(P1)与 `Note{OmsNeedsRestQuery, trades = 1}`,由对账的成交历史校正价格(校正走 ledger 的采纳路径)。venue 契约:`QueryResult` 在 `cum_filled > 0` 时应给均价,给不出的由 gw 先查成交再出事件。
 6. **超量成交**:`ev.cum_filled > slot.qty`(只可能是解码/单位错误)→ 成交照常入账(`FillOut.flags |= OVERFILL`,由对账裁决),但超出 `qty` 的部分**不进入对冲基数**;同一事件内先按 OnFill 第 1–5 步对不超过 `qty` 的部分产生第二腿,再把该槽所在链接置 `Broken{Overfill}`;`Note{OmsOverfill}`(P0)。

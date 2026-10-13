@@ -712,7 +712,13 @@ fn seq_425_terminal_reports_and_base_fees_refresh_exposure_before_snapshot_repla
     use hft_event::OrderEventKind;
 
     for late_fee in [false, true] {
-        let mut h = steady();
+        reset_script();
+        let mut b = b0();
+        // Isolate the exposure gate from automatic residual trimming. The risk gate
+        // remains 100 USDT; the executor treats this fixture's residuals as dust.
+        b.setup_edit.push(|s| s.exec.default.dust_notional = n("1000"));
+        let mut h = b.boot();
+        h.steady();
         let d = h.order_at_touch(AC1, A1, Side::Buy, if late_fee { "0.004" } else { "0.010" });
         let filled = if late_fee { d.qty } else { q("0.001") };
         h.fill(&d, filled, filled, d.px);

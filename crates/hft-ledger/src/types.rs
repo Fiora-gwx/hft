@@ -128,11 +128,13 @@ pub enum JournalApplyError {
 pub enum SettlementError {
     UnknownInstrument,
     NotPerpetual,
+    NotSpot,
     VenueMismatch,
     AccountVenue,
     WrongAsset,
     InvalidQuantity,
     InvalidPrice,
+    InvalidNotional,
     MissingCash,
     CashCoverage,
     ExternalOverlap,

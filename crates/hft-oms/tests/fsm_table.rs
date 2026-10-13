@@ -581,6 +581,36 @@ fn qr(h: &mut H, r: OrderRef, status: u8, cum: &str, avg: &str, px: &str) {
 }
 
 #[test]
+fn oms_480_fill_preserves_original_notional_before_increment_price_rounding() {
+    let (mut h, r) = mk(false, Live, true, Free, "0");
+    ev(&mut h, r, OrderEventKind::PartialFill, |e| {
+        e.cum_filled = q("0.004");
+        e.avg_px = p("60000");
+    });
+    let first = i128::from(p("60000").0) * i128::from(q("0.004").0);
+    assert_eq!(h.out.fills[0].notional, Some(first));
+    ev(&mut h, r, OrderEventKind::Fill, |e| {
+        e.cum_filled = q("0.01");
+        e.avg_px = p("60001");
+    });
+    let expected = i128::from(p("60001").0) * i128::from(q("0.01").0) - first;
+    let second = h.out.fills[0];
+    assert_eq!(second.notional, Some(expected));
+    assert_ne!(expected, i128::from(second.px.0) * i128::from(second.qty.0));
+
+    let (mut h, r) = mk(false, Live, true, Free, "0");
+    ev(&mut h, r, OrderEventKind::Fill, |e| {
+        e.cum_filled = q("0.01");
+        e.avg_px = hft_types::Px(0);
+        e.px = p("60003");
+    });
+    assert_eq!(
+        h.out.fills[0].notional,
+        Some(i128::from(p("60003").0) * i128::from(q("0.01").0))
+    );
+}
+
+#[test]
 fn oms_065_query_result_row() {
     let (mut h, s) = mk(false, PendingNew, false, Free, "0");
     qr(&mut h, s, 1, "0", "0", "60000.00");

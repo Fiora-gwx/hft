@@ -369,6 +369,7 @@ impl Oms {
             fee_asset: ev.fee_asset,
             seq,
             cash,
+            notional: None,
         };
         let _ = out.fills.push(fo);
         self.leg_fill(account, tb.group, tb.leg_ix, Qty(signed), px, now);

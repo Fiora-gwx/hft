@@ -657,8 +657,20 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
     }
     // OMS has already matched the account/venue/instrument and positive net quantity.
     // Reject an unusable increment price before a linked hedge can enter the pipeline.
-    if out.fills.iter().any(|f| f.cash.is_some() && f.px.0 <= 0) {
+    if out.fills.iter().any(|f| {
+        f.px.0 <= 0
+            && (f.cash.is_some() || (e.rd.inst(f.inst).kind == InstKind::Spot && f.notional.is_some()))
+    }) {
         return Err(FatalReason::Settlement(hft_ledger::SettlementError::InvalidPrice));
+    }
+    if out
+        .fills
+        .iter()
+        .any(|f| e.rd.inst(f.inst).kind == InstKind::Spot && f.notional.is_some_and(|n| n <= 0))
+    {
+        return Err(FatalReason::Settlement(
+            hft_ledger::SettlementError::InvalidNotional,
+        ));
     }
     // Hedges (fast path first, after the facts have been validated).
     let hedges: Vec<HedgeRequest> = out.hedges.as_slice().to_vec();
@@ -707,6 +719,12 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
             };
             e.ledger
                 .apply_settled_fill(&fd, cash, e.now.engine_ns)
+                .map_err(FatalReason::Settlement)?
+        } else if let Some(notional) = f.notional
+            && e.rd.inst(f.inst).kind == InstKind::Spot
+        {
+            e.ledger
+                .apply_spot_fill(&fd, notional, e.now.engine_ns)
                 .map_err(FatalReason::Settlement)?
         } else {
             e.ledger.apply_fill(&fd, e.now.engine_ns)

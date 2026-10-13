@@ -29,7 +29,7 @@ spec: README.md
 | 延迟样本 | OMS-012, OMS-071, OMS-080–OMS-089 |
 | REPORT_DECODE | OMS-090, OMS-091 |
 | 恢复后的 gw 映射 | OMS-092, OMS-093 |
-| 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460、OMS-467、OMS-468、OMS-470–OMS-475、OMS-476–OMS-479 |
+| 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460、OMS-467、OMS-468、OMS-470–OMS-475、OMS-476–OMS-480 |
 | 成交净量(B4) | OMS-067, OMS-120–OMS-124, OMS-184, OMS-404 |
 | Unknown 收敛流程 | OMS-032, OMS-065, OMS-066, OMS-068, OMS-070, OMS-073, OMS-089, OMS-130–OMS-154, OMS-400, OMS-402, OMS-420 |
 | 墓碑与迟到成交(C1) | OMS-013, OMS-148, OMS-160–OMS-164, OMS-287, OMS-322, OMS-462、OMS-469 |
@@ -4337,6 +4337,16 @@ spec: README.md
 - 步骤:13 行篡改方向、身份、数量、价格、规范键、填充、资产、重复行、来源或版本;另删去证明生成合法 v3 快照
 - 期望:损坏快照全部拒绝;v3 可读但不能证明跨来源重复,后续未入账的重复原件不能补造证明
 - 实现:`crates/hft-oms/tests/settlement.rs::oms_479_receipt_restore_rejects_corruption_and_legacy_has_no_proof`
+
+### OMS-480 成交输出保留价格取整前的名义
+
+- 规则:[回报匹配与成交增量](README.md#回报匹配与成交增量)
+- 级别:unit
+- 里程碑:M2
+- 前置:Live 普通槽,尚未成交且未受外来成交抵扣
+- 步骤:先累计 0.004 BTC、均价 60000,再累计 0.01 BTC、均价 60001;独立新槽再交付 avg_px 为零的成交
+- 期望:第二笔保留原始增量名义 360.01 USDT,与已取整 px × qty 不同;无均价时保留 ev.px × d;数量与价格既有语义不变
+- 实现:`crates/hft-oms/tests/fsm_table.rs::oms_480_fill_preserves_original_notional_before_increment_price_rounding`
 
 ## 验收
 

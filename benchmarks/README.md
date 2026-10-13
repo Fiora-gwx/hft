@@ -180,6 +180,7 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 | `ledger/validate_reconcile_batch` | hft-ledger | [hft-ledger 延迟与资源契约](../crates/hft-ledger/README.md#延迟与资源契约) | LED-294 |
 | `ledger/apply_settled_external` | hft-ledger | [hft-ledger 延迟与资源契约](../crates/hft-ledger/README.md#延迟与资源契约) | LED-251 |
 | `ledger/apply_settled_fill` | hft-ledger | [hft-ledger 延迟与资源契约](../crates/hft-ledger/README.md#延迟与资源契约) | LED-250 |
+| `ledger/apply_spot_fill` | hft-ledger | [hft-ledger 延迟与资源契约](../crates/hft-ledger/README.md#延迟与资源契约) | LED-300 |
 | `ledger/equity` | hft-ledger | [hft-ledger 延迟与资源契约](../crates/hft-ledger/README.md#延迟与资源契约) | LED-257 |
 | `ledger/funding_window_sweep` | hft-ledger | [hft-ledger 延迟与资源契约](../crates/hft-ledger/README.md#延迟与资源契约) | LED-254 |
 | `ledger/on_mark` | hft-ledger | [hft-ledger 延迟与资源契约](../crates/hft-ledger/README.md#延迟与资源契约) | LED-256 |

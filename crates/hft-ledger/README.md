@@ -37,6 +37,7 @@ impl Ledger {
     pub fn set_cell_shadow(&mut self, a: AccountId, g: GroupId, shadow: bool);             // cell 有效模式进入/离开 Shadow(外来成交归属只在非 Shadow cell 中找)
     pub fn on_run_start(&mut self, run_start_ens: i64);                                    // 本次运行起点(当前 EngineClock.base_engine_ns):早于它的换算率、保证金报告与标记价视为过期
     pub fn apply_fill(&mut self, f: &FillDelta, t: i64) -> FillApplied;                   // CEX 成交增量;净量复算不一致时带 NetAdjust
+    pub fn apply_spot_fill(&mut self, f: &FillDelta, notional: i128, t: i64) -> Result<FillApplied, SettlementError>; // 现货原始毛成交名义,单位 px_exp + qty_exp
     pub fn apply_settled_fill(&mut self, f: &FillDelta, settled: PerpCashSettlement, t: i64) -> Result<FillApplied, SettlementError>; // 永续成交与其已知现金结算额
     pub fn apply_fee(&mut self, f: &FeeDelta, t: i64) -> FeeApplied;                      // 晚到手续费(OMS FeeOut);扣基础资产时带 NetAdjust
     /// 强平、ADL、人工、交割、未知:去重 + auto_held 抵扣 + 归属 + 入账(见"外部成交");auto_recon = 对账 AUTO_EXTERNAL 合成的本体。
@@ -136,6 +137,8 @@ pub struct FillDelta {                  // sequencer 由 OMS 的 FillOut 构造(
 **净量规则(唯一定义)**:令 `base` 为 inst 的基础资产,`fee_base = fee`(若 `fee_asset == base`)否则 0。现货买入 `net_qty = qty − fee_base`;现货卖出 `net_qty = qty + fee_base`;永续 `net_qty = qty`。手续费扣哪个资产由 refdata `VenueCaps.fee_asset_rule` 预先说明(`Quote` | `ReceivedAsset` | `ReceivedAssetUnlessDiscount{token}` | `Configured(asset)`),回报里的实际 `fee_asset` 优先。现货持仓、库存、对冲量、平仓量一律按 `net_qty`;OMS 的 LegTracker 与执行层使用同一值。`net_qty` 由 OMS 在处理成交回报时按本规则填写(费用未随成交到达时先按 `net_qty = qty` 计,不预估);`apply_fill` 按同一规则复算,不一致时写 `Note{NetQtyMismatch}`(P1)、以复算值记账,并在 `FillApplied.net_adjust` 返回差额(`delta` = 该腿有符号持仓的补差 `(复算值 − OMS 值) × side.sign()`,与 OMS `net_adjust` 的 `leg.net += delta` 同一口径),sequencer 同一事件内交 OMS `net_adjust` 与执行层 `on_leg_adjust`——LegTracker 与账本不分叉。
 
 `FeeDelta { account, venue, inst, group, side, fee, fee_asset, seq }`(sequencer 由 OMS 的 `FeeOut` 构造;槽、墓碑与 gen 不符的归属由 OMS 完成):手续费入 `fee_cex` 并从费用资产的现金扣除(扣哪一桶见[仓位与已实现](#仓位与已实现平均成本法)第 4 步);费用资产是该 inst 的基础资产时,库存与持仓按净量规则补差(买入 `−fee`、卖出再多减 `fee`,有符号持仓的补差买卖都是 `delta = −fee`),并返回 `FeeApplied { pnl, net_adjust: Some(NetAdjust { account, venue, group, inst, delta }) }`,sequencer 同一事件内交 OMS `net_adjust`(LegTracker 与对冲余数)与执行层 `on_leg_adjust`。无归属的费用只记账户级。
+
+`apply_spot_fill` 使用 OMS 给出的原始增量名义结算现货现金,只在计价资产单位上取整一次;成本与分析用已实现仍用 `FillDelta.px`。它先验证品种存在且为现货、venue 与账户绑定、正数量、正价格和正名义;错误分别返回 `UnknownInstrument`、`NotSpot`、`VenueMismatch`、`AccountVenue`、`InvalidQuantity`、`InvalidPrice`、`InvalidNotional`,包括时间在内的状态不变。身份与去重由调用方提前完成;`notional` 不能由钱包差额倒推。
 
 `PerpCashSettlement { asset: AssetId, amount: Qty }` 是已匹配到本次成交增量的实际已实现现金,按 `asset.qty_exp` 计,收入为正,不含手续费、资金费或划转。已知零额仍按零入钱包。`apply_settled_fill` 先验证品种存在且为永续、venue 与品种相符、账户绑定该 venue、结算资产为保证金/计价资产、`qty = net_qty > 0`、价格正数;失败返回 `SettlementError::{UnknownInstrument, NotPerpetual, VenueMismatch, AccountVenue, WrongAsset, InvalidQuantity, InvalidPrice}`,包括时间在内的全部状态不变。成交身份和去重由调用方在此之前完成,不能把余额差额当成结算事实传入。
 
@@ -271,7 +274,7 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 2. 反向减仓且 `q ≤ |Q|`:移出成本 `removed = cost × q / |Q|`(i128 一次相除,`TowardZero`;`q = |Q|` 时恰为 `cost`,全平不留残余成本);`realized += sign(Q) × (p × q − removed)`(即 `(p − avg) × q × sign(Q)`,`avg = cost / |Q|`);`cost −= removed`;`qty += s×q`。`cost` 存绝对值(多空都 ≥ 0);`cost` 与 `realized_quote` 的指数是该 inst 的 `px_exp + qty_exp`(`Px × Qty` 的 i128 积本身,不取整)。
 3. 穿越零(`q > |Q|`):拆成"平掉 |Q|"(规则 2)+"新开 q − |Q|"(规则 1)。
 4. 手续费:`fee` 按 `fee_asset` 当时换算率入 `fee_cex`(折扣代币等非 USDT 资产照样换算),并从该资产的 `CashEntry.total` 扣除。**扣哪一桶**(保持基础资产不变量):计价/保证金资产 → 只扣 `total`;本 inst 的基础资产 → 按净量规则体现在该 group 的库存与持仓上(第 5 步);其他基础资产(如平台币折扣)→ 先扣该资产的 `unassigned`,不足部分扣 `baseline`(保持 `NON_STRATEGY`),仍不足则 `unassigned` 记为负并写 `Note{InvShortfall}`(P1);**从不动其他 group 的 `inv`**。
-5. 现金与库存:现货每笔成交按毛量 `p × qty` 换算到计价资产最小单位,买入支出 `Ceil`、卖出收入 `Floor`,损失精度时递增 `rounding`;独立于成本与分析用已实现的取整。买入 → 计价资产 `total` 扣款、基础资产 `total += net_qty`、`inv(base, group) += net_qty`;卖出反之(库存从该 group 的 `inv` 扣,不足部分从 `unassigned` 扣并写 `Note{InvShortfall}`);永续 → 已实现与费用进保证金资产 `total` 与 `MarginState.wallet`。
+5. 现金与库存:现货每笔成交按原始毛成交名义换算到计价资产最小单位;`apply_spot_fill` 直接使用传入的 i128 名义,其他入口用 `p × qty`,买入支出 `Ceil`、卖出收入 `Floor`,损失精度时递增 `rounding`;独立于成本与分析用已实现的取整。买入 → 计价资产 `total` 扣款、基础资产 `total += net_qty`、`inv(base, group) += net_qty`;卖出反之(库存从该 group 的 `inv` 扣,不足部分从 `unassigned` 扣并写 `Note{InvShortfall}`);永续 → 已实现与费用进保证金资产 `total` 与 `MarginState.wallet`。
 6. 已实现与手续费同时累加到 group 的累计、当日、当前轮次三处。
 
 `apply_settled_fill` 仅以实际结算额替代第 5 步的永续现金已实现项,费用仍单独扣一次。数量、按 journal 顺序的平均成本、分析用已实现与轮次账沿用上述规则;这些分析量不是交易所钱包的结算来源。`apply_fill` 保留无结算事实时的既有计算语义。账户权益与强平距离仍使用本地成本估计未实现盈亏,不能把钱包逐单位一致外推为成本、未实现盈亏或强平价也与交易所一致。
@@ -325,7 +328,7 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 | `Note{EpochStart}` | 记当前 epoch(`v[0]`) |
 | `StateSnapshot` | 每个快照保留一份从自身已入账事实起步、清空非持久视图后继续消费后缀的冷副本。Recovery 只从该副本取得时钟、漂移标志与逐 venue 更新时间,其余派生金额从主冷账本的事实重算;不读新快照的仓位/余额覆盖累计状态。普通快照不重置主视图;副本最多一层,随下一个快照替换 |
 | `OrderDecision{action = New}`(Output,`reject = 0` 且未置 `SHADOW`) | 槽映射登记 `(venue, account, epoch, slot, gen) → (inst, side, group)`;容量 = Σ 各表 `slots` × (`tombstone_gens` + 1)(OMS 配置),满时淘汰最早登记的一项(`map_evicted` +1) |
-| `OrderEvent`(Input) | 按 `(ev.venue, ev.account, ev.epoch, ev.slot, ev.gen)` 查映射;`cum_filled` 大于该槽已记累计量时,增量 = `cum_filled − 已记`,增量名义 = `avg_px × cum_filled − 已记名义`,手续费按 [hft-oms 回报匹配与成交增量](../hft-oms/README.md#回报匹配与成交增量) 与 [成交净量](../hft-oms/README.md#成交净量b4) 的同一口径,构造 `FillDelta`/`FeeDelta`(`PERP_CASH` 使用上述结算入口;`seq` = 该 `OrderEvent` 的 seq,与引擎由 OMS `FillOut`/`FeeOut` 带出的值相同;group 轮次的 `open_seq` 取它)调 `apply_fill`/`apply_fee`;`cum_filled` 不增(重复、乱序)→ 不入账,例外:`PartialFill`/`Fill` 的 `cum_filled` 大于该槽此前成交类回报的最大 `cum_filled`(数量已由非成交回报带来,hft-oms 回报匹配与成交增量第 9 条)→ 只按 `FeeDelta` 入账其费用;映射缺失 → `unmapped_fills` +1,不入账(这类成交由 OMS 的 `Note{OmsForeignFill}` 另行给出,见下行) |
+| `OrderEvent`(Input) | 按 `(ev.venue, ev.account, ev.epoch, ev.slot, ev.gen)` 查映射;`cum_filled` 大于该槽已记累计量时,增量 = `cum_filled − 已记`,增量名义 = `avg_px × cum_filled − 已记名义`,手续费按 [hft-oms 回报匹配与成交增量](../hft-oms/README.md#回报匹配与成交增量) 与 [成交净量](../hft-oms/README.md#成交净量b4) 的同一口径,构造 `FillDelta`/`FeeDelta`(`PERP_CASH` 使用上述结算入口;现货普通槽将增量名义直接交 `apply_spot_fill`,墓碑仍用其增量价;`seq` = 该 `OrderEvent` 的 seq,与引擎由 OMS `FillOut`/`FeeOut` 带出的值相同;group 轮次的 `open_seq` 取它)调 `apply_fill`/`apply_fee`;`cum_filled` 不增(重复、乱序)→ 不入账,例外:`PartialFill`/`Fill` 的 `cum_filled` 大于该槽此前成交类回报的最大 `cum_filled`(数量已由非成交回报带来,hft-oms 回报匹配与成交增量第 9 条)→ 只按 `FeeDelta` 入账其费用;映射缺失 → `unmapped_fills` +1,不入账(这类成交由 OMS 的 `Note{OmsForeignFill}` 另行给出,见下行) |
 | `ReconcileBatch`(Input) | 仅从原始凭据重建;同事件必须有唯一 ReconcileCash 与每笔应用的 ExternalFill 注记,字段逐项核对,缺失/重复/跨事件证据报 ReconcileEvidence 并锁存;金额不从注记或后续快照取值 |
 | `ExternalFill`(Input) | venue 或品种要求 `PERP_CASH` 时调 `apply_settled_external(e, t)`;其他情况调 `apply_external(e, false, t)` |
 | `ReconcileReport` 中带 `AUTO_RECON` 注记的 `AUTO_EXTERNAL` 条目 | "外部成交"第 6 步 |
@@ -548,6 +551,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 | 入口 | p50 | p99 | 基准名 |
 |---|---|---|---|
 | `apply_fill`(含现金、库存、净量复算) | ≤ 150 ns | ≤ 400 ns | `ledger/apply_fill` |
+| `apply_spot_fill`(含校验、原始名义、现金与费用) | ≤ 150 ns | ≤ 400 ns | `ledger/apply_spot_fill` |
 | `apply_settled_fill`(含品种/账户/资产校验、持仓、结算与费用) | ≤ 150 ns | ≤ 400 ns | `ledger/apply_settled_fill` |
 | `apply_external`(含去重与归属) | ≤ 200 ns | ≤ 500 ns | `ledger/apply_external` |
 | `apply_reconciled_external`(一笔新凭据,空待确认表) | ≤ 500 ns | ≤ 2000 ns | `ledger/apply_reconciled_external` |
