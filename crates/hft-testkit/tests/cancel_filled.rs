@@ -242,6 +242,13 @@ fn tk_172_real_cancel_races_keep_wallets_recovery_and_checkers_equal() {
         );
         let races = cancel_filled::validate(&on).unwrap_or_else(|e| panic!("{e}\n{:?}", on.cancel_filled));
         assert_eq!(races, 2);
+        assert!(
+            on.cancel_filled
+                .iter()
+                .flat_map(|v| &v.cases)
+                .any(|x| x.command_ns == Some(x.held_ns)),
+            "no original fill first captured in its cancel call"
+        );
         assert!(on.truth.iter().all(|t| !t.undelivered && t.excluded.is_empty()));
         assert!(on.journal_verification.is_some());
         for damage in 0..5 {

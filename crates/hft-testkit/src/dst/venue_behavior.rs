@@ -1031,7 +1031,7 @@ impl<M: Matcher> MockVenue<M> {
             self.cancel_filled.command(cmd, now);
         }
         self.m.on_command(cmd, now);
-        out.extend(self.collect(now));
+        out.extend(self.collect_with_command(now, Some(cmd)));
         out
     }
 
@@ -1072,6 +1072,10 @@ impl<M: Matcher> MockVenue<M> {
 
     /// Matcher reports that are due, perturbed by the active report faults.
     fn collect(&mut self, now: u64) -> Vec<(u64, InputRec)> {
+        self.collect_with_command(now, None)
+    }
+
+    fn collect_with_command(&mut self, now: u64, command: Option<&GwCmd>) -> Vec<(u64, InputRec)> {
         self.finish_partial(now);
         let mut reps = Vec::new();
         if !self.clean {
@@ -1113,7 +1117,14 @@ impl<M: Matcher> MockVenue<M> {
             let cancel_release = r.client_id == cancel::RELEASE_ID;
             if !self.clean && !late_copy && !cancel_release {
                 match self.cancel_filled.capture(&r, now) {
-                    Ok(true) => continue,
+                    Ok(true) => {
+                        // An old fill can first become readable in the cancel call itself.
+                        // Associate that real frame before consuming its following rejection.
+                        if let Some(cmd) = command {
+                            self.cancel_filled.command(cmd, now);
+                        }
+                        continue;
+                    }
                     Ok(false) => {}
                     Err(e) => {
                         self.fault_error = Some(e);

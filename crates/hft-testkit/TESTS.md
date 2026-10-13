@@ -2164,7 +2164,7 @@ spec: README.md
 - 级别:replay
 - 里程碑:M2
 - 输入:真实 PairOnFill 开平仓,两个 venue 各一次 CancelRejectFilled,1.2/1.4 s 的已确认 CancelAll;晚到费用 6000 ms,有无第 500 步连续两次恢复各一行,每行 10000 步;100 ms 录制行情保持尾部价格并覆盖全部步骤
-- 步骤:从原件、真实撤单帧、journal 决策与实际拒绝/成交关联证据;关闭检查器复跑;破坏 epoch、撤单序号、原现金、冷热观察及原件交付五项
+- 步骤:从原件、真实撤单帧、journal 决策与实际拒绝/成交关联证据,包含原件首次在同次撤单调用内可读的一行;关闭检查器复跑;破坏 epoch、撤单序号、原现金、冷热观察及原件交付五项
 - 期望:每行实际运行 10000 步,时间边界导致的提前结束明确失败;每行两次真实竞态,撤单决策 seq < 拒绝 seq < 原件 seq,费用仅入账一次;完整回放及严格钱包核对通过,末尾无在途/排除项。五种破坏均失败;检查器开关前后完整 journal、意图、交付、HashTrail 和真值一致
 - 实现:`crates/hft-testkit/tests/cancel_filled.rs::tk_172_real_cancel_races_keep_wallets_recovery_and_checkers_equal`
 
