@@ -1962,7 +1962,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:Live taker 与 Sim target,真实 Model、物理编号,600 步,第 120 步崩溃恢复
 - 步骤:开关全部检查器各执行一次,独立重算 Model;另用不支持 Model/物理段的 ToyEngine 分别请求两种模式
-- 期望:真实世界非空 Advice 全量重算成功,完整 journal、出环、交付和非空 HashTrail 逐字节相同;缺少适配器明确失败,无合成回退或空列表跳过
+- 期望:启动快照的观察由首步 INV-6 核对,真实世界非空 Advice 全量重算成功,完整 journal、出环、交付和非空 HashTrail 逐字节相同;缺少适配器明确失败,无合成回退或空列表跳过
 - 实现:`crates/hft-testkit/tests/model_journal.rs::tk_153_model_world_keeps_checker_independence_and_requires_adapters`
 
 ### TK-154 Model 输出缓冲与已读前缀受检查

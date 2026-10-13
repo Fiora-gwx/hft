@@ -757,7 +757,9 @@ impl<S: StrategySet> Sut for SeqSut<S> {
                 .map_err(BootFail)?
                 .ok_or_else(|| BootFail("real Model startup output unavailable".into()))?
             {
-                sut.process(0, 0, &input, &mut StepOut::default());
+                let ring = ring_of(&sut.s().driver().io, &input);
+                sut.push_bytes(ring, input.kind, input.body);
+                sut.run();
             }
         }
         sut.prologue(true);
