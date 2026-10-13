@@ -1,0 +1,56 @@
+name: Timer identity schema audit
+on:
+  push:
+    branches: [codex/m2-integration]
+    paths:
+      - .github/workflows/timer-identity-audit.yml
+      - .github/scripts/timer-identity-audit.rs
+      - crates/hft-sequencer/src/snapshot.rs
+      - crates/hft-sequencer/src/recover.rs
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Free runner disk
+        run: bash .github/scripts/free-disk.sh
+      - name: Install pinned Rust toolchain
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: x86-ci-v2
+          save-if: false
+      - name: Compare every registered conformance seed with the previous snapshot format
+        run: |
+          mkdir -p audit crates/hft-testkit/examples
+          git show 6a48be81248c699559421e2a28717c05156495a5:fixtures/dst/hashtrail.toml >audit/baseline.toml
+          cp .github/scripts/timer-identity-audit.rs crates/hft-testkit/examples/timer_identity_audit.rs
+          cargo run --locked --profile ci -p hft-testkit --features seq --example timer_identity_audit >audit/trails.tsv
+          python3 - <<'PY'
+          import json, pathlib, tomllib
+          root = pathlib.Path('audit')
+          baseline = tomllib.loads((root / 'baseline.toml').read_text())['seed']
+          rows = [line.split('\t') for line in (root / 'trails.tsv').read_text().splitlines()]
+          assert len(rows) == len(baseline) == 50
+          results = []
+          for got, want in zip(rows, baseline):
+              seed, full, old, points, checks = got
+              assert int(seed) == int(want['seed'], 0)
+              assert want['suite'] == 'core' and want['steps'] == 2000
+              assert old == want['trail'], (seed, old, want['trail'])
+              assert full != old and int(points) > 0 and int(checks) > 0
+              results.append(dict(seed=seed, full=full, old=old, points=int(points), snapshot_checks=int(checks)))
+          (root / 'result.json').write_text(json.dumps(dict(baseline='6a48be8', head='${{ github.sha }}', rows=results), indent=2))
+          print('50/50: excluding only the newly added section reproduces every old HashTrail digest; full-state invariants remained enabled')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: timer-identity-schema-audit
+          path: audit/
+          retention-days: 7

@@ -1,0 +1,49 @@
+name: Cash settlement schema audit
+on:
+  push:
+    branches: [codex/m2-cash-audit]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Free runner disk
+        run: bash .github/scripts/free-disk.sh
+      - name: Install pinned Rust toolchain
+        run: bash .github/scripts/install-rust.sh
+      - name: Prepare the standard workspace metadata
+        run: |
+          mkdir -p audit
+          cp Cargo.lock audit/before.lock
+          cargo xtask --help >audit/xtask.txt
+          cp Cargo.lock audit/resolved.lock
+          git diff -- Cargo.lock >audit/lock.patch
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: x86-ci-v2
+          save-if: false
+      - name: Focused cash and real-journal tests
+        run: cargo test --locked --profile ci -p hft-testkit --features seq tk_12 -- --nocapture
+      - name: Capability conformance with all invariant checks
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p audit crates/hft-testkit/examples
+          cp .github/scripts/cash-conformance-audit.rs crates/hft-testkit/examples/cash_conformance_audit.rs
+          cargo run --locked --profile ci -p hft-testkit --features seq --example cash_conformance_audit >audit/conformance.tsv
+      - name: Strict cash with the original full CI 191 seed matrix and all regressions
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p audit crates/hft-testkit/examples
+          cp .github/scripts/cash-dst-audit.rs crates/hft-testkit/examples/cash_dst_audit.rs
+          cargo run --locked --profile ci -p hft-testkit --features seq --example cash_dst_audit >audit/strict.tsv
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cash-fix-audit
+          path: audit/
+          retention-days: 7

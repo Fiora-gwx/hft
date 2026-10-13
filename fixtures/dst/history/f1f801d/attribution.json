@@ -1,0 +1,12 @@
+[
+  {
+    "mode": "current",
+    "matching_full_digests": 50,
+    "balance_checks": 400
+  },
+  {
+    "mode": "rollback",
+    "matching_full_digests": 50,
+    "balance_checks": 0
+  }
+]

@@ -27,7 +27,7 @@ spec: README.md
 | 10. SeqRig | PY-106–PY-109、PY-111、PY-112 |
 | 11. 临时目录 | TK-174 |
 | 实现说明 | 不适用:见子节 |
-| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140、TK-142、TK-144–TK-145、TK-155–TK-173 |
+| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140、TK-142、TK-144–TK-145、TK-155–TK-173、TK-175 |
 | 金样运行器 | TK-001、TK-005 |
 | 源文件 | TK-066 |
 | 延迟与资源契约 | TK-092–TK-093 |
@@ -2197,6 +2197,24 @@ spec: README.md
   - 步骤 4 后证据目录仍在;步骤 5 交出的目录仍在,panic 时丢弃的普通目录不存在
   - 步骤 6 得到 `target/dst/x-migration-<pid>.json`
 - 实现:`crates/hft-testkit/tests/tmp.rs::tk_174_test_directories_removed_unless_kept`
+
+### TK-175 五次历史 HashTrail 迁移保留可核对的永久证据
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:unit
+- 里程碑:M2
+- 前置:`fixtures/dst/history/`:提交 1af231b、b9d5024、03c4607、905fc14、f1f801d 各自迁移前的金样 `before.toml`(父提交原文)、CI 制品中的审计输出(逐字节复制,制品 ZIP 摘要与 Agent Note 记录相同)与审计程序源码,`MANIFEST.toml` 登记每个文件的 SHA-256;`fixtures/dst/recon-before.toml`(TK-137 在当前代码上重现)
+- 步骤:
+  1. 按 `MANIFEST.toml` 核对全部证据文件的 SHA-256
+  2. 以每次迁移的 `before.toml` 为旧金样、下一次的 `before.toml`(最后一次为 `recon-before.toml`)为新金样,逐种子比较审计输出
+- 期望:
+  - TK-175.1:全部文件摘要相同(≥ 40 个)
+  - TK-175.2:五个金样均为 50 个 `core`、2 000 步种子,集合不变
+  - TK-175.3(1af231b,Drain 重启):只有种子 7、28、34 改变;从记录的 HashTrail 字节重算的 xxh3-128,基线构建等于旧金样,修复构建等于新金样
+  - TK-175.4(b9d5024 节 27、03c4607 OMS 现金行):只去掉新表示的投影摘要逐种子等于旧金样,完整摘要等于新金样
+  - TK-175.5(905fc14 严格永续现金):严格能力摘要等于新金样;旧能力摘要与旧金样只在种子 5、9、11、14、18、43 不同(无 client id 与 FillBeforeAck 故障模型修正)
+  - TK-175.6(f1f801d BalanceCheck):只移除新增输出的回滚构建等于旧金样,当前构建等于新金样(= `recon-before.toml`)
+- 实现:`crates/hft-testkit/tests/history.rs::tk_175_historical_hashtrail_migrations_keep_permanent_evidence`
 
 ### TK-176 每个检查器报告实际比较的条目数
 

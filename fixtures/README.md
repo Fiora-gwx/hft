@@ -69,6 +69,9 @@ fixtures/
   dst/stale-before.toml            默认旧代数故障接通前的迁移参考;TK-163 重现旧摘要并核对首次故障前缀及检查器透明性;不覆盖当前 HashTrail 金样
   dst/cancel-before.toml           已成交撤单拒绝故障接通前的迁移参考;TK-173 重现旧摘要并核对实际暂缓及检查器透明性
   dst/late-before.toml             回收槽回报重送前的迁移参考;TK-169 重现旧摘要并核对首次故障前缀及检查器透明性;不覆盖当前 HashTrail 金样
+  dst/history/<提交>/              10/12 五次 HashTrail 迁移的永久证据:迁移前金样 `before.toml`(父提交原文)、CI 审计制品中逐字节复制的输出、
+                                   审计程序源码 `audit/*.txt`(不编译);`dst/history/MANIFEST.toml` 登记运行号、制品 ZIP 与每个文件的 SHA-256;
+                                   TK-175 核对并把金样串到 `recon-before.toml`;不得重新生成,`.gitattributes` 对该目录关闭换行转换
 ```
 
 规则:`<case>` 用行为命名(`snapshot_then_gap_triggers_resync`、`price_in_scientific_notation`、`missing_E_field`、`base_asset_fee_on_buy`),不按日期编号。

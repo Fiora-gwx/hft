@@ -23,6 +23,8 @@ mod fees;
 mod foreign_ledger;
 mod r#gen;
 mod hash;
+#[cfg(feature = "seq")]
+mod history;
 mod invariants_map;
 #[cfg(feature = "seq")]
 mod late_migration;
@@ -41,6 +43,8 @@ mod planted_seq;
 mod planted_seq;
 #[cfg(feature = "planted")]
 mod planted_seq;
+#[cfg(feature = "planted")]
+mod planted_seq;
 mod probes;
 #[cfg(feature = "seq")]
 mod reconcile_actor;
@@ -53,7 +57,10 @@ mod sdk_mock;
 mod sdk_rd;
 mod tmp;
 mod tmp;
+mod tmp;
 mod truth;
+#[cfg(feature = "seq")]
+mod vacuity;
 #[cfg(feature = "seq")]
 mod vacuity;
 // The engine adapter's tests (feature `seq`, on in `--all-features` runs): enabling it here as a
