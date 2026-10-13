@@ -1,11 +1,42 @@
 //! Directed transport-race fixtures shared by the real-engine tests and file replayer.
-use hft_event::{CmdHdr, CmdScope, ControlCmd, OrderAction, OrderDecision, OrderEvent};
+use hft_event::{Bbo, CmdHdr, CmdScope, ControlCmd, OrderAction, OrderDecision, OrderEvent};
 use hft_types::{InstId, StrategyId, VenueId};
 use zerocopy::IntoBytes;
 
 use crate::dst::actors::encode_cmd;
 use crate::dst::world::{ACCT_A, UTC0, VP, VS};
-use crate::dst::{DstConfig, Fault, RerunPolicy, RunRecord};
+use crate::dst::{DstConfig, Fault, InputRec, MarketSource, RerunPolicy, RunRecord, Source};
+
+fn extend_market(c: &mut DstConfig) {
+    let MarketSource::Recorded(inputs) = &mut c.market else {
+        panic!("cancel race requires recorded market inputs");
+    };
+    let last_at = inputs.last().expect("recorded market tail").0;
+    let latest: Vec<_> = c
+        .world
+        .insts
+        .iter()
+        .map(|inst| {
+            inputs
+                .iter()
+                .rev()
+                .filter_map(|(_, r)| r.read::<Bbo>())
+                .find(|b| b.h.inst == inst.id)
+                .expect("recorded BBO for every instrument")
+        })
+        .collect();
+    // Keep the inherited prices and cadence after its 89.9 s tail. At least one recorded
+    // market Input per remaining step prevents feed exhaustion from truncating this race.
+    for tick in 1..=c.steps {
+        let at = last_at + tick * 100_000_000;
+        for b in &latest {
+            let mut b = *b;
+            b.h.ex_ts_ns = at as i64;
+            b.update_id += tick;
+            inputs.push((at, InputRec::of(&b, Source::Market)));
+        }
+    }
+}
 
 /// Open and close real paired orders, cancel each still-unreported completed leg, then drain
 /// all original fees. Recovery takes place after the initial race; the exchange keeps truth.
@@ -16,6 +47,7 @@ pub fn config(seed: u64, restart: bool) -> DstConfig {
     c.rerun = RerunPolicy::Never;
     c.horizon_ns = DstConfig::new(seed, c.suite).horizon_ns;
     c.steps = 10_000;
+    extend_market(&mut c);
     c.scripted.clear();
     for venue in [VS, VP] {
         c.scripted.push((

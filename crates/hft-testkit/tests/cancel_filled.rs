@@ -230,12 +230,18 @@ fn tk_172_real_cancel_races_keep_wallets_recovery_and_checkers_equal() {
     for restart in [false, true] {
         let mut cfg = cancel_filled::config(0, restart);
         let on = run_record::<DstEngine>(&cfg);
-        assert!(on.outcome.is_pass(), "{}", crate::seq_sut::show(&on));
+        assert!(
+            on.outcome.is_pass(),
+            "{}\n{:?}",
+            crate::seq_sut::show(&on),
+            on.cancel_filled
+        );
         assert_eq!(
             on.steps_run, cfg.steps,
             "directed race ended before its step budget"
         );
-        assert_eq!(cancel_filled::validate(&on).unwrap(), 2);
+        let races = cancel_filled::validate(&on).unwrap_or_else(|e| panic!("{e}\n{:?}", on.cancel_filled));
+        assert_eq!(races, 2);
         assert!(on.truth.iter().all(|t| !t.undelivered && t.excluded.is_empty()));
         assert!(on.journal_verification.is_some());
         for damage in 0..5 {

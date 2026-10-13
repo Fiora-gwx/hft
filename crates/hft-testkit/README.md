@@ -411,7 +411,7 @@ impl<S: StrategySet> SeqRig<S> {
 
 `ReceiptReader` 从有界 ExternalReceipt 历史筛出尚未入账的完整身份,按原始历史顺序提交现金与费用;重复分页只接受逐字节相同的原件。已入账身份按完整提交事件累积,不依赖热账本去重 FIFO 的当前保留窗口。`ReconActor::settled_input` 只负责打包;缺失、冲突、超量、无完整现金覆盖或错误账户/品种的凭据使本轮明确失败,不从仓位差或钱包差估算现金。TK-134–136 覆盖自动选择、两轮条件、FIFO 回收、重启与补报;LED-081 的开平仓与标准种子入口见下文。资金费、余额与 UnknownResolved 的完整对账轮次仍未实现,真实轮次拒绝仅含金额差的 funding 注入。
 
-定向撤单竞态使用真实引擎运行,步数和时限分别约束运行;达到时限但没有跑满约定步数不能算通过,具体行数和步数归 TK-172。
+定向撤单竞态使用真实引擎运行,录制行情保持原频率与尾部价格,覆盖整个步数预算。步数和时限分别约束运行;达到时限但没有跑满约定步数不能算通过,具体行数和步数归 TK-172。
 
 TK-137/157/163/169 的历史证明均将后续 CancelRejectFilled count 置零;TK-173 以 0231835 的 50 行参考核对新故障、首差异前缀与检查器透明性。TK-137/157/163 的历史证明均将 LateFillAfterRecycle count 置零,保留原计划条目、时间与随机流。TK-169 重现回收槽重送之前的 50 行参考,新轨迹首差异不得早于首次非零 LateFillAfterRecycle。TK-137 独立保存迁移前的 HashTrail 参考,用旧 actor 重现它;真实 actor 在首轮对账前须保持 journal 前缀相同,检查器开关须保持完整 journal、意图、HashTrail 和交易所真值相同。该历史证明把 PartialFills 时长与 StaleGenFill count 置零,保留原故障条目与调度。TK-157 把 StaleGenFill count 置零,重现部分成交接通前的 50 行参考,默认部分成交生效后的首条差异不得早于首次 PartialFills。TK-163 只把 StaleGenFill count 置零以重现其接通前的 50 行参考,新轨迹的首条差异不得早于首次非零 StaleGenFill。完整检查器开关比较包含 journal、交付、意图、HashTrail 和交易所真值。当前金样只接受有 CI 迁移证据支持的摘要,不减少种子、步数或比较字段。
 
@@ -506,6 +506,7 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 - 真实 `SeqSut` 的基础币费用仅支持同一现货 venue 共用基础资产的世界;多基础资产与永续的该配置拒绝启动(TK-106)。
 - LED-080/081 的专属场景和标准种子入口按上述契约执行;`StaleGenFill` 待执行请求不算实际成交,`LateFillAfterRecycle` 未交付副本不算墓碑覆盖,覆盖数以原件与实际交付证据为准。后者的新增成交量路径仍由 OMS 定向用例覆盖,普通基线不计作该路径验收。多笔原件与累计回报的部分重叠仍明确失败,不在 LED-080 的单笔重复证明内。
 - `CancelRejectFilled` 请求和超时释放不算撤单竞态成功;必须有真实 Cancel、撮合器拒绝及后续原件交付的日志证据。它不覆盖尚未完成的撤改竞态全集。
+- 固定行情耗尽后的 LED-267 派生权益观察存在待定位差异,冷热读者的过期标志与 as_of_ens 可能不同,金额相等仍会失败。[CI 266](https://github.com/Fiora-gwx/hft/actions/runs/38397768438/job/115297630578) 的 TK-172 记录了该边界;持续行情的撤单竞态验收不代表断行情后的观察一致性已通过。
 - 运行期 `BaseFee` 尚未接入 MockVenue 的执行分支,计划条目不能计为覆盖。基础币费用的配置与资金验收仍按 TK-106 执行,不等于运行期费用扰动已覆盖。
 - 真实引擎的逐 Input 与逐决策观察契约见 [DST 框架](#6-dst-框架)。`toy::PLANTED` 各行的真实引擎版本(各 crate 的 `planted-*` feature)、`run_sim_case`(TK-009)、`ProbeBuild` 注入(TK-095)与模板探针的构建检查(TK-042)未落地(TK-053 仍以 `ToyEngine` 运行);`hft-dst` 的 `SIGINT`/`SIGTERM` 处理属 M6。
 
