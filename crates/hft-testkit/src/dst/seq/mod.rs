@@ -627,7 +627,22 @@ impl<S: StrategySet> Sut for SeqSut<S> {
 
     fn physical_journal(&self) -> Result<Option<Log>, String> {
         if self.world.physical_journal {
-            advisor::committed_log(&self.s().driver().io.j).map(Some)
+            let j = &self.s().driver().io.j;
+            // Export every committed byte, including the completed event's trailing Meta.
+            // Only the incremental Model consumer needs to withhold replaceable tail Meta.
+            let log = snapshots::prefix(j, io::committed_seq(j));
+            let boundary = log
+                .recs
+                .iter()
+                .rposition(|r| r.flags.contains(hft_event::RecordFlags::EVENT_END))
+                .ok_or("physical journal has no committed event boundary")?;
+            if log.recs[boundary + 1..]
+                .iter()
+                .any(|r| r.role() != hft_event::Role::Meta)
+            {
+                return Err("physical journal has an unfinished event tail".into());
+            }
+            Ok(Some(log))
         } else {
             Ok(None)
         }
@@ -734,6 +749,16 @@ impl<S: StrategySet> Sut for SeqSut<S> {
             // Start at instance creation, before a periodic snapshot could hide Model Inputs.
             let log = advisor::committed_log(&sut.s().driver().io.j).map_err(BootFail)?;
             sut.advisor = Some(advisor::ModelDriver::start(&log, &setup, hb).map_err(BootFail)?);
+            // A discarded-checkpoint note declares an empty Model origin. Record the
+            // startup output before enabling market inputs, not at the first actor tick
+            // after the Model has already consumed the prologue and historical samples.
+            for input in sut
+                .advisor_inputs()
+                .map_err(BootFail)?
+                .ok_or_else(|| BootFail("real Model startup output unavailable".into()))?
+            {
+                sut.process(0, 0, &input, &mut StepOut::default());
+            }
         }
         sut.prologue(true);
         sut.mirror(None);

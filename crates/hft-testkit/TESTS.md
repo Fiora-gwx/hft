@@ -1952,7 +1952,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:物理编号 W1,第二实例为 probe-target,启用真实 Advisor,无检查点
 - 步骤:四轮各交付 16 条 BBO,逐次把真实 Advisor 输出交回引擎;轮间依次 clean restart、两次 CrashFault 恢复,每轮保存快照并从创建处独立重算
-- 期望:Advice 为真实 16 B 载荷,四段全部 Input 参与重算,每条已记录 Advice 都比较且无分歧;篡改首条载荷或 basis_seq 均失败
+- 期望:真实 Advisor 的空起步注记在时刻 0 且早于首条行情;Advice 为真实 16 B 载荷,导出保留已发布的完整事件及其尾部测量 Meta,四段全部 Input 参与重算,每条已记录 Advice 都比较且无分歧;篡改首条载荷或 basis_seq 均失败
 - 实现:`crates/hft-testkit/tests/model_journal.rs::tk_152_real_model_replays_across_restarts_and_rejects_changed_advice`
 
 ### TK-153 Model 世界不依赖检查器并拒绝缺少适配器

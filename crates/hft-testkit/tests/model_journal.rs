@@ -65,6 +65,32 @@ fn tk_152_real_model_replays_across_restarts_and_rejects_changed_advice() {
         tsc_hz: 1_000_000_000,
     })
     .unwrap();
+    let initial = e.physical_journal().unwrap().unwrap();
+    let origin = initial
+        .recs
+        .iter()
+        .find(|r| {
+            r.kind == EventKind::NOTE
+                && r.read::<hft_event::Note>().is_some_and(|n| {
+                    n.strategy == hft_types::StrategyId(2)
+                        && n.code
+                            == hft_event::note_code(
+                                hft_event::NoteSource::Advisor,
+                                hft_sequencer::codes::advisor_note::MODEL_CHECKPOINT_DISCARDED,
+                            )
+                })
+        })
+        .expect("actual Advisor startup origin");
+    assert_eq!(origin.tsc, 0);
+    assert!(
+        origin.seq
+            < initial
+                .recs
+                .iter()
+                .find(|r| r.kind == EventKind::BBO)
+                .unwrap()
+                .seq
+    );
     let mut now = 0;
     for phase in 0..4 {
         for update_id in 0..16 {
@@ -103,7 +129,16 @@ fn tk_152_real_model_replays_across_restarts_and_rejects_changed_advice() {
         );
         deliver_advisor(&mut e, now);
         let log = e.physical_journal().unwrap().unwrap();
-        assert!(log.recs.last().unwrap().flags.contains(RecordFlags::EVENT_END));
+        let boundary = log
+            .recs
+            .iter()
+            .rposition(|r| r.flags.contains(RecordFlags::EVENT_END))
+            .unwrap();
+        assert!(
+            log.recs[boundary + 1..]
+                .iter()
+                .all(|r| r.role() == hft_event::Role::Meta)
+        );
         check(&log);
         if phase == 0 {
             e.clean_restart().unwrap();

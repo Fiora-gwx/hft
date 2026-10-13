@@ -47,6 +47,18 @@ fn verify_case(cfg: &DstConfig, dir: &Path) -> Value {
         .unwrap();
     }
     let log = rec.physical_journal.as_ref().expect("real DST physical source");
+    if rec.outcome.is_pass() {
+        assert_eq!(
+            log.recs.len(),
+            rec.journal.len(),
+            "export must retain the whole published run"
+        );
+    }
+    for (ix, (a, b)) in log.recs.iter().zip(&rec.journal).enumerate() {
+        assert_eq!((a.seq, a.kind, a.tsc, a.flags), (b.seq, b.kind, b.tsc, b.flags));
+        assert_eq!(a.body, b.body, "RunRecord source at {}", a.seq);
+        assert_eq!(log.record_end_seq(ix), Some(b.end_seq));
+    }
     let journal = crate::fixture::dst::export(log, &dir.join("journal"));
     let output = Command::new(executable())
         .args([
@@ -66,15 +78,29 @@ fn verify_case(cfg: &DstConfig, dir: &Path) -> Value {
     if let DstOutcome::Fail(f) = &rec.outcome {
         panic!("DST seed {:#018x}: {:?}: {}", cfg.seed, f.invariant, f.message);
     }
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
+        panic!(
+            "seed {:#018x}: report {e}; exit {}; stderr {}",
+            cfg.seed,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+                .chars()
+                .take(1_024)
+                .collect::<String>()
+        )
+    });
+    let summary = &report["summary"];
     assert!(
         output.status.success(),
-        "seed {:#018x}: {} {}",
+        "seed {:#018x}: exit {}; verify={} recompute={} first_output={} first_model={}; full report in {}",
         cfg.seed,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        output.status,
+        summary["verify"],
+        summary["recompute"],
+        summary["first_output_divergent_seq"],
+        summary["first_model_divergent_seq"],
+        dir.display(),
     );
-    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let summary = &report["summary"];
     assert_eq!(summary["verify"], "pass", "{report}");
     assert_eq!(summary["recompute"], "pass", "{report}");
     assert!(report["model_divergences"].as_array().unwrap().is_empty());

@@ -128,7 +128,7 @@
 
 ### 质量门(`quality-gates.yml`)
 
-`replay-dst` 是独立的 GitHub 托管作业,与 `rust` 使用相同的代码/文档路径判定,调用 `replay-dst.yml`。按 [RPL-012](../apps/replayer/TESTS.md#rpl-012-dst-生成的种子-journal-全部回放一致) 跑提交派生种子与全部回归集,不减少普通 DST、资金场景、HashTrail 或基准冒烟。`replay-dst-commit` artifact 保存每行原始文件、SHA-256、故障表与独立进程报告,总表为 `target/xtask/replay-dst.json`,保留 7 天;只用 `contents: read`,不使用 S3。默认忽略的整批测试在该作业显式运行,普通测试中的定向文件用例不能代替它。
+`replay-dst` 是独立的 GitHub 托管作业,与 `rust` 使用相同的代码/文档路径判定,调用 `replay-dst.yml`。按 [RPL-012](../apps/replayer/TESTS.md#rpl-012-dst-生成的种子-journal-全部回放一致) 跑提交派生种子与全部回归集,不减少普通 DST、资金场景、HashTrail 或基准冒烟。`replay-dst-commit` artifact 保存每行原始文件、SHA-256、故障表与独立进程报告,总表为 `target/xtask/replay-dst.json`,保留 7 天;只用 `contents: read`,不使用 S3。默认忽略的整批测试在该作业显式运行,普通测试中的定向文件用例不能代替它。`workflow_dispatch` 可指定提交 SHA 与 `commit/date` 种子来源,数量与回归集固定,用于单独复核同一批验收。
 
 RPL-058–060、RPL-270–273 的现场 Model 回放文件、检查点、生成参数及独立进程报告保存为 `replay-model-evidence` artifact,保留 7 天。测试只导出自己生成的合成文件,不读取生产 journal;该制品用于核对与后续固定样本评审,不代替 `fixtures/replay` 的指针和哈希。
 

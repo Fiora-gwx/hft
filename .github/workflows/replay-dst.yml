@@ -2,6 +2,19 @@
 name: DST file replay
 
 on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Exact commit to verify
+        required: true
+        type: string
+      seed_mode:
+        description: Source of the fixed 100-seed range
+        required: true
+        type: choice
+        options:
+          - commit
+          - date
   workflow_call:
     inputs:
       sha:

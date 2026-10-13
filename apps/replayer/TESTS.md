@@ -159,7 +159,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:一个 Live taker、一个 Sim target,真实 Advisor,物理编号,固定种子 1、1000 步
 - 步骤:第 250 步连续崩溃两次并恢复;导出全部已提交段,逐条核对真实写者序号和读回记录,独立进程无检查点重算
-- 期望:至少两个 Recovery 段,Output、快照和全部非空 Advice 均比较成功;文件只增加最终 End,其他正文与物理首末序号保持原件
+- 期望:至少两个 Recovery 段,Output、快照和全部非空 Advice 均比较成功;导出记录与完整 RunRecord 逐条一致,保留已发布的尾部测量 Meta,文件只增加最终 End,其他正文与物理首末序号保持原件
 - 实现:`apps/replayer/tests/dst.rs::rpl_283_dst_files_preserve_records_and_model_across_recovery`
 
 ### RPL-013 未给 --from-seq 时从第一个段首快照起步并比对其后全部 Output
