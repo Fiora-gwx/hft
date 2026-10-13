@@ -1089,6 +1089,9 @@ fn recovery_end<D: Driver<S>, S: StrategySet>(
     // Draining is irreversible within the old process. The new run is already protected by
     // Recovery and freshly reset gates; carrying Draining across this boundary would make
     // every subsequent Resume / SetMode upgrade impossible.
+    // Tail replay can have started a Drain after the selected snapshot. Its in-memory
+    // progress belongs to that old run too; a Recovery snapshot does not carry it forward.
+    e.drain = crate::engine::DrainState::default();
     crate::mode_glue::apply_mode(
         e,
         inst,

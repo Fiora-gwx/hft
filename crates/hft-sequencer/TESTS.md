@@ -5752,6 +5752,16 @@ spec: README.md
 - 期望:对应 OmsCash 错误 Fatal,钱包和仓位不变,无新订单决策
 - 实现:`crates/hft-sequencer/tests/settlement.rs::seq_420_unproven_receipt_overlap_stops_without_wallet_or_hedge_change`
 
+### SEQ-421 恢复后旧 Drain 执行状态不进入新运行
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)、[Drain](README.md#drain)
+- 级别:table
+- 里程碑:M2
+- 前置:自足配置真实引擎,关键帧之后开始 Drain;两种 cancel_resting 各覆盖空仓立即完成与 IOC 尚未应答两行
+- 步骤:从该关键帧恢复并重放旧 Drain;新运行再发相反 cancel_resting 的 Drain;独立执行从初始启动和关键帧开始的全部运行回放
+- 期望:旧尾部实际重放且无分歧;恢复结束的 DrainState 全字段为初始值,Draining cap 消失而 Recovery 保留;新运行首轮不自行结束,新命令按本次参数与 engine_ns 重新开始;两种窗口均验证两次运行,无普通或恢复分歧
+- 实现:`crates/hft-sequencer/tests/recover.rs::seq_421_recovery_clears_old_drain_progress_before_the_new_run`
+
 ## 验收
 
 本组件在 M2 的完成标准(门槛编号与累计量的唯一定义在 [testing §8](../../docs/testing.md#8-上线门槛);数值上限在 [benchmarks](../../benchmarks/README.md)):

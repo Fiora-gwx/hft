@@ -133,7 +133,7 @@ DST 的只读观察仅在 `testkit` 构建启用。策略定时器先预留配�
 
 Drain 退出前的发布边界由 [sequencer 主循环](../crates/hft-sequencer/README.md#主循环step) 保证,退出前最后一个完整事件及 Drain 快照对恢复读者可见;封段与关闭由装配层执行。
 
-恢复核容量、接替 Draining,新容量入引导配置;快照保留停止点 engine_ns,分歧入输出哈希。
+恢复核容量、结束旧 Drain 状态并接替 Draining,新容量入引导配置;快照保留停止点 engine_ns,分歧入输出哈希。
 
 journal 记录分三类:**Input**(进入决策的一切,含实盘驱动当场做出的环境相关决定,记为 `Timer`)、**Output**(决策、意图与执行层决定)、**Meta**(测量,不参与验证比对与状态)。确定性前提:时钟、随机数、配置内容、定时器全部来自 Input 记录;无 `HashMap` 迭代依赖;无全局可变状态。细节见 [`hft-sequencer`](../crates/hft-sequencer/README.md) 与 [`replayer`](../apps/replayer/README.md)。
 

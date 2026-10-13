@@ -39,6 +39,124 @@ fn replay_hash(log: Log, setup: &hft_sequencer::EngineSetup) -> [u8; 16] {
     hash_of(&s)
 }
 
+#[test]
+fn seq_421_recovery_clears_old_drain_progress_before_the_new_run() {
+    use hft_strategy_sdk::EventRef;
+    use hft_types::Tif;
+
+    for pending in [false, true] {
+        for cancel_resting in [false, true] {
+            reset_script();
+            // A deterministic recorded BBO leaves an IOC unacknowledged in the pending row.
+            // Keep the same pure hook installed for the independent full replay.
+            set_hook(|hx, ev, ctx| {
+                if let EventRef::Bbo { inst, .. } = ev
+                    && *inst == A1
+                    && hx.s.strategy == S1
+                    && hx.v.bbo(A1).bid_px == px("50020")
+                {
+                    let _ = ctx.place(intent(
+                        hx,
+                        A1,
+                        Side::Buy,
+                        Tif::Ioc,
+                        hft_strategy_sdk::IntentClass::Open,
+                        hx.v.bbo(A1).ask_px,
+                        q("0.001"),
+                    ));
+                }
+            });
+            let mut h = b0().boot_self_contained();
+            h.steady();
+            if pending {
+                let mark = h.mark();
+                h.quote(A1, "50020", "50021");
+                h.run();
+                let ds = decisions(&h.since(mark));
+                assert_eq!(ds.len(), 1);
+                assert_eq!(ds[0].1.reject, 0);
+            }
+            let window = h.keyframe().seq;
+            h.cmd(AccountId(0), &ControlCmd::Drain { cancel_resting });
+            let result = h.run();
+            assert_eq!(matches!(result, StepOutcome::Done { .. }), !pending);
+            assert!(h.s.view().draining());
+            assert!(h.verify_from(Some(window)).is_empty());
+
+            // Restore before the Drain so the old tail must recreate its runtime progress.
+            let mut h = h
+                .crash_restart(plan(SnapshotSel::AtSeq(window), true, 2, 0), Rerun::default())
+                .unwrap();
+            assert!(h.s.engine().recovery_replayed() > 0);
+            assert!(h.s.engine().recovery_mismatches().is_empty());
+            assert!(!h.s.view().draining());
+            assert_eq!(h.s.engine().drain, Default::default());
+            assert!(
+                h.s.engine()
+                    .risk
+                    .mode
+                    .cap(CapSource::DRAINING, &hft_risk::scope_any())
+                    .is_none()
+            );
+            assert!(
+                h.s.engine()
+                    .risk
+                    .mode
+                    .caps()
+                    .iter()
+                    .any(|c| c.source == CapSource::RECOVERY)
+            );
+            assert!(!matches!(
+                h.run(),
+                StepOutcome::Done { .. } | StepOutcome::Fatal(_)
+            ));
+
+            let id = h.cmd(
+                AccountId(0),
+                &ControlCmd::Drain {
+                    cancel_resting: !cancel_resting,
+                },
+            );
+            h.run();
+            assert_eq!(
+                h.result_of(id).unwrap().status,
+                hft_sequencer::codes::status::APPLIED
+            );
+            assert!(h.s.view().draining());
+            assert_eq!(h.s.engine().drain.cancel_resting, !cancel_resting);
+            assert_eq!(
+                h.s.engine().drain.cause,
+                Some(hft_sequencer::types::DoneCause::Drain)
+            );
+            assert_eq!(h.s.engine().drain.started_ens, h.s.engine().now.engine_ns);
+
+            #[cfg(feature = "replay-io")]
+            for from_seq in [None, Some(window)] {
+                use hft_sequencer::driver::verify::{VerifyOptions, verify};
+                let log = Log::from_segments(&h.j().segments);
+                let got = verify::<TestSet>(
+                    log,
+                    VerifyOptions {
+                        from_seq,
+                        ..Default::default()
+                    },
+                    hb(),
+                )
+                .unwrap();
+                assert_eq!(got.runs.len(), 2);
+                assert!(got.inputs > 0 && got.sink.compared > 0);
+                assert!(got.sink.mismatches.is_empty(), "{:?}", got.sink.detail);
+                assert!(
+                    got.sink.recovery_diffs.is_empty(),
+                    "{:?}",
+                    got.sink.recovery_diffs
+                );
+            }
+            clear_hook();
+        }
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(12))]
     #[test]
