@@ -32,6 +32,7 @@ fn tk_163_stale_migration_reproduces_prior_goldens_and_preserves_prefix() {
         let mut cfg = suite.config(seed);
         cfg.steps = steps;
         cfg.rerun = RerunPolicy::Never;
+        let cfg = crate::cancel_filled::without_cancel(&cfg);
         let mut cfg = crate::late_recycle::without_late(&cfg);
         let old_cfg = crate::stale_gen::without_stale(&cfg);
         let before = run_record::<DstEngine>(&old_cfg);

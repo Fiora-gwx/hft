@@ -4,6 +4,8 @@
 //! `tests/dst/` (one `#[test]` per suite), `cargo xtask dst` and `hft-dst` iterate.
 
 #[cfg(feature = "seq")]
+pub mod cancel_filled;
+#[cfg(feature = "seq")]
 pub mod foreign_ledger;
 pub mod framework;
 #[cfg(feature = "seq")]

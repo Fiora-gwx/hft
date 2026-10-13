@@ -20,7 +20,9 @@ use crate::dst::obs::TruthRow;
 use crate::dst::sut::{InputRec, Source};
 use crate::dst::world::{ActorId, RngExt, WorldSpec, actor_rng};
 
+mod cancel;
 mod late;
+pub use cancel::{CancelFilledCase, CancelFilledReport};
 pub use late::{LateRecycleCopy, LateRecycleReport};
 
 /// Reject rules of the behaviour layer's code table.
@@ -769,6 +771,7 @@ pub struct MockVenue<M: Matcher> {
     stale_executions: Vec<StaleGenExecution>,
     stale_replies: VecDeque<VenueOut>,
     late: late::LateRecycle,
+    cancel_filled: cancel::CancelFilled,
     md_down_until: u64,
     order_down_until: u64,
     userstream_down_until: u64,
@@ -820,6 +823,7 @@ impl<M: Matcher> MockVenue<M> {
             stale_executions: Vec::new(),
             stale_replies: VecDeque::new(),
             late: late::LateRecycle::default(),
+            cancel_filled: cancel::CancelFilled::default(),
             md_down_until: 0,
             order_down_until: 0,
             userstream_down_until: 0,
@@ -1023,6 +1027,9 @@ impl<M: Matcher> MockVenue<M> {
                 None => {}
             }
         }
+        if !self.clean {
+            self.cancel_filled.command(cmd, now);
+        }
         self.m.on_command(cmd, now);
         out.extend(self.collect(now));
         out
@@ -1067,6 +1074,9 @@ impl<M: Matcher> MockVenue<M> {
     fn collect(&mut self, now: u64) -> Vec<(u64, InputRec)> {
         self.finish_partial(now);
         let mut reps = Vec::new();
+        if !self.clean {
+            reps.extend(self.cancel_filled.release(now, self.userstream_down_until));
+        }
         let horizon = now.saturating_add(10_000_000);
         let horizon = self.partial_until.map_or(horizon, |end| horizon.min(end));
         self.m.drain_due(horizon, &mut reps);
@@ -1100,6 +1110,17 @@ impl<M: Matcher> MockVenue<M> {
         let mut fba = self.next_order.contains(&NextOrder::FillBeforeAck);
         for r in reps {
             let late_copy = r.client_id == late::COPY_ID;
+            let cancel_release = r.client_id == cancel::RELEASE_ID;
+            if !self.clean && !late_copy && !cancel_release {
+                match self.cancel_filled.capture(&r, now) {
+                    Ok(true) => continue,
+                    Ok(false) => {}
+                    Err(e) => {
+                        self.fault_error = Some(e);
+                        continue;
+                    }
+                }
+            }
             let original = r.rep;
             let mut rep = r.rep;
             if let RepMsg::ExternalFill(x) = &mut rep {
@@ -1231,6 +1252,20 @@ impl<M: Matcher> MockVenue<M> {
                     .entry(e.account.0)
                     .and_modify(|last| *last = (*last).max(due + u64::from(duplicate)));
             }
+            if !self.clean
+                && let RepMsg::OrderEvent(e) = &rep
+            {
+                let last = due + u64::from(duplicate);
+                if let Err(e) = self.cancel_filled.rejected(e, last) {
+                    self.fault_error = Some(e);
+                }
+                if cancel_release {
+                    self.cancel_filled.scheduled(e, last);
+                    self.last_due
+                        .entry(e.account.0)
+                        .and_modify(|d| *d = (*d).max(last));
+                }
+            }
             out.push((due, input));
         }
         self.produced += out.len() as u64;
@@ -1277,6 +1312,11 @@ impl<M: Matcher> MockVenue<M> {
     /// Next time `tick` has work.
     pub fn next_wake(&self, now: u64) -> u64 {
         let mut t = self.m.next_due().unwrap_or(u64::MAX);
+        if !self.clean
+            && let Some(at) = self.cancel_filled.next_due(self.userstream_down_until)
+        {
+            t = t.min(at);
+        }
         if let Some(report) = self.stale_replies.front() {
             t = t.min(report.due_ns);
         }
@@ -1379,6 +1419,11 @@ impl<M: Matcher> MockVenue<M> {
             Fault::SecondLegReject { .. } => self.next_order.push(NextOrder::Reject),
             Fault::FillBeforeAck { .. } => self.next_order.push(NextOrder::FillBeforeAck),
             Fault::LateFeeOnly { delay_ms, .. } => self.late_fees.push_back(delay_ms),
+            Fault::CancelRejectFilled { count, hold_ms, .. } => {
+                if let Err(e) = self.cancel_filled.request(count, hold_ms, now) {
+                    self.fault_error = Some(e);
+                }
+            }
             Fault::LateFillAfterRecycle { count, .. } => {
                 if let Err(e) = self.late.request(count, now) {
                     self.fault_error = Some(e);
@@ -1614,6 +1659,10 @@ impl<M: Matcher> MockVenue<M> {
         self.late.report(self.cfg.venue)
     }
 
+    pub fn cancel_filled_report(&self) -> CancelFilledReport {
+        self.cancel_filled.report(self.cfg.venue)
+    }
+
     fn drain_stale(&mut self, now: u64) {
         if self.clean || self.fault_error.is_some() || now < self.userstream_down_until {
             return;
@@ -1710,6 +1759,7 @@ impl<M: Matcher> MockVenue<M> {
                 t.undelivered |= self.last_due.get(&a.0).is_some_and(|d| *d >= now);
                 t.undelivered |= self.adl_replays.iter().any(|(_, f)| f.account == a);
                 t.undelivered |= self.reconcile_gaps.iter().any(|(f, _)| f.account == a);
+                t.undelivered |= self.cancel_filled.undelivered(a);
                 t.excluded
                     .extend(self.excluded.iter().filter(|(x, _)| *x == a.0).map(|(_, i)| *i));
                 t

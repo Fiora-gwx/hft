@@ -26,7 +26,7 @@ spec: README.md
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
 | 10. SeqRig | PY-106–PY-109、PY-111、PY-112 |
 | 实现说明 | 不适用:见子节 |
-| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140、TK-142、TK-144–TK-145、TK-155–TK-169 |
+| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140、TK-142、TK-144–TK-145、TK-155–TK-173 |
 | 金样运行器 | TK-001、TK-005 |
 | 源文件 | TK-066 |
 | 延迟与资源契约 | TK-092–TK-093 |
@@ -1757,7 +1757,7 @@ spec: README.md
 - 级别:integ
 - 里程碑:M2
 - 前置:`fixtures/dst/recon-before.toml` 固定 CI 212 的 50 个种子、套件、每行 2000 步及摘要
-- 步骤:仅用测试适配器重现旧报告与旧输入环,旧轮次时刻按调度周期累加;PartialFills 时长、StaleGenFill 与 LateFillAfterRecycle count 置零并保留原计划条目以复现历史空操作;同一配置运行真实已提交对账 actor;再次关闭检查器运行新 actor
+- 步骤:仅用测试适配器重现旧报告与旧输入环,旧轮次时刻按调度周期累加;隔离后续 CancelRejectFilled 后,PartialFills 时长、StaleGenFill 与 LateFillAfterRecycle count 置零并保留原计划条目以复现历史空操作;同一配置运行真实已提交对账 actor;再次关闭检查器运行新 actor
 - 期望:旧 actor 重现 50 个旧摘要;首条 journal 差异为虚拟 30 s 的 ReconcileReport,此前逐字节相同;新 actor 开关检查器的全部 journal、网关意图、完整 HashTrail 与最终交易所真值逐字节相同;三个运行均达到原步数且不变量通过
 - 证据:CI 保存 `target/dst/reconcile-migration.json`,列出每行的新旧摘要、首次差异序号/时刻和记录数;当前金样保持原种子、套件、步数及哈希范围
 - 实现:`crates/hft-testkit/tests/reconcile_migration.rs::tk_137_recon_migration_preserves_prefix_and_checker_transparency`
@@ -2007,7 +2007,7 @@ spec: README.md
 - 级别:integ
 - 里程碑:M2
 - 前置:`fixtures/dst/partial-before.toml` 固定提交 4244872 的 50 个种子、套件、每行 2000 步及摘要
-- 步骤:StaleGenFill 与 LateFillAfterRecycle count 置零以保留历史边界;将 PartialFills 时长置零,保留计划条目、顺序与随机流,重现旧摘要;再启用 PartialFills 并关闭全部检查器复跑
+- 步骤:隔离后续 CancelRejectFilled 后,StaleGenFill 与 LateFillAfterRecycle count 置零以保留历史边界;将 PartialFills 时长置零,保留计划条目、顺序与随机流,重现旧摘要;再启用 PartialFills 并关闭全部检查器复跑
 - 期望:旧摘要逐行相等,至少一行轨迹变化且首条差异不早于首次部分成交故障,此前 journal 前缀逐字节相同;全部运行达到原步数并通过不变量,检查器开关的完整 journal、交付、意图、HashTrail 与交易所真值相同
 - 证据:CI 保存 `target/dst/partial-fill-migration.json` 的原提交、新旧摘要、差异边界、实际部分成交数量及逐行比较结果,核对后才更新当前金样
 - 实现:`crates/hft-testkit/tests/partial_migration.rs::tk_157_partial_migration_reproduces_prior_goldens_and_preserves_prefix`
@@ -2073,7 +2073,7 @@ spec: README.md
 - 级别:integ
 - 里程碑:M2
 - 前置:`fixtures/dst/stale-before.toml` 固定提交 eb236c8 的 50 个种子、套件、每行 2000 步与摘要
-- 步骤:隔离后续 LateFillAfterRecycle,将 StaleGenFill count 置零重现历史空路径,保留故障条目、顺序及随机流;再按默认 count 运行并关闭检查器复跑
+- 步骤:隔离后续 CancelRejectFilled 后,隔离后续 LateFillAfterRecycle,将 StaleGenFill count 置零重现历史空路径,保留故障条目、顺序及随机流;再按默认 count 运行并关闭检查器复跑
 - 期望:旧摘要逐行复现,新轨迹至少一行变化且首差异不早于首次非零故障,此前字节相同;全部运行完成原步数并通过不变量,检查器开关后的完整 journal、交付、意图、HashTrail 与真值相同
 - 证据:CI 保留 `target/dst/stale-gen-migration.json` 的基线提交、新旧摘要、差异边界与实际成交数量,核对后才更新当前金样
 - 实现:`crates/hft-testkit/tests/stale_migration.rs::tk_163_stale_migration_reproduces_prior_goldens_and_preserves_prefix`
@@ -2134,9 +2134,49 @@ spec: README.md
 - 级别:replay
 - 里程碑:M2
 - 输入:`fixtures/dst/late-before.toml` 固定 50 行、每行 2000 步,基线为 335e321
-- 步骤:仅把 LateFillAfterRecycle count 置零重现旧摘要,保留计划时间、顺序与随机流;默认故障及检查器关闭各复跑
+- 步骤:隔离后续 CancelRejectFilled 后,仅把 LateFillAfterRecycle count 置零重现旧摘要,保留计划时间、顺序与随机流;默认故障及检查器关闭各复跑
 - 期望:旧摘要逐行一致,首差异不早于首次故障,前缀字节与检查器开关后的完整 journal、意图、交付、HashTrail 和交易所真值一致;CI 保存逐行迁移证据,当前金样只能据证据更新
 - 实现:`crates/hft-testkit/tests/late_migration.rs::tk_169_late_migration_reproduces_prior_goldens_and_preserves_prefix`
+
+### TK-170 已成交撤单拒绝来自真实撮合器
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:unit
+- 里程碑:M2
+- 前置:真实 SimExchange,现货/永续 × 买/卖 × VS 配置基础币费用开关,共八行
+- 步骤:暂缓实际完整成交,发送真实 Cancel;组合回报重复、乱序及晚到费用,交付拒绝后释放原件
+- 期望:每行 CancelReject(GONE) 的完整身份、累计量与现金来自实际订单;原件只拆费一次,交付不重复结算,费用副本只有一份,严格真值不变且在途最终清除
+- 实现:`crates/hft-testkit/tests/cancel_filled.rs::tk_170_cancel_race_uses_real_matcher_reject_and_original_cash`
+
+### TK-171 撤单竞态的前置与有界等待
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:unit
+- 里程碑:M2
+- 前置:TK-170 的已撮合原件;错误 gen、slot、inst 与 Query 操作四行,另含零请求、零等待、超容量及 clean 模式
+- 步骤:注入不匹配操作;在到期前后断开并恢复用户流;核对等待数、原件释放和错误锁存
+- 期望:四种不匹配均不能形成撤单竞态证据,到期且连通后原件交付一次;等待期间保持在途。零请求/clean 无操作,非零请求的零等待及超容量失败
+- 实现:`crates/hft-testkit/tests/cancel_filled.rs::tk_171_cancel_race_requires_matching_command_and_bounded_wait`
+
+### TK-172 真实引擎撤单竞态的严格资金与恢复
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:replay
+- 里程碑:M2
+- 输入:真实 PairOnFill 开平仓,两个 venue 各一次 CancelRejectFilled,1.2/1.4 s 的已确认 CancelAll;晚到费用 6000 ms,有无第 500 步连续两次恢复各一行,每行 10000 步
+- 步骤:从原件、真实撤单帧、journal 决策与实际拒绝/成交关联证据;关闭检查器复跑;破坏 epoch、撤单序号、原现金、冷热观察及原件交付五项
+- 期望:每行两次真实竞态,撤单决策 seq < 拒绝 seq < 原件 seq,费用仅入账一次;完整回放及严格钱包核对通过,末尾无在途/排除项。五种破坏均失败;检查器开关前后完整 journal、意图、交付、HashTrail 和真值一致
+- 实现:`crates/hft-testkit/tests/cancel_filled.rs::tk_172_real_cancel_races_keep_wallets_recovery_and_checkers_equal`
+
+### TK-173 撤单竞态故障的完整金样迁移证据
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:replay
+- 里程碑:M2
+- 输入:`fixtures/dst/cancel-before.toml` 固定 50 行、每行 2000 步,基线为 0231835
+- 步骤:count 置零重现旧摘要,保留故障条目、时间与随机流;默认故障及关闭检查器各复跑,统计原件暂缓、实际拒绝和原件交付
+- 期望:旧摘要逐行一致,首差异不早于首次非零故障且必须实际暂缓成交,首差异前缀及检查器开关后的 journal、意图、交付、HashTrail 和真值一致;CI 保存逐行证据,不凭请求数声称实际竞态覆盖
+- 实现:`crates/hft-testkit/tests/cancel_migration.rs::tk_173_cancel_migration_reproduces_prior_goldens_and_preserves_prefix`
 
 ## 验收
 

@@ -122,6 +122,7 @@ fn tk_137_recon_migration_preserves_prefix_and_checker_transparency() {
         let mut cfg = suite.config(seed);
         cfg.steps = steps;
         cfg.rerun = RerunPolicy::Never;
+        let cfg = crate::cancel_filled::without_cancel(&cfg);
         let mut cfg = crate::partial_fills::without_partial(&cfg);
         cfg = crate::stale_gen::without_stale(&cfg);
         cfg = crate::late_recycle::without_late(&cfg);

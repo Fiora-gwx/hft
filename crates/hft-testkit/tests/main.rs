@@ -5,6 +5,10 @@
 static ALLOC: hft_testkit::CountingAlloc = hft_testkit::CountingAlloc;
 
 mod actors;
+#[cfg(feature = "seq")]
+mod cancel_filled;
+#[cfg(feature = "seq")]
+mod cancel_migration;
 mod clock;
 mod deps;
 #[cfg(feature = "dst-bin")]

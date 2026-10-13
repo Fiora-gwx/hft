@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | RPL-095、RPL-104、RPL-241、RPL-242 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | RPL-001–RPL-004、RPL-070、RPL-079 |
-| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-287 |
+| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-288 |
 | sim | RPL-090–RPL-108、RPL-120–RPL-129、RPL-140–RPL-145、RPL-259 |
 | compare | RPL-160–RPL-173 |
 | latency | RPL-190–RPL-206 |
@@ -191,6 +191,16 @@ spec: README.md
 - 步骤:两个 venue 从 0 时刻各请求一次 LateFillAfterRecycle,第 250 步连续崩溃两次,保留原件并在回收后重送;独立 replayer 无检查点重算
 - 期望:每行两个请求均实际交付,首序号 < 回收边界 < 晚到序号,至少两个 Recovery 段;原件先于首个 Recovery、晚到副本在最后一次 Recovery 之后。全部 DST 不变量、Output、快照及 Model Advice 通过;case.json 保留恢复序号、原件字节和墓碑身份,数量不包含等待请求或新造成交
 - 实现:`apps/replayer/tests/dst.rs::rpl_287_recycled_copies_replay_real_files_and_model_after_recovery`
+
+### RPL-288 已成交撤单拒绝的真实文件与 Model 回放
+
+- 规则:[verify](README.md#verify)
+- 级别:proc
+- 里程碑:M2
+- 前置:TK-172 配置启用物理 journal 与真实 Model,种子 0/2,每行 10000 步
+- 步骤:两 venue 原始完整成交暂缓,实际 CancelAll 导出单笔 Cancel,第 500 步连续两次恢复;独立 replayer 无检查点重算
+- 期望:每行两次真实竞态、至少两个 Recovery 段,实际撤单决策 seq < 拒绝 seq < 原件 seq;所有 Input、Output、快照及 Model Advice 核对通过。case.json 分开保留请求、等待、超时、完整原件/撤单/拒绝字节与实际交付序号,原始文件可独立审计
+- 实现:`apps/replayer/tests/dst.rs::rpl_288_cancel_reject_filled_replays_actual_files_and_model`
 
 ### RPL-013 未给 --from-seq 时从第一个段首快照起步并比对其后全部 Output
 

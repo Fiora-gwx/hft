@@ -137,6 +137,9 @@ pub enum Fault {
     },
     CancelRejectFilled {
         venue: VenueId,
+        /// Hold one real full fill per request until a matching cancel reject or timeout.
+        count: u32,
+        hold_ms: u32,
     },
     PartialFills {
         venue: VenueId,
@@ -623,7 +626,11 @@ fn draw<R: RngExt>(c: FaultCategory, rng: &mut R, w: &WorldSpec, steps: u64, at:
                 dur_ms: ms(rng, 500, 10_000),
             },
             3 => FillBeforeAck { venue: v },
-            4 => CancelRejectFilled { venue: v },
+            4 => CancelRejectFilled {
+                venue: v,
+                count: 1,
+                hold_ms: 5_000,
+            },
             5 => PartialFills {
                 venue: v,
                 dur_ms: ms(rng, 500, 10_000),

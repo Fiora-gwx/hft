@@ -67,6 +67,7 @@ fixtures/
   dst/recon-before.toml            已提交对账 actor 的迁移参考;TK-137 用旧 actor 重现摘要,新 actor 核对首条差异与检查器透明性;不覆盖当前 HashTrail 金样
   dst/partial-before.toml          部分成交故障接通前的迁移参考;TK-157 重现空操作摘要并核对首次故障前缀及检查器透明性;不覆盖当前 HashTrail 金样
   dst/stale-before.toml            默认旧代数故障接通前的迁移参考;TK-163 重现旧摘要并核对首次故障前缀及检查器透明性;不覆盖当前 HashTrail 金样
+  dst/cancel-before.toml           已成交撤单拒绝故障接通前的迁移参考;TK-173 重现旧摘要并核对实际暂缓及检查器透明性
   dst/late-before.toml             回收槽回报重送前的迁移参考;TK-169 重现旧摘要并核对首次故障前缀及检查器透明性;不覆盖当前 HashTrail 金样
 ```
 

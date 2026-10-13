@@ -14,7 +14,9 @@ use crate::dst::faults::{Fault, FaultPlan};
 use crate::dst::invariants::{EndView, InvId, InvState, InvariantSet, StepView, check_end, check_step};
 use crate::dst::obs::{Obs, TruthRow};
 use crate::dst::sut::{BootCtx, FrameRec, InputRec, JRec, OutRing, Source, StepOut, Sut};
-use crate::dst::venue_behavior::{ExternalReceipt, LateRecycleReport, Matcher, MockVenue, StaleGenReport};
+use crate::dst::venue_behavior::{
+    CancelFilledReport, ExternalReceipt, LateRecycleReport, Matcher, MockVenue, StaleGenReport,
+};
 use crate::dst::world::{AccountKind, World};
 use crate::dst::{DstConfig, DstFailure, DstOutcome, FailKind, RerunPolicy, TraceItem};
 use crate::hash::{ComponentHashes, HashTrail};
@@ -55,6 +57,8 @@ pub struct RunRecord {
     pub stale_gen: Vec<StaleGenReport>,
     /// Delayed copies of real fills, with the committed boundary that proved slot recycling.
     pub late_recycle: Vec<LateRecycleReport>,
+    /// Original fills delayed across real cancel commands, including requests not yet matched.
+    pub cancel_filled: Vec<CancelFilledReport>,
     /// Final exchange-side view, independently of the engine observations.
     pub truth: Vec<TruthRow>,
 }
@@ -85,6 +89,7 @@ impl RunRecord {
             external_receipts: Vec::new(),
             stale_gen: Vec::new(),
             late_recycle: Vec::new(),
+            cancel_filled: Vec::new(),
             truth: Vec::new(),
         }
     }
@@ -484,7 +489,7 @@ impl<E: Sut> Loop<'_, E> {
             | ReportDup { venue, .. }
             | ReportDelay { venue, .. }
             | FillBeforeAck { venue }
-            | CancelRejectFilled { venue }
+            | CancelRejectFilled { venue, .. }
             | PartialFills { venue, .. }
             | LateFeeOnly { venue, .. }
             | StaleGenFill { venue, .. }
@@ -920,6 +925,7 @@ impl<E: Sut> Loop<'_, E> {
             if !v.clean {
                 self.rec.stale_gen.push(v.stale_gen_report());
                 self.rec.late_recycle.push(v.late_recycle_report());
+                self.rec.cancel_filled.push(v.cancel_filled_report());
             }
             self.rec.matched_tail.extend(v.m.matched_tail());
             self.rec

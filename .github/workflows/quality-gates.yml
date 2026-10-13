@@ -484,6 +484,16 @@ jobs:
             target/dst/*/rpl-287-*/
           if-no-files-found: ignore
           retention-days: 7
+      - name: Upload cancel-filled migration and replay evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cancel-filled-migration
+          path: |
+            target/dst/cancel-filled-migration.json
+            target/dst/*/rpl-288-*/
+          if-no-files-found: ignore
+          retention-days: 7
       # Directed infrastructure evidence, not LED-081 seed acceptance.
       - name: Upload settlement boundary evidence
         if: always()

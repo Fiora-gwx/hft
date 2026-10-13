@@ -158,6 +158,8 @@ RPL-058–060、RPL-270–273 的现场 Model 回放文件、检查点、生成�
 
 默认旧代数故障的迁移和定向文件证据以 `stale-gen-migration` 保留 7 天,成功和失败都上传已有文件;覆盖要求归 [TK-163](../crates/hft-testkit/TESTS.md#tk-163-旧代数故障的完整金样迁移证据) 与 [RPL-286](../apps/replayer/TESTS.md#rpl-286-默认旧代数成交的真实文件与-model-跨恢复回放)。请求、等待与真实成交分开记录,既有整批种子与金样强度保持不变。
 
+撤单竞态迁移及定向文件证据以 `cancel-filled-migration` 保留 7 天,成功和失败都上传已有文件;覆盖要求归 [TK-173](../crates/hft-testkit/TESTS.md#tk-173-撤单竞态故障的完整金样迁移证据) 与 [RPL-288](../apps/replayer/TESTS.md#rpl-288-已成交撤单拒绝的真实文件与-model-回放)。
+
 回收槽回报重送的迁移及定向文件证据以 `late-recycle-migration` 保留 7 天,成功和失败都上传已有文件;覆盖要求归 [TK-169](../crates/hft-testkit/TESTS.md#tk-169-回收槽故障的完整金样迁移证据) 与 [RPL-287](../apps/replayer/TESTS.md#rpl-287-回收槽副本的真实文件与-model-恢复回放)。副本不计作新的撮合成交。
 
 - **`decoupling-gate`**:PR 同时改了 `strategies/*` 与引擎 crate 或 app(范围取 `cargo xtask deps` 的分层表,[tools](../tools/README.md#cargo-xtask-deps))时失败。**豁免**只在两个条件同时成立时生效:PR 带 `engine-change` 标签,且有一位 Admin(名单 `.github/hft-admins.txt`,当前为负责人)的批准评审——作业用 `GITHUB_TOKEN`(`pull-requests: read`)读评审列表核对批准人;只有标签、或批准人不在名单里 → 仍失败。它在 `ci.yml` 的 PR 运行中执行一次;评审提交与标签变化只经 `decoupling.yml` 重跑这一个作业,不重跑构建与测试。`main` 推送时它对合并提交相对第一个父提交的差异与对应 PR 的标签、评审做同样判定。每次豁免写进作业摘要(`$GITHUB_STEP_SUMMARY`:PR 号、批准人、改动的引擎 crate 列表),并列入当夜每夜摘要的"解耦豁免"一节。

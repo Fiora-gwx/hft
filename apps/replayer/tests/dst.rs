@@ -149,6 +149,34 @@ fn verify_case(cfg: &DstConfig, dir: &Path) -> Value {
         json!({"venue": v.venue.0, "requested": v.requested, "pending": v.pending, "executions": executions})
     }).collect();
     let stale_gen_fills: usize = rec.stale_gen.iter().map(|v| v.executions.len()).sum();
+    let cancel_filled: Vec<_> = rec
+        .cancel_filled
+        .iter()
+        .map(|v| {
+            use zerocopy::IntoBytes;
+            let bytes = |e: &[u8]| e.iter().map(|b| format!("{b:02x}")).collect::<String>();
+            let seq = |e: Option<OrderEvent>| {
+                e.and_then(|e| {
+                    rec.journal
+                        .iter()
+                        .find(|j| j.kind == EventKind::ORDER_EVENT && j.body == e.as_bytes())
+                        .map(|j| j.seq)
+                })
+            };
+            let cases: Vec<_> = v.cases.iter().map(|x| json!({
+            "requested_ns": x.requested_ns, "held_ns": x.held_ns, "deadline_ns": x.deadline_ns,
+            "original_due_ns": x.original_due_ns, "original": bytes(x.original.as_bytes()),
+            "command_ns": x.command_ns, "command": x.command.map(|c| bytes(c.as_bytes())),
+            "command_seq": x.command.map(|c| c.decision_seq),
+            "rejection": x.rejection.map(|e| bytes(e.as_bytes())), "rejection_seq": seq(x.rejection),
+            "rejection_due_ns": x.rejection_due_ns, "release_ns": x.release_ns,
+            "report": x.report.map(|e| bytes(e.as_bytes())), "delivered_ns": x.delivered_ns,
+            "delivered_seq": seq(x.report),
+        })).collect();
+            json!({"venue": v.venue.0, "requested": v.requested, "awaiting_fill": v.awaiting_fill,
+            "awaiting_release": v.awaiting_release, "cases": cases})
+        })
+        .collect();
     let late_recycle: Vec<_> = rec
         .late_recycle
         .iter()
@@ -202,7 +230,8 @@ fn verify_case(cfg: &DstConfig, dir: &Path) -> Value {
         "recovery_seqs": recovery_seqs,
         "physical_last_seq": log.record_end_seq(log.recs.len() - 1),
         "advices": advice, "partial_fills": partial_fills, "stale_gen_fills": stale_gen_fills,
-        "stale_gen": stale_gen, "late_recycle": late_recycle, "faults_planned": plan.items.len(),
+        "stale_gen": stale_gen, "late_recycle": late_recycle, "cancel_filled": cancel_filled,
+        "faults_planned": plan.items.len(),
         "faults_scheduled_before_end": plan.items.iter().filter(|(t, _)| *t <= rec.end_ns).count(),
         "files": files, "summary": summary});
     std::fs::write(dir.join("case.json"), serde_json::to_vec_pretty(&result).unwrap()).unwrap();
@@ -352,6 +381,33 @@ fn rpl_287_recycled_copies_replay_real_files_and_model_after_recovery() {
             total += copies.len();
         }
         assert_eq!(total, 2);
+    }
+}
+
+#[test]
+fn rpl_288_cancel_reject_filled_replays_actual_files_and_model() {
+    for seed in [0, 2] {
+        let mut cfg = hft_testkit::scenarios::cancel_filled::config(seed, true);
+        cfg.world.physical_journal = true;
+        cfg.world.model_advice = true;
+        let dir = root().join(format!("target/dst/{seed:016x}/rpl-288-{}", std::process::id()));
+        let result = verify_case(&cfg, &dir);
+        assert_eq!(result["steps_run"], 10_000);
+        assert!(result["recovery_runs"].as_u64().unwrap() >= 2);
+        let mut races = 0;
+        for v in result["cancel_filled"].as_array().unwrap() {
+            assert_eq!(v["requested"], 1);
+            assert_eq!(v["awaiting_fill"], 0);
+            assert_eq!(v["awaiting_release"], 0);
+            for x in v["cases"].as_array().unwrap() {
+                let cmd = x["command_seq"].as_u64().unwrap();
+                let reject = x["rejection_seq"].as_u64().unwrap();
+                let fill = x["delivered_seq"].as_u64().unwrap();
+                assert!(cmd < reject && reject < fill);
+                races += 1;
+            }
+        }
+        assert_eq!(races, 2);
     }
 }
 
