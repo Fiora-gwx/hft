@@ -2533,6 +2533,7 @@ spec: README.md
 - 性质:从第一条 `StateSnapshot` 起步的 `JournalLedger` 喂完到第 k 条 `StateSnapshot` 为止的全部记录后,其 `pos`、`inventory`、`venue_book`(余额)与从第 k 条快照 `restore` 的 Ledger 逐项相等
 - 生成:测试内的 sequencer 替身(写出 sequencer 会写的 journal 记录并按同样的调用驱动引擎 Ledger;hft-testkit 的 sequencer 夹具落地后改用它)在 `rd_lf()` 上运行 1–200 条随机输入(下单、部分成交、重复与乱序回报、`FeeOnly`、`ExternalFill`、资金费推送、`AdoptExchange`、`StaleGen` 带成交),每 20 条写一次 `StateSnapshot`
 - 参考:引擎 Ledger 在同一快照处的读数
+- 调用契约:测试驱动与 sequencer 一样,现货把取整前的增量名义交给 apply_spot_fill,成本仍使用取整后的增量价;保留 CI 回归种子。另固定核对 6%/66% 两次成交的原始累计报告,买入共扣 404374、卖出共收 404373 个计价资产最小单位,冷热与快照读数均相等
 - 例数:PR 500
 - 实现:`crates/hft-ledger/tests/prop_journal_ledger.rs::led_266_cold_equals_engine_at_snapshots`
 

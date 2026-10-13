@@ -181,7 +181,13 @@ impl Seq {
                     _pad3: 0,
                     seq: 0,
                 };
-                self.e.apply_fill(&fd, t);
+                if inst == BTC_S1 {
+                    self.e
+                        .apply_spot_fill(&fd, inc_notional, t)
+                        .expect("spot increment");
+                } else {
+                    self.e.apply_fill(&fd, t);
+                }
                 let ord = &mut self.orders[o];
                 ord.prev_cum = ord.cum;
                 ord.cum = cum;
@@ -357,20 +363,64 @@ fn readings(
     (pos, cash, inv)
 }
 
+fn started() -> (Seq, Vec<u8>) {
+    let mut e = booted();
+    e.on_run_start(T0);
+    let mut q = Seq {
+        e,
+        records: Vec::new(),
+        snaps: Vec::new(),
+        orders: Vec::new(),
+        t: T0,
+    };
+    let first = snap(&q.e);
+    let mut c = EngineClock::new_zeroed();
+    c.base_engine_ns = T0;
+    c.tsc_hz_milli = CLOCK_HZ_MILLI;
+    q.rec(&c, true);
+    q.rec(&epoch_start(u64::from(EPOCH)), true);
+    (q, first)
+}
+
+#[test]
+fn led_266_fractional_report_notional_survives_the_hot_driver_and_cold_snapshot() {
+    for buy in [true, false] {
+        let (mut q, first) = started();
+        let mut r = SnapshotReader::new(&first);
+        let mut cold = JournalLedger::from_snapshot(&mut r, rd_lf(), &cfg_lf(), &caps_lf()).unwrap();
+        q.input(&In::New {
+            perp: false,
+            buy,
+            lots: 1,
+        });
+        let mut fed = 0;
+        // The CI counterexample's reported cumulative amount is 404373.999960 quote
+        // units. First cash is exactly 35784; second cash rounds to 368590/368589.
+        for (pct, price, cumulative_cash) in [
+            (6, 596_400_000, 35_784),
+            (66, 594_500_000, if buy { 404_374 } else { 404_373 }),
+        ] {
+            q.input(&In::Fill { o: 0, pct, px: price });
+            while fed < q.records.len() {
+                cold.apply(&decode_record(&q.records[fed]).unwrap()).unwrap();
+                fed += 1;
+            }
+            let expected = 100_000_000_000 + if buy { -cumulative_cash } else { cumulative_cash };
+            assert_eq!(cash(&q.e, A1, S1, USDT).total, Qty(expected));
+            assert_eq!(cash(cold.ledger(), A1, S1, USDT).total, Qty(expected));
+            assert_eq!(readings(cold.ledger()), readings(&restore(&snap(&q.e)).unwrap()));
+        }
+        let last = q.orders[0].last.unwrap();
+        assert_eq!((last.cum_filled, last.avg_px), (Qty(680), Px(594_667_647)));
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(cases(500)))]
 
     #[test]
     fn led_266_cold_equals_engine_at_snapshots(inputs in prop::collection::vec(input(), 1..=200)) {
-        let mut e = booted();
-        e.on_run_start(T0);
-        let mut q = Seq { e, records: Vec::new(), snaps: Vec::new(), orders: Vec::new(), t: T0 };
-        let first = snap(&q.e);
-        let mut c = EngineClock::new_zeroed();
-        c.base_engine_ns = T0;
-        c.tsc_hz_milli = CLOCK_HZ_MILLI;
-        q.rec(&c, true);
-        q.rec(&epoch_start(u64::from(EPOCH)), true);
+        let (mut q, first) = started();
         for (k, x) in inputs.iter().enumerate() {
             q.input(x);
             if (k + 1) % 20 == 0 || k + 1 == inputs.len() {

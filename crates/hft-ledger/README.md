@@ -570,7 +570,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 
 ## 测试与验收
 
-用例与验收见 [TESTS.md](TESTS.md)。
+用例与验收见 [TESTS.md](TESTS.md)。LED-266 的 journal 属性驱动使用与 sequencer 相同的现货原始名义入口,保留累计均价取整的固定反例及 CI 回归种子;真实引擎的逐快照核对由 LED-267 覆盖。
 
 ## 依赖
 

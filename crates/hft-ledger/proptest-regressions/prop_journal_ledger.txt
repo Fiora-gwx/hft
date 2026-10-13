@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b6d449d26d74c0cea3d579a7ef37ed9a5fe1a020e0074869c0099df185b313bc # shrinks to inputs = [New { perp: false, buy: false, lots: 1 }, New { perp: false, buy: false, lots: 1 }, New { perp: false, buy: false, lots: 1 }, New { perp: false, buy: false, lots: 1 }, New { perp: false, buy: false, lots: 1 }, New { perp: false, buy: false, lots: 1 }, New { perp: false, buy: false, lots: 1 }, Fill { o: 6, pct: 6, px: 596400000 }, Fill { o: 6, pct: 66, px: 594500000 }]
