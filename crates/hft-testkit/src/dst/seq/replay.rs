@@ -41,15 +41,42 @@ pub fn verify_all<S: StrategySet>(log: Log, hb: &'static Heartbeat) -> Result<Jo
     let result = verify::<S>(log, VerifyOptions::default(), hb)
         .map_err(|e| format!("full journal verification failed: {e:?}"))?;
     if let Some(m) = result.sink.mismatches.first() {
-        let offset = result.sink.detail.first().map(|(_, a, b)| {
-            a.iter()
+        let detail = result.sink.detail.first().map(|(_, a, b)| {
+            let offset = a
+                .iter()
                 .zip(b)
                 .position(|(x, y)| x != y)
-                .unwrap_or(a.len().min(b.len()))
+                .unwrap_or(a.len().min(b.len()));
+            (
+                offset,
+                a.len(),
+                b.len(),
+                &a[..a.len().min(96)],
+                &b[..b.len().min(96)],
+            )
         });
+        let input = result
+            .sink
+            .log
+            .recs
+            .iter()
+            .rev()
+            .find(|r| r.seq <= m.seq && r.role() == Role::Input)
+            .map(|r| (r.seq, r.kind.0, r.tsc, &r.body[..r.body.len().min(160)]));
+        let context: Vec<_> = result
+            .sink
+            .log
+            .recs
+            .iter()
+            .filter(|r| r.seq >= m.seq.saturating_sub(4))
+            .take(9)
+            .map(|r| (r.seq, r.kind.0, r.flags.0))
+            .collect();
         return Err(format!(
-            "full journal divergence at seq {} kind {} byte {offset:?}",
-            m.seq, m.kind.0
+            "full journal divergence at seq {} kind {}; detail {detail:?}; flags {:?}; input {input:?}; context {context:?}",
+            m.seq,
+            m.kind.0,
+            result.sink.detail_flags.first()
         ));
     }
     if let Some(d) = result.sink.recovery_diffs.first() {

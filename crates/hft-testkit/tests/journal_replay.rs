@@ -133,6 +133,10 @@ fn tk_148_full_journal_checks_every_run_and_earlier_divergences() {
         latest_only(bad.clone());
         let err = verify_all::<TestStrategies>(bad, &HB).unwrap_err();
         assert!(err.contains(&format!("divergence at seq {target}")), "{err}");
+        for field in ["detail Some(", "flags Some(", "input Some(", "context ["] {
+            assert!(err.contains(field), "{err}");
+        }
+        assert!(err.len() < 4_096, "bounded first-divergence context");
     }
     let keyframe = log
         .recs

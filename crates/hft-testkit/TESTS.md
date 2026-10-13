@@ -1894,7 +1894,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:真实 W1 引擎产生关键帧、按需快照、普通滚段、Drain 重启和两次崩溃恢复,共五段、四次独立运行;验证器只取得原始 journal 和段时钟
-- 期望:正例的 Input、Output、快照及全部覆盖计数由原始记录独立统计,交给新线程仍完全相同;下表各反例失败,前三行从最新快照开始的局部验证仍通过
+- 期望:正例的 Input、Output、快照及全部覆盖计数由原始记录独立统计,交给新线程仍完全相同;下表各反例失败,前三行从最新快照开始的局部验证仍通过;CmdResult 体和标志分歧保留两侧有界字节、标志、最近 Input 和邻近记录,消息少于 4096 字节
 - 实现:`crates/hft-testkit/tests/journal_replay.rs::tk_148_full_journal_checks_every_run_and_earlier_divergences`
 
 | 行 | 改动 | 期望 |
