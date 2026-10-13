@@ -14,7 +14,7 @@ pub fn config(seed: u64, restart: bool) -> DstConfig {
         .config(&super::suites(), seed)
         .expect("core suite");
     c.rerun = RerunPolicy::Never;
-    c.horizon_ns = DstConfig::default().horizon_ns;
+    c.horizon_ns = DstConfig::new(seed, c.suite).horizon_ns;
     c.steps = 10_000;
     c.scripted.clear();
     for venue in [VS, VP] {
