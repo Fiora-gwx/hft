@@ -124,6 +124,7 @@ fn tk_137_recon_migration_preserves_prefix_and_checker_transparency() {
         cfg.rerun = RerunPolicy::Never;
         let mut cfg = crate::partial_fills::without_partial(&cfg);
         cfg = crate::stale_gen::without_stale(&cfg);
+        cfg = crate::late_recycle::without_late(&cfg);
         let before = run_record::<PriorActor>(&cfg);
         let after = run_record::<DstEngine>(&cfg);
         for r in [&before, &after] {

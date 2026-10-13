@@ -154,6 +154,8 @@ pub enum Fault {
     },
     LateFillAfterRecycle {
         venue: VenueId,
+        /// Replay the next real fill after its slot is recycled; zero retains a historical no-op.
+        count: u32,
     },
     /// A real external execution delivered with stale or unresolved order identity. The
     /// optional raw receipt precedes the cumulative copy; exchange truth settles only once.
@@ -631,7 +633,7 @@ fn draw<R: RngExt>(c: FaultCategory, rng: &mut R, w: &WorldSpec, steps: u64, at:
                 delay_ms: 50,
             },
             7 => StaleGenFill { venue: v, count: 1 },
-            _ => LateFillAfterRecycle { venue: v },
+            _ => LateFillAfterRecycle { venue: v, count: 1 },
         },
         FaultCategory::Reject => match k(rng, 6) {
             0 => RateLimit {

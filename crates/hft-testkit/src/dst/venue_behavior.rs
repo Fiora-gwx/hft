@@ -20,6 +20,9 @@ use crate::dst::obs::TruthRow;
 use crate::dst::sut::{InputRec, Source};
 use crate::dst::world::{ActorId, RngExt, WorldSpec, actor_rng};
 
+mod late;
+pub use late::{LateRecycleCopy, LateRecycleReport};
+
 /// Reject rules of the behaviour layer's code table.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum RejectRule {
@@ -765,6 +768,7 @@ pub struct MockVenue<M: Matcher> {
     stale_pending: VecDeque<(u64, u8)>,
     stale_executions: Vec<StaleGenExecution>,
     stale_replies: VecDeque<VenueOut>,
+    late: late::LateRecycle,
     md_down_until: u64,
     order_down_until: u64,
     userstream_down_until: u64,
@@ -815,6 +819,7 @@ impl<M: Matcher> MockVenue<M> {
             stale_pending: VecDeque::new(),
             stale_executions: Vec::new(),
             stale_replies: VecDeque::new(),
+            late: late::LateRecycle::default(),
             md_down_until: 0,
             order_down_until: 0,
             userstream_down_until: 0,
@@ -1094,6 +1099,8 @@ impl<M: Matcher> MockVenue<M> {
         let mut out = Vec::new();
         let mut fba = self.next_order.contains(&NextOrder::FillBeforeAck);
         for r in reps {
+            let late_copy = r.client_id == late::COPY_ID;
+            let original = r.rep;
             let mut rep = r.rep;
             if let RepMsg::ExternalFill(x) = &mut rep {
                 x.cause = if r.client_id.starts_with(self.cfg.liquidation_prefix) {
@@ -1150,7 +1157,8 @@ impl<M: Matcher> MockVenue<M> {
             // ReportDup duplicates the fee-free fill; the separately delayed fee is emitted
             // once (FeeOnly is a delta, without a duplicate-report idempotency key).
             let mut fee_due = due;
-            if let RepMsg::OrderEvent(e) = &mut rep
+            if !late_copy
+                && let RepMsg::OrderEvent(e) = &mut rep
                 && matches!(e.what, OrderEventKind::Fill | OrderEventKind::PartialFill)
                 && e.fee.0 != 0
                 && let Some(delay_ms) = self.late_fees.pop_front()
@@ -1162,6 +1170,9 @@ impl<M: Matcher> MockVenue<M> {
                 out.push((fee_due, InputRec::of(&fee, self.src())));
                 e.fee.0 = 0;
                 e.fee_asset = AssetId(0);
+            }
+            if !self.clean && !late_copy {
+                self.late.capture(&original, &rep);
             }
             let input = rep_input(&rep, self.src());
             if let Some(a) = rep_account(&rep) {
@@ -1213,6 +1224,12 @@ impl<M: Matcher> MockVenue<M> {
                 self.last_due
                     .entry(e.account.0)
                     .and_modify(|last| *last = (*last).max(execution.delivered_ns));
+            }
+            if late_copy && let RepMsg::OrderEvent(e) = &rep {
+                self.late.scheduled(e, due + u64::from(duplicate));
+                self.last_due
+                    .entry(e.account.0)
+                    .and_modify(|last| *last = (*last).max(due + u64::from(duplicate)));
             }
             out.push((due, input));
         }
@@ -1362,6 +1379,11 @@ impl<M: Matcher> MockVenue<M> {
             Fault::SecondLegReject { .. } => self.next_order.push(NextOrder::Reject),
             Fault::FillBeforeAck { .. } => self.next_order.push(NextOrder::FillBeforeAck),
             Fault::LateFeeOnly { delay_ms, .. } => self.late_fees.push_back(delay_ms),
+            Fault::LateFillAfterRecycle { count, .. } => {
+                if let Err(e) = self.late.request(count, now) {
+                    self.fault_error = Some(e);
+                }
+            }
             Fault::NoClientIdFill { .. } => self.next_order.push(NextOrder::NoClientId),
             Fault::StaleGenFill { count, .. } => {
                 if count == 0 {
@@ -1560,6 +1582,36 @@ impl<M: Matcher> MockVenue<M> {
             pending: self.stale_pending.len(),
             executions: self.stale_executions.clone(),
         }
+    }
+
+    /// Read-only engine facts authorize only transport replay, never another settlement.
+    pub fn observe_recycled(
+        &mut self,
+        obs: &crate::dst::obs::Obs,
+        journal: &[crate::dst::sut::JRec],
+        now: u64,
+    ) -> bool {
+        if self.clean || self.fault_error.is_some() || now < self.userstream_down_until {
+            return false;
+        }
+        match self.late.release(obs, journal, now, self.cfg.latency_ns.0) {
+            Ok(replies) => {
+                if replies.is_empty() {
+                    return false;
+                }
+                self.stale_replies.extend(replies);
+                self.stale_replies.make_contiguous().sort_by_key(|r| r.due_ns);
+                true
+            }
+            Err(e) => {
+                self.fault_error = Some(e);
+                false
+            }
+        }
+    }
+
+    pub fn late_recycle_report(&self) -> LateRecycleReport {
+        self.late.report(self.cfg.venue)
     }
 
     fn drain_stale(&mut self, now: u64) {

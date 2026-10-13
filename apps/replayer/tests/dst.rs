@@ -146,6 +146,44 @@ fn verify_case(cfg: &DstConfig, dir: &Path) -> Value {
         json!({"venue": v.venue.0, "requested": v.requested, "pending": v.pending, "executions": executions})
     }).collect();
     let stale_gen_fills: usize = rec.stale_gen.iter().map(|v| v.executions.len()).sum();
+    let late_recycle: Vec<_> = rec
+        .late_recycle
+        .iter()
+        .map(|v| {
+            let copies: Vec<_> = v
+                .copies
+                .iter()
+                .map(|x| {
+                    use zerocopy::IntoBytes;
+                    let late_seq = rec
+                        .journal
+                        .iter()
+                        .find(|j| {
+                            j.seq > x.recycle_seq
+                                && j.kind == EventKind::ORDER_EVENT
+                                && j.body == x.report.as_bytes()
+                        })
+                        .map(|j| j.seq);
+                    let hex = |e: &OrderEvent| {
+                        e.as_bytes()
+                            .iter()
+                            .map(|b| format!("{b:02x}"))
+                            .collect::<String>()
+                    };
+                    json!({"requested_ns": x.requested_ns, "original_seq": x.original_seq,
+                "recycle_seq": x.recycle_seq, "recycle_ns": x.recycle_ns,
+                "delivered_ns": x.delivered_ns, "delivered_seq": late_seq,
+                "original": hex(&x.original), "report": hex(&x.report),
+                "tomb": {"venue": x.tomb.venue.0, "account": x.tomb.account.0,
+                    "epoch": x.tomb.epoch, "slot": x.tomb.slot, "gen": x.tomb.r#gen,
+                    "inst": x.tomb.inst.0, "filled": x.tomb.filled.to_string()},
+                "current": x.current.map(|s| json!({"epoch": s.epoch, "gen": s.r#gen}))})
+                })
+                .collect();
+            json!({"venue": v.venue.0, "requested": v.requested, "awaiting_fill": v.awaiting_fill,
+            "awaiting_recycle": v.awaiting_recycle, "copies": copies})
+        })
+        .collect();
     let files: Vec<_> = (1..=log.segs.len())
         .map(|si| {
             let file = journal.join(format!("{si:010}.jrn"));
@@ -160,7 +198,7 @@ fn verify_case(cfg: &DstConfig, dir: &Path) -> Value {
         "records": log.recs.len(), "segments": log.segs.len(), "recovery_runs": recovery,
         "physical_last_seq": log.record_end_seq(log.recs.len() - 1),
         "advices": advice, "partial_fills": partial_fills, "stale_gen_fills": stale_gen_fills,
-        "stale_gen": stale_gen, "faults_planned": plan.items.len(),
+        "stale_gen": stale_gen, "late_recycle": late_recycle, "faults_planned": plan.items.len(),
         "faults_scheduled_before_end": plan.items.iter().filter(|(t, _)| *t <= rec.end_ns).count(),
         "files": files, "summary": summary});
     std::fs::write(dir.join("case.json"), serde_json::to_vec_pretty(&result).unwrap()).unwrap();
@@ -263,6 +301,48 @@ fn rpl_286_default_stale_fills_replay_original_files_and_model_across_recovery()
             );
         }
         assert!(result["recovery_runs"].as_u64().unwrap() >= 2, "{result}");
+    }
+}
+
+#[test]
+fn rpl_287_recycled_copies_replay_real_files_and_model_after_recovery() {
+    use hft_testkit::dst::world::{VP, VS};
+    use hft_testkit::dst::{CrashFault, Fault, FaultRates};
+    for seed in [0, 2] {
+        let mut cfg = replay_config(suites().iter().find(|s| s.name == "core").unwrap(), seed);
+        cfg.steps = 10_000;
+        cfg.faults = FaultRates::off();
+        cfg.rerun = RerunPolicy::Never;
+        cfg.scripted = vec![
+            (0, Fault::LateFillAfterRecycle { venue: VS, count: 1 }),
+            (0, Fault::LateFillAfterRecycle { venue: VP, count: 1 }),
+            (
+                0,
+                Fault::Crash(CrashFault {
+                    at_step: 250,
+                    repeat: 2,
+                    point: hft_testkit::dst::CrashPoint::SeqInput,
+                }),
+            ),
+        ];
+        let dir = root().join(format!("target/dst/{seed:016x}/rpl-287-{}", std::process::id()));
+        let result = verify_case(&cfg, &dir);
+        assert_eq!(result["steps_run"], 10_000);
+        assert!(result["recovery_runs"].as_u64().unwrap() >= 2);
+        let mut total = 0;
+        for v in result["late_recycle"].as_array().unwrap() {
+            assert_eq!(v["requested"], 1);
+            assert_eq!(v["awaiting_fill"], 0);
+            assert_eq!(v["awaiting_recycle"], 0);
+            let copies = v["copies"].as_array().unwrap();
+            assert_eq!(copies.len(), 1);
+            for x in copies {
+                assert!(x["original_seq"].as_u64().unwrap() < x["recycle_seq"].as_u64().unwrap());
+                assert!(x["delivered_seq"].as_u64().unwrap() > x["recycle_seq"].as_u64().unwrap());
+            }
+            total += copies.len();
+        }
+        assert_eq!(total, 2);
     }
 }
 

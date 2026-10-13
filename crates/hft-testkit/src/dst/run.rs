@@ -14,7 +14,7 @@ use crate::dst::faults::{Fault, FaultPlan};
 use crate::dst::invariants::{EndView, InvId, InvState, InvariantSet, StepView, check_end, check_step};
 use crate::dst::obs::{Obs, TruthRow};
 use crate::dst::sut::{BootCtx, FrameRec, InputRec, JRec, OutRing, Source, StepOut, Sut};
-use crate::dst::venue_behavior::{ExternalReceipt, Matcher, MockVenue, StaleGenReport};
+use crate::dst::venue_behavior::{ExternalReceipt, LateRecycleReport, Matcher, MockVenue, StaleGenReport};
 use crate::dst::world::{AccountKind, World};
 use crate::dst::{DstConfig, DstFailure, DstOutcome, FailKind, RerunPolicy, TraceItem};
 use crate::hash::{ComponentHashes, HashTrail};
@@ -53,6 +53,8 @@ pub struct RunRecord {
     pub external_receipts: Vec<ExternalReceipt>,
     /// Default stale-generation requests, including pending requests that created no fill.
     pub stale_gen: Vec<StaleGenReport>,
+    /// Delayed copies of real fills, with the committed boundary that proved slot recycling.
+    pub late_recycle: Vec<LateRecycleReport>,
     /// Final exchange-side view, independently of the engine observations.
     pub truth: Vec<TruthRow>,
 }
@@ -82,6 +84,7 @@ impl RunRecord {
             matched_tail: Vec::new(),
             external_receipts: Vec::new(),
             stale_gen: Vec::new(),
+            late_recycle: Vec::new(),
             truth: Vec::new(),
         }
     }
@@ -485,7 +488,7 @@ impl<E: Sut> Loop<'_, E> {
             | PartialFills { venue, .. }
             | LateFeeOnly { venue, .. }
             | StaleGenFill { venue, .. }
-            | LateFillAfterRecycle { venue }
+            | LateFillAfterRecycle { venue, .. }
             | RateLimit { venue, .. }
             | ServerError { venue }
             | Timeout { venue }
@@ -686,6 +689,13 @@ impl<E: Sut> Loop<'_, E> {
         }
         self.arm_timer();
         self.observe_into_after();
+        // Venue transport consumes committed observations even when assertions are disabled.
+        // Recovery has already trimmed/rebuilt the journal and refreshed this view.
+        for v in 0..self.venues.len() {
+            if self.venues[v].observe_recycled(&self.after, self.sut.journal(), now) {
+                self.wake_venue(v);
+            }
+        }
         let ordinal = self.rec.steps_run;
         if self.cfg.hash_every > 0 && ordinal.is_multiple_of(self.cfg.hash_every) {
             self.rec.trail.sample(ordinal, self.sut.hashes());
@@ -909,6 +919,7 @@ impl<E: Sut> Loop<'_, E> {
         for v in self.venues.iter().chain(&self.sims) {
             if !v.clean {
                 self.rec.stale_gen.push(v.stale_gen_report());
+                self.rec.late_recycle.push(v.late_recycle_report());
             }
             self.rec.matched_tail.extend(v.m.matched_tail());
             self.rec

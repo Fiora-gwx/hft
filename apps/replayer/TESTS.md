@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | RPL-095、RPL-104、RPL-241、RPL-242 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | RPL-001–RPL-004、RPL-070、RPL-079 |
-| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-286 |
+| verify | RPL-010–RPL-032、RPL-040–RPL-063、RPL-070–RPL-079、RPL-270–RPL-287 |
 | sim | RPL-090–RPL-108、RPL-120–RPL-129、RPL-140–RPL-145、RPL-259 |
 | compare | RPL-160–RPL-173 |
 | latency | RPL-190–RPL-206 |
@@ -181,6 +181,16 @@ spec: README.md
 - 步骤:现货与永续分别在 0、5 s 请求一笔默认 StaleGenFill,第 250 步连续崩溃两次;独立 replayer 无检查点重算
 - 期望:每行四条请求全部执行且完整交付,正/零成交 ID 与两个方向覆盖,至少两个 Recovery 段;全部 DST 不变量、Output、快照与 Model Advice 比较通过。case.json 分开记录请求、待执行与实际成交,每笔保留 Ack 身份、原始资金事实及实际交付 seq,原始物理文件可独立核对
 - 实现:`apps/replayer/tests/dst.rs::rpl_286_default_stale_fills_replay_original_files_and_model_across_recovery`
+
+### RPL-287 回收槽副本的真实文件与 Model 恢复回放
+
+- 规则:[verify](README.md#verify)
+- 级别:proc
+- 里程碑:M2
+- 前置:RPL-283 的真实引擎、Model 与物理文件,种子 0/2,每行 10000 步
+- 步骤:两个 venue 从 0 时刻各请求一次 LateFillAfterRecycle,第 250 步连续崩溃两次,保留原件并在回收后重送;独立 replayer 无检查点重算
+- 期望:每行两个请求均实际交付,首序号 < 回收边界 < 晚到序号,至少两个 Recovery 段;全部 DST 不变量、Output、快照及 Model Advice 通过;case.json 保留原件字节和墓碑身份,数量不包含等待请求或新造成交
+- 实现:`apps/replayer/tests/dst.rs::rpl_287_recycled_copies_replay_real_files_and_model_after_recovery`
 
 ### RPL-013 未给 --from-seq 时从第一个段首快照起步并比对其后全部 Output
 

@@ -33,6 +33,7 @@ fn tk_157_partial_migration_reproduces_prior_goldens_and_preserves_prefix() {
         let mut cfg = suite.config(seed);
         cfg.steps = steps;
         cfg.rerun = RerunPolicy::Never;
+        let cfg = crate::late_recycle::without_late(&cfg);
         let mut cfg = crate::stale_gen::without_stale(&cfg);
         let old_cfg = crate::partial_fills::without_partial(&cfg);
         let before = run_record::<DstEngine>(&old_cfg);

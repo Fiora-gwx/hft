@@ -26,7 +26,7 @@ spec: README.md
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
 | 10. SeqRig | PY-106–PY-109、PY-111、PY-112 |
 | 实现说明 | 不适用:见子节 |
-| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140、TK-142、TK-144–TK-145、TK-155–TK-165 |
+| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140、TK-142、TK-144–TK-145、TK-155–TK-169 |
 | 金样运行器 | TK-001、TK-005 |
 | 源文件 | TK-066 |
 | 延迟与资源契约 | TK-092–TK-093 |
@@ -1757,7 +1757,7 @@ spec: README.md
 - 级别:integ
 - 里程碑:M2
 - 前置:`fixtures/dst/recon-before.toml` 固定 CI 212 的 50 个种子、套件、每行 2000 步及摘要
-- 步骤:仅用测试适配器重现旧报告与旧输入环,旧轮次时刻按调度周期累加;PartialFills 时长与 StaleGenFill count 置零并保留原计划条目以复现历史空操作;同一配置运行真实已提交对账 actor;再次关闭检查器运行新 actor
+- 步骤:仅用测试适配器重现旧报告与旧输入环,旧轮次时刻按调度周期累加;PartialFills 时长、StaleGenFill 与 LateFillAfterRecycle count 置零并保留原计划条目以复现历史空操作;同一配置运行真实已提交对账 actor;再次关闭检查器运行新 actor
 - 期望:旧 actor 重现 50 个旧摘要;首条 journal 差异为虚拟 30 s 的 ReconcileReport,此前逐字节相同;新 actor 开关检查器的全部 journal、网关意图、完整 HashTrail 与最终交易所真值逐字节相同;三个运行均达到原步数且不变量通过
 - 证据:CI 保存 `target/dst/reconcile-migration.json`,列出每行的新旧摘要、首次差异序号/时刻和记录数;当前金样保持原种子、套件、步数及哈希范围
 - 实现:`crates/hft-testkit/tests/reconcile_migration.rs::tk_137_recon_migration_preserves_prefix_and_checker_transparency`
@@ -2007,7 +2007,7 @@ spec: README.md
 - 级别:integ
 - 里程碑:M2
 - 前置:`fixtures/dst/partial-before.toml` 固定提交 4244872 的 50 个种子、套件、每行 2000 步及摘要
-- 步骤:StaleGenFill count 置零以保留历史边界;将 PartialFills 时长置零,保留计划条目、顺序与随机流,重现旧摘要;再启用 PartialFills 并关闭全部检查器复跑
+- 步骤:StaleGenFill 与 LateFillAfterRecycle count 置零以保留历史边界;将 PartialFills 时长置零,保留计划条目、顺序与随机流,重现旧摘要;再启用 PartialFills 并关闭全部检查器复跑
 - 期望:旧摘要逐行相等,至少一行轨迹变化且首条差异不早于首次部分成交故障,此前 journal 前缀逐字节相同;全部运行达到原步数并通过不变量,检查器开关的完整 journal、交付、意图、HashTrail 与交易所真值相同
 - 证据:CI 保存 `target/dst/partial-fill-migration.json` 的原提交、新旧摘要、差异边界、实际部分成交数量及逐行比较结果,核对后才更新当前金样
 - 实现:`crates/hft-testkit/tests/partial_migration.rs::tk_157_partial_migration_reproduces_prior_goldens_and_preserves_prefix`
@@ -2073,7 +2073,7 @@ spec: README.md
 - 级别:integ
 - 里程碑:M2
 - 前置:`fixtures/dst/stale-before.toml` 固定提交 eb236c8 的 50 个种子、套件、每行 2000 步与摘要
-- 步骤:仅将 StaleGenFill count 置零重现历史空路径,保留故障条目、顺序及随机流;再按默认 count 运行并关闭检查器复跑
+- 步骤:隔离后续 LateFillAfterRecycle,将 StaleGenFill count 置零重现历史空路径,保留故障条目、顺序及随机流;再按默认 count 运行并关闭检查器复跑
 - 期望:旧摘要逐行复现,新轨迹至少一行变化且首差异不早于首次非零故障,此前字节相同;全部运行完成原步数并通过不变量,检查器开关后的完整 journal、交付、意图、HashTrail 与真值相同
 - 证据:CI 保留 `target/dst/stale-gen-migration.json` 的基线提交、新旧摘要、差异边界与实际成交数量,核对后才更新当前金样
 - 实现:`crates/hft-testkit/tests/stale_migration.rs::tk_163_stale_migration_reproduces_prior_goldens_and_preserves_prefix`
@@ -2097,6 +2097,46 @@ spec: README.md
 - 步骤:同时启用 GrayConn、ReportDup 与 NoClientIdFill,再触发默认旧代数成交;推进到最后一次交付之后
 - 期望:2 ms 原始回报延迟放大为 200 ms,产生一份无 client ID 副本及两份原身份副本;三份交付的数量、价格、现金与成交 ID 都等于唯一原件;副本字节相同,观察时间覆盖最后交付,钱包和仓位只结算一次
 - 实现:`crates/hft-testkit/tests/stale_gen.rs::tk_165_stale_reports_share_transport_faults_without_repeating_settlement`
+
+### TK-166 回收槽副本保留原件及共同传输扰动
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:unit
+- 里程碑:M2
+- 前置:真实 SimMatcher,现货/永续 × 买卖 × 基础币费用开关,共八行;真实 IOC 成交及拆费后的首次交付
+- 步骤:保存原件,提供完整已提交日志与已复用槽的墓碑观察;重送时组合 GrayConn、ReportDup、NoClientIdFill
+- 期望:每行三份副本均晚于回收边界且字节等于首次回报,FeeOnly 不重复生成;观察保留含费用原件和无费用首次回报,首序号与回收序号可核对;钱包、仓位与库存不再改变
+- 实现:`crates/hft-testkit/tests/late_recycle.rs::tk_166_recycled_fill_copies_keep_original_facts_and_transport_faults`
+
+### TK-167 回收槽副本的提交边界、身份及等待条件
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:unit
+- 里程碑:M2
+- 前置:一份真实成交,待匹配墓碑与当前槽;请求容量为 EXTERNAL_HISTORY_CAP
+- 步骤:分别破坏 venue、account、epoch、slot、gen、inst、累计量、完整提交日志,或保留当前同身份槽;再测试断流恢复、时间溢出、容量满、零请求与 clean
+- 期望:十类不满足条件均等待,用户流恢复后只释放一次;未提交尾部不算原件,溢出和容量满明确失败,零请求和 clean 不排队
+- 实现:`crates/hft-testkit/tests/late_recycle.rs::tk_167_recycled_copies_require_full_committed_identity_and_bounded_requests`
+
+### TK-168 真实回收槽重送的资金与恢复验证
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:replay
+- 里程碑:M2
+- 输入:LED-080 的固定开平仓配置,仅注入两个 venue 的默认回收槽故障;有无第 150 步连续两次恢复各一行
+- 步骤:完成实际原件、槽回收及晚到交付,从 journal 逐一关联;关闭检查器复跑;破坏墓碑 epoch、原件序号、回收序号及冷热比较观察
+- 期望:每行实际两份晚到副本,钱包严格一致且末尾无在途/排除项,完整 journal 回放通过;四种破坏均被发现,检查器开关前后 journal、意图、交付、HashTrail 及交易所真值相同
+- 实现:`crates/hft-testkit/tests/late_recycle.rs::tk_168_real_recycled_copies_keep_wallets_recovery_and_checkers_equal`
+
+### TK-169 回收槽故障的完整金样迁移证据
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:replay
+- 里程碑:M2
+- 输入:`fixtures/dst/late-before.toml` 固定 50 行、每行 2000 步,基线为 335e321
+- 步骤:仅把 LateFillAfterRecycle count 置零重现旧摘要,保留计划时间、顺序与随机流;默认故障及检查器关闭各复跑
+- 期望:旧摘要逐行一致,首差异不早于首次故障,前缀字节与检查器开关后的完整 journal、意图、交付、HashTrail 和交易所真值一致;CI 保存逐行迁移证据,当前金样只能据证据更新
+- 实现:`crates/hft-testkit/tests/late_migration.rs::tk_169_late_migration_reproduces_prior_goldens_and_preserves_prefix`
 
 ## 验收
 
