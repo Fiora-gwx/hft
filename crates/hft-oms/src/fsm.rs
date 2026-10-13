@@ -2,7 +2,7 @@
 
 use hft_event::{OrderAction, OrderEvent, OrderEventKind, OrderFlags, RecordHeader};
 use hft_strategy_sdk::{HedgeKind, LinkRole, OrderRef, OrderUpdate, OrderUpdateKind};
-use hft_types::{AssetId, GROUP_NONE, Px, Qty, Side, Tif, Tsc};
+use hft_types::{AssetId, GROUP_NONE, GroupId, InstId, Px, Qty, Side, StrategyId, Tif, Tsc};
 
 /// `OrderEvent.detail` of Cancel/AmendReject: the order is already filled or gone (hft-event `RejectClass`).
 pub(crate) const REJECT_GONE: u8 = 1;
@@ -394,8 +394,7 @@ impl Oms {
         else {
             return;
         };
-        if ev.inst != sl.inst {
-            out.cash_error = Some(crate::CashError::Identity);
+        if self.inst_mismatch((sl.inst, sl.strategy, sl.group), ev, out) {
             return;
         }
         if let Err(e) = crate::cash::delta(
@@ -560,7 +559,7 @@ impl Oms {
     /// A `PartialFill`/`Fill` whose quantity an earlier non-fill report (`CancelReject`,
     /// `CancelAck`, `QueryResult`, …) already applied without a fee: its fee is booked like a
     /// `FeeOnly` (README "回报匹配与成交增量" 9). A repeated fill report (`cum_filled ≤ fee_cum`)
-    /// books nothing.
+    /// books nothing; `fee_cum` also covers an increment whose non-fill report carried a fee.
     fn fee_of_applied_fill(&mut self, ti: usize, s: u32, ev: &OrderEvent, out: &mut OmsOut) {
         let Some(t) = self.t(ti) else { return };
         let (Some(sl), Some(ex)) = (t.slot(s), t.ext.get(s as usize)) else {
@@ -636,6 +635,46 @@ impl Oms {
             }
         }
         self.anomaly_note(&sl, anomaly::TABLE, ev.what as u64, out);
+    }
+
+    /// Report identity check after the `(slot, gen, epoch)` match (README "回报匹配与成交增量").
+    /// `inst = INST_NONE` means the venue did not supply it (e.g. WS API error replies) and is
+    /// accepted. A different nonzero inst is a strict-cash `CashError::Identity` when the matched
+    /// inst is `perp_cash`; elsewhere the report is ignored with a P0 `OmsAnomaly{InstMismatch}`.
+    /// `true` = the caller stops processing the report.
+    pub(crate) fn inst_mismatch(
+        &mut self,
+        own: (InstId, StrategyId, GroupId),
+        ev: &OrderEvent,
+        out: &mut OmsOut,
+    ) -> bool {
+        let (own, strategy, group) = own;
+        if ev.inst == hft_types::INST_NONE || ev.inst == own {
+            return false;
+        }
+        if self.inst(own).perp_cash {
+            out.cash_error = Some(crate::CashError::Identity);
+            return true;
+        }
+        let n = notes::note_at(
+            notes::ANOMALY,
+            hft_event::NoteLevel::P0,
+            strategy,
+            group,
+            own,
+            [
+                anomaly::INST_MISMATCH,
+                u64::from(ev.inst.0),
+                ev.what as u64,
+                u64::from(ev.slot.0),
+                u64::from(ev.r#gen),
+                ev.exch_order_id,
+                0,
+                0,
+            ],
+        );
+        self.note(n, out);
+        true
     }
 
     pub(crate) fn anomaly_note(&mut self, sl: &OrderSlot, kind: u64, arg: u64, out: &mut OmsOut) {
@@ -916,6 +955,11 @@ impl Oms {
             }
             if let Some(e) = t.ext.get_mut(s as usize) {
                 e.net_filled = Qty(e.net_filled.0.saturating_add(d_net.0));
+                // A fee booked with this increment (whatever report kind carried it) covers the
+                // executions up to `cum`: a later fill report repeating them books no fee again.
+                if f.fee.0 != 0 && f.cum.0 > e.fee_cum.0 {
+                    e.fee_cum = f.cum;
+                }
                 if cash.is_some() {
                     e.cash_qty = f.cash_qty;
                     e.cash_sum = f.cash_sum;

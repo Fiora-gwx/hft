@@ -309,8 +309,7 @@ impl Oms {
             return false;
         }
         let (venue, account) = (t.venue, t.account);
-        if ev.inst != tb.inst {
-            out.cash_error = Some(crate::CashError::Identity);
+        if self.inst_mismatch((tb.inst, tb.strategy, tb.group), ev, out) {
             return true;
         }
         let cash = match crate::cash::delta(

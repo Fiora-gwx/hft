@@ -326,8 +326,16 @@ fn oms_479_receipt_restore_rejects_corruption_and_legacy_has_no_proof() {
 fn oms_476_reconcile_cash_capacity_counts_distinct_order_identities() {
     use hft_event::{ReconcileBatchHdr, ReconcileBatchView, ReconcileReport};
     use zerocopy::{FromZeros, IntoBytes};
-    let mut h = H::with(|c| c.foreign_fill_track.set(VX, A1, 2));
-    h.o.remember_external_cash(&original_external(70), true).unwrap();
+    // Provenance is only retained for a strict-cash venue (OMS-483).
+    let mut cfg = p0();
+    cfg.foreign_fill_track.set(VX, A1, 2);
+    let rd = build_rd(&RdOpts {
+        vx_perp_cash: true,
+        ..RdOpts::default()
+    });
+    let mut h = H::from_cfg(&cfg, rd);
+    // An order identity without single-execution proof (as before on the non-cash fixture).
+    h.o.remember_external_cash(&original_external(70), false).unwrap();
     let mut summary = ReconcileReport::new_zeroed();
     summary.report_id = 7;
     summary.venue = VX;
@@ -824,4 +832,33 @@ fn oms_475_sim_reset_clears_only_that_accounts_foreign_cash() {
     e.account = A1;
     h.ev(&e, 4);
     assert!(h.out.foreign_fills.is_empty());
+}
+
+#[test]
+fn oms_483_external_cash_guard_rejects_rows_the_restore_would_refuse() {
+    let (mut h, rd) = fixture();
+    let before = snap(&h.o);
+    let good = original_external(9901);
+    assert_eq!(h.o.external_cash_guard(&good), Ok(false), "OMS-483.1");
+    // .2 a spot inst of a non-cash venue reported under the strict-cash venue.
+    let mut e = good;
+    e.inst = X;
+    // .3 the strict-cash inst reported under another venue.
+    let mut f = good;
+    f.venue = VS;
+    for (row, x) in [("OMS-483.2", e), ("OMS-483.3", f)] {
+        assert_eq!(h.o.external_cash_guard(&x), Err(CashError::Identity), "{row}");
+        assert_eq!(
+            h.o.remember_external_cash(&x, true),
+            Err(CashError::Identity),
+            "{row}"
+        );
+        assert_eq!(snap(&h.o), before, "{row}");
+        restore(&snap(&h.o), rd);
+    }
+    // The accepted identity still restores.
+    h.o.remember_external_cash(&good, true).unwrap();
+    let after = snap(&h.o);
+    assert_ne!(after, before);
+    assert_eq!(snap(&restore(&after, rd)), after, "OMS-483.1");
 }

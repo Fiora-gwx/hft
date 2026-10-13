@@ -119,3 +119,30 @@ fn oms_466_config_section_rejects_incomplete() {
         OmsConfig::from_engine(&EngineConfig::load(&b.finish(), None).unwrap(), rd(), EPOCH, HZ).is_err()
     );
 }
+
+#[test]
+fn oms_484_config_section_stride_must_be_whole_rows() {
+    let rows = OmsConfig::new(EPOCH, HZ).to_rows();
+    let bytes = rows.as_slice().as_bytes().to_vec();
+    let n = rows.len() as u32;
+    // .1 a whole number of 16-byte rows loads; .2/.3 other strides over the same bytes do not.
+    for (row, size, count, ok) in [
+        ("OMS-484.1", 16u32, n, true),
+        ("OMS-484.2", 8, n * 2, false),
+        ("OMS-484.3", 32, n / 2, false),
+    ] {
+        let mut b = EcfBuilder::new(1, HostClass::Dev2);
+        b.section(
+            EngineSection::Oms,
+            1,
+            size,
+            count,
+            bytes[..(size * count) as usize].to_vec(),
+        );
+        // The container may already refuse a short stride; either layer must refuse it.
+        let loaded = EngineConfig::load(&b.finish(), None)
+            .ok()
+            .is_some_and(|ec| OmsConfig::from_engine(&ec, rd(), EPOCH, HZ).is_ok());
+        assert_eq!(loaded, ok, "{row}");
+    }
+}

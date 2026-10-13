@@ -4,6 +4,9 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-13 | OMS 回报品种:`inst = INST_NONE` 视为 venue 未提供(Binance WS API 错误响应),按命中的槽/墓碑品种处理;非零的另一品种在 PERP_CASH 品种上仍为 `CashError::Identity`,其余忽略该回报并写 P0 `OmsAnomaly{InstMismatch=5}`;冷账本同规则 | 静态评审 B:epoch 补齐后每条 Reject/CancelReject 都会以 Fatal(OmsCash) 停机;OMS-481、LED-305 | crates/hft-oms/(src、tests、README.md、TESTS.md)、crates/hft-ledger/src/journal.rs | 否(待资金评审) |
+| 2026-10-13 | 任何回报带来成交增量且费用非零时,费用随增量入账并推进 `fee_cum`(OMS 与冷账本一致),之后覆盖同一数量的成交回报不再记费;写入 venue 契约 | 静态评审 F:CancelAck/QueryResult 带费用后 Fill 再记一次;OMS-482、LED-304 | crates/hft-oms/(src/fsm.rs、tests、README.md、TESTS.md)、crates/hft-ledger/src/journal.rs | 否(待资金评审) |
+| 2026-10-13 | `external_cash_guard` 只接受节 12 恢复能接受的行(有效、PERP_CASH、inst 的 venue 等于回报 venue),否则 `Identity`,来源不保存;OMS 配置段字节数须为 16 B 整行;冷账本节 13 v8 出现待确认凭据行拒绝恢复;README 记录外来现金来源表只增不减为启用 PERP_CASH 前的阻塞项 | 静态评审 E、小项与 C;OMS-483、OMS-484、LED-303 | crates/hft-oms/(src/cash.rs、src/config_blob.rs、tests、README.md、TESTS.md)、crates/hft-ledger/(src/snapshot.rs、tests、README.md、TESTS.md) | 否(待恢复评审) |
 | 2026-10-13 | CancelRejectFilled 暂缓真实完整成交,以真实 Cancel 和撮合器 GONE 回报确认竞态,含原件在撤单调用内首次可读;保留原始费用/现金及到期释放,请求与实际交付分开记证据,录制行情覆盖完整定向运行,截短明确失败 | TK-170–173、RPL-288;接通默认撤单竞态空路径,旧 50 行参考独立保留,5 行摘要按 CI 264 的原件交付、前缀与透明性证据迁移 | testkit、真实文件回放、fixture、CI 证据及配套规格 | 待资金与恢复评审 |
 | 2026-10-13 | LateFillAfterRecycle 保留真实撮合原件,等待已提交首份交付及完整身份墓碑后重送;传输扰动可组合,请求/等待/实际交付分开统计,历史迁移隔离后续故障 | TK-166–169、RPL-287;补齐默认回收槽重送空路径,保留严格钱包、完整种子及历史参考 | testkit、replayer 测试、README/TESTS、fixture 与 CI 证据 | 待恢复评审 |
 | 2026-10-13 | 当前 HashTrail 的 3 行按 CI 261 逐行证据迁移,保留 50 行旧参考与每行 2000 步;RPL-287 从原件与副本序号核对跨越全部恢复,默认撤单拒绝与运行期基础币费用空分支记入后续项 | TK-169、RPL-287;迁移证明含 4 份实际副本、故障前缀和检查器透明性 | 金样、replayer 测试及配套契约 | 否 |

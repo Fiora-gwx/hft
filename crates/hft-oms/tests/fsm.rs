@@ -317,3 +317,44 @@ fn oms_456_amend_qty_down_only() {
         "OMS-456.7"
     );
 }
+
+#[test]
+fn oms_482_fee_carried_by_non_fill_report_is_booked_once() {
+    for (row, cancel_fee, fill_fee, want_fees) in
+        [("OMS-482.1", 1000, 1000, 0usize), ("OMS-482.2", 0, 1000, 1usize)]
+    {
+        let mut h = H::new();
+        let r = h.place_ok(&buy_x(), 0);
+        h.ack(r, 41, 1);
+        h.cancel(r, 2).unwrap();
+        let mut e = h.oe(r, OrderEventKind::CancelAck);
+        e.cum_filled = q("0.004");
+        e.avg_px = p("60000.00");
+        e.fee = Qty(cancel_fee);
+        e.fee_asset = USDT;
+        h.ev(&e, 3);
+        assert_eq!(h.out.fills.len(), 1, "{row}");
+        assert_eq!(h.out.fills[0].fee, cancel_fee, "{row}");
+        let after_cancel = h.ext(r).fee_cum;
+        assert_eq!(
+            after_cancel,
+            if cancel_fee != 0 { q("0.004") } else { Qty(0) },
+            "{row}"
+        );
+        let mut f = h.oe(r, OrderEventKind::PartialFill);
+        f.cum_filled = q("0.004");
+        f.avg_px = p("60000.00");
+        f.fee = Qty(fill_fee);
+        f.fee_asset = USDT;
+        h.ev(&f, 4);
+        assert!(h.out.fills.is_empty(), "{row}");
+        assert_eq!(h.out.fees.len(), want_fees, "{row}");
+        if want_fees == 1 {
+            assert_eq!(h.out.fees[0].fee, fill_fee, "{row}");
+        }
+        assert_eq!(h.ext(r).fee_cum, q("0.004"), "{row}");
+        // A repeat of the same fill report never books its fee again.
+        h.ev(&f, 5);
+        assert!(h.out.fees.is_empty() && h.out.fills.is_empty(), "{row} repeat");
+    }
+}
