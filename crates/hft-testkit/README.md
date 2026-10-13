@@ -25,6 +25,7 @@ status: spec
   - [8. hft-dst 运行器](#8-hft-dst-运行器)
   - [9. 分配计数与基准驱动](#9-分配计数与基准驱动)
   - [10. SeqRig](#10-seqrig)
+  - [11. 临时目录](#11-临时目录)
 - [实现说明](#实现说明)
 - [延迟与资源契约](#延迟与资源契约)
 - [测试与验收](#测试与验收)
@@ -381,6 +382,25 @@ impl<S: StrategySet> SeqRig<S> {
 }
 ```
 
+### 11. 临时目录
+
+测试自有的临时目录与证据目录(`src/tmp.rs`):
+
+```rust
+pub const KEEP_TMP: &str = "HFT_TEST_KEEP_TMP";              // = "1" 时全部保留(调试;需要上传成功证据的 CI 步骤设置)
+pub struct TmpDir { /* 路径、是否证据目录、是否已交出 */ }
+impl TmpDir {
+    pub fn new(path: impl Into<PathBuf>) -> io::Result<TmpDir>;      // 建目录(含父目录)并持有;丢弃时删除
+    pub fn in_temp(prefix: &str) -> io::Result<TmpDir>;              // <系统临时目录>/<prefix>-<pid>-<n>,n 为进程内序号
+    pub fn evidence(path: impl Into<PathBuf>) -> io::Result<TmpDir>; // 正常丢弃时删除,持有者 panic 中丢弃时保留
+    pub fn path(&self) -> &Path;
+    pub fn keep(self) -> PathBuf;                                    // 交出目录(调用方已收住并报告的失败)
+}
+pub fn per_process_file(dir: &Path, stem: &str, ext: &str) -> PathBuf; // <dir>/<stem>-<pid>.<ext>
+```
+
+`TmpDir` 丢弃时删除目录及其全部内容,测试 panic 时也删除;证据目录在持有者 panic 时保留,供 CI 上传失败证据。同一检出中并行的测试进程以 `per_process_file` 各写一份迁移证据,不互相覆盖。`hft-dst` 的 CLI 测试与 replayer 的 DST 文件用例(RPL-012、RPL-283–RPL-288)用它管理目录;hft-journal 的 `tests/common/tmp.rs` 是同一约定的本地版本。验收归 TK-174。
+
 ## 实现说明
 
 <details><summary>实现要点</summary>
@@ -451,6 +471,7 @@ LED-081 使用真实策略命令在 1 s 开仓、4 s 以 PairOnFill 平仓、7 s
 | `src/hash.rs` | `HashTrail`、`diff_trails`、`bisect_divergence` |
 | `src/seq_rig.rs`(feature `seq`) | `SeqRig`、`RigIo`、`RigConfig` |
 | `src/alloc.rs`、`src/bench.rs` | `CountingAlloc`、`HistBench` |
+| `src/tmp.rs` | `TmpDir`、`per_process_file`(测试临时与证据目录) |
 | `src/chain_mocks/*`(`chain` feature) | 公共 RPC 端点集合、节点、builder、`SwapGuard` 语义模型 |
 
 </details>

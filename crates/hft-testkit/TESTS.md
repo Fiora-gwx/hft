@@ -25,6 +25,7 @@ spec: README.md
 | 8. hft-dst 运行器 | TK-075–TK-088、TK-143、TK-146 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
 | 10. SeqRig | PY-106–PY-109、PY-111、PY-112 |
+| 11. 临时目录 | TK-174 |
 | 实现说明 | 不适用:见子节 |
 | DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140、TK-142、TK-144–TK-145、TK-155–TK-173 |
 | 金样运行器 | TK-001、TK-005 |
@@ -2177,6 +2178,25 @@ spec: README.md
 - 步骤:count 置零重现旧摘要,保留故障条目、时间与随机流;默认故障及关闭检查器各复跑,统计原件暂缓、实际拒绝和原件交付
 - 期望:旧摘要逐行一致,首差异不早于首次非零故障且必须实际暂缓成交,首差异前缀及检查器开关后的 journal、意图、交付、HashTrail 和真值一致;CI 保存逐行证据,不凭请求数声称实际竞态覆盖
 - 实现:`crates/hft-testkit/tests/cancel_migration.rs::tk_173_cancel_migration_reproduces_prior_goldens_and_preserves_prefix`
+
+### TK-174 测试临时目录与证据目录按所有权删除
+
+- 规则:[11. 临时目录](README.md#11-临时目录)
+- 级别:unit
+- 里程碑:M2
+- 前置:环境变量 `HFT_TEST_KEEP_TMP` 未设置
+- 步骤:
+  1. `TmpDir::in_temp("tk-174")` 建目录并写一个文件,丢弃守卫
+  2. 同一进程连续建两个 `in_temp` 目录
+  3. `TmpDir::evidence(<路径>)` 正常丢弃
+  4. 另一线程内持有证据目录的闭包 panic,`catch_unwind` 收住
+  5. `keep()` 交出普通目录;另一线程内持有普通目录的闭包 panic
+  6. `per_process_file(target/dst, "x-migration", "json")`
+- 期望:
+  - 步骤 1 后目录不存在;步骤 2 两个路径不同;步骤 3 后证据目录不存在
+  - 步骤 4 后证据目录仍在;步骤 5 交出的目录仍在,panic 时丢弃的普通目录不存在
+  - 步骤 6 得到 `target/dst/x-migration-<pid>.json`
+- 实现:`crates/hft-testkit/tests/tmp.rs::tk_174_test_directories_removed_unless_kept`
 
 ### TK-178 植入缺陷不进入任何生产构建
 

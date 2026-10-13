@@ -257,6 +257,7 @@ fn rpl_283_dst_files_preserve_records_and_model_across_recovery() {
         "target/dst/0000000000000001/rpl-283-{}",
         std::process::id()
     ));
+    let _evidence = hft_testkit::tmp::TmpDir::evidence(&dir).unwrap();
     let result = verify_case(&cfg, &dir);
     assert!(result["recovery_runs"].as_u64().unwrap() >= 2, "{result}");
 }
@@ -289,6 +290,7 @@ fn rpl_284_partial_fills_replay_real_files_and_model_across_recovery() {
         "target/dst/0000000000000001/rpl-284-{}",
         std::process::id()
     ));
+    let _evidence = hft_testkit::tmp::TmpDir::evidence(&dir).unwrap();
     let result = verify_case(&cfg, &dir);
     assert_eq!(result["steps_run"], 10_000);
     assert!(result["partial_fills"].as_u64().unwrap() > 0, "{result}");
@@ -319,6 +321,7 @@ fn rpl_286_default_stale_fills_replay_original_files_and_model_across_recovery()
             ),
         ];
         let dir = root().join(format!("target/dst/{seed:016x}/rpl-286-{}", std::process::id()));
+        let _evidence = hft_testkit::tmp::TmpDir::evidence(&dir).unwrap();
         let result = verify_case(&cfg, &dir);
         assert_eq!(result["steps_run"], 10_000);
         assert_eq!(result["stale_gen_fills"], 4, "{result}");
@@ -359,6 +362,7 @@ fn rpl_287_recycled_copies_replay_real_files_and_model_after_recovery() {
             ),
         ];
         let dir = root().join(format!("target/dst/{seed:016x}/rpl-287-{}", std::process::id()));
+        let _evidence = hft_testkit::tmp::TmpDir::evidence(&dir).unwrap();
         let result = verify_case(&cfg, &dir);
         assert_eq!(result["steps_run"], 10_000);
         assert!(result["recovery_runs"].as_u64().unwrap() >= 2);
@@ -391,6 +395,7 @@ fn rpl_288_cancel_reject_filled_replays_actual_files_and_model() {
         cfg.world.physical_journal = true;
         cfg.world.model_advice = true;
         let dir = root().join(format!("target/dst/{seed:016x}/rpl-288-{}", std::process::id()));
+        let _evidence = hft_testkit::tmp::TmpDir::evidence(&dir).unwrap();
         let result = verify_case(&cfg, &dir);
         assert_eq!(result["steps_run"], 10_000);
         assert!(result["recovery_runs"].as_u64().unwrap() >= 2);
@@ -452,9 +457,11 @@ fn rpl_012_dst_journals_verify() {
             std::process::id(),
             suite.name
         ));
+        let evidence = hft_testkit::tmp::TmpDir::evidence(&dir).unwrap();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| verify_case(&cfg, &dir)));
         match result {
             Ok(mut row) => {
+                drop(evidence);
                 row["source"] = json!(source);
                 rows.push(row);
                 eprintln!(
@@ -465,6 +472,8 @@ fn rpl_012_dst_journals_verify() {
                 );
             }
             Err(e) => {
+                // A caught failure keeps its journals, fault table and replay reports.
+                evidence.keep();
                 let why = e
                     .downcast_ref::<String>()
                     .cloned()

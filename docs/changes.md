@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-14 | 测试临时与证据目录改为 RAII `TmpDir`(`HFT_TEST_KEEP_TMP=1` 保留):hft-dst CLI 测试 panic 不再遗留目录,replayer DST 文件目录只在失败时保留(replay-dst 作业设保留),三小时夹具改为最后持有者释放;迁移证据按进程命名;CTL-155 取至多 3 轮的最佳 p99、CTL-010 超限时整组重放至多 4 组,上限不变;modes 回归集注释改为已修复 | TK-174、CTL-010、CTL-155、RPL-012、RPL-283–288;评审发现的目录泄漏、并发覆盖与墙钟断言抖动 | hft-testkit、replayer、hft-ctl 测试与规格、fixtures、CI | 否 |
 | 2026-10-14 | 引擎 crate 新增测试专用 `planted` feature(每线程开关,只由 hft-testkit 的 `planted` 打开):真实引擎 DST 在 16 个种子内以 I2、I3、I6、I16、I20 发现对应植入缺陷;TK-053.21–.23 在真实引擎上以 QF-1 核心断言、MS-2(测试策略版,录制标记价接入匹配器)与对冲重试断言实现,TK-053.23 原期望 I3/I20 不适用于本地拒绝 reduceOnly 重试的真实引擎 | TK-053、TK-178、TK-179;评审:植入缺陷只在 ToyEngine 上验证 | hft-risk、hft-exec、hft-ledger、hft-oms、hft-sequencer、hft-testkit、allow-list | 待负责人确认(风控与资金路径的测试开关) |
 | 2026-10-13 | CancelRejectFilled 暂缓真实完整成交,以真实 Cancel 和撮合器 GONE 回报确认竞态,含原件在撤单调用内首次可读;保留原始费用/现金及到期释放,请求与实际交付分开记证据,录制行情覆盖完整定向运行,截短明确失败 | TK-170–173、RPL-288;接通默认撤单竞态空路径,旧 50 行参考独立保留,5 行摘要按 CI 264 的原件交付、前缀与透明性证据迁移 | testkit、真实文件回放、fixture、CI 证据及配套规格 | 待资金与恢复评审 |
 | 2026-10-13 | LateFillAfterRecycle 保留真实撮合原件,等待已提交首份交付及完整身份墓碑后重送;传输扰动可组合,请求/等待/实际交付分开统计,历史迁移隔离后续故障 | TK-166–169、RPL-287;补齐默认回收槽重送空路径,保留严格钱包、完整种子及历史参考 | testkit、replayer 测试、README/TESTS、fixture 与 CI 证据 | 待恢复评审 |

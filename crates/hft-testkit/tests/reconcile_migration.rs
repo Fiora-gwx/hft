@@ -193,8 +193,11 @@ fn tk_137_recon_migration_preserves_prefix_and_checker_transparency() {
         rows.push(line);
     }
     assert_eq!(rows.len(), 50);
-    let path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/dst/reconcile-migration.json");
+    let path = hft_testkit::tmp::per_process_file(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/dst"),
+        "reconcile-migration",
+        "json",
+    );
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let run_id = std::env::var("GITHUB_RUN_ID")
         .ok()

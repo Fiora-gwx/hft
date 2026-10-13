@@ -699,8 +699,11 @@ fn tk_138_reconciled_adl_waits_for_commit_then_restores_full_truth() {
         assert!(v.m.external_history().is_empty());
     }
     assert_eq!(evidence.len(), 16);
-    let path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/dst/reconcile-settlement.json");
+    let path = hft_testkit::tmp::per_process_file(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/dst"),
+        "reconcile-settlement",
+        "json",
+    );
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, format!("{{\"seed\":1,\"coverage\":\"direct-opening-transport-matrix\",\"led_081_complete\":false,\"rows\":[{}]}}\n", evidence.join(","))).unwrap();
 }

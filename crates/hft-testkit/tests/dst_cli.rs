@@ -3,8 +3,8 @@ use std::process::Command;
 
 #[test]
 fn tk_146_cli_foreign_case_keeps_settlement_evidence_on_run_and_repro() {
-    let dir = std::env::temp_dir().join(format!("hft-dst-foreign-cli-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = hft_testkit::tmp::TmpDir::in_temp("hft-dst-foreign-cli").unwrap();
+    let dir = tmp.path().to_path_buf();
     let call = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_hft-dst"))
             .args(args)
@@ -75,13 +75,12 @@ fn tk_146_cli_foreign_case_keeps_settlement_evidence_on_run_and_repro() {
         body.contains(&format!("\"runs\":[{single}]")),
         "run/repro evidence differs"
     );
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
 fn tk_143_cli_case_selection_and_repro_are_not_baseline_runs() {
-    let dir = std::env::temp_dir().join(format!("hft-dst-cli-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = hft_testkit::tmp::TmpDir::in_temp("hft-dst-cli").unwrap();
+    let dir = tmp.path().to_path_buf();
     let bin = env!("CARGO_BIN_EXE_hft-dst");
     let call = |args: &[&str]| Command::new(bin).args(args).current_dir(&dir).output().unwrap();
     let list = call(&["list"]);
@@ -167,5 +166,4 @@ fn tk_143_cli_case_selection_and_repro_are_not_baseline_runs() {
         body.contains(&format!("\"runs\":[{single}]")),
         "run/repro evidence differs"
     );
-    std::fs::remove_dir_all(&dir).unwrap();
 }
