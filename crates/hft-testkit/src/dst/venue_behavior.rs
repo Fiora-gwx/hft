@@ -686,6 +686,32 @@ struct MatchBook {
     ask: (i64, i64),
 }
 
+/// One actual default stale-generation execution, tied to the previously scheduled Ack.
+/// The original financial receipt remains in `Matcher::external_history`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StaleGenExecution {
+    pub requested_ns: u64,
+    pub matched_ns: u64,
+    pub delivered_ns: u64,
+    pub ack_ns: u64,
+    pub account: AccountId,
+    pub inst: InstId,
+    pub epoch: u16,
+    pub slot: SlotId,
+    pub ack_gen: u32,
+    pub ack_order_id: u64,
+    pub order_id: u64,
+}
+
+/// Fault requests and completed executions are separate: a pending request is not coverage.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StaleGenReport {
+    pub venue: VenueId,
+    pub requested: u64,
+    pub pending: usize,
+    pub executions: Vec<StaleGenExecution>,
+}
+
 /// A venue in the DST: matcher + behaviour layer + fault perturbation.
 #[derive(Debug)]
 pub struct MockVenue<M: Matcher> {
@@ -706,6 +732,11 @@ pub struct MockVenue<M: Matcher> {
     /// after a fill cannot resolve that fill early. This models the gw's exchange-id lookup;
     /// it must not treat the matcher-supplied slot as evidence for a no-client-id report.
     ack_ids: BTreeMap<(u8, u64), (u64, OrderEvent)>,
+    stale_seed: u64,
+    stale_requested: u64,
+    /// (request time, variant). Seed and request ordinal cover side and positive/zero trade ID.
+    stale_pending: VecDeque<(u64, u8)>,
+    stale_executions: Vec<StaleGenExecution>,
     md_down_until: u64,
     order_down_until: u64,
     userstream_down_until: u64,
@@ -751,6 +782,10 @@ impl<M: Matcher> MockVenue<M> {
                 .collect(),
             partial_until: None,
             ack_ids: BTreeMap::new(),
+            stale_seed: seed,
+            stale_requested: 0,
+            stale_pending: VecDeque::new(),
+            stale_executions: Vec::new(),
             md_down_until: 0,
             order_down_until: 0,
             userstream_down_until: 0,
@@ -1139,7 +1174,7 @@ impl<M: Matcher> MockVenue<M> {
     /// Periodic work at `now`: pongs, dead-man, due reports, recoveries.
     pub fn tick(&mut self, now: u64) -> Vec<(u64, InputRec)> {
         self.finish_partial(now);
-        let mut out = Vec::new();
+        let mut out = self.drain_stale(now);
         if !self.clean && self.cfg.bbo_ping_ms > 0 {
             while self.next_ping <= now {
                 let silent = self.next_ping < self.md_down_until
@@ -1175,6 +1210,13 @@ impl<M: Matcher> MockVenue<M> {
     /// Next time `tick` has work.
     pub fn next_wake(&self, now: u64) -> u64 {
         let mut t = self.m.next_due().unwrap_or(u64::MAX);
+        if !self.clean
+            && !self.stale_pending.is_empty()
+            && self.fault_error.is_none()
+            && let Some(at) = self.ack_ids.values().map(|(at, _)| *at).min()
+        {
+            t = t.min(at.max(self.userstream_down_until));
+        }
         if let Some(end) = self.partial_until {
             t = t.min(end);
         }
@@ -1268,6 +1310,26 @@ impl<M: Matcher> MockVenue<M> {
             Fault::FillBeforeAck { .. } => self.next_order.push(NextOrder::FillBeforeAck),
             Fault::LateFeeOnly { delay_ms, .. } => self.late_fees.push_back(delay_ms),
             Fault::NoClientIdFill { .. } => self.next_order.push(NextOrder::NoClientId),
+            Fault::StaleGenFill { count, .. } => {
+                if count == 0 {
+                    return out;
+                }
+                let total = self.stale_requested + u64::from(count);
+                if total > EXTERNAL_HISTORY_CAP as u64 {
+                    self.fault_error = Some("stale fill request capacity exceeded".into());
+                    return out;
+                }
+                if self.books.iter().any(|b| b.lot <= 0) {
+                    self.fault_error = Some("stale fills require positive instrument lots".into());
+                    return out;
+                }
+                for ordinal in self.stale_requested..total {
+                    self.stale_pending
+                        .push_back((now, ((self.stale_seed ^ ordinal) & 3) as u8));
+                }
+                self.stale_requested = total;
+                out.extend(self.drain_stale(now));
+            }
             Fault::ForeignOrderFill {
                 account,
                 inst,
@@ -1454,6 +1516,75 @@ impl<M: Matcher> MockVenue<M> {
     /// Latched fault prerequisite/capacity failure; no execution is created after it.
     pub fn fault_error(&self) -> Option<&str> {
         self.fault_error.as_deref()
+    }
+
+    /// Read-only fault coverage. Copying it does not consume pending requests or originals.
+    pub fn stale_gen_report(&self) -> StaleGenReport {
+        StaleGenReport {
+            venue: self.cfg.venue,
+            requested: self.stale_requested,
+            pending: self.stale_pending.len(),
+            executions: self.stale_executions.clone(),
+        }
+    }
+
+    fn drain_stale(&mut self, now: u64) -> Vec<(u64, InputRec)> {
+        let mut out = Vec::new();
+        if self.clean || self.fault_error.is_some() || now < self.userstream_down_until {
+            return out;
+        }
+        while let Some(&(requested_ns, variant)) = self.stale_pending.front() {
+            let Some((ack_ns, ack)) = self.ack_ids.values().find(|(at, _)| *at <= now).copied() else {
+                break;
+            };
+            let Some(book) = self.books.iter().find(|b| b.inst == ack.inst) else {
+                self.fault_error = Some("stale Ack instrument is not in the venue".into());
+                break;
+            };
+            if now.checked_add(2_000_000).is_none() {
+                self.fault_error = Some("stale fill delivery exceeds virtual time".into());
+                break;
+            }
+            let rows = self.apply_fault(
+                &Fault::ForeignOrderFill {
+                    account: ack.account,
+                    inst: ack.inst,
+                    qty: book.lot,
+                    buy: variant & 1 == 0,
+                    positive_trade_id: variant & 2 == 0,
+                    unresolved: false,
+                    raw_first: false,
+                },
+                now,
+            );
+            if self.fault_error.is_some() {
+                break;
+            }
+            let Some((due, input)) = rows.first() else {
+                self.fault_error = Some("stale fill produced no order report".into());
+                break;
+            };
+            let Some(order) = input.read::<OrderEvent>() else {
+                self.fault_error = Some("stale fill produced an invalid order report".into());
+                break;
+            };
+            self.stale_executions.push(StaleGenExecution {
+                requested_ns,
+                matched_ns: now,
+                delivered_ns: *due,
+                ack_ns,
+                account: ack.account,
+                inst: ack.inst,
+                epoch: ack.epoch,
+                slot: ack.slot,
+                ack_gen: ack.r#gen,
+                ack_order_id: ack.exch_order_id,
+                order_id: order.exch_order_id,
+            });
+            self.stale_pending.pop_front();
+            out.extend(rows);
+        }
+        out
     }
 
     /// Clear only receipts independently proved booked at a committed engine boundary.

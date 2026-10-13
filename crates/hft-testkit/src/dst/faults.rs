@@ -149,6 +149,8 @@ pub enum Fault {
     },
     StaleGenFill {
         venue: VenueId,
+        /// One lot per queued independent execution; zero preserves a historical no-op.
+        count: u32,
     },
     LateFillAfterRecycle {
         venue: VenueId,
@@ -628,7 +630,7 @@ fn draw<R: RngExt>(c: FaultCategory, rng: &mut R, w: &WorldSpec, steps: u64, at:
                 venue: v,
                 delay_ms: 50,
             },
-            7 => StaleGenFill { venue: v },
+            7 => StaleGenFill { venue: v, count: 1 },
             _ => LateFillAfterRecycle { venue: v },
         },
         FaultCategory::Reject => match k(rng, 6) {

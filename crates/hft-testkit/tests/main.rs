@@ -57,5 +57,9 @@ mod seq_sut;
 mod shrink;
 #[cfg(feature = "seq")]
 mod snapshot_checks;
+#[cfg(feature = "seq")]
+mod stale_gen;
+#[cfg(feature = "seq")]
+mod stale_migration;
 mod suites;
 mod support;

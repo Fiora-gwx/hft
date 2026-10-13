@@ -14,7 +14,7 @@ use crate::dst::faults::{Fault, FaultPlan};
 use crate::dst::invariants::{EndView, InvId, InvState, InvariantSet, StepView, check_end, check_step};
 use crate::dst::obs::{Obs, TruthRow};
 use crate::dst::sut::{BootCtx, FrameRec, InputRec, JRec, OutRing, Source, StepOut, Sut};
-use crate::dst::venue_behavior::{ExternalReceipt, Matcher, MockVenue};
+use crate::dst::venue_behavior::{ExternalReceipt, Matcher, MockVenue, StaleGenReport};
 use crate::dst::world::{AccountKind, World};
 use crate::dst::{DstConfig, DstFailure, DstOutcome, FailKind, RerunPolicy, TraceItem};
 use crate::hash::{ComponentHashes, HashTrail};
@@ -51,6 +51,8 @@ pub struct RunRecord {
     pub matched_tail: Vec<(u64, hft_event::OrderEvent)>,
     /// Complete bounded original external execution history, independent of delivery copies.
     pub external_receipts: Vec<ExternalReceipt>,
+    /// Default stale-generation requests, including pending requests that created no fill.
+    pub stale_gen: Vec<StaleGenReport>,
     /// Final exchange-side view, independently of the engine observations.
     pub truth: Vec<TruthRow>,
 }
@@ -79,6 +81,7 @@ impl RunRecord {
             ledger_checks: Vec::new(),
             matched_tail: Vec::new(),
             external_receipts: Vec::new(),
+            stale_gen: Vec::new(),
             truth: Vec::new(),
         }
     }
@@ -429,6 +432,13 @@ impl<E: Sut> Loop<'_, E> {
                     self.world.schedule(now + self.advisor.period_ns, Ev::Advisor);
                 }
             }
+            // Queued venue faults may fail when an Ack arrives or the stream reconnects,
+            // after apply_fault has returned. Never let that failure become an empty pass.
+            if self.fail.is_none()
+                && let Some(error) = self.venues.iter().find_map(|v| v.fault_error())
+            {
+                self.fail = Some((self.rec.steps_run, FailKind::Scenario("TK-161"), error.to_owned()));
+            }
         }
     }
 
@@ -474,7 +484,7 @@ impl<E: Sut> Loop<'_, E> {
             | CancelRejectFilled { venue }
             | PartialFills { venue, .. }
             | LateFeeOnly { venue, .. }
-            | StaleGenFill { venue }
+            | StaleGenFill { venue, .. }
             | LateFillAfterRecycle { venue }
             | RateLimit { venue, .. }
             | ServerError { venue }
@@ -897,6 +907,9 @@ impl<E: Sut> Loop<'_, E> {
             }
         }
         for v in self.venues.iter().chain(&self.sims) {
+            if !v.clean {
+                self.rec.stale_gen.push(v.stale_gen_report());
+            }
             self.rec.matched_tail.extend(v.m.matched_tail());
             self.rec
                 .external_receipts

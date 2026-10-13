@@ -126,6 +126,25 @@ fn verify_case(cfg: &DstConfig, dir: &Path) -> Value {
         .filter_map(|r| r.read::<OrderEvent>())
         .filter(|e| e.what == OrderEventKind::PartialFill && e.qty.0 > 0)
         .count();
+    let stale_gen: Vec<_> = rec.stale_gen.iter().map(|v| {
+        let executions: Vec<_> = v.executions.iter().map(|x| {
+            let fill = rec.external_receipts.iter().find(|r|
+                r.fill.venue == v.venue && r.fill.account == x.account && r.fill.exch_order_id == x.order_id)
+                .expect("stale execution must retain its original receipt").fill;
+            let delivered_seq = rec.journal.iter().find_map(|j| j.try_read::<OrderEvent>()
+                .filter(|e| e.venue == v.venue && e.account == x.account && e.exch_order_id == x.order_id)
+                .map(|_| j.seq));
+            json!({"requested_ns": x.requested_ns, "matched_ns": x.matched_ns,
+                "delivered_ns": x.delivered_ns, "ack_ns": x.ack_ns, "account": x.account.0,
+                "inst": x.inst.0, "epoch": x.epoch, "slot": x.slot.0, "ack_gen": x.ack_gen,
+                "ack_order_id": x.ack_order_id, "order_id": x.order_id, "delivered_seq": delivered_seq,
+                "side": fill.side as u8, "qty": fill.qty.0, "px": fill.px.0, "trade_id": fill.trade_id,
+                "fill_seq": fill.fill_seq, "cash_qty": fill.cash_qty.0, "cash": fill.cash_amount.0,
+                "fee": fill.fee.0, "fee_asset": fill.fee_asset.0})
+        }).collect();
+        json!({"venue": v.venue.0, "requested": v.requested, "pending": v.pending, "executions": executions})
+    }).collect();
+    let stale_gen_fills: usize = rec.stale_gen.iter().map(|v| v.executions.len()).sum();
     let files: Vec<_> = (1..=log.segs.len())
         .map(|si| {
             let file = journal.join(format!("{si:010}.jrn"));
@@ -139,7 +158,8 @@ fn verify_case(cfg: &DstConfig, dir: &Path) -> Value {
         "steps_limit": cfg.steps, "steps_run": rec.steps_run, "end_ns": rec.end_ns,
         "records": log.recs.len(), "segments": log.segs.len(), "recovery_runs": recovery,
         "physical_last_seq": log.record_end_seq(log.recs.len() - 1),
-        "advices": advice, "partial_fills": partial_fills, "faults_planned": plan.items.len(),
+        "advices": advice, "partial_fills": partial_fills, "stale_gen_fills": stale_gen_fills,
+        "stale_gen": stale_gen, "faults_planned": plan.items.len(),
         "faults_scheduled_before_end": plan.items.iter().filter(|(t, _)| *t <= rec.end_ns).count(),
         "files": files, "summary": summary});
     std::fs::write(dir.join("case.json"), serde_json::to_vec_pretty(&result).unwrap()).unwrap();
@@ -201,6 +221,48 @@ fn rpl_284_partial_fills_replay_real_files_and_model_across_recovery() {
     assert_eq!(result["steps_run"], 10_000);
     assert!(result["partial_fills"].as_u64().unwrap() > 0, "{result}");
     assert!(result["recovery_runs"].as_u64().unwrap() >= 2, "{result}");
+}
+
+#[test]
+fn rpl_286_default_stale_fills_replay_original_files_and_model_across_recovery() {
+    use hft_testkit::dst::faults::{CrashFault, Fault};
+    use hft_testkit::dst::world::{VP, VS};
+    for seed in [0, 2] {
+        let mut cfg = replay_config(&suites()[0], seed);
+        cfg.steps = 10_000;
+        cfg.faults = hft_testkit::dst::FaultRates::off();
+        cfg.rerun = RerunPolicy::Never;
+        cfg.scripted = vec![
+            (0, Fault::StaleGenFill { venue: VS, count: 1 }),
+            (0, Fault::StaleGenFill { venue: VP, count: 1 }),
+            (5_000_000_000, Fault::StaleGenFill { venue: VS, count: 1 }),
+            (5_000_000_000, Fault::StaleGenFill { venue: VP, count: 1 }),
+            (
+                0,
+                Fault::Crash(CrashFault {
+                    at_step: 250,
+                    repeat: 2,
+                    point: hft_testkit::dst::CrashPoint::SeqInput,
+                }),
+            ),
+        ];
+        let dir = root().join(format!("target/dst/{seed:016x}/rpl-286-{}", std::process::id()));
+        let result = verify_case(&cfg, &dir);
+        assert_eq!(result["steps_run"], 10_000);
+        assert_eq!(result["stale_gen_fills"], 4, "{result}");
+        for venue in result["stale_gen"].as_array().unwrap() {
+            assert_eq!(venue["requested"], 2);
+            assert_eq!(venue["pending"], 0);
+            assert!(
+                venue["executions"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|x| x["delivered_seq"].as_u64().is_some())
+            );
+        }
+        assert!(result["recovery_runs"].as_u64().unwrap() >= 2, "{result}");
+    }
 }
 
 #[test]

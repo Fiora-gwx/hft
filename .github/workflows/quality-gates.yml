@@ -464,6 +464,16 @@ jobs:
             target/dst/*/rpl-284-*/
           if-no-files-found: ignore
           retention-days: 7
+      - name: Upload default stale-generation migration and replay evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stale-gen-migration
+          path: |
+            target/dst/stale-gen-migration.json
+            target/dst/*/rpl-286-*/
+          if-no-files-found: ignore
+          retention-days: 7
       # Directed infrastructure evidence, not LED-081 seed acceptance.
       - name: Upload settlement boundary evidence
         if: always()

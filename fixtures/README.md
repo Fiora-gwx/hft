@@ -66,6 +66,7 @@ fixtures/
                                    CI 在 x86_64 上逐字节核对,标签工作流的 aarch64 一致性集与同一提交的这份金样比较(规则归 development 与 testing §6)
   dst/recon-before.toml            已提交对账 actor 的迁移参考;TK-137 用旧 actor 重现摘要,新 actor 核对首条差异与检查器透明性;不覆盖当前 HashTrail 金样
   dst/partial-before.toml          部分成交故障接通前的迁移参考;TK-157 重现空操作摘要并核对首次故障前缀及检查器透明性;不覆盖当前 HashTrail 金样
+  dst/stale-before.toml            默认旧代数故障接通前的迁移参考;TK-163 重现旧摘要并核对首次故障前缀及检查器透明性;不覆盖当前 HashTrail 金样
 ```
 
 规则:`<case>` 用行为命名(`snapshot_then_gap_triggers_resync`、`price_in_scientific_notation`、`missing_E_field`、`base_asset_fee_on_buy`),不按日期编号。

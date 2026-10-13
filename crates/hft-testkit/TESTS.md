@@ -26,7 +26,7 @@ spec: README.md
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
 | 10. SeqRig | PY-106–PY-109、PY-111、PY-112 |
 | 实现说明 | 不适用:见子节 |
-| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140、TK-142、TK-144–TK-145、TK-155–TK-159 |
+| DST 的世界模型 | TK-045–TK-048、TK-055–TK-064、TK-097–TK-099、TK-126–TK-140、TK-142、TK-144–TK-145、TK-155–TK-164 |
 | 金样运行器 | TK-001、TK-005 |
 | 源文件 | TK-066 |
 | 延迟与资源契约 | TK-092–TK-093 |
@@ -2007,7 +2007,7 @@ spec: README.md
 - 级别:integ
 - 里程碑:M2
 - 前置:`fixtures/dst/partial-before.toml` 固定提交 4244872 的 50 个种子、套件、每行 2000 步及摘要
-- 步骤:只将 PartialFills 时长置零,保留计划条目、顺序与随机流,重现旧摘要;再运行正常故障并关闭全部检查器复跑
+- 步骤:StaleGenFill count 置零以保留历史边界;将 PartialFills 时长置零,保留计划条目、顺序与随机流,重现旧摘要;再启用 PartialFills 并关闭全部检查器复跑
 - 期望:旧摘要逐行相等,至少一行轨迹变化且首条差异不早于首次部分成交故障,此前 journal 前缀逐字节相同;全部运行达到原步数并通过不变量,检查器开关的完整 journal、交付、意图、HashTrail 与交易所真值相同
 - 证据:CI 保存 `target/dst/partial-fill-migration.json` 的原提交、新旧摘要、差异边界、实际部分成交数量及逐行比较结果,核对后才更新当前金样
 - 实现:`crates/hft-testkit/tests/partial_migration.rs::tk_157_partial_migration_reproduces_prior_goldens_and_preserves_prefix`
@@ -2031,6 +2031,62 @@ spec: README.md
 - 步骤:分别使用 clean、零时长、非正 lot 与结束时刻溢出配置
 - 期望:clean 与零时长不产生 PartialFill,原订单全成;非正 lot 和时刻溢出分别返回明确错误
 - 实现:`crates/hft-testkit/tests/partial_fills.rs::tk_159_partial_clean_zero_and_invalid_windows_are_explicit`
+
+### TK-160 默认旧代数成交的独立结算与完整身份
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:table
+- 里程碑:M2
+- 前置:W1 MockVenue 与真实 SimExchange,已到达的真实 Ack;永续另有方向相反的两 lot 持仓
+- 步骤:现货/永续分别运行种子 0–3,每次注入一个默认 StaleGenFill;报价从 60018.9 移到 60027.5
+- 期望:买卖和正/零成交 ID 的八种组合齐全,每次实际结算一个 lot;Ack 的账户、品种、epoch、slot 保留,gen 翻最高位且交易所订单号独立。现金、仓位、库存、累计副本与原件逐单位核对,永续平仓现金为正/负 8600 raw;交付和重复读取观察不再结算
+- 实现:`crates/hft-testkit/tests/stale_gen.rs::tk_160_default_stale_fills_preserve_original_settlement_and_scoped_identity`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| TK-160.1 | 现货 × 买卖 × 正/零 ID | 一个 lot 的库存与计价币现金按原始报价一致 |
+| TK-160.2 | 永续 × 买卖 × 正/零 ID | 一个 lot 的仓位与完整现金事实一致,交付不重复结算 |
+
+### TK-161 旧代数请求等待条件和容量错误
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:unit
+- 里程碑:M2
+- 前置:没有 Ack 的 W1 venue,一条待执行请求
+- 步骤:排入未来 Ack,在 Ack 到时前断开用户流,推进至恢复边界;另测 clean、count 零、请求容量满、非正 lot 和交付时刻溢出
+- 期望:未来 Ack 与断流期间都不改变交易所真值,恢复边界执行恰一笔;等待和实际成交分开计数。clean/count 零不排队;其他非法条件明确失败且不结算新成交,延后故障错误也终止世界
+- 实现:`crates/hft-testkit/tests/stale_gen.rs::tk_161_stale_queue_waits_for_ack_and_stream_and_fails_before_invalid_execution`
+
+### TK-162 真实旧代数成交的资金、证据与检查器透明性
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:integ
+- 里程碑:M2
+- 前置:沿用 LED-080 的真实 PairOnFill 开平仓与结束窗口,种子 0/2;12/16 s 各注入一笔现货,14/18 s 各一笔永续
+- 步骤:每行完整运行并逐原件关联 Ack、累计回报、同事件 OmsStaleGenFill 与冷热比较;关闭检查器复跑
+- 期望:每个 venue 的两条请求全部实际成交,正/零 ID、买卖方向覆盖;无在途或排除项,严格钱包和完整 journal 验证通过,开关检查器后的 journal、交付、意图、HashTrail、真值及故障观察相同。缺 venue 观察、缺原件、错误 gen 与篡改现金分别使证据检查失败
+- 实现:`crates/hft-testkit/tests/stale_gen.rs::tk_162_real_stale_fills_keep_strict_wallets_replay_and_checkers_equal`
+
+### TK-163 旧代数故障的完整金样迁移证据
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)、[HashTrail](README.md#7-状态哈希对比)
+- 级别:integ
+- 里程碑:M2
+- 前置:`fixtures/dst/stale-before.toml` 固定提交 eb236c8 的 50 个种子、套件、每行 2000 步与摘要
+- 步骤:仅将 StaleGenFill count 置零重现历史空路径,保留故障条目、顺序及随机流;再按默认 count 运行并关闭检查器复跑
+- 期望:旧摘要逐行复现,新轨迹至少一行变化且首差异不早于首次非零故障,此前字节相同;全部运行完成原步数并通过不变量,检查器开关后的完整 journal、交付、意图、HashTrail 与真值相同
+- 证据:CI 保留 `target/dst/stale-gen-migration.json` 的基线提交、新旧摘要、差异边界与实际成交数量,核对后才更新当前金样
+- 实现:`crates/hft-testkit/tests/stale_migration.rs::tk_163_stale_migration_reproduces_prior_goldens_and_preserves_prefix`
+
+### TK-164 框架模型按外来证据记入旧代数成交
+
+- 规则:[DST 的世界模型](README.md#dst-的世界模型)
+- 级别:integ
+- 里程碑:M2
+- 前置:ToyEngine 与 ToyMatcher,种子 0、2500 步,常规随机故障关闭
+- 步骤:现货、永续分别排入两条默认旧代数请求
+- 期望:实际产生四笔独立成交,外来证据和去重路径一致,全部不变量通过;框架模型不冒充真实引擎的 TK-162 验收
+- 实现:`crates/hft-testkit/tests/stale_gen.rs::tk_164_framework_model_books_default_stale_fills_as_external_evidence`
 
 ## 验收
 

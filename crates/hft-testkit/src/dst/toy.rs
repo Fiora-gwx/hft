@@ -596,6 +596,34 @@ impl ToyEngine {
             } else {
                 self.stale_gen += 1;
             }
+            // The framework model follows the same external-evidence path. Distinct stale
+            // orders must be booked; copies of an already observed receipt stay deduplicated.
+            if fill && tomb.is_none() && e.exch_order_id != 0 && matches!(e.detail, 1 | 2) {
+                self.on_external(
+                    out,
+                    seq,
+                    tsc,
+                    ExternalFill {
+                        venue: e.venue,
+                        account: e.account,
+                        side: if e.detail == 1 { Side::Buy } else { Side::Sell },
+                        cause: hft_event::ExternalCause::Unknown,
+                        inst: e.inst,
+                        qty: e.cum_filled,
+                        px: e.px,
+                        fee: e.fee,
+                        fee_asset: e.fee_asset,
+                        _pad: [0; 6],
+                        exch_order_id: e.exch_order_id,
+                        trade_id: e.trade_id,
+                        ex_ts_ns: e.ex_ts_ns,
+                        rx_tsc: Tsc(e.rx_tsc),
+                        fill_seq: if e.trade_id == 0 { e.cum_filled.0 as u64 } else { 0 },
+                        cash_qty: e.cash_qty,
+                        cash_amount: e.cash_sum,
+                    },
+                );
+            }
             return;
         };
         let s = self.slots[ix].clone();
