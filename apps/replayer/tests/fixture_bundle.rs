@@ -11,7 +11,8 @@ use sha2::{Digest, Sha256};
 use xtask::EnvError;
 use xtask::exec::{Cmd, Exec, Output, SysExec};
 
-use crate::{fixture, long_model};
+use crate::fixture;
+use crate::long_model::heavy as long_model;
 
 struct Pipeline {
     objects: BTreeMap<String, Vec<u8>>,
@@ -70,6 +71,7 @@ impl Exec for Pipeline {
 #[test]
 fn rpl_281_generated_bundle_fetch_replays_full_and_checkpoint_window() {
     let f = long_model::three_hours();
+    let f = &*f;
     let log = fixture::read(f);
     let from = long_model::h2(&log);
     let root = f.root.join("bundle-transport");

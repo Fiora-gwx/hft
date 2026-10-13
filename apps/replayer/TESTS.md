@@ -2211,6 +2211,7 @@ spec: README.md
 - 步骤:通过已记录的 SetMode 将组设为 Live,独立进程对两份完整目录执行 verify/recompute;3 h 文件另取 1 h 之后的首份检查点,从 2 h 之后首个关键帧 H2 验证;文件、检查点、参数与报告输出到 CI 的 replay-model-evidence 制品
 - 期望:实际 engine_ns 满足 1 h/3 h,分别有 2/4 段、每小时至少 12 个快照和 720 条 Advice、非零 OrderDecision 与真实 Fill;关键帧相邻间隔不超过 310 s,检查点相邻间隔为 600–610 s(10 s 投递粒度)。全部退出 0,双 verdict 为 pass,全窗口 coalesced = 0;窗口比较数恰为 Advice.seq > H2 的条数,检查点身份和 last_seq 匹配;输入文件、seal 与检查点字节不变。现场生成文件不替代尚未发布的固定 T1/T3 指针
 - 实现:`apps/replayer/tests/long_model.rs::rpl_270_full_duration_path_model_files_and_checkpoint_window`
+- 备注:feature `long-fixtures`(1 h / 3 h 现场生成文件),不在默认本地测试二进制;CI 的 `heavy-tests` 作业运行([development](../../docs/development.md#质量门quality-gatesyml))
 
 ### RPL-271 路径版本变化后的重建点来自实际引擎时间
 
@@ -2221,6 +2222,7 @@ spec: README.md
 - 步骤:分别以路径版本 1、2 的独立进程从检查点执行 recompute;由 journal EngineClock 锚点和记录头独立计算检查点后首个 engine_ns ≥ L 时刻 + 120 s 的记录 R
 - 期望:均退出 0、双 verdict 为 pass;同版本无重建点,版本 2 的 recompute_from_seq = R、比较数恰为 seq > L 且 basis_seq ≥ R 的 Advice 数,非零且小于同版本比较数;检查点输入字节不变
 - 实现:`apps/replayer/tests/long_model.rs::rpl_271_path_version_rebuild_uses_actual_engine_time`
+- 备注:feature `long-fixtures`(1 h / 3 h 现场生成文件),不在默认本地测试二进制;CI 的 `heavy-tests` 作业运行([development](../../docs/development.md#质量门quality-gatesyml))
 
 ### RPL-272 重启后的来源缺失与路径注记反例
 
@@ -2314,6 +2316,7 @@ spec: README.md
 - 步骤:原始输入;分别改变 cap 的 set_seq/scope.account、ledger/OMS/strategy/book/exec/EngineClock 节体字节,再同时改 EngineClock 与 ClockCal;单独改 ClockCal 作为正例;重算 CRC 与 seal,正式读者复查只改变目标逻辑字节;再同时改较早 CmdResult 与风险快照并 keep-going;每条记录保留原 CRC 策略,CmdResult 不强加 CRC;恢复来源重跑
 - 期望:原始、恢复输入与仅改 ClockCal 行体均退出 0;校准正例的 Input、Output、快照比较数与基线相同且非零。九行业务反例退出 1,首错精确为被改快照,此前及该点 Output 比较数由输入独立统计,恰一个普通分歧;组件、字段、两侧偏移与完整字段字节一致,混合校准差异不能掩盖 EngineClock 分歧;较早 CmdResult 首错不能借用风险组件。文件与报告/侧文件一致,运行不改输入;生成证据保留目标 seq 与逻辑偏移。此用例不替代固定 T1 的 RPL-017
 - 实现:`apps/replayer/tests/snapshot_diff.rs::rpl_279_generated_hour_snapshot_component_and_field_diagnostics`
+- 备注:feature `long-fixtures`(1 h / 3 h 现场生成文件),不在默认本地测试二进制;CI 的 `heavy-tests` 作业运行([development](../../docs/development.md#质量门quality-gatesyml))
 
 ### RPL-280 真实文件的损坏快照不猜组件
 
@@ -2324,6 +2327,7 @@ spec: README.md
 - 步骤:逐项改节保留字段、节长、重复节号与快照节数;每行从引导快照验证,再从损坏快照起步
 - 期望:完整回放退出 1,首错在被改快照,component 为 null,明细指明 Logged 侧、实际偏移与解析原因;从损坏快照起步自检退出 3,无成功报告;源文件不被修复或改写
 - 实现:`apps/replayer/tests/snapshot_diff.rs::rpl_280_malformed_snapshot_diagnostics_do_not_invent_components`
+- 备注:feature `long-fixtures`(1 h / 3 h 现场生成文件),不在默认本地测试二进制;CI 的 `heavy-tests` 作业运行([development](../../docs/development.md#质量门quality-gatesyml))
 
 | 行 | 损坏 | 完整回放明细 |
 |---|---|---|
@@ -2341,6 +2345,7 @@ spec: README.md
 - 步骤:根据原始字节建立临时 files-v1 指针;真实 zstd 压缩,只以本地对象存储替代 S3 交付;经 xtask 获取、复用缓存,再由同一回放包装器执行普通回放、完整重算、第一小时检查点到 H2 之后窗口的三项检查;测试执行器将固定 cargo 命令映射到已构建 example,不启动编译器;最后篡改缓存
 - 期望:十个文件逐字节相等,再次获取零下载;三项真实回放成功,完整与窗口 Advice 数从 journal 独立统计,普通回放与重算的 Input/Output/快照计数相等;源文件不变,坏缓存退出 2 且不执行回放。CI 证据保存指针和各项报告,明确标记 generated_not_frozen;不代替 S3/OIDC 实测或固定 T1/T3 验收
 - 实现:`apps/replayer/tests/fixture_bundle.rs::rpl_281_generated_bundle_fetch_replays_full_and_checkpoint_window`
+- 备注:feature `long-fixtures`(1 h / 3 h 现场生成文件),不在默认本地测试二进制;CI 的 `heavy-tests` 作业运行([development](../../docs/development.md#质量门quality-gatesyml))
 
 ### RPL-282 原件重复的真实文件完整与窗口回放
 

@@ -16,6 +16,8 @@ fn order(r: &hft_testkit::dst::sut::InputRec) -> Option<OrderEvent> {
     OrderEvent::try_read_from_bytes(&r.body).ok()
 }
 
+// Used by the `heavy` migration proofs (feature `dst-heavy`).
+#[cfg_attr(not(feature = "dst-heavy"), allow(dead_code))]
 pub(super) fn without_cancel(cfg: &DstConfig) -> DstConfig {
     let mut c = cfg.clone();
     let mut plan = c.fault_plan();

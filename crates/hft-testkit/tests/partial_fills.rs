@@ -11,6 +11,8 @@ use zerocopy::TryFromBytes;
 
 /// Keep the same event plan, ordering and random draws, but reproduce the former no-op.
 /// Historical actor migration tests also use this to isolate their own change.
+// Used by the `heavy` migration proofs (feature `dst-heavy`).
+#[cfg_attr(not(feature = "dst-heavy"), allow(dead_code))]
 pub(super) fn without_partial(cfg: &DstConfig) -> DstConfig {
     let mut cfg = cfg.clone();
     let mut plan = cfg.fault_plan();

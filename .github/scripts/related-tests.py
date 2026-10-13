@@ -78,7 +78,8 @@ def commands(packages: list[str]) -> list[list[str]]:
     # Proc tests launch examples built alongside the selected test assemblies.
     return [
         ["cargo", "build", *common, "--tests", "--examples", "--keep-going"],
-        ["cargo", "test", *common, "--no-fail-fast"],
+        # `heavy::` tests run in the heavy-tests job, like `cargo xtask ci` (docs/development.md).
+        ["cargo", "test", *common, "--no-fail-fast", "--", "--skip", "heavy::"],
     ]
 
 

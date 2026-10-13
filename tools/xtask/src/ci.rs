@@ -101,6 +101,10 @@ fn optional(root: &Path, ms: &[Member]) -> Result<Vec<(String, bool)>, EnvError>
         .collect())
 }
 
+/// Test-path filter of the heavy tests the unit/property step skips (the `heavy-tests` CI job
+/// runs exactly these).
+pub const HEAVY_TESTS: &str = "heavy::";
+
 /// `scope.toml` optional components with whether each is a workspace member.
 pub type Optional = Vec<(String, bool)>;
 
@@ -162,10 +166,15 @@ pub fn plan(root: &Path, opts: Options) -> Result<(Vec<Step>, Optional), EnvErro
     if opts.pure_only && selected.is_empty() {
         unit_notes.push("no tier = pure crate in the workspace".to_string());
     } else {
+        // `heavy::` tests (feature-gated DST migration proofs and long replayer fixtures) run
+        // in their own CI job (docs/development.md "质量门"), not in this step.
         unit.push(
             sel_args(&["test", "--profile", "ci"])
                 .arg("--all-features")
-                .arg("--no-fail-fast"),
+                .arg("--no-fail-fast")
+                .arg("--")
+                .arg("--skip")
+                .arg(HEAVY_TESTS),
         );
     }
     let py: Vec<String> = python_packages(root)

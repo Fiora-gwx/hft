@@ -1,6 +1,5 @@
 mod dst;
 mod fixture;
-mod fixture_bundle;
 mod long_model;
 mod model;
 mod model_boundary;
@@ -8,8 +7,15 @@ mod receipt;
 mod recompute;
 mod recovery;
 mod recovery_gap;
-mod snapshot_diff;
 mod verify;
+/// Tests over the generated 1 h / 3 h fixtures (feature `long-fixtures`; see `long_model::heavy`).
+#[cfg(feature = "long-fixtures")]
+mod heavy {
+    #[path = "../fixture_bundle.rs"]
+    mod fixture_bundle;
+    #[path = "../snapshot_diff.rs"]
+    mod snapshot_diff;
+}
 
 use hft_event::{EventKind, RecordFlags, RecordHeader};
 use hft_strategy_registry::Strategies;

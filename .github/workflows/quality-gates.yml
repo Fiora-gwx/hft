@@ -446,52 +446,15 @@ jobs:
             target/xtask/dst.json
           if-no-files-found: ignore
           retention-days: 7
-      - name: Upload reconciliation actor migration evidence
+      # The replayer's DST file cases keep their directories only when they fail (TmpDir evidence,
+      # crates/hft-testkit README "11. 临时目录"); the migration proofs run in heavy-tests.
+      - name: Upload failed replayer DST file evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: reconcile-migration
-          path: target/dst/reconcile-migration.json
-          if-no-files-found: ignore
-          retention-days: 7
-      - name: Upload partial-fill migration and file replay evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: partial-fill-migration
+          name: replayer-dst-file-evidence
           path: |
-            target/dst/partial-fill-migration.json
-            target/dst/*/rpl-284-*/
-          if-no-files-found: ignore
-          retention-days: 7
-      - name: Upload default stale-generation migration and replay evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: stale-gen-migration
-          path: |
-            target/dst/stale-gen-migration.json
-            target/dst/*/rpl-286-*/
-          if-no-files-found: ignore
-          retention-days: 7
-      - name: Upload recycled-fill migration and replay evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: late-recycle-migration
-          path: |
-            target/dst/late-recycle-migration.json
-            target/dst/*/rpl-287-*/
-          if-no-files-found: ignore
-          retention-days: 7
-      - name: Upload cancel-filled migration and replay evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: cancel-filled-migration
-          path: |
-            target/dst/cancel-filled-migration.json
-            target/dst/*/rpl-288-*/
+            target/dst/*/rpl-28[3-8]-*/
           if-no-files-found: ignore
           retention-days: 7
       # Directed infrastructure evidence, not LED-081 seed acceptance.
@@ -500,7 +463,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: reconcile-settlement
-          path: target/dst/reconcile-settlement.json
+          path: target/dst/reconcile-settlement-*.json
           if-no-files-found: ignore
           retention-days: 7
       - name: Save nested test builds
@@ -633,6 +596,58 @@ jobs:
             echo "**Over the 12-minute PR target.**" >>"$GITHUB_STEP_SUMMARY"
           fi
 
+  # Heavy tests (docs/development.md "质量门"): the DST HashTrail migration proofs (TK-137/157/163/
+  # 169/173, feature hft-testkit/dst-heavy) and the 1 h / 3 h replayer fixtures (RPL-270/271/279–281,
+  # feature replayer/long-fixtures); every test under a `heavy::` module, which `cargo xtask ci`
+  # skips. Own cache: the two-package feature set resolves differently from the workspace build.
+  heavy-tests:
+    needs: paths
+    if: ${{ !cancelled() && needs.paths.outputs.docs_only != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      HEAVY_FEATURES: hft-testkit/dst-heavy,replayer/long-fixtures
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.HEAD_SHA }}
+      - name: Free runner disk
+        run: bash .github/scripts/free-disk.sh
+      - name: Install pinned Rust toolchain
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: x86-heavy-v1
+          cache-on-failure: true
+      - name: Build the heavy test assemblies
+        run: cargo build --locked --profile ci -p hft-testkit -p replayer --features "$HEAVY_FEATURES" --tests --examples
+      - name: Run the heavy:: tests
+        env:
+          HFT_REPLAY_EVIDENCE_DIR: ${{ github.workspace }}/target/replay-model
+        run: cargo test --locked --profile ci -p hft-testkit -p replayer --features "$HEAVY_FEATURES" --tests --no-fail-fast -- heavy::
+      - name: Upload generated long-fixture Model replay evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: replay-model-evidence-long
+          path: target/replay-model/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Upload DST migration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dst-migration-evidence
+          path: |
+            target/dst/reconcile-migration-*.json
+            target/dst/partial-fill-migration-*.json
+            target/dst/stale-gen-migration-*.json
+            target/dst/late-recycle-migration-*.json
+            target/dst/cancel-filled-migration-*.json
+          if-no-files-found: ignore
+          retention-days: 7
+
   ops-py:
     needs: paths
     # Same condition as `rust`.
@@ -736,7 +751,7 @@ jobs:
           fi
 
   acceptance:
-    needs: [paths, docs, decoupling-gate, related-tests, rust, arch-check, benchmarks, ops-py, replay-dst]
+    needs: [paths, docs, decoupling-gate, related-tests, rust, arch-check, benchmarks, ops-py, replay-dst, heavy-tests]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

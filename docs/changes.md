@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-14 | DST HashTrail 迁移证明(TK-137/157/163/169/173)与 replayer 1 h / 3 h 文件用例(RPL-270/271/279–281)移入测试二进制的 `heavy` 模块,分别由 `dst-heavy`、`long-fixtures` feature 打开;`cargo xtask ci` 单元步与 related-tests 以 `--skip heavy::` 跳过,新增独立 `heavy-tests` 作业运行并上传迁移与长文件证据,验收汇总要求它成功 | 约 750 次 2 000 步真实引擎运行与长文件生成在默认本地测试二进制里,占 CI 时间与本地内存 | hft-testkit、replayer、tools/xtask、CI 工作流与脚本、development/testing/tools 文档 | 否 |
 | 2026-10-14 | 测试临时与证据目录改为 RAII `TmpDir`(`HFT_TEST_KEEP_TMP=1` 保留):hft-dst CLI 测试 panic 不再遗留目录,replayer DST 文件目录只在失败时保留(replay-dst 作业设保留),三小时夹具改为最后持有者释放;迁移证据按进程命名;CTL-155 取至多 3 轮的最佳 p99、CTL-010 超限时整组重放至多 4 组,上限不变;modes 回归集注释改为已修复 | TK-174、CTL-010、CTL-155、RPL-012、RPL-283–288;评审发现的目录泄漏、并发覆盖与墙钟断言抖动 | hft-testkit、replayer、hft-ctl 测试与规格、fixtures、CI | 否 |
 | 2026-10-14 | 10/12 五次 HashTrail 迁移(1af231b、b9d5024、03c4607、905fc14、f1f801d)的迁移前金样、CI 审计制品输出(按 Agent Note 记录的 ZIP 摘要核对后逐字节复制)与审计程序源码永久保存在 `fixtures/dst/history/`,TK-175 逐种子核对并串到 TK-137 在当前代码上重现的参考 | 这些审计的临时工作流在同一提交删除,证据只在 7 天后过期的 Actions 制品里 | fixtures、hft-testkit 测试与规格 | 否 |
 | 2026-10-14 | 每个不变量检查器累计实际比较的条目数(`RunRecord.compared`,hft-dst 结果 `compared`),I16 只计未被在途跳过的账户;标准冒烟种子集要求核心不变量比较数 > 0;`RiskRow` 改从引擎当前 RiskParams 与执行层参数观察 | TK-176、TK-177、TK-180;检查器通过时可能什么都没比较(如 INV-16 跳过在途账户) | hft-testkit、hft-exec(testkit 只读接口)、hft-dst | 否 |

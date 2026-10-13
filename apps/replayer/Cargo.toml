@@ -20,6 +20,12 @@ hft-strategy-registry = { path = "../../strategies/registry" }
 hft-rt.workspace = true
 serde_json = "1"
 
+[features]
+# Tests over the generated 1 h / 3 h path-model fixtures (tests/long_model.rs `heavy`, RPL-270,
+# RPL-271, RPL-279–281): not in the default local test binary; CI runs them in the `heavy-tests`
+# job (docs/development.md).
+long-fixtures = []
+
 [dev-dependencies]
 hft-refdata.workspace = true
 hft-journal = { workspace = true, features = ["mem-backend"] }

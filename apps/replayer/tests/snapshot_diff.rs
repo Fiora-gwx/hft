@@ -6,7 +6,7 @@ use hft_strategy_sdk::SnapshotReader;
 use serde_json::{Value, json};
 use zerocopy::FromBytes;
 
-use super::{fixture, long_model};
+use crate::{fixture, long_model};
 
 fn section(body: &[u8], id: u16) -> (usize, u32, usize) {
     let mut r = SnapshotReader::new(&body[96..]);
