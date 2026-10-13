@@ -608,14 +608,16 @@ Model 从检查点恢复、镜像尚未追到其 `last_seq` 时,落后量以该�
 - **关键帧**(`StateSnapshot{purpose=Keyframe}`)**一次写完**:实盘驱动按[环境决定表](#环境决定写成-input)的 `Sys{Snapshot}` 行(时间或事件数到期、空闲轮、最大推迟 2 个周期)交出 `Timer{Sys, Snapshot}`;sequencer 处理它时在同一事件内写完整个快照,随后 `end_event`、`publish`。停顿 ≤ 300 µs,是 [latency-budget §3.1](../../docs/latency-budget.md#31-p999-记录项) 的 p99.9 记录项;写出期间到达的输入在环中等待。两种触发与最大推迟一起给出恢复重放尾部的上界(数值写在 [apps/hft-core](../../apps/hft-core/README.md) 启动步骤)。**关键帧不计算 `state_hash`**:头部该字段写 0(四种驱动相同,逐字节比对不受影响),需要它的读者从节内容按[状态哈希](#状态哈希)的规则计算。恢复、验证与镜像驱动读到 `Timer{Sys, Snapshot}` 时同样一次写完(验证驱动逐字节比对)。
 - **L2 关键帧**:每个 Live 簿的 `L2Snapshot{origin=Keyframe}` 由 `Timer{Keyframe, inst}` 在每个 `keyframe_period_ms` 窗口内均摊写出(每簿每窗口一条;引导块另有一条),不在同一时刻导出全部簿。
 - **按需**(`SnapshotNow`)、**Drain**、**Recovery** 与引导块的快照同样一次写完。
-- **写出**:sequencer 按固定顺序调用各组件的 `snapshot(&self, w)`,每个组件一次写完本 crate 的全部节:[hft-ledger](../hft-ledger/README.md)(节 1、13、22)→ [hft-oms](../hft-oms/README.md)(节 2、3、12)→ [hft-risk](../hft-risk/README.md)(节 4、14、17、18、23)→ 本 crate(节 5、8、9、10、15、16、19、20、24、25、26、27)→ [hft-book](../hft-book/README.md) `BookSet::snapshot`(节 6、7)→ [hft-exec](../hft-exec/README.md)(节 21)。快照体内各节按这个写出顺序排列(节号不要求递增;读者按 `SectionHdr.section` 定位);`state_hash` 按写出顺序对各节内容累积(节 16 除外;关键帧不算、写 0),写完全部节后与 `n_sections` 一起回填 `SnapshotHdr`(此时尚未 publish,读者不可见)。写完任一快照后 `rx_from_seq` = 该快照的 `at_seq`(见[只读视图](#只读视图seqviews实现-sdk-views))。
-- **内容**:分节表与 `SnapshotHdr`/`SectionHdr` 归 [journal-format 快照记录结构](../../docs/subsystems/journal-format.md#快照记录结构);行格式由节的归属 crate 定义。本 crate 负责节 5、8–10、15、16、19、20、24、25、26、27(全部 `#[repr(C)]`、显式填充、按所列键升序;节 20 与节 25 的行格式在 journal-format;节 5 的实例状态字节由策略经 SDK 的 `SnapshotWriter` 写出)。
+- **写出**:sequencer 按固定顺序调用各组件的 `snapshot(&self, w)`,每个组件一次写完本 crate 的全部节:[hft-ledger](../hft-ledger/README.md)(节 1、13、22)→ [hft-oms](../hft-oms/README.md)(节 2、3、12)→ [hft-risk](../hft-risk/README.md)(节 4、14、17、18、23)→ 本 crate(节 5、8、9、10、15、16、19、20、24、25、26、27,有成交记录时另有节 28)→ [hft-book](../hft-book/README.md) `BookSet::snapshot`(节 6、7)→ [hft-exec](../hft-exec/README.md)(节 21)。快照体内各节按这个写出顺序排列(节号不要求递增;读者按 `SectionHdr.section` 定位);`state_hash` 按写出顺序对各节内容累积(节 16 与节 28 除外;关键帧不算、写 0),写完全部节后与 `n_sections` 一起回填 `SnapshotHdr`(此时尚未 publish,读者不可见)。写完任一快照后 `rx_from_seq` = 该快照的 `at_seq`(见[只读视图](#只读视图seqviews实现-sdk-views))。
+- **内容**:分节表与 `SnapshotHdr`/`SectionHdr` 归 [journal-format 快照记录结构](../../docs/subsystems/journal-format.md#快照记录结构);行格式由节的归属 crate 定义。本 crate 负责节 5、8–10、15、16、19、20、24、25、26、27、28(全部 `#[repr(C)]`、显式填充、按所列键升序;节 20 与节 25 的行格式在 journal-format;节 5 的实例状态字节由策略经 SDK 的 `SnapshotWriter` 写出)。
 - **快照中的 TSC 字段**(本 crate 的已登记行;其余持久时刻一律 engine_ns):节 8 `TimerRow.deadline_tsc` 与节 27 `StrategyTimerRow.deadline_tsc`(恢复结束时按[定时器](#定时器)的公式平移);节 26 `ConnLiveRow.live_tsc`(本次运行的值,处理 `EngineClock` 时清零,不平移);节 16 `ClockCalRow.tsc`(不计入 `state_hash`,只供冷读者换算 UTC)。
 - **从快照起步**(恢复、验证、镜像同一流程):各组件 `restore` 之后、处理任何 Input 之前,`rx_from_seq` = 该快照的 `at_seq`,对每个实例按生效的 `StrategyParams` 调 `ledger.on_groups_changed`、`risk.on_groups_changed`,并重算 `model_mem`、`model_ckpt`;对每个 group 以恢复出的 LegTracker 摘要调一次 `risk.on_legs`(只重建 hft-risk 的 `on_legs` 缓存;返回的 `AutoClear` 不执行、不写记录——快照之前的 Input 已对同一状态判定过);引导块与之后读到的 `L2Snapshot{origin = Keyframe}` 只写档位、不改 `restore` 读回的簿元数据([hft-book](../hft-book/README.md));再以节 10 每 inst 的 `(mark_px, mark_ens)` 调一次 `ledger.restore_marks`、以 `interval_s ≠ 0` 的行逐 inst 调 `ledger.on_funding_interval`——这些只重建不进快照的派生索引与缓存,不产生任何记录。
 
 #### 节行格式(草案,实现时以代码与编译期断言为准)
 
-当前行版本:节 5 v2、节 8 v2、节 9 v1、节 10 v6、节 15 v2、节 16 v1、节 19 v2、节 24 v1、节 26 v2、节 27 v1(节 20、25 的行格式与版本在 journal-format)。
+当前行版本:节 5 v2、节 8 v2、节 9 v1、节 10 v6、节 15 v2、节 16 v1、节 19 v2、节 24 v1、节 26 v2、节 27 v1、节 28 v1(节 20、25 的行格式与版本在 journal-format)。
+
+**节 28 `FillSeq`**(最近成交 seq):`CmdState.fill_seq` 是按 (account, inst) 的定长稠密表(启动时按 refdata 的账户数 × 品种数分配,成交路径只写不分配),`AdoptExchange` 的 `StaleReport` 守卫与 `AUTO_EXTERNAL` 前提读它。快照只写非零行,按 (account, inst) 升序;没有任何成交时整节不写,所以无成交的快照字节不变。恢复按行写回;节缺失(含早于本节的旧快照)= 空表(与旧版本恢复行为相同);行超出 refdata 维度、版本不符、`_pad` 非零、seq 为 0、inst 为 0 或乱序 → `SnapshotUndecodable{section: 28}`。本节是成交事件的派生索引,不计入 `state_hash` 与 DST `HashTrail`(与节 16 一样),但快照记录仍逐字节参与验证回放,离线快照自检(`replay_snapshot`)单独核对它的往返字节;因此从快照起步与连续回放做出相同的守卫判定。
 
 ```rust
 #[repr(C)] pub struct StrategyRowHdr {                                                                                  // 节 5,24 B
@@ -630,6 +632,7 @@ Model 从检查点恢复、镜像尚未追到其 `last_seq` 时,落后量以该�
 #[repr(C)] pub struct StrategyTimersHdr { pub strategy: StrategyId, pub _pad: [u8; 3], pub n_timers: u32, pub next_id: u64 } // 节 27,16 B;count 为实例数,每行头后 n_timers 条登记
 #[repr(C)] pub struct StrategyTimerRow { pub id: u64, pub deadline_tsc: u64, pub tag: u32, pub group: GroupId } // 节 27 登记,24 B;deadline_tsc 与节 8 同一运行、同一平移
 #[repr(C)] pub struct ActiveConfigRow { pub blob: BlobRef, pub scope: CmdScope }                                       // 节 9,64 B
+#[repr(C)] pub struct FillSeqRow { pub account: AccountId, pub _pad: [u8; 3], pub inst: InstId, pub seq: u64 }      // 节 28,16 B;键 (account, inst),只写 seq ≠ 0
 
 #[repr(C)] pub struct MarketLastRow {                                                                                    // 节 10,112 B;键 inst
     pub inst: InstId, pub interval_s: u32, pub trade_px: Px, pub trade_qty: Qty, pub trade_ts_ns: i64,

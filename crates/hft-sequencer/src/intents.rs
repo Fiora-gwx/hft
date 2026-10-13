@@ -706,11 +706,9 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
         };
         // Seq of the latest fill per (account, inst): `AdoptExchange`'s `StaleReport` check and
         // the `AUTO_EXTERNAL` precondition read it.
-        let key = (f.account, f.inst);
-        match e.cmd.fill_seq.iter_mut().find(|x| x.0 == key) {
-            Some(x) => x.1 = e.cur_seq,
-            None => e.cmd.fill_seq.push((key, e.cur_seq)),
-        }
+        // Fixed-size table: no allocation on the fill path; refdata bounds every fill key.
+        let stored = e.cmd.fill_seq.set(f.account, f.inst, e.cur_seq);
+        debug_assert!(stored, "fill outside refdata dimensions");
         let before = e.ledger.pos(f.account, f.inst).qty.0 != 0;
         let r = if let Some(amount) = f.cash {
             let cash = hft_ledger::PerpCashSettlement {

@@ -14,9 +14,9 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 use crate::Driver;
 use crate::clock::{EngineClockRow, SeqDayRow};
 use crate::commands::{
-    ACTIVE_CONFIG_VERSION, ActiveConfigRow, CMD_DEDUP_VERSION, CmdDedupHdr, RECON_PENDING_VERSION,
-    ReconPendingHdr, SECTION_ACTIVE_CONFIG, SECTION_CMD_DEDUP, SECTION_RECON_PENDING, SECTION_VENUE_NOTICES,
-    VENUE_NOTICES_VERSION,
+    ACTIVE_CONFIG_VERSION, ActiveConfigRow, CMD_DEDUP_VERSION, CmdDedupHdr, FILL_SEQ_VERSION, FillSeqRow,
+    RECON_PENDING_VERSION, ReconPendingHdr, SECTION_ACTIVE_CONFIG, SECTION_CMD_DEDUP, SECTION_FILL_SEQ,
+    SECTION_RECON_PENDING, SECTION_VENUE_NOTICES, VENUE_NOTICES_VERSION,
 };
 use crate::engine::Engine;
 use crate::journal::{BootSink, JournalSink};
@@ -296,6 +296,16 @@ fn w_seq_sections<S: StrategySet>(e: &Engine, inst: &Instances<S>, w: &mut Snaps
         }
     }
     w.end_section();
+    // 28 FillSeq: only when some (account, inst) has a fill, so fill-free snapshots keep
+    // their bytes; an absent section restores as an empty table.
+    let mut rows = e.cmd.fill_seq.rows().peekable();
+    if rows.peek().is_some() {
+        w.begin_section(SECTION_FILL_SEQ, FILL_SEQ_VERSION);
+        for r in rows {
+            w.put_row(&r);
+        }
+        w.end_section();
+    }
 }
 
 fn active_rows<S: StrategySet>(e: &Engine, inst: &Instances<S>) -> Vec<ActiveConfigRow> {
@@ -347,7 +357,9 @@ pub(crate) fn write_sections<S: StrategySet>(e: &Engine, inst: &Instances<S>, w:
     w.end_section();
 }
 
-/// `state_hash`: xxh3-128 of every section (header + body) in write order, section 16 excluded.
+/// `state_hash`: xxh3-128 of every section (header + body) in write order, sections 16 and 28
+/// excluded. Section 28 (latest fill seqs) is a derived guard index: replay still compares its
+/// bytes and the restore self-check round-trips it, but it does not move the conformance digest.
 pub fn state_hash(sections: &[u8]) -> [u8; 16] {
     let mut h = xxhash_rust::xxh3::Xxh3::new();
     let mut off = 0usize;
@@ -357,7 +369,7 @@ pub fn state_hash(sections: &[u8]) -> [u8; 16] {
         };
         let end = off + 16 + sh.len as usize;
         let Some(all) = sections.get(off..end) else { break };
-        if sh.section != SECTION_CLOCK_CAL {
+        if sh.section != SECTION_CLOCK_CAL && sh.section != SECTION_FILL_SEQ {
             h.update(all);
         }
         off = end;
@@ -698,6 +710,8 @@ pub struct SeqSections {
     pub conns: Vec<ConnLiveRow>,
     /// `None` distinguishes an old snapshot with no identity history from an empty table.
     pub strategy_timers: Option<Vec<(StrategyTimersHdr, Vec<StrategyTimerRow>)>>,
+    /// Section 28 (absent = no fill recorded, including snapshots written before it existed).
+    pub fill_seq: Vec<FillSeqRow>,
 }
 
 /// Parses sections 5–27 of this crate; `Err(section)` = undecodable.
@@ -843,6 +857,23 @@ pub fn read_seq_sections(body: &[u8]) -> Result<SeqSections, u16> {
             return Err(err);
         }
         out.strategy_timers = Some(states);
+    }
+    if let Some(s) = sec(SECTION_FILL_SEQ)? {
+        let err = SECTION_FILL_SEQ;
+        if s.version != FILL_SEQ_VERSION || s.body.len() != s.count as usize * 16 {
+            return Err(err);
+        }
+        let mut rr = s.reader();
+        let mut prev = (0u8, 0u32);
+        for k in 0..s.count {
+            let r: FillSeqRow = rr.get_row().map_err(|_| err)?;
+            let key = (r.account.0, r.inst.0);
+            if r._pad != [0; 3] || r.seq == 0 || r.inst.0 == 0 || (k > 0 && key <= prev) {
+                return Err(err);
+            }
+            prev = key;
+            out.fill_seq.push(r);
+        }
     }
     Ok(out)
 }

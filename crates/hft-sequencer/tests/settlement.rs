@@ -301,7 +301,11 @@ fn seq_418_bad_receipt_batch_cannot_partially_book() {
                 .is_some_and(|n| n.code == hft_ledger::notes::code::EXTERNAL_FILL)
         }));
         h.keyframe();
-        assert_eq!(wallet(cold_at(&h, &start).ledger()), wallet_before, "row {mutation}");
+        assert_eq!(
+            wallet(cold_at(&h, &start).ledger()),
+            wallet_before,
+            "row {mutation}"
+        );
         assert!(h.verify().is_empty(), "row {mutation}");
         assert!(h.verify_from(Some(start.seq)).is_empty(), "row {mutation}");
     }
@@ -458,6 +462,93 @@ fn seq_428_report_without_inst_does_not_stop_a_strict_cash_engine() {
     assert_eq!(cold.ledger().pos(AC1, B1), h.s.engine().ledger.pos(AC1, B1));
     assert!(h.verify().is_empty());
     assert!(h.verify_from(Some(start.seq)).is_empty());
+}
+
+#[test]
+fn seq_429_latest_fill_seq_survives_snapshot_recovery() {
+    use hft_sequencer::driver::live::RingId;
+    reset_script();
+    let mut h = b0().boot_self_contained();
+    h.steady();
+    add_hook(|hx, ev, ctx| {
+        if let EventRef::Bbo { inst, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+            && hx.v.bbo(A1).bid_px == px("50002")
+        {
+            let mut it = open_buy(hx, B1);
+            it.side = Side::Sell;
+            it.qty = Qty(100_000);
+            it.px = hx.v.bbo(B1).bid_px;
+            let _ = ctx.place(it);
+        }
+    });
+    let start = h.keyframe();
+    // An established, clean prior report enables AUTO_EXTERNAL.
+    let seen = h.j().records().last().unwrap().seq;
+    h.push(RingId::Ctl, &recon_summary(AC1, B, 801, seen));
+    assert_eq!(h.run(), StepOutcome::Idle);
+    assert!(h.s.engine().risk.auto_external_ok(AC1, B, 0));
+    let mark = h.mark();
+    h.quote(A1, "50002", "50003");
+    assert_eq!(h.run(), StepOutcome::Idle);
+    let d: Vec<_> = decisions(&h.since(mark))
+        .into_iter()
+        .filter(|(_, d)| d.inst == B1 && d.account == AC1 && d.reject == 0)
+        .map(|(_, d)| d)
+        .collect();
+    assert_eq!(d.len(), 1);
+    h.ack(&d[0]);
+    assert_eq!(h.run(), StepOutcome::Idle);
+    // The exchange view is taken here, before the fill.
+    let view_seq = h.j().records().last().unwrap().seq;
+    let mut e = order_event(&d[0], OrderEventKind::Fill, h.epoch());
+    e.cum_filled = Qty(100_000);
+    h.push(h.rep_ring(AC1), &e);
+    assert_eq!(h.run(), StepOutcome::Idle);
+    let pos = h.s.engine().ledger.pos(AC1, B1).qty;
+    assert_eq!(pos, Qty(-100_000));
+    let after_fill = h.keyframe();
+    let secs = hft_sequencer::snapshot::read_seq_sections(&after_fill.body[96..]).unwrap();
+    assert_eq!(secs.fill_seq.len(), 1, "SEQ-429.1");
+    assert_eq!((secs.fill_seq[0].account, secs.fill_seq[0].inst), (AC1, B1));
+    assert!(secs.fill_seq[0].seq > view_seq);
+    let before = hft_sequencer::snapshot::read_seq_sections(&start.body[96..]).unwrap();
+    assert!(before.fill_seq.is_empty(), "SEQ-429.2");
+    // A report viewed before that fill must not AUTO_EXTERNAL it away.
+    let mut summary = recon_summary(AC1, B, 802, view_seq);
+    summary.count = 2;
+    let mut p = summary;
+    p.idx = 1;
+    p.item = 1;
+    p.inst = B1;
+    p.engine_qty = pos;
+    p.exch_qty = Qty(-50_000);
+    p.sflags = hft_event::ReconcileReport::AUTO_EXTERNAL;
+    h.push(RingId::Ctl, &summary);
+    h.push(RingId::Ctl, &p);
+    assert_eq!(h.run(), StepOutcome::Idle);
+    assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, pos, "SEQ-429.3");
+    // Control: the same report viewed after the fill is applied.
+    let now = h.j().records().last().unwrap().seq;
+    for r in [&mut summary, &mut p] {
+        r.report_id = 803;
+        r.view_seq = now;
+    }
+    h.push(RingId::Ctl, &summary);
+    h.push(RingId::Ctl, &p);
+    assert_eq!(h.run(), StepOutcome::Idle);
+    assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, Qty(-50_000), "SEQ-429.4");
+    h.keyframe();
+    assert!(h.verify().is_empty());
+    // Recovery from either keyframe makes the same decision as the continuous run.
+    for from in [&start, &after_fill] {
+        assert!(
+            h.verify_from(Some(from.seq)).is_empty(),
+            "SEQ-429.3 from {}",
+            from.seq
+        );
+    }
 }
 
 #[test]

@@ -28,7 +28,7 @@ spec: README.md
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
 | 连接活性 | SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173 |
-| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420、SEQ-425–SEQ-428 |
+| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420、SEQ-425–SEQ-429 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
@@ -5862,6 +5862,24 @@ spec: README.md
 |---|---|---|
 | SEQ-428.1 | 第一张 `Reject{inst = 0}`(Binance WS API 错误响应的形态) | Idle |
 | SEQ-428.2 | 第一张 `Fill{inst = 0}`,带完整现金事实 | Idle;钱包按现金与费用变化,仓位 −100000;冷账本相同;验证回放无差异 |
+
+### SEQ-429 最近成交 seq 经快照恢复后守卫判定不变
+
+- 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)、[快照](README.md#快照)
+- 级别:integ
+- 里程碑:M2
+- 前置:B0(非严格现金);AC1 已有一次干净的完整报告(report 801);策略在第一条 A1 报价时在 B1 卖出 0.001 BTC
+- 步骤:
+  1. 写关键帧 K0;订单 Ack 后记下 `view_seq` = 当前末条 seq;交付全部成交;写关键帧 K1
+  2. 送 report 802:`view_seq` 取第 1 步的值,Position 条目 `AUTO_EXTERNAL`,`engine_qty` = −0.001,`exch_qty` = −0.0005
+  3. 送 report 803:同第 2 步,`view_seq` 取当前末条 seq
+  4. 写关键帧,做完整与从 K0、K1 起步的验证回放
+- 期望:
+  - K1 的节 28 恰好一行 (AC1, B1, seq > view_seq);K0 没有节 28(SEQ-429.1、.2)
+  - 第 2 步后仓位仍 −0.001(成交晚于报告视图,AUTO_EXTERNAL 不适用)(SEQ-429.3)
+  - 第 3 步后仓位为 −0.0005(SEQ-429.4,对照)
+  - 三种验证回放均无差异(从 K1 起步时守卫判定与连续运行相同)
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_429_latest_fill_seq_survives_snapshot_recovery`
 
 ## 验收
 

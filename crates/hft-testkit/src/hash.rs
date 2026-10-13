@@ -61,6 +61,8 @@ pub const SECTION_COMPONENT: &[(u16, Component)] = &[
 
 /// Section excluded from `state_hash` (ClockCal).
 pub const SECTION_CLOCK_CAL: u16 = 16;
+/// Section excluded from `state_hash` (FillSeq, a derived guard index; bytes still replayed).
+pub const SECTION_FILL_SEQ: u16 = 28;
 /// `SnapshotPurpose::Keyframe`.
 pub const PURPOSE_KEYFRAME: u8 = 2;
 
@@ -228,11 +230,12 @@ pub fn sections(logical: &[u8]) -> Result<(SnapshotHdr, Sections<'_>), SnapErr> 
     Ok((hdr, out))
 }
 
-/// `xxh3_128` over every section except 16, in write order (the reader-side keyframe hash).
+/// `xxh3_128` over every section except 16 and 28, in write order (the reader-side keyframe
+/// hash; same exclusions as the sequencer's `state_hash`).
 pub fn state_hash_of(secs: &[(u16, &[u8])]) -> u128 {
     let mut h = Xxh3::new();
     for (n, b) in secs {
-        if *n != SECTION_CLOCK_CAL {
+        if *n != SECTION_CLOCK_CAL && *n != SECTION_FILL_SEQ {
             h.update(b);
         }
     }

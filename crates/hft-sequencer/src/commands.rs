@@ -202,12 +202,81 @@ pub struct CmdState {
     pub recon_view: Vec<(u64, u64)>,
     /// `(report_id, account, inst) → exch − engine` of position items.
     pub recon_diff: Vec<((u64, AccountId, InstId), Qty)>,
-    /// `(account, inst) → seq of the last fill`.
-    pub fill_seq: Vec<((AccountId, InstId), u64)>,
+    /// `(account, inst) → seq of the last fill` (snapshot section 28).
+    pub fill_seq: FillSeqTable,
 }
 
+/// `(account, inst) → seq of the latest fill` read by the `AdoptExchange` `StaleReport` guard
+/// and the `AUTO_EXTERNAL` precondition. Dense and sized from refdata at boot, so the fill path
+/// never allocates (M1); persisted in snapshot section 28 so recovery equals continuous replay.
+#[derive(Clone, Debug, Default)]
+pub struct FillSeqTable {
+    /// Row stride: `inst_count + 1` (inst 0 is never a fill inst).
+    stride: usize,
+    seqs: Vec<u64>,
+}
+
+impl FillSeqTable {
+    pub fn new(n_accounts: usize, n_insts: usize) -> FillSeqTable {
+        let stride = n_insts + 1;
+        FillSeqTable {
+            stride,
+            seqs: vec![0; (n_accounts + 1) * stride],
+        }
+    }
+    fn ix(&self, a: AccountId, i: InstId) -> Option<usize> {
+        let i = i.0 as usize;
+        (i < self.stride).then(|| usize::from(a.0) * self.stride + i)
+    }
+    /// 0 = no fill seen (or outside refdata).
+    pub fn get(&self, a: AccountId, i: InstId) -> u64 {
+        self.ix(a, i).and_then(|x| self.seqs.get(x)).copied().unwrap_or(0)
+    }
+    /// `false` = the key is outside the boot dimensions (nothing stored).
+    pub fn set(&mut self, a: AccountId, i: InstId, seq: u64) -> bool {
+        match self.ix(a, i).and_then(|x| self.seqs.get_mut(x)) {
+            Some(x) => {
+                *x = seq;
+                true
+            }
+            None => false,
+        }
+    }
+    /// Nonzero entries in `(account, inst)` order (the section 28 row order).
+    pub fn rows(&self) -> impl Iterator<Item = FillSeqRow> + '_ {
+        let stride = self.stride.max(1);
+        self.seqs
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| **s != 0)
+            .map(move |(k, s)| FillSeqRow {
+                account: AccountId((k / stride) as u8),
+                _pad: [0; 3],
+                inst: InstId((k % stride) as u32),
+                seq: *s,
+            })
+    }
+}
+
+pub const SECTION_FILL_SEQ: u16 = 28;
+pub const FILL_SEQ_VERSION: u16 = 1;
+
+/// Section 28 row (16 B): the seq of the latest fill of `(account, inst)`; only nonzero rows,
+/// ascending `(account, inst)`. The section is written only when it has a row.
+#[repr(C)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, FromBytes, IntoBytes, Immutable, KnownLayout)]
+pub struct FillSeqRow {
+    pub account: AccountId,
+    pub _pad: [u8; 3],
+    pub inst: InstId,
+    pub seq: u64,
+}
+const _: () = assert!(core::mem::size_of::<FillSeqRow>() == 16);
+const _: () = assert!(core::mem::offset_of!(FillSeqRow, inst) == 4);
+const _: () = assert!(core::mem::offset_of!(FillSeqRow, seq) == 8);
+
 impl CmdState {
-    pub fn new(recent: usize) -> CmdState {
+    pub fn new(recent: usize, rd: &RefData) -> CmdState {
         let z = crate::strategies::zero_blob();
         CmdState {
             dedup: VecDeque::with_capacity(recent),
@@ -228,7 +297,7 @@ impl CmdState {
             feeds_last: vec![false; 256],
             recon_view: Vec::new(),
             recon_diff: Vec::new(),
-            fill_seq: Vec::with_capacity(256),
+            fill_seq: FillSeqTable::new(crate::engine::account_count(rd), rd.inst_count()),
         }
     }
     fn dedup_find(&self, id: &[u8; 16]) -> Option<&CmdDedupRow> {
@@ -1663,12 +1732,7 @@ fn adopt<D: Driver<S>, S: StrategySet>(
         .iter()
         .find(|x| x.0 == report_id)
         .map_or(0, |x| x.1);
-    let last_fill = e
-        .cmd
-        .fill_seq
-        .iter()
-        .find(|x| x.0 == (account, inst_id))
-        .map_or(0, |x| x.1);
+    let last_fill = e.cmd.fill_seq.get(account, inst_id);
     if last_fill > view_seq && view_seq != 0 {
         return Ok(res(status::PRECONDITION_FAILED, detail::STALE_REPORT));
     }
@@ -2690,7 +2754,7 @@ fn auto_external_check(e: &Engine, it: &ReconcileReport, summary_flags: u16) -> 
     if fl.open_buy.0 != 0 || fl.open_sell.0 != 0 {
         return false;
     }
-    let last_fill = e.cmd.fill_seq.iter().find(|x| x.0 == (a, i)).map_or(0, |x| x.1);
+    let last_fill = e.cmd.fill_seq.get(a, i);
     if last_fill > it.view_seq {
         return false;
     }
