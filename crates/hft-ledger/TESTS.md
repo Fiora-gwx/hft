@@ -967,7 +967,7 @@ spec: README.md
 - 门槛:④
 - 前置:testkit 假交易所(hft-sim 撮合器),测试策略在 `A1` 上运行 PairOnFill 开平仓;冷读者 = 本 crate 的消费驱动读同一份 journal
 - 故障:每个种子随机选 1–3 个时刻向 gw 注入 `StaleGen` 带成交的 `OrderEvent`(`exch_order_id ≠ 0`,`trade_id = 0` 与 `> 0` 各半)与 1 条 `SLOT_UNRESOLVED` 带成交的 `OrderEvent`;其中一半与之前 gw 已报的 `ExternalFill{Unknown}` 同一订单
-- 种子:PR 200(提交派生)+ 回归集;每夜日期派生
+- 种子:PR 200(提交派生)+ 回归集;每夜日期派生;现货重复回报的固定失败样本保留在 [core 回归集](../../fixtures/dst-seeds/core.txt)
 - 断言:每个事件边界后,热进程 ledger 与冷读者 ledger 的节 1、13、22 快照字节相等;每条 `Note{OmsForeignFill}` 在冷读者中恰好产生一次 `apply_external` 调用;INV-1、INV-16
 - 边界:同订单重叠限于一笔完整原始成交与其累计确认;每组对齐的四个种子共享数量与时刻,正/零 ID 和先发原件分别占半数;故障须实际改变模拟真值且最后全部交付,不得放宽钱包一致或用空观察跳过
 - 实现:`crates/hft-testkit/src/scenarios/foreign_ledger.rs::led_080_foreign_order_cold_hot_equal`

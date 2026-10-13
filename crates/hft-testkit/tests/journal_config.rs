@@ -227,11 +227,11 @@ fn tk_114_round_notes_replay_across_storage_restarts() {
 
 #[test]
 fn tk_120_drain_restart_conformance_keeps_recovery_gates() {
-    use hft_event::{CapRecord, OrderAction, OrderDecision, SnapshotHdr};
+    use hft_event::{CapRecord, OrderAction, OrderDecision, OrderFlags, SnapshotHdr};
     use hft_risk::snapshot::{GateRow, SECTION_GATES, SECTION_RISK_STATE};
     use hft_strategy_sdk::SnapshotReader;
     use hft_testkit::dst::{RerunPolicy, run_record};
-    use hft_types::{CapSource, OrderFlags, RejectBits};
+    use hft_types::{CapSource, RejectBits};
 
     let suite = hft_testkit::scenarios::suites()
         .into_iter()
