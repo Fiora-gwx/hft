@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | 不适用:非规范 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | TOOL-001–TOOL-002 |
-| cargo xtask ci | TOOL-003–TOOL-011, TOOL-186–TOOL-191、TOOL-206/207 |
+| cargo xtask ci | TOOL-003–TOOL-011, TOOL-186–TOOL-191、TOOL-206–TOOL-207 |
 | cargo xtask decoupling-gate | TOOL-012–TOOL-019 |
 | cargo xtask scaffold-gate | TOOL-020–TOOL-029 |
 | cargo xtask deps | TOOL-030–TOOL-031、TOOL-118 |
