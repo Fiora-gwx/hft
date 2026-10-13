@@ -227,8 +227,7 @@ fn tk_147_external_dedup_observation_keeps_scope_and_key_domain() {
     use hft_testkit::dst::seq::observe::Before;
     use hft_testkit::dst::sut::{BootCtx, InputRec, JRec, Source, Sut};
     use hft_testkit::dst::world::{ACCT_B, VS};
-    use hft_types::{InstId, Tsc};
-    use zerocopy::FromZeros;
+    use hft_types::{AssetId, InstId, Px, Tsc};
 
     fn check(state: &mut InvState, evidence: &[Evidence]) -> Result<(), String> {
         let info = StepInfo {
@@ -261,13 +260,25 @@ fn tk_147_external_dedup_observation_keeps_scope_and_key_domain() {
         tsc_hz: 1_000_000_000,
     })
     .unwrap();
-    let mut fill = ExternalFill::new_zeroed();
-    fill.account = ACCT_A;
-    fill.venue = VP;
-    fill.inst = P1;
-    fill.exch_order_id = 900;
-    fill.trade_id = 100;
-    fill.fill_seq = 100;
+    let mut fill = ExternalFill {
+        account: ACCT_A,
+        venue: VP,
+        inst: P1,
+        side: Side::Buy,
+        cause: ExternalCause::Unknown,
+        qty: Qty(100),
+        px: Px(600_100_000),
+        fee: Qty(0),
+        fee_asset: AssetId(0),
+        _pad: [0; 6],
+        exch_order_id: 900,
+        trade_id: 100,
+        ex_ts_ns: 1,
+        rx_tsc: Tsc(1),
+        fill_seq: 100,
+        cash_qty: Qty(100),
+        cash_amount: Qty(0),
+    };
     let positive = ExternalKey::Trade(100);
     let zero = ExternalKey::OrderSeq {
         exch_order_id: 900,
