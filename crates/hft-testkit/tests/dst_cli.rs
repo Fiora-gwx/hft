@@ -211,8 +211,5 @@ fn tk_180_cli_reports_compared_items_per_invariant() {
         body.contains(&format!("\"compared\":{{{}}}", fields.join(","))),
         "TK-180: {body}"
     );
-    assert!(
-        want[16] > 0 && want[1] > 0,
-        "TK-180: the sample compared nothing"
-    );
+    assert!(want[16] > 0 && want[1] > 0, "TK-180: the sample compared nothing");
 }

@@ -1,12 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use hft_event::{
-    AdviceHdr, EngineClock, EventKind, OrderAction, OrderDecision, OrderEvent, OrderEventKind, SnapshotHdr,
-};
-use hft_sequencer::advisor::checkpoint;
-use hft_sequencer::driver::replay::Log;
-use hft_strategy_sdk::SnapshotReader;
 use serde_json::Value;
 
 use crate::fixture;
