@@ -500,6 +500,7 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 - `MockVenue` 的交易所行为层是"规格中的交易所",与真实交易所的差异只能由金样、测试网/模拟盘联调与正式实盘的运行监控发现。
 - 真实 `SeqSut` 的基础币费用仅支持同一现货 venue 共用基础资产的世界;多基础资产与永续的该配置拒绝启动(TK-106)。
 - LED-080/081 的专属场景和标准种子入口按上述契约执行;`StaleGenFill` 待执行请求不算实际成交,`LateFillAfterRecycle` 未交付副本不算墓碑覆盖,覆盖数以原件与实际交付证据为准。后者的新增成交量路径仍由 OMS 定向用例覆盖,普通基线不计作该路径验收。多笔原件与累计回报的部分重叠仍明确失败,不在 LED-080 的单笔重复证明内。
+- 默认故障表中的 `CancelRejectFilled` 与运行期 `BaseFee` 尚未接入 MockVenue 的执行分支,计划条目不能计为覆盖。基础币费用的配置与资金验收仍按 TK-106 执行,不等于运行期费用扰动已覆盖。
 - 真实引擎的逐 Input 与逐决策观察契约见 [DST 框架](#6-dst-框架)。`toy::PLANTED` 各行的真实引擎版本(各 crate 的 `planted-*` feature)、`run_sim_case`(TK-009)、`ProbeBuild` 注入(TK-095)与模板探针的构建检查(TK-042)未落地(TK-053 仍以 `ToyEngine` 运行);`hft-dst` 的 `SIGINT`/`SIGTERM` 处理属 M6。
 
 ### 开发备忘

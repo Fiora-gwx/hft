@@ -189,7 +189,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:RPL-283 的真实引擎、Model 与物理文件,种子 0/2,每行 10000 步
 - 步骤:两个 venue 从 0 时刻各请求一次 LateFillAfterRecycle,第 250 步连续崩溃两次,保留原件并在回收后重送;独立 replayer 无检查点重算
-- 期望:每行两个请求均实际交付,首序号 < 回收边界 < 晚到序号,至少两个 Recovery 段;全部 DST 不变量、Output、快照及 Model Advice 通过;case.json 保留原件字节和墓碑身份,数量不包含等待请求或新造成交
+- 期望:每行两个请求均实际交付,首序号 < 回收边界 < 晚到序号,至少两个 Recovery 段;原件先于首个 Recovery、晚到副本在最后一次 Recovery 之后。全部 DST 不变量、Output、快照及 Model Advice 通过;case.json 保留恢复序号、原件字节和墓碑身份,数量不包含等待请求或新造成交
 - 实现:`apps/replayer/tests/dst.rs::rpl_287_recycled_copies_replay_real_files_and_model_after_recovery`
 
 ### RPL-013 未给 --from-seq 时从第一个段首快照起步并比对其后全部 Output

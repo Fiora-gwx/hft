@@ -109,16 +109,19 @@ fn verify_case(cfg: &DstConfig, dir: &Path) -> Value {
     let advice = log.recs.iter().filter(|r| r.kind == EventKind::ADVICE).count();
     assert!(advice > 0, "real Model channel was never exercised");
     assert_eq!(summary["model_advice_compared"].as_u64(), Some(advice as u64));
-    let recovery = log
+    let recovery_seqs: Vec<_> = log
         .recs
         .iter()
         .filter(|r| r.kind == EventKind::SEGMENT_ROLL)
-        .filter_map(|r| r.read::<SegmentRoll>())
         .filter(|r| {
-            r.mark == hft_journal::RollMark::Begin as u8
-                && r.reason == hft_journal::RollReason::Recovery as u8
+            r.read::<SegmentRoll>().is_some_and(|s| {
+                s.mark == hft_journal::RollMark::Begin as u8
+                    && s.reason == hft_journal::RollReason::Recovery as u8
+            })
         })
-        .count();
+        .map(|r| r.seq)
+        .collect();
+    let recovery = recovery_seqs.len();
     let partial_fills = log
         .recs
         .iter()
@@ -196,6 +199,7 @@ fn verify_case(cfg: &DstConfig, dir: &Path) -> Value {
     let result = json!({"seed": format!("{:#018x}", cfg.seed), "suite": cfg.suite,
         "steps_limit": cfg.steps, "steps_run": rec.steps_run, "end_ns": rec.end_ns,
         "records": log.recs.len(), "segments": log.segs.len(), "recovery_runs": recovery,
+        "recovery_seqs": recovery_seqs,
         "physical_last_seq": log.record_end_seq(log.recs.len() - 1),
         "advices": advice, "partial_fills": partial_fills, "stale_gen_fills": stale_gen_fills,
         "stale_gen": stale_gen, "late_recycle": late_recycle, "faults_planned": plan.items.len(),
@@ -329,6 +333,9 @@ fn rpl_287_recycled_copies_replay_real_files_and_model_after_recovery() {
         let result = verify_case(&cfg, &dir);
         assert_eq!(result["steps_run"], 10_000);
         assert!(result["recovery_runs"].as_u64().unwrap() >= 2);
+        let recoveries = result["recovery_seqs"].as_array().unwrap();
+        let first_recovery = recoveries.first().unwrap().as_u64().unwrap();
+        let last_recovery = recoveries.last().unwrap().as_u64().unwrap();
         let mut total = 0;
         for v in result["late_recycle"].as_array().unwrap() {
             assert_eq!(v["requested"], 1);
@@ -337,6 +344,8 @@ fn rpl_287_recycled_copies_replay_real_files_and_model_after_recovery() {
             let copies = v["copies"].as_array().unwrap();
             assert_eq!(copies.len(), 1);
             for x in copies {
+                assert!(x["original_seq"].as_u64().unwrap() < first_recovery);
+                assert!(x["delivered_seq"].as_u64().unwrap() > last_recovery);
                 assert!(x["original_seq"].as_u64().unwrap() < x["recycle_seq"].as_u64().unwrap());
                 assert!(x["delivered_seq"].as_u64().unwrap() > x["recycle_seq"].as_u64().unwrap());
             }
