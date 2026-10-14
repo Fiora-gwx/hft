@@ -4,7 +4,10 @@
     clippy::float_arithmetic,
     clippy::unwrap_used,
     clippy::expect_used,
-    clippy::panic
+    clippy::panic,
+    clippy::todo,
+    clippy::unimplemented,
+    clippy::unreachable
 )]
 
 pub mod fast;
