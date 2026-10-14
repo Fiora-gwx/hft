@@ -72,17 +72,21 @@ tier = "cold"
 ''', encoding="utf-8")
             for path, name in [("crates/core", "hft-core-lib"),
                                ("strategies/carry", "carry"),
+                               ("strategies/no-bench", "no-bench"),
                                ("strategies/registry", "hft-strategy-registry"),
                                ("strategies/_template", "template")]:
                 manifest = root / path / "Cargo.toml"
                 manifest.parent.mkdir(parents=True)
                 manifest.write_text(f'[package]\nname = "{name}"\n', encoding="utf-8")
+                if path != "strategies/no-bench":
+                    (manifest.parent / "benches").mkdir()
             previous = Path.cwd()
             os.chdir(root)
             try:
                 self.assertEqual(paths.hot_crates([
                     "strategies/carry/benches/on_event.rs", "strategies/carry/src/lib.rs",
                     "strategies/registry/src/lib.rs", "strategies/_template/src/lib.rs",
+                    "strategies/no-bench/src/lib.rs",
                     "strategies/deleted/src/lib.rs", "crates/core/src/lib.rs",
                 ]), ["carry", "hft-core-lib"])
                 self.assertEqual(paths.hot_crates(["strategies/carry/README.md"]), [])
