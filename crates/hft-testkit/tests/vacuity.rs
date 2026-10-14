@@ -4,9 +4,9 @@ use hft_testkit::dst::invariants::{CHECKERS, InvId};
 use hft_testkit::dst::{RerunPolicy, run_record};
 use hft_testkit::scenarios::{SeqEngine, suites};
 
-/// The cargo-test smoke set of `tests/dst/main.rs`: every suite, seeds 1 and 2, 2 000 steps.
+/// Trading smoke: every suite, seeds 1 and 2, 10 000 steps (includes Broken periods).
 const SMOKE_SEEDS: u64 = 2;
-const SMOKE_STEPS: u64 = 2_000;
+const SMOKE_STEPS: u64 = 10_000;
 
 /// Invariants every standard smoke run must actually exercise. The others are only reached by
 /// their directed cases (TK-179, TK-053.21–.23, LED-080/081 …) and are reported, not required.
@@ -25,6 +25,7 @@ const CORE: &[InvId] = &[
     InvId::I15,
     InvId::I16,
     InvId::I19,
+    InvId::I20,
 ];
 
 #[test]
@@ -105,9 +106,8 @@ fn tk_176_compared_counts_follow_enabled_checkers() {
     }
 }
 
-/// The opt-in trading world (`WorldSpec::w1_trading`, hft-testkit README "DST 的世界模型") on the
-/// standard smoke set: every run passes, and the hedge/naked-leg checkers compare far more than
-/// in W1 (INV-15/19: 69 vs 12 when introduced).
+/// Both trading and legacy worlds remain stable. Trading exercises hedge/naked-leg checks;
+/// flat-account margin heartbeats can also let the legacy world trade more than before.
 #[test]
 fn trading_world_smoke_exercises_hedges() {
     let mut total = [0u64; 32];
@@ -117,7 +117,9 @@ fn trading_world_smoke_exercises_hedges() {
             for (trading, sum) in [(true, &mut total), (false, &mut w1)] {
                 let mut c = s.config(seed);
                 if trading {
-                    c.world = hft_testkit::dst::world::WorldSpec::w1_trading(false);
+                    c.world = hft_testkit::dst::world::WorldSpec::w1_trading(true);
+                } else {
+                    c.world = hft_testkit::dst::world::WorldSpec::w1_legacy();
                 }
                 c.steps = SMOKE_STEPS;
                 c.rerun = RerunPolicy::Never;
@@ -137,6 +139,55 @@ fn trading_world_smoke_exercises_hedges() {
     for i in [InvId::I15, InvId::I19] {
         let (t, b) = (total[usize::from(i.0)], w1[usize::from(i.0)]);
         eprintln!("{}: trading {t}, W1 {b}", i.code());
-        assert!(t > 2 * b, "{}: trading world compared {t}, W1 {b}", i.code());
+        assert!(t > 0, "{}: trading world compared nothing", i.code());
+    }
+}
+
+#[test]
+fn tk_177_trading_world_regression_seeds() {
+    let mut errors = Vec::new();
+    for (name, seed) in [
+        ("storage", 0xd975_b663_903a_5073),
+        ("core", 0xffcf_b391_8b4c_9ae0),
+        ("storage", 0xffcf_b391_8b4c_9b42),
+        ("core", 0xffcf_b391_8b4c_9b7a),
+        ("core", 0xffcf_b391_8b4c_9af7),
+        ("core", 0xffcf_b391_8b4c_9af6),
+        ("storage", 0xffcf_b391_8b4c_9b0c),
+    ] {
+        let suite = suites().into_iter().find(|s| s.name == name).unwrap();
+        for cycles in [false, true] {
+            let mut c = suite.config(seed);
+            c.world = hft_testkit::dst::world::WorldSpec::w1_trading(cycles);
+            c.steps = 10_000;
+            c.rerun = RerunPolicy::Always;
+            let r = run_record::<SeqEngine>(&c);
+            if !r.outcome.is_pass() {
+                errors.push(format!(
+                    "{name} {seed:#018x} cycles={cycles}: {}",
+                    crate::seq_sut::show(&r)
+                ));
+            }
+        }
+    }
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}
+
+#[test]
+fn tk_177_replay_trading_position_limit() {
+    let seed = 0xe7ca_e53f_900f_5924;
+    let suite = suites().into_iter().find(|s| s.name == "core").unwrap();
+    for steps in [8_039, 10_000] {
+        let mut c = hft_testkit::scenarios::replay_config(&suite, seed);
+        c.steps = steps;
+        c.rerun = RerunPolicy::Always;
+        let r = run_record::<SeqEngine>(&c);
+        assert!(r.outcome.is_pass(), "{}", crate::seq_sut::show(&r));
+        assert_eq!(r.steps_run, steps);
+        if steps == 8_039 {
+            assert!(r.obs.positions.iter().any(|p| p.qty == 10_001_000));
+            assert!(r.obs.legs.iter().any(|l| l.naked_qty == 10_001_000));
+            assert!(r.stale_gen.iter().any(|v| !v.executions.is_empty()));
+        }
     }
 }

@@ -49,7 +49,7 @@
   - 记 `L(a, X)` = 账户 `a` 中引用资产 `X` 的各 group 的 `GroupLimits.max_pos_qty` 的最大值(没有这样的 group 时取 `AcctLimits.default_group.max_pos_qty`);每步:`|Σ_{inst ∈ X} 持仓(a, inst)|` ≤ `L(a, X)`(现货取 ledger 库存、永续取带符号仓位,同资产同尺度相加)
   - 每个 (a, g):`LegView.naked_qty` ≤ 该 group 各腿 `max_pos_qty` 的最大值
   - 每个增加 |仓位| 的出环 `Place`(Open,与不带 reduceOnly 的 Hedge):出环时 |持仓 + 同向在途 + qty| ≤ `max_pos_qty`(Open 计即时与挂单两类在途,Hedge 只计即时在途;口径同检查链 #7)
-  - 例外:由 `ExternalFill{cause ∈ {Manual, Unknown}}`、`AdoptExchange` 或 DST 注入的交易所真值差异使某 (a, X) 超出时,该 (a, X) 的前两条从这一步起暂停检查,直到它回到上限以内;第三条不例外
+  - 例外:由 `ExternalFill{cause ∈ {Manual, Unknown}}`、`AdoptExchange` 或 DST 注入的交易所真值差异使某 (a, X) 超出时,该 (a, X) 的前两条从这一步起暂停检查;旧代数/外来 OrderEvent 由同事件 ExternalFill 账本注记及实际持仓增量证明。只有资产净额、各品种持仓绝对量及 group 含在途裸量均回到上限以内才解除,避免被另一腿暂时抵消的超限在先平永续时重新暴露;第三条不例外
 - 实现:`crates/hft-testkit/src/dst/invariants.rs::inv_3_unhedged_within_risk_limits`
 - 备注:检查器 `I3`;原文"`RiskParams` 限额"取仓位上限 `max_pos_qty`(检查链 #7 的同一字段);主要触发场景 MS-3、BK-1、LT-1
 

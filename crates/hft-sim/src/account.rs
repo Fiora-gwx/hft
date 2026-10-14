@@ -579,9 +579,6 @@ impl SimExchange {
             .and_then(|a| a.mrep.get(k))
             .copied()
             .unwrap_or_default();
-        if m.n_pos == 0 && !force {
-            return;
-        }
         let ratio = m.ratio();
         let since = t.saturating_sub(rep.last_tsc);
         let send = force

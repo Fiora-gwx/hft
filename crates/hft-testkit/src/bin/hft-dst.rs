@@ -32,6 +32,7 @@ struct Args {
     out: Option<PathBuf>,
     crash_dir: Option<PathBuf>,
     trace: bool,
+    world: Option<bool>,
 }
 
 fn parse_u64(s: &str) -> Option<u64> {
@@ -56,6 +57,7 @@ fn parse() -> Result<Args, String> {
         out: None,
         crash_dir: None,
         trace: false,
+        world: None,
     };
     while let Some(k) = it.next() {
         let mut val = || it.next().ok_or(format!("{k} needs a value"));
@@ -78,6 +80,13 @@ fn parse() -> Result<Args, String> {
             "--out" => a.out = Some(PathBuf::from(val()?)),
             "--crash-dir" => a.crash_dir = Some(PathBuf::from(val()?)),
             "--trace" => a.trace = true,
+            "--world" => {
+                a.world = Some(match val()?.as_str() {
+                    "trading" => true,
+                    "legacy" => false,
+                    _ => return Err("--world trading|legacy".into()),
+                })
+            }
             _ => return Err(format!("unknown argument {k}")),
         }
     }
@@ -115,6 +124,12 @@ fn config(a: &Args, all: &[DstSuite], case: Option<Scenario>, seed: u64) -> Resu
     };
     cfg.steps = a.steps;
     cfg.trace = a.trace;
+    let recorded_legacy =
+        a.cmd == "repro" && case.is_none() && hft_testkit::scenarios::legacy_regression(cfg.suite, seed);
+    if let Some(trading) = a.world.or(recorded_legacy.then_some(false)) {
+        cfg.world.margin_feed = trading;
+        cfg.world.taker_cycles = trading;
+    }
     Ok(cfg)
 }
 

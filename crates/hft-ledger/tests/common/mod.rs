@@ -624,7 +624,7 @@ pub fn boot_a1_init(l: &mut Ledger, t0: i64, btc: &str, bnb: &str) {
         (S1, BNB, qa(BNB, bnb)),
         (P2, USDT, usdt("50000")),
     ] {
-        l.on_balance(&bal(A1, v, a, free, Qty(0), D), false, t0);
+        l.on_balance(&bal(A1, v, a, free, Qty(0), D), true, t0);
     }
     l.on_ref_px(BTC_S1, px("59999.99"), px("60000.01"), t0);
     l.on_ref_px(BNB_S1, px("599.99"), px("600.01"), t0);
@@ -638,9 +638,9 @@ pub fn boot_a1(l: &mut Ledger, t0: i64) {
 
 /// `A2` initialized: `S3` USDC `usdc`, `P2` USDT `p2_usdt`.
 pub fn boot_a2(l: &mut Ledger, t: i64, usdc: &str, p2_usdt: &str) {
-    l.on_balance(&bal(A2, S3, USDC, qa(USDC, usdc), Qty(0), D), false, t);
-    l.on_balance(&bal(A2, S3, BTC, Qty(0), Qty(0), D), false, t);
-    l.on_balance(&bal(A2, P2, USDT, usdt(p2_usdt), Qty(0), D), false, t);
+    l.on_balance(&bal(A2, S3, USDC, qa(USDC, usdc), Qty(0), D), true, t);
+    l.on_balance(&bal(A2, S3, BTC, Qty(0), Qty(0), D), true, t);
+    l.on_balance(&bal(A2, P2, USDT, usdt(p2_usdt), Qty(0), D), true, t);
 }
 
 /// `ledger_lf()` + `boot_a1(0 s)`.

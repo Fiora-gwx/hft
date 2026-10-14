@@ -42,7 +42,29 @@ fn rates(list: &[(FaultCategory, u32)]) -> FaultRates {
 }
 
 fn base(seed: u64) -> DstConfig {
-    DstConfig::new(seed, "core")
+    let mut cfg = DstConfig::new(seed, "core");
+    cfg.world = crate::dst::world::WorldSpec::w1_trading(true);
+    cfg
+}
+
+/// Recorded counterexamples retain their original world. New trading fixtures carry
+/// `world=trading`; unmarked rows predate the standard trading-world switch.
+pub fn legacy_regression(suite: &str, seed: u64) -> bool {
+    let rows = match suite {
+        "core" => include_str!("../../../../fixtures/dst-seeds/core.txt"),
+        "modes" => include_str!("../../../../fixtures/dst-seeds/modes.txt"),
+        "storage" => include_str!("../../../../fixtures/dst-seeds/storage.txt"),
+        _ => return false,
+    };
+    rows.lines().any(|line| {
+        let mut words = line.split_whitespace();
+        words
+            .next()
+            .and_then(|s| s.strip_prefix("0x"))
+            .and_then(|s| u64::from_str_radix(s, 16).ok())
+            == Some(seed)
+            && !words.any(|w| w == "world=trading")
+    })
 }
 
 /// RPL-012 uses the normal suite faults and step count, with one Live taker and one Sim

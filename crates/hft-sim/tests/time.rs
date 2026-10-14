@@ -63,9 +63,16 @@ fn sim_012_drain_order() {
     s.place(A9, BTC_S1, Buy, "0.1", "60000", Tif::Ioc, ms(100));
     s.place(A8, BTC_S1, Buy, "0.1", "60000", Tif::Ioc, ms(100));
     s.advance(ms(110));
-    assert_eq!(s.ex.next_due(), Some(Tsc(ms(102))));
+    // The flat account's startup margin report precedes the first order response.
+    assert_eq!(s.ex.next_due(), Some(Tsc(ms(101))));
     s.drain(ms(110));
-    let accts: Vec<_> = s.out.iter().map(|r| (r.account, r.due)).collect();
+    assert!(s.out.windows(2).all(|w| w[0].due <= w[1].due));
+    let accts: Vec<_> = s
+        .out
+        .iter()
+        .filter(|r| matches!(r.msg, hft_event::RepMsg::OrderEvent(_)))
+        .map(|r| (r.account, r.due))
+        .collect();
     let n8 = accts.iter().filter(|(a, _)| *a == A8).count();
     assert!(n8 >= 2);
     assert!(

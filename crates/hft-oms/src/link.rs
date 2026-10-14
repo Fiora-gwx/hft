@@ -83,8 +83,22 @@ impl Oms {
         {
             return sl.inst;
         }
-        self.tomb(f.venue, f.account, f.slot, f.r#gen)
-            .map_or(InstId(0), |t| t.inst)
+        if let Some(t) = self.tomb(f.venue, f.account, f.slot, f.r#gen) {
+            return t.inst;
+        }
+        // A gated link can outlive its first slot and the finite tombstone history. Its group
+        // remains pinned while active. Recover the unique first-venue leg from that definition.
+        let Some(g) = self.group_ix(e.account, e.group).and_then(|i| self.groups.get(i)) else {
+            return InstId(0);
+        };
+        let mut legs = g
+            .insts
+            .iter()
+            .take(usize::from(g.n_legs))
+            .copied()
+            .filter(|i| self.inst(*i).venue == f.venue);
+        let first = legs.next().unwrap_or(InstId(0));
+        if legs.next().is_some() { InstId(0) } else { first }
     }
 
     /// Side of the first leg (opposite of the hedge side).
@@ -144,6 +158,9 @@ impl Oms {
         let e = self.links.get(i)?;
         let (_, p) = self.plans.get(i)?;
         let finst = self.first_inst(i);
+        if finst.0 == 0 {
+            return Some(0);
+        }
         let fx = self.leg_ix_of(e.account, e.group, finst);
         let hx = self.leg_ix_of(e.account, e.group, p.inst);
         let lv = &self.legs(e.account, e.group).view;

@@ -13,3 +13,8 @@
 0x6358ace2ebdb85b8 2026-10-13 现货旧代数副本已正确去重,冷账本检查误把未映射计数当成新入账(LED-267;https://github.com/Fiora-gwx/hft/actions/runs/38381173440)
 0x6358ace2ebdb85c3 2026-10-13 现货旧代数副本已正确去重,冷账本检查误把未映射计数当成新入账(LED-267;https://github.com/Fiora-gwx/hft/actions/runs/38381173440)
 0x61aaa3c81c37eb19 2026-10-14 INV-4 group/link observation; .agents/notes/implemented/bug-fix/2026-10-14-dst-decision-scope-and-exec-passes.md (TK-107)
+0xffcfb3918b4c9ae0 2026-10-14 world=trading 余额初始化与在途成交重复计量
+0xffcfb3918b4c9b7a 2026-10-14 world=trading INV-14 查询确认终态的执行结果证据
+0xffcfb3918b4c9af7 2026-10-14 world=trading INV-8 交易世界反例复核
+0xffcfb3918b4c9af6 2026-10-14 world=trading INV-6 准入前腿摘要与快照恢复不同
+0xe7cae53f900f5924 2026-10-14 world=trading INV-3 replay_config 旧代数外来持仓超限后先平永续的例外识别及解除

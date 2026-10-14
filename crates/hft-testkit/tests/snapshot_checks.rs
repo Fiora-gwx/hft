@@ -20,6 +20,8 @@ fn check_snapshot_preserves_margin_run_boundary() {
         .find(|s| s.name == "modes")
         .unwrap();
     let mut c = suite.config(0x8573_1331_22fc_e369);
+    c.world.margin_feed = false;
+    c.world.taker_cycles = false;
     c.steps = 8000;
     c.rerun = hft_testkit::dst::RerunPolicy::Never;
     let r = run_record::<E>(&c);

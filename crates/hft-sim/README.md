@@ -242,7 +242,7 @@ sim-gw 按该 venue 的 [`VenueCaps`](../hft-refdata/README.md) 模仿交易所�
 | `OrderEvent` | 撮合与终态 | `OrderEventKind`(码值归 [hft-event](../hft-event/README.md)):`Ack` → 每档一条 `PartialFill`/`Fill`(累计量、均价、`fee`、`fee_asset`)→ IOC 余量 `Expired`;拒单为 `Reject`(`reject_code = SIM_CODE_BASE + n`,n 见[拒单规则](#拒单规则));`late_fee` 的延迟费用为 `FeeOnly`;`ex_ts_ns` = 撮合时所用行情记录的交易所时间 |
 | `OrderEvent`(撤、改、查) | 该指令的 `arrive_tsc` | 按订单表(每账户 1,024 项:挂单与最近终结的订单,满时淘汰最早终结的记录):`Cancel` 目标是挂单 → `CancelAck`(解锁),否则 `CancelReject`;`CancelAll` 对范围内(`inst ≠ 0` 为该 inst,`inst = 0` 为该账户全部)每个挂单一条 `CancelAck`;`Amend` 目标是挂单且新价量通过拒单规则第 2–4、7–9 条 → `AmendAck`,否则 `AmendReject`;`Query` → `QueryResult`(`order_status`:挂单 New/PartiallyFilled,终态记录按其终态,订单表中没有 → NotFound;带 `cum_filled` 与 `avg_px`) |
 | `FundingSettle` | 结算时刻 | `funding_settle = PerSymbolPush`:每 inst 一条;`BalanceOnlyPush`:`inst = INST_NONE` 的合计;`RateOnly`:不推送(由 sequencer 按规则合成,[hft-event](../hft-event/README.md)) |
-| `MarginReport` | `margin_data = Push`:比率与上一条报告之差的绝对值 ≥ 0.01 或距上一条 1 s;`Poll{interval_ms}`:每 `interval_ms` | 保证金余额、维持、可用、比率、每 inst 强平价(按 §7 的公式算,与模拟强平的触发条件同一口径;ADL 档恒 0) |
+| `MarginReport` | 含空仓账户(n = 0);`margin_data = Push`:比率与上一条报告之差的绝对值 ≥ 0.01 或距上一条 1 s;`Poll{interval_ms}`:每 `interval_ms` | 保证金余额、维持、可用、比率、每 inst 强平价(按 §7 的公式算,与模拟强平的触发条件同一口径;ADL 档恒 0) |
 | `ExternalFill{cause = Liquidation}` | 模拟强平 | 每 inst 一条,带强平费 |
 | `AccountConfigReport` | 启动与 `SimReset` 后 | 恒与 `VenueCaps` 要求一致(`mismatches = 0`,`uid_keys = 0`:Sim 账户没有 key,`IDENTITY` 对它视为满足);永续 venue 对每个可交易 inst 一条 `LeverageItem{leverage = MarginModel.leverage}`,hft-risk 按它折算保证金 |
 | `PositionReport` / `BalanceReport` | 事件时间 0(随启动回报)、此后每 `report_interval_s`,以及每次 `SimTransfer`/`SimReset` | 模拟真值,供 ledger 校验与 `SimDrift`;每个非零余额/仓位一条,上一条报告非零而现在为零的再报一次;`due_tsc` = 该事件时刻(不加 resp 延迟) |

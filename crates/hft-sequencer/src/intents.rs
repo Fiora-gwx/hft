@@ -460,6 +460,31 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
         None
     };
     // 5. evaluate.
+    // OMS reservations can change between reports (place/cancel/hedge). Refresh the
+    // authoritative legs before admission, just as recovery rebuilds this derived cache.
+    if it.group.0 != 0 {
+        let summary = crate::views::leg_summary(
+            &e.oms,
+            &e.market,
+            &e.rd,
+            account,
+            it.group,
+            inst.spec(account, it.group),
+        );
+        let _ = e.risk.on_legs(account, it.group, &summary);
+    }
+    if let Some(p) = pair.as_ref().filter(|p| p.view.group.0 != 0) {
+        let summary = crate::views::leg_summary(
+            &e.oms,
+            &e.market,
+            &e.rd,
+            p.view.account,
+            p.view.group,
+            inst.spec(p.view.account, p.view.group),
+        );
+        let _ = e.risk.on_legs(p.view.account, p.view.group, &summary);
+    }
+    // Cap side effects remain in the post-report pass, after execution has seen its updates.
     if e.trace.on {
         e.trace.views.push(iv);
         if let Some(p) = &pair {

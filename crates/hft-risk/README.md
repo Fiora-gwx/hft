@@ -530,7 +530,7 @@ pub struct KillCmd { pub level: KillLevel, pub scope: CmdScope, pub cancel_resti
 
 1. **度量**:`liq_dist = min(rep_liq_dist, est_liq_dist)`——交易所给的 `liq_px` 与 ledger 估计取更保守者(某持仓的报告未给 `liq_px` 时该持仓只用估计);无永续持仓 → `Rate::MAX`。
 2. **交叉校验**:`r = max(reported_ratio, est_ratio)`;`r ≥ margin_ratio_crosscheck` → 至少 L2。
-3. **数据过期或不完整 → 至少 L1**:无报告;报告早于本次运行起点(`report_ens < run_start_ens`,即重启后尚未收到新报告);`now.engine_ns − report_ens > margin_stale_ms`;报告带 `ITEMS_TRUNCATED`;**标记价断流**:有永续持仓且 `mark_ens < run_start_ens` 或 `now.engine_ns − mark_ens > mark_stale_ms`(估计强平距离依赖的 mark 不再更新)。停止到达的数据由 `Timer{Risk, MarginStale}` 判定:截止取 `min(report_ens + margin_stale_ms, mark_ens + mark_stale_ms) + 1 ns`(过期按严格大于判定:`now.engine_ns = report_ens + margin_stale_ms` 时未过期,再晚 1 ns 即过期;标记价同理),到期时按本模块存下的最近一份 `MarginSample` 复核,未过期则按新截止重新登记(每 (account, venue) 至多一个在堆);定时器早到(`now.engine_ns` < 截止,重启后 TSC 换算的取整差)时只按剩余时长重新登记、不改档位。
+3. **数据过期或不完整 → 至少 L1**:无报告;报告早于本次运行起点(`report_ens < run_start_ens`,即重启后尚未收到新报告);`now.engine_ns − report_ens > margin_stale_ms`;报告带 `ITEMS_TRUNCATED`;**标记价断流**:有永续持仓或永续在途订单且 `mark_ens < run_start_ens` 或 `now.engine_ns − mark_ens > mark_stale_ms`(估计强平距离依赖的 mark 不再更新)。停止到达的数据由 `Timer{Risk, MarginStale}` 判定:截止取 `min(report_ens + margin_stale_ms, mark_ens + mark_stale_ms) + 1 ns`(过期按严格大于判定:`now.engine_ns = report_ens + margin_stale_ms` 时未过期,再晚 1 ns 即过期;标记价同理),最后一个永续持仓与在途订单结束后由 sequencer 刷新空仓样本,不再沿用旧仓 mark;保证金报告自身的完整性与新鲜度仍按本条检查。到期时按本模块存下的最近一份 `MarginSample` 复核,未过期则按新截止重新登记(每 (account, venue) 至多一个在堆);定时器早到(`now.engine_ns` < 截止,重启后 TSC 换算的取整差)时只按剩余时长重新登记、不改档位。
 
 | 档 | 条件(任一满足) | 动作 |
 |---|---|---|

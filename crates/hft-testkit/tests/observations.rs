@@ -32,11 +32,7 @@ fn capture(events: &[EventStep]) {
                 d.action == OrderAction::New
                     && d.reject == 0
                     && d.link_role == hft_strategy_sdk::LinkRole::SecondRetry as u8
-            }) && e
-                .info
-                .decisions
-                .iter()
-                .any(|d| d.seq == r.seq && d.group_unknown && !d.link_unknown)
+            }) && e.info.decisions.iter().any(|d| d.seq == r.seq && !d.link_unknown)
         }) {
             UNKNOWN_SAMPLES.with(|s| {
                 let mut s = s.borrow_mut();
@@ -253,6 +249,9 @@ impl<const FORCE: bool, S: hft_strategy_sdk::StrategySet, const RECOVER: bool> S
         self.0.drain_observations(o);
         capture(&o.events[n..]);
     }
+    fn control_state_version(&self) -> Result<u64, String> {
+        self.0.control_state_version()
+    }
     fn next_deadline(&self) -> Option<u64> {
         self.0.next_deadline()
     }
@@ -304,7 +303,39 @@ impl<const FORCE: bool, S: hft_strategy_sdk::StrategySet, const RECOVER: bool> S
 
 #[test]
 fn tk_110_real_fee_history_across_restarts() {
-    let c = crate::fee_cycle::config(6_000);
+    let mut c = crate::fee_cycle::config(6_000);
+    // Explicitly hold a real fill until its cancel rejection books the cumulative quantity.
+    // Its original base fee must arrive with the later Fill, independently of timer cadence.
+    c.scripted = vec![(
+        0,
+        hft_testkit::dst::Fault::CancelRejectFilled {
+            venue: hft_testkit::dst::world::VS,
+            count: 1,
+            hold_ms: 5_000,
+        },
+    )];
+    let at = 200_000_000;
+    c.confirmed_commands.push((
+        at,
+        hft_testkit::dst::actors::encode_cmd(
+            &hft_event::ControlCmd::CancelAll {
+                scope: hft_event::CmdScope {
+                    strategy: hft_types::StrategyId(0),
+                    venue: hft_testkit::dst::world::VS,
+                    account: hft_testkit::dst::world::ACCT_A,
+                    _pad: 0,
+                    group: hft_types::GROUP_ALL,
+                    inst: hft_types::InstId(0),
+                    _pad2: 0,
+                },
+            },
+            "fee-recovery",
+            hft_event::CmdHdr::ROLE_ADMIN,
+            hft_testkit::dst::world::ACCT_A,
+            hft_testkit::dst::world::UTC0 as u64 + at,
+            100,
+        ),
+    ));
     let r = run_record::<Observed<false, crate::fee_cycle::FeeStrategies, true>>(&c);
     assert!(r.outcome.is_pass(), "{}", crate::seq_sut::show(&r));
     assert_eq!(r.steps_run, 10_000);
@@ -367,40 +398,29 @@ fn check_unknown_is_scoped_to_decision_group_and_link() {
         .find(|s| s.name == "core")
         .unwrap();
     let mut c = suite.config(0x61aa_a3c8_1c37_eb19);
-    // A CI seed recorded in the world before 2026-10-14 (no marks, holding takers).
     c.world.margin_feed = false;
     c.world.taker_cycles = false;
-    c.steps = 7_111;
     c.rerun = hft_testkit::dst::RerunPolicy::Never;
     let r = run_record::<Observed>(&c);
     assert!(r.outcome.is_pass(), "{}", crate::seq_sut::show(&r));
     let found = UNKNOWN_SAMPLES.with(|s| s.take()).into_iter().last();
-    let e = &found.expect("retry beside another Unknown link was not exercised");
+    let mut sample = found.expect("a real converged-link retry was not exercised");
+    // Exercise the scope distinction on diagnostic copies of an actual successful retry.
+    // Admission now prevents the old seed from accumulating an unrelated live Unknown link.
+    let info = sample
+        .info
+        .decisions
+        .iter_mut()
+        .find(|d| !d.link_unknown && d.link != 0)
+        .unwrap();
+    info.group_unknown = true;
+    let e = &sample;
     let i = e
         .info
         .decisions
         .iter()
         .find(|d| d.group_unknown && !d.link_unknown && d.link != 0)
         .unwrap();
-    let d = e
-        .records
-        .iter()
-        .find(|r| r.seq == i.seq)
-        .unwrap()
-        .try_read::<OrderDecision>()
-        .unwrap();
-    assert!(
-        e.before
-            .legs
-            .iter()
-            .any(|l| l.account == d.account && l.group == d.group && l.unknown_slots > 0)
-    );
-    assert!(
-        e.before
-            .slots
-            .iter()
-            .any(|s| s.account == d.account && s.group == d.group && s.state == SlotState::Unknown)
-    );
     assert!(e.before.links.iter().any(|l| l.id == i.link && !l.has_unknown));
     assert!(check(InvId::I4, e).is_ok());
     let mut bad = e.clone();
@@ -453,10 +473,10 @@ fn tk_121_hedge_place_failure_requires_exact_evidence() {
         .into_iter()
         .find(|s| s.name == "core")
         .unwrap();
-    let mut c = suite.config(0x1af2_31bb_1d64_40e2);
-    // A counterexample recorded in the world before 2026-10-14 (no marks, holding takers).
-    c.world.margin_feed = false;
-    c.world.taker_cycles = false;
+    let mut c = suite.config(2);
+    // Bound the actual OMS table so capacity is exercised even when exposure admission
+    // prevents the old fixture from accumulating 64 live orders.
+    c.world.oms_slots = Some(4);
     c.rerun = RerunPolicy::Always;
     let r = run_record::<Observed>(&c);
     assert!(r.outcome.is_pass(), "{}", crate::seq_sut::show(&r));

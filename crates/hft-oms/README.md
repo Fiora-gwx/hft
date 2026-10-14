@@ -488,6 +488,7 @@ pub struct VenueAcctTable {            // 每 (venue, account) 一个
 
 重复与乱序的判定只用两样东西:`(epoch, gen)` 与单调的 `cum_filled`。表的补充规则(唯一定义):
 
+- `CancelReject`/`AmendReject` 的新增累计成交在 Unknown 与终态也按累计水位入账一次;Unknown 部分成交保留 Unknown 与查询,全部成交才收敛 Filled。无增量沿用表内保持/dup 规则。
 - `—` = 该状态下没有对应的在途操作:按"异常 Note"格处理(写 `OmsAnomaly{Table}`、保持状态;带成交增量时先应用增量)。例外:`PendingCancel` 且置 `AMEND_SENT`(改单之后又撤单)时,`AmendAck` → `px/qty := pending`、`AmendReject` → 保持原价量,两者都保持 `PendingCancel` 并清 `AMEND_SENT`。
 - 任何状态收到 `Ack` 而槽的 `exch_order_id = 0` 时记下它;收到 `Ack` 或成交即置 `ACKED`。`QueryResult` 收敛为 `Live` 时 `px/qty` 取事件内的值。
 - `Unknown` 收到 `PartialFill` 时回到 `prev_state`(`prev_state ∈ {PendingCancel, PendingAmend}`),否则回到 `Live`。
@@ -837,7 +838,7 @@ pub struct OutItem {                 // 32 B(布局为草案,以代码与编译�
 const _: () = assert!(size_of::<OutItem>() == 32);
 ```
 
-`pending_out` 由一个全局 FIFO(Notify、Hedge、Link、Timer、Alarm、Aged 项,容量 4 × 全部表槽数 + 2 × 全部账户链接数 + 64)与每 (venue, account) 两条决策队列(风险递减、Open)组成;Notify 项交出时另带进入 Unknown 的 `OmsUnknown`,UnknownQuery 等定时器登记同样经 Timer 项排队,保证同类输出按产生顺序交出。进快照(节 12 的 `Out` 行:先全局 FIFO,再按表键升序的各表风险递减队列、Open 队列,各自 FIFO);恢复时 Decision 项按槽的 (venue, account) 与是否风险递减回到对应队列。出环决策的槽置 `QUEUED`;已排队决策的槽不再排第二条 `Query`(队列长度以槽数为界,下一次 UnknownQuery 定时器再查)。`wants_continue()` 为真时 sequencer 的实盘驱动下一轮写 `Timer{OmsContinue}`,`on_continue` 按 FIFO 再交出至多 K 条决策及相应的其他输出;`Hedge` 项在交出时按当时的 `owed` 与 `naked_dir` 计算数量(与立即发出时同一规则,回放确定)。队列中的撤单在交出前若槽已终态则丢弃(那是已无意义的命令,不是丢输出)。
+`pending_out` 由一个全局 FIFO(Notify、Hedge、Link、Timer、Alarm、Aged 项,容量 4 × 全部表槽数 + 2 × 全部账户链接数 + 64)与每 (venue, account) 两条决策队列(风险递减、Open)组成;Notify 项交出时另带进入 Unknown 的 `OmsUnknown`,UnknownQuery 等定时器登记同样经 Timer 项排队,保证同类输出按产生顺序交出。进快照(节 12 的 `Out` 行:先全局 FIFO,再按表键升序的各表风险递减队列、Open 队列,各自 FIFO);恢复时 Decision 项按槽的 (venue, account) 与是否风险递减回到对应队列。出环决策的槽置 `QUEUED`;已排队决策的槽不再排第二条 `Query`(队列长度以槽数为界,下一次 UnknownQuery 定时器再查)。`wants_continue()` 为真时 sequencer 的实盘驱动下一轮写 `Timer{OmsContinue}`,`on_continue` 按 FIFO 再交出至多 K 条决策及相应的其他输出;第一腿槽与墓碑已回收时,仍从固定 group 定义中定位唯一第一腿;无法定位时禁止继续第二腿。`Hedge` 项在交出时按当时的 `owed` 与 `naked_dir` 计算数量(与立即发出时同一规则,回放确定)。队列中的撤单在交出前若槽已终态则丢弃(那是已无意义的命令,不是丢输出)。
 
 **撤单范围与批量撤单**(Kill、`Drain`、`CancelAll` 命令走 `cancel_all`,撤单持续义务走 `reissue_cancels`,两者同一规则;本段是可撤状态的唯一定义,[control-plane `CancelAll`](../../docs/subsystems/control-plane.md) 与 Kill 链接这里):"可撤的槽"= 状态 `Live`、`PendingNew` 或 `PendingAmend` 的槽(`PendingAmend` 的槽在交易所上仍挂着);`PendingCancel` 已在撤;`Unknown` 槽不发撤单,收敛为 `Live` 时由撤单持续义务补撤;已置 `CANCEL_SENT` 的不重发:
 

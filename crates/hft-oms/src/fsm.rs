@@ -498,8 +498,15 @@ impl Oms {
                         self.pre_fill(ti, s, ev, now, seq, out);
                         self.transition(ti, s, S::Live, TransitionCause::CancelReject, now, seq, out);
                     }
+                    S::Unknown if ev.cum_filled.0 > sl.filled.0 => {
+                        self.pre_fill(ti, s, ev, now, seq, out);
+                        if ev.cum_filled.0 >= sl.qty.0 {
+                            self.transition(ti, s, S::Filled, TransitionCause::Fill, now, seq, out);
+                        }
+                    }
                     S::Unknown => {}
                     S::PendingNew | S::Live | S::PendingAmend => self.table_anomaly(ti, s, ev, now, seq, out),
+                    _ if ev.cum_filled.0 > sl.filled.0 => self.table_anomaly(ti, s, ev, now, seq, out),
                     _ => self.stats.dup += 1,
                 }
             }
@@ -542,10 +549,17 @@ impl Oms {
                         self.pre_fill(ti, s, ev, now, seq, out);
                         self.clear_flag(ti, s, SlotFlags::AMEND_SENT);
                     }
+                    S::Unknown if ev.cum_filled.0 > sl.filled.0 => {
+                        self.pre_fill(ti, s, ev, now, seq, out);
+                        if ev.cum_filled.0 >= sl.qty.0 {
+                            self.transition(ti, s, S::Filled, TransitionCause::Fill, now, seq, out);
+                        }
+                    }
                     S::Unknown => {}
                     S::PendingNew | S::Live | S::PendingCancel => {
                         self.table_anomaly(ti, s, ev, now, seq, out)
                     }
+                    _ if ev.cum_filled.0 > sl.filled.0 => self.table_anomaly(ti, s, ev, now, seq, out),
                     _ => self.stats.dup += 1,
                 }
             }

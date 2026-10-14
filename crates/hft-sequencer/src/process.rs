@@ -732,13 +732,19 @@ fn margin_to_risk<D: Driver<S>, S: StrategySet>(
     truncated: bool,
 ) -> R<()> {
     let m = e.ledger.margin(a, v);
+    let mut mark_ens = m.mark_oldest_ens;
+    for i in e.rd.insts_of_venue(v) {
+        if e.oms.inflight().open_buy(a, *i).0 != 0 || e.oms.inflight().open_sell(a, *i).0 != 0 {
+            mark_ens = mark_ens.min(e.market.row(*i).map_or(0, |r| r.mark_ens));
+        }
+    }
     let s = MarginSample {
         rep_liq_dist: m.rep_liq_dist,
         est_liq_dist: m.est_liq_dist,
         reported_ratio: m.rep_ratio,
         est_ratio: m.est_ratio,
         report_ens: m.rep_ens,
-        mark_ens: m.mark_oldest_ens,
+        mark_ens,
         has_report: m.has_report,
         truncated,
     };
@@ -837,7 +843,7 @@ pub(crate) fn after_oms<D: Driver<S>, S: StrategySet>(
     inst: &mut Instances<S>,
     drv: &mut D,
     a: AccountId,
-    _v: VenueId,
+    v: VenueId,
 ) -> R<()> {
     // Callbacks can touch more groups. Swap in an empty, startup-sized buffer so they
     // retain the same next-pass semantics without allocating a copy of this batch.
@@ -861,7 +867,29 @@ pub(crate) fn after_oms<D: Driver<S>, S: StrategySet>(
     })();
     groups.clear();
     e.cmd.legs_spare = groups;
-    result
+    result?;
+    refresh_flat_margin(e, inst, drv, a, v)
+}
+
+fn refresh_flat_margin<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    a: AccountId,
+    v: VenueId,
+) -> R<()> {
+    // The last fill/cancel can remove the final mark-dependent exposure. Refresh that fact
+    // before the stale timer evaluates its cached sample; a live order still needs its mark.
+    if v.market() == Some(hft_types::MarketKind::LinearPerp)
+        && e.ledger.margin(a, v).mark_oldest_ens == i64::MAX
+        && e.rd
+            .insts_of_venue(v)
+            .iter()
+            .all(|i| e.oms.inflight().open_buy(a, *i).0 == 0 && e.oms.inflight().open_sell(a, *i).0 == 0)
+    {
+        margin_to_risk(e, inst, drv, a, v, false)?;
+    }
+    Ok(())
 }
 
 /// Marks a group whose legs changed in this Input.
@@ -1041,7 +1069,7 @@ pub(crate) fn external_fill<D: Driver<S>, S: StrategySet>(
         let gix = crate::strategies::gix_for(inst, a, g);
         crate::strategies::queue_for_account(e, inst, a, Notif::External { gix, f: v });
     }
-    Ok(())
+    refresh_flat_margin(e, inst, drv, a, x.venue)
 }
 
 fn funding_settle<D: Driver<S>, S: StrategySet>(
@@ -1404,7 +1432,10 @@ pub(crate) fn feeds_gate<D: Driver<S>, S: StrategySet>(
 /// `balance_check_quiet_ms`.
 fn balance_quiet(e: &Engine, a: AccountId, v: VenueId) -> bool {
     let f = e.oms.inflight();
-    let none_inflight = f.open_notional_venue(a, v).0 == 0 && f.buy_notional(a, v).0 == 0;
+    let none_inflight =
+        e.rd.insts_of_venue(v)
+            .iter()
+            .all(|i| f.open_buy(a, *i).0 == 0 && f.open_sell(a, *i).0 == 0);
     let mut last_fill = 0i64;
     for i in e.rd.insts_of_venue(v) {
         last_fill = last_fill.max(e.ledger.pos(a, *i).last_fill_ens);

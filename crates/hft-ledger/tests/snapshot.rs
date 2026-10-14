@@ -53,9 +53,9 @@ fn rich() -> Ledger {
     l.on_groups_changed(I9, &table(&[spec(G9, BTC, &[(BTC_S1, S1), (BTC_P2, P2)])]));
     boot_a1(&mut l, 0);
     for v in [S1, P2] {
-        l.on_balance(&bal(A9, v, USDT, usdt("10000"), Qty(0), D), false, 0);
+        l.on_balance(&bal(A9, v, USDT, usdt("10000"), Qty(0), D), true, 0);
     }
-    l.on_balance(&bal(A9, S1, BTC, Qty(0), Qty(0), D), false, 0);
+    l.on_balance(&bal(A9, S1, BTC, Qty(0), Qty(0), D), true, 0);
     activity(&mut l, A1, G1, 1_000);
     activity(&mut l, A9, G9, 2_000);
     let items = margin_items(&[(BTC_P2, px("80000"), 2)]);

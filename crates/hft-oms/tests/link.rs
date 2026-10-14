@@ -494,6 +494,26 @@ fn oms_191_retry_capped_to_zero_done() {
 }
 
 #[test]
+fn oms_191_retry_after_first_tomb_expires_still_caps_naked() {
+    let mut h = H::with(|c| {
+        c.reuse_quarantine_ms = 1;
+        c.tombstone_keep_ms = 1;
+    });
+    let (f, l) = place_first(&mut h, q("0.012"), Tif::Ioc, plan_l1(), 0);
+    h.fill(f, q("0.012"), p("60000.00"), 0);
+    let hs = place_req(&mut h, 100);
+    reject(&mut h, hs, 200);
+    h.o.test_set_net(A1, g1(), Y, q("-0.012"));
+    h.sweep(201);
+    h.sweep(203);
+    assert!(h.o.tomb(f.venue, f.account, f.slot, f.r#gen).is_none());
+    h.retry(l, 300);
+    assert!(h.out.hedges.is_empty());
+    assert_eq!(h.link(l).state, LinkState::Done);
+    assert_eq!(h.n_notes(notes::HEDGE_NAKED_CAPPED), 1);
+}
+
+#[test]
 fn oms_192_reduce_only_inherit() {
     for (row, ro, on_fail, retry, want) in [
         ("OMS-192.1", 0u8, OnFail::Retry, false, false),

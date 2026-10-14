@@ -960,7 +960,7 @@ impl<M: Matcher> MockVenue<M> {
 
     /// The gateway's margin snapshot of every account on a perpetual venue (the exchange truth):
     /// after an engine restart and on the gateway's periodic poll, so the engine has fresh margin
-    /// data also for a flat account (whose venue pushes margin only with a position).
+    /// data independently of the exchange push cadence, including while flat.
     pub fn margin_snapshot(&mut self, now: u64) -> Vec<(u64, InputRec)> {
         let src = self.src();
         self.m

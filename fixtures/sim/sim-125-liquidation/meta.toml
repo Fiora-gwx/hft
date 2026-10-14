@@ -1,4 +1,4 @@
 covers = "liquidation price in MarginReport, liquidation exactly at liq_px, ExternalFill with slippage and fee"
 source = "synthetic"
 reviewed_by = "pending"
-note = "expected files written by SIM_GOLDEN_BLESS=1 and checked line by line against crates/hft-sim/README.md"
+note = "Flat-margin contract: 1 empty-position margin reports added; every existing complete report is unchanged. Balances and due times checked against the input script; human review pending."

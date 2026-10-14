@@ -66,7 +66,7 @@ impl Ledger {
     /// 从快照起步后(sequencer 在各组件 restore 之后、处理任何 Input 之前调用一次):按 hft-sequencer 节 10 的每 inst 最新标记价与其 engine_ns
     /// 重建不进快照的派生缓存(持有者未实现缓存、保证金估计、强平距离、最旧标记价时刻);不改任何 PnL 累计。冷路径,O(持仓数)。
     pub fn restore_marks(&mut self, marks: &[(InstId, Px, i64)]);
-    pub fn on_balance(&mut self, b: &BalanceReport, quiet: bool, t: i64) -> BalanceVerdict; // 首条 → 初始化;其后只校验
+    pub fn on_balance(&mut self, b: &BalanceReport, quiet: bool, t: i64) -> BalanceVerdict; // 首条 quiet 报告 → 初始化;其后只校验
     pub fn on_margin(&mut self, m: &MarginReportView<'_>, t: i64);                        // 保存报告值,重算估计与强平距离
     pub fn on_day_roll(&mut self, t: i64);                                                 // 只重置当日 PnL 基线;日亏锁存在 hft-risk
     pub fn apply_adjust(&mut self, a: &AdjustDelta, t: i64) -> PnlDelta;                  // AdoptExchange 的仓位或余额条目、WriteOffResidual 的核销(Funding 类只经资金费对账校正产生)
@@ -284,8 +284,8 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 
 ### 余额初始化、校验与基线
 
-1. **初始化**:某 (account, venue, asset) 首次收到 `BalanceReport`(gw 会话建立时的余额快照;模拟账户由 sim-gw 按 `SimAccountCfg.initial_balances` 给出)且条目为 `UNINIT` → `total = free + locked`;计价/保证金资产直接为现金,其他资产记入 `unassigned`;写 `Note{BalanceInit}`。账户的全部 venue 都初始化后 `Equity.valid` 才可能为真。
-2. **校验**:其后的 `BalanceReport` 只更新 `rep_*`;`quiet = true`(sequencer 判定:该 (account, venue) `balance_check_quiet_ms` 内无成交、相关 inst 无非终态单)时比较 `free + locked` 与 `total`,差 ≥ 该资产的 `AssetMeta.dust`([hft-refdata](../hft-refdata/README.md#数据结构))→ `BalanceVerdict::Drift{asset, diff}`。每次实际校验写 `Note{BalanceCheck}`(Ledger 的 n = 16),仅记录原始报告和 quiet 闸门通过的事实,不携带期望差额或结果;字段归 [Note 登记表](../hft-event/README.md#note-来源与码登记表)。首次初始化与 quiet=false 不写。漂移告警归 `Note{BalanceDrift}`,分级由 reconciler 报告 + hft-risk 完成,本 crate 不改账。
+1. **初始化**:某 (account, venue, asset) 首次收到通过 quiet 闸门的 `BalanceReport`(gw 会话建立时的余额快照;模拟账户由 sim-gw 按 `SimAccountCfg.initial_balances` 给出)且条目为 `UNINIT` → `total = free + locked`;计价/保证金资产直接为现金,其他资产记入 `unassigned`;写 `Note{BalanceInit}`。账户的全部 venue 都初始化后 `Equity.valid` 才可能为真。
+2. **校验**:其后的 `BalanceReport` 只更新 `rep_*`;`quiet = true`(sequencer 判定:该 (account, venue) `balance_check_quiet_ms` 内无成交、相关 inst 无非终态单)时比较 `free + locked` 与 `total`,差 ≥ 该资产的 `AssetMeta.dust`([hft-refdata](../hft-refdata/README.md#数据结构))→ `BalanceVerdict::Drift{asset, diff}`。每次实际校验写 `Note{BalanceCheck}`(Ledger 的 n = 16),仅记录原始报告和 quiet 闸门通过的事实,不携带期望差额或结果;字段归 [Note 登记表](../hft-event/README.md#note-来源与码登记表)。首次初始化与 quiet=false 不写 BalanceCheck;初始化必须通过同一 quiet 闸门,未通过只更新报告字段并保留 UNINIT,不覆盖已累计的成交。漂移告警归 `Note{BalanceDrift}`,分级由 reconciler 报告 + hft-risk 完成,本 crate 不改账。
 3. **基线**(`SetBalanceBaseline{account, venue}`):对该 venue 上**不属于任何 group** 的非计价资产,把条目改为 `baseline = 最近报告值(free + locked)`、`unassigned = 0`、`total = baseline`,置 `NON_STRATEGY`;差额记入 `adjust`;写 `Note{BaselineSet}`(v[] = 资产数、合计名义)。返回涉及的资产列表,sequencer 据此向 hft-risk 报告对账闸门的处置(`Disposition::Baselined`)。属于某 group 的资产与计价/保证金资产不受影响(需要 `AdoptExchange`)。
 
 ### 外部成交(`ExternalFill`)
@@ -338,6 +338,7 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 | `FundingSettle`(推送与 `synth = 1` 的 Output) | 按 `VenueCaps.funding_settle` 调 `apply_funding` / `apply_funding_push` |
 | `Note{Adjusted}`、`Note{FundingCorrected}`(未置 `NO_HISTORY`)| 还原 `AdjustDelta` 调 `apply_adjust` |
 | `BalanceReport`、`MarginReport`、`Bbo`/`MarkPrice`、`Applied` 的 `RecordTransfer`/`SimTransfer`/`SimReset`/`SetBalanceBaseline` 命令、`Timer{Sys, DayRoll}` | 与 sequencer 相同的入口;BalanceReport 先以 quiet=false 更新报告字段,保留同事件原始报告 |
+| `Note{BalanceInit}` | 必须匹配同事件待处理余额报告的账户、venue、资产与总额;原报告通过 quiet 闸门后初始化,不从注记虚构余额;不匹配则 BalanceEvidence |
 | `Note{BalanceCheck}` | 必须匹配同事件、尚未使用的已初始化 BalanceReport 的账户、venue、资产、free、locked、交易所时刻和引擎时刻;否则 BalanceEvidence 并锁存失败。用冷账本自身钱包重新执行 quiet=true 校验,得到漂移标志;EVENT_END 清除待匹配报告。没有该事实的旧日志只更新报告字段,不能证明漂移标志相等 |
 
 `t` 取该记录的 `Now.engine_ns`(由记录头 tsc 与本段的 `EngineClock` 按 [event-model 时间戳语义](../../docs/subsystems/event-model.md) 计算)。**等价断言**:在每条 `StateSnapshot` 记录处,`JournalLedger` 的持仓、现货库存与余额(`pos`、`inventory`、`venue_book`)等于从该快照恢复的引擎 Ledger 的同一读数(属性测试与 DST 每个快照点检查)。

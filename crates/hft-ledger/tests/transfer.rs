@@ -42,10 +42,10 @@ fn sim_init() -> Vec<SimBalance> {
 
 fn boot_a9(l: &mut Ledger, t: i64) {
     for v in [S1, P2] {
-        l.on_balance(&bal(A9, v, USDT, usdt("10000"), Qty(0), D), false, t);
+        l.on_balance(&bal(A9, v, USDT, usdt("10000"), Qty(0), D), true, t);
     }
-    l.on_balance(&bal(A9, S1, BTC, Qty(0), Qty(0), D), false, t);
-    l.on_balance(&bal(A9, S1, BNB, Qty(0), Qty(0), D), false, t);
+    l.on_balance(&bal(A9, S1, BTC, Qty(0), Qty(0), D), true, t);
+    l.on_balance(&bal(A9, S1, BNB, Qty(0), Qty(0), D), true, t);
 }
 
 #[test]

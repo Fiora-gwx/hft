@@ -355,6 +355,24 @@ fn mark_for(d: i64) -> i64 {
 
 #[test]
 fn sim_076_margin_report_cadence() {
+    for (md, period) in [
+        (MarginData::Push, 1_000),
+        (MarginData::Poll { interval_ms: 5_000 }, 5_000),
+    ] {
+        let rd = rd_with(|s| s.caps_mut(P2).margin_data = md);
+        let mut s = seeded(&setup_sim(), &rd, "18000", &[], &[]);
+        s.clock(0);
+        s.drain(ms(10));
+        assert_eq!(margin_reports(&s).len(), 1, "flat startup {md:?}");
+        s.out.clear();
+        s.mark(ms(period), BTC_P2, "60000");
+        s.drain(ms(period + 10));
+        let reports = margin_reports(&s);
+        assert_eq!(reports.len(), 1, "flat heartbeat {md:?}");
+        assert_eq!(reports[0].0.n, 0);
+        assert_eq!(reports[0].0.margin_ratio, Rate(0));
+        assert!(reports[0].1.is_empty());
+    }
     // (row, margin_data, mark raw, time after the first report, expect report)
     let below = mark_for(9_999_000);
     assert!(ratio_at(below) - ratio_at(600_000_000) < 10_000_000);

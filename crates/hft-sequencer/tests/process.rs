@@ -946,6 +946,64 @@ fn seq_149_mark_price_to_margin() {
 }
 
 #[test]
+fn seq_149_flat_margin_does_not_reuse_closed_position_mark() {
+    for with_mark in [false, true] {
+        let mut h = steady();
+        if with_mark {
+            h.mark_md(B1, "50010");
+        }
+        h.open_position(AC1, B1, Side::Sell, "0.010");
+        let m = s1_on_bbo(&mut h, |hx| {
+            let mut it = intent(
+                hx,
+                B1,
+                Side::Buy,
+                hft_types::Tif::Ioc,
+                hft_strategy_sdk::IntentClass::Reduce,
+                px("50011"),
+                q("0.010"),
+            );
+            it.flags = hft_strategy_sdk::OrderIntent::REDUCE_ONLY;
+            vec![it]
+        });
+        let closing = decisions(&h.since(m))
+            .into_iter()
+            .find(|(_, d)| d.inst == B1)
+            .unwrap()
+            .1;
+        assert_eq!(closing.reject, 0);
+        h.ack(&closing);
+        h.adv(11_000 * h.s.engine().now.tsc_per_ms);
+        h.margin_report(AC1, "100000", "0", "100000");
+        h.run();
+        let level = |h: &H| h.s.engine().risk.view(AC1, &h.s.engine().now).margin_level;
+        assert_eq!(level(&h), hft_strategy_sdk::MarginLevel::L1);
+        h.fill(&closing, closing.qty, closing.qty, closing.px);
+        assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, Qty(0));
+        assert_eq!(level(&h), hft_strategy_sdk::MarginLevel::None);
+        for _ in 0..3 {
+            h.adv(1_000 * h.s.engine().now.tsc_per_ms);
+            h.margin_report(AC1, "100000", "0", "100000");
+            h.run();
+            assert_eq!(
+                level(&h),
+                hft_strategy_sdk::MarginLevel::None,
+                "marks={with_mark}"
+            );
+        }
+        let _pending = h.order_at_touch(AC1, B1, Side::Sell, "0.010");
+        assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, Qty(0));
+        h.margin_report(AC1, "100000", "0", "100000");
+        h.run();
+        assert_eq!(
+            level(&h),
+            hft_strategy_sdk::MarginLevel::L1,
+            "flat with an in-flight perp"
+        );
+    }
+}
+
+#[test]
 fn seq_150_external_fill_attributed() {
     let mut h = steady();
     h.open_position(AC1, B1, Side::Sell, "0.010");

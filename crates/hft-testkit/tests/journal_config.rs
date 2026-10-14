@@ -249,15 +249,13 @@ fn tk_120_drain_restart_conformance_keeps_recovery_gates() {
         .into_iter()
         .find(|s| s.name == "core")
         .unwrap();
-    // Core seeds whose 2000-step run of the standard world completes a Drain under the suite's
-    // own faults (a Drain completes only when nothing is in flight, so few seeds do; with
-    // `WorldSpec::w1_trading` they are 0x148 and 0x190 instead). Openings are checked only while the
-    // account still has its Recovery cap (`auto_resume_after_clean_drain` releases it once the
-    // startup gate passes); the counts are printed, not required.
+    // Standard trading-world seeds whose 2000-step runs complete a Drain under suite faults.
+    // A Drain requires no in-flight orders; these rows assert that it really completes.
+    // Recovery Open checks apply until the startup gate releases its cap.
     let mut drains_total = 0;
     let mut rejected_total = 0;
     let mut other_caps = 0;
-    for seed in [7u64, 28, 34] {
+    for seed in [0x148u64, 0x190] {
         let mut c = suite.config(seed);
         c.steps = 2_000;
         c.rerun = RerunPolicy::Always;
