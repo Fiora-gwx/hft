@@ -15,11 +15,12 @@ fn reg_002_default_kinds_m4() {
         .iter()
         .map(|d| (d.name, d.kind_id, d.non_prod_only))
         .collect();
-    let mut expected = vec![("portfolio-carry", 1, false)];
+    let mut expected = vec![];
     if cfg!(feature = "cross-taker") {
         expected.push(("cross-taker", 3, false));
     }
     expected.push(("latency-probe", 5, true));
+    expected.push(("portfolio-carry", 1, false));
     assert_eq!(kinds, expected);
 }
 

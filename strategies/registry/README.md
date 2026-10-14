@@ -24,7 +24,7 @@ status: impl
 
 ## 使用本组件
 
-当前列表包含默认的 portfolio-carry、latency-probe 与 feature 门控的 cross-taker。后者的真实引擎/模拟撮合、参数恢复和报价门控测试位于 `tests/cross_taker_e2e.rs`;schema 金样保存全部已实现策略,默认构建只比较启用项。
+当前列表包含默认的 latency-probe、portfolio-carry 与 feature 门控的 cross-taker。追加策略保留既有项顺序,按 kind_id 排序的 schema 导出不受注册顺序影响。后者的真实引擎/模拟撮合、参数恢复和报价门控测试位于 `tests/cross_taker_e2e.rs`;schema 金样保存全部已实现策略,默认构建只比较启用项。
 
 ```rust
 // src/lib.rs —— 真实策略的列表只写在这一处;每行一个策略,optional 策略用 Cargo feature 门控。
