@@ -26,7 +26,7 @@ status: spec
 
 ### 热路径:分类与检查
 
-`evaluate_pair(first, second, view, now)` 在同一只读状态上检查两腿,同账户的 group/account 名义含另一腿待提交名义;两腿必须不同 venue/inst。全部通过才由 sequencer 分别 commit,任何拒绝不扣令牌。
+`evaluate_pair(first, second, view, now)` 在同一只读状态上检查两腿,同账户的 group/account 名义含另一腿待提交名义;两腿必须不同 venue/inst,Reduce/Flatten 方向须与实际持仓相反。全部通过才由 sequencer 分别 commit,任何拒绝不扣令牌。
 
 ```rust
 pub struct Risk { pub mode: mode::Mode, /* 参数、桶、日亏、保证金档位、杠杆表、交易中的永续 inst、对账计数,见实现说明 */ }

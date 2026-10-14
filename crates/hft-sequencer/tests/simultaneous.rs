@@ -40,6 +40,36 @@ fn fire(h: &mut H) -> (usize, Vec<OrderDecision>) {
 
 #[test]
 fn seq_178_simultaneous_atomic_risk_and_capacity() {
+    reset_script();
+    let mut h = b0().boot_self_contained();
+    h.steady();
+    h.cmd_confirmed(
+        AC1,
+        &hft_event::ControlCmd::Kill {
+            scope: hft_event::CmdScope {
+                strategy: hft_types::StrategyId(0),
+                venue: B,
+                account: AC1,
+                _pad: 0,
+                group: hft_types::GROUP_ALL,
+                inst: hft_types::InstId(0),
+                _pad2: 0,
+            },
+            level: hft_types::KillLevel::Venue,
+            flatten: false,
+            cancel_resting: true,
+            hard: false,
+        },
+    );
+    h.run();
+    install(OnFail::Reverse);
+    let out = h.io_ref().out.len();
+    let (_, ds) = fire(&mut h);
+    assert_eq!(ds.len(), 1);
+    assert_eq!(ds[0].reject, RejectBits::KILLED.0);
+    assert!(last_link(&h, AC1).is_none());
+    assert!(h.io_ref().out[out..].iter().all(|(_, c)| c.op != GwOp::Place));
+    assert!(h.verify().is_empty());
     for (group_cap, order_cap, bit) in [
         ("800", "10000", RejectBits::NOTIONAL_GROUP),
         ("50000", "500.05", RejectBits::NOTIONAL_ORDER),

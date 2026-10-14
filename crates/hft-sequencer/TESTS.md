@@ -2566,7 +2566,7 @@ SEQ-158 补充验收:RateOnly 的实额输入替换已有合成额,重复实额�
 
 ### SEQ-178 Simultaneous 第二腿与 Hedge 类意图的投影字段
 
-- 整对准入补充验收:`tests/simultaneous.rs::seq_178_simultaneous_atomic_risk_and_capacity` 检查第二腿单笔限额、双腿合计 group 限额与第二腿槽耗尽时均无第一腿副作用;`seq_224_simultaneous_ring_full_sends_neither` 检查任一出环满时两腿都不发,双 RingFull Input 可验证回放。
+- 整对准入补充验收:`tests/simultaneous.rs::seq_178_simultaneous_atomic_risk_and_capacity` 检查第二腿 venue kill、单笔限额、双腿合计 group 限额与第二腿槽耗尽时均无第一腿副作用;`seq_224_simultaneous_ring_full_sends_neither` 检查任一出环满时两腿都不发,双 RingFull Input 可验证回放。
 
 - 规则:[意图管线](README.md#意图管线)
 - 级别:table

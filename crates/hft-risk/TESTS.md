@@ -625,6 +625,8 @@ spec: README.md
 
 ### RSK-034 #7 仓位:Open 含全部在途,Hedge 与 Flatten 只扣即时在途
 
+- Simultaneous 整对准入补充:任一 Reduce/Flatten 腿方向与实际持仓同向时拒 REDUCE_INVALID,两腿正确反向时按可减量校验;实现并入 `rsk_034_position_inflight`。
+
 - 规则:[检查链](README.md#检查链按廉价--昂贵短路适用范围以本表为唯一定义)(#7、#7 只扣即时在途的理由)
 - 级别:table
 - 里程碑:M2
@@ -2400,5 +2402,4 @@ spec: README.md
 - **DST**:RSK-280、RSK-281 计入上线门槛 ④ 的累计量,零违反;累计量与种子规则只在 [testing §8](../../docs/testing.md#8-上线门槛)。
 - **基准**:RSK-250–RSK-264 在参考机上满足 [benchmarks 单 crate 基准上限表](../../benchmarks/README.md#单-crate-基准上限表) 的"风控链"一行与本 crate `benches/budgets.toml`(不宽于上限表);RSK-241 零分配在 PR 中阻断。
 - **跨组件**:sequencer 驱动下的模式、kill、恢复与断腿场景(紧急停止、多个 cap 叠加、日亏 Resume、Drain 期间、冷启动、停机标记等)由 [testing §4.1](../../docs/testing.md#41-模式账户与人工干预) 登记的跨组件场景验证,本文件不重复。
-
 

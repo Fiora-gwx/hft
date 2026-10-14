@@ -385,6 +385,21 @@ impl Risk {
         if first.venue == second.venue || first.inst == second.inst {
             return Err(hft_types::RejectBits::INVALID);
         }
+        for it in [first, second] {
+            if matches!(
+                it.class,
+                hft_strategy_sdk::IntentClass::Reduce | hft_strategy_sdk::IntentClass::Flatten
+            ) {
+                let pos = v.pos(it.account, it.inst).0;
+                let reducing = match it.side {
+                    hft_types::Side::Buy => pos < 0,
+                    hft_types::Side::Sell => pos > 0,
+                };
+                if !reducing {
+                    return Err(hft_types::RejectBits::REDUCE_INVALID);
+                }
+            }
+        }
         let a = chain::evaluate_with_peer(&self.s, &self.mode, first, Some(second), v, now)?;
         let b = chain::evaluate_with_peer(&self.s, &self.mode, second, Some(first), v, now)?;
         Ok([a, b])

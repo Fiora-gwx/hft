@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-负责人于 2026-10-14 要求双腿同发。sequencer 对两腿做只读完整准入,风险累计限额包含整对名义,然后连续建槽并将两帧作为一对推环。环容量是发送环境事实,保持 journal 发布后的双 RingFull Input,不把未记录的容量引入决策。原子性仅覆盖本地准入与容量,网络和两个交易所的成交不具备事务性。
+负责人于 2026-10-14 要求双腿同发。sequencer 对两腿做只读完整准入,风险累计限额包含整对名义,减仓提示同时校验真实持仓方向,然后连续建槽并将两帧作为一对推环。环容量是发送环境事实,保持 journal 发布后的双 RingFull Input,不把未记录的容量引入决策。原子性仅覆盖本地准入与容量,网络和两个交易所的成交不具备事务性。
 
 恢复等待原始两腿均终态,按持久化 on_fail 比较净成交;已在途的 Reverse 不重复发送。反向检查位于本事件成交和费用入账后。契约归 [sequencer](../../../../crates/hft-sequencer/README.md#意图管线)、[OMS](../../../../crates/hft-oms/README.md#simultaneous) 和 [risk](../../../../crates/hft-risk/README.md#热路径分类与检查)。
 
