@@ -9,6 +9,7 @@ use hft_types::Rate;
 
 #[test]
 fn exe_195_simul_first_leg() {
+    check_simultaneous_close_marks_spot_second_reducing();
     for (row, of, want) in [
         ("EXE-195.1", SimulOnFail::Reverse, OnFail::Reverse),
         ("EXE-195.2", SimulOnFail::Hold, OnFail::Hold),
@@ -40,8 +41,7 @@ fn exe_195_simul_first_leg() {
     }
 }
 
-#[test]
-fn exe_195_simultaneous_close_marks_spot_second_reducing() {
+fn check_simultaneous_close_marks_spot_second_reducing() {
     let mut fx = Fx::new();
     fx.legs(A1, G7, &["10", "-10"]);
     fx.spot(A1, A, G7, "10", "10");

@@ -258,6 +258,7 @@ fn reverses(h: &H, m: usize) -> Vec<OrderDecision> {
 
 #[test]
 fn exe_502_simultaneous_on_fail() {
+    super::simultaneous::check_simultaneous_fault_seeds_and_snapshot_replay();
     case(Scenario::new(
         "EXE-502",
         "Simultaneous: second-leg failure by on_fail; reverse failure Broken",

@@ -104,8 +104,33 @@ impl Log {
 }
 
 /// The aligned sink of the replay drivers.
+#[cfg(feature = "replay-io")]
+#[derive(Debug)]
+pub struct DecideTiming {
+    pub clock_ns: fn() -> u64,
+    pub samples_ns: Vec<u64>,
+    start_ns: u64,
+    elapsed_ns: u64,
+}
+
+#[cfg(feature = "replay-io")]
+impl DecideTiming {
+    pub fn new(clock_ns: fn() -> u64, capacity: usize) -> Self {
+        Self {
+            clock_ns,
+            samples_ns: Vec::with_capacity(capacity),
+            start_ns: 0,
+            elapsed_ns: 0,
+        }
+    }
+}
+
+/// The aligned sink of the replay drivers.
 #[derive(Debug)]
 pub struct ReplaySink {
+    /// Optional cold-replay measurements. The clock never supplies an engine timestamp.
+    #[cfg(feature = "replay-io")]
+    pub decide_timing: Option<DecideTiming>,
     pub mode: ReplayMode,
     pub log: Log,
     /// Next record to align with.
@@ -155,6 +180,8 @@ pub(super) fn venue_account(kind: EventKind, body: &[u8]) -> (VenueId, AccountId
 impl ReplaySink {
     pub fn new(mode: ReplayMode, log: Log) -> ReplaySink {
         ReplaySink {
+            #[cfg(feature = "replay-io")]
+            decide_timing: None,
             mode,
             log,
             pos: 0,
@@ -463,12 +490,27 @@ impl JournalSink for ReplaySink {
         }
         match role_of(kind, probe.get(..n).unwrap_or(&[])) {
             Role::Input => {
+                #[cfg(feature = "replay-io")]
+                if let Some(timing) = &mut self.decide_timing {
+                    timing.start_ns = (timing.clock_ns)();
+                }
                 // The driver positioned `pos` on the handed record.
                 let seq = self.log.recs.get(self.pos).map_or(0, |r| r.seq);
                 self.pos += 1;
                 Ok(Seq(seq))
             }
-            Role::Output => Ok(Seq(self.compare(kind, flags, pieces, false))),
+            Role::Output => {
+                let seq = self.compare(kind, flags, pieces, false);
+                #[cfg(feature = "replay-io")]
+                if kind == EventKind::ORDER_DECISION
+                    && self.comparing(seq)
+                    && let Some(timing) = &mut self.decide_timing
+                    && timing.samples_ns.len() < timing.samples_ns.capacity()
+                {
+                    timing.samples_ns.push(timing.elapsed_ns);
+                }
+                Ok(Seq(seq))
+            }
             _ => Ok(Seq(self.meta_seq(kind))),
         }
     }
@@ -667,6 +709,10 @@ impl<S: StrategySet> Driver<S> for ReplayDriver {
         self.run_tsc
     }
     fn measure(&mut self) -> Tsc {
+        #[cfg(feature = "replay-io")]
+        if let Some(timing) = &mut self.sink.decide_timing {
+            timing.elapsed_ns = (timing.clock_ns)().saturating_sub(timing.start_ns);
+        }
         Tsc(0)
     }
     fn emit(&mut self, _o: &OutRecord<'_>) -> EmitResult {

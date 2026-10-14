@@ -148,8 +148,8 @@ spec: README.md
 - 规则:[1. 金样](README.md#1-金样)
 - 级别:table
 - 里程碑:M2
-- 前置:`fixtures/sim/` 夹具用例 `ioc-cross`:一段行情记录 + 指令脚本(一张 IOC 买单);期望回报序列(Ack、Fill、终态)
-- 实现:待实现
+- 前置:`fixtures/sim/tk-009-ioc-cross/`:一条 BBO + IOC 买单 + 到期推进脚本;refdata/setup 取 hft-sim 的 `rd_sim()`/`setup_sim()`,期望为 Ack 与全成 Fill(Fill 本身为终态)。
+- 实现:`crates/hft-testkit/tests/sim_golden.rs::tk_009_sim_case_reports_first_field_difference`
 
 | 行 | 期望文件 | 期望 |
 |---|---|---|
@@ -1418,7 +1418,7 @@ spec: README.md
 - 期望:正常运行全部不变量通过;实际存在内部 Timer 和成功对冲;所有反例被相应检查拒绝,不修改被测引擎
 - 回归:core 种子 `0x61aaa3c81c37eb19` 的同组其他订单 Unknown 不阻止已收敛链接的合法 SecondRetry;诊断副本中的本链接 Unknown、Open 与本次输入刚进入 Unknown 都必须被 I4 拒绝,本次已收敛的 group 可通过。
 - 实现:`crates/hft-testkit/tests/observations.rs::tk_107_real_observations_and_counterexamples`
-- 回归函数:`crates/hft-testkit/tests/observations.rs::tk_107_unknown_is_scoped_to_decision_group_and_link`
+- 回归函数:`crates/hft-testkit/tests/observations.rs::check_unknown_is_scoped_to_decision_group_and_link`
 
 ### TK-108 观察检查点只覆盖已发布 journal
 
@@ -1501,7 +1501,7 @@ spec: README.md
 - 期望:正常行实际包含五种目的的至少八条快照,检查数等于 journal 快照数;每个真实快照同时经过 LED-267 冷账本核对;开关检查器前后的完整 journal 和非空 HashTrail 逐字节相同;九种反例均以 INV-6 在第 0 步失败,诊断指出原因,不能被后来的正确快照遮盖
 - 实现:`crates/hft-testkit/tests/snapshot_checks.rs::tk_115_every_snapshot_checked_with_periodic_rebuild_off`
 - 回归:modes 种子 `0x8573133122fce369`,8 000 步,实际产生旧运行报告过期的 L1 MarginStress;从中途快照回放仍产生同一 cap 注记,所有快照与定期 INV-6 通过。
-- 回归函数:`crates/hft-testkit/tests/snapshot_checks.rs::tk_115_snapshot_preserves_margin_run_boundary`
+- 回归函数:`crates/hft-testkit/tests/snapshot_checks.rs::check_snapshot_preserves_margin_run_boundary`
 
 ### TK-116 快照观察只保留已提交边界且缓冲有界
 

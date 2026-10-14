@@ -647,6 +647,8 @@ pub struct PxBand { pub max_px_dev: Rate, pub ioc_max_cross: Rate, pub rr_max_cr
 
 `classes` 保持类别下标顺序;其余表分别按 inst、account、(account, venue)、(account, group) 严格递增,重复或乱序拒绝。解码在分配前按剩余字节核对 count,拒绝截短、尾随字节、未知格式、越界整数及缺失/未知账户、venue、inst 引用。每个 refdata 账户及其 venue 都必须有显式限额行。参数值的风控语义、容量和 `ExecRiskMismatch` 仍由 `Risk::new` / `set_params` 检查。完整内容随 `ConfigBlob` 进入 journal,不以全局变量、线程局部值或外部配置文件补齐。
 
+`RiskParams::inspect_blob` 供离线 `show`/`diff` 读取同一格式,执行格式与行顺序检查,不检查 refdata 引用,不能替代加载入口。`decode_blob` 复用该解析器并完成引用检查。TOML 映射与差异预览归 [hft-cfg](../../tools/README.md#hft-cfg)。
+
 ### 引擎单与执行配置的一致性(`ExecRiskMismatch`)
 
 执行层的默认减仓、补腿与自动有界平仓用 `ExecConfig.force_slice` 切片;它必须落在风控上限之内,否则这些单会被 #5/#6 反复拒绝。每个账户 `a` 要求:

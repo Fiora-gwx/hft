@@ -654,24 +654,24 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 - 规则:[cargo xtask replay-verify](README.md#cargo-xtask-replay-verify)
 - 级别:replay
 - 里程碑:M2
-- 输入:`fixtures/replay/` 中一份由 DST 产出的 journal 样本(含 `OrderDecision`、`ExecDecision`、`CmdResult`、`StateSnapshot` 与一个 `Keyframe` 快照)
+- 输入:真实 DST 在临时目录产出的物理 journal 样本(含 `OrderDecision`、`ExecDecision`、`CmdResult`、启动与按需 `StateSnapshot`、`LatencySample`);由真实 writer 重算 CRC 与段链
 - 期望:
   - 退出 0;JSON `divergences = []`
-- 实现:`tools/xtask/tests/replay_verify.rs::tool_039_untouched_sample_passes`
+- 实现:`apps/replayer/tests/toolcases.rs::tool_039_untouched_sample_passes`
 
 ### TOOL-040 篡改一个 Output 字节时报告第一个分歧的 seq
 
 - 规则:[cargo xtask replay-verify](README.md#cargo-xtask-replay-verify)
 - 级别:unit
 - 里程碑:M2
-- 前置:TOOL-039 的样本复制一份;`seq = 1042` 的 `OrderDecision` 体第 8 字节(非测量字段)加 1 并重算记录 CRC
+- 前置:TOOL-039 的样本复制一份;首条 `OrderDecision` 的 `px` 字段(体偏移 16,非测量字段)翻转一位,记录其 seq 为 S,并重算记录 CRC
 - 步骤:
   1. 运行 `cargo xtask replay-verify <复制的目录>`
 - 期望:
-  - 退出 1;报告 `first_divergent_seq = 1042`
-  - 报告含两侧记录的十六进制与解码视图;`journal 片段` 路径指向的文件含 `seq` 841–1041 的 200 条事件
-  - 状态哈希分歧报告给出组件名(取自 hft-testkit `diff_trails`)
-- 实现:`tools/xtask/tests/replay_verify.rs::tool_040_reports_first_divergent_seq`
+  - 退出 1;报告 `first_divergent_seq = S`
+  - 报告含两侧记录的十六进制与解码视图;`journal_fragment` 路径指向的文件含 S 之前至多 200 条逻辑记录,保持顺序与原 seq,可用 `hft_event::decode_record` 逐条读取
+  - `field_diff` 指向 `px`;快照组件诊断由 RPL-279/280 验收,不依赖 DST HashTrail 金样
+- 实现:`apps/replayer/tests/toolcases.rs::tool_040_reports_first_divergent_seq`
 
 ### TOOL-041 只改测量字段或快照头 snap_tsc 不报分歧
 
@@ -679,13 +679,13 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 - 级别:table
 - 里程碑:M2
 - 前置:TOOL-039 的样本复制一份,按行改动后重算 CRC
-- 实现:`tools/xtask/tests/replay_verify.rs::tool_041_masked_fields_ignored`
+- 实现:`apps/replayer/tests/toolcases.rs::tool_041_masked_fields_ignored`
 
 | 行 | 改动 | 期望 |
 |---|---|---|
 | TOOL-041.1 | 一条 `OrderDecision` 中 `MEASURE_MASK` 覆盖的字段(`decided_tsc`) | 退出 0 |
 | TOOL-041.2 | 一个 `StateSnapshot` 头的 `snap_tsc` | 退出 0 |
-| TOOL-041.3 | 同一 `StateSnapshot` 体中的一个字节 | 退出 1,`first_divergent_seq` = 该快照的 seq |
+| TOOL-041.3 | 同一非起点 `StateSnapshot` 的 `engine_ns` 字段 | 退出 1,`first_divergent_seq` = 该快照的 seq |
 | TOOL-041.4 | 一条 `LatencySample`(Meta)中的一个字节 | 退出 0 |
 
 ### TOOL-042 Keyframe 快照的 state_hash 由 replayer 侧计算
@@ -705,26 +705,26 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 - 规则:[cargo xtask replay-verify](README.md#cargo-xtask-replay-verify)
 - 级别:unit
 - 里程碑:M2
-- 前置:样本中删去引导块里的 `ConfigBlob{Refdata}` 记录(重建段链与 CRC)
+- 前置:将样本中所有 `ConfigBlob{Refdata}` 的 kind 改为其他 blob kind,保持 seq 连续并重建段链与 CRC,使 journal 内没有 Refdata
 - 步骤:
   1. 运行 `cargo xtask replay-verify <样本>`
 - 期望:
   - 退出 1;stderr 与 JSON 含"journal 不自足"及缺失的 blob 种类 `Refdata`;进程没有打开样本目录以外的任何配置文件
-- 实现:`tools/xtask/tests/replay_verify.rs::tool_043_not_self_contained`
+- 实现:`apps/replayer/tests/toolcases.rs::tool_043_not_self_contained`
 
 ### TOOL-044 --from-seq/--to-seq 之外的分歧不计
 
 - 规则:[cargo xtask replay-verify](README.md#cargo-xtask-replay-verify)
 - 级别:unit
 - 里程碑:M2
-- 前置:同 TOOL-040(分歧在 `seq = 1042`)
+- 前置:同 TOOL-040(分歧在 seq S),首个可恢复快照 seq 为 B
 - 步骤:
-  1. 运行 `cargo xtask replay-verify <样本> --from-seq 1 --to-seq 1041`
-  2. 运行 `cargo xtask replay-verify <样本> --from-seq 1042 --to-seq 2000`
+  1. 运行 `cargo xtask replay-verify <样本> --from-seq B --to-seq S-1`
+  2. 运行 `cargo xtask replay-verify <样本> --from-seq S`
 - 期望:
   - 步骤 1 退出 0
-  - 步骤 2 退出 1,`first_divergent_seq = 1042`
-- 实现:`tools/xtask/tests/replay_verify.rs::tool_044_seq_range`
+  - 步骤 2 退出 1,`first_divergent_seq = S`
+- 实现:`apps/replayer/tests/toolcases.rs::tool_044_seq_range`
 
 ### TOOL-045 --record-decide-hist 输出 decide 分段直方图
 
@@ -736,7 +736,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
   1. 运行 `cargo xtask replay-verify <样本> --record-decide-hist`
 - 期望:
   - 退出 0;JSON 含 `decide_hist`,其 `count` 等于样本中 `OrderDecision` 记录数,含 p50/p90/p99/p99.9/max
-- 实现:`tools/xtask/tests/replay_verify.rs::tool_045_decide_hist`
+- 实现:`apps/replayer/tests/toolcases.rs::tool_045_decide_hist`
 
 ### TOOL-046 Sim 账户的 journal 同样逐字节验证
 
@@ -826,7 +826,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
   1. 运行 `cargo xtask dst --seeds 1 --seed S --suite core`
 - 期望:
   - 退出 1;stderr 恰有一行匹配 `^DST FAILED seed=0x[0-9a-f]{16} step=N invariant=I1\([a-z_]+\) -> cargo xtask dst --seeds 1 --seed 0x[0-9a-f]{16} --suite core --steps N\+1 --trace$`(N+1 写成具体数值)
-  - `target/dst/<seed>/` 含故障表与 200 条事件的 journal 片段;以该片段运行 `replayer` 退出 0(片段可读)
+  - `target/dst/<seed>/` 含故障表、复现行与至多 200 条事件的 journal 记录片段(含失败事件);用 `hft_event::decode_record` 读完,按 EVENT_END 计数。不含完整引导块的片段用于诊断,重演使用复现命令
 - 实现:`tools/xtask/tests/dst.rs::tool_052_failure_output`
 
 ### TOOL-053 dst 的任何运行都不写服务器账本
@@ -1319,6 +1319,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 ### TOOL-086 test-trace 在规格与代码完全对应时通过
 
+- 补充前置:同一夹具增加 `CARRY-001`(M4) 及对应测试,验证五字母前缀可解析且不会误报多余测试。
 - 规则:[其他 xtask 子命令](README.md#其他-xtask-子命令)
 - 级别:unit
 - 里程碑:M1
@@ -2112,7 +2113,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 - 里程碑:M2
 - 前置:`params/risk.toml` 夹具(字段归 hft-risk);`cur.blob` 为上一版本
 - 步骤:
-  1. `hft-cfg build --kind risk --in params/risk.toml --out r.blob --against cur.blob`
+  1. `hft-cfg build --kind risk --in params/risk.toml --refdata refdata.blob --out r.blob --against cur.blob`
   2. `hft-cfg show r.blob`
 - 期望:
   - 退出 0;`r.blob` 与 hft-risk `RiskParams` 构建器对同一输入的输出逐字节相同;`show` 的取值与 TOML 逐项相同;差异报告按账户逐字段标出放宽/收紧

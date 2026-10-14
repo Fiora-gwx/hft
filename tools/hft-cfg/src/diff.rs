@@ -19,6 +19,7 @@ use crate::util::*;
 pub enum BlobKind {
     Refdata,
     Engine,
+    Risk,
     Strategy,
 }
 
@@ -26,6 +27,7 @@ pub fn kind_of(b: &[u8]) -> BlobKind {
     match b.get(..8) {
         Some(b"HFTRDB01") => BlobKind::Refdata,
         Some(b"HFTECF01") => BlobKind::Engine,
+        Some(b"HFTRKP01") => BlobKind::Risk,
         _ => BlobKind::Strategy,
     }
 }

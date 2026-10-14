@@ -452,6 +452,8 @@ fn order_connection(r: &mut SeqRig<Strategies>, v: VenueId, state: ConnStateKind
 
 #[test]
 fn carry_010_linked_entry_funding_and_edge_decay_exit() {
+    check_simultaneous_slice_uses_both_sides_depth_and_caps();
+    check_simultaneous_fault_seeds_repair_and_replay();
     for seed in 0..4 {
         for reverse in [false, true] {
             scenario(seed, reverse);
@@ -519,8 +521,7 @@ fn scenario(seed: i64, reverse: bool) {
     verify(&r);
 }
 
-#[test]
-fn carry_002_simultaneous_slice_uses_both_sides_depth_and_caps() {
+fn check_simultaneous_slice_uses_both_sides_depth_and_caps() {
     for reverse in [false, true] {
         // Make each venue's executable side the bottleneck in turn. The other side is a decoy.
         for thin in [I1, I2] {
@@ -547,8 +548,7 @@ fn carry_002_simultaneous_slice_uses_both_sides_depth_and_caps() {
     }
 }
 
-#[test]
-fn carry_010_simultaneous_fault_seeds_repair_and_replay() {
+fn check_simultaneous_fault_seeds_repair_and_replay() {
     for seed in 0..12 {
         // Replay is checked in every run; a second execution also checks deterministic outputs/state.
         assert_eq!(fault_scenario(seed), fault_scenario(seed), "seed {seed}");

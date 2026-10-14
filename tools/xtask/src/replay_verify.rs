@@ -34,6 +34,10 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
     };
     let mut i = 1;
     while i < args.len() {
+        if args[i] == "--record-decide-hist" {
+            i += 1;
+            continue;
+        }
         if !matches!(args[i].as_str(), "--from-seq" | "--to-seq")
             || args
                 .get(i + 1)

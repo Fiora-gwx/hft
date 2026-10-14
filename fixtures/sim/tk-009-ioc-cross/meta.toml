@@ -1,0 +1,4 @@
+case = "TK-009"
+source = "Hand-calculated from hft-sim Sim-030 and shared rd_sim/setup_sim"
+reviewed_by = "pending owner review"
+calculation = "0.1 BTC at 60000 USDT = 6000 USDT; taker fee 0.0004 = 2.4 USDT; fixed entry+response latency 2+2 ms; Fill is terminal"

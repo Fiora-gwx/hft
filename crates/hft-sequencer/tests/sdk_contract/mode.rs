@@ -101,6 +101,7 @@ fn mode_is(t: &str, old: &str, new: &str) -> bool {
 
 #[test]
 fn sdk_164_mode_table_orders() {
+    check_unlinked_hedge_closes_naked_exposure();
     use IntentClass::*;
     // (row, mode, open_allowed, class)
     let rows: [(u32, RunMode, bool, IntentClass); 8] = [
@@ -173,8 +174,7 @@ fn sdk_164_mode_table_orders() {
     }
 }
 
-#[test]
-fn sdk_164_unlinked_hedge_closes_naked_exposure() {
+fn check_unlinked_hedge_closes_naked_exposure() {
     for (spot, perp, side) in [("0.01", "0.008", Side::Sell), ("0.008", "0.01", Side::Buy)] {
         let mut b = b_gt3();
         // Exercise manual repair before the executor's automatic HedgeFix starts.
@@ -274,6 +274,7 @@ fn issue_with_hx(
 
 #[test]
 fn sdk_165_shadow_no_commit() {
+    check_shadow_records_live_risk_result();
     // A's order bucket holds 5 tokens; acct-1's OMS tables have 64 slots.
     let mut b = b_gt3();
     b.rd.limits.retain(|l| l.0 != A);
@@ -308,8 +309,7 @@ fn sdk_165_shadow_no_commit() {
     assert_eq!(lv.leg[0].inflight_immediate, Qty(0));
 }
 
-#[test]
-fn sdk_165_shadow_records_live_risk_result() {
+fn check_shadow_records_live_risk_result() {
     // Use the same input and risk state in each mode, including failures late in the chain.
     for (case, want) in [
         (0, RejectBits(0)),

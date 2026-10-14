@@ -131,6 +131,8 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 
 `replay-io` 的冷规划器校验 RecoverMismatch 注记及其引用的旧尾部,按 [replayer verify](../../apps/replayer/README.md#verify) 的范围比较并单列 `recovery_diffs`;恢复后的普通输出不放行。仅经过验证的启动注记可在从新引导快照起步时略过,它们不由该快照重新生成。非法证据返回 `RecoveryRange`,普通与恢复差异共用诊断容量,溢出失败。默认构建不包含范围规划和恢复明细存储。
 
+同一 feature 的 `verify_with_clock` 可注入仅供诊断的纳秒时钟,从 Input 入 journal 到决定测量点计时,对窗口内每条 OrderDecision 留一个样本;样本容量在启动前按记录数预分配。时钟不供应驱动 TSC,不进入决策、快照或比较字节。统计与 JSON 归 replayer,TOOL-045 验证启用前后的比较结果相同。
+
 同一 feature 的 `driver::recompute` 以独立镜像执行 Model,起点、检查点身份、比较窗口与路径重建点遵循 [replayer verify](../../apps/replayer/README.md#verify)。每次独立运行从其引导快照重建引擎。Model 只在已有合法起点、前缀连续且实例名/编号/账户/种类/参数引用均一致时续用已重算状态;不满足则重新寻找起点,无起点逐名报告。窗口前的检查点与路径重置注记参与预热;原始产出字节在连续前缀内保留,每个运行各自只匹配一次;重启追赶重发旧 basis 的 Advice 仍验证原字节,同一运行内重复记录拒绝。`StrategySet::has_model` 只排除实际 NoModel,空布局和零资源声明仍可带 Model。同一五元键的重复产出只保留最后一条参与配对,覆盖量计入 coalesced;每条产出只匹配一次。诊断记录数、待配对/历史产出与差异载荷合计字节数由 `RecomputeLimits` 限制,溢出返回错误。文件与 JSON 仍归 app;此入口只用于冷回放,不改主循环、journal schema 或快照格式。
 
 回放比较器要求屏蔽测量字段后的逻辑体**长度和内容都相等**;不删体尾零。传输标志按 `NONCMP_FLAGS` 屏蔽,SHADOW 等业务标志仍参与比较。

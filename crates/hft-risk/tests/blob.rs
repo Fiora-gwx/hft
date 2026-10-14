@@ -16,6 +16,7 @@ fn rsk_284_risk_blob_roundtrip() {
     assert_eq!(&b[16..24], &(-123_456_789i64).to_le_bytes());
     assert_eq!(&b[24..40], b"risk-codec-test!");
     let q = RiskParams::decode_blob(&b, rd).unwrap();
+    assert_eq!(RiskParams::inspect_blob(&b).unwrap(), q);
     assert_eq!(p.version, q.version);
     assert_eq!(p.generated_at_ns, q.generated_at_ns);
     assert_eq!(p.author, q.author);
@@ -43,6 +44,7 @@ fn rsk_285_risk_blob_rejects_malformed() {
     let b = p.encode_blob().unwrap();
     for n in 0..b.len() {
         assert!(RiskParams::decode_blob(&b[..n], rd).is_err(), "truncation at {n}");
+        assert!(RiskParams::inspect_blob(&b[..n]).is_err(), "inspection at {n}");
     }
     for (off, word) in [(0, 0), (8, 0), (48, u64::MAX), (72, u64::MAX)] {
         let mut bad = b.clone();
@@ -64,6 +66,7 @@ fn rsk_285_risk_blob_rejects_malformed() {
     assert_eq!(dup.encode_blob(), Err(RiskBlobError::Order));
     let mut missing = p.clone();
     missing.accounts.truncate(2);
+    assert!(RiskParams::inspect_blob(&missing.encode_blob().unwrap()).is_ok());
     assert_eq!(
         RiskParams::decode_blob(&missing.encode_blob().unwrap(), rd),
         Err(RiskBlobError::Reference("accounts.missing"))

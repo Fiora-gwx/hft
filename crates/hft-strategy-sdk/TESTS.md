@@ -2511,7 +2511,7 @@ spec: README.md
 | SDK-164.7 | Live,`open_allowed = 0` | Reduce | `outcome = Placed(_)` |
 | SDK-164.8 | Live,`open_allowed = 0` | Flatten | `outcome = Placed(_)` |
 
-- SDK-164.4 补充:组净量 +0.002 / −0.002 时分别在永续腿卖/买 0.001,同一 Input 连续两笔通过且带 RISK_REDUCING(仅买回空仓带 REDUCE_ONLY);第三笔同向与一笔反向均 CLOSE_ONLY,不出环。实现:`crates/hft-sequencer/tests/sdk_contract/mode.rs::sdk_164_unlinked_hedge_closes_naked_exposure`。
+- SDK-164.4 补充:组净量 +0.002 / −0.002 时分别在永续腿卖/买 0.001,同一 Input 连续两笔通过且带 RISK_REDUCING(仅买回空仓带 REDUCE_ONLY);第三笔同向与一笔反向均 CLOSE_ONLY,不出环。实现:`crates/hft-sequencer/tests/sdk_contract/mode.rs::check_unlinked_hedge_closes_naked_exposure`。
 
 ### SDK-165 Shadow 下完整风控评估且不扣资源
 
@@ -2526,7 +2526,7 @@ spec: README.md
   - 3 条 `OrderDecision` 都带 `SHADOW` 位;之后令牌剩余仍为 5、空闲槽仍为 64、`v.legs(A1, G1).leg[0].inflight_immediate = 0`
   - Shadow 与 Live 的首个风控拒绝位相同;Shadow 同时带 SHADOW,slot=0、outcome=Shadowed,无 GwCmd;资源不变
 - 实现:`crates/hft-sequencer/tests/sdk_contract/mode.rs::sdk_165_shadow_no_commit`
-- 风控结果补充实现:`crates/hft-sequencer/tests/sdk_contract/mode.rs::sdk_165_shadow_records_live_risk_result`
+- 风控结果补充实现:`crates/hft-sequencer/tests/sdk_contract/mode.rs::check_shadow_records_live_risk_result`
 
 ### SDK-166 目标在各有效模式下的增仓与减仓部分
 

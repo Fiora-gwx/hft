@@ -78,6 +78,17 @@ pub fn verify<S: StrategySet>(
     opts: VerifyOptions,
     hb: &'static Heartbeat,
 ) -> Result<VerifyResult, VerifyError> {
+    verify_with_clock::<S>(log, opts, hb, None)
+}
+
+/// Optional diagnostic clock, read only around decision computation. Logged TSC and all
+/// comparison bytes remain unchanged. One sample is retained per compared OrderDecision.
+pub fn verify_with_clock<S: StrategySet>(
+    log: Log,
+    opts: VerifyOptions,
+    hb: &'static Heartbeat,
+    clock_ns: Option<fn() -> u64>,
+) -> Result<VerifyResult, VerifyError> {
     let from = opts.from_seq.unwrap_or(0);
     let to = opts.to_seq.unwrap_or(u64::MAX);
     if from > to || log.recs.last().is_none_or(|r| from > r.seq) {
@@ -104,6 +115,9 @@ pub fn verify<S: StrategySet>(
         .position(|r| r.seq > to && r.role() == Role::Input)
         .unwrap_or(log.recs.len());
     let mut driver = ReplayDriver::new(ReplayMode::Verify, log, 0, 1);
+    if let Some(clock) = clock_ns {
+        driver.sink.decide_timing = Some(super::replay::DecideTiming::new(clock, driver.end));
+    }
     driver.sink.compare_from = from;
     driver.sink.compare_to = to;
     driver.sink.stop_on_first = !opts.keep_going;

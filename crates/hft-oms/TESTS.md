@@ -3348,7 +3348,7 @@ spec: README.md
 
 ### OMS-317 链接有 Unknown 槽时续接推迟到收敛的那个事件
 
-- 补充验收:`tests/recover.rs::oms_317_simultaneous_recovery_waits_for_both_terminal` 覆盖 Simultaneous 快照恢复、两腿 QueryResult(Live) 不提前反向、第二腿多成时在该腿反向、Reverse 再次恢复不重复出单,以及 Hold 留给 LegTracker。
+- 补充验收:`tests/recover.rs::check_simultaneous_recovery_waits_for_both_terminal` 覆盖 Simultaneous 快照恢复、两腿 QueryResult(Live) 不提前反向、第二腿多成时在该腿反向、Reverse 再次恢复不重复出单,以及 Hold 留给 LegTracker。
 
 - 规则:[恢复:停机时间不计与闸门续接](README.md#恢复停机时间不计与闸门续接)
 - 级别:unit

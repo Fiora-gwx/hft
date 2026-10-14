@@ -440,10 +440,7 @@ fn cmd_repro(a: &Args) -> Result<ExitCode, String> {
     }
     if a.trace {
         for t in &rec.trace {
-            println!(
-                "{} {} {:?} {:#06x} seq={}",
-                t.step, t.at_ns, t.src, t.kind.0, t.seq
-            );
+            eprintln!("{}", hft_testkit::dst::report::trace_line(t));
         }
     }
     match rec.outcome {
