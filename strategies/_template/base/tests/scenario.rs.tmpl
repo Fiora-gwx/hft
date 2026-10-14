@@ -1,0 +1,83 @@
+//! Scenario tests of `{{name}}` on the SDK mock views (cookbook "6. 场景测试"). The binary counts
+//! allocations, so every `StrategyHarness::feed` also checks that the fast part does not allocate.
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code
+
+mod common;
+
+use common::{A1, CAPACITY, G1, I1, I2, fixture, g1, quote};
+use {{crate}}::{{{Type}}, {{Type}}Params};
+use hft_strategy_sdk::params::{RawParams, SchemaView};
+use hft_strategy_sdk::testing::ev;
+use hft_strategy_sdk::{GroupTable, ParamError, ParamSet, Strategy};
+use hft_testkit::sdk_mock::StrategyHarness;
+
+#[global_allocator]
+static ALLOC: hft_testkit::CountingAlloc = hft_testkit::CountingAlloc;
+
+fn params(n_groups: u16) -> {{Type}}Params {
+    let schema = {{Type}}::DESC.schema;
+    let defaults = (0..schema.n_fields())
+        .filter_map(|i| schema.field(i).map(|f| f.default))
+        .collect();
+    {{Type}}Params::from_raw(
+        &RawParams {
+            defaults,
+            overrides: Vec::new(),
+        },
+        n_groups,
+    )
+}
+
+fn harness() -> StrategyHarness<{{Type}}> {
+    let mut h = StrategyHarness::<{{Type}}>::new(&params(1), &g1(), fixture(), A1).expect("params");
+    h.views_mut().at_engine_ns(1_000_000_000);
+    h
+}
+
+#[test]
+fn quotes_tracked_without_intents() {
+    let mut h = harness();
+    for (k, (inst, mid)) in [(I1, 6_000_000), (I2, 6_000_100), (I1, 6_000_010)]
+        .into_iter()
+        .enumerate()
+    {
+        h.views_mut().at_engine_ns(1_000_000_000 + k as i64 * 1_000_000);
+        quote(h.views_mut(), inst, mid);
+        let b = h.views_mut().bbo_of(inst);
+        let out = h.feed(&ev::bbo(inst, 0, b).as_ref());
+        assert!(
+            out.items.is_empty(),
+            "the skeleton sends nothing: {:?}",
+            out.items
+        );
+    }
+    let g = h.strategy().fast.groups[0];
+    assert_eq!(g.id, G1);
+    assert_eq!(g.mid, [6_000_010, 6_000_100]);
+    assert_eq!(g.n_bbo, 3);
+}
+
+#[test]
+fn snapshot_roundtrip() {
+    let mut h = harness();
+    quote(h.views_mut(), I1, 6_000_000);
+    let b = h.views_mut().bbo_of(I1);
+    h.feed(&ev::bbo(I1, 0, b).as_ref());
+    h.snapshot_roundtrip().expect("snapshot → restore → snapshot");
+}
+
+#[test]
+fn group_shape_checked() {
+    let one_leg = GroupTable::new(&[common::spec(G1, &[(I1, common::V1)])], CAPACITY);
+    let p = params(1);
+    let rd = fixture();
+    assert_eq!(
+        p.validate(&one_leg, &rd.view()),
+        Err(ParamError::GroupShape { gix: 0, code: 1 })
+    );
+    assert_eq!(p.validate(&g1(), &rd.view()), Ok(()));
+}

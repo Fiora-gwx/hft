@@ -1,0 +1,66 @@
+---
+description: "{{name}} 策略的 pipeline 插件包(骨架):声明 strategy_kind 与 api_version,尚不拥有任何字段;规则随策略补写"
+kind: python-package
+tier: cold
+scope: core
+status: spec
+---
+
+# {{name}} pipeline 插件
+
+## 概要
+
+`hft-plugin-{{name}}` 是 [`{{name}}`](../README.md) 策略的 pipeline 插件包,由 `cargo xtask new-strategy --with-pipeline` 生成。插件只经 [pipeline 框架](../../../python/pipeline/README.md)的 `hft_pipeline.api` 与框架交互,以入口点 `hft_pipeline.plugins` 登记;骨架的 `owned_fields` 为空、不声明外部输入,`compute` 尚未实现。参数编码经 SDK 的编解码器,插件不编码参数。
+
+## 目录
+
+- [使用本组件](#使用本组件)
+- [实现说明](#实现说明)
+- [延迟与资源契约](#延迟与资源契约)
+- [测试与验收](#测试与验收)
+- [依赖](#依赖)
+- [延伸阅读](#延伸阅读)
+- [已知限制与后续工作](#已知限制与后续工作)
+
+## 使用本组件
+
+入口点 `{{crate}} = "hft_plugin_{{crate}}:PLUGIN"`;`PLUGIN.strategy_kind = {{kind_id}}`,`api_version = 1`。
+
+## 实现说明
+
+<details><summary>实现要点</summary>
+
+| 文件 | 职责 |
+|---|---|
+| `src/hft_plugin_{{crate}}/__init__.py` | 插件对象 `PLUGIN` |
+| `tests/test_plugin.py` | 离线测试 |
+
+</details>
+
+## 延迟与资源契约
+
+冷进程,无热路径约束。
+
+## 测试与验收
+
+骨架自带离线测试 `tests/test_plugin.py`;用例随策略的 TESTS.md 补写。
+
+## 依赖
+
+只依赖 `hft_pipeline.api` 与标准库。
+
+## 延伸阅读
+
+- [cookbook:新增一个策略](../../../docs/cookbook/adding-a-strategy.md)
+
+## 已知限制与后续工作
+
+`compute` 与 `explain` 未实现;框架接入前不在任何实例配置中使用。
+
+### 开发备忘
+
+<details><summary>给实现者</summary>
+
+先在策略 README 写清插件拥有的字段与输入,再实现 `compute`。
+
+</details>

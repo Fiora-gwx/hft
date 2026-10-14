@@ -278,3 +278,133 @@ fn tool_029_probe_shape_required() {
         assert!(r.stderr.contains(msg), "{id}: `{msg}` not in {}", r.stderr);
     }
 }
+
+/// Replaces the fixture template with the repository's `strategies/_template/` (every layer).
+fn real_template(f: &Fixture) {
+    std::fs::remove_dir_all(f.path("strategies/_template")).unwrap();
+    let src = common::repos::repo_root().join("strategies/_template");
+    for e in walkdir::WalkDir::new(&src).into_iter().filter_map(|e| e.ok()) {
+        if e.file_type().is_file() {
+            let rel = e.path().strip_prefix(&src).unwrap();
+            let rel = format!(
+                "strategies/_template/{}",
+                rel.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/")
+            );
+            f.write(&rel, &std::fs::read_to_string(e.path()).unwrap());
+        }
+    }
+}
+
+/// crates/hft-strategy-sdk/TESTS.md SDK-004 on the `strat_repo` fixture with the repository's real
+/// template, hot clippy configuration and scaffold templates (builds, tests, the DST short set and
+/// `hft-core --check` go through the recording executor; the gate's real run is CI's `cargo xtask
+/// scaffold-gate`). Step 1 is the gate; step 2 the engine-side status. Then the same template is
+/// rendered by `new-strategy` as a second strategy committed on its own, and `decoupling-gate` over
+/// that commit (real git) finds no engine crate or app in the diff.
+#[test]
+fn sdk_004_second_test_strategy_zero_engine_diff() {
+    let f = strat_repo("sg-sdk-004");
+    real_template(&f);
+    common::repos::copy_real(&f, "tools/lint/clippy-hot.toml");
+    for p in [
+        "crates/hft-strategy-sdk/src/lib.rs",
+        "crates/hft-testkit/src/lib.rs",
+        "crates/hft-sequencer/src/lib.rs",
+    ] {
+        f.write(p, "// fixture\n");
+    }
+    common::repos::git(&f, &["add", "-A"]);
+    common::repos::git(&f, &["commit", "-q", "-m", "engine crates, real template"]);
+
+    // Step 1: the gate.
+    let s = Script::new(&f, &[], 0);
+    let r = gate(&f, &s, true, None);
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    let calls = s.calls();
+    for pat in [
+        "-p ci-probe --test scenario",
+        "-p hft-strategy-registry --test ci_probe_dst",
+        " --check --config ",
+    ] {
+        assert!(calls.iter().any(|c| c.contains(pat)), "{pat} not in {calls:?}");
+    }
+    let j = r.json.unwrap();
+    assert_eq!(j["dst_seeds"], 100);
+    assert_eq!(j["kind_id"], "0xff10");
+    assert_eq!(j["engine_changes"], serde_json::json!([]));
+    // The probe is the real template's: kind 0xFF10, a Model declaring 2 MiB per group by default
+    // (window 262_144 × 8 B), the plugin package and the hot clippy configuration.
+    let p = f.path(DEC).join("strategies/ci-probe");
+    let read = |rel: &str| std::fs::read_to_string(p.join(rel)).unwrap();
+    assert!(read("src/lib.rs").contains("kind_id: 65296,"));
+    assert!(read("src/lib.rs").contains("type Model = model::CiProbeModel;"));
+    assert!(read("src/model/mod.rs").contains("fn mem_bytes("));
+    assert!(read("src/params.rs").contains("default = 262_144"));
+    assert!(read("pipeline/pyproject.toml").contains("ci_probe = \"hft_plugin_ci_probe:PLUGIN\""));
+    assert_eq!(read("clippy.toml"), f.read("tools/lint/clippy-hot.toml"));
+    let cfg: toml::Table = f.read(&format!("{DEC}/sim-check.toml")).parse().unwrap();
+    assert_eq!(cfg["advisor"]["mem_budget_mib"].as_integer(), Some(160));
+    let reg: toml::Table = f.read(&format!("{DEC}/registry/Cargo.toml")).parse().unwrap();
+    let tk = &reg["dev-dependencies"]["hft-testkit"]["features"];
+    assert!(
+        tk.as_array().unwrap().iter().any(|v| v.as_str() == Some("seq")),
+        "{tk}"
+    );
+
+    // Step 2: no engine crate (SDK, hft-testkit, hft-sequencer included), app, hft-cfg or python/
+    // change; everything generated is under target/ (ignored).
+    let engine = [
+        "crates",
+        "apps",
+        "tools/hft-cfg",
+        "python",
+        "crates/hft-strategy-sdk",
+        "crates/hft-testkit",
+        "crates/hft-sequencer",
+    ];
+    assert_eq!(status(&f, &engine), Vec::<String>::new());
+    assert_eq!(status(&f, &[]), Vec::<String>::new());
+
+    // The same template through the generator as a second strategy, then decoupling-gate over it.
+    let base = common::repos::git(&f, &["rev-parse", "HEAD"]).trim().to_string();
+    let s2 = Script::new(&f, &[], 0);
+    let r = f.xtask_script(
+        &[
+            "new-strategy",
+            "probe-two",
+            "--kind-id",
+            "5",
+            "--with-model",
+            "--with-pipeline",
+        ],
+        &s2,
+        &[],
+    );
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert_eq!(status(&f, &engine), Vec::<String>::new());
+    common::repos::git(&f, &["add", "-A"]);
+    common::repos::git(&f, &["commit", "-q", "-m", "second strategy"]);
+    let head = common::repos::git(&f, &["rev-parse", "HEAD"]).trim().to_string();
+    let r = f.xtask_env(
+        &["decoupling-gate", "--base", &base, "--head", &head],
+        &[("XTASK_EXEC_SCRIPT", None), ("XTASK_EXEC_LOG", None)],
+    );
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    let j = r.json.unwrap();
+    assert_eq!(j["engine"], serde_json::json!([]));
+    assert_eq!(j["apps"], serde_json::json!([]));
+    let strat: Vec<&str> = j["strategies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    for want in [
+        "strategies/probe-two/src/lib.rs",
+        "strategies/probe-two/src/model/mod.rs",
+        "strategies/registry/src/lib.rs",
+        "strategies/registry/Cargo.toml",
+    ] {
+        assert!(strat.contains(&want), "{want} not in {strat:?}");
+    }
+}

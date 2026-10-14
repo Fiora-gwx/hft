@@ -1,0 +1,236 @@
+//! Model of `{{name}}` (advisor thread, warm): keeps a ring of the last `window` mid samples of each
+//! group's first leg and sends one `WindowAdvice` per group every model tick. Deterministic: integer
+//! arithmetic only, groups in ascending gix. Raw-sample section tag 1 (per group): `{GroupId: u32,
+//! mid: I64 Prefixed (oldest first), fp: U64 One}` — `fp` is the group fingerprint the samples
+//! belong to; restore drops a group's samples when it differs. No path state.
+
+use hft_strategy_sdk::prelude::*;
+use hft_strategy_sdk::{
+    AdviceOut, ElemDesc, ElemTy, EventRef, GroupResets, GroupSpecExt, GroupTable, LenRule, MODEL_TICK, Model,
+    ModelLayoutDesc, ModelParamEffect, ModelViews, RefView, ResetCause, RestoreError, SectionDesc,
+    SectionScope, SnapshotProgress, SnapshotReader, SnapshotWriter, StrategyInstance,
+};
+
+use crate::advice::WindowAdvice;
+use crate::params::{{Type}}Params;
+
+/// `{{Type}}Model::LAYOUT`.
+pub static LAYOUT: ModelLayoutDesc = ModelLayoutDesc {
+    sections: &[SectionDesc {
+        tag: 1,
+        name: "mids",
+        scope: SectionScope::Group,
+        elems: &[
+            ElemDesc {
+                name: "mid",
+                ty: ElemTy::I64,
+                len: LenRule::Prefixed,
+            },
+            ElemDesc {
+                name: "fp",
+                ty: ElemTy::U64,
+                len: LenRule::One,
+            },
+        ],
+    }],
+};
+
+/// Fixed overhead of the declarations (struct, group table, advice buffers).
+pub const BASE_BYTES: u64 = 64 * 1024;
+
+/// One group's sample ring.
+#[derive(Debug)]
+struct Ring {
+    id: GroupId,
+    /// `GroupSpec::fingerprint()` the samples belong to.
+    fp: u64,
+    first_leg: InstId,
+    /// Capacity `window` (allocated when the group is configured).
+    buf: Vec<i64>,
+    /// Next write position once the ring is full.
+    head: usize,
+}
+
+impl Ring {
+    fn new(g: &GroupSpec, window: usize) -> Ring {
+        Ring {
+            id: g.id,
+            fp: g.fingerprint(),
+            first_leg: g.legs[0].inst,
+            buf: Vec::with_capacity(window),
+            head: 0,
+        }
+    }
+
+    fn push(&mut self, mid: i64) {
+        if self.buf.len() < self.buf.capacity() {
+            self.buf.push(mid);
+        } else if let Some(slot) = self.buf.get_mut(self.head) {
+            *slot = mid;
+            self.head = (self.head + 1) % self.buf.len();
+        }
+    }
+
+    /// Samples oldest first.
+    fn iter(&self) -> impl Iterator<Item = &i64> {
+        let (a, b) = self.buf.split_at(self.head.min(self.buf.len()));
+        b.iter().chain(a.iter())
+    }
+
+    fn advice(&self) -> WindowAdvice {
+        let n = self.buf.len();
+        let sum: i128 = self.buf.iter().map(|m| i128::from(*m)).sum();
+        WindowAdvice {
+            n: n as u32,
+            mean_mid: if n == 0 { 0 } else { (sum / n as i128) as i64 },
+        }
+    }
+}
+
+/// The slow part.
+#[derive(Debug)]
+pub struct {{Type}}Model {
+    window: usize,
+    groups: Vec<Ring>,
+}
+
+impl {{Type}}Model {
+    fn rings(p: &{{Type}}Params, groups: &GroupTable) -> Vec<Ring> {
+        let window = p.at(0).window as usize;
+        groups.iter().map(|(_, g)| Ring::new(g, window)).collect()
+    }
+
+    /// Samples held for the group at `gix` (tests and diagnostics).
+    pub fn samples(&self, gix: u16) -> usize {
+        self.groups.get(usize::from(gix)).map_or(0, |r| r.buf.len())
+    }
+}
+
+impl Model for {{Type}}Model {
+    type Params = {{Type}}Params;
+    const LAYOUT_VERSION: u32 = 1;
+    const LAYOUT: &'static ModelLayoutDesc = &LAYOUT;
+    const PATH_VERSION: u32 = 0;
+
+    /// `n_groups × window × 8 B` of sample rings plus `BASE_BYTES` (2 MiB per group by default).
+    fn mem_bytes(p: &{{Type}}Params, n_groups: u16) -> u64 {
+        u64::from(n_groups) * u64::from(p.at(0).window) * 8 + BASE_BYTES
+    }
+
+    /// Per group: section header and id (16 B) + count (4 B) + `window × 8 B` + fp (8 B); plus 256 B.
+    fn snapshot_bytes(p: &{{Type}}Params, n_groups: u16) -> u64 {
+        u64::from(n_groups) * (28 + u64::from(p.at(0).window) * 8) + 256
+    }
+
+    fn path_settle_ms(_: &{{Type}}Params) -> u64 {
+        0
+    }
+
+    /// A full window at one sample per BBO is not time-bounded; the skeleton declares none.
+    fn cold_start_ms(_: &{{Type}}Params, _: u16) -> u64 {
+        0
+    }
+
+    fn new(_inst: StrategyInstance, p: &{{Type}}Params, groups: &GroupTable, _rd: &RefView<'_>) -> Self {
+        {{Type}}Model {
+            window: p.at(0).window as usize,
+            groups: Self::rings(p, groups),
+        }
+    }
+
+    /// Groups with a new `GroupId` or a changed fingerprint start empty and are reported
+    /// (`Fingerprint`); a `window` change (structural) restarts every group.
+    fn on_params(&mut self, p: &{{Type}}Params, groups: &GroupTable, _rd: &RefView<'_>) -> ModelParamEffect {
+        let window = p.at(0).window as usize;
+        if window != self.window {
+            self.window = window;
+            self.groups = Self::rings(p, groups);
+            return ModelParamEffect::ResetAll;
+        }
+        let mut old = core::mem::take(&mut self.groups);
+        let mut resets = GroupResets::new(groups.capacity());
+        for (gix, g) in groups.iter() {
+            let fp = g.fingerprint();
+            match old.iter().position(|r| r.id == g.id && r.fp == fp) {
+                Some(i) => self.groups.push(old.swap_remove(i)),
+                None => {
+                    resets.set(gix, ResetCause::Fingerprint);
+                    self.groups.push(Ring::new(g, window));
+                }
+            }
+        }
+        if resets.is_empty() {
+            ModelParamEffect::None
+        } else {
+            ModelParamEffect::ResetGroups(resets)
+        }
+    }
+
+    fn on_event<V: ModelViews>(&mut self, ev: &EventRef<'_>, _v: &V, out: &mut AdviceOut<'_>) {
+        match *ev {
+            EventRef::Bbo { inst, gix, b } => {
+                if let Some(r) = self.groups.get_mut(usize::from(gix))
+                    && r.first_leg == inst
+                    && b.bid_px.0 > 0
+                    && b.ask_px.0 >= b.bid_px.0
+                {
+                    r.push(b.bid_px.0 + (b.ask_px.0 - b.bid_px.0) / 2);
+                }
+            }
+            EventRef::Timer { tag, .. } if tag == MODEL_TICK => {
+                for r in &self.groups {
+                    let _ = out.emit(r.id, &r.advice());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn snapshot_path(&self, _w: &mut SnapshotWriter) {}
+
+    fn restore_path(&mut self, _r: &mut SnapshotReader<'_>) -> Result<(), RestoreError> {
+        Ok(())
+    }
+
+    fn snapshot_chunk(&self, from_gix: u16, w: &mut SnapshotWriter, max_bytes: u32) -> SnapshotProgress {
+        let mut used = 0usize;
+        let mut gix = usize::from(from_gix);
+        while let Some(r) = self.groups.get(gix) {
+            let len = 4 + 4 + 8 * r.buf.len() + 8;
+            if gix > usize::from(from_gix) && used + len > max_bytes as usize {
+                return SnapshotProgress::More(gix as u16);
+            }
+            w.section(1);
+            w.put_u32(r.id.0);
+            w.put_u32(r.buf.len() as u32);
+            for m in r.iter() {
+                w.put_i64(*m);
+            }
+            w.put_u64(r.fp);
+            used += len;
+            gix += 1;
+        }
+        SnapshotProgress::Done
+    }
+
+    /// Restores the samples of the groups still configured with the same `GroupId` and fingerprint,
+    /// oldest first (a full ring keeps the newest `window`).
+    fn restore(&mut self, r: &mut SnapshotReader<'_>) -> Result<(), RestoreError> {
+        while !r.is_empty() {
+            let id = GroupId(r.get_u32()?);
+            let n = r.get_u32()? as usize;
+            let mids = r.get_bytes(n.checked_mul(8).ok_or(RestoreError::BadValue)?)?;
+            let fp = r.get_u64()?;
+            if let Some(g) = self.groups.iter_mut().find(|g| g.id == id && g.fp == fp) {
+                g.buf.clear();
+                g.head = 0;
+                for c in mids.chunks_exact(8) {
+                    let mut le = [0u8; 8];
+                    le.copy_from_slice(c);
+                    g.push(i64::from_le_bytes(le));
+                }
+            }
+        }
+        Ok(())
+    }
+}

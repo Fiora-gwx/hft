@@ -653,7 +653,7 @@ jobs:
       # M2: crates/ apps/ strategies/ tools/ changed.
       - name: cargo xtask scaffold-gate
         if: needs.paths.outputs.scaffold == 'true' && steps.xtask.outputs.scaffold-gate == 'true'
-        run: cargo xtask scaffold-gate
+        run: cargo xtask scaffold-gate --profile ci
 
       # M3 (cargo xtask fuzz and tools/xtask/fuzz-targets.toml): 60 s per changed target.
       - name: Fuzz smoke of changed targets

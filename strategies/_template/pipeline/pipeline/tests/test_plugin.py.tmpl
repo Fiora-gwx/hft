@@ -1,0 +1,18 @@
+"""Offline checks of the {{name}} plugin skeleton (no network, no framework)."""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+import hft_plugin_{{crate}} as plugin  # noqa: E402
+
+
+def test_plugin_identity():
+    assert plugin.PLUGIN.strategy_kind == {{kind_id}}
+    assert plugin.PLUGIN.api_version >= 1
+
+
+def test_owns_no_field_yet():
+    assert plugin.PLUGIN.owned_fields == frozenset()
+    assert plugin.PLUGIN.required_inputs == ()

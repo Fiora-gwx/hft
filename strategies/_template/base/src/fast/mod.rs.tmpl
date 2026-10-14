@@ -1,0 +1,145 @@
+//! Fast part of `{{name}}` (sequencer thread, hot): bounded integer work per event, no allocation
+//! after `new`, state per group indexed by gix and keyed by `GroupId` in snapshots. The skeleton
+//! keeps the last mid of each leg; the strategy's gates and intents go here.
+#![deny(clippy::float_arithmetic)]
+
+use hft_strategy_sdk::prelude::*;
+use hft_strategy_sdk::{
+    Ctx, EvMask, EventRef, GroupTable, Part, RestoreError, SnapshotReader, SnapshotWriter, SubsBuilder, Views,
+};
+
+use crate::params::{{Type}}Params;
+
+/// Legs per group (README "group 形态").
+pub const LEGS: usize = 2;
+
+/// BBO of both legs of every group, delivered to `part` (`Fast`, or `Both` with a Model).
+pub fn subscribe(groups: &GroupTable, part: Part, out: &mut SubsBuilder<'_>) {
+    for (gix, g) in groups.iter() {
+        for l in g.legs.iter().take(usize::from(g.n_legs).min(LEGS)) {
+            let _ = out.market(l.inst, gix, EvMask::BBO, part);
+        }
+    }
+}
+
+/// State of one group.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GroupState {
+    pub id: GroupId,
+    pub legs: [InstId; LEGS],
+    /// Last mid of each leg (raw `Px`); 0 = no two-sided quote yet.
+    pub mid: [i64; LEGS],
+    /// BBO events seen for this group.
+    pub n_bbo: u64,
+    /// `basis_seq` of the latest Advice of this group from the Model (0 = none). Not in the
+    /// snapshot: Advice from before a restart is stale (`basis_seq < now.boot_seq`).
+    pub advice_seq: u64,
+}
+
+impl GroupState {
+    fn of(g: &GroupSpec) -> GroupState {
+        let mut legs = [INST_NONE; LEGS];
+        for (d, l) in legs.iter_mut().zip(g.legs.iter()) {
+            *d = l.inst;
+        }
+        GroupState {
+            id: g.id,
+            legs,
+            mid: [0; LEGS],
+            n_bbo: 0,
+            advice_seq: 0,
+        }
+    }
+}
+
+/// The fast part's state.
+#[derive(Debug)]
+pub struct Fast {
+    /// One entry per gix; capacity `GroupTable::capacity()` (no reallocation on parameter changes).
+    pub groups: Vec<GroupState>,
+    /// Previous states during `on_params` (same capacity, allocated in `new`).
+    scratch: Vec<GroupState>,
+    pub enabled: bool,
+}
+
+impl Fast {
+    pub fn new(p: &{{Type}}Params, groups: &GroupTable) -> Fast {
+        let mut f = Fast {
+            groups: Vec::with_capacity(usize::from(groups.capacity())),
+            scratch: Vec::with_capacity(usize::from(groups.capacity())),
+            enabled: false,
+        };
+        f.on_params(p, groups);
+        f
+    }
+
+    /// New parameters: groups with a new `GroupId` or a changed leg set start empty, the others keep
+    /// their state (SDK "参数变化时的 group 重置").
+    pub fn on_params(&mut self, p: &{{Type}}Params, groups: &GroupTable) {
+        self.enabled = p.at(0).enabled;
+        self.scratch.clear();
+        self.scratch.extend_from_slice(&self.groups);
+        self.groups.clear();
+        for (_, g) in groups.iter() {
+            let fresh = GroupState::of(g);
+            let kept = self
+                .scratch
+                .iter()
+                .find(|s| s.id == g.id && s.legs == fresh.legs)
+                .copied()
+                .unwrap_or(fresh);
+            self.groups.push(kept);
+        }
+    }
+
+    pub fn on_event<V: Views>(&mut self, ev: &EventRef<'_>, _v: &V, _ctx: &mut Ctx<'_>) {
+        match *ev {
+            EventRef::Bbo { inst, gix, b } => {
+                if let Some(g) = self.groups.get_mut(usize::from(gix))
+                    && let Some(k) = g.legs.iter().position(|l| *l == inst)
+                {
+                    g.n_bbo += 1;
+                    if b.bid_px.0 > 0 && b.ask_px.0 >= b.bid_px.0 {
+                        g.mid[k] = b.bid_px.0 + (b.ask_px.0 - b.bid_px.0) / 2;
+                    }
+                }
+            }
+            EventRef::Advice { gix, basis_seq, .. } => {
+                if let Some(g) = self.groups.get_mut(usize::from(gix)) {
+                    g.advice_seq = basis_seq;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// `n: u16`, then per group `id: u32, mid: [i64; 2], n_bbo: u64` in gix order.
+    pub fn snapshot(&self, w: &mut SnapshotWriter) {
+        w.put_u16(self.groups.len() as u16);
+        for g in &self.groups {
+            w.put_u32(g.id.0);
+            for m in g.mid {
+                w.put_i64(m);
+            }
+            w.put_u64(g.n_bbo);
+        }
+    }
+
+    /// Restores by `GroupId`; saved groups that are no longer configured are dropped.
+    pub fn restore(&mut self, r: &mut SnapshotReader<'_>) -> Result<(), RestoreError> {
+        let n = r.get_u16()?;
+        for _ in 0..n {
+            let id = GroupId(r.get_u32()?);
+            let mut mid = [0i64; LEGS];
+            for m in mid.iter_mut() {
+                *m = r.get_i64()?;
+            }
+            let n_bbo = r.get_u64()?;
+            if let Some(g) = self.groups.iter_mut().find(|g| g.id == id) {
+                g.mid = mid;
+                g.n_bbo = n_bbo;
+            }
+        }
+        Ok(())
+    }
+}

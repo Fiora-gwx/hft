@@ -589,6 +589,76 @@ pub fn check(g: &Graph, cfg: &Config) -> Vec<Violation> {
     out.into_iter().collect()
 }
 
+/// Rule 13: `strategy_set!` invocations outside `strategy_set_sites` (globs over repo-relative paths) in
+/// the `.rs` files of every workspace member directory (`target/` not descended into). Invocations are
+/// found with `syn` (comments, string literals and `macro_rules!` bodies do not count); a file `syn`
+/// cannot parse counts every line with `strategy_set!` before any `//`.
+pub fn call_sites(root: &Path, g: &Graph, cfg: &Config) -> Vec<Violation> {
+    const MACRO: &str = "strategy_set";
+    let sites = cfg.list("strategy_set_sites");
+    let mut files = BTreeMap::new();
+    for n in g.nodes.iter().filter(|n| n.member) {
+        let dir = root.join(&n.label);
+        let walk = walkdir::WalkDir::new(&dir)
+            .into_iter()
+            .filter_entry(|e| e.depth() == 0 || e.file_name() != "target");
+        for e in walk.flatten() {
+            let rel = crate::rel_path(root, e.path());
+            if e.file_type().is_file() && rel.ends_with(".rs") {
+                files.entry(rel).or_insert_with(|| n.label.clone());
+            }
+        }
+    }
+    let bang = format!("{MACRO}!");
+    let mut out = Vec::new();
+    for (rel, pkg) in files {
+        if sites.iter().any(|s| crate::hot_check::glob_match(s, &rel)) {
+            continue;
+        }
+        let Ok(src) = std::fs::read_to_string(root.join(&rel)) else {
+            continue;
+        };
+        if !src.contains(&bang) {
+            continue;
+        }
+        let lines: Vec<usize> = match syn::parse_file(&src) {
+            Ok(f) => {
+                struct V(Vec<usize>);
+                impl<'a> syn::visit::Visit<'a> for V {
+                    fn visit_macro(&mut self, m: &'a syn::Macro) {
+                        if let Some(s) = m.path.segments.last()
+                            && s.ident == MACRO
+                        {
+                            self.0.push(s.ident.span().start().line);
+                        }
+                        syn::visit::visit_macro(self, m);
+                    }
+                }
+                let mut v = V(Vec::new());
+                syn::visit::Visit::visit_file(&mut v, &f);
+                v.0
+            }
+            Err(_) => src
+                .lines()
+                .enumerate()
+                .filter(|(_, l)| l.find(&bang).is_some_and(|i| !l[..i].contains("//")))
+                .map(|(i, _)| i + 1)
+                .collect(),
+        };
+        for line in lines {
+            out.push(Violation {
+                rule: 13,
+                package: pkg.clone(),
+                detail: format!(
+                    "`{MACRO}!` invoked at {rel}:{line}; only {} may invoke it",
+                    sites.join(", ")
+                ),
+            });
+        }
+    }
+    out
+}
+
 /// Package name of the member at `label` (falls back to the last path segment).
 fn journal_name(g: &Graph, label: &str) -> String {
     g.find(label)
@@ -626,7 +696,8 @@ pub fn run(root: &Path) -> i32 {
             return EXIT_ENV;
         }
     };
-    let vs = check(&g, &cfg);
+    let mut vs = check(&g, &cfg);
+    vs.extend(call_sites(root, &g, &cfg));
     for x in &vs {
         eprintln!("[rule {}] {}: {}", x.rule, x.package, x.detail);
     }

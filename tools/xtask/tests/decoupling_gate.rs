@@ -221,3 +221,112 @@ fn tool_019_never_builds() {
         || c.starts_with("cargo test")
         || c.starts_with("cargo check")));
 }
+
+// ------------------------------------------------------------------------ SDK-006–SDK-009
+// crates/hft-strategy-sdk/TESTS.md: PRs without label and reviews (`--pr n`, empty review list).
+
+/// Runs the gate on `files` as PR `pr` with no label and no reviews; also returns the step summary.
+fn gate_pr(tag: &str, files: &[&str], pr: u32) -> (Run, String) {
+    let f = layers(tag);
+    let diff = files.join("\n") + "\n";
+    let pull = format!("gh api -H Accept: application/vnd.github+json repos/o/r/pulls/{pr}");
+    let reviews = format!("{pull}/reviews?per_page=100");
+    let pull_json = format!("{{\"number\":{pr},\"labels\":[]}}");
+    let s = Script::new(
+        &f,
+        &[
+            ("git rev-parse", 0, "", ""),
+            ("git diff --name-only B..H", 0, &diff, ""),
+            (&reviews, 0, "[]", ""),
+            (&pull, 0, &pull_json, ""),
+        ],
+        0,
+    );
+    let summary = f.path("summary.md").display().to_string();
+    let pr = pr.to_string();
+    let r = f.xtask_script(
+        &["decoupling-gate", "--base", "B", "--head", "H", "--pr", &pr],
+        &s,
+        &[
+            ("GITHUB_TOKEN", Some("t")),
+            ("GH_TOKEN", None),
+            ("GITHUB_REPOSITORY", Some("o/r")),
+            ("GITHUB_STEP_SUMMARY", Some(&summary)),
+        ],
+    );
+    (r, std::fs::read_to_string(&summary).unwrap_or_default())
+}
+
+#[test]
+fn sdk_006_sdk_and_strategy_same_pr_rejected() {
+    let sdk = "crates/hft-strategy-sdk/src/ctx.rs";
+    let strat = "strategies/latency-probe/src/fast/mod.rs";
+    let (r, _) = gate_pr("dg-sdk-006", &[sdk, strat], 1);
+    assert_eq!(r.code, 1, "{}", r.stderr);
+    for f in [sdk, strat] {
+        assert!(
+            r.stderr.lines().any(|l| l.trim() == f),
+            "{f} not listed:\n{}",
+            r.stderr
+        );
+    }
+    let j = r.json.unwrap();
+    assert_eq!(j["engine"], serde_json::json!([sdk]));
+    assert_eq!(j["strategies"], serde_json::json!([strat]));
+    assert!(j.get("exemption").is_none());
+}
+
+#[test]
+fn sdk_007_strategy_only_pr_passes() {
+    let mut files: Vec<String> = (0..12).map(|i| format!("strategies/foo/src/m{i}.rs")).collect();
+    files.extend(
+        [
+            "strategies/registry/src/lib.rs",
+            "strategies/registry/Cargo.toml",
+            "fixtures/strategy-schemas/7-foo.schema.json",
+            "fixtures/strategy-schemas/index.json",
+        ]
+        .map(str::to_string),
+    );
+    let files: Vec<&str> = files.iter().map(String::as_str).collect();
+    let (r, summary) = gate_pr("dg-sdk-007", &files, 2);
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert!(r.json.unwrap().get("exemption").is_none());
+    assert!(
+        !summary.contains("豁免") && !summary.contains("exemption"),
+        "{summary}"
+    );
+}
+
+#[test]
+fn sdk_008_sdk_only_pr_passes() {
+    let (r, _) = gate_pr(
+        "dg-sdk-008",
+        &[
+            "crates/hft-strategy-sdk/src/views.rs",
+            "crates/hft-strategy-sdk/README.md",
+            "crates/hft-strategy-sdk/TESTS.md",
+        ],
+        3,
+    );
+    assert_eq!(r.code, 0, "{}", r.stderr);
+}
+
+#[test]
+fn sdk_009_capacity_change_with_strategy_rejected() {
+    let (r, _) = gate_pr(
+        "dg-sdk-009",
+        &["strategies/foo/src/params.rs", "apps/hft-core/README.md"],
+        4,
+    );
+    assert_eq!(r.code, 1, "{}", r.stderr);
+    assert!(
+        r.stderr.lines().any(|l| l.trim() == "apps/hft-core/README.md"),
+        "{}",
+        r.stderr
+    );
+    assert_eq!(
+        r.json.unwrap()["apps"],
+        serde_json::json!(["apps/hft-core/README.md"])
+    );
+}

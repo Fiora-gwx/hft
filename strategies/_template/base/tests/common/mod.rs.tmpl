@@ -1,0 +1,239 @@
+//! Test fixture of `{{name}}`: a refdata with one spot venue (`V1`, inst `I1`) and one USDT perpetual
+//! venue (`V2`, inst `I2`) on two exchanges, both BTC/USDT; account `A1` (Sim) bound to instance `S1`
+//! of this kind; group `G1` = (I1, I2).
+#![allow(dead_code)]
+
+use hft_event::{GroupSpec, LegDef};
+use hft_refdata::{
+    AccountSpec, AssetClass, AssetSpec, CapFlags, DeadManCap, Exchange, FeeAssetRule, FeePair, FeeSpec,
+    FundingSettleKind, InstKind, InstSpec, InstStatus, InstanceSpec, LiqMarker, MarginData, MarginMode,
+    PositionMode, RdbBuilder, RefData, SimBalanceSpec, SimSpec, StaleGuardKind, TestnetKind, TsUnit,
+    VenueCaps, VenueSpec,
+};
+use hft_strategy_sdk::GroupTable;
+use hft_strategy_sdk::testing::{MockViews, RefFixture};
+use hft_types::{
+    AccountId, AssetExp, AssetId, GroupId, InstId, MarketKind, Notional, Px, Qty, Rate, StrategyId, VenueId,
+};
+
+pub const V1: VenueId = VenueId::BINANCE_SPOT;
+pub const V2: VenueId = VenueId::OKX_SWAP;
+pub const I1: InstId = InstId(1);
+pub const I2: InstId = InstId(2);
+pub const BTC: AssetId = AssetId(1);
+pub const USDT: AssetId = AssetId(2);
+pub const A1: AccountId = AccountId(1);
+pub const S1: StrategyId = StrategyId(1);
+pub const G1: GroupId = GroupId(0x0100_0001);
+/// `max_groups_per_instance` of the fixture.
+pub const CAPACITY: u16 = 8;
+
+fn venue(b: &mut RdbBuilder, id: VenueId, exchange: Exchange, product: InstKind) {
+    b.venue(VenueSpec {
+        id,
+        exchange,
+        product,
+        ws_max_streams_per_conn: 1024,
+        ws_max_in_msgs_per_s: 10,
+        ws_max_conn_age_s: 86_400,
+        ws_new_conn_per_5min_ip: 300,
+        app_ping_interval_s: 0,
+        ts_unit: TsUnit::Ms,
+        client_id_max_len: 36,
+        client_id_prefix: "".into(),
+        max_batch: 5,
+        max_inflight_amend: 1,
+        crossed_tolerance_default: 0,
+        stale_guard: StaleGuardKind::RecvWindow,
+    });
+    let perp = product == InstKind::Perp;
+    b.caps(VenueCaps {
+        venue: id,
+        market: if perp {
+            MarketKind::LinearPerp
+        } else {
+            MarketKind::Spot
+        },
+        fee_asset_rule: if perp {
+            FeeAssetRule::Quote
+        } else {
+            FeeAssetRule::ReceivedAsset
+        },
+        reduce_only: perp,
+        required_position_mode: if perp {
+            PositionMode::OneWay
+        } else {
+            PositionMode::NotApplicable
+        },
+        required_margin_mode: if perp {
+            MarginMode::Cross
+        } else {
+            MarginMode::NotApplicable
+        },
+        required_multi_asset: None,
+        required_spot_borrow: None,
+        funding_settle: if perp {
+            FundingSettleKind::PerSymbolPush
+        } else {
+            FundingSettleKind::NotApplicable
+        },
+        margin_data: if perp {
+            MarginData::Poll { interval_ms: 2000 }
+        } else {
+            MarginData::NotApplicable
+        },
+        own_liquidation_marker: LiqMarker::NotIdentifiable,
+        liq_marker_arg: "".into(),
+        ignorable_user_events: Vec::new().into(),
+        flags: CapFlags::POST_ONLY | CapFlags::IOC,
+        amend_qty_down_only: false,
+        dms: DeadManCap::None,
+        dms_min_ms: 0,
+        dms_max_ms: 0,
+        dms_timeout_ms: 0,
+        dms_refresh_ms: 0,
+        testnet: TestnetKind::Testnet,
+        _pad: 0,
+    });
+    b.fee(FeeSpec {
+        venue: id,
+        tier: 0,
+        fee: FeePair {
+            maker: Rate(200_000),
+            taker: Rate(500_000),
+        },
+    });
+}
+
+fn inst(b: &mut RdbBuilder, id: InstId, v: VenueId, kind: InstKind) {
+    b.inst(InstSpec {
+        id,
+        venue: v,
+        symbol: format!("BTCUSDT{}", id.0),
+        status: InstStatus::Trading,
+        kind,
+        asset: BTC,
+        quote: USDT,
+        tick: 1,
+        lot: 1_000,
+        min_qty: Qty(1_000),
+        max_qty: Qty(100_000_000_000),
+        min_notional: Notional(5_000_000),
+        book_window: 64,
+        l2_depth: 20,
+        crossed_tolerance: 0,
+        tick_str: "0.01".into(),
+        lot_str: "0.00001".into(),
+        min_qty_str: "0.00001".into(),
+        funding_interval_s: if kind == InstKind::Perp { 28_800 } else { 0 },
+        max_leverage: if kind == InstKind::Perp { 20 } else { 0 },
+        ..InstSpec::default()
+    });
+}
+
+/// The fixture refdata.
+pub fn refdata() -> RefData {
+    let mut b = RdbBuilder::new(1);
+    b.created_utc_ns(1_759_276_800_000_000_000);
+    for (id, name, class, px, qty) in [
+        (BTC, "BTC", AssetClass::Crypto, -2, -8),
+        (USDT, "USDT", AssetClass::Stable, -6, -6),
+    ] {
+        b.asset(AssetSpec {
+            id,
+            name: name.into(),
+            class,
+            exp: AssetExp {
+                px_exp: px,
+                qty_exp: qty,
+            },
+            px_max: Px(1_000_000_000_000_000),
+            qty_max: Qty(1_000_000_000_000_000),
+            dust: Qty(1_000),
+        });
+    }
+    // Venue rows in ascending id order.
+    venue(&mut b, V1, Exchange::Binance, InstKind::Spot);
+    venue(&mut b, V2, Exchange::Okx, InstKind::Perp);
+    inst(&mut b, I1, V1, InstKind::Spot);
+    inst(&mut b, I2, V2, InstKind::Perp);
+    b.instance(InstanceSpec {
+        id: S1,
+        kind_id: {{kind_id}},
+        name: "{{name}}-1".into(),
+    });
+    b.account(AccountSpec {
+        id: A1,
+        sim: true,
+        bound_instance: S1,
+        is_prod: false,
+        venues: (1 << V1.0) | (1 << V2.0),
+        label: "sim-{{name}}".into(),
+        ..AccountSpec::default()
+    });
+    b.sim(SimSpec {
+        account: A1,
+        fee_tier: 0,
+        latency_model: 0,
+        margin_model: 0,
+    });
+    for v in [V1, V2] {
+        b.sim_balance(SimBalanceSpec {
+            account: A1,
+            venue: v,
+            asset: USDT,
+            qty: Qty(1_000_000_000_000),
+        });
+    }
+    let blob = b.finish();
+    match RefData::load(&blob, None) {
+        Ok(r) => r,
+        Err(e) => panic!("fixture refdata rejected: {e:?}"),
+    }
+}
+
+/// The fixture as a `RefFixture` of account `A1`.
+pub fn fixture() -> RefFixture {
+    RefFixture::new(refdata(), A1)
+}
+
+/// A group with the legs `legs` (inst, venue) in order.
+pub fn spec(id: GroupId, legs: &[(InstId, VenueId)]) -> GroupSpec {
+    let none = LegDef {
+        inst: InstId(0),
+        venue: VenueId(0),
+        kind: 0,
+        _pad: 0,
+        route: 0,
+        _pad2: 0,
+    };
+    let mut l = [none; 4];
+    for (d, (i, v)) in l.iter_mut().zip(legs.iter()) {
+        *d = LegDef {
+            inst: *i,
+            venue: *v,
+            kind: LegDef::CEX,
+            _pad: 0,
+            route: 0,
+            _pad2: 0,
+        };
+    }
+    GroupSpec {
+        id,
+        asset: BTC,
+        n_legs: legs.len() as u8,
+        open_allowed: 1,
+        legs: l,
+        _rsv: 0,
+    }
+}
+
+/// `G1` = (I1 spot, I2 perp).
+pub fn g1() -> GroupTable {
+    GroupTable::new(&[spec(G1, &[(I1, V1), (I2, V2)])], CAPACITY)
+}
+
+/// Two-sided quote of `i` around `mid` (raw prices, spread 2 ticks).
+pub fn quote(v: &mut MockViews, i: InstId, mid: i64) {
+    v.bbo(i, (Px(mid - 1), Qty(1_000_000)), (Px(mid + 1), Qty(1_000_000)));
+}

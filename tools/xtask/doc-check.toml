@@ -45,7 +45,18 @@ skip = [".agents/notes"]
 check = "strategy-name"
 id = "STRATNAME"
 files = ["crates/*/README.md", "apps/*/README.md"]
-pattern = '(?:PortfolioCarry|Cdex|CrossTaker|MakerTaker|StockToken)|(?:^|[^A-Za-z0-9_])Carry(?:[^A-Za-z0-9_]|$)'
+strip = ['\]\([^)]*\)', 'strategies/[A-Za-z0-9_\-]+']
+pattern = '(?:PortfolioCarry|Cdex|CrossTaker|MakerTaker|StockToken)|(?:^|[^A-Za-z0-9_])Carry(?:[^A-Za-z0-9_]|$)|portfolio[-_]carry|cross[-_]taker|maker[-_]taker|stock[-_]?token'
+
+# Engine and app Rust sources (code, comments and string literals; crates/hft-strategy-sdk TESTS.md
+# SDK-010): family names in every spelling and lowercase `cdex`. A bare `Carry` is a common word in code
+# (carry-over state) and is not matched here.
+[[rule]]
+check = "strategy-name"
+id = "RSSTRAT"
+files = ["crates/**/*.rs", "apps/**/*.rs"]
+strip = ['strategies/[A-Za-z0-9_\-]+']
+pattern = '(?:PortfolioCarry|Cdex|CrossTaker|MakerTaker|StockToken)|portfolio[-_]carry|cross[-_]taker|maker[-_]taker|stock[-_]?token|(?:^|[^A-Za-z0-9])cdex(?:[^A-Za-z0-9]|$)'
 
 [[rule]]
 check = "strategy-name"
