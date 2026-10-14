@@ -790,6 +790,8 @@ struct LegDef 16
   6 _pad pad:2
   8 route u32
   12 _pad2 pad:4
+strategy 1 portfolio-carry
+  note 1 CarryTarget
 strategy 3 cross-taker
   note 1 Fired
   note 2 HedgeFailed
