@@ -27,6 +27,31 @@ fn core_101_journal_set_follows_active_venue_tasks() {
 }
 
 #[test]
+fn core_102_actual_journal_budget() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("dual.toml");
+    std::fs::write(&path, include_str!("../config/dual-testnet.toml")).unwrap();
+    let c = hft_core::config::parse(&path).unwrap();
+    assert_eq!(journals(&c, false).len(), 5);
+    // Two venues with one gateway each: the documented dev2 seq/feed/gw layouts.
+    assert_eq!(hft_core::budget::required(&c, false).unwrap(), (120 << 20) + 4096);
+    assert_eq!(hft_core::budget::required(&c, true).unwrap(), (96 << 20) + 4096);
+    let mut opened_budget = 4096;
+    for name in journals(&c, false) {
+        let kind = if name == "seq" {
+            hft_journal::JournalKind::Seq
+        } else {
+            hft_journal::JournalKind::Raw
+        };
+        let cfg = hft_core::storage::config(&c, &name, kind, hft_types::VenueId(0));
+        assert!(cfg.validate());
+        opened_budget += hot_resident(cfg.segment_bytes, cfg.hot_keep).unwrap();
+    }
+    assert_eq!(opened_budget, hft_core::budget::required(&c, false).unwrap());
+    assert!(check_space(192 << 20, 0, opened_budget).is_ok());
+}
+
+#[test]
 fn core_165_only_self_held_bytes_credit_the_space_check() {
     assert!(check_space(100, 28, 128).is_ok());
     assert_eq!(check_space(100, 27, 128).unwrap_err().code, "ShmSpace");

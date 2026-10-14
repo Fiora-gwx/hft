@@ -8,6 +8,21 @@ fn fixture() -> (tempfile::TempDir, std::path::PathBuf, String) {
 }
 
 #[test]
+fn core_011_optional_raw_layout_requires_both_fields() {
+    let (_d, path, text) = fixture();
+    std::fs::write(
+        &path,
+        format!("{text}\n[journal.raw_feed]\nsegment_bytes = 4194304\n[journal.raw_gw]\nhot_keep = 0\n"),
+    )
+    .unwrap();
+    let errors = hft_core::config::parse(&path).unwrap_err();
+    assert_eq!(errors.len(), 2);
+    assert!(errors.iter().all(|e| e.code == "MissingField"));
+    assert!(errors.iter().any(|e| e.detail == "journal.raw_feed.hot_keep"));
+    assert!(errors.iter().any(|e| e.detail == "journal.raw_gw.segment_bytes"));
+}
+
+#[test]
 fn core_001_exit_codes_preserve_drain_cause() {
     use hft_sequencer::DoneCause;
     for (cause, code) in [

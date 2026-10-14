@@ -907,6 +907,8 @@ hft-core 自身不在 tick-to-trade 路径上增加代码;路径上的分段预�
 
 ## 已知限制与后续工作
 
+- 当前文件配置支持分别设置 seq、raw-feed 与 raw-gw 的段大小和热段保留，字段归 [可执行配置](config/README.md)。预算从实际 journal 列表及各自布局求和；tmpfs 空间检查作用于实例挂载点。完整引擎/advisor/大页预算矩阵仍未装配。
+
 - 当前可执行子集是 Linux 上的新 journal 会话、文件配置、单任务线程、已注册的 `NoModel` 策略与 `--dry-run` 离线闭环；配置生成示例、测试网模板与命令见 [config](config/README.md)。Windows 支持 `--check`、`schemas`、`--version` 与配置测试；实际引擎要求 Linux tmpfs 和 Unix socket。
 - `binance-spot`、`binance-usdm` 静态装配 `FeedRuntime`、`GwRuntime`、`SessionDriver`。`bitget-spot`、`bitget-usdt-futures` 通过 `bitget` Cargo feature 装配 UTA 协议，未启用时返回 `VenueNotBuilt`。单 venue 最多一个交易所账户；ECF1 必须要求两种 key 的身份闸门，app 不伪造账户配置、身份或对账成功。账户链路与限制见“测试环境账户装配”，完整恢复和正式权限核验仍未装配。
 - 启动先取得冷盘实例目录的内核文件锁，锁文件不删除，进程死亡由内核释放所有权。持锁期间用 `max(snapshot_epoch, durable_epoch) + 1` 预约 epoch，`write_sync` 成功后才能建立账户连接；腐坏与溢出退出 4。当前新会话没有 snapshot epoch。启动前按实际 journal 列表检查 tmpfs 可用量与本实例持有量，创建工作线程前 `mlockall`，失败退出 3；完整引擎区预算仍待接线。

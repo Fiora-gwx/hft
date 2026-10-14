@@ -1082,7 +1082,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:各行的构造器(段大小、`hot_keep`、页、advisor 预算按内存表);`budget::compute(&cfg)` 返回各部分 MiB 与合计
-- 实现:`apps/hft-core/tests/budget.rs::core_102_budget_columns`
+- 实现:`apps/hft-core/tests/budget.rs::core_102_actual_journal_budget`
+- 覆盖边界:覆盖双 venue 测试网模板的实际 seq/raw 布局、writer 配置与热段总量一致性；完整主机列、引擎区和 advisor 合计仍待验收。
 
 | 行 | 构造器 | 期望(`seq` / `raw-feed` / `-bbo` / `raw-gw` / 引擎区 / sim-gw / advisor / 镜像 / 其余 = 合计;其中大页) |
 |---|---|---|

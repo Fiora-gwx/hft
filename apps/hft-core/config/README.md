@@ -25,3 +25,5 @@
 来源：[Binance REST/市场流测试网说明](https://developers.binance.me/en/docs/products/derivatives-trading-usds-futures/general-info)、[官方 USDT-M SDK](https://github.com/binance/binance-connector-js/tree/master/clients/derivatives-trading-usds-futures)。路径由 `venue-binance` 的 route 表生成。REST 密钥和 Ed25519 session 密钥分别配置 API key 文件；Ed25519 支持原始 32 字节、PKCS#8 DER/PEM，HMAC secret 为 ASCII。文件不入库，日志不回显解析失败的 TOML 或凭据内容。`src_ip` 与 `bind_device` 必须按测试机实际出口填写。
 
 账户链路、同进程装配与限制见 [测试网 runbook](../RUNBOOK-testnet.md)。Bitget 默认启用，模板为 [bitget-demo.toml](bitget-demo.toml)，HMAC 文件用 `session_seed_path` 并提供 `passphrase_path`。
+
+`journal.segment_bytes` 与 `journal.hot_keep` 为 seq 的配置；可选的 `journal.raw_feed`、`journal.raw_gw` 各含必填的 `segment_bytes`、`hot_keep`，缺省时沿用 seq 配置。raw 允许零保留，尺寸须页对齐且在 2–256 MiB 内。双 venue 模板按 [dev2 journal 表](../README.md#内存与-journal-段按主机类唯一归属)分开配置，实际预算与打开 writer 使用同一布局；容量检查读取实例子目录的文件系统，支持每实例独立 tmpfs 挂载。
