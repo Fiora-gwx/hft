@@ -256,9 +256,10 @@ dev = [
 # ---------------------------------------------------------------- apps (assembly only)
 [pkg."apps/hft-core"]
 tier = "hot"
+dev = ["crates/hft-testkit", "crates/hft-ctl-proto"]
 deps = [
     "crates/hft-types", "crates/hft-event", "crates/hft-refdata", "crates/hft-rt", "crates/hft-journal",
-    "crates/hft-net", "crates/hft-venue", "crates/venue-binance", "crates/venue-okx", "crates/venue-bitget",
+    "crates/hft-net", "crates/hft-venue", "crates/hft-venue-proto", "crates/venue-binance", "crates/venue-okx", "crates/venue-bitget",
     "crates/hft-book", "crates/hft-oms", "crates/hft-risk", "crates/hft-ledger", "crates/hft-exec",
     "crates/hft-strategy-sdk", "crates/hft-strat-lib", "crates/hft-sequencer", "crates/hft-sim", "crates/hft-ctl",
     "strategies/registry", "crates/hft-ext-proto",

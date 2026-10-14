@@ -30,6 +30,7 @@ members = [
     "strategies/cross-taker",
     "strategies/registry",
     "apps/replayer",
+    "apps/hft-core",
     "tools/xtask",
     "tools/hft-cfg",
     "tools/hostprobe",

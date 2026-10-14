@@ -47,6 +47,8 @@ sequencer 经 `out-<venue>` 环交给 gw 的元素是 [hft-event](../hft-event/R
 
 ### 运行时入口
 
+生命周期收尾：调用 `FeedRuntime::retire_all` / `GwRuntime::retire_all` 停止连接后，以消耗运行时所有权的 `seal_and_close(self) -> Result<(), hft_journal::RollErr>` 封存对应 raw journal；调用方在任务退出后最后停止 persister。此冷路径不改变报文处理与资金语义。
+
 ```rust
 /// 本任务承载哪些路由;hft-core 按任务名给出:feed-bbo:<v> → Bbo,feed-md:<v> → Md,feed:<v> → All。
 #[repr(u8)] pub enum FeedRoutes { Bbo = 1, Md = 2, All = 3 }

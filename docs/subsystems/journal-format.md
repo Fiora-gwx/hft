@@ -4,6 +4,8 @@
 
 ## 三类 journal
 
+进程对 seq/raw 写者的创建、停止与持久化顺序归 [hft-core 可执行装配](../../apps/hft-core/config/README.md)；文件结构与封段契约仍由本页及 hft-journal 定义。
+
 | journal 名 | scope | 写者(唯一) | 记录头 `seq` | 记录头 `tsc` | 引导块 | CRC |
 |---|---|---|---|---|---|---|
 | `seq` | core | sequencer | sequencer 全局序号 | `proc_tsc` | 有 | 按 kind([hft-event](../../crates/hft-event/README.md) `KindInfo.crc`) |
