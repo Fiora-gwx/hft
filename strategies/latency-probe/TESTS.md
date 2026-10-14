@@ -1046,6 +1046,8 @@ spec: README.md
 | LPR-064.6 | `src/fast/quote.rs` 加 `let x: f64 = 0.0;` | `cargo xtask hot-check` | 退出 1(S1) |
 | LPR-064.7 | `src/fast/pair.rs` 调用 `std::time::Instant::now()` | `cargo xtask ci`(clippy) | 失败 |
 
+M3 引擎场景的当前覆盖使用 registry 的真实 `Strategies`、sequencer、OMS、执行层与 `SimExchange`。LPR-065 先覆盖双永续腿 10 s 的周期挂撤、零成交与每条 New/Cancel 样本的触发记录关联;1 h/五段空白的精确计数仍待完成。LPR-066 覆盖 10 min 的先撤第二腿、再跨网关撤第一腿。LPR-067/068 分别运行五个 pair 周期与三个 target 周期并验证零净量和 journal 重放。LPR-069 用持续拒绝第二腿和 2 s AutoFix 等待验证 Broken 后策略不再发链接、引擎自动修复继续。LPR-070 用双腿 `far_bp = 40_000_000` 大于夹具价格带 `30_000_000`,运行 600 s;启动后的首轮在 1 s,共 1,200 个拒绝,计数 Note 含已完成的 1,198 个,边界的两个留待后续刷出。LPR-071 当前是六个固定种子的重复回报、限流、延迟回报回归,开启全部 INV、快照重建与完整 journal 验证;200 派生种子、多组并发和完整故障矩阵仍待完成。编号已有函数不代表以下冻结场景已全部验收。
+
 ### LPR-065 引擎级:1 h quote 运行的样本数与撤单
 
 - 规则:[产生的延迟样本](README.md#产生的延迟样本)、[quote 探测](README.md#quote-探测)、[用途与运行要求](README.md#用途与运行要求)
@@ -1057,7 +1059,7 @@ spec: README.md
 - 期望:
   - 设本策略 `place` 的探测单数为 N:`LatencySample{action = New}` 中 `venue = V2` 的条数 = N,`trigger_kind` 都是 Bbo(0x0101);`LatencySample{action = Cancel}` 条数 = N,每条的 `trigger_kind` 都是 OrderEvent(0x0203)且触发记录是同一订单的 Ack;成交 0 笔;每张探测单都以 `Cancelled` 终结(无 `Aged`)
   - N = 3_590(每段空白使之后的探测顺延 100 ms、少 2 张)
-- 实现:`strategies/registry/tests/latency_probe_scenarios.rs::lpr_065_quote_hour`
+- 实现:`strategies/registry/tests/latency_probe_scenarios.rs::lpr_065_quote_core_ack_cancel_and_replay`
 
 ### LPR-066 引擎级:跨 gw 变体的样本
 
@@ -1106,7 +1108,7 @@ spec: README.md
   1. 运行到第一腿成交后 3 个 `pair_period_ms`
 - 期望:
   - 该 cell 进入 Broken(`Exec{Broken}` 投递给本策略);之后本策略没有新的第一腿与平仓链接(`Blocked`);执行层的自动有界平仓照常(`origin = Engine(AutoFix)`)
-- 实现:`strategies/registry/tests/latency_probe_scenarios.rs::lpr_069_second_leg_rejected`
+- 实现:`strategies/registry/tests/latency_probe_dst.rs::lpr_069_second_leg_rejected`
 
 ### LPR-070 引擎级:价格带小于 `far_bp` 时每张探测单都被门控拒绝
 
@@ -1129,7 +1131,7 @@ spec: README.md
 - 故障:Ack 丢失与 `Unknown`、撤单被拒(已成交)、行情与下单连接断开重连、限速 429、部分成交、第二腿被拒、切片 `Stuck`、任意时刻崩溃后重启(hft-testkit 故障目录对应各项)
 - 种子:PR 200(提交派生)+ 回归集;每夜日期派生(`cargo xtask dst --strategy latency-probe`)
 - 断言:每腿在途探测单 ≤ 1;每个 group 的残余名义(quote 第 6 步口径)≤ `max_inv_notional` + 1 lot 名义;`enabled = false` 与有效模式 `CloseOnly` 期间无 Open 意图与增仓目标;交易所拒单后同一腿下一次挂单的间隔 ≥ `probe_period_ms`;INV 由 hft-testkit 的不变量集每步检查
-- 实现:`strategies/registry/tests/latency_probe_dst.rs::lpr_071_dst_suite`
+- 实现:`strategies/registry/tests/latency_probe_dst.rs::lpr_071_dst_core_faults`
 
 ### LPR-072 基准:`on_event` 快侧未命中
 
