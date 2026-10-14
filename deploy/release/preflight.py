@@ -103,35 +103,7 @@ def check(host):
         return True
     probe("host-profile", profile)
 
-    def imds():
-        value = json.loads(host.command("nft", "-j", "list", "table", "inet", "hft_imds"))
-        sets = [row["set"] for row in value["nftables"] if "set" in row and row["set"].get("name") == "hft_uids"]
-        uids = host.service_uids()
-        if len(sets) != 1 or not uids or not uids <= set(sets[0].get("elem", [])):
-            return False
-        chains = [row["chain"] for row in value["nftables"] if "chain" in row and row["chain"].get("name") == "out"]
-        if len(chains) != 1 or chains[0].get("hook") != "output" or chains[0].get("type") != "filter":
-            return False
-        rules = [row["rule"] for row in value["nftables"] if "rule" in row]
-        # Both destination families must be dropped for the installed hft uid set.
-        families = set()
-        for rule in rules:
-            if rule.get("chain") != "out":
-                continue
-            uid = destination = dropped = False
-            family = None
-            for expr in rule.get("expr", []):
-                match = expr.get("match", {})
-                if match.get("op") == "==" and match.get("left") == {"meta": {"key": "skuid"}} and match.get("right") == "@hft_uids":
-                    uid = True
-                payload = match.get("left", {}).get("payload", {})
-                if match.get("op") == "==" and payload.get("field") == "daddr" and (payload.get("protocol"), match.get("right")) in (("ip", "169.254.169.254"), ("ip6", "fd00:ec2::254")):
-                    destination, family = True, payload["protocol"]
-                dropped |= "drop" in expr
-            if uid and destination and dropped:
-                families.add(family)
-        return families == {"ip", "ip6"}
-    probe("imds-rules", imds)
+    probe("imds-rules", lambda: valid_imds(json.loads(host.command("nft", "-j", "list", "table", "inet", "hft_imds")), host.service_uids()))
     probe("live-secret-denied", host.live_secret_denied)
     # These commands validate local references without returning secret values.
     secrets = sorted(host.path("/etc/hft/secrets").glob("*.toml"))
@@ -144,6 +116,34 @@ def check(host):
         probe("secrets:" + secret.name, lambda secret=secret: host.command(str(tree / "bin/hft-secrets"), "--check", "--manifest", str(secret)) is not None)
     probe("core-config", lambda: host.command(str(tree / "bin/hft-core"), "--check", "--config", str(host.path("/etc/hft/hft-core-prod.toml"))) is not None)
     return results
+
+
+def valid_imds(value, uids):
+    sets = [row["set"] for row in value["nftables"] if "set" in row and row["set"].get("name") == "hft_uids"]
+    if len(sets) != 1 or not uids or not uids <= set(sets[0].get("elem", [])):
+        return False
+    chains = [row["chain"] for row in value["nftables"] if "chain" in row and row["chain"].get("name") == "out"]
+    if len(chains) != 1 or chains[0].get("hook") != "output" or chains[0].get("type") != "filter":
+        return False
+    rules = [row["rule"] for row in value["nftables"] if "rule" in row]
+    # Both destination families must be dropped for the installed hft uid set.
+    families = set()
+    for rule in rules:
+        if rule.get("chain") != "out":
+            continue
+        uid = destination = dropped = False
+        family = None
+        for expr in rule.get("expr", []):
+            match = expr.get("match", {})
+            if match.get("op") == "==" and match.get("left") == {"meta": {"key": "skuid"}} and match.get("right") == "@hft_uids":
+                uid = True
+            payload = match.get("left", {}).get("payload", {})
+            if match.get("op") == "==" and payload.get("field") == "daddr" and (payload.get("protocol"), match.get("right")) in (("ip", "169.254.169.254"), ("ip6", "fd00:ec2::254")):
+                destination, family = True, payload["protocol"]
+            dropped |= "drop" in expr
+        if uid and destination and dropped:
+            families.add(family)
+    return families == {"ip", "ip6"}
 
 
 def main():

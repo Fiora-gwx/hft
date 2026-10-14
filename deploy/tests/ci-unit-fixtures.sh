@@ -3,6 +3,7 @@
 set -euo pipefail
 # The workflow invokes this through sudo, which intentionally strips CI from the environment.
 [[ ${CI:-} == true || ( ${SUDO_USER:-} == runner && -d /opt/hostedtoolcache ) ]] || { echo 'CI fixture only' >&2; exit 1; }
+command -v nft >/dev/null || apt-get install -y -q --no-install-recommends nftables
 for user in hft hft-guard; do
   id "$user" >/dev/null 2>&1 || useradd --system --no-create-home "$user"
 done

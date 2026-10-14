@@ -1,7 +1,9 @@
 """Acceptance coverage for the executable prod/testnet subset of the host generator."""
 import importlib.util
+import os
 from pathlib import Path
 import shutil
+import subprocess
 import tomllib
 
 import pytest
@@ -68,6 +70,29 @@ def dep_247_dev2_profile():
     assert expected["guard.slices.hft.slice.memory_max"]["eq"] == str(1376 * 1024 * 1024)
     assert expected["nic.egress[*].on_nic"]["eq"] is True
     assert "prod" in tomllib.loads(files["egress.toml"])
+
+
+@pytest.mark.skipif(os.environ.get("CI") != "true" or os.name != "posix", reason="isolated hosted-CI network namespace")
+def dep_247_real_nft_uid_isolation():
+    # No host network mutation: unshare creates a fresh network namespace before nft runs.
+    script = r'''
+import json, pathlib, subprocess, sys
+repo = pathlib.Path.cwd()
+sys.path.insert(0, str(repo / "deploy/imds"))
+sys.path.insert(0, str(repo / "deploy/release"))
+from dev2_lock import rules
+from preflight import valid_imds
+subprocess.run(["nft", "add", "table", "inet", "fixture_other"], check=True)
+for replace in (False, True):
+    subprocess.run(["nft", "-f", "-"], input=rules({1001, 1002}, replace), text=True, check=True)
+    actual = json.loads(subprocess.check_output(["nft", "-j", "list", "table", "inet", "hft_imds"]))
+    assert valid_imds(actual, {1001, 1002}), actual
+    assert not valid_imds(actual, {1001, 1002, 1003})
+    tables = json.loads(subprocess.check_output(["nft", "-j", "list", "tables"]))
+    assert any(row.get("table", {}).get("name") == "fixture_other" for row in tables["nftables"])
+'''
+    result = subprocess.run(["sudo", "-n", "unshare", "--net", "/usr/bin/python3", "-B", "-"], cwd=REPO, input=script, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def dep_250_pure_generator(tmp_path, monkeypatch):
