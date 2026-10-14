@@ -1420,3 +1420,16 @@ fn bgt_090_ws_response_identity_cannot_redirect() {
         assert_eq!(sink.events(), 0);
     }
 }
+
+#[test]
+fn bgt_093_transport_error_does_not_become_not_found() {
+    for status in [403, 408, 418, 429, 500, 503] {
+        let (result, sink) = dec_rest(status, r#"{"code":"25204","msg":"order not found"}"#);
+        let out = result.unwrap();
+        assert!(sink.orders.is_empty());
+        assert!(out.outcome_unknown.is_some());
+        if status == 429 {
+            assert_eq!(out.ctl, ReportCtl::RateLimited);
+        }
+    }
+}

@@ -320,3 +320,133 @@ proptest::proptest! {
         proptest::prop_assert_eq!(s.margin.unwrap().margin_ratio.0, want);
     }
 }
+
+#[test]
+fn bgt_150_account_pages_commit_only_after_complete_validation() {
+    let rd = account_rd(false);
+    let mut s = State::default();
+    for (q, body) in [
+        (Query::Settings, settings(Some("acct-0001"))),
+        (Query::Balances, ASSETS.to_vec()),
+        (Query::Positions, POSITIONS.to_vec()),
+    ] {
+        P::account_decode(rd, ACCT, &q, 200, &body, 10, &mut s).unwrap();
+    }
+    let before = format!("{s:?}");
+    let mut balances: serde_json::Value = serde_json::from_slice(ASSETS).unwrap();
+    let mut duplicate = balances["data"]["assets"][0].clone();
+    duplicate["balance"] = "200".into();
+    balances["data"]["assets"].as_array_mut().unwrap().push(duplicate);
+    let mut positions: serde_json::Value = serde_json::from_slice(POSITIONS).unwrap();
+    let mut bad = positions["data"]["list"][0].clone();
+    bad["symbol"] = "ETHUSDT".into();
+    bad["total"] = "bad".into();
+    positions["data"]["list"].as_array_mut().unwrap().push(bad);
+    let mut config: serde_json::Value = serde_json::from_slice(&settings(Some("acct-0001"))).unwrap();
+    config["data"]["symbolConfigList"][0]["leverage"] = "3".into();
+    config["data"]["symbolConfigList"][1]["marginMode"] = "isolated".into();
+    for (q, body) in [
+        (Query::Balances, serde_json::to_vec(&balances).unwrap()),
+        (Query::Positions, serde_json::to_vec(&positions).unwrap()),
+        (Query::Settings, serde_json::to_vec(&config).unwrap()),
+        (Query::Permissions, permissions(Some("wrong"), false)),
+    ] {
+        assert!(
+            P::account_decode(rd, ACCT, &q, 200, &body, 11, &mut s).is_err(),
+            "{q:?}"
+        );
+        assert_eq!(format!("{s:?}"), before, "{q:?}");
+    }
+    // Repeating a valid observation replaces, rather than appends to, each page.
+    for _ in 0..1000 {
+        P::account_decode(rd, ACCT, &Query::Balances, 200, ASSETS, 10, &mut s).unwrap();
+        P::account_decode(rd, ACCT, &Query::Positions, 200, POSITIONS, 10, &mut s).unwrap();
+    }
+    assert_eq!(format!("{s:?}"), before);
+    // Interleaving account snapshots must neither change report dedup nor vice versa.
+    use hft_venue_proto::{MsgOp, VenueProtocol};
+    const PUSH: &str = r#"{"action":"snapshot","arg":{"instType":"UTA","topic":"order"},"data":[{"category":"usdt-futures","symbol":"BTCUSDT","orderId":"1234567890123","clientOid":"100030a020002a000000078d","price":"65000.1","qty":"0.004","tradeSide":"buy_single","orderType":"limit","timeInForce":"gtc","side":"buy","cumExecQty":"0.004","cumExecValue":"260","avgPrice":"65000","orderStatus":"filled","cancelReason":"","feeDetail":[{"feeCoin":"USDT","fee":"0.04"}],"createdTime":"1790000000400","updatedTime":"1790000000500"}],"ts":1790000000501}"#;
+    let mut plain = venue_bitget::GwCtx::default();
+    let mut interleaved = venue_bitget::GwCtx::default();
+    let class = P::classify_report(MsgOp::Text, &PUSH.as_bytes()[..64]);
+    for n in 0..10_000 {
+        let mut left = RepSink::default();
+        let mut right = RepSink::default();
+        let a = P::decode_report(rd, &mut plain, class, PUSH.as_bytes(), &RX, &mut left).unwrap();
+        if n % 10 == 0 {
+            P::account_decode(rd, ACCT, &Query::Positions, 200, POSITIONS, 10, &mut s).unwrap();
+        }
+        let b = P::decode_report(rd, &mut interleaved, class, PUSH.as_bytes(), &RX, &mut right).unwrap();
+        assert_eq!(a, b);
+        assert_eq!(format!("{left:?}"), format!("{right:?}"));
+    }
+    assert_eq!(format!("{s:?}"), before);
+}
+
+#[test]
+fn bgt_006_cancel_reply_and_order_page_identity() {
+    let q = Query::Cancel {
+        symbol: "BTCUSDT".into(),
+        order_id: "123".into(),
+    };
+    let mut s = State::default();
+    for (id, valid) in [("123", true), ("124", false), ("", false)] {
+        let b = serde_json::to_vec(&serde_json::json!({"code":"00000","data":{"orderId":id}})).unwrap();
+        assert_eq!(
+            P::account_decode(account_rd(false), ACCT, &q, 200, &b, 1, &mut s).is_ok(),
+            valid
+        );
+    }
+    let q = Query::OpenOrders { cursor: "456".into() };
+    for data in [
+        serde_json::json!({"list":[{"symbol":"BTCUSDT","orderId":"123"}],"cursor":"456"}),
+        serde_json::json!({"list":[{"symbol":"BTCUSDT","orderId":"123"},{"symbol":"BTCUSDT","orderId":"123"}]}),
+        serde_json::json!({"list":[{"symbol":"BTCUSDT","orderId":"0"}]}),
+    ] {
+        let b = serde_json::to_vec(&serde_json::json!({"code":"00000","data":data})).unwrap();
+        assert!(P::account_decode(account_rd(false), ACCT, &q, 200, &b, 1, &mut s).is_err());
+        assert!(s.orders.is_empty() && s.cursor.is_empty());
+    }
+}
+
+#[test]
+fn bgt_144_single_key_identity() {
+    use hft_venue_proto::{RestReqBuf, VenueProtocol};
+    for supported in [
+        P::session_identity_request(&cfg(), &key(), WC.unix_ms, &mut RestReqBuf::default()),
+        venue_bitget::BitgetSpot::session_identity_request(
+            &cfg(),
+            &key(),
+            WC.unix_ms,
+            &mut RestReqBuf::default(),
+        ),
+    ] {
+        assert_eq!(supported, Ok(false));
+    }
+    fn check<T: AccountProtocol>(a: AccountId) {
+        let mut s = State::default();
+        T::account_decode(
+            account_rd(false),
+            a,
+            &Query::Settings,
+            200,
+            &settings(Some("acct-0001")),
+            1,
+            &mut s,
+        )
+        .unwrap();
+        T::account_decode(
+            account_rd(false),
+            a,
+            &Query::Permissions,
+            200,
+            &permissions(Some("acct-0001"), false),
+            1,
+            &mut s,
+        )
+        .unwrap();
+        assert_eq!(s.config.unwrap().uid_keys, 3);
+    }
+    check::<P>(ACCT);
+    check::<venue_bitget::BitgetSpot>(AccountId(1));
+}

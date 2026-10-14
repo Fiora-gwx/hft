@@ -159,6 +159,8 @@ BGT-063 对两份不同凭证构建同值小模板,显式借用凭证签名得�
 | BGT-006.3 | `acct_request` 永续 Margin 步 0、1 | `endpoint = 0` |
 | BGT-006.4 | `bbo_snapshot_request(insts = [1801])` | `endpoint = 0` |
 | BGT-006.5 | `Query` 的 REST 请求(BGT-072) | `endpoint = 0` |
+- 实现补充:warm 撤单响应须匹配请求 orderId;重复订单、零 ID、重复/无效 cursor 拒绝。
+
 
 ### BGT-010 行情 classify 按路由分类,不依赖频道名的位置
 
@@ -1004,6 +1006,8 @@ BGT-063 对两份不同凭证构建同值小模板,显式借用凭证签名得�
 | BGT-093.6 | 订单不存在的响应 | 状态 `NotFound`(7);不产出 `Reject`、不定终态(`stale_guard = None`) |
 
 - 身份回归:`crates/venue-bitget/tests/reports.rs::bgt_093_query_identity_cannot_redirect`;品种、venue/account/槽/代不符或负累计量拒绝整条响应。
+- 实现补充:HTTP 403/408/418/429/5xx 即使带订单不存在码也保持 OutcomeUnknown,不产出 NotFound;429 保留 RateLimited。
+
 
 ### BGT-100 订单频道状态映射为 OrderEvent
 
@@ -1476,6 +1480,8 @@ BGT-063 对两份不同凭证构建同值小模板,显式借用凭证签名得�
 - 期望:
   - 两个上下文产出的 `AccountConfigReport` 与 `MarginReport` 逐字节相同(本 crate 不声明跨序列沿用的字段)
 - 实现:`crates/venue-bitget/tests/acct.rs::bgt_150_acct_isolation`
+- 实现补充:warm `State` 对应测试 `tests/acct.rs::bgt_150_account_pages_commit_only_after_complete_validation`,含 10³ 次页面重用、10⁴ 次回报穿插与坏配置/余额/持仓页面不改状态;不宣称旧 bounded 接口完成。
+
 
 ### BGT-170 rate_rules 默认值
 
@@ -1987,6 +1993,8 @@ BGT-063 对两份不同凭证构建同值小模板,显式借用凭证签名得�
 - 输入:`fixtures/bitget-usdt-futures/subscribe/{ok,rejected_30001,unsubscribe_ok}.in`、`fixtures/bitget-spot/subscribe/{ok,rejected_30001}.in`
 - 期望文件:同目录 `<case>.expected.jsonl`(`ControlHint::SubAck` 的规范渲染)
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_311_subscribe_ack`
+- 实现补充:输入为按公开格式手工构造的 synthetic 订阅/退订/拒绝帧,meta 等待人工审核;不声明测试网采集。
+
 
 ### BGT-312 金样:心跳回应 pong
 
@@ -1996,6 +2004,8 @@ BGT-063 对两份不同凭证构建同值小模板,显式借用凭证签名得�
 - 输入:`fixtures/bitget-usdt-futures/pong/pong.in`(文本 `pong`)
 - 期望文件:`fixtures/bitget-usdt-futures/pong/pong.expected.jsonl`(`ControlHint::Pong`,无事件)
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_312_pong`
+- 实现补充:两个产品线均有 synthetic 文本 pong,经 control 消费且私有解码无事件。
+
 
 ### BGT-313 金样:永续 place-order 响应
 
@@ -2113,6 +2123,8 @@ BGT-063 对两份不同凭证构建同值小模板,显式借用凭证签名得�
 - 输入:`fixtures/bitget-usdt-futures/unknown/{v3_unknown_topic,v2_unknown_channel}.in`、`fixtures/bitget-spot/unknown/v3_unknown_topic.in`(合成)
 - 期望文件:同目录 `<case>.expected.jsonl`(计数行,不是错误行)
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_325_unknown_events`
+- 实现补充:两个产品线均覆盖 synthetic 未知 V3 topic 与 V2 channel。
+
 
 ### BGT-326 金样:账户设置查询
 
@@ -2217,6 +2229,8 @@ BGT-063 对两份不同凭证构建同值小模板,显式借用凭证签名得�
 - 备注:依赖待核实:开发备忘第 18 条
 
 BGT-336 补充单元验收:签名 trading-account financial-records 查询、IN/OUT 实额、忽略交易费、cursor 续页及循环拒绝,失败无部分输出。实现:`tests/funding.rs::bgt_336_funding_bills_are_cash_not_ticker_or_wallet`。
+- 实现补充:空 list 且非空 cursor 返回 Shape,禁止将不完整账单窗口判为完成。
+
 
 ### BGT-337 金样:UTA 资产(只读查询)
 

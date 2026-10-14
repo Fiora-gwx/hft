@@ -48,4 +48,11 @@ fn bgt_336_funding_bills_are_cash_not_ticker_or_wallet() {
         .unwrap();
     assert_eq!(next.cursor.as_slice(), b"9");
     assert!(P::funding_decode(rd(), &next, 200, paged.as_bytes()).is_err());
+    // An empty page with a continuation cannot advance the durable funding watermark.
+    for cursor in ["9", "unsafe&cursor"] {
+        let empty =
+            serde_json::to_vec(&serde_json::json!({"code":"00000","data":{"list":[],"cursor":cursor}}))
+                .unwrap();
+        assert!(P::funding_decode(rd(), &query(), 200, &empty).is_err());
+    }
 }

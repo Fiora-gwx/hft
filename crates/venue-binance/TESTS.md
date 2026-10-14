@@ -1044,10 +1044,10 @@ BIN-063 对两份不同凭证构建同值小模板,显式借用凭证签名得�
 | BIN-092.7 | 400 / −4164 | Reject,raw `0xFFFFEFBC` |
 | BIN-092.8 | 400 / −5022 | Reject,raw `0xFFFFEC62` |
 | BIN-092.9 | 400 / −4061 | Reject,raw `0xFFFFF023` |
-| BIN-092.10 | 429 / −1003 | Reject,raw `0xFFFFFC15`;`ctl = RateLimited`;`rate = Some(RateObs{Weight, used = limit = 2400, window_ms: 60000})`(refdata 生效值) |
-| BIN-092.11 | 429 / −1015 | Reject,raw `0xFFFFFC09`;`ctl = RateLimited`;`rate = Some(RateObs{Orders, used = limit = 300, window_ms: 10000})` |
-| BIN-092.12 | 429 / 无业务码 | Reject,raw `0x200001AD`;`ctl = RateLimited`;`rate` 的 `Weight` 置满 |
-| BIN-092.13 | 418 / 无业务码 | Reject,raw `0x200001A2`;`ctl = RateLimited`;`rate` 的 `Weight` 置满 |
+| BIN-092.10 | 429 / −1003 | OutcomeUnknown,raw `0xFFFFFC15`;`ctl = RateLimited`;`rate = Some(RateObs{Weight, used = limit = 2400, window_ms: 60000})`(refdata 生效值) |
+| BIN-092.11 | 429 / −1015 | OutcomeUnknown,raw `0xFFFFFC09`;`ctl = RateLimited`;`rate = Some(RateObs{Orders, used = limit = 300, window_ms: 10000})` |
+| BIN-092.12 | 429 / 无业务码 | OutcomeUnknown,raw `0x200001AD`;`ctl = RateLimited`;`rate` 的 `Weight` 置满 |
+| BIN-092.13 | 418 / 无业务码 | OutcomeUnknown,raw `0x200001A2`;`ctl = RateLimited`;`rate` 的 `Weight` 置满 |
 | BIN-092.14 | 408 / −1007 | 未知,raw `0xFFFFFC11` |
 | BIN-092.15 | 500 / −1001 | 未知,raw `0xFFFFFC17` |
 | BIN-092.16 | 503 / −1008 | 未知,raw `0xFFFFFC10` |
@@ -1058,6 +1058,8 @@ BIN-063 对两份不同凭证构建同值小模板,显式借用凭证签名得�
 | BIN-092.21 | 400 / −1121(未登记于两表) | 未知,raw `0xFFFFFB9F` |
 | BIN-092.22 | 以上除 .2、.10–.13 外的每行 | `ctl = None` |
 | BIN-092.22 | 同 .5 但交给 `Spot` | Reject,raw `0xFFFFF81D`(两表对两个产品线相同) |
+- 回归:403/408/418/429/5xx 即使携带确定拒绝、GONE 或 NotFound 业务码也无订单事件;429/418 优先输出 RateLimited 并把对应桶置满。
+
 
 ### BIN-093 撤单 -2011 产出 CancelReject 且标明订单已不存在
 
@@ -1514,6 +1516,8 @@ BIN-063 对两份不同凭证构建同值小模板,显式借用凭证签名得�
 | BIN-142.2 | `Usdm` `acct_request(Config step 0)` | `RestReqBuf{endpoint: 0, method: GET, path_query: "/fapi/v1/positionSide/dual?timestamp=1790000000000&recvWindow=1500&signature=cd74c1947d93de5156a92463317b9b8e3c0c89c2f52753b8baf66b1c2c1f133f", headers 含 "X-MBX-APIKEY: TESTKEY", redacted: true}` |
 | BIN-142.3 | `Usdm` `acct_request(Config step 5)` | `endpoint: 1`,`path_query = "/api/v3/account?timestamp=1790000000000&recvWindow=1500&signature=cd74c1947d93de5156a92463317b9b8e3c0c89c2f52753b8baf66b1c2c1f133f"`,`redacted: true` |
 | BIN-142.4 | `acct_request` 的签名 | 64 个小写十六进制字符(不是 base64、不是 Ed25519) |
+- 实现补充:warm 入口的签名向量由 `tests/acct.rs::bin_142_rest_hmac_request_matches_independent_vector` 覆盖,当前路径为 accountConfig;跨 host 的旧分步请求仍待接口统一。
+
 
 ### BIN-143 会话 key 的 UID 用 Ed25519 签名查询现货账户接口
 
@@ -1695,6 +1699,8 @@ BIN-063 对两份不同凭证构建同值小模板,显式借用凭证签名得�
   - 步骤 1 与步骤 2 的报告逐字节相同
   - 步骤 3 前后账户查询报告逐字节相同;`decode_report` 的输出与不穿插账户查询时逐字节相同
 - 实现:`crates/venue-binance/tests/acct.rs::bin_153_acct_isolation`
+- 实现补充:warm `State` 对应测试 `tests/acct.rs::bin_153_failed_account_page_preserves_baseline`,含 10³ 次页面重用、10⁴ 次回报穿插与失败页面不改状态;不宣称旧 bounded 接口完成。
+
 
 ### BIN-170 rate_rules 逐行给出官方默认限速
 

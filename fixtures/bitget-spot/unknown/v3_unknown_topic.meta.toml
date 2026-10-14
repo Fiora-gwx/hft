@@ -1,0 +1,6 @@
+source = "synthetic"
+venue = "bitget-spot"
+channel = "unknown"
+scrubbed = true
+reviewed_by = "pending-human-review"
+notes = "Documented heartbeat or deliberately unregistered channel; no live-capture claim."

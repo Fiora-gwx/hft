@@ -176,3 +176,78 @@ fn bin_149_negative_maintenance_is_not_a_safe_ratio() {
     assert!(Usdm::account_decode(rd(), ACCT, &Query::Balances, 200, body, 1, &mut s).is_err());
     assert!(s.margin.is_none());
 }
+
+#[test]
+fn bin_153_failed_account_page_preserves_baseline() {
+    let mut s = margin("10000", "250");
+    let body = br#"[{"symbol":"BTCUSDT","positionSide":"BOTH","positionAmt":"-0.001","entryPrice":"65000","unRealizedProfit":"-1","liquidationPrice":"70000"}]"#;
+    Usdm::account_decode(rd(), ACCT, &Query::Positions, 200, body, 12, &mut s).unwrap();
+    let before = format!("{s:?}");
+    let mut rows: serde_json::Value = serde_json::from_slice(body).unwrap();
+    let mut bad = rows[0].clone();
+    bad["symbol"] = "ETHUSDT".into();
+    bad["positionAmt"] = "bad".into();
+    rows.as_array_mut().unwrap().push(bad);
+    let duplicate = br#"{"totalMarginBalance":"10000","totalMaintMargin":"250","availableBalance":"100","assets":[{"asset":"USDT","walletBalance":"100"},{"asset":"USDT","walletBalance":"200"}]}"#;
+    for (q, b) in [
+        (Query::Positions, serde_json::to_vec(&rows).unwrap()),
+        (Query::Balances, duplicate.to_vec()),
+    ] {
+        assert!(Usdm::account_decode(rd(), ACCT, &q, 200, &b, 13, &mut s).is_err());
+        assert_eq!(format!("{s:?}"), before);
+    }
+    for _ in 0..1000 {
+        Usdm::account_decode(rd(), ACCT, &Query::Positions, 200, body, 12, &mut s).unwrap();
+    }
+    assert_eq!(format!("{s:?}"), before);
+    // Interleaving account snapshots must neither change report dedup nor vice versa.
+    use hft_venue_proto::{MsgOp, VenueProtocol};
+    const PUSH: &str = r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"BTCUSDT","c":"1000301020002a000000073d","S":"BUY","o":"LIMIT","x":"TRADE","X":"PARTIALLY_FILLED","i":325078477,"l":"0.001","z":"0.003","L":"65000.1","ap":"65000.05","n":"0.0130","N":"USDT","rp":"0","T":1790000000010,"t":9001}}"#;
+    let mut plain = venue_binance::GwCtx::default();
+    let mut interleaved = venue_binance::GwCtx::default();
+    let class = Usdm::classify_report(MsgOp::Text, &PUSH.as_bytes()[..64]);
+    for n in 0..10_000 {
+        let mut left = RepSink::default();
+        let mut right = RepSink::default();
+        let a = Usdm::decode_report(rd(), &mut plain, class, PUSH.as_bytes(), &RX, &mut left).unwrap();
+        if n % 10 == 0 {
+            Usdm::account_decode(rd(), ACCT, &Query::Positions, 200, body, 12, &mut s).unwrap();
+        }
+        let b = Usdm::decode_report(rd(), &mut interleaved, class, PUSH.as_bytes(), &RX, &mut right).unwrap();
+        assert_eq!(a, b);
+        assert_eq!(format!("{left:?}"), format!("{right:?}"));
+    }
+    assert_eq!(format!("{s:?}"), before);
+}
+
+#[test]
+fn bin_006_warm_cancel_response_matches_request() {
+    let q = Query::Cancel {
+        symbol: "BTCUSDT".into(),
+        order_id: "123".into(),
+    };
+    for (symbol, id, valid) in [
+        ("BTCUSDT", 123, true),
+        ("ETHUSDT", 123, false),
+        ("BTCUSDT", 124, false),
+    ] {
+        let body = serde_json::to_vec(&serde_json::json!({"symbol":symbol,"orderId":id})).unwrap();
+        assert_eq!(
+            Usdm::account_decode(rd(), ACCT, &q, 200, &body, 1, &mut State::default()).is_ok(),
+            valid
+        );
+    }
+}
+
+#[test]
+fn bin_142_rest_hmac_request_matches_independent_vector() {
+    use hft_venue_proto::{Method, RestReqBuf};
+    let mut out = RestReqBuf::default();
+    Usdm::account_request(&cfg(1500), &hm1(), &Query::Settings, WC.unix_ms, &mut out).unwrap();
+    assert_eq!(out.method, Method::Get);
+    assert_eq!(out.endpoint, 0);
+    assert!(out.redacted);
+    // Independently calculated using Python hmac over the public HM1 documentation key.
+    assert_eq!(out.path_query.as_slice(), b"/fapi/v1/accountConfig?timestamp=1790000000000&recvWindow=1500&signature=cd74c1947d93de5156a92463317b9b8e3c0c89c2f52753b8baf66b1c2c1f133f");
+    assert_eq!(out.headers.as_slice(), b"X-MBX-APIKEY: TESTKEY\r\n");
+}

@@ -4,6 +4,7 @@
 mod classify;
 mod encode;
 mod funding;
+mod golden;
 mod md;
 mod reports;
 mod session;

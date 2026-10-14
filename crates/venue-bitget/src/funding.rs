@@ -92,7 +92,7 @@ impl FundingHistoryProtocol for BitgetUsdtFutures {
                     ..q.clone()
                 })
             }
-            Some(_) if !r.data.list.is_empty() => return Err(DecodeErr::Shape),
+            Some(_) => return Err(DecodeErr::Shape),
             _ => None,
         };
         let mut bills = Vec::with_capacity(r.data.list.len());
