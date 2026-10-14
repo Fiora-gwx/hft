@@ -1643,9 +1643,9 @@ spec: README.md
 - 规则:[2. ledger / pnl](README.md#2-ledger--pnl)
 - 级别:table
 - 里程碑:M2
-- 前置:J_LED20 种子 1 的副本,修改首笔非零累计成交的品种为与已登记订单不同的合法品种,保留记录完整性并重算 CRC
+- 前置:J_LED20 种子 1 的副本,把现货 101 上首笔非零累计成交回报的 `px` 与 `avg_px` 改为 0(冷账本拒绝无价现货成交),保留记录完整性并重算 CRC。不再用改品种触发:非 PERP_CASH 品种上回报给出另一非零品种时 hft-oms 与冷账本均忽略该回报,不报错
 - 步骤:分别调用 ledger 与 pnl
-- 期望:两入口均抛 JournalError,消息包含 Identity,seq 为错误回报的序号;不返回部分账本或收益表
+- 期望:两入口均抛 JournalError,消息包含 `Settlement(InvalidPrice)`,seq 为错误回报的序号;不返回部分账本或收益表
 - 实现:`crates/hft-py/tests/python/test_ledger.py::test_py_114_booking_error_exposes_failing_sequence`
 
 | 行 | API |
