@@ -17,3 +17,4 @@
 0xffcfb3918b4c9b7a 2026-10-14 world=trading INV-14 查询确认终态的执行结果证据
 0xffcfb3918b4c9af7 2026-10-14 world=trading INV-8 交易世界反例复核
 0xffcfb3918b4c9af6 2026-10-14 world=trading INV-6 准入前腿摘要与快照恢复不同
+0xe7cae53f900f5924 2026-10-14 world=trading INV-3 replay_config 旧代数外来持仓超限后先平永续的例外识别及解除

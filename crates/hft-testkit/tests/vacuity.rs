@@ -172,3 +172,22 @@ fn tk_177_trading_world_regression_seeds() {
     }
     assert!(errors.is_empty(), "{}", errors.join("\n"));
 }
+
+#[test]
+fn tk_177_replay_trading_position_limit() {
+    let seed = 0xe7ca_e53f_900f_5924;
+    let suite = suites().into_iter().find(|s| s.name == "core").unwrap();
+    for steps in [8_039, 10_000] {
+        let mut c = hft_testkit::scenarios::replay_config(&suite, seed);
+        c.steps = steps;
+        c.rerun = RerunPolicy::Always;
+        let r = run_record::<SeqEngine>(&c);
+        assert!(r.outcome.is_pass(), "{}", crate::seq_sut::show(&r));
+        assert_eq!(r.steps_run, steps);
+        if steps == 8_039 {
+            assert!(r.obs.positions.iter().any(|p| p.qty == 10_001_000));
+            assert!(r.obs.legs.iter().any(|l| l.naked_qty == 10_001_000));
+            assert!(r.stale_gen.iter().any(|v| !v.executions.is_empty()));
+        }
+    }
+}

@@ -1419,6 +1419,7 @@ spec: README.md
 - 回归:core 的 legacy 种子 `0x61aaa3c81c37eb19` 提供真实成功 SecondRetry;在诊断副本设置同组其他订单 Unknown,仍允许已收敛链接的重试;副本中的本链接 Unknown、Open 与本次输入刚进入 Unknown 都必须被 I4 拒绝,本次已收敛的 group 可通过。
 - 实现:`crates/hft-testkit/tests/observations.rs::tk_107_real_observations_and_counterexamples`
 - 回归函数:`crates/hft-testkit/tests/observations.rs::check_unknown_is_scoped_to_decision_group_and_link`
+- INV-3 外来限额例外:已记账的外来增量可保持例外直到各腿回到限额;只有注记无增量不能豁免,例外期间的新开仓仍检查限额,解除后无证据超限必须失败。实现 `src/dst/invariants.rs::i3_tests::tk_107_external_position_limit_exception_is_bounded`。
 
 ### TK-108 观察检查点只覆盖已发布 journal
 
@@ -2190,6 +2191,7 @@ spec: README.md
 - 种子:三个套件各种子 1、2,10 000 步的交易世界冒烟,强制复跑
 - 断言:全部运行通过;I1、I2、I3、I4、I5、I6、I7、I8、I11、I12、I14、I15、I16、I19、I20 的比较数之和均大于 0;其余检查器(I9、I13、I17、I18)的比较数逐运行打印,由定向用例(TK-053、TK-179、LED-080/081 等)覆盖
 - 实现:`crates/hft-testkit/tests/vacuity.rs::tk_177_standard_smoke_compares_every_core_invariant`
+- replay_config 的 core 种子 `0xe7cae53f900f5924` 在第 8039 步确有外来现货超限 1000 及平永续在途,允许既有减仓规则继续处理;完整 10000 步及强制复跑通过。实现 `tests/vacuity.rs::tk_177_replay_trading_position_limit`。
 
 ### TK-178 植入缺陷不进入任何生产构建
 
