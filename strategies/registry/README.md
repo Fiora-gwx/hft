@@ -89,6 +89,8 @@ pub fn export_schemas() -> Vec<(String, String)>;
 
 `tests/portfolio_carry.rs` 用真实 sequencer、mock 成交和 journal 验证 [CARRY-002/010](../portfolio-carry/TESTS.md),覆盖双向 Simultaneous 入场/退出、双侧深度与限价、非对称成交/拒单/在途断线的确定性故障种子、实际资金费去重与逐字节重放。
 
+`tests/latency_probe_scenarios.rs` 与 `tests/latency_probe_dst.rs` 通过真实引擎和模拟交易所验证挂撤、跨网关触发关联、双腿/目标退出、价格带与 Broken 自动修复;每个场景验证 journal 重放。当前覆盖与剩余长时间/故障矩阵归 [探针测试规格](../latency-probe/TESTS.md)。
+
 用例与验收见 [TESTS.md](TESTS.md)。
 
 ## 依赖

@@ -14,6 +14,8 @@ spec: README.md
 
 离线工具的共享夹具对照在 `tests/calibration.rs`（cross-taker feature）;直接调用真实信号并驱动 carry Strategy 校验目标数量,覆盖归 [strat-calib/TESTS.md](../../tools/strat-calib/TESTS.md)。
 
+探针的真实引擎场景与确定性故障回归在 `tests/latency_probe_scenarios.rs`、`tests/latency_probe_dst.rs`,覆盖范围归 [latency-probe/TESTS.md](../latency-probe/TESTS.md)。
+
 ## 覆盖
 
 | README 小节 | 用例 |

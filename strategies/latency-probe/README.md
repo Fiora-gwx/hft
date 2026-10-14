@@ -264,6 +264,8 @@ impl Strategy for LatencyProbe {
 
 ## 测试与验收
 
+真实引擎的周期挂撤、跨网关样本、pair/target 退出、Broken 自动修复与价格带拒绝在 [registry 场景](../registry/tests/latency_probe_scenarios.rs) 和 [故障回归](../registry/tests/latency_probe_dst.rs) 验证,包含完整 journal 重放。长时间计数、200 种子完整故障矩阵及主机/测试网测量的剩余范围见 [TESTS.md](TESTS.md#lpr-065-引擎级1-h-quote-运行的样本数与撤单)。
+
 用例与验收见 [TESTS.md](TESTS.md)。
 
 ## 依赖
