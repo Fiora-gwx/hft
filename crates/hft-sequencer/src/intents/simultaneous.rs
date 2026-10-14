@@ -6,6 +6,7 @@ pub(super) struct Prepared {
     pub ai: ApprovedIntent,
     pub view: IntentView,
     pub admission: Option<hft_risk::Admission>,
+    pub shadow: bool,
 }
 
 pub(super) fn prepare<S: StrategySet>(
@@ -65,6 +66,7 @@ pub(super) fn prepare<S: StrategySet>(
         pos: e.ledger.pos(plan.account, plan.inst).qty,
         pending_buy: fl.open_buy,
         pending_sell: fl.open_sell,
+        ..PosFacts::default()
     };
     let draft = IntentDraft {
         account: plan.account,
@@ -81,6 +83,7 @@ pub(super) fn prepare<S: StrategySet>(
     let class = Risk::classify(&draft, hft_risk::Origin::Oms, &facts, e.rd.caps(plan.venue));
     let gated = matches!(src, Src::Strategy { .. })
         || matches!(src, Src::Exec { o } if o.origin == ExecOrigin::Target && class.class == IntentClass::Open);
+    let mut shadow = false;
     if gated {
         let cell = CellKey {
             strategy: e.rd.account(plan.account).bound_instance,
@@ -88,10 +91,10 @@ pub(super) fn prepare<S: StrategySet>(
             group: first.group,
         };
         let eff = e.risk.mode.effective(cell);
-        if eff == Effective::Shadow
-            || (eff == Effective::Live
-                && class.class == IntentClass::Open
-                && !open_allowed(inst, plan.account, first.group))
+        shadow = eff == Effective::Shadow;
+        if eff == Effective::Live
+            && class.class == IntentClass::Open
+            && !open_allowed(inst, plan.account, first.group)
         {
             return Err(PipeOut::Shadowed);
         }
@@ -153,6 +156,7 @@ pub(super) fn prepare<S: StrategySet>(
         ai,
         view,
         admission: None,
+        shadow,
     })
 }
 

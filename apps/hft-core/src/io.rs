@@ -345,6 +345,16 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
         }
         ok
     }
+    fn out_free(&mut self, ring: OutRing) -> usize {
+        match ring {
+            OutRing::Sim => self.sim_orders.free_hint(),
+            OutRing::Venue(v) => self
+                .gws
+                .iter()
+                .find(|g| g.venue == v)
+                .map_or(0, |g| g.orders.free_hint()),
+        }
+    }
     fn push_feed(&mut self, v: VenueId, c: &FeedCmd) -> bool {
         self.feeds
             .iter_mut()

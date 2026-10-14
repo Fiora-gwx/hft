@@ -436,17 +436,20 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
     // A simultaneous pair is prepared before either admission is committed or slot allocated.
     let mut pair = if simul && link_role == Some(LinkRole::First) {
         match simultaneous::prepare(e, inst, strategy, &it, &iv, src) {
-            Ok(p) => Some(p),
+            Ok(p) => {
+                shadow |= p.shadow;
+                Some(p)
+            }
             Err(outcome) => {
-                let (bits, shadow) = match outcome {
-                    PipeOut::Shadowed => (RejectBits(0), true),
-                    PipeOut::Rejected(bits) => (bits, false),
-                    _ => (RejectBits::INVALID, false),
+                let bits = match outcome {
+                    PipeOut::Shadowed => RejectBits::MODE_SHADOW,
+                    PipeOut::Rejected(bits) => bits,
+                    _ => RejectBits::INVALID,
                 };
                 record_only(e, strategy, &it, bits, shadow, oflags, reason, intent_no);
                 #[cfg(feature = "testkit")]
                 e.audit.record((e.out.recs.len() - 1) as u32, audit_facts);
-                return Ok(outcome);
+                return Ok(if shadow { PipeOut::Shadowed } else { outcome });
             }
         }
     } else {

@@ -70,9 +70,11 @@ fn seq_178_simultaneous_atomic_risk_and_capacity() {
     assert!(last_link(&h, AC1).is_none());
     assert!(h.io_ref().out[out..].iter().all(|(_, c)| c.op != GwOp::Place));
     assert!(h.verify().is_empty());
-    for (group_cap, order_cap, bit) in [
-        ("800", "10000", RejectBits::NOTIONAL_GROUP),
-        ("50000", "500.05", RejectBits::NOTIONAL_ORDER),
+    for (group_cap, order_cap, bit, shadow) in [
+        ("800", "10000", RejectBits::NOTIONAL_GROUP, false),
+        ("50000", "500.05", RejectBits::NOTIONAL_ORDER, false),
+        ("50000", "500.05", RejectBits::NOTIONAL_ORDER, true),
+        ("50000", "10000", RejectBits(0), true),
     ] {
         reset_script();
         let mut b = b0();
@@ -88,12 +90,29 @@ fn seq_178_simultaneous_atomic_risk_and_capacity() {
         b.risk = Some(rp);
         let mut h = b.boot_self_contained();
         h.steady();
+        if shadow {
+            h.cmd(
+                AC1,
+                &hft_event::ControlCmd::SetMode {
+                    scope: scope(S1, AC1, hft_types::GroupId(0)),
+                    mode: hft_types::RunMode::Shadow,
+                },
+            );
+            h.run();
+        }
         install(OnFail::Reverse);
         let before = h.s.engine().oms.table_view(A, AC1).unwrap().free_len;
         let out = h.io_ref().out.len();
-        let (_, ds) = fire(&mut h);
+        let (m, ds) = fire(&mut h);
         assert_eq!(ds.len(), 1, "{ds:?}");
         assert_eq!(ds[0].reject, bit.0, "{ds:?}");
+        assert_eq!(
+            h.since(m)
+                .iter()
+                .filter(|r| r.flags.0 & hft_event::RecordFlags::SHADOW.0 != 0)
+                .count(),
+            usize::from(shadow)
+        );
         assert_eq!(h.s.engine().oms.table_view(A, AC1).unwrap().free_len, before);
         assert!(last_link(&h, AC1).is_none());
         assert!(h.io_ref().out[out..].iter().all(|(_, c)| c.op != GwOp::Place));
