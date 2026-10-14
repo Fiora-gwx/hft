@@ -63,7 +63,7 @@ fn tool_020_probe_generated_in_test_range() {
     let r = gate(&f, &s, true, None);
     assert_eq!(r.code, 0, "{}", r.stderr);
     let p = f.path(DEC).join("strategies/ci-probe");
-    for rel in ["src/lib.rs", "src/model/mod.rs", "tests/scenario.rs"] {
+    for rel in ["src/lib.rs", "tests/scenario.rs"] {
         assert!(p.join(rel).is_file(), "missing {rel}");
     }
     assert!(p.join("pipeline").is_dir());
@@ -74,9 +74,11 @@ fn tool_020_probe_generated_in_test_range() {
         .iter()
         .map(|v| v.as_str().unwrap().to_string())
         .collect();
-    for want in ["ci-probe", "--with-model", "--with-pipeline"] {
+    for want in ["ci-probe", "--with-pipeline"] {
         assert!(args.iter().any(|a| a == want), "{want} not in {args:?}");
     }
+    assert!(!args.iter().any(|a| a == "--with-model"));
+    assert!(!p.join("src/model").exists());
     let i = args.iter().position(|a| a == "--kind-id").unwrap();
     let k = u32::from_str_radix(args[i + 1].trim_start_matches("0x"), 16).unwrap();
     assert!((0xFF00..=0xFFFF).contains(&k), "kind_id {k:#x}");
@@ -175,7 +177,12 @@ fn tool_022_scenario_dst_check_order() {
     let scen = at("-p ci-probe --test scenario");
     let dst = at("-p hft-strategy-registry --test ci_probe_dst");
     let check = at(" --check --dry-run --config ");
-    assert!(scen < dst && dst < check, "{calls:?}");
+    let config = at("-p hft-strategy-registry --test ci_probe_config");
+    let build = at("-p hft-core --features bitget");
+    assert!(
+        scen < dst && dst < config && config < build && build < check,
+        "{calls:?}"
+    );
     assert!(
         calls[check].starts_with(&hft_core(&f.path("target"))),
         "{}",
@@ -184,10 +191,7 @@ fn tool_022_scenario_dst_check_order() {
     assert!(calls[check].ends_with("sim-check.toml"), "{}", calls[check]);
     let j = r.json.unwrap();
     assert_eq!(j["dst_seeds"], 100);
-    let acct = &j["sim_account"];
-    assert!(acct["label"].as_str().unwrap().starts_with("sim-"), "{acct}");
-    assert_eq!(acct["kind"], "sim");
-    assert_eq!(acct["bound_instance"], "ci-probe-sim");
+    assert_eq!(j["model"], "NoModel");
 }
 
 #[test]
@@ -281,7 +285,7 @@ fn tool_028_probe_depends_on_oms() {
 #[test]
 fn tool_029_probe_shape_required() {
     let rows = [
-        ("TOOL-029.1", "strategies/_template/model", "no Model skeleton"),
+        ("TOOL-029.1", "strategies/_template/base/src", "must use NoModel"),
         (
             "TOOL-029.2",
             "strategies/_template/pipeline",
@@ -351,18 +355,20 @@ fn sdk_004_second_test_strategy_zero_engine_diff() {
     assert_eq!(j["dst_seeds"], 100);
     assert_eq!(j["kind_id"], "0xff10");
     assert_eq!(j["engine_changes"], serde_json::json!([]));
-    // The probe is the real template's: kind 0xFF10, a Model declaring 2 MiB per group by default
-    // (window 262_144 × 8 B), the plugin package and the hot clippy configuration.
+    // The probe uses the supported NoModel contract, with the plugin and hot clippy config.
     let p = f.path(DEC).join("strategies/ci-probe");
     let read = |rel: &str| std::fs::read_to_string(p.join(rel)).unwrap();
     assert!(read("src/lib.rs").contains("kind_id: 65296,"));
-    assert!(read("src/lib.rs").contains("type Model = model::CiProbeModel;"));
-    assert!(read("src/model/mod.rs").contains("fn mem_bytes("));
-    assert!(read("src/params.rs").contains("default = 262_144"));
+    assert!(read("src/lib.rs").contains("type Model = NoModel<CiProbeParams>;"));
+    assert!(!p.join("src/model").exists());
     assert!(read("pipeline/pyproject.toml").contains("ci_probe = \"hft_plugin_ci_probe:PLUGIN\""));
     assert_eq!(read("clippy.toml"), f.read("tools/lint/clippy-hot.toml"));
     let cfg: toml::Table = f.read(&format!("{DEC}/sim-check.toml")).parse().unwrap();
-    assert_eq!(cfg["advisor"]["mem_budget_mib"].as_integer(), Some(160));
+    assert_eq!(cfg["schema"].as_integer(), Some(1));
+    assert_eq!(cfg["instance"]["config_source"].as_str(), Some("file"));
+    assert!(cfg.get("advisor").is_none());
+    assert!(cfg.get("sim_accounts").is_none());
+    assert!(f.path(DEC).join("registry/tests/ci_probe_config.rs").is_file());
     let reg: toml::Table = f.read(&format!("{DEC}/registry/Cargo.toml")).parse().unwrap();
     let tk = &reg["dev-dependencies"]["hft-testkit"]["features"];
     assert!(

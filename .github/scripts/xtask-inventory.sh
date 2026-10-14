@@ -33,9 +33,18 @@ missing=()
   echo "### xtask subcommands (current milestone $current)"
   echo
 } >>"$summary"
-for name in "${have[@]}"; do echo "$name=true" >>"$out"; done
+# gen-host is listed by help while its implementation is still an input-checking stub.
+# Its M3 generator lives in deploy/gen; reaching M3 without it must fail below.
+available() {
+  printf '%s\n' "${have[@]}" | grep -qx -- "$1" || return 1
+  [[ $1 != gen-host || -d deploy/gen ]]
+}
+for name in "${have[@]}"; do
+  if available "$name"; then echo "$name=true" >>"$out";
+  else echo "$name=false" >>"$out"; fi
+done
 for name in "${!due[@]}"; do
-  if printf '%s\n' "${have[@]}" | grep -qx -- "$name"; then
+  if available "$name"; then
     echo "- \`$name\`: present" >>"$summary"
   elif (( $(rank "${due[$name]}") <= $(rank "$current") )); then
     missing+=("$name")

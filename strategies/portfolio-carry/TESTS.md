@@ -116,12 +116,12 @@ spec: README.md
 
 - 规则:[资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 基准名:`strategies/portfolio-carry/hold`
+- 基准名:`strategies/portfolio-carry/{tick_miss,tick_fire,target_set,hold,exec_update,risk_event}`
 - 里程碑:M4
-- 前置:一个健康 group、稳定的对冲仓位,预分配 CtxBufs。
-- 步骤:Criterion 重复 on_event(Bbo),配置与 harness 构造不计时。
-- 期望:参考机 p50/p99 不超过 README 预算;CI smoke 只报告。
-- 实现:`benches/on_event.rs::carry_009_hold`
+- 前置:一个 group、显式报价/资金/费率与固定缓冲;持有、Exec、Risk 用例设置等量对冲仓位。
+- 步骤:Criterion 重复相应 SDK 事件,每次恢复初态;配置、恢复与输出断言不计时。
+- 期望:未入场/持有/Exec 不产生目标;BBO 与定时器入场每次产生等量反向目标;Risk 锁存后下一 group 事件退出至零。参考机 p50/p99 不超过 README/SDK 预算;CI smoke 只报告;慢侧与 Advice 明确不适用。
+- 实现:`benches/on_event.rs::carry_009_entries`
 
 ### CARRY-010 真实 sequencer 的双向 linked 成交、资金费与重放
 

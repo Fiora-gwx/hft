@@ -1,9 +1,9 @@
 //! `cargo xtask scaffold-gate [--keep] [--profile <name>]` (tools/README.md "cargo xtask scaffold-gate"):
 //! the template probe check of gate ⑧.
 //!
-//! 1. Renders the `new-strategy` template with `--with-model --with-pipeline` as `ci-probe` (kind_id
-//!    in the test range) into `target/decoupling/strategies/ci-probe/`; checks its shape (Model
-//!    skeleton `src/model/`, pipeline plugin `pipeline/pyproject.toml`) and its direct
+//! 1. Renders the `new-strategy` NoModel template with `--with-pipeline` as `ci-probe` (kind_id
+//!    in the test range) into `target/decoupling/strategies/ci-probe/`; checks its shape (NoModel
+//!    contract, pipeline plugin `pipeline/pyproject.toml`) and its direct
 //!    dependencies (only those `deps.toml` allows `strategies/*`).
 //! 2. Writes the temporary workspace `target/decoupling/Cargo.toml`: the registry copy
 //!    (`registry/`, `strategy_set!` + `CiProbe`, a dependency on the probe, the DST short set
@@ -15,7 +15,7 @@
 //!    that external versions match the main build. The registry copy gets the dev-dependency
 //!    `hft-testkit` with feature `seq` (the DST short set runs the real sequencer).
 //! 3. Runs the probe's scenario test, the DST short set, builds `hft-core` and runs
-//!    `hft-core --check --config <generated sim config>`; while `apps/hft-core` is not in the
+//!    `hft-core --check --dry-run --config <generated sim config>`; while `apps/hft-core` is not in the
 //!    repository (M3) the last two steps are recorded as skipped.
 //! 4. Fails on any change under `crates/`, `apps/`, `tools/hft-cfg/`, `python/`
 //!    (`git status --porcelain`, untracked files included), then removes `target/decoupling/`
@@ -47,13 +47,14 @@ pub const ENGINE_PATHS: [&str; 4] = ["crates", "apps", "tools/hft-cfg", "python"
 /// xtask-owned templates of the registry DST short set and the sim instance check config.
 pub const DST_TEMPLATE: &str = "tools/xtask/scaffold/registry_dst.rs.tmpl";
 pub const CONFIG_TEMPLATE: &str = "tools/xtask/scaffold/sim-check.toml";
+pub const CONFIG_TEST_TEMPLATE: &str = "tools/xtask/scaffold/registry_config.rs.tmpl";
 const APPS: [&str; 2] = ["apps/hft-core", "apps/replayer"];
 
 fn probe() -> Opts {
     Opts {
         name: PROBE.into(),
         kind_id: PROBE_KIND_ID,
-        with_model: true,
+        with_model: false,
         with_pipeline: true,
     }
 }
@@ -310,21 +311,14 @@ fn wr(p: &Path, text: &str) -> Result<(), EnvError> {
 /// Shape violations of a rendered probe.
 pub fn shape(dir: &Path) -> Vec<String> {
     let mut v = Vec::new();
-    let model = dir.join("src/model");
-    let has_model = (model.is_dir() || dir.join("src/model.rs").is_file())
-        && walkdir::WalkDir::new(&model)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .chain(
-                walkdir::WalkDir::new(dir.join("src/model.rs"))
-                    .into_iter()
-                    .filter_map(|e| e.ok()),
-            )
-            .filter(|e| e.file_type().is_file())
-            .any(|e| std::fs::read_to_string(e.path()).is_ok_and(|t| t.contains("mem_bytes")));
-    if !has_model {
+    let no_model = std::fs::read_to_string(dir.join("src/lib.rs")).is_ok_and(|t| {
+        t.split_whitespace()
+            .collect::<String>()
+            .contains("typeModel=NoModel<")
+    });
+    if !no_model {
         v.push(format!(
-            "probe shape: {PROBE} has no Model skeleton (src/model/ declaring mem_bytes)"
+            "probe shape: {PROBE} must use NoModel (advisor assembly is deferred to M9)"
         ));
     }
     if !dir.join("pipeline/pyproject.toml").is_file() {
@@ -414,27 +408,11 @@ fn exe(name: &str) -> String {
     }
 }
 
-/// The Sim account of the generated config: the `[[sim_accounts]]` entry (`label`, `kind`,
-/// `bound_instance`).
-fn sim_account(cfg: &str) -> Value {
-    let t: toml::Table = cfg.parse().unwrap_or_default();
-    t.get("sim_accounts")
-        .and_then(|v| v.as_array())
-        .and_then(|a| a.first())
-        .and_then(|a| a.as_table())
-        .map(|a| {
-            let s = |k: &str| a.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
-            json!({"label": s("label"), "kind": s("kind"), "bound_instance": s("bound_instance")})
-        })
-        .unwrap_or(Value::Null)
-}
-
 #[derive(Debug, Default)]
 struct Report {
     violations: Vec<String>,
     steps: Vec<Value>,
     engine_changes: Vec<String>,
-    sim_account: Value,
 }
 
 /// Options of one run.
@@ -540,6 +518,13 @@ fn build_and_check(
         .replace("{{seeds}}", &DST_SEEDS.to_string());
     let dst_test = format!("{}_dst", o.krate());
     wr(&rcopy.join("tests").join(format!("{dst_test}.rs")), &dst)?;
+    let config_test = format!("{}_config", o.krate());
+    if opts.hft_core {
+        let config = rd(&root.join(CONFIG_TEST_TEMPLATE))?
+            .replace("{{name}}", PROBE)
+            .replace("{{kind_id}}", &PROBE_KIND_ID.to_string());
+        wr(&rcopy.join("tests").join(format!("{config_test}.rs")), &config)?;
+    }
     // App manifest copies and the temporary workspace.
     let redirect = (reg.clone(), rcopy.clone());
     let mut members = vec!["registry".to_string(), format!("strategies/{PROBE}")];
@@ -571,18 +556,13 @@ fn build_and_check(
             .display()
             .to_string()
             .replace('\\', "/");
-        for (name, template) in [
-            ("scaffold_config", "config.rs.tmpl"),
-            ("sdk005", "sdk005.rs.tmpl"),
-        ] {
-            wr(
-                &app.join(format!("{name}.rs")),
-                &rd(&root.join("tools/xtask/scaffold").join(template))?.replace("{{support}}", &support),
-            )?;
-        }
+        wr(
+            &app.join("sdk005.rs"),
+            &rd(&root.join("tools/xtask/scaffold/sdk005.rs.tmpl"))?.replace("{{support}}", &support),
+        )?;
         let path = app.join("Cargo.toml");
         let mut text = rd(&path)?;
-        text.push_str("\n[[example]]\nname = \"scaffold_config\"\npath = \"scaffold_config.rs\"\n\n[[test]]\nname = \"sdk005\"\npath = \"sdk005.rs\"\n");
+        text.push_str("\n[[test]]\nname = \"sdk005\"\npath = \"sdk005.rs\"\n");
         wr(&path, &text)?;
     }
     let cfg_text = rd(&root.join(CONFIG_TEMPLATE))?
@@ -590,7 +570,7 @@ fn build_and_check(
         .replace("{{kind_id}}", &PROBE_KIND_ID.to_string());
     let cfg = dec.join("sim-check.toml");
     wr(&cfg, &cfg_text)?;
-    r.sim_account = sim_account(&cfg_text);
+    wr(&dec.join("sim-check.template.toml"), &cfg_text)?;
     // Step 3: scenario, DST short set, hft-core build and --check, all on the main target dir.
     let tdir = target_dir(root);
     let tenv = vec![("CARGO_TARGET_DIR".to_string(), tdir.display().to_string())];
@@ -613,28 +593,16 @@ fn build_and_check(
     ];
     if opts.hft_core {
         steps.push((
-            "build hft-core",
+            "generate check config",
             cargo(
-                &[
-                    "build",
-                    "-p",
-                    "hft-core",
-                    "--bin",
-                    "hft-core",
-                    "--example",
-                    "scaffold_config",
-                ],
+                &["test", "-p", "hft-strategy-registry", "--test", &config_test],
                 &mp,
                 prof,
             ),
         ));
-        let generator = tdir
-            .join(profile_dir(prof))
-            .join("examples")
-            .join(exe("scaffold_config"));
         steps.push((
-            "generate assembly config",
-            Cmd::new(&generator.display().to_string(), &[]).arg(dec.display().to_string()),
+            "build hft-core",
+            cargo(&["build", "-p", "hft-core", "--features", "bitget"], &mp, prof),
         ));
         steps.push((
             "hft-core --check",
@@ -648,23 +616,7 @@ fn build_and_check(
             cargo(&["test", "-p", "hft-core", "--test", "sdk005"], &mp, prof),
         ));
     }
-    let mut model_source = None;
     for (name, mut c) in steps {
-        if name == "build hft-core" {
-            // Model scenario/DST have already run. The M3 host has no advisor task, so its
-            // schema/ctl acceptance uses the same schema with the SDK's NoModel adapter.
-            let source = pdir.join("src/lib.rs");
-            let original = rd(&source)?;
-            model_source = Some(original.clone());
-            let code = original
-                .replace(
-                    &format!("type Model = model::{}Model;", o.ty()),
-                    &format!("type Model = hft_strategy_sdk::NoModel<{}Params>;", o.ty()),
-                )
-                .replace("Part::Both", "Part::Fast")
-                .replace("        out.model_tick(MODEL_TICK_MS);\n", "");
-            wr(&source, &code)?;
-        }
         c.env = tenv.clone();
         let o = exec.run(&c)?;
         r.steps
@@ -672,14 +624,8 @@ fn build_and_check(
         if !o.ok() {
             r.violations
                 .push(format!("{name}: `{}` exited {}", c.line(), o.code));
-            if let Some(original) = &model_source {
-                wr(&pdir.join("src/lib.rs"), original)?;
-            }
             return Ok(());
         }
-    }
-    if let Some(original) = model_source {
-        wr(&pdir.join("src/lib.rs"), &original)?;
     }
     if !opts.hft_core {
         eprintln!("scaffold-gate: {NO_HFT_CORE}");
@@ -783,7 +729,7 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
         "dst_seeds": DST_SEEDS,
         "profile": opts.profile,
         "hft_core": if opts.hft_core { Value::Bool(true) } else { Value::String(NO_HFT_CORE.into()) },
-        "sim_account": r.sim_account,
+        "model": "NoModel",
         "steps": r.steps,
         "engine_changes": r.engine_changes,
         "violations": r.violations,

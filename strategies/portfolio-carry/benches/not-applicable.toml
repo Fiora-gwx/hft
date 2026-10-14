@@ -1,0 +1,3 @@
+# Absent optional SDK interfaces; no synthetic timing samples.
+slow_update = "Both legs use Part::Fast; no cached slow-side trigger or Model."
+advice = "NoModel<CarryParams>; no Advice payload or subscription."

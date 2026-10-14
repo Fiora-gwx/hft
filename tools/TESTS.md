@@ -302,7 +302,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
   - 记录型执行器中只有 `git` 与 GitHub API 调用;没有任何 `cargo build`、`cargo test`、`cargo check` 调用
 - 实现:`tools/xtask/tests/decoupling_gate.rs::tool_019_never_builds`
 
-### TOOL-020 scaffold-gate 以模板生成带 Model 与 pipeline 插件的测试段探针
+### TOOL-020 scaffold-gate 以模板生成 NoModel 与 pipeline 插件的测试段探针
 
 - 规则:[cargo xtask scaffold-gate](README.md#cargo-xtask-scaffold-gate)
 - 级别:unit
@@ -311,8 +311,8 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 - 步骤:
   1. 运行 `cargo xtask scaffold-gate --keep`
 - 期望:
-  - `target/decoupling/strategies/ci-probe/` 存在,含 `src/lib.rs`、Model 骨架、`tests/scenario.rs`、`pipeline/` 目录
-  - 生成时调用的 `new-strategy` 参数含 `ci-probe`、`--with-model`、`--with-pipeline`,`--kind-id` 的值 ∈ `0xFF00..=0xFFFF`
+  - `target/decoupling/strategies/ci-probe/` 存在,含 `src/lib.rs`、`type Model = NoModel<…>`、`tests/scenario.rs`、`pipeline/` 目录;不生成 Model 模块
+  - 生成时调用的 `new-strategy` 参数含 `ci-probe`、`--with-pipeline`,不含 `--with-model`,`--kind-id` 的值 ∈ `0xFF00..=0xFFFF`
 - 实现:`tools/xtask/tests/scaffold_gate.rs::tool_020_probe_generated_in_test_range`
 
 ### TOOL-021 scaffold-gate 在临时 registry 副本末尾加一行并以 patch 构建,复用主 target 目录
@@ -338,7 +338,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 - 步骤:
   1. 运行 `cargo xtask scaffold-gate`
 - 期望:
-  - 记录的顺序:`ci-probe` 的场景测试 → registry 副本 `tests/` 中含 `CiProbe` 的 DST 短集(100 个种子)→ 以副本构建的 `hft-core --check --config <生成的 sim 实例测试配置>`
+  - 记录的顺序:`ci-probe` 的场景测试 → registry 副本 `tests/` 中含 `CiProbe` 的 DST 短集(100 个种子)→ 配置生成测试(真实四类 blob、SHA-256、生成 kind 与 Sim 账户绑定、零 Model 内存/检查点)→ 带 `bitget` feature 的副本 `hft-core --check --dry-run --config <生成的 sim 实例测试配置>`
   - 生成的测试配置把 `ci-probe` 绑定到一个 `label` 以 `sim-` 开头的 Sim 账户;退出 0
 - 实现:`tools/xtask/tests/scaffold_gate.rs::tool_022_scenario_dst_check_order`
 
@@ -358,7 +358,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 - 规则:[cargo xtask scaffold-gate](README.md#cargo-xtask-scaffold-gate)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M9
 - 前置:模板生成后把 `ci-probe` 的 `Model::mem_bytes` 改为超过生成配置中 `advisor.mem_budget_mib` 的值(配置 `advisor.mem_budget_mib = 64`,探针声明 65 MiB/group × 1 group);真实 `hft-core` 构建
 - 步骤:
   1. 运行 `cargo xtask scaffold-gate`
@@ -419,7 +419,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
   - 退出 1;stderr 含边 `ci-probe → hft-oms`
 - 实现:`tools/xtask/tests/scaffold_gate.rs::tool_028_probe_depends_on_oms`
 
-### TOOL-029 生成的探针缺 Model 或缺 pipeline 插件时失败
+### TOOL-029 生成的探针不满足 NoModel 或缺 pipeline 插件时失败
 
 - 规则:[cargo xtask scaffold-gate](README.md#cargo-xtask-scaffold-gate)
 - 级别:table
@@ -427,9 +427,9 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 - 前置:临时分支改模板,使生成物缺少各行所列部分
 - 实现:`tools/xtask/tests/scaffold_gate.rs::tool_029_probe_shape_required`
 
-| 行 | 生成物缺少 | 期望 |
+| 行 | 生成物缺陷 | 期望 |
 |---|---|---|
-| TOOL-029.1 | `Model` 骨架 | 退出 1;stderr 指明缺 Model |
+| TOOL-029.1 | 缺少 `NoModel` 关联类型 | 退出 1;stderr 指明必须使用 NoModel |
 | TOOL-029.2 | `pipeline/` 插件包 | 退出 1;stderr 指明缺 pipeline 插件 |
 
 ### TOOL-030 deps 在无违规的仓库上通过
@@ -2882,12 +2882,14 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 | TOOL-190.4 | 文件回放取消 | 退出 0;日期文件回放明确显示 cancelled |
 | TOOL-190.5 | 缺少文件回放结果 | 退出 0;日期文件回放显示 ?,不能报告成功 |
 
-### TOOL-191 主机生成检查只按代码与配置变更触发
+### TOOL-191 主机与基准检查按适用路径触发
 
 - 规则:[质量门](../docs/development.md#质量门quality-gatesyml)
 - 级别:table
 - 里程碑:M1
 - 前置:路径列表替身与真实临时 Git 仓库;运行 changed-paths 入口,读取工作流输出
+- 期望:hot 包匹配 `deps.toml` 的精确/通配规则,策略源码或基准改动触发其实际包名;Markdown、模板与已删除包不触发基准。手动完整通道始终执行基准短跑,普通推送保留路径选择。
+- 期望:子命令清单仅在 `deploy/gen` 已落地时启用 `gen-host`;M2 缺失时报告尚未落地,M3 缺失时失败。`gen_host` 路径判定与 deploy 容器测试不受该实现状态影响。
 - 实现:`tools/xtask/tests/test_ci_paths.py::test_tool_191_host_checks_follow_code_and_config_changes`
 
 | 行 | 输入 | 期望 |

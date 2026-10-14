@@ -2,3 +2,24 @@
 ["strategies/portfolio-carry/hold"]
 p50_ns = 60
 p99_ns = 150
+
+# SDK reference-host budgets; CI smoke reports timings only.
+["strategies/portfolio-carry/tick_miss"]
+p50_ns = 15
+p99_ns = 40
+
+["strategies/portfolio-carry/tick_fire"]
+p50_ns = 300
+p99_ns = 1000
+
+["strategies/portfolio-carry/target_set"]
+p50_ns = 250
+p99_ns = 800
+
+["strategies/portfolio-carry/exec_update"]
+p50_ns = 80
+p99_ns = 250
+
+["strategies/portfolio-carry/risk_event"]
+p50_ns = 150
+p99_ns = 400

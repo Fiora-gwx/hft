@@ -102,7 +102,7 @@ status: impl
 
 ## 延迟与资源契约
 
-以下是待参考机标定的验收预算,不是本次实测性能声明;分段归 [latency-budget](../../docs/latency-budget.md)。Criterion 基准 `strategies/portfolio-carry/hold` 覆盖单 group 评估,CI smoke 只报告。
+以下是待参考机标定的验收预算,不是本次实测性能声明;分段归 [latency-budget](../../docs/latency-budget.md)。Criterion 基准 `strategies/portfolio-carry/{tick_miss,tick_fire,target_set,hold,exec_update,risk_event}` 覆盖单 group 未入场、BBO 入场、定时器目标、持有、成交完成重评估与保证金退出锁存;除 hold 外预算归 [SDK](../../crates/hft-strategy-sdk/README.md#延迟与资源契约)。每次采样恢复初态,配置、恢复和输出断言不计时;CI smoke 只报告。NoModel 无慢侧更新或 Advice,在 `benches/not-applicable.toml` 声明这两项不适用。
 
 | 入口 | p50 / p99 预算 | 内存与验证 |
 |---|---|---|
