@@ -1239,7 +1239,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - t = 1 s 那条意图只产生一条 `OrderDecision{inst S1, reject = KILLED}`;从 t = 1 s 到场景结束,`VS`、`VP` 的出环帧中无账户 `a` 的 `Place`;账户 `a` 的 `InflightBook.open_buy[(a, S1)] = 0`,`VS`、`VP` 上账户 `a` 的三个令牌桶余量与 t = 1 s 之前相同
   - 账户 `b` 的意图 `OrderDecision.reject = 0`,第一腿出环,第二腿在其成交的同一 Input 内出环
   - 每步 INV-3、INV-4、INV-5 成立
-- 实现:`crates/hft-sequencer/tests/scenarios.rs::b1_link_open_rejected_when_hedge_venue_killed`(B1.2、B1.3、B1.6 另见同文件 `b1_2_…`、`b1_3_…`、`b1_6_…`)(先以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,阈值取 B0 参数,见该文件头;W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补)
+- 实现:`crates/hft-sequencer/tests/scenarios.rs::b1_link_open_rejected_when_hedge_venue_killed`
+- 备注:B1.2、B1.3、B1.6 另见同文件 `b1_2_…`、`b1_3_…`、`b1_6_…`;实现方式:先以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,阈值取 B0 参数,见该文件头;W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -1265,7 +1266,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - 从 t = 1 s 到场景结束无 `reject = REDUCE_INVALID`、无 `MockVenue` 以 reduceOnly 为由的拒单;链接最终 `LinkUpdate{Done}`,`LinkEntry.retries = 1`
   - 全程无 `ExecDecision{action HedgeFix}`、无 `link_role = HedgeFix` 的 `OrderDecision`
   - 每步 INV-8、INV-15、INV-19 成立
-- 实现:`crates/hft-sequencer/tests/scenarios.rs::b2_open_link_retry_is_second_retry_not_reduce_only`(B2.1 见 `b2_1_…`)(先以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,阈值取 B0 参数,见该文件头;W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补)
+- 实现:`crates/hft-sequencer/tests/scenarios.rs::b2_open_link_retry_is_second_retry_not_reduce_only`
+- 备注:B2.1 见 `b2_1_…`;实现方式:先以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,阈值取 B0 参数,见该文件头;W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -1353,7 +1355,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - 成交 Input 内第二腿 `OrderDecision{link_role Second, qty 0.02, reject = HEDGE_LIMIT}`(名义约 1,200,200 > 10,000);出环帧中无 `P1` 单
   - 同一 Input 内链接 `Broken{HedgeLimit}`、`Note{OmsHedgeBroken}`(P0)、`CapSet{Broken, (a, g1)}`、`CapSet{HedgeFailure, a}`;不登记 `HedgeRetry`;场景结束前无该链接的 `SecondRetry`
   - 每步 INV-15 成立
-- 实现:`crates/hft-sequencer/tests/scenarios.rs::b6_unit_error_hedge_vetoed_by_hedge_limit`(B6.2 见 `b6_2_…`)(先以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,阈值取 B0 参数,见该文件头;W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补)
+- 实现:`crates/hft-sequencer/tests/scenarios.rs::b6_unit_error_hedge_vetoed_by_hedge_limit`
+- 备注:B6.2 见 `b6_2_…`;实现方式:先以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,阈值取 B0 参数,见该文件头;W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -1865,7 +1868,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 - 断言:
   - t = 10.5 s 那条 Input 内:第一腿意图的 `OrderDecision{reject = LINK_STALE}`(只此一位),无 OMS 槽、无出环帧,`IntentHandle` = `Rejected(LINK_STALE)`
   - 无第二腿;t = 10.5 s 起到连接恢复,`g1` LegTracker 两腿净量不变
-- 实现:`crates/hft-sequencer/tests/scenarios.rs::lk_1_unhealthy_second_leg_conn_rejects_open`(LK-1.5 见 `lk_1_5_…`)(先以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,阈值取 B0 参数,见该文件头;W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补)
+- 实现:`crates/hft-sequencer/tests/scenarios.rs::lk_1_unhealthy_second_leg_conn_rejects_open`
+- 备注:LK-1.5 见 `lk_1_5_…`;实现方式:先以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,阈值取 B0 参数,见该文件头;W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -1886,7 +1890,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 - 故障:t = 1 s `probe-taker` 发开仓
 - 种子:标准集(§2.4)
 - 断言:t = 1 s 那条 Input 内第一腿 `OrderDecision{reject = LINK_FUNDS}`,无出环帧;此后 1 s 内无该 group 的成交
-- 实现:`crates/hft-sequencer/tests/scenarios.rs::lk_2_unaffordable_second_leg_rejects_open`(LK-2.4–2.7;主例与 LK-2.1–2.3 见 `lk_2_spot_…`)(先以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,阈值取 B0 参数,见该文件头;W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补)
+- 实现:`crates/hft-sequencer/tests/scenarios.rs::lk_2_unaffordable_second_leg_rejects_open`
+- 备注:LK-2.4–2.7;主例与 LK-2.1–2.3 见 `lk_2_spot_…`;实现方式:先以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,阈值取 B0 参数,见该文件头;W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -1911,7 +1916,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - t = 0.2 s 的同一 Input 内第二腿 `P1` 卖 0.100 IOC 出环,限价 = `cap` = 59,880.05 × 0.99 向上取到 tick = 59,281.3,`capped = true`
   - `Note{OmsHedgeSlipCapped}`(P1,`v = [link_id, 60,000.0, 59,880.0, 59,281.3]`)恰好一条;无 `retries` 增加、无 HedgeRetry 登记
   - 第二腿成交后链接 `Done`
-- 实现:`crates/hft-sequencer/tests/scenarios.rs::lk_3_slip_capped_beyond_cross_gated`(先以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,阈值取 B0 参数,见该文件头;W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补)
+- 实现:`crates/hft-sequencer/tests/scenarios.rs::lk_3_slip_capped_beyond_cross_gated`
+- 备注:实现方式:先以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,阈值取 B0 参数,见该文件头;W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -2225,8 +2231,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - t = 3.0 s 的 `ConnState{Order, Up}` 同一 Input 内恰好一条 `OrderDecision{Query, slot = s1}`;其 `SendReport{Query, Written}` 之后 `query_count = 1`
   - `QueryResult` 那条 Input 内:s1 `Unknown → Filled`(cause = `QueryResult`(12));`FillOut{qty = 0.01, net_qty = 0.01, flags = 0}`;ledger `S1` 库存 0.01;同一 Input 内 `OrderDecision{New, inst = P1, side = Sell, qty = 0.01, tif = Ioc, link_role = Second}`,`oflags` 含 `RISK_REDUCING`、不含 `REDUCE_ONLY`;`Note{OmsVenueReady}` 恰好一条;`venue_ready(VS, a) = true`,`has_unknown = false`
   - 全程每步 INV-1、INV-2、INV-4、INV-7 成立
-- 实现:`crates/hft-sequencer/tests/scenarios.rs::fp_1_conn_down_no_ack_converges_by_query`(FP-1.1–1.3 见 `fp_1_1_…`、`fp_1_2_…`、`fp_1_3_…`)(先以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,阈值取 B0 参数,见该文件头;W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补)
-- 备注:连接断开期间链接截止不计(第一腿尚无已知成交,`first_fill_tsc = 0`);恢复后的续接见 BK-4
+- 实现:`crates/hft-sequencer/tests/scenarios.rs::fp_1_conn_down_no_ack_converges_by_query`
+- 备注:连接断开期间链接截止不计(第一腿尚无已知成交,`first_fill_tsc = 0`);恢复后的续接见 BK-4;FP-1.1–1.3 见 `fp_1_1_…`、`fp_1_2_…`、`fp_1_3_…`;实现方式:先以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,阈值取 B0 参数,见该文件头;W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -2253,8 +2259,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - t = 1.5 s:`rate_backoff = false`;Reduce 单放行出环(10 s 窗口剩余约 12 个令牌 ≥ 1);Open 仍 `reject = RATE`(10 s 窗口剩余 ≤ 16)
   - t = 13.0 s:Open 放行出环(两窗口剩余分别 > 16 与 > 192)
   - 门控拒绝不改变 OMS 与执行层的执行失败计数(INV-14);每步 INV-12
-- 实现:`crates/hft-sequencer/tests/scenarios.rs::fp_2_rate_limit_drains_bucket_and_backs_off`(FP-2.1–2.3 见 `fp_2_1_…`、`fp_2_2_…`、`fp_2_3_…`)(先以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,阈值取 B0 参数,见该文件头;W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补)
-- 备注:策略侧 `Throttle` 的退避镜像由 hft-strat-lib 的属性测试覆盖;本例只断言引擎侧与视图 `rate_backoff`
+- 实现:`crates/hft-sequencer/tests/scenarios.rs::fp_2_rate_limit_drains_bucket_and_backs_off`
+- 备注:策略侧 `Throttle` 的退避镜像由 hft-strat-lib 的属性测试覆盖;本例只断言引擎侧与视图 `rate_backoff`;FP-2.1–2.3 见 `fp_2_1_…`、`fp_2_2_…`、`fp_2_3_…`;实现方式:先以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,阈值取 B0 参数,见该文件头;W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
