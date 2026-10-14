@@ -17,9 +17,11 @@ def evaluate(needs: dict) -> tuple[bool, list[dict]]:
     paths = needs.get("paths", {})
     outputs = paths.get("outputs", {})
     docs_only = paths.get("result") == "success" and outputs.get("docs_only") == "true"
-    bench_known = all(k in outputs for k in ("bench_crates", "benchmarks", "toolchain"))
+    # GitHub drops job outputs whose value is the empty string, so an empty `bench_crates`
+    # arrives as a missing key; the two boolean outputs are always non-empty and must exist.
+    bench_known = all(k in outputs for k in ("benchmarks", "toolchain"))
     no_bench = (paths.get("result") == "success" and bench_known
-                and not outputs["bench_crates"] and outputs["benchmarks"] == "false"
+                and not outputs.get("bench_crates", "") and outputs["benchmarks"] == "false"
                 and outputs["toolchain"] == "false")
     rows = []
     for job in JOBS:

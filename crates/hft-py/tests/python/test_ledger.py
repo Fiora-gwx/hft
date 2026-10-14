@@ -95,7 +95,7 @@ def test_py_100_ledger_views_match_rust(j_led) -> None:  # type: ignore[no-untyp
 def test_py_114_booking_error_exposes_failing_sequence(j_led, tmp_path: Path, api: str) -> None:  # type: ignore[no-untyped-def]
     source = j_led(1).j
     reports = pl.DataFrame(hft_py.open_journal(source.path).events("OrderEvent"))
-    report = reports.filter(pl.col("cum_filled") > 0).row(0, named=True)
+    report = reports.filter((pl.col("cum_filled") > 0) & (pl.col("inst") == 101)).row(0, named=True)
     seq = report["seq"]
     altered = source.copy(tmp_path / api)
     changed = False
@@ -104,8 +104,11 @@ def test_py_114_booking_error_exposes_failing_sequence(j_led, tmp_path: Path, ap
         for record in jfile.records(raw):
             if record.seq != seq:
                 continue
-            # Preserve a valid event and CRC but contradict its registered order's instrument.
-            struct.pack_into("<I", raw, record.off + 24 + 12, 202 if report["inst"] != 202 else 102)
+            # Preserve a valid event and CRC but give the spot fill no usable price (px and
+            # avg_px zero): the cold booking refuses it. A different nonzero inst is no longer
+            # an error off strict-cash venues (the report is ignored, as the OMS does).
+            struct.pack_into("<q", raw, record.off + 24 + 16, 0)
+            struct.pack_into("<q", raw, record.off + 24 + 88, 0)
             if record.crc:
                 jfile.set_record_crc(raw, record)
             segment.write_bytes(raw)
@@ -115,7 +118,7 @@ def test_py_114_booking_error_exposes_failing_sequence(j_led, tmp_path: Path, ap
             break
     assert changed
     journal = hft_py.open_journal(altered.path)
-    with pytest.raises(hft_py.JournalError, match="ledger settlement: Identity") as error:
+    with pytest.raises(hft_py.JournalError, match=r"ledger settlement: Settlement\(InvalidPrice\)") as error:
         if api == "ledger":
             hft_py.ledger(journal, account="bn-1")
         else:
