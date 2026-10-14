@@ -98,7 +98,8 @@ def hot_crates(files: list[str]) -> list[str]:
             rule = next((pkg for pattern, pkg in rules.items()
                          if "*" in pattern and fnmatchcase(path, pattern)), {})
         manifest = Path(path) / "Cargo.toml"
-        if rule.get("tier") == "hot" and manifest.is_file():
+        # Hot packages without benches/ (e.g. apps/hft-core) have nothing for bench-gate to run.
+        if rule.get("tier") == "hot" and manifest.is_file() and (Path(path) / "benches").is_dir():
             with manifest.open("rb") as f:
                 out.add(tomllib.load(f)["package"]["name"])
     return sorted(out)
