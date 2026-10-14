@@ -420,6 +420,10 @@ impl Oms {
         r.qty = q;
         r.basis = basis;
         r.hedge_cap_qty = Qty(basis.0.saturating_add(lot));
+        #[cfg(feature = "planted")]
+        if crate::planted::on(crate::planted::RETRY_REDUCE_ONLY) {
+            r.reduce_only = true;
+        }
         self.push_hedge(r, out);
         self.set_hedging(i, seq, out);
     }

@@ -767,6 +767,7 @@ pub struct PxBand { pub max_px_dev: Rate, pub ioc_max_cross: Rate, pub rr_max_cr
 
 <details><summary>给实现者</summary>
 
+- **植入缺陷(feature `planted`,只在测试中)**:`src/planted.rs` 按线程打开的开关:检查链 #7 不检查持仓上限(`risk-no-exposure-limit`)、保证金分档只看比率(`margin-ratio-only`)。只由 hft-testkit 的 `planted` feature 打开,生产清单、`seq` 与 `dst-bin` 都不含它([TK-178](../hft-testkit/TESTS.md#tk-178-植入缺陷不进入任何生产构建));真实引擎 DST 发现各缺陷的验收归 [TK-179](../hft-testkit/TESTS.md#tk-179-真实引擎的植入缺陷在有界种子内被不变量发现) 与 TK-053.21–TK-053.23。
 - 开放问题:对账差异的"逐项确认"只经 `AdoptExchange`、`SetBalanceBaseline` 与 `AUTO_EXTERNAL` 自动入账表达,不设单独的确认命令;若 control-plane 增加,`Disposition` 追加一个变体即可。
 - **待核实**:各所限速数值与限速错误码分类;各所保证金率换算(统一口径的分子分母)在 `venue-*` 核实,方法:测试网/模拟盘账户下单前后对比交易所 UI 的保证金率、强平价与 `MarginReport`;各所 `liq_px` 在单向/双向持仓与全仓下的含义(Bitget 单向持仓待核实,方法同上);各所标记价推送周期(决定 `mark_stale_ms` 的下限),方法:测试网连续 24 h 统计 `MarkPrice` 间隔分布;各所账户配置查询是否列出全部永续 inst 的杠杆(决定"杠杆未知即禁开"是否会误伤),方法:测试网账户对未持仓、未设置过杠杆的 inst 查询一次,看是否返回默认杠杆。
 - 实现顺序:`classify` → `mode`(table、caps、effective、kill 投影、gates、对冲闸门子集、`gate_changes`、recon_gate)→ 检查链(含链接腿、名义口径、在途口径与冒烟单)→ 令牌桶预留 → 保证金分档(强平距离、比率交叉校验、标记价断流、重启后 L3 确认、杠杆表与杠杆上限)→ 日亏/对账/时钟/Storage → 参数、账户作用域与 `ExecRiskMismatch` → `view_for` → 快照。

@@ -611,6 +611,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 
 <details><summary>给实现者</summary>
 
+- **植入缺陷(feature `planted`,只在测试中)**:`src/planted.rs` 按线程打开的开关:晚到的纯费用回报不入余额(`ignore-fee`)。只由 hft-testkit 的 `planted` feature 打开,生产清单、`seq` 与 `dst-bin` 都不含它([TK-178](../hft-testkit/TESTS.md#tk-178-植入缺陷不进入任何生产构建));真实引擎 DST 发现各缺陷的验收归 [TK-179](../hft-testkit/TESTS.md#tk-179-真实引擎的植入缺陷在有界种子内被不变量发现) 与 TK-053.21–TK-053.23。
 - **待核实**:各所现货成交回报是否总带手续费与手续费资产(不带的所 `fee_asset = ASSET_NONE`,之后必须有 `FeeOnly`),方法:测试网/模拟盘账户逐所下单比对回报与成交历史;各所余额推送是否包含 locked,方法同上;`BalanceOnlyPush` 所的资金费推送在同一结算时刻是一笔合计还是每 inst 一笔(决定推送去重键是否足够),方法:测试网持仓两个以上 inst 跨过一次结算,抓用户流原文;各所资金费推送与流水时刻相对结算边界的偏差,方法同上(决定按结算边界归一化是否足够);三所私有流断开期间发生的强平/ADL 在重连后是否补推(决定 `auto_held` 是否会长期残留),方法:测试网断流演练。
 - 实现顺序:position + 净量(含 `NetAdjust`)→ cash/库存/余额初始化/手续费扣桶 → rates → equity → funding(含结算周期表与 `funding_grid`、推送去重、已入钱包额、无历史挂起)→ margin(含强平距离、最旧标记价、`restore_marks`)→ external(去重环)/adjust(采纳、核销)/baseline → rounds → 快照 → hft-py 绑定;chain 两本账随 feature 最后。
 </details>

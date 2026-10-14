@@ -224,6 +224,8 @@ pub fn with_model() -> Fixture {
 }
 
 /// Full-duration, path-bearing Model files. Publication as frozen T1/T3 fixtures is separate.
+/// Only the `heavy` tests use them (feature `long-fixtures`).
+#[cfg_attr(not(feature = "long-fixtures"), allow(dead_code))]
 pub fn path_model(hours: u64) -> Fixture {
     assert!(matches!(hours, 1 | 3));
     let f = create_with_restart::<hft_testkit::strategies::ReplayStrategies>(

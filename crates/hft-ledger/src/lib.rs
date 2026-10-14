@@ -31,6 +31,8 @@ mod journal_reconcile;
 mod ledger;
 mod margin;
 pub mod notes;
+#[cfg(feature = "planted")]
+pub mod planted;
 mod position;
 mod rates;
 mod rounds;

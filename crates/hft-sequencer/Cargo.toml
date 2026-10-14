@@ -13,6 +13,9 @@ autotests = false
 workspace = true
 
 [features]
+# Planted defects for the DST self-test (src/planted.rs): only hft-testkit's `planted` feature
+# enables this; never in a production build (crates/hft-testkit TESTS.md TK-178).
+planted = ["hft-oms/planted", "hft-risk/planted", "hft-exec/planted", "hft-ledger/planted"]
 # hft-journal's writer (`JournalWriter` as `JournalSink`): only apps/hft-core and apps/replayer enable it.
 live = ["hft-journal/writer"]
 # Offline adapter only; no file reads are added to the live sequencer path.

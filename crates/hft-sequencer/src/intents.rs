@@ -177,6 +177,16 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
         };
         let lim = e.risk.hedge_px_limits(req.account, req.venue, req.inst);
         let bbo = e.market.bbo_view(&e.books, req.inst);
+        // Planted: the quote's last change stands in for the connection's liveness evidence.
+        #[cfg(feature = "planted")]
+        let bbo = if crate::planted::on(crate::planted::HEDGE_PX_BOOK_AGE) {
+            hft_strategy_sdk::BboView {
+                conn_live_tsc: bbo.rx_tsc,
+                ..bbo
+            }
+        } else {
+            bbo
+        };
         let tick = e.rd.inst(req.inst).tick;
         match price_hedge(&req, &plan, &bbo, e.now.tsc, &lim, tick, e.now.tsc_per_ms) {
             Ok(hp) => {

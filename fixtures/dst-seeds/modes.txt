@@ -1,4 +1,4 @@
 # DST failure regressions of suite `modes` (fixtures/README.md): seed, first failure date, cause.
 0x00000000000000a7 2026-10-10 Drain 完成的事件未 publish,重启丢成交(SEQ-370;docs/changes.md 2026-10-10)
 0x0000000000000094 2026-10-10 CancelReject 先带来数量,随后 Fill 的手续费被当重复丢弃(OMS-460)
-0x7dfee4207b81bfbd 2026-10-12 成交生成与交付乱序导致永续逐笔取整差额,INV-16 严格失败保留(TK-123;待修复)
+0x7dfee4207b81bfbd 2026-10-12 成交生成与交付乱序导致永续逐笔取整差额;已修复:永续按实际现金结算(perp_cash,TK-127 默认世界逐单位一致),TK-123 显式关闭能力保留旧记录反例

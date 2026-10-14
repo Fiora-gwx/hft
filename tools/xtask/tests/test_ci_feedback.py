@@ -155,7 +155,7 @@ class FeedbackPolicyTests(unittest.TestCase):
         docs["rust"]["result"] = "failure"
         self.assertFalse(summary.evaluate(docs)[0])
         fast_only = copy.deepcopy(needs)
-        for job in ["rust", "arch-check", "benchmarks", "ops-py", "replay-dst"]:
+        for job in ["rust", "arch-check", "benchmarks", "ops-py", "replay-dst", "heavy-tests"]:
             fast_only[job]["result"] = "skipped"
         self.assertFalse(summary.evaluate(fast_only)[0])
 

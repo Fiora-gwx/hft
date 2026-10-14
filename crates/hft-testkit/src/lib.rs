@@ -22,6 +22,7 @@ pub mod seed;
 #[cfg(feature = "seq")]
 pub mod seq_rig;
 pub mod strategies;
+pub mod tmp;
 
 pub use alloc::{AllocScope, CountingAlloc};
 pub use bench::{BenchMode, BenchOutput, HistBench};

@@ -1,0 +1,60 @@
+name: Cash settlement schema audit
+on:
+  push:
+    branches: [codex/m2-cash-audit]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Free runner disk
+        run: bash .github/scripts/free-disk.sh
+      - name: Install pinned Rust toolchain
+        run: bash .github/scripts/install-rust.sh
+      - name: Prepare the standard workspace metadata
+        run: |
+          mkdir -p audit
+          cp Cargo.lock audit/before.lock
+          cargo xtask --help >audit/xtask.txt
+          cp Cargo.lock audit/resolved.lock
+          git diff -- Cargo.lock >audit/lock.patch
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: x86-ci-v2
+          save-if: false
+      - name: Compare all conformance seeds with the pre-cash snapshot representation
+        run: |
+          mkdir -p audit crates/hft-testkit/examples
+          cp fixtures/dst/hashtrail.toml audit/baseline.toml
+          cp .github/scripts/cash-schema-audit.rs crates/hft-testkit/examples/cash_schema_audit.rs
+          cargo run --locked --profile ci -p hft-testkit --features seq --example cash_schema_audit >audit/trails.tsv
+          python3 - <<'PY'
+          import json, pathlib, tomllib
+          root = pathlib.Path('audit')
+          baseline = tomllib.loads((root / 'baseline.toml').read_text())['seed']
+          rows = [line.split('\t') for line in (root / 'trails.tsv').read_text().splitlines()]
+          assert len(rows) == len(baseline) == 50
+          results = []
+          for got, want in zip(rows, baseline):
+              seed, full, old, points, checks, snapshots, slots, tombs = got
+              assert int(seed) == int(want['seed'], 0)
+              assert want['suite'] == 'core' and want['steps'] == 2000
+              assert old == want['trail'], (seed, old, want['trail'])
+              assert full != old and int(points) > 0 and int(checks) > 0
+              assert int(snapshots) >= int(points)
+              results.append(dict(seed=seed, full=full, old=old, points=int(points), snapshot_checks=int(checks), snapshots=int(snapshots), slots=int(slots), tombs=int(tombs)))
+          assert sum(r['slots'] for r in results) > 0 and sum(r['tombs'] for r in results) > 0
+          (root / 'result.json').write_text(json.dumps(dict(baseline='d05efd0', head='${{ github.sha }}', rows=results), indent=2))
+          print('50/50: projecting only cash snapshot additions reproduces old digests; all real-state invariants stayed enabled')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cash-schema-audit
+          path: audit/
+          retention-days: 7

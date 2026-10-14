@@ -3,8 +3,8 @@ use std::process::Command;
 
 #[test]
 fn tk_146_cli_foreign_case_keeps_settlement_evidence_on_run_and_repro() {
-    let dir = std::env::temp_dir().join(format!("hft-dst-foreign-cli-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = hft_testkit::tmp::TmpDir::in_temp("hft-dst-foreign-cli").unwrap();
+    let dir = tmp.path().to_path_buf();
     let call = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_hft-dst"))
             .args(args)
@@ -75,13 +75,12 @@ fn tk_146_cli_foreign_case_keeps_settlement_evidence_on_run_and_repro() {
         body.contains(&format!("\"runs\":[{single}]")),
         "run/repro evidence differs"
     );
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
 fn tk_143_cli_case_selection_and_repro_are_not_baseline_runs() {
-    let dir = std::env::temp_dir().join(format!("hft-dst-cli-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = hft_testkit::tmp::TmpDir::in_temp("hft-dst-cli").unwrap();
+    let dir = tmp.path().to_path_buf();
     let bin = env!("CARGO_BIN_EXE_hft-dst");
     let call = |args: &[&str]| Command::new(bin).args(args).current_dir(&dir).output().unwrap();
     let list = call(&["list"]);
@@ -167,5 +166,50 @@ fn tk_143_cli_case_selection_and_repro_are_not_baseline_runs() {
         body.contains(&format!("\"runs\":[{single}]")),
         "run/repro evidence differs"
     );
-    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// TK-180: `hft-dst run` reports the items each checker compared, summed over its seeds.
+#[test]
+fn tk_180_cli_reports_compared_items_per_invariant() {
+    use hft_testkit::dst::invariants::CHECKERS;
+    use hft_testkit::scenarios::{DstEngine, suites};
+    let tmp = hft_testkit::tmp::TmpDir::in_temp("hft-dst-compared").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_hft-dst"))
+        .args([
+            "run",
+            "--seeds",
+            "3..4",
+            "--suite",
+            "core",
+            "--steps",
+            "300",
+            "--out",
+            "r.json",
+            "--crash-dir",
+            "c",
+        ])
+        .current_dir(tmp.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let body = std::fs::read_to_string(tmp.path().join("r.json")).unwrap();
+    let suite = suites().into_iter().find(|s| s.name == "core").unwrap();
+    let mut want = [0u64; 32];
+    for seed in 3..=4 {
+        let mut c = suite.config(seed);
+        c.steps = 300;
+        let r = hft_testkit::dst::run_record::<DstEngine>(&c);
+        for (w, n) in want.iter_mut().zip(r.compared) {
+            *w += n;
+        }
+    }
+    let fields: Vec<String> = CHECKERS
+        .iter()
+        .map(|k| format!("\"{}\":{}", k.id.code(), want[usize::from(k.id.0)]))
+        .collect();
+    assert!(
+        body.contains(&format!("\"compared\":{{{}}}", fields.join(","))),
+        "TK-180: {body}"
+    );
+    assert!(want[16] > 0 && want[1] > 0, "TK-180: the sample compared nothing");
 }

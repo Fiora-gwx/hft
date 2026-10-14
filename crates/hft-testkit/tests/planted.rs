@@ -204,5 +204,8 @@ fn tk_053_planted_defects_found() {
             None => misses.push(format!("{row} {planted}: not found within MAX_SEEDS seeds")),
         }
     }
+    // TK-053.21–.23 run on the real engine with its planted defects (feature `planted`).
+    #[cfg(feature = "planted")]
+    misses.extend(crate::planted_seq::tk_053_real_rows());
     assert!(misses.is_empty(), "{misses:#?}");
 }

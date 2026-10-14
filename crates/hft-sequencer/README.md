@@ -927,6 +927,7 @@ advisor 的定时投递、重启注记去重、落后量、两种环容量的独
 
 <details><summary>给实现者</summary>
 
+- **植入缺陷(feature `planted`,只在测试中)**:`src/planted.rs` 按线程打开的开关:对冲定价以盘口最后变化时刻代替连接活性(`hedge-px-book-age`);`planted::DEFECTS` 为全部缺陷的名字表,`planted::set`/`restore` 按名字切换本线程的各 crate 开关。只由 hft-testkit 的 `planted` feature 打开,生产清单、`seq` 与 `dst-bin` 都不含它([TK-178](../hft-testkit/TESTS.md#tk-178-植入缺陷不进入任何生产构建));真实引擎 DST 发现各缺陷的验收归 [TK-179](../hft-testkit/TESTS.md#tk-179-真实引擎的植入缺陷在有界种子内被不变量发现) 与 TK-053.21–TK-053.23。
 - **待核实**:单条交易所深度增量消息的档数分布(决定 `bbo_wait` 的实际上界),方法:用现有采集的 raw 数据统计各所 `L2Batch` 档数的 p99/max(M3 前);满容量关键帧的字节数与一次写完的耗时,方法:`seq/snapshot_keyframe` 在参考机上按满容量配置测量;关键帧与引导块的 2 MiB 顺序写是否冲刷本核 L2、改用非临时存储(STNP)能否消除:待实测(方法:M3 末探针测关键帧后 1 ms 内 `decide` 的 p99,普通存储与 STNP 两种写法 A/B;写入路径在 hft-journal 的 append);环头检查的每环成本,方法:`seq/head_check` 在参考机上按 R = 13、3 个活跃生产者测量。
 - 实现顺序:`RecoverDriver` + `EVENT_END` 截断 → 引擎时间(`EngineClock`,乘数-移位换算与 `ClockRange`)→ `LiveDriver` 取环顺序、让位、定时器中途检查、环境决定器 → 连接活性(槽、成员位图、按值投影)→ 实例表与 `StrategySet` 胶水 → 意图管线 → 定时器 → 快照(各组件写出顺序与哈希回填)→ 扇出 → 执行层胶水 → 资金费合成 → 对账报告(含 `AUTO_EXTERNAL`)→ 合并 → Drain → advisor(镜像 + Model + 分块检查点)→ 毒丸隔离 → `VerifyDriver`(离线)→ `seq/l2burst` 单进程基准(M2)。
 </details>

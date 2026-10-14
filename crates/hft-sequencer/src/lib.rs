@@ -37,6 +37,8 @@ mod mode_glue;
 pub mod notify;
 pub mod params;
 pub mod parsed;
+#[cfg(feature = "planted")]
+pub mod planted;
 mod process;
 mod recover;
 pub mod snapshot;

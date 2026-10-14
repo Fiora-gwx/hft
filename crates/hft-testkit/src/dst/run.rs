@@ -61,6 +61,10 @@ pub struct RunRecord {
     pub cancel_filled: Vec<CancelFilledReport>,
     /// Final exchange-side view, independently of the engine observations.
     pub truth: Vec<TruthRow>,
+    /// Non-vacuity: items each invariant checker compared, index n = `I<n>` (TK-176). INV-6
+    /// includes the run's snapshot checks and end-of-run journal comparisons, INV-9 the hash-trail
+    /// points and Outputs an in-process rerun compared.
+    pub compared: [u64; 32],
 }
 
 impl RunRecord {
@@ -91,7 +95,12 @@ impl RunRecord {
             late_recycle: Vec::new(),
             cancel_filled: Vec::new(),
             truth: Vec::new(),
+            compared: [0; 32],
         }
+    }
+    /// Items `I<n>` compared in this run (see [`RunRecord::compared`]).
+    pub fn compared_of(&self, i: InvId) -> u64 {
+        self.compared.get(usize::from(i.0)).copied().unwrap_or(0)
     }
     /// Output records (`role = Output` by kind) of the journal: the intent stream compared by INV-9.
     pub fn outputs(&self) -> Vec<&JRec> {
@@ -136,6 +145,8 @@ pub fn run_record<E: Sut>(cfg: &DstConfig) -> RunRecord {
         c2.rerun = RerunPolicy::Never;
         let r2 = run_once::<E>(&c2);
         let same_out = rec.outputs() == r2.outputs();
+        rec.compared[usize::from(InvId::I9.0)] +=
+            (rec.trail.points.len().max(r2.trail.points.len()) + rec.outputs().len()) as u64;
         if r2.trail != rec.trail || !same_out {
             let step = rec.steps_run.saturating_sub(1);
             rec.outcome = DstOutcome::Fail(Box::new(DstFailure {
@@ -196,6 +207,23 @@ fn run_once<E: Sut>(cfg: &DstConfig) -> RunRecord {
         world: &cfg.world,
         planted: &cfg.planted,
         tsc_hz: cfg.tsc_hz,
+    };
+    // The planted defects stay switched on until this run (rebuilds and verifiers included) ends.
+    let _plant = match E::plant(&cfg.planted) {
+        Ok(p) => p,
+        Err(e) => {
+            rec.outcome = DstOutcome::Fail(Box::new(DstFailure {
+                seed: cfg.seed,
+                suite: cfg.suite,
+                step: 0,
+                invariant: FailKind::Boot,
+                message: e.0,
+                trace: Vec::new(),
+                fault_schedule: plan,
+                journal_tail: Vec::new(),
+            }));
+            return rec;
+        }
     };
     let sut = match E::boot(&boot) {
         Ok(s) => s,
@@ -351,6 +379,14 @@ impl<E: Sut> Loop<'_, E> {
                                     let (bid, ask) = ((b.bid_px.0, b.bid_qty.0), (b.ask_px.0, b.ask_qty.0));
                                     self.venues[v].m.on_bbo(b.h.inst, bid, ask, now);
                                     self.sims[v].m.on_bbo(b.h.inst, bid, ask, now);
+                                }
+                                // So do recorded mark prices (margin and liquidation truth).
+                                if let Some(m) = i.read::<hft_event::MarkPrice>()
+                                    && let Some(v) = venue_ix(&self.venues, m.h.venue)
+                                {
+                                    self.venues[v].m.on_mark(m.h.inst, m.px.0, now);
+                                    self.sims[v].m.on_mark(m.h.inst, m.px.0, now);
+                                    self.wake_venue(v);
                                 }
                                 self.world.schedule(now, Ev::Deliver(i));
                             }
@@ -904,6 +940,14 @@ impl<E: Sut> Loop<'_, E> {
             }
         }
         self.rec.journal = self.sut.journal().to_vec();
+        self.rec.compared = self.inv.compared;
+        if self.cfg.invariants.contains(InvId::I6) {
+            let i6 = &mut self.rec.compared[usize::from(InvId::I6.0)];
+            *i6 += self.rec.snapshot_checks + self.rec.ledger_checks.len() as u64;
+            if let Some(j) = self.rec.journal_verification {
+                *i6 += j.inputs + j.outputs + j.snapshots;
+            }
+        }
         #[cfg(feature = "seq")]
         if self.cfg.world.physical_journal {
             match self.sut.physical_journal() {

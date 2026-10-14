@@ -428,6 +428,10 @@ impl Exec {
         c.view.origin = origin.unwrap_or(TargetOrigin::Strategy);
         c.view.state = state;
         c.view.set_seq = r.set_seq;
+        #[cfg(feature = "planted")]
+        if crate::planted::on(crate::planted::SNAPSHOT_FIELD) {
+            c.view.set_seq = 0;
+        }
         c.view.set_tsc = r.set_tsc;
         c.view.last_slice_tsc = r.last_slice_tsc;
         c.view.n_slices = r.n_slices;

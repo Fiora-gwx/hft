@@ -264,8 +264,14 @@ fn result_json(
     elapsed: u64,
     names: &[&str],
     evidence: &[String],
+    compared: &[u64; 32],
 ) -> String {
     let suites: Vec<String> = names.iter().map(|s| format!("\"{s}\"")).collect();
+    // Non-vacuity (TK-176): items each checker compared over all seeds of this run.
+    let compared: Vec<String> = hft_testkit::dst::invariants::CHECKERS
+        .iter()
+        .map(|c| format!("\"{}\":{}", c.id.code(), compared[usize::from(c.id.0)]))
+        .collect();
     let viol: Vec<String> = v
         .iter()
         .map(|x| {
@@ -276,7 +282,7 @@ fn result_json(
         })
         .collect();
     format!(
-        "{{\"bin_version\":\"{}\",\"git_sha\":\"{}\",\"profile\":\"{}\",\"suites\":[{}],\"case\":{},\"seed_from\":{from},\"seed_to_done\":{},\"seeds_run\":{n},\"steps\":{},\"violations\":[{}],\"elapsed_s\":{elapsed},\"runs\":[{}]}}\n",
+        "{{\"bin_version\":\"{}\",\"git_sha\":\"{}\",\"profile\":\"{}\",\"suites\":[{}],\"case\":{},\"seed_from\":{from},\"seed_to_done\":{},\"seeds_run\":{n},\"steps\":{},\"violations\":[{}],\"compared\":{{{}}},\"elapsed_s\":{elapsed},\"runs\":[{}]}}\n",
         env!("CARGO_PKG_VERSION"),
         option_env!("HFT_GIT_SHA").unwrap_or("unknown"),
         if cfg!(debug_assertions) { "ci" } else { "release" },
@@ -285,6 +291,7 @@ fn result_json(
         done.map_or("null".to_string(), |d| d.to_string()),
         a.steps,
         viol.join(","),
+        compared.join(","),
         evidence.join(",")
     )
 }
@@ -341,6 +348,7 @@ fn cmd_run(a: &Args) -> Result<ExitCode, String> {
     let mut done = None;
     let mut n = 0u64;
     let mut evidence = Vec::new();
+    let mut compared = [0u64; 32];
     let inflight = crash.join(".inflight.json");
     for seed in from..=to {
         if a.deadline_s.is_some_and(|d| start.elapsed().as_secs() >= d) {
@@ -355,10 +363,13 @@ fn cmd_run(a: &Args) -> Result<ExitCode, String> {
         );
         atomic_write(&inflight, &marker).map_err(|e| format!("inflight marker: {e}"))?;
         let outcome = std::panic::catch_unwind(|| execute(&cfg, case));
-        if case.is_some()
-            && let Ok(rec) = &outcome
-        {
-            evidence.push(evidence_json(rec, case));
+        if let Ok(rec) = &outcome {
+            for (t, n) in compared.iter_mut().zip(rec.compared) {
+                *t = t.saturating_add(n);
+            }
+            if case.is_some() {
+                evidence.push(evidence_json(rec, case));
+            }
         }
         match outcome {
             Ok(RunRecord {
@@ -385,11 +396,31 @@ fn cmd_run(a: &Args) -> Result<ExitCode, String> {
         n += 1;
         done = Some(seed);
         if n.is_multiple_of(a.checkpoint) {
-            let j = result_json(a, from, done, n, &v, start.elapsed().as_secs(), &names, &evidence);
+            let j = result_json(
+                a,
+                from,
+                done,
+                n,
+                &v,
+                start.elapsed().as_secs(),
+                &names,
+                &evidence,
+                &compared,
+            );
             atomic_write(&out, &j).map_err(|e| format!("out: {e}"))?;
         }
     }
-    let j = result_json(a, from, done, n, &v, start.elapsed().as_secs(), &names, &evidence);
+    let j = result_json(
+        a,
+        from,
+        done,
+        n,
+        &v,
+        start.elapsed().as_secs(),
+        &names,
+        &evidence,
+        &compared,
+    );
     atomic_write(&out, &j).map_err(|e| format!("out: {e}"))?;
     let _ = std::fs::remove_file(&inflight);
     Ok(if v.is_empty() {

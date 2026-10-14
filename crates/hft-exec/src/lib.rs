@@ -33,6 +33,8 @@ mod external;
 mod fix;
 mod force;
 mod out;
+#[cfg(feature = "planted")]
+pub mod planted;
 mod snapshot;
 mod targets;
 pub mod types;
@@ -274,6 +276,12 @@ impl Exec {
 
     pub(crate) fn params(&self, k: usize) -> ExecParams {
         self.accts.get(k).map_or_else(ExecParams::default, |a| a.params)
+    }
+
+    /// The parameters account `a` currently runs with (read-only DST observation).
+    #[cfg(feature = "testkit")]
+    pub fn account_params(&self, a: AccountId) -> Option<ExecParams> {
+        self.acct_ix(a).map(|k| self.params(k))
     }
 
     pub(crate) fn inst(&self, i: InstId) -> &InstHot {

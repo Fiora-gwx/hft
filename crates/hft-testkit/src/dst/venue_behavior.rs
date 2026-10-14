@@ -115,6 +115,8 @@ pub const EXTERNAL_ORDER_ID_BASE: u64 = u64::MAX - EXTERNAL_HISTORY_CAP as u64;
 pub trait Matcher: Sized {
     fn new(world: &WorldSpec, venue: VenueId, seed: u64) -> Self;
     fn on_bbo(&mut self, inst: InstId, bid: (i64, i64), ask: (i64, i64), now_ns: u64);
+    /// A recorded mark price of `inst` (margin, liquidation); matchers without margin ignore it.
+    fn on_mark(&mut self, _inst: InstId, _px: i64, _now_ns: u64) {}
     fn on_command(&mut self, cmd: &GwCmd, now_ns: u64);
     /// Reports due at or before `now_ns`, in due order.
     fn drain_due(&mut self, now_ns: u64, out: &mut Vec<VenueOut>);

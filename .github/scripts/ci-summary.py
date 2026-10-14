@@ -8,8 +8,9 @@ from pathlib import Path
 import sys
 
 
-JOBS = ("paths", "docs", "decoupling-gate", "related-tests", "rust", "arch-check", "benchmarks", "ops-py", "replay-dst")
-CODE_JOBS = {"related-tests", "rust", "arch-check", "benchmarks", "ops-py", "replay-dst"}
+JOBS = ("paths", "docs", "decoupling-gate", "related-tests", "rust", "arch-check", "benchmarks", "ops-py",
+        "replay-dst", "heavy-tests")
+CODE_JOBS = {"related-tests", "rust", "arch-check", "benchmarks", "ops-py", "replay-dst", "heavy-tests"}
 
 
 def evaluate(needs: dict) -> tuple[bool, list[dict]]:

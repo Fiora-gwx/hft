@@ -180,6 +180,10 @@ impl Exec {
                 if now.tsc.0 < c.auto_fix.due_tsc.0 {
                     return;
                 }
+                #[cfg(feature = "planted")]
+                if crate::planted::on(crate::planted::BROKEN_NEVER_AUTOFIX) {
+                    return;
+                }
                 if self.wait_reason(cix, v, now) != 0 {
                     return;
                 }
@@ -195,6 +199,15 @@ impl Exec {
             AutoFixPhase::Running => {
                 let _ = p;
                 self.autofix_slice(cix, v, now, out);
+            }
+            #[cfg(feature = "planted")]
+            AutoFixPhase::Done | AutoFixPhase::Failed
+                if crate::planted::on(crate::planted::BROKEN_REPEAT_AUTOFIX) =>
+            {
+                // The due time already passed: the next pass starts another auto fix.
+                if let Some(cm) = self.cells.get_mut(cix) {
+                    cm.auto_fix.phase = AutoFixPhase::Primed as u8;
+                }
             }
             _ => {}
         }

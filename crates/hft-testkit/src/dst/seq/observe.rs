@@ -476,11 +476,31 @@ pub fn fill_engine(e: &Engine, w: &WorldSpec, audit: &History, carry: &Carry, o:
             min_qty: i128::from(i.min_qty),
         });
     }
+    // The limits the engine actually runs with (its current RiskParams and the execution layer's
+    // per-account parameters, both changed by SetRisk / SetParams), not the world configuration:
+    // the first account's row, which the checkers compare against.
+    let first = w.accounts.first().map_or(AccountId(0), |a| a.id);
+    let lim = e
+        .risk
+        .params()
+        .accounts
+        .as_slice()
+        .iter()
+        .find(|l| l.account == first);
+    if lim.is_none() {
+        o.observation_error
+            .get_or_insert_with(|| format!("no risk limits of account {} in the engine", first.0));
+    }
+    let xp = e.exec.account_params(first);
+    if xp.is_none() {
+        o.observation_error
+            .get_or_insert_with(|| format!("no execution parameters of account {} in the engine", first.0));
+    }
     o.risk = RiskRow {
-        max_hedge_notional: w.risk.max_hedge_notional,
-        max_reduce_notional: w.risk.max_reduce_notional,
-        force_step_bp: w.risk.force_step_bp,
-        broken_auto_fix_ms: w.risk.broken_auto_fix_ms,
+        max_hedge_notional: lim.map_or(0, |l| i128::from(l.max_hedge_notional.0)),
+        max_reduce_notional: lim.map_or(0, |l| i128::from(l.max_reduce_notional.0)),
+        force_step_bp: lim.map_or(0, |l| l.margin.force_step.0 / 100_000),
+        broken_auto_fix_ms: xp.map_or(0, |p| i64::from(p.broken_auto_fix_ms)),
         reuse_quarantine_ms: i64::from(e.setup.oms.reuse_quarantine_ms),
         sweep_batch: u32::from(e.setup.oms.sweep_batch),
     };

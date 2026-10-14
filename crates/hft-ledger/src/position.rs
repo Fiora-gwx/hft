@@ -521,6 +521,10 @@ impl Ledger {
             },
             net_adjust: None,
         };
+        #[cfg(feature = "planted")]
+        if crate::planted::on(crate::planted::IGNORE_FEE) {
+            return zero;
+        }
         let Some(s) = self.inst(f.inst).copied() else {
             return zero;
         };

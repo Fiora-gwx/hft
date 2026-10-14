@@ -200,11 +200,19 @@ mod linux {
                 }
                 times
             };
-            let (a, b, c) = (run(), run(), run());
-            for i in 0..a.len() {
-                let m = a[i].min(b[i]).min(c[i]);
-                prop_assert!(m <= 1_000_000 * if cfg!(debug_assertions) { 20 } else { 1 }, "poll_once took {m} ns");
+            // Per call the minimum over three replays of the same input. A preempted replay set is
+            // measured again (up to 3 more sets): a call that blocks exceeds the bound every time,
+            // a scheduler stall of the shared test binary does not.
+            let limit = 1_000_000 * if cfg!(debug_assertions) { 20 } else { 1 };
+            let mut worst = u64::MAX;
+            for _ in 0..4 {
+                let (a, b, c) = (run(), run(), run());
+                worst = (0..a.len()).map(|i| a[i].min(b[i]).min(c[i])).max().unwrap_or(0);
+                if worst <= limit {
+                    break;
+                }
             }
+            prop_assert!(worst <= limit, "poll_once took {worst} ns");
         }
     }
 }

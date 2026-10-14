@@ -883,7 +883,7 @@ const _: () = assert!(size_of::<ExecRowHdr>() == 8 && size_of::<LegRef>() == 32 
 
 ## 测试与验收
 
-默认关闭的 `testkit` feature 复制强制目标的仓位、前一目标、原始缩减比例与实际保存的目标,以及自动平仓计时触发与开始门控的只读诊断;三类缓冲各为 `max(8, cell_count × 8)`,只在构造时分配,溢出显式失败,不进快照与生产构建。跨组件验收归 [TK-109](../hft-testkit/TESTS.md#tk-109-真实保证金强制目标独立重算)。
+默认关闭的 `testkit` feature 复制强制目标的仓位、前一目标、原始缩减比例与实际保存的目标,以及自动平仓计时触发与开始门控的只读诊断;三类缓冲各为 `max(8, cell_count × 8)`,只在构造时分配,溢出显式失败,不进快照与生产构建。跨组件验收归 [TK-109](../hft-testkit/TESTS.md#tk-109-真实保证金强制目标独立重算)。同一 feature 下 `Exec::account_params(account)` 只读返回该账户当前的执行参数,DST 的 `RiskRow` 由此观察 `broken_auto_fix_ms`([TK-176](../hft-testkit/TESTS.md#tk-176-每个检查器报告实际比较的条目数))。
 
 用例与验收见 [TESTS.md](TESTS.md)。
 
@@ -926,6 +926,7 @@ const _: () = assert!(size_of::<ExecRowHdr>() == 8 && size_of::<LegRef>() == 32 
 
 <details><summary>给实现者</summary>
 
+- **植入缺陷(feature `planted`,只在测试中)**:`src/planted.rs` 按线程打开的开关:恢复丢失 `set_seq`(`snapshot-field`)、Broken 从不自动平仓或终态后再次开始(`broken-never-autofix`、`broken-repeat-autofix`)。只由 hft-testkit 的 `planted` feature 打开,生产清单、`seq` 与 `dst-bin` 都不含它([TK-178](../hft-testkit/TESTS.md#tk-178-植入缺陷不进入任何生产构建));真实引擎 DST 发现各缺陷的验收归 [TK-179](../hft-testkit/TESTS.md#tk-179-真实引擎的植入缺陷在有界种子内被不变量发现) 与 TK-053.21–TK-053.23。
 - **待核实**(方法:各所官方文档 + 测试网/模拟盘小单,结果写进对应 `venue-*` 与 `VenueCaps`):① reduceOnly 订单是否豁免最小名义/最小数量(影响"目标为 0 的最后一腿"、补腿、自动有界平仓与无组持仓减仓的可下单性);② 现货卖出时手续费扣哪个资产(决定 `group 库存` 与可用余额哪个是上限);③ 各所 IOC 对"超出可见深度"的处理是否一致(部分成交后余量撤销)。
 - **开放问题**:`SetParams` 的 `LotMismatch` 用引擎切片上限、`set_target` 用策略切片上限,两者取值不同时增仓目标仍可能在 `SetParams` 放行后被拒(见"两腿 lot 对齐"第 5 条);若模拟账户运行中频繁出现,考虑让策略在参数里声明切片上限、由 `SetParams` 一并校验。
 - 默认值标"待标定"的项在模拟账户运行期间按报告标定,上线前写回本表。

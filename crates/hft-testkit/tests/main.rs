@@ -7,8 +7,6 @@ static ALLOC: hft_testkit::CountingAlloc = hft_testkit::CountingAlloc;
 mod actors;
 #[cfg(feature = "seq")]
 mod cancel_filled;
-#[cfg(feature = "seq")]
-mod cancel_migration;
 mod clock;
 mod deps;
 #[cfg(feature = "dst-bin")]
@@ -23,29 +21,44 @@ mod fees;
 mod foreign_ledger;
 mod r#gen;
 mod hash;
-mod invariants_map;
+/// Heavy DST migration proofs (TK-137/157/163/169/173: 50 conformance seeds × three real-engine
+/// runs of 2 000 steps each): feature `dst-heavy`, outside the default local test binary; the CI
+/// `heavy-tests` job runs every `heavy::` test and `cargo xtask ci` skips them
+/// (docs/development.md).
+#[cfg(feature = "dst-heavy")]
+// `path = "."`: the nested modules are this directory's files.
+#[path = "."]
+mod heavy {
+    mod cancel_migration;
+    mod late_migration;
+    mod partial_migration;
+    mod reconcile_migration;
+    mod stale_migration;
+}
 #[cfg(feature = "seq")]
-mod late_migration;
+mod history;
+mod invariants_map;
 #[cfg(feature = "seq")]
 mod late_recycle;
 #[cfg(feature = "seq")]
 mod ledger_case;
 #[cfg(feature = "seq")]
 mod partial_fills;
-#[cfg(feature = "seq")]
-mod partial_migration;
 mod planted;
+#[cfg(feature = "planted")]
+mod planted_seq;
 mod probes;
 #[cfg(feature = "seq")]
 mod reconcile_actor;
-#[cfg(feature = "seq")]
-mod reconcile_migration;
 #[cfg(feature = "seq")]
 mod reconcile_world;
 mod replay_probe;
 mod sdk_mock;
 mod sdk_rd;
+mod tmp;
 mod truth;
+#[cfg(feature = "seq")]
+mod vacuity;
 // The engine adapter's tests (feature `seq`, on in `--all-features` runs): enabling it here as a
 // dev-dependency feature would put hft-sequencer into every dependent's dev closure.
 #[cfg(feature = "seq")]
@@ -67,7 +80,5 @@ mod shrink;
 mod snapshot_checks;
 #[cfg(feature = "seq")]
 mod stale_gen;
-#[cfg(feature = "seq")]
-mod stale_migration;
 mod suites;
 mod support;

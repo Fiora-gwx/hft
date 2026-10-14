@@ -1,0 +1,303 @@
+# DST conformance set (crates/hft-testkit README "7. 状态哈希对比", testing §6): seeds in registration
+# order, each with its suite, step limit and HashTrail digest (xxh3-128 of `HashTrail::to_bytes()`,
+# printed by `hft-dst hashtrail`). Regenerate with `cargo xtask dst --hashtrail write`.
+
+[[seed]]
+seed = "0x0000000000000001"
+suite = "core"
+steps = 2000
+trail = "912dca19984b9a06c985939d930d4d5a"
+
+[[seed]]
+seed = "0x0000000000000002"
+suite = "core"
+steps = 2000
+trail = "b752ee0a74da31ef7e01dd9a8482e3ba"
+
+[[seed]]
+seed = "0x0000000000000003"
+suite = "core"
+steps = 2000
+trail = "5d9327d35e1b6ffef1dc6aa931d6dd6b"
+
+[[seed]]
+seed = "0x0000000000000004"
+suite = "core"
+steps = 2000
+trail = "0e14efcc71ca40da5e1bede10e31e1bd"
+
+[[seed]]
+seed = "0x0000000000000005"
+suite = "core"
+steps = 2000
+trail = "b51608016d8a2821a5ab626b3fc4ea61"
+
+[[seed]]
+seed = "0x0000000000000006"
+suite = "core"
+steps = 2000
+trail = "734fb436a86e43de52169dafbda57d05"
+
+[[seed]]
+seed = "0x0000000000000007"
+suite = "core"
+steps = 2000
+trail = "467b268ccfb8840f1b19ad821ec18522"
+
+[[seed]]
+seed = "0x0000000000000008"
+suite = "core"
+steps = 2000
+trail = "14ab1b7a6c3d0f47878f3a9efd9550d0"
+
+[[seed]]
+seed = "0x0000000000000009"
+suite = "core"
+steps = 2000
+trail = "f8f4fa433bf59a7a81f29c3595e9a38d"
+
+[[seed]]
+seed = "0x000000000000000a"
+suite = "core"
+steps = 2000
+trail = "babc8a283cb0f841aa4a8effecf072eb"
+
+[[seed]]
+seed = "0x000000000000000b"
+suite = "core"
+steps = 2000
+trail = "a9e10564f61ac2fd113939b457cacccc"
+
+[[seed]]
+seed = "0x000000000000000c"
+suite = "core"
+steps = 2000
+trail = "b1bfb22302379e44e1f1feddfc560fbf"
+
+[[seed]]
+seed = "0x000000000000000d"
+suite = "core"
+steps = 2000
+trail = "ac53e06a51a303f8db032d1b0613f0b4"
+
+[[seed]]
+seed = "0x000000000000000e"
+suite = "core"
+steps = 2000
+trail = "31283c4f4cab00174a0e9a157e5379a6"
+
+[[seed]]
+seed = "0x000000000000000f"
+suite = "core"
+steps = 2000
+trail = "7ec802203228f5b40dc4211212700b54"
+
+[[seed]]
+seed = "0x0000000000000010"
+suite = "core"
+steps = 2000
+trail = "397d296e95edc47586b690287e37c193"
+
+[[seed]]
+seed = "0x0000000000000011"
+suite = "core"
+steps = 2000
+trail = "fce59bb071d0a9dd9d5dac05870b48c3"
+
+[[seed]]
+seed = "0x0000000000000012"
+suite = "core"
+steps = 2000
+trail = "ef52ad8ea06755aace4528413fd6ba00"
+
+[[seed]]
+seed = "0x0000000000000013"
+suite = "core"
+steps = 2000
+trail = "f7abbedaeda806d0902b313277a643a5"
+
+[[seed]]
+seed = "0x0000000000000014"
+suite = "core"
+steps = 2000
+trail = "5b15b5424da134ad0654890018dcfde9"
+
+[[seed]]
+seed = "0x0000000000000015"
+suite = "core"
+steps = 2000
+trail = "db7d9089a346658595bad49c7d23abfe"
+
+[[seed]]
+seed = "0x0000000000000016"
+suite = "core"
+steps = 2000
+trail = "cf46f00c5b8ec717b9a96414b1fe3306"
+
+[[seed]]
+seed = "0x0000000000000017"
+suite = "core"
+steps = 2000
+trail = "bf4642c078d20979674c0b7c332c265a"
+
+[[seed]]
+seed = "0x0000000000000018"
+suite = "core"
+steps = 2000
+trail = "9815e0211048f8aca052a004ab38a50b"
+
+[[seed]]
+seed = "0x0000000000000019"
+suite = "core"
+steps = 2000
+trail = "35d894e3e437cae6dbd01acb9750eb62"
+
+[[seed]]
+seed = "0x000000000000001a"
+suite = "core"
+steps = 2000
+trail = "92d31786e1a16c6b881245f3a4139650"
+
+[[seed]]
+seed = "0x000000000000001b"
+suite = "core"
+steps = 2000
+trail = "c8ea5123342c1cd65df0c177814771b8"
+
+[[seed]]
+seed = "0x000000000000001c"
+suite = "core"
+steps = 2000
+trail = "d9944643646416b5abd44d5fa60ad1a2"
+
+[[seed]]
+seed = "0x000000000000001d"
+suite = "core"
+steps = 2000
+trail = "025c47d492c1ebcc5576fc9c951bbe02"
+
+[[seed]]
+seed = "0x000000000000001e"
+suite = "core"
+steps = 2000
+trail = "e9cde08dddc3bd2052a4bc8c15ccd32c"
+
+[[seed]]
+seed = "0x000000000000001f"
+suite = "core"
+steps = 2000
+trail = "4e46c2cda1be4b45d5d1f64f355a16ea"
+
+[[seed]]
+seed = "0x0000000000000020"
+suite = "core"
+steps = 2000
+trail = "a8049074266b5e4436765087165f2afa"
+
+[[seed]]
+seed = "0x0000000000000021"
+suite = "core"
+steps = 2000
+trail = "c69aac4cf360505baaaa91bffe7486ed"
+
+[[seed]]
+seed = "0x0000000000000022"
+suite = "core"
+steps = 2000
+trail = "5fe7f52d75783ba8252f4b5565cede85"
+
+[[seed]]
+seed = "0x0000000000000023"
+suite = "core"
+steps = 2000
+trail = "b7c05d4297de99d1701f2f9f9522a6a2"
+
+[[seed]]
+seed = "0x0000000000000024"
+suite = "core"
+steps = 2000
+trail = "f840fd920266d1406883c52b0667e267"
+
+[[seed]]
+seed = "0x0000000000000025"
+suite = "core"
+steps = 2000
+trail = "72b7849ad22d5955ccaa714dfd5afbb3"
+
+[[seed]]
+seed = "0x0000000000000026"
+suite = "core"
+steps = 2000
+trail = "91755126c154486bdff2558e7266e4a4"
+
+[[seed]]
+seed = "0x0000000000000027"
+suite = "core"
+steps = 2000
+trail = "1f377a64996fa44230d09dece38c2e66"
+
+[[seed]]
+seed = "0x0000000000000028"
+suite = "core"
+steps = 2000
+trail = "8844dde4b9063469e74cbec7acef6124"
+
+[[seed]]
+seed = "0x0000000000000029"
+suite = "core"
+steps = 2000
+trail = "092401c297b73ccf895e5509567eb3f2"
+
+[[seed]]
+seed = "0x000000000000002a"
+suite = "core"
+steps = 2000
+trail = "3f38df822b2fa3835f7722d553c56d92"
+
+[[seed]]
+seed = "0x000000000000002b"
+suite = "core"
+steps = 2000
+trail = "b83c6d91765ff119fc62c89a8f915f15"
+
+[[seed]]
+seed = "0x000000000000002c"
+suite = "core"
+steps = 2000
+trail = "9ac714b87055523411cbb91fd519d38b"
+
+[[seed]]
+seed = "0x000000000000002d"
+suite = "core"
+steps = 2000
+trail = "642fdd6a5d88c42d4ce0dcc7db706e34"
+
+[[seed]]
+seed = "0x000000000000002e"
+suite = "core"
+steps = 2000
+trail = "22c60dd0612e5e81f41daa4cd6521515"
+
+[[seed]]
+seed = "0x000000000000002f"
+suite = "core"
+steps = 2000
+trail = "73dea7d420c252cf65d989f23c52c244"
+
+[[seed]]
+seed = "0x0000000000000030"
+suite = "core"
+steps = 2000
+trail = "082878cefdc9c795c5f09a640350688b"
+
+[[seed]]
+seed = "0x0000000000000031"
+suite = "core"
+steps = 2000
+trail = "6de302ebd29eee678feb874c30886880"
+
+[[seed]]
+seed = "0x0000000000000032"
+suite = "core"
+steps = 2000
+trail = "b3965ced8d4bb96a5510ad141240bcf2"

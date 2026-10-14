@@ -180,6 +180,22 @@ pub struct InvState {
     i19_ext: BTreeSet<(u8, u8, u32, ExternalKey)>,
     /// I20: per (account, group) Broken period: (autofix starts, terminals).
     i20_period: BTreeMap<(u8, u32), (u32, u32)>,
+    /// Non-vacuity: items each checker actually compared, index n = `I<n>` (README "6. DST 框架"
+    /// 不变量; TK-176). A checker that passes with 0 compared proved nothing for that run.
+    pub compared: [u64; 32],
+}
+
+impl InvState {
+    /// Items `I<n>` compared so far.
+    pub fn compared(&self, i: InvId) -> u64 {
+        self.compared.get(usize::from(i.0)).copied().unwrap_or(0)
+    }
+    /// Counts `n` more compared items of `I<n>`.
+    pub fn add_compared(&mut self, i: InvId, n: u64) {
+        if let Some(c) = self.compared.get_mut(usize::from(i.0)) {
+            *c = c.saturating_add(n);
+        }
+    }
 }
 
 /// Step checker.
@@ -326,9 +342,156 @@ pub fn check_step(set: InvariantSet, st: &mut InvState, v: &StepView<'_>) -> Res
         if set.contains(c.id) {
             observation_complete(c.id, v).map_err(|m| (c.id, m))?;
             (c.step)(st, v).map_err(|m| (c.id, m))?;
+            st.add_compared(c.id, subjects(c.id, v));
         }
     }
     Ok(())
+}
+
+/// Items checker `I<n>` compared in a step it passed: the facts whose violation it would have
+/// reported, not rows it merely scanned (TK-176). I1 evidence items + changed position rows; I2
+/// report Inputs (order reports, external fills); I3 limited (account, asset) sums, limited legs
+/// and accepted position-increasing orders; I4 New decisions; I5 Place/Amend frames + kill rows;
+/// I6 rebuild comparisons (the run adds its snapshot checks); I7 OMS tables + terminal slots; I8
+/// OnFill links + retired histories + accepted second legs; I11 mode cells + kill rows; I12
+/// risk-reducing decisions; I13 a mode-changing Input with its decisions; I14 links + hedge place
+/// failures; I15 accepted hedge and flatten orders; I16 accounts compared with the exchange truth
+/// (nothing undelivered or in flight); I17 accepted MarginStress orders + force targets; I18
+/// completed Drains; I19 accepted hedge, fix and flatten orders + booked external fills; I20
+/// Broken cells + auto-fix starts and terminals.
+fn subjects(id: InvId, v: &StepView<'_>) -> u64 {
+    let decisions = v.decisions();
+    let news = || decisions.iter().filter(|(d, _)| is_new(d));
+    let accepted = || news().filter(|(d, _)| d.reject == 0);
+    let n =
+        match id.0 {
+            1 => {
+                let changed = v
+                    .after
+                    .positions
+                    .iter()
+                    .filter(|r| {
+                        v.before
+                            .positions
+                            .iter()
+                            .find(|o| (o.account, o.venue, o.inst) == (r.account, r.venue, r.inst))
+                            .map_or(r.qty != 0, |o| o.qty != r.qty)
+                    })
+                    .count();
+                v.info.evidence.len() + changed
+            }
+            2 => usize::from(v.input().is_some_and(|r| {
+                r.try_read::<OrderEvent>().is_some() || r.try_read::<ExternalFill>().is_some()
+            })),
+            3 => {
+                let sums: BTreeSet<(u8, u16)> = v
+                    .after
+                    .positions
+                    .iter()
+                    .map(|p| (p.account.0, p.asset.0))
+                    .collect();
+                sums.iter()
+                    .filter(|(a, x)| {
+                        v.after
+                            .limits
+                            .iter()
+                            .any(|l| l.account.0 == *a && l.asset.0 == *x)
+                    })
+                    .count()
+                    + v.after.legs.iter().filter(|l| l.max_pos_qty > 0).count()
+                    + accepted()
+                        .filter(|(d, i)| {
+                            i.is_some_and(|i| {
+                                i.max_pos_qty > 0
+                                    && (i.class == DecClass::Open
+                                        || (i.class == DecClass::Hedge
+                                            && !OrderFlags(d.oflags).contains(OrderFlags::REDUCE_ONLY)))
+                            })
+                        })
+                        .count()
+            }
+            4 => news().count(),
+            5 => {
+                v.frames
+                    .iter()
+                    .filter(|f| matches!(f.cmd.op, GwOp::Place | GwOp::Amend))
+                    .count()
+                    + v.after.kill.len()
+            }
+            6 => usize::from(v.rebuild.is_some()),
+            7 => v.after.tables.len() + v.after.slots.iter().filter(|s| s.state.is_terminal()).count(),
+            8 => {
+                v.after
+                    .links
+                    .iter()
+                    .filter(|l| l.plan == PlanKind::OnFill && !l.reversed)
+                    .count()
+                    + v.after.hedge_history.len()
+                    + accepted()
+                        .filter(|(_, i)| i.is_some_and(|i| i.hedge == Some(HedgeKind::Second)))
+                        .count()
+            }
+            11 => v.after.cells.len() + v.after.kill.len(),
+            12 => decisions
+                .iter()
+                .filter(|(d, _)| OrderFlags(d.oflags).contains(OrderFlags::RISK_REDUCING))
+                .count(),
+            13 => {
+                use hft_event::CmdKind;
+                let mode_input = matches!(
+                    v.cmd_kind(),
+                    Some(CmdKind::SET_MODE | CmdKind::RESUME | CmdKind::KILL | CmdKind::VENUE_NOTICE)
+                ) || matches!(v.timer_code(), Some(TimerCode::Sys(_)));
+                if mode_input { 1 + decisions.len() } else { 0 }
+            }
+            14 => v.after.links.len() + v.info.place_failures.len(),
+            15 => accepted()
+                .filter(|(_, i)| i.is_some_and(|i| matches!(i.class, DecClass::Hedge | DecClass::Flatten)))
+                .count(),
+            16 => truth_compared(v.after, v.truth),
+            17 => {
+                accepted()
+                    .filter(|(_, i)| i.is_some_and(|i| i.margin_stress && i.class == DecClass::Flatten))
+                    .count()
+                    + v.info.force_targets.len()
+            }
+            18 => usize::from(v.after.drain.done && !v.after.drain.timed_out),
+            19 => {
+                accepted()
+                    .filter(|(_, i)| i.is_some_and(|i| i.hedge.is_some() || i.class == DecClass::Flatten))
+                    .count()
+                    + v.info
+                        .evidence
+                        .iter()
+                        .filter(|e| e.kind == EvidenceKind::External)
+                        .count()
+            }
+            20 => {
+                v.after.exec.iter().filter(|c| c.broken).count()
+                    + v.info.autofix_starts.len()
+                    + v.info
+                        .notes
+                        .iter()
+                        .filter(|n| matches!(n.name, "ExecAutoFixDone" | "ExecAutoFixFailed"))
+                        .count()
+            }
+            _ => 0,
+        };
+    n as u64
+}
+
+/// Truth rows `compare_truth` compares rather than skips (nothing undelivered or in flight).
+fn truth_compared(o: &Obs, truth: &[TruthRow]) -> usize {
+    truth
+        .iter()
+        .filter(|t| {
+            !t.undelivered
+                && !o
+                    .slots
+                    .iter()
+                    .any(|s| s.account == t.account && s.venue == t.venue && !s.state.is_terminal())
+        })
+        .count()
 }
 
 /// A real adapter declares its applicable cells and accounts independently of the observed rows.
@@ -486,6 +649,9 @@ pub fn check_end(set: InvariantSet, st: &mut InvState, v: &EndView<'_>) -> Resul
             && let Some(f) = c.end
         {
             f(st, v).map_err(|m| (c.id, m))?;
+            if c.id == InvId::I16 {
+                st.add_compared(c.id, truth_compared(v.obs, v.truth) as u64);
+            }
         }
     }
     Ok(())

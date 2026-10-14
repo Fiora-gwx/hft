@@ -13,6 +13,8 @@ use zerocopy::TryFromBytes;
 const MS: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MS;
 
+// Used by the `heavy` migration proofs (feature `dst-heavy`).
+#[cfg_attr(not(feature = "dst-heavy"), allow(dead_code))]
 pub(super) fn without_stale(cfg: &DstConfig) -> DstConfig {
     let mut cfg = cfg.clone();
     let mut plan = cfg.fault_plan();
