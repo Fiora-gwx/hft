@@ -25,6 +25,7 @@
 mod caps;
 mod cid;
 pub mod codes;
+mod funding;
 mod json;
 mod line;
 mod md;

@@ -24,6 +24,7 @@ spec: README.md
 
 | README 小节 | 用例 |
 |---|---|
+| 资金费实额 | BIN-332 |
 | 概要 | BIN-001, BIN-038, BIN-210 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | BIN-001, BIN-078, BIN-079 |
@@ -1721,7 +1722,7 @@ spec: README.md
 | BIN-171.5 | `required_margin_mode` | `Cross` / `NotApplicable` |
 | BIN-171.6 | `required_multi_asset` | `Some(false)` / `None` |
 | BIN-171.7 | `required_spot_borrow` | `None` / `None` |
-| BIN-171.8 | `funding_settle` | `BalanceOnlyPush` / `NotApplicable` |
+| BIN-171.8 | `funding_settle` | `RateOnly` / `NotApplicable` |
 | BIN-171.9 | `margin_data` | `Poll{interval_ms: 5000}` / `NotApplicable` |
 | BIN-171.10 | `own_liquidation_marker`、`liq_marker_arg` | `ClientIdPrefix`、`"autoclose-\|adl_autoclose\|settlement_autoclose-"` / `NotIdentifiable`、`""` |
 | BIN-171.11 | `ignorable_user_events` | `["TRADE_LITE", "STRATEGY_UPDATE", "GRID_UPDATE", "CONDITIONAL_ORDER_TRIGGER_REJECT"]` / `["balanceUpdate", "listStatus", "externalLockUpdate"]` |
@@ -1789,7 +1790,7 @@ spec: README.md
 | BIN-174.14 | `check_hot_alloc` | 两者通过 |
 | BIN-174.15 | `check_session` | 两者通过(哨兵密钥为 `ED1`、`HM1` 的替身) |
 | BIN-174.16 | `check_cid` | 两者通过 |
-| BIN-174.17 | `check_funding` | `Usdm` 按 `BalanceOnlyPush` 通过;`Spot` 无资金费样本、0 条 `FundingSettle` |
+| BIN-174.17 | `check_funding` | 默认 `Usdm` 按 `RateOnly` 无私有实额推送;认证历史见 BIN-332;`Spot` 无资金费样本、0 条 `FundingSettle` |
 | BIN-174.18 | `check_margin` | `Usdm` 按 `Poll` 通过;`Spot` 的 Margin 序列为空 |
 | BIN-174.19 | `check_bbo_refresh` | 两者通过(`Usdm` 批量 1、`Spot` 批量不限条数) |
 | BIN-174.20 | `check_detail` | 两者通过(`-2011` 为 `GONE` 类) |
@@ -2303,6 +2304,8 @@ spec: README.md
 - 输入:`fixtures/binance-usdm/rest.income/` 的 `funding_two_symbols.in`;来源:待采集(方法 B;演示环境不结算资金费时用文档示例,`source = "exchange-doc"`)
 - 期望文件:同目录 `<case>.expected.jsonl`(`funding` 行,逐笔带 inst 与结算时刻)
 - 实现:`crates/venue-binance/tests/golden.rs::bin_332_funding_flow`
+
+BIN-332 补充单元验收:签名 GET、正负现金金额、同刻多合约、满页继续、HTTP/JSON 错误整页失败。实现:`tests/funding.rs::bin_332_income_history_actual_amount_and_signing`、`bin_332_full_page_requires_following_page`。默认 caps 采用 RateOnly;BIN-113–116 保留为可选 BalanceOnlyPush 用户流配置,不与实额历史并用。
 
 ### BIN-333 金样:Usdm balance 与 Spot account 余额(只读查询)
 

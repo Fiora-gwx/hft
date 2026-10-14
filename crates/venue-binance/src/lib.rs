@@ -24,6 +24,7 @@
 mod caps;
 mod cid;
 mod errors;
+mod funding;
 mod json;
 mod line;
 mod md;
@@ -136,17 +137,41 @@ impl TimeUnit {
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct FeedCtx {
     pub time_unit: TimeUnit,
+    fund: [(InstId, i64, u32); 256],
 }
 
 impl FeedCtx {
     /// `fstream` connections (no `timeUnit` parameter): milliseconds.
     pub const USDM: FeedCtx = FeedCtx {
         time_unit: TimeUnit::Ms,
+        fund: [(InstId(0), 0, 0); 256],
     };
     /// Spot connections opened with `timeUnit=MICROSECOND`.
     pub const SPOT: FeedCtx = FeedCtx {
         time_unit: TimeUnit::Us,
+        fund: [(InstId(0), 0, 0); 256],
     };
+
+    fn funding_interval(&mut self, inst: InstId, next_ms: i64) -> u32 {
+        for slot in &mut self.fund {
+            if slot.0 == inst {
+                if next_ms != slot.1 {
+                    slot.2 = next_ms
+                        .checked_sub(slot.1)
+                        .filter(|d| *d > 0 && *d % 1000 == 0)
+                        .and_then(|d| u32::try_from(d / 1000).ok())
+                        .unwrap_or(0);
+                    slot.1 = next_ms;
+                }
+                return slot.2;
+            }
+            if slot.0.0 == 0 {
+                *slot = (inst, next_ms, 0);
+                return 0;
+            }
+        }
+        0
+    }
 }
 
 /// gw-task state. The M1.5 build keeps none (dedup rings and cumulative-quantity tables arrive

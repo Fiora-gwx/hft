@@ -73,7 +73,7 @@ E.base_engine_ns = engine_ns(上次运行最后一条已提交记录)           
 | 0x0203 | `OrderEvent` | 定长 120 | Input | 回执/拒绝/成交/撤单/改单/过期/查询结果/结果未知/仅费用 |
 | 0x0204 | `PositionReport` | 定长 56 | Input | 交易所推送,只校验 |
 | 0x0205 | `BalanceReport` | 定长 40 | Input | |
-| 0x0206 | `FundingSettle` | 定长 56 | 按体:`synth = 1` Output,否则 Input | `inst = INST_NONE` = 只推账户级合计 |
+| 0x0206 | `FundingSettle` | 定长 56 | 按体:`synth = 1` Output,否则 Input | `inst = INST_NONE` = 只推账户级合计;认证历史实额的完整总额口径见 [ledger](../../crates/hft-ledger/README.md#资金费) |
 | 0x0207 | `ExternalFill` | 定长 96 | Input | 自身强平、ADL、人工、交割等非本系统下单的成交(`schema_version` 3 的结算字段归 hft-event) |
 | 0x0208 | `MarginReport` | Var | Input | 保证金余额/维持/可用/保证金率 + 每 inst 强平价与 ADL 档 |
 | 0x0209 | `AccountConfigReport` | Var | Input | 持仓模式、保证金模式、多资产、UID(含核对过的 key)与不一致位(含现货借币);尾部为每个永续 inst 的实际杠杆 |

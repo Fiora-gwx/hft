@@ -12,6 +12,7 @@ spec: README.md
 
 | README 小节 | 用例 |
 |---|---|
+| 资金费账单轮询 | VEN-258 |
 | 概要 | VEN-014、VEN-020、VEN-021、VEN-241、VEN-389 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
@@ -2708,6 +2709,8 @@ spec: README.md
 - 期望:
   - `acct_request`、`acct_decode`、`acct_finish` 的调用线程 id 全部等于 acct-fetch 线程;gw 线程上这三个方法的调用数为 0
 - 实现:`crates/hft-venue/tests/acct_fetch.rs::ven_258_decode_off_gw_thread`
+
+VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨页 ID 去重、成功后由 acct 环经 gw 发布 FundingSettle。实现:`tests/funding.rs::ven_258_funding_pages_atomic_retry_dedup_and_gateway_ingress`。
 
 ### VEN-259 原始响应按 `ACCT_RAW_CHUNK` 分块,gw 写 `RawTx` 与连续的 `RawRx`,拼接后与原响应相同
 

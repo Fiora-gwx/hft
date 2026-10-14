@@ -28,7 +28,7 @@ pub(crate) fn default_caps(line: Line, asset: impl Fn(&str) -> Option<AssetId>) 
             c.required_margin_mode = MarginMode::Cross;
             c.required_multi_asset = Some(false);
             c.required_spot_borrow = None;
-            c.funding_settle = FundingSettleKind::BalanceOnlyPush;
+            c.funding_settle = FundingSettleKind::RateOnly;
             c.margin_data = MarginData::Poll { interval_ms: 5_000 };
             c.own_liquidation_marker = LiqMarker::ClientIdPrefix;
             c.liq_marker_arg = "autoclose-|adl_autoclose|settlement_autoclose-".into();

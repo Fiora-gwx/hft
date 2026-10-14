@@ -549,6 +549,14 @@ pub struct AcctRecHdr {                // acct-<venue> 环记录头(进程内,�
 5. **推送型保证金数据**(`margin_data = Push`):不经 acct-fetch,由 gw 的 `decode_report` 直接产出(§4 第 2 步);gw 只更新 `next_margin_tsc`。
 6. 调度延迟:`AcctReq` 在 acct-fetch 下一次被调用时才发出,上界 = warm 线程的 park 超时(§1);`MarginNow` 的响应因此多出至多一个 park 周期。
 
+### 资金费账单轮询
+
+`FundingPoll<P: FundingHistoryProtocol>` 是 warm 账户查询驱动,单账户同时只有一个在途页面。调用者以 `request` 取得签名 GET,向选定产品线的 REST origin 发送,在完成时调用 `response`;超时调用 `retry`。调度与 HTTP 的所有时刻由调用者传入,不读系统时钟。`FundingPollCfg` 的 `poll_ms`、`lookback_ms`、`settle_lag_ms`、`max_settlement_skew_ms`、`max_pages`、`max_bills` 均在加载时校验;`poll_ms` 同时限制分页与错误重试节拍,部署按该账户和 IP 的 REST 权重余量配置。查询每段不超过 30 天,`lookback_ms` 必须小于 30 天;起点由账本历史水位提供。
+
+页面先校验后暂存,账单按 ID 去重;相同 ID 内容冲突、容量越界、循环游标或任意失败均保留原页面,不发布部分金额。完整窗口才按 refdata 的合约结算周期/锚汇总。账单偏离该网格超过 `max_settlement_skew_ms` 或周期未知时失败,需刷新 refdata,不猜结算时刻;`settle_lag_ms` 不小于此偏差上限。窗口开头未完整覆盖的旧结算不发布。后续窗口重叠回查迟到账单,账本按实额总额差分,见 [ledger](../hft-ledger/README.md#资金费)。
+
+`publish_one` 每圈至多写一条 acct 环记录,环满时保留待发项;格式是 8 B `FUNDv001` + 56 B `FundingSettle`。gw 在本圈订单处理之后至多取一条,校验 venue/account/inst 与 `synth=0`,再写 rep 环,由 sequencer 先 journal 再入账。acct-fetch 不直接写 rep。此版本记录不含凭证或签名;通用 `AcctRecHdr` 查询族与 HTTP RestPool 的进程装配仍见已知限制。
+
 ### 4b. 私有频道归属与热备连接
 
 私有频道 = 本账户的订单/成交、持仓、余额、保证金推送(Binance USDT-M 的 listenKey 流、Binance 现货 ws-api 上的 `userDataStream.subscribe`、OKX/Bitget `/private` 上的各频道)。

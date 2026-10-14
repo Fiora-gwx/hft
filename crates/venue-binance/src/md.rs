@@ -1,9 +1,9 @@
 //! Market data: dispatch from the first 64 B (README "1. 分派"), `peek` ids, sequence rules, control
 //! hints and decoding (M1.5: `bookTicker` of both lines).
 
-use hft_event::{Bbo, MarketHdr};
+use hft_event::{Bbo, Funding, IndexPrice, MarkPrice, MarketHdr};
 use hft_refdata::RefData;
-use hft_types::{InstId, Px, Qty};
+use hft_types::{InstId, Px, Qty, Rate};
 use hft_venue_proto::{
     ControlHint, DecodeErr, MdOutcome, MdSink, MsgOp, Peek, RawSeq, ResyncMethod, RouteId, RxMeta, SeqIds,
     SeqRule, StreamKind,
@@ -441,7 +441,47 @@ pub(crate) fn decode_md(
             out.bbo(&e);
             Ok(MdOutcome { events: 1, inst })
         }
-        // The other classes decode from M3 (README "已知限制与后续工作"); control classes never.
+        Class::MarkPrice if line == Line::Usdm => {
+            #[derive(Deserialize)]
+            struct Mark<'a> {
+                #[serde(borrow)]
+                s: &'a str,
+                p: &'a str,
+                i: &'a str,
+                r: &'a str,
+                #[serde(rename = "E")]
+                event: i64,
+                #[serde(rename = "T")]
+                next: i64,
+            }
+            let m: Mark<'_> = from(p)?;
+            let inst = inst_of(line, rd, m.s.as_bytes());
+            if inst.0 == 0 {
+                return Ok(MdOutcome { events: 0, inst });
+            }
+            if m.next <= 0 {
+                return Err(DecodeErr::Number);
+            }
+            let exp = rd.inst(inst).px_wire_exp;
+            let mark = Px(fixed(m.p, exp)?);
+            let index = Px(fixed(m.i, exp)?);
+            let rate = Rate(fixed(m.r, -9)?);
+            let next = time_ns(m.next, 1_000_000)?;
+            let mut h = hdr(line, inst, rx);
+            h.ex_send_ns = time_ns(m.event, ctx.time_unit.ns())?;
+            let interval_s = ctx.funding_interval(inst, m.next);
+            out.mark(&MarkPrice { h, px: mark });
+            out.index(&IndexPrice { h, px: index });
+            out.funding(&Funding {
+                h,
+                rate,
+                next_funding_ns: next,
+                interval_s,
+                _pad: 0,
+            });
+            Ok(MdOutcome { events: 3, inst })
+        }
+        // The other classes decode from M3; control classes never.
         _ => Err(DecodeErr::UnknownClass),
     }
 }

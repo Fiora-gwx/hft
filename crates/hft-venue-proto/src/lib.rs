@@ -18,8 +18,11 @@
     clippy::unimplemented
 )]
 
+mod funding;
 mod sink;
 mod types;
+
+pub use funding::{FundingBill, FundingHistoryProtocol, FundingPage, FundingQuery};
 
 #[cfg(feature = "testkit")]
 pub mod testkit;

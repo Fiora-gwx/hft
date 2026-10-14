@@ -1044,7 +1044,7 @@ fn funding_settle<D: Driver<S>, S: StrategySet>(
         return Ok(());
     };
     match e.rd.caps(f.venue).funding_settle {
-        FundingSettleKind::PerSymbolPush => {
+        FundingSettleKind::PerSymbolPush | FundingSettleKind::RateOnly => {
             e.trace.rec("ledger.apply_funding", u64::from(f.account.0), 0);
             if let Some(d) = e.ledger.apply_funding(&f, e.now.engine_ns) {
                 ledger_notes(e);

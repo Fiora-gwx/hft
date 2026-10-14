@@ -91,10 +91,7 @@ fn bin_171_default_caps() {
     );
     assert_eq!(
         (u.funding_settle, s.funding_settle),
-        (
-            FundingSettleKind::BalanceOnlyPush,
-            FundingSettleKind::NotApplicable
-        ),
+        (FundingSettleKind::RateOnly, FundingSettleKind::NotApplicable),
         "BIN-171.8"
     );
     assert_eq!(

@@ -186,7 +186,7 @@ core 的深度来源([hft-venue-proto 契约 26](../hft-venue-proto/README.md#�
 | `required_margin_mode` | 全仓(`marginType = CROSSED`,所有可交易 symbol);多资产模式关闭 | 不适用(现金账户) | 待核实(端点,开发备忘第 5 条) |
 | `required_multi_asset` | `Some(false)`(多资产模式关闭) | `None` | 同上 |
 | `required_spot_borrow` | `None`(永续) | `None`:现货钱包不能借币,由"账户类型 = `SPOT`"核验(否则 `ACCT_TYPE`,见"账户配置核验") | 官方(`accountType` 字段);现货钱包无自动借币开关待核实(开发备忘第 5 条) |
-| `funding_settle` | `BalanceOnlyPush`:全仓下 `ACCOUNT_UPDATE m=FUNDING_FEE` 只带余额 `B`、不带持仓 `P` | 不适用 | 待核实(开发备忘第 1 条) |
+| `funding_settle` | `RateOnly`:行情估算 + 认证 income 历史实额完成 | 不适用 | [资金费实额](#资金费实额) |
 | `margin_data` | `Poll{interval_ms: 5000}` | 不适用 | — |
 | `own_liquidation_marker` | `LiqMarker::ClientIdPrefix`,`liq_marker_arg = "autoclose-\|adl_autoclose\|settlement_autoclose-"`:client id 前缀 `autoclose-`(强平)、`adl_autoclose`(ADL)、`settlement_autoclose-`(下架/交割结算);辅证 `o.o = LIQUIDATION`、`x = CALCULATED` | `LiqMarker::NotIdentifiable`,`""`(现金现货无强平) | 待核实(开发备忘第 2 条) |
 | `ignorable_user_events` | `TRADE_LITE`、`STRATEGY_UPDATE`、`GRID_UPDATE`、`CONDITIONAL_ORDER_TRIGGER_REJECT` | `balanceUpdate`、`listStatus`、`externalLockUpdate` | 待核实(事件名全集,开发备忘第 4 条) |
@@ -268,7 +268,7 @@ core 的深度来源([hft-venue-proto 契约 26](../hft-venue-proto/README.md#�
 |---|---|---|
 | `ORDER_TRADE_UPDATE` | `OrderEvent`(见"回报解码")或 `ExternalFill` | — |
 | `ACCOUNT_UPDATE`,`m ≠ FUNDING_FEE` | 每个 refdata 中的 `P[]` 一条 `PositionReport{inst ← s, qty ← pa, entry_px ← ep, upnl ← up, liq_px = 0, ex_ts_ns ← T}`,每个 `B[]` 一条 `BalanceReport{asset ← a, free ← wb, locked = 0, ex_ts_ns ← T}`(只校验,不驱动仓位;refdata 之外的 symbol/资产跳过) | `m = MARGIN_TYPE_CHANGE` → `ConfigRecheck`;`m ∈ {INSURANCE_CLEAR, ADMIN_DEPOSIT, ADMIN_WITHDRAW}` → `MarginNow` |
-| `ACCOUNT_UPDATE`,`m = FUNDING_FEE` | 全仓:`FundingSettle{inst: INST_NONE, amount ← B[a = USDT].bc, settle_ts_ns ← T, synth: 0}`(`B[]` 里出现 USDT 以外的资产 → 计数告警,不入 `amount`);若带 `P`(逐仓)则 `FundingSettle{inst}`。去重键([契约 22](../hft-venue-proto/README.md#实现方必须遵守的契约)):`TradeKey::Funding{settle_ts_ns ← T, disc ← B[a = USDT].wb 的 raw 定点}`(`T` 是否等于结算时刻、同一结算时刻是否按 symbol 分多条推送,待核实,开发备忘第 1 条) | — |
+| `ACCOUNT_UPDATE`,`m = FUNDING_FEE` | 可选 BalanceOnlyPush 配置(默认 RateOnly 不由此记账)。全仓:`FundingSettle{inst: INST_NONE, amount ← B[a = USDT].bc, settle_ts_ns ← T, synth: 0}`(`B[]` 里出现 USDT 以外的资产 → 计数告警,不入 `amount`);若带 `P`(逐仓)则 `FundingSettle{inst}`。去重键([契约 22](../hft-venue-proto/README.md#实现方必须遵守的契约)):`TradeKey::Funding{settle_ts_ns ← T, disc ← B[a = USDT].wb 的 raw 定点}`(`T` 是否等于结算时刻、同一结算时刻是否按 symbol 分多条推送,待核实,开发备忘第 1 条) | — |
 | `MARGIN_CALL` | 无 | `MarginNow` |
 | `ACCOUNT_CONFIG_UPDATE` | 无 | 含 `ai` 或 `ac` → `ConfigRecheck` |
 | `listenKeyExpired` | 无;`ctl = UserStreamEnded`(运行时推 `ConnState{Down, role=UserStream}`) | 运行时重建用户流连接(`bootstrap` 取新 key) |
@@ -283,7 +283,13 @@ core 的深度来源([hft-venue-proto 契约 26](../hft-venue-proto/README.md#�
 | `balanceUpdate`、`listStatus`、`externalLockUpdate` | 无(`skip = Listed`;`balanceUpdate` 之后的 `outboundAccountPosition` 给出绝对余额) | — |
 | 其他 | 无(`skip = Unknown`) | — |
 
-资金费收付的**按币归属**由 sequencer 合成(`funding_settle = BalanceOnlyPush`),reconciler 用 `GET /fapi/v1/income?incomeType=FUNDING_FEE`(带 symbol)校正([hft-venue-proto 契约 14](../hft-venue-proto/README.md#实现方必须遵守的契约))。
+资金费由行情估算与[认证历史实额](#资金费实额)完成入账。默认 `RateOnly` 不把 `ACCOUNT_UPDATE m=FUNDING_FEE` 的账户总额再次记入钱包;用户流资金费解码属于可选 `BalanceOnlyPush` 配置,不得与历史实额通道同时启用。
+
+### 资金费实额
+
+`Usdm` 实现 `FundingHistoryProtocol`:HMAC-SHA256 签名的 `GET /fapi/v1/income?incomeType=FUNDING_FEE`,明确 `startTime/endTime/page/limit=100/timestamp`;仅接受 `FUNDING_FEE` + `USDT`,按 `symbol` 找 inst,`tranId` 为账单键,`time` 为毫秒,`income` 为有符号实额。满页继续请求下一页,不足一页才结束。未知合约、数值错误或非 200 状态拒绝整页。请求与 headers 标记为敏感,不可写原文日志。接口参数来源为 [官方连接器](https://github.com/binance/binance-futures-connector-python/blob/main/binance/um_futures/account.py)。
+
+`markPriceUpdate` 解码出 MarkPrice、IndexPrice、Funding;费率与下次结算时间供策略只读视图使用,不代表资金费已到账。周期由同合约相邻不同 `T` 的差得出,首次与倒退时未知(0),表容量 256,超容量保持未知。轮询的原始账单由 [FundingPoll](../hft-venue/README.md#资金费账单轮询) 完成去重、汇总和 journal 入口。
 
 ### 测试网/模拟盘
 
@@ -512,7 +518,7 @@ pub mod mock {
 
 **待核实**(本机连不上 developers.binance.com。方法 A:经东京服务器抓官方文档原文(`research/_src/rgrab.py`),摘录写进本 README 并把原文缓存到 `research/_src/`;方法 B:Demo Trading 演示环境实测并把 raw 样本放进 fixtures;方法 C:正式实盘开始后从 raw journal 补核——只用于上线后才可能出现的样本(真实强平、ADL),上线前必须确定的项不得依赖它。每项注明用哪种。)
 
-1. **全仓资金费推送的形态**(决定 `funding_settle = BalanceOnlyPush` 与去重键):是否不带持仓 `P`;同一结算时刻是否按 symbol 分多条推送;`T` 是否等于结算时刻;`B[].wb` 在同一时刻的多条推送间是否各不相同(作 `disc`)。方法:A + B(演示环境持仓两个 symbol 跨过一次结算,抓 `ACCOUNT_UPDATE m=FUNDING_FEE` 原文);演示环境不结算资金费时按偏安全的 `BalanceOnlyPush` 上线,C 补核。若实际带 `P` 且含 symbol,改为 `PerSymbolPush`。
+1. **全仓资金费推送的形态**(决定 `funding_settle = BalanceOnlyPush` 与去重键):是否不带持仓 `P`;同一结算时刻是否按 symbol 分多条推送;`T` 是否等于结算时刻;`B[].wb` 在同一时刻的多条推送间是否各不相同(作 `disc`)。方法:A + B(演示环境持仓两个 symbol 跨过一次结算,抓 `ACCOUNT_UPDATE m=FUNDING_FEE` 原文);当前默认保持 `RateOnly` 与认证 income 历史实额。未核实上述字段前不得启用可选推送记账;切换来源须同时停用历史实额,并另行评审去重与归属。
 2. **强平/ADL/结算单的 client id 前缀、`o.o = LIQUIDATION`、`x = CALCULATED` 的语义**:A;再在演示环境用高杠杆小仓制造一次强平取样(B)。ADL 样本只能等实盘出现或向官方索取样本;取得前 ADL 行的金样用文档原文构造并标"合成"。
 3. **网页/App 单的 client id 前缀**(`web_`、`ios_`、`and_`):B(演示环境网页端下一笔单,若演示环境有网页端);否则按 `Unknown` 上线(偏安全),C 补核。
 4. **可忽略事件名全集**(`TRADE_LITE`、`STRATEGY_UPDATE`、`GRID_UPDATE`、`CONDITIONAL_ORDER_TRIGGER_REJECT`、现货 `externalLockUpdate`):A;上线后由"未知事件"计数补全(refdata 追加,不需发版)。

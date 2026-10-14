@@ -2268,9 +2268,11 @@ dependencies = [
  "hft-testkit",
  "hft-types",
  "hft-venue-proto",
+ "hmac",
  "proptest",
  "serde",
  "serde_json",
+ "sha2",
  "sonic-rs",
 ]
 

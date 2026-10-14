@@ -24,6 +24,7 @@ spec: README.md
 
 | README 小节 | 用例 |
 |---|---|
+| 资金费实额 | BGT-336 |
 | 概要 | BGT-171, BGT-190, BGT-210–BGT-218 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | BGT-001, BGT-010, BGT-013, BGT-076, BGT-080, BGT-081 |
@@ -2197,6 +2198,8 @@ spec: README.md
 - 期望文件:同目录 `<case>.expected.jsonl`(`funding` 行)
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_336_ro_funding`
 - 备注:依赖待核实:开发备忘第 18 条
+
+BGT-336 补充单元验收:签名 trading-account financial-records 查询、IN/OUT 实额、忽略交易费、cursor 续页及循环拒绝,失败无部分输出。实现:`tests/funding.rs::bgt_336_funding_bills_are_cash_not_ticker_or_wallet`。
 
 ### BGT-337 金样:UTA 资产(只读查询)
 

@@ -1,7 +1,7 @@
 //! Funding synthesis (TESTS.md "资金费合成": SEQ-192–SEQ-196, SEQ-361).
 
 use hft_refdata::FundingSettleKind;
-use hft_types::{Side, Tsc};
+use hft_types::{Qty, Side, Tsc};
 
 use crate::common::*;
 
@@ -127,4 +127,36 @@ fn seq_361_synth_rx_tsc_zero() {
     assert!(s.iter().all(|x| x.rx_tsc == Tsc(0)));
     let v = h.verify();
     assert!(v.is_empty(), "{v:?}");
+}
+
+#[test]
+fn seq_158_rate_only_actual_settlement_replaces_synth_and_replays() {
+    let mut h = rate_only();
+    h.open_position(AC1, B1, Side::Sell, "0.010");
+    h.funding_md(B1, "0.0001", t0800(), 28_800);
+    h.mark_md(B1, "50000");
+    h.at(T0 + (t0800() - UTC0) as u64);
+    h.sys(15 | (u32::from(B.0) << 8));
+    let initial = h.s.engine().ledger.account(AC1).day.funding;
+    assert_eq!(initial.0, 50_000);
+    let actual = hft_event::FundingSettle {
+        venue: B,
+        account: AC1,
+        _pad: 0,
+        inst: B1,
+        amount: hft_types::Notional(42_000),
+        rate: hft_types::Rate(0),
+        pos_qty: Qty(0),
+        settle_ts_ns: t0800(),
+        rx_tsc: Tsc(h.now()),
+        synth: 0,
+        _pad2: [0; 7],
+    };
+    for _ in 0..2 {
+        let ring = h.rep_ring(AC1);
+        h.push(ring, &actual);
+        h.run();
+        assert_eq!(h.s.engine().ledger.account(AC1).day.funding.0, 42_000);
+    }
+    assert!(h.verify().is_empty());
 }

@@ -7,6 +7,7 @@ mod classify;
 mod codes;
 mod encode;
 mod endpoint;
+mod funding;
 mod md;
 mod prop_encode;
 mod reports;
