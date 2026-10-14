@@ -231,10 +231,17 @@ pub struct Engine {
     /// echoing `BrokenReq`). Entries of older Inputs are stale by their seq; fixed size, no
     /// allocation.
     pub(crate) broken_seen: crate::mode_glue::BrokenSeen,
+    /// The `risk.on_legs` calls of the current Input (`mode_glue::LegsSeen`): one per group and
+    /// LegSummary. Fixed size, no allocation.
+    pub(crate) legs_seen: crate::mode_glue::LegsSeen,
     /// Test hook (feature `testing`): the next Hedge-class executor order carries this
     /// `hedge_cap_qty` instead of its own (SEQ-171 injects a producer that understates the cap).
     #[cfg(feature = "testing")]
     pub test_exec_hedge_cap: Option<hft_types::Qty>,
+    /// Test hook (feature `testing`): the next `advance` returns this `ExecOut` instead of
+    /// calling the executor (SEQ-137 drains one output of every kind).
+    #[cfg(feature = "testing")]
+    pub test_exec_inject: Option<ExecOut>,
 }
 
 impl core::fmt::Debug for Engine {
@@ -509,8 +516,11 @@ impl Engine {
             sent_union: vec![0; n_inst + 1],
             pos_touched: Vec::with_capacity(64),
             broken_seen: crate::mode_glue::BrokenSeen::default(),
+            legs_seen: crate::mode_glue::LegsSeen::default(),
             #[cfg(feature = "testing")]
             test_exec_hedge_cap: None,
+            #[cfg(feature = "testing")]
+            test_exec_inject: None,
         })
     }
 
@@ -597,6 +607,9 @@ impl Engine {
             .unwrap_or_else(|| ExecOut::with_caps(OutCaps::README))
     }
     pub(crate) fn put_exec(&mut self, mut o: ExecOut) {
+        // Every call into the executor drains its output before the buffer goes back (README
+        // "process" 6, SEQ-136); a non-empty buffer here is an output dropped on the floor.
+        debug_assert!(o.is_empty(), "ExecOut returned undrained");
         o.clear();
         self.exec_pool.push(o);
     }

@@ -505,7 +505,7 @@ pub struct AcctState {                           // 每账户
 
 **计次、冷却、截止**(与 OMS 第二腿重试同一机制):首次满足触发且未被第 2 条抑制时记 `fix.first_tsc`(抑制期间不记,唯一例外是多出那一腿所在 venue 未放行时照记、只作闸门滞留告警的起点;venue 恢复期放行与 `manual_hold` 解除时清零,下一次满足触发时重新记);执行结果类失败(交易所拒单、IOC 零成交、引擎单被 #5/#6 拒(`RiskReject`)、计次类的本地发送失败)`count += 1`,门控拒绝不计次但时间照算(本地发送失败哪些计次见 [hft-oms SendReport 处理](../hft-oms/README.md#sendreport-处理));两次间隔 ≥ `fix_cooldown_ms`(`Timer{Exec, Fix}`);`count ≥ fix_max` 或 `now − first_tsc > fix_deadline_ms` → `Broken{FixExhausted}` + `Note{ExecBroken}`(P0)。naked 回到阈值内 → `FixState` 清零。
 
-`fix.first_tsc = 0` 且 `now < wake_at` 时,本 cell 的切片或门控退避尚未结束,不启动补腿窗口;容量续推、回填引起的强制推进与快照恢复均遵守此限制。已经开始的窗口在退避期间继续计时,不因 `wake_at` 延后而重置或延长截止。
+`fix.first_tsc = 0` 且 `now < wake_at` 时,本 cell 的切片或门控退避尚未结束,不启动补腿窗口;容量续推、回填引起的强制推进与快照恢复均遵守此限制。**例外**:目标被敞口门(风控 #9 `EXPOSURE_GATE`)门控时不受此限——该门在 group 裸露期间一直关闭,其退避会把补腿无限期推后;补腿是风险递减单,不受 #9 约束(EXE-502 分支 B)。已经开始的窗口在退避期间继续计时,不因 `wake_at` 延后而重置或延长截止。
 
 **命令** `hedge_fix_cmd`:同一动作,`kind = CmdHedgeFix`,不受计次、冷却、Broken 状态、`manual_hold` 与恢复期抑制的限制(它是 Broken 的人工处理方式、Reorg 的唯一处理方式;调用即解除该 cell 的 `manual_hold`),仍受 HARD 与风控;预览由 control-plane 基于最新对账生成。在 Broken 期间调用会取消本期的自动有界平仓(`auto_fix.phase = Cancelled`)。命令不看补腿阈值 `tol`,只要求已成交裸量高于尘埃线。`ExecCmdErr`:`Hard`(HARD 生效)、`UnknownGroup`(该账户无此 group 的 cell)、`NotQuiescent`(该 group 有活动链接、Unknown/Pending* 槽或即时在途)、`NothingToFix`(已成交裸量 ≤ 尘埃线,或按 lot 向零取整后低于多出那一腿的最小下单量)、`QuoteUnavailable`(多出那一腿 `quote_ok` 不成立)、`ChainLeg`(optional,见上);返回错误时不产生输出、不改状态(不解除 `manual_hold`、不取消自动有界平仓)。naked 降到尘埃线以下后 Broken cap 的解除条件由 hft-risk 判定。
 

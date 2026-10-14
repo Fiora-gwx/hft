@@ -1443,7 +1443,7 @@ spec: README.md
   1. 依次投递两条 `OrderEvent{slot 0, exch_order_id 555}`
 - 期望:
   - sequencer 构造的两条 `ExternalFill{cause Unknown}` 的 `fill_seq` 分别为 400 000 与 1 000 000;`ledger.apply_external` 两次都返回 `Some`;账户 X 持仓变化合计 −0.01
-- 实现:`crates/hft-testkit/src/scenarios/oms.rs::oms_109_foreign_fill_seq_distinct`
+- 实现:`crates/hft-sequencer/tests/oms_integ.rs::oms_109_foreign_fill_seq_distinct`
 
 ### OMS-110 外来单跟踪表 FIFO 淘汰时写 Note
 
@@ -2568,12 +2568,12 @@ spec: README.md
 - 规则:[对冲定价](README.md#对冲定价)、[配置项](README.md#配置项omsconfig)
 - 级别:integ
 - 里程碑:M2
-- 前置:testkit 进程内 sequencer + hft-risk;`RiskParams`:a1 的 Y 所在价格带 `rr_max_cross = 0.005`,a2 账户另设 0.003;L1(a1)第二腿报价 bid 59600.0 / ask 60400.0 下的买单
+- 前置:testkit 进程内 sequencer + hft-risk;`RiskParams`:Y 所在价格带 `rr_max_cross = 0.005`(价格带按 inst 归类,其余 inst 另一档);L1(a1)第二腿报价 bid 59710.0 / ask 60290.0(中价 60000.0)下的买单
 - 步骤:
   1. 第一腿成交,第二腿进对冲定价
 - 期望:
-  - `price_hedge` 收到的 `lim = {2000, 0.005}`(a1 的值,不是 a2 的 0.003),与 `risk.hedge_px_limits(a1, VX, Y)` 逐字段相等;定出的买价 60300.0 经风控 #5 放行
-- 实现:`crates/hft-testkit/src/scenarios/oms.rs::oms_227_limits_same_source`
+  - `price_hedge` 收到的 `lim = {2000, 0.005}`,与 `risk.hedge_px_limits(a1, VX, Y)` 逐字段相等;定出的买价 60300.0(= 越价上限,`capped = true`)经风控 #5 放行
+- 实现:`crates/hft-sequencer/tests/oms_integ.rs::oms_227_limits_same_source`
 
 ### OMS-228 ref_px 为 0 时不判超滑点
 

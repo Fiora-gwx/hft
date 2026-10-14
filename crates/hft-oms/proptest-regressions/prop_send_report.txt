@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc d91db723cd8f229603c6540df76b6dff41b81dbcb51427367ee2800c8a6c1695 # shrinks to inits = [PendingAmend], reps = [(0, 0, 0, false)]
+cc b54bb801a27ebbc13f73c8b7c302908bc1b51c45cf0633e4e6d35d799c14a437 # shrinks to inits = [PendingNew, PendingNew, PendingNew, PendingNew, PendingNew, PendingNew, PendingNew, PendingCancel, PendingCancel, PendingNew, PendingNew, PendingNew, PendingNew, PendingCancel, PendingNew, PendingNew, PendingCancel, PendingCancel, PendingNew, PendingNew, PendingNew, PendingNew, PendingNew, PendingCancel, PendingCancel, PendingNew, PendingNew, PendingNew, PendingCancel, PendingCancel, PendingNew, PendingNew, PendingNew, PendingCancel, PendingNew, PendingNew, PendingCancel, PendingNew, PendingNew, PendingNew, PendingCancel, PendingCancel, PendingNew, PendingNew, PendingCancel, PendingNew, PendingCancel, PendingCancel, PendingNew, PendingNew, PendingCancel], reps = [(40, 187, 20, false)]

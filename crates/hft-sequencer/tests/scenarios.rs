@@ -22,7 +22,7 @@ use hft_types::{
 
 use crate::common::*;
 
-fn steady() -> H {
+pub(crate) fn steady() -> H {
     reset_script();
     let mut h = b0().boot();
     h.steady();
@@ -30,7 +30,7 @@ fn steady() -> H {
 }
 
 /// Every instance in `who` places `f(hx)` on the next a1 Bbo; returns the journal mark before it.
-fn place_on_a1(h: &mut H, who: &'static [StrategyId], f: fn(&Hx<'_>) -> OrderIntent) -> usize {
+pub(crate) fn place_on_a1(h: &mut H, who: &'static [StrategyId], f: fn(&Hx<'_>) -> OrderIntent) -> usize {
     set_hook(move |hx, ev, ctx| {
         if let EventRef::Bbo { inst, .. } = ev
             && *inst == A1
@@ -46,25 +46,25 @@ fn place_on_a1(h: &mut H, who: &'static [StrategyId], f: fn(&Hx<'_>) -> OrderInt
     m
 }
 
-fn link_open(hx: &Hx<'_>) -> OrderIntent {
+pub(crate) fn link_open(hx: &Hx<'_>) -> OrderIntent {
     pair_first(hx, q("0.01"))
 }
 
-fn decs(h: &H, m: usize) -> Vec<OrderDecision> {
+pub(crate) fn decs(h: &H, m: usize) -> Vec<OrderDecision> {
     decisions(&h.since(m)).into_iter().map(|d| d.1).collect()
 }
 
-fn frames(h: &H, n: usize) -> Vec<(OutRing, GwCmd)> {
+pub(crate) fn frames(h: &H, n: usize) -> Vec<(OutRing, GwCmd)> {
     h.io_ref().out[n..].to_vec()
 }
 
-fn notes_of(h: &H, m: usize, c: notes::OmsNoteCode) -> Vec<Note> {
+pub(crate) fn notes_of(h: &H, m: usize, c: notes::OmsNoteCode) -> Vec<Note> {
     let code = notes::code_of(c);
     h.notes_since(m).into_iter().filter(|n| n.code == code).collect()
 }
 
 /// `CapSet` records written since `m`.
-fn cap_sets(h: &H, m: usize) -> Vec<CapRecord> {
+pub(crate) fn cap_sets(h: &H, m: usize) -> Vec<CapRecord> {
     h.notes_since(m)
         .iter()
         .filter(|n| n.source == NoteSource::Risk && n.code & 0xFFFF == 2)
@@ -72,7 +72,7 @@ fn cap_sets(h: &H, m: usize) -> Vec<CapRecord> {
         .collect()
 }
 
-fn has_cap(h: &H, src: CapSource, a: AccountId, g: Option<GroupId>) -> bool {
+pub(crate) fn has_cap(h: &H, src: CapSource, a: AccountId, g: Option<GroupId>) -> bool {
     h.s.engine()
         .risk
         .mode
@@ -82,7 +82,7 @@ fn has_cap(h: &H, src: CapSource, a: AccountId, g: Option<GroupId>) -> bool {
 }
 
 /// The newest link of account `a` (link ids are small; the B0 table holds 4 per account).
-fn last_link(h: &H, a: AccountId) -> Option<LinkEntry> {
+pub(crate) fn last_link(h: &H, a: AccountId) -> Option<LinkEntry> {
     (1..=256u32)
         .filter_map(|id| h.s.engine().oms.link(id).copied())
         .filter(|l| l.account == a && l.state != LinkState::Free)
@@ -90,7 +90,7 @@ fn last_link(h: &H, a: AccountId) -> Option<LinkEntry> {
 }
 
 /// OMS hedge-retry timers in the heap: `(deadline, link_id)`.
-fn hedge_retry_timers(h: &H) -> Vec<(u64, u32)> {
+pub(crate) fn hedge_retry_timers(h: &H) -> Vec<(u64, u32)> {
     h.s.engine()
         .heap
         .sorted()
@@ -100,12 +100,12 @@ fn hedge_retry_timers(h: &H) -> Vec<(u64, u32)> {
         .collect()
 }
 
-fn role(d: &OrderDecision) -> u8 {
+pub(crate) fn role(d: &OrderDecision) -> u8 {
     d.link_role
 }
 
 /// Opens the a1-buy / b1-sell link of s1 and acknowledges the first leg.
-fn open_first(h: &mut H) -> OrderDecision {
+pub(crate) fn open_first(h: &mut H) -> OrderDecision {
     let m = place_on_a1(h, &[S1], link_open);
     let d = decs(h, m).into_iter().find(|d| d.inst == A1).expect("first leg");
     assert_eq!(d.reject, 0, "{d:?}");
@@ -113,7 +113,7 @@ fn open_first(h: &mut H) -> OrderDecision {
     d
 }
 
-fn expire(h: &mut H, d: &OrderDecision) {
+pub(crate) fn expire(h: &mut H, d: &OrderDecision) {
     let ev = order_event(d, OrderEventKind::Expired, h.epoch());
     let r = h.rep_ring(d.account);
     h.push(r, &ev);
@@ -121,7 +121,7 @@ fn expire(h: &mut H, d: &OrderDecision) {
 }
 
 /// Steps to `t` (absolute TSC), letting due timers fire.
-fn run_to(h: &mut H, t: u64) {
+pub(crate) fn run_to(h: &mut H, t: u64) {
     while h.now() < t {
         let d = (t - h.now()).min(50 * MS);
         h.adv(d);
@@ -129,7 +129,7 @@ fn run_to(h: &mut H, t: u64) {
     }
 }
 
-fn no_hedge_fix(h: &H, m: usize) -> bool {
+pub(crate) fn no_hedge_fix(h: &H, m: usize) -> bool {
     let fix_decision = h.since(m).iter().any(|r| {
         r.kind == EventKind::EXEC_DECISION
             && r.read::<hft_event::ExecDecision>()
@@ -142,6 +142,10 @@ fn no_hedge_fix(h: &H, m: usize) -> bool {
 
 #[test]
 fn b1_link_open_rejected_when_hedge_venue_killed() {
+    crate::scenarios_hedge::case(hft_testkit::dst::Scenario::new(
+        "B1",
+        "link open rejected whole when the hedge venue is killed",
+    ));
     // Main: account 1 has a Kill on (B, a); account 2's identical open is untouched.
     let mut h = steady();
     let id = h.cmd_confirmed(
@@ -395,12 +399,12 @@ fn b1_2_unknown_on_hedge_venue_blocks_link_open_until_converged() {
     assert_eq!(frames(&h, n).len(), 1);
 }
 
-fn a1_buy_open(hx: &Hx<'_>) -> OrderIntent {
+pub(crate) fn a1_buy_open(hx: &Hx<'_>) -> OrderIntent {
     open_buy(hx, A1)
 }
 
 /// A one-leg b1 sell IOC Open of g1 at the bid.
-fn b1_sell_open(hx: &Hx<'_>) -> OrderIntent {
+pub(crate) fn b1_sell_open(hx: &Hx<'_>) -> OrderIntent {
     let b = hx.v.bbo(B1);
     let mut it = intent(
         hx,
@@ -416,7 +420,7 @@ fn b1_sell_open(hx: &Hx<'_>) -> OrderIntent {
 }
 
 /// Advances to `t` in 250 ms steps with both venues' market connections alive.
-fn keep_alive_to(h: &mut H, t: u64) {
+pub(crate) fn keep_alive_to(h: &mut H, t: u64) {
     while h.now() < t {
         let d = (t - h.now()).min(250 * MS);
         h.adv(d);
@@ -430,7 +434,7 @@ fn keep_alive_to(h: &mut H, t: u64) {
 
 /// An exchange rate-limit rejection of a one-leg `inst` IOC of s1, with the gateway's
 /// `ConnState{Degraded, RATE_LIMIT}` (the hit that clears the buckets and starts the backoff).
-fn rate_limit_hit(h: &mut H, inst: InstId) -> OrderDecision {
+pub(crate) fn rate_limit_hit(h: &mut H, inst: InstId) -> OrderDecision {
     let f: fn(&Hx<'_>) -> OrderIntent = if inst == A1 { a1_buy_open } else { b1_sell_open };
     let m = place_on_a1(h, &[S1], f);
     let d = decs(h, m)
@@ -444,7 +448,7 @@ fn rate_limit_hit(h: &mut H, inst: InstId) -> OrderDecision {
 
 /// The venue rejects `d` with its rate-limit code (-1015) and the gateway reports
 /// `ConnState{Degraded, RATE_LIMIT}` on the order connection.
-fn venue_rate_reject(h: &mut H, d: &OrderDecision) {
+pub(crate) fn venue_rate_reject(h: &mut H, d: &OrderDecision) {
     let mut ev = order_event(d, OrderEventKind::Reject, h.epoch());
     ev.reject_code = 0xFFFF_FC09;
     let t = h.now();
@@ -494,6 +498,10 @@ fn b1_3_link_venue_rate_reserve_boundary() {
 
 #[test]
 fn b2_open_link_retry_is_second_retry_not_reduce_only() {
+    crate::scenarios_hedge::case(hft_testkit::dst::Scenario::new(
+        "B2",
+        "open-link retry is SecondRetry without reduceOnly",
+    ));
     let mut h = steady();
     let first = open_first(&mut h);
     let m0 = h.mark();
@@ -592,6 +600,10 @@ fn b2_open_link_retry_is_second_retry_not_reduce_only() {
 
 #[test]
 fn b6_unit_error_hedge_vetoed_by_hedge_limit() {
+    crate::scenarios_hedge::case(hft_testkit::dst::Scenario::new(
+        "B6",
+        "unit-error hedge vetoed by HEDGE_LIMIT",
+    ));
     let mut h = steady();
     let first = open_first(&mut h);
     // b1 quoted 1 000× too high (healthy connection) between the first leg and its fill.
@@ -651,12 +663,16 @@ fn b6_unit_error_hedge_vetoed_by_hedge_limit() {
 
 // ------------------------------------------------------------------------------------- LK-1
 
-fn md(v: hft_types::VenueId, st: ConnStateKind, rx: u64) -> hft_event::ConnState {
+pub(crate) fn md(v: hft_types::VenueId, st: ConnStateKind, rx: u64) -> hft_event::ConnState {
     conn(v, 0, st, ConnRole::Md, InstId(0), AccountId(0), rx)
 }
 
 #[test]
 fn lk_1_unhealthy_second_leg_conn_rejects_open() {
+    crate::scenarios_hedge::case(hft_testkit::dst::Scenario::new(
+        "LK-1",
+        "unhealthy second-leg connection rejects the open",
+    ));
     // Main: b1's only BBO connection Down → LINK_STALE (only that bit), no slot, no frame.
     for st in [ConnStateKind::Down, ConnStateKind::Resync] {
         let mut h = steady();
@@ -754,6 +770,10 @@ fn lk_1_5_retry_at_boundary_matches_open() {
 /// leverage report changes the need (LK-2.6/2.7).
 #[test]
 fn lk_2_unaffordable_second_leg_rejects_open() {
+    crate::scenarios_hedge::case(hft_testkit::dst::Scenario::new(
+        "LK-2",
+        "unaffordable second leg rejects the open",
+    ));
     // link_notional = 0.010 × mid × (1 + rr) with b1 mid 50 010.5 (B0 quote 50 010 / 50 011).
     let probe = |avail_raw: i64, lev: Option<&str>| -> u32 {
         let mut h = steady();
@@ -987,7 +1007,7 @@ fn b6_2_second_leg_uses_rate_reserve() {
 // ------------------------------------------------------------------------------------- LK-3
 
 /// `HedgePlan{px_mode Cross, px_param 0.002, max_slip 0.001}` on the a1/b1 link.
-fn link_open_slip(hx: &Hx<'_>) -> OrderIntent {
+pub(crate) fn link_open_slip(hx: &Hx<'_>) -> OrderIntent {
     let mut it = open_buy(hx, A1);
     it.qty = q("0.01");
     let mut plan = onfill(hx.s.account, B1, Side::Sell);
@@ -1003,7 +1023,7 @@ fn link_open_slip(hx: &Hx<'_>) -> OrderIntent {
     it
 }
 
-fn sell_cap(h: &H, bid: &str, ask: &str) -> Px {
+pub(crate) fn sell_cap(h: &H, bid: &str, ask: &str) -> Px {
     let e = h.s.engine();
     let rr = e.risk.hedge_px_limits(AC1, B, B1).rr_max_cross;
     let tick = h.rd.inst(B1).tick;
@@ -1014,6 +1034,10 @@ fn sell_cap(h: &H, bid: &str, ask: &str) -> Px {
 
 #[test]
 fn lk_3_slip_capped_beyond_cross_gated() {
+    crate::scenarios_hedge::case(hft_testkit::dst::Scenario::new(
+        "LK-3",
+        "slip capped, beyond the cross gated",
+    ));
     // Main: ref 50 010; b1 moves 0.4 % (> max_slip, < rr_max_cross of the mid) before the fill.
     let mut h = steady();
     h.quote(B1, "50010", "50010.5");
@@ -1103,11 +1127,11 @@ fn lk_3_slip_capped_beyond_cross_gated() {
 
 // ------------------------------------------------------------------------------------- FP-1
 
-fn send_report(d: &OrderDecision, op: hft_event::GwOp, seq: u64, t: u64) -> hft_event::SendReport {
+pub(crate) fn send_report(d: &OrderDecision, op: hft_event::GwOp, seq: u64, t: u64) -> hft_event::SendReport {
     send_report_st(d, op, seq, t, hft_event::SendStatus::Written)
 }
 
-fn send_report_st(
+pub(crate) fn send_report_st(
     d: &OrderDecision,
     op: hft_event::GwOp,
     seq: u64,
@@ -1133,7 +1157,7 @@ fn send_report_st(
 }
 
 /// `ConnState` of (v, a)'s order connections `orders` and its user stream.
-fn order_conns(h: &mut H, v: hft_types::VenueId, a: AccountId, st: ConnStateKind, orders: &[u8]) {
+pub(crate) fn order_conns(h: &mut H, v: hft_types::VenueId, a: AccountId, st: ConnStateKind, orders: &[u8]) {
     let t = h.now();
     for k in orders {
         h.push(RingId::Rep(0), &conn(v, *k, st, ConnRole::Order, InstId(0), a, t));
@@ -1145,7 +1169,7 @@ fn order_conns(h: &mut H, v: hft_types::VenueId, a: AccountId, st: ConnStateKind
     h.run();
 }
 
-fn slot_state(h: &H, d: &OrderDecision) -> Option<hft_oms::OrderState> {
+pub(crate) fn slot_state(h: &H, d: &OrderDecision) -> Option<hft_oms::OrderState> {
     let r = hft_strategy_sdk::OrderRef::new(d.venue, d.account, d.slot.0, d.r#gen);
     h.s.engine().oms.slot(r).map(|s| s.state)
 }
@@ -1153,7 +1177,7 @@ fn slot_state(h: &H, d: &OrderDecision) -> Option<hft_oms::OrderState> {
 /// FP-1 preamble: the linked open is sent (`SendReport{Place, Written}`), the venue fills it
 /// but every report is lost, then (A, a)'s order connections and user stream drop. Returns the
 /// first leg and the time it was sent.
-fn fp1_lost_reports(h: &mut H) -> (OrderDecision, u64) {
+pub(crate) fn fp1_lost_reports(h: &mut H) -> (OrderDecision, u64) {
     let m = place_on_a1(h, &[S1], link_open);
     let (seq, first) = decisions(&h.since(m))[0];
     assert_eq!(first.reject, 0);
@@ -1169,7 +1193,7 @@ fn fp1_lost_reports(h: &mut H) -> (OrderDecision, u64) {
 }
 
 /// One `Query` per `ConnState{Order, Up}` call; returns its decision seq.
-fn up_and_query(h: &mut H, first: &OrderDecision) -> u64 {
+pub(crate) fn up_and_query(h: &mut H, first: &OrderDecision) -> u64 {
     let m = h.mark();
     order_conns(h, A, AC1, ConnStateKind::Up, &[0]);
     let qs: Vec<_> = decisions(&h.since(m))
@@ -1183,6 +1207,10 @@ fn up_and_query(h: &mut H, first: &OrderDecision) -> u64 {
 
 #[test]
 fn fp_1_conn_down_no_ack_converges_by_query() {
+    crate::scenarios_hedge::case(hft_testkit::dst::Scenario::new(
+        "FP-1",
+        "connection down without Ack converges by query",
+    ));
     let mut h = steady();
     let m = h.mark();
     let (first, t0) = fp1_lost_reports(&mut h);
@@ -1388,7 +1416,7 @@ fn fp_1_3_unanswered_queries_report_stuck() {
 // ------------------------------------------------------------------------------------- FP-2
 
 /// A Reduce of g1's a1 long (sell 0.005 IOC at the bid).
-fn a1_reduce(hx: &Hx<'_>) -> OrderIntent {
+pub(crate) fn a1_reduce(hx: &Hx<'_>) -> OrderIntent {
     let b = hx.v.bbo(A1);
     let mut it = intent(
         hx,
@@ -1404,7 +1432,7 @@ fn a1_reduce(hx: &Hx<'_>) -> OrderIntent {
 }
 
 /// g1 holds a1 +0.01 / b1 −0.01 (a completed link).
-fn hedged_position(h: &mut H) {
+pub(crate) fn hedged_position(h: &mut H) {
     let first = open_first(h);
     let m = h.mark();
     h.fill(&first, first.qty, first.qty, first.px);
@@ -1413,7 +1441,7 @@ fn hedged_position(h: &mut H) {
     h.fill(&second, second.qty, second.qty, second.px);
 }
 
-fn rate_hits(h: &H, m: usize) -> usize {
+pub(crate) fn rate_hits(h: &H, m: usize) -> usize {
     h.notes_since(m)
         .iter()
         .filter(|n| n.source == NoteSource::Risk && n.code & 0xFFFF == 1)
@@ -1422,6 +1450,10 @@ fn rate_hits(h: &H, m: usize) -> usize {
 
 #[test]
 fn fp_2_rate_limit_drains_bucket_and_backs_off() {
+    crate::scenarios_hedge::case(hft_testkit::dst::Scenario::new(
+        "FP-2",
+        "rate limit drains the bucket and backs off",
+    ));
     let mut h = steady();
     hedged_position(&mut h);
     let m = h.mark();

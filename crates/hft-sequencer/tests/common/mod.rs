@@ -252,6 +252,8 @@ pub struct Rd {
     pub limits: Vec<(VenueId, RateLimit)>,
     /// Venues besides A and B (spot; their caps go in `caps`, their insts in `insts`).
     pub extra_venues: Vec<(VenueId, Exchange)>,
+    /// `VenueSpec.stale_guard` overrides of A / B (default `RecvWindow`).
+    pub stale_guards: Vec<(VenueId, StaleGuardKind)>,
 }
 
 pub fn order_limits(v: VenueId, l10: u32, l60: u32) -> Vec<(VenueId, RateLimit)> {
@@ -368,6 +370,7 @@ pub fn b0_rd() -> Rd {
         caps: vec![caps_spec(A, false), caps_spec(B, true)],
         limits,
         extra_venues: Vec::new(),
+        stale_guards: Vec::new(),
     }
 }
 
@@ -379,8 +382,16 @@ impl Rd {
         b.asset(asset(2, "USDT", AssetClass::Stable, 1_000_000));
         b.asset(asset(3, "ETH", AssetClass::Crypto, 1_000));
         b.asset(asset(4, "FILL", AssetClass::Crypto, 1_000));
-        b.venue(venue_spec(A, Exchange::Binance, InstKind::Spot));
-        b.venue(venue_spec(B, Exchange::Gate, InstKind::Perp));
+        for (v, ex, k) in [
+            (A, Exchange::Binance, InstKind::Spot),
+            (B, Exchange::Gate, InstKind::Perp),
+        ] {
+            let mut vs = venue_spec(v, ex, k);
+            if let Some((_, g)) = self.stale_guards.iter().find(|x| x.0 == v) {
+                vs.stale_guard = *g;
+            }
+            b.venue(vs);
+        }
         for (v, ex) in &self.extra_venues {
             b.venue(venue_spec(*v, *ex, InstKind::Spot));
         }

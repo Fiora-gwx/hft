@@ -265,3 +265,70 @@ fn seq_029_view_sources() {
     assert_eq!(v.inst(B1).lot, e.rd.inst(B1).lot);
     let _ = (AccountId(0), ConnId(0));
 }
+
+/// Account 1: 1 000 USDT free at A with a resting a1 buy of 300 USDT; at B a reported available
+/// margin of 800 USDT with a resting b1 Open sell whose margin at 3× is 150 USDT.
+#[test]
+fn seq_026_affordability_reads() {
+    reset_script();
+    let mut h = b0().boot();
+    // The first balance of (A, 1, USDT) initialises the ledger's cash; steady's later report
+    // only reconciles.
+    let br = hft_event::BalanceReport {
+        venue: A,
+        account: AC1,
+        asset: USDT,
+        _pad: 0,
+        free: q("1000"),
+        locked: hft_types::Qty(0),
+        ex_ts_ns: 0,
+        rx_tsc: Tsc(h.now()),
+    };
+    h.push(RingId::Rep(0), &br);
+    h.steady();
+    h.margin_report(AC1, "800", "0", "800");
+    h.quote(B1, "49990", "49991");
+    h.run();
+    let m = h.mark();
+    set_hook(|hx, ev, ctx| {
+        if let EventRef::Bbo { inst, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+        {
+            let mut buy = intent(
+                hx,
+                A1,
+                Side::Buy,
+                hft_types::Tif::Gtc,
+                hft_strategy_sdk::IntentClass::Open,
+                px("50000"),
+                q("0.006"),
+            );
+            buy.group = G1;
+            let _ = ctx.place(buy);
+            let mut sell = intent(
+                hx,
+                B1,
+                Side::Sell,
+                hft_types::Tif::Gtc,
+                hft_strategy_sdk::IntentClass::Open,
+                px("50000"),
+                q("0.009"),
+            );
+            sell.group = G1;
+            let _ = ctx.place(sell);
+        }
+    });
+    h.quote(A1, "50000", "50003");
+    h.run();
+    clear_hook();
+    let ds = decisions(&h.since(m));
+    assert_eq!(ds.len(), 2, "{ds:?}");
+    for (_, d) in &ds {
+        assert_eq!(d.reject, 0, "{d:?}");
+        h.ack(d);
+    }
+    let ra = h.s.engine().risk_adapter();
+    assert_eq!(ra.avail_quote(AC1, A, USDT), Some(n("700")));
+    assert_eq!(ra.avail_margin(AC1, B), Some(n("650")));
+}

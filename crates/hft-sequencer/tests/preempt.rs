@@ -766,3 +766,92 @@ fn seq_078_heartbeat_per_step() {
     h.step();
     assert_eq!(h.hb.read(), h0 + 3);
 }
+
+/// A link of s1 whose second leg expired: its `HedgeRetry` is the heap top. Returns its deadline.
+fn hedge_retry_pending(h: &mut H) -> u64 {
+    set_hook(|hx, ev, ctx| {
+        if let EventRef::Bbo { inst, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+        {
+            let _ = ctx.place(pair_first(hx, q("0.01")));
+        }
+    });
+    let m = h.mark();
+    h.quote(A1, "50000", "50003");
+    h.run();
+    clear_hook();
+    let first = decisions(&h.since(m))[0].1;
+    h.ack(&first);
+    let m = h.mark();
+    h.fill(&first, first.qty, first.qty, first.px);
+    let second = decisions(&h.since(m))
+        .into_iter()
+        .find(|d| d.1.inst == B1)
+        .expect("second leg")
+        .1;
+    h.ack(&second);
+    let ev = order_event(&second, hft_event::OrderEventKind::Expired, h.epoch());
+    h.push(RingId::Rep(0), &ev);
+    h.run();
+    let top = h.s.engine().heap.sorted()[0];
+    assert_eq!((top.owner, top.timer_id & 0xFF), (3, 4), "HedgeRetry on top");
+    top.deadline
+}
+
+fn retry_backlog() -> (H, u64, u64) {
+    let mut h = steady();
+    let d = hedge_retry_pending(&mut h);
+    for k in 0..100u64 {
+        h.push(RingId::Bbo(0), &bbo(A1, A, 0, "50000", "50002", 30_000 + k, 1));
+        h.push(RingId::Md(0), &trade(A1, 900 + k));
+    }
+    let base = h.io().takes;
+    (h, d, base)
+}
+
+#[test]
+fn seq_069_hedge_retry_waits_one_input() {
+    // Dry run: the take number of the 2nd md handed after the backlog is queued.
+    let (mut h, _, base) = retry_backlog();
+    h.step();
+    let handed = h.io().handed.clone();
+    let mds: Vec<usize> = handed
+        .iter()
+        .enumerate()
+        .skip(base as usize)
+        .filter(|(_, r)| matches!(r, Some(RingId::Md(_))))
+        .map(|(i, _)| i)
+        .collect();
+    assert!(mds.len() >= 2, "md handed in the first round: {handed:?}");
+    let k_take = mds[1] as u64 + 1;
+    // Real run: the TSC crosses D while the k-th md is processed.
+    let (mut h, d, _) = retry_backlog();
+    let m = h.mark();
+    h.step_until_take(k_take, d);
+    // The round ended at the crossing: both backlogs are still there when the Timer is handed.
+    assert!(len(&mut h, RingId::Bbo(0)) > 0, "bbo backlog not drained");
+    assert!(len(&mut h, RingId::Md(0)) > 0, "md backlog not drained");
+    for _ in 0..4 {
+        if h.since(m).iter().any(|r| r.kind == EventKind::TIMER) {
+            break;
+        }
+        h.step();
+    }
+    let ins = inputs_since(&h, m);
+    let k = ins
+        .iter()
+        .position(|r| r.kind == EventKind::TIMER)
+        .expect("Timer{Oms, HedgeRetry} handed");
+    let t = ins[k].read::<hft_event::Timer>().expect("timer body");
+    assert_eq!((t.owner, t.timer_id & 0xFF), (3, 4));
+    // Inputs after the TSC crossed D, before the Timer: at most the md being processed.
+    let crossed: Vec<_> = ins[..k].iter().filter(|r| r.tsc >= d).collect();
+    assert!(
+        crossed.len() <= 1,
+        "{:?}",
+        crossed.iter().map(|r| r.kind).collect::<Vec<_>>()
+    );
+    let last = ins[..k].last().expect("an md before the timer");
+    assert_eq!(last.kind, EventKind::TRADE);
+}

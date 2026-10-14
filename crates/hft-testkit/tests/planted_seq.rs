@@ -77,19 +77,46 @@ fn broken_fails(seed: u64) -> DstConfig {
     c
 }
 
-/// The hedge leg's market data is down for 1.5 s right after the opening: the second leg is gated
-/// and goes out as a `SecondRetry` once the quote is back, inside the hedge deadline.
+/// A probe-target `PairOnFill` on g1 (first leg `S1` buy on spot, second leg `P1` sell on the
+/// perp, whose venue supports reduceOnly) whose first second leg the venue rejects: the link
+/// retries with a `SecondRetry`, which must not carry reduceOnly (an opening short with
+/// reduceOnly is refused). On a spot hedge leg the sequencer never sends reduceOnly (hft-risk
+/// `classify` folds in `VenueCaps.reduce_only`), so the defect needs the perp hedge leg.
 fn retry(seed: u64) -> DstConfig {
+    use hft_strategy_sdk::params::{RawParams, SchemaView, encode_body};
+    use hft_testkit::strategies::TargetParams;
     let mut c = suite_cfg("core", seed);
-    c.scripted.push((
-        45_000_000,
-        Fault::ConnDown {
-            venue: VS,
-            conn: hft_testkit::dst::faults::ConnKind::Md,
-            down_ms: 1_500,
-            resync: false,
+    c.faults = FaultRates::off();
+    c.world.accounts.truncate(1);
+    c.world.groups.truncate(1);
+    c.world.strategies.truncate(1);
+    if let Some(i) = c
+        .world
+        .insts
+        .iter_mut()
+        .find(|i| i.id == hft_testkit::dst::world::S1)
+    {
+        i.lot = 100_000;
+        i.min_qty = 100_000;
+    }
+    let schema = &TargetParams::SCHEMA;
+    let defaults = (0..schema.n_fields())
+        .map(|ix| {
+            let f = schema.field(ix).expect("probe-target field");
+            if f.name == "t_pair_ms" { 1_000 } else { f.default }
+        })
+        .collect();
+    c.world.strategies[0].kind_id = 0xFF02;
+    c.world.strategies[0].params = encode_body(
+        schema,
+        1,
+        &RawParams {
+            defaults,
+            overrides: Vec::new(),
         },
-    ));
+    )
+    .expect("probe-target parameters");
+    c.scripted = vec![(0, Fault::SecondLegReject { venue: VP })];
     c
 }
 

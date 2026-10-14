@@ -30,6 +30,7 @@ mod out;
 mod out_props;
 mod price;
 mod prop_fsm;
+mod prop_send_report;
 mod quiesce;
 mod send;
 mod settlement;

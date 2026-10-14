@@ -805,3 +805,150 @@ fn seq_304_replace_refdata_recheck() {
             .expect("Draining");
     assert_eq!(draining.params[0], 0);
 }
+
+// ------------------------------------------------------------------------------- SEQ-289
+
+/// ETH spot on A (inst 25) and ETH perp on B (inst 26), with fillers 23 / 24.
+const X25: hft_types::InstId = hft_types::InstId(25);
+const X26: hft_types::InstId = hft_types::InstId(26);
+
+fn lot_of(s: &str) -> (&str, i64) {
+    (s, (s.parse::<f64>().unwrap() * 1e8).round() as i64)
+}
+
+/// B0 plus the pair (25, 26) with lots `la` / `lb` and the first leg's `min_notional`; account
+/// 1's `force_slice.max_chunk_notional` 1 000 USDT, `dust_notional` 10 USDT. `with_group` boots
+/// s1 with that pair already in a group.
+fn lot_rig(la: &str, lb: &str, min_notional: &str, with_group: bool) -> H {
+    reset_script();
+    let mut b = b0();
+    for id in 23..=26u32 {
+        let i = hft_types::InstId(id);
+        let s = match id {
+            25 => {
+                let mut s = inst_spec(i, A, "ETHFDUSD", false, ETH, ("0.01", 1), lot_of(la));
+                s.min_notional = n(min_notional);
+                s
+            }
+            26 => inst_spec(i, B, "ETH2_USDT", true, ETH, ("0.01", 1), lot_of(lb)),
+            _ => inst_spec(
+                i,
+                A,
+                &format!("F{id}USDT"),
+                false,
+                FILL,
+                ("0.01", 1),
+                ("0.001", 100_000),
+            ),
+        };
+        b.rd.insts.push(s);
+    }
+    b.setup_edit.push(|s| {
+        s.exec.default.dust_notional = n("10");
+        s.exec.default.force_slice.max_chunk_notional = n("1000");
+    });
+    if with_group {
+        b.params[0]
+            .groups
+            .push(group(GroupId(0x0100_0007), ETH, &[leg(X26, B), leg(X25, A)]));
+    }
+    let mut h = b.boot();
+    // g7 at boot has no feeds for its legs: leave the cells in their boot mode.
+    h.bring_up(!with_group);
+    h
+}
+
+fn mark_on(h: &mut H, i: hft_types::InstId, v: hft_types::VenueId, p: &str) {
+    let mut hd = <hft_event::MarketHdr as zerocopy::FromZeros>::new_zeroed();
+    hd.venue = v;
+    hd.inst = i;
+    hd.rx_tsc = h.now();
+    h.push(
+        hft_sequencer::driver::live::RingId::Md(1),
+        &hft_event::MarkPrice { h: hd, px: px(p) },
+    );
+    h.run();
+}
+
+fn book_on(h: &mut H, i: hft_types::InstId, v: hft_types::VenueId, bid: &str, ask: &str) {
+    let t = h.now();
+    h.push(
+        hft_sequencer::driver::live::RingId::Rep(0),
+        &conn(
+            v,
+            0,
+            hft_event::ConnStateKind::Up,
+            hft_event::ConnRole::Md,
+            i,
+            AccountId(0),
+            t,
+        ),
+    );
+    h.upd += 1;
+    let u = h.upd;
+    let ring = if v == A {
+        hft_sequencer::driver::live::RingId::Bbo(0)
+    } else {
+        hft_sequencer::driver::live::RingId::Bbo(1)
+    };
+    h.push(ring, &bbo(i, v, 0, bid, ask, u, t));
+    h.run();
+}
+
+/// SetParams of s1 adding (or keeping) g7 = (26, 25).
+fn add_g7(h: &mut H, version: u64, thr: i64) -> (u8, u32) {
+    let mut p = Spb::s1(version);
+    p.groups = vec![
+        gspec(G1),
+        group(GroupId(0x0100_0007), ETH, &[leg(X26, B), leg(X25, A)]),
+    ];
+    p.values[F_THR] = thr;
+    let id = h.set_params_as(&p, "pipeline", ADMIN, true, |_| {});
+    h.run();
+    h.res(id)
+}
+
+#[test]
+fn seq_289_lot_and_dust() {
+    let lm = (status::INVALID_ARGS, u32::from(detail::LOT_MISMATCH));
+    let applied = (status::APPLIED, 0);
+    // .1 lots 0.001 / 0.01 divide.
+    let mut h = lot_rig("0.001", "0.01", "5", false);
+    assert_eq!(add_g7(&mut h, 2, 5), applied, ".1");
+    // .2 / .3 lots 0.004 / 0.01 (pair_lot 0.02) at mark 50 000 (1 000) and 50 001 (1 000.02).
+    for (mark, want) in [("50000", applied), ("50001", lm)] {
+        let mut h = lot_rig("0.004", "0.01", "5", false);
+        mark_on(&mut h, X26, B, mark);
+        assert_eq!(add_g7(&mut h, 2, 5), want, "mark {mark}");
+    }
+    // .4 no mark, a book mid of 49 000.
+    let mut h = lot_rig("0.004", "0.01", "5", false);
+    book_on(&mut h, X26, B, "48999.99", "49000.01");
+    assert_eq!(add_g7(&mut h, 2, 5), applied, ".4");
+    // .5 no mark, no mid.
+    let mut h = lot_rig("0.004", "0.01", "5", false);
+    assert_eq!(add_g7(&mut h, 2, 5), lm, ".5");
+    assert_eq!(
+        h.s.instances().get(S1).unwrap().params_version(),
+        1,
+        ".5 old params"
+    );
+    // .6 an existing g7 at 0.004 / 0.01 with the mark at 60 000; only a threshold changes.
+    let mut h = lot_rig("0.004", "0.01", "5", true);
+    mark_on(&mut h, X26, B, "60000");
+    assert_eq!(add_g7(&mut h, 2, 9), applied, ".6");
+    // .7 / .8 the new group's trading leg min_notional 10 (= dust) and 10.01.
+    let mut h = lot_rig("0.001", "0.01", "10", false);
+    assert_eq!(add_g7(&mut h, 2, 5), applied, ".7");
+    let mut h = lot_rig("0.001", "0.01", "10.01", false);
+    assert_eq!(
+        add_g7(&mut h, 2, 5),
+        (status::INVALID_ARGS, u32::from(detail::DUST_BELOW_MIN_NOTIONAL)),
+        ".8"
+    );
+    assert_eq!(
+        h.s.instances().get(S1).unwrap().params_version(),
+        1,
+        ".8 old params"
+    );
+}

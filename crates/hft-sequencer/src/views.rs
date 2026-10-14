@@ -482,6 +482,30 @@ impl RiskView for RiskAdapter<'_> {
     }
 }
 
+/// `(link_qty, link_notional)` of a linked first leg (README "意图管线" 4): the second leg's
+/// quantity `qty × num / den` and its notional at the second leg's mid moved by `rr` (rounded
+/// up), the most `price_hedge` can pay at that mid; 0 without a two-sided quote. O(1).
+#[allow(clippy::too_many_arguments)]
+pub fn link_projection(
+    qty: Qty,
+    ratio_num: u32,
+    ratio_den: u32,
+    bid: Px,
+    ask: Px,
+    rr: Rate,
+    exp: hft_types::AssetExp,
+    quote_rate: Rate,
+) -> (Qty, Notional) {
+    let den = i128::from(ratio_den.max(1));
+    let lq = i128::from(qty.0) * i128::from(ratio_num) / den;
+    let link_qty = Qty(i64::try_from(lq).unwrap_or(i64::MAX));
+    if bid.0 <= 0 || ask.0 <= 0 {
+        return (link_qty, Notional(0));
+    }
+    let capx = Px::mid_floor(bid, ask).mul_rate(rr, hft_types::RoundMode::Ceil);
+    (link_qty, Risk::notional(link_qty, capx, exp, quote_rate))
+}
+
 /// Rescales `raw × 10^from` to exponent `to` (floor).
 pub fn rescale(raw: i64, from: i32, to: i32) -> i64 {
     let d = from - to;
