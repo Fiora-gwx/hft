@@ -29,6 +29,7 @@ mod mem_journal;
 mod mismatch;
 mod mode;
 mod notify_backlog;
+mod oms_integ;
 mod params;
 mod poison;
 mod preempt;
