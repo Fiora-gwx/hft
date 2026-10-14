@@ -1194,6 +1194,13 @@ impl Conn {
         &self.rx[self.ps..self.pe]
     }
 
+    /// HTTP uses the same first-record / completion-read timestamp rule as WS.
+    pub(crate) fn plaintext_stamps(&self) -> Timestamps {
+        let first = self.seg_at(self.plain_abs);
+        let last = self.seg_at(self.plain_abs + (self.pe - self.ps).saturating_sub(1) as u64);
+        self.compose(first.first, last.done_tsc)
+    }
+
     /// Consumes `n` plaintext bytes (the Upgrade response).
     pub(crate) fn consume_plain(&mut self, n: usize) {
         let n = n.min(self.pe - self.ps);

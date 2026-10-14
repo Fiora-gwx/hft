@@ -107,6 +107,27 @@ impl std::fmt::Debug for Handoff {
 }
 
 impl Handoff {
+    /// A completed scripted TLS connection, exclusively owned by its returned token.
+    #[cfg(feature = "test-io")]
+    #[doc(hidden)]
+    pub fn test_from_conn(conn: Box<Conn>) -> Self {
+        let id = conn.id();
+        let role = conn.role;
+        let arena = Box::leak(Box::new(ConnArena {
+            slots: vec![Slot {
+                role,
+                conn: UnsafeCell::new(*conn),
+            }]
+            .into_boxed_slice(),
+            clock: hft_rt::TscClock::from_hz_milli(1_000_000_000_000, hft_rt::CalibPair::default()),
+        }));
+        Self {
+            arena,
+            slot: 0,
+            id,
+            role,
+        }
+    }
     /// Arena slot number.
     pub fn slot(&self) -> u16 {
         self.slot

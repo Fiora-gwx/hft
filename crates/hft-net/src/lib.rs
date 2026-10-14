@@ -26,6 +26,7 @@ mod connector;
 mod pool;
 mod ready;
 pub mod rest;
+mod rest_pool;
 pub mod sock;
 mod tls;
 mod types;
@@ -43,6 +44,7 @@ pub use hft_event::ConnRole;
 pub use hft_types::ConnId;
 pub use pool::{ActiveIter, BuildWhy, ConnPool, PoolErr, PoolMode, RotatePolicy};
 pub use ready::{ReadyHandle, ReadyPoll};
+pub use rest_pool::{Header, Method, ReqTag, RestErr, RestFail, RestPool, RestReq, RestResp};
 pub use sock::SysCount;
 pub use tls::ConfigErr;
 pub use types::{
