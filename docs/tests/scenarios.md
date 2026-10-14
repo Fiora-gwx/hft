@@ -1473,7 +1473,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 - 断言:
   - t ∈ [1 s, 5 s):账户 `a` 的 `gate_bits` 无 `ACCOUNT_CFG`(`Note{StartupGate}`),`released = false`;账户 `a` 无 `AccountCfg` cap
   - t = 5 s Input 内 `VP` 进入 `cfg_ok_venues`;其余位已满足,账户 `a` 放行
-- 实现:`apps/hft-core/tests/safety_scenarios.rs::c6_account_cfg_gate_and_cap`；真实 sequencer 的 B0 确定性步骤覆盖干净 Drain 后恢复、配置门、C6.1–C6.5 配置变化及开仓/减仓/对冲；恢复后的配置观察 journal 独立回放逐步比较。W1 标准种子集待补。
+- 实现:`apps/hft-core/tests/safety_scenarios.rs::c6_account_cfg_gate_and_cap`
+- 覆盖边界:真实 sequencer 的 B0 确定性步骤覆盖干净 Drain 后恢复、配置门、C6.1–C6.5 配置变化及开仓/减仓/对冲；恢复后的配置观察 journal 独立回放逐步比较。W1 标准种子集待补。
 - 备注:测试网部分见 drills.md
 
 | 行 | 相对主例的变化 | 断言 |
@@ -1659,7 +1660,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - t = 1 s Input 内 `CapSet{Delisting, (VP, P1), params[0] = at_ns}`(Info);实例 1 收到 `EventRef::Notice`
   - t ∈ (1 s, 20 s):本腿或链接腿为 `P1` 的 Open `reject = CLOSE_ONLY`;S1 单腿 Open(无链接)`reject = 0`;`P1` 的减仓与对冲单 `reject = 0`
   - t = 20 s 之后 `P1` 的 Open `reject = 0`
-- 实现:`apps/hft-core/tests/safety_scenarios.rs::c15_delisting_notice_blocks_open_on_inst`；B0 真实成交形成两腿后验证公告、链接腿门控、单腿开仓、减仓、对冲与 Resume。C15.1 的 FundingStats 与 W1 标准种子集待补。
+- 实现:`apps/hft-core/tests/safety_scenarios.rs::c15_delisting_notice_blocks_open_on_inst`
+- 覆盖边界:B0 真实成交形成两腿后验证公告、链接腿门控、单腿开仓、减仓、对冲与 Resume。C15.1 的 FundingStats 与 W1 标准种子集待补。
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
