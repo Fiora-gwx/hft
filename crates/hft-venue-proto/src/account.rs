@@ -12,24 +12,11 @@ pub enum Query {
     SymbolSettings,
     Balances,
     Positions,
-    OpenOrders {
-        cursor: String,
-    },
-    Cancel {
-        symbol: String,
-        order_id: String,
-    },
+    OpenOrders { cursor: String },
+    Cancel { symbol: String, order_id: String },
     ListenKey,
     Keepalive,
-    DeadMan {
-        symbol: String,
-        timeout_ms: u32,
-    },
-    Funding {
-        start_ms: i64,
-        end_ms: i64,
-        cursor: String,
-    },
+    DeadMan { symbol: String, timeout_ms: u32 },
 }
 #[derive(Clone, Debug)]
 pub struct OpenOrder {
@@ -46,12 +33,11 @@ pub struct State {
     pub orders: Vec<OpenOrder>,
     pub cursor: String,
     pub funding: Vec<hft_event::FundingSettle>,
-    pub funding_cursor: String,
-    pub funding_ids: Vec<String>,
 }
 
 /// Separate warm extension: implementations may allocate; no hot decoder depends on it.
 pub trait AccountProtocol: VenueProtocol {
+    type Funding: crate::FundingHistoryProtocol + Send;
     fn account_request(
         cfg: &VenueCfg,
         cred: &Credential,

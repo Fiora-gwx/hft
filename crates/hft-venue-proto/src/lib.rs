@@ -18,8 +18,8 @@
     clippy::unimplemented
 )]
 
-mod funding;
 pub mod account;
+mod funding;
 mod sink;
 mod types;
 

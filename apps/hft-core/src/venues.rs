@@ -736,6 +736,7 @@ fn account_error(name: &str, e: &hft_venue::account::Error) -> Error {
         hft_venue::account::Error::Transport(_) => "REST transport failed; exchange outcome unknown",
         hft_venue::account::Error::CancelNotQuiescent => "startup open orders did not converge to empty",
         hft_venue::account::Error::Busy => "account request already active",
+        hft_venue::account::Error::Funding(_) => "funding history incomplete or invalid",
     };
     Error::config("AccountBootstrap", format!("{name}: {detail}"))
 }

@@ -596,7 +596,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 
 ### 非正式账户启动基线与结算观察
 
-`seed_position` 仅供空账本启动，按交易所数量/入场价建账户 unassigned 成本，不产生虚构成交或现金；余额使用首次 BalanceReport 初始化，初始状态进完整 StateSnapshot。RateOnly 真实 FundingSettle 输入只由 check_funding 比较合成历史、发 FundingMismatch，不再次记现金；冷消费者相同。已有显式 ReconcileReport 校正入口不受影响。
+`seed_position` 仅供空账本启动，按交易所数量/入场价建账户 unassigned 成本，不产生虚构成交或现金；余额使用首次 BalanceReport 初始化，初始状态进完整 StateSnapshot。运行中余额/持仓差异只告警，不覆盖账本；资金费沿用既有实际结算入口。
 
 ## 已知限制与后续工作
 

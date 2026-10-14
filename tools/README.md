@@ -86,7 +86,7 @@ PR 级的解耦检查,上线门槛 ⑧ 的一部分([testing §8](../docs/testin
 ### cargo xtask scaffold-gate
 
 ```sh
-cargo xtask scaffold-gate [--keep] [--profile <name>]
+cargo xtask scaffold-gate [--keep] [--profile <name>] [--generic-tools]
 ```
 
 "新增策略零改动"的检查,上线门槛 ⑧ 的另一部分:
@@ -99,6 +99,8 @@ cargo xtask scaffold-gate [--keep] [--profile <name>]
 模板(`strategies/_template/`)或 `strategies/registry` 尚不在仓库时跳过:退出 0,原因写进摘要与 JSON(`result = "skipped"`)。JSON 另含 `new_strategy_args`、`dst_seeds`、`profile`、`hft_core`、`sim_account`(生成配置中的 Sim 账户)、`steps`(每步命令与退出码,或 `skipped` 原因)与 `violations`。
 
 按路径触发(改动 `crates/`、`apps/`、`strategies/`、`tools/` 的 PR,[testing §6](../docs/testing.md#6-ci-运行矩阵))。
+
+SDK-005 由 `--generic-tools` 运行隔离副本的 `sdk005` 进程用例，要求 `HFT_CFG_BIN` 指向预先构建的通用工具、`HFT_PYTHON` 指向已安装 hft-py wheel 的 Python；副本只构建新策略与 app，不重建这两个工具。测试导出 schema、比较参数 body，并向真实 ctl socket 发 preview。Model 场景与 DST 先按完整模板运行；app 的 schema/ctl 阶段保留相同参数 schema，以 SDK NoModel 适配器装配，M3 host 不提供 advisor。装配检查先用副本中的 schema 构造完整 blob 配置。
 
 ### cargo xtask deps
 

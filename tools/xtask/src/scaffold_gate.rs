@@ -638,7 +638,8 @@ fn build_and_check(
         ));
         steps.push((
             "hft-core --check",
-            Cmd::new(&bin.display().to_string(), &["--check", "--config"]).arg(cfg.display().to_string()),
+            Cmd::new(&bin.display().to_string(), &["--check", "--dry-run", "--config"])
+                .arg(cfg.display().to_string()),
         ));
     }
     if opts.generic_tools && opts.hft_core {
@@ -648,6 +649,19 @@ fn build_and_check(
         ));
     }
     for (name, mut c) in steps {
+        if name == "build hft-core" {
+            // Model scenario/DST have already run. The M3 host has no advisor task, so its
+            // schema/ctl acceptance uses the same schema with the SDK's NoModel adapter.
+            let source = pdir.join("src/lib.rs");
+            let code = rd(&source)?
+                .replace(
+                    &format!("type Model = model::{}Model;", o.ty()),
+                    &format!("type Model = hft_strategy_sdk::NoModel<{}Params>;", o.ty()),
+                )
+                .replace("Part::Both", "Part::Fast")
+                .replace("        out.model_tick(MODEL_TICK_MS);\n", "");
+            wr(&source, &code)?;
+        }
         c.env = tenv.clone();
         let o = exec.run(&c)?;
         r.steps

@@ -8,6 +8,8 @@ spec: README.md
 
 格式与规则见 [docs/tests](../docs/tests/README.md)。
 
+SDK-005 的记录型执行器测试在 `xtask/tests/scaffold_gate.rs`；实际隔离副本进程测试模板在 `xtask/scaffold/sdk005.rs.tmpl`，CI Python 作业通过 `--generic-tools` 执行。
+
 ## 覆盖
 
 | README 小节 | 用例 |

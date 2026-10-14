@@ -73,6 +73,20 @@ pub fn write_for_kind(root: &Path, hot: &Path, user: Option<&str>, kind: Option<
             dust: Qty(1),
         });
     }
+    if kind.is_some() {
+        b.asset(AssetSpec {
+            id: AssetId(4),
+            name: "BGB".into(),
+            class: AssetClass::Crypto,
+            exp: AssetExp {
+                px_exp: -4,
+                qty_exp: -8,
+            },
+            px_max: Px(1_000_000_000_000),
+            qty_max: Qty(1_000_000_000_000_000),
+            dust: Qty(1),
+        });
+    }
     b.venue(VenueSpec {
         id: v,
         exchange: Exchange::Binance,
@@ -156,7 +170,7 @@ pub fn write_for_kind(root: &Path, hot: &Path, user: Option<&str>, kind: Option<
         use hft_venue_proto::VenueProtocol;
         b.caps(venue_bitget::BitgetSpot::default_caps(|s| match s {
             "USDT" => Some(usdt),
-            "BNB" => Some(AssetId(3)),
+            "BGB" => Some(AssetId(4)),
             _ => None,
         }));
         b.fee(FeeSpec {

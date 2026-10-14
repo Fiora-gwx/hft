@@ -9,6 +9,7 @@ use serde::{Deserialize, de::DeserializeOwned};
 macro_rules! implementation {
     ($p:ty, $fut:expr) => {
         impl AccountProtocol for $p {
+            type Funding = crate::BitgetUsdtFutures;
             fn account_request(
                 c: &VenueCfg,
                 k: &Credential,
@@ -67,20 +68,6 @@ fn request(
             }
             format!(
                 "/api/v3/trade/unfilled-orders?category={cat}&limit=100{}",
-                if cursor.is_empty() {
-                    String::new()
-                } else {
-                    format!("&cursor={cursor}")
-                }
-            )
-        }
-        Query::Funding {
-            start_ms,
-            end_ms,
-            cursor,
-        } if fut && (*start_ms >= 0) && end_ms >= start_ms && (cursor.is_empty() || safe_token(cursor)) => {
-            format!(
-                "/api/v3/account/financial-records?category=USDT-FUTURES&coin=USDT&startTime={start_ms}&endTime={end_ms}&limit=100{}",
                 if cursor.is_empty() {
                     String::new()
                 } else {
@@ -205,21 +192,6 @@ struct Orders {
     #[serde(default)]
     cursor: Option<String>,
 }
-#[derive(Deserialize)]
-struct FundingRow {
-    id: String,
-    symbol: String,
-    coin: String,
-    r#type: String,
-    amount: String,
-    ts: String,
-}
-#[derive(Deserialize)]
-struct FundingRows {
-    list: Vec<FundingRow>,
-    #[serde(default)]
-    cursor: Option<String>,
-}
 
 fn precision(s: &str) -> Result<String, DecodeErr> {
     let n = s.parse::<usize>().map_err(|_| DecodeErr::Number)?;
@@ -266,51 +238,6 @@ fn decode(
     }
     let ns = t.checked_mul(1_000_000).ok_or(DecodeErr::Overflow)?;
     match q {
-        Query::Funding { start_ms, end_ms, .. } => {
-            let rows: FundingRows = data(b)?;
-            s.funding_cursor = rows.cursor.unwrap_or_default();
-            for r in rows.list {
-                if !matches!(
-                    r.r#type.as_str(),
-                    "CONTRACT_MAIN_SETTLE_FEE_USER_IN" | "CONTRACT_MAIN_SETTLE_FEE_USER_OUT"
-                ) {
-                    continue;
-                }
-                let ts = r.ts.parse::<i64>().map_err(|_| DecodeErr::Number)?;
-                let settle_ns = ts.checked_mul(1_000_000).ok_or(DecodeErr::Overflow)?;
-                if r.coin != "USDT" || ts < *start_ms || ts > *end_ms || !safe_token(&r.id) {
-                    return Err(DecodeErr::Shape);
-                }
-                if s.funding_ids.contains(&r.id) {
-                    continue;
-                }
-                if s.funding_ids.len() >= 4096 {
-                    return Err(DecodeErr::Shape);
-                }
-                let i = instrument(rd, v, &r.symbol)?;
-                let value = notional(&r.amount)?;
-                if (r.r#type.ends_with("_IN") && value < 0) || (r.r#type.ends_with("_OUT") && value > 0) {
-                    return Err(DecodeErr::Shape);
-                }
-                s.funding_ids.push(r.id);
-                if let Some(f) = s
-                    .funding
-                    .iter_mut()
-                    .find(|f| f.inst == i && f.settle_ts_ns == settle_ns)
-                {
-                    f.amount.0 = f.amount.0.checked_add(value).ok_or(DecodeErr::Overflow)?;
-                } else {
-                    s.funding.push(hft_event::FundingSettle {
-                        venue: v,
-                        account: a,
-                        inst: i,
-                        amount: Notional(value),
-                        settle_ts_ns: settle_ns,
-                        ..zerocopy::FromZeros::new_zeroed()
-                    });
-                }
-            }
-        }
         Query::Instruments => {
             let rows: Vec<Instrument> = data(b)?;
             for i in rd.insts_of_venue(v) {

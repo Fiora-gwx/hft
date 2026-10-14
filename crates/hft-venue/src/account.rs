@@ -25,6 +25,7 @@ pub enum Error {
     Protocol(Query),
     CancelNotQuiescent,
     Busy,
+    Funding(crate::FundingPollErr),
 }
 struct Work {
     query: Query,
@@ -66,7 +67,8 @@ pub struct Client<P: AccountProtocol, T: Transport = hft_net::rest::Client> {
     order: Option<(hft_event::GwCmd, hft_venue_proto::RestOrigin)>,
     order_reply: Option<crate::order_rest::Reply>,
     started_ms: i64,
-    funding_pages: u16,
+    funding: Option<crate::FundingPoll<P::Funding>>,
+    funding_active: bool,
 }
 impl<P: AccountProtocol, T: Transport> core::fmt::Debug for Client<P, T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -110,7 +112,8 @@ impl<P: AccountProtocol, T: Transport> Client<P, T> {
             order: None,
             order_reply: None,
             started_ms: 0,
-            funding_pages: 0,
+            funding: None,
+            funding_active: false,
         }
     }
     fn add(&mut self, q: Query) {
@@ -171,7 +174,8 @@ impl<P: AccountProtocol, T: Transport> Client<P, T> {
         Ok(())
     }
     pub fn idle(&self) -> bool {
-        self.active.is_none()
+        !self.funding_active
+            && self.active.is_none()
             && self.queue.is_empty()
             && !self.ready
             && self.order.is_none()
@@ -252,8 +256,37 @@ impl<P: AccountProtocol, T: Transport> Client<P, T> {
     pub fn poll(&mut self, now: i64) -> Result<bool, Error> {
         if self.started_ms == 0 {
             self.started_ms = now / 1_000_000;
+            if self.rd.caps(P::VENUE).funding_settle == hft_refdata::FundingSettleKind::RateOnly {
+                self.funding = Some(
+                    crate::FundingPoll::new(
+                        self.account,
+                        self.started_ms,
+                        crate::FundingPollCfg {
+                            poll_ms: i64::from(self.cfg.interval_ms),
+                            lookback_ms: i64::try_from(self.cfg.funding_window_ms)
+                                .map_err(|_| Error::Funding(crate::FundingPollErr::Config))?,
+                            settle_lag_ms: i64::from(self.cfg.funding_lag_ms),
+                            max_settlement_skew_ms: i64::from(self.cfg.funding_lag_ms),
+                            max_pages: 64,
+                            max_bills: 4096,
+                        },
+                    )
+                    .map_err(Error::Funding)?,
+                );
+            }
         }
         if let Some(result) = self.transport.poll(now) {
+            if self.funding_active {
+                self.funding_active = false;
+                let r = result.map_err(Error::Transport)?;
+                let poll = self.funding.as_mut().ok_or(Error::Busy)?;
+                poll.response(self.rd, r.status, &r.body, now / 1_000_000, hft_types::Tsc(0))
+                    .map_err(Error::Funding)?;
+                self.state.funding = poll.take_ready();
+                self.ready = !self.state.funding.is_empty();
+                self.next = now + i64::from(self.cfg.request_gap_ms) * 1_000_000;
+                return Ok(true);
+            }
             if let Some((cmd, origin)) = self.order.take() {
                 self.order_reply = Some(crate::order_rest::Reply::new(self.account, cmd, origin, result));
                 self.next = now + i64::from(self.cfg.request_gap_ms) * 1_000_000;
@@ -305,26 +338,6 @@ impl<P: AccountProtocol, T: Transport> Client<P, T> {
                 {
                     return Err(Error::Protocol(q.clone()));
                 }
-                if let Query::Funding {
-                    start_ms,
-                    end_ms,
-                    cursor,
-                } = q
-                    && !self.state.funding_cursor.is_empty()
-                {
-                    self.funding_pages += 1;
-                    if self.funding_pages > 64 || self.state.funding_cursor == *cursor {
-                        return Err(Error::Protocol(q.clone()));
-                    }
-                    self.queue.push_front(Work {
-                        query: Query::Funding {
-                            start_ms: *start_ms,
-                            end_ms: *end_ms,
-                            cursor: self.state.funding_cursor.clone(),
-                        },
-                        session: false,
-                    });
-                }
                 if self.boot && matches!(q, Query::OpenOrders { .. }) {
                     if !self.state.orders.is_empty() {
                         self.cancel_rounds += 1;
@@ -361,6 +374,7 @@ impl<P: AccountProtocol, T: Transport> Client<P, T> {
             return Ok(true);
         }
         if self.ready
+            || self.funding_active
             || self.active.is_some()
             || self.order.is_some()
             || self.order_reply.is_some()
@@ -377,27 +391,31 @@ impl<P: AccountProtocol, T: Transport> Client<P, T> {
             if P::MARKET == MarketKind::LinearPerp {
                 self.add(Query::Positions);
             }
-            if self.rd.caps(P::VENUE).funding_settle == hft_refdata::FundingSettleKind::RateOnly {
-                let start_ms = self.started_ms.max(
-                    (now / 1_000_000).saturating_sub(self.cfg.funding_window_ms.min(i64::MAX as u64) as i64),
-                );
-                let end_ms = now / 1_000_000 - i64::from(self.cfg.funding_lag_ms);
-                if end_ms > start_ms {
-                    self.funding_pages = 0;
-                    self.add(Query::Funding {
-                        start_ms,
-                        end_ms,
-                        cursor: String::new(),
-                    });
-                }
-            }
         }
+
         if self.queue.is_empty()
             && P::USER_STREAM
             && !self.listen.is_empty()
             && now - self.last_keepalive >= i64::from(self.cfg.listen_keepalive_ms) * 1_000_000
         {
             self.add(Query::Keepalive);
+        }
+        if self.queue.is_empty()
+            && !self.boot
+            && let Some(poll) = &mut self.funding
+        {
+            let clock = hft_venue_proto::WallClock {
+                unix_ms: now / 1_000_000,
+                unix_us: now / 1000,
+            };
+            if let Some(req) = poll
+                .request(&self.venue, &self.rest, &clock)
+                .map_err(|_| Error::Funding(crate::FundingPollErr::Config))?
+            {
+                self.send(&req, now)?;
+                self.funding_active = true;
+                return Ok(true);
+            }
         }
         let Some(w) = self.queue.pop_front() else {
             return Ok(false);
@@ -440,6 +458,10 @@ impl<P: AccountProtocol, T: Transport> Client<P, T> {
     /// After a runtime observation failure, discard the partial batch and retry after the
     /// configured interval. The caller publishes an unreadable configuration gate meanwhile.
     pub fn retry(&mut self, now: i64) {
+        self.funding_active = false;
+        if let Some(poll) = &mut self.funding {
+            poll.retry(now / 1_000_000);
+        }
         self.queue.clear();
         self.active = None;
         self.state = State::default();

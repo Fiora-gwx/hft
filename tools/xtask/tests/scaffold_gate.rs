@@ -174,7 +174,7 @@ fn tool_022_scenario_dst_check_order() {
     };
     let scen = at("-p ci-probe --test scenario");
     let dst = at("-p hft-strategy-registry --test ci_probe_dst");
-    let check = at(" --check --config ");
+    let check = at(" --check --dry-run --config ");
     assert!(scen < dst && dst < check, "{calls:?}");
     assert!(
         calls[check].starts_with(&hft_core(&f.path("target"))),
@@ -343,7 +343,7 @@ fn sdk_004_second_test_strategy_zero_engine_diff() {
     for pat in [
         "-p ci-probe --test scenario",
         "-p hft-strategy-registry --test ci_probe_dst",
-        " --check --config ",
+        " --check --dry-run --config ",
     ] {
         assert!(calls.iter().any(|c| c.contains(pat)), "{pat} not in {calls:?}");
     }

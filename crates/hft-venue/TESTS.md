@@ -10,12 +10,13 @@ spec: README.md
 
 格式与规则见 [docs/tests](../../docs/tests/README.md)。本 crate 的用例以桩协议 `StubProto` 与脚本化连接驱动 `FeedRuntime`、`SnapFetchTask`、`GwRuntime`、`AcctFetchTask` 与 `SessionDriver`,与具体交易所无关;各 `venue-*` 的报文金样与契约检查在各自的 `TESTS.md`,真实 venue 协议与运行时、sequencer 组合的跨组件场景在 [scenarios](../../docs/tests/scenarios.md)。
 
-CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs::core_120_mock_accounts_bootstrap_reauth_and_drift` 以独立子进程、两家真实协议和脚本 REST 验证撤空、基线、重新核验、超时/错误模式失败与余额差异不覆盖账本；不替代真实 TLS、交易所或正式恢复验收。RateOnly 真实结算观察只告警，不重复入账。
+CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs::core_120_mock_accounts_bootstrap_reauth_and_drift` 以独立子进程、两家真实协议和脚本 REST 验证撤空、基线、重新核验、超时/错误模式失败与余额差异不覆盖账本；不替代真实 TLS、交易所或正式恢复验收。资金费账单复用 FundingPoll，沿用现有实际结算记账与去重。
 
 ## 覆盖
 
 | README 小节 | 用例 |
 |---|---|
+| 测试环境账户启动与观察 | VEN-261、VEN-310 |
 | 资金费账单轮询 | VEN-258 |
 | 概要 | VEN-014、VEN-020、VEN-021、VEN-241、VEN-389 |
 | 目录 | 不适用:非规范 |

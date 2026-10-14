@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-新 journal 的非正式 Live 账户先验证规则/配置/身份、撤销遗留订单并查到空，再读取余额与持仓。空账本建立账户 unassigned 成本并写完整启动快照。运行中的观察先入 journal，只检查余额/持仓差异；RateOnly 真实结算与合成历史比较，不重复记现金。Demo Unverifiable 使用相同 REST/WS key，仍需人工身份确认。
+新 journal 的非正式 Live 账户先验证规则/配置/身份、撤销遗留订单并查到空，再读取余额与持仓。空账本建立账户 unassigned 成本并写完整启动快照。运行中的观察先入 journal，只检查余额/持仓差异；Bitget 资金费账单复用集成分支的 FundingPoll 与实际结算记账。Demo Unverifiable 使用相同 REST/WS key，仍需人工身份确认。
 
 ## Alternatives considered
 

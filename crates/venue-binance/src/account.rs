@@ -9,6 +9,7 @@ use serde::Deserialize;
 macro_rules! implementation {
     ($p:ty, $fut:expr) => {
         impl AccountProtocol for $p {
+            type Funding = crate::Usdm;
             fn account_request(
                 c: &VenueCfg,
                 k: &Credential,
@@ -445,7 +446,6 @@ fn decode(
             let _: Order = from(b)?;
         }
         Query::ListenKey | Query::Keepalive => {}
-        Query::Funding { .. } => return Err(DecodeErr::UnknownClass),
         Query::DeadMan { symbol, timeout_ms } => {
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase")]

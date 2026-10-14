@@ -208,6 +208,14 @@ impl<P: FundingHistoryProtocol> FundingPoll<P> {
         Ok(())
     }
 
+    /// Transfer a completed window to another bounded warm ingress batch.
+    pub fn take_ready(&mut self) -> Vec<FundingSettle> {
+        if self.sent != 0 {
+            return Vec::new();
+        }
+        std::mem::take(&mut self.ready)
+    }
+
     pub fn pending(&self) -> &[FundingSettle] {
         self.ready.get(self.sent..).unwrap_or(&[])
     }
