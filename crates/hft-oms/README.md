@@ -658,7 +658,9 @@ const _: () = assert!(size_of::<LinkEntry>() == 80 && offset_of!(LinkEntry, firs
 
 ### Simultaneous
 
-`HedgePlan.kind = Simultaneous` 的第一腿在 `place()` 的**同一事件内**产出第二腿 `HedgeRequest{role: Second, qty: floor_to_lot(qty × ratio + residual)}`(第二腿在风控里按 Open 分类,检查两腿 venue;尚无成交,不受裸量上限约束)。两腿都终态后按成交净量比较:
+sequencer 先用 `simultaneous_preview` 只读检查两腿槽、链接槽、待发送队列及第二腿量,再按[意图管线](../hft-sequencer/README.md#意图管线)整对准入。两腿 venue 必须不同;任一资源不足不分配槽。恢复后的原始两腿先查询收敛,均终态后才按 on_fail 处理差额;仍在途的 Reverse 不重复发送。Reverse 等待多出那条腿所在 venue 的闸门。
+
+`HedgePlan.kind = Simultaneous` 的第一腿在 `place()` 的**同一事件内**产出第二腿 `HedgeRequest{role: Second, qty: floor_to_lot(qty × ratio + residual)}`(第二腿增仓按 Open、减仓提示按 Reduce 分类,检查两腿 venue;尚无成交,不受裸量上限约束)。两腿都终态后按成交净量比较:
 
 - 第二腿少于第一腿 × ratio:`on_fail = Reverse` → 对第一腿已成交未对冲部分发 `Reverse`(reduce-only,IOC);`Hold` → 只进 LegTracker。
 - 第一腿少于第二腿 / ratio(第一腿被拒或部分成交):对称处理,在第二腿上发 `Reverse`。
@@ -983,6 +985,8 @@ const _: () = assert!(size_of::<TableRow>() == 32 && size_of::<LinkRowHdr>() == 
 `reconcile_cash_guard(&ReconcileBatchView)` 在任何财务处理前同时核对来源冲突和整组所需容量。同一原始订单的多笔成交只占一个来源行;批内 distinct 新身份总数必须不大于剩余 foreign_fill_track,失败无副作用。
 
 ## 延迟与资源契约
+
+`simultaneous_preview` 预算 p50 ≤ 50 ns/p99 ≤ 150 ns,基准 `oms/simultaneous_preview`,零分配;待统一升级主机实测。
 
 分段:`decided_tsc − proc_tsc`(簿 + 策略 + 执行层 + 风控 + OMS,基准形态 1–5 µs,[00 §4](../../design/00-目标与延迟预算.md));OMS 占其中以下份额。测量:Criterion 基准(热缓存,单核)+ 实盘 `LatencySample` 分段直方图。
 

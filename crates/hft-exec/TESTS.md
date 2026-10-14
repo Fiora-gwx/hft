@@ -4158,6 +4158,8 @@ spec: README.md
 
 ### EXE-502 Simultaneous:第二腿失败按 on_fail 处理,反向失败进入 Broken
 
+- 真实引擎确定性故障补充:`crates/hft-sequencer/tests/simultaneous.rs::exe_502_simultaneous_fault_seeds_and_snapshot_replay` 用 12 个固定种子 × Reverse/Hold 覆盖任一腿拒绝、两侧不同部分成交、连接中断和查询终态;检查反向量及仓位,并验证完整 journal 与在途快照起点。
+
 - 规则:[Simultaneous](README.md#simultaneous)
 - 级别:dst
 - 里程碑:M2

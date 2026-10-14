@@ -193,6 +193,16 @@ pub(crate) fn finish_event<D: Driver<S>, S: StrategySet>(e: &mut Engine, drv: &m
                     e.trace.rec("emit.feed", u64::from(venue.0), 0);
                     drv.emit(&OutRecord::FeedCtl(*venue, cmd));
                 }
+                Emit::Pair { rings, cmds, recs } => {
+                    let mut pair = [(rings[0], cmds[0]), (rings[1], cmds[1])];
+                    for (k, (_, c)) in pair.iter_mut().enumerate() {
+                        c.decision_seq = e.out.seqs.get(recs[k] as usize).copied().unwrap_or(0);
+                        c.decided_tsc = measured;
+                        e.trace.rec("emit.gw", c.decision_seq, c.op as u64);
+                    }
+                    let venues = [e.rd.inst(cmds[0].inst).venue, e.rd.inst(cmds[1].inst).venue];
+                    drv.emit(&OutRecord::Pair(&pair, venues));
+                }
             }
         }
     }

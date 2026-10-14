@@ -74,6 +74,11 @@ pub(crate) enum Emit {
         cmd: GwCmd,
         rec: Option<u32>,
     },
+    Pair {
+        rings: [OutRing; 2],
+        cmds: [GwCmd; 2],
+        recs: [u32; 2],
+    },
     Feed {
         venue: VenueId,
         cmd: FeedCmd,

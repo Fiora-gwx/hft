@@ -37,6 +37,8 @@ pub enum FatalReason {
     /// The cash-enabled venue supplied an external path whose attribution is not supported.
     UnsupportedExternalCash,
     ReconcileEvidence,
+    /// A pre-admitted simultaneous pair could not be materialized; publish neither leg.
+    PairAdmission,
 }
 
 /// Which capacity a restored state exceeds (checked in this order).
@@ -123,6 +125,8 @@ pub enum OutRing {
 #[derive(Copy, Clone, Debug)]
 pub enum OutRecord<'a> {
     Out(OutRing, &'a GwCmd),
+    /// Reserve capacity on both rings before pushing either leg.
+    Pair(&'a [(OutRing, GwCmd); 2], [VenueId; 2]),
     FeedCtl(VenueId, &'a FeedCmd),
 }
 

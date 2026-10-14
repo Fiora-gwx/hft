@@ -144,6 +144,9 @@ impl<S: StrategySet> LiveIo<S> for Io<S> {
     fn pop(&mut self, r: RingId, out: &mut InputSlot) -> bool {
         self.rings.pop(r, out)
     }
+    fn out_free(&mut self, ring: OutRing) -> usize {
+        self.rings.out_free(ring)
+    }
     fn push_out(&mut self, r: OutRing, c: &GwCmd) -> bool {
         self.rings.push_out(r, c)
     }

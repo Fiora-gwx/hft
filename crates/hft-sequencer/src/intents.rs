@@ -26,6 +26,8 @@ use crate::views::{RiskAdapter, SeqViews, lev_x100, quote_rate};
 
 type R<T> = Result<T, FatalReason>;
 
+mod simultaneous;
+
 /// Where an intent comes from.
 #[derive(Copy, Clone, Debug)]
 pub(crate) enum Src {
@@ -431,13 +433,42 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
             iv.link_side = s.side;
         }
     }
+    // A simultaneous pair is prepared before either admission is committed or slot allocated.
+    let mut pair = if simul && link_role == Some(LinkRole::First) {
+        match simultaneous::prepare(e, inst, strategy, &it, &iv, src) {
+            Ok(p) => Some(p),
+            Err(outcome) => {
+                let (bits, shadow) = match outcome {
+                    PipeOut::Shadowed => (RejectBits(0), true),
+                    PipeOut::Rejected(bits) => (bits, false),
+                    _ => (RejectBits::INVALID, false),
+                };
+                record_only(e, strategy, &it, bits, shadow, oflags, reason, intent_no);
+                #[cfg(feature = "testkit")]
+                e.audit.record((e.out.recs.len() - 1) as u32, audit_facts);
+                return Ok(outcome);
+            }
+        }
+    } else {
+        None
+    };
     // 5. evaluate.
     if e.trace.on {
         e.trace.views.push(iv);
+        if let Some(p) = &pair {
+            e.trace.views.push(p.view);
+        }
     }
     let res = {
         let v = RiskAdapter { v: views_noexec(e) };
-        e.risk.evaluate(&iv, &v, &e.now)
+        if let Some(p) = pair.as_mut() {
+            e.risk.evaluate_pair(&iv, &p.view, &v, &e.now).map(|[a, b]| {
+                p.admission = Some(b);
+                a
+            })
+        } else {
+            e.risk.evaluate(&iv, &v, &e.now)
+        }
     };
     e.trace.rec("risk.evaluate", u64::from(account.0), 0);
     if shadow {
@@ -541,8 +572,18 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
     for d in o.decisions.as_slice() {
         e.audit.pending(*d, audit_facts);
     }
+    let paired = pair.is_some();
+    if let Some(p) = pair {
+        if r.is_err() {
+            return Err(FatalReason::PairAdmission);
+        }
+        simultaneous::place(e, inst, drv, p, &mut o)?;
+    }
     drain_oms(e, inst, drv, &mut o)?;
     e.put_oms(o);
+    if paired {
+        simultaneous::bundle(e, r.map_err(|_| FatalReason::PairAdmission)?)?;
+    }
     match r {
         Ok(h) => {
             e.out.stamped.push(h);
@@ -756,7 +797,7 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
     // nested calls take other pooled buffers, so it is drained in place in the fixed order
     // without heap copies (hot-path rule M1; the fill → second leg path is `seq/fill_to_hedge`).
     // Hedges (fast path first, after the facts have been validated).
-    for h in out.hedges.iter() {
+    for h in out.hedges.iter().filter(|h| h.role != LinkRole::Reverse) {
         place_hedge(e, inst, drv, h)?;
     }
     // PnL of the fills and fees goes to risk after the whole output is drained. A stack buffer
@@ -853,6 +894,10 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
             e.exec.on_leg_adjust(n.account, n.group);
             crate::process::touch_legs(e, n.account, n.group);
         }
+    }
+    // Reversals need the current Input's fill/fee in the ledger for reduce-only admission.
+    for h in out.hedges.iter().filter(|h| h.role == LinkRole::Reverse) {
+        place_hedge(e, inst, drv, h)?;
     }
     // Updates → exec (EXEC slots), nobody (SMOKE), else the owner strategy.
     for u in out.updates.iter() {

@@ -57,6 +57,9 @@ pub trait LiveIo<S: StrategySet> {
     /// Pops the next element as an Input (`kind`, `flags`, body); `false` = empty.
     fn pop(&mut self, r: RingId, out: &mut InputSlot) -> bool;
     fn push_out(&mut self, ring: OutRing, c: &GwCmd) -> bool;
+    /// Conservative free slots. This single producer's next `n` pushes must succeed when
+    /// this returns at least `n`; consumers can only increase the available capacity.
+    fn out_free(&mut self, ring: OutRing) -> usize;
     fn push_feed(&mut self, v: VenueId, c: &FeedCmd) -> bool;
     fn take_parsed(&mut self, r: &BlobRef) -> Option<ParsedConfig<S>>;
     fn retire(&mut self, p: ParsedConfig<S>);
@@ -181,6 +184,30 @@ const PER_ROUND_TIMERS: u16 = 16;
 const CONFLATE_TAKE: usize = 32;
 
 impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
+    fn ring_full(&mut self, venue: VenueId, c: &GwCmd) {
+        if matches!(c.op, GwOp::Place | GwOp::Cancel | GwOp::Amend | GwOp::Query) {
+            let sr = SendReport {
+                decision_seq: c.decision_seq,
+                sent_tsc: Tsc(0),
+                slot: c.slot,
+                r#gen: c.r#gen,
+                target_slot: c.target_slot,
+                target_gen: 0,
+                venue,
+                account: c.account,
+                conn: hft_types::ConnId(0),
+                status: SendStatus::RingFull,
+                op: c.op,
+                _pad: [0; 3],
+                os_errno: 0,
+                _pad2: 0,
+            };
+            let mut s = InputSlot::with_capacity(64);
+            s.set(RecordFlags(0), Tsc(0), &sr);
+            self.synth.push_back(s);
+        }
+    }
+
     pub fn new(io: IO, cfg: LiveCfg) -> LiveDriver<S, IO> {
         LiveDriver {
             io,
@@ -938,35 +965,34 @@ impl<S: StrategySet, IO: LiveIo<S>> Driver<S> for LiveDriver<S, IO> {
 
     fn emit(&mut self, o: &OutRecord<'_>) -> EmitResult {
         match o {
+            OutRecord::Pair(pair, venues) => {
+                let same = pair[0].0 == pair[1].0;
+                let room = self.io.out_free(pair[0].0) >= if same { 2 } else { 1 }
+                    && (same || self.io.out_free(pair[1].0) >= 1);
+                if room {
+                    for (ring, cmd) in *pair {
+                        let pushed = self.io.push_out(*ring, cmd);
+                        debug_assert!(pushed, "LiveIo::out_free reservation violated");
+                    }
+                    EmitResult::Pushed
+                } else {
+                    for (k, (_, cmd)) in pair.iter().enumerate() {
+                        self.ring_full(venues[k], cmd);
+                    }
+                    EmitResult::Full
+                }
+            }
             OutRecord::Out(ring, c) => {
                 if self.io.push_out(*ring, c) {
                     return EmitResult::Pushed;
                 }
-                if matches!(c.op, GwOp::Place | GwOp::Cancel | GwOp::Amend | GwOp::Query) {
-                    let venue = match ring {
+                self.ring_full(
+                    match ring {
                         OutRing::Venue(v) => *v,
                         OutRing::Sim => VenueId(0),
-                    };
-                    let sr = SendReport {
-                        decision_seq: c.decision_seq,
-                        sent_tsc: Tsc(0),
-                        slot: c.slot,
-                        r#gen: c.r#gen,
-                        target_slot: c.target_slot,
-                        target_gen: 0,
-                        venue,
-                        account: c.account,
-                        conn: hft_types::ConnId(0),
-                        status: SendStatus::RingFull,
-                        op: c.op,
-                        _pad: [0; 3],
-                        os_errno: 0,
-                        _pad2: 0,
-                    };
-                    let mut s = InputSlot::with_capacity(64);
-                    s.set(RecordFlags(0), Tsc(0), &sr);
-                    self.synth.push_back(s);
-                }
+                    },
+                    c,
+                );
                 EmitResult::Full
             }
             OutRecord::FeedCtl(venue, c) => {

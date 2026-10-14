@@ -107,6 +107,8 @@ kind 编号**永不复用**;废弃的 kind 在 `hft-event` 中保留为 `#[depre
 
 ## 关键事件体
 
+Simultaneous 的两份 OrderDecision 共用 trigger_seq;整对出环容量失败以两份 SendReport(RingFull) Input 记录,回放不读取物理环容量。规则归 [sequencer 意图管线](../../crates/hft-sequencer/README.md#意图管线)。
+
 > 草案:本节的字节布局(字段顺序、偏移、`_pad`、大小)实现时以代码与编译期断言为准;码值与字段名全仓一致。
 
 所有体是 `#[repr(C)]` + `zerocopy::{IntoBytes, KnownLayout, Immutable}`,再加 `FromBytes`(无枚举字段)或 `TryFromBytes`(含 `Side`、`OrderEventKind` 等枚举字段——枚举的 0 值与越界值非法,读取时顺带校验);无隐式填充、大小是 8 的倍数,无指针、无 `String`/`Vec`。价格与数量是 `hft-types` 的 `Px`/`Qty`(i64,指数由资产决定,见 [hft-types](../../crates/hft-types/README.md))。

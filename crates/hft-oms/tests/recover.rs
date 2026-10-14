@@ -34,6 +34,48 @@ fn rec_end(h: &mut H, now: u64, stop: u64) {
 }
 
 #[test]
+fn oms_317_simultaneous_recovery_waits_for_both_terminal() {
+    for policy in [OnFail::Reverse, OnFail::Hold] {
+        let mut h = H::new();
+        let mut hp = plan_l1();
+        hp.kind = hft_strategy_sdk::HedgeKind::Simultaneous;
+        hp.on_fail = policy;
+        let (first, link) = place_first(&mut h, q("0.012"), Tif::Ioc, hp, 0);
+        let req = one_hedge(&h);
+        let second = place_hedge(&mut h, &req, 0).unwrap();
+        h.fill(first, q("0.005"), p("60000"), 1);
+        let bytes = snapshot(&h);
+        h = restored(&bytes);
+        rec_end(&mut h, 10_000, 2);
+        gate(&mut h, VS, 10_000);
+        gate(&mut h, VX, 10_000);
+        h.query(first, 1, q("0.005"), p("60000"), 10_001);
+        assert!(h.out.hedges.is_empty());
+        h.query(second, 1, q("0.008"), p("59990"), 10_002);
+        assert!(
+            h.out.hedges.is_empty(),
+            "live original orders must not be reversed"
+        );
+        h.what(first, OrderEventKind::Expired, 10_003);
+        assert!(h.out.hedges.is_empty());
+        h.what(second, OrderEventKind::Expired, 10_004);
+        if policy == OnFail::Reverse {
+            let r = one_hedge(&h);
+            assert_eq!((r.inst, r.side, r.qty), (Y, Side::Buy, q("0.003")));
+            let rv = place_hedge(&mut h, &r, 10_004).unwrap();
+            // A second crash with the reverse still live must not duplicate the reverse.
+            h = restored(&snapshot(&h));
+            rec_end(&mut h, 20_000, 10_005);
+            gate(&mut h, VX, 20_000);
+            h.query(rv, 1, Qty(0), p("60000"), 20_001);
+            assert!(h.out.hedges.is_empty());
+            h.fill(rv, q("0.003"), p("60000"), 20_002);
+        }
+        assert_eq!(h.link(link).state, LinkState::Done);
+    }
+}
+
+#[test]
 fn oms_464_late_first_fill_does_not_double_resume() {
     let mut h = H::new();
     let (first, link) = place_first(&mut h, q("0.012"), Tif::Ioc, plan_l1(), 0);

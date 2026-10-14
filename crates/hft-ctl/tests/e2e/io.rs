@@ -234,6 +234,10 @@ impl LiveIo<Set> for RigIo {
         out.set_bytes(e.kind, RecordFlags(0), t, &e.body);
         true
     }
+    fn out_free(&mut self, ring: OutRing) -> usize {
+        let _ = ring;
+        usize::MAX
+    }
     fn push_out(&mut self, ring: OutRing, c: &GwCmd) -> bool {
         self.out.push((ring, *c));
         true

@@ -79,6 +79,45 @@ fn rsk_253_check_reject_kill(c: &mut Criterion) {
     });
 }
 
+fn simultaneous_pair(c: &mut Criterion) {
+    let mut w = r0();
+    let first = link_open(
+        1,
+        G1,
+        A1,
+        Side::Buy,
+        "0.001",
+        "50000.00",
+        (1, B, B1, Side::Sell, "0.001", "50"),
+    );
+    let second = link_open(
+        1,
+        G1,
+        B1,
+        Side::Sell,
+        "0.001",
+        "49995.0",
+        (1, A, A1, Side::Buy, "0.001", "50"),
+    );
+    let mut t = w.now;
+    assert!(w.risk.evaluate_pair(&first, &second, &w.mv, &now_at(t)).is_ok());
+    c.bench_function("risk/check_pair", |x| {
+        x.iter(|| {
+            t += STEP;
+            w.mv.tsc = t as u64;
+            let now = now_at(t);
+            if let Ok(pair) = w
+                .risk
+                .evaluate_pair(black_box(&first), black_box(&second), &w.mv, &now)
+            {
+                for a in pair {
+                    w.risk.commit(&a, &now);
+                }
+            }
+        })
+    });
+}
+
 fn rsk_254_check_pass_hedge(c: &mut Criterion) {
     let mut w = r0();
     let it = hedge(1, G1, B1, Side::Sell, "0.001", "49995.0", "0.001");
@@ -215,7 +254,8 @@ criterion_group!(
     rsk_261_leverage,
     rsk_262_view_for,
     rsk_263_on_account_cfg,
-    rsk_264_check_mode
+    rsk_264_check_mode,
+    simultaneous_pair
 );
 criterion_main!(benches);
 

@@ -26,6 +26,8 @@ status: spec
 
 ### 热路径:分类与检查
 
+`evaluate_pair(first, second, view, now)` 在同一只读状态上检查两腿,同账户的 group/account 名义含另一腿待提交名义;两腿必须不同 venue/inst。全部通过才由 sequencer 分别 commit,任何拒绝不扣令牌。
+
 ```rust
 pub struct Risk { pub mode: mode::Mode, /* 参数、桶、日亏、保证金档位、杠杆表、交易中的永续 inst、对账计数,见实现说明 */ }
 
@@ -344,7 +346,7 @@ pub mod mode {
 | LegLink 第二腿 `role = Second`,开仓链接(`HedgePlan.reduce_only = 0`:现货买入后开永续空等) | Hedge | 是 | **否**(在该 venue 是开新仓) |
 | **开仓链接的重试**(`role = SecondRetry`,继承 `HedgePlan.reduce_only = 0`) | Hedge | 是 | **否** |
 | 第二腿或其重试,平仓链接(`HedgePlan.reduce_only = 1`) | Hedge | 是 | 是(`VenueCaps.reduce_only` 时) |
-| `Simultaneous` 第二腿(与第一腿同一事件发出) | Open | **否** | 否 |
+| `Simultaneous` 第二腿(与第一腿同一事件发出) | 减仓提示为 Reduce,其余 Open | Reduce 时校验可减量 | Reduce 且支持时为是 |
 | `Simultaneous` 反向单(`Reverse`)、`HedgeFix`(执行层的自动补腿、外来成交默认处理、残余修剪、`Broken` 的自动有界平仓、`HedgeFix` 命令:只平掉多出的一腿) | Hedge | 是 | 是(支持时) |
 | `Flatten`:策略硬动作、执行层默认减仓(`reason ∈ {MarginStress, Hard}`,含 `Broken` 的 group 与 `SerialFallback` 路径)、`Kill{Account, flatten}` 清仓 | Flatten | 是 | 是(支持时) |
 | `Reduce`,品种支持 reduceOnly(永续减仓、目标意图的减仓切片) | Reduce | 仅当 `qty ≤ |pos| − 已挂同向减仓量` | 是 |
@@ -722,6 +724,7 @@ pub struct PxBand { pub max_px_dev: Rate, pub ioc_max_cross: Rate, pub rr_max_cr
 | `classify` | ≤ 15 ns | ≤ 40 ns | `risk/classify` |
 | `evaluate` 全部通过(单腿 Open)+ `commit` | ≤ 200 ns | ≤ 500 ns | `risk/check_pass_open` |
 | `evaluate` 全部通过(链接 Open,两腿 venue,含第二腿报价健康与可负担性)+ `commit` | ≤ 280 ns | ≤ 500 ns | `risk/check_pass_linked_open` |
+| `evaluate_pair` 两腿 + 两次 `commit`(预算,待参考机实测) | ≤ 560 ns | ≤ 1000 ns | `risk/check_pair` |
 | `evaluate` 第 1 层即拒(HARD) | ≤ 30 ns | ≤ 80 ns | `risk/check_reject_kill` |
 | `evaluate` + `commit` Hedge 类 | ≤ 150 ns | ≤ 400 ns | `risk/check_pass_hedge` |
 | `mode.apply`(cap 增删,含 kill 投影,256 条) | ≤ 2 µs | ≤ 5 µs | `risk/mode_apply` |

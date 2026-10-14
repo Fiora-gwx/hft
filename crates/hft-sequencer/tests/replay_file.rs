@@ -66,6 +66,9 @@ impl LiveIo<TestSet> for FileIo {
     fn pop(&mut self, r: RingId, out: &mut InputSlot) -> bool {
         self.io.pop(r, out)
     }
+    fn out_free(&mut self, ring: OutRing) -> usize {
+        self.io.out_free(ring)
+    }
     fn push_out(&mut self, ring: OutRing, c: &GwCmd) -> bool {
         self.io.push_out(ring, c)
     }

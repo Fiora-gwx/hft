@@ -1095,6 +1095,9 @@ impl<S: StrategySet> LiveIo<S> for TestIo<S> {
         }
         true
     }
+    fn out_free(&mut self, ring: OutRing) -> usize {
+        self.out_free.get(&ring).copied().unwrap_or(usize::MAX)
+    }
     fn push_out(&mut self, ring: OutRing, c: &GwCmd) -> bool {
         if let Some(f) = self.out_free.get_mut(&ring) {
             if *f == 0 {

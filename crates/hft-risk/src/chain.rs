@@ -85,6 +85,17 @@ pub(crate) fn evaluate<V: RiskView>(
     v: &V,
     now: &Now,
 ) -> Result<Admission, RejectBits> {
+    evaluate_with_peer(s, m, it, None, v, now)
+}
+
+pub(crate) fn evaluate_with_peer<V: RiskView>(
+    s: &Side,
+    m: &Mode,
+    it: &IntentView,
+    peer: Option<&IntentView>,
+    v: &V,
+    now: &Now,
+) -> Result<Admission, RejectBits> {
     let rr = it.flags & OrderFlags::RISK_REDUCING.0 != 0;
     let smoke = it.origin == Origin::Command && it.flags & OrderFlags::SMOKE.0 != 0;
     let gated = !rr;
@@ -217,8 +228,19 @@ pub(crate) fn evaluate<V: RiskView>(
             }
             let gl = lim.group(a, it.group);
             let n = i128::from(it.notional.0);
-            let sum =
-                |sc: Scope| i128::from(v.held_notional(a, sc).0) + i128::from(v.open_notional(a, sc).0) + n;
+            let sum = |sc: Scope| {
+                let pending = peer
+                    .filter(|p| {
+                        p.account == a
+                            && match sc {
+                                Scope::Account => true,
+                                Scope::Group(g) => p.group == g,
+                                Scope::Venue(venue) => p.venue == venue,
+                            }
+                    })
+                    .map_or(0, |p| i128::from(p.notional.0));
+                i128::from(v.held_notional(a, sc).0) + i128::from(v.open_notional(a, sc).0) + n + pending
+            };
             if sum(Scope::Group(it.group)) > i128::from(gl.max_group_notional.0) {
                 return Err(RejectBits::NOTIONAL_GROUP);
             }

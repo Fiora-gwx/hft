@@ -41,6 +41,31 @@ fn exe_195_simul_first_leg() {
 }
 
 #[test]
+fn exe_195_simultaneous_close_marks_spot_second_reducing() {
+    let mut fx = Fx::new();
+    fx.legs(A1, G7, &["10", "-10"]);
+    fx.spot(A1, A, G7, "10", "10");
+    let sp = SimulParams {
+        slice: slice0(),
+        on_fail: SimulOnFail::Reverse,
+        _pad0: [0; 7],
+        fix_tolerance: rate("0.02"),
+        residual: ResidualPolicy::Hold,
+        _pad1: [0; 7],
+    };
+    let mut t = target(A1, G7, &[(0, q("0")), (1, q("0"))], ExecSpec::Simultaneous(sp));
+    t.reason = hft_strategy_sdk::TargetReason::MarginStress;
+    let out = fx.go(&t);
+    let hedge = out.orders[0].intent.link.get().unwrap().hedge;
+    assert_eq!(hedge.kind, HedgeKind::Simultaneous);
+    assert_eq!(hedge.inst, S);
+    assert_eq!(
+        hedge.reduce_only, 1,
+        "spot reduction is semantic even without a venue reduceOnly flag"
+    );
+}
+
+#[test]
 fn exe_196_maker_first_unsupported() {
     let mut fx = Fx::new();
     let m = MakerParams {

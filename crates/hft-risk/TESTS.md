@@ -263,6 +263,8 @@ spec: README.md
 
 ### RSK-010 分类表每一行
 
+- Simultaneous 第二腿减仓提示按 Reduce 检查可减量;永续带 reduceOnly,现货不带;数量超可减量不标风险递减。由同一分类表测试覆盖。
+
 - 规则:[分类](README.md#分类)
 - 级别:table
 - 里程碑:M2
