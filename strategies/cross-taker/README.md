@@ -82,10 +82,6 @@ registry 的 cross-taker feature 注册 CrossTaker,kind_id/schema_id = 3,version
 
 每组状态预分配,只含 engine_ns 冷却、UTC 公告期限、失败锁存、Broken 镜像和订单去重身份,不存 TSC、不复制仓位。快照按 GroupId/fingerprint 验证;参数替换保留相同 GroupId/指纹的状态。params.rs 定义 schema;fast/signal.rs 实现整数信号和数量;fast/mod.rs 处理事件、意图、快照;desc.rs 定义 Note;lib.rs 接 SDK trait。
 
-### 开发备忘
-
-待实测:在统一升级主机记录各事件入口的分段直方图;在模拟账户上校准 min_edge、slip、机会年龄与手续费舍入的影响。持仓期间资金费和库存退出规则待负责人确认。
-
 ## 延迟与资源契约
 
 on_event 无分配、无锁、无系统调用、无浮点数;每个 BBO 最多检查两个方向、发一条订单。每组状态不超过 128 B,按 GroupTable::capacity 预分配。快照 2 B 头 + 每组 50 B,无 Model 分配。
@@ -111,3 +107,7 @@ on_event 无分配、无锁、无系统调用、无浮点数;每个 BBO 最多�
 - LeadLag/Advice、Simultaneous 和无利润自动库存退出不在本实现;触发为可执行价差。基线差异见 docs/changes.md,待负责人评审。
 - 非 dust 裸量等待引擎修复,现货费用 dust 按引擎阈值保留。
 - 延迟验收、14 天模拟、费率与成交校准、零成交冒烟和正式实例 Shadow 仍是上线前工作。
+
+### 开发备忘
+
+待实测:在统一升级主机记录各事件入口的分段直方图;在模拟账户上校准 min_edge、slip、机会年龄与手续费舍入的影响。持仓期间资金费和库存退出规则待负责人确认。
