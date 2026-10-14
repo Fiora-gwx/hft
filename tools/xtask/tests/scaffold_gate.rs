@@ -368,6 +368,13 @@ fn sdk_004_second_test_strategy_zero_engine_diff() {
     assert_eq!(cfg["instance"]["config_source"].as_str(), Some("file"));
     assert!(cfg.get("advisor").is_none());
     assert!(cfg.get("sim_accounts").is_none());
+    for thread in cfg["threads"].as_array().unwrap() {
+        let nice = thread["nice"].as_integer().unwrap();
+        assert!((0..=19).contains(&nice));
+        if thread["task"].as_str() == Some("housekeeping") {
+            assert_eq!(nice, 0);
+        }
+    }
     assert!(f.path(DEC).join("registry/tests/ci_probe_config.rs").is_file());
     let reg: toml::Table = f.read(&format!("{DEC}/registry/Cargo.toml")).parse().unwrap();
     let tk = &reg["dev-dependencies"]["hft-testkit"]["features"];
