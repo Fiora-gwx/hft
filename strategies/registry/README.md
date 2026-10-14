@@ -86,7 +86,7 @@ pub fn export_schemas() -> Vec<(String, String)>;
 
 ## 测试与验收
 
-`tests/portfolio_carry.rs` 用真实 sequencer、mock 成交和 journal 验证 [CARRY-010](../portfolio-carry/TESTS.md#carry-010-真实-sequencer-的双向-linked-成交资金费与重放),覆盖双向 linked 目标、实际资金费去重、退出与逐字节重放。
+`tests/portfolio_carry.rs` 用真实 sequencer、mock 成交和 journal 验证 [CARRY-002/010](../portfolio-carry/TESTS.md),覆盖双向 Simultaneous 入场/退出、双侧深度与限价、非对称成交/拒单/在途断线的确定性故障种子、实际资金费去重与逐字节重放。
 
 用例与验收见 [TESTS.md](TESTS.md)。
 

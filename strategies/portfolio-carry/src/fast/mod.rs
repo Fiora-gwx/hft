@@ -404,7 +404,7 @@ impl Fast {
             urgency: Urgency::Normal,
             _pad1: [0; 5],
             band: Rate(0),
-            exec: ExecSpec::PairOnFill(PairParams {
+            exec: ExecSpec::Simultaneous(SimulParams {
                 slice: TakerSliceParams {
                     depth_frac: Rate(1_000_000_000),
                     depth_levels: 1,
@@ -415,14 +415,8 @@ impl Fast {
                     cooldown_ms: f.retry_ms,
                     _pad1: 0,
                 },
-                first_leg: FirstLeg::Fixed,
-                first_leg_ix: 0,
-                hedge_px_mode: PxMode::Cross,
-                _pad0: [0; 5],
-                hedge_cross: f.max_cross,
-                hedge_max_slip: f.max_cross,
-                ratio_num: 1,
-                ratio_den: 1,
+                on_fail: SimulOnFail::Reverse,
+                _pad0: [0; 7],
                 fix_tolerance: Rate(0),
                 residual: ResidualPolicy::TrimExcess,
                 _pad1: [0; 7],
