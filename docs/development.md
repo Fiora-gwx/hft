@@ -137,6 +137,8 @@ RPL-058–060、RPL-272、RPL-273 的现场 Model 回放文件、检查点、生
 - **快速通道**(`lane: fast`,每个 PR,目标墙钟 < 10 分钟):`paths`、`docs`、`decoupling-gate`、`ops-py`,以及受影响包(改动的 workspace 成员加其全部反向依赖,`.github/scripts/related-tests.py`)上的 `fast-clippy`、`fast-test`(cargo-nextest,固定版本并核对 SHA-256)与 `fast-dst`(hft-testkit 受影响时 20 个提交派生种子 + 回归集,基线与 LED-080/LED-081)。proc 级测试二进制(`proc*`)、trybuild compile-fail 二进制、`heavy::`、RPL-012 整批、doctest、replay-dst、基准、aarch64 检查与按路径的门(scaffold-gate、fuzz、replay-verify)不在快速通道。
 - **完整通道**(`lane: full`,`codex/m2-integration` 与 `main` 的每次推送,以及每夜):`paths`、`docs`、`decoupling-gate`(每夜跳过:没有待判定的差异)、`ops-py`、`rust`(`cargo xtask ci`:全工作区测试含 proc 与 doctest、金样、200 种子 DST 冒烟,及按路径的门)、`heavy-tests`、`replay-dst`、`benchmarks`、`arch-check`。集成分支因此每次合并都经完整验证;发布 `preflight` 要求的 `rust` 作业只在完整通道出现,所以开发构建取集成分支或 `main` 的提交。
 
+手动派发 `ci.yml` 使用完整通道并运行全部基准短跑。普通推送按 hot 包改动选择短跑,路径匹配覆盖 `deps.toml` 的 `strategies/*` 规则并使用 Cargo 包名;模板与纯 Markdown 不触发短跑(TOOL-191)。
+
 各作业:
 
 | 作业 | 内容 |

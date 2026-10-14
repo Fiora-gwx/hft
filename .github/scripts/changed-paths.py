@@ -13,7 +13,7 @@ Writes step outputs (true/false unless noted):
   replay        strategies, hft-exec, hft-risk, hft-oms, hft-sequencer -> replay-verify samples
   fuzz_targets  space-separated fuzz targets whose sources changed (tools/xtask/fuzz-targets.toml)
   bench_crates  space-separated hot crates (tools/xtask/deps.toml tier = "hot") that changed
-  benchmarks    benchmarks/
+  benchmarks    benchmarks/ or a manual full-lane dispatch
   toolchain     rust-toolchain.toml                         -> base vs head relative benchmark
   cargo_lock    Cargo.lock                                  -> cargo deny check advisories
   gen_host      non-Markdown deploy/ or apps/hft-core/      -> gen-host --check, deploy container tests
@@ -24,6 +24,7 @@ Writes step outputs (true/false unless noted):
 from __future__ import annotations
 
 import importlib.util
+from fnmatch import fnmatchcase
 import os
 import subprocess
 import sys
@@ -84,13 +85,23 @@ def hot_crates(files: list[str]) -> list[str]:
         return []
     with cfg.open("rb") as f:
         t = tomllib.load(f)
-    out = []
-    for path, pkg in t.get("pkg", {}).items():
-        if pkg.get("tier") != "hot" or "*" in path:
+    rules = t.get("pkg", {})
+    out = set()
+    for file in files:
+        parts = file.split("/")
+        if file.endswith(".md") or len(parts) < 3 or parts[1].startswith("_"):
             continue
-        if any(f.startswith(path + "/") and not f.endswith(".md") for f in files):
-            out.append(Path(path).name)
-    return out
+        path = "/".join(parts[:2])
+        # Exact package rules take precedence over wildcard rules such as strategies/*.
+        rule = rules.get(path)
+        if rule is None:
+            rule = next((pkg for pattern, pkg in rules.items()
+                         if "*" in pattern and fnmatchcase(path, pattern)), {})
+        manifest = Path(path) / "Cargo.toml"
+        if rule.get("tier") == "hot" and manifest.is_file():
+            with manifest.open("rb") as f:
+                out.add(tomllib.load(f)["package"]["name"])
+    return sorted(out)
 
 
 def main() -> int:
@@ -106,7 +117,9 @@ def main() -> int:
         "replay": under(files, *REPLAY_PREFIXES),
         "fuzz_targets": " ".join(fuzz_targets(files)),
         "bench_crates": " ".join(hot_crates(files)),
-        "benchmarks": under(files, "benchmarks/"),
+        # Manual full-lane validation must include smoke even when the last commit only
+        # changes CI tooling. Ordinary pushes retain the path-triggered short set.
+        "benchmarks": event == "workflow_dispatch" or under(files, "benchmarks/"),
         "toolchain": "rust-toolchain.toml" in files,
         "cargo_lock": "Cargo.lock" in files,
         "gen_host": under(code_files, "deploy/", "apps/hft-core/"),

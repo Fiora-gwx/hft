@@ -2882,13 +2882,14 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 | TOOL-190.4 | 文件回放取消 | 退出 0;日期文件回放明确显示 cancelled |
 | TOOL-190.5 | 缺少文件回放结果 | 退出 0;日期文件回放显示 ?,不能报告成功 |
 
-### TOOL-191 主机生成检查只按代码与配置变更触发
+### TOOL-191 主机与基准检查按适用路径触发
 
 - 规则:[质量门](../docs/development.md#质量门quality-gatesyml)
 - 级别:table
 - 里程碑:M1
 - 前置:路径列表替身与真实临时 Git 仓库;运行 changed-paths 入口,读取工作流输出
-- 实现:`tools/xtask/tests/test_ci_paths.py::test_tool_191_host_checks_follow_code_and_config_changes`
+- 期望:hot 包匹配 `deps.toml` 的精确/通配规则,策略源码或基准改动触发其实际包名;Markdown、模板与已删除包不触发基准。手动完整通道始终执行基准短跑,普通推送保留路径选择。
+- 实现:`tools/xtask/tests/test_ci_paths.py::test_tool_191_host_checks_follow_code_and_config_changes`、`tools/xtask/tests/test_ci_paths.py::test_tool_191_benchmark_selection_includes_hot_strategies`
 
 | 行 | 输入 | 期望 |
 |---|---|---|
