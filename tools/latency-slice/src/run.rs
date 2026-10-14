@@ -714,7 +714,7 @@ where
             account: ACCOUNT,
             src_ip_idx: 0,
             tpl,
-            ctx: GwCtx,
+            ctx: GwCtx::default(),
         }],
     )
     .map_err(|e| format!("GwRuntime: {e:?}"))?;

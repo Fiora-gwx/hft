@@ -648,12 +648,15 @@ fn build_and_check(
             cargo(&["test", "-p", "hft-core", "--test", "sdk005"], &mp, prof),
         ));
     }
+    let mut model_source = None;
     for (name, mut c) in steps {
         if name == "build hft-core" {
             // Model scenario/DST have already run. The M3 host has no advisor task, so its
             // schema/ctl acceptance uses the same schema with the SDK's NoModel adapter.
             let source = pdir.join("src/lib.rs");
-            let code = rd(&source)?
+            let original = rd(&source)?;
+            model_source = Some(original.clone());
+            let code = original
                 .replace(
                     &format!("type Model = model::{}Model;", o.ty()),
                     &format!("type Model = hft_strategy_sdk::NoModel<{}Params>;", o.ty()),
@@ -669,8 +672,14 @@ fn build_and_check(
         if !o.ok() {
             r.violations
                 .push(format!("{name}: `{}` exited {}", c.line(), o.code));
+            if let Some(original) = &model_source {
+                wr(&pdir.join("src/lib.rs"), original)?;
+            }
             return Ok(());
         }
+    }
+    if let Some(original) = model_source {
+        wr(&pdir.join("src/lib.rs"), &original)?;
     }
     if !opts.hft_core {
         eprintln!("scaffold-gate: {NO_HFT_CORE}");
