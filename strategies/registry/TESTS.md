@@ -213,6 +213,7 @@ spec: README.md
   - P9 的实例:`CmdResult{InvalidArgs, detail = ParamInvalid}`,`arg & 0xF = 3`(`NonProdOnly`);该实例没有被创建(无 `on_params` 调用),journal 中没有它的 `StrategyParams` 生效记录
   - T1、S1 的实例:`CmdResult{Applied}`
 - 实现:`strategies/registry/tests/non_prod_only.rs::reg_013_set_params_binding`
+- 覆盖:三类账户各用独立引擎，ctl-gateway 的生产校验接到真实 sequencer；另绕过 gateway 注入正式账户参数，核对 `NonProdOnly`、零创建/回调与零生效版本。
 
 ### REG-014 `Strategies::schema_json` 与导出的文件内容相同
 
