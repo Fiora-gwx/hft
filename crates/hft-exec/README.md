@@ -870,7 +870,7 @@ const _: () = assert!(size_of::<ExecRowHdr>() == 8 && size_of::<LegRef>() == 32 
 | 入口 | p50 | p99 | 基准名 |
 |---|---|---|---|
 | `touch_inst`,该 inst 无活动 cell(绝大多数 tick) | ≤ 8 ns | ≤ 20 ns | `exec_step/idle` |
-| `advance` 推进一个活动 cell、无切片(小表 / 1 024 cell 稀疏表) | ≤ 60 ns | ≤ 150 ns | `exec_step/hold`、`exec_step/hold/1024_cells` |
+| `advance` 推进一个活动 cell、无切片(小表 / 1 024 cell 稀疏表) | p50 ≤ 60 ns | p99 ≤ 150 ns | `exec_step/hold`、`exec_step/hold/1024_cells` |
 | `advance` 推进一个活动 cell 并产生一笔配对第一腿(2 腿、各 ≤ 10 档深度) | ≤ 300 ns | ≤ 800 ns | `exec_step/slice_pair` |
 | `advance` 推进一个 Broken cell 并产生一片自动有界平仓 | ≤ 200 ns | ≤ 500 ns | `exec_step/auto_fix` |
 | `set_target`(校验 + 登记,含"更接近 0"与 `pair_lot`) | ≤ 80 ns | ≤ 200 ns | `exec/set_target` |
