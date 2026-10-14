@@ -155,7 +155,7 @@ pub struct IntentView {
     pub link_inst: InstId,
     pub link_qty: Qty,                        // 第一腿全部成交时第二腿的数量 = qty × ratio(净量口径)
     pub link_notional: Notional,              // 第二腿名义的上界:两个方向都按 mid × (1 + rr_max_cross) 投影(公式归 sequencer 意图管线第 4 步)
-    // ── 对冲类上限(class = Hedge 时由产生方 hft-oms / hft-exec 填写;规则 basis + 1 lot 归 hft-exec)──
+    // ── 对冲类上限(class = Hedge):OMS/执行层提供;策略无链接 Hedge 由 sequencer 读 PosView::hedge_cap_qty(side)──
     pub hedge_cap_qty: Qty,
 }
 

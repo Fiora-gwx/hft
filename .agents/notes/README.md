@@ -4,7 +4,7 @@
 
 ## M2-lite 决定(2026-10-14)
 
-[M2-lite](implemented/architecture/2026-10-14-m2-lite.md) 收窄 M2 范围,推迟功能的用例改为里程碑 `M9`(上线后);待确认的 changes.md 行见[签字批次 1](implemented/process/2026-10-14-signoff-batch-1.md)。
+[M2-lite](implemented/architecture/2026-10-14-m2-lite.md) 收窄 M2 范围,推迟功能的用例改为里程碑 `M9`(上线后);changes.md 的批量确认结论见[签字批次 1](implemented/process/2026-10-14-signoff-batch-1.md)。
 
 ## 恢复缺口验证决定(2026-10-12)
 
