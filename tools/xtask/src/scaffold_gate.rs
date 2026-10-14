@@ -558,8 +558,7 @@ fn build_and_check(
             .replace('\\', "/");
         wr(
             &app.join("sdk005.rs"),
-            &rd(&root.join("tools/xtask/scaffold/sdk005.rs.tmpl"))?
-                .replace("{{support}}", &support),
+            &rd(&root.join("tools/xtask/scaffold/sdk005.rs.tmpl"))?.replace("{{support}}", &support),
         )?;
         let path = app.join("Cargo.toml");
         let mut text = rd(&path)?;
