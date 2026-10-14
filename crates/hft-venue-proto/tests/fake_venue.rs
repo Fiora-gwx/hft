@@ -139,27 +139,92 @@ pub enum FakeMd {
 
 /// The fake linear-perpetual protocol.
 #[derive(Copy, Clone, Debug)]
-pub struct FakePerp;
+pub struct Fake<const SPOT: bool = false, const MUT: u8 = 0>;
+pub type FakePerp = Fake;
+pub type FakeSpot = Fake<true>;
 
 /// Feed state (none needed by the M1.5 messages).
 #[derive(Clone, Debug, Default)]
 pub struct FakeFeedCtx;
 
-impl VenueProtocol for FakePerp {
+struct Wire<'a> {
+    out: &'a mut [u8],
+    n: usize,
+}
+impl core::fmt::Write for Wire<'_> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        let dst = self
+            .out
+            .get_mut(self.n..self.n + s.len())
+            .ok_or(core::fmt::Error)?;
+        dst.copy_from_slice(s.as_bytes());
+        self.n += s.len();
+        Ok(())
+    }
+}
+fn blank_report(rx: &RxMeta) -> hft_event::OrderEvent {
+    use hft_event::{OrderEvent, OrderEventKind};
+    OrderEvent {
+        venue: FAKE_VENUE,
+        account: rx.account,
+        what: OrderEventKind::Ack,
+        detail: 0,
+        slot: hft_types::SlotId(42),
+        r#gen: 7,
+        inst: InstId(201),
+        px: Px(0),
+        qty: Qty(0),
+        cum_filled: Qty(0),
+        fee: Qty(0),
+        fee_asset: AssetId(0),
+        epoch: 4,
+        reject_code: 0,
+        exch_order_id: 0,
+        ex_ts_ns: 0,
+        hw_rx_ns: rx.hw_rx_ns,
+        rx_tsc: rx.rx_tsc,
+        avg_px: Px(0),
+        cash_qty: Qty(0),
+        cash_sum: Qty(0),
+        trade_id: 0,
+    }
+}
+
+impl<const SPOT: bool, const MUT: u8> VenueProtocol for Fake<SPOT, MUT> {
     const NAME: &'static str = "fake-perp";
     const VENUE: VenueId = FAKE_VENUE;
-    const MARKET: MarketKind = MarketKind::LinearPerp;
+    const MARKET: MarketKind = if SPOT {
+        MarketKind::Spot
+    } else {
+        MarketKind::LinearPerp
+    };
     const ORDER_FRAME_CAP: usize = 2048;
     type MdClass = FakeMd;
-    type ReportClass = FakeMd;
+    type ReportClass = u8;
     type FeedCtx = FakeFeedCtx;
     type GwCtx = ();
     type Templates = ();
 
-    // The session, order and account members are not exercised by the M1.5 cases of this crate
-    // (their fixtures arrive with M3): inert bodies.
-    fn default_caps(_asset: impl Fn(&str) -> Option<AssetId>) -> VenueCaps {
-        VenueCaps::none(FAKE_VENUE)
+    // Only methods with independent contract fixtures implement this synthetic wire protocol.
+    fn default_caps(asset: impl Fn(&str) -> Option<AssetId>) -> VenueCaps {
+        let mut caps = VenueCaps::none(FAKE_VENUE);
+        caps.market = Self::MARKET;
+        caps.reduce_only = !SPOT;
+        caps.fee_asset_rule = if SPOT {
+            FeeAssetRule::ReceivedAssetUnlessDiscount {
+                token: asset("FKT").unwrap_or(AssetId(0)),
+            }
+        } else {
+            FeeAssetRule::Quote
+        };
+        if !SPOT {
+            caps.dms = DeadManCap::CountdownAccount;
+            caps.dms_min_ms = 10_000;
+            caps.dms_max_ms = 120_000;
+            caps.dms_timeout_ms = 60_000;
+            caps.dms_refresh_ms = 15_000;
+        }
+        caps
     }
     fn bootstrap(_r: Role, _c: &VenueCfg, _k: Option<&Credential>) -> Option<BootCall> {
         None
@@ -219,12 +284,25 @@ impl VenueProtocol for FakePerp {
         _c: &VenueCfg,
         _k: &Credential,
         _n: i64,
-        _o: &mut RestReqBuf,
+        out: &mut RestReqBuf,
     ) -> Result<bool, ProtoErr> {
-        Ok(false)
+        if SPOT {
+            return Ok(false);
+        }
+        out.path_query.push(b"/identity").map_err(|_| ProtoErr::BufFull)?;
+        out.headers
+            .push(b"Authorization: fixture-signature\r\n")
+            .map_err(|_| ProtoErr::BufFull)?;
+        out.redacted = true;
+        Ok(true)
     }
-    fn decode_identity(_s: u16, _b: &[u8], _u: &mut [u8; 24]) -> Result<(), DecodeErr> {
-        Err(DecodeErr::UnknownClass)
+    fn decode_identity(s: u16, b: &[u8], u: &mut [u8; 24]) -> Result<(), DecodeErr> {
+        if s != 200 || b.is_empty() || b.len() > u.len() || !b.iter().all(u8::is_ascii_graphic) {
+            return Err(DecodeErr::Shape);
+        }
+        u.fill(0);
+        u[..b.len()].copy_from_slice(b);
+        Ok(())
     }
     fn peek(_rd: &RefData, _ctx: &FakeFeedCtx, c: FakeMd, p: &[u8]) -> Result<Peek, DecodeErr> {
         let (stream, key) = match c {
@@ -278,42 +356,142 @@ impl VenueProtocol for FakePerp {
         Ok(())
     }
     fn encode(
-        _rd: &RefData,
+        rd: &RefData,
         _t: &(),
         c: &GwCmd,
-        _tg: &TargetRef,
-        _k: &WallClock,
-        _b: &mut [u8],
+        tg: &TargetRef,
+        k: &WallClock,
+        b: &mut [u8],
     ) -> Result<usize, EncodeErr> {
-        Err(EncodeErr::Unsupported(c.op))
+        if rd.inst(c.inst).venue != Self::VENUE {
+            return Err(EncodeErr::UnknownInst);
+        }
+        let ro = c.oflags & hft_event::OrderFlags::REDUCE_ONLY.0 != 0;
+        if SPOT && ro && MUT != 1 {
+            return Err(EncodeErr::Unsupported(c.op));
+        }
+        if c.op == GwOp::Amend && tg.exch_order_id == 0 {
+            return Err(EncodeErr::UnknownTarget);
+        }
+        let mut cid = [0; 48];
+        let n = Self::render_cid(&tg.id, &mut cid);
+        let cid = core::str::from_utf8(&cid[..n]).map_err(|_| EncodeErr::FieldOverflow)?;
+        use core::fmt::Write;
+        let mut w = Wire { out: b, n: 0 };
+        write!(
+            w,
+            "{{\"op\":{},\"cid\":\"{}\",\"time\":{}",
+            c.op as u8, cid, k.unix_ms
+        )
+        .map_err(|_| EncodeErr::FieldOverflow)?;
+        if ro && !SPOT {
+            w.write_str(",\"ro\":true")
+                .map_err(|_| EncodeErr::FieldOverflow)?;
+        }
+        w.write_str("}").map_err(|_| EncodeErr::FieldOverflow)?;
+        Ok(w.n)
     }
-    fn render_cid(_id: &ClientOrderId, _o: &mut [u8; 48]) -> usize {
-        0
+    fn render_cid(id: &ClientOrderId, o: &mut [u8; 48]) -> usize {
+        let mut text = [0; 24];
+        id.encode(&mut text);
+        o[..2].copy_from_slice(b"hf");
+        o[2..26].copy_from_slice(&text);
+        26
     }
-    fn parse_cid(_b: &[u8]) -> Option<ClientOrderId> {
-        None
+    fn parse_cid(b: &[u8]) -> Option<ClientOrderId> {
+        ClientOrderId::decode(b.strip_prefix(b"hf")?).ok()
     }
-    fn classify_report(_op: MsgOp, _h: &[u8]) -> FakeMd {
-        FakeMd::Unknown
+    fn classify_report(_op: MsgOp, h: &[u8]) -> u8 {
+        match str_field(h, "e") {
+            Some(b"response") => 1,
+            Some(b"listenKeyExtended") => 2,
+            Some(b"ended") => 3,
+            Some(b"shutdown") => 4,
+            _ => 0,
+        }
     }
     fn decode_report(
         _rd: &RefData,
         _c: &mut (),
-        _k: FakeMd,
-        _p: &[u8],
-        _rx: &RxMeta,
-        _o: &mut impl ReportSink,
+        k: u8,
+        p: &[u8],
+        rx: &RxMeta,
+        out: &mut impl ReportSink,
     ) -> Result<ReportOutcome, DecodeErr> {
-        Err(DecodeErr::UnknownClass)
+        let mut o = ReportOutcome::default();
+        match k {
+            0 => o.skip = hft_venue_proto::Skip::Unknown,
+            2 => o.skip = hft_venue_proto::Skip::Listed,
+            3 => o.ctl = hft_venue_proto::ReportCtl::UserStreamEnded,
+            4 => o.ctl = hft_venue_proto::ReportCtl::ServerShutdown,
+            _ => {
+                let r = hft_venue_proto::ReqRef {
+                    slot: 42,
+                    r#gen: 7,
+                    op: GwOp::Place,
+                };
+                o.req = Some(r);
+                let code = str_field(p, "code").ok_or(DecodeErr::Shape)?;
+                o.raw_code = if code.starts_with(b"HTTP") {
+                    hft_venue_proto::raw_code_http(503)
+                } else {
+                    hft_venue_proto::raw_code_str(code)
+                };
+                if [b"-2010".as_slice(), b"51008", b"-1021", b"-1015"].contains(&code) {
+                    let mut e = blank_report(rx);
+                    e.what = hft_event::OrderEventKind::Reject;
+                    e.reject_code = o.raw_code;
+                    out.order(&e);
+                    o.events = 1;
+                    o.ctl = match code {
+                        b"-1021" => hft_venue_proto::ReportCtl::ClockSkew,
+                        b"-1015" => hft_venue_proto::ReportCtl::RateLimited,
+                        _ => hft_venue_proto::ReportCtl::None,
+                    };
+                } else {
+                    o.outcome_unknown = Some(r);
+                }
+            }
+        }
+        Ok(o)
     }
     fn rate_rules() -> &'static [RateRule] {
-        &[]
+        const NORMAL: RateRule = RateRule {
+            scope: hft_refdata::LimitScope::Account,
+            bucket: hft_refdata::LimitBucket::Orders,
+            window_ms: 1000,
+            limit: 10,
+        };
+        if MUT == 2 {
+            &[RateRule {
+                window_ms: 0,
+                ..NORMAL
+            }]
+        } else if MUT == 3 {
+            &[RateRule { limit: 0, ..NORMAL }]
+        } else {
+            &[NORMAL]
+        }
     }
     fn stale_guard() -> StaleGuard {
-        StaleGuard::None
+        if SPOT {
+            StaleGuard::None
+        } else {
+            StaleGuard::RecvWindow { default_ms: 5000 }
+        }
     }
     fn dead_man() -> DeadManSpec {
-        DeadManSpec::None
+        if SPOT {
+            DeadManSpec::None
+        } else {
+            DeadManSpec::CountdownAccount {
+                min_ms: 10_000,
+                max_ms: 120_000,
+                timeout_ms: 60_000,
+                refresh_ms: 15_000,
+                via: hft_venue_proto::Via::Ws,
+            }
+        }
     }
     fn dead_man_refresh(
         _rd: &RefData,
@@ -520,7 +698,7 @@ pub struct AcctScratch {
     pub amount: i64,
     pub qty: i64,
 }
-impl AcctProtocol for FakePerp {
+impl<const SPOT: bool, const MUT: u8> AcctProtocol for Fake<SPOT, MUT> {
     type AcctCtx = u32;
     type AcctScratch = AcctScratch;
     fn acct_queries(k: AcctQueryKind) -> &'static [AcctQuery] {
@@ -628,7 +806,7 @@ impl AcctProtocol for FakePerp {
             let mut h = hft_event::AccountConfigReportHdr::new_zeroed();
             h.venue = FAKE_VENUE;
             h.account = acct;
-            h.uid_keys = 2;
+            h.uid_keys = if SPOT { 3 } else { 2 };
             h.venue_uid[..2].copy_from_slice(b"U1");
             h.n_lev = 1;
             out.account_config(

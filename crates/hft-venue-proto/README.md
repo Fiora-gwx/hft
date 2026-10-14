@@ -591,6 +591,8 @@ pub enum ExchIdHint { Resolved { epoch: u16, slot: SlotId, gen: u32 }, Recorded,
 
 `private_channels` 给出需确认的频道位图，`private_ack` 返回频道位与是否成功；退订确认不得当作订阅确认。`is_private_report` 区分私有推送和订单请求响应，运行时在协议去重前过滤非归属连接。
 
+`valid_uid` 校验固定 24 字节 UID 的非空可见 ASCII 与连续零填充。`testkit::check_identity` 比较独立 UID 样本并拒绝失败 HTTP 响应；`check_reduce_only` 使用调用方提供的 wire 字段判定器校验编码，现货不能静默丢弃该标志。`check_default_caps` 同时拒绝空限速表、零额度与零窗口。
+
 ## 已知限制与后续工作
 
 - 原始码编码、`dedup_key` 与固定容量 `TradeIdRing` 可用于热路径。`testkit` 包含有序 Md/Report 观测、首个字节差异定位、独立 fixture 比对、累计量/未知码及基本配置契约检查;`MdRec::bytes` 的首字节区分 sink 方法,其后是字段原始字节,相同布局的 Mark/Index 不混同。完整 `check_*` 验收套件仍未齐备。warm `account` 的数值超限返回 Overflow,非法/非精确数字返回 Number。

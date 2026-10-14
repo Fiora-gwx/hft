@@ -227,7 +227,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`FakeSpot` 的默认 `fee_asset_rule = ReceivedAssetUnlessDiscount{token: "FKT"}`(资产名);按行传入的查找函数
-- 实现:`crates/hft-venue-proto/tests/defaults.rs::vpr_016_default_caps_asset_injection`
+- 实现:`crates/hft-venue-proto/tests/contract_runtime.rs::vpr_016_default_caps_asset_injection`
 
 | 行 | 查找函数 | 期望 `default_caps(f).fee_asset_rule` |
 |---|---|---|
@@ -712,7 +712,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`FakePerp`;`codes.rs` 确定拒绝表 {`-2010`, `"51008"`},结果未知表 {`-1007`, `"50004"`};样本构造函数按码生成下单响应
-- 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_076_check_unknown_codes_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_runtime.rs::vpr_076_unknown_codes_do_not_become_business_rejects`
 
 | 行 | 响应码 | 期望 `decode_report` |
 |---|---|---|
@@ -856,7 +856,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `check_default_caps::<FakeSpot>()`;`check_default_caps::<FakePerp>()`
 - 期望:
   - 两者通过。检查内容:`default_caps()` 的 stale_guard 与 `stale_guard()` 同变体同 `default_ms`;`dms` 与 `dead_man()` 同名变体,`dms_min_ms/max_ms/timeout_ms/refresh_ms` = 10_000/120_000/60_000/15_000;`default_caps()` 的市场 = `MARKET`;`FakeSpot` 编码带 `REDUCE_ONLY` 的 Place 返回 `Err(Unsupported(Place))`;`FakeSpot::dead_man_refresh` 返回 `Err(Unsupported(GwOp::DeadManRefresh))`;`rate_rules()` 非空且每条 `window_ms > 0`、`limit > 0`
-- 实现:`crates/hft-venue-proto/tests/contract_caps.rs::vpr_087_check_default_caps_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_runtime.rs::vpr_087_capability_and_encoded_protection_contracts`
 
 ### VPR-088 check_default_caps 检出能力表与 stale_guard 不一致
 
@@ -912,7 +912,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `check_default_caps`
 - 期望:
   - `Err(ContractFail{contract: 11})`
-- 实现:`crates/hft-venue-proto/tests/contract_caps.rs::vpr_091_spot_reduce_only_dropped`
+- 实现:`crates/hft-venue-proto/tests/contract_runtime.rs::vpr_091_spot_dropped_reduce_only_is_rejected`
 
 ### VPR-092 永续只在 oflags 带 REDUCE_ONLY 时填 reduce-only 字段
 
@@ -920,7 +920,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`FakePerp`;Place 命令,其余字段固定
-- 实现:`crates/hft-venue-proto/tests/contract_caps.rs::vpr_092_perp_reduce_only_field`
+- 实现:`crates/hft-venue-proto/tests/contract_runtime.rs::vpr_092_perp_reduce_only_field`
 
 | 行 | `oflags` | 期望帧 |
 |---|---|---|
@@ -938,7 +938,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `check_default_caps`
 - 期望:
   - `Err(ContractFail{contract: 15})`,`detail` 含 `rate_rules`
-- 实现:`crates/hft-venue-proto/tests/contract_caps.rs::vpr_093_zero_window_rule`
+- 实现:`crates/hft-venue-proto/tests/contract_runtime.rs::vpr_093_zero_rate_window_or_limit_is_rejected`
 
 ### VPR-094 check_fee_asset:实际费用与扣费资产,晚到费用走 FeeOnly(契约 12、19)
 
@@ -1157,7 +1157,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`FakePerp`;`ignorable_user_events = ["listStatus"]`;按行一条用户流消息
-- 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_108_check_unknown_events_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_runtime.rs::vpr_108_ignored_and_unknown_are_successful_empty_decodes`
 
 | 行 | 事件 | 期望 |
 |---|---|---|
@@ -1220,7 +1220,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`FakePerp`(会话凭证与 REST 凭证不同:`session_identity_request` 返回 `Ok(true)`);`FakeSpot`(同一把:返回 `Ok(false)`);UID 样本 `"U1"`
-- 实现:`crates/hft-venue-proto/tests/contract_acct.rs::vpr_112_check_identity_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_runtime.rs::vpr_112_uid_requires_successful_signed_session_evidence`
 
 | 行 | 产品线 | 期望 |
 |---|---|---|

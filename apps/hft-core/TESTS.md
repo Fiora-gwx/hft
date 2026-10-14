@@ -3991,6 +3991,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 ### CORE-387 venue 接线:有 Live 账户的 venue 才挂 `AcctFetchTask` 与账户环
 
+公共 BBO 池的请求、合批、背压与 raw 单写者验收归 [hft-venue VEN-151–161](../../crates/hft-venue/TESTS.md#ven-151-每条-snapreq-恰好得到一条-snap-记录)。
+
 - 规则:[实现说明](README.md#实现说明)
 - 级别:unit
 - 里程碑:M3

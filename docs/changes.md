@@ -6,6 +6,7 @@
 |---|---|---|---|---|
 | 2026-10-15 | Binance/Bitget 的 HTTP 403/408/418/429/5xx 优先于业务码,不生成 Reject/GONE/NotFound;429/418 仍执行各协议限速提示 | BIN-092、BGT-093;传输错误不能证明订单失败 | 两所错误映射、回报解码、README、TESTS;[决定](../.agents/notes/implemented/bug-fix/2026-10-15-account-page-and-transport-evidence.md) | 待评审(订单) |
 | 2026-10-15 | warm 账户页面完整校验后原子替换对应 State;撤单回执绑定请求订单,重复资产/订单与坏游标拒绝;Bitget 空资金费页带 cursor 不再结束窗口 | BIN-006/153、BGT-006/150/336;部分页面污染与资金费遗漏 | 两所 account、Bitget funding、README、TESTS | 待评审(账户/资金) |
+| 2026-10-15 | 保活响应的 UserStreamEnded 处置实际私有归属连接；逐品种死手在无 live inst 时不发送；轮换等待恰满上限时退出忙等待，错峰到期的 standby 只补建、不提升为 primary。驱动内会话 UID 查询有界重试且失败不授予身份通过；池化补帧超时退役连接、超大响应整批失败 | VEN-234/235/236/237/314/151，错误连接退役与边界行为回归 | hft-venue、hft-venue-proto 与 hft-core 快照装配 | 待评审(账户/订单/连接健康) |
 | 2026-10-15 | 非 BBO 行情连接的 Pong 按规范发布 md Alive，正常行情更新发布水位；条件心跳在最后入站数据满 interval 时发送 | VEN-134、VEN-281，原实现遗漏活性输入并额外延迟心跳 | hft-venue 的 feed、心跳与规格 | 待评审(连接健康) |
 | 2026-10-15 | REST 在途保存发送时完整身份，省略 epoch 的回包与 Unknown 不借用当前槽 epoch；无匹配在途证据的 Unknown 保持 UNRESOLVED | VEN-228，槽复用和 SetEpoch 后迟到回包归属 | hft-venue 的网关、warm REST 消息与规格 | 待评审(订单/资金归属) |
 | 2026-10-15 | 账户查询失败不发布部分报告；变长账户回报先提交尾部再提交头；私有频道按完整确认切换，缺会话 UID 证据不声称核验；REST 超时/429/5xx 保持 Unknown，全撤按声明通道发送 | VEN-211/257/260/272/273/313/392、BIN-202、BGT-201 | hft-venue、hft-venue-proto、hft-net；hft-core 与两个协议的最小接线 | 待评审(账户/风控/订单) |

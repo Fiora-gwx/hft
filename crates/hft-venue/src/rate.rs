@@ -92,20 +92,26 @@ impl RateCounters {
         }
     }
     pub fn take(&mut self, now: u64) -> bool {
+        if !self.available(now) {
+            return false;
+        }
+        self.charge();
+        true
+    }
+    /// Check the default request cost without consuming quota while a transport is unavailable.
+    pub(crate) fn available(&mut self, now: u64) -> bool {
         for w in &mut self.windows {
             w.roll(now);
         }
-        if self
+        !self
             .windows
             .iter()
             .any(|w| w.used.checked_add(w.cost).is_none_or(|n| n > w.limit))
-        {
-            return false;
-        }
+    }
+    pub(crate) fn charge(&mut self) {
         for w in &mut self.windows {
             w.used += w.cost;
         }
-        true
     }
     /// A delayed observation may tighten, but never release quota already charged locally.
     pub fn observe_window(&mut self, obs: RateObs, now: u64) {

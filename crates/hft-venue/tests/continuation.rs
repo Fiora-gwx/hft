@@ -11,6 +11,13 @@ use hft_types::InstId;
 use hft_venue::{FeedCfg, FeedRoutes, streams};
 
 #[test]
+fn ven_395_warm_and_account_paths_zero_alloc() {
+    crate::snap_pool::measure_pooled_snapshot();
+    crate::acct_fetch::measure_account_sequences_and_gateway_apply();
+    crate::gw_hold::measure_unmatched_fill_hold_and_timeout();
+}
+
+#[test]
 fn ven_025_stream_bits() {
     for (mask, name, route, levels) in [
         (streams::BBO, "Bbo", 0, 0),

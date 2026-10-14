@@ -891,7 +891,7 @@ hft-core 自身不在 tick-to-trade 路径上增加代码;路径上的分段预�
 - Agent Note:`sim-only-instance`、`sim-colocated-with-prod`、`no-small-live`、`engine-time`、`warmup-injection`、`no-same-exchange-spot-perp`、`host-class-c32`、`rx-irq-driven`、`feed-split-and-snap-fetch`、`verify-on-server`、`m3-end-probe`、`irq-split-reserve`、`core-market-data-scope`、`manual-hold-and-stop-marker`、`dev2-guard-system-slice-psi`、[thread-plan-and-host-classes](../../.agents/notes/proposed/architecture/2026-10-01-thread-plan-and-host-classes.md)、[recover-driver](../../.agents/notes/proposed/architecture/2026-10-01-recover-driver.md)、[recovery-epoch-and-boot-rules](../../.agents/notes/proposed/architecture/2026-10-01-recovery-epoch-and-boot-rules.md)
 - 运维:[host-tuning](../../docs/runbooks/host-tuning.md)、[release-and-deploy](../../docs/runbooks/release-and-deploy.md)、[incident-response](../../docs/runbooks/incident-response.md)、[launch](../../docs/runbooks/launch.md)
 
-公共 BBO 补帧使用独立的公共 REST transport 与 FeedCtx,沿用 venue 的行情源 IP;由 conn-builder warm 线程驱动 [SnapFetchTask](../../crates/hft-venue/README.md#当前-bbo-补帧传输),经 snap 环回到 feed 单写者发布。
+公共 BBO 补帧使用独立的 `RestPool<1>` 与 FeedCtx,沿用 venue 的行情源 IP;由 conn-builder warm 线程驱动 [PooledSnapFetchTask](../../crates/hft-venue/README.md#当前-bbo-补帧传输),经 snap 环回到 feed 单写者发布。
 
 ### 测试环境账户装配
 

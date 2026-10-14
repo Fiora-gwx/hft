@@ -318,6 +318,7 @@ impl TxTsDrain {
 ### 调用约束
 
 - `Conn` 任一时刻只属于一个线程;转移只经 `hft_rt::spsc` 的 `Producer<Handoff>` / `Producer<RetireMsg>`(arena 槽号,不是指针)。热线程**永不**调用 `connect`、`shutdown`、`close`、`getaddrinfo`,也不做 TLS 握手。
+- `Handoff::retire` 把尚未装入池的交接转换成回收消息；池拒绝安装时仍须交还原 Connector 回收。`test-io` 的 `ScriptIo.wait_fd` 只覆盖就绪列表观察值，不执行该描述符的系统调用。
 - `next_frame` 返回的 `Frame::payload` 在同一 `Conn` 下一次 `next_frame` 或 `poll_rx` 前有效;调用方须在此之前完成解码与 raw journal 追加。两次 `next_frame` 之间调用 `send_frame` 不影响读位置与已解出的明文。
 - `send_frame` 只接受已 `seal` 的帧;`SendErr::NotOpen/TxBacklog` 保证**没有**加密,调用方可改走备用连接;`SendErr::Io` 表示密文已产生,订单按 `Unknown` 处理([defensive-patterns](../../docs/defensive-patterns.md))。
 - `warm` 可每轮空闲循环调用;它不做系统调用,不改真实连接的任何状态。

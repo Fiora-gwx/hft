@@ -468,7 +468,8 @@ where
     let snap_arena = ConnArena::new(&[(ConnRole::Rest, 1)], &snap_net, clock);
     let snap_connector =
         Connector::new(snap_arena, &snap_net).map_err(|_| Error::config("SnapshotNetwork", name))?;
-    let mut snapshots = hft_venue::SnapFetchTask::<P>::new(
+    let snapshot_pool = hft_net::RestPool::<1>::new(snap_host.as_bytes(), &snap_net, clock);
+    let mut snapshots = hft_venue::PooledSnapFetchTask::<P, 1>::new(
         hft_venue::SnapCfg {
             parallel: 1,
             timeout_ms: snap_net.rest_timeout_ms,
@@ -484,13 +485,11 @@ where
             clock: clock.tsc_utc(&clock.base),
         },
         ctx.clone(),
+        snapshot_pool,
     )
     .map_err(|_| Error::config("SnapshotConfig", name))?;
     snapshots
-        .attach(
-            hft_net::rest::Client::new(snap_connector, c.rings.bytes / 4),
-            snap_host,
-        )
+        .attach_connector(snap_connector, EndpointId(0), 0)
         .map_err(|_| Error::config("SnapshotHost", name))?;
     let (fw, fs) = raw("feed")?;
     let mut sides = vec![fs];

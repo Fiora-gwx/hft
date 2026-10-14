@@ -108,6 +108,7 @@ impl Default for SlotMirror {
 /// gw counters.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct GwCounters {
+    pub keepalive_unsupported: u64,
     pub cmd_bad_account: u64,
     /// `drain_out` calls (instrumentation of README §4 / T13).
     pub drain_calls: u64,
@@ -1402,9 +1403,17 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 self.conn_state(account, role, id, ConnStateKind::Degraded, codes::RATE_LIMIT, rx)
             }
             ReportCtl::UserStreamEnded => {
-                if P::USER_STREAM {
-                    self.retire_conn(a, id, ErrBits::PEER_EOF, now);
-                } else if self.accts[a].private.owner == Some(id) {
+                let owner = if role == ConnRole::Rest {
+                    self.accts[a].private.owner
+                } else {
+                    Some(id)
+                };
+                if P::USER_STREAM
+                    && let Some(owner) = owner
+                {
+                    self.retire_conn(a, owner, ErrBits::PEER_EOF, now);
+                } else if owner.is_some() && self.accts[a].private.owner == owner {
+                    let id = owner.unwrap_or(id);
                     self.accts[a].private.owner = None;
                     self.conn_state(account, ConnRole::UserStream, id, ConnStateKind::Down, 0, now);
                     self.private_start(a, id, now);
@@ -2146,6 +2155,14 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 self.insts_buf.push(m.inst);
             }
         }
+        if self.insts_buf.is_empty()
+            && matches!(
+                P::dead_man(),
+                hft_venue_proto::DeadManSpec::CountdownPerInst { .. }
+            )
+        {
+            return;
+        }
         let clk = self.wall(now);
         self.dm.frame.clear();
         self.dm.reqs.clear();
@@ -2623,11 +2640,17 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             self.retire_conn(a, old, ErrBits::ROTATE_DUE, now);
             did = true;
         }
-        if let Some(x) = self.accts.get_mut(a)
-            && x.pool.rotate_due(now).is_some()
-        {
-            x.rotate = true;
-            x.rotate_bits |= ErrBits::ROTATE_DUE.bits();
+        if let Some(due) = self.accts.get_mut(a).and_then(|x| x.pool.rotate_due(now)) {
+            let primary = self.accts[a].pool.primary().map(|c| c.id());
+            if primary == Some(due) {
+                self.accts[a].rotate = true;
+                self.accts[a].rotate_bits |= ErrBits::ROTATE_DUE.bits();
+            } else {
+                // A staggered standby expires before the primary. Replace it without promoting
+                // the expiring socket or disturbing the primary's inflight requests.
+                self.retire_conn(a, due, ErrBits::ROTATE_DUE, now);
+                did = true;
+            }
         }
         let Some(x) = self.accts.get_mut(a) else {
             return did;
@@ -2646,7 +2669,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             .is_some_and(|c| c.phase() == hft_net::ConnPhase::Open);
         let busy = pid.is_some_and(|p| self.inflight.iter().any(|f| f.conn == p));
         if !standby_open || busy {
-            if now.saturating_sub(since) > wait {
+            if now.saturating_sub(since) >= wait {
                 // Give up this time; wait again.
                 x.rotate_since = Some(now.saturating_add(wait));
             }
