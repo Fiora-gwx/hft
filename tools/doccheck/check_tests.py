@@ -61,7 +61,7 @@ VAGUE = ["正确", "正常", "合理", "适当", "符合预期", "等等", "之�
 ALLOWED_REASON = re.compile(r"^不适用[::]\s*(非规范|见子节|由\s*.+\s*覆盖|里程碑外)")
 NONNORMATIVE = {"概要", "目录", "测试与验收", "依赖", "延伸阅读", "已知限制与后续工作", "开发备忘"}
 SCEN_ID = re.compile(r"^(A\d+|B\d+|C\d+|[A-Z]{1,4}-\d+[a-z]?|INV-\d+|DRL-\d+)$")
-COMP_ID = re.compile(r"^([A-Z]{2,4})-(\d{3})$")
+COMP_ID = re.compile(r"^([A-Z]{2,})-(\d{3})$")
 RANGE_SEP = "–"
 
 
@@ -149,7 +149,7 @@ if os.path.exists(reg_path):
             cells = split_row(line)
             for i in range(0, len(cells) - 1, 2):
                 c, p = cells[i], cells[i + 1]
-                if c and p and re.fullmatch(r"[A-Z]{2,4}", p):
+                if c and p and re.fullmatch(r"[A-Z]{2,}", p):
                     prefix_of[c] = p
 else:
     problems["FRONT"].append("docs/tests/README.md missing (prefix registry)")
@@ -259,7 +259,7 @@ def expand(entry):
                 bad.append(tok)
         elif COMP_ID.match(tok) or SCEN_ID.match(tok):
             ids.append((tok, True))
-        elif re.match(r"^[A-Z]{2,4}-\d{3}\.\d+$", tok):
+        elif re.match(r"^[A-Z]{2,}-\d{3}\.\d+$", tok):
             ids.append((tok.split(".")[0], True))
         else:
             bad.append(tok)

@@ -87,6 +87,19 @@ fn ids(r: &Run, key: &str) -> Vec<String> {
 #[test]
 fn tool_086_clean_passes() {
     let f = trace_clean();
+    // Frozen strategy IDs can have more than four prefix letters. They must be parsed,
+    // even when their milestone is later than the currently reported milestone.
+    f.append(
+        A_TESTS,
+        &case(
+            "CARRY-001",
+            "unit",
+            "M4",
+            "",
+            "`crates/a/tests/x.rs::carry_001_ok`",
+        ),
+    );
+    f.append(A_X, "\n#[test]\nfn carry_001_ok() {}\n");
     let r = f.xtask(&["test-trace"]);
     assert_eq!(r.code, 0, "stderr:\n{}", r.stderr);
     for key in ["unimplemented", "extra", "inconsistent"] {
