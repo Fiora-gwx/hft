@@ -390,7 +390,9 @@ fn account(
             account: rx.account,
             inst,
             qty: Qty(fixed(p.pa, h.qty_wire_exp)?),
-            entry_px: Px(fixed(p.ep, h.px_wire_exp)?),
+            entry_px: Px(
+                hft_types::parse_round(p.ep.as_bytes(), h.px_wire_exp, RoundMode::HalfEven).map_err(fx)?,
+            ),
             upnl: Notional(hft_types::parse_round(p.up.as_bytes(), -6, RoundMode::HalfEven).map_err(fx)?),
             ex_ts_ns: ns,
             rx_tsc: Tsc(rx.rx_tsc),

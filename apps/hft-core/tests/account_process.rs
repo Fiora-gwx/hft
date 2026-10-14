@@ -118,6 +118,7 @@ struct Server {
     settings: usize,
     drift: bool,
     hedge: bool,
+    funding: bool,
     fail: bool,
     requests: usize,
 }
@@ -161,13 +162,17 @@ impl Transport for Mock {
                 r#"{"orderId":"7"}"#.into()
             } else if path.contains("/account/assets") {
                 format!(
-                    r#"{{"usdtEquity":"100","accountEquity":"100","mmr":"0.1","assets":[{{"coin":"USDT","balance":"{}","available":"90","locked":"0","debt":"0"}}]}}"#,
+                    r#"{{"usdtEquity":"100","accountEquity":"200","mmr":"0.1","assets":[{{"coin":"USDT","balance":"{}","available":"90","locked":"0","debt":"0"}}]}}"#,
                     if s.drift { "99" } else { "100" }
                 )
             } else if path.contains("current-position") {
                 r#"{"list":[{"symbol":"BTCUSDT","holdMode":"one_way_mode","marginMode":"crossed","posSide":"short","total":"0.001","avgPrice":"60000","unrealisedPnl":"0","liquidationPrice":"100000"}]}"#.into()
             } else if path.contains("financial-records") {
-                r#"{"list":[],"cursor":""}"#.into()
+                if s.funding {
+                    r#"{"list":[{"id":"900","symbol":"BTCUSDT","coin":"USDT","category":"USDT-FUTURES","type":"CONTRACT_MAIN_SETTLE_FEE_USER_OUT","amount":"0.02","ts":"1790006400000"}],"cursor":""}"#.into()
+                } else {
+                    r#"{"list":[],"cursor":""}"#.into()
+                }
             } else {
                 panic!("unexpected mock endpoint")
             };
@@ -269,6 +274,11 @@ fn exercise<P: AccountProtocol>(bitget: bool) {
     assert!(baseline.orders.is_empty());
     assert_eq!(baseline.config.unwrap().position_mode, 2);
     assert_eq!(baseline.leverage[0].leverage.0, 2_000_000_000);
+    if bitget {
+        let m = baseline.margin.as_ref().unwrap();
+        assert_eq!(m.maint_margin.0, 50_000, "USD maintenance converted to USDT");
+        assert_eq!(m.margin_ratio.0, 500_000);
+    }
     assert_eq!(baseline.balances[0].free.0, 10_000_000_000);
     assert_eq!(baseline.positions[0].qty.0, if bitget { -100000 } else { 100000 });
     let mut config = hft_ledger::LedgerConfig::default();
@@ -335,6 +345,26 @@ fn exercise<P: AccountProtocol>(bitget: bool) {
             .0,
         10_000_000_000
     );
+    if bitget {
+        server.lock().unwrap().funding = true;
+        now = 1_790_006_400_000_000_000 + 601_000_000_000;
+        let mut seen = false;
+        for _ in 0..200 {
+            now += 2_000_000;
+            c.poll(now).unwrap();
+            if let Some(s) = c.take()
+                && let Some(f) = s.funding.first()
+            {
+                assert_eq!(
+                    (f.inst.0, f.amount.0, f.settle_ts_ns),
+                    (2, -20_000, 1_790_006_400_000_000_000)
+                );
+                seen = true;
+                break;
+            }
+        }
+        assert!(seen, "completed funding window reaches account ingress");
+    }
     server.lock().unwrap().fail = true;
     c.reauthenticate().unwrap();
     now += 2_000_000;
