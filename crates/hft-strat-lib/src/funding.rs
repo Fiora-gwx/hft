@@ -19,6 +19,7 @@ pub struct SettleRec {
     pub flags: u32,
     pub _pad: u32,
 }
+const _: () = assert!(size_of::<SettleRec>() == 24);
 impl Default for SettleRec {
     fn default() -> Self {
         Self {
@@ -48,6 +49,7 @@ pub struct FundingSummary {
     pub next_settle_ns: i64,
     pub interval_changed_at_ns: i64,
 }
+const _: () = assert!(size_of::<FundingSummary>() == 80);
 impl Default for FundingSummary {
     fn default() -> Self {
         Self {
