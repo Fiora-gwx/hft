@@ -123,7 +123,7 @@ fn bgt_066_spot_place() {
     let f = enc::<BitgetSpot>(&c, &t).unwrap();
     assert_eq!(
         f,
-        r#"{"op":"trade","id":"p0000002a00000007","category":"spot","topic":"place-order","args":[{"symbol":"BGBUSDT","side":"sell","orderType":"limit","price":"1.2345","qty":"1","timeInForce":"ioc","clientOid":"100030b020002a000000079d"}]}"#,
+        r#"{"op":"trade","id":"p0000002a00000007","category":"spot","topic":"place-order","args":[{"symbol":"BGBUSDT","side":"sell","orderType":"limit","price":"1.2345","qty":"1","timeInForce":"ioc","clientOid":"100030b020002a000000079d","autoBorrow":"no"}]}"#,
         "BGT-066.1"
     );
     let mut c2 = c;

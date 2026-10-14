@@ -813,8 +813,12 @@ jobs:
         if: needs.paths.outputs.ops == 'true'
         run: python -m unittest discover -s tools/xtask/tests -p 'test_ci_*.py' -v
       - name: Install pinned Rust toolchain (hft_py)
-        if: needs.paths.outputs.python == 'true' && hashFiles('crates/hft-py/Cargo.toml') != ''
+        if: (needs.paths.outputs.python == 'true' || needs.paths.outputs.scaffold == 'true') && hashFiles('crates/hft-py/Cargo.toml') != ''
         run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        if: needs.paths.outputs.python == 'true' || needs.paths.outputs.scaffold == 'true'
+        with:
+          shared-key: x86-rust
       - name: Python packages (maturin develop, ruff, mypy --strict, pytest)
         if: needs.paths.outputs.python == 'true'
         run: |
@@ -844,6 +848,9 @@ jobs:
             cargo build --locked --profile ci -p hft-journal --example testwriter --features hft-journal/writer -p hft-py --example pyfixture
             sudo prlimit --pid $$ --memlock=unlimited:unlimited
             HFT_PY_TOOLS=target/ci/examples HFT_PY_RELEASE_PYTHON="$RUNNER_TEMP/venv-rel/bin/python" python -m pytest -q crates/hft-py/tests/python
+            # SDK-005: generic tools are built before the isolated registry gains the new kind.
+            cargo build --locked --profile ci -p hft-cfg
+            HFT_CFG_BIN="$PWD/target/ci/hft-cfg" HFT_PYTHON="$RUNNER_TEMP/venv-rel/bin/python" cargo xtask scaffold-gate --profile ci --generic-tools
           fi
           for p in "${pkgs[@]}"; do python -m pip install -e "$p"; done
           python -m ruff check python strategies tools/az-probe
@@ -851,6 +858,18 @@ jobs:
             python -m mypy --strict "${pkgs[@]}"
             python -m pytest -q "${pkgs[@]}"
           fi
+
+      - name: SDK-005 generic tools and ctl preview
+        if: needs.paths.outputs.scaffold == 'true' && needs.paths.outputs.python != 'true'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/sdk-tools"
+          source "$RUNNER_TEMP/sdk-tools/bin/activate"
+          pip install maturin
+          maturin build --locked --profile ci --manifest-path crates/hft-py/Cargo.toml -o "$RUNNER_TEMP/sdk-wheels"
+          pip install --no-deps "$RUNNER_TEMP"/sdk-wheels/*.whl
+          cargo build --locked --profile ci -p hft-cfg
+          sudo prlimit --pid $$ --memlock=unlimited:unlimited
+          HFT_CFG_BIN="$PWD/target/ci/hft-cfg" HFT_PYTHON="$(command -v python)" cargo xtask scaffold-gate --profile ci --generic-tools
 
       # deploy/ lands in M3 (deploy/TESTS.md); every guard below is "the files exist".
       # The container tests (deploy/tests/container/, deploy/dev2/tests/container/) run only when

@@ -21,6 +21,7 @@
     clippy::unimplemented
 )]
 
+mod account;
 mod caps;
 mod cid;
 mod errors;
@@ -32,12 +33,14 @@ mod orders;
 mod reports;
 mod session;
 mod sign;
+mod user_stream;
 mod wr;
 
 pub use cid::{decode_req_id, encode_req_id};
 pub use errors::{CodeClass, classify_code};
 pub use line::Line;
 pub use orders::Templates;
+pub use sign::session_seed;
 
 use hft_event::{GwCmd, GwOp};
 use hft_refdata::{RefData, VenueCaps};
@@ -174,10 +177,52 @@ impl FeedCtx {
     }
 }
 
-/// gw-task state. The M1.5 build keeps none (dedup rings and cumulative-quantity tables arrive
-/// with the user-data streams, M3).
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
-pub struct GwCtx;
+/// Per-account bounded duplicate windows; retained across connection replacement.
+#[derive(Clone, Debug)]
+pub struct GwCtx {
+    trades: [(u32, u64, u64, i64); 1024],
+    trade_next: usize,
+    funding: [(i64, i64); 64],
+    funding_next: usize,
+}
+impl Default for GwCtx {
+    fn default() -> Self {
+        Self {
+            trades: [(0, 0, 0, 0); 1024],
+            trade_next: 0,
+            funding: [(0, 0); 64],
+            funding_next: 0,
+        }
+    }
+}
+impl GwCtx {
+    pub(crate) fn trade(&mut self, inst: u32, id: u64, order: u64, cum: i64) -> bool {
+        let key = if id > 0 {
+            (inst, id, 0, 0)
+        } else {
+            (inst, 0, order, cum)
+        };
+        if self.trades.contains(&key) {
+            return false;
+        }
+        if let Some(slot) = self.trades.get_mut(self.trade_next) {
+            *slot = key;
+        }
+        self.trade_next = (self.trade_next + 1) % self.trades.len();
+        true
+    }
+    pub(crate) fn funding(&mut self, ts: i64, wallet: i64) -> bool {
+        let key = (ts, wallet);
+        if self.funding.contains(&key) {
+            return false;
+        }
+        if let Some(slot) = self.funding.get_mut(self.funding_next) {
+            *slot = key;
+        }
+        self.funding_next = (self.funding_next + 1) % self.funding.len();
+        true
+    }
+}
 
 /// One implementation for both lines; `Usdm` and `Spot` forward with their `Line`.
 macro_rules! venue_impl {

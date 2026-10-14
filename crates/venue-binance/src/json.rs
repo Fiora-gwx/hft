@@ -204,3 +204,45 @@ pub(crate) struct WsResp<'a> {
     #[serde(rename = "rateLimits", default)]
     pub rate_limits: Option<RateSel>,
 }
+
+/// Up to `N` elements of an array kept in place; more → `over`.
+pub(crate) struct Arr<T, const N: usize> {
+    pub items: [Option<T>; N],
+    pub over: bool,
+}
+
+impl<T, const N: usize> Arr<T, N> {
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.items.iter().map_while(Option::as_ref)
+    }
+}
+
+impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for Arr<T, N> {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V<T, const N: usize>(core::marker::PhantomData<T>);
+        impl<'de, T: Deserialize<'de>, const N: usize> Visitor<'de> for V<T, N> {
+            type Value = Arr<T, N>;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("array")
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut s: A) -> Result<Arr<T, N>, A::Error> {
+                let mut out = Arr {
+                    items: core::array::from_fn(|_| None),
+                    over: false,
+                };
+                let mut n = 0usize;
+                while let Some(x) = s.next_element::<T>()? {
+                    match out.items.get_mut(n) {
+                        Some(slot) => {
+                            *slot = Some(x);
+                            n += 1;
+                        }
+                        None => out.over = true,
+                    }
+                }
+                Ok(out)
+            }
+        }
+        d.deserialize_seq(V::<T, N>(core::marker::PhantomData))
+    }
+}

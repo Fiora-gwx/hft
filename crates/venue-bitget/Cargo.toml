@@ -18,6 +18,7 @@ hft-types.workspace = true
 hft-refdata.workspace = true
 hft-event.workspace = true
 hft-venue-proto.workspace = true
+zerocopy.workspace = true
 # Per-message structs over borrowed strings (README "实现说明" 2); no generic JSON values.
 sonic-rs = "0.5"
 serde = { version = "1", default-features = false, features = ["derive"] }

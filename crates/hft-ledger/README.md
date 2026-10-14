@@ -594,6 +594,10 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 - [07 §5 仓位与盈亏记账](../../design/07-策略层.md)、[09 §4.3 对账与会计口径](../../design/09-可观测性、风控与控制面.md)
 - [hft-strategy-sdk](../hft-strategy-sdk/README.md)(`PortfolioView`)、[hft-oms](../hft-oms/README.md)、[hft-risk](../hft-risk/README.md)、[hft-exec](../hft-exec/README.md)、[hft-sim](../hft-sim/README.md)、[hft-py](../hft-py/README.md)
 
+### 非正式账户启动基线与结算观察
+
+`seed_position` 仅供空账本启动，按交易所数量/入场价建账户 unassigned 成本，不产生虚构成交或现金；余额使用首次 BalanceReport 初始化，初始状态进完整 StateSnapshot。运行中余额/持仓差异只告警，不覆盖账本；资金费沿用既有实际结算入口。
+
 ## 已知限制与后续工作
 
 - 普通订单与原始外来成交的 `PERP_CASH` 已接到 sequencer 与 JournalLedger;测试世界的能力与资金验收归 [hft-testkit](../hft-testkit/README.md#6-dst-框架),生产协议尚未启用。外来归属重叠、已过保留期的系统订单重新归属、生产对账服务的原始历史查询与模拟恢复装配仍待接通;LED-080/081 的专属场景仅覆盖其明确列出的原件关系,不代表多笔原件与累计量部分重叠已获证明,未证明的严格结算路径明确失败。冷读者不完整镜像 OMS 的状态机与回收时机,跨回收的增量均价、未接受的非成交回报及外来归属仍需专门验证;普通成交用例不代表全部冷热一致性验收。

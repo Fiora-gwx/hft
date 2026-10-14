@@ -20,10 +20,13 @@ spec: README.md
 
 可选扩展(增量深度、REST 深度快照与 `align_first`、现货 SBE、`mock` 反向编解码、`order.cancelReplace`)的用例不在本文件;见"验收"。
 
+CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs::core_120_mock_accounts_bootstrap_reauth_and_drift` 以独立子进程、两家真实协议和脚本 REST 验证撤空、基线、重新核验、超时/错误模式失败与余额差异不覆盖账本；不替代真实 TLS、交易所或正式恢复验收。资金费账单复用 FundingPoll，沿用现有实际结算记账与去重。
+
 ## 覆盖
 
 | README 小节 | 用例 |
 |---|---|
+| 测试环境 warm 账户入口 | BIN-142、BIN-145 |
 | 资金费实额 | BIN-332 |
 | 概要 | BIN-001, BIN-038, BIN-210 |
 | 目录 | 不适用:非规范 |

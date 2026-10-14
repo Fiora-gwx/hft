@@ -910,6 +910,10 @@ advisor 的定时投递、重启注记去重、落后量、两种环容量的独
 - [指定快照恢复审计范围](../../.agents/notes/implemented/bug-fix/2026-10-11-snapshot-recovery-audit-range.md)
 - [恢复快照的引擎时间](../../.agents/notes/implemented/bug-fix/2026-10-11-recovery-snapshot-engine-time.md)
 
+### 非正式账户 bootstrap
+
+`Sequencer::boot_accounts` 只给新 journal 的非正式 Live 账户接受余额/持仓基线；绑定错误、重复资产/持仓、正式或 Sim 账户、无效持仓拒绝启动。策略初始化前建立账户 unassigned 状态并写第一份完整快照。RateOnly 真实结算输入先记录再检查差异，不自动纠正现金。
+
 ## 已知限制与后续工作
 
 - 含绑定实例的旧开发快照若缺节 27,恢复返回 `SnapshotUndecodable{section: 27}`;即使堆为空也不能推断 ID 计数器为 1。旧版本会跳过未知节,但不具备稳定 TimerId 的恢复契约,不作为使用该能力的回滚版本。固定样本须由支持节 27 的版本生成;上一已验证版本的兼容升级与回滚仍须负责人评审。

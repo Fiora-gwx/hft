@@ -8,10 +8,13 @@ spec: README.md
 
 格式与规则见 [docs/tests](../../docs/tests/README.md)。本 crate 只有类型、trait、去重与码编码;"实现方必须遵守的契约"由 feature `testkit` 的检查函数在每个 venue 上执行。本文件的契约用例在内置假协议上证明每个检查函数对遵守契约的实现通过(正例)、对违反契约的变体检出(反例);各 venue 对真实报文调用这些检查的用例在该 venue 的 `TESTS.md`。
 
+CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs::core_120_mock_accounts_bootstrap_reauth_and_drift` 以独立子进程、两家真实协议和脚本 REST 验证单位倍率规则归一化、撤空、基线、重新核验、超时/错误模式失败与余额差异不覆盖账本；不替代真实 TLS、交易所或正式恢复验收。资金费账单复用 FundingPoll，沿用现有实际结算记账与去重。
+
 ## 覆盖
 
 | README 小节 | 用例 |
 |---|---|
+| Warm 账户扩展 | VPR-015、VPR-126 |
 | 认证资金费历史扩展 | VPR-100 |
 | 概要 | VPR-122、VPR-150 |
 | 目录 | 不适用:非规范 |

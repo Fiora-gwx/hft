@@ -23,9 +23,10 @@ excl=(--exclude xtask)
 if [[ $channel == release ]] && ((${#hot[@]})); then
   args=()
   for p in "${hot[@]}"; do args+=(-p "$p"); excl+=(--exclude "$p"); done
+  if has hft-strategy-registry; then args+=(-p hft-strategy-registry --all-features); fi
   cargo build --locked --profile release-hot --target "$target" "${args[@]}"
 fi
-cargo build --locked --release --target "$target" --workspace --bins "${excl[@]}"
+cargo build --locked --release --target "$target" --workspace --all-features --bins "${excl[@]}"
 
 n=0
 for dir in "target/$target/release" "target/$target/release-hot"; do

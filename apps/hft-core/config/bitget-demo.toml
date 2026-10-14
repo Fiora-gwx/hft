@@ -1,0 +1,85 @@
+# Template: replace blob paths/hashes and source binding before --check.
+# Endpoints belong to RDB1; see README.md. Never put credentials inline.
+schema = 1
+[instance]
+name = "prod"
+order_env = "testnet"
+config_source = "file"
+[paths]
+journal_ram = "/dev/shm/hft-bitget-demo"
+journal_cold = "/var/lib/hft-bitget-demo"
+ctl_socket = "/run/hft-bitget-demo/core.sock"
+ctl_principals = "principals.toml"
+[shutdown]
+cancel_open_orders = true
+drain_timeout_ms = 30000
+[journal]
+segment_bytes = 16777216
+hot_keep = 2
+[clock]
+step_threshold_ns = 50000
+interval_ms = 1000
+[rings]
+elements = 4096
+bytes = 1048576
+[venues.futures]
+protocol = "bitget-usdt-futures"
+id = 10
+max_sub_insts = 1
+stale_guard_ms = 1500
+src_ip = "192.0.2.10"
+bind_device = "eth0"
+[venues.futures.account_io]
+timeout_ms = 10000
+interval_ms = 5000
+request_gap_ms = 250
+max_cancel_rounds = 32
+listen_keepalive_ms = 1800000
+[[venues.futures.accounts]]
+account = 1
+api_key_path = "/run/secrets/hft-bitget-demo/session-api-key"
+session_seed_path = "/run/secrets/hft-bitget-demo/session-secret"
+rest_api_key_path = "/run/secrets/hft-bitget-demo/session-api-key"
+rest_secret_path = "/run/secrets/hft-bitget-demo/session-secret"
+rest_sign_alg = "hmac-sha256"
+passphrase_path = "/run/secrets/hft-bitget-demo/passphrase"
+[[threads]]
+name = "sequencer"
+task = "sequencer"
+park_us = 100
+[[threads]]
+name = "persist"
+task = "persist"
+park_us = 500
+[[threads]]
+name = "housekeeping"
+task = "housekeeping"
+park_us = 1000
+[[threads]]
+name = "ctl-gateway"
+task = "ctl-gateway"
+park_us = 200
+[[threads]]
+name = "feed-futures"
+task = "feed:futures"
+park_us = 100
+[[threads]]
+name = "gw-futures"
+task = "gw:futures"
+park_us = 100
+[[threads]]
+name = "build-futures"
+task = "conn-builder:futures"
+park_us = 500
+[blobs.refdata]
+path = "refdata.bin"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+[blobs.engine]
+path = "engine.bin"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+[blobs.risk_params]
+path = "risk.bin"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+[[blobs.strategy_params]]
+path = "params.bin"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"

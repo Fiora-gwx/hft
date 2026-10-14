@@ -20,6 +20,7 @@
     clippy::unimplemented
 )]
 
+pub mod account;
 pub mod codes;
 mod config;
 mod conn_id;
@@ -29,6 +30,7 @@ mod gw;
 mod hb;
 mod idtable;
 mod kill;
+pub mod order_rest;
 mod rate;
 mod raw;
 mod seq;

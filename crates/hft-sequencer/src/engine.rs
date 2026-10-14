@@ -657,8 +657,19 @@ impl Engine {
 pub(crate) fn boot_empty<D: Driver<S>, S: StrategySet>(
     configs: ConfigSet<S>,
     setup: &EngineSetup,
+    drv: D,
+    hb: &'static Heartbeat,
+) -> Result<Sequencer<D, S>, BootError> {
+    boot_accounts(configs, setup, drv, hb, &[], &[])
+}
+
+pub(crate) fn boot_accounts<D: Driver<S>, S: StrategySet>(
+    configs: ConfigSet<S>,
+    setup: &EngineSetup,
     mut drv: D,
     hb: &'static Heartbeat,
+    balances: &[hft_event::BalanceReport],
+    positions: &[hft_event::PositionReport],
 ) -> Result<Sequencer<D, S>, BootError> {
     let rd = RefData::load(&configs.refdata_blob, None).map_err(|r| {
         BootError::Config(ConfigErr::Blob {
@@ -667,6 +678,30 @@ pub(crate) fn boot_empty<D: Driver<S>, S: StrategySet>(
         })
     })?;
     let mut e = Engine::new(rd, setup, &configs.risk)?;
+    for (ix, r) in balances.iter().enumerate() {
+        if e.rd.account(r.account).is_prod
+            || e.is_sim(r.account)
+            || e.rd.account(r.account).venues & (1u64 << r.venue.0.min(63)) == 0
+            || e.rd.asset(r.asset).id.0 == 0
+            || balances[..ix]
+                .iter()
+                .any(|b| (b.account, b.venue, b.asset) == (r.account, r.venue, r.asset))
+        {
+            return Err(BootError::Config(ConfigErr::Component("AccountBootstrap")));
+        }
+        let _ = e.ledger.on_balance(r, true, 0);
+    }
+    for (ix, r) in positions.iter().enumerate() {
+        if e.rd.account(r.account).is_prod
+            || e.is_sim(r.account)
+            || positions[..ix]
+                .iter()
+                .any(|p| (p.account, p.inst) == (r.account, r.inst))
+            || !e.ledger.seed_position(r)
+        {
+            return Err(BootError::Config(ConfigErr::Component("AccountBootstrap")));
+        }
+    }
     let mut inst = Instances::<S>::new(&e.rd, &e.caps)?;
     let ec = hft_refdata::EngineConfig::load(&configs.engine_blob, None).map_err(|r| {
         BootError::Config(ConfigErr::Blob {

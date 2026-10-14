@@ -1,0 +1,80 @@
+//! SDK-005: old generic tools consume the newly linked strategy schema and real ctl preview.
+#![cfg(target_os = "linux")]
+#[path = "{{support}}"]
+mod support;
+use hft_ctl::client::CtlClient;
+use hft_ctl_proto::{AccountSel, CmdBody, ResultCode};
+use std::{process::{Child, Command, Stdio}, time::{Duration, Instant}};
+struct Process(Child);
+impl Drop for Process {
+    fn drop(&mut self) { let _ = self.0.kill(); let _ = self.0.wait(); }
+}
+fn run(c: &mut Command) {
+    let o = c.output().unwrap();
+    assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+}
+#[test]
+fn sdk_005_generic_tools_handle_new_schema() {
+    let d = tempfile::tempdir().unwrap();
+    let hot = tempfile::tempdir_in("/dev/shm").unwrap();
+    let user = std::env::var("USER").unwrap();
+    let cfg = support::write_for_kind(d.path(), hot.path(), Some(&user), Some(65296));
+    let schemas = d.path().join("schemas");
+    run(Command::new(env!("CARGO_BIN_EXE_hft-core")).args(["schemas", "--out"]).arg(&schemas));
+    assert!(schemas.join("65296-ci-probe.schema.json").is_file());
+    let input = d.path().join("params.toml");
+    std::fs::write(&input, r#"
+[strategy]
+instance = "paper-probe"
+account = "paper"
+schema = { id = 65296, version = 1 }
+version = 2
+source = "manual"
+[defaults]
+enabled = false
+[[groups]]
+n = 1
+asset = "BTC"
+open_allowed = true
+legs = [{ inst = "binance-spot:BTCUSDT" }, { inst = "bitget-uta-spot:BTCUSDT" }]
+[groups.overrides]
+max_qty = "0.01"
+"#).unwrap();
+    let blob = d.path().join("params.spb1");
+    run(Command::new(std::env::var_os("HFT_CFG_BIN").expect("prebuilt hft-cfg"))
+        .args(["build", "--kind", "strategy", "--schemas"]).arg(&schemas)
+        .arg("--refdata").arg(d.path().join("refdata.bin"))
+        .arg("--against").arg(d.path().join("strategy_params.bin"))
+        .arg("--in").arg(&input).arg("--out").arg(&blob));
+    let py = std::env::var_os("HFT_PYTHON").unwrap_or_else(|| "python3".into());
+    run(Command::new(py).arg("-c").arg(r#"
+import sys, pathlib, tomllib, base64, hft_py
+root = pathlib.Path(sys.argv[1])
+t = tomllib.loads((root/'params.toml').read_text())
+s = hft_py.params.load_schemas(str(root/'schemas'))[65296]
+b, errors = hft_py.params.encode(s,
+    header={'strategy':1,'account':1,'version':t['strategy']['version'],'source':'Manual','generated_at_ns':0},
+    groups=[{'id':0x01000001,'asset':1,'open_allowed':True,'qty_exp':-8,'px_exp':-4,
+             'legs':[{'inst':1,'venue':2,'kind':'Cex'}, {'inst':2,'venue':11,'kind':'Cex'}]}],
+    defaults=t['defaults'], overrides=[{'group_ix':0,'field':'max_qty','value':t['groups'][0]['overrides']['max_qty']}])
+assert not errors, errors
+old = (root/'params.spb1').read_bytes()
+assert b[128:] == old[128:], 'generic tool parameter bodies differ'
+(root/'params.b64').write_text(base64.b64encode(old).decode())
+"#).arg(d.path()));
+    let stderr = std::fs::File::create(d.path().join("stderr")).unwrap();
+    let mut process = Process(Command::new(env!("CARGO_BIN_EXE_hft-core"))
+        .args(["--dry-run", "--config"]).arg(&cfg).stdout(Stdio::null()).stderr(stderr).spawn().unwrap());
+    let until = Instant::now() + Duration::from_secs(30);
+    while !d.path().join("core.sock").exists() {
+        assert!(Instant::now() < until && process.0.try_wait().unwrap().is_none(), "{}", std::fs::read_to_string(d.path().join("stderr")).unwrap());
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let ctl = CtlClient::new(d.path().join("core.sock"), format!("cli:{user}"));
+    let req = ctl.request(AccountSel::Name("paper".into()), CmdBody::SetParams {
+        strategy: "paper-probe".into(), account: None,
+        blob_b64: std::fs::read_to_string(d.path().join("params.b64")).unwrap(), base_version: None,
+    });
+    let result = ctl.preview(&req).unwrap();
+    assert_eq!(result.code, Some(ResultCode::Applied), "{result:?}");
+}

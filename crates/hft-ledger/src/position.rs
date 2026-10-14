@@ -87,6 +87,36 @@ pub(crate) fn col_add(b: &mut PnlBreakdown, col: Col, d: Notional) {
 }
 
 impl Ledger {
+    /// Cold bootstrap only, before any strategy, fill or snapshot. Existing perpetual inventory
+    /// remains account-owned (no strategy leg attribution); cash and realized PnL are unchanged.
+    /// The caller records the resulting complete boot snapshot before releasing any input.
+    pub fn seed_position(&mut self, r: &hft_event::PositionReport) -> bool {
+        if *self.pos(r.account, r.inst) != InstPos::ZERO
+            || !self.inst(r.inst).is_some_and(|s| s.perp && s.venue == r.venue)
+            || r.qty.0 == i64::MIN
+            || (r.qty.0 != 0 && r.entry_px.0 <= 0)
+            || self.av(r.account, r.venue).is_none()
+        {
+            return false;
+        }
+        let q = Qty(r.qty.0.abs());
+        let _ = self.book_trade(&Trade {
+            acc: r.account,
+            inst: r.inst,
+            side: if r.qty.0 < 0 { Side::Sell } else { Side::Buy },
+            gross: q,
+            net: q,
+            px: r.entry_px,
+            cell: None,
+            col: Col::Adjust,
+            t: 0,
+            seq: 0,
+            cash: false,
+            defer_round: None,
+        });
+        true
+    }
+
     /// Adds `d` to the group's cumulative, day and round books (when attributed) and to the
     /// account's day book.
     pub(crate) fn add_pnl(&mut self, acc: AccountId, cell: Option<usize>, d: &PnlBreakdown) {

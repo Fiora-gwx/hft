@@ -10,7 +10,7 @@
 
 | 主机 | 进程 | 说明 |
 |---|---|---|
-| `tokyo-cex`(主机类是部署配置,[latency-budget §7](latency-budget.md#7-主机类与验收口径)):`dev2` = 现有 2 核主机,开发测试与模拟账户,**不放正式实盘账户**;统一升级主机(默认候选 `c32`)上 prod 与 sim 同机,延迟验收与正式实盘在这里 | [`hft-core`](../apps/hft-core/README.md) | 同一二进制两种实例:`prod` 只含交易所账户;`sim` 只含模拟账户、不加载交易所 key。dev2 上 `prod` 角色实例只在测试网联调窗口运行 |
+| `tokyo-cex`(主机类是部署配置,[latency-budget §7](latency-budget.md#7-主机类与验收口径)):`dev2` = 现有 2 核主机,开发测试与模拟账户,**不放正式实盘账户**;统一升级主机(默认候选 `c32`)上 prod 与 sim 同机,延迟验收与正式实盘在这里 | [`hft-core`](../apps/hft-core/README.md#测试环境账户装配) | 同一二进制两种实例:`prod` 只含交易所账户;`sim` 只含模拟账户、不加载交易所 key。dev2 上 `prod` 角色实例只在测试网联调窗口运行 |
 | | [`journal-archiver`](../apps/journal-archiver/README.md)、[`watchtower`](../apps/watchtower/README.md)、[`reconciler`](../apps/reconciler/README.md)、[`kill-switch`](../apps/kill-switch/README.md) | Rust 冷进程;reconciler 与 kill-switch 跳过模拟账户 |
 | | [`ops_bot`](../python/ops_bot/README.md)、[`pipeline`](../python/pipeline/README.md)、[`treasury`](../python/treasury/README.md) | Python 冷进程 |
 | `dev2`(对统一升级主机) | `hft-offbox-watchdog`([deploy](../deploy/README.md)) | 机外看门狗:升级主机失联即经独立通道告警 |
@@ -157,3 +157,4 @@ journal 记录分三类:**Input**(进入决策的一切,含实盘驱动当场做
 | `Position`、`FillDelta`、`Ledger`、`PnlBreakdown`、journal 冷消费者 `JournalLedger`;模拟撮合器与模拟账户 | [hft-ledger](../crates/hft-ledger/README.md);[hft-sim](../crates/hft-sim/README.md) |
 | `LiveDriver`、`RecoverDriver`、`VerifyDriver`、`engine_ns` 的累加、恢复结束时刻 `recovery_end` 与平移的调度 | [hft-sequencer](../crates/hft-sequencer/README.md) |
 | 外部 venue 帧、tx 生命周期与链上 profile(optional) | [hft-ext-proto](../crates/hft-ext-proto/README.md)、[hft-chain-evm](../crates/hft-chain-evm/README.md) |
+

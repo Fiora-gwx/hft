@@ -296,7 +296,7 @@ impl<P: VenueProtocol<GwCtx = GwCtx, Templates = Templates>> LoopGw<P> {
             out,
             rd,
             tpl,
-            ctx: GwCtx,
+            ctx: GwCtx::default(),
             account,
             epoch,
             pend: VecDeque::new(),

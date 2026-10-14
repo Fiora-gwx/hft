@@ -94,6 +94,7 @@ struct Job {
     open_ns: i64,
     ws_key: [u8; 24],
     info: TlsInfo,
+    target: Option<(String, Vec<(String, String)>)>,
 }
 
 /// The builder (one per arena; warm thread).
@@ -260,8 +261,40 @@ impl Connector {
             open_ns: 0,
             ws_key: [0; 24],
             info: TlsInfo::default(),
+            target: None,
         });
         Ok(JobId(ji as u32 | (generation as u32) << 8))
+    }
+
+    /// Warm-only per-job Upgrade target. Credentials never enter the shared endpoint table.
+    pub fn submit_target(
+        &mut self,
+        req: BuildReq,
+        path: String,
+        headers: Vec<(String, String)>,
+    ) -> Result<JobId, BuildErr> {
+        if !path.starts_with('/')
+            || path.bytes().any(|b| b <= 32 || b == 127)
+            || headers
+                .iter()
+                .any(|(k, v)| k.is_empty() || k.contains(['\r', '\n', ':']) || v.contains(['\r', '\n']))
+        {
+            return Err(BuildErr::BadEndpoint);
+        }
+        let id = self.submit(req)?;
+        if let Some(i) = self.job_index(id)
+            && let Some(j) = self.jobs[i].as_mut()
+        {
+            j.target = Some((path, headers));
+        }
+        Ok(id)
+    }
+
+    /// Cancel a warm job, including a ready HTTP connection, without handing it to another thread.
+    pub fn cancel(&mut self, id: JobId) {
+        if let Some(i) = self.job_index(id) {
+            let _ = self.fail(i, ConnPhase::Dead, BuildFail::Timeout);
+        }
     }
 
     /// Advances every job one step (non-blocking); returns at most one event.
@@ -597,11 +630,15 @@ impl Connector {
         let raw = self.ws_key_raw();
         let mut key = [0u8; 24];
         b64(&raw, &mut key);
-        let ep = self
+        let mut ep = self
             .cfg
             .endpoints
             .get(self.jobs[i].as_ref()?.req.endpoint.0 as usize)?
             .clone();
+        if let Some((path, headers)) = self.jobs[i].as_ref()?.target.as_ref() {
+            ep.path.clone_from(path);
+            ep.upgrade_headers.clone_from(headers);
+        }
         if let Some(j) = self.jobs[i].as_mut() {
             j.ws_key = key;
         }

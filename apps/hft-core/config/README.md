@@ -22,6 +22,6 @@
 | OrderWs | `wss://testnet.binancefuture.com/ws-fapi/v1` |
 | UserData | `wss://demo-fstream.binance.com/ws`，动态 listenKey 需 bootstrap |
 
-来源：[Binance REST/市场流测试网说明](https://developers.binance.me/en/docs/products/derivatives-trading-usds-futures/general-info)、[官方 USDT-M SDK](https://github.com/binance/binance-connector-js/tree/master/clients/derivatives-trading-usds-futures)。路径由 `venue-binance` 的 route 表生成。REST 密钥和 Ed25519 session 密钥分别配置 API key 文件；session seed 为 32 个原始字节，REST secret 为 ASCII。文件不入库，日志不回显解析失败的 TOML 或凭据内容。`src_ip` 与 `bind_device` 必须按测试机实际出口填写。
+来源：[Binance REST/市场流测试网说明](https://developers.binance.me/en/docs/products/derivatives-trading-usds-futures/general-info)、[官方 USDT-M SDK](https://github.com/binance/binance-connector-js/tree/master/clients/derivatives-trading-usds-futures)。路径由 `venue-binance` 的 route 表生成。REST 密钥和 Ed25519 session 密钥分别配置 API key 文件；Ed25519 支持原始 32 字节、PKCS#8 DER/PEM，HMAC secret 为 ASCII。文件不入库，日志不回显解析失败的 TOML 或凭据内容。`src_ip` 与 `bind_device` 必须按测试机实际出口填写。
 
-当前网络装配保留账户与身份闸门；账户查询、用户流 bootstrap 与身份核验的上游缺口见主 README。此模板不表示可以交易。Bitget 用 `--features bitget` 编译，注册名为 `bitget-spot` / `bitget-usdt-futures`，凭据提供 `session_secret_path`（HMAC）、`passphrase_path` 及其余 key 路径。业务策略通过 registry 独立交付；app 不实现套利或资金费算法。
+账户链路、同进程装配与限制见 [测试网 runbook](../RUNBOOK-testnet.md)。Bitget 默认启用，模板为 [bitget-demo.toml](bitget-demo.toml)，HMAC 文件用 `session_seed_path` 并提供 `passphrase_path`。

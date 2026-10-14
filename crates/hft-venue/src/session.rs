@@ -133,17 +133,30 @@ impl<P: VenueProtocol> SessionDriver<P> {
         acct: Option<AccountId>,
         now_ns: i64,
     ) -> Result<JobId, SessErr> {
+        self.start_prepared(c, req, acct, now_ns, None)
+    }
+
+    /// Bootstrap body supplied by the warm REST task; never recorded in a raw journal.
+    pub fn start_prepared(
+        &mut self,
+        c: &mut Connector,
+        req: BuildReq,
+        acct: Option<AccountId>,
+        now_ns: i64,
+        boot: Option<&[u8]>,
+    ) -> Result<JobId, SessErr> {
         let Some(free) = self.jobs.iter().position(Option::is_none) else {
             return Err(SessErr::Busy);
         };
         let role = req.role;
         let cfg = self.cfg.venue;
         let cred = self.cred(acct).copied();
-        if P::bootstrap(role, &cfg, cred.as_ref()).is_some() {
+        if P::bootstrap(role, &cfg, cred.as_ref()).is_some() && boot.is_none() {
             return Err(SessErr::Bootstrap);
         }
         // Public market data (`Md`): the path is fixed per route and already in the connector's
         // endpoint table (BuildReq carries no route), so `P::endpoint` is not called (README §7 step 2).
+        let mut target = None;
         if role != ConnRole::Md {
             let mut ep = EndpointSpec::default();
             P::endpoint(
@@ -151,14 +164,29 @@ impl<P: VenueProtocol> SessionDriver<P> {
                 RouteId(0),
                 &cfg,
                 cred.as_ref(),
-                None,
+                boot,
                 now_ns / 1_000_000,
                 &mut ep,
             )
             .map_err(SessErr::Proto)?;
+            let path = std::str::from_utf8(ep.path_query.as_slice())
+                .map_err(|_| SessErr::Proto(ProtoErr::Cfg))?
+                .to_owned();
+            let raw =
+                std::str::from_utf8(ep.headers.as_slice()).map_err(|_| SessErr::Proto(ProtoErr::Cfg))?;
+            let mut headers = Vec::new();
+            for line in raw.split("\r\n").filter(|l| !l.is_empty()) {
+                let (k, v) = line.split_once(':').ok_or(SessErr::Proto(ProtoErr::Cfg))?;
+                headers.push((k.to_owned(), v.trim().to_owned()));
+            }
+            target = Some((path, headers));
             self.note(SessionOp::Endpoint(req.conn));
         }
-        let job = c.submit(req).map_err(SessErr::Build)?;
+        let job = match target {
+            Some((path, headers)) => c.submit_target(req, path, headers),
+            None => c.submit(req),
+        }
+        .map_err(SessErr::Build)?;
         self.note(SessionOp::Submit(req.conn));
         if let Some(s) = self.jobs.get_mut(free) {
             *s = Some(SJob {

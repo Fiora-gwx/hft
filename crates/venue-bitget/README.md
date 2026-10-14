@@ -326,6 +326,12 @@ UTA 文档目录有"Demo Trading"一节(官方,本地缓存的目录页),端点(
 - 现有知识来源:`E:\trading\Trading\crates\bitget`(seq/pseq、无条件 ping、登录签名与测试向量)、`E:\trading\Trading\apps\collector\src\private.rs`(V2 私有登录与 `orders` 订阅)
 - 官方 UTA 文档原文的镜像(2026-10-14 取得,本地缓存 `E:\trading\analysis\bitget-src\`):GitHub `metafrogmeme-droid/001` 的 `docs/bitget-uta/*.md`(由 www.bitget.com/api-doc/uta 抓取,含 WebSocket 全部频道、Trade、Market、枚举与错误码页)、官方 SDK `Bitget-AI/agent-sdk` 的 `openapi.yaml`(UTA REST 请求结构)
 
+### 测试环境 warm 账户入口
+
+AccountProtocol 使用 UTA V3 instruments/settings/info/assets/current-position/unfilled-orders。basic unified 账户要求单向/全仓、杠杆不超配置、无债务；key 要有 uta_trade 且无 withdraw，REST/WS 分别读取 UID 并匹配。现货订单显式 autoBorrow=no，demo REST 带 paptrading: 1。
+
+永续资金费读 [account/financial-records](https://www.bitget.com/docs/catalog/account/assets-balance)，过滤 CONTRACT_MAIN_SETTLE_FEE_USER_IN/OUT，按 id 去重并完成分页；funding-financial-records 是资金账户流水。RateOnly 真实 FundingSettle 入 journal 后仅检查差异，不重复记现金。真实 demo 字段仍须按开发备忘采样核验。
+
 ## 已知限制与后续工作
 
 - **无死手**:进程崩溃到 kill-switch 撤单之间有窗口(kill-switch 心跳检测周期决定)。

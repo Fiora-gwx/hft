@@ -15,6 +15,10 @@ use std::path::{Path, PathBuf};
 use zerocopy::IntoBytes;
 
 pub fn write(root: &Path, hot: &Path, user: Option<&str>) -> PathBuf {
+    write_for_kind(root, hot, user, None)
+}
+
+pub fn write_for_kind(root: &Path, hot: &Path, user: Option<&str>, kind: Option<u16>) -> PathBuf {
     std::fs::create_dir_all(root).unwrap();
     let v = VenueId::BINANCE_SPOT;
     let a = AccountId(1);
@@ -22,7 +26,12 @@ pub fn write(root: &Path, hot: &Path, user: Option<&str>) -> PathBuf {
     let usdt = AssetId(2);
     let desc = Strategies::kinds()
         .iter()
-        .find(|d| d.non_prod_only && d.schema.fields.iter().any(|f| f.name == "probe_period_ms"))
+        .find(|d| {
+            kind.map_or_else(
+                || d.non_prod_only && d.schema.fields.iter().any(|f| f.name == "probe_period_ms"),
+                |k| d.kind_id == k,
+            )
+        })
         .unwrap();
     let mut b = RdbBuilder::new(1);
     for (id, name, class, exp) in [
@@ -59,6 +68,20 @@ pub fn write(root: &Path, hot: &Path, user: Option<&str>) -> PathBuf {
             name: name.into(),
             class,
             exp,
+            px_max: Px(1_000_000_000_000),
+            qty_max: Qty(1_000_000_000_000_000),
+            dust: Qty(1),
+        });
+    }
+    if kind.is_some() {
+        b.asset(AssetSpec {
+            id: AssetId(4),
+            name: "BGB".into(),
+            class: AssetClass::Crypto,
+            exp: AssetExp {
+                px_exp: -4,
+                qty_exp: -8,
+            },
             px_max: Px(1_000_000_000_000),
             qty_max: Qty(1_000_000_000_000_000),
             dust: Qty(1),
@@ -122,6 +145,70 @@ pub fn write(root: &Path, hot: &Path, user: Option<&str>) -> PathBuf {
         min_qty_str: "0.00001".into(),
         ..InstSpec::default()
     });
+    let second = kind.is_some();
+    let other = VenueId::BITGET_UTA_SPOT;
+    #[cfg(feature = "bitget")]
+    if second {
+        let v = other;
+        b.venue(VenueSpec {
+            id: v,
+            exchange: Exchange::Bitget,
+            product: InstKind::Spot,
+            ws_max_streams_per_conn: 1024,
+            ws_max_in_msgs_per_s: 5,
+            ws_max_conn_age_s: 86400,
+            ws_new_conn_per_5min_ip: 300,
+            app_ping_interval_s: 0,
+            ts_unit: TsUnit::Us,
+            client_id_max_len: 36,
+            client_id_prefix: "".into(),
+            max_batch: 5,
+            max_inflight_amend: 1,
+            crossed_tolerance_default: 0,
+            stale_guard: StaleGuardKind::RecvWindow,
+        });
+        use hft_venue_proto::VenueProtocol;
+        b.caps(venue_bitget::BitgetSpot::default_caps(|s| match s {
+            "USDT" => Some(usdt),
+            "BGB" => Some(AssetId(4)),
+            _ => None,
+        }));
+        b.fee(FeeSpec {
+            venue: v,
+            tier: 0,
+            fee: FeePair {
+                maker: Rate(1_000_000),
+                taker: Rate(1_000_000),
+            },
+        });
+        b.limit(
+            v,
+            RateLimit {
+                scope: LimitScope::Account,
+                bucket: LimitBucket::Orders,
+                limit: 100,
+                window_ms: 1000,
+                default_cost: 1,
+            },
+        );
+        b.inst(InstSpec {
+            id: InstId(2),
+            venue: v,
+            symbol: "BTCUSDT".into(),
+            asset: btc,
+            quote: usdt,
+            tick: 100,
+            lot: 1000,
+            min_qty: Qty(1000),
+            max_qty: Qty(100_000_000_000),
+            min_notional: Notional(5_000_000),
+            book_window: 4096,
+            tick_str: "0.01".into(),
+            lot_str: "0.00001".into(),
+            min_qty_str: "0.00001".into(),
+            ..InstSpec::default()
+        });
+    }
     b.instance(InstanceSpec {
         id: StrategyId(1),
         kind_id: desc.kind_id,
@@ -132,7 +219,7 @@ pub fn write(root: &Path, hot: &Path, user: Option<&str>) -> PathBuf {
         sim: true,
         bound_instance: StrategyId(1),
         is_prod: false,
-        venues: 1 << v.0,
+        venues: (1 << v.0) | if second { 1 << other.0 } else { 0 },
         label: "paper".into(),
         uid_policy: UidPolicy::Verified,
     });
@@ -148,6 +235,14 @@ pub fn write(root: &Path, hot: &Path, user: Option<&str>) -> PathBuf {
         asset: usdt,
         qty: Qty(100_000_000_000),
     });
+    if second {
+        b.sim_balance(SimBalanceSpec {
+            account: a,
+            venue: other,
+            asset: usdt,
+            qty: Qty(100_000_000_000),
+        });
+    }
     let rdb = b.finish();
     let rd = RefData::load(&rdb, None).unwrap();
     let schema = desc.schema;
@@ -198,7 +293,7 @@ pub fn write(root: &Path, hot: &Path, user: Option<&str>) -> PathBuf {
     let group = GroupSpec {
         id: GroupId::compose(StrategyId(1), 1).unwrap(),
         asset: btc,
-        n_legs: 1,
+        n_legs: if second { 2 } else { 1 },
         open_allowed: 1,
         legs: [
             LegDef {
@@ -207,7 +302,16 @@ pub fn write(root: &Path, hot: &Path, user: Option<&str>) -> PathBuf {
                 kind: LegDef::CEX,
                 ..none
             },
-            none,
+            if second {
+                LegDef {
+                    inst: InstId(2),
+                    venue: other,
+                    kind: LegDef::CEX,
+                    ..none
+                }
+            } else {
+                none
+            },
             none,
             none,
         ],
@@ -273,7 +377,7 @@ pub fn write(root: &Path, hot: &Path, user: Option<&str>) -> PathBuf {
             max_instances: 4,
         },
         ledger,
-        venues: vec![v],
+        venues: if second { vec![v, other] } else { vec![v] },
         keys: vec![],
         epoch: 1,
         tsc_hz_milli: 1_000_000_000_000,
@@ -285,7 +389,7 @@ pub fn write(root: &Path, hot: &Path, user: Option<&str>) -> PathBuf {
     let mut engine = engine_setup(&rig, &rd);
     engine.drain_timeout_ms = 3000;
     engine.gws.venues.clear();
-    engine.feeds = VenueSet(1 << v.0);
+    engine.feeds = VenueSet((1 << v.0) | if second { 1 << other.0 } else { 0 });
     engine.seq.rings[7] = hft_sequencer::RingLimit::default();
     engine.seq.allow_missing_standby = 1;
     engine.exec.default.force_slice.max_chunk_notional = Notional(100_000_000);
@@ -339,6 +443,12 @@ qty_raw = 200000000
         hot.display(),
         v.0
     );
+    if second {
+        text += &format!(
+            "\n[venues.second]\nprotocol = 'bitget-spot'\nid = {}\nmax_sub_insts = 1\nstale_guard_ms = 1500\n\n[[sim.quotes]]\ninst = 2\nbid_raw = 600000000\nask_raw = 600001000\nqty_raw = 200000000\n",
+            other.0
+        );
+    }
     for task in [
         "sequencer",
         "persist",

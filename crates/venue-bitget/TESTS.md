@@ -20,10 +20,13 @@ spec: README.md
 - `B1v2(seq, ts)` = V2 形态的 `books1` 推送 `{"action":"snapshot","arg":{"instType":"USDT-FUTURES","channel":"books1","instId":"BTCUSDT"},"data":[{"asks":[["65000.2","0.004"]],"bids":[["65000.1","1.5"]],"checksum":0,"seq":<seq>,"ts":"<ts>"}],"ts":1790000000125}`;`B1v3` = 同内容的 UTA 形态(`arg` 为 `{"instType":"usdt-futures","topic":"books1","symbol":"BTCUSDT"}`,写法待核实,开发备忘第 1 条)。
 - `VecSink` = hft-venue-proto `testkit` 的收集 sink;`GoldenDriver` 同出处。
 
+CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs::core_120_mock_accounts_bootstrap_reauth_and_drift` 以独立子进程、两家真实协议和脚本 REST 验证撤空、基线、重新核验、超时/错误模式失败与余额差异不覆盖账本；不替代真实 TLS、交易所或正式恢复验收。资金费账单复用 FundingPoll，沿用现有实际结算记账与去重。
+
 ## 覆盖
 
 | README 小节 | 用例 |
 |---|---|
+| 测试环境 warm 账户入口 | BGT-142、BGT-143 |
 | 资金费实额 | BGT-336 |
 | 概要 | BGT-171, BGT-190, BGT-210–BGT-218 |
 | 目录 | 不适用:非规范 |

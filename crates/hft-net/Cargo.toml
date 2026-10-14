@@ -84,3 +84,6 @@ required-features = ["test-io"]
 name = "net"
 path = "tests/main.rs"
 required-features = ["test-io"]
+
+[[test]]
+name = "rest_warm"

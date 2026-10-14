@@ -7,7 +7,7 @@ use crate::{
 use hft_event::{HkMsg, SysTimer, TimerCode};
 use hft_rt::{Backing, Consumer, Producer, TscClock};
 use hft_sequencer::driver::live::{LiveCfg, LiveDriver};
-use hft_sequencer::{BootSource, Sequencer, StepOutcome};
+use hft_sequencer::{Sequencer, StepOutcome};
 use hft_types::VenueId;
 use std::{
     sync::{
@@ -185,8 +185,7 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
         0,
     )
     .map_err(|e| Error::config("EngineMismatch", format!("{e:?}")))?;
-    let (writer, seq_side) = storage::open(jcfg, epoch)?;
-    let mut sides = vec![seq_side];
+    let mut sides = Vec::new();
     let (ctl_tx, ctl_rx) = byte_ring(c.rings.bytes)?;
     let (hk_tx, hk_rx) = ring(c.rings.elements)?;
     let (sim_tx, sim_rx) = byte_ring(c.rings.bytes)?;
@@ -199,6 +198,8 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
     let mut feed_inputs = Vec::new();
     let mut venue_tasks = Vec::new();
     let mut gateway_inputs = Vec::new();
+    let mut initial_balances = Vec::new();
+    let mut initial_positions = Vec::new();
     let rd: &'static hft_refdata::RefData = Box::leak(Box::new(l.rd));
     for (name, v) in &c.venues {
         let (bbo_tx, bbo_rx) = ring(c.rings.elements)?;
@@ -241,7 +242,9 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
             let vtask = crate::venues::assemble(
                 c, &l.setup, name, v, rd, clock, epoch, bbo_tx, md_tx, bulk_tx, feed_rx,
             )?;
-            let (task, gw, js) = vtask;
+            let (task, gw, js, baseline) = vtask;
+            initial_balances.extend(baseline.balances);
+            initial_positions.extend(baseline.positions);
             venue_tasks.push(task);
             if let Some(g) = gw {
                 gateway_inputs.push(g);
@@ -249,6 +252,8 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
             sides.extend(js);
         }
     }
+    let (writer, seq_side) = storage::open(jcfg, epoch)?;
+    sides.push(seq_side);
     // Gateway order must be the same as ECF1/GwMap's kill-word order.
     gateway_inputs.sort_by_key(|g| l.setup.gws.venues.iter().position(|v| *v == g.venue));
     let mut status = hft_sequencer::snapshot::clock_status(clock.base, clock.hz_milli);
@@ -288,8 +293,8 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
             .map_err(|e| Error::config("StrategyParams", e.to_string()))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let mut seq = Sequencer::boot(
-        BootSource::Empty { configs: l.configs },
+    let mut seq = Sequencer::boot_accounts(
+        l.configs,
         &l.setup,
         LiveDriver::new(
             env,
@@ -300,6 +305,8 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
             },
         ),
         hb,
+        &initial_balances,
+        &initial_positions,
     )
     .map_err(|e| Error::config("Assembly", format!("{e:?}")))?;
     seq.step(); // publish EngineClock before readers and runtime inputs can reach the sequencer

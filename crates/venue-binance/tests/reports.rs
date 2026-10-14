@@ -22,14 +22,14 @@ fn ack(rl: Option<&str>) -> String {
 fn dec_u(p: &str) -> (Result<ReportOutcome, DecodeErr>, RepSink) {
     let mut s = RepSink::default();
     let c = Usdm::classify_report(MsgOp::Text, &p.as_bytes()[..p.len().min(64)]);
-    let r = Usdm::decode_report(rd(), &mut GwCtx, c, p.as_bytes(), &RX, &mut s);
+    let r = Usdm::decode_report(rd(), &mut GwCtx::default(), c, p.as_bytes(), &RX, &mut s);
     (r, s)
 }
 
 fn dec_s(p: &str) -> (Result<ReportOutcome, DecodeErr>, RepSink) {
     let mut s = RepSink::default();
     let c = Spot::classify_report(MsgOp::Text, &p.as_bytes()[..p.len().min(64)]);
-    let r = Spot::decode_report(rd(), &mut GwCtx, c, p.as_bytes(), &RX, &mut s);
+    let r = Spot::decode_report(rd(), &mut GwCtx::default(), c, p.as_bytes(), &RX, &mut s);
     (r, s)
 }
 

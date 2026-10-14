@@ -7,7 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [features]
-default = []
+default = ["bitget"]
 bitget = ["dep:venue-bitget"]
 
 [dependencies]
