@@ -43,6 +43,18 @@ pub fn rd_ignoring(names: &[&str]) -> &'static RefData {
 }
 
 fn build(names: &[&str]) -> &'static RefData {
+    let blob = build_blob(names, false);
+    match RefData::load(&blob, None) {
+        Ok(r) => Box::leak(Box::new(r)),
+        Err(e) => panic!("RD-BIN rejected: {e:?}"),
+    }
+}
+
+pub fn demo_blob(usdm_prod: bool) -> Vec<u8> {
+    build_blob(&[], usdm_prod)
+}
+
+fn build_blob(names: &[&str], usdm_prod: bool) -> Vec<u8> {
     let mut b = RdbBuilder::new(1);
     b.created_utc_ns(1_759_276_800_000_000_000);
     for (id, name, class, px, qty) in [
@@ -213,6 +225,7 @@ fn build(names: &[&str]) -> &'static RefData {
             id,
             label: label.into(),
             venues: 1 << v.0,
+            is_prod: usdm_prod && v == VenueId::BINANCE_USDM,
             ..AccountSpec::default()
         });
         b.account_venue(AccountVenueSpec {
@@ -221,11 +234,7 @@ fn build(names: &[&str]) -> &'static RefData {
             uid: "acct-0001".into(),
         });
     }
-    let blob = b.finish();
-    match RefData::load(&blob, None) {
-        Ok(r) => Box::leak(Box::new(r)),
-        Err(e) => panic!("RD-BIN rejected: {e:?}"),
-    }
+    b.finish()
 }
 
 /// `RX`.

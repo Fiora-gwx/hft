@@ -1936,6 +1936,8 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 
 ### BIN-212 演示环境两个产品线共用一个 UID 时 refdata 只告警
 
+- 本地契约测试用 RD-BIN 的两产品账户经生产 RdbBuilder 构建相同 UID 的 blob,再切换永续账户的 is_prod 位;hft-cfg TOML 端到端夹具与演示 key 的真实共用能力仍需单独核实。
+
 - 规则:[测试网/模拟盘](README.md#测试网模拟盘)
 - 级别:integ
 - 里程碑:M3

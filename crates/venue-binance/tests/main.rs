@@ -5,6 +5,7 @@ mod caps;
 mod cid;
 mod classify;
 mod codes;
+mod demo;
 mod encode;
 mod endpoint;
 mod funding;

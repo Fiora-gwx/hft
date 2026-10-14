@@ -903,6 +903,8 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 
 独立定时器回放夹具经 `B0::boot_self_contained` 写入完整 ECF1/RKP1,含用例显式设置的执行层参数,回放端从 journal 装配配置。精简 B0 的注入解码器用于其余单元用例。
 
+SEQ-076 使用真实 LiveDriver 与预生成的虚拟到达时间表,将消费者耗时与生产者到达分开;200 个提交派生种子加 `fixtures/dst-seeds/` 回归种子,可用 `HFT_DST_SEED_ID` 指定每夜日期或复现身份。每次运行核对 VerifyDriver,同种子重跑核对完整记录;该确定性测试不提供参考主机延迟结论。SEQ-077 的额度耗尽反例与裁决状态见 [TESTS.md](TESTS.md#seq-077-实盘回报与-bbo-的等待上界)。
+
 advisor 的定时投递、重启注记去重、落后量、两种环容量的独立合并模型,以及三种检查点块大小的完整载荷续算见 [SEQ-036–046](TESTS.md#seq-036-model-的时间刻度只来自-journal-中的-timersys-advisortick)。这些验收在测试进程中生成 journal,不替代固定回放样本与参考主机延迟门槛。
 
 ## 依赖
