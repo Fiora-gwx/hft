@@ -102,7 +102,7 @@ fn core_012_atomic_control_batch_has_no_partial_publication() {
     let mut tx = hft_core::io::AtomicCtl(tx);
     let records = vec![
         (EventKind::NOTE, RecordFlags(0), vec![7; 32]),
-        (EventKind::CONTROL_CMD, RecordFlags(0), vec![9; 64]),
+        (EventKind::NOTE, RecordFlags(0), vec![9; 64]),
     ];
     assert!(tx.write_all(&records));
     let mut rx = hft_core::io::Inputs::new(rx);
@@ -110,7 +110,7 @@ fn core_012_atomic_control_batch_has_no_partial_publication() {
     assert!(rx.pop(hft_types::Tsc(1), &mut slot));
     assert_eq!(slot.kind, EventKind::NOTE);
     assert!(rx.pop(hft_types::Tsc(1), &mut slot));
-    assert_eq!(slot.kind, EventKind::CONTROL_CMD);
+    assert_eq!(slot.body(), &[9; 64]);
     assert!(!rx.pending());
     let oversized = vec![(EventKind::NOTE, RecordFlags(0), vec![0; 262144])];
     assert!(!tx.write_all(&oversized));
@@ -122,4 +122,104 @@ fn core_012_atomic_control_batch_has_no_partial_publication() {
     ));
     assert!(rx.pop(hft_types::Tsc(2), &mut slot));
     assert_eq!(slot.kind, EventKind::SEND_REPORT);
+}
+
+#[test]
+fn core_012_control_adapter_reaches_live_sequencer() {
+    use hft_core::{
+        io,
+        runtime::{byte_ring, ring},
+    };
+    use hft_sequencer::{BootSource, MemJournal, Sequencer, StepOutcome};
+    use zerocopy::FromBytes;
+    let d = tempfile::tempdir().unwrap();
+    let path = support::write(d.path(), &d.path().join("hot"), None);
+    let l = hft_core::config::load(&path, true).unwrap();
+    let clock = hft_rt::TscClock::from_hz_milli(
+        l.setup.clock.tsc_hz_milli,
+        hft_rt::CalibPair {
+            tsc: hft_rt::tsc_now(),
+            realtime_ns: 0,
+            ..Default::default()
+        },
+    );
+    let (ctl_tx, ctl_rx) = byte_ring(1048576).unwrap();
+    let (_hk_tx, hk_rx) = ring(1024).unwrap();
+    let (_sim_tx, sim_rx) = byte_ring(1048576).unwrap();
+    let (sim_orders, _sim_rx) = ring(1024).unwrap();
+    let (parsed_tx, parsed_rx) = Box::leak(Box::new(hft_rt::Mailbox::new())).split();
+    let (retired_tx, retired_rx) = Box::leak(Box::new(hft_rt::Mailbox::new())).split();
+    let (_bbo_tx, bbo) = ring(1024).unwrap();
+    let (_md_tx, md) = ring(1024).unwrap();
+    let (_bulk_tx, bulk) = byte_ring(1048576).unwrap();
+    let (commands, _cmd_rx) = ring(1024).unwrap();
+    let env = io::Io {
+        journal: MemJournal::new(l.setup.clock),
+        clock,
+        ctl: io::Inputs::new(ctl_rx),
+        hk: hk_rx,
+        sim_reports: io::Inputs::new(sim_rx),
+        sim_orders,
+        feeds: vec![io::FeedInput {
+            venue: hft_types::VenueId::BINANCE_SPOT,
+            bbo,
+            md,
+            bulk,
+            commands,
+        }],
+        gws: vec![],
+        parsed: parsed_rx,
+        retired: retired_tx,
+        retired_pending: None,
+        clock_status: hft_sequencer::snapshot::clock_status(clock.base, clock.hz_milli),
+        profile: hft_sequencer::snapshot::host_profile(clock.hz_milli),
+        orders: 0,
+        cancels: 0,
+        reports: 0,
+    };
+    let mut ctl = hft_ctl::Core::<hft_core::Strategies, _>::new(
+        hft_ctl::GatewayConfig::new(l.cfg.paths.ctl_socket, l.principals, 256, 1024, 4),
+        l.rd,
+        io::AtomicCtl(ctl_tx),
+        parsed_tx,
+        retired_rx,
+        |_, _| Err(1),
+        hft_sequencer::config_blob::decode_risk_blob,
+        vec![],
+        clock.tsc_utc(&clock.base),
+        Default::default(),
+    );
+    let hb = Box::leak(Box::new(hft_rt::Heartbeat::new()));
+    let mut seq = Sequencer::boot(
+        BootSource::Empty { configs: l.configs },
+        &l.setup,
+        hft_sequencer::driver::LiveDriver::new(env, Default::default()),
+        hb,
+    )
+    .unwrap();
+    seq.step();
+    assert!(ctl.on_internal(
+        hft_ctl::InternalCmd::Drain { cancel_resting: true },
+        hft_rt::tsc_now()
+    ));
+    for _ in 0..1024 {
+        match seq.step() {
+            StepOutcome::Done { .. } => return,
+            StepOutcome::Fatal(f) => panic!("{f:?}"),
+            _ => {}
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let results: Vec<_> = seq
+        .driver()
+        .io
+        .journal
+        .records()
+        .filter(|r| r.kind == hft_event::EventKind::CMD_RESULT)
+        .map(|r| hft_event::CmdResult::read_from_bytes(&r.body).ok())
+        .collect();
+    panic!(
+        "Drain did not complete: {results:?}; {:?}",
+        seq.driver_mut().taken_log
+    );
 }

@@ -6,7 +6,7 @@ spec: README.md
 
 # hft-core 测试规格
 
-当前实现覆盖说明：`tests/config.rs` 验证 CORE-002、CORE-012、CORE-045 的可执行子集；`tests/paper_process.rs::core_048_sim_instance_boots_without_keys` 以固定行情和真实 `SimExchange` 启动进程，经控制 socket 启用 registry 策略，检查发送、Ack、CancelAck、SIGTERM Drain、冷副本及重启拒绝。CORE-048 的部署目录、共享心跳块与完整主机验收仍待完成；本说明不改变原用例期望或里程碑。
+当前实现覆盖说明：`tests/config.rs` 验证 CORE-002、CORE-012、CORE-045 的可执行子集，含控制批次原子发布、分片头重组、模拟回报解码及真实 LiveDriver 的 Drain；`tests/paper_process.rs::core_048_sim_instance_boots_without_keys` 以固定行情和真实 `SimExchange` 启动进程，经控制 socket 启用 registry 策略，检查发送、Ack、CancelAck、SIGTERM Drain、冷副本及重启拒绝。CORE-048 的部署目录、共享心跳块与完整主机验收仍待完成；本说明不改变原用例期望或里程碑。
 
 格式与规则见 [docs/tests](../../docs/tests/README.md)。
 

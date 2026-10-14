@@ -49,29 +49,82 @@ impl hft_ctl::CtlRing for AtomicCtl {
 pub struct Inputs {
     pub ring: ByteConsumer,
     offset: usize,
+    assembled: Vec<u8>,
 }
 impl Inputs {
     pub fn new(ring: ByteConsumer) -> Self {
-        Self { ring, offset: 0 }
+        // Maximum atomic publication is one quarter of the configured 4 MiB byte ring.
+        Self {
+            ring,
+            offset: 0,
+            assembled: Vec::with_capacity(1 << 20),
+        }
     }
     pub fn pending(&self) -> bool {
         self.ring.has_data()
     }
     pub fn peek_len(&mut self) -> Option<usize> {
-        frame(self.ring.peek()?.get(self.offset..)?).map(|r| r.body.len())
+        let r = frame(self.ring.peek()?.get(self.offset..)?)?;
+        if matches!(r.kind, EventKind::CONTROL_CMD | EventKind::CONFIG_BLOB) {
+            Some(PartHdr::read_from_prefix(r.body).ok()?.0.total_len as usize)
+        } else {
+            Some(r.body.len())
+        }
     }
     pub fn pop(&mut self, now: Tsc, out: &mut InputSlot) -> bool {
-        let Some(buf) = self.ring.peek() else { return false };
-        let Some(r) = frame(&buf[self.offset..]) else {
-            return false;
-        };
-        out.set_bytes(r.kind, r.flags, now, r.body);
-        self.offset += r.encoded_len();
-        if self.offset == buf.len() {
-            self.ring.advance();
-            self.offset = 0;
+        self.assembled.clear();
+        let mut next_part = 0;
+        loop {
+            let Some(buf) = self.ring.peek() else { return false };
+            let Some(r) = frame(&buf[self.offset..]) else {
+                return false;
+            };
+            let mut done = true;
+            if matches!(r.kind, EventKind::CONTROL_CMD | EventKind::CONFIG_BLOB) {
+                // Gateway records carry physical PartHdrs; LiveDriver accepts logical inputs.
+                let Ok((h, rest)) = PartHdr::read_from_prefix(r.body) else {
+                    return false;
+                };
+                let Some(chunk) = rest.get(..h.chunk_len as usize) else {
+                    return false;
+                };
+                if h.part != next_part
+                    || h.parts == 0
+                    || h.part >= h.parts
+                    || h.total_len as usize > self.assembled.capacity()
+                    || self.assembled.len() + chunk.len() > h.total_len as usize
+                {
+                    return false;
+                }
+                self.assembled.extend_from_slice(chunk);
+                next_part += 1;
+                done = next_part == h.parts;
+                if done {
+                    if self.assembled.len() != h.total_len as usize {
+                        return false;
+                    }
+                    out.set_bytes(
+                        r.kind,
+                        RecordFlags(r.flags.0 & !RecordFlags::PART.0),
+                        now,
+                        &self.assembled,
+                    );
+                }
+            } else {
+                if next_part != 0 {
+                    return false;
+                }
+                out.set_bytes(r.kind, r.flags, now, r.body);
+            }
+            self.offset += r.encoded_len();
+            if self.offset == buf.len() {
+                self.ring.advance();
+                self.offset = 0;
+            }
+            if done {
+                return true;
+            }
         }
-        true
     }
 }
 // Both ctl batches and simulated replies use this framing. CtlRecord::read intentionally
