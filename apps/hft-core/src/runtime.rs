@@ -138,7 +138,7 @@ pub fn clock_tick(
 }
 
 #[cfg(target_os = "linux")]
-fn notify(message: &str) -> Result<(), Error> {
+pub(crate) fn notify(message: &str) -> Result<(), Error> {
     use std::os::{
         linux::net::SocketAddrExt,
         unix::{
@@ -163,7 +163,7 @@ fn notify(message: &str) -> Result<(), Error> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn notify(_message: &str) -> Result<(), Error> {
+pub(crate) fn notify(_message: &str) -> Result<(), Error> {
     Ok(())
 }
 
@@ -273,6 +273,7 @@ fn run_linux(
     secrets: crate::secrets::SecretFiles,
 ) -> Result<u8, Error> {
     let c = &l.cfg;
+    l.startup_trace.mark(3, false);
     #[cfg(target_os = "linux")]
     let signals = Arc::new(crate::signals::Signals::block()?);
     let lease = crate::recovery::InstanceLease::acquire(&c.paths.journal_cold, storage::instance(c))?;
@@ -326,7 +327,7 @@ fn run_linux(
     .map_err(|e| Error::config("EngineMismatch", format!("{e:?}")))?;
     let mut sides = Vec::new();
     let (ctl_tx, ctl_rx) = byte_ring(c.rings.bytes)?;
-    let (hk_tx, hk_rx) = ring(c.rings.elements)?;
+    let (mut hk_tx, hk_rx) = ring(c.rings.elements)?;
     let (sim_tx, sim_rx) = byte_ring(c.rings.bytes)?;
     let (sim_orders, sim_out) = ring(c.rings.elements)?;
     let (parsed_tx, parsed_rx) = Box::leak(Box::new(hft_rt::Mailbox::new())).split();
@@ -345,6 +346,8 @@ fn run_linux(
     let mut initial_balances = Vec::new();
     let mut initial_positions = Vec::new();
     let rd: &'static hft_refdata::RefData = Box::leak(Box::new(l.rd));
+    l.startup_trace.mark(3, true);
+    l.startup_trace.mark(4, false);
     for (name, v) in &c.venues {
         let (bbo_tx, bbo_rx) = ring(c.rings.elements)?;
         let (md_tx, md_rx) = ring(c.rings.elements)?;
@@ -399,12 +402,15 @@ fn run_linux(
     drop(secrets); // zeroize raw input buffers after handing credentials to their owners
     let (writer, seq_side) = storage::open(jcfg, epoch)?;
     sides.push(seq_side);
+    l.startup_trace.mark(4, true);
+    l.startup_trace.mark(5, false);
     // Gateway order must be the same as ECF1/GwMap's kill-word order.
     gateway_inputs.sort_by_key(|g| l.setup.gws.venues.iter().position(|v| *v == g.venue));
     let mut status = hft_sequencer::snapshot::clock_status(clock.base, clock.hz_milli);
     status.source = 2;
     status.state = 2;
     let env = io::Io {
+        startup: Default::default(),
         journal: writer,
         clock,
         ctl: io::Inputs::new(ctl_rx),
@@ -455,6 +461,37 @@ fn run_linux(
     )
     .map_err(|e| Error::config("Assembly", format!("{e:?}")))?;
     seq.step(); // publish EngineClock before readers and runtime inputs can reach the sequencer
+    l.startup_trace.mark(5, true);
+    // One producer owns hk throughout serial startup. Publish all buffered Meta before READY.
+    for note in l.startup_trace.notes(c.startup) {
+        if note.v[0] == 4 && note.v[1] == 0 {
+            for warning in rd.warnings() {
+                let warning = crate::startup::note(
+                    4,
+                    hft_event::NoteLevel::P1,
+                    [
+                        warning.code as u64,
+                        u64::from(warning.section),
+                        u64::from(warning.row),
+                        0,
+                    ],
+                );
+                hk_tx
+                    .try_push(HkMsg::Note(warning))
+                    .map_err(|_| Error::runtime("Startup", "startup metadata ring full", 3))?;
+            }
+        }
+        hk_tx
+            .try_push(HkMsg::Note(note))
+            .map_err(|_| Error::runtime("Startup", "startup metadata ring full", 3))?;
+    }
+    while seq.driver_mut().io.hk.len_hint() != 0 {
+        match seq.step() {
+            StepOutcome::Idle | StepOutcome::Busy => {}
+            other => return Err(Error::runtime("Startup", format!("{other:?}"), 4)),
+        }
+        seq.driver_mut().taken_log.clear();
+    }
     heartbeat.set_state(hft_rt::HkLine::WARMUP);
     if let Some(parent) = c.paths.ctl_socket.parent() {
         std::fs::create_dir_all(parent).map_err(|e| Error::runtime("CtlSocket", e.to_string(), 3))?;
@@ -595,6 +632,10 @@ fn run_linux(
         }
     }
     let ready = Arc::new(AtomicBool::new(false));
+    let ready_sent = Arc::new(AtomicBool::new(false));
+    let hk_ready_sent = ready_sent.clone();
+    let startup_phase = Arc::new(AtomicU8::new(0));
+    let hk_startup_phase = startup_phase.clone();
     let hk_ready = ready.clone();
     #[cfg(target_os = "linux")]
     let hk_drain = drain.clone();
@@ -614,6 +655,7 @@ fn run_linux(
         let mut seq_count = hb.read();
         let mut seq_progress = Instant::now();
         let mut announced = false;
+        let mut status_step = 5;
         while !stop.load(Ordering::Acquire) {
             t.heartbeat.beat();
             #[cfg(target_os = "linux")]
@@ -627,6 +669,12 @@ fn run_linux(
                 }
                 notify("READY=1")?;
                 announced = true;
+                hk_ready_sent.store(true, Ordering::Release);
+            }
+            let phase = hk_startup_phase.load(Ordering::Acquire).min(8);
+            while status_step < phase {
+                status_step += 1;
+                notify(&format!("STATUS=Startup step {status_step}"))?;
             }
             heartbeat.set_state(hk_state.load(Ordering::Acquire));
             let count = hb.read();
@@ -659,12 +707,16 @@ fn run_linux(
         .filter(|a| rd.account(*a).id.0 != 0)
         .collect();
     let seq_ready = ready.clone();
+    let startup_cfg = c.startup;
+    let startup_base_us = l.startup_trace.elapsed();
+    let startup_base_tsc = hft_rt::tsc_now();
     let seq_thread = std::thread::Builder::new()
         .name(seq_policy.name.clone())
         .spawn(move || -> Result<(u8, u64, u64, u64), Error> {
             pin(&seq_policy)?;
             seq_ready.store(true, Ordering::Release);
             let mut running = false;
+            let mut startup_started = false;
             loop {
                 seq_slot.beat();
                 if stop.load(Ordering::Acquire) || persist_stop.load(Ordering::Acquire) {
@@ -678,9 +730,30 @@ fn run_linux(
                     seq.driver_mut().io.retired_pending = seq.driver_mut().io.retired.try_send(p).err();
                 }
                 let outcome = seq.step();
+                let released = accounts.iter().all(|a| seq.engine().risk.mode.released(*a));
+                if !startup_started && ready_sent.load(Ordering::Acquire) {
+                    let now = hft_rt::tsc_now();
+                    let elapsed = startup_base_us
+                        + (u128::from(now.0.saturating_sub(startup_base_tsc.0)) * 1_000_000_000
+                            / u128::from(clock.hz_milli)) as u64;
+                    seq.driver_mut().io.startup =
+                        crate::startup::Live::start(startup_cfg, elapsed, now, clock.hz_milli);
+                    startup_started = true;
+                }
+                if startup_started && seq.driver_mut().io.startup.phase() < 9 {
+                    let bits = hft_risk::mode::gate_bits::FEEDS | hft_risk::mode::gate_bits::ORDER_CONNS;
+                    let connected = accounts
+                        .iter()
+                        .all(|a| seq.engine().risk.mode.gate_bits(*a) & bits == bits);
+                    seq.driver_mut()
+                        .io
+                        .startup
+                        .observe(hft_rt::tsc_now(), connected, released);
+                    startup_phase.store(seq.driver_mut().io.startup.phase(), Ordering::Release);
+                }
                 if seq.view().draining() {
                     observed_state.store(hft_rt::HkLine::DRAINING, Ordering::Release);
-                } else if !running && accounts.iter().all(|a| seq.engine().risk.mode.released(*a)) {
+                } else if !running && released {
                     running = true;
                     observed_state.store(hft_rt::HkLine::RUNNING, Ordering::Release);
                 }

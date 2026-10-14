@@ -6,6 +6,8 @@ spec: README.md
 
 # hft-strat-lib 测试规格
 
+实时 FundingStats 子集由 `tests/funding.rs` 验证结算、周期变化、回退、缺口和日化边界；同一 Funding 投递的 SDK 视图集成见 [C15.1](../../docs/tests/scenarios.md#c15-venuenoticedelisting-设该-inst-的-delisting-cap-并把公告投递给策略)。预热与快照用例仍待实现。
+
 格式与规则见 [docs/tests](../../docs/tests/README.md)。
 
 ## 覆盖

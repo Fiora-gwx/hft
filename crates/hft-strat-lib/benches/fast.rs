@@ -219,6 +219,42 @@ fn slb_146_expiring(c: &mut Criterion) {
     });
 }
 
+fn slb_144_funding_observe(c: &mut Criterion) {
+    let mut stats = hft_strat_lib::FundingStats::new();
+    let f = hft_strategy_sdk::FundingView {
+        rate: Rate(100_000),
+        next_settle_ns: 28_800_000_000_000,
+        interval_s: 28_800,
+        ..hft_strategy_sdk::FundingView::EMPTY
+    };
+    c.bench_function("stratlib/funding_observe", |b| {
+        b.iter(|| black_box(stats.observe(black_box(&f), 1)))
+    });
+}
+fn slb_145_funding_summary(c: &mut Criterion) {
+    let mut stats = hft_strat_lib::FundingStats::new();
+    for i in 1..=257 {
+        stats.observe(
+            &hft_strategy_sdk::FundingView {
+                rate: Rate(100_000),
+                next_settle_ns: i * 3_600_000_000_000,
+                interval_s: 3_600,
+                ..hft_strategy_sdk::FundingView::EMPTY
+            },
+            i * 3_600_000_000_000 - 1,
+        );
+    }
+    c.bench_function("stratlib/funding_summary", |b| {
+        b.iter(|| {
+            black_box(stats.summary(
+                300 * 3_600_000_000_000,
+                black_box(257 * 3_600_000_000_000),
+                3_600_000_000_000,
+            ))
+        })
+    });
+}
+
 criterion_group!(
     benches,
     slb_136_spread,
@@ -229,6 +265,8 @@ criterion_group!(
     slb_141_dirty,
     slb_142_throttle,
     slb_143_vwap20,
-    slb_146_expiring
+    slb_146_expiring,
+    slb_144_funding_observe,
+    slb_145_funding_summary
 );
 criterion_main!(benches);

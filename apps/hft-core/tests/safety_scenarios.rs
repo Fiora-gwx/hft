@@ -9,6 +9,62 @@ use hft_strategy_sdk::IntentClass;
 use hft_types::{AccountId, CapSource, GroupId, InstId, RejectBits, Side, StrategyId};
 use zerocopy::IntoBytes;
 
+#[test]
+fn c15_funding_period_reaches_stats_in_same_delivery() {
+    use hft_strat_lib::{FundingObs, FundingStats, funding_flags};
+    reset_script();
+    SCRIPT.with(|s| {
+        s.borrow_mut().subs.push((
+            S1,
+            vec![(
+                B1,
+                0,
+                hft_strategy_sdk::EvMask::FUNDING,
+                hft_strategy_sdk::Part::Fast,
+            )],
+        ))
+    });
+    let mut h = b0().boot_self_contained();
+    h.steady();
+    let got = cap();
+    let captured = got.clone();
+    let mut stats = FundingStats::new();
+    set_hook(move |hx, ev, _| {
+        if matches!(ev, hft_strategy_sdk::EventRef::Funding { inst, .. } if *inst == B1)
+            && hx.s.strategy == StrategyId(1)
+        {
+            let view = hx.v.funding(B1);
+            let now = hx.v.now().utc_ns;
+            let obs = stats.observe(&view, now);
+            captured
+                .borrow_mut()
+                .push((view, obs, stats.summary(86_400_000_000_000, now, 60_000_000_000)));
+        }
+    });
+    let next = 1_800_000_000_000_000_000;
+    h.funding_md(B1, "0.000100000", next, 28_800);
+    h.funding_md(B1, "0.000200000", next, 3_600);
+    let observed = got.borrow();
+    assert_eq!(observed.len(), 2);
+    assert_eq!(observed[1].0.prev_interval_s, 28_800);
+    assert_eq!(observed[1].0.interval_s, 3_600);
+    assert_eq!(
+        observed[1].1,
+        FundingObs::IntervalChanged {
+            old_s: 28_800,
+            new_s: 3_600
+        }
+    );
+    assert_ne!(observed[1].2.flags & funding_flags::INTERVAL_CHANGED, 0);
+    assert_eq!(observed[1].2.predicted_daily, r("0.004800000"));
+    assert_eq!(
+        observed[1].2.n_settles, 0,
+        "a period change alone is not settlement"
+    );
+    drop(observed);
+    assert!(h.verify_from(None).is_empty());
+}
+
 fn account_report(
     h: &mut H,
     venue: hft_types::VenueId,

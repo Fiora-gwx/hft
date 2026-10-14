@@ -14,13 +14,17 @@ spec: README.md
 
 格式与规则见 [docs/tests](../../docs/tests/README.md)。
 
-`tests/secrets.rs` 验证共享路径一次读取后删除、原始缓冲交接、错误脱敏、后续配置失败时不残留已读取文件，以及失败的 `--check` 不消耗凭据。完整 strace 矩阵与测试分配器的释放前清零观测尚未覆盖。
+`tests/secrets.rs` 验证共享路径一次读取后删除、原始缓冲交接、错误脱敏、后续配置失败时不残留已读取文件，以及失败的 `--check` 不消耗凭据。`tests/secret_wipe.rs` 的分配器在释放前检查完整原始缓冲清零（CORE-224）；完整 strace 矩阵尚未覆盖。
 
 `tests/paper_process.rs::core_380_ready_precedes_gate_release_and_control_drain_stops_cleanly` 验证 CLOCK 仍关闭时 READY 不改变 Warmup、全部工作线程有命名心跳槽、控制 socket 的 Drain 被记录后干净退出；完整启动失败与恢复状态矩阵尚未覆盖。
 
 CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs::core_120_mock_accounts_bootstrap_reauth_and_drift` 以独立子进程、两家真实协议和脚本 REST 验证撤空、基线、重新核验、超时/错误模式失败与余额差异不覆盖账本；不替代真实 TLS、交易所或正式恢复验收。资金费账单复用 FundingPoll，沿用现有实际结算记账与去重。
 
 `tests/thread_plan.rs` 覆盖当前单任务线程子集的必需任务唯一性（CORE-061）、housekeeping nice 校验（CORE-070），并在 Linux 读取真实线程的 affinity、timerslack、nice、名称与心跳槽（CORE-084），验证调度策略为 SCHED_OTHER（CORE-086）。绑核失败的子进程不发送 READY；完整多任务线程与各主机矩阵仍按原用例验收。
+
+`tests/assembly.rs` 验证 CORE-032/033 的正式账户探针拒绝与测试账户准入、CORE-043/044 的账户引用与凭据组合、CORE-420 的角色与身份闸门 ECF1 往返；完整主机、OKX 与多账户表未覆盖。`tests/startup.rs` 验证新 journal 的 16 条启动记录和 READY 顺序（CORE-220），以及预算/闸门超时后延迟放行（CORE-221.1–4）；恢复 tail_lost 行未覆盖。`tests/recovery.rs` 以强杀子进程验证内核释放锁且 durable epoch 不复用（CORE-242）。
+
+`tests/shutdown.rs` 在真实 sequencer/OMS/exec 上验证 Drain 等待第二腿、链接撤单超时与 7 秒回报路径（CORE-303/304），并从 Drain 命令前的快照验证回放；操作系统信号接线另由 `tests/signals.rs` 验证。`tests/paper_process.rs::core_308_drain_command_exit0` 使用 Unix UID Trader 鉴权，验证确认后的 Drain issuer、快照和退出 0；没有证书链路。`tests/w1.rs` 用现有交易世界的三个种子验证账户 HARD 隔离（CORE-313）、Delisting 设置/解除、真实成交与完整回放；不代表原用例全量种子验收。
 
 ## 覆盖
 

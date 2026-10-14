@@ -9,6 +9,7 @@ pub mod runtime;
 pub mod secrets;
 #[cfg(target_os = "linux")]
 pub mod signals;
+pub mod startup;
 pub mod storage;
 pub mod venues;
 

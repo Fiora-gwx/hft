@@ -17,7 +17,7 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
                 "schema", "instance", "paths", "blobs", "shutdown", "journal", "clock", "watchdog",
                 "threads", "venues", "rings",
             ],
-            &["sim"],
+            &["sim", "startup"],
         ),
         "instance" => (&["name", "config_source"], &["order_env"]),
         "paths" => (
@@ -31,6 +31,7 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
         "journal_size" => (&["segment_bytes", "hot_keep"], &[]),
         "clock" => (&["step_threshold_ns", "interval_ms"], &[]),
         "watchdog" => (&["hb_stale_ms"], &[]),
+        "startup" => (&["budget_s", "gate_timeout_s"], &[]),
         "thread" => (&["name", "task", "park_us", "nice"], &["core"]),
         "rings" => (&["elements", "bytes"], &[]),
         "venue" => (
@@ -111,7 +112,7 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
             (
                 "config",
                 "instance" | "paths" | "blobs" | "shutdown" | "journal" | "clock" | "watchdog" | "rings"
-                | "sim",
+                | "sim" | "startup",
             ) => Some(key.as_str()),
             ("blobs", "refdata" | "engine" | "risk_params") => Some("blob"),
             ("venue", "account_io") => Some("account_io"),

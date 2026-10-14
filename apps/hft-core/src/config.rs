@@ -26,6 +26,8 @@ pub struct Config {
     pub venues: BTreeMap<String, Venue>,
     pub rings: Rings,
     pub sim: Option<Paper>,
+    #[serde(default)]
+    pub startup: crate::startup::Config,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -176,6 +178,7 @@ pub struct Quote {
 }
 
 pub struct Loaded {
+    pub startup_trace: crate::startup::Serial,
     pub cfg: Config,
     pub rd: RefData,
     pub setup: EngineSetup,
@@ -255,6 +258,14 @@ pub fn parse(path: &Path) -> Result<Config, Vec<Error>> {
 }
 
 pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
+    load_timed(path, dry, crate::startup::Serial::default())
+}
+
+pub fn load_timed(
+    path: &Path,
+    dry: bool,
+    mut startup_trace: crate::startup::Serial,
+) -> Result<Loaded, Vec<Error>> {
     let c = parse(path)?;
     let mut errors = Vec::new();
     macro_rules! bad {
@@ -265,6 +276,9 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
     }
     if c.schema != 1 {
         bad!("BadValue", "schema must be 1".into());
+    }
+    if c.startup.budget_s == 0 || c.startup.gate_timeout_s == 0 {
+        bad!("BadValue", "startup budgets must be positive".into());
     }
     if c.clock.step_threshold_ns == 0 || c.clock.interval_ms == 0 {
         bad!("BadValue", "clock threshold and interval must be positive".into());
@@ -450,6 +464,8 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
         return Err(errors);
     }
     let one = |code, detail: String| vec![Error::config(code, detail)];
+    startup_trace.mark(1, true);
+    startup_trace.mark(2, false);
     let rd_blob = rd_blob.ok_or_else(|| one("FileRead", "refdata".into()))?;
     let ec_blob = ec_blob.ok_or_else(|| one("FileRead", "engine".into()))?;
     let risk_blob = risk_blob.ok_or_else(|| one("FileRead", "risk".into()))?;
@@ -743,7 +759,9 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
             ),
         )
     })?;
+    startup_trace.mark(2, true);
     Ok(Loaded {
+        startup_trace,
         cfg: c,
         rd,
         setup,

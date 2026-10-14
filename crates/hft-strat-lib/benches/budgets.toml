@@ -37,3 +37,11 @@ p99_ns = 150
 ["stratlib/expiring"]
 p50_ns = 2
 p99_ns = 5
+
+["stratlib/funding_observe"]
+p50_ns = 15
+p99_ns = 40
+
+["stratlib/funding_summary"]
+p50_ns = 500
+p99_ns = 1000

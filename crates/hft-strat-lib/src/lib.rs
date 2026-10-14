@@ -10,7 +10,8 @@
 //! Stateful fast-part components store engine_ns only (their snapshots go into the strategy
 //! snapshot); `DirtyFilter` compares this run's TSC values of the SDK `BboView`.
 //!
-//! Model-only components (`FundingStats`, `PercentileStats`, `LeadLag`) arrive with milestone M4.
+//! FundingStats has live observation/summary support. Model prefill/checkpoints and the other
+//! Model components (`PercentileStats`, `LeadLag`) remain milestone M4.
 //! Specification: `crates/hft-strat-lib/README.md`.
 #![forbid(unsafe_code)]
 #![deny(
@@ -28,6 +29,7 @@ pub mod confirm;
 pub mod cost;
 pub mod dirty;
 pub mod expiring;
+pub mod funding;
 pub mod impact;
 pub mod spread;
 pub mod throttle;
@@ -38,6 +40,7 @@ pub use confirm::{Confirm, ConfirmParams, ConfirmParamsNs, ConfirmWindow};
 pub use cost::{CostErr, CostItem, CostLine, FeeErr, FeeLeg, Liquidity, cost_flags, fee_round_trip};
 pub use dirty::{DirtyFilter, DirtyParams, DirtyParamsTsc, DirtyReason, Freshness, LegFresh};
 pub use expiring::{Expiring, Fresh};
+pub use funding::{FUNDING_RING, FundingObs, FundingStats, FundingSummary, SettleRec, funding_flags};
 pub use impact::{ImpactModel, Vwap, VwapParams};
 pub use spread::SpreadCalc;
 pub use throttle::{

@@ -1,6 +1,6 @@
 # hft 架构地图
 
-改 `crates/`、`strategies/` 或 `apps/` 前读本页。类型归各 crate README 与 [subsystems/](subsystems/README.md),理由归 [Agent Notes](../.agents/notes/README.md) 与 [../../architecture-v2/](../design/README.md)。
+改引擎、策略或 app 前读本页。类型归组件 README 与 [subsystems/](subsystems/README.md),理由归 [Agent Notes](../.agents/notes/README.md) 与 [设计证据](../design/README.md)。
 
 ## 1. 一句话
 
@@ -42,7 +42,7 @@ warm 任务(不在 tick-to-trade 路径,不占热核)
   ctl-gateway       Unix socket → 鉴权 → ControlCmd → ctl 环
   advisor           尾随 seq journal → 各策略 Model → Advice → advice 环;分块写 Model 检查点
   sim-gw            只在 sim 实例:out-sim 环 → hft-sim 撮合 → rep-sim 环
-  housekeeping      心跳 → sd_notify、时钟校准(ClockStatus)、persist 滞后与磁盘余量 → Timer 输入
+  housekeeping      心跳 → sd_notify、时钟校准(ClockStatus)、persist 滞后与磁盘余量 → Timer 输入;启动 Meta 由 sequencer 单写者提交
   persist           热段 → 冷副本复制与 fdatasync;段预创建与退役(会阻塞,独占线程)
 ```
 

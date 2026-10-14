@@ -39,6 +39,7 @@ zeroize = "1"
 signal-hook = "0.3"
 
 [dev-dependencies]
+hft-strat-lib.workspace = true
 hft-sequencer = { workspace = true, features = ["testing"] }
 hft-net = { workspace = true, features = ["test-io"] }
 hft-journal = { workspace = true, features = ["writer", "mem-backend"] }

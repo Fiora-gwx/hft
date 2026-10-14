@@ -183,6 +183,7 @@ pub struct Io<J: JournalSink> {
     pub clock: TscClock,
     pub ctl: Inputs,
     pub hk: Consumer<HkMsg>,
+    pub startup: crate::startup::Live,
     pub sim_reports: Inputs,
     pub sim_orders: Producer<GwCmd>,
     pub feeds: Vec<FeedInput>,
@@ -256,7 +257,7 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
     fn len(&mut self, r: RingId) -> usize {
         match r {
             RingId::Ctl => usize::from(self.retired_pending.is_none() && self.ctl.pending()),
-            RingId::Hk => self.hk.len_hint(),
+            RingId::Hk => self.hk.len_hint() + self.startup.len(),
             RingId::RepSim => usize::from(self.sim_reports.pending()),
             RingId::Rep(n) => self.gws.get(n as usize).map_or(0, |g| {
                 g.reports.len_hint()
@@ -311,6 +312,10 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
                 ok
             }
             RingId::Hk => {
+                if let Some(note) = self.startup.pop() {
+                    out.set(RecordFlags(0), now, &note);
+                    return true;
+                }
                 let Some(m) = self.hk.try_pop() else { return false };
                 match m {
                     HkMsg::ClockStatus(b) => {
