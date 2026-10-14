@@ -196,15 +196,25 @@ def dep_225_activate_ok(tmp_path):
     assert (root / "etc/systemd/system/hft-core@prod.service").is_file()
 
 
-def dep_222_fetch(tmp_path):
+def dep_222_fetch(tmp_path, monkeypatch):
     fetcher = load("fetch")
     token = tmp_path / "etc/hft/github-release-token"
     token.parent.mkdir(parents=True)
     token.write_text("fixture-token")
     token.chmod(0o600)
-    # The production CLI enforces uid 0; CI's fixture can run unprivileged.
+    # Exercise rejection with the real unprivileged owner before supplying a root-owned fixture.
     if os.name == "posix" and os.getuid() != 0:
-        pytest.skip("token ownership check requires the root container")
+        with pytest.raises(release.ReleaseError, match="root-owned"):
+            fetcher.fetch("v1.2.3", False, "production", tmp_path, dry_run=True)
+        original = Path.lstat
+        def fixture_stat(path, *args, **kwargs):
+            info = original(path, *args, **kwargs)
+            if path == token:
+                fields = list(info)
+                fields[4] = 0
+                return os.stat_result(fields)
+            return info
+        monkeypatch.setattr(Path, "lstat", fixture_stat)
     for ver, prerelease, asset in [("v1.2.3", False, "production"), ("v1.2.3-dev.4", True, "production"), ("v1.2.3", False, "verify")]:
         name = ("hft-verify-" if asset == "verify" else "hft-") + ver + "-aarch64.tar.zst"
         calls = []
