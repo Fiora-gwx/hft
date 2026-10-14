@@ -36,14 +36,20 @@ fn rsk_250_classify(c: &mut Criterion) {
 /// `evaluate` + `commit` of `it` with engine_ns advancing so every iteration passes.
 fn pass_loop(c: &mut Criterion, name: &str, w: &mut W, it: &hft_risk::IntentView) {
     let mut t = w.now;
+    w.mv.tsc = t as u64;
+    w.risk
+        .evaluate(it, &w.mv, &now_at(t))
+        .expect("pass benchmark fixture must pass");
     c.bench_function(name, |x| {
         x.iter(|| {
             t += STEP;
             w.mv.tsc = t as u64;
             let now = now_at(t);
-            if let Ok(a) = w.risk.evaluate(black_box(it), &w.mv, &now) {
-                w.risk.commit(&a, &now);
-            }
+            let a = w
+                .risk
+                .evaluate(black_box(it), &w.mv, &now)
+                .expect("pass benchmark rejected");
+            w.risk.commit(&a, &now);
         })
     });
 }
@@ -66,6 +72,7 @@ fn rsk_252_check_pass_linked_open(c: &mut Criterion) {
         (1, B, B1, Side::Sell, "0.001", "50"),
     );
     pass_loop(c, "risk/check_pass_linked_open", &mut w, &it);
+    simultaneous_pair(c);
 }
 
 fn rsk_253_check_reject_kill(c: &mut Criterion) {
@@ -100,19 +107,22 @@ fn simultaneous_pair(c: &mut Criterion) {
         (1, A, A1, Side::Buy, "0.001", "50"),
     );
     let mut t = w.now;
-    assert!(w.risk.evaluate_pair(&first, &second, &w.mv, &now_at(t)).is_ok());
+    // The preflight uses the same live-connection time as the measured iterations.
+    w.mv.tsc = t as u64;
+    w.risk
+        .evaluate_pair(&first, &second, &w.mv, &now_at(t))
+        .expect("pair benchmark fixture must pass");
     c.bench_function("risk/check_pair", |x| {
         x.iter(|| {
             t += STEP;
             w.mv.tsc = t as u64;
             let now = now_at(t);
-            if let Ok(pair) = w
+            let pair = w
                 .risk
                 .evaluate_pair(black_box(&first), black_box(&second), &w.mv, &now)
-            {
-                for a in pair {
-                    w.risk.commit(&a, &now);
-                }
+                .expect("pair benchmark rejected");
+            for a in pair {
+                w.risk.commit(&a, &now);
             }
         })
     });
@@ -254,8 +264,7 @@ criterion_group!(
     rsk_261_leverage,
     rsk_262_view_for,
     rsk_263_on_account_cfg,
-    rsk_264_check_mode,
-    simultaneous_pair
+    rsk_264_check_mode
 );
 criterion_main!(benches);
 

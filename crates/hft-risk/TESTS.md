@@ -2174,12 +2174,14 @@ spec: README.md
 - 基准名:`risk/check_pass_open`
 - 实现:`crates/hft-risk/benches/risk.rs::rsk_251_check_pass_open`
 
-### RSK-252 基准链接 Open 全部通过 + commit
+### RSK-252 基准链接与同时双腿 Open 全部通过 + commit
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
 - 里程碑:M2
-- 基准名:`risk/check_pass_linked_open`
+- 基准名:`risk/check_pass_linked_open`、`risk/check_pair`
+- 前置:R0,预检查与每次采样的 mock 连接活跃时刻和 Now 同步;引擎时间按令牌补充速率推进。
+- 期望:预检查及每次评估均放行,链接单提交一次、同时双腿提交两次;任何拒绝使基准失败。
 - 实现:`crates/hft-risk/benches/risk.rs::rsk_252_check_pass_linked_open`
 
 ### RSK-253 基准第 1 层即拒(HARD)
@@ -2402,4 +2404,3 @@ spec: README.md
 - **DST**:RSK-280、RSK-281 计入上线门槛 ④ 的累计量,零违反;累计量与种子规则只在 [testing §8](../../docs/testing.md#8-上线门槛)。
 - **基准**:RSK-250–RSK-264 在参考机上满足 [benchmarks 单 crate 基准上限表](../../benchmarks/README.md#单-crate-基准上限表) 的"风控链"一行与本 crate `benches/budgets.toml`(不宽于上限表);RSK-241 零分配在 PR 中阻断。
 - **跨组件**:sequencer 驱动下的模式、kill、恢复与断腿场景(紧急停止、多个 cap 叠加、日亏 Resume、Drain 期间、冷启动、停机标记等)由 [testing §4.1](../../docs/testing.md#41-模式账户与人工干预) 登记的跨组件场景验证,本文件不重复。
-
