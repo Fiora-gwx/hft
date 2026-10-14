@@ -184,7 +184,16 @@ def dep_225_activate_ok(tmp_path):
     for group in ("core", "cold", "sim"):
         (base / ("current-" + group)).symlink_to("releases/v1.2.2")
     runner.calls.clear()
-    record = release.activate("v1.2.3", "core", root, runner)
+    def first_boot(argv):
+        runner(argv)
+        args = [str(x) for x in argv]
+        if args[0] == "install":
+            assert args[1:] == ["-d", "-o", "hft", "-g", "hft-journal-ro", "-m", "2750", str(root / "data/prod")]
+            assert ["systemctl", "disable", "--now", "hft-core@prod.service"] in runner.calls
+            Path(args[-1]).mkdir(parents=True)
+        if "verify" in args and args[0].endswith("hostprobe"):
+            assert (root / "data/prod").is_dir(), "first activation must prepare the cold path"
+    record = release.activate("v1.2.3", "core", root, first_boot)
     assert record["acceptance"] == "pending" and record["hostprobe"] == "passed"
     assert os.readlink(base / "current-core") == "releases/v1.2.3"
     assert os.readlink(base / "previous-core") == "releases/v1.2.2"

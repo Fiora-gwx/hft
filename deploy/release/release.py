@@ -258,6 +258,10 @@ def activate(ver, group, root, runner=run, dry_run=False):
     identities(runner)
     # Stop the old process before replacing any pointer or unit content it might execute.
     runner(["systemctl", "disable", "--now", *units])
+    if group == "core":
+        # First boot needs this before systemd constructs ReadWritePaths and preflight
+        # probes the cold filesystem. ExecStartPre still repairs its mode on every start.
+        runner(["install", "-d", "-o", "hft", "-g", "hft-journal-ro", "-m", "2750", root / "data/prod"])
     def switch(link, target):
         temp = link.with_name(link.name + ".next")
         temp.unlink(missing_ok=True)

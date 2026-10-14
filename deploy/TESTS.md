@@ -10,6 +10,8 @@ spec: README.md
 
 发布链路的 `tests/test_release_preflight.py` 验证 DEP-251 的 CI lane 汇总准入：fast lane 的 `rust` 跳过不阻止已通过 acceptance 的开发制品，acceptance 缺失、失败或跳过均拒绝。
 
+DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实例后、hostprobe 前准备 `/data/prod`；真实目录属主和挂载权限仍在主机验收。
+
 可执行子集：`dev2/tests/test_guard.py` 驱动真实护栏决策与文件写入、替身 systemctl，核对阈值持续时间、因果判定、两级停机和标志生存期；`tests/test_polkit.py` 用 JS 求值器核对 DEP-079，DEP-080/085 在护栏测试中。`tests/test_shm_release.py` 验证 CORE-195 的状态闸门、实例边界与 dry-run。它们不替代容器里的 systemd/权限/OOM/I/O 测试、发布归档或真实主机证据。
 
 **公共夹具**(`deploy/tests/fixtures/`;用例在 `前置` 中按名引用,并写出该用例依赖的取值):

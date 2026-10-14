@@ -620,7 +620,7 @@ sim  = [{ ip = "<第二个私有 IP>", eip_alloc = "eipalloc-…" }]  # sim 常�
 
 ## 已知限制与后续工作
 
-测试网窗口通过 `dev2/hft-window start|stop` 控制，开窗先阻止并停止批处理，确认 prod 停止且其 tmpfs 已用量只剩心跳页后才删除窗口标志；失败保留标志。生成的 prod 单元检查窗口与持久 tripped。预检读取实际 cgroup 的 CPU、memory/swap、I/O 限额及 OOMScoreAdjust，拒绝 dev2 隔离核配置；不运行压力测试。冷激活先停旧实例再切组链接，并建立当前装配需要的 hft 用户和组。
+测试网窗口通过 `dev2/hft-window start|stop` 控制，开窗先阻止并停止批处理，确认 prod 停止且其 tmpfs 已用量只剩心跳页后才删除窗口标志；失败保留标志。生成的 prod 单元检查窗口与持久 tripped。预检读取实际 cgroup 的 CPU、memory/swap、I/O 限额及 OOMScoreAdjust，拒绝 dev2 隔离核配置；不运行压力测试。冷激活先停旧实例再切组链接，并建立当前装配需要的 hft 用户和组；首次激活在启动前创建 `/data/prod`，供 systemd 写路径沙箱及冷盘预检使用，后续 ExecStartPre 仍校正目录模式。
 
 - 可执行护栏入口是 `dev2/hft-dev2-guard`，配置模板为 `dev2/dev2-guard.toml.tmpl`；支持只读 `--dry-run`，`clear` 在 root 调用时先切换到 `hft-guard` 再写事件。采样器读取 proc/cgroup 与只读健康导出文件，动作使用固定 hft 单元白名单；事件写 `events.jsonl`，告警输出 journald。Telegram 直发与旧系统主单元状态尚未接线，不能据此宣称 dev2 共机或测试网验收完成。`bin/hft-shm-release` 只在有效的本实例心跳为 Stopped 时删除 `.jrn`/`.jrn.preparing`，保留心跳与其他证据，拒绝符号链接树。
 
