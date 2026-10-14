@@ -59,6 +59,32 @@ def dep_125_core_template():
     assert "ExecStopPost=+/opt/hft/current-core/deploy/bin/hft-shm-release prod" in lines
 
 
+def dep_070_dev2_testnet_window_and_no_host_tuning():
+    files, _ = generated()
+    core = files["hft-core@prod.service"]
+    assert "ExecCondition=+/usr/bin/test ! -e /var/lib/hft/guard/tripped\n" in core
+    assert "ExecCondition=/usr/bin/test -e /run/hft/window/active\n" in core
+    assert core.index("guard/tripped") < core.index("window/active")
+    assert "hft-host-tune" not in core
+    assert "[Install]" not in core
+    assert all("Conflicts=" not in text for text in files.values())
+    assert "CPUQuota=" not in files["hftbatch.slice"]
+
+
+def dep_076_dev2_tmpfs_mount():
+    files, _ = generated()
+    lines = files["dev-shm-hft-prod.mount"].splitlines()
+    assert {"What=tmpfs", "Where=/dev/shm/hft/prod", "Type=tmpfs", "Options=size=192M,uid=hft,gid=hft-journal-ro,mode=2750"} <= set(lines)
+    assert "RequiresMountsFor=/dev/shm/hft/prod /data/prod" in files["hft-core@prod.service"]
+
+
+@pytest.mark.skipif(os.environ.get("CI") != "true" or os.name != "posix", reason="requires hosted CI unit fixtures")
+def dep_134_systemd_analyze():
+    directory = REPO / "deploy/generated/test-dev2-prod"
+    units = [str(p) for p in directory.iterdir() if p.suffix in (".service", ".slice", ".mount", ".target")]
+    subprocess.run(["systemd-analyze", "verify", *units], check=True, capture_output=True, timeout=30)
+
+
 def dep_247_dev2_profile():
     files, profile = generated()
     expected = {row["key"]: row for row in tomllib.loads(profile)["expect"]}

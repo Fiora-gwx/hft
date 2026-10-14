@@ -158,6 +158,18 @@ def check_binaries(tree, runner):
             runner([path, "--version"])
 
 
+def identities(runner):
+    """Only the identities used by the assembled dev2 profile; never touch legacy users."""
+    for group in ("hft", "hft-guard", "hft-ctl", "hft-stopmark", "hft-journal-ro"):
+        runner(["groupadd", "--system", "--force", group])
+    for user in ("hft", "hft-guard"):
+        try:
+            runner(["id", "-u", user])
+        except subprocess.CalledProcessError:
+            runner(["useradd", "--system", "--no-create-home", "--gid", user, "--shell", "/usr/sbin/nologin", user])
+    runner(["usermod", "--append", "--groups", "hft-ctl,hft-stopmark,hft-journal-ro", "hft"])
+
+
 def install(archive, checksum, root, runner=run, dry_run=False):
     archive, checksum, root = Path(archive), Path(checksum), Path(root)
     words = checksum.read_text(encoding="ascii").strip().split()
@@ -243,6 +255,9 @@ def activate(ver, group, root, runner=run, dry_run=False):
         raise ReleaseError("activation pointer is not a symlink")
     if dry_run:
         return {"version": ver, "group": group, "units": units, "files": files}
+    identities(runner)
+    # Stop the old process before replacing any pointer or unit content it might execute.
+    runner(["systemctl", "disable", "--now", *units])
     def switch(link, target):
         temp = link.with_name(link.name + ".next")
         temp.unlink(missing_ok=True)
@@ -261,8 +276,6 @@ def activate(ver, group, root, runner=run, dry_run=False):
         shutil.copyfile(src, dst)
         dst.chmod(0o644)
     runner(["systemctl", "daemon-reload"])
-    if units:
-        runner(["systemctl", "disable", "--now", *units])
     record = dict(version=ver, group=group, manifest=name, channel=manifest["channel"], git_sha=manifest["git_sha"], archive_sha256=installed["archive_sha256"], current="releases/" + ver, previous=old, acceptance="pending", host_expect_sha256=manifest["host_expect"][name])
     try:
         output = root / "run/hft/hostprofile.json"

@@ -23,6 +23,10 @@ on:
         description: Re-run for an already pushed formal tag vX.Y.Z (instead of sha/dev_n)
         type: string
         required: false
+      artifact_only:
+        description: Build the immutable CI artifact without creating a tag or GitHub Release
+        type: boolean
+        default: false
       skip_nightly:
         description: Skip the formal-release nightly condition (Admins in .github/hft-admins.txt only)
         type: boolean
@@ -198,12 +202,9 @@ jobs:
         run: |
           bin=target/aarch64-unknown-linux-gnu/release-hot/hft-core
           [[ -x $bin ]] || bin=target/aarch64-unknown-linux-gnu/release/hft-core
-          cfg=${HFT_CORE_SAMPLE_CONFIG:-apps/hft-core/config/sample.toml}
-          if [[ ! -f $cfg ]]; then
-            echo "::error::sample configuration $cfg for hft-core --check is missing"
-            exit 1
-          fi
-          "$bin" --config "$cfg" --check
+          cargo build --locked --profile ci --target aarch64-unknown-linux-gnu -p hft-core --example paper_config
+          target/aarch64-unknown-linux-gnu/ci/examples/paper_config "$RUNNER_TEMP/check-config" /dev/shm/hft-check
+          "$bin" --config "$RUNNER_TEMP/check-config/core.toml" --dry-run --check
       - name: Export strategy schemas and compare with fixtures/strategy-schemas
         if: hashFiles('apps/hft-core/Cargo.toml') != ''
         shell: bash
@@ -223,11 +224,6 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends clang libbpf-dev linux-libc-dev
           mkdir -p dist/deploy/imds
           clang -O2 -target bpf -c deploy/imds/hft-imds-connect.bpf.c -o dist/deploy/imds/hft-imds-connect.bpf.o
-      - name: SBOM
-        shell: bash
-        run: |
-          echo "::notice::SBOM tool not selected yet (docs/development.md step 6: chosen when the repository is set up)"
-
       - name: Package release archive
         shell: bash
         env:
@@ -239,6 +235,8 @@ jobs:
           fi
           mkdir -p dist
           printf '%s\n' "$EVIDENCE" >dist/evidence.json
+          python3 deploy/gen/generate.py --check
+          python3 deploy/release/stage.py "$TAG" "$SHA" dist --run-id "$GITHUB_RUN_ID"
           export HFT_RELEASE_EVIDENCE=dist/evidence.json HFT_CI_RUN_ID=$GITHUB_RUN_ID
           SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
           export SOURCE_DATE_EPOCH
@@ -270,7 +268,7 @@ jobs:
           name: release-dist
           path: out/
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   verify:
     needs: preflight
@@ -291,7 +289,7 @@ jobs:
   publish:
     needs: [preflight, conformance-x86, build, verify]
     if: >-
-      ${{ !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' &&
+      ${{ !cancelled() && !inputs.artifact_only && needs.preflight.result == 'success' && needs.build.result == 'success' &&
       (needs.preflight.outputs.channel == 'dev' ||
       (needs.conformance-x86.result == 'success' &&
       (needs.verify.result == 'success' || needs.preflight.outputs.skip_verify == 'true'))) }}

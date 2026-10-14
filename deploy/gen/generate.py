@@ -68,6 +68,8 @@ Slice=hft-core.slice
 SupplementaryGroups=hft-ctl hft-stopmark
 RuntimeDirectory=hft/core-prod
 RuntimeDirectoryMode=0751
+ExecCondition=+/usr/bin/test ! -e /var/lib/hft/guard/tripped
+ExecCondition=/usr/bin/test -e /run/hft/window/active
 ExecStartPre=/usr/bin/systemctl is-active --quiet hft-dev2-guard.service
 ExecStartPre=/usr/bin/systemctl is-active --quiet hft-imds-lock.service
 ExecStartPre=+/opt/hft/current-core/deploy/release/preflight.sh
@@ -98,7 +100,7 @@ ReadWritePaths=/data/prod /dev/shm/hft/prod -/var/lib/hft/kill-switch
     result["egress.toml"] = "prod = [" + ", ".join('{ eni = "b", ip = "' + x["ip"] + '" }' for x in host["egress"]["prod"]) + "]\n"
     storage_row = next(line for line in core_spec.splitlines() if line.startswith("| `storage.disk_free_block_pct`"))
     disk_limit = re.search(r"\| (\d+) / \d+", storage_row)[1]
-    result["preflight.toml"] = "disk_free_block_pct = " + disk_limit + "\n"
+    result["preflight.toml"] = "disk_free_block_pct = " + disk_limit + "\n" + "\n".join(f"{key} = {value}" for key, value in r.items()) + "\n"
     expectation = [("guard.dev2_guard_active", True)]
     for name, memory, parent in [("hft.slice", r["parent_memory"], "/"), ("hft-core.slice", r["parent_memory"], "/hft.slice"), ("hftbatch.slice", r["batch_memory"], "/")]:
         for key, value in [("present", True), ("parent", parent), ("memory_max", str(memory * 1024 * 1024)), ("memory_swap_max", "0")]:

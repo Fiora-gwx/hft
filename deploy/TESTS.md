@@ -23,6 +23,8 @@ spec: README.md
 - 脚本测试的替身根:脚本以环境变量 `HFT_SYSROOT=<临时目录>` 运行,`/proc`、`/sys`、`/etc`、`/run`、`/var/lib`、`/dev/shm` 都落在其下;`systemctl`、`ethtool`、`ip`、`nft`、`bpftool`、`aws`、`runuser` 与 IMDS(`169.254.169.254` 的 HTTP 替身)由替身实现,记录调用序列。替身根与环境变量只用于测试,生产路径不变。
 - 容器:`proc` 用例在 CI 的特权 systemd 容器(`ubuntu:24.04`,cgroup v2,systemd ≥ 255)中运行,按用例写明的清单夹具执行安装与激活;hft 二进制以夹具替身代替(遵守相同的 `sd_notify`、退出码与建文件行为)。
 
+本轮可执行覆盖：`test_layout.py` 将真实仓库部署树与假 ELF 构建输出经过 staging、package、verify，覆盖 DEP-001 的测试网部署子集；DEP-042 检查全部 Bash 入口，DEP-251 检查当前标准库脚本及其本地依赖。DEP-070/076/134 覆盖 dev2 prod 生成物，其他主机、sim、凭证代理和未装配服务不计为通过。`test_resource_limits_fail_closed` 验证 CPU、memory/swap、I/O 限额失效时预检拒绝，不替代 DEP-060/061/062/063/065 的实际争用、OOM、吞吐测量。
+
 ## 覆盖
 
 | README 小节 | 用例 |
