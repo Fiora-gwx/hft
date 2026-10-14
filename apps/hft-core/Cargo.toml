@@ -1,0 +1,50 @@
+[package]
+name = "hft-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+bitget = ["dep:venue-bitget"]
+
+[dependencies]
+hft-types.workspace = true
+hft-event.workspace = true
+hft-refdata.workspace = true
+hft-rt.workspace = true
+hft-journal = { workspace = true, features = ["writer"] }
+hft-sequencer = { workspace = true, features = ["live"] }
+hft-strategy-sdk.workspace = true
+hft-strategy-registry = { path = "../../strategies/registry" }
+hft-risk.workspace = true
+hft-sim.workspace = true
+hft-ctl = { path = "../../crates/hft-ctl" }
+hft-net.workspace = true
+hft-venue.workspace = true
+hft-venue-proto.workspace = true
+venue-binance.workspace = true
+venue-bitget = { workspace = true, optional = true }
+serde = { version = "1", features = ["derive"] }
+toml.workspace = true
+# Cold configuration hashing also runs in Windows --check; no assembly toolchain needed.
+sha2 = "0.10"
+zerocopy.workspace = true
+libc.workspace = true
+zeroize = "1"
+
+[target.'cfg(unix)'.dependencies]
+signal-hook = "0.3"
+
+[dev-dependencies]
+hft-ctl-proto = { path = "../../crates/hft-ctl-proto" }
+hft-oms.workspace = true
+hft-exec.workspace = true
+hft-ledger.workspace = true
+hft-testkit = { workspace = true, features = ["seq"] }
+tempfile = "3"
+
+[lints]
+workspace = true

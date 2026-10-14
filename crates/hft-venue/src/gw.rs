@@ -1894,6 +1894,11 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         n
     }
 
+    /// Shutdown after `retire_all`: seal the raw journal before the persister stops.
+    pub fn seal_and_close(self) -> Result<(), hft_journal::RollErr> {
+        self.raw.seal_and_close()
+    }
+
     /// Starts (`true`) or stops recording the effect trace (tests).
     #[doc(hidden)]
     pub fn trace(&mut self, on: bool) {

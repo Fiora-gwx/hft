@@ -35,6 +35,7 @@ strategies/<name> → hft-strategy-sdk + hft-strat-lib(细则见 strategies/AGEN
 strategies/registry(hft-strategy-registry)→ 各 strategies/<name>(唯一策略清单;被 apps/hft-core、apps/replayer 依赖)
 ```
 
+- `apps/hft-core` 依赖 `hft-venue-proto` 作泛型协议装配；其 dev 依赖 `hft-testkit` + `hft-ctl-proto`。
 - **任何引擎 crate 都不依赖 `strategies/*` 与 `hft-strategy-registry`**(含 `[dev-dependencies]`,`hft-testkit` 也不例外):引擎 crate 的测试用 `hft-testkit` 的测试策略;唯一的策略清单是 `strategies/registry`,依赖它的只有 `apps/hft-core` 与 `apps/replayer`;需要真实策略的集成测试放 `strategies/registry/tests/` 或 `apps/hft-core/tests/`。
 - `venue-<x>` 只依赖 `hft-types/hft-refdata/hft-event/hft-venue-proto` 与编解码库;不依赖 `hft-net`、`hft-venue`、`hft-sequencer`。
 - `pure`/`hot` crate 不依赖 `cold` crate;`tokio` 不进 hot crate 的依赖闭包。

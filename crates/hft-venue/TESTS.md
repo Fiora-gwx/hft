@@ -6,6 +6,8 @@ spec: README.md
 
 # hft-venue 测试规格
 
+生命周期装配说明：`FeedRuntime` 与 `GwRuntime` 的 `seal_and_close` 将已停止任务的 raw writer 交给 journal 封段流程；连接退役断言沿用现有用例，进程退出的持久化验证归 [hft-core TESTS](../../apps/hft-core/TESTS.md)。
+
 格式与规则见 [docs/tests](../../docs/tests/README.md)。本 crate 的用例以桩协议 `StubProto` 与脚本化连接驱动 `FeedRuntime`、`SnapFetchTask`、`GwRuntime`、`AcctFetchTask` 与 `SessionDriver`,与具体交易所无关;各 `venue-*` 的报文金样与契约检查在各自的 `TESTS.md`,真实 venue 协议与运行时、sequencer 组合的跨组件场景在 [scenarios](../../docs/tests/scenarios.md)。
 
 ## 覆盖

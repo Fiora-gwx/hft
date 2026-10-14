@@ -1786,6 +1786,11 @@ impl<P: VenueProtocol> FeedRuntime<P> {
         ids.len()
     }
 
+    /// Shutdown after `retire_all`: seal the raw journal before the persister stops.
+    pub fn seal_and_close(self) -> Result<(), hft_journal::RollErr> {
+        self.st.raw.seal_and_close()
+    }
+
     /// Subscription items queued or awaiting answers on all connections (tests).
     #[doc(hidden)]
     pub fn pending_subs(&self) -> usize {

@@ -65,6 +65,10 @@ pub struct RawLog {
 }
 
 impl RawLog {
+    /// Shutdown after the owning runtime has stopped producing records.
+    pub(crate) fn seal_and_close(self) -> Result<(), hft_journal::RollErr> {
+        self.w.seal_and_close()
+    }
     /// A raw writer for `venue` (the runtimes build their own; public for benchmarks and tools).
     pub fn open(w: JournalWriter, venue: VenueId, clock: hft_rt::TscUtc) -> RawLog {
         RawLog::new(w, venue, Ticks { clock })
