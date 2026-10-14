@@ -120,3 +120,95 @@ fn seq_187_draining_no_increase() {
             .all(|d| d.1.account != AC2 || d.1.reject != 0 || d.1.action != hft_event::OrderAction::New)
     );
 }
+
+// ===================================================================================================
+// SEQ-185: Kill{Account, flatten} → engine_flatten covering a Broken group (helpers:
+// tests/common/risk_kit.rs).
+// ===================================================================================================
+
+mod flatten_broken {
+    use hft_event::OrderFlags;
+    use hft_sequencer::codes::status;
+    use hft_types::{CapSource, Side};
+
+    use crate::common::risk_kit::*;
+    use crate::common::*;
+
+    #[test]
+    fn seq_185_engine_flatten_covers_broken() {
+        reset_script();
+        let mut h = b0().boot();
+        h.steady();
+        // g2 Broken: a1 +0.010, b1 −0.005 (naked 0.005 BTC ≈ 250 USDT).
+        broken_by_release(
+            &mut h,
+            S2,
+            G2,
+            &[(A1, Side::Buy, "0.010"), (B1, Side::Sell, "0.005")],
+        );
+        h.trace_on();
+        let n = h.io_ref().out.len();
+        let m = h.mark();
+        let v = h.s.engine().risk.mode.ctl_state_version();
+        let id = h.cmd_with(
+            "cli:trader1",
+            TRADER,
+            AC2,
+            &kill_account(AC2, false, true, true),
+            |c| {
+                c.confirmed = 1;
+                c.expect_state_version = v;
+            },
+        );
+        h.run();
+        assert_eq!(h.res(id).0, status::APPLIED, "{:?}", h.res(id));
+        assert_eq!(
+            h.s.engine().trace.count("exec.engine_flatten"),
+            1,
+            "{:?}",
+            h.trace()
+        );
+        let ds = decs_since(&h, m);
+        let perp: Vec<_> = ds.iter().filter(|d| d.inst == B1 && d.account == AC2).collect();
+        assert_eq!(perp.len(), 1, "{ds:?}");
+        let p = perp[0];
+        assert_eq!((p.side, p.qty, p.reject), (Side::Buy, q("0.005"), 0), "{p:?}");
+        assert!(p.oflags & OrderFlags::REDUCE_ONLY.0 != 0, "reduce-only perp leg");
+        assert!(
+            ds.iter().all(|d| d.inst != A1),
+            "no spot leg before the perp leg reaches its target: {ds:?}"
+        );
+        assert!(
+            frames(&h, n).iter().any(|f| f.1.inst == B1 && f.1.account == AC2),
+            "perp leg out in the command's Input"
+        );
+        assert!(cap_on(&h, CapSource::BROKEN, AC2, Some(G2)), "still Broken");
+        // The perp leg fills → the spot leg (a1 sell 0.010) follows.
+        h.ack(p);
+        let m = h.mark();
+        h.fill(p, p.qty, p.qty, p.px);
+        let t = h.now() + 2 * SEC;
+        while h.now() < t {
+            h.adv(100 * MS);
+            md_alive(&mut h);
+            requote(&mut h, A1);
+            if decs_since(&h, m).iter().any(|d| d.inst == A1) {
+                break;
+            }
+        }
+        let ds = decs_since(&h, m);
+        let spot = ds
+            .iter()
+            .find(|d| d.inst == A1 && d.account == AC2)
+            .expect("spot leg");
+        assert_eq!(
+            (spot.side, spot.qty, spot.reject),
+            (Side::Sell, q("0.010"), 0),
+            "{spot:?}"
+        );
+    }
+
+    fn frames(h: &H, n: usize) -> Vec<(hft_sequencer::OutRing, hft_event::GwCmd)> {
+        h.io_ref().out[n..].to_vec()
+    }
+}

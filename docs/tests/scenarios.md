@@ -411,7 +411,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - t = 150 s(只有一轮 Ignore):`CmdResult{PreconditionFailed, detail = ReconNotClean}`,cap 集合与 `ctl_state_version` 不变
   - t = 210 s:`CmdResult{Applied}`;cap 集合为空;t = 211 s 的 Open 链接 `reject = 0`、第一腿出环
   - INV-11、INV-13 每步成立
-- 实现:`crates/hft-testkit/src/scenarios/modes.rs::md_2_resume_removes_exact_cap_only`
+- 实现:`crates/hft-sequencer/tests/scenarios_risk.rs::md_2_resume_removes_exact_cap_only`
+- 备注:MD-2.1–2.4 在同一函数;实现方式:以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,价格与阈值取 B0(见该文件头);W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -437,7 +438,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - t = 300 s:`CmdResult{PreconditionFailed, detail = ResumeLimit}`,cap 仍在
   - 日界的 `Timer{DayRoll}`:`day_pnl` 基线归零、`resumes_today = 0`、cap 集合仍含 `DailyLoss{a}`、有效模式仍为 `CloseOnly`
   - 日界后 10 s:`CmdResult{Applied}`,cap 删除;新触发线 = 0 − 50 = −50 USDT
-- 实现:`crates/hft-testkit/src/scenarios/modes.rs::md_3_daily_loss_resume_resets_trigger`
+- 实现:`crates/hft-sequencer/tests/scenarios_risk.rs::md_3_daily_loss_resume_resets_trigger`
+- 备注:MD-3.1、MD-3.2 在同一函数(当日 PnL 的 1e-6 USDT 精度由一笔 USDT 手续费定位);实现方式:以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,价格与阈值取 B0(见该文件头);W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -460,8 +462,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - t ∈ [8 s, 15 s) 每一步 `ForceDeleverage` 的引擎单(Flatten,`origin = Engine`,永续腿先)出环,`reject = 0`
   - t = 20 s:`CapCleared{ClockBad}`;t = 21 s 的 Open `reject = 0`
   - INV-12 每步成立
-- 实现:`crates/hft-testkit/src/scenarios/modes.rs::md_4_clockbad_halted_block_open_only`
-- 备注:策略侧 `Throttle` 对 Flatten 与硬动作绕过 `cooldown`、`in_flight` 的放行表归 [hft-strat-lib Throttle](../../crates/hft-strat-lib/README.md#throttle),由其 `TESTS.md` 覆盖;本场景只断言引擎侧的放行
+- 实现:`crates/hft-sequencer/tests/scenarios_risk.rs::md_4_clockbad_halted_block_open_only`
+- 备注:MD-4.2 在同一函数,MD-4.1 见 `md_4_1_…`;实现方式:以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,价格与阈值取 B0(见该文件头);W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补;策略侧 `Throttle` 对 Flatten 与硬动作绕过 `cooldown`、`in_flight` 的放行表归 [hft-strat-lib Throttle](../../crates/hft-strat-lib/README.md#throttle),由其 `TESTS.md` 覆盖;本场景只断言引擎侧的放行
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -1114,7 +1116,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - m2:`CancelReject` 后为 `Live`;t = 6 s 的 `ConnState{Order, Up}` 同一 Input 内再发一条 `OrderDecision{Cancel}`,随后 `Cancelled`
   - t = 10 s 之后:t = 13 s 的 `ConnState{Order, Up}` 不为 m3 发撤单,m3 保持 `Live` 直到 `ttl_ms` 到期
   - 每步 INV-5、INV-7
-- 实现:`crates/hft-testkit/src/scenarios/kill.rs::b_10_cancel_obligation_reissued_on_reconnect`
+- 实现:`crates/hft-sequencer/tests/scenarios_risk.rs::b_10_cancel_obligation_reissued_on_reconnect`
+- 备注:B-10.1 在同一函数;撤单持续义务按账户重发(任一 venue 的 Up 都重发该账户全部应撤的单),所以 m2 的 CancelReject 之后 `VS` 在 t = 3 s 的 Up 即重撤 m2,`VP` 断线时它进 `Unknown`,t = 6 s 的 Up 发查询,查询收敛为 Live 的同一 Input 内再撤;实现方式:以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,价格与阈值取 B0(见该文件头);W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -1679,7 +1682,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - `t_b + 120,000 ms` 的推进写 `ExecDecision{AutoFix, detail = AutoFix/Start, target_qty = 0.100}`;此后每片是 `S1` 卖出 IOC,`OrderDecision{reason = AutoFix, link_role = HedgeFix}`,`oflags` 含 `RISK_REDUCING`、不含 `REDUCE_ONLY`,`hedge_cap_qty` = 发出时 `naked_filled` + 0.00001;限价 = `cap_cross_px(Sell, 59,999.99, 59,999.995, 0.005, rr 0.01, tick 0.01)` = 59,700.00;每片 `⌈qty × 59,700.00⌉ ≤ 2,000 USDT`,三片依次 0.03350、0.03350、0.03300 BTC,相邻两片 `OrderDecision` 的引擎时间间隔 ≥ 200 ms
   - 第 3 片成交的同一 Input 内依次有 `ExecDecision{AutoFix, detail = AutoFix/Done}`、`Note{ExecAutoFixDone}`(P1,`v = [a | g1 << 8, 0, 0.100, 0.100, 0, 3]`)、`CapCleared{Broken(a, g1)}`;cell `state = Idle`;`HedgeFailure(a)` 保留到场景结束(无 `CapCleared{HedgeFailure}`)
   - 本 Broken 期 `AutoFix/Start` 恰好 1 条、终态(`AutoFix/Done` 或 `AutoFix/Failed`)恰好 1 条;每步 INV-15、INV-19、INV-20 成立
-- 实现:`crates/hft-testkit/src/scenarios/broken.rs::bk_1_spot_excess_auto_fix_once`
+- 实现:`crates/hft-sequencer/tests/scenarios_risk.rs::bk_1_spot_excess_auto_fix_once`
+- 备注:BK-1.2、1.3、1.5–1.8 在同一函数(BK-1.3 的静默从 t_b + 117 s 开始:静默超过 `conn_liveness_ms` 才算报价不可用);BK-1.1、1.4、1.9、1.10 待补;实现方式:以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,价格与阈值取 B0(见该文件头);W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -1708,7 +1712,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - 每片是 `P1` 买入 IOC,`oflags` 含 `RISK_REDUCING` 与 `REDUCE_ONLY`,`link_role = HedgeFix`;限价 = `cap_cross_px(Buy, 60,010.1, 60,010.05, 0.005, rr 0.01, tick 0.1)` = 60,310.1;四片依次 0.033、0.033、0.033、0.001 BTC,每片 `⌈qty × 60,310.1⌉ ≤ 2,000 USDT`
   - 末片成交的同一 Input 内 `Note{ExecAutoFixDone}`(P1,`v = [a | g1 << 8, 1, 0.100, 0.100, 0, 4]`)与 `CapCleared{Broken(a, g1)}`;`HedgeFailure(a)` 保留
   - 全程无 `S1` 的 AutoFix 订单;每步 INV-15、INV-17、INV-20 成立
-- 实现:`crates/hft-testkit/src/scenarios/broken.rs::bk_2_perp_excess_reduce_only_buy`
+- 实现:`crates/hft-sequencer/tests/scenarios_risk.rs::bk_2_perp_excess_reduce_only_buy`
+- 备注:实现方式:以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,价格与阈值取 B0(见该文件头);W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补
 
 ### BK-3 L3 与 flatten 对 Broken cell 照常生效,先 reduce-only 减永续腿再减现货
 
@@ -1726,7 +1731,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - 先发 `P1` 买 0.080 IOC(`Flatten`,`REDUCE_ONLY`,`origin = Engine`,`ExecDecision.algo = Engine`),`P1` 到达 −0.320 之前无 `S1` 的减仓单;之后 `S1` 卖 0.060
   - 每步只减不增、不越过 0;`t_b + 120 s` 时引擎目标在位,无 `AutoFix/Start`(等待条件"有引擎目标")
   - 每步 INV-17、INV-19、INV-20 成立
-- 实现:`crates/hft-testkit/src/scenarios/broken.rs::bk_3_l3_and_flatten_cover_broken`
+- 实现:`crates/hft-sequencer/tests/scenarios_risk.rs::bk_3_l3_and_flatten_cover_broken`
+- 备注:BK-3.1 在同一函数(B0 盘口 1 BTC × `depth_frac` 0.3,永续腿分片);BK-3.2、3.3 待补;实现方式:以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,价格与阈值取 B0(见该文件头);W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -1823,7 +1829,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - 重启后到场景结束:无 `resolve_broken` 调用产生的 `CapSet{Broken}`、无 `HedgeFailure`;账户闸门放行的 Input 内 `CapCleared{Recovery}`(auto)
   - `g1` 无补腿单(容差内)
   - `g2`:`t_r + 23 s`(= `VP` 放行 + 5,000 ms)写 `ExecDecision{ExternalDefault}` 并发 `P1` 买 0.050(新窗口,不按停机前的截止)
-- 实现:`crates/hft-testkit/src/scenarios/broken.rs::bk_7_resolve_broken_only_on_hard_release`
+- 实现:`crates/hft-sequencer/tests/scenarios_risk.rs::bk_7_resolve_broken_only_on_hard_release`
+- 备注:BK-7.1 在同一函数;Drain 等待 `g2` 外来成交的默认处理(hft-sequencer Drain 第 3 步),所以 `g2` 的 ExternalDefault 在重启前(1 s + 5 s)发出,重启后不再处理;实现方式:以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,价格与阈值取 B0(见该文件头);W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -1985,7 +1992,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - t = 1.030 s:被接受并替换引擎目标,腿顺序 `PerpFirst`、`urgency = Urgent`,此后该 cell 的订单 `origin = Engine`
   - t = 1.040 s:账户 `b` 的目标被接受、Open 意图放行(不受 `a` 的锁影响)
   - t = 10 s:`CapCleared{Kill}`,`flatten_lock(a)` 清除;t = 10.5 s 的目标被接受(`TargetSet` 或 `TargetReplaced`),无 `FlattenLocked`
-- 实现:`crates/hft-testkit/src/scenarios/link.rs::fl_1_flatten_lock_rejects_away_from_zero`
+- 实现:`crates/hft-sequencer/tests/scenarios_risk.rs::fl_1_flatten_lock_rejects_away_from_zero`
+- 备注:被接受的 (0, 0) `Exit` 目标是策略目标(hft-exec“目标的接受与替换”),清仓锁使它不能被清除;实现方式:以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,价格与阈值取 B0(见该文件头);W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补
 
 ### MS-2 单边 +30%(1 h 内)行情下引擎先于强平完成减仓,模拟真值中不发生强平
 

@@ -423,3 +423,201 @@ fn seq_173_quiet_book_still_hedges() {
             .any(|o| o.0 == OutRing::Venue(B) && o.1.inst == B1)
     );
 }
+
+// ===================================================================================================
+// SEQ-181: InflightBook.open_margin, incremental vs per-slot sum (helpers: tests/common/risk_kit.rs).
+// ===================================================================================================
+
+mod open_margin {
+    use hft_event::{EventKind, LeverageItem, OrderDecision, OrderEventKind};
+    use hft_sequencer::driver::live::RingId;
+    use hft_strategy_sdk::IntentClass;
+    use hft_types::{Qty, Rate, RoundMode, Side, Tif};
+    use proptest::prelude::*;
+    use zerocopy::IntoBytes;
+
+    use crate::common::risk_kit::*;
+    use crate::common::*;
+
+    /// One in-flight b1 Open of the reference model.
+    struct Live {
+        d: OrderDecision,
+        lev_x100: i64,
+        filled: Qty,
+        acked: bool,
+    }
+
+    /// Account 1's b1 leverage on B set to `x` (b2 kept at 3×).
+    fn set_leverage(h: &mut H, x: u16) {
+        let levs = [
+            LeverageItem {
+                inst: B1,
+                _pad: 0,
+                leverage: Rate(i64::from(x) * 1_000_000_000),
+            },
+            LeverageItem {
+                inst: B2,
+                _pad: 0,
+                leverage: r("3.00"),
+            },
+        ];
+        let mut body = cfg_hdr(AC1, B, 2).as_bytes().to_vec();
+        for l in &levs {
+            body.extend_from_slice(l.as_bytes());
+        }
+        h.push_bytes(RingId::Rep(0), EventKind::ACCOUNT_CONFIG_REPORT, body);
+        h.run();
+    }
+
+    fn reference(h: &H, live: &[Live]) -> i64 {
+        let exp = h.rd.asset(BTC).exp;
+        live.iter()
+            .map(|o| {
+                let rem = Qty(o.d.qty.0 - o.filled.0);
+                let notional = o.d.px.mul_qty(rem, exp, RoundMode::HalfEven).0.0;
+                (i128::from(notional) * 100 / i128::from(o.lev_x100)) as i64
+            })
+            .sum()
+    }
+
+    fn report(h: &mut H, o: &Live, what: OrderEventKind, qty: Qty, cum: Qty) {
+        let mut ev = order_event(&o.d, what, h.epoch());
+        ev.qty = qty;
+        ev.cum_filled = cum;
+        h.push(RingId::Rep(0), &ev);
+        h.run();
+    }
+
+    /// Reports drawn from {Ack, PartialFill, Fill, Cancel}; `op = (kind, leverage, pick)`.
+    fn run(ops: &[(u8, u16, u8)]) -> Result<(), TestCaseError> {
+        reset_script();
+        let mut b = b0();
+        // No repair of the deliberately unhedged b1 opens (it would end in Broken / CloseOnly).
+        b.setup_edit
+            .push(|s| s.exec.default.fix_tolerance_default = Rate(1_000_000_000_000));
+        // … nor an exposure gate on it: every generated open reaches the OMS.
+        let rd = b.rd.load();
+        let mut p = b0_risk(&rd);
+        for a in p.accounts.as_mut_slice() {
+            a.default_group.naked_gate = Rate(i64::MAX);
+        }
+        b.risk = Some(p);
+        let mut h = b.boot();
+        h.steady();
+        let mut live: Vec<Live> = Vec::new();
+        let (mut tried, mut placed, mut max_margin) = (0u32, 0u32, 0i64);
+        let mut rejects = Vec::new();
+        for &(kind, lev, pick) in ops {
+            // 600 ms per step and ≤ 6 live orders: terminal slots wait reuse_quarantine_ms
+            // (5 s) before reuse, and B0 has 16 slots per (venue, account).
+            h.adv(600 * MS);
+            md_alive(&mut h);
+            h.margin_report(AC1, "100000", "0", "100000");
+            h.mark_md(B1, "50010");
+            if kind == 0 || live.is_empty() {
+                if live.len() >= 6 {
+                    continue;
+                }
+                set_leverage(&mut h, lev);
+                let d = place_tif(
+                    &mut h,
+                    S1,
+                    G1,
+                    B1,
+                    Side::Sell,
+                    q("0.002"),
+                    IntentClass::Open,
+                    Tif::Gtc,
+                );
+                tried += 1;
+                if d.reject != 0 {
+                    let caps: Vec<_> =
+                        h.s.engine()
+                            .risk
+                            .mode
+                            .caps()
+                            .iter()
+                            .map(|c| (c.source, c.scope.account, c.scope.group))
+                            .collect();
+                    rejects.push(format!("{:#x} {caps:?}", d.reject));
+                }
+                if d.reject == 0 {
+                    placed += 1;
+                    // Acknowledged at once: an order left PendingNew past ack_timeout goes
+                    // Unknown and the venue stops admitting Opens (VENUE_NOT_READY).
+                    h.ack(&d);
+                    live.push(Live {
+                        d,
+                        lev_x100: i64::from(lev) * 100,
+                        filled: Qty(0),
+                        acked: true,
+                    });
+                }
+            } else {
+                let k = usize::from(pick) % live.len();
+                let o = &mut live[k];
+                let rem = Qty(o.d.qty.0 - o.filled.0);
+                match kind {
+                    1 if !o.acked => {
+                        o.acked = true;
+                        let x = Live {
+                            d: o.d,
+                            lev_x100: o.lev_x100,
+                            filled: o.filled,
+                            acked: true,
+                        };
+                        report(&mut h, &x, OrderEventKind::Ack, Qty(0), x.filled);
+                    }
+                    1 | 2 if rem.0 > q("0.001").0 => {
+                        let f = q("0.001");
+                        o.filled = Qty(o.filled.0 + f.0);
+                        let x = Live {
+                            d: o.d,
+                            lev_x100: o.lev_x100,
+                            filled: o.filled,
+                            acked: o.acked,
+                        };
+                        report(&mut h, &x, OrderEventKind::PartialFill, f, x.filled);
+                    }
+                    2 => {
+                        let x = Live {
+                            d: o.d,
+                            lev_x100: o.lev_x100,
+                            filled: o.d.qty,
+                            acked: o.acked,
+                        };
+                        live.remove(k);
+                        report(&mut h, &x, OrderEventKind::Fill, rem, x.d.qty);
+                    }
+                    _ => {
+                        let x = Live {
+                            d: o.d,
+                            lev_x100: o.lev_x100,
+                            filled: o.filled,
+                            acked: o.acked,
+                        };
+                        live.remove(k);
+                        report(&mut h, &x, OrderEventKind::Expired, Qty(0), x.filled);
+                    }
+                }
+            }
+            let got = h.s.engine().oms.inflight().open_margin(AC1, B).0;
+            prop_assert_eq!(got, reference(&h, &live), "after {:?}", (kind, lev, pick));
+            max_margin = max_margin.max(got);
+        }
+        // Non-vacuous: every attempted open is admitted and carries margin.
+        prop_assert_eq!(placed, tried, "rejects {:x?}", rejects);
+        prop_assert!(tried == 0 || max_margin > 0);
+        Ok(())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(ProptestConfig::default().cases.max(1_000)))]
+        #[test]
+        fn seq_181_open_margin_incremental(
+            ops in proptest::collection::vec((0u8..4, 1u16..=20, any::<u8>()), 1..300)
+        ) {
+            run(&ops)?;
+        }
+    }
+}
