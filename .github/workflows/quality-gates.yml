@@ -259,6 +259,10 @@ jobs:
           restore-keys: x86-nested-${{ hashFiles('rust-toolchain.toml') }}-
       - name: Test the affected packages (cargo nextest)
         env:
+          # The same inputs as the plan step: `run` plans again when the cache restore replaced
+          # target/ (.github/scripts/related-tests.py).
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ env.BASE_SHA }}
           HEAD: ${{ env.HEAD_SHA }}
         run: |
           # tmpfs journal segments are mlocked (crates/hft-journal JNL-040/044/045).
