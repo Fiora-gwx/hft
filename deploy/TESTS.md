@@ -8,6 +8,10 @@ spec: README.md
 
 格式与规则见 [docs/tests](../docs/tests/README.md)。
 
+发布链路的 `tests/test_release_preflight.py` 验证 DEP-251 的 CI lane 汇总准入：fast lane 的 `rust` 跳过不阻止已通过 acceptance 的开发制品，acceptance 缺失、失败或跳过均拒绝。
+
+DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实例后、hostprobe 前准备 `/data/prod`；真实目录属主和挂载权限仍在主机验收。
+
 可执行子集：`dev2/tests/test_guard.py` 驱动真实护栏决策与文件写入、替身 systemctl，核对阈值持续时间、因果判定、两级停机和标志生存期；`tests/test_polkit.py` 用 JS 求值器核对 DEP-079，DEP-080/085 在护栏测试中。`tests/test_shm_release.py` 验证 CORE-195 的状态闸门、实例边界与 dry-run。它们不替代容器里的 systemd/权限/OOM/I/O 测试、发布归档或真实主机证据。
 
 **公共夹具**(`deploy/tests/fixtures/`;用例在 `前置` 中按名引用,并写出该用例依赖的取值):
@@ -22,6 +26,8 @@ spec: README.md
 - hft-core 主机类档夹具(值抄自 hft-core 线程计划,只用于本文件):`c32`——hk 核 0、`eni_b` 核 1、隔离核 5–17(seq 核 5,发送热核 5–17)、冷核 18 与 29、批处理核 19–21 与 30–31(ENI-B2 未启用时另含 28)、`eni_c` 核 22、sim 核 23–27、预留 `eni_b2` 核 28;`c4`——hk 核 0、隔离核 1–3、seq 核 1;`dev2`——两核,无隔离核。
 - 脚本测试的替身根:脚本以环境变量 `HFT_SYSROOT=<临时目录>` 运行,`/proc`、`/sys`、`/etc`、`/run`、`/var/lib`、`/dev/shm` 都落在其下;`systemctl`、`ethtool`、`ip`、`nft`、`bpftool`、`aws`、`runuser` 与 IMDS(`169.254.169.254` 的 HTTP 替身)由替身实现,记录调用序列。替身根与环境变量只用于测试,生产路径不变。
 - 容器:`proc` 用例在 CI 的特权 systemd 容器(`ubuntu:24.04`,cgroup v2,systemd ≥ 255)中运行,按用例写明的清单夹具执行安装与激活;hft 二进制以夹具替身代替(遵守相同的 `sd_notify`、退出码与建文件行为)。
+
+本轮可执行覆盖：`test_layout.py` 将真实仓库部署树与假 ELF 构建输出经过 staging、package、verify，覆盖 DEP-001 的测试网部署子集；DEP-042 检查全部 Bash 入口，DEP-251 检查当前标准库脚本及其本地依赖。DEP-070/076/134 覆盖 dev2 prod 生成物，其他主机、sim、凭证代理和未装配服务不计为通过。`test_resource_limits_fail_closed` 验证 CPU、memory/swap、I/O 限额失效时预检拒绝，不替代 DEP-060/061/062/063/065 的实际争用、OOM、吞吐测量。
 
 ## 覆盖
 

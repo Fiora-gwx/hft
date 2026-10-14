@@ -184,7 +184,16 @@ def dep_225_activate_ok(tmp_path):
     for group in ("core", "cold", "sim"):
         (base / ("current-" + group)).symlink_to("releases/v1.2.2")
     runner.calls.clear()
-    record = release.activate("v1.2.3", "core", root, runner)
+    def first_boot(argv):
+        runner(argv)
+        args = [str(x) for x in argv]
+        if args[0] == "install":
+            assert args[1:] == ["-d", "-o", "hft", "-g", "hft-journal-ro", "-m", "2750", str(root / "data/prod")]
+            assert ["systemctl", "disable", "--now", "hft-core@prod.service"] in runner.calls
+            Path(args[-1]).mkdir(parents=True)
+        if "verify" in args and args[0].endswith("hostprobe"):
+            assert (root / "data/prod").is_dir(), "first activation must prepare the cold path"
+    record = release.activate("v1.2.3", "core", root, first_boot)
     assert record["acceptance"] == "pending" and record["hostprobe"] == "passed"
     assert os.readlink(base / "current-core") == "releases/v1.2.3"
     assert os.readlink(base / "previous-core") == "releases/v1.2.2"
@@ -192,7 +201,7 @@ def dep_225_activate_ok(tmp_path):
     assert os.readlink(base / "current-cold") == "releases/v1.2.2"
     assert runner.calls[-1][:2] == [str(base / "current-core/bin/hostprobe"), "verify"]
     assert "--expected" in runner.calls[-1] and "--out" in runner.calls[-1]
-    assert [c for c in runner.calls if c[0] == "systemctl"] == [["systemctl", "daemon-reload"], ["systemctl", "disable", "--now", "hft-core@prod.service"]]
+    assert [c for c in runner.calls if c[0] == "systemctl"] == [["systemctl", "disable", "--now", "hft-core@prod.service"], ["systemctl", "daemon-reload"]]
     assert (root / "etc/systemd/system/hft-core@prod.service").is_file()
 
 
@@ -275,15 +284,26 @@ def preflight_host(tmp_path, monkeypatch):
     monkeypatch.setattr(preflight, "selected_host", lambda *args: ("test-host", dict(**{"class": "dev2"}, instances=["prod"], formal_live=False)))
     for path, text in {
         "etc/hft/hft-core-prod.toml": '[instance]\nname="prod"\norder_env="testnet"\n[paths]\njournal_cold="/data"\n',
-        "etc/hft/preflight.toml": "disk_free_block_pct=15\n",
+        "etc/hft/preflight.toml": "disk_free_block_pct=15\nmemory=768\nparent_memory=1376\nbatch_memory=512\nquota=100\nweight=50\nread=40\nwrite=20\n",
         "proc/cpuinfo": "Features: aes atomics\n",
         "sys/fs/cgroup/hftbatch.slice/cpu.idle": "1",
+        "sys/fs/cgroup/cgroup.subtree_control": "cpu memory io",
+        "sys/devices/system/cpu/isolated": "",
+        "sys/fs/cgroup/hft.slice/cpu.max": "100000 100000",
+        "sys/fs/cgroup/hft.slice/cpu.weight": "50",
+        "sys/fs/cgroup/hftbatch.slice/cpu.max": "max 100000",
+        "sys/fs/cgroup/hftbatch.slice/io.max": "259:1 rbps=40000000 wbps=20000000",
         "run/hft/hostprofile.json": '{"pending_reboot":false}',
         "etc/hft/secrets/hft-core.toml": '[[secret]]\nsecret_id="arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:hft/testnet/fixture"\n',
     }.items():
         target = root / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text)
+    for directory, limit in [("hft.slice", 1376), ("hftbatch.slice", 512), ("hft.slice/hft-core.slice/hft-core@prod.service", 768)]:
+        for field, value in [("memory.max", str(limit * 1024 * 1024)), ("memory.swap.max", "0")]:
+            target = root / "sys/fs/cgroup" / directory / field
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(value)
     for unit in ("hft.slice", "hft-core.slice", "hftbatch.slice"):
         for target in (tree / "deploy/generated/test-host" / unit, root / "etc/systemd/system" / unit):
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -307,10 +327,12 @@ def preflight_host(tmp_path, monkeypatch):
             if argv[0] == "uname":
                 return self.machine
             if argv[0] == "findmnt":
-                return argv[-1]
+                return "259:1" if "MAJ:MIN" in argv else argv[-1]
             if argv[0] == "chronyc":
                 return self.chrony
             if argv[0] == "systemctl":
+                if "--property=OOMScoreAdjust" in argv:
+                    return "100"
                 return "active" if self.active else "inactive"
             if argv[0] == "nft":
                 return json.dumps({"nftables": rules})

@@ -176,7 +176,7 @@ replayer 的定向文件用例([RPL-283](../apps/replayer/TESTS.md#rpl-283-dst-�
 ### 发布工作流(`release-aarch64.yml`)
 
 1. **`preflight`**(`ubuntu-latest`,`actions: read`、`checks: read`)确定 SHA:标签触发取标签指向的提交;`workflow_dispatch` 取输入 `sha`(必须是某个 PR 的头提交或 `main` 上的提交;判定为 `origin/main` 的祖先或某个已推送分支的头提交)或输入 `tag` 指向的提交。实现:`.github/scripts/release-preflight.py`(`release-x86-cross.yml` 共用)。下列任一不满足即失败,**不在发布工作流里补跑质量门**:
-   1. `gh api …/actions/workflows/ci.yml/runs?head_sha=<SHA>&status=success` 有结果,且该次运行的 `rust` 作业结论为 `success`(被跳过的不算);
+   1. `gh api …/actions/workflows/ci.yml/runs?head_sha=<SHA>&status=success` 有结果，且该次运行的 `acceptance` 作业结论为 `success`；它核对该 lane 全部适用门槛，不能以某个被跳过的作业代替通过；
    2. 该 SHA 最近一次名为 `decoupling-gate` 的 check run 结论为 `success`(`ci.yml` 或 `decoupling.yml` 产生;`pull_request_review` 触发的运行与 PR 头 SHA 的关联方式待核实,方法:M1 第一周提交一次评审后用 `gh api …/commits/<SHA>/check-runs` 查看);
    3. 正式版 `vX.Y.Z`:该 SHA 是 `origin/main` 的祖先,且 `main` 上实际执行了的最近一次 `nightly.yml` 运行结论为 `success`;`nightly` 作业被跳过的运行不计入最近一次,也不当作通过;最近一次实际执行失败时不得回退查找更早的成功运行;
    4. 由 `workflow_dispatch` 创建开发构建时,标签 `vX.Y.Z-dev.<dev_n>` 尚不存在(`X.Y.Z` = 该 SHA 的工作区版本)。
@@ -187,10 +187,10 @@ replayer 的定向文件用例([RPL-283](../apps/replayer/TESTS.md#rpl-283-dst-�
    1. 安装构建依赖与固定工具链;`rust-cache` 键 `arm64-release`(只给发布构建;7 天未用被逐出时冷构建);打印 `/proc/cpuinfo` 的 `Features`([构建剖面](#构建剖面)的待核实项,方法见该节)。
    2. 版本核对:`vX.Y.Z` 必须等于工作区版本;开发构建的 `X.Y.Z` 必须等于工作区版本。`channel` = 开发构建时 `dev`,否则 `release`。
    3. **正式版**跑 aarch64 一致性集(内容归 [testing §6](testing.md#6-ci-运行矩阵)):单元/金样、与 `conformance-x86` 相同的 DST 冒烟、`fixtures/replay/` 样本 verify;不一致即不发布。开发构建跳过。
-   4. 构建:正式版 `cargo build --locked --profile release-hot -p hft-core -p kill-switch --target aarch64-unknown-linux-gnu`,其余二进制 `cargo build --locked --release --target aarch64-unknown-linux-gnu`;开发构建全部 `--release`,只构建 dev2 运行的二进制([构建剖面](#构建剖面))。对每个二进制 `file … | grep 'ARM aarch64'`;`hft-core --check` 对样例配置通过(CPU 特性检查;样例配置的路径待 hft-core(M3)定,工作流暂取 `HFT_CORE_SAMPLE_CONFIG`,缺省 `apps/hft-core/config/sample.toml`,`apps/hft-core` 存在而文件缺失即失败)。
+   4. 构建:正式版 `hft-core` 与 `kill-switch` 用 `release-hot`，其余二进制用 `release`；开发构建全部用 `release`，registry 启用全部 feature([构建剖面](#构建剖面))。对每个二进制核对 aarch64 ELF；由同一提交的 `paper_config` example 生成自足配置，当前 channel 的 `hft-core --dry-run --check` 必须通过。样例检查与 schema 导出按 channel 选二进制，不能选中缓存中的另一剖面。
    5. `hft-core schemas --out dist/schemas/strategies`,与 `fixtures/strategy-schemas/` 逐字节相同,否则失败。
-   6. 构建 Python wheel(各包 + `hft_py` aarch64 wheel)与离线 wheelhouse,合并 `requirements.lock`;以 `clang -O2 -target bpf` 把 `deploy/imds/hft-imds-connect.bpf.c` 编译为 `.bpf.o` 放进归档的 `deploy/imds/`([deploy IMDS 锁定](../deploy/README.md#imds-锁定与凭证代理));生成 SBOM(工具在建仓时选定)。
-   7. `deploy/release/package-release.sh "$version" "$git_sha" dist`(`SOURCE_DATE_EPOCH` = 提交时间,可复现打包,[deploy](../deploy/README.md#发布归档与-releasectl));正式版另以 `bench` 剖面打包基准制品 `hft-bench-<ver>-aarch64.tar.zst`(不进生产归档,[benchmarks](../benchmarks/README.md));上传 workflow artifact,`retention-days: 1`。工作流交给打包脚本的输入:`dist/schemas/strategies/`、`dist/python/{wheels,wheelhouse,requirements.lock}`、`dist/deploy/imds/*.bpf.o`、二进制留在 `target/aarch64-unknown-linux-gnu/{release,release-hot}/`;环境变量 `HFT_RELEASE_EVIDENCE`(preflight 的 `evidence` JSON 文件,进 `RELEASE.json.evidence`)、`HFT_CI_RUN_ID`(进 `RELEASE.json.ci_run_id`)、`SOURCE_DATE_EPOCH`;脚本写出 `dist/hft-<tag>-aarch64.tar.zst` 与 `.sha256`。基准制品由工作流直接以同样的可复现 tar 参数打包(`benches/` 下的 `bench` 剖面可执行文件 + `bin/xtask`)。
+   6. 构建 Python wheel(各包 + `hft_py` aarch64 wheel)与离线 wheelhouse，合并 `requirements.lock`；以 `clang -O2 -target bpf` 编译 `deploy/imds/hft-imds-connect.bpf.c`，放进归档的 `deploy/imds/`([IMDS 锁定](../deploy/README.md#imds-锁定与凭证代理))。`deploy/release/stage.py` 从 Cargo 可执行目标、对应剖面二进制、schema、部署生成物与 wheelhouse 构造 `dist/stage/`、`release-metadata.json` 和 CycloneDX 清单；具体校验归 [打包器](../deploy/README.md#已知限制与后续工作)。
+   7. `deploy/release/package-release.sh "$version" "$git_sha" dist` 校验 staging 并写出 `dist/hft-<tag>-aarch64.tar.zst` 与 `.sha256`；`SOURCE_DATE_EPOCH` 取提交时间。正式版另以 `bench` 剖面打包基准制品([benchmarks](../benchmarks/README.md))。原生 aarch64 发布 artifact 保留 7 天；`artifact_only=true` 在上传后停止，不创建 tag 或 Release。发布预检与构建证据进入 `RELEASE.json`，字段归 [deploy](../deploy/README.md#发布归档与-releasectl)。
 4. **`verify`**(只在正式版):以 `workflow_call` 调用 `verify-bundle.yml`,输入为同一 SHA 与版本。
 5. **`publish`**(`ubuntu-latest`,`contents: write`;条件 `needs.build.result == 'success'`,正式版另要求 `needs.conformance-x86.result == 'success'` 与 `needs.verify.result == 'success'`;Admin 以 dispatch 输入 `skip_verify: true` 跳过验证包时 `verify` 不运行、`publish` 不要求它——用于热修,之后以 `verify-bundle.yml` 的 `workflow_dispatch(sha)` 补出包,开正式实盘所用的版本仍须有验证包与补跑):`workflow_dispatch` 时先在 `sha` 上创建带注释的标签 `vX.Y.Z-dev.<dev_n>` 并推送(以 `GITHUB_TOKEN` 推送的标签不再触发工作流);`gh release create --verify-tag`,上传生产归档与 `.sha256`、正式版的基准制品与验证包(各带 `.sha256`);`channel = dev` 时加 `--prerelease`,并删除最近 10 个之外的开发构建 pre-release(标签不删、不移动)。正式版资产不可变。Release 资产不占 artifact 存储配额。
 
@@ -240,7 +240,7 @@ replayer 的定向文件用例([RPL-283](../apps/replayer/TESTS.md#rpl-283-dst-�
 
 - **运行资源**:只用标准托管 runner,不启用 larger runner 或自托管 runner。各作业保留 [testing §6](testing.md#6-ci-运行矩阵) 的超时与冒烟批量,用于控制反馈时间和异常任务;同一 PR 的旧运行取消,只有文档改动时跳过构建测试。
 - **费用边界**:公开仓库的标准 runner 分钟免费不代表所有服务免费。larger runner、超出免费范围的存储与缓存、AWS/S3 等按各自规则计费;本仓库不启用额外付费资源。按下列保留策略管理 artifact 与 cache。
-- **artifact 与 cache**:发布与验证包的 workflow artifact `retention-days: 1`(发布物以 Release 资产为准);每夜只在崩溃时上传小文件;CI 不保存累计账本 artifact。cache 存 Rust 构建缓存(x86 `ci`(键 `x86-ci-v2`,另有测试嵌套构建的 `x86-nested-*`,见 `rust` 作业;`rust-cache` 的键不含剖面,改动依赖所用的剖面设置——`[profile.ci]` 的继承项、`package."*"`——时把键的版本号加一,否则完全命中的旧缓存不再保存,之后每次都重编依赖)、只构建 xtask 的 `docs`/`decoupling-gate`(共享键 `x86-xtask`)、arm 发布 `arm64-release`、`nightly-arm` 的 `arm64-ci`、arm 验证包 `arm64-verify`、应急交叉编译 `x86-cross`)与 fuzz 语料,被逐出时冷构建,超时的每夜视为基础设施失败。
+- **artifact 与 cache**:原生 aarch64 发布 artifact 的保留期归上节；验证包与交叉构建 artifact 保留 1 天(发布物以 Release 资产为准);每夜只在崩溃时上传小文件;CI 不保存累计账本 artifact。cache 存 Rust 构建缓存(x86 `ci`(键 `x86-ci-v2`,另有测试嵌套构建的 `x86-nested-*`,见 `rust` 作业;`rust-cache` 的键不含剖面,改动依赖所用的剖面设置——`[profile.ci]` 的继承项、`package."*"`——时把键的版本号加一,否则完全命中的旧缓存不再保存,之后每次都重编依赖)、只构建 xtask 的 `docs`/`decoupling-gate`(共享键 `x86-xtask`)、arm 发布 `arm64-release`、`nightly-arm` 的 `arm64-ci`、arm 验证包 `arm64-verify`、应急交叉编译 `x86-cross`)与 fuzz 语料,被逐出时冷构建,超时的每夜视为基础设施失败。
 
 决定与替代范围见 [公开仓库 CI](../.agents/notes/implemented/process/2026-10-10-public-repository-ci.md)。
 

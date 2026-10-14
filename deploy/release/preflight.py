@@ -90,6 +90,7 @@ def check(host):
     probe("testnet-only", lambda: config["instance"]["name"] == "prod" and config["instance"]["order_env"] == "testnet")
     probe("guard-active", lambda: host.command("systemctl", "is-active", "hft-dev2-guard.service") == "active")
     probe("batch-idle", lambda: host.text("/sys/fs/cgroup/hftbatch.slice/cpu.idle").strip() == "1" and not host.path("/sys/fs/cgroup/hft.slice/hftbatch.slice").exists())
+    results.update(resource_checks(host, policy, cold))
     probe("guard-polkit", lambda: host.path("/etc/polkit-1/rules.d/50-hft-dev2-guard.rules").read_bytes() == (tree / "deploy/polkit/50-hft-dev2-guard.rules").read_bytes())
     for unit in ("hft.slice", "hft-core.slice", "hftbatch.slice"):
         probe("unit:" + unit, lambda unit=unit: host.path("/etc/systemd/system/" + unit).read_bytes() == (tree / "deploy/generated" / name / unit).read_bytes())
@@ -115,6 +116,38 @@ def check(host):
         probe("secret-prefix:" + secret.name, allowed_prefix)
         probe("secrets:" + secret.name, lambda secret=secret: host.command(str(tree / "bin/hft-secrets"), "--check", "--manifest", str(secret)) is not None)
     probe("core-config", lambda: host.command(str(tree / "bin/hft-core"), "--check", "--config", str(host.path("/etc/hft/hft-core-prod.toml"))) is not None)
+    return results
+
+
+def resource_checks(host, policy, cold):
+    """Check installed kernel limits, not just the text of a unit file. Never stress the host."""
+    results = {}
+
+    def probe(name, fn):
+        try:
+            results[name] = bool(fn())
+        except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+            results[name] = False
+
+    def read(name):
+        return host.text("/sys/fs/cgroup/" + name).strip()
+
+    probe("cgroup-controllers", lambda: {"cpu", "memory", "io"} <= set(read("cgroup.subtree_control").split()))
+    probe("dev2-no-isolated-cpus", lambda: host.text("/sys/devices/system/cpu/isolated").strip() == "")
+    probe("core-oom-score", lambda: host.command("systemctl", "show", "--property=OOMScoreAdjust", "--value", "hft-core@prod.service") == "100")
+    for directory, budget in (("hft.slice", "parent_memory"), ("hftbatch.slice", "batch_memory"), ("hft.slice/hft-core.slice/hft-core@prod.service", "memory")):
+        # The service cgroup does not exist yet in ExecStartPre? systemd creates it before pre-start.
+        probe("memory:" + directory, lambda directory=directory, budget=budget: int(read(directory + "/memory.max")) == policy[budget] * 1024 * 1024 and read(directory + "/memory.swap.max") == "0")
+    probe("parent-cpu-limit", lambda: read("hft.slice/cpu.max") == f"{policy['quota'] * 1000} 100000" and int(read("hft.slice/cpu.weight")) == policy["weight"])
+    probe("batch-cpu-limit", lambda: read("hftbatch.slice/cpu.max") == "max 100000" and read("hftbatch.slice/cpu.idle") == "1")
+
+    def io_limit():
+        device = host.command("findmnt", "-n", "-o", "MAJ:MIN", "-T", cold)
+        rows = [line.split() for line in read("hftbatch.slice/io.max").splitlines()]
+        row = next((parts[1:] for parts in rows if parts[0] == device), [])
+        limits = dict(part.split("=") for part in row)
+        return limits.get("rbps") == str(policy["read"] * 1_000_000) and limits.get("wbps") == str(policy["write"] * 1_000_000)
+    probe("batch-io-limit", io_limit)
     return results
 
 

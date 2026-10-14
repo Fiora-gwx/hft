@@ -28,8 +28,8 @@ nightly_summary = load_script("nightly-summary")
 class GitHubEvidence:
     """Only verdict endpoints exist; an accidental usage scan fails the test."""
 
-    def __init__(self, rust="success", decoupling="success", nightly="success"):
-        self.rust = rust
+    def __init__(self, acceptance="success", decoupling="success", nightly="success"):
+        self.acceptance = acceptance
         self.decoupling = decoupling
         self.nightly = nightly
         self.calls = []
@@ -40,7 +40,7 @@ class GitHubEvidence:
             assert params == {"head_sha": "a" * 40, "status": "success"}
             return [{"id": 11}]
         if path.endswith("/actions/runs/11/jobs"):
-            return [{"name": "quality-gates / rust", "conclusion": self.rust}]
+            return [{"name": "quality-gates / acceptance", "conclusion": self.acceptance}]
         if path.endswith("/check-runs"):
             return [
                 {"id": 20, "name": "decoupling-gate", "started_at": "2026-10-09", "conclusion": "success"},
@@ -72,10 +72,10 @@ def run_preflight(evidence, channel="dev", actor="collaborator", on_main=True, *
 
 class ReleasePolicyTests(unittest.TestCase):
     def test_tool_187_dev_requires_executed_ci_without_usage_scan(self):
-        for rust, dg, expected in [("success", "success", 0), ("skipped", "success", 1),
+        for acceptance, dg, expected in [("success", "success", 0), ("skipped", "success", 1),
                                    ("failure", "success", 1), ("success", "failure", 1)]:
-            with self.subTest(rust=rust, decoupling=dg):
-                api = GitHubEvidence(rust=rust, decoupling=dg)
+            with self.subTest(acceptance=acceptance, decoupling=dg):
+                api = GitHubEvidence(acceptance=acceptance, decoupling=dg)
                 result, output = run_preflight(api)
                 self.assertEqual(result, expected)
                 self.assertFalse(any("nightly.yml" in path for path in api.calls))
@@ -96,9 +96,9 @@ class ReleasePolicyTests(unittest.TestCase):
             ("admin", True, "success", "failure", "failure", True, 1),
             ("admin", True, "success", "success", "failure", False, 1),
         ]
-        for actor, skip, rust, dg, nightly, on_main, expected in rows:
-            with self.subTest(actor=actor, skip=skip, rust=rust, dg=dg, nightly=nightly, on_main=on_main):
-                api = GitHubEvidence(rust, dg, nightly)
+        for actor, skip, acceptance, dg, nightly, on_main, expected in rows:
+            with self.subTest(actor=actor, skip=skip, acceptance=acceptance, dg=dg, nightly=nightly, on_main=on_main):
+                api = GitHubEvidence(acceptance, dg, nightly)
                 result, output = run_preflight(api, "release", actor, on_main,
                                                IN_SKIP_NIGHTLY=str(skip).lower())
                 self.assertEqual(result, expected)
