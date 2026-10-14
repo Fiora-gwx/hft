@@ -207,6 +207,7 @@ pub enum Md {
     Mark,
     Index,
     Funding,
+    Liquidation,
     Depth,
     DepthT,
     Ack,
@@ -218,6 +219,7 @@ pub enum Md {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Rep {
     Order,
+    External,
     Resp,
     Event,
     Ignorable,
@@ -580,19 +582,20 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         Ok(())
     }
 
-    fn classify(_route: RouteId, _op: MsgOp, head: &[u8]) -> Md {
+    fn classify(route: RouteId, _op: MsgOp, head: &[u8]) -> Md {
         log("classify", || {
             String::from_utf8_lossy(head.get(..head.len().min(24)).unwrap_or(&[])).into_owned()
         });
         let k = head.split(|&b| b == b'|').next().unwrap_or(&[]);
         match k {
-            b"B" => Md::Bbo,
-            b"T" => Md::Trade,
-            b"M" => Md::Mark,
-            b"I" => Md::Index,
-            b"F" => Md::Funding,
-            b"D" => Md::Depth,
-            b"DT" => Md::DepthT,
+            b"B" if route == RouteId(0) => Md::Bbo,
+            b"T" if route == RouteId(2) => Md::Trade,
+            b"M" if route == RouteId(2) => Md::Mark,
+            b"I" if route == RouteId(2) => Md::Index,
+            b"F" if route == RouteId(2) => Md::Funding,
+            b"L" if route == RouteId(2) => Md::Liquidation,
+            b"D" if route == RouteId(1) => Md::Depth,
+            b"DT" if route == RouteId(1) => Md::DepthT,
             b"ACK" => Md::Ack,
             b"PONG" => Md::Pong,
             b"BYE" => Md::Bye,
@@ -605,10 +608,11 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         let inst = inst_of(rd, f.get(1));
         let (stream, id) = match c {
             Md::Bbo => (StreamKind::Bbo, num(f.get(2))?),
-            Md::Trade => (StreamKind::Trade, num(f.get(2))?),
+            Md::Trade => (StreamKind::Trade, num(f.get(2))? + num(f.get(6)).unwrap_or(1) - 1),
             Md::Mark => (StreamKind::Mark, num(f.get(2))?),
             Md::Index => (StreamKind::Index, num(f.get(2))?),
             Md::Funding => (StreamKind::Funding, num(f.get(2))?),
+            Md::Liquidation => (StreamKind::Liquidation, num(f.get(2))?),
             Md::Depth | Md::DepthT => (StreamKind::DepthTopN, num(f.get(2))?),
             _ => return Err(DecodeErr::UnknownClass),
         };
@@ -679,7 +683,19 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
                     },
                     _pad: [0; 7],
                 };
-                out.trade(&e);
+                let count = num(f.get(6)).unwrap_or(1);
+                if !(1..=65).contains(&count) {
+                    return Err(DecodeErr::Overflow);
+                }
+                for n in 0..count {
+                    let mut trade = e;
+                    trade.trade_id += n as u64;
+                    out.trade(&trade);
+                }
+                return Ok(MdOutcome {
+                    events: count as u16,
+                    inst,
+                });
             }
             Md::Mark => {
                 let mut e = MarkPrice::new_zeroed();
@@ -687,6 +703,30 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
                 e.h.ex_ts_ns = num(f.get(2))?.saturating_mul(1_000_000);
                 e.px = Px(fx(f.get(3), pe)?);
                 out.mark(&e);
+            }
+            Md::Index => {
+                let mut e = hft_event::IndexPrice::new_zeroed();
+                e.h = h;
+                e.h.ex_ts_ns = num(f.get(2))?.saturating_mul(1_000_000);
+                e.px = Px(fx(f.get(3), pe)?);
+                out.index(&e);
+            }
+            Md::Funding => {
+                let mut e = hft_event::Funding::new_zeroed();
+                e.h = h;
+                e.h.ex_ts_ns = num(f.get(2))?.saturating_mul(1_000_000);
+                e.rate = hft_types::Rate(fx(f.get(3), -9)?);
+                e.next_funding_ns = num(f.get(4))?.saturating_mul(1_000_000);
+                out.funding(&e);
+            }
+            Md::Liquidation => {
+                out.liquidation(&hft_event::Liquidation {
+                    h,
+                    px: Px(fx(f.get(3), pe)?),
+                    qty: Qty(fx(f.get(4), qe)?),
+                    side: Side::Sell,
+                    _pad: [0; 7],
+                });
             }
             Md::Depth | Md::DepthT => {
                 let n = num(f.get(3))? as usize;
@@ -943,6 +983,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         let f = fields(head);
         match f.first().copied() {
             Some(b"O") => Rep::Order,
+            Some(b"X") => Rep::External,
             Some(b"R") => Rep::Resp,
             Some(b"E") if f.get(1).copied() == Some(b"listenKeyExtended") => Rep::Ignorable,
             Some(b"E") => Rep::Event,
@@ -967,6 +1008,28 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         let f = fields(p);
         let mut o = ReportOutcome::default();
         match c {
+            Rep::External => {
+                out.external_fill(&hft_event::ExternalFill {
+                    venue: V7,
+                    account: rx.account,
+                    side: Side::Sell,
+                    cause: hft_event::ExternalCause::Liquidation,
+                    inst: super::rd::S1,
+                    qty: Qty(2),
+                    px: Px(100),
+                    fee: Qty(3),
+                    fee_asset: AssetId(2),
+                    _pad: [0; 6],
+                    exch_order_id: 123,
+                    trade_id: 9,
+                    ex_ts_ns: 7,
+                    rx_tsc: hft_types::Tsc(rx.rx_tsc),
+                    fill_seq: 0,
+                    cash_qty: Qty(0),
+                    cash_amount: Qty(0),
+                });
+                o.events = 1;
+            }
             Rep::Order => {
                 let mut e = blank_order(rx.account);
                 e.rx_tsc = rx.rx_tsc;
@@ -977,7 +1040,8 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
                 if !exch.is_empty() {
                     e.exch_order_id = exch_id_value(exch);
                 }
-                if cid.is_empty() {
+                let owner = Self::parse_cid(cid).filter(|id| id.account == rx.account && id.venue == V7);
+                if owner.is_none() {
                     if !exch.is_empty()
                         && let ExchIdHint::Resolved { epoch, slot, r#gen } = out.exch_id(exch, None)
                     {
@@ -985,7 +1049,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
                         e.slot = slot;
                         e.r#gen = r#gen;
                     }
-                } else if let Some(id) = Self::parse_cid(cid) {
+                } else if let Some(id) = owner {
                     e.epoch = id.epoch;
                     e.slot = SlotId(id.slot);
                     e.r#gen = id.r#gen;
@@ -997,6 +1061,16 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
                 e.cum_filled = Qty(num(f.get(5)).unwrap_or(0));
                 e.avg_px = Px(num(f.get(6)).unwrap_or(0));
                 e.fee = Qty(num(f.get(7)).unwrap_or(0));
+                e.fee_asset = AssetId(num(f.get(8)).unwrap_or(0) as u16);
+                e.trade_id = num(f.get(9)).unwrap_or(0).max(0) as u64;
+                e.detail = if matches!(e.what, OrderEventKind::PartialFill | OrderEventKind::Fill) {
+                    Side::Buy as u8
+                } else {
+                    0
+                };
+                e.px = e.avg_px;
+                e.inst = super::rd::S1;
+                e.ex_ts_ns = num(f.get(10)).unwrap_or(0);
                 out.order(&e);
                 o.events = 1;
             }

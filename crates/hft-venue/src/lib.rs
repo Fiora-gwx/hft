@@ -28,6 +28,7 @@ mod feed;
 mod funding;
 mod gw;
 mod hb;
+mod hold;
 mod idtable;
 mod kill;
 pub mod order_rest;

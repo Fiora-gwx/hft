@@ -587,6 +587,8 @@ pub enum ExchIdHint { Resolved { epoch: u16, slot: SlotId, gen: u32 }, Recorded,
 
 ## 已知限制与后续工作
 
+- 原始码编码、`dedup_key` 与固定容量 `TradeIdRing` 可用于热路径。`testkit` 包含有序 Md/Report 观测、首个字节差异定位、独立 fixture 比对、累计量/未知码及基本配置契约检查;`MdRec::bytes` 的首字节区分 sink 方法,其后是字段原始字节,相同布局的 Mark/Index 不混同。完整 `check_*` 验收套件与 legacy `AcctCtx/AcctScratch` 查询接口仍未齐备。warm `account` 的数值超限返回 Overflow,非法/非精确数字返回 Number。
+
 - **M1.5 实现范围**:trait 已含行情、会话、下单编码、回报解码、BBO 补帧与死手、限速观测各节;账户查询(`AcctCtx`、`AcctScratch`、`acct_queries`/`acct_request`/`acct_decode`/`acct_finish`)仍由后续 acct-fetch 接口统一；只读查询 `ro_request`/`ro_decode` 与 `RoSink` 可供 warm reconciler 使用，默认实现返回 Unsupported/UnknownClass。两个在用产品线族支持 OpenOrders/Fills/Balance/Positions（现货无 Positions）；FundingFlow 由带固定两端窗口的 FundingHistoryProtocol 承载，RoKind::FundingFlow 尚不支持。
 - **帧单位是 WS 消息**:FIX(Binance Spot、Bybit spot)需要非 WS 分帧,可选扩展:接入 FIX 时扩展 `MsgOp` 与 hft-net。
 - **Hyperliquid 自建节点**输出本地文件而非 WS,不适合本 trait 的帧模型;需要时另开 Agent Note 设计文件尾随变体。

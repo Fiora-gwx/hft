@@ -216,6 +216,8 @@ impl IdTable {
             self.remove_at(i);
             return;
         }
+        // Eviction performs backward-shift deletion: the live entry can move.
+        let Some(i) = self.find(key, h) else { return };
         if let Some(e) = self.e.get_mut(i) {
             e.flags |= IdEntry::TERMINAL;
             e.term_tsc = now;

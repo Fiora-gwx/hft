@@ -479,7 +479,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. 投递 `Subscribe{inst: 9999, streams: BBO}`,`poll_once`
 - 期望:
   - 无 `BuildReq`、无订阅帧、bbo/md 环无元素;计数 `cmd_bad_inst = 1`
-- 实现:`crates/hft-venue/tests/feed_cmd.rs::ven_027_unknown_inst`
+- 实现:`crates/hft-venue/tests/feed_routes.rs::ven_027_unknown_inst`
 
 ### VEN-028 分档快照档数按 `feed.topn_levels` 选择
 
@@ -738,7 +738,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. `poll_once` 一次
 - 期望:
   - `classify` 调用顺序为连接 8 的 64 帧,然后连接 9 的 64 帧(不交错);两条连接各余 36 帧
-- 实现:`crates/hft-venue/tests/feed_poll.rs::ven_054_md_conn_by_conn`
+- 实现:`crates/hft-venue/tests/feed_routes.rs::ven_054_md_conn_by_conn`
 
 ### VEN-055 `routes = All` 时同一轮先做 Bbo 路由再做其余路由,各自不超过上限
 
@@ -750,7 +750,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. `poll_once` 一次
 - 期望:
   - 先处理 16 帧 BBO(按帧轮转),再处理连接 8 的 64 帧、连接 9 的 64 帧;`LoopStat.frames = 144`
-- 实现:`crates/hft-venue/tests/feed_poll.rs::ven_055_all_routes_order`
+- 实现:`crates/hft-venue/tests/feed_routes.rs::ven_055_all_routes_order`
 
 ### VEN-056 每连接帧数上限的边界
 
@@ -838,7 +838,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`F0`,`routes = All`;S1 订阅 `BBO | BOOK | TRADE | MARK | INDEX | FUNDING | LIQUIDATION`,回执已齐
-- 实现:`crates/hft-venue/tests/feed_frame.rs::ven_065_event_rings`
+- 实现:`crates/hft-venue/tests/feed_routes.rs::ven_065_event_rings`
 
 | 行 | 帧 | 期望 |
 |---|---|---|
@@ -946,7 +946,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. `poll_once`
 - 期望:
   - bbo 环多 3 条 `Bbo`;md 环不变;连接 8 的 5 帧仍在缓冲;`LoopStat{did_work: true, ring_full: 1}`
-- 实现:`crates/hft-venue/tests/ring_full.rs::ven_073_md_full_bbo_continues`
+- 实现:`crates/hft-venue/tests/feed_routes.rs::ven_073_md_full_bbo_continues`
 
 ### VEN-074 bulk 环放不下下一片时按环满处理
 
@@ -1009,7 +1009,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. `ScriptNet.eof(8)`(深度连接),同时 BBO 连接 0 推 `B|S1|40|…`,`poll_once`
 - 期望:
   - bbo 环:`Bbo{S1, u: 40}`,没有任何 `ConnState`;md 环:`Down{conn: 8, inst: 0}` 与 S1、S2 各一条 `Resync{reason: 15}`
-- 实现:`crates/hft-venue/tests/feed_err.rs::ven_078_depth_drop_isolated`
+- 实现:`crates/hft-venue/tests/feed_routes.rs::ven_078_depth_drop_isolated`
 
 ### VEN-079 交接后推 `Up` 并以限速节奏发订阅帧
 
@@ -3337,7 +3337,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 - 级别:bench
 - 里程碑:M3
 - 基准名:`venue_idtable`
-- 实现:`crates/hft-venue/benches/idtable.rs::ven_358_idtable`
+- 实现:`crates/hft-venue/benches/gw.rs::ven_358_idtable`
 
 ### VEN-359 基准:`kill_admit`
 

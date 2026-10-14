@@ -28,6 +28,7 @@ use crate::codes;
 use crate::config::{GwCfg, InitErr, Ticks};
 use crate::conn_id::{GW_FIRST, GW_LAST, IdRange};
 use crate::hb::{Hb, HbSend};
+use crate::hold::{Held, IdKey};
 use crate::idtable::{IdTable, exch_id_value};
 use crate::kill::kill_admit;
 use crate::rate::RateCounters;
@@ -123,6 +124,7 @@ pub struct GwCounters {
     pub ring_full: u64,
     pub install_failed: u64,
     pub fee_rule_deviation: u64,
+    pub hold_evicted: u64,
 }
 
 const NO_CONN: ConnId = ConnId(0);
@@ -170,6 +172,7 @@ struct Acct<P: VenueProtocol> {
     tpl: P::Templates,
     ctx: P::GwCtx,
     ids: IdTable,
+    hold: VecDeque<Held>,
     rate: RateCounters,
     quota: u16,
     rotate: bool,
@@ -206,6 +209,7 @@ pub struct GwRuntime<P: VenueProtocol, const CAP: usize = 2048> {
     batch: Vec<GwCmd>,
     inflight: Vec<Inflight>,
     sink_evs: Vec<RepMsg>,
+    sink_keys: [IdKey; SINK_CAP],
     dm: DeadManOut,
     insts_buf: Vec<InstId>,
     epoch: u16,
@@ -241,10 +245,13 @@ fn is_order(op: GwOp) -> bool {
 /// Report sink of one frame: buffers events, records exchange ids in the account's `IdTable`.
 struct GwSink<'a> {
     evs: &'a mut Vec<RepMsg>,
+    keys: &'a mut [IdKey; SINK_CAP],
     ids: &'a mut IdTable,
     mirror: &'a mut [SlotMirror],
     account: AccountId,
     now: u64,
+    epoch: u16,
+    prev: Option<u16>,
     over: bool,
     unsupported: u32,
     key: [u8; 36],
@@ -254,13 +261,18 @@ struct GwSink<'a> {
 impl GwSink<'_> {
     fn push(&mut self, m: RepMsg) {
         if self.evs.len() < SINK_CAP {
+            self.keys[self.evs.len()] = IdKey::new(&self.key[..self.key_len]);
             self.evs.push(m);
         } else {
             self.over = true;
         }
     }
     fn remember(&mut self, key: &[u8]) {
-        let n = key.len().min(36);
+        self.key_len = 0;
+        if key.len() > self.key.len() {
+            return;
+        }
+        let n = key.len();
         if let (Some(d), Some(s)) = (self.key.get_mut(..n), key.get(..n)) {
             d.copy_from_slice(s);
             self.key_len = n;
@@ -294,15 +306,26 @@ impl ReportSink for GwSink<'_> {
         self.remember(key);
         match owner {
             Some(id) => {
-                let _ = self.ids.insert(key, id.epoch, id.slot, id.r#gen, self.now);
+                if id.account != self.account || (id.epoch != self.epoch && Some(id.epoch) != self.prev) {
+                    return ExchIdHint::Unknown;
+                }
+                let recorded = self
+                    .ids
+                    .insert(key, id.epoch, id.slot, id.r#gen, self.now)
+                    .is_ok();
                 if let Some(m) = self.mirror.get_mut(id.slot as usize)
                     && m.live
                     && m.r#gen == id.r#gen
+                    && m.epoch == id.epoch
                     && m.account == self.account
                 {
                     m.exch_order_id = exch_id_value(key);
                 }
-                ExchIdHint::Recorded
+                if recorded {
+                    ExchIdHint::Recorded
+                } else {
+                    ExchIdHint::Unknown
+                }
             }
             None => match self.ids.get(key) {
                 Some((epoch, slot, r#gen)) => ExchIdHint::Resolved {
@@ -383,6 +406,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 tpl: a.tpl,
                 ctx: a.ctx,
                 ids: IdTable::new(cfg.id_table_cap, cfg.id_tomb_cap, t.ms(u64::from(cfg.id_tomb_ms))),
+                hold: VecDeque::with_capacity(usize::from(cfg.unmatched_hold_cap)),
                 rate: RateCounters::new(limits, |ms| t.ms(ms)),
                 quota: 0,
                 rotate: false,
@@ -422,6 +446,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             batch: Vec::with_capacity(usize::from(cfg.cmds_per_loop)),
             inflight: Vec::with_capacity(INFLIGHT_CAP),
             sink_evs: Vec::with_capacity(SINK_CAP),
+            sink_keys: [IdKey::default(); SINK_CAP],
             dm: DeadManOut {
                 frame: Default::default(),
                 reqs: Vec::with_capacity(insts_cap),
@@ -516,10 +541,13 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         self.sink_evs.clear();
         let mut sink = GwSink {
             evs: &mut self.sink_evs,
+            keys: &mut self.sink_keys,
             ids: &mut x.ids,
             mirror: &mut self.mirror,
             account: r.account,
             now,
+            epoch: self.epoch,
+            prev: self.accept_prev.then_some(self.prev_epoch),
             over: false,
             unsupported: 0,
             key: [0; 36],
@@ -540,10 +568,10 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             &rx,
             &mut sink,
         );
-        let (key, n) = (sink.key, sink.key_len);
+        let (key, n, over) = (sink.key, sink.key_len, sink.over);
         let outcome = match result {
-            Ok(o) => o,
-            Err(_) => {
+            Ok(o) if !over => o,
+            _ => {
                 self.sink_evs.clear();
                 self.n.report_decode_err += 1;
                 ReportOutcome {
@@ -630,6 +658,9 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         }
         let cmds = self.cmds_done.wrapping_sub(cmds0);
         let maint = self.maintain(now);
+        for a in 0..self.accts.len() {
+            self.release_holds(a, now);
+        }
         // acct-fetch never writes rep directly: gw remains its only producer.
         if self.out.free_hint() > reserve
             && self.pend_rep.is_empty()
@@ -744,10 +775,13 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         self.sink_evs.clear();
         let mut sink = GwSink {
             evs: &mut self.sink_evs,
+            keys: &mut self.sink_keys,
             ids,
             mirror: &mut self.mirror,
             account,
             now,
+            epoch: self.epoch,
+            prev: self.accept_prev.then_some(self.prev_epoch),
             over: false,
             unsupported: 0,
             key: [0; 36],
@@ -777,7 +811,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         {
             m.last_data = ts.rx_tsc;
         }
-        match res {
+        match if over { Err(DecodeErr::Overflow) } else { res } {
             Ok(o) => {
                 if let Some(m) = self
                     .accts
@@ -841,7 +875,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         o: &ReportOutcome,
         rx: u64,
         hw: i64,
-        key: &[u8],
+        _key: &[u8],
         now: u64,
     ) {
         let account = self.accts.get(a).map_or(AccountId(0), |x| x.account);
@@ -855,29 +889,36 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     e.slot = SlotId::UNRESOLVED;
                     e.r#gen = 0;
                 }
-                let terminal = matches!(
-                    e.what,
-                    OrderEventKind::Fill
-                        | OrderEventKind::CancelAck
-                        | OrderEventKind::Reject
-                        | OrderEventKind::Expired
-                );
-                if terminal && e.slot != SlotId::UNRESOLVED {
-                    if let Some(mm) = self.mirror.get_mut(e.slot.0 as usize)
-                        && mm.r#gen == e.r#gen
-                        && mm.account == account
-                    {
-                        mm.live = false;
+                let key = self.sink_keys[k];
+                if e.slot == SlotId::UNRESOLVED
+                    && matches!(
+                        e.what,
+                        OrderEventKind::PartialFill | OrderEventKind::Fill | OrderEventKind::FeeOnly
+                    )
+                {
+                    let cap = usize::from(self.cfg.unmatched_hold_cap);
+                    let evicted = self
+                        .accts
+                        .get_mut(a)
+                        .and_then(|x| (x.hold.len() == cap).then(|| x.hold.pop_front()).flatten());
+                    if let Some(old) = evicted {
+                        self.n.hold_evicted += 1;
+                        self.push_rep(crate::hold::expired(old.event));
                     }
-                    if !key.is_empty()
-                        && let Some(x) = self.accts.get_mut(a)
-                    {
-                        x.ids.terminal(key, now);
+                    if let Some(x) = self.accts.get_mut(a) {
+                        x.hold.push_back(Held {
+                            event: *e,
+                            key,
+                            since: now,
+                        });
                     }
+                    continue;
                 }
+                self.order_terminal(a, e, key, now);
             }
             self.push_rep(m);
         }
+        self.release_holds(a, now);
         if let Some(r) = o.req {
             self.inflight_done(id, r);
         }
@@ -926,6 +967,64 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     x.rotate = true;
                     x.rotate_bits |= ErrBits::SERVER_HINT.bits();
                 }
+            }
+        }
+    }
+
+    fn order_terminal(&mut self, a: usize, e: &OrderEvent, key: IdKey, now: u64) {
+        if e.slot == SlotId::UNRESOLVED
+            || !matches!(
+                e.what,
+                OrderEventKind::Fill
+                    | OrderEventKind::CancelAck
+                    | OrderEventKind::Reject
+                    | OrderEventKind::Expired
+            )
+        {
+            return;
+        }
+        if let Some(mm) = self.mirror.get_mut(e.slot.0 as usize)
+            && mm.r#gen == e.r#gen
+            && mm.epoch == e.epoch
+            && mm.account == e.account
+        {
+            mm.live = false;
+        }
+        if !key.bytes().is_empty()
+            && exch_id_value(key.bytes()) == e.exch_order_id
+            && let Some(x) = self.accts.get_mut(a)
+        {
+            x.ids.terminal(key.bytes(), now);
+        }
+    }
+
+    fn release_holds(&mut self, a: usize, now: u64) {
+        let timeout = self.t.ms(u64::from(self.cfg.unmatched_hold_ms));
+        let mut i = 0;
+        while self.pend_rep.is_empty() && self.out.free_hint() > usize::from(self.cfg.cmds_per_loop) {
+            let Some(x) = self.accts.get_mut(a) else {
+                break;
+            };
+            let Some(h) = x.hold.get(i).copied() else {
+                break;
+            };
+            let owner = x.ids.get(h.key.bytes()).filter(|(epoch, _, _)| {
+                *epoch == self.epoch || (self.accept_prev && *epoch == self.prev_epoch)
+            });
+            if owner.is_none() && now.saturating_sub(h.since) <= timeout {
+                i += 1;
+                continue;
+            }
+            x.hold.remove(i);
+            if let Some((epoch, slot, r#gen)) = owner {
+                let mut e = h.event;
+                e.epoch = epoch;
+                e.slot = SlotId(slot);
+                e.r#gen = r#gen;
+                self.order_terminal(a, &e, h.key, now);
+                self.push_rep(RepMsg::OrderEvent(e));
+            } else {
+                self.push_rep(crate::hold::expired(h.event));
             }
         }
     }
@@ -1931,6 +2030,14 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             d = min_deadline(d, f.sent.saturating_add(to).saturating_add(1));
         }
         for x in self.accts.iter() {
+            if let Some(h) = x.hold.front() {
+                d = min_deadline(
+                    d,
+                    h.since
+                        .saturating_add(self.t.ms(u64::from(self.cfg.unmatched_hold_ms)))
+                        .saturating_add(1),
+                );
+            }
             for m in x.metas.iter() {
                 if let Some(t) = m.hb.next_deadline(m.last_data) {
                     d = min_deadline(d, t);
@@ -1947,6 +2054,14 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
 
     pub fn counters(&self) -> GwCounters {
         self.n
+    }
+
+    #[doc(hidden)]
+    pub fn held(&self, account: AccountId) -> usize {
+        self.accts
+            .iter()
+            .find(|x| x.account == account)
+            .map_or(0, |x| x.hold.len())
     }
 
     pub fn raw_counters(&self) -> RawCounters {

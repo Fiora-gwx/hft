@@ -1963,7 +1963,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `retire(c1, PEER_EOF)`;`next_build(0)`
 - 期望:
   - 活跃数 0;`next_build` 返回 `Some(Fill)`
-- 实现:`crates/hft-net/tests/pool.rs::net_249_retire_last_then_fill`
+- 实现:`crates/hft-net/tests/pool.rs::net_249_last_retired_refills`
 
 ### NET-250 计划轮换时刻相差小于 rotate_stagger_s 时较晚的一条提前
 
@@ -1988,7 +1988,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:PrimaryStandby,target 2,两条活跃;c1(ConnId 7)`rotate_at = 1_000_000`,c2 无计划;无在建
-- 实现:`crates/hft-net/tests/pool.rs::net_251_rotate_due`
+- 实现:`crates/hft-net/tests/pool.rs::net_251_rotation_boundary`
 
 | 行 | `now` | 期望 |
 |---|---|---|
@@ -2034,7 +2034,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. 遍历 `active()`;`retire(1, WS_CLOSE)`;遍历 `active()`
 - 期望:
   - 第一次依次 1、2;第二次只有 2,`primary().id() == 2`
-- 实现:`crates/hft-net/tests/pool.rs::net_254_race_retire`
+- 实现:`crates/hft-net/tests/pool.rs::net_254_race_both_active`
 
 ### NET-260 Content-Length 响应完整交出,请求带固定头
 
@@ -2261,7 +2261,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   3. 再 `submit` 一个请求
 - 期望:
   - 服务端收到的记录序号依次为 0、1;步骤 2 不推进发送序号
-- 实现:待实现
+- 实现:`crates/hft-net/tests/rest.rs::net_276_only_submitted_requests_advance_tls`
 
 ### NET-277 RestPool 的热线程入口从不调用 connect、shutdown、close、getaddrinfo
 
@@ -2273,7 +2273,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. 10⁴ 轮 `RestPool::submit`/`poll`/`idle_check`/`take_retired`
 - 期望:
   - 热线程阶段 `SysCount` 中 `connect`、`shutdown`、`close`、`getaddrinfo`、`epoll_ctl` 的增量都为 0
-- 实现:待实现
+- 实现:`crates/hft-net/tests/rest.rs::net_277_hot_rest_never_manages_connections`
 
 ### NET-285 稳态收发零分配
 
@@ -2470,7 +2470,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:bench
 - 里程碑:M3
 - 基准名:`net_pool_swap`
-- 实现:`crates/hft-net/benches/pool.rs::net_330_pool_swap`
+- 实现:`crates/hft-net/benches/tx.rs::net_330_pool_swap`
 
 ### NET-331 基准:RssPlan::pick(可选)
 

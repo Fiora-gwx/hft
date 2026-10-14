@@ -268,6 +268,7 @@ pub struct BuildReq {
 /// 一个池只连一个端点(BuildReq.endpoint);同一 venue 的多个 REST 端点由上层各持一个池(hft-venue §4a)。
 pub struct RestPool<const N: usize = 2> { /* N 条 HTTP/1.1 keep-alive Conn,一连接一在途 */ }
 impl<const N: usize> RestPool<N> {
+    pub fn new(host: &[u8], cfg: &NetConfig, clock: TscClock) -> Self;
     /// 全部 Open 连接都有在途 → Busy;没有 Open 连接 → NoConn;请求拼接超过 tx 明文区 → ReqTooLarge(都未加密)。
     pub fn submit(&mut self, req: &RestReq<'_>, now_tsc: u64) -> Result<ReqTag, RestErr>;
     /// 只读有在途请求的连接;返回一个完整响应(已去 chunk)或一个失败(该连接随之退役)。
@@ -282,7 +283,7 @@ impl<const N: usize> RestPool<N> {
     pub fn take_retired(&mut self) -> Option<RetireMsg>;
 }
 pub struct RestReq<'a> { pub method: Method, pub path_query: &'a [u8], pub headers: &'a [(&'a [u8], &'a [u8])], pub body: &'a [u8], pub tag: u64 }
-pub struct RestResp<'a> { pub tag: u64, pub status: u16, pub headers: &'a [Header<'a>], pub body: &'a [u8], pub ts: Timestamps }
+pub struct RestResp<'a> { pub tag: u64, pub status: u16, pub headers: [Header<'a>; 64], pub header_count: usize, pub body: &'a [u8], pub ts: Timestamps }
 pub struct RestFail { pub tag: u64, pub err: RestErr }
 pub enum RestErr { Busy, NoConn, ReqTooLarge, Send(SendErr), Timeout, TooLarge, Closed /* 响应完整前对端关闭 */, Proto }
 
@@ -494,7 +495,8 @@ HTTP/1.1 over 同一 `Conn`(`ConnRole::Rest`,无 WS)。请求在 tx 明文 scrat
 | `src/connector.rs` | 建连作业、WS Upgrade、NAPI 落点 |
 | `src/ready.rs` | `ReadyPoll`、`ReadyHandle`、`ConnSet`(epoll 封装,`unsafe` 集中于 `sock.rs`) |
 | `src/rss.rs` | Toeplitz、`RssPlan`、端口挑选 |
-| `src/rest.rs` | HTTP/1.1 请求拼接、响应解析、`RestPool` |
+| `src/rest_pool.rs` | 有界 HTTP/1.1 keep-alive `RestPool`;响应 headers 只读 `[..header_count]` |
+| `src/rest.rs` | warm 单请求 `Client`,由调用方驱动 `Connector` |
 | `src/txts.rs` | `TxTsDrain` |
 
 </details>
@@ -558,6 +560,8 @@ HTTP/1.1 over 同一 `Conn`(`ConnRole::Rest`,无 WS)。请求在 tx 明文 scrat
 
 ## 已知限制与后续工作
 
+- `RestPool` 覆盖复用、Content-Length、超时、关闭、容量与时间戳;chunked、无 Content-Length 的 bodyless 响应、HTTP/2 与重定向仍不支持。上层 warm `Client` 尚未迁移到该池。提交前完成 HTTP 长度校验,失败不推进 TLS 序号;签名请求临时区在提交或编码失败后清零。
+
 - **默认关闭的三项(可选扩展)**:RSS 源端口预计算、TX 时间戳 errqueue、scratch TLS 预热。规格与测试保留,启用条件:升级主机上的直方图(`kernel_rx`、`egress` 冷热差)证明该项是主导项;启用任何一项前,其测试行必须全绿。
 - **中断驱动的代价**:每个包多一次中断与软中断(在专用 IRQ 核上),热线程发现数据的等待 ≈ 半个轮询周期;`kernel_rx` 的基准形态按此设定(latency-budget §3)。`IRQ_ON_HOT` 告警保持为真。
 - **无 kernel bypass**:可选扩展(裸金属 + Onload,启用条件:交易所提供 AWS 之外的接入或 fabric 抖动主导 p99)若启用,本 crate 零改动(POSIX 透明),但 `SO_TIMESTAMPING` 在 Onload 下的行为需重测([03 §5](../../design/03-网络与传输层.md))。
@@ -566,7 +570,7 @@ HTTP/1.1 over 同一 `Conn`(`ConnRole::Rest`,无 WS)。请求在 tx 明文 scrat
 - **TX 无硬件戳**:ENA 限制;`sent_tsc` 是 `sendmsg` 返回时刻,线上时刻只能用对端回执估计。
 - **一次读多包只拿到最后一个包的戳**:见实现说明 §7(取最早一个包所在读取的戳、`MULTI_SKB` 标记、`rx_empty_gap_ns` 上界);若测得 `MULTI_SKB` 比例 > 1%,再评估逐包读(`recvmmsg` 不适用于 TCP)。
 - **IPv4 only**:交易所端点全部 IPv4;IPv6 不在范围内。
-- **M1.5 实现范围**:接收、发送、时间戳、`Connector`、`ConnArena`/`ConnPool`、`ReadyPoll` 已实现;`RestPool`(M3)、`tls_mode = buffered`(M3)、`RssPlan` 与 TX 时间戳 `TxTsDrain`、scratch TLS 预热(可选扩展,M7)尚未实现,对应配置在 `Connector::new` 被拒绝。`ConnArena` 的大页 backing 待 hft-core 装配时接入(现为堆分配 + 预触摸)。
+- **实现范围**:接收、发送、时间戳、`Connector`、`ConnArena`/`ConnPool`、`ReadyPoll` 与 `RestPool` 已实现;`tls_mode = buffered`(M3)、`RssPlan` 与 TX 时间戳 `TxTsDrain`、scratch TLS 预热(可选扩展,M7)尚未实现,对应配置在 `Connector::new` 被拒绝。`ConnArena` 的大页 backing 待 hft-core 装配时接入(现为堆分配 + 预触摸)。
 
 ### 开发备忘
 

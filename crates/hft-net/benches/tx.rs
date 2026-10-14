@@ -97,9 +97,25 @@ fn net_328_send_loopback(c: &mut Criterion) {
     }
 }
 
+fn net_330_pool_swap(c: &mut Criterion) {
+    use hft_net::{ConnId, ConnPool, Handoff, PoolMode, RotatePolicy};
+    use support::mempeer::{Opts, pair_with};
+    let mut pool = ConnPool::<2>::new(PoolMode::PrimaryStandby, 2, RotatePolicy::default());
+    for id in [1, 2] {
+        let (conn, _) = pair_with(Opts {
+            id: ConnId(id),
+            ..Opts::default()
+        });
+        pool.install(Handoff::test_from_conn(conn), None).unwrap();
+    }
+    c.bench_function("net_pool_swap", |b| {
+        b.iter(|| std::hint::black_box(pool.swap_primary()))
+    });
+}
+
 criterion_group!(
     name = benches;
     config = Criterion::default().sample_size(20).measurement_time(Duration::from_secs(2)).warm_up_time(Duration::from_millis(300));
-    targets = net_326_seal_300b, net_327_encrypt_300b_mem, net_328_send_loopback
+    targets = net_326_seal_300b, net_327_encrypt_300b_mem, net_328_send_loopback, net_330_pool_swap
 );
 criterion_main!(benches);

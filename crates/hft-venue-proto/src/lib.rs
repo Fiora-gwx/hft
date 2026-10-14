@@ -16,11 +16,15 @@
 )]
 
 pub mod account;
+mod code;
+mod dedup;
 mod funding;
 mod readonly;
 mod sink;
 mod types;
 
+pub use code::{RAW_CODE_NONE, raw_code_http, raw_code_num, raw_code_str};
+pub use dedup::{TradeIdRing, TradeKey, dedup_key};
 pub use funding::{FundingBill, FundingHistoryProtocol, FundingPage, FundingQuery};
 pub use readonly::{FillRow, RoKind, RoPage, RoQuery, RoSink};
 
