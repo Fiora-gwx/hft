@@ -620,6 +620,8 @@ sim  = [{ ip = "<第二个私有 IP>", eip_alloc = "eipalloc-…" }]  # sim 常�
 
 ## 已知限制与后续工作
 
+- 可执行护栏入口是 `dev2/hft-dev2-guard`，配置模板为 `dev2/dev2-guard.toml.tmpl`；支持只读 `--dry-run`，`clear` 在 root 调用时先切换到 `hft-guard` 再写事件。采样器读取 proc/cgroup 与只读健康导出文件，动作使用固定 hft 单元白名单；事件写 `events.jsonl`，告警输出 journald。Telegram 直发、旧系统主单元状态、主机清单生成与完整安装激活尚未接线，不能据此宣称 dev2 共机或测试网验收完成。`bin/hft-shm-release` 只在有效的本实例心跳为 Stopped 时删除 `.jrn`/`.jrn.preparing`，保留心跳与其他证据，拒绝符号链接树。
+
 - `dev2` 护栏的全部数值待标定(M3 前在 dev2 上实测:先只跑守护与只读采集一周,再逐步加 hft 进程,最后做 dev2 护栏第 10 条的标定演练);旧系统状态的探测方式需与其维护者确认(只用于告警,不触发停机)。dev2 上 sim 常驻、联调窗口再加一个测试网实例时资源最紧:窗口内批处理由窗口标志与 `hft-window` 停止。
 - 升级主机的档位(默认 `c32`;`c16` 只在 M3 末满订阅探针达标且启用 `epoll_pwait(0)` 时保留)与是否启用 ENI-B2 在 M3 末探针后选定;清单、aarch64 GRUB 模板与 AMI 在定档后编写;x86 `metal` 的清单与模板只在可选的 metal 剖面立项时编写。
 - 出口 IP 隔离只解决按 IP 计的限额;按账户或 UID 计的限额与 sim 无关(sim 不持账户)。

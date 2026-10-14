@@ -1,0 +1,47 @@
+# Threshold ownership: apps/hft-core/README.md, dev2 guard. Requires host calibration.
+mode = "shared"
+sample_s = 5
+level_two_s = 30
+recover_s = 1800
+cpu_cores = 0.25
+memory_mib = 256
+state_dir = "/var/lib/hft/guard"
+legacy_cgroup = "system.slice"
+# Installation must replace this with the owner's read-only health export.
+legacy_state = "/run/hft/legacy-health"
+[signals.mem_available_mib]
+kind = "stop"
+threshold = 600
+below = true
+samples = 3
+[signals.legacy_memory]
+kind = "stop"
+threshold = 5
+seconds = 30
+[signals.legacy_cpu]
+kind = "stop"
+threshold = 20
+seconds = 60
+[signals.swap_in]
+kind = "stop"
+threshold = 1000
+seconds = 120
+[signals.host_memory]
+kind = "alert"
+threshold = 10
+seconds = 30
+level = "P2"
+[signals.host_cpu]
+kind = "alert"
+threshold = 40
+seconds = 60
+level = "P2"
+[signals.swap_growth]
+kind = "alert"
+threshold = 64
+level = "P1"
+[signals.legacy_unhealthy]
+kind = "alert"
+threshold = 0
+seconds = 30
+level = "P1"

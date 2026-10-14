@@ -904,7 +904,7 @@ hft-core 自身不在 tick-to-trade 路径上增加代码;路径上的分段预�
 
 - 当前可执行子集是 Linux 上的新 journal 会话、文件配置、单任务线程、已注册的 `NoModel` 策略与 `--dry-run` 离线闭环；配置生成示例、测试网模板与命令见 [config](config/README.md)。Windows 支持 `--check`、`schemas`、`--version` 与配置测试；实际引擎要求 Linux tmpfs 和 Unix socket。
 - `binance-spot`、`binance-usdm` 静态装配 `FeedRuntime`、`GwRuntime`、`SessionDriver`。`bitget-spot`、`bitget-usdt-futures` 通过 `bitget` Cargo feature 装配 UTA 协议，未启用时返回 `VenueNotBuilt`。单 venue 最多一个交易所账户；ECF1 必须要求两种 key 的身份闸门，app 不伪造账户配置、身份或对账成功。账户链路与限制见“测试环境账户装配”，完整恢复和正式权限核验仍未装配。
-- 既有 seq journal 返回 `RecoveryRequired`(4)，不按空账户重启。`SetRefdata`、advisor、主机 profile 验证、完整资源预算/护栏、大页、sd_notify 与共享心跳块尚未装配；日志输出线程心跳与退出时订单/撤单/回报计数。完整规格与上线门槛仍以本页其余部分为准。
+- 既有 seq journal 返回 `RecoveryRequired`(4)，不按空账户重启。`SetRefdata`、advisor、主机 profile 验证、完整资源预算、大页与逐线程心跳槽尚未装配。共享心跳块记录 sequencer 进度与进程状态，housekeeping 独占 `READY`/`WATCHDOG` 通知；sequencer 停摆达到配置时限后不续 watchdog。`Stopped` 只在 seq/raw 封存且 persist 刷完后发布。完整规格与上线门槛仍以本页其余部分为准。
 - `--dry-run` 只用 Sim 账户和配置中的固定报价，不连接交易所；撮合由 `hft-sim::SimExchange` 执行。模拟任务沿 journal 前缀推进，在成功订单决定处等待 out-sim 交接；不使用后来行情处理先前决定。SIGINT/SIGTERM 与 `--run-for-ms` 经 ctl-gateway 的内部 Drain 命令停止开仓、按配置撤单；sequencer 完成后封 seq/raw 段，persist 最后落盘并退出。它是装配冒烟工具，不替代实时模拟账户的上线观察。
 
 - **单机 SPOF**:`prod` 实例一台;停得安全靠死手 + kill-switch + 冷启动 < 30 s;整机失联时的机外告警与人工处置归 watchtower 的 `healthz`、dev2 上的机外看门狗与 incident-response。可选扩展:第二台 warm standby(人工切),在单机故障的停机时间成为收益瓶颈时再做。

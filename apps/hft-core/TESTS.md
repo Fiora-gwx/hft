@@ -6,7 +6,9 @@ spec: README.md
 
 # hft-core 测试规格
 
-当前实现覆盖说明：`tests/config.rs` 验证 CORE-002、CORE-012、CORE-045 的可执行子集，含控制批次原子发布、分片头重组、模拟回报解码、模拟连接与行情的启动闸门、真实 LiveDriver 与 registry 策略的下单/撤单闭环（含发送报告和 epoch 匹配）及 Drain；`tests/paper_process.rs::core_048_sim_instance_boots_without_keys` 以固定行情和真实 `SimExchange` 启动进程，等待 ClockOk 后经控制 socket 启用 registry 策略，检查发送、Ack、CancelAck、SIGTERM Drain、冷副本及重启拒绝。CORE-048 的部署目录、共享心跳块与完整主机验收仍待完成；本说明不改变原用例期望或里程碑。
+当前实现覆盖说明：`tests/config.rs` 验证 CORE-002、CORE-012、CORE-045 的可执行子集，含控制批次原子发布、分片头重组、模拟回报解码、模拟连接与行情的启动闸门、真实 LiveDriver 与 registry 策略的下单/撤单闭环（含发送报告和 epoch 匹配）及 Drain；`tests/paper_process.rs::core_048_sim_instance_boots_without_keys` 以固定行情和真实 `SimExchange` 启动进程，等待 ClockOk 后经控制 socket 启用 registry 策略，检查发送、Ack、CancelAck、SIGTERM Drain、冷副本、共享心跳的 Stopped 与重启拒绝。CORE-048 的部署目录与完整主机验收仍待完成；本说明不改变原用例期望或里程碑。
+
+`tests/startup_config.rs` 覆盖当前配置子集的退出码、缺失字段、未知字段脱敏、策略编号、重复绑定、线程名与 park 心跳约束、订阅容量；不表示完整主机配置矩阵通过。`tests/housekeeping.rs` 验证 CORE-382 的校准记录与 CORE-418 的三态输入装配。dev2 护栏判定测试在 `deploy/dev2/tests/test_guard.py`，热段释放在 `deploy/tests/test_shm_release.py`；真实主机标定、Telegram 告警、旧系统主单元状态采集与 systemd 容器验收仍缺证据。
 
 格式与规则见 [docs/tests](../../docs/tests/README.md)。
 

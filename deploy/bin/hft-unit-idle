@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Read-only ExecCondition. Transitional states still hold the mutual exclusion.
+if [[ ${1:-} == --dry-run ]]; then shift; fi
+if (($# == 0)); then exit 2; fi
+for unit in "$@"; do
+    case "$unit" in hft-*.service) ;; *) exit 2 ;; esac
+    state=$(systemctl is-active "$unit" || true)
+    case "$state" in active|activating|deactivating|reloading) exit 1 ;; esac
+done

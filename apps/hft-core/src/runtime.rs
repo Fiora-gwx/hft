@@ -43,6 +43,70 @@ pub fn idle(t: &Thread) {
     std::thread::park_timeout(Duration::from_micros(t.park_us));
 }
 
+/// Assemble a calibration observation and its decision input, keeping the three clock states.
+/// Every step is a fresh discontinuity; identical consecutive steps must not be coalesced.
+pub fn clock_tick(
+    hk: &mut Producer<HkMsg>,
+    pair: hft_rt::CalibPair,
+    hz: u64,
+    verdict: hft_rt::ClockVerdict,
+    previous: &mut Option<u8>,
+) -> Result<(), Error> {
+    let state = match verdict {
+        hft_rt::ClockVerdict::Synced => 1,
+        hft_rt::ClockVerdict::Unsynced => 2,
+        hft_rt::ClockVerdict::Stepped { .. } => 3,
+    };
+    let mut status = hft_sequencer::snapshot::clock_status(pair, hz);
+    status.source = 2;
+    status.state = state;
+    hk.try_push(HkMsg::ClockStatus(status))
+        .map_err(|_| Error::runtime("HkFull", "clock record", 3))?;
+    if *previous != Some(state) || state == 3 {
+        let (_, timer_id, _) = TimerCode::Sys(if state == 1 {
+            SysTimer::ClockOk
+        } else {
+            SysTimer::ClockBad
+        })
+        .encode()
+        .map_err(|_| Error::runtime("Clock", "timer encoding", 3))?;
+        hk.try_push(HkMsg::Sys { timer_id })
+            .map_err(|_| Error::runtime("HkFull", "clock verdict", 3))?;
+        *previous = Some(state);
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn notify(message: &str) -> Result<(), Error> {
+    use std::os::{
+        linux::net::SocketAddrExt,
+        unix::{
+            ffi::OsStrExt,
+            net::{SocketAddr, UnixDatagram},
+        },
+    };
+    let Some(path) = std::env::var_os("NOTIFY_SOCKET") else {
+        return Ok(());
+    };
+    let bytes = path.as_bytes();
+    let addr = if let Some(name) = bytes.strip_prefix(b"@") {
+        SocketAddr::from_abstract_name(name)
+    } else {
+        SocketAddr::from_pathname(path)
+    }
+    .map_err(|_| Error::runtime("Notify", "invalid notify address", 3))?;
+    UnixDatagram::unbound()
+        .and_then(|socket| socket.send_to_addr(message.as_bytes(), &addr))
+        .map_err(|_| Error::runtime("Notify", "cannot notify service manager", 3))?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn notify(_message: &str) -> Result<(), Error> {
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct Workers {
     pub stop: Arc<AtomicBool>,
@@ -193,7 +257,12 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
     let (parsed_tx, parsed_rx) = Box::leak(Box::new(hft_rt::Mailbox::new())).split();
     let (retired_tx, retired_rx) = Box::leak(Box::new(hft_rt::Mailbox::new())).split();
     let (_internal_tx, internal_rx) = ring::<hft_ctl::InternalCmd>(16)?;
-    let hb: &'static hft_rt::Heartbeat = Box::leak(Box::new(hft_rt::Heartbeat::new()));
+    let heartbeat_dir = c.paths.journal_ram.join(storage::instance(c).as_str());
+    std::fs::create_dir_all(&heartbeat_dir)
+        .map_err(|_| Error::runtime("Heartbeat", "cannot create instance heartbeat directory", 3))?;
+    let heartbeat = hft_rt::HeartbeatBlock::create(&heartbeat_dir.join("heartbeat"), if dry { 2 } else { 1 })
+        .map_err(|e| Error::runtime("Heartbeat", format!("{e:?}"), 3))?;
+    let hb = heartbeat.sequencer();
     let mut paper_feeds = Vec::new();
     let mut feed_inputs = Vec::new();
     let mut venue_tasks = Vec::new();
@@ -310,6 +379,7 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
     )
     .map_err(|e| Error::config("Assembly", format!("{e:?}")))?;
     seq.step(); // publish EngineClock before readers and runtime inputs can reach the sequencer
+    heartbeat.set_state(hft_rt::HkLine::WARMUP);
     if let Some(parent) = c.paths.ctl_socket.parent() {
         std::fs::create_dir_all(parent).map_err(|e| Error::runtime("CtlSocket", e.to_string(), 3))?;
     }
@@ -450,35 +520,36 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
     let mut hk = hk_tx;
     let threshold = c.clock.step_threshold_ns;
     let interval = Duration::from_millis(u64::from(c.clock.interval_ms));
+    let hk_drain = drain.clone();
+    let stale_after = Duration::from_millis(u64::from(c.watchdog.hb_stale_ms));
     workers.spawn(policy(c, "housekeeping")?, move |stop, t| {
         let mut tracker = hft_rt::DriftTracker::new(threshold);
         let mut last = None;
         let mut next = Instant::now();
+        let mut seq_count = hb.read();
+        let mut seq_progress = Instant::now();
+        heartbeat.set_state(hft_rt::HkLine::RUNNING);
+        notify("READY=1")?;
         while !stop.load(Ordering::Acquire) {
+            let count = hb.read();
+            if count != seq_count {
+                seq_count = count;
+                seq_progress = Instant::now();
+            }
             if Instant::now() >= next {
                 let pair = hft_rt::sample_pair(&clock, None)
                     .map_err(|e| Error::runtime("Clock", format!("{e:?}"), 3))?;
                 let verdict = tracker.push(pair);
-                let good = matches!(verdict, hft_rt::ClockVerdict::Synced);
-                let mut s = hft_sequencer::snapshot::clock_status(pair, clock.hz_milli);
-                s.source = 2;
-                s.state = if good { 1 } else { 2 };
-                hk.try_push(HkMsg::ClockStatus(s))
-                    .map_err(|_| Error::runtime("HkFull", "clock record", 3))?;
-                if last != Some(good) {
-                    let (_, timer_id, _) = TimerCode::Sys(if good {
-                        SysTimer::ClockOk
-                    } else {
-                        SysTimer::ClockBad
-                    })
-                    .encode()
-                    .map_err(|_| Error::runtime("Clock", "timer encoding", 3))?;
-                    hk.try_push(HkMsg::Sys { timer_id })
-                        .map_err(|_| Error::runtime("HkFull", "clock verdict", 3))?;
-                    last = Some(good);
+                clock_tick(&mut hk, pair, clock.hz_milli, verdict, &mut last)?;
+                heartbeat.hk.hk_utc_ns.store(pair.realtime_ns, Ordering::Release);
+                if hk_drain.load(Ordering::Acquire) {
+                    heartbeat.set_state(hft_rt::HkLine::DRAINING);
                 }
-                eprintln!("hft-core: heartbeat={} clock_synced={good}", hb.read());
-                next += interval;
+                if seq_progress.elapsed() < stale_after {
+                    notify("WATCHDOG=1")?;
+                }
+                // Missed periods cannot fabricate several observations of one instant.
+                next = Instant::now() + interval;
             }
             idle(&t);
         }
@@ -544,6 +615,10 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
     work_result?;
     persist_result?;
     let (code, orders, cancels, reports) = result?;
+    // This is the release authority consumed by hft-shm-release: never publish it
+    // on a worker failure, journal close failure, or before the persister finishes.
+    heartbeat.set_state(hft_rt::HkLine::STOPPED);
+    notify("STOPPING=1")?;
     println!(
         "hft-core: STOPPED exit={code} orders={orders} cancels={cancels} order_reports={reports} persisted=true"
     );

@@ -1,5 +1,6 @@
 //! Process assembly; business state belongs exclusively to hft-sequencer.
 pub mod config;
+mod config_shape;
 pub mod io;
 pub mod paper;
 pub mod runtime;

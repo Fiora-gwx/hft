@@ -5,6 +5,7 @@
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
 | 2026-10-15 | 无归属成交按账户有界暂存后释放或超时转 ExternalFill;保留成交 id/累计序号,不推测现金;非法 epoch 不写订单号表,终态按账户/epoch/gen 定位,满帧解码不发布部分事件;修复 IdTable 淘汰移位误标终态 | VEN-214–220、VEN-290–295 | hft-venue 的代码、README 与 TESTS | 待评审(订单/资金归属) |
+| 2026-10-15 | housekeeping 保留 Stepped 状态并逐次记录 ClockBad，不把连续时钟跳变合并为一次 Unsynced；共享心跳的 Stopped 仅在全部 journal 封存与 persist 完成后发布，热段清理据此放行 | CORE-418、CORE-195，时钟风险输入与停机证据接线 | apps/hft-core、deploy 的代码与规格 | 待评审(风控/恢复) |
 | 2026-10-15 | Bitget REST 查单非空品种与 clientOid 必须匹配原请求身份;负累计量/均价拒绝,错误响应不再重定向到另一订单槽 | BGT-093 查单身份回归 | crates/venue-bitget/src/reports.rs、tests/reports.rs、README.md、TESTS.md | 待评审(订单/资金) |
 | 2026-10-15 | 网关发送侧同时执行 Account/Uid 全部订单限速窗口;延迟观测只收紧计数。BBO 重连后经公共 REST 补帧,失效请求不覆盖已恢复报价,REST 不证明 WS 活性 | VEN-224、VEN-130/132/133 | crates/hft-venue、hft-net、apps/hft-core 的代码与规格 | 待评审(风控/报价可用性) |
 | 2026-10-15 | Unverifiable 账户容许缺 UID 且不声称核验成功，实际 UID 矛盾仍拒绝；保证金观察携带本轮非零持仓强平价和未知 ADL，Bitget 负总持仓量拒绝；USDM 全撤 REST 确认不生成逐单终态，错误保持 Unknown | BIN-072/173、BGT-142/146/149、CORE-120/169 | hft-venue-proto、venue-binance、venue-bitget、hft-venue、hft-core 的代码与规格 | 待评审(账户/风控) |

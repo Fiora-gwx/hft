@@ -134,6 +134,12 @@ fn core_048_sim_instance_boots_without_keys() {
     let summary = std::fs::read_to_string(d.path().join("stdout")).unwrap();
     assert!(status.success(), "{status} {summary}\n{log}");
     assert!(summary.contains("persisted=true"), "{summary}");
+    let heartbeat = hft_rt::HeartbeatBlock::open_ro(&hot.path().join("sim/heartbeat")).unwrap();
+    assert_eq!(
+        heartbeat.hk.state.load(std::sync::atomic::Ordering::Acquire),
+        hft_rt::HkLine::STOPPED
+    );
+    assert!(heartbeat.sequencer().read() > 0);
     assert!(!d.path().join("core.sock").exists());
     assert!(d.path().join("cold/sim/seq").is_dir());
     let again = Command::new(env!("CARGO_BIN_EXE_hft-core"))

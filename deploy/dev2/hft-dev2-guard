@@ -1,0 +1,36 @@
+#!/usr/bin/python3
+"""Run the dev2 resource guard; --dry-run never changes units or state files."""
+import argparse
+import datetime
+import os
+import time
+from guard import Effects, Guard, Sampler, load_config
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("action", choices=("run", "clear"), nargs="?", default="run")
+    parser.add_argument("--config", default="/etc/hft/dev2-guard.toml")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+    cfg = load_config(args.config)
+    if os.name == "posix" and os.geteuid() == 0 and not args.dry_run:
+        import pwd
+        user = pwd.getpwnam("hft-guard")
+        os.setgroups([])
+        os.setgid(user.pw_gid)
+        os.setuid(user.pw_uid)
+    effects = Effects(cfg["state_dir"], args.dry_run)
+    if args.action == "clear":
+        effects.clear(datetime.datetime.now(datetime.timezone.utc).isoformat())
+        return
+    guard = Guard(cfg, effects)
+    sampler = Sampler(cfg)
+    while True:
+        start = time.monotonic()
+        guard.step(sampler.sample())
+        time.sleep(max(0, cfg["sample_s"] - (time.monotonic() - start)))
+
+
+if __name__ == "__main__":
+    main()
