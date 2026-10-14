@@ -372,6 +372,7 @@ where
         accounts.push(GwAccountSpec::<P> {
             account: a,
             src_ip_idx: 0,
+            rest_credential: rest,
             tpl,
             ctx: gw_ctx(),
         });

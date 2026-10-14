@@ -67,6 +67,7 @@ impl Gateway {
             vec![GwAccountSpec {
                 account: hft_types::AccountId(1),
                 src_ip_idx: 0,
+                rest_credential: Credential::default(),
                 tpl: venue_binance::Spot::build_templates(
                     &cfg.venue_cfg(),
                     rd,

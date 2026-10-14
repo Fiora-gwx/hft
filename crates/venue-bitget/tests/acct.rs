@@ -275,3 +275,48 @@ fn bgt_149_margin_failures() {
         .is_err()
     );
 }
+
+#[test]
+fn bgt_147_margin_ratio_boundaries() {
+    for (equity, maintenance, want) in [
+        ("10000", "0", 0),
+        ("0", "250", i64::MAX),
+        ("10000", "20000", 2_000_000_000),
+        ("10000", "10000", 1_000_000_000),
+        ("0.000001", "0", 0),
+        ("10000", "250", 25_000_000),
+    ] {
+        let mut body: serde_json::Value = serde_json::from_slice(ASSETS).unwrap();
+        body["data"]["usdtEquity"] = equity.into();
+        body["data"]["accountEquity"] = "10000".into();
+        body["data"]["mmr"] = maintenance.into();
+        body["data"]["marginRatio"] = "0.9".into();
+        let mut s = State::default();
+        P::account_decode(
+            account_rd(false),
+            ACCT,
+            &Query::Balances,
+            200,
+            &serde_json::to_vec(&body).unwrap(),
+            1,
+            &mut s,
+        )
+        .unwrap();
+        assert_eq!(s.margin.unwrap().margin_ratio.0, want);
+    }
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::test_runner::Config::with_cases(1000))]
+    #[test]
+    fn bgt_148_margin_i128_reference(equity in 1i64..1_000_000_000, maintenance in 0i64..1_000_000_000) {
+        let mut body: serde_json::Value = serde_json::from_slice(ASSETS).unwrap();
+        body["data"]["usdtEquity"] = equity.to_string().into();
+        body["data"]["accountEquity"] = equity.to_string().into();
+        body["data"]["mmr"] = maintenance.to_string().into();
+        let mut s = State::default();
+        P::account_decode(rd(), ACCT, &Query::Balances, 200, &serde_json::to_vec(&body).unwrap(), 1, &mut s).unwrap();
+        let want = (i128::from(maintenance) * 1_000_000_000 / i128::from(equity)).min(i128::from(i64::MAX)) as i64;
+        proptest::prop_assert_eq!(s.margin.unwrap().margin_ratio.0, want);
+    }
+}

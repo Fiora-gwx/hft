@@ -90,6 +90,7 @@ fn request(
     let tpl = crate::orders::build_templates(cfg, AccountId(0), key)?;
     crate::orders::sign_headers(
         &tpl,
+        key,
         &WallClock {
             unix_ms: now,
             ..Default::default()

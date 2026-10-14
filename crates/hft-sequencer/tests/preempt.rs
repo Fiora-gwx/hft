@@ -164,6 +164,9 @@ fn seq_057_ctl_hk_per_round() {
     }
     h.step();
     assert_eq!(len(&mut h, RingId::Ctl), 2);
+    assert_eq!(len(&mut h, RingId::Hk), 6);
+    h.step();
+    assert_eq!(len(&mut h, RingId::Ctl), 0);
     assert_eq!(len(&mut h, RingId::Hk), 2);
 }
 
@@ -388,11 +391,15 @@ fn seq_063_preempted_count_against_limits() {
     h.step();
     let k = order_of(&h, m);
     assert_eq!(k.iter().filter(|x| **x == EventKind::CONTROL_CMD).count(), 4);
-    assert_eq!(k.iter().filter(|x| **x == EventKind::BBO).count(), 10);
+    assert_eq!(k.iter().filter(|x| **x == EventKind::BBO).count(), 2);
     assert_eq!(len(&mut h, RingId::Ctl), 1);
     let m = h.mark();
     h.step();
-    assert!(order_of(&h, m).contains(&EventKind::CONTROL_CMD));
+    let order = order_of(&h, m);
+    assert!(
+        order.iter().position(|k| *k == EventKind::CONTROL_CMD).unwrap()
+            < order.iter().position(|k| *k == EventKind::BBO).unwrap()
+    );
 }
 
 #[test]

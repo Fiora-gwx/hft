@@ -272,6 +272,11 @@ fn ws_resp(
             let a = m.args.map(|x| x.0).unwrap_or_default();
             let id = a.order_id.get()?;
             let cid = parse_cid(a.client_oid.as_bytes());
+            if cid.is_some_and(|c| {
+                c.venue != line.venue() || c.account != account || c.slot != req.slot || c.r#gen != req.r#gen
+            }) {
+                return Err(DecodeErr::Shape);
+            }
             let (epoch, slot, r#gen) = ids_of(cid, req);
             let mut e = blank(line, account, rx);
             e.what = OrderEventKind::Ack;
@@ -493,7 +498,7 @@ fn side_of(s: &str) -> Option<Side> {
 
 /// Absolute value of a signed decimal at `exp` (V2 reports fees negative).
 fn abs_fixed(s: &str, exp: i8) -> Result<i64, DecodeErr> {
-    Ok(fixed_or_zero(s, exp)?.checked_abs().unwrap_or(i64::MAX))
+    fixed_or_zero(s, exp)?.checked_abs().ok_or(DecodeErr::Overflow)
 }
 
 /// One validated order row, before the `GwCtx` comparison.
@@ -574,6 +579,12 @@ fn parse_row(line: Line, rd: &RefData, r: &OrderRow<'_>, top_ts: UInt) -> Result
         return Err(DecodeErr::Shape);
     }
     let (mut fee_coin, mut cum_fee, mut fill_fee) = ("", Qty(0), None);
+    if let Some(d) = r.fee_detail.as_ref() {
+        // The event ABI has one fee asset. Never silently drop another charged coin.
+        if d.over || d.iter().filter(|f| !f.fee.is_empty()).count() > 1 {
+            return Err(DecodeErr::Shape);
+        }
+    }
     if let Some(d) = r.fee_detail.as_ref()
         && let Some(f) = d.iter().find(|f| !f.fee.is_empty())
     {
@@ -591,6 +602,9 @@ fn parse_row(line: Line, rd: &RefData, r: &OrderRow<'_>, top_ts: UInt) -> Result
         fill_fee = Some(Qty(abs_fixed(s, exp)?));
     }
     let fee_asset = asset_by_name(line, rd, fee_coin);
+    if fee_asset.0 == 0 && (cum_fee.0 != 0 || fill_fee.is_some_and(|f| f.0 != 0)) {
+        return Err(DecodeErr::Shape);
+    }
     let trade_id = match r.trade_id {
         // Missing, 0 or negative ids are "absent" (contract 22).
         Some(s) if !s.is_empty() && !s.starts_with('-') => s.parse::<u64>().map_err(|_| DecodeErr::Number)?,
@@ -631,7 +645,7 @@ fn parse_row(line: Line, rd: &RefData, r: &OrderRow<'_>, top_ts: UInt) -> Result
         fee_asset,
         trade_id,
         ex_ts_ns,
-        cid: parse_cid(r.client_oid.as_bytes()),
+        cid: parse_cid(r.client_oid.as_bytes()).filter(|c| c.venue == line.venue()),
         cid_empty: r.client_oid.is_empty(),
         cause,
     }))
@@ -651,8 +665,38 @@ fn orders(
     }
     // Validate every row first: a failing message writes no event and leaves `ctx` unchanged.
     let mut rows: [Option<Parsed>; ORDERS_MAX] = [None; ORDERS_MAX];
-    for (slot, r) in rows.iter_mut().zip(m.data.iter()) {
-        *slot = parse_row(line, rd, r, m.ts)?;
+    for (k, r) in m.data.iter().enumerate() {
+        let mut row = parse_row(line, rd, r, m.ts)?;
+        if let Some(x) = row.as_mut() {
+            x.cid = x.cid.filter(|c| c.account == rx.account);
+            let mut prev = ctx.get(x.order_id).map(|p| (p.cum, p.value, p.fee, p.fee_asset));
+            // Validate the entire message against each earlier update before emitting anything.
+            for earlier in rows.iter().take(k).flatten().filter(|p| p.order_id == x.order_id) {
+                let old = prev.unwrap_or((0, -1, 0, AssetId(0)));
+                if earlier.cum.0 >= old.0 {
+                    prev = Some((
+                        earlier.cum.0,
+                        earlier.cum_value.map_or(old.1, |v| v.0),
+                        earlier.cum_fee.0.max(old.2),
+                        if earlier.cum_fee.0 == 0 {
+                            old.3
+                        } else {
+                            earlier.fee_asset
+                        },
+                    ));
+                }
+            }
+            if let Some((cum, value, fee, asset)) = prev
+                && x.cum.0 >= cum
+                && ((x.cum.0 > cum && x.cum_value.is_some_and(|v| value >= 0 && v.0 < value))
+                    || (fee != 0 && x.cum_fee.0 != 0 && asset != x.fee_asset))
+            {
+                return Err(DecodeErr::Shape);
+            }
+        }
+        if let Some(slot) = rows.get_mut(k) {
+            *slot = row;
+        }
     }
     let mut o = ReportOutcome::default();
     for x in rows.iter().flatten() {
@@ -689,6 +733,11 @@ fn emit(
             prev_value.or(x.cum_value.map(|v| v.0)).unwrap_or(-1)
         },
         x.cum_fee.0.max(prev_fee),
+        if x.cum_fee.0 == 0 {
+            prev.map_or(x.fee_asset, |p| p.fee_asset)
+        } else {
+            x.fee_asset
+        },
         terminal || prev.is_some_and(|p| p.terminal),
     );
     let what = match x.st {
@@ -792,6 +841,13 @@ fn emit(
     o.events += 1;
 }
 
+fn average_or_zero(s: &str, exp: i8) -> Result<i64, DecodeErr> {
+    if s.is_empty() {
+        return Ok(0);
+    }
+    parse_round(s.as_bytes(), exp, RoundMode::HalfEven).map_err(fx)
+}
+
 // ---------------------------------------------------------------- position channel
 
 #[derive(Deserialize)]
@@ -840,9 +896,13 @@ fn positions(
             }
             let h = rd.inst(inst);
             let size = fixed_or_zero(r.size, h.qty_wire_exp)?;
+            if size < 0 {
+                return Err(DecodeErr::Shape);
+            }
             let qty = match r.pos_side {
                 "short" => size.checked_neg().ok_or(DecodeErr::Overflow)?,
-                _ => size,
+                "long" => size,
+                _ => return Err(DecodeErr::Shape),
             };
             let upnl = if r.upnl.is_empty() {
                 0
@@ -859,9 +919,9 @@ fn positions(
                 _pad: 0,
                 inst,
                 qty: Qty(qty),
-                entry_px: Px(fixed_or_zero(r.avg_px, h.px_wire_exp)?),
+                entry_px: Px(average_or_zero(r.avg_px, h.px_wire_exp)?),
                 upnl: Notional(upnl),
-                liq_px: Px(fixed_or_zero(r.liq_px, h.px_wire_exp)?.max(0)),
+                liq_px: Px(average_or_zero(r.liq_px, h.px_wire_exp)?.max(0)),
                 ex_ts_ns: ts,
                 rx_tsc: Tsc(rx.rx_tsc),
             });
@@ -882,7 +942,7 @@ struct CoinRow<'a> {
     #[serde(borrow)]
     coin: &'a str,
     #[serde(borrow)]
-    available: &'a str,
+    balance: &'a str,
     #[serde(alias = "frozen", default, borrow)]
     locked: &'a str,
 }
@@ -921,13 +981,22 @@ fn account(
             continue;
         }
         let qe = rd.asset(asset).exp.qty_exp;
+        let total = fixed(c.balance, qe)?;
+        let locked = if line == Line::Spot {
+            fixed_or_zero(c.locked, qe)?
+        } else {
+            0
+        };
+        if locked < 0 {
+            return Err(DecodeErr::Shape);
+        }
         *slot = Some(BalanceReport {
             venue: line.venue(),
             account: rx.account,
             asset,
             _pad: 0,
-            free: Qty(fixed_or_zero(c.available, qe)?),
-            locked: Qty(fixed_or_zero(c.locked, qe)?),
+            free: Qty(total.checked_sub(locked).ok_or(DecodeErr::Overflow)?),
+            locked: Qty(locked),
             ex_ts_ns: ts,
             rx_tsc: Tsc(rx.rx_tsc),
         });
@@ -1043,7 +1112,7 @@ pub(crate) fn decode_rest(
         St::Cancelled => status::CANCELLED,
     };
     e.cum_filled = Qty(fixed_or_zero(d.cum_qty, h.qty_wire_exp)?);
-    e.avg_px = Px(fixed_or_zero(d.avg_px, h.px_wire_exp)?);
+    e.avg_px = Px(average_or_zero(d.avg_px, h.px_wire_exp)?);
     if e.cum_filled.0 < 0 || e.avg_px.0 < 0 || (e.cum_filled.0 > 0 && e.avg_px.0 == 0) {
         return Err(DecodeErr::Shape);
     }

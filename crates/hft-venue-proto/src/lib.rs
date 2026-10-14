@@ -50,6 +50,55 @@ use hft_types::{AccountId, AssetId, ClientOrderId, InstId, MarketKind, VenueId};
 /// One venue product line's protocol (static dispatch; README "`VenueProtocol`(静态分派)").
 /// Every method is an associated function or takes its context explicitly; no global state.
 pub trait VenueProtocol: Sized + 'static {
+    /// Authenticated warm entry points. Credentials are borrowed, never stored in Templates.
+    #[allow(clippy::too_many_arguments)]
+    fn encode_rest_signed(
+        rd: &RefData,
+        t: &Self::Templates,
+        cred: &Credential,
+        c: &GwCmd,
+        tgt: &TargetRef,
+        clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<(), EncodeErr> {
+        let _ = cred;
+        Self::encode_rest(rd, t, c, tgt, clk, out)
+    }
+    fn ro_request_signed(
+        rd: &RefData,
+        t: &Self::Templates,
+        cred: &Credential,
+        acct: AccountId,
+        q: &RoQuery,
+        clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<(), EncodeErr> {
+        let _ = cred;
+        Self::ro_request(rd, t, acct, q, clk, out)
+    }
+    fn session_keepalive_request_signed(
+        rd: &RefData,
+        t: &Self::Templates,
+        cred: &Credential,
+        clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<bool, EncodeErr> {
+        let _ = cred;
+        Self::session_keepalive_request(rd, t, clk, out)
+    }
+    fn dead_man_refresh_signed(
+        rd: &RefData,
+        t: &Self::Templates,
+        cred: &Credential,
+        timeout_ms: u32,
+        insts: &[InstId],
+        clk: &WallClock,
+        out: &mut DeadManOut,
+    ) -> Result<(), EncodeErr> {
+        let _ = cred;
+        Self::dead_man_refresh(rd, t, timeout_ms, insts, clk, out)
+    }
+
     /// Warm read-only query. Unsupported on product lines without a corresponding endpoint.
     fn ro_request(
         _rd: &RefData,
@@ -88,7 +137,7 @@ pub trait VenueProtocol: Sized + 'static {
     type FeedCtx;
     /// Venue-private gw state: request ids, cumulative-quantity synthesis, dedup rings, margin cache.
     type GwCtx;
-    /// Frame templates and the REST signing credential of one (venue, account) (contract 7).
+    /// Non-sensitive frame templates of one (venue, account); credentials are borrowed (contract 7).
     type Templates;
     /// After `CancelAll` the gw queries the open-order list once (contract 29).
     const CANCEL_ALL_SWEEP: bool = false;
@@ -327,13 +376,15 @@ pub trait VenueProtocol: Sized + 'static {
     fn dead_man() -> DeadManSpec;
     /// WS frame or REST requests; `dead_man() = None` → `Err(Unsupported(DeadManRefresh))`.
     fn dead_man_refresh(
-        rd: &RefData,
-        t: &Self::Templates,
-        timeout_ms: u32,
-        insts: &[InstId],
-        clk: &WallClock,
-        out: &mut DeadManOut,
-    ) -> Result<(), EncodeErr>;
+        _rd: &RefData,
+        _t: &Self::Templates,
+        _timeout_ms: u32,
+        _insts: &[InstId],
+        _clk: &WallClock,
+        _out: &mut DeadManOut,
+    ) -> Result<(), EncodeErr> {
+        Err(EncodeErr::Unsupported(GwOp::DeadManRefresh))
+    }
     /// Hyperliquid: every order frame carries a signature.
     fn needs_per_order_signing() -> bool {
         false

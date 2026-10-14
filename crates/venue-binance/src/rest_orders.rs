@@ -10,6 +10,7 @@ pub(crate) fn cancel_all(
     line: Line,
     rd: &RefData,
     t: &Templates,
+    cred: &Credential,
     c: &GwCmd,
     clk: &WallClock,
     out: &mut RestReqBuf,
@@ -34,16 +35,18 @@ pub(crate) fn cancel_all(
             env: VenueEnv::Prod,
             stale_guard_ms: t.recv_window_ms,
         },
-        &t.rest,
+        cred,
         clk.unix_ms,
         out,
     )
     .map_err(|_| EncodeErr::FieldOverflow)
 }
+#[allow(clippy::too_many_arguments)] // Explicit borrowed credentials keep templates secret-free.
 pub(crate) fn deadman(
     line: Line,
     rd: &RefData,
     t: &Templates,
+    cred: &Credential,
     timeout_ms: u32,
     insts: &[InstId],
     clk: &WallClock,
@@ -75,7 +78,7 @@ pub(crate) fn deadman(
                 env: VenueEnv::Prod,
                 stale_guard_ms: t.recv_window_ms,
             },
-            &t.rest,
+            cred,
             &q,
             clk.unix_ms,
             &mut r,

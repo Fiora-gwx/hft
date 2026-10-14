@@ -10,6 +10,46 @@ use support::{BT1, DP5, RX, S_BNB, S_BTC, SBT1, SDP5, U_BTC, rd};
 use venue_binance::{FeedCtx, Spot, Usdm, spot, usdm};
 
 #[test]
+fn bin_037_market_receive_metadata() {
+    fn check<P: VenueProtocol>(mut ctx: P::FeedCtx, samples: &[(P::MdClass, &[u8])]) {
+        for hw in [0, RX.hw_rx_ns] {
+            let rx = hft_venue_proto::RxMeta { hw_rx_ns: hw, ..RX };
+            for &(class, body) in samples {
+                let mut sink = VecSink::default();
+                P::decode_md(rd(), &mut ctx, class, body, &rx, &mut sink).unwrap();
+                assert!(!sink.md.is_empty());
+                for event in &sink.md {
+                    let h = event.market_hdr().unwrap();
+                    assert_eq!(
+                        (
+                            h.venue,
+                            h.conn,
+                            h.rx_tsc,
+                            h.hw_rx_ns,
+                            h.sw_rx_ns,
+                            h.rx_empty_gap_ns
+                        ),
+                        (P::VENUE, rx.conn, rx.rx_tsc, hw, rx.sw_rx_ns, rx.rx_empty_gap_ns)
+                    );
+                }
+            }
+        }
+    }
+    check::<Usdm>(FeedCtx::USDM, &[
+        (usdm::MdClass::BookTicker, BT1.as_bytes()),
+        (usdm::MdClass::DepthTopN, DP5.as_bytes()),
+        (usdm::MdClass::AggTrade, br#"{"e":"aggTrade","s":"BTCUSDT","a":9,"p":"65000.1","q":"0.001","T":1000,"E":1001,"m":false}"#),
+        (usdm::MdClass::MarkPrice, br#"{"e":"markPriceUpdate","E":1790000000125,"s":"BTCUSDT","p":"65001.23","i":"65000.50","r":"0.00010000","T":1790006400000}"#),
+        (usdm::MdClass::ForceOrder, br#"{"e":"forceOrder","E":1001,"o":{"s":"BTCUSDT","ap":"65000.1","z":"0.001","S":"SELL","T":1000}}"#),
+    ]);
+    check::<Spot>(FeedCtx::SPOT, &[
+        (spot::MdClass::JsonBookTicker, SBT1.as_bytes()),
+        (spot::MdClass::JsonDepthTopN, SDP5.as_bytes()),
+        (spot::MdClass::JsonTrade, br#"{"e":"trade","s":"BTCUSDT","t":10,"p":"65000.1","q":"0.001","T":1000,"E":1001,"m":false}"#),
+    ]);
+}
+
+#[test]
 fn bin_032_markprice_three_events() {
     let mut ctx = FeedCtx::USDM;
     let mut sink = VecSink::default();

@@ -9,13 +9,12 @@ use crate::Line;
 use crate::cid::encode_req_id;
 use crate::wr::Wr;
 
-/// Frame state of one (venue, account), including its warm REST credential (redacted Debug).
+/// Frame state of one (venue, account), containing only public configuration.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct Templates {
     pub account: AccountId,
     /// `recvWindow` = `gw.stale_guard_ms`.
     pub recv_window_ms: u32,
-    pub(crate) rest: Credential,
 }
 
 pub(crate) fn build_templates(
@@ -23,7 +22,7 @@ pub(crate) fn build_templates(
     cfg: &VenueCfg,
     _rd: &RefData,
     acct: AccountId,
-    rest: &Credential,
+    _rest: &Credential,
 ) -> Result<Templates, ProtoErr> {
     if cfg.stale_guard_ms == 0 {
         return Err(ProtoErr::Cfg);
@@ -31,7 +30,6 @@ pub(crate) fn build_templates(
     Ok(Templates {
         account: acct,
         recv_window_ms: cfg.stale_guard_ms,
-        rest: *rest,
     })
 }
 

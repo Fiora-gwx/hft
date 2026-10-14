@@ -45,7 +45,7 @@ pub trait VenueProtocol: Sized + 'static {
     type FeedCtx;                        // 只放 venue 私有状态(SBE 模板表、时间单位、路由内订阅下标…);refdata 不放这里,调用时显式传 rd。
                                          // feed 任务与 snap-fetch 各持一个实例(契约 25)
     type GwCtx;                          // 只放 venue 私有状态:请求 id 编码、累计量合成表、成交与资金费去重环(契约 22)、保证金推送缓存
-    type Templates;                      // 帧模板:该 (venue, account) 的预编码片段与 REST 签名凭证(契约 7);随 refdata 在启动期构建一次(refdata 不热换,变更 = 重启);
+    type Templates;                      // 帧模板:该 (venue, account) 的预编码片段与非敏感配置(凭证按调用借用,契约 7);随 refdata 在启动期构建一次(refdata 不热换,变更 = 重启);
                                          // gw 与 acct-fetch 各构建一份(交易 REST key),reconciler 以只读 key 构建自己的一份(契约 31)
     const CANCEL_ALL_SWEEP: bool = false; // true:gw 发完 CancelAll 后再查一次挂单列表兜底(契约 29;OKX)
     const BBO_SNAPSHOT_BATCH: u16 = 1;   // 一次 BBO 补帧请求可覆盖的 inst 上限(契约 24);u16::MAX = 只受 RestReqBuf 长度限制
@@ -409,7 +409,7 @@ pub enum ExchIdHint { Resolved { epoch: u16, slot: SlotId, gen: u32 }, Recorded,
 **下单与回报**
 
 6. 传输超时类错误码(如 Binance `-1007`、OKX `50004`)不得解码为 `Reject`,只能走"结果未知"(契约 8;[defensive-patterns](../../docs/defensive-patterns.md))。
-7. 登录帧与任何含签名的帧由调用方标 `REDACTED`,实现方不把密钥材料存进任何静态或上下文。唯一例外是 `build_templates` 的 `rest` 凭证:它只保存在该份 `Templates` 里,用于该份模板产出的 REST 签名(`acct_request`、`encode_rest`、`dead_man_refresh`、`session_keepalive_request`、`ro_request`);`FeedCtx`、`GwCtx`、`AcctCtx` 与静态量不含密钥材料;会话凭证只经 `login`、`endpoint`、`bootstrap`、`session_identity_request` 的参数借用。
+7. 登录帧与任何含签名的帧由调用方标 `REDACTED`,实现方不把密钥材料存进静态、`Templates` 或上下文。warm 请求通过 `encode_rest_signed`、`ro_request_signed`、`session_keepalive_request_signed`、`dead_man_refresh_signed` 显式借用 `Credential`;模板仅含非敏感配置。会话与 `AccountProtocol` 同样按调用借用凭证。旧无凭证入口保留为适配兼容面,不能从模板找回 key;采用 signed 入口的协议在旧入口返回 Unsupported/不发请求。
 8. **未登记的错误码默认"结果未知"**(不是 Reject):`decode_report` 只对 `codes.rs` 里显式登记为"确定拒绝"的码产出 `Reject`;登记为"结果未知"的码与**任何未登记码**都返回 `ReportOutcome.outcome_unknown`;运行时据此推一条 `OrderEvent{what: OutcomeUnknown, reject_code = raw_code}`,OMS 把该槽置 `Unknown` 并查询。每个 venue 的 `codes.rs` 必须有两张表:确定拒绝、结果未知;README 有"结果未知码表"一节。**原始码的编码**(`OrderEvent.reject_code` 与 `ReportOutcome.raw_code`,u32;SDK 的 `venue_code: u32` 原样携带,数值码按 i32 补码解读):
     - 交易所数值码(含负数)按 i32 补码存(Binance `-2010` → `0xFFFF_F826`,读回 −2010);
     - 纯数字的字符串码(可带一个前导 `-`)按十进制解析为 i32(OKX `"51008"` → 51008);超出 i32 范围的按非数字处理;
@@ -496,7 +496,7 @@ pub enum ExchIdHint { Resolved { epoch: u16, slot: SlotId, gen: u32 }, Recorded,
 28. **`OrderEvent.detail`**(u8;字段与码值归 [hft-event](../hft-event/README.md)):`QueryResult` 填订单状态码(New=1 … NotFound=7,与 `ReconcileReport.order_status` 同码);`CancelReject`/`AmendReject` 在 `codes.rs` 把该码登记为"订单已成交、已撤或不存在"类时填 `GONE`,其他原因填 0;其余 `what` 填 0。每个 venue README 的"结果未知码表"写明哪些码属 `GONE` 类,查询响应的状态映射写在下单一节。
 29. **REST 形态的订单操作与会话维护**:`order_channel(op) = Rest` 的订单类 op 由 `encode_rest` 生成签名请求,其余 op 由 `encode` 写 WS 帧;同一 op 只走一种通道。`CancelAll` 的展开(账户级 → 按 inst → 按单)由运行时按 `Unsupported(CancelAll)` 逐级进行,两种通道相同([hft-venue 出环](../hft-venue/README.md#出环outmsg--gwcmd));`CANCEL_ALL_SWEEP = true` 的所,运行时发完 `CancelAll` 后用 `ro_request(OpenOrders)` 查一次挂单列表,响应经 `decode_rest`(`RestWhat::Sweep`)对 client id 可解析为本账户的每个订单产出 `OrderEvent{what: QueryResult}`。需要会话维护的所实现 `session_keepalive_request`。gw 的全部 REST 响应经 `decode_rest` 解码:槽与操作取自 `RestOrigin`(响应不带 client id 时不得猜测),输出与 `decode_report` 遵守同样的契约 8、9、10、13、28、30;死手与会话维护响应不产出订单事件,失败只体现在 `ReportOutcome.raw_code` 与 `ctl`。
 30. **控制提示 `ReportOutcome.ctl`**:`decode_report`/`decode_rest` 遇时间戳越界拒单置 `ClockSkew`、遇交易所限速置 `RateLimited`(两者照常按码表产出 `Reject` 等事件)、遇用户流被交易所终止置 `UserStreamEnded`、遇私有连接上的下线或维护预告置 `ServerShutdown`;不产出 `ConnState`(由运行时按 [hft-venue §4](../hft-venue/README.md#4-gwruntimepoll_once-的循环结构) 第 2 步产出)。各 venue README 的"结果未知码表"与"用户流事件表"写明哪些码与事件置哪种提示。
-31. **只读查询族**(reconciler 的对账输入,[reconciler](../../apps/reconciler/README.md#覆盖范围与数据来源)):`ro_request` 只生成 `GET` 类只读请求(签名用 `Templates` 的凭证;reconciler 以只读 key 构建,`redacted = true`);`ro_decode` 按 `RoKind` 经 `RoSink` 逐行产出——`OpenOrders` → `open_order`、`Fills` → `fill`、`FundingFlow` → `funding`(逐笔带 inst 与交易所原始结算时刻)、`Balance` → `balance`、`Positions` → `position`;只保留 refdata 中该账户可交易的 inst 与资产;分页以 `RoPage.next_cursor` 交回调用方。产品线没有的查询(现货的 `Positions`、`FundingFlow`)返回 `Unsupported`。不依赖 `GwCtx`/`AcctCtx`,同一输入的输出确定。每个 venue README 有"只读查询"表(按产品线:端点、分页与游标、字段映射、是否带 client id)。kill-switch 不使用本族:它零依赖、自写每所的查挂单与查 UID([kill-switch 依赖](../../apps/kill-switch/README.md#依赖)),与本族只共用 fixtures 中的原始响应。
+31. **只读查询族**(reconciler 的对账输入,[reconciler](../../apps/reconciler/README.md#覆盖范围与数据来源)):`ro_request` 只生成 `GET` 类只读请求(signed 入口按调用借用只读 key,`redacted = true`);`ro_decode` 按 `RoKind` 经 `RoSink` 逐行产出——`OpenOrders` → `open_order`、`Fills` → `fill`、`FundingFlow` → `funding`(逐笔带 inst 与交易所原始结算时刻)、`Balance` → `balance`、`Positions` → `position`;只保留 refdata 中该账户可交易的 inst 与资产;分页以 `RoPage.next_cursor` 交回调用方。产品线没有的查询(现货的 `Positions`、`FundingFlow`)返回 `Unsupported`。不依赖 `GwCtx`/`AcctCtx`,同一输入的输出确定。每个 venue README 有"只读查询"表(按产品线:端点、分页与游标、字段映射、是否带 client id)。kill-switch 不使用本族:它零依赖、自写每所的查挂单与查 UID([kill-switch 依赖](../../apps/kill-switch/README.md#依赖)),与本族只共用 fixtures 中的原始响应。
 
 ## 每个 venue README 的必备节
 

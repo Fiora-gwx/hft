@@ -117,7 +117,17 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         let mut wire = RestReqBuf::default();
         let clk = self.wall(now);
         let tg = self.target_gen(&c);
-        if P::encode_rest(self.rd, &self.accts[a].tpl, &c, &target, &clk, &mut wire).is_err() {
+        if P::encode_rest_signed(
+            self.rd,
+            &self.accts[a].tpl,
+            &self.accts[a].rest_credential,
+            &c,
+            &target,
+            &clk,
+            &mut wire,
+        )
+        .is_err()
+        {
             self.report(
                 &c,
                 tg,
@@ -289,7 +299,13 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         };
         let mut wire = RestReqBuf::default();
         let clk = self.wall(now);
-        let result = P::session_keepalive_request(self.rd, &self.accts[a].tpl, &clk, &mut wire);
+        let result = P::session_keepalive_request_signed(
+            self.rd,
+            &self.accts[a].tpl,
+            &self.accts[a].rest_credential,
+            &clk,
+            &mut wire,
+        );
         if result == Ok(false) {
             return;
         }
@@ -319,7 +335,15 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             since_ms: 0,
             limit: 0,
         };
-        let result = P::ro_request(self.rd, &self.accts[a].tpl, c.account, &query, &clk, &mut wire);
+        let result = P::ro_request_signed(
+            self.rd,
+            &self.accts[a].tpl,
+            &self.accts[a].rest_credential,
+            c.account,
+            &query,
+            &clk,
+            &mut wire,
+        );
         let origin = RestOrigin {
             what: RestWhat::Sweep,
             req: None,

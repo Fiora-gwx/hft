@@ -14,14 +14,12 @@ use crate::cid::encode_req_id;
 use crate::sign::rest_sign;
 use crate::wr::Wr;
 
-/// Frame state of one (venue, account): the REST signing credential (contract 7; `Debug` never
-/// prints it) and whether requests go to demo trading.
+/// Non-sensitive frame configuration; the caller borrows credentials per warm REST request.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct Templates {
     pub account: AccountId,
     /// REST requests carry `paptrading: 1` (README "测试网/模拟盘").
     pub demo: bool,
-    pub(crate) rest: Credential,
 }
 
 pub(crate) fn build_templates(
@@ -35,7 +33,6 @@ pub(crate) fn build_templates(
     Ok(Templates {
         account: acct,
         demo: cfg.env == VenueEnv::Testnet,
-        rest: *rest,
     })
 }
 
@@ -159,7 +156,12 @@ pub(crate) const ORDER_INFO: &[u8] = b"/api/v3/trade/order-info";
 
 /// Signed REST headers: `ACCESS-KEY`, `ACCESS-SIGN`, `ACCESS-TIMESTAMP`, `ACCESS-PASSPHRASE`,
 /// `locale`, and `paptrading: 1` on demo trading.
-pub(crate) fn sign_headers(t: &Templates, clk: &WallClock, out: &mut RestReqBuf) -> Result<(), ProtoErr> {
+pub(crate) fn sign_headers(
+    t: &Templates,
+    cred: &Credential,
+    clk: &WallClock,
+    out: &mut RestReqBuf,
+) -> Result<(), ProtoErr> {
     let mut ts = [0u8; 24];
     let mut w = Wr::new(&mut ts);
     w.i64(clk.unix_ms);
@@ -172,7 +174,7 @@ pub(crate) fn sign_headers(t: &Templates, clk: &WallClock, out: &mut RestReqBuf)
         Method::Delete => b"DELETE",
     };
     let sig = rest_sign(
-        t.rest.secret.0.as_slice(),
+        cred.secret.0.as_slice(),
         ts,
         method,
         out.path_query.as_slice(),
@@ -182,13 +184,13 @@ pub(crate) fn sign_headers(t: &Templates, clk: &WallClock, out: &mut RestReqBuf)
     let h = &mut out.headers;
     h.clear();
     h.push(b"ACCESS-KEY: ")?;
-    h.push(t.rest.api_key.as_slice())?;
+    h.push(cred.api_key.as_slice())?;
     h.push(b"\r\nACCESS-SIGN: ")?;
     h.push(&sig)?;
     h.push(b"\r\nACCESS-TIMESTAMP: ")?;
     h.push(ts)?;
     h.push(b"\r\nACCESS-PASSPHRASE: ")?;
-    h.push(t.rest.passphrase.as_slice())?;
+    h.push(cred.passphrase.as_slice())?;
     h.push(b"\r\nlocale: en-US\r\n")?;
     if t.demo {
         h.push(b"paptrading: 1\r\n")?;
@@ -198,10 +200,12 @@ pub(crate) fn sign_headers(t: &Templates, clk: &WallClock, out: &mut RestReqBuf)
 }
 
 /// `Query` → `GET /api/v3/trade/order-info?clientOid=<cid>` (signed).
+#[allow(clippy::too_many_arguments)] // Explicit borrowed credentials keep templates secret-free.
 pub(crate) fn encode_rest(
     line: Line,
     rd: &RefData,
     t: &Templates,
+    cred: &Credential,
     c: &GwCmd,
     tgt: &TargetRef,
     clk: &WallClock,
@@ -221,7 +225,7 @@ pub(crate) fn encode_rest(
     out.path_query.push(ORDER_INFO).map_err(ovf)?;
     out.path_query.push(b"?clientOid=").map_err(ovf)?;
     out.path_query.push(&cid_text(tgt)).map_err(ovf)?;
-    sign_headers(t, clk, out).map_err(|e| match e {
+    sign_headers(t, cred, clk, out).map_err(|e| match e {
         ProtoErr::Cfg => EncodeErr::Unsupported(c.op),
         _ => EncodeErr::FieldOverflow,
     })

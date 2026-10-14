@@ -238,7 +238,7 @@ UTA 订单推送不带本笔成交:`GwCtx` 按 `orderId` 记上次的累计量�
 | `order`(`{"instType":"UTA","topic":"order"}`;只保留 `category` = 本产品线) | 先过"外部成交识别";`live`/`new` → `Ack`;累计量前进 → `PartialFill`/`Fill`;`cancelled` → `CancelAck`,`timeInForce ∈ {ioc, fok}` 或 `cancelReason ∈ {ioc_not_full_cancel, fok_not_full_cancel, post_only_fill_cancel}` 时 `Expired`(都带当时的累计量与本笔增量) | — |
 | `fill` / `fast-fill` | 不订阅;收到时 `skip = Listed` | — |
 | `position`(只永续订阅;现货不产出) | `PositionReport{qty ← size(posSide = short 取负), entry_px ← avgPrice, upnl ← unrealisedPnl, liq_px ← liqPrice(空 → 0)}`(只校验;refdata 外品种跳过) | — |
-| `account` | `data[0].coin[]` 每币种一条 `BalanceReport{free ← available, locked ← locked}`(只校验;refdata 外币种跳过);`margin_data = Poll` 期间不产出 `MarginReport`;若核实带保证金率则 `MarginReport`(并把 `margin_data` 改为 `Push`;推送在 gw 线程上解码,预算上限见 [hft-venue](../hft-venue/README.md#延迟与资源契约) `venue_gw_margin_push`) | — |
+| `account` | `data[0].coin[]` 每币种一条 `BalanceReport`:永续 `free ← balance, locked ← 0`;现货 `free ← balance − locked`(有符号),`locked ← locked`(必须非负)(只校验;refdata 外币种跳过);`margin_data = Poll` 期间不产出 `MarginReport`;若核实带保证金率则 `MarginReport`(并把 `margin_data` 改为 `Push`;推送在 gw 线程上解码,预算上限见 [hft-venue](../hft-venue/README.md#延迟与资源契约) `venue_gw_margin_push`) | — |
 | `{"event":"login"|"subscribe"|"error"}` | 无(控制回执;订阅被拒 `code` 为数字,如 `30001`) | — |
 | `pong` | 无(心跳回应) | — |
 | 其他 | 无(`skip = Unknown`;核实后把确认无用的名字加入 `ignorable_user_events`) | — |
@@ -272,7 +272,7 @@ Warm 入口支持 OpenOrders、Fills、Balance 与永续 Positions，整页校�
 UTA V3 分页取响应 cursor，重复游标和非数值游标返回错误，不伪造末页。查询按 category 请求，inst 过滤在完整响应中完成，避免缩小页面后丢失下一页。Fills 的 feeDetail 必须可归到同一已登记资产；混合手续费币种拒绝该页。字段来源为 [官方订单查询文档](https://www.bitget.com/docs/catalog/trading/order-management)。
 
 
-`ro_request`/`ro_decode` 的实现([契约 31](../hft-venue-proto/README.md#实现方必须遵守的契约));reconciler 以只读 key 构建 `Templates` 调用,gw 不用(`CANCEL_ALL_SWEEP = false`)。UTA 端点、分页与字段**全部待核实**(开发备忘第 18 条),核实前按下表"要读到什么"实现,读不到即 `DecodeErr::Shape`。
+`ro_request_signed`/`ro_decode` 的实现([契约 31](../hft-venue-proto/README.md#实现方必须遵守的契约));reconciler 以只读 key 构建 `Templates` 调用,gw 不用(`CANCEL_ALL_SWEEP = false`)。UTA 端点、分页与字段**全部待核实**(开发备忘第 18 条),核实前按下表"要读到什么"实现,读不到即 `DecodeErr::Shape`。
 
 | `RoKind` | 请求(候选,两个产品线) | 要读到什么 |
 |---|---|---|
@@ -335,7 +335,15 @@ UTA V3 分页取响应 cursor，重复游标和非数值游标返回错误，不
 - 现有知识来源:`E:\trading\Trading\crates\bitget`(seq/pseq、无条件 ping、登录签名与测试向量)、`E:\trading\Trading\apps\collector\src\private.rs`(V2 私有登录与 `orders` 订阅)
 - 官方 UTA 文档原文的镜像(2026-10-14 取得,本地缓存 `E:\trading\analysis\bitget-src\`):GitHub `metafrogmeme-droid/001` 的 `docs/bitget-uta/*.md`(由 www.bitget.com/api-doc/uta 抓取,含 WebSocket 全部频道、Trade、Market、枚举与错误码页)、官方 SDK `Bitget-AI/agent-sdk` 的 `openapi.yaml`(UTA REST 请求结构)
 
+私有推送的 `balance` 是钱包余额,`available` 是可用保证金/购买力,不能替代现金余额;字段依据 [官方账户频道](https://www.bitget.com/docs/uta/websocket/private/Account-Channel)。持仓 size 必须非负,posSide 只接受 long/short,均价与强平估算价按资产价格指数 HalfEven 舍入。订单推送的已解析 clientOid 必须属于当前产品线与账户,否则作为外来成交;WS 下单响应中的有效 clientOid 若与请求槽/gen 或当前账户不符则拒绝。
+
+累计成交量推进而金额倒退、非零手续费币种未知/跨累计基线变化、多个非空 feeDetail 币种行均拒绝整帧,不改 GwCtx、不产出部分事件;同帧先后记录也经过该检查。未带新费用的重复推送保留旧费用币种,绝对值溢出拒绝。
+
 ### 测试环境 warm 账户入口
+
+`Templates` 仅保存账户与非敏感帧配置。warm REST/只读请求使用 `*_signed` 入口,每次从调用方借用凭证;旧无凭证入口不发认证请求。账户运行时持有 REST key;warm task 与网关 REST 池均按请求借用,全撤沿用各自通道。
+
+当前执行接口是 `AccountProtocol::{account_request, account_decode}` 与独立 `State`,允许 warm 分配;冻结的 `acct_queries/acct_decode/acct_finish` 分步接口仍待统一,不把其无分配、完整配置序列或 ADL 缓存用例视为完成。50 KiB 持仓基准测量当前 warm 解码(包括分配),不作为旧无分配入口的达标证据。
 
 AccountProtocol 使用 UTA V3 instruments/settings/info/assets/current-position/unfilled-orders。basic unified 账户要求单向/全仓、杠杆不超配置、无债务；key 要有 uta_trade 且无 withdraw，REST/WS 分别读取 UID 并匹配。现货订单显式 autoBorrow=no，demo REST 带 paptrading: 1。
 

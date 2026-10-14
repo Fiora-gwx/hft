@@ -208,9 +208,10 @@ impl<P: AccountProtocol, T: Transport> Client<P, T> {
         let mut req = RestReqBuf::default();
         let tpl =
             P::build_templates(&self.venue, self.rd, self.account, &self.rest).map_err(|_| Error::Busy)?;
-        if P::encode_rest(
+        if P::encode_rest_signed(
             self.rd,
             &tpl,
+            &self.rest,
             &r.cmd,
             &r.target,
             &hft_venue_proto::WallClock {

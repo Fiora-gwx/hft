@@ -538,3 +538,23 @@ fn bin_119_ignorable_unknown() {
     check::<venue_binance::Spot>(rd, "newEvt", Skip::Unknown, false, true);
     check::<Usdm>(rd, "TRADE_LITE", Skip::Listed, true, false);
 }
+
+#[test]
+fn bin_107_zero_commission_without_asset_and_invalid_last_fill() {
+    let base = otu("TRADE", "PARTIALLY_FILLED");
+    let mut v: serde_json::Value = serde_json::from_str(&base).unwrap();
+    v["o"]["N"] = serde_json::Value::Null;
+    v["o"]["n"] = "0".into();
+    let (out, sink) = decode::<Usdm>(&mut GwCtx::default(), &v.to_string());
+    assert_eq!(out.unwrap().events, 1);
+    assert_eq!(sink.orders[0].fee.0, 0);
+    v["o"]["n"] = "0.01".into();
+    let (out, sink) = decode::<Usdm>(&mut GwCtx::default(), &v.to_string());
+    assert!(out.is_err());
+    assert!(sink.orders.is_empty());
+    let mut v: serde_json::Value = serde_json::from_str(&base).unwrap();
+    v["o"]["l"] = "1".into();
+    let (out, sink) = decode::<Usdm>(&mut GwCtx::default(), &v.to_string());
+    assert!(out.is_err());
+    assert!(sink.orders.is_empty());
+}

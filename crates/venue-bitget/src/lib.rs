@@ -168,14 +168,29 @@ impl FeedCtx {
 /// Per-order cumulative state of the `order` channel (README "累计量与费用来源"): the last
 /// cumulative quantity, value (`Notional`, −1 = unknown) and fee seen, so fills and fees are
 /// emitted once as differences.
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub(crate) struct OrderState {
     pub id: u64,
     pub cum: i64,
     pub value: i64,
     pub fee: i64,
+    pub fee_asset: AssetId,
     pub terminal: bool,
     pub stamp: u32,
+}
+
+impl Default for OrderState {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            cum: 0,
+            value: 0,
+            fee: 0,
+            fee_asset: AssetId(0),
+            terminal: false,
+            stamp: 0,
+        }
+    }
 }
 
 const GW_SLOTS: usize = 4096;
@@ -229,7 +244,15 @@ impl GwCtx {
         None
     }
 
-    pub(crate) fn put(&mut self, id: u64, cum: i64, value: i64, fee: i64, terminal: bool) {
+    pub(crate) fn put(
+        &mut self,
+        id: u64,
+        cum: i64,
+        value: i64,
+        fee: i64,
+        fee_asset: AssetId,
+        terminal: bool,
+    ) {
         self.clock = self.clock.wrapping_add(1);
         let h = Self::home(id);
         // The entry itself, else the first empty slot (end of the chain), else the first terminal
@@ -260,6 +283,7 @@ impl GwCtx {
                 cum,
                 value,
                 fee,
+                fee_asset,
                 terminal,
                 stamp: self.clock,
             };
@@ -464,15 +488,16 @@ macro_rules! venue_impl {
             ) -> Result<usize, EncodeErr> {
                 orders::encode($line, rd, t, c, tgt, clk, body)
             }
-            fn encode_rest(
+            fn encode_rest_signed(
                 rd: &RefData,
                 t: &Templates,
+                cred: &Credential,
                 c: &GwCmd,
                 tgt: &TargetRef,
                 clk: &WallClock,
                 out: &mut RestReqBuf,
             ) -> Result<(), EncodeErr> {
-                orders::encode_rest($line, rd, t, c, tgt, clk, out)
+                orders::encode_rest($line, rd, t, cred, c, tgt, clk, out)
             }
             fn decode_rest(
                 rd: &RefData,
@@ -504,15 +529,16 @@ macro_rules! venue_impl {
             ) -> Result<ReportOutcome, DecodeErr> {
                 reports::decode_report($line, rd, ctx, c, payload, rx, out)
             }
-            fn ro_request(
+            fn ro_request_signed(
                 rd: &RefData,
                 t: &Templates,
+                cred: &Credential,
                 acct: AccountId,
                 q: &hft_venue_proto::RoQuery,
                 clk: &WallClock,
                 out: &mut RestReqBuf,
             ) -> Result<(), EncodeErr> {
-                readonly::request($line, rd, t, acct, q, clk, out)
+                readonly::request($line, rd, t, cred, acct, q, clk, out)
             }
             fn ro_decode(
                 rd: &RefData,

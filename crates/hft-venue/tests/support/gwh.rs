@@ -67,6 +67,10 @@ pub fn spec<P: VenueProtocol<Templates = Tpl, GwCtx = GwCtx>>(
     GwAccountSpec {
         account: a,
         src_ip_idx: 0,
+        rest_credential: Credential {
+            api_key: hft_venue_proto::ArrayBuf::from_bytes(b"gateway-rest-test").unwrap(),
+            ..Credential::default()
+        },
         tpl: P::build_templates(&vc, rd_stub(), a, &Credential::default()).unwrap(),
         ctx: GwCtx::default(),
     }

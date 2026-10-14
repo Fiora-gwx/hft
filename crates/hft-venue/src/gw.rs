@@ -23,8 +23,8 @@ use hft_rt::{
 };
 use hft_types::{AccountId, ClientOrderId, InstId, Px, Qty, SlotId, Tsc};
 use hft_venue_proto::{
-    DeadManOut, DecodeErr, ExchIdHint, MsgOp, OrderChannel, ReportCtl, ReportOutcome, ReportSink, ReqRef,
-    RxMeta, Skip, TargetRef, VenueProtocol, WallClock,
+    Credential, DeadManOut, DecodeErr, ExchIdHint, MsgOp, OrderChannel, ReportCtl, ReportOutcome, ReportSink,
+    ReqRef, RxMeta, Skip, TargetRef, VenueProtocol, WallClock,
 };
 use zerocopy::IntoBytes;
 
@@ -62,12 +62,13 @@ pub struct GwDeps {
     pub clock: TscUtc,
 }
 
-/// One Live account served by this gw: its templates (built at startup with the account's REST
-/// key, contract 7) and its protocol context.
+/// One Live account served by this gw. The account owns its REST credential separately from
+/// the non-secret templates; neither its credential nor signed wire content may be logged.
 pub struct GwAccountSpec<P: VenueProtocol> {
     pub account: AccountId,
     /// Index into the instance's source addresses (the account's own egress IP).
     pub src_ip_idx: u8,
+    pub rest_credential: Credential,
     pub tpl: P::Templates,
     pub ctx: P::GwCtx,
 }
@@ -177,6 +178,7 @@ struct Acct<P: VenueProtocol> {
     pool: ConnPool<3>,
     user: Option<ConnPool<2>>,
     metas: Vec<CMeta>,
+    rest_credential: Credential,
     tpl: P::Templates,
     ctx: P::GwCtx,
     ids: IdTable,
@@ -451,6 +453,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 user: P::USER_STREAM
                     .then(|| ConnPool::new(PoolMode::Race, 1, RotatePolicy { stagger_tsc: stagger })),
                 metas: Vec::with_capacity(8),
+                rest_credential: a.rest_credential,
                 tpl: a.tpl,
                 ctx: a.ctx,
                 ids: IdTable::new(cfg.id_table_cap, cfg.id_tomb_cap, t.ms(u64::from(cfg.id_tomb_ms))),
@@ -2147,7 +2150,15 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         self.dm.frame.clear();
         self.dm.reqs.clear();
         let r = match self.accts.get(a) {
-            Some(x) => P::dead_man_refresh(self.rd, &x.tpl, c.arg, &self.insts_buf, &clk, &mut self.dm),
+            Some(x) => P::dead_man_refresh_signed(
+                self.rd,
+                &x.tpl,
+                &x.rest_credential,
+                c.arg,
+                &self.insts_buf,
+                &clk,
+                &mut self.dm,
+            ),
             None => return,
         };
         let mut ok = r.is_ok();

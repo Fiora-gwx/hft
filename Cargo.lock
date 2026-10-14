@@ -1247,9 +1247,12 @@ dependencies = [
  "hft-risk",
  "hft-strategy-sdk",
  "hft-types",
+ "hft-venue-proto",
  "serde",
  "serde_json",
  "toml 0.8.23",
+ "venue-binance",
+ "venue-bitget",
  "zerocopy",
 ]
 

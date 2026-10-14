@@ -649,3 +649,134 @@ fn tool_132_immutables() {
         assert_eq!(out.exists(), exit == 0, "{id}");
     }
 }
+
+#[test]
+fn tool_130_caps_overrides() {
+    use hft_types::VenueId;
+    use hft_venue_proto::VenueProtocol;
+    let dir = scratch("tool_130");
+    let caps = std::fs::read_to_string(fixtures().join("refdata-basic/caps.toml")).unwrap();
+    let mut value: toml::Value = toml::from_str(&caps).unwrap();
+    value["caps"].as_table_mut().unwrap().remove("binance-usdm");
+    let defaults = toml::to_string(&value).unwrap();
+    let overrides = std::fs::read_to_string(fixtures().join("refdata-basic/venue_caps.toml")).unwrap();
+    let base = venue_binance::Usdm::default_caps(|_| None);
+    let disabled = format!(
+        "flags = {}\nreason = \"disable amend\"",
+        base.flags.0 & !hft_refdata::CapFlags::AMEND.0
+    );
+    let unsupported = format!("flags = {}", base.flags.0 | (1 << 30));
+    let events = base
+        .ignorable_user_events
+        .iter()
+        .map(|s| format!("\"{s}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    let appended = format!("ignorable_user_events = [{events},\"LOCAL_NOTE\"]");
+    let cases = [
+        ("1", "", 0, ""),
+        ("2", disabled.as_str(), 0, ""),
+        ("3", unsupported.as_str(), 1, "not supported"),
+        ("4", "required_margin_mode = \"cross\"", 1, "reason"),
+        ("5", "ignorable_user_events = []", 1, "may only append"),
+        ("6", appended.as_str(), 0, ""),
+        (
+            "7",
+            "dms_timeout_ms = 19999\ndms_refresh_ms = 10000\nreason = \"boundary\"",
+            1,
+            "DeadManRange",
+        ),
+        (
+            "8",
+            "dms_timeout_ms = 20000\ndms_refresh_ms = 10000\nreason = \"boundary\"",
+            0,
+            "",
+        ),
+        (
+            "10",
+            "required_spot_borrow = false\nreason = \"invalid perp\"",
+            1,
+            "CapsMarketMismatch",
+        ),
+        (
+            "11",
+            "required_margin_mode = \"mixed\"\nreason = \"invalid mode\"",
+            1,
+            "CapsMarketMismatch",
+        ),
+        (
+            "12",
+            "margin_data = { kind = \"poll\", interval_ms = 0 }\nreason = \"invalid poll\"",
+            1,
+            "CapsValue",
+        ),
+    ];
+    for (id, over, exit, msg) in cases {
+        let over = format!("[venue_caps.binance-usdm]\n{over}\n");
+        let (r, out) = build_basic(
+            &dir,
+            id,
+            &[
+                ("caps.toml", &caps, &defaults),
+                ("venue_caps.toml", &overrides, &over),
+            ],
+            None,
+        );
+        assert_eq!(r.code, exit, "{id}: {}{}", r.stderr, r.stdout);
+        assert!(r.stderr.contains(msg), "{id}: {}", r.stderr);
+        assert_eq!(out.exists(), exit == 0);
+        if exit == 0 {
+            let blob = std::fs::read(&out).unwrap();
+            let rd = hft_refdata::RefData::load(&blob, None).unwrap();
+            let c = rd.caps(VenueId::BINANCE_USDM);
+            match id {
+                "1" => assert_eq!(c, &base),
+                "2" => assert_eq!(c.flags.0 & hft_refdata::CapFlags::AMEND.0, 0),
+                "6" => assert_eq!(
+                    c.ignorable_user_events.last().map(|s| s.as_ref()),
+                    Some("LOCAL_NOTE")
+                ),
+                "8" => assert_eq!((c.dms_timeout_ms, c.dms_refresh_ms), (20_000, 10_000)),
+                _ => unreachable!(),
+            }
+            let dump = dir.join(format!("{id}-dump.toml"));
+            std::fs::write(&dump, hft_refdata::dump(&rd)).unwrap();
+            let again = dir.join(format!("{id}-again.blob"));
+            let r = run(&["build", "--kind", "refdata", "--in", p(&dump), "--out", p(&again)]);
+            assert_eq!(r.code, 0, "{}", r.stderr);
+            assert_eq!(std::fs::read(again).unwrap(), blob);
+        }
+    }
+    for (tag, invalid) in [
+        ("non-table", "[venue_caps]\nbinance-usdm = 3\n"),
+        (
+            "duplicate-alias",
+            "[venue_caps.binance-usdm]\n[venue_caps.BINANCE_USDM]\n",
+        ),
+    ] {
+        let (r, out) = build_basic(
+            &dir,
+            tag,
+            &[
+                ("caps.toml", &caps, &defaults),
+                ("venue_caps.toml", &overrides, invalid),
+            ],
+            None,
+        );
+        assert_eq!(r.code, 1, "{tag}: {}", r.stderr);
+        assert!(!out.exists());
+    }
+    let (r, out) = build_basic(
+        &dir,
+        "9",
+        &[(
+            "venue_caps.toml",
+            &overrides,
+            "[venue_caps.bitget-uta-spot]\nrequired_spot_borrow = true\nreason = \"invalid borrow\"\n",
+        )],
+        None,
+    );
+    assert_eq!(r.code, 1);
+    assert!(r.stderr.contains("SpotBorrowRequired"), "{}", r.stderr);
+    assert!(!out.exists());
+}

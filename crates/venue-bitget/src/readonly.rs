@@ -9,10 +9,12 @@ use hft_venue_proto::{
 };
 use serde::Deserialize;
 
+#[allow(clippy::too_many_arguments)] // Explicit borrowed credentials keep templates secret-free.
 pub(crate) fn request(
     line: Line,
     rd: &RefData,
     t: &Templates,
+    cred: &Credential,
     a: AccountId,
     q: &RoQuery,
     clk: &WallClock,
@@ -49,7 +51,7 @@ pub(crate) fn request(
     out.path_query
         .push(path.as_bytes())
         .map_err(|_| EncodeErr::FieldOverflow)?;
-    crate::orders::sign_headers(t, clk, out).map_err(|_| EncodeErr::FieldOverflow)
+    crate::orders::sign_headers(t, cred, clk, out).map_err(|_| EncodeErr::FieldOverflow)
 }
 #[derive(Deserialize)]
 struct Envelope<T> {

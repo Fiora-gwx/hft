@@ -84,5 +84,45 @@ fn bin_507_skip_event_usdm(c: &mut Criterion) {
         });
     }
 }
-criterion_group!(benches, bin_506_decode_otu, bin_507_skip_event_usdm);
+
+// Warm bootstrap decoder: allocations are included, never interpreted as a hot acct_* result.
+fn bin_508_account_positions(c: &mut Criterion) {
+    use hft_venue_proto::account::{AccountProtocol, Query, State};
+    let rd = support::rd();
+    let mut rows = Vec::new();
+    let body = loop {
+        let i = rd
+            .insts_of_venue(Usdm::VENUE)
+            .get(rows.len())
+            .expect("enough configured symbols");
+        rows.push(serde_json::json!({"symbol":rd.inst_meta(*i).symbol.as_ref(), "positionSide":"BOTH", "positionAmt":"0.001", "entryPrice":"65000.125", "unRealizedProfit":"0", "liquidationPrice":"60000.555"}));
+        let body = serde_json::to_vec(&rows).unwrap();
+        if body.len() >= 50 * 1024 {
+            break body;
+        }
+    };
+    let mut state = State::default();
+    Usdm::account_decode(rd, support::ACCT, &Query::Positions, 200, &body, 1, &mut state).unwrap();
+    assert_eq!(state.margin_items.len(), rows.len());
+    c.bench_function("bench_acct_decode_position_risk", |b| {
+        b.iter(|| {
+            Usdm::account_decode(
+                rd,
+                support::ACCT,
+                &Query::Positions,
+                200,
+                black_box(&body),
+                1,
+                &mut state,
+            )
+            .unwrap()
+        })
+    });
+}
+criterion_group!(
+    benches,
+    bin_506_decode_otu,
+    bin_507_skip_event_usdm,
+    bin_508_account_positions
+);
 criterion_main!(benches);

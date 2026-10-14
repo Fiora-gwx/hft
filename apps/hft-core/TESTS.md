@@ -4290,3 +4290,5 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 上线门槛的唯一定义在 [testing §8](../../docs/testing.md#8-上线门槛);上线步骤见 [launch](../../docs/runbooks/launch.md)。
 
 CORE-090 的网关入口包含配对 rep-bulk，变长 MarginReport/AccountConfigReport 的完整长度由 peek_len 预留后交给 InputSlot；发布顺序回归见 [VEN-242](../../crates/hft-venue/TESTS.md)。
+
+网关 REST 凭证装配由 CORE-120 的进程构建路径校验;签名入口传参与模板无凭证的行为分别归 VEN-228/391 与 BIN-063/BGT-063。

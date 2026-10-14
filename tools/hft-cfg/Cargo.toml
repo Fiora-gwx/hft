@@ -17,6 +17,9 @@ path = "src/main.rs"
 # Never depends on strategies/* or hft-strategy-registry (tools/README.md "依赖"; cargo xtask deps).
 [dependencies]
 hft-types.workspace = true
+hft-venue-proto.workspace = true
+venue-binance.workspace = true
+venue-bitget.workspace = true
 hft-refdata = { workspace = true, features = ["tools"] }
 hft-event.workspace = true
 hft-risk.workspace = true

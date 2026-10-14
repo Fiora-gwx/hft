@@ -531,3 +531,54 @@ fn bgt_201_private_subscribe() {
         br#"{"op":"unsubscribe","args":[{"instType":"UTA","topic":"order"},{"instType":"UTA","topic":"account"}]}"#
     );
 }
+
+#[test]
+fn bgt_063_no_secret_retained() {
+    let original = key();
+    let mut changed = original;
+    changed.secret.0.clear();
+    changed
+        .secret
+        .0
+        .push(b"unique-secret-marker-32-bytes-long")
+        .unwrap();
+    changed.passphrase.clear();
+    changed.passphrase.push(b"different-passphrase").unwrap();
+    let t = Fut::build_templates(&cfg(), rd(), support::ACCT, &original).unwrap();
+    let other = Fut::build_templates(&cfg(), rd(), support::ACCT, &changed).unwrap();
+    let query = hft_venue_proto::RoQuery {
+        kind: hft_venue_proto::RoKind::Fills,
+        inst: support::F_BTC,
+        limit: 1,
+        cursor: 0,
+        since_ms: support::WC.unix_ms,
+    };
+    let mut a = hft_venue_proto::RestReqBuf::default();
+    let mut b = hft_venue_proto::RestReqBuf::default();
+    Fut::ro_request_signed(
+        support::rd(),
+        &t,
+        &original,
+        support::ACCT,
+        &query,
+        &support::WC,
+        &mut a,
+    )
+    .unwrap();
+    Fut::ro_request_signed(
+        support::rd(),
+        &t,
+        &changed,
+        support::ACCT,
+        &query,
+        &support::WC,
+        &mut b,
+    )
+    .unwrap();
+    assert!(a.redacted && b.redacted);
+    assert!(a.path_query != b.path_query || a.headers != b.headers);
+    assert!(Fut::ro_request(support::rd(), &t, support::ACCT, &query, &support::WC, &mut a).is_err());
+    assert_eq!(t, other);
+    assert!(core::mem::size_of_val(&t) < 32);
+    assert!(!format!("{t:?}").contains("unique-secret"));
+}

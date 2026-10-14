@@ -204,6 +204,7 @@ fn order(
     };
     if e.cum_filled.0 < 0
         || e.qty.0 < 0
+        || e.qty > e.cum_filled
         || (e.cum_filled.0 > 0 && e.avg_px.0 <= 0)
         || (fill && (e.qty.0 <= 0 || e.px.0 <= 0))
     {
@@ -217,13 +218,15 @@ fn order(
     let mut cash_amount = Qty(0);
     let mut cash_qty = Qty(0);
     if fill {
-        if e.fee_asset.0 == 0 {
+        let fee_exp = if e.fee_asset.0 == 0 {
+            -8
+        } else {
+            rd.asset(e.fee_asset).exp.qty_exp
+        };
+        e.fee = Qty(fixed(r.n.ok_or(DecodeErr::Shape)?, fee_exp)?);
+        if e.fee.0 != 0 && e.fee_asset.0 == 0 {
             return Err(DecodeErr::Shape);
         }
-        e.fee = Qty(fixed(
-            r.n.ok_or(DecodeErr::Shape)?,
-            rd.asset(e.fee_asset).exp.qty_exp,
-        )?);
         if let Some(cash) = r.rp {
             cash_qty = e.qty;
             cash_amount = Qty(fixed(cash, rd.asset(h.quote).exp.qty_exp)?);
@@ -231,6 +234,7 @@ fn order(
     }
     let received = if side == Side::Buy { h.asset } else { h.quote };
     let deviation = fill
+        && e.fee.0 != 0
         && match rd.caps(line.venue()).fee_asset_rule {
             FeeAssetRule::Quote => e.fee_asset != h.quote,
             FeeAssetRule::ReceivedAsset => e.fee_asset != received,

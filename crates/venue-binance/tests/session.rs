@@ -110,7 +110,13 @@ fn bin_080_session_keepalive_request() {
     let t = Usdm::build_templates(&cfg(1500), support::rd(), support::ACCT, &support::hm1()).unwrap();
     let mut out = RestReqBuf::default();
     assert_eq!(
-        Usdm::session_keepalive_request(support::rd(), &t, &support::WC, &mut out),
+        Usdm::session_keepalive_request_signed(
+            support::rd(),
+            &t,
+            &crate::support::hm1(),
+            &support::WC,
+            &mut out
+        ),
         Ok(true)
     );
     assert_eq!(out.method, Method::Put);
@@ -120,7 +126,13 @@ fn bin_080_session_keepalive_request() {
     assert!(out.redacted);
     let before = out;
     assert_eq!(
-        Spot::session_keepalive_request(support::rd(), &t, &support::WC, &mut out),
+        Spot::session_keepalive_request_signed(
+            support::rd(),
+            &t,
+            &crate::support::hm1(),
+            &support::WC,
+            &mut out
+        ),
         Ok(false)
     );
     assert_eq!(out, before);
@@ -209,4 +221,55 @@ fn bin_144_decode_identity() {
             assert_eq!(uid, [0xff; 24]);
         }
     }
+}
+
+#[test]
+fn bin_063_no_secret_retained() {
+    let original = support::hm1();
+    let mut changed = original;
+    changed.secret.0.clear();
+    changed
+        .secret
+        .0
+        .push(b"unique-secret-marker-32-bytes-long")
+        .unwrap();
+    changed.passphrase.clear();
+    changed.passphrase.push(b"different-passphrase").unwrap();
+    let t = Usdm::build_templates(&cfg(1500), support::rd(), support::ACCT, &original).unwrap();
+    let other = Usdm::build_templates(&cfg(1500), support::rd(), support::ACCT, &changed).unwrap();
+    let query = hft_venue_proto::RoQuery {
+        kind: hft_venue_proto::RoKind::Fills,
+        inst: support::U_BTC,
+        limit: 1,
+        cursor: 0,
+        since_ms: support::WC.unix_ms,
+    };
+    let mut a = hft_venue_proto::RestReqBuf::default();
+    let mut b = hft_venue_proto::RestReqBuf::default();
+    Usdm::ro_request_signed(
+        support::rd(),
+        &t,
+        &original,
+        support::ACCT,
+        &query,
+        &support::WC,
+        &mut a,
+    )
+    .unwrap();
+    Usdm::ro_request_signed(
+        support::rd(),
+        &t,
+        &changed,
+        support::ACCT,
+        &query,
+        &support::WC,
+        &mut b,
+    )
+    .unwrap();
+    assert!(a.redacted && b.redacted);
+    assert!(a.path_query != b.path_query || a.headers != b.headers);
+    assert!(Usdm::ro_request(support::rd(), &t, support::ACCT, &query, &support::WC, &mut a).is_err());
+    assert_eq!(t, other);
+    assert!(core::mem::size_of_val(&t) < 32);
+    assert!(!format!("{t:?}").contains("unique-secret"));
 }
