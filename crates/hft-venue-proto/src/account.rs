@@ -90,12 +90,9 @@ pub fn rules(
     min_notional: &str,
 ) -> Result<(), DecodeErr> {
     let h = rd.inst(inst);
-    let m = rd.inst_meta(inst);
-    let px_exp = h.px_exp.checked_sub(m.px_unit_shift).ok_or(DecodeErr::Number)?;
-    let qty_exp = h.qty_exp.checked_sub(m.qty_unit_shift).ok_or(DecodeErr::Number)?;
-    if decimal(tick, px_exp)? != h.tick
-        || decimal(lot, qty_exp)? != h.lot
-        || decimal(min_qty, qty_exp)? != h.min_qty.0
+    if decimal(tick, h.px_wire_exp)? != h.tick
+        || decimal(lot, h.qty_wire_exp)? != h.lot
+        || decimal(min_qty, h.qty_wire_exp)? != h.min_qty.0
         || decimal(min_notional, -6)? != h.min_notional.0
     {
         return Err(DecodeErr::Shape);

@@ -9,6 +9,9 @@ use hft_venue_proto::{
 use std::sync::{Arc, Mutex};
 
 fn rd() -> &'static RefData {
+    rd_shift(0)
+}
+fn rd_shift(shift: i8) -> &'static RefData {
     let mut b = RdbBuilder::new(1);
     for (id, name, class, px, qty) in [
         (AssetId(1), "USDT", AssetClass::Stable, -6, -8),
@@ -89,9 +92,11 @@ fn rd() -> &'static RefData {
             max_qty: Qty(100_000_000_000),
             min_notional: Notional(5_000_000),
             book_window: 4096,
-            tick_str: "0.1".into(),
-            lot_str: "0.001".into(),
-            min_qty_str: "0.001".into(),
+            px_unit_shift: shift,
+            qty_unit_shift: shift,
+            tick_str: if shift == 0 { "0.1" } else { "100" }.into(),
+            lot_str: if shift == 0 { "0.001" } else { "0.000001" }.into(),
+            min_qty_str: if shift == 0 { "0.001" } else { "0.000001" }.into(),
             max_leverage: 5,
             funding_interval_s: 28800,
             ..InstSpec::default()
@@ -386,6 +391,12 @@ fn exercise<P: AccountProtocol>(bitget: bool) {
 }
 #[test]
 fn core_120_mock_accounts_bootstrap_reauth_and_drift() {
+    // Venue units can differ from asset units; rules must share the decoder normalization.
+    let shifted = rd_shift(3);
+    for inst in [InstId(1), InstId(2)] {
+        assert!(hft_venue_proto::account::rules(shifted, inst, "100", "0.000001", "0.000001", "5").is_ok());
+        assert!(hft_venue_proto::account::rules(shifted, inst, "0.1", "0.000001", "0.000001", "5").is_err());
+    }
     if std::env::var_os("HFT_MOCK_ACCOUNT_CHILD").is_none() {
         let o = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
