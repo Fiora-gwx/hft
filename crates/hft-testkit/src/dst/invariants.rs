@@ -1437,8 +1437,8 @@ fn check_8(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
 
 // ------------------------------------------------------------------------------------------- I9
 
-/// INV-9: the same seed twice gives byte-identical intent streams and hash trails (the run loop
-/// reruns 5% of seeds in process; the version-tag job compares `fixtures/dst/hashtrail.toml`).
+/// INV-9: the same seed twice gives byte-identical intent streams, hash trails and event digests
+/// (the run loop reruns 5% of seeds in process; no digest is committed to the repository).
 pub fn inv_9_same_seed_same_trail() -> Scenario {
     standing(Scenario::new("INV-9", "same seed, same trail"), InvId::I9)
 }

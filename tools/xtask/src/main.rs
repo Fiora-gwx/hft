@@ -27,7 +27,7 @@ const SUBCOMMANDS: &[(&str, &str)] = &[
     ),
     (
         "dst",
-        "--seeds N [--steps M] [--seed S] [--suite X] [--regressions] [--trace] | --hashtrail check|write [--first K] deterministic simulation via hft-dst",
+        "--seeds N [--steps M] [--seed S] [--suite X] [--regressions] [--trace] deterministic simulation via hft-dst",
     ),
     (
         "deps",

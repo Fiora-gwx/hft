@@ -62,16 +62,7 @@ fixtures/
                                    cmd_hash、帧与响应金样;文件清单与格式归 hft-ctl-proto 的 TESTS
   replay/<name>.pointer.toml       回放样本指针(S3 URI + SHA-256 + 大小 + schema 版本)
   dst-seeds/<suite>.txt            DST 失败种子回归集(每行:种子、首次失败日期、Agent Note 或 issue 链接)
-  dst/hashtrail.toml               DST 一致性金样:固定种子 → 各自的 `HashTrail`(`cargo xtask dst` 输出,类型归 hft-testkit);改变 DST 轨迹的 PR 在同一提交里重新生成;
-                                   CI 在 x86_64 上逐字节核对,标签工作流的 aarch64 一致性集与同一提交的这份金样比较(规则归 development 与 testing §6)
-  dst/recon-before.toml            已提交对账 actor 的迁移参考;TK-137 用旧 actor 重现摘要,新 actor 核对首条差异与检查器透明性;不覆盖当前 HashTrail 金样
-  dst/partial-before.toml          部分成交故障接通前的迁移参考;TK-157 重现空操作摘要并核对首次故障前缀及检查器透明性;不覆盖当前 HashTrail 金样
-  dst/stale-before.toml            默认旧代数故障接通前的迁移参考;TK-163 重现旧摘要并核对首次故障前缀及检查器透明性;不覆盖当前 HashTrail 金样
-  dst/cancel-before.toml           已成交撤单拒绝故障接通前的迁移参考;TK-173 重现旧摘要并核对实际暂缓及检查器透明性
-  dst/late-before.toml             回收槽回报重送前的迁移参考;TK-169 重现旧摘要并核对首次故障前缀及检查器透明性;不覆盖当前 HashTrail 金样
-  dst/history/<提交>/              10/12 五次 HashTrail 迁移的永久证据:迁移前金样 `before.toml`(父提交原文)、CI 审计制品中逐字节复制的输出、
-                                   审计程序源码 `audit/*.txt`(不编译);`dst/history/MANIFEST.toml` 登记运行号、制品 ZIP 与每个文件的 SHA-256;
-                                   TK-175 核对并把金样串到 `recon-before.toml`;不得重新生成,`.gitattributes` 对该目录关闭换行转换
+  (dst/ 已移除,2026-10-14)        DST 不登记 HashTrail 金样或迁移参考;确定性由进程内两次运行比较(hft-testkit INV-9、TK-181)
 ```
 
 规则:`<case>` 用行为命名(`snapshot_then_gap_triggers_resync`、`price_in_scientific_notation`、`missing_E_field`、`base_asset_fee_on_buy`),不按日期编号。

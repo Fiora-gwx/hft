@@ -9,8 +9,6 @@
 //! - Runs: `hft-dst run --seeds A..B` for the range (`hft-dst repro` per seed with `--trace`), `hft-dst
 //!   repro` per regression seed; crash directories under `target/dst/`. Nothing is written outside
 //!   `target/` (no server ledger).
-//! - `--hashtrail check|write`: `hft-dst hashtrail` per registered seed of
-//!   `fixtures/dst/hashtrail.toml`, compared with / written into its `trail` values.
 //! - JSON `target/xtask/dst.json`: `seeds` (16-digit hex, range then regressions), `runs`
 //!   (`seed`, `suite`, `source`), `steps`, `strategy_set`, `result`.
 
@@ -25,13 +23,6 @@ use crate::{EXIT_ENV, EXIT_FAIL, EXIT_OK, EnvError, write_json};
 /// Where the DST framework lives once it exists (crates/hft-testkit README §6).
 pub const DST_DIR: &str = "crates/hft-testkit/src/dst";
 pub const REGRESSIONS: &str = "fixtures/dst-seeds";
-pub const HASHTRAIL: &str = "fixtures/dst/hashtrail.toml";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Trail {
-    Check,
-    Write,
-}
 
 /// Parsed arguments.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -44,8 +35,6 @@ pub struct Opts {
     pub regressions: bool,
     pub trace: bool,
     pub strategy: Option<String>,
-    pub hashtrail: Option<Trail>,
-    pub first: Option<u64>,
 }
 
 /// `123` or `0x7b`.
@@ -76,48 +65,18 @@ pub fn parse(args: &[String]) -> Result<Opts, EnvError> {
             "--seeds" => o.seeds = Some(num(val(&mut it, a)?, a)?),
             "--steps" => o.steps = Some(num(val(&mut it, a)?, a)?),
             "--seed" => o.seed = Some(num(val(&mut it, a)?, a)?),
-            "--first" => o.first = Some(num(val(&mut it, a)?, a)?),
             "--suite" => o.suite = Some(val(&mut it, a)?),
             "--case" => o.case = Some(val(&mut it, a)?),
             "--strategy" => o.strategy = Some(val(&mut it, a)?),
             "--regressions" => o.regressions = true,
             "--trace" => o.trace = true,
-            "--hashtrail" => {
-                o.hashtrail = Some(match val(&mut it, a)?.as_str() {
-                    "check" => Trail::Check,
-                    "write" => Trail::Write,
-                    x => return Err(EnvError(format!("--hashtrail {x}: expected check or write"))),
-                })
-            }
             x => return Err(EnvError(format!("unknown argument {x}"))),
         }
     }
-    match o.hashtrail {
-        Some(t) => {
-            if o.seeds.is_some() || o.seed.is_some() || o.suite.is_some() || o.regressions || o.case.is_some()
-            {
-                return Err(EnvError(
-                    "--hashtrail runs the registered seeds: it cannot be combined with --seeds/--seed/--suite/--regressions/--case".into(),
-                ));
-            }
-            match (t, o.first) {
-                (Trail::Write, Some(_)) => {
-                    return Err(EnvError("--first goes only with --hashtrail check".into()));
-                }
-                (_, Some(0)) => return Err(EnvError("--first must be at least 1".into())),
-                _ => {}
-            }
-        }
-        None => {
-            if o.first.is_some() {
-                return Err(EnvError("--first goes only with --hashtrail check".into()));
-            }
-            match o.seeds {
-                None => return Err(EnvError("--seeds N is required".into())),
-                Some(0) => return Err(EnvError("--seeds must be at least 1".into())),
-                _ => {}
-            }
-        }
+    match o.seeds {
+        None => return Err(EnvError("--seeds N is required".into())),
+        Some(0) => return Err(EnvError("--seeds must be at least 1".into())),
+        _ => {}
     }
     Ok(o)
 }
@@ -224,82 +183,6 @@ fn fail(msg: impl std::fmt::Display) -> i32 {
     EXIT_ENV
 }
 
-/// One registered conformance seed of `fixtures/dst/hashtrail.toml`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TrailSeed {
-    pub seed: u64,
-    pub suite: String,
-    pub steps: u64,
-    pub trail: String,
-}
-
-/// The `[[seed]]` tables of the HashTrail golden file, in registration (file) order.
-pub fn read_trails(text: &str) -> Result<Vec<TrailSeed>, EnvError> {
-    let t: toml::Table = text.parse().map_err(|e| EnvError(format!("{HASHTRAIL}: {e}")))?;
-    let arr = t
-        .get("seed")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| EnvError(format!("{HASHTRAIL}: no [[seed]] tables")))?;
-    arr.iter()
-        .enumerate()
-        .map(|(i, v)| {
-            let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
-            let bad = || {
-                EnvError(format!(
-                    "{HASHTRAIL}: [[seed]] #{}: needs seed, suite, steps, trail",
-                    i + 1
-                ))
-            };
-            Ok(TrailSeed {
-                seed: s("seed").as_deref().and_then(parse_u64).ok_or_else(bad)?,
-                suite: s("suite").ok_or_else(bad)?,
-                steps: v
-                    .get("steps")
-                    .and_then(|x| x.as_integer())
-                    .and_then(|x| u64::try_from(x).ok())
-                    .ok_or_else(bad)?,
-                trail: s("trail").ok_or_else(bad)?,
-            })
-        })
-        .collect()
-}
-
-/// `text` with the `trail` value of the i-th `[[seed]]` table replaced by `trails[i]` (all else
-/// byte-identical).
-pub fn rewrite_trails(text: &str, trails: &[String]) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut ix: Option<usize> = None;
-    for line in text.split_inclusive('\n') {
-        let t = line.trim_start();
-        if t.starts_with("[[seed]]") {
-            ix = Some(ix.map_or(0, |i| i + 1));
-        } else if t.starts_with('[') {
-            ix = None;
-        }
-        if let Some(i) = ix
-            && t.starts_with("trail")
-            && t[5..].trim_start().starts_with('=')
-            && let Some(new) = trails.get(i)
-        {
-            let indent = &line[..line.len() - t.len()];
-            let nl = if line.ends_with('\n') { "\n" } else { "" };
-            out.push_str(&format!("{indent}trail = \"{new}\"{nl}"));
-            continue;
-        }
-        out.push_str(line);
-    }
-    out
-}
-
-/// `trail <hex> points=<n>` → `<hex>`.
-pub fn parse_trail_line(stdout: &str) -> Option<String> {
-    stdout
-        .lines()
-        .find_map(|l| l.strip_prefix("trail "))
-        .and_then(|r| r.split_whitespace().next())
-        .map(str::to_string)
-}
-
 fn build_runner(root: &Path, exec: &mut dyn Exec) -> Result<String, i32> {
     let build = Cmd::new(
         "cargo",
@@ -322,108 +205,13 @@ fn build_runner(root: &Path, exec: &mut dyn Exec) -> Result<String, i32> {
     }
 }
 
-/// `--hashtrail check|write [--first K]`: `hft-dst hashtrail --seed S --suite X --steps N` per
-/// registered seed (stdout `trail <xxh3_128 hex> points=<n>`); `check` stops at the first digest
-/// that differs from the file (exit 1), `write` rewrites the `trail` values (seed set unchanged).
-fn hashtrail(root: &Path, o: &Opts, exec: &mut dyn Exec) -> i32 {
-    let path = root.join(HASHTRAIL);
-    let text = match std::fs::read_to_string(&path) {
-        Ok(t) => t,
-        Err(e) => return fail(format!("{HASHTRAIL}: {e}")),
-    };
-    let seeds = match read_trails(&text) {
-        Ok(s) => s,
-        Err(e) => return fail(e),
-    };
-    let n = match o.first {
-        Some(k) if k as usize > seeds.len() => {
-            return fail(format!(
-                "--first {k}: {HASHTRAIL} registers {} seeds",
-                seeds.len()
-            ));
-        }
-        Some(k) => k as usize,
-        None => seeds.len(),
-    };
-    let bin = match build_runner(root, exec) {
-        Ok(b) => b,
-        Err(c) => return c,
-    };
-    let write = o.hashtrail == Some(Trail::Write);
-    let mut got = Vec::with_capacity(n);
-    let mut code = EXIT_OK;
-    let mut first_diff = serde_json::Value::Null;
-    for t in &seeds[..n] {
-        let c = Cmd::capture(
-            &bin,
-            &[
-                "hashtrail",
-                "--seed",
-                &hex(t.seed),
-                "--suite",
-                &t.suite,
-                "--steps",
-                &t.steps.to_string(),
-            ],
-        );
-        let r = match exec.run(&c) {
-            Ok(r) => r,
-            Err(e) => return fail(e),
-        };
-        eprint!("{}", r.stderr);
-        if !r.ok() {
-            eprintln!("dst: `{}` exited {}", c.line(), r.code);
-            code = if r.code == EXIT_ENV { EXIT_ENV } else { EXIT_FAIL };
-            break;
-        }
-        let Some(trail) = parse_trail_line(&r.stdout) else {
-            return fail(format!("`{}` printed no `trail <hex>` line", c.line()));
-        };
-        if !write && trail != t.trail {
-            eprintln!(
-                "dst: HashTrail differs: seed={} suite={} steps={} expected={} got={}",
-                hex(t.seed),
-                t.suite,
-                t.steps,
-                t.trail,
-                trail
-            );
-            first_diff = json!({"seed": hex(t.seed), "suite": t.suite, "expected": t.trail, "got": trail});
-            code = EXIT_FAIL;
-            break;
-        }
-        got.push(trail);
-    }
-    if write
-        && code == EXIT_OK
-        && let Err(e) = std::fs::write(&path, rewrite_trails(&text, &got))
-    {
-        return fail(format!("write {HASHTRAIL}: {e}"));
-    }
-    let j = json!({
-        "hashtrail": if write { "write" } else { "check" },
-        "seeds": seeds[..n].iter().map(|t| hex(t.seed)).collect::<Vec<_>>(),
-        "first_divergence": first_diff,
-        "result": match code { EXIT_OK => "pass", EXIT_FAIL => "fail", _ => "error" },
-    });
-    if let Err(e) = write_json(root, "dst", &j) {
-        return fail(e);
-    }
-    eprintln!(
-        "dst: --hashtrail {}: {n} seeds -> {}",
-        if write { "write" } else { "check" },
-        if code == EXIT_OK { "PASS" } else { "FAIL" }
-    );
-    code
-}
-
 /// Runs `dst` with `exec`; returns the exit code.
 pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
     let o = match parse(args) {
         Ok(o) => o,
         Err(e) => {
             return fail(format!(
-                "{e}\nusage: cargo xtask dst --seeds N [--steps M] [--seed S] [--suite X] [--case ID] [--regressions] [--trace] [--strategy K]\n       cargo xtask dst --hashtrail check|write [--first K] [--strategy K]"
+                "{e}\nusage: cargo xtask dst --seeds N [--steps M] [--seed S] [--suite X] [--case ID] [--regressions] [--trace] [--strategy K]"
             ));
         }
     };
@@ -437,12 +225,6 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
             "--strategy {k}: strategies/registry/tests/{}_dst.rs is not in the repository",
             k.replace('-', "_")
         ));
-    }
-    if o.hashtrail.is_some() {
-        if !root.join(HASHTRAIL).is_file() {
-            return fail(format!("{HASHTRAIL} not found"));
-        }
-        return hashtrail(root, &o, exec);
     }
     let steps = o.steps.unwrap_or(hft_testkit::seed::DST_DEFAULT_STEPS);
     let start = match o.seed {

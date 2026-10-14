@@ -37,7 +37,7 @@ fn ci_repo(tag: &str) -> Fixture {
     f
 }
 
-const STEPS: [&str; 14] = [
+const STEPS: [&str; 13] = [
     "cargo fmt --all --check",
     "cargo clippy --profile ci --workspace --all-targets --all-features -- -D warnings",
     "cargo deny check licenses bans",
@@ -49,7 +49,6 @@ const STEPS: [&str; 14] = [
     "xtask dst --seeds 200 --regressions",
     "xtask dst --seeds 200 --regressions --case LED-080",
     "xtask dst --seeds 200 --regressions --case LED-081",
-    "xtask dst --hashtrail check --first 50",
     "xtask gen-schema --check",
     "xtask doc-check",
 ];
@@ -65,14 +64,14 @@ fn tool_003_stops_at_first_failure() {
 }
 
 #[test]
-fn tool_004_runs_twelve_steps_in_order() {
+fn tool_004_runs_eleven_steps_in_order() {
     let f = ci_repo("ci-004");
     let s = Script::new(&f, &[], 0);
     let r = f.xtask_script(&["ci"], &s, &[]);
     assert_eq!(r.code, 0, "{}", r.stderr);
     assert_eq!(s.calls(), STEPS.to_vec());
     let j = r.json.unwrap();
-    assert_eq!(j["steps"].as_array().unwrap().len(), 12);
+    assert_eq!(j["steps"].as_array().unwrap().len(), 11);
     assert_eq!(j["result"], "pass");
 }
 
@@ -267,5 +266,5 @@ fn tool_009_dst_smoke_args() {
         !calls[i + 1].contains("--seed ") && !calls[i + 2].contains("--seed "),
         "the case uses the same commit-derived start"
     );
-    assert_eq!(calls[i + 3], "xtask dst --hashtrail check --first 50");
+    assert_eq!(calls[i + 3], "xtask gen-schema --check");
 }

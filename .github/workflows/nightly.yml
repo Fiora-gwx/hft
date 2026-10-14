@@ -24,6 +24,18 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # The full lane of the quality gates on the nightly commit (the same jobs as an integration-branch
+  # push: whole-workspace tests, heavy tests, replay-dst, benchmarks, aarch64 check).
+  quality-gates:
+    uses: ./.github/workflows/quality-gates.yml
+    with:
+      lane: full
+      sha: ${{ inputs.sha || '' }}
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write
+
   replay-dst:
     uses: ./.github/workflows/replay-dst.yml
     with:
@@ -49,10 +61,6 @@ jobs:
         if: steps.xtask.outputs.setup == 'true'
         run: cargo xtask setup
 
-      # M2 (cargo xtask dst, fixtures/dst/hashtrail.toml): every registered conformance seed.
-      - name: HashTrail check, all conformance seeds
-        if: steps.xtask.outputs.dst == 'true' && hashFiles('fixtures/dst/hashtrail.toml') != ''
-        run: cargo xtask dst --hashtrail check
       # M2: a batch of new seeds; N (`seeds`) and M (`steps`) from tools/xtask/dst-nightly.toml,
       # start S = UTC date YYYYMMDD * 10^6 (docs/development.md#每夜任务nightlyyml).
       - name: DST new seeds (regression smoke)
@@ -208,7 +216,7 @@ jobs:
 
   # One message to the alert group: job verdicts and the day's decoupling exemptions.
   summary:
-    needs: [nightly, nightly-arm, replay-dst]
+    needs: [nightly, nightly-arm, replay-dst, quality-gates]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -229,6 +237,7 @@ jobs:
           NIGHTLY_RESULT: ${{ needs.nightly.result }}
           ARM_RESULT: ${{ needs.nightly-arm.result }}
           REPLAY_DST_RESULT: ${{ needs.replay-dst.result }}
+          QUALITY_GATES_RESULT: ${{ needs.quality-gates.result }}
           ARM_CACHE_HIT: ${{ needs.nightly-arm.outputs.cache-hit }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |

@@ -20,7 +20,7 @@ spec: README.md
 | 3. 假时钟 | TK-022–TK-024 |
 | 4. 策略测试桩 | TK-025–TK-035 |
 | 5. 解耦门槛夹具 | TK-036–TK-042、TK-094–TK-096、TK-117–TK-119、TK-141、TOOL-024、TOOL-027–TOOL-029 |
-| 6. DST 框架 | TK-043–TK-070、TK-100–TK-116、TK-120–TK-125、TK-147–TK-154、TK-176–TK-179 |
+| 6. DST 框架 | TK-043–TK-070、TK-100–TK-116、TK-120–TK-125、TK-147–TK-154、TK-176–TK-179、TK-181 |
 | 7. 状态哈希对比 | TK-071–TK-074 |
 | 8. hft-dst 运行器 | TK-075–TK-088、TK-143、TK-146、TK-180 |
 | 9. 分配计数与基准驱动 | TK-089–TK-091 |
@@ -738,15 +738,7 @@ spec: README.md
 
 ### TK-054 一致性集在 x86_64 与 aarch64 上的 HashTrail 与金样相同
 
-- 规则:[6. DST 框架](README.md#6-dst-框架)
-- 级别:dst
-- 里程碑:M2
-- 门槛:④
-- 故障:`fixtures/dst/hashtrail.toml` 登记的套件与故障率
-- 种子:`fixtures/dst/hashtrail.toml` 登记的全部种子(版本标签作业;同一提交;数目归 testing §6)
-- 断言:`cargo xtask dst --hashtrail check` 在 `ubuntu-latest` 与 `ubuntu-24.04-arm` 上都退出 0;INV-9
-- 不变量:INV-9
-- 实现:`crates/hft-testkit/src/scenarios/framework.rs::tk_054_cross_arch_conformance`
+已删除:HashTrail 金样(`fixtures/dst/hashtrail.toml`)按负责人决定(2026-10-14)移除;确定性改由进程内两次运行比较(INV-9 复跑、TK-043、TK-181),不再登记摘要。
 
 ### TK-055 CrashFault 中途丢弃 sequencer 后由 RecoverDriver 重建
 
@@ -1754,14 +1746,7 @@ spec: README.md
 
 ### TK-137 对账 actor 迁移须复现旧金样并保持检查器透明
 
-- 规则:[DST 的世界模型](README.md#dst-的世界模型)、[HashTrail](README.md#7-状态哈希对比)
-- 级别:integ
-- 里程碑:M2
-- 前置:`fixtures/dst/recon-before.toml` 固定 CI 212 的 50 个种子、套件、每行 2000 步及摘要
-- 步骤:仅用测试适配器重现旧报告与旧输入环,旧轮次时刻按调度周期累加;隔离后续 CancelRejectFilled 后,PartialFills 时长、StaleGenFill 与 LateFillAfterRecycle count 置零并保留原计划条目以复现历史空操作;同一配置运行真实已提交对账 actor;再次关闭检查器运行新 actor
-- 期望:旧 actor 重现 50 个旧摘要;首条 journal 差异为虚拟 30 s 的 ReconcileReport,此前逐字节相同;新 actor 开关检查器的全部 journal、网关意图、完整 HashTrail 与最终交易所真值逐字节相同;三个运行均达到原步数且不变量通过
-- 证据:CI 保存 `target/dst/reconcile-migration.json`,列出每行的新旧摘要、首次差异序号/时刻和记录数;当前金样保持原种子、套件、步数及哈希范围
-- 实现:`crates/hft-testkit/tests/reconcile_migration.rs::tk_137_recon_migration_preserves_prefix_and_checker_transparency`
+已删除:HashTrail 金样迁移证明随金样移除(负责人决定 2026-10-14);真实对账轮次的语义由 TK-135 的断言覆盖,确定性由 TK-181。
 
 ### TK-138 补账提交后才解除 ADL 缺口并补推原件
 
@@ -1830,7 +1815,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:带 dst-bin 的 hft-dst
 - 步骤:list 后运行 LED-081;把步数限制为 1 并复现;运行完整种子 2,比较 run 与 repro 的单种子证据
-- 期望:截短场景退出 1 且复现保留 --case,完整运行退出 0 且含实际补账、抵扣和无跳过真值;未知编号、套件冲突、hashtrail 带 case、超过 4096 的显式场景批次退出 2
+- 期望:截短场景退出 1 且复现保留 --case,完整运行退出 0 且含实际补账、抵扣和无跳过真值;未知编号、套件冲突、run/repro 以外的子命令带 case、超过 4096 的显式场景批次退出 2
 - 实现:`crates/hft-testkit/tests/dst_cli.rs::tk_143_cli_case_selection_and_repro_are_not_baseline_runs`
 
 ### TK-144 外来订单的交付副本不得再次结算
@@ -2004,14 +1989,7 @@ spec: README.md
 
 ### TK-157 部分成交接通前后保留完整金样迁移证据
 
-- 规则:[DST 的世界模型](README.md#dst-的世界模型)、[HashTrail](README.md#7-状态哈希对比)
-- 级别:integ
-- 里程碑:M2
-- 前置:`fixtures/dst/partial-before.toml` 固定提交 4244872 的 50 个种子、套件、每行 2000 步及摘要
-- 步骤:隔离后续 CancelRejectFilled 后,StaleGenFill 与 LateFillAfterRecycle count 置零以保留历史边界;将 PartialFills 时长置零,保留计划条目、顺序与随机流,重现旧摘要;再启用 PartialFills 并关闭全部检查器复跑
-- 期望:旧摘要逐行相等,至少一行轨迹变化且首条差异不早于首次部分成交故障,此前 journal 前缀逐字节相同;全部运行达到原步数并通过不变量,检查器开关的完整 journal、交付、意图、HashTrail 与交易所真值相同
-- 证据:CI 保存 `target/dst/partial-fill-migration.json` 的原提交、新旧摘要、差异边界、实际部分成交数量及逐行比较结果,核对后才更新当前金样
-- 实现:`crates/hft-testkit/tests/partial_migration.rs::tk_157_partial_migration_reproduces_prior_goldens_and_preserves_prefix`
+已删除:HashTrail 金样迁移证明随金样移除(负责人决定 2026-10-14);部分成交语义由 TK-155、TK-156、TK-158、TK-159 覆盖。
 
 ### TK-158 部分成交窗口按最新盘口和实际到所时刻结束
 
@@ -2070,14 +2048,7 @@ spec: README.md
 
 ### TK-163 旧代数故障的完整金样迁移证据
 
-- 规则:[DST 的世界模型](README.md#dst-的世界模型)、[HashTrail](README.md#7-状态哈希对比)
-- 级别:integ
-- 里程碑:M2
-- 前置:`fixtures/dst/stale-before.toml` 固定提交 eb236c8 的 50 个种子、套件、每行 2000 步与摘要
-- 步骤:隔离后续 CancelRejectFilled 后,隔离后续 LateFillAfterRecycle,将 StaleGenFill count 置零重现历史空路径,保留故障条目、顺序及随机流;再按默认 count 运行并关闭检查器复跑
-- 期望:旧摘要逐行复现,新轨迹至少一行变化且首差异不早于首次非零故障,此前字节相同;全部运行完成原步数并通过不变量,检查器开关后的完整 journal、交付、意图、HashTrail 与真值相同
-- 证据:CI 保留 `target/dst/stale-gen-migration.json` 的基线提交、新旧摘要、差异边界与实际成交数量,核对后才更新当前金样
-- 实现:`crates/hft-testkit/tests/stale_migration.rs::tk_163_stale_migration_reproduces_prior_goldens_and_preserves_prefix`
+已删除:HashTrail 金样迁移证明随金样移除(负责人决定 2026-10-14);旧代数成交语义由 TK-160–TK-162 覆盖。
 
 ### TK-164 框架模型按外来证据记入旧代数成交
 
@@ -2131,13 +2102,7 @@ spec: README.md
 
 ### TK-169 回收槽故障的完整金样迁移证据
 
-- 规则:[DST 的世界模型](README.md#dst-的世界模型)
-- 级别:replay
-- 里程碑:M2
-- 输入:`fixtures/dst/late-before.toml` 固定 50 行、每行 2000 步,基线为 335e321
-- 步骤:隔离后续 CancelRejectFilled 后,仅把 LateFillAfterRecycle count 置零重现旧摘要,保留计划时间、顺序与随机流;默认故障及检查器关闭各复跑
-- 期望:旧摘要逐行一致,首差异不早于首次故障,前缀字节与检查器开关后的完整 journal、意图、交付、HashTrail 和交易所真值一致;CI 保存逐行迁移证据,当前金样只能据证据更新
-- 实现:`crates/hft-testkit/tests/late_migration.rs::tk_169_late_migration_reproduces_prior_goldens_and_preserves_prefix`
+已删除:HashTrail 金样迁移证明随金样移除(负责人决定 2026-10-14);回收槽语义由 TK-166–TK-168 覆盖。
 
 ### TK-170 已成交撤单拒绝来自真实撮合器
 
@@ -2171,13 +2136,7 @@ spec: README.md
 
 ### TK-173 撤单竞态故障的完整金样迁移证据
 
-- 规则:[DST 的世界模型](README.md#dst-的世界模型)
-- 级别:replay
-- 里程碑:M2
-- 输入:`fixtures/dst/cancel-before.toml` 固定 50 行、每行 2000 步,基线为 0231835
-- 步骤:count 置零重现旧摘要,保留故障条目、时间与随机流;默认故障及关闭检查器各复跑,统计原件暂缓、实际拒绝和原件交付
-- 期望:旧摘要逐行一致,首差异不早于首次非零故障且必须实际暂缓成交,首差异前缀及检查器开关后的 journal、意图、交付、HashTrail 和真值一致;CI 保存逐行证据,不凭请求数声称实际竞态覆盖
-- 实现:`crates/hft-testkit/tests/cancel_migration.rs::tk_173_cancel_migration_reproduces_prior_goldens_and_preserves_prefix`
+已删除:HashTrail 金样迁移证明随金样移除(负责人决定 2026-10-14);撤单竞态语义由 TK-170–TK-172 覆盖。
 
 ### TK-174 测试临时目录与证据目录按所有权删除
 
@@ -2200,21 +2159,7 @@ spec: README.md
 
 ### TK-175 五次历史 HashTrail 迁移保留可核对的永久证据
 
-- 规则:[DST 的世界模型](README.md#dst-的世界模型)
-- 级别:unit
-- 里程碑:M2
-- 前置:`fixtures/dst/history/`:提交 1af231b、b9d5024、03c4607、905fc14、f1f801d 各自迁移前的金样 `before.toml`(父提交原文)、CI 制品中的审计输出(逐字节复制,制品 ZIP 摘要与 Agent Note 记录相同)与审计程序源码,`MANIFEST.toml` 登记每个文件的 SHA-256;`fixtures/dst/recon-before.toml`(TK-137 在当前代码上重现)
-- 步骤:
-  1. 按 `MANIFEST.toml` 核对全部证据文件的 SHA-256
-  2. 以每次迁移的 `before.toml` 为旧金样、下一次的 `before.toml`(最后一次为 `recon-before.toml`)为新金样,逐种子比较审计输出
-- 期望:
-  - TK-175.1:全部文件摘要相同(≥ 40 个)
-  - TK-175.2:五个金样均为 50 个 `core`、2 000 步种子,集合不变
-  - TK-175.3(1af231b,Drain 重启):只有种子 7、28、34 改变;从记录的 HashTrail 字节重算的 xxh3-128,基线构建等于旧金样,修复构建等于新金样
-  - TK-175.4(b9d5024 节 27、03c4607 OMS 现金行):只去掉新表示的投影摘要逐种子等于旧金样,完整摘要等于新金样
-  - TK-175.5(905fc14 严格永续现金):严格能力摘要等于新金样;旧能力摘要与旧金样只在种子 5、9、11、14、18、43 不同(无 client id 与 FillBeforeAck 故障模型修正)
-  - TK-175.6(f1f801d BalanceCheck):只移除新增输出的回滚构建等于旧金样,当前构建等于新金样(= `recon-before.toml`)
-- 实现:`crates/hft-testkit/tests/history.rs::tk_175_historical_hashtrail_migrations_keep_permanent_evidence`
+已删除:历史 HashTrail 迁移证据(`fixtures/dst/history/`)随金样移除(负责人决定 2026-10-14)。
 
 ### TK-176 每个检查器报告实际比较的条目数
 
@@ -2287,9 +2232,25 @@ spec: README.md
   - 退出 0;`compared` 对象按 `I<n>` 列出全部检查器,值等于两个种子 `RunRecord.compared` 之和;`I1`、`I16` 大于 0
 - 实现:`crates/hft-testkit/tests/dst_cli.rs::tk_180_cli_reports_compared_items_per_invariant`
 
+### TK-181 同一种子在进程内运行两次的事件摘要相同,不与登记值比较
+
+- 规则:[6. DST 框架](README.md#6-dst-框架)
+- 级别:integ
+- 里程碑:M2
+- 前置:真实引擎(`seq`);`core` 种子 1、2 与 `storage` 种子 3,各 2 000 步,关闭复跑
+- 步骤:
+  1. 每个种子以 `run_record` 运行两次
+  2. `core` 种子 1 以 `RerunPolicy::Always` 再运行一次
+- 期望:
+  - 每次通过且跑满步数;journal 多于 100 条且有意图与交付(非空)
+  - 两次的 `RunRecord::event_digest()`(全部 journal 记录的 xxh3-128)、journal、意图、交付、`HashTrail` 与交易所真值逐项相同;三个种子的摘要互不相同
+  - 步骤 2 通过,INV-9 比较数不少于 journal 记录数(复跑实际比较了事件摘要)
+  - 不读取任何登记在仓库中的摘要
+- 实现:`crates/hft-testkit/tests/determinism.rs::tk_181_same_seed_twice_in_process_same_event_digest`
+
 ## 验收
 
 - 本组件完成 = 里程碑已到的全部用例有同编号的实现且通过(`cargo xtask test-trace`)。
 - 框架可信度:TK-053 的每一行都在其种子上限内被找到(ToyEngine 行 2 000,真实引擎行 16),TK-179 的每一行在 16 个种子内被真实引擎 DST 找到,TK-051 的每一行都缩到 ≤ 5 项;TK-177 的核心不变量都实际比较过;任一行未达成即框架验收不通过。
-- 跨架构一致:版本标签作业的 TK-054 通过(不变量 9,[testing §6](../../docs/testing.md#6-ci-运行矩阵))。
+- 确定性:INV-9 进程内复跑、TK-043 与 TK-181 通过;不登记 HashTrail 或事件摘要金样。
 - 运行时间预算(PR 冒烟、每夜、版本标签、`scaffold-gate`、全部金样、单步开销)以 [延迟与资源契约](README.md#延迟与资源契约) 的表为准,由 CI 作业时长与 TK-092、TK-093 的基准输出给出证据;服务器累计的门槛 ④ 由 hft-verify 账本给出([testing §6.1](../../docs/testing.md#61-服务器上的累计运行))。

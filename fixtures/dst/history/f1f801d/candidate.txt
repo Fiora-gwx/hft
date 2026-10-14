@@ -1,4 +1,0 @@
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
-     Running `target/debug/xtask dst --hashtrail write`
-    Finished `ci` profile [optimized] target(s) in 0.04s
-dst: --hashtrail write: 50 seeds -> PASS

@@ -2,7 +2,7 @@ use hft_event::{EventKind, GwCmd, GwOp, OrderEvent, OrderEventKind};
 use hft_testkit::dst::seq::matcher::SimMatcher;
 use hft_testkit::dst::venue_behavior::{EXTERNAL_HISTORY_CAP, MockVenue, MockVenueCfg};
 use hft_testkit::dst::world::{ACCT_A, BTC, P1, S1, VP, VS, WorldSpec};
-use hft_testkit::dst::{ConnKind, DstConfig, Fault, InvariantSet, run_record};
+use hft_testkit::dst::{ConnKind, Fault, InvariantSet, run_record};
 use hft_testkit::scenarios::{DstEngine, cancel_filled};
 use hft_types::{InstId, Px, Qty, Side, SlotId, Tif, Tsc, VenueId};
 use zerocopy::{IntoBytes, TryFromBytes};
@@ -14,20 +14,6 @@ fn order(r: &hft_testkit::dst::sut::InputRec) -> Option<OrderEvent> {
         return None;
     }
     OrderEvent::try_read_from_bytes(&r.body).ok()
-}
-
-// Used by the `heavy` migration proofs (feature `dst-heavy`).
-#[cfg_attr(not(feature = "dst-heavy"), allow(dead_code))]
-pub(super) fn without_cancel(cfg: &DstConfig) -> DstConfig {
-    let mut c = cfg.clone();
-    let mut plan = c.fault_plan();
-    for (_, f) in &mut plan.items {
-        if let Fault::CancelRejectFilled { count, .. } = f {
-            *count = 0;
-        }
-    }
-    c.plan = Some(plan);
-    c
 }
 
 fn held(venue: VenueId, inst: InstId, side: Side, base: bool) -> (MockVenue<SimMatcher>, GwCmd) {

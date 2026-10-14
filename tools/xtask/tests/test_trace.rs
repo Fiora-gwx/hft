@@ -1,4 +1,5 @@
 //! `cargo xtask test-trace` (tools/TESTS.md TOOL-086–TOOL-091, TOOL-180; rules: docs/tests/README.md §6).
+//! Report-only: the three lists never change the exit code; hard spec errors do (TOOL-090.4–.6).
 
 use crate::common;
 
@@ -110,7 +111,7 @@ fn tool_087_unimplemented() {
             |f| {
                 f.remove(A_X);
             },
-            1,
+            0,
             Some(&["AA-001"]),
             "AA-001",
         ),
@@ -119,7 +120,7 @@ fn tool_087_unimplemented() {
             |f| {
                 f.replace(A_TESTS, "`crates/a/tests/x.rs::aa_001_ok`", "待实现");
             },
-            1,
+            0,
             None,
             "AA-001",
         ),
@@ -132,7 +133,7 @@ fn tool_087_unimplemented() {
                     "()",
                 );
             },
-            1,
+            0,
             Some(&["B-1"]),
             "B-1",
         ),
@@ -141,7 +142,7 @@ fn tool_087_unimplemented() {
             |f| {
                 f.replace("crates/a/benches/hot.rs", "\"a/hot\"", "\"a/cold\"");
             },
-            1,
+            0,
             Some(&["AA-003"]),
             "AA-003",
         ),
@@ -150,7 +151,7 @@ fn tool_087_unimplemented() {
             |f| {
                 f.replace(A_X, "#[test]\n", "#[test]\n#[ignore]\n");
             },
-            1,
+            0,
             Some(&["AA-001"]),
             "AA-001",
         ),
@@ -199,7 +200,7 @@ fn tool_088_not_required() {
     );
     let rows: [Row; 4] = [
         ("TOOL-088.1", aa005.clone(), "M2", false, 0, &[]),
-        ("TOOL-088.2", aa005, "M3", false, 1, &["AA-005"]),
+        ("TOOL-088.2", aa005, "M3", false, 0, &["AA-005"]),
         ("TOOL-088.3", aa006, "M1", false, 0, &[]),
         ("TOOL-088.4", String::new(), "M2", true, 0, &[]),
     ];
@@ -225,19 +226,19 @@ fn tool_089_extra() {
         (
             "TOOL-089.1",
             "\n#[test]\nfn aa_099_orphan() {}\n",
-            1,
+            0,
             &["aa_099_orphan"],
         ),
         (
             "TOOL-089.2",
             "\n#[test]\nfn zz_001_unknown_prefix() {}\n",
-            1,
+            0,
             &["zz_001_unknown_prefix"],
         ),
         (
             "TOOL-089.3",
             "\nproptest! {\n    fn aa_098_prop(x in 0u8..4) {\n        prop_assert!(x < 4);\n    }\n}\n",
-            1,
+            0,
             &["aa_098_prop"],
         ),
         ("TOOL-089.4", "\n#[test]\nfn helper_case() {}\n", 0, &[]),
@@ -265,7 +266,7 @@ fn tool_090_inconsistent() {
     let body = f.read(A_X);
     f.remove(A_X).write("crates/a/tests/y.rs", &body);
     let r = f.xtask(&["test-trace"]);
-    assert_eq!(r.code, 1, "TOOL-090.1: {}", r.stderr);
+    assert_eq!(r.code, 0, "TOOL-090.1: {}", r.stderr);
     assert_eq!(
         list(&r, "inconsistent"),
         vec![json!({
@@ -280,7 +281,7 @@ fn tool_090_inconsistent() {
     let f = trace_clean();
     f.replace(A_X, "fn aa_001_ok", "fn aa_001_renamed");
     let r = f.xtask(&["test-trace"]);
-    assert_eq!(r.code, 1, "TOOL-090.2: {}", r.stderr);
+    assert_eq!(r.code, 0, "TOOL-090.2: {}", r.stderr);
     assert_eq!(ids(&r, "inconsistent"), ["AA-001"], "TOOL-090.2");
 
     // TOOL-090.3: defined twice.
@@ -288,8 +289,44 @@ fn tool_090_inconsistent() {
     let body = f.read(A_X);
     f.write("crates/a/tests/y.rs", &body);
     let r = f.xtask(&["test-trace"]);
-    assert_eq!(r.code, 1, "TOOL-090.3: {}", r.stderr);
+    assert_eq!(r.code, 0, "TOOL-090.3: {}", r.stderr);
     assert_eq!(ids(&r, "inconsistent"), ["AA-001"], "TOOL-090.3");
+
+    // TOOL-090.4..6: hard spec errors fail the run; the report lists them under `errors`.
+    type Edit = fn(&Fixture);
+    let rows: [(&str, Edit, &str); 3] = [
+        (
+            "TOOL-090.4",
+            |f| {
+                f.replace(A_TESTS, "`crates/a/tests/x.rs::aa_001_ok`", "见 x.rs");
+            },
+            "AA-001: 实现",
+        ),
+        (
+            "TOOL-090.5",
+            |f| {
+                f.append(A_TESTS, &case("AA-001", "unit", "M1", "", "待实现"));
+            },
+            "AA-001: case id defined twice",
+        ),
+        (
+            "TOOL-090.6",
+            |f| {
+                f.replace(A_TESTS, "- 里程碑:M1\n", "- 里程碑:第二期\n");
+            },
+            "AA-001: unparsable 里程碑",
+        ),
+    ];
+    for (row, edit, msg) in rows {
+        let f = trace_clean();
+        edit(&f);
+        let r = f.xtask(&["test-trace"]);
+        assert_eq!(r.code, 1, "{row}: {}", r.stderr);
+        let errors = list(&r, "errors");
+        assert_eq!(errors.len(), 1, "{row}: {errors:?}");
+        assert!(errors[0].as_str().unwrap().contains(msg), "{row}: {errors:?}");
+        assert!(r.stderr.contains(msg), "{row}: {}", r.stderr);
+    }
 }
 
 #[test]
@@ -307,18 +344,28 @@ fn tool_091_reads_docs_tests() {
             )),
     );
     let r = f.xtask(&["test-trace"]);
-    assert_eq!(r.code, 1, "{}", r.stderr);
+    assert_eq!(r.code, 0, "report-only: {}", r.stderr);
     assert_eq!(ids(&r, "unimplemented"), ["INV-1"]);
     let obj = r.json.as_ref().unwrap().as_object().unwrap();
     let mut keys: Vec<&String> = obj.keys().filter(|k| obj[*k].is_array()).collect();
     keys.sort();
-    assert_eq!(keys, ["extra", "inconsistent", "unimplemented"]);
-    assert_eq!(obj.len(), 3);
+    assert_eq!(keys, ["errors", "extra", "inconsistent", "unimplemented"]);
+    assert_eq!(obj.len(), 5);
+    // Per milestone: M1 = AA-001 + INV-1 (one unimplemented), M2 = AA-002, AA-003, B-1.
+    assert_eq!(
+        obj["by_milestone"],
+        json!({
+            "M1": {"cases": 2, "implemented": 1, "unimplemented": 1},
+            "M2": {"cases": 3, "implemented": 3, "unimplemented": 0},
+        })
+    );
     assert!(
-        r.stderr.contains("unimplemented=1 extra=0 inconsistent=0"),
+        r.stderr
+            .contains("unimplemented=1 extra=0 inconsistent=0 (report-only) errors=0"),
         "{}",
         r.stderr
     );
+    assert!(r.stderr.contains("M1    cases=2"), "{}", r.stderr);
     assert!(r.stdout.is_empty(), "stdout: {}", r.stdout);
 }
 
@@ -372,7 +419,7 @@ fn tool_180_optional_and_python() {
             "TOOL-180.2",
             "[\"incr-depth\"]",
             |_, _| {},
-            1,
+            0,
             "unimplemented",
             &["AA-010"],
         ),
@@ -402,7 +449,7 @@ fn tool_180_optional_and_python() {
             |f, _| {
                 f.remove(PY);
             },
-            1,
+            0,
             "unimplemented",
             &["PP-001"],
         ),
@@ -412,7 +459,7 @@ fn tool_180_optional_and_python() {
             |f, _| {
                 f.append(PY, "\n\ndef test_pp_099_orphan():\n    assert True\n");
             },
-            1,
+            0,
             "extra",
             &["test_pp_099_orphan"],
         ),
@@ -433,7 +480,7 @@ fn tool_180_optional_and_python() {
                 let body = f.read(PY);
                 f.remove(PY).write("python/p/tests/test_y.py", &body);
             },
-            1,
+            0,
             "inconsistent",
             &["PP-001"],
         ),
@@ -443,7 +490,11 @@ fn tool_180_optional_and_python() {
         edit(&f, with_incr);
         let r = f.xtask(&["test-trace"]);
         assert_eq!(r.code, code, "{row}: stderr:\n{}", r.stderr);
-        if !key.is_empty() {
+        if key.is_empty() {
+            for k in ["unimplemented", "extra", "inconsistent"] {
+                assert!(ids(&r, k).is_empty(), "{row}: {k}");
+            }
+        } else {
             assert_eq!(ids(&r, key), want, "{row}");
         }
     }

@@ -1,6 +1,12 @@
-# Quality gates, called by ci.yml (docs/development.md#质量门quality-gatesyml).
-# What runs and the time limits: docs/testing.md §6 (PR row: target <= 12 minutes,
-# timeout-minutes: 20, rust/replay-dst 30). Early feedback and full acceptance run independently.
+# Quality gates, called by ci.yml and nightly.yml (docs/development.md#质量门quality-gatesyml).
+# Two lanes (input `lane`):
+# - fast (pull requests, target < 10 min wall): paths, docs, decoupling-gate, ops-py, and for the
+#   affected packages (changed + reverse dependencies, .github/scripts/related-tests.py) clippy,
+#   cargo-nextest and a 20-seed DST smoke;
+# - full (pushes to codex/m2-integration and main, nightly): the whole workspace (`cargo xtask ci`:
+#   clippy, all tests incl. proc and doctests, golden, 200-seed DST smoke), heavy tests, replay-dst,
+#   benchmarks, aarch64 check, path-triggered gates.
+# `acceptance` (.github/scripts/ci-summary.py) requires every job of the lane.
 #
 # Steps for components of later milestones are guarded by `steps.xtask.outputs.<subcommand>`
 # (.github/scripts/xtask-inventory.sh: a subcommand that is due but missing fails the job) or by
@@ -9,6 +15,19 @@ name: Quality gates
 
 on:
   workflow_call:
+    inputs:
+      lane:
+        description: fast (PR) or full (integration pushes, nightly)
+        type: string
+        default: full
+      sha:
+        description: Commit to test (default the PR head or the pushed commit)
+        type: string
+        default: ""
+      replay_seed_mode:
+        description: replay-dst seed source (commit or date)
+        type: string
+        default: commit
 
 permissions:
   contents: read
@@ -16,8 +35,9 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   # Test the exact commit that preflight later looks up (the PR head, not the merge ref).
-  HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  HEAD_SHA: ${{ inputs.sha || github.event.pull_request.head.sha || github.sha }}
   BASE_SHA: ${{ github.event.pull_request.base.sha }}
+  LANE: ${{ inputs.lane }}
 
 jobs:
   paths:
@@ -35,6 +55,9 @@ jobs:
       gen_host: ${{ steps.paths.outputs.gen_host }}
       python: ${{ steps.paths.outputs.python }}
       ops: ${{ steps.paths.outputs.ops }}
+      has_tests: ${{ steps.related.outputs.has_tests }}
+      packages: ${{ steps.related.outputs.packages }}
+      dst: ${{ steps.related.outputs.dst }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,16 +70,26 @@ jobs:
           BASE: ${{ env.BASE_SHA }}
           HEAD: ${{ env.HEAD_SHA }}
         run: python3 .github/scripts/changed-paths.py
+      # Fast lane package selection: changed members plus their reverse dependencies.
+      - name: Select affected packages (fast lane)
+        id: related
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ env.BASE_SHA }}
+          HEAD: ${{ env.HEAD_SHA }}
+        run: python3 .github/scripts/related-tests.py plan
 
   replay-dst:
     needs: paths
-    if: ${{ !cancelled() && needs.paths.outputs.docs_only != 'true' }}
+    if: ${{ !cancelled() && inputs.lane == 'full' }}
     uses: ./.github/workflows/replay-dst.yml
     with:
-      sha: ${{ github.event.pull_request.head.sha || github.sha }}
-      seed_mode: commit
+      sha: ${{ inputs.sha || github.event.pull_request.head.sha || github.sha }}
+      seed_mode: ${{ inputs.replay_seed_mode }}
 
   decoupling-gate:
+    # Judges a diff: PRs and pushes only (nightly has none).
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -107,6 +140,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.HEAD_SHA }}
+          fetch-depth: 0 # gen-schema --check compares against the merge base
       - name: CI policy regression tests
         run: python3 -m unittest discover -s tools/xtask/tests -p 'test_ci_*.py' -v
       # Pinned release binary, checked against its SHA-256 (the docker://rhysd/actionlint image hit
@@ -140,53 +174,82 @@ jobs:
       - name: cargo xtask doc-check
         if: ${{ !cancelled() }}
         run: cargo xtask doc-check
-      - name: cargo xtask test-trace
-        # docs/tests/README.md §6: every PR and main push.
+      - name: Fixture index and generated schemas
         if: ${{ !cancelled() }}
-        run: cargo xtask test-trace
+        run: |
+          cargo xtask fixtures check
+          cargo xtask gen-schema --check
+      - name: cargo xtask test-trace (report-only)
+        # docs/tests/README.md §6: unimplemented/extra/inconsistent are reported, never fail; only
+        # hard spec errors (duplicate ids, malformed 里程碑/实现) do. Per-milestone counts go to the
+        # step summary.
+        if: ${{ !cancelled() }}
+        run: |
+          rc=0
+          cargo xtask test-trace || rc=$?
+          python3 - <<'PY' >>"$GITHUB_STEP_SUMMARY" || true
+          import json
+          j = json.load(open("target/xtask/test-trace.json", encoding="utf-8"))
+          print("### test-trace (report-only)\n")
+          print("| Milestone | Cases | Implemented | Unimplemented |\n|---|---|---|---|")
+          for m, c in j["by_milestone"].items():
+              print(f"| {m} | {c['cases']} | {c['implemented']} | {c['unimplemented']} |")
+          print(f"\nunimplemented (<= current milestone) {len(j['unimplemented'])}, extra {len(j['extra'])}, "
+                f"inconsistent {len(j['inconsistent'])}, errors {len(j['errors'])}")
+          PY
+          exit $rc
 
-  related-tests:
+  # ---- fast lane (pull requests) ------------------------------------------------------------
+  # Tests of the affected packages with cargo-nextest, two partitions in parallel (no proc or
+  # compile-fail binaries, heavy::, RPL-012 batch or doctests: those run in the full lane).
+  # Read-only cache of the full `rust` job.
+  fast-test:
     needs: paths
-    if: ${{ !cancelled() && needs.paths.outputs.docs_only != 'true' }}
+    if: >-
+      ${{ !cancelled() && inputs.lane == 'fast' && needs.paths.outputs.docs_only != 'true' &&
+          needs.paths.outputs.has_tests != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/2", "2/2"]
     env:
+      # Same CARGO*/CC* variables as `rust`: rust-cache hashes them into the cache key.
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
       CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-      HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      SHARD: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.HEAD_SHA }}
           fetch-depth: 0
-      - name: Select packages changed in this push
-        id: related
+      - name: Plan the affected package tests
         env:
           EVENT: ${{ github.event_name }}
-          ACTION: ${{ github.event.action }}
-          BEFORE: ${{ github.event.before }}
           BASE: ${{ env.BASE_SHA }}
+          HEAD: ${{ env.HEAD_SHA }}
         run: python3 .github/scripts/related-tests.py plan
       - name: Free runner disk
-        if: steps.related.outputs.has_tests == 'true'
         run: bash .github/scripts/free-disk.sh
       - name: Install system packages
-        if: steps.related.outputs.has_tests == 'true'
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends strace python3-numpy
       - name: Install pinned Rust toolchain
-        if: steps.related.outputs.has_tests == 'true'
         run: bash .github/scripts/install-rust.sh
+      - name: Install pinned cargo-nextest (SHA-256 checked)
+        run: bash .github/scripts/install-nextest.sh
       - uses: Swatinem/rust-cache@v2
-        if: steps.related.outputs.has_tests == 'true'
         with:
-          # rust-cache's default suffix is <key>-<job>; shared-key replaces both.
+          # rust-cache's default suffix is <key>-<job>; shared-key replaces both. A PR finds the
+          # full `rust` job's cache of its base branch (integration pushes run the full lane); on
+          # a miss the first shard saves this PR's own entry (scoped to the PR ref) so later pushes
+          # of the same PR start warm.
           shared-key: x86-ci-v2-rust
-          save-if: false
+          save-if: ${{ matrix.shard == '1/2' }}
       - name: Restore nested test builds
-        if: steps.related.outputs.has_tests == 'true'
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -194,25 +257,115 @@ jobs:
             target/jnl-feature
           key: x86-nested-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: x86-nested-${{ hashFiles('rust-toolchain.toml') }}-
-      - name: Prepare proc test prerequisites
-        if: steps.related.outputs.has_tests == 'true'
-        run: bash .github/scripts/test-prereqs.sh
-      - name: Run related package tests
+      - name: Test the affected packages (cargo nextest)
+        env:
+          HEAD: ${{ env.HEAD_SHA }}
         run: |
+          # tmpfs journal segments are mlocked (crates/hft-journal JNL-040/044/045).
           sudo prlimit --pid $$ --memlock=unlimited:unlimited
           python3 .github/scripts/related-tests.py run
-      - name: Upload early feedback plan and results
+      - name: Shard name
+        id: shard
+        if: always()
+        run: echo "name=${SHARD/\//-of-}" >>"$GITHUB_OUTPUT"
+      - name: Upload fast-lane plan and results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: related-tests
+          name: related-tests-${{ steps.shard.outputs.name }}
           path: target/xtask/related-tests.json
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 7
 
+  fast-clippy:
+    needs: paths
+    if: >-
+      ${{ !cancelled() && inputs.lane == 'fast' && needs.paths.outputs.docs_only != 'true' &&
+          needs.paths.outputs.has_tests != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.HEAD_SHA }}
+      - name: Install pinned Rust toolchain
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: x86-ci-v2-rust
+          save-if: false
+      - name: clippy on the affected packages
+        env:
+          PACKAGES: ${{ needs.paths.outputs.packages }}
+        run: |
+          args=()
+          for p in $PACKAGES; do args+=(-p "$p"); done
+          cargo clippy --locked --profile ci "${args[@]}" --all-targets --all-features -- -D warnings
+      - name: xtask subcommands
+        if: needs.paths.outputs.cargo_lock == 'true'
+        id: xtask
+        run: bash .github/scripts/xtask-inventory.sh
+      - name: cargo deny check licenses bans (Cargo.lock changed)
+        if: needs.paths.outputs.cargo_lock == 'true' && steps.xtask.outputs.setup == 'true'
+        run: |
+          cargo xtask setup
+          cargo deny check licenses bans
+
+  # DST smoke when hft-testkit (the engine adapter) is affected: 20 commit-derived seeds plus the
+  # regression set, baseline and the LED-080/LED-081 cases (the full lane runs 200 seeds).
+  fast-dst:
+    needs: paths
+    if: >-
+      ${{ !cancelled() && inputs.lane == 'fast' && needs.paths.outputs.docs_only != 'true' &&
+          needs.paths.outputs.dst == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.HEAD_SHA }}
+      - name: Install pinned Rust toolchain
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: x86-ci-v2-rust
+          save-if: false
+      - name: xtask subcommands
+        id: xtask
+        run: bash .github/scripts/xtask-inventory.sh
+      - name: DST smoke (20 seeds + regressions)
+        if: steps.xtask.outputs.dst == 'true'
+        run: |
+          cargo xtask dst --seeds 20 --regressions
+          for c in LED-080 LED-081; do
+            cargo xtask dst --seeds 20 --regressions --case "$c"
+          done
+      - name: Upload DST failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dst-failures
+          path: |
+            target/dst/*/repro.txt
+            target/dst/*/faults.txt
+            target/dst/*/journal.bin
+            target/dst/*.json
+            target/xtask/dst*.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ---- full lane (integration-branch and main pushes, nightly) --------------------------------
   arch-check:
     needs: paths
-    if: ${{ !cancelled() && needs.paths.outputs.docs_only != 'true' }}
+    if: ${{ !cancelled() && inputs.lane == 'full' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -245,7 +398,7 @@ jobs:
   benchmarks:
     needs: paths
     if: >-
-      ${{ !cancelled() && needs.paths.outputs.docs_only != 'true' &&
+      ${{ !cancelled() && inputs.lane == 'full' &&
           (needs.paths.result != 'success' || needs.paths.outputs.bench_crates != '' ||
            needs.paths.outputs.benchmarks == 'true' || needs.paths.outputs.toolchain == 'true') }}
     runs-on: ubuntu-latest
@@ -331,12 +484,11 @@ jobs:
 
   rust:
     needs: paths
-    # A coupling violation still gets build/test feedback. Only confirmed docs-only changes
-    # skip these jobs; a failed path classification runs the full checks.
-    if: >-
-      ${{ !cancelled() && needs.paths.outputs.docs_only != 'true' }}
+    # Full lane only; a coupling violation still gets build/test feedback.
+    if: ${{ !cancelled() && inputs.lane == 'full' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # safety cap: hosted-runner speed varies by about +-50% (docs/testing.md §6)
+    # Safety cap: a cold cache (first full-lane run of a branch) needs ~30 min incl. the cache save.
+    timeout-minutes: 45
     permissions:
       contents: read
       id-token: write # S3 fixtures through GitHub OIDC (replay-verify samples)
@@ -409,7 +561,7 @@ jobs:
           exit $rc
 
       # fmt, clippy, deny licenses/bans, deps, hot-check, fixtures check, unit/property (ci profile),
-      # golden, DST smoke + `dst --hashtrail check --first 50` (from M2), gen-schema --check
+      # golden, DST smoke (200 seeds + regressions, from M2), gen-schema --check
       # (tools/README.md "cargo xtask ci"); doc-check is the docs job's.
       - name: cargo xtask ci
         id: ci
@@ -447,7 +599,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
       # The replayer's DST file cases keep their directories only when they fail (TmpDir evidence,
-      # crates/hft-testkit README "11. 临时目录"); the migration proofs run in heavy-tests.
+      # crates/hft-testkit README "11. 临时目录").
       - name: Upload failed replayer DST file evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -554,7 +706,6 @@ jobs:
         env:
           HAS_GEN_SCHEMA: ${{ steps.xtask.outputs.gen-schema }}
           HAS_GEN_HOST: ${{ steps.xtask.outputs.gen-host }}
-          HAS_DST: ${{ steps.xtask.outputs.dst }}
         run: |
           set +e
           if [[ $HAS_GEN_SCHEMA == true ]]; then
@@ -564,9 +715,6 @@ jobs:
             SIM_GOLDEN_BLESS=1 cargo test --locked --profile ci -p hft-sim --test golden sim_123_cross_arch_golden
           fi
           if [[ $HAS_GEN_HOST == true ]]; then cargo xtask gen-host; fi
-          if [[ $HAS_DST == true && -f fixtures/dst/hashtrail.toml ]]; then
-            cargo xtask dst --hashtrail write
-          fi
           core=""
           for p in target/ci/hft-core target/release/hft-core target/debug/hft-core; do
             if [[ -x $p ]]; then core=$p; break; fi
@@ -586,28 +734,23 @@ jobs:
           path: ${{ runner.temp }}/regen.patch
           retention-days: 7
 
-      - name: PR runtime target (12 minutes, docs/testing.md §6)
+      - name: Job wall time
         if: always()
         run: |
           mins=$(( ($(date +%s) - JOB_START + 59) / 60 ))
-          echo "rust job: about $mins min" >>"$GITHUB_STEP_SUMMARY"
-          if ((mins > 12)); then
-            echo "::warning::rust job took about $mins min, over the 12-minute PR target"
-            echo "**Over the 12-minute PR target.**" >>"$GITHUB_STEP_SUMMARY"
-          fi
+          echo "rust job (full lane): about $mins min" >>"$GITHUB_STEP_SUMMARY"
 
-  # Heavy tests (docs/development.md "质量门"): the DST HashTrail migration proofs (TK-137/157/163/
-  # 169/173, feature hft-testkit/dst-heavy) and the 1 h / 3 h replayer fixtures (RPL-270/271/279–281,
+  # Heavy tests (docs/development.md "质量门"): the 1 h / 3 h replayer fixtures (RPL-270/271/279–281,
   # feature replayer/long-fixtures); every test under a `heavy::` module, which `cargo xtask ci`
-  # skips. Own cache: the two-package feature set resolves differently from the workspace build.
+  # skips. Own cache: the feature set resolves differently from the workspace build.
   heavy-tests:
     needs: paths
-    if: ${{ !cancelled() && needs.paths.outputs.docs_only != 'true' }}
+    if: ${{ !cancelled() && inputs.lane == 'full' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      HEAVY_FEATURES: hft-testkit/dst-heavy,replayer/long-fixtures
+      HEAVY_FEATURES: replayer/long-fixtures
     steps:
       - uses: actions/checkout@v4
         with:
@@ -621,12 +764,12 @@ jobs:
           key: x86-heavy-v1
           cache-on-failure: true
       - name: Build the heavy test assemblies
-        run: cargo build --locked --profile ci -p hft-testkit -p replayer --features "$HEAVY_FEATURES" --tests --examples
+        run: cargo build --locked --profile ci -p replayer --features "$HEAVY_FEATURES" --tests --examples
       - name: "Run the heavy:: tests"
         env:
           HFT_REPLAY_EVIDENCE_DIR: ${{ github.workspace }}/target/replay-model
         run: |
-          cargo test --locked --profile ci -p hft-testkit -p replayer --features "$HEAVY_FEATURES" --tests --no-fail-fast -- heavy::
+          cargo test --locked --profile ci -p replayer --features "$HEAVY_FEATURES" --tests --no-fail-fast -- heavy::
       - name: Upload generated long-fixture Model replay evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -635,23 +778,10 @@ jobs:
           path: target/replay-model/
           if-no-files-found: ignore
           retention-days: 7
-      - name: Upload DST migration evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: dst-migration-evidence
-          path: |
-            target/dst/reconcile-migration-*.json
-            target/dst/partial-fill-migration-*.json
-            target/dst/stale-gen-migration-*.json
-            target/dst/late-recycle-migration-*.json
-            target/dst/cancel-filled-migration-*.json
-          if-no-files-found: ignore
-          retention-days: 7
 
   ops-py:
     needs: paths
-    # Same condition as `rust`.
+    # Both lanes; skipped only for a docs-only PR.
     if: >-
       ${{ !cancelled() && needs.paths.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
@@ -752,7 +882,8 @@ jobs:
           fi
 
   acceptance:
-    needs: [paths, docs, decoupling-gate, related-tests, rust, arch-check, benchmarks, ops-py, replay-dst, heavy-tests]
+    needs: [paths, docs, decoupling-gate, ops-py, fast-test, fast-clippy, fast-dst, rust, arch-check, benchmarks,
+            replay-dst, heavy-tests]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -760,9 +891,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.HEAD_SHA }}
-      - name: Require all applicable checks on this commit
+      - name: Require all applicable checks of this lane on this commit
         env:
           HEAD: ${{ env.HEAD_SHA }}
+          EVENT: ${{ github.event_name }}
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: python3 .github/scripts/ci-summary.py
       - name: Upload complete acceptance verdict

@@ -64,7 +64,7 @@ pub enum SeedSet {
     Standard,
     /// PR `n` consecutive seeds.
     Pr(u32),
-    /// Fixed seeds (`hashtrail.toml`, regressions).
+    /// Fixed seeds (regressions).
     Fixed(&'static [u64]),
 }
 
