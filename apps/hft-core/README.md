@@ -896,6 +896,8 @@ hft-core 自身不在 tick-to-trade 路径上增加代码;路径上的分段预�
 
 `bitget` 默认启用，可与 Binance 同进程装配。两种 key 分别签名核验；非正式 Unverifiable 账户要求相同 API key，仍需人工确认身份闸门。Ed25519 文件支持原始 32 字节、PKCS#8 DER/PEM。周期余额/持仓只校验；REST 失败发布配置 UNREADABLE 后按 interval 重试。RateOnly 真实结算只与合成历史比较，不重复入现金；窗口与滞后取 LedgerConfig。操作见 [测试网 runbook](RUNBOOK-testnet.md)。
 
+账户入口按 State 中的 MarginItem 编码变长 MarginReport；超过单体容量时设置 ITEMS_TRUNCATED，未观察到的 ADL 值不填零。该编码由 CORE-169 验证。
+
 ## 已知限制与后续工作
 
 - 当前可执行子集是 Linux 上的新 journal 会话、文件配置、单任务线程、已注册的 `NoModel` 策略与 `--dry-run` 离线闭环；配置生成示例、测试网模板与命令见 [config](config/README.md)。Windows 支持 `--check`、`schemas`、`--version` 与配置测试；实际引擎要求 Linux tmpfs 和 Unix socket。

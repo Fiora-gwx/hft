@@ -126,6 +126,7 @@ struct Instrument {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Settings {
+    #[serde(default)]
     uid: String,
     account_mode: String,
     account_level: String,
@@ -143,6 +144,7 @@ struct SymbolSettings {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Permissions {
+    #[serde(default)]
     user_id: String,
     perm_type: String,
     permissions: Vec<String>,
@@ -211,10 +213,15 @@ fn identity(
     uid: &str,
     h: &mut AccountConfigReportHdr,
 ) -> Result<(), DecodeErr> {
+    if uid.is_empty() && rd.account(a).uid_policy == UidPolicy::Unverifiable {
+        h.venue_uid.fill(0);
+        h.uid_keys = 0;
+        return Ok(());
+    }
     if rd.account(a).uid_policy == UidPolicy::Verified && rd.venue_uid(a, v) != Some(uid) {
         return Err(DecodeErr::Shape);
     }
-    if uid.is_empty() || uid.len() > 24 || !uid.bytes().all(|b| b.is_ascii_digit()) {
+    if uid.len() > 24 || !safe_token(uid) {
         return Err(DecodeErr::Shape);
     }
     h.venue_uid[..uid.len()].copy_from_slice(uid.as_bytes());
@@ -313,7 +320,11 @@ fn decode(
             let old = h.venue_uid;
             h.venue_uid.fill(0);
             identity(rd, a, v, &r.user_id, h)?;
-            if old != h.venue_uid {
+            let absent = old == [0; 24] || h.venue_uid == [0; 24];
+            if absent && rd.account(a).uid_policy == UidPolicy::Unverifiable {
+                h.venue_uid.fill(0);
+                h.uid_keys = 0;
+            } else if old != h.venue_uid {
                 return Err(DecodeErr::Shape);
             }
         }
@@ -407,6 +418,9 @@ fn decode(
                 let i = instrument(rd, v, &r.symbol)?;
                 let h = rd.inst(i);
                 let qty = decimal(&r.total, h.qty_wire_exp)?;
+                if qty < 0 {
+                    return Err(DecodeErr::Shape);
+                }
                 let qty = match r.pos_side.as_str() {
                     "long" => qty,
                     "short" => qty.checked_neg().ok_or(DecodeErr::Overflow)?,
@@ -442,6 +456,7 @@ fn decode(
                     });
                 }
             }
+            s.position_margin_items();
         }
         Query::OpenOrders { .. } => {
             let r: Orders = data(b)?;

@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-15 | Unverifiable 账户容许缺 UID 且不声称核验成功，实际 UID 矛盾仍拒绝；保证金观察携带本轮非零持仓强平价和未知 ADL，Bitget 负总持仓量拒绝；USDM 全撤 REST 确认不生成逐单终态，错误保持 Unknown | BIN-072/173、BGT-142/146/149、CORE-120/169 | hft-venue-proto、venue-binance、venue-bitget、hft-venue、hft-core 的代码与规格 | 待评审(账户/风控) |
 | 2026-10-14 | Unknown 与终态的撤单/改单拒绝报告仍应用新增累计成交,重复不重记,部分成交不解除 Unknown;冷消费者接受 Reject 的成交证据 | OMS-061、trading DST INV-6 | hft-oms、hft-ledger | 待评审 |
 | 2026-10-14 | 每次准入前刷新 OMS 腿摘要,消除在途改变后的过时裸露风险缓存及恢复差异 | trading DST INV-6 | hft-sequencer | 待评审 |
 | 2026-10-14 | 余额首次初始化也须通过无在途且成交静默的 quiet 闸门;冷账本用同事件 BalanceInit 证据重建 | trading DST INV-1,LED-042 | hft-ledger、hft-sequencer | 待评审 |

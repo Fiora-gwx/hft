@@ -1315,11 +1315,13 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 ### BGT-142 永续账户配置核验的每个不符位
 
+当前 AccountProtocol 测试覆盖 UID 缺失策略、实际 UID 矛盾及提现权限拒绝；各不符位细分报告仍未完成，当前失败统一由运行时发布 UNREADABLE。
+
 - 规则:[账户配置核验](README.md#账户配置核验)、[账户形态(官方,本地缓存的 UTA 概览页)](README.md#账户形态官方本地缓存的-uta-概览页)、[契约](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
 - 里程碑:M3
 - 前置:`RD-BGT`;新 `AcctCtx`;基准响应(HTTP 200):步 0 = UTA 账户、基础模式、单向持仓;步 1 = BTCUSDT、ETHUSDT 均全仓;步 2 = UID `acct-0001`、权限含交易不含提现;步 5 = BTCUSDT 杠杆 5、ETHUSDT 杠杆 10。依次 `acct_decode` 四步后 `acct_finish(Config)`;每行只改所列一处
-- 实现:`crates/venue-bitget/tests/acct.rs::bgt_142_config_fut_bits`
+- 实现:`crates/venue-bitget/tests/acct.rs::bgt_142_config_uid_and_permissions_fail_closed`
 - 备注:依赖待核实:开发备忘第 5、15 条(端点与字段);输入为待采集(方法 A + B:模拟盘账户逐项切换后抓响应)
 
 | 行 | 改动 | 期望 `AccountConfigReport` |
@@ -1405,7 +1407,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   - 一次 `sink.margin`:`MarginReportHdr{venue: 10, account: 2, source: Poll(2), mflags: 0, n: 2, margin_balance: 10000000000, maint_margin: 250000000, avail_margin: 8000500000, margin_ratio: 25000000}`(= 250 / 10000,不采用 0.0251)
   - 条目 `[MarginItem{inst: 1801, adl_quantile: 255, liq_px: 5200050}, MarginItem{inst: 1802, adl_quantile: 255, liq_px: 0}]`
   - 两条 `PositionReport`:`{inst: 1801, qty: 1000000, entry_px: 6400000, upnl: 10500000, liq_px: 5200050}`、`{inst: 1802, qty: -50000000, liq_px: 0}`
-- 实现:`crates/venue-bitget/tests/acct.rs::bgt_146_margin_report`
+- 实现:`crates/venue-bitget/tests/acct.rs::bgt_146_margin_report_and_position_items`
 - 备注:依赖待核实:开发备忘第 5 条(端点与字段)
 
 ### BGT-147 margin_ratio 的边界
@@ -1581,6 +1583,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | BGT-174.22 | `check_ctl` | 通过(核实前只有 HTTP 429 → `RateLimited`) |
 
 ### BGT-175 只读查询的请求与解码通过 check_ro
+
+当前 warm 入口由 `crates/venue-bitget/tests/readonly.rs` 验证签名、整页失败原子性、分页与外来身份；FundingFlow 保留为该表未完成项，实额查询沿用 FundingHistoryProtocol。
 
 - 规则:[只读查询](README.md#只读查询)、[契约](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table

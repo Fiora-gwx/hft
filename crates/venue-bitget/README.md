@@ -265,6 +265,11 @@ UTA 文档目录有"Demo Trading"一节(官方,本地缓存的目录页),端点(
 
 ### 只读查询
 
+Warm 入口支持 OpenOrders、Fills、Balance 与永续 Positions，整页校验后才调用 RoSink；错误页没有部分结果，外来 client id 保持 UNRESOLVED/None，不借用本账户槽。FundingFlow 暂由 `FundingHistoryProtocol` 的固定窗口接口承载，`ro_request(FundingFlow)` 返回 Unsupported。合成响应仅证明本地映射，真实接口权限与分页仍须测试网验证。
+
+UTA V3 分页取响应 cursor，重复游标和非数值游标返回错误，不伪造末页。查询按 category 请求，inst 过滤在完整响应中完成，避免缩小页面后丢失下一页。Fills 的 feeDetail 必须可归到同一已登记资产；混合手续费币种拒绝该页。字段来源为 [官方订单查询文档](https://www.bitget.com/docs/catalog/trading/order-management)。
+
+
 `ro_request`/`ro_decode` 的实现([契约 31](../hft-venue-proto/README.md#实现方必须遵守的契约));reconciler 以只读 key 构建 `Templates` 调用,gw 不用(`CANCEL_ALL_SWEEP = false`)。UTA 端点、分页与字段**全部待核实**(开发备忘第 18 条),核实前按下表"要读到什么"实现,读不到即 `DecodeErr::Shape`。
 
 | `RoKind` | 请求(候选,两个产品线) | 要读到什么 |
@@ -333,6 +338,8 @@ UTA 文档目录有"Demo Trading"一节(官方,本地缓存的目录页),端点(
 AccountProtocol 使用 UTA V3 instruments/settings/info/assets/current-position/unfilled-orders。basic unified 账户要求单向/全仓、杠杆不超配置、无债务；key 要有 uta_trade 且无 withdraw，REST/WS 分别读取 UID 并匹配。现货订单显式 autoBorrow=no，demo REST 带 paptrading: 1。
 
 永续资金费读 [account/financial-records](https://www.bitget.com/docs/catalog/account/assets-balance)，过滤 CONTRACT_MAIN_SETTLE_FEE_USER_IN/OUT，按 id 去重并完成分页；funding-financial-records 是资金账户流水。RateOnly 真实 FundingSettle 入 journal 后仅检查差异，不重复记现金。真实 demo 字段仍须按开发备忘采样核验。
+
+账户 UID 缺失仅在 refdata 明确 Unverifiable 时允许，报告 uid_keys=0、venue_uid 全零；Verified 缺失或不匹配仍失败。两把凭证都返回 UID 时必须一致。持仓总量必须非负，再按 posSide 赋号；本轮 MarginItem 只含非零仓位，liq_px 随当前持仓更新，ADL 缺失为 255。
 
 ## 已知限制与后续工作
 

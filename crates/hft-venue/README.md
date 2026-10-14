@@ -737,6 +737,8 @@ VEN-341 用以本 crate 为根的 `cargo tree` 检查依赖闭包与特性,不�
 
 固定容量 order_rest SPSC 将查单送 warm worker，响应回到 gw 唯一上下文解码；失败保持 OutcomeUnknown。CancelAll 可退化为镜像内逐单 WS 撤单。资金费流水按有界 cursor 分页，只供比较，截断/循环拒绝整轮。
 
+账户 warm 调度在 REST 与会话 UID 比对时，只对 Unverifiable 账户容许缺失值，并发布 uid_keys=0；双方都有值但不同仍失败。保证金条目随同一轮持仓观察传递，失败轮次不发布部分 State。
+
 ## 已知限制与后续工作
 
 - **M1.5 实现范围**:已实现 BBO 行情(feed-bbo、按帧轮转、就绪探测、BBO 槽、Alive 与静默判定、去重)、`routes = Md/All` 的成交/标记价/资金费与分档快照、raw journal、gw 的出环/kill/限速/发送/撤单(含 `CancelAll` 展开)/回报/`OutcomeUnknown`/在途超时/主备与计划切换、心跳、`SessionDriver` 的 endpoint/登录/交接/回收。M3 再实现(构造与接口已在,运行中不触发):BBO 补帧(feed 不发 `SnapReq`)、`SnapFetchTask` 的 REST 执行(`poll_once` 空转)、`AcctFetchTask` 与 gw 侧账户查询(`GwDeps.acct_req`/`raw_tail` 随之加入)、成交暂存(`hold.rs`;解析不到槽的回报直接以 `slot = UNRESOLVED` 入环)、去重环重建(`reseed.rs`)、gw 的 REST 池(查单/撤单走 REST、`CANCEL_ALL_SWEEP`、`rest_idle_check_ms` 检查,`order_channel = Rest` 的命令回 `NoConn`)、私有频道归属与 `private_subscribe`、`bootstrap`(`SessionDriver::start` 返回 `SessErr::Bootstrap`)与会话 UID 核验(`session_identity_request` 只调用、不执行)、增量深度。对应用例的里程碑见 TESTS.md(M3)。

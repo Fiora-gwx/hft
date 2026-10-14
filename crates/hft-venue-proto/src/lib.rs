@@ -1,11 +1,8 @@
 //! `hft-venue-proto`: the `VenueProtocol` trait and the pure types in its signatures.
 //!
-//! This build carries the M1.5 part of the README: the identity constants, the session, market-data,
-//! snapshot, order/report, rate-limit, expiry and dead-man members of the trait with their helper
-//! types (`types.rs`), `MdSink` and `ReportSink`, and under feature `testkit` the `VecSink` recorder
-//! and the contract-3 part of `check_md_basics`. The account-query and read-only query members,
-//! `TradeIdRing`/`dedup_key`, the raw-code encoders and the other contract checks arrive with M3
-//! (README "已知限制与后续工作"). No I/O, no threads, no global state.
+//! Pure venue codecs, warm account observations, funding history and read-only queries.
+//! No I/O, no threads, no global state. The legacy bounded account-query API and full contract
+//! checking suite remain described in README "已知限制与后续工作".
 //! Specification: `crates/hft-venue-proto/README.md`.
 #![forbid(unsafe_code)]
 #![deny(
@@ -20,10 +17,12 @@
 
 pub mod account;
 mod funding;
+mod readonly;
 mod sink;
 mod types;
 
 pub use funding::{FundingBill, FundingHistoryProtocol, FundingPage, FundingQuery};
+pub use readonly::{FillRow, RoKind, RoPage, RoQuery, RoSink};
 
 #[cfg(feature = "testkit")]
 pub mod testkit;
@@ -45,6 +44,27 @@ use hft_types::{AccountId, AssetId, ClientOrderId, InstId, MarketKind, VenueId};
 /// One venue product line's protocol (static dispatch; README "`VenueProtocol`(静态分派)").
 /// Every method is an associated function or takes its context explicitly; no global state.
 pub trait VenueProtocol: Sized + 'static {
+    /// Warm read-only query. Unsupported on product lines without a corresponding endpoint.
+    fn ro_request(
+        _rd: &RefData,
+        _t: &Self::Templates,
+        _acct: AccountId,
+        _q: &RoQuery,
+        _clk: &WallClock,
+        _out: &mut RestReqBuf,
+    ) -> Result<(), EncodeErr> {
+        Err(EncodeErr::Unsupported(GwOp::Query))
+    }
+    fn ro_decode(
+        _rd: &RefData,
+        _acct: AccountId,
+        _q: &RoQuery,
+        _status: u16,
+        _body: &[u8],
+        _out: &mut impl RoSink,
+    ) -> Result<RoPage, DecodeErr> {
+        Err(DecodeErr::UnknownClass)
+    }
     // ---- identity and constants ----
     /// Venue name, e.g. `"binance-usdm"` (hft-core `venues.<v>.protocol`, `fixtures/<NAME>/`).
     const NAME: &'static str;

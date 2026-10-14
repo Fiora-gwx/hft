@@ -323,14 +323,17 @@ Binance 的测试环境用 **Demo Trading**(演示环境);旧测试网(`testnet.
 
 ### 只读查询
 
-`ro_request`/`ro_decode` 的实现([契约 31](../hft-venue-proto/README.md#实现方必须遵守的契约));reconciler 以只读 HMAC key 构建 `Templates` 调用,gw 不用(`CANCEL_ALL_SWEEP = false`)。签名同"账户配置核验";端点、分页与字段全部待核实(开发备忘第 22 条)。
+Warm 入口支持 OpenOrders、Fills、Balance 与永续 Positions，整页校验后才调用 RoSink；错误页没有部分结果，外来 client id 保持 UNRESOLVED/None，不借用本账户槽。FundingFlow 暂由 `FundingHistoryProtocol` 的固定窗口接口承载，`ro_request(FundingFlow)` 返回 Unsupported。合成响应仅证明本地映射，真实接口权限与分页仍须测试网验证。
+
+
+`ro_request`/`ro_decode` 的实现([契约 31](../hft-venue-proto/README.md#实现方必须遵守的契约));reconciler 以只读 HMAC key 构建 `Templates` 调用,gw 不用(`CANCEL_ALL_SWEEP = false`)。签名同"账户配置核验";成交分页按 [官方 USD-M 文档](https://developers.binance.com/docs/derivatives/usds-margined-futures/trade/rest-api/Account-Trade-List) 与 [Spot 文档](https://developers.binance.com/docs/binance-spot-api-docs/rest-api/account-endpoints) 生成请求。第一页用 startTime，后续只用 fromId；满页游标取最大 id + 1，空页终止。
 
 | `RoKind` | `Usdm` | `Spot` | 字段映射 |
 |---|---|---|---|
 | `OpenOrders` | `GET /fapi/v1/openOrders`(不带 symbol = 全部) | `GET /api/v3/openOrders` | 每单 `open_order`:`clientOrderId` 经 `parse_cid` 定槽,`origQty`/`price`、`executedQty` → `cum_filled`,`status` → `detail` |
 | `Fills` | `GET /fapi/v1/userTrades?symbol=&fromId=`(按 symbol;游标 = 最后一条 `id` + 1) | `GET /api/v3/myTrades?symbol=&fromId=` | 每笔 `fill`:`id` → `trade_id`,`orderId`,`qty`、`price`、`commission`/`commissionAsset`,`time`;**不带 client id**(`cid = None`);强平类 `cause` 无法从本接口判定(`None`,开发备忘第 2 条) |
 | `FundingFlow` | `GET /fapi/v1/income?incomeType=FUNDING_FEE&startTime=`(游标 = 最后一条 `time` + 1) | `Unsupported` | 每笔 `funding`:`symbol` → inst,`income` → amount,`time` → `settle_ts_ns` |
-| `Balance` | `GET /fapi/v3/balance` | `GET /api/v3/account` | 每资产 `balance`(`free`/`locked`) |
+| `Balance` | `GET /fapi/v3/account` | `GET /api/v3/account` | 每资产 `balance`(`free`/`locked`) |
 | `Positions` | `GET /fapi/v3/positionRisk` | `Unsupported` | 每 inst `position`,映射同"保证金数据换算" |
 
 ### `mock` 特性(给 mock-exchange 的反向编解码)
@@ -500,6 +503,8 @@ pub mod mock {
 - 现有知识来源:`E:\trading\Trading\crates\binance`(depth 同步、`/market` 路由)、`E:\trading\Trading\apps\collector\src\private.rs`(listenKey、私有对账端点)、旧套利引擎 Rust 交易模块 `cex-arb/src/exchange/bn_futures.rs`(位于 `E:\trading\Trading\` 下;logon 签名串、`positionRisk`)
 
 ### 测试环境 warm 账户入口
+
+USDM 的 `encode_rest(CancelAll)` 按合约生成签名 DELETE，全账户 inst=0 返回 Unsupported，供运行时逐合约展开。REST code=200 只确认请求；不生成逐单取消回报。403/429/5xx 与业务错误保留结果未知，限速/时钟偏差另发连接提示。`dead_man_refresh` 按 inst 生成签名 POST；确认的 countdownTime 接受官方字符串及数字形式，值与请求必须相等。
 
 AccountProtocol 核对 exchangeInfo 的 tick/lot/minQty/minNotional；USDM accountConfig、symbolConfig 核验单向、单资产、全仓与杠杆，v3/account 和 v3/positionRisk 提供基线。遗留订单逐笔取消后查到空。REST 支持 HMAC/Ed25519，listenKey 由 REST 创建续期。accountConfig 不返回 UID，Demo 的非正式 Unverifiable 账户须使用同一 REST/WS key 并经人工身份确认；正式账户与完整跨主机权限/UID 查询不由此入口放行。
 

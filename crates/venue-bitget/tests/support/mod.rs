@@ -36,15 +36,19 @@ pub const SPOT: VenueId = VenueId::BITGET_UTA_SPOT;
 /// `RD-BGT` with the effective caps = `default_caps()`.
 pub fn rd() -> &'static RefData {
     static RD: OnceLock<&'static RefData> = OnceLock::new();
-    RD.get_or_init(|| build(&[]))
+    RD.get_or_init(|| build(&[], false, false))
 }
 
 /// `RD-BGT` with extra `ignorable_user_events` on both lines (BGT-115.6).
 pub fn rd_ignoring(names: &[&str]) -> &'static RefData {
-    build(names)
+    build(names, false, false)
 }
 
-fn build(ignorable: &[&str]) -> &'static RefData {
+pub fn account_rd(unverifiable: bool) -> &'static RefData {
+    build(&[], true, unverifiable)
+}
+
+fn build(ignorable: &[&str], compact: bool, unverifiable: bool) -> &'static RefData {
     let mut b = RdbBuilder::new(1);
     b.created_utc_ns(1_759_276_800_000_000_000);
     for (id, name, class, px, qty) in [
@@ -122,8 +126,13 @@ fn build(ignorable: &[&str]) -> &'static RefData {
             );
         }
     }
-    for id in 1..=1902u32 {
-        let (venue, kind, sym, asset, tick, lot, tick_s, lot_s) = match id {
+    for id in 1..=if compact { 4 } else { 1902u32 } {
+        let wire_id = if compact {
+            [1801, 1802, 1901, 1902][id as usize - 1]
+        } else {
+            id
+        };
+        let (venue, kind, sym, asset, tick, lot, tick_s, lot_s) = match wire_id {
             1801 => (FUT, InstKind::Perp, "BTCUSDT", BTC, 10, 100_000, "0.1", "0.001"),
             1802 => (FUT, InstKind::Perp, "ETHUSDT", ETH, 1, 1_000_000, "0.01", "0.01"),
             1901 => (SPOT, InstKind::Spot, "BTCUSDT", BTC, 1, 100, "0.01", "0.000001"),
@@ -173,13 +182,18 @@ fn build(ignorable: &[&str]) -> &'static RefData {
         b.account(AccountSpec {
             id,
             label: label.into(),
+            uid_policy: if unverifiable {
+                hft_refdata::UidPolicy::Unverifiable
+            } else {
+                hft_refdata::UidPolicy::Verified
+            },
             venues: 1 << v.0,
             ..AccountSpec::default()
         });
         b.account_venue(AccountVenueSpec {
             account: id,
             venue: v,
-            uid: "acct-0001".into(),
+            uid: if unverifiable { "" } else { "acct-0001" }.into(),
         });
     }
     let blob = b.finish();
