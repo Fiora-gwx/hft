@@ -172,8 +172,10 @@ pub struct GoldenFail {
 pub struct GoldenDriver<P>(core::marker::PhantomData<P>);
 
 impl MdRec {
+    /// A stable sink-method tag (1..=10), followed by the exact event fields. Tags distinguish
+    /// equal-layout events, e.g. MarkPrice and IndexPrice, and preserve L2 call boundaries.
     pub fn bytes(&self) -> Vec<u8> {
-        match self {
+        let mut body = match self {
             Self::Bbo(e) => e.as_bytes().to_vec(),
             Self::Trade(e) => e.as_bytes().to_vec(),
             Self::Mark(e) => e.as_bytes().to_vec(),
@@ -202,7 +204,21 @@ impl MdRec {
                 b.extend(asks.as_slice().as_bytes());
                 b
             }
-        }
+        };
+        let tag = match self {
+            Self::Bbo(_) => 1,
+            Self::L2Begin(_) => 2,
+            Self::L2Level(..) => 3,
+            Self::L2End => 4,
+            Self::L2Snapshot { .. } => 5,
+            Self::Trade(_) => 6,
+            Self::Mark(_) => 7,
+            Self::Index(_) => 8,
+            Self::Funding(_) => 9,
+            Self::Liquidation(_) => 10,
+        };
+        body.insert(0, tag);
+        body
     }
 }
 impl<P: VenueProtocol> GoldenDriver<P> {

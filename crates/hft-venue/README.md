@@ -741,6 +741,7 @@ VEN-341 用以本 crate 为根的 `cargo tree` 检查依赖闭包与特性,不�
 ## 已知限制与后续工作
 
 - 有界 `hold` 按账户暂存无法归属的成交,收到有效 epoch 的 Ack 后按到达顺序释放;超时/满载遵循 §4。终态只影响同 account/epoch/gen 的槽镜像,IdTable 淘汰后重新定位可能移动的条目。VEN-294 的前置“4 条终态容量中保留 8 条终态”不可达;测试以 4 条终态 + 4 条活动条目验证相同满表拒绝边界,该前置修订待负责人评审。
+- VEN-073 的“md 环容量 4”与 §1 的读取前预留 `FRAME_EVENTS_MAX = 64` 不相容;测试使用容量 128 的环、两帧各 64 笔成交填满后验证 BBO 隔离。该前置修订待负责人评审,不据此声称容量 4 可运行。
 
 - **实现范围**:BBO 行情、静默连接健康、`routes = Md/All`、分档快照、公共 REST 补帧、raw journal、gw 出环/kill/限速/发送/撤单展开/回报/成交暂存、主备切换与心跳、warm 账户启动及固定容量 order_rest 交接。仍缺通用 `AcctFetchTask` 与 gw 账户查询调度、rep-bulk、去重环重建、gw 内联 `RestPool` 与空闲检测、`CANCEL_ALL_SWEEP`、私有频道归属与订阅回执切换。`SessionDriver::start_prepared` 接受调用方完成的 bootstrap,驱动自身不执行 bootstrap 与会话 UID 请求。增量深度仍属可选扩展;用例里程碑保持 TESTS.md 的定义。
 - **深度只有前 N 档**:core 的深度是分档快照(各所档位上限不同,见各 venue README);需要全深度的策略触发可选扩展"增量深度与快照重同步"(§3),它的深度连接是单路,一条连接断开 = 该连接上所有 inst 重同步;双路合并是再一层可选扩展(开发备忘)。

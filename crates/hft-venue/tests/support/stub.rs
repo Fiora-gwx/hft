@@ -207,6 +207,7 @@ pub enum Md {
     Mark,
     Index,
     Funding,
+    Liquidation,
     Depth,
     DepthT,
     Ack,
@@ -581,19 +582,20 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         Ok(())
     }
 
-    fn classify(_route: RouteId, _op: MsgOp, head: &[u8]) -> Md {
+    fn classify(route: RouteId, _op: MsgOp, head: &[u8]) -> Md {
         log("classify", || {
             String::from_utf8_lossy(head.get(..head.len().min(24)).unwrap_or(&[])).into_owned()
         });
         let k = head.split(|&b| b == b'|').next().unwrap_or(&[]);
         match k {
-            b"B" => Md::Bbo,
-            b"T" => Md::Trade,
-            b"M" => Md::Mark,
-            b"I" => Md::Index,
-            b"F" => Md::Funding,
-            b"D" => Md::Depth,
-            b"DT" => Md::DepthT,
+            b"B" if route == RouteId(0) => Md::Bbo,
+            b"T" if route == RouteId(2) => Md::Trade,
+            b"M" if route == RouteId(2) => Md::Mark,
+            b"I" if route == RouteId(2) => Md::Index,
+            b"F" if route == RouteId(2) => Md::Funding,
+            b"L" if route == RouteId(2) => Md::Liquidation,
+            b"D" if route == RouteId(1) => Md::Depth,
+            b"DT" if route == RouteId(1) => Md::DepthT,
             b"ACK" => Md::Ack,
             b"PONG" => Md::Pong,
             b"BYE" => Md::Bye,
@@ -606,10 +608,11 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         let inst = inst_of(rd, f.get(1));
         let (stream, id) = match c {
             Md::Bbo => (StreamKind::Bbo, num(f.get(2))?),
-            Md::Trade => (StreamKind::Trade, num(f.get(2))?),
+            Md::Trade => (StreamKind::Trade, num(f.get(2))? + num(f.get(6)).unwrap_or(1) - 1),
             Md::Mark => (StreamKind::Mark, num(f.get(2))?),
             Md::Index => (StreamKind::Index, num(f.get(2))?),
             Md::Funding => (StreamKind::Funding, num(f.get(2))?),
+            Md::Liquidation => (StreamKind::Liquidation, num(f.get(2))?),
             Md::Depth | Md::DepthT => (StreamKind::DepthTopN, num(f.get(2))?),
             _ => return Err(DecodeErr::UnknownClass),
         };
@@ -680,7 +683,19 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
                     },
                     _pad: [0; 7],
                 };
-                out.trade(&e);
+                let count = num(f.get(6)).unwrap_or(1);
+                if !(1..=65).contains(&count) {
+                    return Err(DecodeErr::Overflow);
+                }
+                for n in 0..count {
+                    let mut trade = e;
+                    trade.trade_id += n as u64;
+                    out.trade(&trade);
+                }
+                return Ok(MdOutcome {
+                    events: count as u16,
+                    inst,
+                });
             }
             Md::Mark => {
                 let mut e = MarkPrice::new_zeroed();
@@ -688,6 +703,30 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
                 e.h.ex_ts_ns = num(f.get(2))?.saturating_mul(1_000_000);
                 e.px = Px(fx(f.get(3), pe)?);
                 out.mark(&e);
+            }
+            Md::Index => {
+                let mut e = hft_event::IndexPrice::new_zeroed();
+                e.h = h;
+                e.h.ex_ts_ns = num(f.get(2))?.saturating_mul(1_000_000);
+                e.px = Px(fx(f.get(3), pe)?);
+                out.index(&e);
+            }
+            Md::Funding => {
+                let mut e = hft_event::Funding::new_zeroed();
+                e.h = h;
+                e.h.ex_ts_ns = num(f.get(2))?.saturating_mul(1_000_000);
+                e.rate = hft_types::Rate(fx(f.get(3), -9)?);
+                e.next_funding_ns = num(f.get(4))?.saturating_mul(1_000_000);
+                out.funding(&e);
+            }
+            Md::Liquidation => {
+                out.liquidation(&hft_event::Liquidation {
+                    h,
+                    px: Px(fx(f.get(3), pe)?),
+                    qty: Qty(fx(f.get(4), qe)?),
+                    side: Side::Sell,
+                    _pad: [0; 7],
+                });
             }
             Md::Depth | Md::DepthT => {
                 let n = num(f.get(3))? as usize;

@@ -361,7 +361,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:新 `VecSink`;按行调用一次
-- 实现:`crates/hft-venue-proto/tests/testkit.rs::vpr_040_vec_sink_md`
+- 实现:`crates/hft-venue-proto/tests/helpers.rs::vpr_040_vec_sink_md`
 
 | 行 | 调用 | 期望记录 |
 |---|---|---|

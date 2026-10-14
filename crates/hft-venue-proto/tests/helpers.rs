@@ -3,6 +3,77 @@ use hft_types::{AccountId, ClientOrderId, InstId, SlotId, VenueId};
 use hft_venue_proto::testkit::{ReportRec, VecSink};
 use hft_venue_proto::*;
 use zerocopy::FromZeros;
+
+#[test]
+fn vpr_040_vec_sink_md() {
+    use hft_event::*;
+    use hft_types::{Px, Qty, Side};
+    use hft_venue_proto::testkit::MdRec;
+    let mut s = VecSink::default();
+    let b = Bbo::new_zeroed();
+    let h = MarketHdr::new_zeroed();
+    let batch = L2BatchHdr::new_zeroed();
+    let snap = L2SnapHdr::new_zeroed();
+    let lv = [Level {
+        px: Px(100),
+        qty: Qty(2),
+    }];
+    let trade = Trade {
+        h,
+        px: Px(100),
+        qty: Qty(2),
+        trade_id: 7,
+        taker_side: Side::Buy,
+        _pad: [0; 7],
+    };
+    let liq = Liquidation {
+        h,
+        px: Px(100),
+        qty: Qty(2),
+        side: Side::Sell,
+        _pad: [0; 7],
+    };
+    let m = MarkPrice::new_zeroed();
+    let i = IndexPrice::new_zeroed();
+    let f = Funding::new_zeroed();
+    s.bbo(&b);
+    s.l2_begin(&batch);
+    s.l2_level(Side::Buy, Px(100), Qty(2));
+    s.l2_end();
+    s.l2_snapshot(&L2SnapshotPart {
+        hdr: snap,
+        bids: &lv,
+        asks: &[],
+        part: 0,
+        parts: 1,
+    });
+    s.trade(&trade);
+    s.mark(&m);
+    s.index(&i);
+    s.funding(&f);
+    s.liquidation(&liq);
+    assert_eq!(
+        s.md,
+        [
+            MdRec::Bbo(b),
+            MdRec::L2Begin(batch),
+            MdRec::L2Level(Side::Buy, Px(100), Qty(2)),
+            MdRec::L2End,
+            MdRec::L2Snapshot {
+                hdr: snap,
+                bids: lv.to_vec(),
+                asks: vec![],
+                part: 0,
+                parts: 1
+            },
+            MdRec::Trade(trade),
+            MdRec::Mark(m),
+            MdRec::Index(i),
+            MdRec::Funding(f),
+            MdRec::Liquidation(liq)
+        ]
+    );
+}
 #[path = "fake_venue.rs"]
 mod fake_venue;
 
@@ -11,6 +82,9 @@ fn vpr_046_golden_first_difference() {
     use hft_venue_proto::testkit::GoldenDriver;
     type G = GoldenDriver<fake_venue::FakePerp>;
     let want = vec![vec![1, 2, 3], vec![4, 5]];
+    let mark = testkit::MdRec::Mark(hft_event::MarkPrice::new_zeroed()).bytes();
+    let index = testkit::MdRec::Index(hft_event::IndexPrice::new_zeroed()).bytes();
+    assert_eq!(G::compare("event kind", &[mark], &[index]).unwrap_err().offset, 0);
     assert!(G::compare("fixture", &want, &want).is_ok());
     for (got, record, offset) in [
         (vec![vec![1, 9, 3], vec![4, 5]], 0, 1),

@@ -94,6 +94,12 @@ fn ven_217_hold_timeout() {
     assert_eq!(e[0].fill_seq, 2000);
     h.poll(T + 6_000_000_000);
     assert!(external(&h.reps()).is_empty());
+    h.net.push(P, b"O||EX-trade|Fill|1|3|10150|2|2|55");
+    h.poll(T + 6_000_000_001);
+    h.reps();
+    h.poll(T + 11_000_000_002);
+    let e = external(&h.reps());
+    assert_eq!((e[0].trade_id, e[0].fill_seq), (55, 3));
 }
 #[test]
 fn ven_218_fee_only_timeout() {
