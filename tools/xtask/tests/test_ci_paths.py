@@ -18,7 +18,7 @@ SPEC.loader.exec_module(paths)
 
 
 class PathPolicyTests(unittest.TestCase):
-    def test_tool_191_benchmark_selection_includes_hot_strategies(self):
+    def check_benchmark_selection_includes_hot_strategies(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             cfg = root / "tools/xtask/deps.toml"
@@ -62,6 +62,7 @@ tier = "cold"
             self.assertEqual(outputs["benchmarks"], expected)
 
     def test_tool_191_host_checks_follow_code_and_config_changes(self):
+        self.check_benchmark_selection_includes_hot_strategies()
         rows = [
             (["deploy/README.md", "crates/hft-oms/src/lib.rs"], False, False),
             (["apps/hft-core/README.md", ".github/workflows/ci.yml"], False, False),
