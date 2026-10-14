@@ -286,6 +286,8 @@ mod script {
     /// queue answers `EAGAIN` and an empty send queue accepts everything, both at `idle_tsc`.
     #[derive(Clone, Debug)]
     pub struct ScriptIo {
+        /// Optional synthetic descriptor for wait-set tests; never used for a system call.
+        pub wait_fd: Option<i32>,
         pub recv: VecDeque<RecvStep>,
         pub send: VecDeque<SendStep>,
         /// Bytes accepted by `sendmsg`, in order (the test drains it).
@@ -310,6 +312,7 @@ mod script {
     impl Default for ScriptIo {
         fn default() -> Self {
             ScriptIo {
+                wait_fd: None,
                 recv: VecDeque::new(),
                 send: VecDeque::new(),
                 sent: Vec::new(),

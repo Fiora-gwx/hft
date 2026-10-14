@@ -21,6 +21,28 @@ use support::stub::{self, Stub, StubProto, V_SIGN};
 const P: ConnId = ConnId(112);
 const S: ConnId = ConnId(113);
 
+#[test]
+fn ven_204_smoke_same_frame() {
+    let mut h = gw::<StubProto>();
+    let ordinary = h.place(A1, 1, 1, S1, false);
+    let mut smoke = h.place(A1, 2, 1, S1, false);
+    smoke.oflags |= hft_event::OrderFlags::SMOKE.0;
+    h.cmd(ordinary);
+    h.cmd(smoke);
+    h.poll(3000);
+    assert_eq!(statuses(&h.reps()), [SendStatus::Written; 2]);
+    let frames = texts(&mut h, P);
+    let mut frames = frames.iter().filter(|s| s.starts_with("P|"));
+    let a = frames.next().unwrap();
+    let b = frames.next().unwrap();
+    // Both the request reference and the client id contain the slot, all other fields agree.
+    assert_eq!(
+        a.split('|').skip(3).collect::<Vec<_>>(),
+        b.split('|').skip(3).collect::<Vec<_>>()
+    );
+    assert!(h.rt.mirror(2).unwrap().live);
+}
+
 fn texts(h: &mut Gh<StubProto>, c: ConnId) -> Vec<String> {
     h.net.sent_text(&mut h.rt, c)
 }

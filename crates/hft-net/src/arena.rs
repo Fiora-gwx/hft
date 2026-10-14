@@ -141,6 +141,12 @@ impl Handoff {
         self.role
     }
 
+    /// Return a rejected handover to its connector without installing it in another pool.
+    /// The caller must relinquish every copy of this ownership token after this call.
+    pub fn retire(self, why: ErrBits) -> RetireMsg {
+        RetireMsg { h: self, why }
+    }
+
     /// The connection, for the token's current holder.
     pub(crate) fn conn(&mut self) -> Option<&mut Conn> {
         // SAFETY: holding the token makes this thread the slot's sole owner (module docs); the

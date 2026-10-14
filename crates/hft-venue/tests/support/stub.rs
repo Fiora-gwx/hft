@@ -220,6 +220,9 @@ pub enum Md {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Rep {
+    Maintenance,
+    Hint,
+    Margin,
     Bulk,
     Order,
     External,
@@ -436,7 +439,13 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
     }
 
     fn bootstrap(role: Role, _cfg: &VenueCfg, cred: Option<&Credential>) -> Option<BootCall> {
-        log("bootstrap", || format!("{role:?} cred={}", cred.is_some()));
+        log("bootstrap", || {
+            format!(
+                "{role:?} cred={} rest_key={}",
+                cred.is_some(),
+                cred.is_some_and(|c| c.api_key.as_slice() == b"bootstrap-rest-test")
+            )
+        });
         (cfg().bootstrap && role == Role::UserStream).then(RestReqBuf::default)
     }
 
@@ -569,7 +578,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
     fn is_private_report(c: Rep) -> bool {
         matches!(
             c,
-            Rep::Bulk | Rep::Order | Rep::External | Rep::Event | Rep::Ignorable
+            Rep::Bulk | Rep::Order | Rep::External | Rep::Event | Rep::Ignorable | Rep::Hint | Rep::Margin
         )
     }
     fn heartbeat(role: Role) -> HeartbeatSpec {
@@ -859,12 +868,19 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
     fn decode_bbo_snapshot(
         rd: &RefData,
         ctx: &mut (),
-        _insts: &[InstId],
+        insts: &[InstId],
         body: &[u8],
         rx: &RxMeta,
         out: &mut impl MdSink,
     ) -> Result<u16, DecodeErr> {
-        Self::decode_md(rd, ctx, Md::Bbo, body, rx, out).map(|r| r.events)
+        let mut n = 0;
+        for row in body.split(|b| *b == b'\n') {
+            let peek = Self::peek(rd, ctx, Md::Bbo, row)?;
+            if insts.contains(&peek.inst) {
+                n += Self::decode_md(rd, ctx, Md::Bbo, row, rx, out)?.events;
+            }
+        }
+        Ok(n)
     }
 
     fn build_templates(
@@ -931,7 +947,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
                 c.px.0,
                 c.qty.0,
                 clk.unix_ms + i64::from(t.stale_ms),
-                c.oflags,
+                c.oflags & !hft_event::OrderFlags::SMOKE.0,
                 g = r#gen
             ),
             GwOp::Cancel => {
@@ -1025,6 +1041,12 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         out: &mut impl ReportSink,
     ) -> Result<ReportOutcome, DecodeErr> {
         log("decode_rest", || format!("{status}"));
+        if origin.what == hft_venue_proto::RestWhat::Keepalive && body == b"ended" {
+            return Ok(ReportOutcome {
+                ctl: ReportCtl::UserStreamEnded,
+                ..Default::default()
+            });
+        }
         if status != 200 {
             return Ok(ReportOutcome {
                 outcome_unknown: origin.req,
@@ -1089,6 +1111,9 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         _clk: &WallClock,
         out: &mut RestReqBuf,
     ) -> Result<bool, EncodeErr> {
+        if !cfg().keepalive {
+            return Ok(false);
+        }
         out.path_query
             .push(b"/keepalive")
             .map_err(|_| EncodeErr::FieldOverflow)?;
@@ -1156,6 +1181,9 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
     fn classify_report(_op: MsgOp, head: &[u8]) -> Rep {
         let f = fields(head);
         match f.first().copied() {
+            Some(b"H") => Rep::Hint,
+            Some(b"MP") => Rep::Margin,
+            Some(b"BYE") => Rep::Maintenance,
             Some(b"V") => Rep::Bulk,
             Some(b"O") => Rep::Order,
             Some(b"X") => Rep::External,
@@ -1183,6 +1211,31 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         let f = fields(p);
         let mut o = ReportOutcome::default();
         match c {
+            Rep::Hint => {
+                o.hint = if f.get(1).copied() == Some(b"MARGIN_CALL") {
+                    hft_venue_proto::AcctHint::MarginNow
+                } else {
+                    hft_venue_proto::AcctHint::ConfigRecheck
+                }
+            }
+            Rep::Margin => {
+                let mut h = hft_event::MarginReportHdr::new_zeroed();
+                h.venue = V7;
+                h.account = rx.account;
+                h.n = 1;
+                h.source = 1;
+                out.margin(
+                    &h,
+                    &[hft_event::MarginItem {
+                        inst: super::rd::S1,
+                        adl_quantile: 40,
+                        _pad: [0; 3],
+                        liq_px: Px(77),
+                    }],
+                );
+                o.events = 1;
+            }
+            Rep::Maintenance => o.ctl = ReportCtl::ServerShutdown,
             Rep::Bulk => {
                 let mut m = hft_event::MarginReportHdr::new_zeroed();
                 m.venue = V7;
@@ -1400,6 +1453,17 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
     ) -> Result<(), EncodeErr> {
         match cfg().dead_man {
             DeadManSpec::None => Err(EncodeErr::Unsupported(GwOp::DeadManRefresh)),
+            DeadManSpec::CountdownAccount { via: Via::Rest, .. } => {
+                let mut r = RestReqBuf {
+                    redacted: true,
+                    ..Default::default()
+                };
+                r.path_query
+                    .push(b"/dead-man")
+                    .map_err(|_| EncodeErr::FieldOverflow)?;
+                out.reqs.push(r);
+                Ok(())
+            }
             _ => {
                 let ids: Vec<String> = insts.iter().map(|i| i.0.to_string()).collect();
                 out.frame

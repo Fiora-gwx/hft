@@ -493,7 +493,7 @@ struct GwAccount<P: VenueProtocol> {
    - **推送型保证金数据**(`margin_data = Push`):账户与持仓推送在这里由 `decode_report` 直接产出 `MarginReport`(venue 在 `GwCtx` 里合并账户级与持仓级推送),gw 只更新 §4a 的推送时刻;最大推送类型的解码预算见"延迟与资源契约"。
 3. `RestPool::poll`(每 `aux_every` 圈,只读有在途请求的连接):每个响应以提交时记下的 `RestOrigin` 调 `P::decode_rest`,输出与 `ReportOutcome` 按第 2 步处理;查询结果(`Unknown` 收敛)→ `OrderEvent{what=QueryResult}`(带 `cum_filled`、`avg_px` 与 `detail` 订单状态码);`RestPool::poll` 返回 `RestFail`(超时、断开)→ 该请求按无响应处理(订单类 → `OrderEvent{what: OutcomeUnknown, reject_code = 0}`);REST 死手响应失败 → `ConnState{Degraded, account, role=Order, reason=DEADMAN}`,会话维护(listenKey 续期)失败 → 同一 reason、`role=UserStream`([05 §8](../../design/05-CEX执行层.md):视为连接异常)。对 `stale_guard()` 为 `None` 或 `RecvWindow` 的所(如 Binance),查询"不存在"只作为提示交给 OMS,不据此定终态,由成交历史确认或对账收敛;`ExpireAt` 的所只有非对冲、非链接槽可在窗口 + grace 后定终态([hft-venue-proto 契约 10](../hft-venue-proto/README.md#实现方必须遵守的契约),判定在 [hft-oms](../hft-oms/README.md))。
 4. `ErrBits`:primary 致命 → **强制切换**(standby 已登录则 `swap_primary`),推 `ConnState{Down, conn, account, role=Order, reason}`,在途请求由 sequencer 推入 `Unknown` 并经新 primary 查询收敛;私有频道归属在旧 primary 上时按 §4b 的强制切换处理;standby 致命 → `retire`、推 `ConnState{Down, conn, account, role=Order, reason}` 并补建;UserStream 致命 → `ConnState{Down, role=UserStream}` 并补建。下单与独立用户流连接 `install` 后推 `ConnState{Up, conn, account, role}`(hft-core 启动闸门 `ORDER_CONNS` 读它)。
-5. **计划切换**:primary `rotate_due`(计划轮换时刻按 `conn.rotate_margin_s` 规则)、收到 `ServerShutdown` 提示或 `GwCmd{Rotate}`,standby `Open`,且 `inflight[primary] == 0` → 先按 §4b 把私有频道迁到 standby(先建后断),再 `swap_primary`,推 `ConnState{Rotated, conn = 新 primary, account, role=Order, reason}`(`reason` = 触发它的 `ROTATE_DUE` 或 `SERVER_HINT` 位,`GwCmd{Rotate}` 为 0);旧 primary 再等 1 s 收尾回报后 `retire`。超过 `rotate_wait_max_ms` 仍有在途 → 放弃本次,再过 `rotate_wait_max_ms` 重新开始等待。
+5. **计划切换**:primary `rotate_due`(计划轮换时刻按 `conn.rotate_margin_s` 规则)、收到 `ServerShutdown` 提示或 `GwCmd{Rotate}`,standby `Open`,且 `inflight[primary] == 0` → 先按 §4b 把私有频道迁到 standby(先建后断),再 `swap_primary`,推 `ConnState{Rotated, conn = 新 primary, account, role=Order, reason}`(`reason` = 触发它的 `ROTATE_DUE` 或 `SERVER_HINT` 位,`GwCmd{Rotate}` 为 0);旧 primary 再等 1 s 收尾回报后 `retire`。满 `rotate_wait_max_ms` 仍有在途 → 放弃本次,再过 `rotate_wait_max_ms` 重新开始等待；该圈响应清空在途时仍可切换。错峰到期的 standby 只退役并补建，不触发 primary 切换。
 6. 心跳(§5);`inflight` 超时检查;`hold` 超时检查(第 2 步);账户查询调度(§4a)。
 7. **预热(可选,默认关)**:`gw.warm_interval_ns > 0` 时,空闲超过该间隔用一条固定的假 `GwCmd{op: Place}` 走 `encode → seal`(写 `warm_frame`)→ `primary.warm(&warm_frame)`。不发送、不推任何事件。启用条件:统一升级主机上 `egress` 的冷热差测量证明值得。
 
@@ -647,6 +647,7 @@ struct IdTable {
 | `src/topn.rs` | 分档快照的状态(`AwaitFirst`/`Live`)与 `Resync`/`Up` 记录(§3c) |
 | `src/resync.rs` | 增量深度的重同步槽、状态机、snap 记录的应用(可选扩展) |
 | `src/snap.rs` | `SnapFetchTask`、`SnapReq`/`SnapRecHdr`、请求合并与权重计数 |
+| `src/snap_pool.rs` | `PooledSnapFetchTask`、公共 REST 池、合批与有界完成记录 |
 | `src/gw.rs` | `GwRuntime` 循环体、`drain_out`、发送、切换 |
 | `src/kill.rs` | `kill_admit`(纯函数,gw 与 hft-core 启动自检共用) |
 | `src/idtable.rs` | `IdTable`、终态保留与淘汰 |
@@ -755,7 +756,7 @@ REST 在途项保存发送时的完整 ClientOrderId；回包省略 epoch 时只
 - 有界 `hold` 按账户暂存无法归属的成交,收到有效 epoch 的 Ack 后按到达顺序释放;超时/满载遵循 §4。终态只影响同 account/epoch/gen 的槽镜像,IdTable 淘汰后重新定位可能移动的条目。VEN-294 的前置“4 条终态容量中保留 8 条终态”不可达;测试以 4 条终态 + 4 条活动条目验证相同满表拒绝边界,该前置修订待负责人评审。
 - VEN-073 的“md 环容量 4”与 §1 的读取前预留 `FRAME_EVENTS_MAX = 64` 不相容;测试使用容量 128 的环、两帧各 64 笔成交填满后验证 BBO 隔离。该前置修订待负责人评审,不据此声称容量 4 可运行。
 
-- **实现范围**:BBO、分档快照、公共 REST 补帧、raw journal、gw 出环/kill/限速/发送/撤单展开/回报/成交暂存、主备切换与心跳、warm 账户启动。`AcctSched` 与有界 `AcctFetchTask<P: AcctProtocol, T: AcctTransport>` 覆盖完整账户查询序列、失败退避与分块 raw；`AcctRestPools` 是 keep-alive 传输适配器。gw 支持 rep-bulk、私有频道归属/回执切换、内联 `RestPool`、空闲检测与 `CANCEL_ALL_SWEEP`。具体产品线的 `AcctProtocol` 实现及应用账户轮询迁移、快照池化/合批、去重环重建与完整契约/性能验收仍待完成。`SessionDriver::start_prepared` 接受调用方完成的 bootstrap，`verified_identity` 将 warm 校验绑定至本次 job；缺少独立会话 key 的 UID 证据时交接 Failed 状态，驱动自身的 UID REST 重试仍待完成。用例里程碑保持 TESTS.md 的定义。
+- **实现范围**:BBO、分档快照、公共 REST 补帧、raw journal、gw 出环/kill/限速/发送/撤单展开/回报/成交暂存、主备切换与心跳、warm 账户启动。`AcctSched` 与有界 `AcctFetchTask<P: AcctProtocol, T: AcctTransport>` 覆盖完整账户查询序列、失败退避与分块 raw；`AcctRestPools` 是 keep-alive 传输适配器。gw 支持 rep-bulk、私有频道归属/回执切换、内联 `RestPool`、空闲检测与 `CANCEL_ALL_SWEEP`。具体产品线的 `AcctProtocol` 实现及应用账户轮询迁移、去重环重建与完整契约/性能验收仍待完成。未知用户事件与费用偏离的 Note 尚缺 rep/接收端接线。池化补帧接入应用，驱动内 bootstrap/UID REST 支持有界重试；应用会话仍经账户客户端调用 `start_prepared` / `verified_identity`，缺少独立会话 key 的 UID 证据时交接 Failed 状态。用例里程碑保持 TESTS.md 的定义。
 - **深度只有前 N 档**:core 的深度是分档快照(各所档位上限不同,见各 venue README);需要全深度的策略触发可选扩展"增量深度与快照重同步"(§3),它的深度连接是单路,一条连接断开 = 该连接上所有 inst 重同步;双路合并是再一层可选扩展(开发备忘)。
 - **gw 负责填帧**:OMS 只产出数值化 `OrderDecision`,sequencer 投影为 `GwCmd`,venue 特定的帧编码在 gw 线程完成(sequencer 不依赖任何 `venue-*`,各 venue 并行填帧)。
 - **refdata 变更 = 重启**:新增/移除 inst 走 ConfigBlob + Drain + 重启;可选扩展(refdata 热替换,触发条件:重启窗口影响交易)时 `rd` 参数接口不变,运行时需增加订阅差分。
@@ -795,7 +796,13 @@ REST 在途项保存发送时的完整 ClientOrderId；回包省略 epoch 时只
 
 ### 当前 BBO 补帧传输
 
-`SnapFetchTask::new` 接收 rd、两组请求/响应环与时钟,`attach` 在启动期注入公共 REST host/transport。当前 lane 串行一个请求、单 inst,配置 `parallel = 1`;多连接池、合批与 keep-alive 验收仍待完成。HTTP 调用非阻塞,成功或失败都只交付一条记录;环满保留记录,大于 `max_record_bytes` 只写 TooLarge 头。`timeout_ms` 默认 2000、`request_gap_ms` 默认 100、`max_record_bytes` 默认 65536;app 按 snap 环容量的 1/4 覆盖上限。请求消耗 refdata 的 IP/Weight 窗口,不足时保留请求等待。接收戳取 warm 任务观察到完整响应时的 TSC/UTC,不伪造硬件戳。
+`PooledSnapFetchTask<P, N>` 接收独立 FeedCtx、两组请求/响应环与 `RestPool<N>`，以 `parallel` 限定在途批数。启动期通过 `SnapConnections` 接 conn-builder，或 `attach_connector` 在同一 warm 任务建连；源 IP 由装配传入。`SnapFetchTask::into_pooled` 可迁移尚未启动的单连接任务。
+
+每批最多取 `BBO_SNAPSHOT_BATCH` 与 32 的较小值，重复 inst 留到下一批；请求 BufFull 时减半重试。成功响应必须恰好包含每个请求 inst 的一条 Bbo。每个请求都有完成记录，同批原始正文只附在首条；环满保留整批，超过 `max_record_bytes` 整批只发 TooLarge 头。超时退役连接，迟到响应不能匹配后续请求。池空或 Busy 不消耗 refdata IP/Weight 额度。当前 app 使用 `N = parallel = 1`；超时、请求间隔与记录上限仍由 SnapCfg 与环容量约束，参数归本页配置表。接收戳取 hft-net 的响应戳与本轮 TSC，不伪造硬件戳。
+
+### 驱动内会话 REST
+
+`SessionDriver::set_rest` 注入单账户 REST 传输、账户号与 REST 凭证后，`enqueue` 接受该账户的有界建连请求，拒绝其他账户复用其出口；`drive_at` 以 REST 凭证完成 bootstrap，再构造 endpoint。登录与 UID 查询仍用会话凭证。独立 session key 在登录后查询 UID，按 1/2/4/8/16/30 秒退避，达到 `acct_query_degraded_after` 后以失败身份状态交接；HTTP 成功且 UID 非空、ASCII 可见、零填充连续才是有效证据。`start_prepared` / `verified_identity` 继续支持调用方提供证据。应用账户客户端仍使用后一入口；多账户应用采用每账户驱动或外部账户客户端。
 
 FeedRuntime 缓存协议是否支持补帧,在宽限期后每 inst 至多一个在途 req_id。成功无序号报价不改变流序号水位,失败再等一个宽限期;流已恢复、请求已失效或成员全失联时丢弃迟到响应。REST 的连接号不更新 WS 活性,原始响应由 feed 单写者写 raw。
 

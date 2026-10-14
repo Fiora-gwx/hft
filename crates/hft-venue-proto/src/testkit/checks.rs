@@ -77,9 +77,83 @@ pub fn check_default_caps<P: VenueProtocol>(caps: &VenueCaps) -> Result<(), Cont
     ) {
         return Err(fail(10, "stale_guard", "zero protection window"));
     }
+    if P::rate_rules().is_empty() {
+        return Err(fail(15, "rate_rules", "empty rate_rules"));
+    }
     for rule in P::rate_rules() {
-        if rule.window_ms == 0 {
-            return Err(fail(15, "rate_rules", "zero rate window"));
+        if rule.window_ms == 0 || rule.limit == 0 {
+            return Err(fail(15, "rate_rules", "zero rate_rules window or limit"));
+        }
+    }
+    Ok(())
+}
+
+/// Verify the encoded protection, not only the declared capability. The predicate inspects the
+/// venue's actual wire field; it must be independent of its encoder.
+pub fn check_reduce_only<P: VenueProtocol>(
+    rd: &RefData,
+    templates: &P::Templates,
+    place: &hft_event::GwCmd,
+    target: &crate::TargetRef,
+    clock: &crate::WallClock,
+    protected: impl Fn(&[u8]) -> bool,
+) -> Result<(), ContractFail> {
+    let mut buf = vec![0; P::ORDER_FRAME_CAP];
+    for flags in [
+        0,
+        hft_event::OrderFlags::REDUCE_ONLY.0,
+        hft_event::OrderFlags::RISK_REDUCING.0,
+    ] {
+        let mut c = *place;
+        c.oflags = flags;
+        let r = P::encode(rd, templates, &c, target, clock, &mut buf);
+        if P::MARKET == hft_types::MarketKind::Spot && flags == hft_event::OrderFlags::REDUCE_ONLY.0 {
+            if r != Err(EncodeErr::Unsupported(hft_event::GwOp::Place)) {
+                return Err(fail(11, "reduce_only", "spot silently dropped REDUCE_ONLY"));
+            }
+        } else {
+            let bytes = r
+                .ok()
+                .and_then(|n| buf.get(..n))
+                .ok_or_else(|| fail(11, "reduce_only", "place did not encode"))?;
+            if protected(bytes) != (flags == hft_event::OrderFlags::REDUCE_ONLY.0) {
+                return Err(fail(
+                    11,
+                    "reduce_only",
+                    "wire protection differs from REDUCE_ONLY",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Session UID evidence is never inferred from an HTTP success alone.
+pub fn check_identity<P: VenueProtocol>(
+    cfg: &crate::VenueCfg,
+    cred: &crate::Credential,
+    body: &[u8],
+    expected: [u8; 24],
+) -> Result<(), ContractFail> {
+    let mut req = crate::RestReqBuf::default();
+    let separate = P::session_identity_request(cfg, cred, 0, &mut req)
+        .map_err(|_| fail(23, "identity request", "cannot encode identity request"))?;
+    if separate {
+        if !req.redacted || req.path_query.is_empty() {
+            return Err(fail(23, "identity request", "missing redaction or target"));
+        }
+        let mut uid = [0; 24];
+        if P::decode_identity(200, body, &mut uid).is_err() || uid != expected || !crate::valid_uid(&uid) {
+            return Err(fail(
+                23,
+                "identity response",
+                "UID differs from independent evidence",
+            ));
+        }
+        for status in [401, 403, 429, 500, 503] {
+            if P::decode_identity(status, body, &mut uid).is_ok() {
+                return Err(fail(23, "identity response", "accepted unsuccessful HTTP status"));
+            }
         }
     }
     Ok(())

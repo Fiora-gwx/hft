@@ -5,6 +5,8 @@
     clippy::disallowed_methods,
     clippy::disallowed_types
 )] // allow-list: test code, not a hot path (crate level, as in the former per-file binaries)
+#[global_allocator]
+static ALLOC: hft_testkit::CountingAlloc = hft_testkit::CountingAlloc;
 mod acct_fetch;
 mod acct_sched;
 mod bbo_live;
@@ -33,6 +35,7 @@ mod raw_modes;
 mod ring_full;
 mod seq;
 mod session;
+mod snap_pool;
 mod snapshot;
 mod support;
 

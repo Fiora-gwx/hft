@@ -44,6 +44,7 @@ mod seq;
 mod session;
 mod sink;
 mod snap;
+mod snap_pool;
 
 pub use acct::{AcctReq, AcctSched, AcctState};
 pub use acct_fetch::{AcctAccount, AcctFetchTask, AcctResponse, AcctTransport};
@@ -66,6 +67,7 @@ pub use rest::AcctRestPools;
 pub use seq::{InstSeq, Verdict, judge};
 pub use session::{SessErr, SessEvent, SessionCfg, SessionDriver, SessionOp};
 pub use snap::{SnapDeps, SnapFetchTask, SnapRecHdr, SnapReq};
+pub use snap_pool::{PooledSnapFetchTask, SnapConnections};
 
 /// Max `FeedCmd`s taken per `poll_once`.
 pub const FEEDCMD_PER_POLL: usize = 8;

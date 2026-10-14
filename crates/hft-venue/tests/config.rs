@@ -107,6 +107,37 @@ fn feed_err(cfg: FeedCfg) -> Result<(), InitErr> {
     try_feed::<StubProto>(cfg, Caps::default(), Net::new(0, 0), rd_stub()).map(|_| ())
 }
 
+#[test]
+fn ven_013_deps_match_routes() {
+    for (routes, change, ok) in [
+        (FeedRoutes::Bbo, 0, true),
+        (FeedRoutes::Bbo, 1, false),
+        (FeedRoutes::Bbo, 2, false),
+        (FeedRoutes::Md, 0, true),
+        (FeedRoutes::Md, 3, false),
+        (FeedRoutes::Md, 4, false),
+        (FeedRoutes::All, 0, true),
+        (FeedRoutes::All, 5, false),
+    ] {
+        let result = try_feed_deps::<StubProto>(
+            FeedCfg { routes, ..f0() },
+            Caps::default(),
+            Net::new(0, 0),
+            rd_stub(),
+            |d| match change {
+                1 => d.md = Some(hft_rt::spsc(128, Backing::Heap).unwrap().0),
+                2 => d.bbo = None,
+                3 => d.snapreq = Some(hft_rt::spsc(8, Backing::Heap).unwrap().0),
+                4 => d.bbo = Some(hft_rt::spsc(128, Backing::Heap).unwrap().0),
+                5 => d.snapreq = None,
+                _ => {}
+            },
+        )
+        .map(|_| ());
+        assert_eq!(result, if ok { Ok(()) } else { Err(InitErr::DepsMismatch) });
+    }
+}
+
 fn snap_err(cfg: SnapCfg) -> Result<(), InitErr> {
     let (op, _) = hft_rt::byte_spsc(1 << 18, Backing::Heap).unwrap();
     let deps = SnapDeps {

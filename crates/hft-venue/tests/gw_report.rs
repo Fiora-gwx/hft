@@ -18,6 +18,41 @@ use support::stub::{self, StubProto};
 const P: ConnId = ConnId(112);
 
 #[test]
+fn ven_222_report_decode_window_and_recovery() {
+    for (script, down) in [
+        (vec![(0, false)], false),
+        (vec![(0, false), (10, false), (20, false)], true),
+        (vec![(0, false), (5, true), (10, false), (20, false)], false),
+        (vec![(0, false), (30, false), (61, false)], false),
+        (vec![(0, false), (30, false), (60, false)], true),
+        (vec![(0, false), (10, false)], false),
+    ] {
+        let mut cfg = g0();
+        cfg.aux_every = 1;
+        cfg.report_decode_down_after = 3;
+        let mut h = gw_full::<StubProto>(cfg, &[A1], GhOpts::default());
+        let mut states = Vec::new();
+        for (sec, valid) in &script {
+            h.net
+                .push(P, if *valid { b"E|listenKeyExtended" } else { b"Z|bad" });
+            h.poll(3_000_000 + sec * 1_000_000_000);
+            states.extend(conn_states(&h.reps()));
+        }
+        assert_eq!(h.rt.conn(P).is_none(), down, "{script:?}");
+        assert_eq!(states.iter().any(|s| s.state == ConnStateKind::Down), down);
+        assert!(
+            states
+                .iter()
+                .any(|s| s.state == ConnStateKind::Degraded && s.reason == codes::REPORT_DECODE)
+        );
+        assert_eq!(
+            h.rt.counters().report_decode_err,
+            script.iter().filter(|(_, ok)| !ok).count() as u64
+        );
+    }
+}
+
+#[test]
 fn ven_214_epoch_window() {
     for (epoch, accept, account, want) in [
         (70, true, A1, true),

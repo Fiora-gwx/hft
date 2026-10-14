@@ -280,3 +280,162 @@ fn ven_313_config_merges_both_key_identities() {
         assert_eq!((h.uid_keys, h.mismatches), (mask, mismatch));
     }
 }
+
+pub(crate) fn measure_account_sequences_and_gateway_apply() {
+    use hft_event::RepMsg;
+    let rd = rd_with(&RdOpts {
+        conn_age_s: 0,
+        margin: hft_refdata::MarginData::NotApplicable,
+        ..Default::default()
+    });
+    let cfg = GwCfg {
+        aux_every: 1,
+        ..Default::default()
+    };
+    let mut h = crate::support::gwh::gw_rd::<StubProto, 2048>(cfg, &[A1], Default::default(), rd).unwrap();
+    h.open(1000, 2);
+    h.reps();
+    let (queries, mut queries_rx) = spsc(8, Backing::Heap).unwrap();
+    h.rt.set_account_queries(queries);
+    let (bulk, mut tail) = byte_spsc(1 << 20, Backing::Heap).unwrap();
+    h.rt.set_rep_bulk(bulk);
+    let (mut task, mut tx, mut out) = worker(Mock::default(), GwCfg::default());
+    task.transport_mut(A1).unwrap().endpoints.reserve(400_000);
+    stub::log_enabled(false);
+    for n in 0..101_000u32 {
+        let kind = if n % 2 == 0 {
+            AcctQueryKind::Config
+        } else {
+            AcctQueryKind::Margin
+        };
+        let now = 3_000_000 + u64::from(n + 1) * 60_000_000_000;
+        let req = if kind == AcctQueryKind::Config {
+            h.rt.account_session(A1, 0, [0; 24]);
+            h.poll(now);
+            queries_rx
+                .try_pop()
+                .unwrap_or_else(|| panic!("no config at round {n}"))
+        } else {
+            let mut req = request(kind);
+            req.seq_no = n + 1;
+            req
+        };
+        tx.try_push(req).unwrap();
+        task.transport_mut(A1).unwrap().replies =
+            Mock::data(&[1, 2, 3][..if kind == AcctQueryKind::Config { 3 } else { 2 }]).replies;
+        let mut done = 0;
+        let mut applied = 0;
+        for step in 0..32 {
+            let scope = hft_testkit::CountingAlloc::scope();
+            task.poll_once(now + step);
+            let allocs = scope.allocs();
+            if n >= 1000 {
+                assert_eq!(allocs, 0, "account sequence");
+            }
+            while let Some(b) = out.peek() {
+                done += usize::from(AcctRecHdr::read(b).unwrap().what == 2);
+                if kind == AcctQueryKind::Config {
+                    h.acct.reserve(b.len() as u32).unwrap().copy_from_slice(b);
+                    h.acct.commit();
+                }
+                out.advance();
+            }
+            let scope = hft_testkit::CountingAlloc::scope();
+            h.rt.poll_once(now + step);
+            let allocs = scope.allocs();
+            if n >= 1000 {
+                assert_eq!(allocs, 0, "gateway account apply");
+            }
+            for r in h.reps() {
+                applied += usize::from(matches!(r, RepMsg::AccountConfigReport(_)));
+            }
+            while tail.peek().is_some() {
+                tail.advance();
+            }
+        }
+        assert_eq!(done, 1);
+        assert_eq!(applied, usize::from(kind == AcctQueryKind::Config));
+    }
+    stub::log_enabled(true);
+}
+
+fn scheduled_gateway(
+    margin: hft_refdata::MarginData,
+) -> (
+    crate::support::gwh::Gh<StubProto>,
+    hft_rt::Consumer<AcctReq>,
+    ByteConsumer,
+) {
+    let rd = rd_with(&RdOpts {
+        margin,
+        ..Default::default()
+    });
+    let cfg = GwCfg {
+        aux_every: 1,
+        ..Default::default()
+    };
+    let mut h = crate::support::gwh::gw_rd::<StubProto, 2048>(cfg, &[A1], Default::default(), rd).unwrap();
+    h.open(1000, 2);
+    h.reps();
+    let (tx, mut queries) = spsc(8, Backing::Heap).unwrap();
+    h.rt.set_account_queries(tx);
+    let (bulk, tail) = byte_spsc(1 << 20, Backing::Heap).unwrap();
+    h.rt.set_rep_bulk(bulk);
+    let (mut task, mut tx, mut out) = worker(Mock::data(&[1, 2, 3, 4, 5]), cfg);
+    for kind in [AcctQueryKind::Config, AcctQueryKind::Margin] {
+        h.poll(3_000_000);
+        let req = queries.try_pop().unwrap();
+        assert_eq!(req.kind, kind);
+        tx.try_push(req).unwrap();
+        for b in drain(&mut task, &mut out) {
+            h.acct.reserve(b.len() as u32).unwrap().copy_from_slice(&b);
+            h.acct.commit();
+            h.poll(3_000_001);
+            h.reps();
+        }
+    }
+    assert!(queries.try_pop().is_none());
+    (h, queries, tail)
+}
+#[test]
+fn ven_225_private_hints_schedule_immediate_account_query() {
+    for (frame, kind, why) in [
+        (b"H|MARGIN_CALL".as_slice(), AcctQueryKind::Margin, 2),
+        (b"H|CFG", AcctQueryKind::Config, 3),
+    ] {
+        let (mut h, mut q, _) = scheduled_gateway(hft_refdata::MarginData::Poll { interval_ms: 10_000 });
+        h.net.push(ConnId(112), frame);
+        h.poll(1_000_000_000);
+        let r = q.try_pop().unwrap();
+        assert_eq!((r.kind, r.account, r.why), (kind, A1, why));
+        h.poll(1_000_000_001);
+        assert!(q.try_pop().is_none());
+    }
+}
+#[test]
+fn ven_227_margin_push_moves_fallback_and_preserves_tail() {
+    use zerocopy::FromBytes;
+    let (mut h, mut q, mut tail) = scheduled_gateway(hft_refdata::MarginData::Push);
+    while tail.peek().is_some() {
+        tail.advance();
+    }
+    h.net.push(ConnId(112), b"MP");
+    h.poll(1_000_000_000);
+    let reps = h.reps();
+    assert!(
+        reps.iter()
+            .any(|r| matches!(r, hft_event::RepMsg::MarginReport(h) if h.source == 1 && h.n == 1))
+    );
+    assert_eq!(
+        hft_event::MarginItem::read_from_bytes(tail.peek().unwrap())
+            .unwrap()
+            .inst,
+        S1
+    );
+    assert!(q.try_pop().is_none());
+    h.poll(5_999_999_999);
+    assert!(q.try_pop().is_none());
+    h.poll(6_000_000_000);
+    let r = q.try_pop().unwrap();
+    assert_eq!((r.kind, r.why), (AcctQueryKind::Margin, 4));
+}

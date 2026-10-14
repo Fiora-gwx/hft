@@ -1171,6 +1171,10 @@ impl Conn {
     /// The socket fd (-1 for a scripted or closed connection).
     #[inline]
     pub fn raw_fd(&self) -> i32 {
+        #[cfg(feature = "test-io")]
+        if let Some(fd) = self.sock.script.as_ref().and_then(|s| s.wait_fd) {
+            return fd;
+        }
         self.sock.fd
     }
 

@@ -23,6 +23,193 @@ fn response<const V: u32>(h: &mut Gh<Stub<2048, V>>, status: u16, now: u64) {
         h.poll(now + n);
     }
 }
+
+#[test]
+fn ven_210_wait_fds_only_pending_rest() {
+    use hft_rt::PollTask;
+    let mut h = setup::<0>();
+    let p = h.place(A1, 7, 3, S1, false);
+    h.cmd(p);
+    h.poll(4000);
+    h.reps();
+    let q = h.targeted(GwOp::Query, A1, 7);
+    h.cmd(q);
+    h.poll(5000);
+    let mut fds = hft_rt::WaitFds::new();
+    h.rt.wait_fds(&mut fds);
+    let mut expected = [112, 113, 114]
+        .map(|i| h.rt.conn(ConnId(i)).unwrap().raw_fd())
+        .to_vec();
+    let mut got = fds.as_slice().to_vec();
+    got.sort();
+    expected.sort();
+    assert_eq!(got, expected);
+    response(&mut h, 200, 6000);
+    fds.clear();
+    h.rt.wait_fds(&mut fds);
+    let mut got = fds.as_slice().to_vec();
+    got.sort();
+    let mut expected = [112, 113]
+        .map(|i| h.rt.conn(ConnId(i)).unwrap().raw_fd())
+        .to_vec();
+    expected.sort();
+    assert_eq!(got, expected);
+}
+
+#[test]
+fn ven_236_deadman_covers_live_smoke_and_account_scope() {
+    use hft_venue_proto::{DeadManSpec, Via};
+    let mut h = setup::<0>();
+    let a = h.place(A1, 1, 1, S1, false);
+    let mut b = h.place(A1, 2, 1, S2, false);
+    b.oflags |= hft_event::OrderFlags::SMOKE.0;
+    h.cmd(a);
+    h.cmd(b);
+    h.poll(4000);
+    h.reps();
+    h.net.sent_text(&mut h.rt, ConnId(112));
+    h.cmd(hft_event::GwCmd {
+        arg: 30_000,
+        ..base(GwOp::DeadManRefresh, A1)
+    });
+    h.poll(5000);
+    assert!(
+        h.net
+            .sent_text(&mut h.rt, ConnId(112))
+            .iter()
+            .any(|s| s == "DM|30000|701,702")
+    );
+    assert!(reports(&h.reps()).is_empty());
+    let mut h = setup::<0>();
+    h.cmd(base(GwOp::DeadManRefresh, A1));
+    h.poll(4000);
+    assert!(
+        h.net
+            .sent_text(&mut h.rt, ConnId(112))
+            .iter()
+            .all(|s| !s.starts_with("DM|"))
+    );
+    stub::set_cfg(|c| {
+        c.dead_man = DeadManSpec::CountdownAccount {
+            min_ms: 5000,
+            max_ms: 60000,
+            timeout_ms: 30000,
+            refresh_ms: 10000,
+            via: Via::Rest,
+        }
+    });
+    h.cmd(base(GwOp::DeadManRefresh, A1));
+    h.poll(5000);
+    response(&mut h, 500, 6000);
+    assert!(
+        conn_states(&h.reps())
+            .iter()
+            .any(|s| s.reason == hft_venue::codes::DEADMAN)
+    );
+    stub::set_cfg(|c| c.dead_man = DeadManSpec::None);
+    h.cmd(base(GwOp::DeadManRefresh, A1));
+    h.poll(7000);
+    assert!(
+        conn_states(&h.reps())
+            .iter()
+            .any(|s| s.reason == hft_venue::codes::DEADMAN)
+    );
+}
+
+#[test]
+fn ven_237_maintenance_uses_private_owner_and_rest_session_status() {
+    use crate::support::stub::V_USER_STREAM;
+    use hft_event::{ConnRole, ConnStateKind};
+    for (status, body, supported) in [
+        (200, "ok", true),
+        (400, "bad", true),
+        (200, "ended", true),
+        (200, "ok", false),
+    ] {
+        stub::set_cfg(|c| {
+            c.keepalive = supported;
+            c.private_channels = 1;
+        });
+        let mut h = setup::<V_USER_STREAM>();
+        h.net.push(ConnId(114), b"PACK|0|ok");
+        h.poll(3500);
+        let owner = h.rt.private_owner(A1).unwrap();
+        h.reps();
+        h.net.sent_text(&mut h.rt, owner);
+        h.net.sent_text(&mut h.rt, ConnId(113));
+        h.cmd(base(GwOp::Resubscribe, A1));
+        h.poll(4000);
+        assert!(
+            h.net
+                .sent_text(&mut h.rt, owner)
+                .iter()
+                .any(|s| s.starts_with("PSUB|"))
+        );
+        assert!(h.net.sent_text(&mut h.rt, ConnId(113)).is_empty());
+        h.net.push(owner, b"PACK|0|ok");
+        h.poll(4100);
+        h.reps();
+        h.cmd(base(GwOp::SessionKeepalive, A1));
+        h.poll(5000);
+        if supported {
+            let msg = format!(
+                "HTTP/1.1 {status} Result\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            );
+            let wire = h.net.peer(ConnId(115)).records(&[msg.as_bytes()]);
+            mempeer::deliver(h.rt.conn(ConnId(115)).unwrap(), 6000, 6000, wire);
+            for n in 0..8 {
+                h.poll(6000 + n);
+            }
+        }
+        let reps = h.reps();
+        assert!(reports(&reps).is_empty());
+        let states = conn_states(&reps);
+        if body == "ended" {
+            assert!(states.iter().any(|s| s.role == ConnRole::UserStream
+                && s.state == ConnStateKind::Down
+                && s.conn == owner.0));
+            assert!(h.retired.contains(&owner));
+            assert!(h.rt.conn(ConnId(115)).is_some());
+        } else if status == 400 {
+            assert!(
+                states
+                    .iter()
+                    .any(|s| s.role == ConnRole::UserStream && s.reason == hft_venue::codes::DEADMAN)
+            );
+        } else {
+            assert!(states.is_empty());
+        }
+        assert_eq!(h.rt.counters().keepalive_unsupported, u64::from(!supported));
+        h.cmd(hft_event::GwCmd::set_epoch(6, true, 5));
+        h.poll(7000);
+        assert!(reports(&h.reps()).is_empty());
+        let c = h.place(A1, 7, 1, S1, false);
+        h.cmd(c);
+        h.poll(8000);
+        assert_eq!(h.rt.mirror(7).unwrap().epoch, 6);
+    }
+}
+
+#[test]
+fn ven_247_deadman_only_on_explicit_command() {
+    let mut h = setup::<0>();
+    let c = h.place(A1, 7, 1, S1, false);
+    h.cmd(c);
+    h.poll(4000);
+    h.net.sent_text(&mut h.rt, ConnId(112));
+    for second in 1..=600 {
+        h.poll(second * 1_000_000_000);
+        h.reps();
+    }
+    assert!(
+        h.net
+            .sent_text(&mut h.rt, ConnId(112))
+            .iter()
+            .all(|s| !s.starts_with("DM|"))
+    );
+    assert!(stub::calls("decode_rest").is_empty());
+}
 #[test]
 fn ven_228_query_uses_persistent_rest_and_stable_origin() {
     let mut h = setup::<0>();

@@ -38,6 +38,10 @@ required-features = ["testkit"]
 name = "helpers"
 required-features = ["testkit"]
 
+[[test]]
+name = "contract_runtime"
+required-features = ["testkit"]
+
 [[bench]]
 name = "dedup"
 harness = false

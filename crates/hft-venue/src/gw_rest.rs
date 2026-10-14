@@ -307,6 +307,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             &mut wire,
         );
         if result == Ok(false) {
+            self.n.keepalive_unsupported += 1;
             return;
         }
         let origin = RestOrigin {

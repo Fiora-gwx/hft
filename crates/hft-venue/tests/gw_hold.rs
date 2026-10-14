@@ -9,6 +9,40 @@ use hft_types::{ClientOrderId, Qty, SlotId};
 
 const P: ConnId = ConnId(112);
 const T: u64 = 3_000_000;
+pub(crate) fn measure_unmatched_fill_hold_and_timeout() {
+    let rd = rd_with(&RdOpts {
+        conn_age_s: 0,
+        ..Default::default()
+    });
+    let mut h = gw_rd::<StubProto, 2048>(g0(), &[A1], Default::default(), rd).unwrap();
+    h.open(1000, 2);
+    h.reps();
+    stub::log_enabled(false);
+    for id in [P, ConnId(113)] {
+        h.rt.conn(id).unwrap().script().unwrap().sent.reserve(1 << 20);
+    }
+    for n in 0..101_000u64 {
+        let t = T + n * 6_000_000_000;
+        h.net.push(P, format!("O||EX-{n}|Fill|1|1|100|0|0|0").as_bytes());
+        h.net.flush(&mut h.rt, t);
+        let scope = hft_testkit::CountingAlloc::scope();
+        h.rt.poll_once(t);
+        let held = scope.allocs();
+        assert_eq!(h.rt.held(A1), 1);
+        h.reps();
+        let scope = hft_testkit::CountingAlloc::scope();
+        h.rt.poll_once(t + 5_000_000_001);
+        let released = scope.allocs();
+        assert_eq!(external(&h.reps()).len(), 1);
+        if n >= 1000 {
+            assert_eq!((held, released), (0, 0));
+        }
+        for id in [P, ConnId(113)] {
+            h.rt.conn(id).unwrap().script().unwrap().sent.clear();
+        }
+    }
+    stub::log_enabled(true);
+}
 fn cid(slot: u32) -> String {
     stub::cid_text(&ClientOrderId {
         epoch: 5,

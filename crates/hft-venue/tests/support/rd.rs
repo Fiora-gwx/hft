@@ -33,6 +33,7 @@ pub struct RdOpts {
     pub in_msgs_per_s: u16,
     pub conn_age_s: u32,
     pub margin: MarginData,
+    pub rest_limit: Option<RateLimit>,
 }
 
 impl Default for RdOpts {
@@ -42,6 +43,7 @@ impl Default for RdOpts {
             in_msgs_per_s: 10,
             conn_age_s: 86_400,
             margin: MarginData::Poll { interval_ms: 2000 },
+            rest_limit: None,
         }
     }
 }
@@ -206,6 +208,9 @@ pub fn rd_with(o: &RdOpts) -> &'static RefData {
                 default_cost: 1,
             },
         );
+    }
+    if let Some(limit) = o.rest_limit {
+        b.limit(V7, limit);
     }
     let blob = b.finish();
     match RefData::load(&blob, None) {

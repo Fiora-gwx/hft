@@ -203,6 +203,9 @@ impl Net {
     }
     pub fn complete_with(&mut self, req: BuildReq, prepare: impl FnOnce(&mut Conn)) -> Handoff {
         let mut io = ScriptIo::new();
+        if req.role != ConnRole::Md {
+            io.wait_fd = Some(i32::from(req.conn.0));
+        }
         io.idle_tsc = 0;
         self.c().push_script(io);
         let job = self.c().submit(req).unwrap();

@@ -80,6 +80,20 @@ impl<P: VenueProtocol, T: Transport> core::fmt::Debug for SnapFetchTask<P, T> {
     }
 }
 impl<P: VenueProtocol, T: Transport> SnapFetchTask<P, T> {
+    /// Startup conversion to bounded keep-alive pools; no request may have been accepted yet.
+    pub fn into_pooled<const N: usize>(
+        self,
+        pool: hft_net::RestPool<N>,
+    ) -> Result<crate::PooledSnapFetchTask<P, N>, InitErr> {
+        if self.transport.is_some()
+            || self.active.is_some()
+            || self.pending.is_some()
+            || self.waiting.is_some()
+        {
+            return Err(InitErr::DepsMismatch);
+        }
+        crate::PooledSnapFetchTask::new(self.cfg, self.deps, self.ctx, pool)
+    }
     pub fn new(cfg: SnapCfg, deps: SnapDeps, ctx: P::FeedCtx) -> Result<Self, InitErr> {
         if cfg.parallel == 0 {
             return Err(InitErr::Cfg("snap.parallel"));

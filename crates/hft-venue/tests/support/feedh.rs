@@ -91,8 +91,17 @@ pub fn feed_net<P: VenueProtocol<FeedCtx = ()>>(cfg: FeedCfg, caps: Caps, net: N
 pub fn try_feed<P: VenueProtocol<FeedCtx = ()>>(
     cfg: FeedCfg,
     caps: Caps,
+    net: Net,
+    rd: &'static hft_refdata::RefData,
+) -> Result<Fh<P>, hft_venue::InitErr> {
+    try_feed_deps(cfg, caps, net, rd, |_| {})
+}
+pub fn try_feed_deps<P: VenueProtocol<FeedCtx = ()>>(
+    cfg: FeedCfg,
+    caps: Caps,
     mut net: Net,
     rd: &'static hft_refdata::RefData,
+    edit: impl FnOnce(&mut FeedDeps),
 ) -> Result<Fh<P>, hft_venue::InitErr> {
     let (w, raw) = raw_journal(
         if cfg.routes == FeedRoutes::Bbo {
@@ -115,7 +124,7 @@ pub fn try_feed<P: VenueProtocol<FeedCtx = ()>>(
     let has_md = cfg.routes.has_md();
     let snap = matches!(cfg.routes, FeedRoutes::Bbo | FeedRoutes::All);
     let ready = cfg.ready.then(|| net.ready_poll());
-    let deps = FeedDeps {
+    let mut deps = FeedDeps {
         rd,
         bbo: has_bbo.then_some(bbo_p),
         md: has_md.then_some(md_p),
@@ -130,6 +139,7 @@ pub fn try_feed<P: VenueProtocol<FeedCtx = ()>>(
         build: b_p,
         clock: clock(),
     };
+    edit(&mut deps);
     let rt = FeedRuntime::<P>::new(cfg, deps, ())?;
     Ok(Fh {
         rt,

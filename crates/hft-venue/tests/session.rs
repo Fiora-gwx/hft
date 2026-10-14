@@ -58,34 +58,38 @@ fn req(conn: u8, role: ConnRole) -> BuildReq {
 
 /// Runs a session to its event: handshake + Upgrade against `peer`, then login answers from
 /// `answer` (login frame text → reply text).
-fn run(
-    drv: &mut SessionDriver<StubProto>,
+fn run<T: hft_venue::AcctTransport>(
+    drv: &mut SessionDriver<StubProto, T>,
     c: &mut Connector,
     job: JobId,
     peer: &mut MemPeer,
     t0: i64,
     mut answer: impl FnMut(&str) -> Option<String>,
 ) -> SessEvent {
-    assert!(drv.drive(c, t0).is_none());
+    assert!(drv.drive_at(c, t0, t0 as u64).is_none());
     let out = c.script(job).unwrap().take_sent();
     peer.feed_handshake(&out);
     let back = peer.drain();
     c.script(job).unwrap().push_recv(RecvStep::data(0, 0, back));
-    assert!(drv.drive(c, t0 + 1).is_none());
+    assert!(drv.drive_at(c, t0 + 1, (t0 + 1) as u64).is_none());
     let out = c.script(job).unwrap().take_sent();
     peer.feed_handshake(&out);
     let back = peer.answer_upgrade();
     c.script(job).unwrap().push_recv(RecvStep::data(0, 0, back));
     let mut t = t0 + 2;
-    if let Some(e) = drv.drive(c, t) {
+    if let Some(e) = drv.drive_at(c, t, t as u64) {
         return e;
     }
     t += TICKET_WAIT_NS;
     for _ in 0..20 {
-        if let Some(e) = drv.drive(c, t) {
+        if let Some(e) = drv.drive_at(c, t, t as u64) {
             return e;
         }
-        t += 1;
+        t += if drv.rest_mut().is_some() {
+            1_000_000_000
+        } else {
+            1
+        };
         let Some(s) = c.script(job) else { continue };
         let out = s.take_sent();
         peer.feed_client(&out);
@@ -433,4 +437,141 @@ fn ven_313_session_uid_handover_requires_evidence() {
         assert_eq!(&data[9..33], if observed { &uid } else { &[0; 24] });
         drv.retire(net.c(), p.retire(ConnId(112), hft_net::ErrBits::empty()).unwrap());
     }
+}
+
+#[derive(Default)]
+struct SessionHttp {
+    active: bool,
+    fail: bool,
+    attempts: Vec<u64>,
+}
+impl hft_venue::AcctTransport for SessionHttp {
+    fn submit(
+        &mut self,
+        _: &hft_venue_proto::RestReqBuf,
+        _: u64,
+        now: u64,
+    ) -> Result<ConnId, hft_net::RestErr> {
+        assert!(!self.active);
+        self.active = true;
+        self.attempts.push(now);
+        Ok(ConnId(80))
+    }
+    fn poll(&mut self, _: u64) -> Option<Result<hft_venue::AcctResponse<'_>, hft_net::RestErr>> {
+        if !self.active {
+            return None;
+        }
+        self.active = false;
+        if self.fail {
+            return Some(Err(hft_net::RestErr::Timeout));
+        }
+        Some(Ok(hft_venue::AcctResponse {
+            status: 200,
+            body: b"U1",
+            conn: ConnId(80),
+            ts: Default::default(),
+        }))
+    }
+    fn abort(&mut self) {
+        self.active = false;
+    }
+    fn idle_check(&mut self, _: u64) {}
+}
+#[test]
+fn ven_314_session_uid_failed_after_bounded_backoff() {
+    for fail in [false, true] {
+        stub::set_cfg(|c| {
+            *c = Default::default();
+            c.session_identity = true;
+        });
+        let mut net = Net::new(0, 1);
+        let mut drv = SessionDriver::<StubProto, SessionHttp>::new(scfg(), vec![(A1, cred())]);
+        drv.set_rest(
+            SessionHttp {
+                fail,
+                ..Default::default()
+            },
+            hft_venue::GwCfg::default(),
+            A1,
+            cred(),
+        )
+        .unwrap();
+        net.c().push_script(ScriptIo::new());
+        let job = drv
+            .start(net.c(), req(112, ConnRole::Order), Some(A1), 1)
+            .unwrap();
+        let mut peer = mempeer::server_only(0);
+        let ev = run(&mut drv, net.c(), job, &mut peer, 10, |_| None);
+        let SessEvent::Ready(handoff) = ev else {
+            panic!("{ev:?}")
+        };
+        let mut pool = ConnPool::<1>::new(PoolMode::Race, 1, RotatePolicy::default());
+        pool.install(handoff, None).unwrap();
+        let data = pool.get(ConnId(112)).unwrap().handoff_data();
+        assert_eq!(data[8], if fail { 2 } else { 1 });
+        if !fail {
+            assert_eq!(&data[9..11], b"U1");
+        }
+        let a = &drv.rest_mut().unwrap().attempts;
+        assert_eq!(a.len(), if fail { 3 } else { 1 });
+        if fail {
+            assert!(a[1] - a[0] >= 1_000_000_000);
+            assert!(a[2] - a[1] >= 2_000_000_000);
+        }
+        net.c()
+            .reclaim(pool.retire(ConnId(112), hft_net::ErrBits::empty()).unwrap());
+    }
+}
+#[test]
+fn ven_394_bootstrap_rest_precedes_endpoint() {
+    stub::set_cfg(|c| {
+        *c = Default::default();
+        c.bootstrap = true;
+    });
+    let mut net = Net::new(0, 1);
+    let mut drv = SessionDriver::<StubProto, SessionHttp>::new(scfg(), vec![(A1, cred())]);
+    let mut rest = cred();
+    rest.api_key = hft_venue_proto::ArrayBuf::default();
+    rest.api_key.push(b"bootstrap-rest-test").unwrap();
+    drv.set_rest(SessionHttp::default(), hft_venue::GwCfg::default(), A1, rest)
+        .unwrap();
+    assert!(drv.enqueue(req(121, ConnRole::UserStream), Some(A2)).is_err());
+    drv.enqueue(req(120, ConnRole::UserStream), Some(A1)).unwrap();
+    assert!(drv.enqueue(req(120, ConnRole::UserStream), Some(A1)).is_err());
+    stub::take_log();
+    assert!(drv.drive_at(net.c(), 1, 1).is_none());
+    assert!(
+        stub::calls("bootstrap")
+            .iter()
+            .any(|c| c.arg.contains("rest_key=true"))
+    );
+    assert!(stub::calls("endpoint").is_empty());
+    net.c().push_script(ScriptIo::new());
+    assert!(drv.drive_at(net.c(), 2, 2).is_none());
+    let ep = stub::calls("endpoint");
+    assert_eq!(ep.len(), 1);
+    assert!(ep[0].arg.contains("boot=true"));
+    let job = drv.job(ConnId(120)).unwrap();
+    // Connector was driven once by drive_at: finish it using its actual TLS peer.
+    let mut peer = mempeer::server_only(0);
+    peer.feed_handshake(&net.c().script(job).unwrap().take_sent());
+    let back = peer.drain();
+    net.c().script(job).unwrap().push_recv(RecvStep::data(3, 3, back));
+    assert!(drv.drive_at(net.c(), 3, 3).is_none());
+    peer.feed_handshake(&net.c().script(job).unwrap().take_sent());
+    let back = peer.answer_upgrade();
+    net.c().script(job).unwrap().push_recv(RecvStep::data(4, 4, back));
+    let mut ev = None;
+    for t in [4, 4 + TICKET_WAIT_NS, 5 + TICKET_WAIT_NS] {
+        if ev.is_none() {
+            ev = drv.drive_at(net.c(), t, t as u64);
+        }
+    }
+    let SessEvent::Ready(h) = ev.unwrap() else {
+        panic!("bootstrap session failed")
+    };
+    let mut pool = ConnPool::<1>::new(PoolMode::Race, 1, RotatePolicy::default());
+    pool.install(h, None).unwrap();
+    net.c()
+        .reclaim(pool.retire(ConnId(120), hft_net::ErrBits::empty()).unwrap());
 }

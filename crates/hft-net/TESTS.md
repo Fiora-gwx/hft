@@ -6,6 +6,8 @@ spec: README.md
 
 # hft-net 测试规格
 
+公共 REST 池交接、超时退役与重建的跨组件回归见 [hft-venue VEN-151–161](../hft-venue/TESTS.md#ven-151-每条-snapreq-恰好得到一条-snap-记录)；脚本 wait fd 的观察由该组件 VEN-210 覆盖。
+
 格式与规则见 [docs/tests](../../docs/tests/README.md)。
 
 CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs::core_120_mock_accounts_bootstrap_reauth_and_drift` 以独立子进程、两家真实协议和脚本 REST 验证撤空、基线、重新核验、超时/错误模式失败与余额差异不覆盖账本；不替代真实 TLS、交易所或正式恢复验收。资金费账单复用 FundingPoll，沿用现有实际结算记账与去重。

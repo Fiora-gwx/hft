@@ -43,6 +43,12 @@ pub use types::{
     VenueCfg, VenueEnv, Via, WallClock,
 };
 
+/// Nonempty ASCII UID, with canonical zero padding; suitable for exact credential comparison.
+pub fn valid_uid(uid: &[u8; 24]) -> bool {
+    let n = uid.iter().position(|b| *b == 0).unwrap_or(uid.len());
+    n != 0 && uid[..n].iter().all(u8::is_ascii_graphic) && uid[n..].iter().all(|b| *b == 0)
+}
+
 use hft_event::{GwCmd, GwOp};
 use hft_refdata::{RefData, VenueCaps};
 use hft_types::{AccountId, AssetId, ClientOrderId, InstId, MarketKind, VenueId};

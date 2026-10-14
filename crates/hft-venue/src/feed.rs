@@ -111,7 +111,7 @@ struct Inst {
     refresh_attempt: u16,
     /// Per-task subscription ids (`RawHdr.stream`): BBO, depth, md.
     sub_id: [u32; 3],
-    sample_tsc: u64,
+    sample_tsc: Option<u64>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -351,10 +351,12 @@ impl<P: VenueProtocol> St<P> {
                 }
                 let every = self.t.ms(u64::from(self.cfg.raw_sample_ms));
                 if let Some(i) = ix.and_then(|i| self.insts.get_mut(i)) {
-                    if i.sample_tsc != 0 && ts.rx_tsc.saturating_sub(i.sample_tsc) < every {
+                    if i.sample_tsc
+                        .is_some_and(|last| ts.rx_tsc.saturating_sub(last) < every)
+                    {
                         return;
                     }
-                    i.sample_tsc = ts.rx_tsc.max(1);
+                    i.sample_tsc = Some(ts.rx_tsc);
                 }
                 rflags = hft_event::RawHdr::SAMPLED;
             }
@@ -720,7 +722,7 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                 refresh_req: 0,
                 refresh_attempt: 0,
                 sub_id: [0; 3],
-                sample_tsc: 0,
+                sample_tsc: None,
             })
             .collect();
         let pick = |k: RouteKind| P::routes().iter().find(|r| r.kind == k).copied();
