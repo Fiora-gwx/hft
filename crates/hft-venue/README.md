@@ -578,7 +578,7 @@ pub struct AcctRecHdr {                // acct-<venue> 环记录头(进程内,�
 | 场景 | 动作 |
 |---|---|
 | 服务端 WS Ping | `hft-net` 自动回 Pong |
-| `HeartbeatSpec.ping = AppText/AppJson` | 每 `interval_ms` 发一次(`unconditional=false` 时仅在该间隔内无入站数据才发) |
+| `HeartbeatSpec.ping = AppText/AppJson` | 每 `interval_ms` 发一次；`unconditional=false` 时，收到数据后下次期限为最后入站数据时刻 + `interval_ms`，静默满该间隔即发送 |
 | 我们的 RTT 探测 | 下单与深度连接每 5 s 一次 WS Ping(payload = tsc),Pong 记 RTT([03 §3.5](../../design/03-网络与传输层.md));行情服务器对 Ping 批处理的所(Binance fstream ≈ 50 ms)只用于存活,不进 RTT 直方图 |
 | BBO 连接存活探测 | 每 `feed.bbo_ping_ms`(1 000)一次 `P::bbo_probe()`,不论有无数据;回帧驱动 `ConnState{Alive}`(§3a);同时充当该连接的 RTT 探测 |
 | `pong_timeout_ms` / `idle_timeout_ms` 超时 | 置 `PING_TIMEOUT`/`IDLE_TIMEOUT` → 按致命处理 |

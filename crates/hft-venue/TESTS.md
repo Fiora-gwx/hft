@@ -440,7 +440,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`F0`,`routes = All`;每行对 S1 投递一条 `Subscribe{S1, streams}`,完成建连后读 `CallLog` 中 `subscribe` 收到的 `SubSpec`
-- 实现:`crates/hft-venue/tests/feed_cmd.rs::ven_025_stream_bits`
+- 实现:`crates/hft-venue/tests/continuation.rs::ven_025_stream_bits`
 
 | 行 | `streams`(SDK `EvMask` 位值) | 期望 `SubSpec` 集合 |
 |---|---|---|
@@ -468,7 +468,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   - 步骤 1 后没有任何订阅或退订帧
   - 步骤 2 后发出 Trade 与 DepthTopN 的退订帧、Mark 的订阅帧,Bbo 不动;此后深度连接上的 `D|S1|…` 按未订阅符号计数丢弃,md 环不再出现 S1 的 `L2Snapshot`
   - 步骤 3 后发出 Bbo 与 Mark 的退订帧;回执后 bbo 环恰好两条成员事件 `ConnState{Down, role=Md, conn ∈ {0, 1}, inst: S1}`
-- 实现:`crates/hft-venue/tests/feed_cmd.rs::ven_026_subscribe_diff`
+- 实现:`crates/hft-venue/tests/continuation.rs::ven_026_subscribe_diff`
 
 ### VEN-027 订阅本 venue 不存在的 inst 被计数丢弃
 
@@ -1031,7 +1031,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`F0`,`routes = Bbo`,`feed.bbo_conns = 1`;连接 0 在 `T0 = 10⁹` 交接;每行给出 `ws_max_conn_age_s` 与 `conn.rotate_margin_s`,在所列时刻 `poll_once`
-- 实现:`crates/hft-venue/tests/feed_pool.rs::ven_080_rotate_time`
+- 实现:`crates/hft-venue/tests/continuation.rs::ven_080_rotate_time`
 
 | 行 | 强断时长 / 余量 / 时刻 | 期望 |
 |---|---|---|
@@ -1049,7 +1049,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. 投递 `Rotate{conn: 1}`,`poll_once`
 - 期望:
   - 这一轮发出一条替补 `BuildReq`(原因 `Rotate(1)`,连接号取最小空闲槽 2);连接 1 仍活跃,不推 `Down`
-- 实现:`crates/hft-venue/tests/feed_pool.rs::ven_081_rotate_cmd`
+- 实现:`crates/hft-venue/tests/continuation.rs::ven_081_rotate_cmd`
 
 ### VEN-082 赛马池替补收到第一帧数据后退役最早安装的连接
 
@@ -1063,7 +1063,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 期望:
   - 步骤 1 后 S1 的成员 `Up` 来自连接 0、1、2(三条重叠);连接 0 仍活跃
   - 步骤 2 后 bbo 环:`ConnState{Down, conn: 0, inst: 0}`;S1 只剩连接 1、2 两个成员;没有 `RACE_SINGLE`
-- 实现:`crates/hft-venue/tests/feed_pool.rs::ven_082_race_replacement_retires_oldest`
+- 实现:`crates/hft-venue/tests/continuation.rs::ven_082_race_replacement_retires_oldest`
 
 ### VEN-083 服务端下线预告触发替补
 
@@ -1075,7 +1075,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. 连接 1 推 `BYE`,`poll_once`
 - 期望:
   - 连接 1 被置 `SERVER_HINT`;这一轮发出替补 `BuildReq`(原因 `Hint(1)`);bbo 环没有行情事件也没有 `Down`
-- 实现:`crates/hft-venue/tests/feed_pool.rs::ven_083_server_shutdown_hint`
+- 实现:`crates/hft-venue/tests/continuation.rs::ven_083_server_shutdown_hint`
 
 ### VEN-084 `LoopStat` 反映这一轮的工作量与最早期限
 
@@ -1126,7 +1126,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`F0`,`routes = Md`;`FRAME_EVENTS_MAX = 64`;`StubProto` 的成交帧可携带多笔成交;之后同一连接再来一帧 1 笔成交
-- 实现:`crates/hft-venue/tests/feed_frame.rs::ven_087_frame_events_over_is_decode_error`
+- 实现:`crates/hft-venue/tests/continuation.rs::ven_087_frame_events_over_is_decode_error`
 
 | 行 | 一帧中的成交笔数 | 期望 |
 |---|---|---|
@@ -1175,7 +1175,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. 依次喂 `B|S1|50`、`T|S1|50`、`B|S2|50`、`T|S1|49`、`B|S1|51`
 - 期望:
   - 转发 `Bbo{S1, 50}`、`Trade{S1, tid 50}`、`Bbo{S2, 50}`、`Bbo{S1, 51}`;`T|S1|49` 被丢
-- 实现:`crates/hft-venue/tests/seq.rs::ven_102_streams_independent`
+- 实现:`crates/hft-venue/tests/continuation.rs::ven_102_streams_independent`
 
 ### VEN-103 两路随机交错同一 BBO 序列时输出严格递增、无重复
 
@@ -1413,7 +1413,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. 不推 S1 报价,运行 10 s
 - 期望:
   - snapreq 环始终为空;S1 一直处于补帧;`CallLog` 中 `bbo_snapshot_request` 只在 `FeedRuntime::new` 时被调用一次
-- 实现:`crates/hft-venue/tests/bbo_live.rs::ven_131_no_snap_when_pushes_first`
+- 实现:`crates/hft-venue/tests/continuation.rs::ven_131_no_snap_when_pushes_first`
 
 ### VEN-132 snap 记录带回的报价按补帧状态处理
 
@@ -1452,7 +1452,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. 连接 8 的 RTT Ping 得到 Pong(`rx_tsc = t_p`),`poll_once`
 - 期望:
   - md 环一条 `ConnState{Alive, role: Md, conn: 8, inst: 0, rx_tsc: t_p}`;bbo 环无新元素
-- 实现:`crates/hft-venue/tests/bbo_live.rs::ven_134_md_conn_alive`
+- 实现:`crates/hft-venue/tests/heartbeat.rs::ven_134_md_conn_alive`
 
 ### VEN-150 snap-fetch 在途数不超过 `snap.parallel`,其余按 FIFO 排队
 
@@ -2017,7 +2017,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`G0`,`gw.rest_idle_check_ms = 1000`;A1 的 REST 连接 131、132 空闲;上次检查 `t_c`
-- 实现:`crates/hft-venue/tests/gw_loop.rs::ven_209_rest_idle_check`
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_209_rest_idle_check`
 
 | 行 | `now` / 对端 | 期望 |
 |---|---|---|
@@ -2924,6 +2924,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 - 里程碑:M3
 - 前置:`G0`;`heartbeat(Order) = {ping: AppText, interval_ms: 20000, pong_timeout_ms: 10000, idle_timeout_ms: 0}`;A1 primary 每 1 s 收到一帧数据,运行 60 s
 - 实现:`crates/hft-venue/tests/heartbeat.rs::ven_281_app_heartbeat`
+- 边界回归:在原期限前 100 ms 收到数据后，静默满一个 interval 即发送，不额外等待原周期的一整轮。
 
 | 行 | `unconditional` | 期望 |
 |---|---|---|

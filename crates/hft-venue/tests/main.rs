@@ -38,4 +38,5 @@ mod support;
 
 mod private;
 
+mod continuation;
 mod gw_rest;

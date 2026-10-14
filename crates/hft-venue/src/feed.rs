@@ -516,14 +516,13 @@ impl<P: VenueProtocol> St<P> {
                     *v = pk.ids.last_id;
                 }
                 m.got_data = true;
-                if to_bbo {
-                    m.pub_tsc = ts.rx_tsc;
-                    if let Some(s) = self.insts.get_mut(ix)
-                        && s.refresh == REFRESH_ACTIVE
-                    {
-                        s.refresh = REFRESH_NONE;
-                        s.refresh_req = 0;
-                    }
+                m.pub_tsc = ts.rx_tsc;
+                if to_bbo
+                    && let Some(s) = self.insts.get_mut(ix)
+                    && s.refresh == REFRESH_ACTIVE
+                {
+                    s.refresh = REFRESH_NONE;
+                    s.refresh_req = 0;
                 }
                 if depth
                     && let Some(q) = self.seqs.get_mut(ix)
@@ -555,12 +554,17 @@ impl<P: VenueProtocol> St<P> {
         if let Some(h) = m.hb.as_mut() {
             h.on_pong();
         }
-        if m.kind == RouteKind::Bbo {
-            let half = self.t.ms(u64::from(self.cfg.bbo_ping_ms)) / 2;
-            if rx.saturating_sub(m.pub_tsc) >= half {
-                m.pub_tsc = rx;
-                self.cs(true, m.id, ConnStateKind::Alive, InstId(0), 0, rx);
-            }
+        let half = self.t.ms(u64::from(self.cfg.bbo_ping_ms)) / 2;
+        if rx.saturating_sub(m.pub_tsc) >= half {
+            m.pub_tsc = rx;
+            self.cs(
+                m.kind == RouteKind::Bbo,
+                m.id,
+                ConnStateKind::Alive,
+                InstId(0),
+                0,
+                rx,
+            );
         }
     }
 

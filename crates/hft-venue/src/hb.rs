@@ -60,6 +60,9 @@ impl Hb {
         if self.interval > 0 && now >= self.next_ping {
             self.next_ping = now.max(self.next_ping).saturating_add(self.interval);
             let quiet = now.saturating_sub(last_data) >= self.interval;
+            if !self.unconditional && !quiet {
+                self.next_ping = last_data.saturating_add(self.interval);
+            }
             if self.unconditional || quiet {
                 if self.pong_wait.is_none() && self.pong_to > 0 {
                     self.pong_wait = Some(now);

@@ -146,3 +146,34 @@ fn ven_393_rest_polling_reads_only_pending_lanes() {
     assert_eq!(h.rt.conn(ConnId(114)).unwrap().sys().recvmsg - before, 10);
     assert_eq!(h.rt.conn(ConnId(115)).unwrap().sys().recvmsg, idle);
 }
+
+#[test]
+fn ven_209_rest_idle_check() {
+    let mut h = setup::<0>();
+    let first = ConnId(114);
+    let other = ConnId(115);
+    let a = h.rt.conn(first).unwrap().sys().recvmsg;
+    let b = h.rt.conn(other).unwrap().sys().recvmsg;
+    for _ in 0..8 {
+        h.poll(999_999_999);
+    }
+    assert_eq!(h.rt.conn(first).unwrap().sys().recvmsg, a);
+    assert_eq!(h.rt.conn(other).unwrap().sys().recvmsg, b);
+    for _ in 0..8 {
+        h.poll(1_000_000_000);
+    }
+    assert_eq!(h.rt.conn(first).unwrap().sys().recvmsg, a + 1);
+    assert_eq!(h.rt.conn(other).unwrap().sys().recvmsg, b + 1);
+    for _ in 0..16 {
+        h.poll(1_000_000_000);
+    }
+    assert_eq!(h.rt.conn(first).unwrap().sys().recvmsg, a + 1);
+    h.net.at(first, 2_000_000_000, crate::support::net::Ev::Eof);
+    for _ in 0..8 {
+        h.poll(2_000_000_000);
+    }
+    assert!(h.retired.contains(&first));
+    assert!(h.rt.conn(other).is_some());
+    assert_eq!(h.rt.conn(other).unwrap().sys().recvmsg, b + 2);
+    assert!(h.builds.iter().any(|r| r.role == hft_net::ConnRole::Rest));
+}

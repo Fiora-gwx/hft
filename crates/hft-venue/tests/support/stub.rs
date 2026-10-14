@@ -505,6 +505,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         _cfg: &VenueCfg,
         out: &mut SubFrames,
     ) -> Result<(), ProtoErr> {
+        log("subscribe", || format!("{unsub}:{subs:?}"));
         let per = cfg().subs_per_frame.max(1);
         for chunk in subs.chunks(per) {
             let ids: Vec<String> = chunk
@@ -843,6 +844,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         insts: &[InstId],
         out: &mut RestReqBuf,
     ) -> Result<bool, ProtoErr> {
+        log("bbo_snapshot_request", || format!("{insts:?}"));
         let c = cfg();
         if !c.bbo_snapshot {
             return Ok(false);
