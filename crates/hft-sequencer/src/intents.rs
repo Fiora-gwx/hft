@@ -438,6 +438,10 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
         match simultaneous::prepare(e, inst, strategy, &it, &iv, src) {
             Ok(p) => {
                 shadow |= p.shadow;
+                // Carried lot residual can raise the actual second quantity above the ratio
+                // estimate. Link affordability must cover the order that will be placed.
+                iv.link_qty = p.view.qty;
+                iv.link_notional = iv.link_notional.max(p.view.notional);
                 Some(p)
             }
             Err(outcome) => {

@@ -472,7 +472,7 @@ OMS 对冲的 `place` 调用前另复制完整链接身份、重试计数、目�
 
 `oms.place` 返回 `NoFreeSlot` 或 `LinkTableFull` 时,同一 Input 写 `OrderDecision{reject = CAPACITY, slot = 0, gen = 0}`;`NoTable` 写 `INVALID`。保留原意图的身份、价量、`intent_no` 与触发 seq,不出环、不扣令牌。OMS 内部对冲失败的计次与重试不变。令牌在 place 成功后、排空 OMS 输出前提交。
 
-Simultaneous 第一腿在第 5 步前预计算第二腿的实际数量、限价、分类与模式门,检查两腿槽和链接容量;`risk.evaluate_pair` 全部通过才提交两份 admission 并连续建槽。两份 OrderDecision 属于同一 Input,EVENT_END/publish 之后以 `OutRecord::Pair` 出环。任一腿模式、风控或槽/队列容量失败,两腿均不提交;成功预检后建槽异常为 Fatal(PairAdmission),本事件不发布。两腿均用准入时限价,不等待成交后再次定价。
+Simultaneous 第一腿在第 5 步前预计算第二腿的实际数量、限价、分类与模式门,检查两腿槽和链接容量;链接可负担性使用含累计 lot 残余的实际第二腿数量,名义不低于实际订单。`risk.evaluate_pair` 全部通过才提交两份 admission 并连续建槽。两份 OrderDecision 属于同一 Input,EVENT_END/publish 之后以 `OutRecord::Pair` 出环。任一腿模式、风控或槽/队列容量失败,两腿均不提交;成功预检后建槽异常为 Fatal(PairAdmission),本事件不发布。两腿均用准入时限价,不等待成交后再次定价。
 
 所有来源的意图(策略 `Ctx`、执行层 `ExecOut.orders`、OMS 的 `Second`/`SecondRetry`/`Reverse`、命令)走同一条管线:
 

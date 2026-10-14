@@ -135,6 +135,52 @@ fn seq_178_simultaneous_atomic_risk_and_capacity() {
 }
 
 #[test]
+fn seq_178_simultaneous_residual_affordability() {
+    reset_script();
+    let mut b = b0();
+    b.setup_edit
+        .push(|s| s.exec.default.force_slice.max_chunk_notional = n("10"));
+    let mut rp = b0_risk(&b.rd.load());
+    let mut ac = rp.accounts.as_slice().to_vec();
+    for a in &mut ac {
+        a.max_hedge_notional = n("85");
+    }
+    rp.accounts = hft_risk::PreVec::from_vec(ac);
+    b.risk = Some(rp);
+    let mut h = b.boot_self_contained();
+    h.steady();
+    set_hook(|hx, ev, ctx| {
+        if let EventRef::Bbo { inst, b, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+            && b.ask_px == px("50003")
+        {
+            let mut it = pair_first(hx, q("0.001"));
+            let mut link = *it.link.get().unwrap();
+            link.hedge.kind = HedgeKind::Simultaneous;
+            link.hedge.on_fail = OnFail::Hold;
+            link.hedge.ratio_num = 3;
+            link.hedge.ratio_den = 2;
+            it.link = LegLinkOpt::some(link);
+            let _ = ctx.place(it);
+        }
+    });
+    let (_, ds) = fire(&mut h);
+    assert_eq!(ds.len(), 2, "{ds:?}");
+    assert!(ds.iter().all(|d| d.reject == 0));
+    assert_eq!(ds.iter().find(|d| d.inst == B1).unwrap().qty, q("0.001"));
+    // The next 0.0015 ratio estimate plus carried 0.0005 becomes a 0.002 order.
+    let before = h.s.engine().oms.table_view(A, AC1).unwrap().free_len;
+    let out = h.io_ref().out.len();
+    let (_, ds) = fire(&mut h);
+    assert_eq!(ds.len(), 1, "{ds:?}");
+    assert_eq!(ds[0].reject, RejectBits::HEDGE_LIMIT.0, "{ds:?}");
+    assert_eq!(h.s.engine().oms.table_view(A, AC1).unwrap().free_len, before);
+    assert!(h.io_ref().out[out..].iter().all(|(_, c)| c.op != GwOp::Place));
+    assert!(h.verify().is_empty());
+}
+
+#[test]
 fn seq_224_simultaneous_ring_full_sends_neither() {
     for ring in [OutRing::Venue(A), OutRing::Venue(B)] {
         reset_script();
