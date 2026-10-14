@@ -18,6 +18,7 @@ use hft_strategy_sdk::{StrategyDesc, StrategySet, params};
 
 hft_strategy_sdk::strategy_set! {
     pub struct Strategies {
+        portfolio_carry::PortfolioCarry,
         #[cfg(feature = "cross-taker")] cross_taker::CrossTaker,
         latency_probe::LatencyProbe,
     }

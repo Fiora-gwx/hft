@@ -27,7 +27,7 @@ spec: README.md
 
 ## 用例
 
-**共用夹具**:`Strategies` 为本 crate 的 `strategy_set!` 生成的集合;"默认构建"指不加 feature 的 `cargo build -p hft-strategy-registry`,"全 feature 构建"指 `--all-features`;`LP` = `latency_probe::LatencyProbe::DESC`;临时目录 `tmp` 由测试创建。M2 时列表中只有 latency-probe 一行(portfolio-carry 在 M4 加入),依赖 portfolio-carry 的用例标 M4。
+**共用夹具**:`Strategies` 为本 crate 的 `strategy_set!` 生成的集合;"默认构建"指不加 feature 的 `cargo build -p hft-strategy-registry`,"全 feature 构建"指 `--all-features`;`LP` = `latency_probe::LatencyProbe::DESC`;临时目录 `tmp` 由测试创建。默认列表为 portfolio-carry 与 latency-probe;策略级场景用例归各策略 TESTS.md。
 
 ### REG-001 默认构建的集合包含 latency-probe,且不含测试策略段
 
@@ -51,7 +51,7 @@ spec: README.md
 - 步骤:
   1. 读 `Strategies::kinds()`
 - 期望:
-  - 恰好两项,按列表顺序:(`portfolio-carry`, 1, `non_prod_only = false`)、(`latency-probe`, 5, `non_prod_only = true`)
+  - 默认恰好两项,按列表顺序:(`portfolio-carry`, 1, `non_prod_only = false`)、(`latency-probe`, 5, `non_prod_only = true`);启用 cross-taker 时在两者间加入 kind 3,不改变 core 项顺序
 - 实现:`strategies/registry/tests/kinds.rs::reg_002_default_kinds_m4`
 
 ### REG-003 默认与全 feature 两种构建都能编译,编译期唯一性断言通过

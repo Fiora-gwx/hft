@@ -10,6 +10,20 @@ use hft_strategy_registry::{Strategies, TEST_KIND_IDS};
 use hft_strategy_sdk::StrategySet;
 
 #[test]
+fn reg_002_default_kinds_m4() {
+    let kinds: Vec<_> = Strategies::kinds()
+        .iter()
+        .map(|d| (d.name, d.kind_id, d.non_prod_only))
+        .collect();
+    let mut expected = vec![("portfolio-carry", 1, false)];
+    if cfg!(feature = "cross-taker") {
+        expected.push(("cross-taker", 3, false));
+    }
+    expected.push(("latency-probe", 5, true));
+    assert_eq!(kinds, expected);
+}
+
+#[test]
 fn reg_001_default_kinds() {
     let k = Strategies::kinds();
     let lp: Vec<_> = k.iter().filter(|d| d.name == "latency-probe").collect();

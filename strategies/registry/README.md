@@ -24,7 +24,7 @@ status: impl
 
 ## 使用本组件
 
-当前列表包含默认的 latency-probe 与 feature 门控的 cross-taker。后者的真实引擎/模拟撮合、参数恢复和报价门控测试位于 `tests/cross_taker_e2e.rs`;schema 金样保存全部已实现策略,默认构建只比较启用项。
+当前列表包含默认的 portfolio-carry、latency-probe 与 feature 门控的 cross-taker。后者的真实引擎/模拟撮合、参数恢复和报价门控测试位于 `tests/cross_taker_e2e.rs`;schema 金样保存全部已实现策略,默认构建只比较启用项。
 
 ```rust
 // src/lib.rs —— 真实策略的列表只写在这一处;每行一个策略,optional 策略用 Cargo feature 门控。
@@ -85,6 +85,8 @@ pub fn export_schemas() -> Vec<(String, String)>;
 本 crate 没有自己的热路径入口;生成的分派开销按 SDK 的 `sdk/set_dispatch`(p50 ≤ 2 ns、p99 ≤ 5 ns)与各策略 README 的预算验收。`export_schemas()` 只在打包(`hft-core schemas`)时运行(冷);`GetSchema` 直接用 `Strategies::schema_json`。
 
 ## 测试与验收
+
+`tests/portfolio_carry.rs` 用真实 sequencer、mock 成交和 journal 验证 [CARRY-010](../portfolio-carry/TESTS.md#carry-010-真实-sequencer-的双向-linked-成交资金费与重放),覆盖双向 linked 目标、实际资金费去重、退出与逐字节重放。
 
 用例与验收见 [TESTS.md](TESTS.md)。
 

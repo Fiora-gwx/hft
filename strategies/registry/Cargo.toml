@@ -19,6 +19,7 @@ cross-taker = ["dep:cross-taker"]
 hft-strategy-sdk = { workspace = true, features = ["schema-json"] }
 latency-probe.workspace = true
 cross-taker = { workspace = true, optional = true }
+portfolio-carry.workspace = true
 
 [dev-dependencies]
 hft-strategy-sdk = { workspace = true, features = ["testing"] }
@@ -26,4 +27,9 @@ serde_json = "1"
 hft-testkit = { workspace = true, features = ["seq"] }
 hft-event.workspace = true
 hft-types.workspace = true
+hft-refdata.workspace = true
+hft-risk.workspace = true
+hft-ledger.workspace = true
+hft-sequencer = { workspace = true, features = ["testing"] }
+hft-rt.workspace = true
 zerocopy.workspace = true
