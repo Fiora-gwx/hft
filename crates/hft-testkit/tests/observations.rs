@@ -368,14 +368,15 @@ fn tk_107_unknown_is_scoped_to_decision_group_and_link() {
         .find(|s| s.name == "core")
         .unwrap();
     let mut c = suite.config(0x61aa_a3c8_1c37_eb19);
+    // A CI seed recorded in the world before 2026-10-14 (no marks, holding takers).
+    c.world.margin_feed = false;
+    c.world.taker_cycles = false;
     c.steps = 7_111;
     c.rerun = hft_testkit::dst::RerunPolicy::Never;
     let r = run_record::<Observed>(&c);
     assert!(r.outcome.is_pass(), "{}", crate::seq_sut::show(&r));
-    let samples = UNKNOWN_SAMPLES.with(|s| s.take());
-    let e = samples
-        .last()
-        .expect("retry beside another Unknown link was not exercised");
+    let found = UNKNOWN_SAMPLES.with(|s| s.take()).into_iter().last();
+    let e = &found.expect("retry beside another Unknown link was not exercised");
     let i = e
         .info
         .decisions
@@ -454,6 +455,9 @@ fn tk_121_hedge_place_failure_requires_exact_evidence() {
         .find(|s| s.name == "core")
         .unwrap();
     let mut c = suite.config(0x1af2_31bb_1d64_40e2);
+    // A counterexample recorded in the world before 2026-10-14 (no marks, holding takers).
+    c.world.margin_feed = false;
+    c.world.taker_cycles = false;
     c.rerun = RerunPolicy::Always;
     let r = run_record::<Observed>(&c);
     assert!(r.outcome.is_pass(), "{}", crate::seq_sut::show(&r));

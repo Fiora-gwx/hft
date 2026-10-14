@@ -104,3 +104,39 @@ fn tk_176_compared_counts_follow_enabled_checkers() {
         );
     }
 }
+
+/// The opt-in trading world (`WorldSpec::w1_trading`, hft-testkit README "DST 的世界模型") on the
+/// standard smoke set: every run passes, and the hedge/naked-leg checkers compare far more than
+/// in W1 (INV-15/19: 69 vs 12 when introduced).
+#[test]
+fn trading_world_smoke_exercises_hedges() {
+    let mut total = [0u64; 32];
+    let mut w1 = [0u64; 32];
+    for s in suites() {
+        for seed in 1..=SMOKE_SEEDS {
+            for (trading, sum) in [(true, &mut total), (false, &mut w1)] {
+                let mut c = s.config(seed);
+                if trading {
+                    c.world = hft_testkit::dst::world::WorldSpec::w1_trading(false);
+                }
+                c.steps = SMOKE_STEPS;
+                c.rerun = RerunPolicy::Never;
+                let r = run_record::<SeqEngine>(&c);
+                assert!(
+                    r.outcome.is_pass(),
+                    "{} seed {seed} trading={trading}: {:?}",
+                    s.name,
+                    r.outcome.failure().map(|f| (f.invariant.label(), &f.message))
+                );
+                for (t, n) in sum.iter_mut().zip(r.compared) {
+                    *t += n;
+                }
+            }
+        }
+    }
+    for i in [InvId::I15, InvId::I19] {
+        let (t, b) = (total[usize::from(i.0)], w1[usize::from(i.0)]);
+        eprintln!("{}: trading {t}, W1 {b}", i.code());
+        assert!(t > 2 * b, "{}: trading world compared {t}, W1 {b}", i.code());
+    }
+}

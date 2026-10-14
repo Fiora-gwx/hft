@@ -578,6 +578,13 @@ pub fn spb_blob<S: StrategySet>(w: &WorldSpec, s: &StrategyBinding, version: u64
         {
             *th = TAKER_SPREAD_TH;
         }
+        if is_taker(kind) && w.taker_cycles {
+            for (ix, d) in defaults.iter_mut().enumerate() {
+                if schema.field(ix as u16).is_some_and(|f| f.name == "close_on") {
+                    *d = TAKER_CLOSE_ON_CYCLES;
+                }
+            }
+        }
         let raw = RawParams {
             defaults,
             overrides: Vec::new(),
@@ -624,6 +631,10 @@ pub fn is_taker(kind: u16) -> bool {
 /// Opening threshold of the takers in a DST world: 0.01 % (W1 quotes the perp ≈ 0.017 % above
 /// the spot, so the seed's random walk opens and holds positions).
 pub const TAKER_SPREAD_TH: i64 = 100_000;
+
+/// `close_on` of the takers in a world with `taker_cycles`: Exec, External, Risk and the hold
+/// timer (exit, cool down, reopen).
+pub const TAKER_CLOSE_ON_CYCLES: i64 = 15;
 
 /// Leg order of a group in the parameter blob. `probe-taker` sells leg A when its bid exceeds leg
 /// B's ask: with W1's quotes (perp above spot) and no base inventory that is the perp, so a
@@ -680,7 +691,7 @@ pub fn engine_setup(w: &WorldSpec, tsc_hz: u64, epoch: u32) -> EngineSetup {
     let mut oms = OmsConfig::new(epoch, hz_milli);
     oms.max_out_per_event = 16;
     oms.links_per_account = 16;
-    oms.slots = PerTable::new(64);
+    oms.slots = PerTable::new(w.oms_slots.unwrap_or(64));
     if let Some(ms) = w.oms_tombstone_keep_ms {
         oms.tombstone_keep_ms = ms;
     }

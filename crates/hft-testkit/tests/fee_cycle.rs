@@ -159,6 +159,9 @@ pub fn config(delay_ms: u32) -> hft_testkit::dst::DstConfig {
         .find(|v| v.id == VS)
         .unwrap()
         .fee_in_base = true;
+    // A fee fixture over a still market: no marks or restart margin snapshots (TK-106/TK-110
+    // pin the late-fee path of this exact delivery order).
+    c.world.margin_feed = false;
     c.scripted.push((0, Fault::LateFeeOnly { venue: VS, delay_ms }));
     c
 }

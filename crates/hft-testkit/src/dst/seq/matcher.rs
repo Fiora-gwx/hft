@@ -339,6 +339,21 @@ impl Matcher for SimMatcher {
     fn accounts(&self) -> Vec<AccountId> {
         self.accounts.clone()
     }
+    fn margin_report(&self, a: AccountId) -> Option<hft_event::MarginReportHdr> {
+        let m = self.ex.as_ref()?.account(a)?.margin(self.venue)?;
+        let mut h = hft_event::MarginReportHdr::new_zeroed();
+        h.venue = self.venue;
+        h.account = a;
+        h.source = 1;
+        h.margin_balance = m.margin_balance;
+        h.maint_margin = m.maint;
+        h.avail_margin = m.avail;
+        h.margin_ratio = m.margin_ratio;
+        if m.margin_ratio.0 >= 1_000_000_000 {
+            h.mflags = hft_event::MarginReportHdr::MARGIN_CALL;
+        }
+        Some(h)
+    }
     fn matched_tail(&self) -> Vec<(u64, hft_event::OrderEvent)> {
         let mut rows: Vec<_> = self.matched.iter().copied().collect();
         rows.sort_by_key(|r| r.0);

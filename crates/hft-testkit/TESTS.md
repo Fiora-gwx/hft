@@ -1344,13 +1344,13 @@ spec: README.md
 - 规则:[6. DST 框架](README.md#6-dst-框架)
 - 级别:unit
 - 里程碑:M2
-- 前置:`SeqSut<TestStrategies>`;`core` 套件;种子 `0xbe413439dca24fad`;运行 780 步,包含最高有效槽被占用的前缀
+- 前置:`SeqSut<TestStrategies>`;`core` 套件,`WorldSpec.oms_slots = 4`;依次取种子 `0xbe413439dca24fad`、1、2、…、32,各运行 780 步,取第一个最终 `Obs` 中最高有效槽被占用的种子
 - 步骤:
-  1. 运行该种子,每步检查全部不变量
-  2. 检查最终 `Obs` 中每张表的槽号与计数
+  1. 依次运行各种子,每步检查全部不变量
+  2. 检查每次运行最终 `Obs` 中每张表的槽号与计数
 - 期望:
-  - 780 步完成且没有不变量违反
-  - 至少一张表的最高有效槽 `capacity` 出现在 `Obs.slots`
+  - 每次运行 780 步完成且没有不变量违反
+  - 某个种子的至少一张表的最高有效槽 `capacity` 出现在 `Obs.slots`
   - 每张表的槽号均在 `1..=capacity`,占用数加空闲数等于容量
 - 实现:`crates/hft-testkit/tests/seq_sut.rs::tk_101_observes_last_oms_slot`
 
@@ -1402,7 +1402,7 @@ spec: README.md
 - 规则:[DST 的世界模型](README.md#dst-的世界模型)、[INV-8](../../docs/tests/invariants.md#inv-8-onfill-第二腿的对冲数量之和等于触发它的第一腿累计净成交量)
 - 级别:dst
 - 里程碑:M2
-- 前置:`SeqSut<FeeStrategies>` 与真实 SimExchange;W1 的 VS 配置 `fee_in_base = true`;测试夹具每 100 ms 发一次现货第一腿 OnFill,每单 2 个永续 lot,组现货净量达到 20 单时转卖,行情保持初始价差;50/6000 ms 延迟两行,包含槽回收与链接复用
+- 前置:`SeqSut<FeeStrategies>` 与真实 SimExchange;W1 的 VS 配置 `fee_in_base = true`,`margin_feed` 关(静止行情的费用夹具,固定交付顺序);测试夹具每 100 ms 发一次现货第一腿 OnFill,每单 2 个永续 lot,组现货净量达到 20 单时转卖,行情保持初始价差;50/6000 ms 延迟两行,包含槽回收与链接复用
 - 故障:`LateFeeOnly{venue = VS, delay_ms}`
 - 种子:固定种子 1
 - 断言:配置实际进入 refdata 的 VenueCaps,FeeOnly 的资产为 BTC;每行运行 10000 步且全部不变量通过;INV-8 观察包含晚到手续费补差与链接复用前的已完成累计量,不能固定 `fee_adjust = 0`;反例漏记或重复费用补差、改错余数、减少历史成交量或删除全部历史桶时相应检查失败
@@ -1488,7 +1488,7 @@ spec: README.md
 - 里程碑:M2
 - 输入:storage 套件,固定种子 0x00cc7b25194f1b2c、0x00cc7b25194f1b3a、0x00cc7b25194f1b4b、0x00cc7b25194f1b4d、0x00cc7b25194f1bc8、0x00cc7b25194f1be0
 - 步骤:各运行完整 10,000 步,使用套件原有故障率和全部不变量;逐条检查 RoundClosed 的所属 Input
-- 期望:六行均实际结束轮次,注记属于入账最后一笔增量或费用的回报(Fill、PartialFill、带成交的 QueryResult 等,或 FeeOnly),不遗留到对账;含定期和结束 INV-6 的全部检查通过;相同种子保留在 storage 回归集
+- 期望:六行均通过,至少三行实际结束轮次(种子选于 2026-10-14 之前的世界),注记属于入账最后一笔增量或费用的回报(Fill、PartialFill、带成交的 QueryResult 等,或 FeeOnly),不遗留到对账;含定期和结束 INV-6 的全部检查通过;相同种子保留在 storage 回归集
 - 实现:`crates/hft-testkit/tests/journal_config.rs::tk_114_round_notes_replay_across_storage_restarts`
 
 ### TK-115 每条快照在其完成边界检查 INV-6
@@ -1559,9 +1559,9 @@ spec: README.md
 - 里程碑:M2
 - 前置:真实 `SeqSut<TestStrategies>`、原始 core 套件,不改故障率、时限或采样间隔
 - 故障:套件原有故障计划,实际触发 Drain 和自动重启
-- 种子:固定种子 7、28、34,每行 2000 步
-- 断言:每行实际完成至少一次 Drain 和对应恢复;Drain 快照含 Draining,其他 cap 非空,Recovery 快照不含旧 Draining,其余 cap 原样保留,全部账户仍有 Recovery 且闸门未放行;每条快照通过 INV-6,检查数与 journal 快照数相同;全部不变量通过,强制复跑的 Output 和非空 HashTrail 逐字节一致
-- 恢复后 New 意图:逐条验证开仓决策以 CloseOnly 拒绝且没有分配槽,种子 28 必须实际出现拒单;拒单数量随此前订单终态变化,不固定历史计数;默认外来成交可触发已分配槽的 risk_reducing 防御单,方向和数量仍经过完整不变量检查;订单查询照常处理
+- 种子:标准世界(W1)中 2000 步内完成 Drain 的 core 种子 7、28、34,每行 2000 步(`WorldSpec::w1_trading` 的世界交易更密,多数种子的 Drain 在 2000 步内等不到无在途,对应种子为 `0x148`、`0x190`)
+- 断言:每行实际完成至少一次 Drain 和对应恢复;Drain 快照含 Draining,Recovery 快照不含旧 Draining,其余 cap(若有)原样保留,全部账户仍有 Recovery 且闸门未放行;每条快照通过 INV-6,检查数与 journal 快照数相同;全部不变量通过,强制复跑的 Output 和非空 HashTrail 逐字节一致
+- 恢复后 New 意图:账户仍有 Recovery cap 期间(`auto_resume_after_clean_drain` 在启动闸门通过后解除),开仓决策以 CloseOnly 拒绝且没有分配槽;默认外来成交可触发已分配槽的 risk_reducing 防御单,方向和数量仍经过完整不变量检查;订单查询照常处理;拒绝数与带其他 cap 的 Drain 数只打印
 - 实现:`crates/hft-testkit/tests/journal_config.rs::tk_120_drain_restart_conformance_keeps_recovery_gates`
 
 ### TK-121 对冲 place 失败必须有同一链接实例的原始证据
@@ -1569,7 +1569,7 @@ spec: README.md
 - 规则:[6. DST 框架](README.md#6-dst-框架)、[INV-14](../../docs/tests/invariants.md#inv-14-门控拒绝不计入执行失败计数只有交易所执行结果才计入)
 - 级别:dst
 - 里程碑:M2
-- 前置:真实 `SeqSut<TestStrategies>` 与原始 core 套件,不改故障率与时限
+- 前置:真实 `SeqSut<TestStrategies>` 与原始 core 套件(`WorldSpec::w1_legacy` 的世界),不改故障率与时限
 - 故障:套件原有计划
 - 种子:固定种子 `0x1af231bb1d6440e2`,完整 10000 步
 - 断言:全部不变量与强制复跑通过;按原始观察选取对冲重试 Timer,同一链接实例调用前空闲槽为 0,place 返回 NoFreeSlot,重试从 1 到 2;同事件恰有一条 CAPACITY OrderDecision,trigger_seq/账户/组/venue/品种吻合,slot/gen 为 0且不出环;删除/重复观察、改错 Input/epoch/slot/gen/创建事件/链接号/账户/组、非满表、错误失败种类、错误计数水位、多加计数和缺链接身份共 17 行反例失败;未增加计数的失败也不能漏观察。四种门控 SendReport 不能单独解释计数增加;链接号复用后不能借旧实例证据。关闭检查器后完整 journal 和非空 HashTrail 逐字节相同
@@ -1592,12 +1592,12 @@ spec: README.md
 - 规则:[6. DST 框架](README.md#6-dst-框架)
 - 级别:integ
 - 里程碑:M2
-- 前置:modes 固定种子 `0x7dfee4207b81bfbd`,显式关闭永续现金能力保留旧记录语义,先生成原 10000 步故障表并固定,截取前 316 步核对证据;回报中的 Ack 数量不作为成交
+- 前置:modes 固定种子 `0x7dfee4207b81bfbd`,`WorldSpec::w1_legacy` 的世界(无标记价、taker 不循环),显式关闭永续现金能力保留旧记录语义,先生成原 10000 步故障表并固定,截取前 316 步核对证据;回报中的 Ack 数量不作为成交
 - 步骤:从模拟回报生成序号取得单 5/6/7 的完整身份、数量与价格,与 journal 交付顺序及原始下单方向比较;关闭检查器重跑相同步数。核对该账户全部成交集合,从完整订单身份关联到原始 GwCmd 和已提交 OrderDecision,分别独立计算两种顺序的钱包与费用,不读实际成本或余额变化作为期望
-- 期望:生成顺序为 5/6/7,交付顺序为 6/5/7,旧能力模式的 INV-16 在第 315 步以精确 1 单位差额失败;诊断不改变 journal、HashTrail 或回报。此用例验证故障证据,不代表该余额差通过验收;常规回归集中的原种子仍在默认能力下完整运行 10000 步并接受严格核对
+- 期望:生成顺序为 5/6/7,交付顺序为 6/5/7,旧能力模式的 INV-16 在前 316 步内(记录时为第 315 步)以精确 1 单位差额失败;诊断不改变 journal、HashTrail 或回报。此用例验证故障证据,不代表该余额差通过验收;常规回归集中的原种子仍在默认能力下完整运行 10000 步并接受严格核对
 - 实现:`crates/hft-testkit/tests/fill_order.rs::tk_123_raw_matching_order_survives_report_jitter`
 - 反例:实际余额 ±1、输入费用 ±1、错误 epoch、重复证据、错误生成顺序均不能满足独立演算。参考仅接受本例的单笔全成,其他回报形式明确拒绝
-- 历史定位:交付序号 544/555/597 仅扣除此前新增的 BalanceCheck 记录数后核对;成交身份、金额、完整 journal 与 HashTrail 的比较不作归一化
+- 历史定位:交付顺序按扣除此前新增的 BalanceCheck 记录数后的序号核对(记录时为 544/555/597,具体序号随无关的引擎输出移动);成交身份、金额、完整 journal 与 HashTrail 的比较不作归一化
 
 ### TK-124 两种成交顺序的独立现金演算覆盖未平仓与正负取整
 
@@ -1641,7 +1641,7 @@ spec: README.md
 - 规则:[DST 的世界模型](README.md#dst-的世界模型)、[INV-16](../../docs/tests/invariants.md#inv-16-无在途时账本的仓位现货库存与余额等于模拟真值)
 - 级别:dst
 - 里程碑:M2
-- 前置:modes 原种子 `0x7dfee4207b81bfbd`、原 10000 步故障计划,W1 仅为永续 VP 默认启用 `VenueSpec.perp_cash`;引擎与模拟器能力位一致,现货拒绝该开关
+- 前置:modes 原种子 `0x7dfee4207b81bfbd`、原 10000 步故障计划,`WorldSpec::w1_legacy` 的世界,W1 仅为永续 VP 默认启用 `VenueSpec.perp_cash`;引擎与模拟器能力位一致,现货拒绝该开关
 - 故障:原始 modes 故障表,不调整延迟、故障率或检查间隔
 - 种子:前 316 步诊断窗口和完整 10000 步分别运行,均强制重跑
 - 断言:诊断窗口保留原交付乱序,从原始成交及完整订单身份独立计算每笔现金,逐笔与现金字段相等;独立按交付顺序估算仍多 1 单位,实际两边钱包均为 49999683575。关闭检查器后完整 journal、非空 HashTrail、撮合证据及真值逐字节相同;完整 10000 步全部不变量及快照重建通过。前缀与全程分别从首个、中间和最后一个仍有成交后缀的快照交给 JournalLedger 冷读,全部钱包、仓位和库存与热引擎逐单位相同

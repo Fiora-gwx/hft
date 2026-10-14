@@ -21,6 +21,10 @@ use crate::dst::world::{AccountKind, World};
 use crate::dst::{DstConfig, DstFailure, DstOutcome, FailKind, RerunPolicy, TraceItem};
 use crate::hash::{ComponentHashes, HashTrail};
 
+/// Period of the gateway margin poll of a world with `margin_feed` (a third of the Push
+/// `margin_stale_ms`).
+const MARGIN_POLL_NS: u64 = 5_000_000_000;
+
 /// Everything a finished run leaves for scenario assertions and framework tests.
 #[derive(Clone, Debug)]
 pub struct RunRecord {
@@ -203,6 +207,8 @@ struct Loop<'c, E: Sut> {
     after: Obs,
     timer_at: u64,
     venue_wake: Vec<u64>,
+    /// Next gateway margin poll (`WorldSpec.margin_feed`).
+    next_margin_poll: u64,
     fail: Option<(u64, FailKind, String)>,
     snapshots_checked_through: u64,
 }
@@ -301,6 +307,7 @@ fn run_once<E: Sut>(cfg: &DstConfig) -> RunRecord {
         after: Obs::default(),
         timer_at: u64::MAX,
         venue_wake: vec![u64::MAX; n],
+        next_margin_poll: MARGIN_POLL_NS,
         fail: None,
         snapshots_checked_through: 0,
     };
@@ -389,6 +396,15 @@ impl<E: Sut> Loop<'_, E> {
                                     self.wake_venue(v);
                                 }
                             }
+                            MarketOut::Mark { venue, inst, px } => {
+                                if let Some(v) = venue_ix(&self.venues, venue) {
+                                    if let Some((at, inp)) = self.venues[v].on_mark(inst, px, now) {
+                                        self.world.schedule(at, Ev::Deliver(inp));
+                                    }
+                                    self.sims[v].m.on_mark(inst, px, now);
+                                    self.wake_venue(v);
+                                }
+                            }
                             MarketOut::Recorded(i) => {
                                 // The exchange truth follows the recorded quotes too.
                                 if let Some(b) = i.read::<hft_event::Bbo>()
@@ -409,6 +425,13 @@ impl<E: Sut> Loop<'_, E> {
                                 self.world.schedule(now, Ev::Deliver(i));
                             }
                         }
+                    }
+                    if self.cfg.world.margin_feed && now >= self.next_margin_poll {
+                        for v in 0..self.venues.len() {
+                            let ins = self.venues[v].margin_snapshot(now);
+                            self.deliver_all(ins);
+                        }
+                        self.next_margin_poll = now.saturating_add(MARGIN_POLL_NS);
                     }
                     if next != u64::MAX {
                         self.world.schedule(next, Ev::Market);
@@ -709,6 +732,21 @@ impl<E: Sut> Loop<'_, E> {
             return;
         }
         self.sut.drain_observations(&mut self.out);
+        // A restart (crash, clean restart or the process ending after a Drain) begins a new run
+        // (`EngineClock`): the gateways send their margin snapshots, as after any reconnect.
+        let new_run = crash.is_some()
+            || clean
+            || self
+                .out
+                .records
+                .iter()
+                .any(|r| r.kind == hft_event::EventKind::ENGINE_CLOCK);
+        if new_run && self.cfg.world.margin_feed {
+            for v in 0..self.venues.len() {
+                let ins = self.venues[v].margin_snapshot(now);
+                self.deliver_all(ins);
+            }
+        }
         // A batch merely queued by the actor cannot release a gap. Ask after actual commit,
         // even with all checkers disabled, so observation choices never alter delivery.
         if self
