@@ -682,6 +682,8 @@ enum NextOrder {
     FillBeforeAck,
     /// The next fill also arrives without a client id; a previously delivered Ack may resolve it.
     NoClientId,
+    /// Fault `NotFoundThenFill`: the order reaches the matcher only after this many ms.
+    Hidden(u32),
 }
 
 /// Latest advertised book, kept separately from the faulted matching liquidity.
@@ -784,6 +786,8 @@ pub struct MockVenue<M: Matcher> {
     reconcile_gaps: Vec<(ExternalFill, bool)>,
     fault_error: Option<String>,
     quiet: BTreeMap<u32, u64>,
+    /// Orders of `NotFoundThenFill` held back from the matcher until their due time.
+    hidden: Vec<(u64, GwCmd)>,
     last_due: BTreeMap<u8, u64>,
     /// (account, inst) whose truth changed without a push (ADL in a user-stream gap): INV-16
     /// does not compare them until the engine synthesises the fill.
@@ -833,6 +837,7 @@ impl<M: Matcher> MockVenue<M> {
             reconcile_gaps: Vec::new(),
             fault_error: None,
             quiet: BTreeMap::new(),
+            hidden: Vec::new(),
             last_due: BTreeMap::new(),
             excluded: Vec::new(),
             produced: 0,
@@ -1018,6 +1023,10 @@ impl<M: Matcher> MockVenue<M> {
                     self.m.drain_due(u64::MAX, &mut tmp);
                     return out;
                 }
+                Some(NextOrder::Hidden(ms)) => {
+                    self.hidden.push((now + u64::from(ms) * 1_000_000, *cmd));
+                    return out;
+                }
                 Some(NextOrder::ServerError) => {
                     let mut e = self.blank_event(cmd, now);
                     e.what = OrderEventKind::OutcomeUnknown;
@@ -1070,7 +1079,9 @@ impl<M: Matcher> MockVenue<M> {
         let mut e = self.blank_event(cmd, now);
         e.reject_code = self.cfg.code(r);
         let lat = self.rng.range(self.cfg.latency_ns.0, self.cfg.latency_ns.1);
-        self.last_due.insert(cmd.account.0, now + lat);
+        // Keep a later pending report (a late FeeOnly) in view: the truth stays undelivered.
+        let due = self.last_due.entry(cmd.account.0).or_insert(0);
+        *due = (*due).max(now + lat);
         (now + lat, InputRec::of(&e, self.src()))
     }
 
@@ -1320,6 +1331,18 @@ impl<M: Matcher> MockVenue<M> {
                 self.dead_man.insert(a, now);
             }
         }
+        if !self.hidden.is_empty() {
+            let due: Vec<GwCmd> = self
+                .hidden
+                .iter()
+                .filter(|(at, _)| *at <= now)
+                .map(|(_, c)| *c)
+                .collect();
+            self.hidden.retain(|(at, _)| *at > now);
+            for cmd in due {
+                self.m.on_command(&cmd, now);
+            }
+        }
         out.extend(self.collect(now));
         out
     }
@@ -1344,6 +1367,9 @@ impl<M: Matcher> MockVenue<M> {
         }
         if let Some(end) = self.partial_until {
             t = t.min(end);
+        }
+        if let Some(at) = self.hidden.iter().map(|(at, _)| *at).min() {
+            t = t.min(at);
         }
         if let Some(at) = self.adl_replays.iter().map(|(at, _)| *at).min() {
             t = t.min(at.max(self.userstream_down_until));
@@ -1432,6 +1458,7 @@ impl<M: Matcher> MockVenue<M> {
             Fault::ServerError { .. } => self.next_order.push(NextOrder::ServerError),
             Fault::UnknownCode { .. } => self.next_order.push(NextOrder::UnknownCode),
             Fault::SecondLegReject { .. } => self.next_order.push(NextOrder::Reject),
+            Fault::NotFoundThenFill { delay_ms, .. } => self.next_order.push(NextOrder::Hidden(delay_ms)),
             Fault::FillBeforeAck { .. } => self.next_order.push(NextOrder::FillBeforeAck),
             Fault::LateFeeOnly { delay_ms, .. } => self.late_fees.push_back(delay_ms),
             Fault::CancelRejectFilled { count, hold_ms, .. } => {

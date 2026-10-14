@@ -189,6 +189,12 @@ pub enum Fault {
     NotFoundNoGuard {
         venue: VenueId,
     },
+    /// The venue accepts the next order but executes it only `delay_ms` later: until then no
+    /// report is sent and a query by client id answers NotFound (scripted only, never generated).
+    NotFoundThenFill {
+        venue: VenueId,
+        delay_ms: u32,
+    },
     SecondLegReject {
         venue: VenueId,
     },
@@ -412,6 +418,7 @@ impl Fault {
             | Timeout { .. }
             | UnknownCode { .. }
             | NotFoundNoGuard { .. }
+            | NotFoundThenFill { .. }
             | SecondLegReject { .. } => FaultCategory::Reject,
             QuietBook { .. }
             | SecondLegSilent { .. }

@@ -6,10 +6,16 @@
 #[cfg(feature = "seq")]
 pub mod cancel_filled;
 #[cfg(feature = "seq")]
+pub mod exec;
+#[cfg(feature = "seq")]
 pub mod foreign_ledger;
 pub mod framework;
 #[cfg(feature = "seq")]
 pub mod ledger;
+#[cfg(feature = "seq")]
+pub mod oms;
+#[cfg(feature = "seq")]
+pub mod pair;
 
 /// The engine the three DST entries run (`tests/dst/`, `cargo xtask dst`, `hft-dst`): the real
 /// sequencer over `SimExchange` with the test strategies (feature `seq`).
@@ -136,6 +142,13 @@ pub fn scenarios() -> Vec<Scenario> {
     v.extend([
         foreign_ledger::led_080_foreign_order_cold_hot_equal(),
         ledger::led_081_auto_external_cold_hot_equal(),
+        oms::oms_400_faults_reconcile_zero(),
+        oms::oms_402_notfound_then_fill(),
+        exec::exe_500_pair_open_partial_fills(),
+        exec::exe_505_common_checker(),
+        oms::oms_404_late_fees(),
+        oms::oms_405_slip_jump(),
+        oms::oms_401_quiet_book_hedges(),
     ]);
     v.extend([
         i::inv_1_position_change_has_fill_evidence(),

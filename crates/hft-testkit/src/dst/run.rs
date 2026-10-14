@@ -553,6 +553,7 @@ impl<E: Sut> Loop<'_, E> {
             | Timeout { venue }
             | UnknownCode { venue }
             | NotFoundNoGuard { venue }
+            | NotFoundThenFill { venue, .. }
             | SecondLegReject { venue }
             | SecondLegSilent { venue, .. }
             | PersistentSecondReject { venue, .. }
