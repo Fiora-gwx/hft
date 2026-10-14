@@ -106,7 +106,13 @@ fn control_drain(trader: bool) {
     );
     // The final process teardown may close the socket after journal commit but before
     // the gateway can flush a response. The journal below is the completion authority.
-    let _ = ctl.send(&request, Duration::from_secs(3));
+    if trader {
+        let preview = ctl.preview(&request).unwrap();
+        assert_eq!(preview.code, Some(ResultCode::Applied), "{preview:?}");
+        let _ = ctl.confirm(&request, preview.ctl_state_version);
+    } else {
+        let _ = ctl.send(&request, Duration::from_secs(3));
+    }
     let status = loop {
         if let Some(status) = process.0.try_wait().unwrap() {
             break status;
@@ -132,10 +138,12 @@ fn control_drain(trader: bool) {
             }
             hft_journal::Next::Event(event) if event.kind == hft_event::EventKind::CONTROL_CMD => {
                 let (hdr, cmd) = hft_event::ControlCmd::decode(event.body).unwrap();
-                if matches!(cmd, hft_event::ControlCmd::Drain { cancel_resting: true }) {
+                if hdr.hflags & hft_event::CmdHdr::PREVIEW == 0
+                    && matches!(cmd, hft_event::ControlCmd::Drain { cancel_resting: true })
+                {
                     let expected = format!("cli:{user}");
                     assert_eq!(&hdr.issuer[..expected.len()], expected.as_bytes());
-                    assert_eq!(hdr.confirmed, 1);
+                    assert_eq!(hdr.confirmed, u8::from(trader));
                     drain_issuer = true;
                 }
             }
