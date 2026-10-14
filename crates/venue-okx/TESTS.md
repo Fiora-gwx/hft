@@ -61,7 +61,7 @@ spec: README.md
 
 - 规则:[使用本组件](README.md#使用本组件)、[3. 订单帧模板](README.md#3-订单帧模板)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数;逐行断言关联常量
 - 实现:`crates/venue-okx/tests/consts.rs::okx_001_identity_consts`
 
@@ -75,7 +75,7 @@ spec: README.md
 
 - 规则:[端点与路由](README.md#端点与路由)、[分档快照流](README.md#分档快照流)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数;断言 `routes()` 的全部条目(顺序即下表)
 - 实现:`crates/venue-okx/tests/consts.rs::okx_002_routes`
 
@@ -92,7 +92,7 @@ spec: README.md
 
 - 规则:[端点与路由](README.md#端点与路由)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`KEY`;`now_ms = 1790000000000`;两个产品线逐行各跑一次
 - 实现:`crates/venue-okx/tests/session.rs::okx_003_endpoint_paths`
 
@@ -108,7 +108,7 @@ spec: README.md
 
 - 规则:[端点与路由](README.md#端点与路由)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`KEY`;`WC`;`OkxSwap`
 - 步骤:
   1. 生成 BBO 补帧请求(inst 1501)、Config 序列步 0–2 的请求、Margin 兜底步 0–1 的请求、`dead_man_refresh(timeout_ms = 30000)` 的请求、`GwCmd{op: Query, target_slot: 42}` 的 REST 查单请求
@@ -120,7 +120,7 @@ spec: README.md
 
 - 规则:[1. 分派](README.md#1-分派)、[使用本组件](README.md#使用本组件)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`route = 0`;`MsgOp::Text`,除注明外;头为报文前缀(其后内容任意)
 - 实现:`crates/venue-okx/tests/classify.rs::okx_010_classify_md`
 
@@ -148,7 +148,7 @@ spec: README.md
 
 - 规则:[1. 分派](README.md#1-分派)、[使用本组件](README.md#使用本组件)、[用户流事件表](README.md#用户流事件表)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`MsgOp::Text`;编译进来的默认可忽略名单 = `default_caps().ignorable_user_events`
 - 实现:`crates/venue-okx/tests/classify.rs::okx_011_classify_report`
 
@@ -180,7 +180,7 @@ spec: README.md
 
 - 规则:[1. 分派](README.md#1-分派)
 - 级别:prop
-- 里程碑:M3
+- 里程碑:M9
 - 性质:对任意两条前 64 字节相同的报文,`classify` 结果相同,`classify_report` 结果相同;对长度 < 64 的报文不越界读
 - 生成:从 OKX-010、OKX-011 的头与全部金样输入中取前缀 p(长度 0–64),后接 0–4096 个随机字节,成对生成两条前 64 字节相同、之后不同的报文
 - 参考:断言 `classify(r, op, a) == classify(r, op, b)` 与 `classify_report(op, a) == classify_report(op, b)`;ASan 下零越界
@@ -191,7 +191,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)、[分档快照流](README.md#分档快照流)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数
 - 实现:`crates/venue-okx/tests/md.rs::okx_020_seq_rule_and_resync`
 - 备注:依赖待核实:开发备忘第 6 条(`bbo-tbt` 是否带 `seqId`)、第 18 条(`books5` 是否带单调 `seqId`);核实结论改变规则时同一改动修改本表
@@ -210,7 +210,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)、[hft-venue-proto 契约 2](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;报文 `B1` = `{"arg":{"channel":"bbo-tbt","instId":"BTC-USDT-SWAP"},"data":[{"asks":[["65000.2","12","0","3"]],"bids":[["65000.1","150","0","5"]],"ts":"1790000000123","seqId":4000123}]}`
 - 步骤:
   1. `peek(rd, ctx, BboTbt, B1)`
@@ -222,7 +222,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;报文同 OKX-021 的 `B1`,但 `instId = "DOGE-USDT-SWAP"`;另一条 `instId = "BTC-USDT"`(现货符号)
 - 步骤:
   1. 对两条报文各 `peek`
@@ -234,7 +234,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;报文 `{"arg":{"channel":"mark-price","instId":"BTC-USDT-SWAP"},"data":[{"instType":"SWAP","instId":"BTC-USDT-SWAP","markPx":"65001.3","ts":"1790000000500"}]}`
 - 步骤:
   1. `peek(rd, ctx, MarkPrice, …)`
@@ -246,7 +246,7 @@ spec: README.md
 
 - 规则:[hft-venue-proto 契约 2](../hft-venue-proto/README.md#实现方必须遵守的契约)、[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;报文同 OKX-021 的 `B1`,但 `bids[0][0] = "abc"`
 - 步骤:
   1. `peek`
@@ -260,7 +260,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)、[下单:WS `/private`](README.md#下单ws-private)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;报文 OKX-021 的 `B1`;`RX`
 - 步骤:
   1. `decode_md(rd, ctx, BboTbt, B1, &RX, &mut sink)`
@@ -273,7 +273,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)、[下单:WS `/private`](README.md#下单ws-private)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSpot`;报文 `{"arg":{"channel":"bbo-tbt","instId":"BTC-USDT"},"data":[{"asks":[["65000.2","0.3","0","2"]],"bids":[["65000.1","0.002","0","1"]],"ts":"1790000000123","seqId":88}]}`
 - 步骤:
   1. `decode_md`
@@ -285,7 +285,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)、[hft-venue-proto 契约 4、5](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;基准报文 OKX-021 的 `B1`,每行只改所列字段;每行断言返回值与 sink 事件数,无 panic
 - 实现:`crates/venue-okx/tests/md.rs::okx_027_bbo_decode_failures`
 
@@ -307,7 +307,7 @@ spec: README.md
 
 - 规则:[分档快照流](README.md#分档快照流)、[行情频道 → 事件](README.md#行情频道--事件)、[hft-venue-proto 契约 26](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`books5` 报文:`instId = "BTC-USDT-SWAP"`,`asks` = `[65000.2, 10]、[65000.3, 20]、[65000.4, 30]、[65000.5, 40]、[65000.6, 50]`(张),`bids` = `[65000.1, 15]、[65000.0, 25]、[64999.9, 35]、[64999.8, 45]、[64999.7, 55]`,`ts = "1790000000200"`,`seqId = 5001`
 - 步骤:
   1. `decode_md(rd, ctx, Books5, …, &RX, &mut sink)`
@@ -321,7 +321,7 @@ spec: README.md
 
 - 规则:[分档快照流](README.md#分档快照流)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:同 OKX-029,但 `bids` 只有 3 档、`asks` 5 档
 - 步骤:
   1. `decode_md`
@@ -333,7 +333,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:同 OKX-029,但 `bids[2] = ["64999.9","0","0","0"]`
 - 步骤:
   1. `decode_md`
@@ -345,7 +345,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`RX`;报文 `{"arg":{"channel":"trades","instId":<sym>},"data":[{"instId":<sym>,"tradeId":<id>,"px":<px>,"sz":<sz>,"side":<side>,"ts":"1790000000300","count":"1"}]}`
 - 实现:`crates/venue-okx/tests/md.rs::okx_033_trades`
 
@@ -362,7 +362,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;OKX-023 的报文;`RX`
 - 步骤:
   1. `decode_md(rd, ctx, MarkPrice, …)`
@@ -374,7 +374,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;报文 `{"arg":{"channel":"funding-rate","instId":"BTC-USDT-SWAP"},"data":[{"instId":"BTC-USDT-SWAP","fundingRate":<r>,"fundingTime":<ft>,"nextFundingTime":<nft>,"ts":"1790000000000"}]}`
 - 实现:`crates/venue-okx/tests/md.rs::okx_036_funding_rate`
 - 备注:依赖待核实:开发备忘第 8 条(`fundingTime`/`nextFundingTime` 语义)
@@ -391,7 +391,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;报文 `{"arg":{"channel":"index-tickers","instId":"BTC-USDT"},"data":[{"instId":"BTC-USDT","idxPx":"64998.7","ts":"1790000000700"}]}`;第二条同形但 `instId = "DOGE-USDT"`
 - 步骤:
   1. 两条各 `peek` 与 `decode_md`
@@ -404,7 +404,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSpot`;OKX-023 的 `mark-price` 报文(`BTC-USDT-SWAP`)
 - 步骤:
   1. `peek(rd, ctx, MarkPrice, …)`
@@ -416,7 +416,7 @@ spec: README.md
 
 - 规则:[hft-venue-proto 契约 3](../hft-venue-proto/README.md#实现方必须遵守的契约)、[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`RX`;每行取 OKX-025、OKX-029、OKX-033.1、OKX-035、OKX-036.1、OKX-037 的报文
 - 实现:`crates/venue-okx/tests/md.rs::okx_039_rxmeta_passthrough`
 
@@ -433,7 +433,7 @@ spec: README.md
 
 - 规则:[1. 分派](README.md#1-分派)、[2. 订阅约束](README.md#2-订阅约束)、[用户流事件表](README.md#用户流事件表)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数;对报文先 `classify` 再 `control(c, payload)`
 - 实现:`crates/venue-okx/tests/md.rs::okx_040_control_hints`
 
@@ -451,7 +451,7 @@ spec: README.md
 
 - 规则:[1. 分派](README.md#1-分派)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;OKX-040.1 的报文
 - 步骤:
   1. `decode_md(rd, ctx, Control, …)`
@@ -464,7 +464,7 @@ spec: README.md
 
 - 规则:[hft-venue-proto 契约 5](../hft-venue-proto/README.md#实现方必须遵守的契约)、[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;测试进程装计数分配器;`build_templates` 与 `GwCtx`/`FeedCtx` 构造在计数开始前完成
 - 步骤:
   1. 依次各 10⁴ 次:`classify` + `peek` + `decode_md`(OKX-025、OKX-029、OKX-033.1、OKX-036.1 的报文)、`encode`(OKX-065 的 Place)、`classify_report` + `decode_report`(OKX-090 的响应、OKX-101 的成交推送、OKX-114 的 `account` 推送、OKX-113 的 `positions` 推送)
@@ -476,7 +476,7 @@ spec: README.md
 
 - 规则:[心跳与 BBO 探测](README.md#心跳与-bbo-探测)、[hft-venue-proto 契约 24](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`
 - 步骤:
   1. `bbo_snapshot_request(rd, ctx, &[1501], &mut out)`
@@ -489,7 +489,7 @@ spec: README.md
 
 - 规则:[心跳与 BBO 探测](README.md#心跳与-bbo-探测)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;每行调用前 `out` 清空
 - 实现:`crates/venue-okx/tests/snap.rs::okx_051_bbo_snapshot_request_arity`
 
@@ -503,7 +503,7 @@ spec: README.md
 
 - 规则:[心跳与 BBO 探测](README.md#心跳与-bbo-探测)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;snap-fetch 自己的 `FeedCtx`;请求的 inst = 1501;响应体 `{"code":"0","msg":"","data":[{"asks":[["65000.2","12","0","3"]],"bids":[["65000.1","150","0","5"]],"ts":"1790000000900","seqId":4000200}]}`;`RX`
 - 步骤:
   1. `decode_bbo_snapshot(rd, &mut ctx, &[1501], body, &RX, &mut sink)`
@@ -516,7 +516,7 @@ spec: README.md
 
 - 规则:[心跳与 BBO 探测](README.md#心跳与-bbo-探测)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:同 OKX-052;每行替换响应体
 - 实现:`crates/venue-okx/tests/snap.rs::okx_053_bbo_snapshot_failures`
 
@@ -532,7 +532,7 @@ spec: README.md
 
 - 规则:[hft-venue-proto 契约 25](../hft-venue-proto/README.md#实现方必须遵守的契约)、[心跳与 BBO 探测](README.md#心跳与-bbo-探测)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`ctx_a` = 新建 `FeedCtx`,`ctx_b` = 已对 OKX-025/OKX-029/OKX-036.1 报文各解码 10⁴ 次的 `FeedCtx`;OKX-052 的响应体
 - 步骤:
   1. 分别在 `ctx_a`、`ctx_b` 上 `decode_bbo_snapshot`
@@ -546,7 +546,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)、[5. 心跳与会话](README.md#5-心跳与会话)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`KEY`;`now_ms = 1538054050000`;`OkxSwap`
 - 步骤:
   1. `login(Order, cfg, cred, now_ms, &mut out)`
@@ -559,7 +559,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:同 OKX-060,但 `now_ms = 1538054050999`
 - 步骤:
   1. `login(Order, …)`
@@ -571,7 +571,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)、[用户流事件表](README.md#用户流事件表)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数
 - 实现:`crates/venue-okx/tests/session.rs::okx_062_login_result`
 
@@ -590,7 +590,7 @@ spec: README.md
 
 - 规则:[端点与路由](README.md#端点与路由)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`KEY`;`now_ms = 1790000000000`
 - 步骤:
   1. `login(Md, cfg, cred, now_ms, &mut out)`
@@ -602,7 +602,7 @@ spec: README.md
 
 - 规则:[hft-venue-proto 契约 7](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`KEY`;两个产品线
 - 步骤:
   1. `login(Order, …)`;`build_templates(cfg, rd, 2)`;构造 `GwCtx`、`FeedCtx`、`AcctCtx`;对每个 Config 步调用 `acct_request`
@@ -615,7 +615,7 @@ spec: README.md
 
 - 规则:[3. 订单帧模板](README.md#3-订单帧模板)、[下单:WS `/private`](README.md#下单ws-private)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`gw.stale_guard_ms = 1500`;`build_templates(cfg, rd, 2)`;`WC`;`c = GwCmd{op: Place, inst: 1501, side: Sell, tif: Ioc, px: 6500010, qty: 0.04(4000000), slot: 42, gen: 7, account: 2, oflags: 0}`;client id = `CID(3, 42, 7)`(gw 渲染后经模板写入)
 - 步骤:
   1. `encode(rd, &t, &c, &tgt, &WC, &mut body)`(`body` 2048 B)
@@ -628,7 +628,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)、[3. 订单帧模板](README.md#3-订单帧模板)、[hft-venue-proto 契约 11](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:同 OKX-065,每行只改所列字段;断言帧中对应键的值
 - 实现:`crates/venue-okx/tests/encode.rs::okx_066_place_field_mapping`
 
@@ -647,7 +647,7 @@ spec: README.md
 
 - 规则:[3. 订单帧模板](README.md#3-订单帧模板)、[下单:WS `/private`](README.md#下单ws-private)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSpot`;`gw.stale_guard_ms = 1500`;`WC`;`c = GwCmd{op: Place, inst: 1601, side: Buy, tif: Gtc, px: 6500010, qty: 0.002(200000), slot: 42, gen: 7, oflags: 0}`;client id = `OKX_SPOT` 的 `CID(3, 42, 7)`
 - 步骤:
   1. `encode`
@@ -659,7 +659,7 @@ spec: README.md
 
 - 规则:[3. 订单帧模板](README.md#3-订单帧模板)、[hft-venue-proto 契约 11](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:同 OKX-067,`oflags = REDUCE_ONLY`
 - 步骤:
   1. `encode`
@@ -671,7 +671,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)、[3. 订单帧模板](README.md#3-订单帧模板)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;每行一条 Place,断言帧中 `sz`/`px` 的值;不经 f64
 - 实现:`crates/venue-okx/tests/encode.rs::okx_069_wire_formatting`
 
@@ -693,7 +693,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)
 - 级别:prop
-- 里程碑:M3
+- 里程碑:M9
 - 性质:对任意 `Qty`(lot 整数倍,raw ∈ [1, 10¹⁵])与 `ctVal ∈ {1, 0.1, 0.01, 0.001, 10, 1000}`(`qty_unit_shift ∈ {0, −1, −2, −3, 1, 3}`),`encode` 写出的 `sz` 经 `parse_exact(sz, qty_wire_exp)` 读回等于原 `Qty`;`sz` 的十进制值等于 i128 参考 `qty / ctVal`(精确,无舍入)
 - 生成:qty_exp ∈ {−8, −6, 0};lot ∈ {1, 10, 1000} raw;数量 = lot × k,k ∈ [1, 10⁹];shift 从上列均匀抽取
 - 参考:i128 十进制参考实现 `qty × 10^(qty_exp) / ctVal`,渲染为最短十进制
@@ -704,7 +704,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:源码树 `crates/venue-okx/src/**/*.rs`
 - 步骤:
   1. 去掉注释后扫描标识符 `ct_val`、`ctVal`、`ct_mult`;扫描数量路径的格式化与解析调用
@@ -716,7 +716,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`WC`;`c = GwCmd{op: Cancel, inst: 1501, slot: 42, gen: 7, target_slot: 42}`;`tgt = TargetRef{id: CID(3, 42, 7), exch_order_id: 0}`
 - 步骤:
   1. `encode`
@@ -729,7 +729,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`gw.stale_guard_ms = 1500`;`WC`;`c = GwCmd{op: Amend, inst: 1501, px: 6500020, qty: 5000000, slot: 42, gen: 7, target_slot: 42}`;`tgt.id = CID(3, 42, 7)`
 - 步骤:
   1. `encode`
@@ -741,7 +741,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;两个产品线;`c = GwCmd{op: CancelAll, account: 2, inst: 0}`
 - 步骤:
   1. `encode`
@@ -753,7 +753,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`KEY`;`WC`;`c = GwCmd{op: Query, inst: 1501, slot: 42, gen: 7, target_slot: 42}`;`tgt.id = CID(3, 42, 7)`
 - 步骤:
   1. `order_channel(Query)`;`encode_rest(rd, &t, &c, &tgt, &WC, &mut out)`
@@ -767,7 +767,7 @@ spec: README.md
 
 - 规则:[3. 订单帧模板](README.md#3-订单帧模板)、[hft-venue-proto 契约 5](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;基准为 OKX-065 的 `c`;每行只改所列项
 - 实现:`crates/venue-okx/tests/encode.rs::okx_076_encode_failures`
 
@@ -784,7 +784,7 @@ spec: README.md
 
 - 规则:[3. 订单帧模板](README.md#3-订单帧模板)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`c` 取最长输入:`px = 9223372036854775807`(raw 上限)、`qty` 为 lot 对齐的最大值、`slot = 0xFFFFF`、`gen = 0xFFFFFFFF`、`oflags = REDUCE_ONLY`、`tif = PostOnly`;Place 与 Amend 各一次
 - 步骤:
   1. `encode`
@@ -796,7 +796,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`WC`;每行以所列 `gw.stale_guard_ms` 调用 `build_templates` 后编码 OKX-065 的 `c`
 - 实现:`crates/venue-okx/tests/encode.rs::okx_078_exptime`
 
@@ -810,7 +810,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`WC`;`cs` = 20 条 Place(slot 42–61,gen 7,inst 1501,其余同 OKX-065)
 - 步骤:
   1. `encode_batch(rd, &t, &cs, &tgts, &WC, &mut body)`(`body` 8192 B)
@@ -822,7 +822,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`cs` = 20 条 Cancel(目标 slot 42–61),`tgts[k].id = CID(3, 42 + k, 7)`
 - 步骤:
   1. `encode_batch`
@@ -834,7 +834,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`WC`
 - 实现:`crates/venue-okx/tests/encode.rs::okx_082_batch_limits`
 
@@ -852,7 +852,7 @@ spec: README.md
 
 - 规则:[使用本组件](README.md#使用本组件)、[3. 订单帧模板](README.md#3-订单帧模板)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数;"解码"= 从响应 `id` 还原 `ReportOutcome.req`(经 OKX-090 的路径)
 - 实现:`crates/venue-okx/tests/cid.rs::okx_083_request_id`
 
@@ -873,7 +873,7 @@ spec: README.md
 
 - 规则:[使用本组件](README.md#使用本组件)、[3. 订单帧模板](README.md#3-订单帧模板)
 - 级别:prop
-- 里程碑:M3
+- 里程碑:M9
 - 性质:对任意 `ClientOrderId`(epoch ∈ [0, 2¹⁵),venue ∈ {5, 6},account ∈ [0, 255],slot ∈ [0, 2²⁰),gen ∈ u32)与任意 `(op, slot, gen)`:`render_cid` 输出匹配 `^[0-9a-f]{24}$` 且 `parse_cid(render) == Some(id)`;请求 id 匹配 `^[pcmbxn][0-9a-f]{16}$`,长度 17 ≤ 32,解码回原值
 - 生成:上述取值域均匀抽取
 - 参考:hft-types `ClientOrderId::encode/decode`
@@ -884,7 +884,7 @@ spec: README.md
 
 - 规则:[使用本组件](README.md#使用本组件)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`OkxSwap`
 - 实现:`crates/venue-okx/tests/cid.rs::okx_085_parse_cid`
 
@@ -904,7 +904,7 @@ spec: README.md
 
 - 规则:[使用本组件](README.md#使用本组件)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`OkxSwap`;`id = ClientOrderId{epoch: 3, venue: 5, account: 2, slot: 42, gen: 7}`;`out = [0xAA; 48]`
 - 步骤:
   1. `render_cid(&id, &mut out)`
@@ -916,7 +916,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数
 - 步骤:
   1. 两个产品线调用 `needs_per_order_signing()`
@@ -928,7 +928,7 @@ spec: README.md
 
 - 规则:[4. 回报](README.md#4-回报)、[hft-venue-proto 契约 13](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`RX`;响应 `R0` = `{"id":"p0000002a00000007","op":"order","code":"0","msg":"","data":[{"clOrdId":"1000305020002a000000077d","ordId":"312269865356374016","tag":"","ts":"1790000000150","sCode":"0","sMsg":"Order placed"}],"inTime":"1790000000140100","outTime":"1790000000145300"}`
 - 步骤:
   1. `classify_report(Text, R0)` 后 `decode_report(rd, &mut gw, OrderResp, R0, &RX, &mut sink)`
@@ -942,7 +942,7 @@ spec: README.md
 
 - 规则:[结果未知码表](README.md#结果未知码表)、[hft-venue-proto 契约 6、8](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;生效 `RateLimitTable` 第一条 `Orders` 行 = `(Inst, Orders, 2000 ms, 60)`;响应形如 OKX-090 的 `R0`,但顶层 `code = "1"`、`data[0].sCode` 与 `sMsg` 按行替换(行注明"顶层"时改顶层 `code` 且 `data = []`);"Reject" 指一条 `OrderEvent{what: Reject, slot: 42, gen: 7, reject_code = raw}`,"未知" 指 0 条 `OrderEvent` 且 `outcome_unknown = Some(ReqRef{42, 7, Place})`;每行另断言 `ReportOutcome.raw_code = raw`
 - 实现:`crates/venue-okx/tests/codes.rs::okx_091_order_code_table`
 
@@ -979,7 +979,7 @@ spec: README.md
 
 - 规则:[结果未知码表](README.md#结果未知码表)、[4. 回报](README.md#4-回报)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;响应 `{"id":<id>,"op":<op>,"code":<c>,"msg":"","data":[{"clOrdId":"1000305020002a000000077d","ordId":"312269865356374016","sCode":<s>,"sMsg":""}],"inTime":"1790000000140100","outTime":"1790000000145300"}`
 - 实现:`crates/venue-okx/tests/codes.rs::okx_092_cancel_amend_responses`
 
@@ -996,7 +996,7 @@ spec: README.md
 
 - 规则:[结果未知码表](README.md#结果未知码表)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;响应 `{"id":"b0000002a00000007","op":"batch-orders","code":"2","msg":"","data":[{"clOrdId":"1000305020002a000000077d","ordId":"11","sCode":"0","sMsg":""},{"clOrdId":"1000305020002b000000017a","ordId":"","sCode":"51008","sMsg":""},{"clOrdId":"1000305020002c000000027e","ordId":"","sCode":"50004","sMsg":""}],"inTime":"1790000000140100","outTime":"1790000000145300"}`
 - 步骤:
   1. `decode_report(rd, &mut gw, BatchResp, …)`
@@ -1009,7 +1009,7 @@ spec: README.md
 
 - 规则:[结果未知码表](README.md#结果未知码表)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;响应 `{"id":"x0000002a00000007","op":"batch-cancel-orders","code":"50013","msg":"Systems are busy","data":[],"inTime":"","outTime":""}`
 - 步骤:
   1. `decode_report(…, BatchResp, …)`
@@ -1021,7 +1021,7 @@ spec: README.md
 
 - 规则:[使用本组件](README.md#使用本组件)、[4. 回报](README.md#4-回报)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:同 OKX-090,但 `"id":"1512"`
 - 步骤:
   1. `decode_report`
@@ -1033,7 +1033,7 @@ spec: README.md
 
 - 规则:[4. 回报](README.md#4-回报)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:同 OKX-090,每行改 `inTime`/`outTime`
 - 实现:`crates/venue-okx/tests/reports.rs::okx_096_gw_dwell`
 
@@ -1047,7 +1047,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)、[累计量与费用来源](README.md#累计量与费用来源)、[hft-venue-proto 契约 9、10](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;响应 `{"code":<c>,"msg":"","data":[{"instId":"BTC-USDT-SWAP","ordId":"312269865356374016","clOrdId":"1000305020002a000000077d","state":<st>,"accFillSz":<acc>,"avgPx":<avg>,"fee":"-0.13","feeCcy":"USDT","sz":"5","px":"65000.1","uTime":"1790000001000"}]}`
 - 实现:`crates/venue-okx/tests/reports.rs::okx_097_query_result`
 - 前置补充:以 `decode_rest(rd, ctx, &RestOrigin{what: Order, req: Some(ReqRef{slot: 42, gen: 7, op: Query}), inst: 1501}, 200, body, &RX, &mut sink)` 解码;"状态"即 `OrderEvent.detail`
@@ -1067,7 +1067,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;响应 `{"code":"0","msg":"","data":[<订单 A:clOrdId = CID(3, 42, 7),state live,accFillSz "0">,<订单 B:clOrdId = CID(3, 43, 1),state partially_filled,accFillSz "1",avgPx "65000">,<订单 C:clOrdId = "",state live>]}`
 - 步骤:
   1. `decode_rest(…, &RestOrigin{what: Sweep, req: None, inst: 0}, 200, body, …)`
@@ -1079,7 +1079,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)、[VenueCaps 默认值](README.md#venuecaps-默认值)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`
 - 实现:`crates/venue-okx/tests/reports.rs::okx_099_caa_response`
 
@@ -1093,7 +1093,7 @@ spec: README.md
 
 - 规则:[4. 回报](README.md#4-回报)、[用户流事件表](README.md#用户流事件表)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`RX`;基准推送 `ORD` = `{"arg":{"channel":"orders","instType":"SWAP","uid":"acct-0001"},"data":[{"instType":"SWAP","instId":"BTC-USDT-SWAP","ordId":"312269865356374016","clOrdId":"1000305020002a000000077d","ordType":"limit","side":"buy","sz":"5","px":"65000.1","state":"partially_filled","fillSz":"3","fillPx":"65000.1","tradeId":"242589207","fillFee":"-0.0975","fillFeeCcy":"USDT","fillTime":"1790000000400","accFillSz":"3","avgPx":"65000.1","category":"normal","amendResult":"","reqId":"","uTime":"1790000000401"}]}`;每行只改所列字段,断言产出的 `OrderEvent.what` 序列(全部 `slot 42, gen 7, epoch 3`)
 - 实现:`crates/venue-okx/tests/reports.rs::okx_100_orders_state_mapping`
 
@@ -1117,7 +1117,7 @@ spec: README.md
 
 - 规则:[4. 回报](README.md#4-回报)、[累计量与费用来源](README.md#累计量与费用来源)、[hft-venue-proto 契约 9、13、19](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`RX`;OKX-100 的 `ORD`
 - 步骤:
   1. `decode_report(rd, &mut gw, Orders, ORD, &RX, &mut sink)`
@@ -1130,7 +1130,7 @@ spec: README.md
 
 - 规则:[累计量与费用来源](README.md#累计量与费用来源)、[hft-venue-proto 契约 19](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:OKX-100 的 `ORD`,`fillFee = "0.0130"`
 - 步骤:
   1. `decode_report`
@@ -1142,7 +1142,7 @@ spec: README.md
 
 - 规则:[累计量与费用来源](README.md#累计量与费用来源)、[hft-venue-proto 契约 22](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;同一 `GwCtx`;OKX-100 的 `ORD`(`tradeId = "242589207"`)
 - 步骤:
   1. `decode_report(ORD)`
@@ -1156,7 +1156,7 @@ spec: README.md
 
 - 规则:[累计量与费用来源](README.md#累计量与费用来源)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;同一 `GwCtx`;推送 a = OKX-100 的 `ORD`;推送 b = 同 `tradeId = "242589207"` 但 `instId = "ETH-USDT-SWAP"`、`clOrdId = CID(3, 43, 1)`、`ordId = "7"`
 - 步骤:
   1. `decode_report(a)`;`decode_report(b)`
@@ -1168,7 +1168,7 @@ spec: README.md
 
 - 规则:[累计量与费用来源](README.md#累计量与费用来源)、[hft-venue-proto 契约 22](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;每行新建 `GwCtx`;推送为 OKX-100 的 `ORD` 的变体,按序喂入
 - 实现:`crates/venue-okx/tests/dedup.rs::okx_105_dedup_without_tradeid`
 
@@ -1184,7 +1184,7 @@ spec: README.md
 
 - 规则:[4. 回报](README.md#4-回报)、[hft-venue-proto 契约 19](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;推送为 OKX-100 的 `ORD`(永续)或其现货变体(`instType = SPOT`,`instId = BTC-USDT`,`clOrdId` = `OKX_SPOT` 的 `CID(3, 42, 7)`,`fillSz = "0.002"`);每行断言 `ReportOutcome.fee_rule_deviation` 与事件的 `fee_asset`
 - 实现:`crates/venue-okx/tests/reports.rs::okx_106_fee_rule_deviation`
 
@@ -1203,7 +1203,7 @@ spec: README.md
 
 - 规则:[累计量与费用来源](README.md#累计量与费用来源)、[下单:WS `/private`](README.md#下单ws-private)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSpot`;OKX-106 的现货变体,`fillSz = "0.002"`,`accFillSz = "0.005"`,`fillFee = "-0.000002"`,`fillFeeCcy = "BTC"`
 - 步骤:
   1. `decode_report`
@@ -1215,7 +1215,7 @@ spec: README.md
 
 - 规则:[外部成交识别](README.md#外部成交识别)、[hft-venue-proto 契约 18](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;每行新建 `GwCtx`;推送为 OKX-100 的 `ORD`,只改 `category` 与 `clOrdId`
 - 实现:`crates/venue-okx/tests/external.rs::okx_108_external_fill_order`
 - 备注:依赖待核实:开发备忘第 2 条(`category` 推送原文)、第 3 条(网页/App 单的 `clOrdId`);核实前 ADL 与交割样本为按文档构造的合成样本
@@ -1240,7 +1240,7 @@ spec: README.md
 
 - 规则:[外部成交识别](README.md#外部成交识别)、[hft-venue-proto 契约 22](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;OKX-100 的 `ORD`,`category = full_liquidation`,`clOrdId = ""`,`side = sell`,`fillSz = "2"`,`fillPx = "52000.5"`,`fillFee = "-1.04"`,`accFillSz = "2"`
 - 实现:`crates/venue-okx/tests/external.rs::okx_109_external_fill_fields`
 
@@ -1254,7 +1254,7 @@ spec: README.md
 
 - 规则:[外部成交识别](README.md#外部成交识别)、[hft-venue-proto 契约 22](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:同一 `GwCtx`;OKX-109.2 的推送(`tradeId = ""`)
 - 步骤:
   1. 喂两次
@@ -1266,7 +1266,7 @@ spec: README.md
 
 - 规则:[外部成交识别](README.md#外部成交识别)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:OKX-109.1 的推送,另在同一推送的 `data[0]` 加 `"liqPenalty":"-3.5"`
 - 步骤:
   1. `decode_report`
@@ -1278,7 +1278,7 @@ spec: README.md
 
 - 规则:[用户流事件表](README.md#用户流事件表)、[保证金数据换算](README.md#保证金数据换算)、[hft-venue-proto 契约 17](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;同一 `GwCtx` 已解码 OKX-114 的 `account` 推送;`positions` 推送 `data` = `[{"instType":"SWAP","instId":"BTC-USDT-SWAP","mgnMode":"cross","posSide":"net","pos":"-150","avgPx":"64000.5","upl":"12.5","liqPx":"71000.5","adl":"3","uTime":"1790000000600"},{"instType":"SWAP","instId":"ETH-USDT-SWAP","mgnMode":"cross","posSide":"net","pos":"20","avgPx":"3000.1","upl":"-1.2","liqPx":"","adl":"0","uTime":"1790000000600"}]`
 - 步骤:
   1. `decode_report(…, Positions, …)`
@@ -1291,7 +1291,7 @@ spec: README.md
 
 - 规则:[用户流事件表](README.md#用户流事件表)、[保证金数据换算](README.md#保证金数据换算)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;新建 `GwCtx`;`account` 推送 `data[0]` = `{"adjEq":"","mmr":"","uTime":"1790000000500","details":[{"ccy":"USDT","eq":"10000","cashBal":"10050","frozenBal":"50","availEq":"8000.5","availBal":"8000","mmr":"250","mgnRatio":"40"},{"ccy":"BTC","eq":"0.01","cashBal":"0.01","frozenBal":"0","availEq":"0.01","mmr":"0","mgnRatio":""},{"ccy":"XYZ","eq":"5","cashBal":"5","frozenBal":"0"}]}`
 - 步骤:
   1. `decode_report(…, Account, …)`
@@ -1304,7 +1304,7 @@ spec: README.md
 
 - 规则:[保证金数据换算](README.md#保证金数据换算)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;新建 `GwCtx`;`account` 推送 `data[0]` = `{"adjEq":"20000","mmr":"1000","availEq":"15000","mgnRatio":"20","uTime":"1790000000500","details":[{"ccy":"USDT","eq":"10000","cashBal":"10000","frozenBal":"0","availEq":"9000","mmr":"250"}]}`
 - 步骤:
   1. `decode_report(…, Account, …)`
@@ -1316,7 +1316,7 @@ spec: README.md
 
 - 规则:[保证金数据换算](README.md#保证金数据换算)、[hft-venue-proto 契约 17](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:OKX-114 的推送,每行只改 `details[USDT]` 的 `eq`、`mmr`、`mgnRatio`
 - 实现:`crates/venue-okx/tests/margin.rs::okx_116_margin_ratio_edges`
 
@@ -1333,7 +1333,7 @@ spec: README.md
 
 - 规则:[保证金数据换算](README.md#保证金数据换算)
 - 级别:prop
-- 里程碑:M3
+- 里程碑:M9
 - 性质:对任意 `eq`、`mmr` 十进制串(合约模式)与 `adjEq`、`mmr`(多币种口径),`MarginReport.margin_ratio` 等于 i128 参考 `floor(mmr × 10⁹ / eq)`(`eq ≤ 0` → `Rate::MAX`;`mmr` 为空 → 0);不 panic
 - 生成:`eq` ∈ [−10⁶, 10¹²],`mmr` ∈ [0, 10¹²],各 0–6 位小数;5% 概率为空串
 - 参考:i128 十进制参考实现
@@ -1344,7 +1344,7 @@ spec: README.md
 
 - 规则:[保证金数据换算](README.md#保证金数据换算)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;新建 `GwCtx`;OKX-113 的 `positions` 推送
 - 步骤:
   1. `decode_report(…, Positions, …)`
@@ -1356,7 +1356,7 @@ spec: README.md
 
 - 规则:[保证金数据换算](README.md#保证金数据换算)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:OKX-114 的推送,`details[USDT].availEq = ""`,`availBal = "7999"`
 - 步骤:
   1. `decode_report`
@@ -1368,7 +1368,7 @@ spec: README.md
 
 - 规则:[保证金数据换算](README.md#保证金数据换算)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:OKX-113 的 `positions` 推送,只改第一条的 `adl`
 - 实现:`crates/venue-okx/tests/margin.rs::okx_120_adl_quantile`
 
@@ -1384,7 +1384,7 @@ spec: README.md
 
 - 规则:[用户流事件表](README.md#用户流事件表)、[保证金数据换算](README.md#保证金数据换算)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSpot`;OKX-114 的 `account` 推送
 - 步骤:
   1. `decode_report(…, Account, …)`
@@ -1396,7 +1396,7 @@ spec: README.md
 
 - 规则:[用户流事件表](README.md#用户流事件表)、[hft-venue-proto 契约 14、22](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;同一 `GwCtx` 已解码 OKX-114 的 `account` 推送(USDT `cashBal = 10050`);资金费推送 `F1` = `{"arg":{"channel":"balance_and_position"},"data":[{"pTime":"1790006400050","eventType":"funding_fee","balData":[{"ccy":"USDT","cashBal":"10049.65","uTime":"1790006400050"}],"posData":[]}]}`
 - 步骤:
   1. `decode_report(…, BalanceAndPosition, F1, …)`
@@ -1409,7 +1409,7 @@ spec: README.md
 
 - 规则:[用户流事件表](README.md#用户流事件表)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:新建 `GwCtx`(未收到任何 `account`/`balance_and_position` 推送);OKX-122 的 `F1`
 - 步骤:
   1. `decode_report(F1)`
@@ -1423,7 +1423,7 @@ spec: README.md
 
 - 规则:[用户流事件表](README.md#用户流事件表)、[hft-venue-proto 契约 22](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:同 OKX-122 的初始状态;每行新建该状态后按序喂入
 - 实现:`crates/venue-okx/tests/funding.rs::okx_124_funding_dedup`
 
@@ -1437,7 +1437,7 @@ spec: README.md
 
 - 规则:[用户流事件表](README.md#用户流事件表)、[保证金数据换算](README.md#保证金数据换算)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`F1` 只改 `eventType`
 - 实现:`crates/venue-okx/tests/funding.rs::okx_125_balance_and_position_events`
 
@@ -1453,7 +1453,7 @@ spec: README.md
 
 - 规则:[用户流事件表](README.md#用户流事件表)、[保证金数据换算](README.md#保证金数据换算)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;推送 `{"arg":{"channel":"liquidation-warning","instType":"SWAP"},"data":[{"instId":"BTC-USDT-SWAP","mgnMode":"cross","pos":"-150","liqPx":"71000.5","mgnRatio":"1.2"}]}`
 - 步骤:
   1. `decode_report(…, LiquidationWarning, …)`
@@ -1465,7 +1465,7 @@ spec: README.md
 
 - 规则:[用户流事件表](README.md#用户流事件表)、[1. 分派](README.md#1-分派)、[hft-venue-proto 契约 20](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;行 4 的 refdata 在 `ignorable_user_events` 追加 `"foo-notice"`;每行先 `classify_report` 再 `decode_report`
 - 实现:`crates/venue-okx/tests/reports.rs::okx_127_ignorable_and_unknown`
 
@@ -1484,7 +1484,7 @@ spec: README.md
 
 - 规则:[hft-venue-proto 契约 20](../hft-venue-proto/README.md#实现方必须遵守的契约)、[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;OKX-100 的 `ORD` 的变体
 - 实现:`crates/venue-okx/tests/reports.rs::okx_128_known_class_bad_body`
 
@@ -1500,7 +1500,7 @@ spec: README.md
 
 - 规则:[累计量与费用来源](README.md#累计量与费用来源)、[hft-venue-proto 契约 9](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:新建 `GwCtx`;OKX-100 的 `ORD`,`fillSz = "1"`,`accFillSz = "4"`(之前的成交推送未送达)
 - 步骤:
   1. `decode_report`
@@ -1512,7 +1512,7 @@ spec: README.md
 
 - 规则:[hft-venue-proto 契约 13](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:OKX-100 的 `ORD`,`clOrdId = CID(2, 42, 7)`
 - 步骤:
   1. `decode_report`
@@ -1524,7 +1524,7 @@ spec: README.md
 
 - 规则:[账户配置核验](README.md#账户配置核验)、[hft-venue-proto 契约 16](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数;断言 `acct_queries(Config)` 的条目(顺序即下表)
 - 实现:`crates/venue-okx/tests/acct.rs::okx_140_config_queries`
 
@@ -1539,7 +1539,7 @@ spec: README.md
 
 - 规则:[保证金数据换算](README.md#保证金数据换算)、[hft-venue-proto 契约 17](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数
 - 实现:`crates/venue-okx/tests/acct.rs::okx_141_margin_queries`
 
@@ -1553,7 +1553,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)、[账户配置核验](README.md#账户配置核验)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`KEY`;`WC`
 - 步骤:
   1. `acct_request(rd, &t, 2, Config 步 0, &WC, &mut out)`
@@ -1565,7 +1565,7 @@ spec: README.md
 
 - 规则:[账户配置核验](README.md#账户配置核验)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`OkxSwap`;`KEY`;`WC`;经 `GoldenDriver` 跑完整 Config 序列,记录产出的全部请求
 - 实现:`crates/venue-okx/tests/acct.rs::okx_143_leverage_batches`
 - 备注:依赖待核实:开发备忘第 14 条(批量上限);静态请求表展开为多批的机制归 hft-venue-proto,本用例只断言请求内容
@@ -1580,7 +1580,7 @@ spec: README.md
 
 - 规则:[账户配置核验](README.md#账户配置核验)、[VenueCaps 默认值](README.md#venuecaps-默认值)、[hft-venue-proto 契约 16、23](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;经 `GoldenDriver` 喂 Config 序列响应后 `acct_finish`;基准响应:`account/config` 的 `data[0]` = `{"uid":"acct-0001","acctLv":"2","posMode":"net_mode","perm":"read_only,trade","feeType":"0","autoLoan":false,"enableSpotBorrow":false}`;`positions` 全部 `mgnMode = cross`;`leverage-info` 三个 inst 的 `lever` = 5、10、3;基准期望 `AccountConfigReport{position_mode: 2(OneWay), margin_mode: 2(Cross), multi_asset: 2(Off), mismatches: 0, uid_keys: 3(SESSION|REST), venue_uid: "acct-0001", n_lev: 3}`;每行只改所列项,写出与基准不同的字段
 - 实现:`crates/venue-okx/tests/acct.rs::okx_144_swap_config_bits`
 - 备注:依赖待核实:开发备忘第 5 条(端点字段与模拟盘可用性)
@@ -1613,7 +1613,7 @@ spec: README.md
 
 - 规则:[账户配置核验](README.md#账户配置核验)、[VenueCaps 默认值](README.md#venuecaps-默认值)、[hft-venue-proto 契约 16](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSpot`;基准响应同 OKX-144 但 `acctLv = "1"`;基准期望 `{position_mode: 1, margin_mode: 1, multi_asset: 1(都是 NotApplicable), mismatches: 0, uid_keys: 3, n_lev: 0}`
 - 实现:`crates/venue-okx/tests/acct.rs::okx_145_spot_config_bits`
 - 备注:依赖待核实:开发备忘第 14 条(`enableSpotBorrow` 在 `acctLv = 2` 下的语义)
@@ -1638,7 +1638,7 @@ spec: README.md
 
 - 规则:[账户配置核验](README.md#账户配置核验)、[hft-venue-proto 契约 16](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`OkxSwap`;Config 序列其余响应同 OKX-144 基准
 - 实现:`crates/venue-okx/tests/acct.rs::okx_146_leverage_items`
 
@@ -1653,7 +1653,7 @@ spec: README.md
 
 - 规则:[账户配置核验](README.md#账户配置核验)、[hft-venue-proto 契约 23](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`KEY`;两个产品线
 - 步骤:
   1. `session_identity_request(cfg, cred, 1790000000000, &mut out)`
@@ -1667,7 +1667,7 @@ spec: README.md
 
 - 规则:[保证金数据换算](README.md#保证金数据换算)、[hft-venue-proto 契约 27](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`GwCtx` 已解码 OKX-114 的 `account` 推送(USDT `eq = 10000`);新建 `AcctCtx`;兜底响应:`account/balance` 的 `data[0]` 与 OKX-114 同形但 `details[USDT].eq = "9000"`、`mmr = "300"`;`account/positions` 与 OKX-113 的 `data` 相同
 - 步骤:
   1. 对 Margin 步 0、1 依次 `acct_decode`,再 `acct_finish(Margin)`
@@ -1681,7 +1681,7 @@ spec: README.md
 
 - 规则:[保证金数据换算](README.md#保证金数据换算)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSpot`;新建 `AcctCtx`、空 `AcctScratch`
 - 步骤:
   1. `acct_finish(rd, &mut ctx, 2, Margin, &s, &RX, &mut sink)`
@@ -1693,7 +1693,7 @@ spec: README.md
 
 - 规则:[限速默认值](README.md#限速默认值)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数;两个产品线的 `rate_rules()` 相同
 - 实现:`crates/venue-okx/tests/consts.rs::okx_170_rate_rules`
 
@@ -1710,7 +1710,7 @@ spec: README.md
 
 - 规则:[VenueCaps 默认值](README.md#venuecaps-默认值)、[hft-venue-proto 契约 10](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数
 - 步骤:
   1. 两个产品线调用 `stale_guard()`
@@ -1723,7 +1723,7 @@ spec: README.md
 
 - 规则:[VenueCaps 默认值](README.md#venuecaps-默认值)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数
 - 实现:`crates/venue-okx/tests/deadman.rs::okx_172_dead_man_spec`
 
@@ -1737,7 +1737,7 @@ spec: README.md
 
 - 规则:[VenueCaps 默认值](README.md#venuecaps-默认值)、[5. 心跳与会话](README.md#5-心跳与会话)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`KEY`;`WC`
 - 步骤:
   1. `dead_man_refresh(rd, &t, 30000, &[], &WC, &mut out)`
@@ -1751,7 +1751,7 @@ spec: README.md
 
 - 规则:[VenueCaps 默认值](README.md#venuecaps-默认值)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:同 OKX-173;每行以所列 `timeout_ms` 调用
 - 实现:`crates/venue-okx/tests/deadman.rs::okx_174_timeout_bounds`
 
@@ -1770,7 +1770,7 @@ spec: README.md
 
 - 规则:[VenueCaps 默认值](README.md#venuecaps-默认值)、[hft-venue-proto 契约 15](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数;断言 `OkxSwap::default_caps()` 的每个字段
 - 实现:`crates/venue-okx/tests/caps.rs::okx_175_default_caps_swap`
 
@@ -1795,7 +1795,7 @@ spec: README.md
 
 - 规则:[VenueCaps 默认值](README.md#venuecaps-默认值)、[hft-venue-proto 契约 15、21](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数;断言 `OkxSpot::default_caps()` 的每个字段
 - 实现:`crates/venue-okx/tests/caps.rs::okx_176_default_caps_spot`
 
@@ -1819,7 +1819,7 @@ spec: README.md
 
 - 规则:[hft-venue-proto 契约](../hft-venue-proto/README.md#实现方必须遵守的契约)、[6. 源文件规划](README.md#6-源文件规划)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`tests/contract.rs` 以 testkit 的检查函数分别实例化 `OkxSwap`、`OkxSpot`;样本取自 `fixtures/okx-swap/`、`fixtures/okx-spot/`;每行对两个产品线各跑一次
 - 实现:`crates/venue-okx/tests/contract.rs::okx_177_contract_checks`
 
@@ -1869,7 +1869,7 @@ spec: README.md
 
 - 规则:[5. 心跳与会话](README.md#5-心跳与会话)、[心跳与 BBO 探测](README.md#心跳与-bbo-探测)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数;两个产品线
 - 实现:`crates/venue-okx/tests/session.rs::okx_190_heartbeat_spec`
 
@@ -1884,7 +1884,7 @@ spec: README.md
 
 - 规则:[2. 订阅约束](README.md#2-订阅约束)、[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;每行一组 `SubSpec`,调用 `subscribe(subs, cfg, &mut out)`
 - 实现:`crates/venue-okx/tests/subscribe.rs::okx_200_subscribe_frames`
 
@@ -1905,7 +1905,7 @@ spec: README.md
 
 - 规则:[2. 订阅约束](README.md#2-订阅约束)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:合成 refdata `RD-OKX-120`(`RD-OKX` 另加到共 120 个可交易永续);`OkxSwap`;`Bbo` 流
 - 实现:`crates/venue-okx/tests/subscribe.rs::okx_201_subscribe_batching`
 
@@ -1920,7 +1920,7 @@ spec: README.md
 
 - 规则:[2. 订阅约束](README.md#2-订阅约束)
 - 级别:prop
-- 里程碑:M3
+- 里程碑:M9
 - 性质:对任意 `SubSpec` 集合(0–300 条)与 `unsub ∈ {false, true}`,`subscribe` 与 `private_subscribe` 写出的每一帧能被 `sonic-rs` 解析、顶层键集合 = `{op, args}`、`args.len() ≤ 50`
 - 生成:inst 从 `RD-OKX` 两产品线的 inst 抽取;流从各产品线支持的 `StreamKind` 抽取
 - 参考:断言;另把全部帧的 `args` 拼接后与输入集合一一对应
@@ -1931,7 +1931,7 @@ spec: README.md
 
 - 规则:[用户流事件表](README.md#用户流事件表)、[2. 订阅约束](README.md#2-订阅约束)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSwap`;`acct = 2`
 - 实现:`crates/venue-okx/tests/subscribe.rs::okx_203_private_subscribe_swap`
 
@@ -1944,7 +1944,7 @@ spec: README.md
 
 - 规则:[用户流事件表](README.md#用户流事件表)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX`;`OkxSpot`;`acct = 2`
 - 步骤:
   1. `private_subscribe(cfg, 2, false, &mut out)`
@@ -1956,7 +1956,7 @@ spec: README.md
 
 - 规则:[测试网/模拟盘](README.md#测试网模拟盘)、[下单:WS `/private`](README.md#下单ws-private)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX-DEMO`(端点环境 `Demo`);`KEY`;`WC`;`OkxSwap`
 - 实现:`crates/venue-okx/tests/demo.rs::okx_210_demo_header`
 
@@ -1971,7 +1971,7 @@ spec: README.md
 
 - 规则:[测试网/模拟盘](README.md#测试网模拟盘)、[下单:WS `/private`](README.md#下单ws-private)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-OKX-DEMO`;OKX-065 的 `c`
 - 步骤:
   1. `build_templates` 后 `encode`
@@ -1983,7 +1983,7 @@ spec: README.md
 
 - 规则:[依赖](README.md#依赖)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:CI 文档作业;`cargo tree -p venue-okx -e normal` 与 `-e dev`
 - 步骤:
   1. 取 normal 依赖闭包与 dev 依赖列表
@@ -1995,7 +1995,7 @@ spec: README.md
 
 - 规则:[测试网/模拟盘](README.md#测试网模拟盘)、[账户配置核验](README.md#账户配置核验)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:模拟盘 refdata(已由 hft-cfg 按 TOML `uid_policy = "unverifiable"`、`uid_policy_signoff` 生成并加载):账户 2 `is_prod = false`、`UidPolicy::Unverifiable`、`venue_uid = ""`;`account/config` 响应无 `uid`,其余同 OKX-144 基准
 - 步骤:
   1. 经 `GoldenDriver` 跑 `OkxSwap` 的 Config 序列
@@ -2024,7 +2024,7 @@ spec: README.md
 
 - 规则:[测试网/模拟盘](README.md#测试网模拟盘)、[用户流事件表](README.md#用户流事件表)
 - 级别:testnet
-- 里程碑:M3
+- 里程碑:M9
 - 环境:dev2;OKX 模拟盘账户一个;两条登录后的 `/private` 连接
 - 授权:`[需授权]`(模拟盘 API key)
 - 步骤:
@@ -2038,7 +2038,7 @@ spec: README.md
 
 - 规则:[测试网/模拟盘](README.md#测试网模拟盘)、[分档快照流](README.md#分档快照流)
 - 级别:testnet
-- 里程碑:M3
+- 里程碑:M9
 - 环境:dev2;OKX 模拟盘 `wspap` 端点与 `x-simulated-trading: 1` 的 REST
 - 授权:`[需授权]`(模拟盘 API key)
 - 步骤:
@@ -2052,7 +2052,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)、[心跳与 BBO 探测](README.md#心跳与-bbo-探测)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/bbo-tbt/*.in` 与 `fixtures/okx-spot/bbo-tbt/*.in`;case:`normal`、`large_face_value_pepe`(`PEPE-USDT-SWAP`,`qty_unit_shift = 7`)、`one_side_empty`、`same_seqid_twice`、`price_scientific_notation`(合成)、`missing_seqId`(合成);来源:现有采集系统 raw WAL(`cargo xtask fixtures extract --wal … --channel bbo-tbt`),合成项 `source = "synthetic"`
 - 期望文件:同目录 `<case>.expected.jsonl`(`Bbo` 逐字段;`missing_seqId` 期望 `{"error":"Shape"}`)
 - 夹具:`fixtures/refdata/okx-test-1.blob`
@@ -2062,7 +2062,7 @@ spec: README.md
 
 - 规则:[分档快照流](README.md#分档快照流)、[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/books5/*.in`、`fixtures/okx-spot/books5/*.in`;case:`normal`、`duplicate_seqId`、`duplicate_ts`、`fewer_than_5_levels`、`zero_qty_level`、`ctval_0_01`;来源:现有采集系统 raw WAL;`duplicate_*` 为连续两条原文
 - 期望文件:同目录 `<case>.expected.jsonl`(每条一条 `L2Snapshot{origin = TopN}`,按 `feed.snapshot_part_levels` 切片后的各片)
 - 夹具:`fixtures/refdata/okx-test-1.blob`
@@ -2073,7 +2073,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/trades/*.in`、`fixtures/okx-spot/trades/*.in`;case:`taker_buy`、`taker_sell`、`ctval_0_1_eth`、`pepe_large_face_value`、`empty_tradeId`(合成);来源:现有采集系统 raw WAL
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-okx/tests/golden.rs::okx_302_golden_trades`
@@ -2082,7 +2082,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/mark-price/*.in`;case:`normal`、`bad_markPx`(合成);来源:现有采集系统 raw WAL
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-okx/tests/golden.rs::okx_303_golden_mark_price`
@@ -2091,7 +2091,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/funding-rate/*.in`;case:`interval_8h`、`interval_change_8h_to_4h`、`next_time_empty`;来源:现有采集系统 raw WAL;`interval_change_*` 待采集(方法 A:在 `okx_docs.txt` 与采集系统历史中找周期变化的合约,取变化前后各一条)
 - 期望文件:同目录 `<case>.expected.jsonl`(`Funding.interval_s` 逐条)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_304_golden_funding_rate`
@@ -2101,7 +2101,7 @@ spec: README.md
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/index-tickers/*.in`;case:`normal`、`index_without_swap_in_refdata`;来源:现有采集系统 raw WAL
 - 期望文件:同目录 `<case>.expected.jsonl`(第二个 case 期望为空)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_305_golden_index_tickers`
@@ -2110,7 +2110,7 @@ spec: README.md
 
 - 规则:[心跳与 BBO 探测](README.md#心跳与-bbo-探测)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/rest.books/*.in`、`fixtures/okx-spot/rest.books/*.in`;case:`normal`、`unknown_instrument_51001`、`empty_data`;来源:待采集(方法 C:模拟盘与实盘公共 REST 各取一条,公共接口无需 key)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-okx/tests/golden.rs::okx_306_golden_rest_books`
@@ -2119,7 +2119,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/login/*.in`;case:`ok`、`failed_60009`、`bad_timestamp_60004`;只存服务端回执(登录帧含签名,永不入库);来源:现有采集系统私有流 raw(已清洗 `connId`)
 - 期望文件:同目录 `<case>.expected.jsonl`(`login_result` 的渲染:`{"login":"Ok"}`、`{"login":"Rejected","code":60009}`)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_307_golden_login_result`
@@ -2128,7 +2128,7 @@ spec: README.md
 
 - 规则:[2. 订阅约束](README.md#2-订阅约束)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/subscribe/*.in`;case:`ack`、`unsubscribe_ack`、`error_60033_id_param`、`error_64003_fee_tier`;来源:现有采集系统 raw(`60033` 已在生产出现),`64003` 待采集(方法 C:模拟盘低等级账户订阅 `books-l2-tbt`)
 - 期望文件:同目录 `<case>.expected.jsonl`(`ControlHint::SubAck{ok, code}`)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_308_golden_subscribe_ack`
@@ -2137,7 +2137,7 @@ spec: README.md
 
 - 规则:[用户流事件表](README.md#用户流事件表)、[1. 分派](README.md#1-分派)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/notice/64008.in`(公共与私有连接各一条);来源:`exchange-doc`(官方文档示例),线上第一次出现时补真实样本
 - 期望文件:`fixtures/okx-swap/notice/64008.expected.jsonl`(公共连接 `ServerShutdown`;私有连接 0 事件)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_309_golden_notice_64008`
@@ -2146,7 +2146,7 @@ spec: README.md
 
 - 规则:[5. 心跳与会话](README.md#5-心跳与会话)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/pong/pong.in`;来源:现有采集系统 raw
 - 期望文件:`fixtures/okx-swap/pong/pong.expected.jsonl`(`ControlHint::Pong`)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_310_golden_pong`
@@ -2155,7 +2155,7 @@ spec: README.md
 
 - 规则:[结果未知码表](README.md#结果未知码表)、[4. 回报](README.md#4-回报)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/order/*.in`、`fixtures/okx-spot/order/*.in`;case:`ok`、`50001`、`50004`、`50013`、`50026`、`50011`、`50036`、`50037`、`50017`–`50022`、`50027`、`50029`、`51006`、`51008`、`51008_subcode`、`unregistered_59999`、`spot_cash_ok`;来源:模拟盘 raw(方法 C);模拟盘无法制造的码(`50001`、`50004`、`50013`、`50026`、`50017`–`50022`)用 `exchange-doc`
 - 期望文件:同目录 `<case>.expected.jsonl`(结果未知与未登记码期望 `OutcomeUnknown`,不是 `Reject`)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_311_golden_order_resp`
@@ -2165,7 +2165,7 @@ spec: README.md
 
 - 规则:[结果未知码表](README.md#结果未知码表)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/batch-orders/*.in`;case:`all_ok`、`code_1_all_failed`、`code_2_partial`、`whole_unknown_50013`;来源:模拟盘 raw(方法 C),`whole_unknown_50013` 为 `synthetic`
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-okx/tests/golden.rs::okx_312_golden_batch_orders`
@@ -2174,7 +2174,7 @@ spec: README.md
 
 - 规则:[结果未知码表](README.md#结果未知码表)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/amend-order/*.in`;case:`ok`、`reject_51008`、`unknown_50001`、`batch_partial`;来源:模拟盘 raw(方法 C)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-okx/tests/golden.rs::okx_313_golden_amend_resp`
@@ -2183,7 +2183,7 @@ spec: README.md
 
 - 规则:[结果未知码表](README.md#结果未知码表)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/cancel-order/*.in`、`fixtures/okx-spot/cancel-order/*.in`;case:`ok`、`already_filled_51400`、`unknown_50004`;来源:模拟盘 raw(方法 C:对已成交的单撤单得 `51400`)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-okx/tests/golden.rs::okx_314_golden_cancel_resp`
@@ -2192,7 +2192,7 @@ spec: README.md
 
 - 规则:[结果未知码表](README.md#结果未知码表)、[下单:WS `/private`](README.md#下单ws-private)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/batch-cancel-orders/*.in`;case:`all_ok`、`partial_51400`;来源:模拟盘 raw(方法 C)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-okx/tests/golden.rs::okx_315_golden_batch_cancel`
@@ -2201,7 +2201,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)、[累计量与费用来源](README.md#累计量与费用来源)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/rest.trade_order/*.in`、`fixtures/okx-spot/rest.trade_order/*.in`;case:`live`、`partially_filled`、`filled`、`canceled`、`not_found_51603`;来源:模拟盘 raw(方法 C)
 - 期望文件:同目录 `<case>.expected.jsonl`(`QueryResult` 带 `cum_filled` 与 `avg_px`;`51603` 期望 NotFound)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_316_golden_rest_query`
@@ -2210,7 +2210,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/rest.orders_pending/*.in`;case:`mixed_own_and_foreign`、`empty`;来源:模拟盘 raw(方法 C:挂两笔本系统单与一笔网页单)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-okx/tests/golden.rs::okx_317_golden_orders_pending`
@@ -2219,7 +2219,7 @@ spec: README.md
 
 - 规则:[VenueCaps 默认值](README.md#venuecaps-默认值)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/rest.cancel_all_after/*.in`;case:`ok`、`demo_unavailable_50038`;来源:待采集(方法 C:模拟盘调用一次;开发备忘第 5 条)
 - 期望文件:同目录 `<case>.expected.jsonl`(0 事件;`raw_code`)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_318_golden_caa`
@@ -2228,7 +2228,7 @@ spec: README.md
 
 - 规则:[4. 回报](README.md#4-回报)、[累计量与费用来源](README.md#累计量与费用来源)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/orders/*.in`、`fixtures/okx-spot/orders/*.in`;case:`live`、`post_only_live`、`partially_filled`、`filled`、`canceled`、`mmp_canceled`、`ioc_expired`、`fok_expired`、`amend_ok`、`amend_failed`、`amend_auto_cancel`、`rebate_positive_fillFee`、`spot_fee_in_base`、`spot_fee_feeType_1`;来源:模拟盘 raw(方法 C)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-okx/tests/golden.rs::okx_319_golden_orders_states`
@@ -2237,7 +2237,7 @@ spec: README.md
 
 - 规则:[外部成交识别](README.md#外部成交识别)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/orders/*.in`;case:`full_liquidation`、`partial_liquidation`、`adl`、`delivery`、`liquidation_empty_tradeId`、`same_liquidation_twice`;来源:强平待采集(方法 C:模拟盘高杠杆小仓制造强平),ADL 与交割按官方文档构造(`source = "synthetic"`,`meta.toml` 标"合成",正式实盘出现后补真实样本)
 - 期望文件:同目录 `<case>.expected.jsonl`(`ExternalFill` 带 `cause`、`trade_id`/`fill_seq`)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_320_golden_liquidation_adl`
@@ -2247,7 +2247,7 @@ spec: README.md
 
 - 规则:[外部成交识别](README.md#外部成交识别)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/orders/web_order_fill.in`、`fixtures/okx-spot/orders/web_order_fill.in`;来源:待采集(方法 C:模拟盘网页端下单成交)
 - 期望文件:同目录 `web_order_fill.expected.jsonl`(`ExternalFill{cause: Unknown}`)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_321_golden_web_order`
@@ -2257,7 +2257,7 @@ spec: README.md
 
 - 规则:[下单:WS `/private`](README.md#下单ws-private)、[累计量与费用来源](README.md#累计量与费用来源)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/orders/qty_*.in` 与 `fixtures/okx-swap/encode/qty_*.in`;case:`qty_btc_ctval_0_01`、`qty_eth_ctval_0_1`、`qty_pepe_ctval_1e7`;每个 case 一条下单 `GwCmd`(编码)与一条成交推送(解码);来源:模拟盘 raw(方法 C)
 - 期望文件:同目录 `<case>.expected.jsonl`(下单帧 `sz` 为张数;成交事件 `qty`/`cum_filled` 为资产单位)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_322_golden_qty_conversion`
@@ -2266,7 +2266,7 @@ spec: README.md
 
 - 规则:[保证金数据换算](README.md#保证金数据换算)、[用户流事件表](README.md#用户流事件表)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/positions/*.in`;case:`two_positions`、`liqPx_empty`、`adl_levels_0_to_5`、`isolated_position`;来源:模拟盘 raw(方法 C;开发备忘第 19 条同时统计体积)
 - 期望文件:同目录 `<case>.expected.jsonl`(`PositionReport` + `MarginReport`)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_323_golden_positions`
@@ -2275,7 +2275,7 @@ spec: README.md
 
 - 规则:[保证金数据换算](README.md#保证金数据换算)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/account/acctlv2_*.in`、`fixtures/okx-spot/account/*.in`;case:`acctlv2_normal`、`acctlv2_no_cross_position`、`acctlv2_20_currencies`;来源:模拟盘 raw(方法 C)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-okx/tests/golden.rs::okx_324_golden_account_lv2`
@@ -2284,7 +2284,7 @@ spec: README.md
 
 - 规则:[保证金数据换算](README.md#保证金数据换算)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/account/acctlv3_*.in`;case:`acctlv3_normal`;来源:待采集(方法 C:模拟盘切换为多币种保证金模式后抓一条)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-okx/tests/golden.rs::okx_325_golden_account_lv3`
@@ -2293,7 +2293,7 @@ spec: README.md
 
 - 规则:[用户流事件表](README.md#用户流事件表)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/balance_and_position/funding_*.in`;case:`funding_fee_after_account`、`funding_fee_same_push_twice`、`funding_fee_two_disc`、`funding_fee_no_baseline`;来源:待采集(方法 C:模拟盘持仓跨过一次结算;模拟盘不结算时用 `exchange-doc` 构造并在 `meta.toml` 标"合成",方法 D 补核)
 - 期望文件:同目录 `<case>.expected.jsonl`(`FundingSettle{inst: 0}` 与去重结果)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_326_golden_funding_fee`
@@ -2303,7 +2303,7 @@ spec: README.md
 
 - 规则:[用户流事件表](README.md#用户流事件表)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/balance_and_position/*.in`;case:`liquidation`、`adl`、`filled`、`snapshot`;来源:`filled`、`snapshot` 取模拟盘 raw(方法 C);`liquidation`、`adl` 与 OKX-320 同法取得
 - 期望文件:同目录 `<case>.expected.jsonl`(0 事件,`hint` 渲染为 `{"hint":"MarginNow"}`)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_327_golden_balance_and_position_other`
@@ -2312,7 +2312,7 @@ spec: README.md
 
 - 规则:[用户流事件表](README.md#用户流事件表)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/liquidation-warning/*.in`;case:`warning`;来源:现有采集系统私有流 raw(该频道已在生产订阅)
 - 期望文件:同目录 `<case>.expected.jsonl`(`{"hint":"MarginNow"}`)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_328_golden_liquidation_warning`
@@ -2321,7 +2321,7 @@ spec: README.md
 
 - 规则:[用户流事件表](README.md#用户流事件表)、[VenueCaps 默认值](README.md#venuecaps-默认值)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/channel-conn-count/*.in`、`fixtures/okx-spot/channel-conn-count/*.in`;case:`count`、`count_error`;来源:待采集(方法 C:同一账户对 `orders` 开多条连接)
 - 期望文件:同目录 `<case>.expected.jsonl`(`{"ignored":"channel-conn-count"}` 等)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_329_golden_ignorable`
@@ -2331,7 +2331,7 @@ spec: README.md
 
 - 规则:[用户流事件表](README.md#用户流事件表)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/unknown/*.in`;case:`unknown_event_name`、`unknown_private_channel`;来源:`synthetic`
 - 期望文件:同目录 `<case>.expected.jsonl`(计数,不是错误)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_330_golden_unknown_event`
@@ -2340,7 +2340,7 @@ spec: README.md
 
 - 规则:[账户配置核验](README.md#账户配置核验)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/rest.account_config/*.in`、`fixtures/okx-spot/rest.account_config/*.in`;case:`acctlv_1`、`acctlv_2`、`acctlv_3`、`acctlv_4`、`posmode_net`、`posmode_long_short`、`feetype_0`、`feetype_1`、`perm_with_withdraw`、`perm_without_trade`、`autoloan_true`、`spot_borrow_on`、`spot_borrow_off`、`spot_borrow_missing`、`uid_missing_demo`;来源:模拟盘 raw(方法 C),无法在模拟盘切换的组合用 `synthetic`(由真实响应改字段,`meta.toml` 写明)
 - 期望文件:同目录 `<case>.expected.jsonl`(完整 Config 序列跑完后的 `AccountConfigReport`)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_331_golden_account_config`
@@ -2350,7 +2350,7 @@ spec: README.md
 
 - 规则:[账户配置核验](README.md#账户配置核验)、[保证金数据换算](README.md#保证金数据换算)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/rest.account_positions/*.in`;case:`all_cross`、`one_isolated`、`foreign_isolated`;来源:模拟盘 raw(方法 C)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-okx/tests/golden.rs::okx_332_golden_rest_positions`
@@ -2359,7 +2359,7 @@ spec: README.md
 
 - 规则:[账户配置核验](README.md#账户配置核验)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/rest.leverage_info/*.in`;case:`three_insts`、`two_batches_second_failed`;来源:模拟盘 raw(方法 C),失败批为 `synthetic`
 - 期望文件:同目录 `<case>.expected.jsonl`(`LeverageItem` 列表与 `UNREADABLE`)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_333_golden_leverage_info`
@@ -2368,7 +2368,7 @@ spec: README.md
 
 - 规则:[保证金数据换算](README.md#保证金数据换算)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/rest.account_balance/*.in`;case:`acctlv2`、`acctlv3`;来源:模拟盘 raw(方法 C)
 - 期望文件:同目录 `<case>.expected.jsonl`(`MarginReport{source = Poll}`)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_334_golden_rest_balance`
@@ -2377,7 +2377,7 @@ spec: README.md
 
 - 规则:[3. 订单帧模板](README.md#3-订单帧模板)、[下单:WS `/private`](README.md#下单ws-private)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/okx-swap/encode/*.in`、`fixtures/okx-spot/encode/*.in`(每个 case 是一条或多条 `GwCmd` + `TargetRef` + `WallClock` 的规范 JSON);case:`place_limit`、`place_ioc_reduce_only`、`place_post_only`、`place_fok`、`amend`、`cancel`、`batch_place_20`、`batch_cancel_20`;来源:`synthetic`(帧由人按官方文档逐字段核对)
 - 期望文件:同目录 `<case>.expected.jsonl`(每条命令一行 `{"frame":"<帧文本>"}`,与 `encode`/`encode_batch` 的输出逐字节相等)
 - 实现:`crates/venue-okx/tests/golden.rs::okx_335_golden_encode`
@@ -2431,7 +2431,7 @@ spec: README.md
 
 - 规则:[hft-venue-proto 契约 5](../hft-venue-proto/README.md#实现方必须遵守的契约)、[1. 分派](README.md#1-分派)
 - 级别:fuzz
-- 里程碑:M3
+- 里程碑:M9
 - 门槛:③
 - 目标:`okx-swap`:按输入首字节分派到 `classify → peek → decode_md`、`decode_bbo_snapshot`、`classify_report → decode_report`(下单响应、私有推送、REST 响应)、`acct_decode`(Config 与 Margin 各步),均以 `OkxSwap` 与 `RD-OKX` 调用
 - 语料:`cargo xtask fixtures corpus okx-swap` 由 `fixtures/okx-swap/**/*.in` 生成 + 变异;`fixtures/okx-swap/regressions/` 全部
@@ -2442,7 +2442,7 @@ spec: README.md
 
 - 规则:[hft-venue-proto 契约 5](../hft-venue-proto/README.md#实现方必须遵守的契约)、[1. 分派](README.md#1-分派)
 - 级别:fuzz
-- 里程碑:M3
+- 里程碑:M9
 - 门槛:③
 - 目标:`okx-spot`:同 OKX-400,以 `OkxSpot` 调用
 - 语料:`fixtures/okx-spot/**/*.in` 生成 + 变异;`fixtures/okx-spot/regressions/` 全部
@@ -2453,7 +2453,7 @@ spec: README.md
 
 - 规则:[3. 订单帧模板](README.md#3-订单帧模板)
 - 级别:fuzz
-- 里程碑:M3
+- 里程碑:M9
 - 目标:`fuzz_okx_encode_roundtrip`:任意字节构造 `GwCmd`(inst 取 `RD-OKX` 中的 inst,价量取任意 raw),`encode`/`encode_batch` 成功时用 `sonic-rs` 解析帧,`sz`、`px`、`clOrdId`、`instIdCode`、`expTime` 解析回的值与输入一致;失败时只能是 `EncodeErr`
 - 语料:OKX-335 的输入 + 变异
 - 判定:零 panic、零单输入超时(口径见 [testing §3.3](../../docs/testing.md#33-fuzz));往返不一致按崩溃处理
@@ -2463,7 +2463,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M9
 - 基准名:`bench_classify_okx`
 - 实现:`crates/venue-okx/benches/decode.rs::okx_500_classify`
 
@@ -2471,7 +2471,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M9
 - 基准名:`bench_decode_okx_bbo`
 - 实现:`crates/venue-okx/benches/decode.rs::okx_501_decode_bbo`
 
@@ -2479,7 +2479,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M9
 - 基准名:`bench_decode_okx_books5`
 - 实现:`crates/venue-okx/benches/decode.rs::okx_502_decode_books5`
 
@@ -2487,7 +2487,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M9
 - 基准名:`bench_encode_okx_order`
 - 实现:`crates/venue-okx/benches/encode.rs::okx_503_encode_order`
 
@@ -2495,7 +2495,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M9
 - 基准名:`bench_decode_okx_orders`
 - 实现:`crates/venue-okx/benches/reports.rs::okx_504_decode_orders`
 
@@ -2503,7 +2503,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M9
 - 基准名:`bench_decode_okx_account`
 - 实现:`crates/venue-okx/benches/reports.rs::okx_505_decode_account`
 
@@ -2511,7 +2511,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M9
 - 基准名:`bench_decode_okx_positions`
 - 实现:`crates/venue-okx/benches/reports.rs::okx_506_decode_positions`
 
