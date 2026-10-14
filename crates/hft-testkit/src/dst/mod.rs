@@ -245,3 +245,33 @@ impl DstOutcome {
         }
     }
 }
+
+/// Generic DST short set of one strategy kind (README "5. 解耦门槛夹具" A.2): seeds `0..seeds`, each
+/// in the suite chosen from the seed ([`scenario::suite_for_seed`] over
+/// [`crate::scenarios::suites`]), with both W1 instances bound to the kind named `name` of `S`
+/// (default parameters) and its real Model driven by the advisor (`WorldSpec.model_advice`). The
+/// engine is the real sequencer, [`SeqSut<S>`]. Returns one repro line per failing seed (empty = all
+/// passed); `S` without a kind named `name` is one failure.
+#[cfg(feature = "seq")]
+pub fn run_short_set<S: hft_strategy_sdk::StrategySet>(name: &str, seeds: u32) -> Vec<String> {
+    let Some(kind) = S::kinds().iter().find(|d| d.name == name).map(|d| d.kind_id) else {
+        return vec![format!("{name}: no strategy kind of that name in the set")];
+    };
+    let suites = crate::scenarios::suites();
+    let mut fails = Vec::new();
+    for seed in 0..u64::from(seeds) {
+        let Some(suite) = scenario::suite_for_seed(&suites, seed) else {
+            return vec!["no DST suites".to_owned()];
+        };
+        let mut cfg = suite.config(seed);
+        for b in &mut cfg.world.strategies {
+            b.kind_id = kind;
+            b.params.clear();
+        }
+        cfg.world.model_advice = true;
+        if let DstOutcome::Fail(f) = run::<SeqSut<S>>(&cfg) {
+            fails.push(format!("{}: {}", report::repro_line(&f), f.message));
+        }
+    }
+    fails
+}

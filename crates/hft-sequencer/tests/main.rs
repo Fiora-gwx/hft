@@ -24,6 +24,7 @@ mod funding;
 mod hash;
 mod intents;
 mod keyframe;
+mod lint;
 mod liveness;
 mod mem_journal;
 mod mismatch;
