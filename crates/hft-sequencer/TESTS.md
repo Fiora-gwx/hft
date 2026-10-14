@@ -4523,7 +4523,7 @@ spec: README.md
 - 规则:[确定性规则](README.md#确定性规则)
 - 级别:table
 - 里程碑:M2
-- 前置:本 crate 的 `clippy.toml` 与 `src/`;每行人为加入一处违规后跑 `cargo clippy -p hft-sequencer`
+- 前置:本 crate 的 `clippy.toml` 与 `src/`;受控夹具逐行注入违规,串行运行 `cargo clippy` 使用的实际 `clippy-driver`,断言退出状态与对应诊断;正例允许经 IO 接口读 TSC
 - 实现:`crates/hft-sequencer/tests/determinism.rs::seq_310_determinism_lints`
 
 | 行 | 加入的违规 | 期望 |
@@ -4534,7 +4534,7 @@ spec: README.md
 | SEQ-310.4 | `thread_local!` | 失败 |
 | SEQ-310.5 | `static mut` | 失败 |
 | SEQ-310.6 | `rand::thread_rng()` | 失败 |
-| SEQ-310.7 | 决策路径模块(`src/intents.rs`、`src/dispatch.rs`)出现 `f64` | 失败 |
+| SEQ-310.7 | 决策路径模块(`src/intents.rs`、`src/process.rs`)出现 `f64` | 失败 |
 | SEQ-310.8 | `src/driver/live/` 内读 TSC | 通过(允许位置) |
 
 ### SEQ-311 同一 journal 两次、两台主机上验证结果相同
