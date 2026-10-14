@@ -212,13 +212,18 @@ fn tk_114_round_notes_replay_across_storage_restarts() {
                 closed += 1;
                 let input = last_input.unwrap();
                 // These seeds close rounds through OMS; reconciliation must not inherit Notes.
+                // The round closes on the report that books the last increment or fee: a fill
+                // report, any report carrying a fill (a QueryResult of an Unknown slot), FeeOnly.
                 let event = input
                     .try_read::<OrderEvent>()
                     .expect("RoundClosed belongs to OrderEvent");
-                assert!(matches!(
-                    event.what,
-                    OrderEventKind::Fill | OrderEventKind::PartialFill | OrderEventKind::FeeOnly
-                ));
+                assert!(
+                    matches!(
+                        event.what,
+                        OrderEventKind::Fill | OrderEventKind::PartialFill | OrderEventKind::FeeOnly
+                    ) || event.cum_filled.0 > 0,
+                    "seed={seed:#x}: {event:?}"
+                );
             }
         }
         assert!(closed > 0, "seed={seed:#x}: must actually close a round");
@@ -237,7 +242,7 @@ fn tk_120_drain_restart_conformance_keeps_recovery_gates() {
         .into_iter()
         .find(|s| s.name == "core")
         .unwrap();
-    for (seed, rejected_after_restart) in [(7, 0), (28, 2), (34, 0)] {
+    for (seed, rejected_after_restart) in [(7, 0), (28, 3), (34, 0)] {
         let mut c = suite.config(seed);
         c.steps = 2_000;
         c.rerun = RerunPolicy::Always;

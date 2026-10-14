@@ -1486,7 +1486,7 @@ spec: README.md
 - 里程碑:M2
 - 输入:storage 套件,固定种子 0x00cc7b25194f1b2c、0x00cc7b25194f1b3a、0x00cc7b25194f1b4b、0x00cc7b25194f1b4d、0x00cc7b25194f1bc8、0x00cc7b25194f1be0
 - 步骤:各运行完整 10,000 步,使用套件原有故障率和全部不变量;逐条检查 RoundClosed 的所属 Input
-- 期望:六行均实际结束轮次,注记属于 Fill、PartialFill 或 FeeOnly,不遗留到对账;含定期和结束 INV-6 的全部检查通过;相同种子保留在 storage 回归集
+- 期望:六行均实际结束轮次,注记属于入账最后一笔增量或费用的回报(Fill、PartialFill、带成交的 QueryResult 等,或 FeeOnly),不遗留到对账;含定期和结束 INV-6 的全部检查通过;相同种子保留在 storage 回归集
 - 实现:`crates/hft-testkit/tests/journal_config.rs::tk_114_round_notes_replay_across_storage_restarts`
 
 ### TK-115 每条快照在其完成边界检查 INV-6
@@ -1557,7 +1557,7 @@ spec: README.md
 - 故障:套件原有故障计划,实际触发 Drain 和自动重启
 - 种子:固定种子 7、28、34,每行 2000 步
 - 断言:每行实际完成至少一次 Drain 和对应恢复;Drain 快照含 Draining,其他 cap 非空,Recovery 快照不含旧 Draining,其余 cap 原样保留,全部账户仍有 Recovery 且闸门未放行;每条快照通过 INV-6,检查数与 journal 快照数相同;全部不变量通过,强制复跑的 Output 和非空 HashTrail 逐字节一致
-- 恢复后 New 意图:种子 28 的两条开仓决策均以 CloseOnly 拒绝且没有分配槽,其余两行没有开仓决策;默认外来成交可触发已分配槽的 risk_reducing 防御单,方向和数量仍经过完整不变量检查;订单查询照常处理
+- 恢复后 New 意图:种子 28 的三条开仓决策均以 CloseOnly 拒绝且没有分配槽,其余两行没有开仓决策;默认外来成交可触发已分配槽的 risk_reducing 防御单,方向和数量仍经过完整不变量检查;订单查询照常处理
 - 实现:`crates/hft-testkit/tests/journal_config.rs::tk_120_drain_restart_conformance_keeps_recovery_gates`
 
 ### TK-121 对冲 place 失败必须有同一链接实例的原始证据

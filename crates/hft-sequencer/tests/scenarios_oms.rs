@@ -54,7 +54,7 @@ fn report(h: &mut H, d: &OrderDecision, what: OrderEventKind, cum: Qty, fee: Qty
 
 fn query_result(h: &mut H, d: &OrderDecision, status: u8, cum: Qty, avg: Px) {
     let mut ev = order_event(d, OrderEventKind::QueryResult, h.epoch());
-    ev.detail = status.into();
+    ev.detail = status;
     ev.cum_filled = cum;
     ev.avg_px = avg;
     let r = h.rep_ring(d.account);

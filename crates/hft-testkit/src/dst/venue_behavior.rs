@@ -1051,7 +1051,9 @@ impl<M: Matcher> MockVenue<M> {
             cum_filled: Qty(0),
             fee: Qty(0),
             fee_asset: AssetId(0),
-            epoch: 0,
+            // A `Place` carries the engine epoch in `arg` (the matcher's reports are stamped the
+            // same way); an epoch-0 reply would never match its slot and be dropped as stale.
+            epoch: if cmd.op == GwOp::Place { cmd.arg as u16 } else { 0 },
             reject_code: 0,
             exch_order_id: 0,
             ex_ts_ns: now as i64,

@@ -1969,7 +1969,7 @@ mod seq_136 {
                 h.set_target_s2(t);
             }
             4 => {
-                let (i, side) = if x % 2 == 0 {
+                let (i, side) = if x.is_multiple_of(2) {
                     (A1, Side::Sell)
                 } else {
                     (B1, Side::Buy)
@@ -1988,11 +1988,11 @@ mod seq_136 {
                 h.run();
             }
             5 => {
-                let liq = if x % 2 == 0 { "52000" } else { "80000" };
+                let liq = if x.is_multiple_of(2) { "52000" } else { "80000" };
                 margin_item(h, liq);
             }
             6 => {
-                let c = if x % 2 == 0 {
+                let c = if x.is_multiple_of(2) {
                     ControlCmd::Kill {
                         scope: scope(hft_types::StrategyId(0), AC1, GroupId(0)),
                         level: KillLevel::Account,

@@ -531,7 +531,7 @@ fn fp_6_1_conn_down_gates_until_up() {
     let m = h.mark();
     let t_fill = h.now();
     h.fill(&first, first.qty, first.qty, first.px);
-    assert!(notes_of(&h, m, notes::HEDGE_PX_STALE).len() >= 1);
+    assert!(!notes_of(&h, m, notes::HEDGE_PX_STALE).is_empty());
     run_to(&mut h, t_fill + 2_950 * MS);
     assert_eq!(
         last_link(&h, AC1).map(|l| (l.state, l.retries)),
@@ -992,7 +992,7 @@ fn unknown_resolved(
 
 fn query_result(h: &mut H, d: &OrderDecision, status: u8) {
     let mut ev = order_event(d, OrderEventKind::QueryResult, h.epoch());
-    ev.detail = status.into();
+    ev.detail = status;
     let r = h.rep_ring(d.account);
     h.push(r, &ev);
     h.run();

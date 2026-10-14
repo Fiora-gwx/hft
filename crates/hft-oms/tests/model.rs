@@ -394,20 +394,18 @@ pub fn send_report_table(s: &SendSlot, op: GwOp, st: SendStatus) -> SendEffect {
                 e.needs_rest = true;
             }
         }
-        GwOp::CancelAll => {
-            if !written {
-                let hit = s.state == OrderState::PendingCancel && s.sflags & SlotFlags::CANCEL_SENT != 0;
-                if wr_err {
-                    if hit {
-                        e.flags |= SlotFlags::VERIFY;
-                        e.query = true;
-                    }
-                } else {
-                    if hit {
-                        e.flags &= !SlotFlags::CANCEL_SENT;
-                    }
-                    e.cancel_not_sent = true;
+        GwOp::CancelAll if !written => {
+            let hit = s.state == OrderState::PendingCancel && s.sflags & SlotFlags::CANCEL_SENT != 0;
+            if wr_err {
+                if hit {
+                    e.flags |= SlotFlags::VERIFY;
+                    e.query = true;
                 }
+            } else {
+                if hit {
+                    e.flags &= !SlotFlags::CANCEL_SENT;
+                }
+                e.cancel_not_sent = true;
             }
         }
         _ => {}
