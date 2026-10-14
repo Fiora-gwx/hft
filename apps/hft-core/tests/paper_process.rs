@@ -98,7 +98,7 @@ fn core_048_sim_instance_boots_without_keys() {
         assert!(
             Instant::now() < deadline,
             "placed={placed} ack={ack}; {}",
-            std::fs::read_to_string(d.path().join("stderr")).unwrap()
+            diagnostic(&path, d.path())
         );
         assert!(process.0.try_wait().unwrap().is_none());
         match reader.poll() {

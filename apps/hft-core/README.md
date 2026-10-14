@@ -871,7 +871,7 @@ hft-core 自身不在 tick-to-trade 路径上增加代码;路径上的分段预�
 ## 测试与验收
 
 用例与验收见 [TESTS.md](TESTS.md)。
-进程级离线冒烟见 `tests/paper_process.rs`；可移植配置与控制环测试见 `tests/config.rs`。运行入口与当前可执行子集见 [config](config/README.md)。
+进程级离线冒烟见 `tests/paper_process.rs`；可移植配置与控制环测试见 `tests/config.rs`。运行入口与当前可执行子集见 [config](config/README.md)。模拟网关在取出订单指令时生成 `SendReport{Written}`，并为纯模拟器的订单回报补当前 epoch，使 OMS 按 `(slot, gen, epoch)` 匹配。
 
 ## 依赖
 

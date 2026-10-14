@@ -131,7 +131,7 @@ fn core_012_control_adapter_reaches_live_sequencer() {
         runtime::{byte_ring, ring},
     };
     use hft_sequencer::{BootSource, MemJournal, Sequencer, StepOutcome};
-    use zerocopy::FromBytes;
+    use zerocopy::{FromBytes, FromZeros, TryFromBytes};
     let d = tempfile::tempdir().unwrap();
     let path = support::write(d.path(), &d.path().join("hot"), None);
     let l = hft_core::config::load(&path, true).unwrap();
@@ -146,7 +146,7 @@ fn core_012_control_adapter_reaches_live_sequencer() {
     let (ctl_tx, ctl_rx) = byte_ring(1048576).unwrap();
     let (mut hk_tx, hk_rx) = ring(1024).unwrap();
     let (mut sim_tx, sim_rx) = byte_ring(1048576).unwrap();
-    let (sim_orders, _sim_rx) = ring(1024).unwrap();
+    let (sim_orders, mut sim_rx_orders) = ring(1024).unwrap();
     let (parsed_tx, parsed_rx) = Box::leak(Box::new(hft_rt::Mailbox::new())).split();
     let (retired_tx, retired_rx) = Box::leak(Box::new(hft_rt::Mailbox::new())).split();
     let (bbo_tx, bbo) = ring(1024).unwrap();
@@ -192,7 +192,24 @@ fn core_012_control_adapter_reaches_live_sequencer() {
         reports: 0,
     };
     let mut ctl = hft_ctl::Core::<hft_core::Strategies, _>::new(
-        hft_ctl::GatewayConfig::new(l.cfg.paths.ctl_socket, l.principals, 256, 1024, 4),
+        hft_ctl::GatewayConfig::new(
+            l.cfg.paths.ctl_socket,
+            hft_ctl::PrincipalTable::from_parts(
+                vec![(
+                    1,
+                    hft_ctl::UidKind::Cli {
+                        login: "paper".into(),
+                    },
+                )],
+                vec![(
+                    "cli:paper".into(),
+                    hft_ctl_proto::RoleSet::from_roles(&[hft_ctl_proto::Role::Admin]),
+                )],
+            ),
+            256,
+            1024,
+            4,
+        ),
         l.rd,
         io::AtomicCtl(ctl_tx),
         parsed_tx,
@@ -213,7 +230,7 @@ fn core_012_control_adapter_reaches_live_sequencer() {
     .unwrap();
     seq.step();
     exchange.drain_due(hft_rt::tsc_now(), |r| {
-        hft_core::paper::reply_parts(&paper_rd, &r.msg, r.bulk, |kind, parts| {
+        hft_core::paper::reply_parts(&paper_rd, 1, &r.msg, r.bulk, |kind, parts| {
             assert!(io::write_record(&mut sim_tx, kind, parts));
         });
     });
@@ -228,6 +245,88 @@ fn core_012_control_adapter_reaches_live_sequencer() {
     assert_eq!(
         seq.engine().risk.mode.gate_bits(hft_types::AccountId(1)),
         hft_risk::mode::gate_bits::ALL
+    );
+    let request = hft_ctl_proto::CmdRequest {
+        v: hft_ctl_proto::PROTO_VERSION,
+        cmd_id: hft_ctl_proto::Uuid::from_bytes([1; 16]),
+        issuer: "cli:paper".into(),
+        issued_at_ns: 0,
+        expires_at_ns: 10_000_000_000,
+        account: hft_ctl_proto::AccountSel::Name("paper".into()),
+        preview: false,
+        confirmed: true,
+        expect_state_version: Some(seq.engine().risk.mode.ctl_state_version()),
+        view_account: None,
+        chat_type: None,
+        cmd: hft_ctl_proto::CmdBody::SetMode {
+            strategy: Some("paper-probe".into()),
+            group: None,
+            account: None,
+            mode: hft_types::RunMode::Live,
+        },
+    };
+    let reply = ctl.on_request(1, 1, &request.to_json(), hft_rt::tsc_now());
+    assert!(matches!(reply, hft_ctl::Reply::Wait), "{reply:?}");
+    let mut cursor = 0;
+    let mut sent = false;
+    let mut acked = false;
+    let mut canceled = false;
+    // Drive the same registry strategy, live SPSC adapter and pure exchange without OS sockets.
+    for _ in 0..4000 {
+        feed.poll(hft_rt::tsc_now()).unwrap();
+        assert!(!matches!(seq.step(), StepOutcome::Fatal(_)));
+        for record in seq.driver().io.journal.records().skip(cursor) {
+            use hft_event::EventKind as K;
+            cursor += 1;
+            let hdr = hft_event::RecordHeader {
+                seq: record.seq,
+                tsc: record.tsc,
+                ..hft_event::RecordHeader::new_zeroed()
+            };
+            match record.kind {
+                K::BBO => {
+                    let b = hft_event::Bbo::read_from_bytes(&record.body).unwrap();
+                    exchange.on_record(&hdr, hft_sim::SimInput::Market(hft_sim::MarketEventRef::Bbo(&b)));
+                }
+                K::ORDER_DECISION => {
+                    let d = hft_event::OrderDecision::try_read_from_bytes(&record.body).unwrap();
+                    if d.reject == 0 && record.flags.0 & hft_event::RecordFlags::SHADOW.0 == 0 {
+                        let cmd = sim_rx_orders
+                            .try_pop()
+                            .expect("decision must publish its command");
+                        assert_eq!(cmd.decision_seq, record.seq);
+                        let report = hft_core::paper::written(&cmd, d.venue, hft_rt::tsc_now()).unwrap();
+                        io::rep_parts(&hft_event::RepMsg::SendReport(report), &[], |kind, parts| {
+                            assert!(io::write_record(&mut sim_tx, kind, parts));
+                        });
+                        exchange.on_command(&cmd, cmd.decided_tsc);
+                    }
+                }
+                K::SEND_REPORT => sent = true,
+                K::ORDER_EVENT => {
+                    let e = hft_event::OrderEvent::try_read_from_bytes(&record.body).unwrap();
+                    acked |= e.what == hft_event::OrderEventKind::Ack;
+                    canceled |= e.what == hft_event::OrderEventKind::CancelAck;
+                    assert_eq!(e.epoch, 1);
+                }
+                _ => {}
+            }
+        }
+        let now = hft_rt::tsc_now();
+        exchange.advance(now);
+        exchange.drain_due(now, |r| {
+            hft_core::paper::reply_parts(&paper_rd, 1, &r.msg, r.bulk, |kind, parts| {
+                assert!(io::write_record(&mut sim_tx, kind, parts));
+            });
+        });
+        if sent && acked && canceled {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(
+        sent && acked && canceled,
+        "sent={sent}, acked={acked}, canceled={canceled}"
     );
     assert!(ctl.on_internal(
         hft_ctl::InternalCmd::Drain { cancel_resting: true },

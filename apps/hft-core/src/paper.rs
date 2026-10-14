@@ -117,8 +117,8 @@ pub struct Gateway {
     rd: &'static RefData,
     seen: u64,
     event_tsc: u64,
-    awaiting: Option<u64>,
-    pending_order: Option<GwCmd>,
+    awaiting: Option<(u64, VenueId)>,
+    epoch: u16,
     pending: VecDeque<(EventKind, Vec<u8>)>,
 }
 impl std::fmt::Debug for Gateway {
@@ -135,6 +135,7 @@ impl Gateway {
         orders: Consumer<GwCmd>,
         replies: ByteProducer,
         rd: &'static RefData,
+        epoch: u32,
     ) -> Self {
         Self {
             exchange,
@@ -145,7 +146,7 @@ impl Gateway {
             seen: 0,
             event_tsc: 0,
             awaiting: None,
-            pending_order: None,
+            epoch: (epoch & 0x7fff) as u16,
             pending: VecDeque::with_capacity(hft_sim::PENDING_REPLY_CAP),
         }
     }
@@ -162,8 +163,8 @@ impl Gateway {
         // An accepted decision is a barrier: publication precedes the out-ring push.
         // Never let later market data overtake a command still being handed off.
         for _ in 0..512 {
-            if let Some(seq) = self.awaiting {
-                let Some(cmd) = self.pending_order.take().or_else(|| self.orders.try_pop()) else {
+            if let Some((seq, venue)) = self.awaiting {
+                let Some(cmd) = self.orders.try_pop() else {
                     break;
                 };
                 if cmd.decision_seq != 0 && cmd.decision_seq != seq {
@@ -172,6 +173,11 @@ impl Gateway {
                         "out-sim and journal decision sequence differ",
                         4,
                     ));
+                }
+                if let Some(report) = written(&cmd, venue, now) {
+                    io::rep_parts(&RepMsg::SendReport(report), &[], |kind, parts| {
+                        self.pending.push_back((kind, parts.concat()));
+                    });
                 }
                 self.exchange.on_command(&cmd, cmd.decided_tsc);
                 if cmd.decision_seq == seq {
@@ -215,7 +221,7 @@ impl Gateway {
                                 && d.reject == 0
                                 && r.hdr.flags & RecordFlags::SHADOW.0 == 0
                             {
-                                self.awaiting = Some(r.hdr.seq);
+                                self.awaiting = Some((r.hdr.seq, d.venue));
                             }
                         }
                         _ => {
@@ -235,7 +241,7 @@ impl Gateway {
             self.exchange.advance(due);
         }
         self.exchange.drain_due(due, |r| {
-            reply_parts(self.rd, &r.msg, r.bulk, |kind, parts| {
+            reply_parts(self.rd, self.epoch, &r.msg, r.bulk, |kind, parts| {
                 self.pending.push_back((kind, parts.concat()));
             });
         });
@@ -247,7 +253,13 @@ impl Gateway {
 }
 
 /// Expand SimExchange's account-wide connection fact to its configured venue scope.
-pub fn reply_parts(rd: &RefData, msg: &RepMsg, bulk: &[u8], mut emit: impl FnMut(EventKind, &[&[u8]])) {
+pub fn reply_parts(
+    rd: &RefData,
+    epoch: u16,
+    msg: &RepMsg,
+    bulk: &[u8],
+    mut emit: impl FnMut(EventKind, &[&[u8]]),
+) {
     if let RepMsg::ConnState(c) = msg
         && c.venue.0 == 0
         && c.account.0 != 0
@@ -260,7 +272,40 @@ pub fn reply_parts(rd: &RefData, msg: &RepMsg, bulk: &[u8], mut emit: impl FnMut
                 io::rep_parts(&RepMsg::ConnState(state), &[], &mut emit);
             }
         }
+    } else if let RepMsg::OrderEvent(e) = msg {
+        // This adapter only boots a fresh simulator; recovery is rejected at startup.
+        // The pure simulator has no engine epoch, while OMS matches (slot, gen, epoch).
+        let mut event = *e;
+        event.epoch = epoch;
+        io::rep_parts(&RepMsg::OrderEvent(event), bulk, emit);
     } else {
         io::rep_parts(msg, bulk, emit);
     }
+}
+
+/// Task-layer transport acknowledgement; matching/exchange evidence comes later from SimExchange.
+pub fn written(cmd: &GwCmd, venue: VenueId, now: Tsc) -> Option<SendReport> {
+    use hft_types::{ConnId, SlotId};
+    let (slot, r#gen, target_slot, target_gen) = match cmd.op {
+        GwOp::Place => (cmd.slot, cmd.r#gen, SlotId(0), 0),
+        GwOp::Cancel | GwOp::Amend | GwOp::Query => (cmd.target_slot, cmd.r#gen, cmd.target_slot, cmd.r#gen),
+        GwOp::CancelAll => (SlotId(0), 0, SlotId(0), 0),
+        _ => return None,
+    };
+    Some(SendReport {
+        decision_seq: cmd.decision_seq,
+        sent_tsc: now,
+        slot,
+        r#gen,
+        target_slot,
+        target_gen,
+        venue,
+        account: cmd.account,
+        conn: ConnId(0),
+        status: SendStatus::Written,
+        op: cmd.op,
+        _pad: [0; 3],
+        os_errno: 0,
+        _pad2: 0,
+    })
 }

@@ -416,6 +416,7 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
             sim_out,
             sim_tx,
             rd,
+            epoch,
         );
         workers.spawn(policy(c, "sim-gw")?, move |stop, t| {
             while !stop.load(Ordering::Acquire) {
