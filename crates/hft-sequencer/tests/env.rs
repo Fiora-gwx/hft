@@ -25,6 +25,52 @@ fn sys_ids(h: &H, m: usize) -> Vec<u32> {
         .collect()
 }
 
+#[test]
+fn seq_097_env_positions_differ_verify_passes() {
+    let mut positions = Vec::new();
+    for idle_ms in [50, 1000] {
+        reset_script();
+        let mut b = b0();
+        b.seq.keyframe_period_ms = 200;
+        let mut h = b.boot();
+        h.steady();
+        let start = tsc_of(UTC0 + 4 * H + 30 * MIN - SECS / 2);
+        h.at(start);
+        h.keyframe();
+        h.run();
+        let mark = h.mark();
+        for ms in 1..=1000 {
+            h.at(start + ms * MS);
+            h.push(RingId::Md(0), &trade(A1, ms));
+            h.step();
+            if ms % idle_ms == 0 {
+                for _ in 0..6 {
+                    h.step();
+                }
+            }
+        }
+        h.run();
+        let recs = h.since(mark);
+        let seqs: Vec<_> = [2, 1]
+            .into_iter()
+            .map(|id| {
+                recs.iter()
+                    .filter(|r| r.kind == EventKind::TIMER)
+                    .find(|r| {
+                        r.read::<Timer>()
+                            .is_some_and(|t| t.owner == 1 && t.timer_id == id)
+                    })
+                    .expect("environment timer")
+                    .seq
+            })
+            .collect();
+        assert!(h.verify().is_empty(), "idle {idle_ms}");
+        positions.push(seqs);
+    }
+    assert_ne!(positions[0][0], positions[1][0]);
+    assert_ne!(positions[0][1], positions[1][1]);
+}
+
 /// B0 with keyframes out of the way.
 fn quiet() -> H {
     reset_script();

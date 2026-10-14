@@ -132,6 +132,8 @@ core 的深度来源([hft-venue-proto 契约 26](../hft-venue-proto/README.md#�
 
 ### 累计量与费用来源
 
+UTA 订单回报的累计量比已保存量小时不产出事件,也不回退累计金额、费用或终态基线;累计量未增长时保留已有金额基线。`avgPrice` 按资产价格指数作 HalfEven 舍入,允许成交均价含更多小数位。负累计量、金额、均价以及超过累计量的单笔数量在更新上下文之前拒绝。
+
 | 流 | `cum_filled` | `avg_px` | 费用 |
 |---|---|---|---|
 | UTA 私有 `order` 频道 | `cumExecQty`(订单累计;V2 `accBaseVolume`) | `avgPrice`(V2 `priceAvg`) | `feeDetail[0].fee`(订单累计,取绝对值)+ `feeCoin`;本笔费用 = 与 `GwCtx` 中上次累计的差分(V2 本笔 `fillFee`/`fillFeeCoin` 存在时直接用) |

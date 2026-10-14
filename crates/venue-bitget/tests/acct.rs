@@ -6,6 +6,63 @@ use hft_venue_proto::{
 };
 use venue_bitget::BitgetUsdtFutures as P;
 
+#[test]
+fn bgt_078_rest_headers() {
+    use base64::Engine;
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    let mut out = hft_venue_proto::RestReqBuf::default();
+    P::account_request(&cfg(), &key(), &Query::Settings, WC.unix_ms, &mut out).unwrap();
+    assert!(out.redacted);
+    assert_eq!(out.endpoint, 0);
+    let headers = std::str::from_utf8(out.headers.as_slice()).unwrap();
+    let mut mac = Hmac::<Sha256>::new_from_slice(b"secret").unwrap();
+    mac.update(format!("{}GET", WC.unix_ms).as_bytes());
+    mac.update(out.path_query.as_slice());
+    let signature = base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes());
+    assert_eq!(signature.len(), 44);
+    for h in [
+        "ACCESS-KEY: k".to_owned(),
+        format!("ACCESS-SIGN: {signature}"),
+        format!("ACCESS-TIMESTAMP: {}", WC.unix_ms),
+        "ACCESS-PASSPHRASE: p".to_owned(),
+    ] {
+        assert_eq!(headers.lines().filter(|line| *line == h).count(), 1, "{h}");
+    }
+    assert_eq!(
+        headers.lines().filter(|line| line.starts_with("ACCESS-")).count(),
+        4
+    );
+}
+
+#[test]
+fn bgt_006_rest_endpoint_index() {
+    fn check<Q: AccountProtocol>(queries: &[Query]) {
+        for q in queries {
+            let mut out = hft_venue_proto::RestReqBuf::default();
+            Q::account_request(&cfg(), &key(), q, WC.unix_ms, &mut out).unwrap();
+            assert_eq!(out.endpoint, 0, "{q:?}");
+        }
+    }
+    let common = [
+        Query::Instruments,
+        Query::Settings,
+        Query::SymbolSettings,
+        Query::Permissions,
+        Query::Balances,
+        Query::OpenOrders {
+            cursor: String::new(),
+        },
+        Query::Cancel {
+            symbol: "BTCUSDT".into(),
+            order_id: "123".into(),
+        },
+    ];
+    check::<P>(&common);
+    check::<venue_bitget::BitgetSpot>(&common);
+    check::<P>(&[Query::Positions]);
+}
+
 fn settings(uid: Option<&str>) -> Vec<u8> {
     let mut s = serde_json::json!({"code":"00000","data": {
     "accountMode":"unified","accountLevel":"basic","holdMode":"one_way_mode",

@@ -5,6 +5,7 @@ mod caps;
 mod cid;
 mod classify;
 mod codes;
+mod demo;
 mod encode;
 mod endpoint;
 mod funding;
@@ -22,3 +23,4 @@ mod bbo;
 #[path = "../fuzz/exercise.rs"]
 mod fuzz_exercise;
 mod readonly;
+mod rest;

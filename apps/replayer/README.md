@@ -119,6 +119,8 @@ replayer compare --a s3://<bucket>/<prefix>/<host>/prod/… --b s3://<bucket>/<p
 
 ### latency
 
+当前 CLI 接受本地 `--journal`、`--out` 与两项必填阈值,覆盖完整输入窗口;窗口/venue 过滤等扩展选项尚未接入,传入时退出 2。输入须携带 refdata ConfigBlob;同一输入内变更 refdata 哈希退出 3。先完整校验输入,再输出文件。每个 `.hdr` 文件按确定性顺序串接 HDR V2 直方图,JSON 的 `histograms` 数组给出每组 `key`、`upper_bound`、`offset` 和 `bytes`,可逐项独立反序列化。
+
 按事件加权的主机内延迟统计:对 seq journal 中**每一条**带 `MarketHdr` 的行情记录(含分档深度快照;记录集合唯一归 [hft-telemetry](../../crates/hft-telemetry/README.md) 的 `event_weighted()`),用记录头的 `tsc` 与 `MarketHdr` 里的 `hw_rx`/`sw_rx`/`rx_tsc` 时间戳算出 `kernel_rx`、`ingest`、`feed_host`(分段定义归 [latency-budget §2](../../docs/latency-budget.md#2-分段名全仓唯一))。数据全部来自 journal,热路径上没有额外成本;它补上探针按时间抽样会低估的突发尾部。门槛 ⑩ 的 `ingest` 与 `kernel_rx` 读这份统计,探针样本只用于订单类分段(判定归 [testing §8.2](../../docs/testing.md#82-延迟验收的测法))。
 
 1. **计算**在 [hft-telemetry](../../crates/hft-telemetry/README.md) 的离线模块 `event_weighted()`;本命令只负责输入定位、按记录扫描、分组与输出,不运行 sequencer,不读当前配置。

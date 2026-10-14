@@ -1,0 +1,6 @@
+venue = "stub-venue"
+channel = "bbo"
+protocol_version = "1"
+captured_at = "2026-10-15"
+source = "synthetic"
+source_ref = "independent integer passthrough test"

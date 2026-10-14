@@ -492,6 +492,49 @@ fn ord(status: &str, cum: &str, value: &str, avg: &str, fee: &str, extra: &str) 
     )
 }
 
+#[test]
+fn bgt_101_old_push_does_not_rewind_fill_value() {
+    let mut ctx = GwCtx::new();
+    for (cum, value, avg, fee) in [
+        ("0.001", "65", "65000", "0.01"),
+        ("0.003", "196", "65333.33333333", "0.03"),
+    ] {
+        let (out, sink) = dec(&mut ctx, &ord("partially_filled", cum, value, avg, fee, ""));
+        assert_eq!(out.unwrap().events, 1);
+        assert_eq!(sink.orders.len(), 1);
+    }
+    let (out, sink) = dec(
+        &mut ctx,
+        &ord("partially_filled", "0.001", "65", "65000", "0.01", ""),
+    );
+    assert_eq!(out.unwrap().events, 0);
+    assert!(sink.orders.is_empty());
+    let (out, sink) = dec(&mut ctx, &ord("filled", "0.004", "262", "65500", "0.04", ""));
+    assert_eq!(out.unwrap().events, 1);
+    let fill = one(&sink);
+    assert_eq!(
+        (fill.qty, fill.px, fill.fee),
+        (Qty(100_000), Px(6_600_000), Qty(1_000_000))
+    );
+    assert_eq!(fill.cum_filled, Qty(400_000));
+}
+
+#[test]
+fn bgt_101_invalid_fill_does_not_mutate_context() {
+    for (cum, value, avg) in [
+        ("-0.001", "65", "65000"),
+        ("0.001", "-65", "65000"),
+        ("0.001", "65", "-65000"),
+    ] {
+        let mut ctx = GwCtx::new();
+        let saved = ctx.clone();
+        let (out, sink) = dec(&mut ctx, &ord("partially_filled", cum, value, avg, "0.01", ""));
+        assert_eq!(out, Err(DecodeErr::Shape));
+        assert!(sink.orders.is_empty() && sink.ext.is_empty());
+        assert_eq!(ctx, saved);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn ord_on(
     cat: &str,

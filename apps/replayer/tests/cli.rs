@@ -1,5 +1,6 @@
 mod dst;
 mod fixture;
+mod latency;
 mod long_model;
 mod model;
 mod model_boundary;

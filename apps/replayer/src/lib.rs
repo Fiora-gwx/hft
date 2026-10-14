@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 mod checkpoints;
+mod latency;
 mod options;
 mod report;
 
@@ -102,6 +103,9 @@ fn discover(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), Failure> {
 }
 
 fn execute<S: StrategySet>(args: &[String], stdout: &mut impl Write) -> Result<i32, Failure> {
+    if args.first().is_some_and(|s| s == "latency") {
+        return latency::execute(args, stdout);
+    }
     if args == ["--version"] {
         writeln!(stdout, "{VERSION}").map_err(|e| (2, e.to_string()))?;
         for kind in S::kinds() {

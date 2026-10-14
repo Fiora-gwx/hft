@@ -16,6 +16,39 @@ use support::{BGB, F_BTC, F_ETH, S_BGB, S_BTC, WC, cfg, key, rd};
 use venue_bitget::{BitgetSpot, BitgetUsdtFutures as Fut};
 
 #[test]
+fn bgt_191_unconditional_ping_survives() {
+    for spec in [Fut::heartbeat(Role::Md), BitgetSpot::heartbeat(Role::Md)] {
+        let mut last_ping = 0;
+        let mut sent = Vec::new();
+        for now in 1..=600_000u32 {
+            // A busy server sends market data every 100 ms. Inbound activity cannot reset ping.
+            let data_arrived = now % 100 == 0;
+            if now - last_ping >= spec.interval_ms && (spec.unconditional || !data_arrived) {
+                let mut frame = [0; 4];
+                assert_eq!(Fut::app_ping(Role::Md, i64::from(now), &mut frame), 4);
+                assert_eq!(&frame, b"ping");
+                sent.push(now);
+                last_ping = now; // server immediately answers pong
+            }
+            assert!(now - last_ping < 120_000);
+        }
+        assert_eq!(sent, (1..=24).map(|n| n * 25_000).collect::<Vec<_>>());
+    }
+}
+
+#[test]
+fn bgt_193_bbo_probe_budget() {
+    for routes in [Fut::routes(), BitgetSpot::routes()] {
+        let route = routes.iter().find(|r| r.kind == RouteKind::Bbo).unwrap();
+        let probe_interval_ms = 1000;
+        let probe_per_s = 1000 / probe_interval_ms;
+        let subscriptions = u32::from(route.max_in_msgs_per_s) / 2 - probe_per_s;
+        assert_eq!(subscriptions, 4);
+        assert!(subscriptions + probe_per_s <= u32::from(route.max_in_msgs_per_s));
+    }
+}
+
+#[test]
 fn bgt_001_identity_consts() {
     assert_eq!(Fut::NAME, "bitget-usdt-futures", "BGT-001.1");
     assert_eq!(

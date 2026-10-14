@@ -16,6 +16,66 @@ use crate::json::{ErrBody, from};
 use crate::sign::{ed25519_b64, logon_payload};
 use crate::wr::Wr;
 
+pub(crate) fn identity_request(
+    line: Line,
+    cfg: &VenueCfg,
+    cred: &Credential,
+    now_ms: i64,
+    out: &mut hft_venue_proto::RestReqBuf,
+) -> Result<bool, ProtoErr> {
+    let mut request = hft_venue_proto::RestReqBuf {
+        endpoint: u8::from(line == Line::Usdm),
+        ..Default::default()
+    };
+    request.path_query.push(b"/api/v3/account")?;
+    crate::account::sign_request(cfg, cred, now_ms, &mut request)?;
+    *out = request;
+    Ok(true)
+}
+
+pub(crate) fn decode_identity(
+    status: u16,
+    body: &[u8],
+    uid: &mut [u8; 24],
+) -> Result<(), hft_venue_proto::DecodeErr> {
+    use hft_venue_proto::DecodeErr;
+    if !(200..300).contains(&status) {
+        return Err(DecodeErr::Shape);
+    }
+    #[derive(Deserialize)]
+    struct Identity<'a> {
+        #[serde(borrow)]
+        uid: Uid<'a>,
+    }
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Uid<'a> {
+        Number(u64),
+        Text(&'a str),
+    }
+    let identity: Identity<'_> = from(body).map_err(|_| DecodeErr::Shape)?;
+    let mut text = [0u8; 24];
+    match identity.uid {
+        Uid::Number(0) => return Err(DecodeErr::Shape),
+        Uid::Number(n) => {
+            let mut writer = Wr::new(&mut text);
+            writer.u64(n);
+            writer.finish().ok_or(DecodeErr::Shape)?;
+        }
+        Uid::Text(s) => {
+            if s.is_empty()
+                || s.len() > text.len()
+                || !s.bytes().all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
+            {
+                return Err(DecodeErr::Shape);
+            }
+            text[..s.len()].copy_from_slice(s.as_bytes());
+        }
+    }
+    *uid = text;
+    Ok(())
+}
+
 /// USDT-M routes.
 pub(crate) const ROUTE_PUBLIC_BBO: RouteId = RouteId(1);
 pub(crate) const ROUTE_PUBLIC_TOPN: RouteId = RouteId(2);

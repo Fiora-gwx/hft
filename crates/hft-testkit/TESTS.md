@@ -43,6 +43,8 @@ spec: README.md
 
 ### TK-001 golden_cases 按 fixtures 布局读出金样
 
+- 运行器接口位于 `golden` 模块,协议适配由调用方闭包提供;使用本目录 stub-venue 文件夹具验证只读加载。
+
 - 规则:[1. 金样](README.md#1-金样)、[金样运行器](README.md#金样运行器)
 - 级别:unit
 - 里程碑:M3

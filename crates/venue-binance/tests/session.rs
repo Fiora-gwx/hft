@@ -103,3 +103,110 @@ fn bin_191_bbo_probe_ws_ping() {
         assert!(out.iter().all(|&b| b == 0xAA));
     }
 }
+
+#[test]
+fn bin_080_session_keepalive_request() {
+    use hft_venue_proto::{Method, RestReqBuf};
+    let t = Usdm::build_templates(&cfg(1500), support::rd(), support::ACCT, &support::hm1()).unwrap();
+    let mut out = RestReqBuf::default();
+    assert_eq!(
+        Usdm::session_keepalive_request(support::rd(), &t, &support::WC, &mut out),
+        Ok(true)
+    );
+    assert_eq!(out.method, Method::Put);
+    assert_eq!(out.endpoint, 0);
+    assert_eq!(out.path_query.as_slice(), b"/fapi/v1/listenKey");
+    assert!(out.headers.as_slice().starts_with(b"X-MBX-APIKEY: TESTKEY\r\n"));
+    assert!(out.redacted);
+    let before = out;
+    assert_eq!(
+        Spot::session_keepalive_request(support::rd(), &t, &support::WC, &mut out),
+        Ok(false)
+    );
+    assert_eq!(out, before);
+}
+
+#[test]
+fn bin_006_rest_endpoint_index() {
+    use hft_venue_proto::RestReqBuf;
+    fn check<P: VenueProtocol>(endpoint: u8) {
+        let mut out = RestReqBuf::default();
+        assert_eq!(
+            P::session_identity_request(&cfg(1500), &support::hm1(), NOW, &mut out),
+            Ok(true)
+        );
+        assert_eq!(out.endpoint, endpoint);
+        assert!(
+            out.path_query
+                .as_slice()
+                .starts_with(b"/api/v3/account?timestamp=")
+        );
+        assert!(out.redacted);
+    }
+    check::<Usdm>(1);
+    check::<Spot>(0);
+    let mut uid = [0; 24];
+    Usdm::decode_identity(200, br#"{"uid":354937868}"#, &mut uid).unwrap();
+    assert_eq!(&uid[..9], b"354937868");
+    let before = uid;
+    for (status, body) in [
+        (403, br#"{"uid":354937868}"#.as_slice()),
+        (200, b"{}"),
+        (200, br#"{"uid":0}"#),
+        (200, br#"{"uid":-1}"#),
+    ] {
+        assert!(Usdm::decode_identity(status, body, &mut uid).is_err());
+        assert_eq!(uid, before);
+    }
+}
+
+#[test]
+fn bin_143_session_identity_signature() {
+    let mut out = hft_venue_proto::RestReqBuf::default();
+    assert_eq!(
+        Usdm::session_identity_request(&cfg(1500), &ed1(), NOW, &mut out),
+        Ok(true)
+    );
+    assert_eq!(out.endpoint, 1);
+    assert_eq!(out.path_query.as_slice(),b"/api/v3/account?timestamp=1790000000000&recvWindow=1500&signature=K7bvmAqJQoyYhTgBMqaX4BA7vIA8c8W1scUjhqYqNFkhYU6cb%2B7j1nTvn5sq2P0Gn3NbnQLQhmAkGeHTNmfQCg%3D%3D");
+    assert!(out.headers.as_slice().starts_with(b"X-MBX-APIKEY: TESTKEY\r\n"));
+    assert!(out.redacted);
+    let before = out;
+    assert_eq!(
+        Spot::session_identity_request(&cfg(1500), &ed1(), NOW, &mut out),
+        Ok(true)
+    );
+    assert_eq!(out.endpoint, 0);
+    assert_eq!(before.path_query, out.path_query);
+}
+
+#[test]
+fn bin_144_decode_identity() {
+    use hft_venue_proto::DecodeErr;
+    for (status, body, want) in [
+        (
+            200,
+            r#"{"makerCommission":10,"canTrade":true,"accountType":"SPOT","uid":"acct-0001"}"#,
+            Some("acct-0001"),
+        ),
+        (200, r#"{"uid":354937868}"#, Some("354937868")),
+        (200, "{}", None),
+        (
+            401,
+            r#"{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action."}"#,
+            None,
+        ),
+        (200, r#"{"uid":"1234567890123456789012345"}"#, None),
+    ] {
+        let mut uid = [0xff; 24];
+        let result = Usdm::decode_identity(status, body.as_bytes(), &mut uid);
+        if let Some(want) = want {
+            assert_eq!(result, Ok(()));
+            assert_eq!(&uid[..want.len()], want.as_bytes());
+            assert!(uid[want.len()..].iter().all(|b| *b == 0));
+        } else {
+            assert_eq!(result, Err(DecodeErr::Shape));
+            assert_eq!(uid, [0xff; 24]);
+        }
+    }
+}

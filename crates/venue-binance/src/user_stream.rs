@@ -96,10 +96,24 @@ pub(crate) fn decode(
             hint: AcctHint::MarginNow,
             ..ReportOutcome::default()
         }),
-        "ACCOUNT_CONFIG_UPDATE" => Ok(ReportOutcome {
-            hint: AcctHint::ConfigRecheck,
-            ..ReportOutcome::default()
-        }),
+        "ACCOUNT_CONFIG_UPDATE" => {
+            #[derive(Deserialize)]
+            struct Config<'a> {
+                #[serde(borrow)]
+                ac: Option<sonic_rs::LazyValue<'a>>,
+                #[serde(borrow)]
+                ai: Option<sonic_rs::LazyValue<'a>>,
+            }
+            let cfg: Config = from(p)?;
+            Ok(ReportOutcome {
+                hint: if cfg.ac.is_some() || cfg.ai.is_some() {
+                    AcctHint::ConfigRecheck
+                } else {
+                    AcctHint::None
+                },
+                ..ReportOutcome::default()
+            })
+        }
         "listenKeyExpired" | "eventStreamTerminated" => Ok(ReportOutcome {
             ctl: ReportCtl::UserStreamEnded,
             ..ReportOutcome::default()
@@ -330,7 +344,9 @@ fn account(
         return Err(DecodeErr::Shape);
     }
     let ns = time_ns(r.T, 1_000_000)?;
-    if r.a.m == "FUNDING_FEE" {
+    if r.a.m == "FUNDING_FEE"
+        && rd.caps(line.venue()).funding_settle != hft_refdata::FundingSettleKind::RateOnly
+    {
         let Some(b) = r.a.B.iter().find(|b| b.a == "USDT") else {
             return Ok(ReportOutcome::default());
         };

@@ -1166,9 +1166,11 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 故障:两次运行的处理耗时分布不同(一次 ×1、一次 ×3),md 突发 10×、bbo 突发每轮取满批
 - 种子:PR 200(提交派生)+ 回归集;每夜日期派生
 - 断言:两次运行的 journal 中 Input 的取出顺序、md 停止位置与 `Timer` 位置不同;各自的 `VerifyDriver` 逐字节通过;INV-6、INV-9
-- 实现:`crates/hft-testkit/src/scenarios/seq.rs::seq_076_preempt_positions_verify`
+- 实现:`crates/hft-sequencer/tests/preemption_dst.rs::seq_076_preempt_positions_verify`
 
 ### SEQ-077 实盘回报与 Bbo 的等待上界
+
+- 待裁决:每轮 ctl 额度耗尽后继续取 BBO/md 的 SEQ-063 行为与本例冲突;反例保留为显式 ignored 测试,不计验收通过。见 [额度与等待上界](../../.agents/notes/proposed/architecture/2026-10-15-sequencer-quota-wait-bound.md)。
 
 - 规则:[主循环](README.md#主循环step)
 - 级别:dst
@@ -1177,7 +1179,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 故障:在上述积压期间按 Poisson(每 200 µs)注入 `Bbo`、实盘回报与 ctl 命令
 - 种子:PR 200 + 回归集;每夜日期派生
 - 断言:每条注入的实盘回报在 journal 中的位置与其到达时刻之间最多隔一条 `Bbo`、Advice 或 md 消息;每条注入的 `Bbo` 最多隔一条 md 消息;每条 ctl 同实盘回报;取出位置与"每处理完一条 md 查看 ctl/rep/bbo 环头、每处理完一条 bbo 或 advice 查看 ctl/rep 环头"一致
-- 实现:`crates/hft-testkit/src/scenarios/seq.rs::seq_077_preempt_wait_bounds`
+- 实现:`crates/hft-sequencer/tests/preemption_dst.rs::seq_077_preempt_wait_bounds`
 
 ### SEQ-078 实盘每轮 step 打一次心跳
 
@@ -3294,6 +3296,8 @@ SEQ-158 补充验收:RateOnly 的实额输入替换已有合成额,重复实额�
 | SEQ-229.5 | 只为引擎订阅的 b1 `Funding` 到达 | 不投递给任何策略;`MarketLast` 更新 |
 
 ### SEQ-230 持仓在 0 与非 0 之间变化时同一 Input 内重算并集
+
+- 当前回归覆盖无组持仓三次零交叉的同 Input 订阅重算;WriteOffResidual 后移除组的完整前置仍待补齐。
 
 - 规则:[inst → 策略的稠密索引](README.md#inst--策略的稠密索引)
 - 级别:table

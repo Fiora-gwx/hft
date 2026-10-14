@@ -539,11 +539,15 @@ fn parse_row(line: Line, rd: &RefData, r: &OrderRow<'_>, top_ts: UInt) -> Result
         None => return Err(DecodeErr::Shape),
     };
     let avg_px = Px(match r.avg_px {
-        Some(s) => fixed_or_zero(s, pe)?,
-        None => 0,
+        Some("") | None => 0,
+        Some(s) => parse_round(s.as_bytes(), pe, RoundMode::HalfEven).map_err(fx)?,
     });
     // Contract 9: a fill without an average price is a decode error.
-    if cum.0 > 0 && avg_px.0 == 0 {
+    if order_id == 0
+        || cum.0 < 0
+        || avg_px.0 < 0
+        || (cum.0 > 0 && (avg_px.0 == 0 || side_of(r.side).is_none()))
+    {
         return Err(DecodeErr::Shape);
     }
     let cum_value = match r.cum_value {
@@ -560,6 +564,12 @@ fn parse_row(line: Line, rd: &RefData, r: &OrderRow<'_>, top_ts: UInt) -> Result
         Some(s) if !s.is_empty() => Some(Px(fixed(s, pe)?)),
         _ => None,
     };
+    if cum_value.is_some_and(|v| v.0 < 0)
+        || fill_qty.is_some_and(|q| q.0 < 0 || q > cum)
+        || fill_px.is_some_and(|p| p.0 < 0)
+    {
+        return Err(DecodeErr::Shape);
+    }
     if st == St::Filled && cum.0 == 0 && fill_qty.is_none() {
         return Err(DecodeErr::Shape);
     }
@@ -665,13 +675,21 @@ fn emit(
         (e.cum, (e.value >= 0).then_some(e.value), e.fee)
     });
     let advanced = x.cum.0 > prev_cum;
+    // A delayed older push must not rewind the value/terminal baseline used by the next fill.
+    if x.cum.0 < prev_cum {
+        return;
+    }
     let terminal = matches!(x.st, St::Filled | St::Cancelled);
     ctx.put(
         x.order_id,
         x.cum.0.max(prev_cum),
-        x.cum_value.map_or(-1, |v| v.0),
+        if advanced {
+            x.cum_value.map_or(-1, |v| v.0)
+        } else {
+            prev_value.or(x.cum_value.map(|v| v.0)).unwrap_or(-1)
+        },
         x.cum_fee.0.max(prev_fee),
-        terminal,
+        terminal || prev.is_some_and(|p| p.terminal),
     );
     let what = match x.st {
         St::Open if advanced => OrderEventKind::PartialFill,

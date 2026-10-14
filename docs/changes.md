@@ -8,6 +8,7 @@
 | 2026-10-15 | 缺省 epoch 的 WS 请求回包只在同连接唯一在途请求与活动槽镜像身份一致时补齐；跨连接响应不消耗原请求。正确的交易所拒单因此终结原槽，重复回包不借用槽身份 | FP-8，时间窗拒单被错误归为 UNRESOLVED，原订单留在 PendingNew | hft-venue 的网关与规格、hft-core 跨组件回归 | 待评审(订单/风控) |
 | 2026-10-15 | 启动校验拒绝执行强制平仓限额超过风控限额，以及账户尘埃线低于绑定交易腿的最大最小名义；复用风险层一致性检查，错误在网络连接和 journal 创建前返回 | CORE-115、CORE-116，原加载路径漏检 | apps/hft-core 的配置与测试 | 待评审(风控) |
 | 2026-10-15 | housekeeping 保留 Stepped 状态并逐次记录 ClockBad，不把连续时钟跳变合并为一次 Unsynced；共享心跳的 Stopped 仅在全部 journal 封存与 persist 完成后发布，热段清理据此放行 | CORE-418、CORE-195，时钟风险输入与停机证据接线 | apps/hft-core、deploy 的代码与规格 | 待评审(风控/恢复) |
+| 2026-10-15 | Binance 查询均价按指数舍入并拒绝负累计成交事实;RateOnly 资金费用户流只作余额/持仓核验,不再与认证历史实额同时产生 FundingSettle;Bitget 迟到订单回报不回退累计金额基线,均价按指数舍入,非法负量/金额在状态更新前拒绝 | BIN-094/112、BGT-101 回归 | venue-binance/venue-bitget 代码、README、TESTS | 待评审 |
 | 2026-10-15 | Bitget REST 查单非空品种与 clientOid 必须匹配原请求身份;负累计量/均价拒绝,错误响应不再重定向到另一订单槽 | BGT-093 查单身份回归 | crates/venue-bitget/src/reports.rs、tests/reports.rs、README.md、TESTS.md | 待评审(订单/资金) |
 | 2026-10-15 | 网关发送侧同时执行 Account/Uid 全部订单限速窗口;延迟观测只收紧计数。BBO 重连后经公共 REST 补帧,失效请求不覆盖已恢复报价,REST 不证明 WS 活性 | VEN-224、VEN-130/132/133 | crates/hft-venue、hft-net、apps/hft-core 的代码与规格 | 待评审(风控/报价可用性) |
 | 2026-10-15 | Unverifiable 账户容许缺 UID 且不声称核验成功，实际 UID 矛盾仍拒绝；保证金观察携带本轮非零持仓强平价和未知 ADL，Bitget 负总持仓量拒绝；USDM 全撤 REST 确认不生成逐单终态，错误保持 Unknown | BIN-072/173、BGT-142/146/149、CORE-120/169 | hft-venue-proto、venue-binance、venue-bitget、hft-venue、hft-core 的代码与规格 | 待评审(账户/风控) |

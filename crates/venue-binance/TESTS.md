@@ -1068,6 +1068,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 ### BIN-094 查询响应解码为带累计量与均价的 QueryResult
 
+- 回归:均价超出价格指数时 HalfEven 舍入;累计量、均价或累计报价金额为负时拒绝且不输出订单事件。
+
 - 规则:[下单:WS API](README.md#下单ws-api)、[累计量与费用来源](README.md#累计量与费用来源)、[hft-venue-proto 契约 9](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
 - 里程碑:M1.5
@@ -1307,6 +1309,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 ### BIN-112 Usdm ACCOUNT_UPDATE 产出持仓与余额校验事件,并按原因给提示
 
+- 回归补充:RateOnly 下 FUNDING_FEE 推送不得输出 FundingSettle,余额核验仍输出;历史流水负责实额。
+
 - 规则:[用户流事件表](README.md#用户流事件表)
 - 级别:table
 - 里程碑:M3
@@ -1517,7 +1521,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 期望:
   - 步骤 1 返回 `Ok(true)`;`out = {endpoint: 1, method: GET, path_query: "/api/v3/account?timestamp=1790000000000&recvWindow=1500&signature=K7bvmAqJQoyYhTgBMqaX4BA7vIA8c8W1scUjhqYqNFkhYU6cb%2B7j1nTvn5sq2P0Gn3NbnQLQhmAkGeHTNmfQCg%3D%3D", headers 含 "X-MBX-APIKEY: TESTKEY", redacted: true}`
   - 步骤 2 返回 `Ok(true)`,同一 `path_query`,`endpoint: 0`
-- 实现:`crates/venue-binance/tests/sign.rs::bin_143_session_identity_request`
+- 实现:`crates/venue-binance/tests/session.rs::bin_143_session_identity_signature`
 - 备注:依赖待核实:开发备忘第 16 条(只开合约权限的 Ed25519 key 能否读现货账户)
 
 ### BIN-144 decode_identity 取出 UID 并右补零
@@ -1526,7 +1530,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`uid` 为 24 字节缓冲,初值全 0xFF
-- 实现:`crates/venue-binance/tests/acct.rs::bin_144_decode_identity`
+- 实现:`crates/venue-binance/tests/session.rs::bin_144_decode_identity`
 
 | 行 | status / body | 期望 |
 |---|---|---|
@@ -1931,6 +1935,8 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 实现:`crates/venue-binance/tests/deps.rs::bin_211_no_mock_in_prod`
 
 ### BIN-212 演示环境两个产品线共用一个 UID 时 refdata 只告警
+
+- 本地契约测试用 RD-BIN 的两产品账户经生产 RdbBuilder 构建相同 UID 的 blob,再切换永续账户的 is_prod 位;hft-cfg TOML 端到端夹具与演示 key 的真实共用能力仍需单独核实。
 
 - 规则:[测试网/模拟盘](README.md#测试网模拟盘)
 - 级别:integ

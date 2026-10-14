@@ -1021,6 +1021,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 ### BGT-101 部分成交的字段逐一映射
 
+- 回归补充:迟到累计量不得回退累计金额/费用基线;多位小数均价按指数舍入;非法负量/金额不得改变上下文。
+
 - 规则:[累计量与费用来源](README.md#累计量与费用来源)、[实现说明](README.md#实现说明)、[契约](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
 - 里程碑:M3
@@ -2292,7 +2294,7 @@ BGT-336 补充单元验收:签名 trading-account financial-records 查询、IN/
 - 级别:bench
 - 里程碑:M3
 - 基准名:`bench_encode_bitget_place`
-- 实现:`crates/venue-bitget/benches/orders.rs::bgt_503_encode_place`
+- 实现:`crates/venue-bitget/benches/reports.rs::bgt_503_encode_place`
 
 ### BGT-504 基准:订单推送解码(含外部成交判定与去重)
 

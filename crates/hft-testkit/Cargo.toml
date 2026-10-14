@@ -16,6 +16,8 @@ workspace = true
 # The engine crates (hft-sim, hft-sequencer, hft-oms, hft-risk, hft-ledger, hft-exec) are the DST
 # engine adapter's (`SeqSut`, feature `seq`; README "6. DST 框架").
 [dependencies]
+serde_json = "1"
+toml.workspace = true
 hft-types.workspace = true
 hft-event.workspace = true
 hft-rt.workspace = true

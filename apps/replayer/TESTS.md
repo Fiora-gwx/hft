@@ -1616,6 +1616,8 @@ spec: README.md
 
 ### RPL-191 缺 ClockStatus 使误差界超限的样本计入 unsynced_cal、不进分位数
 
+- 当前测试以显式超界校准误差验证排除路径;固定频差下单纯删除校准点不会扩大插值误差,原缺点场景的误差前提待评审。
+
 - 规则:[latency](README.md#latency)
 - 级别:unit
 - 里程碑:M3
@@ -1718,6 +1720,8 @@ spec: README.md
 - 实现:`apps/replayer/tests/latency.rs::rpl_198_dataset_per_host_profile`
 
 ### RPL-199 按层给出 unsynced_cal 与总数
+
+- 当前测试以突发窗口的显式超界校准误差验证分层计数;删两条校准记录的误差前提同 RPL-191 待评审。
 
 - 规则:[latency](README.md#latency)
 - 级别:unit

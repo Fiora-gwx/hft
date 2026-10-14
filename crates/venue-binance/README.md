@@ -154,6 +154,10 @@ core 的深度来源([hft-venue-proto 契约 26](../hft-venue-proto/README.md#�
 
 ### 累计量与费用来源
 
+查询回报的均价按资产价格指数作 HalfEven 舍入;负累计成交量、负均价与负累计报价金额在产生订单事件前拒绝。
+
+`funding_settle = RateOnly` 时,`ACCOUNT_UPDATE m=FUNDING_FEE` 只输出余额/持仓核验事件,不输出 `FundingSettle`;资金费实额仍由认证历史流水进入账本,防止两条来源重复记账。
+
 | 流 | `cum_filled` | `avg_px` | 费用 |
 |---|---|---|---|
 | `Usdm` `ORDER_TRADE_UPDATE` | `z`(累计成交量) | `ap` | `n`(本笔,增量)+ `N` 资产;不产出 `FeeOnly` |

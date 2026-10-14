@@ -452,6 +452,50 @@ fn seq_066_md_time_slice() {
 }
 
 #[test]
+fn seq_065_md_rechecks_priority_heads() {
+    reset_script();
+    let mut b = b0();
+    b.seq.md_round_ns = 10_000_000;
+    let mut h = b.boot();
+    h.steady();
+    for k in 0..2000 {
+        h.push(RingId::Md(0), &trade(A1, k + 1000));
+    }
+    let base = h.io().takes;
+    let (ctl, _) = h.cmd_elem("cli:test", 4, AC1, &ControlCmd::SnapshotNow, |_| {});
+    // Arrival counts include the higher-priority messages already handed over.
+    for (after_take, ring, e) in [
+        (
+            base + 5,
+            RingId::Bbo(0),
+            elem(&bbo(A1, A, 0, "50000", "50002", 9000, h.now())),
+        ),
+        (base + 10, RingId::Rep(1), elem(&alive(B, 9001))),
+        (base + 14, RingId::Ctl, ctl),
+    ] {
+        h.io().arrivals.push(Arrival {
+            after_take,
+            ring,
+            elem: e,
+        });
+    }
+    let m = h.mark();
+    h.step();
+    let k = order_of(&h, m);
+    for (kind, n) in [
+        (EventKind::BBO, 5),
+        (EventKind::CONN_STATE, 9),
+        (EventKind::CONTROL_CMD, 12),
+    ] {
+        let at = k.iter().position(|x| *x == kind).unwrap();
+        assert_eq!(k[..at].iter().filter(|x| **x == EventKind::TRADE).count(), n);
+        assert_eq!(k[at - 1], EventKind::TRADE);
+    }
+    h.run();
+    assert!(h.verify().is_empty());
+}
+
+#[test]
 fn seq_067_rep_sim_last_and_bounded() {
     for (n, want) in [(1_000usize, 32usize), (31, 31), (33, 32)] {
         let mut h = steady();

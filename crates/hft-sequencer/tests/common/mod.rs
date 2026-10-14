@@ -993,6 +993,10 @@ pub struct TestIo<S: StrategySet> {
     pub hz: u64,
     pub takes: u64,
     pub arrivals: Vec<Arrival>,
+    /// Test producer schedule in virtual TSC, independent of consumer processing speed.
+    pub timed_arrivals: Vec<(u64, RingId, Elem)>,
+    /// (scheduled TSC, hand-overs completed at injection, ring, element).
+    pub injected: Vec<(u64, u64, RingId, Elem)>,
     /// Ring ids handed over, in order.
     pub handed: Vec<Option<RingId>>,
     /// Optional independent observation at the actual ring pop boundary.
@@ -1037,6 +1041,8 @@ impl<S: StrategySet> TestIo<S> {
             hz: c.tsc_hz_milli,
             takes: 0,
             arrivals: Vec::new(),
+            timed_arrivals: Vec::new(),
+            injected: Vec::new(),
             handed: Vec::new(),
             popped: None,
             tsc_reads: 0,
@@ -1174,6 +1180,11 @@ impl<S: StrategySet> LiveIo<S> for TestIo<S> {
         self.arrivals.retain(|a| a.after_take != n);
         for a in due {
             self.ring(a.ring).push_back(a.elem);
+        }
+        while self.timed_arrivals.first().is_some_and(|a| a.0 <= self.tsc) {
+            let (at, ring, elem) = self.timed_arrivals.remove(0);
+            self.injected.push((at, self.takes, ring, elem.clone()));
+            self.ring(ring).push_back(elem);
         }
     }
 }
