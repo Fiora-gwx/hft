@@ -2269,7 +2269,7 @@ BGT-336 补充单元验收:签名 trading-account financial-records 查询、IN/
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
 - 里程碑:M3
-- 基准名:`bench_decode_bitget_books1`
+- 基准名:`bench_decode_bitget_books1`、`bench_decode_bitget_books1/spot`
 - 实现:`crates/venue-bitget/benches/md.rs::bgt_501_decode_books1`
 
 ### BGT-502 基准:books15 解码为 TopN 快照

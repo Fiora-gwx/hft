@@ -152,10 +152,10 @@ pub struct LiveDriver<S: StrategySet, IO: LiveIo<S>> {
     a_done_notify: bool,
     a_done_recheck: bool,
     a_env_done: bool,
-    synth: VecDeque<InputSlot>,
+    synth: VecDeque<SendReport>,
     feed_stage: Vec<(VenueId, FeedCmd)>,
-    conf: VecDeque<(InputSlot, InstId)>,
-    conf_ring: Option<u8>,
+    conf: VecDeque<usize>,
+    conf_slots: [InputSlot; CONFLATE_TAKE],
     /// Bbo dropped by conflation since the last report.
     pub conflated: u64,
     last_conflate_tsc: u64,
@@ -202,9 +202,7 @@ impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
                 os_errno: 0,
                 _pad2: 0,
             };
-            let mut s = InputSlot::with_capacity(64);
-            s.set(RecordFlags(0), Tsc(0), &sr);
-            self.synth.push_back(s);
+            self.synth.push_back(sr);
         }
     }
 
@@ -228,7 +226,9 @@ impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
             synth: VecDeque::with_capacity(64),
             feed_stage: Vec::with_capacity(1024),
             conf: VecDeque::with_capacity(CONFLATE_TAKE),
-            conf_ring: None,
+            conf_slots: core::array::from_fn(|_| {
+                InputSlot::with_capacity(core::mem::size_of::<hft_event::Bbo>())
+            }),
             conflated: 0,
             last_conflate_tsc: 0,
             last_tick_tsc: 0,
@@ -314,11 +314,12 @@ impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
         let size = self.io.journal().needs_roll(now);
         let size_now = matches!(size, Some((_, RollAt::EventBoundary))) && !v.wants_continue();
         let size_idle = matches!(size, Some((_, RollAt::IdleRound))) && idle_ok;
-        let near_settle = v
-            .funding_times()
-            .iter()
-            .any(|t| utc >= t - 120_000_000_000 && utc < t + 120_000_000_000);
-        let hourly = self.rolled_hour != i64::MIN && hour > self.rolled_hour && idle_ok && !near_settle;
+        let hourly = self.rolled_hour != i64::MIN
+            && hour > self.rolled_hour
+            && idle_ok
+            && !v
+                .funding_times()
+                .any(|t| utc >= t - 120_000_000_000 && utc < t + 120_000_000_000);
         if self.rolled_hour == i64::MIN {
             self.rolled_hour = hour;
         }
@@ -337,14 +338,15 @@ impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
             self.kf_window_start = now.0 - (now.0 - self.kf_window_start) % period;
             self.kf_done.clear();
         }
-        let books = v.live_books();
-        if !books.is_empty() {
+        let mut books = v.live_books();
+        let count = books.clone().count();
+        if count != 0 {
             let elapsed = now.0.saturating_sub(self.kf_window_start);
-            let target = ((u128::from(elapsed) * books.len() as u128) / u128::from(period)) as usize + 1;
-            if self.kf_done.len() < target.min(books.len())
-                && let Some(i) = books.iter().find(|b| !self.kf_done.contains(b))
+            let target = ((u128::from(elapsed) * count as u128) / u128::from(period)) as usize + 1;
+            if self.kf_done.len() < target.min(count)
+                && let Some(i) = books.find(|b| !self.kf_done.contains(b))
             {
-                self.kf_done.push(*i);
+                self.kf_done.push(i);
                 Self::timer_input(out, 2, i.0, GroupId(0), now.0, now);
                 return true;
             }
@@ -513,9 +515,7 @@ impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
 
     fn take_bbo(&mut self, out: &mut InputSlot, v: &DriverView<'_>) -> bool {
         // Conflated batch first.
-        if let Some((s, _)) = self.conf.pop_front() {
-            *out = s;
-            out.tsc = self.io.tsc();
+        if self.pop_conflated(out) {
             self.c.bbo += 1;
             return true;
         }
@@ -537,23 +537,20 @@ impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
             self.c.bbo_rr = (ix + 1) % n.max(1);
             if backlog > usize::from(v.params().conflate_backlog) {
                 // Conflate up to 32 records: keep the last Bbo per inst.
-                let mut batch: Vec<InputSlot> = Vec::with_capacity(CONFLATE_TAKE);
-                for _ in 0..CONFLATE_TAKE {
-                    let mut s = InputSlot::with_capacity(128);
-                    if !self.io.pop(RingId::Bbo(ix), &mut s) {
+                let mut insts = [InstId(0); CONFLATE_TAKE];
+                let mut count = 0;
+                for (s, i) in self.conf_slots.iter_mut().zip(&mut insts) {
+                    if !self.io.pop(RingId::Bbo(ix), s) {
                         break;
                     }
-                    batch.push(s);
+                    *i = s.read::<hft_event::Bbo>().map_or(InstId(0), |b| b.h.inst);
+                    count += 1;
                 }
                 if let Some(u) = self.c.bbo_per.get_mut(usize::from(ix)) {
-                    *u += batch.len() as u16;
+                    *u += count as u16;
                 }
-                let insts: Vec<InstId> = batch
-                    .iter()
-                    .map(|s| s.read::<hft_event::Bbo>().map_or(InstId(0), |b| b.h.inst))
-                    .collect();
-                let mut kept: Vec<(InputSlot, InstId)> = Vec::new();
-                for (k2, s) in batch.into_iter().enumerate() {
+                let insts = insts.get(..count).unwrap_or(&[]);
+                for (k2, s) in self.conf_slots.iter_mut().take(count).enumerate() {
                     let i = insts.get(k2).copied().unwrap_or(InstId(0));
                     let later = insts.iter().skip(k2 + 1).any(|x| *x == i);
                     if later {
@@ -561,17 +558,12 @@ impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
                         continue;
                     }
                     let dup = insts.iter().take(k2).any(|x| *x == i);
-                    let mut s = s;
                     if dup {
                         s.flags = RecordFlags(s.flags.0 | RecordFlags::CONFLATED.0);
                     }
-                    kept.push((s, i));
+                    self.conf.push_back(k2);
                 }
-                self.conf.extend(kept);
-                self.conf_ring = Some(ix);
-                if let Some((s, _)) = self.conf.pop_front() {
-                    *out = s;
-                    out.tsc = self.io.tsc();
+                if self.pop_conflated(out) {
                     if self.quarantined(out) {
                         return self.take_bbo(out, v);
                     }
@@ -589,6 +581,18 @@ impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
             }
         }
         false
+    }
+
+    fn pop_conflated(&mut self, out: &mut InputSlot) -> bool {
+        let Some(ix) = self.conf.pop_front() else {
+            return false;
+        };
+        let Some(s) = self.conf_slots.get(ix) else {
+            return false;
+        };
+        out.set_bytes(s.kind, s.flags, self.io.tsc(), s.body());
+        out.seq = s.seq;
+        true
     }
 
     fn take_advice(&mut self, out: &mut InputSlot) -> bool {
@@ -671,9 +675,10 @@ impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
         None
     }
 
-    fn handed(&mut self, out: &InputSlot, r: Option<RingId>) -> bool {
+    fn handed(&mut self, _out: &InputSlot, r: Option<RingId>) -> bool {
         self.took_any = true;
-        self.taken_log.push((out.kind, r));
+        #[cfg(feature = "testing")]
+        self.taken_log.push((_out.kind, r));
         self.io.after_take(r);
         true
     }
@@ -755,18 +760,15 @@ impl<S: StrategySet, IO: LiveIo<S>> Driver<S> for LiveDriver<S, IO> {
         self.rings_empty_at_begin = self.all_rings_empty();
         // Staged FeedCmd first.
         if !self.feed_stage.is_empty() {
-            let staged = core::mem::take(&mut self.feed_stage);
-            let mut rest = Vec::with_capacity(staged.len());
             let mut blocked = false;
-            for (venue, c) in staged {
-                if blocked || !self.io.push_feed(venue, &c) {
-                    blocked = true;
-                    rest.push((venue, c));
-                }
-            }
-            self.feed_stage = rest;
+            self.feed_stage.retain(|(venue, c)| {
+                blocked = blocked || !self.io.push_feed(*venue, c);
+                blocked
+            });
         }
         if !self.started {
+            self.kf_done
+                .reserve(v.engine().rd.inst_count().saturating_sub(self.kf_done.len()));
             self.exclusive = true;
             return;
         }
@@ -794,8 +796,7 @@ impl<S: StrategySet, IO: LiveIo<S>> Driver<S> for LiveDriver<S, IO> {
     fn take(&mut self, v: &DriverView<'_>, out: &mut InputSlot) -> bool {
         // Synthetic inputs (SendReport{RingFull}) go first.
         if let Some(s) = self.synth.pop_front() {
-            *out = s;
-            out.tsc = self.io.tsc();
+            out.set(RecordFlags(0), self.io.tsc(), &s);
             return self.handed(out, None);
         }
         loop {

@@ -1,0 +1,15 @@
+# Reference-host budgets from README, unchanged. Criterion reports relative timings only.
+["bench_classify_bitget"]
+p50_ns = 30
+p99_ns = 60
+allocs = 0
+
+["bench_decode_bitget_books1"]
+p50_ns = 400
+p99_ns = 800
+allocs = 0
+
+["bench_decode_bitget_books1/spot"]
+p50_ns = 400
+p99_ns = 800
+allocs = 0

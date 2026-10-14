@@ -307,6 +307,7 @@ spec: README.md
   - 每次停止前最后处理的 cell 之后,剩余容量至少有一项低于单 cell 上限(orders 4、cancels 4、cancel_resting 4、decisions 6、notify 2、broken 1、timers 3、notes 3)
   - 步骤 2 结束后,全部批次的 `ExecDecision` 拼接与容量无限的一次 `advance` 逐条相同(64 条 `ForceStep{Engine/Step}`,无重复、无缺失)
 - 实现:`crates/hft-exec/tests/output.rs::exe_022_advance_continue`
+- 稀疏位图回归:`crates/hft-exec/tests/output.rs::exe_022_sparse_words_continue`;130 个组仅标记 cix 0、63、64、129,跨 word 与 Continue 后订单顺序不变,决策与通知同容量充足时逐条相同。
 
 ### EXE-023 同一 advance 内同一 (account, inst) 的 cancel_resting 只写一条
 
@@ -4031,7 +4032,7 @@ spec: README.md
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
 - 里程碑:M2
-- 基准名:`exec_step/hold`
+- 基准名:`exec_step/hold`、`exec_step/hold/1024_cells`(同一活动 cell,其余 cell 未标记)
 - 实现:`crates/hft-exec/benches/exec.rs::exe_481_exec_step_hold`
 
 ### EXE-482 基准:advance 产生一笔配对第一腿(2 腿、各 10 档)

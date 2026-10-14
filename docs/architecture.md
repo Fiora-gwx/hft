@@ -4,7 +4,7 @@
 
 ## 1. 一句话
 
-交易主机上运行同一个 Rust 热进程二进制的实例:**feed 任务 → SPSC 环 → 单写者 sequencer(序号、journal、簿、策略快速部分、执行层、风控、OMS)→ SPSC 环 → gw 任务**;任务到线程与核的映射是按主机类配置的线程计划。策略是静态编译进同一二进制的策略包(只依赖策略 SDK);策略的慢速部分在 advisor 线程运行,结果以 `Advice` 事件经 journal 回到 sequencer。慢的一切是只读 journal 的冷进程,只能经 ctl-gateway 写入一条被记录的控制环。状态 = f(journal)。
+交易主机上运行同一个 Rust 热进程二进制的实例:**feed 任务 → SPSC 环 → 单写者 sequencer(序号、journal、簿、策略快速部分、执行层、风控、OMS)→ SPSC 环 → gw 任务**;任务按主机类配置映射到线程与核。策略是静态编译进同一二进制的策略包(只依赖策略 SDK);策略的慢速部分在 advisor 线程运行,结果以 `Advice` 事件经 journal 回到 sequencer。慢的一切是只读 journal 的冷进程,只能经 ctl-gateway 写入一条被记录的控制环。状态 = f(journal)。
 
 ## 2. 部署单元
 
@@ -64,6 +64,8 @@ warm 任务(不在 tick-to-trade 路径,不占热核)
 分段名与主机内预算(`tick_to_trade`、回报触发下一单的 `rep_to_order` 及其对冲子集 `hedge_host`)唯一归属 [latency-budget](latency-budget.md)。不做"每 tick 空跑下单路径",**不对真实连接预加密**([T5、T6](hot-path-rules.md#线程t))。
 
 ## 5. 状态所有权
+
+[合并缓冲](../crates/hft-sequencer/README.md#bbo-合并与-conflated)归 LiveDriver。
 
 | 状态 | 唯一写者 | 其他线程/进程如何看到 |
 |---|---|---|

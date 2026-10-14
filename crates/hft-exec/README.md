@@ -373,6 +373,8 @@ pub struct AcctState {                           // 每账户
 
 ### 推进(`advance` 中每个 cell,O(n_legs) + 每腿 ≤ `depth_levels` 档)
 
+`advance` 按待推进位图的 word 升序枚举置位的 cix,跳过整段未置位的 cell;Live 先于 Sim,同类内保持 cix 升序。当前批次与下一批次的标记分开保存,容量不足时保留未访问位,由 Continue 接续。
+
 0. 该账户 `force_req` 非空 → 先按"保证金危急的默认减仓"设定引擎目标(含无组 cell),清 `force_req`。
 1. `state == Broken` 且无引擎目标、`auto_fix.phase ∉ {Primed 且已到期, Running}` → 跳过;或该 cell 不是因成交/链接/模式/风控/新目标被标记且 `now < wake_at` → 跳过(到期由定时器重新标记)。Broken 的 cell 走"Broken 处置"一节的步骤,不走下面 2–8。
 2. 每腿读 `pos_i = legs.leg[i].net`、`infl_i = legs.leg[i].inflight_immediate`(无组 cell:ledger 仓位与 `own_infl[i]`);`eff_i = pos_i + infl_i`;`diff_i = target_i − eff_i`。
@@ -868,7 +870,7 @@ const _: () = assert!(size_of::<ExecRowHdr>() == 8 && size_of::<LegRef>() == 32 
 | 入口 | p50 | p99 | 基准名 |
 |---|---|---|---|
 | `touch_inst`,该 inst 无活动 cell(绝大多数 tick) | ≤ 8 ns | ≤ 20 ns | `exec_step/idle` |
-| `advance` 推进一个活动 cell、无切片 | ≤ 60 ns | ≤ 150 ns | `exec_step/hold` |
+| `advance` 推进一个活动 cell、无切片(小表 / 1 024 cell 稀疏表) | ≤ 60 ns | ≤ 150 ns | `exec_step/hold`、`exec_step/hold/1024_cells` |
 | `advance` 推进一个活动 cell 并产生一笔配对第一腿(2 腿、各 ≤ 10 档深度) | ≤ 300 ns | ≤ 800 ns | `exec_step/slice_pair` |
 | `advance` 推进一个 Broken cell 并产生一片自动有界平仓 | ≤ 200 ns | ≤ 500 ns | `exec_step/auto_fix` |
 | `set_target`(校验 + 登记,含"更接近 0"与 `pair_lot`) | ≤ 80 ns | ≤ 200 ns | `exec/set_target` |

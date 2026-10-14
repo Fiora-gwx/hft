@@ -596,8 +596,8 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
         let mut any = false;
         // Market entries of this instance (CSR row order: dispatch position, gix).
         if let Some(m) = market {
-            let entries = inst.subs.fast_entries(m.inst(), ix16);
-            if !entries.is_empty() {
+            let mut entries = inst.subs.fast_entries(m.inst(), ix16).peekable();
+            if entries.peek().is_some() {
                 let Some(slot) = inst.slots.get_mut(ix) else {
                     continue;
                 };
@@ -606,14 +606,14 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
                     slot.bufs.begin();
                     any = true;
                 }
-                for (gix, mask) in entries.iter() {
+                for (gix, mask) in entries {
                     if !mask.contains(m.mask()) {
                         continue;
                     }
                     e.trace
-                        .rec("deliver.market", u64::from(slot.id.0), u64::from(*gix));
+                        .rec("deliver.market", u64::from(slot.id.0), u64::from(gix));
                     let v = full_views(e);
-                    let ev = market_ev(&m, *gix, &e.market);
+                    let ev = market_ev(&m, gix, &e.market);
                     S::on_event(
                         st,
                         &ev,

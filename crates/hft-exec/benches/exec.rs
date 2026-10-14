@@ -36,6 +36,22 @@ fn exe_481_exec_step_hold(c: &mut Criterion) {
             fx.out.clear();
         })
     });
+    // Same one-cell work with a sparse pending bitmap and the recovery upper-bound table.
+    // This exposes whole-table scans that the small fixture cannot distinguish.
+    let mut fx = fx_many(1021);
+    let group = many(1000);
+    let mut target = t0("10", "-10");
+    target.group = group;
+    let order = fx.go(&target).orders[0];
+    fx.placed(&order);
+    let now = Views::now(&fx.v.m);
+    c.bench_function("exec_step/hold/1024_cells", |x| {
+        x.iter(|| {
+            fx.ex.touch_cell(A1, group);
+            fx.ex.advance(&fx.v, now, &mut fx.out);
+            fx.out.clear();
+        })
+    });
 }
 
 /// Advance of (a, g) from the saved cell state, `n` times per iteration batch.

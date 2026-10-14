@@ -4619,6 +4619,7 @@ SEQ-158 补充验收:RateOnly 的实额输入替换已有合成额,重复实额�
   - sequencer 线程上的分配与释放次数均为 0;被替换的参数对象经 `retire` 交出,不在本线程 drop
 - 回报路径回归:`tests/sdk_alloc.rs::seq_315_order_reports_reuse_hot_buffers` 覆盖 Ack、部分/全部成交、重复回报与成交后 Reject;扣除内存 journal 测试接收器的逐记录分配后,引擎分配为零。全量混合 Input 验收仍归 M3。
 - 实现:`crates/hft-sequencer/tests/sdk_alloc.rs::seq_315_order_reports_reuse_hot_buffers`
+- 行情与驱动回归:`crates/hft-sequencer/tests/sdk_alloc.rs::seq_315_live_driver_buffers`;有 Live L2 簿与 funding 时刻时重复处理 70 条同品种 BBO,覆盖合并与三个订阅者投递,最终更新号与 CONFLATED 保留;feed 重试与 RingFull 合成回报同样扣除测试 journal 的逐记录分配后为零。
 
 ### SEQ-316 sequencer 线程在稳态下不做系统调用
 

@@ -94,6 +94,7 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 | `bench_classify_okx` | venue-okx | [venue-okx 延迟与资源契约](../crates/venue-okx/README.md#延迟与资源契约) | OKX-500 |
 | `bench_classify_usdm` | venue-binance | [venue-binance 延迟与资源契约](../crates/venue-binance/README.md#延迟与资源契约) | BIN-500 |
 | `bench_decode_bitget_books1` | venue-bitget | [venue-bitget 延迟与资源契约](../crates/venue-bitget/README.md#延迟与资源契约) | BGT-501 |
+| `bench_decode_bitget_books1/spot` | venue-bitget | [venue-bitget 延迟与资源契约](../crates/venue-bitget/README.md#延迟与资源契约) | BGT-501 |
 | `bench_decode_bitget_books15` | venue-bitget | [venue-bitget 延迟与资源契约](../crates/venue-bitget/README.md#延迟与资源契约) | BGT-502 |
 | `bench_decode_bitget_order` | venue-bitget | [venue-bitget 延迟与资源契约](../crates/venue-bitget/README.md#延迟与资源契约) | BGT-504 |
 | `bench_decode_bookticker` | venue-binance | [venue-binance 延迟与资源契约](../crates/venue-binance/README.md#延迟与资源契约) | BIN-502 |
@@ -151,6 +152,7 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 | `exec/set_target` | hft-exec | [hft-exec 延迟与资源契约](../crates/hft-exec/README.md#延迟与资源契约) | EXE-484 |
 | `exec_step/auto_fix` | hft-exec | [hft-exec 延迟与资源契约](../crates/hft-exec/README.md#延迟与资源契约) | EXE-483 |
 | `exec_step/hold` | hft-exec | [hft-exec 延迟与资源契约](../crates/hft-exec/README.md#延迟与资源契约) | EXE-481 |
+| `exec_step/hold/1024_cells` | hft-exec | [hft-exec 延迟与资源契约](../crates/hft-exec/README.md#延迟与资源契约) | EXE-481 |
 | `exec_step/idle` | hft-exec | [hft-exec 延迟与资源契约](../crates/hft-exec/README.md#延迟与资源契约) | EXE-480 |
 | `exec_step/slice_pair` | hft-exec | [hft-exec 延迟与资源契约](../crates/hft-exec/README.md#延迟与资源契约) | EXE-482 |
 | `feed-ingest` | benchmarks | [路径基准与门槛](#路径基准与门槛) | —(路径基准,本页) |
@@ -459,6 +461,7 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 
 ## 延伸阅读
 
+- [Windows 开发机热点测量与前后对照(2026-10-15)](reports/2026-10-15-windows-hotpath.md)(诊断报告,非参考机验收)
 - [latency-budget.md](../docs/latency-budget.md)、[testing.md](../docs/testing.md)、[hot-path-rules.md](../docs/hot-path-rules.md)
 - [architecture-v2/00](../design/00-目标与延迟预算.md)、[03 §7](../design/03-网络与传输层.md)、[09 §2](../design/09-可观测性、风控与控制面.md)、[10 §5](../design/10-语言分工与代码组织.md)、[11 实施路线图](../design/11-实施路线图.md)(M1.5 延迟探针)、[research/04 §7](../design/research/04-oss-frameworks-and-patterns.md)
 - DSH 样例:`architecture-v2/research/_dsh/benchmarks_AGENTS.md`

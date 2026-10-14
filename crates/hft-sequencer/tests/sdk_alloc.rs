@@ -24,6 +24,120 @@ use crate::common::*;
 static ALLOC: CountingAlloc = CountingAlloc;
 
 #[test]
+fn seq_315_live_driver_buffers() {
+    use hft_event::{FeedCmd, RecordFlags};
+    use hft_sequencer::Driver;
+    use hft_sequencer::driver::live::RingId;
+    use hft_sequencer::types::OutRecord;
+    use zerocopy::FromZeros;
+
+    reset_script();
+    let mut boot = b0();
+    boot.rd.insts.iter_mut().find(|i| i.id == A1).unwrap().l2_depth = 20;
+    let mut h = boot.boot();
+    h.bring_up(false);
+    SCRIPT.with(|s| s.borrow_mut().quiet = true);
+    h.io().handed.reserve(20_000);
+    h.io().feed.reserve(20_000);
+    h.io().j.segments.last_mut().unwrap().records.reserve(20_000);
+    h.s.driver_mut().taken_log.reserve(20_000);
+
+    // Keep a subscribed funding row and a live L2 book while exercising the scheduler.
+    let now = h.now();
+    h.s.engine_mut().market.row_mut(B1).unwrap().next_funding_ns = UTC0 + 100 * 1_000_000_000;
+    {
+        let book = h.s.engine_mut().books.l2_mut(A1).expect("allocated L2 book");
+        let mut hdr = hft_event::L2SnapHdr::new_zeroed();
+        hdr.h.inst = A1;
+        hdr.h.venue = A;
+        hdr.snap_id = 1;
+        hdr.origin = hft_event::L2SnapHdr::EXCHANGE;
+        hdr.n_bids = 1;
+        hdr.n_asks = 1;
+        book.apply_snapshot(
+            &hdr,
+            &[
+                hft_event::Level {
+                    px: px("50000"),
+                    qty: q("1"),
+                },
+                hft_event::Level {
+                    px: px("50002"),
+                    qty: q("1"),
+                },
+            ],
+        );
+        assert_eq!(book.state(), hft_book::BookState::Live);
+    }
+    h.run();
+    for batch in 0..4u64 {
+        for k in 0..70u64 {
+            h.push(
+                RingId::Bbo(0),
+                &bbo(A1, A, 0, "50000", "50002", 10_000 + batch * 70 + k, now),
+            );
+        }
+        let before = h.mark();
+        let scope = CountingAlloc::scope();
+        h.run();
+        let allocations = scope.allocs();
+        let sink_bodies = (h.mark() - before) as u64;
+        eprintln!(
+            "driver allocation profile: batch={batch} engine_allocs={} records={sink_bodies}",
+            allocations - sink_bodies
+        );
+        assert_eq!(allocations, sink_bodies, "engine allocated in BBO batch {batch}");
+        // The final record must retain the real final update, independent of buffer reuse.
+        assert_eq!(h.s.engine().books.top(A1).update_id, 10_069 + batch * 70);
+        assert!(h.j().records().any(|r| r.flags.contains(RecordFlags::CONFLATED)));
+    }
+
+    h.io().feed_free = Some(0);
+    let cmd = FeedCmd::Subscribe { inst: A1, streams: 1 };
+    h.s.driver_mut().emit(&OutRecord::FeedCtl(A, &cmd));
+    h.io().feed_free = Some(1);
+    let before = h.mark();
+    let scope = CountingAlloc::scope();
+    h.run();
+    let allocations = scope.allocs();
+    let sink_bodies = (h.mark() - before) as u64;
+    eprintln!(
+        "driver allocation profile: staged_feed engine_allocs={}",
+        allocations - sink_bodies
+    );
+    assert_eq!(
+        allocations, sink_bodies,
+        "engine allocated while retrying FeedCmd"
+    );
+    assert_eq!(h.io_ref().feed.last(), Some(&(A, cmd)));
+
+    let ring = hft_sequencer::OutRing::Venue(A);
+    h.io().out_free.insert(ring, 0);
+    let mut cmd = hft_event::GwCmd::set_epoch(1, false, 0);
+    cmd.op = hft_event::GwOp::Query;
+    cmd.account = AC1;
+    let before = h.mark();
+    let scope = CountingAlloc::scope();
+    h.s.driver_mut().emit(&OutRecord::Out(ring, &cmd));
+    h.run();
+    let allocations = scope.allocs();
+    assert_eq!(
+        allocations,
+        (h.mark() - before) as u64,
+        "synthetic SendReport allocated"
+    );
+    let report = h
+        .since(before)
+        .into_iter()
+        .find(|r| r.kind == hft_event::EventKind::SEND_REPORT)
+        .unwrap();
+    assert_eq!(
+        report.read::<hft_event::SendReport>().unwrap().status,
+        hft_event::SendStatus::RingFull
+    );
+}
+
+#[test]
 fn seq_315_order_reports_reuse_hot_buffers() {
     reset_script();
     let mut h = b0().boot();

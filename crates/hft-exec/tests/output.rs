@@ -175,6 +175,39 @@ fn exe_023_cancel_resting_dedup() {
     }
 }
 
+#[test]
+fn exe_022_sparse_words_continue() {
+    fn run(caps: OutCaps) -> Rec {
+        let mut fx = fx_many(130);
+        for k in [0, 63, 64, 129] {
+            fx.spot(A1, A, many(k), "0", "100000");
+            let mut tg = t0("10", "-10");
+            tg.group = many(k);
+            inject(&mut fx, &tg);
+            fx.ex.touch_cell(A1, many(k));
+        }
+        fx.out = ExecOut::with_caps(caps);
+        let mut all = fx.adv();
+        for _ in 0..8 {
+            if !fx.ex.has_pending() {
+                break;
+            }
+            fx.fire(ExecTimerKind::Continue, hft_types::AccountId(0), GNONE);
+            all.extend(fx.adv());
+        }
+        assert!(!fx.ex.has_pending());
+        assert_eq!(
+            all.orders.iter().map(|o| o.id.cix).collect::<Vec<_>>(),
+            [0, 63, 64, 129]
+        );
+        all
+    }
+    let bounded = run(OutCaps::README);
+    let reference = run(OutCaps::all(4096));
+    assert_eq!(norm(&bounded.decisions), norm(&reference.decisions));
+    assert_eq!(bounded.notify, reference.notify);
+}
+
 /// g7 Broken with a Running auto-fix slice (sell S) in flight.
 pub fn running_autofix(fx: &mut Fx, budget: &str, done: &str, n: u8) -> hft_strategy_sdk::OrderRef {
     let r0 = hft_strategy_sdk::OrderRef::new(A, A1, 77, 1);
