@@ -1315,7 +1315,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - 同一 Input 内第二腿 `OrderDecision{P1 卖, qty 0.049}`(0.0499 按 lot 0.001 向零取整),`HedgeRequest.hedge_cap_qty = 0.0509`;`residual[g1][P1] = 0.0009`
   - 第二腿成交后已成交裸量 0.0009 BTC(54 USDT > 5)而比例 0.0009 / 0.0499 ≈ 0.018 < 0.02:场景结束前无 `ExecDecision{HedgeFix}`
   - 每步 INV-8、INV-16 成立
-- 实现:`crates/hft-testkit/src/scenarios/exec_correctness.rs::b4_base_asset_fee_hedges_net_qty`
+- 实现:`crates/hft-sequencer/tests/scenarios_oms.rs::b4_base_asset_fee_hedges_net_qty`
+- 备注:B4.1 在同一函数;B4.2 待 W1 种子化 DST(需 probe-target 的退出目标);实现方式同 B1(真实 sequencer 在 B0 夹具上的确定性步骤序列,映射与阈值见该文件头)
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -2293,7 +2294,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - `Fill` 那条 Input 内:s1 `PendingNew → Filled`,槽置 `FILL_BEFORE_ACK` 与 `ACKED`;`FillOut{qty = 0.01, net_qty = 0.01}`;ledger `S1` 库存 0.01、USDT −600.6;同一 Input 内 `OrderDecision{New, P1, Sell, qty = 0.01, px = 59,980.0, tif = Ioc, link_role = Second}`(限价 = max(60,010.0 × (1 − 0.0005), 60,010.05 × (1 − 0.002)) 向上取整到 0.1);合成一条 `LatencySample{action = New}`
   - `Ack` 那条 Input:没有 `Note{OmsTransition}`,`OmsStats` 的 dup 计数加 1;无 `FillOut`、无 `OrderDecision`;ledger 与 LegTracker 不变;不再合成 `LatencySample`
   - INV-2、INV-8、INV-19
-- 实现:`crates/hft-testkit/src/scenarios/failpath.rs::fp_3_fill_before_ack_goes_filled`
+- 实现:`crates/hft-sequencer/tests/scenarios_oms.rs::fp_3_fill_before_ack_goes_filled`
+- 备注:FP-3.1、FP-3.2 见 `fp_3_1_partial_before_ack_and_duplicate_fill`;实现方式同 B1(真实 sequencer 在 B0 夹具上的确定性步骤序列,映射与阈值见该文件头)
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -2317,7 +2319,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - `Fill` 那条 Input:s1 `Unknown → Filled`;`FillOut{qty = 0.01}`;ledger `S1` 库存 +0.01(记 `GROUP_NONE`);给实例 1 的 `OrderUpdate{Filled(0.01)}`
   - 随后到达的 `QueryResult{Filled, cum_filled = 0.01}`:终态,只计 dup,无 `FillOut`
   - 场景结束时 s1 的 `OrderDecision{Cancel}` 恰好一条;INV-1、INV-2、INV-7
-- 实现:`crates/hft-testkit/src/scenarios/failpath.rs::fp_4_cancel_reject_filled_no_retry`
+- 实现:`crates/hft-sequencer/tests/scenarios_oms.rs::fp_4_cancel_reject_filled_no_retry`
+- 备注:FP-4.1、FP-4.2 在同一函数;终态槽上的 `QueryResult` 按 hft-oms 回报处理表"仅应用成交增量",不计 `dup`;实现方式同 B1(真实 sequencer 在 B0 夹具上的确定性步骤序列,映射与阈值见该文件头)
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -2421,8 +2424,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - `Unknown` 期间:没有 `SecondRetry`、没有 `Reverse`;`venue_ready(VP, a) = false`,`a` 在 `VP` 上的 Open 被拒(`VENUE_NOT_READY`)
   - `QueryResult` 那条 Input:`Unknown → Filled`;`FillOut{qty = 0.01}`;链接 `Done`;`Note{OmsVenueReady}` 一条
   - INV-1、INV-4、INV-19
-- 实现:`crates/hft-testkit/src/scenarios/failpath.rs::fp_9_unregistered_code_goes_unknown`
-- 备注:各 venue 对未登记码产出 `OutcomeUnknown` 的映射由 hft-venue-proto 契约 8 的检查与各 `venue-*` 金样覆盖
+- 实现:`crates/hft-sequencer/tests/scenarios_oms.rs::fp_9_unregistered_code_goes_unknown`
+- 备注:各 venue 对未登记码产出 `OutcomeUnknown` 的映射由 hft-venue-proto 契约 8 的检查与各 `venue-*` 金样覆盖;FP-9.1、FP-9.2 见 `fp_9_1_query_rejected_then_retry`;实现方式同 B1(真实 sequencer 在 B0 夹具上的确定性步骤序列,映射与阈值见该文件头)
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -2447,7 +2450,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - 第一条 `now − sent_tsc > 2 000 ms` 的 NotFound 那条 Input:置 `HIST_WAIT`,写 `Note{OmsNeedsRestQuery, trades = 1}`;此后每次 `Timer{Oms, UnknownQuery}` 到期改为重写该 Note、不发 `Query`;`query_count` 不再增加
   - `history_checked = 0` 的条目只记录,s1 仍 `Unknown`
   - t = 10.0 s 的条目:s1 `Unknown → Rejected`(`reject_code = 0`,cause = `Reconcile`(13)),`OrderUpdate::Rejected{bits = 0, venue_code = 0}`;InflightBook 此时才释放;t < 10.0 s 的任何时刻 s1 都不是终态
-- 实现:`crates/hft-testkit/src/scenarios/failpath.rs::fp_10_notfound_waits_trade_history`
+- 实现:`crates/hft-sequencer/tests/scenarios_oms.rs::fp_10_notfound_waits_trade_history`
+- 备注:FP-10.2、FP-10.3 见 `fp_10_2_expire_at_rejects_unlinked_only`;FP-10.1、FP-10.4 待 W1 种子化 DST;实现方式同 B1(真实 sequencer 在 B0 夹具上的确定性步骤序列,映射与阈值见该文件头)
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -2492,8 +2496,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - 成交那条 Input:`FillOut{qty = 0.01, net_qty = 0.00999}`;ledger `S1` 库存 0.00999;LegTracker `S1` 腿 net +0.00999;第二腿 `qty = 0.009`(0.00999 按 `P1` lot 0.001 向零取整),`residual[g1][P1] = 0.00099`;第二腿的 `basis = 0.00999`、`hedge_cap_qty = 0.01099`
   - 第二条同样的链接(第一腿 0.01、扣 0.00001 BTC):第二腿 `qty = 0.010`(0.00999 + 0.00099 = 0.01098 向零取整),余数 0.00098
   - 第二腿与链接的对冲基数不出现毛量 0.01;INV-8
-- 实现:`crates/hft-testkit/src/scenarios/failpath.rs::fp_12_base_fee_hedges_net_qty`
-- 备注:跨组件期望见 B4
+- 实现:`crates/hft-sequencer/tests/scenarios_oms.rs::fp_12_base_fee_hedges_net_qty`
+- 备注:跨组件期望见 B4;FP-12.1 见 `fp_12_1_fee_only_corrects_net`;FP-12.2 待 W1 种子化 DST(需 probe-target 的退出目标);实现方式同 B1(真实 sequencer 在 B0 夹具上的确定性步骤序列,映射与阈值见该文件头)
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|

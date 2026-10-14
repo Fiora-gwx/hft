@@ -296,3 +296,121 @@ impl Order {
         }
     }
 }
+
+// ------------------------------------------------------------------------------- SendReport (B-1)
+
+use hft_event::{GwOp, SendStatus};
+use hft_oms::{OrderState, SlotFlags};
+
+/// The parts of a slot the `SendReport` table reads and writes.
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub struct SendSlot {
+    pub state: OrderState,
+    pub sflags: u16,
+    pub query_count: u8,
+}
+
+/// Expected effect of one `SendReport` on one slot (README "SendReport 处理", table form).
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub struct SendEffect {
+    pub state: OrderState,
+    /// Expected `sflags & flag_mask`.
+    pub flags: u16,
+    pub flag_mask: u16,
+    pub query_count: u8,
+    /// `OrderUpdate::Rejected{LOCAL_SEND_FAIL, status}` to the owner.
+    pub rejected: bool,
+    /// `Note{OmsCancelNotSent}` (one per report).
+    pub cancel_not_sent: bool,
+    /// A `Query` decision for this slot.
+    pub query: bool,
+    /// `Note{OmsNeedsRestQuery}`.
+    pub needs_rest: bool,
+}
+
+const MASK: u16 = SlotFlags::CANCEL_SENT | SlotFlags::AMEND_SENT | SlotFlags::VERIFY;
+
+impl SendEffect {
+    pub fn unchanged(s: &SendSlot) -> SendEffect {
+        SendEffect {
+            state: s.state,
+            flags: s.sflags & MASK,
+            flag_mask: MASK,
+            query_count: s.query_count,
+            rejected: false,
+            cancel_not_sent: false,
+            query: false,
+            needs_rest: false,
+        }
+    }
+}
+
+/// The naive table: `(op, status)` → effect on slot `s` (for `CancelAll`, `s` is any slot of the
+/// table; only `PendingCancel` slots with `CANCEL_SENT` are in its range).
+pub fn send_report_table(s: &SendSlot, op: GwOp, st: SendStatus) -> SendEffect {
+    let mut e = SendEffect::unchanged(s);
+    let written = st == SendStatus::Written;
+    let wr_err = st == SendStatus::WriteError;
+    let open = !matches!(
+        s.state,
+        OrderState::Filled | OrderState::Cancelled | OrderState::Rejected | OrderState::Free
+    );
+    match op {
+        GwOp::Place => {
+            if !written && s.state == OrderState::PendingNew {
+                e.flag_mask = 0;
+                e.flags = 0;
+                if wr_err {
+                    e.state = OrderState::Unknown;
+                    e.query = true;
+                } else {
+                    e.state = OrderState::Rejected;
+                    e.rejected = true;
+                }
+            }
+        }
+        GwOp::Cancel | GwOp::Amend => {
+            if !written {
+                if wr_err {
+                    if open {
+                        e.flags |= SlotFlags::VERIFY;
+                        e.query = true;
+                    }
+                } else {
+                    let f = if op == GwOp::Cancel {
+                        SlotFlags::CANCEL_SENT
+                    } else {
+                        SlotFlags::AMEND_SENT
+                    };
+                    e.flags &= !f;
+                    e.cancel_not_sent = true;
+                }
+            }
+        }
+        GwOp::Query => {
+            if written {
+                e.query_count = s.query_count.saturating_add(1);
+            } else if st == SendStatus::QueryUnsupported {
+                e.needs_rest = true;
+            }
+        }
+        GwOp::CancelAll => {
+            if !written {
+                let hit = s.state == OrderState::PendingCancel && s.sflags & SlotFlags::CANCEL_SENT != 0;
+                if wr_err {
+                    if hit {
+                        e.flags |= SlotFlags::VERIFY;
+                        e.query = true;
+                    }
+                } else {
+                    if hit {
+                        e.flags &= !SlotFlags::CANCEL_SENT;
+                    }
+                    e.cancel_not_sent = true;
+                }
+            }
+        }
+        _ => {}
+    }
+    e
+}

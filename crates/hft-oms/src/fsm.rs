@@ -582,6 +582,16 @@ impl Oms {
             OrderState::Unknown
         };
         self.transition(ti, s, to, cause, now, seq, out);
+        // The rejected cancel/amend was answered: it is no longer in flight (scenarios FP-4).
+        // `Unknown` otherwise keeps both bits for a request the connection loss left unanswered.
+        if to == OrderState::Unknown {
+            let f = if cause == TransitionCause::CancelReject {
+                SlotFlags::CANCEL_SENT
+            } else {
+                SlotFlags::AMEND_SENT
+            };
+            self.clear_flag(ti, s, f);
+        }
     }
 
     fn set_eid_acked(&mut self, ti: usize, s: u32, eid: u64) {

@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 67e8233cc5f69e49d7105276a3b4296aeb72c292680351423e084660f2be6656 # shrinks to orders = [Ord { buy: true, lots: 1, fills: 1, feeless: false, fee_bp: 0, btc: false, when: Now, wrong_gen: false }]
+cc c0b252a14fe59a83eaeed04477474eee2e7799717e4a4706d4bbfa734de17eb3 # shrinks to orders = [Ord { buy: false, lots: 1, fills: 1, feeless: false, fee_bp: 0, btc: false, when: Now, wrong_gen: false }, Ord { buy: false, lots: 1, fills: 1, feeless: true, fee_bp: 1, btc: true, when: Later, wrong_gen: false }, Ord { buy: false, lots: 28, fills: 1, feeless: false, fee_bp: 0, btc: false, when: Now, wrong_gen: false }]
