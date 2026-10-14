@@ -16,12 +16,29 @@ impl Drop for Process {
 
 #[test]
 fn core_380_ready_precedes_gate_release_and_control_drain_stops_cleanly() {
+    control_drain(false);
+}
+
+#[test]
+fn core_308_drain_command_exit0() {
+    control_drain(true);
+}
+
+fn control_drain(trader: bool) {
     use std::os::unix::net::UnixDatagram;
     use std::sync::atomic::Ordering;
+    use zerocopy::FromBytes;
     let d = tempfile::tempdir().unwrap();
     let hot = tempfile::tempdir_in("/dev/shm").unwrap();
     let user = std::env::var("USER").unwrap();
     let path = support::write(d.path(), hot.path(), Some(&user));
+    if trader {
+        let principals = d.path().join("principals.toml");
+        let text = std::fs::read_to_string(&principals)
+            .unwrap()
+            .replace("Admin", "Trader");
+        std::fs::write(principals, text).unwrap();
+    }
     // Keep CLOCK closed throughout the test; READY announces usable control/journal,
     // not permission to trade. No exchange or external clock dependency is involved.
     let text = std::fs::read_to_string(&path)
@@ -43,8 +60,13 @@ fn core_380_ready_precedes_gate_release_and_control_drain_stops_cleanly() {
             .unwrap(),
     );
     let mut datagram = [0; 128];
-    let n = notify.recv(&mut datagram).unwrap();
-    assert_eq!(&datagram[..n], b"READY=1");
+    loop {
+        let n = notify.recv(&mut datagram).unwrap();
+        if &datagram[..n] == b"READY=1" {
+            break;
+        }
+        assert!(datagram[..n].starts_with(b"STATUS=Startup step "));
+    }
     let heartbeat = hft_rt::HeartbeatBlock::open_ro(&hot.path().join("sim/heartbeat")).unwrap();
     assert_eq!(heartbeat.hk.state.load(Ordering::Acquire), hft_rt::HkLine::WARMUP);
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -84,7 +106,13 @@ fn core_380_ready_precedes_gate_release_and_control_drain_stops_cleanly() {
     );
     // The final process teardown may close the socket after journal commit but before
     // the gateway can flush a response. The journal below is the completion authority.
-    let _ = ctl.send(&request, Duration::from_secs(3));
+    if trader {
+        let preview = ctl.preview(&request).unwrap();
+        assert_eq!(preview.code, Some(ResultCode::Applied), "{preview:?}");
+        let _ = ctl.confirm(&request, preview.ctl_state_version);
+    } else {
+        let _ = ctl.send(&request, Duration::from_secs(3));
+    }
     let status = loop {
         if let Some(status) = process.0.try_wait().unwrap() {
             break status;
@@ -100,11 +128,28 @@ fn core_380_ready_precedes_gate_release_and_control_drain_stops_cleanly() {
     let config = hft_core::config::load(&path, true).unwrap();
     let mut reader = hft_core::storage::reader(&config.cfg).unwrap();
     let mut result = false;
+    let mut drain_issuer = false;
+    let mut drain_snapshot = false;
     loop {
         match reader.poll() {
             hft_journal::Next::Record(r) if r.hdr.kind == hft_event::EventKind::CMD_RESULT.0 => {
                 let r = r.read::<hft_event::CmdResult>().unwrap();
                 result |= r.cmd == hft_event::CmdKind::DRAIN && r.status == ResultCode::Applied as u8;
+            }
+            hft_journal::Next::Event(event) if event.kind == hft_event::EventKind::CONTROL_CMD => {
+                let (hdr, cmd) = hft_event::ControlCmd::decode(event.body).unwrap();
+                if hdr.hflags & hft_event::CmdHdr::PREVIEW == 0
+                    && matches!(cmd, hft_event::ControlCmd::Drain { cancel_resting: true })
+                {
+                    let expected = format!("cli:{user}");
+                    assert_eq!(&hdr.issuer[..expected.len()], expected.as_bytes());
+                    assert_eq!(hdr.confirmed, u8::from(trader));
+                    drain_issuer = true;
+                }
+            }
+            hft_journal::Next::Event(event) if event.kind == hft_event::EventKind::STATE_SNAPSHOT => {
+                let (hdr, _) = hft_event::SnapshotHdr::read_from_prefix(event.body).unwrap();
+                drain_snapshot |= hdr.purpose == hft_sequencer::snapshot::PURPOSE_DRAIN;
             }
             hft_journal::Next::Record(_) | hft_journal::Next::Event(_) => {}
             hft_journal::Next::Err(e) => panic!("{e:?}"),
@@ -112,6 +157,10 @@ fn core_380_ready_precedes_gate_release_and_control_drain_stops_cleanly() {
         }
     }
     assert!(result, "Drain was not journaled as Applied");
+    assert!(
+        drain_issuer && drain_snapshot,
+        "Drain issuer and final snapshot must be durable"
+    );
 }
 
 #[test]

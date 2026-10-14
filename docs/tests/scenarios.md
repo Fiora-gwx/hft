@@ -1661,7 +1661,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - t ∈ (1 s, 20 s):本腿或链接腿为 `P1` 的 Open `reject = CLOSE_ONLY`;S1 单腿 Open(无链接)`reject = 0`;`P1` 的减仓与对冲单 `reject = 0`
   - t = 20 s 之后 `P1` 的 Open `reject = 0`
 - 实现:`apps/hft-core/tests/safety_scenarios.rs::c15_delisting_notice_blocks_open_on_inst`
-- 覆盖边界:B0 真实成交形成两腿后验证公告、链接腿门控、单腿开仓、减仓、对冲与 Resume。C15.1 的 FundingStats 与 W1 标准种子集待补。
+- 覆盖边界:B0 真实成交形成两腿后验证公告、链接腿门控、单腿开仓、减仓、对冲与 Resume。`c15_funding_period_reaches_stats_in_same_delivery` 验证 C15.1 的 SDK 资金费视图、实时 FundingStats 周期变化与折日化，独立回放 journal；不把预测费率记入账户余额。`tests/w1.rs::c15_w1_delisting_and_resume_matrix` 使用现有交易世界的三个种子验证限制设置/解除、真实成交与完整回放。W1 标准种子集及资金费故障矩阵待补；FundingStats 的预热与检查点状态见 [构件限制](../../crates/hft-strat-lib/README.md#已知限制与后续工作)。
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|

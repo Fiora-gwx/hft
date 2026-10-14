@@ -9,6 +9,9 @@ fn main() -> std::process::ExitCode {
             for e in &errors {
                 eprintln!("{e}");
             }
+            if errors.iter().any(|e| e.exit == 134) {
+                std::process::abort();
+            }
             std::process::ExitCode::from(errors.first().map_or(2, |e| e.exit))
         }
     }
@@ -56,6 +59,10 @@ fn run() -> Result<u8, Vec<Error>> {
         }
     }
     let path = path.ok_or_else(usage)?;
+    let mut startup = hft_core::startup::Serial::default();
+    if !check {
+        startup.enable_status().map_err(|e| vec![e])?;
+    }
     let secrets = if check || dry {
         hft_core::secrets::SecretFiles::default()
     } else {
@@ -66,7 +73,7 @@ fn run() -> Result<u8, Vec<Error>> {
             hft_core::secrets::SecretFiles::default()
         }
     };
-    let loaded = hft_core::config::load(&path, dry)?;
+    let loaded = hft_core::config::load_timed(&path, dry, startup)?;
     if check {
         println!("hft-core: configuration valid");
         return Ok(0);

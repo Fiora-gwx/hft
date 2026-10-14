@@ -42,8 +42,13 @@ fn signal_drain(signal: i32, directed: bool, cancel: bool) {
             .unwrap(),
     );
     let mut buf = [0; 256];
-    let n = notify.recv(&mut buf).unwrap();
-    assert_eq!(&buf[..n], b"READY=1");
+    loop {
+        let n = notify.recv(&mut buf).unwrap();
+        if &buf[..n] == b"READY=1" {
+            break;
+        }
+        assert!(buf[..n].starts_with(b"STATUS=Startup step "));
+    }
     let pid = process.0.id() as i32;
     let expected_mask = [libc::SIGTERM, libc::SIGINT, libc::SIGHUP]
         .into_iter()

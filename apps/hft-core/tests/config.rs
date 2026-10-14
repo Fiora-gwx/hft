@@ -173,6 +173,7 @@ fn core_012_control_adapter_reaches_live_sequencer() {
         update: 0,
     };
     let env = io::Io {
+        startup: Default::default(),
         journal: MemJournal::new(l.setup.clock),
         clock,
         ctl: io::Inputs::new(ctl_rx),

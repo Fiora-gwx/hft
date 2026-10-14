@@ -19,6 +19,22 @@ pub fn write(root: &Path, hot: &Path, user: Option<&str>) -> PathBuf {
 }
 
 pub fn write_for_kind(root: &Path, hot: &Path, user: Option<&str>, kind: Option<u16>) -> PathBuf {
+    write_mode(root, hot, user, kind, false, false)
+}
+
+#[allow(dead_code)]
+pub fn write_live(root: &Path, hot: &Path, is_prod: bool) -> PathBuf {
+    write_mode(root, hot, None, None, true, is_prod)
+}
+
+fn write_mode(
+    root: &Path,
+    hot: &Path,
+    user: Option<&str>,
+    kind: Option<u16>,
+    live: bool,
+    is_prod: bool,
+) -> PathBuf {
     std::fs::create_dir_all(root).unwrap();
     let v = VenueId::BINANCE_SPOT;
     let a = AccountId(1);
@@ -216,32 +232,40 @@ pub fn write_for_kind(root: &Path, hot: &Path, user: Option<&str>, kind: Option<
     });
     b.account(AccountSpec {
         id: a,
-        sim: true,
+        sim: !live,
         bound_instance: StrategyId(1),
-        is_prod: false,
+        is_prod,
         venues: (1 << v.0) | if second { 1 << other.0 } else { 0 },
         label: "paper".into(),
         uid_policy: UidPolicy::Verified,
     });
-    b.sim(SimSpec {
-        account: a,
-        fee_tier: 0,
-        latency_model: 0,
-        margin_model: 0,
-    });
-    b.sim_balance(SimBalanceSpec {
-        account: a,
-        venue: v,
-        asset: usdt,
-        qty: Qty(100_000_000_000),
-    });
-    if second {
+    if live {
+        b.account_venue(AccountVenueSpec {
+            account: a,
+            venue: v,
+            uid: "123".into(),
+        });
+    } else {
+        b.sim(SimSpec {
+            account: a,
+            fee_tier: 0,
+            latency_model: 0,
+            margin_model: 0,
+        });
         b.sim_balance(SimBalanceSpec {
             account: a,
-            venue: other,
+            venue: v,
             asset: usdt,
             qty: Qty(100_000_000_000),
         });
+        if second {
+            b.sim_balance(SimBalanceSpec {
+                account: a,
+                venue: other,
+                asset: usdt,
+                qty: Qty(100_000_000_000),
+            });
+        }
     }
     let rdb = b.finish();
     let rd = RefData::load(&rdb, None).unwrap();
@@ -392,6 +416,11 @@ pub fn write_for_kind(root: &Path, hot: &Path, user: Option<&str>, kind: Option<
     engine.feeds = VenueSet((1 << v.0) | if second { 1 << other.0 } else { 0 });
     engine.seq.rings[7] = hft_sequencer::RingLimit::default();
     engine.seq.allow_missing_standby = 1;
+    if live {
+        engine.role_prod = true;
+        engine.gws.venues = vec![v];
+        engine.keys_required = vec![(a, v, 3)];
+    }
     engine.exec.default.force_slice.max_chunk_notional = Notional(100_000_000);
     let ecf = engine.encode_blob(1, HostClass::Dev2, 0);
     let principals = user.map_or_else(String::new, |u| {
@@ -485,6 +514,32 @@ qty_raw = 200000000
         );
     }
     let path = root.join("core.toml");
+    if live {
+        let mut config: toml::Value = toml::from_str(&text).unwrap();
+        config.as_table_mut().unwrap().remove("sim");
+        config["instance"]["name"] = "prod".into();
+        config["instance"]
+            .as_table_mut()
+            .unwrap()
+            .insert("order_env".into(), "testnet".into());
+        let venue = config["venues"]["public"].as_table_mut().unwrap();
+        venue.insert("src_ip".into(), "127.0.0.1".into());
+        venue.insert("bind_device".into(), "lo".into());
+        let keys: toml::Value = toml::from_str("account=1\napi_key_path='api'\nsession_seed_path='session'\nrest_api_key_path='rest-api'\nrest_secret_path='rest'").unwrap();
+        venue.insert("accounts".into(), toml::Value::Array(vec![keys]));
+        venue.insert("account_io".into(), toml::from_str("timeout_ms=5000\ninterval_ms=1000\nrequest_gap_ms=100\nmax_cancel_rounds=3\nlisten_keepalive_ms=600000").unwrap());
+        let threads = config["threads"].as_array_mut().unwrap();
+        threads.retain(|t| !matches!(t["task"].as_str(), Some("sim-gw" | "paper-feed")));
+        for (name, task) in [
+            ("feed", "feed:public"),
+            ("gw", "gw:public"),
+            ("conn", "conn-builder:public"),
+        ] {
+            threads
+                .push(toml::from_str(&format!("name='{name}'\ntask='{task}'\npark_us=100\nnice=0")).unwrap());
+        }
+        text = toml::to_string(&config).unwrap();
+    }
     std::fs::write(&path, text).unwrap();
     path
 }

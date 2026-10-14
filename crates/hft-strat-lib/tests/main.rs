@@ -6,6 +6,7 @@ mod confirm;
 mod cost;
 mod dirty;
 mod expiring;
+mod funding;
 mod impact;
 mod layout;
 mod props;

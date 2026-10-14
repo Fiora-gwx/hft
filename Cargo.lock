@@ -1274,6 +1274,7 @@ dependencies = [
  "hft-rt",
  "hft-sequencer",
  "hft-sim",
+ "hft-strat-lib",
  "hft-strategy-registry",
  "hft-strategy-sdk",
  "hft-testkit",

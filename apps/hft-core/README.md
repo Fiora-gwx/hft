@@ -907,6 +907,8 @@ hft-core 自身不在 tick-to-trade 路径上增加代码;路径上的分段预�
 
 ## 已知限制与后续工作
 
+- 新 journal 启动记录步 1–8 的 `StartupStep`、累计预算与闸门超时标志；步 1–5 的 STATUS 在串行步骤开始时发送，记录在 journal 打开后补写。步 6–8 的固定容量 Meta 队列由 sequencer 独占，housekeeping 只观察阶段并更新 STATUS，不参与闸门决策；步骤记录经过正常 journal 提交路径。恢复的 `tail_lost` 标志、完整连接失败与主机矩阵仍待装配。
+
 - 当前文件配置支持分别设置 seq、raw-feed 与 raw-gw 的段大小和热段保留，字段归 [可执行配置](config/README.md)。预算从实际 journal 列表及各自布局求和；tmpfs 空间检查作用于实例挂载点。完整引擎/advisor/大页预算矩阵仍未装配。
 
 - 当前可执行子集是 Linux 上的新 journal 会话、文件配置、单任务线程、已注册的 `NoModel` 策略与 `--dry-run` 离线闭环；配置生成示例、测试网模板与命令见 [config](config/README.md)。Windows 支持 `--check`、`schemas`、`--version` 与配置测试；实际引擎要求 Linux tmpfs 和 Unix socket。

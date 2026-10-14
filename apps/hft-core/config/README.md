@@ -27,3 +27,5 @@
 账户链路、同进程装配与限制见 [测试网 runbook](../RUNBOOK-testnet.md)。Bitget 默认启用，模板为 [bitget-demo.toml](bitget-demo.toml)，HMAC 文件用 `session_seed_path` 并提供 `passphrase_path`。
 
 `journal.segment_bytes` 与 `journal.hot_keep` 为 seq 的配置；可选的 `journal.raw_feed`、`journal.raw_gw` 各含必填的 `segment_bytes`、`hot_keep`，缺省时沿用 seq 配置。raw 允许零保留，尺寸须页对齐且在 2–256 MiB 内。双 venue 模板按 [dev2 journal 表](../README.md#内存与-journal-段按主机类唯一归属)分开配置，实际预算与打开 writer 使用同一布局；容量检查读取实例子目录的文件系统，支持每实例独立 tmpfs 挂载。
+
+可选 `[startup]` 同时提供正整数 `budget_s` 与 `gate_timeout_s`；省略时沿用 [启动顺序](../README.md#启动顺序) 的预算。它们只控制 StartupStep 的超时标志，不能放行账户闸门。`--check` 不发送 STATUS。

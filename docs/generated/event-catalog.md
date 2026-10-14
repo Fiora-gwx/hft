@@ -1389,17 +1389,17 @@
 | `ExecGateHeldNaked` | Exec | 12 | P0 |  |
 | `ExecChainLegExcess` | Exec | 13 | P0 |  |
 | `CtlAudit` | CtlAudit |  | Info | `cmd_id` [0, +128)、`cmd_kind` [128, +16)、`result_code` [144, +8)、`role` [152, +8)、`view_account` [160, +8)、`chat_type` [168, +8)、`target_account` [176, +8)、`issuer` [192, +64)、`cmd_hash` [256, +192)、`peer_uid` [448, +32) |
-| `PartialEventDropped` | Boot |  | P1 |  |
-| `TailSkipped` | Boot |  | P0 | `seq_from` [0, +64)、`seq_to` [64, +64)、`reason` [128, +64) |
-| `RecoverFromSnapshot` | Boot |  | P1 | `snapshot_seq` [0, +64)、`skip_from` [64, +64)、`skip_to` [128, +64)、`reason` [192, +64)、`issuer` [256, +64) |
-| `KillSelfTest` | Boot |  | Info | `account` [0, +64)、`result` [64, +64) |
-| `InputQuarantined` | Boot |  | P0 | `seq` [0, +64)、`crashes` [64, +64) |
-| `StartupStep` | Boot |  | Info |  |
-| `HostDegraded` | Boot |  | P1 |  |
-| `JournalTailLost` | Boot |  | P1 |  |
-| `RefdataWarning` | Boot |  | P1 | `code` [0, +64)、`section` [64, +64)、`row` [128, +64) |
-| `StopMarkerCorrupt` | Boot |  | P0 |  |
-| `EndpointOverride` | Boot |  | P1 | `venue` [0, +8) |
+| `PartialEventDropped` | Boot | 1 | P1 |  |
+| `TailSkipped` | Boot | 2 | P0 | `seq_from` [0, +64)、`seq_to` [64, +64)、`reason` [128, +64) |
+| `RecoverFromSnapshot` | Boot | 3 | P1 | `snapshot_seq` [0, +64)、`skip_from` [64, +64)、`skip_to` [128, +64)、`reason` [192, +64)、`issuer` [256, +64) |
+| `KillSelfTest` | Boot | 4 | Info | `account` [0, +64)、`result` [64, +64) |
+| `InputQuarantined` | Boot | 5 | P0 | `seq` [0, +64)、`crashes` [64, +64) |
+| `StartupStep` | Boot | 6 | Info |  |
+| `HostDegraded` | Boot | 7 | P1 |  |
+| `JournalTailLost` | Boot | 8 | P1 |  |
+| `RefdataWarning` | Boot | 9 | P1 | `code` [0, +64)、`section` [64, +64)、`row` [128, +64) |
+| `StopMarkerCorrupt` | Boot | 10 | P0 |  |
+| `EndpointOverride` | Boot | 11 | P1 | `venue` [0, +8) |
 | `ModelCheckpointDiscarded` | Advisor |  | P1 | `strategy` [0, +64)、`reason` [64, +64) |
 | `ModelPathReset` | Advisor |  | P2 | `reason` [0, +64)、`last_seq` [64, +64)、`path_settle_ms` [128, +64)、`ckpt_path_version` [192, +64)、`bin_path_version` [256, +64) |
 | `AdvisorLag` | Advisor |  | P1 | `strategy` [0, +64)、`lag_ms` [64, +64)、`lag_records` [128, +64)、`consumed_seq` [192, +64) |

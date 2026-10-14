@@ -53,3 +53,55 @@ fn core_242_reservation_survives_owner_exit_and_never_reuses_epoch() {
         b"corrupt"
     );
 }
+
+#[test]
+fn core_242_kernel_unlock_after_process_death() {
+    use std::{
+        process::Command,
+        time::{Duration, Instant},
+    };
+    const CHILD: &str = "HFT_TEST_EPOCH_CHILD";
+    if let Some(root) = std::env::var_os(CHILD) {
+        let root = std::path::Path::new(&root);
+        let meta = DurableMeta::open(root, &InstanceName::Prod).unwrap();
+        let lease = InstanceLease::acquire(root, InstanceName::Prod).unwrap();
+        assert_eq!(lease.reserve_epoch(&meta, None).unwrap(), 1);
+        std::fs::write(root.join("reserved"), b"1").unwrap();
+        loop {
+            std::thread::sleep(Duration::from_secs(1));
+        }
+    }
+    struct Child(std::process::Child);
+    impl Drop for Child {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let mut child = Child(
+        Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "core_242_kernel_unlock_after_process_death",
+                "--test-threads=1",
+            ])
+            .env(CHILD, root.path())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !root.path().join("reserved").exists() {
+        assert!(Instant::now() < deadline);
+        assert!(child.0.try_wait().unwrap().is_none());
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(InstanceLease::acquire(root.path(), InstanceName::Prod).is_err());
+    child.0.kill().unwrap();
+    child.0.wait().unwrap();
+    let lease = InstanceLease::acquire(root.path(), InstanceName::Prod).unwrap();
+    let meta = DurableMeta::open(root.path(), &InstanceName::Prod).unwrap();
+    assert_eq!(meta.read("engine_epoch").unwrap(), Some(1));
+    assert_eq!(lease.reserve_epoch(&meta, None).unwrap(), 2);
+}
