@@ -13,7 +13,13 @@ def command(*argv):
     return subprocess.run(argv, check=True, capture_output=True, timeout=60).stdout
 
 
-def window(action, root=Path("/"), run=command, dry_run=False):
+def used_bytes(path):
+    # Count mapped-but-unlinked pages as well; directory enumeration cannot see them.
+    stat = os.statvfs(path)
+    return (stat.f_blocks - stat.f_bfree) * stat.f_frsize
+
+
+def window(action, root=Path("/"), run=command, dry_run=False, usage=used_bytes):
     marker = root / "run/hft/window/active"
     if action == "start" and (root / "var/lib/hft/guard/tripped").exists():
         raise ValueError("guard is tripped")
@@ -33,6 +39,8 @@ def window(action, root=Path("/"), run=command, dry_run=False):
         run("systemctl", "stop", PROD)
         if run("systemctl", "show", "--property=ActiveState", "--value", PROD).strip() not in (b"inactive", b"failed"):
             raise ValueError("prod has not stopped")
+        if usage(root / "dev/shm/hft/prod") > 4096:
+            raise ValueError("prod hot pages remain; retain window until recovery and clean Drain")
         marker.unlink(missing_ok=True)
         # Batch timers resume naturally; the window never starts a batch itself.
 

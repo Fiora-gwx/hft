@@ -20,7 +20,10 @@ def dep_079_window_serializes_batch_and_preserves_failure_marker(tmp_path):
     assert marker.exists()
     assert calls[-1] == ("systemctl", "start", window.PROD)
     assert [a[-1] for a in calls if a[1] == "stop"] == list(window.BATCH)
-    window.window("stop", tmp_path, run)
+    with pytest.raises(ValueError, match="hot pages remain"):
+        window.window("stop", tmp_path, run, usage=lambda path: 8192)
+    assert marker.exists()
+    window.window("stop", tmp_path, run, usage=lambda path: 4096)
     assert not marker.exists()
     assert all(a[-1].startswith("hft-") for a in calls)
     calls.clear()

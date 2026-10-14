@@ -192,7 +192,7 @@ def dep_225_activate_ok(tmp_path):
     assert os.readlink(base / "current-cold") == "releases/v1.2.2"
     assert runner.calls[-1][:2] == [str(base / "current-core/bin/hostprobe"), "verify"]
     assert "--expected" in runner.calls[-1] and "--out" in runner.calls[-1]
-    assert [c for c in runner.calls if c[0] == "systemctl"] == [["systemctl", "daemon-reload"], ["systemctl", "disable", "--now", "hft-core@prod.service"]]
+    assert [c for c in runner.calls if c[0] == "systemctl"] == [["systemctl", "disable", "--now", "hft-core@prod.service"], ["systemctl", "daemon-reload"]]
     assert (root / "etc/systemd/system/hft-core@prod.service").is_file()
 
 
