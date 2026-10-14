@@ -719,6 +719,8 @@ pub struct PxBand { pub max_px_dev: Rate, pub ioc_max_cross: Rate, pub rr_max_cr
 
 分段 `decide` 内的风控份额,预算 200–500 ns/意图(上限表见 [benchmarks](../../benchmarks/README.md#单-crate-基准上限表))。
 
+通过路径的基准先同步 mock 连接活跃时刻并验证输入可放行;每次采样推进引擎时间以补充令牌,更新连接活跃时刻,断言单腿或双腿评估成功后执行相应 `commit`。任何拒绝都使基准失败。
+
 | 入口 | p50 | p99 | 基准名 |
 |---|---|---|---|
 | `classify` | ≤ 15 ns | ≤ 40 ns | `risk/classify` |
