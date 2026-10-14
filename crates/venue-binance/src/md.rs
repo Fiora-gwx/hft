@@ -481,7 +481,7 @@ pub(crate) fn decode_md(
             });
             Ok(MdOutcome { events: 3, inst })
         }
-        // The other classes decode from M3; control classes never.
-        _ => Err(DecodeErr::UnknownClass),
+        // Core trades, liquidations and bounded TopN snapshots.
+        _ => crate::market::decode(line, rd, ctx, c, p, rx, out),
     }
 }

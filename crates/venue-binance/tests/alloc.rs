@@ -94,6 +94,33 @@ fn round(tu: &Templates, ts: &Templates, sink: &mut CountSink) {
     let mut sctx = FeedCtx::SPOT;
     std::hint::black_box(Spot::peek(r, &sctx, c, SBT1.as_bytes()).unwrap());
     Spot::decode_md(r, &mut sctx, c, SBT1.as_bytes(), &RX, &mut md).unwrap();
+    Usdm::decode_md(
+        r,
+        &mut ctx,
+        venue_binance::usdm::MdClass::DepthTopN,
+        support::DP5.as_bytes(),
+        &RX,
+        &mut md,
+    )
+    .unwrap();
+    Spot::decode_md(
+        r,
+        &mut sctx,
+        venue_binance::spot::MdClass::JsonDepthTopN,
+        support::SDP5.as_bytes(),
+        &RX,
+        &mut md,
+    )
+    .unwrap();
+    Usdm::decode_md(
+        r,
+        &mut ctx,
+        venue_binance::usdm::MdClass::AggTrade,
+        br#"{"s":"BTCUSDT","p":"65000.1","q":"0.001","a":7,"T":1000,"E":1001,"m":true}"#,
+        &RX,
+        &mut md,
+    )
+    .unwrap();
     let ut = TargetRef {
         id: cid(VenueId::BINANCE_USDM, 3, 42, 7),
         exch_order_id: 0,

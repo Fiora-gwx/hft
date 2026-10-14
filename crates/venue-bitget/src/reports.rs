@@ -1005,10 +1005,14 @@ pub(crate) fn decode_rest(
     let m: QueryResp = from(body)?;
     let d = m.data.ok_or(DecodeErr::Shape)?;
     let _ = m.code;
-    let inst = match inst_of(line, rd, d.symbol) {
-        InstId(0) => req.inst,
-        i => i,
+    let inst = if d.symbol.is_empty() {
+        req.inst
+    } else {
+        inst_of(line, rd, d.symbol)
     };
+    if inst != req.inst {
+        return Err(DecodeErr::Shape);
+    }
     if inst.0 == 0 || rd.inst(inst).venue != line.venue() {
         return Err(DecodeErr::Shape);
     }
@@ -1022,14 +1026,16 @@ pub(crate) fn decode_rest(
     };
     e.cum_filled = Qty(fixed_or_zero(d.cum_qty, h.qty_wire_exp)?);
     e.avg_px = Px(fixed_or_zero(d.avg_px, h.px_wire_exp)?);
-    if e.cum_filled.0 > 0 && e.avg_px.0 == 0 {
+    if e.cum_filled.0 < 0 || e.avg_px.0 < 0 || (e.cum_filled.0 > 0 && e.avg_px.0 == 0) {
         return Err(DecodeErr::Shape);
     }
     e.exch_order_id = d.order_id.get()?;
-    if let Some(c) = parse_cid(d.client_oid.as_bytes()) {
+    if !d.client_oid.is_empty() {
+        let c = parse_cid(d.client_oid.as_bytes()).ok_or(DecodeErr::Shape)?;
+        if c.venue != line.venue() || c.account != rx.account || c.slot != r.slot || c.r#gen != r.r#gen {
+            return Err(DecodeErr::Shape);
+        }
         e.epoch = c.epoch;
-        e.slot = SlotId(c.slot);
-        e.r#gen = c.r#gen;
     }
     e.ex_ts_ns = d.updated.opt()?.map_or(Ok(0), ms_ns)?;
     out.order(&e);

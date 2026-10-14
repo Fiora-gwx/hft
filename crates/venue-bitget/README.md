@@ -93,7 +93,7 @@ UTA 有三种账户模式:**逐仓模式**(每个仓位独立风险,只支持逐
 - 响应:`{"event":"trade","id":…,"topic":…,"args":[{orderId, clientOid[, symbol, cTime]}],"code":"0","msg":"success","ts":…}`;失败为 `{"event":"error","id":…,"code":"<码>","msg":…}`(`event = trade` 而 `code ≠ 0` 同样按失败处理)。**官方:下单、改单、撤单的成功响应只表示交易所收到请求**,订单状态以私有 `order` 频道为准;下单在入撮合前被拒也只体现为响应码。因此:下单成功响应 → `Ack`(`exch_order_id ← orderId`,`exch_id` 登记);**撤单与改单的成功响应不产生事件**(只结束在途请求),`CancelAck` 由订单频道的 `cancelled` 推送产出;改单是异步的、失败不另行通知,所以 `VenueCaps.flags` 不含 `AMEND`(帧仍可编码,运行时不会发)。
 - 价/量按 inst 的 tick/lot 格式化为最短十进制(不补零、不经 f64);`Tif::Gtc/Ioc/Fok/PostOnly` → `gtc`/`ioc`/`fok`/`post_only`;永续 `oflags` 带 `REDUCE_ONLY` 时写 `"reduceOnly":"YES"`,否则不写(缺省为否);现货带 `REDUCE_ONLY` → `EncodeErr::Unsupported`。UTA 下单没有 `pxAmendType` 参数:超出价格带的单以 `25205`/`25206` 拒绝(登记为确定拒绝),不夹到边界。`ORDER_FRAME_CAP = 2048`;`encode_batch` 保持默认 `Unsupported`(官方批量上限 20,[hft-oms](../hft-oms/README.md) 每个意图一个槽一个帧)。
 - `CancelAll`:`encode` 对 `CancelAll` 返回 `EncodeErr::Unsupported(CancelAll)`;运行时把槽镜像中该账户的活动订单展开为逐条 `Cancel`([hft-venue 出环](../hft-venue/README.md#出环outmsg--gwcmd) 的第 ③ 级),回报按 `Cancel` 解码;`CANCEL_ALL_SWEEP = false`。
-- `Query`:签名同实现说明第 8 点(`ACCESS-TIMESTAMP` 为 ms,另带 `locale: en-US`,模拟盘 `paptrading: 1`);响应经 `decode_rest`(槽取自 `RestOrigin`,`clientOid` 可解析时取其 epoch/槽):`orderStatus` → `OrderEvent.detail`(`live`/`new` → New、`partially_filled`、`filled`、`cancelled`,契约 28)、`cumExecQty`/`avgPrice` → `cum_filled`/`avg_px`(契约 9);码 `25204`(订单不存在)→ `detail = NotFound(7)`,不定终态;其余失败 → 结果未知(HTTP 429 置 `RateLimited`)。
+- `Query`:签名同实现说明第 8 点(`ACCESS-TIMESTAMP` 为 ms,另带 `locale: en-US`,模拟盘 `paptrading: 1`);响应经 `decode_rest`(槽取自 `RestOrigin`,`clientOid` 必须与请求的 venue/account/槽/代一致后取其 epoch;非空品种必须匹配原请求):`orderStatus` → `OrderEvent.detail`(`live`/`new` → New、`partially_filled`、`filled`、`cancelled`,契约 28)、`cumExecQty`/`avgPrice` → `cum_filled`/`avg_px`(契约 9);码 `25204`(订单不存在)→ `detail = NotFound(7)`,不定终态;其余失败 → 结果未知(HTTP 429 置 `RateLimited`)。
 - 每频道限速、STP、过期保护字段:官方未写,按 10 单/s 与"无过期字段"处理(`stale_guard() = None`,见实现说明第 7 点);响应无网关时间戳,`ReportOutcome.gw_dwell_us = 0`。
 
 ### 限速默认值
@@ -261,7 +261,7 @@ UTA 文档目录有"Demo Trading"一节(官方,本地缓存的目录页),端点(
 | BBO 连接(`books1`,双路) | 同上 | `bbo_probe()` = 文本 `ping`(服务端是否回 WS 协议 Pong 待核实),每 `feed.bbo_ping_ms` 一次,同时满足上一行的 25 s 要求;`pong` 计入存活 | 待核实(开发备忘第 16 条) |
 
 - 入向上限 10 条/s/连接(超出被断):BBO 连接的探测占 1 条/s,订阅帧按 4 条/s 发送。
-- BBO 补帧:`books1` 每条都是完整一档快照;当前构建保持 `bbo_snapshot_request` 的默认 `Ok(false)`(订阅即推首帧)。若模拟盘确认订阅后不立即推送,改用 `GET /api/v3/market/orderbook?category=…&symbol=…&limit=1`(公共接口,不签名;官方响应的价量是 JSON 数字),`BBO_SNAPSHOT_BATCH = 1`(开发备忘第 16 条)。
+- BBO 补帧:`GET /api/v3/market/orderbook?category=…&symbol=…&limit=1`,公共接口不签名,`BBO_SNAPSHOT_BATCH = 1`。按[官方市场数据](https://www.bitget.com/docs/catalog/market/market-data)读取 `data.a/b/ts`;价量的 JSON 数字保留原始文本做定点解析。REST 不提供序号,`update_id = 0`;缺任一侧或无效数值拒绝整条响应。
 
 ### 只读查询
 
@@ -277,7 +277,7 @@ UTA 文档目录有"Demo Trading"一节(官方,本地缓存的目录页),端点(
 
 ### `mock` 特性
 
-与 [venue-binance](../venue-binance/README.md#mock-特性给-mock-exchange-的反向编解码) 相同的四个反向编解码函数,供 optional 的 [mock-exchange](../../apps/mock-exchange/README.md) 使用。
+`features = ["mock"]` 导出 `mock::{encode_market, decode_order_frame, encode_order_event, encode_rest_response}` 与输入类型,供 optional 的 [mock-exchange](../../apps/mock-exchange/README.md) 离线使用。支持 BBO/深度/成交/标记资金费、订单请求/应答/推送、REST BBO 与查单;生产默认关闭。账户 REST 模拟响应由测试夹具提供。
 
 ## 实现说明
 
@@ -337,7 +337,7 @@ AccountProtocol 使用 UTA V3 instruments/settings/info/assets/current-position/
 ## 已知限制与后续工作
 
 - **无死手**:进程崩溃到 kill-switch 撤单之间有窗口(kill-switch 心跳检测周期决定)。
-- **未实现**(核实与模拟盘冒烟前不能通过上线门槛):账户配置核验与保证金轮询(`acct.rs`,hft-venue-proto 尚无 `acct_queries` 成员)、只读查询(`ro_request`)、BBO REST 补帧、`mock` 特性、金样(BGT-300–338)、fuzz 与 BGT-502–505 基准。
+- **验收缺口**:账户配置与保证金轮询已有 warm `AccountProtocol` 接口及应用接线,与规格中的 `acct_*` 分步接口尚未统一;只读查询族、账户字段实测核验、完整金样(BGT-300–338)与基准仍未完成。公共 BBO REST、mock 与两条产品线 fuzz 入口已实现;新增固定输入均为 synthetic、待人工复核,不替代模拟盘样本与累计 fuzz 门槛。
 - **交易所侧死手未接**:官方 `POST /api/v3/trade/countdown-cancel-all`(5–60 s,需向商务申请开通)可作为 `CountdownAccount` 死手,开通后再接;当前仍靠 kill-switch。
 - **资金费实收**:`account` 频道在资金费结算时推送,但不带品种与金额明细,`funding_settle = RateOnly`;实际结算经[资金费实额](#资金费实额)查询。真实账户的账单延迟与 timestamp 相对结算网格的偏差待核实(方法:持仓跨结算采集)。
 - **保证金数据靠轮询**:5 s 周期;若核实账户频道推送保证金率,改为 `Push`。

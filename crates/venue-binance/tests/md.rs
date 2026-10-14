@@ -391,3 +391,129 @@ fn bin_036_decode_unknown_class() {
         "BIN-036.4"
     );
 }
+
+#[test]
+fn bin_027_topn_atomic_decode() {
+    let mut sink = VecSink::default();
+    Usdm::decode_md(
+        rd(),
+        &mut { FeedCtx::USDM },
+        usdm::MdClass::DepthTopN,
+        DP5.as_bytes(),
+        &RX,
+        &mut sink,
+    )
+    .unwrap();
+    let MdRec::L2Snapshot {
+        hdr,
+        bids,
+        asks,
+        parts,
+        ..
+    } = &sink.md[0]
+    else {
+        panic!("snapshot")
+    };
+    assert_eq!(
+        (hdr.snap_id, hdr.origin, *parts, bids.len(), asks.len()),
+        (7_000_000_001, 3, 1, 5, 5)
+    );
+    assert_eq!((bids[0].px.0, asks[0].qty.0), (6_500_010, 40_000_000));
+    assert_eq!(hdr.h.rx_tsc, RX.rx_tsc);
+    sink.md.clear();
+    let invalid = DP5.replace("65000.6", "invalid");
+    assert!(
+        Usdm::decode_md(
+            rd(),
+            &mut { FeedCtx::USDM },
+            usdm::MdClass::DepthTopN,
+            invalid.as_bytes(),
+            &RX,
+            &mut sink
+        )
+        .is_err()
+    );
+    assert!(sink.md.is_empty());
+}
+#[test]
+fn bin_028_topn_zero_levels() {
+    let mut sink = VecSink::default();
+    let msg = DP5.replace("1.000", "0");
+    Usdm::decode_md(
+        rd(),
+        &mut { FeedCtx::USDM },
+        usdm::MdClass::DepthTopN,
+        msg.as_bytes(),
+        &RX,
+        &mut sink,
+    )
+    .unwrap();
+    assert!(matches!(&sink.md[0], MdRec::L2Snapshot { bids, .. } if bids.len() == 4));
+}
+#[test]
+fn bin_029_spot_topn_combined() {
+    let mut sink = VecSink::default();
+    Spot::decode_md(
+        rd(),
+        &mut { FeedCtx::SPOT },
+        spot::MdClass::JsonDepthTopN,
+        SDP5.as_bytes(),
+        &RX,
+        &mut sink,
+    )
+    .unwrap();
+    assert!(
+        matches!(&sink.md[0], MdRec::L2Snapshot { hdr, bids, .. } if hdr.h.inst == S_BNB && hdr.h.ex_ts_ns == 0 && bids[0].px.0 == 600100)
+    );
+}
+#[test]
+fn bin_030_aggtrade_taker_side() {
+    for (maker, side) in [(true, hft_types::Side::Sell), (false, hft_types::Side::Buy)] {
+        let msg = format!(
+            r#"{{"e":"aggTrade","s":"BTCUSDT","a":9,"p":"65000.1","q":"0.001","T":1000,"E":1001,"m":{maker}}}"#
+        );
+        let mut sink = VecSink::default();
+        Usdm::decode_md(
+            rd(),
+            &mut { FeedCtx::USDM },
+            usdm::MdClass::AggTrade,
+            msg.as_bytes(),
+            &RX,
+            &mut sink,
+        )
+        .unwrap();
+        assert!(
+            matches!(&sink.md[0], MdRec::Trade(t) if t.taker_side == side && t.trade_id == 9 && t.qty.0 == 100000 && t.h.ex_ts_ns == 1000000000)
+        );
+    }
+}
+#[test]
+fn bin_031_spot_trade_microseconds() {
+    let mut sink = VecSink::default();
+    Spot::decode_md(
+        rd(),
+        &mut { FeedCtx::SPOT },
+        spot::MdClass::JsonTrade,
+        br#"{"e":"trade","s":"BTCUSDT","t":10,"p":"65000.1","q":"0.001","T":1000,"E":1001,"m":false}"#,
+        &RX,
+        &mut sink,
+    )
+    .unwrap();
+    assert!(matches!(&sink.md[0], MdRec::Trade(t) if t.h.ex_ts_ns == 1000000 && t.h.ex_send_ns == 1001000));
+}
+#[test]
+fn bin_034_public_liquidation() {
+    let mut sink = VecSink::default();
+    Usdm::decode_md(
+        rd(),
+        &mut { FeedCtx::USDM },
+        usdm::MdClass::ForceOrder,
+        br#"{"e":"forceOrder","E":1001,"o":{"s":"BTCUSDT","ap":"65000.1","z":"0.001","S":"SELL","T":1000}}"#,
+        &RX,
+        &mut sink,
+    )
+    .unwrap();
+    assert!(
+        matches!(&sink.md[0], MdRec::Liquidation(t) if t.side == hft_types::Side::Sell && t.qty.0 == 100000)
+    );
+}

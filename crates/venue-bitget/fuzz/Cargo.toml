@@ -1,0 +1,30 @@
+[package]
+name = "venue-bitget-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+[package.metadata]
+cargo-fuzz = true
+[workspace]
+members = ["."]
+[dependencies]
+libfuzzer-sys = "0.4"
+venue-bitget = { path = ".." }
+hft-types = { path = "../../hft-types" }
+hft-refdata = { path = "../../hft-refdata" }
+hft-event = { path = "../../hft-event" }
+hft-venue-proto = { path = "../../hft-venue-proto", features = ["testkit"] }
+
+[[bin]]
+name = "bitget-usdt-futures"
+path = "fuzz_targets/bitget_usdt_futures.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "bitget-spot"
+path = "fuzz_targets/bitget_spot.rs"
+test = false
+doc = false
+bench = false

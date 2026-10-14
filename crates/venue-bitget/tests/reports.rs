@@ -1228,3 +1228,19 @@ fn bgt_117_no_funding_settle() {
     assert_eq!(s.funding, 0);
     let _ = AssetId(0);
 }
+
+#[test]
+fn bgt_093_query_identity_cannot_redirect() {
+    let base = query("filled", "0.004", "65000.1");
+    for bad in [
+        base.replace("BTCUSDT", "ETHUSDT"),
+        base.replace("BTCUSDT", "UNKNOWN"),
+        base.replace(CID7, &cid_text(&cid(FUT, 3, 43, 7))),
+        base.replace(CID7, "foreign"),
+        query("filled", "-0.004", "65000.1"),
+    ] {
+        let (r, s) = dec_rest(200, &bad);
+        assert!(r.is_err());
+        assert!(s.orders.is_empty());
+    }
+}
