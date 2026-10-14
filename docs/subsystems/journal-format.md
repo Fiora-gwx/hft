@@ -254,7 +254,7 @@ const _: () = assert!(size_of::<SnapshotHdr>() == 96);
 | 22 | `LedgerInventory` | [hft-ledger](../../crates/hft-ledger/README.md) | 每 (account, venue, asset) 的现货库存(按 group 或 unassigned)与余额基线(`SetBalanceBaseline`) |
 | 23 | `MarginState` | [hft-risk](../../crates/hft-risk/README.md) | 每 (account, venue) 最近一条 `MarginReport` 的摘要与 seq、`MarginStress` 档位与减仓截止 |
 | 24 | `VenueNotices` | [hft-sequencer](../../crates/hft-sequencer/README.md) | 生效的 `VenueNotice`(下架时刻、结算周期覆盖、维护窗口) |
-| 25 | `EngineClock` | [hft-sequencer](../../crates/hft-sequencer/README.md);行格式在本页 | 当前运行的引擎时钟基准:`EngineClockRow { base_engine_ns: i64, base_tsc: u64 /* 该 EngineClock 记录的记录头 tsc */, tsc_hz_milli: u64, clock_seq: u64 /* 该 EngineClock 记录的 seq */ }`(32 B,一行,行版本 1);计入 `state_hash`(全部来自 Input,回放确定);从中途段起步的读者据此换算 `engine_ns` |
+| 25 | `EngineClock` | [hft-sequencer](../../crates/hft-sequencer/README.md);行格式在本页 | 当前运行的引擎时钟基准:`EngineClockRow { base_engine_ns: i64, base_tsc: u64 /* 该 EngineClock 记录的记录头 tsc */, tsc_hz_milli: u64, clock_seq: u64 /* 该 EngineClock 记录的 seq */ }`(32 B,一行,行版本 1);计入 `state_hash`(全部来自 Input,回放确定);从中途段起步的读者据此换算 `engine_ns` 并复原风控运行起点([派生恢复](../../crates/hft-sequencer/README.md#快照)) |
 | 26 | `ConnLive` | [hft-sequencer](../../crates/hft-sequencer/README.md) | 每 (venue, BBO 连接槽) 的 `ConnLive{up, resync, live_tsc}`(槽数 `MAX_BBO_CONN_SLOTS`);只含本次运行的值,处理 `EngineClock` 时清空;从关键帧起步的读者据此延续 `BboView` 的连接健康 |
 
 | 27 | `StrategyTimers` | [hft-sequencer](../../crates/hft-sequencer/README.md) | 每绑定实例的 SDK TimerId 计数器及存活登记;恢复与节 8 逐项核对,截止一起平移 |

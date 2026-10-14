@@ -234,6 +234,8 @@ DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xt
 
 没有分配 slot/gen 的 Shadow 记录不能提供订单身份,不得解释未解析成交。同事件成交/注记证据上限沿用 sequencer 的诊断容量,Shadow 身份表上限沿用 `hft_ledger::SLOT_MAP_CAP`;满时失败,不静默淘汰证据。
 
+modes 回归集另覆盖风控运行起点的派生恢复:从中途快照回放时,旧运行保证金报告仍按相同起点判过期,MarginStress cap 与注记必须一致(TK-115)。
+
 storage 回归集包含轮次结束后经历快照与重启的种子;按完整 10,000 步故障时序运行,确认实际产生 RoundClosed,其所属 Input 为原始成交或手续费回报,独立重建不得漏掉注记(TK-114)。
 
 一致性集中的 Drain 重启种子另外检查启动边界。Drain 快照保留退出 cap,Recovery 快照移除旧 Draining、原样保留其余 cap,全部账户仍有 Recovery 且闸门未放行;同种子复跑逐字节比较 Output 与 HashTrail(TK-120)。

@@ -1500,6 +1500,8 @@ spec: README.md
 - 步骤:同一测试入口逐行运行正例与九种反例。首次世界步在外部行情之前依次处理关键帧、按需快照与滚段 Timer,Drain 干净重启后连续崩溃恢复两次;另一行关闭全部检查器;反例行分别删除首条/全部观察、重复首条、改错边界、跨过后续 Input、改错首条风险哈希、标记溢出、返回重建错误、删除首条快照的完整账本视图
 - 期望:正常行实际包含五种目的的至少八条快照,检查数等于 journal 快照数;每个真实快照同时经过 LED-267 冷账本核对;开关检查器前后的完整 journal 和非空 HashTrail 逐字节相同;九种反例均以 INV-6 在第 0 步失败,诊断指出原因,不能被后来的正确快照遮盖
 - 实现:`crates/hft-testkit/tests/snapshot_checks.rs::tk_115_every_snapshot_checked_with_periodic_rebuild_off`
+- 回归:modes 种子 `0x8573133122fce369`,8 000 步,实际产生旧运行报告过期的 L1 MarginStress;从中途快照回放仍产生同一 cap 注记,所有快照与定期 INV-6 通过。
+- 回归函数:`crates/hft-testkit/tests/snapshot_checks.rs::tk_115_snapshot_preserves_margin_run_boundary`
 
 ### TK-116 快照观察只保留已提交边界且缓冲有界
 

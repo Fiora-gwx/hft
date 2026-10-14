@@ -14,6 +14,38 @@ use zerocopy::FromZeros;
 
 type E = SeqSut<TestStrategies>;
 
+#[test]
+fn tk_115_snapshot_preserves_margin_run_boundary() {
+    let suite = hft_testkit::scenarios::suites()
+        .into_iter()
+        .find(|s| s.name == "modes")
+        .unwrap();
+    let mut c = suite.config(0x8573_1331_22fc_e369);
+    c.steps = 8000;
+    c.rerun = hft_testkit::dst::RerunPolicy::Never;
+    let r = run_record::<E>(&c);
+    // A retained report from the previous run must still trigger the L1 stale cap
+    // when replay begins at a later keyframe, without another EngineClock Input.
+    assert!(
+        r.journal
+            .iter()
+            .filter_map(|j| j.try_read::<hft_event::Note>())
+            .any(|n| {
+                if n.code != hft_event::note_code(hft_event::NoteSource::Risk, 2) {
+                    return false;
+                }
+                let cap = hft_risk::cap_of_note(&n);
+                cap.source == hft_types::CapSource::MARGIN_STRESS
+                    && cap.scope.account == AccountId(2)
+                    && cap.level == 1
+                    && cap.params[0] == 1 << 5
+            }),
+        "the stale-margin transition must be exercised"
+    );
+    assert!(r.snapshot_checks > 1);
+    assert!(r.outcome.is_pass(), "{}", crate::seq_sut::show(&r));
+}
+
 struct Snapshots(E, u64, bool);
 
 impl Sut for Snapshots {

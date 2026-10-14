@@ -1654,6 +1654,8 @@ spec: README.md
   - 两组 engine_ns 逐条相同;起步时 `E` 等于关键帧节 25
 - 实现:`crates/hft-sequencer/tests/clock.rs::seq_111_start_from_snapshot_uses_section25`
 
+TK-115 的 modes 回归另覆盖节 25 的运行起点恢复给风控:旧运行的保证金报告不得因从中途快照起步而变成新报告,MarginStale 的 cap 注记须与连续运行一致。
+
 ### SEQ-112 运行中的段滚动不改引擎时钟基准
 
 - 规则:[引擎时间](README.md#引擎时间engine_ns)、[快照](README.md#快照)
