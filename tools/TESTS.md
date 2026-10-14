@@ -948,6 +948,8 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 ### TOOL-062 gen-host --check 在生成物无差异时通过
 
+当前 dev2 prod/testnet 的入口与提交一致性由 `deploy/tests/test_gen.py::dep_250_pure_generator` 覆盖；本用例的 c32 全矩阵尚未验收。
+
 - 规则:[cargo xtask gen-host](README.md#cargo-xtask-gen-host)
 - 级别:golden
 - 里程碑:M3

@@ -620,7 +620,13 @@ sim  = [{ ip = "<第二个私有 IP>", eip_alloc = "eipalloc-…" }]  # sim 常�
 
 ## 已知限制与后续工作
 
-- 可执行护栏入口是 `dev2/hft-dev2-guard`，配置模板为 `dev2/dev2-guard.toml.tmpl`；支持只读 `--dry-run`，`clear` 在 root 调用时先切换到 `hft-guard` 再写事件。采样器读取 proc/cgroup 与只读健康导出文件，动作使用固定 hft 单元白名单；事件写 `events.jsonl`，告警输出 journald。Telegram 直发、旧系统主单元状态、主机清单生成与完整安装激活尚未接线，不能据此宣称 dev2 共机或测试网验收完成。`bin/hft-shm-release` 只在有效的本实例心跳为 Stopped 时删除 `.jrn`/`.jrn.preparing`，保留心跳与其他证据，拒绝符号链接树。
+- 可执行护栏入口是 `dev2/hft-dev2-guard`，配置模板为 `dev2/dev2-guard.toml.tmpl`；支持只读 `--dry-run`，`clear` 在 root 调用时先切换到 `hft-guard` 再写事件。采样器读取 proc/cgroup 与只读健康导出文件，动作使用固定 hft 单元白名单；事件写 `events.jsonl`，告警输出 journald。Telegram 直发与旧系统主单元状态尚未接线，不能据此宣称 dev2 共机或测试网验收完成。`bin/hft-shm-release` 只在有效的本实例心跳为 Stopped 时删除 `.jrn`/`.jrn.preparing`，保留心跳与其他证据，拒绝符号链接树。
+
+- [生成器](gen/generate.py)经 `cargo xtask gen-host` 调用，当前只接受 [dev2 prod 测试清单](hosts/test-dev2-prod.toml)的字段集合与角色组合；拒绝 sim、升级主机与验证服务。生成单元、slice、tmpfs、出口地址、安装计划及 hostprobe 的资源期望；内存、I/O、冷盘门限读取 hft-core 的归属表。输出不包含内核、IRQ 或凭证代理；dev2 的 IMDS 服务调用 [uid 隔离脚本](imds/dev2_lock.py)，单事务替换 hft 自有 nft 表，不改其他表，不支持升级主机 BPF。测试清单的地址只供夹具使用，不是主机实测值。完整主机矩阵仍未验收。
+- [发布工具](release/release.py)提供安全解包、逐文件校验、离线 venv、安装记录和按组冷激活；未装配的组拒绝激活，应用单元停止名单不越组，最后运行 hostprobe 并记录 pending。安装的架构检查覆盖全部 `bin/` 文件，版本探针目前只对 hft-core 执行。下载器读取 root 0600 token，按精确版本下载并核对 SHA-256；跨域重定向去除认证头。
+- [打包器](release/package.py)接收 CI 准备的 `dist/stage/` 与 `dist/release-metadata.json`，后者含发布表的元数据及 Linux `/proc/cpuinfo` 命名的 `cpu_features`。缺失元数据、SBOM 或主机期望均失败；现有发布工作流尚未构造这两项输入，SBOM 工具也未选定，不能据此产出完整发布归档。安装所需的 requirements.lock 必须带哈希；离线 wheelhouse 的完整闭包仍需发布工作流验收。
+- [预检](release/preflight.py)只验当前 dev2 prod/testnet 装配：架构与 CPU 特性、独立冷卷及容量、chrony、无 Rust 工具链、分组路径、guard、slice、IMDS uid 集及双栈规则、正式秘密访问拒绝、hft-secrets 检查、hft-core 配置检查和重新采集的 hostprobe 期望。`preflight.toml` 的冷盘门限由生成器从 hft-core 默认表生成，因当前运行配置尚不接受 storage 段而独立安装。缺任一输入或命令即失败；完整 S3/凭证代理、ctl 签发者生成、服务用户权限闭包和升级主机矩阵未覆盖。秘密清单、已加载的 IMDS 规则和实测主机配置缺失仍阻止服务启动；hft-secrets 使用 tools 的实现。
+- CI 容器验证 root 清除标志、降权后的事件属主及 Stopped/Draining 热段释放。cgroup CPU 让出、OOM 顺序、loop 设备 I/O、真实 systemd 启停、ENI/EIP、Secrets Manager/IAM 和 aarch64 指令集仍需专门的特权环境或真实主机；未把替身命令执行记作这些用例通过。
 
 - `dev2` 护栏的全部数值待标定(M3 前在 dev2 上实测:先只跑守护与只读采集一周,再逐步加 hft 进程,最后做 dev2 护栏第 10 条的标定演练);旧系统状态的探测方式需与其维护者确认(只用于告警,不触发停机)。dev2 上 sim 常驻、联调窗口再加一个测试网实例时资源最紧:窗口内批处理由窗口标志与 `hft-window` 停止。
 - 升级主机的档位(默认 `c32`;`c16` 只在 M3 末满订阅探针达标且启用 `epoll_pwait(0)` 时保留)与是否启用 ENI-B2 在 M3 末探针后选定;清单、aarch64 GRUB 模板与 AMI 在定档后编写;x86 `metal` 的清单与模板只在可选的 metal 剖面立项时编写。

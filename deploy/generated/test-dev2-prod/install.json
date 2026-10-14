@@ -1,0 +1,64 @@
+{
+  "groups": {
+    "cold": [],
+    "core": [
+      {
+        "destination": "etc/systemd/system/hft.slice",
+        "source": "deploy/generated/test-dev2-prod/hft.slice"
+      },
+      {
+        "destination": "etc/systemd/system/hft-core.slice",
+        "source": "deploy/generated/test-dev2-prod/hft-core.slice"
+      },
+      {
+        "destination": "etc/systemd/system/hftbatch.slice",
+        "source": "deploy/generated/test-dev2-prod/hftbatch.slice"
+      },
+      {
+        "destination": "etc/systemd/system/dev-shm-hft-prod.mount",
+        "source": "deploy/generated/test-dev2-prod/dev-shm-hft-prod.mount"
+      },
+      {
+        "destination": "etc/systemd/system/hft-core@prod.service",
+        "source": "deploy/generated/test-dev2-prod/hft-core@prod.service"
+      },
+      {
+        "destination": "etc/systemd/system/hft-dev2-guard.service",
+        "source": "deploy/generated/test-dev2-prod/hft-dev2-guard.service"
+      },
+      {
+        "destination": "etc/systemd/system/hft-imds-lock.service",
+        "source": "deploy/generated/test-dev2-prod/hft-imds-lock.service"
+      },
+      {
+        "destination": "etc/systemd/system/hft-core.target",
+        "source": "deploy/generated/test-dev2-prod/hft-core.target"
+      },
+      {
+        "destination": "etc/hft/egress.toml",
+        "source": "deploy/generated/test-dev2-prod/egress.toml"
+      },
+      {
+        "destination": "etc/hft/preflight.toml",
+        "source": "deploy/generated/test-dev2-prod/preflight.toml"
+      },
+      {
+        "destination": "etc/hft/dev2-guard.toml",
+        "source": "deploy/dev2/dev2-guard.toml.tmpl"
+      },
+      {
+        "destination": "etc/polkit-1/rules.d/50-hft-dev2-guard.rules",
+        "source": "deploy/polkit/50-hft-dev2-guard.rules"
+      }
+    ],
+    "sim": []
+  },
+  "units": {
+    "cold": [],
+    "core": [
+      "hft-core@prod.service",
+      "hft-core.target"
+    ],
+    "sim": []
+  }
+}
