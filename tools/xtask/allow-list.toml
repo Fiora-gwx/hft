@@ -248,3 +248,8 @@ reason = "engine-clock base of the previous run; the next run's EngineClock repl
 file = "crates/hft-venue/src/account.rs"
 lints = ["clippy::disallowed_macros"]
 reason = "Warm account HTTP request construction; no hot task calls this scheduler"
+
+[[allow]]
+file = "crates/hft-venue/src/snap.rs"
+lints = ["clippy::disallowed_macros"]
+reason = "Warm public REST request construction on conn-builder; the feed receives bounded records"

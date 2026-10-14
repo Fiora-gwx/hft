@@ -8,8 +8,8 @@
 use crate::support;
 
 use hft_net::ConnId;
-use hft_rt::IdlePolicy;
 use hft_rt::Backing;
+use hft_rt::IdlePolicy;
 use hft_venue::{
     DepthMode, FeedCfg, FeedRoutes, GwCfg, InitErr, RawMode, ReadyPollMode, SnapCfg, SnapDeps, SnapFetchTask,
     ready_poll_on, streams,
