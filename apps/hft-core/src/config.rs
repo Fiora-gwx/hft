@@ -370,6 +370,9 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
         }
     }
     let mut names = Vec::new();
+    if c.threads.len() > 30 {
+        errors.push(Error::config("ThreadPlan", "heartbeat capacity is 30 threads"));
+    }
     for t in &c.threads {
         if names.contains(&t.name)
             || t.name.is_empty()

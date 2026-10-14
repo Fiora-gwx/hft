@@ -3,7 +3,7 @@ use crate::Error;
 use crate::{
     config::{Config, Thread, Venue},
     io,
-    runtime::{Workers, byte_ring, idle, policy, ring},
+    runtime::{ThreadContext, Workers, byte_ring, idle, policy, ring},
     storage,
 };
 use hft_event::{ConnRole, FeedCmd, FeedMsg};
@@ -26,7 +26,7 @@ use std::{
 };
 use zerocopy::{FromZeros, IntoBytes};
 
-type TaskFn = Box<dyn FnOnce(Arc<AtomicBool>, Thread) -> Result<(), Error> + Send>;
+type TaskFn = Box<dyn FnOnce(Arc<AtomicBool>, ThreadContext) -> Result<(), Error> + Send>;
 pub struct VenueTasks(Vec<(Thread, TaskFn)>);
 pub type BuiltVenue = (VenueTasks, Option<io::GatewayInput>, Vec<storage::Side>, State);
 impl std::fmt::Debug for VenueTasks {
@@ -499,6 +499,7 @@ where
         policy(c, &format!("feed:{name}"))?,
         Box::new(move |stop, t| {
             while !stop.load(Ordering::Acquire) {
+                t.heartbeat.beat();
                 if !feed.poll_once(hft_rt::tsc_now().0).did_work {
                     idle(&t);
                 }
@@ -622,6 +623,7 @@ where
             policy(c, &format!("gw:{name}"))?,
             Box::new(move |stop, t| {
                 while !stop.load(Ordering::Acquire) {
+                    t.heartbeat.beat();
                     if !gw.poll_once(hft_rt::tsc_now().0).did_work {
                         idle(&t);
                     }
@@ -643,6 +645,7 @@ where
             let mut reauth_started = false;
             let mut pending_rest = None;
             loop {
+                t.heartbeat.beat();
                 let stopping_now = stop.load(Ordering::Acquire);
                 if stopping_now && stopping.is_none() {
                     stopping = Some(Instant::now());

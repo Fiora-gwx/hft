@@ -12,7 +12,7 @@ use hft_types::VenueId;
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
     },
     thread::JoinHandle,
     time::{Duration, Instant},
@@ -41,6 +41,40 @@ pub fn pin(t: &Thread) -> Result<(), Error> {
 }
 pub fn idle(t: &Thread) {
     std::thread::park_timeout(Duration::from_micros(t.park_us));
+}
+
+/// A worker owns the only writer of its claimed heartbeat slot.
+#[derive(Debug)]
+pub struct ThreadContext {
+    pub policy: Thread,
+    pub heartbeat: &'static hft_rt::Heartbeat,
+}
+impl std::ops::Deref for ThreadContext {
+    type Target = Thread;
+    fn deref(&self) -> &Thread {
+        &self.policy
+    }
+}
+
+fn claim(
+    heartbeat: &'static hft_rt::HeartbeatBlock,
+    t: &Thread,
+) -> Result<&'static hft_rt::Heartbeat, Error> {
+    use hft_rt::HbKind;
+    let kind = match t.task.as_str() {
+        "sequencer" => HbKind::Sequencer,
+        "persist" => HbKind::Persist,
+        "housekeeping" => HbKind::Housekeeping,
+        "ctl-gateway" => HbKind::Ctl,
+        "sim-gw" => HbKind::Gw,
+        "paper-feed" => HbKind::Feed,
+        s if s.starts_with("gw:") => HbKind::Gw,
+        s if s.starts_with("feed:") => HbKind::Feed,
+        _ => HbKind::Mixed,
+    };
+    heartbeat
+        .claim(&t.name, t.core.unwrap_or(u16::MAX), kind as u8)
+        .ok_or_else(|| Error::config("ThreadPlan", "heartbeat slots exhausted"))
 }
 
 /// Assemble a calibration observation and its decision input, keeping the three clock states.
@@ -111,28 +145,29 @@ fn notify(_message: &str) -> Result<(), Error> {
 pub struct Workers {
     pub stop: Arc<AtomicBool>,
     joins: Vec<JoinHandle<Result<(), Error>>>,
+    heartbeat: &'static hft_rt::HeartbeatBlock,
 }
-impl Default for Workers {
-    fn default() -> Self {
+impl Workers {
+    pub fn new(heartbeat: &'static hft_rt::HeartbeatBlock) -> Self {
         Self {
             stop: Arc::new(AtomicBool::new(false)),
             joins: Vec::new(),
+            heartbeat,
         }
     }
-}
-impl Workers {
     pub fn spawn(
         &mut self,
         t: Thread,
-        f: impl FnOnce(Arc<AtomicBool>, Thread) -> Result<(), Error> + Send + 'static,
+        f: impl FnOnce(Arc<AtomicBool>, ThreadContext) -> Result<(), Error> + Send + 'static,
     ) -> Result<(), Error> {
+        let heartbeat = claim(self.heartbeat, &t)?;
         let stop = self.stop.clone();
         self.joins.push(
             std::thread::Builder::new()
                 .name(t.name.clone())
                 .spawn(move || {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        pin(&t).and_then(|()| f(stop.clone(), t))
+                        pin(&t).and_then(|()| f(stop.clone(), ThreadContext { policy: t, heartbeat }))
                     }))
                     .unwrap_or_else(|_| Err(Error::runtime("ThreadPanic", "worker panicked", 134)));
                     if result.is_err() {
@@ -435,12 +470,13 @@ fn run_linux(
     );
     #[cfg(not(target_os = "linux"))]
     let _ = internal_rx;
-    let mut workers = Workers::default();
-    let mut persist_workers = Workers::default();
+    let mut workers = Workers::new(heartbeat);
+    let mut persist_workers = Workers::new(heartbeat);
     let mut persist = storage::Persist::new(sides);
     persist_workers.spawn(policy(c, "persist")?, move |stop, t| {
         let start = Instant::now();
         while !stop.load(Ordering::Acquire) {
+            t.heartbeat.beat();
             if !persist.poll(
                 start.elapsed().as_nanos() as u64,
                 clock.to_utc_ns(hft_rt::tsc_now()),
@@ -466,6 +502,7 @@ fn run_linux(
         use hft_rt::PollTask;
         let mut sent = false;
         while !stop.load(Ordering::Acquire) {
+            t.heartbeat.beat();
             let now = hft_rt::tsc_now();
             if request.load(Ordering::Acquire) && !sent {
                 #[cfg(target_os = "linux")]
@@ -508,6 +545,7 @@ fn run_linux(
         );
         workers.spawn(policy(c, "sim-gw")?, move |stop, t| {
             while !stop.load(Ordering::Acquire) {
+                t.heartbeat.beat();
                 if !gateway.poll(hft_rt::tsc_now())? {
                     idle(&t);
                 }
@@ -516,6 +554,7 @@ fn run_linux(
         })?;
         workers.spawn(policy(c, "paper-feed")?, move |stop, t| {
             while !stop.load(Ordering::Acquire) {
+                t.heartbeat.beat();
                 for f in &mut paper_feeds {
                     f.poll(hft_rt::tsc_now())?;
                 }
@@ -531,7 +570,9 @@ fn run_linux(
     let mut hk = hk_tx;
     let threshold = c.clock.step_threshold_ns;
     let interval = Duration::from_millis(u64::from(c.clock.interval_ms));
-    let hk_drain = drain.clone();
+    // This is an observation of sequencer-owned state, never a decision input.
+    let observed_state = Arc::new(AtomicU8::new(hft_rt::HkLine::WARMUP));
+    let hk_state = observed_state.clone();
     let stale_after = Duration::from_millis(u64::from(c.watchdog.hb_stale_ms));
     workers.spawn(policy(c, "housekeeping")?, move |stop, t| {
         let mut tracker = hft_rt::DriftTracker::new(threshold);
@@ -539,9 +580,10 @@ fn run_linux(
         let mut next = Instant::now();
         let mut seq_count = hb.read();
         let mut seq_progress = Instant::now();
-        heartbeat.set_state(hft_rt::HkLine::RUNNING);
         notify("READY=1")?;
         while !stop.load(Ordering::Acquire) {
+            t.heartbeat.beat();
+            heartbeat.set_state(hk_state.load(Ordering::Acquire));
             let count = hb.read();
             if count != seq_count {
                 seq_count = count;
@@ -553,9 +595,6 @@ fn run_linux(
                 let verdict = tracker.push(pair);
                 clock_tick(&mut hk, pair, clock.hz_milli, verdict, &mut last)?;
                 heartbeat.hk.hk_utc_ns.store(pair.realtime_ns, Ordering::Release);
-                if hk_drain.load(Ordering::Acquire) {
-                    heartbeat.set_state(hft_rt::HkLine::DRAINING);
-                }
                 if seq_progress.elapsed() < stale_after {
                     notify("WATCHDOG=1")?;
                 }
@@ -569,11 +608,18 @@ fn run_linux(
     let stop = workers.stop.clone();
     let persist_stop = persist_workers.stop.clone();
     let seq_policy = policy(c, "sequencer")?;
+    let seq_slot = claim(heartbeat, &seq_policy)?;
+    let accounts: Vec<_> = (1..=u8::MAX)
+        .map(hft_types::AccountId)
+        .filter(|a| rd.account(*a).id.0 != 0)
+        .collect();
     let seq_thread = std::thread::Builder::new()
         .name(seq_policy.name.clone())
         .spawn(move || -> Result<(u8, u64, u64, u64), Error> {
             pin(&seq_policy)?;
+            let mut running = false;
             loop {
+                seq_slot.beat();
                 if stop.load(Ordering::Acquire) || persist_stop.load(Ordering::Acquire) {
                     return Err(Error::runtime(
                         "WorkerFailed",
@@ -585,6 +631,12 @@ fn run_linux(
                     seq.driver_mut().io.retired_pending = seq.driver_mut().io.retired.try_send(p).err();
                 }
                 let outcome = seq.step();
+                if seq.view().draining() {
+                    observed_state.store(hft_rt::HkLine::DRAINING, Ordering::Release);
+                } else if !running && accounts.iter().all(|a| seq.engine().risk.mode.released(*a)) {
+                    running = true;
+                    observed_state.store(hft_rt::HkLine::RUNNING, Ordering::Release);
+                }
                 seq.driver_mut().taken_log.clear();
                 match outcome {
                     StepOutcome::Idle => idle(&seq_policy),

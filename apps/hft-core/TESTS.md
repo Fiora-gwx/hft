@@ -14,6 +14,8 @@ spec: README.md
 
 `tests/secrets.rs` 验证共享路径一次读取后删除、原始缓冲交接、错误脱敏、后续配置失败时不残留已读取文件，以及失败的 `--check` 不消耗凭据。完整 strace 矩阵与测试分配器的释放前清零观测尚未覆盖。
 
+`tests/paper_process.rs::core_380_ready_precedes_gate_release_and_control_drain_stops_cleanly` 验证 CLOCK 仍关闭时 READY 不改变 Warmup、全部工作线程有命名心跳槽、控制 socket 的 Drain 被记录后干净退出；完整启动失败与恢复状态矩阵尚未覆盖。
+
 CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs::core_120_mock_accounts_bootstrap_reauth_and_drift` 以独立子进程、两家真实协议和脚本 REST 验证撤空、基线、重新核验、超时/错误模式失败与余额差异不覆盖账本；不替代真实 TLS、交易所或正式恢复验收。资金费账单复用 FundingPoll，沿用现有实际结算记账与去重。
 
 ## 覆盖
