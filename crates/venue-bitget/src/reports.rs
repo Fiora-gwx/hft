@@ -1069,7 +1069,7 @@ pub(crate) fn decode_rest(
     e.r#gen = r.r#gen;
     e.inst = req.inst;
     if !ok {
-        if code.num() == Some(ORDER_GONE) {
+        if code.num() == Some(ORDER_GONE) && !matches!(status, 403 | 408 | 418 | 429) && status < 500 {
             // "Order does not exist": NotFound, never a final state (no expiry guard, contract 10).
             e.detail = status::NOT_FOUND;
             out.order(&e);

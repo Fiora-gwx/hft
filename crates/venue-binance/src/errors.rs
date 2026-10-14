@@ -34,10 +34,12 @@ const REJECT: &[i64] = &[
 
 /// Class of a business code, or of an HTTP status when `code` is `None`.
 pub fn classify_code(code: Option<i64>, status: u16) -> CodeClass {
+    if matches!(status, 403 | 408 | 418 | 429) || status >= 500 {
+        return CodeClass::Unknown;
+    }
     match code {
         Some(c) if REJECT.contains(&c) => CodeClass::Reject,
         Some(_) => CodeClass::Unknown,
-        None if status == 429 || status == 418 => CodeClass::Reject,
         None => CodeClass::Unknown,
     }
 }

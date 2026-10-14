@@ -325,6 +325,24 @@ fn ws_resp(
         }
         _ => {}
     }
+    // Transport uncertainty takes precedence even over a stale/contradictory error body.
+    if matches!(m.status, 403 | 408 | 418 | 429) || m.status >= 500 {
+        o.outcome_unknown = Some(req);
+        if matches!(m.status, 418 | 429) {
+            o.ctl = ReportCtl::RateLimited;
+            o.rate = full(
+                line,
+                rd,
+                if code == Some(ORDER_LIMIT) {
+                    LimitBucket::Orders
+                } else {
+                    LimitBucket::Weight
+                },
+            )
+            .or(o.rate);
+        }
+        return Ok(o);
+    }
     let mut e = blank(line, account, rx);
     e.slot = SlotId(req.slot);
     e.r#gen = req.r#gen;

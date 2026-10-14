@@ -173,8 +173,10 @@ core 的深度来源([hft-venue-proto 契约 26](../hft-venue-proto/README.md#�
 
 | 表 | 码 | 来源 |
 |---|---|---|
-| 确定拒绝 | `-1013`(过滤器)、`-1021`(时间戳超出 recvWindow)、`-1111`(精度)、`-2010`(现货新单被拒,含余额不足)、`-2019`(保证金不足)、`-2022`(reduceOnly 被拒)、`-4164`(低于最小名义)、`-5022`(GTX 会吃单)、`-4061`(持仓方向与模式不符)、`-1003`/`-1015`(限速,请求未处理)、HTTP 429/418 | research/02 与现有系统实测;逐码待核实(方法 A + B:官方错误码页原文与演示环境样本,随金样登记) |
-| 结果未知 | `-1007`(超时,状态未知)、`-1001`(内部错误/连接断开)、`-1008`(服务过载)、HTTP/WS `status ≥ 500`,以及**任何未登记码** | 现货 ws-api 文档明示"5XX 不代表失败,状态未知"[官方,本地缓存];期货待核实(方法 A) |
+| 确定拒绝 | `-1013`(过滤器)、`-1021`(时间戳超出 recvWindow)、`-1111`(精度)、`-2010`(现货新单被拒,含余额不足)、`-2019`(保证金不足)、`-2022`(reduceOnly 被拒)、`-4164`(低于最小名义)、`-5022`(GTX 会吃单)、`-4061`(持仓方向与模式不符)、`-1003`/`-1015`(限速,请求未处理) | research/02 与现有系统实测;逐码待核实(方法 A + B:官方错误码页原文与演示环境样本,随金样登记) |
+| 结果未知 | `-1007`(超时,状态未知)、`-1001`(内部错误/连接断开)、`-1008`(服务过载)、HTTP/WS 403/408/418/429 或 `status ≥ 500`,以及**任何未登记码** | 现货 ws-api 文档明示"5XX 不代表失败,状态未知"[官方,本地缓存];期货待核实(方法 A) |
+
+传输失败状态优先于响应体的业务码,不能生成确定拒单、GONE 或 NotFound;429/418 仍收紧限速。
 
 撤单响应 `-2011`(未知订单,常因已成交)→ `CancelReject{detail = GONE}`(属 `GONE` 类,契约 28;sequencer 等成交回报,不重试);其余确定拒绝码在撤改上 `detail = 0`。查询 `order.status` 返回 `-2013`(订单不存在)→ `QueryResult` 的 NotFound 形态,**不定终态**:`stale_guard()` 是 `RecvWindow`,按[契约 10](../hft-venue-proto/README.md#实现方必须遵守的契约) 由 OMS 保持 `Unknown` 并经成交历史(`Usdm` `GET /fapi/v1/userTrades`,`Spot` `myTrades`,按 symbol + 时间窗)确认收敛。**成交历史的记录只带 `orderId`、不带 client id**(待核实,开发备忘第 19 条),所以"这笔从未成交"不能按 client id 在历史里直接查到;判据归 [reconciler](../../apps/reconciler/README.md):成交历史窗口内出现既不属于已知槽、也不属于已登记外来单的 `orderId` → `history_checked = 0` 并报 P0;grace 后按 client id 查询(`order.status`,或 REST `GET /fapi/v1/order?origClientOrderId=`)连续两次仍 `-2013`、且窗口内没有未归属的成交,才给 `history_checked = 1`。控制提示([契约 30](../hft-venue-proto/README.md#实现方必须遵守的契约)):`-1021` → `ctl = ClockSkew`(运行时推 `ConnState{Degraded, reason=CLOCK_SKEW}`);`-1003`、`-1015`、HTTP 429/418 → `ctl = RateLimited`,`RateObs` 置满;`listenKey` 续期返回 `-1125`(listenKey 不存在)→ `ctl = UserStreamEnded`。
 
@@ -509,6 +511,8 @@ pub mod mock {
 成交的单笔量不能超过累计量;零手续费允许缺少手续费币种,非零手续费必须能映射到 refdata,零手续费不触发 fee_rule_deviation。warm 保证金查询拒绝负维持保证金;权益非正仍报告 Rate::MAX。UID 同时接受数字与字符串,Verified 要求匹配;Unverifiable 只豁免缺失,实际返回的 UID 保留给运行时核对两把 key。
 
 ### 测试环境 warm 账户入口
+
+账户页面先完整解码与校验再替换 `State` 中对应观察值;失败保留上一次完整页面,不发布部分余额、持仓或杠杆。重复资产/订单、非正订单 ID、负冻结余额、负价格与重复分页游标拒绝。遗留订单的撤单回执须同时匹配请求的 symbol 和 orderId。
 
 `Templates` 仅保存账户与非敏感帧配置。warm REST/只读请求使用 `*_signed` 入口,每次从调用方借用凭证;旧无凭证入口不发认证请求。账户运行时持有 REST key;warm task 与网关 REST 池均按请求借用,全撤沿用各自通道。
 

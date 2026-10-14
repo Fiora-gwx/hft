@@ -59,10 +59,12 @@ pub(crate) const RATE_LIMITED: i64 = 25004;
 
 /// Class of a business code, or of an HTTP status when `code` is `None`.
 pub fn classify_code(code: Option<i64>, status: u16) -> CodeClass {
+    if matches!(status, 403 | 408 | 418 | 429) || status >= 500 {
+        return CodeClass::Unknown;
+    }
     match code {
         Some(c) if DEFINITE_REJECT.contains(&c) => CodeClass::Reject,
         Some(_) => CodeClass::Unknown,
-        None if status == 429 => CodeClass::Reject,
         None => CodeClass::Unknown,
     }
 }

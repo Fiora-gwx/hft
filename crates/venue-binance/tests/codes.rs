@@ -146,7 +146,7 @@ fn bin_092_error_code_table() {
             "BIN-092.10",
             429,
             Some(-1003),
-            W::Reject(0xFFFF_FC15),
+            W::Unknown(0xFFFF_FC15),
             ReportCtl::RateLimited,
             full(LimitBucket::Weight, 2400, 60_000),
         ),
@@ -154,7 +154,7 @@ fn bin_092_error_code_table() {
             "BIN-092.11",
             429,
             Some(-1015),
-            W::Reject(0xFFFF_FC09),
+            W::Unknown(0xFFFF_FC09),
             ReportCtl::RateLimited,
             full(LimitBucket::Orders, 300, 10_000),
         ),
@@ -162,7 +162,7 @@ fn bin_092_error_code_table() {
             "BIN-092.12",
             429,
             None,
-            W::Reject(0x2000_01AD),
+            W::Unknown(0x2000_01AD),
             ReportCtl::RateLimited,
             full(LimitBucket::Weight, 2400, 60_000),
         ),
@@ -170,7 +170,7 @@ fn bin_092_error_code_table() {
             "BIN-092.13",
             418,
             None,
-            W::Reject(0x2000_01A2),
+            W::Unknown(0x2000_01A2),
             ReportCtl::RateLimited,
             full(LimitBucket::Weight, 2400, 60_000),
         ),
@@ -297,4 +297,29 @@ fn bin_095_query_not_found() {
         (OrderEventKind::QueryResult, SlotId(42), 7, 0, 0, 0xFFFF_F823, 7)
     );
     assert_eq!(o.outcome_unknown, None);
+}
+
+#[test]
+fn bin_092_transport_status_cannot_manufacture_order_evidence() {
+    for status in [418, 429] {
+        let b = format!(
+            r#"{{"id":"p0000002a00000007","status":{status},"error":{{"code":-2019}},"rateLimits":[{{"rateLimitType":"REQUEST_WEIGHT","interval":"MINUTE","intervalNum":1,"limit":2400,"count":1}}]}}"#
+        );
+        let (out, sink) = dec::<Usdm>(&b);
+        assert!(sink.orders.is_empty());
+        let rate = out.rate.unwrap();
+        assert_eq!(rate.used, rate.limit);
+        assert_eq!(out.ctl, ReportCtl::RateLimited);
+    }
+    for status in [403, 408, 418, 429, 500, 502, 503] {
+        for (op, code) in [("p", -2019), ("c", -2011), ("q", -2013), ("m", -1013)] {
+            let b = resp(status, Some(code)).replace("p0000002a", &format!("{op}0000002a"));
+            let (out, sink) = dec::<Usdm>(&b);
+            assert!(sink.orders.is_empty(), "{status} {op} {code}");
+            assert!(out.outcome_unknown.is_some());
+            if matches!(status, 418 | 429) {
+                assert_eq!(out.ctl, ReportCtl::RateLimited);
+            }
+        }
+    }
 }

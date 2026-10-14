@@ -270,8 +270,71 @@ struct Order {
     order_id: u64,
 }
 
+// Each REST page is a transaction. A malformed later row must not replace a validated baseline.
 #[allow(clippy::too_many_arguments)]
 fn decode(
+    v: VenueId,
+    fut: bool,
+    rd: &RefData,
+    a: AccountId,
+    q: &Query,
+    status: u16,
+    b: &[u8],
+    t: i64,
+    s: &mut State,
+) -> Result<(), DecodeErr> {
+    let mut next = State {
+        config: s.config,
+        ..State::default()
+    };
+    decode_page(v, fut, rd, a, q, status, b, t, &mut next)?;
+    for (n, row) in next.balances.iter().enumerate() {
+        if row.locked.0 < 0
+            || (!fut && row.free.0 < 0)
+            || next.balances[..n].iter().any(|old| old.asset == row.asset)
+        {
+            return Err(DecodeErr::Shape);
+        }
+    }
+    if next.positions.iter().any(|p| p.entry_px.0 < 0 || p.liq_px.0 < 0) {
+        return Err(DecodeErr::Shape);
+    }
+    for (n, row) in next.orders.iter().enumerate() {
+        if !safe_token(&row.symbol)
+            || !safe_token(&row.order_id)
+            || !row.order_id.parse::<u64>().is_ok_and(|id| id != 0)
+            || next.orders[..n]
+                .iter()
+                .any(|old| old.symbol == row.symbol && old.order_id == row.order_id)
+        {
+            return Err(DecodeErr::Shape);
+        }
+    }
+    match q {
+        Query::Settings | Query::Permissions => s.config = next.config,
+        Query::SymbolSettings => s.leverage = next.leverage,
+        Query::Balances => {
+            s.balances = next.balances;
+            s.margin = next.margin;
+        }
+        Query::Positions => {
+            s.positions = next.positions;
+            s.margin_items = next.margin_items;
+        }
+        Query::OpenOrders { cursor } => {
+            if !next.cursor.is_empty() && (next.cursor == *cursor || !safe_token(&next.cursor)) {
+                return Err(DecodeErr::Shape);
+            }
+            s.orders = next.orders;
+            s.cursor = next.cursor;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn decode_page(
     v: VenueId,
     fut: bool,
     rd: &RefData,
@@ -496,8 +559,11 @@ fn decode(
                 .collect();
             s.cursor.clear();
         }
-        Query::Cancel { .. } => {
-            let _: Order = from(b)?;
+        Query::Cancel { symbol, order_id } => {
+            let r: Order = from(b)?;
+            if r.symbol != *symbol || r.order_id.to_string() != *order_id {
+                return Err(DecodeErr::Shape);
+            }
         }
         Query::ListenKey | Query::Keepalive => {}
         Query::DeadMan { symbol, timeout_ms } => {
