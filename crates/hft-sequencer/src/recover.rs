@@ -391,6 +391,9 @@ pub(crate) fn restore_at<S: StrategySet>(
     if secs.engine_clock.tsc_hz_milli != 0 {
         e.clock = crate::clock::EngineClock::new(secs.engine_clock)
             .map_err(|_| BootError::SnapshotUndecodable { section: 25 })?;
+        // Tail replay stays in the snapshot's run until the next EngineClock Input.
+        // Margin freshness/force confirmation must use the same run boundary as live.
+        e.risk.set_run_start(secs.engine_clock.base_engine_ns);
         e.boot_seq = secs.engine_clock.clock_seq + 1;
     }
     for c in secs.conns.iter() {

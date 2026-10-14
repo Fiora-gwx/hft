@@ -346,7 +346,15 @@ impl ToyEngine {
             max_pos_qty: max_pos,
             notional: i128::from(qty) * i128::from(px) / 1_000_000,
             link,
-            link_unknown: false,
+            link_unknown: link != 0
+                && self
+                    .slots
+                    .iter()
+                    .any(|s| s.link == link && s.state == SlotState::Unknown),
+            group_unknown: self
+                .slots
+                .iter()
+                .any(|s| s.account == a && s.group == g && s.state == SlotState::Unknown),
         });
         if reject != 0 {
             return false;

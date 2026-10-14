@@ -1112,13 +1112,6 @@ pub fn inv_4_unknown_group_no_open_no_reverse() -> Scenario {
 }
 
 fn check_4(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
-    let unknown: BTreeSet<(u8, u32)> = v
-        .before
-        .legs
-        .iter()
-        .filter(|l| l.unknown_slots > 0)
-        .map(|l| (l.account.0, l.group.0))
-        .collect();
     let unknown_slots: BTreeSet<(u8, u8, u32, u32)> = v
         .before
         .slots
@@ -1133,14 +1126,11 @@ fn check_4(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
         if d.reject == 0 && unknown_slots.contains(&(d.venue.0, d.account.0, d.slot.0, d.r#gen)) {
             return Err(format!("New on Unknown slot {} gen {}", d.slot.0, d.r#gen));
         }
-        if !unknown.contains(&(d.account.0, d.group.0)) {
-            continue;
-        }
         let Some(i) = info else { continue };
         if i.margin_stress && i.class == DecClass::Flatten {
             continue;
         }
-        if i.class == DecClass::Open && d.reject == 0 {
+        if i.group_unknown && i.class == DecClass::Open && d.reject == 0 {
             return Err(format!(
                 "Open released in Unknown group {:#x} (seq {})",
                 d.group.0, i.seq

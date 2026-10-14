@@ -561,6 +561,8 @@ pub struct DecisionInfo {
     /// Link id (0 = none) and whether that link has an `Unknown` slot (INV-4).
     pub link: u32,
     pub link_unknown: bool,
+    /// Whether the group has an Unknown slot at this decision, after applying the input.
+    pub group_unknown: bool,
 }
 
 /// One Note record of the step, named through the owning crate's code table.

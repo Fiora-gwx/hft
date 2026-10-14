@@ -1368,6 +1368,7 @@ SDK 自身的入口(在 `decided_tsc − proc_tsc` 分段内,[latency-budget](..
 | `Model::on_event(Order/Exec/Manual)`(订阅了 `model_own` 的策略) | ≤ 1 µs | ≤ 5 µs | `model/<kind>/own_event` |
 
 - 执行层推进目标的预算(每事件 O(腿数))归 [hft-exec](../hft-exec/README.md);策略预算不含它。
+- 未实现慢侧、Advice 或 TargetIntent 的策略可在 `benches/not-applicable.toml` 以 `slow_update`、`advice`、`target_set` 键声明不适用理由;不生成计时样本。其余四个策略入口必须实测;已提供基准的入口不得同时声明不适用。覆盖检查与报告归 [tools](../../tools/README.md#cargo-xtask-bench-gate)。
 - 模型 tick 必须在 1 ms 内完成(advisor 的 `poll_once` 时间片);超过的模型按 gix 分片,跨多个 tick 完成。分片由 Model 自己实现,SDK 不提供续算接口:每个 tick 处理哪一片只由该模型 tick 的 UTC 时刻决定(例如 ⌊tick 时刻 / 周期⌋ 对分片数取模),所以分片位置与重启、检查点位置无关,不进状态。检查点写出同样按块分到多次 `poll_once`。
 - 内存:`CtxBufs` 每实例约 24 KiB(64 个 232 B 的 `TargetIntent` 为主);`BboView` 按值约 88 B,`Views::bbo` 每次调用读 1 行报价 + 至多 `MAX_BBO_CONN_SLOTS` 个 `ConnLive` 槽(未命中的 tick 只读报价);Model 的堆按 `mem_bytes` 声明计入 hft-core 的 `advisor.mem_budget_mib`;`MockViews` 只在测试。SDK 本身无全局状态、无分配(`define_params!` 的 decode、`GroupResets` 与 `schema_json` 除外,均在冷路径)。
 

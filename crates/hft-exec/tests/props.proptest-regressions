@@ -4,6 +4,7 @@
 #
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
+cc 5bf7fb15af4ed9f8d98cff7f381029ea91e3e5b8acf9eeb64cf7fea51ff1da7c # EXE-024: capacity continuation must not revisit placement callbacks in the current pass
 cc f4bca141da1f1725fd748d98701820330de7df809651a4f93158880fb80e1f68 # shrinks to o = [(0, 18881), (12, 0), (7, 19733), (0, 41741)]
 cc 725f840e306ce356afc5d06f79d6632f5ea85512a69c318fa948e577bb04518e # shrinks to o = [(0, 9447), (8, 59525)]
 cc 314366a588a27cb9382e715c7ff5b79e55085c6f4495b0e6995026eca5fbe2e9 # shrinks to o = [(0, 49781), (9, 35072), (0, 14510), (9, 7152), (12, 0), (6, 3748)]

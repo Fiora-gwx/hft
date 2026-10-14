@@ -234,6 +234,8 @@ DST FAILED seed=0x9e3779b97f4a7c15 step=48213 invariant=I3(exposure) -> cargo xt
 
 没有分配 slot/gen 的 Shadow 记录不能提供订单身份,不得解释未解析成交。同事件成交/注记证据上限沿用 sequencer 的诊断容量,Shadow 身份表上限沿用 `hft_ledger::SLOT_MAP_CAP`;满时失败,不静默淘汰证据。
 
+modes 回归集另覆盖风控运行起点的派生恢复:从中途快照回放时,旧运行保证金报告仍按相同起点判过期,MarginStress cap 与注记必须一致(TK-115)。
+
 storage 回归集包含轮次结束后经历快照与重启的种子;按完整 10,000 步故障时序运行,确认实际产生 RoundClosed,其所属 Input 为原始成交或手续费回报,独立重建不得漏掉注记(TK-114)。
 
 一致性集中的 Drain 重启种子另外检查启动边界。Drain 快照保留退出 cap,Recovery 快照移除旧 Draining、原样保留其余 cap,全部账户仍有 Recovery 且闸门未放行;同种子复跑逐字节比较 Output 与 HashTrail(TK-120)。
@@ -290,7 +292,7 @@ INV-2/19 的外来成交观察保留契约 22 的键分支及全部身份字段,
 
 对冲 `place` 失败须有原始观察及[容量拒绝决策](../hft-sequencer/README.md)。INV-14 按所属 Input 和完整链接身份检查错误、调用前空闲槽数及重试水位,一个失败最多解释一次该链接的计数增加;漏记、重复、错误身份、非满表的 NoFreeSlot 或复用其他链接证据均失败。门控 SendReport 本身不提供计数依据。恢复后在同一 Input 内完成并复用的链接,从 Input 前的观察补齐旧创建身份,已知 epoch/gen/创建事件不得覆盖。观察不改变 journal 或 HashTrail(TK-121、TK-122)。
 
-`DecisionInfo` 以 journal seq 关联决策前的原始仓位、在途、对冲计划与风控限额;适配器独立计算累计比例补差、剩余对冲量和名义量,不使用订单自身的在途。INV-8 按账户、组和对冲品种分别核对历史与当前链接,不把两个对冲腿的余数相加。强制减仓按原仓位、前一目标、原始比例与 lot 重算目标;自动平仓期限按计时触发与配置窗口重算。诊断默认关闭,不改变 journal schema、快照或状态哈希。传输 Input 内 PendingCancel 必须有相同订单身份的成功 Cancel 决策,不能把主动撤单当成成交证据。验收归 TK-107–TK-111 与 SEQ-373。
+`DecisionInfo` 以 journal seq 关联决策前的原始仓位、在途、对冲计划与风控限额;INV-4 分别读取决策时刻的 group Unknown 与该链接槽位的 Unknown,不把同组其他订单或输入处理前的 Unknown 当作当前链接状态;适配器独立计算累计比例补差、剩余对冲量和名义量,不使用订单自身的在途。INV-8 按账户、组和对冲品种分别核对历史与当前链接,不把两个对冲腿的余数相加。强制减仓按原仓位、前一目标、原始比例与 lot 重算目标;自动平仓期限按计时触发与配置窗口重算。诊断默认关闭,不改变 journal schema、快照或状态哈希。传输 Input 内 PendingCancel 必须有相同订单身份的成功 Cancel 决策,不能把主动撤单当成成交证据。验收归 TK-107–TK-111 与 SEQ-373。
 
 世界步结束后的 `Obs` 始终更新,对账 actor 据此生成真实仓位差;`InvariantSet::none()` 仅关闭断言与验证回放,不停止 actor 使用的观察。TK-121 在实际运行对账的完整场景中逐记录比较 journal 与 HashTrail;失败只报告首条差异,不把整份 journal 打入 CI 日志。
 

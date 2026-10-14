@@ -1,6 +1,6 @@
 //! Read-only component state and per-Input evidence for the real sequencer.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::audit::History;
 use crate::dst::world::WorldSpec;
@@ -270,6 +270,7 @@ pub fn fill_engine(e: &Engine, w: &WorldSpec, audit: &History, carry: &Carry, o:
         }
     }
     // OMS slots and tables.
+    let mut unknown_links = BTreeSet::new();
     for a in &w.accounts {
         for v in &a.venues {
             let Some(t) = e.oms.table_view(*v, a.id) else {
@@ -311,6 +312,9 @@ pub fn fill_engine(e: &Engine, w: &WorldSpec, audit: &History, carry: &Carry, o:
                     continue;
                 }
                 let st = slot_state(sl.state);
+                if sl.state == OrderState::Unknown && sl.link_id != 0 {
+                    unknown_links.insert(sl.link_id);
+                }
                 o.slots.push(SlotRow {
                     venue: *v,
                     account: a.id,
@@ -401,7 +405,7 @@ pub fn fill_engine(e: &Engine, w: &WorldSpec, audit: &History, carry: &Carry, o:
             hedge_filled: i128::from(l.hedge_filled.0),
             reversed: l.flags & 128 != 0,
             retries: u32::from(l.retries),
-            has_unknown: e.oms.legs(l.account, l.group).unknown_slots > 0,
+            has_unknown: unknown_links.contains(&l.link_id),
         });
     }
     // Legs.

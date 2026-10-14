@@ -17,6 +17,7 @@ thread_local! {
     static RESTARTS: RefCell<u64> = const { RefCell::new(0) };
     static LATE_FILL_FEES: RefCell<u64> = const { RefCell::new(0) };
     static PLACE_SAMPLES: RefCell<Vec<EventStep>> = const { RefCell::new(Vec::new()) };
+    static UNKNOWN_SAMPLES: RefCell<Vec<EventStep>> = const { RefCell::new(Vec::new()) };
 }
 struct Observed<
     const FORCE: bool = false,
@@ -26,6 +27,24 @@ struct Observed<
 
 fn capture(events: &[EventStep]) {
     for e in events {
+        if e.records.iter().any(|r| {
+            r.try_read::<OrderDecision>().is_some_and(|d| {
+                d.action == OrderAction::New
+                    && d.reject == 0
+                    && d.link_role == hft_strategy_sdk::LinkRole::SecondRetry as u8
+            }) && e
+                .info
+                .decisions
+                .iter()
+                .any(|d| d.seq == r.seq && d.group_unknown && !d.link_unknown)
+        }) {
+            UNKNOWN_SAMPLES.with(|s| {
+                let mut s = s.borrow_mut();
+                if s.len() < 128 {
+                    s.push(e.clone());
+                }
+            });
+        }
         if !e.info.place_failures.is_empty() {
             PLACE_SAMPLES.with(|s| {
                 let mut s = s.borrow_mut();
@@ -117,6 +136,7 @@ impl<const FORCE: bool, S: hft_strategy_sdk::StrategySet, const RECOVER: bool> S
         RESTARTS.with(|n| *n.borrow_mut() = 0);
         LATE_FILL_FEES.with(|n| *n.borrow_mut() = 0);
         PLACE_SAMPLES.with(|s| s.borrow_mut().clear());
+        UNKNOWN_SAMPLES.with(|s| s.borrow_mut().clear());
         SeqSut::<S>::boot(c).map(|e| Self(e, false, 0))
     }
     fn process(&mut self, n: u64, t: u64, i: &InputRec, o: &mut StepOut) {
@@ -338,6 +358,90 @@ fn check(id: InvId, e: &EventStep) -> Result<(), (InvId, String)> {
             rebuild: None,
         },
     )
+}
+
+#[test]
+fn tk_107_unknown_is_scoped_to_decision_group_and_link() {
+    use hft_testkit::dst::obs::{DecClass, SlotState};
+    let suite = hft_testkit::scenarios::suites()
+        .into_iter()
+        .find(|s| s.name == "core")
+        .unwrap();
+    let mut c = suite.config(0x61aa_a3c8_1c37_eb19);
+    c.steps = 7_111;
+    c.rerun = hft_testkit::dst::RerunPolicy::Never;
+    let r = run_record::<Observed>(&c);
+    assert!(r.outcome.is_pass(), "{}", crate::seq_sut::show(&r));
+    let samples = UNKNOWN_SAMPLES.with(|s| s.take());
+    let e = samples
+        .last()
+        .expect("retry beside another Unknown link was not exercised");
+    let i = e
+        .info
+        .decisions
+        .iter()
+        .find(|d| d.group_unknown && !d.link_unknown && d.link != 0)
+        .unwrap();
+    let d = e
+        .records
+        .iter()
+        .find(|r| r.seq == i.seq)
+        .unwrap()
+        .try_read::<OrderDecision>()
+        .unwrap();
+    assert!(
+        e.before
+            .legs
+            .iter()
+            .any(|l| l.account == d.account && l.group == d.group && l.unknown_slots > 0)
+    );
+    assert!(
+        e.before
+            .slots
+            .iter()
+            .any(|s| s.account == d.account && s.group == d.group && s.state == SlotState::Unknown)
+    );
+    assert!(e.before.links.iter().any(|l| l.id == i.link && !l.has_unknown));
+    assert!(check(InvId::I4, e).is_ok());
+    let mut bad = e.clone();
+    bad.info
+        .decisions
+        .iter_mut()
+        .find(|d| d.seq == i.seq)
+        .unwrap()
+        .link_unknown = true;
+    assert!(
+        check(InvId::I4, &bad).is_err(),
+        "retry of an Unknown link accepted"
+    );
+    let mut open = e.clone();
+    open.info
+        .decisions
+        .iter_mut()
+        .find(|d| d.seq == i.seq)
+        .unwrap()
+        .class = DecClass::Open;
+    assert!(
+        check(InvId::I4, &open).is_err(),
+        "Open in an Unknown group accepted"
+    );
+    // The decision-time facts govern both entering and leaving Unknown in this Input.
+    open.before.legs.iter_mut().for_each(|l| l.unknown_slots = 0);
+    open.before.slots.retain(|s| s.state != SlotState::Unknown);
+    assert!(check(InvId::I4, &open).is_err(), "newly Unknown group was missed");
+    let mut converged = e.clone();
+    let i = converged
+        .info
+        .decisions
+        .iter_mut()
+        .find(|d| d.seq == i.seq)
+        .unwrap();
+    i.class = DecClass::Open;
+    i.group_unknown = false;
+    assert!(
+        check(InvId::I4, &converged).is_ok(),
+        "converged group still blocked by before-state"
+    );
 }
 
 #[test]

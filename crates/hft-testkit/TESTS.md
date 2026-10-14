@@ -1416,7 +1416,9 @@ spec: README.md
 - 前置:真实 `SeqSut<TestStrategies>`、W1、种子 1、2000 步
 - 步骤:读取内部 Timer 与 New 决策的逐 Input 观察,对副本分别改错 Kill、有效模式、对冲数量及强制减仓方向,删去模式/保证金/执行单元/在途/决策观察,制造溢出标记和 Input 漏记/重复
 - 期望:正常运行全部不变量通过;实际存在内部 Timer 和成功对冲;所有反例被相应检查拒绝,不修改被测引擎
+- 回归:core 种子 `0x61aaa3c81c37eb19` 的同组其他订单 Unknown 不阻止已收敛链接的合法 SecondRetry;诊断副本中的本链接 Unknown、Open 与本次输入刚进入 Unknown 都必须被 I4 拒绝,本次已收敛的 group 可通过。
 - 实现:`crates/hft-testkit/tests/observations.rs::tk_107_real_observations_and_counterexamples`
+- 回归函数:`crates/hft-testkit/tests/observations.rs::tk_107_unknown_is_scoped_to_decision_group_and_link`
 
 ### TK-108 观察检查点只覆盖已发布 journal
 
@@ -1498,6 +1500,8 @@ spec: README.md
 - 步骤:同一测试入口逐行运行正例与九种反例。首次世界步在外部行情之前依次处理关键帧、按需快照与滚段 Timer,Drain 干净重启后连续崩溃恢复两次;另一行关闭全部检查器;反例行分别删除首条/全部观察、重复首条、改错边界、跨过后续 Input、改错首条风险哈希、标记溢出、返回重建错误、删除首条快照的完整账本视图
 - 期望:正常行实际包含五种目的的至少八条快照,检查数等于 journal 快照数;每个真实快照同时经过 LED-267 冷账本核对;开关检查器前后的完整 journal 和非空 HashTrail 逐字节相同;九种反例均以 INV-6 在第 0 步失败,诊断指出原因,不能被后来的正确快照遮盖
 - 实现:`crates/hft-testkit/tests/snapshot_checks.rs::tk_115_every_snapshot_checked_with_periodic_rebuild_off`
+- 回归:modes 种子 `0x8573133122fce369`,8 000 步,实际产生旧运行报告过期的 L1 MarginStress;从中途快照回放仍产生同一 cap 注记,所有快照与定期 INV-6 通过。
+- 回归函数:`crates/hft-testkit/tests/snapshot_checks.rs::tk_115_snapshot_preserves_margin_run_boundary`
 
 ### TK-116 快照观察只保留已提交边界且缓冲有界
 

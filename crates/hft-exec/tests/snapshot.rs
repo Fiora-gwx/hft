@@ -576,7 +576,7 @@ fn exe_459_pending_roundtrip() {
     assert!(fx.ex.has_pending());
     let s = fx.snap();
     let pend = (0..64)
-        .filter(|k| cell_row(&s, A1, many(*k)).is_some_and(|r| r.flags & RF_PENDING != 0))
+        .filter(|k| cell_row(&s, A1, many(*k)).is_some_and(|r| r.flags & RF_ADVANCING != 0))
         .count();
     let mut done: Vec<u16> = b0.orders.iter().map(|o| o.id.cix).collect();
     done.sort_unstable();
@@ -585,11 +585,45 @@ fn exe_459_pending_roundtrip() {
     assert!(pend > 0);
     let restored = fx.restore(&s);
     assert!(restored.has_pending());
+    let groups = GroupTable::new(&fx.groups, 256);
+    fx.ex
+        .on_groups_changed(&groups, &RefView::new(&fx.rd, A1), &mut fx.out);
+    assert_eq!(
+        fx.snap(),
+        s,
+        "unchanged groups preserve the continuation work set"
+    );
     let reference = continue_all(&mut fx);
     fx.ex = restored;
     let again = continue_all(&mut fx);
     assert_eq!(norm(&again), norm(&reference));
     assert!(!reference.is_empty());
+}
+
+#[test]
+fn exe_459_legacy_pending_and_invalid_work_flags() {
+    let mut fx = Fx::new();
+    fx.set(I1, &t0("3", "-3")).0.unwrap();
+    let mut legacy = fx.snap();
+    legacy[2..4].copy_from_slice(&1u16.to_le_bytes());
+    for (kind, off) in offsets(&legacy) {
+        if kind == ROW_CELL {
+            legacy[off + 12] &= !(RF_FORCED | RF_ADVANCING | RF_ADVANCING_FORCED);
+        }
+    }
+    let expected = fx.adv();
+    fx.ex = fx.restore(&legacy);
+    let actual = fx.adv();
+    assert_eq!(norm(&actual.decisions), norm(&expected.decisions));
+    assert_eq!(actual.orders, expected.orders);
+
+    for flags in [RF_FORCED, RF_ADVANCING_FORCED, RF_PENDING | RF_ADVANCING_FORCED] {
+        let mut bad = legacy.clone();
+        bad[2..4].copy_from_slice(&ROW_VERSION.to_le_bytes());
+        let off = cell_off(&bad, A1, G7);
+        bad[off + 12] = flags;
+        assert!(try_restore(&fx, &bad).is_err(), "orphan work flags {flags}");
+    }
 }
 
 #[test]

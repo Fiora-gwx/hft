@@ -1654,6 +1654,8 @@ spec: README.md
   - 两组 engine_ns 逐条相同;起步时 `E` 等于关键帧节 25
 - 实现:`crates/hft-sequencer/tests/clock.rs::seq_111_start_from_snapshot_uses_section25`
 
+TK-115 的 modes 回归另覆盖节 25 的运行起点恢复给风控:旧运行的保证金报告不得因从中途快照起步而变成新报告,MarginStale 的 cap 注记须与连续运行一致。
+
 ### SEQ-112 运行中的段滚动不改引擎时钟基准
 
 - 规则:[引擎时间](README.md#引擎时间engine_ns)、[快照](README.md#快照)
@@ -5253,6 +5255,7 @@ SEQ-158 补充验收:RateOnly 的实额输入替换已有合成额,重复实额�
 - 步骤:各依次写入 512、513 条观察,重置事件观察后关联正确与缺失的 journal 序号
 - 期望:三种缓冲的 512 条有效;第 513 条失败且不扩容;事件重置清空决策/place 观察,决策缺失序号置失败标志;冷恢复记录与溢出错误不随事件重置清除,溢出读取返回错误
 - 关联:完整边界的 `StateView::ledger`/`refdata` 只读性、缺失视图失败及真实冷热逐项核对由 [TK-115](../hft-testkit/TESTS.md#tk-115-每条快照在其完成边界检查-inv-6) 与 [LED-267](../hft-ledger/TESTS.md#led-267-dst-中每个快照点-journalledger-等于引擎-ledger) 验证
+- 关联:决策时刻的 group/link Unknown 分别取样,同组其他订单不污染当前链接;反例验收见 [TK-107](../hft-testkit/TESTS.md#tk-107-真实引擎逐事件观察与反例)。
 - 实现:`crates/hft-sequencer/src/audit.rs::seq_373_diagnostic_capacity_is_explicit`
 
 ### SEQ-374 人工保持阻止配对目标的尾差下单并逐字节回放
