@@ -8,6 +8,8 @@ spec: README.md
 
 格式与规则见 [docs/tests](../../docs/tests/README.md)。
 
+真实跨所策略场景在 `tests/cross_taker_e2e.rs`,覆盖范围归 [cross-taker/TESTS.md](../cross-taker/TESTS.md)。REG-008 金样同时验证全部 feature 导出与默认构建投影;REG-009 的版本扰动按目标策略身份定位,不依赖其在 index 中的位置。
+
 ## 覆盖
 
 | README 小节 | 用例 |
