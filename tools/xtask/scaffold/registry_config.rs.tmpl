@@ -1,0 +1,64 @@
+//! Build the scaffold probe's offline configuration with the production blob codecs.
+use hft_strategy_registry::Strategies;
+use hft_strategy_sdk::StrategySet;
+use hft_testkit::dst::{seq::build, world::{WorldSpec, VP}};
+use hft_types::{HostClass, VenueId};
+
+#[test]
+fn scaffold_config_for_registered_probe() {
+    let mut world = WorldSpec::w1_sim();
+    // The assembly supports these two venue protocols; the template requires two exchanges.
+    let remap = |v| if v == VP { VenueId::BITGET_UTA_USDT_FUT } else { v };
+    for v in &mut world.venues {
+        v.id = remap(v.id);
+    }
+    for i in &mut world.insts {
+        i.venue = remap(i.venue);
+    }
+    for a in &mut world.accounts {
+        for v in &mut a.venues {
+            *v = remap(*v);
+        }
+        for (v, _, _) in &mut a.balances {
+            *v = remap(*v);
+        }
+    }
+    let binding = &mut world.strategies[0];
+    binding.kind_id = {{kind_id}};
+    let instance = binding.instance;
+    let account = binding.account;
+    let desc = Strategies::kinds().iter().find(|d| d.kind_id == {{kind_id}}).unwrap();
+    assert_eq!(desc.name, "{{name}}");
+    let rdb = build::refdata_blob_with_names(
+        &world, true, &[(instance, "{{name}}-sim")], &[(account, "sim-{{name}}")],
+    ).unwrap();
+    let rd = build::load_refdata(&rdb).unwrap();
+    let params = build::spb_blob::<Strategies>(&world, &world.strategies[0], 1).unwrap();
+    let parsed = build::parse_spb::<Strategies>(&params, &rd).unwrap();
+    assert_eq!(parsed.kind_id, {{kind_id}});
+    assert_eq!((parsed.model_mem, parsed.model_ckpt), (0, 0));
+    assert_eq!(rd.account(account).bound_instance, instance);
+    assert!(matches!(rd.account(account).kind, hft_refdata::AccountKind::Sim(_)));
+    let risk = build::risk_params(&world).encode_blob().unwrap();
+    let mut engine = build::engine_setup(&world, 1_000_000_000, 1);
+    engine.gws.venues.clear();
+    engine.seq.allow_missing_standby = 1;
+    let ecf = engine.encode_blob(1, HostClass::Dev2, 0);
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    std::fs::write(root.join("principals.toml"), "").unwrap();
+    let mut config = include_str!("../../sim-check.template.toml").to_string();
+    for (name, bytes) in [
+        ("refdata", rdb), ("engine", ecf), ("risk_params", risk), ("strategy_params", params),
+    ] {
+        let file = format!("{name}.bin");
+        std::fs::write(root.join(&file), &bytes).unwrap();
+        let table = if name == "strategy_params" {
+            format!("[[blobs.{name}]]")
+        } else {
+            format!("[blobs.{name}]")
+        };
+        let hash: String = build::sha256(&bytes).iter().map(|b| format!("{b:02x}")).collect();
+        config += &format!("\n{table}\npath = '{file}'\nsha256 = '{hash}'\n");
+    }
+    std::fs::write(root.join("sim-check.toml"), config).unwrap();
+}

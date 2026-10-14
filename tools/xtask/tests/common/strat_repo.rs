@@ -39,7 +39,7 @@ pub fn strat_repo(tag: &str) -> Fixture {
     f.write(&format!("{t}/base/Cargo.toml"), BASE_TOML);
     f.write(
         &format!("{t}/base/src/lib.rs"),
-        "//! {{name}} (kind_id {{kind_id}})\npub struct {{Type}};\n",
+        "//! {{name}} (kind_id {{kind_id}})\npub struct {{Type}};\ntype Model = NoModel<{{Type}}Params>;\n",
     );
     f.write(
         &format!("{t}/base/tests/scenario.rs"),
@@ -85,8 +85,8 @@ pub fn strat_repo(tag: &str) -> Fixture {
     copy_real(&f, "tools/xtask/deps.toml");
     copy_real(&f, "tools/xtask/scaffold/registry_dst.rs.tmpl");
     copy_real(&f, "tools/xtask/scaffold/sim-check.toml");
-    copy_real(&f, "tools/xtask/scaffold/config.rs.tmpl");
     copy_real(&f, "tools/xtask/scaffold/sdk005.rs.tmpl");
+    copy_real(&f, "tools/xtask/scaffold/registry_config.rs.tmpl");
     git(&f, &["init", "-q"]);
     git(&f, &["add", "-A"]);
     git(&f, &["commit", "-q", "-m", "fixture"]);

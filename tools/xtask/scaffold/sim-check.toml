@@ -1,24 +1,88 @@
-# scaffold-gate (tools/README.md "cargo xtask scaffold-gate"): `sim` instance test config for the
-# assembly check `hft-core --check --config <this>` of the template probe `{{name}}` (kind_id
-# {{kind_id}}). Field meanings belong to apps/hft-core; rendered into target/decoupling/, never
-# committed.
+# Offline scaffold assembly check; blob tables are written by the registry config test.
+# Only hft-core --check --dry-run reads this fixture; it never opens venue sessions.
+schema = 1
 
 [instance]
 name = "sim"
+config_source = "file"
 
-[advisor]
-mem_budget_mib = 160
-checkpoint_max_mib = 64
+[paths]
+journal_ram = "hot"
+journal_cold = "cold"
+ctl_socket = "core.sock"
+ctl_principals = "principals.toml"
 
-[startup]
-allow_missing_standby = true
+[shutdown]
+cancel_open_orders = true
+drain_timeout_ms = 30000
 
-[[instances]]
-name = "{{name}}-sim"
-kind_id = {{kind_id}}
+[journal]
+segment_bytes = 8388608
+hot_keep = 2
 
-[[sim_accounts]]
-label = "sim-{{name}}"
-kind = "sim"
-bound_instance = "{{name}}-sim"
-venues = ["binance-usdm", "bitget-uta-spot"]
+[clock]
+step_threshold_ns = 50000
+interval_ms = 1000
+
+[rings]
+elements = 1024
+bytes = 1048576
+
+[venues.spot]
+protocol = "binance-spot"
+id = 2
+max_sub_insts = 1
+stale_guard_ms = 1500
+
+[venues.perp]
+protocol = "bitget-usdt-futures"
+id = 10
+max_sub_insts = 1
+stale_guard_ms = 1500
+
+[sim]
+seed = 123
+entry_us = 100
+resp_us = 100
+leverage = 5
+mmr_raw = 5000000
+liq_fee_raw = 1000000
+liq_slippage_bp = 10
+quote_interval_ms = 20
+
+[[sim.quotes]]
+inst = 1
+bid_raw = 599999900
+ask_raw = 600000000
+qty_raw = 200000000
+
+[[sim.quotes]]
+inst = 2
+bid_raw = 600100000
+ask_raw = 600101000
+qty_raw = 500000000
+
+[[threads]]
+name = "sequencer"
+task = "sequencer"
+park_us = 100
+[[threads]]
+name = "persist"
+task = "persist"
+park_us = 100
+[[threads]]
+name = "housekeeping"
+task = "housekeeping"
+park_us = 100
+[[threads]]
+name = "ctl-gateway"
+task = "ctl-gateway"
+park_us = 100
+[[threads]]
+name = "sim-gw"
+task = "sim-gw"
+park_us = 100
+[[threads]]
+name = "paper-feed"
+task = "paper-feed"
+park_us = 100

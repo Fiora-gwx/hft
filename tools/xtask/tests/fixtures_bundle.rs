@@ -256,7 +256,10 @@ fn tool_202_bundle_replay_dispatches_closed_strategy_and_all_declared_checks() {
                     "--".into(),
                     "verify".into(),
                     "--journal".into(),
-                    f.path("target/fixtures-cache/bundle/prod/seq")
+                    f.path("target")
+                        .join("fixtures-cache")
+                        .join("bundle")
+                        .join("prod/seq")
                         .display()
                         .to_string(),
                     "--advice".into(),
@@ -265,7 +268,10 @@ fn tool_202_bundle_replay_dispatches_closed_strategy_and_all_declared_checks() {
                 if i == 2 {
                     expected.extend([
                         "--model-checkpoint".into(),
-                        f.path("target/fixtures-cache/bundle/ckpt/tsa.ckpt")
+                        f.path("target")
+                            .join("fixtures-cache")
+                            .join("bundle")
+                            .join("ckpt/tsa.ckpt")
                             .display()
                             .to_string(),
                         "--from-seq".into(),
