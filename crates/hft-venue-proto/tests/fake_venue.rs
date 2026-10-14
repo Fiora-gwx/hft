@@ -27,6 +27,8 @@ use hft_venue_proto::{
     SnapshotInfo, StaleGuard, SubFrames, SubSpec, TargetRef, VenueCfg, VenueProtocol, WallClock,
 };
 use zerocopy::FromZeros;
+#[path = "money_fixture.rs"]
+pub mod money;
 
 /// Venue of the fake refdata (a spot venue row: the M1.5 fixture only exercises decoding).
 pub const FAKE_VENUE: VenueId = VenueId::BINANCE_SPOT;
@@ -202,8 +204,9 @@ impl<const SPOT: bool, const MUT: u8> VenueProtocol for Fake<SPOT, MUT> {
     type MdClass = FakeMd;
     type ReportClass = u8;
     type FeedCtx = FakeFeedCtx;
-    type GwCtx = ();
+    type GwCtx = money::ReportCtx;
     type Templates = ();
+    const BBO_SNAPSHOT_BATCH: u16 = 2;
 
     // Only methods with independent contract fixtures implement this synthetic wire protocol.
     fn default_caps(asset: impl Fn(&str) -> Option<AssetId>) -> VenueCaps {
@@ -230,7 +233,19 @@ impl<const SPOT: bool, const MUT: u8> VenueProtocol for Fake<SPOT, MUT> {
         None
     }
     fn routes() -> &'static [RouteSpec] {
-        &[]
+        if MUT == 4 {
+            &[RouteSpec {
+                id: RouteId(0),
+                kind: hft_venue_proto::RouteKind::Bbo,
+                name: "bbo",
+                race: true,
+                max_streams: 10,
+                max_in_msgs_per_s: 10,
+                topn_levels: &[],
+            }]
+        } else {
+            &[]
+        }
     }
     fn endpoint(
         _r: Role,
@@ -241,7 +256,12 @@ impl<const SPOT: bool, const MUT: u8> VenueProtocol for Fake<SPOT, MUT> {
         _n: i64,
         _o: &mut EndpointSpec,
     ) -> Result<(), ProtoErr> {
-        Err(ProtoErr::Unsupported)
+        if MUT != 4 {
+            return Err(ProtoErr::Unsupported);
+        }
+        _o.path_query.push(b"/ws?product=perp")?;
+        _o.headers.push(b"X-Fixture: session\r\n")?;
+        Ok(())
     }
     fn login(
         _r: Role,
@@ -251,7 +271,12 @@ impl<const SPOT: bool, const MUT: u8> VenueProtocol for Fake<SPOT, MUT> {
         _n: i64,
         _o: &mut Vec<u8>,
     ) -> Result<LoginStep, ProtoErr> {
-        Ok(LoginStep::NotNeeded)
+        if MUT == 4 && _r != Role::Md {
+            _o.extend_from_slice(b"login:fixture-signature");
+            Ok(LoginStep::Frame)
+        } else {
+            Ok(LoginStep::NotNeeded)
+        }
     }
     fn login_result(_p: &[u8]) -> LoginResult {
         LoginResult::NotMine
@@ -263,14 +288,24 @@ impl<const SPOT: bool, const MUT: u8> VenueProtocol for Fake<SPOT, MUT> {
         _c: &VenueCfg,
         _o: &mut SubFrames,
     ) -> Result<(), ProtoErr> {
-        Err(ProtoErr::Unsupported)
+        if MUT != 4 {
+            return Err(ProtoErr::Unsupported);
+        }
+        _o.push(if _u { b"unsub:md" } else { b"sub:md" }, _s.len() as u16)
     }
     fn private_subscribe(_c: &VenueCfg, _a: AccountId, _u: bool, _o: &mut SubFrames) -> Result<(), ProtoErr> {
-        Err(ProtoErr::Unsupported)
+        if MUT != 4 {
+            return Err(ProtoErr::Unsupported);
+        }
+        _o.push(if _u { b"unsub:private" } else { b"sub:private" }, 1)
     }
     fn heartbeat(_r: Role) -> HeartbeatSpec {
         HeartbeatSpec {
-            ping: PingKind::WsPing,
+            ping: if MUT == 4 && !SPOT {
+                PingKind::AppText
+            } else {
+                PingKind::WsPing
+            },
             interval_ms: 0,
             unconditional: false,
             pong_timeout_ms: 0,
@@ -278,7 +313,15 @@ impl<const SPOT: bool, const MUT: u8> VenueProtocol for Fake<SPOT, MUT> {
         }
     }
     fn app_ping(_r: Role, _n: i64, _o: &mut [u8]) -> usize {
-        0
+        if MUT == 4 && !SPOT && _o.len() >= 4 {
+            _o[..4].copy_from_slice(b"ping");
+            4
+        } else {
+            0
+        }
+    }
+    fn bbo_probe() -> PingKind {
+        Self::heartbeat(Role::Md).ping
     }
     fn session_identity_request(
         _c: &VenueCfg,
@@ -340,7 +383,11 @@ impl<const SPOT: bool, const MUT: u8> VenueProtocol for Fake<SPOT, MUT> {
         _i: InstId,
         _o: &mut RestReqBuf,
     ) -> Result<(), ProtoErr> {
-        Err(ProtoErr::Unsupported)
+        if MUT != 4 {
+            return Err(ProtoErr::Unsupported);
+        }
+        _o.path_query.push(b"/depth")?;
+        Ok(())
     }
     fn decode_snapshot(
         _rd: &RefData,
@@ -350,7 +397,19 @@ impl<const SPOT: bool, const MUT: u8> VenueProtocol for Fake<SPOT, MUT> {
         _rx: &RxMeta,
         _o: &mut impl MdSink,
     ) -> Result<SnapshotInfo, DecodeErr> {
-        Err(DecodeErr::UnknownClass)
+        if MUT != 4 {
+            return Err(DecodeErr::UnknownClass);
+        }
+        if int_field(_b, "i")? != i64::from(_i.0) {
+            return Err(DecodeErr::Shape);
+        }
+        Self::decode_md(_rd, _c, FakeMd::Depth, _b, _rx, _o)?;
+        let levels = levels(_b, "b", _rd.inst(_i).px_exp, _rd.inst(_i).qty_exp)?.len();
+        Ok(SnapshotInfo {
+            inst: _i,
+            snap_id: int_field(_b, "u")? as u64,
+            levels: levels as u32,
+        })
     }
     fn build_templates(_c: &VenueCfg, _rd: &RefData, _a: AccountId, _k: &Credential) -> Result<(), ProtoErr> {
         Ok(())
@@ -363,6 +422,9 @@ impl<const SPOT: bool, const MUT: u8> VenueProtocol for Fake<SPOT, MUT> {
         k: &WallClock,
         b: &mut [u8],
     ) -> Result<usize, EncodeErr> {
+        if c.op == GwOp::Query {
+            return Err(EncodeErr::Unsupported(c.op));
+        }
         if rd.inst(c.inst).venue != Self::VENUE {
             return Err(EncodeErr::UnknownInst);
         }
@@ -391,6 +453,57 @@ impl<const SPOT: bool, const MUT: u8> VenueProtocol for Fake<SPOT, MUT> {
         w.write_str("}").map_err(|_| EncodeErr::FieldOverflow)?;
         Ok(w.n)
     }
+    fn encode_batch(
+        rd: &RefData,
+        t: &(),
+        cs: &[GwCmd],
+        tgts: &[TargetRef],
+        clk: &WallClock,
+        body: &mut [u8],
+    ) -> Result<usize, EncodeErr> {
+        if MUT != 4 || cs.len() != tgts.len() {
+            return Err(EncodeErr::Unsupported(GwOp::Place));
+        }
+        let mut used = 0;
+        for (c, tgt) in cs.iter().zip(tgts) {
+            if used != 0 {
+                *body.get_mut(used).ok_or(EncodeErr::FieldOverflow)? = b'\n';
+                used += 1;
+            }
+            used += Self::encode(
+                rd,
+                t,
+                c,
+                tgt,
+                clk,
+                body.get_mut(used..).ok_or(EncodeErr::FieldOverflow)?,
+            )?;
+        }
+        Ok(used)
+    }
+    fn ro_request(
+        _rd: &RefData,
+        _t: &(),
+        _acct: AccountId,
+        q: &hft_venue_proto::RoQuery,
+        _clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<(), EncodeErr> {
+        if MUT != 4 {
+            return Err(EncodeErr::Unsupported(GwOp::Query));
+        }
+        use hft_venue_proto::RoKind as R;
+        let path: &[u8] = match q.kind {
+            R::OpenOrders => b"/open",
+            R::Fills => b"/fills",
+            R::FundingFlow => b"/funding",
+            R::Balance => b"/balance",
+            R::Positions => b"/positions",
+        };
+        out.path_query.push(path).map_err(|_| EncodeErr::FieldOverflow)?;
+        out.redacted = true;
+        Ok(())
+    }
     fn render_cid(id: &ClientOrderId, o: &mut [u8; 48]) -> usize {
         let mut text = [0; 24];
         id.encode(&mut text);
@@ -407,12 +520,13 @@ impl<const SPOT: bool, const MUT: u8> VenueProtocol for Fake<SPOT, MUT> {
             Some(b"listenKeyExtended") => 2,
             Some(b"ended") => 3,
             Some(b"shutdown") => 4,
+            Some(b"fill" | b"fee" | b"query" | b"cancel" | b"amend" | b"funding" | b"balance") => 5,
             _ => 0,
         }
     }
     fn decode_report(
         _rd: &RefData,
-        _c: &mut (),
+        ctx: &mut money::ReportCtx,
         k: u8,
         p: &[u8],
         rx: &RxMeta,
@@ -420,6 +534,7 @@ impl<const SPOT: bool, const MUT: u8> VenueProtocol for Fake<SPOT, MUT> {
     ) -> Result<ReportOutcome, DecodeErr> {
         let mut o = ReportOutcome::default();
         match k {
+            5 => return money::report::<Self>(ctx, p, rx, out),
             0 => o.skip = hft_venue_proto::Skip::Unknown,
             2 => o.skip = hft_venue_proto::Skip::Listed,
             3 => o.ctl = hft_venue_proto::ReportCtl::UserStreamEnded,
@@ -473,6 +588,148 @@ impl<const SPOT: bool, const MUT: u8> VenueProtocol for Fake<SPOT, MUT> {
             &[NORMAL]
         }
     }
+    fn order_channel(op: GwOp) -> hft_venue_proto::OrderChannel {
+        if op == GwOp::Query {
+            hft_venue_proto::OrderChannel::Rest
+        } else {
+            hft_venue_proto::OrderChannel::Ws
+        }
+    }
+    fn encode_rest(
+        _rd: &RefData,
+        _t: &(),
+        c: &GwCmd,
+        _tgt: &TargetRef,
+        _clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<(), EncodeErr> {
+        if c.op != GwOp::Query {
+            return Err(EncodeErr::Unsupported(c.op));
+        }
+        out.path_query
+            .push(b"/order?signature=fixture")
+            .map_err(|_| EncodeErr::FieldOverflow)?;
+        out.redacted = true;
+        Ok(())
+    }
+    fn decode_rest(
+        rd: &RefData,
+        ctx: &mut money::ReportCtx,
+        req: &hft_venue_proto::RestOrigin,
+        status: u16,
+        body: &[u8],
+        rx: &RxMeta,
+        out: &mut impl ReportSink,
+    ) -> Result<ReportOutcome, DecodeErr> {
+        use hft_venue_proto::{ReportCtl, RestWhat};
+        if status == 429 {
+            return Ok(ReportOutcome {
+                ctl: ReportCtl::RateLimited,
+                outcome_unknown: req.req,
+                raw_code: hft_venue_proto::raw_code_http(status),
+                ..Default::default()
+            });
+        }
+        if !(200..300).contains(&status) {
+            return Ok(ReportOutcome {
+                outcome_unknown: req.req,
+                raw_code: hft_venue_proto::raw_code_http(status),
+                ..Default::default()
+            });
+        }
+        if matches!(req.what, RestWhat::Keepalive | RestWhat::DeadMan) {
+            return Ok(ReportOutcome {
+                ctl: if body == b"ended" {
+                    ReportCtl::UserStreamEnded
+                } else {
+                    ReportCtl::None
+                },
+                ..Default::default()
+            });
+        }
+        if req.what == RestWhat::Sweep {
+            let mut o = ReportOutcome::default();
+            for row in body.split(|b| *b == b'\n') {
+                if str_field(row, "cid").and_then(Self::parse_cid).is_some() {
+                    o.events += money::report::<Self>(ctx, row, rx, out)?.events;
+                }
+            }
+            return Ok(o);
+        }
+        let mut sink = money::OriginSink {
+            inner: out,
+            req: *req,
+        };
+        let mut o = Self::decode_report(rd, ctx, 5, body, rx, &mut sink)?;
+        o.req = req.req;
+        Ok(o)
+    }
+    fn session_keepalive_request(
+        _rd: &RefData,
+        _t: &(),
+        _clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<bool, EncodeErr> {
+        out.path_query
+            .push(b"/keepalive")
+            .map_err(|_| EncodeErr::FieldOverflow)?;
+        out.headers
+            .push(b"Api-Key: fixture\r\n")
+            .map_err(|_| EncodeErr::FieldOverflow)?;
+        out.redacted = true;
+        Ok(true)
+    }
+    fn bbo_snapshot_request(
+        _rd: &RefData,
+        _ctx: &FakeFeedCtx,
+        insts: &[InstId],
+        out: &mut RestReqBuf,
+    ) -> Result<bool, ProtoErr> {
+        if SPOT {
+            return Ok(false);
+        }
+        if insts.len() > 2 {
+            return Err(ProtoErr::BufFull);
+        }
+        out.path_query.push(b"/bbo")?;
+        Ok(true)
+    }
+    fn decode_bbo_snapshot(
+        rd: &RefData,
+        ctx: &mut FakeFeedCtx,
+        insts: &[InstId],
+        body: &[u8],
+        rx: &RxMeta,
+        out: &mut impl MdSink,
+    ) -> Result<u16, DecodeErr> {
+        let mut n = 0;
+        for row in body.split(|b| *b == b'\n') {
+            let inst = str_field(row, "i")
+                .map(|_| int_field(row, "i"))
+                .transpose()?
+                .map(|i| InstId(i as u32))
+                .or_else(|| (insts.len() == 1).then(|| insts[0]))
+                .ok_or(DecodeErr::Shape)?;
+            if !insts.contains(&inst) {
+                return Err(DecodeErr::Shape);
+            }
+            let meta = rd.inst(inst);
+            let mut b = Bbo::new_zeroed();
+            b.h.inst = inst;
+            b.h.venue = Self::VENUE;
+            b.h.conn = rx.conn;
+            b.h.rx_tsc = rx.rx_tsc;
+            b.update_id = int_field(row, "u").unwrap_or(0) as u64;
+            b.bid_px = Px(fixed(str_field(row, "b").ok_or(DecodeErr::Shape)?, meta.px_exp)?);
+            b.ask_px = Px(fixed(str_field(row, "a").ok_or(DecodeErr::Shape)?, meta.px_exp)?);
+            b.bid_qty = Qty(fixed(str_field(row, "B").ok_or(DecodeErr::Shape)?, meta.qty_exp)?);
+            b.ask_qty = Qty(fixed(str_field(row, "A").ok_or(DecodeErr::Shape)?, meta.qty_exp)?);
+            let _ = ctx;
+            out.bbo(&b);
+            n += 1;
+        }
+        Ok(n)
+    }
     fn stale_guard() -> StaleGuard {
         if SPOT {
             StaleGuard::None
@@ -501,7 +758,12 @@ impl<const SPOT: bool, const MUT: u8> VenueProtocol for Fake<SPOT, MUT> {
         _k: &WallClock,
         _o: &mut DeadManOut,
     ) -> Result<(), EncodeErr> {
-        Err(EncodeErr::Unsupported(GwOp::DeadManRefresh))
+        if MUT != 4 || SPOT {
+            return Err(EncodeErr::Unsupported(GwOp::DeadManRefresh));
+        }
+        _o.frame
+            .push(b"deadman:60000")
+            .map_err(|_| EncodeErr::FieldOverflow)
     }
 
     fn classify(_route: RouteId, op: MsgOp, head: &[u8]) -> FakeMd {
@@ -600,8 +862,11 @@ impl<const SPOT: bool, const MUT: u8> VenueProtocol for Fake<SPOT, MUT> {
 
 /// Raw bytes after `"k":` up to the next `,`, `}` or `]` (quotes stripped).
 fn raw_field<'a>(p: &'a [u8], k: &str) -> Option<&'a [u8]> {
-    let key = format!("\"{k}\":");
-    let at = p.windows(key.len()).position(|w| w == key.as_bytes())? + key.len();
+    let len = k.len() + 3;
+    let at = p
+        .windows(len)
+        .position(|w| w[0] == b'"' && &w[1..1 + k.len()] == k.as_bytes() && &w[len - 2..] == b"\":")?
+        + len;
     let rest = &p[at..];
     let end = rest
         .iter()
@@ -649,24 +914,47 @@ fn fixed(s: &[u8], exp: i8) -> Result<i64, DecodeErr> {
 }
 
 /// `"k":[["px","qty"],…]` → levels.
-fn levels(p: &[u8], k: &str, pe: i8, qe: i8) -> Result<Vec<Level>, DecodeErr> {
-    let key = format!("\"{k}\":[");
+struct Levels {
+    data: [Level; 1024],
+    len: usize,
+}
+impl core::ops::Deref for Levels {
+    type Target = [Level];
+    fn deref(&self) -> &[Level] {
+        &self.data[..self.len]
+    }
+}
+fn levels(p: &[u8], k: &str, pe: i8, qe: i8) -> Result<Levels, DecodeErr> {
+    let n = k.len() + 4;
     let at = p
-        .windows(key.len())
-        .position(|w| w == key.as_bytes())
+        .windows(n)
+        .position(|w| w[0] == b'"' && &w[1..1 + k.len()] == k.as_bytes() && &w[n - 3..] == b"\":[")
         .ok_or(DecodeErr::Truncated)?
-        + key.len();
+        + n;
     let mut rest = &p[at..];
-    let mut out = Vec::new();
+    let mut out = Levels {
+        data: [Level {
+            px: Px(0),
+            qty: Qty(0),
+        }; 1024],
+        len: 0,
+    };
     while let Some(b'[') = rest.first() {
         let end = rest.iter().position(|&b| b == b']').ok_or(DecodeErr::Truncated)?;
         let pair = &rest[1..end];
         let comma = pair.iter().position(|&b| b == b',').ok_or(DecodeErr::Shape)?;
-        let unq = |v: &[u8]| -> Vec<u8> { v.iter().copied().filter(|&b| b != b'"').collect() };
-        out.push(Level {
-            px: Px(fixed(&unq(&pair[..comma]), pe)?),
-            qty: Qty(fixed(&unq(&pair[comma + 1..]), qe)?),
-        });
+        fn unq(v: &[u8]) -> &[u8] {
+            v.strip_prefix(b"\"")
+                .unwrap_or(v)
+                .strip_suffix(b"\"")
+                .unwrap_or(v)
+        }
+        let level = out.data.get_mut(out.len).ok_or(DecodeErr::Overflow)?;
+        *level = Level {
+            px: Px(fixed(unq(&pair[..comma]), pe)?),
+            qty: Qty(fixed(unq(&pair[comma + 1..]), qe)?),
+        };
+        out.len += 1;
         rest = &rest[end + 1..];
         rest = rest.strip_prefix(b",").unwrap_or(rest);
     }
@@ -698,7 +986,7 @@ pub struct AcctScratch {
     pub amount: i64,
     pub qty: i64,
 }
-impl<const SPOT: bool, const MUT: u8> AcctProtocol for Fake<SPOT, MUT> {
+impl<const SPOT: bool> AcctProtocol for Fake<SPOT, 0> {
     type AcctCtx = u32;
     type AcctScratch = AcctScratch;
     fn acct_queries(k: AcctQueryKind) -> &'static [AcctQuery] {

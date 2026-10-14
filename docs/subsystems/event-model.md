@@ -219,3 +219,6 @@ Simultaneous 的两份 OrderDecision 共用 trigger_seq;整对出环容量失败
 非正式 Live 新会话的 REST 账户基线由 [hft-core 账户装配](../../apps/hft-core/README.md#测试环境账户装配) 在启动任务前交给 sequencer，随首份完整快照记录；运行中的余额、持仓与配置观察走 Input，不直接修改业务状态。
 
 公共 REST 合批响应通过进程内 snap 记录交给 feed 单写者，原始正文每批只记录一次；请求号、失败与背压规则归 [hft-venue 补帧传输](../../crates/hft-venue/README.md#当前-bbo-补帧传输)。
+
+
+网关诊断经 `RepMsg::Note` 进入 live driver，按 `Note.source = Venue` 记录为 Meta；分类归 [hft-event](../../crates/hft-event/README.md#note-来源与码登记表)，有界事件名与频率归 [hft-venue](../../crates/hft-venue/README.md)。

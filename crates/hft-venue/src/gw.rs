@@ -1177,7 +1177,15 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         } else {
             decode_one::<P>(self.rd, ctx, &f, id, account, &mut sink)
         };
-        let (over, unsupported, key, key_len) = (sink.over, sink.unsupported, sink.key, sink.key_len);
+        let (over, unsupported) = (sink.over, sink.unsupported);
+        let mut event_name = [0; 32];
+        let name = if matches!(&res, Ok(o) if o.skip == Skip::Unknown) {
+            P::report_event_name(f.payload)
+        } else {
+            &[]
+        };
+        let name_len = name.len().min(event_name.len());
+        event_name[..name_len].copy_from_slice(&name[..name_len]);
         let ts = f.ts;
         self.raw.rx(
             id,
@@ -1231,7 +1239,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     None,
                     ts.rx_tsc,
                     ts.best_rx().0,
-                    &key[..key_len.min(36)],
+                    &event_name[..name_len],
                     now,
                 );
             }
@@ -1280,7 +1288,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         rest_identity: Option<(ReqRef, ClientOrderId, InstId)>,
         rx: u64,
         hw: i64,
-        _key: &[u8],
+        event_name: &[u8],
         now: u64,
     ) {
         let account = self.accts.get(a).map_or(AccountId(0), |x| x.account);
@@ -1389,10 +1397,22 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         match o.skip {
             Skip::No => {}
             Skip::Listed => self.n.user_evt_ignored += 1,
-            Skip::Unknown => self.n.user_evt_unknown += 1,
+            Skip::Unknown => {
+                self.n.user_evt_unknown += 1;
+                if self.n.user_evt_unknown == 1
+                    || (self.cfg.unknown_evt_note_every != 0
+                        && self
+                            .n
+                            .user_evt_unknown
+                            .is_multiple_of(u64::from(self.cfg.unknown_evt_note_every)))
+                {
+                    self.venue_note(account, codes::UNKNOWN_USER_EVENT, event_name);
+                }
+            }
         }
         if o.fee_rule_deviation {
             self.n.fee_rule_deviation += 1;
+            self.venue_note(account, codes::FEE_RULE_DEVIATION, &[]);
         }
         match o.ctl {
             ReportCtl::None => {}
@@ -1431,6 +1451,27 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 }
             }
         }
+    }
+
+    fn venue_note(&mut self, account: AccountId, code: u32, name: &[u8]) {
+        let mut v = [0; 8];
+        v[0] = u64::from(P::VENUE.0);
+        v[1] = u64::from(account.0);
+        for (i, chunk) in name.chunks(8).take(4).enumerate() {
+            let mut word = [0; 8];
+            word[..chunk.len()].copy_from_slice(chunk);
+            v[2 + i] = u64::from_le_bytes(word);
+        }
+        self.push_rep(RepMsg::Note(hft_event::Note {
+            code,
+            level: hft_event::NoteLevel::P2,
+            source: hft_event::NoteSource::Venue,
+            strategy: hft_types::StrategyId(0),
+            _pad: 0,
+            group: hft_types::GroupId(0),
+            inst: InstId(0),
+            v,
+        }));
     }
 
     fn order_terminal(&mut self, a: usize, e: &OrderEvent, key: IdKey, now: u64) {

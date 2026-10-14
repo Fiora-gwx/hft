@@ -314,7 +314,7 @@ fn ven_127_silent_from_install() {
 }
 
 /// Connections 0, 1 up with S1, S2 members; then `rst` on `drop` and replacements completed.
-fn refresh_case(drop: &[u8], ack: &[u8]) -> (Fh, Vec<FeedMsg>) {
+pub(crate) fn refresh_case(drop: &[u8], ack: &[u8]) -> (Fh, Vec<FeedMsg>) {
     let (mut h, mut now) = bbo_up(|_| {}, &[S1, S2]);
     for &c in drop {
         h.net.at(ConnId(c), 0, Ev::Rst);

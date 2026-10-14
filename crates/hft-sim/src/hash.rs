@@ -46,6 +46,10 @@ fn rep_bytes(h: &mut Xxh3, m: &RepMsg) {
             h.update(&[9]);
             h.update(x.as_bytes());
         }
+        RepMsg::Note(x) => {
+            h.update(&[10]);
+            h.update(x.as_bytes());
+        }
     }
 }
 

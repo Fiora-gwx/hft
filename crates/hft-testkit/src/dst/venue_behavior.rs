@@ -657,6 +657,7 @@ pub fn rep_account(r: &RepMsg) -> Option<AccountId> {
         RepMsg::ExternalFill(e) => Some(e.account),
         RepMsg::AccountConfigReport(e) => Some(e.account),
         RepMsg::MarginReport(e) => Some(e.account),
+        RepMsg::Note(_) => None,
     }
 }
 
@@ -672,6 +673,7 @@ pub fn rep_input(r: &RepMsg, src: Source) -> InputRec {
         RepMsg::ExternalFill(e) => InputRec::of(e, src),
         RepMsg::AccountConfigReport(e) => InputRec::of(e, src),
         RepMsg::MarginReport(e) => InputRec::of(e, src),
+        RepMsg::Note(e) => InputRec::of(e, src),
     }
 }
 

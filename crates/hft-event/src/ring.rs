@@ -51,6 +51,8 @@ pub enum RepMsg {
     AccountConfigReport(AccountConfigReportHdr),
     /// Followed by `n` `MarginItem`s in `rep-<venue>-bulk`.
     MarginReport(MarginReportHdr),
+    /// Venue diagnostics; sequencer records these as Meta, never as an order observation.
+    Note(Note),
 }
 const _: () = assert!(size_of::<RepMsg>() <= 128);
 

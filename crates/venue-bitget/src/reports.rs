@@ -53,6 +53,14 @@ fn quoted_after<'a>(h: &'a [u8], key: &[u8]) -> Option<&'a [u8]> {
     rest.get(..end)
 }
 
+/// Non-secret event or channel name for bounded runtime diagnostics.
+pub(crate) fn report_event_name(p: &[u8]) -> &[u8] {
+    quoted_after(p, b"\"topic\":\"")
+        .or_else(|| quoted_after(p, b"\"channel\":\""))
+        .or_else(|| event_name(p))
+        .unwrap_or(&[])
+}
+
 /// Channel class of a private topic name.
 fn topic_class(name: &[u8]) -> ReportClass {
     match name {

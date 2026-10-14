@@ -55,7 +55,7 @@ impl Default for Caps {
     }
 }
 
-pub struct Fh<P: VenueProtocol<FeedCtx = ()> = StubProto> {
+pub struct Fh<P: VenueProtocol<FeedCtx = super::stub::FeedCtx> = StubProto> {
     pub rt: FeedRuntime<P>,
     pub net: Net,
     pub bbo: Option<Consumer<FeedMsg>>,
@@ -79,16 +79,20 @@ pub fn feed(cfg: FeedCfg) -> Fh {
     feed_with::<StubProto>(cfg, Caps::default())
 }
 
-pub fn feed_with<P: VenueProtocol<FeedCtx = ()>>(cfg: FeedCfg, caps: Caps) -> Fh<P> {
+pub fn feed_with<P: VenueProtocol<FeedCtx = super::stub::FeedCtx>>(cfg: FeedCfg, caps: Caps) -> Fh<P> {
     feed_net(cfg, caps, Net::new(64, 4))
 }
 
-pub fn feed_net<P: VenueProtocol<FeedCtx = ()>>(cfg: FeedCfg, caps: Caps, net: Net) -> Fh<P> {
+pub fn feed_net<P: VenueProtocol<FeedCtx = super::stub::FeedCtx>>(
+    cfg: FeedCfg,
+    caps: Caps,
+    net: Net,
+) -> Fh<P> {
     try_feed(cfg, caps, net, rd_stub()).unwrap()
 }
 
 /// Builds the harness on `rd`; a constructor failure is returned.
-pub fn try_feed<P: VenueProtocol<FeedCtx = ()>>(
+pub fn try_feed<P: VenueProtocol<FeedCtx = super::stub::FeedCtx>>(
     cfg: FeedCfg,
     caps: Caps,
     net: Net,
@@ -96,7 +100,7 @@ pub fn try_feed<P: VenueProtocol<FeedCtx = ()>>(
 ) -> Result<Fh<P>, hft_venue::InitErr> {
     try_feed_deps(cfg, caps, net, rd, |_| {})
 }
-pub fn try_feed_deps<P: VenueProtocol<FeedCtx = ()>>(
+pub fn try_feed_deps<P: VenueProtocol<FeedCtx = super::stub::FeedCtx>>(
     cfg: FeedCfg,
     caps: Caps,
     mut net: Net,
@@ -140,7 +144,7 @@ pub fn try_feed_deps<P: VenueProtocol<FeedCtx = ()>>(
         clock: clock(),
     };
     edit(&mut deps);
-    let rt = FeedRuntime::<P>::new(cfg, deps, ())?;
+    let rt = FeedRuntime::<P>::new(cfg, deps, Default::default())?;
     Ok(Fh {
         rt,
         net,
@@ -161,7 +165,7 @@ pub fn try_feed_deps<P: VenueProtocol<FeedCtx = ()>>(
     })
 }
 
-impl<P: VenueProtocol<FeedCtx = ()>> Drop for Fh<P> {
+impl<P: VenueProtocol<FeedCtx = super::stub::FeedCtx>> Drop for Fh<P> {
     fn drop(&mut self) {
         // Give every connection back so the connector (and its leaked arena) can be reused.
         self.rt.retire_all(0);
@@ -169,7 +173,7 @@ impl<P: VenueProtocol<FeedCtx = ()>> Drop for Fh<P> {
     }
 }
 
-impl<P: VenueProtocol<FeedCtx = ()>> Fh<P> {
+impl<P: VenueProtocol<FeedCtx = super::stub::FeedCtx>> Fh<P> {
     /// Delivers due events, runs one `poll_once`, collects builds and retirements.
     pub fn poll(&mut self, now: u64) -> LoopStat {
         self.net.flush(&mut self.rt, now);

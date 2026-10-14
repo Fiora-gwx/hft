@@ -106,6 +106,12 @@ const USDM_IGNORABLE: [&[u8]; 4] = [
     b"GRID_UPDATE",
     b"CONDITIONAL_ORDER_TRIGGER_REJECT",
 ];
+
+pub(crate) fn report_event_name(p: &[u8]) -> &[u8] {
+    name_after(p, b"{\"e\":\"")
+        .or_else(|| spot_event_name(p))
+        .unwrap_or(&[])
+}
 const SPOT_IGNORABLE: [&[u8]; 3] = [b"balanceUpdate", b"listStatus", b"externalLockUpdate"];
 
 impl ClassifyReport for usdm::ReportClass {

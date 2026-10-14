@@ -35,6 +35,7 @@ pub fn rep_venue(r: &RepMsg) -> VenueId {
         RepMsg::ExternalFill(e) => e.venue,
         RepMsg::AccountConfigReport(e) => e.venue,
         RepMsg::MarginReport(e) => e.venue,
+        RepMsg::Note(_) => VenueId(0),
     }
 }
 

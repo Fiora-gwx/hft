@@ -235,6 +235,7 @@ pub fn rep_parts<R>(msg: &RepMsg, bulk: &[u8], mut f: impl FnMut(EventKind, &[&[
         RepMsg::ConnState(b) => f(EventKind::CONN_STATE, &[b.as_bytes()]),
         RepMsg::AccountConfigReport(b) => f(EventKind::ACCOUNT_CONFIG_REPORT, &[b.as_bytes(), bulk]),
         RepMsg::MarginReport(b) => f(EventKind::MARGIN_REPORT, &[b.as_bytes(), bulk]),
+        RepMsg::Note(b) => f(EventKind::NOTE, &[b.as_bytes()]),
     }
 }
 impl<J: JournalSink> LiveIo<Strategies> for Io<J> {

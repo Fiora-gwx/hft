@@ -124,6 +124,7 @@ impl Obs for Enc {
             RepMsg::ExternalFill(x) => Ok(encode_fixed(&mut buf, 1, 1, f, x)),
             RepMsg::AccountConfigReport(x) => encode_var(&mut buf, 1, 1, f, x, bulk),
             RepMsg::MarginReport(x) => encode_var(&mut buf, 1, 1, f, x, bulk),
+            RepMsg::Note(x) => Ok(encode_fixed(&mut buf, 1, 1, f, x)),
         };
         if !matches!(n, Ok(k) if k > 0) {
             self.ok = false;

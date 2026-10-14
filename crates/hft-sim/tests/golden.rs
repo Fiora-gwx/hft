@@ -163,6 +163,7 @@ fn render(acct: AccountId, due: u64, m: &RepMsg, bulk: &[u8]) -> String {
                 h.venue.0, h.n_lev, h.mismatches
             )
         }
+        RepMsg::Note(n) => format!("\"ev\":\"Note\",\"code\":{}", n.code),
         RepMsg::MarginReport(h) => {
             let items: Vec<String> = bulk
                 .chunks_exact(16)

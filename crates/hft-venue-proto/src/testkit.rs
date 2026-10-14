@@ -11,8 +11,10 @@ use crate::{MdSink, MsgOp, RouteId, RxMeta, VenueProtocol};
 use zerocopy::IntoBytes;
 mod acct;
 mod checks;
+mod contracts;
 pub use acct::*;
 pub use checks::*;
+pub use contracts::*;
 
 /// One `MdSink` call, recorded with owned copies of its inputs.
 #[derive(Clone, Debug, PartialEq, Eq)]

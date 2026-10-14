@@ -3,7 +3,16 @@
 //! below. `cargo xtask gen-schema` reads `CONN_REASONS` (text scan) into `schemas/conn-reason.json`
 //! and the event catalog.
 
-use hft_event::ConnStateKind;
+use hft_event::{ConnStateKind, NoteSource};
+
+/// Venue-local diagnostic codes. v[0] = venue, v[1] = account; unknown-event names occupy
+/// v[2..6] as up to 32 little-endian bytes, zero padded. No payload or credential is copied.
+pub const UNKNOWN_USER_EVENT: u32 = 0x0500_0001;
+pub const FEE_RULE_DEVIATION: u32 = 0x0500_0002;
+pub const NOTE_CODES: &[(NoteSource, u32, &str)] = &[
+    (NoteSource::Venue, 1, "VenueUnknownUserEvent"),
+    (NoteSource::Venue, 2, "VenueFeeRuleDeviation"),
+];
 
 pub const GAP: u32 = 1;
 pub const DECODE: u32 = 2;

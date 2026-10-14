@@ -177,6 +177,7 @@ pub fn reply_bytes(account: AccountId, due: u64, m: &RepMsg, bulk: &[u8]) -> Vec
         RepMsg::ExternalFill(x) => (7, x.as_bytes()),
         RepMsg::AccountConfigReport(x) => (8, x.as_bytes()),
         RepMsg::MarginReport(x) => (9, x.as_bytes()),
+        RepMsg::Note(x) => (10, x.as_bytes()),
     };
     v.push(tag);
     v.extend_from_slice(body);

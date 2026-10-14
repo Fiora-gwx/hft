@@ -571,7 +571,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:hft-core 出口表 `src_ips = [10.0.0.11, 10.0.0.12, 10.0.0.13]`;`venues.V7.feed.conns = [{stream: bbo, src_ip: 10.0.0.11}, {stream: md, src_ip: 10.0.0.12}, {stream: md, src_ip: 10.0.0.13}]`;A1 的 `venues.V7.gw.src_ip = 10.0.0.13`
-- 实现:`crates/hft-venue/tests/conn_id.rs::ven_035_warm_src_ip`
+- 实现:`crates/hft-venue/tests/final_round.rs::ven_035_warm_rest_connections_reuse_source_and_rebuild`
 
 | 行 | 请求方 | 期望 `BuildReq.src_ip_idx` |
 |---|---|---|
@@ -588,7 +588,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. 触发 100 次 BBO 补帧请求、100 个账户查询序列、100 次连接退役与补建
 - 期望:
   - feed 与 gw 线程上 `futex` 与对 eventfd 的 `write` 调用数均为 0;snap-fetch、acct-fetch 与 `BuildStub` 在各自下一次被调用时取到全部元素
-- 实现:`crates/hft-venue/tests/conn_id.rs::ven_036_no_wake_to_warm`
+- 实现:`crates/hft-venue/tests/final_round.rs::ven_036_no_wake_to_warm`
 
 
 ### VEN-040 每次 `poll_once` 至多取 `FEEDCMD_PER_POLL` 条命令
@@ -1119,7 +1119,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 期望:
   - bbo 环 2 条 `Bbo`(`update_id` 101、102);raw-feed 只有第 2 条帧的 `RawRx`;`raw_append_err{journal: raw-feed-V7-bbo, err: Full} = 1`
   - 无 `ConnState`;连接未退役;`poll_once` 返回 `did_work = true`
-- 实现:`crates/hft-venue/tests/feed_raw.rs::ven_086_raw_full_drops_record_only`
+- 实现:`crates/hft-venue/tests/final_round.rs::ven_086_raw_full_drops_only_raw_and_recovers_after_preparation`
 
 ### VEN-087 单帧事件数超过 `FRAME_EVENTS_MAX` 时整帧按解码错误处理
 
@@ -1573,7 +1573,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   2. 两者各自单独运行同样的脚本
 - 期望:
   - 两种运行下 bbo 环序列逐字节相同,snap 环记录逐字节相同
-- 实现:`crates/hft-venue/tests/snap_fetch.rs::ven_158_feed_ctx_independent`
+- 实现:`crates/hft-venue/tests/final_round.rs::ven_158_feed_and_snapshot_contexts_remain_independent`
 
 ### VEN-159 warm 任务的空闲 REST 连接按 `gw.rest_idle_check_ms` 检查存活
 
@@ -2183,7 +2183,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`G0`,`gw.unknown_evt_note_every = 1000`;每行在 A1 用户流上喂 n 条同类事件
-- 实现:`crates/hft-venue/tests/gw_report.rs::ven_221_skip_events`
+- 实现:`crates/hft-venue/tests/final_round.rs::ven_221_unknown_event_notes_are_bounded_and_keep_event_name`
 
 | 行 | 事件 / n | 期望 |
 |---|---|---|
@@ -2267,7 +2267,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. 收到该成交回报
 - 期望:
   - `OrderEvent{Fill}` 的 `fee`、`fee_asset` 与报文一致;计数 `fee_rule_deviation{V7} = 1`;source = `Venue` 的 Meta Note 一条
-- 实现:`crates/hft-venue/tests/gw_report.rs::ven_226_fee_rule_deviation`
+- 实现:`crates/hft-venue/tests/final_round.rs::ven_226_fee_deviation_note_preserves_execution_fact`
 
 ### VEN-227 推送型保证金数据由回报解码直接产出,并推后兜底期限
 
@@ -3216,7 +3216,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
   1. 运行登录、下单、撤单、查单、死手刷新、会话维护、Config 与 Margin 序列各 10 次;扫描全部 raw journal
 - 期望:
   - raw 全文不含哨兵字节串;每条签名请求的 `RawTx` 带 `REDACTED` 且只有方法 + 路径;没有任何登录帧的 `RawTx`
-- 实现:`crates/hft-venue/tests/raw.rs::ven_320_redaction_scan`
+- 实现:`crates/hft-venue/tests/final_round.rs::ven_320_redaction_scan_across_account_and_gateway_paths`
 
 ### VEN-321 `RawRx` 覆盖回报、账户查询响应与连接标记
 
@@ -3228,7 +3228,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
   1. 交接 A1 的 112(Order)与 120(UserStream);收到 3 帧回报;完成一个 Config 序列
 - 期望:
   - raw-gw:`Connect` 记录 2 条,记录体分别为 `[A1, Order(2)]` 与 `[A1, UserStream(3)]`;回报 `RawRx` 3 条;Config 响应的 `RawTx` + `RawRx` 按 VEN-259 的形状
-- 实现:`crates/hft-venue/tests/raw.rs::ven_321_raw_coverage`
+- 实现:`crates/hft-venue/tests/final_round.rs::ven_321_raw_coverage_includes_account_requests_and_connections`
 
 ### VEN-330 重连混沌:1000 次断连重连中簿从不在新快照之前回到 `Live`
 

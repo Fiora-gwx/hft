@@ -24,6 +24,7 @@ xxhash-rust.workspace = true
 zerocopy = { workspace = true, optional = true }
 
 [dev-dependencies]
+hft-testkit.workspace = true
 zerocopy.workspace = true
 criterion.workspace = true
 
@@ -40,6 +41,10 @@ required-features = ["testkit"]
 
 [[test]]
 name = "contract_runtime"
+required-features = ["testkit"]
+
+[[test]]
+name = "contract_money"
 required-features = ["testkit"]
 
 [[bench]]

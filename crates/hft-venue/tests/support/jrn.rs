@@ -115,6 +115,9 @@ impl Drop for RawJ {
 }
 
 impl RawJ {
+    pub fn prepare(&mut self) {
+        self.prep.poll();
+    }
     /// Every `RawRx`/`RawTx` record so far, in order.
     pub fn records(&self) -> Vec<RawRec> {
         let mut c = ReaderConfig::new(

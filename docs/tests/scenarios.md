@@ -1604,7 +1604,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - 步骤 1、2 之后:`user_evt_ignored{VP} = 10,000`、`user_evt_unknown{VP} = 10,000`;Meta `Note` 条数 = 1 + ⌊10,000 / 1,000⌋ = 11;sequencer 未收到 `ConnState`;3 个槽无 `VERIFY`;无 `OrderDecision{action Query}`;用户流连接未重连
   - 步骤 3 之后:`ConnState{UserStream, Degraded, reason REPORT_DECODE}`;3 个槽置 `VERIFY` 并各有一条 `Query`
 - 实现:`apps/hft-core/tests/user_events.rs::c12_ignorable_and_unknown_user_events_only_counted`
-- 覆盖边界:当前进程内夹具以 Spot 协议覆盖两类各 10,000 帧的计数、无查询/VERIFY/重连，以及截断推送触发 3 槽 VERIFY/Query。该协议的私有订阅复用 Order 连接，错误报告沿用该连接角色。原前置的 OKX 协议矩阵、UserStream 角色与 11 条 Meta Note 尚未验收。
+- 覆盖边界:当前进程内夹具以 Spot 协议覆盖两类各 10,000 帧的计数、无查询/VERIFY/重连，以及截断推送触发 3 槽 VERIFY/Query。该协议的私有订阅复用 Order 连接，错误报告沿用该连接角色。11 条 Venue Meta Note 经应用 rep 接口写入 journal，保留事件名；原前置的 OKX 协议矩阵与 UserStream 角色尚未验收。
 - 备注:各 venue 的事件分类金样归各 `venue-*` 的 `TESTS.md`
 
 ### C13 全仓资金费只推余额的 venue 由 sequencer 按结算时刻持仓合成每 inst 的资金费

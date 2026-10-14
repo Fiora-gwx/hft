@@ -1407,6 +1407,13 @@
 | `AdvisorStats` | Advisor |  | Info |  |
 | `ModelCkptSkipped` | Advisor |  | P1 |  |
 
+计数类码(只在 source crate 的 `NOTE_CODES` 表):
+
+| 码名 | source | n |
+|---|---|---|
+| `VenueUnknownUserEvent` | Venue | 1 |
+| `VenueFeeRuleDeviation` | Venue | 2 |
+
 ## ConnState.reason
 
 `Down`/`Rotated` 时为 hft-net `ErrBits` 原值,`Up`/`Alive` 时为 0;`Resync`/`Degraded` 取下表(唯一归属 [hft-venue](../../crates/hft-venue/README.md#产生与消费的事件) 的 `CONN_REASONS`)。
