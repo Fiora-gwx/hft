@@ -456,7 +456,7 @@ spec: README.md
 
 - 规则:[只读视图](README.md#只读视图seqviews实现-sdk-views)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态;s2 对 g2 有活动目标
 - 步骤:
   1. 投递一条 bbo-A,使 `exec.has_pending()` 为真;在 `exec.advance` 内经视图读 `target(2, g2)`;同一 Input 中 s2 的 `on_event` 内读 `target(2, g2)`
@@ -492,7 +492,7 @@ spec: README.md
 
 - 规则:[只读视图](README.md#只读视图seqviews实现-sdk-views)、[连接活性](README.md#连接活性)
 - 级别:prop
-- 里程碑:M2
+- 里程碑:M5
 - 性质:任意连接与簿状态下,`RiskView::bbo(i)`、`Views::bbo(i)`、传给 `price_hedge` 与执行层的 `BboView` 逐字段相等
 - 生成:每 inst 0–8 个成员槽,各槽 `up`/`resync`/`live_tsc` 随机;inst 的 `RESYNC` 随机;簿状态 ∈ {Live, Resyncing};Top 随机
 - 参考:三处读数两两相等
@@ -577,7 +577,7 @@ spec: README.md
 
 - 规则:[advisor 与 Model](README.md#advisor-与-model)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0;一段含 200 000 条 Input 的 DST journal(含 `SetParams`、`Kill`、Advice、关键帧、段滚动)
 - 步骤:
   1. `MirrorDriver` 从第一个引导块起步跑完;每 1 000 条按状态哈希规则算一次哈希
@@ -771,7 +771,7 @@ spec: README.md
 
 - 规则:[模型检查点](README.md#模型检查点)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0;s2 有效检查点 C(`last_seq` = 40 000);seq 45 000 处有 `SetParams{s2, version 9}`;重启时换了二进制 SHA 与 refdata version
 - 步骤:
   1. 重启,advisor 加载 C 并续算到末尾
@@ -821,7 +821,7 @@ spec: README.md
 
 - 规则:[记录分类](README.md#记录分类)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0;每行构造一条该类记录,读 sequencer 写入时用的分类与 `KindInfo.role`
 - 实现:`crates/hft-sequencer/tests/records.rs::seq_052_record_roles`
 
@@ -841,7 +841,7 @@ spec: README.md
 
 - 规则:[记录分类](README.md#记录分类)、[确定性规则](README.md#确定性规则)
 - 级别:prop
-- 里程碑:M2
+- 里程碑:M5
 - 性质:同一 Input 序列中任意位置插入任意 Meta 记录(`ClockStatus`、`Note{Housekeeping}`、`Note{Venue}`、`Note{CtlAudit}`、`HostProfile`),处理后的状态哈希与 Output 序列(按测量掩码比较)与不插入时相同
 - 生成:B0 上随机 Input 序列 100–2 000 条;Meta 插入 0–200 条,位置均匀
 - 参考:不插入 Meta 的同一序列
@@ -852,7 +852,7 @@ spec: README.md
 
 - 规则:[记录分类](README.md#记录分类)、[状态哈希](README.md#状态哈希)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0;一段含 `OrderDecision` 与关键帧的 journal;每行改日志中一个字段后跑 `VerifyDriver`
 - 实现:`crates/hft-sequencer/tests/records.rs::seq_054_measure_mask`
 
@@ -1007,7 +1007,7 @@ spec: README.md
 
 - 规则:[主循环](README.md#主循环step)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M3
 - 前置:B0 稳态;`md_round_ns = 10 000 000`(本用例不让时间片截止);md-A 积压 2 000 条 20 档 `L2Batch`(M1…);处理 M5 期间 bbo-A 到 1 条,处理 M9 期间 rep-B 到 1 条,处理 M12 期间 ctl 到 1 条
 - 步骤:
   1. `step()`
@@ -1156,7 +1156,7 @@ spec: README.md
 
 - 规则:[主循环](README.md#主循环step)、[确定性规则](README.md#确定性规则)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M3
 - 前置:B0;同一份行情与回报到达脚本
 - 故障:两次运行的处理耗时分布不同(一次 ×1、一次 ×3),md 突发 10×、bbo 突发每轮取满批
 - 种子:PR 200(提交派生)+ 回归集;每夜日期派生
@@ -1167,7 +1167,7 @@ spec: README.md
 
 - 规则:[主循环](README.md#主循环step)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M3
 - 前置:B0;md-A 积压 2 000 条 `L2Batch`、bbo-A 积压 128 条(含合并)、advice 积压 16 条
 - 故障:在上述积压期间按 Poisson(每 200 µs)注入 `Bbo`、实盘回报与 ctl 命令
 - 种子:PR 200 + 回归集;每夜日期派生
@@ -1223,7 +1223,7 @@ spec: README.md
 
 - 规则:[环境决定写成 Input](README.md#环境决定写成-input)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态;账户 1 在 B 有一张冒烟单;交出 `Timer{Oms, SmokeTtl, account 1, venue B}`
 - 实现:`crates/hft-sequencer/tests/env.rs::seq_081_smoke_ttl_keep`
 
@@ -1272,7 +1272,7 @@ spec: README.md
 
 - 规则:[环境决定写成 Input](README.md#环境决定写成-input)、[通知队列与续推](README.md#通知队列与续推)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态;`needs_roll = (Size, EventBoundary)`;OMS 待发队列尚余 20 条(K = 16)
 - 步骤:
   1. 连续 `step()` 直到出现 `Timer{Sys, Roll}`
@@ -1344,7 +1344,7 @@ spec: README.md
 
 - 规则:[环境决定写成 Input](README.md#环境决定写成-input)、[快照](README.md#快照)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0 改 `keyframe_period_ms = 1 000`;4 个 inst 的簿为 Live,第 5 个为 `Resyncing`;运行 3 000 ms,每 5 ms 一条 bbo
 - 步骤:
   1. 统计每个 [k × 1 000 ms, (k + 1) × 1 000 ms) 窗口内的 `Timer{Keyframe, inst}` 与 `L2Snapshot{origin = Keyframe}`
@@ -1386,7 +1386,7 @@ spec: README.md
 
 - 规则:[环境决定写成 Input](README.md#环境决定写成-input)、[资金费合成](README.md#资金费合成)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0 稳态;venue B 的 `VenueCaps.funding_settle = RateOnly`;账户 1 持有 b1 空 0.010;`next_funding_settle() = (B, 08:00:00Z)`
 - 实现:`crates/hft-sequencer/tests/env.rs::seq_092_funding_settle_timer`
 
@@ -1454,7 +1454,7 @@ spec: README.md
 
 - 规则:[环境决定写成 Input](README.md#环境决定写成-input)、[确定性规则](README.md#确定性规则)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M3
 - 前置:B0;同一输入到达脚本跑两次:第一次每 50 ms 有一个空闲轮,第二次只在 1 s 处有空闲轮;两次都越过一个整点并到期一次关键帧
 - 步骤:
   1. 两次运行各自 `VerifyDriver` 重放
@@ -1950,7 +1950,7 @@ spec: README.md
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)、[通知队列与续推](README.md#通知队列与续推)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态;每行在一个 Input 内使所列分区产生所列条数的通知
 - 实现:`crates/hft-sequencer/tests/notify_backlog.rs::seq_133_notify_partitions`
 
@@ -2066,7 +2066,7 @@ spec: README.md
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)、[目标意图与执行层](README.md#目标意图与执行层)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态;s2 收到第 6 步的 `EventRef::Exec` 进度通知时设一个新目标并下一笔策略单
 - 步骤:
   1. 投递触发执行层推进的 bbo-A
@@ -2102,7 +2102,7 @@ spec: README.md
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M3
 - 前置:B0 稳态;a1 簿为 Live 并订阅深度;s1 订阅 a1 的 `BOOK`
 - 步骤:
   1. 投递一条含 20 档更新的 `L2Batch`
@@ -2114,7 +2114,7 @@ spec: README.md
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M3
 - 前置:B0 稳态;a1 订阅分档深度(TopN 流)
 - 步骤:
   1. 投递 `L2Snapshot{origin = TopN, 10 档}`
@@ -2126,7 +2126,7 @@ spec: README.md
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M3
 - 前置:B0 稳态;a1 启用增量深度,簿处于 `Resyncing`;REST 快照分 3 片
 - 步骤:
   1. 依次投递 3 条 `L2Snapshot{origin = Exchange}` 分片,中间穿插 1 条 bbo-A
@@ -2195,7 +2195,7 @@ spec: README.md
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0 稳态;g1 的 b1 腿 −1.000,账户另有无组 b1 空 0.004;全量强平 `ExternalFill{b1, Buy 1.004}`
 - 步骤:
   1. 投递该 `ExternalFill`
@@ -2232,7 +2232,7 @@ spec: README.md
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0 稳态;此前 `AUTO_EXTERNAL` 合成使 `auto_held[(1, b1, Buy)] = 2`
 - 步骤:
   1. 投递交易所补推的 `ExternalFill{account 1, b1, Buy 2, cause Adl}`
@@ -2244,7 +2244,7 @@ spec: README.md
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0 稳态;账户 1 在 B;每行投递使 OMS 产出所列 `ForeignFill` 的 `OrderEvent`
 - 实现:`crates/hft-sequencer/tests/process.rs::seq_155_foreign_fill_dedup_keys`
 
@@ -2289,7 +2289,7 @@ spec: README.md
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0 稳态;账户 1 持有 b1 空 0.010;每行设定 venue B 的 `funding_settle` 与推送
 - 实现:`crates/hft-sequencer/tests/process.rs::seq_158_funding_settle_push`
 
@@ -2320,7 +2320,7 @@ spec: README.md
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)、[启动闸门](README.md#启动闸门)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M3
 - 前置:B0,账户 1 闸门未放行;s1 订阅 B 的连接事件
 - 实现:`crates/hft-sequencer/tests/process.rs::seq_160_conn_state_order_and_depth`
 
@@ -2385,7 +2385,7 @@ spec: README.md
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0 稳态;账户 1 在 B 永续 b1 空 10(引擎 `engine_qty = −10`);用户流自最近一次 Up 起已稳定 ≥ 1 个对账周期,本组与上一组 `Summary` 都无 `USERSTREAM_DOWN`;账户 1 在 B 无 Unknown 槽、b1 无非终态槽、b1 自 `view_seq` 以来无成交;b1 `mark_px = 50 000`;每行一组只含该仓位条目(带 `AUTO_EXTERNAL`)的报告
 - 实现:`crates/hft-sequencer/tests/recon.rs::seq_165_auto_external_applied`
 
@@ -2399,7 +2399,7 @@ spec: README.md
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 前置:同 SEQ-165,`exch_qty = −8`;每行只破坏所列一项
 - 实现:`crates/hft-sequencer/tests/recon.rs::seq_166_auto_external_rejected`
 
@@ -2419,7 +2419,7 @@ spec: README.md
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 前置:SEQ-165.1 的 journal
 - 实现:`crates/hft-sequencer/tests/recon.rs::seq_167_auto_external_replay`
 
@@ -2433,7 +2433,7 @@ spec: README.md
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:SEQ-165.1 之后(`auto_held[(1, b1, Buy)] = 2`)
 - 步骤:
   1. 投递 gw 补推的 `ExternalFill{b1, Buy 2, cause Adl}`
@@ -2529,7 +2529,7 @@ spec: README.md
 
 - 规则:[意图管线](README.md#意图管线)
 - 级别:prop
-- 里程碑:M2
+- 里程碑:M5
 - 性质:任意意图序列中,每条结果为 Shadowed 或 Rejected 的意图处理前后,hft-risk 令牌桶、OMS `InflightBook` 与已分配槽数逐字段不变
 - 生成:B0 上 1–500 条策略意图,有效模式 ∈ {Live, CloseOnly, Shadow} 随机切换,令牌桶 0–10 个令牌,数量 0.0001–1
 - 参考:处理前后三项状态的快照相等(对 Shadowed/Rejected 的意图)
@@ -2649,7 +2649,7 @@ spec: README.md
 
 - 规则:[目标意图与执行层](README.md#目标意图与执行层)、[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M4
 - 前置:B0 稳态;s2 在 b1 上挂一张 reduce-only GTC 买单(非 EXEC 槽);账户 2 的 `MarginReport` 使 hft-risk 进入 L3 并产出 `force`
 - 步骤:
   1. 投递该 `MarginReport`
@@ -2814,7 +2814,7 @@ spec: README.md
 
 - 规则:[资金费合成](README.md#资金费合成)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0 稳态;B `BalanceOnlyPush`、`funding_grid` 8 h、锚 0;b1 `next_funding_ns = 08:00:00.003`(交易所给出的时刻带 3 ms 偏差)
 - 步骤:
   1. 触发合成;再投递推送 `FundingSettle{inst = INST_NONE, ts 08:00:02}`
@@ -2826,7 +2826,7 @@ spec: README.md
 
 - 规则:[模式与 cap 的驱动](README.md#模式与-cap-的驱动)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态;每行投递所列 Input,记录 `risk.mode.apply` 收到的 `ModeInput`
 - 实现:`crates/hft-sequencer/tests/mode.rs::seq_197_mode_input_mapping`
 
@@ -2938,7 +2938,7 @@ spec: README.md
 
 - 规则:[模式与 cap 的驱动](README.md#模式与-cap-的驱动)、[通知队列与续推](README.md#通知队列与续推)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 改 `max_cells_total = 256`、`max_groups_per_instance = 200`;账户 2 有 n 个带裸量的 group,全部满足 SEQ-202.1
 - 实现:`crates/hft-sequencer/tests/mode.rs::seq_204_naked_groups_cursor`
 
@@ -2952,7 +2952,7 @@ spec: README.md
 
 - 规则:[模式与 cap 的驱动](README.md#模式与-cap-的驱动)、[冷启动恢复](README.md#冷启动恢复recoverdriver)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:恢复后;账户 1 链接 L(第二腿在 B)处于 `RESUME_HOLD`;账户 1 启动闸门未放行
 - 步骤:
   1. 投递使 hft-risk `hedge_gate_ok(1, B)` 由假变真的 `AccountConfigReport{1, B}`
@@ -2964,7 +2964,7 @@ spec: README.md
 
 - 规则:[模式与 cap 的驱动](README.md#模式与-cap-的驱动)、[冷启动恢复](README.md#冷启动恢复recoverdriver)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:恢复后;账户 2 的 g2 多出永续腿在 B;A 断线(账户 2 未放行);B 的 `hedge_gate_ok` 已满足,`RECONCILED` 在 B 尚未置位
 - 步骤:
   1. 投递使 B 的 `RECONCILED` 置位的对账报告组末条
@@ -2976,7 +2976,7 @@ spec: README.md
 
 - 规则:[模式与 cap 的驱动](README.md#模式与-cap-的驱动)、[启动闸门](README.md#启动闸门)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:恢复后;账户 1 只差 `FEEDS` 一位
 - 步骤:
   1. 投递使 `FEEDS` 置位的 Input
@@ -3000,7 +3000,7 @@ spec: README.md
 
 - 规则:[模式与 cap 的驱动](README.md#模式与-cap-的驱动)、[Drain](README.md#drain)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态,账户 1 已放行
 - 实现:`crates/hft-sequencer/tests/mode.rs::seq_209_internal_drain_causes`
 
@@ -3014,7 +3014,7 @@ spec: README.md
 
 - 规则:[模式与 cap 的驱动](README.md#模式与-cap-的驱动)、[启动闸门](README.md#启动闸门)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:恢复后,账户 1 `gate_bits = 0b0101`
 - 步骤:
   1. 投递使 `gate_bits` 变为 `0b0111` 的 Input
@@ -3038,7 +3038,7 @@ spec: README.md
 
 - 规则:[模式与 cap 的驱动](README.md#模式与-cap-的驱动)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态;构造一次 `apply`,其 `ModeOutcome` 同时含 cells、cancels、kill_changed、hedge_gate_open、released、risk_events、gate_changes、notes
 - 步骤:
   1. 投递触发它的 Input,记录下游调用序列
@@ -3103,7 +3103,7 @@ spec: README.md
 
 - 规则:[模拟账户](README.md#模拟账户)、[主循环](README.md#主循环step)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0 同进程混跑;实盘账户 1 持续成对开仓
 - 故障:rep-sim 积压 1 000 条并持续注入每轮数百条回报
 - 种子:PR 100 + 回归集;每夜日期派生
@@ -3236,7 +3236,7 @@ spec: README.md
 
 - 规则:[inst → 策略的稠密索引](README.md#inst--策略的稠密索引)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 改实例 s3(Live)、s1(Sim)、s2(Live);s2 的 gix 0 与 gix 1 都订阅 a1,s3、s1 各一个 group 订阅 a1
 - 步骤:
   1. 投递 bbo-A(a1)
@@ -3279,7 +3279,7 @@ spec: README.md
 
 - 规则:[inst → 策略的稠密索引](README.md#inst--策略的稠密索引)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M3
 - 前置:B0 稳态;s1 只订阅 b1 的 `BBO`;每行从上一行的状态继续
 - 实现:`crates/hft-sequencer/tests/subs.rs::seq_230_union_follows_position`
 
@@ -3293,7 +3293,7 @@ spec: README.md
 
 - 规则:[inst → 策略的稠密索引](README.md#inst--策略的稠密索引)、[环与容量](README.md#环与容量)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M3
 - 前置:B0 改 `max_insts = 3`;a1、b1、a2 已占满 3 个 `sub_ix`
 - 步骤:
   1. 外来成交使账户 1 获得 b2 永续持仓
@@ -3787,7 +3787,7 @@ spec: README.md
 
 - 规则:[冷启动恢复](README.md#冷启动恢复recoverdriver)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:停机前 s1 链接 L 处于 `Hedging`(第一腿已成交、第二腿在 B 未成交);`hedge_deadline_ms = 3 000`;停机 10 min
 - 步骤:
   1. 恢复;运行 5 s,B 的对冲闸门子集尚未满足
@@ -3804,7 +3804,7 @@ spec: README.md
 
 - 规则:[冷启动恢复](README.md#冷启动恢复recoverdriver)、[确定性规则](README.md#确定性规则)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0;策略集 + 执行层 + 风控 + OMS + ledger + 共用撮合器
 - 故障:在事件中途、段滚动中途、引导块中途、关键帧写出中途各随机注入进程崩溃,重启走 `RecoverDriver`
 - 种子:PR 200 + 回归集;每夜日期派生
@@ -3872,7 +3872,7 @@ spec: README.md
 
 - 规则:[毒丸输入隔离](README.md#毒丸输入隔离)、[版本变化与回滚](README.md#版本变化与回滚)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0;hft-core `startup.poison_crash_limit = 2`
 - 故障:A:实盘处理某条 Input 时连续崩溃 2 次(运行期);B:重放同一区间时连续崩溃 2 次(恢复期)
 - 种子:PR 50 + 回归集;每夜日期派生
@@ -3915,7 +3915,7 @@ spec: README.md
 
 - 规则:[启动闸门](README.md#启动闸门)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:恢复后,账户 1 闸门未放行;每行投递所列 Input
 - 实现:`crates/hft-sequencer/tests/gates.rs::seq_275_gate_inputs`
 
@@ -3946,7 +3946,7 @@ spec: README.md
 
 - 规则:[存储降级](README.md#存储降级)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态;账户 2 已有 `Kill{Account(2), flatten}`(引擎目标 0、`reason = Hard`,两片之间冷却中,未到达)
 - 步骤:
   1. 交出 `Timer{PersistLag, level 2}`
@@ -4179,7 +4179,7 @@ spec: README.md
 
 - 规则:[命令路径](README.md#命令路径)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态;s2 有 g2、g2b;新参数移除 g2b、新增 g2c,`default_mode = Shadow`
 - 实现:`crates/hft-sequencer/tests/commands.rs::seq_291_set_params_apply`
 
@@ -4197,7 +4197,7 @@ spec: README.md
 
 - 规则:[命令路径](README.md#命令路径)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态;账户 1 `force_slice.max_chunk_notional = 1 000 USDT`
 - 实现:`crates/hft-sequencer/tests/commands.rs::seq_292_set_risk`
 
@@ -4211,7 +4211,7 @@ spec: README.md
 
 - 规则:[命令路径](README.md#命令路径)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0;每行构造使 `risk.mode.apply` 返回所列 `ModeErr` 的已确认命令
 - 实现:`crates/hft-sequencer/tests/commands.rs::seq_293_mode_err_mapping`
 
@@ -4248,7 +4248,7 @@ spec: README.md
 
 - 规则:[命令路径](README.md#命令路径)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 前置:干净 Drain 写快照;重启时实盘驱动带停机标记 `Kill{Global}`;`auto_resume_after_clean_drain = 1`
 - 步骤:
   1. 重启,闸门放行
@@ -4267,7 +4267,7 @@ spec: README.md
 
 - 规则:[命令路径](README.md#命令路径)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0 稳态;report 950 已生效(`view_seq = 10 000`),其中 (1, B, b1) 仓位差异 +0.002
 - 实现:`crates/hft-sequencer/tests/commands.rs::seq_296_adopt_exchange`
 
@@ -4441,7 +4441,7 @@ spec: README.md
 
 - 规则:[Drain](README.md#drain)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态,`shutdown.drain_timeout_ms = 60 000`;每行在 `Drain{cancel_resting: true}` 时只存在所列一项未完成,该项在 Drain 开始后 2 s 完成
 - 实现:`crates/hft-sequencer/tests/drain.rs::seq_306_drain_wait_conditions`
 
@@ -4474,7 +4474,7 @@ spec: README.md
 
 - 规则:[Drain](README.md#drain)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态;s2 的 g2 目标增仓尚余 0.03;账户 2 处于 L3,减仓目标尚余 2 片
 - 步骤:
   1. `Drain{cancel_resting: false}`,运行到结束
@@ -4486,7 +4486,7 @@ spec: README.md
 
 - 规则:[Drain](README.md#drain)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:SEQ-304.5 之后(待生效 blob R2);Drain 第 3 步满足
 - 实现:`crates/hft-sequencer/tests/drain.rs::seq_308_refdata_recheck_at_drain_end`
 
@@ -4504,7 +4504,7 @@ spec: README.md
 
 - 规则:[Drain](README.md#drain)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态,`shutdown.drain_timeout_ms = 5 000`;每行在超时时刻仍未完成所列项
 - 实现:`crates/hft-sequencer/tests/drain.rs::seq_309_drain_timeout`
 
@@ -4540,7 +4540,7 @@ spec: README.md
 
 - 规则:[确定性规则](README.md#确定性规则)、[状态哈希](README.md#状态哈希)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 前置:一段 DST 生成的 journal(500 000 条 Input,含关键帧、按需快照、Drain 快照);CI 的 x86_64 与 aarch64 作业
 - 步骤:
   1. 每个作业以 `VerifyDriver` 跑两次,输出每个快照处的 `out_hash` 与按读者规则计算的 `state_hash`
@@ -4552,7 +4552,7 @@ spec: README.md
 
 - 规则:[确定性规则](README.md#确定性规则)
 - 级别:prop
-- 里程碑:M2
+- 里程碑:M5
 - 性质:对同一 Input 序列(按 journal 顺序交出),任意注入的处理延迟(手动 TSC 在组件调用之间前进)不改变状态哈希与 Output(测量字段除外)
 - 生成:B0 上 100–2 000 条 Input;每次组件调用后 TSC 前进 0–100 µs 随机
 - 参考:不注入延迟的同一序列
@@ -4563,7 +4563,7 @@ spec: README.md
 
 - 规则:[确定性规则](README.md#确定性规则)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0;运行 10 000 条 Input 后扫描全部 Output
 - 实现:`crates/hft-sequencer/tests/determinism.rs::seq_313_zero_padding_try_from_bytes`
 
@@ -4597,7 +4597,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M3
 - 前置:B0 稳态;计数分配器;预热 1 000 条 Input 之后开始计数
 - 步骤:
   1. 处理 100 000 条混合 Input(行情、回报、命令含 `SetParams`、关键帧、段滚动、Drain)
@@ -4638,7 +4638,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)、[主循环](README.md#主循环step)
 - 级别:bench
-- 里程碑:M2
+- 里程碑:M3
 - 基准名:`seq/l2burst`
 - 实现:`crates/hft-sequencer/benches/l2burst.rs::seq_319_l2burst`
 
@@ -4790,7 +4790,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M2
+- 里程碑:M3
 - 基准名:`seq/replay_throughput`
 - 实现:`crates/hft-sequencer/benches/seq.rs::seq_338_replay_throughput`
 
@@ -4798,7 +4798,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)、[advisor](README.md#advisor)
 - 级别:bench
-- 里程碑:M2
+- 里程碑:M9
 - 基准名:`seq/mirror_throughput`
 - 实现:`crates/hft-sequencer/benches/seq.rs::seq_339_mirror_throughput`
 
@@ -4806,7 +4806,7 @@ spec: README.md
 
 - 规则:[策略集](README.md#策略集strategyset)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0;s1(probe-taker,账户 1)与 s2(probe-target,账户 2)同时运行;对 s1 注入 `Kill{Account(1)}` 与连续拒单
 - 步骤:
   1. 运行 10 000 条 Input
@@ -4835,7 +4835,7 @@ spec: README.md
 
 - 规则:[模式与 cap 的驱动](README.md#模式与-cap-的驱动)、[冷启动恢复](README.md#冷启动恢复recoverdriver)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0;g2 带容差内、高于尘埃线的残余;`auto_resume_after_clean_drain = 1`
 - 故障:干净 Drain 后重启;重启后 1–5 s 内各连接随机先后 Up
 - 种子:PR 100 + 回归集;每夜日期派生
@@ -4847,7 +4847,7 @@ spec: README.md
 
 - 规则:[输出扇出](README.md#输出扇出)、[主循环](README.md#主循环step)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0;账户 1、2 都在 B 持续成对开仓
 - 故障:账户 1 在 B 持续收到限速拒绝并堆满其出环配额
 - 种子:PR 100 + 回归集;每夜日期派生
@@ -4870,7 +4870,7 @@ spec: README.md
 
 - 规则:[环与容量](README.md#环与容量)、[启动闸门](README.md#启动闸门)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0;每行只改所列开关;干净 Drain 后重启,全部连接 Up、对账干净
 - 实现:`crates/hft-sequencer/tests/gates.rs::seq_345_seq_params_switches`
 
@@ -4885,7 +4885,7 @@ spec: README.md
 
 - 规则:[环与容量](README.md#环与容量)、[主循环](README.md#主循环step)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0(`replay_per_round = 1 024`);`VerifyDriver`;journal 共 n 条 Input
 - 实现:`crates/hft-sequencer/tests/preempt.rs::seq_346_replay_per_round_boundary`
 
@@ -4899,7 +4899,7 @@ spec: README.md
 
 - 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0;每行构造所列故障后 `boot(Journal(Latest))`
 - 实现:`crates/hft-sequencer/tests/boot.rs::seq_347_boot_errors`
 
@@ -4913,7 +4913,7 @@ spec: README.md
 
 - 规则:[命令路径](README.md#命令路径)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态;账户 1 在 A 有 Open 挂单 2 张、RISK_REDUCING 挂单 1 张;Trader 发出
 - 实现:`crates/hft-sequencer/tests/commands.rs::seq_348_cancel_all_annotate`
 
@@ -4993,7 +4993,7 @@ spec: README.md
 
 - 规则:[命令路径](README.md#命令路径)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态;`ctl_state_version = 5`;直接向 ctl 环写 `confirmed = 1`、`expect_state_version = 0` 的命令(主体 `cli:alice`,Admin)
 - 实现:`crates/hft-sequencer/tests/commands.rs::seq_354_confirm_without_version`
 
@@ -5024,7 +5024,7 @@ spec: README.md
 
 - 规则:[快照](README.md#快照)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0;快照中账户 1 的 g1 静止、`Broken{1, g1}` 在位
 - 步骤:
   1. 从该快照起步(验证驱动)
@@ -5038,7 +5038,7 @@ spec: README.md
 
 - 规则:[命令路径](README.md#命令路径)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态;账户 1 在 B 上实际杠杆 5×,`RiskParams.max_perp_leverage_x100 = 300`(该账户原无永续腿)
 - 步骤:
   1. `SetParams` 给 s1 新增引用 `b1` 的 group g3
@@ -5050,7 +5050,7 @@ spec: README.md
 
 - 规则:[命令路径](README.md#命令路径)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态;主体 Admin
 - 实现:`crates/hft-sequencer/tests/commands.rs::seq_358_error_mapping`
 
@@ -5068,7 +5068,7 @@ spec: README.md
 
 - 规则:[每条 Input 的处理顺序(`process`)](README.md#每条-input-的处理顺序process)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0 稳态;账户 1 在 A 上
 - 步骤:
   1. 交出一条 `StaleGen` 带成交的 `OrderEvent`(`exch_order_id = 77`、`cum_filled = 0.002`)
@@ -5123,7 +5123,7 @@ spec: README.md
 
 - 规则:[模型检查点](README.md#模型检查点)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0;s2 的 Model `model_tick(every_ms = 60 000)`;journal 中 `AdvisorTick` 的 UTC 依次为 00:30:59.5、00:31:00.5;检查点 `last_seq` 是 00:30:59.5 那条 AdvisorTick 之后的一条记录
 - 步骤:
   1. 从该检查点续算
@@ -5135,7 +5135,7 @@ spec: README.md
 
 - 规则:[每条 Input 的处理顺序(`process`)](README.md#每条-input-的处理顺序process)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0 稳态;ledger `balance_check_quiet_ms = 5 000`;(A, 1) 最近一笔成交在 engine_ns F,无非终态单
 - 实现:`crates/hft-sequencer/tests/ledger_bridge.rs::seq_364_balance_quiet_boundary`
 
@@ -5150,7 +5150,7 @@ spec: README.md
 
 - 规则:[命令路径](README.md#命令路径)、[目标意图与执行层](README.md#目标意图与执行层)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0 稳态;s2(probe-target)的 g2 当前净量 `a1` +0.01、`b1` −0.01;s2 对 `Manual` 的处理是设 g2 目标 +0.02 / −0.02
 - 步骤:
   1. `StrategyCmd{s2, g2, reduce_only = true}`
@@ -5162,7 +5162,7 @@ spec: README.md
 
 - 规则:[冷启动恢复](README.md#冷启动恢复recoverdriver)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:B0;同一构建;journal 末尾是 Drain 快照
 - 实现:`crates/hft-sequencer/tests/recover.rs::seq_366_clean_drain_flag`
 
@@ -5177,7 +5177,7 @@ spec: README.md
 
 - 规则:[环与容量](README.md#环与容量)、[advisor 与 Model](README.md#advisor-与-model)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0;实盘驱动;`advisor_max_lag_ms = 1 000`;advisor 被阻塞 3 s
 - 步骤:
   1. 解除阻塞
@@ -5201,7 +5201,7 @@ spec: README.md
 
 - 规则:[每条 Input 的处理顺序(`process`)](README.md#每条-input-的处理顺序process)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:B0;账户 1 在 B 上启动闸门 `RECONCILED` 未放行
 - 步骤:
   1. 交出只含一条 `UnknownResolved` 条目、无 `Summary` 的 `ReconcileReport` 组

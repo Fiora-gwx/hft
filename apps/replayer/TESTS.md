@@ -45,7 +45,7 @@ spec: README.md
 
 - 规则:[使用本组件](README.md#使用本组件)、[输入定位与退出码](README.md#输入定位与退出码)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:样本 T1;每行的命令以 `replayer` 二进制运行(表中以子命令开头的行省略了二进制名);以 `strace -f -e trace=openat` 记录每行运行打开的文件
 - 实现:`apps/replayer/tests/cli.rs::rpl_001_bad_args_exit_2`
 
@@ -69,7 +69,7 @@ spec: README.md
 
 - 规则:[实现说明](README.md#实现说明)
 - 级别:proc
-- 里程碑:M2
+- 里程碑:M5
 - 前置:同一提交、同一剖面构建的 `replayer` 与 `hft-core` 二进制
 - 步骤:
   1. 分别运行 `replayer --version` 与 `hft-core --version`
@@ -82,7 +82,7 @@ spec: README.md
 
 - 规则:[使用本组件](README.md#使用本组件)、[verify](README.md#verify)、[sim](README.md#sim)、[compare](README.md#compare)、[latency](README.md#latency)、[输入定位与退出码](README.md#输入定位与退出码)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:样本 T1、S1;S1 的副本 `S1b` 另含第二个 Sim 账户 `sim-b`(由同一次运行录下);测试策略 A 的 Model 构造计数器(hft-testkit 测试策略暴露的 `MODEL_NEW_COUNT`)在每行开始前清零
 - 实现:`apps/replayer/tests/cli.rs::rpl_003_defaults`
 
@@ -218,7 +218,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:样本 T1 的副本;在 `K3 − 5` 处的 `Bbo` 与 `K3 + 5` 处的 `Bbo` 中只篡改每行指明的那一条(价加 1 tick,两条都会改变其后的决策)
 - 实现:`apps/replayer/tests/verify.rs::rpl_014_start_at_nearest_snapshot`
 
@@ -235,7 +235,7 @@ spec: README.md
 - 规则:[verify](README.md#verify)、[输入定位与退出码](README.md#输入定位与退出码)
 - 级别:table
 - 前置:样本 T1;`$T1/seg2` 只含 T1 的第 2 段
-- 里程碑:M2
+- 里程碑:M5
 - 实现:`apps/replayer/tests/verify.rs::rpl_015_no_snapshot_before_from_exit_3`
 
 | 行 | 输入与 `--from-seq` | 期望 |
@@ -248,7 +248,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 前置:样本 T1;`B1` 是引导块快照(头部 `state_hash` 非 0,实盘值记为 `H`);`K1` 是关键帧(头部 `state_hash = 0`);`--from-seq` 按行给出
 - 实现:`apps/replayer/tests/verify.rs::rpl_016_snapshot_self_check`
 
@@ -264,7 +264,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:样本 T1 的副本;关键帧 `K2` 中 hft-risk 节(节 4)的一个计数字段加 1(改动后重算记录校验)
 - 步骤:
   1. `replayer verify --journal <副本> --report $OUT/r.json`
@@ -301,7 +301,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:样本 T1 的副本;引导块中的 `RiskParams` ConfigBlob 的 `max_order_notional` 改为 T1 中最大单笔名义的一半(重算 blob 的 sha256 与记录校验);T1 中第一条名义超过新上限的 `OrderDecision` 的 seq 记为 `w`
 - 步骤:
   1. `replayer verify --journal <副本> --report $OUT/r.json`
@@ -326,7 +326,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:样本 T1 的副本;每行只做该行的改动
 - 实现:`apps/replayer/tests/verify.rs::rpl_022_measure_fields_masked`
 
@@ -341,7 +341,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:样本 T1 的副本;每行只改该行的 Meta 记录内容(长度不变,重算校验)
 - 实现:`apps/replayer/tests/verify.rs::rpl_023_meta_not_compared`
 
@@ -398,7 +398,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:合成 journal:从快照起步后第 n 条 Input 处篡改一条使决策改变的 `Bbo`(n 按行);`--report $OUT/r.json`
 - 实现:`apps/replayer/tests/verify.rs::rpl_027_divergence_details`
 
@@ -412,7 +412,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:样本 T1 的副本;`K2` 与 `K6` 之后各有一条 `OrderDecision` 的 `qty` 加 1 lot(两处互不影响状态)
 - 步骤:
   1. `replayer verify --journal <副本> --keep-going --report $OUT/r.json`
@@ -424,7 +424,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:样本 T1 的副本;seq `q` 处一条 `OrderDecision` 的 `qty` 加 1 lot
 - 实现:`apps/replayer/tests/verify.rs::rpl_029_to_seq`
 
@@ -438,7 +438,7 @@ spec: README.md
 
 - 规则:[输入定位与退出码](README.md#输入定位与退出码)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:样本 T1(段头 `instance = "prod"`)
 - 实现:`apps/replayer/tests/verify.rs::rpl_030_instance_mismatch`
 
@@ -452,7 +452,7 @@ spec: README.md
 
 - 规则:[实现说明](README.md#实现说明)
 - 级别:proc
-- 里程碑:M2
+- 里程碑:M5
 - 前置:样本 T1;`/etc/hft/` 下放一份与 T1 参数不同的 `prod.toml`(`max_order_notional` 减半)
 - 步骤:
   1. 以 `TZ=UTC`、系统时间不变运行 `replayer verify --journal $T1 --report $OUT/a.json`
@@ -466,7 +466,7 @@ spec: README.md
 
 - 规则:[实现说明](README.md#实现说明)
 - 级别:proc
-- 里程碑:M2
+- 里程碑:M5
 - 前置:同一提交的 x86_64 与 aarch64 `replayer`(标签作业的一致性集);样本 T1 与 RPL-021 的篡改副本
 - 步骤:
   1. 两种架构各运行 `verify --journal $T1 --advice recompute --report r.json` 与 `verify --journal <篡改副本> --report d.json`
@@ -479,7 +479,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:replay
-- 里程碑:M2
+- 里程碑:M9
 - 输入:`fixtures/replay/testkit-1h`(样本 T1;`tsa` 在 T1 中由实例创建起步,无检查点);`replayer verify --journal $T1 --advice recompute --report $OUT/r.json`
 - 期望:
   - 退出 0;`r.json`:`verify = "pass"`、`recompute = "pass"`、`coalesced = 0`
@@ -490,7 +490,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:hft-testkit 测试策略 A 的测试变体 `tsa-hashmap`(Model 产出载荷前按 `std::collections::HashMap` 的迭代顺序拼接 group 列表,`RandomState` 每进程不同);用它录 30 min journal(实例创建起步)
 - 步骤:
   1. `replayer verify --journal <该 journal> --advice recompute --report $OUT/r.json`
@@ -517,7 +517,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:样本 T1 的副本;一条 `tsa` 的 `Advice`(seq `a`)的 `AdviceHdr.basis_seq` 改为 `basis_seq − 1`(保持其他字节不变,重算校验)
 - 步骤:
   1. `replayer verify --journal <副本> --advice recompute`
@@ -530,7 +530,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 前置:样本 T1 的副本;一条 `tsa` 的 `Advice`(seq `a`)只改该行指明的字节
 - 实现:`apps/replayer/tests/recompute.rs::rpl_044_payload_byte_diff`
 
@@ -544,7 +544,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 前置:合成 journal:同一策略实例 `tsa` 绑定两个 Live 账户 `acct-l`、`acct-m`,对 group `g1`、`local_kind = 1`、相同 `basis_seq` 各产出一条 Advice(载荷不同);每行在副本上只改 journal 中 `acct-l` 那条的一个键分量
 - 实现:`apps/replayer/tests/recompute.rs::rpl_045_pairing_key_components`
 
@@ -560,7 +560,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:replay
-- 里程碑:M2
+- 里程碑:M9
 - 输入:`fixtures/replay/testkit-3h`(样本 T3);`replayer verify --journal T3 --advice recompute --model-checkpoint ckpt-1h/tsa.ckpt --from-seq H2 --report $OUT/r.json`
 - 期望:
   - 退出 0;`recompute = "pass"`;`checkpoint_key` 含一项 `{strategy_instance = "tsa", layout_version = 1, last_seq = L1, …}`
@@ -571,7 +571,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 前置:样本 T3 与 `ckpt-1h/tsa.ckpt`(`last_seq = L1`);每行在副本上把指明 seq 的那条 `tsa` Advice 的 payload 末字节加 1
 - 实现:`apps/replayer/tests/recompute.rs::rpl_047_compare_after_start`
 
@@ -586,7 +586,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 前置:样本 T3;`ckpt-1h/tsa.ckpt` 的副本只改该行的 `CkptHdr` 字段并重算 CRC
 - 实现:`apps/replayer/tests/recompute.rs::rpl_048_checkpoint_key_mismatch`
 
@@ -602,7 +602,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)、[输入定位与退出码](README.md#输入定位与退出码)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 前置:样本 T3;`ckpt-1h/tsa.ckpt` 的副本只做该行改动(不重算 CRC,除非该行另有说明)
 - 实现:`apps/replayer/tests/recompute.rs::rpl_049_checkpoint_corrupt_exit_3`
 
@@ -618,7 +618,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 前置:样本 T3 的第 2–3 h 两段作为输入(第一条记录的 seq 记为 `F`,最后一条为 `E`);检查点副本只改 `last_seq` 并重算 CRC;窗口内 `tsa` 没有实例创建点与 `ModelCheckpointDiscarded`
 - 实现:`apps/replayer/tests/recompute.rs::rpl_050_checkpoint_outside_input`
 
@@ -633,7 +633,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:合成 journal(3 h):两个带 Model 的实例 `tsa`、`tsb`,`tsb` 在第 2 h 中途由 `SetParams` 创建;目录 `$CK` 只含 `tsa.ckpt`(1 h 末写出)
 - 步骤:
   1. `replayer verify --journal <合成> --advice recompute --model-checkpoint $CK --from-seq H2 --report $OUT/r.json`
@@ -684,7 +684,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:样本 T3 的第 2 段起的输入(`tsa` 创建点不在窗口内,窗口内无 `ModelCheckpointDiscarded`);不给 `--model-checkpoint`
 - 步骤:
   1. `replayer verify --journal <输入> --advice recompute --report $OUT/r.json`
@@ -696,7 +696,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:hft-testkit 测试策略 A 的变体 `tsa-p2`(`PATH_VERSION = 2`,`path_settle_ms = 120 000`,其余同 A);样本 T3 的 `ckpt-1h/tsa.ckpt`(路径节版本 1);T3 由 `PATH_VERSION = 1` 的代码录下,`tsa-p2` 的输出在路径状态收敛前与录下的不同、收敛后相同;`L1` 所指记录的引擎时间记为 `e0`;T3 中 `L1` 之后第一条引擎时间 ≥ `e0 + 120 000 × 10^6` 的记录的 seq 记为 `R`
 - 步骤:
   1. 以 `tsa-p2` 构建的 replayer 运行 `verify --journal T3 --advice recompute --model-checkpoint ckpt-1h/ --report $OUT/r.json`(不给 `--from-seq`,比较范围从 `L1 + 1` 起)
@@ -710,7 +710,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 前置:合成 journal:检查点 `last_seq = L` 所指记录的引擎时间 `e0`;`path_settle_ms = 1 000`;`L` 之后依次有记录 r1、r2、r3,引擎时间分别为 `e0 + 999 999 999`、`e0 + 1 000 000 000`、`e0 + 1 000 000 001`(ns);每条 rk 之后紧跟一条 `basis_seq = rk` 的 Advice,其载荷与连续运行不同的只有 `basis_seq < recompute_from_seq` 的那些(由测试 Model 构造)
 - 实现:`apps/replayer/tests/recompute.rs::rpl_057_rebuild_point_boundary`
 
@@ -766,7 +766,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:样本 T3 与 `ckpt-1h/tsa.ckpt`(`last_seq = L1`,`L1` 之前最近的快照为 `Kp`);`--from-seq H2`(`H2 > L1`);在副本中 `Kp` 与 `L1` 之间一条影响 `tsa` Model 视图的 `Bbo` 改价 1 tick
 - 步骤:
   1. `verify --journal <副本> --advice recompute --model-checkpoint ckpt-1h/ --from-seq H2`
@@ -792,7 +792,7 @@ spec: README.md
 
 - 规则:[verify](README.md#verify)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:RPL-041 的 journal
 - 步骤:
   1. `verify --journal <该 journal> --advice recompute --report $OUT/r.json`
@@ -1826,7 +1826,7 @@ spec: README.md
 
 - 规则:[输入定位与退出码](README.md#输入定位与退出码)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:样本 T1 的第 1 段文件 `$T1/…/0000000001-….jrn`
 - 步骤:
   1. `replayer verify --journal <该文件>`
@@ -1838,7 +1838,7 @@ spec: README.md
 
 - 规则:[输入定位与退出码](README.md#输入定位与退出码)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:样本 T1 的两段复制到一个目录,文件名改为使字典序与 `first_seq` 顺序相反(段头不变)
 - 步骤:
   1. `replayer verify --journal <该目录>`
@@ -1892,7 +1892,7 @@ spec: README.md
 
 - 规则:[输入定位与退出码](README.md#输入定位与退出码)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 前置:样本 T1 的副本;每行只做该行改动
 - 实现:`apps/replayer/tests/input.rs::rpl_225_incompatible_exit_4`
 
@@ -1906,7 +1906,7 @@ spec: README.md
 
 - 规则:[依赖](README.md#依赖)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M5
 - 前置:`cargo metadata` 取 `apps/replayer` 的依赖图(含启用的 feature)
 - 步骤:
   1. 检查依赖图
@@ -1943,7 +1943,7 @@ spec: README.md
 
 - 规则:[实现说明](README.md#实现说明)
 - 级别:proc
-- 里程碑:M2
+- 里程碑:M5
 - 前置:样本 T1;`strace -f -e trace=mmap,madvise`
 - 步骤:
   1. `replayer verify --journal $T1`
@@ -1955,7 +1955,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M2
+- 里程碑:M3
 - 基准名:`replay-throughput`
 - 实现:`apps/replayer/benches/replay.rs::rpl_250_replay_throughput`
 

@@ -1504,7 +1504,7 @@ spec: README.md
 
 - 规则:[回报匹配与成交增量](README.md#回报匹配与成交增量)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M9
 - 前置:testkit 进程内 sequencer;一条防御路径外来成交(OMS-114 的事件)与一条 `StaleGen` 成交(OMS-105 的事件)
 - 步骤:
   1. 处理两条 Input;从 journal 读出同一事件内的 `Note{OmsForeignFill}`,按 README 第 8 条的字段构造 `ExternalFill{cause = Unknown}`(其余字段 0)
@@ -3019,7 +3019,7 @@ spec: README.md
 
 - 规则:[残余核销](README.md#残余核销)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M9
 - 前置:testkit 进程内 sequencer + hft-ledger;g1 状态同 OMS-281.1(ledger 中 g1 的 X 持仓 0.0004、Y −0.0001)
 - 步骤:
   1. `ControlCmd{WriteOffResidual{a1, g1}}`
@@ -3853,7 +3853,7 @@ spec: README.md
 
 - 规则:[恢复:停机时间不计与闸门续接](README.md#恢复停机时间不计与闸门续接)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M5
 - 前置:P0;`resume_hold_max_ms = 30000`;配对开仓进行中
 - 故障:在随机事件点崩溃(含第一腿已成交、第二腿在途),停机 10 s–30 min;重启后第二腿 venue 的对冲闸门子集在 0–40 s 后满足,另一 venue 的对账延迟;10% 的种子在恢复期内再次崩溃
 - 种子:PR 200 + 回归集;每夜日期派生

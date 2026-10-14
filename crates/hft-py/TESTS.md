@@ -1522,7 +1522,7 @@ spec: README.md
 
 - 规则:[4. 打包与发布](README.md#4-打包与发布)
 - 级别:proc
-- 里程碑:M2
+- 里程碑:M9
 - 前置:CI 发布流水线在 arm64 runner 上以 `maturin` 构建本版本(版本号 v)
 - 步骤:
   1. 列出产物;`auditwheel show <wheel>`
@@ -1537,7 +1537,7 @@ spec: README.md
 
 - 规则:[4. 打包与发布](README.md#4-打包与发布)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 前置:CI arm64 runner;按 `/opt/hft/releases/<v>/venv` 的结构新建空 venv;`pip install --no-index --find-links <归档>/python hft_py`;冒烟 = `open_journal(J_MD).events("Bbo")` 行数、`params.load_schemas("fixtures/strategy-schemas")`、`heartbeat.read` 读 `HB`
 - 备注:在发布工作流(`release-aarch64.yml`,`.github/scripts/build-wheels.sh`)中运行;`manylinux_2_28` 标签与"wheel 版本 = 发布版本"需要该流水线以 manylinux 容器或 zig 构建并按发布标签设置版本,接入之前本用例未实现
 - 实现:`crates/hft-py/tests/python/test_wheel.py::test_py_151_offline_install_smoke`
@@ -1565,7 +1565,7 @@ spec: README.md
 
 - 规则:[4. 打包与发布](README.md#4-打包与发布)
 - 级别:proc
-- 里程碑:M2
+- 里程碑:M9
 - 前置:PY-151.1 的 venv;同一归档的 `RELEASE.json`
 - 步骤:
   1. `importlib.metadata.version("hft_py")`
