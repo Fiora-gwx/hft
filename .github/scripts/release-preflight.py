@@ -3,7 +3,7 @@
 
 Rules: docs/development.md#发布工作流release-aarch64yml step 1. It never re-runs quality gates; it
 only proves existing verdicts for the SHA being released:
-  1. a successful ci.yml run for the SHA whose `rust` job concluded `success` (skipped is not a pass);
+  1. a successful ci.yml run for the SHA whose lane-aware `acceptance` job concluded `success`;
   2. the latest check run named `decoupling-gate` on the SHA concluded `success`;
   3. formal vX.Y.Z: the SHA is an ancestor of origin/main and the latest nightly.yml run on main
      that actually executed (its `nightly` job was not skipped) succeeded;
@@ -107,10 +107,10 @@ def check_ci(repo: str, sha: str) -> int:
     )
     for run in runs:
         jobs = list(gh.paged(f"/repos/{repo}/actions/runs/{run['id']}/jobs", "jobs"))
-        rust = job_named(jobs, "rust")
-        if rust and rust.get("conclusion") == "success":
+        acceptance = job_named(jobs, "acceptance")
+        if acceptance and acceptance.get("conclusion") == "success":
             return int(run["id"])
-    raise Fail(f"1: no successful ci.yml run with a successful `rust` job for {sha}")
+    raise Fail(f"1: no successful ci.yml run with a successful `acceptance` job for {sha}")
 
 
 def check_decoupling(repo: str, sha: str) -> int:
