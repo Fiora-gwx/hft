@@ -446,15 +446,26 @@ fn query_fields(line: Line, rd: &RefData, r: &OrderResult<'_>, e: &mut OrderEven
     }
     let row = rd.inst(e.inst);
     let z = Qty(fixed(r.executed_qty.ok_or(DecodeErr::Shape)?, row.qty_wire_exp)?);
+    if z.0 < 0 {
+        return Err(DecodeErr::Shape);
+    }
     e.cum_filled = z;
     e.avg_px = match line {
-        Line::Usdm => Px(fixed(r.avg_price.ok_or(DecodeErr::Shape)?, row.px_wire_exp)?),
+        Line::Usdm => Px(hft_types::parse_round(
+            r.avg_price.ok_or(DecodeErr::Shape)?.as_bytes(),
+            row.px_wire_exp,
+            RoundMode::HalfEven,
+        )
+        .map_err(fx)?),
         Line::Spot => {
             let quote = r.cum_quote.ok_or(DecodeErr::Shape)?;
+            let n = hft_types::parse_round(quote.as_bytes(), -6, RoundMode::HalfEven).map_err(fx)?;
+            if n < 0 {
+                return Err(DecodeErr::Shape);
+            }
             if z.0 == 0 {
                 Px(0)
             } else {
-                let n = hft_types::parse_round(quote.as_bytes(), -6, RoundMode::HalfEven).map_err(fx)?;
                 let exp = AssetExp {
                     px_exp: row.px_exp,
                     qty_exp: row.qty_exp,
@@ -463,7 +474,7 @@ fn query_fields(line: Line, rd: &RefData, r: &OrderResult<'_>, e: &mut OrderEven
             }
         }
     };
-    if e.cum_filled.0 > 0 && e.avg_px.0 == 0 {
+    if e.avg_px.0 < 0 || (e.cum_filled.0 > 0 && e.avg_px.0 == 0) {
         return Err(DecodeErr::Shape);
     }
     Ok(())

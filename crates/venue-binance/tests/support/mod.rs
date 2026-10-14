@@ -35,10 +35,14 @@ pub const ACCT: AccountId = AccountId(2);
 /// USDT-M except 1042/1043, none on spot besides 2001/2002).
 pub fn rd() -> &'static RefData {
     static RD: OnceLock<&'static RefData> = OnceLock::new();
-    RD.get_or_init(build)
+    RD.get_or_init(|| build(&[]))
 }
 
-fn build() -> &'static RefData {
+pub fn rd_ignoring(names: &[&str]) -> &'static RefData {
+    build(names)
+}
+
+fn build(names: &[&str]) -> &'static RefData {
     let mut b = RdbBuilder::new(1);
     b.created_utc_ns(1_759_276_800_000_000_000);
     for (id, name, class, px, qty) in [
@@ -94,7 +98,11 @@ fn build() -> &'static RefData {
         "BNB" => Some(BNB),
         _ => None,
     };
-    b.caps(Usdm::default_caps(asset));
+    let mut caps = Usdm::default_caps(asset);
+    let mut events = caps.ignorable_user_events.to_vec();
+    events.extend(names.iter().map(|s| Box::<str>::from(*s)));
+    caps.ignorable_user_events = events.into();
+    b.caps(caps);
     b.caps(Spot::default_caps(asset));
     for (v, rules) in [
         (VenueId::BINANCE_USDM, Usdm::rate_rules()),
@@ -310,6 +318,10 @@ pub const SDP5: &str = r#"{"stream":"bnbusdt@depth5@100ms","data":{"lastUpdateId
 #[derive(Default, Debug)]
 pub struct RepSink {
     pub orders: Vec<OrderEvent>,
+    pub ext: Vec<ExternalFill>,
+    pub balances: Vec<BalanceReport>,
+    pub positions: Vec<PositionReport>,
+    pub funding: Vec<FundingSettle>,
     pub exch_ids: Vec<(Vec<u8>, Option<ClientOrderId>)>,
     pub other: usize,
 }
@@ -318,16 +330,20 @@ impl ReportSink for RepSink {
     fn order(&mut self, e: &OrderEvent) {
         self.orders.push(*e);
     }
-    fn position(&mut self, _e: &PositionReport) {
+    fn position(&mut self, e: &PositionReport) {
+        self.positions.push(*e);
         self.other += 1;
     }
-    fn balance(&mut self, _e: &BalanceReport) {
+    fn balance(&mut self, e: &BalanceReport) {
+        self.balances.push(*e);
         self.other += 1;
     }
-    fn funding_settle(&mut self, _e: &FundingSettle) {
+    fn funding_settle(&mut self, e: &FundingSettle) {
+        self.funding.push(*e);
         self.other += 1;
     }
-    fn external_fill(&mut self, _e: &ExternalFill) {
+    fn external_fill(&mut self, e: &ExternalFill) {
+        self.ext.push(*e);
         self.other += 1;
     }
     fn margin(&mut self, _hdr: &MarginReportHdr, _items: &[MarginItem]) {

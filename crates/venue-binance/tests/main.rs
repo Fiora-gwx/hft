@@ -22,3 +22,4 @@ mod bbo;
 #[path = "../fuzz/exercise.rs"]
 mod fuzz_exercise;
 mod readonly;
+mod rest;

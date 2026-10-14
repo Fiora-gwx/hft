@@ -87,34 +87,58 @@ pub(crate) fn deadman(
     Ok(())
 }
 pub(crate) fn decode(req: &RestOrigin, status: u16, body: &[u8]) -> Result<ReportOutcome, DecodeErr> {
-    if req.req.is_none_or(|r| r.op != GwOp::CancelAll) {
+    if !matches!(
+        req.what,
+        RestWhat::Order | RestWhat::Keepalive | RestWhat::DeadMan
+    ) || (req.what == RestWhat::Order && req.req.is_none_or(|r| r.op != GwOp::CancelAll))
+    {
         return Err(DecodeErr::UnknownClass);
     }
     let mut o = ReportOutcome {
         req: req.req,
         ..ReportOutcome::default()
     };
-    if !(200..300).contains(&status) {
-        o.outcome_unknown = req.req;
-        o.raw_code = 0x2000_0000 | u32::from(status);
-        if status == 429 || status == 418 {
-            o.ctl = ReportCtl::RateLimited;
-        }
-        return Ok(o);
-    }
     #[derive(Deserialize)]
     struct Answer {
-        code: i32,
+        code: Option<i32>,
+        #[serde(rename = "listenKey")]
+        listen_key: Option<String>,
+        #[serde(rename = "countdownTime")]
+        countdown: Option<Number>,
     }
-    let r: Answer = crate::json::from(body)?;
-    if r.code != 200 {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Number {
+        Integer(u64),
+        Text(String),
+    }
+    let parsed = crate::json::from::<Answer>(body);
+    if !(200..300).contains(&status) || parsed.as_ref().is_ok_and(|r| r.code.is_some_and(|c| c != 200)) {
         o.outcome_unknown = req.req;
-        o.raw_code = r.code as u32;
-        o.ctl = match r.code {
-            -1003 | -1015 => ReportCtl::RateLimited,
-            -1021 => ReportCtl::ClockSkew,
+        let code = parsed.as_ref().ok().and_then(|r| r.code).filter(|c| *c < 0);
+        o.raw_code = code.map_or(0x2000_0000 | u32::from(status), |c| c as u32);
+        o.ctl = match code {
+            Some(-1125) if req.what == RestWhat::Keepalive => ReportCtl::UserStreamEnded,
+            Some(-1003 | -1015) => ReportCtl::RateLimited,
+            Some(-1021) => ReportCtl::ClockSkew,
+            _ if matches!(status, 418 | 429) => ReportCtl::RateLimited,
             _ => ReportCtl::None,
         };
+        return Ok(o);
+    }
+    let r = parsed?;
+    match req.what {
+        RestWhat::Order if r.code != Some(200) => return Err(DecodeErr::Shape),
+        RestWhat::Keepalive if r.listen_key.as_ref().is_none_or(String::is_empty) => {
+            return Err(DecodeErr::Shape);
+        }
+        RestWhat::DeadMan => {
+            let _countdown = match r.countdown.ok_or(DecodeErr::Shape)? {
+                Number::Integer(n) => n,
+                Number::Text(s) => s.parse::<u64>().map_err(|_| DecodeErr::Number)?,
+            };
+        }
+        _ => {}
     }
     Ok(o)
 }

@@ -22,6 +22,7 @@ mod fees;
 #[cfg(feature = "seq")]
 mod foreign_ledger;
 mod r#gen;
+mod golden;
 mod hash;
 mod invariants_map;
 #[cfg(feature = "seq")]

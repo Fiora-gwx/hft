@@ -306,16 +306,15 @@ macro_rules! venue_impl {
                 0
             }
             fn session_identity_request(
-                _cfg: &VenueCfg,
-                _cred: &Credential,
-                _now_ms: i64,
-                _out: &mut RestReqBuf,
+                cfg: &VenueCfg,
+                cred: &Credential,
+                now_ms: i64,
+                out: &mut RestReqBuf,
             ) -> Result<bool, ProtoErr> {
-                // Signed REST requests arrive with M3 (README "已知限制与后续工作").
-                Err(ProtoErr::Unsupported)
+                session::identity_request($line, cfg, cred, now_ms, out)
             }
-            fn decode_identity(_status: u16, _body: &[u8], _uid: &mut [u8; 24]) -> Result<(), DecodeErr> {
-                Err(DecodeErr::UnknownClass)
+            fn decode_identity(status: u16, body: &[u8], uid: &mut [u8; 24]) -> Result<(), DecodeErr> {
+                session::decode_identity(status, body, uid)
             }
             fn classify(route: RouteId, op: MsgOp, head: &[u8]) -> $md {
                 md::Classify::classify(route, op, head)
@@ -470,6 +469,29 @@ macro_rules! venue_impl {
                 out: &mut RestReqBuf,
             ) -> Result<(), EncodeErr> {
                 rest_orders::cancel_all($line, rd, t, c, clk, out)
+            }
+            fn session_keepalive_request(
+                _rd: &RefData,
+                t: &Templates,
+                clk: &WallClock,
+                out: &mut RestReqBuf,
+            ) -> Result<bool, EncodeErr> {
+                if $line == Line::Spot {
+                    return Ok(false);
+                }
+                account::request(
+                    true,
+                    &VenueCfg {
+                        env: hft_venue_proto::VenueEnv::Prod,
+                        stale_guard_ms: t.recv_window_ms,
+                    },
+                    &t.rest,
+                    &hft_venue_proto::account::Query::Keepalive,
+                    clk.unix_ms,
+                    out,
+                )
+                .map_err(|_| EncodeErr::FieldOverflow)?;
+                Ok(true)
             }
             fn decode_rest(
                 _rd: &RefData,

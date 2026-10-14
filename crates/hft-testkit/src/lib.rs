@@ -14,6 +14,7 @@ pub mod bench;
 pub mod clock;
 pub mod dst;
 pub mod r#gen;
+pub mod golden;
 pub mod hash;
 pub mod scenarios;
 #[cfg(feature = "sdk-mock")]

@@ -12,6 +12,10 @@ autotests = false
 workspace = true
 
 [dependencies]
+hft-refdata.workspace = true
+hft-telemetry.workspace = true
+zerocopy.workspace = true
+hdrhistogram = { version = "7.5", default-features = false, features = ["serialization"] }
 hft-event.workspace = true
 hft-journal.workspace = true
 hft-sequencer = { workspace = true, features = ["replay-io"] }

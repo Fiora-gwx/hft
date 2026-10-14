@@ -1,7 +1,25 @@
 //! BIN-010, BIN-011, BIN-013: dispatch from the first 64 bytes.
 
 use hft_venue_proto::{MsgOp, RouteId, VenueProtocol};
+use proptest::prelude::*;
 use venue_binance::{Spot, Usdm, spot, usdm};
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(2000))]
+    #[test]
+    fn bin_012_classify_reads_prefix_only(prefix in any::<[u8;64]>(), a in prop::collection::vec(any::<u8>(),0..4097), b in prop::collection::vec(any::<u8>(),0..4097), event in 0..10usize) {
+        let names=["bookTicker","depthUpdate","aggTrade","markPriceUpdate","forceOrder","ORDER_TRADE_UPDATE","ACCOUNT_UPDATE","executionReport","outboundAccountPosition",""];
+        let mut p=prefix;
+        if event<9 {let s=format!("{{\"e\":\"{}\",",names[event]);p[..s.len()].copy_from_slice(s.as_bytes());}
+        let x=[&p[..],&a].concat();let y=[&p[..],&b].concat();
+        for op in [MsgOp::Text,MsgOp::Binary] {
+            for r in Usdm::routes() {prop_assert_eq!(Usdm::classify(r.id,op,&x),Usdm::classify(r.id,op,&p));prop_assert_eq!(Usdm::classify(r.id,op,&x),Usdm::classify(r.id,op,&y));}
+            for r in Spot::routes() {prop_assert_eq!(Spot::classify(r.id,op,&x),Spot::classify(r.id,op,&p));prop_assert_eq!(Spot::classify(r.id,op,&x),Spot::classify(r.id,op,&y));}
+            prop_assert_eq!(Usdm::classify_report(op,&x),Usdm::classify_report(op,&y));
+            prop_assert_eq!(Spot::classify_report(op,&x),Spot::classify_report(op,&y));
+        }
+    }
+}
 
 fn route<P: VenueProtocol>(name: &str) -> RouteId {
     P::routes().iter().find(|r| r.name == name).unwrap().id

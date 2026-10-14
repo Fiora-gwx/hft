@@ -38,17 +38,16 @@ status: spec
 ### 1. 金样
 
 ```rust
-pub struct GoldenCase { pub id: CaseId, pub venue: VenueId, pub channel: &'static str,
-                        pub input: Vec<RawFrame>, pub expected: Vec<OwnedEvent>, pub meta: CaseMeta }
-pub fn golden_cases(venue: &str, channel: &str) -> impl Iterator<Item = GoldenCase>;
-pub fn run_decoder_case<P: VenueProtocol>(p: &mut P, case: &GoldenCase) -> Result<(), GoldenDiff>;
-
-// 每个 venue crate 的 tests/golden.rs 每个协议一行:
-hft_testkit::golden_suite!(venue_binance::Usdm, "binance-usdm");
-hft_testkit::golden_suite!(venue_binance::Spot, "binance-spot");
+pub struct GoldenCase { pub id: String, pub venue: String, pub channel: String,
+                        pub input: Vec<Vec<u8>>, pub expected: Vec<Vec<serde_json::Value>>,
+                        pub meta: toml::Table }
+pub fn golden_cases(root: &Path, venue: &str, channel: &str) -> Result<Vec<GoldenCase>, String>;
+pub fn run_decoder_case(case: &GoldenCase,
+    decode: impl FnMut(&[u8]) -> Vec<serde_json::Value>) -> Result<(), GoldenDiff>;
 ```
 
 - 目录布局、来源规则与覆盖要求归 [fixtures/](../../fixtures/README.md);本 crate 只按该布局读取。core 套件:`binance-usdm`、`binance-spot`、`okx-swap`、`okx-spot`、`bitget-usdt-futures`、`bitget-spot`;其余 venue 在启用时加一行。
+- 接口位于 `hft_testkit::golden`;调用方的闭包持有协议上下文并把事件投影为 JSON 字段。每帧多事件或零事件时,元数据 `events_per_frame` 显式登记各帧事件数;单帧或一帧一事件可省略。`exponents` 表登记需要十进制诊断的字段指数。文件按路径排序,空套件、计数不符、非法命名空间与目录内符号链接均失败;不读取更新期望值的环境开关。`golden_suite!` 的协议适配宏仍是后续项。
 - `GoldenDiff` 给出第一条不一致的帧、事件序号与逐字段差异(定点值同时显示原值与按指数换算的十进制)。
 - **没有"用当前输出覆盖期望"的开关**:金样不对就修 fixture 来源,不修归一化逻辑去迁就([testing §1](../../docs/testing.md#1-原则));期望只能由 `tools/` 的抽取工具从 raw 捕获产出并经人工复核。
 - `seq` feature 导出 `run_sim_case(&mut SimExchange, &[SimStep], &[OrderEvent])`:调用方解析金样、构造 refdata/setup 与按 TSC 排序的 `Record`/`Command`/`Advance` 脚本。运行器逐步推进撮合并收取到期回报,逐字节比较完整 OrderEvent 流(含时间);其他回报不属于该流。末尾 `Advance` 须覆盖最后响应期限。乱序脚本、少报、多报或字段差异返回首个 `GoldenDiff{event, field, expected, actual}`,不提供自动更新期望值入口(TK-009)。
@@ -465,7 +464,7 @@ LED-081 使用真实策略命令在 1 s 开仓、4 s 以 PairOnFill 平仓、7 s
 | 文件 | 职责 |
 |---|---|
 | `src/sim_golden.rs` | `seq` feature 的 `SimStep`、`run_sim_case` 与首个字段差异 |
-| `src/golden.rs` | `GoldenCase`、加载、`run_decoder_case`、`golden_suite!` |
+| `src/golden.rs` | `golden` 模块的 `GoldenCase`、只读加载与 `run_decoder_case` |
 | `src/gen/{market.rs, orders.rs, perturb.rs, ctl.rs, fees.rs, margin.rs, external.rs}` | proptest 策略(模块名 `r#gen`:`gen` 是 2024 版关键字;`fees.rs` 含 `funding_flows`,`margin.rs` 含 `one_sided_move`,`external.rs` 含 `account_config`);`gen/chain/*`(`chain` feature) |
 | `src/clock.rs` | `ManualTsc`、`ManualUtc` |
 | `src/seed.rs` | 种子派生与确定性 `TestRunner` |

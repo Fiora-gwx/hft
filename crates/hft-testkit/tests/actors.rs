@@ -36,6 +36,7 @@ fn place(slot: u32, qty: i64, px: i64) -> GwCmd {
 }
 
 #[test]
+#[cfg(feature = "seq")]
 fn tk_126_external_reports_carry_exchange_cash_facts() {
     use hft_event::RepMsg;
     use hft_testkit::dst::seq::matcher::SimMatcher;
@@ -147,6 +148,7 @@ fn tk_126_external_reports_carry_exchange_cash_facts() {
 }
 
 #[test]
+#[cfg(feature = "seq")]
 fn tk_128_no_client_id_uses_the_accounts_ack_identity_and_keeps_cash() {
     use hft_testkit::dst::seq::matcher::SimMatcher;
     use hft_testkit::dst::world::{ACCT_B, P1};

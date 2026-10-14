@@ -51,3 +51,7 @@ path = "tests/alloc.rs"
 [[test]]
 name = "binance"
 path = "tests/main.rs"
+
+[[bench]]
+name = "reports"
+harness = false

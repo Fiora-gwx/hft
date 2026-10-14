@@ -292,3 +292,24 @@ fn bin_096_cancel_amend_acks() {
     assert_eq!(r.unwrap().events, 0, "BIN-096.4");
     assert!(s.orders.is_empty(), "BIN-096.4");
 }
+
+#[test]
+fn bin_094_query_average_precision_and_negative_facts() {
+    for (avg, want) in [("65000.125", 6_500_012), ("65000.135", 6_500_014)] {
+        let (out, sink) = dec_u(&query("FILLED", "0.004", "avgPrice", avg));
+        assert!(out.is_ok());
+        assert_eq!(sink.orders[0].avg_px, Px(want));
+    }
+    for (qty, avg) in [("-0.001", "65000"), ("0.001", "-65000")] {
+        let (out, sink) = dec_u(&query("FILLED", qty, "avgPrice", avg));
+        assert_eq!(out, Err(hft_venue_proto::DecodeErr::Shape));
+        assert!(sink.orders.is_empty());
+    }
+    for qty in ["0", "0.004"] {
+        let body = query("FILLED", qty, "cummulativeQuoteQty", "-0.1")
+            .replace("1000301020002a000000073d", "1000302020002a000000070d");
+        let (out, sink) = dec_s(&body);
+        assert_eq!(out, Err(hft_venue_proto::DecodeErr::Shape));
+        assert!(sink.orders.is_empty());
+    }
+}
