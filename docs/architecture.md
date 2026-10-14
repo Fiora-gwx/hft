@@ -100,7 +100,7 @@ L5 冷/工具   hft-ctl  hft-telemetry  hft-sim  hft-py(reader + ledger + SDK pa
 optional     hft-ext-proto  hft-amm  hft-chain-evm  hft-chain-solana(冻结)
 strategies   strategies/<name>:只依赖 hft-strategy-sdk + hft-strat-lib(Python pipeline 插件随包在 strategies/<name>/pipeline/);strategies/registry(hft-strategy-registry):唯一策略清单,依赖各策略包
 apps         hft-core、replayer(二者经 hft-strategy-registry 取得同一 StrategySet)journal-archiver watchtower reconciler kill-switch;optional:chain-core chain-grpc-relay mock-exchange
-tools        hft-cfg(按 schema 通用编码) xtask hft-verify hostprobe az-probe hft-secrets latency-slice(M1.5 探针专用) strat-calib(离线 Python;Rust dev 依赖策略/SDK/基础类型用于夹具对照)
+tools        hft-cfg(按 schema 通用编码) xtask hft-verify hostprobe az-probe hft-secrets latency-slice(M1.5 探针专用)
 python       框架包 ops_bot  pipeline  treasury;optional:research
 ```
 
@@ -157,3 +157,4 @@ journal 记录分三类:**Input**(进入决策的一切,含实盘驱动当场做
 | `Position`、`FillDelta`、`Ledger`、`PnlBreakdown`、journal 冷消费者 `JournalLedger`;模拟撮合器与模拟账户 | [hft-ledger](../crates/hft-ledger/README.md);[hft-sim](../crates/hft-sim/README.md) |
 | `LiveDriver`、`RecoverDriver`、`VerifyDriver`、`engine_ns` 的累加、恢复结束时刻 `recovery_end` 与平移的调度 | [hft-sequencer](../crates/hft-sequencer/README.md) |
 | 外部 venue 帧、tx 生命周期与链上 profile(optional) | [hft-ext-proto](../crates/hft-ext-proto/README.md)、[hft-chain-evm](../crates/hft-chain-evm/README.md) |
+

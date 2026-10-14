@@ -1,4 +1,5 @@
 //! Same JSON is asserted by Python. Rust calls production signal/sizing, not a second formula.
+#![cfg(feature = "cross-taker")]
 #![allow(
     clippy::disallowed_methods,
     clippy::disallowed_macros,
@@ -16,7 +17,10 @@ use portfolio_carry::{CarryFields, CarryParams, PortfolioCarry};
 use serde_json::{Value, json};
 
 fn fixture() -> Value {
-    serde_json::from_str(include_str!("fixtures/signals.json")).unwrap()
+    serde_json::from_str(include_str!(
+        "../../../tools/strat-calib/tests/fixtures/signals.json"
+    ))
+    .unwrap()
 }
 fn n(v: &Value, key: &str, default: i64) -> i64 {
     v[key].as_i64().unwrap_or(default)

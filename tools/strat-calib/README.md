@@ -10,7 +10,7 @@ status: impl
 
 ## 概要
 
-负责人需要用已有采样行情筛选研究参数时使用。Python 命令读取本地 Parquet/CSV/JSON,输出中文 Markdown、JSON 与成交/资金费序列 CSV。Rust crate 只承载共享夹具对照测试,不提供生产接口。工具没有联网、账户访问、发单或配置下发能力,不替代模拟账户、journal 确定性回放与上线门槛。
+负责人需要用已有采样行情筛选研究参数时使用。Python 命令读取本地 Parquet/CSV/JSON,输出中文 Markdown、JSON 与成交/资金费序列 CSV。Rust 对照测试位于 registry 的现有测试目标,不提供生产接口。工具没有联网、账户访问、发单或配置下发能力,不替代模拟账户、journal 确定性回放与上线门槛。
 
 ## 目录
 
@@ -52,7 +52,7 @@ Parquet 必需列为 `exchange,market,symbol,canonical_id,sec,last_ns,bid,ask,bi
 
 ## 实现说明
 
-`core.py` 使用整数复制真实策略的净边、限价、共同 lot 和 sizing。`tests/fixtures/signals.json` 同时由 Python 与 Rust 测试读取;Rust 对照直接调用 cross-taker 信号、portfolio-carry 年化,并驱动真实 carry Strategy 验证资本/杠杆与目标数量。真实参数与进程模型的归属见延伸阅读。
+`core.py` 使用整数复制真实策略的净边、限价、共同 lot 和 sizing。`tests/fixtures/signals.json` 同时由 Python 与 [registry 对照测试](../../strategies/registry/tests/calibration.rs)读取;Rust 对照直接调用 cross-taker 信号、portfolio-carry 年化,并驱动真实 carry Strategy 验证资本/杠杆与目标数量。真实参数与进程模型的归属见延伸阅读。
 
 `data.py` 按标的一次只读一个过滤后的 Arrow 表,使用单线程解码。`simulation.py` 在同秒记录的较晚 last_ns 计算机会,只在保留观察点评估,不制造秒内事件。套利选可行方向中净边最高者,平手买 leg 0;保留冷却和实际模拟持仓,遇 cap 停止,双腿减仓不穿零。现货库存来自显式初始库存及模拟成交。
 
@@ -62,7 +62,7 @@ carry 保留已发目标并按顶档深度切片,预测过期时持有已对冲�
 
 ## 延迟与资源契约
 
-离线 cold 工具,无热路径延迟约束。按 canonical_id 过滤读取、不并行解码、不下载数据;内存上限由单标的样本与输出成交数决定,不承诺任意大数据恒定内存。原始大数据保留在仓库外。Rust 对照测试只构建本工具包,不运行 workspace 构建;本地遵守操作者的 memguard 与可用提交内存规则。
+离线 cold 工具,无热路径延迟约束。按 canonical_id 过滤读取、不并行解码、不下载数据;内存上限由单标的样本与输出成交数决定,不承诺任意大数据恒定内存。原始大数据保留在仓库外。Rust 对照只运行 registry 的 calibration 测试目标;本地遵守操作者的 memguard 与可用提交内存规则。
 
 ## 测试与验收
 
@@ -70,7 +70,7 @@ carry 保留已发目标并按顶档深度切片,预测过期时持有已对冲�
 
 ## 依赖
 
-Python 3.12+、NumPy、pandas、PyArrow;测试 pytest。Rust 测试壳无运行依赖,dev 依赖两策略、SDK testing、基础类型/refdata/event 和 serde_json。它不在 hot crate 或生产制品依赖中。
+Python 3.12+、NumPy、pandas、PyArrow;测试 pytest。工具不增加 Rust 依赖;共享夹具在 registry 的既有策略/SDK 测试依赖内验证,不增加生产代码。
 
 ## 延伸阅读
 

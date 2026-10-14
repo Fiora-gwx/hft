@@ -4,7 +4,7 @@
 
 | 行为 | 实现 |
 |---|---|
-| 双腿费用、共同 lot、深度/名义/仓位 cap、现货库存、减仓、溢出与 tick/slip | tests/test_calibration.py::test_shared_rust_signal_sizing 与 tests/conformance.rs::calibration_shared_taker_signal_and_sizing 共享 JSON |
+| 双腿费用、共同 lot、深度/名义/仓位 cap、现货库存、减仓、溢出与 tick/slip | tests/test_calibration.py::test_shared_rust_signal_sizing 与 strategies/registry/tests/calibration.rs::calibration_shared_taker_signal_and_sizing 共享 JSON |
 | 年化不同周期、费用、借贷、负费率 floor 和未知周期 | test_shared_rust_funding 与 calibration_shared_funding_net_apr |
 | carry 真实 Strategy 目标、最小金额、资金与杠杆限制 | test_shared_real_rust_carry_target 与 calibration_shared_carry_target_uses_real_strategy |
 | 冷却、年龄等于上限、cap 停手、期末退出费使持续基差现金流变亏损 | test_caps_cooldown_age_and_terminal_cost_prevent_fake_arbitrage_profit |
@@ -19,4 +19,4 @@
 | 旧 CSV 导出器的 true 首行被识别,其他坏表头拒绝 | test_legacy_daily_csv_success_prefix_is_not_a_funding_row |
 | Parquet 真实 CLI、交集对齐、不向前填充、JSON/CSV/中文报告/数据哈希 | test_cli_parquet_outputs_and_no_future_fill |
 
-Python 验证命令为 `python -m pytest -q tools/strat-calib/tests`;Rust 为 `cargo test -p strat-calib-conformance --test conformance -- --test-threads 2`。本地 Cargo 命令必须经操作者指定的 memguard,构建前检查提交内存;CI 的 fast-test 选择本工具包,ops-py 独立运行 Python 测试和 ruff。两侧必须同时通过,不能只用 Python 自证与 Rust 一致。
+Python 验证命令为 `python -m pytest -q tools/strat-calib/tests`;Rust 为 `cargo test -p hft-strategy-registry --features cross-taker --test calibration -- --test-threads 2`。本地 Cargo 命令必须经操作者指定的 memguard,构建前检查提交内存;CI 的 fast-test 对工具源码或共享夹具的改动选择 registry,ops-py 独立运行 Python 测试和 ruff。两侧必须同时通过,不能只用 Python 自证与 Rust 一致。

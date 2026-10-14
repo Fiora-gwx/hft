@@ -133,6 +133,10 @@ def select(files: list[str], members: dict[str, str], deps: dict[str, set[str]] 
     if any(f.startswith(("tests/", "benchmarks/")) for f in code):
         return everything, "shared test input"
     selected = {name for directory, name in members.items() if any(f.startswith(directory + "/") for f in code)}
+    # Offline Python kernels and their shared JSON fixtures are pinned to the real strategies
+    # by registry/tests/calibration.rs. Keep that check selected for tool-only edits too.
+    if any(f.startswith("tools/strat-calib/") for f in code):
+        selected.update(name for directory, name in members.items() if directory == "strategies/registry")
     fixture_dirs = sorted({f.split("/")[1] for f in code if f.startswith("fixtures/") and f.count("/") >= 2})
     for directory in fixture_dirs:
         users = fixture_consumers(root or Path.cwd(), directory, members)

@@ -12,6 +12,8 @@ spec: README.md
 
 资金费策略的同事件双腿、限价/深度、失败修复、结算及重放场景在 `tests/portfolio_carry.rs`,覆盖范围归 [portfolio-carry/TESTS.md](../portfolio-carry/TESTS.md)。
 
+离线工具的共享夹具对照在 `tests/calibration.rs`（cross-taker feature）;直接调用真实信号并驱动 carry Strategy 校验目标数量,覆盖归 [strat-calib/TESTS.md](../../tools/strat-calib/TESTS.md)。
+
 ## 覆盖
 
 | README 小节 | 用例 |

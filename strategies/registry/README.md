@@ -75,6 +75,7 @@ pub fn export_schemas() -> Vec<(String, String)>;
 | `src/lib.rs` | `strategy_set!` 调用(`Strategies`)、`export_schemas` |
 | `tests/schemas.rs` | 导出结果与已提交的 schema 金样比对;`index.json` 顶层为数组 |
 | `tests/kind_ids.rs` | kind_id 账本检查(见上) |
+| `tests/calibration.rs` | 离线工具共享夹具与真实策略信号/目标数量对照;见 [strat-calib](../../tools/strat-calib/README.md) |
 | `tests/non_prod_only.rs` | `Strategies::kinds()` 中 latency-probe 的 `non_prod_only = true`、其他真实策略为 false;hft-testkit 场景里对绑定到 `is_prod = true` 账户的 latency-probe 实例发 `SetParams` → `ParamInvalid{NonProdOnly}`(装配期退出 2 `ProbeOnProdAccount` 的用例在 [apps/hft-core](../../apps/hft-core/README.md) 的测试里) |
 | `tests/<strategy>_scenarios.rs`、`tests/<strategy>_dst.rs`、`tests/<strategy>_recovery.rs` | 各策略 README 列出的引擎场景、DST 与恢复测试(hft-testkit 驱动,`Strategies` 为类型参数);`cargo xtask dst --strategy <name>` 运行对应的 DST 目标 |
 
