@@ -15,6 +15,9 @@ from release import ReleaseError, sha256, verify_tree, version
 
 def package_tree(source, output, metadata, epoch, compress=True):
     """A complete staging tree + CI metadata produces an immutable, reproducible archive."""
+    source, output = source.resolve(), output.resolve()
+    if output.is_relative_to(source):
+        raise ReleaseError("archive output must be outside its staging tree")
     version(metadata["version"])
     if not re.fullmatch(r"[0-9a-f]{40}", metadata["git_sha"]) or epoch < 0:
         raise ReleaseError("invalid provenance")

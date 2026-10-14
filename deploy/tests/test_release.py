@@ -247,6 +247,8 @@ def dep_003_artifact_names(tmp_path):
         tree = release.unpack(archive, extracted)
         metadata = json.loads((tree / "RELEASE.json").read_text())
         (tree / "RELEASE.json").unlink()
+        with pytest.raises(release.ReleaseError, match="outside its staging tree"):
+            packager.package_tree(tree, tree / "nested-output", metadata, 0, compress=False)
         first = packager.package_tree(tree, directory / "one", metadata, 0, compress=False)
         second = packager.package_tree(tree, directory / "two", metadata, 0, compress=False)
         assert first.read_bytes() == second.read_bytes()
