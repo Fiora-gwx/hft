@@ -1,0 +1,16 @@
+# Reference-machine limits from the strategy README; CI reports timings only.
+["strategies/cross-taker/tick_miss"]
+p50_ns = 15
+p99_ns = 40
+
+["strategies/cross-taker/tick_fire"]
+p50_ns = 300
+p99_ns = 1000
+
+["strategies/cross-taker/exec_update"]
+p50_ns = 80
+p99_ns = 250
+
+["strategies/cross-taker/risk_event"]
+p50_ns = 150
+p99_ns = 400

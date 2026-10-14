@@ -495,6 +495,29 @@ fn tool_185_budget_kinds() {
         r.json.unwrap()["missing_strategy_entries"],
         json!(["strategies/s/advice"])
     );
+    // An absent optional interface is explicit and reported, never a fake timing sample.
+    f.write(
+        "strategies/s/benches/not-applicable.toml",
+        "advice = 'No Advice payload or subscription'\n",
+    );
+    let r = f.xtask_script(&["bench-gate", "--smoke"], &s, &[]);
+    assert_eq!(r.code, 0, "TOOL-185.5: {}", r.stderr);
+    assert_eq!(
+        r.json.unwrap()["strategy_not_applicable"]["strategies/s/advice"],
+        "No Advice payload or subscription"
+    );
+    // Critical hooks, empty reasons, typos and entries with real benchmarks cannot be excluded.
+    for declaration in [
+        "tick_fire = 'required'",
+        "advice = ''",
+        "advise = 'typo'",
+        "target_set = 'already measured'",
+    ] {
+        f.write("strategies/s/benches/not-applicable.toml", declaration);
+        let r = f.xtask_script(&["bench-gate", "--smoke"], &s, &[]);
+        assert_ne!(r.code, 0, "TOOL-185.5: {declaration}");
+        assert!(r.stderr.contains("invalid not-applicable"), "{}", r.stderr);
+    }
     // TOOL-185.6
     let f = strat_repo("bg-185", &reg, &all);
     let s = Script::new(&f, &[(BUILD, 0, &ba, ""), (SMOKE_A, 0, &both, "")], 0);

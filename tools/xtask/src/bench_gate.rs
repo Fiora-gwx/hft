@@ -232,21 +232,51 @@ fn literals(dir: &Path) -> BTreeSet<String> {
     out
 }
 
-/// Missing strategy entries: `(strategy dir, benchmark name)`.
-fn missing_strategy_entries(root: &Path) -> Result<Vec<(String, String)>, EnvError> {
+#[derive(Default)]
+struct StrategyEntries {
+    missing: Vec<(String, String)>,
+    not_applicable: BTreeMap<String, String>,
+}
+
+/// Required entries must be measured; optional interfaces can be explicitly absent.
+fn missing_strategy_entries(root: &Path) -> Result<StrategyEntries, EnvError> {
     let strategies = registered_strategies(root);
     if strategies.is_empty() {
-        return Ok(Vec::new());
+        return Ok(StrategyEntries::default());
     }
     let entries = strategy_entries(root)?;
-    let mut out = Vec::new();
+    let mut out = StrategyEntries::default();
     for s in strategies {
-        let lits = literals(&root.join("strategies").join(&s).join("benches"));
+        let dir = root.join("strategies").join(&s).join("benches");
+        let lits = literals(&dir);
+        let path = dir.join("not-applicable.toml");
+        if path.exists() {
+            let text =
+                std::fs::read_to_string(&path).map_err(|e| EnvError(format!("{}: {e}", path.display())))?;
+            let declarations: toml::Table = text
+                .parse()
+                .map_err(|e| EnvError(format!("{}: {e}", path.display())))?;
+            for (entry, reason) in declarations {
+                let name = format!("strategies/{s}/{entry}");
+                let reason = reason.as_str().unwrap_or("").trim();
+                if !matches!(entry.as_str(), "slow_update" | "advice" | "target_set")
+                    || reason.is_empty()
+                    || lits.contains(&name)
+                    || lits.contains(&format!("strategies/{}/{entry}", s.replace('-', "_")))
+                {
+                    return Err(EnvError(format!(
+                        "{}: invalid not-applicable declaration `{entry}` (only absent optional SDK interfaces with a reason)",
+                        path.display()
+                    )));
+                }
+                out.not_applicable.insert(name, reason.to_string());
+            }
+        }
         for e in &entries {
             let a = e.replace("<kind>", &s);
             let b = e.replace("<kind>", &s.replace('-', "_"));
-            if !lits.contains(&a) && !lits.contains(&b) {
-                out.push((s.clone(), a));
+            if !lits.contains(&a) && !lits.contains(&b) && !out.not_applicable.contains_key(&a) {
+                out.missing.push((s.clone(), a));
             }
         }
     }
@@ -810,12 +840,19 @@ fn run_inner(root: &Path, o: &Opts) -> Result<i32, EnvError> {
         return Ok(finish_audit(root, summary, v, failures));
     }
     // Strategy benchmark entries (both modes).
-    let missing = missing_strategy_entries(root)?;
-    for (s, n) in &missing {
+    let strategy_entries = missing_strategy_entries(root)?;
+    for (s, n) in &strategy_entries.missing {
         eprintln!("bench-gate: strategies/{s}/benches/ lacks the SDK entry `{n}`");
         failures.push(format!("missing strategy entry {n}"));
     }
-    summary["missing_strategy_entries"] = json!(missing.iter().map(|(_, n)| n).collect::<Vec<_>>());
+    summary["missing_strategy_entries"] = json!(
+        strategy_entries
+            .missing
+            .iter()
+            .map(|(_, n)| n)
+            .collect::<Vec<_>>()
+    );
+    summary["strategy_not_applicable"] = json!(strategy_entries.not_applicable);
     let pkgs = bench_packages(root, o)?;
     let reg = registry(root);
     let reference = o.mode == Mode::Reference;

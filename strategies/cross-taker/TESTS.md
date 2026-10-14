@@ -20,3 +20,5 @@
 signal_* 在 tests/signal.rs;cross_taker_* 在 registry/tests/cross_taker_e2e.rs,需 cross-taker feature。引擎夹具为 SeqSut<Strategies> + 实际 SimExchange,包含现货/永续和非零 taker 费用,不以测试策略替代真实策略。
 
 短场景与三个 DST 种子不替代 docs/testing.md 上线门槛。真实行情长期模拟、大规模故障 DST、参考机延迟与资金费持有成本校准仍待完成。
+
+延迟验收由 benches/on_event.rs 的 on_event 基准覆盖未命中、开火、Exec Broken、Risk HedgeBroken,每次恢复初态后计时真实策略入口。SDK 的 slow_update、advice、target_set 无对应功能,以 not-applicable.toml 明确登记,不得拿空操作样本作为验收。基准登记与上限见 README;CI 只验证编译和运行。

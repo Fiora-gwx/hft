@@ -272,7 +272,10 @@ dependencies = [
 name = "cross-taker"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "hft-strategy-sdk",
+ "hft-testkit",
+ "zerocopy",
 ]
 
 [[package]]
