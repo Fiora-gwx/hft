@@ -24,7 +24,7 @@ elements = 4096
 bytes = 1048576
 [venues.futures]
 protocol = "binance-usdm"
-id = 2
+id = 1
 max_sub_insts = 1
 stale_guard_ms = 1500
 src_ip = "192.0.2.10"

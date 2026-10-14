@@ -56,6 +56,11 @@ fn core_012_check_rejects_bad_hash_and_inline_credentials() {
 }
 #[test]
 fn core_045_rejects_live_accounts_in_paper_and_unbuilt_venues() {
+    let template: hft_core::config::Config =
+        toml::from_str(include_str!("../config/binance-testnet.toml")).unwrap();
+    for venue in template.venues.values() {
+        hft_core::venues::registered(&venue.protocol, hft_types::VenueId(venue.id)).unwrap();
+    }
     let d = tempfile::tempdir().unwrap();
     let path = support::write(d.path(), &d.path().join("hot"), None);
     assert!(
