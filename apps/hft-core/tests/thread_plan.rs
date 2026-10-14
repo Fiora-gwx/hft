@@ -170,7 +170,10 @@ mod linux {
             .iter_mut()
             .find(|t| t["task"].as_str() == Some("persist"))
             .unwrap();
-        persist["core"] = i64::from(cpu).into();
+        persist
+            .as_table_mut()
+            .unwrap()
+            .insert("core".into(), i64::from(cpu).into());
         std::fs::write(&path, toml::to_string(&cfg).unwrap()).unwrap();
         let socket = d.path().join("notify.sock");
         let notify = UnixDatagram::bind(&socket).unwrap();
