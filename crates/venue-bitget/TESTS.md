@@ -553,7 +553,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 期望:
   - 步骤 1 返回 `Ok(true)`;`out.endpoint = 0`、`method = GET`;`path_query` 是一档深度接口且查询串含 `symbol=BTCUSDT`;`headers` 不含 `ACCESS-KEY`、`ACCESS-SIGN`;`redacted = false`
   - 步骤 2 返回 `Ok(true)`,查询串含 `symbol=BGBUSDT`
-- 实现:`crates/venue-bitget/tests/snapshot.rs::bgt_050_bbo_snapshot_request`
+- 实现:`crates/venue-bitget/tests/bbo.rs::bgt_050_bbo_public_request`
 - 备注:依赖待核实:开发备忘第 16 条(接口路径、订阅后是否立即推送;核实为立即推送后改为返回 `Ok(false)`,本用例同一提交改写)
 
 ### BGT-051 BBO 补帧请求的 inst 个数不为 1 时不支持
@@ -562,7 +562,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`RD-BGT`;永续
-- 实现:`crates/venue-bitget/tests/snapshot.rs::bgt_051_bbo_snapshot_count`
+- 实现:`crates/venue-bitget/tests/bbo.rs::bgt_051_bbo_invalid_inst_count`
 
 | 行 | `insts` | 期望 |
 |---|---|---|
@@ -575,17 +575,17 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 规则:[心跳与 BBO 探测](README.md#心跳与-bbo-探测)、[契约](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
 - 里程碑:M3
-- 前置:`RD-BGT`;`RX`;以 `decode_bbo_snapshot(rd, &mut ctx, &[1801], body, &RX, &mut sink)` 调用;响应体 = `{"code":"00000","msg":"success","data":{"symbol":"BTCUSDT","bids":[["65000.1","1.5"]],"asks":[["65000.2","0.004"]],"ts":"1790000000400"<,序号>}}`(字段名待核实,开发备忘第 16 条)
-- 实现:`crates/venue-bitget/tests/snapshot.rs::bgt_052_decode_bbo_snapshot`
+- 前置:`RD-BGT`;`RX`;以 `decode_bbo_snapshot(rd, &mut ctx, &[1801], body, &RX, &mut sink)` 调用;响应体 = `{"code":"00000","msg":"success","data":{"b":[[65000.1,1.5]],"a":[[65000.2,0.004]],"ts":"1790000000400"}}`(字段按官方 UTA market/orderbook,2026-10-15 核对)
+- 实现:`crates/venue-bitget/tests/bbo.rs::bgt_052_bbo_raw_decimal_numbers`
 
 | 行 | 响应变体 | 期望 |
 |---|---|---|
-| BGT-052.1 | 带序号字段 `"seq":555` | `Ok(1)`;一条 `Bbo{h.inst: 1801, h.ex_ts_ns: 1790000000400000000, bid_px: 6500010, bid_qty: 150000000, ask_px: 6500020, ask_qty: 400000, update_id: 555}` |
+| BGT-052.1 | 额外带未定义的 `"seq":555` | `Ok(1)`;一条 `Bbo{h.inst: 1801, h.ex_ts_ns: 1790000000400000000, bid_px: 6500010, bid_qty: 150000000, ask_px: 6500020, ask_qty: 400000, update_id: 0}` |
 | BGT-052.2 | 无序号字段 | `Ok(1)`;`update_id = 0` |
 | BGT-052.3 | `{"code":"40034","msg":"Parameter does not exist","data":null}` | `Err(DecodeErr::Shape)`,0 个事件 |
-| BGT-052.4 | `asks` 为空 | `Err(DecodeErr::Shape)` |
-| BGT-052.5 | 在 `"bids":[["650` 截断 | `Err(DecodeErr::Truncated)` |
-| BGT-052.6 | `symbol` 为 `"DOGEUSDT"` | `Ok(0)`,0 个事件 |
+| BGT-052.4 | `a` 为空 | `Err(DecodeErr::Shape)` |
+| BGT-052.5 | 在 `"b":[["650` 截断 | `Err(DecodeErr::Truncated)` |
+| BGT-052.6 | 请求 inst 为另一 venue | `Err(DecodeErr::Shape)`,0 个事件 |
 
 ### BGT-053 BBO 补帧解码不依赖 feed 的 FeedCtx 状态
 
@@ -996,6 +996,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | BGT-093.5 | 已成交,`0.004`,均价缺失或 `"0"` | `Err(DecodeErr::Shape)`(`cum_filled > 0` 而无均价视为解码错误) |
 | BGT-093.6 | "订单不存在"(HTTP 400,码 `"25204"`,`data: null`) | 一条 `QueryResult{slot: 42, gen: 7, cum_filled: 0}`,`detail` = NotFound(7)(槽取自 `RestOrigin`) |
 | BGT-093.6 | 订单不存在的响应 | 状态 `NotFound`(7);不产出 `Reject`、不定终态(`stale_guard = None`) |
+
+- 身份回归:`crates/venue-bitget/tests/reports.rs::bgt_093_query_identity_cannot_redirect`;品种、venue/account/槽/代不符或负累计量拒绝整条响应。
 
 ### BGT-100 订单频道状态映射为 OrderEvent
 

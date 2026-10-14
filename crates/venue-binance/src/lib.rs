@@ -22,12 +22,14 @@
 )]
 
 mod account;
+mod bbo;
 mod caps;
 mod cid;
 mod errors;
 mod funding;
 mod json;
 mod line;
+mod market;
 mod md;
 mod orders;
 mod reports;
@@ -231,6 +233,11 @@ macro_rules! venue_impl {
             const NAME: &'static str = $name;
             const VENUE: VenueId = $venue;
             const MARKET: MarketKind = $market;
+            const BBO_SNAPSHOT_BATCH: u16 = if matches!($line, Line::Spot) {
+                u16::MAX
+            } else {
+                1
+            };
             const ORDER_FRAME_CAP: usize = 2048;
             type MdClass = $md;
             type ReportClass = $rep;
@@ -353,6 +360,24 @@ macro_rules! venue_impl {
                 _out: &mut impl MdSink,
             ) -> Result<SnapshotInfo, DecodeErr> {
                 Err(DecodeErr::UnknownClass)
+            }
+            fn bbo_snapshot_request(
+                rd: &RefData,
+                _ctx: &Self::FeedCtx,
+                insts: &[InstId],
+                out: &mut RestReqBuf,
+            ) -> Result<bool, ProtoErr> {
+                bbo::request($line, rd, insts, out)
+            }
+            fn decode_bbo_snapshot(
+                rd: &RefData,
+                _ctx: &mut Self::FeedCtx,
+                insts: &[InstId],
+                body: &[u8],
+                rx: &RxMeta,
+                out: &mut impl MdSink,
+            ) -> Result<u16, DecodeErr> {
+                bbo::decode($line, rd, insts, body, rx, out)
             }
             fn build_templates(
                 cfg: &VenueCfg,

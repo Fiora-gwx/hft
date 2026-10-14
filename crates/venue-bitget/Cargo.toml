@@ -13,6 +13,11 @@ autotests = false
 [lints]
 workspace = true
 
+[features]
+default = []
+# Pure inverse codecs for the optional mock exchange. Never enabled by hft-core.
+mock = []
+
 [dependencies]
 hft-types.workspace = true
 hft-refdata.workspace = true

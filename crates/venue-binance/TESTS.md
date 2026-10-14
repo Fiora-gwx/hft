@@ -394,7 +394,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   - 返回 `Ok(MdOutcome{events: 1, inst: 1042})`
   - `sink` 恰好一次 `l2_snapshot`:`hdr = {h.inst: 1042, h.ex_ts_ns: 1790000000300000000, h.ex_send_ns: 1790000000301000000, snap_id: 7000000001, origin: TopN(3), n_bids: 5, n_asks: 5}`,`bids` 价格严格降序 `[65000.1, 65000.0, 64999.9, 64999.8, 64999.7]`,`asks` 严格升序 `[65000.2, 65000.3, 65000.4, 65000.5, 65000.6]`,数量逐档等于报文
   - `l2_begin`/`l2_level`/`l2_end` 调用 0 次
-- 实现:`crates/venue-binance/tests/md.rs::bin_027_usdm_topn_snapshot`
+- 实现:`crates/venue-binance/tests/md.rs::bin_027_topn_atomic_decode`
 
 ### BIN-028 分档快照中缺失的档与数量为 0 的档不输出
 
@@ -402,7 +402,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`RD-BIN`;路由 `public-topn`;在 `DP5` 上改写
-- 实现:`crates/venue-binance/tests/md.rs::bin_028_topn_empty_levels`
+- 实现:`crates/venue-binance/tests/md.rs::bin_028_topn_zero_levels`
 
 | 行 | 改写 | 期望 |
 |---|---|---|
@@ -430,7 +430,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`RD-BIN`;`Usdm` `market` 路由;payload `{"e":"aggTrade","E":1790000000201,"s":"BTCUSDT","a":26129,"p":"65000.1","q":"0.010","f":100,"l":105,"T":1790000000200,"m":<m>}`
-- 实现:`crates/venue-binance/tests/md.rs::bin_030_aggtrade`
+- 实现:`crates/venue-binance/tests/md.rs::bin_030_aggtrade_taker_side`
 
 | 行 | `m` | 期望 `Trade` |
 |---|---|---|
@@ -448,7 +448,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `decode_md(rd, ctx, JsonTrade, payload, &RX, &mut sink)`
 - 期望:
   - 一条 `Trade{h.inst: 2001, px: 6500010, qty: 100000, trade_id: 12345, taker_side: Buy, h.ex_ts_ns: 1790000000200500000, h.ex_send_ns: 1790000000201500000}`
-- 实现:`crates/venue-binance/tests/md.rs::bin_031_spot_trade_us`
+- 实现:`crates/venue-binance/tests/md.rs::bin_031_spot_trade_microseconds`
 
 ### BIN-032 markPriceUpdate 产出 MarkPrice、IndexPrice 与 Funding 三条事件
 
@@ -488,7 +488,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `decode_md(rd, ctx, ForceOrder, payload, &RX, &mut sink)`
 - 期望:
   - 一条 `Liquidation{h.inst: 1042, px: 64010.5(6401050), qty: 0.014(1400000), side: Sell, h.ex_ts_ns: 1790000000400000000, h.ex_send_ns: 1790000000401000000}`;无 `ExternalFill`(公共流与本账户无关)
-- 实现:`crates/venue-binance/tests/md.rs::bin_034_force_order`
+- 实现:`crates/venue-binance/tests/md.rs::bin_034_public_liquidation`
 
 ### BIN-035 订阅回执、订阅被拒与 serverShutdown 经 control 给出提示
 
@@ -573,7 +573,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `Usdm::bbo_snapshot_request(rd, ctx, &[1042], &mut out)`
 - 期望:
   - 返回 `Ok(true)`;`out = RestReqBuf{endpoint: 0, method: GET, path_query: "/fapi/v1/ticker/bookTicker?symbol=BTCUSDT", headers: 空, body: 空, redacted: false}`
-- 实现:`crates/venue-binance/tests/bbo_refresh.rs::bin_050_usdm_bbo_refresh_request`
+- 实现:`crates/venue-binance/tests/bbo.rs::bin_050_bbo_request`
 - 备注:依赖待核实:开发备忘第 17 条(订阅后是否立即推当前 BBO;核实为"立即推"后本用例改为返回 `Ok(false)`)
 
 ### BIN-051 Usdm BBO 补帧一次给多个 inst 被拒
@@ -582,7 +582,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`RD-BIN`;全新 `FeedCtx`
-- 实现:`crates/venue-binance/tests/bbo_refresh.rs::bin_051_usdm_bbo_refresh_arity`
+- 实现:`crates/venue-binance/tests/bbo.rs::bin_051_bbo_batch_rejected`
 
 | 行 | `insts` | 期望 |
 |---|---|---|
@@ -596,7 +596,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`RD-BIN`;全新 `FeedCtx`;`RestReqBuf.path_query` 容量 1024 B
-- 实现:`crates/venue-binance/tests/bbo_refresh.rs::bin_052_spot_bbo_refresh_request`
+- 实现:`crates/venue-binance/tests/bbo.rs::bin_052_spot_bbo_symbols`
 
 | 行 | `insts` | 期望 |
 |---|---|---|
@@ -615,7 +615,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `decode_bbo_snapshot(rd, ctx, &[1042], body, &RX, &mut sink)`
 - 期望:
   - 返回 `Ok(1)`;一条 `Bbo{h.inst: 1042, h.ex_ts_ns: 1790000000500000000, h.ex_send_ns: 0, bid_px: 6500010, bid_qty: 150000000, ask_px: 6500020, ask_qty: 400000, update_id: 400900300}`
-- 实现:`crates/venue-binance/tests/bbo_refresh.rs::bin_053_usdm_bbo_refresh_decode`
+- 实现:`crates/venue-binance/tests/bbo.rs::bin_053_bbo_rest_decode`
 - 备注:依赖待核实:开发备忘第 17 条(`lastUpdateId` 字段)
 
 ### BIN-054 Spot BBO 补帧响应按数组逐个产出 Bbo,序号与时间为 0
@@ -628,7 +628,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `Spot::decode_bbo_snapshot(rd, ctx, &[2001, 2002], body, &RX, &mut sink)`
 - 期望:
   - 返回 `Ok(2)`;依次 `Bbo{h.inst: 2001, update_id: 0, h.ex_ts_ns: 0, bid_px: 6500010, …}`、`Bbo{h.inst: 2002, update_id: 0, bid_px: 600.100(600100), bid_qty: 2(200000000), ask_px: 600200, ask_qty: 300000000}`
-- 实现:`crates/venue-binance/tests/bbo_refresh.rs::bin_054_spot_bbo_refresh_decode`
+- 实现:`crates/venue-binance/tests/bbo.rs::bin_054_spot_bbo_rest_decode`
 
 ### BIN-055 BBO 补帧响应的异常形态
 
@@ -636,7 +636,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`RD-BIN`;每行另断言无 panic
-- 实现:`crates/venue-binance/tests/bbo_refresh.rs::bin_055_bbo_refresh_errors`
+- 实现:`crates/venue-binance/tests/bbo.rs::bin_055_bbo_error_atomic`
 
 | 行 | 产品线 / body | 期望 |
 |---|---|---|

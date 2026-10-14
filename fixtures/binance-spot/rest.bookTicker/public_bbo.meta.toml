@@ -1,0 +1,7 @@
+source = "synthetic"
+source_ref = "M3 offline public BBO contract example"
+captured_at = "2026-10-15"
+refdata = "tests/support RD"
+exchange_doc = "https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Symbol-Order-Book-Ticker"
+reviewed_by = "pending owner review"
+scrubbed = false

@@ -515,7 +515,7 @@ AccountProtocol 核对 exchangeInfo 的 tick/lot/minQty/minNotional；USDM accou
 - **`TRADE_LITE` 不用**:它可能比 `ORDER_TRADE_UPDATE` 更早到达;可选扩展(触发条件:对冲第二腿的回报延迟成为主要项)时改为成交提示,并与 `ORDER_TRADE_UPDATE` 按 `t` 去重。
 - **保证金轮询走 REST**:5 s 间隔下逼空时的保证金率最多滞后 5 s + 一次往返;更快的来源(ws-fapi 账户方法)待核实后再评估(开发备忘第 10 条)。
 - **现货用户流**依赖 ws-api 归属连接上的订阅;归属切换期间的缺口由 `Unknown` + 查询收敛。
-- **当前构建只含 M1.5 子集**(纵切片 [latency-slice](../../tools/latency-slice/README.md) 用到的部分):路由、端点与 listenKey bootstrap;全部 core 行情类的分派、`peek`、序号规则与控制提示;两个产品线的 bookTicker 解码;logon;订阅与私有频道订阅;下单、撤单、改单、查询与现货全撤帧;WS API 响应(Ack、Reject、结果未知、撤单与改单应答、查询结果);限速、能力、过期、死手与心跳默认值。其余随 M3 补全(TESTS.md 中里程碑 M3 的用例):bookTicker 以外的行情解码与用户流事件(`decode_md`/`decode_report` 返回 `UnknownClass`),账户与只读查询,签名 REST(`encode_rest`、`dead_man_refresh`、`session_keepalive_request` 返回 `Unsupported`),会话 key 身份查询(`session_identity_request` 返回 `Unsupported`),BBO 补帧请求(保持 trait 默认 `Ok(false)`)。
+- **当前实现**:core 行情含 bookTicker、TopN、逐笔、标记/指数/资金费与公开强平;私有回报与账户启动查询已接入。公共 REST BBO 支持 USDT-M 单品种与 Spot symbols 批量,整批校验后输出。签名 REST 网关方法、统一只读查询族、完整金样与增量深度仍未完成。`fuzz/` 含两条产品线的行情、BBO、回报与账户解码目标;累计 fuzz 门槛仍待运行。
 - **错误响应的 epoch**:WS API 错误响应不带 client id,请求 id 也不含 epoch,`decode_report` 以请求 id 的 `slot`/`gen` 与 `epoch = 0` 产出事件;gw 的 epoch 不为 0 时这些事件按外来处理(hft-venue 把 `slot` 置为 `UNRESOLVED`)。M3 之前在 hft-venue gw 侧按槽镜像补 epoch(或把 epoch 编进请求 id),届时同步改 [hft-venue-proto 契约 13](../hft-venue-proto/README.md#实现方必须遵守的契约) 与"5. 回报解码"表。
 
 ### 开发备忘

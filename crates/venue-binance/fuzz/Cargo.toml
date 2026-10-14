@@ -1,0 +1,30 @@
+[package]
+name = "venue-binance-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+[package.metadata]
+cargo-fuzz = true
+[workspace]
+members = ["."]
+[dependencies]
+libfuzzer-sys = "0.4"
+venue-binance = { path = ".." }
+hft-types = { path = "../../hft-types" }
+hft-refdata = { path = "../../hft-refdata" }
+hft-event = { path = "../../hft-event" }
+hft-venue-proto = { path = "../../hft-venue-proto", features = ["testkit"] }
+
+[[bin]]
+name = "binance-usdm"
+path = "fuzz_targets/binance_usdm.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "binance-spot"
+path = "fuzz_targets/binance_spot.rs"
+test = false
+doc = false
+bench = false

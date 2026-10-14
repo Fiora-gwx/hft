@@ -7,3 +7,9 @@ mod md;
 mod reports;
 mod session;
 mod support;
+
+mod bbo;
+#[path = "../fuzz/exercise.rs"]
+mod fuzz_exercise;
+#[cfg(feature = "mock")]
+mod mock;
