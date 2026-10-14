@@ -177,6 +177,7 @@ spec: README.md
 | BGT-010.15 | `books1`,`[1,2,3]` | `Unknown` |
 | BGT-010.16 | `books1`,文本 `ping` | `Unknown` |
 | BGT-010.17 | `public-books`(`RouteId(4)`),增量 `books` 推送 | `BooksIncr` |
+| BGT-010.18 | 任一路由,`{"code":30001,"msg":…,"event":"error"}`(`event` 不在开头) | `SubAck` |
 
 ### BGT-011 现货行情 classify 与永续同一规则
 
@@ -231,6 +232,8 @@ spec: README.md
 | BGT-013.13 | `{"arg":{"instType":"usdt-futures","topic":"strategy-x"…`(不认得的频道) | `Unknown` |
 | BGT-013.14 | 空 payload | `Unknown` |
 | BGT-013.15 | `op = Binary` | `Unknown` |
+| BGT-013.16 | `{"event":"subscribe","arg":{"instType":"UTA","topic":"order"}}` | `Control` |
+| BGT-013.17 | `{"code":"25204","msg":"Order does not exist","id":"c0000002a00000007","event":"error"}`(请求 id 超出前 64 B) | `Control`;`decode_report` 读到本系统请求 id 后按响应解码:一条 `CancelReject{detail: GONE}` |
 
 ### BGT-014 Push 类经 decode_report 解析后与直接分类的结果相同
 

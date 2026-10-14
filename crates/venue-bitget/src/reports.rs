@@ -72,21 +72,21 @@ pub(crate) fn classify_report(op: MsgOp, head: &[u8]) -> ReportClass {
     if h == b"pong" {
         return ReportClass::Pong;
     }
-    if let Some(n) = event_name(h) {
-        return match n {
-            b"trade" => ReportClass::WsResp,
-            // A failed trade frame answers with `event = error` and the request id.
-            b"error" if quoted_after(h, b"\"id\":\"").is_some_and(|id| decode_req_id(id).is_some()) => {
-                ReportClass::WsResp
-            }
-            b"login" | b"subscribe" | b"unsubscribe" | b"error" => ReportClass::Control,
-            _ => ReportClass::Unknown,
-        };
-    }
-    if let Some(rest) = h.strip_prefix(b"{\"id\":\"") {
-        let end = rest.iter().position(|&c| c == b'"').unwrap_or(rest.len());
-        return match rest.get(..end).and_then(decode_req_id) {
-            Some(_) => ReportClass::WsResp,
+    if h.starts_with(b"{") && !is_push(h) {
+        // A request id in the head decides; a foreign id is not ours.
+        if let Some(id) = quoted_after(h, b"\"id\":\"") {
+            return match decode_req_id(id) {
+                Some(_) => ReportClass::WsResp,
+                None => ReportClass::Unknown,
+            };
+        }
+        // No id within the head: `decode_report` reads the whole frame (`Control` frames that
+        // carry one of our request ids are decoded as trade answers there).
+        return match event_name(h) {
+            Some(b"trade") => ReportClass::WsResp,
+            Some(b"login" | b"subscribe" | b"unsubscribe" | b"error") => ReportClass::Control,
+            Some(_) => ReportClass::Unknown,
+            None if h.windows(7).any(|w| w == b"\"code\":") => ReportClass::Control,
             None => ReportClass::Unknown,
         };
     }
@@ -97,6 +97,13 @@ pub(crate) fn classify_report(op: MsgOp, head: &[u8]) -> ReportClass {
         Some(name) => topic_class(name),
         None => ReportClass::Push,
     }
+}
+
+/// The request id of a control frame (absent or numeric → not ours).
+#[derive(Deserialize)]
+struct IdOnly<'a> {
+    #[serde(borrow)]
+    id: &'a str,
 }
 
 /// `arg` of a push whose topic lies beyond the head.
@@ -145,7 +152,12 @@ pub(crate) fn decode_report(
             skip: Skip::Listed,
             ..ReportOutcome::default()
         }),
-        ReportClass::Control | ReportClass::Pong => Ok(ReportOutcome::default()),
+        // An error answer whose request id lies beyond the head.
+        ReportClass::Control => match from::<IdOnly>(p) {
+            Ok(m) if decode_req_id(m.id.as_bytes()).is_some() => ws_resp(line, rd, p, rx, out),
+            _ => Ok(ReportOutcome::default()),
+        },
+        ReportClass::Pong => Ok(ReportOutcome::default()),
         ReportClass::Unknown => {
             let h = p.get(..p.len().min(HEAD)).unwrap_or(&[]);
             let name = quoted_after(h, b"\"topic\":\"")

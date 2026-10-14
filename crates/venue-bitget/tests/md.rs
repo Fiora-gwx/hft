@@ -839,6 +839,12 @@ fn bgt_010_classify_md() {
         ("BGT-010.15", BOOKS1, "[1,2,3]", MdClass::Unknown),
         ("BGT-010.16", BOOKS1, "ping", MdClass::Unknown),
         (
+            "BGT-010.18",
+            TRADE,
+            r#"{"code":30001,"msg":"x","event":"error"}"#,
+            MdClass::SubAck,
+        ),
+        (
             "BGT-010.17",
             BOOKS,
             r#"{"data":[{"a":[],"b":[],"seq":1,"pseq":0}],"arg":{"topic":"books"}}"#,

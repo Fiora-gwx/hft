@@ -124,6 +124,20 @@ fn bgt_013_classify_report() {
         ReportClass::Unknown,
         "BGT-013.15"
     );
+    // BGT-013.17: an error answer with `code` first and the request id beyond the head.
+    let late = r#"{"code":"25204","msg":"Order does not exist","id":"c0000002a00000007","event":"error"}"#;
+    assert_eq!(
+        Fut::classify_report(MsgOp::Text, support::head(late)),
+        ReportClass::Control,
+        "BGT-013.17"
+    );
+    let (r, s) = dec(&mut GwCtx::new(), late);
+    assert_eq!(r.unwrap().req.map(|x| x.op), Some(GwOp::Cancel), "BGT-013.17");
+    assert_eq!(
+        (one(&s).what, one(&s).detail),
+        (OrderEventKind::CancelReject, 1),
+        "BGT-013.17"
+    );
 }
 
 // ---------------------------------------------------------------- trade answers

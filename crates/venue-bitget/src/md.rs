@@ -30,8 +30,16 @@ pub(crate) const BOOKS_MAX: usize = 1000;
 const TRADES_MAX: usize = 100;
 
 /// The `{"event":"<name>"` of a control frame.
+/// The `"event":"<name>"` of a control frame anywhere in the head of a non-push object (key order
+/// differs between frames: `{"event":…` first on subscribe answers, `{"code":…,"event":…}` on
+/// some error frames).
 pub(crate) fn event_name(h: &[u8]) -> Option<&[u8]> {
-    let rest = h.strip_prefix(b"{\"event\":\"")?;
+    if !h.starts_with(b"{") || is_push(h) {
+        return None;
+    }
+    const KEY: &[u8] = b"\"event\":\"";
+    let at = h.windows(KEY.len()).position(|w| w == KEY)?;
+    let rest = h.get(at + KEY.len()..)?;
     let end = rest.iter().position(|&c| c == b'"')?;
     rest.get(..end)
 }
