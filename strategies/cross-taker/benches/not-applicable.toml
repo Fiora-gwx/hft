@@ -1,0 +1,4 @@
+# Unsupported SDK interfaces; these are coverage declarations, never timing samples.
+slow_update = "Both BBO legs are Part::Fast; no cached slow-side trigger or Model."
+advice = "NoModel<XtParams>; no Advice payload or subscription."
+target_set = "Places OnFill linked OrderIntent only; never emits TargetIntent."

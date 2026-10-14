@@ -2803,7 +2803,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 | TOOL-185.2 | `--reference`;`a/y` 超出预算 | 退出 0;JSON 中 `a/y` 的 `verdict` 标为超出 |
 | TOOL-185.3 | `--reference`;`a/x` 超出预算 | 退出 1 |
 | TOOL-185.4 | `--smoke`;`a/x` 超出预算 | 退出 0(冒烟不读门槛) |
-| TOOL-185.5 | `--smoke`;`strategies/s/benches/` 缺 `strategies/s/advice` | 退出 1;列出缺的基准名 |
+| TOOL-185.5 | `--smoke`;`strategies/s/benches/` 缺 `strategies/s/advice` | 无声明退出 1 并列出缺名;not-applicable.toml 提供非空理由时退出 0 并报告理由;必需入口、空理由、拼错名称或已有基准的排除声明均拒绝 |
 | TOOL-185.6 | `--smoke`;`strategies/s/benches/` 提供 SDK 规定的全部入口 | 退出 0 |
 
 ### TOOL-186 ci --no-doc-check 跳过 doc-check 步

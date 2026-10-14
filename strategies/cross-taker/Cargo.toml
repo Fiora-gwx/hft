@@ -12,3 +12,13 @@ workspace = true
 
 [dependencies]
 hft-strategy-sdk.workspace = true
+
+[dev-dependencies]
+hft-strategy-sdk = { workspace = true, features = ["testing"] }
+hft-testkit = { workspace = true, features = ["seq"] }
+criterion.workspace = true
+zerocopy.workspace = true
+
+[[bench]]
+name = "on_event"
+harness = false

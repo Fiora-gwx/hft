@@ -300,6 +300,10 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 | `sim/replay_day` | hft-sim | [hft-sim 延迟与资源契约](../crates/hft-sim/README.md#延迟与资源契约) | SIM-213 |
 | `startup-cold` | hft-core | [路径基准与门槛](#路径基准与门槛) | CORE-267 |
 | `strategies/portfolio-carry/hold` | portfolio-carry | [portfolio-carry 延迟与资源契约](../strategies/portfolio-carry/README.md#延迟与资源契约) | CARRY-009 |
+| `strategies/cross-taker/exec_update` | cross-taker | [cross-taker 延迟与资源契约](../strategies/cross-taker/README.md#延迟与资源契约) | —(策略延迟验收) |
+| `strategies/cross-taker/risk_event` | cross-taker | [cross-taker 延迟与资源契约](../strategies/cross-taker/README.md#延迟与资源契约) | —(策略延迟验收) |
+| `strategies/cross-taker/tick_fire` | cross-taker | [cross-taker 延迟与资源契约](../strategies/cross-taker/README.md#延迟与资源契约) | —(策略延迟验收) |
+| `strategies/cross-taker/tick_miss` | cross-taker | [cross-taker 延迟与资源契约](../strategies/cross-taker/README.md#延迟与资源契约) | —(策略延迟验收) |
 | `strategies/latency-probe/ack_cancel` | latency-probe | [latency-probe 延迟与资源契约](../strategies/latency-probe/README.md#延迟与资源契约) | LPR-074 |
 | `strategies/latency-probe/advice` | latency-probe | [latency-probe 延迟与资源契约](../strategies/latency-probe/README.md#延迟与资源契约) | LPR-083 |
 | `strategies/latency-probe/exec_update` | latency-probe | [latency-probe 延迟与资源契约](../strategies/latency-probe/README.md#延迟与资源契约) | LPR-076 |
