@@ -982,6 +982,21 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         Ok(w.n)
     }
 
+    fn encode_rest_signed(
+        rd: &RefData,
+        t: &Tpl,
+        cred: &Credential,
+        c: &GwCmd,
+        tgt: &TargetRef,
+        clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<(), EncodeErr> {
+        if cred.api_key.as_slice() != b"gateway-rest-test" {
+            return Err(EncodeErr::Unsupported(c.op));
+        }
+        log("encode_rest_signed", String::new);
+        Self::encode_rest(rd, t, c, tgt, clk, out)
+    }
     fn encode_rest(
         _rd: &RefData,
         _t: &Tpl,
@@ -1055,6 +1070,19 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         result.events = 1;
         Ok(result)
     }
+    fn session_keepalive_request_signed(
+        rd: &RefData,
+        t: &Tpl,
+        cred: &Credential,
+        clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<bool, EncodeErr> {
+        if cred.api_key.as_slice() != b"gateway-rest-test" {
+            return Err(EncodeErr::Unsupported(GwOp::SessionKeepalive));
+        }
+        log("session_keepalive_request_signed", String::new);
+        Self::session_keepalive_request(rd, t, clk, out)
+    }
     fn session_keepalive_request(
         _rd: &RefData,
         _t: &Tpl,
@@ -1066,6 +1094,21 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
             .map_err(|_| EncodeErr::FieldOverflow)?;
         out.redacted = true;
         Ok(true)
+    }
+    fn ro_request_signed(
+        rd: &RefData,
+        t: &Tpl,
+        cred: &Credential,
+        a: AccountId,
+        q: &hft_venue_proto::RoQuery,
+        clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<(), EncodeErr> {
+        if cred.api_key.as_slice() != b"gateway-rest-test" {
+            return Err(EncodeErr::Unsupported(GwOp::Query));
+        }
+        log("ro_request_signed", String::new);
+        Self::ro_request(rd, t, a, q, clk, out)
     }
     fn ro_request(
         _rd: &RefData,
@@ -1332,6 +1375,21 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         cfg().dead_man
     }
 
+    fn dead_man_refresh_signed(
+        rd: &RefData,
+        t: &Tpl,
+        cred: &Credential,
+        timeout_ms: u32,
+        insts: &[InstId],
+        clk: &WallClock,
+        out: &mut DeadManOut,
+    ) -> Result<(), EncodeErr> {
+        if cred.api_key.as_slice() != b"gateway-rest-test" {
+            return Err(EncodeErr::Unsupported(GwOp::DeadManRefresh));
+        }
+        log("dead_man_refresh_signed", String::new);
+        Self::dead_man_refresh(rd, t, timeout_ms, insts, clk, out)
+    }
     fn dead_man_refresh(
         _rd: &RefData,
         _t: &Tpl,

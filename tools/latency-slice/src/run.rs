@@ -713,6 +713,7 @@ where
         vec![GwAccountSpec {
             account: ACCOUNT,
             src_ip_idx: 0,
+            rest_credential: rest,
             tpl,
             ctx: GwCtx::default(),
         }],

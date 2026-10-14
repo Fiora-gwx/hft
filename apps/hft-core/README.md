@@ -903,7 +903,7 @@ hft-core 自身不在 tick-to-trade 路径上增加代码;路径上的分段预�
 
 账户入口按 State 中的 MarginItem 编码变长 MarginReport；超过单体容量时设置 ITEMS_TRUNCATED，未观察到的 ADL 值不填零。该编码由 CORE-169 验证。
 
-网关装配将 rep-bulk 与 rep 配对交给 GatewayInput，并按 REST 端点创建 gateway RestPool；REST 连接由 conn-builder 交接。会话重认证后的 UID 证据绑定至本次 SessionDriver job。账户观察仍使用 warm AccountClient，有界 AcctProtocol 接入状态见 [hft-venue](../../crates/hft-venue/README.md#已知限制与后续工作)。
+网关账户显式接收 REST 凭证,与非敏感模板分开持有。网关装配将 rep-bulk 与 rep 配对交给 GatewayInput，并按 REST 端点创建 gateway RestPool；REST 连接由 conn-builder 交接。会话重认证后的 UID 证据绑定至本次 SessionDriver job。账户观察仍使用 warm AccountClient，有界 AcctProtocol 接入状态见 [hft-venue](../../crates/hft-venue/README.md#已知限制与后续工作)。
 
 ## 已知限制与后续工作
 

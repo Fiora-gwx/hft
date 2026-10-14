@@ -3655,4 +3655,4 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 - **可选扩展"全量增量深度"**:VEN-105–VEN-109(`状态:可选扩展:全量增量深度`)在某 venue 启用 `feed.depth = incremental` 的同一提交加入 `tools/xtask/test-trace.toml` 的 `enabled_extensions` 并通过;L2 双路合并(开发备忘)启用前先补用例。
 
 账户执行、私有归属与 REST 池的实现回归分别见 tests/acct_sched.rs、tests/acct_fetch.rs、tests/private.rs、tests/gw_rest.rs。VEN-313 当前覆盖调用方提供证据及缺证据失败的交接路径；VEN-314 的驱动内 UID 重试仍未完成。VEN-073/294 前置修订由 [容量边界说明](../../.agents/notes/proposed/testing/2026-10-15-venue-capacity-preconditions.md) 待负责人确认。
-warm REST 认证编码沿用账户任务的凭证,通过 encode_rest_signed 显式传参;模板不保留密钥的回归归 BIN-063/BGT-063。
+warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入口显式传参;VEN-228/391 验证查单、会话维护与全撤扫描传入账户凭证,模板不保留密钥的回归归 BIN-063/BGT-063。

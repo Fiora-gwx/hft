@@ -97,7 +97,7 @@ impl<P: VenueProtocol> SnapFetchTask<P> {
 pub struct GwRuntime<P: VenueProtocol, const CAP: usize = 2048> { /* 见实现说明 §4 */ }
 impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
     /// 启动期:建槽镜像与 IdTable,并从 raw-gw journal 尾部重建去重环(§6a)。
-    /// accts:每个 Live 账户的 GwAccountSpec(账户、出口 IP 序号、P::build_templates 的结果与 P::GwCtx);其余字段(kill 位、连接号段)由 new 从 refdata 求出。
+    /// accts:每个 Live 账户的 GwAccountSpec(账户、出口 IP 序号、独立 REST 凭证、P::build_templates 的结果与 P::GwCtx);其余字段(kill 位、连接号段)由 new 从 refdata 求出。
     pub fn new(cfg: GwCfg, deps: GwDeps, accts: Vec<GwAccountSpec<P>>) -> Result<Self, InitErr>;
     pub fn poll_once(&mut self, now_tsc: u64) -> LoopStat;
 }
@@ -628,7 +628,7 @@ struct IdTable {
 2. `P::endpoint` 生成 path/query/额外头(可能含签名,如 KuCoin 私有 WS URL)→ `Connector::submit`。行情角色(`Md`)不调用 `P::endpoint`:公共行情的 path 按路由固定,装配时已写进 `Connector` 的端点表,而 `BuildReq` 不带路由号(M1.5 探针上以路由 0 调用时 Binance 现货与 USDT-M 返回 `Unsupported`,行情连接全部建不起来)。
 3. `Open` 后:Order/UserStream 角色调 `P::login`,等 `P::login_result`(多步挑战式登录用 `Continue`);失败按 `LoginResult::Rejected(code)` 上报并退避。
 4. 交接前核对 NAPI 落点(`Connector::napi_ifindex`,规则与处置归 [hft-core 主机资源隔离](../../apps/hft-core/README.md#主机资源隔离slice核与出口-ip)):不符 → 不交接,按建连失败退役。登录成功 → `handoff` 给请求它的任务(feed-bbo、feed-md、snap-fetch、acct-fetch 或 gw;连接号由请求方在 `BuildReq` 里按 §1 号段给出)。请求方启用了就绪探测时,交接前先把该连接注册进请求方的就绪 epfd(hft-net `ReadyHandle::add`,`epoll_ctl` 在 warm 线程;hft-core 装配时把各行情任务的 `ReadyHandle` 交给该 venue 的 `SessionDriver`,按 §1 的连接号段找到请求方)。**订阅由热任务在 `install` 后发出**(订阅回执进 raw journal,限速由行情任务控制);登录帧与凭据只在 warm 线程出现,热线程不持有会话私钥(需逐单签名的 Hyperliquid 例外,gw 持有 API 钱包私钥)。
-5. REST 签名请求用**独立的 HMAC REST key**(每次 1–2 µs):它在启动期作为 `P::build_templates` 的 `rest` 参数进入 gw 与 acct-fetch 各自的 `Templates`(契约 7),gw 用它签死手、REST 订单操作、挂单列表兜底与会话维护,acct-fetch 签账户查询;Ed25519 key 只给 ws-fapi/ws-api 会话登录用。
+5. REST 签名请求用**独立的 HMAC REST key**:gw 的账户状态与 warm AccountClient 分别持有凭证,通过 `*_signed`/`account_request` 按调用借用;`Templates` 不留密钥(契约 7)。gw 签死手、REST 订单、挂单列表与会话维护;warm task 签账户查询。Ed25519 key 只供会话登录与其身份核验。
 5a. **会话 key 的身份核验**([hft-venue-proto 契约 23](../hft-venue-proto/README.md#实现方必须遵守的契约)):Order 角色登录成功后、交接之前,`P::session_identity_request` 返回 `Ok(true)` 时,warm 线程用该会话凭证签名的只读请求查一次 UID(经 warm 线程自己的 REST 连接,超时 `gw.acct_query_timeout_ms`),`P::decode_identity` 解出的 UID 随 `Handoff` 交给 gw(`Handoff.session_uid: [u8; 24]` + 状态 `Ok | Failed`);gw 把它放进下一条 Config 请求(§4a),由 acct-fetch 并入报告:置 `uid_keys |= SESSION`,与 `AccountMeta.venue_uid` 不符时置 `UID`。查询失败时按 §4a 的退避在交接前重试,共至多 `gw.acct_query_degraded_after` 次(含第一次);仍失败则以 `Failed` 交接(连接照常可用,但报告不置 `SESSION`,`IDENTITY` 闸门保持关闭,gw 推 `ConnState{Degraded, role=Rest, reason=ACCT_QUERY}`),由下一次会话重建重查。返回 `Ok(false)` 的所,REST 步的结果同时置 `SESSION | REST`。每次重建会话(切换、重连)都重查,结果并入下一份 Config 报告。
 6. 私有频道不在 warm 线程订阅:连接交接后由 gw 按 §4b 决定是否成为归属连接,再发 `P::private_subscribe`(签名型订阅帧由 warm 线程预先生成并随交接带过来,热线程不持有会话私钥)。
 7. **回收**:收到 `RetireMsg` 时先从就绪 epfd 注销(`ReadyHandle::del`,若注册过),再 `Connector::reclaim`。
@@ -799,4 +799,4 @@ REST 在途项保存发送时的完整 ClientOrderId；回包省略 epoch 时只
 
 FeedRuntime 缓存协议是否支持补帧,在宽限期后每 inst 至多一个在途 req_id。成功无序号报价不改变流序号水位,失败再等一个宽限期;流已恢复、请求已失效或成员全失联时丢弃迟到响应。REST 的连接号不更新 WS 活性,原始响应由 feed 单写者写 raw。
 
-账户 warm task 的认证 REST 编码调用 `VenueProtocol::encode_rest_signed`,借用该任务持有的凭证;网关 Templates 不携带密钥。
+账户 warm task 与网关 REST 池通过 `*_signed` 入口借用各自账户持有的凭证;网关死手、会话维护与挂单扫描同样显式传参,Templates 不携带密钥。

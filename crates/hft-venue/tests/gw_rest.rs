@@ -41,6 +41,7 @@ fn ven_228_query_uses_persistent_rest_and_stable_origin() {
     assert!(reports(&v).is_empty(), "one send report, at submission");
     assert!(v.iter().any(|m|matches!(m,RepMsg::OrderEvent(e) if e.what==OrderEventKind::QueryResult && e.epoch==5 && e.slot.0==7 && e.r#gen==3 && e.cum_filled.0==3)));
     assert_eq!(stub::calls("encode_rest").len(), 1);
+    assert_eq!(stub::calls("encode_rest_signed").len(), 1);
 }
 #[test]
 fn ven_228_rest_identity_survives_epoch_change_and_slot_reuse() {
@@ -120,11 +121,26 @@ fn ven_391_cancel_all_sweep_decodes_owned_open_orders() {
     h.cmd(base(GwOp::CancelAll, A1));
     h.poll(4000);
     assert_eq!(statuses(&h.reps()), vec![SendStatus::Written]);
+    assert_eq!(stub::calls("ro_request_signed").len(), 1);
     response(&mut h, 200, 5000);
     assert!(
         h.reps()
             .iter()
             .any(|m| matches!(m,RepMsg::OrderEvent(e) if e.what==OrderEventKind::QueryResult && e.slot.0==7))
+    );
+}
+
+#[test]
+fn ven_228_rest_keepalive_borrows_account_credential() {
+    let mut h = setup::<0>();
+    stub::take_log();
+    h.cmd(base(GwOp::SessionKeepalive, A1));
+    h.poll(4000);
+    assert_eq!(stub::calls("session_keepalive_request_signed").len(), 1);
+    assert!(
+        h.reps()
+            .iter()
+            .all(|m| !matches!(m, RepMsg::ConnState(c) if c.state == hft_event::ConnStateKind::Degraded))
     );
 }
 #[test]

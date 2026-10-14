@@ -341,7 +341,7 @@ UTA V3 分页取响应 cursor，重复游标和非数值游标返回错误，不
 
 ### 测试环境 warm 账户入口
 
-`Templates` 仅保存账户与非敏感帧配置。warm REST/只读请求使用 `*_signed` 入口,每次从调用方借用凭证;旧无凭证入口不发认证请求。运行时全撤经 warm account task 签名,热 gw 不持有 REST key。
+`Templates` 仅保存账户与非敏感帧配置。warm REST/只读请求使用 `*_signed` 入口,每次从调用方借用凭证;旧无凭证入口不发认证请求。账户运行时持有 REST key;warm task 与网关 REST 池均按请求借用,全撤沿用各自通道。
 
 当前执行接口是 `AccountProtocol::{account_request, account_decode}` 与独立 `State`,允许 warm 分配;冻结的 `acct_queries/acct_decode/acct_finish` 分步接口仍待统一,不把其无分配、完整配置序列或 ADL 缓存用例视为完成。50 KiB 持仓基准测量当前 warm 解码(包括分配),不作为旧无分配入口的达标证据。
 
