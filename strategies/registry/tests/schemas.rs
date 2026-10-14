@@ -56,6 +56,19 @@ fn compare_golden(export: &[(String, String)], dir: &Path) -> Result<(), GoldenE
         })
         .collect();
     golden.sort();
+    // The committed catalogue contains every implemented optional kind. A default build
+    // compares its projection; unknown/extra files still fail the ordinary comparison.
+    if dir == golden_dir() && !cfg!(feature = "cross-taker") {
+        golden.retain(|(n, _)| n != "3-cross-taker.schema.json");
+        if let Some((_, index)) = golden.iter_mut().find(|(n, _)| n == "index.json") {
+            let rows: Vec<serde_json::Value> = serde_json::from_str(index).unwrap();
+            let rows: Vec<String> = rows.iter().filter(|r| r["kind_id"] != 3).map(|r| format!(
+                "{{\"kind_id\":{},\"name\":{},\"file\":{},\"schema_id\":{},\"schema_version\":{},\"schema_digest\":{}}}",
+                r["kind_id"], r["name"], r["file"], r["schema_id"], r["schema_version"], r["schema_digest"]
+            )).collect();
+            *index = format!("[{}]", rows.join(","));
+        }
+    }
     if let (Some(a), Some(b)) = (index(export), index(&golden)) {
         let (a, b) = (index_entries(&a), index_entries(&b));
         for (k, ver, dig) in &a {
@@ -220,7 +233,12 @@ fn reg_009_golden_discipline() {
     assert_eq!(r, Err(GoldenErr::VersionNotBumped { kind_id: 5 }), "REG-009.2");
     let r = with_golden("3", |d| {
         replace_in(d, "index.json", &digest, "0000000000000001");
-        replace_in(d, "index.json", "\"schema_version\":1", "\"schema_version\":0");
+        replace_in(
+            d,
+            "index.json",
+            "\"schema_version\":1,\"schema_digest\":\"0000000000000001\"",
+            "\"schema_version\":0,\"schema_digest\":\"0000000000000001\"",
+        );
         replace_in(d, lp, "\"schema_version\":1", "\"schema_version\":0");
     });
     assert_eq!(r, Err(GoldenErr::GoldenStale { file: lp.into() }), "REG-009.3");

@@ -15,6 +15,11 @@ fn reg_001_default_kinds() {
     let lp: Vec<_> = k.iter().filter(|d| d.name == "latency-probe").collect();
     assert_eq!(lp.len(), 1);
     assert_eq!(
+        k.iter()
+            .any(|d| d.name == "cross-taker" && d.kind_id == 3 && !d.non_prod_only),
+        cfg!(feature = "cross-taker")
+    );
+    assert_eq!(
         (lp[0].kind_id, lp[0].non_prod_only, lp[0].schema.id),
         (5, true, 5)
     );

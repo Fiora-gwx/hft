@@ -27,6 +27,7 @@ members = [
     "crates/hft-py",
     "crates/hft-sequencer",
     "strategies/latency-probe",
+    "strategies/cross-taker",
     "strategies/registry",
     "apps/replayer",
     "tools/xtask",
@@ -66,6 +67,7 @@ hft-ctl-proto = { path = "crates/hft-ctl-proto" }
 hft-strategy-sdk = { path = "crates/hft-strategy-sdk" }
 hft-strat-lib = { path = "crates/hft-strat-lib" }
 latency-probe = { path = "strategies/latency-probe" }
+cross-taker = { path = "strategies/cross-taker" }
 hft-book = { path = "crates/hft-book" }
 hft-sim = { path = "crates/hft-sim" }
 hft-ledger = { path = "crates/hft-ledger" }

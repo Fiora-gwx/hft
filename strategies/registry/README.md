@@ -3,7 +3,7 @@ description: "全仓唯一列出真实策略的地方:一次 strategy_set! 调�
 kind: crate
 tier: hot
 scope: core
-status: spec
+status: impl
 ---
 
 # hft-strategy-registry
@@ -23,6 +23,8 @@ status: spec
 - [已知限制与后续工作](#已知限制与后续工作)
 
 ## 使用本组件
+
+当前列表包含默认的 latency-probe 与 feature 门控的 cross-taker。后者的真实引擎/模拟撮合、参数恢复和报价门控测试位于 `tests/cross_taker_e2e.rs`;schema 金样保存全部已实现策略,默认构建只比较启用项。
 
 ```rust
 // src/lib.rs —— 真实策略的列表只写在这一处;每行一个策略,optional 策略用 Cargo feature 门控。

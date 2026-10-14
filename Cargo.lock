@@ -269,6 +269,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "cross-taker"
+version = "0.1.0"
+dependencies = [
+ "hft-strategy-sdk",
+]
+
+[[package]]
 name = "crunchy"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -922,9 +929,14 @@ dependencies = [
 name = "hft-strategy-registry"
 version = "0.1.0"
 dependencies = [
+ "cross-taker",
+ "hft-event",
  "hft-strategy-sdk",
+ "hft-testkit",
+ "hft-types",
  "latency-probe",
  "serde_json",
+ "zerocopy",
 ]
 
 [[package]]
