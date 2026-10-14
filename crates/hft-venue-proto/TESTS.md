@@ -16,6 +16,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 | README 小节 | 用例 |
 |---|---|
+| 有界账户查询与私有订阅扩展 | VPR-047、VPR-048、VPR-108、VPR-112、VPR-116、VPR-120 |
 | Warm 账户扩展 | VPR-015、VPR-126 |
 | 认证资金费历史扩展 | VPR-100 |
 | 概要 | VPR-122、VPR-150 |

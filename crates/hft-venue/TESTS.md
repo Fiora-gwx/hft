@@ -16,6 +16,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 
 | README 小节 | 用例 |
 |---|---|
+| 账户与私有回报的运行时接线 | VEN-211、VEN-225、VEN-228、VEN-242、VEN-250–VEN-264、VEN-270–VEN-276、VEN-313、VEN-391–VEN-393 |
 | 当前 BBO 补帧传输 | VEN-130、VEN-132、VEN-133、VEN-155 |
 | 测试环境账户启动与观察 | VEN-261、VEN-310 |
 | 资金费账单轮询 | VEN-258 |
@@ -2290,6 +2291,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 期望:
   - `decode_rest` 收到 `RestOrigin{what: Order, req: Some(ReqRef{slot: 96, gen: 4, op: Query})}`;rep 环 `OrderEvent{what: QueryResult, slot: 96, gen: 4, cum_filled: 3, avg_px: 100.2, detail: 2}`;`inflight` 中该请求清除
 - 实现:`crates/hft-venue/tests/gw_report.rs::ven_228_query_result`
+- 回归:`tests/gw_rest.rs` 验证省略 epoch 的回包使用请求发送时身份；SetEpoch 后即使同槽同 gen 复用，成功与 503 回包也不借用新 epoch，原 epoch 不再接受时 QueryResult 保持 UNRESOLVED。
 
 ### VEN-229 请求超过 `inflight_timeout_ms` 无响应推一次 `Degraded{INFLIGHT_TIMEOUT}` 并移出在途
 

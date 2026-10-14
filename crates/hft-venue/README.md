@@ -742,11 +742,13 @@ VEN-341 用以本 crate 为根的 `cargo tree` 检查依赖闭包与特性,不�
 
 ### 账户与私有回报的运行时接线
 
-启动期以 `set_account_queries` 注入 acctreq 生产端，以 `set_rep_bulk` 配对变长回报尾部环；`set_rest_pools` 的端点顺序对应 `RestReqBuf.endpoint`。`AcctRecHdr` 是 80 B 的进程内 ACCTv001 帧头，Raw 只含方法、去掉 query 的路径与响应块，Done 携带一整组报告。gw 检查序列、账户、venue 与品种归属后发布；失败序列不发布部分报告。rep-bulk 的尾部先提交，rep 头后提交，背压时两者一起保留。
+启动期以 `set_account_queries` 注入 acctreq 生产端，以 `set_rep_bulk` 配对变长回报尾部环；`set_rest_pools` 的端点顺序对应 `RestReqBuf.endpoint`。进程内 ACCTv001 帧头由字段逐项编码为 80 字节，不依赖 Rust 结构体布局；Raw 只含方法、去掉 query 的路径与响应块，Done 携带一整组报告。gw 检查序列、账户、venue 与品种归属后发布；失败序列不发布部分报告。rep-bulk 的尾部先提交，rep 头后提交，背压时两者一起保留。
 
 同一 gw 中相同 src_ip_idx 的账户共享 IP/Weight 窗口；账户查询和内联 REST 请求共同记账，Account/Uid 窗口仍按账户执行。REST 使用生效表的 default_cost，账户序列使用声明的选中步骤权重之和；不同任务使用同一出口时的全局配额协调仍待装配验证。
 
 `prepare_private` 只在 warm 线程生成订阅/退订帧，使用 Conn 的非秘密交接数据传给 gw。私有回执按频道位去重；拒绝或超时保持旧归属。REST 订单在成功写入时仅发布一次 SendReport，传输失败保留 Unknown，不由超时/429/5xx 合成业务拒绝；池关闭与超时取消先退役旧连接，迟到响应不能归到下一请求。
+
+REST 在途项保存发送时的完整 ClientOrderId；回包省略 epoch 时只补该请求的 epoch，传输失败产生的 Unknown 也使用该身份。槽复用或 SetEpoch 不改变已发送请求的归属；没有匹配在途证据的 Unknown 保持 UNRESOLVED，不能借用当前槽的 epoch。
 
 ## 已知限制与后续工作
 

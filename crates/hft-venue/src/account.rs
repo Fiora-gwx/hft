@@ -64,7 +64,11 @@ pub struct Client<P: AccountProtocol, T: Transport = hft_net::rest::Client> {
     listen: Vec<u8>,
     ready: bool,
     _p: core::marker::PhantomData<P>,
-    order: Option<(hft_event::GwCmd, hft_venue_proto::RestOrigin)>,
+    order: Option<(
+        hft_event::GwCmd,
+        hft_venue_proto::RestOrigin,
+        hft_types::ClientOrderId,
+    )>,
     order_reply: Option<crate::order_rest::Reply>,
     started_ms: i64,
     funding: Option<crate::FundingPoll<P::Funding>>,
@@ -221,6 +225,7 @@ impl<P: AccountProtocol, T: Transport> Client<P, T> {
                 self.account,
                 r.cmd,
                 origin,
+                Some(r.target.id),
                 Err(hft_net::rest::Error::Request),
             ));
             return Ok(());
@@ -230,11 +235,12 @@ impl<P: AccountProtocol, T: Transport> Client<P, T> {
                 self.account,
                 r.cmd,
                 origin,
+                Some(r.target.id),
                 Err(hft_net::rest::Error::Transport),
             ));
             return Ok(());
         }
-        self.order = Some((r.cmd, origin));
+        self.order = Some((r.cmd, origin, r.target.id));
         Ok(())
     }
     pub fn listen_body(&self) -> Option<&[u8]> {
@@ -287,8 +293,14 @@ impl<P: AccountProtocol, T: Transport> Client<P, T> {
                 self.next = now + i64::from(self.cfg.request_gap_ms) * 1_000_000;
                 return Ok(true);
             }
-            if let Some((cmd, origin)) = self.order.take() {
-                self.order_reply = Some(crate::order_rest::Reply::new(self.account, cmd, origin, result));
+            if let Some((cmd, origin, identity)) = self.order.take() {
+                self.order_reply = Some(crate::order_rest::Reply::new(
+                    self.account,
+                    cmd,
+                    origin,
+                    Some(identity),
+                    result,
+                ));
                 self.next = now + i64::from(self.cfg.request_gap_ms) * 1_000_000;
                 return Ok(true);
             }

@@ -1022,7 +1022,11 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         let mut e = blank_order(rx.account);
         e.what = OrderEventKind::QueryResult;
         e.inst = super::rd::S1;
-        e.epoch = 5;
+        e.epoch = if origin.what == hft_venue_proto::RestWhat::Sweep {
+            5
+        } else {
+            0
+        };
         let mut result = ReportOutcome {
             req: origin.req,
             ..Default::default()

@@ -194,7 +194,7 @@ fn ven_260_done_is_one_complete_config_report() {
     assert_eq!((lev.inst, lev.leverage.0), (S1, 5_000_000_000));
 }
 #[test]
-fn ven_258_account_decode_only_called_by_warm_task() {
+fn ven_259_account_decode_only_called_by_warm_task() {
     let mut h = crate::support::gwh::gw::<StubProto>();
     let (tx, rx) = spsc(8, Backing::Heap).unwrap();
     h.rt.set_account_queries(tx);

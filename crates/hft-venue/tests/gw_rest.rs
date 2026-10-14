@@ -39,8 +39,43 @@ fn ven_228_query_uses_persistent_rest_and_stable_origin() {
     response(&mut h, 200, 6000);
     let v = h.reps();
     assert!(reports(&v).is_empty(), "one send report, at submission");
-    assert!(v.iter().any(|m|matches!(m,RepMsg::OrderEvent(e) if e.what==OrderEventKind::QueryResult && e.slot.0==7 && e.r#gen==3 && e.cum_filled.0==3)));
+    assert!(v.iter().any(|m|matches!(m,RepMsg::OrderEvent(e) if e.what==OrderEventKind::QueryResult && e.epoch==5 && e.slot.0==7 && e.r#gen==3 && e.cum_filled.0==3)));
     assert_eq!(stub::calls("encode_rest").len(), 1);
+}
+#[test]
+fn ven_228_rest_identity_survives_epoch_change_and_slot_reuse() {
+    for status in [200, 503] {
+        for accept_prev in [false, true] {
+            let mut h = setup::<0>();
+            let old = h.place(A1, 7, 3, S1, false);
+            h.cmd(old);
+            h.poll(4000);
+            h.reps();
+            let q = h.targeted(GwOp::Query, A1, 7);
+            h.cmd(q);
+            h.poll(5000);
+            h.reps();
+            h.cmd(hft_event::GwCmd::set_epoch(70, accept_prev, 5));
+            h.poll(5100);
+            // Even reusing the same generation cannot redirect a response to the new epoch.
+            let new = h.place(A1, 7, 3, S1, false);
+            h.cmd(new);
+            h.poll(5200);
+            h.reps();
+            response(&mut h, status, 6000);
+            let orders = events(&h.reps());
+            assert_eq!(orders.len(), 1);
+            let e = orders[0];
+            assert_eq!(e.epoch, 5, "the original request owns the response");
+            if status == 200 && !accept_prev {
+                assert_eq!(e.slot, hft_types::SlotId::UNRESOLVED);
+            } else {
+                assert_eq!((e.slot.0, e.r#gen), (7, 3));
+            }
+            let mirror = h.rt.mirror(7).unwrap();
+            assert_eq!((mirror.epoch, mirror.r#gen, mirror.live), (70, 3, true));
+        }
+    }
 }
 #[test]
 fn ven_228_rest_failures_preserve_unknown_outcome() {

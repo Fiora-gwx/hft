@@ -736,6 +736,10 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             conn,
             ConnRole::Rest,
             &outcome,
+            r.origin
+                .req
+                .zip(r.identity)
+                .map(|(req, id)| (req, id, r.origin.inst)),
             now,
             0,
             key.get(..n).unwrap_or(&[]),
@@ -1220,6 +1224,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     id,
                     role,
                     &o,
+                    None,
                     ts.rx_tsc,
                     ts.best_rx().0,
                     &key[..key_len.min(36)],
@@ -1268,13 +1273,24 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         id: ConnId,
         role: ConnRole,
         o: &ReportOutcome,
+        rest_identity: Option<(ReqRef, ClientOrderId, InstId)>,
         rx: u64,
         hw: i64,
         _key: &[u8],
         now: u64,
     ) {
         let account = self.accts.get(a).map_or(AccountId(0), |x| x.account);
-        let request_identity = o.req.and_then(|r| self.request_identity(id, account, r));
+        let request_identity = rest_identity
+            .filter(|(r, cid, _)| {
+                cid.account == account && cid.venue == P::VENUE && cid.slot == r.slot && cid.r#gen == r.r#gen
+            })
+            .map(|(r, cid, inst)| (r, cid.epoch, inst))
+            .or_else(|| {
+                o.req
+                    .or(o.outcome_unknown)
+                    .and_then(|r| self.request_identity(id, account, r))
+                    .map(|(r, m)| (r, m.epoch, m.inst))
+            });
         for k in 0..self.sink_evs.len() {
             let Some(mut m) = self.sink_evs.get(k).copied() else {
                 break;
@@ -1283,16 +1299,16 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 // Some request responses omit the client id (and therefore epoch).
                 // Only an outstanding request on this connection can fill that gap.
                 if e.epoch == 0
-                    && let Some((r, mirror)) = request_identity
+                    && let Some((r, epoch, inst)) = request_identity
                     && e.slot.0 == r.slot
                     && e.r#gen == r.r#gen
                     && e.account == account
                     && e.venue == P::VENUE
-                    && (e.inst.0 == 0 || e.inst == mirror.inst)
+                    && (e.inst.0 == 0 || inst.0 == 0 || e.inst == inst)
                 {
-                    e.epoch = mirror.epoch;
+                    e.epoch = epoch;
                     if e.inst.0 == 0 {
-                        e.inst = mirror.inst;
+                        e.inst = inst;
                     }
                 }
                 let accepted = e.epoch == self.epoch || (self.accept_prev && e.epoch == self.prev_epoch);
@@ -1350,12 +1366,17 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         }
         if let Some(r) = o.outcome_unknown {
             self.n.outcome_unknown += 1;
-            let epoch = self.mirror.get(r.slot as usize).map_or(self.epoch, |m| m.epoch);
+            let identity = request_identity.filter(|(req, _, _)| *req == r);
             let mut e = blank_event(P::VENUE, account);
             e.what = OrderEventKind::OutcomeUnknown;
-            e.slot = SlotId(r.slot);
-            e.r#gen = r.r#gen;
-            e.epoch = epoch;
+            if let Some((_, epoch, inst)) = identity {
+                e.slot = SlotId(r.slot);
+                e.r#gen = r.r#gen;
+                e.epoch = epoch;
+                e.inst = inst;
+            } else {
+                e.slot = SlotId::UNRESOLVED;
+            }
             e.reject_code = o.raw_code;
             e.rx_tsc = rx;
             e.hw_rx_ns = hw;

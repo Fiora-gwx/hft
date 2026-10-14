@@ -16,6 +16,7 @@ pub(super) struct Pending {
     tag: u64,
     cmd: GwCmd,
     origin: RestOrigin,
+    identity: Option<ClientOrderId>,
     conn: ConnId,
 }
 pub(super) struct Pools {
@@ -63,6 +64,14 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         if !self.rest_available(a, weight, true, now) {
             return Err(HttpError::Rate);
         }
+        let identity = origin.req.map(|r| {
+            let epoch = if c.op == GwOp::Place {
+                self.epoch
+            } else {
+                self.mirror.get(r.slot as usize).map_or(self.epoch, |m| m.epoch)
+            };
+            self.cid(c.account, r.slot, r.r#gen, epoch)
+        });
         let x = &mut self.accts[a];
         let Some(http) = &mut x.http else {
             return Err(RestErr::NoConn.into());
@@ -81,6 +90,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             tag,
             cmd: c,
             origin,
+            identity,
             conn,
         });
         self.rest_charge(a, weight);
@@ -173,6 +183,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                                 account: p.cmd.account,
                                 cmd: p.cmd,
                                 origin: p.origin,
+                                identity: p.identity,
                                 status: 0,
                                 len: 0,
                                 body: [0; 8192],
