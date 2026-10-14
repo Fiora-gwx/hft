@@ -43,7 +43,9 @@ max_qty = "0.01"
     let blob = d.path().join("params.spb1");
     run(Command::new(std::env::var_os("HFT_CFG_BIN").expect("prebuilt hft-cfg"))
         .args(["build", "--kind", "strategy", "--schemas"]).arg(&schemas)
-        .arg("--refdata").arg(d.path().join("refdata.bin")).arg("--in").arg(&input).arg("--out").arg(&blob));
+        .arg("--refdata").arg(d.path().join("refdata.bin"))
+        .arg("--against").arg(d.path().join("strategy_params.bin"))
+        .arg("--in").arg(&input).arg("--out").arg(&blob));
     let py = std::env::var_os("HFT_PYTHON").unwrap_or_else(|| "python3".into());
     run(Command::new(py).arg("-c").arg(r#"
 import sys, pathlib, tomllib, base64, hft_py
