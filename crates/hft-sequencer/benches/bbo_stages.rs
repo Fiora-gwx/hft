@@ -165,7 +165,17 @@ fn run(hit: bool, profile: bool, hz: u64) {
 }
 
 fn main() {
-    let hz = hft_rt::tsc_hz_nominal().expect("nominal counter frequency required");
+    // Nominal counter frequency when the CPU reports one; otherwise one calibration round
+    // (hosted CI runners do not expose it), as hft-testkit's bench harness does.
+    let hz = hft_rt::tsc_hz_nominal()
+        .or_else(|| {
+            let cfg = hft_rt::CalibConfig {
+                rounds: 1,
+                ..hft_rt::CalibConfig::default()
+            };
+            hft_rt::TscClock::calibrate(&cfg).ok().map(|c| c.hz_milli / 1000)
+        })
+        .expect("counter frequency: neither nominal nor calibrated");
     if std::env::args().any(|a| a == "--single") {
         ram(hz, true);
         return;
