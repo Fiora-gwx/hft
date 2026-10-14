@@ -107,7 +107,16 @@ impl Gateway {
             if req.role == hft_event::ConnRole::UserStream {
                 self.user_conn = Some(req.conn);
             }
-            let ready = self.net.complete(req);
+            let ready = self.net.complete_with(req, |conn| {
+                hft_venue::prepare_private::<venue_binance::Spot>(
+                    conn,
+                    &GwCfg::default().venue_cfg(),
+                    hft_types::AccountId(1),
+                    0,
+                    [0; 24],
+                )
+                .unwrap();
+            });
             self.handoff.try_push(Handover::Ready(ready)).unwrap();
         }
         self.net.reap(&mut self.retire);

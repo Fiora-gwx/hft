@@ -585,11 +585,17 @@ pub enum ExchIdHint { Resolved { epoch: u16, slot: SlotId, gen: u32 }, Recorded,
 
 `account::AccountProtocol` 提供纯 `account_request` / `account_decode`，覆盖规则、账户模式/权限、余额/持仓、撤销遗留订单、listenKey 和结算流水。State 是一轮观察结果，不拥有账本；允许 warm 分配。`margin_items` 保存本轮非零持仓的强平价，未观察到 ADL 时为 255；消失持仓的 PositionReport 为零，但不留下旧 MarginItem。规则使用 refdata 的 wire 指数归一化后精确匹配定点配置，金额转 Notional 时 HalfEven；错误不带凭证或响应正文。
 
+### 有界账户查询与私有订阅扩展
+
+`AcctProtocol` 不为缺失实现提供成功默认值；每账户的 ctx 与 scratch 由 warm 任务独占，完整序列到齐才调用 finish。`AcctQuery::selected` 同时约束轮次和推送兜底标记。`GoldenDriver::run_acct` 逐字段比对每步请求及整组带类型标签的报告，返回首个不同记录/字节的位置。具体产品线的有界解码接入仍待完成。
+
+`private_channels` 给出需确认的频道位图，`private_ack` 返回频道位与是否成功；退订确认不得当作订阅确认。`is_private_report` 区分私有推送和订单请求响应，运行时在协议去重前过滤非归属连接。
+
 ## 已知限制与后续工作
 
-- 原始码编码、`dedup_key` 与固定容量 `TradeIdRing` 可用于热路径。`testkit` 包含有序 Md/Report 观测、首个字节差异定位、独立 fixture 比对、累计量/未知码及基本配置契约检查;`MdRec::bytes` 的首字节区分 sink 方法,其后是字段原始字节,相同布局的 Mark/Index 不混同。完整 `check_*` 验收套件与 legacy `AcctCtx/AcctScratch` 查询接口仍未齐备。warm `account` 的数值超限返回 Overflow,非法/非精确数字返回 Number。
+- 原始码编码、`dedup_key` 与固定容量 `TradeIdRing` 可用于热路径。`testkit` 包含有序 Md/Report 观测、首个字节差异定位、独立 fixture 比对、累计量/未知码及基本配置契约检查;`MdRec::bytes` 的首字节区分 sink 方法,其后是字段原始字节,相同布局的 Mark/Index 不混同。完整 `check_*` 验收套件仍未齐备。warm `account` 的数值超限返回 Overflow,非法/非精确数字返回 Number。
 
-- **M1.5 实现范围**:trait 已含行情、会话、下单编码、回报解码、BBO 补帧与死手、限速观测各节;账户查询(`AcctCtx`、`AcctScratch`、`acct_queries`/`acct_request`/`acct_decode`/`acct_finish`)仍由后续 acct-fetch 接口统一；只读查询 `ro_request`/`ro_decode` 与 `RoSink` 可供 warm reconciler 使用，默认实现返回 Unsupported/UnknownClass。两个在用产品线族支持 OpenOrders/Fills/Balance/Positions（现货无 Positions）；FundingFlow 由带固定两端窗口的 FundingHistoryProtocol 承载，RoKind::FundingFlow 尚不支持。
+- **M1.5 实现范围**:trait 已含行情、会话、下单编码、回报解码、BBO 补帧与死手、限速观测各节;有界账户查询通过显式 `AcctProtocol` 扩展提供 `AcctCtx/AcctScratch` 与四个 acct 方法；只读查询 `ro_request`/`ro_decode` 与 `RoSink` 可供 warm reconciler 使用，默认实现返回 Unsupported/UnknownClass。两个在用产品线族支持 OpenOrders/Fills/Balance/Positions（现货无 Positions）；FundingFlow 由带固定两端窗口的 FundingHistoryProtocol 承载，RoKind::FundingFlow 尚不支持。
 - **帧单位是 WS 消息**:FIX(Binance Spot、Bybit spot)需要非 WS 分帧,可选扩展:接入 FIX 时扩展 `MsgOp` 与 hft-net。
 - **Hyperliquid 自建节点**输出本地文件而非 WS,不适合本 trait 的帧模型;需要时另开 Agent Note 设计文件尾随变体。
 - **账户查询只走 REST 池**:部分所的 WS API 也提供账户查询(Binance ws-fapi 的账户方法,待核实,见 venue-binance 开发备忘第 10 条);改走 WS 只换 `acct_request` 的输出形式,接口不变,触发条件:REST 权重成为瓶颈。

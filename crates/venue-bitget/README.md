@@ -343,6 +343,8 @@ AccountProtocol 使用 UTA V3 instruments/settings/info/assets/current-position/
 
 账户 UID 缺失仅在 refdata 明确 Unverifiable 时允许，报告 uid_keys=0、venue_uid 全零；Verified 缺失或不匹配仍失败。两把凭证都返回 UID 时必须一致。持仓总量必须非负，再按 posSide 赋号；本轮 MarginItem 只含非零仓位，liq_px 随当前持仓更新，ADL 缺失为 255。
 
+私有订阅确认由 `private_ack` 按 order/position/account 映射为位 0/1/2；现货只等待 order/account。重复回执不增加完成数，unsubscribe 回执不确认 subscribe，error 回执使该频道失败。
+
 ## 已知限制与后续工作
 
 - **无死手**:进程崩溃到 kill-switch 撤单之间有窗口(kill-switch 心跳检测周期决定)。

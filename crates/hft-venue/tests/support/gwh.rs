@@ -68,7 +68,7 @@ pub fn spec<P: VenueProtocol<Templates = Tpl, GwCtx = GwCtx>>(
         account: a,
         src_ip_idx: 0,
         tpl: P::build_templates(&vc, rd_stub(), a, &Credential::default()).unwrap(),
-        ctx: GwCtx,
+        ctx: GwCtx::default(),
     }
 }
 
@@ -185,7 +185,9 @@ impl<P: VenueProtocol<Templates = Tpl, GwCtx = GwCtx>, const C: usize> Gh<P, C> 
         for _ in 0..100 {
             self.poll(now);
             for b in std::mem::take(&mut self.builds) {
-                let h = self.net.complete(b);
+                let h = self.net.complete_with(b, |c| {
+                    hft_venue::prepare_private::<P>(c, &g0().venue_cfg(), A1, 0, [0; 24]).unwrap();
+                });
                 self.handoff.try_push(Handover::Ready(h)).unwrap();
                 done += 1;
             }
@@ -204,7 +206,9 @@ impl<P: VenueProtocol<Templates = Tpl, GwCtx = GwCtx>, const C: usize> Gh<P, C> 
             .position(|b| b.conn == conn)
             .expect("no such build");
         let b = self.builds.remove(i);
-        let h = self.net.complete(b);
+        let h = self.net.complete_with(b, |c| {
+            hft_venue::prepare_private::<P>(c, &g0().venue_cfg(), A1, 0, [0; 24]).unwrap();
+        });
         self.handoff.try_push(Handover::Ready(h)).unwrap();
     }
 

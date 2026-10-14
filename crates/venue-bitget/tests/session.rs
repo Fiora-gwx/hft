@@ -506,6 +506,18 @@ fn bgt_200_subscribe_frames() {
 
 #[test]
 fn bgt_201_private_subscribe() {
+    assert_eq!(Fut::private_channels(), 7);
+    assert_eq!(BitgetSpot::private_channels(), 5);
+    for (topic, bit) in [("order", 0), ("position", 1), ("account", 2)] {
+        for (event, expected) in [
+            ("subscribe", Some((bit, true))),
+            ("error", Some((bit, false))),
+            ("unsubscribe", None),
+        ] {
+            let body = format!(r#"{{"event":"{event}","arg":{{"instType":"UTA","topic":"{topic}"}}}}"#);
+            assert_eq!(Fut::private_ack(body.as_bytes()), expected);
+        }
+    }
     let mut out = SubFrames::with_capacity(4096, 4);
     Fut::private_subscribe(&cfg(), AccountId(2), false, &mut out).unwrap();
     assert_eq!(

@@ -512,3 +512,158 @@ pub fn depth20_payload(inst: u32) -> String {
         side(101, 1)
     )
 }
+
+use hft_venue_proto::{AcctProtocol, AcctQuery, AcctQueryKind};
+#[derive(Default)]
+pub struct AcctScratch {
+    pub bits: u8,
+    pub amount: i64,
+    pub qty: i64,
+}
+impl AcctProtocol for FakePerp {
+    type AcctCtx = u32;
+    type AcctScratch = AcctScratch;
+    fn acct_queries(k: AcctQueryKind) -> &'static [AcctQuery] {
+        const CONFIG: [AcctQuery; 3] = [
+            AcctQuery {
+                kind: AcctQueryKind::Config,
+                step: 0,
+                every: 1,
+                push_fallback: false,
+                weight: 2,
+            },
+            AcctQuery {
+                kind: AcctQueryKind::Config,
+                step: 1,
+                every: 1,
+                push_fallback: false,
+                weight: 3,
+            },
+            AcctQuery {
+                kind: AcctQueryKind::Config,
+                step: 2,
+                every: 1,
+                push_fallback: false,
+                weight: 1,
+            },
+        ];
+        const MARGIN: [AcctQuery; 2] = [
+            AcctQuery {
+                kind: AcctQueryKind::Margin,
+                step: 0,
+                every: 1,
+                push_fallback: true,
+                weight: 5,
+            },
+            AcctQuery {
+                kind: AcctQueryKind::Margin,
+                step: 1,
+                every: 2,
+                push_fallback: true,
+                weight: 5,
+            },
+        ];
+        if k == AcctQueryKind::Config {
+            &CONFIG
+        } else {
+            &MARGIN
+        }
+    }
+    fn acct_request(
+        _rd: &RefData,
+        _t: &(),
+        acct: AccountId,
+        q: AcctQuery,
+        _clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<(), EncodeErr> {
+        let _ = acct;
+        out.path_query
+            .push(b"/account?signature=test-signed-value")
+            .unwrap();
+        out.redacted = true;
+        out.endpoint = if q.kind == AcctQueryKind::Config {
+            q.step % 2
+        } else {
+            0
+        };
+        Ok(())
+    }
+    fn acct_decode(
+        _rd: &RefData,
+        _ctx: &mut u32,
+        _acct: AccountId,
+        q: AcctQuery,
+        status: u16,
+        body: &[u8],
+        s: &mut AcctScratch,
+    ) -> Result<(), DecodeErr> {
+        if status != 200 || body.len() < 8 {
+            return Err(DecodeErr::Shape);
+        }
+        let value = i64::from_le_bytes(body[..8].try_into().unwrap());
+        s.bits |= 1 << q.step;
+        if q.kind == AcctQueryKind::Margin {
+            if q.step == 0 {
+                s.amount = value;
+            } else {
+                s.qty = value;
+            }
+        }
+        Ok(())
+    }
+    fn acct_finish(
+        _rd: &RefData,
+        ctx: &mut u32,
+        acct: AccountId,
+        k: AcctQueryKind,
+        s: &AcctScratch,
+        out: &mut impl ReportSink,
+    ) -> Result<(), DecodeErr> {
+        *ctx += 1;
+        if k == AcctQueryKind::Config {
+            if s.bits != 7 {
+                return Err(DecodeErr::Shape);
+            }
+            let mut h = hft_event::AccountConfigReportHdr::new_zeroed();
+            h.venue = FAKE_VENUE;
+            h.account = acct;
+            h.uid_keys = 2;
+            h.venue_uid[..2].copy_from_slice(b"U1");
+            h.n_lev = 1;
+            out.account_config(
+                &h,
+                &[hft_event::LeverageItem {
+                    inst: InstId(201),
+                    _pad: 0,
+                    leverage: hft_types::Rate(5_000_000_000),
+                }],
+            );
+        } else {
+            let mut h = hft_event::MarginReportHdr::new_zeroed();
+            h.venue = FAKE_VENUE;
+            h.account = acct;
+            h.margin_balance = hft_types::Notional(s.amount);
+            h.n = 1;
+            out.margin(
+                &h,
+                &[hft_event::MarginItem {
+                    inst: InstId(201),
+                    adl_quantile: 255,
+                    _pad: [0; 3],
+                    liq_px: Px(0),
+                }],
+            );
+            let mut p = hft_event::PositionReport::new_zeroed();
+            p.venue = FAKE_VENUE;
+            p.account = acct;
+            p.inst = InstId(201);
+            p.qty = Qty(s.qty);
+            out.position(&p);
+            p.inst = InstId(202);
+            p.qty = Qty(-s.qty);
+            out.position(&p);
+        }
+        Ok(())
+    }
+}

@@ -29,7 +29,7 @@ fn ven_230_primary_fatal_failover() {
     let v = h.reps();
     let d: Vec<_> = conn_states(&v)
         .into_iter()
-        .filter(|s| s.state == ConnStateKind::Down)
+        .filter(|s| s.state == ConnStateKind::Down && s.role == ConnRole::Order)
         .collect();
     assert_eq!(d.len(), 1);
     assert_eq!(
@@ -105,5 +105,12 @@ fn ven_233_up_on_install() {
         .filter(|s| s.state == ConnStateKind::Up)
         .map(|s| (s.account, s.role, s.conn))
         .collect();
-    assert_eq!(up, vec![(A1, ConnRole::Order, 112), (A1, ConnRole::Order, 113)]);
+    assert_eq!(
+        up,
+        vec![
+            (A1, ConnRole::Order, 112),
+            (A1, ConnRole::UserStream, 112),
+            (A1, ConnRole::Order, 113)
+        ]
+    );
 }

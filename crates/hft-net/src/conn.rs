@@ -128,6 +128,7 @@ pub struct Conn {
     mask: u64,
     scratch: Option<Box<MaskedFrame<TEXT_CAP>>>,
     stats: ConnStats,
+    handoff_data: Vec<u8>,
     _not_sync: PhantomData<Cell<()>>,
 }
 
@@ -220,6 +221,7 @@ impl Conn {
             mask: 0x9E37_79B9_7F4A_7C15,
             scratch: Some(Box::new(MaskedFrame::new())),
             stats: ConnStats::default(),
+            handoff_data: Vec::new(),
             _not_sync: PhantomData,
         }
     }
@@ -264,6 +266,22 @@ impl Conn {
             f.unseal();
         }
         self.stats = ConnStats::default();
+        self.handoff_data.fill(0);
+        self.handoff_data.clear();
+    }
+
+    /// Warm-thread preparation only. Opaque, non-secret protocol metadata travels with the arena
+    /// slot; the hot owner borrows it without allocating. Reset erases it before slot reuse.
+    pub fn set_handoff_data(&mut self, bytes: &[u8]) -> bool {
+        if bytes.len() > 16_384 {
+            return false;
+        }
+        self.handoff_data.clear();
+        self.handoff_data.extend_from_slice(bytes);
+        true
+    }
+    pub fn handoff_data(&self) -> &[u8] {
+        &self.handoff_data
     }
 
     /// The hot thread took the connection over (`ConnPool::install`): queue-empty confirmations
@@ -1378,6 +1396,8 @@ impl Conn {
     #[doc(hidden)]
     pub fn test_reset_stats(&mut self) {
         self.stats = ConnStats::default();
+        self.handoff_data.fill(0);
+        self.handoff_data.clear();
         self.err = ErrBits::empty();
         self.sock.sys = SysCount::default();
         self.read_data_round = false;

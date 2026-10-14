@@ -1,10 +1,6 @@
-//! `SessionDriver<P>` on the warm `conn-builder` thread (README §7): endpoint, build, login (one or
-//! more frames until `LoginResult::Ok`), readiness registration of the requesting feed task, hand-off;
-//! on retirement de-registration before `Connector::reclaim`. Login frames and credentials stay on
-//! this thread. M1.5 limits (README "已知限制与后续工作"): the bootstrap REST call, the session
-//! identity request and a dynamic Upgrade target need the hft-net REST client / per-job targets
-//! (M3) — `bootstrap = Some` is refused, `session_identity_request` is asked but not executed, the
-//! `endpoint` output must equal the static endpoint configuration.
+//! Warm session setup: endpoint, login, verified identity handover, private subscription templates.
+//! The warm caller performs bootstrap/identity REST and supplies the verified result per job.
+//! Missing evidence for a protocol requiring a distinct session key is handed over as failed.
 
 use std::collections::VecDeque;
 
@@ -72,6 +68,7 @@ struct SJob {
     req: BuildReq,
     acct: Option<AccountId>,
     phase: Phase,
+    identity: Option<[u8; 24]>,
 }
 
 const JOBS: usize = hft_net::MAX_JOBS;
@@ -156,7 +153,7 @@ impl<P: VenueProtocol> SessionDriver<P> {
         // Public market data (`Md`): the path is fixed per route and already in the connector's
         // endpoint table (BuildReq carries no route), so `P::endpoint` is not called (README §7 step 2).
         let mut target = None;
-        if role != ConnRole::Md {
+        if !matches!(role, ConnRole::Md | ConnRole::Rest) {
             let mut ep = EndpointSpec::default();
             P::endpoint(
                 role,
@@ -193,9 +190,24 @@ impl<P: VenueProtocol> SessionDriver<P> {
                 req,
                 acct,
                 phase: Phase::Building,
+                identity: None,
             });
         }
         Ok(job)
+    }
+
+    /// Bind a successful warm session-key observation to this exact build job.
+    /// The caller must have authenticated the UID with the session credential, not just REST.
+    pub fn verified_identity(&mut self, job: JobId, uid: [u8; 24]) -> Result<(), SessErr> {
+        let valid = uid.iter().position(|b| *b == 0).unwrap_or(uid.len());
+        if valid == 0 || !uid[..valid].iter().all(u8::is_ascii) || uid[valid..].iter().any(|b| *b != 0) {
+            return Err(SessErr::Proto(ProtoErr::Cfg));
+        }
+        let i = self.find(job).ok_or(SessErr::Proto(ProtoErr::Cfg))?;
+        if let Some(j) = &mut self.jobs[i] {
+            j.identity = Some(uid);
+        }
+        Ok(())
     }
 
     /// Advances the connector and the logins; at most one event per call.
@@ -300,7 +312,7 @@ impl<P: VenueProtocol> SessionDriver<P> {
         }
     }
 
-    /// Identity request (asked; executed from M3), readiness registration, hand-off.
+    /// Merge the authenticated session observation before readiness registration and hand-off.
     fn finish(&mut self, c: &mut Connector, i: usize, now_ns: i64) -> SessEvent {
         let Some(j) = self.jobs.get(i).copied().flatten() else {
             return SessEvent::Failed {
@@ -308,11 +320,30 @@ impl<P: VenueProtocol> SessionDriver<P> {
                 code: 0,
             };
         };
-        if j.req.role == ConnRole::Order
+        let mut identity = 0;
+        let mut uid = [0; 24];
+        if matches!(j.req.role, ConnRole::Order | ConnRole::UserStream)
             && let Some(cred) = self.cred(j.acct).copied()
         {
             let mut req = RestReqBuf::default();
-            let _ = P::session_identity_request(&self.cfg.venue, &cred, now_ns / 1_000_000, &mut req);
+            match P::session_identity_request(&self.cfg.venue, &cred, now_ns / 1_000_000, &mut req) {
+                Ok(false) => {}
+                Ok(true) if j.identity.is_some() => {
+                    identity = 1;
+                    uid = j.identity.unwrap_or([0; 24]);
+                }
+                _ => identity = 2,
+            }
+        }
+        if matches!(j.req.role, ConnRole::Order | ConnRole::UserStream)
+            && let Some(account) = j.acct
+        {
+            let ok = c.conn_mut(j.job).is_some_and(|conn| {
+                crate::private::prepare::<P>(conn, &self.cfg.venue, account, identity, uid).is_ok()
+            });
+            if !ok {
+                return self.fail(c, i, 0);
+            }
         }
         let id = j.req.conn;
         if let Some(h) = self.ready_of(id) {

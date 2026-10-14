@@ -153,6 +153,20 @@ fn bin_201_stream_names() {
 
 #[test]
 fn bin_202_private_subscribe() {
+    assert_eq!(Spot::private_channels(), 1);
+    assert_eq!(Usdm::private_channels(), 0);
+    assert_eq!(
+        Spot::private_ack(br#"{"id":"u0000000000000000","status":200}"#),
+        Some((0, true))
+    );
+    assert_eq!(
+        Spot::private_ack(br#"{"id":"u0000000000000000","status":401}"#),
+        Some((0, false))
+    );
+    assert_eq!(
+        Spot::private_ack(br#"{"id":"u0000000000000001","status":200}"#),
+        None
+    );
     let run = |spot: bool, unsub: bool| {
         let mut out = SubFrames::with_capacity(4096, 4);
         if spot {
@@ -172,7 +186,7 @@ fn bin_202_private_subscribe() {
     );
     assert_eq!(
         run(true, true),
-        [r#"{"id":"u0000000000000000","method":"userDataStream.unsubscribe"}"#],
+        [r#"{"id":"u0000000000000001","method":"userDataStream.unsubscribe"}"#],
         "BIN-202.3"
     );
 }

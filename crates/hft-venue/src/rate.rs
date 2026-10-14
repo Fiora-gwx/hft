@@ -23,6 +23,37 @@ impl Window {
     }
 }
 impl RateCounters {
+    /// Effective REST windows shared by account queries, order queries and maintenance.
+    pub fn account_rest(limits: &[RateLimit], ms: impl Fn(u64) -> u64) -> Self {
+        Self {
+            windows: limits
+                .iter()
+                .filter(|l| l.scope != LimitScope::Ip && l.bucket == LimitBucket::Weight)
+                .map(|l| Window {
+                    limit: l.limit,
+                    ms: l.window_ms,
+                    ticks: ms(u64::from(l.window_ms)).max(1),
+                    cost: u32::from(l.default_cost.max(1)),
+                    start: 0,
+                    used: 0,
+                })
+                .collect(),
+        }
+    }
+    pub fn weight_available(&mut self, weight: u32, urgent: bool, now: u64) -> bool {
+        for w in &mut self.windows {
+            w.roll(now);
+        }
+        self.windows.iter().all(|w| {
+            let enough = w.used.checked_add(weight).is_some_and(|n| n <= w.limit);
+            enough && (urgent || u64::from(w.limit.saturating_sub(w.used)) * 5 >= u64::from(w.limit))
+        })
+    }
+    pub fn charge_weight(&mut self, weight: u32) {
+        for w in &mut self.windows {
+            w.used = w.used.saturating_add(weight);
+        }
+    }
     /// Public REST weight limits for the configured market-data source IP.
     pub fn rest(limits: &[RateLimit], ms: impl Fn(u64) -> u64) -> Self {
         Self {

@@ -16,6 +16,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 
 | README 小节 | 用例 |
 |---|---|
+| 账户与私有回报的运行时接线 | VEN-211、VEN-225、VEN-228、VEN-242、VEN-250–VEN-264、VEN-270–VEN-276、VEN-313、VEN-391–VEN-393 |
 | 当前 BBO 补帧传输 | VEN-130、VEN-132、VEN-133、VEN-155 |
 | 测试环境账户启动与观察 | VEN-261、VEN-310 |
 | 资金费账单轮询 | VEN-258 |
@@ -314,7 +315,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 | VEN-015.3 | `gw.id_table_cap = 16384` | `Ok` |
 | VEN-015.4 | `gw.id_tomb_cap = 6144`,`gw.id_table_cap = 16384`(= 2 × 8192) | `Ok`(边界) |
 | VEN-015.5 | `gw.id_tomb_cap = 6145`,`gw.id_table_cap = 16384` | `Err(InitErr::IdTableCap)` |
-| VEN-015.6 | 生效 `margin_data = Poll{interval_ms: 999}`,`gw.margin_poll_min_ms = 1000` | `Err(InitErr::MarginPoll)` |
+| VEN-015.6 | 生效 `margin_data = Poll{interval_ms: 1000}`,`gw.margin_poll_min_ms = 1001`(999 已被 refdata 拒绝) | `Err(InitErr::MarginPoll)` |
 | VEN-015.7 | `Poll{interval_ms: 1000}`;`Poll{interval_ms: 1001}` | `Ok`;`Ok` |
 | VEN-015.8 | `AcctFetchTask::new` 账户 [A1, A9] | `Err(InitErr::SimAccount)` |
 
@@ -411,7 +412,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`MAX_BBO_CONN_SLOTS = 8`;调用 `feed_cmd_dest(&cmd)`(拆分形态;`All` 形态只有一个 feedctl 环,不调用)
-- 实现:`crates/hft-venue/tests/feed_cmd.rs::ven_023_feed_cmd_dest`
+- 实现:`crates/hft-venue/tests/config.rs::ven_023_feed_cmd_dest`
 
 | 行 | 命令 | 期望 |
 |---|---|---|
@@ -439,7 +440,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`F0`,`routes = All`;每行对 S1 投递一条 `Subscribe{S1, streams}`,完成建连后读 `CallLog` 中 `subscribe` 收到的 `SubSpec`
-- 实现:`crates/hft-venue/tests/feed_cmd.rs::ven_025_stream_bits`
+- 实现:`crates/hft-venue/tests/continuation.rs::ven_025_stream_bits`
 
 | 行 | `streams`(SDK `EvMask` 位值) | 期望 `SubSpec` 集合 |
 |---|---|---|
@@ -467,7 +468,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   - 步骤 1 后没有任何订阅或退订帧
   - 步骤 2 后发出 Trade 与 DepthTopN 的退订帧、Mark 的订阅帧,Bbo 不动;此后深度连接上的 `D|S1|…` 按未订阅符号计数丢弃,md 环不再出现 S1 的 `L2Snapshot`
   - 步骤 3 后发出 Bbo 与 Mark 的退订帧;回执后 bbo 环恰好两条成员事件 `ConnState{Down, role=Md, conn ∈ {0, 1}, inst: S1}`
-- 实现:`crates/hft-venue/tests/feed_cmd.rs::ven_026_subscribe_diff`
+- 实现:`crates/hft-venue/tests/continuation.rs::ven_026_subscribe_diff`
 
 ### VEN-027 订阅本 venue 不存在的 inst 被计数丢弃
 
@@ -941,7 +942,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 规则:[§1](README.md#1-线程与环由-hft-core-装配)
 - 级别:unit
 - 里程碑:M3
-- 前置:`F0`,`routes = All`;md 环容量 4 已满;深度连接 8 有 5 帧、BBO 连接 0 有 3 帧
+- 前置:`F0`,`routes = All`;md 环容量 128，以两帧各 64 条成交填满(满足 FRAME_EVENTS_MAX 预留);深度连接 8 有 5 帧、BBO 连接 0 有 3 帧
 - 步骤:
   1. `poll_once`
 - 期望:
@@ -1030,7 +1031,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`F0`,`routes = Bbo`,`feed.bbo_conns = 1`;连接 0 在 `T0 = 10⁹` 交接;每行给出 `ws_max_conn_age_s` 与 `conn.rotate_margin_s`,在所列时刻 `poll_once`
-- 实现:`crates/hft-venue/tests/feed_pool.rs::ven_080_rotate_time`
+- 实现:`crates/hft-venue/tests/continuation.rs::ven_080_rotate_time`
 
 | 行 | 强断时长 / 余量 / 时刻 | 期望 |
 |---|---|---|
@@ -1048,7 +1049,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. 投递 `Rotate{conn: 1}`,`poll_once`
 - 期望:
   - 这一轮发出一条替补 `BuildReq`(原因 `Rotate(1)`,连接号取最小空闲槽 2);连接 1 仍活跃,不推 `Down`
-- 实现:`crates/hft-venue/tests/feed_pool.rs::ven_081_rotate_cmd`
+- 实现:`crates/hft-venue/tests/continuation.rs::ven_081_rotate_cmd`
 
 ### VEN-082 赛马池替补收到第一帧数据后退役最早安装的连接
 
@@ -1062,7 +1063,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 期望:
   - 步骤 1 后 S1 的成员 `Up` 来自连接 0、1、2(三条重叠);连接 0 仍活跃
   - 步骤 2 后 bbo 环:`ConnState{Down, conn: 0, inst: 0}`;S1 只剩连接 1、2 两个成员;没有 `RACE_SINGLE`
-- 实现:`crates/hft-venue/tests/feed_pool.rs::ven_082_race_replacement_retires_oldest`
+- 实现:`crates/hft-venue/tests/continuation.rs::ven_082_race_replacement_retires_oldest`
 
 ### VEN-083 服务端下线预告触发替补
 
@@ -1074,7 +1075,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. 连接 1 推 `BYE`,`poll_once`
 - 期望:
   - 连接 1 被置 `SERVER_HINT`;这一轮发出替补 `BuildReq`(原因 `Hint(1)`);bbo 环没有行情事件也没有 `Down`
-- 实现:`crates/hft-venue/tests/feed_pool.rs::ven_083_server_shutdown_hint`
+- 实现:`crates/hft-venue/tests/continuation.rs::ven_083_server_shutdown_hint`
 
 ### VEN-084 `LoopStat` 反映这一轮的工作量与最早期限
 
@@ -1125,7 +1126,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`F0`,`routes = Md`;`FRAME_EVENTS_MAX = 64`;`StubProto` 的成交帧可携带多笔成交;之后同一连接再来一帧 1 笔成交
-- 实现:`crates/hft-venue/tests/feed_frame.rs::ven_087_frame_events_over_is_decode_error`
+- 实现:`crates/hft-venue/tests/continuation.rs::ven_087_frame_events_over_is_decode_error`
 
 | 行 | 一帧中的成交笔数 | 期望 |
 |---|---|---|
@@ -1174,7 +1175,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. 依次喂 `B|S1|50`、`T|S1|50`、`B|S2|50`、`T|S1|49`、`B|S1|51`
 - 期望:
   - 转发 `Bbo{S1, 50}`、`Trade{S1, tid 50}`、`Bbo{S2, 50}`、`Bbo{S1, 51}`;`T|S1|49` 被丢
-- 实现:`crates/hft-venue/tests/seq.rs::ven_102_streams_independent`
+- 实现:`crates/hft-venue/tests/continuation.rs::ven_102_streams_independent`
 
 ### VEN-103 两路随机交错同一 BBO 序列时输出严格递增、无重复
 
@@ -1412,7 +1413,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. 不推 S1 报价,运行 10 s
 - 期望:
   - snapreq 环始终为空;S1 一直处于补帧;`CallLog` 中 `bbo_snapshot_request` 只在 `FeedRuntime::new` 时被调用一次
-- 实现:`crates/hft-venue/tests/bbo_live.rs::ven_131_no_snap_when_pushes_first`
+- 实现:`crates/hft-venue/tests/continuation.rs::ven_131_no_snap_when_pushes_first`
 
 ### VEN-132 snap 记录带回的报价按补帧状态处理
 
@@ -1451,7 +1452,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. 连接 8 的 RTT Ping 得到 Pong(`rx_tsc = t_p`),`poll_once`
 - 期望:
   - md 环一条 `ConnState{Alive, role: Md, conn: 8, inst: 0, rx_tsc: t_p}`;bbo 环无新元素
-- 实现:`crates/hft-venue/tests/bbo_live.rs::ven_134_md_conn_alive`
+- 实现:`crates/hft-venue/tests/heartbeat.rs::ven_134_md_conn_alive`
 
 ### VEN-150 snap-fetch 在途数不超过 `snap.parallel`,其余按 FIFO 排队
 
@@ -2016,7 +2017,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`G0`,`gw.rest_idle_check_ms = 1000`;A1 的 REST 连接 131、132 空闲;上次检查 `t_c`
-- 实现:`crates/hft-venue/tests/gw_loop.rs::ven_209_rest_idle_check`
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_209_rest_idle_check`
 
 | 行 | `now` / 对端 | 期望 |
 |---|---|---|
@@ -2048,7 +2049,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. 运行 3 圈
 - 期望:
   - 每圈恰好应用 1 条;`Order` 日志中每圈的 acct 应用位于该圈最后一次 `drain_out` 之后;3 圈后环中余 7 条
-- 实现:`crates/hft-venue/tests/gw_loop.rs::ven_211_acct_one_per_loop`
+- 实现:`crates/hft-venue/tests/acct_fetch.rs::ven_211_gateway_applies_one_record_after_orders`
 
 ### VEN-212 rep 环接近满时停读回报与 acct 记录,出环用预留空位继续
 
@@ -2290,6 +2291,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 期望:
   - `decode_rest` 收到 `RestOrigin{what: Order, req: Some(ReqRef{slot: 96, gen: 4, op: Query})}`;rep 环 `OrderEvent{what: QueryResult, slot: 96, gen: 4, cum_filled: 3, avg_px: 100.2, detail: 2}`;`inflight` 中该请求清除
 - 实现:`crates/hft-venue/tests/gw_report.rs::ven_228_query_result`
+- 回归:`tests/gw_rest.rs` 验证省略 epoch 的回包使用请求发送时身份；SetEpoch 后即使同槽同 gen 复用，成功与 503 回包也不借用新 epoch，原 epoch 不再接受时 QueryResult 保持 UNRESOLVED。
 
 ### VEN-229 请求超过 `inflight_timeout_ms` 无响应推一次 `Degraded{INFLIGHT_TIMEOUT}` 并移出在途
 
@@ -2481,7 +2483,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`G0`;`StubProto::decode_report` 对每行的帧调用一次所列 sink 方法
-- 实现:`crates/hft-venue/tests/gw_report.rs::ven_242_sink_to_rep`
+- 实现:`crates/hft-venue/tests/gw_report.rs::ven_242_variable_report_tails_preserve_order_under_backpressure`
 
 | 行 | sink 调用 | 期望 rep 环 |
 |---|---|---|
@@ -2498,7 +2500,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`G0`;A1 槽 98 的 Place 在途于 primary 112;`StubProto` 把 `R|<req>|-1021` 判为确定拒绝且在 `ReportOutcome` 中标明时钟越界,把 `R|<req>|-1015` 判为确定拒绝且标明交易所限速
-- 实现:`crates/hft-venue/tests/gw_report.rs::ven_243_clock_skew_rate_limit`
+- 实现:`crates/hft-venue/tests/gw_report.rs::ven_243_clock_and_rate_failures_degrade_connection`
 
 | 行 | 响应 | 期望 |
 |---|---|---|
@@ -2563,7 +2565,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`G0`;行 .1 用 `StubCfg{user_stream: true}`(A2 用户流连接 121);行 .2–.4 用 `StubProto`,A1 primary 112(私有频道归属)、standby 113 已登录;按行注入一帧(`USER_STREAM` 是协议常量,同一 gw 的账户不能混用两种归属)
-- 实现:`crates/hft-venue/tests/gw_report.rs::ven_248_stream_end_and_shutdown`
+- 实现:`crates/hft-venue/tests/private.rs::ven_248_stream_end_resubscribes_order_connection`
 
 | 行 | 帧 / 连接 | 期望 |
 |---|---|---|
@@ -2596,7 +2598,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 期望:
   - 步骤 1:acctreq 环为空
   - 步骤 2:恰好一条 `AcctReq{kind: Config, account: A1, why: Startup(5)}`;acct-fetch 按 step 0、1、2 的顺序发请求,第 3 个用端点 1 的池;rep 环恰好一条 `AccountConfigReport`
-- 实现:`crates/hft-venue/tests/acct.rs::ven_250_startup_config`
+- 实现:`crates/hft-venue/tests/acct_sched.rs::ven_250_startup_config_waits_for_readiness`
 
 ### VEN-251 `Poll` 型保证金按 `max(interval_ms, margin_poll_min_ms)` 周期查询
 
@@ -2604,7 +2606,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`G0` + `C0`;生效 `margin_data = Poll{interval_ms: 2000}`,`gw.margin_poll_min_ms = 1000`;上一个 Margin 序列在 `t_d` 完成;每行在所列时刻跑一个 aux 圈
-- 实现:`crates/hft-venue/tests/acct.rs::ven_251_margin_poll_period`
+- 实现:`crates/hft-venue/tests/acct_sched.rs::ven_251_poll_interval_from_completion`
 
 | 行 | `now` | 期望 |
 |---|---|---|
@@ -2622,7 +2624,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
   1. 依次投递 `AcctReq{Margin, poll_no: 0…12}`,每个序列都成功
 - 期望:
   - step 1 的请求恰好在 `poll_no` = 0、6、12 时发出;step 0 每次发出;每个序列都只产出一份 `MarginReport`
-- 实现:`crates/hft-venue/tests/acct.rs::ven_252_every_n`
+- 实现:`crates/hft-venue/tests/acct_sched.rs::ven_252_every_n_queries_weight_matches_selection`
 
 ### VEN-253 `Push` 型只在推送过期后兜底查询
 
@@ -2630,7 +2632,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`G0` + `C0`,生效 `margin_data = Push`,`gw.margin_push_stale_ms = 5000`;最后一次账户推送在 `t_p`;`acct_queries(Margin)` 只有一个 `push_fallback = true` 的请求
-- 实现:`crates/hft-venue/tests/acct.rs::ven_253_push_fallback`
+- 实现:`crates/hft-venue/tests/acct_sched.rs::ven_253_push_fallback_only_after_stale`
 
 | 行 | 过程 | 期望 |
 |---|---|---|
@@ -2645,7 +2647,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`G0` + `C0`;A1 同一 aux 检查时机上同时满足所列条件
-- 实现:`crates/hft-venue/tests/acct.rs::ven_254_priority`
+- 实现:`crates/hft-venue/tests/acct_sched.rs::ven_254_priority_and_one_sequence_per_account`
 
 | 行 | 同时待执行 | 期望第一个 `AcctReq` 的 `why` |
 |---|---|---|
@@ -2661,7 +2663,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`G0` + `C0`;A1 的 REST 权重桶 100 / 60 000 ms;Margin 序列两个请求权重 3 + 2;每行开始时桶已用量如列
-- 实现:`crates/hft-venue/tests/acct.rs::ven_255_weight_and_defer`
+- 实现:`crates/hft-venue/tests/acct_sched.rs::ven_255_query_weight_reserve_and_urgent_hard_limit`
 
 | 行 | 已用 / 待执行 | 期望 |
 |---|---|---|
@@ -2677,7 +2679,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`G0` + `C0`,`gw.acct_query_degraded_after = 3`;A1 的 Margin 序列有 2 个请求;每行连续处理所列结果
-- 实现:`crates/hft-venue/tests/acct.rs::ven_256_failure_backoff`
+- 实现:`crates/hft-venue/tests/acct_sched.rs::ven_256_failure_backoff_degraded_once_and_recovery`
 
 | 行 | 序列结果 | 期望 |
 |---|---|---|
@@ -2694,7 +2696,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 级别:table
 - 里程碑:M3
 - 前置:`C0`,`gw.acct_query_timeout_ms = 3000`,`gw.acct_body_max = 262144`,acct 环容量 1 MiB;一条 `AcctReq{Margin}`,单请求序列
-- 实现:`crates/hft-venue/tests/acct_fetch.rs::ven_257_failure_kinds`
+- 实现:`crates/hft-venue/tests/acct_fetch.rs::ven_257_failed_sequences_never_publish_partial_reports`
 
 | 行 | 响应 | 期望 acct 记录 |
 |---|---|---|
@@ -2732,7 +2734,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 - 期望:
   - acct 环:4 条 `Raw{part: 0..3, parts: 4}`(体长 16384、16384、16384、2048,首块 `req_len > 0`),随后 1 条 `Done`
   - gw 每圈应用 1 条;raw-gw 中 `conn = 80` 的记录依次为 1 条 `RawTx`(`REDACTED`,记录头 `tsc = sent_tsc`,payload 为方法 + 路径,不含签名)与 4 条 `RawRx{what: RestResponse}`;4 条 payload 依次拼接与原响应逐字节相同
-- 实现:`crates/hft-venue/tests/acct_fetch.rs::ven_259_raw_chunks`
+- 实现:`crates/hft-venue/tests/acct_fetch.rs::ven_259_raw_response_chunks_preserve_bytes_and_redact_query`
 
 ### VEN-260 `Done` 记录的报告原样推入 rep 环且连续
 
@@ -2744,7 +2746,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
   1. 完成一个 Margin 序列
 - 期望:
   - rep 环在 `Done` 应用的那一圈连续出现:`MarginReport`(头,`n = 3`,条目在 rep-bulk)、`PositionReport{S1}`、`{S2}`、`{S3}`,中间没有其他元素
-- 实现:`crates/hft-venue/tests/acct.rs::ven_260_done_contiguous`
+- 实现:`crates/hft-venue/tests/acct_fetch.rs::ven_260_done_is_one_complete_config_report`
 
 ### VEN-261 账户配置按周期、按提示与会话重建重查
 
@@ -2752,7 +2754,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 - 级别:table
 - 里程碑:M3
 - 前置:`G0` + `C0`,`gw.acct_cfg_recheck_s = 600`;上一个 Config 序列在 `t_d` 完成
-- 实现:`crates/hft-venue/tests/acct.rs::ven_261_config_recheck`
+- 实现:`crates/hft-venue/tests/acct_sched.rs::ven_261_config_recheck_period_hint_and_session`
 
 | 行 | 过程 | 期望 |
 |---|---|---|
@@ -2770,7 +2772,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
   1. 运行 60 s
 - 期望:
   - acctreq 环中没有 `kind = Margin` 的请求;Config 照常
-- 实现:`crates/hft-venue/tests/acct.rs::ven_262_spot_no_margin`
+- 实现:`crates/hft-venue/tests/acct_sched.rs::ven_262_spot_never_schedules_margin`
 
 ### VEN-263 REST 端点表的下标选择对应的池
 
@@ -2782,7 +2784,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
   1. 执行 Config 序列
 - 期望:
   - step 0、1 在端点 0 的池提交,step 2 在端点 1 的池提交;端点 1 的池只连该主机
-- 实现:`crates/hft-venue/tests/acct_fetch.rs::ven_263_endpoint_pool`
+- 实现:`crates/hft-venue/tests/acct_fetch.rs::ven_263_endpoint_indices_follow_query_table`
 
 ### VEN-264 acct-fetch 的 `has_pending`
 
@@ -2790,7 +2792,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 - 级别:table
 - 里程碑:M3
 - 前置:`C0`
-- 实现:`crates/hft-venue/tests/acct_fetch.rs::ven_264_has_pending`
+- 实现:`crates/hft-venue/tests/acct_fetch.rs::ven_264_warm_task_pending_and_idle`
 
 | 行 | 状态 | 期望 |
 |---|---|---|
@@ -2829,7 +2831,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 - 级别:table
 - 里程碑:M3
 - 前置:`G0`;交接 primary 112、standby 113(与独立用户流 120,若有)
-- 实现:`crates/hft-venue/tests/private.rs::ven_271_owner_by_shape`
+- 实现:`crates/hft-venue/tests/private.rs::ven_271_owner_by_shape_and_warm_frames`
 
 | 行 | `StubCfg.user_stream` | 期望 |
 |---|---|---|
@@ -2849,7 +2851,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 - 期望:
   - 帧序:113 订阅 → 113 回执齐 → `priv_owner = 113` → 112 退订(或随退役)→ `swap_primary` → `ConnState{Rotated, conn: 113}`
   - 步骤 2 的成交只产出一条 `OrderEvent{Fill}`,资金费只产出一条 `FundingSettle`
-- 实现:`crates/hft-venue/tests/private.rs::ven_272_make_before_break`
+- 实现:`crates/hft-venue/tests/private.rs::ven_272_make_before_break_shared_dedup`
 
 ### VEN-273 新连接订阅被拒或 5 s 内回执不全时放弃本次切换
 
@@ -2857,7 +2859,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 - 级别:table
 - 里程碑:M3
 - 前置:同 VEN-272 步骤 1 之前;113 的私有订阅在 `t_s` 发出
-- 实现:`crates/hft-venue/tests/private.rs::ven_273_switch_abandoned`
+- 实现:`crates/hft-venue/tests/private.rs::ven_273_switch_rejection_and_incomplete_ack_keep_old_owner`
 
 | 行 | 113 的回执 | 期望 |
 |---|---|---|
@@ -2877,7 +2879,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 - 期望:
   - 步骤 1:rep 环同一圈有 `ConnState{Down, role: Order, conn: 112}` 与 `ConnState{Down, account: A1, role: UserStream}`;113 上发出私有订阅帧
   - 步骤 2:`ConnState{Up, account: A1, role: UserStream}`;随后一条 Margin 与一条 Config 的 `AcctReq`
-- 实现:`crates/hft-venue/tests/private.rs::ven_274_forced_switch`
+- 实现:`crates/hft-venue/tests/private.rs::ven_274_forced_switch_waits_for_all_private_ack`
 
 ### VEN-275 不在归属连接上的私有推送在切换窗口外被丢弃并计数
 
@@ -2889,7 +2891,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
   1. 113 送达一条成交推送
 - 期望:
   - rep 环无该成交;计数 `priv_not_owner = 1`;该帧照写 `RawRx`
-- 实现:`crates/hft-venue/tests/private.rs::ven_275_push_not_owner`
+- 实现:`crates/hft-venue/tests/private.rs::ven_275_push_not_owner_is_raw_only`
 
 ### VEN-276 独立用户流连接的轮换同样先建后断
 
@@ -2901,7 +2903,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
   1. 交接新用户流连接 121,121 收到首条事件,`poll_once`
 - 期望:
   - 121 收到首条事件之前 120 一直是归属;之后 `priv_owner = 121`,120 退役;期间无 `ConnState{Down, role: UserStream}`
-- 实现:`crates/hft-venue/tests/private.rs::ven_276_user_stream_rotation`
+- 实现:`crates/hft-venue/tests/private.rs::ven_276_user_stream_replacement_waits_for_first_event`
 
 ### VEN-280 服务端 WS Ping 由 hft-net 回 Pong,不产生事件
 
@@ -2922,6 +2924,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 - 里程碑:M3
 - 前置:`G0`;`heartbeat(Order) = {ping: AppText, interval_ms: 20000, pong_timeout_ms: 10000, idle_timeout_ms: 0}`;A1 primary 每 1 s 收到一帧数据,运行 60 s
 - 实现:`crates/hft-venue/tests/heartbeat.rs::ven_281_app_heartbeat`
+- 边界回归:在原期限前 100 ms 收到数据后，静默满一个 interval 即发送，不额外等待原周期的一整轮。
 
 | 行 | `unconditional` | 期望 |
 |---|---|---|
@@ -3014,7 +3017,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 - 规则:[§6](README.md#6-exch-id--slot-私有表idtable)
 - 级别:unit
 - 里程碑:M3
-- 前置:`G0`,OMS 槽数 4、`gw.id_tomb_cap = 4`、`gw.id_table_cap = 16`(= 2 × (4 + 4),满足 VEN-015 的下限),`gw.id_tomb_ms = 120000`;表中 8 条(负载 0.5),全部为 1 s 前到终态的条目
+- 前置:`G0`,OMS 槽数 4、`gw.id_tomb_cap = 4`、`gw.id_table_cap = 16`(= 2 × (4 + 4),满足 VEN-015 的下限),`gw.id_tomb_ms = 120000`;表中 8 条(负载 0.5)，其中 4 条为 1 s 前到终态的条目、4 条为活动条目(不超过墓碑容量)
 - 步骤:
   1. 新单 Ack 带新的交易所 id
 - 期望:
@@ -3167,7 +3170,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 - 级别:table
 - 里程碑:M3
 - 前置:`SessionDriver` + `G0` + `C0`;A1 的 `AccountMeta.venue_uid = "acct-0001"`;每行设定 `StubCfg.session_identity` 与查询结果
-- 实现:`crates/hft-venue/tests/session.rs::ven_313_session_uid`
+- 实现:`crates/hft-venue/tests/acct_fetch.rs::ven_313_config_merges_both_key_identities`
 
 | 行 | 设定 | 期望 |
 |---|---|---|
@@ -3574,7 +3577,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
   1. gw 运行 10 s
 - 期望:
   - Margin 序列间隔 2 s(10 s 内 5 条 `AcctReq{Margin}`);`CallLog` 中 `default_caps` 调用数为 0
-- 实现:`crates/hft-venue/tests/config.rs::ven_390_margin_interval_from_refdata`
+- 实现:`crates/hft-venue/tests/acct_sched.rs::ven_390_effective_margin_interval`
 
 ### VEN-391 `CANCEL_ALL_SWEEP` 的挂单列表兜底
 
@@ -3586,7 +3589,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
   1. 处理 `CancelAll{account: A1, inst: 0}`;对端回挂单列表(A1 的 1 张仍挂 + 1 张外来单)
 - 期望:
   - 展开的帧之后提交 1 个 `ro_request(OpenOrders)` 请求;其响应经 `decode_rest(Sweep)` 产出 1 条 `QueryResult` 入 rep 环
-- 实现:`crates/hft-venue/tests/gw_send.rs::ven_391_cancel_all_sweep`
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_391_cancel_all_sweep_decodes_owned_open_orders`
 
 ### VEN-392 `order_channel(CancelAll) = Rest` 的全撤走 REST
 
@@ -3598,7 +3601,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
   1. 处理 `CancelAll{account: A1, inst: 0}`
 - 期望:
   - 无 WS 帧;1 个 REST 请求(`encode_rest`);1 条 `SendReport{CancelAll, Written}`
-- 实现:`crates/hft-venue/tests/gw_send.rs::ven_392_cancel_all_rest`
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_392_cancel_all_uses_declared_rest_channel`
 
 ### VEN-393 gw REST 连接的轮询节拍
 
@@ -3611,7 +3614,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 - 期望:
   - `SysCount.recvmsg`:连接 130 为 10(在途期间的 aux 圈)、其余 REST 连接 0;`epoll_pwait` 为 0
   - 每次 REST socket 被读之后都紧跟一次 `drain_out`(插桩计数相等)
-- 实现:`crates/hft-venue/tests/gw_loop.rs::ven_393_rest_poll_cadence`
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_393_rest_polling_reads_only_pending_lanes`
 
 ### VEN-394 会话建立:bootstrap REST 先于 endpoint
 
@@ -3650,3 +3653,5 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 - **发布**:改动本 crate 的版本先在 dev2 测试网窗口冒烟,再上升级主机(步骤归 [release-and-deploy](../../docs/runbooks/release-and-deploy.md))。
 - **跨组件**:模拟账户的订单从不出现在任何 `out-<venue>` 环,由 [hft-sim](../hft-sim/README.md) 与 apps/hft-core 的装配断言覆盖;真实 venue 协议 + 本 crate 运行时 + sequencer 的组合(如未知用户流事件、时钟越界拒单)见 [scenarios](../../docs/tests/scenarios.md) 的 C12、FP-8。
 - **可选扩展"全量增量深度"**:VEN-105–VEN-109(`状态:可选扩展:全量增量深度`)在某 venue 启用 `feed.depth = incremental` 的同一提交加入 `tools/xtask/test-trace.toml` 的 `enabled_extensions` 并通过;L2 双路合并(开发备忘)启用前先补用例。
+
+账户执行、私有归属与 REST 池的实现回归分别见 tests/acct_sched.rs、tests/acct_fetch.rs、tests/private.rs、tests/gw_rest.rs。VEN-313 当前覆盖调用方提供证据及缺证据失败的交接路径；VEN-314 的驱动内 UID 重试仍未完成。VEN-073/294 前置修订由 [容量边界说明](../../.agents/notes/proposed/testing/2026-10-15-venue-capacity-preconditions.md) 待负责人确认。

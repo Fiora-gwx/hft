@@ -428,11 +428,26 @@ pub(crate) fn private_subscribe(
         Line::Usdm => Ok(()),
         Line::Spot => out.push(
             if unsub {
-                b"{\"id\":\"u0000000000000000\",\"method\":\"userDataStream.unsubscribe\"}"
+                b"{\"id\":\"u0000000000000001\",\"method\":\"userDataStream.unsubscribe\"}"
             } else {
                 b"{\"id\":\"u0000000000000000\",\"method\":\"userDataStream.subscribe\"}"
             },
             0,
         ),
     }
+}
+
+/// A subscription response cannot be confused with a later unsubscribe response.
+pub(crate) fn private_ack(line: Line, payload: &[u8]) -> Option<(u8, bool)> {
+    if line != Line::Spot {
+        return None;
+    }
+    #[derive(serde::Deserialize)]
+    struct Ack<'a> {
+        #[serde(borrow)]
+        id: &'a str,
+        status: u16,
+    }
+    let a = from::<Ack>(payload).ok()?;
+    (a.id == "u0000000000000000").then_some((0, a.status == 200))
 }

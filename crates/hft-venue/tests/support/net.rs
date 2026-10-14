@@ -199,6 +199,9 @@ impl Net {
     /// Builds the requested connection through the connector (handshake + Upgrade against a fresh
     /// `MemPeer`) and returns its hand-off.
     pub fn complete(&mut self, req: BuildReq) -> Handoff {
+        self.complete_with(req, |_| {})
+    }
+    pub fn complete_with(&mut self, req: BuildReq, prepare: impl FnOnce(&mut Conn)) -> Handoff {
         let mut io = ScriptIo::new();
         io.idle_tsc = 0;
         self.c().push_script(io);
@@ -207,8 +210,21 @@ impl Net {
         let t0 = self.t;
         self.t += 1_000_000_000;
         let c = self.cc.as_mut().expect("connector");
-        let ev = mempeer::ws_build(c, job, &mut peer, t0);
+        let ev = if req.role == ConnRole::Rest {
+            assert_eq!(c.drive(t0), None);
+            let sent = c.script(job).unwrap().take_sent();
+            peer.feed_handshake(&sent);
+            let back = peer.drain();
+            c.script(job).unwrap().push_recv(RecvStep::data(0, 0, back));
+            assert_eq!(c.drive(t0 + 1), None);
+            let sent = c.script(job).unwrap().take_sent();
+            peer.feed_handshake(&sent);
+            c.drive(t0 + 1 + hft_net::TICKET_WAIT_NS).unwrap()
+        } else {
+            mempeer::ws_build(c, job, &mut peer, t0)
+        };
         assert!(matches!(ev, hft_net::BuildEvent::Ready { .. }), "{ev:?}");
+        prepare(self.c().conn_mut(job).unwrap());
         let h = self.c().handoff(job).unwrap();
         if let Some(s) = self.peers.get_mut(req.conn.0 as usize) {
             *s = Some(peer);

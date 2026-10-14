@@ -903,6 +903,8 @@ hft-core 自身不在 tick-to-trade 路径上增加代码;路径上的分段预�
 
 账户入口按 State 中的 MarginItem 编码变长 MarginReport；超过单体容量时设置 ITEMS_TRUNCATED，未观察到的 ADL 值不填零。该编码由 CORE-169 验证。
 
+网关装配将 rep-bulk 与 rep 配对交给 GatewayInput，并按 REST 端点创建 gateway RestPool；REST 连接由 conn-builder 交接。会话重认证后的 UID 证据绑定至本次 SessionDriver job。账户观察仍使用 warm AccountClient，有界 AcctProtocol 接入状态见 [hft-venue](../../crates/hft-venue/README.md#已知限制与后续工作)。
+
 ## 已知限制与后续工作
 
 - 当前可执行子集是 Linux 上的新 journal 会话、文件配置、单任务线程、已注册的 `NoModel` 策略与 `--dry-run` 离线闭环；配置生成示例、测试网模板与命令见 [config](config/README.md)。Windows 支持 `--check`、`schemas`、`--version` 与配置测试；实际引擎要求 Linux tmpfs 和 Unix socket。

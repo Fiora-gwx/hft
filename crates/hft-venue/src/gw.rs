@@ -17,12 +17,16 @@ use hft_net::{
     RetireMsg, RotatePolicy, SendErr, SendOk, TxTag,
 };
 use hft_refdata::{AccountKind, MarginData, RefData};
-use hft_rt::{ByteConsumer, Consumer, KillWord, PollTask, Polled, Producer, TscUtc, WaitFds};
+use hft_rt::{
+    Backing, ByteConsumer, ByteProducer, Consumer, KillWord, PollTask, Polled, Producer, TscUtc, WaitFds,
+    byte_spsc,
+};
 use hft_types::{AccountId, ClientOrderId, InstId, Px, Qty, SlotId, Tsc};
 use hft_venue_proto::{
     DeadManOut, DecodeErr, ExchIdHint, MsgOp, OrderChannel, ReportCtl, ReportOutcome, ReportSink, ReqRef,
     RxMeta, Skip, TargetRef, VenueProtocol, WallClock,
 };
+use zerocopy::IntoBytes;
 
 use crate::codes;
 use crate::config::{GwCfg, InitErr, Ticks};
@@ -125,6 +129,7 @@ pub struct GwCounters {
     pub install_failed: u64,
     pub fee_rule_deviation: u64,
     pub hold_evicted: u64,
+    pub private_unowned: u64,
 }
 
 const NO_CONN: ConnId = ConnId(0);
@@ -162,6 +167,8 @@ struct CMeta {
     buffered: bool,
 }
 
+#[path = "gw_rest.rs"]
+mod rest_io;
 struct Acct<P: VenueProtocol> {
     account: AccountId,
     kill_ix: u8,
@@ -175,6 +182,10 @@ struct Acct<P: VenueProtocol> {
     ids: IdTable,
     hold: VecDeque<Held>,
     rate: RateCounters,
+    rest_weight: RateCounters,
+    http: Option<rest_io::Pools>,
+    sched: crate::AcctSched,
+    private: crate::private::Private,
     quota: u16,
     rotate: bool,
     rotate_since: Option<u64>,
@@ -189,11 +200,17 @@ pub struct GwRuntime<P: VenueProtocol, const CAP: usize = 2048> {
     rd: &'static RefData,
     t: Ticks,
     accts: Vec<Acct<P>>,
+    rest_ip: Vec<(u8, RateCounters)>,
     mirror: Vec<SlotMirror>,
     cmds: Consumer<OutMsg>,
     out: Producer<RepMsg>,
     pend_rep: VecDeque<RepMsg>,
+    bulk: Option<ByteProducer>,
+    bulk_tx: ByteProducer,
+    bulk_rx: ByteConsumer,
     acct: ByteConsumer,
+    acct_req: Option<Producer<crate::AcctReq>>,
+    acct_queries: [&'static [hft_venue_proto::AcctQuery]; 2],
     raw: RawLog,
     kill: &'static KillWord,
     kill_mask: u32,
@@ -202,14 +219,17 @@ pub struct GwRuntime<P: VenueProtocol, const CAP: usize = 2048> {
     retire: Producer<RetireMsg>,
     retire_pend: VecDeque<RetireMsg>,
     build: Producer<BuildReq>,
-    building: Vec<Option<(usize, ConnRole)>>,
+    building: Vec<Option<(usize, ConnRole, usize)>>,
     ids: IdRange,
     frame: Box<MaskedFrame<CAP>>,
+    private_frames: hft_venue_proto::SubFrames,
     txcopy: Box<[u8]>,
     staged: VecDeque<GwCmd>,
     batch: Vec<GwCmd>,
     inflight: Vec<Inflight>,
     sink_evs: Vec<RepMsg>,
+    sink_bulk: Vec<u8>,
+    sink_spans: [(usize, usize); SINK_CAP],
     sink_keys: [IdKey; SINK_CAP],
     dm: DeadManOut,
     insts_buf: Vec<InstId>,
@@ -246,6 +266,8 @@ fn is_order(op: GwOp) -> bool {
 /// Report sink of one frame: buffers events, records exchange ids in the account's `IdTable`.
 struct GwSink<'a> {
     evs: &'a mut Vec<RepMsg>,
+    bulk: &'a mut Vec<u8>,
+    spans: &'a mut [(usize, usize); SINK_CAP],
     keys: &'a mut [IdKey; SINK_CAP],
     ids: &'a mut IdTable,
     mirror: &'a mut [SlotMirror],
@@ -262,11 +284,23 @@ struct GwSink<'a> {
 impl GwSink<'_> {
     fn push(&mut self, m: RepMsg) {
         if self.evs.len() < SINK_CAP {
+            self.spans[self.evs.len()] = (0, 0);
             self.keys[self.evs.len()] = IdKey::new(&self.key[..self.key_len]);
             self.evs.push(m);
         } else {
             self.over = true;
         }
+    }
+    fn push_bulk(&mut self, msg: RepMsg, bytes: &[u8]) {
+        if self.bulk.len() + bytes.len() > self.bulk.capacity() || self.evs.len() == SINK_CAP {
+            self.over = true;
+            return;
+        }
+        let ix = self.evs.len();
+        self.push(msg);
+        let start = self.bulk.len();
+        self.bulk.extend_from_slice(bytes);
+        self.spans[ix] = (start, bytes.len());
     }
     fn remember(&mut self, key: &[u8]) {
         self.key_len = 0;
@@ -297,11 +331,19 @@ impl ReportSink for GwSink<'_> {
     fn external_fill(&mut self, e: &hft_event::ExternalFill) {
         self.push(RepMsg::ExternalFill(*e));
     }
-    fn margin(&mut self, _hdr: &hft_event::MarginReportHdr, _items: &[hft_event::MarginItem]) {
-        self.unsupported += 1;
+    fn margin(&mut self, hdr: &hft_event::MarginReportHdr, items: &[hft_event::MarginItem]) {
+        if usize::from(hdr.n) != items.len() || hdr.n > hft_event::MarginReportHdr::MAX_ITEMS {
+            self.over = true;
+            return;
+        }
+        self.push_bulk(RepMsg::MarginReport(*hdr), items.as_bytes());
     }
-    fn account_config(&mut self, _hdr: &hft_event::AccountConfigReportHdr, _lev: &[hft_event::LeverageItem]) {
-        self.unsupported += 1;
+    fn account_config(&mut self, hdr: &hft_event::AccountConfigReportHdr, lev: &[hft_event::LeverageItem]) {
+        if usize::from(hdr.n_lev) != lev.len() || hdr.n_lev > hft_event::AccountConfigReportHdr::MAX_ITEMS {
+            self.over = true;
+            return;
+        }
+        self.push_bulk(RepMsg::AccountConfigReport(*hdr), lev.as_bytes());
     }
     fn exch_id(&mut self, key: &[u8], owner: Option<&ClientOrderId>) -> ExchIdHint {
         self.remember(key);
@@ -393,7 +435,12 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         let limits = rd.rate_limits(P::VENUE);
         let mut list = Vec::with_capacity(accts.len());
         for a in accts {
-            let ix = rd.venue_account_ix(P::VENUE, a.account).unwrap_or(0);
+            let ix = rd
+                .venue_account_ix(P::VENUE, a.account)
+                .ok_or(InitErr::DepsMismatch)?;
+            if list.iter().any(|x: &Acct<P>| x.account == a.account) {
+                return Err(InitErr::DepsMismatch);
+            }
             let bits = hft_types::KillBits::account(ix).0 | hft_types::KillBits::account_hard(ix).0;
             list.push(Acct {
                 account: a.account,
@@ -409,6 +456,16 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 ids: IdTable::new(cfg.id_table_cap, cfg.id_tomb_cap, t.ms(u64::from(cfg.id_tomb_ms))),
                 hold: VecDeque::with_capacity(usize::from(cfg.unmatched_hold_cap)),
                 rate: RateCounters::new(limits, |ms| t.ms(ms)),
+                private: crate::private::Private::default(),
+                http: None,
+                rest_weight: RateCounters::account_rest(limits, |ms| t.ms(ms)),
+                sched: crate::AcctSched::new(
+                    a.account,
+                    P::MARKET,
+                    rd.caps(P::VENUE).margin_data,
+                    &cfg,
+                    |ms| t.ms(ms),
+                ),
                 quota: 0,
                 rotate: false,
                 rotate_since: None,
@@ -416,21 +473,34 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 retire_at: None,
             });
         }
+        let mut rest_ip = Vec::new();
+        for x in &list {
+            if !rest_ip.iter().any(|(ip, _)| *ip == x.src_ip_idx) {
+                rest_ip.push((x.src_ip_idx, RateCounters::rest(limits, |ms| t.ms(ms))));
+            }
+        }
         let mut building = Vec::with_capacity(256);
         building.resize(256, None);
         let mut venue_insts: Vec<InstId> = rd.insts_of_venue(P::VENUE).to_vec();
         venue_insts.sort_unstable();
         let insts_cap = venue_insts.len().max(1);
+        let (bulk_tx, bulk_rx) = byte_spsc(1 << 19, Backing::Heap).map_err(|_| InitErr::DepsMismatch)?;
         Ok(GwRuntime {
             cfg,
             rd,
             t,
             accts: list,
+            rest_ip,
             mirror: vec![SlotMirror::default(); cfg.oms_slots as usize],
             cmds: deps.cmds,
             out: deps.out,
             pend_rep: VecDeque::with_capacity(REP_PEND_CAP),
+            bulk: None,
+            bulk_tx,
+            bulk_rx,
             acct: deps.acct,
+            acct_req: None,
+            acct_queries: [&[], &[]],
             raw: RawLog::new(deps.raw, P::VENUE, t),
             kill: deps.kill,
             kill_mask: deps.kill_mask,
@@ -442,11 +512,14 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             building,
             ids: IdRange::new(GW_FIRST, GW_LAST),
             frame: Box::new(MaskedFrame::new()),
+            private_frames: hft_venue_proto::SubFrames::with_capacity(CAP * 8, 8),
             txcopy: vec![0u8; CAP].into_boxed_slice(),
             staged: VecDeque::with_capacity(usize::from(cfg.cmds_per_loop)),
             batch: Vec::with_capacity(usize::from(cfg.cmds_per_loop)),
             inflight: Vec::with_capacity(INFLIGHT_CAP),
             sink_evs: Vec::with_capacity(SINK_CAP),
+            sink_bulk: Vec::with_capacity(65536),
+            sink_spans: [(0, 0); SINK_CAP],
             sink_keys: [IdKey::default(); SINK_CAP],
             dm: DeadManOut {
                 frame: Default::default(),
@@ -477,6 +550,35 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         }
     }
 
+    /// Startup: pair the variable report lane with the sequencer's rep consumer.
+    pub fn set_rep_bulk(&mut self, bulk: ByteProducer) {
+        self.bulk = Some(bulk);
+    }
+
+    fn flush_reports(&mut self) {
+        while let Some(m) = self.pend_rep.front().copied() {
+            if self.out.free_hint() == 0 {
+                break;
+            }
+            if matches!(m, RepMsg::MarginReport(_) | RepMsg::AccountConfigReport(_)) {
+                let Some(body) = self.bulk_rx.peek() else { break };
+                let Some(dst) = self.bulk.as_mut().and_then(|b| b.reserve(body.len() as u32)) else {
+                    break;
+                };
+                dst.copy_from_slice(body);
+                if let Some(b) = &mut self.bulk {
+                    b.commit();
+                }
+                self.bulk_rx.advance();
+            }
+            // Single producer: the free slot cannot disappear after the check above.
+            if self.out.try_push(m).is_err() {
+                break;
+            }
+            self.pend_rep.pop_front();
+        }
+    }
+
     fn push_rep(&mut self, m: RepMsg) {
         self.raw.note(Effect::Rep);
         if self.pend_rep.is_empty() && self.out.try_push(m).is_ok() {
@@ -488,6 +590,26 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         } else {
             self.n.rep_lost += 1;
         }
+    }
+
+    fn push_sink(&mut self, k: usize, m: RepMsg) {
+        if !matches!(m, RepMsg::MarginReport(_) | RepMsg::AccountConfigReport(_)) {
+            self.push_rep(m);
+            return;
+        }
+        let (start, len) = self.sink_spans[k];
+        let Some(bytes) = self.sink_bulk.get(start..start + len) else {
+            return;
+        };
+        let Some(dst) = self.bulk_tx.reserve(len as u32) else {
+            self.n.rep_lost += 1;
+            return;
+        };
+        dst.copy_from_slice(bytes);
+        self.bulk_tx.commit();
+        self.raw.note(Effect::Rep);
+        self.pend_rep.push_back(m);
+        self.flush_reports();
     }
 
     fn conn_state(
@@ -535,13 +657,33 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             0,
             0,
         );
+        self.decode_rest_reply(
+            r,
+            NO_CONN,
+            hft_net::Timestamps {
+                rx_tsc: now,
+                ..Default::default()
+            },
+            now,
+        );
+    }
+    fn decode_rest_reply(
+        &mut self,
+        r: crate::order_rest::Reply,
+        conn: ConnId,
+        ts: hft_net::Timestamps,
+        now: u64,
+    ) {
         let Some(a) = self.accts.iter().position(|a| a.account == r.account) else {
             return;
         };
         let Some(x) = self.accts.get_mut(a) else { return };
         self.sink_evs.clear();
+        self.sink_bulk.clear();
         let mut sink = GwSink {
             evs: &mut self.sink_evs,
+            bulk: &mut self.sink_bulk,
+            spans: &mut self.sink_spans,
             keys: &mut self.sink_keys,
             ids: &mut x.ids,
             mirror: &mut self.mirror,
@@ -556,24 +698,32 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         };
         let rx = RxMeta {
             account: r.account,
-            conn: NO_CONN,
-            rx_tsc: now,
+            conn,
+            rx_tsc: ts.rx_tsc,
+            hw_rx_ns: ts.hw_rx_ns,
+            sw_rx_ns: ts.sw_rx_ns,
+            rx_empty_gap_ns: ts.rx_empty_gap_ns,
             ..RxMeta::default()
         };
-        let result = P::decode_rest(
-            self.rd,
-            &mut x.ctx,
-            &r.origin,
-            r.status,
-            r.body.get(..usize::from(r.len)).unwrap_or(&[]),
-            &rx,
-            &mut sink,
-        );
+        let result = if r.status == 0 {
+            Err(DecodeErr::Shape)
+        } else {
+            P::decode_rest(
+                self.rd,
+                &mut x.ctx,
+                &r.origin,
+                r.status,
+                r.body.get(..usize::from(r.len)).unwrap_or(&[]),
+                &rx,
+                &mut sink,
+            )
+        };
         let (key, n, over) = (sink.key, sink.key_len, sink.over);
         let outcome = match result {
             Ok(o) if !over => o,
             _ => {
                 self.sink_evs.clear();
+                self.sink_bulk.clear();
                 self.n.report_decode_err += 1;
                 ReportOutcome {
                     outcome_unknown: r.origin.req,
@@ -583,9 +733,13 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         };
         self.apply_outcome(
             a,
-            NO_CONN,
+            conn,
             ConnRole::Rest,
             &outcome,
+            r.origin
+                .req
+                .zip(r.identity)
+                .map(|(req, id)| (req, id, r.origin.inst)),
             now,
             0,
             key.get(..n).unwrap_or(&[]),
@@ -594,16 +748,14 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
     }
     pub fn poll_once(&mut self, now: u64) -> LoopStat {
         let mut ls = LoopStat::default();
-        if let Some(reply) = self.rest.as_mut().and_then(|(_, rx)| rx.try_pop()) {
+        if self.pend_rep.is_empty()
+            && self.out.free_hint() > SINK_CAP
+            && let Some(reply) = self.rest.as_mut().and_then(|(_, rx)| rx.try_pop())
+        {
             self.rest_reply(reply, now);
             ls.did_work = true;
         }
-        while let Some(m) = self.pend_rep.front().copied() {
-            if self.out.try_push(m).is_err() {
-                break;
-            }
-            self.pend_rep.pop_front();
-        }
+        self.flush_reports();
         while let Some(m) = self.retire_pend.front().copied() {
             if self.retire.try_push(m).is_err() {
                 break;
@@ -640,9 +792,27 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     .get_mut(a)
                     .and_then(|x| x.user.as_mut())
                     .and_then(|p| p.primary().map(|c| c.id()));
+                let uid = self.accts[a].private.owner.or(uid);
                 if uid.is_some() {
                     frames += self.read_conn(a, uid, ConnRole::UserStream, now);
                 }
+            }
+            let candidate = self.accts[a].private.candidate.map(|c| c.id);
+            let owner = self.accts[a].private.owner;
+            if let Some(id) = candidate
+                && Some(id) != pid
+                && (!P::USER_STREAM || Some(id) != owner)
+            {
+                frames += self.read_conn(
+                    a,
+                    Some(id),
+                    if P::USER_STREAM {
+                        ConnRole::UserStream
+                    } else {
+                        ConnRole::Order
+                    },
+                    now,
+                );
             }
             // 3. standby every aux round.
             if aux {
@@ -650,36 +820,27 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     .accts
                     .get_mut(a)
                     .and_then(|x| x.pool.standby().map(|c| c.id()));
-                if sid.is_some() {
+                if sid.is_some() && sid != candidate {
                     self.n.standby_reads += 1;
                     frames += self.read_conn(a, sid, ConnRole::Order, now);
                     self.n.standby_drains += 1;
                 }
             }
         }
+        if aux {
+            ls.did_work |= self.poll_http(now);
+        }
         let cmds = self.cmds_done.wrapping_sub(cmds0);
         let maint = self.maintain(now);
         for a in 0..self.accts.len() {
             self.release_holds(a, now);
         }
-        // acct-fetch never writes rep directly: gw remains its only producer.
-        if self.out.free_hint() > reserve
-            && self.pend_rep.is_empty()
-            && let Some(record) = self.acct.peek()
-        {
-            let event = crate::funding::read_funding_record(record);
-            self.acct.advance();
-            if let Some(e) = event.filter(|e| {
-                e.venue == P::VENUE
-                    && e.synth == 0
-                    && self.acct_ix(e.account).is_some()
-                    && self.rd.inst(e.inst).venue == P::VENUE
-            }) {
-                self.push_rep(RepMsg::FundingSettle(e));
-            } else {
-                self.n.report_decode_err += 1;
-            }
-            ls.did_work = true;
+        // Account decoding runs on the warm worker; only its bounded records reach this thread.
+        if aux {
+            ls.did_work |= self.schedule_accounts(now);
+        }
+        if self.out.free_hint() > reserve && self.pend_rep.is_empty() {
+            ls.did_work |= self.apply_acct(now);
         }
         ls.frames = frames;
         ls.cmds = u16::try_from(cmds).unwrap_or(u16::MAX);
@@ -687,6 +848,209 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         ls.next_deadline = self.deadline();
         self.last = ls;
         ls
+    }
+
+    /// Startup-only wiring of the bounded account worker and its immutable protocol query table.
+    pub fn set_account_queries(&mut self, tx: Producer<crate::AcctReq>)
+    where
+        P: hft_venue_proto::AcctProtocol,
+    {
+        self.acct_queries = [
+            P::acct_queries(hft_venue_proto::AcctQueryKind::Config),
+            P::acct_queries(hft_venue_proto::AcctQueryKind::Margin),
+        ];
+        self.acct_req = Some(tx);
+    }
+
+    pub fn account_session(&mut self, account: AccountId, status: u8, uid: [u8; 24]) {
+        if let Some(x) = self.accts.iter_mut().find(|x| x.account == account) {
+            x.sched.session(status, uid);
+        }
+    }
+
+    fn rest_available(&mut self, a: usize, weight: u32, urgent: bool, now: u64) -> bool {
+        let x = &mut self.accts[a];
+        x.rest_weight.weight_available(weight, urgent, now)
+            && self
+                .rest_ip
+                .iter_mut()
+                .find(|(ip, _)| *ip == x.src_ip_idx)
+                .is_some_and(|(_, r)| r.weight_available(weight, urgent, now))
+    }
+    fn rest_charge(&mut self, a: usize, weight: u32) {
+        let x = &mut self.accts[a];
+        x.rest_weight.charge_weight(weight);
+        if let Some((_, r)) = self.rest_ip.iter_mut().find(|(ip, _)| *ip == x.src_ip_idx) {
+            r.charge_weight(weight);
+        }
+    }
+    fn schedule_accounts(&mut self, now: u64) -> bool {
+        if self.acct_req.is_none() {
+            return false;
+        }
+        let mut did = false;
+        for a in 0..self.accts.len() {
+            let x = &mut self.accts[a];
+            let ready = x.pool.primary().is_some() && x.private.owner.is_some();
+            if let Some((req, weight)) = x
+                .sched
+                .due(now, ready, self.acct_queries[0], self.acct_queries[1])
+                && self.rest_available(a, weight, req.why == 2, now)
+                && self.acct_req.as_mut().is_some_and(|tx| tx.try_push(req).is_ok())
+            {
+                self.rest_charge(a, weight);
+                self.accts[a].sched.started(req);
+                did = true;
+            }
+        }
+        did
+    }
+
+    fn apply_acct(&mut self, now: u64) -> bool {
+        let Some(record) = self.acct.peek() else {
+            return false;
+        };
+        if let Some(e) = crate::funding::read_funding_record(record) {
+            self.acct.advance();
+            if e.venue == P::VENUE
+                && e.synth == 0
+                && self.acct_ix(e.account).is_some()
+                && self.rd.inst(e.inst).venue == P::VENUE
+            {
+                self.push_rep(RepMsg::FundingSettle(e));
+            } else {
+                self.n.report_decode_err += 1;
+            }
+            return true;
+        }
+        let Some(h) = crate::AcctRecHdr::read(record) else {
+            self.acct.advance();
+            self.n.report_decode_err += 1;
+            return true;
+        };
+        let Some(a) = self.accts.iter().position(|x| x.account == h.account) else {
+            self.acct.advance();
+            self.n.report_decode_err += 1;
+            return true;
+        };
+        if !matches!(self.accts[a].sched.state(),crate::AcctState::Running(r) if r.seq_no==h.seq_no && r.kind==h.kind)
+        {
+            self.acct.advance();
+            self.n.report_decode_err += 1;
+            return true;
+        }
+        let mut invalid = false;
+        match h.what {
+            crate::acct_wire::RAW => {
+                let start = crate::acct_wire::HEADER;
+                let n = h.req_len as usize;
+                if h.parts == 0
+                    || h.part >= h.parts
+                    || h.body_len as usize > crate::ACCT_RAW_CHUNK
+                    || (h.part != 0 && n != 0)
+                {
+                    invalid = true;
+                } else {
+                    if n > 0 {
+                        self.raw.tx(
+                            h.conn,
+                            what::REST_RESPONSE,
+                            RawHdr::REDACTED,
+                            &record[start..start + n],
+                            h.sent_tsc,
+                        );
+                    }
+                    self.raw.rx(
+                        h.conn,
+                        what::REST_RESPONSE,
+                        0,
+                        0,
+                        h.ts.best_rx().0,
+                        h.ts.flags,
+                        &record[start + n..],
+                        h.ts.rx_tsc,
+                    );
+                }
+            }
+            crate::acct_wire::DONE => {
+                self.sink_evs.clear();
+                self.sink_bulk.clear();
+                let mut rest = &record[crate::acct_wire::HEADER..];
+                while !rest.is_empty() {
+                    let Some((m, tail, n)) = crate::acct_wire::report(rest) else {
+                        invalid = true;
+                        break;
+                    };
+                    let identity = match m {
+                        RepMsg::MarginReport(e) => (e.venue, e.account),
+                        RepMsg::AccountConfigReport(e) => (e.venue, e.account),
+                        RepMsg::PositionReport(e) => (e.venue, e.account),
+                        RepMsg::BalanceReport(e) => (e.venue, e.account),
+                        RepMsg::FundingSettle(e) => (e.venue, e.account),
+                        _ => {
+                            invalid = true;
+                            break;
+                        }
+                    };
+                    let inst_ok = match m {
+                        RepMsg::PositionReport(e) => self.rd.insts_of_venue(P::VENUE).contains(&e.inst),
+                        RepMsg::FundingSettle(e) => {
+                            e.inst.0 == 0 || self.rd.insts_of_venue(P::VENUE).contains(&e.inst)
+                        }
+                        RepMsg::MarginReport(_) | RepMsg::AccountConfigReport(_) => {
+                            tail.chunks_exact(16).all(|row| {
+                                let id = u32::from_le_bytes([row[0], row[1], row[2], row[3]]);
+                                self.rd.insts_of_venue(P::VENUE).contains(&InstId(id))
+                            })
+                        }
+                        _ => true,
+                    };
+                    if !inst_ok
+                        || identity != (P::VENUE, h.account)
+                        || self.sink_evs.len() == SINK_CAP
+                        || self.sink_bulk.len() + tail.len() > self.sink_bulk.capacity()
+                    {
+                        invalid = true;
+                        break;
+                    }
+                    let k = self.sink_evs.len();
+                    self.sink_spans[k] = (self.sink_bulk.len(), tail.len());
+                    self.sink_bulk.extend_from_slice(tail);
+                    self.sink_evs.push(m);
+                    rest = &rest[n..];
+                }
+            }
+            crate::acct_wire::FAILED => {}
+            _ => invalid = true,
+        }
+        self.acct.advance();
+        if invalid || h.what == crate::acct_wire::FAILED {
+            if invalid {
+                self.n.report_decode_err += 1;
+            }
+            if self.accts[a]
+                .sched
+                .failed(h.seq_no, now, self.cfg.acct_query_degraded_after)
+            {
+                self.conn_state(
+                    h.account,
+                    ConnRole::Rest,
+                    h.conn,
+                    ConnStateKind::Degraded,
+                    codes::ACCT_QUERY,
+                    now,
+                );
+            }
+        } else if h.what == crate::acct_wire::DONE {
+            for k in 0..self.sink_evs.len() {
+                let m = self.sink_evs[k];
+                self.push_sink(k, m);
+            }
+            if self.accts[a].sched.done(h.seq_no, now) == Some(true) {
+                self.conn_state(h.account, ConnRole::Rest, h.conn, ConnStateKind::Up, 0, now);
+            }
+        }
+        true
     }
 
     /// Reads one connection of account `a`: `poll_rx`, then frame by frame with a `drain_out` after
@@ -702,7 +1066,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 c.poll_rx(now);
             }
             loop {
-                if self.out.free_hint() <= reserve {
+                if self.out.free_hint() <= reserve || !self.pend_rep.is_empty() {
                     break;
                 }
                 if !self.report_frame(a, id, role, now) {
@@ -754,6 +1118,8 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         let Some(x) = self.accts.get_mut(a) else {
             return false;
         };
+        let accepted = x.private.accepts(id);
+        let candidate = x.private.candidate.is_some_and(|c| c.id == id);
         let user = x
             .metas
             .iter()
@@ -773,9 +1139,23 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         };
         let Some(conn) = conn else { return false };
         let Some(f) = conn.next_frame() else { return false };
+        let private_ack = P::private_ack(f.payload);
+        let class = P::classify_report(
+            if f.opcode == Opcode::Binary {
+                MsgOp::Binary
+            } else {
+                MsgOp::Text
+            },
+            f.payload.get(..64).unwrap_or(f.payload),
+        );
+        let private_push = P::is_private_report(class);
+        let discard = private_push && !accepted;
         self.sink_evs.clear();
+        self.sink_bulk.clear();
         let mut sink = GwSink {
             evs: &mut self.sink_evs,
+            bulk: &mut self.sink_bulk,
+            spans: &mut self.sink_spans,
             keys: &mut self.sink_keys,
             ids,
             mirror: &mut self.mirror,
@@ -788,7 +1168,11 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             key: [0; 36],
             key_len: 0,
         };
-        let res = decode_one::<P>(self.rd, ctx, &f, id, account, &mut sink);
+        let res = if discard || private_ack.is_some() {
+            Ok(ReportOutcome::default())
+        } else {
+            decode_one::<P>(self.rd, ctx, &f, id, account, &mut sink)
+        };
         let (over, unsupported, key, key_len) = (sink.over, sink.unsupported, sink.key, sink.key_len);
         let ts = f.ts;
         self.raw.rx(
@@ -812,6 +1196,20 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         {
             m.last_data = ts.rx_tsc;
         }
+        if discard {
+            self.n.private_unowned += 1;
+        }
+        if let Some((bit, ok)) = private_ack
+            && candidate
+        {
+            if !ok {
+                self.private_abort(a, id, now);
+            } else if self.accts[a].private.ack(id, bit) {
+                self.private_ready(a, id, now);
+            }
+        } else if candidate && private_push && res.is_ok() && self.accts[a].private.ready(id) {
+            self.private_ready(a, id, now);
+        }
         match if over { Err(DecodeErr::Overflow) } else { res } {
             Ok(o) => {
                 if let Some(m) = self
@@ -826,6 +1224,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     id,
                     role,
                     &o,
+                    None,
                     ts.rx_tsc,
                     ts.best_rx().0,
                     &key[..key_len.min(36)],
@@ -874,13 +1273,24 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         id: ConnId,
         role: ConnRole,
         o: &ReportOutcome,
+        rest_identity: Option<(ReqRef, ClientOrderId, InstId)>,
         rx: u64,
         hw: i64,
         _key: &[u8],
         now: u64,
     ) {
         let account = self.accts.get(a).map_or(AccountId(0), |x| x.account);
-        let request_identity = o.req.and_then(|r| self.request_identity(id, account, r));
+        let request_identity = rest_identity
+            .filter(|(r, cid, _)| {
+                cid.account == account && cid.venue == P::VENUE && cid.slot == r.slot && cid.r#gen == r.r#gen
+            })
+            .map(|(r, cid, inst)| (r, cid.epoch, inst))
+            .or_else(|| {
+                o.req
+                    .or(o.outcome_unknown)
+                    .and_then(|r| self.request_identity(id, account, r))
+                    .map(|(r, m)| (r, m.epoch, m.inst))
+            });
         for k in 0..self.sink_evs.len() {
             let Some(mut m) = self.sink_evs.get(k).copied() else {
                 break;
@@ -889,16 +1299,16 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 // Some request responses omit the client id (and therefore epoch).
                 // Only an outstanding request on this connection can fill that gap.
                 if e.epoch == 0
-                    && let Some((r, mirror)) = request_identity
+                    && let Some((r, epoch, inst)) = request_identity
                     && e.slot.0 == r.slot
                     && e.r#gen == r.r#gen
                     && e.account == account
                     && e.venue == P::VENUE
-                    && (e.inst.0 == 0 || e.inst == mirror.inst)
+                    && (e.inst.0 == 0 || inst.0 == 0 || e.inst == inst)
                 {
-                    e.epoch = mirror.epoch;
+                    e.epoch = epoch;
                     if e.inst.0 == 0 {
-                        e.inst = mirror.inst;
+                        e.inst = inst;
                     }
                 }
                 let accepted = e.epoch == self.epoch || (self.accept_prev && e.epoch == self.prev_epoch);
@@ -933,9 +1343,19 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 }
                 self.order_terminal(a, e, key, now);
             }
-            self.push_rep(m);
+            self.push_sink(k, m);
         }
         self.release_holds(a, now);
+        if let Some(x) = self.accts.get_mut(a) {
+            x.sched.hint(o.hint);
+            if self
+                .sink_evs
+                .iter()
+                .any(|m| matches!(m, RepMsg::MarginReport(_) | RepMsg::PositionReport(_)))
+            {
+                x.sched.pushed(now);
+            }
+        }
         if let Some(r) = o.req {
             self.inflight_done(id, r);
         }
@@ -946,12 +1366,17 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         }
         if let Some(r) = o.outcome_unknown {
             self.n.outcome_unknown += 1;
-            let epoch = self.mirror.get(r.slot as usize).map_or(self.epoch, |m| m.epoch);
+            let identity = request_identity.filter(|(req, _, _)| *req == r);
             let mut e = blank_event(P::VENUE, account);
             e.what = OrderEventKind::OutcomeUnknown;
-            e.slot = SlotId(r.slot);
-            e.r#gen = r.r#gen;
-            e.epoch = epoch;
+            if let Some((_, epoch, inst)) = identity {
+                e.slot = SlotId(r.slot);
+                e.r#gen = r.r#gen;
+                e.epoch = epoch;
+                e.inst = inst;
+            } else {
+                e.slot = SlotId::UNRESOLVED;
+            }
             e.reject_code = o.raw_code;
             e.rx_tsc = rx;
             e.hw_rx_ns = hw;
@@ -974,12 +1399,20 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 self.conn_state(account, role, id, ConnStateKind::Degraded, codes::RATE_LIMIT, rx)
             }
             ReportCtl::UserStreamEnded => {
-                self.conn_state(account, ConnRole::UserStream, id, ConnStateKind::Down, 0, rx);
-                if let Some(c) = self.conn_of(a, id) {
-                    c.mark(ErrBits::SERVER_HINT);
+                if P::USER_STREAM {
+                    self.retire_conn(a, id, ErrBits::PEER_EOF, now);
+                } else if self.accts[a].private.owner == Some(id) {
+                    self.accts[a].private.owner = None;
+                    self.conn_state(account, ConnRole::UserStream, id, ConnStateKind::Down, 0, now);
+                    self.private_start(a, id, now);
                 }
             }
             ReportCtl::ServerShutdown => {
+                if role == ConnRole::UserStream
+                    && let Some(c) = self.conn_of(a, id)
+                {
+                    c.mark(ErrBits::SERVER_HINT);
+                }
                 if let Some(x) = self.accts.get_mut(a) {
                     x.rotate = true;
                     x.rotate_bits |= ErrBits::SERVER_HINT.bits();
@@ -1153,12 +1586,12 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             self.report(&c, self.target_gen(&c), NO_CONN, SendStatus::RateLimited, 0, 0);
             return;
         }
-        if c.op == GwOp::CancelAll {
+        if c.op == GwOp::CancelAll && P::order_channel(c.op) != OrderChannel::Rest {
             self.cancel_all(a, &c, now);
             return;
         }
         // Target from the slot mirror.
-        let tgt = if c.op == GwOp::Place {
+        let tgt = if matches!(c.op, GwOp::Place | GwOp::CancelAll) {
             TargetRef {
                 id: self.cid(c.account, c.slot.0, c.r#gen, self.epoch),
                 exch_order_id: 0,
@@ -1179,6 +1612,10 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         };
         let clk = self.wall(now);
         if P::order_channel(c.op) == OrderChannel::Rest {
+            if self.accts[a].http.is_some() {
+                self.order_http(a, c, tgt, now);
+                return;
+            }
             let sent = self.rest.as_mut().is_some_and(|(tx, _)| {
                 tx.try_push(crate::order_rest::Request { cmd: c, target: tgt })
                     .is_ok()
@@ -1512,10 +1949,9 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 }
                 s += 1;
             }
-            if P::CANCEL_ALL_SWEEP {
-                // The open-order sweep is a REST request (M3).
-                self.n.rest_unavailable += 1;
-            }
+        }
+        if P::CANCEL_ALL_SWEEP {
+            self.sweep(a, *c, now);
         }
         self.report(c, None, conn_used, status, 0, sent_at);
     }
@@ -1650,7 +2086,16 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 }
             }
             GwOp::DeadManRefresh => self.dead_man(c, now),
-            GwOp::SessionKeepalive | GwOp::Resubscribe => self.n.rest_unavailable += 1,
+            GwOp::SessionKeepalive => self.keepalive(c, now),
+            GwOp::Resubscribe => {
+                if let Some(a) = self.acct_ix(c.account)
+                    && let Some(id) = self.accts[a].private.owner
+                {
+                    self.accts[a].private.owner = None;
+                    self.conn_state(c.account, ConnRole::UserStream, id, ConnStateKind::Down, 0, now);
+                    self.private_start(a, id, now);
+                }
+            }
             _ => self.n.maint_ignored += 1,
         }
     }
@@ -1660,7 +2105,9 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             self.n.cmd_bad_account += 1;
             return;
         };
-        if let Some((tx, _)) = &mut self.rest {
+        if self.accts[a].http.is_none()
+            && let Some((tx, _)) = &mut self.rest
+        {
             let request = crate::order_rest::Request {
                 cmd: c,
                 target: TargetRef {
@@ -1723,8 +2170,17 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             }
         }
         if ok && !self.dm.reqs.is_empty() {
-            // REST dead man arrives with the gw REST pools (M3).
-            self.n.rest_unavailable += 1;
+            for k in 0..self.dm.reqs.len() {
+                let wire = self.dm.reqs[k];
+                let origin = hft_venue_proto::RestOrigin {
+                    what: hft_venue_proto::RestWhat::DeadMan,
+                    req: None,
+                    inst: InstId(0),
+                };
+                if self.submit_http(a, c, origin, &wire, now).is_err() {
+                    ok = false;
+                }
+            }
         }
         if !ok {
             let account = c.account;
@@ -1739,15 +2195,111 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         }
     }
 
+    fn private_send(&mut self, a: usize, id: ConnId, unsub: bool, now: u64) -> bool {
+        self.private_frames.clear();
+        // Use disjoint borrows: the frame store is immutable while the connection writes.
+        let x = &mut self.accts[a];
+        let conn = if P::USER_STREAM {
+            x.user.as_mut().and_then(|u| u.get(id))
+        } else {
+            x.pool.get(id)
+        };
+        let Some(conn) = conn else { return false };
+        if !crate::private::copy_frames(conn.handoff_data(), unsub, &mut self.private_frames) {
+            return P::private_channels() == 0;
+        }
+        for k in 0..self.private_frames.len() {
+            let Some((bytes, _)) = self.private_frames.get(k) else {
+                return false;
+            };
+            if conn.send_text(bytes, now).is_err() {
+                return false;
+            }
+            self.raw.tx(id, what::WS_TEXT, RawHdr::REDACTED, &[], now);
+        }
+        true
+    }
+    fn private_start(&mut self, a: usize, id: ConnId, now: u64) {
+        if self.accts[a].private.candidate.is_some() {
+            return;
+        }
+        self.accts[a].private.begin(id, P::private_channels(), now);
+        if !self.private_send(a, id, false, now) {
+            self.private_abort(a, id, now);
+            return;
+        }
+        // An implicit subscription is authenticated by the connection's bootstrap. Replacement
+        // user streams still wait for their first private event before retiring the old stream.
+        if P::private_channels() == 0 && (!P::USER_STREAM || self.accts[a].private.owner.is_none()) {
+            self.private_ready(a, id, now);
+        }
+    }
+    fn private_ready(&mut self, a: usize, id: ConnId, now: u64) {
+        let old = self.accts[a].private.owner.replace(id);
+        self.accts[a].private.candidate = None;
+        if self.accts[a].private.ever_ready {
+            self.accts[a].sched.hint(hft_venue_proto::AcctHint::MarginNow);
+            self.accts[a].sched.hint(hft_venue_proto::AcctHint::ConfigRecheck);
+        }
+        self.accts[a].private.ever_ready = true;
+        if let Some(old) = old
+            && old != id
+        {
+            if !P::USER_STREAM {
+                self.accts[a].private.retiring = Some(old);
+            }
+            self.private_send(a, old, true, now);
+            if P::USER_STREAM {
+                self.retire_conn(a, old, ErrBits::ROTATE_DUE, now);
+            }
+        }
+        self.conn_state(
+            self.accts[a].account,
+            ConnRole::UserStream,
+            id,
+            ConnStateKind::Up,
+            0,
+            now,
+        );
+    }
+    fn private_abort(&mut self, a: usize, id: ConnId, now: u64) {
+        self.private_send(a, id, true, now);
+        self.accts[a].private.candidate = None;
+        self.accts[a].private.retry_at =
+            now.saturating_add(self.t.ms(u64::from(self.cfg.rotate_wait_max_ms)));
+        self.conn_state(
+            self.accts[a].account,
+            ConnRole::UserStream,
+            id,
+            ConnStateKind::Degraded,
+            codes::SUB_REJECTED,
+            now,
+        );
+        if P::USER_STREAM {
+            self.retire_conn(a, id, ErrBits::IDLE_TIMEOUT, now);
+        }
+    }
+    pub fn private_owner(&self, account: AccountId) -> Option<ConnId> {
+        self.accts.iter().find(|a| a.account == account)?.private.owner
+    }
+
     // ---------------------------------------------------------------- connections and timers
 
     fn handover(&mut self, h: Handover, now: u64) {
         match h {
             Handover::Failed(id) => {
-                if let Some((a, role)) = self.building.get_mut(id.0 as usize).and_then(Option::take) {
+                if let Some((a, role, endpoint)) = self.building.get_mut(id.0 as usize).and_then(Option::take)
+                {
                     self.ids.free(id);
                     if let Some(x) = self.accts.get_mut(a) {
                         match role {
+                            ConnRole::Rest => {
+                                if let Some((_, p)) =
+                                    x.http.as_mut().and_then(|r| r.endpoints.get_mut(endpoint))
+                                {
+                                    p.build_failed();
+                                }
+                            }
                             ConnRole::UserStream => {
                                 if let Some(u) = x.user.as_mut() {
                                     u.build_failed();
@@ -1760,10 +2312,23 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             }
             Handover::Ready(h) => {
                 let id = h.id();
-                let Some((a, role)) = self.building.get_mut(id.0 as usize).and_then(Option::take) else {
+                let Some((a, role, endpoint)) = self.building.get_mut(id.0 as usize).and_then(Option::take)
+                else {
                     self.n.install_failed += 1;
                     return;
                 };
+                if role == ConnRole::Rest {
+                    let ok = self.accts[a]
+                        .http
+                        .as_mut()
+                        .and_then(|r| r.endpoints.get_mut(endpoint))
+                        .is_some_and(|(_, p)| p.install(h).is_ok());
+                    if !ok {
+                        self.n.install_failed += 1;
+                        self.ids.free(id);
+                    }
+                    return;
+                }
                 let age = u64::from(self.rd.venue(P::VENUE).ws_max_conn_age_s);
                 let rot = (age != 0).then(|| {
                     now.saturating_add(
@@ -1806,7 +2371,42 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     buffered: false,
                 });
                 let account = x.account;
-                self.conn_state(account, role, id, ConnStateKind::Up, 0, now);
+                let mut session_failed = false;
+                let conn = if role == ConnRole::UserStream {
+                    x.user.as_mut().and_then(|u| u.get(id))
+                } else {
+                    x.pool.get(id)
+                };
+                if let Some(data) = conn.map(|c| c.handoff_data())
+                    && data.get(..8) == Some(b"PRIV0001")
+                    && data.len() >= 33
+                {
+                    let mut uid = [0; 24];
+                    uid.copy_from_slice(&data[9..33]);
+                    if data[8] != 0 {
+                        x.sched.session(data[8], uid);
+                        session_failed = data[8] == 2;
+                    }
+                }
+                if session_failed {
+                    self.conn_state(
+                        account,
+                        ConnRole::Rest,
+                        id,
+                        ConnStateKind::Degraded,
+                        codes::ACCT_QUERY,
+                        now,
+                    );
+                }
+                if role == ConnRole::Order {
+                    self.conn_state(account, role, id, ConnStateKind::Up, 0, now);
+                }
+                let primary = self.accts[a].pool.primary().map(|c| c.id());
+                if (P::USER_STREAM && role == ConnRole::UserStream)
+                    || (!P::USER_STREAM && primary == Some(id))
+                {
+                    self.private_start(a, id, now);
+                }
                 self.raw
                     .rx(id, what::CONNECT, 0, 0, 0, 0, &[account.0, role as u8], now);
             }
@@ -1826,6 +2426,16 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             _ => Some(x.pool.retire(id, why)),
         };
         x.metas.retain(|m| m.id != id);
+        let owner = x.private.owner == Some(id);
+        if owner {
+            x.private.owner = None;
+        }
+        if x.private.retiring == Some(id) {
+            x.private.retiring = None;
+        }
+        if x.private.candidate.is_some_and(|c| c.id == id) {
+            x.private.candidate = None;
+        }
         let account = x.account;
         if let Some(Ok(msg)) = r
             && self.retire.try_push(msg).is_err()
@@ -1836,7 +2446,32 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         self.inflight.retain(|f| f.conn != id);
         self.raw
             .rx(id, what::DISCONNECT, 0, 0, 0, 0, &[account.0, role as u8], now);
-        self.conn_state(account, role, id, ConnStateKind::Down, why.bits(), now);
+        if role != ConnRole::UserStream || owner {
+            self.conn_state(account, role, id, ConnStateKind::Down, why.bits(), now);
+        }
+        if owner {
+            if role != ConnRole::UserStream {
+                self.conn_state(
+                    account,
+                    ConnRole::UserStream,
+                    id,
+                    ConnStateKind::Down,
+                    why.bits(),
+                    now,
+                );
+            }
+            let next = if P::USER_STREAM {
+                self.accts[a]
+                    .user
+                    .as_mut()
+                    .and_then(|u| u.primary().map(|c| c.id()))
+            } else {
+                self.accts[a].pool.primary().map(|c| c.id())
+            };
+            if let Some(next) = next {
+                self.private_start(a, next, now);
+            }
+        }
     }
 
     /// Error bits, heartbeats, in-flight timeouts, planned switches, builds (README §4 steps 4–6).
@@ -1927,13 +2562,39 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     x.rotate_bits |= (bits & (ErrBits::SERVER_HINT | ErrBits::ROTATE_DUE)).bits();
                 }
                 if let Some(c) = self.conn_of(a, id) {
-                    c.clear_err();
+                    if role != ConnRole::UserStream {
+                        c.clear_err();
+                    }
                     c.finish_poll(now);
+                }
+            }
+            if let Some(c) = self.accts[a].private.candidate
+                && now.saturating_sub(c.since) >= self.t.ms(5000)
+            {
+                self.private_abort(a, c.id, now);
+                did = true;
+            }
+            if self.accts[a].private.owner.is_none()
+                && self.accts[a].private.candidate.is_none()
+                && now >= self.accts[a].private.retry_at
+            {
+                let id = if P::USER_STREAM {
+                    self.accts[a]
+                        .user
+                        .as_mut()
+                        .and_then(|u| u.primary().map(|c| c.id()))
+                } else {
+                    self.accts[a].pool.primary().map(|c| c.id())
+                };
+                if let Some(id) = id {
+                    self.private_start(a, id, now);
+                    did = true;
                 }
             }
             did |= self.switch(a, now);
         }
         did |= self.builds(now);
+        did |= self.build_http(now);
         did
     }
 
@@ -1960,10 +2621,13 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         let Some(x) = self.accts.get_mut(a) else {
             return did;
         };
-        if !x.rotate || x.retire_at.is_some() {
+        if !x.rotate || x.retire_at.is_some() || now < x.private.retry_at {
             return did;
         }
         let since = *x.rotate_since.get_or_insert(now);
+        if now < since {
+            return did;
+        }
         let pid = x.pool.primary().map(|c| c.id());
         let standby_open = x
             .pool
@@ -1977,6 +2641,17 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             }
             return did;
         }
+        let sid = x.pool.standby().map(|c| c.id());
+        if !P::USER_STREAM
+            && let Some(sid) = sid
+            && x.private.owner != Some(sid)
+        {
+            if x.private.candidate.is_none() {
+                self.private_start(a, sid, now);
+            }
+            return true;
+        }
+        let x = &mut self.accts[a];
         let Ok((newp, old)) = x.pool.swap_primary() else {
             return did;
         };
@@ -1999,6 +2674,9 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             for role in [ConnRole::Order, ConnRole::UserStream] {
                 let want = {
                     let Some(x) = self.accts.get_mut(a) else { continue };
+                    if role == ConnRole::UserStream && now < x.private.retry_at {
+                        continue;
+                    }
                     match role {
                         ConnRole::UserStream => x.user.as_mut().and_then(|u| u.next_build(now)),
                         _ => x.pool.next_build(now),
@@ -2026,7 +2704,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                         };
                         if self.build.try_push(req).is_ok() {
                             if let Some(s) = self.building.get_mut(id.0 as usize) {
-                                *s = Some((a, role));
+                                *s = Some((a, role, 0));
                             }
                             true
                         } else {
@@ -2059,6 +2737,9 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             d = min_deadline(d, f.sent.saturating_add(to).saturating_add(1));
         }
         for x in self.accts.iter() {
+            if let Some(c) = x.private.candidate {
+                d = min_deadline(d, c.since.saturating_add(self.t.ms(5000)));
+            }
             if let Some(h) = x.hold.front() {
                 d = min_deadline(
                     d,
@@ -2109,6 +2790,13 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             }
             if x.metas.iter().any(|m| m.id == id) {
                 return x.pool.get(id);
+            }
+            if let Some(h) = &mut x.http {
+                for (_, p) in &mut h.endpoints {
+                    if let Some(c) = p.get(id) {
+                        return Some(c);
+                    }
+                }
             }
         }
         None
@@ -2167,6 +2855,19 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             for id in ids {
                 self.retire_conn(a, id, ErrBits::empty(), now);
                 n += 1;
+            }
+        }
+        for a in &mut self.accts {
+            if let Some(h) = &mut a.http {
+                for (_, p) in &mut h.endpoints {
+                    p.retire_all();
+                    while let Some(m) = p.take_retired() {
+                        n += 1;
+                        if self.retire.try_push(m).is_err() {
+                            self.retire_pend.push_back(m);
+                        }
+                    }
+                }
             }
         }
         while let Some(m) = self.retire_pend.front().copied() {
@@ -2314,6 +3015,11 @@ impl<P: VenueProtocol, const CAP: usize> PollTask for GwRuntime<P, CAP> {
 
     fn wait_fds(&self, out: &mut WaitFds) {
         for x in self.accts.iter() {
+            if let Some(h) = &x.http {
+                for (_, p) in &h.endpoints {
+                    p.wait_fds(out);
+                }
+            }
             for m in x.metas.iter() {
                 if m.fd >= 0 {
                     out.push(m.fd);

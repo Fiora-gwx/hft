@@ -419,3 +419,117 @@ fn vpr_042_vec_sink_exch_id() {
     assert_eq!(s.exch_id(b"X2", None), ExchIdHint::Unknown);
     assert_eq!(s.id_calls.len(), 4);
 }
+
+#[test]
+fn vpr_047_golden_acct() {
+    use fake_venue::{FAKE_VENUE as V, FakePerp as P};
+    use hft_event::{AccountConfigReportHdr, LeverageItem, MarginItem, MarginReportHdr, PositionReport};
+    use hft_types::{Notional, Px, Qty, Rate};
+    use hft_venue_proto::testkit::{AcctSample, GoldenDriver};
+    let rd = fake_venue::fake_rd();
+    let account = AccountId(1);
+    let mut config = AccountConfigReportHdr::new_zeroed();
+    config.venue = V;
+    config.account = account;
+    config.n_lev = 1;
+    config.uid_keys = 2;
+    config.venue_uid[..2].copy_from_slice(b"U1");
+    let lev = LeverageItem {
+        inst: InstId(201),
+        _pad: 0,
+        leverage: Rate(5_000_000_000),
+    };
+    let mut margin = MarginReportHdr::new_zeroed();
+    margin.venue = V;
+    margin.account = account;
+    margin.margin_balance = Notional(11);
+    margin.n = 1;
+    let item = MarginItem {
+        inst: InstId(201),
+        adl_quantile: 255,
+        _pad: [0; 3],
+        liq_px: Px(0),
+    };
+    let mut pos = PositionReport::new_zeroed();
+    pos.venue = V;
+    pos.account = account;
+    pos.inst = InstId(201);
+    pos.qty = Qty(12);
+    let mut pos2 = pos;
+    pos2.inst = InstId(202);
+    pos2.qty = Qty(-12);
+    for (kind, want) in [
+        (AcctQueryKind::Config, vec![ReportRec::Config(config, vec![lev])]),
+        (
+            AcctQueryKind::Margin,
+            vec![
+                ReportRec::Margin(margin, vec![item]),
+                ReportRec::Position(pos),
+                ReportRec::Position(pos2),
+            ],
+        ),
+    ] {
+        let queries = P::acct_queries(kind);
+        let wires: Vec<_> = queries
+            .iter()
+            .map(|q| {
+                let mut r = RestReqBuf {
+                    redacted: true,
+                    ..Default::default()
+                };
+                r.path_query
+                    .push(b"/account?signature=test-signed-value")
+                    .unwrap();
+                r.endpoint = if kind == AcctQueryKind::Config {
+                    q.step % 2
+                } else {
+                    0
+                };
+                r
+            })
+            .collect();
+        let bodies: Vec<_> = (11i64..).take(queries.len()).map(i64::to_le_bytes).collect();
+        let samples: Vec<_> = queries
+            .iter()
+            .enumerate()
+            .map(|(i, q)| AcctSample {
+                name: "account sequence",
+                query: *q,
+                status: 200,
+                body: &bodies[i],
+                request: &wires[i],
+            })
+            .collect();
+        GoldenDriver::<P>::run_acct(
+            kind,
+            &samples,
+            &rd,
+            account,
+            &(),
+            &WallClock::default(),
+            &mut 0,
+            &want,
+        )
+        .unwrap();
+        let mut bad = want.clone();
+        if let ReportRec::Config(h, _) = &mut bad[0] {
+            h.mismatches = 1;
+        }
+        if let ReportRec::Margin(h, _) = &mut bad[0] {
+            h.margin_balance = Notional(12);
+        }
+        assert!(
+            GoldenDriver::<P>::run_acct(
+                kind,
+                &samples,
+                &rd,
+                account,
+                &(),
+                &WallClock::default(),
+                &mut 0,
+                &bad
+            )
+            .is_err()
+        );
+    }
+}

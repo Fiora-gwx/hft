@@ -386,11 +386,19 @@ where
                 .push(endpoint(rd, P::VENUE, EndpointRole::UserData)?);
         }
     }
+    let mut gateway_rest = None;
+    if !accounts.is_empty() {
+        let ep = endpoint(rd, P::VENUE, EndpointRole::Rest)?;
+        let id = EndpointId(net.endpoints.len() as u8);
+        gateway_rest = Some((id, ep.host.clone()));
+        net.endpoints.push(ep);
+    }
     let arena = ConnArena::new(
         &[
             (ConnRole::Md, 32),
             (ConnRole::Order, 4),
             (ConnRole::UserStream, 2),
+            (ConnRole::Rest, 2),
         ],
         &net,
         clock,
@@ -517,6 +525,7 @@ where
     if !accounts.is_empty() {
         let (orders, cmds) = ring(c.rings.elements)?;
         let (out, reports) = ring(c.rings.elements)?;
+        let (rep_bulk_tx, rep_bulk) = byte_ring(c.rings.bytes)?;
         let (_acct_tx, acct) = byte_ring(c.rings.bytes)?;
         let kill = Box::leak(Box::new(hft_rt::CachePadded(std::sync::atomic::AtomicU32::new(
             0,
@@ -612,9 +621,17 @@ where
         )
         .map_err(|e| Error::config("Gateway", format!("{e:?}")))?;
         gw.set_rest(rest_order_tx, rest_reply_rx);
+        gw.set_rep_bulk(rep_bulk_tx);
+        if let Some((endpoint, host)) = gateway_rest {
+            let pool = hft_net::RestPool::<2>::new(host.as_bytes(), &net, clock);
+            gw.set_rest_pools(AccountId(v.accounts[0].account), vec![(endpoint, pool)])
+                .map_err(|_| Error::config("RestPool", name))?;
+        }
         gateway = Some(io::GatewayInput {
             venue: P::VENUE,
             reports,
+            rep_bulk,
+            pending_report: None,
             orders,
             kill,
             account_reports: io::Inputs::new(account_rx),
@@ -673,6 +690,14 @@ where
                         pending_private = gb_rx.try_pop();
                         reauth_started = false;
                     }
+                    if pending_private.is_some_and(|r| r.role == ConnRole::Rest)
+                        && let Some(r) = pending_private.take()
+                        && session.start(&mut connector, r, None, now).is_err()
+                    {
+                        gh_tx
+                            .try_push(Handover::Failed(r.conn))
+                            .map_err(|_| Error::runtime("HandoffFull", "REST connection", 3))?;
+                    }
                     if let Some(client) = &mut account_client {
                         if pending_rest.is_none() {
                             pending_rest = rest_order_rx.try_pop();
@@ -723,13 +748,29 @@ where
                             publish_account(&mut account_tx, &state)?;
                             if reauth_started && let Some(mut r) = pending_private.take() {
                                 r.deadline_ns = now + i64::from(v_timeout_ms) * 1_000_000;
-                                if session
-                                    .start_prepared(&mut connector, r, account, now, client.listen_body())
-                                    .is_err()
-                                {
-                                    gh_tx.try_push(Handover::Failed(r.conn)).map_err(|_| {
-                                        Error::runtime("HandoffFull", "private connection", 3)
-                                    })?;
+                                let started = session.start_prepared(
+                                    &mut connector,
+                                    r,
+                                    account,
+                                    now,
+                                    client.listen_body(),
+                                );
+                                match started {
+                                    Ok(job) => {
+                                        if let Some(h) = state.config
+                                            && h.uid_keys & 1 != 0
+                                            && h.venue_uid[0] != 0
+                                        {
+                                            session.verified_identity(job, h.venue_uid).map_err(|_| {
+                                                Error::config("SessionIdentity", "invalid verified UID")
+                                            })?;
+                                        }
+                                    }
+                                    Err(_) => {
+                                        gh_tx.try_push(Handover::Failed(r.conn)).map_err(|_| {
+                                            Error::runtime("HandoffFull", "private connection", 3)
+                                        })?;
+                                    }
                                 }
                                 reauth_started = false;
                             }

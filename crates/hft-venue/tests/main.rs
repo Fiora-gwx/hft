@@ -5,6 +5,8 @@
     clippy::disallowed_methods,
     clippy::disallowed_types
 )] // allow-list: test code, not a hot path (crate level, as in the former per-file binaries)
+mod acct_fetch;
+mod acct_sched;
 mod bbo_live;
 mod codes;
 mod config;
@@ -33,3 +35,8 @@ mod seq;
 mod session;
 mod snapshot;
 mod support;
+
+mod private;
+
+mod continuation;
+mod gw_rest;

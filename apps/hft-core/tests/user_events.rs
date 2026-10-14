@@ -34,6 +34,13 @@ fn c12_ignorable_and_unknown_user_events_only_counted() {
     for _ in 0..8 {
         gateway.poll(h.now());
     }
+    let subscribed = gateway.net.sent_text(&mut gateway.runtime, hft_net::ConnId(112));
+    assert!(subscribed.iter().any(|f| f.contains("userDataStream.subscribe")));
+    gateway.net.push(
+        hft_net::ConnId(112),
+        br#"{"id":"u0000000000000000","status":200,"result":{"subscriptionId":1}}"#,
+    );
+    gateway.poll(h.now());
     gateway.deliver(&mut h);
     // Spot private subscriptions share the authenticated order connection.
     let conn = hft_net::ConnId(112);

@@ -41,6 +41,8 @@ pub struct RestReq<'a> {
 /// Header storage is inline; only `headers[..header_count]` contains response headers.
 pub struct RestResp<'a> {
     pub tag: ReqTag,
+    pub conn: ConnId,
+    pub sent_tsc: u64,
     pub status: u16,
     pub headers: [Header<'a>; 64],
     pub header_count: usize,
@@ -94,6 +96,8 @@ struct Complete {
 
 #[derive(Debug)]
 struct Lane {
+    id: ConnId,
+    fd: i32,
     h: Option<Handoff>,
     retired: Option<RetireMsg>,
     pending: Option<(ReqTag, u64)>,
@@ -130,6 +134,8 @@ impl<const N: usize> RestPool<N> {
     pub fn new(host: &[u8], cfg: &NetConfig, clock: TscClock) -> Self {
         Self {
             lanes: std::array::from_fn(|_| Lane {
+                id: ConnId(0),
+                fd: -1,
                 h: None,
                 retired: None,
                 pending: None,
@@ -160,7 +166,9 @@ impl<const N: usize> RestPool<N> {
             return Err(PoolErr::NotOpen);
         }
         c.on_install();
+        lane.fd = c.raw_fd();
         let id = h.id();
+        lane.id = id;
         lane.h = Some(h);
         self.building = false;
         Ok(id)
@@ -261,7 +269,7 @@ impl<const N: usize> RestPool<N> {
         }
         let lane = self.lanes.iter_mut().find(|l| l.result.is_some())?;
         let result = lane.result.take()?;
-        let (tag, _) = lane.pending.take()?;
+        let (tag, sent_tsc) = lane.pending.take()?;
         Some(match result {
             Err(err) => Err(RestFail { tag, err }),
             Ok(done) => {
@@ -278,6 +286,8 @@ impl<const N: usize> RestPool<N> {
                 let header_count = response.headers.len();
                 Ok(RestResp {
                     tag,
+                    conn: lane.id,
+                    sent_tsc,
                     status,
                     headers,
                     header_count,
@@ -314,6 +324,46 @@ impl<const N: usize> RestPool<N> {
             }
         }
         count
+    }
+
+    /// Only in-flight sockets belong to the task's park wait set.
+    pub fn wait_fds(&self, out: &mut hft_rt::WaitFds) {
+        for l in &self.lanes {
+            if l.pending.is_some() && l.h.is_some() && l.fd >= 0 {
+                out.push(l.fd);
+            }
+        }
+    }
+    pub fn has_pending(&self) -> bool {
+        self.lanes.iter().any(|l| l.result.is_some())
+    }
+    pub fn pending_conn(&self, tag: ReqTag) -> Option<ConnId> {
+        self.lanes
+            .iter()
+            .find(|l| l.pending.is_some_and(|p| p.0 == tag))
+            .map(|l| l.id)
+    }
+    /// Drain: retire all lanes for reclamation by their connector.
+    pub fn retire_all(&mut self) {
+        for lane in &mut self.lanes {
+            retire(lane, ErrBits::empty());
+            lane.pending = None;
+            lane.result = None;
+            lane.len = 0;
+        }
+    }
+    /// Timeout/cancellation retires the socket: a late response cannot satisfy a later request.
+    pub fn cancel(&mut self, tag: ReqTag) {
+        if let Some(l) = self
+            .lanes
+            .iter_mut()
+            .find(|l| l.pending.is_some_and(|p| p.0 == tag))
+        {
+            retire(l, ErrBits::IDLE_TIMEOUT);
+            l.pending = None;
+            l.result = None;
+            l.len = 0;
+        }
     }
 }
 

@@ -172,6 +172,8 @@ pub struct FeedInput {
 pub struct GatewayInput {
     pub venue: VenueId,
     pub reports: Consumer<RepMsg>,
+    pub rep_bulk: ByteConsumer,
+    pub pending_report: Option<RepMsg>,
     pub orders: Producer<GwCmd>,
     pub kill: &'static KillWord,
     pub account_reports: Inputs,
@@ -257,7 +259,9 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
             RingId::Hk => self.hk.len_hint(),
             RingId::RepSim => usize::from(self.sim_reports.pending()),
             RingId::Rep(n) => self.gws.get(n as usize).map_or(0, |g| {
-                g.reports.len_hint() + usize::from(g.account_reports.pending())
+                g.reports.len_hint()
+                    + usize::from(g.pending_report.is_some())
+                    + usize::from(g.account_reports.pending())
             }),
             RingId::Bbo(n) => self.feeds.get(n as usize).map_or(0, |f| f.bbo.len_hint()),
             RingId::Md(n) => self.feeds.get(n as usize).map_or(0, |f| f.md.len_hint()),
@@ -267,9 +271,18 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
     fn peek_len(&mut self, r: RingId) -> Option<usize> {
         if let RingId::Rep(n) = r
             && let Some(g) = self.gws.get_mut(n as usize)
-            && g.account_reports.pending()
         {
-            return g.account_reports.peek_len();
+            if g.account_reports.pending() {
+                return g.account_reports.peek_len();
+            }
+            if g.pending_report.is_none() {
+                g.pending_report = g.reports.try_pop();
+            }
+            return g.pending_report.map(|m| match m {
+                RepMsg::MarginReport(h) => 64 + usize::from(h.n) * 16,
+                RepMsg::AccountConfigReport(h) => 64 + usize::from(h.n_lev) * 16,
+                _ => 128,
+            });
         }
         if r == RingId::Ctl {
             self.ctl.peek_len()
@@ -332,13 +345,34 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
                 {
                     return g.account_reports.pop(now, out);
                 }
-                let Some(m) = self.gws.get_mut(n as usize).and_then(|g| g.reports.try_pop()) else {
+                let Some(g) = self.gws.get_mut(n as usize) else {
+                    return false;
+                };
+                let Some(m) = g.pending_report.take().or_else(|| g.reports.try_pop()) else {
                     return false;
                 };
                 self.reports += u64::from(matches!(m, RepMsg::OrderEvent(_)));
-                rep_parts(&m, &[], |kind, pieces| {
+                let variable = matches!(m, RepMsg::MarginReport(_) | RepMsg::AccountConfigReport(_));
+                let body = if variable {
+                    let expected = match m {
+                        RepMsg::MarginReport(h) => usize::from(h.n) * 16,
+                        RepMsg::AccountConfigReport(h) => usize::from(h.n_lev) * 16,
+                        _ => 0,
+                    };
+                    let Some(body) = g.rep_bulk.peek().filter(|b| b.len() == expected) else {
+                        g.pending_report = Some(m);
+                        return false;
+                    };
+                    body
+                } else {
+                    &[]
+                };
+                rep_parts(&m, body, |kind, pieces| {
                     out.set_pieces(kind, RecordFlags(0), now, pieces)
                 });
+                if variable {
+                    g.rep_bulk.advance();
+                }
                 true
             }
             _ => false,

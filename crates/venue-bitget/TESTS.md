@@ -2323,3 +2323,5 @@ BGT-336 补充单元验收:签名 trading-account financial-records 查询、IN/
 - **心跳回归**:BGT-191(持续推送数据时 10 min 不被服务端断开)与反例 BGT-192 通过;同一回归在真实运行时上的版本归 hft-venue。
 - **模拟盘联调**(门槛 ⑥):BGT-220 连续 3 天无未解释异常,行情与下单都用模拟盘;BGT-219 的 `books1` 与 V2 基线对比报告完成。
 - **可选扩展**:增量深度 `books`(含 `pseq = 0` 重置金样与 `bench_decode_bitget_books`)、`mock` 反向编解码、`batch-place`/`batch-modify` 批量帧在启用时同一改动补写用例并通过。
+
+BGT-201 同时核对私有频道位图与逐频道 subscribe/error/unsubscribe 回执识别。
