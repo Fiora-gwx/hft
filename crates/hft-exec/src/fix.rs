@@ -121,7 +121,11 @@ impl Exec {
         }
         // A capacity continuation (or restore) can revisit a rejected target before its wake.
         // Do not start a new repair window during that backoff; an existing window still expires.
-        if c.fix.first_tsc.0 == 0 && now.tsc.0 < c.wake_at.0 {
+        // A target gated by the exposure gate (#9) is the exception: the gate stays closed while
+        // the group is naked, so its backoff would hold the repair off for good (the repair is
+        // risk-reducing and passes #9).
+        let exposure_gated = c.gated_bits.0 & hft_types::RejectBits::EXPOSURE_GATE.0 != 0;
+        if c.fix.first_tsc.0 == 0 && now.tsc.0 < c.wake_at.0 && !exposure_gated {
             return;
         }
         let (_, e) = self.naked(cix, v);
@@ -152,7 +156,7 @@ impl Exec {
             self.reg_timer(cix, ExecTimerKind::Fix, t, t, out);
             return;
         }
-        if now.tsc.0 < c.wake_at.0 {
+        if now.tsc.0 < c.wake_at.0 && !exposure_gated {
             return;
         }
         let kind = if ext_default {

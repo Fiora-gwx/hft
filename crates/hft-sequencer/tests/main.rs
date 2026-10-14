@@ -44,6 +44,7 @@ mod replay_file;
 mod ring_full;
 mod scenarios;
 mod scenarios_risk;
+mod scenarios_exec;
 mod scenarios_hedge;
 mod scenarios_oms;
 mod sdk_contract;

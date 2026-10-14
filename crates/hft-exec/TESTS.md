@@ -4154,7 +4154,7 @@ spec: README.md
 - 故障:IOC 随机部分成交、零成交、`Unknown` 后迟到成交
 - 种子:PR 200 + 回归集;每夜日期派生
 - 断言:模拟交易所真值中 P 净量从未在单笔订单内由正跨到负;最终到达 −5.0
-- 实现:`crates/hft-testkit/src/scenarios/exec.rs::exe_501_flip_no_cross`
+- 实现:`crates/hft-sequencer/tests/scenarios_exec.rs::exe_501_flip_no_cross`
 
 ### EXE-502 Simultaneous:第二腿失败按 on_fail 处理,反向失败进入 Broken
 
@@ -4165,7 +4165,7 @@ spec: README.md
 - 故障:分支 A:第二腿被交易所拒(`on_fail = Reverse`);分支 B:同样故障,`on_fail = Hold`;分支 C:反向单也被拒
 - 种子:PR 100 + 回归集;每夜日期派生
 - 断言:A 对已成交未对冲部分出反向 IOC、无 Broken;B 无反向单,LegTracker 记裸量、补腿按阈值处理;C cell `Broken{ReverseFailed}`、`Note{ExecBroken}` P0
-- 实现:`crates/hft-testkit/src/scenarios/exec.rs::exe_502_simultaneous_on_fail`
+- 实现:`crates/hft-sequencer/tests/scenarios_exec.rs::exe_502_simultaneous_on_fail`
 
 ### EXE-503 L3 期间价差扩大:限价按 cap_cross_px,风控不以价格带或名义拒绝
 
@@ -4187,7 +4187,7 @@ spec: README.md
 - 故障:t 1 s 起有效模式 CloseOnly,t 20 s 回到 Live
 - 种子:PR 100 + 回归集;每夜日期派生
 - 断言:CloseOnly 期间 g7 无订单、`Stuck{Gated(CLOSE_ONLY)}`,g8 照常;Live 后 g7 继续;每个 cell 每 `gated_backoff_ms` 至多一条被拒意图
-- 实现:`crates/hft-testkit/src/scenarios/exec.rs::exe_504_close_only_midway`
+- 实现:`crates/hft-sequencer/tests/scenarios_exec.rs::exe_504_close_only_midway`
 
 ### EXE-505 执行层场景的通用断言:裸量超阈值时长有界,Broken 有界处置
 
