@@ -225,6 +225,16 @@ pub struct Engine {
     pub(crate) sent_union: Vec<u8>,
     /// Insts whose position changed between zero and non-zero in this Input.
     pub(crate) pos_touched: Vec<InstId>,
+    /// `(seq, account, group)` of the `Auto(Broken)` applications of the current Input (README
+    /// "意图管线" 6, "process" 7): one group is set `Broken` — and `on_legs` called for it — once
+    /// per Input even when several paths report it (a `HEDGE_LIMIT` rejection and the executor's
+    /// echoing `BrokenReq`). Entries of older Inputs are stale by their seq; fixed size, no
+    /// allocation.
+    pub(crate) broken_seen: crate::mode_glue::BrokenSeen,
+    /// Test hook (feature `testing`): the next Hedge-class executor order carries this
+    /// `hedge_cap_qty` instead of its own (SEQ-171 injects a producer that understates the cap).
+    #[cfg(feature = "testing")]
+    pub test_exec_hedge_cap: Option<hft_types::Qty>,
 }
 
 impl core::fmt::Debug for Engine {
@@ -498,6 +508,9 @@ impl Engine {
             ctx_full: 0,
             sent_union: vec![0; n_inst + 1],
             pos_touched: Vec::with_capacity(64),
+            broken_seen: crate::mode_glue::BrokenSeen::default(),
+            #[cfg(feature = "testing")]
+            test_exec_hedge_cap: None,
         })
     }
 
