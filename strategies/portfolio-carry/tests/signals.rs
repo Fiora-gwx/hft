@@ -167,7 +167,7 @@ fn carry_002_entry_has_equal_linked_legs_and_cap() {
     assert!(t.legs[0].qty.0 < 0);
     assert_eq!(t.legs[0].qty.0, -t.legs[1].qty.0);
     assert!(t.legs[1].qty.0 <= 100_000_000);
-    assert!(matches!(t.exec, ExecSpec::PairOnFill(_)));
+    assert_simultaneous(t.exec);
     assert_eq!(t.reason, TargetReason::Rebalance);
 }
 #[test]
@@ -212,6 +212,7 @@ fn carry_005_edge_decay_exits_and_hysteresis_holds() {
     assert_eq!(r.targets.len(), 1);
     assert_eq!(r.targets[0].reason, TargetReason::Exit);
     assert!(r.targets[0].legs.iter().all(|l| l.qty.0 == 0));
+    assert_simultaneous(r.targets[0].exec);
 }
 #[test]
 fn carry_006_healthy_quiet_quote_accepted_disconnected_quote_rejected() {
@@ -270,5 +271,19 @@ fn carry_008_disabled_and_closeonly_exit_held_positions() {
         let r = tick(&mut s, &v, &mut h);
         assert_eq!(r.targets.len(), 1);
         assert!(r.targets[0].legs.iter().all(|l| l.qty.0 == 0));
+        assert_simultaneous(r.targets[0].exec);
     }
+}
+
+fn assert_simultaneous(exec: ExecSpec) {
+    let ExecSpec::Simultaneous(p) = exec else {
+        panic!("entry and exit must dispatch both legs simultaneously");
+    };
+    assert_eq!(p.on_fail, SimulOnFail::Reverse);
+    assert_eq!(p.fix_tolerance, Rate(0));
+    assert_eq!(p.residual, ResidualPolicy::TrimExcess);
+    assert_eq!(p.slice.depth_frac, Rate(1_000_000_000));
+    assert_eq!(p.slice.depth_levels, 1);
+    assert_eq!(p.slice.max_cross, params(&group()).at(0).max_cross);
+    assert_eq!(p.slice.max_chunk_notional, params(&group()).at(0).max_notional);
 }

@@ -10,7 +10,7 @@ status: impl
 
 ## 概要
 
-每个 group 持有同一资产的等量反向两腿,赚取净资金费差。第 0 腿为线性永续,第 1 腿为现货或线性永续。现货组合只做空永续、多现货;双永续组合选择净年化收益较高的方向。两腿必须在不同交易所,使用同一计价资产与资产数量指数。策略只输出 SDK `TargetIntent`,由执行层 `PairOnFill` 管理第二腿及补腿。
+每个 group 持有同一资产的等量反向两腿,赚取净资金费差。第 0 腿为线性永续,第 1 腿为现货或线性永续。现货组合只做空永续、多现货;双永续组合选择净年化收益较高的方向。两腿必须在不同交易所,使用同一计价资产与资产数量指数。策略只输出 SDK `TargetIntent`,入场和退出均由执行层 `Simultaneous` 在同一事件内发出两腿 IOC。
 
 规则未定、在模拟账户上研究。当前参数默认值均为暂定研究值,生产上线仍需通过 [上线门槛](../../docs/testing.md#8-上线门槛)。`kind_id=1`、schema/version 均为 1,`NoModel<CarryParams>` 不消费 Advice 或预热。实际资金费记账归 [ledger](../../crates/hft-ledger/README.md#资金费),策略不按预测费率修改 PnL。
 
@@ -40,7 +40,9 @@ status: impl
 
 ### 输出与退出
 
-目标数量为 `(q, -q)`,`PairOnFill` 固定先做第 0 腿、1:1 对冲、第 1 腿 Cross,残余用 `TrimExcess`。下单、断腿、风控、Unknown 与修复由引擎负责。存在 Unknown、pending 或 open link 时等待;Broken 或仍在工作的引擎目标不覆盖,引擎处置完成后继续评估。重复目标不重发;失败重试受 `retry_ms` 限制。
+目标数量为 `(q, -q)`,入场及零目标退出共用 `Simultaneous(SimulParams)`,固定 `on_fail=Reverse`、`fix_tolerance=0`、`residual=TrimExcess`。每片双腿整对准入后同事件发出,无需等待任一腿成交。切片取两腿各自对手侧 BBO 深度的较小值,再受目标剩余量、资金与名义上限约束,按两腿 lot 对齐;`depth_frac=1`、`depth_levels=1`。两腿限价以本次切片观察的 BBO 为准,买价不高于 ask × (1 + `max_cross`),卖价不低于 bid × (1 − `max_cross`),tick 舍入与引擎价格带只能收紧边界。
+
+两原单终态后,非对称成交按 `Reverse` 请求反向处置超额量;反向单仍受引擎风险递减检查,失败交 Broken/修复机制。下单、断腿、风控、Unknown 与修复由引擎负责。存在 Unknown、pending 或 open link 时等待,断线本身不改变仓位;Broken 或仍在工作的引擎目标不覆盖,引擎处置完成后继续评估。重复目标不重发;失败重试受 `retry_ms` 限制。
 
 已有仓位的净年化低于 `exit_apr` 时发两腿零目标(`Exit`)。`enabled=false`、`open_allowed=false`、CloseOnly、保证金压力、自身外部成交或品种通知同样触发退出。安全退出在 Broken/引擎介入期间保留到持仓归零。费率缺失时持有已有对冲仓位;未成交的开仓目标在费率失效后撤向零。退出不要求另一腿预测费率可用。
 
@@ -113,7 +115,7 @@ status: impl
 
 ## 测试与验收
 
-[TESTS.md](TESTS.md) 定义信号、进入/退出、资金/杠杆、连接健康和快照用例。真实 sequencer 场景在 `registry/tests/portfolio_carry.rs`,以 mock 成交验证两种永续方向的 linked 第二腿、真实资金费输入、重复去重、退出以及逐字节 replay verify。该场景使用 mock 的 PerSymbolPush 能力;实际交易所的 RateOnly 账单完成由独立引擎改动验收。
+[TESTS.md](TESTS.md) 定义信号、进入/退出、资金/杠杆、连接健康和快照用例。真实 sequencer 场景在 `registry/tests/portfolio_carry.rs`,以 mock 成交验证两种永续方向的同事件双发、双侧深度与限价边界、非对称成交、单腿拒绝、在途断线后查询收敛、真实资金费去重和退出。故障种子检查风险修复、不凭连接猜仓位、重复执行确定性,每个场景逐字节 replay verify。该场景使用 mock 的 PerSymbolPush 能力;实际交易所的 RateOnly 账单完成由独立引擎改动验收。
 
 ## 依赖
 
@@ -124,6 +126,7 @@ status: impl
 - [策略接口](../../crates/hft-strategy-sdk/README.md)
 - [执行层](../../crates/hft-exec/README.md)
 - [范围决定](../../.agents/notes/implemented/feature/2026-10-14-bounded-funding-carry.md)
+- [双腿同发决定](../../.agents/notes/implemented/feature/2026-10-14-carry-simultaneous.md)
 
 ## 已知限制与后续工作
 

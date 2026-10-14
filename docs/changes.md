@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-14 | portfolio-carry 按负责人决定在入场和退出使用 Simultaneous 同事件双 IOC,固定 Reverse、零容差与 TrimExcess;保留切片参数,按两腿对手侧深度及资金/名义上限取量,限价受观察 BBO ± max_cross 约束;Unknown 待确认后才修复,实际资金费记账不变 | 负责人同发决定;CARRY-002/005/008/010 | strategies/portfolio-carry、strategies/registry、同发 Agent Note | 待评审 |
 | 2026-10-14 | Simultaneous 两腿先完整准入(含合计名义、lot 残余后的实际可负担量、减仓分类与方向、槽与出环容量),全部通过才同事件出单;Reverse 在本事件成交入账后检查,恢复等待两原单终态且不重复反向 | 负责人同发决定;SEQ-178/224、EXE-502、OMS-317、RSK-010/034 | OMS、risk、exec、sequencer、配套规格与真实引擎故障/回放验收 | 待评审 |
 | 2026-10-14 | 待评审(实现核对):策略无链接 Hedge 在减少 group 已成交净敞口且扣除同向全部在途后不过零时分类 Hedge/RISK_REDUCING,CloseOnly 放行;扩大敞口仍按 Open 拒绝;交易所 reduceOnly 只用于本腿减仓且 venue 支持 | 负责人决定 SDK-164.4;RSK-010 | hft-risk、hft-sequencer、hft-strategy-sdk README/TESTS、control-plane | 是(按 2026-10-14 决定修改) |
 | 2026-10-14 | 待评审(实现核对):Shadow 意图完整 evaluate,OrderDecision 同时记录 SHADOW 与实盘风控结果(reject=0 或首个拒绝位);不 commit、不分配槽、不出环,结果仍回填 Shadowed | 负责人决定 SDK-165;SEQ-174 | hft-sequencer、hft-strategy-sdk README/TESTS、event-model | 是(按 2026-10-14 决定修改) |
