@@ -1417,7 +1417,8 @@ spec: README.md
 - 步骤:读取内部 Timer 与 New 决策的逐 Input 观察,对副本分别改错 Kill、有效模式、对冲数量及强制减仓方向,删去模式/保证金/执行单元/在途/决策观察,制造溢出标记和 Input 漏记/重复
 - 期望:正常运行全部不变量通过;实际存在内部 Timer 和成功对冲;所有反例被相应检查拒绝,不修改被测引擎
 - 回归:core 种子 `0x61aaa3c81c37eb19` 的同组其他订单 Unknown 不阻止已收敛链接的合法 SecondRetry;诊断副本中的本链接 Unknown、Open 与本次输入刚进入 Unknown 都必须被 I4 拒绝,本次已收敛的 group 可通过。
-- 实现:`crates/hft-testkit/tests/observations.rs::tk_107_real_observations_and_counterexamples`、`tk_107_unknown_is_scoped_to_decision_group_and_link`
+- 实现:`crates/hft-testkit/tests/observations.rs::tk_107_real_observations_and_counterexamples`
+- 回归函数:`crates/hft-testkit/tests/observations.rs::tk_107_unknown_is_scoped_to_decision_group_and_link`
 
 ### TK-108 观察检查点只覆盖已发布 journal
 
