@@ -230,7 +230,7 @@ pub(crate) fn advance<D: Driver<S>, S: StrategySet>(
     if !e.exec.has_pending() {
         return Ok(());
     }
-    e.gpos.refresh(&e.ledger);
+    e.gpos.refresh(&e.ledger, e.gpos_bbo);
     e.trace.rec("exec.advance", 0, 0);
     let mut xo = e.take_exec();
     {
@@ -298,7 +298,7 @@ pub(crate) fn hedge_fix<D: Driver<S>, S: StrategySet>(
     a: AccountId,
     g: GroupId,
 ) -> R<Result<(), ExecCmdErr>> {
-    e.gpos.refresh(&e.ledger);
+    e.gpos.refresh(&e.ledger, e.gpos_bbo);
     e.trace.rec("exec.hedge_fix_cmd", u64::from(a.0), u64::from(g.0));
     let mut xo = e.take_exec();
     let r = {
@@ -318,7 +318,7 @@ pub(crate) fn on_external<D: Driver<S>, S: StrategySet>(
     a: AccountId,
     f: &hft_strategy_sdk::ExternalFillView,
 ) -> R<hft_types::Tsc> {
-    e.gpos.refresh(&e.ledger);
+    e.gpos.refresh(&e.ledger, e.gpos_bbo);
     e.trace
         .rec("exec.on_external", u64::from(a.0), u64::from(f.group.0));
     let mut xo = e.take_exec();

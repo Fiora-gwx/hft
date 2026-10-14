@@ -20,9 +20,19 @@
 #[cfg(target_endian = "big")]
 compile_error!("hft-sequencer: snapshot rows are little-endian only");
 
+// Expands to nothing in production, including the counter storage.
+macro_rules! bench_stage {
+    ($e:expr, $stage:ident) => {
+        #[cfg(feature = "bench-stages")]
+        $e.bench_stages.mark(crate::bench_stages::Stage::$stage);
+    };
+}
+
 pub mod advisor;
 #[cfg(feature = "testkit")]
 pub mod audit;
+#[cfg(feature = "bench-stages")]
+pub mod bench_stages;
 pub mod clock;
 pub mod codes;
 mod commands;
@@ -174,6 +184,7 @@ impl<D: Driver<S>, S: StrategySet> Sequencer<D, S> {
                 self.e.finished = Some(StepOutcome::Fatal(f));
                 return StepOutcome::Fatal(f);
             }
+            bench_stage!(self.e, Intake);
             if let Some(o) = self.e.finished {
                 // The event that ended the run (Drain snapshot included) is complete: publish it
                 // before returning, like the end of any round.
@@ -181,12 +192,24 @@ impl<D: Driver<S>, S: StrategySet> Sequencer<D, S> {
                 return o;
             }
         }
+        bench_stage!(self.e, Publish);
         self.drv.journal().publish();
+        bench_stage!(self.e, Intake);
         if busy {
             StepOutcome::Busy
         } else {
             StepOutcome::Idle
         }
+    }
+
+    /// Benchmark-only boundary: one already-decoded Input through the production processor.
+    #[cfg(feature = "bench-stages")]
+    pub fn bench_input(&mut self, input: &InputSlot) -> Result<(), FatalReason> {
+        process::process_parts(&mut self.e, &mut self.inst, &mut self.drv, input)?;
+        bench_stage!(self.e, Publish);
+        self.drv.journal().publish();
+        bench_stage!(self.e, Intake);
+        Ok(())
     }
 
     /// The driver's read-only view.

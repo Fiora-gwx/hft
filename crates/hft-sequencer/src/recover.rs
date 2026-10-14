@@ -493,6 +493,8 @@ pub(crate) fn restore_at<S: StrategySet>(
     }
     let cells: Vec<(AccountId, GroupId)> = inst.cells().map(|c| (c.account, c.group)).collect();
     e.gpos.set_cells(cells.into_iter());
+    e.gpos.index_insts(&inst);
+    e.feeds_dirty = true;
     // Gate input caches from the restored gate state.
     derive_gate_caches(&mut e);
     // Subscription index; the feed commands of a start are sent at EngineClock.

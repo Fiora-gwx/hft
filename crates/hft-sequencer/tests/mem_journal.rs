@@ -28,13 +28,18 @@ fn seq_424_physical_meta_boundaries_distinguish_boot_and_open_events() {
         assert!(seg.records[2].flags.contains(RecordFlags::EVENT_END));
         let standalone = j.append(RecordFlags(0), Tsc(1), &meta).unwrap().0;
         j.publish();
+        assert_eq!(j.committed_len, published_bytes(&j));
         assert_eq!(j.records().nth(j.committed - 1).unwrap().seq, standalone);
         assert!(j.records().last().unwrap().flags.contains(RecordFlags::EVENT_END));
         j.append(RecordFlags(0), Tsc(2), &input).unwrap();
         j.append(RecordFlags(0), Tsc(2), &meta).unwrap();
+        let committed = j.committed_len;
+        j.publish();
+        assert_eq!(j.committed_len, committed, "open event stays unpublished");
         assert!(!j.records().last().unwrap().flags.contains(RecordFlags::EVENT_END));
         j.end_event();
         j.publish();
+        assert_eq!(j.committed_len, published_bytes(&j));
         let rows = &j.segments.last().unwrap().records;
         assert!(rows[rows.len() - 2].flags.contains(RecordFlags::EVENT_END));
         assert!(!rows.last().unwrap().flags.contains(RecordFlags::EVENT_END));
@@ -69,6 +74,7 @@ fn seq_423_memory_multipart_boundaries_and_truncation() {
             assert_eq!(j.record_end_seq(first), next - 1);
             j.end_event();
             j.publish();
+            assert_eq!(j.committed_len, published_bytes(&j));
         }
         assert_eq!(j.len(), 5);
         assert_eq!(j.committed, 5);
@@ -94,6 +100,7 @@ fn seq_423_memory_multipart_boundaries_and_truncation() {
             assert_eq!(j.next_seq, next);
             assert_eq!(j.segments[0].part_ends, retained.part_ends);
             assert_eq!(j.published().count(), 5);
+            assert_eq!(j.committed_len, published_bytes(&j));
         }
         assert_eq!(
             j.append_var(EventKind::STATE_SNAPSHOT, RecordFlags(0), Tsc(9), &[&body])
@@ -101,5 +108,14 @@ fn seq_423_memory_multipart_boundaries_and_truncation() {
                 .0,
             next
         );
+        j.end_event();
+        j.publish();
+        assert_eq!(j.committed_len, published_bytes(&j), "append after truncation");
     }
+}
+
+fn published_bytes(j: &MemJournal) -> u64 {
+    j.published()
+        .map(|r| 24 + r.body.len().div_ceil(8) as u64 * 8)
+        .sum()
 }

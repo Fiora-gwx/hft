@@ -275,6 +275,8 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 | `seq/advice_route` | hft-sequencer | [hft-sequencer 延迟与资源契约](../crates/hft-sequencer/README.md#延迟与资源契约) | SEQ-330 |
 | `seq/bbo_exec_fire` | hft-sequencer | [hft-sequencer 延迟与资源契约](../crates/hft-sequencer/README.md#延迟与资源契约) | SEQ-327 |
 | `seq/bbo_fire` | hft-sequencer | [hft-sequencer 延迟与资源契约](../crates/hft-sequencer/README.md#延迟与资源契约) | SEQ-326 |
+| `seq/bbo_hit` | hft-sequencer | [内部阶段诊断](../crates/hft-sequencer/README.md#延迟与资源契约),与 `seq/bbo_fire` 同夹具 | SEQ-326 |
+| `seq/bbo_miss_ram` | hft-sequencer | [内部阶段诊断](../crates/hft-sequencer/README.md#延迟与资源契约),真实 SPSC/RAM 写者 | SEQ-324 |
 | `seq/bbo_miss` | hft-sequencer | [hft-sequencer 延迟与资源契约](../crates/hft-sequencer/README.md#延迟与资源契约) | SEQ-324 |
 | `seq/bbo_target_idle` | hft-sequencer | [hft-sequencer 延迟与资源契约](../crates/hft-sequencer/README.md#延迟与资源契约) | SEQ-325 |
 | `seq/bbo_view` | hft-sequencer | [hft-sequencer 延迟与资源契约](../crates/hft-sequencer/README.md#延迟与资源契约) | SEQ-322 |

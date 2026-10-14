@@ -115,7 +115,7 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 
 `JournalSink` 由 `hft-journal::JournalWriter` 实现(实盘、恢复),验证与镜像驱动实现为按日志对齐序号的哑写者;`EVENT_END` 位与 Input/Output/Meta 分类属于 [hft-event](../hft-event/README.md) 的 `RecordFlags`/`KindInfo.role`。
 
-测试用 `MemJournal::new` 按逻辑记录编号;`with_physical_seq` 在 append 返回前按 `PartIter` 预留全部物理片序号,逻辑体仍完整保存。`MemSegment.part_ends` 与 `Log.part_ends` 保存首片及末片序号,引导块计数包含每一片,滚段 Meta 与真实写者一致。物理模式的独立 Meta 自带 EVENT_END 并可发布,引导块和开放事件内的 Meta 不提前结束事件。崩溃截尾同步清除分片索引,重算保留记录数,从最后保留记录的末片之后续写;调用方先裁到发布边界也适用。此模式只用于测试,不改变生产写者、文件格式和快照格式;`committed_len` 仍是内存记录长度的代理值,不可当作文件字节数。
+测试用 `MemJournal::new` 按逻辑记录编号;`with_physical_seq` 在 append 返回前按 `PartIter` 预留全部物理片序号,逻辑体仍完整保存。`MemSegment.part_ends` 与 `Log.part_ends` 保存首片及末片序号,引导块计数包含每一片,滚段 Meta 与真实写者一致。物理模式的独立 Meta 自带 EVENT_END 并可发布,引导块和开放事件内的 Meta 不提前结束事件。崩溃截尾同步清除分片索引,重算保留记录数,从最后保留记录的末片之后续写;调用方先裁到发布边界也适用。此模式只用于测试,不改变生产写者、文件格式和快照格式;内存记录字节累计值在 append、事件边界与引导完成时维护,`publish` 只发布边界值(O(1)),截尾后从保留前缀重建累计值。`committed_len` 仍是内存记录长度的代理值,不可当作文件字节数。
 
 **离线文件输入**由默认关闭的 `replay-io` feature 提供 `Log::from_reader(&mut JournalReader, LogReadLimits)`。完整文件验证使用 [JournalReader::open_files](../hft-journal/README.md#读者) 预检的固定边界与原路径清单;普通读者须配置 LastCompleteEvent、段首起点、Error-on-gap 和非零重组容量,其恢复截断点本身不证明文件完整。记录数与逻辑体字节数上限分别由 `LogReadLimits.records/body_bytes` 给出。超过上限、Pending、空输入、损坏、缺段、未知 kind 或段头 schema 与当前二进制不符均返回 `LogReadError`,不返回成功的部分日志。物理 seq 与跨片记录的末片 seq、事件标志、多段重组后的业务尾零及各段时钟保持原样;Fixed/Var 经 [exact_body](../hft-event/README.md#体-trait-与编解码) 去除传输填充。读取不打开写者、不修改来源文件,只在冷调用方执行,不进入 LiveDriver 的取环路径。
 
@@ -160,6 +160,8 @@ pub struct MirrorDriver  { /* advisor 线程:尾随 seq journal 的 Input,按日
 实例表:`instances: FixedVec<InstanceSlot<S>, max_instances>`,键 `StrategyId`(= `StrategyInstanceId`,同一 u8 类型,由 refdata 的 `Instances` 段分配);每个实例绑定且只绑定一个账户(`AccountMeta.bound_instance`),`kind_id` 由 refdata `InstanceMeta` 给出、进程生命周期内不变;实例在其第一份 `StrategyParams` 生效时创建。实例按所绑定账户的类型分成**实盘实例**(`AccountKind::Live`)与**模拟实例**(`Sim`);启动时生成固定的派发顺序 `dispatch_order`(先全部实盘实例、后全部模拟实例,各自按 `StrategyId` 升序),refdata 不热替换,所以它在进程生命周期内不变。每个实例另记每个 group 的 `spec_seq`(见 [Advice 路由](#advice-路由))与当前参数的 `model_mem`、`model_ckpt`。
 
 ### 只读视图(`SeqViews`,实现 SDK `Views`)
+
+`GroupPosView` 引用由派生缓存提供。参数安装与恢复时按 GroupSpec 的交易腿建立 inst → 缓存行索引;首次读取完整刷新,随后 BBO 只刷新该 inst 的行,其他 Input 保留完整刷新。缓存与索引不进快照,账本仍是唯一事实源。
 
 | 方法 | 数据来源 |
 |---|---|
@@ -400,6 +402,8 @@ g. rep-sim ≤ sim_max_per_round
 
 ### 连接活性
 
+`Feeds` 就绪检查使用不持久化的失效标记。首条报价、成员集合增长、任何非 BBO Input、参数安装与恢复使其失效;失效后在原有检查点完整复核。连续 BBO 只改变价格和接收时间时复用检查结果,不扫描全部账户与交易腿。
+
 报价新鲜度按 **BBO 连接健康**判定(活性证据的来源与发布规则归 [event-model 关键事件体](../../docs/subsystems/event-model.md#关键事件体),槽号与成员事件归 [hft-venue](../hft-venue/README.md);判定式 `BboView::quote_live` 归 SDK,阈值 `conn_liveness_ms` 归 hft-risk)。每个 venue 的 BBO 连接占槽 `0..MAX_BBO_CONN_SLOTS`(常量及其值归 [hft-types](../hft-types/README.md#id-与枚举);`ConnState.conn` / `MarketHdr.conn` 小于它即槽号,连接退役后槽复用)。本 crate 维护:
 
 - 每 (venue, 槽) `ConnLive { up: bool, resync: bool, live_tsc: Tsc }`(快照节 26);
@@ -598,7 +602,7 @@ Model 从检查点恢复、镜像尚未追到其 `last_seq` 时,落后量以该�
 
 ### inst → 策略的稠密索引
 
-快速行情投递借用 CSR 行并按实例过滤,不为每个订阅者复制临时 Vec;实例顺序与行内 gix 顺序保持不变。
+快速行情投递借用 CSR 行并按实例过滤,不为每个订阅者复制临时 Vec。每轮将 CSR、通知与直接事件的接收者合并到按派发位置编号的位图,只访问有输入的实例;实例顺序、行内 gix 顺序与共享定时器额度的分配顺序保持不变。
 
 订阅 inst 在首次订阅时得到稠密下标 `sub_ix`(`InstId → sub_ix` 映射按 refdata 宇宙预分配,u16;下标进程生命周期内不回收)。CSR:`sub_off: [u32; max_insts + 1]`、`sub_ent: [(instance_ix: u16, gix: u16); max_insts × max_subs_per_inst]`;行情事件经 `sub_ix` 直接下标,行内顺序按 `(dispatch_order 中的位置, gix)` 升序——先实盘实例、后模拟实例(确定)。由各实例 `subscriptions()` 在启动与 `SetParams` 改变订阅时原地重建(命令路径,O(总订阅数),不分配)。**行情订阅随之下发**:重建时对每个 inst 求全部实例(快速部分与 Model)订阅的 SDK `EvMask` 之并,再并上**引擎自身的订阅**(持仓驱动):① 任一已绑定 GroupSpec 的交易腿含 `BBO`,永续交易腿另含 `MARK` 与 `FUNDING`;② 本实例账户中 `InstPos.qty ≠ 0` 的永续 inst 含 `BBO`、`MARK`、`FUNDING`,有现货库存(现货 `InstPos.qty ≠ 0`)的 inst 含 `BBO`——含核销、外来成交与人工交易留下的账户级无 group 持仓;③ EngineConfig 段 2 的每个 `ref_inst` 含 `BBO`。ledger 的保证金、未实现与换算率、资金费合成、MarginStress 与 L3 依赖它们;只为引擎订阅、策略未订阅的事件不投递给策略。并集在启动与 `SetParams` 改变订阅时重算,ledger 使某 (account, inst) 的 `InstPos.qty` 在 0 与非 0 之间变化时在同一 Input 内重算该 inst;只由 ②③ 引入的 inst 同样占 `sub_ix`(CSR 行为空),`max_insts` 用尽时该 inst 不订阅(永续持仓因此没有标记价,hft-risk 按标记价断流至少 L1 并告警)。与上次下发的值不同时出环一条 `FeedCmd::Subscribe{inst, streams = 新并集}`(首次订阅与并集变化都重发;并集变为空 → `Unsubscribe{inst}`;字段归 [hft-event](../hft-event/README.md#环元素类型),按位分发到 feed-bbo/feed-md 的规则归 [hft-venue](../hft-venue/README.md));上次下发的并集不进快照(只在本次运行有效),启动时每个并集非空的 inst 各发一次。group 级事件用 `group → (instance_ix, gix)` 的同构索引。
 
@@ -854,6 +858,8 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 待确认凭据恢复归 hft-ledger,原始来源与单笔证明恢复归 hft-oms;批次无跨 Input 暂存状态。
 
 ## 延迟与资源契约
+
+`bbo_stages` 基准通过显式 `bench-stages` feature 启用有序硬件计数器,细分 `seq-decide` 内部开销;普通构建不含计时字段、读取或分支。输出逐次采样分位数,同时测未启用计时的对照。覆盖原 TestIo、真实 SPSC + RAM JournalWriter,以及已解码 Input 到发布边界;这些诊断不替代参考机门槛。样本与边界见 [BBO 报告](../../benchmarks/reports/2026-10-15-windows-hotpath.md#bbo-逐阶段诊断)。
 
 分段名以 [latency-budget](../../docs/latency-budget.md) 为准:本 crate 负责 `ingest` 中的环取出部分、`decide` 全段以及 `leg_gap`/`hedge_host`/`rep_to_order` 的 sequencer 内部分;`decide`、`tick_to_trade` 与 `rep_to_order` 的分配与验收数值只在 latency-budget §3 与 [testing ⑩](../../docs/testing.md#8-上线门槛),本页只给组件预算。
 

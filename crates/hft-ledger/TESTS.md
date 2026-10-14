@@ -1999,6 +1999,8 @@ LED-092 补充验收:估算 6、实额 5.25 只补差 -0.75;重复实额/定时�
 
 ### LED-210 换算率取参考 inst 最近 Bbo 的向下取整中间价
 
+补充比对增量汇总与完整重算:零持仓与非零库存,相关与无关账户,汇率过期和恢复报价边界;数值、标志、事件时间一致。实现 `crates/hft-ledger/tests/rates.rs::led_210_reference_quote_preserves_full_summary_projection`。
+
 - 规则:[USDT 统一计价](README.md#usdt-统一计价)
 - 级别:table
 - 里程碑:M2

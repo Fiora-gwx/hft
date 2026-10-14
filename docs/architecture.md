@@ -67,6 +67,8 @@ warm 任务(不在 tick-to-trade 路径,不占热核)
 
 [合并缓冲](../crates/hft-sequencer/README.md#bbo-合并与-conflated)归 LiveDriver。
 
+BBO 的派生视图按 inst 索引刷新,策略按当前接收者集合投递;缓存不承载业务事实,恢复时重建。契约归 [sequencer 只读视图](../crates/hft-sequencer/README.md#只读视图seqviews实现-sdk-views)。
+
 | 状态 | 唯一写者 | 其他线程/进程如何看到 |
 |---|---|---|
 | 簿、BBO、BBO 成员连接健康、最新成交、资金费、mark | sequencer | 冷进程读 journal 重建 |
@@ -159,4 +161,3 @@ journal 记录分三类:**Input**(进入决策的一切,含实盘驱动当场做
 | `Position`、`FillDelta`、`Ledger`、`PnlBreakdown`、journal 冷消费者 `JournalLedger`;模拟撮合器与模拟账户 | [hft-ledger](../crates/hft-ledger/README.md);[hft-sim](../crates/hft-sim/README.md) |
 | `LiveDriver`、`RecoverDriver`、`VerifyDriver`、`engine_ns` 的累加、恢复结束时刻 `recovery_end` 与平移的调度 | [hft-sequencer](../crates/hft-sequencer/README.md) |
 | 外部 venue 帧、tx 生命周期与链上 profile(optional) | [hft-ext-proto](../crates/hft-ext-proto/README.md)、[hft-chain-evm](../crates/hft-chain-evm/README.md) |
-

@@ -504,6 +504,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 ### SEQ-029 视图方法的数据来源
 
+补充验证 BBO 缓存:成交后交替更新相关与无关 inst,每个 group 的视图逐字段等于 ledger;恢复关键帧后重复验证并校验回放。实现 `crates/hft-sequencer/tests/views.rs::seq_029_bbo_group_cache_matches_ledger_after_fills_and_recovery`。
+
 - 规则:[只读视图](README.md#只读视图seqviews实现-sdk-views)
 - 级别:table
 - 里程碑:M2
@@ -1672,6 +1674,8 @@ TK-115 的 modes 回归另覆盖节 25 的运行起点恢复给风控:旧运行�
 - 实现:`crates/hft-sequencer/tests/clock.rs::seq_112_roll_keeps_base`
 
 ### SEQ-113 BBO 连接上各 Input 对连接活性的作用
+
+补充验证就绪缓存:连续报价期间断开全部成员,再重连并重建成员,Feeds 闸门随状态正确开闭,从关键帧回放一致。实现 `crates/hft-sequencer/tests/liveness.rs::seq_113_feed_gate_cache_rechecks_after_connection_and_membership_changes`。
 
 - 规则:[连接活性](README.md#连接活性)
 - 级别:table
@@ -4695,7 +4699,8 @@ SEQ-158 补充验收:RateOnly 的实额输入替换已有合成额,重复实额�
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
 - 里程碑:M2
-- 基准名:`seq/bbo_miss`
+- 基准名:`seq/bbo_miss`、`seq/bbo_miss_ram`(诊断)
+- 诊断:`benches/bbo_stages.rs` 逐次测内部阶段,分别运行 TestIo 与真实 SPSC/RAM 写者;RAM 另报已解码 Input 入口,样本维度不合并。
 - 实现:`crates/hft-sequencer/benches/seq.rs::seq_324_bbo_miss`
 
 ### SEQ-325 Bbo 未命中策略并推进一个目标
@@ -4711,7 +4716,8 @@ SEQ-158 补充验收:RateOnly 的实额输入替换已有合成额,重复实额�
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
 - 里程碑:M2
-- 基准名:`seq/bbo_fire`
+- 基准名:`seq/bbo_fire`、`seq/bbo_hit`(同夹具的逐次诊断名)
+- 诊断:`benches/bbo_stages.rs` 每次从新状态命中可接纳订单,初始化与析构不计时。
 - 实现:`crates/hft-sequencer/benches/seq.rs::seq_326_bbo_fire`
 
 ### SEQ-327 Bbo 经执行层切片到出环
@@ -5800,6 +5806,8 @@ SEQ-158 补充验收:RateOnly 的实额输入替换已有合成额,重复实额�
 
 ### SEQ-423 多片记录截尾与已裁发布前缀恢复
 
+同时逐阶段比对 `committed_len` 与已发布记录字节和,覆盖截尾、调用方先裁前缀、续写。
+
 - 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
 - 级别:table
 - 里程碑:M2
@@ -5817,6 +5825,8 @@ SEQ-158 补充验收:RateOnly 的实额输入替换已有合成额,重复实额�
 | SEQ-423.5 | 2 × PART_MAX_CHUNK + 1 | 3 |
 
 ### SEQ-424 物理模式 Meta 的独立、引导与事件边界
+
+同时校验引导、独立 Meta、开放事件、事件结束与跨段的发布字节边界;重复 publish 不使开放记录可见。
 
 - 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
 - 级别:unit

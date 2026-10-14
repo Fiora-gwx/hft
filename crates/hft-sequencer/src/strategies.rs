@@ -388,6 +388,8 @@ pub(crate) fn apply_params<D: crate::Driver<S>, S: StrategySet>(
     }
     let cells: Vec<(AccountId, GroupId)> = inst_cells(inst);
     e.gpos.set_cells(cells.into_iter());
+    e.gpos.index_insts(inst);
+    e.feeds_dirty = true;
     crate::advisor::on_params(e, inst, ix);
     if !added.is_empty() || !removed.is_empty() {
         e.trace
@@ -563,7 +565,9 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
     queued: &[Queued],
     direct: Option<(usize, Direct<'_>, bool)>,
 ) -> Result<(), crate::types::FatalReason> {
-    e.gpos.refresh(&e.ledger);
+    bench_stage!(e, Views);
+    e.gpos.refresh(&e.ledger, e.gpos_bbo);
+    bench_stage!(e, Strategy);
     if inst.models.on {
         let manual = match direct {
             Some((
@@ -588,7 +592,38 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
         .saturating_sub(e.engine_timer_demand)
         .saturating_sub(e.strat_timers);
     let mut ro_ix: Option<usize> = None;
-    for pos in 0..inst.dispatch_order.len() {
+    // Positions, not strategy IDs: preserve Live-before-Sim order and shared timer quota.
+    // The CSR row is already bounded by max_subs_per_inst; unrelated instances are not visited.
+    let mut ready = [0u64; 4];
+    let mut include = |ix: usize| {
+        if let Some(&pos) = inst.dispatch_pos.get(ix)
+            && let Some(word) = ready.get_mut(usize::from(pos) / 64)
+        {
+            *word |= 1u64 << (pos % 64);
+        }
+    };
+    if let Some(m) = market {
+        for &(ix, _, _) in inst.subs.row(m.inst()) {
+            include(usize::from(ix));
+        }
+    }
+    for q in queued {
+        include(usize::from(q.inst));
+    }
+    if let Some((ix, _, _)) = direct {
+        include(ix);
+    }
+    let positions = ready.into_iter().enumerate().flat_map(|(word, mut bits)| {
+        core::iter::from_fn(move || {
+            if bits == 0 {
+                return None;
+            }
+            let pos = word * 64 + bits.trailing_zeros() as usize;
+            bits &= bits - 1;
+            Some(pos)
+        })
+    });
+    for pos in positions {
         let Some(ix16) = inst.dispatch_order.get(pos).copied() else {
             continue;
         };
