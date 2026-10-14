@@ -12,9 +12,7 @@ use hft_refdata::InstKind;
 use hft_risk::mode::{CellKey, Effective, ModeInput};
 use hft_risk::{Classification, IntentDraft, IntentView, PosFacts, Risk};
 use hft_strategy_sdk::ctx::CancelReq;
-use hft_strategy_sdk::{
-    HedgeKind, IntentClass, IntentOutcome, LinkRole, OrderIntent, OrderRef, StrategySet,
-};
+use hft_strategy_sdk::{HedgeKind, IntentClass, IntentOutcome, LinkRole, OrderIntent, OrderRef, StrategySet};
 use hft_types::{
     AccountId, CapSource, GroupId, InstId, Px, Qty, RejectBits, RoundMode, Side, SlotId, StrategyId, Tsc,
     VenueId,

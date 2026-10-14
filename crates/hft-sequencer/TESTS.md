@@ -2473,11 +2473,11 @@ spec: README.md
 - 规则:[意图管线](README.md#意图管线)
 - 级别:unit
 - 里程碑:M2
-- 前置:B0 稳态;s2 的 g2 补腿单(执行层 `origin = Engine`,`hedge_cap_qty = 0.004`)数量 0.006
+- 前置:B0 稳态;s2 的 g2 补腿单(执行层 `origin = Engine`,`hedge_cap_qty = 0.004`)数量 0.006(执行层按规则不会产生这样的单:测试经 `testing` 钩子 `Engine::test_exec_hedge_cap` 改写下一条 Hedge 类执行层订单的上限,由 `HedgeFix` 命令触发)
 - 步骤:
   1. 触发执行层发出该单
 - 期望:
-  - `OrderDecision{reject = HEDGE_LIMIT}`;`exec.on_place_result(id, Rejected(HEDGE_LIMIT))`;`apply(Auto(Broken{2, g2}))`;一条 P0 注记;同一 Input 内 `risk.on_legs(2, g2, ..)` 一次;无出环
+  - `OrderDecision{reject = HEDGE_LIMIT}`;`exec.on_place_result(id, Rejected(HEDGE_LIMIT))`;其后 `apply(Auto(Broken{2, g2}))` 恰好一次;一条 P0 注记(执行层 `ExecBroken{HedgeVeto}`);同一 Input 内 `risk.on_legs(2, g2, ..)` 一次;无出环
 - 实现:`crates/hft-sequencer/tests/intents.rs::seq_171_exec_order_hedge_limit`
 
 ### SEQ-172 对手价超出 max_slip 但未越过 rr_max_cross 时按上限定价出环

@@ -40,6 +40,7 @@ mod replay_config;
 #[cfg(all(target_os = "linux", feature = "live", feature = "replay-io"))]
 mod replay_file;
 mod ring_full;
+mod scenarios;
 mod sdk_contract;
 mod settlement;
 mod sim_route;

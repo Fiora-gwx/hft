@@ -37,7 +37,7 @@ impl Default for BrokenSeen {
 impl BrokenSeen {
     /// Records `(seq, a, g)`; `false` when it was already recorded in Input `seq`.
     pub(crate) fn first(&mut self, seq: u64, a: AccountId, g: GroupId) -> bool {
-        if self.rows.iter().any(|r| *r == (seq, a, g)) {
+        if self.rows.contains(&(seq, a, g)) {
             return false;
         }
         let ix = usize::from(self.next) % self.rows.len();

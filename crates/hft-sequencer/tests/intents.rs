@@ -312,8 +312,7 @@ fn seq_171_exec_order_hedge_limit() {
     assert_eq!(t.count("apply.Broken"), 1, "{:?}", t.names());
     assert!(t.pos("apply.Broken").unwrap() > res, "{:?}", t.names());
     assert_eq!(
-        t.ev
-            .iter()
+        t.ev.iter()
             .filter(|e| e.what == "risk.on_legs" && e.a == u64::from(AC2.0) && e.b == u64::from(G2.0))
             .count(),
         1,
@@ -333,7 +332,9 @@ fn seq_171_exec_order_hedge_limit() {
             .mode
             .caps()
             .iter()
-            .any(|c| c.source == hft_types::CapSource::BROKEN && c.scope.account == AC2 && c.scope.group == G2),
+            .any(|c| c.source == hft_types::CapSource::BROKEN
+                && c.scope.account == AC2
+                && c.scope.group == G2),
         "Broken cap of (2, g2)"
     );
 }
