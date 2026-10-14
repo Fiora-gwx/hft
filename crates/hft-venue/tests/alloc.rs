@@ -26,6 +26,21 @@ static ALLOC: CountingAlloc = CountingAlloc;
 const ROUNDS: u64 = 100_000;
 const WARMUP: u64 = 1_000;
 
+#[test]
+fn vpr_022_helpers_zero_alloc() {
+    use hft_venue_proto::{TradeIdRing, TradeKey, dedup_key, raw_code_http, raw_code_num, raw_code_str};
+    let mut ring = TradeIdRing::<1024>::new();
+    let scope = CountingAlloc::scope();
+    for n in 1..100_000 {
+        std::hint::black_box(raw_code_num(-n));
+        std::hint::black_box(raw_code_http(503));
+        std::hint::black_box(raw_code_str(b"unknown-code"));
+        let key = dedup_key(S1, TradeKey::Id(n as u64));
+        std::hint::black_box(ring.seen_or_insert(key));
+    }
+    assert_eq!(scope.allocs(), 0);
+}
+
 fn queue(h: &mut Fh, id: ConnId, payload: &[u8], t: u64) {
     let b = h.net.peer(id).frames(&[ws_ref::text(payload)]);
     h.rt.conn(id)

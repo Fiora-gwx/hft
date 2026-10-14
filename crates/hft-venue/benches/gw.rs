@@ -273,6 +273,24 @@ fn ven_359_kill_admit(c: &mut Criterion) {
     });
 }
 
+fn ven_358_idtable(c: &mut Criterion) {
+    let mut table = hft_venue::IdTable::new(16384, 4096, 120_000_000_000);
+    let keys: Vec<_> = (0..8192).map(|n| n.to_string().into_bytes()).collect();
+    for (n, k) in keys.iter().take(8192).enumerate() {
+        let _ = table.insert(k, 5, n as u32, 1, 0);
+    }
+    for k in keys.iter().take(4096) {
+        table.terminal(k, 0);
+    }
+    let mut n = 0usize;
+    c.bench_function("venue_idtable", |b| {
+        b.iter(|| {
+            n = (n + 1) % 8192;
+            std::hint::black_box(table.get(std::hint::black_box(&keys[n])));
+        })
+    });
+}
+
 fn ven_369_gw_idle_8sock(c: &mut Criterion) {
     stub::log_enabled(false);
     // Four accounts × (primary, standby) = 8 idle sockets.
@@ -303,6 +321,6 @@ criterion_group!(
     name = benches;
     config = Criterion::default().sample_size(20).measurement_time(Duration::from_secs(2)).warm_up_time(Duration::from_millis(300));
     targets = ven_354_gw_place_loopback, ven_355_gw_place_mem, ven_356_gw_report_path, ven_357_gw_drain_during_burst,
-        ven_359_kill_admit, ven_369_gw_idle_8sock
+        ven_358_idtable, ven_359_kill_admit, ven_369_gw_idle_8sock
 );
 criterion_main!(benches);

@@ -18,6 +18,72 @@ use support::stub::{self, StubProto};
 const P: ConnId = ConnId(112);
 
 #[test]
+fn ven_214_epoch_window() {
+    for (epoch, accept, account, want) in [
+        (70, true, A1, true),
+        (5, true, A1, true),
+        (69, true, A1, false),
+        (5, false, A1, false),
+        (70, true, A2, false),
+    ] {
+        let mut h = gw::<StubProto>();
+        h.cmd(hft_event::GwCmd::set_epoch(70, accept, 5));
+        h.poll(3_000_000);
+        h.reps();
+        let id = ClientOrderId {
+            epoch,
+            venue: V7,
+            account,
+            slot: 80,
+            r#gen: 1,
+        };
+        h.net.push(
+            P,
+            format!("O|{}|EX-9|Ack|0|0|0|0|0|0", stub::cid_text(&id)).as_bytes(),
+        );
+        h.poll(3_000_001);
+        let e = events(&h.reps());
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].slot, if want { SlotId(80) } else { SlotId::UNRESOLVED });
+        if want {
+            assert_eq!(e[0].epoch, epoch);
+        }
+        assert_eq!(h.rt.id_table(A1).unwrap().get(b"EX-9").is_some(), want);
+    }
+}
+#[test]
+fn ven_215_idtable_fallback() {
+    let mut h = gw::<StubProto>();
+    let id = ClientOrderId {
+        epoch: 5,
+        venue: V7,
+        account: A1,
+        slot: 80,
+        r#gen: 1,
+    };
+    h.net.push(
+        P,
+        format!("O|{}|EX-9|Ack|0|0|0|0|0|0", stub::cid_text(&id)).as_bytes(),
+    );
+    h.poll(3_000_000);
+    h.reps();
+    for cid in ["", "web-123"] {
+        h.net
+            .push(P, format!("O|{cid}|EX-9|CancelAck|0|0|0|0|0|0").as_bytes());
+        h.poll(3_000_001);
+        let e = events(&h.reps());
+        assert_eq!((e[0].epoch, e[0].slot, e[0].r#gen), (5, SlotId(80), 1));
+    }
+    h.net.push(P, b"O||EX-404|Ack|0|0|0|0|0|0");
+    h.poll(3_000_002);
+    let e = events(&h.reps());
+    assert_eq!(
+        (e[0].slot, e[0].exch_order_id),
+        (SlotId::UNRESOLVED, exch_id_value(b"EX-404"))
+    );
+}
+
+#[test]
 fn ven_213_cid_resolves() {
     let mut h = gw::<StubProto>();
     let id = ClientOrderId {

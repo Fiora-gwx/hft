@@ -218,6 +218,7 @@ pub enum Md {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Rep {
     Order,
+    External,
     Resp,
     Event,
     Ignorable,
@@ -943,6 +944,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         let f = fields(head);
         match f.first().copied() {
             Some(b"O") => Rep::Order,
+            Some(b"X") => Rep::External,
             Some(b"R") => Rep::Resp,
             Some(b"E") if f.get(1).copied() == Some(b"listenKeyExtended") => Rep::Ignorable,
             Some(b"E") => Rep::Event,
@@ -967,6 +969,28 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         let f = fields(p);
         let mut o = ReportOutcome::default();
         match c {
+            Rep::External => {
+                out.external_fill(&hft_event::ExternalFill {
+                    venue: V7,
+                    account: rx.account,
+                    side: Side::Sell,
+                    cause: hft_event::ExternalCause::Liquidation,
+                    inst: super::rd::S1,
+                    qty: Qty(2),
+                    px: Px(100),
+                    fee: Qty(3),
+                    fee_asset: AssetId(2),
+                    _pad: [0; 6],
+                    exch_order_id: 123,
+                    trade_id: 9,
+                    ex_ts_ns: 7,
+                    rx_tsc: hft_types::Tsc(rx.rx_tsc),
+                    fill_seq: 0,
+                    cash_qty: Qty(0),
+                    cash_amount: Qty(0),
+                });
+                o.events = 1;
+            }
             Rep::Order => {
                 let mut e = blank_order(rx.account);
                 e.rx_tsc = rx.rx_tsc;
@@ -977,7 +1001,8 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
                 if !exch.is_empty() {
                     e.exch_order_id = exch_id_value(exch);
                 }
-                if cid.is_empty() {
+                let owner = Self::parse_cid(cid).filter(|id| id.account == rx.account && id.venue == V7);
+                if owner.is_none() {
                     if !exch.is_empty()
                         && let ExchIdHint::Resolved { epoch, slot, r#gen } = out.exch_id(exch, None)
                     {
@@ -985,7 +1010,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
                         e.slot = slot;
                         e.r#gen = r#gen;
                     }
-                } else if let Some(id) = Self::parse_cid(cid) {
+                } else if let Some(id) = owner {
                     e.epoch = id.epoch;
                     e.slot = SlotId(id.slot);
                     e.r#gen = id.r#gen;
@@ -997,6 +1022,16 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
                 e.cum_filled = Qty(num(f.get(5)).unwrap_or(0));
                 e.avg_px = Px(num(f.get(6)).unwrap_or(0));
                 e.fee = Qty(num(f.get(7)).unwrap_or(0));
+                e.fee_asset = AssetId(num(f.get(8)).unwrap_or(0) as u16);
+                e.trade_id = num(f.get(9)).unwrap_or(0).max(0) as u64;
+                e.detail = if matches!(e.what, OrderEventKind::PartialFill | OrderEventKind::Fill) {
+                    Side::Buy as u8
+                } else {
+                    0
+                };
+                e.px = e.avg_px;
+                e.inst = super::rd::S1;
+                e.ex_ts_ns = num(f.get(10)).unwrap_or(0);
                 out.order(&e);
                 o.events = 1;
             }

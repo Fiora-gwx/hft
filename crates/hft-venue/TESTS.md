@@ -3337,7 +3337,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 - 级别:bench
 - 里程碑:M3
 - 基准名:`venue_idtable`
-- 实现:`crates/hft-venue/benches/idtable.rs::ven_358_idtable`
+- 实现:`crates/hft-venue/benches/gw.rs::ven_358_idtable`
 
 ### VEN-359 基准:`kill_admit`
 
