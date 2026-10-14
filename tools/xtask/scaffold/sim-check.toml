@@ -7,7 +7,7 @@
 name = "sim"
 
 [advisor]
-mem_budget_mib = 64
+mem_budget_mib = 160
 checkpoint_max_mib = 64
 
 [startup]

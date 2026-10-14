@@ -1,5 +1,5 @@
-//! `cargo xtask scaffold-gate [--keep]` (tools/README.md "cargo xtask scaffold-gate"): the template
-//! probe check of gate ⑧.
+//! `cargo xtask scaffold-gate [--keep] [--profile <name>]` (tools/README.md "cargo xtask scaffold-gate"):
+//! the template probe check of gate ⑧.
 //!
 //! 1. Renders the `new-strategy` template with `--with-model --with-pipeline` as `ci-probe` (kind_id
 //!    in the test range) into `target/decoupling/strategies/ci-probe/`; checks its shape (Model
@@ -10,15 +10,19 @@
 //!    `tests/ci_probe_dst.rs`), the probe, and manifest copies of `apps/hft-core` and `apps/replayer`
 //!    whose sources stay in the repository and whose registry dependency points at the copy
 //!    (Cargo's `[patch]` cannot replace a path dependency, so the copies carry the redirection).
-//!    Every build runs with `CARGO_TARGET_DIR` = the main target directory.
+//!    Every build runs with `CARGO_TARGET_DIR` = the main target directory and `--profile <name>`
+//!    (default `dev`; CI passes the profile of its main build); the root `Cargo.lock` is copied in so
+//!    that external versions match the main build. The registry copy gets the dev-dependency
+//!    `hft-testkit` with feature `seq` (the DST short set runs the real sequencer).
 //! 3. Runs the probe's scenario test, the DST short set, builds `hft-core` and runs
-//!    `hft-core --check --config <generated sim config>`.
+//!    `hft-core --check --config <generated sim config>`; while `apps/hft-core` is not in the
+//!    repository (M3) the last two steps are recorded as skipped.
 //! 4. Fails on any change under `crates/`, `apps/`, `tools/hft-cfg/`, `python/`
 //!    (`git status --porcelain`, untracked files included), then removes `target/decoupling/`
 //!    unless `--keep`.
 //!
-//! Skipped (exit 0, reason in the summary and JSON) while the template, the registry or
-//! `apps/hft-core` is not in the repository yet.
+//! Skipped (exit 0, reason in the summary and JSON) while the template or the registry is not in the
+//! repository yet.
 
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -30,8 +34,12 @@ use crate::new_strategy::{self, Opts};
 use crate::{EXIT_ENV, EXIT_FAIL, EXIT_OK, EnvError, write_json};
 
 pub const PROBE: &str = "ci-probe";
-/// kind_id of the probe, in the registry's test range 0xFF00–0xFFFF.
-pub const PROBE_KIND_ID: u16 = 0xFFF0;
+/// kind_id of the probe, in the registry's test range 0xFF00–0xFFFF (crates/hft-strategy-sdk TESTS.md
+/// SDK-004/SDK-005: 0xFF10 = 65296).
+pub const PROBE_KIND_ID: u16 = 0xFF10;
+/// Why the assembly-check steps are skipped while the app is missing.
+pub const NO_HFT_CORE: &str =
+    "apps/hft-core is not in the repository yet (M3): hft-core build and --check skipped";
 /// Seeds of the DST short set.
 pub const DST_SEEDS: u32 = 100;
 /// Paths that must stay unchanged (tools/README.md step 4).
@@ -429,11 +437,78 @@ struct Report {
     sim_account: Value,
 }
 
+/// Options of one run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RunOpts {
+    keep: bool,
+    /// Cargo profile of every build and test (`dev` = cargo's default).
+    profile: String,
+    /// `apps/hft-core` is in the repository (assembly-check steps run).
+    hft_core: bool,
+}
+
+/// Target sub-directory of a cargo profile.
+fn profile_dir(profile: &str) -> &str {
+    match profile {
+        "dev" | "test" => "debug",
+        "release" | "bench" => "release",
+        p => p,
+    }
+}
+
+/// `cargo <args…> --manifest-path <m> [--profile <p>]`.
+fn cargo(args: &[&str], manifest: &str, profile: &str) -> Cmd {
+    let mut a: Vec<&str> = vec![args[0], "--manifest-path", manifest];
+    a.extend_from_slice(&args[1..]);
+    if profile != "dev" {
+        a.extend(["--profile", profile]);
+    }
+    Cmd::new("cargo", &a)
+}
+
+/// The registry copy's manifest with the dev-dependency `hft-testkit` carrying feature `seq`
+/// (added as a workspace dependency when the registry does not have it).
+fn with_testkit_seq(t: &mut toml::Table) {
+    let dev = t
+        .entry("dev-dependencies")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let Some(dev) = dev.as_table_mut() else {
+        return;
+    };
+    let entry = dev.entry("hft-testkit").or_insert_with(|| {
+        let mut e = toml::Table::new();
+        e.insert("workspace".into(), toml::Value::Boolean(true));
+        toml::Value::Table(e)
+    });
+    if let Some(b) = entry.as_bool() {
+        let mut e = toml::Table::new();
+        e.insert("workspace".into(), toml::Value::Boolean(b));
+        *entry = toml::Value::Table(e);
+    }
+    if let Some(e) = entry.as_table_mut() {
+        let feats = e
+            .entry("features")
+            .or_insert_with(|| toml::Value::Array(Vec::new()));
+        if let Some(a) = feats.as_array_mut()
+            && !a.iter().any(|v| v.as_str() == Some("seq"))
+        {
+            a.push(toml::Value::String("seq".into()));
+        }
+    }
+}
+
 /// Steps 1–3 (everything except the diff check and the cleanup).
-fn build_and_check(root: &Path, dec: &Path, exec: &mut dyn Exec, r: &mut Report) -> Result<(), EnvError> {
+fn build_and_check(
+    root: &Path,
+    dec: &Path,
+    exec: &mut dyn Exec,
+    opts: &RunOpts,
+    r: &mut Report,
+) -> Result<(), EnvError> {
     let o = probe();
     let pdir = dec.join("strategies").join(PROBE);
     new_strategy::render(&root.join(new_strategy::TEMPLATE), &pdir, &o)?;
+    new_strategy::copy_clippy(root, &pdir)?;
     r.violations.extend(shape(&pdir));
     r.violations.extend(dep_violations(root, &pdir)?);
     if !r.violations.is_empty() {
@@ -453,6 +528,7 @@ fn build_and_check(root: &Path, dec: &Path, exec: &mut dyn Exec, r: &mut Report)
         .parse()
         .map_err(|e| EnvError(format!("registry Cargo.toml: {e}")))?;
     relocate_all_deps(&mut t, &reg, &rcopy, &none);
+    with_testkit_seq(&mut t);
     let rt = toml::to_string(&t).map_err(|e| EnvError(format!("encode manifest: {e}")))?;
     let rt = new_strategy::add_dependency(&rt, &format!("{PROBE} = {{ path = \"../strategies/{PROBE}\" }}"));
     wr(&rcopy.join("Cargo.toml"), &rt)?;
@@ -483,6 +559,10 @@ fn build_and_check(root: &Path, dec: &Path, exec: &mut dyn Exec, r: &mut Report)
         &manifest,
         &workspace_manifest(&rd(&root.join("Cargo.toml"))?, root, dec, &members)?,
     )?;
+    if root.join("Cargo.lock").is_file() {
+        std::fs::copy(root.join("Cargo.lock"), dec.join("Cargo.lock"))
+            .map_err(|e| EnvError(format!("copy Cargo.lock: {e}")))?;
+    }
     let cfg_text = rd(&root.join(CONFIG_TEMPLATE))?
         .replace("{{name}}", PROBE)
         .replace("{{kind_id}}", &PROBE_KIND_ID.to_string());
@@ -493,39 +573,29 @@ fn build_and_check(root: &Path, dec: &Path, exec: &mut dyn Exec, r: &mut Report)
     let tdir = target_dir(root);
     let tenv = vec![("CARGO_TARGET_DIR".to_string(), tdir.display().to_string())];
     let mp = manifest.display().to_string();
-    let bin = tdir.join("debug").join(exe("hft-core"));
-    let steps: Vec<(&str, Cmd)> = vec![
+    let prof = opts.profile.as_str();
+    let bin = tdir.join(profile_dir(prof)).join(exe("hft-core"));
+    let mut steps: Vec<(&str, Cmd)> = vec![
         (
             "scenario",
-            Cmd::new(
-                "cargo",
-                &["test", "--manifest-path", &mp, "-p", PROBE, "--test", "scenario"],
-            ),
+            cargo(&["test", "-p", PROBE, "--test", "scenario"], &mp, prof),
         ),
         (
             "dst short set",
-            Cmd::new(
-                "cargo",
-                &[
-                    "test",
-                    "--manifest-path",
-                    &mp,
-                    "-p",
-                    "hft-strategy-registry",
-                    "--test",
-                    &dst_test,
-                ],
+            cargo(
+                &["test", "-p", "hft-strategy-registry", "--test", &dst_test],
+                &mp,
+                prof,
             ),
         ),
-        (
-            "build hft-core",
-            Cmd::new("cargo", &["build", "--manifest-path", &mp, "-p", "hft-core"]),
-        ),
-        (
+    ];
+    if opts.hft_core {
+        steps.push(("build hft-core", cargo(&["build", "-p", "hft-core"], &mp, prof)));
+        steps.push((
             "hft-core --check",
             Cmd::new(&bin.display().to_string(), &["--check", "--config"]).arg(cfg.display().to_string()),
-        ),
-    ];
+        ));
+    }
     for (name, mut c) in steps {
         c.env = tenv.clone();
         let o = exec.run(&c)?;
@@ -534,7 +604,13 @@ fn build_and_check(root: &Path, dec: &Path, exec: &mut dyn Exec, r: &mut Report)
         if !o.ok() {
             r.violations
                 .push(format!("{name}: `{}` exited {}", c.line(), o.code));
-            break;
+            return Ok(());
+        }
+    }
+    if !opts.hft_core {
+        eprintln!("scaffold-gate: {NO_HFT_CORE}");
+        for name in ["build hft-core", "hft-core --check"] {
+            r.steps.push(json!({"step": name, "skipped": NO_HFT_CORE}));
         }
     }
     Ok(())
@@ -542,18 +618,30 @@ fn build_and_check(root: &Path, dec: &Path, exec: &mut dyn Exec, r: &mut Report)
 
 /// Runs `scaffold-gate` with `exec`; returns the exit code.
 pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
-    let mut keep = false;
-    for a in args {
+    const USAGE: &str = "usage: cargo xtask scaffold-gate [--keep] [--profile <name>]";
+    let mut opts = RunOpts {
+        keep: false,
+        profile: "dev".into(),
+        hft_core: root.join("apps/hft-core/Cargo.toml").is_file(),
+    };
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
         match a.as_str() {
-            "--keep" => keep = true,
+            "--keep" => opts.keep = true,
+            "--profile" => match it.next() {
+                Some(p) if !p.is_empty() && !p.starts_with('-') => opts.profile = p.clone(),
+                _ => {
+                    eprintln!("scaffold-gate: error: --profile needs a value ({USAGE})");
+                    return EXIT_ENV;
+                }
+            },
             x => {
-                eprintln!(
-                    "scaffold-gate: error: unknown argument {x} (usage: cargo xtask scaffold-gate [--keep])"
-                );
+                eprintln!("scaffold-gate: error: unknown argument {x} ({USAGE})");
                 return EXIT_ENV;
             }
         }
     }
+    let keep = opts.keep;
     let missing: Vec<&str> = [
         (
             new_strategy::TEMPLATE,
@@ -563,7 +651,6 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
             new_strategy::REGISTRY,
             root.join(new_strategy::REGISTRY).join("Cargo.toml").is_file(),
         ),
-        ("apps/hft-core", root.join("apps/hft-core/Cargo.toml").is_file()),
     ]
     .iter()
     .filter(|(_, ok)| !ok)
@@ -583,7 +670,7 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
     let dec = root.join("target").join("decoupling");
     let _ = std::fs::remove_dir_all(&dec);
     let mut r = Report::default();
-    let mut code = match build_and_check(root, &dec, exec, &mut r) {
+    let mut code = match build_and_check(root, &dec, exec, &opts, &mut r) {
         Ok(()) => EXIT_OK,
         Err(e) => {
             eprintln!("scaffold-gate: error: {e}");
@@ -618,6 +705,8 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
         "kind_id": format!("{PROBE_KIND_ID:#06x}"),
         "new_strategy_args": probe().args(),
         "dst_seeds": DST_SEEDS,
+        "profile": opts.profile,
+        "hft_core": if opts.hft_core { Value::Bool(true) } else { Value::String(NO_HFT_CORE.into()) },
         "sim_account": r.sim_account,
         "steps": r.steps,
         "engine_changes": r.engine_changes,

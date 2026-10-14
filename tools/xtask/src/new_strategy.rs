@@ -7,7 +7,10 @@
 //! `--with-model`) and `pipeline/` (with `--with-pipeline`) are overlays on the same crate root (an
 //! overlay file replaces the base file with the same path). Paths and UTF-8 contents substitute
 //! `{{name}}` (kebab, = crate and directory name), `{{crate}}` (snake), `{{Type}}` (CamelCase) and
-//! `{{kind_id}}` (decimal).
+//! `{{kind_id}}` (decimal); a `.tmpl` suffix is dropped (template sources carry it so that no repository
+//! scanner — cargo, doc-check, test-trace, Python linters — reads them as live files). The hot clippy
+//! configuration `tools/lint/clippy-hot.toml` is copied in as `clippy.toml` (hot-check compares the
+//! two byte for byte) unless the template has one.
 
 use std::path::{Path, PathBuf};
 
@@ -16,6 +19,10 @@ use crate::{EXIT_ENV, EXIT_FAIL, EXIT_OK, EnvError};
 
 pub const TEMPLATE: &str = "strategies/_template";
 pub const REGISTRY: &str = "strategies/registry";
+/// Suffix of template source files, dropped when rendered.
+pub const TMPL: &str = ".tmpl";
+/// The clippy configuration of `hot` crates (strategies are hot).
+pub const CLIPPY_HOT: &str = "tools/lint/clippy-hot.toml";
 /// kind_id test range (strategies/registry README): never allocated by `new-strategy`.
 pub const TEST_RANGE_START: u32 = 0xFF00;
 
@@ -123,7 +130,9 @@ pub fn render(template: &Path, out: &Path, o: &Opts) -> Result<Vec<String>, EnvE
     // `scaffold-gate` reports the missing shape).
     for l in &layers {
         for f in walk(l) {
-            files.insert(crate::rel_path(l, &f), f);
+            let rel = crate::rel_path(l, &f);
+            let rel = rel.strip_suffix(TMPL).unwrap_or(&rel).to_string();
+            files.insert(rel, f);
         }
     }
     let mut written = Vec::new();
@@ -142,6 +151,18 @@ pub fn render(template: &Path, out: &Path, o: &Opts) -> Result<Vec<String>, EnvE
         written.push(rel);
     }
     Ok(written)
+}
+
+/// Copies `tools/lint/clippy-hot.toml` of `root` to `<out>/clippy.toml` unless the rendered crate has
+/// one; `Ok(false)` when `root` has no such file (fixture repositories).
+pub fn copy_clippy(root: &Path, out: &Path) -> Result<bool, EnvError> {
+    let src = root.join(CLIPPY_HOT);
+    let dst = out.join("clippy.toml");
+    if !src.is_file() || dst.exists() {
+        return Ok(false);
+    }
+    std::fs::copy(&src, &dst).map_err(|e| EnvError(format!("copy {CLIPPY_HOT}: {e}")))?;
+    Ok(true)
 }
 
 fn parse_int(s: &str) -> Option<u32> {
@@ -480,14 +501,15 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
         }
     };
     let out = root.join("strategies").join(&o.name);
-    let written = match render(&root.join(TEMPLATE), &out, &o) {
-        Ok(w) => w,
-        Err(e) => {
-            let _ = std::fs::remove_dir_all(&out);
-            eprintln!("new-strategy: error: {e}");
-            return EXIT_ENV;
-        }
-    };
+    let written =
+        match render(&root.join(TEMPLATE), &out, &o).and_then(|w| copy_clippy(root, &out).map(|_| w)) {
+            Ok(w) => w,
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&out);
+                eprintln!("new-strategy: error: {e}");
+                return EXIT_ENV;
+            }
+        };
     for (rel, text) in &edits {
         if let Err(e) = write(root, rel, text) {
             eprintln!("new-strategy: error: {e}");

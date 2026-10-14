@@ -1,0 +1,89 @@
+//! Model tests of `{{name}}` (cookbook "4. 慢速部分"): samples of the first leg, one `WindowAdvice` per
+//! group on the model tick, declarations.
+#![allow(
+    clippy::disallowed_types,
+    clippy::disallowed_macros,
+    clippy::disallowed_methods
+)] // allow-list: test code
+
+mod common;
+
+use common::{A1, G1, I1, I2, fixture, g1, quote};
+use {{crate}}::advice::WindowAdvice;
+use {{crate}}::model::{{Type}}Model;
+use {{crate}}::{{{Type}}, {{Type}}Params};
+use hft_strategy_sdk::params::{RawParams, SchemaView};
+use hft_strategy_sdk::prelude::GROUP_NONE;
+use hft_strategy_sdk::testing::ev;
+use hft_strategy_sdk::{AdvicePayload, GIX_NONE, MODEL_TICK, Model, Strategy};
+use hft_testkit::sdk_mock::ModelHarness;
+
+fn params(window: i64) -> {{Type}}Params {
+    let schema = {{Type}}::DESC.schema;
+    let defaults = (0..schema.n_fields())
+        .filter_map(|i| schema.field(i))
+        .map(|f| if f.name == "window" { window } else { f.default })
+        .collect();
+    {{Type}}Params::from_raw(
+        &RawParams {
+            defaults,
+            overrides: Vec::new(),
+        },
+        1,
+    )
+}
+
+#[test]
+fn advice_on_model_tick() {
+    let mut h = ModelHarness::<{{Type}}>::new(&params(16), &g1(), fixture(), A1);
+    for (k, mid) in [6_000_000i64, 6_000_010, 6_000_020].into_iter().enumerate() {
+        h.views_mut().at_engine_ns(1_000_000_000 + k as i64 * 1_000_000);
+        quote(h.views_mut(), I1, mid);
+        let b = h.views_mut().bbo_of(I1);
+        assert!(h.feed(&ev::bbo(I1, 0, b).as_ref()).is_empty());
+    }
+    // The second leg is not sampled.
+    quote(h.views_mut(), I2, 7_000_000);
+    let b = h.views_mut().bbo_of(I2);
+    assert!(h.feed(&ev::bbo(I2, 0, b).as_ref()).is_empty());
+    assert_eq!(h.model().samples(0), 3);
+    let out = h.feed(&ev::timer(MODEL_TICK, GROUP_NONE, GIX_NONE).as_ref());
+    assert_eq!(out.len(), 1, "{out:?}");
+    let (group, kind, bytes) = &out[0];
+    assert_eq!((*group, *kind), (G1, WindowAdvice::LOCAL_KIND));
+    assert_eq!(
+        WindowAdvice::decode(bytes),
+        Ok(WindowAdvice {
+            n: 3,
+            mean_mid: 6_000_010
+        })
+    );
+}
+
+#[test]
+fn ring_keeps_newest_window() {
+    let mut h = ModelHarness::<{{Type}}>::new(&params(16), &g1(), fixture(), A1);
+    for k in 0..20i64 {
+        quote(h.views_mut(), I1, 6_000_000 + k);
+        let b = h.views_mut().bbo_of(I1);
+        h.feed(&ev::bbo(I1, 0, b).as_ref());
+    }
+    assert_eq!(h.model().samples(0), 16);
+    let out = h.feed(&ev::timer(MODEL_TICK, GROUP_NONE, GIX_NONE).as_ref());
+    // Samples 4..=19: mean 6_000_011 (integer).
+    assert_eq!(
+        WindowAdvice::decode(&out[0].2).map(|a| (a.n, a.mean_mid)),
+        Ok((16, 6_000_011))
+    );
+}
+
+#[test]
+fn declarations_scale_with_window() {
+    let p = params(262_144);
+    assert!(
+        {{Type}}Model::mem_bytes(&p, 1) >= 2 * 1024 * 1024,
+        "2 MiB per group by default"
+    );
+    assert!({{Type}}Model::mem_bytes(&p, 2) > {{Type}}Model::mem_bytes(&p, 1));
+    assert!({{Type}}Model::snapshot_bytes(&p, 1) >= 262_144 * 8);
+}

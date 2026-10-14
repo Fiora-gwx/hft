@@ -57,6 +57,12 @@ secrets = "tools/hft-secrets"
 secrets_crates = ["aws-sdk-secretsmanager", "aws-sdk-kms"]
 # rule 12
 testing_feature = "testing"
+# rule 13: the only files that may invoke `strategy_set!` (globs over repo-relative paths; the assembly
+# rule of crates/hft-strategy-sdk README "装配"): the registry, hft-testkit and the SDK's own tests.
+strategy_set_sites = [
+    "strategies/registry/src/**", "crates/hft-testkit/**", "crates/hft-strategy-sdk/tests/**",
+    "crates/hft-strategy-sdk/benches/**",
+]
 
 # ---------------------------------------------------------------- L0
 [pkg."crates/hft-types"]

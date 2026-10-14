@@ -1,0 +1,37 @@
+//! `{{Type}}Params` (README "参数表"; `window` belongs to the Model) and its group-shape `check`.
+//! Every tunable value is a schema field; the defaults are placeholders until the strategy's rules
+//! are written.
+
+use hft_strategy_sdk::{GroupTable, ParamError, RefView};
+
+hft_strategy_sdk::define_params! {
+    pub struct {{Type}}Params(schema_id = {{kind_id}}, version = 1, fields = {{Type}}Fields) {
+        /// false: no openings (the skeleton never opens)
+        enabled: Bool [default = 0, manual_only, relax = Up],
+        /// per-group position cap of the first leg (placeholder)
+        max_qty: Qty [min = 0, max = 1_000_000_000_000, default = 0, per_group, relax = Up],
+        /// Model: mid samples kept per group (changing it restarts the Model's group state)
+        window: Count [min = 16, max = 1_048_576, default = 262_144, structural],
+    }
+}
+
+/// `ParamError::GroupShape` codes.
+pub mod shape {
+    /// A group does not have exactly two legs.
+    pub const LEGS: u16 = 1;
+}
+
+impl {{Type}}Params {
+    /// Group shape: exactly two legs (two-leg groups on two exchanges are enforced by the engine).
+    pub fn check(&self, groups: &GroupTable, _rd: &RefView<'_>) -> Result<(), ParamError> {
+        for (gix, g) in groups.iter() {
+            if g.n_legs != 2 {
+                return Err(ParamError::GroupShape {
+                    gix,
+                    code: shape::LEGS,
+                });
+            }
+        }
+        Ok(())
+    }
+}
