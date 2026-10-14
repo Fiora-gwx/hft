@@ -1,0 +1,31 @@
+{
+  "fees_bps": {
+    "binance:linear_perpetual": 5,
+    "okx:linear_perpetual": 5,
+    "bitget:linear_perpetual": 5,
+    "binance:spot": 10,
+    "okx:spot": 10,
+    "bitget:spot": 10
+  },
+  "assumed_metadata": {
+    "px_exp": -6, "qty_exp": -8, "tick": 1, "lot": 1,
+    "min_qty": 1, "max_qty": 10000000000000000, "min_notional": 0
+  },
+  "taker": {
+    "enabled": true, "min_edge": 200000, "slip": 100000, "depth_frac": 500000000,
+    "max_chunk_notional": 100000000, "max_position_notional": 500000000,
+    "max_quote_age_ms": 5, "cooldown_ms": 100, "max_hedge_failures": 3
+  },
+  "carry": {
+    "enabled": true, "enter_apr": 100000000, "exit_apr": 20000000,
+    "borrow_apr": 0, "fee_horizon_ms": 86400000, "entry_window_ms": 300000,
+    "min_lead_ms": 10000, "funding_max_age_ms": 30000, "max_notional": 100000000,
+    "capital_fraction": 400000000, "max_leverage_x100": 300, "max_cross": 100000, "retry_ms": 1000
+  },
+  "capital_quote": {"binance": 10000, "okx": 10000, "bitget": 10000},
+  "leverage_x100": {"binance": 100, "okx": 100, "bitget": 100},
+  "threshold_grid_bps": [1, 2, 3, 5, 10],
+  "fee_scenarios_bps": [1, 2, 5],
+  "carry_horizons_days": [1, 3, 7],
+  "max_price_ratio": 1.1
+}

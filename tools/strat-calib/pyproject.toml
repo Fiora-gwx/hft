@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "strat-calib"
+version = "0.1.0"
+description = "Offline, assumption-labelled strategy calibration from recorded BBO and funding"
+requires-python = ">=3.12"
+dependencies = ["numpy>=1.26", "pandas>=2.2", "pyarrow>=16"]
+
+[project.scripts]
+strat-calib = "strat_calib.cli:main"
+
+[tool.setuptools]
+packages = ["strat_calib"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"

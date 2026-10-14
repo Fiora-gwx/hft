@@ -357,3 +357,8 @@ dev_tier_ok = true
 [pkg."tools/hft-verify"]
 tier = "cold"
 deps = []
+
+[pkg."tools/strat-calib"]
+tier = "cold"
+deps = []
+dev = ["strategies/cross-taker", "strategies/portfolio-carry", "crates/hft-strategy-sdk", "crates/hft-refdata", "crates/hft-types", "crates/hft-event"]

@@ -812,6 +812,13 @@ jobs:
       - name: CI script policy regression tests
         if: needs.paths.outputs.ops == 'true'
         run: python -m unittest discover -s tools/xtask/tests -p 'test_ci_*.py' -v
+      - name: Offline calibration Python tests
+        if: hashFiles('tools/strat-calib/pyproject.toml') != ''
+        run: |
+          python3 -m venv "$RUNNER_TEMP/calib"
+          "$RUNNER_TEMP/calib/bin/python" -m pip install ./tools/strat-calib pytest ruff
+          "$RUNNER_TEMP/calib/bin/python" -m ruff check tools/strat-calib
+          "$RUNNER_TEMP/calib/bin/python" -m pytest -q tools/strat-calib/tests
       - name: Install pinned Rust toolchain (hft_py)
         if: (needs.paths.outputs.python == 'true' || needs.paths.outputs.scaffold == 'true') && hashFiles('crates/hft-py/Cargo.toml') != ''
         run: bash .github/scripts/install-rust.sh

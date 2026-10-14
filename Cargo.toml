@@ -36,6 +36,7 @@ members = [
     "tools/hft-cfg",
     "tools/hostprobe",
     "tools/latency-slice",
+    "tools/strat-calib",
 ]
 
 [workspace.package]

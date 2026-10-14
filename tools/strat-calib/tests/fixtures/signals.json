@@ -1,0 +1,27 @@
+{
+  "taker": [
+    {"name":"weighted_fees_below_threshold", "buy":[999,1000,10000,10000], "sell":[1003,1004,10000,10000], "expected":null},
+    {"name":"caps", "buy":[999,1000,10000,10000], "sell":[1010,1011,10000,10000], "expected":{"buy_px":1000,"sell_px":1010,"qty":988,"edge":7990000,"reducing":false}},
+    {"name":"common_lot", "buy":[999,1000,10000,10000], "sell":[1010,1011,101,10000], "buy_meta":{"lot":6},"sell_meta":{"lot":10}, "expected":{"buy_px":1000,"sell_px":1010,"qty":30,"edge":7990000,"reducing":false}},
+    {"name":"insufficient_depth", "buy":[999,1000,10000,10000], "sell":[1010,1011,59,10000], "buy_meta":{"lot":6},"sell_meta":{"lot":10}, "expected":null},
+    {"name":"spot_no_short", "buy":[999,1000,10000,10000], "sell":[1010,1011,10000,10000],"spot":true, "expected":null},
+    {"name":"spot_free", "buy":[999,1000,10000,10000], "sell":[1010,1011,10000,10000],"spot":true,"positions":[0,1000],"spot_free":40, "expected":{"buy_px":1000,"sell_px":1010,"qty":40,"edge":7990000,"reducing":false}},
+    {"name":"reduce_stop_zero", "buy":[999,1000,10000,10000], "sell":[1010,1011,10000,10000],"positions":[-20,20], "expected":{"buy_px":1000,"sell_px":1010,"qty":20,"edge":7990000,"reducing":true}},
+    {"name":"bad_book", "buy":[999,1000,10000,10000], "sell":[1010,1000,10000,10000], "expected":null},
+    {"name":"overflow", "buy":[999,1000,10000,10000], "sell":[1010,1011,10000,10000], "sell_meta":{"px_exp":-18,"qty_exp":-18}, "expected":null},
+    {"name":"tick_slip", "buy":[999,1000,10000,10000], "sell":[1050,1051,10000,10000],"buy_meta":{"tick":3},"sell_meta":{"tick":4},"slip":10000000,"expected":{"buy_px":1008,"sell_px":1040,"qty":950,"edge":29714285,"reducing":false}}
+  ],
+  "carry": [
+    {"a":[1000000,28800],"b":[400000,14400],"fees":0,"borrow_apr":10000000,"max_cross":0,"horizon":86400000,"direction":-1,"expected":209000000},
+    {"a":[1000000,28800],"b":[400000,14400],"fees":500000,"borrow_apr":10000000,"max_cross":0,"horizon":86400000,"direction":-1,"expected":-156000000},
+    {"a":[-1,7],"b":null,"fees":0,"borrow_apr":0,"max_cross":0,"horizon":86400000,"direction":-1,"expected":-4505143},
+    {"a":[1000000,0],"b":null,"fees":0,"borrow_apr":0,"max_cross":0,"horizon":86400000,"direction":-1,"expected":null},
+    {"a":[1000000,28800],"b":null,"fees":0,"borrow_apr":0,"max_cross":100000,"horizon":86400000,"direction":-1,"expected":949000000}
+  ],
+  "carry_targets": [
+    {"capital":10000000000,"leverage":200,"expected":99970000},
+    {"capital":100000000,"leverage":200,"expected":39988000},
+    {"capital":10000000,"leverage":200,"expected":0},
+    {"capital":10000000000,"leverage":301,"expected":0}
+  ]
+}
