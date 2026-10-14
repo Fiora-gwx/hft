@@ -1,5 +1,4 @@
 //! The real binary and AWS SDK against local IMDSv2, Secrets Manager and KMS HTTP endpoints.
-#![cfg(unix)]
 use serde_json::json;
 use std::{
     io::{Read, Write},
@@ -7,7 +6,7 @@ use std::{
     path::PathBuf,
     process::Command,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
@@ -19,17 +18,23 @@ struct Fixture {
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
     requests: Arc<AtomicUsize>,
+    paths: Arc<Mutex<Vec<String>>>,
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        if let Some(t) = self.thread.take() {
-            t.join().unwrap();
+        if let Some(t) = self.thread.take()
+            && let Err(error) = t.join()
+            && !std::thread::panicking()
+        {
+            std::panic::resume_unwind(error);
         }
         let _ = std::fs::remove_dir_all(&self.root);
     }
 }
 fn request(stream: &mut TcpStream) -> (String, Vec<u8>) {
+    // Accepted sockets inherit the nonblocking listener mode on Windows.
+    stream.set_nonblocking(false).unwrap();
     stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
     let mut bytes = Vec::new();
     let end = loop {
@@ -74,11 +79,17 @@ impl Fixture {
         let thread_stop = stop.clone();
         let requests = Arc::new(AtomicUsize::new(0));
         let count = requests.clone();
+        let paths = Arc::new(Mutex::new(Vec::new()));
+        let observed = paths.clone();
         let thread = std::thread::spawn(move || {
             while !thread_stop.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((mut s, _)) => {
                         let (h, b) = request(&mut s);
+                        observed
+                            .lock()
+                            .unwrap()
+                            .push(h.lines().next().unwrap().to_owned());
                         count.fetch_add(1, Ordering::Relaxed);
                         let (status, body) = if h.starts_with("PUT /latest/api/token ") {
                             (200, "test-token".to_owned())
@@ -108,7 +119,7 @@ impl Fixture {
                             (404, "".into())
                         };
                         let reply = format!(
-                            "HTTP/1.1 {status} Test\r\nContent-Type: application/x-amz-json-1.1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            "HTTP/1.1 {status} Test\r\nContent-Type: application/x-amz-json-1.1\r\nx-aws-ec2-metadata-token-ttl-seconds: 21600\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                             body.len()
                         );
                         let _ = s.write_all(reply.as_bytes());
@@ -126,18 +137,11 @@ impl Fixture {
             stop,
             thread: Some(thread),
             requests,
+            paths,
         }
     }
-    fn run(&self, imds: &str) -> std::process::Output {
-        let name = Command::new("id").arg("-un").output().unwrap();
-        let name = std::str::from_utf8(&name.stdout).unwrap().trim();
-        Command::new(env!("CARGO_BIN_EXE_hft-secrets"))
-            .args(["fetch", "--manifest"])
-            .arg(self.root.join("m.toml"))
-            .arg("--out")
-            .arg(self.root.join("out"))
-            .args(["--owner", name, "--mode", "0400"])
-            .env("AWS_EC2_METADATA_SERVICE_ENDPOINT", imds)
+    fn sdk_env(&self, cmd: &mut Command, imds: &str) {
+        cmd.env("AWS_EC2_METADATA_SERVICE_ENDPOINT", imds)
             .env("AWS_ENDPOINT_URL", &self.url)
             .env("AWS_REGION", "us-east-1")
             .env("AWS_EC2_METADATA_DISABLED", "false")
@@ -150,12 +154,72 @@ impl Fixture {
             .env(
                 "AWS_SHARED_CREDENTIALS_FILE",
                 self.root.join("absent-credentials"),
-            )
+            );
+    }
+    #[cfg(unix)]
+    fn run(&self, imds: &str) -> std::process::Output {
+        let name = Command::new("id").arg("-un").output().unwrap();
+        let name = std::str::from_utf8(&name.stdout).unwrap().trim();
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_hft-secrets"));
+        self.sdk_env(&mut cmd, imds);
+        cmd.args(["fetch", "--manifest"])
+            .arg(self.root.join("m.toml"))
+            .arg("--out")
+            .arg(self.root.join("out"))
+            .args(["--owner", name, "--mode", "0400"])
             .output()
             .unwrap()
     }
 }
+
 #[test]
+fn tool_114_sdk_transport() {
+    use hft_secrets::Provider;
+    if let Ok(mode) = std::env::var("HFT_TEST_SECRET_SDK_CHILD") {
+        let mut sdk = hft_secrets::aws::Aws::new().expect("local IMDS instance role");
+        let path = std::env::var("HFT_TEST_SECRET_MANIFEST").unwrap();
+        let text = std::fs::read_to_string(path).unwrap();
+        let m = hft_secrets::manifest(&text).unwrap();
+        let a = sdk.get(&m.secret[0]).expect("local Secrets Manager response");
+        assert_eq!(a.bytes.as_slice(), b"S3CR3T-A");
+        assert_eq!(a.version, "v1");
+        let b = sdk.get(&m.secret[1]);
+        if mode == "denied" {
+            assert_eq!(b.unwrap_err(), "AccessDeniedException");
+        } else {
+            let b = b.expect("local KMS response");
+            assert_eq!(b.bytes.as_slice(), b"S3CR3T-B");
+            assert_eq!(b.version, "v7");
+        }
+        return;
+    }
+    for denied in [false, true] {
+        let f = Fixture::new(denied, true);
+        let mut cmd = Command::new(std::env::current_exe().unwrap());
+        f.sdk_env(&mut cmd, &f.url);
+        let out = cmd
+            .args([
+                "--exact",
+                "tool_114_sdk_transport",
+                "--test-threads=1",
+                "--nocapture",
+            ])
+            .env("HFT_TEST_SECRET_SDK_CHILD", if denied { "denied" } else { "ok" })
+            .env("HFT_TEST_SECRET_MANIFEST", f.root.join("m.toml"))
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}; request paths: {:?}",
+            String::from_utf8_lossy(&out.stderr),
+            f.paths.lock().unwrap()
+        );
+        assert!(f.requests.load(Ordering::Relaxed) >= 4);
+    }
+}
+
+#[test]
+#[cfg(unix)]
 fn tool_114_writes_files_and_names_only() {
     use std::os::unix::fs::MetadataExt;
     let f = Fixture::new(false, true);
@@ -174,6 +238,7 @@ fn tool_114_writes_files_and_names_only() {
     assert!(f.requests.load(Ordering::Relaxed) >= 5);
 }
 #[test]
+#[cfg(unix)]
 fn tool_115_all_or_nothing() {
     let f = Fixture::new(true, true);
     let o = f.run(&f.url);
@@ -185,6 +250,7 @@ fn tool_115_all_or_nothing() {
     assert!(!f.root.join("out").exists() || std::fs::read_dir(f.root.join("out")).unwrap().next().is_none());
 }
 #[test]
+#[cfg(unix)]
 fn tool_116_env_errors() {
     let f = Fixture::new(false, false);
     for endpoint in [&f.url, "http://127.0.0.1:1"] {
