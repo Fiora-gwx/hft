@@ -218,6 +218,7 @@ impl Ledger {
         t: i64,
         touched: &mut FixedVec<(AccountId, VenueId), 4>,
     ) {
+        self.upnl_dirty = [0; 4];
         self.tick(t);
         touched.clear();
         if let Some(p) = self.ipx.get_mut(inst.0 as usize) {

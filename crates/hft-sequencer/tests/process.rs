@@ -1326,3 +1326,154 @@ fn seq_383_price_round_notes_are_journaled_before_snapshots() {
         }
     }
 }
+
+// ===================================================================================================
+// SEQ-341: Broken auto-clear conditions, L3 on a Broken group (helpers: tests/common/risk_kit.rs).
+// ===================================================================================================
+
+mod broken_clear {
+    use hft_event::{ControlCmd, OrderDecision, OrderFlags};
+    use hft_sequencer::codes::status;
+    use hft_strategy_sdk::LinkRole;
+    use hft_types::{CapSource, Side};
+
+    use crate::common::risk_kit::*;
+    use crate::common::*;
+
+    fn steady() -> H {
+        reset_script();
+        let mut h = b0().boot();
+        h.steady();
+        h
+    }
+
+    /// g2 Broken by an exhausted link (a1 +0.01 filled, every b1 hedge expired): `Broken{2, g2}`
+    /// and `HedgeFailure{2}`.
+    fn broken_link() -> H {
+        let mut h = steady();
+        break_link(&mut h, S2, q("0.01"));
+        assert!(cap_on(&h, CapSource::BROKEN, AC2, Some(G2)));
+        assert!(cap_on(&h, CapSource::HEDGE_FAILURE, AC2, None));
+        h
+    }
+
+    fn hedge_fix(h: &mut H) -> OrderDecision {
+        let m = h.mark();
+        let r = run_cmd(
+            h,
+            AC2,
+            &ControlCmd::HedgeFix {
+                scope: scope(S2, AC2, G2),
+            },
+        );
+        assert_eq!(r.0, status::APPLIED, "{r:?}");
+        decs_since(h, m)
+            .into_iter()
+            .find(|d| d.inst == A1 && d.account == AC2)
+            .expect("HedgeFix order")
+    }
+
+    fn broken(h: &H) -> bool {
+        cap_on(h, CapSource::BROKEN, AC2, Some(G2))
+    }
+
+    fn cleared_broken(h: &H, m: usize) -> bool {
+        cap_notes(h, m, false)
+            .iter()
+            .any(|c| c.source == CapSource::BROKEN && c.scope.account == AC2 && c.scope.group == G2)
+    }
+
+    #[test]
+    fn seq_341_broken_auto_clear_conditions() {
+        // .1 the bounded auto-close sells the excess a1 at t_b + broken_auto_fix_ms; its fill
+        // takes the filled naked to 0 with the group quiet → AutoClear{Broken}, HedgeFailure kept.
+        let mut h = broken_link();
+        let t_b = h.now();
+        let m = h.mark();
+        alive_to(&mut h, t_b + 121 * SEC, 500 * MS);
+        let af: Vec<_> = decs_since(&h, m)
+            .into_iter()
+            .filter(|d| d.reason == REASON_AUTO_FIX)
+            .collect();
+        assert_eq!(af.len(), 1, "{af:?}");
+        let x = af[0];
+        assert_eq!(
+            (x.inst, x.side, x.qty, x.reject),
+            (A1, Side::Sell, q("0.01"), 0),
+            "{x:?}"
+        );
+        assert!(is_role(&x, LinkRole::HedgeFix));
+        h.ack(&x);
+        assert!(broken(&h), "SEQ-341.3: in flight, not cleared");
+        let m = h.mark();
+        h.fill(&x, x.qty, x.qty, x.px);
+        assert!(
+            !broken(&h) && cleared_broken(&h, m),
+            "SEQ-341.1 AutoClear{{Broken}}"
+        );
+        assert!(
+            cap_on(&h, CapSource::HEDGE_FAILURE, AC2, None),
+            "SEQ-341.1 HedgeFailure kept"
+        );
+
+        // .2 HedgeFix to the dust line, group quiet → AutoClear; .3 before its fill → kept.
+        let mut h = broken_link();
+        let x = hedge_fix(&mut h);
+        assert_eq!(
+            (x.side, x.qty, x.reason),
+            (Side::Sell, q("0.01"), REASON_CMD_HEDGE_FIX)
+        );
+        h.ack(&x);
+        assert!(broken(&h), "SEQ-341.3");
+        let m = h.mark();
+        h.fill(&x, x.qty, x.qty, x.px);
+        assert!(!broken(&h) && cleared_broken(&h, m), "SEQ-341.2");
+        assert!(
+            cap_on(&h, CapSource::HEDGE_FAILURE, AC2, None),
+            "SEQ-341.2 HedgeFailure kept"
+        );
+
+        // .4 the closing IOC ends with zero fill → still Broken.
+        let mut h = broken_link();
+        let x = hedge_fix(&mut h);
+        h.ack(&x);
+        let m = h.mark();
+        expire_order(&mut h, &x);
+        assert!(broken(&h) && !cleared_broken(&h, m), "SEQ-341.4");
+
+        // .5 L3 ForceDeleverage on a Broken g2 holding a1 +0.010 / b1 −0.005: a reduce-only perp
+        // buy goes out (perp first).
+        let mut h = steady();
+        broken_by_release(
+            &mut h,
+            S2,
+            G2,
+            &[(A1, Side::Buy, "0.010"), (B1, Side::Sell, "0.005")],
+        );
+        h.mark_md(B1, "50000");
+        let n = h.io_ref().out.len();
+        let m = h.mark();
+        // liq_px 54 500 for the short b1 at mark 50 000: liq_dist 0.09 ≤ liq_dist_force 0.10.
+        margin_with(&mut h, AC2, "0.01", Some("54500"));
+        let fs: Vec<_> = exec_decs_since(&h, m)
+            .into_iter()
+            .filter(|x| x.action == hft_exec::decision::action::FORCE_STEP)
+            .collect();
+        assert!(!fs.is_empty(), "ForceStep");
+        let ds = decs_since(&h, m);
+        let p = ds
+            .iter()
+            .find(|d| d.inst == B1 && d.account == AC2)
+            .unwrap_or_else(|| panic!("perp reduction: {ds:?}"));
+        assert_eq!((p.side, p.reject), (Side::Buy, 0), "{p:?}");
+        assert!(p.oflags & OrderFlags::REDUCE_ONLY.0 != 0);
+        assert!(ds.iter().all(|d| d.inst != A1), "perp first: {ds:?}");
+        assert!(
+            h.io_ref().out[n..]
+                .iter()
+                .any(|f| f.1.inst == B1 && f.1.account == AC2),
+            "SEQ-341.5 out"
+        );
+        assert!(broken(&h));
+    }
+}

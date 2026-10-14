@@ -4980,7 +4980,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:B0 稳态;OMS `unknown_alarm_ms = 30 000`;账户 1 在 B 上槽 s 于 t 进入 `Unknown`
-- 实现:`crates/hft-sequencer/tests/modes.rs::seq_353_unknown_timeout_cap`
+- 实现:`crates/hft-sequencer/tests/mode.rs::seq_353_unknown_timeout_cap`
 
 | 行 | 输入 | 期望 |
 |---|---|---|
@@ -5195,7 +5195,7 @@ spec: README.md
   1. 交出 (A, 1) 的 `ConnState{Degraded, role Order, reason RATE_LIMIT}`
 - 期望:
   - 同一 Input 内调 `risk.on_rate_limit_hit(A, 1, now)` 一次,其返回的 `Note{RateLimitHit}` 写入输出;之后 (A, 1) 的 Open 被 `RATE_BACKOFF` 拒
-- 实现:`crates/hft-sequencer/tests/modes.rs::seq_368_rate_limit_hit_note`
+- 实现:`crates/hft-sequencer/tests/mode.rs::seq_368_rate_limit_hit_note`
 
 ### SEQ-369 不含 Summary 的对账组不调 apply(Gate(Recon))
 

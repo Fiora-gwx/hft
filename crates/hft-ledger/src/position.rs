@@ -635,6 +635,9 @@ impl Ledger {
             a.day.unrealized = Notional(a.day.unrealized.0.saturating_add(du));
             a.held_notional = Notional(a.held_notional.0.saturating_add(dn));
         }
+        if du != 0 {
+            self.mark_upnl_changed(acc);
+        }
     }
 
     /// Recomputes the unrealized of leg `l` of cell `c`; the delta goes to the group books.

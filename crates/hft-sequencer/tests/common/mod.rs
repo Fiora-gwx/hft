@@ -8,6 +8,7 @@
     clippy::too_many_arguments
 )] // allow-list: test code, not a hot path
 
+pub mod risk_kit;
 pub mod strat;
 
 use std::collections::{HashMap, VecDeque};

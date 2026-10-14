@@ -4,7 +4,7 @@
 use hft_event::{CapRecord, CmdScope, NoteLevel, RecordFlags};
 use hft_risk::mode::{CancelScope, CellKey, DrainCause, Effective, ModeErr, ModeInput, ModeOutcome};
 use hft_strategy_sdk::StrategySet;
-use hft_types::{AccountId, CapSource, GroupId, InstId, KillBits, RunMode, VenueId};
+use hft_types::{AccountId, CapSource, GroupId, InstId, RunMode, VenueId};
 
 use crate::Driver;
 use crate::codes::note;
@@ -289,9 +289,8 @@ pub(crate) fn execute<D: Driver<S>, S: StrategySet>(
     }
     // ③ kill words.
     if out.kill_changed {
-        let bits: Vec<KillBits> = e.risk.mode.kill_bits().to_vec();
-        e.trace.rec("kill_words", bits.len() as u64, 0);
-        drv.write_kill(&bits);
+        e.trace.rec("kill_words", e.risk.mode.kill_bits().len() as u64, 0);
+        drv.write_kill(e.risk.mode.kill_bits());
     }
     // ④ resolve_broken (HARD Kill record deleted).
     if out.resolve_broken {
@@ -332,7 +331,7 @@ pub(crate) fn execute<D: Driver<S>, S: StrategySet>(
         }
     }
     for a in out.daily_loss_resumed.as_slice().iter() {
-        let day = e.ledger.account(*a).day.net_realized();
+        let day = e.ledger.account(*a).day.net();
         e.risk.on_daily_loss_resumed(*a, day);
     }
     // ⑦ internal Drain.
