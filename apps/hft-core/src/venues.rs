@@ -244,6 +244,21 @@ where
     P::GwCtx: Send,
     P::Templates: Send,
 {
+    // Complete the self-test before even the account-baseline REST connection is opened.
+    let kill: Option<&'static hft_rt::KillWord> = if v.accounts.is_empty() {
+        None
+    } else {
+        let word = Box::leak(Box::new(hft_rt::CachePadded(std::sync::atomic::AtomicU32::new(
+            0,
+        ))));
+        for k in &v.accounts {
+            let ix = rd
+                .venue_account_ix(P::VENUE, AccountId(k.account))
+                .ok_or_else(|| Error::config("AccountBinding", name))?;
+            selftest_word(word, ix)?;
+        }
+        Some(word)
+    };
     let venue = VenueCfg {
         env: VenueEnv::Testnet,
         stale_guard_ms: v.stale_guard_ms,
@@ -528,46 +543,9 @@ where
         let (out, reports) = ring(c.rings.elements)?;
         let (rep_bulk_tx, rep_bulk) = byte_ring(c.rings.bytes)?;
         let (_acct_tx, acct) = byte_ring(c.rings.bytes)?;
-        let kill = Box::leak(Box::new(hft_rt::CachePadded(std::sync::atomic::AtomicU32::new(
-            0,
-        ))));
+        let kill = kill.ok_or_else(|| Error::config("KillSelfTest", name))?;
         for k in &v.accounts {
             let a = AccountId(k.account);
-            let ix = rd
-                .venue_account_ix(P::VENUE, a)
-                .ok_or_else(|| Error::config("AccountBinding", name))?;
-            let bits = hft_types::KillBits::account(ix).0 | hft_types::KillBits::account_hard(ix).0;
-            for hard in [false, true] {
-                kill.store(
-                    hft_types::KillBits::account(ix).0
-                        | if hard {
-                            hft_types::KillBits::account_hard(ix).0
-                        } else {
-                            0
-                        },
-                    Ordering::Release,
-                );
-                let word = kill.load(Ordering::Acquire);
-                if hft_venue::kill_admit(word, 7, bits, ix, hft_event::GwOp::Place, 0)
-                    || hft_venue::kill_admit(
-                        word,
-                        7,
-                        bits,
-                        ix,
-                        hft_event::GwOp::Place,
-                        hft_event::OrderFlags::RISK_REDUCING.0,
-                    ) == hard
-                {
-                    return Err(Error::config("KillSelfTest", name));
-                }
-            }
-            for bit in 0..32 {
-                kill.store(1u32 << bit, Ordering::Release);
-                if kill.load(Ordering::Acquire) != 1u32 << bit {
-                    return Err(Error::config("KillSelfTest", name));
-                }
-            }
-            kill.store(0, Ordering::Release);
             let (owner, timer_id, group) =
                 hft_event::TimerCode::Sys(hft_event::SysTimer::KillSelfTestOk { account: a })
                     .encode()
@@ -881,6 +859,46 @@ pub fn registered(protocol: &str, id: VenueId) -> Result<(), Error> {
     if id != expected {
         return Err(Error::config("UnknownVenue", "protocol and VenueId differ"));
     }
+    Ok(())
+}
+
+/// Cold self-test of the same atomic word handed to the live gateway.
+pub fn selftest_word(kill: &hft_rt::KillWord, ix: u8) -> Result<(), Error> {
+    if ix >= 12 {
+        return Err(Error::config("KillSelfTest", "account index out of range"));
+    }
+    let bits = hft_types::KillBits::account(ix).0 | hft_types::KillBits::account_hard(ix).0;
+    for hard in [false, true] {
+        kill.store(
+            hft_types::KillBits::account(ix).0
+                | if hard {
+                    hft_types::KillBits::account_hard(ix).0
+                } else {
+                    0
+                },
+            Ordering::Release,
+        );
+        let word = kill.load(Ordering::Acquire);
+        if hft_venue::kill_admit(word, 7, bits, ix, hft_event::GwOp::Place, 0)
+            || hft_venue::kill_admit(
+                word,
+                7,
+                bits,
+                ix,
+                hft_event::GwOp::Place,
+                hft_event::OrderFlags::RISK_REDUCING.0,
+            ) == hard
+        {
+            return Err(Error::config("KillSelfTest", "atomic word/admission mismatch"));
+        }
+    }
+    for bit in 0..32 {
+        kill.store(1u32 << bit, Ordering::Release);
+        if kill.load(Ordering::Acquire) != 1u32 << bit {
+            return Err(Error::config("KillSelfTest", "atomic word/admission mismatch"));
+        }
+    }
+    kill.store(0, Ordering::Release);
     Ok(())
 }
 

@@ -1065,7 +1065,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`budget::journal_list(&cfg)`
-- 实现:`apps/hft-core/tests/budget.rs::core_101_journal_list`
+- 实现:`apps/hft-core/tests/budget.rs::core_101_journal_set_follows_active_venue_tasks`
 
 | 行 | 配置 | 期望 |
 |---|---|---|
@@ -1073,6 +1073,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-101.2 | `dev2_prod()` | `seq` + 6 个 `raw-feed-<v>` + `raw-gw-binance-usdm`、`raw-gw-okx-swap`,共 9 个 |
 | CORE-101.3 | `c4_prod()` | `seq` + 6 个 `raw-feed-<v>` + 1 个 `raw-gw-<v>`,共 8 个 |
 | CORE-101.4 | `c32_prod()` | `seq` + 6 个 `raw-feed-<v>` + 6 个 `raw-feed-<v>-bbo` + 6 个 `raw-gw-<v>`,共 19 个 |
+- 覆盖边界:覆盖当前单任务线程与 paper 的实际 journal 集合；拆分 BBO 路由矩阵依赖对应接线。
+
 
 ### CORE-102 内存表各列由实际配置求和得到 `host.mem_budget_mib`
 
@@ -1738,7 +1740,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`budget::shm_space_ok(avail, held_self, need)` 纯函数,单位字节;`need` = 192 MiB(`dev2` `sim`)
-- 实现:`apps/hft-core/tests/budget.rs::core_165_shm_space_check`
+- 实现:`apps/hft-core/tests/budget.rs::core_165_only_self_held_bytes_credit_the_space_check`
 
 | 行 | `avail` / `held_self` | 期望 |
 |---|---|---|
@@ -1746,6 +1748,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-165.2 | 192 MiB − 1 B / 0 | `Err(ShmSpace)` |
 | CORE-165.3 | 40 MiB / 152 MiB | `Ok` |
 | CORE-165.4 | 40 MiB / 152 MiB − 1 B | `Err(ShmSpace)` |
+- 覆盖边界:覆盖空间判定与溢出边界；实际持有量由 hft-journal 接口提供，完整跨挂载矩阵待补。
+
 
 ### CORE-166 SIGKILL 后本实例热段留在 tmpfs:重启通过空间检查并复用
 
@@ -1769,7 +1773,9 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. 启动
 - 期望:
   - 退出码 3;错误行 `ShmSpace`;没有建心跳块
-- 实现:`apps/hft-core/tests/shm.rs::core_167_other_instance_fills_space`
+- 实现:`apps/hft-core/tests/budget.rs::core_167_other_instance_space_is_not_available`
+- 覆盖边界:覆盖容量不足的退出码；跨实例真实 tmpfs 占满需 Linux 主机验证。
+
 
 ### CORE-168 出口 IP 的划分校验
 
@@ -2654,7 +2660,9 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 期望:
   - 步骤 1:`engine_epoch = 5` 的 `write_sync` 早于假交易所收到的任何下单类帧;`Note{EpochStart}` 的 `v[0] = 5`
   - 步骤 2:被中断的一次把 `engine_epoch` 写成 5;再次启动后 `EpochStart` 的 `v[0] = 6`
-- 实现:`apps/hft-core/tests/recovery.rs::core_242_epoch_synced_before_orders`
+- 实现:`apps/hft-core/tests/recovery.rs::core_242_reservation_survives_owner_exit_and_never_reuses_epoch`
+- 覆盖边界:覆盖持久化后退出、重开租约、单写者排他、两实例隔离、损坏与溢出；快照恢复与 Unknown 查单进程故障矩阵仍依赖恢复装配。
+
 
 ### CORE-243 `EngineClock` 恰好一条,先于其他 Input;`HostProfile` 与 `ConfigBlob{HostManifest}` 在它之前
 
@@ -3009,6 +3017,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-268.5 | `{Kill(Account bn-12)}` / Place,`RISK_REDUCING` | true |
 | CORE-268.6 | `{Kill(Account bn-12), hard}` / Place,`RISK_REDUCING` | false |
 | CORE-268.7 | 每行结束后 | 自检对比结果与 kill 放行表一致,两个账户各一条 `Timer{Sys, KillSelfTestOk}` |
+- 覆盖边界:覆盖实际原子字、两端账户索引及 32 位读回；账户闸门事件由现有账户环发布。
+
 
 ### CORE-269 kill 自检逐位回读 32 位,检出位宽截断
 
@@ -3045,7 +3055,9 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 期望:
   - 全部 `KillWord` = 0;假交易所在步 3 期间收到 0 帧(连接在步 6 才建)
   - Sim 账户(另以 `dev2_sim()` 运行)不占任何 `KillWord`,也没有 `KillSelfTestOk`
-- 实现:`apps/hft-core/tests/kill_selftest.rs::core_271_no_frames_words_zero`
+- 实现:`apps/hft-core/tests/kill_selftest.rs::core_271_selftest_uses_only_atomic_words_and_leaves_them_clear`
+- 覆盖边界:自检函数无网络能力，结束原子字为零；完整步 3 的网络帧时序依赖启动步骤事件。
+
 
 ### CORE-272 没有停机标记时不写任何 Kill
 
@@ -3327,7 +3339,9 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 期望:
   - journal 依次有:`ControlCmd{Drain{cancel_resting = true}}`(issuer `cli:systemd`)、两张挂单的撤单决策、`purpose = Drain` 的快照;每个 journal 末段以 `End` 结束并 `Sealed`
   - 假交易所收到两张撤单;退出码 0;退出时 `HkLine.state = 5`;冷副本 `synced_len` = 热段 `committed_len`
-- 实现:`apps/hft-core/tests/shutdown.rs::core_300_sigterm_drain_sequence`
+- 实现:`apps/hft-core/tests/signals.rs::core_300_sigterm_journaled_drain`
+- 覆盖边界:Linux paper 进程验证系统信号、唯一 Drain 命令、issuer、封存与 Stopped；真实交易所两挂单矩阵待补。
+
 
 ### CORE-301 SIGINT 与 SIGTERM 同一路径
 
@@ -3339,7 +3353,9 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. 发 SIGINT
 - 期望:
   - journal 中有 `ControlCmd{Drain}`(issuer `cli:systemd`);退出码 0;`state = 5`
-- 实现:`apps/hft-core/tests/shutdown.rs::core_301_sigint_same_path`
+- 实现:`apps/hft-core/tests/signals.rs::core_301_sigint_journaled_drain`
+- 覆盖边界:Linux paper 进程验证 SIGINT 共用 ctl Drain 路径；真实账户矩阵同 CORE-300。
+
 
 ### CORE-302 `shutdown.cancel_open_orders = false` 时 SIGTERM 不撤挂单
 
@@ -3351,7 +3367,9 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. 发 SIGTERM
 - 期望:
   - `ControlCmd{Drain{cancel_resting = false}}`;假交易所没有收到撤单;两张挂单在 Drain 快照中为非终态;退出码 0
-- 实现:`apps/hft-core/tests/shutdown.rs::core_302_sigterm_keeps_orders`
+- 实现:`apps/hft-core/tests/signals.rs::core_302_signal_respects_cancel_setting`
+- 覆盖边界:验证 journal 中 cancel_resting=false；真实交易所保留两挂单的矩阵待补。
+
 
 ### CORE-303 Drain 期间有已发第一腿、未发第二腿的链接时等它结束才写快照
 
@@ -3893,7 +3911,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-380.15 | `Validate` / 全部账户闸门通过 | 非法迁移(`Err(IllegalTransition)`) |
 | CORE-380.16 | `Stopped` / 任意 | 非法迁移 |
 
-### CORE-381 主线程屏蔽信号,SIGTERM 只经 housekeeping 的 signalfd 处理
+### CORE-381 主线程屏蔽信号,signalfd 将服务信号交给 ctl Drain
 
 - 规则:[实现说明](README.md#实现说明)
 - 级别:proc
@@ -3903,7 +3921,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. 读每个线程 `/proc/<pid>/task/<tid>/status` 的 `SigBlk`
   2. 用 `tgkill` 把 SIGTERM 发给主线程
 - 期望:
-  - 主线程 `SigBlk` 含 SIGTERM、SIGINT、SIGHUP;housekeeping 线程有指向 signalfd 的 fd
+  - 全部线程 `SigBlk` 含 SIGTERM、SIGINT、SIGHUP;进程有 signalfd。housekeeping 消费进程信号，主线程同时消费定向发给它的信号；SIGHUP 不重载配置
   - 步骤 2 后进程不被默认动作终止,而是写出 `ControlCmd{Drain}`(issuer `cli:systemd`)并以 0 退出
 - 实现:`apps/hft-core/tests/signals.rs::core_381_main_thread_masks_signals`
 
