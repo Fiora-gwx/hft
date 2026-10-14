@@ -261,3 +261,36 @@ pub(crate) fn private_subscribe(
     let n = w.finish().ok_or(ProtoErr::BufFull)?;
     out.push(frame.get(..n).unwrap_or(&[]), 0)
 }
+
+/// UTA confirms each topic independently; duplicate confirmations never complete another topic.
+pub(crate) fn private_ack(payload: &[u8]) -> Option<(u8, bool)> {
+    #[derive(serde::Deserialize)]
+    struct Arg<'a> {
+        #[serde(borrow, default)]
+        topic: &'a str,
+        #[serde(borrow, default)]
+        channel: &'a str,
+    }
+    #[derive(serde::Deserialize)]
+    struct Ack<'a> {
+        #[serde(borrow)]
+        event: &'a str,
+        #[serde(borrow)]
+        arg: Arg<'a>,
+    }
+    let a = crate::json::from::<Ack>(payload).ok()?;
+    if !matches!(a.event, "subscribe" | "error") {
+        return None;
+    }
+    let bit = match if a.arg.topic.is_empty() {
+        a.arg.channel
+    } else {
+        a.arg.topic
+    } {
+        "order" => 0,
+        "position" => 1,
+        "account" => 2,
+        _ => return None,
+    };
+    Some((bit, a.event == "subscribe"))
+}

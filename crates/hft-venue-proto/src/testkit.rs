@@ -9,7 +9,9 @@ use hft_types::{Px, Qty, Side};
 
 use crate::{MdSink, MsgOp, RouteId, RxMeta, VenueProtocol};
 use zerocopy::IntoBytes;
+mod acct;
 mod checks;
+pub use acct::*;
 pub use checks::*;
 
 /// One `MdSink` call, recorded with owned copies of its inputs.

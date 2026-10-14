@@ -4288,3 +4288,5 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 基准 `startup-cold`(CORE-267)与 `core/advisor_ckpt_chunk`(CORE-402)按 [benchmarks](../../benchmarks/README.md) 登记的数值在参考机上判定。
 - `host`/`drill` 用例的证据按各用例的 `证据` 字段归档:dev2 护栏的演练(CORE-148、CORE-210–CORE-217)与护栏、批处理的主机用例在 M3 末之前完成,其中演练 8(CORE-216)不通过即按 [dev2 护栏](README.md#dev2-护栏) 启用退路 (a);统一升级主机的用例(CORE-077–CORE-079、CORE-089、CORE-142、CORE-170–CORE-176、CORE-233、CORE-279、CORE-400–CORE-408)在 M7 完成。
 - 上线门槛的唯一定义在 [testing §8](../../docs/testing.md#8-上线门槛);上线步骤见 [launch](../../docs/runbooks/launch.md)。
+
+CORE-090 的网关入口包含配对 rep-bulk，变长 MarginReport/AccountConfigReport 的完整长度由 peek_len 预留后交给 InputSlot；发布顺序回归见 [VEN-242](../../crates/hft-venue/TESTS.md)。

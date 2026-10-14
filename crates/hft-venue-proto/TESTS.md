@@ -459,7 +459,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `GoldenDriver::<FakePerp>::run_acct(Config, …)`;`run_acct(Margin, …)`
 - 期望:
   - 两次都 `Ok`;`acct_request` 产出的每个 `RestReqBuf` 与期望逐字节相同
-- 实现:`crates/hft-venue-proto/tests/testkit.rs::vpr_047_golden_acct`
+- 实现:`crates/hft-venue-proto/tests/helpers.rs::vpr_047_golden_acct`
 
 ### VPR-048 GoldenDriver 逐字节比对编码类方法
 

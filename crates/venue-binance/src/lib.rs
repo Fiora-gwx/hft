@@ -291,6 +291,18 @@ macro_rules! venue_impl {
             ) -> Result<(), ProtoErr> {
                 session::subscribe($line, rd, subs, unsub, cfg, out)
             }
+            fn private_channels() -> u64 {
+                if $line == Line::Spot { 1 } else { 0 }
+            }
+            fn private_ack(payload: &[u8]) -> Option<(u8, bool)> {
+                session::private_ack($line, payload)
+            }
+            fn is_private_report(class: Self::ReportClass) -> bool {
+                {
+                    use $rep as R;
+                    !matches!(class, R::WsResp | R::Control | R::Unknown)
+                }
+            }
             fn private_subscribe(
                 cfg: &VenueCfg,
                 acct: AccountId,

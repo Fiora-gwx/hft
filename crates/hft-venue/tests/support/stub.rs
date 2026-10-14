@@ -59,6 +59,7 @@ pub struct StubCfg {
     pub session_identity: bool,
     pub rest_query: bool,
     pub keepalive: bool,
+    pub private_channels: u8,
     pub encode_batch_ok: bool,
     pub subs_per_frame: usize,
     pub bootstrap: bool,
@@ -95,6 +96,7 @@ impl Default for StubCfg {
             session_identity: false,
             rest_query: false,
             keepalive: false,
+            private_channels: 0,
             encode_batch_ok: true,
             subs_per_frame: 10,
             bootstrap: false,
@@ -218,6 +220,7 @@ pub enum Md {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Rep {
+    Bulk,
     Order,
     External,
     Resp,
@@ -234,7 +237,9 @@ pub struct Tpl {
 }
 
 #[derive(Debug, Default)]
-pub struct GwCtx;
+pub struct GwCtx {
+    pub dedup: hft_venue_proto::TradeIdRing<128>,
+}
 
 /// Fields of a `|`-separated line (fixed array, no allocation).
 struct Fields<'a> {
@@ -538,9 +543,34 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         out: &mut SubFrames,
     ) -> Result<(), ProtoErr> {
         log("private_subscribe", || format!("{} {unsub}", acct.0));
-        out.push(format!("PSUB|{}", acct.0).as_bytes(), 1)
+        if cfg().private_channels == 0 {
+            return Ok(());
+        }
+        out.push(
+            format!("{}|{}", if unsub { "PUNSUB" } else { "PSUB" }, acct.0).as_bytes(),
+            1,
+        )
     }
 
+    fn private_channels() -> u64 {
+        u64::from(cfg().private_channels)
+    }
+    fn private_ack(p: &[u8]) -> Option<(u8, bool)> {
+        let mut f = p.split(|b| *b == b'|');
+        if f.next()? != b"PACK" {
+            return None;
+        }
+        Some((
+            core::str::from_utf8(f.next()?).ok()?.parse().ok()?,
+            f.next()? == b"ok",
+        ))
+    }
+    fn is_private_report(c: Rep) -> bool {
+        matches!(
+            c,
+            Rep::Bulk | Rep::Order | Rep::External | Rep::Event | Rep::Ignorable
+        )
+    }
     fn heartbeat(role: Role) -> HeartbeatSpec {
         let c = cfg();
         if role == Role::Md { c.hb_md } else { c.hb_order }
@@ -950,6 +980,101 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         Ok(w.n)
     }
 
+    fn encode_rest(
+        _rd: &RefData,
+        _t: &Tpl,
+        c: &GwCmd,
+        _tgt: &TargetRef,
+        _clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<(), EncodeErr> {
+        if Self::order_channel(c.op) != OrderChannel::Rest {
+            return Err(EncodeErr::Unsupported(c.op));
+        }
+        log("encode_rest", || format!("{:?}", c.op));
+        out.path_query
+            .push(b"/order?signature=wire-only")
+            .map_err(|_| EncodeErr::FieldOverflow)?;
+        out.redacted = true;
+        Ok(())
+    }
+    fn decode_rest(
+        _rd: &RefData,
+        _ctx: &mut GwCtx,
+        origin: &hft_venue_proto::RestOrigin,
+        status: u16,
+        body: &[u8],
+        rx: &RxMeta,
+        out: &mut impl ReportSink,
+    ) -> Result<ReportOutcome, DecodeErr> {
+        log("decode_rest", || format!("{status}"));
+        if status != 200 {
+            return Ok(ReportOutcome {
+                outcome_unknown: origin.req,
+                ctl: if status == 429 {
+                    ReportCtl::RateLimited
+                } else {
+                    ReportCtl::None
+                },
+                ..Default::default()
+            });
+        }
+        let mut e = blank_order(rx.account);
+        e.what = OrderEventKind::QueryResult;
+        e.inst = super::rd::S1;
+        e.epoch = 5;
+        let mut result = ReportOutcome {
+            req: origin.req,
+            ..Default::default()
+        };
+        if let Some(r) = origin.req {
+            e.slot = SlotId(r.slot);
+            e.r#gen = r.r#gen;
+            if r.op != GwOp::Query {
+                return Ok(result);
+            }
+        } else if origin.what == hft_venue_proto::RestWhat::Sweep {
+            e.slot = SlotId(7);
+            e.r#gen = 1;
+        } else {
+            return Ok(result);
+        }
+        if body != b"ok" {
+            return Err(DecodeErr::Shape);
+        }
+        e.cum_filled = Qty(3);
+        e.avg_px = Px(100);
+        e.rx_tsc = rx.rx_tsc;
+        out.order(&e);
+        result.events = 1;
+        Ok(result)
+    }
+    fn session_keepalive_request(
+        _rd: &RefData,
+        _t: &Tpl,
+        _clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<bool, EncodeErr> {
+        out.path_query
+            .push(b"/keepalive")
+            .map_err(|_| EncodeErr::FieldOverflow)?;
+        out.redacted = true;
+        Ok(true)
+    }
+    fn ro_request(
+        _rd: &RefData,
+        _t: &Tpl,
+        _a: AccountId,
+        _q: &hft_venue_proto::RoQuery,
+        _clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<(), EncodeErr> {
+        out.path_query
+            .push(b"/open-orders")
+            .map_err(|_| EncodeErr::FieldOverflow)?;
+        out.redacted = true;
+        Ok(())
+    }
     fn encode_batch(
         _rd: &RefData,
         _t: &Tpl,
@@ -982,6 +1107,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
     fn classify_report(_op: MsgOp, head: &[u8]) -> Rep {
         let f = fields(head);
         match f.first().copied() {
+            Some(b"V") => Rep::Bulk,
             Some(b"O") => Rep::Order,
             Some(b"X") => Rep::External,
             Some(b"R") => Rep::Resp,
@@ -994,7 +1120,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
 
     fn decode_report(
         rd: &RefData,
-        _ctx: &mut GwCtx,
+        ctx: &mut GwCtx,
         c: Rep,
         p: &[u8],
         rx: &RxMeta,
@@ -1008,6 +1134,45 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         let f = fields(p);
         let mut o = ReportOutcome::default();
         match c {
+            Rep::Bulk => {
+                let mut m = hft_event::MarginReportHdr::new_zeroed();
+                m.venue = V7;
+                m.account = rx.account;
+                m.n = 3;
+                let items = [hft_event::MarginItem {
+                    inst: super::rd::S1,
+                    adl_quantile: 40,
+                    _pad: [0; 3],
+                    liq_px: Px(77),
+                }; 3];
+                out.margin(&m, &items);
+                let mut c = hft_event::AccountConfigReportHdr::new_zeroed();
+                c.venue = V7;
+                c.account = rx.account;
+                c.n_lev = 2;
+                let lev = [hft_event::LeverageItem {
+                    inst: super::rd::S1,
+                    _pad: 0,
+                    leverage: hft_types::Rate(5_000_000_000),
+                }; 2];
+                out.account_config(&c, &lev);
+                let mut pos = hft_event::PositionReport::new_zeroed();
+                pos.account = rx.account;
+                pos.venue = V7;
+                pos.inst = super::rd::S1;
+                pos.qty = Qty(8);
+                out.position(&pos);
+                let mut bal = hft_event::BalanceReport::new_zeroed();
+                bal.account = rx.account;
+                bal.venue = V7;
+                out.balance(&bal);
+                let mut fund = hft_event::FundingSettle::new_zeroed();
+                fund.account = rx.account;
+                fund.venue = V7;
+                fund.inst = super::rd::S1;
+                out.funding_settle(&fund);
+                o.events = 5;
+            }
             Rep::External => {
                 out.external_fill(&hft_event::ExternalFill {
                     venue: V7,
@@ -1071,6 +1236,17 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
                 e.px = e.avg_px;
                 e.inst = super::rd::S1;
                 e.ex_ts_ns = num(f.get(10)).unwrap_or(0);
+                if matches!(
+                    e.what,
+                    OrderEventKind::Fill | OrderEventKind::PartialFill | OrderEventKind::FeeOnly
+                ) && e.trade_id != 0
+                    && ctx.dedup.seen_or_insert(hft_venue_proto::dedup_key(
+                        e.inst,
+                        hft_venue_proto::TradeKey::Id(e.trade_id),
+                    ))
+                {
+                    return Ok(o);
+                }
                 out.order(&e);
                 o.events = 1;
             }
@@ -1088,7 +1264,14 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
                 }
                 match code {
                     0 => {}
-                    -2010 => {
+                    -2010 | -1021 | -1015 => {
+                        o.ctl = if code == -1021 {
+                            ReportCtl::ClockSkew
+                        } else if code == -1015 {
+                            ReportCtl::RateLimited
+                        } else {
+                            ReportCtl::None
+                        };
                         let mut e = blank_order(rx.account);
                         e.what = OrderEventKind::Reject;
                         e.slot = SlotId(r.slot);
@@ -1110,7 +1293,9 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
             Rep::Ignorable => o.skip = Skip::Listed,
             Rep::Event => {
                 let name = f.get(1).copied().unwrap_or(&[]);
-                if name == b"SHUTDOWN" {
+                if name == b"ENDED" {
+                    o.ctl = ReportCtl::UserStreamEnded;
+                } else if name == b"SHUTDOWN" {
                     o.ctl = ReportCtl::ServerShutdown;
                 } else if rd
                     .caps(V7)
@@ -1162,5 +1347,159 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
 
     fn needs_per_order_signing() -> bool {
         V & V_SIGN != 0
+    }
+}
+use hft_venue_proto::{AcctProtocol, AcctQuery, AcctQueryKind};
+#[derive(Default)]
+pub struct AcctScratch {
+    pub bits: u8,
+    pub amount: i64,
+    pub qty: i64,
+}
+impl<const C: usize, const V: u32> AcctProtocol for Stub<C, V> {
+    type AcctCtx = u32;
+    type AcctScratch = AcctScratch;
+    fn acct_queries(k: AcctQueryKind) -> &'static [AcctQuery] {
+        const CONFIG: [AcctQuery; 3] = [
+            AcctQuery {
+                kind: AcctQueryKind::Config,
+                step: 0,
+                every: 1,
+                push_fallback: false,
+                weight: 2,
+            },
+            AcctQuery {
+                kind: AcctQueryKind::Config,
+                step: 1,
+                every: 1,
+                push_fallback: false,
+                weight: 3,
+            },
+            AcctQuery {
+                kind: AcctQueryKind::Config,
+                step: 2,
+                every: 1,
+                push_fallback: false,
+                weight: 1,
+            },
+        ];
+        const MARGIN: [AcctQuery; 2] = [
+            AcctQuery {
+                kind: AcctQueryKind::Margin,
+                step: 0,
+                every: 1,
+                push_fallback: true,
+                weight: 5,
+            },
+            AcctQuery {
+                kind: AcctQueryKind::Margin,
+                step: 1,
+                every: 2,
+                push_fallback: true,
+                weight: 5,
+            },
+        ];
+        if k == AcctQueryKind::Config {
+            &CONFIG
+        } else {
+            &MARGIN
+        }
+    }
+    fn acct_request(
+        _rd: &RefData,
+        _t: &Tpl,
+        acct: AccountId,
+        q: AcctQuery,
+        _clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<(), EncodeErr> {
+        log("acct_request", || {
+            format!("{} {} {}", acct.0, q.kind as u8, q.step)
+        });
+        out.path_query
+            .push(b"/account?signature=test-signed-value")
+            .unwrap();
+        out.redacted = true;
+        out.endpoint = if q.kind == AcctQueryKind::Config {
+            q.step % 2
+        } else {
+            0
+        };
+        Ok(())
+    }
+    fn acct_decode(
+        _rd: &RefData,
+        _ctx: &mut u32,
+        _acct: AccountId,
+        q: AcctQuery,
+        status: u16,
+        body: &[u8],
+        s: &mut AcctScratch,
+    ) -> Result<(), DecodeErr> {
+        log("acct_decode", || format!("{}", q.step));
+        if status != 200 || body.len() < 8 {
+            return Err(DecodeErr::Shape);
+        }
+        let value = i64::from_le_bytes(body[..8].try_into().unwrap());
+        s.bits |= 1 << q.step;
+        if q.kind == AcctQueryKind::Margin {
+            if q.step == 0 {
+                s.amount = value;
+            } else {
+                s.qty = value;
+            }
+        }
+        Ok(())
+    }
+    fn acct_finish(
+        _rd: &RefData,
+        ctx: &mut u32,
+        acct: AccountId,
+        k: AcctQueryKind,
+        s: &AcctScratch,
+        out: &mut impl ReportSink,
+    ) -> Result<(), DecodeErr> {
+        *ctx += 1;
+        if k == AcctQueryKind::Config {
+            if s.bits != 7 {
+                return Err(DecodeErr::Shape);
+            }
+            let mut h = hft_event::AccountConfigReportHdr::new_zeroed();
+            h.venue = V7;
+            h.account = acct;
+            h.uid_keys = 2;
+            h.venue_uid[..3].copy_from_slice(b"101");
+            h.n_lev = 1;
+            out.account_config(
+                &h,
+                &[hft_event::LeverageItem {
+                    inst: super::rd::S1,
+                    _pad: 0,
+                    leverage: hft_types::Rate(5_000_000_000),
+                }],
+            );
+        } else {
+            let mut h = hft_event::MarginReportHdr::new_zeroed();
+            h.venue = V7;
+            h.account = acct;
+            h.margin_balance = hft_types::Notional(s.amount);
+            h.n = 1;
+            out.margin(
+                &h,
+                &[hft_event::MarginItem {
+                    inst: super::rd::S1,
+                    adl_quantile: 255,
+                    _pad: [0; 3],
+                    liq_px: Px(0),
+                }],
+            );
+            let mut p = hft_event::PositionReport::new_zeroed();
+            p.venue = V7;
+            p.account = acct;
+            p.inst = super::rd::S1;
+            p.qty = Qty(s.qty);
+            out.position(&p);
+        }
+        Ok(())
     }
 }

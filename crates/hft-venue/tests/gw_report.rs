@@ -221,3 +221,75 @@ fn ven_229_inflight_timeout() {
     assert_eq!(e.len(), 1, "VEN-229.4: decoded into the ring");
     assert_eq!(h.rt.inflight(P), 0, "VEN-229.4");
 }
+
+#[test]
+fn ven_242_variable_report_tails_preserve_order_under_backpressure() {
+    use hft_rt::{Backing, byte_spsc};
+    use zerocopy::FromBytes;
+    let mut h = gw::<StubProto>();
+    let (mut tx, mut rx) = byte_spsc(512, Backing::Heap).unwrap();
+    for _ in 0..16 {
+        tx.reserve(24).unwrap().fill(7);
+        tx.commit();
+    }
+    h.rt.set_rep_bulk(tx);
+    h.net.push(P, b"V|reports");
+    h.poll(3_000_000);
+    assert!(h.reps().is_empty(), "header cannot outrun its bulk record");
+    while rx.peek().is_some() {
+        rx.advance();
+    }
+    h.poll(3_000_001);
+    let r = h.reps();
+    assert!(matches!(r.first(), Some(RepMsg::MarginReport(m)) if m.n == 3));
+    let first = rx.peek().unwrap();
+    assert_eq!(first.len(), 48);
+    assert_eq!(
+        hft_event::MarginItem::read_from_bytes(&first[..16])
+            .unwrap()
+            .liq_px
+            .0,
+        77
+    );
+    rx.advance();
+    h.poll(3_000_002);
+    let mut all = r;
+    all.extend(h.reps());
+    assert!(
+        all.iter()
+            .any(|m| matches!(m, RepMsg::AccountConfigReport(h) if h.n_lev == 2))
+    );
+    assert_eq!(rx.peek().unwrap().len(), 32);
+    assert_eq!(
+        hft_event::LeverageItem::read_from_bytes(&rx.peek().unwrap()[..16])
+            .unwrap()
+            .leverage
+            .0,
+        5_000_000_000
+    );
+    assert!(
+        all.iter()
+            .any(|m| matches!(m, RepMsg::PositionReport(p) if p.qty.0 == 8))
+    );
+    assert!(all.iter().any(|m| matches!(m, RepMsg::BalanceReport(_))));
+    assert!(all.iter().any(|m| matches!(m, RepMsg::FundingSettle(_))));
+}
+#[test]
+fn ven_243_clock_and_rate_failures_degrade_connection() {
+    for (code, reason) in [(-1021, codes::CLOCK_SKEW), (-1015, codes::RATE_LIMIT)] {
+        let mut h = gw::<StubProto>();
+        let c = h.place(A1, 98, 1, S1, false);
+        h.cmd(c);
+        h.poll(3000);
+        h.reps();
+        h.net.push(P, format!("R|98-1-1-5|{code}").as_bytes());
+        h.poll(3001);
+        let r = h.reps();
+        assert_eq!(events(&r)[0].what, OrderEventKind::Reject);
+        assert!(
+            conn_states(&r)
+                .iter()
+                .any(|s| s.state == ConnStateKind::Degraded && s.reason == reason)
+        );
+    }
+}

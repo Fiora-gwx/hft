@@ -558,6 +558,8 @@ HTTP/1.1 over 同一 `Conn`(`ConnRole::Rest`,无 WS)。请求在 tx 明文 scrat
 
 `rest::Client` 复用 Connector 的 TLS 校验和源地址绑定，一次一个请求，按 BuildReq 截止时刻取消。支持 Content-Length/chunked，拒绝压缩、歧义 framing、超容量响应；传输失败不等于业务拒绝。`submit_target` 为单条 WS 连接设置协议生成的路径与头，listenKey 不写全局端点或错误信息。
 
+`RestResp` 携带实际 ConnId 与提交时刻 sent_tsc，接收时间戳仍取首字节。`RestPool::cancel` 退役指定请求连接并丢弃已缓冲响应；`retire_all` 用于停机交回全部连接。`wait_fds` 只枚举在途连接，`has_pending` 只表示已完成的可消费结果。Conn 的 handoff_data 限 16 KiB，仅 warm 线程设置非秘密元数据，热线程只借用读取，重置时清零。
+
 ## 已知限制与后续工作
 
 - `RestPool` 覆盖复用、Content-Length、超时、关闭、容量与时间戳;chunked、无 Content-Length 的 bodyless 响应、HTTP/2 与重定向仍不支持。上层 warm `Client` 尚未迁移到该池。提交前完成 HTTP 长度校验,失败不推进 TLS 序号;签名请求临时区在提交或编码失败后清零。

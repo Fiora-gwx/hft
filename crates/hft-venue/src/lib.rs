@@ -21,6 +21,12 @@
 )]
 
 pub mod account;
+mod acct;
+mod acct_fetch;
+mod acct_wire;
+mod private;
+mod rest;
+pub use private::prepare as prepare_private;
 pub mod codes;
 mod config;
 mod conn_id;
@@ -39,6 +45,9 @@ mod session;
 mod sink;
 mod snap;
 
+pub use acct::{AcctReq, AcctSched, AcctState};
+pub use acct_fetch::{AcctAccount, AcctFetchTask, AcctResponse, AcctTransport};
+pub use acct_wire::{AcctFail, AcctRecHdr};
 pub use config::{
     DepthMode, FeedCfg, FeedCmdDest, FeedEndpoints, FeedRoutes, GwCfg, InitErr, RawMode, ReadyPollMode,
     SnapCfg, feed_cmd_dest, ready_poll_on,
@@ -53,6 +62,7 @@ pub use idtable::{IdCounters, IdEntry, IdErr, IdTable, exch_id_value};
 pub use kill::kill_admit;
 pub use rate::RateCounters;
 pub use raw::{Effect, RawCounters, RawLog, what as raw_what};
+pub use rest::AcctRestPools;
 pub use seq::{InstSeq, Verdict, judge};
 pub use session::{SessErr, SessEvent, SessionCfg, SessionDriver, SessionOp};
 pub use snap::{SnapDeps, SnapFetchTask, SnapRecHdr, SnapReq};

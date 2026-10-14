@@ -425,7 +425,7 @@ pub mod mock {
 
 - `dead_man() = CountdownPerInst{ min_ms: 5000, timeout_ms: 30000, refresh_ms: 10000, via: Rest }`(`Usdm`):sequencer 的 `DeadMan` 定时器发 `GwCmd{op: DeadManRefresh, arg: timeout_ms}`,gw 对槽镜像中**有挂单**的 inst 逐个发签名 REST(`countdownTime = timeout_ms`)。每次权重 10(待核实,开发备忘第 10 条),只刷有挂单的 inst;Admin 冒烟单(`OrderFlags::SMOKE`)占用槽镜像,所在 symbol 同样被刷新。
 - listenKey:REST `POST /fapi/v1/listenKey` 取得(由 `bootstrap(Role::UserStream, cfg, Some(REST 凭证))` 给出该请求,头 `X-MBX-APIKEY`,无签名;其余角色与 `Spot` 返回 `None`;`endpoint` 从 `boot` 响应体取 `listenKey` 拼出 `/private/ws/<listenKey>`);sequencer 的系统定时器每 30 min 发 `SessionKeepalive`,`session_keepalive_request` 给出 `PUT /fapi/v1/listenKey`(`Usdm` 返回 `Ok(true)`,`Spot` 返回 `Ok(false)`);续期失败 → `ConnState{Degraded, role=UserStream}`;`listenKeyExpired` 或续期返回 `-1125` → `ctl = UserStreamEnded`,运行时推 `ConnState{Down, role=UserStream}`(OMS 置 VERIFY 并查询)并重建用户流连接(重新 `bootstrap` 取新 key)。listenKey 不进快照;每次进程启动 gw 重新取 key,sequencer 重新登记 30 min 周期的 `SessionKeepalive` 定时器;gw 收到 `SessionKeepalive` 时若尚无 key → 忽略并计数。
-- 现货用户流:归属连接登录后发 `userDataStream.subscribe`;计划切换时新 primary 先订阅、收到回执后旧连接 `userDataStream.unsubscribe`([hft-venue §4b](../hft-venue/README.md#4b-私有频道归属与热备连接))。
+- 现货用户流:归属连接登录后发 `userDataStream.subscribe`(id `u0000000000000000`，200 回执确认频道);计划切换时新 primary 先订阅、收到回执后旧连接 `userDataStream.unsubscribe`(id `u0000000000000001`，回执不确认订阅)([hft-venue §4b](../hft-venue/README.md#4b-私有频道归属与热备连接))。
 - 24 h 强断:refdata `VenueMeta.ws_max_conn_age_s = 86400`,运行时在 24 h − `conn.rotate_margin_s` 处计划轮换([hft-venue 配置项](../hft-venue/README.md#配置项));收到 `serverShutdown` → `ServerShutdown` 提示,运行时提前轮换。
 - 心跳与 BBO 探测:按产品线见[心跳与 BBO 探测](#心跳与-bbo-探测)。
 

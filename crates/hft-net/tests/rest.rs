@@ -271,6 +271,7 @@ fn net_274_rest_resp_stamps() {
     assert!(p.poll(1000).is_none());
     mempeer::deliver_stamped(p.get(ConnId(1)).unwrap(), 1999, 2000, b, 50, 51);
     let r = p.poll(2000).unwrap().unwrap();
+    assert_eq!((r.conn, r.sent_tsc), (ConnId(1), 0));
     assert_eq!(r.ts.hw_rx_ns, 40);
     assert_eq!(r.ts.rx_tsc, 2000);
 }
@@ -346,4 +347,20 @@ fn net_277_hot_rest_never_manages_connections() {
     });
     assert_eq!(p.idle_check(100001), 1);
     assert!(p.take_retired().is_some());
+}
+
+#[test]
+fn net_264_cancel_retires_lane_and_discards_late_response() {
+    let (mut p, mut s) = setup::<2>(65536);
+    p.submit(&req(21), 0).unwrap();
+    deliver(&mut p, &mut s[0], 1, OK, 1);
+    p.cancel(21);
+    assert!(p.poll(2).is_none());
+    assert_eq!(p.take_retired().unwrap().id(), ConnId(1));
+    p.submit(&req(22), 3).unwrap();
+    deliver(&mut p, &mut s[1], 2, OK, 4);
+    assert_eq!(p.poll(4).unwrap().unwrap().tag, 22);
+    p.retire_all();
+    assert_eq!(p.take_retired().unwrap().id(), ConnId(2));
+    assert!(p.get(ConnId(2)).is_none());
 }

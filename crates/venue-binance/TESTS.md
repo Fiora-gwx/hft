@@ -1908,7 +1908,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 |---|---|---|
 | BIN-202.1 | `Usdm::private_subscribe(&cfg, 2, false, &mut out)` | `Ok`,0 帧 |
 | BIN-202.2 | `Spot::private_subscribe(&cfg, 2, false, &mut out)` | 1 帧 `{"id":"u0000000000000000","method":"userDataStream.subscribe"}` |
-| BIN-202.3 | `Spot::private_subscribe(&cfg, 2, true, &mut out)` | 1 帧 `{"id":"u0000000000000000","method":"userDataStream.unsubscribe"}` |
+| BIN-202.3 | `Spot::private_subscribe(&cfg, 2, true, &mut out)` | 1 帧 `{"id":"u0000000000000001","method":"userDataStream.unsubscribe"}`；退订回执不确认订阅 |
 
 ### BIN-210 依赖图不含运行时、网络与 serde_json
 

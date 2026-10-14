@@ -197,3 +197,26 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn ven_034_conn_id_ranges() {
+    use hft_venue::{
+        ACCT_FIRST, ACCT_LAST, GW_FIRST, GW_LAST, IdRange, MD_FIRST, MD_LAST, SNAP_FIRST, SNAP_LAST,
+    };
+    for (lo, hi, held, want) in [
+        (MD_FIRST, MD_LAST, 1, 9),
+        (SNAP_FIRST, SNAP_LAST, 0, 64),
+        (ACCT_FIRST, ACCT_LAST, 0, 80),
+        (GW_FIRST, GW_LAST, 4, 116),
+    ] {
+        let mut ids = IdRange::new(lo, hi);
+        for id in lo..=hi {
+            assert_eq!(ids.alloc(), Some(ConnId(id)));
+        }
+        assert_eq!(ids.alloc(), None);
+        for id in lo + held..=hi {
+            ids.free(ConnId(id));
+        }
+        assert_eq!(ids.alloc(), Some(ConnId(want)));
+    }
+}

@@ -16,6 +16,7 @@
 )]
 
 pub mod account;
+mod acct;
 mod code;
 mod dedup;
 mod funding;
@@ -23,6 +24,7 @@ mod readonly;
 mod sink;
 mod types;
 
+pub use acct::{AcctProtocol, AcctQuery, AcctQueryKind};
 pub use code::{RAW_CODE_NONE, raw_code_http, raw_code_num, raw_code_str};
 pub use dedup::{TradeIdRing, TradeKey, dedup_key};
 pub use funding::{FundingBill, FundingHistoryProtocol, FundingPage, FundingQuery};
@@ -142,6 +144,18 @@ pub trait VenueProtocol: Sized + 'static {
         unsub: bool,
         out: &mut SubFrames,
     ) -> Result<(), ProtoErr>;
+    /// Bit mask of independently acknowledged private channels; zero = subscription is implicit.
+    fn private_channels() -> u64 {
+        0
+    }
+    /// A subscription acknowledgement's stable channel bit and success, never an order response.
+    fn private_ack(_payload: &[u8]) -> Option<(u8, bool)> {
+        None
+    }
+    /// Identifies private pushes before decoding so discarded standby traffic cannot consume dedup keys.
+    fn is_private_report(_class: Self::ReportClass) -> bool {
+        false
+    }
     fn heartbeat(role: Role) -> HeartbeatSpec;
     /// Application ping into `out`; returns its length (0 = use a WS Ping).
     fn app_ping(role: Role, now_ms: i64, out: &mut [u8]) -> usize;

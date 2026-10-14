@@ -362,3 +362,138 @@ fn ven_018_refdata_effective_values() {
     let _g = gw::<StubProto>();
     assert!(stub::calls("default_caps").is_empty());
 }
+
+struct NoAcctTransport;
+impl hft_venue::AcctTransport for NoAcctTransport {
+    fn submit(
+        &mut self,
+        _: &hft_venue_proto::RestReqBuf,
+        _: u64,
+        _: u64,
+    ) -> Result<ConnId, hft_net::RestErr> {
+        Err(hft_net::RestErr::NoConn)
+    }
+    fn poll(&mut self, _: u64) -> Option<Result<hft_venue::AcctResponse<'_>, hft_net::RestErr>> {
+        None
+    }
+    fn idle_check(&mut self, _: u64) {}
+    fn abort(&mut self) {}
+}
+fn acct_err(rd: &'static hft_refdata::RefData, acct: hft_types::AccountId) -> Result<(), InitErr> {
+    let (_, rx) = hft_rt::spsc(8, Backing::Heap).unwrap();
+    let (out, _) = hft_rt::byte_spsc(1 << 20, Backing::Heap).unwrap();
+    let spec = support::gwh::spec::<StubProto>(acct, 1500);
+    hft_venue::AcctFetchTask::<StubProto, NoAcctTransport>::new(
+        rd,
+        g0(),
+        clock(),
+        rx,
+        out,
+        vec![hft_venue::AcctAccount {
+            account: acct,
+            templates: spec.tpl,
+            transport: NoAcctTransport,
+        }],
+    )
+    .map(|_| ())
+}
+#[test]
+fn ven_015_gw_new_limits() {
+    for (cap, tomb, ok) in [
+        (16383, 4096, false),
+        (8192, 4096, false),
+        (16384, 4096, true),
+        (16384, 6144, true),
+        (16384, 6145, false),
+    ] {
+        let result = gw_err(GwCfg {
+            id_table_cap: cap,
+            id_tomb_cap: tomb,
+            ..g0()
+        });
+        assert_eq!(result, if ok { Ok(()) } else { Err(InitErr::IdTableCap) });
+    }
+    for (interval, minimum) in [(1000, 1001), (1000, 1000), (1001, 1000)] {
+        let rd = rd_with(&RdOpts {
+            margin: hft_refdata::MarginData::Poll {
+                interval_ms: interval,
+            },
+            ..Default::default()
+        });
+        let cfg = GwCfg {
+            margin_poll_min_ms: minimum,
+            ..g0()
+        };
+        let result = gw_rd::<StubProto, 2048>(cfg, &[A1], Default::default(), rd).map(|_| ());
+        assert_eq!(
+            result,
+            if interval < minimum {
+                Err(InitErr::MarginPoll)
+            } else {
+                Ok(())
+            }
+        );
+    }
+    assert_eq!(acct_err(rd_stub(), A9), Err(InitErr::SimAccount));
+}
+#[test]
+fn ven_016_rotate_margin() {
+    for age in [3600, 3601, 3599, 0] {
+        let rd = rd_with(&RdOpts {
+            conn_age_s: age,
+            ..Default::default()
+        });
+        let want = if age == 0 || age > 3600 {
+            Ok(())
+        } else {
+            Err(InitErr::RotateMargin)
+        };
+        assert_eq!(
+            try_feed::<StubProto>(f0(), Caps::default(), Net::new(0, 0), rd).map(|_| ()),
+            want
+        );
+        assert_eq!(
+            gw_rd::<StubProto, 2048>(g0(), &[A1], Default::default(), rd).map(|_| ()),
+            want
+        );
+        let (op, _) = hft_rt::byte_spsc(1 << 18, Backing::Heap).unwrap();
+        let deps = SnapDeps {
+            rd,
+            reqs: [None, None],
+            out: [Some(op), None],
+            clock: clock(),
+        };
+        assert_eq!(
+            SnapFetchTask::<StubProto>::new(SnapCfg::default(), deps, ()).map(|_| ()),
+            want
+        );
+        assert_eq!(acct_err(rd, A1), want);
+    }
+}
+#[test]
+fn ven_023_feed_cmd_dest() {
+    use hft_event::FeedCmd as C;
+    use hft_venue::{FeedCmdDest as D, feed_cmd_dest};
+    for (c, d) in [
+        (C::Resync { inst: S1 }, D::Md),
+        (C::Rotate { conn: ConnId(7) }, D::Bbo),
+        (C::Rotate { conn: ConnId(8) }, D::Md),
+        (
+            C::Subscribe {
+                inst: S1,
+                streams: streams::BBO,
+            },
+            D::Both,
+        ),
+        (
+            C::Subscribe {
+                inst: S1,
+                streams: streams::TRADE,
+            },
+            D::Both,
+        ),
+        (C::Unsubscribe { inst: S1 }, D::Both),
+    ] {
+        assert_eq!(feed_cmd_dest(&c), d);
+    }
+}

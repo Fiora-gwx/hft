@@ -209,6 +209,8 @@ Simultaneous 的两份 OrderDecision 共用 trigger_seq;整对出环容量失败
 6. **策略不登记事件**:策略的慢速输出用 `Advice` 的 `local_kind` 自行区分,参数用 schema,人工操作与冷启动预热数据分别用 `StrategyCmd`、`InjectWarmup` 命令的载荷,Note 码用 SDK `StrategyDesc.notes`;只有引擎需要理解的新事实(新回报类型、新账户状态)才新增 kind。
 7. 新增或修改 kind 的步骤见 [cookbook/adding-an-event-kind.md](../cookbook/adding-an-event-kind.md)。
 
+变长账户回报的 rep/rep-bulk 配对与完整序列发布契约归 [hft-venue 账户接线](../../crates/hft-venue/README.md#账户与私有回报的运行时接线)，sequencer 入口仍生成完整的单条 Input。
+
 ## 延伸阅读
 
 - [hft-event](../../crates/hft-event/README.md)、[journal-format](journal-format.md)、[hft-strategy-sdk](../../crates/hft-strategy-sdk/README.md)(`EventRef` 怎样把这些事件交给策略)

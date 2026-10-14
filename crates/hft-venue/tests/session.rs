@@ -407,3 +407,30 @@ fn ven_315_credentials_warm_only() {
         );
     }
 }
+
+#[test]
+fn ven_313_session_uid_handover_requires_evidence() {
+    for (required, observed, status) in [(false, false, 0), (true, true, 1), (true, false, 2)] {
+        stub::set_cfg(|c| {
+            c.login = LoginMode::None;
+            c.session_identity = required;
+        });
+        let mut net = Net::new(64, 16);
+        let mut drv = SessionDriver::<StubProto>::new(scfg(), vec![(A1, cred())]);
+        let (job, mut peer) = start(&mut drv, &mut net, req(112, ConnRole::Order), Some(A1));
+        let mut uid = [0; 24];
+        uid[..2].copy_from_slice(b"U1");
+        if observed {
+            drv.verified_identity(job, uid).unwrap();
+        }
+        let ev = run(&mut drv, net.c(), job, &mut peer, 10, |_| None);
+        let SessEvent::Ready(h) = ev else { panic!("{ev:?}") };
+        let mut p = ConnPool::<1>::new(PoolMode::Race, 1, RotatePolicy::default());
+        p.install(h, None).unwrap();
+        let data = p.get(ConnId(112)).unwrap().handoff_data();
+        assert_eq!(&data[..8], b"PRIV0001");
+        assert_eq!(data[8], status);
+        assert_eq!(&data[9..33], if observed { &uid } else { &[0; 24] });
+        drv.retire(net.c(), p.retire(ConnId(112), hft_net::ErrBits::empty()).unwrap());
+    }
+}

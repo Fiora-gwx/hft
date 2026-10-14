@@ -2747,3 +2747,5 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - **HW 戳覆盖率**:NET-376 在升级主机上通过(PHC 开启时 ≥ 99.9%)。
 - **可选扩展**:RSS 源端口预计算(NET-331、NET-350–NET-353)、TX 时间戳(NET-361、NET-362)、scratch TLS 预热(NET-181、NET-182、NET-329)默认关闭;启用其中任一项之前,对应用例必须全绿。
 - **待核实项的关闭**:NET-370–NET-375 的结论写进 Agent Note,README 开发备忘的对应条目同一改动改为已核实或按备选方案修改规格与用例。
+
+NET-264 同时验证主动取消先退役连接，缓冲中的迟到响应不会被下一 tag 消费；NET-274 核对响应的 ConnId 与 sent_tsc。
