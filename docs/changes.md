@@ -5,6 +5,7 @@
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
 | 2026-10-15 | 无归属成交按账户有界暂存后释放或超时转 ExternalFill;保留成交 id/累计序号,不推测现金;非法 epoch 不写订单号表,终态按账户/epoch/gen 定位,满帧解码不发布部分事件;修复 IdTable 淘汰移位误标终态 | VEN-214–220、VEN-290–295 | hft-venue 的代码、README 与 TESTS | 待评审(订单/资金归属) |
+| 2026-10-15 | 缺省 epoch 的 WS 请求回包只在同连接唯一在途请求与活动槽镜像身份一致时补齐；跨连接响应不消耗原请求。正确的交易所拒单因此终结原槽，重复回包不借用槽身份 | FP-8，时间窗拒单被错误归为 UNRESOLVED，原订单留在 PendingNew | hft-venue 的网关与规格、hft-core 跨组件回归 | 待评审(订单/风控) |
 | 2026-10-15 | 启动校验拒绝执行强制平仓限额超过风控限额，以及账户尘埃线低于绑定交易腿的最大最小名义；复用风险层一致性检查，错误在网络连接和 journal 创建前返回 | CORE-115、CORE-116，原加载路径漏检 | apps/hft-core 的配置与测试 | 待评审(风控) |
 | 2026-10-15 | housekeeping 保留 Stepped 状态并逐次记录 ClockBad，不把连续时钟跳变合并为一次 Unsynced；共享心跳的 Stopped 仅在全部 journal 封存与 persist 完成后发布，热段清理据此放行 | CORE-418、CORE-195，时钟风险输入与停机证据接线 | apps/hft-core、deploy 的代码与规格 | 待评审(风控/恢复) |
 | 2026-10-15 | Bitget REST 查单非空品种与 clientOid 必须匹配原请求身份;负累计量/均价拒绝,错误响应不再重定向到另一订单槽 | BGT-093 查单身份回归 | crates/venue-bitget/src/reports.rs、tests/reports.rs、README.md、TESTS.md | 待评审(订单/资金) |

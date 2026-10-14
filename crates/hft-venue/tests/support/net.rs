@@ -141,6 +141,15 @@ impl Net {
         let c = SPARE
             .with(|s| s.borrow_mut().pop())
             .unwrap_or_else(|| Box::new(fresh_connector()));
+        Self::from_connector(c)
+    }
+
+    /// A separate test binary may resolve its fixture CA relative to its own manifest.
+    pub fn with_config(cfg: NetConfig) -> Net {
+        Self::from_connector(Box::new(connector_with(cfg)))
+    }
+
+    fn from_connector(c: Box<Connector>) -> Net {
         let mut peers = Vec::with_capacity(256);
         peers.resize_with(256, || None);
         Net {

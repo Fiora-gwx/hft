@@ -47,6 +47,8 @@ sequencer 经 `out-<venue>` 环交给 gw 的元素是 [hft-event](../hft-event/R
 
 ### 运行时入口
 
+请求响应缺少 client id 时，`GwRuntime` 只在同一连接存在唯一 `(slot, gen, op)` 在途请求、该请求的 epoch 与活动槽镜像一致、账户与 venue 相符时补齐 epoch 和缺省品种；补齐后仍执行 epoch 接受窗口。无匹配、重复及跨连接响应不能凭请求号借用槽身份，也不能消耗另一连接的在途请求。回归见 [FP-8](../../docs/tests/scenarios.md#fp-8-本机时钟漂移超过-recvwindow-时交易所以时间窗拒单并标记连接-clock_skew时钟不可信只停新开仓)。
+
 生命周期收尾：调用 `FeedRuntime::retire_all` / `GwRuntime::retire_all` 停止连接后，以消耗运行时所有权的 `seal_and_close(self) -> Result<(), hft_journal::RollErr>` 封存对应 raw journal；调用方在任务退出后最后停止 persister。此冷路径不改变报文处理与资金语义。
 
 ```rust

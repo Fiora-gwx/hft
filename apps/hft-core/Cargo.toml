@@ -39,6 +39,11 @@ zeroize = "1"
 signal-hook = "0.3"
 
 [dev-dependencies]
+hft-sequencer = { workspace = true, features = ["testing"] }
+hft-net = { workspace = true, features = ["test-io"] }
+hft-journal = { workspace = true, features = ["writer", "mem-backend"] }
+rustls = { version = "0.23.45", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+aws-lc-rs = { version = "1.14", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
 hft-ctl-proto = { path = "../../crates/hft-ctl-proto" }
 hft-oms.workspace = true
 hft-exec.workspace = true

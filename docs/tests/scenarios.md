@@ -1473,7 +1473,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 - 断言:
   - t ∈ [1 s, 5 s):账户 `a` 的 `gate_bits` 无 `ACCOUNT_CFG`(`Note{StartupGate}`),`released = false`;账户 `a` 无 `AccountCfg` cap
   - t = 5 s Input 内 `VP` 进入 `cfg_ok_venues`;其余位已满足,账户 `a` 放行
-- 实现:`crates/hft-testkit/src/scenarios/exec_correctness.rs::c6_account_cfg_gate_and_cap`
+- 实现:`apps/hft-core/tests/safety_scenarios.rs::c6_account_cfg_gate_and_cap`；真实 sequencer 的 B0 确定性步骤覆盖干净 Drain 后恢复、配置门、C6.1–C6.5 配置变化及开仓/减仓/对冲；恢复后的配置观察 journal 独立回放逐步比较。W1 标准种子集待补。
 - 备注:测试网部分见 drills.md
 
 | 行 | 相对主例的变化 | 断言 |
@@ -1603,6 +1603,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - 步骤 1、2 之后:`user_evt_ignored{VP} = 10,000`、`user_evt_unknown{VP} = 10,000`;Meta `Note` 条数 = 1 + ⌊10,000 / 1,000⌋ = 11;sequencer 未收到 `ConnState`;3 个槽无 `VERIFY`;无 `OrderDecision{action Query}`;用户流连接未重连
   - 步骤 3 之后:`ConnState{UserStream, Degraded, reason REPORT_DECODE}`;3 个槽置 `VERIFY` 并各有一条 `Query`
 - 实现:`apps/hft-core/tests/user_events.rs::c12_ignorable_and_unknown_user_events_only_counted`
+- 覆盖边界:当前进程内夹具以 Spot 协议覆盖两类各 10,000 帧的计数、无查询/VERIFY/重连，以及截断推送触发 3 槽 VERIFY/Query。该协议的私有订阅复用 Order 连接，错误报告沿用该连接角色。原前置的 OKX 协议矩阵、UserStream 角色与 11 条 Meta Note 尚未验收。
 - 备注:各 venue 的事件分类金样归各 `venue-*` 的 `TESTS.md`
 
 ### C13 全仓资金费只推余额的 venue 由 sequencer 按结算时刻持仓合成每 inst 的资金费
@@ -1658,7 +1659,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - t = 1 s Input 内 `CapSet{Delisting, (VP, P1), params[0] = at_ns}`(Info);实例 1 收到 `EventRef::Notice`
   - t ∈ (1 s, 20 s):本腿或链接腿为 `P1` 的 Open `reject = CLOSE_ONLY`;S1 单腿 Open(无链接)`reject = 0`;`P1` 的减仓与对冲单 `reject = 0`
   - t = 20 s 之后 `P1` 的 Open `reject = 0`
-- 实现:`crates/hft-testkit/src/scenarios/exec_correctness.rs::c15_delisting_notice_blocks_open_on_inst`
+- 实现:`apps/hft-core/tests/safety_scenarios.rs::c15_delisting_notice_blocks_open_on_inst`；B0 真实成交形成两腿后验证公告、链接腿门控、单腿开仓、减仓、对冲与 Resume。C15.1 的 FundingStats 与 W1 标准种子集待补。
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -2408,6 +2409,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - 步骤 3:Open 的 `OrderDecision.reject = CLOCK`,不出环;`Reduce` 单放行出环(`RISK_REDUCING`)
   - 步骤 4:`CapCleared{ClockBad}`;Open 不再因 `CLOCK` 被拒
 - 实现:`apps/hft-core/tests/clock_skew.rs::fp_8_clock_skew_reject_and_clockbad_blocks_open`
+- 覆盖边界:B0 的价格与风险参数，真实网关经进程内 TLS/WS 接收错误响应后交给真实 sequencer，验证策略的拒单码；另验证跨连接响应不关联订单、不消耗原连接在途，正确响应后的重复回包不重用槽。W1 的固定报价待补。
 - 备注:`Timer{ClockOk|ClockBad}` 由 housekeeping 按时钟状态写出,与交易所的时间窗拒单是两条独立的观测;`-1021` 的码表登记由 venue-binance 的金样覆盖
 
 ### FP-9 未登记的交易所错误码使槽进入 Unknown 并告警,不按 Reject 释放敞口
