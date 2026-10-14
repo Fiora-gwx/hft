@@ -5,6 +5,45 @@ use crate::common;
 use common::deps_repo::{D, DEV, PKGS, apply, clean, violations};
 
 #[test]
+fn tool_118_secret_sdks_only_in_secrets() {
+    // Add stubs for process packages not otherwise exercised by the clean graph.
+    for (row, dir, sdk, code) in [
+        (1, "apps/hft-core", "aws-sdk-secretsmanager", 1),
+        (2, "apps/kill-switch", "aws-sdk-kms", 1),
+        (3, "apps/journal-archiver", "aws-sdk-s3", 0),
+        (4, "crates/hft-oms", "aws-sdk-s3", 1),
+        (5, "tools/hft-secrets", "", 0),
+    ] {
+        let f = clean(&format!("118-{row}"));
+        f.write("vendor/aws-sdk-s3/Cargo.toml","[package]\nname = \"aws-sdk-s3\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[dependencies]\ntokio = { path = \"../tokio\" }\n");
+        f.write("vendor/aws-sdk-s3/src/lib.rs", "");
+        if !f.path(&format!("{dir}/Cargo.toml")).exists() {
+            let name = dir.rsplit('/').next().unwrap();
+            f.replace(
+                "Cargo.toml",
+                "members = [\n",
+                &format!("members = [\n    \"{dir}\",\n"),
+            );
+            f.write(
+                &format!("{dir}/Cargo.toml"),
+                &format!(
+                    "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n[dependencies]\n"
+                ),
+            );
+            f.write(&format!("{dir}/src/lib.rs"), "");
+        }
+        if !sdk.is_empty() {
+            apply(&f, dir, D, &format!("vendor/{sdk}"));
+        }
+        let r = f.xtask(&["deps"]);
+        assert_eq!(r.code, code, "TOOL-118.{row}: {} {:?}", r.stderr, violations(&r));
+        if row <= 2 {
+            assert!(violations(&r).iter().any(|v| v.contains("rule 11")));
+        }
+    }
+}
+
+#[test]
 fn tool_030_clean_passes() {
     let f = clean("tool-030");
     let run = f.xtask(&["deps"]);

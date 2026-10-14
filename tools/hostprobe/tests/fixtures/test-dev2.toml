@@ -1,0 +1,33 @@
+# TOOL-107: only the dev2 required/advisory policy; hardware comes from c32-root.
+manifest = "test-dev2"
+class = "dev2"
+
+[[expect]]
+key = "guard.dev2_guard_active"
+eq = true
+level = "required"
+
+[[expect]]
+key = "imds.nft.tables"
+eq = ["inet hft_imds_dev2"]
+level = "required"
+
+[[expect]]
+key = "guard.slices.hft.slice.memory_swap_max"
+eq = "0"
+level = "required"
+
+[[expect]]
+key = "guard.slices.hftbatch.slice.cpu_quota_us"
+empty = true
+level = "required"
+
+[[expect]]
+key = "guard.slices.hftbatch.slice.parent"
+eq = "/"
+level = "required"
+
+[[expect]]
+key = "cpu.isolated"
+eq = "2-15"
+level = "advisory"
