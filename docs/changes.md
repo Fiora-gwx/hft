@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-14 | 执行层容量续推只处理当前轮剩余 cell,回填重新标记的工作留给下一轮,不提升强制位;节 21 v2 保存两轮及其强制位,兼容读取 v1 | EXE-024 CI 种子 5bf7fb15、EXE-459;小容量提前重访导致资金执行序列偏离无限容量 | hft-exec、journal-format、回归测试 | 待评审 |
 | 2026-10-14 | Simultaneous 两腿先完整准入(含合计名义、lot 残余后的实际可负担量、减仓分类与方向、槽与出环容量),全部通过才同事件出单;Reverse 在本事件成交入账后检查,恢复等待两原单终态且不重复反向 | 负责人同发决定;SEQ-178/224、EXE-502、OMS-317、RSK-010/034 | OMS、risk、exec、sequencer、配套规格与真实引擎故障/回放验收 | 待评审 |
 | 2026-10-14 | 待评审(实现核对):策略无链接 Hedge 在减少 group 已成交净敞口且扣除同向全部在途后不过零时分类 Hedge/RISK_REDUCING,CloseOnly 放行;扩大敞口仍按 Open 拒绝;交易所 reduceOnly 只用于本腿减仓且 venue 支持 | 负责人决定 SDK-164.4;RSK-010 | hft-risk、hft-sequencer、hft-strategy-sdk README/TESTS、control-plane | 是(按 2026-10-14 决定修改) |
 | 2026-10-14 | 待评审(实现核对):Shadow 意图完整 evaluate,OrderDecision 同时记录 SHADOW 与实盘风控结果(reject=0 或首个拒绝位);不 commit、不分配槽、不出环,结果仍回填 Shadowed | 负责人决定 SDK-165;SEQ-174 | hft-sequencer、hft-strategy-sdk README/TESTS、event-model | 是(按 2026-10-14 决定修改) |

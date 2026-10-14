@@ -60,7 +60,7 @@
 - 里程碑:M2
 - 故障:全部 DST 套件(全部套件设 `unknown_blocks_open = true`);每步检查。最能触发:下单连接断开、发送后无回报、未登记错误码、`WriteError`、无过期保护的所返回 NotFound
 - 种子:标准集([scenarios §2.4](scenarios.md#24-种子集))
-- 断言:对每个 (a, g),从其某个槽进入 `Unknown` 的那一步起,到该 group 的 `LegState.unknown_slots` 回到 0 的那一步止:
+- 断言:按每条 New 决策的时刻判断(应用本次 Input 之后、提交该单之前);对每个 (a, g),其 `LegState.unknown_slots > 0` 期间:
   - 没有 `class = Open` 且 `reject = 0` 的 `OrderDecision{New}` 属于 (a, g);该 group 的 Open 意图都以 `VENUE_NOT_READY` 或 `UNKNOWN_PENDING` 被拒
   - 含 `Unknown` 槽的链接没有 `link_role ∈ {SecondRetry, Reverse}` 的 `OrderDecision{New}`
   - 处于 `Unknown` 的槽只出现 `OrderDecision{Query}` 或 `{Cancel}`,从不以相同 `(slot, gen)` 再出现 `New`;没有引擎订单以该槽的剩余量为对象做反向

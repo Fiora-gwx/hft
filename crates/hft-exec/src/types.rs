@@ -722,7 +722,7 @@ pub const FORCE_FULL: u8 = 1;
 /// Snapshot section number of this crate.
 pub const SECTION_EXEC: u16 = 21;
 /// Row version of section 21.
-pub const ROW_VERSION: u16 = 1;
+pub const ROW_VERSION: u16 = 2;
 /// `ExecRowHdr.kind` values.
 pub const ROW_CELL: u8 = 1;
 pub const ROW_ACCT: u8 = 2;
@@ -822,6 +822,11 @@ pub const RF_SERIAL: u8 = 2;
 pub const RF_MANUAL_HOLD: u8 = 4;
 pub const RF_LINK_HOLD: u8 = 8;
 pub const RF_MANUAL_HOLD_DEFERRED: u8 = 16;
+/// Next-pass pending work bypasses the wake gate.
+pub const RF_FORCED: u8 = 32;
+/// Unvisited work in the current capacity-limited pass.
+pub const RF_ADVANCING: u8 = 64;
+pub const RF_ADVANCING_FORCED: u8 = 128;
 
 /// Account row (24 B).
 #[repr(C)]

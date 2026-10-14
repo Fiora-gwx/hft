@@ -170,6 +170,8 @@ pub enum PlaceResult { Placed(OrderRef), Rejected(RejectBits), Shadowed }
 
 **输出容量与续推**(固定容量从不丢弃输出):各向量的容量是**单次调用**的上限,sequencer 在每次调用后排空(Output 追加、订单进意图管线、通知入队),所以与一个输入事件内的调用次数无关。
 
+`advance` 在一轮开始时冻结待推进集合及其强制位;容量不足只续推尚未访问的 cell,保留原来的 wake 门控。下单回填或新输入重新标记的工作进入下一轮,不插入当前轮;当前轮结束后本次调用返回。两轮工作集合与各自强制位均进快照。
+
 `FixedVec::as_mut_slice` 只暴露已有元素,不改变长度或容量;sequencer 原地补决策标志,排空时直接读取预分配向量,不另建临时副本。
 
 | 入口 | 单次产出上限 |
@@ -325,7 +327,10 @@ pub struct CellIndex {
     by_key: Box<[(AccountId, GroupId, u16)]>,    // 有序;set_target 等按 (account, group) 二分查 cix
     inst_cells: Csr<InstId, u16>,                // inst → 引用它的 cix(≤ max_subs_per_inst)
     live: BitSet,                                // 有目标、非 Idle、外来成交计时中、默认减仓中或 Broken 处置中的 cell;touch_inst 只标这些
-    pending: BitSet,                             // 待推进;advance 按位升序遍历(= (account, group) 升序)
+    pending: BitSet,                             // 下一轮待推进
+    forced: BitSet,                              // 下一轮强制推进
+    advancing: BitSet,                           // 当前轮未访问;实盘优先,各按 (account, group) 升序
+    advancing_forced: BitSet,                    // 当前轮强制推进,容量中断不改变它
 }
 pub struct AcctState {                           // 每账户
     pub force_active: bool,                      // 处于默认减仓期(由 force_deleverage 置位,MarginStress 降到 L3 以下清除)
@@ -742,10 +747,12 @@ SDK 的 `StuckReason`/`BrokenReason`/`TargetReject` 新增值时同一改动在�
 
 本 crate 的快照节是节 21(编号由 [journal-format](../../docs/subsystems/journal-format.md) 分配;**行格式与行版本只在本节登记**)。`snapshot(&self, w)` 一次写完整节:每个"非空" cell 一行(有目标、待推进,或行内任一字段与新建 cell 不同——如非 Idle、`FixState` 非零、`ext_deadline ≠ 0`、`auto_fix.phase ≠ None`、`serial ≠ 0`、`hold ≠ 0`、`deferred ≠ 0`、冷却时刻、`active` 的切片序号或已登记的定时器位;只写前几项会让清除目标后的冷却与订单序号在 restore 后丢失;无组 cell 同样,键 `(account, GROUP_NONE)`,含其当前装入的腿定义),再每个 `force_active`、`flatten_lock` 或 `force_req` 非空的账户一行,再每个账户一条 Gate 行(`gate_open`、`venue_open`、`gate_closed_tsc`:验证回放与 advisor 镜像从快照值继续;恢复驱动在 `recovery_end` 时清零并重设);全部小端、按键升序。`pending` 位随 cell 行写出(因输出容量停下、等 `Timer{Exec, Continue}` 的 cell 在事件边界仍待推进);`pair_lot` 不进快照(restore 时由目标与 refdata 重算)。含枚举字段的行用 `zerocopy::TryFromBytes` 读回,非法判别值 → `RestoreError`。
 
+节 21 写 v2,布局与行长保持不变:`PENDING/FORCED` 表示下一轮工作,`ADVANCING/ADVANCING_FORCED` 表示当前轮未访问工作;强制位必须有对应工作位。读取 v1 时按旧约定将 `PENDING` 恢复为强制待推进,不推断不存在的轮次信息;未知版本拒绝恢复。
+
 **目标按逐字段的显式行写出,不原样写 SDK 类型**:SDK 的 `ExecSpec` 是 `#[repr(C, u8)]` 数据枚举,判别字节后的 7 B 是隐式填充,较小的变体在 128 B 载荷里留下未初始化的尾部,原样写进快照会使 `state_hash` 不确定,也派生不了 `IntoBytes`。所以 cell 行之后接 `ExecTargetRow`:字段顺序与偏移同 SDK `TargetIntent`,只把 `exec` 换成显式的 `ExecSpecRow`。写出时逐字段拷贝,全部 `_pad` 与 `params` 的尾部写 0;读回时 `algo` 必须是合法的 `ExecSpec` 判别值(`has_target = 0` 时整行为 0),按 `algo` 用 `TryFromBytes` 读对应参数结构,尾部非零 → `RestoreError`。
 
 ```rust
-// 节 21 ExecTargets,行版本 1(草案,实现时以代码与编译期断言为准)。每行以 ExecRowHdr 开头,顺序 Cell* → Acct* → Gate*。
+// 节 21 ExecTargets,行版本 2(草案,实现时以代码与编译期断言为准)。每行以 ExecRowHdr 开头,顺序 Cell* → Acct* → Gate*。
 #[repr(C)] pub struct ExecRowHdr { pub kind: u8 /* Cell=1 Acct=2 Gate=3 */, pub _pad: [u8; 3], pub len: u32 }   // 8 B;len = 行体字节数
 #[repr(C)] pub struct LegRef {                   // 32 B;无组 cell 写当前装入的腿,普通 cell 由 GroupSpec 重建、行内全零
     pub venue: VenueId, pub kind: u8 /* Spot=1 LinearPerp=2 Chain=3 */, pub reduce_only_cap: u8, pub _pad: u8, //  0
@@ -770,7 +777,7 @@ SDK 的 `StuckReason`/`BrokenReason`/`TargetReject` 新增值时同一改动在�
     pub owner: StrategyInstanceId,               //   8
     pub n_legs: u8, pub has_target: u8,          //   9 / 10
     pub origin: u8,                              //  11 TargetOrigin 线上码(hft-event ExecDecision.origin 码表)
-    pub flags: u8,                               //  12 PENDING=1 SERIAL=2 MANUAL_HOLD=4 LINK_HOLD=8 MANUAL_HOLD_DEFERRED=16
+    pub flags: u8,                               //  12 PENDING=1 SERIAL=2 MANUAL_HOLD=4 LINK_HOLD=8 MANUAL_HOLD_DEFERRED=16 FORCED=32 ADVANCING=64 ADVANCING_FORCED=128
     pub deferred: u8,                            //  13 ENGINE_SET=1 ENGINE_CLEARED=2 CLEARED_BY_CMD=4 STATE=8 TIMERS=16 ALARM=32 HOLD_REL=64 EXT_CLR=128
     pub cap_block: u8,                           //  14 BROKEN=1 REORG=2
     pub fix_count: u8,                           //  15

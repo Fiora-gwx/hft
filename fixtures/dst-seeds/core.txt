@@ -12,3 +12,4 @@
 0x6358ace2ebdb859f 2026-10-13 现货旧代数副本已正确去重,冷账本检查误把未映射计数当成新入账(LED-267;https://github.com/Fiora-gwx/hft/actions/runs/38381173440)
 0x6358ace2ebdb85b8 2026-10-13 现货旧代数副本已正确去重,冷账本检查误把未映射计数当成新入账(LED-267;https://github.com/Fiora-gwx/hft/actions/runs/38381173440)
 0x6358ace2ebdb85c3 2026-10-13 现货旧代数副本已正确去重,冷账本检查误把未映射计数当成新入账(LED-267;https://github.com/Fiora-gwx/hft/actions/runs/38381173440)
+0x61aaa3c81c37eb19 2026-10-14 INV-4 group/link observation; .agents/notes/implemented/bug-fix/2026-10-14-dst-decision-scope-and-exec-passes.md (TK-107)

@@ -104,6 +104,9 @@ pub struct Exec {
     pub(crate) inst_ix: Vec<(InstId, u16)>,
     pub(crate) pending: Box<[u64]>,
     pub(crate) forced: Box<[u64]>,
+    /// Frozen work set of the current pass; placement callbacks queue the next pass separately.
+    pub(crate) advancing: Box<[u64]>,
+    pub(crate) advancing_forced: Box<[u64]>,
     pub(crate) pend: Box<[[PendOrder; 4]]>,
     /// Hot inst rows (copy of refdata), indexed by `InstId`.
     pub(crate) insts: Box<[InstHot]>,
@@ -232,6 +235,8 @@ impl Exec {
             inst_ix: Vec::with_capacity((cap.max_cells_total as usize).saturating_mul(4)),
             pending: vec![0u64; words].into_boxed_slice(),
             forced: vec![0u64; words].into_boxed_slice(),
+            advancing: vec![0u64; words].into_boxed_slice(),
+            advancing_forced: vec![0u64; words].into_boxed_slice(),
             pend: vec![[PEND_NONE; 4]; total].into_boxed_slice(),
             insts: Vec::new().into_boxed_slice(),
             none_inst,
@@ -299,18 +304,48 @@ impl Exec {
     }
 
     pub(crate) fn is_pending(&self, cix: usize) -> bool {
-        self.pending
-            .get(cix / 64)
-            .is_some_and(|x| x & (1 << (cix % 64)) != 0)
+        Self::bit(&self.pending, cix) || Self::bit(&self.advancing, cix)
     }
 
-    pub(crate) fn take_pending(&mut self, cix: usize) -> bool {
+    pub(crate) fn bit(bits: &[u64], cix: usize) -> bool {
+        bits.get(cix / 64).is_some_and(|x| x & (1 << (cix % 64)) != 0)
+    }
+
+    pub(crate) fn work_flags(&self, cix: usize) -> u8 {
+        [
+            (RF_PENDING, &self.pending),
+            (RF_FORCED, &self.forced),
+            (RF_ADVANCING, &self.advancing),
+            (RF_ADVANCING_FORCED, &self.advancing_forced),
+        ]
+        .iter()
+        .fold(0, |flags, (flag, bits)| {
+            flags | if Self::bit(bits, cix) { *flag } else { 0 }
+        })
+    }
+
+    pub(crate) fn restore_work(&mut self, cix: usize, flags: u8) {
+        for (flag, bits) in [
+            (RF_PENDING, &mut self.pending),
+            (RF_FORCED, &mut self.forced),
+            (RF_ADVANCING, &mut self.advancing),
+            (RF_ADVANCING_FORCED, &mut self.advancing_forced),
+        ] {
+            if flags & flag != 0
+                && let Some(w) = bits.get_mut(cix / 64)
+            {
+                *w |= 1 << (cix % 64);
+            }
+        }
+    }
+
+    pub(crate) fn take_advancing(&mut self, cix: usize) -> bool {
         let (w, b) = (cix / 64, cix % 64);
-        let f = self.forced.get(w).is_some_and(|x| x & (1 << b) != 0);
-        if let Some(x) = self.pending.get_mut(w) {
+        let f = Self::bit(&self.advancing_forced, cix);
+        if let Some(x) = self.advancing.get_mut(w) {
             *x &= !(1 << b);
         }
-        if let Some(x) = self.forced.get_mut(w) {
+        if let Some(x) = self.advancing_forced.get_mut(w) {
             *x &= !(1 << b);
         }
         f
@@ -355,7 +390,7 @@ impl Exec {
             .get(..self.cell_count())
             .map(<[_]>::to_vec)
             .unwrap_or_default();
-        let old_pend: Vec<bool> = (0..self.cell_count()).map(|i| self.is_pending(i)).collect();
+        let old_work: Vec<u8> = (0..self.cell_count()).map(|i| self.work_flags(i)).collect();
         let old_n = self.n_grouped;
         for w in self.pending.iter_mut() {
             *w = 0;
@@ -363,6 +398,8 @@ impl Exec {
         for w in self.forced.iter_mut() {
             *w = 0;
         }
+        self.advancing.fill(0);
+        self.advancing_forced.fill(0);
         let n = keys.len();
         for (i, (a, g, gix)) in keys.iter().enumerate() {
             let spec = groups.get(*gix as u16);
@@ -386,7 +423,7 @@ impl Exec {
             if let Some(slot) = self.cells.get_mut(i) {
                 *slot = c;
             }
-            let was_pending = prev.and_then(|p| old_pend.get(p).copied()).unwrap_or(false);
+            let work = prev.and_then(|p| old_work.get(p).copied()).unwrap_or(0);
             if changed {
                 if let Some(c) = self.cells.get_mut(i)
                     && c.has_target
@@ -400,8 +437,8 @@ impl Exec {
                     }
                 }
                 self.mark_pending(i, true);
-            } else if was_pending {
-                self.mark_pending(i, true);
+            } else {
+                self.restore_work(i, work);
             }
             if let Some(slot) = self.pend.get_mut(i) {
                 *slot = [PEND_NONE; 4];
@@ -427,9 +464,7 @@ impl Exec {
             if let Some(slot) = self.cells.get_mut(n + k) {
                 *slot = c;
             }
-            if old_pend.get(old_n + k).copied().unwrap_or(false) {
-                self.mark_pending(n + k, true);
-            }
+            self.restore_work(n + k, old_work.get(old_n + k).copied().unwrap_or(0));
         }
         self.n_grouped = n;
         self.rebuild_inst_index();
@@ -523,7 +558,7 @@ impl Exec {
 
     /// Some cell is pending.
     pub fn has_pending(&self) -> bool {
-        self.pending.iter().any(|w| *w != 0)
+        self.pending.iter().chain(self.advancing.iter()).any(|w| *w != 0)
     }
 
     /// Drain may proceed for every account.

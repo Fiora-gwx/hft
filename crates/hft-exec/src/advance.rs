@@ -61,10 +61,14 @@ impl Exec {
                 self.apply_force_req(k, v, now);
             }
         }
+        if !self.advancing.iter().any(|w| *w != 0) {
+            core::mem::swap(&mut self.pending, &mut self.advancing);
+            core::mem::swap(&mut self.forced, &mut self.advancing_forced);
+        }
         let n = self.cell_count();
         for sim in [false, true] {
             for cix in 0..n {
-                if !self.is_pending(cix) {
+                if !Self::bit(&self.advancing, cix) {
                     continue;
                 }
                 let k = self.acct_of_cix(cix);
@@ -75,17 +79,14 @@ impl Exec {
                     self.stop_for_capacity(out);
                     return;
                 }
-                let forced = self.take_pending(cix);
+                let forced = self.take_advancing(cix);
                 self.step_cell(cix, forced, v, now, out);
             }
         }
     }
 
     fn stop_for_capacity(&mut self, out: &mut ExecOut) {
-        // Remaining pending cells are processed in full when continued (uniform with restore).
-        for (p, f) in self.pending.iter().zip(self.forced.iter_mut()) {
-            *f |= *p;
-        }
+        // Continue only the unvisited work of this pass, preserving its original wake gating.
         if !self.continue_set {
             out.timers.push(ExecTimerReq {
                 cancel: false,

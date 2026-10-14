@@ -330,7 +330,8 @@ spec: README.md
 - 生成:1–64 个 cell;事件序列 1–200 条,从 {set_target, clear_target, 成交回报, LinkNotice, on_risk(CapSet/CapCleared/MarginStress), force_deleverage, engine_flatten, clear_account, on_venue_gate_open, 定时器到期} 抽取
 - 参考:`tests/model.rs` 的无限容量运行
 - 例数:PR 1 000
-- 实现:`crates/hft-exec/tests/props.rs::exe_024_no_output_lost_under_caps`
+- 回归:保留 CI 种子 `5bf7fb15af4ed9f8d98cff7f381029ea91e3e5b8acf9eeb64cf7fea51ff1da7c`;下单回填重新标记已访问 cell 时,续推不得提前重访;每次续推前恢复快照仍得到相同的逐 cell 输出。
+- 实现:`crates/hft-exec/tests/props.rs::exe_024_no_output_lost_under_caps`、`exe_024_placement_callbacks_wait_for_next_pass`
 
 ### EXE-025 最后一片自动平仓的回报先于 CapCleared{Broken}:Done 在 on_order_update 中写出
 
@@ -3909,7 +3910,8 @@ spec: README.md
   1. `snapshot`;`restore`;`has_pending()`;按 `Continue` 推进完
 - 期望:
   - 40 个 Cell 行 `flags & PENDING(1) = 1`;`restore` 后 `has_pending() = true`;续推写出的决定与未快照的实例逐条相同
-- 实现:`crates/hft-exec/tests/snapshot.rs::exe_459_pending_roundtrip`
+- 兼容:读取 v1 的 pending 行保持旧强制推进语义;v2 拒绝没有对应工作位的强制位;恢复保留当前轮与下一轮。
+- 实现:`crates/hft-exec/tests/snapshot.rs::exe_459_pending_roundtrip`、`exe_459_legacy_pending_and_invalid_work_flags`
 
 ### EXE-460 从快照起步的验证回放沿用快照中的闸门与 venue 放行状态
 

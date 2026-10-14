@@ -52,6 +52,8 @@ pub struct DecisionFacts {
     pub margin_stress: bool,
     pub hedge: Option<(LinkRole, Option<HedgeFacts>)>,
     pub link: u32,
+    /// Unknown slots belonging to this link, sampled independently of the group's counters.
+    pub link_unknown: bool,
     pub legs: LegView,
     pub leg_insts: [InstId; 4],
     pub pos: Qty,
@@ -303,6 +305,16 @@ pub(crate) fn capture(e: &mut Engine, it: &OrderIntent, src: Src, class: IntentC
         margin_stress: matches!(src, Src::Exec { o } if matches!(o.reason, TargetReason::MarginStress | TargetReason::Hard)),
         hedge,
         link,
+        link_unknown: link != 0
+            && e.rd.account_venues().iter().any(|(a, v, _)| {
+                e.oms.table_view(*v, *a).is_some_and(|t| {
+                    (1..=t.n_slots).any(|slot| {
+                        e.oms.raw_slot(*v, *a, slot).is_some_and(|(s, _, _)| {
+                            s.link_id == link && s.state == hft_oms::OrderState::Unknown
+                        })
+                    })
+                })
+            }),
         legs: e.oms.legs(it.account, it.group).view,
         leg_insts,
         pos: e.ledger.pos(it.account, it.inst).qty,
@@ -341,6 +353,7 @@ mod tests {
             margin_stress: false,
             hedge: None,
             link: 0,
+            link_unknown: false,
             legs: LegView::EMPTY,
             leg_insts: [InstId(0); 4],
             pos: Qty(0),

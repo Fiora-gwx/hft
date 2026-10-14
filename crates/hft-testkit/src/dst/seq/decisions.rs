@@ -226,7 +226,8 @@ pub fn fill(
             max_pos_qty: i128::from(f.max_pos_qty.0),
             notional,
             link: f.link,
-            link_unknown: f.legs.has_unknown,
+            link_unknown: f.link_unknown,
+            group_unknown: f.legs.has_unknown,
         });
         info.decision_inflight
             .push((rec.seq, f.legs.leg.map(|l| i128::from(l.inflight_immediate.0))));

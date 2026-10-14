@@ -72,6 +72,7 @@ struct World {
     ext_timed: Vec<u32>,
     af_running: Vec<u32>,
     eng_unreached: Vec<u32>,
+    restore_continuations: bool,
 }
 
 const GROUPS: [GroupId; 2] = [G7, G8];
@@ -106,6 +107,7 @@ impl World {
             ext_timed: Vec::new(),
             af_running: Vec::new(),
             eng_unreached: Vec::new(),
+            restore_continuations: false,
         }
     }
 
@@ -270,6 +272,11 @@ impl World {
         for _ in 0..64 {
             if !cont {
                 break;
+            }
+            if self.restore_continuations {
+                let snap = self.fx.snap();
+                self.fx.ex = self.fx.restore(&snap);
+                assert_eq!(self.fx.snap(), snap, "continuation state roundtrip");
             }
             self.timers.retain(|t| t.0 != 4);
             let now = self.now();
@@ -922,6 +929,51 @@ fn exe_516_new_fix_waits_for_wake_under_capacity_and_restore() {
         baselines.push((decisions, orders, notify));
     }
     assert_eq!(baselines[0], baselines[1]);
+}
+
+#[test]
+fn exe_024_placement_callbacks_wait_for_next_pass() {
+    // Persisted CI seed 5bf7fb15af4ed9f8d98cff7f381029ea91e3e5b8acf9eeb64cf7fea51ff1da7c.
+    let ops = [
+        (0, 57830),
+        (7, 699),
+        (6, 156),
+        (3, 1344),
+        (7, 27008),
+        (0, 0),
+        (9, 33763),
+        (3, 54631),
+        (9, 8558),
+        (6, 47804),
+        (7, 9788),
+        (8, 36812),
+        (0, 25592),
+    ];
+    let run = |capped, restore| {
+        let mut w = World::new(capped, Checks::default());
+        w.restore_continuations = restore;
+        w.set_net(G7, 0, 100_000_000);
+        w.set_net(G7, 1, -100_000_000);
+        w.fx.spot(A1, A, G7, "1", "1");
+        for (op, x) in ops {
+            w.step(op, x);
+        }
+        assert_eq!(
+            w.trace
+                .timers
+                .iter()
+                .any(|t| t.kind() == Some(ExecTimerKind::Continue)),
+            capped
+        );
+        let mut decisions = strip(&w.trace.decisions);
+        decisions.sort_by_key(|d| d.group.0);
+        w.trace.orders.sort_by_key(|o| o.intent.group.0);
+        w.trace.notify.sort_by_key(|n| n.u.group.0);
+        (decisions, w.trace.orders, w.trace.notify)
+    };
+    let baseline = run(false, false);
+    assert_eq!(run(true, false), baseline, "capacity only");
+    assert_eq!(run(true, true), baseline, "restore every continuation");
 }
 
 proptest! {

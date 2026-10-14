@@ -135,7 +135,11 @@ impl Exec {
 
     fn cell_row(&self, cix: usize) -> ExecCellRow {
         match self.cells.get(cix) {
-            Some(c) => self.row_of(c, self.is_pending(cix)),
+            Some(c) => {
+                let mut row = self.row_of(c, false);
+                row.flags |= self.work_flags(cix);
+                row
+            }
             None => ExecCellRow::new_zeroed(),
         }
     }
@@ -300,7 +304,7 @@ impl Exec {
         let Some(sec) = r.find_section(SECTION_EXEC)? else {
             return Ok(x);
         };
-        if sec.version != ROW_VERSION {
+        if sec.version != 1 && sec.version != ROW_VERSION {
             return Err(RestoreError::VersionUnsupported);
         }
         let mut s = sec.reader();
@@ -318,7 +322,7 @@ impl Exec {
                     }
                     let cr: ExecCellRow = s.get_row()?;
                     let tr: ExecTargetRow = s.get_row()?;
-                    x.load_cell(&cr, &tr)?;
+                    x.load_cell(&cr, &tr, sec.version)?;
                 }
                 ROW_ACCT => {
                     if h.len != 24 {
@@ -352,10 +356,11 @@ impl Exec {
                 }
             }
         }
+        x.continue_set = x.advancing.iter().any(|w| *w != 0);
         Ok(x)
     }
 
-    fn load_cell(&mut self, r: &ExecCellRow, t: &ExecTargetRow) -> Result<(), RestoreError> {
+    fn load_cell(&mut self, r: &ExecCellRow, t: &ExecTargetRow, version: u16) -> Result<(), RestoreError> {
         let a = AccountId(r.account);
         let g = GroupId(r.group);
         let cix = self.cix_of(a, g).ok_or(RestoreError::BadValue)?;
@@ -421,6 +426,15 @@ impl Exec {
             crate::targets::zero_intent(a, g)
         };
         let pending = r.flags & RF_PENDING != 0;
+        let forced = version == 1 || r.flags & RF_FORCED != 0;
+        let advancing = version >= 2 && r.flags & RF_ADVANCING != 0;
+        let advancing_forced = version >= 2 && r.flags & RF_ADVANCING_FORCED != 0;
+        if (version == 1 && r.flags & (RF_FORCED | RF_ADVANCING | RF_ADVANCING_FORCED) != 0)
+            || (version >= 2 && forced && !pending)
+            || (advancing_forced && !advancing)
+        {
+            return Err(RestoreError::BadValue);
+        }
         let Some(c) = self.cells.get_mut(cix) else {
             return Err(RestoreError::BadValue);
         };
@@ -490,9 +504,7 @@ impl Exec {
             }
             c.n_legs = r.n_legs.min(4);
         }
-        if pending {
-            self.mark_pending(cix, true);
-        }
+        self.restore_work(cix, r.flags | if version == 1 && pending { RF_FORCED } else { 0 });
         self.recompute_pair_lot(cix);
         Ok(())
     }

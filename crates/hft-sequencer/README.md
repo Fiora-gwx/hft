@@ -422,7 +422,7 @@ g. rep-sim ≤ sim_max_per_round
 
 `Driver::observe_boundary` / `LiveIo::observe_boundary` 在完整 Input 与启动完成时提供只读 `audit::StateView`。测试驱动可独立序列化该边界的全部组件,与当次 journal 快照重建结果比较,覆盖同一轮内的多个快照和恢复。`ledger()`/`refdata()` 只返回共享引用,供冷账本检查逐项核对同边界的完整视图,包括未持久化的派生字段。该接口仅在 `testkit` feature 下存在,序列化无生产热路径预算,不改变事件和快照字节;验收归 [TK-115](../hft-testkit/TESTS.md#tk-115-每条快照在其完成边界检查-inv-6) 与 [LED-267](../hft-ledger/TESTS.md#led-267-dst-中每个快照点-journalledger-等于引擎-ledger)。
 
-该 feature 在意图计入自身在途量前复制 `DecisionFacts`,以最终 journal seq 关联每条 New 决策(含拒绝与 Shadow)。每个 Input 的待关联与完成观察各至多 512 条,溢出或序号缺失显式失败(SEQ-373);只读事实供 [TK-107](../hft-testkit/TESTS.md#tk-107-真实引擎逐事件观察与反例) 重算参考量。
+该 feature 在意图计入自身在途量前复制 `DecisionFacts`(group Unknown 取 LegView,链接 Unknown 独立扫描该链接的订单槽),以最终 journal seq 关联每条 New 决策(含拒绝与 Shadow)。每个 Input 的待关联与完成观察各至多 512 条,溢出或序号缺失显式失败(SEQ-373);只读事实供 [TK-107](../hft-testkit/TESTS.md#tk-107-真实引擎逐事件观察与反例) 重算参考量。
 
 OMS 对冲的 `place` 调用前另复制完整链接身份、重试计数、目标账户/venue/inst 与空闲槽数;调用失败时保存原错误及所属 Input seq,拒绝的 OrderDecision 由意图管线记录。失败观察每个 Input 至多 512 条,溢出失败,下一 Input 清空;检查器按链接实例逐次核对计数,验收见 [TK-121](../hft-testkit/TESTS.md#tk-121-对冲-place-失败必须有同一链接实例的原始证据)。
 
