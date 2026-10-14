@@ -216,6 +216,10 @@ pub struct GwRuntime<P: VenueProtocol, const CAP: usize = 2048> {
     venue_insts: Box<[InstId]>,
     n: GwCounters,
     last: LoopStat,
+    rest: Option<(
+        Producer<crate::order_rest::Request>,
+        Consumer<crate::order_rest::Reply>,
+    )>,
 }
 
 impl<P: VenueProtocol, const CAP: usize> core::fmt::Debug for GwRuntime<P, CAP> {
@@ -431,6 +435,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             venue_insts: venue_insts.into_boxed_slice(),
             n: GwCounters::default(),
             last: LoopStat::default(),
+            rest: None,
         })
     }
 
@@ -482,8 +487,88 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
     }
 
     /// One round (README §4 "一圈的顺序").
+    pub fn set_rest(
+        &mut self,
+        tx: Producer<crate::order_rest::Request>,
+        rx: Consumer<crate::order_rest::Reply>,
+    ) {
+        self.rest = Some((tx, rx));
+    }
+    fn rest_reply(&mut self, r: crate::order_rest::Reply, now: u64) {
+        // A queued request is not evidence of a write. A response proves it reached the wire;
+        // transport errors leave the query outcome unknown.
+        self.report(
+            &r.cmd,
+            self.target_gen(&r.cmd),
+            NO_CONN,
+            if r.status == 0 {
+                SendStatus::WriteError
+            } else {
+                SendStatus::Written
+            },
+            0,
+            0,
+        );
+        let Some(a) = self.accts.iter().position(|a| a.account == r.account) else {
+            return;
+        };
+        let Some(x) = self.accts.get_mut(a) else { return };
+        self.sink_evs.clear();
+        let mut sink = GwSink {
+            evs: &mut self.sink_evs,
+            ids: &mut x.ids,
+            mirror: &mut self.mirror,
+            account: r.account,
+            now,
+            over: false,
+            unsupported: 0,
+            key: [0; 36],
+            key_len: 0,
+        };
+        let rx = RxMeta {
+            account: r.account,
+            conn: NO_CONN,
+            rx_tsc: now,
+            ..RxMeta::default()
+        };
+        let result = P::decode_rest(
+            self.rd,
+            &mut x.ctx,
+            &r.origin,
+            r.status,
+            r.body.get(..usize::from(r.len)).unwrap_or(&[]),
+            &rx,
+            &mut sink,
+        );
+        let (key, n) = (sink.key, sink.key_len);
+        let outcome = match result {
+            Ok(o) => o,
+            Err(_) => {
+                self.sink_evs.clear();
+                self.n.report_decode_err += 1;
+                ReportOutcome {
+                    outcome_unknown: r.origin.req,
+                    ..ReportOutcome::default()
+                }
+            }
+        };
+        self.apply_outcome(
+            a,
+            NO_CONN,
+            ConnRole::Rest,
+            &outcome,
+            now,
+            0,
+            key.get(..n).unwrap_or(&[]),
+            now,
+        );
+    }
     pub fn poll_once(&mut self, now: u64) -> LoopStat {
         let mut ls = LoopStat::default();
+        if let Some(reply) = self.rest.as_mut().and_then(|(_, rx)| rx.try_pop()) {
+            self.rest_reply(reply, now);
+            ls.did_work = true;
+        }
         while let Some(m) = self.pend_rep.front().copied() {
             if self.out.try_push(m).is_err() {
                 break;
@@ -832,6 +917,9 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             }
             ReportCtl::UserStreamEnded => {
                 self.conn_state(account, ConnRole::UserStream, id, ConnStateKind::Down, 0, rx);
+                if let Some(c) = self.conn_of(a, id) {
+                    c.mark(ErrBits::SERVER_HINT);
+                }
             }
             ReportCtl::ServerShutdown => {
                 if let Some(x) = self.accts.get_mut(a) {
@@ -938,12 +1026,6 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             self.report(&c, self.target_gen(&c), NO_CONN, SendStatus::RateLimited, 0, 0);
             return;
         }
-        if P::order_channel(c.op) == OrderChannel::Rest {
-            // REST pools of the gw arrive with M3 (hft-net RestPool).
-            self.n.rest_unavailable += 1;
-            self.report(&c, self.target_gen(&c), NO_CONN, SendStatus::NoConn, 0, 0);
-            return;
-        }
         if c.op == GwOp::CancelAll {
             self.cancel_all(a, &c, now);
             return;
@@ -969,6 +1051,19 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             }
         };
         let clk = self.wall(now);
+        if P::order_channel(c.op) == OrderChannel::Rest {
+            let sent = self.rest.as_mut().is_some_and(|(tx, _)| {
+                tx.try_push(crate::order_rest::Request { cmd: c, target: tgt })
+                    .is_ok()
+            });
+            if !sent {
+                self.n.rest_unavailable += 1;
+            }
+            if !sent {
+                self.report(&c, self.target_gen(&c), NO_CONN, SendStatus::NoConn, 0, 0);
+            }
+            return;
+        }
         let x = match self.accts.get(a) {
             Some(x) => x,
             None => return,
@@ -1437,6 +1532,32 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             self.n.cmd_bad_account += 1;
             return;
         };
+        if let Some((tx, _)) = &mut self.rest {
+            let request = crate::order_rest::Request {
+                cmd: c,
+                target: TargetRef {
+                    id: ClientOrderId {
+                        epoch: self.epoch,
+                        venue: P::VENUE,
+                        account: c.account,
+                        slot: 0,
+                        r#gen: 0,
+                    },
+                    exch_order_id: 0,
+                },
+            };
+            if tx.try_push(request).is_err() {
+                self.conn_state(
+                    c.account,
+                    ConnRole::Order,
+                    NO_CONN,
+                    ConnStateKind::Degraded,
+                    codes::DEADMAN,
+                    now,
+                );
+            }
+            return;
+        }
         self.insts_buf.clear();
         for m in self.mirror.iter() {
             if m.live

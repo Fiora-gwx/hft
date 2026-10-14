@@ -15,9 +15,8 @@ use hft_types::VenueId;
 use hft_venue::{FeedCfg, FeedEndpoints, GwCfg};
 use hft_venue::{FeedDeps, FeedRuntime, GwAccountSpec, GwDeps, GwRuntime, Handover};
 use hft_venue::{SessEvent, SessionCfg, SessionDriver};
-use hft_venue_proto::{
-    ArrayBuf, Credential, RouteKind, SecretBuf, SignAlg, VenueCfg, VenueEnv, VenueProtocol,
-};
+use hft_venue_proto::account::{AccountProtocol, State};
+use hft_venue_proto::{ArrayBuf, Credential, RouteKind, SecretBuf, SignAlg, VenueCfg, VenueEnv};
 use std::{
     sync::{
         Arc,
@@ -25,9 +24,11 @@ use std::{
     },
     time::{Duration, Instant},
 };
+use zerocopy::{FromZeros, IntoBytes};
 
 type TaskFn = Box<dyn FnOnce(Arc<AtomicBool>, Thread) -> Result<(), Error> + Send>;
 pub struct VenueTasks(Vec<(Thread, TaskFn)>);
+pub type BuiltVenue = (VenueTasks, Option<io::GatewayInput>, Vec<storage::Side>, State);
 impl std::fmt::Debug for VenueTasks {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VenueTasks")
@@ -57,7 +58,7 @@ pub fn assemble(
     md: Producer<FeedMsg>,
     bulk: ByteProducer,
     commands: Consumer<FeedCmd>,
-) -> Result<(VenueTasks, Option<io::GatewayInput>, Vec<storage::Side>), Error> {
+) -> Result<BuiltVenue, Error> {
     match v.protocol.as_str() {
         "binance-usdm" => build::<venue_binance::Usdm>(
             c,
@@ -72,7 +73,7 @@ pub fn assemble(
             bulk,
             commands,
             venue_binance::FeedCtx::USDM,
-            || venue_binance::GwCtx,
+            venue_binance::GwCtx::default,
             SignAlg::Ed25519,
         ),
         "binance-spot" => build::<venue_binance::Spot>(
@@ -88,7 +89,7 @@ pub fn assemble(
             bulk,
             commands,
             venue_binance::FeedCtx::SPOT,
-            || venue_binance::GwCtx,
+            venue_binance::GwCtx::default,
             SignAlg::Ed25519,
         ),
         #[cfg(feature = "bitget")]
@@ -135,10 +136,15 @@ fn endpoint(rd: &RefData, venue: VenueId, role: EndpointRole) -> Result<Endpoint
         .iter()
         .find(|e| e.role == role)
         .ok_or_else(|| Error::config("Endpoint", format!("venue={} role={role:?}", venue.0)))?;
+    let scheme = if role == EndpointRole::Rest {
+        "https://"
+    } else {
+        "wss://"
+    };
     let url = e
         .url
-        .strip_prefix("wss://")
-        .ok_or_else(|| Error::config("Endpoint", "requires wss://"))?;
+        .strip_prefix(scheme)
+        .ok_or_else(|| Error::config("Endpoint", "requires verified TLS"))?;
     let (host, path) = url.split_once('/').unwrap_or((url, ""));
     if host.is_empty() || host.contains(['@', ':', '?', '#']) {
         return Err(Error::config("Endpoint", "requires a DNS host on port 443"));
@@ -152,7 +158,7 @@ fn endpoint(rd: &RefData, venue: VenueId, role: EndpointRole) -> Result<Endpoint
     })
 }
 
-fn credential(
+pub fn credential(
     key: &std::path::Path,
     secret: &std::path::Path,
     passphrase: Option<&std::path::Path>,
@@ -171,23 +177,36 @@ fn credential(
         Ok(bytes)
     }
     let key = read(key, 128)?;
-    let secret = read(secret, 256)?;
+    let secret = read(secret, 4096)?;
     let passphrase = passphrase.map(|p| read(p, 64)).transpose()?;
     let key = key.trim_ascii();
-    let secret = if alg == SignAlg::Ed25519 {
-        secret.as_slice()
+    let seed = if alg == SignAlg::Ed25519 {
+        Some(Zeroizing::new(venue_binance::session_seed(&secret).ok_or_else(
+            || Error::config("CredentialShape", "invalid Ed25519 raw/PKCS8 key"),
+        )?))
+    } else {
+        None
+    };
+    let secret = if let Some(seed) = &seed {
+        seed.as_slice()
     } else {
         secret.trim_ascii()
     };
     if key.is_empty()
-        || !key.iter().all(u8::is_ascii_graphic)
+        || !key
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || *b == b'-' || *b == b'_')
         || secret.is_empty()
         || (alg == SignAlg::Ed25519 && secret.len() != 32)
+        || passphrase.as_ref().is_some_and(|p| {
+            p.trim_ascii().is_empty()
+                || !p
+                    .trim_ascii()
+                    .iter()
+                    .all(|b| b.is_ascii_graphic() && *b != b'"' && *b != b'\\')
+        })
     {
-        return Err(Error::config(
-            "CredentialShape",
-            "API key must be ASCII; session seed must be 32 raw bytes",
-        ));
+        return Err(Error::config("CredentialShape", "invalid API key or signing key"));
     }
     Ok(Credential {
         api_key: ArrayBuf::from_bytes(key).ok_or_else(|| Error::config("CredentialShape", "key length"))?,
@@ -201,7 +220,7 @@ fn credential(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build<P: VenueProtocol + Send>(
+fn build<P: AccountProtocol + Send>(
     c: &Config,
     setup: &hft_sequencer::EngineSetup,
     name: &str,
@@ -216,7 +235,7 @@ fn build<P: VenueProtocol + Send>(
     ctx: P::FeedCtx,
     gw_ctx: fn() -> P::GwCtx,
     session_alg: SignAlg,
-) -> Result<(VenueTasks, Option<io::GatewayInput>, Vec<storage::Side>), Error>
+) -> Result<BuiltVenue, Error>
 where
     P::FeedCtx: Send,
     P::GwCtx: Send,
@@ -276,14 +295,73 @@ where
     };
     let mut accounts = Vec::new();
     let mut creds = Vec::new();
+    let mut account_client = None;
+    let mut baseline = State::default();
     for k in &v.accounts {
         let a = AccountId(k.account);
         let rest = credential(
             &k.rest_api_key_path,
             &k.rest_secret_path,
             k.passphrase_path.as_deref(),
-            SignAlg::HmacSha256,
+            if k.rest_sign_alg.as_deref() == Some("ed25519") {
+                SignAlg::Ed25519
+            } else {
+                SignAlg::HmacSha256
+            },
         )?;
+        let session_key = credential(
+            &k.api_key_path,
+            &k.session_seed_path,
+            k.passphrase_path.as_deref(),
+            session_alg,
+        )?;
+        if rd.account(a).uid_policy == hft_refdata::UidPolicy::Unverifiable
+            && rest.api_key != session_key.api_key
+        {
+            return Err(Error::config(
+                "AccountIdentity",
+                "unverifiable demo identity requires the same API key for REST and session",
+            ));
+        }
+        let params = v.account_io.ok_or_else(|| Error::config("AccountIo", name))?;
+        let mut rest_net = net.clone();
+        let rest_endpoint = endpoint(rd, P::VENUE, EndpointRole::Rest)?;
+        let host = rest_endpoint.host.clone();
+        rest_net.endpoints = vec![rest_endpoint];
+        let rest_arena = ConnArena::new(&[(ConnRole::Rest, 2)], &rest_net, clock);
+        let rest_connector =
+            Connector::new(rest_arena, &rest_net).map_err(|_| Error::config("AccountNetwork", name))?;
+        let mut client = hft_venue::account::Client::<P>::new(
+            hft_net::rest::Client::new(rest_connector, 8 << 20),
+            host,
+            hft_venue::account::Config {
+                timeout_ms: params.timeout_ms,
+                interval_ms: params.interval_ms,
+                request_gap_ms: params.request_gap_ms,
+                max_cancel_rounds: params.max_cancel_rounds,
+                listen_keepalive_ms: params.listen_keepalive_ms,
+                funding_window_ms: setup.ledger.funding_recon_window_ms,
+                funding_lag_ms: setup.ledger.funding_recon_lag_ms,
+            },
+            venue,
+            rd,
+            a,
+            rest,
+            session_key,
+        );
+        client.start();
+        // Serial startup only: no strategy or gateway can place an order before the baseline.
+        loop {
+            client
+                .poll(clock.to_utc_ns(hft_rt::tsc_now()))
+                .map_err(|e| account_error(name, &e))?;
+            if let Some(state) = client.take() {
+                baseline = state;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        account_client = Some(client);
         let tpl = P::build_templates(&venue, rd, a, &rest)
             .map_err(|_| Error::config("Templates", "cannot build account templates"))?;
         accounts.push(GwAccountSpec::<P> {
@@ -292,15 +370,7 @@ where
             tpl,
             ctx: gw_ctx(),
         });
-        creds.push((
-            a,
-            credential(
-                &k.api_key_path,
-                &k.session_seed_path,
-                k.passphrase_path.as_deref(),
-                session_alg,
-            )?,
-        ));
+        creds.push((a, session_key));
     }
     if !accounts.is_empty() {
         gwcfg.order_endpoint = EndpointId(net.endpoints.len() as u8);
@@ -403,6 +473,10 @@ where
         }),
     )];
     let mut gateway = None;
+    let (mut account_tx, account_rx) = byte_ring(c.rings.bytes)?;
+    let (rest_order_tx, mut rest_order_rx) = ring(c.rings.elements)?;
+    let (mut rest_reply_tx, rest_reply_rx) = ring(c.rings.elements)?;
+    publish_account(&mut account_tx, &baseline)?;
     if !accounts.is_empty() {
         let (orders, cmds) = ring(c.rings.elements)?;
         let (out, reports) = ring(c.rings.elements)?;
@@ -410,6 +484,73 @@ where
         let kill = Box::leak(Box::new(hft_rt::CachePadded(std::sync::atomic::AtomicU32::new(
             0,
         ))));
+        for k in &v.accounts {
+            let a = AccountId(k.account);
+            let ix = rd
+                .venue_account_ix(P::VENUE, a)
+                .ok_or_else(|| Error::config("AccountBinding", name))?;
+            let bits = hft_types::KillBits::account(ix).0 | hft_types::KillBits::account_hard(ix).0;
+            for hard in [false, true] {
+                kill.store(
+                    hft_types::KillBits::account(ix).0
+                        | if hard {
+                            hft_types::KillBits::account_hard(ix).0
+                        } else {
+                            0
+                        },
+                    Ordering::Release,
+                );
+                let word = kill.load(Ordering::Acquire);
+                if hft_venue::kill_admit(word, 7, bits, ix, hft_event::GwOp::Place, 0)
+                    || hft_venue::kill_admit(
+                        word,
+                        7,
+                        bits,
+                        ix,
+                        hft_event::GwOp::Place,
+                        hft_event::OrderFlags::RISK_REDUCING.0,
+                    ) == hard
+                {
+                    return Err(Error::config("KillSelfTest", name));
+                }
+            }
+            for bit in 0..32 {
+                kill.store(1u32 << bit, Ordering::Release);
+                if kill.load(Ordering::Acquire) != 1u32 << bit {
+                    return Err(Error::config("KillSelfTest", name));
+                }
+            }
+            kill.store(0, Ordering::Release);
+            let (owner, timer_id, group) =
+                hft_event::TimerCode::Sys(hft_event::SysTimer::KillSelfTestOk { account: a })
+                    .encode()
+                    .map_err(|_| Error::config("KillSelfTest", name))?;
+            let timer = hft_event::Timer {
+                owner,
+                timer_id,
+                group,
+                ..hft_event::Timer::new_zeroed()
+            };
+            if !io::write_record(&mut account_tx, hft_event::EventKind::TIMER, &[timer.as_bytes()]) {
+                return Err(Error::config("AccountRing", name));
+            }
+            let report = hft_event::ReconcileReport {
+                report_id: u64::from(epoch) << 32 | u64::from(a.0) << 8 | u64::from(P::VENUE.0),
+                venue: P::VENUE,
+                account: a,
+                item: 5,
+                severity: 1,
+                count: 1,
+                ..hft_event::ReconcileReport::new_zeroed()
+            };
+            if !io::write_record(
+                &mut account_tx,
+                hft_event::EventKind::RECONCILE_REPORT,
+                &[report.as_bytes()],
+            ) {
+                return Err(Error::config("AccountRing", name));
+            }
+        }
         let (gw, gs) = raw("gw")?;
         sides.push(gs);
         let mut gw = GwRuntime::<P, 8192>::new(
@@ -433,11 +574,13 @@ where
             accounts,
         )
         .map_err(|e| Error::config("Gateway", format!("{e:?}")))?;
+        gw.set_rest(rest_order_tx, rest_reply_rx);
         gateway = Some(io::GatewayInput {
             venue: P::VENUE,
             reports,
             orders,
             kill,
+            account_reports: io::Inputs::new(account_rx),
         });
         tasks.push((
             policy(c, &format!("gw:{name}"))?,
@@ -454,6 +597,8 @@ where
         ));
     }
     let account = v.accounts.first().map(|k| AccountId(k.account));
+    let task_name = name.to_owned();
+    let v_timeout_ms = v.account_io.as_ref().map_or(10_000, |x| x.timeout_ms);
     tasks.push((
         policy(c, &format!("conn-builder:{name}"))?,
         Box::new(move |stop, t| {
@@ -461,6 +606,9 @@ where
             // FeedRuntime does not submit SnapReq until that upstream feature exists.
             let _snapshot_endpoints = (snapreq_rx, snap_tx);
             let mut stopping = None;
+            let mut pending_private = None;
+            let mut reauth_started = false;
+            let mut pending_rest = None;
             loop {
                 let stopping_now = stop.load(Ordering::Acquire);
                 if stopping_now && stopping.is_none() {
@@ -477,13 +625,77 @@ where
                 }
                 if !stopping_now {
                     let now = clock.to_utc_ns(hft_rt::tsc_now());
-                    for (rx, tx, acct) in [(&mut fb_rx, &mut fh_tx, None), (&mut gb_rx, &mut gh_tx, account)]
+                    if let Some(r) = fb_rx.try_pop()
+                        && session.start(&mut connector, r, None, now).is_err()
                     {
-                        if let Some(r) = rx.try_pop()
-                            && session.start(&mut connector, r, acct, now).is_err()
+                        fh_tx
+                            .try_push(Handover::Failed(r.conn))
+                            .map_err(|_| Error::runtime("HandoffFull", "public connection", 3))?;
+                    }
+                    if pending_private.is_none() {
+                        pending_private = gb_rx.try_pop();
+                        reauth_started = false;
+                    }
+                    if let Some(client) = &mut account_client {
+                        if pending_rest.is_none() {
+                            pending_rest = rest_order_rx.try_pop();
+                        }
+                        if pending_private.is_none()
+                            && client.idle()
+                            && let Some(r) = pending_rest.take()
                         {
-                            tx.try_push(Handover::Failed(r.conn))
-                                .map_err(|_| Error::runtime("HandoffFull", "connection failure", 3))?;
+                            client.order(r, now).map_err(|e| account_error(&task_name, &e))?;
+                        }
+                        if pending_private.is_some() && !reauth_started && client.idle() {
+                            client
+                                .reauthenticate()
+                                .map_err(|e| account_error(&task_name, &e))?;
+                            reauth_started = true;
+                        }
+                        if let Err(e) = client.poll(now) {
+                            eprintln!("{}", account_error(&task_name, &e));
+                            let h = hft_event::AccountConfigReportHdr {
+                                venue: P::VENUE,
+                                account: account.unwrap_or(AccountId(0)),
+                                mismatches: 256,
+                                source: 3,
+                                ex_ts_ns: now,
+                                ..hft_event::AccountConfigReportHdr::new_zeroed()
+                            };
+                            if !io::write_record(
+                                &mut account_tx,
+                                hft_event::EventKind::ACCOUNT_CONFIG_REPORT,
+                                &[h.as_bytes()],
+                            ) {
+                                return Err(Error::runtime("AccountRing", "failed observation", 3));
+                            }
+                            if let Some(r) = pending_private.take() {
+                                gh_tx
+                                    .try_push(Handover::Failed(r.conn))
+                                    .map_err(|_| Error::runtime("HandoffFull", "private connection", 3))?;
+                            }
+                            reauth_started = false;
+                            client.retry(now);
+                        }
+                        if let Some(r) = client.take_order() {
+                            rest_reply_tx
+                                .try_push(r)
+                                .map_err(|_| Error::runtime("RestRing", "REST response overflow", 3))?;
+                        }
+                        if let Some(state) = client.take() {
+                            publish_account(&mut account_tx, &state)?;
+                            if reauth_started && let Some(mut r) = pending_private.take() {
+                                r.deadline_ns = now + i64::from(v_timeout_ms) * 1_000_000;
+                                if session
+                                    .start_prepared(&mut connector, r, account, now, client.listen_body())
+                                    .is_err()
+                                {
+                                    gh_tx.try_push(Handover::Failed(r.conn)).map_err(|_| {
+                                        Error::runtime("HandoffFull", "private connection", 3)
+                                    })?;
+                                }
+                                reauth_started = false;
+                            }
                         }
                     }
                     if let Some(ev) = session.drive(&mut connector, now) {
@@ -504,7 +716,59 @@ where
             }
         }),
     ));
-    Ok((VenueTasks(tasks), gateway, sides))
+    Ok((VenueTasks(tasks), gateway, sides, baseline))
+}
+
+fn account_error(name: &str, e: &hft_venue::account::Error) -> Error {
+    // Never format wire responses, signatures or credentials. Query labels identify the failed check.
+    let detail = match e {
+        hft_venue::account::Error::Protocol(q) => match q {
+            hft_venue_proto::account::Query::Instruments => "instrument rules mismatch or missing symbol",
+            hft_venue_proto::account::Query::Settings => {
+                "account/position/margin/asset mode or identity check failed"
+            }
+            hft_venue_proto::account::Query::SymbolSettings => {
+                "cross margin or instrument leverage check failed"
+            }
+            hft_venue_proto::account::Query::Permissions => "identity or API key permission check failed",
+            _ => "required account response invalid",
+        },
+        hft_venue::account::Error::Transport(_) => "REST transport failed; exchange outcome unknown",
+        hft_venue::account::Error::CancelNotQuiescent => "startup open orders did not converge to empty",
+        hft_venue::account::Error::Busy => "account request already active",
+    };
+    Error::config("AccountBootstrap", format!("{name}: {detail}"))
+}
+
+fn publish_account(tx: &mut ByteProducer, state: &State) -> Result<(), Error> {
+    let mut records = Vec::new();
+    if let Some(mut h) = state.config {
+        h.n_lev =
+            u16::try_from(state.leverage.len()).map_err(|_| Error::config("AccountCapacity", "leverage"))?;
+        let mut body = h.as_bytes().to_vec();
+        for l in &state.leverage {
+            body.extend_from_slice(l.as_bytes());
+        }
+        records.push((hft_event::EventKind::ACCOUNT_CONFIG_REPORT, body));
+    }
+    for b in &state.balances {
+        records.push((hft_event::EventKind::BALANCE_REPORT, b.as_bytes().to_vec()));
+    }
+    for p in &state.positions {
+        records.push((hft_event::EventKind::POSITION_REPORT, p.as_bytes().to_vec()));
+    }
+    for f in &state.funding {
+        records.push((hft_event::EventKind::FUNDING_SETTLE, f.as_bytes().to_vec()));
+    }
+    if let Some(m) = state.margin {
+        records.push((hft_event::EventKind::MARGIN_REPORT, m.as_bytes().to_vec()));
+    }
+    for (kind, body) in records {
+        if !io::write_record(tx, kind, &[&body]) {
+            return Err(Error::runtime("AccountRing", "account observations overflow", 3));
+        }
+    }
+    Ok(())
 }
 pub fn registered(protocol: &str, id: VenueId) -> Result<(), Error> {
     let expected = match protocol {

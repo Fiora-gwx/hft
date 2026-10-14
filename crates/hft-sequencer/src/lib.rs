@@ -120,6 +120,19 @@ impl<D: Driver<S>, S: StrategySet> core::fmt::Debug for Sequencer<D, S> {
 }
 
 impl<D: Driver<S>, S: StrategySet> Sequencer<D, S> {
+    /// Fresh non-production Live account bootstrap. Baselines are persisted in the initial
+    /// StateSnapshot before EngineClock or strategy inputs. Recovery must use `boot(Journal)`.
+    pub fn boot_accounts(
+        configs: ConfigSet<S>,
+        setup: &EngineSetup,
+        drv: D,
+        hb: &'static Heartbeat,
+        balances: &[hft_event::BalanceReport],
+        positions: &[hft_event::PositionReport],
+    ) -> Result<Self, BootError> {
+        engine::boot_accounts(configs, setup, drv, hb, balances, positions)
+    }
+
     /// Builds every component from `boot` and `setup` (README "装配与运行"); preallocates.
     pub fn boot(
         boot: BootSource<S>,

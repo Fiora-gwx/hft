@@ -844,6 +844,9 @@ jobs:
             cargo build --locked --profile ci -p hft-journal --example testwriter --features hft-journal/writer -p hft-py --example pyfixture
             sudo prlimit --pid $$ --memlock=unlimited:unlimited
             HFT_PY_TOOLS=target/ci/examples HFT_PY_RELEASE_PYTHON="$RUNNER_TEMP/venv-rel/bin/python" python -m pytest -q crates/hft-py/tests/python
+            # SDK-005: generic tools are built before the isolated registry gains the new kind.
+            cargo build --locked --profile ci -p hft-cfg
+            HFT_CFG_BIN="$PWD/target/ci/hft-cfg" HFT_PYTHON="$RUNNER_TEMP/venv-rel/bin/python" cargo xtask scaffold-gate --profile ci --generic-tools
           fi
           for p in "${pkgs[@]}"; do python -m pip install -e "$p"; done
           python -m ruff check python strategies tools/az-probe

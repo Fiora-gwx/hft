@@ -108,7 +108,7 @@ fn round(tu: &Templates, ts: &Templates, sink: &mut CountSink) {
     }
     for a in ANSWERS {
         let c = Usdm::classify_report(MsgOp::Text, &a.as_bytes()[..64]);
-        Usdm::decode_report(r, &mut GwCtx, c, a.as_bytes(), &RX, sink).unwrap();
+        Usdm::decode_report(r, &mut GwCtx::default(), c, a.as_bytes(), &RX, sink).unwrap();
     }
 }
 

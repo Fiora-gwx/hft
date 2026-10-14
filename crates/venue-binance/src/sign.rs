@@ -7,6 +7,18 @@ use ed25519_dalek::{Signer, SigningKey};
 
 use crate::wr::Wr;
 
+/// Cold key-file decoder. Accept raw seed, PKCS#8 DER or unencrypted PKCS#8 PEM.
+pub fn session_seed(bytes: &[u8]) -> Option<[u8; 32]> {
+    use ed25519_dalek::pkcs8::DecodePrivateKey;
+    if let Some(s) = seed(bytes) {
+        return Some(s);
+    }
+    if let Ok(text) = core::str::from_utf8(bytes) {
+        return SigningKey::from_pkcs8_pem(text.trim()).ok().map(|k| k.to_bytes());
+    }
+    SigningKey::from_pkcs8_der(bytes).ok().map(|k| k.to_bytes())
+}
+
 /// PKCS#8 v1 prefix of an Ed25519 private key (RFC 8410): the 32-byte seed follows.
 const PKCS8_PREFIX: [u8; 16] = [
     0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,

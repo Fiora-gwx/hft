@@ -174,6 +174,7 @@ pub struct GatewayInput {
     pub reports: Consumer<RepMsg>,
     pub orders: Producer<GwCmd>,
     pub kill: &'static KillWord,
+    pub account_reports: Inputs,
 }
 pub struct Io<J: JournalSink> {
     pub journal: J,
@@ -255,13 +256,21 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
             RingId::Ctl => usize::from(self.retired_pending.is_none() && self.ctl.pending()),
             RingId::Hk => self.hk.len_hint(),
             RingId::RepSim => usize::from(self.sim_reports.pending()),
-            RingId::Rep(n) => self.gws.get(n as usize).map_or(0, |g| g.reports.len_hint()),
+            RingId::Rep(n) => self.gws.get(n as usize).map_or(0, |g| {
+                g.reports.len_hint() + usize::from(g.account_reports.pending())
+            }),
             RingId::Bbo(n) => self.feeds.get(n as usize).map_or(0, |f| f.bbo.len_hint()),
             RingId::Md(n) => self.feeds.get(n as usize).map_or(0, |f| f.md.len_hint()),
             _ => 0,
         }
     }
     fn peek_len(&mut self, r: RingId) -> Option<usize> {
+        if let RingId::Rep(n) = r
+            && let Some(g) = self.gws.get_mut(n as usize)
+            && g.account_reports.pending()
+        {
+            return g.account_reports.peek_len();
+        }
         if r == RingId::Ctl {
             self.ctl.peek_len()
         } else {
@@ -318,6 +327,11 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
                 m.is_some_and(|m| feed(m, now, out, &mut f.bulk))
             }
             RingId::Rep(n) => {
+                if let Some(g) = self.gws.get_mut(n as usize)
+                    && g.account_reports.pending()
+                {
+                    return g.account_reports.pop(now, out);
+                }
                 let Some(m) = self.gws.get_mut(n as usize).and_then(|g| g.reports.try_pop()) else {
                     return false;
                 };

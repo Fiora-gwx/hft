@@ -181,6 +181,49 @@ fn ven_310_session_flow() {
 }
 
 #[test]
+fn ven_310_prepared_bootstrap_reconnect_authenticates_again() {
+    stub::set_cfg(|c| {
+        c.bootstrap = true;
+        c.login = LoginMode::One;
+    });
+    let mut net = Net::new(64, 16);
+    let mut drv = SessionDriver::<StubProto>::new(scfg(), vec![(A1, cred())]);
+    for (i, body) in [b"dummy-listen-one".as_slice(), b"dummy-listen-two"]
+        .into_iter()
+        .enumerate()
+    {
+        let r = req(112 + i as u8, ConnRole::UserStream);
+        assert!(matches!(
+            drv.start(net.c(), r, Some(A1), 1),
+            Err(hft_venue::SessErr::Bootstrap)
+        ));
+        net.c().push_script(ScriptIo::new());
+        let job = drv.start_prepared(net.c(), r, Some(A1), 1, Some(body)).unwrap();
+        let mut peer = mempeer::server_only(0);
+        let mut authenticated = false;
+        let event = run(&mut drv, net.c(), job, &mut peer, 10, |frame| {
+            if frame.starts_with("LOGIN0|") {
+                authenticated = true;
+                Some("LOGIN_OK".into())
+            } else {
+                None
+            }
+        });
+        assert!(authenticated);
+        let SessEvent::Ready(h) = event else {
+            panic!("{event:?}")
+        };
+        let mut pool = ConnPool::<1>::new(PoolMode::Race, 1, RotatePolicy::default());
+        pool.install(h, None).unwrap();
+        drv.retire(net.c(), pool.retire(r.conn, hft_net::ErrBits::empty()).unwrap());
+    }
+    stub::set_cfg(|c| {
+        c.bootstrap = false;
+        c.login = LoginMode::None;
+    });
+}
+
+#[test]
 fn ven_312_ready_epfd_register() {
     let mut net = Net::new(64, 16);
     let rp = net.ready_poll();

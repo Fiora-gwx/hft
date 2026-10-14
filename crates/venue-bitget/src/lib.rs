@@ -22,6 +22,7 @@
     clippy::unimplemented
 )]
 
+mod account;
 mod caps;
 mod cid;
 pub mod codes;

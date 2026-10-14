@@ -17,7 +17,7 @@ fn req(id: &str) -> (usdm::ReportClass, Option<ReqRef>) {
         return (c, None);
     }
     let mut sink = RepSink::default();
-    let o = Usdm::decode_report(rd(), &mut GwCtx, c, p.as_bytes(), &RX, &mut sink).unwrap();
+    let o = Usdm::decode_report(rd(), &mut GwCtx::default(), c, p.as_bytes(), &RX, &mut sink).unwrap();
     (c, o.req)
 }
 

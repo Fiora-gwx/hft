@@ -731,6 +731,12 @@ VEN-341 用以本 crate 为根的 `cargo tree` 检查依赖闭包与特性,不�
 - [hft-sim](../hft-sim/README.md)(模拟账户的 sim-gw)、[hft-oms](../hft-oms/README.md)(墓碑、`ForeignOrder`、冒烟单)、[hft-risk](../hft-risk/README.md)(`ACCOUNT_CFG`/`IDENTITY` 闸门、`MarginStress`)
 - 范围与取舍:[round8-decisions](../../design/_work/round8-decisions.md);Agent Note:`venue-protocol-and-runtime-split`、`dedicated-gateway-threads`、`no-speculative-tls-encryption`、`venue-caps`、`feed-split-and-snap-fetch`、`rx-irq-driven`、`core-market-data-scope`、`irq-split-reserve`
 
+### 测试环境账户启动与观察
+
+`account::Client<P>` 串行执行 warm 协议。撤单按“查一页、逐笔撤、重查第一页”，超过 max_cancel_rounds 失败，不沿已失效的删除分页 cursor 继续。只交付完整 State。私有重连前重新核验账户/身份，再调用 SessionDriver::start_prepared；独立用户流使用 bootstrap 路径。周期失败丢弃部分状态，由调用方发布不可读闸门并重试。
+
+固定容量 order_rest SPSC 将查单送 warm worker，响应回到 gw 唯一上下文解码；失败保持 OutcomeUnknown。CancelAll 可退化为镜像内逐单 WS 撤单。资金费流水按有界 cursor 分页，只供比较，截断/循环拒绝整轮。
+
 ## 已知限制与后续工作
 
 - **M1.5 实现范围**:已实现 BBO 行情(feed-bbo、按帧轮转、就绪探测、BBO 槽、Alive 与静默判定、去重)、`routes = Md/All` 的成交/标记价/资金费与分档快照、raw journal、gw 的出环/kill/限速/发送/撤单(含 `CancelAll` 展开)/回报/`OutcomeUnknown`/在途超时/主备与计划切换、心跳、`SessionDriver` 的 endpoint/登录/交接/回收。M3 再实现(构造与接口已在,运行中不触发):BBO 补帧(feed 不发 `SnapReq`)、`SnapFetchTask` 的 REST 执行(`poll_once` 空转)、`AcctFetchTask` 与 gw 侧账户查询(`GwDeps.acct_req`/`raw_tail` 随之加入)、成交暂存(`hold.rs`;解析不到槽的回报直接以 `slot = UNRESOLVED` 入环)、去重环重建(`reseed.rs`)、gw 的 REST 池(查单/撤单走 REST、`CANCEL_ALL_SWEEP`、`rest_idle_check_ms` 检查,`order_channel = Rest` 的命令回 `NoConn`)、私有频道归属与 `private_subscribe`、`bootstrap`(`SessionDriver::start` 返回 `SessErr::Bootstrap`)与会话 UID 核验(`session_identity_request` 只调用、不执行)、增量深度。对应用例的里程碑见 TESTS.md(M3)。

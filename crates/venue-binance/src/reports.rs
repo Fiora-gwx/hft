@@ -157,7 +157,7 @@ impl ClassifyReport for spot::ReportClass {
 }
 
 /// Empty `OrderEvent` of this line and account carrying the frame's receive points.
-fn blank(line: Line, account: AccountId, rx: &RxMeta) -> OrderEvent {
+pub(crate) fn blank(line: Line, account: AccountId, rx: &RxMeta) -> OrderEvent {
     OrderEvent {
         venue: line.venue(),
         account,
@@ -215,7 +215,7 @@ fn ids_of(cid: Option<ClientOrderId>, req: ReqRef) -> (u16, u32, u32) {
     }
 }
 
-fn exch_key(id: u64, buf: &mut [u8; 20]) -> &[u8] {
+pub(crate) fn exch_key(id: u64, buf: &mut [u8; 20]) -> &[u8] {
     let mut i = buf.len();
     let mut x = id;
     loop {
@@ -233,7 +233,7 @@ fn exch_key(id: u64, buf: &mut [u8; 20]) -> &[u8] {
 pub(crate) fn decode_report(
     line: Line,
     rd: &RefData,
-    _ctx: &mut GwCtx,
+    ctx: &mut GwCtx,
     c: RClass,
     p: &[u8],
     rx: &RxMeta,
@@ -264,7 +264,7 @@ pub(crate) fn decode_report(
             })
         }
         // ORDER_TRADE_UPDATE, ACCOUNT_UPDATE, executionReport, …: M3.
-        RClass::UserEvent => Err(DecodeErr::UnknownClass),
+        RClass::UserEvent => crate::user_stream::decode(line, rd, ctx, p, rx, out),
     }
 }
 

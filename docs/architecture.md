@@ -157,3 +157,5 @@ journal 记录分三类:**Input**(进入决策的一切,含实盘驱动当场做
 | `Position`、`FillDelta`、`Ledger`、`PnlBreakdown`、journal 冷消费者 `JournalLedger`;模拟撮合器与模拟账户 | [hft-ledger](../crates/hft-ledger/README.md);[hft-sim](../crates/hft-sim/README.md) |
 | `LiveDriver`、`RecoverDriver`、`VerifyDriver`、`engine_ns` 的累加、恢复结束时刻 `recovery_end` 与平移的调度 | [hft-sequencer](../crates/hft-sequencer/README.md) |
 | 外部 venue 帧、tx 生命周期与链上 profile(optional) | [hft-ext-proto](../crates/hft-ext-proto/README.md)、[hft-chain-evm](../crates/hft-chain-evm/README.md) |
+
+非正式新 journal 由 [hft-core 账户装配](../apps/hft-core/README.md#测试环境账户装配) 在 warm 侧验证交易所状态，sequencer 启动前接收基线并记录完整快照；运行中账户观察先入 journal，再检查差异。

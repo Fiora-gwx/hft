@@ -96,8 +96,18 @@ pub struct Venue {
     pub stale_guard_ms: u32,
     pub src_ip: Option<std::net::Ipv4Addr>,
     pub bind_device: Option<String>,
+    pub account_io: Option<AccountIo>,
     #[serde(default)]
     pub accounts: Vec<Keys>,
+}
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AccountIo {
+    pub timeout_ms: u32,
+    pub interval_ms: u32,
+    pub request_gap_ms: u32,
+    pub max_cancel_rounds: u32,
+    pub listen_keepalive_ms: u32,
 }
 // Never contains secret values. Contents are read only when constructing a real session.
 #[derive(Debug, Deserialize)]
@@ -109,6 +119,7 @@ pub struct Keys {
     pub session_seed_path: PathBuf,
     pub rest_api_key_path: PathBuf,
     pub rest_secret_path: PathBuf,
+    pub rest_sign_alg: Option<String>,
     pub passphrase_path: Option<PathBuf>,
 }
 #[derive(Debug, Deserialize)]
@@ -302,6 +313,19 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
             }
             if !v.accounts.is_empty() {
                 tasks.push(format!("gw:{name}"));
+                if v.account_io.is_none_or(|c| {
+                    c.timeout_ms == 0
+                        || c.interval_ms == 0
+                        || c.request_gap_ms == 0
+                        || c.max_cancel_rounds == 0
+                        || c.listen_keepalive_ms == 0
+                        || c.listen_keepalive_ms >= 3_600_000
+                }) {
+                    errors.push(Error::config(
+                        "AccountIo",
+                        "explicit nonzero account polling settings required",
+                    ));
+                }
             }
             if v.src_ip.is_none() || v.bind_device.as_ref().is_none_or(|s| s.is_empty()) {
                 errors.push(Error::config(
@@ -310,6 +334,12 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
                 ));
             }
             for k in &v.accounts {
+                if k.rest_sign_alg
+                    .as_deref()
+                    .is_some_and(|s| s != "ed25519" && s != "hmac-sha256")
+                {
+                    errors.push(Error::config("CredentialAlgorithm", name));
+                }
                 if k.api_key_path.as_os_str().is_empty()
                     || k.session_seed_path.as_os_str().is_empty()
                     || k.rest_api_key_path.as_os_str().is_empty()

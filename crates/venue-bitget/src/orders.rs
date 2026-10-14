@@ -124,6 +124,9 @@ pub(crate) fn encode(
             if flags.contains(OrderFlags::REDUCE_ONLY) {
                 w.bytes(b",\"reduceOnly\":\"YES\"");
             }
+            if line == Line::Spot {
+                w.bytes(b",\"autoBorrow\":\"no\"");
+            }
         }
         GwOp::Cancel => {
             let req =

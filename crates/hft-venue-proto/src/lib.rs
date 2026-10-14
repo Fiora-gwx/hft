@@ -19,6 +19,7 @@
 )]
 
 mod funding;
+pub mod account;
 mod sink;
 mod types;
 

@@ -43,7 +43,7 @@ fn run() -> Result<u8, Vec<Error>> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--config" if path.is_none() => path = Some(PathBuf::from(it.next().ok_or_else(usage)?)),
-            "--check" if !check => check = true,
+            "--check" | "check-config" if !check => check = true,
             "--dry-run" if !dry => dry = true,
             "--run-for-ms" if duration.is_none() => {
                 let n = it.next().ok_or_else(usage)?.parse::<u64>().map_err(|_| usage())?;

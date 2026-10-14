@@ -85,6 +85,8 @@ pub fn strat_repo(tag: &str) -> Fixture {
     copy_real(&f, "tools/xtask/deps.toml");
     copy_real(&f, "tools/xtask/scaffold/registry_dst.rs.tmpl");
     copy_real(&f, "tools/xtask/scaffold/sim-check.toml");
+    copy_real(&f, "tools/xtask/scaffold/config.rs.tmpl");
+    copy_real(&f, "tools/xtask/scaffold/sdk005.rs.tmpl");
     git(&f, &["init", "-q"]);
     git(&f, &["add", "-A"]);
     git(&f, &["commit", "-q", "-m", "fixture"]);

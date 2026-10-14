@@ -1,0 +1,23 @@
+[strategy]
+instance = "demo-spread"
+account = "demo"
+schema = { id = 3, version = 1 }
+version = 1
+source = "manual"
+
+[defaults]
+enabled = true
+min_edge = "0.002"
+slip = "0.0005"
+depth_frac = "0.1"
+max_chunk_notional = "200"
+max_position_notional = "400"
+max_quote_age_ms = "100ms"
+cooldown_ms = "1s"
+max_hedge_failures = "3"
+
+[[groups]]
+n = 1
+asset = "BTC"
+open_allowed = true
+legs = [{ inst = "binance-usdm:BTCUSDT" }, { inst = "bitget-uta-usdt-fut:BTCUSDT" }]

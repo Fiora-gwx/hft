@@ -29,12 +29,19 @@ max_sub_insts = 1
 stale_guard_ms = 1500
 src_ip = "192.0.2.10"
 bind_device = "eth0"
+[venues.futures.account_io]
+timeout_ms = 10000
+interval_ms = 5000
+request_gap_ms = 250
+max_cancel_rounds = 32
+listen_keepalive_ms = 1800000
 [[venues.futures.accounts]]
 account = 1
 api_key_path = "/run/secrets/hft-testnet/session-api-key"
 session_seed_path = "/run/secrets/hft-testnet/session-seed"
-rest_api_key_path = "/run/secrets/hft-testnet/rest-api-key"
-rest_secret_path = "/run/secrets/hft-testnet/rest-secret"
+rest_api_key_path = "/run/secrets/hft-testnet/session-api-key"
+rest_secret_path = "/run/secrets/hft-testnet/session-seed"
+rest_sign_alg = "ed25519"
 [[threads]]
 name = "sequencer"
 task = "sequencer"

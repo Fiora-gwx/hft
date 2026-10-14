@@ -445,6 +445,7 @@ struct RunOpts {
     profile: String,
     /// `apps/hft-core` is in the repository (assembly-check steps run).
     hft_core: bool,
+    generic_tools: bool,
 }
 
 /// Target sub-directory of a cargo profile.
@@ -563,6 +564,27 @@ fn build_and_check(
         std::fs::copy(root.join("Cargo.lock"), dec.join("Cargo.lock"))
             .map_err(|e| EnvError(format!("copy Cargo.lock: {e}")))?;
     }
+    if opts.hft_core {
+        let app = dec.join("apps/hft-core");
+        let support = root
+            .join("apps/hft-core/tests/support/mod.rs")
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        for (name, template) in [
+            ("scaffold_config", "config.rs.tmpl"),
+            ("sdk005", "sdk005.rs.tmpl"),
+        ] {
+            wr(
+                &app.join(format!("{name}.rs")),
+                &rd(&root.join("tools/xtask/scaffold").join(template))?.replace("{{support}}", &support),
+            )?;
+        }
+        let path = app.join("Cargo.toml");
+        let mut text = rd(&path)?;
+        text.push_str("\n[[example]]\nname = \"scaffold_config\"\npath = \"scaffold_config.rs\"\n\n[[test]]\nname = \"sdk005\"\npath = \"sdk005.rs\"\n");
+        wr(&path, &text)?;
+    }
     let cfg_text = rd(&root.join(CONFIG_TEMPLATE))?
         .replace("{{name}}", PROBE)
         .replace("{{kind_id}}", &PROBE_KIND_ID.to_string());
@@ -590,10 +612,39 @@ fn build_and_check(
         ),
     ];
     if opts.hft_core {
-        steps.push(("build hft-core", cargo(&["build", "-p", "hft-core"], &mp, prof)));
+        steps.push((
+            "build hft-core",
+            cargo(
+                &[
+                    "build",
+                    "-p",
+                    "hft-core",
+                    "--bin",
+                    "hft-core",
+                    "--example",
+                    "scaffold_config",
+                ],
+                &mp,
+                prof,
+            ),
+        ));
+        let generator = tdir
+            .join(profile_dir(prof))
+            .join("examples")
+            .join(exe("scaffold_config"));
+        steps.push((
+            "generate assembly config",
+            Cmd::new(&generator.display().to_string(), &[]).arg(dec.display().to_string()),
+        ));
         steps.push((
             "hft-core --check",
             Cmd::new(&bin.display().to_string(), &["--check", "--config"]).arg(cfg.display().to_string()),
+        ));
+    }
+    if opts.generic_tools && opts.hft_core {
+        steps.push((
+            "SDK-005 generic tools and ctl preview",
+            cargo(&["test", "-p", "hft-core", "--test", "sdk005"], &mp, prof),
         ));
     }
     for (name, mut c) in steps {
@@ -618,16 +669,18 @@ fn build_and_check(
 
 /// Runs `scaffold-gate` with `exec`; returns the exit code.
 pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
-    const USAGE: &str = "usage: cargo xtask scaffold-gate [--keep] [--profile <name>]";
+    const USAGE: &str = "usage: cargo xtask scaffold-gate [--keep] [--profile <name>] [--generic-tools]";
     let mut opts = RunOpts {
         keep: false,
         profile: "dev".into(),
         hft_core: root.join("apps/hft-core/Cargo.toml").is_file(),
+        generic_tools: false,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--keep" => opts.keep = true,
+            "--generic-tools" => opts.generic_tools = true,
             "--profile" => match it.next() {
                 Some(p) if !p.is_empty() && !p.starts_with('-') => opts.profile = p.clone(),
                 _ => {

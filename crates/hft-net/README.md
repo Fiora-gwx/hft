@@ -551,6 +551,10 @@ HTTP/1.1 over 同一 `Conn`(`ConnRole::Rest`,无 WS)。请求在 tx 明文 scrat
 - [hft-venue](../hft-venue/README.md)(本 crate 的唯一上层)、[event-model](../../docs/subsystems/event-model.md)、[latency-budget](../../docs/latency-budget.md)、[hot-path-rules](../../docs/hot-path-rules.md)、[deploy 调优](../../deploy/README.md)、[hostprobe](../../tools/README.md#hostprobe)
 - Agent Note:`no-speculative-tls-encryption`、`dedicated-gateway-threads`、`rx-irq-driven`(`.agents/notes/proposed/`)
 
+### Warm REST 单请求传输
+
+`rest::Client` 复用 Connector 的 TLS 校验和源地址绑定，一次一个请求，按 BuildReq 截止时刻取消。支持 Content-Length/chunked，拒绝压缩、歧义 framing、超容量响应；传输失败不等于业务拒绝。`submit_target` 为单条 WS 连接设置协议生成的路径与头，listenKey 不写全局端点或错误信息。
+
 ## 已知限制与后续工作
 
 - **默认关闭的三项(可选扩展)**:RSS 源端口预计算、TX 时间戳 errqueue、scratch TLS 预热。规格与测试保留,启用条件:升级主机上的直方图(`kernel_rx`、`egress` 冷热差)证明该项是主导项;启用任何一项前,其测试行必须全绿。

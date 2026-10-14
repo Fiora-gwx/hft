@@ -11,6 +11,25 @@ use common::{Fixture, Script};
 
 const DEC: &str = "target/decoupling";
 
+#[test]
+fn sdk_005_generic_tools_handle_new_schema() {
+    let f = strat_repo("sdk-005");
+    let s = Script::new(&f, &[], 0);
+    let r = f.xtask_script(&["scaffold-gate", "--generic-tools", "--keep"], &s, &[]);
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    let calls = s.calls();
+    assert!(calls.iter().any(|c| c.contains("-p hft-core --test sdk005")));
+    assert!(
+        !calls
+            .iter()
+            .any(|c| c.contains("-p hft-cfg") || c.contains("-p hft-py")),
+        "old tools must not be rebuilt by the patched workspace"
+    );
+    let test = f.read("target/decoupling/apps/hft-core/sdk005.rs");
+    assert!(test.contains("ctl.preview"));
+    assert!(test.contains("hft_py.params.load_schemas"));
+}
+
 fn hft_core(target: &Path) -> String {
     let exe = if cfg!(windows) { "hft-core.exe" } else { "hft-core" };
     target.join("debug").join(exe).display().to_string()

@@ -16,3 +16,4 @@ mod routes;
 mod session;
 mod subscribe;
 mod support;
+mod user_stream;

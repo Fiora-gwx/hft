@@ -499,6 +499,12 @@ pub mod mock {
 - 评审证据(资金费按币归属、强平识别、账户模式核验):[review-2026-10-02](../../design/_work/review-2026-10-02-主策略适配与执行正确性.md);范围:[round8-decisions](../../design/_work/round8-decisions.md)
 - 现有知识来源:`E:\trading\Trading\crates\binance`(depth 同步、`/market` 路由)、`E:\trading\Trading\apps\collector\src\private.rs`(listenKey、私有对账端点)、旧套利引擎 Rust 交易模块 `cex-arb/src/exchange/bn_futures.rs`(位于 `E:\trading\Trading\` 下;logon 签名串、`positionRisk`)
 
+### 测试环境 warm 账户入口
+
+AccountProtocol 核对 exchangeInfo 的 tick/lot/minQty/minNotional；USDM accountConfig、symbolConfig 核验单向、单资产、全仓与杠杆，v3/account 和 v3/positionRisk 提供基线。遗留订单逐笔取消后查到空。REST 支持 HMAC/Ed25519，listenKey 由 REST 创建续期。accountConfig 不返回 UID，Demo 的非正式 Unverifiable 账户须使用同一 REST/WS key 并经人工身份确认；正式账户与完整跨主机权限/UID 查询不由此入口放行。
+
+私有流支持 ORDER_TRADE_UPDATE、ACCOUNT_UPDATE、现货包装 executionReport/outboundAccountPosition；成交按有限窗口去重，非正 trade id 按订单累计量去重；资金费推送按时刻与钱包余额去重。流结束触发运行时重连认证。
+
 ## 已知限制与后续工作
 
 - **COIN-M 不做**:需要时新增 `Coinm` 类型复用 `usdm` 模块。

@@ -25,6 +25,7 @@ mod conn;
 mod connector;
 mod pool;
 mod ready;
+pub mod rest;
 pub mod sock;
 mod tls;
 mod types;

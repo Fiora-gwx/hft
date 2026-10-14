@@ -21,7 +21,7 @@ fn resp(status: u16, code: Option<i64>) -> String {
 fn dec<P: VenueProtocol<GwCtx = GwCtx>>(p: &str) -> (ReportOutcome, RepSink) {
     let mut s = RepSink::default();
     let c = P::classify_report(MsgOp::Text, &p.as_bytes()[..p.len().min(64)]);
-    let o = P::decode_report(rd(), &mut GwCtx, c, p.as_bytes(), &RX, &mut s).unwrap();
+    let o = P::decode_report(rd(), &mut GwCtx::default(), c, p.as_bytes(), &RX, &mut s).unwrap();
     (o, s)
 }
 
