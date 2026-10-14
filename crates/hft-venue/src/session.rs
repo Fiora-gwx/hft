@@ -10,8 +10,7 @@ use std::collections::VecDeque;
 
 use hft_event::ConnRole;
 use hft_net::{
-    BuildErr, BuildEvent, BuildReq, ConnId, ConnPhase, ConnPool, Connector, Handoff, JobId, PoolMode,
-    ReadyHandle, RetireMsg, RotatePolicy,
+    BuildErr, BuildEvent, BuildReq, ConnId, ConnPhase, Connector, Handoff, JobId, ReadyHandle, RetireMsg,
 };
 use hft_types::{AccountId, MAX_BBO_CONN_SLOTS};
 use hft_venue_proto::{
@@ -357,16 +356,8 @@ impl<P: VenueProtocol> SessionDriver<P> {
             };
         };
         let id = j.req.conn;
-        if let Ok(h) = c.handoff(j.job) {
-            // The connector only takes connections back as `RetireMsg`, which a pool produces.
-            let mut p = ConnPool::<1>::new(PoolMode::Race, 1, RotatePolicy::default());
-            if p.install(h, None).is_ok()
-                && let Ok(m) = p.retire(id, hft_net::ErrBits::empty())
-            {
-                c.reclaim(m);
-                self.note(SessionOp::Reclaim(id));
-            }
-        }
+        c.cancel(j.job);
+        self.note(SessionOp::Reclaim(id));
         SessEvent::Failed { conn: id, code }
     }
 

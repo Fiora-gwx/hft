@@ -1,78 +1,119 @@
-//! Send-side rate counters per (venue, account) (README §4 step 1.2): the last line before the
-//! exchange's hard limit. Fixed windows from refdata `RateLimitTable` (scope `Account`, bucket
-//! `Orders`); `RateObs` in a response replaces the local count (scaled to this counter's limit when it reports another window); `ResetRate` zeroes it.
-
+//! Every effective account/UID order window is enforced before writing an order.
 use hft_refdata::{LimitBucket, LimitScope, RateLimit};
-
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+use hft_venue_proto::RateObs;
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RateCounters {
-    /// 0 = no order limit for this venue.
+    windows: Box<[Window]>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct Window {
     limit: u32,
-    window_ticks: u64,
+    ms: u32,
+    ticks: u64,
     cost: u32,
     start: u64,
     used: u32,
 }
-
-impl RateCounters {
-    /// From the venue's effective limits; `ms` converts milliseconds to ticks.
-    pub fn new(limits: &[RateLimit], ms: impl Fn(u64) -> u64) -> RateCounters {
-        let mut c = RateCounters::default();
-        if let Some(l) = limits
-            .iter()
-            .find(|l| l.scope == LimitScope::Account && l.bucket == LimitBucket::Orders)
-        {
-            c.limit = l.limit;
-            c.window_ticks = ms(u64::from(l.window_ms));
-            c.cost = u32::from(l.default_cost.max(1));
-        }
-        c
-    }
-
+impl Window {
     fn roll(&mut self, now: u64) {
-        if now.saturating_sub(self.start) >= self.window_ticks {
+        if now.saturating_sub(self.start) >= self.ticks {
             self.start = now;
             self.used = 0;
         }
     }
-
-    /// Whether one more order fits; if so it is counted.
-    #[inline]
-    pub fn take(&mut self, now: u64) -> bool {
-        if self.limit == 0 {
-            return true;
+}
+impl RateCounters {
+    /// Public REST weight limits for the configured market-data source IP.
+    pub fn rest(limits: &[RateLimit], ms: impl Fn(u64) -> u64) -> Self {
+        Self {
+            windows: limits
+                .iter()
+                .filter(|l| l.scope == LimitScope::Ip && l.bucket == LimitBucket::Weight)
+                .map(|l| Window {
+                    limit: l.limit,
+                    ms: l.window_ms,
+                    ticks: ms(u64::from(l.window_ms)).max(1),
+                    cost: u32::from(l.default_cost.max(1)),
+                    start: 0,
+                    used: 0,
+                })
+                .collect(),
         }
-        self.roll(now);
-        if self.used.saturating_add(self.cost) > self.limit {
+    }
+    /// Allocates only during startup; subsequent operations visit the fixed window table.
+    pub fn new(limits: &[RateLimit], ms: impl Fn(u64) -> u64) -> Self {
+        Self {
+            windows: limits
+                .iter()
+                .filter(|l| {
+                    matches!(l.scope, LimitScope::Account | LimitScope::Uid)
+                        && l.bucket == LimitBucket::Orders
+                })
+                .map(|l| Window {
+                    limit: l.limit,
+                    ms: l.window_ms,
+                    ticks: ms(u64::from(l.window_ms)).max(1),
+                    cost: u32::from(l.default_cost.max(1)),
+                    start: 0,
+                    used: 0,
+                })
+                .collect(),
+        }
+    }
+    pub fn take(&mut self, now: u64) -> bool {
+        for w in &mut self.windows {
+            w.roll(now);
+        }
+        if self
+            .windows
+            .iter()
+            .any(|w| w.used.checked_add(w.cost).is_none_or(|n| n > w.limit))
+        {
             return false;
         }
-        self.used += self.cost;
+        for w in &mut self.windows {
+            w.used += w.cost;
+        }
         true
     }
-
-    /// A response reported the exchange's own count `used` of a limit `limit`. The exchange may
-    /// report another window than this counter's (Binance picks its fullest `rateLimits` entry,
-    /// e.g. the daily order count), so the count is scaled to this counter's limit by the same
-    /// fill ratio (rounded up); an observation with this counter's limit is taken as is.
-    pub fn observe(&mut self, used: u32, limit: u32, now: u64) {
-        if self.limit == 0 {
+    /// A delayed observation may tighten, but never release quota already charged locally.
+    pub fn observe_window(&mut self, obs: RateObs, now: u64) {
+        if obs.bucket != LimitBucket::Orders {
             return;
         }
-        self.roll(now);
-        self.used = if limit == 0 || limit == self.limit {
-            used
-        } else {
-            let scaled = (u64::from(used) * u64::from(self.limit)).div_ceil(u64::from(limit));
-            u32::try_from(scaled).unwrap_or(u32::MAX)
-        };
+        let exact = self.windows.iter().any(|w| w.ms == obs.window_ms);
+        for w in &mut self.windows {
+            w.roll(now);
+            if exact && w.ms != obs.window_ms {
+                continue;
+            }
+            let used = if obs.limit == 0 || obs.limit == w.limit {
+                obs.used
+            } else {
+                u32::try_from((u64::from(obs.used) * u64::from(w.limit)).div_ceil(u64::from(obs.limit)))
+                    .unwrap_or(u32::MAX)
+            };
+            w.used = w.used.max(used);
+        }
     }
-
-    /// `GwCmd{ResetRate}`.
+    /// Compatibility entry for callers without the window; conservatively scales the observation.
+    pub fn observe(&mut self, used: u32, limit: u32, now: u64) {
+        self.observe_window(
+            RateObs {
+                bucket: LimitBucket::Orders,
+                used,
+                limit,
+                window_ms: 0,
+            },
+            now,
+        );
+    }
     pub fn reset(&mut self) {
-        self.used = 0;
+        for w in &mut self.windows {
+            w.used = 0;
+        }
     }
-
     pub fn used(&self) -> u32 {
-        self.used
+        self.windows.first().map_or(0, |w| w.used)
     }
 }

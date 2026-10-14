@@ -391,3 +391,82 @@ fn ven_129_refresh_ends_on_quote() {
         }
     }
 }
+
+fn inject_snapshot(h: &mut Fh, req: hft_venue::SnapReq, update: u64, status: u8) {
+    use zerocopy::{FromZeros, IntoBytes};
+    let head = hft_venue::SnapRecHdr {
+        rx_tsc: 600_000_000,
+        sw_rx_ns: 600_000_000,
+        req_id: req.req_id,
+        inst: req.inst,
+        body_len: 0,
+        status,
+        kind: req.kind,
+        conn: ConnId(hft_venue::SNAP_FIRST),
+        _pad: 0,
+        http_status: 200,
+        _pad2: 0,
+        _pad3: 0,
+    };
+    let mut e = hft_event::Bbo::new_zeroed();
+    e.h.venue = V7;
+    e.h.inst = req.inst;
+    e.h.conn = head.conn;
+    e.h.rx_tsc = head.rx_tsc;
+    e.update_id = update;
+    e.bid_px = hft_types::Px(10000);
+    e.ask_px = hft_types::Px(10001);
+    e.bid_qty = hft_types::Qty(1000);
+    e.ask_qty = hft_types::Qty(1000);
+    let mut bytes = head.as_bytes().to_vec();
+    if status == hft_venue::SnapRecHdr::OK {
+        bytes.extend_from_slice(e.as_bytes());
+    }
+    let ring = h.snap.as_mut().unwrap();
+    ring.reserve(bytes.len() as u32).unwrap().copy_from_slice(&bytes);
+    ring.commit();
+}
+#[test]
+fn ven_130_refresh_grace_sends_once() {
+    let (mut h, _) = refresh_case(&[0, 1], &[0]);
+    h.poll(400_000_000);
+    assert!(h.snapreq.as_mut().unwrap().try_pop().is_none());
+    h.poll(600_000_000);
+    let req = h.snapreq.as_mut().unwrap().try_pop().unwrap();
+    assert_eq!(req.inst, S1);
+    let second = h.snapreq.as_mut().unwrap().try_pop().unwrap();
+    assert_eq!(second.inst, S2);
+    h.poll(700_000_000);
+    assert!(h.snapreq.as_mut().unwrap().try_pop().is_none());
+}
+#[test]
+fn ven_132_snapshot_cannot_overwrite_recovered_stream() {
+    let (mut h, _) = refresh_case(&[0, 1], &[0]);
+    h.rt.set_last_fwd(S1, StreamKind::Bbo, 200);
+    h.poll(600_000_000);
+    let req = h.snapreq.as_mut().unwrap().try_pop().unwrap();
+    inject_snapshot(&mut h, req, 0, hft_venue::SnapRecHdr::OK);
+    h.poll(600_000_001);
+    assert_eq!(bbos(&h.drain_bbo()).len(), 1);
+    assert_eq!(h.rt.inst_seq(S1).unwrap().last_fwd[0], 200);
+    inject_snapshot(&mut h, req, 300, hft_venue::SnapRecHdr::OK);
+    h.poll(600_000_002);
+    assert!(bbos(&h.drain_bbo()).is_empty());
+    assert_eq!(h.rt.counters().snapshot_stale, 1);
+}
+#[test]
+fn ven_133_snapshot_failure_waits_new_grace() {
+    let (mut h, _) = refresh_case(&[0, 1], &[0]);
+    h.poll(600_000_000);
+    let req = h.snapreq.as_mut().unwrap().try_pop().unwrap();
+    let _ = h.snapreq.as_mut().unwrap().try_pop();
+    inject_snapshot(&mut h, req, 0, hft_venue::SnapRecHdr::RATE);
+    h.poll(600_000_001);
+    h.poll(1_000_000_000);
+    assert!(h.snapreq.as_mut().unwrap().try_pop().is_none());
+    h.poll(1_100_000_001);
+    let retry = h.snapreq.as_mut().unwrap().try_pop().unwrap();
+    assert_eq!(retry.inst, req.inst);
+    assert_ne!(retry.req_id, req.req_id);
+    assert_eq!(retry.attempt, 1);
+}

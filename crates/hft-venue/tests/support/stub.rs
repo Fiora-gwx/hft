@@ -784,6 +784,17 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         Ok(true)
     }
 
+    fn decode_bbo_snapshot(
+        rd: &RefData,
+        ctx: &mut (),
+        _insts: &[InstId],
+        body: &[u8],
+        rx: &RxMeta,
+        out: &mut impl MdSink,
+    ) -> Result<u16, DecodeErr> {
+        Self::decode_md(rd, ctx, Md::Bbo, body, rx, out).map(|r| r.events)
+    }
+
     fn build_templates(
         cfg: &VenueCfg,
         _rd: &RefData,

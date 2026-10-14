@@ -890,6 +890,8 @@ hft-core 自身不在 tick-to-trade 路径上增加代码;路径上的分段预�
 - Agent Note:`sim-only-instance`、`sim-colocated-with-prod`、`no-small-live`、`engine-time`、`warmup-injection`、`no-same-exchange-spot-perp`、`host-class-c32`、`rx-irq-driven`、`feed-split-and-snap-fetch`、`verify-on-server`、`m3-end-probe`、`irq-split-reserve`、`core-market-data-scope`、`manual-hold-and-stop-marker`、`dev2-guard-system-slice-psi`、[thread-plan-and-host-classes](../../.agents/notes/proposed/architecture/2026-10-01-thread-plan-and-host-classes.md)、[recover-driver](../../.agents/notes/proposed/architecture/2026-10-01-recover-driver.md)、[recovery-epoch-and-boot-rules](../../.agents/notes/proposed/architecture/2026-10-01-recovery-epoch-and-boot-rules.md)
 - 运维:[host-tuning](../../docs/runbooks/host-tuning.md)、[release-and-deploy](../../docs/runbooks/release-and-deploy.md)、[incident-response](../../docs/runbooks/incident-response.md)、[launch](../../docs/runbooks/launch.md)
 
+公共 BBO 补帧使用独立的公共 REST transport 与 FeedCtx,沿用 venue 的行情源 IP;由 conn-builder warm 线程驱动 [SnapFetchTask](../../crates/hft-venue/README.md#当前-bbo-补帧传输),经 snap 环回到 feed 单写者发布。
+
 ### 测试环境账户装配
 
 网络模式只接受非正式 Live 账户与 testnet 端点。`venues.<name>.account_io` 显式指定 `timeout_ms`、`interval_ms`、`request_gap_ms`、`max_cancel_rounds`、`listen_keepalive_ms`。启动先串行核对交易规则、账户模式和身份，撤销遗留订单并查到空，再读取余额与永续持仓。余额与账户 unassigned 持仓进入第一份完整 StateSnapshot，不猜测 group。启动 Summary 只证明本次快照与空 OMS 一致；seq journal 在 bootstrap 完成后创建。
