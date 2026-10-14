@@ -814,6 +814,15 @@ impl Risk {
             .get(Buckets::vix(a, v))
             .map_or(0, |b| b.backoff_until_ens)
     }
+
+    /// Daily-loss state of `a` (snapshot section 17 `RiskAcctRow`): `(loss_trigger,
+    /// resumes_today, latched)`; read-only, for diagnostics and tests.
+    pub fn daily_loss_state(&self, a: AccountId) -> Option<(Notional, u8, bool)> {
+        self.s
+            .pnl
+            .get(usize::from(a.0))
+            .map(|p| (p.loss_trigger, p.resumes_today, p.latched))
+    }
 }
 
 impl Side {

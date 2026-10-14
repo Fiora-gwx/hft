@@ -231,6 +231,9 @@ pub struct Ledger {
     pub(crate) notes: Vec<Note>,
     pub(crate) notes_dropped: u32,
     pub(crate) rounding: u64,
+    /// Accounts whose unrealized changed in the current `on_ref_px`/`on_mark` (bit per account
+    /// id); transient, not in the snapshot: cleared at the entry of both calls.
+    pub(crate) upnl_dirty: [u64; 4],
 }
 
 pub(crate) static ZERO_POS: InstPos = InstPos::ZERO;
@@ -487,6 +490,7 @@ impl Ledger {
             notes: Vec::with_capacity(NOTE_BUF),
             notes_dropped: 0,
             rounding: 0,
+            upnl_dirty: [0; 4],
         };
         l.rates = vec![
             RateState {
@@ -830,6 +834,25 @@ impl Ledger {
 
     pub fn account(&self, a: AccountId) -> &AccountBook {
         self.accounts.get(usize::from(a.0)).unwrap_or(&ZERO_ACCOUNT)
+    }
+
+    /// Next account (ascending id) whose unrealized, and so its day PnL, changed in the last
+    /// `on_ref_px`/`on_mark`; the sequencer hands each to `risk.on_pnl` (hft-risk "当日亏损").
+    pub fn take_upnl_changed(&mut self) -> Option<AccountId> {
+        for (k, w) in self.upnl_dirty.iter_mut().enumerate() {
+            if *w != 0 {
+                let b = w.trailing_zeros();
+                *w &= !(1u64 << b);
+                return u8::try_from(k * 64 + b as usize).ok().map(AccountId);
+            }
+        }
+        None
+    }
+
+    pub(crate) fn mark_upnl_changed(&mut self, a: AccountId) {
+        if let Some(w) = self.upnl_dirty.get_mut(usize::from(a.0 >> 6)) {
+            *w |= 1u64 << (a.0 & 63);
+        }
     }
 
     /// `(interval_s, anchor_s)` used to normalize funding times; `INST_NONE` = finest grid of

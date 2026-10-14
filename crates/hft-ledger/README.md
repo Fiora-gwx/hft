@@ -82,6 +82,7 @@ impl Ledger {
     pub fn equity(&self, a: AccountId) -> Equity;
     pub fn group(&self, a: AccountId, g: GroupId) -> &GroupBook;
     pub fn account(&self, a: AccountId) -> &AccountBook;      // day_pnl、held_notional
+    pub fn take_upnl_changed(&mut self) -> Option<AccountId>; // 上次 on_ref_px/on_mark 改变了未实现的下一个账户(升序)
     pub fn rate(&self, asset: AssetId) -> RateView;           // 换算率与年龄
     pub fn portfolio(&self, a: AccountId) -> Portfolio<'_>;    // SDK `PortfolioRead` 的实现(sequencer 视图适配器的 `Views::portfolio` 返回它)
     pub fn funding_grid(&self, v: VenueId, inst: InstId) -> (u32, u32); // 资金费时刻归一化的 (interval_s, anchor_s);inst = INST_NONE 取该 venue 的最细网格
@@ -444,7 +445,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 
 ### 未实现与当日 PnL(增量维护)
 
-`on_ref_px`/`on_mark` 只更新持有该 inst 的 (account, group):`new_upnl = qty × (估值价 − avg)` 换算 USDT,`delta` 同步加到 `GroupBook.day.unrealized` 与 `AccountBook.upnl`;不遍历所有 group。`day` 在 `on_day_roll`(UTC 日切的 `Timer`)时清零(未实现以当时值为新基线)——这只是 PnL 基线;日亏熔断是 hft-risk 的锁存 cap,日切不清。`restore_marks` 只重建持有者的 `upnl` 缓存,不产生 `delta`。
+`on_ref_px`/`on_mark` 只更新持有该 inst 的 (account, group):`new_upnl = qty × (估值价 − avg)` 换算 USDT,`delta` 同步加到 `GroupBook.day.unrealized` 与 `AccountBook.upnl`;不遍历所有 group。`day` 在 `on_day_roll`(UTC 日切的 `Timer`)时清零(未实现以当时值为新基线)——这只是 PnL 基线;日亏熔断是 hft-risk 的锁存 cap,日切不清。`restore_marks` 只重建持有者的 `upnl` 缓存,不产生 `delta`。`on_ref_px`/`on_mark` 入口清空、重估中记下未实现有变化的账户(按账户号的位图,瞬态,不进快照),sequencer 随即以 `take_upnl_changed()`(账户号升序逐个取出)对这些账户调 `risk.on_pnl`——当日亏损熔断看含未实现的当日 PnL([hft-risk 当日亏损](../hft-risk/README.md#当日亏损锁存))。
 
 ### 轮次(round)
 

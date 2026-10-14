@@ -273,6 +273,7 @@ impl Ledger {
     /// Reference quote of `inst`: conversion rate (when it is a reference inst), spot valuation
     /// and unrealized of its holders.
     pub fn on_ref_px(&mut self, inst: InstId, bid: Px, ask: Px, t: i64) {
+        self.upnl_dirty = [0; 4];
         self.tick(t);
         let Some(s) = self.inst(inst).copied() else { return };
         if let Some(p) = self.ipx.get_mut(inst.0 as usize) {

@@ -514,6 +514,7 @@ fn bbo<'a, D: Driver<S>, S: StrategySet>(
     e.trace.rec("ledger.on_ref_px", u64::from(i.0), 0);
     e.ledger.on_ref_px(i, b.bid_px, b.ask_px, e.now.engine_ns);
     ledger_notes(e);
+    upnl_pnl(e, inst, drv)?;
     e.trace.rec("exec.touch_inst", u64::from(i.0), 0);
     e.exec.touch_inst(i);
     feeds_gate(e, inst, drv)?;
@@ -541,6 +542,7 @@ fn after_book<D: Driver<S>, S: StrategySet>(
         e.trace.rec("ledger.on_ref_px", u64::from(i.0), 1);
         e.ledger.on_ref_px(i, bid, ask, e.now.engine_ns);
         ledger_notes(e);
+        upnl_pnl(e, inst, drv)?;
     }
     e.trace.rec("exec.touch_inst", u64::from(i.0), 1);
     e.exec.touch_inst(i);
@@ -700,9 +702,10 @@ fn mark<'a, D: Driver<S>, S: StrategySet>(
         .rec("ledger.on_mark", u64::from(i.0), e.now.engine_ns as u64);
     e.ledger.on_mark(i, m.px, e.now.engine_ns, &mut touched);
     ledger_notes(e);
-    for (a, v) in touched.iter().copied().collect::<Vec<_>>() {
+    for (a, v) in touched.iter().copied() {
         margin_to_risk(e, inst, drv, a, v, false)?;
     }
+    upnl_pnl(e, inst, drv)?;
     e.trace.rec("exec.touch_inst", u64::from(i.0), 2);
     e.exec.touch_inst(i);
     p.market = Some(MarketEv::Mark { inst: i, px: m.px });
@@ -786,6 +789,12 @@ fn order_event<D: Driver<S>, S: StrategySet>(
         return Ok(());
     };
     let h = hdr_of(e, slot);
+    // A smoke order has no owner and so no `OrderUpdate` (hft-oms): its Unknown → Live
+    // convergence is seen here, for the standing cancel obligation (B-10).
+    let r = hft_strategy_sdk::OrderRef::new(ev.venue, ev.account, ev.slot.0, ev.r#gen);
+    let smoke_unknown = e.oms.slot(r).is_some_and(|s| {
+        s.state == hft_oms::OrderState::Unknown && s.oflags & hft_event::OrderFlags::SMOKE.0 != 0
+    });
     let mut o = e.take_oms();
     e.trace
         .rec("oms.on_order_event", u64::from(ev.slot.0), ev.what as u64);
@@ -793,6 +802,13 @@ fn order_event<D: Driver<S>, S: StrategySet>(
     touch_report_groups(e, &o);
     crate::intents::drain_oms(e, inst, drv, &mut o)?;
     e.put_oms(o);
+    if smoke_unknown
+        && e.oms
+            .slot(r)
+            .is_some_and(|s| s.state == hft_oms::OrderState::Live)
+    {
+        crate::mode_glue::cancel_obligation_on_live(e, inst, drv, ev.account, ev.venue)?;
+    }
     after_oms(e, inst, drv, ev.account, ev.venue)?;
     Ok(())
 }
@@ -844,11 +860,33 @@ pub(crate) fn pnl<D: Driver<S>, S: StrategySet>(
     drv: &mut D,
     d: PnlDelta,
 ) -> R<()> {
-    let a = d.account;
+    account_pnl(e, inst, drv, d.account)
+}
+
+/// `risk.on_pnl` of every account whose unrealized the last `ledger.on_ref_px`/`on_mark` moved
+/// (README "process": the day PnL includes the unrealized, hft-risk "当日亏损").
+pub(crate) fn upnl_pnl<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+) -> R<()> {
+    while let Some(a) = e.ledger.take_upnl_changed() {
+        account_pnl(e, inst, drv, a)?;
+    }
+    Ok(())
+}
+
+/// `risk.on_pnl` with account `a`'s current day PnL (realized + funding + fees + unrealized).
+fn account_pnl<D: Driver<S>, S: StrategySet>(
+    e: &mut Engine,
+    inst: &mut Instances<S>,
+    drv: &mut D,
+    a: AccountId,
+) -> R<()> {
     if a.0 == 0 {
         return Ok(());
     }
-    let day = e.ledger.account(a).day.net_realized();
+    let day = e.ledger.account(a).day.net();
     let eq = e.ledger.equity(a);
     e.trace.rec("risk.on_pnl", u64::from(a.0), 0);
     if let Some(inp) = e.risk.on_pnl(
@@ -1565,9 +1603,8 @@ pub(crate) fn naked_scan<D: Driver<S>, S: StrategySet>(
         let mut buf = hft_oms::FixedVec::<GroupId, 64>::new();
         let more = e.oms.naked_groups(a, &mut buf, &mut cursor);
         e.trace.rec("oms.naked_groups", u64::from(a.0), buf.len() as u64);
-        let groups: Vec<GroupId> = buf.as_slice().to_vec();
-        budget = budget.saturating_sub(groups.len().max(1));
-        for g in groups {
+        budget = budget.saturating_sub(buf.len().max(1));
+        for g in buf.as_slice().iter().copied() {
             let hit = {
                 let v = crate::noexec_views!(e);
                 e.exec.resolve_broken(a, g, &v)
