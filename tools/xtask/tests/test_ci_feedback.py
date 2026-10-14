@@ -47,6 +47,9 @@ def write_workspace(root: Path) -> dict:
 
 class FeedbackPolicyTests(unittest.TestCase):
     def test_tool_206_fast_lane_selects_affected_packages_and_reverse_deps(self):
+        calibration_members = {"strategies/registry": "hft-strategy-registry", "tools/xtask": "xtask"}
+        for path in ("tools/strat-calib/strat_calib/core.py", "tools/strat-calib/tests/fixtures/signals.json"):
+            self.assertEqual(related.select([path], calibration_members)[0], ["hft-strategy-registry"])
         real_run = subprocess.run
         # Background git maintenance can still be writing .git when the directory is removed.
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:

@@ -64,3 +64,4 @@
 | [contracts/](contracts/README.md) | — | optional | SwapGuard 合约(链上策略迁移时启用;冻结) |
 | [deploy/](deploy/README.md) · [benchmarks/](benchmarks/README.md) · [fixtures/](fixtures/README.md) · [tools/](tools/README.md) | — | core | 部署、资源护栏与调优;基准;金样;工具(含 `hft-cfg`、`hft-verify`) |
 | [tools/latency-slice](tools/latency-slice/README.md) | cold | core | M1.5 延迟探针的纵切片程序(主网 BBO + 简化 sequencer + 测试网下单,出分段直方图);只用于探针,不进生产 |
+| [tools/strat-calib](tools/strat-calib/README.md) | cold | optional | 记录行情的离线参数筛选、费用与容量情景分析;不替代模拟账户或上线门槛 |
