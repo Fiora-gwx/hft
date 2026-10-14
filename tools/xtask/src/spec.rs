@@ -13,7 +13,7 @@ use walkdir::WalkDir;
 use crate::{EnvError, rel_path};
 
 static CASE_HEAD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^###\s+(\S+)\s+(.*)$").unwrap());
-static COMP_ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([A-Z]{2,4})-(\d{3})$").unwrap());
+static COMP_ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([A-Z]{2,})-(\d{3})$").unwrap());
 static SCEN_ID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(A\d+|B\d+|C\d+|[A-Z]{1,4}-\d+[a-z]?|INV-\d+|DRL-\d+)$").unwrap());
 static ANY_HEAD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^#{1,3}\s").unwrap());
