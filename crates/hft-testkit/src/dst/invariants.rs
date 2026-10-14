@@ -1132,152 +1132,6 @@ fn check_3(st: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(test)]
-mod i3_tests {
-    use super::*;
-    use crate::dst::obs::{Evidence, InstRow, LimitRow, NoteInfo, PosRow};
-    use hft_types::{InstId, Px, Qty, StrategyId, Tif, Tsc, VenueId};
-    use zerocopy::IntoBytes;
-
-    #[test]
-    fn tk_107_external_position_limit_exception_is_bounded() {
-        let mut obs = Obs::default();
-        obs.insts.push(InstRow {
-            inst: InstId(1),
-            venue: VenueId(1),
-            asset: AssetId(1),
-            perp: false,
-            lot: 1,
-            min_qty: 1,
-        });
-        for (inst, qty) in [(1, 101), (2, -100)] {
-            obs.positions.push(PosRow {
-                account: AccountId(1),
-                venue: VenueId(1),
-                inst: InstId(inst),
-                asset: AssetId(1),
-                qty,
-            });
-        }
-        obs.limits.push(LimitRow {
-            account: AccountId(1),
-            asset: AssetId(1),
-            max_pos_qty: 100,
-        });
-        let mut info = StepInfo::default();
-        info.notes.push(NoteInfo {
-            seq: 1,
-            name: "ExternalFill",
-            account: AccountId(1),
-            group: GroupId(1),
-            inst: InstId(1),
-            v: [
-                1 << 8 | (ExternalCause::Unknown as u64) << 16,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-            ],
-        });
-        info.evidence.push(Evidence {
-            kind: EvidenceKind::Fill,
-            account: AccountId(1),
-            venue: VenueId(1),
-            inst: InstId(1),
-            delta: 1,
-            ext_key: None,
-        });
-        let check = |st: &mut InvState, after: &Obs, info: &StepInfo, records: &[JRec]| {
-            check_3(
-                st,
-                &StepView {
-                    step: 0,
-                    now_ns: 0,
-                    records,
-                    delivered: None,
-                    frames: &[],
-                    info,
-                    before: after,
-                    after,
-                    truth: &[],
-                    rebuild: None,
-                },
-            )
-        };
-        let empty = StepInfo::default();
-        let mut st = InvState::default();
-        check(&mut st, &obs, &info, &[]).unwrap();
-        // A hedge hides the oversized leg until that hedge is closed first.
-        assert!(st.i3_paused.contains(&(1, 1)));
-        obs.positions[1].qty = 0;
-        check(&mut st, &obs, &empty, &[]).unwrap();
-        assert!(check(&mut InvState::default(), &obs, &empty, &[]).is_err());
-        let mut note_only = info.clone();
-        note_only.evidence.clear();
-        assert!(check(&mut InvState::default(), &obs, &note_only, &[]).is_err());
-        // Even while externally over limit, a newly admitted increasing order is forbidden.
-        let d = OrderDecision {
-            trigger_seq: 1,
-            decided_tsc: Tsc(0),
-            px: Px(1),
-            qty: Qty(1),
-            group: GroupId(1),
-            inst: InstId(1),
-            slot: SlotId(1),
-            r#gen: 1,
-            target_slot: SlotId(0),
-            reject: 0,
-            strategy: StrategyId(1),
-            venue: VenueId(1),
-            account: AccountId(1),
-            action: OrderAction::New,
-            side: Side::Buy,
-            tif: Tif::Ioc,
-            oflags: 0,
-            reason: 0,
-            intent_no: 0,
-            req_px: Px(1),
-            link_role: 0,
-            _pad: [0; 7],
-        };
-        let rec = JRec {
-            seq: 2,
-            end_seq: 2,
-            tsc: 0,
-            kind: EventKind::ORDER_DECISION,
-            flags: hft_event::RecordFlags(0),
-            body: d.as_bytes().to_vec(),
-        };
-        let mut order = StepInfo::default();
-        order.decisions.push(DecisionInfo {
-            seq: 2,
-            class: DecClass::Open,
-            origin: DecOrigin::Strategy,
-            hedge: None,
-            margin_stress: false,
-            basis: 0,
-            naked_dir: 0,
-            pos: 101,
-            same_dir_inflight: 0,
-            max_pos_qty: 100,
-            notional: 0,
-            link: 0,
-            link_unknown: false,
-            group_unknown: false,
-        });
-        assert!(check(&mut st, &obs, &order, &[rec]).is_err());
-        // Once every leg is back within the limit, subsequent unexplained excess fails.
-        obs.positions[0].qty = 100;
-        check(&mut st, &obs, &empty, &[]).unwrap();
-        assert!(st.i3_paused.is_empty());
-        obs.positions[0].qty = 101;
-        assert!(check(&mut st, &obs, &empty, &[]).is_err());
-    }
-}
-
 // ------------------------------------------------------------------------------------------- I4
 
 /// INV-4: a group with an `Unknown` slot opens nothing and reverses nothing until it converges.
@@ -2517,4 +2371,150 @@ fn check_20(st: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod i3_tests {
+    use super::*;
+    use crate::dst::obs::{Evidence, InstRow, LimitRow, NoteInfo, PosRow};
+    use hft_types::{InstId, Px, Qty, StrategyId, Tif, Tsc, VenueId};
+    use zerocopy::IntoBytes;
+
+    #[test]
+    fn tk_107_external_position_limit_exception_is_bounded() {
+        let mut obs = Obs::default();
+        obs.insts.push(InstRow {
+            inst: InstId(1),
+            venue: VenueId(1),
+            asset: AssetId(1),
+            perp: false,
+            lot: 1,
+            min_qty: 1,
+        });
+        for (inst, qty) in [(1, 101), (2, -100)] {
+            obs.positions.push(PosRow {
+                account: AccountId(1),
+                venue: VenueId(1),
+                inst: InstId(inst),
+                asset: AssetId(1),
+                qty,
+            });
+        }
+        obs.limits.push(LimitRow {
+            account: AccountId(1),
+            asset: AssetId(1),
+            max_pos_qty: 100,
+        });
+        let mut info = StepInfo::default();
+        info.notes.push(NoteInfo {
+            seq: 1,
+            name: "ExternalFill",
+            account: AccountId(1),
+            group: GroupId(1),
+            inst: InstId(1),
+            v: [
+                1 << 8 | (ExternalCause::Unknown as u64) << 16,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ],
+        });
+        info.evidence.push(Evidence {
+            kind: EvidenceKind::Fill,
+            account: AccountId(1),
+            venue: VenueId(1),
+            inst: InstId(1),
+            delta: 1,
+            ext_key: None,
+        });
+        let check = |st: &mut InvState, after: &Obs, info: &StepInfo, records: &[JRec]| {
+            check_3(
+                st,
+                &StepView {
+                    step: 0,
+                    now_ns: 0,
+                    records,
+                    delivered: None,
+                    frames: &[],
+                    info,
+                    before: after,
+                    after,
+                    truth: &[],
+                    rebuild: None,
+                },
+            )
+        };
+        let empty = StepInfo::default();
+        let mut st = InvState::default();
+        check(&mut st, &obs, &info, &[]).unwrap();
+        // A hedge hides the oversized leg until that hedge is closed first.
+        assert!(st.i3_paused.contains(&(1, 1)));
+        obs.positions[1].qty = 0;
+        check(&mut st, &obs, &empty, &[]).unwrap();
+        assert!(check(&mut InvState::default(), &obs, &empty, &[]).is_err());
+        let mut note_only = info.clone();
+        note_only.evidence.clear();
+        assert!(check(&mut InvState::default(), &obs, &note_only, &[]).is_err());
+        // Even while externally over limit, a newly admitted increasing order is forbidden.
+        let d = OrderDecision {
+            trigger_seq: 1,
+            decided_tsc: Tsc(0),
+            px: Px(1),
+            qty: Qty(1),
+            group: GroupId(1),
+            inst: InstId(1),
+            slot: SlotId(1),
+            r#gen: 1,
+            target_slot: SlotId(0),
+            reject: 0,
+            strategy: StrategyId(1),
+            venue: VenueId(1),
+            account: AccountId(1),
+            action: OrderAction::New,
+            side: Side::Buy,
+            tif: Tif::Ioc,
+            oflags: 0,
+            reason: 0,
+            intent_no: 0,
+            req_px: Px(1),
+            link_role: 0,
+            _pad: [0; 7],
+        };
+        let rec = JRec {
+            seq: 2,
+            end_seq: 2,
+            tsc: 0,
+            kind: EventKind::ORDER_DECISION,
+            flags: hft_event::RecordFlags(0),
+            body: d.as_bytes().to_vec(),
+        };
+        let mut order = StepInfo::default();
+        order.decisions.push(DecisionInfo {
+            seq: 2,
+            class: DecClass::Open,
+            origin: DecOrigin::Strategy,
+            hedge: None,
+            margin_stress: false,
+            basis: 0,
+            naked_dir: 0,
+            pos: 101,
+            same_dir_inflight: 0,
+            max_pos_qty: 100,
+            notional: 0,
+            link: 0,
+            link_unknown: false,
+            group_unknown: false,
+        });
+        assert!(check(&mut st, &obs, &order, &[rec]).is_err());
+        // Once every leg is back within the limit, subsequent unexplained excess fails.
+        obs.positions[0].qty = 100;
+        check(&mut st, &obs, &empty, &[]).unwrap();
+        assert!(st.i3_paused.is_empty());
+        obs.positions[0].qty = 101;
+        assert!(check(&mut st, &obs, &empty, &[]).is_err());
+    }
 }
