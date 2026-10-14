@@ -315,7 +315,7 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 
 `FillDelta`/`FeeDelta` 不写 journal(它们是 OMS 处理 `OrderEvent` 的同一事件内的派生量),冷读者按下表从 journal 记录重建同样的调用,得到与引擎相同的持仓、库存与余额:
 
-恢复 OMS 节 2 时接受行版本 1–3;版本 1 以 `filled` 初始化费用水位,版本 2/3 读取 `fee_cum`,版本 3 读取现金覆盖量与累计额。节 12 版本 1–4 的墓碑保留完整订单身份,版本 2–4 读取现金水位;版本 3/4 的 ForeignCash 行按 [OMS 格式](../hft-oms/README.md#快照行格式节-2312草案实现时以代码与编译期断言为准)恢复外来累计结算与原始来源,版本 4 的 ForeignReceipt 独立校验并恢复单笔金融事实;缺来源、重复与非法原件拒绝恢复,旧版不补造原件。旧版现金水位补零。`PERP_CASH` 下已成交量必须全部覆盖,否则拒绝恢复。节 3 版本 1 提供当前 epoch,节 25 版本 1 提供时钟;首次 Boot 前的全零时钟行表示尚未开始,等待后续 EngineClock,零频率但其余字段非零的行拒读,关键帧后的新订单无须等下一次 EpochStart。未知版本返回 `VersionUnsupported`,重复身份或快照映射超容量返回 `BadValue`。
+恢复 OMS 节 2 时接受行版本 1–3;版本 1 以 `filled` 初始化费用水位,版本 2/3 读取 `fee_cum`,版本 3 读取现金覆盖量与累计额。节 12 版本 1–5 的墓碑保留完整订单身份,版本 2–5 读取现金水位,版本 5 读取墓碑费用水位 `fee_cum`(1–4 取 `filled`);版本 3/4 的 ForeignCash 行按 [OMS 格式](../hft-oms/README.md#快照行格式节-2312草案实现时以代码与编译期断言为准)恢复外来累计结算与原始来源,版本 4 的 ForeignReceipt 独立校验并恢复单笔金融事实;缺来源、重复与非法原件拒绝恢复,旧版不补造原件。旧版现金水位补零。`PERP_CASH` 下已成交量必须全部覆盖,否则拒绝恢复。节 3 版本 1 提供当前 epoch,节 25 版本 1 提供时钟;首次 Boot 前的全零时钟行表示尚未开始,等待后续 EngineClock,零频率但其余字段非零的行拒读,关键帧后的新订单无须等下一次 EpochStart。未知版本返回 `VersionUnsupported`,重复身份或快照映射超容量返回 `BadValue`。
 
 `apply` 遇到无法证明的入账返回 `JournalApplyError`,之后持续返回首个错误,调用方必须停止读取。`PERP_CASH` 的普通订单按完整身份及累计覆盖量计算现金增量,调用 `apply_settled_fill`;同水位不同金额、缺失/越界覆盖、减法溢出、找不到订单或重复登记身份都失败。FeeOnly 与查询后的补费不推进现金水位。失败成交不改账本或水位;未启用该能力的回报沿用本地计算。原始回报身份与登记品种不符时也明确报错。
 

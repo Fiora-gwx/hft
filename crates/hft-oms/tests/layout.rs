@@ -88,7 +88,7 @@ fn oms_012_slot_stamps_layout() {
 
 #[test]
 fn oms_013_tomb_layout() {
-    assert_eq!(size_of::<Tomb>(), 72);
+    assert_eq!(size_of::<Tomb>(), 80);
     assert_eq!(
         [
             offset_of!(Tomb, r#gen),
@@ -107,8 +107,9 @@ fn oms_013_tomb_layout() {
             offset_of!(Tomb, freed_tsc),
             offset_of!(Tomb, cash_qty),
             offset_of!(Tomb, cash_sum),
+            offset_of!(Tomb, fee_cum),
         ],
-        [0, 4, 6, 8, 12, 16, 17, 18, 19, 20, 24, 32, 40, 48, 56, 64]
+        [0, 4, 6, 8, 12, 16, 17, 18, 19, 20, 24, 32, 40, 48, 56, 64, 72]
     );
 }
 
