@@ -14,8 +14,7 @@ use hft_risk::{Classification, IntentDraft, IntentView, PosFacts, Risk};
 use hft_strategy_sdk::ctx::CancelReq;
 use hft_strategy_sdk::{HedgeKind, IntentClass, IntentOutcome, LinkRole, OrderIntent, OrderRef, StrategySet};
 use hft_types::{
-    AccountId, CapSource, GroupId, InstId, Px, Qty, RejectBits, RoundMode, Side, SlotId, StrategyId, Tsc,
-    VenueId,
+    AccountId, CapSource, GroupId, InstId, Px, Qty, RejectBits, Side, SlotId, StrategyId, Tsc, VenueId,
 };
 
 use crate::Driver;
@@ -125,7 +124,10 @@ fn record_only(
 
 fn oflags_of(it: &OrderIntent, c: &Classification, extra: u16) -> u16 {
     let mut f = extra;
-    if c.reduce_only || it.reduce_only() {
+    // `REDUCE_ONLY` is hft-risk `classify()`'s result alone (hft-oms "分类"): it already folds
+    // in the intent's own reduce-only request and the venue's `VenueCaps.reduce_only`, so a spot
+    // venue never receives the flag (a `Reverse` on spot is a plain IOC).
+    if c.reduce_only {
         f |= OrderFlags::REDUCE_ONLY.0;
     }
     if c.risk_reducing {
@@ -350,17 +352,19 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
         iv.link_account = p.account;
         iv.link_inst = p.inst;
         iv.link_side = p.side;
-        let den = i128::from(p.ratio_den.max(1));
-        let lq = i128::from(it.qty.0) * i128::from(p.ratio_num) / den;
-        iv.link_qty = Qty(i64::try_from(lq).unwrap_or(i64::MAX));
         let b = e.market.bbo_view(&e.books, p.inst);
         let rr = e.risk.view_for(p.account, p.inst, &e.now).rr_max_cross;
-        if b.bid_px.0 > 0 && b.ask_px.0 > 0 {
-            let mid = Px::mid_floor(b.bid_px, b.ask_px);
-            let capx = mid.mul_rate(rr, RoundMode::Ceil);
-            let lexp = e.rd.asset(e.rd.inst(p.inst).asset).exp;
-            iv.link_notional = Risk::notional(iv.link_qty, capx, lexp, quote_rate(&e.rd, &e.ledger, p.inst));
-        }
+        let lexp = e.rd.asset(e.rd.inst(p.inst).asset).exp;
+        (iv.link_qty, iv.link_notional) = crate::views::link_projection(
+            it.qty,
+            p.ratio_num,
+            p.ratio_den,
+            b.bid_px,
+            b.ask_px,
+            rr,
+            lexp,
+            quote_rate(&e.rd, &e.ledger, p.inst),
+        );
         let lim = e.risk.hedge_px_limits(p.account, p.venue, p.inst);
         let silence = u64::from(lim.conn_liveness_ms).saturating_mul(e.now.tsc_per_ms);
         if b.quote_live(e.now.tsc, silence) {
@@ -451,7 +455,10 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
         }
     }
     ai.risk_reducing = class.risk_reducing;
-    ai.reduce_only = class.reduce_only || it.reduce_only();
+    ai.reduce_only = class.reduce_only;
+    if !class.reduce_only {
+        ai.intent.flags &= !OrderIntent::REDUCE_ONLY;
+    }
     ai.lev_x100 = lev;
     ai.smoke_ttl_ms = smoke_ttl;
     ai.hedge_px = hedge_px;

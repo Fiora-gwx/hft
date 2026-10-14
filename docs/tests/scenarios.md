@@ -1028,8 +1028,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - 0 < t < 0.8 s:g1 的 `LegView.naked_qty` = 0.00001(第二腿在途计入裸量),`open_links = 1`;执行层无 `ExecDecision{HedgeFix}`,cell 的 `fix_first_tsc = 0`、`fix_count = 0`
   - t = 0.8 s 第二腿全部成交后链接 `Done`;已成交裸量 0.00001 × 60,000 = 0.6 USDT ≤ `dust_notional`,到场景结束无 `HedgeFix`
   - 每步 INV-8、INV-15、INV-19
-- 实现:`crates/hft-testkit/src/scenarios/hedge.rs::b_4_inflight_second_leg_suppresses_hedge_fix`
-- 备注:`Broken` 的有界自动平仓见 BK-1,恢复期抑制的完整场景见 BK-5
+- 实现:`crates/hft-sequencer/tests/scenarios_hedge.rs::b_4_inflight_second_leg_suppresses_hedge_fix`
+- 备注:`Broken` 的有界自动平仓见 BK-1,恢复期抑制的完整场景见 BK-5;B-4.1、B-4.4 在同一函数,B-4.3 见 `b_4_3_broken_group_no_hedge_fix`;B-4.2、B-4.5 待 W1 种子化 DST;实现方式同 B1(真实 sequencer 在 B0 夹具上的确定性步骤序列,映射与阈值见该文件头)
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -1052,7 +1052,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - 第二腿被拒后恰好发出 3 条 `SecondRetry`,每条的 `OrderDecision.trigger_seq` 指向一条 `Timer{Oms, HedgeRetry}` Input,相邻两条的引擎时间间隔 ≥ 100 ms;它们之间没有任何行情 Input 改变 `S1`、`P1` 的报价
   - 第 3 条 `SecondRetry` 被拒的同一 Input 内:链接 `Broken{RetryExhausted}`,`Note{OmsHedgeBroken}`(P0),`Broken{a, g1}` 与 `HedgeFailure{a}` 的 `CapSet`
   - 每步 INV-3、INV-8、INV-14
-- 实现:`crates/hft-testkit/src/scenarios/hedge.rs::b_5_hedge_retry_timer_drives_retries`
+- 实现:`crates/hft-sequencer/tests/scenarios_hedge.rs::b_5_hedge_retry_timer_drives_retries`
+- 备注:B-5.2 在同一函数,B-5.1 见 `b_5_1_hard_kill_gates_retries_until_deadline`;实现方式同 B1(真实 sequencer 在 B0 夹具上的确定性步骤序列,映射与阈值见该文件头)
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -1409,7 +1410,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - t = 4 s 报告之后 s2 仍为 `Unknown`、`query_count` 不变;t ∈ [1.06 s, 8 s) 无 `link_role = SecondRetry` 的 `OrderDecision`
   - t = 8 s 报告的 Input 内 s2 → `Rejected`(`reject_code = 0`,迁移原因 `Reconcile`);同一 Input 内登记 `HedgeRetry`,到期 Input 内一条 `SecondRetry{qty 0.02}`
   - 每步 INV-2、INV-4、INV-8 成立
-- 实现:`crates/hft-testkit/src/scenarios/exec_correctness.rs::c1_hedge_leg_notfound_waits_history`
+- 实现:`crates/hft-sequencer/tests/scenarios_hedge.rs::c1_hedge_leg_notfound_waits_history`
+- 备注:C1.3 见 `c1_3_deadline_while_unknown`;C1.1、C1.2 待 W1 种子化 DST;实现方式同 B1(真实 sequencer 在 B0 夹具上的确定性步骤序列,映射与阈值见该文件头)
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -1450,7 +1452,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - 补腿首次满足触发的时刻 + 10,000 ms 之后的第一次推进(≤ 11.60 s)内 `ExecDecision{State → Broken, detail = Broken/FixExhausted}`、`Note{ExecBroken}`(P0)、`CapSet{Broken, (a, g1)}`;此前无 `Broken`
   - 全程无 `link_role = HedgeFix` 的出环帧
   - 每步 INV-14、INV-15 成立
-- 实现:`crates/hft-testkit/src/scenarios/exec_correctness.rs::c4_auto_hedge_fix_gated_bounded`
+- 实现:`crates/hft-sequencer/tests/scenarios_hedge.rs::c4_auto_hedge_fix_gated_bounded`
+- 备注:C4.1 见 `c4_1_rejected_fixes_exhaust`;C4.2 待 W1 种子化 DST;实现方式同 B1(真实 sequencer 在 B0 夹具上的确定性步骤序列,映射与阈值见该文件头)
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -1851,8 +1854,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - t = 0.2 s 那条成交回报的同一 Input 内第二腿出环:`OrderDecision{link_role = Second, P1 卖 0.100, IOC}`,限价 = `cap_cross_px(Sell, 60,010.0, 60,010.05, 0.002, rr 0.01, tick 0.1)` = 59,890.0
   - t = 0 到 t = 10 s:无 `Note{OmsHedgePxStale}`、无 `Timer{Oms, HedgeRetry}` 登记、无 `RejectBits::STALE_MID`、无 `Broken`
   - 每步 INV-3、INV-8、INV-19 成立
-- 实现:`crates/hft-testkit/src/scenarios/link.rs::qf_1_quiet_book_still_hedges`
-- 备注:上线门槛 ④/⑦ 点名的必过项
+- 实现:`crates/hft-sequencer/tests/scenarios_hedge.rs::qf_1_quiet_book_still_hedges`
+- 备注:上线门槛 ④/⑦ 点名的必过项;QF-1.1 在同一函数,QF-1.4、QF-1.6 见 `qf_1_4_stale_at_fill_gated_then_retried`;QF-1.2、QF-1.3、QF-1.5 待 W1 种子化 DST;实现方式同 B1(真实 sequencer 在 B0 夹具上的确定性步骤序列,映射与阈值见该文件头)
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -1964,7 +1967,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - cell 的 `pair_lot` = 0.01;每片第一腿量是 0.01 的整数倍,依次为 0.04、0.04、0.04、0.01
   - 每片第二腿 = 该片第一腿成交净量,是对方 lot 的整数倍且 ≥ 其 `min_qty`;每片后 `g1` 两条腿的余数都为 0
   - 目标到达后 `ExecDecision{State → Idle}`,两腿净量 +0.130 / −0.130
-- 实现:`crates/hft-testkit/src/scenarios/link.rs::lt_1_lot_alignment_and_mismatch`
+- 实现:`crates/hft-sequencer/tests/scenarios_hedge.rs::lt_1_lot_alignment_and_mismatch`
+- 备注:B0 价格下切片为 0.05/0.05/0.03(断言取 `pair_lot` 整数倍与合计);LT-1.1–LT-1.3 见 `lt_1_1_set_params_lcm_vs_force_chunk`;实现方式同 B1(真实 sequencer 在 B0 夹具上的确定性步骤序列,映射与阈值见该文件头)
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -2334,8 +2338,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
   - 第 1、2、3 次拒绝后 `retries` 依次为 1、2、3 并各登记一个 `Timer{Oms, HedgeRetry}`;第 4 次拒绝(第 3 张 `SecondRetry`)的那条 Input 内:`retries = 4 > hedge_retry_max`,`LinkUpdate{state = Broken, broken_reason = RetryExhausted}`、`Note{OmsHedgeBroken}`(P0)、`Broken{a, g1}` 与 `HedgeFailure{a}` 的 `CapSet`,实例 1 收到 `RiskEvent::HedgeBroken{group = g1}`,执行层该 cell 为 `Broken`
   - 之后 `a` 的任何 Open 被拒(`CLOSE_ONLY`);LegTracker `g1` 的 `S1` 腿 net = +0.01、`P1` 腿 net = 0
   - INV-8、INV-14、INV-15、INV-19
-- 实现:`crates/hft-testkit/src/scenarios/failpath.rs::fp_5_second_leg_rejected_retries_then_broken`
-- 备注:`Broken` 之后的自动有界平仓见 BK-1;门控拒绝(报价、kill、限速)不计次见 FP-6、FP-2.2
+- 实现:`crates/hft-sequencer/tests/scenarios_hedge.rs::fp_5_second_leg_rejected_retries_then_broken`
+- 备注:`Broken` 之后的自动有界平仓见 BK-1;门控拒绝(报价、kill、限速)不计次见 FP-6、FP-2.2;FP-5.1 见 `fp_5_1_reverse_on_reject`,FP-5.3 见 `fp_5_3_hold_on_reject`;FP-5.2 待 W1 种子化 DST;实现方式同 B1(真实 sequencer 在 B0 夹具上的确定性步骤序列,映射与阈值见该文件头)
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -2355,8 +2359,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 - 断言:
   - t = 0.2 s 那条 Input 内 `OrderDecision{New, P1, Sell, qty = 0.01, px = 59,980.0, link_role = Second}` 出环;`ApprovedIntent.hedge_px` 的 `capped = false`、`slipped = false`
   - 全程无 `Note{OmsHedgePxStale}`、无 `Timer{Oms, HedgeRetry}` 登记、`retries = 0`、无 `Broken`
-- 实现:`crates/hft-testkit/src/scenarios/failpath.rs::fp_6_quiet_second_leg_book_still_priced`
-- 备注:跨组件的完整期望(风险递减单、自动平仓、L3 减仓同样照常)见 QF-1
+- 实现:`crates/hft-sequencer/tests/scenarios_hedge.rs::fp_6_quiet_second_leg_book_still_priced`
+- 备注:跨组件的完整期望(风险递减单、自动平仓、L3 减仓同样照常)见 QF-1;FP-6.1、FP-6.2 见 `fp_6_1_conn_down_gates_until_up`;实现方式同 B1(真实 sequencer 在 B0 夹具上的确定性步骤序列,映射与阈值见该文件头)
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|
@@ -2375,8 +2379,8 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 - 断言:
   - t = 0.2 s 那条 Input 内 `OrderDecision{New, P1, Sell, qty = 0.01, tif = Ioc, px = 59,840.2, link_role = Second}`(上限 = 59,960.05 × 0.998 = 59,840.1299 向上取整到 0.1);`hedge_px` 的 `capped = true`、`slipped = true`;`Note{OmsHedgeSlipCapped}`(P1,`v = [link_id, 60,010.0, 59,960.0, 59,840.2]`)恰好一条;风控放行该单(无 `PX_BAND`)
   - 超滑点本身不计次:`retries = 0`;IOC 在 59,840.2 成交后链接 `Done`
-- 实现:`crates/hft-testkit/src/scenarios/failpath.rs::fp_7_slippage_priced_at_cap_not_failed`
-- 备注:跨组件期望见 LK-3
+- 实现:`crates/hft-sequencer/tests/scenarios_hedge.rs::fp_7_slippage_priced_at_cap_not_failed`
+- 备注:跨组件期望见 LK-3;FP-7.2 在同一函数,FP-7.1 见 `fp_7_1_beyond_cross_gated_until_back`;实现方式同 B1(真实 sequencer 在 B0 夹具上的确定性步骤序列,映射与阈值见该文件头)
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|

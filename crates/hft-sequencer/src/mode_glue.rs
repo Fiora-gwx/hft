@@ -2,6 +2,7 @@
 //! execution of `ModeOutcome` in the order ①–⑧.
 
 use hft_event::{CapRecord, CmdScope, NoteLevel, RecordFlags};
+use hft_risk::LegSummary;
 use hft_risk::mode::{CancelScope, CellKey, DrainCause, Effective, ModeErr, ModeInput, ModeOutcome};
 use hft_strategy_sdk::StrategySet;
 use hft_types::{AccountId, CapSource, GroupId, InstId, RunMode, VenueId};
@@ -43,6 +44,45 @@ impl BrokenSeen {
         let ix = usize::from(self.next) % self.rows.len();
         if let Some(r) = self.rows.get_mut(ix) {
             *r = (seq, a, g);
+        }
+        self.next = self.next.wrapping_add(1) % (self.rows.len() as u8);
+        true
+    }
+}
+
+/// `(seq, account, group, summary)` of the `risk.on_legs` calls of the current Input: a group
+/// is handed to `on_legs` once per Input and LegSummary (README "process" 7) — the Broken path and
+/// the end-of-Input pass over the touched groups would otherwise both hand it the same summary.
+/// A changed summary is always handed over. Fixed capacity: a full table forgets its oldest
+/// entry, which at worst repeats an idempotent `on_legs`.
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct LegsSeen {
+    rows: [(u64, AccountId, GroupId, LegSummary); 8],
+    next: u8,
+}
+
+impl Default for LegsSeen {
+    fn default() -> Self {
+        LegsSeen {
+            rows: [(0, AccountId(0), GroupId(0), LegSummary::default()); 8],
+            next: 0,
+        }
+    }
+}
+
+impl LegsSeen {
+    /// Records `(seq, a, g, s)`; `false` when `(a, g)` was last handed `s` in Input `seq`.
+    pub(crate) fn changed(&mut self, seq: u64, a: AccountId, g: GroupId, s: &LegSummary) -> bool {
+        if let Some(r) = self.rows.iter_mut().find(|r| r.0 == seq && r.1 == a && r.2 == g) {
+            if r.3 == *s {
+                return false;
+            }
+            r.3 = *s;
+            return true;
+        }
+        let ix = usize::from(self.next) % self.rows.len();
+        if let Some(r) = self.rows.get_mut(ix) {
+            *r = (seq, a, g, *s);
         }
         self.next = self.next.wrapping_add(1) % (self.rows.len() as u8);
         true
@@ -169,6 +209,10 @@ pub(crate) fn on_legs<D: Driver<S>, S: StrategySet>(
     }
     let spec = inst.spec(a, g).copied();
     let s = crate::views::leg_summary(&e.oms, &e.market, &e.rd, a, g, spec.as_ref());
+    if !e.legs_seen.changed(e.cur_seq, a, g, &s) {
+        e.trace.rec("risk.on_legs.dup", u64::from(a.0), u64::from(g.0));
+        return Ok(());
+    }
     e.trace.rec("risk.on_legs", u64::from(a.0), u64::from(g.0));
     if let Some(inp) = e.risk.on_legs(a, g, &s) {
         apply_mode(e, inst, drv, inp)?;

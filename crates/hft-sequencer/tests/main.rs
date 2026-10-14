@@ -42,6 +42,7 @@ mod replay_file;
 mod ring_full;
 mod scenarios;
 mod scenarios_risk;
+mod scenarios_hedge;
 mod sdk_contract;
 mod settlement;
 mod sim_route;

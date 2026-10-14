@@ -366,6 +366,7 @@ pub(crate) fn apply_params<D: crate::Driver<S>, S: StrategySet>(
         if e.exec.cell(account, c.group).is_some_and(|x| x.has_target) {
             let mut xo = e.take_exec();
             e.exec.clear_target(strategy, account, c.group, e.now, &mut xo);
+            crate::exec_glue::drain_out(e, inst, drv, &mut xo)?;
             e.put_exec(xo);
             e.seq_note(
                 crate::codes::note::TARGET_CLEARED,

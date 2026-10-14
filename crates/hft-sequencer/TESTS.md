@@ -4965,7 +4965,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:B0 稳态;s1 在 `a1` 上 `place` 买 0.01 IOC,带 LegLink(第二腿 `b1` 卖,ratio 1/1),各行改所列字段
-- 实现:`crates/hft-sequencer/tests/intent.rs::seq_352_link_valid_precheck`
+- 实现:`crates/hft-sequencer/tests/intents.rs::seq_352_link_valid_precheck`
 
 | 行 | 改动 | 期望 |
 |---|---|---|
@@ -5082,7 +5082,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:B0 稳态;账户 1 g1 链接 L(第一腿 `a1`,第二腿 `b1`);B 的 `b1` BBO 60 000.0 / 60 000.1
-- 实现:`crates/hft-sequencer/tests/intent.rs::seq_360_oms_hooks`
+- 实现:`crates/hft-sequencer/tests/intents.rs::seq_360_oms_hooks`
 
 | 行 | 输入 | 期望 |
 |---|---|---|

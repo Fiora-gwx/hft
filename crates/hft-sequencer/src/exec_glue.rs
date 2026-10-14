@@ -220,6 +220,13 @@ pub(crate) fn advance<D: Driver<S>, S: StrategySet>(
     inst: &mut Instances<S>,
     drv: &mut D,
 ) -> R<()> {
+    #[cfg(feature = "testing")]
+    if let Some(mut xo) = e.test_exec_inject.take() {
+        e.trace.rec("exec.advance", 0, 0);
+        drain_out(e, inst, drv, &mut xo)?;
+        e.put_exec(xo);
+        return Ok(());
+    }
     if !e.exec.has_pending() {
         return Ok(());
     }

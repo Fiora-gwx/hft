@@ -621,3 +621,383 @@ mod open_margin {
         }
     }
 }
+// ------------------------------------------------------------------------------- SEQ-177
+
+mod seq_177 {
+    use hft_strategy_sdk::{BboView, HedgeKind, HedgePlan, LinkRole, OnFail, PxMode, ResidualPolicy};
+    use hft_types::{AssetExp, HedgePxLimits, InstId, Notional, Px, Qty, Rate, Side, Tsc, VenueId};
+    use proptest::prelude::*;
+
+    const EXP: AssetExp = AssetExp {
+        px_exp: -2,
+        qty_exp: -8,
+    };
+    const PAR: Rate = Rate(1_000_000_000);
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 5_000, ..ProptestConfig::default() })]
+        /// At an unchanged second-leg mid, `price_hedge`'s limit × the second leg's quantity never
+        /// exceeds the `link_notional` the first leg was admitted with; so a first leg admitted
+        /// with `link_notional ≤ max_hedge_notional` is never refused by #6 on notional.
+        #[test]
+        fn seq_177_second_leg_within_link_notional(
+            mid_units in 1i64..=100_000,
+            mid_cents in 0i64..100,
+            rr_bp in 5i64..=200,
+            off_bp in -300i64..=300,
+            buy in any::<bool>(),
+            num in 1u32..=20,
+            den in 1u32..=10,
+            lots in 1i64..=10_000,
+            param_bp in 0i64..=100,
+            cross in any::<bool>(),
+        ) {
+            let num = num.min(2 * den); // ratio 0.1–2 (den ≤ 10, so num / den ≥ 0.1)
+            let mid = Px(mid_units * 100 + mid_cents);
+            let rr = Rate(rr_bp * 100_000);
+            let tick = 1i64;
+            let lot = 100_000i64; // 0.001
+            // Counterparty price off mid by `off_bp`, the other side mirrored: same mid.
+            let d = (mid.0 * off_bp.abs() / 10_000).max(0);
+            let (bid, ask) = (Px(mid.0 - d), Px(mid.0 + d));
+            prop_assume!(bid.0 > 0 && Px::mid_floor(bid, ask) == mid);
+            let first_qty = Qty(lots * lot);
+            let (link_qty, link_notional) =
+                hft_sequencer::views::link_projection(first_qty, num, den, bid, ask, rr, EXP, PAR);
+            // The second leg: the net fill × ratio floored to its lot (never above link_qty).
+            let qty = Qty(link_qty.0 / lot * lot);
+            prop_assume!(qty.0 > 0);
+            let side = if buy { Side::Buy } else { Side::Sell };
+            let plan = HedgePlan {
+                kind: HedgeKind::OnFill,
+                px_mode: if cross { PxMode::Cross } else { PxMode::Mid },
+                on_fail: OnFail::Retry,
+                tif: hft_types::Tif::Ioc,
+                venue: VenueId::GATE_USDT_FUT,
+                account: hft_types::AccountId(1),
+                side,
+                reduce_only: 0,
+                inst: InstId(21),
+                ratio_num: num,
+                ratio_den: den,
+                residual: ResidualPolicy::Defer,
+                _pad: [0; 3],
+                px_param: Rate(param_bp * 100_000),
+                max_slip: Rate(50_000_000),
+                limit_px: Px(0),
+            };
+            let req = hft_oms::HedgeRequest {
+                link_id: 1,
+                role: LinkRole::Second,
+                venue: plan.venue,
+                account: plan.account,
+                side,
+                reduce_only: false,
+                inst: plan.inst,
+                group: hft_types::GroupId(0x0100_0001),
+                strategy: hft_types::StrategyId(1),
+                qty,
+                basis: qty,
+                hedge_cap_qty: Qty(qty.0 + lot),
+                ref_px: if buy { ask } else { bid },
+                peer_venue: VenueId(0),
+                peer_account: hft_types::AccountId(0),
+                trigger_seq: 1,
+            };
+            let bbo = BboView {
+                bid_px: bid,
+                bid_qty: Qty(1),
+                ask_px: ask,
+                ask_qty: Qty(1),
+                conn_live_tsc: Tsc(1_000),
+                conn_up: true,
+                ..BboView::EMPTY
+            };
+            let lim = HedgePxLimits { conn_liveness_ms: 2_000, rr_max_cross: rr };
+            match hft_oms::price_hedge(&req, &plan, &bbo, Tsc(1_000), &lim, tick, 1_000_000) {
+                Ok(hp) => {
+                    let n = hft_risk::Risk::notional(qty, hp.px, EXP, PAR);
+                    prop_assert!(n.0 <= link_notional.0, "{n:?} > {link_notional:?} ({hp:?})");
+                    // #6 with max_hedge_notional = link_notional.
+                    let max_hedge: Notional = link_notional;
+                    prop_assert!(n.0 <= max_hedge.0);
+                }
+                // Beyond the cross: gated, nothing priced (the counterparty is outside the cap).
+                Err(e) => prop_assert_eq!(e, hft_oms::HedgePxErr::BeyondCross),
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------- SEQ-352
+
+#[test]
+fn seq_352_link_valid_precheck() {
+    fn with(f: fn(&mut hft_strategy_sdk::LegLink)) -> impl Fn(&Hx<'_>) -> hft_strategy_sdk::OrderIntent {
+        move |hx| {
+            let mut it = pair_first(hx, q("0.01"));
+            if let Some(l0) = it.link.get() {
+                let mut l = *l0;
+                f(&mut l);
+                it.link = hft_strategy_sdk::LegLinkOpt::some(l);
+            }
+            it
+        }
+    }
+    let rows: [(&str, fn(&mut hft_strategy_sdk::LegLink), bool); 4] = [
+        ("352.1", |_| {}, false),
+        ("352.2", |l| l.role = hft_strategy_sdk::LinkRole::Second, false),
+        (
+            "352.3",
+            |l| l.hedge.kind = hft_strategy_sdk::HedgeKind::Simultaneous,
+            false,
+        ),
+        ("352.4", |l| l.role = hft_strategy_sdk::LinkRole::Second, true),
+    ];
+    for (row, f, shadow) in rows {
+        let mut h = steady();
+        if shadow {
+            let id = h.cmd_confirmed(
+                AC1,
+                &ControlCmd::SetMode {
+                    scope: scope(S1, AC1, G1),
+                    mode: RunMode::Shadow,
+                },
+            );
+            h.run();
+            assert_eq!(h.res(id).0, 0, "{row}");
+        }
+        let ok = row == "352.1";
+        let g = with(f);
+        let n = h.io_ref().out.len();
+        let tokens =
+            h.s.engine()
+                .risk
+                .view_for(AC1, A1, &h.s.engine().now)
+                .rate_backoff;
+        let infl = h.s.engine().oms.inflight().pos(AC1, A1);
+        let outcome: Cap<Option<IntentOutcome>> = cap();
+        let o2 = outcome.clone();
+        let handle: Cap<hft_strategy_sdk::IntentHandle> = cap();
+        let h2 = handle.clone();
+        set_hook(move |hx, ev, ctx| {
+            if let EventRef::Bbo { inst, .. } = ev
+                && *inst == A1
+                && hx.s.strategy == S1
+            {
+                let prev = h2.borrow().first().copied();
+                match prev {
+                    None => {
+                        if let Ok(x) = ctx.place(g(hx)) {
+                            h2.borrow_mut().push(x);
+                        }
+                    }
+                    Some(x) => o2.borrow_mut().push(ctx.outcome(x)),
+                }
+            }
+        });
+        h.trace_on();
+        let m = h.mark();
+        h.quote(A1, "50000", "50003");
+        h.run();
+        let tr_eval = h.s.engine().trace.count("risk.evaluate");
+        let tr_mode = h.s.engine().trace.count("mode_gate");
+        h.quote(A1, "50000", "50003");
+        h.run();
+        clear_hook();
+        let ds = decisions(&h.since(m));
+        assert_eq!(ds.len(), 1, "{row}: {ds:?}");
+        let d = ds[0].1;
+        if ok {
+            assert_eq!(d.reject, 0, "{row}");
+            assert!(tr_mode >= 1);
+            assert!(tr_eval >= 1);
+            assert_eq!(h.io_ref().out.len(), n + 1, "{row}");
+            continue;
+        }
+        assert_eq!(d.reject, RejectBits::INVALID.0, "{row}");
+        assert_eq!(d.slot.0, 0, "{row}: no slot");
+        assert_eq!(
+            h.since(m)
+                .iter()
+                .filter(|r| r.flags.0 & RecordFlags::SHADOW.0 != 0)
+                .count(),
+            0,
+            "{row}: not SHADOW"
+        );
+        assert_eq!(tr_eval, 0, "{row}");
+        assert_eq!(tr_mode, 0, "{row}");
+        assert_eq!(h.io_ref().out.len(), n, "{row}: nothing out");
+        assert_eq!(h.s.engine().oms.inflight().pos(AC1, A1), infl, "{row}");
+        assert_eq!(
+            h.s.engine()
+                .risk
+                .view_for(AC1, A1, &h.s.engine().now)
+                .rate_backoff,
+            tokens
+        );
+        assert_eq!(
+            outcome.borrow().first().copied(),
+            Some(Some(IntentOutcome::Rejected(RejectBits::INVALID))),
+            "{row}"
+        );
+    }
+}
+
+// ------------------------------------------------------------------------------- SEQ-360
+
+#[test]
+fn seq_360_oms_hooks() {
+    use crate::scenarios as sc;
+    // .1 Timer{Oms, UnknownQuery} → on_unknown_query, not on_sweep.
+    let mut h = steady();
+    let m = sc::place_on_a1(&mut h, &[S1], sc::a1_buy_open);
+    let (seq, d) = decisions(&h.since(m))[0];
+    let t = h.now();
+    h.push(
+        RingId::Rep(0),
+        &sc::send_report_st(
+            &d,
+            hft_event::GwOp::Place,
+            seq,
+            t,
+            hft_event::SendStatus::WriteError,
+        ),
+    );
+    h.run();
+    assert_eq!(sc::slot_state(&h, &d), Some(hft_oms::OrderState::Unknown));
+    let due =
+        h.s.engine()
+            .heap
+            .sorted()
+            .iter()
+            .find(|e| e.owner == 3 && e.timer_id & 0xFF == 3)
+            .map(|e| e.deadline)
+            .expect("UnknownQuery timer");
+    h.trace_on();
+    sc::run_to(&mut h, due);
+    assert!(h.s.engine().trace.count("oms.on_unknown_query") >= 1, ".1");
+    let tr = h.trace();
+    let uq = tr.iter().position(|x| *x == "oms.on_unknown_query").unwrap_or(0);
+    let input_start = tr[..uq].iter().rposition(|x| *x == "append.input").unwrap_or(0);
+    let input_end = tr[uq..]
+        .iter()
+        .position(|x| *x == "append.input")
+        .map_or(tr.len(), |k| uq + k);
+    assert!(
+        !tr[input_start..input_end].contains(&"oms.on_sweep"),
+        ".1: {:?}",
+        &tr[input_start..input_end]
+    );
+
+    // .2 / .3 the second leg refused with RATE_BACKOFF → retry_at = backoff end; with RATE → 0.
+    for backoff in [true, false] {
+        reset_script();
+        let mut b = b0();
+        b.caps.max_timers = 8_192;
+        b.setup_edit.push(|s| s.oms.slots = hft_oms::PerTable::new(256));
+        if !backoff {
+            // No reserve on (B, 1): one-leg opens can empty its 10 s window.
+            let rd = b.rd.load();
+            let mut rp = b0_risk(&rd);
+            let mut v = rp.venues.as_slice().to_vec();
+            for x in v.iter_mut() {
+                if x.venue == B && x.account == AC1 {
+                    x.rr_reserve = r("0");
+                }
+            }
+            rp.venues = hft_risk::PreVec::from_vec(v);
+            b.risk = Some(rp);
+        }
+        let mut h = b.boot();
+        h.steady();
+        let first = sc::open_first(&mut h);
+        if backoff {
+            sc::rate_limit_hit(&mut h, B1);
+        } else {
+            for k in 0..100 {
+                let m = sc::place_on_a1(&mut h, &[S1], sc::b1_sell_open);
+                let d = sc::decs(&h, m)[0];
+                assert_eq!(d.reject, 0, "b1 open #{k}");
+                h.reject(&d);
+            }
+            let m = sc::place_on_a1(&mut h, &[S1], sc::b1_sell_open);
+            assert_eq!(sc::decs(&h, m)[0].reject, RejectBits::RATE.0, "window empty");
+        }
+        h.trace_on();
+        let m = h.mark();
+        h.fill(&first, first.qty, first.qty, first.px);
+        let second = sc::decs(&h, m)
+            .into_iter()
+            .find(|d| d.inst == B1)
+            .expect("second leg decision");
+        let gated: Vec<_> =
+            h.s.engine()
+                .trace
+                .ev
+                .iter()
+                .filter(|e| e.what == "oms.hedge_gated")
+                .copied()
+                .collect();
+        if backoff {
+            assert_eq!(second.reject, RejectBits::RATE_BACKOFF.0, ".2");
+            let e = h.s.engine();
+            let want = e.now.tsc_of(e.risk.backoff_until(B, AC1)).0;
+            assert_eq!(gated.last().map(|g| g.b), Some(want), ".2");
+        } else {
+            assert_eq!(
+                second.reject & RejectBits::RATE.0,
+                RejectBits::RATE.0,
+                ".3 {second:?}"
+            );
+            assert_eq!(gated.last().map(|g| g.b), Some(0), ".3");
+        }
+    }
+
+    // .4 / .5 the link's hedge_ref_px = b1 bid; the second leg's price = price_hedge's result.
+    let mut h = steady();
+    h.quote(B1, "60000", "60000.1");
+    h.run();
+    let first = sc::open_first(&mut h);
+    let l = sc::last_link(&h, AC1).expect("link");
+    assert_eq!(l.ref_px, px("60000"), ".4");
+    let m = h.mark();
+    h.fill(&first, first.qty, first.qty, first.px);
+    let second = sc::decs(&h, m)
+        .into_iter()
+        .find(|d| d.inst == B1)
+        .expect("second leg");
+    let e = h.s.engine();
+    let (_, plan) = *e.oms.link_plan(l.link_id).expect("plan");
+    let bbo = e.market.bbo_view(&e.books, B1);
+    let lim = e.risk.hedge_px_limits(AC1, B, B1);
+    let req = hft_oms::HedgeRequest {
+        link_id: l.link_id,
+        role: hft_strategy_sdk::LinkRole::Second,
+        venue: B,
+        account: AC1,
+        side: Side::Sell,
+        reduce_only: false,
+        inst: B1,
+        group: G1,
+        strategy: S1,
+        qty: second.qty,
+        basis: second.qty,
+        hedge_cap_qty: second.qty,
+        ref_px: l.ref_px,
+        peer_venue: hft_types::VenueId(0),
+        peer_account: hft_types::AccountId(0),
+        trigger_seq: 0,
+    };
+    let hp = hft_oms::price_hedge(
+        &req,
+        &plan,
+        &bbo,
+        e.now.tsc,
+        &lim,
+        h.rd.inst(B1).tick,
+        e.now.tsc_per_ms,
+    )
+    .expect("priced");
+    assert_eq!(second.px, hp.px, ".5");
+}

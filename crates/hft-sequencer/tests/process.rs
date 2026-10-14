@@ -1475,5 +1475,586 @@ mod broken_clear {
             "SEQ-341.5 out"
         );
         assert!(broken(&h));
+// ------------------------------------------------------------------------------- ExecOut drain
+
+/// The trace split per Input (each chunk starts at its `append.input`).
+fn per_input(h: &H) -> Vec<Vec<hft_sequencer::trace::TraceEv>> {
+    let mut v: Vec<Vec<hft_sequencer::trace::TraceEv>> = Vec::new();
+    for e in h.s.engine().trace.ev.iter() {
+        if e.what == "append.input" || v.is_empty() {
+            v.push(Vec::new());
+        }
+        if let Some(c) = v.last_mut() {
+            c.push(*e);
+        }
+    }
+    v
+}
+
+fn pos_of(c: &[hft_sequencer::trace::TraceEv], what: &str) -> Option<usize> {
+    c.iter().position(|e| e.what == what)
+}
+
+/// An `ExecOut` with one output of every kind (account 2, g2).
+fn one_of_each(h: &H) -> hft_exec::ExecOut {
+    use zerocopy::FromZeros;
+    let mut xo = hft_exec::ExecOut::new();
+    let mut d = hft_event::ExecDecision::new_zeroed();
+    d.group = G2;
+    d.owner = S2;
+    d.account = AC2;
+    d.action = hft_exec::decision::action::TARGET_SET;
+    d.leg_ix = 0xFF;
+    d.first_leg_ix = 0xFF;
+    xo.decisions.push(d);
+    xo.cancel_resting.push(hft_exec::CancelResting {
+        account: AC2,
+        inst: B1,
+    });
+    let b = h.s.engine().market.bbo_view(&h.s.engine().books, A1);
+    let it = hft_strategy_sdk::OrderIntent {
+        venue: A,
+        account: AC2,
+        side: Side::Buy,
+        tif: hft_types::Tif::Ioc,
+        class: hft_strategy_sdk::IntentClass::Open,
+        flags: 0,
+        _pad: [0; 2],
+        inst: A1,
+        group: G2,
+        px: b.ask_px,
+        qty: q("0.001"),
+        link: hft_strategy_sdk::LegLinkOpt::NONE,
+        tag: 0,
+        max_rest_ms: 0,
+    };
+    xo.orders.push(hft_exec::ExecOrder {
+        id: hft_exec::ExecOrderId { cix: 0, n: 1 },
+        intent: it,
+        origin: hft_exec::ExecOrigin::Engine,
+        kind: hft_exec::ExecOrderKind::Slice,
+        reason: hft_strategy_sdk::TargetReason::Rebalance,
+        hedge_cap_qty: Qty(0),
+    });
+    xo.cancels.push(hft_strategy_sdk::OrderRef::new(B, AC2, 15, 0));
+    xo.broken.push(hft_exec::BrokenReq {
+        account: AC2,
+        group: G2,
+    });
+    xo.timers.push(hft_exec::ExecTimerReq {
+        cancel: false,
+        timer_id: hft_exec::ExecTimerReq::id(hft_exec::ExecTimerKind::Wake, AC2),
+        group: G2,
+        at: Tsc(h.now() + 60 * SEC),
+    });
+    xo.notify.push(hft_exec::ExecNotify {
+        account: AC2,
+        owner: S2,
+        u: hft_strategy_sdk::ExecUpdate {
+            group: G2,
+            tag: 0,
+            origin: hft_strategy_sdk::TargetOrigin::Strategy,
+            kind: hft_strategy_sdk::ExecUpdateKind::Done {
+                cleared_by_engine: false,
+            },
+            target: [Qty(0); 4],
+            filled: [Qty(0); 4],
+            inflight: [Qty(0); 4],
+        },
+    });
+    xo.notes.push(hft_event::Note {
+        code: hft_event::note_code(hft_event::NoteSource::Exec, 7),
+        level: hft_event::NoteLevel::Info,
+        source: hft_event::NoteSource::Exec,
+        strategy: S2,
+        _pad: 0,
+        group: G2,
+        inst: hft_types::InstId(0),
+        v: [0x137, 0, 0, 0, 0, 0, 0, 0],
+    });
+    xo
+}
+
+#[test]
+fn seq_137_exec_out_drain_order() {
+    let mut h = steady();
+    let xo = one_of_each(&h);
+    h.s.engine_mut().test_exec_inject = Some(xo);
+    h.trace_on();
+    clear_log();
+    let m = h.mark();
+    h.quote(A1, "50000", "50003");
+    h.run();
+    let c = per_input(&h)
+        .into_iter()
+        .find(|c| pos_of(c, "exec.advance").is_some())
+        .expect("the advance Input");
+    let names: Vec<&str> = c.iter().map(|e| e.what).collect();
+    let at = |w: &str| pos_of(&c, w).unwrap_or_else(|| panic!("{w} in {names:?}"));
+    let order = [
+        at("exec_decision"),
+        at("oms.cancel_resting_on"),
+        at("exec.order"),
+        at("exec.on_place_result"),
+        c.iter()
+            .position(|e| e.what == "oms.cancel" && e.b == 1)
+            .expect("exec cancel"),
+        at("exec.broken"),
+        at("queue.exec"),
+    ];
+    assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?} {names:?}");
+    // The order went through the pipeline between the two.
+    let place = at("risk.evaluate");
+    assert!(order[2] < place && place < order[3]);
+    assert!(
+        h.s.engine()
+            .heap
+            .sorted()
+            .iter()
+            .any(|t| t.owner == 5 && t.group == G2.0)
+    );
+    // Records: the ExecDecision first, the exec Note after the Broken CapSet Note.
+    let recs = h.since(m);
+    let xd = recs
+        .iter()
+        .position(|r| r.kind == EventKind::EXEC_DECISION)
+        .expect("ExecDecision");
+    let od = recs
+        .iter()
+        .position(|r| r.kind == EventKind::ORDER_DECISION)
+        .expect("OrderDecision");
+    let capset = recs
+        .iter()
+        .position(|r| {
+            r.read::<hft_event::Note>()
+                .is_some_and(|n| n.source == hft_event::NoteSource::Risk && n.code & 0xFFFF == 2)
+        })
+        .expect("CapSet{Broken}");
+    let xn = recs
+        .iter()
+        .position(|r| r.read::<hft_event::Note>().is_some_and(|n| n.v[0] == 0x137))
+        .expect("exec note");
+    assert!(xd < od && od < capset && capset < xn, "{xd} {od} {capset} {xn}");
+    h.run();
+    assert!(log().iter().any(|g| g.s == S2 && g.kind == "Exec"));
+}
+
+/// Inputs whose trace has `apply.Broken` for (a, g): the number of `risk.on_legs(a, g)` after it.
+fn on_legs_after_broken(h: &H, a: hft_types::AccountId, g: GroupId) -> Vec<usize> {
+    let is = |e: &hft_sequencer::trace::TraceEv, w: &str| {
+        e.what == w && e.a == u64::from(a.0) && e.b == u64::from(g.0)
+    };
+    per_input(h)
+        .iter()
+        .filter_map(|c| {
+            let p = c.iter().position(|e| is(e, "apply.Broken"))?;
+            Some(c[p..].iter().filter(|e| is(e, "risk.on_legs")).count())
+        })
+        .collect()
+}
+
+#[test]
+fn seq_139_on_legs_after_broken() {
+    use crate::scenarios as sc;
+    use hft_types::{AccountId, CapSource};
+    // .1 link Broken{Deadline}: the second leg is gated beyond the cross until the deadline.
+    let mut h = sc::steady();
+    let m = sc::place_on_a1(&mut h, &[S1], sc::link_open_slip);
+    let first = sc::decs(&h, m)[0];
+    h.ack(&first);
+    h.quote(B1, "48000", "52000");
+    h.run();
+    let t_fill = h.now();
+    h.fill(&first, first.qty, first.qty, first.px);
+    h.trace_on();
+    sc::run_to(&mut h, t_fill + 3_500 * MS);
+    assert_eq!(
+        sc::last_link(&h, AC1).map(|l| l.state),
+        Some(hft_oms::LinkState::Broken)
+    );
+    assert_eq!(on_legs_after_broken(&h, AC1, G1), vec![1], ".1");
+
+    // .2 the second leg is vetoed by HEDGE_LIMIT.
+    let mut h = sc::steady();
+    let first = sc::open_first(&mut h);
+    h.quote(B1, "50010000", "50011000");
+    h.run();
+    h.trace_on();
+    h.fill(&first, first.qty, first.qty, first.px);
+    assert_eq!(on_legs_after_broken(&h, AC1, G1), vec![1], ".2");
+
+    // .3 the executor's ExecOut.broken.
+    let mut h = sc::steady();
+    let mut xo = hft_exec::ExecOut::new();
+    xo.broken.push(hft_exec::BrokenReq {
+        account: AC1,
+        group: G1,
+    });
+    h.s.engine_mut().test_exec_inject = Some(xo);
+    h.trace_on();
+    h.quote(A1, "50000", "50003");
+    h.run();
+    assert_eq!(on_legs_after_broken(&h, AC1, G1), vec![1], ".3");
+
+    // .4 resolve_broken: a one-leg a1 fill lands during a HARD Kill; Resume{Kill} judges it.
+    let mut h = sc::steady();
+    let m = sc::place_on_a1(&mut h, &[S1], sc::a1_buy_open);
+    let d = sc::decs(&h, m)[0];
+    h.ack(&d);
+    let kill = ControlCmd::Kill {
+        scope: scope(hft_types::StrategyId(0), AC1, GroupId(0)),
+        level: KillLevel::Account,
+        flatten: false,
+        cancel_resting: false,
+        hard: true,
+    };
+    let id = h.cmd_confirmed(AC1, &kill);
+    h.run();
+    assert_eq!(h.res(id).0, 0, "{:?}", h.res(id));
+    h.fill(&d, d.qty, d.qty, d.px);
+    assert!(!sc::has_cap(&h, CapSource::BROKEN, AC1, Some(G1)));
+    // Resume{Kill} needs a clean reconciliation of both venues seen after the Kill.
+    let after = h.j().records().last().map_or(0, |r| r.seq);
+    for (k, v) in [A, B].into_iter().enumerate() {
+        h.push(RingId::Rep(0), &recon_summary(AC1, v, 91_000 + k as u64, after));
+    }
+    h.run();
+    h.trace_on();
+    let id = h.cmd_confirmed(
+        AC1,
+        &ControlCmd::Resume {
+            scope: scope(hft_types::StrategyId(0), AC1, GroupId(0)),
+            source: CapSource::KILL,
+        },
+    );
+    h.run();
+    assert_eq!(h.res(id).0, 0, "{:?}", h.res(id));
+    assert!(sc::has_cap(&h, CapSource::BROKEN, AC1, Some(G1)), ".4 Broken");
+    assert_eq!(on_legs_after_broken(&h, AC1, G1), vec![1], ".4");
+    let _ = AccountId(0);
+
+    // .5 a fill only (no Broken): on_legs once, with the LegTracker change.
+    let mut h = sc::steady();
+    let m = sc::place_on_a1(&mut h, &[S1], sc::a1_buy_open);
+    let d = sc::decs(&h, m)[0];
+    h.ack(&d);
+    h.trace_on();
+    h.fill(&d, d.qty, d.qty, d.px);
+    let c = per_input(&h)
+        .into_iter()
+        .find(|c| pos_of(c, "ledger.apply_fill").is_some())
+        .expect("fill Input");
+    assert_eq!(c.iter().filter(|e| e.what == "risk.on_legs").count(), 1, ".5");
+    assert!(pos_of(&c, "apply.Broken").is_none());
+}
+
+// ------------------------------------------------------------------------------- SEQ-132
+
+/// s2's g2: first leg b1 sell 0.003 with an OnFill a1 buy; every second leg expires until the
+/// link is Broken (b1 −0.003 left). Returns the harness at the Broken Input.
+fn g2_broken_short_b1() -> H {
+    use crate::scenarios as sc;
+    fn first(hx: &Hx<'_>) -> hft_strategy_sdk::OrderIntent {
+        let b = hx.v.bbo(B1);
+        let mut it = intent(
+            hx,
+            B1,
+            Side::Sell,
+            hft_types::Tif::Ioc,
+            hft_strategy_sdk::IntentClass::Open,
+            b.bid_px,
+            q("0.003"),
+        );
+        it.group = G2;
+        it.link = hft_strategy_sdk::LegLinkOpt::some(hft_strategy_sdk::LegLink {
+            group: G2,
+            role: hft_strategy_sdk::LinkRole::First,
+            _pad: [0; 3],
+            tolerance: r("0.02"),
+            hedge: onfill(hx.s.account, A1, Side::Buy),
+        });
+        it
+    }
+    let mut h = sc::steady();
+    let m = sc::place_on_a1(&mut h, &[S2], first);
+    let f = sc::decs(&h, m)
+        .into_iter()
+        .find(|d| d.inst == B1)
+        .expect("first leg");
+    assert_eq!(f.reject, 0, "{f:?}");
+    h.ack(&f);
+    let m0 = h.mark();
+    h.fill(&f, f.qty, f.qty, f.px);
+    for _ in 0..8 {
+        if sc::has_cap(&h, hft_types::CapSource::BROKEN, AC2, Some(G2)) {
+            return h;
+        }
+        let open = sc::decs(&h, m0)
+            .into_iter()
+            .rev()
+            .find(|d| d.inst == A1 && d.reject == 0)
+            .expect("hedge leg");
+        h.ack(&open);
+        sc::expire(&mut h, &open);
+        if sc::has_cap(&h, hft_types::CapSource::BROKEN, AC2, Some(G2)) {
+            return h;
+        }
+        let due = sc::hedge_retry_timers(&h).first().map(|t| t.0).expect("retry");
+        sc::keep_alive_to(&mut h, due);
+    }
+    panic!("g2 not Broken");
+}
+
+#[test]
+fn seq_132_on_risk_after_updates() {
+    use crate::scenarios as sc;
+    let mut h = g2_broken_short_b1();
+    // The bounded auto-fix starts broken_auto_fix_ms later with one b1 buy 0.003 slice.
+    let t = h.now();
+    let m = h.mark();
+    let mut slice = None;
+    let mut until = t;
+    while slice.is_none() && until < t + 125 * SEC {
+        until += SEC;
+        sc::keep_alive_to(&mut h, until);
+        h.quote(B1, "50010", "50011");
+        h.run();
+        slice = sc::decs(&h, m)
+            .into_iter()
+            .find(|d| d.inst == B1 && d.reject == 0 && d.account == AC2);
+    }
+    let slice = slice.expect("auto-fix slice");
+    assert_eq!((slice.side, slice.qty), (Side::Buy, q("0.003")));
+    h.ack(&slice);
+    h.trace_on();
+    let m = h.mark();
+    h.fill(&slice, slice.qty, slice.qty, slice.px);
+    let tr = h.trace();
+    let at = |w: &str| {
+        tr.iter()
+            .position(|x| *x == w)
+            .unwrap_or_else(|| panic!("{w}: {tr:?}"))
+    };
+    let upd = at("exec.on_order_update");
+    let legs = tr
+        .iter()
+        .enumerate()
+        .skip(upd)
+        .find(|(_, x)| **x == "risk.on_legs")
+        .map(|(i, _)| i)
+        .expect("on_legs after the update");
+    let apply = tr
+        .iter()
+        .enumerate()
+        .skip(legs)
+        .find(|(_, x)| **x == "risk.apply")
+        .map(|(i, _)| i)
+        .expect("apply(AutoClear)");
+    let on_risk = tr
+        .iter()
+        .enumerate()
+        .skip(apply)
+        .find(|(_, x)| **x == "exec.on_risk")
+        .map(|(i, _)| i)
+        .expect("exec.on_risk(CapCleared)");
+    assert!(upd < legs && legs < apply && apply < on_risk);
+    let recs = h.since(m);
+    assert!(
+        recs.iter()
+            .any(|r| r.read::<hft_event::ExecDecision>().is_some_and(|x| x.action
+                == hft_exec::decision::action::AUTO_FIX
+                && x.detail
+                    == hft_exec::pack(
+                        hft_exec::decision::table::AUTO_FIX,
+                        hft_exec::decision::autofix::DONE,
+                        0
+                    ))),
+        "ExecDecision{{AutoFix/Done}}"
+    );
+    assert!(
+        h.notes_since(m)
+            .iter()
+            .any(|n| n.source == hft_event::NoteSource::Exec
+                && n.code & 0xFFFF == hft_exec::decision::note::EXEC_AUTO_FIX_DONE)
+    );
+    assert!(
+        h.notes_since(m)
+            .iter()
+            .any(|n| n.source == hft_event::NoteSource::Risk && n.code & 0xFFFF == 3),
+        "CapCleared{{Broken}}"
+    );
+    assert!(!sc::has_cap(&h, hft_types::CapSource::BROKEN, AC2, Some(G2)));
+    assert!(sc::has_cap(&h, hft_types::CapSource::HEDGE_FAILURE, AC2, None));
+}
+
+// ------------------------------------------------------------------------------- SEQ-136
+
+mod seq_136 {
+    use proptest::prelude::*;
+
+    use super::*;
+    use crate::scenarios as sc;
+
+    fn a1_sell(hx: &Hx<'_>) -> hft_strategy_sdk::OrderIntent {
+        let b = hx.v.bbo(A1);
+        intent(
+            hx,
+            A1,
+            Side::Sell,
+            hft_types::Tif::Ioc,
+            hft_strategy_sdk::IntentClass::Reduce,
+            b.bid_px,
+            q("0.001"),
+        )
+    }
+
+    /// One random Input (or a few) of the generator.
+    fn op(h: &mut H, k: u8, x: u32) {
+        match k {
+            0 => {
+                let (i, base) = match x % 4 {
+                    0 => (A1, 50_000),
+                    1 => (B1, 50_010),
+                    2 => (A2, 3_000),
+                    _ => (B2, 3_000),
+                };
+                let bid = base + i64::from(x % 7) - 3;
+                h.quote(i, &bid.to_string(), &(bid + 1).to_string());
+                h.run();
+            }
+            1 => {
+                let f: fn(&Hx<'_>) -> hft_strategy_sdk::OrderIntent = match x % 4 {
+                    0 => sc::a1_buy_open,
+                    1 => sc::b1_sell_open,
+                    2 => a1_sell,
+                    _ => sc::link_open,
+                };
+                sc::place_on_a1(h, &[S1], f);
+            }
+            2 => {
+                // Answer one open order: ack, fill, partial fill, expire or reject.
+                let open: Vec<hft_event::OrderDecision> = sc::decs(h, 0)
+                    .into_iter()
+                    .filter(|d| {
+                        d.reject == 0
+                            && d.action == hft_event::OrderAction::New
+                            && sc::slot_state(h, d).is_some_and(|s| {
+                                matches!(s, hft_oms::OrderState::PendingNew | hft_oms::OrderState::Live)
+                            })
+                    })
+                    .collect();
+                if open.is_empty() {
+                    return;
+                }
+                let d = open[(x as usize / 8) % open.len()];
+                match x % 5 {
+                    0 => h.ack(&d),
+                    1 => h.fill(&d, d.qty, d.qty, d.px),
+                    2 => {
+                        let half = Qty(d.qty.0 / 2);
+                        h.fill(&d, half, half, d.px)
+                    }
+                    3 => sc::expire(h, &d),
+                    _ => h.reject(&d),
+                }
+            }
+            3 => {
+                let qty = Qty(i64::from(x % 5) * 1_000_000);
+                let t = target(
+                    AC2,
+                    G2,
+                    &[(0, qty), (1, Qty(-qty.0))],
+                    ExecSpec::PairOnFill(pair0()),
+                );
+                h.set_target_s2(t);
+            }
+            4 => {
+                let (i, side) = if x % 2 == 0 {
+                    (A1, Side::Sell)
+                } else {
+                    (B1, Side::Buy)
+                };
+                h.push(
+                    RingId::Rep(0),
+                    &ext(
+                        AC1,
+                        i,
+                        side,
+                        "0.001",
+                        hft_event::ExternalCause::Unknown,
+                        9_000 + u64::from(x),
+                    ),
+                );
+                h.run();
+            }
+            5 => {
+                let liq = if x % 2 == 0 { "52000" } else { "80000" };
+                margin_item(h, liq);
+            }
+            6 => {
+                let c = if x % 2 == 0 {
+                    ControlCmd::Kill {
+                        scope: scope(hft_types::StrategyId(0), AC1, GroupId(0)),
+                        level: KillLevel::Account,
+                        flatten: true,
+                        cancel_resting: true,
+                        hard: false,
+                    }
+                } else {
+                    ControlCmd::Resume {
+                        scope: scope(hft_types::StrategyId(0), AC1, GroupId(0)),
+                        source: hft_types::CapSource::KILL,
+                    }
+                };
+                h.cmd_confirmed(AC1, &c);
+                h.run();
+            }
+            _ => {
+                let t = h.now() + u64::from(x % 1_500) * MS;
+                sc::keep_alive_to(h, t);
+            }
+        }
+    }
+
+    /// A MarginReport of (acct-1, B) with one b1 item at `liq`.
+    fn margin_item(h: &mut H, liq: &str) {
+        use zerocopy::FromZeros;
+        let mut hd = hft_event::MarginReportHdr::new_zeroed();
+        hd.venue = B;
+        hd.account = AC1;
+        hd.source = 1;
+        hd.n = 1;
+        hd.margin_balance = n("100000");
+        hd.maint_margin = n("10");
+        hd.avail_margin = n("99000");
+        hd.rx_tsc = Tsc(h.now());
+        let it = hft_event::MarginItem {
+            inst: B1,
+            adl_quantile: 255,
+            _pad: [0; 3],
+            liq_px: px(liq),
+        };
+        let mut body = zerocopy::IntoBytes::as_bytes(&hd).to_vec();
+        body.extend_from_slice(zerocopy::IntoBytes::as_bytes(&it));
+        h.push_bytes(RingId::Rep(0), EventKind::MARGIN_REPORT, body);
+        h.run();
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 300, ..ProptestConfig::default() })]
+        /// Every executor call drains its `ExecOut` before the buffer goes back
+        /// (`Engine::put_exec` debug assertion) under targets, fills, external fills, L3
+        /// margin reports and flattening kills.
+        #[test]
+        fn seq_136_exec_out_drained_after_each_call(
+            ops in proptest::collection::vec((0u8..8, any::<u32>()), 100..400)
+        ) {
+            let mut h = sc::steady();
+            h.mark_md(B1, "50010");
+            for (k, x) in ops {
+                op(&mut h, k, x);
+            }
+            prop_assert!(h.s.engine().exec.cell(AC2, G2).is_some());
+        }
     }
 }

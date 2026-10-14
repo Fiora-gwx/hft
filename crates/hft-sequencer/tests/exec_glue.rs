@@ -211,4 +211,58 @@ mod flatten_broken {
     fn frames(h: &H, n: usize) -> Vec<(hft_sequencer::OutRing, hft_event::GwCmd)> {
         h.io_ref().out[n..].to_vec()
     }
+/// g1 Broken with the spot leg a1 +0.004 extra (every second leg expired); `HedgeFix{1, g1}`
+/// goes through `exec.hedge_fix_cmd` once, its a1 sell 0.004 through the pipeline to the ring.
+#[test]
+fn seq_186_hedge_fix_cmd() {
+    use crate::scenarios as sc;
+    let mut h = sc::steady();
+    let m = sc::place_on_a1(&mut h, &[S1], |hx| pair_first(hx, q("0.004")));
+    let first = sc::decs(&h, m)[0];
+    assert_eq!(first.reject, 0);
+    h.ack(&first);
+    let m0 = h.mark();
+    h.fill(&first, first.qty, first.qty, first.px);
+    for _ in 0..8 {
+        if sc::has_cap(&h, hft_types::CapSource::BROKEN, AC1, Some(G1)) {
+            break;
+        }
+        let open = sc::decs(&h, m0)
+            .into_iter()
+            .rev()
+            .find(|d| d.inst == B1 && d.reject == 0)
+            .expect("hedge leg");
+        h.ack(&open);
+        sc::expire(&mut h, &open);
+        if let Some(due) = sc::hedge_retry_timers(&h).first().map(|t| t.0) {
+            sc::run_to(&mut h, due);
+        }
+    }
+    assert!(sc::has_cap(&h, hft_types::CapSource::BROKEN, AC1, Some(G1)));
+    h.trace_on();
+    let n = h.io_ref().out.len();
+    let m = h.mark();
+    let id = h.cmd_confirmed(
+        AC1,
+        &ControlCmd::HedgeFix {
+            scope: scope(S1, AC1, G1),
+        },
+    );
+    h.run();
+    assert_eq!(h.s.engine().trace.count("exec.hedge_fix_cmd"), 1);
+    assert_eq!(
+        h.res(id).0,
+        hft_sequencer::codes::status::APPLIED,
+        "{:?}",
+        h.res(id)
+    );
+    let d = sc::decs(&h, m);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(
+        (d[0].inst, d[0].side, d[0].qty, d[0].reject),
+        (A1, hft_types::Side::Sell, q("0.004"), 0)
+    );
+    let fr = sc::frames(&h, n);
+    assert_eq!(fr.len(), 1);
+    assert_eq!((fr[0].1.inst, fr[0].1.qty), (A1, q("0.004")));
 }
