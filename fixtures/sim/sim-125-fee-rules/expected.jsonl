@@ -4,9 +4,13 @@
 {"due":0,"acct":9,"ev":"BalanceReport","venue":2,"asset":"USDT","free":"100000","locked":"0"}
 {"due":0,"acct":9,"ev":"BalanceReport","venue":2,"asset":"BNB","free":"1","locked":"0"}
 {"due":0,"acct":9,"ev":"BalanceReport","venue":5,"asset":"USDT","free":"18000","locked":"0"}
+{"due":102000000,"acct":9,"ev":"MarginReport","mb":"18000","maint":"0","avail":"18000","ratio":"0","items":[]}
 {"due":104000000,"acct":9,"ev":"OrderEvent","what":"Ack","slot":1,"inst":"BTC/S1","px":"60000","qty":"0.1","cum":"0","avg":"0","fee":"0","fee_asset":"-","code":0,"detail":0,"ex_ts":100000000}
 {"due":104000000,"acct":9,"ev":"OrderEvent","what":"Fill","slot":1,"inst":"BTC/S1","px":"60000","qty":"0.1","cum":"0.1","avg":"60000","fee":"0.004","fee_asset":"BNB","code":0,"detail":0,"ex_ts":100000000}
+{"due":3002000000,"acct":9,"ev":"MarginReport","mb":"18000","maint":"0","avail":"18000","ratio":"0","items":[]}
 {"due":3004000000,"acct":9,"ev":"OrderEvent","what":"Ack","slot":2,"inst":"BTC/S1","px":"60000","qty":"0.05","cum":"0","avg":"0","fee":"0","fee_asset":"-","code":0,"detail":0,"ex_ts":3000000000}
 {"due":3004000000,"acct":9,"ev":"OrderEvent","what":"Fill","slot":2,"inst":"BTC/S1","px":"60000","qty":"0.05","cum":"0.05","avg":"60000","fee":"0.002","fee_asset":"BNB","code":0,"detail":0,"ex_ts":3000000000}
 {"due":3004000000,"acct":9,"ev":"OrderEvent","what":"Ack","slot":3,"inst":"BTC/S1","px":"59000","qty":"0.1","cum":"0","avg":"0","fee":"0","fee_asset":"-","code":0,"detail":0,"ex_ts":3000000000}
+{"due":4002000000,"acct":9,"ev":"MarginReport","mb":"18000","maint":"0","avail":"18000","ratio":"0","items":[]}
 {"due":4002000000,"acct":9,"ev":"OrderEvent","what":"Fill","slot":3,"inst":"BTC/S1","px":"59000","qty":"0.1","cum":"0.1","avg":"59000","fee":"0.00196667","fee_asset":"BNB","code":0,"detail":0,"ex_ts":4000000000}
+{"due":5002000000,"acct":9,"ev":"MarginReport","mb":"18000","maint":"0","avail":"18000","ratio":"0","items":[]}

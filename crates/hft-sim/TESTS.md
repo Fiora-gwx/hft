@@ -895,6 +895,8 @@ spec: README.md
 - 期望文件:`fixtures/sim/sim-123-mixed/expected-replies.bin`(逐条回报字节)与 `expected-state-hash.txt`(每个输入之后的 `state_hash`)
 - 实现:`crates/hft-sim/tests/golden.rs::sim_123_cross_arch_golden`
 
+- 空仓保证金:强平后仍输出零仓项目的债务保证金报告;maint 为零,负钱包与饱和风险率保留,相应回报队列状态参与 state_hash。
+
 ### SIM-124 资金守恒、仓位与成交量上界、回报时序三组不变量
 
 - 规则:[10. 不变量](README.md#10-不变量)
@@ -914,6 +916,8 @@ spec: README.md
 - 输入:`fixtures/sim/sim-125-<case>/`(`taker-walk`、`fee-rules`、`funding-push-forms`、`liquidation`、`transfer-reset` 五组;每组 `records.jsonl`、`commands.jsonl`、`setup.toml`)
 - 期望文件:各组目录下的 `expected.jsonl`(人工核对后入库)
 - 实现:`crates/hft-sim/tests/golden.rs::sim_125_replay_fixtures`
+
+- 空仓报告同样按 Push 周期发出,划转/重置后的钱包金额来自该脚本;正钱包的零仓比例为零,负钱包仍保留饱和风险率。
 
 ### SIM-114 回报只用实盘同一组事件类型
 
