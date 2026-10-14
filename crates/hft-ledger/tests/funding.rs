@@ -125,6 +125,53 @@ fn led_092_rate_only_synth_booked() {
     assert_eq!((h[0].booked, h[0].hflags & HFLAG_PUSHED), (n("6"), 0));
 }
 
+#[test]
+fn led_092_actual_total_replaces_estimate_and_is_replay_idempotent() {
+    let mut l = fund_a1(RateOnly);
+    let initial = wallet(&l);
+    let estimate = synth(&l, T1);
+    l.apply_funding(&estimate, s(10));
+    assert!(l.apply_funding(&estimate, s(11)).is_none());
+    let actual = push(BTC_P2, "5.25", T1);
+    let delta = l.apply_funding(&actual, s(12)).unwrap();
+    assert_eq!(delta.d.funding, n("-0.75"));
+    assert_eq!(delta.group, G1);
+    assert_eq!(wallet(&l).0 - initial.0, n("5.25").0);
+    assert_eq!(l.group(A1, G1).pnl.funding, n("5.25"));
+    assert!(l.apply_funding(&actual, s(13)).is_none());
+    assert!(l.apply_funding(&estimate, s(14)).is_none());
+    // A later complete overlapping window can contain a late bill.
+    assert_eq!(
+        l.apply_funding(&push(BTC_P2, "5.5", T1), s(15))
+            .unwrap()
+            .d
+            .funding,
+        n("0.25")
+    );
+    assert_eq!(wallet(&l).0 - initial.0, n("5.5").0);
+    assert_eq!(l.fund_hist(A1, P2)[0].hflags, HFLAG_PUSHED);
+}
+
+#[test]
+fn led_092_actual_before_timer_and_old_opening_balance() {
+    let mut l = fund_a1(RateOnly);
+    let initial = wallet(&l);
+    l.apply_funding(&push(BTC_P2, "-2", T1), s(10)).unwrap();
+    assert!(l.apply_funding(&synth(&l, T1), s(11)).is_none());
+    assert_eq!(wallet(&l).0 - initial.0, n("-2").0);
+    assert!(l.apply_funding(&push(BTC_P2, "99", -T1), s(12)).is_none());
+    assert_eq!(wallet(&l).0 - initial.0, n("-2").0);
+}
+
+#[test]
+fn led_092_actual_after_close_keeps_settlement_owner() {
+    let mut l = fund_a1(RateOnly);
+    l.apply_funding(&synth(&l, T1), s(10));
+    l.apply_fill(&f(Buy, BTC_P2, "1.0", "60000", "0", USDT, G1, 2), s(11));
+    assert_eq!(l.apply_funding(&push(BTC_P2, "4", T1), s(12)).unwrap().group, G1);
+    assert_eq!(l.group(A1, G1).pnl.funding, n("4"));
+}
+
 /// RateOnly ledger with `BTC/P2` position `q` (built by one fill).
 fn rate_only_pos(q: &str) -> Ledger {
     let mut l = booted_with(rd_funding(RateOnly));

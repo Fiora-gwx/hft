@@ -241,6 +241,12 @@ UTA 订单推送不带本笔成交:`GwCtx` 按 `orderId` 记上次的累计量�
 | `pong` | 无(心跳回应) | — |
 | 其他 | 无(`skip = Unknown`;核实后把确认无用的名字加入 `ignorable_user_events`) | — |
 
+### 资金费实额
+
+`BitgetUsdtFutures` 实现 `FundingHistoryProtocol`,HMAC 签名查询 `GET /api/v3/account/financial-records?category=USDT-FUTURES&coin=USDT`,明确起止毫秒、`limit=100` 和返回的 cursor。这不是资金账户的 `funding-financial-records`。只接受 `CONTRACT_MAIN_SETTLE_FEE_USER_IN/OUT` 的交易账单,`id` 去重,`symbol` 定位合约,`ts` 为毫秒,`amount` 为现金金额,由 IN/OUT 规范正负。交易费、转账与 RWA 分红类型不当作普通资金费。分页错误、未知合约、错误币种或非成功响应拒绝整页。来源为 [官方财务记录](https://www.bitget.com/docs/catalog/account/assets-balance) 与 [官方枚举](https://www.bitget.com/docs/uta/enum)。
+
+`ticker` 的费率/下次结算时间经 Funding 进入策略;account 推送的余额不能推导逐合约收付。`RateOnly` 保留行情估算,认证账单经 [FundingPoll](../hft-venue/README.md#资金费账单轮询) 和 [ledger 实额完成](../hft-ledger/README.md#资金费) 修正金额,不等待 M9 的资金费自动对账。
+
 ### 测试网/模拟盘
 
 UTA 文档目录有"Demo Trading"一节(官方,本地缓存的目录页),端点(行情与下单)、请求头、模拟盘符号与主网符号的映射(Classic V2 的模拟盘曾用带前缀的符号与产品类型,UTA 是否沿用待核实)、API key 申请方式与 UTA V3 接口的覆盖范围待核实(开发备忘第 9 条);模拟盘读不到 UID 时该账户按 `uid_policy = "unverifiable"` 配置(规则归 [hft-refdata](../hft-refdata/README.md#数据结构))。模拟盘 refdata 由 hft-cfg 按模拟盘的品种接口单独生成。上线门槛第 ⑥ 项([testing §8](../../docs/testing.md#8-上线门槛))要求 Bitget 模拟盘联调,行情与下单都用模拟盘(`feed_env = "testnet"` + 模拟盘 refdata);模拟盘不覆盖的接口逐项记录,处理方式归 testing §8,不以实盘小单替代。
@@ -325,7 +331,7 @@ UTA 文档目录有"Demo Trading"一节(官方,本地缓存的目录页),端点(
 - **无死手**:进程崩溃到 kill-switch 撤单之间有窗口(kill-switch 心跳检测周期决定)。
 - **未实现**(核实与模拟盘冒烟前不能通过上线门槛):账户配置核验与保证金轮询(`acct.rs`,hft-venue-proto 尚无 `acct_queries` 成员)、只读查询(`ro_request`)、BBO REST 补帧、`mock` 特性、金样(BGT-300–338)、fuzz 与基准。
 - **交易所侧死手未接**:官方 `POST /api/v3/trade/countdown-cancel-all`(5–60 s,需向商务申请开通)可作为 `CountdownAccount` 死手,开通后再接;当前仍靠 kill-switch。
-- **资金费实收**:`account` 频道在资金费结算时推送,但不带品种与金额明细,`funding_settle = RateOnly`;对账用 REST 账单(`financial-records`,类型 `CONTRACT_MAIN_SETTLE_FEE_USER_IN/OUT`)归只读查询。
+- **资金费实收**:`account` 频道在资金费结算时推送,但不带品种与金额明细,`funding_settle = RateOnly`;实际结算经[资金费实额](#资金费实额)查询。真实账户的账单延迟与 timestamp 相对结算网格的偏差待核实(方法:持仓跨结算采集)。
 - **保证金数据靠轮询**:5 s 周期;若核实账户频道推送保证金率,改为 `Push`。
 - **SBE / LOLA**:官方未见;若机构团队确认存在,另开 Agent Note 评估,不在本规格内。
 - **只用 UTA**:Classic 账户模式不支持;账户须已升级 UTA 且为基础模式(或经 refdata 覆盖为高级模式)。

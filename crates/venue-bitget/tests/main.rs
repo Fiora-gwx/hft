@@ -2,6 +2,7 @@
 //! the TESTS.md case ids); files with process-wide effects are separate targets.
 #![allow(clippy::disallowed_types)] // allow-list: test code, not a hot path
 mod encode;
+mod funding;
 mod md;
 mod reports;
 mod session;

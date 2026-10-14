@@ -24,6 +24,7 @@ pub mod codes;
 mod config;
 mod conn_id;
 mod feed;
+mod funding;
 mod gw;
 mod hb;
 mod idtable;
@@ -43,6 +44,7 @@ pub use conn_id::{
     ACCT_FIRST, ACCT_LAST, BboSlots, GW_FIRST, GW_LAST, IdRange, MD_FIRST, MD_LAST, SNAP_FIRST, SNAP_LAST,
 };
 pub use feed::{FeedCounters, FeedDeps, FeedRuntime};
+pub use funding::{FundingPoll, FundingPollCfg, FundingPollErr, write_funding_record};
 pub use gw::{GwAccountSpec, GwCounters, GwDeps, GwRuntime, SlotMirror};
 pub use idtable::{IdCounters, IdEntry, IdErr, IdTable, exch_id_value};
 pub use kill::kill_admit;

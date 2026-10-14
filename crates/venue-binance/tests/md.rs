@@ -10,6 +10,49 @@ use support::{BT1, DP5, RX, S_BNB, S_BTC, SBT1, SDP5, U_BTC, rd};
 use venue_binance::{FeedCtx, Spot, Usdm, spot, usdm};
 
 #[test]
+fn bin_032_markprice_three_events() {
+    let mut ctx = FeedCtx::USDM;
+    let mut sink = VecSink::default();
+    let msg = br#"{"e":"markPriceUpdate","E":1790000000125,"s":"BTCUSDT","p":"65001.23","i":"65000.50","r":"0.00010000","T":1790006400000}"#;
+    let result = Usdm::decode_md(rd(), &mut ctx, usdm::MdClass::MarkPrice, msg, &RX, &mut sink).unwrap();
+    assert_eq!(result.events, 3);
+    assert!(matches!(&sink.md[0], MdRec::Mark(m) if m.px == Px(6_500_123)));
+    assert!(matches!(&sink.md[1], MdRec::Index(m) if m.px == Px(6_500_050)));
+    assert!(
+        matches!(&sink.md[2], MdRec::Funding(f) if f.rate.0 == 100_000 && f.interval_s == 0
+        && f.next_funding_ns == 1_790_006_400_000_000_000 && f.h.rx_tsc == RX.rx_tsc)
+    );
+}
+
+#[test]
+fn bin_033_funding_interval() {
+    let mut ctx = FeedCtx::USDM;
+    for (offset, expected) in [
+        (0, 0),
+        (0, 0),
+        (28_800_000, 28_800),
+        (28_800_000, 28_800),
+        (43_200_000, 14_400),
+    ] {
+        let mut sink = VecSink::default();
+        let msg = format!(
+            r#"{{"E":1790000000125,"s":"BTCUSDT","p":"65001.23","i":"65000.50","r":"0.0001","T":{}}}"#,
+            1_790_006_400_000_i64 + offset
+        );
+        Usdm::decode_md(
+            rd(),
+            &mut ctx,
+            usdm::MdClass::MarkPrice,
+            msg.as_bytes(),
+            &RX,
+            &mut sink,
+        )
+        .unwrap();
+        assert!(matches!(&sink.md[2], MdRec::Funding(f) if f.interval_s == expected));
+    }
+}
+
+#[test]
 fn bin_020_seq_rule_resync() {
     use SeqRule::*;
     let u = [

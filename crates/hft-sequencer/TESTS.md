@@ -2301,6 +2301,8 @@ spec: README.md
 | SEQ-158.4 | `BalanceOnlyPush` / 推送与合成记录不一致 | ledger 返回 `Mismatch` → 一条 `Note{Ledger, FundingMismatch}` |
 | SEQ-158.5 | `PerSymbolPush` / 推送结算时刻 08:00:02(晚 2 s) | 经 `funding_settle_norm_ns` 归一化为 08:00:00 后配对 |
 
+SEQ-158 补充验收:RateOnly 的实额输入替换已有合成额,重复实额无动作,验证重放逐字节相同。实现:`tests/funding.rs::seq_158_rate_only_actual_settlement_replaces_synth_and_replays`。
+
 ### SEQ-159 BalanceReport 与 PositionReport
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)

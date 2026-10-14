@@ -578,6 +578,10 @@ pub enum ExchIdHint { Resolved { epoch: u16, slot: SlotId, gen: u32 }, Recorded,
 - [13 O2](../../design/13-设计评审与优化.md)、[04 §2](../../design/04-行情接入层.md)、[05 §4](../../design/05-CEX执行层.md)、[research/02](../../design/research/02-exchange-connectivity.md)
 - 范围与取舍:[round8-decisions](../../design/_work/round8-decisions.md);Agent Note:`venue-protocol-and-runtime-split`、`venue-caps`、`feed-split-and-snap-fetch`、`core-market-data-scope`
 
+### 认证资金费历史扩展
+
+`FundingHistoryProtocol` 由需要实际资金费账单的永续产品线实现。`funding_request` 生成带签名的 GET(`redacted=true`),`funding_decode` 只在 warm 任务调用,返回 `FundingPage`。`FundingQuery` 固定包含两端均包含的 UTC 毫秒窗口及页码/游标;`FundingBill` 带交易所账单 ID、inst、原始时刻与有符号现金金额(`Notional`),金额不取费率或余额。页面错误不产出部分结果;只有 `next=None` 才表示完整窗口。HTTP 状态、业务错误与分页失败必须交还调用者重试。
+
 ## 已知限制与后续工作
 
 - **M1.5 实现范围**:trait 已含行情、会话、下单编码、回报解码、BBO 补帧与死手、限速观测各节;账户查询(`AcctCtx`、`AcctScratch`、`acct_queries`/`acct_request`/`acct_decode`/`acct_finish`)与只读查询(`ro_request`/`ro_decode`、`RoSink`)随 M3 的 acct-fetch 与 reconciler 加入,在此之前 venue 实现不需要也不能提供它们。

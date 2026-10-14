@@ -545,6 +545,25 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         }
         let cmds = self.cmds_done.wrapping_sub(cmds0);
         let maint = self.maintain(now);
+        // acct-fetch never writes rep directly: gw remains its only producer.
+        if self.out.free_hint() > reserve
+            && self.pend_rep.is_empty()
+            && let Some(record) = self.acct.peek()
+        {
+            let event = crate::funding::read_funding_record(record);
+            self.acct.advance();
+            if let Some(e) = event.filter(|e| {
+                e.venue == P::VENUE
+                    && e.synth == 0
+                    && self.acct_ix(e.account).is_some()
+                    && self.rd.inst(e.inst).venue == P::VENUE
+            }) {
+                self.push_rep(RepMsg::FundingSettle(e));
+            } else {
+                self.n.report_decode_err += 1;
+            }
+            ls.did_work = true;
+        }
         ls.frames = frames;
         ls.cmds = u16::try_from(cmds).unwrap_or(u16::MAX);
         ls.did_work |= frames > 0 || cmds > 0 || maint;

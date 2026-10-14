@@ -125,6 +125,64 @@ impl Ledger {
         let ts = self.norm_ts(f.venue, f.inst, f.settle_ts_ns);
         let pushed = f.synth == 0;
         let existing = self.hist_find(av, f.inst, ts);
+        // An authenticated history poll supplies the complete per-symbol settlement total.
+        // Finalize its estimate, retaining the settlement-time owner even after a close/rebind.
+        // Pre-initialization bills are already included in the opening balance.
+        if kind == FundingSettleKind::RateOnly && pushed {
+            if self.inst(f.inst).is_none_or(|i| i.venue != f.venue)
+                || self
+                    .avd
+                    .get(av)
+                    .and_then(|d| d.hist_from)
+                    .is_none_or(|from| ts < from)
+            {
+                return None;
+            }
+            let old = existing.and_then(|k| self.avd.get(av)?.hist.get(k)).copied();
+            let (cell, group) = old.map_or_else(
+                || self.holder(f.account, f.inst),
+                |r| (self.cell_of(f.account, r.group), r.group),
+            );
+            let booked = old.map_or(0, |r| r.booked.0.saturating_add(r.corrected.0));
+            let delta = Notional(f.amount.0.saturating_sub(booked));
+            let row = FundRec {
+                inst: f.inst,
+                group,
+                hflags: PUSHED,
+                settle_ts: ts,
+                booked: f.amount,
+                corrected: Notional(0),
+            };
+            match existing {
+                Some(k) => {
+                    if let Some(r) = self.avd.get_mut(av).and_then(|d| d.hist.get_mut(k)) {
+                        *r = row;
+                    }
+                }
+                None => {
+                    self.hist_insert(av, row);
+                }
+            }
+            if delta.0 == 0 {
+                return None;
+            }
+            self.quote_add(
+                av,
+                self.settle_asset(f.venue),
+                self.notional_to_asset(f.venue, delta),
+            );
+            let d = self.funding_pnl(f.account, cell, delta);
+            self.refresh_summary(av);
+            return Some(PnlDelta {
+                account: f.account,
+                group,
+                d,
+            });
+        }
+        // Neither a repeated timer nor a late prediction may add to a finalized settlement.
+        if !pushed && existing.is_some() {
+            return None;
+        }
         if pushed
             && existing
                 .and_then(|k| self.avd.get(av).and_then(|d| d.hist.get(k)))

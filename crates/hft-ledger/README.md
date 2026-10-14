@@ -352,11 +352,13 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 |---|---|---|
 | `PerSymbolPush` | 交易所推送的 `FundingSettle{inst, synth = 0}` 经 `apply_funding`:group `funding` 与保证金钱包 | 同一 (account, venue, inst, settle_ts) 已有推送入账(`FundHist` 记录带 `PUSHED`)→ 重复,返回 `None` |
 | `BalanceOnlyPush` | sequencer 在结算时刻按"结算时刻持仓 × mark × 费率"合成每 inst 的 `FundingSettle{synth = 1}`(Output),`apply_funding` 只计入 group 的 `funding`(PnL 归属),**不动钱包**;交易所推送的 `FundingSettle{inst = INST_NONE}` 经 `apply_funding_push`:**钱包按推送实额入账**,并记入该 (account, venue, settle_ts) 的**已入钱包额**(`FundHist` 中 `inst = INST_NONE` 的记录,`booked += amount`) | 推送去重:同一 (account, venue) 最近 `funding_push_seen_cap` 条已入账推送中已有相同 `(settle_ts_ns, amount)` → `Duplicate`,不入账;配对校验:已入钱包额 − Σ 同 (account, venue, settle_ts) 合成额 = 残差,计入 `AccountBook.funding_residual`;`|残差| > max(funding_tol_abs, funding_tol_rel × |实额|)` → `FundingCheck::Mismatch`:推送一侧完成配对时由 `apply_funding_push` 返回、sequencer 写 `Note{FundingMismatch}`(P1);合成一侧后到、在 `apply_funding` 中完成配对时(该入口不返回校验结果),本 crate 直接写同一注记。推送与合成到达顺序任意,未配对项留在待配对表(≤ 16 条/(account, venue);满时淘汰 `settle_ts` 最早的一项,不对它做配对校验,它的钱包与归属差由对账条目校正);推送丢失、重复或误判重复都由对账的钱包条目校正(见下节) |
-| `RateOnly` | 同上合成,`apply_funding` 计入 group `funding` **且**计入钱包(估计) | 交易所流水由 reconciler 逐笔对照,差额经 `Funding` 条目[自动校正](#资金费对账校正) |
+| `RateOnly` | 同上合成,`apply_funding` 计入 group `funding` **且**计入钱包(估计) | 认证账单完整总额经 `FundingSettle{synth=0}` 完成实额入账;另有 [M9 对账校正](#资金费对账校正) |
 
 表中的 `settle_ts` 一律是[归一化](#资金费时刻归一化)后的值。`synth_funding(a, inst, mark, rate, settle_ts_ns)` 只做计算:`amount = −pos_qty × mark × rate`(空头在正费率时收入为正),`pos_qty` 取调用时刻的持仓;i128 中算出后取整一次到 `Notional`(收入 `Floor`、支出按绝对值 `Ceil`,hft-types 记账规则);`pos_qty = 0` → `None`(不产生合成记录);何时调用(结算时刻的 `Timer`)归 [hft-sequencer](../hft-sequencer/README.md#资金费合成)。
 
 **逐笔入账记录**:每次资金费入账(`PerSymbolPush` 的推送实额、`BalanceOnlyPush`/`RateOnly` 的合成额、`BalanceOnlyPush` 推送的已入钱包额)同时在该 (account, venue) 的 `FundHist` 环里记一条 `FundRec { inst, group, hflags, settle_ts_ns, booked, corrected }`(`booked` = 入账额,`corrected` = 之后自动校正的累计额,`hflags.PUSHED` = 由交易所推送入账;`inst = INST_NONE` 的记录是 `BalanceOnlyPush` 所该结算时刻的钱包账);环按 `settle_ts_ns` 有序,窗口 `funding_recon_window_ms`,容量 `funding_hist_cap`。另存水位线 `hist_from_ns`:该 (account, venue) 自此时刻起的每一笔入账都在环里(首次启用 = 该 (account, venue) 首条 `BalanceReport` 初始化时,取该报告的 `ex_ts_ns`;环满淘汰最旧记录时取被淘汰记录的 `settle_ts_ns + 1`;从不含 `FundMark` 行的快照恢复时取恢复后该 (account, venue) 首次 `reconcile_funding` 的 `now_ns`——`restore` 不接触 UTC)。
+
+**RateOnly 实额完成**:认证账单轮询产出 `FundingSettle{synth=0, inst≠INST_NONE}` 时,金额是该合约、该归一化结算时刻的完整总额。`apply_funding` 只把 `amount - booked - corrected` 计入钱包与 funding PnL,保留已有记录的 group,将记录标为 `PUSHED`。重叠轮询相同总额无动作;补到迟到账单后按新的总额差分;真实结算先到时,后来的合成无动作。重复合成同样无动作。未知 inst、venue 不匹配、尚无初始化水位或早于 `hist_from_ns` 的实额不入账,避免把期初余额再次计入。无旧记录时按当前持有者归属,否则记账户级。此入口是资金费主链路,不启用 M9 的 reconciler 自动校正。
 
 ### 资金费时刻归一化
 

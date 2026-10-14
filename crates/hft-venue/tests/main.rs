@@ -14,6 +14,7 @@ mod feed_err;
 mod feed_frame;
 mod feed_poll;
 mod feed_pool;
+mod funding;
 mod gw_conn;
 mod gw_drain;
 mod gw_loop;

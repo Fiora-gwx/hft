@@ -12,6 +12,7 @@ spec: README.md
 
 | README 小节 | 用例 |
 |---|---|
+| 认证资金费历史扩展 | VPR-100 |
 | 概要 | VPR-122、VPR-150 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
@@ -1019,7 +1020,7 @@ spec: README.md
 |---|---|---|
 | VPR-100.1 | `PerSymbolPush` | `FundingSettle{inst: 201, amount: −1.25, settle_ts_ns: T, synth: 0}` |
 | VPR-100.2 | `BalanceOnlyPush` | `FundingSettle{inst: INST_NONE, amount: −1.25, settle_ts_ns: T, synth: 0}` |
-| VPR-100.3 | `RateOnly` | 零条 `FundingSettle`;费率推送仍经 `MdSink::funding` 产出 `Funding` |
+| VPR-100.3 | `RateOnly` | 私有推送零条 `FundingSettle`;费率推送仍经 `MdSink::funding` 产出 `Funding`;独立 warm `FundingHistoryProtocol` 查询返回账单,验收见各 venue 的资金费历史用例 |
 
 ### VPR-101 check_funding 检出 venue 自行合成或在 RateOnly 下产出的实现
 

@@ -1031,6 +1031,8 @@ spec: README.md
   - 步骤 2:`G1.pnl.funding` +6;`A1/P2` USDT `total` 与 `wallet` +6;`FundHist` 记录 `booked` 6.0、`hflags` 不含 `PUSHED`
 - 实现:`crates/hft-ledger/tests/funding.rs::led_092_rate_only_synth_booked`
 
+LED-092 补充验收:估算 6、实额 5.25 只补差 -0.75;重复实额/定时器无动作;实额先到后合成不重复;平仓后保留原 group;水位前账单不重复期初余额。实现见 `tests/funding.rs` 的 `led_092_actual_*`。
+
 ### LED-093 合成资金费只取整一次:收入向下、支出向上
 
 - 规则:[资金费](README.md#资金费)
