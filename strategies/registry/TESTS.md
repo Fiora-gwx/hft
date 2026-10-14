@@ -197,7 +197,7 @@ spec: README.md
 
 - 规则:[实现说明](README.md#实现说明)、[使用本组件](README.md#使用本组件)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M3
 - 前置:registry 的 `Strategies` 实例化 hft-testkit 场景(真实 sequencer 与 ctl-gateway 校验);refdata:账户 `P9`(Live,`is_prod = true`)、`T1`(Live 测试网,`is_prod = false`)、`S1`(Sim);latency-probe 的三个实例分别绑定 P9、T1、S1;参数为 latency-probe TESTS 的 `PP0` 与单腿 quote 组
 - 步骤:
   1. 对三个实例各发一次 `SetParams`
