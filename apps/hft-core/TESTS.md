@@ -111,7 +111,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[策略装配](README.md#策略装配)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:生产 registry 构建的二进制运行 `hft-core schemas --out <tmp>`
 - 期望文件:`fixtures/strategy-schemas/`(每策略 `<kind_id>-<name>.schema.json` 与 `index.json`)
 - 实现:`apps/hft-core/tests/schemas.rs::core_003_schemas_match_golden`
@@ -120,7 +120,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[命令行与退出码](README.md#命令行与退出码)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`<tmp>/ro` 目录模式 `0555`,测试以非 root 运行
 - 步骤:
   1. 运行 `hft-core schemas --out <tmp>/ro`
@@ -156,7 +156,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[命令行与退出码](README.md#命令行与退出码)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`dev2_sim()` 去掉 `shutdown.cancel_open_orders` 与 `startup.allow_missing_standby`,并把 `blobs.engine.sha256` 改成全 0;`NOTIFY_SOCKET` 指向测试套接字
 - 步骤:
   1. 运行 `hft-core --config <cfg>`
@@ -170,7 +170,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[命令行与退出码](README.md#命令行与退出码)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`dev2_sim()` 的 TOML 文本在第 3 行末尾追加一个未闭合的 `"`,另去掉 `shutdown.cancel_open_orders`
 - 步骤:
   1. 调用 `config::load_and_validate(text, &blobs, &sysroot)`
@@ -194,7 +194,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[命令行与退出码](README.md#命令行与退出码)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`c32_prod()` 去掉 `startup.allow_missing_standby`;主机夹具 `sysroot::c16()`(16 vCPU、32 GiB);`rt.host.mode = "prod"`、`host.on_mismatch = "refuse"`
 - 步骤:
   1. 调用 `startup::run_steps_1_2(&cfg, &sysroot)` 并取退出码
@@ -207,7 +207,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[命令行与退出码](README.md#命令行与退出码)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`c32_prod()` 不改;主机夹具 `sysroot::c16()`;`rt.host.mode = "prod"`、`host.on_mismatch = "refuse"`
 - 步骤:
   1. 调用 `startup::run_steps_1_2`
@@ -299,7 +299,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[命令行与退出码](README.md#命令行与退出码)、[崩溃隔离与从快照恢复](README.md#崩溃隔离与从快照恢复)
 - 级别:host
-- 里程碑:M3
+- 里程碑:M5
 - 环境:dev2,`hft-core@sim` 运行中
 - 授权:`[需授权]`
 - 步骤:
@@ -365,7 +365,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[策略装配](README.md#策略装配)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M6
 - 前置:解耦门槛的 registry 补丁副本(列表末尾加一行 CI 测试策略,kind_id 0xFF10,步骤归 tools `scaffold-gate`);`dev2_sim()` 的 `sim-b` 改绑该策略的实例
 - 步骤:
   1. 以该特性构建 hft-core,运行 `--check`
@@ -379,7 +379,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[策略装配](README.md#策略装配)
 - 级别:integ
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`dev2_sim()` 运行到步 8;ctl socket 以 Viewer 证书连接
 - 步骤:
   1. 对每个 `kind_id` 发 `GetSchema`
@@ -436,7 +436,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实例角色(prod 与 sim)](README.md#实例角色prod-与-sim)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:改动同时作用于 refdata `AccountMeta.label` 与 `[[accounts]].label`;`config::load_and_validate`
 - 实现:`apps/hft-core/tests/instance_role.rs::core_042_account_name_prefix`
 
@@ -519,7 +519,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[配置文件字段](README.md#配置文件字段)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:配置不写 `paths.release_manifest`;`config::resolved(&cfg)`
 - 实现:`apps/hft-core/tests/defaults.rs::core_047_release_manifest_default`
 
@@ -686,7 +686,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[线程计划](README.md#线程计划)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`c32_prod()`(`host.hot_cpus = 5-17`);行 .6、.7 的 `c32_prod_eni_b2()` 另设 `host.irq_cpus.eni_b2 = 28`;`layout::validate`
 - 实现:`apps/hft-core/tests/thread_plan.rs::core_066_spin_and_irq_cores`
 
@@ -728,7 +728,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[线程计划](README.md#线程计划)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`c32_sim()`(`host.hot_cpus = 5-17`,与同机 `prod` 相同);`layout::validate`
 - 实现:`apps/hft-core/tests/thread_plan.rs::core_068_sim_off_hot_cores`
 
@@ -745,7 +745,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[线程计划](README.md#线程计划)、[HeartbeatBlock](README.md#heartbeatblock)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`c32_prod()`(17 个线程 + 加的线程;加的线程为 `core = "none"`、`Park{10000}`、`nice = 10`,各承载从 `warm` 拆出的一个 warm 任务或一个 `feed-md:` 拆分);`layout::validate`
 - 实现:`apps/hft-core/tests/thread_plan.rs::core_069_thread_count_limit`
 
@@ -799,7 +799,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[线程计划](README.md#线程计划)、[配置文件字段](README.md#配置文件字段)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`layout::validate`
 - 实现:`apps/hft-core/tests/thread_plan.rs::core_073_hot_cpus_equal_spin_cores`
 
@@ -816,7 +816,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[线程计划](README.md#线程计划)、[主机资源隔离(slice、核与出口 IP)](README.md#主机资源隔离slice核与出口-ip)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:各行用 deploy 的主机类模板(线程计划即本页各主机类表,全部下单 venue 启用);输出为 `cargo xtask gen-host --host test-<主机类>` 的生成物
 - 实现:`tools/xtask/tests/gen_host.rs::core_074_kernel_and_slice_sets`
 
@@ -831,7 +831,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[线程计划](README.md#线程计划)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`c32` 模板只启用 4 个下单 venue(`binance-usdm`、`binance-spot`、`okx-swap`、`okx-spot`;`gw-bg-*` 两线程不生成)
 - 步骤:
   1. 运行 `cargo xtask gen-host --host test-c32`
@@ -843,7 +843,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[线程计划](README.md#线程计划)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`c32` 模板加 `host.irq_cpus.eni_b2 = 28`,主机清单加 `[eni_b2]`
 - 步骤:
   1. 运行 `cargo xtask gen-host --host test-c32`
@@ -897,7 +897,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[线程计划](README.md#线程计划)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:各行从所列构造器起;`layout::validate`
 - 实现:`apps/hft-core/tests/thread_plan.rs::core_080_bbo_not_with_md`
 
@@ -930,7 +930,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[线程计划](README.md#线程计划)、[`dev2`:现有 `c7g.large`](README.md#dev2现有-c7glarge2-vcpu38-gb与旧系统同机)、[`c4`](README.md#c44-物理核联调可选)、[`c8`](README.md#c8c8g2xlarge8-物理核16-gib只承载-prod)、[`c16`](README.md#c16c8g4xlarge有条件的候选首批下单-venue--4)、[`c32`](README.md#c32c8g8xlarge统一升级主机默认候选prod--sim-同机)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:各行用构造器(即本页表格的逐线程转写);主机夹具与主机类一致;`config::load_and_validate`
 - 实现:`apps/hft-core/tests/thread_plan.rs::core_082_documented_plans_validate`
 
@@ -949,7 +949,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[`c4`](README.md#c44-物理核联调可选)、[`c8`](README.md#c8c8g2xlarge8-物理核16-gib只承载-prod)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:新增的 gw 线程只能用表中已有的核;`layout::validate`
 - 实现:`apps/hft-core/tests/thread_plan.rs::core_083_host_class_gw_capacity`
 
@@ -1002,7 +1002,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[线程计划](README.md#线程计划)、[HostProfile](README.md#hostprofile)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`rt.host.mode = "prod"`;构造器与主机夹具按行;`startup::run_steps_1_2`
 - 实现:`apps/hft-core/tests/hostcheck.rs::core_087_host_class_check`
 
@@ -1017,7 +1017,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[线程计划](README.md#线程计划)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M7
 - 前置:同一构建产物;`dev2_prod()`、`c16_prod()`、`c32_prod()` 三份配置分别配对应的主机夹具(`rt.host.sysroot`)
 - 步骤:
   1. 三次运行 `hft-core --config <cfg> --check`
@@ -1124,7 +1124,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[内存与 journal 段(按主机类唯一归属)](README.md#内存与-journal-段按主机类唯一归属)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:deploy 各主机类模板;`cargo xtask gen-host --host test-<主机类> --check`
 - 实现:`tools/xtask/tests/gen_host.rs::core_104_hugepage_counts`
 
@@ -1139,7 +1139,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[内存与 journal 段(按主机类唯一归属)](README.md#内存与-journal-段按主机类唯一归属)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`c32` 模板中只把 `journal.raw-feed-binance-usdm-bbo.segment_bytes` 由 128 MiB 改成 256 MiB
 - 步骤:
   1. 运行 `cargo xtask gen-host --host test-c32 --check`
@@ -1163,7 +1163,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[内存与 journal 段(按主机类唯一归属)](README.md#内存与-journal-段按主机类唯一归属)
 - 级别:host
-- 里程碑:M3
+- 里程碑:M7
 - 环境:dev2;按目标订阅回放现有采集数据(方法见内存表后的"待实测"),每个主机类列的配置各跑一次
 - 授权:无(离线回放)
 - 步骤:
@@ -1191,7 +1191,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[内存与 journal 段(按主机类唯一归属)](README.md#内存与-journal-段按主机类唯一归属)、[配置文件字段](README.md#配置文件字段)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`dev2_sim()`(配置与段 5 都是 160 / 1024,`allow_missing_standby` 都为 false);`config::load_and_validate`
 - 实现:`apps/hft-core/tests/budget.rs::core_109_segment5_equality`
 
@@ -1220,7 +1220,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[内存与 journal 段(按主机类唯一归属)](README.md#内存与-journal-段按主机类唯一归属)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`dev2_sim()`;`rt.host.mode = "prod"`;以 `prlimit --memlock=65536:65536` 启动
 - 步骤:
   1. 运行 `hft-core --config <cfg>`
@@ -1232,7 +1232,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[内存与 journal 段(按主机类唯一归属)](README.md#内存与-journal-段按主机类唯一归属)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:deploy 各主机类模板生成的实例配置;读每个 `venues.<v>.feed.raw.{bbo, md}` 与 `feed.raw_dups`
 - 实现:`tools/xtask/tests/gen_host.rs::core_112_raw_modes`
 
@@ -1368,7 +1368,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[内存与 journal 段(按主机类唯一归属)](README.md#内存与-journal-段按主机类唯一归属)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M5
 - 前置:热段根 `<journal_ram>/prod/` 留有测试网实例 SIGKILL 后的 `seq` 热段(`synced_len > 0`);冷副本根 `<cold_root>/prod/` 已搬空
 - 步骤:
   1. 以正式配置(同一 `instance.name = "prod"`,空冷副本)启动
@@ -1380,7 +1380,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[内存与 journal 段(按主机类唯一归属)](README.md#内存与-journal-段按主机类唯一归属)、[崩溃隔离与从快照恢复](README.md#崩溃隔离与从快照恢复)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_sim()` 运行到 `Running`,最后一条已提交记录的 `engine_ns = E`
 - 步骤:
   1. SIGKILL 后重启,等步 5 结束
@@ -1602,7 +1602,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[内存与 journal 段(按主机类唯一归属)](README.md#内存与-journal-段按主机类唯一归属)、[主机资源隔离(slice、核与出口 IP)](README.md#主机资源隔离slice核与出口-ip)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`cargo xtask gen-host --host test-<主机类>` 的单元覆盖文件与 slice 文件
 - 实现:`tools/xtask/tests/gen_host.rs::core_144_memory_max_tables`
 
@@ -1618,7 +1618,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[内存与 journal 段(按主机类唯一归属)](README.md#内存与-journal-段按主机类唯一归属)
 - 级别:host
-- 里程碑:M3
+- 里程碑:M7
 - 环境:dev2(`verify = true`);另在一台 `verify = false`、未装 `hft-verify` 的主机(M7 升级主机或探针主机)
 - 授权:`[需授权]`
 - 步骤:
@@ -1671,7 +1671,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[主机资源隔离(slice、核与出口 IP)](README.md#主机资源隔离slice核与出口-ip)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`cargo xtask gen-host --host test-<主机类>` 的生成物
 - 实现:`tools/xtask/tests/gen_host.rs::core_160_slice_membership`
 
@@ -1692,7 +1692,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[主机资源隔离(slice、核与出口 IP)](README.md#主机资源隔离slice核与出口-ip)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`cargo xtask gen-host` 生成物;冷盘设备为主机清单的冷盘卷
 - 实现:`tools/xtask/tests/gen_host.rs::core_161_io_bandwidth`
 
@@ -1707,7 +1707,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[主机资源隔离(slice、核与出口 IP)](README.md#主机资源隔离slice核与出口-ip)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`cargo xtask gen-host` 生成物,取全部 slice 的 `AllowedCPUs` 并集
 - 实现:`tools/xtask/tests/gen_host.rs::core_162_irq_cores_outside_slices`
 
@@ -1721,7 +1721,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[主机资源隔离(slice、核与出口 IP)](README.md#主机资源隔离slice核与出口-ip)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`cargo xtask gen-host` 生成物的 `OOMScoreAdjust=`
 - 实现:`tools/xtask/tests/gen_host.rs::core_163_oom_score_adjust`
 
@@ -1766,7 +1766,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[主机资源隔离(slice、核与出口 IP)](README.md#主机资源隔离slice核与出口-ip)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_sim()`;测试 tmpfs `size=224M`;运行到 `Running` 后另占满 tmpfs,使剩余可用 < 48 MiB(不足一份新 `seq` 段)
 - 步骤:
   1. SIGKILL,再启动
@@ -1792,7 +1792,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[主机资源隔离(slice、核与出口 IP)](README.md#主机资源隔离slice核与出口-ip)、[多账户](README.md#多账户)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`host.egress` = `{prod = [10.0.1.10, 10.0.1.11], sim = [10.0.3.10]}`(行 .6–.8 另有 `prod_bulk = [10.0.2.10]`);`config::load_and_validate`
 - 实现:`apps/hft-core/tests/egress.rs::core_168_egress_partition`
 
@@ -2096,7 +2096,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[dev2 护栏](README.md#dev2-护栏)
 - 级别:prop
-- 里程碑:M3
+- 里程碑:M5
 - 性质:任意信号序列下,护栏发出的 systemctl 调用 ⊆ {对白名单单元的 `stop`} ∪ {`start hft-core@sim.service`};从不 `start` `hft-core@prod`、任何批处理单元或其定时器;从不删除 `tripped`;每个 UTC 日至多一次 `start`
 - 生成:24 h 的 5 s 采样;每个信号按分段随机游走,在阈值两侧各 50% 时间;两个 slice 的用量在因果阈值两侧随机;随机插入窗口开关与人工启停
 - 参考:断言上述集合包含关系与计数
@@ -2134,7 +2134,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[dev2 护栏](README.md#dev2-护栏)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:护栏配置为专用主机列;`hft.slice` 0.1 核 / 100 MiB
 - 实现:`deploy/dev2/tests/test_guard.py::core_194_dedicated_host_mode`
 
@@ -2166,7 +2166,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[dev2 护栏](README.md#dev2-护栏)、[启动顺序](README.md#启动顺序)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_sim()`,运行到 `Running`;`auto_resume_after_clean_drain = true`
 - 步骤:
   1. SIGTERM,等退出 0;运行 `hft-shm-release sim`
@@ -2180,7 +2180,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[dev2 护栏](README.md#dev2-护栏)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_sim()` 运行到 `Running`;停机方式按行;之后运行 `hft-shm-release sim`
 - 实现:`apps/hft-core/tests/shm_release.rs::core_197_hot_segments_kept_on_unclean_stop`
 
@@ -2472,7 +2472,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[配置文件字段](README.md#配置文件字段)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:编译期断言;`RingCapKind::from_u8`
 - 实现:`apps/hft-core/tests/rings.rs::core_228_ring_cap_row_layout`
 
@@ -2571,7 +2571,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)、[崩溃隔离与从快照恢复](README.md#崩溃隔离与从快照恢复)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_sim()`;测试钩子在某条 Input(seq = S,kind = K)的输出写到一半时 SIGKILL
 - 步骤:
   1. 重启,等步 4 结束
@@ -2584,7 +2584,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_sim()`;按行准备热段与冷副本;启动到步 5 结束
 - 实现:`apps/hft-core/tests/recovery.rs::core_236_tail_lost`
 
@@ -2599,7 +2599,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_sim()` 停机后删掉 RAM 热段,并把冷副本中间一段的段头 `prev_header_sha256` 翻转 1 位
 - 步骤:
   1. 启动
@@ -2611,7 +2611,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:旧版本二进制运行 `dev2_sim()` 后按行停机,再用新版本二进制(schema 版本表不同)启动
 - 实现:`apps/hft-core/tests/recovery.rs::core_238_version_change`
 
@@ -2624,7 +2624,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_sim()` 的最新完整快照节 5 的 `desc_version` 改为策略 `restore` 不接受的值(段 CRC 同步重算)
 - 步骤:
   1. 启动
@@ -2636,7 +2636,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)
 - 级别:integ
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`dev2_prod()` 连假交易所;在尾部一条 `OrderDecision` 的记录体中改一个字节(CRC 同步,模拟重算输出不同)
 - 步骤:
   1. 重启
@@ -2680,7 +2680,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)、[HostProfile](README.md#hostprofile)
 - 级别:prop
-- 里程碑:M3
+- 里程碑:M5
 - 性质:任意时刻 SIGKILL 后重启,本次运行的新段中:`HostProfile` 与 `ConfigBlob{HostManifest}` 各一条,位于第一条 Input 之前;第一条 Input 是 `EngineClock`,本次运行没有第二条;处理它的同一事件内有 `Note{EpochStart}`
 - 生成:`dev2_prod()` 连假交易所满速行情与随机下单;SIGKILL 时刻在 [0, 10 s) 均匀抽取
 - 参考:读 journal 逐条断言
@@ -2691,7 +2691,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)、[崩溃隔离与从快照恢复](README.md#崩溃隔离与从快照恢复)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`dev2_prod()` 连假交易所,满速行情与随机下单
 - 步骤:
   1. 循环 100 次:运行 [1 s, 60 s) 内随机时长后 SIGKILL,重启到步 5 结束,记录 `Recovery` 快照的状态哈希
@@ -2705,7 +2705,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)、[配置文件字段](README.md#配置文件字段)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_sim()` 运行中经 `SetParams` 把 `s1` 的参数换成版本 B(journal 中最新 `ConfigBlob` 为 B);配置文件的 `blobs.strategy_params` 仍是版本 A;干净 Drain 后按行重启
 - 实现:`apps/hft-core/tests/recovery.rs::core_245_config_source`
 
@@ -2996,7 +2996,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M5
 - 前置:取 hft-sequencer 段 5 的 `keyframe_max_events` 默认值与 `seq/replay_throughput` 的预算下限(事件/分钟)两个常量
 - 步骤:
   1. 计算 `keyframe_max_events × 60 / 吞吐下限`
@@ -3008,7 +3008,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)、[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M5
 - 基准名:`startup-cold`(两组:空尾部;尾部 = `keyframe_max_events` 条)
 - 实现:`benchmarks/startup-cold/main.rs::core_267_startup_cold`
 
@@ -3036,7 +3036,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`c32_prod()`;测试构建把 `binance-usdm` 的 `KillWord` 换成只保留低 8 位的替身(store 时丢弃 bit 8–31)
 - 步骤:
   1. 运行步 3 的 kill 自检
@@ -3048,7 +3048,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`c32_prod()`;测试构建把 `kill_admit` 换成不看 `ACCOUNT_HARD_MASK` 的错误版本
 - 步骤:
   1. 运行 kill 自检
@@ -3075,7 +3075,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_prod()`;`/var/lib/hft/kill-switch/`(测试根)为空
 - 步骤:
   1. 启动到步 5 结束后 1 s
@@ -3087,7 +3087,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_prod()`;`stop-marker.json` 内容按行;启动到步 5 结束
 - 实现:`apps/hft-core/tests/stop_marker.rs::core_273_marker_to_kill`
 
@@ -3104,7 +3104,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_prod()`;`stop-marker.json`(`scope = "*"`)存在,另有一份旧的 `stop-marker.json.consumed`;测试钩子把 persist 暂停到放行为止
 - 步骤:
   1. 启动,等 Kill Input 写出,检查目录
@@ -3118,7 +3118,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M5
 - 前置:同 CORE-274,persist 暂停
 - 步骤:
   1. 启动,Kill Input 写出后 SIGKILL;放开 persist 钩子再启动
@@ -3130,7 +3130,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:按行准备目录(记录每个文件的 SHA-256 与 mtime);启动到步 5 结束后 2 s
 - 实现:`apps/hft-core/tests/stop_marker.rs::core_276_only_live_marker_name_read`
 
@@ -3185,7 +3185,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[崩溃隔离与从快照恢复](README.md#崩溃隔离与从快照恢复)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`recovery::boot_guard_next(stored, interval)` 纯函数;`DurableMeta` 用测试目录
 - 实现:`apps/hft-core/tests/recovery.rs::core_280_boot_guard_update`
 
@@ -3202,7 +3202,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[崩溃隔离与从快照恢复](README.md#崩溃隔离与从快照恢复)、[配置文件字段](README.md#配置文件字段)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`recovery::plan(stored_boot_guard, interval, poison_crash_limit)`;本次区间与已存区间相同
 - 实现:`apps/hft-core/tests/recovery.rs::core_281_poison_limit_boundary`
 
@@ -3217,7 +3217,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[崩溃隔离与从快照恢复](README.md#崩溃隔离与从快照恢复)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_prod()` 连假交易所,`poison_crash_limit = 2`;测试构建在重放到 seq = P 的 Input 时 abort(实盘处理该 Input 不崩);运行到 P 之后 SIGKILL;进程由测试直接拉起(不经 systemd)
 - 步骤:
   1. 依次启动三次
@@ -3231,7 +3231,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[崩溃隔离与从快照恢复](README.md#崩溃隔离与从快照恢复)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_prod()` 连假交易所,`poison_crash_limit = 2`;测试构建在实盘处理内容为 X 的对账报告时 abort;reconciler 每次启动后都重新生成内容 X 的报告;进程由测试直接拉起
 - 步骤:
   1. 首次启动(处理 X 时崩溃),再启动两次
@@ -3244,7 +3244,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[崩溃隔离与从快照恢复](README.md#崩溃隔离与从快照恢复)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:journal 中有快照 S1(seq 1000)、S2(seq 5000)、S3(seq 9000);按行把某些快照设为本二进制不可解
 - 实现:`apps/hft-core/tests/recover_from_snapshot.rs::core_284_snapshot_selection`
 
@@ -3262,7 +3262,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[崩溃隔离与从快照恢复](README.md#崩溃隔离与从快照恢复)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M5
 - 前置:journal 末条 seq = 12000,由新版本二进制写出(不是 Drain 快照结尾);旧版本二进制能解码的最新快照 seq = 5000;`--reason "rollback v0.4"`
 - 步骤:
   1. 旧二进制 `--recover-from-snapshot latest --reason "rollback v0.4"` 启动,到步 5 结束
@@ -3318,7 +3318,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_prod()`,`config_source = "file"`;干净 Drain 后换入把 `bn-1` 改绑另一实例的 refdata(SHA-256 同步),按行准备快照中 `bn-1` 的状态,再启动
 - 实现:`apps/hft-core/tests/recovery.rs::core_289_rebind_with_position`
 
@@ -3332,7 +3332,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[启动顺序](README.md#启动顺序)、[命令行与退出码](README.md#命令行与退出码)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`c32_prod()` 配 `sysroot::c32()`,`rt.host.mode = "dev"`(`HUGEPAGES_SHORT` 不拒绝);运行环境没有空闲的 1 GiB 页
 - 步骤:
   1. 启动
@@ -3437,7 +3437,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[优雅退出与 kill 语义](README.md#优雅退出与-kill-语义)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`dev2_sim()` 到 `Running`
 - 步骤:
   1. 发 SIGHUP,等 5 s
@@ -3461,7 +3461,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[优雅退出与 kill 语义](README.md#优雅退出与-kill-语义)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_prod()` 到 `Running`
 - 步骤:
   1. SIGKILL
@@ -3473,7 +3473,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[优雅退出与 kill 语义](README.md#优雅退出与-kill-语义)、[HeartbeatBlock](README.md#heartbeatblock)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_sim()`;`watchdog.hb_stale_ms = 1000`;`NOTIFY_SOCKET` 指向测试套接字;测试钩子可让 sequencer 主循环卡住
 - 步骤:
   1. `Running` 后观察 3 s 的 `WATCHDOG=1`
@@ -3538,7 +3538,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[refdata 变更(Drain + 重启)](README.md#refdata-变更drain--重启)
 - 级别:integ
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`dev2_sim()`,`instance.config_source = "file"`;Admin 经 `cli:<login>` 连接
 - 步骤:
   1. 发 `ReplaceRefdata{blob, version}` 并确认
@@ -3550,7 +3550,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[refdata 变更(Drain + 重启)](README.md#refdata-变更drain--重启)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`instance.config_source = "journal"`;Admin 发 `ReplaceRefdata` 并确认;新 blob 按行
 - 实现:`apps/hft-core/tests/refdata_change.rs::core_321_gateway_assembly_check`
 
@@ -3567,7 +3567,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[refdata 变更(Drain + 重启)](README.md#refdata-变更drain--重启)
 - 级别:integ
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`dev2_prod()`,`config_source = "journal"`;`bn-1` 在 inst `I` 上有仓位;新 blob 删除 `I`
 - 步骤:
   1. Admin 发 `ReplaceRefdata` 并确认
@@ -3579,7 +3579,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[refdata 变更(Drain + 重启)](README.md#refdata-变更drain--重启)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`dev2_prod()` 连假交易所,`config_source = "journal"`;新 blob 只改一个费率档的数值(inst、资产、账户与绑定不变);测试进程监督者在退出码 75 时立即重启
 - 步骤:
   1. Admin 发 `ReplaceRefdata` 并确认;等重启后的闸门放行
@@ -3592,7 +3592,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[refdata 变更(Drain + 重启)](README.md#refdata-变更drain--重启)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`dev2_prod()` 连假交易所;新 blob 把 `bn-1` 改绑另一实例(此时 `bn-1` 无仓位,有一张挂单);`ReplaceRefdata` 的 Drain 不撤挂单;假交易所在 Drain 期间让该挂单成交
 - 步骤:
   1. Admin 发 `ReplaceRefdata` 并确认,等进程退出
@@ -3608,7 +3608,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[refdata 变更(Drain + 重启)](README.md#refdata-变更drain--重启)
 - 级别:integ
-- 里程碑:M3
+- 里程碑:M9
 - 前置:同 CORE-323,但假交易所对撤单与查单永不回执;`shutdown.drain_timeout_ms = 8000`
 - 步骤:
   1. Admin 发 `ReplaceRefdata` 并确认
@@ -3620,7 +3620,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[refdata 变更(Drain + 重启)](README.md#refdata-变更drain--重启)
 - 级别:prop
-- 里程碑:M3
+- 里程碑:M9
 - 性质:对任意 (refdata, 配置) 组合,`RefdataAssemblyCheck` 返回的失败项集合 = 启动步 2 对同一组合给出的错误中属于 {`AccountNamePrefix`、`MissingCredential`、`SimConfig`、线程计划未覆盖 venue、`DustBelowMinNotional`} 的集合(按 arg 码 1–5 映射)
 - 生成:从 `dev2_prod()`、`dev2_sim()` 起,随机增删账户(前缀合规或不合规)、增删 key 引用、改 `latency_model` 下标、增删 venue 与其行情任务、改 `min_notional` 与 `dust_notional`
 - 参考:直接调用启动步 2 的校验器并过滤
@@ -3631,7 +3631,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[多账户](README.md#多账户)
 - 级别:integ
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`dev2_prod()` 连假交易所;`binance-usdm` 上 `bn-1`、`bn-2`;两者的 `RiskParams` 限速各 10 单/s;`bn-1` 的策略以 50 单/s 发单,`bn-2` 以 5 单/s
 - 步骤:
   1. 运行 10 s
@@ -3643,7 +3643,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[HostProfile](README.md#hostprofile)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`rt.host.mode = "prod"`;主机夹具按行;`startup::run_steps_1_2`
 - 实现:`apps/hft-core/tests/hostcheck.rs::core_340_hard_and_soft_bits`
 
@@ -3658,7 +3658,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[HostProfile](README.md#hostprofile)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`hostcheck::needs(&cfg, &held)`;本实例已持有的段 `held` 由夹具给出
 - 实现:`apps/hft-core/tests/hostcheck.rs::core_341_host_needs`
 
@@ -3673,7 +3673,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[HostProfile](README.md#hostprofile)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_sim()`;`host.expect_profile` 为测试期望;`paths.hostprofile` 按行
 - 实现:`apps/hft-core/tests/hostcheck.rs::core_342_on_mismatch`
 
@@ -3690,7 +3690,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[HostProfile](README.md#hostprofile)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_sim()`;hostprofile.json 为一份 3 KiB 的夹具
 - 步骤:
   1. 启动到步 5 结束
@@ -3702,7 +3702,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[HeartbeatBlock](README.md#heartbeatblock)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_prod()`;`paths.heartbeat_shm` 的父目录按 deploy 路径表建为属组 `hft-journal-ro`、`2750`
 - 步骤:
   1. 启动到步 3 结束
@@ -3715,7 +3715,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[HeartbeatBlock](README.md#heartbeatblock)、[实现说明](README.md#实现说明)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_prod()` 连假交易所与 reconciler;读 `HkLine.state` 的变化序列
 - 实现:`apps/hft-core/tests/heartbeat.rs::core_351_state_sequence`
 
@@ -3731,7 +3731,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[HeartbeatBlock](README.md#heartbeatblock)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`housekeeping::alive(state, progressed_within_hb_stale)` 纯函数;`watchdog.hb_stale_ms = 1000`
 - 实现:`apps/hft-core/tests/heartbeat.rs::core_352_liveness_rule`
 
@@ -3789,7 +3789,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[配置文件字段](README.md#配置文件字段)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`dev2_sim()` 中不写下列键;`config::resolved(&cfg)`
 - 实现:`apps/hft-core/tests/defaults.rs::core_361_defaults`
 
@@ -4180,7 +4180,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[命令行与退出码](README.md#命令行与退出码)、[内存与 journal 段(按主机类唯一归属)](README.md#内存与-journal-段按主机类唯一归属)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`dev2_prod()`;`config::load_and_validate` 与装配(不连接);`venues.binance-usdm.gw.id_tomb_ms = 120000`;引擎定时器需求 `engine_timer_demand` 由测试构建的 hft-sequencer 函数算出,记为 W
 - 实现:`apps/hft-core/tests/assembly.rs::core_412_assembly_error_names`
 
@@ -4201,7 +4201,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[配置文件字段](README.md#配置文件字段)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`dev2_prod()` 连假交易所;签发者表中 `cli:alice` 为 Trader;`write_rate_per_min = 12`
 - 步骤:
   1. 启动,等闸门通过;`cli:alice` 发 `Annotate{OpsNote}`
@@ -4286,7 +4286,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[HostProfile](README.md#hostprofile)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`c32_prod()` 配 `sysroot::c32()` 夹具,夹具使 `check_host` 恰好置一个 hard 位 `ISOLCPUS`;`host.on_mismatch = "degrade"`
 - 实现:`apps/hft-core/tests/hostcheck.rs::core_419_host_mode`
 

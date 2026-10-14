@@ -71,7 +71,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[辅助类型](README.md#辅助类型)、[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数
 - 实现:`crates/hft-venue-proto/tests/layout.rs::vpr_002_seq_layouts`
 
@@ -85,7 +85,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数
 - 实现:`crates/hft-venue-proto/tests/layout.rs::vpr_003_small_types`
 
@@ -99,7 +99,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[辅助类型](README.md#辅助类型)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数
 - 实现:`crates/hft-venue-proto/tests/layout.rs::vpr_004_stream_kind_codes`
 
@@ -113,7 +113,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[辅助类型](README.md#辅助类型)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数
 - 实现:`crates/hft-venue-proto/tests/layout.rs::vpr_005_small_enum_codes`
 
@@ -127,7 +127,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[辅助类型](README.md#辅助类型)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数
 - 实现:`crates/hft-venue-proto/tests/layout.rs::vpr_006_role_is_conn_role`
 
@@ -141,7 +141,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[辅助类型](README.md#辅助类型)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数
 - 实现:`crates/hft-venue-proto/tests/layout.rs::vpr_007_ctl_and_ro_codes`
 
@@ -155,7 +155,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[`VenueProtocol`(静态分派)](README.md#venueprotocol静态分派)、[实现说明](README.md#实现说明)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:只实现必需方法的最小假协议 `Minimal`
 - 步骤:
   1. `Minimal::encode_batch(rd, t, &[c1, c2], &[tg1, tg2], &clk, &mut body)`
@@ -167,7 +167,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[`VenueProtocol`(静态分派)](README.md#venueprotocol静态分派)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`Minimal`
 - 步骤:
   1. `Minimal::needs_per_order_signing()`
@@ -179,7 +179,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[`VenueProtocol`(静态分派)](README.md#venueprotocol静态分派)、[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`Minimal`
 - 步骤:
   1. `Minimal::bbo_probe()`
@@ -191,7 +191,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[`VenueProtocol`(静态分派)](README.md#venueprotocol静态分派)、[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`Minimal`;`RestReqBuf` 预置 `path_query = b"/keep"`
 - 步骤:
   1. `Minimal::bbo_snapshot_request(rd, &ctx, &[101], &mut out)`
@@ -203,7 +203,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[`VenueProtocol`(静态分派)](README.md#venueprotocol静态分派)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`Minimal`;`VecSink` 为空
 - 步骤:
   1. `Minimal::decode_bbo_snapshot(rd, &mut ctx, &[101], b"{}", &rx, &mut sink)`
@@ -215,7 +215,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[`VenueProtocol`(静态分派)](README.md#venueprotocol静态分派)、[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`Minimal`;`RestReqBuf` 预置 `path_query = b"/keep"`;`GwCmd{op: Query, target_slot: 7}`
 - 实现:`crates/hft-venue-proto/tests/defaults.rs::vpr_015_rest_defaults`
 
@@ -267,7 +267,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)、[开发备忘](README.md#开发备忘)
 - 级别:prop
-- 里程碑:M3
+- 里程碑:M9
 - 性质:非数字串的结果 ∈ `[0x4000_0000, 0x40FF_FFFF]`;`raw_code_http(s)` ∈ `[0x2000_0000, 0x2000_FFFF]`;`|c| < 2²⁹` 的数值码结果不落在这两段,且 ≠ 0(c ≠ 0 时)
 - 生成:随机非数字字节串 0–32 B;`s ∈ u16`;`c ∈ (−2²⁹, 2²⁹)`
 - 参考:区间断言
@@ -308,7 +308,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[辅助类型](README.md#辅助类型)
 - 级别:prop
-- 里程碑:M3
+- 里程碑:M9
 - 性质:同一 `(inst, TradeKey)` 结果恒等;结果 ≠ 0;10⁶ 个两两不同的输入的结果两两不同
 - 生成:inst ∈ u32;三种 `TradeKey` 各占 1/3,字段 ∈ u64 / i64
 - 参考:`HashSet<u64>` 计数
@@ -345,7 +345,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[辅助类型](README.md#辅助类型)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:debug 构建;新 `TradeIdRing<1024>`
 - 步骤:
   1. `seen_or_insert(0)`
@@ -413,7 +413,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现说明](README.md#实现说明)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`FakePerp`;样本 `topn_seq`:3 条 20 档快照 payload 与期望 `L2Snapshot{origin = TopN}` 体
 - 步骤:
   1. `GoldenDriver::<FakePerp>::run_md(topn_seq)`
@@ -425,7 +425,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现说明](README.md#实现说明)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`FakePerp`(增量深度)
 - 实现:`crates/hft-venue-proto/tests/testkit.rs::vpr_044_golden_incremental`
 
@@ -438,7 +438,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现说明](README.md#实现说明)、[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`FakePerp`;3 条增量;在第 2 条注入 `prev_override = 9_000`
 - 步骤:
   1. `run_md` 并取出输出
@@ -492,7 +492,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现说明](README.md#实现说明)、[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`FakeSpot`、`FakePerp`;固定种子 7 的随机字节(0–4 096 B)
 - 步骤:
   1. 每个输入依次喂 `classify → peek → decode_md`、`decode_snapshot`、`decode_bbo_snapshot`、`classify_report → decode_report`、`decode_rest`、`acct_decode`、`ro_decode`
@@ -504,7 +504,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现说明](README.md#实现说明)、[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::PanicOnShort>`(payload < 8 B 时 `decode_md` 索引越界)
 - 步骤:
   1. `catch_unwind` 中对输入 `b"{}"` 运行 FuzzHarness 的单输入入口
@@ -516,7 +516,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)、[实现说明](README.md#实现说明)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`FakePerp`;样本:快照 `snap_id = 1_000`,其后增量 A(原始序号覆盖 990–1_005)、B、C
 - 步骤:
   1. `check_chain::<FakePerp>(samples)`
@@ -528,7 +528,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::IgnorePrevOverride>`;样本同 VPR-060
 - 步骤:
   1. `check_chain`
@@ -540,7 +540,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::LastIdOffByOne>`(`last_id` 写成交易所原值 − 1)
 - 步骤:
   1. `check_chain`
@@ -564,7 +564,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::PeekIdsDiffer>`(`peek.ids.last_id` 比批头大 1)
 - 步骤:
   1. `check_md_basics`
@@ -576,7 +576,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::PeekParsesPrice>`(价格非法时 `peek` 返回 `Err(Number)`)
 - 步骤:
   1. `check_md_basics`
@@ -601,7 +601,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::SubstituteSwTs>`(`hw_rx_ns == 0` 时写 `sw_rx_ns`)
 - 步骤:
   1. `check_md_basics`
@@ -613,7 +613,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:按行的变体
 - 实现:`crates/hft-venue-proto/tests/contract_md.rs::vpr_068_dropped_fields_detected`
 
@@ -643,7 +643,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::ViaF64>`(先 `parse::<f64>` 再乘 1e8 取整)
 - 步骤:
   1. `check_md_basics`(样本含 VPR-069.2 那一条)
@@ -655,7 +655,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::OverflowAsNumber>`
 - 步骤:
   1. `check_md_basics`(样本含 VPR-069.3 那一条)
@@ -667,7 +667,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现说明](README.md#实现说明)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::CacheRd>`(首次调用时把符号表拷进 `FeedCtx`);两份 refdata:`rd_a` 把 `FAKE-PERP-1` 映射为 201,`rd_b` 映射为 301
 - 步骤:
   1. `check_md_basics` 对同一个 `FeedCtx` 先以 `rd_a`、再以 `rd_b` 解码同一条 BBO
@@ -704,7 +704,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::AllocInDecode>`(每次 `decode_md` 建一个 `Vec`)
 - 步骤:
   1. `check_hot_alloc`
@@ -735,7 +735,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::UnknownAsReject>`
 - 步骤:
   1. `check_unknown_codes`
@@ -747,7 +747,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::TimeoutAsReject>`(`-1007` 产出 `Reject`)
 - 步骤:
   1. `check_unknown_codes`
@@ -759,7 +759,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::HashNumericString>`(`"51008"` 走哈希段)
 - 步骤:
   1. `check_unknown_codes`
@@ -783,7 +783,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::SecretInHeader>`(`acct_request` 把私钥写进一个头)
 - 步骤:
   1. `check_session`
@@ -795,7 +795,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)、[辅助类型](README.md#辅助类型)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::SignedNotRedacted>`(`dead_man_refresh` 的 REST 请求 `redacted = false`)
 - 步骤:
   1. `check_session`
@@ -807,7 +807,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[`VenueProtocol`(静态分派)](README.md#venueprotocol静态分派)、[辅助类型](README.md#辅助类型)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::AppPingMissing>`(`heartbeat(Order).ping == AppText` 而 `app_ping(Order)` 返回 0)
 - 步骤:
   1. `check_session`
@@ -831,7 +831,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::CumNoDedup>`
 - 步骤:
   1. `check_cum`
@@ -843,7 +843,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:查询响应 `filled = 0.6`、缺 `avgPx` 字段
 - 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_086_avg_px_zero`
 
@@ -868,7 +868,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::StaleGuardMismatch>`(`default_caps` 写 `ExpireAt`)
 - 步骤:
   1. `check_default_caps`
@@ -962,7 +962,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::FeeAsZeroFill>`
 - 步骤:
   1. `check_fee_asset`
@@ -974,7 +974,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:按行的变体
 - 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_096_fee_rule_violations`
 
@@ -1000,7 +1000,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::CurrentEpoch>`(`OrderEvent.epoch` 恒填 5)
 - 步骤:
   1. `check_cid`
@@ -1012,7 +1012,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[`VenueProtocol`(静态分派)](README.md#venueprotocol静态分派)、[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:按行的变体
 - 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_099_cid_shape_violations`
 
@@ -1040,7 +1040,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:按行的变体
 - 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_101_funding_violations`
 
@@ -1077,7 +1077,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:按行的变体
 - 实现:`crates/hft-venue-proto/tests/contract_acct.rs::vpr_103_account_config_violations`
 
@@ -1114,7 +1114,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:按行的变体
 - 实现:`crates/hft-venue-proto/tests/contract_acct.rs::vpr_105_margin_violations`
 
@@ -1149,7 +1149,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::MarkerAfterCid>`
 - 步骤:
   1. `check_external_fill`(样本含 VPR-106.3)
@@ -1177,7 +1177,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::UnknownIsError>`
 - 步骤:
   1. `check_unknown_events`
@@ -1209,7 +1209,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:按行的变体
 - 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_111_dedup_violations`
 
@@ -1239,7 +1239,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::TruncateUid>`(`decode_identity` 只写前 1 B)
 - 步骤:
   1. `check_identity`
@@ -1268,7 +1268,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:按行的变体
 - 实现:`crates/hft-venue-proto/tests/contract_md.rs::vpr_115_bbo_refresh_violations`
 
@@ -1295,7 +1295,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:按行的变体
 - 实现:`crates/hft-venue-proto/tests/contract_md.rs::vpr_117_snapshot_isolation_violations`
 
@@ -1308,7 +1308,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)、[辅助类型](README.md#辅助类型)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`FakePerp`(`routes()`:id 0 `Bbo`(`race = true`)、id 1 `DepthTopN`(`topn_levels = [5, 20]`)、id 2 `Md`)
 - 步骤:
   1. `check_topn::<FakePerp>(samples)`
@@ -1320,7 +1320,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)、[辅助类型](README.md#辅助类型)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:按行的变体
 - 实现:`crates/hft-venue-proto/tests/contract_md.rs::vpr_119_topn_violations`
 
@@ -1349,7 +1349,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:按行的变体
 - 实现:`crates/hft-venue-proto/tests/contract_acct.rs::vpr_121_acct_isolation_violations`
 
@@ -1363,7 +1363,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[`VenueProtocol`(静态分派)](README.md#venueprotocol静态分派)、[解码输出 sink](README.md#解码输出-sink)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`FakePerp`;期望文件 `crates/hft-venue-proto/tests/data/fake/<方法>.expected`
 - 实现:`crates/hft-venue-proto/tests/trait_methods.rs::vpr_122_every_method_golden`
 
@@ -1418,7 +1418,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:按行的变体
 - 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_125_detail_violations`
 
@@ -1451,7 +1451,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:按行的变体
 - 实现:`crates/hft-venue-proto/tests/contract_rest.rs::vpr_127_rest_violations`
 
@@ -1485,7 +1485,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:按行的变体
 - 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_129_ctl_violations`
 
@@ -1499,7 +1499,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[每个 venue README 的必备节](README.md#每个-venue-readme-的必备节)、[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`doc-check` 的 venue 规则对夹具 README 运行;基线夹具 = `scope: core`、含全部 12 个必备节、每节对现货与永续都有内容;每行在基线上做一处改动
 - 实现:`tools/xtask/tests/doc_check_venue.rs::vpr_130_required_sections`
 
@@ -1526,7 +1526,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`doc-check` 读取本 README 的门槛表与夹具 venue 的预算表、`benches/budgets.toml`;每行改夹具中的一项
 - 实现:`tools/xtask/tests/doc_check_venue.rs::vpr_131_venue_budget_not_wider`
 
@@ -1548,7 +1548,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`doc-check` 读取本 README 门槛表、hft-net 预算表(`net_rx_300b_mem`、`net_rx_2k_mem`)与 latency-budget §3 `ingest` 行;每行改一个输入
 - 实现:`tools/xtask/tests/doc_check_venue.rs::vpr_132_ingest_consistency`
 
@@ -1596,7 +1596,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`FakePerp`(支持 `encode_batch`);批量下单响应 3 条:槽 40 成功、槽 41 `"50004"`(结果未知)、槽 42 `"51008"`(确定拒绝)
 - 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_135_batch_outcome_unknown`
 
@@ -1610,7 +1610,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:变体 `Fake<FakePerp, Mut::BatchFirstUnknownOnly>`(批量响应中第二条起的结果未知条目不产出事件)
 - 步骤:
   1. `check_unknown_codes`(样本含 VPR-135.1)
@@ -1637,7 +1637,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现方必须遵守的契约](README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:按行的变体
 - 实现:`crates/hft-venue-proto/tests/contract_acct.rs::vpr_138_unverifiable_violations`
 
@@ -1681,7 +1681,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[依赖](README.md#依赖)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`cargo metadata` 取 `hft-venue-proto` 不开 feature 的 normal 依赖的直接内部依赖与外部依赖;另一份副本清单加入 `hft-net`
 - 实现:`crates/hft-venue-proto/tests/deps.rs::vpr_150_deps_closure`
 
@@ -1696,7 +1696,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 - 规则:[实现说明](README.md#实现说明)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`cargo metadata` 读 `venue-binance`、`venue-okx`、`venue-bitget` 的 dev 依赖
 - 实现:`crates/hft-venue-proto/tests/deps.rs::vpr_151_venue_dev_deps_use_testkit`
 

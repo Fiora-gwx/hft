@@ -78,7 +78,7 @@ BIN-026 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[概要](README.md#概要)、[使用本组件](README.md#使用本组件)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数;每行断言 `VenueProtocol` 关联常量;`VenueId` 数值取自 hft-types 的 VenueId 表
 - 实现:`crates/venue-binance/tests/consts.rs::bin_001_identity_consts`
 
@@ -1210,7 +1210,7 @@ BIN-026 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[累计量与费用来源](README.md#累计量与费用来源)、[hft-venue-proto 契约 12](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`fixtures/binance-usdm/ORDER_TRADE_UPDATE/` 与 `fixtures/binance-spot/executionReport/` 的全部金样输入
 - 步骤:
   1. 逐条 `decode_report`
@@ -1344,7 +1344,7 @@ BIN-026 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[用户流事件表](README.md#用户流事件表)、[hft-venue-proto 契约 14](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RD-BIN`;生效 `funding_settle = BalanceOnlyPush`;推送 `FF1` = `{"e":"ACCOUNT_UPDATE","E":1790006400050,"T":1790006400000,"a":{"m":"FUNDING_FEE","B":[{"a":"USDT","wb":"999.65","cw":"999.65","bc":"-0.35"}],"P":[]}}`
 - 步骤:
   1. `decode_report(rd, ctx, AccountUpdate, FF1, &RX, &mut sink)`
@@ -1357,7 +1357,7 @@ BIN-026 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[用户流事件表](README.md#用户流事件表)、[hft-venue-proto 契约 22](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:同一 `GwCtx`;按行顺序喂入
 - 实现:`crates/venue-binance/tests/funding.rs::bin_114_funding_dedup`
 
@@ -1372,7 +1372,7 @@ BIN-026 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[用户流事件表](README.md#用户流事件表)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`FF1` 的 `B` 改写如列
 - 实现:`crates/venue-binance/tests/funding.rs::bin_115_funding_non_usdt`
 
@@ -1386,7 +1386,7 @@ BIN-026 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[用户流事件表](README.md#用户流事件表)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`FF1` 加 `"P":[{"s":"BTCUSDT","pa":"0.004","ep":"65000.1","up":"0","mt":"isolated","iw":"10","ps":"BOTH"}]`
 - 步骤:
   1. `decode_report`
@@ -1795,7 +1795,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 
 - 规则:[hft-venue-proto 契约 8](../hft-venue-proto/README.md#实现方必须遵守的契约)、[VenueCaps 默认值](README.md#venuecaps-默认值)、[外部成交识别](README.md#外部成交识别)、[8. 源文件规划](README.md#8-源文件规划)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`tests/contract.rs`;hft-venue-proto `testkit` feature;`RD-BIN`;每个检查用该产品线的金样作样本
 - 实现:`crates/venue-binance/tests/contract.rs::bin_174_contract_checks`
 
@@ -1932,7 +1932,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 
 - 规则:[依赖](README.md#依赖)、[2. 解码](README.md#2-解码)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`cargo tree -p venue-binance -e normal --prefix none`(默认特性与 `--all-features` 各一次)
 - 步骤:
   1. 收集包名集合
@@ -1944,7 +1944,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 
 - 规则:[`mock` 特性(给 mock-exchange 的反向编解码)](README.md#mock-特性给-mock-exchange-的反向编解码)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`cargo tree -p hft-core -e features --target aarch64-unknown-linux-gnu`
 - 步骤:
   1. 查找 `venue-binance feature "mock"`
@@ -2040,7 +2040,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 
 - 规则:[分档快照流](README.md#分档快照流)、[hft-venue-proto 契约 26](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/binance-usdm/depth5/`、`depth10/`、`depth20/` 各一条 `normal.in`;`depth20/dup_u.in`(同一 `u` 重复)、`depth20/short_levels.in`(冷门合约档数不足 20)、`depth5/empty_side.in`(`b` 为空数组);来源:待采集(方法 B:演示环境订阅 `/public` 各档 1 分钟;主网 collector 无该频道)
 - 期望文件:同目录 `<case>.expected.jsonl`(每条消息一条 `L2Snapshot{origin = TopN}`,按 `feed.snapshot_part_levels` 切片)
 - 实现:`crates/venue-binance/tests/golden.rs::bin_301_usdm_partial_depth`
@@ -2071,7 +2071,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/binance-usdm/forceOrder/` 的 `sell.in`、`buy.in`、`missing_o.in`;来源:collector raw WAL(`/market` 路由)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-binance/tests/golden.rs::bin_304_usdm_force_order`
@@ -2121,7 +2121,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 
 - 规则:[下单:WS API](README.md#下单ws-api)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/binance-usdm/order.modify/` 的 `ok.in`、`err_-2013.in`、`err_-1001.in`;来源:待采集(方法 B)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-binance/tests/golden.rs::bin_309_usdm_modify_responses`
@@ -2242,7 +2242,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 
 - 规则:[分档快照流](README.md#分档快照流)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/binance-spot/depth5/`、`depth10/`、`depth20/` 各一条 `normal.in`;`depth20/dup_lastUpdateId.in`、`depth20/short_levels.in`、`depth5/unknown_stream_symbol.in`;来源:待采集(方法 B:演示环境 `/stream` 订阅)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-binance/tests/golden.rs::bin_321_spot_partial_depth`
@@ -2405,7 +2405,7 @@ BIN-332 单元输入验证带符号的八位小数金额与 HalfEven 半值取�
 
 - 规则:[4. 订单帧模板](README.md#4-订单帧模板)
 - 级别:fuzz
-- 里程碑:M3
+- 里程碑:M9
 - 目标:`fuzz/fuzz_binance_encode_roundtrip`:任意字节构造 `GwCmd`(两个产品线、全部订单类 op)→ `encode`;`Ok` 时帧经 `sonic-rs` 解析,字段与 `GwCmd` 一致、`id` 解回 `(op, slot, gen)`;`Err` 只能是 `EncodeErr` 的四个变体之一
 - 语料:BIN-064–BIN-071 的 `GwCmd` 序列化 + 变异
 - 判定:零 panic、零单输入超时(口径见 [testing §3.3](../../docs/testing.md#33-fuzz));往返不一致按崩溃处理
@@ -2439,7 +2439,7 @@ BIN-332 单元输入验证带符号的八位小数金额与 HalfEven 半值取�
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M9
 - 基准名:`bench_decode_depth20`
 - 实现:`crates/venue-binance/benches/decode.rs::bin_503_decode_depth20`
 

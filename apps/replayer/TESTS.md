@@ -1671,7 +1671,7 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 
 - 规则:[latency](README.md#latency)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M7
 - 前置:合成 journal 跨两个 UTC 日(同一数据集);UTC 00:00 两侧 1 s 内没有同一次读出的记录(切点不拆分 `frames_in_read` 组)
 - 步骤:
   1. `--from D1T00:00Z --to D2T00:00Z` 运行写 `$OUT/d1`
@@ -1687,7 +1687,7 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 
 - 规则:[latency](README.md#latency)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:合成 journal:800 条 `Bbo`、200 条 `L2Snapshot{origin = TopN}`、50 条 `Trade`、10 条 `MarkPrice`、3 条 `Funding`、20 条 `ControlCmd`(无 `MarketHdr`)
 - 步骤:
   1. 同 RPL-190 运行
@@ -1713,7 +1713,7 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 
 - 规则:[latency](README.md#latency)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M7
 - 前置:合成 journal 两段:段 1 的 `HostProfile` 为主机类 `c16`、发布 `v1.0.0`;段 2 为 `c32`、`v1.0.0`
 - 步骤:
   1. 同 RPL-190 运行
@@ -1739,7 +1739,7 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 
 - 规则:[latency](README.md#latency)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:合成 journal:`binance-usdm` 600 条、`okx-swap` 400 条 `Bbo`
 - 实现:`apps/replayer/tests/latency.rs::rpl_200_venue_filter`
 
@@ -1754,7 +1754,7 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 
 - 规则:[latency](README.md#latency)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:合成 journal:三条 `Bbo` 的 UTC(记录头 `tsc` 经段头校准换算)分别为 T − 1 ns、T、T + 1 ns,另一条为 U − 1 ns、U;`--from T --to U`
 - 实现:`apps/replayer/tests/latency.rs::rpl_201_window_half_open`
 
@@ -1770,7 +1770,7 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 
 - 规则:[latency](README.md#latency)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:合成 journal:100 条 `Bbo` 的逐样本误差界为 900 ns,100 条为 1 100 ns;其中 50 条 `rx_empty_gap_ns = 40 000`、其余 0,每次读出 1 帧
 - 实现:`apps/replayer/tests/latency.rs::rpl_202_cli_thresholds`
 
@@ -1785,7 +1785,7 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 
 - 规则:[latency](README.md#latency)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M7
 - 输入:`fixtures/replay/latency-mini/`:合成 journal(一个数据集;`Bbo` 2 000 条,其中突发层 400 条;行情触发的 `LatencySample` 300 条,突发层 60 条、平静层 240 条);`--cal-max-err-ns 1000 --burst-gap-ns 50000`
 - 期望文件:`fixtures/replay/latency-mini/RPL-203/latency.json`(逐字段相等:`cfg`;`datasets[0]` 的 `host_profile`、`release`、`n`、`missing`、`gap_missing`、`negative`、`unsynced_cal`、`unsynced_cal_by_stratum`、`sw_anchor_share`、`groups`、`kernel_rx_hi`、`cal_err`、`probe_strata`;`probe_strata` 中平静层与突发层各有 p50/p99,权重为 0.8/0.2;样本不足的组其合成值为 `null`)
 - 实现:`apps/replayer/tests/latency.rs::rpl_203_latency_json_golden`
@@ -1820,7 +1820,7 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 
 - 规则:[实现说明](README.md#实现说明)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M7
 - 前置:合成 journal(1 h):每 1 000 ms 一条 `ClockStatus`,每秒 2 000 条行情记录;测试构建记录扫描器缓冲的峰值条数
 - 步骤:
   1. 同 RPL-190 运行
@@ -1961,7 +1961,7 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M5
 - 基准名:`replay-throughput`
 - 实现:`apps/replayer/benches/replay.rs::rpl_250_replay_throughput`
 
@@ -1981,7 +1981,7 @@ RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../..
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M7
 - 基准名:`latency_day`
 - 实现:`apps/replayer/benches/replay.rs::rpl_253_latency_day`
 

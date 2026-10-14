@@ -981,7 +981,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 - 规则:[cargo xtask gen-host](README.md#cargo-xtask-gen-host)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M7
 - 前置:夹具 `test-c32`;清单中网卡按 `device_index` 描述
 - 步骤:
   1. 运行 `cargo xtask gen-host --host test-c32`
@@ -993,7 +993,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 - 规则:[cargo xtask gen-host](README.md#cargo-xtask-gen-host)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`deploy/hosts/` 下有 `test-c32.toml`、`test-dev2.toml`
 - 步骤:
   1. 运行 `cargo xtask gen-host`
@@ -1154,7 +1154,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 - 规则:[其他 xtask 子命令](README.md#其他-xtask-子命令)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M6
 - 输入:`tools/xtask/tests/fixtures/extract/raw-journal/`(一个 raw journal 段,含同一连接上 3 条 `RawRx`,其中一条响应拆成 2 块)
 - 期望文件:`tools/xtask/tests/fixtures/extract/expected/*.in`(按连接拼接后的报文)
 - 实现:`tools/xtask/tests/fixtures_cmd.rs::tool_073_extract_raw_journal`
@@ -1177,7 +1177,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 - 规则:[其他 xtask 子命令](README.md#其他-xtask-子命令)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M6
 - 前置:`fixtures/binance-usdm/` 下有 5 个 `.in`
 - 步骤:
   1. 运行 `cargo xtask fixtures corpus binance-usdm`
@@ -1202,7 +1202,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 - 规则:[其他 xtask 子命令](README.md#其他-xtask-子命令)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M6
 - 前置:`tools/xtask/toolchains.toml` 的 nightly = `nightly-2026-09-01`;记录型执行器让目标 `binance-usdm` 报告一个崩溃输入 C(最小化后为 C')
 - 步骤:
   1. 运行 `cargo xtask fuzz binance-usdm --time 60`
@@ -1215,7 +1215,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 - 规则:[其他 xtask 子命令](README.md#其他-xtask-子命令)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M6
 - 前置:输入文件 `in.bin`
 - 步骤:
   1. 运行 `cargo xtask fuzz binance-usdm --repro in.bin`
@@ -1227,7 +1227,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 - 规则:[其他 xtask 子命令](README.md#其他-xtask-子命令)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M6
 - 前置:`fuzz-targets.toml` 登记 3 个目标,每夜每目标 1 分钟
 - 步骤:
   1. 运行 `cargo xtask fuzz --nightly`
@@ -2089,7 +2089,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 - 规则:[hft-cfg](README.md#hft-cfg)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`old.blob` 与 `new.blob`:新增 inst `okx-swap:AIN-USDT-SWAP`、删除账户 9、账户 3 的绑定从 `pc-main` 改为 `pc-b`、`binance-usdm` 能力行 `margin_data.interval_ms` 5000 → 2000、账户 4 的余额上限放宽
 - 步骤:
   1. `hft-cfg diff --old old.blob --new new.blob --json`
@@ -2104,7 +2104,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 - 规则:[hft-cfg](README.md#hft-cfg)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M5
 - 前置:本地替身 HTTP 服务返回录制的 instruments 响应(`fixtures/` 中服务器上实拉的样本):含合约乘数 1000 的 `1000PEPEUSDT`、乘数 3 的合约、一个交割合约、普通永续 `AINUSDT`
 - 步骤:
   1. `hft-cfg refdata fetch --venue binance-usdm --out insts-binance-usdm.toml`
