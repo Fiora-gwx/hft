@@ -111,12 +111,14 @@ fn oms_025_note_codes_registered() {
 
 #[test]
 fn oms_026_anomaly_kinds() {
-    // .1 Reject on a Live slot (OMS-056.2).
+    // .1 Reject contradicts a known fill (OMS-056).
     let mut h = H::new();
     let s = h.place_ok(&buy_x(), 0);
     h.ack(s, 1, 1);
     let mut e = h.oe(s, OrderEventKind::Reject);
     e.reject_code = 2010;
+    e.cum_filled = q("0.001");
+    e.avg_px = p("60000");
     h.ev(&e, 2);
     let a = h.notes(notes::ANOMALY);
     assert_eq!(

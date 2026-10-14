@@ -430,7 +430,7 @@ spec: README.md
 
 | 行 | 触发 | 期望 |
 |---|---|---|
-| OMS-026.1 | 回报处理表的异常格(OMS-056.2) | `Note{OmsAnomaly}`,`level = P1`,`v[0] = 1`(Table) |
+| OMS-026.1 | 回报处理表中 Reject 与已有成交矛盾(OMS-056.2) | `Note{OmsAnomaly}`,`level = P1`,`v[0] = 1`(Table) |
 | OMS-026.2 | `foreign` 表 FIFO 淘汰(OMS-110.2) | `level = P1`,`v[0] = 2`(ForeignEvict) |
 | OMS-026.3 | 冒烟单成交(OMS-267) | `level = P0`,`v[0] = 3`(SmokeFilled) |
 | OMS-026.4 | `ReconcileReport` 条目被忽略(OMS-145) | `level = P1`,`v[0] = 4`(ReconIgnored) |
@@ -736,9 +736,9 @@ spec: README.md
 | 行 | 状态 | 期望 |
 |---|---|---|
 | OMS-056.1 | `PendingNew` | → `Rejected`;`reject_code = 2010`;`OmsTransition{1 → 7, Reject(5)}`;`OrderUpdate::Rejected{bits: 0, venue_code: 2010}`;`open_buy`、`imm_buy` 各 −0.01;腿 0 即时 −0.01 |
-| OMS-056.2 | `Live` | 保持 `Live`;`Note{OmsAnomaly}`(`v[0] = 1`,P1);无 `OmsTransition` |
-| OMS-056.3 | `PendingCancel` | 保持;`OmsAnomaly{Table}` 一条 |
-| OMS-056.4 | `PendingAmend` | 保持;`OmsAnomaly{Table}` 一条 |
+| OMS-056.2 | `Live` | 零成交 → `Rejected`,释放在途、通知拥有者;有成交证据时保留成交及剩余在途并告警,新累计增量只记一次 |
+| OMS-056.3 | `PendingCancel` | 零成交 → `Rejected`;有成交同 OMS-056.2 |
+| OMS-056.4 | `PendingAmend` | 零成交 → `Rejected`;有成交同 OMS-056.2 |
 | OMS-056.5 | `Unknown`(prev `PendingNew`) | → `Rejected`;`unknown_count` −1;`OrderUpdate::Rejected{bits: 0, venue_code: 2010}` |
 | OMS-056.6 | `Filled` | 输出为空;`OmsStats.dup` +1 |
 | OMS-056.7 | `Cancelled` | 输出为空;`OmsStats.dup` +1 |
@@ -3889,7 +3889,7 @@ spec: README.md
 - 里程碑:M2
 - 输入:`fixtures/replay/oms-basic/`(下单、成交、链接、Unknown 收敛、外来成交、冒烟单)与 `fixtures/replay/oms-recover/`(含一次 `recovery_end` 与之后的新段)
 - 期望:`replayer verify` 对两个样本的意图流与状态哈希序列逐字节一致;第二个样本从 `purpose = Recovery` 快照起步的新段同样一致
-- 实现:`apps/replayer/tests/replay.rs::oms_410_replay_verify`
+- 实现:`apps/replayer/tests/tail.rs::oms_410_replay_verify`
 
 ### OMS-420 三所测试网与模拟盘联调中 Unknown 收敛与槽泄漏
 

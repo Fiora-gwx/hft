@@ -247,7 +247,13 @@ pub(crate) fn rebuild_all<S: StrategySet>(e: &mut Engine, inst: &mut Instances<S
 /// MARK|FUNDING), ② non-zero positions (perp: BBO|MARK|FUNDING, spot: BBO), ③ `ref_inst` (BBO).
 pub(crate) fn engine_subscriptions<S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>) {
     let perp = EvMask::BBO.0 | EvMask::MARK.0 | EvMask::FUNDING.0;
-    let mut add: Vec<(InstId, u8)> = Vec::new();
+    let mut add = |i: InstId, m: u8| {
+        if inst.subs.alloc(i).is_some()
+            && let Some(u) = inst.subs.union.get_mut(i.0 as usize)
+        {
+            *u |= m;
+        }
+    };
     for s in inst.slots.iter() {
         let Some(g) = s.groups() else { continue };
         for (_, sp) in g.iter() {
@@ -257,7 +263,7 @@ pub(crate) fn engine_subscriptions<S: StrategySet>(e: &mut Engine, inst: &mut In
                 } else {
                     EvMask::BBO.0
                 };
-                add.push((l.inst, m));
+                add(l.inst, m);
             }
         }
     }
@@ -269,19 +275,11 @@ pub(crate) fn engine_subscriptions<S: StrategySet>(e: &mut Engine, inst: &mut In
             } else {
                 EvMask::BBO.0
             };
-            add.push((id, m));
+            add(id, m);
         }
     }
     for (_, i) in e.setup.ledger.ref_inst.iter() {
-        add.push((*i, EvMask::BBO.0));
-    }
-    for (i, m) in add {
-        if inst.subs.alloc(i).is_none() {
-            continue;
-        }
-        if let Some(u) = inst.subs.union.get_mut(i.0 as usize) {
-            *u |= m;
-        }
+        add(*i, EvMask::BBO.0);
     }
 }
 

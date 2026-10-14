@@ -104,6 +104,7 @@ pub struct Queued {
 #[derive(Clone, Debug)]
 pub struct Notify {
     q: Vec<Queued>,
+    pub(crate) delivery: Vec<Queued>,
     used: [usize; 6],
     /// Set once a partition overflowed in this Input: everything after goes to the backlog.
     spilled: bool,
@@ -118,6 +119,7 @@ impl Notify {
     pub fn new(u: usize) -> Notify {
         Notify {
             q: Vec::with_capacity(NOTIFY_QUEUE_CAP),
+            delivery: Vec::with_capacity(NOTIFY_QUEUE_CAP),
             used: [0; 6],
             spilled: false,
             backlog: std::collections::VecDeque::with_capacity(4 * u),

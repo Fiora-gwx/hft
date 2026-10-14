@@ -160,7 +160,7 @@ impl Order {
                 }
             }
             Rep::Reject => {
-                if matches!(st, PendingNew | Unknown) {
+                if !st.terminal() && self.filled == 0 {
                     self.to(Rejected);
                 }
             }

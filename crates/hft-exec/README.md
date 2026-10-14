@@ -883,6 +883,8 @@ const _: () = assert!(size_of::<ExecRowHdr>() == 8 && size_of::<LegRef>() == 32 
 
 ## 测试与验收
 
+EXE-464 的文件回放入口位于 [replayer 测试](../../apps/replayer/TESTS.md):真实执行层场景导出保留物理编号的 journal,并验证普通运行与 Recovery 段中的 `ExecDecision` 和快照。
+
 默认关闭的 `testkit` feature 复制强制目标的仓位、前一目标、原始缩减比例与实际保存的目标,以及自动平仓计时触发与开始门控的只读诊断;三类缓冲各为 `max(8, cell_count × 8)`,只在构造时分配,溢出显式失败,不进快照与生产构建。跨组件验收归 [TK-109](../hft-testkit/TESTS.md#tk-109-真实保证金强制目标独立重算)。同一 feature 下 `Exec::account_params(account)` 只读返回该账户当前的执行参数,DST 的 `RiskRow` 由此观察 `broken_auto_fix_ms`([TK-176](../hft-testkit/TESTS.md#tk-176-每个检查器报告实际比较的条目数))。
 
 用例与验收见 [TESTS.md](TESTS.md)。

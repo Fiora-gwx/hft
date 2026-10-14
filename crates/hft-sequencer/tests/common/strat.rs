@@ -376,6 +376,8 @@ pub type SubScript = Vec<(InstId, u16, EvMask, Part)>;
 
 #[derive(Default)]
 pub struct Script {
+    /// Allocation regression tests disable the diagnostic formatting/log only.
+    pub quiet: bool,
     pub log: Vec<Got>,
     pub hook: Option<Hook>,
     /// Hooks that stay installed (deterministic triggers; they also run during verify replays).
@@ -573,6 +575,7 @@ macro_rules! test_set {
             fn on_event<V: Views>(s: &mut TestInst, ev: &EventRef<'_>, v: &V, ctx: &mut Ctx<'_>) {
                 s.n_events += 1;
                 let (kind, gix, inst) = event_name(ev);
+                let quiet = SCRIPT.with(|x| x.borrow().quiet);
                 let bbo = match ev {
                     EventRef::Bbo { b, .. } => Some(*b),
                     _ => None,
@@ -584,12 +587,18 @@ macro_rules! test_set {
                     gix,
                     inst,
                     now: v.now(),
-                    text: format!("{ev:?}"),
+                    text: if quiet {
+                        String::new()
+                    } else {
+                        format!("{ev:?}")
+                    },
                     bbo,
                 };
                 let (hook, mut persist) = SCRIPT.with(|x| {
                     let mut x = x.borrow_mut();
-                    x.log.push(got);
+                    if !quiet {
+                        x.log.push(got);
+                    }
                     (x.hook.take(), core::mem::take(&mut x.persist))
                 });
                 let w = W(v);

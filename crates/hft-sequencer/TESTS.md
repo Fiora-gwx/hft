@@ -280,7 +280,7 @@ spec: README.md
 - 生成:ctl/rep-A/rep-B/bbo-A/bbo-B/advice/md-A/rep-sim 各 0–300 条,到达时刻在 0–5 ms 内均匀抽取;每条处理耗时 0–20 µs;到期定时器 0–20 个
 - 参考:testkit 记录的 take 序列与 journal 中 Input 的 seq 序列逐项相等
 - 例数:PR 500;每夜 20 000
-- 实现:`crates/hft-sequencer/tests/preempt.rs::seq_012_take_order_is_journal_order`
+- 实现:`crates/hft-sequencer/tests/determinism.rs::seq_012_take_order_is_journal_order`
 
 ### SEQ-013 append 返回 Full 时 step 返回 Fatal(JournalFull) 且不出环
 
@@ -2534,7 +2534,8 @@ spec: README.md
 - 生成:B0 上 1–500 条策略意图,有效模式 ∈ {Live, CloseOnly, Shadow} 随机切换,令牌桶 0–10 个令牌,数量 0.0001–1
 - 参考:处理前后三项状态的快照相等(对 Shadowed/Rejected 的意图)
 - 例数:PR 1 000;每夜 50 000
-- 实现:`crates/hft-sequencer/tests/intents.rs::seq_175_shadow_rejected_no_side_effects`
+- 容量回归:订单槽满时写单条 `CAPACITY` 决策,slot/gen 为 0,不出环、不增加在途、不扣令牌;从此前快照回放同样拒绝。
+- 实现:`crates/hft-sequencer/tests/intents.rs::seq_175_capacity_rejection_is_journaled_and_replayable`
 
 ### SEQ-176 带 LegLink 的第一腿 Open 投影 link 字段
 
@@ -4523,7 +4524,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:本 crate 的 `clippy.toml` 与 `src/`;每行人为加入一处违规后跑 `cargo clippy -p hft-sequencer`
-- 实现:`crates/hft-sequencer/tests/lint.rs::seq_310_determinism_lints`
+- 实现:`crates/hft-sequencer/tests/determinism.rs::seq_310_determinism_lints`
 
 | 行 | 加入的违规 | 期望 |
 |---|---|---|
@@ -4603,7 +4604,8 @@ spec: README.md
   1. 处理 100 000 条混合 Input(行情、回报、命令含 `SetParams`、关键帧、段滚动、Drain)
 - 期望:
   - sequencer 线程上的分配与释放次数均为 0;被替换的参数对象经 `retire` 交出,不在本线程 drop
-- 实现:`crates/hft-sequencer/tests/determinism.rs::seq_315_zero_alloc`
+- 回报路径回归:`tests/sdk_alloc.rs::seq_315_order_reports_reuse_hot_buffers` 覆盖 Ack、部分/全部成交、重复回报与成交后 Reject;扣除内存 journal 测试接收器的逐记录分配后,引擎分配为零。全量混合 Input 验收仍归 M3。
+- 实现:`crates/hft-sequencer/tests/sdk_alloc.rs::seq_315_order_reports_reuse_hot_buffers`
 
 ### SEQ-316 sequencer 线程在稳态下不做系统调用
 

@@ -152,6 +152,8 @@ impl<S: Strategy> ModelHarness<S> {
 
 ### 6. DST 框架
 
+`scenarios/seq.rs` 的 SEQ-344 使用全部不变量、物理编号 journal、周期快照验证与同种子二次执行;它与 OMS/执行层场景共用注册表,由 DST 入口选择套件和种子。
+
 ```rust
 pub struct World<E> { /* 虚拟时间、按 (virtual_ns, gen_seq) 全序的事件堆 */ }
 pub fn actor_rng(seed: u64, a: ActorId) -> ChaCha8Rng;   // ChaCha8Rng::seed_from_u64(seed::derive(seed, actor 标签))

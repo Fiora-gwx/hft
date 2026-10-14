@@ -16,6 +16,7 @@ mod commands;
 mod common;
 mod config_blob;
 mod conflate;
+mod determinism;
 mod drain;
 mod env;
 mod exec_glue;

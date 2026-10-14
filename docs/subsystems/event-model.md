@@ -199,7 +199,7 @@ kind 编号**永不复用**;废弃的 kind 在 `hft-event` 中保留为 `#[depre
 2. **改语义用新 kind**:字段含义、单位、指数变化一律新 kind,旧 kind 保留读取能力。
 3. **每个 kind 有 `schema_version`**:记录在段头的 schema 表里;`gen-schema` 生成物带版本。
 4. **记录上限 64 KiB**:更大的内容(快照、大 blob)用 `Multi` 布局拆成多段,非末段置 `PART`;`Var` kind 必须声明尾部上限且整条 ≤ 64 KiB。
-5. **决策也是事件**:`OrderDecision`/`ExecDecision`(以及 optional 的 `SwapDecision`)记录策略输出、执行层选择、风控结果与 OMS 分配,使意图流可逐字节比对;不要只记录"发了什么帧"。
+5. **决策也是事件**:`OrderDecision`/`ExecDecision`(以及 optional 的 `SwapDecision`)记录策略输出、执行层选择、风控结果与 OMS 分配,使意图流可逐字节比对;未获 OMS 槽的容量拒绝也走 [意图管线](../../crates/hft-sequencer/README.md#意图管线)记录,不要只记录"发了什么帧"。
 6. **策略不登记事件**:策略的慢速输出用 `Advice` 的 `local_kind` 自行区分,参数用 schema,人工操作与冷启动预热数据分别用 `StrategyCmd`、`InjectWarmup` 命令的载荷,Note 码用 SDK `StrategyDesc.notes`;只有引擎需要理解的新事实(新回报类型、新账户状态)才新增 kind。
 7. 新增或修改 kind 的步骤见 [cookbook/adding-an-event-kind.md](../cookbook/adding-an-event-kind.md)。
 

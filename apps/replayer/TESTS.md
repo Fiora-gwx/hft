@@ -120,12 +120,12 @@ spec: README.md
 - 规则:[verify](README.md#verify)
 - 级别:replay
 - 里程碑:M2
-- 输入:`fixtures/replay/testkit-1h`(样本 T1);`replayer verify --journal $T1 --report $OUT/r.json`
+- 输入:真实写者生成的一小时 testkit 日志(`tests/fixture.rs::path_model(1)`,固定样本发布前的 T1 等价来源);`replayer verify --journal $T1 --report $OUT/r.json`
 - 期望:
   - 退出 0;`r.json`:`verify = "pass"`,无 `first_divergent_seq`、无 `component`
   - 分歧明细 `recovery_diffs` 为空;比较过的 Output 记录数 = T1 中 `B1` 之后的 Output 类记录数(不含 Meta)
   - 比较过的快照数 = T1 中 `StateSnapshot` 记录数(`B1`、`B2` 与全部关键帧)
-- 实现:`apps/replayer/tests/verify.rs::rpl_010_testkit_1h_consistent`
+- 实现:`apps/replayer/tests/tail.rs::rpl_010_testkit_1h_consistent`
 
 ### RPL-011 含 Sim 账户回报的 sim 实例 journal 回放一致且不读取模拟配置
 
@@ -207,12 +207,12 @@ spec: README.md
 - 规则:[verify](README.md#verify)
 - 级别:unit
 - 里程碑:M2
-- 前置:样本 T1 的副本;`B1` 之后第一条使测试策略产生 `OrderDecision` 的 `Bbo`(seq `x`)的买价加 1 tick
+- 前置:样本 T1 的副本;`B1` 之后第一条使测试策略产生 `OrderDecision` 的 `Bbo`(seq `x`)的买价移动 1 tick(当前夹具向下移,保持 bid < ask)
 - 步骤:
   1. `replayer verify --journal <副本>`
 - 期望:
   - 退出 1;分歧明细:seq = `x` 之后同一事件内的第一条 `OrderDecision` 的 seq,kind = `OrderDecision`,"最近快照 seq" = `B1`
-- 实现:`apps/replayer/tests/verify.rs::rpl_013_default_start_first_segment_snapshot`
+- 实现:`apps/replayer/tests/tail.rs::rpl_013_default_starts_at_first_snapshot`
 
 ### RPL-014 从 --from-seq 之前最近的快照起步
 
@@ -283,7 +283,7 @@ spec: README.md
   1. `replayer verify --journal <副本>`
 - 期望:
   - 退出 1;分歧 seq = `y`;期望侧(journal)kind = `Note`,实际侧为"重放未产生";`y` 之前的记录全部一致
-- 实现:`apps/replayer/tests/verify.rs::rpl_018_extra_output_in_journal`
+- 实现:`apps/replayer/tests/tail.rs::rpl_018_extra_logged_output_at_its_seq`
 
 ### RPL-019 重放产生而 journal 缺失的 Output 在该 seq 报分歧
 
@@ -295,7 +295,7 @@ spec: README.md
   1. `replayer verify --journal <副本>`
 - 期望:
   - 退出 1;分歧 seq = `z`;实际侧 kind = `OrderDecision`,期望侧为 journal 中 seq `z` 处的那条记录(原 `z + 1`)
-- 实现:`apps/replayer/tests/verify.rs::rpl_019_missing_output_in_journal`
+- 实现:`apps/replayer/tests/tail.rs::rpl_019_missing_logged_output_at_its_seq`
 
 ### RPL-020 journal 中风控参数被改动后报出第一条受影响的决策
 
@@ -315,12 +315,12 @@ spec: README.md
 - 规则:[verify](README.md#verify)
 - 级别:unit
 - 里程碑:M2
-- 前置:样本 T1 的副本;seq `b` 的 `Bbo` 的卖价最低位翻转(该变化使测试策略在同一事件内改变下单价)
+- 前置:样本 T1 的副本;seq `b` 的 `Bbo` 定价侧单字节翻转(当前 taker 夹具使用买价,翻转一个能改变 tick 取整结果且不使报价交叉的置位 bit,使按 tick 取整后的下单价改变)
 - 步骤:
   1. `replayer verify --journal <副本>`
 - 期望:
   - 退出 1;分歧 seq = `b` 之后第一条 `OrderDecision` 的 seq;字段级 diff 只含价格字段
-- 实现:`apps/replayer/tests/verify.rs::rpl_021_bbo_byte_flip`
+- 实现:`apps/replayer/tests/tail.rs::rpl_021_bbo_byte_first_affected_decision`
 
 ### RPL-022 测量字段与 Output 记录头 tsc 不参与比较
 
@@ -1852,7 +1852,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M2
 - 前置:三段的合成 journal(段 1–3);每行只做该行改动
-- 实现:`apps/replayer/tests/input.rs::rpl_222_broken_chain_exit_3`
+- 实现:`apps/replayer/tests/tail.rs::rpl_222_chain_gap_hash_and_valid_suffix`
 
 | 行 | 改动 | 期望 |
 |---|---|---|

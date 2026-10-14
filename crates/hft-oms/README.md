@@ -474,7 +474,7 @@ pub struct VenueAcctTable {            // 每 (venue, account) 一个
 | 回报 \ 状态 | PendingNew | Live | PendingCancel | PendingAmend | Unknown | 终态 |
 |---|---|---|---|---|---|---|
 | `Ack` | → Live,记 `exch_order_id` | dup | 保持(迟到的新单回执) | 保持 | → Live(证据) | dup |
-| `Reject` | → Rejected | 异常 Note,保持 | 异常 Note | 异常 Note | → Rejected | dup |
+| `Reject` | 零成交 → Rejected;有成交见下文 | 同左 | 同左 | 同左 | 同左 | 无成交证据 dup;有成交见下文 |
 | `PartialFill` | 应用增量 → Live,置 `FILL_BEFORE_ACK` | 应用增量 | 应用增量,保持 | 应用增量,保持 | 应用增量 → prev_state 或 Live | Cancelled 时应用增量 + 异常;Filled dup |
 | `Fill`(cum==qty) | → Filled(fill-before-ack,置 `FILL_BEFORE_ACK`) | → Filled | → Filled | → Filled | → Filled | Cancelled 时 → Filled + 异常;Filled dup |
 | `CancelAck` / `Expired` | → Cancelled(撤掉未确认的单) | → Cancelled(交易所主动撤/IOC 余量) | → Cancelled | → Cancelled | → Cancelled | dup |
@@ -493,6 +493,7 @@ pub struct VenueAcctTable {            // 每 (venue, account) 一个
 - `Unknown` 收到 `PartialFill` 时回到 `prev_state`(`prev_state ∈ {PendingCancel, PendingAmend}`),否则回到 `Live`。
 - "终态"列中 `Rejected` 与 `Cancelled` 同样处理(应用增量、异常 Note 并请求对账;`Fill` → `Filled`)。
 - "原因=已成交/不存在"由 venue 协议按其 `codes.rs` 判定,经 `OrderEvent.detail = GONE` 给出;`QueryResult` 的订单状态同样取 `OrderEvent.detail`(码与 `ReconcileReport.order_status` 相同:New=1 … NotFound=7)。字段布局归 [hft-event](../hft-event/README.md)。
+- `Reject` 仅在槽内 `filled = 0` 且回报 `cum_filled = 0` 时把非终态槽变为 `Rejected`,包括 Ack 之后及撤改在途;释放在途并保留交易所拒绝码。有成交证据时不以 Reject 释放剩余在途,先按累计量应用真实增量并写 `OmsAnomaly{Table}`;已有终态不回退,重复回报不重复入账。
 - 交易所 `Reject` 给拥有者 `OrderUpdate::Rejected{bits: 0, venue_code: reject_code}`;`Rejected(NOT_FOUND)` = 状态 `Rejected`、`reject_code = 0`,迁移原因 `NotFoundExpire`(过期保护定终态)或 `Reconcile`(成交历史确认),给拥有者 `Rejected{bits: 0, venue_code: 0}`。
 
 ### SendReport 处理
@@ -1025,6 +1026,8 @@ const _: () = assert!(size_of::<TableRow>() == 32 && size_of::<LinkRowHdr>() == 
 - 禁止:`hft-ledger`、`hft-risk`、`hft-exec`(L1 互不依赖;与 hft-exec 的交换由 sequencer 用 SDK 类型与各自的输出结构投影完成;风控参数经 `HedgePxLimits` 传入)、`hft-sequencer`、`hft-strat-lib`、任何 `strategies/*`、`hft-venue`、`venue-*`、任何 I/O 或 `std::time`。
 
 ## 延伸阅读
+
+- [容量与 Ack 后 Reject 的成交保护](../../.agents/notes/implemented/bug-fix/2026-10-14-order-capacity-and-late-reject.md)
 
 - [外来结算来源与水位的决定](../../.agents/notes/implemented/bug-fix/2026-10-12-foreign-cash-cursors.md)
 

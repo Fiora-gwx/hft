@@ -212,4 +212,6 @@ impl RejectBits {
     pub const LINK_STALE: Self = RejectBits(1 << 28);
     /// Linked open: the second leg cannot fund the link.
     pub const LINK_FUNDS: Self = RejectBits(1 << 29);
+    /// OMS order or link slots are exhausted; no order was created or sent.
+    pub const CAPACITY: Self = RejectBits(1 << 30);
 }

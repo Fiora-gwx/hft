@@ -23,6 +23,54 @@ use crate::common::*;
 #[global_allocator]
 static ALLOC: CountingAlloc = CountingAlloc;
 
+#[test]
+fn seq_315_order_reports_reuse_hot_buffers() {
+    reset_script();
+    let mut h = b0().boot();
+    h.steady();
+    set_hook(|hx, ev, ctx| {
+        if let EventRef::Bbo { inst, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+        {
+            let _ = ctx.place(pair_first(hx, q("0.01")));
+        }
+    });
+    let m = h.mark();
+    h.quote(A1, "50000", "50003");
+    h.run();
+    clear_hook();
+    let d = decisions(&h.since(m))[0].1;
+    SCRIPT.with(|s| s.borrow_mut().quiet = true);
+    // The rig records diagnostics in growable collections. Reserve those outside the
+    // measured path. MemJournal still makes exactly one body Vec per appended record;
+    // count that explicit test-sink cost separately from sequencer allocations.
+    h.io().handed.reserve(4096);
+    h.io().out.reserve(4096);
+    h.io().push_committed.reserve(4096);
+    h.io().j.segments.last_mut().unwrap().records.reserve(4096);
+    for (what, cum) in [
+        (hft_event::OrderEventKind::Ack, "0"),
+        (hft_event::OrderEventKind::PartialFill, "0.004"),
+        (hft_event::OrderEventKind::PartialFill, "0.004"),
+        (hft_event::OrderEventKind::Fill, "0.01"),
+        (hft_event::OrderEventKind::Reject, "0.01"),
+    ] {
+        let mut ev = order_event(&d, what, h.epoch());
+        ev.cum_filled = q(cum);
+        ev.avg_px = d.px;
+        h.push(hft_sequencer::driver::live::RingId::Rep(0), &ev);
+        let before = h.mark();
+        let scope = CountingAlloc::scope();
+        h.run();
+        let allocations = scope.allocs();
+        let sink_bodies = (h.mark() - before) as u64;
+        assert_eq!(allocations, sink_bodies, "engine allocated on {what:?}");
+    }
+    assert_eq!(h.s.engine().ledger.pos(AC1, A1).qty, q("0.01"));
+    SCRIPT.with(|s| s.borrow_mut().quiet = false);
+}
+
 /// `SeqRig` (crates/hft-sequencer/tests/sdk_contract/mod.rs `rig`): B0 with s1 on the three
 /// `GT3` groups (inst 23 added), steady.
 fn rig() -> H {

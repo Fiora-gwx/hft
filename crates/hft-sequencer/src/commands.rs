@@ -194,6 +194,7 @@ pub struct CmdState {
     pub blobs: BlobStore,
     pub recon: Vec<ReconGroupState>,
     pub legs_touched: Vec<GroupId>,
+    pub legs_spare: Vec<GroupId>,
     pub conns: ConnTable,
     pub unknown_last: Vec<u32>,
     pub feeds_last: Vec<bool>,
@@ -438,7 +439,7 @@ const _: () = assert!(core::mem::offset_of!(FillSeqRow, inst) == 4);
 const _: () = assert!(core::mem::offset_of!(FillSeqRow, seq) == 8);
 
 impl CmdState {
-    pub fn new(recent: usize, rd: &RefData) -> CmdState {
+    pub fn new(recent: usize, cells: usize, rd: &RefData) -> CmdState {
         let z = crate::strategies::zero_blob();
         CmdState {
             dedup: VecDeque::with_capacity(recent),
@@ -453,7 +454,8 @@ impl CmdState {
             },
             blobs: BlobStore::default(),
             recon: Vec::with_capacity(8),
-            legs_touched: Vec::with_capacity(16),
+            legs_touched: Vec::with_capacity(cells),
+            legs_spare: Vec::with_capacity(cells),
             conns: ConnTable::default(),
             unknown_last: vec![u32::MAX; 256],
             feeds_last: vec![false; 256],
