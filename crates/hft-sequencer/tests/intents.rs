@@ -874,8 +874,8 @@ fn seq_352_link_valid_precheck() {
                 .iter()
                 .filter(|r| r.flags.0 & RecordFlags::SHADOW.0 != 0)
                 .count(),
-            0,
-            "{row}: not SHADOW"
+            usize::from(shadow),
+            "{row}: preserve Shadow mode on the recorded rejection"
         );
         assert_eq!(tr_eval, 0, "{row}");
         assert_eq!(tr_mode, 0, "{row}");
@@ -890,7 +890,11 @@ fn seq_352_link_valid_precheck() {
         );
         assert_eq!(
             outcome.borrow().first().copied(),
-            Some(Some(IntentOutcome::Rejected(RejectBits::INVALID))),
+            Some(Some(if shadow {
+                IntentOutcome::Shadowed
+            } else {
+                IntentOutcome::Rejected(RejectBits::INVALID)
+            })),
             "{row}"
         );
     }

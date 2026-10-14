@@ -2525,7 +2525,8 @@ spec: README.md
 - 期望:
   - 3 条 `OrderDecision` 都带 `SHADOW` 位;之后令牌剩余仍为 5、空闲槽仍为 64、`v.legs(A1, G1).leg[0].inflight_immediate = 0`
   - Shadow 与 Live 的首个风控拒绝位相同;Shadow 同时带 SHADOW,slot=0、outcome=Shadowed,无 GwCmd;资源不变
-- 实现:`crates/hft-sequencer/tests/sdk_contract/mode.rs::sdk_165_shadow_no_commit`、`crates/hft-sequencer/tests/sdk_contract/mode.rs::sdk_165_shadow_records_live_risk_result`
+- 实现:`crates/hft-sequencer/tests/sdk_contract/mode.rs::sdk_165_shadow_no_commit`
+- 风控结果补充实现:`crates/hft-sequencer/tests/sdk_contract/mode.rs::sdk_165_shadow_records_live_risk_result`
 
 ### SDK-166 目标在各有效模式下的增仓与减仓部分
 

@@ -4974,7 +4974,7 @@ spec: README.md
 | SEQ-352.1 | 无(`role = First`、OnFill、`Retry`、`Ioc`) | 照常经模式门与检查链,出环 |
 | SEQ-352.2 | `role = Second` | 一条 `OrderDecision{reject = INVALID}`;`Ctx::outcome = Rejected(INVALID)`;`risk.evaluate` 未被调用;令牌、在途、槽都不变;无出环 |
 | SEQ-352.3 | `kind = Simultaneous`、`on_fail = Retry` | 同 .2 |
-| SEQ-352.4 | 期望模式 Shadow 且 `role = Second` | 同 .2(结构检查先于模式门,不写 `SHADOW`) |
+| SEQ-352.4 | 期望模式 Shadow 且 `role = Second` | `OrderDecision{SHADOW, reject = INVALID}`、结果 Shadowed;结构检查仍先短路,不调用 evaluate、不扣资源、不出环 |
 
 ### SEQ-353 OMS 的 P0 级 OmsUnknown 在同一 Input 内设 UnknownTimeout cap
 
