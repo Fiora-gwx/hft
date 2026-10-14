@@ -2971,7 +2971,7 @@ spec: README.md
 
 - 规则:[启动顺序](README.md#启动顺序)、[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M2
+- 里程碑:M3
 - 基准名:`startup-cold`(两组:空尾部;尾部 = `keyframe_max_events` 条)
 - 实现:`benchmarks/startup-cold/main.rs::core_267_startup_cold`
 

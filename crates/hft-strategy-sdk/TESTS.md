@@ -239,7 +239,7 @@ spec: README.md
 
 - 规则:[策略包的三部分](README.md#策略包的三部分)、[确定性规则](README.md#确定性规则)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 前置:`tools/xtask/tests/fixtures/strategy-x/` 是按 strategies/AGENTS.md 模块约定生成的最小策略 crate(`cargo clippy` 与 `cargo xtask hot-check` 在原样上退出 0);每行只做该行一处改动
 - 实现:`tools/xtask/tests/hot_check_strategy.rs::sdk_011_fast_and_model_prohibitions`
 
@@ -264,7 +264,7 @@ spec: README.md
 
 - 规则:[依赖](README.md#依赖)、[规划源文件](README.md#规划源文件)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:SDK crate 的副本
 - 步骤:
   1. 原样运行 `cargo clippy -p hft-strategy-sdk` 与 `cargo xtask hot-check`
@@ -1860,7 +1860,7 @@ spec: README.md
 
 - 规则:[参数编解码器的使用方](README.md#参数编解码器的使用方)、[参数编解码器(`params` 模块,唯一实现)](README.md#参数编解码器params-模块唯一实现)
 - 级别:golden
-- 里程碑:M2
+- 里程碑:M9
 - 输入:`fixtures/params/sdk-tp/*.input.toml` 与 SDK-112 的命令 `(op, vals)` 清单
 - 期望文件:`fixtures/params/sdk-tp/<case>.blob`
 - 前置:hft-cfg 二进制与 hft-py wheel 由同一提交构建
@@ -3046,7 +3046,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M3
 - 前置:`cargo xtask new-strategy probe-x --kind-id 0xFF20` 在临时副本中生成;每行一种生成选项
 - 实现:`tools/xtask/tests/new_strategy.rs::sdk_206_template_budget_entries`
 

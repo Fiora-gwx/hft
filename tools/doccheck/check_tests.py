@@ -40,7 +40,7 @@ problems = defaultdict(list)
 warnings = defaultdict(list)
 
 LEVELS = {"unit", "table", "prop", "golden", "fuzz", "bench", "dst", "integ", "proc", "replay", "host", "testnet", "drill"}
-MILESTONES = {"M1", "M1.5", "M2", "M3", "M4", "M5", "M6", "M7", "M8"}
+MILESTONES = {"M1", "M1.5", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9"}
 COMMON = ["规则", "级别", "里程碑", "实现"]
 BY_LEVEL = {
     "unit": ["前置", "步骤", "期望"],

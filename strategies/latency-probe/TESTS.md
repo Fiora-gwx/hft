@@ -1050,7 +1050,7 @@ spec: README.md
 
 - 规则:[产生的延迟样本](README.md#产生的延迟样本)、[quote 探测](README.md#quote-探测)、[用途与运行要求](README.md#用途与运行要求)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M3
 - 前置:`strategies/registry/tests/latency_probe_scenarios.rs`;registry 的 `Strategies` 实例化 hft-testkit 场景;`RL1` 的 T1 为 Live 测试网账户、V2 由 `MockVenue`(hft-sim `SimExchange`)模拟,PostOnly 远离对手价不成交;`RiskParams`:I2 的 `max_px_dev = 50_000_000`(≥ `far_bp`)、令牌桶足够;`PP0`;[`GQ`];脚本行情:I2 的 `Bbo` 在 t = 0、100、200 … ms 各一条,共 1 h;另有 5 段各 3 s 无 `Bbo`,每段从某次探测之后 50 ms 开始、段间相隔 ≥ 10 min;`MockVenue` 的 Ack 与撤单回报延迟 5 ms
 - 步骤:
   1. 运行 1 h 脚本
@@ -1063,7 +1063,7 @@ spec: README.md
 
 - 规则:[产生的延迟样本](README.md#产生的延迟样本)、[quote 探测](README.md#quote-探测)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M3
 - 前置:同 LPR-065,但 [`GX`](leg 0 = I2 @ V2、leg 1 = I3 @ V3),V2 与 V3 各一个 `MockVenue`;两腿 `Bbo` 都每 100 ms 一条,10 min,无空白
 - 步骤:
   1. 运行 10 min
@@ -1076,7 +1076,7 @@ spec: README.md
 
 - 规则:[pair 探测](README.md#pair-探测)、[产生的延迟样本](README.md#产生的延迟样本)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M3
 - 前置:同 LPR-065 的装配;[`GPP`](mode pair);两个 `MockVenue` 的盘口可成交;`RiskParams` 的 `ioc_max_cross ≥ pair_cross`;运行 5 个 `pair_period_ms`
 - 步骤:
   1. 运行脚本
@@ -1088,7 +1088,7 @@ spec: README.md
 
 - 规则:[target 探测](README.md#target-探测)、[产生的延迟样本](README.md#产生的延迟样本)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M3
 - 前置:同 LPR-067,[`GTS`](mode target,A = I1、B = I3)
 - 步骤:
   1. 运行 3 个 `target_period_ms`
@@ -1100,7 +1100,7 @@ spec: README.md
 
 - 规则:[pair 探测](README.md#pair-探测)、[事件处理](README.md#事件处理)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M3
 - 前置:同 LPR-067;B 所在 `MockVenue` 拒绝全部新单
 - 步骤:
   1. 运行到第一腿成交后 3 个 `pair_period_ms`
@@ -1112,7 +1112,7 @@ spec: README.md
 
 - 规则:[用途与运行要求](README.md#用途与运行要求)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M3
 - 前置:同 LPR-065(无空白),但 I2 的 `max_px_dev = 20_000_000`(< `far_bp` 30_000_000);运行到 t = 600_000 ms 那条 `Bbo`(含)
 - 步骤:
   1. 运行脚本
@@ -1124,7 +1124,7 @@ spec: README.md
 
 - 规则:[quote 探测](README.md#quote-探测)、[pair 探测](README.md#pair-探测)、[target 探测](README.md#target-探测)、[事件处理](README.md#事件处理)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M3
 - 前置:`strategies/registry/tests/latency_probe_dst.rs`;`RL1` 另加 ETH 的 `I5`(V2 永续)、`I6`(V3 永续)与 SOL 的 `I7`(V2 永续)、`I8`(V3 永续);GroupTable [`GQ`(I2), quote_xgw 组 (I5, I6), pair 组 (I7, I8), target 组 (I1, I3)];`PP0`
 - 故障:Ack 丢失与 `Unknown`、撤单被拒(已成交)、行情与下单连接断开重连、限速 429、部分成交、第二腿被拒、切片 `Stuck`、任意时刻崩溃后重启(hft-testkit 故障目录对应各项)
 - 种子:PR 200(提交派生)+ 回归集;每夜日期派生(`cargo xtask dst --strategy latency-probe`)

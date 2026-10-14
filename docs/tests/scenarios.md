@@ -81,7 +81,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[冷启动恢复(RecoverDriver)](../../crates/hft-sequencer/README.md#冷启动恢复recoverdriver)、[每条 Input 的处理顺序](../../crates/hft-sequencer/README.md#每条-input-的处理顺序process)、[写者](../../crates/hft-journal/README.md#写者)、[提交游标](../subsystems/journal-format.md#提交游标)、[启动顺序](../../apps/hft-core/README.md#启动顺序)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:⑤
 - 前置:W1;`keyframe_period_ms = 60000`,`keyframe_max_events = 200000`;实例 1 为 probe-taker,按种子行情在 g1 上发带 `LegLink` 的两腿意图(第一腿 `S1` 买 0.01 BTC IOC,第二腿 `P1` 卖,`HedgePlan{OnFill, on_fail = Retry}`);`hedge_deadline_ms = 3000`,`hedge_retry_min_ms = 100`
 - 故障:`CrashFault{at_step}` 一次,`at_step` 由种子选在某个 Input 的处理中途——该 Input 与它的至少一条 Output 已 `append`、`end_event` 未调用;种子集中至少 30% 的崩溃点落在第一腿成交回报(`OrderEvent{Fill}`)的处理中途(其第二腿 `OrderDecision{New}` 已 `append`);崩溃后停机 0 s 重启一次
@@ -99,7 +99,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[快照](../../crates/hft-sequencer/README.md#快照)、[冷启动恢复(RecoverDriver)](../../crates/hft-sequencer/README.md#冷启动恢复recoverdriver)、[段滚动与引导块](../subsystems/journal-format.md#段滚动与引导块)、[快照记录结构](../subsystems/journal-format.md#快照记录结构)、[恢复与校验](../../crates/hft-journal/README.md#恢复与校验)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:⑤
 - 前置:W1;`keyframe_period_ms = 1000`,`keyframe_max_events = 100000`;实例 1、2 为 probe-target,t = 0.1 s 各设一次 `TakerSlice` 目标(`S1` +0.01 BTC);段内已有关键帧 K1(t = 0 后第一次到期写出,seq = k1)
 - 步骤:
@@ -122,7 +122,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[冷启动恢复(RecoverDriver)](../../crates/hft-sequencer/README.md#冷启动恢复recoverdriver)、[恢复:停机时间不计与闸门续接](../../crates/hft-oms/README.md#恢复停机时间不计与闸门续接)、[Unknown 收敛流程](../../crates/hft-oms/README.md#unknown-收敛流程)、[启动闸门](../../crates/hft-risk/README.md#启动闸门)、[检查链](../../crates/hft-risk/README.md#检查链按廉价--昂贵短路适用范围以本表为唯一定义)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:⑤
 - 前置:W1;实例 1 为 probe-target;`ack_timeout_ms[VS] = 2000`,`unknown_query_interval_ms = 1000`,`not_found_grace_ms[VS] = 2000`,`unknown_alarm_ms = 30000`,`unknown_blocks_open = true`,`auto_resume_after_clean_drain = true`
 - 步骤:
@@ -151,7 +151,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[版本变化与回滚](../../crates/hft-sequencer/README.md#版本变化与回滚)、[冷启动恢复(RecoverDriver)](../../crates/hft-sequencer/README.md#冷启动恢复recoverdriver)、[干净 Drain 重启自动解除 Recovery](../../crates/hft-risk/README.md#干净-drain-重启自动解除-recovery)、[命令行与退出码](../../apps/hft-core/README.md#命令行与退出码)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:⑤
 - 前置:W1;两个构建 A、B:`WriterEnv.build_git` 不同,实例 1(probe-taker)的 `StrategyDesc.version` A = 3、B = 4(B 的 `restore` 接受 3 与 4);`auto_resume_after_clean_drain = true`
 - 步骤:
@@ -174,7 +174,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[恢复时决策不一致](../../crates/hft-sequencer/README.md#恢复时决策不一致)、[冷启动恢复(RecoverDriver)](../../crates/hft-sequencer/README.md#冷启动恢复recoverdriver)、[启动闸门](../../crates/hft-risk/README.md#启动闸门)、[干净 Drain 重启自动解除 Recovery](../../crates/hft-risk/README.md#干净-drain-重启自动解除-recovery)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M9
 - 门槛:⑤
 - 前置:W1;同一构建;实例 1、2 为 probe-taker;最近关键帧 K 在 t = 1.0 s
 - 步骤:
@@ -196,7 +196,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[毒丸输入隔离](../../crates/hft-sequencer/README.md#毒丸输入隔离)、[崩溃隔离与从快照恢复](../../apps/hft-core/README.md#崩溃隔离与从快照恢复)、[持久元数据](../../crates/hft-journal/README.md#持久元数据engine_epoch-等)、[干净 Drain 重启自动解除 Recovery](../../crates/hft-risk/README.md#干净-drain-重启自动解除-recovery)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:⑤
 - 前置:W1;`startup.poison_crash_limit = 2`;`keyframe_period_ms = 60000`;实例 1、2 为 probe-taker
 - 故障:t = 10 s 第一次崩溃(随种子落在任意 Input 中途),恢复区间 R = (最近快照 seq, 截断后末条 seq];第 1、2 次重启各在重放 R 的同一 Input 中途 `CrashFault`(`repeat = 2`);第 3 次重启不注入故障
@@ -218,7 +218,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[版本变化与回滚](../../crates/hft-sequencer/README.md#版本变化与回滚)、[崩溃隔离与从快照恢复](../../apps/hft-core/README.md#崩溃隔离与从快照恢复)、[段滚动与引导块](../subsystems/journal-format.md#段滚动与引导块)、[对账闸门与 HARD 解除的严格条件](../../crates/hft-risk/README.md#对账闸门与-hard-解除的严格条件)、[人工干预的采纳](../../crates/hft-ledger/README.md#人工干预的采纳adoptexchange)、[启动闸门与严格放行](../../apps/reconciler/README.md#启动闸门与严格放行)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:⑤
 - 前置:W1;构建 A(旧)与 B(新)的 `build_git` 不同,实例 1 的 `StrategyDesc.version` A = 3(接受 2、3)、B = 4(接受 3、4);`VS` 的 `VenueCaps.flags` 含 `BATCH_CANCEL`;`DurableMeta.engine_epoch` 初值 10
 - 步骤:
@@ -245,7 +245,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[对账闸门与 HARD 解除的严格条件](../../crates/hft-risk/README.md#对账闸门与-hard-解除的严格条件)、[启动闸门](../../crates/hft-risk/README.md#启动闸门)、[对账分级](../../crates/hft-risk/README.md#对账分级全系统唯一一次)、[ReconcileReport](../../apps/reconciler/README.md#reconcilereport)、[人工干预的采纳](../../crates/hft-ledger/README.md#人工干预的采纳adoptexchange)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:⑤
 - 前置:W1;账户 a 崩溃后重启(非干净);a 的闸门输入除 `RECONCILED` 外齐备;`recon_gate_items = 64`;BTC 的 `AssetMeta.dust` = 0.00001
 - 步骤:
@@ -274,7 +274,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[干净 Drain 重启自动解除 Recovery](../../crates/hft-risk/README.md#干净-drain-重启自动解除-recovery)、[Drain](../../crates/hft-sequencer/README.md#drain)、[HARD 解除时的 Broken 判定](../../crates/hft-exec/README.md#hard-解除时的-broken-判定resolve_broken)、[命令路径](../../crates/hft-sequencer/README.md#命令路径)、[启动顺序](../../apps/hft-core/README.md#启动顺序)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:⑤
 - 前置:W1;同一构建;`auto_resume_after_clean_drain = true`;`dust_notional = 10 USDT`,`fix_tolerance_default = 0.15`;账户 a 的 g1 持有 `S1` +0.01000、`P1` −0.010 BTC(无裸量)
 - 步骤:
@@ -299,7 +299,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[恢复:停机时间不计与闸门续接](../../crates/hft-oms/README.md#恢复停机时间不计与闸门续接)、[OnFill](../../crates/hft-oms/README.md#onfill)、[启动闸门](../../crates/hft-risk/README.md#启动闸门)、[冷启动恢复(RecoverDriver)](../../crates/hft-sequencer/README.md#冷启动恢复recoverdriver)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:⑤
 - 前置:W1;实例 1 为 probe-taker;`hedge_deadline_ms = 3000`,`hedge_retry_min_ms = 100`,`hedge_retry_max = 3`,`resume_hold_max_ms = 30000`,`P1` 所属价格带类别 `rr_max_cross = 0.005`
 - 步骤:
@@ -322,7 +322,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[定时器](../../crates/hft-sequencer/README.md#定时器)、[引擎时间](../../crates/hft-sequencer/README.md#引擎时间engine_ns)、[快照与恢复](../../crates/hft-exec/README.md#快照与恢复)、[Broken 处置](../../crates/hft-exec/README.md#broken-处置)、[保证金分档](../../crates/hft-risk/README.md#保证金分档marginstress)、[令牌桶](../../crates/hft-risk/README.md#令牌桶)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:⑤
 - 前置:W1;上次运行 `tsc_hz_milli` = 2,500,000,000,000;`deleverage_deadline_ms = 30000`,`liq_dist_reduce = 0.15`,`liq_dist_force = 0.10`,`broken_auto_fix_ms = 120000`;崩溃前状态:实例 1 的一个策略定时器在崩溃时还剩 400 ms(截止引擎时间 E_d);账户 a 处于 MarginStress L2 已 12 000 ms(`deadline_ens` 还剩 18 000 ms);账户 b 的 g2 `Broken`(现货腿多出)已 50 000 ms,`VS`、`VP` 都已放行
 - 步骤:
@@ -347,7 +347,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[Model 检查点](../../crates/hft-strategy-sdk/README.md#model-检查点)、[模型检查点](../../crates/hft-sequencer/README.md#模型检查点)、[advisor 与 Model](../../crates/hft-sequencer/README.md#advisor-与-model)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M9
 - 门槛:⑤
 - 前置:W1;实例 1 为 probe-target(带 Model,`LAYOUT_VERSION = 1`、`PATH_VERSION = 1`、`schema.id` = S);`advisor.model_checkpoint_ms = 60000`;参考运行 = 同一 journal 不停机连续运行得到的 Advice 序列
 - 步骤:
@@ -373,7 +373,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[模式与上限的统一优先级](../subsystems/control-plane.md#模式与上限的统一优先级)、[命令集](../subsystems/control-plane.md#命令集)、[有效模式](../../crates/hft-risk/README.md#有效模式)、[模式与 cap 的驱动](../../crates/hft-sequencer/README.md#模式与-cap-的驱动)、[运行模式下意图的行为表](../../crates/hft-strategy-sdk/README.md#运行模式下意图的行为表)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④
 - 前置:W1;实例 1 为 `probe-taker`;t = 0 时 g1 持仓 `S1` +0.10000 BTC、`P1` −0.100 BTC,无在途,LegTracker 残余 0;`probe-taker` 参数:t = 10 s 以平仓链接平掉 g1(第一腿 `S1` 卖 0.10000,第二腿 `P1` 买 0.100,`HedgePlan.reduce_only = 1`),另自 t = 2 s 起每 1 s 试发一笔 0.001 BTC 的 Open 链接;`conn_liveness_ms = 2000`
 - 故障:t = 1 s Trader 发 `SetMode{strategy = 1, group = g1, account = a, mode = Shadow}`(降级,不确认);两腿回报时延由种子在 10–200 ms 内抽取
@@ -472,7 +472,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[令牌桶](../../crates/hft-risk/README.md#令牌桶)、[输出扇出](../../crates/hft-oms/README.md#输出扇出)、[输出扇出](../../crates/hft-sequencer/README.md#输出扇出)、[检查链](../../crates/hft-risk/README.md#检查链按廉价--昂贵短路适用范围以本表为唯一定义)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M9
 - 门槛:④
 - 前置:W1;实例 1(账户 a)为 `probe-target`,目标使它在 `P1` 上连续发 Open 切片(每片 0.001 BTC,`cooldown_ms = 0`);实例 2(账户 b)为 `probe-taker`,每 2 s 发一笔 0.001 BTC 的 PairOnFill 开仓链接(第一腿 `S1` 买,第二腿 `P1` 卖);OMS `max_out_per_event = 16`、`out_quota[(VP, a)] = out_quota[(VP, b)] = 64`;VP 的 `RateLimitTable` 10 s 窗口 300、分钟窗口 1,200,`rate_headroom = 0.10`(容量 270 / 1,080);(VP, a)、(VP, b) 的 `rr_reserve = 0.20`、`backoff_base_ms = 500`、`backoff_max_ms = 8000`
 - 故障:t ∈ [0, 60 s) `MockVenue` 对账户 a 在 VP 上的每个 Place 回限速错误(`RateLimitHit`);账户 b 不受影响
@@ -514,7 +514,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[版本与确认](../subsystems/control-plane.md#版本与确认)、[类别](../subsystems/control-plane.md#类别)、[命令路径](../../crates/hft-sequencer/README.md#命令路径)、[权限表](../../crates/hft-ctl-proto/README.md#权限表)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④
 - 前置:W1;cell (1, a, g1) 期望 `CloseOnly`;实例 1 的 g1 `open_allowed = 0`;`CtlActor` 直接写 ctl 环(`CmdHdr.role` 与 issuer 按行给出);hft-testkit 测试策略的参数 schema 至少有一个 `FieldDesc.structural = true` 的字段 F_s 与一个非结构字段 F_n
 - 步骤:
@@ -568,7 +568,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[账户语义](../subsystems/control-plane.md#账户语义)、[启动闸门](../../crates/hft-risk/README.md#启动闸门)、[命令路径](../../crates/hft-sequencer/README.md#命令路径)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M9
 - 门槛:④
 - 前置:W1;实例 1、2 的全部 cell 期望 `CloseOnly`;账户 a 闸门已放行;账户 b 除 `RECONCILED` 外各位已置位:`ReconActor` 对 (b, VP) 的首组报告含一条未处置的 Warn 仓位差 0.010 BTC
 - 步骤:
@@ -589,7 +589,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[Kill](../../crates/hft-risk/README.md#kill)、[kill 字](../../crates/hft-risk/README.md#kill-字唯一的跨线程共享可变量)、[命令集](../subsystems/control-plane.md#命令集)、[命令路径](../../crates/hft-sequencer/README.md#命令路径)、[模拟账户](../../crates/hft-sequencer/README.md#模拟账户)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M9
 - 门槛:④
 - 前置:W1(10.7、10.8 用 W1-SIM);a、b 各有一条在途 PairOnFill 链接,第一腿在命令之后 1 s 成交;a、b 在 VP 各挂 2 张 GTC Open 单;`VS`、`VP` 的 `VenueCaps.flags` 含 `BATCH_CANCEL`;命令由 `CtlActor` 以 Trader 身份直接写 ctl 环;降级命令不确认
 - 实现:`crates/hft-testkit/src/scenarios/modes.rs::md_10_kill_parameter_combinations`
@@ -695,7 +695,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[Drain](../../crates/hft-sequencer/README.md#drain)、[运行模式、Drain 与 Unknown](../../crates/hft-exec/README.md#运行模式drain-与-unknown)、[类别](../subsystems/control-plane.md#类别)、[存储降级](../../crates/hft-risk/README.md#存储降级storage)、[存储降级](../../crates/hft-sequencer/README.md#存储降级)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④
 - 前置:W1;实例 1 为 `probe-target`,g1 目标为两腿各 0.100 BTC、当前 0.050,增仓切片每片 0.010;实例 2 的 cell (2, b, g2) 期望 `CloseOnly`;g1 有一条在途链接:第一腿已成交,第二腿 IOC 已发、t = 1.5 s 回报成交;`shutdown.drain_timeout_ms = 30000`;`conn_liveness_ms = 2000`
 - 故障:t = 1 s Trader 发 `Drain{cancel_resting = true}`;t = 2 s Trader 经确认发 `SetMode{2, g2, b, Live}`;t = 3 s Trader 经确认发 `Kill{Account(a), flatten}`
@@ -721,7 +721,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[refdata 变更](../../apps/hft-core/README.md#refdata-变更drain--重启)、[Drain](../../crates/hft-sequencer/README.md#drain)、[命令路径](../../crates/hft-sequencer/README.md#命令路径)、[命令行与退出码](../../apps/hft-core/README.md#命令行与退出码)、[干净 Drain 重启自动解除 Recovery](../../crates/hft-risk/README.md#干净-drain-重启自动解除-recovery)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④
 - 前置:W1;生效 refdata `version = 7`;`instance.config_source = "journal"`;`shutdown.drain_timeout_ms = 20000`;账户 a 的 g1 有一条在途链接,其第二腿 IOC 自 t = 0.5 s 发出后 `MockVenue` 不回任何回报(槽停在 `PendingNew`);新 blob `version = 8` 只比 v7 多一个 inst `S2` = ETH-USDT @ `VS`,`RefData::load(v8, v7)` 通过;Admin issuer `cli:admin`
 - 故障:t = 1 s Admin 经确认发 `ReplaceRefdata{version = 8}`;t = 21 s Drain 超时;Drain 末的装配校验通过
@@ -741,7 +741,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[冷启动恢复](../../crates/hft-sequencer/README.md#冷启动恢复recoverdriver)、[启动闸门](../../crates/hft-risk/README.md#启动闸门)、[对账闸门与 HARD 解除的严格条件](../../crates/hft-risk/README.md#对账闸门与-hard-解除的严格条件)、[类别](../subsystems/control-plane.md#类别)、[启动顺序](../../apps/hft-core/README.md#启动顺序)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④
 - 前置:W1;崩溃前期望模式 (1, a, g1) `Live`、(2, b, g2) `CloseOnly`;a 的 g1 持仓 `S1` +0.10000 / `P1` −0.100,b 的 g2 持仓 `S1` +0.05000 / `P1` −0.050;无在途;`auto_resume_after_clean_drain = true`
 - 故障:t = 0 `CrashFault`(非干净停机)后以 `RecoverDriver` 重启;t = 1–5 s 各连接 Up、`AccountConfigReport`(UID 一致、`uid_keys` 覆盖全部交易 key)与 `Timer{Sys, KillSelfTestOk}` 到达;`ReconActor` 在 `EpochStart` 之后对 (a, VS)、(a, VP) 各发一组全部 Ignore 的报告,对 (b, VP) 发一组含一条 Warn 仓位差的报告;t = 8 s Trader 经确认发 `Resume{Recovery, b}`;t = 10 s Trader 经确认发 `Kill{Account(b), flatten}`;t = 20 s Trader 经确认发 `Resume{Recovery, a}`
@@ -782,7 +782,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[人工保持与恢复期抑制](../../crates/hft-exec/README.md#人工保持与恢复期抑制)、[外来成交的默认处理](../../crates/hft-exec/README.md#外来成交的默认处理b3)、[命令集](../subsystems/control-plane.md#命令集)、[对账分级](../../crates/hft-risk/README.md#对账分级全系统唯一一次)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M9
 - 门槛:④
 - 前置:W1;实例 1 为 `probe-target`,g1 目标 `S1` +0.10000 / `P1` −0.100 已到达(cell `Idle`);`ExecConfig`:`external_deadline_ms = 5000`、`broken_auto_fix_ms = 120000`、`fix_tolerance_default = 0.02`、`fix_deadline_ms = 10000`、`dust_notional = 5 USDT`
 - 故障:t = 1 s `MockVenue` 按 `external_fills(cause = Manual)` 在账户 a 的 `P1` 上成交买入 0.100(人工网页平仓,用户流照常推送),gw 产出 `ExternalFill{cause = Manual}`;t = 30 s 策略对 g1 调 `clear_target`;t = 200 s 策略对 g1 调 `set_target(S1 = 0, P1 = 0)`
@@ -805,7 +805,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[数据结构](../../crates/hft-refdata/README.md#数据结构)、[LoadErrCode 码表](../../crates/hft-refdata/README.md#loaderrcode-码表)、[命令路径](../../crates/hft-sequencer/README.md#命令路径)、[结果码](../subsystems/control-plane.md#结果码)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④
 - 前置:W1;另有 `VB`:`VenueId = 4`,`Exchange::Binance`,USDT 永续,inst `B1` = BTC-USDT 永续;`SetParams` 由 issuer `pipeline` 直接写 ctl 环,实例 1、账户 a,生效参数 `version = 3`
 - 实现:`crates/hft-testkit/src/scenarios/modes.rs::md_19_same_exchange_rejected`
@@ -848,7 +848,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[冒烟单](../../crates/hft-oms/README.md#冒烟单smokeorder)、[命令集](../subsystems/control-plane.md#命令集)、[命令路径](../../crates/hft-sequencer/README.md#命令路径)、[检查链](../../crates/hft-risk/README.md#检查链按廉价--昂贵短路适用范围以本表为唯一定义)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④
 - 前置:W1;cell (1, a, g1) 期望 `CloseOnly`;`smoke_far_bp = 0.03`;`conn_liveness_ms = 2000`;`S1` ask = 60,000.00;Admin 以 `CmdHdr.role = Admin`、issuer `cli:admin` 直接写 ctl 环;`ReconActor` 每 5 s 一组报告
 - 步骤:
@@ -913,7 +913,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[预热注入](../../crates/hft-strategy-sdk/README.md#预热注入)、[命令路径](../../crates/hft-sequencer/README.md#命令路径)、[advisor 与 Model](../../crates/hft-sequencer/README.md#advisor-与-model)、[命令集](../subsystems/control-plane.md#命令集)、[权限表](../../crates/hft-ctl-proto/README.md#权限表)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M9
 - 门槛:④
 - 前置:W1;实例 1 为 `probe-target`,其 `Model` 接收 `local_kind = 7` 的预热,策略声明 `SubsBuilder::warmup(Part::Both)`;命令由 `CtlActor` 直接写 ctl 环,`CmdHdr.account = 0`(`*`)
 - 步骤:
@@ -936,7 +936,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[快照](../../crates/hft-sequencer/README.md#快照)、[快照行格式](../../crates/hft-risk/README.md#快照行格式节-4171823草案实现时以代码与编译期断言为准)、[mode 模块](../../crates/hft-risk/README.md#mode-模块唯一的模式状态)、[冷启动恢复](../../crates/hft-sequencer/README.md#冷启动恢复recoverdriver)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M9
 - 门槛:④
 - 前置:W1;t = 50 s 时生效的 cap:`Kill{Account(b)}`、`DailyLoss{a}`、`Recon{a, VP}`、`ClockBad`;账户 b 的 `RECONCILED` 未置位;(a, VS) 的一组 `ReconcileReport`(`count = 3`)已到达 2 条
 - 故障:t = 50 s 驱动写 `Timer{Sys, Snapshot}`(关键帧);t = 51 s 该对账组第 3 条到达;t = 52 s `CrashFault`,以 `RecoverDriver` 重启
@@ -969,7 +969,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[恢复后的 gw 映射](../../crates/hft-oms/README.md#恢复后的-gw-映射)、[Unknown 收敛流程](../../crates/hft-oms/README.md#unknown-收敛流程)、[冷启动恢复(RecoverDriver)](../../crates/hft-sequencer/README.md#冷启动恢复recoverdriver)、[Unknown 订单收敛](../../apps/reconciler/README.md#unknown-订单收敛)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④、⑤
 - 前置:W1;`VP` 的 venue 行为层对 `Query` 一律回 `SendReport{Query, QueryUnsupported}`;`unknown_query_interval_ms = 1000`;崩溃前 a 有两个非终态槽:`VS` 上 s1(IOC 买 0.01,`PendingNew`,`exch_order_id = 0`),`VP` 上 s2(IOC 卖 0.01,`Live`,已部分成交 0.004,`exch_order_id = 7001`)
 - 步骤:
@@ -993,7 +993,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[回报匹配与成交增量](../../crates/hft-oms/README.md#回报匹配与成交增量)、[墓碑与迟到成交](../../crates/hft-oms/README.md#墓碑与迟到成交c1)、[ClientOrderId](../../crates/hft-oms/README.md#clientorderid)、[冷启动恢复(RecoverDriver)](../../crates/hft-sequencer/README.md#冷启动恢复recoverdriver)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④、⑤
 - 前置:W1;`slots[(VS, a)] = 1`(只有槽 s1),`reuse_quarantine_ms = 5000`,`tombstone_gens = 2`,`tombstone_keep_ms = 3600000`;`DurableMeta.engine_epoch` = 11;s1 的第 1 代(epoch 11、gen 1)为 IOC 买 0.01,终态 `Cancelled`、`filled = 0.005`、`exch_order_id = 9001`
 - 步骤:
@@ -1082,7 +1082,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[定时器](../../crates/hft-sequencer/README.md#定时器)、[快照与恢复](../../crates/hft-exec/README.md#快照与恢复)、[恢复:停机时间不计与闸门续接](../../crates/hft-oms/README.md#恢复停机时间不计与闸门续接)、[令牌桶](../../crates/hft-risk/README.md#令牌桶)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④、⑤
 - 前置:W1;上次运行 `tsc_hz_milli` = 2,500,000,000,000;崩溃时(`stop_tsc` 处)堆中 `Timer{Oms, HedgeRetry}` 在 `stop_tsc` 之后 80 ms、`Timer{Exec, Fix}` 在之后 300 ms、`Timer{Exec, Wake}` 在之前 50 ms(未处理);一个墓碑的 `freed_tsc` 在之前 1000 ms;g1 的 `LegState.last_fill_tsc` 在之前 2000 ms;(`VS`, a) 的 `tokens_10s` = 7
 - 步骤:
@@ -1136,7 +1136,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[命令路径](../../crates/hft-sequencer/README.md#命令路径)、[人工干预的采纳](../../crates/hft-ledger/README.md#人工干预的采纳adoptexchange)、[ReconcileReport](../../apps/reconciler/README.md#reconcilereport)、[结果码](../subsystems/control-plane.md#结果码)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M9
 - 门槛:④
 - 前置:W1;账户 a 在 `VP` 的 `P1` 引擎仓位 −0.010 BTC(属 g1),交易所仓位 −0.012 BTC
 - 步骤:
@@ -1157,7 +1157,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[环境决定写成 Input](../../crates/hft-sequencer/README.md#环境决定写成-input)、[当日亏损(锁存)](../../crates/hft-risk/README.md#当日亏损锁存)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④、⑤
 - 前置:W1;`last_day_rolled` = 2026-10-03;崩溃前最后一条 Input 的 UTC = 2026-10-03 23:59:30;`ClockStatus` 为 `Synced`
 - 步骤:
@@ -1178,7 +1178,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[写者](../../crates/hft-journal/README.md#写者)、[环境决定写成 Input](../../crates/hft-sequencer/README.md#环境决定写成-input)、[journal 满](../../crates/hft-sequencer/README.md#journal-满)、[段滚动与引导块](../subsystems/journal-format.md#段滚动与引导块)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④
 - 前置:W1;seq journal `page = Normal`,`segment_bytes = 4194304`,`size_idle_pct = 75`,`size_valve_pct = 90`;persist 替身按需提供预创建段;测试驱动每轮至少交出一条 Input(无空闲轮),直到步骤 2
 - 步骤:
@@ -1200,7 +1200,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[段滚动与引导块](../subsystems/journal-format.md#段滚动与引导块)、[提交游标](../subsystems/journal-format.md#提交游标)、[写者](../../crates/hft-journal/README.md#写者)、[恢复与校验](../../crates/hft-journal/README.md#恢复与校验)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④、⑤
 - 前置:W1;当前段号 N,其中有关键帧 K
 - 步骤:
@@ -1276,7 +1276,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[外部成交](../../crates/hft-ledger/README.md#外部成交externalfill)、[外来成交(B3)](../../crates/hft-oms/README.md#外来成交b3)、[外来成交的默认处理(B3)](../../crates/hft-exec/README.md#外来成交的默认处理b3)、[每条 Input 的处理顺序](../../crates/hft-sequencer/README.md#每条-input-的处理顺序process)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M4
 - 门槛:④
 - 前置:W1、R6;场景开始前 g1 经一条已 `Done` 的链接持 S1 +0.02、P1 −0.02,g1 无目标;`probe-taker` 参数设为收到 `External` 不动作
 - 故障:t = 1 s `MockVenue` 推送账户 `a` 在 `VP` 的 `ExternalFill{cause Adl, inst P1, side 买, qty 0.02, px 60,010.0, trade_id 7001}`
@@ -1320,7 +1320,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[对账闸门与 HARD 解除的严格条件](../../crates/hft-risk/README.md#对账闸门与-hard-解除的严格条件)、[启动闸门](../../crates/hft-risk/README.md#启动闸门)、[干净 Drain 重启自动解除 Recovery](../../crates/hft-risk/README.md#干净-drain-重启自动解除-recovery)、[启动闸门与严格放行](../../apps/reconciler/README.md#启动闸门与严格放行)、[命令路径](../../crates/hft-sequencer/README.md#命令路径)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④
 - 前置:W1、R6;从一份干净 Drain 快照冷启动(同版本、尾部为空、无 `Unknown`/`Broken`);t = 2 s 之前账户 `a` 除 `RECONCILED` 外各闸门位已置位;`ReconActor` 对 (a, VP) 在 t = 2 s 提交一组全部 `Ignore` 的报告
 - 故障:t = 2 s `ReconActor` 对 (a, VS) 提交 `report_id = 11`:`Summary` + `Balance{asset USDT, engine_qty 100,000, exch_qty 100,008, diff 8, severity Warn}`;t = 5 s `CtlActor` 发 `AdoptExchange{a, VS, item Balance, asset USDT, report_id 11}`(Admin,已确认)
@@ -1364,7 +1364,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[保证金分档(MarginStress)](../../crates/hft-risk/README.md#保证金分档marginstress)、[保证金数据](../../crates/hft-ledger/README.md#保证金数据)、[保证金危急的默认减仓(A5)与 engine_flatten](../../crates/hft-exec/README.md#保证金危急的默认减仓a5与-engine_flatten)、[PairOnFill](../../crates/hft-exec/README.md#paironfill)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M4
 - 门槛:④
 - 前置:W1、R6;场景开始前 `probe-target` 以目标 `{S1 +1.0, P1 −1.0}`(PairOnFill,`reason = Rebalance`)建仓完毕并保持该目标;`VP` 每 1 s 推 `MarkPrice` 60,010.0、每 5 s 推一条 `MarginReport`,报告的维持保证金与保证金余额使 ledger `est_liq_dist` 恒为 0.60、`reported_ratio` 恒为 0.10;报告中 `P1` 的 `liq_px = 60,010.0 × (1 + d)`,`d` 即下面的 `rep_liq_dist`
 - 故障:`rep_liq_dist` 在 t ∈ [0, 10) s 为 0.30,t = 10 s 起 0.24,t = 20 s 起 0.14,t = 25 s 起 0.09
@@ -1415,7 +1415,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[恢复时决策不一致](../../crates/hft-sequencer/README.md#恢复时决策不一致)、[冷启动恢复(RecoverDriver)](../../crates/hft-sequencer/README.md#冷启动恢复recoverdriver)、[干净 Drain 重启自动解除 Recovery](../../crates/hft-risk/README.md#干净-drain-重启自动解除-recovery)、[对账闸门与 HARD 解除的严格条件](../../crates/hft-risk/README.md#对账闸门与-hard-解除的严格条件)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M9
 - 门槛:④
 - 前置:W1、R6;t = 10 s 时账户 `a` 在 `VS` 与 `VP` 上各有一张已 `Filled`、尚在 `reuse_quarantine_ms` 内未回收的槽(`f_s`、`f_p`)
 - 故障:t = 10 s `CrashFault`;重启前把 journal 尾部一条 `OrderDecision{account a, venue VS}` 的 `px` 改动 1 tick(只改该 Output 记录)
@@ -1455,7 +1455,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[启动闸门](../../crates/hft-risk/README.md#启动闸门)、[cap 记录](../../crates/hft-risk/README.md#cap-记录)、[永续杠杆上限](../../crates/hft-risk/README.md#永续杠杆上限)、[启动顺序](../../apps/hft-core/README.md#启动顺序)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M3
 - 门槛:④
 - 前置:W1、R6,另设 `max_perp_leverage_x100 = 300`、`P1` 实际杠杆 3.00;`VP` 的 `required_position_mode = OneWay`、`required_margin_mode = Cross`;`VS` 的 `required_spot_borrow = Some(false)`;从干净 Drain 快照冷启动
 - 故障:t = 1 s (a, VP) 的 `AccountConfigReport{position_mode Hedge, margin_mode Cross, P1 杠杆 3.00}`;t = 5 s 同一账户报告改为 `position_mode OneWay`
@@ -1478,7 +1478,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[余额初始化、校验与基线](../../crates/hft-ledger/README.md#余额初始化校验与基线)、[仓位与已实现](../../crates/hft-ledger/README.md#仓位与已实现平均成本法)、[人工干预的采纳](../../crates/hft-ledger/README.md#人工干预的采纳adoptexchange)、[现货库存与余额基线](../../apps/reconciler/README.md#现货库存与余额基线)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④
 - 前置:W1、R6;`VS` 的 `fee_asset_rule = ReceivedAssetUnlessDiscount{token = BNB}`;账户 `a` 在 `VS` 的初始余额另有 3.5 BNB(不属于任何 group);`ReconActor` 自 t = 30 s 起每 30 s 一组报告
 - 故障:t = 5 s 交易所真值中 BNB 增加 0.2(空投,用户流不推);t = 40 s `SetBalanceBaseline{a, VS}`(Trader,已确认);t = 50 s 起 g1 的 S1 成交以 BNB 扣费,每笔 0.0001 BNB
@@ -1497,7 +1497,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[Kill](../../crates/hft-risk/README.md#kill)、[kill 字](../../crates/hft-risk/README.md#kill-字唯一的跨线程共享可变量)、[检查链](../../crates/hft-risk/README.md#检查链按廉价--昂贵短路适用范围以本表为唯一定义)、[RISK_REDUCING 判定](../../crates/hft-oms/README.md#risk_reducing-判定)、[崩溃隔离与从快照恢复](../../apps/hft-core/README.md#崩溃隔离与从快照恢复)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M9
 - 门槛:④
 - 前置:W1、R6;账户 `a`、`b` 各有一条第一腿已成交 0.02、第二腿在 `HedgeRetry` 中的链接(第二腿首单 IOC 零成交),以及一张已 Ack 的策略 GTC 开仓挂单
 - 故障:t = 1 s `Kill{Account(a), hard}`(Admin,已确认);此后 `MockVenue` 对重试单全部成交
@@ -1538,7 +1538,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[存储降级(Storage)](../../crates/hft-risk/README.md#存储降级storage)、[存储降级](../../crates/hft-sequencer/README.md#存储降级)、[Drain](../../crates/hft-sequencer/README.md#drain)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④
 - 前置:W1、R6;两个账户各持 g1/g2 的 S1 +0.02、P1 −0.02
 - 故障:t = 1 s `HkActor` 注入 `Timer{Sys, PersistLag}`(档位 1);t = 10 s 注入 `Timer{Sys, StorageOk}`
@@ -1561,7 +1561,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[Drain](../../crates/hft-sequencer/README.md#drain)、[Drain 静止判定(支持 C11)](../../crates/hft-oms/README.md#drain-静止判定支持-c11)、[运行模式、Drain 与 Unknown](../../crates/hft-exec/README.md#运行模式drain-与-unknown)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④
 - 前置:W1、R6;`probe-taker` 在 t = 1 s 发 S1 买 0.02 带开仓链接
 - 故障:第一腿 t = 1.02 s `Ack`;t = 1.03 s `CtlActor` 发 `Drain{cancel_resting = false}`;第一腿 t = 1.20 s 全部成交;第二腿 t = 1.30 s 全部成交
@@ -1599,7 +1599,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[资金费合成](../../crates/hft-sequencer/README.md#资金费合成)、[资金费](../../crates/hft-ledger/README.md#资金费)、[资金费对账校正](../../crates/hft-ledger/README.md#资金费对账校正)、[资金费比对](../../apps/reconciler/README.md#资金费比对)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M9
 - 门槛:④
 - 前置:W1、R6;`VP` 的 `funding_settle = BalanceOnlyPush`;g1 持 P1 −0.5;`P1` 的 `funding_interval_s = 28,800`,下一结算时刻 `T` = 场景开始后的第一个 UTC 08:00;`T` 时 `MarketLast.mark_px = 60,010.0`、`funding_rate = 0.0001`
 - 故障:`T + 1.5 s` `MockVenue` 推 `FundingSettle{account a, inst INST_NONE, settle_ts T + 1.2 s, amount +3.000500}`;`T + 3 s` 同一推送再到一次
@@ -1620,7 +1620,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[PairOnFill](../../crates/hft-exec/README.md#paironfill)、[保证金危急的默认减仓(A5)与 engine_flatten](../../crates/hft-exec/README.md#保证金危急的默认减仓a5与-engine_flatten)、[目标的接受与替换](../../crates/hft-exec/README.md#目标的接受与替换)
 - 级别:table
-- 里程碑:M2
+- 里程碑:M4
 - 门槛:④
 - 前置:W1、R6;g1 的腿号:S1 = 0、P1 = 1;减仓行(C14.1–C14.3)起始 S1 +0.10、P1 −0.10,增仓行(C14.4–C14.7)起始 0;`probe-target` 按各行下 PairOnFill 目标;"深度"指对手侧前 5 档可见深度名义;期望看该目标第一条 `ExecDecision{Slice}` 的 `first_leg_ix` 与第一笔订单的 inst
 - 实现:`crates/hft-testkit/src/scenarios/exec_correctness.rs::c14_leg_order`
@@ -1639,7 +1639,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[下架与公告(VenueNotice)](../../crates/hft-risk/README.md#下架与公告venuenotice)、[检查链](../../crates/hft-risk/README.md#检查链按廉价--昂贵短路适用范围以本表为唯一定义)、[命令路径](../../crates/hft-sequencer/README.md#命令路径)、[FundingStats](../../crates/hft-strat-lib/README.md#fundingstats)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M3
 - 门槛:④
 - 前置:W1、R6;g1 持 S1 +0.02、P1 −0.02
 - 故障:t = 1 s `CtlActor` 发 `VenueNotice{venue VP, inst P1, kind Delisting{at_ns = t + 7 d}}`(Trader);t = 20 s 发 `Resume{Delisting, (VP, P1)}`
@@ -1735,7 +1735,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[恢复:停机时间不计与闸门续接](../../crates/hft-oms/README.md#恢复停机时间不计与闸门续接)、[LegLink 与 HedgePlan](../../crates/hft-oms/README.md#leglink-与-hedgeplan)、[启动闸门](../../crates/hft-risk/README.md#启动闸门)、[断腿](../../crates/hft-risk/README.md#断腿broken自动有界平仓l3-与-flatten)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④、⑤
 - 前置:W1,账户 `a`、`g1`,`probe-taker`;`hedge_deadline_ms = 3000`、`resume_hold_max_ms = 30000`、`hedge_retry_max = 3`、`hedge_retry_min_ms = 100`
 - 故障:
@@ -1757,7 +1757,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[人工保持与恢复期抑制](../../crates/hft-exec/README.md#人工保持与恢复期抑制)、[Broken 处置](../../crates/hft-exec/README.md#broken-处置)、[补腿](../../crates/hft-exec/README.md#补腿hedgefixc4)、[外来成交的默认处理](../../crates/hft-exec/README.md#外来成交的默认处理b3)、[启动闸门](../../crates/hft-risk/README.md#启动闸门)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M5
 - 门槛:④、⑤
 - 前置:W1,账户 `a`(`g1`)与 `b`(`g2`),两个实例的 `probe-taker` 参数 `close_on = []`、链接 `on_fail = Hold`、`tolerance = 0.02`;`dust_notional = 5 USDT`、`fix_max = 3`、`fix_cooldown_ms = 1000`、`fix_deadline_ms = 10000`、`external_deadline_ms = 5000`、`broken_auto_fix_ms = 120000`、`gate_naked_alarm_ms = 300000`
 - 故障:
@@ -1782,7 +1782,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[残余与尘埃](../../crates/hft-exec/README.md#残余与尘埃)、[Broken 处置](../../crates/hft-exec/README.md#broken-处置)、[残余核销](../../crates/hft-oms/README.md#残余核销)、[断腿](../../crates/hft-risk/README.md#断腿broken自动有界平仓l3-与-flatten)、[cap 记录](../../crates/hft-risk/README.md#cap-记录)、[命令集](../subsystems/control-plane.md#命令集)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M9
 - 门槛:④
 - 前置:W1,但 `S1` 的 `min_qty` = 0.001 BTC(lot 仍 0.00001,`min_notional` 5 USDT);`dust_notional = 5 USDT`、`broken_auto_fix_ms = 120000`、`max_reduce_notional = 10,000 USDT`、`force_slice.max_chunk_notional = 10,000 USDT`;`probe-taker` `close_on = []`;Admin 主体 `cli:admin1`
 - 故障:
@@ -1922,7 +1922,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[回报匹配与成交增量](../../crates/hft-oms/README.md#回报匹配与成交增量)、[外来成交](../../crates/hft-oms/README.md#外来成交b3)、[OnFill](../../crates/hft-oms/README.md#onfill)、[外部成交](../../crates/hft-ledger/README.md#外部成交externalfill)、[gw 循环结构](../../crates/hft-venue/README.md#4-gwruntimepoll_once-的循环结构)、[契约 22](../../crates/hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M4
 - 门槛:④
 - 前置:W1,账户 `a`、`g1`,`probe-taker` `close_on = []`;`gw.unmatched_hold_ms = 5000`(由 venue 行为层模拟)、`external_deadline_ms = 5000`、`tolerance = 0.02`
 - 故障:t = 0 第一腿 `S1` 买 0.100 IOC;t = 0.05 s 交易所推送该单的成交(0.100 @ 60,000.00,`exch_order_id = X`)但不带 client id;该单的 Ack 在 t = 2.0 s 到达
@@ -1985,7 +1985,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[保证金分档](../../crates/hft-risk/README.md#保证金分档marginstress)、[保证金危急的默认减仓](../../crates/hft-exec/README.md#保证金危急的默认减仓a5与-engine_flatten)、[压力用例](../../crates/hft-sim/README.md#压力用例上线门槛必过项)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M4
 - 门槛:④、⑦
 - 前置:W1,账户 `a` 满仓:`g1` 为 `S1` +1.000、`P1` −1.000(永续名义 60,000 USDT);`VP` 保证金余额 18,000 USDT(保证金余额 / 名义 = 0.30),`P1` 在 refdata 中的分档维持保证金率为单档 0.5%,交易所杠杆 5×;`margin_data = Push`(每 1 s 一条 `MarginReport`);`RiskParams` 保证金段:`liq_dist_block_open = 0.25`、`liq_dist_reduce = 0.15`、`liq_dist_force = 0.10`、`liq_dist_hyst = 0.02`、`margin_ratio_crosscheck = 0.80`、`margin_ratio_hyst = 0.05`、`deleverage_deadline_ms = 30000`、`force_step = 0.20`、`force_step_interval_ms = 5000`、`margin_stale_ms = 15000`、`mark_stale_ms = 10000`;`max_reduce_notional = 20,000 USDT`、`force_slice.max_chunk_notional = 20,000 USDT`;`probe-taker` `close_on = []`(只由引擎减仓)
 - 故障:`one_sided_move(P1, +30%, 3_600_000, Linear)` 与 `one_sided_move(S1, +30%, 3_600_000, Linear)`(对永续空头不利的方向),之后保持 30 min;运行到 t = 5,400 s
@@ -2024,7 +2024,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[保证金危急的默认减仓](../../crates/hft-exec/README.md#保证金危急的默认减仓a5与-engine_flatten)、[`ExecDecision.detail` 打包与子码](../../crates/hft-exec/README.md#execdecisiondetail-打包与子码)、[保证金分档](../../crates/hft-risk/README.md#保证金分档marginstress)、[报价可用](../../crates/hft-exec/README.md#报价可用连接健康)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M4
 - 门槛:④
 - 前置:W1,账户 `a`:`g1` 为 `S1` +1.000、`P1` −1.000,另有不属于任何 group 的 `P1` −0.050(账户 `P1` 合计 −1.050);`P1` mark 60,000.0;`liq_dist_force = 0.10`、`liq_dist_hyst = 0.02`、`liq_dist_reduce = 0.15`、`liq_dist_block_open = 0.25`、`force_step = 0.20`、`force_step_interval_ms = 5000`;`max_reduce_notional = 30,000 USDT`、`force_slice.max_chunk_notional = 30,000 USDT`、`l3_max_cross = 0`;`conn_liveness_ms = 2000`;`dust_notional = 5 USDT`
 - 故障:`S1` 的 BBO 连接自 t = −0.5 s 起停止回任何帧,t = 30 s 恢复;t = 0 起 `margin_path` 使 `VP` 的 `liq_dist` = 0.09 并保持到 t = 40 s
@@ -2069,7 +2069,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[保证金危急的默认减仓](../../crates/hft-exec/README.md#保证金危急的默认减仓a5与-engine_flatten)、[输出扇出](../../crates/hft-oms/README.md#输出扇出)、[LegTracker](../../crates/hft-oms/README.md#legtracker)、[检查链](../../crates/hft-risk/README.md#检查链按廉价--昂贵短路适用范围以本表为唯一定义)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M4
 - 门槛:④
 - 前置:W1,账户 `a`:`g1` 为 `S1` +1.000、`P1` −1.000;`P1` mark 60,000.0;策略已在 `P1` 上挂出 4 张已 Ack 的 reduce-only GTC 买单(各 0.250 @ 58,000.0,合计 = |仓位|);`liq_dist_force = 0.10`、`force_step = 0.20`、`force_step_interval_ms = 5000`;`max_reduce_notional = 30,000 USDT`、`force_slice.max_chunk_notional = 30,000 USDT`
 - 故障:t = 0 `margin_path` 使 `VP` 的 `liq_dist` = 0.09(L3)并保持到 t = 20 s;4 张 GTC 的撤单确认在 t = 0.3 s 到达;t = 3 s 策略再挂一张 reduce-only GTC 买单 0.300 @ 58,000.0
@@ -2088,7 +2088,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[保证金危急的默认减仓](../../crates/hft-exec/README.md#保证金危急的默认减仓a5与-engine_flatten)、[恢复:停机时间不计与闸门续接](../../crates/hft-oms/README.md#恢复停机时间不计与闸门续接)、[保证金分档](../../crates/hft-risk/README.md#保证金分档marginstress)、[快照与恢复](../../crates/hft-exec/README.md#快照与恢复)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M4
 - 门槛:④、⑤
 - 前置:W1,账户 `a`:`g1` 为 `S1` +1.000、`P1` −1.000;`P1` mark 60,000.0;`liq_dist_force = 0.10`、`force_step = 0.20`、`force_step_interval_ms = 5000`;`resume_hold_max_ms = 30000`、`hedge_deadline_ms = 3000`;`max_reduce_notional = 30,000 USDT`、`force_slice.max_chunk_notional = 30,000 USDT`
 - 故障:
@@ -2112,7 +2112,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[ReconcileReport](../../apps/reconciler/README.md#reconcilereport)、[对账分级](../../crates/hft-risk/README.md#对账分级全系统唯一一次)、[每条 Input 的处理顺序](../../crates/hft-sequencer/README.md#每条-input-的处理顺序process)、[外部成交](../../crates/hft-ledger/README.md#外部成交externalfill)、[外来成交的默认处理](../../crates/hft-exec/README.md#外来成交的默认处理b3)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M9
 - 门槛:④
 - 前置:W1,账户 `a`:`g1` 为 `S1` +1.000、`P1` −1.000;`P1` mark 60,010.0;`ReconActor` 对 (a, VP) 每 30 s 一轮(视图点 `S0` = t = 30、60、90、120 s),`user_stream_lag = 2000 ms`;`recon_closeonly_notional = 100,000 USDT`;`external_deadline_ms = 5000`、`tolerance = 0.02`、`dust_notional = 5 USDT`;`probe-taker` `close_on = []`
 - 故障:t = 0 `VP` 用户流 `ConnState{UserStream, Down}`;t = 10 s 模拟交易所对账户 `a` 的 `P1` 仓位做 ADL(真值 −1.000 → −0.700),不推送任何成交;t = 20 s 用户流 `Up`
@@ -2141,7 +2141,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[资金费比对](../../apps/reconciler/README.md#资金费比对)、[资金费对账校正](../../crates/hft-ledger/README.md#资金费对账校正)、[对账分级](../../crates/hft-risk/README.md#对账分级全系统唯一一次)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M9
 - 门槛:④
 - 前置:W1,账户 `a`:`g1` `P1` −1.000;`VP` 为 `PerSymbolPush`;`funding_recon_lag_ms = 600000`、`funding_recon_window_ms = 172800000`;reconciler `funding_dust = 0.01 USDT`;`ReconActor` 每 30 s 一轮
 - 故障:UTC 08:00:00 结算;08:00:01 推送 `FundingSettle{P1, +12.000 USDT}` 入账;交易所逐笔流水为该笔 +9.000 USDT(差 −3.000);对账在 08:15:00 与 08:15:30 各一轮
@@ -2165,7 +2165,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[资金费比对](../../apps/reconciler/README.md#资金费比对)、[对账分级](../../crates/hft-risk/README.md#对账分级全系统唯一一次)、[启动闸门](../../crates/hft-risk/README.md#启动闸门)、[资金费对账校正](../../crates/hft-ledger/README.md#资金费对账校正)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M9
 - 门槛:④
 - 前置:同 FD-1;另:引擎视图 `VP` USDT 余额 50,000.000,交易所余额 49,997.000;USDT 的 `AssetMeta.dust` = 0.01;场景从冷启动开始(`EpochStart` 之后第一组报告决定 `RECONCILED(a, VP)`)
 - 故障:同 FD-1;第一组报告即在 08:15:00
@@ -2183,7 +2183,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[Advice 载荷](../../crates/hft-strategy-sdk/README.md#advice-载荷)、[Advice 路由](../../crates/hft-sequencer/README.md#advice-路由)、[advisor 与 Model](../../crates/hft-sequencer/README.md#advisor-与-model)、[AdvisorLag](../../crates/hft-event/README.md#控制与系统0x04xx0x05xx)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M9
 - 门槛:④
 - 前置:W1,实例 1 为 `probe-target`,其 Model 每次 `Timer{Sys, AdvisorTick}`(每 100 ms)产出一条 `Advice`;快速部分用 hft-strat-lib `Expiring` 缓存 Advice,参数 `advice_max_age_ms = 1000`;时间表每 500 ms 一个增仓目标点(t = 10.0、10.5、11.0 … s),到点时缓存中无未过期 Advice 则跳过该点;`advisor_max_lag_ms = 2000`
 - 故障:`AdvisorActor` 注入落后:t ∈ [10 s, 13 s) Model 处理 journal 落后 3,000 ms(按 `engine_ns`),这段时间产出的 Advice 随之推迟 3,000 ms 交付;t ≥ 13 s 恢复即时
@@ -2442,7 +2442,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 
 - 规则:[外部成交](../../crates/hft-ledger/README.md#外部成交externalfill)、[外来成交(B3)](../../crates/hft-oms/README.md#外来成交b3)、[外来成交的默认处理(B3)](../../crates/hft-exec/README.md#外来成交的默认处理b3)、[每条 Input 的处理顺序](../../crates/hft-sequencer/README.md#每条-input-的处理顺序process)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M4
 - 门槛:④
 - 前置:W1;账户 `a` 的 `g1`:`S1` 腿 net +0.01、`P1` 腿 net −0.01,无在途、无目标;probe-taker 参数设为对 `EventRef::External` 不动作;`external_deadline_ms = 5000`;`dust_notional = 10 USDT`;`fix_tolerance_default = 0.05`;`max_hedge_notional = 10 000 USDT`
 - 故障:t = 1.0 s MockVenue 在 `P1` 上强平本账户空头 0.004(买 0.004 @ 60,500.0),产出 `ExternalFill{cause = Liquidation, inst = P1, side = Buy, qty = 0.004, trade_id = 9001}`

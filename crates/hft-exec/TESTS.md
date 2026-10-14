@@ -4171,7 +4171,7 @@ spec: README.md
 
 - 规则:[限价与单笔名义](README.md#限价与单笔名义)、[保证金危急的默认减仓](README.md#保证金危急的默认减仓a5与-engine_flatten)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M4
 - 前置:a1 L3,g8 P −10.0;`force_slice.max_cross = 0.005`、`rr_max_cross = 0.01`、`l3_max_cross = 0`
 - 故障:P 对手价相对 mid 的偏离在 0.3%–2% 之间随机游走
 - 种子:PR 100 + 回归集;每夜日期派生

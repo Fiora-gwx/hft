@@ -2300,7 +2300,7 @@ spec: README.md
 
 - 规则:[保证金分档](README.md#保证金分档marginstress)(L3 行)、[检查链](README.md#检查链按廉价--昂贵短路适用范围以本表为唯一定义)(#7 只扣即时在途)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M4
 - 前置:testkit 两腿世界:venue A 现货、B 永续;账户 1 的 g1 现货多 2 BTC、永续空 2 BTC;`force_step = 0.20`、`force_step_interval_ms = 5 000`;策略在 b1 挂满同向 reduce-only GTC(总量 = |仓位|,已 Ack)
 - 故障:t = 0 起 b1 标记价线性上涨,使 `liq_dist` 在 t = 10 s 落到 0.10 以下并保持;A 的 BBO 连接健康
 - 种子:PR 200(提交派生)+ 回归集;每夜日期派生
@@ -2311,7 +2311,7 @@ spec: README.md
 
 - 规则:[存储降级](README.md#存储降级storage)(推迟)
 - 级别:dst
-- 里程碑:M2
+- 里程碑:M5
 - 前置:testkit 两腿世界;账户 1 有仓位;`Kill{Account(1), flatten}` 在 t = 0 生效
 - 故障:t = 1 s 注入 `Timer{Sys, PersistLag}`(档位 2);b1 每个 IOC 切片只成交一半
 - 种子:PR 200 + 回归集;每夜日期派生

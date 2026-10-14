@@ -68,7 +68,7 @@
 ## 日常流程
 
 1. 从 `main` 开分支:`feat/*`、`fix/*`、`ops/*`、`perf/*`、`recovery/*`、`strat/*`(只改 `strategies/*` 与其参数)。
-2. 写代码前读目标目录的 README、`TESTS.md` 与它们链接的子系统页;组件以"`TESTS.md` 中里程碑已到的用例全部实现并通过"为完成。实现与规格不一致时按 [docs/tests §7](tests/README.md#7-修改流程设计基线-v1-之后):同一提交改 README、`TESTS.md` 与代码,并在 [changes.md](changes.md) 记一行(推翻原决定另写 Agent Note)。
+2. 写代码前读目标目录的 README、`TESTS.md` 与它们链接的子系统页;组件以"`TESTS.md` 中里程碑已到的用例全部实现并通过"为完成。实现与规格不一致时按 [docs/tests §7](tests/README.md#7-修改流程设计基线-v1-之后):同一提交改 README、`TESTS.md` 与代码;资金、风控或恢复语义变更在 [changes.md](changes.md) 记一行(推翻原决定另写 Agent Note),负责人每周批量确认。规格冻结:新增用例须负责人批准。
 3. 提交前按整批差异一次核对代码、依赖登记、README、TESTS、生成文件与变更记录,同时检查文档解析和测试映射;不适用的项注明原因。每批只完成一个明确验收目标,新发现只有阻塞该目标时才纳入。提交用 Conventional Commits 主题(`feat(hft-oms): …`、`feat(portfolio-carry): …`);生成物(`gen-schema` 输出、策略 schema 金样 `fixtures/strategy-schemas/`、deploy 生成物)与生成器改动同一提交。
 4. 推送分支 → PR → CI 全绿 → 合并(`--no-ff`;单人维护也先推分支让 CI 验证确切的提交)。CI 红时在本地改代码再推,不在服务器上排查编译问题。没有受保护分支,"红了不合并"是人的纪律,机器只在发布 `preflight` 处把关。
 5. **开发构建**(需要在 `dev2` 联调时):对一个 `ci.yml` 已全绿的 PR 头提交,用 `release-aarch64.yml` 的 `workflow_dispatch`(输入 `sha`、`dev_n`)出 `vX.Y.Z-dev.N`,不必先合入 `main`;或在已通过 CI 的 `main` 提交上直接打该标签。再在服务器上按 [release-and-deploy](runbooks/release-and-deploy.md) 拉取并冷安装。合并本身不自动产出制品。

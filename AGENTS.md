@@ -74,7 +74,7 @@ cargo xtask fuzz <target>   # 解码器 fuzz(固定的 nightly 工具链,见 too
 - **发布纪律**:冷生产、不可变归档 + SHA-256 + `RELEASE.json`、保留一个已验证回滚版本;内核参数、资源护栏与调优脚本随发布归档([deploy/](deploy/README.md))。
 - **共机护栏**:`dev2` 与 cdex 正式账户共机,hft 进程只在资源护栏内运行,cdex 优先;数值与守护规则归 [hft-core](apps/hft-core/README.md)。
 - **秘密不入库、不入 journal**:API key 与私钥启动期从 Secrets Manager/KMS 载入;交易 key 不带提现权限;journal 不记录 key、签名原文或登录帧。
-- **文档随代码**:同一改动更新 README、`TESTS.md` 与子系统页,行为变更记 [docs/changes.md](docs/changes.md);一件事实只有一个归属地,其余处链接;写当前状态与契约,不写历史与推理过程。
+- **文档随代码**:同一改动更新 README、`TESTS.md` 与子系统页,资金、风控与恢复语义变更记 [docs/changes.md](docs/changes.md);一件事实只有一个归属地,其余处链接;写当前状态与契约,不写历史与推理过程。
 - **持久的决策理由写 Agent Note**:放 `.agents/notes/{proposed,implemented,rejected}/{class}/`,格式见 [.agents/notes/README.md](.agents/notes/README.md);机械改动不需要。
 
 ## 编辑本文件
