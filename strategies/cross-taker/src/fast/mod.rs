@@ -173,8 +173,14 @@ impl Fast {
         if risk.hard {
             return;
         }
-        let input = |l: LegDef, k: usize| -> Option<LegInput> {
-            let book = v.bbo(l.inst);
+        let (a_book, b_book) = (v.bbo(a.inst), v.bbo(b.inst));
+        // Signal requires buy_limit >= ask and sell_limit <= bid and never credits
+        // rebates. With a positive required edge, uncrossed touches cannot qualify.
+        // Keep settlement and halt delivery above this read-only rejection.
+        if f.min_edge.0 > 0 && a_book.bid_px <= b_book.ask_px && b_book.bid_px <= a_book.ask_px {
+            return;
+        }
+        let input = |l: LegDef, k: usize, book: BboView| -> Option<LegInput> {
             if !v.quote_ok(self.account, l.inst)
                 || !v.venue_ready(self.account, l.venue)
                 || book.rx_tsc.0 == 0
@@ -197,7 +203,10 @@ impl Fast {
                 spot_free,
             })
         };
-        let (Some(la), Some(lb)) = (input(a, 0), input(b, 1)) else {
+        let Some(la) = input(a, 0, a_book) else {
+            return;
+        };
+        let Some(lb) = input(b, 1, b_book) else {
             return;
         };
         let allowed = |x: &signal::Signal| {
