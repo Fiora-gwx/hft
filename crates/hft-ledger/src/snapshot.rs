@@ -211,7 +211,14 @@ impl Ledger {
                 let inst = InstId(i as u32);
                 let Some(p) = self.pos_ix(a, inst) else { continue };
                 let Some(x) = self.pos.get(p) else { continue };
-                if x.qty.0 == 0 && x.cost == 0 && x.realized_quote == 0 && x.fees_quote == 0 {
+                // `last_fill_ens` alone keeps the row: the BalanceReport `quiet` test reads it, so a
+                // flat position closed moments ago must restore with its last fill time.
+                if x.qty.0 == 0
+                    && x.cost == 0
+                    && x.realized_quote == 0
+                    && x.fees_quote == 0
+                    && x.last_fill_ens == 0
+                {
                     continue;
                 }
                 w.put_row(&PositionRow {

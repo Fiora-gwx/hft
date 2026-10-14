@@ -10,3 +10,4 @@
 0x00cc7b25194f1b4d 2026-10-11 账本 RoundClosed 延迟到对账写出,跨快照 INV-6 丢失输出(TK-114)
 0x00cc7b25194f1bc8 2026-10-11 账本 RoundClosed 延迟到对账写出,跨快照 INV-6 丢失输出(TK-114)
 0x00cc7b25194f1be0 2026-10-11 账本 RoundClosed 延迟到对账写出,跨快照 INV-6 丢失输出(TK-114)
+0x73a4a0fcecf8af9f 2026-10-14 全平且无费用的持仓在快照里不写行,恢复后 last_fill_ens 归零,BalanceReport 的 quiet 判定与连续运行不同(LED-232;https://github.com/Fiora-gwx/hft/actions/runs/38504308204 RPL-012)

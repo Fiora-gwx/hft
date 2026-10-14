@@ -195,11 +195,26 @@ fn led_232_positions_only_nonzero() {
     l.apply_fill(&f(Buy, BTC_P2, "1.0", "60000", "0", USDT, G1, 1), s(1));
     l.apply_fill(&f(Sell, BTC_P2, "1.0", "60000", "0", USDT, G1, 1), s(2));
     l.apply_fill(&f(Buy, BTC_S1, "0.1", "60000", "0", USDT, G1, 0), s(3));
+    // A position that is untouched since boot is not written. The flat BTC/P2 keeps its row:
+    // its last fill time feeds the BalanceReport quiet test and must survive a restore.
     let bytes = snap(&l);
     let s1 = section(&bytes, SECTION_POSITIONS);
-    assert_eq!(s1.count, 1);
-    let r = PositionRow::read_from_bytes(&s1.body[..64]).expect("row");
-    assert_eq!((r.account, r.inst), (A1, BTC_S1));
+    assert_eq!(s1.count, 2);
+    let rows: Vec<PositionRow> = (0..2)
+        .map(|k| PositionRow::read_from_bytes(&s1.body[k * 64..k * 64 + 64]).expect("row"))
+        .collect();
+    let keys: Vec<_> = rows.iter().map(|r| (r.account, r.inst)).collect();
+    assert!(
+        keys.contains(&(A1, BTC_S1)) && keys.contains(&(A1, BTC_P2)),
+        "{keys:?}"
+    );
+    let flat = rows.iter().find(|r| r.inst == BTC_P2).expect("flat row");
+    assert_eq!(flat.qty, Qty(0));
+    assert_eq!(flat.last_fill_ens, l.pos(A1, BTC_P2).last_fill_ens);
+    assert_ne!(flat.last_fill_ens, 0);
+    let r = restore(&bytes).expect("restore");
+    assert_eq!(r.pos(A1, BTC_P2), l.pos(A1, BTC_P2));
+    assert_eq!(snap(&r), bytes);
 }
 
 #[test]

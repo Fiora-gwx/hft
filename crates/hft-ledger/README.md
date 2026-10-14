@@ -478,7 +478,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 `StateSnapshot` 的分节表与 `SectionHdr` 归 [journal-format](../../docs/subsystems/journal-format.md#快照记录结构);本 crate 定义节 1、13、22 的行(当前行版本:节 1 v2、节 13 无待确认凭据时 v8、有凭据时 v9,节 22 v2;恢复时 v8 的节 13 出现待确认凭据行 `AUTO_CASH` 即 `BadValue`)。全部 `#[repr(C)]`、小端、按所列键升序;i128 以 `[u64; 2]` 小端存放。`snapshot(&self, w)` 按节 1 → 13 → 22 一次写完。
 
 ```rust
-// 节 1 Positions:每 (account, inst) 一行,只写 qty、cost、realized、fees 任一非零的项;键 (account, inst)
+// 节 1 Positions:每 (account, inst) 一行,只写 qty、cost、realized、fees、last_fill_ens 任一非零的项(last_fill_ens 进入 BalanceReport 的 quiet 判定,平仓后的持仓也须保留);键 (account, inst)
 #[repr(C)] pub struct PositionRow {                                // 64 B = InstPos + 键
     pub account: AccountId, pub _pad: [u8; 3], pub inst: InstId,
     pub qty: Qty, pub cost: [u64; 2], pub realized_quote: [u64; 2], pub fees_quote: i64, pub last_fill_ens: i64,
