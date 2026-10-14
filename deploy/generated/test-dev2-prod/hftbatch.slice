@@ -1,0 +1,6 @@
+[Slice]
+CPUWeight=idle
+MemoryMax=512M
+MemorySwapMax=0
+IOReadBandwidthMax=/data 40M
+IOWriteBandwidthMax=/data 20M

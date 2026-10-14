@@ -1,0 +1,27 @@
+[Unit]
+Description=hft dev2 resource guard
+After=local-fs.target
+
+[Service]
+Type=simple
+User=hft-guard
+Slice=system.slice
+ExecStart=/usr/bin/python3 /opt/hft/current-core/deploy/dev2/hft-dev2-guard --config /etc/hft/dev2-guard.toml
+Restart=always
+RestartSec=5
+RuntimeDirectory=hft/guard
+RuntimeDirectoryPreserve=yes
+StateDirectory=hft/guard
+StateDirectoryMode=0750
+MemoryMax=32M
+MemorySwapMax=0
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/hft/guard
+CapabilityBoundingSet=
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,37 @@
+[Unit]
+Description=hft testnet core
+After=network-online.target hft-dev2-guard.service hft-imds-lock.service
+RequiresMountsFor=/dev/shm/hft/prod /data/prod
+StartLimitBurst=3
+StartLimitIntervalSec=600
+
+[Service]
+Type=notify
+User=hft
+Slice=hft-core.slice
+SupplementaryGroups=hft-ctl hft-stopmark
+RuntimeDirectory=hft/core-prod
+RuntimeDirectoryMode=0751
+ExecStartPre=/usr/bin/systemctl is-active --quiet hft-dev2-guard.service
+ExecStartPre=/usr/bin/systemctl is-active --quiet hft-imds-lock.service
+ExecStartPre=+/opt/hft/current-core/deploy/release/preflight.sh
+ExecStartPre=+/usr/bin/install -d -o hft -g hft-journal-ro -m 2750 /data/prod
+ExecStartPre=+/opt/hft/current-core/bin/hft-secrets fetch --manifest /etc/hft/secrets/hft-core.toml --out /run/hft/core-prod/secrets --owner hft --mode 0400
+ExecStart=/opt/hft/current-core/bin/hft-core --config /etc/hft/hft-core-prod.toml
+ExecStopPost=+/opt/hft/current-core/deploy/bin/hft-shm-release prod
+WatchdogSec=10
+TimeoutStartSec=45
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=1
+RestartPreventExitStatus=2 3 4
+RestartForceExitStatus=75
+LimitMEMLOCK=infinity
+LimitNOFILE=65536
+MemoryMax=384M
+MemorySwapMax=0
+OOMScoreAdjust=100
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/data/prod /dev/shm/hft/prod -/var/lib/hft/kill-switch

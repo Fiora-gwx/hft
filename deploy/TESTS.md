@@ -108,6 +108,7 @@ spec: README.md
 - 里程碑:M3
 - 前置:夹具提交;`SOURCE_DATE_EPOCH = 0`;每行运行一次对应的打包脚本
 - 实现:`deploy/tests/test_release.py::dep_003_artifact_names`
+- 覆盖边界:覆盖生产归档的版本命名、channel、逐文件哈希和确定性 tar；验证包与 zstd 命令链仍待验收。
 
 | 行 | 命令 | 期望 |
 |---|---|---|
@@ -235,6 +236,7 @@ spec: README.md
 - 里程碑:M3
 - 前置:替身根;归档为夹具正式版 `v1.2.3`,其余校验都能通过
 - 实现:`deploy/tests/test_release.py::dep_014_manifest_selection`
+- 覆盖边界:覆盖选定清单不存在的拒绝；合法名称变体与 host_expect 哈希由安装夹具覆盖，完整清单矩阵仍待验收。
 
 | 行 | `/etc/hft/host-local.toml` | 期望 |
 |---|---|---|
@@ -919,7 +921,7 @@ spec: README.md
   - 步骤 1:`tripped` 不存在;`events.jsonl` 为 3 行,末行动作为"清除标志";退出 0
   - 步骤 2:`events.jsonl` 新建,属主 `hft-guard`
   - 两步之后 `find /var/lib/hft/guard -uid 0` 输出为空
-- 实现:`deploy/dev2/tests/container/test_guard_proc.py::dep_081_clear_no_root_files`
+- 实现:`deploy/tests/container/test_guard_ownership.py::dep_081_clear_no_root_files`
 
 ### DEP-082 `tripped` 标志的属主、模式与位置
 
@@ -933,7 +935,8 @@ spec: README.md
 - 期望:
   - 步骤 1:属主 `hft-guard`,模式 0644,路径在 `StateDirectory`(`/var/lib/hft/guard/`)下
   - 步骤 2:文件仍在,inode 与内容不变
-- 实现:`deploy/dev2/tests/container/test_guard_proc.py::dep_082_tripped_file`
+- 实现:`deploy/tests/container/test_guard_ownership.py::dep_082_tripped_file`
+- 覆盖边界:容器覆盖独立进程重开后的 inode、内容、模式与属主；systemd restart 路径仍待验收。
 
 ### DEP-083 批处理单元必须以 root 判定 `tripped`
 
@@ -961,7 +964,7 @@ spec: README.md
 - 期望:
   - 每步后 `events.jsonl` 恰好多一行合法 JSON,含实例名 `sim` 与心跳 `state`(`Stopped` / `Draining`)以及是否删除
   - `events.jsonl` 属主为 `hft-guard`;`find /var/lib/hft/guard -uid 0` 为空
-- 实现:`deploy/dev2/tests/container/test_guard_proc.py::dep_084_shm_release_event`
+- 实现:`deploy/tests/container/test_guard_ownership.py::dep_084_shm_release_event`
 
 ### DEP-085 二级动作从条件满足到第一个 `stop` 不超过一个采样周期
 
@@ -1097,7 +1100,8 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:夹具 `tokyo-cex-1`、`dev2-1` 的全部 `.service` 生成物;slice 成员与数值的归属见 CORE-160
-- 实现:`tools/xtask/tests/deploy_units.rs::dep_121_explicit_user_slice`
+- 实现:`deploy/tests/test_gen.py::dep_121_explicit_user_slice`
+- 覆盖边界:仅当前 dev2 prod/testnet 与守护服务；其余服务和主机矩阵仍待验收。
 
 | 行 | 单元 | 期望 `User=` / `Slice=` |
 |---|---|---|
@@ -1121,7 +1125,8 @@ spec: README.md
 - 期望:
   - 值集合恰为 {`hft/core-prod`、`hft/core-sim`、`hft/kill-switch`、`hft/creds`、`hft/watchtower`、`hft/reconciler`、`hft/ops_bot`、`hft/pipeline`}(`tokyo-cex-1`),`dev2-1` 另有 `hft/guard`、`hft/offbox`
   - 每个值恰好出现在一个单元里
-- 实现:`tools/xtask/tests/deploy_units.rs::dep_122_runtime_dir_unique`
+- 实现:`deploy/tests/test_gen.py::dep_122_runtime_dir_unique`
+- 覆盖边界:仅当前装配的运行目录唯一性；完整目录集合仍待验收。
 
 ### DEP-123 不用 `Requires=`/`Requisite=`/`BindsTo=` 依赖会重启的单元
 
@@ -1134,7 +1139,8 @@ spec: README.md
 - 期望:
   - 没有任何目标是 `hft-*.service`;`hft-kill-switch` 与两个 hft-core 实例之间没有任何这类依赖;两个 hft-core 实例之间也没有
   - `RequiresMountsFor=` 不计入(允许)
-- 实现:`tools/xtask/tests/deploy_units.rs::dep_123_no_hard_deps`
+- 实现:`deploy/tests/test_gen.py::dep_123_no_hard_deps`
+- 覆盖边界:当前生成物全量检查；尚未生成的服务不计验收。
 
 ### DEP-124 重启策略与配置错误退出码
 
@@ -1142,7 +1148,8 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:夹具 `tokyo-cex-1`、`dev2-1` 的单元
-- 实现:`tools/xtask/tests/deploy_units.rs::dep_124_restart_policy`
+- 实现:`deploy/tests/test_gen.py::dep_124_restart_policy`
+- 覆盖边界:覆盖当前 prod 与守护；冷服务和完整主机矩阵仍待验收。
 
 | 行 | 单元 | 期望 |
 |---|---|---|
@@ -1157,7 +1164,8 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:夹具 `tokyo-cex-1`;`<cold_root>` = `/data`;合并后的 `hft-core@prod.service` 与 `hft-core@sim.service`
-- 实现:`tools/xtask/tests/deploy_units.rs::dep_125_core_template`
+- 实现:`deploy/tests/test_gen.py::dep_125_core_template`
+- 覆盖边界:覆盖 dev2 prod 合并单元；sim、升级主机与大页目录仍待验收。
 
 | 行 | 项 | 期望 |
 |---|---|---|
@@ -2508,6 +2516,7 @@ spec: README.md
   - 最后一步调用 `hostprobe verify`;`deployments/<ts>-v1.2.3.json` 含 `version`、`git_sha`、归档 SHA-256、`current`、`previous`、`refdata_version`、`host_profile_hash`、`channel = "release"`、`group = "core"`、`manifest = "tokyo-cex-1"`、验收结果 `pending`
   - 退出 0;`current-cold` 与 `current-sim` 仍为 `v1.2.2`
 - 实现:`deploy/tests/test_release.py::dep_225_activate_ok`
+- 覆盖边界:覆盖组链接、冷激活顺序、文件安装及末步 hostprobe；完整主机配置、命令链接及 refdata/HostProfile 记录字段仍待验收。
 
 ### DEP-226 激活在校验失败时不切换或回退切换
 
@@ -2612,7 +2621,8 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:替身根,清单 `tokyo-cex-1`;`RELEASE.json.target = "aarch64-unknown-linux-gnu"`;hft-core 的 `storage.disk_free_block_pct = 15`;ENI-A 主私有 IP(IMDS 替身)`10.0.0.5`;基线全部通过(DEP-235.1),每行只破坏一项;失败时 stdout 列出失败项名
-- 实现:`deploy/tests/test_preflight.py::dep_235_common_items`
+- 实现:`deploy/tests/test_release.py::dep_235_common_items`
+- 覆盖边界:覆盖当前 dev2 装配的通用检查；升级主机、ctl 签发者生成、权限闭包和完整 S3 检查仍待验收。
 
 | 行 | 条件 | 期望 |
 |---|---|---|
@@ -2664,7 +2674,8 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:替身根,清单 `dev2-1`;基线全部通过;每行只破坏一项
-- 实现:`deploy/tests/test_preflight.py::dep_237_dev2_items`
+- 实现:`deploy/tests/test_release.py::dep_237_dev2_items`
+- 覆盖边界:覆盖 guard、已安装 slice、polkit、Rust/C 工具链差异与 IMDS/正式秘密拒绝；完整批处理生成物仍待验收。
 
 | 行 | 条件 | 期望 |
 |---|---|---|
@@ -2790,7 +2801,8 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:夹具 `dev2-1` 与 hft-core `dev2` 档生成的期望剖面
-- 实现:`tools/xtask/tests/deploy_profile.rs::dep_247_dev2_profile`
+- 实现:`deploy/tests/test_gen.py::dep_247_dev2_profile`
+- 覆盖边界:覆盖已装配 slice、守护与本地出口检查；EIP 与完整 advisory 剖面仍待验收，IMDS 规则由预检另查。
 
 | 行 | 项 | 期望(级别 `required`) |
 |---|---|---|
@@ -2842,7 +2854,8 @@ spec: README.md
   1. 以 `TZ=UTC` 与 `TZ=Asia/Tokyo`、不同的当前时刻与不同的工作目录各运行一次 `cargo xtask gen-host`
 - 期望:
   - 两次输出逐字节相同,且与已提交的生成物相同;运行期间没有读取 `deploy/hosts/`、hft-core 主机类档与 `deploy/` 静态配置之外的文件(文件访问记录)
-- 实现:`tools/xtask/tests/deploy_gen.rs::dep_250_pure_generator`
+- 实现:`deploy/tests/test_gen.py::dep_250_pure_generator`
+- 覆盖边界:覆盖当前 dev2 清单的纯生成与提交一致性；升级主机矩阵仍待验收。
 
 ### DEP-251 守护、看门狗、`hft-shm-release` 与凭证代理只用 Python 标准库
 

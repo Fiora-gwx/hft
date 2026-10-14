@@ -1,0 +1,12 @@
+schema = 4
+host = "test-dev2-prod"
+instance_type = "c7g.large"
+class = "dev2"
+instances = ["prod"]
+formal_live = false
+verify = false
+replay_verify = false
+[eni_b]
+name = "ens5"
+[egress]
+prod = [{ eni = "b", ip = "172.31.10.5" }]

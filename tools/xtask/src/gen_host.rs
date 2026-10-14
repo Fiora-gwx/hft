@@ -1,6 +1,5 @@
 //! `cargo xtask gen-host [--host <name>] [--check]` (tools/README.md "cargo xtask gen-host"): input
-//! checks only until the generators (`deploy/gen/`) and the hft-core host-class tables exist; then it
-//! exits 2 naming what is missing (tools/README.md 已知限制).
+//! delegates to the deterministic deployment generator. Unsupported host classes fail closed.
 
 use std::path::Path;
 
@@ -35,23 +34,35 @@ pub fn run(root: &Path, args: &[String]) -> i32 {
         }
     };
     if let Some(h) = &host {
+        if h.is_empty()
+            || !h
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b))
+        {
+            eprintln!("gen-host: error: invalid host name");
+            return EXIT_ENV;
+        }
         let rel = format!("deploy/hosts/{h}.toml");
         if !root.join(&rel).is_file() {
             eprintln!("gen-host: error: host inventory {rel} does not exist");
             return EXIT_ENV;
         }
     }
-    let missing: Vec<&str> = ["deploy/gen", "apps/hft-core/Cargo.toml"]
-        .into_iter()
-        .filter(|p| !root.join(p).exists())
-        .collect();
-    eprintln!(
-        "gen-host: error: generator inputs not in the repository yet: {} (tools/README.md 已知限制)",
-        if missing.is_empty() {
-            "generator entry".to_string()
-        } else {
-            missing.join(", ")
+    let script = root.join("deploy/gen/generate.py");
+    let Some(python) = crate::doc_check::find_python().filter(|_| script.is_file()) else {
+        eprintln!("gen-host: error: deployment generator or Python 3 is missing");
+        return EXIT_ENV;
+    };
+    match std::process::Command::new(python)
+        .arg(script)
+        .args(args)
+        .current_dir(root)
+        .status()
+    {
+        Ok(status) => status.code().unwrap_or(crate::EXIT_FAIL),
+        Err(error) => {
+            eprintln!("gen-host: error: {error}");
+            EXIT_ENV
         }
-    );
-    EXIT_ENV
+    }
 }
