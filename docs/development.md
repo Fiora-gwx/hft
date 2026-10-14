@@ -97,7 +97,7 @@
 | `cargo xtask test-trace` | 测试规格(`TESTS.md`、`docs/tests/*.md`)与测试函数、场景、基准的追溯;规则归 [docs/tests §6](tests/README.md#6-与代码的对应) | `docs` 作业(每次运行;只报告未实现/多余/不一致与逐里程碑计数,只有重复编号与格式错误失败) |
 | `hft-cfg …` | 手写 TOML → refdata / `StrategyParams` / `RiskParams` / `EngineConfig` blob + 差异报告;读 `hft-core schemas` 导出的 schema JSON,编解码链接 hft-strategy-sdk 的 `params` | 见 [tools](../tools/README.md#hft-cfg) |
 | `hft-core schemas --out <dir>` | 导出各策略的参数 schema JSON:`<kind_id>-<name>.schema.json` + `index.json`(规格归 [strategies/registry](../strategies/registry/README.md)) | 单元测试与 `fixtures/strategy-schemas/` 比对;发布作业导出进归档 `schemas/strategies/` |
-| `cargo xtask gen-host [--check]` | 主机清单 + hft-core 线程计划 → deploy 生成物([deploy](../deploy/README.md#主机清单)) | 改动 `deploy/` 或 `apps/hft-core/` 的非 Markdown 文件时 `rust` 作业用 `--check` 核对生成物无差异;删除与改名也触发,不要求文件在当前检出中存在;同一判定供 deploy 容器测试使用 |
+| `cargo xtask gen-host [--check]` | 主机清单 + hft-core 线程计划 → deploy 生成物([deploy](../deploy/README.md#主机清单)) | 改动 `deploy/` 或 `apps/hft-core/` 的非 Markdown 文件时 `rust` 作业用 `--check` 核对生成物无差异;删除与改名也触发,同一判定供 deploy 容器测试使用。M3 前缺少 `deploy/gen` 时,子命令清单明确报告生成器尚未落地;到 M3 仍缺失则在清单检查阶段失败,不能以占位命令充当实现 |
 | `cargo xtask fixtures {fetch,extract,scrub,check}` | 金样下载校验、从 journal 抽金样、脱敏、敏感信息扫描 | `check` 在 `ci` 内;`fetch` 经 OIDC 读 S3([凭证](#凭证与权限)) |
 | `cargo xtask fuzz <target> [--time T]` | 以固定 nightly 运行 `cargo fuzz` | 改了解码器的 PR 跑冒烟;每夜短跑轮转;验证包工作流构建全部 core 目标 |
 | `cargo xtask new-strategy <name> --kind-id <n> [--with-model] [--with-pipeline]`(签名归 [tools](../tools/README.md#cargo-xtask-new-strategy)) | 新策略脚手架;`--with-pipeline` 同时生成 `strategies/<name>/pipeline/` 插件包 | 本地或 CI 均可;产物经 PR 合入 |
