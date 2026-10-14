@@ -6,9 +6,17 @@ spec: README.md
 
 # hft-core 测试规格
 
-当前实现覆盖说明：`tests/config.rs` 验证 CORE-002、CORE-012、CORE-045 的可执行子集，含控制批次原子发布、分片头重组、模拟回报解码、模拟连接与行情的启动闸门、真实 LiveDriver 与 registry 策略的下单/撤单闭环（含发送报告和 epoch 匹配）及 Drain；`tests/paper_process.rs::core_048_sim_instance_boots_without_keys` 以固定行情和真实 `SimExchange` 启动进程，等待 ClockOk 后经控制 socket 启用 registry 策略，检查发送、Ack、CancelAck、SIGTERM Drain、冷副本及重启拒绝。CORE-048 的部署目录、共享心跳块与完整主机验收仍待完成；本说明不改变原用例期望或里程碑。
+跨组件场景的实现与未覆盖项见 [C6、C12、C15、FP-8](../../docs/tests/scenarios.md)，使用真实 sequencer 与进程内网关；这些测试不改变本文件的里程碑或完整主机验收要求。
+
+当前实现覆盖说明：`tests/config.rs` 验证 CORE-002、CORE-012、CORE-045 的可执行子集，含控制批次原子发布、分片头重组、模拟回报解码、模拟连接与行情的启动闸门、真实 LiveDriver 与 registry 策略的下单/撤单闭环（含发送报告和 epoch 匹配）及 Drain；`tests/paper_process.rs::core_048_sim_instance_boots_without_keys` 以固定行情和真实 `SimExchange` 启动进程，等待 ClockOk 后经控制 socket 启用 registry 策略，检查发送、Ack、CancelAck、SIGTERM Drain、冷副本、共享心跳的 Stopped 与重启拒绝。CORE-048 的部署目录与完整主机验收仍待完成；本说明不改变原用例期望或里程碑。
+
+`tests/startup_config.rs` 覆盖当前配置子集的退出码、缺失字段与 REST key 引用、未知字段脱敏、策略编号、重复绑定、线程名与 park 心跳约束、订阅容量、执行/风险限额与尘埃线边界；不表示完整主机配置矩阵通过。`tests/housekeeping.rs` 验证 CORE-382 的校准记录与 CORE-418 的三态输入装配。dev2 护栏判定测试在 `deploy/dev2/tests/test_guard.py`，热段释放在 `deploy/tests/test_shm_release.py`；真实主机标定、Telegram 告警、旧系统主单元状态采集与 systemd 容器验收仍缺证据。
 
 格式与规则见 [docs/tests](../../docs/tests/README.md)。
+
+`tests/secrets.rs` 验证共享路径一次读取后删除、原始缓冲交接、错误脱敏、后续配置失败时不残留已读取文件，以及失败的 `--check` 不消耗凭据。完整 strace 矩阵与测试分配器的释放前清零观测尚未覆盖。
+
+`tests/paper_process.rs::core_380_ready_precedes_gate_release_and_control_drain_stops_cleanly` 验证 CLOCK 仍关闭时 READY 不改变 Warmup、全部工作线程有命名心跳槽、控制 socket 的 Drain 被记录后干净退出；完整启动失败与恢复状态矩阵尚未覆盖。
 
 CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs::core_120_mock_accounts_bootstrap_reauth_and_drift` 以独立子进程、两家真实协议和脚本 REST 验证撤空、基线、重新核验、超时/错误模式失败与余额差异不覆盖账本；不替代真实 TLS、交易所或正式恢复验收。资金费账单复用 FundingPoll，沿用现有实际结算记账与去重。
 

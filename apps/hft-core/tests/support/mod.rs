@@ -417,6 +417,8 @@ hot_keep = 2
 [clock]
 step_threshold_ns = 50000
 interval_ms = 1000
+[watchdog]
+hb_stale_ms = 1000
 [rings]
 elements = 1024
 bytes = 1048576

@@ -2083,6 +2083,7 @@ CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、�
 - 里程碑:M3
 - 前置:`G0`;恢复后收到 `SetEpoch{epoch: 70, accept_prev: true, prev_epoch: 5}`(跨 AZ 恢复的安全间隔使 `prev_epoch ≠ epoch − 1`);`IdTable` 为空;回报均为不带成交的 `Ack`,venue/account 与连接一致
 - 实现:`crates/hft-venue/tests/gw_report.rs::ven_214_epoch_window`
+- 跨组件回归:[FP-8](../../docs/tests/scenarios.md#fp-8-本机时钟漂移超过-recvwindow-时交易所以时间窗拒单并标记连接-clock_skew时钟不可信只停新开仓)验证缺省 epoch 的错误响应只由同连接在途请求补齐；跨连接响应和已完成请求的重复响应保持未解析，跨连接响应不消耗原请求。
 
 | 行 | 回报 cid 的 epoch / 此前的 `SetEpoch` | 期望 `OrderEvent` |
 |---|---|---|

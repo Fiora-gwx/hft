@@ -21,6 +21,7 @@ pub struct Config {
     pub shutdown: Shutdown,
     pub journal: Journal,
     pub clock: Clock,
+    pub watchdog: Watchdog,
     pub threads: Vec<Thread>,
     pub venues: BTreeMap<String, Venue>,
     pub rings: Rings,
@@ -72,6 +73,11 @@ pub struct Journal {
 pub struct Clock {
     pub step_threshold_ns: u32,
     pub interval_ms: u32,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Watchdog {
+    pub hb_stale_ms: u32,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -163,7 +169,7 @@ pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 fn resolve(root: &Path, p: &mut PathBuf) {
-    if p.is_relative() {
+    if !p.as_os_str().is_empty() && p.is_relative() {
         *p = root.join(&*p);
     }
 }
@@ -175,9 +181,10 @@ fn read_blob(b: &Blob) -> Result<Vec<u8>, Error> {
     }
     Ok(bytes)
 }
-pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
+pub fn parse(path: &Path) -> Result<Config, Vec<Error>> {
     let text = std::fs::read_to_string(path)
         .map_err(|_| vec![Error::config("FileRead", path.display().to_string())])?;
+    crate::config_shape::check(&text)?;
     // Do not echo TOML source: an accidentally inline key must not be printed on parse failure.
     let mut c: Config = toml::from_str(&text).map_err(|_| {
         vec![Error::config(
@@ -219,6 +226,11 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
             }
         }
     }
+    Ok(c)
+}
+
+pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
+    let c = parse(path)?;
     let mut errors = Vec::new();
     macro_rules! bad {
         ($code:expr, $s:expr) => {{
@@ -231,6 +243,9 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
     }
     if c.clock.step_threshold_ns == 0 || c.clock.interval_ms == 0 {
         bad!("BadValue", "clock threshold and interval must be positive".into());
+    }
+    if c.watchdog.hb_stale_ms == 0 {
+        bad!("BadValue", "watchdog.hb_stale_ms must be positive".into());
     }
     if c.instance.config_source != "file" {
         bad!(
@@ -344,7 +359,10 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
                     || k.session_seed_path.as_os_str().is_empty()
                     || k.rest_api_key_path.as_os_str().is_empty()
                     || k.rest_secret_path.as_os_str().is_empty()
-                    || (v.protocol.starts_with("bitget-") && k.passphrase_path.is_none())
+                    || (v.protocol.starts_with("bitget-")
+                        && k.passphrase_path
+                            .as_ref()
+                            .is_none_or(|p| p.as_os_str().is_empty()))
                 {
                     errors.push(Error::config("MissingCredential", name));
                 }
@@ -352,11 +370,17 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
         }
     }
     let mut names = Vec::new();
+    if c.threads.len() > 30 {
+        errors.push(Error::config("ThreadPlan", "heartbeat capacity is 30 threads"));
+    }
     for t in &c.threads {
         if names.contains(&t.name)
             || t.name.is_empty()
+            || t.name.len() > 15
+            || t.name.as_bytes().contains(&0)
             || t.core.is_some_and(|n| n >= 256)
             || !(1..=10000).contains(&t.park_us)
+            || u128::from(t.park_us) * 4 >= u128::from(c.watchdog.hb_stale_ms) * 1000
             || !tasks.contains(&t.task)
         {
             errors.push(Error::config("ThreadPlan", &t.name));
@@ -394,7 +418,13 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
     let rd_blob = rd_blob.ok_or_else(|| one("FileRead", "refdata".into()))?;
     let ec_blob = ec_blob.ok_or_else(|| one("FileRead", "engine".into()))?;
     let risk_blob = risk_blob.ok_or_else(|| one("FileRead", "risk".into()))?;
-    let rd = RefData::load(&rd_blob, None).map_err(|e| one("Refdata", format!("{e:?}")))?;
+    let rd = RefData::load(&rd_blob, None).map_err(|report| {
+        report
+            .errors
+            .iter()
+            .map(|e| Error::config(e.code.name(), format!("section={} row={}", e.section, e.row)))
+            .collect::<Vec<_>>()
+    })?;
     let setup = EngineSetup::decode_blob(
         &ec_blob,
         &rd,
@@ -407,6 +437,21 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
         0,
     )
     .map_err(|e| one("EngineMismatch", format!("{e:?}")))?;
+    for (name, v) in &c.venues {
+        for k in &v.accounts {
+            let account = rd.account(AccountId(k.account));
+            if k.account == 0
+                || account.id != AccountId(k.account)
+                || account.venues & (1u64 << v.id) == 0
+                || !matches!(account.kind, AccountKind::Live)
+            {
+                errors.push(Error::config(
+                    "AccountMismatch",
+                    format!("venue {name}, account {}", k.account),
+                ));
+            }
+        }
+    }
     if setup.role_prod == dry || setup.drain_timeout_ms != c.shutdown.drain_timeout_ms {
         errors.push(Error::config(
             "EngineMismatch",
@@ -423,6 +468,30 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
         .map_err(|e| one("RiskParams", format!("{e:?}")))?;
     let mut parsed = Vec::new();
     for b in params {
+        // Report the stable startup diagnostics before the generic parameter decoder.
+        // SPB1 parsing requires an aligned slice; a byte Vec has no alignment contract.
+        use zerocopy::IntoBytes;
+        let mut aligned = vec![0u64; b.len().div_ceil(8)];
+        aligned.as_mut_slice().as_mut_bytes()[..b.len()].copy_from_slice(&b);
+        if let Ok(view) = hft_event::parse_spb1(&aligned.as_slice().as_bytes()[..b.len()]) {
+            match Strategies::kinds().iter().find(|d| d.kind_id == view.hdr.kind_id) {
+                None => {
+                    errors.push(Error::config(
+                        "UnknownStrategyKind",
+                        format!("kind {}", view.hdr.kind_id),
+                    ));
+                    continue;
+                }
+                Some(desc) if desc.non_prod_only && rd.account(view.hdr.account).is_prod => {
+                    errors.push(Error::config(
+                        "ProbeOnProdAccount",
+                        format!("account {}", view.hdr.account.0),
+                    ));
+                    continue;
+                }
+                _ => {}
+            }
+        }
         match hft_sequencer::parsed::parse_params::<Strategies>(
             &b,
             digest(&b),
@@ -479,6 +548,40 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
             }
         }
     }
+    for (_, p) in &parsed {
+        if parsed
+            .iter()
+            .filter(|(_, other)| other.strategy == p.strategy)
+            .count()
+            != 1
+        {
+            errors.push(Error::config(
+                "BindingMismatch",
+                format!("instance {}", p.strategy.0),
+            ));
+        }
+        let exec = setup
+            .exec
+            .accounts
+            .iter()
+            .find(|a| a.account == p.account)
+            .and_then(|a| a.params)
+            .unwrap_or(setup.exec.default);
+        let min_notional = p
+            .groups
+            .specs()
+            .iter()
+            .flat_map(|g| g.legs.iter().take(usize::from(g.n_legs)))
+            .map(|leg| rd.inst(leg.inst).min_notional)
+            .max()
+            .unwrap_or(hft_types::Notional(0));
+        if exec.dust_notional < min_notional {
+            errors.push(Error::config(
+                "DustBelowMinNotional",
+                format!("account {}", p.account.0),
+            ));
+        }
+    }
     if let Some(paper) = &c.sim {
         if paper.quote_interval_ms == 0 || paper.quotes.is_empty() || paper.leverage == 0 {
             errors.push(Error::config(
@@ -498,6 +601,33 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
         }
     }
     let feed_bits = c.venues.values().fold(0u64, |bits, v| bits | (1u64 << v.id));
+    let subscriptions: u64 = c.venues.values().map(|v| u64::from(v.max_sub_insts)).sum();
+    if subscriptions > u64::from(setup.caps.max_insts) {
+        errors.push(Error::config("SubCapacity", "subscription sum exceeds max_insts"));
+    }
+    if parsed.iter().map(|(_, p)| u64::from(p.groups.len())).sum::<u64>()
+        > u64::from(setup.caps.max_cells_total)
+    {
+        errors.push(Error::config(
+            "CellCapacity",
+            "group count exceeds max_cells_total",
+        ));
+    }
+    if c.venues
+        .values()
+        .any(|v| u64::from(v.max_sub_insts) * 2 > c.rings.elements as u64)
+    {
+        errors.push(Error::config(
+            "FeedCtlCapacity",
+            "feed control ring requires twice max_sub_insts",
+        ));
+    }
+    if risk.conn_liveness_ms < 2 * hft_venue::FeedCfg::default().bbo_ping_ms {
+        errors.push(Error::config(
+            "ConnLiveness",
+            "connection liveness requires two BBO ping intervals",
+        ));
+    }
     if !dry {
         for v in c.venues.values() {
             for k in &v.accounts {
@@ -535,6 +665,49 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
     if !errors.is_empty() {
         return Err(errors);
     }
+    // Exercise the risk owner's consistency check before any journal, key or network I/O.
+    let mut bounds = vec![hft_risk::ExecBounds::default(); 256];
+    for a in &setup.exec.accounts {
+        let p = a.params.unwrap_or(setup.exec.default);
+        bounds[usize::from(a.account.0)] = hft_risk::ExecBounds {
+            force_max_cross: p.force_slice.max_cross,
+            force_max_chunk: p.force_slice.max_chunk_notional,
+            dust_notional: p.dust_notional,
+        };
+    }
+    hft_risk::Risk::new(
+        &risk,
+        &rd,
+        &setup.gws,
+        &hft_risk::Capacities {
+            max_insts: setup.caps.max_insts,
+            max_cells_total: setup.caps.max_cells_total,
+            max_caps: hft_risk::Capacities::MAX_CAPS,
+        },
+        &bounds,
+        hft_risk::ModeCfg {
+            auto_resume_after_clean_drain: setup.seq.auto_resume_after_clean_drain == 1,
+            allow_missing_standby: setup.seq.allow_missing_standby == 1,
+        },
+    )
+    .map_err(|e| {
+        one(
+            if e == hft_risk::RiskParamError::ExecRiskMismatch {
+                "ExecRiskMismatch"
+            } else {
+                "RiskParams"
+            },
+            format!(
+                "{e:?}; accounts {:?}",
+                setup
+                    .exec
+                    .accounts
+                    .iter()
+                    .map(|a| a.account.0)
+                    .collect::<Vec<_>>()
+            ),
+        )
+    })?;
     Ok(Loaded {
         cfg: c,
         rd,

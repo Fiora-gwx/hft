@@ -3,7 +3,7 @@ use crate::Error;
 use crate::{
     config::{Config, Thread, Venue},
     io,
-    runtime::{Workers, byte_ring, idle, policy, ring},
+    runtime::{ThreadContext, Workers, byte_ring, idle, policy, ring},
     storage,
 };
 use hft_event::{ConnRole, FeedCmd, FeedMsg};
@@ -26,7 +26,7 @@ use std::{
 };
 use zerocopy::{FromZeros, IntoBytes};
 
-type TaskFn = Box<dyn FnOnce(Arc<AtomicBool>, Thread) -> Result<(), Error> + Send>;
+type TaskFn = Box<dyn FnOnce(Arc<AtomicBool>, ThreadContext) -> Result<(), Error> + Send>;
 pub struct VenueTasks(Vec<(Thread, TaskFn)>);
 pub type BuiltVenue = (VenueTasks, Option<io::GatewayInput>, Vec<storage::Side>, State);
 impl std::fmt::Debug for VenueTasks {
@@ -58,6 +58,7 @@ pub fn assemble(
     md: Producer<FeedMsg>,
     bulk: ByteProducer,
     commands: Consumer<FeedCmd>,
+    secrets: &crate::secrets::SecretFiles,
 ) -> Result<BuiltVenue, Error> {
     match v.protocol.as_str() {
         "binance-usdm" => build::<venue_binance::Usdm>(
@@ -75,6 +76,7 @@ pub fn assemble(
             venue_binance::FeedCtx::USDM,
             venue_binance::GwCtx::default,
             SignAlg::Ed25519,
+            secrets,
         ),
         "binance-spot" => build::<venue_binance::Spot>(
             c,
@@ -91,6 +93,7 @@ pub fn assemble(
             venue_binance::FeedCtx::SPOT,
             venue_binance::GwCtx::default,
             SignAlg::Ed25519,
+            secrets,
         ),
         #[cfg(feature = "bitget")]
         "bitget-usdt-futures" => build::<venue_bitget::BitgetUsdtFutures>(
@@ -108,6 +111,7 @@ pub fn assemble(
             venue_bitget::FeedCtx::new(),
             venue_bitget::GwCtx::default,
             SignAlg::HmacSha256,
+            secrets,
         ),
         #[cfg(feature = "bitget")]
         "bitget-spot" => build::<venue_bitget::BitgetSpot>(
@@ -125,6 +129,7 @@ pub fn assemble(
             venue_bitget::FeedCtx::new(),
             venue_bitget::GwCtx::default,
             SignAlg::HmacSha256,
+            secrets,
         ),
         _ => Err(Error::config("VenueNotBuilt", &v.protocol)),
     }
@@ -163,25 +168,22 @@ pub fn credential(
     secret: &std::path::Path,
     passphrase: Option<&std::path::Path>,
     alg: SignAlg,
+    secrets: &crate::secrets::SecretFiles,
 ) -> Result<Credential, Error> {
-    use std::io::Read;
     use zeroize::Zeroizing;
-    fn read(path: &std::path::Path, max: usize) -> Result<Zeroizing<Vec<u8>>, Error> {
-        let mut bytes = Zeroizing::new(Vec::new());
-        std::fs::File::open(path)
-            .and_then(|f| f.take((max + 1) as u64).read_to_end(&mut bytes))
-            .map_err(|_| Error::config("CredentialRead", "cannot read credential file"))?;
+    let read = |path: &std::path::Path, max: usize| {
+        let bytes = secrets.get(path)?;
         if bytes.is_empty() || bytes.len() > max {
             return Err(Error::config("CredentialShape", "invalid credential length"));
         }
         Ok(bytes)
-    }
+    };
     let key = read(key, 128)?;
     let secret = read(secret, 4096)?;
     let passphrase = passphrase.map(|p| read(p, 64)).transpose()?;
     let key = key.trim_ascii();
     let seed = if alg == SignAlg::Ed25519 {
-        Some(Zeroizing::new(venue_binance::session_seed(&secret).ok_or_else(
+        Some(Zeroizing::new(venue_binance::session_seed(secret).ok_or_else(
             || Error::config("CredentialShape", "invalid Ed25519 raw/PKCS8 key"),
         )?))
     } else {
@@ -235,6 +237,7 @@ fn build<P: AccountProtocol + Send>(
     ctx: P::FeedCtx,
     gw_ctx: fn() -> P::GwCtx,
     session_alg: SignAlg,
+    secrets: &crate::secrets::SecretFiles,
 ) -> Result<BuiltVenue, Error>
 where
     P::FeedCtx: Send + Clone,
@@ -308,12 +311,14 @@ where
             } else {
                 SignAlg::HmacSha256
             },
+            secrets,
         )?;
         let session_key = credential(
             &k.api_key_path,
             &k.session_seed_path,
             k.passphrase_path.as_deref(),
             session_alg,
+            secrets,
         )?;
         if rd.account(a).uid_policy == hft_refdata::UidPolicy::Unverifiable
             && rest.api_key != session_key.api_key
@@ -494,6 +499,7 @@ where
         policy(c, &format!("feed:{name}"))?,
         Box::new(move |stop, t| {
             while !stop.load(Ordering::Acquire) {
+                t.heartbeat.beat();
                 if !feed.poll_once(hft_rt::tsc_now().0).did_work {
                     idle(&t);
                 }
@@ -617,6 +623,7 @@ where
             policy(c, &format!("gw:{name}"))?,
             Box::new(move |stop, t| {
                 while !stop.load(Ordering::Acquire) {
+                    t.heartbeat.beat();
                     if !gw.poll_once(hft_rt::tsc_now().0).did_work {
                         idle(&t);
                     }
@@ -638,6 +645,7 @@ where
             let mut reauth_started = false;
             let mut pending_rest = None;
             loop {
+                t.heartbeat.beat();
                 let stopping_now = stop.load(Ordering::Acquire);
                 if stopping_now && stopping.is_none() {
                     stopping = Some(Instant::now());

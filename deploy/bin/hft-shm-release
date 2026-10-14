@@ -1,0 +1,32 @@
+#!/usr/bin/python3
+import argparse
+import datetime
+import os
+from pathlib import Path
+import sys
+from shm_release import release
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "dev2"))
+from guard import Effects
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("instance", choices=("prod", "sim"))
+    parser.add_argument("--root", default="/dev/shm/hft")
+    parser.add_argument("--state-dir", default="/var/lib/hft/guard")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+    result = release(args.root, args.instance, args.dry_run)
+    result.update(utc=datetime.datetime.now(datetime.timezone.utc).isoformat(), action="释放热段")
+    if os.name == "posix" and os.geteuid() == 0 and not args.dry_run:
+        import pwd
+        user = pwd.getpwnam("hft-guard")
+        os.setgroups([])
+        os.setgid(user.pw_gid)
+        os.setuid(user.pw_uid)
+    Effects(args.state_dir, args.dry_run).event(result)
+
+
+if __name__ == "__main__":
+    main()

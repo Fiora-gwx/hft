@@ -12,7 +12,7 @@ use hft_types::VenueId;
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
     },
     thread::JoinHandle,
     time::{Duration, Instant},
@@ -43,32 +43,131 @@ pub fn idle(t: &Thread) {
     std::thread::park_timeout(Duration::from_micros(t.park_us));
 }
 
+/// A worker owns the only writer of its claimed heartbeat slot.
+#[derive(Debug)]
+pub struct ThreadContext {
+    pub policy: Thread,
+    pub heartbeat: &'static hft_rt::Heartbeat,
+}
+impl std::ops::Deref for ThreadContext {
+    type Target = Thread;
+    fn deref(&self) -> &Thread {
+        &self.policy
+    }
+}
+
+fn claim(
+    heartbeat: &'static hft_rt::HeartbeatBlock,
+    t: &Thread,
+) -> Result<&'static hft_rt::Heartbeat, Error> {
+    use hft_rt::HbKind;
+    let kind = match t.task.as_str() {
+        "sequencer" => HbKind::Sequencer,
+        "persist" => HbKind::Persist,
+        "housekeeping" => HbKind::Housekeeping,
+        "ctl-gateway" => HbKind::Ctl,
+        "sim-gw" => HbKind::Gw,
+        "paper-feed" => HbKind::Feed,
+        s if s.starts_with("gw:") => HbKind::Gw,
+        s if s.starts_with("feed:") => HbKind::Feed,
+        _ => HbKind::Mixed,
+    };
+    heartbeat
+        .claim(&t.name, t.core.unwrap_or(u16::MAX), kind as u8)
+        .ok_or_else(|| Error::config("ThreadPlan", "heartbeat slots exhausted"))
+}
+
+/// Assemble a calibration observation and its decision input, keeping the three clock states.
+/// Every step is a fresh discontinuity; identical consecutive steps must not be coalesced.
+pub fn clock_tick(
+    hk: &mut Producer<HkMsg>,
+    pair: hft_rt::CalibPair,
+    hz: u64,
+    verdict: hft_rt::ClockVerdict,
+    previous: &mut Option<u8>,
+) -> Result<(), Error> {
+    let state = match verdict {
+        hft_rt::ClockVerdict::Synced => 1,
+        hft_rt::ClockVerdict::Unsynced => 2,
+        hft_rt::ClockVerdict::Stepped { .. } => 3,
+    };
+    let mut status = hft_sequencer::snapshot::clock_status(pair, hz);
+    status.source = 2;
+    status.state = state;
+    hk.try_push(HkMsg::ClockStatus(status))
+        .map_err(|_| Error::runtime("HkFull", "clock record", 3))?;
+    if *previous != Some(state) || state == 3 {
+        let (_, timer_id, _) = TimerCode::Sys(if state == 1 {
+            SysTimer::ClockOk
+        } else {
+            SysTimer::ClockBad
+        })
+        .encode()
+        .map_err(|_| Error::runtime("Clock", "timer encoding", 3))?;
+        hk.try_push(HkMsg::Sys { timer_id })
+            .map_err(|_| Error::runtime("HkFull", "clock verdict", 3))?;
+        *previous = Some(state);
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn notify(message: &str) -> Result<(), Error> {
+    use std::os::{
+        linux::net::SocketAddrExt,
+        unix::{
+            ffi::OsStrExt,
+            net::{SocketAddr, UnixDatagram},
+        },
+    };
+    let Some(path) = std::env::var_os("NOTIFY_SOCKET") else {
+        return Ok(());
+    };
+    let bytes = path.as_bytes();
+    let addr = if let Some(name) = bytes.strip_prefix(b"@") {
+        SocketAddr::from_abstract_name(name)
+    } else {
+        SocketAddr::from_pathname(path)
+    }
+    .map_err(|_| Error::runtime("Notify", "invalid notify address", 3))?;
+    UnixDatagram::unbound()
+        .and_then(|socket| socket.send_to_addr(message.as_bytes(), &addr))
+        .map_err(|_| Error::runtime("Notify", "cannot notify service manager", 3))?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn notify(_message: &str) -> Result<(), Error> {
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct Workers {
     pub stop: Arc<AtomicBool>,
     joins: Vec<JoinHandle<Result<(), Error>>>,
+    heartbeat: &'static hft_rt::HeartbeatBlock,
 }
-impl Default for Workers {
-    fn default() -> Self {
+impl Workers {
+    pub fn new(heartbeat: &'static hft_rt::HeartbeatBlock) -> Self {
         Self {
             stop: Arc::new(AtomicBool::new(false)),
             joins: Vec::new(),
+            heartbeat,
         }
     }
-}
-impl Workers {
     pub fn spawn(
         &mut self,
         t: Thread,
-        f: impl FnOnce(Arc<AtomicBool>, Thread) -> Result<(), Error> + Send + 'static,
+        f: impl FnOnce(Arc<AtomicBool>, ThreadContext) -> Result<(), Error> + Send + 'static,
     ) -> Result<(), Error> {
+        let heartbeat = claim(self.heartbeat, &t)?;
         let stop = self.stop.clone();
         self.joins.push(
             std::thread::Builder::new()
                 .name(t.name.clone())
                 .spawn(move || {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        pin(&t).and_then(|()| f(stop.clone(), t))
+                        pin(&t).and_then(|()| f(stop.clone(), ThreadContext { policy: t, heartbeat }))
                     }))
                     .unwrap_or_else(|_| Err(Error::runtime("ThreadPanic", "worker panicked", 134)));
                     if result.is_err() {
@@ -99,10 +198,15 @@ impl Drop for Workers {
         let _ = self.join();
     }
 }
-pub fn run(l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, Error> {
+pub fn run(
+    l: Loaded,
+    dry: bool,
+    duration_ms: Option<u64>,
+    secrets: crate::secrets::SecretFiles,
+) -> Result<u8, Error> {
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (l, dry, duration_ms);
+        let _ = (l, dry, duration_ms, secrets);
         Err(Error::runtime(
             "HostCheck",
             "runtime requires Linux (tmpfs journal and Unix ctl); --check and schemas are portable",
@@ -111,12 +215,17 @@ pub fn run(l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, Error> 
     }
     #[cfg(target_os = "linux")]
     {
-        run_linux(l, dry, duration_ms)
+        run_linux(l, dry, duration_ms, secrets)
     }
 }
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, Error> {
+fn run_linux(
+    mut l: Loaded,
+    dry: bool,
+    duration_ms: Option<u64>,
+    secrets: crate::secrets::SecretFiles,
+) -> Result<u8, Error> {
     let c = &l.cfg;
     if c.paths
         .ctl_socket
@@ -193,7 +302,12 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
     let (parsed_tx, parsed_rx) = Box::leak(Box::new(hft_rt::Mailbox::new())).split();
     let (retired_tx, retired_rx) = Box::leak(Box::new(hft_rt::Mailbox::new())).split();
     let (_internal_tx, internal_rx) = ring::<hft_ctl::InternalCmd>(16)?;
-    let hb: &'static hft_rt::Heartbeat = Box::leak(Box::new(hft_rt::Heartbeat::new()));
+    let heartbeat_dir = c.paths.journal_ram.join(storage::instance(c).as_str());
+    std::fs::create_dir_all(&heartbeat_dir)
+        .map_err(|_| Error::runtime("Heartbeat", "cannot create instance heartbeat directory", 3))?;
+    let heartbeat = hft_rt::HeartbeatBlock::create(&heartbeat_dir.join("heartbeat"), if dry { 2 } else { 1 })
+        .map_err(|e| Error::runtime("Heartbeat", format!("{e:?}"), 3))?;
+    let hb = heartbeat.sequencer();
     let mut paper_feeds = Vec::new();
     let mut feed_inputs = Vec::new();
     let mut venue_tasks = Vec::new();
@@ -240,7 +354,7 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
             let _ = (md_tx, bulk_tx);
         } else {
             let vtask = crate::venues::assemble(
-                c, &l.setup, name, v, rd, clock, epoch, bbo_tx, md_tx, bulk_tx, feed_rx,
+                c, &l.setup, name, v, rd, clock, epoch, bbo_tx, md_tx, bulk_tx, feed_rx, &secrets,
             )?;
             let (task, gw, js, baseline) = vtask;
             initial_balances.extend(baseline.balances);
@@ -252,6 +366,7 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
             sides.extend(js);
         }
     }
+    drop(secrets); // zeroize raw input buffers after handing credentials to their owners
     let (writer, seq_side) = storage::open(jcfg, epoch)?;
     sides.push(seq_side);
     // Gateway order must be the same as ECF1/GwMap's kill-word order.
@@ -310,6 +425,7 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
     )
     .map_err(|e| Error::config("Assembly", format!("{e:?}")))?;
     seq.step(); // publish EngineClock before readers and runtime inputs can reach the sequencer
+    heartbeat.set_state(hft_rt::HkLine::WARMUP);
     if let Some(parent) = c.paths.ctl_socket.parent() {
         std::fs::create_dir_all(parent).map_err(|e| Error::runtime("CtlSocket", e.to_string(), 3))?;
     }
@@ -354,12 +470,13 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
     );
     #[cfg(not(target_os = "linux"))]
     let _ = internal_rx;
-    let mut workers = Workers::default();
-    let mut persist_workers = Workers::default();
+    let mut workers = Workers::new(heartbeat);
+    let mut persist_workers = Workers::new(heartbeat);
     let mut persist = storage::Persist::new(sides);
     persist_workers.spawn(policy(c, "persist")?, move |stop, t| {
         let start = Instant::now();
         while !stop.load(Ordering::Acquire) {
+            t.heartbeat.beat();
             if !persist.poll(
                 start.elapsed().as_nanos() as u64,
                 clock.to_utc_ns(hft_rt::tsc_now()),
@@ -385,6 +502,7 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
         use hft_rt::PollTask;
         let mut sent = false;
         while !stop.load(Ordering::Acquire) {
+            t.heartbeat.beat();
             let now = hft_rt::tsc_now();
             if request.load(Ordering::Acquire) && !sent {
                 #[cfg(target_os = "linux")]
@@ -427,6 +545,7 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
         );
         workers.spawn(policy(c, "sim-gw")?, move |stop, t| {
             while !stop.load(Ordering::Acquire) {
+                t.heartbeat.beat();
                 if !gateway.poll(hft_rt::tsc_now())? {
                     idle(&t);
                 }
@@ -435,6 +554,7 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
         })?;
         workers.spawn(policy(c, "paper-feed")?, move |stop, t| {
             while !stop.load(Ordering::Acquire) {
+                t.heartbeat.beat();
                 for f in &mut paper_feeds {
                     f.poll(hft_rt::tsc_now())?;
                 }
@@ -450,35 +570,36 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
     let mut hk = hk_tx;
     let threshold = c.clock.step_threshold_ns;
     let interval = Duration::from_millis(u64::from(c.clock.interval_ms));
+    // This is an observation of sequencer-owned state, never a decision input.
+    let observed_state = Arc::new(AtomicU8::new(hft_rt::HkLine::WARMUP));
+    let hk_state = observed_state.clone();
+    let stale_after = Duration::from_millis(u64::from(c.watchdog.hb_stale_ms));
     workers.spawn(policy(c, "housekeeping")?, move |stop, t| {
         let mut tracker = hft_rt::DriftTracker::new(threshold);
         let mut last = None;
         let mut next = Instant::now();
+        let mut seq_count = hb.read();
+        let mut seq_progress = Instant::now();
+        notify("READY=1")?;
         while !stop.load(Ordering::Acquire) {
+            t.heartbeat.beat();
+            heartbeat.set_state(hk_state.load(Ordering::Acquire));
+            let count = hb.read();
+            if count != seq_count {
+                seq_count = count;
+                seq_progress = Instant::now();
+            }
             if Instant::now() >= next {
                 let pair = hft_rt::sample_pair(&clock, None)
                     .map_err(|e| Error::runtime("Clock", format!("{e:?}"), 3))?;
                 let verdict = tracker.push(pair);
-                let good = matches!(verdict, hft_rt::ClockVerdict::Synced);
-                let mut s = hft_sequencer::snapshot::clock_status(pair, clock.hz_milli);
-                s.source = 2;
-                s.state = if good { 1 } else { 2 };
-                hk.try_push(HkMsg::ClockStatus(s))
-                    .map_err(|_| Error::runtime("HkFull", "clock record", 3))?;
-                if last != Some(good) {
-                    let (_, timer_id, _) = TimerCode::Sys(if good {
-                        SysTimer::ClockOk
-                    } else {
-                        SysTimer::ClockBad
-                    })
-                    .encode()
-                    .map_err(|_| Error::runtime("Clock", "timer encoding", 3))?;
-                    hk.try_push(HkMsg::Sys { timer_id })
-                        .map_err(|_| Error::runtime("HkFull", "clock verdict", 3))?;
-                    last = Some(good);
+                clock_tick(&mut hk, pair, clock.hz_milli, verdict, &mut last)?;
+                heartbeat.hk.hk_utc_ns.store(pair.realtime_ns, Ordering::Release);
+                if seq_progress.elapsed() < stale_after {
+                    notify("WATCHDOG=1")?;
                 }
-                eprintln!("hft-core: heartbeat={} clock_synced={good}", hb.read());
-                next += interval;
+                // Missed periods cannot fabricate several observations of one instant.
+                next = Instant::now() + interval;
             }
             idle(&t);
         }
@@ -487,11 +608,18 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
     let stop = workers.stop.clone();
     let persist_stop = persist_workers.stop.clone();
     let seq_policy = policy(c, "sequencer")?;
+    let seq_slot = claim(heartbeat, &seq_policy)?;
+    let accounts: Vec<_> = (1..=u8::MAX)
+        .map(hft_types::AccountId)
+        .filter(|a| rd.account(*a).id.0 != 0)
+        .collect();
     let seq_thread = std::thread::Builder::new()
         .name(seq_policy.name.clone())
         .spawn(move || -> Result<(u8, u64, u64, u64), Error> {
             pin(&seq_policy)?;
+            let mut running = false;
             loop {
+                seq_slot.beat();
                 if stop.load(Ordering::Acquire) || persist_stop.load(Ordering::Acquire) {
                     return Err(Error::runtime(
                         "WorkerFailed",
@@ -503,6 +631,12 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
                     seq.driver_mut().io.retired_pending = seq.driver_mut().io.retired.try_send(p).err();
                 }
                 let outcome = seq.step();
+                if seq.view().draining() {
+                    observed_state.store(hft_rt::HkLine::DRAINING, Ordering::Release);
+                } else if !running && accounts.iter().all(|a| seq.engine().risk.mode.released(*a)) {
+                    running = true;
+                    observed_state.store(hft_rt::HkLine::RUNNING, Ordering::Release);
+                }
                 seq.driver_mut().taken_log.clear();
                 match outcome {
                     StepOutcome::Idle => idle(&seq_policy),
@@ -544,6 +678,10 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
     work_result?;
     persist_result?;
     let (code, orders, cancels, reports) = result?;
+    // This is the release authority consumed by hft-shm-release: never publish it
+    // on a worker failure, journal close failure, or before the persister finishes.
+    heartbeat.set_state(hft_rt::HkLine::STOPPED);
+    notify("STOPPING=1")?;
     println!(
         "hft-core: STOPPED exit={code} orders={orders} cancels={cancels} order_reports={reports} persisted=true"
     );

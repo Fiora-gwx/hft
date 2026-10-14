@@ -425,6 +425,7 @@ fn not_found() -> io::Error {
 }
 
 /// Makes `root` (and everything below it) a directory of the in-memory backend.
+#[cfg(feature = "mem-backend")]
 pub(crate) fn mem_register_root(root: &Path) {
     let mut s = mem();
     if !s.roots.iter().any(|r| r == root) {
@@ -525,6 +526,7 @@ fn mem_release(id: u64) {
 
 /// Frees every file below `root` regardless of mappings (tests/benches tear-down only: no mapping
 /// of those files may be used afterwards).
+#[cfg(feature = "mem-backend")]
 pub(crate) fn mem_purge(root: &Path) {
     let mut s = mem();
     let gone: Vec<(PathBuf, u64)> = s
@@ -554,6 +556,7 @@ pub(crate) fn mem_len(path: &Path) -> Option<usize> {
 }
 
 /// Shrinks the visible length of a file (tests: "截短").
+#[cfg(feature = "mem-backend")]
 pub(crate) fn mem_truncate(path: &Path, len: usize) -> io::Result<()> {
     let mut s = mem();
     let id = *s.files.get(path).ok_or_else(not_found)?;

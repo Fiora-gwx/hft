@@ -142,6 +142,7 @@ struct Inflight {
     conn: ConnId,
     slot: u32,
     r#gen: u32,
+    epoch: u16,
     op: GwOp,
     sent: u64,
 }
@@ -879,11 +880,27 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         now: u64,
     ) {
         let account = self.accts.get(a).map_or(AccountId(0), |x| x.account);
+        let request_identity = o.req.and_then(|r| self.request_identity(id, account, r));
         for k in 0..self.sink_evs.len() {
             let Some(mut m) = self.sink_evs.get(k).copied() else {
                 break;
             };
             if let RepMsg::OrderEvent(e) = &mut m {
+                // Some request responses omit the client id (and therefore epoch).
+                // Only an outstanding request on this connection can fill that gap.
+                if e.epoch == 0
+                    && let Some((r, mirror)) = request_identity
+                    && e.slot.0 == r.slot
+                    && e.r#gen == r.r#gen
+                    && e.account == account
+                    && e.venue == P::VENUE
+                    && (e.inst.0 == 0 || e.inst == mirror.inst)
+                {
+                    e.epoch = mirror.epoch;
+                    if e.inst.0 == 0 {
+                        e.inst = mirror.inst;
+                    }
+                }
                 let accepted = e.epoch == self.epoch || (self.accept_prev && e.epoch == self.prev_epoch);
                 if e.slot != SlotId::UNRESOLVED && !accepted {
                     e.slot = SlotId::UNRESOLVED;
@@ -1034,14 +1051,25 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             .inflight
             .iter()
             .position(|x| x.conn == conn && x.slot == r.slot && x.r#gen == r.r#gen && x.op == r.op)
-            .or_else(|| {
-                self.inflight
-                    .iter()
-                    .position(|x| x.slot == r.slot && x.r#gen == r.r#gen && x.op == r.op)
-            })
         {
             self.inflight.swap_remove(i);
         }
+    }
+
+    fn request_identity(&self, conn: ConnId, account: AccountId, r: ReqRef) -> Option<(ReqRef, SlotMirror)> {
+        let mirror = *self.mirror.get(r.slot as usize)?;
+        if !mirror.live || mirror.account != account || mirror.r#gen != r.r#gen {
+            return None;
+        }
+        let mut requests = self
+            .inflight
+            .iter()
+            .filter(|f| f.conn == conn && f.slot == r.slot && f.r#gen == r.r#gen && f.op == r.op);
+        let request = requests.next()?;
+        if requests.next().is_some() || request.epoch != mirror.epoch {
+            return None;
+        }
+        Some((r, mirror))
     }
 
     // ---------------------------------------------------------------- drain_out
@@ -1312,6 +1340,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 conn,
                 slot,
                 r#gen,
+                epoch: self.mirror.get(slot as usize).map_or(self.epoch, |m| m.epoch),
                 op,
                 sent,
             });

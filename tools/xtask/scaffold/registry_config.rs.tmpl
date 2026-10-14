@@ -39,7 +39,11 @@ fn scaffold_config_for_registered_probe() {
     assert_eq!((parsed.model_mem, parsed.model_ckpt), (0, 0));
     assert_eq!(rd.account(account).bound_instance, instance);
     assert!(matches!(rd.account(account).kind, hft_refdata::AccountKind::Sim(_)));
-    let risk = build::risk_params(&world).encode_blob().unwrap();
+    let mut risk = build::risk_params(&world);
+    // The process feed pings every 1000 ms; the synthetic DST world uses a shorter
+    // interval. Assembly requires at least two real feed ping intervals.
+    risk.conn_liveness_ms = risk.conn_liveness_ms.max(2000);
+    let risk = risk.encode_blob().unwrap();
     let mut engine = build::engine_setup(&world, 1_000_000_000, 1);
     engine.gws.venues.clear();
     engine.seq.allow_missing_standby = 1;

@@ -872,6 +872,7 @@ hft-core 自身不在 tick-to-trade 路径上增加代码;路径上的分段预�
 ## 测试与验收
 
 用例与验收见 [TESTS.md](TESTS.md)。
+跨组件测试 `tests/safety_scenarios.rs` 与 `tests/clock_skew.rs` 使用真实 sequencer、网关与进程内 TLS/WS；[C6、C15、FP-8 的覆盖边界](../../docs/tests/scenarios.md)保留在场景规格，不作为完整 W1 种子集验收。
 进程级离线冒烟见 `tests/paper_process.rs`；可移植配置与控制环测试见 `tests/config.rs`。运行入口与当前可执行子集见 [config](config/README.md)。模拟网关在取出订单指令时生成 `SendReport{Written}`，并为纯模拟器的订单回报补当前 epoch，使 OMS 按 `(slot, gen, epoch)` 匹配。
 
 ## 依赖
@@ -896,6 +897,8 @@ hft-core 自身不在 tick-to-trade 路径上增加代码;路径上的分段预�
 
 网络模式只接受非正式 Live 账户与 testnet 端点。`venues.<name>.account_io` 显式指定 `timeout_ms`、`interval_ms`、`request_gap_ms`、`max_cancel_rounds`、`listen_keepalive_ms`。启动先串行核对交易规则、账户模式和身份，撤销遗留订单并查到空，再读取余额与永续持仓。余额与账户 unassigned 持仓进入第一份完整 StateSnapshot，不猜测 group。启动 Summary 只证明本次快照与空 OMS 一致；seq journal 在 bootstrap 完成后创建。
 
+凭据由 `src/secrets.rs` 在实际启动的配置验证前读入并 unlink，同一普通文件的共享引用去重；原始输入用 `Zeroizing` 保存，交给连接组件后丢弃。语法解析失败不消费文件，`--check` 与 Sim 不读取文件；完整启动阶段 Note 与各持有组件的密钥生命周期验收仍待完成。
+
 `bitget` 默认启用，可与 Binance 同进程装配。两种 key 分别签名核验；非正式 Unverifiable 账户要求相同 API key，仍需人工确认身份闸门。Ed25519 文件支持原始 32 字节、PKCS#8 DER/PEM。周期余额/持仓只校验；REST 失败发布配置 UNREADABLE 后按 interval 重试。RateOnly 真实结算只与合成历史比较，不重复入现金；窗口与滞后取 LedgerConfig。操作见 [测试网 runbook](RUNBOOK-testnet.md)。
 
 账户入口按 State 中的 MarginItem 编码变长 MarginReport；超过单体容量时设置 ITEMS_TRUNCATED，未观察到的 ADL 值不填零。该编码由 CORE-169 验证。
@@ -904,7 +907,7 @@ hft-core 自身不在 tick-to-trade 路径上增加代码;路径上的分段预�
 
 - 当前可执行子集是 Linux 上的新 journal 会话、文件配置、单任务线程、已注册的 `NoModel` 策略与 `--dry-run` 离线闭环；配置生成示例、测试网模板与命令见 [config](config/README.md)。Windows 支持 `--check`、`schemas`、`--version` 与配置测试；实际引擎要求 Linux tmpfs 和 Unix socket。
 - `binance-spot`、`binance-usdm` 静态装配 `FeedRuntime`、`GwRuntime`、`SessionDriver`。`bitget-spot`、`bitget-usdt-futures` 通过 `bitget` Cargo feature 装配 UTA 协议，未启用时返回 `VenueNotBuilt`。单 venue 最多一个交易所账户；ECF1 必须要求两种 key 的身份闸门，app 不伪造账户配置、身份或对账成功。账户链路与限制见“测试环境账户装配”，完整恢复和正式权限核验仍未装配。
-- 既有 seq journal 返回 `RecoveryRequired`(4)，不按空账户重启。`SetRefdata`、advisor、主机 profile 验证、完整资源预算/护栏、大页、sd_notify 与共享心跳块尚未装配；日志输出线程心跳与退出时订单/撤单/回报计数。完整规格与上线门槛仍以本页其余部分为准。
+- 既有 seq journal 返回 `RecoveryRequired`(4)，不按空账户重启。`SetRefdata`、advisor、主机 profile 验证、完整资源预算与大页尚未装配。共享心跳块记录 sequencer 进度、每个线程的进度与进程状态；`Running` 跟随全部账户首次闸门放行，信号和控制命令的 Drain 都进入 `Draining`。housekeeping 独占 `READY`/`WATCHDOG` 通知；sequencer 停摆达到配置时限后不续 watchdog。`Stopped` 只在 seq/raw 封存且 persist 刷完后发布。完整规格与上线门槛仍以本页其余部分为准。
 - `--dry-run` 只用 Sim 账户和配置中的固定报价，不连接交易所；撮合由 `hft-sim::SimExchange` 执行。模拟任务沿 journal 前缀推进，在成功订单决定处等待 out-sim 交接；不使用后来行情处理先前决定。SIGINT/SIGTERM 与 `--run-for-ms` 经 ctl-gateway 的内部 Drain 命令停止开仓、按配置撤单；sequencer 完成后封 seq/raw 段，persist 最后落盘并退出。它是装配冒烟工具，不替代实时模拟账户的上线观察。
 
 - **单机 SPOF**:`prod` 实例一台;停得安全靠死手 + kill-switch + 冷启动 < 30 s;整机失联时的机外告警与人工处置归 watchtower 的 `healthz`、dev2 上的机外看门狗与 incident-response。可选扩展:第二台 warm standby(人工切),在单机故障的停机时间成为收益瓶颈时再做。

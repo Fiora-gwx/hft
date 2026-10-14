@@ -8,6 +8,8 @@ spec: README.md
 
 格式与规则见 [docs/tests](../docs/tests/README.md)。
 
+可执行子集：`dev2/tests/test_guard.py` 驱动真实护栏决策与文件写入、替身 systemctl，核对阈值持续时间、因果判定、两级停机和标志生存期；`tests/test_polkit.py` 用 JS 求值器核对 DEP-079，DEP-080/085 在护栏测试中。`tests/test_shm_release.py` 验证 CORE-195 的状态闸门、实例边界与 dry-run。它们不替代容器里的 systemd/权限/OOM/I/O 测试、发布归档或真实主机证据。
+
 **公共夹具**(`deploy/tests/fixtures/`;用例在 `前置` 中按名引用,并写出该用例依赖的取值):
 
 - 清单夹具目录 `hosts/`:

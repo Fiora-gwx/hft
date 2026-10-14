@@ -669,6 +669,7 @@ dependencies = [
 name = "hft-core"
 version = "0.1.0"
 dependencies = [
+ "aws-lc-rs",
  "hft-ctl",
  "hft-ctl-proto",
  "hft-event",
@@ -689,6 +690,7 @@ dependencies = [
  "hft-venue",
  "hft-venue-proto",
  "libc",
+ "rustls",
  "serde",
  "sha2",
  "signal-hook",

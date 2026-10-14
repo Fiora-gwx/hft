@@ -1,0 +1,11 @@
+polkit.addRule(function(action, subject) {
+    if (action.id !== "org.freedesktop.systemd1.manage-units" || subject.user !== "hft-guard") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    var stop = ["hft-verify.service", "hft-replay-verify.service", "hft-journal-archiver.service",
+                "hft-pipeline.service", "hft-treasury.service", "hft-core@prod.service",
+                "hft-reconciler.service", "hft-core@sim.service"];
+    var start = ["hft-core@sim.service"];
+    var units = action.lookup("verb") === "stop" ? stop : action.lookup("verb") === "start" ? start : [];
+    return units.indexOf(action.lookup("unit")) >= 0 ? polkit.Result.YES : polkit.Result.NO;
+});
