@@ -396,6 +396,27 @@ fn cross_taker_guards_age_connections_modes_unknown_and_cooldown() {
                 )
             })
         };
+    let profitable = Views::bbo(&v, P1);
+    let mut before = SnapshotWriter::new(1024);
+    s.snapshot(&mut before);
+    for (bid, ask) in [(599_999_900, 600_000_000), (600_000_000, 600_000_100)] {
+        MockViews::bbo(
+            &mut v,
+            P1,
+            (Px(bid), profitable.bid_qty),
+            (Px(ask), profitable.ask_qty),
+        );
+        assert!(fire(&mut s, &v, &mut ctx).places.is_empty());
+        let mut after = SnapshotWriter::new(1024);
+        s.snapshot(&mut after);
+        assert_eq!(after.as_bytes(), before.as_bytes(), "miss changed strategy state");
+    }
+    MockViews::bbo(
+        &mut v,
+        P1,
+        (profitable.bid_px, profitable.bid_qty),
+        (profitable.ask_px, profitable.ask_qty),
+    );
     v.bbo_rx(S1, Tsc(0), 0, RxTsSrc::None);
     assert!(fire(&mut s, &v, &mut ctx).places.is_empty());
     v.bbo_rx(S1, Tsc(10_000_000), 0, RxTsSrc::None);

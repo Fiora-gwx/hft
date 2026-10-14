@@ -54,6 +54,41 @@ fn signal_deducts_both_fee_notionals_and_requires_edge() {
     assert!(signal(a, b, &f).is_none());
 }
 #[test]
+fn signal_uncrossed_touches_cannot_have_positive_net_edge() {
+    let mut f = params();
+    f.min_edge = Rate(1);
+    for (ab, aa, bb, ba) in [
+        (999, 1000, 999, 1000),
+        (999, 1000, 1000, 1001),
+        (1000, 1001, 999, 1000),
+        (999, 1001, 1000, 1002),
+    ] {
+        for fee in [-1_000_000, 0, 1_000_000, 999_999_999] {
+            for slip in [0, 1, 50_000_000] {
+                for tick in [1, 3, 17] {
+                    let (mut a, mut b) = (leg(ab, aa), leg(bb, ba));
+                    a.fee = Rate(fee);
+                    b.fee = Rate(fee);
+                    a.hot.tick = tick;
+                    b.hot.tick = tick;
+                    a.position = Qty(-1000);
+                    b.position = Qty(1000);
+                    f.slip = Rate(slip);
+                    assert!(signal(a, b, &f).is_none());
+                    assert!(signal(b, a, &f).is_none());
+                }
+            }
+        }
+    }
+    // Touch equality is only safely rejected for a positive required edge.
+    let (mut a, mut b) = (leg(999, 1000), leg(1000, 1001));
+    a.fee = Rate(0);
+    b.fee = Rate(0);
+    f.min_edge = Rate(0);
+    f.slip = Rate(0);
+    assert_eq!(signal(a, b, &f).unwrap().edge, Rate(0));
+}
+#[test]
 fn signal_fixes_both_limits_within_observed_slippage() {
     let (mut a, mut b) = (leg(999, 1000), leg(1050, 1051));
     a.hot.tick = 3;

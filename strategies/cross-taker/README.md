@@ -82,13 +82,15 @@ registry 的 cross-taker feature 注册 CrossTaker,kind_id/schema_id = 3,version
 
 每组状态预分配,只含 engine_ns 冷却、UTC 公告期限、失败锁存、Broken 镜像和订单去重身份,不存 TSC、不复制仓位。快照按 GroupId/fingerprint 验证;参数替换保留相同 GroupId/指纹的状态。params.rs 定义 schema;fast/signal.rs 实现整数信号和数量;fast/mod.rs 处理事件、意图、快照;desc.rs 定义 Note;lib.rs 接 SDK trait。
 
+BBO 处理先完成轮次结算与 halt 投递。正 min_edge 下,若两个方向均为原始 bid ≤ 对侧 ask,直接结束本次信号计算;限价不得比触价更有利、负费率不计收益,因此该条件不会排除有效信号。其余报价继续完整的健康、机会年龄、费用、限价和数量检查;已读取的 BBO 在本次调用内复用。
+
 ## 延迟与资源契约
 
 on_event 无分配、无锁、无系统调用、无浮点数;每个 BBO 最多检查两个方向、提交一条双腿链接意图。每组状态不超过 128 B,按 GroupTable::capacity 预分配。快照 2 B 头 + 每组 50 B,无 Model 分配。
 
 保留分段 `decided_tsc − proc_tsc` 的基线预算:未命中 p50 ≤ 15 ns/p99 ≤ 40 ns,命中 p50 ≤ 300 ns/p99 ≤ 1 µs,Order/Exec p50 ≤ 80 ns/p99 ≤ 250 ns,Risk 每组 p50 ≤ 150 ns/p99 ≤ 400 ns;Mode/Conn/Notice 按 Risk 预算。统一升级主机实测尚未完成,这些不是性能声明。
 
-`benches/on_event.rs` 经真实 CrossTaker::on_event 测量 tick_miss(双侧健康但价差不足)、tick_fire(产生 OnFill 链接意图)、exec_update(Broken)、risk_event(HedgeBroken)。边界为入口 proc_tsc 至返回 decided_tsc;夹具和状态恢复在计时外。使用与 registry 引擎测试相同的合成常量、单 group 和 SDK MockViews,默认 Criterion 预热 3 s/100 个样本,无绑核、系统分配器;CI 短跑配置归 [tools](../../tools/README.md#cargo-xtask-bench-gate)。Criterion 仅作相对比较,参考机逐次直方图仍待完成。
+`benches/on_event.rs` 经真实 CrossTaker::on_event 测量 tick_miss(双侧健康但价差不足)、tick_fire(产生 Simultaneous 链接意图)、exec_update(Broken)、risk_event(HedgeBroken)。边界为入口 proc_tsc 至返回 decided_tsc;夹具和状态恢复在计时外。使用与 registry 引擎测试相同的合成常量、单 group 和 SDK MockViews,默认 Criterion 预热 3 s/100 个样本,无绑核、系统分配器;CI 短跑配置归 [tools](../../tools/README.md#cargo-xtask-bench-gate)。Criterion 仅作相对比较,参考机逐次直方图仍待完成。
 
 两腿都走 Part::Fast,无慢侧缓存更新、Advice 或 TargetIntent;`benches/not-applicable.toml` 为 slow_update、advice、target_set 登记理由,不产生空操作计时。Model 不适用。
 
@@ -102,6 +104,7 @@ on_event 无分配、无锁、无系统调用、无浮点数;每个 BBO 最多�
 
 ## 延伸阅读
 
+- [Windows 开发机前后测量](../../benchmarks/reports/2026-10-15-windows-cross-taker.md)(非参考机验收)
 - [SDK](../../crates/hft-strategy-sdk/README.md)、[执行层](../../crates/hft-exec/README.md)、[OMS](../../crates/hft-oms/README.md)
 - [策略规则](../AGENTS.md)、[上线门槛](../../docs/testing.md#8-上线门槛)
 - [同时下单决定](../../.agents/notes/implemented/feature/2026-10-14-cross-taker-simultaneous.md)
