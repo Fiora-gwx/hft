@@ -2,7 +2,7 @@
 //! OMS hedge requests and smoke orders — plus cancel/amend and the fixed-order drain of `OmsOut`
 //! (README "process" 3).
 
-use hft_event::{GwCmd, Note, NoteLevel, OrderAction, OrderDecision, OrderFlags, RecordFlags};
+use hft_event::{GwCmd, NoteLevel, OrderAction, OrderDecision, OrderFlags, RecordFlags};
 use hft_exec::{ExecOrder, ExecOrigin, LinkBrokenCause, LinkNotice, LinkPhase, PlaceResult};
 use hft_oms::{
     ApprovedIntent, HedgeGate, HedgePx, HedgeRequest, OmsOut, OmsTimerKind, OrderState, link_valid,
@@ -12,9 +12,7 @@ use hft_refdata::InstKind;
 use hft_risk::mode::{CellKey, Effective, ModeInput};
 use hft_risk::{Classification, IntentDraft, IntentView, PosFacts, Risk};
 use hft_strategy_sdk::ctx::CancelReq;
-use hft_strategy_sdk::{
-    HedgeKind, IntentClass, IntentOutcome, LinkRole, OrderIntent, OrderRef, OrderUpdate, StrategySet,
-};
+use hft_strategy_sdk::{HedgeKind, IntentClass, IntentOutcome, LinkRole, OrderIntent, OrderRef, StrategySet};
 use hft_types::{
     AccountId, CapSource, GroupId, InstId, Px, Qty, RejectBits, RoundMode, Side, SlotId, StrategyId, Tsc,
     VenueId,
@@ -526,6 +524,16 @@ pub(crate) fn place_exec<D: Driver<S>, S: StrategySet>(
     drv: &mut D,
     o: &ExecOrder,
 ) -> R<PlaceResult> {
+    #[cfg(feature = "testing")]
+    let o = &{
+        let mut x = *o;
+        if x.kind.is_hedge()
+            && let Some(cap) = e.test_exec_hedge_cap.take()
+        {
+            x.hedge_cap_qty = cap;
+        }
+        x
+    };
     let strategy = e.rd.account(o.intent.account).bound_instance;
     let r = pipeline(e, inst, drv, strategy, &o.intent, Src::Exec { o: *o }, 0)?;
     let pr = match r {
@@ -533,11 +541,7 @@ pub(crate) fn place_exec<D: Driver<S>, S: StrategySet>(
         PipeOut::Rejected(b) => PlaceResult::Rejected(b),
         PipeOut::Shadowed | PipeOut::Gated => PlaceResult::Shadowed,
     };
-    if let PipeOut::Rejected(b) = r
-        && b.0 & RejectBits::HEDGE_LIMIT.0 != 0
-    {
-        crate::mode_glue::broken(e, inst, drv, o.intent.account, o.intent.group)?;
-    }
+    // `HEDGE_LIMIT` is terminal; the caller sets Broken after `on_place_result` (README "意图管线" 6).
     Ok(pr)
 }
 
@@ -682,16 +686,18 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
             hft_ledger::SettlementError::InvalidNotional,
         ));
     }
+    // `out` is checked out of the engine's pool (or owned by the caller), never part of `e`:
+    // nested calls take other pooled buffers, so it is drained in place in the fixed order
+    // without heap copies (hot-path rule M1; the fill → second leg path is `seq/fill_to_hedge`).
     // Hedges (fast path first, after the facts have been validated).
-    let hedges: Vec<HedgeRequest> = out.hedges.as_slice().to_vec();
-    for h in hedges.iter() {
+    for h in out.hedges.iter() {
         place_hedge(e, inst, drv, h)?;
     }
-    // PnL of the fills and fees goes to risk after the whole output is drained.
-    let mut pnls: Vec<hft_ledger::PnlDelta> = Vec::new();
+    // PnL of the fills and fees goes to risk after the whole output is drained. A stack buffer
+    // sized by the output's own capacities (fills + fees) holds every delta.
+    let mut pnls = PnlBuf::new();
     // Fills → ledger.
-    let fills: Vec<hft_oms::FillOut> = out.fills.as_slice().to_vec();
-    for f in fills.iter() {
+    for f in out.fills.iter() {
         let fd = hft_ledger::FillDelta {
             account: f.account,
             venue: f.venue,
@@ -739,7 +745,10 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
         };
         e.trace
             .rec("ledger.apply_fill", u64::from(f.account.0), u64::from(f.inst.0));
-        pnls.push(r.pnl);
+        if !pnls.push(r.pnl) {
+            // Only an over-capacity test output gets here: book it now rather than lose it.
+            crate::process::pnl(e, inst, drv, r.pnl)?;
+        }
         if let Some(n) = r.net_adjust {
             e.trace
                 .rec("oms.net_adjust", u64::from(n.account.0), u64::from(n.group.0));
@@ -753,8 +762,7 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
         crate::process::touch_legs(e, f.account, f.group);
     }
     // Fees → ledger.
-    let fees: Vec<hft_oms::FeeOut> = out.fees.as_slice().to_vec();
-    for f in fees.iter() {
+    for f in out.fees.iter() {
         let side = if f.side == 2 { Side::Sell } else { Side::Buy };
         let fd = hft_ledger::FeeDelta {
             account: f.account,
@@ -768,7 +776,10 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
         };
         let r = e.ledger.apply_fee(&fd, e.now.engine_ns);
         e.trace.rec("ledger.apply_fee", u64::from(f.account.0), 0);
-        pnls.push(r.pnl);
+        if !pnls.push(r.pnl) {
+            // Only an over-capacity test output gets here: book it now rather than lose it.
+            crate::process::pnl(e, inst, drv, r.pnl)?;
+        }
         if let Some(n) = r.net_adjust {
             e.trace
                 .rec("oms.net_adjust", u64::from(n.account.0), u64::from(n.group.0));
@@ -778,8 +789,7 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
         }
     }
     // Updates → exec (EXEC slots), nobody (SMOKE), else the owner strategy.
-    let ups: Vec<OrderUpdate> = out.updates.as_slice().to_vec();
-    for u in ups.iter() {
+    for u in out.updates.iter() {
         let origin = e.oms.slot_ext(u.r).map_or(1, |x| x.origin);
         let smoke = e
             .oms
@@ -822,8 +832,7 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
         }
     }
     // Links → exec.on_link.
-    let links: Vec<hft_oms::LinkUpdate> = out.links.as_slice().to_vec();
-    for l in links.iter() {
+    for l in out.links.iter() {
         let n = LinkNotice {
             link_id: l.link_id,
             account: l.account,
@@ -849,20 +858,18 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
     }
     // OMS cash is an increment of the original Input's cumulative facts. The cold consumer
     // independently rebuilds that increment and verifies the same-event OMS Note.
-    let ff: Vec<hft_oms::ForeignFill> = out.foreign_fills.as_slice().to_vec();
-    let notes_snapshot: Vec<Note> = out.notes.as_slice().to_vec();
-    for f in ff.iter() {
+    for f in out.foreign_fills.iter() {
         let ef = foreign_to_external(f);
         crate::process::external_fill(e, inst, drv, &ef, false, true)?;
     }
     // Decisions → Output + out ring.
-    let mut decs: Vec<OrderDecision> = out.decisions.as_slice().to_vec();
-    for d in decs.iter_mut() {
+    for d0 in out.decisions.iter() {
         // Every Output carries the seq of the Input that produced it (README "process" 9).
-        if d.trigger_seq == 0 {
-            d.trigger_seq = e.cur_seq;
+        let mut d1 = *d0;
+        if d1.trigger_seq == 0 {
+            d1.trigger_seq = e.cur_seq;
         }
-        let d = &*d;
+        let d = &d1;
         let ix = e.out.push(RecordFlags(0), d);
         #[cfg(feature = "testkit")]
         e.audit.bind(d, ix);
@@ -875,8 +882,7 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
         });
     }
     // Timers.
-    let timers: Vec<hft_oms::OmsTimerReq> = out.timers.as_slice().to_vec();
-    for t in timers.iter() {
+    for t in out.timers.iter() {
         let code = match t.kind {
             OmsTimerKind::UnknownQuery => 3u32,
             OmsTimerKind::HedgeRetry => 4,
@@ -898,7 +904,7 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
     }
     // Notes and latency samples; P0 OmsUnknown → UnknownTimeout cap.
     let unknown_code = hft_oms::notes::code_of(hft_oms::notes::UNKNOWN);
-    for n in notes_snapshot.iter() {
+    for n in out.notes.iter() {
         e.out.push(RecordFlags(0), n);
         e.trace.rec("note.oms", u64::from(n.code), 0);
     }
@@ -908,10 +914,10 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
     // Ledger Notes are Outputs of this Input, not snapshot state. Do not leave them for a
     // later reconciliation: restoring a snapshot in between would lose those Outputs.
     crate::process::ledger_notes(e);
-    for d in pnls {
-        crate::process::pnl(e, inst, drv, d)?;
+    for d in pnls.iter() {
+        crate::process::pnl(e, inst, drv, *d)?;
     }
-    for n in notes_snapshot.iter() {
+    for n in out.notes.iter() {
         if n.code == unknown_code && n.level == NoteLevel::P0 {
             let v = VenueId((n.v[0] & 0xFF) as u8);
             let a = AccountId(((n.v[0] >> 8) & 0xFF) as u8);
@@ -926,6 +932,37 @@ pub(crate) fn drain_oms<D: Driver<S>, S: StrategySet>(
     }
     out.clear();
     Ok(())
+}
+
+/// PnL deltas of one `OmsOut` drain: at most one per fill and fee (`OmsOut::new` capacities).
+struct PnlBuf {
+    v: [Option<hft_ledger::PnlDelta>; PNL_CAP],
+    n: usize,
+}
+
+const PNL_CAP: usize = 16 + 8;
+
+impl PnlBuf {
+    fn new() -> PnlBuf {
+        PnlBuf {
+            v: [None; PNL_CAP],
+            n: 0,
+        }
+    }
+    /// `false` (nothing stored) when full.
+    fn push(&mut self, d: hft_ledger::PnlDelta) -> bool {
+        match self.v.get_mut(self.n) {
+            Some(x) => {
+                *x = Some(d);
+                self.n += 1;
+                true
+            }
+            None => false,
+        }
+    }
+    fn iter(&self) -> impl Iterator<Item = &hft_ledger::PnlDelta> {
+        self.v.iter().take(self.n).flatten()
+    }
 }
 
 fn foreign_to_external(f: &hft_oms::ForeignFill) -> hft_event::ExternalFill {

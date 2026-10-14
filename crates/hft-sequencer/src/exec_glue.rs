@@ -57,6 +57,15 @@ pub(crate) fn drain_out<D: Driver<S>, S: StrategySet>(
         e.exec.on_place_result(o.id, r, e.now, &mut xo);
         drain_out(e, inst, drv, &mut xo)?;
         e.put_exec(xo);
+        // `HEDGE_LIMIT` is a terminal rejection (README "意图管线" 6): the executor has taken it
+        // (cell `Broken(HedgeVeto)`, its P0 `ExecBroken` and `BrokenReq`) and the group is set
+        // Broken here in the same Input whatever the executor reported — once per Input and
+        // group (`mode_glue::broken`), so `apply` and `on_legs` run once.
+        if let hft_exec::PlaceResult::Rejected(b) = r
+            && b.0 & hft_types::RejectBits::HEDGE_LIMIT.0 != 0
+        {
+            crate::mode_glue::broken(e, inst, drv, o.intent.account, o.intent.group)?;
+        }
     }
     for c in out.cancels.iter() {
         e.trace.rec("oms.cancel", u64::from(c.slot), 1);

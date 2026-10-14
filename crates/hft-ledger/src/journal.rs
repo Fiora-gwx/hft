@@ -295,7 +295,7 @@ impl JournalLedger {
         // Recycled generations must retain their cash watermark too. OMS section 12 has
         // an 8-byte row header; non-tomb rows do not belong to this consumer.
         if let Some(section) = r.find_section(12)? {
-            if !(1..=4).contains(&section.version) {
+            if !(1..=5).contains(&section.version) {
                 return Err(RestoreError::VersionUnsupported);
             }
             let mut rr = section.reader();
@@ -324,7 +324,11 @@ impl JournalLedger {
                 if kind != 4 {
                     continue;
                 }
-                let want = if section.version == 1 { 64 } else { 80 };
+                let want = match section.version {
+                    1 => 64,
+                    2..=4 => 80,
+                    _ => 88,
+                };
                 if row.len() != want {
                     return Err(RestoreError::BadValue);
                 }
@@ -350,7 +354,13 @@ impl JournalLedger {
                     order_px: Px(0),
                     cum: u64_at(32) as i64,
                     notional: 0,
-                    fee_cum: u64_at(32) as i64,
+                    // v5 Tomb rows carry the OMS fee watermark; older rows count every booked
+                    // quantity as fee-covered (same rule as hft-oms restore).
+                    fee_cum: if section.version >= 5 {
+                        u64_at(80) as i64
+                    } else {
+                        u64_at(32) as i64
+                    },
                     cash_qty: if section.version >= 2 {
                         u64_at(64) as i64
                     } else {
@@ -939,7 +949,9 @@ impl JournalLedger {
         let fresh_fee = fill_report && ev.cum_filled.0 > e.fee_cum;
         let d = ev.cum_filled.0.saturating_sub(e.cum);
         if d <= 0 {
-            if !e.tomb && fresh_fee && ev.fee.0 != 0 {
+            // Recycled generations too (hft-oms `tomb_report`): a fee-less report booked the
+            // quantity, the fill report's fee is still owed once.
+            if fresh_fee && ev.fee.0 != 0 {
                 self.ledger.apply_fee(&fee, t);
             }
             if fresh_fee && let Some(x) = self.map.get_mut(key) {

@@ -2183,7 +2183,7 @@ spec: README.md
 - 例数:PR 1 000;每夜 50 000
 - 实现:`crates/hft-ledger/tests/prop_snapshot.rs::led_231_snapshot_roundtrip`
 
-### LED-232 节 1 只写有非零字段的持仓行
+### LED-232 节 1 只写有非零字段(含最近成交时刻)的持仓行
 
 - 规则:[快照行格式](README.md#快照行格式节-11322草案实现时以代码与编译期断言为准)
 - 级别:unit
@@ -2192,7 +2192,8 @@ spec: README.md
 - 步骤:
   1. `snapshot`
 - 期望:
-  - 节 1 只有 `(A1, BTC/S1)` 一行;`(A1, BTC/P2)` 不出现
+  - 节 1 两行:`(A1, BTC/S1)` 与全平的 `(A1, BTC/P2)`(`qty = 0`,`last_fill_ens` 为平仓成交时刻,进入 BalanceReport 的 quiet 判定);从未成交的持仓不写
+  - 恢复后 `(A1, BTC/P2)` 的 `InstPos` 与原值相等,再快照逐字节相同
 - 实现:`crates/hft-ledger/tests/snapshot.rs::led_232_positions_only_nonzero`
 
 ### LED-233 快照行与公开结构的 size_of 断言

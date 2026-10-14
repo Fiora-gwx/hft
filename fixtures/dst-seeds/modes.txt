@@ -2,3 +2,4 @@
 0x00000000000000a7 2026-10-10 Drain 完成的事件未 publish,重启丢成交(SEQ-370;docs/changes.md 2026-10-10)
 0x0000000000000094 2026-10-10 CancelReject 先带来数量,随后 Fill 的手续费被当重复丢弃(OMS-460)
 0x7dfee4207b81bfbd 2026-10-12 成交生成与交付乱序导致永续逐笔取整差额;已修复:永续按实际现金结算(perp_cash,TK-127 默认世界逐单位一致),TK-123 显式关闭能力保留旧记录反例
+0x1b3d8fd7dd34e96e 2026-10-14 QueryResult 无费用记入数量、槽回收后原 Fill 到达墓碑,手续费被当重复丢弃,热账本少记费用;冷账本记入 → INV-6 账本节不一致(OMS-485;https://github.com/Fiora-gwx/hft/actions/runs/38500590670)

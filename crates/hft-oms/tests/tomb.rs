@@ -316,3 +316,45 @@ fn oms_481_report_inst_none_is_unsupplied_and_mismatch_is_not_fatal_off_cash() {
         }
     }
 }
+
+/// OMS-485: a fee-less QueryResult books the fill, the slot is recycled, then the original
+/// `Fill` (with its fee) arrives: the fee is booked once as a `FeeOut` (no quantity), a repeat
+/// books nothing, and the tombstone's fee watermark survives a snapshot (section 12 v5).
+#[test]
+fn oms_485_late_fill_fee_after_feeless_query_on_tomb() {
+    use hft_strategy_sdk::{SnapshotReader, SnapshotWriter};
+    let mut h = H::new();
+    let s = h.place_ok(&buy_x(), 0);
+    h.ack(s, 9, 0);
+    h.query(s, 3, q("0.01"), p("60000.00"), 10);
+    assert_eq!(h.slot(s).state, OrderState::Filled);
+    h.sweep(6_000);
+    let tb = *h.o.tomb(VS, A1, s.slot, s.r#gen).expect("tomb");
+    assert_eq!((tb.filled, tb.fee_cum), (q("0.01"), Qty(0)));
+    // Snapshot with the open fee window: v5 rows, watermark restored.
+    let mut w = SnapshotWriter::new(1 << 20);
+    h.o.snapshot(&mut w);
+    let b = w.as_bytes().to_vec();
+    let o2 = Oms::restore(&mut SnapshotReader::new(&b), &p0(), rd()).expect("restore v5");
+    assert_eq!(o2.tomb(VS, A1, s.slot, s.r#gen).map(|t| t.fee_cum), Some(Qty(0)));
+    let mut e = h.oe(s, OrderEventKind::Fill);
+    e.cum_filled = q("0.01");
+    e.qty = q("0.01");
+    e.px = p("60000.00");
+    e.avg_px = p("60000.00");
+    e.fee = Qty(600_000);
+    e.fee_asset = USDT;
+    h.ev(&e, 7_000);
+    assert!(h.out.fills.is_empty(), "no quantity again");
+    assert_eq!(h.out.fees.len(), 1);
+    assert_eq!((h.out.fees[0].fee, h.out.fees[0].fee_asset), (600_000, USDT));
+    assert_eq!(
+        h.o.tomb(VS, A1, s.slot, s.r#gen).map(|t| t.fee_cum),
+        Some(q("0.01"))
+    );
+    h.ev(&e, 7_001);
+    assert!(
+        h.out.fees.is_empty() && h.out.fills.is_empty(),
+        "repeat books nothing"
+    );
+}

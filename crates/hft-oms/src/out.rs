@@ -231,6 +231,7 @@ impl Oms {
                 freed_tsc: now,
                 cash_qty: ex.cash_qty,
                 cash_sum: ex.cash_sum,
+                fee_cum: ex.fee_cum,
             };
         }
         if let Some(x) = t.slots.get_mut(s as usize) {

@@ -454,7 +454,7 @@ impl SlotStamps {
     };
 }
 
-/// One recycled generation of a slot (72 B); `gen = 0` = empty.
+/// One recycled generation of a slot (80 B); `gen = 0` = empty.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, TryFromBytes, IntoBytes, KnownLayout, Immutable)]
 pub struct Tomb {
@@ -474,13 +474,18 @@ pub struct Tomb {
     pub freed_tsc: Tsc,
     pub cash_qty: Qty,
     pub cash_sum: Qty,
+    /// `SlotExt.fee_cum` of the recycled generation, advanced by its late fill reports: a late
+    /// `PartialFill`/`Fill` whose quantity a fee-less report already booked still books its fee
+    /// once (README "回报匹配与成交增量" 9).
+    pub fee_cum: Qty,
 }
 const _: () = assert!(
-    size_of::<Tomb>() == 72
+    size_of::<Tomb>() == 80
         && offset_of!(Tomb, filled) == 24
         && offset_of!(Tomb, freed_tsc) == 48
         && offset_of!(Tomb, cash_qty) == 56
         && offset_of!(Tomb, cash_sum) == 64
+        && offset_of!(Tomb, fee_cum) == 72
 );
 
 impl Tomb {
@@ -501,6 +506,7 @@ impl Tomb {
         freed_tsc: Tsc(0),
         cash_qty: Qty(0),
         cash_sum: Qty(0),
+        fee_cum: Qty(0),
     };
 }
 
@@ -712,7 +718,11 @@ pub const SECTION_OMS_COUNTERS: u16 = 3;
 pub const SECTION_OMS_LINKS: u16 = 12;
 pub const ROW_VERSION_SLOTS: u16 = 3;
 pub const ROW_VERSION_COUNTERS: u16 = 1;
-pub const ROW_VERSION_LINKS: u16 = 4;
+pub const ROW_VERSION_LINKS: u16 = 5;
+/// Section 12 `Tomb` row length up to row version 4 (no `fee_cum`; restored as `filled`).
+pub const TOMB_ROW_LEN_V4: usize = 80;
+/// Section 12 `Tomb` row length from row version 5.
+pub const TOMB_ROW_LEN: usize = 88;
 
 /// Section 12 `Plan` row (64 B).
 #[repr(C)]
@@ -732,7 +742,7 @@ pub struct LegRowBody {
     pub group: GroupId,
     pub state: LegState,
 }
-/// Section 12 `Tomb` row (80 B).
+/// Section 12 `Tomb` row (88 B; 80 B up to row version 4).
 #[repr(C)]
 #[derive(Copy, Clone, Debug, TryFromBytes, IntoBytes, KnownLayout, Immutable)]
 pub struct TombRowBody {
@@ -743,7 +753,9 @@ pub struct TombRowBody {
     pub tomb: Tomb,
 }
 const _: () = assert!(
-    size_of::<PlanRowBody>() == 64 && size_of::<LegRowBody>() == 200 && size_of::<TombRowBody>() == 80
+    size_of::<PlanRowBody>() == 64
+        && size_of::<LegRowBody>() == 200
+        && size_of::<TombRowBody>() == TOMB_ROW_LEN
 );
 
 // ---------------------------------------------------------------------------- outputs

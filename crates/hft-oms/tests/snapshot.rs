@@ -124,8 +124,10 @@ fn oms_361_snapshot_rows() {
         "OMS-361.3 (expired tomb not written)"
     );
     assert!(kinds.iter().filter(|k| **k == 5).count() >= 20, "OMS-361.3");
+    // The fixture's tombs include quantity booked by fee-less reports (fee window open), so
+    // section 12 is row version 5 with 88-byte Tomb rows.
     for (k, _, len) in rows {
-        let want = [0, 80, 64, 200, 80, 32][k as usize];
+        let want = [0, 80, 64, 200, 88, 32][k as usize];
         assert_eq!(len, want, "OMS-361.4");
     }
 }
@@ -145,7 +147,7 @@ fn oms_362_row_versions() {
     for (id, v) in [
         (SECTION_ORDER_SLOTS, 3),
         (SECTION_OMS_COUNTERS, 1),
-        (SECTION_OMS_LINKS, 2),
+        (SECTION_OMS_LINKS, 5),
     ] {
         let (vo, _, _, _) = sec(&b, id);
         assert_eq!(u16::from_le_bytes([b[vo], b[vo + 1]]), v, "OMS-362.1");

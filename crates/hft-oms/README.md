@@ -379,19 +379,20 @@ pub struct SlotStamps {                // 80 B,与槽平行;只在下单/撤单/
 }
 
 #[repr(C)]
-pub struct Tomb {                      // 72 B;已回收的一代(C1)
+pub struct Tomb {                      // 80 B;已回收的一代(C1)
     pub gen: u32, pub epoch: u16, pub oflags: OrderFlags,                           //  0 / 4 / 6
     pub inst: InstId, pub group: GroupId,                                           //  8 / 12
     pub side: Side, pub leg_ix: u8, pub strategy: StrategyId, pub role: LinkRole,   // 16 / 17 / 18 / 19
     pub link_id: u32,                                                               // 20
     pub filled: Qty, pub net_filled: Qty, pub exch_order_id: u64, pub freed_tsc: Tsc, // 24 / 32 / 40 / 48
     pub cash_qty: Qty, pub cash_sum: Qty, // 56 / 64 该代最终结算水位;迟到成交只入增量
+    pub fee_cum: Qty,                     // 72 该代的费用水位(回收时取 SlotExt.fee_cum),见"回报匹配与成交增量"第 9 条
 }
 
 const _: () = assert!(size_of::<OrderSlot>() == 128 && align_of::<OrderSlot>() == 64
                       && offset_of!(OrderSlot, oflags) == 4 && offset_of!(OrderSlot, sflags) == 106);
 const _: () = assert!(size_of::<SlotExt>() == 64 && size_of::<SlotStamps>() == 80);
-const _: () = assert!(size_of::<Tomb>() == 72 && offset_of!(Tomb, filled) == 24 && offset_of!(Tomb, freed_tsc) == 48);
+const _: () = assert!(size_of::<Tomb>() == 80 && offset_of!(Tomb, filled) == 24 && offset_of!(Tomb, freed_tsc) == 48 && offset_of!(Tomb, fee_cum) == 72);
 
 pub struct VenueAcctTable {            // 每 (venue, account) 一个
     slots: Box<[OrderSlot]>,           // 启动期一次分配
@@ -540,7 +541,7 @@ gw 对某 (venue, account) 的回报帧解码失败时写 `ConnState{role = User
 6. **超量成交**:`ev.cum_filled > slot.qty`(只可能是解码/单位错误)→ 成交照常入账(`FillOut.flags |= OVERFILL`,由对账裁决),但超出 `qty` 的部分**不进入对冲基数**;同一事件内先按 OnFill 第 1–5 步对不超过 `qty` 的部分产生第二腿,再把该槽所在链接置 `Broken{Overfill}`;`Note{OmsOverfill}`(P0)。
 7. `venue-<x>` 必须在每条成交回报里给出**累计成交量** `cum_filled` 与累计均价;给不出的在 gw 内按 exec id 去重合成;仍给不出则该 venue 不允许启用下单(加载时拒绝)。
 8. **冷读者的入账依据**:第 1、2 条每产出一条 `ForeignFill`,同一事件内另写一条 `Note{OmsForeignFill}`(Info,Output 类,回放比对;字段唯一定义在此):`Note.inst = inst`、`Note.group = GROUP_NONE`,`v = [venue | account << 8 | side << 16 | path << 24 | fee_asset << 32, qty, px, fee, exch_order_id, trade_id, fill_seq, cum_filled]`(`path`:防御路径 = 1、`StaleGen` = 2;数值为 raw;`fill_seq` = `trade_id = 0` 时 `cum_filled` 的 raw 值,否则 0)。这笔外来成交与对账 `AUTO_EXTERNAL` 同理,由 sequencer 在本条 Input 内按这些字段确定地构造为 `ExternalFill{cause = Unknown}`(现金字段按第 10–12 条,其余字段为 0)并入账,不另写 Input;冷读者(reconciler 的引擎视图、hft-py)在同一事件内读到本 Note 时构造同一 `ExternalFill`,经 hft-ledger 的 journal 消费路径入账(消费规则归 [hft-ledger 外部成交](../hft-ledger/README.md#外部成交externalfill),码名登记归 hft-event)。
-9. **数量先由非成交回报带来时的费用**:`CancelReject`、`CancelAck`/`Expired`、`AmendAck`/`AmendReject`、`QueryResult` 与对账收敛带来的增量通常不带费用(第 3 条照常入账,`fee = 0`);随后到达、数量已被覆盖(`d ≤ 0`)的 `PartialFill`/`Fill`,若 `ev.cum_filled > SlotExt.fee_cum`,它的 `fee` 按 `FeeOnly` 入账(`FeeOut`,净量补差同"成交净量");`fee_cum ≥ ev.cum_filled` 的是重复回报,不入账。每条 `PartialFill`/`Fill` 之后 `fee_cum = max(fee_cum, ev.cum_filled)`;**任何回报带来成交增量且 `fee ≠ 0` 时,该费用随增量入账,同时 `fee_cum = max(fee_cum, ev.cum_filled)`**——venue 契约:非成交回报若带费用,它就是这段增量(至 `cum_filled`)的费用,之后覆盖同一数量的成交回报不再记费;冷读者(hft-ledger 的 journal 消费)按同一规则。
+9. **数量先由非成交回报带来时的费用**:`CancelReject`、`CancelAck`/`Expired`、`AmendAck`/`AmendReject`、`QueryResult` 与对账收敛带来的增量通常不带费用(第 3 条照常入账,`fee = 0`);随后到达、数量已被覆盖(`d ≤ 0`)的 `PartialFill`/`Fill`,若 `ev.cum_filled > SlotExt.fee_cum`,它的 `fee` 按 `FeeOnly` 入账(`FeeOut`,净量补差同"成交净量");`fee_cum ≥ ev.cum_filled` 的是重复回报,不入账。每条 `PartialFill`/`Fill` 之后 `fee_cum = max(fee_cum, ev.cum_filled)`;**任何回报带来成交增量且 `fee ≠ 0` 时,该费用随增量入账,同时 `fee_cum = max(fee_cum, ev.cum_filled)`**——venue 契约:非成交回报若带费用,它就是这段增量(至 `cum_filled`)的费用,之后覆盖同一数量的成交回报不再记费;冷读者(hft-ledger 的 journal 消费)按同一规则。**槽已回收时同样适用**:墓碑保存该代的 `fee_cum`,命中墓碑、`d ≤ 0` 的 `PartialFill`/`Fill` 若 `ev.cum_filled > Tomb.fee_cum` 且 `fee ≠ 0`,只输出 `FeeOut`(计 `dup`,不产出 `FillOut`),并推进 `Tomb.fee_cum`;墓碑迟到成交(`d > 0`)随 `FillOut` 记费并推进水位。
 
 10. **显式永续结算**:venue 声明 [PERP_CASH](../hft-refdata/README.md#交易所能力表venuecaps) 时,槽与墓碑按完整身份保存 `cash_qty/cash_sum`。回报的非零 `inst` 必须与命中的槽或墓碑一致(`INST_NONE` 按第 2 条)。成交累计量前移时,要求回报覆盖全部累计成交,已有覆盖量等于本地 `filled`;`FillOut.cash = Some(ev.cash_sum − saved.cash_sum)`,单位为该 inst 报价资产的 `qty_exp`,不含费用与资金费。已知零额也输出 `Some(0)`,重复水位金额不一致为 `Conflict`,溢出为 `Overflow`,缺失/部分覆盖为 `Missing`,非法覆盖为 `Coverage`。旧累计量不倒退水位;`FeeOnly` 不推进结算。槽回收时复制水位到墓碑,迟到成交只产出差额。未声明该能力的旧配置保持 `FillOut.cash = None`,不能据此承诺钱包实额一致。
 11. **外来结算水位**:严格模式下防御路径与 StaleGen 的 Fill/PartialFill 要有非零交易所订单号、明确方向、正价格和完整累计结算覆盖。按 `(venue, account, inst, exch_order_id)` 保存累计毛量与现金,只产生差额;同水位异额报 Conflict,旧水位不回退。已知槽或墓碑的同品种订单号不能被错误身份重新登记为外来单;缺少已记录来源且回报代数不大于该槽已用代数时,不能证明它不是退役订单,报 Untracked。未知身份或报告种类无法证明来源时输出 `CashError::Untracked`;外来成交重叠未携带可扣的现金事实时输出 `ExternalOverlap`;现行 `ReconcileReport` 不带结算事实,需要推进成交量时输出 `Missing`。这些错误不推进相关槽、墓碑或成交/费用输出,调用方必须先处理 `OmsOut.cash_error`,不能当作无成交继续运行。跨路径支持需要成交区间与对应现金事实,不能按数量比例分摊现金。
@@ -935,7 +936,7 @@ pub const SLOT_ROW_LEN: usize = 192;
 // Link:LinkEntry 原样(80 B;state ≠ Done 的项;键 link_id)
 // Plan:{ link_id: u32, _pad: u32, tolerance: Rate, plan: HedgePlan }(64 B = 8 + 8 + HedgePlan 48 B;被活动 Link 引用的计划;键 link_id)
 // Leg: { account: AccountId, _pad: [u8; 3], group: GroupId, state: LegState }(200 B = 8 + LegState 192 B;键 (account, group);全零项不写)
-// Tomb:{ venue: VenueId, account: AccountId, _pad: u16, slot: u32, tomb: Tomb }(80 B = 8 + Tomb 72 B;未过期的非空墓碑;键 (venue, account, slot, gen))
+// Tomb:{ venue: VenueId, account: AccountId, _pad: u16, slot: u32, tomb: Tomb }(v5:88 B = 8 + Tomb 80 B;v2–v4:80 B,不含 fee_cum;未过期的非空墓碑;键 (venue, account, slot, gen))
 // ForeignCash(kind = 6,v3):venue:u8,account:u8,side:u8,pad:u8,inst:u32,eid:u64,filled:i64,cash_sum:i64(32 B)。
 // side 1/2 = 外来累计水位,filled > 0;side 0 = 原始 ExternalFill 来源,filled/cash_sum 为零。
 // 行按表顺序及首次登记顺序写出;空行不写;重复键、非法方向/填充、错误品种、超容量拒绝恢复。
@@ -950,7 +951,7 @@ const _: () = assert!(size_of::<TableRow>() == 32 && size_of::<LinkRowHdr>() == 
 - `InflightBook` 与 LegTracker 各腿的两类在途不单独恢复:它们由非终态槽的剩余量与状态决定(不变量),`restore` 时由节 2 重算并与快照中的 `LegState` 校验。
 - `(account, inst) → (group, leg_ix)` 归属表不进快照,由恢复时的 GroupSpec 重建。
 - 进快照的 TSC 字段只有"恢复"第 2 步列出的已登记字段;其余时刻不进快照。
-- **行版本**(只在本 crate 登记,写进 `SectionHdr.version`):节 2 = 3、节 3 = 1、节 12 读取 1–4。含 ForeignReceipt 时写 v4,只有 ForeignCash 时写 v3,均无时保持 v2 编码。v1–3 不含单笔原件证明。节 12 v1 的墓碑为 64 B 行体,读取时补零结算水位。严格结算模式恢复时要求每个非空槽与墓碑的覆盖量等于 filled;旧格式中已有成交而无结算水位的状态拒绝恢复,不能把缺失当已知零。行格式只追加、零值表示未提供;版本递增时读者按旧版本的行长读出并补零,未知的更高版本拒读(`RestoreError`)。
+- **行版本**(只在本 crate 登记,写进 `SectionHdr.version`):节 2 = 3、节 3 = 1、节 12 读取 1–5。有墓碑的费用水位低于其 `filled`(该代有数量由不带费用的回报带来)时写 v5(Tomb 行 88 B,含 `fee_cum`;v5 同时允许 v3/v4 的行),否则含 ForeignReceipt 时写 v4,只有 ForeignCash 时写 v3,均无时保持 v2 编码。v1–3 不含单笔原件证明。节 12 v1 的墓碑为 64 B 行体,读取时补零结算水位;v1–v4 的墓碑读取时 `fee_cum = filled`(该代已入账的数量都按已记费处理)。严格结算模式恢复时要求每个非空槽与墓碑的覆盖量等于 filled;旧格式中已有成交而无结算水位的状态拒绝恢复,不能把缺失当已知零。行格式只追加、零值表示未提供;版本递增时读者按旧版本的行长读出并补零,未知的更高版本拒读(`RestoreError`)。
 
 ### 规划源文件
 

@@ -16,6 +16,39 @@ use crate::views::ModeAdapter;
 
 type R<T> = Result<T, FatalReason>;
 
+/// `(seq, account, group)` of the `Auto(Broken)` applications of the current Input. Fixed
+/// capacity: a full table forgets its oldest entry, which at worst repeats an idempotent `apply`.
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct BrokenSeen {
+    rows: [(u64, AccountId, GroupId); 8],
+    next: u8,
+}
+
+impl Default for BrokenSeen {
+    fn default() -> Self {
+        // Seq 0 is never an Input's seq (the journal starts at 1).
+        BrokenSeen {
+            rows: [(0, AccountId(0), GroupId(0)); 8],
+            next: 0,
+        }
+    }
+}
+
+impl BrokenSeen {
+    /// Records `(seq, a, g)`; `false` when it was already recorded in Input `seq`.
+    pub(crate) fn first(&mut self, seq: u64, a: AccountId, g: GroupId) -> bool {
+        if self.rows.contains(&(seq, a, g)) {
+            return false;
+        }
+        let ix = usize::from(self.next) % self.rows.len();
+        if let Some(r) = self.rows.get_mut(ix) {
+            *r = (seq, a, g);
+        }
+        self.next = self.next.wrapping_add(1) % (self.rows.len() as u8);
+        true
+    }
+}
+
 /// An `Auto` cap record (level and flags per hft-risk conventions).
 pub(crate) fn auto_rec(source: CapSource, scope: CmdScope, seq: u64, p0: u64) -> CapRecord {
     let cflags = match source {
@@ -105,6 +138,13 @@ pub(crate) fn broken<D: Driver<S>, S: StrategySet>(
     a: AccountId,
     g: GroupId,
 ) -> R<()> {
+    // Once per (account, group) and Input: a `HEDGE_LIMIT` rejection of an executor order sets
+    // Broken here, and the executor's `on_place_result` answers with a `BrokenReq` for the same
+    // group in the same Input (README "意图管线" 6: `apply` and `on_legs` once).
+    if !e.broken_seen.first(e.cur_seq, a, g) {
+        e.trace.rec("apply.Broken.dup", u64::from(a.0), u64::from(g.0));
+        return Ok(());
+    }
     let rec = auto_rec(
         CapSource::BROKEN,
         hft_risk::account_group_scope(a, g),

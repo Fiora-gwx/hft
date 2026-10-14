@@ -337,7 +337,30 @@ impl Oms {
             return true;
         }
         let d = ev.cum_filled.0.saturating_sub(tb.filled.0);
+        let fill_report = matches!(ev.what, OrderEventKind::PartialFill | OrderEventKind::Fill);
         if d <= 0 {
+            // A fill report whose quantity a fee-less report (QueryResult, CancelReject …) booked
+            // before the slot was recycled: its fee is still owed, once (as for a live slot).
+            if fill_report && ev.fee.0 != 0 && ev.cum_filled.0 > tb.fee_cum.0 {
+                let fo = FeeOut {
+                    account,
+                    venue,
+                    inst: tb.inst,
+                    group: tb.group,
+                    side: tb.side as u8,
+                    fee: ev.fee.0,
+                    fee_asset: ev.fee_asset,
+                };
+                let _ = out.fees.push(fo);
+                if let Some(t) = self.tm(ti)
+                    && let Some(x) = t.tombs.get_mut(ix)
+                {
+                    x.fee_cum = ev.cum_filled;
+                }
+                // Still a duplicate of the booked quantity (as on a live slot).
+                self.stats.dup += 1;
+                return true;
+            }
             self.stats.dup += 1;
             return true;
         }
@@ -376,6 +399,10 @@ impl Oms {
             && let Some(x) = t.tombs.get_mut(ix)
         {
             x.filled = ev.cum_filled;
+            // The late fill carries its own fee (booked with the FillOut).
+            if (fill_report || ev.fee.0 != 0) && ev.cum_filled.0 > x.fee_cum.0 {
+                x.fee_cum = ev.cum_filled;
+            }
             if cash.is_some() {
                 x.cash_qty = ev.cash_qty;
                 x.cash_sum = ev.cash_sum;

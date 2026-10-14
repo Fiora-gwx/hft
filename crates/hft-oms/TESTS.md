@@ -32,7 +32,7 @@ spec: README.md
 | 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460、OMS-467、OMS-468、OMS-470–OMS-475、OMS-476–OMS-480、OMS-481–OMS-483 |
 | 成交净量(B4) | OMS-067, OMS-120–OMS-124, OMS-184, OMS-404 |
 | Unknown 收敛流程 | OMS-032, OMS-065, OMS-066, OMS-068, OMS-070, OMS-073, OMS-089, OMS-130–OMS-154, OMS-400, OMS-402, OMS-420 |
-| 墓碑与迟到成交(C1) | OMS-013, OMS-148, OMS-160–OMS-164, OMS-287, OMS-322, OMS-462、OMS-469 |
+| 墓碑与迟到成交(C1) | OMS-013, OMS-148, OMS-160–OMS-164, OMS-287, OMS-322, OMS-462、OMS-469、OMS-485 |
 | StaleOrderSweep(`Timer{Oms, Sweep}`,1 s) | OMS-132, OMS-161, OMS-164, OMS-170–OMS-172, OMS-207, OMS-271 |
 | LegLink 与 HedgePlan | OMS-463, OMS-457, OMS-014, OMS-043, OMS-153, OMS-180, OMS-181, OMS-185, OMS-191, OMS-194, OMS-201, OMS-207, OMS-363 |
 | OnFill | OMS-458, OMS-044, OMS-075–OMS-077, OMS-104, OMS-151, OMS-181–OMS-207, OMS-229, OMS-382–OMS-385, OMS-387, OMS-400、TK-106 |
@@ -241,7 +241,7 @@ spec: README.md
   - 大小 80;`trig_ex_ts_ns` 0、`trig_sw_rx_ns` 24、`trig_rx_tsc` 32、`decided_tsc` 48、`sent_tsc` 56、`trigger_seq` 64、`trig_kind` 72、`op` 74
 - 实现:`crates/hft-oms/tests/layout.rs::oms_012_slot_stamps_layout`
 
-### OMS-013 Tomb 大小 72 B 与关键偏移
+### OMS-013 Tomb 大小 80 B 与关键偏移
 
 - 规则:[数据布局](README.md#数据布局草案实现时以代码与编译期断言为准)、[墓碑与迟到成交](README.md#墓碑与迟到成交c1)
 - 级别:unit
@@ -250,7 +250,7 @@ spec: README.md
 - 步骤:
   1. 读取 `size_of::<Tomb>()` 与字段偏移
 - 期望:
-  - 大小 72;`gen` 0、`epoch` 4、`oflags` 6、`inst` 8、`group` 12、`side` 16、`leg_ix` 17、`strategy` 18、`role` 19、`link_id` 20、`filled` 24、`net_filled` 32、`exch_order_id` 40、`freed_tsc` 48、`cash_qty` 56、`cash_sum` 64
+  - 大小 80;`gen` 0、`epoch` 4、`oflags` 6、`inst` 8、`group` 12、`side` 16、`leg_ix` 17、`strategy` 18、`role` 19、`link_id` 20、`filled` 24、`net_filled` 32、`exch_order_id` 40、`freed_tsc` 48、`cash_qty` 56、`cash_sum` 64、`fee_cum` 72
 - 实现:`crates/hft-oms/tests/layout.rs::oms_013_tomb_layout`
 
 ### OMS-014 LinkEntry 大小 80 B 与关键偏移
@@ -3624,9 +3624,9 @@ spec: README.md
 | OMS-361.1 | 2 | `count = 40`;只含非 `Free` 槽;按 `(venue_ix, account_ix, slot_id)` 升序;每行 192 字节 = `OrderSlot` 128 ‖ `SlotExt` 64 |
 | OMS-361.2 | 3 | 首行 `OmsCountersHdr{engine_epoch 7, n_tables 5(夹具的 (venue, account) 表数), resume_hold_until}`;每表一行 `TableRow`(键升序),其后 `free`(FIFO,队头在前)、`gens`(含 `Free` 槽)、`foreign`、`ext_held`(FIFO)、`decode_fails` 与 7 字节零,补零到 8 字节 |
 | OMS-361.3 | 12 | 行顺序 `Link*` → `Plan*` → `Leg*` → `Tomb*` → `Out*`;`Done` 链接不写;`Plan` 只写被活动链接引用的;全零 `LegState` 不写;过期墓碑不写;`Out` 行按 FIFO 顺序、不排序 |
-| OMS-361.4 | 12 | 每行 `LinkRowHdr{kind, len}`:`len` 依次为 80、64、200、80、32 |
+| OMS-361.4 | 12 | 每行 `LinkRowHdr{kind, len}`:`len` 依次为 80、64、200、88、32(夹具含费用水位低于 `filled` 的墓碑,节 12 为 v5) |
 
-### OMS-362 行版本:节 2 写 3、节 3 写 1、节 12 写 2,读到更高版本拒读
+### OMS-362 行版本:节 2 写 3、节 3 写 1、节 12 写 5,读到更高版本拒读
 
 - 规则:[快照行格式](README.md#快照行格式节-2312草案实现时以代码与编译期断言为准)
 - 级别:table
@@ -3636,10 +3636,10 @@ spec: README.md
 
 | 行 | 修改 | 期望 |
 |---|---|---|
-| OMS-362.1 | 不改 | 节 2 的 `version` 为 3,节 3 为 1、节 12 为 2;`restore` 返回 `Ok` |
+| OMS-362.1 | 不改 | 节 2 的 `version` 为 3,节 3 为 1、节 12 为 5(夹具墓碑有未记费的数量);`restore` 返回 `Ok` |
 | OMS-362.2 | 节 2 `version = 4` | `Err(RestoreError)` |
 | OMS-362.3 | 节 3 `version = 2` | `Err(RestoreError)` |
-| OMS-362.4 | 节 12 `version = 3` | `Err(RestoreError)` |
+| OMS-362.4 | 节 12 `version = 6` | `Err(RestoreError)` |
 
 ### OMS-363 非法判别值从快照读回时报 RestoreError
 
@@ -4419,3 +4419,17 @@ spec: README.md
 - **DST**:OMS-400–OMS-405 按 [testing §8 上线门槛](../../docs/testing.md#8-上线门槛) ④ 的种子累计零违反,OMS-401 为必过项。
 - **基准**:OMS-440–OMS-455 的上限只在 [benchmarks](../../benchmarks/README.md) 登记(与 README"延迟与资源契约"表的 p50/p99 一致),参考机判定。
 - **联调与长跑**:Unknown p99 收敛时间与零槽泄漏的数值门槛写在 OMS-420、OMS-421 的 `通过标准`;正式实盘后同一指标由 watchtower 持续监控。
+
+### OMS-485 槽回收后到达的成交回报仍补记不带费用的回报所欠的手续费
+
+- 规则:[回报匹配与成交增量](README.md#回报匹配与成交增量)、[墓碑与迟到成交](README.md#墓碑与迟到成交c1)
+- 级别:unit
+- 里程碑:M2
+- 前置:P0;VS 现货买单 0.01 已 Ack,`QueryResult{Filled, cum = 0.01, fee = 0}` 使其 Filled(`fee_cum = 0`),sweep 回收为墓碑
+- 步骤:
+  1. 快照并恢复
+  2. 投递原始 `Fill{cum = 0.01, fee = 600 000, fee_asset = USDT}`,再投递一次
+- 期望:
+  - 墓碑 `filled = 0.01`、`fee_cum = 0`;快照节 12 为 v5,恢复后 `fee_cum` 仍为 0
+  - 第一条 Fill:无 `FillOut`,恰好一条 `FeeOut{fee = 600 000, USDT}`,墓碑 `fee_cum = 0.01`;第二条无输出
+- 实现:`crates/hft-oms/tests/tomb.rs::oms_485_late_fill_fee_after_feeless_query_on_tomb`

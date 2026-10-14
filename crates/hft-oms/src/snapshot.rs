@@ -11,8 +11,8 @@ use crate::table::GroupEntry;
 use crate::types::{
     LegRowBody, LegState, LinkEntry, LinkRowHdr, LinkState, OmsCountersHdr, OrderSlot, OrderState, OutItem,
     PlanRowBody, ROW_VERSION_COUNTERS, ROW_VERSION_LINKS, ROW_VERSION_SLOTS, SECTION_OMS_COUNTERS,
-    SECTION_OMS_LINKS, SECTION_ORDER_SLOTS, SLOT_ROW_LEN, SLOT_ROW_LEN_V1, SlotExt, SlotFlags, TableRow,
-    Tomb, TombRowBody, out_kind,
+    SECTION_OMS_LINKS, SECTION_ORDER_SLOTS, SLOT_ROW_LEN, SLOT_ROW_LEN_V1, SlotExt, SlotFlags, TOMB_ROW_LEN,
+    TOMB_ROW_LEN_V4, TableRow, Tomb, TombRowBody, out_kind,
 };
 
 const ROW_LINK: u8 = 1;
@@ -88,14 +88,23 @@ impl Oms {
             w.put_bytes([0u8; 8].get(..len.next_multiple_of(8) - len).unwrap_or(&[]));
         }
         // Section 12.
-        // Keep each established encoding when its appended row kind is absent.
-        let version = if self
+        // Keep each established encoding when its appended row kind or field is absent: v5
+        // (88-byte Tomb rows with `fee_cum`) only when some tombstone still owes a fee window
+        // (`fee_cum < filled`); older rows restore `fee_cum = filled`, which is exact otherwise.
+        let fee_window = self
+            .tables
+            .iter()
+            .flatten()
+            .any(|t| t.tombs.iter().any(|b| b.r#gen != 0 && b.fee_cum.0 < b.filled.0));
+        let version = if fee_window {
+            ROW_VERSION_LINKS
+        } else if self
             .tables
             .iter()
             .flatten()
             .any(|t| t.foreign_receipts.iter().any(|r| r.exch_order_id != 0))
         {
-            ROW_VERSION_LINKS
+            4
         } else if self
             .tables
             .iter()
@@ -170,17 +179,20 @@ impl Oms {
                 let l = l.get_mut(..n).unwrap_or(&mut []);
                 l.sort_by_key(|t| t.r#gen);
                 for tb in l.iter() {
-                    w.put_row(&hdr(ROW_TOMB, 80));
-                    w.put_bytes(
-                        TombRowBody {
-                            venue: t.venue,
-                            account: t.account,
-                            _pad: 0,
-                            slot: s,
-                            tomb: **tb,
-                        }
-                        .as_bytes(),
-                    );
+                    let row = TombRowBody {
+                        venue: t.venue,
+                        account: t.account,
+                        _pad: 0,
+                        slot: s,
+                        tomb: **tb,
+                    };
+                    let len = if version >= 5 {
+                        TOMB_ROW_LEN
+                    } else {
+                        TOMB_ROW_LEN_V4
+                    };
+                    w.put_row(&hdr(ROW_TOMB, len));
+                    w.put_bytes(row.as_bytes().get(..len).unwrap_or(&[]));
                 }
             }
         }
@@ -341,13 +353,11 @@ impl Oms {
                 ROW_LINK => 80,
                 ROW_PLAN => 64,
                 ROW_LEG => 200,
-                ROW_TOMB => {
-                    if s12.version == 1 {
-                        64
-                    } else {
-                        80
-                    }
-                }
+                ROW_TOMB => match s12.version {
+                    1 => 64,
+                    2..=4 => TOMB_ROW_LEN_V4,
+                    _ => TOMB_ROW_LEN,
+                },
                 ROW_OUT => 32,
                 ROW_FOREIGN_CASH if s12.version >= 3 => 32,
                 ROW_FOREIGN_RECEIPT if s12.version >= 4 => 72,
@@ -468,12 +478,20 @@ impl Oms {
                     leg_rows.push((0, l.state));
                 }
                 ROW_TOMB => {
-                    let mut bytes = [0u8; 80];
+                    let mut bytes = [0u8; TOMB_ROW_LEN];
                     bytes
                         .get_mut(..b.len())
                         .ok_or(RestoreError::BadValue)?
                         .copy_from_slice(b);
-                    let tr = TombRowBody::try_read_from_bytes(&bytes).map_err(|_| RestoreError::BadValue)?;
+                    let mut tr =
+                        TombRowBody::try_read_from_bytes(&bytes).map_err(|_| RestoreError::BadValue)?;
+                    if s12.version < 5 {
+                        // No fee watermark recorded: every booked quantity counts as fee-covered.
+                        tr.tomb.fee_cum = tr.tomb.filled;
+                    }
+                    if tr.tomb.fee_cum.0 < 0 || tr.tomb.fee_cum.0 > tr.tomb.filled.0 {
+                        return Err(RestoreError::BadValue);
+                    }
                     if !crate::cash::valid_cursor(
                         o.inst(tr.tomb.inst).perp_cash,
                         tr.tomb.filled,
