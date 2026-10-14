@@ -174,7 +174,7 @@ cargo xtask bench-gate [--crate <x>] [--path <p>] [--smoke | --reference] [--sys
 cargo xtask replay-verify <journal-file | journal-dir | fixtures/replay/<name>.pointer.toml> [--from-seq A] [--to-seq B] [--record-decide-hist]
 ```
 
-以验证模式运行 [`replayer`](../apps/replayer/README.md):喂入 journal 的全部 Input 事件,逐字节比较每个 Output 记录(`OrderDecision`、`ExecDecision`、`CmdResult`…,屏蔽 hft-event `MEASURE_MASK` 的测量字段;`StateSnapshot` 同样逐字节比较),并比较快照头的状态哈希(`Keyframe` 快照的 `state_hash` 恒为 0,由 replayer 侧计算,规则归 [journal-format](../docs/subsystems/journal-format.md#快照记录结构))。失败输出第一个分歧的 `seq`、两侧记录的十六进制与解码视图、分歧前 200 条事件的 journal 片段路径。回放只读 journal 内容;若需要任何外部配置文件才能运行,以退出码 1 报告"journal 不自足"。`--record-decide-hist` 同时输出 `decide` 分段直方图,供 bench-gate 的纯计算回归基线使用。模拟账户的 journal 段与实盘一样可验证。
+以验证模式运行 [`replayer`](../apps/replayer/README.md):喂入 journal 的全部 Input 事件,逐字节比较每个 Output 记录(`OrderDecision`、`ExecDecision`、`CmdResult`…,屏蔽 hft-event `MEASURE_MASK` 的测量字段;`StateSnapshot` 同样逐字节比较),并比较快照头的状态哈希(`Keyframe` 快照的 `state_hash` 恒为 0,由 replayer 侧计算,规则归 [journal-format](../docs/subsystems/journal-format.md#快照记录结构))。失败输出第一个分歧的 `seq`、两侧记录的十六进制与解码视图、分歧前至多 200 条逻辑记录的诊断片段路径(格式与位置归 replayer)。回放只读 journal 内容;若需要任何外部配置文件才能运行,以退出码 1 报告"journal 不自足"。`--record-decide-hist` 同时输出 `decide` 分段直方图,供 bench-gate 的纯计算回归基线使用。模拟账户的 journal 段与实盘一样可验证。
 
 整套 [files-v1 指针](../fixtures/README.md#大文件s3-指针) 在运行前复查成员集合、大小与哈希,按 `checks` 逐项调用同一验证器,支持普通回放、Model 重算与检查点窗口。`strategy_set = "registry"` 使用 `cargo run --locked --profile ci -p replayer -- verify`;`testkit-replay-v1` 固定增加 `--example replay_probe`,只装配开发用测试策略集,生产 registry 不包含测试 kind。单对象指针与直接文件/目录默认使用 registry;单对象同时验证大小与哈希。
 
@@ -199,7 +199,7 @@ cargo xtask dst --seeds N [--steps M] [--seed S] [--suite X] [--case ID] [--regr
 | `--trace` | 打印逐步轨迹(复现时用) |
 | `--strategy K` | 跑 `strategies/registry/tests/` 中该策略的 DST(真实策略集);不带时只跑 hft-testkit 的 `TestStrategies` |
 
-失败输出:种子、套件、违反的不变量([testing §4](../docs/testing.md))、违反前 200 条事件的 journal 片段(可直接喂 `replayer`),以及一行可复制的复现命令 `cargo xtask dst --seeds 1 --seed S --suite X --steps M --trace`(格式归 [hft-testkit](../crates/hft-testkit/README.md#6-dst-框架))。CI 与本地运行都不写服务器账本、不计入门槛 ④。
+失败输出:种子、套件、违反的不变量([testing §4](../docs/testing.md))、违反处至多 200 条事件的 journal 记录片段(含失败事件,以 `hft_event::decode_record` 读取;完整重演使用复现命令),以及一行可复制的复现命令 `cargo xtask dst --seeds 1 --seed S --suite X --steps M --trace`(格式归 [hft-testkit](../crates/hft-testkit/README.md#6-dst-框架))。CI 与本地运行都不写服务器账本、不计入门槛 ④。
 
 实现口径:缺省起点 = HEAD 提交 SHA 的前 16 位十六进制(作为 u64);种子写作 `0x` + 16 位小写十六进制,也接受十进制。`dst` 以 `ci` 剖面构建 hft-testkit 的 [`hft-dst`](../crates/hft-testkit/README.md#8-hft-dst-运行器)(`cargo build --profile ci -p hft-testkit --features dst-bin --bin hft-dst`)并调用它:套件表取 `hft-dst list` 中以 `suite <名称>` 开头的行,按名字排序后用 hft-testkit 的 `seed::suite_index` 派生种子的套件;区间种子以 `hft-dst run --seeds <起点>..<终点>`(十进制、含两端)运行,带 `--trace` 时改为逐个 `hft-dst repro --seed S --suite X --steps M --trace --crash-dir target/dst`;回归种子逐个 `hft-dst repro --seed S --suite <文件名所示套件> --steps M --crash-dir target/dst`;崩溃目录与运行结果都在 `target/dst/` 下。`fixtures/dst-seeds/<suite>.txt` 每行取第一个字段为种子,`#` 开头的行跳过。JSON `target/xtask/dst.json`:`seeds`(区间在前、回归在后)、`runs`(每项 `seed`、`suite`、`source = range | regression`)、`steps`、`suite`、`strategy_set`(不带 `--strategy` 时 `"TestStrategies"`)、`result`。hft-testkit 的 DST 框架(`crates/hft-testkit/src/dst/`)不在仓库时退出 2。
 
@@ -380,7 +380,7 @@ refdata、`RiskParams`、`EngineConfig` 的**唯一来源**,也是 `StrategyPara
 hft-cfg build  --kind refdata  --in params/refdata/ --out refdata.blob [--against <当前 blob 或 journal 目录>] [--sim-models <hft-core 配置>] \n               [--schemas <dir>] [--admins <名单文件>]
 hft-cfg build  --kind strategy --schemas <release>/schemas/strategies --refdata <refdata.blob | journal 目录> \
                --in params/strategies/<instance>.<account>.toml --out <file>.blob [--against <当前 blob 或 journal 目录>]
-hft-cfg build  --kind risk   --in params/<file>.toml --out <file>.blob [--against …]
+hft-cfg build  --kind risk   --in params/<file>.toml --refdata <refdata.blob> --out <file>.blob [--against …]
 hft-cfg build  --kind engine --in params/<file>.toml --core-config <hft-core 实例配置> --out <file>.blob [--against …]
 hft-cfg refdata fetch --venue <venue> --out params/refdata/insts-<venue>.toml   # 拉 instruments 接口,生成待审 TOML
 hft-cfg diff   --old <a.blob> --new <b.blob> [--schemas <dir>] [--refdata <refdata.blob>] [--json]   # strategy blob 需要 --schemas
@@ -476,6 +476,8 @@ reason = "只做多现货,从不借币"
 
 **发送与其余**
 
+- **Risk TOML**:`build --kind risk` 必须给 `--refdata <blob>`。字段与嵌套表对应 [RiskParams](../crates/hft-risk/README.md#配置riskparams版本化经-setrisk-替换并作为-configblob-写入-journal),所有字段显式填写,整数采用原始定点单位,`author` 为 16 个字节;`show` 输出可往返的完整 TOML。编码复用 `ParamsBuilder` 与 RKP1 codec,拒绝未知字段、超范围值、重复/乱序行和缺失引用;`--against` 的旧 blob 也须通过引用检查,所有校验成功后才写输出。参数之间的交易约束仍由 `Risk::new`/`set_params` 裁决。差异按账户、venue、group、inst 身份逐字段列出放宽/收紧;身份、元数据和增删行标为变化,预览不代表运行中批准。
+
 - **发送**:`send` 以 `cli:<login>` 身份连本实例的 ctl socket(路径 = hft-core 配置 `paths.ctl_socket`,位于 `/run/hft/core-<instance>/`;运维账户访问 socket 的组成员资格归 [deploy](../deploy/README.md);strategy 需 Trader 或 Admin;risk、refdata 需 Admin,refdata 只在维护窗口),按 [control-plane 的二次确认协议](../docs/subsystems/control-plane.md#版本与确认) 先发预览、打印 sequencer 返回的 `CmdResult{preview}`(第一行是目标账户、账户类型与对照账户的有效模式),人工确认后带 `confirmed` 与 `expect_state_version` 重发;`StateChanged` 时重新预览;被拒时打印结果码与 detail 名(如 `Rejected{RefdataRecheck}`)。Telegram 不直接发 `SetParams`/`SetRisk`;ops_bot 的参数编辑命令改的是 pipeline 的策略文件,由 pipeline 产出 blob 后以自己的身份下发。
 - **`EngineConfig`**:按主机类给出(oms/ledger/容量/批量上限/每事件出环上限 K/环容量),随 hft-core 配置部署,启动时记为 `ConfigBlob{Engine}`;变更需要重启,`send` 不接受 `engine`。ECF1 段 5 中取值归 hft-core 实例配置的三项由 `--core-config` 读入,不在 `params/` 里另写:`advisor.mem_budget_mib` → `advisor_mem_budget_mib`、`advisor.checkpoint_max_mib` → `advisor_ckpt_max_mib`、`startup.allow_missing_standby` → `allow_missing_standby`(段 5 字段归 [hft-sequencer](../crates/hft-sequencer/README.md),hft-core 启动时核对两边相等);配置缺其中任一键 → 退出 2;三键出现在 params 文件任何位置 → 退出 1。params 文件写 `version`、`host_class` 与各段表:`[capacities]`(段 3)、`[rings]`(段 4,键为 `RingCapKind` 名的 snake_case)、`[sequencer]`(段 5 其余字段,`rings.<RingClass 名>.{per_ring, total}`)、`[conn.rotate_margin_s]`(段 6,按 venue);段 1、2、7 在归属 crate 定义行格式后加入(未知表退出 1)。ECF1 与 refdata 之间的交叉校验(含段 2 每个 `ref_inst` 的 `RefInstNotSubscribed`,规则归 [hft-refdata](../crates/hft-refdata/README.md))只在 hft-core 启动时由 `EngineConfig::load` 的验证器进行,hft-cfg 不预检。
 - **`refdata fetch`**:冷路径联网工具,按 venue 拉 instruments/exchangeInfo,按 [hft-refdata 的指数规则](../crates/hft-refdata/README.md#实现说明)生成 inst 行与资产指数建议,排除非 10 的幂合约乘数与交割合约;输出供人审阅的 TOML,不直接产出 blob。
@@ -563,7 +565,7 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 | `tools/az-probe/` | Python 3.12 包(由 `probe2.py` 演化);`targets.toml` |
 | `tools/hostprobe/` | Rust 二进制(cold tier;只读 `/proc`、`/sys`、ioctl、`bpf(BPF_PROG_QUERY)` 与 nftables netlink 查询;不链接任何 hot crate) |
 | `tools/hft-cfg/` | Rust 二进制(cold tier;依赖 `hft-refdata`、`hft-event`、`hft-strategy-sdk`(只用 `params`)、`hft-risk` 的构建器与校验、core `venue-*`(只用 `default_caps`/`dead_man`)、`hft-ctl-proto` 的帧;不依赖任何 `strategies/*` 与 hot 运行时 crate) |
-| `tools/hft-cfg/src/{lib,refdata,strategy,engine,diff,util}.rs` | CLI 与各子命令;`strategy.rs` 只做 TOML ↔ schema 字段映射与单位换算,编码调用 SDK;`risk`、`fetch`、`send` 随 hft-risk 构建器、`refdata fetch` 与 hft-ctl-proto 帧加入 |
+| `tools/hft-cfg/src/{lib,refdata,strategy,engine,risk,diff,util}.rs` | CLI 与各子命令;`strategy.rs` 只做 TOML ↔ schema 字段映射与单位换算,编码调用 SDK;`risk.rs` 映射完整 RKP1;`fetch`、`send` 随 `refdata fetch` 与 hft-ctl-proto 帧加入 |
 | `tools/hft-secrets/` | Rust 二进制(cold tier;`aws-sdk-secretsmanager`、`aws-sdk-kms`、tokio;不链接任何 hot crate);清单模板在 `deploy/secrets/` |
 | `tools/hft-verify/` | Rust 二进制(cold tier;不链接任何 hft crate、无网络代码);`src/{run,rotate,classify,record,ledger,crash,resolve}.rs`;`gates.toml`(门槛取值,与 testing §8 比对) |
 
@@ -608,9 +610,9 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 - az-probe 的首帧单向分布依赖 PHC;探针实例若无 PHC,只能给 RTT 结论。
 - `doc-check` 的分段名与策略族名检查只能匹配名单内的写法,自然语言里的错误用法靠评审。
 - hft-cfg 不跑策略的跨字段 `validate`(它不链接策略代码);离线发现跨字段错误要靠 `send` 的预览或 CI 里对 `fixtures/params/*` 的 gateway 级测试。
-- xtask 尚未实现(随各自的里程碑加入):`fuzz`、`path-digest`(未知子命令,退出 2);`scaffold-gate` 的 Model/advisor 预算验收按 M2-lite 决定归 M9;`dst` 的 `--strategy` 退出 2(registry 尚无策略 DST 入口);`fixtures extract/corpus/bbo-diff` 退出 2;`replay-verify` 的整套指针支持 Model 重算与检查点窗口,直接路径/单对象入口只转发 from/to seq;压缩内容须先经 `fixtures fetch` 解压校验,不直接传 `.zst` 给验证器。分歧前片段导出与 `--record-decide-hist` 尚未接入,不支持的选项退出 2;固定 T1/T3 指针、S3/OIDC 下载实测与双架构回放证据仍待验收;`gen-host` 只做输入核对(`--host` 的清单存在),`deploy/gen/` 与 hft-core 主机类档不在仓库时退出 2。
+- xtask 尚未实现(随各自的里程碑加入):`fuzz`、`path-digest`(未知子命令,退出 2);`scaffold-gate` 的 Model/advisor 预算验收按 M2-lite 决定归 M9;`dst` 的 `--strategy` 退出 2(registry 尚无策略 DST 入口);`fixtures extract/corpus/bbo-diff` 退出 2;`replay-verify` 的整套指针支持 Model 重算与检查点窗口,直接路径/单对象入口只转发 from/to seq;压缩内容须先经 `fixtures fetch` 解压校验,不直接传 `.zst` 给验证器。直接路径/单对象入口支持 `--record-decide-hist`,整套指针入口不接受该选项;固定 T1/T3 指针、S3/OIDC 下载实测与双架构回放证据仍待验收;`gen-host` 只做输入核对(`--host` 的清单存在),`deploy/gen/` 与 hft-core 主机类档不在仓库时退出 2。
 - hot-check 尚未覆盖 [hot-path-rules](../docs/hot-path-rules.md) 中写给 hot-check 而本节检查表未列的项:T5 warm 开关默认值、T7 rustls 握手/`connect` 与 REST 快照调用点只在 `conn-builder`/`snap-fetch` 模块、M6 含枚举字段的事件体 derive `FromBytes`(相关 crate 进入 workspace 时随表加入)。
-- hft-cfg 尚未接入:`build --kind risk`(hft-risk 构建器)、`refdata fetch`、`send`(hft-ctl-proto 帧)、从 journal 目录读取生效 blob(`--against`/`--refdata` 给目录)与 core `venue-*` 的 `default_caps()`(能力行的底取 `[caps.<venue>]`);前四项当前退出 2。
+- hft-cfg 尚未接入:`refdata fetch`、`send`(hft-ctl-proto 帧)、从 journal 目录读取生效 blob(`--against`/`--refdata` 给目录)与 core `venue-*` 的 `default_caps()`(能力行的底取 `[caps.<venue>]`);前三项当前退出 2。
 - hft-verify 的吞吐受服务器空闲 CPU 限制(批处理所在 slice 为 `CPUWeight=idle`,dev2 上的吞吐随旧系统负载变化;达成时间估算见 testing §6.1);它不并行,也不在主机间协调——同时有两台主机运行时靠种子编码与按完成时刻折叠保证结果正确,不靠锁。
 
 ### 开发备忘

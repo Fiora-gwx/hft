@@ -7,6 +7,37 @@ use hft_sequencer::driver::snapshot_diff::snapshot_difference;
 use hft_sequencer::driver::verify::VerifyResult;
 use serde_json::{Value, json};
 
+/// A bounded logical-record diagnostic stream. It is readable by decode_record, not a
+/// self-contained verification journal (which also needs the original boot block).
+pub(crate) fn fragment(
+    source: &std::path::Path,
+    log: &hft_sequencer::driver::replay::Log,
+    seq: u64,
+) -> std::io::Result<std::path::PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    source.hash(&mut hash);
+    let dir = std::path::PathBuf::from("target/replay-verify").join(format!("{:016x}", hash.finish()));
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("before-{seq}.bin"));
+    let rows: Vec<_> = log.recs.iter().filter(|r| r.seq < seq).rev().take(200).collect();
+    let mut bytes = Vec::new();
+    for r in rows.into_iter().rev() {
+        let len = (24 + r.body.len()).div_ceil(8) * 8;
+        bytes.extend_from_slice(&(len as u32).to_le_bytes());
+        bytes.extend_from_slice(&r.kind.0.to_le_bytes());
+        bytes.extend_from_slice(
+            &(r.flags.0 & !(hft_event::RecordFlags::CRC.0 | hft_event::RecordFlags::PART.0)).to_le_bytes(),
+        );
+        bytes.extend_from_slice(&r.seq.to_le_bytes());
+        bytes.extend_from_slice(&r.tsc.to_le_bytes());
+        bytes.extend_from_slice(&r.body);
+        bytes.resize(bytes.len() + len - 24 - r.body.len(), 0);
+    }
+    std::fs::write(&path, bytes)?;
+    Ok(path)
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }

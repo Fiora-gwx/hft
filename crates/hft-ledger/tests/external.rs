@@ -26,8 +26,7 @@ fn e1() -> ExternalFill {
     e
 }
 
-#[test]
-fn led_071_liquidation_shortfall_stays_negative() {
+fn check_liquidation_shortfall_stays_negative() {
     // Wallet 50,000; close a 1 BTC short opened at 60,000 at 120,000, fee 10.
     // Both the M2 local-cost path and the explicit settlement path must retain the debt.
     for settled in [false, true] {
@@ -617,6 +616,7 @@ fn led_070_external_column() {
 
 #[test]
 fn led_071_note_level_by_cause() {
+    check_liquidation_shortfall_stays_negative();
     let rows = [
         (Liquidation, NoteLevel::P0),
         (Adl, NoteLevel::P0),

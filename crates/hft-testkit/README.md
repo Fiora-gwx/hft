@@ -51,7 +51,7 @@ hft_testkit::golden_suite!(venue_binance::Spot, "binance-spot");
 - 目录布局、来源规则与覆盖要求归 [fixtures/](../../fixtures/README.md);本 crate 只按该布局读取。core 套件:`binance-usdm`、`binance-spot`、`okx-swap`、`okx-spot`、`bitget-usdt-futures`、`bitget-spot`;其余 venue 在启用时加一行。
 - `GoldenDiff` 给出第一条不一致的帧、事件序号与逐字段差异(定点值同时显示原值与按指数换算的十进制)。
 - **没有"用当前输出覆盖期望"的开关**:金样不对就修 fixture 来源,不修归一化逻辑去迁就([testing §1](../../docs/testing.md#1-原则));期望只能由 `tools/` 的抽取工具从 raw 捕获产出并经人工复核。
-- 同一运行器也跑 `fixtures/sim/` 的模拟撮合金样(`run_sim_case`:记录 + 指令脚本 → 期望回报序列)。
+- `seq` feature 导出 `run_sim_case(&mut SimExchange, &[SimStep], &[OrderEvent])`:调用方解析金样、构造 refdata/setup 与按 TSC 排序的 `Record`/`Command`/`Advance` 脚本。运行器逐步推进撮合并收取到期回报,逐字节比较完整 OrderEvent 流(含时间);其他回报不属于该流。末尾 `Advance` 须覆盖最后响应期限。乱序脚本、少报、多报或字段差异返回首个 `GoldenDiff{event, field, expected, actual}`,不提供自动更新期望值入口(TK-009)。
 
 ### 2. proptest 生成器
 
@@ -433,7 +433,7 @@ pub fn per_process_file(dir: &Path, stem: &str, ext: &str) -> PathBuf; // <dir>/
 3. **崩溃与毒丸**:`CrashFault{at_step, repeat, point}` 在某输入处理中途丢弃 sequencer 实例,只留 journal(内存段),再以 `RecoverDriver` 重建;`repeat = 2` 时同一输入再次崩溃,检验隔离路径。`point` 选崩溃位置:`SeqInput`(缺省,上述)、`SimMatchedUndelivered`(sim-gw 已撮合、回报仍在待交付堆)、`SimRepQueued`(回报已入 `rep-sim` 环、sequencer 未取走)、`BeforeFirstReport`(某 Sim 账户的第一条余额报告被处理之前);后三种同时丢弃 `SimActor` 的内存对象(整进程崩溃),按 hft-sim 的重启恢复步骤重建。`CleanRestartFault{at_step}` 做一次干净 Drain 重启。
 4. **故障计划**:运行开始时由种子一次性生成完整故障时间表(`Vec<(virtual_ns, Fault)>`),`shrink` 可以逐项删除并重跑。
 5. **随机性唯一来源**:每个 actor 一条 `ChaCha8Rng::seed_from_u64(seed::derive(seed, <actor 标签>))`,增删一个 actor 不改变其他 actor 的流;被测代码需要的随机数必须由事件提供,DST 不向被测代码暴露 RNG。
-6. **检查**:每步后运行启用的不变量检查器(只读访问调试视图);失败即停,把违反前 200 条事件(按 `EVENT_END` 计)写成 journal 记录格式的片段(`journal.bin`,24 B 记录头 + 体 + 补零,`hft_event::decode_record` 可逐条读出;replayer 读入片段随 replayer 落地)、故障表(`faults.txt`,每行 `<virtual_ns> <类别> <故障>`)与复现行(`repro.txt`)存到 `<目录>/<种子 16 位十六进制>/`(`cargo xtask dst` 为 `target/dst/`);失败种子加入 `fixtures/dst-seeds/` 回归集。
+6. **检查**:每步后运行启用的不变量检查器(只读访问调试视图);失败即停,把违反前 200 条事件(按 `EVENT_END` 计)写成 journal 记录格式的片段(`journal.bin`,24 B 记录头 + 体 + 补零,`hft_event::decode_record` 可逐条读出;不含完整引导块,完整重演使用复现命令)、故障表(`faults.txt`,每行 `<virtual_ns> <类别> <故障>`)与复现行(`repro.txt`)存到 `<目录>/<种子 16 位十六进制>/`(`cargo xtask dst` 为 `target/dst/`);失败种子加入 `fixtures/dst-seeds/` 回归集。
 7. **收缩**:"删除一段故障 → 重跑 → 仍以同一不变量失败则保留删除",段长从一半起逐次减半到单项,直到不能再删或超出预算(墙钟秒;预算只决定收缩走多远,每次重跑本身确定)。
 
 `ReconActor::round_committed` 按 Live 账户与 venue 分组,从独立 JournalLedger 读已提交边界的仓位与原始成交入账身份,包括交易所稀疏视图里已归零的合约。`view_seq` 是这个 journal 边界;订单与墓碑阻塞来自同一边界的 OMS 只读接口,用户流及最近活动来自原始记录。两轮数量稳定、无在途或 Unknown/VERIFY、用户流连续 Up 才提出 AUTO_EXTERNAL;真实引擎每轮经控制环提交,检查器开关不改变输入。重启或连续性丢失时清除两轮记忆。
@@ -464,7 +464,8 @@ LED-081 使用真实策略命令在 1 s 开仓、4 s 以 PairOnFill 平仓、7 s
 
 | 文件 | 职责 |
 |---|---|
-| `src/golden.rs` | `GoldenCase`、加载、`run_decoder_case`、`run_sim_case`、`golden_suite!` |
+| `src/sim_golden.rs` | `seq` feature 的 `SimStep`、`run_sim_case` 与首个字段差异 |
+| `src/golden.rs` | `GoldenCase`、加载、`run_decoder_case`、`golden_suite!` |
 | `src/gen/{market.rs, orders.rs, perturb.rs, ctl.rs, fees.rs, margin.rs, external.rs}` | proptest 策略(模块名 `r#gen`:`gen` 是 2024 版关键字;`fees.rs` 含 `funding_flows`,`margin.rs` 含 `one_sided_move`,`external.rs` 含 `account_config`);`gen/chain/*`(`chain` feature) |
 | `src/clock.rs` | `ManualTsc`、`ManualUtc` |
 | `src/seed.rs` | 种子派生与确定性 `TestRunner` |
@@ -537,7 +538,7 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 - `CancelRejectFilled` 请求和超时释放不算撤单竞态成功;必须有真实 Cancel、撮合器拒绝及后续原件交付的日志证据。它不覆盖尚未完成的撤改竞态全集。
 - 固定行情耗尽后的 LED-267 派生权益观察存在待定位差异,冷热读者的过期标志与 as_of_ens 可能不同,金额相等仍会失败。[CI 266](https://github.com/Fiora-gwx/hft/actions/runs/38397768438/job/115297630578) 的 TK-172 记录了该边界;持续行情的撤单竞态验收不代表断行情后的观察一致性已通过。
 - 运行期 `BaseFee` 尚未接入 MockVenue 的执行分支,计划条目不能计为覆盖。基础币费用的配置与资金验收仍按 TK-106 执行,不等于运行期费用扰动已覆盖。
-- 真实引擎的逐 Input 与逐决策观察契约见 [DST 框架](#6-dst-框架)。真实引擎的植入缺陷覆盖 I2、I3、I6、I16、I20 与 QF-1、MS-2、对冲重试三条场景断言(TK-179、TK-053.21–TK-053.23);`toy::PLANTED` 其余各行(I1、I4、I5、I7–I9、I11–I15、I17–I19)的真实引擎版本、`run_sim_case`(TK-009)、`ProbeBuild` 注入(TK-095)与模板探针的构建检查(TK-042)未落地;`hft-dst` 的 `SIGINT`/`SIGTERM` 处理属 M6。
+- 真实引擎的逐 Input 与逐决策观察契约见 [DST 框架](#6-dst-框架)。真实引擎的植入缺陷覆盖 I2、I3、I6、I16、I20 与 QF-1、MS-2、对冲重试三条场景断言(TK-179、TK-053.21–TK-053.23);`toy::PLANTED` 其余各行(I1、I4、I5、I7–I9、I11–I15、I17–I19)的真实引擎版本、`ProbeBuild` 注入(TK-095)与模板探针的构建检查(TK-042)未落地;`hft-dst` 的 `SIGINT`/`SIGTERM` 处理属 M6。
 - 标准套件的冒烟种子集上 I17、I20 比较数为 0、I13、I15、I18、I19 很少(TK-177 逐运行打印):W1 的测试策略很少开仓,保证金与 Broken 路径只由定向世界覆盖。真实引擎 DST 里交易所以未登记码拒单后槽保持 `Unknown`、`QueryResult` 回 NotFound 时不能收敛,依赖该槽收敛的路径(Broken 自动平仓等)在这类世界里一直等待;TK-179 的 Broken 世界改用行情断连使第二腿无法定价。MS-2(测试策略版)带缺陷的运行在强平后出现钱包为负的交易所真值与引擎余额 0 的差异(I16),强平亏空按 [hft-ledger](../hft-ledger/README.md#外部成交externalfill) 保留负余额并 P0 告警;该场景的全链路差异仍需 M4 MS-2 定位与验收,账本入口的亏空/恢复/去重由 LED-071 覆盖。
 
 ### 开发备忘

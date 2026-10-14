@@ -565,6 +565,7 @@ fn continue_all(fx: &mut Fx) -> Vec<hft_event::ExecDecision> {
 
 #[test]
 fn exe_459_pending_roundtrip() {
+    check_legacy_pending_and_invalid_work_flags();
     let mut fx = fx_many(64);
     for k in 0..64 {
         fx.legs(A1, many(k), &["5.00", "-5.0"]);
@@ -600,8 +601,7 @@ fn exe_459_pending_roundtrip() {
     assert!(!reference.is_empty());
 }
 
-#[test]
-fn exe_459_legacy_pending_and_invalid_work_flags() {
+fn check_legacy_pending_and_invalid_work_flags() {
     let mut fx = Fx::new();
     fx.set(I1, &t0("3", "-3")).0.unwrap();
     let mut legacy = fx.snap();

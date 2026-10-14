@@ -11,6 +11,7 @@ pub(crate) struct Options {
     pub verify: VerifyOptions,
     pub report: Option<PathBuf>,
     pub check: bool,
+    pub record_decide_hist: bool,
     pub reassembly: usize,
     pub limits: LogReadLimits,
     pub recompute: bool,
@@ -20,7 +21,7 @@ pub(crate) struct Options {
 
 pub(crate) fn parse(args: &[String]) -> Result<Options, String> {
     if args.first().map(String::as_str) != Some("verify") {
-        return Err("usage: replayer verify --journal <file|dir> [--from-seq N] [--to-seq N] [--instance prod|sim] [--advice journal|recompute] [--model-checkpoint file|dir] [--keep-going] [--report file.json] [--check]; other subcommands are not implemented".into());
+        return Err("usage: replayer verify --journal <file|dir> [--from-seq N] [--to-seq N] [--instance prod|sim] [--advice journal|recompute] [--model-checkpoint file|dir] [--keep-going] [--record-decide-hist] [--report file.json] [--check]; other subcommands are not implemented".into());
     }
     let mut journal = None;
     let mut o = Options {
@@ -29,6 +30,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Options, String> {
         verify: VerifyOptions::default(),
         report: None,
         check: false,
+        record_decide_hist: false,
         recompute: false,
         checkpoint: None,
         model_limits: RecomputeLimits {
@@ -50,6 +52,10 @@ pub(crate) fn parse(args: &[String]) -> Result<Options, String> {
         }
         i += 1;
         match key {
+            "--record-decide-hist" => {
+                o.record_decide_hist = true;
+                continue;
+            }
             "--keep-going" => {
                 o.verify.keep_going = true;
                 continue;

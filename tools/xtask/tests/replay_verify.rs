@@ -31,11 +31,7 @@ fn tool_192_replay_wrapper_runs_binary_and_maps_exit_codes() {
     }
     let mut exec = ScriptExec::default();
     assert_eq!(
-        xtask::replay_verify::run_with(
-            &f.root,
-            &["sample.jrn".into(), "--record-decide-hist".into()],
-            &mut exec
-        ),
+        xtask::replay_verify::run_with(&f.root, &["sample.jrn".into(), "--unsupported".into()], &mut exec),
         2
     );
     assert!(exec.calls.is_empty());

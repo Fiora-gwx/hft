@@ -857,7 +857,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | LED-071.4 | `Delivery` | P0 |
 | LED-071.5 | `Unknown` | P0 |
 
-- LED-071.1 亏空边界:钱包 50 000,1 BTC 空仓成本 60 000,强平买回价 120 000、费用 10;既有本地成本与实际结算入口均保存现金/钱包 −10 010、仓位 0、external PnL −60 010,并有一条 P0 ExternalFill。快照恢复保持负数,重复原件不重复扣款或告警。实现:`crates/hft-ledger/tests/external.rs::led_071_liquidation_shortfall_stays_negative`。M4 MS-2 端到端强平场景按此口径核对交易所钱包。
+- LED-071.1 亏空边界:钱包 50 000,1 BTC 空仓成本 60 000,强平买回价 120 000、费用 10;既有本地成本与实际结算入口均保存现金/钱包 −10 010、仓位 0、external PnL −60 010,并有一条 P0 ExternalFill。快照恢复保持负数,重复原件不重复扣款或告警。实现:`crates/hft-ledger/tests/external.rs::check_liquidation_shortfall_stays_negative`。M4 MS-2 端到端强平场景按此口径核对交易所钱包。
 
 ### LED-072 ExternalFill 注记的 v[] 布局与 v[0] 打包往返
 
@@ -1034,7 +1034,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   - 步骤 2:`G1.pnl.funding` +6;`A1/P2` USDT `total` 与 `wallet` +6;`FundHist` 记录 `booked` 6.0、`hflags` 不含 `PUSHED`
 - 实现:`crates/hft-ledger/tests/funding.rs::led_092_rate_only_synth_booked`
 
-LED-092 补充验收:估算 6、实额 5.25 只补差 -0.75;重复实额/定时器无动作;实额先到后合成不重复;平仓后保留原 group;水位前账单不重复期初余额。实现见 `tests/funding.rs` 的 `led_092_actual_*`。
+LED-092 补充验收:估算 6、实额 5.25 只补差 -0.75;重复实额/定时器无动作;实额先到后合成不重复;平仓后保留原 group;水位前账单不重复期初余额。由主测试调用 `tests/funding.rs` 的 `check_actual_*` 辅助函数。
 
 ### LED-093 合成资金费只取整一次:收入向下、支出向上
 

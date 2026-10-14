@@ -360,8 +360,7 @@ fn check(id: InvId, e: &EventStep) -> Result<(), (InvId, String)> {
     )
 }
 
-#[test]
-fn tk_107_unknown_is_scoped_to_decision_group_and_link() {
+fn check_unknown_is_scoped_to_decision_group_and_link() {
     use hft_testkit::dst::obs::{DecClass, SlotState};
     let suite = hft_testkit::scenarios::suites()
         .into_iter()
@@ -627,6 +626,7 @@ fn tk_121_hedge_place_failure_requires_exact_evidence() {
 
 #[test]
 fn tk_107_real_observations_and_counterexamples() {
+    check_unknown_is_scoped_to_decision_group_and_link();
     let c = crate::support::cfg(1, 2_000, &[], 0, &[]);
     let r = run_record::<Observed>(&c);
     assert!(r.outcome.is_pass(), "{}", crate::seq_sut::show(&r));

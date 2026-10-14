@@ -80,8 +80,14 @@ path = "../../tests/dst/main.rs"
 required-features = ["seq"]
 
 [dev-dependencies]
+serde_json = "1"
 hft-testkit = { path = ".", features = ["sdk-mock"] }
 criterion.workspace = true
+
+[[test]]
+name = "sim_golden"
+path = "tests/sim_golden.rs"
+required-features = ["seq"]
 
 [[bench]]
 name = "dst"

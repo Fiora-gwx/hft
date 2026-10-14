@@ -10,6 +10,14 @@ use std::path::{Path, PathBuf};
 use crate::dst::driver::encode_records;
 use crate::dst::{DstFailure, FaultPlan};
 
+/// One step of the diagnostic stderr trace, shared by the CLI and its contract tests.
+pub fn trace_line(t: &crate::dst::TraceItem) -> String {
+    format!(
+        "{} {} {:?} {:#06x} seq={}",
+        t.step, t.at_ns, t.src, t.kind.0, t.seq
+    )
+}
+
 /// `DST FAILED seed=0x… step=N invariant=I3(exposure) -> cargo xtask dst --seeds 1 --seed 0x… --suite core --steps N+1 --trace`.
 pub fn repro_line(f: &DstFailure) -> String {
     repro_line_case(f, None)

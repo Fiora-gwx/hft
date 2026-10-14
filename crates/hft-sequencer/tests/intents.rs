@@ -196,6 +196,10 @@ fn seq_176_link_fields() {
 
 #[test]
 fn seq_178_peer_and_hedge_cap() {
+    super::simultaneous::check_simultaneous_atomic_risk_and_capacity();
+    super::simultaneous::check_simultaneous_cold_restart_keeps_inflight_link();
+    super::simultaneous::check_simultaneous_residual_affordability();
+    super::simultaneous::check_simultaneous_second_binding_blocks_both();
     let mut h = steady();
     let m = s1_place(&mut h, |hx| pair_first(hx, q("0.01")));
     let first: OrderDecision = decisions(&h.since(m))[0].1;

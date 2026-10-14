@@ -110,6 +110,9 @@ fn led_091_per_symbol_push_dedup() {
 
 #[test]
 fn led_092_rate_only_synth_booked() {
+    check_actual_after_close_keeps_settlement_owner();
+    check_actual_before_timer_and_old_opening_balance();
+    check_actual_total_replaces_estimate_and_is_replay_idempotent();
     let mut l = fund_a1(RateOnly);
     let x = synth(&l, T1 + 300_000_000);
     assert_eq!(
@@ -125,8 +128,7 @@ fn led_092_rate_only_synth_booked() {
     assert_eq!((h[0].booked, h[0].hflags & HFLAG_PUSHED), (n("6"), 0));
 }
 
-#[test]
-fn led_092_actual_total_replaces_estimate_and_is_replay_idempotent() {
+fn check_actual_total_replaces_estimate_and_is_replay_idempotent() {
     let mut l = fund_a1(RateOnly);
     let initial = wallet(&l);
     let estimate = synth(&l, T1);
@@ -152,8 +154,7 @@ fn led_092_actual_total_replaces_estimate_and_is_replay_idempotent() {
     assert_eq!(l.fund_hist(A1, P2)[0].hflags, HFLAG_PUSHED);
 }
 
-#[test]
-fn led_092_actual_before_timer_and_old_opening_balance() {
+fn check_actual_before_timer_and_old_opening_balance() {
     let mut l = fund_a1(RateOnly);
     let initial = wallet(&l);
     l.apply_funding(&push(BTC_P2, "-2", T1), s(10)).unwrap();
@@ -163,8 +164,7 @@ fn led_092_actual_before_timer_and_old_opening_balance() {
     assert_eq!(wallet(&l).0 - initial.0, n("-2").0);
 }
 
-#[test]
-fn led_092_actual_after_close_keeps_settlement_owner() {
+fn check_actual_after_close_keeps_settlement_owner() {
     let mut l = fund_a1(RateOnly);
     l.apply_funding(&synth(&l, T1), s(10));
     l.apply_fill(&f(Buy, BTC_P2, "1.0", "60000", "0", USDT, G1, 2), s(11));

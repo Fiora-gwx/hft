@@ -113,6 +113,7 @@ fn start(
 
 #[test]
 fn ven_310_session_flow() {
+    check_prepared_bootstrap_reconnect_authenticates_again();
     // .1: Md, no bootstrap, no login.
     let mut net = Net::new(64, 16);
     let mut drv = SessionDriver::<StubProto>::new(scfg(), vec![]);
@@ -180,8 +181,7 @@ fn ven_310_session_flow() {
     assert!(drv.log().any(|o| o == SessionOp::Reclaim(ConnId(113))));
 }
 
-#[test]
-fn ven_310_prepared_bootstrap_reconnect_authenticates_again() {
+fn check_prepared_bootstrap_reconnect_authenticates_again() {
     stub::set_cfg(|c| {
         c.bootstrap = true;
         c.login = LoginMode::One;

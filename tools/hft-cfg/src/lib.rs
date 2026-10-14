@@ -14,6 +14,7 @@
 pub mod diff;
 pub mod engine;
 pub mod refdata;
+pub mod risk;
 pub mod strategy;
 pub mod util;
 
@@ -227,6 +228,28 @@ fn build_strategy(a: &Args, out: &mut dyn Write) -> Res<()> {
     Ok(())
 }
 
+fn build_risk(a: &Args, out: &mut dyn Write) -> Res<()> {
+    a.allow(&["kind", "in", "out", "against", "refdata"])?;
+    let rd = diff::load_refdata(&blob_file(a.need("refdata")?, "--refdata")?, "--refdata")?;
+    let input_path = a.need("in")?;
+    let table = parse_toml(&read_text(input_path)?, input_path)?;
+    let blob = risk::build(&table, &rd)?;
+    let report = a
+        .get("against")
+        .map(|p| {
+            let old = blob_file(p, "--against")?;
+            hft_risk::RiskParams::decode_blob(&old, &rd)
+                .or_else(|e| rej(format!("--against: invalid risk blob: {e:?}")))?;
+            risk::diff(&old, &blob)
+        })
+        .transpose()?;
+    write_out(a.need("out")?, &blob)?;
+    if let Some(report) = report {
+        emit(&report, a.json, out);
+    }
+    Ok(())
+}
+
 fn optional_refdata(a: &Args) -> Res<Option<RefData>> {
     a.get("refdata")
         .map(|p| diff::load_refdata(&blob_file(p, "--refdata")?, "--refdata"))
@@ -243,6 +266,7 @@ fn cmd_diff(a: &Args, out: &mut dyn Write) -> Res<()> {
     }
     let rep = match ko {
         BlobKind::Engine => diff::engine_diff(&old, &new)?,
+        BlobKind::Risk => risk::diff(&old, &new)?,
         BlobKind::Refdata => diff::refdata_diff(&old, &new)?,
         BlobKind::Strategy => {
             let rd = optional_refdata(a)?;
@@ -267,6 +291,7 @@ fn cmd_show(a: &Args, out: &mut dyn Write) -> Res<()> {
     let b = blob_file(&p, "show")?;
     let text = match kind_of(&b) {
         BlobKind::Refdata => hft_refdata::dump(&diff::load_refdata(&b, "show")?),
+        BlobKind::Risk => risk::show(&b)?,
         BlobKind::Engine => {
             let ec = EngineConfig::load(&b, None).or_else(|r| {
                 rej(format!(
@@ -323,9 +348,7 @@ fn dispatch(args: &[String], out: &mut dyn Write) -> Res<()> {
         (Some("build"), Some("refdata")) => build_refdata(&a, out),
         (Some("build"), Some("engine")) => build_engine(&a, out),
         (Some("build"), Some("strategy")) => build_strategy(&a, out),
-        (Some("build"), Some("risk")) => {
-            input("build --kind risk: needs the hft-risk RiskParams builder (not available yet)")
-        }
+        (Some("build"), Some("risk")) => build_risk(&a, out),
         (Some("refdata"), _) if a.pos.get(1).map(String::as_str) == Some("fetch") => {
             input("refdata fetch: not available yet")
         }

@@ -38,8 +38,7 @@ fn fire(h: &mut H) -> (usize, Vec<OrderDecision>) {
     )
 }
 
-#[test]
-fn seq_178_simultaneous_atomic_risk_and_capacity() {
+pub(super) fn check_simultaneous_atomic_risk_and_capacity() {
     reset_script();
     let mut h = b0().boot_self_contained();
     h.steady();
@@ -134,8 +133,7 @@ fn seq_178_simultaneous_atomic_risk_and_capacity() {
     assert!(h.verify().is_empty());
 }
 
-#[test]
-fn seq_178_simultaneous_residual_affordability() {
+pub(super) fn check_simultaneous_residual_affordability() {
     reset_script();
     let mut b = b0();
     b.setup_edit
@@ -180,8 +178,7 @@ fn seq_178_simultaneous_residual_affordability() {
     assert!(h.verify().is_empty());
 }
 
-#[test]
-fn seq_224_simultaneous_ring_full_sends_neither() {
+pub(super) fn check_simultaneous_ring_full_sends_neither() {
     for ring in [OutRing::Venue(A), OutRing::Venue(B)] {
         reset_script();
         let mut h = b0().boot_self_contained();
@@ -203,8 +200,7 @@ fn seq_224_simultaneous_ring_full_sends_neither() {
     }
 }
 
-#[test]
-fn seq_178_simultaneous_second_binding_blocks_both() {
+pub(super) fn check_simultaneous_second_binding_blocks_both() {
     reset_script();
     let mut h = b0().boot_self_contained();
     h.steady();
@@ -261,8 +257,7 @@ fn terminal(h: &mut H, d: &OrderDecision, qty: Qty, query: bool) {
     h.run();
 }
 
-#[test]
-fn exe_502_simultaneous_fault_seeds_and_snapshot_replay() {
+pub(super) fn check_simultaneous_fault_seeds_and_snapshot_replay() {
     for seed in 1..=12u64 {
         for policy in [OnFail::Reverse, OnFail::Hold] {
             reset_script();
@@ -362,8 +357,7 @@ fn exe_502_simultaneous_fault_seeds_and_snapshot_replay() {
     }
 }
 
-#[test]
-fn seq_178_simultaneous_cold_restart_keeps_inflight_link() {
+pub(super) fn check_simultaneous_cold_restart_keeps_inflight_link() {
     reset_script();
     let mut h = b0().boot_self_contained();
     h.steady();

@@ -8,6 +8,7 @@ mod recompute;
 mod recovery;
 mod recovery_gap;
 mod tail;
+mod toolcases;
 mod verify;
 /// Tests over the generated 1 h / 3 h fixtures (feature `long-fixtures`; see `long_model::heavy`).
 #[cfg(feature = "long-fixtures")]

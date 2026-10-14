@@ -251,6 +251,14 @@ impl RiskParams {
     /// Rejects non-canonical order, duplicates, narrowing, truncation, trailing bytes and missing
     /// account / venue rows. Row counts are checked against the available bytes before allocation.
     pub fn decode_blob(b: &[u8], rd: &RefData) -> Result<Self, RiskBlobError> {
+        let p = Self::inspect_blob(b)?;
+        p.check_blob_references(rd)?;
+        Ok(p)
+    }
+
+    /// Inspect a canonical blob without refdata (offline show/diff only). This checks the wire
+    /// format, not reference resolution or risk semantics; activation must use `decode_blob`.
+    pub fn inspect_blob(b: &[u8]) -> Result<Self, RiskBlobError> {
         let mut r = Reader { bytes: b };
         if r.take(8)? != RISK_BLOB_MAGIC {
             return Err(RiskBlobError::Format);
@@ -287,6 +295,11 @@ impl RiskParams {
             return Err(RiskBlobError::Trailing);
         }
         format(&p)?;
+        Ok(p)
+    }
+
+    fn check_blob_references(&self, rd: &RefData) -> Result<(), RiskBlobError> {
+        let p = self;
         for id in 1..=u8::MAX {
             let a = rd.account(AccountId(id));
             if a.id.0 == 0 {
@@ -321,6 +334,6 @@ impl RiskParams {
         if p.groups.iter().any(|g| rd.account(g.account).id != g.account) {
             return Err(RiskBlobError::Reference("groups.account"));
         }
-        Ok(p)
+        Ok(())
     }
 }

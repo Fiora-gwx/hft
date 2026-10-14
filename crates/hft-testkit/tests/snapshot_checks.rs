@@ -14,8 +14,7 @@ use zerocopy::FromZeros;
 
 type E = SeqSut<TestStrategies>;
 
-#[test]
-fn tk_115_snapshot_preserves_margin_run_boundary() {
+fn check_snapshot_preserves_margin_run_boundary() {
     let suite = hft_testkit::scenarios::suites()
         .into_iter()
         .find(|s| s.name == "modes")
@@ -173,6 +172,7 @@ impl Sut for Snapshots {
 
 #[test]
 fn tk_115_every_snapshot_checked_with_periodic_rebuild_off() {
+    check_snapshot_preserves_margin_run_boundary();
     let mut c = crate::support::cfg(0, 4, &[], 0, &[]);
     c.invariants = InvariantSet::only(InvId::I6);
     c.rebuild_every = 0;

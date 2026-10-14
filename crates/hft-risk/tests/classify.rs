@@ -65,8 +65,7 @@ fn cls(class: IntentClass, rr: bool, ro: bool) -> Classification {
     }
 }
 
-#[test]
-fn rsk_010_unlinked_strategy_hedge_reduces_group() {
+fn check_unlinked_strategy_hedge_reduces_group() {
     for (net, side, pending, qty, local, want, ro) in [
         (10, Side::Sell, 0, 10, 0, true, false),
         (-10, Side::Buy, 0, 10, 0, true, false),
@@ -113,6 +112,7 @@ fn rsk_010_unlinked_strategy_hedge_reduces_group() {
 
 #[test]
 fn rsk_010_classification_table() {
+    check_unlinked_strategy_hedge_reduces_group();
     use IntentClass::*;
     let ca = caps_of(A1);
     let cb = caps_of(B1);

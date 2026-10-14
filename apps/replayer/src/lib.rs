@@ -13,7 +13,7 @@ use hft_rt::Heartbeat;
 use hft_sequencer::driver::recompute::{RecomputeError, recompute};
 use hft_sequencer::driver::replay::Log;
 use hft_sequencer::driver::replay_io::LogReadError;
-use hft_sequencer::driver::verify::{VerifyError, verify};
+use hft_sequencer::driver::verify::{VerifyError, verify_with_clock};
 use hft_strategy_sdk::StrategySet;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -31,6 +31,23 @@ pub fn run<S: StrategySet>(args: &[String], stdout: &mut impl Write, stderr: &mu
 }
 
 type Failure = (i32, String);
+
+fn monotonic_ns() -> u64 {
+    static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let elapsed = EPOCH.get_or_init(std::time::Instant::now).elapsed().as_nanos();
+    u64::try_from(elapsed).unwrap_or(u64::MAX)
+}
+
+fn decide_hist(samples: &[u64]) -> serde_json::Value {
+    let mut sorted = samples.to_vec();
+    sorted.sort_unstable();
+    let quantile = |permille: usize| {
+        let index = (sorted.len() * permille).div_ceil(1000).saturating_sub(1);
+        sorted.get(index).copied().unwrap_or(0)
+    };
+    serde_json::json!({"unit": "ns", "count": sorted.len(), "p50": quantile(500),
+        "p90": quantile(900), "p99": quantile(990), "p99.9": quantile(999), "max": quantile(1000)})
+}
 fn model_error(e: RecomputeError) -> Failure {
     let code = match e {
         RecomputeError::CheckpointKey { .. } | RecomputeError::Verify(VerifyError::Window) => 2,
@@ -134,6 +151,20 @@ fn execute<S: StrategySet>(args: &[String], stdout: &mut impl Write) -> Result<i
         )
     })?;
     drop(reader);
+    if !log.recs.iter().any(|r| {
+        r.kind == hft_event::EventKind::CONFIG_BLOB
+            && r.read::<hft_event::BlobHdr>()
+                .is_some_and(|b| b.blob.kind == hft_event::BlobKind::Refdata)
+    }) {
+        let message = "journal 不自足: 缺少 ConfigBlob Refdata";
+        writeln!(
+            stdout,
+            "{}",
+            serde_json::json!({"error": message, "missing_blob": "Refdata"})
+        )
+        .map_err(|e| (2, e.to_string()))?;
+        return Err((3, message.into()));
+    }
     let (checkpoints, paths) =
         checkpoints::load::<S>(opts.checkpoint.as_deref(), &log, opts.model_limits.bytes)?;
     protect_report(opts.report.as_deref(), &paths)?;
@@ -156,7 +187,13 @@ fn execute<S: StrategySet>(args: &[String], stdout: &mut impl Write) -> Result<i
     if let Some(m) = &model {
         verify_opts.from_seq = m.verify_from_seq;
     }
-    let result = verify::<S>(log, verify_opts, &HB).map_err(|e| {
+    let result = verify_with_clock::<S>(
+        log,
+        verify_opts,
+        &HB,
+        opts.record_decide_hist.then_some(monotonic_ns as fn() -> u64),
+    )
+    .map_err(|e| {
         let code = match e {
             VerifyError::UnknownStrategy { .. } => 4,
             VerifyError::Window => 2,
@@ -166,9 +203,20 @@ fn execute<S: StrategySet>(args: &[String], stdout: &mut impl Write) -> Result<i
     })?;
     let fail =
         !result.sink.mismatches.is_empty() || model.as_ref().is_some_and(|m| !m.differences.is_empty());
-    let (summary, detail) = report::format(&instance, &result, model.as_ref());
+    let (mut summary, detail) = report::format(&instance, &result, model.as_ref());
+    if let Some(timing) = &result.sink.decide_timing {
+        summary["decide_hist"] = decide_hist(&timing.samples_ns);
+    }
     let mut output = detail.clone();
     output["summary"] = summary.clone();
+    if let Some(first) = result.sink.mismatches.first() {
+        let fragment = report::fragment(&opts.journal, &result.sink.log, first.seq)
+            .map_err(|e| (2, format!("diagnostic fragment: {e}")))?;
+        output["journal_fragment"] = fragment.display().to_string().into();
+    }
+    if let Some(hist) = summary.get("decide_hist") {
+        output["decide_hist"] = hist.clone();
+    }
     writeln!(stdout, "{}", output).map_err(|e| (2, e.to_string()))?;
     if let Some(path) = opts.report {
         report::write(&path, &summary).map_err(|e| (2, e.to_string()))?;

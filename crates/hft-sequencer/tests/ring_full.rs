@@ -16,6 +16,7 @@ fn steady() -> H {
 
 #[test]
 fn seq_224_ring_full_synth_send_report() {
+    super::simultaneous::check_simultaneous_ring_full_sends_neither();
     let mut h = steady();
     h.io().out_free.insert(OutRing::Venue(B), 0);
     add_hook(|hx, ev, ctx| {

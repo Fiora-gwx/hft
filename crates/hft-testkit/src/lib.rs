@@ -20,6 +20,10 @@ pub mod scenarios;
 pub mod sdk_mock;
 pub mod seed;
 #[cfg(feature = "seq")]
+pub mod sim_golden;
+#[cfg(feature = "seq")]
+pub use sim_golden::{GoldenDiff, SimStep, run_sim_case};
+#[cfg(feature = "seq")]
 pub mod seq_rig;
 pub mod strategies;
 pub mod tmp;

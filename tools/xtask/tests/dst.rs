@@ -112,6 +112,206 @@ fn tool_049_single_seed() {
 }
 
 #[test]
+fn tool_050_suite_selection() {
+    let f = dst_repo("dst-050");
+    let suites = hft_testkit::scenarios::suites();
+    let names: Vec<_> = suites.iter().rev().map(|s| s.name).collect();
+    let s = script(&f, &names, 0);
+    let args = ["--seeds", "50", "--seed", "1000"];
+    let a = dst(&f, &s, &args);
+    let b = dst(&f, &s, &args);
+    assert_eq!(a.code, 0, "{}", a.stderr);
+    assert_eq!(b.code, 0, "{}", b.stderr);
+    assert_eq!(a.json, b.json);
+    let runs = a.json.as_ref().unwrap()["runs"].as_array().unwrap();
+    assert_eq!(runs.len(), 50);
+    for (ix, run) in runs.iter().enumerate() {
+        let selected = hft_testkit::dst::scenario::suite_for_seed(&suites, 1000 + ix as u64).unwrap();
+        assert_eq!(run["suite"], selected.name);
+    }
+    let fixed = dst(&f, &s, &["--seeds", "50", "--seed", "1000", "--suite", "modes"]);
+    assert_eq!(fixed.code, 0);
+    assert!(
+        fixed.json.unwrap()["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["suite"] == "modes")
+    );
+    assert!(
+        s.calls()
+            .last()
+            .unwrap()
+            .contains("run --seeds 1000..1049 --suite modes")
+    );
+}
+
+/// The process boundary substitutes only build/list; seed execution uses the real framework
+/// with a planted ToyEngine. This avoids compiling a deliberately defective production runner.
+struct FrameworkExec {
+    config: hft_testkit::dst::DstConfig,
+    stderr: String,
+    record: Option<hft_testkit::dst::RunRecord>,
+}
+
+impl xtask::exec::Exec for FrameworkExec {
+    fn run(&mut self, cmd: &xtask::exec::Cmd) -> Result<xtask::exec::Output, xtask::EnvError> {
+        use hft_testkit::dst::report::{repro_line, trace_line, write_artifacts};
+        use hft_testkit::dst::{ToyEngine, run_record};
+        let mut out = xtask::exec::Output::default();
+        if cmd.program == "cargo" {
+            return Ok(out);
+        }
+        if cmd.args == ["list"] {
+            out.stdout = "suite core\n".into();
+            return Ok(out);
+        }
+        let value = |flag| {
+            cmd.args
+                .windows(2)
+                .find(|a| a[0] == flag)
+                .map(|a| a[1].as_str())
+                .unwrap()
+        };
+        self.config.steps = value("--steps").parse().unwrap();
+        self.config.trace = cmd.args.iter().any(|a| a == "--trace");
+        let seed = if cmd.args[0] == "repro" {
+            xtask::dst::parse_u64(value("--seed")).unwrap()
+        } else {
+            let (a, b) = value("--seeds").split_once("..").unwrap();
+            assert_eq!(a, b);
+            a.parse().unwrap()
+        };
+        assert_eq!(seed, self.config.seed);
+        let record = run_record::<ToyEngine>(&self.config);
+        if self.config.trace {
+            for step in &record.trace {
+                self.stderr.push_str(&format!("{}\n", trace_line(step)));
+            }
+        }
+        if let Some(f) = record.outcome.failure() {
+            write_artifacts(std::path::Path::new(value("--crash-dir")), f).unwrap();
+            self.stderr.push_str(&format!("{}\n", repro_line(f)));
+            out.code = 1;
+        }
+        self.record = Some(record);
+        Ok(out)
+    }
+}
+
+#[test]
+fn tool_052_failure_output() {
+    use hft_testkit::dst::{DstConfig, FaultCategory, RerunPolicy, ToyEngine, run};
+    let f = dst_repo("dst-052");
+    let cfg = (1..=50)
+        .find_map(|seed| {
+            let mut c = DstConfig::new(seed, "core");
+            c.steps = 3000;
+            c.horizon_ns = 600_000_000_000;
+            c.faults.set(FaultCategory::Reject, true, 1000);
+            c.planted = vec!["oms-429-fails"];
+            c.rerun = RerunPolicy::Never;
+            run::<ToyEngine>(&c).failure().is_some().then_some(c)
+        })
+        .expect("planted defect must be detected");
+    let seed = cfg.seed;
+    let mut exec = FrameworkExec {
+        config: cfg,
+        stderr: String::new(),
+        record: None,
+    };
+    let args = [
+        "--seeds",
+        "1",
+        "--seed",
+        &seed.to_string(),
+        "--suite",
+        "core",
+        "--steps",
+        "3000",
+    ]
+    .map(str::to_owned);
+    assert_eq!(xtask::dst::run_with(&f.root, &args, &mut exec), 1);
+    let failure = exec.record.as_ref().unwrap().outcome.failure().unwrap();
+    assert_eq!(
+        exec.stderr,
+        format!("{}\n", hft_testkit::dst::report::repro_line(failure))
+    );
+    assert!(exec.stderr.contains("invariant=I1(fill_evidence)"));
+    assert!(
+        exec.stderr
+            .ends_with(&format!("--steps {} --trace\n", failure.step + 1))
+    );
+    let base = format!("target/dst/{seed:016x}");
+    let bytes = std::fs::read(f.path(&format!("{base}/journal.bin"))).unwrap();
+    let mut rest = bytes.as_slice();
+    let mut events = 0;
+    while !rest.is_empty() {
+        let record = hft_event::decode_record(rest).unwrap();
+        events +=
+            usize::from(hft_event::RecordFlags(record.hdr.flags).contains(hft_event::RecordFlags::EVENT_END));
+        rest = &rest[record.hdr.len as usize..];
+    }
+    assert_eq!(events, (failure.step as usize + 1).min(200));
+    assert!(!f.read(&format!("{base}/faults.txt")).is_empty());
+    assert!(f.read(&format!("{base}/repro.txt")).starts_with(&exec.stderr));
+    // Feed the framework's actual diagnostic through the executable wrapper as inherited
+    // process stderr; the wrapper must not append a second generic "exited 1" line.
+    let list = format!("{} list", runner(&f));
+    let script = Script::new(
+        &f,
+        &[(&list, 0, "suite core\n", ""), (&runner(&f), 1, "", &exec.stderr)],
+        0,
+    );
+    let forwarded = dst(&f, &script, &args.iter().map(String::as_str).collect::<Vec<_>>());
+    assert_eq!(forwarded.code, 1);
+    assert_eq!(
+        forwarded.stderr,
+        format!("{}dst: 1 seeds (0 regression), steps 3000 -> FAIL\n", exec.stderr)
+    );
+}
+
+#[test]
+fn tool_056_trace_flag() {
+    let f = dst_repo("dst-056");
+    for trace in [true, false] {
+        let mut cfg = hft_testkit::dst::DstConfig::new(5, "core");
+        cfg.rerun = hft_testkit::dst::RerunPolicy::Never;
+        let mut exec = FrameworkExec {
+            config: cfg,
+            stderr: String::new(),
+            record: None,
+        };
+        let mut args: Vec<_> = ["--seeds", "1", "--seed", "5", "--steps", "20"]
+            .map(str::to_owned)
+            .into();
+        if trace {
+            args.push("--trace".into());
+        }
+        assert_eq!(xtask::dst::run_with(&f.root, &args, &mut exec), 0);
+        assert_eq!(exec.stderr.lines().count(), if trace { 20 } else { 0 });
+        for (step, line) in exec.stderr.lines().enumerate() {
+            let fields: Vec<_> = line.split_whitespace().collect();
+            assert_eq!(fields[0], step.to_string());
+            assert!(fields[1].parse::<u64>().is_ok());
+            assert!(fields[3].starts_with("0x"));
+        }
+        let list = format!("{} list", runner(&f));
+        let script = Script::new(
+            &f,
+            &[(&list, 0, "suite core\n", ""), (&runner(&f), 0, "", &exec.stderr)],
+            0,
+        );
+        let forwarded = dst(&f, &script, &args.iter().map(String::as_str).collect::<Vec<_>>());
+        assert_eq!(forwarded.code, 0);
+        assert_eq!(
+            forwarded.stderr,
+            format!("{}dst: 1 seeds (0 regression), steps 20 -> PASS\n", exec.stderr)
+        );
+    }
+}
+
+#[test]
 fn tool_051_regressions_in_own_suite() {
     let f = dst_repo("dst-051");
     f.write(

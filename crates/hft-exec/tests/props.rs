@@ -931,8 +931,7 @@ fn exe_516_new_fix_waits_for_wake_under_capacity_and_restore() {
     assert_eq!(baselines[0], baselines[1]);
 }
 
-#[test]
-fn exe_024_placement_callbacks_wait_for_next_pass() {
+fn check_placement_callbacks_wait_for_next_pass() {
     // Persisted CI seed 5bf7fb15af4ed9f8d98cff7f381029ea91e3e5b8acf9eeb64cf7fea51ff1da7c.
     let ops = [
         (0, 57830),
@@ -981,6 +980,7 @@ proptest! {
 
     #[test]
     fn exe_024_no_output_lost_under_caps(o in ops()) {
+    check_placement_callbacks_wait_for_next_pass();
         let mut a = World::new(true, Checks::default());
         let mut b = World::new(false, Checks::default());
         for w in [&mut a, &mut b] {

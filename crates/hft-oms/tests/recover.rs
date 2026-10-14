@@ -33,8 +33,7 @@ fn rec_end(h: &mut H, now: u64, stop: u64) {
     h.o.recovery_end(ms(now), ms(stop), HZ, HZ, 1, &mut h.out);
 }
 
-#[test]
-fn oms_317_simultaneous_recovery_waits_for_both_terminal() {
+fn check_simultaneous_recovery_waits_for_both_terminal() {
     for policy in [OnFail::Reverse, OnFail::Hold] {
         let mut h = H::new();
         let mut hp = plan_l1();
@@ -492,6 +491,7 @@ fn oms_316_resume_venue() {
 
 #[test]
 fn oms_317_resume_waits_unknown() {
+    check_simultaneous_recovery_waits_for_both_terminal();
     let mut h = H::new();
     let (f, l) = place_first(&mut h, q("0.012"), Tif::Ioc, plan_l1(), 498_800);
     h.fill(f, q("0.012"), p("60000.00"), 498_800);

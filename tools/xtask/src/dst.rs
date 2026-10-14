@@ -367,7 +367,10 @@ pub fn run_with(root: &Path, args: &[String], exec: &mut dyn Exec) -> i32 {
         match exec.run(c) {
             Ok(r) if r.ok() => {}
             Ok(r) => {
-                eprintln!("dst: `{}` exited {}", c.line(), r.code);
+                // Exit 1 already carries the runner's single reproducible failure line.
+                if r.code != EXIT_FAIL {
+                    eprintln!("dst: `{}` exited {}", c.line(), r.code);
+                }
                 code = code.max(if r.code == EXIT_ENV { EXIT_ENV } else { EXIT_FAIL });
             }
             Err(e) => return fail(e),

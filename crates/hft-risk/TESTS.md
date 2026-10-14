@@ -294,7 +294,7 @@ spec: README.md
 | RSK-010.19 | 目标意图的增仓切片 | Exec | B | `(Open, false, false)` |
 | RSK-010.20 | 执行层订单的 `class` 提示为 Open,`role = HedgeFix` | Exec | B | `(Hedge, true, true)`(提示不生效) |
 
-- 补充负责人决定 SDK-164.4:覆盖组净量正负两向、归零边界、同向在途耗尽、反向/过量/平组拒绝、本腿 reduceOnly 与非策略来源不借用策略分类。实现:`crates/hft-risk/tests/classify.rs::rsk_010_unlinked_strategy_hedge_reduces_group`。
+- 补充负责人决定 SDK-164.4:覆盖组净量正负两向、归零边界、同向在途耗尽、反向/过量/平组拒绝、本腿 reduceOnly 与非策略来源不借用策略分类。实现:`crates/hft-risk/tests/classify.rs::check_unlinked_strategy_hedge_reduces_group`。
 
 ### RSK-011 SecondRetry 与 Second 的分类逐字段相同
 
@@ -2373,7 +2373,7 @@ spec: README.md
 - 级别:unit
 - 里程碑:M2
 - 前置:R0 的 P0,非零版本、负 generated_at_ns 与 16 B author
-- 步骤:编码后在只持有 refdata 与字节的路径解码;扩大原参数向量的容量后再次编码
+- 步骤:编码后在只持有 refdata 与字节的路径解码,用离线 inspect_blob 比较同一配置;扩大原参数向量的容量后再次编码
 - 期望:头部的 magic、版本、时间与 author 字节符合 RKP1;全部全局字段、类别、账户、venue 与 group 行逐字段相同;编码不受向量容量影响,解码后重编码逐字节相同
 - 实现:`crates/hft-risk/tests/blob.rs::rsk_284_risk_blob_roundtrip`
 
@@ -2384,7 +2384,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:RSK-284 的有效 blob
 - 步骤:分别枚举每个截断点,破坏 magic/version/u32 字段/count/bool,追加尾字节;重复账户、删账户、指定未知 inst
-- 期望:全部返回错误;缺失限额不由默认配置补齐,不存在窄整数截断
+- 期望:decode_blob 全部返回错误;inspect_blob 同样拒绝格式损坏,仅引用检查留给 decode_blob;缺失限额不由默认配置补齐,不存在窄整数截断
 - 实现:`crates/hft-risk/tests/blob.rs::rsk_285_risk_blob_rejects_malformed`
 
 ### RSK-286 两份 RKP1 配置可在新线程独立解码
