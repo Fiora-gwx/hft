@@ -225,6 +225,25 @@ fn cross_taker_trades_both_legs_obeys_caps_and_replays() {
 }
 
 #[test]
+fn cross_taker_link_respects_engine_hedge_limit_before_first_leg() {
+    let mut w = world();
+    w.risk.max_hedge_notional = 50_000_000;
+    let mut r = Rig::new(&w);
+    r.feed(S1, 599_999_900, 600_000_000, 200_000_000);
+    r.feed(P1, 606_000_000, 606_001_000, 500_000_000);
+    assert!(r.sent.is_empty(), "unaffordable hedge must prevent the first leg");
+    assert_eq!(r.positions(), (0, 0));
+    assert!(
+        r.sut
+            .journal()
+            .iter()
+            .filter_map(|j| j.try_read::<OrderDecision>())
+            .any(|d| d.reject & RejectBits::HEDGE_LIMIT.0 != 0)
+    );
+    assert!(r.sut.verify_journal().unwrap().is_some());
+}
+
+#[test]
 fn cross_taker_dst_retries_hedge_reject_and_is_deterministic() {
     use hft_testkit::dst::{
         DstConfig, Fault, MarketGen, MarketSource, MockVenueCfg, RerunPolicy, run_record,

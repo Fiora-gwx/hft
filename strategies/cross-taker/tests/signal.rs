@@ -110,6 +110,16 @@ fn signal_accepts_exact_minimum_notional_and_all_asset_exponents() {
     a.hot.min_notional = Notional(2_000_000);
     a.book.ask_qty = Qty(40);
     assert_eq!(signal(a, b, &params()).unwrap().qty, Qty(20));
+    b.book.bid_px = Px(1100);
+    b.book.ask_px = Px(1101);
+    b.hot.min_notional = Notional(2_200_000);
+    assert_eq!(signal(a, b, &params()).unwrap().qty, Qty(20));
+    let mut f = params();
+    f.slip = Rate(10_000_000);
+    assert!(
+        signal(a, b, &f).is_none(),
+        "sell limit must meet the minimum after slip"
+    );
     for (p, q, expected) in [(-2, -8, 10_000_000), (-4, -8, 1_000_000_000), (0, 0, 0)] {
         b.hot.px_exp = p;
         b.hot.qty_exp = q;

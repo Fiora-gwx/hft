@@ -141,10 +141,7 @@ pub fn signal(buy: LegInput, sell: LegInput, f: &XtFields) -> Option<Signal> {
         qty = qty.min(buy.position.0.saturating_abs()).min(sell.position.0);
     }
     qty = qty.checked_div(lot)?.checked_mul(lot)?;
-    if qty <= 0
-        || qty < min_qty_at(buy.book.ask_px, &buy.hot)?
-        || qty < min_qty_at(sell.book.bid_px, &sell.hot)?
-    {
+    if qty <= 0 || qty < min_qty_at(buy.book.ask_px, &buy.hot)? || qty < min_qty_at(sp, &sell.hot)? {
         return None;
     }
     Some(Signal {
