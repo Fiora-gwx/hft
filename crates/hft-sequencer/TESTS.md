@@ -2172,6 +2172,8 @@ TK-115 的 modes 回归另覆盖节 25 的运行起点恢复给风控:旧运行�
 
 ### SEQ-149 MarkPrice 经 ledger 投影为 MarginSample 交风控
 
+空仓且无永续在途订单时不沿用已平仓品种的过期 mark;有在途订单时仍检查对应 mark。有/无 mark 的世界连续刷新报告均不出现 L1/L0 翻转。
+
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
 - 级别:unit
 - 里程碑:M2
@@ -5145,6 +5147,8 @@ SEQ-158 补充验收:RateOnly 的实额输入替换已有合成额,重复实额�
 - 实现:`crates/hft-sequencer/tests/advisor.rs::seq_363_model_tick_resume`
 
 ### SEQ-364 BalanceReport 的 quiet 判定以 balance_check_quiet_ms 为界
+
+所有方向、含 reduce-only 的非终态订单都阻止 quiet;首次资产初始化同样受此闸门约束。
 
 - 规则:[每条 Input 的处理顺序(`process`)](README.md#每条-input-的处理顺序process)
 - 级别:table

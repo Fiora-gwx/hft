@@ -446,6 +446,8 @@ OMS 对冲的 `place` 调用前另复制完整链接身份、重试计数、目�
 11. `journal.end_event()`:在本 Input 的最后一条**非 Meta** 记录上置 `EVENT_END`。
 12. **任何出环提交之前先 `journal.publish()`**,保证已发出的订单其 `OrderDecision` 已对读者可见;同一 Input 的多条出环消息:先全部追加并 `end_event`、publish 一次、再依次推环(模拟账户的推 `out-sim`)。
 
+余额初始化与校验共用 quiet:该账户该 venue 全部品种的 open_buy/open_sell 为零且最近成交已过静默窗口,不以只覆盖增仓的名义金额代替订单量。保证金 mark 新鲜度包含永续在途品种;最后持仓与在途均消失时立即重投影,报告自身的过期检查仍生效。
+
 | Input | 引擎处理 |
 |---|---|
 | `EngineClock`(每次进程启动一条,先于其他 Input) | 设本次运行的引擎时钟基准(见[引擎时间](#引擎时间engine_ns))→ 清空连接活性(节 26、各 inst 的成员位与 `RESYNC`)与 Viewer 预览表 → `ledger.on_run_start(base)`、`risk.set_run_start(base)` → 同一事件内写 `Note{Sequencer, EpochStart}`(其 seq 即 `Now.boot_seq`) |
@@ -484,7 +486,7 @@ Simultaneous 第一腿在第 5 步前预计算第二腿的实际数量、限价�
 2. **模式门**:只对策略 `place` 的意图与执行层 `origin = Target` 的增仓订单,读 `risk.mode.effective(cell)`;Shadow → 标记只评估,继续完整风控检查链;Live 但 `open_allowed = false` 的 Open → `MODE_SHADOW`;行为表归 [hft-strategy-sdk](../hft-strategy-sdk/README.md)。OMS 的对冲单、执行层的 Engine 订单与减仓订单不经模式门,只受 HARD 约束;**命令产生的冒烟单(`SmokeOrder`)不经模式门**,走完整检查链(检查链对它的口径归 [hft-risk](../hft-risk/README.md))。
 3. `risk.classify(…, &VenueCaps)` → `Classification`。
 4. 投影 `IntentView`:`tif`、`flags`(`OrderFlags`,含 `SMOKE`)、`px` = 意图限价、`notional` = `Risk::notional(qty, px, quote_rate)`(名义的唯一实现,[hft-risk](../hft-risk/README.md));带 LegLink 的第一腿 Open 填 `link_venue/link_account/link_inst/link_side/link_qty/link_notional`(取自 `HedgePlan`,`link_qty` = qty × ratio;`link_notional` = `link_qty` × `mid × (1 + rr_max_cross)`(`mid` 与 `rr_max_cross` 取第二腿 inst 及其价格带类别,两个方向相同):这是第二腿限价的上界——买单限价不高于 `mid × (1 + rr_max_cross)`(OMS 超滑点时就按它定价),卖单限价不高于对手价、因而不高于 `mid`——所以按同一 `mid` 定价的第二腿一定在 `max_hedge_notional` 之内;风控据此做第二腿报价年龄 `LINK_STALE` 与可负担性 `LINK_FUNDS` 检查);Simultaneous 第二腿填 `HedgeRequest.peer_venue/peer_account`;Hedge 类填产生方给出的 `hedge_cap_qty`(`HedgeRequest.hedge_cap_qty`、`ExecOrder.hedge_cap_qty`,策略无链接 Hedge 则取 `PosView::hedge_cap_qty(side)`,规则归 hft-risk 分类)。
-5. `risk.evaluate(&view, &RiskViewAdapter, now)`(只读)。
+5. 先从当前 OMS 腿摘要刷新本次意图(含整对准入的另一账户)的风控缓存;这里只刷新读数,cap 副作用仍在回报排空之后处理。`risk.evaluate(&view, &RiskViewAdapter, now)`(只读)。
 6. Shadow 或被拒:只写 `OrderDecision`(Shadow 同时保留 `SHADOW` 与 evaluate 得到的 `reject`,通过为 0),**不扣令牌、不计在途、不分配槽**。`HEDGE_LIMIT` 是非 Shadow 单的终局拒绝:OMS 来源调 `oms.hedge_vetoed(link_id)`(链接 `Broken{HedgeLimit}`)、执行层来源经 `on_place_result(Rejected(HEDGE_LIMIT))` 回填,两者都 `apply(Auto(Broken{account, group}))` 并写 P0 注记(执行层来源先回填、后 `apply`:执行层据此进入 `Broken(HedgeVeto)` 并写 P0 `ExecBroken`;同一 Input 内对同一 (account, group) 的 `apply(Auto(Broken))` 与随后的 `on_legs` 只做一次,执行层回填产生的 `BrokenReq` 不重复);OMS 对冲请求被 `HEDGE_LIMIT` 以外的位拒绝 → `oms.hedge_gated(link_id, HedgeGate::Risk(bits), retry_at, …)`(`retry_at` = 拒绝位为 `RATE_BACKOFF` 时 `now.tsc_of(risk.backoff_until(该腿 venue, account))`,其余为 0)(门控:不计次、截止照算),执行层订单的其他拒绝经 `on_place_result` 回填(Flatten/ForceStep 被 #5/#6 拒绝的处理归 hft-exec)。
 7. 放行:`oms.place`(`ApprovedIntent` 带本 Input 的 `TrigStamps`;带 `LegLink{role = First}` 的意图填 `hedge_ref_px`(取法归 [hft-oms](../hft-oms/README.md#输出-omsout容量固定由-sequencer-预分配并在每个输入事件后清空)),OMS 对冲请求填第 1 步的 `price_hedge` 结果 `hedge_px`,其余为 0;永续 Open 带 `lev_x100` = `risk.leverage(…)` 换成百分之一倍、向下取整(与 `Views::leverage` 同一换算),未知为 0,供 `InflightBook.open_margin` 增量维护;冒烟单以 `origin = Command` 与 `OrderFlags::SMOKE` 建槽,规则归 hft-oms)→ 分配成功后 `risk.commit` → `OrderDecision` → 出环(`AccountMeta.kind = Sim` 的账户推 `out-sim`,否则 `out-<venue>`)。
 8. 结果回填到发起方(策略的 `IntentHandle`:`Placed | Rejected(bits) | Shadowed`;执行层的 `PlaceResult`;冒烟单 → 该命令的 `CmdResult`)。

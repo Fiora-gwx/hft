@@ -18,7 +18,7 @@ fn mg_a1_no_report() -> Ledger {
         (S1, BNB, qa(BNB, "10")),
         (P2, USDT, usdt("18000")),
     ] {
-        l.on_balance(&bal(A1, v, a, free, Qty(0), D), false, 0);
+        l.on_balance(&bal(A1, v, a, free, Qty(0), D), true, 0);
     }
     l.on_ref_px(BTC_S1, px("59999.99"), px("60000.01"), 0);
     l.on_ref_px(BNB_S1, px("599.99"), px("600.01"), 0);

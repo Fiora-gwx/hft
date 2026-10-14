@@ -1746,7 +1746,7 @@ fn check_14(_: &mut InvState, v: &StepView<'_>) -> Result<(), String> {
                     | OrderEventKind::Expired
                     | OrderEventKind::CancelAck
                     | OrderEventKind::Fill
-            )
+            ) || (e.what == OrderEventKind::QueryResult && matches!(e.detail, 3..=6))
         })
         || v.input()
             .and_then(|r| r.try_read::<SendReport>())

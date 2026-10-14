@@ -1416,7 +1416,7 @@ spec: README.md
 - 前置:真实 `SeqSut<TestStrategies>`、W1、种子 1、2000 步
 - 步骤:读取内部 Timer 与 New 决策的逐 Input 观察,对副本分别改错 Kill、有效模式、对冲数量及强制减仓方向,删去模式/保证金/执行单元/在途/决策观察,制造溢出标记和 Input 漏记/重复
 - 期望:正常运行全部不变量通过;实际存在内部 Timer 和成功对冲;所有反例被相应检查拒绝,不修改被测引擎
-- 回归:core 种子 `0x61aaa3c81c37eb19` 的同组其他订单 Unknown 不阻止已收敛链接的合法 SecondRetry;诊断副本中的本链接 Unknown、Open 与本次输入刚进入 Unknown 都必须被 I4 拒绝,本次已收敛的 group 可通过。
+- 回归:core 的 legacy 种子 `0x61aaa3c81c37eb19` 提供真实成功 SecondRetry;在诊断副本设置同组其他订单 Unknown,仍允许已收敛链接的重试;副本中的本链接 Unknown、Open 与本次输入刚进入 Unknown 都必须被 I4 拒绝,本次已收敛的 group 可通过。
 - 实现:`crates/hft-testkit/tests/observations.rs::tk_107_real_observations_and_counterexamples`
 - 回归函数:`crates/hft-testkit/tests/observations.rs::check_unknown_is_scoped_to_decision_group_and_link`
 
@@ -1445,7 +1445,7 @@ spec: README.md
 - 规则:[6. DST 框架](README.md#6-dst-框架)
 - 级别:dst
 - 里程碑:M2
-- 前置:TK-106 的基础币费用夹具,种子 1、6000 ms 延迟、10000 步
+- 前置:TK-106 的基础币费用夹具,种子 1、10000 步;用 CancelRejectFilled 暂扣首笔真实成交,200 ms 的确认 CancelAll 产生先到的累计成交回报
 - 故障:第 1000、3000 条外部 Input 后各连续非干净重启两次
 - 种子:固定种子 1
 - 断言:全部不变量通过且确实重启四次;每次恢复前后的累计费用、历史加当前链接的累计净成交和请求量相等;退休历史桶不丢失;实际覆盖撤单回报先记成交量、迟到成交回报再补基础币费用的路径
@@ -1500,7 +1500,7 @@ spec: README.md
 - 步骤:同一测试入口逐行运行正例与九种反例。首次世界步在外部行情之前依次处理关键帧、按需快照与滚段 Timer,Drain 干净重启后连续崩溃恢复两次;另一行关闭全部检查器;反例行分别删除首条/全部观察、重复首条、改错边界、跨过后续 Input、改错首条风险哈希、标记溢出、返回重建错误、删除首条快照的完整账本视图
 - 期望:正常行实际包含五种目的的至少八条快照,检查数等于 journal 快照数;每个真实快照同时经过 LED-267 冷账本核对;开关检查器前后的完整 journal 和非空 HashTrail 逐字节相同;九种反例均以 INV-6 在第 0 步失败,诊断指出原因,不能被后来的正确快照遮盖
 - 实现:`crates/hft-testkit/tests/snapshot_checks.rs::tk_115_every_snapshot_checked_with_periodic_rebuild_off`
-- 回归:modes 种子 `0x8573133122fce369`,8 000 步,实际产生旧运行报告过期的 L1 MarginStress;从中途快照回放仍产生同一 cap 注记,所有快照与定期 INV-6 通过。
+- 回归:modes 的 legacy 种子 `0x8573133122fce369`,8 000 步,实际产生旧运行报告过期的 L1 MarginStress;从中途快照回放仍产生同一 cap 注记,所有快照与定期 INV-6 通过。
 - 回归函数:`crates/hft-testkit/tests/snapshot_checks.rs::check_snapshot_preserves_margin_run_boundary`
 
 ### TK-116 快照观察只保留已提交边界且缓冲有界
@@ -1559,7 +1559,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:真实 `SeqSut<TestStrategies>`、原始 core 套件,不改故障率、时限或采样间隔
 - 故障:套件原有故障计划,实际触发 Drain 和自动重启
-- 种子:标准世界(W1)中 2000 步内完成 Drain 的 core 种子 7、28、34,每行 2000 步(`WorldSpec::w1_trading` 的世界交易更密,多数种子的 Drain 在 2000 步内等不到无在途,对应种子为 `0x148`、`0x190`)
+- 种子:标准交易世界中 2000 步内完成 Drain 的 core 种子 `0x148`、`0x190`,每行 2000 步
 - 断言:每行实际完成至少一次 Drain 和对应恢复;Drain 快照含 Draining,Recovery 快照不含旧 Draining,其余 cap(若有)原样保留,全部账户仍有 Recovery 且闸门未放行;每条快照通过 INV-6,检查数与 journal 快照数相同;全部不变量通过,强制复跑的 Output 和非空 HashTrail 逐字节一致
 - 恢复后 New 意图:账户仍有 Recovery cap 期间(`auto_resume_after_clean_drain` 在启动闸门通过后解除),开仓决策以 CloseOnly 拒绝且没有分配槽;默认外来成交可触发已分配槽的 risk_reducing 防御单,方向和数量仍经过完整不变量检查;订单查询照常处理;拒绝数与带其他 cap 的 Drain 数只打印
 - 实现:`crates/hft-testkit/tests/journal_config.rs::tk_120_drain_restart_conformance_keeps_recovery_gates`
@@ -1569,9 +1569,9 @@ spec: README.md
 - 规则:[6. DST 框架](README.md#6-dst-框架)、[INV-14](../../docs/tests/invariants.md#inv-14-门控拒绝不计入执行失败计数只有交易所执行结果才计入)
 - 级别:dst
 - 里程碑:M2
-- 前置:真实 `SeqSut<TestStrategies>` 与原始 core 套件(`WorldSpec::w1_legacy` 的世界),不改故障率与时限
+- 前置:真实 `SeqSut<TestStrategies>` 与标准 core 交易套件,每账户 venue 的 OMS 表为 4 槽,不改故障率与时限
 - 故障:套件原有计划
-- 种子:固定种子 `0x1af231bb1d6440e2`,完整 10000 步
+- 种子:固定种子 2,完整 10000 步;原 `0x1af231bb1d6440e2` 留在 legacy 回归集;交易世界 `0xffcfb3918b4c9b7a` 同时验证 QueryResult 的终态执行证据
 - 断言:全部不变量与强制复跑通过;按原始观察选取对冲重试 Timer,同一链接实例调用前空闲槽为 0,place 返回 NoFreeSlot,重试从 1 到 2;同事件恰有一条 CAPACITY OrderDecision,trigger_seq/账户/组/venue/品种吻合,slot/gen 为 0且不出环;删除/重复观察、改错 Input/epoch/slot/gen/创建事件/链接号/账户/组、非满表、错误失败种类、错误计数水位、多加计数和缺链接身份共 17 行反例失败;未增加计数的失败也不能漏观察。四种门控 SendReport 不能单独解释计数增加;链接号复用后不能借旧实例证据。关闭检查器后完整 journal 和非空 HashTrail 逐字节相同
 - 实现:`crates/hft-testkit/tests/observations.rs::tk_121_hedge_place_failure_requires_exact_evidence`
 - 对账覆盖:两次运行均保持原始对账 actor,确认 journal 包含 ReconcileReport;关闭检查器仍刷新 actor 所需仓位,逐记录比较数量、序号、种类、TSC、标志及全部体字节,失败仅输出首个差异位置
@@ -1592,9 +1592,9 @@ spec: README.md
 - 规则:[6. DST 框架](README.md#6-dst-框架)
 - 级别:integ
 - 里程碑:M2
-- 前置:modes 固定种子 `0x7dfee4207b81bfbd`,`WorldSpec::w1_legacy` 的世界(无标记价、taker 不循环),显式关闭永续现金能力保留旧记录语义,先生成原 10000 步故障表并固定,截取前 316 步核对证据;回报中的 Ack 数量不作为成交
+- 前置:modes 固定种子 `0x7dfee4207b81bfbd`,`WorldSpec::w1_legacy` 的世界(无标记价、taker 不循环),显式关闭永续现金能力保留旧记录语义,先生成原 10000 步故障表并固定,在前 1000 步内定位首次严格失败并核对完整证据;回报中的 Ack 数量不作为成交
 - 步骤:从模拟回报生成序号取得单 5/6/7 的完整身份、数量与价格,与 journal 交付顺序及原始下单方向比较;关闭检查器重跑相同步数。核对该账户全部成交集合,从完整订单身份关联到原始 GwCmd 和已提交 OrderDecision,分别独立计算两种顺序的钱包与费用,不读实际成本或余额变化作为期望
-- 期望:生成顺序为 5/6/7,交付顺序为 6/5/7,旧能力模式的 INV-16 在前 316 步内(记录时为第 315 步)以精确 1 单位差额失败;诊断不改变 journal、HashTrail 或回报。此用例验证故障证据,不代表该余额差通过验收;常规回归集中的原种子仍在默认能力下完整运行 10000 步并接受严格核对
+- 期望:生成顺序为 5/6/7,交付顺序为 6/5/7,旧能力模式的 INV-16 在前 1000 步内以精确 1 单位差额失败;诊断不改变 journal、HashTrail 或回报。此用例验证故障证据,不代表该余额差通过验收;常规回归集中的原种子仍在默认能力下完整运行 10000 步并接受严格核对
 - 实现:`crates/hft-testkit/tests/fill_order.rs::tk_123_raw_matching_order_survives_report_jitter`
 - 反例:实际余额 ±1、输入费用 ±1、错误 epoch、重复证据、错误生成顺序均不能满足独立演算。参考仅接受本例的单笔全成,其他回报形式明确拒绝
 - 历史定位:交付顺序按扣除此前新增的 BalanceCheck 记录数后的序号核对(记录时为 544/555/597,具体序号随无关的引擎输出移动);成交身份、金额、完整 journal 与 HashTrail 的比较不作归一化
@@ -1643,8 +1643,8 @@ spec: README.md
 - 里程碑:M2
 - 前置:modes 原种子 `0x7dfee4207b81bfbd`、原 10000 步故障计划,`WorldSpec::w1_legacy` 的世界,W1 仅为永续 VP 默认启用 `VenueSpec.perp_cash`;引擎与模拟器能力位一致,现货拒绝该开关
 - 故障:原始 modes 故障表,不调整延迟、故障率或检查间隔
-- 种子:前 316 步诊断窗口和完整 10000 步分别运行,均强制重跑
-- 断言:诊断窗口保留原交付乱序,从原始成交及完整订单身份独立计算每笔现金,逐笔与现金字段相等;独立按交付顺序估算仍多 1 单位,实际两边钱包均为 49999683575。关闭检查器后完整 journal、非空 HashTrail、撮合证据及真值逐字节相同;完整 10000 步全部不变量及快照重建通过。前缀与全程分别从首个、中间和最后一个仍有成交后缀的快照交给 JournalLedger 冷读,全部钱包、仓位和库存与热引擎逐单位相同
+- 种子:前 342 步诊断窗口和完整 10000 步分别运行,均强制重跑
+- 断言:诊断窗口保留原交付乱序,从原始成交及完整订单身份独立计算每笔现金,逐笔与现金字段相等;独立按交付顺序估算仍多 1 单位,实际两边钱包均为 49999623447。关闭检查器后完整 journal、非空 HashTrail、撮合证据及真值逐字节相同;完整 10000 步全部不变量及快照重建通过。前缀与全程分别从首个、中间和最后一个仍有成交后缀的快照交给 JournalLedger 冷读,全部钱包、仓位和库存与热引擎逐单位相同
 - 实现:`crates/hft-testkit/tests/fill_order.rs::tk_127_explicit_cash_closes_the_original_wallet_difference`
 - 边界:原 TK-123 显式关闭能力以保留旧协议反例,不能因新用例通过而删除失败回归种子;默认世界仍须通过完整 CI
 
@@ -2118,6 +2118,8 @@ spec: README.md
 - 期望:每行 CancelReject(GONE) 的完整身份、累计量与现金来自实际订单;原件只拆费一次,交付不重复结算,费用副本只有一份,严格真值不变且在途最终清除
 - 实现:`crates/hft-testkit/tests/cancel_filled.rs::tk_170_cancel_race_uses_real_matcher_reject_and_original_cash`
 
+- 同调用边界:真实 GTC 先休眠,录制 BBO 严格穿价后直接撤单;原件首次在该 Cancel 调用读取,command_ns 等于 held_ns,拒绝及原现金来自同一真实撮合器。
+
 ### TK-171 撤单竞态的前置与有界等待
 
 - 规则:[DST 的世界模型](README.md#dst-的世界模型)
@@ -2134,7 +2136,7 @@ spec: README.md
 - 级别:replay
 - 里程碑:M2
 - 输入:真实 PairOnFill 开平仓,两个 venue 各一次 CancelRejectFilled,1.2/1.4 s 的已确认 CancelAll;晚到费用 6000 ms,有无第 500 步连续两次恢复各一行,每行 10000 步;100 ms 录制行情保持尾部价格并覆盖全部步骤
-- 步骤:从原件、真实撤单帧、journal 决策与实际拒绝/成交关联证据,包含原件首次在同次撤单调用内可读的一行;关闭检查器复跑;破坏 epoch、撤单序号、原现金、冷热观察及原件交付五项
+- 步骤:从原件、真实撤单帧、journal 决策与实际拒绝/成交关联证据,同次撤单调用内首次可读的边界由 TK-170 的录制市场穿价行覆盖;关闭检查器复跑;破坏 epoch、撤单序号、原现金、冷热观察及原件交付五项
 - 期望:每行实际运行 10000 步,时间边界导致的提前结束明确失败;每行两次真实竞态,撤单决策 seq < 拒绝 seq < 原件 seq,费用仅入账一次;完整回放及严格钱包核对通过,末尾无在途/排除项。五种破坏均失败;检查器开关前后完整 journal、意图、交付、HashTrail 和真值一致
 - 实现:`crates/hft-testkit/tests/cancel_filled.rs::tk_172_real_cancel_races_keep_wallets_recovery_and_checkers_equal`
 
@@ -2185,8 +2187,8 @@ spec: README.md
 - 级别:dst
 - 里程碑:M2
 - 故障:各套件自身的故障率
-- 种子:三个套件各种子 1、2,2 000 步(与仓库根 `tests/dst/` 的冒烟相同),强制复跑
-- 断言:全部运行通过;I1、I2、I3、I4、I5、I6、I7、I8、I11、I12、I14、I15、I16、I19 的比较数之和均大于 0;其余检查器(I9、I13、I17、I18、I20)的比较数逐运行打印,由定向用例(TK-053、TK-179、LED-080/081 等)覆盖
+- 种子:三个套件各种子 1、2,10 000 步的交易世界冒烟,强制复跑
+- 断言:全部运行通过;I1、I2、I3、I4、I5、I6、I7、I8、I11、I12、I14、I15、I16、I19、I20 的比较数之和均大于 0;其余检查器(I9、I13、I17、I18)的比较数逐运行打印,由定向用例(TK-053、TK-179、LED-080/081 等)覆盖
 - 实现:`crates/hft-testkit/tests/vacuity.rs::tk_177_standard_smoke_compares_every_core_invariant`
 
 ### TK-178 植入缺陷不进入任何生产构建

@@ -4,6 +4,11 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-14 | Unknown 与终态的撤单/改单拒绝报告仍应用新增累计成交,重复不重记,部分成交不解除 Unknown;冷消费者接受 Reject 的成交证据 | OMS-061、trading DST INV-6 | hft-oms、hft-ledger | 待评审 |
+| 2026-10-14 | 每次准入前刷新 OMS 腿摘要,消除在途改变后的过时裸露风险缓存及恢复差异 | trading DST INV-6 | hft-sequencer | 待评审 |
+| 2026-10-14 | 余额首次初始化也须通过无在途且成交静默的 quiet 闸门;冷账本用同事件 BalanceInit 证据重建 | trading DST INV-1,LED-042 | hft-ledger、hft-sequencer | 待评审 |
+| 2026-10-14 | 空仓且无永续在途时刷新保证金样本清除旧仓 mark 过期;报告自身过期仍限制开仓;sim 空仓持续报告 | SEQ-149、SIM-076 | hft-sequencer、hft-risk 规格、hft-sim | 待评审 |
+| 2026-10-14 | 第一腿槽与墓碑丢失后从 group 定位第一腿,无法确定时禁止对冲,保持裸量上限 | trading DST INV-19,OMS-191 | hft-oms | 待评审 |
 | 2026-10-14 | portfolio-carry 按负责人决定在入场和退出使用 Simultaneous 同事件双 IOC,固定 Reverse、零容差与 TrimExcess;保留切片参数,按两腿对手侧深度及资金/名义上限取量,限价受观察 BBO ± max_cross 约束;Unknown 待确认后才修复,实际资金费记账不变 | 负责人同发决定;CARRY-002/005/008/010 | strategies/portfolio-carry、strategies/registry、同发 Agent Note | 待评审 |
 | 2026-10-14 | 执行层容量续推只处理当前轮剩余 cell,回填重新标记的工作留给下一轮,不提升强制位;节 21 v2 保存两轮及其强制位,兼容读取 v1 | EXE-024 CI 种子 5bf7fb15、EXE-459;小容量提前重访导致资金执行序列偏离无限容量 | hft-exec、journal-format、回归测试 | 待评审 |
 | 2026-10-14 | 从中途快照恢复风控运行起点为节 25 的 base_engine_ns,保持保证金报告过期与 L3 本次运行确认的判定 | modes 种子 0x8573133122fce369 在 INV-6 漏写 MarginStale 的 L1 cap;SEQ-111/TK-115 | hft-sequencer 恢复、hft-testkit 回归;[决定](../.agents/notes/implemented/bug-fix/2026-10-14-risk-run-boundary-on-restore.md) | 待评审(风控/恢复) |

@@ -212,9 +212,12 @@ impl Order {
                     self.inc(cum);
                     self.to(Live);
                 }
-                Unknown => {}
-                PendingNew | Live | PendingAmend => self.anomaly_fill(cum),
-                _ => {}
+                Unknown => {
+                    if self.inc(cum) && self.filled >= self.qty {
+                        self.to(Filled);
+                    }
+                }
+                _ => self.anomaly_fill(cum),
             },
             Rep::AmendAck { cum, qty } => match st {
                 PendingAmend => {
@@ -251,9 +254,12 @@ impl Order {
                     self.inc(cum);
                     self.amend_sent = false;
                 }
-                Unknown => {}
-                PendingNew | Live | PendingCancel => self.anomaly_fill(cum),
-                _ => {}
+                Unknown => {
+                    if self.inc(cum) && self.filled >= self.qty {
+                        self.to(Filled);
+                    }
+                }
+                _ => self.anomaly_fill(cum),
             },
             Rep::OutcomeUnknown => {
                 if matches!(st, PendingNew | PendingCancel | PendingAmend) {

@@ -189,7 +189,7 @@ spec: README.md
 - 步骤:
   1. 推进到 110 ms,读 `next_due()`;`drain_due(110 ms)`
 - 期望:
-  - `next_due() == Some(102 ms)`(`A8` 的回报:到达 101 ms + 1 ms);交付顺序为 `A8` 的全部回报,然后 `A9` 的全部回报(104 ms);全部交付后 `next_due() == None`
+  - `next_due() == Some(101 ms)`(空仓启动保证金报告);全部回报按 due 升序,订单回报仍先交付 A8(102 ms),再交付 A9(104 ms);全部交付后 `next_due() == None`
 - 实现:`crates/hft-sim/tests/time.rs::sim_012_drain_order`
 
 ### SIM-020 TopN 快照整替换后只能吃到快照中的档位
@@ -555,6 +555,8 @@ spec: README.md
 - 实现:`crates/hft-sim/tests/margin.rs::sim_075_margin_report_fields`
 
 ### SIM-076 MarginReport 的推送节拍
+
+同一节拍覆盖空仓账户的启动报告与持续心跳,条目数与保证金比例均为零。
 
 - 规则:[产生的事件](README.md#产生的事件)
 - 级别:table
@@ -1632,7 +1634,7 @@ spec: README.md
 | 行 | 模型输入 | 期望 |
 |---|---|---|
 | SIM-222.1 | 按 `gen_seq` 核算 | 与模拟真值逐单位相等 |
-| SIM-222.2 | 错误地按交付顺序核算 | 抓到 model 19999927519 / sim 19999927499 的反例 |
+| SIM-222.2 | 错误地按交付顺序核算 | 固定原种子及其后 31 个种子中至少一次实际乱序导致独立核算与模拟真值不同;按 gen_seq 核算的全部运行仍相等 |
 | SIM-222.3 | 按 `gen_seq`,额外记入 1 单位手续费 | 资金守恒检查失败 |
 
 ### SIM-223 永续回报提供累计结算事实,费用与查询不改变它

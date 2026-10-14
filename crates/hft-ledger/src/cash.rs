@@ -250,7 +250,7 @@ impl Ledger {
         }
     }
 
-    /// First report of an asset initializes it (`Initialized`); later reports only update the
+    /// First quiet report of an asset initializes it (`Initialized`); later reports only update the
     /// `rep_*` fields and, when `quiet`, are compared with `total` (`Ok` / `Drift`).
     pub fn on_balance(&mut self, r: &BalanceReport, quiet: bool, t: i64) -> BalanceVerdict {
         self.tick(t);
@@ -272,7 +272,7 @@ impl Ledger {
             e.rep_locked = r.locked;
             e.rep_ex_ts_ns = r.ex_ts_ns;
             e.rep_ens = t;
-            if e.bflags & bflags::UNINIT != 0 {
+            if e.bflags & bflags::UNINIT != 0 && quiet {
                 let old = e.total.0;
                 e.total = Qty(rep);
                 if !quote {
@@ -315,7 +315,9 @@ impl Ledger {
             ));
         }
         if let Some(b) = self.books.get_mut(av) {
-            b.vflags |= vflags::INIT;
+            if verdict == BalanceVerdict::Initialized {
+                b.vflags |= vflags::INIT;
+            }
             match verdict {
                 BalanceVerdict::Drift { .. } => b.vflags |= vflags::DRIFT,
                 BalanceVerdict::Ok => b.vflags &= !vflags::DRIFT,
@@ -323,6 +325,7 @@ impl Ledger {
             }
         }
         if first_av
+            && verdict == BalanceVerdict::Initialized
             && self.venue_s(venue).is_some_and(|v| v.perp)
             && let Some(d) = self.avd.get_mut(av)
             && d.hist_from.is_none()

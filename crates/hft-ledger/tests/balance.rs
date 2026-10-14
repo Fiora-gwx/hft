@@ -16,8 +16,8 @@ fn fresh() -> Ledger {
 #[test]
 fn led_040_first_report_initializes() {
     let mut l = fresh();
-    let v1 = l.on_balance(&bal(A1, S1, USDT, usdt("90000"), usdt("10000"), D), false, s(1));
-    let v2 = l.on_balance(&bal(A1, S1, BNB, qa(BNB, "10"), Qty(0), D), false, s(1));
+    let v1 = l.on_balance(&bal(A1, S1, USDT, usdt("90000"), usdt("10000"), D), true, s(1));
+    let v2 = l.on_balance(&bal(A1, S1, BNB, qa(BNB, "10"), Qty(0), D), true, s(1));
     assert_eq!(
         (v1, v2),
         (BalanceVerdict::Initialized, BalanceVerdict::Initialized)
@@ -41,18 +41,35 @@ fn led_041_equity_valid_after_all_venues() {
         (BNB, qa(BNB, "10"), Qty(0)),
         (BTC, Qty(0), Qty(0)),
     ] {
-        l.on_balance(&bal(A1, S1, a, free, locked, D), false, s(1));
+        l.on_balance(&bal(A1, S1, a, free, locked, D), true, s(1));
     }
     l.on_ref_px(BTC_S1, px("59999.99"), px("60000.01"), s(1));
     l.on_ref_px(BNB_S1, px("599.99"), px("600.01"), s(1));
     l.on_ref_px(USDC_S1, px("0.9999"), px("1.0001"), s(1));
     assert!(!l.equity(A1).valid, "step 1: P2 not initialized");
-    l.on_balance(&bal(A1, P2, USDT, usdt("50000"), Qty(0), D), false, s(2));
+    l.on_balance(&bal(A1, P2, USDT, usdt("50000"), Qty(0), D), true, s(2));
     assert!(l.equity(A1).valid, "step 2");
 }
 
 #[test]
 fn led_042_not_quiet_no_check() {
+    // A snapshot can already include a fill that is still on the report ring. Keep the asset
+    // uninitialized until the caller proves quiet, then seed from a new authoritative report.
+    let mut pending = fresh();
+    pending.on_balance(&bal(A1, S1, USDT, usdt("100000"), Qty(0), D), true, 0);
+    let report = bal(A1, S1, BTC, btc("0.1"), Qty(0), D + s(1));
+    assert_eq!(pending.on_balance(&report, false, s(1)), BalanceVerdict::Reported);
+    assert_eq!(cash(&pending, A1, S1, BTC).total, Qty(0));
+    assert_ne!(cash(&pending, A1, S1, BTC).bflags & bflags::UNINIT, 0);
+    pending.apply_fill(&f(Buy, BTC_S1, "0.1", "60000", "0", USDT, G1, 0), s(2));
+    assert_eq!(
+        pending.on_balance(&report, true, s(5)),
+        BalanceVerdict::Initialized
+    );
+    assert_eq!(cash(&pending, A1, S1, BTC).total, btc("0.1"));
+    assert_eq!(cash(&pending, A1, S1, BTC).unassigned, Qty(0));
+    assert_eq!(pending.inventory(A1, S1, BTC, G1), btc("0.1"));
+
     let mut l = booted();
     let v = l.on_balance(&bal(A1, S1, USDT, usdt("70000"), Qty(0), D + s(5)), false, s(5));
     assert_eq!(v, BalanceVerdict::Reported);

@@ -426,7 +426,7 @@ impl WorldSpec {
 
     /// W1 as before 2026-10-14 (no marks or restart margin snapshots, takers hold their first
     /// position): the world of counterexamples recorded then (TK-121, TK-123, TK-127 …). Equal
-    /// to [`WorldSpec::w1`] while the live margin feed is opt-in.
+    /// to [`WorldSpec::w1`]; standard suites use [`WorldSpec::w1_trading`].
     pub fn w1_legacy() -> WorldSpec {
         let mut w = WorldSpec::w1();
         w.margin_feed = false;
@@ -435,8 +435,7 @@ impl WorldSpec {
     }
 
     /// W1 with live margin data (`margin_feed`) and, with `cycles`, cycling takers: a world that
-    /// trades through the whole run. Opt-in: over 594 runs of 10 000 steps it surfaces engine
-    /// failures still open (INV-1/6/8/14/19, hft-testkit README "DST 的世界模型").
+    /// trades through the whole run. This is the standard suite/CI world.
     pub fn w1_trading(cycles: bool) -> WorldSpec {
         let mut w = WorldSpec::w1();
         w.margin_feed = true;

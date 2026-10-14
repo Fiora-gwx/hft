@@ -126,18 +126,17 @@ fn tk_123_raw_matching_order_survives_report_jitter() {
         .unwrap()
         .perp_cash = false;
     c.plan = Some(c.fault_plan());
-    c.steps = 316;
+    c.steps = 1000;
     c.rerun = RerunPolicy::Never;
     let r = run_record::<SeqSut<TestStrategies>>(&c);
     let DstOutcome::Fail(f) = &r.outcome else {
         panic!("the strict INV-16 counterexample was not reproduced");
     };
     assert_eq!(f.invariant, FailKind::Inv(InvId::I16));
-    // Within the diagnostic prefix (step 315 when recorded; engine fixes may move it by a few
-    // timer steps without changing the counterexample).
-    assert!(f.step < 316, "{}", f.message);
+    // Bound the diagnostic prefix; heartbeat and admission changes move the quiet boundary.
+    assert!(f.step < 1000, "{}", f.message);
     assert!(
-        f.message.contains("balance 49999683576 != truth 49999683575"),
+        f.message.contains("balance 49999623448 != truth 49999623447"),
         "{}",
         f.message
     );
@@ -342,11 +341,11 @@ fn tk_127_explicit_cash_closes_the_original_wallet_difference() {
     assert!(build::refdata_blob(&bad, false).is_err());
     assert!(build::refdata_blob(&bad, true).is_err());
 
-    c.steps = 316;
+    c.steps = 342;
     c.rerun = RerunPolicy::Always;
     let r = run_record::<SeqSut<TestStrategies>>(&c);
     assert!(r.outcome.is_pass(), "prefix: {}", crate::seq_sut::show(&r));
-    assert_eq!(r.steps_run, 316);
+    assert_eq!(r.steps_run, 342);
     assert!(!r.trail.points.is_empty());
     let relevant = |e: &OrderEvent| e.account.0 == 1 && e.venue.0 == 5 && e.inst.0 == 2;
     let source: Vec<_> = r.matched_tail.iter().map(|(_, e)| *e).filter(relevant).collect();
@@ -376,7 +375,7 @@ fn tk_127_explicit_cash_closes_the_original_wallet_difference() {
         "the original delivery reordering must remain exercised"
     );
     let expected = generated.balance(50_000_000_000);
-    assert_eq!(expected, 49_999_683_575);
+    assert_eq!(expected, 49_999_623_447);
     let truth = r
         .truth
         .iter()

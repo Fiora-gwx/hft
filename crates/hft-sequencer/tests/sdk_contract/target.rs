@@ -504,7 +504,8 @@ fn sdk_159_identical_target_not_reset() {
 fn sdk_160_engine_target_cancels_strategy_resting() {
     let mut h = rig();
     open_legs(&mut h, GT1, &[(A1, Side::Buy, "0.01"), (B1, Side::Sell, "0.01")]);
-    // Resting on b1: a reduce-only GTC buy 0.01 (s1) and an Open GTC sell 0.001 (s2).
+    // Resting on b1: Open sell first, then reduce-only buy. Reserving the buy first
+    // exposes the spot leg and correctly closes the exposure gate for a subsequent Open.
     let trig = h.upd + 1;
     set_hook(move |hx, ev, ctx| {
         if let EventRef::Bbo { inst, b, .. } = ev
@@ -523,7 +524,6 @@ fn sdk_160_engine_target_cancels_strategy_resting() {
                 q("0.01"),
             );
             ro.flags = hft_strategy_sdk::OrderIntent::REDUCE_ONLY;
-            let _ = ctx.place(ro);
             let _ = ctx.place(order_in(
                 hx,
                 GT1,
@@ -534,6 +534,7 @@ fn sdk_160_engine_target_cancels_strategy_resting() {
                 px("50500"),
                 q("0.001"),
             ));
+            let _ = ctx.place(ro);
         }
     });
     let m = h.mark();

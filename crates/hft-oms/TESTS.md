@@ -837,7 +837,7 @@ spec: README.md
 | OMS-061.4 | `PendingCancel`,0.004 | → `Unknown`(`prev_state = PendingCancel`);`unknown_count` +1;`OmsUnknown`(P1)与 `OrderUpdate{Unknown}` 各一条;`OrderDecision{Query, target_slot = s}` 一条;`UnknownQuery` 定时器 = now + 1000 ms;无 `OrderDecision{Cancel}` |
 | OMS-061.5 | `PendingAmend`,0.01 | → `Filled` |
 | OMS-061.6 | `PendingAmend`,0.004 | → `Unknown` + `Query`(同 .4,`prev_state = PendingAmend`) |
-| OMS-061.7 | `Unknown`,0 | 保持 `Unknown`;本调用无 `OrderDecision` |
+| OMS-061.7 | `Unknown`,0 | 无增量时保持;有新增累计成交则只入账增量,部分成交保持 Unknown、全量成交收敛 Filled;重复回报不重复入账;AmendReject 同规则 |
 | OMS-061.8 | `Cancelled` | 输出为空;`OmsStats.dup` +1 |
 
 ### OMS-062 回报处理表:CancelReject(其他原因)行
@@ -2171,6 +2171,8 @@ spec: README.md
 - 实现:`crates/hft-oms/tests/link.rs::oms_190_retry_naked_writeoff`
 
 ### OMS-191 重试量被截为 0 且无在途时链接 Done
+
+第一腿槽与墓碑过期后,仍按 group 的第一腿品种与当前净量截量;无法确定第一腿时不发送重试。
 
 - 规则:[OnFill](README.md#onfill)、[LegLink 与 HedgePlan](README.md#leglink-与-hedgeplan)
 - 级别:unit

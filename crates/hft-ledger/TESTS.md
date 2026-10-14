@@ -474,13 +474,15 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 ### LED-040 首条余额报告初始化:计价资产为现金、其他资产进 unassigned
 
+首条报告仅在 quiet 时初始化。
+
 - 规则:[余额初始化、校验与基线](README.md#余额初始化校验与基线)
 - 级别:unit
 - 里程碑:M2
 - 前置:`rd_lf()`、`cfg_lf()`;`on_run_start(0 s)`;无任何余额报告
 - 步骤:
-  1. `on_balance(A1/S1 USDT free 90 000 locked 10 000, quiet = false, 1 s)`
-  2. `on_balance(A1/S1 BNB free 10 locked 0, quiet = false, 1 s)`
+  1. `on_balance(A1/S1 USDT free 90 000 locked 10 000, quiet = true, 1 s)`
+  2. `on_balance(A1/S1 BNB free 10 locked 0, quiet = true, 1 s)`
 - 期望:
   - 两次都返回 `Initialized`,各写一条 `Note{BalanceInit}`
   - USDT `total` 100 000(free + locked),`unassigned` 0,`bflags` 不含 `UNINIT`;BNB `total` 10,`unassigned` 10,`baseline` 0
@@ -500,6 +502,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 实现:`crates/hft-ledger/tests/balance.rs::led_041_equity_valid_after_all_venues`
 
 ### LED-042 quiet 为假时只更新报告值不比较
+
+尚未初始化的资产也必须等待 quiet;在途成交先入账,随后首条 quiet 报告不得重复计量。
 
 - 规则:[余额初始化、校验与基线](README.md#余额初始化校验与基线)
 - 级别:unit

@@ -93,6 +93,7 @@ fn balances(v: &MockVenue<SimMatcher>, now: u64) -> Vec<hft_testkit::dst::obs::T
 
 #[test]
 fn tk_170_cancel_race_uses_real_matcher_reject_and_original_cash() {
+    capture_in_cancel_call();
     for (venue, inst) in [(VS, S1), (VP, P1)] {
         for side in [Side::Buy, Side::Sell] {
             for base in [false, true] {
@@ -144,9 +145,63 @@ fn tk_170_cancel_race_uses_real_matcher_reject_and_original_cash() {
                         .iter()
                         .any(|(_, r)| { order(r).is_some_and(|e| e.what == OrderEventKind::Fill) })
                 );
-                assert!(v.truth(1_000 * MS).iter().all(|t| !t.undelivered));
+                // The flat-account heartbeat just emitted at 1 s has the same 2 ms transport delay.
+                for at in [1_010, 1_020, 1_030] {
+                    v.tick(at * MS);
+                }
+                assert!(v.truth(1_030 * MS).iter().all(|t| !t.undelivered));
             }
         }
+    }
+}
+
+// The report first becomes readable inside Cancel, rather than relying on an incidental
+// timer race in the full engine fixture. The fill and rejection both come from SimExchange.
+fn capture_in_cancel_call() {
+    for (venue, inst) in [(VS, S1), (VP, P1)] {
+        let w = WorldSpec::w1();
+        let mut cfg = MockVenueCfg::w1(venue);
+        cfg.rate_per_s = 0;
+        cfg.bbo_ping_ms = 0;
+        let mut v = MockVenue::<SimMatcher>::new(cfg, &w, 0);
+        v.apply_fault(
+            &Fault::CancelRejectFilled {
+                venue,
+                count: 1,
+                hold_ms: 5_000,
+            },
+            0,
+        );
+        let price = w.inst(inst).unwrap().bid;
+        let mut cmd = GwCmd::sim_reset(ACCT_A);
+        cmd.op = GwOp::Place;
+        cmd.inst = inst;
+        cmd.slot = SlotId(1);
+        cmd.r#gen = 3;
+        cmd.arg = 7;
+        cmd.qty = Qty(100_000);
+        cmd.px = Px(price);
+        cmd.side = Side::Buy;
+        cmd.tif = Tif::Gtc;
+        v.on_frame(&cmd, MS);
+        assert!(v.cancel_filled_report().cases.is_empty());
+        v.on_market(
+            inst,
+            (price - 2_000, 10_000_000),
+            (price - 1_000, 10_000_000),
+            20 * MS,
+        );
+        let before = balances(&v, 20 * MS);
+        cmd.op = GwOp::Cancel;
+        cmd.target_slot = cmd.slot;
+        v.on_frame(&cmd, 21 * MS);
+        let x = v.cancel_filled_report().cases.remove(0);
+        assert_eq!(x.command_ns, Some(21 * MS));
+        assert_eq!(x.held_ns, 21 * MS);
+        assert_eq!(x.rejection.unwrap().what, OrderEventKind::CancelReject);
+        let released = v.tick(100 * MS);
+        assert!(released.iter().any(|(_, r)| r.body == x.original.as_bytes()));
+        assert_eq!(balances(&v, 100 * MS), before);
     }
 }
 
@@ -230,13 +285,7 @@ fn tk_172_real_cancel_races_keep_wallets_recovery_and_checkers_equal() {
         );
         let races = cancel_filled::validate(&on).unwrap_or_else(|e| panic!("{e}\n{:?}", on.cancel_filled));
         assert_eq!(races, 2);
-        assert!(
-            on.cancel_filled
-                .iter()
-                .flat_map(|v| &v.cases)
-                .any(|x| x.command_ns == Some(x.held_ns)),
-            "no original fill first captured in its cancel call"
-        );
+
         assert!(on.truth.iter().all(|t| !t.undelivered && t.excluded.is_empty()));
         assert!(on.journal_verification.is_some());
         for damage in 0..5 {

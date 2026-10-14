@@ -552,6 +552,9 @@ impl JournalLedger {
                     if n.source == NoteSource::Ledger && n.code == code::BALANCE_CHECK {
                         self.on_balance_check(&n, t)?;
                     }
+                    if n.source == NoteSource::Ledger && n.code == code::BALANCE_INIT {
+                        self.on_balance_init(&n, t)?;
+                    }
                     let cash_inst = match (n.source, n.code) {
                         (NoteSource::Ledger, code::EXTERNAL_FILL)
                             if (n.v[0] >> 24) & aflags::AUTO_RECON != 0 =>
@@ -711,9 +714,48 @@ impl JournalLedger {
         self.recovery = Some(Box::new(replay));
     }
 
+    fn on_balance_init(&mut self, n: &Note, t: i64) -> Result<(), JournalApplyError> {
+        let (b, at) = *self.balance.as_ref().ok_or(JournalApplyError::BalanceEvidence)?;
+        if at != t
+            || n.strategy.0 != 0
+            || n.group != hft_types::GROUP_NONE
+            || n.inst != INST_NONE
+            || n.v
+                != [
+                    u64::from(b.venue.0) | u64::from(b.account.0) << 8,
+                    u64::from(b.asset.0),
+                    b.free.0.saturating_add(b.locked.0) as u64,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                ]
+            || self
+                .ledger
+                .venue_book(b.account, b.venue)
+                .cash
+                .iter()
+                .find(|c| c.asset == b.asset)
+                .is_none_or(|c| c.bflags & bflags::UNINIT == 0)
+        {
+            return Err(JournalApplyError::BalanceEvidence);
+        }
+        self.ledger.on_balance(&b, true, at);
+        self.balance = None;
+        Ok(())
+    }
+
     fn on_balance_check(&mut self, n: &Note, t: i64) -> Result<(), JournalApplyError> {
         let (b, at) = self.balance.as_ref().ok_or(JournalApplyError::BalanceEvidence)?;
         if t != *at
+            || self
+                .ledger
+                .venue_book(b.account, b.venue)
+                .cash
+                .iter()
+                .find(|c| c.asset == b.asset)
+                .is_none_or(|c| c.bflags & bflags::UNINIT != 0)
             || n.strategy.0 != 0
             || n.group != hft_types::GROUP_NONE
             || n.inst != INST_NONE
@@ -937,12 +979,7 @@ impl JournalLedger {
             return Ok(());
         }
         // These reports never carry a booked fill in the OMS state machine.
-        if !e.tomb
-            && matches!(
-                ev.what,
-                OrderEventKind::Ack | OrderEventKind::Reject | OrderEventKind::OutcomeUnknown
-            )
-        {
+        if !e.tomb && matches!(ev.what, OrderEventKind::Ack | OrderEventKind::OutcomeUnknown) {
             return Ok(());
         }
         let fill_report = matches!(ev.what, OrderEventKind::PartialFill | OrderEventKind::Fill);

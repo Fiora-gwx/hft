@@ -15,6 +15,28 @@ use hft_oms::*;
 use hft_strategy_sdk::{OrderRef, OrderUpdateKind};
 use hft_types::{AssetId, Qty, RejectBits};
 
+#[test]
+fn oms_061_unknown_reject_cumulative_fill_is_booked_once() {
+    for what in [OrderEventKind::CancelReject, OrderEventKind::AmendReject] {
+        let (mut h, s) = mk(false, Unknown, true, PendingCancel, "0");
+        let mut e = h.oe(s, what);
+        e.cum_filled = q("0.004");
+        e.avg_px = p("60000.00");
+        h.ev(&e, 10);
+        assert_eq!(h.out.fills.len(), 1);
+        assert_eq!(h.out.fills[0].qty, q("0.004"));
+        assert_eq!(h.state(s), Unknown);
+        h.ev(&e, 11);
+        assert!(h.out.fills.is_empty());
+        e.cum_filled = q("0.01");
+        h.ev(&e, 12);
+        assert_eq!(h.out.fills[0].qty, q("0.006"));
+        assert_eq!(h.state(s), Filled);
+        h.ev(&e, 13);
+        assert!(h.out.fills.is_empty());
+    }
+}
+
 /// Slot s (buy X 0.01 GTC, unlinked) or t (sell Y on VX) in `st`.
 fn mk(on_y: bool, st: OrderState, acked: bool, prev: OrderState, filled: &str) -> (H, OrderRef) {
     let mut h = H::new();

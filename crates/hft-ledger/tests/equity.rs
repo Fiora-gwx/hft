@@ -64,7 +64,7 @@ fn led_222_equity_validity() {
     let mut l = ledger_lf();
     l.on_run_start(0);
     for (a, free) in [(USDT, usdt("100000")), (BTC, Qty(0)), (BNB, qa(BNB, "10"))] {
-        l.on_balance(&bal(A1, S1, a, free, Qty(0), D), false, 0);
+        l.on_balance(&bal(A1, S1, a, free, Qty(0), D), true, 0);
     }
     l.on_ref_px(BTC_S1, px("59999.99"), px("60000.01"), 0);
     l.on_ref_px(BNB_S1, px("599.99"), px("600.01"), 0);
@@ -117,7 +117,7 @@ fn usdc_row(total: &str, locked: &str, fee: &str) -> Ledger {
     let mut l = booted();
     let t = qa(USDC, total).0 + qa(USDC, fee).0;
     let free = Qty((t - qa(USDC, locked).0).max(0));
-    l.on_balance(&bal(A1, S1, USDC, free, qa(USDC, locked), D), false, s(1));
+    l.on_balance(&bal(A1, S1, USDC, free, qa(USDC, locked), D), true, s(1));
     if fee != "0" {
         l.apply_fee(&fee_delta(Buy, BTC_S1, G1, fee, USDC), s(2));
     }

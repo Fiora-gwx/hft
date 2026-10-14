@@ -493,7 +493,7 @@ fn led_136_hist_ring_capacity() {
 #[test]
 fn led_137_hist_from_at_init() {
     let mut l = ledger_lf();
-    l.on_balance(&bal(A1, P2, USDT, usdt("50000"), Qty(0), D + 3 * H), false, s(1));
+    l.on_balance(&bal(A1, P2, USDT, usdt("50000"), Qty(0), D + 3 * H), true, s(1));
     let marks: Vec<FundMarkRow> = rows_of(&l, &[row_kind::FUND_MARK])
         .iter()
         .filter(|(h, _)| h.account == A1 && h.venue == P2)
