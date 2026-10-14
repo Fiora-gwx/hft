@@ -238,7 +238,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`h(s) = xxh3_64(s)`(xxhash-rust)
-- 实现:`crates/hft-venue-proto/tests/code.rs::vpr_020_raw_code_encoding`
+- 实现:`crates/hft-venue-proto/tests/helpers.rs::vpr_020_raw_code_encoding`
 
 | 行 | 调用 | 期望 |
 |---|---|---|
@@ -275,7 +275,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. 10⁵ 次:`raw_code_str`(随机 1–16 B)、`raw_code_num`、`raw_code_http`、`dedup_key`、`seen_or_insert`
 - 期望:
   - 分配次数 0
-- 实现:`crates/hft-venue-proto/tests/code.rs::vpr_022_helpers_zero_alloc`
+- 实现:`crates/hft-venue/tests/alloc.rs::vpr_022_helpers_zero_alloc`
 
 ### VPR-030 dedup_key 区分三种键,键总是带 inst
 
@@ -283,7 +283,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:无参数
-- 实现:`crates/hft-venue-proto/tests/dedup.rs::vpr_030_dedup_key_distinct`
+- 实现:`crates/hft-venue-proto/tests/helpers.rs::vpr_030_dedup_key_distinct`
 
 | 行 | 比较 | 期望 |
 |---|---|---|
@@ -316,7 +316,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `seen_or_insert(1)`;`seen_or_insert(1)`;`seen_or_insert(2)`
 - 期望:
   - 依次 `false`、`true`、`false`
-- 实现:`crates/hft-venue-proto/tests/dedup.rs::vpr_032_ring_seen`
+- 实现:`crates/hft-venue-proto/tests/helpers.rs::vpr_032_ring_seen`
 
 ### VPR-033 TradeIdRing 满后挤出最老的键
 
@@ -324,7 +324,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:新 `TradeIdRing<1024>`;按行插入键 1..=k(两两不同)后查询键 1
-- 实现:`crates/hft-venue-proto/tests/dedup.rs::vpr_033_ring_eviction_boundary`
+- 实现:`crates/hft-venue-proto/tests/helpers.rs::vpr_033_ring_eviction_boundary`
 
 | 行 | 已插入 k | 期望 `seen_or_insert(1)` |
 |---|---|---|
@@ -353,7 +353,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 生成:10⁶ 次操作;键从 1..=4096 均匀抽取(制造重复与挤出)
 - 参考:`HashSet<u64>` + `VecDeque<u64>`(容量 1024,满时弹出最老)
 - 例数:PR 10(每例 10⁶ 次操作)
-- 实现:`crates/hft-venue-proto/tests/dedup.rs::vpr_035_ring_matches_model`
+- 实现:`crates/hft-venue-proto/tests/helpers.rs::vpr_035_ring_matches_model`
 
 ### VPR-040 VecSink 按调用顺序记录 MdSink 的每个方法
 
@@ -376,7 +376,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:新 `VecSink`
-- 实现:`crates/hft-venue-proto/tests/testkit.rs::vpr_041_vec_sink_report`
+- 实现:`crates/hft-venue-proto/tests/helpers.rs::vpr_041_vec_sink_report`
 
 | 行 | 调用 | 期望记录 |
 |---|---|---|
@@ -391,7 +391,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:新 `VecSink`;`id = ClientOrderId{epoch: 4, venue, account: 3, slot: 77, gen: 9}`;按行顺序执行
-- 实现:`crates/hft-venue-proto/tests/testkit.rs::vpr_042_vec_sink_exch_id`
+- 实现:`crates/hft-venue-proto/tests/helpers.rs::vpr_042_vec_sink_exch_id`
 
 | 行 | 调用 | 期望 |
 |---|---|---|
@@ -447,7 +447,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `run_md`
 - 期望:
   - 返回 `Err`,其中样本名为该样本、记录序号 = 1(从 0 计)、字节偏移 = 16
-- 实现:`crates/hft-venue-proto/tests/testkit.rs::vpr_046_golden_mismatch_report`
+- 实现:`crates/hft-venue-proto/tests/helpers.rs::vpr_046_golden_first_difference`
 
 ### VPR-047 GoldenDriver 跑通账户查询响应序列
 
@@ -549,7 +549,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `check_md_basics::<FakePerp>(samples, fake_rd())`;同样对 `FakeSpot`
 - 期望:
   - 两者通过。检查内容:每条样本 `peek` 的 `inst` = `decode_md` 的 `MdOutcome.inst`;有 `L2Batch` 时 `peek.ids` = 批头 `prev_id/last_id`;`MdOutcome.events` = sink 收到的事件数;把价格与数量字段的数字替换为 `"x"` 后 `peek` 结果不变、`decode_md` 返回 `Err(Number)`;未订阅符号的 `peek.inst == 0`
-- 实现:`crates/hft-venue-proto/tests/contract_md.rs::vpr_063_check_md_basics_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_md.rs::vpr_063_peek_without_price`
 
 ### VPR-064 check_md_basics 检出 peek 序号与批头不一致
 
@@ -619,7 +619,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`FakePerp`;inst 201 价格指数 −8;BBO 样本的 `bid_px` 字段按行取值
-- 实现:`crates/hft-venue-proto/tests/contract_md.rs::vpr_069_fixed_point_exact`
+- 实现:`crates/hft-venue-proto/tests/contract_md.rs::vpr_069_decimal_errors`
 
 | 行 | `bid_px` 文本 | 期望 |
 |---|---|---|
@@ -677,7 +677,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `decode_md(rd, ctx, Control, payload, rx, sink)`;`control(Control, payload)`
 - 期望:
   - `decode_md` 返回 `Err(UnknownClass)`,sink 记录数 0;`control` 返回 `Some(ControlHint::SubAck{ok: true, code: 0})`
-- 实现:`crates/hft-venue-proto/tests/contract_md.rs::vpr_073_control_class`
+- 实现:`crates/hft-venue-proto/tests/contract_md.rs::vpr_073_non_data_class`
 
 ### VPR-074 check_hot_alloc:热路径方法与 acct_decode 不分配(契约 5)
 
@@ -873,7 +873,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:变体 `Mut::DeadMan(spec)`,`spec = CountdownPerInst{min_ms: 5_000, timeout_ms, refresh_ms, via: Ws}`;能力表与之同步
-- 实现:`crates/hft-venue-proto/tests/contract_caps.rs::vpr_089_countdown_invariant`
+- 实现:`crates/hft-venue-proto/tests/helpers.rs::vpr_089_dead_man_boundary`
 
 | 行 | `timeout_ms` / `refresh_ms` | 期望 `check_default_caps` |
 |---|---|---|
@@ -889,7 +889,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:变体 `Mut::DeadMan(spec)`,能力表按 README 的对应写入;每行再构造一个故意错一个字段的能力表作反例
-- 实现:`crates/hft-venue-proto/tests/contract_caps.rs::vpr_090_dead_man_mapping`
+- 实现:`crates/hft-venue-proto/tests/helpers.rs::vpr_090_dead_man_caps`
 
 | 行 | `dead_man()` | 期望能力表(min / max / timeout / refresh);反例 |
 |---|---|---|

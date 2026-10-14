@@ -1,0 +1,7 @@
+[bench_trade_id_ring]
+p50_ns = 250
+p99_ns = 300
+
+[bench_dedup_key]
+p50_ns = 15
+p99_ns = 20

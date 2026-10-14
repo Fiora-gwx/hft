@@ -13,6 +13,106 @@ const BBO: &[u8] =
 const TRADE: &[u8] = br#"{"e":"trade","i":201,"t":99,"p":"100.5","q":"0.1","m":1,"T":1700000000000}"#;
 const MARK: &[u8] = br#"{"e":"mark","i":201,"p":"100.55","T":1700000000000}"#;
 
+#[test]
+fn vpr_063_peek_without_price() {
+    use hft_venue_proto::{Peek, RawSeq, SeqIds, StreamKind, VenueProtocol};
+    let rd = fake_rd();
+    let ctx = FakeFeedCtx;
+    let corrupted = String::from_utf8(BBO.to_vec())
+        .unwrap()
+        .replace("100.5", "broken");
+    let want = Peek {
+        inst: hft_types::InstId(201),
+        stream: StreamKind::Bbo,
+        ids: SeqIds {
+            prev_id: 0,
+            last_id: 7,
+        },
+        raw: RawSeq::default(),
+    };
+    let samples = [BBO, corrupted.as_bytes()].map(|payload| {
+        (
+            MdSample {
+                name: "peek",
+                route: RouteId(0),
+                op: MsgOp::Text,
+                payload,
+                rx: RxMeta::default(),
+            },
+            want,
+        )
+    });
+    hft_venue_proto::testkit::check_peek::<FakePerp>(&samples, &rd, &ctx).unwrap();
+    let rec = decode_samples::<FakePerp>(&[samples[0].0.clone()], &rd, &mut FakeFeedCtx).unwrap();
+    assert!(matches!(&rec[0][0],MdRec::Bbo(e) if e.h.inst==want.inst && e.update_id==want.ids.last_id));
+    let class = FakePerp::classify(RouteId(0), MsgOp::Text, corrupted.as_bytes());
+    assert_eq!(
+        FakePerp::decode_md(
+            &rd,
+            &mut FakeFeedCtx,
+            class,
+            corrupted.as_bytes(),
+            &RxMeta::default(),
+            &mut hft_venue_proto::testkit::VecSink::default()
+        ),
+        Err(hft_venue_proto::DecodeErr::Number)
+    );
+}
+#[test]
+fn vpr_069_decimal_errors() {
+    use hft_venue_proto::DecodeErr;
+    assert_eq!(hft_venue_proto::account::decimal("1.23456789", -8), Ok(123456789));
+    assert_eq!(
+        hft_venue_proto::account::decimal("9223372036854775808", 0),
+        Err(DecodeErr::Overflow)
+    );
+    for text in ["NaN", "inf", "x", "1.234567891"] {
+        assert_eq!(
+            hft_venue_proto::account::decimal(text, -8),
+            Err(DecodeErr::Number)
+        );
+    }
+    for text in ["9223372036854775808", "bad"] {
+        let payload = String::from_utf8(BBO.to_vec()).unwrap().replace("100.5", text);
+        let sample = MdSample {
+            name: "decimal",
+            route: RouteId(0),
+            op: MsgOp::Text,
+            payload: payload.as_bytes(),
+            rx: RxMeta::default(),
+        };
+        hft_venue_proto::testkit::check_decode_errors::<FakePerp>(
+            &[(
+                sample,
+                if text == "bad" {
+                    DecodeErr::Number
+                } else {
+                    DecodeErr::Overflow
+                },
+            )],
+            &fake_rd(),
+            &mut FakeFeedCtx,
+        )
+        .unwrap();
+    }
+}
+#[test]
+fn vpr_073_non_data_class() {
+    let s = MdSample {
+        name: "control",
+        route: RouteId(0),
+        op: MsgOp::Text,
+        payload: b"{\"e\":\"subscribed\"}",
+        rx: RxMeta::default(),
+    };
+    hft_venue_proto::testkit::check_decode_errors::<FakePerp>(
+        &[(s, hft_venue_proto::DecodeErr::UnknownClass)],
+        &fake_rd(),
+        &mut FakeFeedCtx,
+    )
+    .unwrap();
+}
+
 fn samples<'a>(rx: RxMeta, depth: &'a [u8]) -> Vec<MdSample<'a>> {
     [("bbo", BBO), ("trade", TRADE), ("mark", MARK), ("depth20", depth)]
         .into_iter()

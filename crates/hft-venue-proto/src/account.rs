@@ -84,15 +84,22 @@ pub fn instrument(rd: &RefData, venue: hft_types::VenueId, symbol: &str) -> Resu
         .ok_or(DecodeErr::Shape)
 }
 pub fn decimal(s: &str, exp: i8) -> Result<i64, DecodeErr> {
-    hft_types::parse_exact(s.as_bytes(), exp).map_err(|_| DecodeErr::Number)
+    hft_types::parse_exact(s.as_bytes(), exp).map_err(number_error)
+}
+fn number_error(e: hft_types::FxErr) -> DecodeErr {
+    if e == hft_types::FxErr::OVERFLOW {
+        DecodeErr::Overflow
+    } else {
+        DecodeErr::Number
+    }
 }
 /// Exchange amounts carry more decimals than the Notional ABI; round once at that boundary.
 pub fn notional(s: &str) -> Result<i64, DecodeErr> {
-    hft_types::parse_round(s.as_bytes(), -6, hft_types::RoundMode::HalfEven).map_err(|_| DecodeErr::Number)
+    hft_types::parse_round(s.as_bytes(), -6, hft_types::RoundMode::HalfEven).map_err(number_error)
 }
 /// Average/estimated prices need not fall on the order tick or wire decimal grid.
 pub fn average_price(s: &str, exp: i8) -> Result<i64, DecodeErr> {
-    hft_types::parse_round(s.as_bytes(), exp, hft_types::RoundMode::HalfEven).map_err(|_| DecodeErr::Number)
+    hft_types::parse_round(s.as_bytes(), exp, hft_types::RoundMode::HalfEven).map_err(number_error)
 }
 pub fn safe_token(s: &str) -> bool {
     !s.is_empty()

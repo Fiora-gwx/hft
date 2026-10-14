@@ -14,15 +14,18 @@ workspace = true
 
 [features]
 # VecSink and the contract checks (README "实现说明"); only venue crates' tests/ and fuzz/ enable it.
-testkit = []
+testkit = ["dep:zerocopy"]
 
 [dependencies]
 hft-types.workspace = true
 hft-refdata.workspace = true
 hft-event.workspace = true
+xxhash-rust.workspace = true
+zerocopy = { workspace = true, optional = true }
 
 [dev-dependencies]
 zerocopy.workspace = true
+criterion.workspace = true
 
 [[test]]
 name = "layout"
@@ -30,3 +33,11 @@ name = "layout"
 [[test]]
 name = "contract_md"
 required-features = ["testkit"]
+
+[[test]]
+name = "helpers"
+required-features = ["testkit"]
+
+[[bench]]
+name = "dedup"
+harness = false

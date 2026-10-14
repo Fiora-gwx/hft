@@ -1089,9 +1089,11 @@ dependencies = [
 name = "hft-venue-proto"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "hft-event",
  "hft-refdata",
  "hft-types",
+ "xxhash-rust",
  "zerocopy",
 ]
 

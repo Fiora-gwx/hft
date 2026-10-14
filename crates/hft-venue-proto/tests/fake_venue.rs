@@ -226,8 +226,23 @@ impl VenueProtocol for FakePerp {
     fn decode_identity(_s: u16, _b: &[u8], _u: &mut [u8; 24]) -> Result<(), DecodeErr> {
         Err(DecodeErr::UnknownClass)
     }
-    fn peek(_rd: &RefData, _ctx: &FakeFeedCtx, _c: FakeMd, _p: &[u8]) -> Result<Peek, DecodeErr> {
-        Err(DecodeErr::UnknownClass)
+    fn peek(_rd: &RefData, _ctx: &FakeFeedCtx, c: FakeMd, p: &[u8]) -> Result<Peek, DecodeErr> {
+        let (stream, key) = match c {
+            FakeMd::Bbo => (hft_venue_proto::StreamKind::Bbo, "u"),
+            FakeMd::Trade => (hft_venue_proto::StreamKind::Trade, "t"),
+            FakeMd::Mark => (hft_venue_proto::StreamKind::Mark, "T"),
+            FakeMd::Depth => (hft_venue_proto::StreamKind::DepthTopN, "u"),
+            FakeMd::Unknown => return Err(DecodeErr::UnknownClass),
+        };
+        Ok(Peek {
+            inst: InstId(int_field(p, "i")? as u32),
+            stream,
+            ids: hft_venue_proto::SeqIds {
+                prev_id: 0,
+                last_id: int_field(p, key)? as u64,
+            },
+            raw: RawSeq::default(),
+        })
     }
     fn seq_rule(_c: FakeMd) -> SeqRule {
         SeqRule::None
@@ -332,6 +347,9 @@ impl VenueProtocol for FakePerp {
         rx: &RxMeta,
         out: &mut impl MdSink,
     ) -> Result<MdOutcome, DecodeErr> {
+        if c == FakeMd::Unknown {
+            return Err(DecodeErr::UnknownClass);
+        }
         let inst = InstId(u32::try_from(int_field(p, "i")?).map_err(|_| DecodeErr::Overflow)?);
         let row = rd.inst(inst);
         let (pe, qe) = (row.px_exp, row.qty_exp);
