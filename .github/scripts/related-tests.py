@@ -168,14 +168,19 @@ def save(plan: dict) -> None:
     PLAN.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def make_plan() -> dict:
+    head = os.environ["HEAD"]
+    files = changed_files(os.environ.get("EVENT", ""), os.environ.get("BASE", ""), head)
+    root = Path.cwd()
+    packages, reason = select(files, workspace(root), dependencies(root), root)
+    return {"sha": head, "files": files, "packages": packages, "reason": reason,
+            "commands": commands(packages, os.environ.get("SHARD", "")), "results": [], "complete": False}
+
+
 def main() -> int:
     if sys.argv[1:] == ["plan"]:
-        head = os.environ["HEAD"]
-        files = changed_files(os.environ.get("EVENT", ""), os.environ.get("BASE", ""), head)
-        root = Path.cwd()
-        packages, reason = select(files, workspace(root), dependencies(root), root)
-        plan = {"sha": head, "files": files, "packages": packages, "reason": reason,
-                "commands": commands(packages, os.environ.get("SHARD", "")), "results": [], "complete": False}
+        plan = make_plan()
+        head, packages, reason = plan["sha"], plan["packages"], plan["reason"]
         save(plan)
         output = os.environ.get("GITHUB_OUTPUT")
         if output:
@@ -190,7 +195,10 @@ def main() -> int:
                 stream.write(text + "\n\nThe full lane (integration-branch pushes, nightly) tests the whole workspace.\n")
         return 0
     if sys.argv[1:] == ["run"]:
-        plan = json.loads(PLAN.read_text(encoding="utf-8"))
+        # The cargo cache restore between `plan` and `run` may replace target/ (a plan selecting
+        # every member, e.g. after a root Cargo.toml change, lost its file): plan again, the
+        # selection is a pure function of the commit range.
+        plan = json.loads(PLAN.read_text(encoding="utf-8")) if PLAN.exists() else make_plan()
         if plan["sha"] != os.environ["HEAD"] or plan["commands"] != commands(plan["packages"], os.environ.get("SHARD", "")):
             raise ValueError("test plan does not match this commit or package commands")
         for command in plan["commands"]:
