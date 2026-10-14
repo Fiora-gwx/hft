@@ -9,6 +9,53 @@ use serde_json::{Value, json};
 const TRACKING: &str = "root/.hostprobe/exec/chronyc -c tracking.out";
 const MAC_B: &str = "root/.hostprobe/imds/meta-data/network/interfaces/macs/06_00_00_00_00_0b";
 
+#[test]
+fn tool_107_dev2_required() {
+    for row in 0..=6 {
+        let f = Fx::new(&format!("107-{row}"));
+        f.write("test-dev2.toml", include_str!("fixtures/test-dev2.toml"));
+        f.write("root/run/systemd/units/invocation_hft-dev2-guard.service", "");
+        f.write("root/.hostprobe/nft/tables", "inet hft_imds_dev2\n");
+        f.write("root/sys/fs/cgroup/hft.slice/memory.swap.max", "0\n");
+        f.write("root/sys/fs/cgroup/hftbatch.slice/cpu.max", "max 100000\n");
+        match row {
+            1 => {
+                f.remove("root/run/systemd/units/invocation_hft-dev2-guard.service");
+            }
+            2 => {
+                f.write("root/.hostprobe/nft/tables", "");
+            }
+            3 => {
+                f.write("root/sys/fs/cgroup/hft.slice/memory.swap.max", "4096\n");
+            }
+            4 => {
+                f.write("root/sys/fs/cgroup/hftbatch.slice/cpu.max", "10000 100000\n");
+            }
+            5 => {
+                std::fs::rename(
+                    f.path("root/sys/fs/cgroup/hftbatch.slice"),
+                    f.path("root/sys/fs/cgroup/hft.slice/hftbatch.slice"),
+                )
+                .unwrap();
+            }
+            6 => {
+                f.write("root/sys/devices/system/cpu/isolated", "3-15\n");
+            }
+            _ => {}
+        }
+        let r = f.run(&["verify", "--expected", "test-dev2.toml", "--out", "v.json"]);
+        assert_eq!(
+            r.code,
+            if (1..=5).contains(&row) { 1 } else { 0 },
+            "TOOL-107.{row}: {}",
+            r.stderr
+        );
+        if row == 6 {
+            assert!(r.stderr.lines().any(|l| l.ends_with("advisory")), "{}", r.stderr);
+        }
+    }
+}
+
 fn tracking(disp: &str) -> String {
     format!(
         "50484330,PHC0,1,1759800000.000000000,0.000000000,0.000000000,0.000000000,-3.512,0.000,0.010,0.000000000,{disp},1.0,Normal\n"

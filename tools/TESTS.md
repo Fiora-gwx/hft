@@ -1730,6 +1730,8 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 ### TOOL-114 hft-secrets 全部取到时按清单写出 0400 文件且只打印名字与版本
 
+- Unix 集成测试调用真实二进制与 SDK,本地 HTTP 替身提供 IMDSv2/Secrets Manager/KMS;属主断言使用测试进程用户,部署账户 hft 的属主操作由同一实现执行。
+
 - 规则:[hft-secrets](README.md#hft-secrets)
 - 级别:integ
 - 里程碑:M3

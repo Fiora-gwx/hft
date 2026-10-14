@@ -35,6 +35,7 @@ members = [
     "tools/xtask",
     "tools/hft-cfg",
     "tools/hostprobe",
+    "tools/hft-secrets",
     "tools/latency-slice",
 ]
 

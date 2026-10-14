@@ -339,6 +339,8 @@ hostprobe osnoise --cpus <hot> --duration 24h      # 主机基线与调优 A/B
 
 ### hft-secrets
 
+清单使用 `[[secret]]` 数组;输出名字仅接受字母、数字、点、下划线与连字符,拒绝路径分隔符、`.` 与 `..`。`kms-ciphertext` 内容为 base64 密文(可先经 `json_key` 取出)。取值使用 SDK 的 IMDSv2 实例角色提供器,不回退到环境或共享凭证。全部秘密取齐后才写出文件,已有输出目录必须为空且不是符号链接;写失败删除本次创建的文件。`fetch` 的文件权限与属主操作要求 Unix,`--check` 可跨平台运行。
+
 在服务启动前把该服务需要的秘密(交易所 API key、Ed25519 私钥;optional 链上组件的钱包私钥)从 AWS Secrets Manager / KMS 取出,写成 tmpfs 上的文件交给服务读取。**hft-core 与其他 Rust 服务都不链接 `aws-sdk-secretsmanager` 与 `aws-sdk-kms`**(hot crate 的闭包不含任何 AWS SDK:它依赖 tokio,规则 [B6](../docs/hot-path-rules.md);冷进程访问 S3 另有各自的依赖节);取秘密这件事只发生在这个冷工具里。模拟账户不持有交易所 key,清单里没有它们的条目。
 
 ```sh
