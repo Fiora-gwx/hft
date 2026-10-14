@@ -105,7 +105,7 @@ impl LiveIo<TestSet> for Io {
 
 pub type Seq = Sequencer<LiveDriver<TestSet, Io>, TestSet>;
 
-pub fn fixture(inputs: &[MemRecord], id: usize) -> (Seq, Producer<Bbo>, Root) {
+pub fn fixture(inputs: &[MemRecord], id: usize, single: bool) -> (Seq, Producer<Bbo>, Root) {
     let root = std::env::current_dir()
         .unwrap()
         .join("target/bbo-profile")
@@ -149,7 +149,10 @@ pub fn fixture(inputs: &[MemRecord], id: usize) -> (Seq, Producer<Bbo>, Root) {
     )
     .unwrap();
     assert_ne!(prep.poll(), PrepState::Failed);
-    let b = b0();
+    let mut b = b0();
+    if single {
+        b.params.retain(|p| p.strategy == S1);
+    }
     let rd = b.rd.load();
     let setup = b.setup(&rd);
     let (tx, rx) = spsc(64, Backing::Heap).unwrap();
@@ -193,9 +196,13 @@ pub fn fixture(inputs: &[MemRecord], id: usize) -> (Seq, Producer<Bbo>, Root) {
     (s, tx, cleanup)
 }
 
-pub fn setup_inputs() -> Vec<MemRecord> {
+pub fn setup_inputs(single: bool) -> Vec<MemRecord> {
     reset_script();
-    let mut source = b0().boot();
+    let mut b = b0();
+    if single {
+        b.params.retain(|p| p.strategy == S1);
+    }
+    let mut source = b.boot();
     source.steady();
     source
         .j()

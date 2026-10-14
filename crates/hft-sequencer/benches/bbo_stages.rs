@@ -20,14 +20,15 @@ use std::hint::black_box;
 #[path = "support/bbo_io.rs"]
 mod bbo_io;
 
-fn ram(hz: u64) {
-    let inputs = bbo_io::setup_inputs();
+fn ram(hz: u64, single: bool) {
+    let inputs = bbo_io::setup_inputs(single);
+    let subscribers = if single { 1 } else { 3 };
     for direct in [false, true] {
         for profile in [false, true] {
             reset_script();
             SCRIPT.with(|s| s.borrow_mut().quiet = true);
             let (mut s, mut tx, root) =
-                bbo_io::fixture(&inputs, usize::from(direct) * 2 + usize::from(profile));
+                bbo_io::fixture(&inputs, usize::from(direct) * 2 + usize::from(profile), single);
             let mut input = hft_sequencer::InputSlot::with_capacity(256);
             let mut totals = Vec::with_capacity(20_000);
             let mut samples: [Vec<u64>; N] = core::array::from_fn(|_| Vec::with_capacity(20_000));
@@ -70,7 +71,7 @@ fn ram(hz: u64) {
                 }
             }
             println!(
-                "{{\"case\":\"seq/bbo_miss_ram\",\"direct\":{direct},\"profile\":{profile},\"n\":20000,\"warmup\":2000,\"hz\":{hz},{}}}",
+                "{{\"case\":\"seq/bbo_miss_ram\",\"subscribers\":{subscribers},\"direct\":{direct},\"profile\":{profile},\"n\":20000,\"warmup\":2000,\"hz\":{hz},{}}}",
                 distribution(&mut totals, hz)
             );
             if profile {
@@ -165,6 +166,10 @@ fn run(hit: bool, profile: bool, hz: u64) {
 
 fn main() {
     let hz = hft_rt::tsc_hz_nominal().expect("nominal counter frequency required");
+    if std::env::args().any(|a| a == "--single") {
+        ram(hz, true);
+        return;
+    }
     let mut empty = Vec::with_capacity(20_000);
     for _ in 0..20_000 {
         let a = hft_rt::tsc_ordered().0;
@@ -180,7 +185,7 @@ fn main() {
             run(hit, profile, hz);
         }
     }
-    ram(hz);
+    ram(hz, false);
 }
 
 fn distribution(v: &mut [u64], hz: u64) -> String {

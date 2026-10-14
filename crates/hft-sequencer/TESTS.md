@@ -4701,6 +4701,7 @@ SEQ-158 补充验收:RateOnly 的实额输入替换已有合成额,重复实额�
 - 里程碑:M2
 - 基准名:`seq/bbo_miss`、`seq/bbo_miss_ram`(诊断)
 - 诊断:`benches/bbo_stages.rs` 逐次测内部阶段,分别运行 TestIo 与真实 SPSC/RAM 写者;RAM 另报已解码 Input 入口,样本维度不合并。
+- `--single` 只安装 S1 参数,独立报告单订阅者,与原三订阅者样本分开。
 - 实现:`crates/hft-sequencer/benches/seq.rs::seq_324_bbo_miss`
 
 ### SEQ-325 Bbo 未命中策略并推进一个目标

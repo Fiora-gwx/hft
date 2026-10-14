@@ -35,7 +35,8 @@
   "binary_sha256": {
     "baseline-ram.exe": "08803c22c551dd314e3e7eef62055874c75795849d99733ff5c1dc66a4cd679e",
     "final-stages.exe": "bdc461236e1b26c4e7f498373f86bf227b9755f954d4dc22c41dde1eae90b637",
-    "baseline-seq.exe": "caefd347eb2ae5d847da550aac851861806a90a19aff9c2e9cfaea8985d787ea"
+    "baseline-seq.exe": "caefd347eb2ae5d847da550aac851861806a90a19aff9c2e9cfaea8985d787ea",
+    "single-stages.exe": "9fa0345a5ff8975c606a2aad565a0d99bfa765069071a320994e60ddae39220e"
   },
   "rdtsc_samples": {
     "before": [
@@ -865,6 +866,262 @@
           }
         ]
       }
+    ],
+    "after_single_subscriber": [
+      {
+        "case": "seq/bbo_miss_ram",
+        "subscribers": 1,
+        "direct": false,
+        "profile": false,
+        "n": 20000,
+        "warmup": 2000,
+        "hz": 3417600000,
+        "p50_ns": 628,
+        "p90_ns": 648,
+        "p99_ns": 1154,
+        "p999_ns": 3288,
+        "max_ns": 83087,
+        "stages": []
+      },
+      {
+        "case": "seq/bbo_miss_ram",
+        "subscribers": 1,
+        "direct": false,
+        "profile": true,
+        "n": 20000,
+        "warmup": 2000,
+        "hz": 3417600000,
+        "p50_ns": 826,
+        "p90_ns": 851,
+        "p99_ns": 1127,
+        "p999_ns": 3333,
+        "max_ns": 110241,
+        "stages": [
+          {
+            "stage": "intake_rounds",
+            "p50_ns": 403,
+            "p90_ns": 419,
+            "p99_ns": 476,
+            "p999_ns": 1230,
+            "max_ns": 109080
+          },
+          {
+            "stage": "journal_input",
+            "p50_ns": 38,
+            "p90_ns": 41,
+            "p99_ns": 210,
+            "p999_ns": 2349,
+            "max_ns": 2616
+          },
+          {
+            "stage": "dispatch_clock",
+            "p50_ns": 40,
+            "p90_ns": 40,
+            "p99_ns": 42,
+            "p999_ns": 63,
+            "max_ns": 1750
+          },
+          {
+            "stage": "book_bbo",
+            "p50_ns": 17,
+            "p90_ns": 19,
+            "p99_ns": 20,
+            "p999_ns": 27,
+            "max_ns": 135
+          },
+          {
+            "stage": "ledger_ref_px",
+            "p50_ns": 107,
+            "p90_ns": 117,
+            "p99_ns": 127,
+            "p999_ns": 225,
+            "max_ns": 7445
+          },
+          {
+            "stage": "feeds_gate",
+            "p50_ns": 21,
+            "p90_ns": 22,
+            "p99_ns": 26,
+            "p999_ns": 37,
+            "max_ns": 88
+          },
+          {
+            "stage": "group_views",
+            "p50_ns": 24,
+            "p90_ns": 26,
+            "p99_ns": 30,
+            "p999_ns": 41,
+            "max_ns": 2642
+          },
+          {
+            "stage": "strategy_delivery_ctx",
+            "p50_ns": 66,
+            "p90_ns": 70,
+            "p99_ns": 84,
+            "p999_ns": 124,
+            "max_ns": 27991
+          },
+          {
+            "stage": "exec_advance",
+            "p50_ns": 12,
+            "p90_ns": 13,
+            "p99_ns": 13,
+            "p999_ns": 16,
+            "max_ns": 26
+          },
+          {
+            "stage": "final_checks",
+            "p50_ns": 26,
+            "p90_ns": 32,
+            "p99_ns": 35,
+            "p999_ns": 40,
+            "max_ns": 149
+          },
+          {
+            "stage": "output_publish",
+            "p50_ns": 20,
+            "p90_ns": 22,
+            "p99_ns": 23,
+            "p999_ns": 30,
+            "max_ns": 2669
+          },
+          {
+            "stage": "round_publish",
+            "p50_ns": 23,
+            "p90_ns": 25,
+            "p99_ns": 26,
+            "p999_ns": 28,
+            "max_ns": 47
+          }
+        ]
+      },
+      {
+        "case": "seq/bbo_miss_ram",
+        "subscribers": 1,
+        "direct": true,
+        "profile": false,
+        "n": 20000,
+        "warmup": 2000,
+        "hz": 3417600000,
+        "p50_ns": 248,
+        "p90_ns": 260,
+        "p99_ns": 413,
+        "p999_ns": 2620,
+        "max_ns": 3157,
+        "stages": []
+      },
+      {
+        "case": "seq/bbo_miss_ram",
+        "subscribers": 1,
+        "direct": true,
+        "profile": true,
+        "n": 20000,
+        "warmup": 2000,
+        "hz": 3417600000,
+        "p50_ns": 420,
+        "p90_ns": 434,
+        "p99_ns": 603,
+        "p999_ns": 2889,
+        "max_ns": 164064,
+        "stages": [
+          {
+            "stage": "intake_rounds",
+            "p50_ns": 21,
+            "p90_ns": 21,
+            "p99_ns": 21,
+            "p999_ns": 23,
+            "max_ns": 3026
+          },
+          {
+            "stage": "journal_input",
+            "p50_ns": 38,
+            "p90_ns": 41,
+            "p99_ns": 210,
+            "p999_ns": 2359,
+            "max_ns": 31506
+          },
+          {
+            "stage": "dispatch_clock",
+            "p50_ns": 40,
+            "p90_ns": 40,
+            "p99_ns": 41,
+            "p999_ns": 76,
+            "max_ns": 247
+          },
+          {
+            "stage": "book_bbo",
+            "p50_ns": 17,
+            "p90_ns": 18,
+            "p99_ns": 20,
+            "p999_ns": 24,
+            "max_ns": 76
+          },
+          {
+            "stage": "ledger_ref_px",
+            "p50_ns": 103,
+            "p90_ns": 109,
+            "p99_ns": 122,
+            "p999_ns": 199,
+            "max_ns": 5925
+          },
+          {
+            "stage": "feeds_gate",
+            "p50_ns": 21,
+            "p90_ns": 22,
+            "p99_ns": 24,
+            "p999_ns": 34,
+            "max_ns": 3623
+          },
+          {
+            "stage": "group_views",
+            "p50_ns": 24,
+            "p90_ns": 26,
+            "p99_ns": 29,
+            "p999_ns": 45,
+            "max_ns": 162588
+          },
+          {
+            "stage": "strategy_delivery_ctx",
+            "p50_ns": 60,
+            "p90_ns": 66,
+            "p99_ns": 79,
+            "p999_ns": 130,
+            "max_ns": 3716
+          },
+          {
+            "stage": "exec_advance",
+            "p50_ns": 12,
+            "p90_ns": 13,
+            "p99_ns": 14,
+            "p999_ns": 16,
+            "max_ns": 192
+          },
+          {
+            "stage": "final_checks",
+            "p50_ns": 26,
+            "p90_ns": 26,
+            "p99_ns": 31,
+            "p999_ns": 38,
+            "max_ns": 6089
+          },
+          {
+            "stage": "output_publish",
+            "p50_ns": 20,
+            "p90_ns": 21,
+            "p99_ns": 23,
+            "p999_ns": 31,
+            "max_ns": 2886
+          },
+          {
+            "stage": "round_publish",
+            "p50_ns": 12,
+            "p90_ns": 12,
+            "p99_ns": 13,
+            "p999_ns": 14,
+            "max_ns": 5864
+          }
+        ]
+      }
     ]
   },
   "criterion": {
@@ -1420,6 +1677,7 @@
     "The separate Criterion binary has bench-stages disabled.",
     "Historical baseline stage harness recorded only p50/p99; final also records p90/p99.9/max.",
     "Full-round samples include the following idle round. Direct starts with InputSlot already populated.",
-    "Replay includes clone, restore and byte verification of 20000 Input records per iteration."
+    "Replay includes clone, restore and byte verification of 20000 Input records per iteration.",
+    "after_single_subscriber is a separate final-only dataset: only S1 parameters installed, the same B0 refdata/accounts and initialization; do not merge with three-subscriber comparisons."
   ]
 }
