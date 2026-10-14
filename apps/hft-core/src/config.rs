@@ -383,6 +383,12 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
             "role/drain timeout differs from ECF1",
         ));
     }
+    if dry && setup.seq.allow_missing_standby != 1 {
+        errors.push(Error::config(
+            "EngineMismatch",
+            "paper mode has one virtual order connection; ECF1 must allow missing standby",
+        ));
+    }
     let risk = hft_risk::RiskParams::decode_blob(&risk_blob, &rd)
         .map_err(|e| one("RiskParams", format!("{e:?}")))?;
     let mut parsed = Vec::new();

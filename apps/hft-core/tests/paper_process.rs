@@ -41,6 +41,32 @@ fn core_048_sim_instance_boots_without_keys() {
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(20));
     }
+    let mut reader = hft_core::storage::reader(&hft_core::config::load(&path, true).unwrap().cfg).unwrap();
+    let (_, clock_ok, _) = hft_event::TimerCode::Sys(hft_event::SysTimer::ClockOk)
+        .encode()
+        .unwrap();
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "startup clock gate: {}",
+            diagnostic(&path, d.path())
+        );
+        assert!(
+            process.0.try_wait().unwrap().is_none(),
+            "{}",
+            diagnostic(&path, d.path())
+        );
+        match reader.poll() {
+            hft_journal::Next::Record(r) if r.hdr.kind == hft_event::EventKind::TIMER.0 => {
+                let t = r.read::<hft_event::Timer>().unwrap();
+                if t.owner == 1 && t.timer_id == clock_ok {
+                    break;
+                }
+            }
+            hft_journal::Next::Err(e) => panic!("{e:?}"),
+            _ => std::thread::sleep(Duration::from_millis(1)),
+        }
+    }
     let ctl = CtlClient::new(d.path().join("core.sock"), format!("cli:{user}"));
     let req = ctl.request(
         AccountSel::Name("paper".into()),
@@ -65,7 +91,6 @@ fn core_048_sim_instance_boots_without_keys() {
         "{result:?}; {}",
         diagnostic(&path, d.path())
     );
-    let mut reader = hft_core::storage::reader(&hft_core::config::load(&path, true).unwrap().cfg).unwrap();
     let mut placed = false;
     let mut ack = false;
     let mut canceled = false;

@@ -97,9 +97,12 @@ impl Feed {
                 ask_qty: Qty(q.qty_raw),
                 update_id: self.update,
             };
-            if self.out.free_hint() < 2 {
+            if self.out.free_hint() < 3 {
                 return Err(Error::runtime("PaperFeedFull", "feed ring exhausted", 3));
             }
+            let mut connection = state;
+            connection.inst = InstId(0);
+            let _ = self.out.try_push(FeedMsg::ConnState(connection));
             let _ = self.out.try_push(FeedMsg::ConnState(state));
             let _ = self.out.try_push(FeedMsg::Bbo(b));
         }
@@ -111,6 +114,7 @@ pub struct Gateway {
     pub reader: hft_journal::JournalReader,
     pub orders: Consumer<GwCmd>,
     pub replies: ByteProducer,
+    rd: &'static RefData,
     seen: u64,
     event_tsc: u64,
     awaiting: Option<u64>,
@@ -130,12 +134,14 @@ impl Gateway {
         reader: hft_journal::JournalReader,
         orders: Consumer<GwCmd>,
         replies: ByteProducer,
+        rd: &'static RefData,
     ) -> Self {
         Self {
             exchange,
             reader,
             orders,
             replies,
+            rd,
             seen: 0,
             event_tsc: 0,
             awaiting: None,
@@ -229,7 +235,7 @@ impl Gateway {
             self.exchange.advance(due);
         }
         self.exchange.drain_due(due, |r| {
-            io::rep_parts(&r.msg, r.bulk, |kind, parts| {
+            reply_parts(self.rd, &r.msg, r.bulk, |kind, parts| {
                 self.pending.push_back((kind, parts.concat()));
             });
         });
@@ -237,5 +243,24 @@ impl Gateway {
             return Err(Error::runtime("PaperReplies", "pending replies exhausted", 3));
         }
         Ok(busy)
+    }
+}
+
+/// Expand SimExchange's account-wide connection fact to its configured venue scope.
+pub fn reply_parts(rd: &RefData, msg: &RepMsg, bulk: &[u8], mut emit: impl FnMut(EventKind, &[&[u8]])) {
+    if let RepMsg::ConnState(c) = msg
+        && c.venue.0 == 0
+        && c.account.0 != 0
+    {
+        let venues = rd.account(c.account).venues;
+        for v in 1..64 {
+            if venues & (1u64 << v) != 0 {
+                let mut state = *c;
+                state.venue = VenueId(v);
+                io::rep_parts(&RepMsg::ConnState(state), &[], &mut emit);
+            }
+        }
+    } else {
+        io::rep_parts(msg, bulk, emit);
     }
 }

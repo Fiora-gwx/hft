@@ -144,15 +144,29 @@ fn core_012_control_adapter_reaches_live_sequencer() {
         },
     );
     let (ctl_tx, ctl_rx) = byte_ring(1048576).unwrap();
-    let (_hk_tx, hk_rx) = ring(1024).unwrap();
-    let (_sim_tx, sim_rx) = byte_ring(1048576).unwrap();
+    let (mut hk_tx, hk_rx) = ring(1024).unwrap();
+    let (mut sim_tx, sim_rx) = byte_ring(1048576).unwrap();
     let (sim_orders, _sim_rx) = ring(1024).unwrap();
     let (parsed_tx, parsed_rx) = Box::leak(Box::new(hft_rt::Mailbox::new())).split();
     let (retired_tx, retired_rx) = Box::leak(Box::new(hft_rt::Mailbox::new())).split();
-    let (_bbo_tx, bbo) = ring(1024).unwrap();
+    let (bbo_tx, bbo) = ring(1024).unwrap();
     let (_md_tx, md) = ring(1024).unwrap();
     let (_bulk_tx, bulk) = byte_ring(1048576).unwrap();
-    let (commands, _cmd_rx) = ring(1024).unwrap();
+    let (commands, cmd_rx) = ring(1024).unwrap();
+    let paper_rd = hft_refdata::RefData::load(l.rd.blob(), None).unwrap();
+    let paper = l.cfg.sim.as_ref().unwrap();
+    let mut exchange = hft_core::paper::exchange(paper, &paper_rd, clock.hz_milli).unwrap();
+    let mut feed = hft_core::paper::Feed {
+        venue: hft_types::VenueId::BINANCE_SPOT,
+        out: bbo_tx,
+        commands: cmd_rx,
+        quotes: paper.quotes.clone(),
+        subscribed: vec![false; paper.quotes.len()],
+        clock,
+        interval_ticks: 0,
+        next: 0,
+        update: 0,
+    };
     let env = io::Io {
         journal: MemJournal::new(l.setup.clock),
         clock,
@@ -198,6 +212,23 @@ fn core_012_control_adapter_reaches_live_sequencer() {
     )
     .unwrap();
     seq.step();
+    exchange.drain_due(hft_rt::tsc_now(), |r| {
+        hft_core::paper::reply_parts(&paper_rd, &r.msg, r.bulk, |kind, parts| {
+            assert!(io::write_record(&mut sim_tx, kind, parts));
+        });
+    });
+    let (_, timer_id, _) = hft_event::TimerCode::Sys(hft_event::SysTimer::ClockOk)
+        .encode()
+        .unwrap();
+    hk_tx.try_push(hft_event::HkMsg::Sys { timer_id }).unwrap();
+    for _ in 0..16 {
+        feed.poll(hft_rt::tsc_now()).unwrap();
+        assert!(!matches!(seq.step(), StepOutcome::Fatal(_)));
+    }
+    assert_eq!(
+        seq.engine().risk.mode.gate_bits(hft_types::AccountId(1)),
+        hft_risk::mode::gate_bits::ALL
+    );
     assert!(ctl.on_internal(
         hft_ctl::InternalCmd::Drain { cancel_resting: true },
         hft_rt::tsc_now()

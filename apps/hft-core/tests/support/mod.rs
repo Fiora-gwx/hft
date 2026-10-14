@@ -287,6 +287,7 @@ pub fn write(root: &Path, hot: &Path, user: Option<&str>) -> PathBuf {
     engine.gws.venues.clear();
     engine.feeds = VenueSet(1 << v.0);
     engine.seq.rings[7] = hft_sequencer::RingLimit::default();
+    engine.seq.allow_missing_standby = 1;
     engine.exec.default.force_slice.max_chunk_notional = Notional(100_000_000);
     let ecf = engine.encode_blob(1, HostClass::Dev2, 0);
     let principals = user.map_or_else(String::new, |u| {
