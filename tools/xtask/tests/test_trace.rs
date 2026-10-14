@@ -499,3 +499,38 @@ fn tool_180_optional_and_python() {
         }
     }
 }
+
+/// Scenario-family ids are traced by their stem (docs/tests/README.md §6): `b1_…` is B1, `b1_6_…` is
+/// table row B1.6 (not B1), `b_10_…` is B-10 (not B-1).
+#[test]
+fn scenario_family_stems() {
+    let f = trace_clean();
+    let mut spec = String::from("# 跨组件场景\n\n## 场景\n\n");
+    spec += &case(
+        "B-1",
+        "dst",
+        "M2",
+        "",
+        "`crates/hft-testkit/src/scenarios/b.rs::b_1_scn`",
+    );
+    spec += &case("B1", "dst", "M2", "", "`crates/s/tests/s.rs::b1_main_case`");
+    spec += &case("B-10", "table", "M2", "", "`crates/s/tests/s.rs::b_10_rows`");
+    spec += &case("BK-1", "dst", "M2", "", "`crates/s/tests/s.rs::bk_1_auto_fix`");
+    f.write("docs/tests/scenarios.md", &spec);
+    let tests = "#[test]\nfn b1_main_case() {}\n#[test]\nfn b1_6_row_six() {}\n\
+                 #[test]\nfn b_10_rows() {}\n#[test]\nfn bk_1_auto_fix() {}\nfn bk_1_helper() {}\n";
+    f.write("crates/s/tests/s.rs", tests);
+    let r = f.xtask(&["test-trace"]);
+    assert_eq!(r.code, 0, "stderr:\n{}", r.stderr);
+    for key in ["unimplemented", "extra", "inconsistent"] {
+        assert!(list(&r, key).is_empty(), "{key} not empty: {:?}", r.json);
+    }
+
+    // Only the row and B-10 remain: neither evidences B1 nor B-1's sibling ids.
+    f.replace("crates/s/tests/s.rs", "fn b1_main_case", "fn b1_7_row_seven");
+    f.replace("crates/s/tests/s.rs", "fn bk_1_auto_fix", "fn bk_10_auto_fix");
+    let r = f.xtask(&["test-trace"]);
+    assert_eq!(r.code, 0, "stderr:\n{}", r.stderr);
+    assert_eq!(ids(&r, "unimplemented"), ["B1", "BK-1"]);
+    assert!(list(&r, "inconsistent").is_empty(), "{:?}", r.json);
+}

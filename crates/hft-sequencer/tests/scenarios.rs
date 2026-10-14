@@ -836,7 +836,7 @@ fn lk_2_unaffordable_second_leg_rejects_open() {
 /// a1 side of account 1 must hold `link_notional × (1 + funds_buffer)` of free USDT net of its
 /// in-flight spot buys.
 #[test]
-fn lk_2_spot_second_leg_needs_free_quote() {
+fn lk_2_1_spot_second_leg_needs_free_quote() {
     fn b1_first_a1_second(hx: &Hx<'_>) -> OrderIntent {
         let mut it = b1_sell_open(hx);
         it.qty = q("0.01");

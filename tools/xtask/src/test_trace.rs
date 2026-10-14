@@ -6,6 +6,8 @@
 //! Evidence that a case is implemented, by level:
 //! - every automatic level: a test function whose name starts with the case number
 //!   (`<prefix>_<nnn>_…`; pytest `test_<prefix>_<nnn>_…`), not `#[ignore]`d unless the case is quarantined;
+//!   scenario-family ids (`B1`, `B-6`, `BK-1`, `MS-2a`, `INV-3`) use their lower-case stem with `-` → `_`
+//!   (`b1_…`, `b_6_…`, `bk_1_…`), the next segment not starting with a digit (`b1_6_…` is row B1.6);
 //! - `dst` additionally: a `Scenario::new("<id>", …)` registration (location = the enclosing function);
 //! - `bench`: a string literal equal to `基准名` in a bench file (location = the enclosing function);
 //! - `fuzz`: a function named `<prefix>_<nnn>_…` in a fuzz-target file.
@@ -31,6 +33,9 @@ use crate::{EXIT_ENV, EXIT_FAIL, EXIT_OK, EnvError, write_json};
 
 /// Test-function names that carry a case number (docs/tests §6 rule 3).
 static NUMBERED_FN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(test_)?([a-z]+)_([0-9]{3})_").unwrap());
+/// Component case ids (`OMS-014`); every other id (`B1`, `B-6`, `BK-1`, `MS-2a`, `INV-3`) is a
+/// scenario-family id whose test function is named by its stem (docs/tests §6).
+static COMPONENT_ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Z]+-[0-9]{3}$").unwrap());
 
 /// Path of the configuration file, relative to the repo root.
 pub const CONFIG: &str = "tools/xtask/test-trace.toml";
@@ -161,6 +166,17 @@ fn named_for(name: &str, stem: &str) -> bool {
     n == stem || n.strip_prefix(stem).is_some_and(|rest| rest.starts_with('_'))
 }
 
+/// A test function named for scenario-family case `stem` (`b1` → `b1_link_open_…`, `b_6` →
+/// `b_6_venue_…`). The segment after the stem must not start with a digit: that would be a table row
+/// (`b1_6_…` is row B1.6, not case B1) or a longer number (`b_10_…` is B-10, not B-1).
+pub fn scenario_named_for(name: &str, stem: &str) -> bool {
+    let n = name.strip_prefix("test_").unwrap_or(name);
+    n == stem
+        || n.strip_prefix(stem)
+            .and_then(|rest| rest.strip_prefix('_'))
+            .is_some_and(|desc| desc.chars().next().is_some_and(|c| !c.is_ascii_digit()))
+}
+
 /// The milestone of an automatic-level, live case whose extension (if any) is enabled; `None` for
 /// cases outside the trace. An unparsable milestone is a hard error.
 fn traced(case: &Case, cfg: &Config, errors: &mut Vec<String>) -> Option<Milestone> {
@@ -192,8 +208,14 @@ fn evidence(case: &Case, idx: &CodeIndex) -> Vec<(String, bool)> {
         let e = out.entry(loc).or_insert(true);
         *e = *e && ignored;
     };
+    let scenario_id = !COMPONENT_ID.is_match(&case.id);
     for f in &idx.fns {
-        let numbered = f.is_test && fn_case_id(&f.name).as_deref() == Some(case.id.as_str());
+        let numbered = f.is_test
+            && if scenario_id {
+                scenario_named_for(&f.name, &st)
+            } else {
+                fn_case_id(&f.name).as_deref() == Some(case.id.as_str())
+            };
         let fuzz = level == "fuzz" && is_fuzz_file(&f.file) && named_for(&f.name, &st);
         if numbered || fuzz {
             add(format!("{}::{}", f.file, f.name), f.ignored && !fuzz);
