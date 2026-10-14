@@ -63,7 +63,7 @@ pub use idtable::{IdCounters, IdEntry, IdErr, IdTable, exch_id_value};
 pub use kill::kill_admit;
 pub use rate::RateCounters;
 pub use raw::{Effect, RawCounters, RawLog, what as raw_what};
-pub use rest::AcctRestPools;
+pub use rest::{AcctConnections, AcctRestPools};
 pub use seq::{InstSeq, Verdict, judge};
 pub use session::{SessErr, SessEvent, SessionCfg, SessionDriver, SessionOp};
 pub use snap::{SnapDeps, SnapFetchTask, SnapRecHdr, SnapReq};

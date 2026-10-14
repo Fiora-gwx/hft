@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-15 | Fill/PartialFill.detail 按冻结 README 保留买卖方向，通用检查器拒绝零方向；同步旧测试冲突，产品线已有方向编码不变 | VPR-124，外来与迟到成交不得猜测方向 | hft-venue-proto 检查器、README、TESTS；[决定](../.agents/notes/proposed/testing/2026-10-15-fill-detail-contract.md) | 待评审(成交方向/资金归属) |
 | 2026-10-15 | Binance/Bitget 的 HTTP 403/408/418/429/5xx 优先于业务码,不生成 Reject/GONE/NotFound;429/418 仍执行各协议限速提示 | BIN-092、BGT-093;传输错误不能证明订单失败 | 两所错误映射、回报解码、README、TESTS;[决定](../.agents/notes/implemented/bug-fix/2026-10-15-account-page-and-transport-evidence.md) | 待评审(订单) |
 | 2026-10-15 | warm 账户页面完整校验后原子替换对应 State;撤单回执绑定请求订单,重复资产/订单与坏游标拒绝;Bitget 空资金费页带 cursor 不再结束窗口 | BIN-006/153、BGT-006/150/336;部分页面污染与资金费遗漏 | 两所 account、Bitget funding、README、TESTS | 待评审(账户/资金) |
 | 2026-10-15 | 保活响应的 UserStreamEnded 处置实际私有归属连接；逐品种死手在无 live inst 时不发送；轮换等待恰满上限时退出忙等待，错峰到期的 standby 只补建、不提升为 primary。驱动内会话 UID 查询有界重试且失败不授予身份通过；池化补帧超时退役连接、超大响应整批失败 | VEN-234/235/236/237/314/151，错误连接退役与边界行为回归 | hft-venue、hft-venue-proto 与 hft-core 快照装配 | 待评审(账户/订单/连接健康) |

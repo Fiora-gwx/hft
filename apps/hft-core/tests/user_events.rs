@@ -1,5 +1,5 @@
 //! C12's transport/OMS behavior on the supported Spot adapter. The frozen
-//! OKX protocol matrix and raw Meta Note cadence remain separate acceptance work.
+//! OKX protocol matrix remains separate acceptance work; Venue diagnostics reach the journal.
 #[path = "../../../crates/hft-sequencer/tests/common/mod.rs"]
 mod common;
 mod net_support;
@@ -74,6 +74,19 @@ fn c12_ignorable_and_unknown_user_events_only_counted() {
     let count = gateway.runtime.counters();
     assert_eq!(count.user_evt_ignored, 10_000);
     assert_eq!(count.user_evt_unknown, 10_000);
+    let notes: Vec<_> = h
+        .recs()
+        .iter()
+        .filter(|r| r.kind == hft_event::EventKind::NOTE)
+        .filter_map(|r| r.read::<hft_event::Note>())
+        .filter(|n| n.code == hft_venue::codes::UNKNOWN_USER_EVENT)
+        .collect();
+    assert_eq!(notes.len(), 11);
+    for note in notes {
+        assert_eq!(note.source, hft_event::NoteSource::Venue);
+        let bytes: Vec<_> = note.v[2..6].iter().flat_map(|v| v.to_le_bytes()).collect();
+        assert_eq!(&bytes[..12], b"evt_new_type");
+    }
     assert_eq!(gateway.builds, builds);
     assert!(!h.io_ref().out[first..].iter().any(|(_, c)| c.op == GwOp::Query));
     for d in &live {

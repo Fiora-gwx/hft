@@ -731,6 +731,8 @@ note Oms 20 OmsHedgeNakedCapped
 note Oms 21 OmsResumeRetry
 note Oms 22 OmsResumeTimeout
 note Oms 23 OmsAnomaly
+note Venue 1 VenueUnknownUserEvent
+note Venue 2 VenueFeeRuleDeviation
 note Ledger 1 RoundClosed
 note Ledger 2 Adjusted
 note Ledger 3 BaselineSet

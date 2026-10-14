@@ -366,6 +366,11 @@ pub trait VenueProtocol: Sized + 'static {
     /// Strips the venue shape and decodes; not ours → `None`.
     fn parse_cid(bytes: &[u8]) -> Option<ClientOrderId>;
     fn classify_report(op: MsgOp, head: &[u8]) -> Self::ReportClass;
+    /// Non-sensitive event/topic name for an unknown-event Note. Never return the whole frame,
+    /// login response, credential, or order payload. Runtime copies at most 32 bytes.
+    fn report_event_name(_payload: &[u8]) -> &[u8] {
+        &[]
+    }
     fn decode_report(
         rd: &RefData,
         ctx: &mut Self::GwCtx,

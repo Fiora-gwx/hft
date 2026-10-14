@@ -751,12 +751,16 @@ VEN-341 用以本 crate 为根的 `cargo tree` 检查依赖闭包与特性,不�
 
 REST 在途项保存发送时的完整 ClientOrderId；回包省略 epoch 时只补该请求的 epoch，传输失败产生的 Unknown 也使用该身份。槽复用或 SetEpoch 不改变已发送请求的归属；没有匹配在途证据的 Unknown 保持 UNRESOLVED，不能借用当前槽的 epoch。
 
+`AcctFetchTask::set_credential` 仅允许空闲账户更新凭证；编码通过 `acct_request_signed` 借用凭证，Templates 不保留秘密。失败和超时的 raw 记录使用提交时连接号；凭证、签名与登录正文不进入 raw journal。
+
+诊断通过 `RepMsg::Note` 交付，码登记在 `src/codes.rs`。`v[0]` 为 venue、`v[1]` 为 account；未知事件的 `v[2..6]` 是事件名前 32 字节的零填充小端编码，事件名由 `report_event_name` 提供，不能包含用户字段或整个载荷。费用偏离不修改成交或费用事实。
+
 ## 已知限制与后续工作
 
 - 有界 `hold` 按账户暂存无法归属的成交,收到有效 epoch 的 Ack 后按到达顺序释放;超时/满载遵循 §4。终态只影响同 account/epoch/gen 的槽镜像,IdTable 淘汰后重新定位可能移动的条目。VEN-294 的前置“4 条终态容量中保留 8 条终态”不可达;测试以 4 条终态 + 4 条活动条目验证相同满表拒绝边界,该前置修订待负责人评审。
 - VEN-073 的“md 环容量 4”与 §1 的读取前预留 `FRAME_EVENTS_MAX = 64` 不相容;测试使用容量 128 的环、两帧各 64 笔成交填满后验证 BBO 隔离。该前置修订待负责人评审,不据此声称容量 4 可运行。
 
-- **实现范围**:BBO、分档快照、公共 REST 补帧、raw journal、gw 出环/kill/限速/发送/撤单展开/回报/成交暂存、主备切换与心跳、warm 账户启动。`AcctSched` 与有界 `AcctFetchTask<P: AcctProtocol, T: AcctTransport>` 覆盖完整账户查询序列、失败退避与分块 raw；`AcctRestPools` 是 keep-alive 传输适配器。gw 支持 rep-bulk、私有频道归属/回执切换、内联 `RestPool`、空闲检测与 `CANCEL_ALL_SWEEP`。具体产品线的 `AcctProtocol` 实现及应用账户轮询迁移、去重环重建与完整契约/性能验收仍待完成。未知用户事件与费用偏离的 Note 尚缺 rep/接收端接线。池化补帧接入应用，驱动内 bootstrap/UID REST 支持有界重试；应用会话仍经账户客户端调用 `start_prepared` / `verified_identity`，缺少独立会话 key 的 UID 证据时交接 Failed 状态。用例里程碑保持 TESTS.md 的定义。
+- **实现范围**:BBO、分档快照、公共 REST 补帧、raw journal、gw 出环/kill/限速/发送/撤单展开/回报/成交暂存、主备切换与心跳、warm 账户启动。`AcctSched` 与有界 `AcctFetchTask<P: AcctProtocol, T: AcctTransport>` 覆盖完整账户查询序列、失败退避与分块 raw；`AcctRestPools` 通过 `AcctConnections` 管理固定区间的建连、交接与退役，源地址取账户配置；退役环满时保留连接所有权并停止补建。gw 支持 rep-bulk、私有频道归属/回执切换、内联 `RestPool`、空闲检测与 `CANCEL_ALL_SWEEP`。具体产品线的 `AcctProtocol` 实现及应用账户轮询迁移与去重环重建仍待完成。未知用户事件与费用偏离的 Note 经 rep 环交给 live driver，按 Meta 分类记录；VEN-361–365 基准可执行，真实最大响应采集与参考机延迟验收待完成。池化补帧接入应用，驱动内 bootstrap/UID REST 支持有界重试；应用会话仍经账户客户端调用 `start_prepared` / `verified_identity`，缺少独立会话 key 的 UID 证据时交接 Failed 状态。用例里程碑保持 TESTS.md 的定义。
 - **深度只有前 N 档**:core 的深度是分档快照(各所档位上限不同,见各 venue README);需要全深度的策略触发可选扩展"增量深度与快照重同步"(§3),它的深度连接是单路,一条连接断开 = 该连接上所有 inst 重同步;双路合并是再一层可选扩展(开发备忘)。
 - **gw 负责填帧**:OMS 只产出数值化 `OrderDecision`,sequencer 投影为 `GwCmd`,venue 特定的帧编码在 gw 线程完成(sequencer 不依赖任何 `venue-*`,各 venue 并行填帧)。
 - **refdata 变更 = 重启**:新增/移除 inst 走 ConfigBlob + Drain + 重启;可选扩展(refdata 热替换,触发条件:重启窗口影响交易)时 `rd` 参数接口不变,运行时需增加订阅差分。

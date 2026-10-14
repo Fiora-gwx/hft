@@ -16,6 +16,10 @@ pub struct AcctResponse<'a> {
 }
 /// A production implementation uses endpoint-indexed hft-net pools; tests inject wire responses.
 pub trait AcctTransport {
+    /// Bounded connection handover/reclamation on the owning warm task.
+    fn maintain(&mut self, _now: u64) -> bool {
+        false
+    }
     fn submit(&mut self, req: &RestReqBuf, tag: u64, now: u64) -> Result<ConnId, RestErr>;
     fn poll(&mut self, now: u64) -> Option<Result<AcctResponse<'_>, RestErr>>;
     fn idle_check(&mut self, now: u64);
@@ -41,6 +45,7 @@ impl<P: AcctProtocol, T: AcctTransport> core::fmt::Debug for AcctAccount<P, T> {
 }
 struct Worker<P: AcctProtocol, T: AcctTransport> {
     spec: AcctAccount<P, T>,
+    credential: hft_venue_proto::Credential,
     ctx: P::AcctCtx,
     scratch: P::AcctScratch,
     req: Option<AcctReq>,
@@ -59,6 +64,7 @@ struct Worker<P: AcctProtocol, T: AcctTransport> {
     finished: bool,
     deadline: u64,
     sent: u64,
+    submitted_conn: ConnId,
 }
 pub struct AcctFetchTask<P: AcctProtocol, T: AcctTransport> {
     rd: &'static RefData,
@@ -123,6 +129,7 @@ impl<P: AcctProtocol, T: AcctTransport> AcctFetchTask<P, T> {
             }
             workers.push(Worker {
                 spec,
+                credential: hft_venue_proto::Credential::default(),
                 ctx: P::AcctCtx::default(),
                 scratch: P::AcctScratch::default(),
                 req: None,
@@ -141,6 +148,7 @@ impl<P: AcctProtocol, T: AcctTransport> AcctFetchTask<P, T> {
                 finished: false,
                 deadline: 0,
                 sent: 0,
+                submitted_conn: ConnId(0),
             });
         }
         Ok(Self {
@@ -164,6 +172,23 @@ impl<P: AcctProtocol, T: AcctTransport> AcctFetchTask<P, T> {
                 .spec
                 .transport,
         )
+    }
+    /// Startup only; the credential belongs to the warm worker, never to protocol state.
+    pub fn set_credential(
+        &mut self,
+        account: AccountId,
+        credential: hft_venue_proto::Credential,
+    ) -> Result<(), InitErr> {
+        let w = self
+            .workers
+            .iter_mut()
+            .find(|w| w.spec.account == account)
+            .ok_or(InitErr::DepsMismatch)?;
+        if w.req.is_some() {
+            return Err(InitErr::DepsMismatch);
+        }
+        w.credential = credential;
+        Ok(())
     }
     pub fn poll_once(&mut self, now: u64) -> LoopStat {
         let mut stat = LoopStat::default();
@@ -202,6 +227,8 @@ impl<P: AcctProtocol, T: AcctTransport> AcctFetchTask<P, T> {
         {
             self.pending_req = None;
             w.req = Some(r);
+            w.submitted_conn = ConnId(0);
+            w.sent = 0;
             w.queries = P::acct_queries(r.kind);
             w.next = 0;
             w.active = None;
@@ -217,6 +244,7 @@ impl<P: AcctProtocol, T: AcctTransport> AcctFetchTask<P, T> {
             self.last_idle = now;
         }
         for w in &mut self.workers {
+            stat.did_work |= w.spec.transport.maintain(now);
             if idle {
                 w.spec.transport.idle_check(now);
             }
@@ -257,7 +285,7 @@ impl<P: AcctProtocol, T: AcctTransport> AcctFetchTask<P, T> {
                     w.raw_pos = 0;
                     let mut status = 0;
                     let mut ts = Timestamps::default();
-                    let mut conn = ConnId(0);
+                    let mut conn = w.submitted_conn;
                     match result {
                         Ok(r) => {
                             status = r.status;
@@ -334,7 +362,7 @@ impl<P: AcctProtocol, T: AcctTransport> AcctFetchTask<P, T> {
                         part: 0,
                         parts: 1,
                         fail: AcctFail::None,
-                        conn: ConnId(0),
+                        conn: w.submitted_conn,
                         http_status: 0,
                         sent_tsc: w.sent,
                         ts: Timestamps::default(),
@@ -366,7 +394,7 @@ impl<P: AcctProtocol, T: AcctTransport> AcctFetchTask<P, T> {
                         part: 0,
                         parts: 1,
                         fail: w.fail,
-                        conn: ConnId(0),
+                        conn: w.submitted_conn,
                         http_status: 0,
                         sent_tsc: w.sent,
                         ts: Timestamps::default(),
@@ -394,7 +422,17 @@ impl<P: AcctProtocol, T: AcctTransport> AcctFetchTask<P, T> {
                     unix_ms: utc / 1_000_000,
                     unix_us: utc / 1000,
                 };
-                if P::acct_request(self.rd, &w.spec.templates, req.account, q, &clk, &mut wire).is_err() {
+                if P::acct_request_signed(
+                    self.rd,
+                    &w.spec.templates,
+                    &w.credential,
+                    req.account,
+                    q,
+                    &clk,
+                    &mut wire,
+                )
+                .is_err()
+                {
                     w.fail = AcctFail::Decode;
                     continue;
                 }
@@ -413,7 +451,8 @@ impl<P: AcctProtocol, T: AcctTransport> AcctFetchTask<P, T> {
                 wire.body.clear();
                 wire.path_query.clear();
                 match result {
-                    Ok(_) => {
+                    Ok(conn) => {
+                        w.submitted_conn = conn;
                         w.active = Some(q);
                         w.next += 1;
                         w.waiting = true;

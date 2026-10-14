@@ -61,3 +61,7 @@ path = "tests/alloc.rs"
 [[test]]
 name = "venue"
 path = "tests/main.rs"
+
+[[bench]]
+name = "acct"
+harness = false

@@ -575,3 +575,23 @@ fn ven_394_bootstrap_rest_precedes_endpoint() {
     net.c()
         .reclaim(pool.retire(ConnId(120), hft_net::ErrBits::empty()).unwrap());
 }
+
+/// Authenticate a scripted socket before handing it to the measured gateway. The login frame
+/// really contains the sentinel; only the authenticated connection crosses to the hot runtime.
+pub(crate) fn login_handoff(net: &mut Net, r: BuildReq) -> hft_net::Handoff {
+    stub::set_cfg(|c| c.login = LoginMode::One);
+    let mut drv = SessionDriver::<StubProto>::new(scfg(), vec![(A1, cred())]);
+    let (job, mut peer) = start(&mut drv, net, r, Some(A1));
+    let mut authenticated = false;
+    let event = run(&mut drv, net.c(), job, &mut peer, 100, |text| {
+        assert!(text.as_bytes().windows(SENTINEL.len()).any(|w| w == SENTINEL));
+        authenticated = true;
+        Some("LOGIN_OK".into())
+    });
+    stub::set_cfg(|c| c.login = LoginMode::None);
+    assert!(authenticated);
+    let SessEvent::Ready(h) = event else {
+        panic!("login failed: {event:?}")
+    };
+    h
+}

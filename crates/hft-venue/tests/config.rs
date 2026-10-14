@@ -146,7 +146,7 @@ fn snap_err(cfg: SnapCfg) -> Result<(), InitErr> {
         out: [Some(op), None],
         clock: clock(),
     };
-    SnapFetchTask::<StubProto>::new(cfg, deps, ()).map(|_| ())
+    SnapFetchTask::<StubProto>::new(cfg, deps, Default::default()).map(|_| ())
 }
 
 fn gw_err(cfg: GwCfg) -> Result<(), InitErr> {
@@ -495,7 +495,7 @@ fn ven_016_rotate_margin() {
             clock: clock(),
         };
         assert_eq!(
-            SnapFetchTask::<StubProto>::new(SnapCfg::default(), deps, ()).map(|_| ()),
+            SnapFetchTask::<StubProto>::new(SnapCfg::default(), deps, Default::default()).map(|_| ()),
             want
         );
         assert_eq!(acct_err(rd, A1), want);

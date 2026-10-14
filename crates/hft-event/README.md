@@ -888,6 +888,7 @@ pub enum RepMsg {                    // rep-<venue> 环与 sim-gw 的 rep-sim �
     ExternalFill(ExternalFill),
     AccountConfigReport(AccountConfigReportHdr), // 其后 hdr.n_lev 条 LeverageItem 在配套的 rep-<venue>-bulk ByteSpsc 里
     MarginReport(MarginReportHdr),   // 其后 hdr.n 条 MarginItem 在配套的 rep-<venue>-bulk ByteSpsc 里,sequencer 按此处的顺序取
+    Note(Note),                     // Venue 诊断，live driver 记录为 Meta，不参与业务决策
 }
 pub enum HkMsg {                     // hk 环元素(→ sequencer;唯一写者是 housekeeping 线程,启动路径在 housekeeping 线程启动之前写完;方向归 hft-sequencer 环表);size_of ≤ 128 B(编译期断言)
     ClockStatus(ClockStatus),        // Meta,原样记录

@@ -44,6 +44,11 @@ fn request_fields(r: &RestReqBuf) -> Vec<Vec<u8>> {
         r.body.as_slice().to_vec(),
     ]
 }
+impl<P: crate::VenueProtocol> GoldenDriver<P> {
+    pub fn compare_request(name: &str, actual: &RestReqBuf, expected: &RestReqBuf) -> Result<(), GoldenFail> {
+        Self::compare(name, &request_fields(actual), &request_fields(expected))
+    }
+}
 impl<P: AcctProtocol> GoldenDriver<P> {
     /// Each expected request and report must be authored independently of the implementation.
     #[allow(clippy::too_many_arguments)]

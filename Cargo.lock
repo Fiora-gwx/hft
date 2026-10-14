@@ -1705,6 +1705,7 @@ dependencies = [
  "criterion",
  "hft-event",
  "hft-refdata",
+ "hft-testkit",
  "hft-types",
  "xxhash-rust",
  "zerocopy",

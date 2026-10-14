@@ -180,7 +180,7 @@ fn vpr_076_unknown_codes_do_not_become_business_rejects() {
                 ..Default::default()
             },
         }];
-        check_unknown_codes::<FakePerp>(&samples, &rd, &mut ()).unwrap();
+        check_unknown_codes::<FakePerp>(&samples, &rd, &mut Default::default()).unwrap();
     }
 }
 #[test]
@@ -201,7 +201,7 @@ fn vpr_108_ignored_and_unknown_are_successful_empty_decodes() {
                 ..Default::default()
             },
         };
-        check_reports::<FakePerp>(20, &[s], &rd, &mut ()).unwrap();
+        check_reports::<FakePerp>(20, &[s], &rd, &mut Default::default()).unwrap();
     }
 }
 #[test]

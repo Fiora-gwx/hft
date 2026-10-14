@@ -53,7 +53,7 @@ impl Harness {
                 out: [Some(out), None],
                 clock: clock(),
             },
-            (),
+            Default::default(),
             pool,
         )
         .unwrap();

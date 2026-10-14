@@ -317,10 +317,114 @@ fn ven_369_gw_idle_8sock(c: &mut Criterion) {
     stub::log_enabled(true);
 }
 
+// Synthetic bounded path measurements; production capture coverage is tracked separately.
+fn report_bench(c: &mut Criterion, name: &str, payload: &[u8], margin: bool) {
+    stub::set_cfg(|c| *c = Default::default());
+    stub::log_enabled(false);
+    let mut h = quiet_gw(&[A1]);
+    let (bulk, mut tail) = hft_rt::byte_spsc(1 << 20, hft_rt::Backing::Heap).unwrap();
+    h.rt.set_rep_bulk(bulk);
+    let mut t = 10_000_000;
+    c.bench_function(name, |b| {
+        b.iter_custom(|iters| {
+            let mut total = Duration::ZERO;
+            for _ in 0..iters {
+                t += 1;
+                let bytes = h.net.peer(ConnId(112)).frames(&[ws_ref::text(payload)]);
+                h.rt.conn(ConnId(112))
+                    .unwrap()
+                    .script()
+                    .unwrap()
+                    .push_recv(RecvStep::data(t, t, bytes));
+                let start = Instant::now();
+                std::hint::black_box(h.rt.poll_once(t));
+                total += start.elapsed();
+                let rows = h.reps();
+                if margin {
+                    assert!(
+                        rows.iter()
+                            .any(|r| matches!(r,hft_event::RepMsg::MarginReport(h) if h.n==1024))
+                    );
+                    assert_eq!(tail.peek().unwrap().len(), 16384);
+                    tail.advance();
+                }
+                h.raw.prepare();
+            }
+            total
+        })
+    });
+    stub::log_enabled(true);
+}
+fn ven_361_gw_external_fill(c: &mut Criterion) {
+    report_bench(c, "venue_gw_external_fill", b"X|external", false);
+}
+fn ven_362_gw_skip_event(c: &mut Criterion) {
+    report_bench(c, "venue_gw_skip_event", b"E|listenKeyExtended", false);
+    report_bench(c, "venue_gw_skip_event_unknown", b"E|fooBar", false);
+}
+fn ven_363_gw_margin_push(c: &mut Criterion) {
+    report_bench(c, "venue_gw_margin_push", b"MP|1024", true);
+}
+fn ven_364_gw_acct_apply_16k(c: &mut Criterion) {
+    use hft_venue::{AcctFail, AcctRecHdr};
+    stub::log_enabled(false);
+    let mut h = quiet_gw(&[A1]);
+    let mut record = vec![0; 80 + 16384];
+    let mut t = 10_000_000u64;
+    let (queries, mut requests) = hft_rt::spsc(8, hft_rt::Backing::Heap).unwrap();
+    h.rt.set_account_queries(queries);
+    for _ in 0..8 {
+        h.poll(t);
+    }
+    let request = requests.try_pop().unwrap();
+    AcctRecHdr {
+        seq_no: request.seq_no,
+        account: A1,
+        what: 1,
+        kind: request.kind,
+        step: 0,
+        part: 0,
+        parts: 1,
+        fail: AcctFail::None,
+        conn: ConnId(80),
+        http_status: 200,
+        sent_tsc: t,
+        ts: hft_net::Timestamps {
+            rx_tsc: t,
+            ..Default::default()
+        },
+        req_len: 0,
+        body_len: 16384,
+    }
+    .write(&mut record)
+    .unwrap();
+    c.bench_function("venue_gw_acct_apply_16k", |b| {
+        b.iter_custom(|iters| {
+            let mut total = Duration::ZERO;
+            for _ in 0..iters {
+                t += 1;
+                h.acct
+                    .reserve(record.len() as u32)
+                    .unwrap()
+                    .copy_from_slice(&record);
+                h.acct.commit();
+                let start = Instant::now();
+                std::hint::black_box(h.rt.poll_once(t));
+                total += start.elapsed();
+                h.reps();
+                assert_eq!(h.rt.counters().report_decode_err, 0);
+                h.raw.prepare();
+            }
+            total
+        })
+    });
+    stub::log_enabled(true);
+}
+
 criterion_group!(
     name = benches;
     config = Criterion::default().sample_size(20).measurement_time(Duration::from_secs(2)).warm_up_time(Duration::from_millis(300));
     targets = ven_354_gw_place_loopback, ven_355_gw_place_mem, ven_356_gw_report_path, ven_357_gw_drain_during_burst,
-        ven_358_idtable, ven_359_kill_admit, ven_369_gw_idle_8sock
+        ven_358_idtable, ven_359_kill_admit, ven_361_gw_external_fill, ven_362_gw_skip_event, ven_363_gw_margin_push, ven_364_gw_acct_apply_16k, ven_369_gw_idle_8sock
 );
 criterion_main!(benches);

@@ -423,6 +423,9 @@ macro_rules! venue_impl {
             fn classify_report(op: MsgOp, head: &[u8]) -> $rep {
                 reports::ClassifyReport::classify_report(op, head)
             }
+            fn report_event_name(payload: &[u8]) -> &[u8] {
+                reports::report_event_name(payload)
+            }
             fn decode_report(
                 rd: &RefData,
                 ctx: &mut GwCtx,

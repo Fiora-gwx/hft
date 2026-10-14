@@ -38,6 +38,20 @@ pub trait AcctProtocol: VenueProtocol {
         clock: &WallClock,
         out: &mut RestReqBuf,
     ) -> Result<(), EncodeErr>;
+    /// Borrow the account's REST credential for this request only. Templates and contexts must
+    /// never retain it. Unsigned test protocols may use the compatibility implementation.
+    fn acct_request_signed(
+        rd: &RefData,
+        t: &Self::Templates,
+        credential: &crate::Credential,
+        account: AccountId,
+        query: AcctQuery,
+        clock: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<(), EncodeErr> {
+        let _ = credential;
+        Self::acct_request(rd, t, account, query, clock, out)
+    }
     fn acct_decode(
         rd: &RefData,
         ctx: &mut Self::AcctCtx,

@@ -78,7 +78,7 @@ fn ven_155_snapshot_success_and_failures() {
                 out: [Some(out), None],
                 clock: clock(),
             },
-            (),
+            Default::default(),
         )
         .unwrap();
         task.attach(

@@ -470,11 +470,11 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`FakePerp`;每行一组输入与期望输出(`tests/data/fake/encode/`)
-- 实现:`crates/hft-venue-proto/tests/testkit.rs::vpr_048_golden_encoders`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_048_golden_encoders_compare_every_wire_field`
 
 | 行 | 方法 | 期望 |
 |---|---|---|
-| VPR-048.1 | `encode`(Place、Cancel、Amend、CancelAll、Query 各一) | 五个帧与期望逐字节相同 |
+| VPR-048.1 | `encode`(Place、Cancel、Amend、CancelAll、Query 各一) | 四个 WS 帧逐字节相同;REST Query 返回 `Unsupported(Query)`，由 VPR-048.7 验证 REST 编码 |
 | VPR-048.2 | `encode_batch`(`FakePerp` 支持,2 条 Place) | 帧逐字节相同;`Minimal` 同输入返回 `Unsupported(Place)` |
 | VPR-048.3 | `render_cid` | 写入字节数与内容同期望,规范 24 位文本位于末尾 |
 | VPR-048.4 | `login`、`subscribe`、`private_subscribe` | 输出缓冲与期望逐字节相同 |
@@ -692,7 +692,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `check_hot_alloc::<FakePerp>(samples, alloc_count)`
 - 期望:
   - 通过。检查内容:预热一轮后,`classify`、`peek`、`decode_md`、`encode`、`classify_report`、`decode_report`、`acct_decode` 的分配次数为 0;响应中 refdata 之外的 200 个符号不出现在 `acct_finish` 的报告里
-- 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_074_check_hot_alloc_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_074_hot_methods_and_large_account_decode_do_not_allocate`
 
 ### VPR-075 check_hot_alloc 检出在 decode_md 里分配的实现
 
@@ -771,7 +771,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `check_session::<FakePerp>(cfg, cred)`
 - 期望:
   - 通过。检查内容:`login`、`private_subscribe`、`endpoint`、`bootstrap`、`acct_request`、`dead_man_refresh`、`session_identity_request`、`encode`、`encode_rest`、`session_keepalive_request`、`ro_request` 的输出都不含哨兵字节串;含签名的 `RestReqBuf.redacted == true`,`snapshot_request`/`bbo_snapshot_request` 的 `redacted == false`;每个 `Role`:`heartbeat(role).ping == WsPing` ⇔ `app_ping(role, …) == 0`;`routes()` 的每条路由 `endpoint(Md, route, …)` 返回 `Ok`;`bootstrap(Md, cfg, None)` 为 `None` 时 `endpoint` 的 `boot` 参数传 `None` 也成功
-- 实现:`crates/hft-venue-proto/tests/contract_session.rs::vpr_080_check_session_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_080_session_secrets_redaction_and_heartbeat`
 
 ### VPR-081 check_session 检出把私钥材料写进输出的实现
 
@@ -819,7 +819,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `check_cum::<FakePerp>(samples)`
 - 期望:
   - 通过。检查内容:`OrderEvent.cum_filled` 依次 0.1、0.4、0.6(重复的 t2 不产出成交增量),单调不减,最终 = 0.6;每条成交类事件 `avg_px > 0`;`QueryResult{cum_filled: 0.6, avg_px: 100.5}`
-- 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_084_check_cum_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_084_cumulative_fills_queries_and_average`
 
 ### VPR-085 check_cum 检出重复成交被累计两次
 
@@ -950,7 +950,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `check_fee_asset::<FakePerp>(samples)`
 - 期望:
   - 通过。检查内容:带费用成交的 `fee == 0.05`、`fee_asset == USDT`;不带费用的 `fee == 0`、`fee_asset == ASSET_NONE`;晚到费用产出 `OrderEvent{what: FeeOnly, qty: 0, fee: 0.02}`;全部样本的输出里没有 `qty == 0` 的 `Fill`/`PartialFill`;BNB 成交 `fee_rule_deviation == true` 且事件 `fee_asset == BNB`
-- 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_094_check_fee_asset_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_094_actual_fees_rebates_and_late_fee`
 
 ### VPR-095 check_fee_asset 检出用 qty = 0 的 Fill 表达晚到费用
 
@@ -988,7 +988,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `check_cid::<FakePerp>(samples)`
 - 期望:
   - 通过。检查内容:`render_cid` 写 26 B,末 24 B = `ClientOrderId::encode` 的文本;`parse_cid(render)` 往返相等;`parse_cid(b"web_123")` 与 `parse_cid` 校验位错的文本都为 `None`;带 epoch 4、5 的回报分别产出 `OrderEvent{epoch: 4}`、`{epoch: 5}`;不带 client id 的回报 `slot == SlotId::UNRESOLVED` 且 sink 收到 `exch_id(key, None)`;Ack 回报的 `ReportOutcome.req == Some(ReqRef{slot, gen, op: Place})`;同一 `GwCmd` 以 `WallClock{unix_ms: 0, …}` 与 `{unix_ms: 1, …}` 编码,只有时间字段不同;inst 不属于本 venue → `Err(UnknownInst)`;输出缓冲 8 B → `Err(FieldOverflow)`;需要 exch id 的 Amend 且 `exch_order_id = 0` → `Err(UnknownTarget)`
-- 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_097_check_cid_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_097_client_identity_comes_from_wire`
 
 ### VPR-098 check_cid 检出用当前 epoch 代替 client id 里 epoch 的实现
 
@@ -1022,7 +1022,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`FakePerp` 以能力表的 `funding_settle` 取值分三种配置;样本:带 symbol 的实收付推送(inst 201,−1.25 USDT,结算时刻 T)、只有余额变化的资金费推送(−1.25 USDT,时刻 T);`T = 1_700_006_400_000_000_000`
-- 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_100_check_funding_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_100_funding_capability_scope_and_no_synthesis`
 
 | 行 | `funding_settle` | 期望(`check_funding` 通过,且以下输出) |
 |---|---|---|
@@ -1050,7 +1050,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`FakeSpot`、`FakePerp`;`AccountMeta.venue_uid = "U1"`;能力表要求单向持仓、全仓、多资产关、`fee_asset_rule = Quote`;每行一组 Config 响应(其余项满足要求)
-- 实现:`crates/hft-venue-proto/tests/contract_acct.rs::vpr_102_check_account_config_bits`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_102_config_mismatch_bits_and_observed_leverage`
 
 | 行 | 响应差异 | 期望 `AccountConfigReport` |
 |---|---|---|
@@ -1088,7 +1088,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`FakePerp` 的 Margin 序列(`margin_data = Poll`)与推送(`margin_data = Push`)各一套样本;`Rate` 指数 −9
-- 实现:`crates/hft-venue-proto/tests/contract_acct.rs::vpr_104_check_margin_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_104_margin_ratio_rounds_up_and_adl_is_normalized`
 
 | 行 | 输入 | 期望 |
 |---|---|---|
@@ -1125,7 +1125,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`FakePerp`(`own_liquidation_marker` = client id 前缀 `"liq_"`;声明"我方订单的成交推送必带 client id");每行一条成交推送
-- 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_106_check_external_fill_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_106_external_marker_precedes_system_client_id`
 
 | 行 | 成交推送 | 期望 |
 |---|---|---|
@@ -1185,7 +1185,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`FakePerp`;每行一个新 `GwCtx`
-- 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_110_check_dedup_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_110_trade_fee_funding_and_balance_dedup`
 
 | 行 | 输入序列 | 期望 |
 |---|---|---|
@@ -1247,7 +1247,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`FakePerp`(`bbo_probe = AppText`,`bbo_snapshot_request` 返回 `Ok(true)`);`FakeSpot`(默认实现)
-- 实现:`crates/hft-venue-proto/tests/contract_md.rs::vpr_114_check_bbo_refresh_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_114_refresh_batch_identity_and_capacity`
 
 | 行 | 产品线 | 期望 |
 |---|---|---|
@@ -1283,7 +1283,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `check_snapshot_isolation::<FakePerp>(samples)`
 - 期望:
   - 通过。检查内容:同一快照响应在全新 `FeedCtx` 与"已解码 10⁴ 条行情的 `FeedCtx`"上的输出逐字节相同;在一个 `FeedCtx` 上穿插快照解码前后,`decode_md` 对同一行情序列的输出逐字节相同;`decode_snapshot` 返回的 `SnapshotInfo{inst: 201, snap_id: 快照序号, levels: 1000}`
-- 实现:`crates/hft-venue-proto/tests/contract_md.rs::vpr_116_check_snapshot_isolation_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_116_snapshot_context_isolation_and_thousand_levels`
 
 ### VPR-117 check_snapshot_isolation 检出共享状态的实现
 
@@ -1337,7 +1337,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `check_acct_isolation::<FakePerp>(samples)`
 - 期望:
   - 通过。检查内容:同一组响应在全新 `AcctCtx` 与"已运行 10³ 个序列的 `AcctCtx`"上产出的报告逐字节相同(该所声明跨序列沿用的字段除外);穿插 10⁴ 条 `decode_report` 前后,账户查询输出不变;`push_fallback` 序列产出一份独立完整的 `MarginReport`,之后下一条推送产出的报告与未执行 fallback 时逐字节相同;`AcctCtx::default()` 构造的上下文可直接使用
-- 实现:`crates/hft-venue-proto/tests/contract_acct.rs::vpr_120_check_acct_isolation_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_120_account_and_report_contexts_are_independent`
 
 ### VPR-121 check_acct_isolation 检出共享状态的实现
 
@@ -1383,7 +1383,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`FakePerp`(`stale_guard = RecvWindow{default_ms: 5000}`);查询响应"订单不存在"
-- 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_123_query_not_found_shape`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_123_not_found_is_query_result`
 
 | 行 | 实现 | 期望 |
 |---|---|---|
@@ -1396,7 +1396,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`FakePerp`;`codes.rs` 把 `-2011` 登记为确定拒绝且属 `GONE` 类,`-2010` 为确定拒绝、非 `GONE`;每行一条回报
-- 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_124_check_detail_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_124_detail_preserves_fill_side_and_query_status`
 
 | 行 | 回报 | 期望 `OrderEvent` |
 |---|---|---|
@@ -1405,7 +1405,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | VPR-124.3 | 撤单响应 `-2011` | `CancelReject`,`detail = GONE` |
 | VPR-124.4 | 改单响应 `-2011` | `AmendReject`,`detail = GONE` |
 | VPR-124.5 | 撤单响应 `-2010` | `CancelReject`,`detail = 0` |
-| VPR-124.6 | 成交推送 | `Fill`,`detail = 0` |
+| VPR-124.6 | 买/卖成交推送 | `Fill`,`detail = Side::Buy/Side::Sell`(冻结 README 契约 28;冲突待评审) |
 | VPR-124.7 | 整组样本交给 `check_detail` | 通过 |
 
 ### VPR-125 check_detail 检出漏填或错填 detail 的实现
@@ -1428,7 +1428,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`FakePerp`(`order_channel(Query) = Rest`,其余 Ws);`RestOrigin{what: Order, req: Some(ReqRef{slot: 42, gen: 7, op: Query}), inst: 201}`;查单响应样本不带 client id
-- 实现:`crates/hft-venue-proto/tests/contract_rest.rs::vpr_126_check_rest_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_126_rest_origin_and_transport_failures`
 
 | 行 | 调用 | 期望 |
 |---|---|---|
@@ -1462,7 +1462,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`FakePerp`;`codes.rs`:`-1021` 确定拒绝 + `ClockSkew`,`-1015` 确定拒绝 + `RateLimited`;每行一条回报或 REST 响应
-- 实现:`crates/hft-venue-proto/tests/contract_report.rs::vpr_128_check_ctl_pass`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_128_control_hints_and_rest_rate_limit`
 
 | 行 | 输入 | 期望 |
 |---|---|---|
@@ -1618,7 +1618,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`FakeSpot`(同一把凭证);Config 响应的 UID 字段按行;其余项满足要求
-- 实现:`crates/hft-venue-proto/tests/contract_acct.rs::vpr_137_unverifiable_uid`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_137_uid_policy_missing_and_empty`
 
 | 行 | `uid_policy` / 响应 UID | 期望 `AccountConfigReport` |
 |---|---|---|
@@ -1646,7 +1646,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:变体 `Fake<FakeSpot, Mut::NoSpotBorrowSwitch>`(`required_spot_borrow = None`,Config 序列不读借币开关,读账户类型)
-- 实现:`crates/hft-venue-proto/tests/contract_acct.rs::vpr_139_spot_no_borrow_switch`
+- 实现:`crates/hft-venue-proto/tests/contract_money.rs::vpr_139_spot_cash_wallet_requires_account_type`
 
 | 行 | 样本 | 期望 |
 |---|---|---|

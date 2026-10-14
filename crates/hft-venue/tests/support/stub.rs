@@ -69,6 +69,7 @@ pub struct StubCfg {
     pub probe: PingKind,
     /// `encode` fails with this error (VEN-199.6).
     pub encode_err: Option<EncodeErr>,
+    pub fee_rule_deviation: bool,
 }
 
 pub const HB_OFF: HeartbeatSpec = HeartbeatSpec {
@@ -105,6 +106,7 @@ impl Default for StubCfg {
             hb_order: HB_OFF,
             probe: PingKind::WsPing,
             encode_err: None,
+            fee_rule_deviation: false,
         }
     }
 }
@@ -417,6 +419,11 @@ fn blank_order(account: AccountId) -> OrderEvent {
     }
 }
 
+#[derive(Default, Debug)]
+pub struct FeedCtx {
+    pub decoded: u64,
+}
+
 impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
     const NAME: &'static str = "stub-perp";
     const VENUE: VenueId = V7;
@@ -424,7 +431,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
     const ORDER_FRAME_CAP: usize = FCAP;
     type MdClass = Md;
     type ReportClass = Rep;
-    type FeedCtx = ();
+    type FeedCtx = FeedCtx;
     type GwCtx = GwCtx;
     type Templates = Tpl;
     const CANCEL_ALL_SWEEP: bool = V & V_SWEEP != 0;
@@ -643,7 +650,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         }
     }
 
-    fn peek(rd: &RefData, _ctx: &(), c: Md, p: &[u8]) -> Result<Peek, DecodeErr> {
+    fn peek(rd: &RefData, _ctx: &FeedCtx, c: Md, p: &[u8]) -> Result<Peek, DecodeErr> {
         let f = fields(p);
         let inst = inst_of(rd, f.get(1));
         let (stream, id) = match c {
@@ -678,12 +685,13 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
 
     fn decode_md(
         rd: &RefData,
-        _ctx: &mut (),
+        _ctx: &mut FeedCtx,
         c: Md,
         p: &[u8],
         rx: &RxMeta,
         out: &mut impl MdSink,
     ) -> Result<MdOutcome, DecodeErr> {
+        _ctx.decoded += 1;
         log_full(
             "decode_md",
             || String::from_utf8_lossy(p.get(..p.len().min(48)).unwrap_or(&[])).into_owned(),
@@ -700,6 +708,10 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         let h = hdr(rx, inst);
         match c {
             Md::Bbo => {
+                let mut h = h;
+                if field(p, 7) == Some(b"ctx") {
+                    h.ex_send_ns = _ctx.decoded as i64;
+                }
                 let e = Bbo {
                     h,
                     bid_px: Px(fx(f.get(3), pe)?),
@@ -829,7 +841,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
 
     fn snapshot_request(
         _rd: &RefData,
-        _ctx: &(),
+        _ctx: &FeedCtx,
         _inst: InstId,
         _out: &mut RestReqBuf,
     ) -> Result<(), ProtoErr> {
@@ -838,7 +850,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
 
     fn decode_snapshot(
         _rd: &RefData,
-        _ctx: &mut (),
+        _ctx: &mut FeedCtx,
         _inst: InstId,
         _body: &[u8],
         _rx: &RxMeta,
@@ -849,7 +861,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
 
     fn bbo_snapshot_request(
         _rd: &RefData,
-        _ctx: &(),
+        _ctx: &FeedCtx,
         insts: &[InstId],
         out: &mut RestReqBuf,
     ) -> Result<bool, ProtoErr> {
@@ -867,7 +879,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
 
     fn decode_bbo_snapshot(
         rd: &RefData,
-        ctx: &mut (),
+        ctx: &mut FeedCtx,
         insts: &[InstId],
         body: &[u8],
         rx: &RxMeta,
@@ -1178,6 +1190,13 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         ClientOrderId::decode(bytes.strip_prefix(b"st-")?).ok()
     }
 
+    fn report_event_name(payload: &[u8]) -> &[u8] {
+        if payload.starts_with(b"E|") {
+            field(payload, 1).unwrap_or(&[])
+        } else {
+            &[]
+        }
+    }
     fn classify_report(_op: MsgOp, head: &[u8]) -> Rep {
         let f = fields(head);
         match f.first().copied() {
@@ -1222,17 +1241,16 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
                 let mut h = hft_event::MarginReportHdr::new_zeroed();
                 h.venue = V7;
                 h.account = rx.account;
-                h.n = 1;
+                let count = num(f.get(1)).unwrap_or(1).clamp(1, 1024) as usize;
+                h.n = count as u16;
                 h.source = 1;
-                out.margin(
-                    &h,
-                    &[hft_event::MarginItem {
-                        inst: super::rd::S1,
-                        adl_quantile: 40,
-                        _pad: [0; 3],
-                        liq_px: Px(77),
-                    }],
-                );
+                let items = [hft_event::MarginItem {
+                    inst: super::rd::S1,
+                    adl_quantile: 40,
+                    _pad: [0; 3],
+                    liq_px: Px(77),
+                }; 1024];
+                out.margin(&h, &items[..count]);
                 o.events = 1;
             }
             Rep::Maintenance => o.ctl = ReportCtl::ServerShutdown,
@@ -1298,6 +1316,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
                 o.events = 1;
             }
             Rep::Order => {
+                o.fee_rule_deviation = cfg().fee_rule_deviation;
                 let mut e = blank_order(rx.account);
                 e.rx_tsc = rx.rx_tsc;
                 e.hw_rx_ns = rx.hw_rx_ns;
@@ -1532,6 +1551,26 @@ impl<const C: usize, const V: u32> AcctProtocol for Stub<C, V> {
         } else {
             &MARGIN
         }
+    }
+    fn acct_request_signed(
+        rd: &RefData,
+        t: &Tpl,
+        cred: &Credential,
+        a: AccountId,
+        q: AcctQuery,
+        clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<(), EncodeErr> {
+        Self::acct_request(rd, t, a, q, clk, out)?;
+        if !cred.api_key.is_empty() {
+            if cred.api_key.as_slice() != b"acct-key-sentinel" {
+                return Err(EncodeErr::FieldOverflow);
+            }
+            out.headers
+                .push(b"Api-Key: acct-key-sentinel\r\n")
+                .map_err(|_| EncodeErr::FieldOverflow)?;
+        }
+        Ok(())
     }
     fn acct_request(
         _rd: &RefData,

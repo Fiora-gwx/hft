@@ -587,15 +587,19 @@ pub enum ExchIdHint { Resolved { epoch: u16, slot: SlotId, gen: u32 }, Recorded,
 
 ### 有界账户查询与私有订阅扩展
 
-`AcctProtocol` 不为缺失实现提供成功默认值；每账户的 ctx 与 scratch 由 warm 任务独占，完整序列到齐才调用 finish。`AcctQuery::selected` 同时约束轮次和推送兜底标记。`GoldenDriver::run_acct` 逐字段比对每步请求及整组带类型标签的报告，返回首个不同记录/字节的位置。具体产品线的有界解码接入仍待完成。
+`AcctProtocol` 不为缺失实现提供成功默认值；`acct_request_signed` 调用期间借用凭证，默认转发 `acct_request`，需签名的实现必须覆盖；每账户的 ctx 与 scratch 由 warm 任务独占，完整序列到齐才调用 finish。`AcctQuery::selected` 同时约束轮次和推送兜底标记。`GoldenDriver::run_acct` 逐字段比对每步请求及整组带类型标签的报告，返回首个不同记录/字节的位置。具体产品线的有界解码接入仍待完成。
+
+`report_event_name` 只返回事件名或频道名的借用切片，缺失返回空切片，不得返回身份、凭证或整个载荷。
 
 `private_channels` 给出需确认的频道位图，`private_ack` 返回频道位与是否成功；退订确认不得当作订阅确认。`is_private_report` 区分私有推送和订单请求响应，运行时在协议去重前过滤非归属连接。
 
 `valid_uid` 校验固定 24 字节 UID 的非空可见 ASCII 与连续零填充。`testkit::check_identity` 比较独立 UID 样本并拒绝失败 HTTP 响应；`check_reduce_only` 使用调用方提供的 wire 字段判定器校验编码，现货不能静默丢弃该标志。`check_default_caps` 同时拒绝空限速表、零额度与零窗口。
 
+VPR-124 的成交 `detail` 按冻结契约 28 保留方向；旧测试冲突见[评审说明](../../.agents/notes/proposed/testing/2026-10-15-fill-detail-contract.md)。
+
 ## 已知限制与后续工作
 
-- 原始码编码、`dedup_key` 与固定容量 `TradeIdRing` 可用于热路径。`testkit` 包含有序 Md/Report 观测、首个字节差异定位、独立 fixture 比对、累计量/未知码及基本配置契约检查;`MdRec::bytes` 的首字节区分 sink 方法,其后是字段原始字节,相同布局的 Mark/Index 不混同。完整 `check_*` 验收套件仍未齐备。warm `account` 的数值超限返回 Overflow,非法/非精确数字返回 Number。
+- 原始码编码、`dedup_key` 与固定容量 `TradeIdRing` 可用于热路径。`testkit` 包含有序 Md/Report 观测、首个字节差异定位、独立 fixture 比对、累计量/未知码及基本配置契约检查;`MdRec::bytes` 的首字节区分 sink 方法,其后是字段原始字节,相同布局的 Mark/Index 不混同。检查器覆盖账户模式、UID、费用资产、成交方向、资金费、外来成交、去重、REST 归属、上下文隔离及分配观测。真实产品线须用独立交易所样本调用检查器，Fake 协议通过不代表交易所验收。warm `account` 的数值超限返回 Overflow,非法/非精确数字返回 Number。
 
 - **M1.5 实现范围**:trait 已含行情、会话、下单编码、回报解码、BBO 补帧与死手、限速观测各节;有界账户查询通过显式 `AcctProtocol` 扩展提供 `AcctCtx/AcctScratch` 与四个 acct 方法；只读查询 `ro_request`/`ro_decode` 与 `RoSink` 可供 warm reconciler 使用，默认实现返回 Unsupported/UnknownClass。两个在用产品线族支持 OpenOrders/Fills/Balance/Positions（现货无 Positions）；FundingFlow 由带固定两端窗口的 FundingHistoryProtocol 承载，RoKind::FundingFlow 尚不支持。
 - **帧单位是 WS 消息**:FIX(Binance Spot、Bybit spot)需要非 WS 分帧,可选扩展:接入 FIX 时扩展 `MsgOp` 与 hft-net。

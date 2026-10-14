@@ -66,6 +66,10 @@ p99_ns = 2500
 p50_ns = 200
 p99_ns = 400
 
+[venue_gw_skip_event_unknown]
+p50_ns = 200
+p99_ns = 400
+
 [venue_gw_margin_push]
 p50_ns = 8000
 p99_ns = 15000

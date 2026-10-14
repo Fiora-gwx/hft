@@ -47,6 +47,8 @@ pub static NOTES_CATALOG: &[NoteEntry] = &[
     NoteEntry { code: 0x04000015, source: 4, n: 21, name: "OmsResumeRetry", level: 2, v: &[] },
     NoteEntry { code: 0x04000016, source: 4, n: 22, name: "OmsResumeTimeout", level: 0, v: &[] },
     NoteEntry { code: 0x04000017, source: 4, n: 23, name: "OmsAnomaly", level: 0, v: &[] },
+    NoteEntry { code: 0x05000001, source: 5, n: 1, name: "VenueUnknownUserEvent", level: 0, v: &[] },
+    NoteEntry { code: 0x05000002, source: 5, n: 2, name: "VenueFeeRuleDeviation", level: 0, v: &[] },
     NoteEntry { code: 0x09000001, source: 9, n: 1, name: "RoundClosed", level: 4, v: &[] },
     NoteEntry { code: 0x09000002, source: 9, n: 2, name: "Adjusted", level: 4, v: &[("account", 0, 8), ("venue", 8, 8), ("inst_or_asset", 64, 64), ("report_id", 128, 64), ("qty", 192, 64), ("px", 256, 64), ("realized", 320, 64)] },
     NoteEntry { code: 0x09000003, source: 9, n: 3, name: "BaselineSet", level: 4, v: &[] },
