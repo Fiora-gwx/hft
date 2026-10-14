@@ -1,0 +1,72 @@
+---
+description: "{{name}} 策略(kind_id {{kind_id}}):由 cargo xtask new-strategy 生成的骨架,订阅各 group 两腿的 BBO 并保存每腿中价,尚不发任何意图;规则按 cookbook 补写"
+kind: crate
+tier: hot
+scope: core
+status: spec
+---
+
+# {{name}}
+
+## 概要
+
+`{{name}}` 是由 [`cargo xtask new-strategy`](../../tools/README.md#cargo-xtask-new-strategy) 从模板生成的策略骨架(kind_id {{kind_id}},登记在 [registry](../registry/README.md))。它只依赖 [hft-strategy-sdk](../../crates/hft-strategy-sdk/README.md) 与 [hft-strat-lib](../../crates/hft-strat-lib/README.md),由 registry 一行装配;引擎、app 与 `python/` 零改动([cookbook](../../docs/cookbook/adding-a-strategy.md))。骨架的快速部分订阅每个 group 两腿的 BBO、保存每腿最近的中价,不发订单意图与目标意图;带 Model 生成时另有慢速部分,按 group 保存中价样本窗口并在每个模型 tick 发一条 Advice。规则未定、在模拟账户上研究;本 README 按 cookbook 第 1 步补写后再改 `status`。
+
+## 目录
+
+- [使用本组件](#使用本组件)
+- [实现说明](#实现说明)
+- [延迟与资源契约](#延迟与资源契约)
+- [测试与验收](#测试与验收)
+- [依赖](#依赖)
+- [延伸阅读](#延伸阅读)
+- [已知限制与后续工作](#已知限制与后续工作)
+
+## 使用本组件
+
+- **group 形态**:两腿(`check` 拒绝其他腿数,`GroupShape` 码 1);两腿在不同交易所由引擎校验。
+- **参数**(`src/params.rs`,`define_params!`):`enabled`(Bool,默认 0,`manual_only`,`relax = Up`)、`max_qty`(Qty,per-group,默认 0,`relax = Up`);带 Model 时另有 `window`(Count,结构字段,每 group 的样本窗口)。默认值都是雏形值。
+- **事件处理**:`Bbo` 更新该腿中价;其余事件(`Risk`、`External`、`Notice`、`Mode`、`Exec`、`Manual`)骨架不处理,补写规则时逐条写进事件处理表。
+- **描述符**(`src/desc.rs`):Note 码、报表字段与策略命令都为空。
+
+## 实现说明
+
+<details><summary>实现要点</summary>
+
+| 文件 | 职责 |
+|---|---|
+| `src/lib.rs` | `StrategyDesc` 与 `impl Strategy`,转发到 `fast` |
+| `src/fast/mod.rs` | 快速部分:按 gix 的 group 状态,快照以 `GroupId` 为键 |
+| `src/params.rs`、`src/desc.rs` | 参数 schema 与 `check`;描述符 |
+| `src/model/`、`src/advice.rs` | Model 与 Advice 载荷(带 Model 生成时) |
+| `tests/` | 场景测试与 refdata 夹具 |
+
+</details>
+
+## 延迟与资源契约
+
+快速部分每个事件只做有界的整数运算、不分配(场景测试以计数分配器核对);基准入口按 SDK 规定补写。
+
+## 测试与验收
+
+用例与验收由策略作者按 cookbook 第 1 步写进本目录的 TESTS.md;骨架自带的场景测试在 `tests/scenario.rs`。
+
+## 依赖
+
+只依赖 `hft-strategy-sdk` 与 `hft-strat-lib`;测试另依赖 hft-testkit、hft-types、hft-refdata、hft-event(只在 `[dev-dependencies]`)。
+
+## 延伸阅读
+
+- [cookbook:新增一个策略](../../docs/cookbook/adding-a-strategy.md)
+
+## 已知限制与后续工作
+
+骨架不发意图,也没有基准与 TESTS.md;按 cookbook 补齐后才能进入模拟账户。
+
+### 开发备忘
+
+<details><summary>给实现者</summary>
+
+先写 README 与 TESTS.md,再改代码。
+
+</details>

@@ -1,0 +1,11 @@
+//! Descriptors of `{{name}}` (README "Note 码表与报表字段"、"策略命令"): Note codes, report fields and
+//! strategy commands. Codes and `op`s are append-only once released.
+
+use hft_strategy_sdk::{CmdDesc, NoteDesc, ReportFieldDesc};
+
+/// Note codes written through `Ctx::note` (none yet).
+pub static NOTES: [NoteDesc; 0] = [];
+/// Strategy-specific daily-report fields (none yet).
+pub static REPORT: [ReportFieldDesc; 0] = [];
+/// Accepted `StrategyCmd` payloads (none: no strategy commands).
+pub static CMDS: [CmdDesc; 0] = [];

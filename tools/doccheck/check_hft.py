@@ -482,7 +482,8 @@ def count(p, rx, s=None):
 RX_PHASE = re.compile(r"阶段\s*[0-4一二三四]'?|^phase:\s*\S", re.M)
 RX_WEEK = re.compile(r"第\s*\d+(?:\s*[–\-~至]\s*\d+)?\s*周")
 RX_CANARY = re.compile(r"[Cc]anary|金丝雀|Primary\s*=\s*1|\"shadow\"|'shadow'")
-RX_STRATNAME = re.compile(r"PortfolioCarry|Cdex|CrossTaker|MakerTaker|StockToken|(?<![A-Za-z0-9_])Carry(?![A-Za-z0-9_])")
+RX_STRATNAME = re.compile(r"PortfolioCarry|Cdex|CrossTaker|MakerTaker|StockToken|(?<![A-Za-z0-9_])Carry(?![A-Za-z0-9_])"
+                          r"|portfolio[-_]carry|cross[-_]taker|maker[-_]taker|stock[-_]?token")
 RX_VENUE = re.compile(r"(?<![A-Za-z0-9_\-])(Binance|OKX|Bitget|Gate(?:\.io)?|Bybit|KuCoin|Kucoin|Hyperliquid|binance|okx|bitget|bybit|kucoin|hyperliquid)(?![A-Za-z0-9_])")
 RX_OLD = re.compile(r"迁移前门槛|HypoDriver|假设回放|(?<![A-Za-z])Armed(?![A-Za-z])")
 RX_CDEX = re.compile(r"cdex")  # lowercase only; Cdex is covered by STRATNAME
@@ -562,7 +563,8 @@ for p, s in texts.items():
         if n:
             add("OLDTERM", p, f"{rr}: {n} ({', '.join(sorted(set(RX_OLD.findall(s))))})")
     if re.match(r"crates/[^/]+/README\.md$", rr) and not rr.startswith("crates/hft-strategies/"):
-        hits = RX_STRATNAME.findall(s)
+        # link targets and strategies/<dir> paths are stripped first (doc-check.toml STRATNAME `strip`)
+        hits = RX_STRATNAME.findall(re.sub(r"strategies/[A-Za-z0-9_\-]+", "", re.sub(r"\]\([^)]*\)", "]", s)))
         if hits:
             add("STRATNAME", p, f"{rr}: {len(hits)} ({', '.join(sorted(set(hits)))})")
     if re.match(r"strategies/[^/]+/README\.md$", rr):

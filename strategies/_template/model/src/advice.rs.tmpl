@@ -1,0 +1,42 @@
+//! Advice payload of `{{name}}` (README "Advice 载荷表"): integers only, first byte = version. The
+//! engine does not interpret it; the fast part and the Model share this definition.
+
+use hft_strategy_sdk::{AdvicePayload, PayloadError, PayloadFull, PayloadReader, PayloadWriter};
+
+/// Payload version (first byte).
+pub const VERSION: u8 = 1;
+
+/// One group's sample summary, 16 B: `{ver: u8, _pad: [u8; 3], n: u32, mean_mid: i64}` — the number
+/// of mid samples in the window and their integer mean (raw `Px` of the first leg; 0 when `n = 0`).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct WindowAdvice {
+    pub n: u32,
+    pub mean_mid: i64,
+}
+
+impl AdvicePayload for WindowAdvice {
+    const LOCAL_KIND: u16 = 1;
+    const MAX_LEN: usize = 16;
+
+    fn encode(&self, w: &mut PayloadWriter<'_>) -> Result<(), PayloadFull> {
+        w.put_u8(VERSION)?;
+        w.put_bytes(&[0; 3])?;
+        w.put_u32(self.n)?;
+        w.put_i64(self.mean_mid)
+    }
+
+    fn decode(b: &[u8]) -> Result<Self, PayloadError> {
+        let mut r = PayloadReader::new(b);
+        let v = r.get_u8()?;
+        if v != VERSION {
+            return Err(PayloadError::Version(v));
+        }
+        r.get_bytes(3)?;
+        let a = WindowAdvice {
+            n: r.get_u32()?,
+            mean_mid: r.get_i64()?,
+        };
+        r.finish()?;
+        Ok(a)
+    }
+}

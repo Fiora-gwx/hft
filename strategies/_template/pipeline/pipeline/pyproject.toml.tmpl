@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hft-plugin-{{name}}"
+version = "0.1.0"
+description = "pipeline plugin of the {{name}} strategy (kind_id {{kind_id}})"
+requires-python = ">=3.11"
+dependencies = []
+
+# Discovered by the pipeline framework (python/pipeline README "插件的打包与发现").
+[project.entry-points."hft_pipeline.plugins"]
+{{crate}} = "hft_plugin_{{crate}}:PLUGIN"
+
+[tool.setuptools.packages.find]
+where = ["src"]
