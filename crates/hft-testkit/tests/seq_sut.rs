@@ -319,3 +319,14 @@ fn seq_sut_sweep() {
     }
     eprintln!("sweep {from}..{}: {} failures {bad:?}", from + n, bad.len());
 }
+
+/// `run_short_set` (README "5. 解耦门槛夹具" A.2) binds the kind it is given by name, with its
+/// defaults and its real Model, on the real sequencer; an unknown name is a failure, not a pass.
+#[test]
+fn short_set_binds_named_kind() {
+    let fails = hft_testkit::dst::run_short_set::<TestStrategies>("probe-target", 2);
+    assert!(fails.is_empty(), "{fails:?}");
+    let fails = hft_testkit::dst::run_short_set::<TestStrategies>("no-such-kind", 2);
+    assert_eq!(fails.len(), 1, "{fails:?}");
+    assert!(fails[0].contains("no-such-kind"), "{fails:?}");
+}
