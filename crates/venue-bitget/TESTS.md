@@ -61,7 +61,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:无参数;读两个类型的关联常量
-- 实现:`crates/venue-bitget/tests/consts.rs::bgt_001_identity_consts`
+- 实现:`crates/venue-bitget/tests/session.rs::bgt_001_identity_consts`
 
 | 行 | 常量 | 期望 |
 |---|---|---|
@@ -78,15 +78,16 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:`BitgetUsdtFutures::routes()`
-- 实现:`crates/venue-bitget/tests/routes.rs::bgt_002_fut_routes`
+- 实现:`crates/venue-bitget/tests/session.rs::bgt_002_fut_routes`
 
 | 行 | 路由名 | 期望 |
 |---|---|---|
 | BGT-002.1 | `books1` | `kind = Bbo`,`race = true`,`max_streams = 1000`,`max_in_msgs_per_s = 10`,`topn_levels = []` |
-| BGT-002.2 | `public-topn` | `kind = DepthTopN`,`race = false`,`topn_levels = [5, 15]`(非空、升序) |
+| BGT-002.2 | `public-topn` | `kind = DepthTopN`,`race = false`,`topn_levels = [5, 50]`(非空、升序;UTA 为 `books5`/`books50`,无 `books15`) |
 | BGT-002.3 | `public-trade` | `kind = Md`,`race = false`,`topn_levels = []` |
 | BGT-002.4 | `public-ticker` | `kind = Md`,`race = false` |
-| BGT-002.5 | 路由总数与种类计数 | 4 条;`Bbo` 恰 1 条、`DepthTopN` 恰 1 条;`race = true` 的只有 `Bbo` 路由 |
+| BGT-002.5 | 路由总数与种类计数 | 5 条(含 `public-books`);`Bbo` 恰 1 条、`DepthTopN` 恰 1 条;`race = true` 的只有 `Bbo` 路由 |
+| BGT-002.6 | `public-books`(`RouteId(4)`,增量 `books`,可选扩展) | `kind = Md`,`race = false` |
 
 ### BGT-003 现货 routes() 没有 ticker 路由
 
@@ -94,14 +95,14 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:`BitgetSpot::routes()`
-- 实现:`crates/venue-bitget/tests/routes.rs::bgt_003_spot_routes`
+- 实现:`crates/venue-bitget/tests/session.rs::bgt_003_spot_routes`
 
 | 行 | 路由名 | 期望 |
 |---|---|---|
 | BGT-003.1 | `books1` | `kind = Bbo`,`race = true`,`max_in_msgs_per_s = 10` |
-| BGT-003.2 | `public-topn` | `kind = DepthTopN`,`topn_levels = [5, 15]` |
+| BGT-003.2 | `public-topn` | `kind = DepthTopN`,`topn_levels = [5, 50]` |
 | BGT-003.3 | `public-trade` | `kind = Md` |
-| BGT-003.4 | 名为 `public-ticker` 的路由 | 不存在;路由总数 3 |
+| BGT-003.4 | 名为 `public-ticker` 的路由 | 不存在;路由总数 4(`books1`、`public-topn`、`public-trade`、`public-books`) |
 
 ### BGT-004 endpoint 按角色给出 UTA V3 路径
 
@@ -109,7 +110,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:`VenueCfg` 取 `RD-BGT` 的生产端点;`now_ms = 1790000000000`;`cred` 为 `KEY`(只对 Order 角色传入);`boot = None`
-- 实现:`crates/venue-bitget/tests/routes.rs::bgt_004_endpoint_paths`
+- 实现:`crates/venue-bitget/tests/session.rs::bgt_004_endpoint_paths`
 - 备注:依赖待核实:开发备忘第 1 条(路径);核实后若路径不同,改 README 端点表与本表同一提交
 
 | 行 | 产品线、角色、路由 | 期望 `EndpointSpec` |
@@ -131,7 +132,7 @@ spec: README.md
   1. 两个产品线各调 `endpoint(Role::UserStream, RouteId(0), …)`
 - 期望:
   - 两次都返回 `Err(ProtoErr::Unsupported)`,`out` 未被写入(长度 0)
-- 实现:`crates/venue-bitget/tests/routes.rs::bgt_005_no_user_stream_role`
+- 实现:`crates/venue-bitget/tests/session.rs::bgt_005_no_user_stream_role`
 
 ### BGT-006 全部 REST 请求使用端点下标 0
 
@@ -155,7 +156,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:`BitgetUsdtFutures`;`op = MsgOp::Text`(除注明外);`head` = payload 的前 min(64, len) 字节;路由 id 取 BGT-002 的顺序(0 `books1`、1 `public-topn`、2 `public-trade`、3 `public-ticker`)
-- 实现:`crates/venue-bitget/tests/classify.rs::bgt_010_classify_md`
+- 实现:`crates/venue-bitget/tests/md.rs::bgt_010_classify_md`
 
 | 行 | 路由与 payload 开头 | 期望 `MdClass` |
 |---|---|---|
@@ -175,6 +176,7 @@ spec: README.md
 | BGT-010.14 | `books1`,payload `{"ac`(4 字节) | `Unknown` |
 | BGT-010.15 | `books1`,`[1,2,3]` | `Unknown` |
 | BGT-010.16 | `books1`,文本 `ping` | `Unknown` |
+| BGT-010.17 | `public-books`(`RouteId(4)`),增量 `books` 推送 | `BooksIncr` |
 
 ### BGT-011 现货行情 classify 与永续同一规则
 
@@ -182,7 +184,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:`BitgetSpot`;路由 id 取 BGT-003 的顺序(0 `books1`、1 `public-topn`、2 `public-trade`);`instType` 为 `SPOT`(V2)/`spot`(UTA)
-- 实现:`crates/venue-bitget/tests/classify.rs::bgt_011_classify_md_spot`
+- 实现:`crates/venue-bitget/tests/md.rs::bgt_011_classify_md_spot`
 
 | 行 | 路由与 payload 开头 | 期望 `MdClass` |
 |---|---|---|
@@ -209,7 +211,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:`BitgetUsdtFutures`;`op = Text`;`head` = payload 前 min(64, len) 字节
-- 实现:`crates/venue-bitget/tests/classify.rs::bgt_013_classify_report`
+- 实现:`crates/venue-bitget/tests/reports.rs::bgt_013_classify_report`
 - 备注:依赖待核实:开发备忘第 1 条(UTA 私有频道名与 `arg` 写法)
 
 | 行 | payload 开头 | 期望 `ReportClass` |
@@ -240,7 +242,7 @@ spec: README.md
   1. 各自 `decode_report(rd, ctx_a/ctx_b, class, payload, &RX, &mut sink)`(两个新的 `GwCtx`)
 - 期望:
   - 两次输出的 `OrderEvent` 逐字节相同(`PartialFill`,字段见 BGT-101);`ReportOutcome.events = 1`、`skip = No`
-- 实现:`crates/venue-bitget/tests/classify.rs::bgt_014_push_class_resolves`
+- 实现:`crates/venue-bitget/tests/reports.rs::bgt_014_push_class_resolves`
 
 ### BGT-020 seq_rule 与 resync_method 按类给出
 
@@ -248,7 +250,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:两个产品线各断言一遍
-- 实现:`crates/venue-bitget/tests/seq.rs::bgt_020_seq_rule_resync`
+- 实现:`crates/venue-bitget/tests/md.rs::bgt_020_seq_rule_resync`
 
 | 行 | `MdClass` | 期望 `seq_rule` / `resync_method` |
 |---|---|---|
@@ -257,6 +259,8 @@ spec: README.md
 | BGT-020.3 | `Trade` | `Monotonic` / `None` |
 | BGT-020.4 | `Ticker` | `ByTime` / `None` |
 | BGT-020.5 | `SubAck`、`Pong`、`Unknown` | `None` / `None` |
+| BGT-020.6 | `BooksIncr` | `Chain` / `Resubscribe` |
+| BGT-020.7 | `align_first(100, raw)`:`[pseq, seq]` = `[99, 101]`、`[100, 105]`、`[90, 100]`、`[101, 105]` | `Apply`、`Apply`、`Drop`、`Gap`(快照 `seq` 落在首条增量的 `[pseq, seq]` 内才接上) |
 
 ### BGT-021 peek books1 取 inst 与 seq,不取 prev
 
@@ -268,7 +272,7 @@ spec: README.md
   1. `peek(rd, &ctx, Books1, payload)`
 - 期望:
   - `Ok(Peek{inst: 1801, ids: SeqIds{prev_id: 0, last_id: 123456789}})`
-- 实现:`crates/venue-bitget/tests/peek.rs::bgt_021_peek_books1`
+- 实现:`crates/venue-bitget/tests/md.rs::bgt_021_peek_books1`
 
 ### BGT-022 peek 对未订阅符号给 inst = 0
 
@@ -280,7 +284,7 @@ spec: README.md
   1. `peek(rd, &ctx, Books1, payload)`
 - 期望:
   - `Ok(Peek{inst: 0, …})`;不返回 `Err`
-- 实现:`crates/venue-bitget/tests/peek.rs::bgt_022_peek_unknown_symbol`
+- 实现:`crates/venue-bitget/tests/md.rs::bgt_022_peek_unknown_symbol`
 
 ### BGT-023 peek 不解析价量
 
@@ -294,7 +298,7 @@ spec: README.md
 - 期望:
   - 步骤 1 `Ok(Peek{inst: 1801, ids.last_id: 5})`
   - 步骤 2 `Err(DecodeErr::Number)`;`sink` 中 0 个事件
-- 实现:`crates/venue-bitget/tests/peek.rs::bgt_023_peek_skips_prices`
+- 实现:`crates/venue-bitget/tests/md.rs::bgt_023_peek_skips_prices`
 
 ### BGT-024 books1 解码为 Bbo,时间戳与接收元数据逐字段
 
@@ -374,17 +378,17 @@ spec: README.md
   - `l2_begin`/`l2_level`/`l2_end` 调用 0 次
 - 实现:`crates/venue-bitget/tests/md.rs::bgt_028_books5_topn`
 
-### BGT-029 books15 档数不足与零量档
+### BGT-029 books50 档数不足与零量档
 
 - 规则:[分档快照流](README.md#分档快照流)、[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:unit
 - 里程碑:M3
-- 前置:`RD-BGT`;payload = V2 永续 `books15`,`seq = 900`,买 3 档(第 2 档数量 `"0"`),卖 15 档
+- 前置:`RD-BGT`;payload = UTA 永续 `books50`,`seq = 900`,买 3 档(第 2 档数量 `"0"`),卖 50 档
 - 步骤:
   1. `decode_md(rd, &mut ctx, BooksTopN, payload, &RX, &mut sink)`
 - 期望:
-  - 一条 `L2Snapshot{origin = TopN, snap_id = 900, n_bids: 2, n_asks: 15}`;零量档不出现在买档中
-- 实现:`crates/venue-bitget/tests/md.rs::bgt_029_books15_short_and_zero`
+  - 一条 `L2Snapshot{origin = TopN, snap_id = 900, n_bids: 2, n_asks: 50}`;零量档不出现在买档中
+- 实现:`crates/venue-bitget/tests/md.rs::bgt_029_books50_short_and_zero`
 
 ### BGT-030 同一 seq 的分档快照两次 peek 序号相同、解码字节相同
 
@@ -494,7 +498,7 @@ spec: README.md
 | BGT-036.1 | `decode_md(…, SubAck, …)` | `Err(DecodeErr::UnknownClass)`,0 个事件 |
 | BGT-036.2 | `decode_md(…, Pong, …)` | `Err(DecodeErr::UnknownClass)` |
 | BGT-036.3 | `decode_md(…, Unknown, …)` | `Err(DecodeErr::UnknownClass)` |
-| BGT-036.4 | `decode_md(…, BooksIncr, …)`(增量深度未启用) | `Err(DecodeErr::UnknownClass)` |
+| BGT-036.4 | `decode_md(…, BooksIncr, …)`(增量 `books`,可选扩展):`action = snapshot`(`pseq = 0`,`seq = 100`)、随后 `update`(`pseq = 100`,`seq = 101`,买 `65000.1` 量 `0`)、重置推送(`update`,`pseq = 0`) | 快照 → 一条 `L2Snapshot{origin: Exchange, snap_id: 100}`(零量档不出现);`update` → `peek` 的 `ids = {prev_id: 100, last_id: 101}`,`l2_begin{prev_id: 100, last_id: 101}` → 各档 `l2_level`(量 0 = 删档)→ `l2_end`;`pseq = 0` 的推送按新快照解码 |
 | BGT-036.5 | 现货 `decode_md(…, Ticker, …)` | `Err(DecodeErr::UnknownClass)` |
 
 ### BGT-037 control 给出订阅回执与心跳回应
@@ -514,6 +518,7 @@ spec: README.md
 | BGT-037.5 | `Pong`,`pong` | `Some(ControlHint::Pong)` |
 | BGT-037.6 | `Books1`,`B1v2` | `None` |
 | BGT-037.7 | `SubAck`,`{"event":"error"}`(无 code) | `Some(SubAck{ok: false, code: 0})` |
+| BGT-037.8 | `SubAck`,`{"event":"subscribe",…,"code":"30001","msg":…}`(UTA 拒绝写在 subscribe 事件里) | `Some(SubAck{ok: false, code: 30001})` |
 
 ### BGT-038 热路径方法零分配、不 panic
 
@@ -635,6 +640,7 @@ spec: README.md
 | BGT-062.6 | `B1v2` | `LoginResult::NotMine` |
 | BGT-062.7 | `pong` | `LoginResult::NotMine` |
 | BGT-062.8 | `{"event":"login"`(截断) | `LoginResult::NotMine` |
+| BGT-062.9 | `{"event":"login","code":"0","msg":"","connId":"x"}` | `LoginResult::Ok` |
 
 ### BGT-063 登录与签名后不留存密钥材料
 
@@ -660,10 +666,9 @@ spec: README.md
   1. `encode(rd, &t, &c, &tgt, &WC, &mut body)`(`body` 容量 2048)
 - 期望:
   - 返回 `Ok(n)`,`n ≤ 2048`;`body[..n]` 是一个 JSON 对象,请求 id 为 `RID(p,42,7)`,操作为 `place-order`
-  - 订单参数:`symbol = "BTCUSDT"`、方向 = 买、价格 `"65000.1"`、数量 `"0.004"`、限价、tif = GTC 的 UTA 写法、`clientOid = "100030a020002a000000078d"`、`pxAmendType` = "超出价格带拒单"的取值、`reduceOnly` 为假
+  - 帧逐字节为 `{"op":"trade","id":"p0000002a00000007","category":"usdt-futures","topic":"place-order","args":[{"symbol":"BTCUSDT","side":"buy","orderType":"limit","price":"65000.1","qty":"0.004","timeInForce":"gtc","clientOid":"100030a020002a000000078d"}]}`(官方 Place-Order-Channel;`reduceOnly` 缺省即否,不发;UTA 没有 `pxAmendType` 参数)
   - 帧中不出现 `apiKey`、`sign`、`passphrase` 字段
 - 实现:`crates/venue-bitget/tests/encode.rs::bgt_064_place_frame`
-- 备注:依赖待核实:开发备忘第 2 条(字段名与取值写法);核实后本用例改为逐字节比较帧文本
 
 ### BGT-065 tif、方向与 reduceOnly 的编码变体
 
@@ -678,9 +683,9 @@ spec: README.md
 |---|---|---|
 | BGT-065.1 | `tif = Ioc`,`side = Sell` | `Ok`;方向 = 卖,tif = IOC 写法 |
 | BGT-065.2 | `tif = PostOnly` | `Ok`;post-only 写法 |
-| BGT-065.3 | `tif = Fok` | `Err(EncodeErr::Unsupported(GwOp::Place))`;`body` 未写(无部分帧) |
-| BGT-065.4 | `oflags = REDUCE_ONLY` | `Ok`;`reduceOnly` 为真 |
-| BGT-065.5 | `oflags = RISK_REDUCING`(无 `REDUCE_ONLY`) | `Ok`;`reduceOnly` 为假(venue 不推断) |
+| BGT-065.3 | `tif = Fok` | `Ok`;`timeInForce = "fok"`(官方 UTA 支持) |
+| BGT-065.4 | `oflags = REDUCE_ONLY` | `Ok`;`"reduceOnly":"YES"` |
+| BGT-065.5 | `oflags = RISK_REDUCING`(无 `REDUCE_ONLY`) | `Ok`;没有 `reduceOnly` 键(venue 不推断) |
 | BGT-065.6 | `oflags = SMOKE` | `Ok`;帧与 BGT-064 逐字节相同 |
 | BGT-065.7 | `inst = 1901`(现货 inst) | `Err(EncodeErr::UnknownInst)` |
 | BGT-065.8 | `inst = 9999`(refdata 中没有) | `Err(EncodeErr::UnknownInst)` |
@@ -695,10 +700,10 @@ spec: README.md
 
 | 行 | 改动 | 期望 |
 |---|---|---|
-| BGT-066.1 | 无 | `Ok`;`symbol = "BGBUSDT"`、卖、价格 `"1.2345"`、数量 `"1"`、IOC、`clientOid = "100030b020002a000000079d"`、含 `pxAmendType`;帧中没有 `reduceOnly` 字段 |
+| BGT-066.1 | 无 | `Ok`;`symbol = "BGBUSDT"`、卖、价格 `"1.2345"`、数量 `"1"`、IOC、`clientOid = "100030b020002a000000079d"`,`category = "spot"`;帧中没有 `reduceOnly` 字段 |
 | BGT-066.2 | `oflags = REDUCE_ONLY` | `Err(EncodeErr::Unsupported(GwOp::Place))`;不写帧、不丢掉标志后照发 |
 | BGT-066.3 | `oflags = REDUCE_ONLY`,`op = Amend` | `Err(EncodeErr::Unsupported(GwOp::Amend))` |
-| BGT-066.4 | `tif = Fok` | `Err(EncodeErr::Unsupported(GwOp::Place))` |
+| BGT-066.4 | `tif = Fok` | `Ok`;`timeInForce = "fok"` |
 
 ### BGT-067 价量格式化为最短十进制
 
@@ -720,11 +725,12 @@ spec: README.md
 | BGT-067.8 | 1902 价 10000 | `"1"` |
 | BGT-067.9 | 1801 价 `i64::MAX` | `"92233720368547758.07"`;帧长 ≤ 2048 |
 
-### BGT-068 每个下单与改单帧都显式带 pxAmendType
+### BGT-068 (撤销)每个下单与改单帧都显式带 pxAmendType
 
 - 规则:[下单:UTA V3 WS](README.md#下单uta-v3-ws)
 - 级别:prop
 - 里程碑:M3
+- 撤销:官方 UTA 下单参数没有 `pxAmendType`(超出价格带的单以 `25205`/`25206` 拒绝,不夹到边界);编号保留不复用
 - 性质:任意合法 `Place`/`Amend` 命令编码成功时,帧经 `sonic-rs` 解析后订单参数恰有一个 `pxAmendType` 键,取值为"超出价格带拒单";删掉该键的帧视为本性质失败
 - 生成:两个产品线;inst 取 RD-BGT 全部;`side`、`tif ∈ {Gtc, Ioc, PostOnly}`;`px`、`qty` 为 tick/lot 的 1..10^9 倍;`slot < 2^20`;`gen` 任意 u32
 - 参考:断言函数 `has_px_amend_type(frame)`
@@ -741,7 +747,7 @@ spec: README.md
 - 步骤:
   1. `encode(rd, &t, &c, &tgt, &WC, &mut body)`
 - 期望:
-  - `Ok`;请求 id `RID(c,42,7)`;操作 `cancel-order`;`symbol = "BTCUSDT"`,`clientOid = "100020a020002a000000079d"`(按镜像里的原 epoch,不按当前 epoch)
+  - `Ok`;请求 id `RID(c,42,7)`;操作 `cancel-order`;`args` 只有 `clientOid = "100020a020002a000000079d"`(按镜像里的原 epoch,不按当前 epoch)
   - `exch_order_id = 0` 不导致 `UnknownTarget`
 - 实现:`crates/venue-bitget/tests/encode.rs::bgt_069_cancel_frame`
 
@@ -754,7 +760,7 @@ spec: README.md
 - 步骤:
   1. `encode`
 - 期望:
-  - `Ok`;请求 id `RID(m,42,7)`;操作 `modify-order`;`clientOid = "100030a020002a000000078d"`;新价格 `"65000.2"`、新数量 `"0.003"`;含 `pxAmendType`
+  - `Ok`;请求 id `RID(m,42,7)`;操作 `modify-order`;`clientOid = "100030a020002a000000078d"`;`symbol = "BTCUSDT"`;新价格 `"65000.2"`、新数量 `"0.003"`;`autoCancel = "no"`(改单失败不撤原单)
 - 实现:`crates/venue-bitget/tests/encode.rs::bgt_070_amend_frame`
 - 备注:依赖待核实:开发备忘第 2 条
 
@@ -782,8 +788,8 @@ spec: README.md
   1. `order_channel(Query)`;`encode_rest(rd, &t, &c, &tgt, &WC, &mut out)`;对同一 `c` 调 `encode`
 - 期望:
   - `order_channel` 为 `Rest`;`encode` 返回 `Err(EncodeErr::Unsupported(GwOp::Query))`
-  - `RestReqBuf{endpoint: 0, method: GET, redacted: true}`;`path_query` = 订单详情路径 + `?symbol=BTCUSDT&clientOid=100030a020002a000000078d`
-  - 头恰含 `ACCESS-KEY: k`、`ACCESS-TIMESTAMP: 1790000000000`、`ACCESS-PASSPHRASE: p`、`ACCESS-SIGN` = Base64(HMAC-SHA256("secret", "1790000000000GET" + `path_query`))
+  - `RestReqBuf{endpoint: 0, method: GET, redacted: true}`;`path_query` = `/api/v3/trade/order-info?clientOid=100030a020002a000000078d`(官方参数只有 `orderId`/`clientOid`)
+  - 头恰含 `ACCESS-KEY: k`、`ACCESS-TIMESTAMP: 1790000000000`、`ACCESS-PASSPHRASE: p`、`ACCESS-SIGN` = Base64(HMAC-SHA256("secret", "1790000000000GET" + `path_query`))、`locale: en-US`;`VenueCfg.env = Testnet` 时另加 `paptrading: 1`
 - 实现:`crates/venue-bitget/tests/encode.rs::bgt_072_query_rest`
 - 备注:依赖待核实:开发备忘第 5 条(订单详情路径)
 
@@ -832,7 +838,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:无参数
-- 实现:`crates/venue-bitget/tests/cid.rs::bgt_076_request_id`
+- 实现:`crates/venue-bitget/tests/encode.rs::bgt_076_request_id`
 
 | 行 | 输入 | 期望 |
 |---|---|---|
@@ -853,7 +859,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:`secret = "secret"`;`ts = "1790000000000"`(ms)
-- 实现:`crates/venue-bitget/tests/sign.rs::bgt_077_rest_sign`
+- 实现:`crates/venue-bitget/tests/encode.rs::bgt_077_rest_sign`
 
 | 行 | METHOD、path+query、body | 期望 `ACCESS-SIGN` |
 |---|---|---|
@@ -881,7 +887,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:永续
-- 实现:`crates/venue-bitget/tests/cid.rs::bgt_080_client_oid`
+- 实现:`crates/venue-bitget/tests/encode.rs::bgt_080_client_oid`
 
 | 行 | 输入 | 期望 |
 |---|---|---|
@@ -904,7 +910,7 @@ spec: README.md
 - 生成:`epoch ∈ [0, 2^15)`、`venue ∈ {10, 11}`、`account ∈ [0, 255]`、`slot ∈ [0, 2^20)`、`gen` 任意 u32
 - 参考:输入 `id`
 - 例数:PR 5 000
-- 实现:`crates/venue-bitget/tests/cid.rs::bgt_081_prop_cid_roundtrip`
+- 实现:`crates/venue-bitget/tests/encode.rs::bgt_081_prop_cid_roundtrip`
 
 ### BGT-090 下单成功响应解码为 Ack
 
@@ -921,43 +927,49 @@ spec: README.md
 - 实现:`crates/venue-bitget/tests/reports.rs::bgt_090_place_ack`
 - 备注:依赖待核实:开发备忘第 2 条(响应字段名、是否回显 `clientOid`、有无网关时间戳)
 
-### BGT-091 错误码映射:核实前全部走结果未知
+### BGT-091 错误码映射:登记码确定拒绝,其余结果未知
 
 - 规则:[结果未知码表](README.md#结果未知码表)、[契约](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
 - 里程碑:M3
-- 前置:`RD-BGT`;以 BGT-090 的响应为基准,把成功码换成所列码(请求 id 随行变化);`codes::DEFINITE_REJECT` 为核实前的空表
-- 实现:`crates/venue-bitget/tests/codes.rs::bgt_091_code_table`
+- 前置:`RD-BGT`;以 BGT-090 的请求为基准,响应为 `{"event":"error","id":<RID>,"code":<码>,"msg":…}`(请求 id 随行变化);`codes::DEFINITE_REJECT` 为官方 UTA 错误码页登记的确定拒绝表
+- 实现:`crates/venue-bitget/tests/reports.rs::bgt_091_code_table`
 
 | 行 | 响应 | 期望 |
 |---|---|---|
-| BGT-091.1 | `codes::DEFINITE_REJECT.len()` | 0 |
+| BGT-091.1 | `codes::DEFINITE_REJECT` | 非空,内容见 README"结果未知码表" |
 | BGT-091.2 | place,码 `"40001"`(未登记) | 无 `OrderEvent`;`outcome_unknown = Some(ReqRef{42, 7, Place})`;`raw_code = 40001` |
-| BGT-091.3 | place,码 `"43012"`(V2 余额不足类,核实前未登记;反例) | 无 `Reject`;`outcome_unknown` 置;`raw_code = 43012` |
-| BGT-091.4 | place,码 `"45110"`(V2 参数类,未登记;反例) | 无 `Reject`;`outcome_unknown` 置;`raw_code = 45110` |
-| BGT-091.5 | place,码 `"40010"`(请求超时类) | `outcome_unknown` 置;`raw_code = 40010` |
+| BGT-091.3 | place,码 `"25202"`(余额不足,已登记) | 一条 `Reject{slot: 42, gen: 7, reject_code: 25202}`;不置 `outcome_unknown` |
+| BGT-091.4 | place,码 `"40017"`(参数校验,已登记) | 一条 `Reject` |
+| BGT-091.5 | place,码 `"40010"`(请求超时) | `outcome_unknown` 置;`raw_code = 40010` |
 | BGT-091.6 | place,码为 JSON 数字 `40001` | 同 BGT-091.2 |
-| BGT-091.7 | place,码 `"abc"`(非数字) | `outcome_unknown` 置;`raw_code = raw_code_str(b"abc")`(`0x4000_0000` 段) |
+| BGT-091.7 | place,码 `"abc"`(非数字) | `outcome_unknown` 置;`raw_code` 在 `0x4000_0000` 段 |
 | BGT-091.8 | cancel(`RID(c,42,7)`),码 `"43001"`(未登记) | 无 `CancelReject`;`outcome_unknown = Some(ReqRef{42, 7, Cancel})`;`raw_code = 43001` |
-| BGT-091.9 | modify(`RID(m,42,7)`),码 `"40001"` | 无 `AmendReject`;`outcome_unknown = Some(ReqRef{42, 7, Amend})` |
+| BGT-091.9 | modify(`RID(m,42,7)`),码 `"25000"`(系统错误) | 无 `AmendReject`;`outcome_unknown = Some(ReqRef{42, 7, Amend})` |
 | BGT-091.10 | Query 的 REST 响应 HTTP 503、无业务码 | `outcome_unknown = Some(ReqRef{42, 7, Query})`;`raw_code = 0x2000_01F7`(536871415) |
 | BGT-091.11 | Query 的 REST 响应 HTTP 429、无业务码 | `outcome_unknown` 置;`ctl = RateLimited`;`raw_code = 0x2000_01AD`(536871341) |
 | BGT-091.12 | Query 的 REST 响应 HTTP 200、`code = "00000"` | 不置 `outcome_unknown`;产出 `QueryResult`(BGT-093) |
+| BGT-091.13 | place,码 `"25212"`(重复 `clientOid`) | 结果未知(前一笔可能仍挂着),不 `Reject` |
+| BGT-091.14 | cancel,码 `"25200"`(已登记) | 一条 `CancelReject{detail: 0}` |
+| BGT-091.15 | place,码 `"25004"`(操作过于频繁) | 一条 `Reject`;`ctl = RateLimited` |
+| BGT-091.16 | place,码 `"40008"`(时间戳过期) | `ctl = ClockSkew` |
+| BGT-091.17 | `event = "trade"` 但 `code = "25202"` | 与 BGT-091.3 相同 |
 
-### BGT-092 改单与撤单成功响应
+### BGT-092 改单与撤单的成功响应只是回执
 
-- 规则:[实现说明](README.md#实现说明)
+- 规则:[实现说明](README.md#实现说明)、[下单:UTA V3 WS](README.md#下单uta-v3-ws)
 - 级别:table
 - 里程碑:M3
-- 前置:同 BGT-090,换请求 id 与操作
+- 前置:同 BGT-090,换请求 id 与操作(官方:撤单、改单的成功响应只表示交易所收到请求,结果以订单频道为准;改单异步,失败不另行通知)
 - 实现:`crates/venue-bitget/tests/reports.rs::bgt_092_amend_cancel_ack`
 
 | 行 | 响应 | 期望 |
 |---|---|---|
-| BGT-092.1 | modify 成功(`RID(m,42,7)`) | 一条 `OrderEvent{what: AmendAck, slot: 42, gen: 7, epoch: 3}`;`req.op = Amend` |
-| BGT-092.2 | cancel 成功(`RID(c,42,7)`) | 一条 `OrderEvent{what: CancelAck, slot: 42, gen: 7}`;`req.op = Cancel` |
-| BGT-092.3 | 由 `CancelAll` 展开的撤单成功(`RID(c,43,1)`) | 一条 `OrderEvent{what: CancelAck, slot: 43, gen: 1}`;`req.op = Cancel` |
-| BGT-092.4 | 成功响应缺 `orderId` | `Err(DecodeErr::Shape)`,0 个事件 |
+| BGT-092.1 | modify 成功(`RID(m,42,7)`) | 0 个事件;`req = Some(ReqRef{42, 7, Amend})`(只结束在途请求) |
+| BGT-092.2 | cancel 成功(`RID(c,42,7)`) | 0 个事件;`req.op = Cancel`;不置 `outcome_unknown`。`CancelAck` 由订单频道的 `cancelled` 推送产出(BGT-100.4) |
+| BGT-092.3 | 由 `CancelAll` 展开的撤单成功(`RID(c,43,1)`) | `req = Some(ReqRef{43, 1, Cancel})` |
+| BGT-092.4 | place 成功响应缺 `orderId` | `Err(DecodeErr::Shape)`,0 个事件 |
+| BGT-092.5 | cancel / modify 失败,码 `"25204"`(订单不存在) | 一条 `CancelReject` / `AmendReject`,`detail = GONE(1)`,`reject_code = 25204` |
 
 ### BGT-093 查单响应解码为 QueryResult,累计量与均价必填
 
@@ -975,7 +987,7 @@ spec: README.md
 | BGT-093.3 | 部分成交,`0.002`,`65000` | `cum_filled: 200000, avg_px: 6500000`;状态 `PartiallyFilled`(2) |
 | BGT-093.4 | 已撤销,`0.001`,`65000.1` | 状态 `Cancelled`(4),`cum_filled: 100000` |
 | BGT-093.5 | 已成交,`0.004`,均价缺失或 `"0"` | `Err(DecodeErr::Shape)`(`cum_filled > 0` 而无均价视为解码错误) |
-| BGT-093.6 | "订单不存在"(码待核实,开发备忘第 4 条)、响应不带 `clientOid` | 一条 `QueryResult{slot: 42, gen: 7, cum_filled: 0}`,`detail` = NotFound(7)(槽取自 `RestOrigin`) |
+| BGT-093.6 | "订单不存在"(HTTP 400,码 `"25204"`,`data: null`) | 一条 `QueryResult{slot: 42, gen: 7, cum_filled: 0}`,`detail` = NotFound(7)(槽取自 `RestOrigin`) |
 | BGT-093.6 | 订单不存在的响应 | 状态 `NotFound`(7);不产出 `Reject`、不定终态(`stale_guard = None`) |
 
 ### BGT-100 订单频道状态映射为 OrderEvent
@@ -983,33 +995,34 @@ spec: README.md
 - 规则:[实现说明](README.md#实现说明)、[用户流事件表](README.md#用户流事件表)
 - 级别:table
 - 里程碑:M3
-- 前置:`RD-BGT`;私有 `RX`(`account = 2`);新 `GwCtx`;`ORD(...)` = V2 永续 `orders` 推送单条:`instId "BTCUSDT"`、`orderId "1234567890123"`、`clientOid = CID(3,42,7)`、`force "gtc"`、`tradeSide "open"`,其余字段按行;每行用新的 `GwCtx`
+- 前置:`RD-BGT`;私有 `RX`(`account = 2`);新 `GwCtx`;`ORD(...)` = UTA `order` 推送单条(`arg = {instType: "UTA", topic: "order"}`):`category "usdt-futures"`、`symbol "BTCUSDT"`、`orderId "1234567890123"`、`clientOid = CID(3,42,7)`、`timeInForce "gtc"`、`tradeSide "buy_single"`,`orderStatus`、`cumExecQty`、`cumExecValue`、`avgPrice`、`feeDetail` 按行(V2 字段名 `status`/`force`/`accBaseVolume`/`priceAvg` 同样接受);每行用新的 `GwCtx`
 - 实现:`crates/venue-bitget/tests/reports.rs::bgt_100_order_status_map`
 - 备注:依赖待核实:开发备忘第 1、3 条(UTA 频道名、状态取值与字段名)
 
 | 行 | 推送内容 | 期望 |
 |---|---|---|
 | BGT-100.1 | `status "live"`,无本笔成交 | 一条 `OrderEvent{what: Ack, slot: 42, gen: 7, epoch: 3, exch_order_id: 1234567890123}` |
-| BGT-100.2 | `status "partially_filled"`,本笔 `0.001`,累计 `0.001`,`tradeId "9001"` | 一条 `PartialFill`,`qty: 100000`,`cum_filled: 100000` |
-| BGT-100.3 | `status "filled"`,本笔 `0.003`,累计 `0.004`,`tradeId "9002"` | 一条 `Fill`,`qty: 300000`,`cum_filled: 400000` |
-| BGT-100.4 | `status "canceled"`,`force "gtc"`,累计 `0` | 一条 `CancelAck` |
-| BGT-100.5 | `status "canceled"`,`force "ioc"`,累计 `0.001` | 一条 `Expired`,`cum_filled: 100000` |
+| BGT-100.2 | `partially_filled`,累计 `0.001` | 一条 `PartialFill`,`qty: 100000`,`cum_filled: 100000` |
+| BGT-100.3 | `filled`,累计 `0.004`(新 `GwCtx`) | 一条 `Fill`,`qty: 400000`,`cum_filled: 400000` |
+| BGT-100.4 | `cancelled`,`timeInForce "gtc"`,累计 `0` | 一条 `CancelAck` |
+| BGT-100.5 | `cancelled`,`timeInForce "ioc"`,累计 `0.001` | 一条 `Expired`,`cum_filled: 100000` |
 | BGT-100.6 | `status "foo"` | `Err(DecodeErr::Shape)`,0 个事件 |
-| BGT-100.7 | `status "filled"` 但缺本笔成交量 | `Err(DecodeErr::Shape)` |
+| BGT-100.7 | `filled` 但缺累计成交量(`cumExecQty`) | `Err(DecodeErr::Shape)` |
+| BGT-100.8 | `cancelled`,`cancelReason "post_only_fill_cancel"` | 一条 `Expired` |
 
 ### BGT-101 部分成交的字段逐一映射
 
 - 规则:[累计量与费用来源](README.md#累计量与费用来源)、[实现说明](README.md#实现说明)、[契约](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
 - 里程碑:M3
-- 前置:`RD-BGT`;私有 `RX`;`ORD(status "partially_filled", baseVolume "0.001", fillPrice "65000.1", accBaseVolume "0.003", priceAvg "65000.05", fillFee "-0.039", fillFeeCoin "USDT", tradeId "9003", fillTime "1790000000500")`
+- 前置:`RD-BGT`;私有 `RX`;同一 `GwCtx` 依次解码 `ORD(partially_filled, cumExecQty "0.002", cumExecValue "130", avgPrice "65000", feeDetail USDT "0.026")` 与 `ORD(partially_filled, "0.003", "195.0001", "65000.03", "0.039", updatedTime "1790000000500")`
 - 步骤:
-  1. `decode_report(rd, &mut ctx, Orders, payload, &RX, &mut sink)`
+  1. `decode_report(rd, &mut ctx, Orders, payload, &RX, &mut sink)` 两次
 - 期望:
-  - 一条 `OrderEvent{venue: 10, account: 2, what: PartialFill, slot: 42, gen: 7, epoch: 3, inst: 1801, px: 6500010, qty: 100000, cum_filled: 300000, avg_px: 6500005, fee: 3900000, fee_asset: 1, exch_order_id: 1234567890123, ex_ts_ns: 1790000000500000000, hw_rx_ns: 1790000000126000000, rx_tsc: 1000, reject_code: 0}`
+  - 第 2 条为 `OrderEvent{venue: 10, account: 2, what: PartialFill, slot: 42, gen: 7, epoch: 3, inst: 1801, px: 6500010(= Δ成交额 65.0001 / Δ量 0.001), qty: 100000, cum_filled: 300000, avg_px: 6500003, fee: 1300000(累计费用差分), fee_asset: 1, exch_order_id: 1234567890123, ex_ts_ns: 1790000000500000000, hw_rx_ns: 1790000000126000000, rx_tsc: 1000, reject_code: 0, trade_id: 0}`
   - `ReportOutcome{events: 1, skip: No, fee_rule_deviation: false}`
+  - V2 形态(`baseVolume "0.001"`、`fillPrice "65000.1"`、`accBaseVolume "0.003"`、`priceAvg "65000.05"`、`fillFee "-0.039"`、`tradeId "9003"`、`fillTime`)在新 `GwCtx` 上:本笔字段优先,`qty: 100000`、`px: 6500010`、`fee: 3900000`(取绝对值)、`trade_id: 9003`
 - 实现:`crates/venue-bitget/tests/reports.rs::bgt_101_partial_fill_fields`
-- 备注:依赖待核实:开发备忘第 3 条(字段名、`fillFee` 的符号口径)
 
 ### BGT-102 同一成交推送两次只产出一次
 
@@ -1051,11 +1064,12 @@ spec: README.md
 | BGT-104.4 | `tradeId "-5"`,本笔 `0.001`,累计 `0.002` | 0 个事件(键与上一行相同) |
 | BGT-104.5 | 删除 `tradeId` 字段,累计 `0.003` | 一条成交事件,`cum_filled: 300000` |
 
-### BGT-105 推送不带累计量时按成交 id 去重累加合成
+### BGT-105 (撤销)推送不带累计量时按成交 id 去重累加合成
 
 - 规则:[累计量与费用来源](README.md#累计量与费用来源)、[契约](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
 - 里程碑:M3
+- 撤销:UTA `order` 推送必带 `cumExecQty`(官方);缺失时按 BGT-100.7 返回 `Shape`。编号保留不复用
 - 前置:同一新 `GwCtx`;三条推送都不带累计量字段:t1(`tradeId "9101"`,本笔 `0.001`)、t2(`"9102"`,本笔 `0.002`)、t1 重复
 - 步骤:
   1. 依次解码 t1、t2、t1
@@ -1078,11 +1092,12 @@ spec: README.md
 - 实现:`crates/venue-bitget/tests/reports.rs::bgt_106_cumulative_fee_diff`
 - 备注:依赖待核实:开发备忘第 3 条;核实为本笔口径时删除本用例并保留编号
 
-### BGT-107 订单终态之后才到的费用产出 FeeOnly
+### BGT-107 (暂缓)订单终态之后才到的费用产出 FeeOnly
 
 - 规则:[累计量与费用来源](README.md#累计量与费用来源)、[用户流事件表](README.md#用户流事件表)、[契约](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
 - 里程碑:M3
+- 暂缓:费用取自 `order` 推送的订单累计 `feeDetail`(随成交差分产出);`fill` 频道不订阅,核实费用晚于订单终态到达后再启用
 - 前置:同一 `GwCtx`;先解码 BGT-100.3(`Fill`,不带费用,`fee: 0`、`fee_asset: ASSET_NONE`);再解码成交频道推送(若存在)
 - 实现:`crates/venue-bitget/tests/reports.rs::bgt_107_fee_only`
 - 备注:依赖待核实:开发备忘第 3 条(成交频道是否存在、费用是否晚于订单终态)
@@ -1117,7 +1132,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:`RD-BGT`;永续成交推送(除注明外),`status "filled"`、`tradeId "9201"`,开平类型与 `clientOid` 按行;每行新 `GwCtx`
-- 实现:`crates/venue-bitget/tests/external.rs::bgt_109_external_order`
+- 实现:`crates/venue-bitget/tests/reports.rs::bgt_109_external_order`
 - 备注:依赖待核实:开发备忘第 3、6、14 条(开平类型字段名、单向模式取值、人工来源标记)
 
 | 行 | 开平类型、`clientOid` | 期望 |
@@ -1135,6 +1150,10 @@ spec: README.md
 | BGT-109.11 | `open`,`CID(3,42,7)` 校验位错 | `ExternalFill{cause: Unknown}` |
 | BGT-109.12 | 现货成交,`"abc"` | `ExternalFill{cause: Unknown}`(现货无强平标记) |
 | BGT-109.13 | 现货成交,`burst_close_long` 字段出现,`CID(3,42,7)`(现货) | `OrderEvent{what: Fill}`(现货 `NotIdentifiable`,不按开平类型判) |
+| BGT-109.14 | `burst_sell_single`(单向模式强平),`CID(3,42,7)` | `ExternalFill{cause: Liquidation}` |
+| BGT-109.15 | `dte_sys_adl_buy_in_single_side_mode`,空 | `ExternalFill{cause: Adl}` |
+| BGT-109.16 | `delivery_buy_single`,空 | `ExternalFill{cause: Delivery}` |
+| BGT-109.17 | `reduce_sell_single`(单向模式部分强平),`CID(3,42,7)` | `ExternalFill{cause: Liquidation}` |
 
 ### BGT-110 ExternalFill 的字段
 
@@ -1142,7 +1161,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:`RD-BGT`;私有 `RX`;永续强平成交:开平类型 `burst_close_long`、`side "sell"`、本笔 `0.004`、`fillPrice "52000.5"`、`fillFee "-0.6"`、`fillFeeCoin "USDT"`、`orderId "777000"`、`fillTime "1790000000600"`、累计 `0.004`
-- 实现:`crates/venue-bitget/tests/external.rs::bgt_110_external_fields`
+- 实现:`crates/venue-bitget/tests/reports.rs::bgt_110_external_fields`
 
 | 行 | `tradeId` | 期望 |
 |---|---|---|
@@ -1161,7 +1180,7 @@ spec: README.md
 - 期望:
   - 一条 `OrderEvent{what: Fill, slot: SlotId::UNRESOLVED, epoch: 0, exch_order_id: 1234567890123}`;无 `ExternalFill`(暂存超时转 `ExternalFill{Unknown}` 归运行时)
   - `sink.exch_id(b"1234567890123", None)` 被调用一次
-- 实现:`crates/venue-bitget/tests/external.rs::bgt_111_missing_client_oid`
+- 实现:`crates/venue-bitget/tests/reports.rs::bgt_111_missing_client_oid`
 - 备注:依赖待核实:开发备忘第 3 条("必带 `clientOid`"核实成立后改按契约 18 第 3 步,本用例同一提交改写)
 
 ### BGT-112 强平成交重复送达只产出一次 ExternalFill
@@ -1170,7 +1189,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:同一 `GwCtx` 按行序;BGT-110 的推送
-- 实现:`crates/venue-bitget/tests/external.rs::bgt_112_external_dedup`
+- 实现:`crates/venue-bitget/tests/reports.rs::bgt_112_external_dedup`
 
 | 行 | 推送 | 期望 |
 |---|---|---|
@@ -1445,7 +1464,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:两个产品线各断言一遍
-- 实现:`crates/venue-bitget/tests/caps.rs::bgt_170_rate_rules`
+- 实现:`crates/venue-bitget/tests/session.rs::bgt_170_rate_rules`
 
 | 行 | 条目 | 期望 `RateRule` |
 |---|---|---|
@@ -1460,7 +1479,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:`RD-BGT`;`WC`;两个产品线
-- 实现:`crates/venue-bitget/tests/caps.rs::bgt_171_stale_guard_dead_man`
+- 实现:`crates/venue-bitget/tests/session.rs::bgt_171_no_stale_guard_no_dead_man`
 
 | 行 | 调用 | 期望 |
 |---|---|---|
@@ -1475,7 +1494,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:`BitgetUsdtFutures::default_caps()`
-- 实现:`crates/venue-bitget/tests/caps.rs::bgt_172_default_caps_fut`
+- 实现:`crates/venue-bitget/tests/session.rs::bgt_172_fut_default_caps`
 
 | 行 | 字段 | 期望 |
 |---|---|---|
@@ -1489,9 +1508,9 @@ spec: README.md
 | BGT-172.8 | `funding_settle` | `RateOnly`(3) |
 | BGT-172.9 | `margin_data` | `Poll{interval_ms: 5000}` |
 | BGT-172.10 | `own_liquidation_marker` | `OrderTypeField`(3) |
-| BGT-172.11 | `liq_marker_arg` 按 `\|` 拆分 | 6 项:`burst_close_long`、`burst_close_short`、`dte_sys_adl_close_long`、`dte_sys_adl_close_short`、`delivery_close_long`、`delivery_close_short` |
+| BGT-172.11 | `liq_marker_arg` 按 `\|` 拆分 | 16 项:双向 `burst_close_long/short`、`reduce_close_long/short`、`dte_sys_adl_close_long/short`、`delivery_close_long/short`;单向 `burst_buy_single`、`burst_sell_single`、`reduce_buy_single`、`reduce_sell_single`、`dte_sys_adl_buy_in_single_side_mode`、`dte_sys_adl_sell_in_single_side_mode`、`delivery_buy_single`、`delivery_sell_single`(官方枚举页) |
 | BGT-172.12 | `ignorable_user_events` | 空 |
-| BGT-172.13 | `flags` | `AMEND + POST_ONLY + IOC` = 7;`FOK`、`BATCH_CANCEL` 位为 0 |
+| BGT-172.13 | `flags` | `POST_ONLY + IOC + FOK` = 14;`AMEND`(改单响应只是回执)与 `BATCH_CANCEL` 位为 0 |
 | BGT-172.14 | `dms` 与四个时长 | `DeadManCap::None`(1);`dms_min_ms = dms_max_ms = dms_timeout_ms = dms_refresh_ms = 0` |
 | BGT-172.15 | `testnet` | `TestnetKind::Demo`(3) |
 | BGT-172.16 | `amend_qty_down_only` | false |
@@ -1502,7 +1521,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:`BitgetSpot::default_caps()`
-- 实现:`crates/venue-bitget/tests/caps.rs::bgt_173_default_caps_spot`
+- 实现:`crates/venue-bitget/tests/session.rs::bgt_173_spot_default_caps`
 
 | 行 | 字段 | 期望 |
 |---|---|---|
@@ -1516,7 +1535,7 @@ spec: README.md
 | BGT-173.8 | `margin_data` | `NotApplicable` |
 | BGT-173.9 | `own_liquidation_marker` / `liq_marker_arg` | `NotIdentifiable`(1) / `""` |
 | BGT-173.10 | `ignorable_user_events` | 空 |
-| BGT-173.11 | `flags` | 7 |
+| BGT-173.11 | `flags` | 14 |
 | BGT-173.12 | `dms` 与四个时长 | `None`(1);四个时长 0 |
 | BGT-173.13 | `testnet` | `Demo`(3) |
 | BGT-173.14 | `amend_qty_down_only` | false |
@@ -1541,7 +1560,7 @@ spec: README.md
 | BGT-174.8 | `check_identity` | 通过(`Ok(false)` 分支:`uid_keys` 覆盖会话与 REST) |
 | BGT-174.9 | `check_default_caps` | 通过(`dead_man() = None` ↔ `dms = None`;现货编码带 `REDUCE_ONLY` → `Unsupported`) |
 | BGT-174.10 | `check_snapshot_isolation` | 通过(BBO 补帧) |
-| BGT-174.11 | `check_topn` | 通过(`public-topn` 恰一条,`topn_levels = [5, 15]`) |
+| BGT-174.11 | `check_topn` | 通过(`public-topn` 恰一条,`topn_levels = [5, 50]`) |
 | BGT-174.12 | `check_acct_isolation` | 通过 |
 | BGT-174.13 | `check_md_basics` | 通过 |
 | BGT-174.14 | `check_hot_alloc` | 通过 |
@@ -1576,7 +1595,7 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:两个产品线
-- 实现:`crates/venue-bitget/tests/heartbeat.rs::bgt_190_heartbeat_spec`
+- 实现:`crates/venue-bitget/tests/session.rs::bgt_190_unconditional_app_ping`
 
 | 行 | 调用 | 期望 |
 |---|---|---|
@@ -1635,20 +1654,21 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:永续;`RD-BGT` 另含 118 个合成永续 inst(共 120 个);`SubSpec` 按行
-- 实现:`crates/venue-bitget/tests/subscribe.rs::bgt_200_subscribe_frames`
+- 实现:`crates/venue-bitget/tests/session.rs::bgt_200_subscribe_frames`
 - 备注:依赖待核实:开发备忘第 1 条(UTA `args` 字段名)
 
 | 行 | `subs` | 期望 |
 |---|---|---|
-| BGT-200.1 | 120 个 inst 的 `Bbo` | 3 帧,`args` 数依次 50、50、20;每帧 `op = "subscribe"`,没有顶层 `id` 键;每个 arg 的频道为 `books1` |
+| BGT-200.1 | 120 个 inst 的 `Bbo` | 3 帧,`args` 数依次 50、50、20;每帧 `op = "subscribe"`,没有顶层 `id` 键;每个 arg 为 `{"instType":"usdt-futures","topic":"books1","symbol":…}` |
 | BGT-200.2 | 1801 的 `DepthTopN`,`levels = 5` | 1 帧,1 个 arg,频道 `books5` |
-| BGT-200.3 | 1801 的 `DepthTopN`,`levels = 15` | 频道 `books15` |
+| BGT-200.3 | 1801 的 `DepthTopN`,`levels = 50` | 频道 `books50`;`levels = 15` → `Err(ProtoErr::Unsupported)` |
 | BGT-200.4 | 1801 的 `DepthTopN`,`levels = 10` | `Err(ProtoErr::Unsupported)`,不写帧 |
 | BGT-200.5 | 1801 的 `Trade` | 频道 `publicTrade` |
 | BGT-200.6 | 1801 的 `Mark`、`Index`、`Funding` 各一个 | 1 个 arg,频道 `ticker`(三者合并,不重复订阅) |
 | BGT-200.7 | 1801 的 `Liquidation` | `Err(ProtoErr::Unsupported)`(公共强平流不订阅) |
 | BGT-200.8 | 现货 1901 的 `Mark` | `Err(ProtoErr::Unsupported)` |
 | BGT-200.9 | 空 `subs` | `Ok`,0 帧 |
+| BGT-200.10 | 1801 的 `DepthIncr` | 频道 `books` |
 
 ### BGT-201 私有频道订阅帧只含本产品线的频道
 
@@ -1656,13 +1676,13 @@ spec: README.md
 - 级别:table
 - 里程碑:M3
 - 前置:账户 2
-- 实现:`crates/venue-bitget/tests/subscribe.rs::bgt_201_private_subscribe`
+- 实现:`crates/venue-bitget/tests/session.rs::bgt_201_private_subscribe`
 - 备注:依赖待核实:开发备忘第 1 条(私有频道名全集、全账户订阅写法)
 
 | 行 | 调用 | 期望 |
 |---|---|---|
-| BGT-201.1 | 永续 `private_subscribe(cfg, 2, false, &mut out)` | 1 帧,`op = "subscribe"`,无 `id`;频道恰为订单、持仓、账户(成交频道核实存在时追加);`instType` 全为永续 |
-| BGT-201.2 | 现货 `private_subscribe(…, false, …)` | 频道恰为订单、账户;无持仓频道;`instType` 全为现货 |
+| BGT-201.1 | 永续 `private_subscribe(cfg, 2, false, &mut out)` | 1 帧 `{"op":"subscribe","args":[{"instType":"UTA","topic":"order"},{"instType":"UTA","topic":"position"},{"instType":"UTA","topic":"account"}]}`;无 `id`(UTA 私有频道覆盖整个统一账户,`decode_report` 按 `category` 只保留本产品线) |
+| BGT-201.2 | 现货 `private_subscribe(…, false, …)` | 频道恰为 `order`、`account`;无 `position` |
 | BGT-201.3 | 永续 `private_subscribe(…, true, …)` | 同 BGT-201.1 的频道,`op = "unsubscribe"` |
 
 ### BGT-210 核实 UTA V3 行情与私有路径、订阅写法、频道名与分档快照

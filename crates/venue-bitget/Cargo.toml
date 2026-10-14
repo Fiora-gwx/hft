@@ -1,0 +1,43 @@
+[package]
+name = "venue-bitget"
+description = "Bitget UTA (V3) USDT perpetual and spot protocol: books1/books5/books50/books market data, ticker mark/index/funding, login, private order/position/account channels, WS place/cancel/modify frames, REST order query, codes, rate and capability defaults"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+# Plain test files build as one binary (tests/main.rs); files with process-wide
+# effects are separate [[test]] targets.
+autotests = false
+
+[lints]
+workspace = true
+
+[dependencies]
+hft-types.workspace = true
+hft-refdata.workspace = true
+hft-event.workspace = true
+hft-venue-proto.workspace = true
+# Per-message structs over borrowed strings (README "实现说明" 2); no generic JSON values.
+sonic-rs = "0.5"
+serde = { version = "1", default-features = false, features = ["derive"] }
+# login and REST signatures: Base64(HMAC-SHA256) (README "实现说明" 8). Not the workspace sha2
+# entry: its `asm` feature needs a C toolchain for the target.
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+
+[dev-dependencies]
+hft-venue-proto = { workspace = true, features = ["testkit"] }
+hft-testkit.workspace = true
+proptest.workspace = true
+# Golden comparison only (README "依赖": never in [dependencies]).
+serde_json = "1"
+
+[[test]]
+name = "alloc"
+path = "tests/alloc.rs"
+
+[[test]]
+name = "bitget"
+path = "tests/main.rs"
