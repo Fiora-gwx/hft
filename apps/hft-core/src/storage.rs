@@ -22,6 +22,7 @@ pub fn instance(c: &Config) -> InstanceName {
     }
 }
 pub fn config(c: &Config, name: &str, kind: JournalKind, venue: VenueId) -> JournalConfig {
+    let layout = c.journal.layout(name);
     JournalConfig {
         name: name.into(),
         kind,
@@ -29,11 +30,11 @@ pub fn config(c: &Config, name: &str, kind: JournalKind, venue: VenueId) -> Jour
         instance: instance(c),
         hot_dir: c.paths.journal_ram.clone(),
         cold_root: c.paths.journal_cold.clone(),
-        segment_bytes: c.journal.segment_bytes,
+        segment_bytes: layout.segment_bytes,
         page: PageSize::Normal,
         size_idle_pct: 75,
         size_valve_pct: 90,
-        hot_keep: c.journal.hot_keep,
+        hot_keep: layout.hot_keep,
     }
 }
 pub fn open(cfg: JournalConfig, epoch: u32) -> Result<(JournalWriter, Side), Error> {

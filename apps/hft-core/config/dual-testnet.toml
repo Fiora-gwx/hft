@@ -6,16 +6,22 @@ name = "prod"
 order_env = "testnet"
 config_source = "file"
 [paths]
-journal_ram = "/dev/shm/hft-testnet"
-journal_cold = "/var/lib/hft-testnet"
-ctl_socket = "/run/hft-testnet/core.sock"
-ctl_principals = "principals.toml"
+journal_ram = "/dev/shm/hft"
+journal_cold = "/data"
+ctl_socket = "/run/hft/core-prod/ctl.sock"
+ctl_principals = "/etc/hft/ctl-principals.toml"
 [shutdown]
 cancel_open_orders = true
 drain_timeout_ms = 30000
 [journal]
-segment_bytes = 16777216
-hot_keep = 2
+segment_bytes = 33554432
+hot_keep = 1
+[journal.raw_feed]
+segment_bytes = 4194304
+hot_keep = 0
+[journal.raw_gw]
+segment_bytes = 2097152
+hot_keep = 0
 [clock]
 step_threshold_ns = 50000
 interval_ms = 1000
@@ -48,30 +54,37 @@ rest_sign_alg = "ed25519"
 name = "sequencer"
 task = "sequencer"
 park_us = 100
+nice = 0
 [[threads]]
 name = "persist"
 task = "persist"
 park_us = 500
+nice = 10
 [[threads]]
 name = "housekeeping"
 task = "housekeeping"
 park_us = 1000
+nice = 0
 [[threads]]
 name = "ctl-gateway"
 task = "ctl-gateway"
 park_us = 200
+nice = 10
 [[threads]]
 name = "feed-futures"
 task = "feed:futures"
 park_us = 100
+nice = 0
 [[threads]]
 name = "gw-futures"
 task = "gw:futures"
 park_us = 100
+nice = 0
 [[threads]]
 name = "build-futures"
 task = "conn-builder:futures"
 park_us = 500
+nice = 10
 [venues.second]
 protocol = "bitget-usdt-futures"
 id = 10
@@ -97,14 +110,17 @@ passphrase_path = "/run/secrets/hft-bitget-demo/passphrase"
 name = "feed-second"
 task = "feed:second"
 park_us = 100
+nice = 0
 [[threads]]
 name = "gw-second"
 task = "gw:second"
 park_us = 100
+nice = 0
 [[threads]]
 name = "build-second"
 task = "conn-builder:second"
 park_us = 500
+nice = 10
 [blobs.refdata]
 path = "refdata.bin"
 sha256 = "0000000000000000000000000000000000000000000000000000000000000000"

@@ -49,30 +49,37 @@ passphrase_path = "/run/secrets/hft-bitget-demo/passphrase"
 name = "sequencer"
 task = "sequencer"
 park_us = 100
+nice = 0
 [[threads]]
 name = "persist"
 task = "persist"
 park_us = 500
+nice = 10
 [[threads]]
 name = "housekeeping"
 task = "housekeeping"
 park_us = 1000
+nice = 0
 [[threads]]
 name = "ctl-gateway"
 task = "ctl-gateway"
 park_us = 200
+nice = 10
 [[threads]]
 name = "feed-futures"
 task = "feed:futures"
 park_us = 100
+nice = 0
 [[threads]]
 name = "gw-futures"
 task = "gw:futures"
 park_us = 100
+nice = 0
 [[threads]]
 name = "build-futures"
 task = "conn-builder:futures"
 park_us = 500
+nice = 10
 [blobs.refdata]
 path = "refdata.bin"
 sha256 = "0000000000000000000000000000000000000000000000000000000000000000"

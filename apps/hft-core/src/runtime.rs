@@ -32,11 +32,37 @@ pub fn policy(c: &Config, task: &str) -> Result<Thread, Error> {
         .ok_or_else(|| Error::config("ThreadPlan", task))
 }
 pub fn pin(t: &Thread) -> Result<(), Error> {
-    hft_rt::name_current_thread(&t.name);
     if let Some(cpu) = t.core {
         hft_rt::pin_current_thread(cpu)
             .map_err(|e| Error::runtime("Affinity", format!("{}: {e:?}", t.name), 3))?;
     }
+    #[cfg(target_os = "linux")]
+    {
+        // All settings target the calling Linux thread; do not inherit an RT policy
+        // or the parent's nice value accidentally. Setup runs before the task body.
+        let param = libc::sched_param { sched_priority: 0 };
+        // SAFETY: param points to an initialized sched_param; pid 0 means this thread.
+        if unsafe { libc::sched_setscheduler(0, libc::SCHED_OTHER, &param) } != 0 {
+            return Err(Error::runtime(
+                "ThreadPolicy",
+                format!("{}: SCHED_OTHER", t.name),
+                3,
+            ));
+        }
+        // SAFETY: PR_SET_TIMERSLACK takes an unsigned long value, no pointers.
+        if unsafe { libc::prctl(libc::PR_SET_TIMERSLACK, 1 as libc::c_ulong, 0, 0, 0) } != 0 {
+            return Err(Error::runtime(
+                "ThreadPolicy",
+                format!("{}: timerslack", t.name),
+                3,
+            ));
+        }
+        // SAFETY: PRIO_PROCESS with id 0 addresses only the calling Linux thread.
+        if unsafe { libc::setpriority(libc::PRIO_PROCESS, 0, i32::from(t.nice)) } != 0 {
+            return Err(Error::runtime("ThreadPolicy", format!("{}: nice", t.name), 3));
+        }
+    }
+    hft_rt::name_current_thread(&t.name);
     Ok(())
 }
 pub fn idle(t: &Thread) {
@@ -160,14 +186,25 @@ impl Workers {
         t: Thread,
         f: impl FnOnce(Arc<AtomicBool>, ThreadContext) -> Result<(), Error> + Send + 'static,
     ) -> Result<(), Error> {
+        // Slot identities remain owned by the single assembly thread.
         let heartbeat = claim(self.heartbeat, &t)?;
         let stop = self.stop.clone();
+        // The main thread waits only for OS setup, never for network or task work.
+        // This keeps a failed affinity/priority setup from racing READY.
+        let (setup_tx, setup_rx) = std::sync::mpsc::sync_channel(1);
         self.joins.push(
             std::thread::Builder::new()
                 .name(t.name.clone())
                 .spawn(move || {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        pin(&t).and_then(|()| f(stop.clone(), ThreadContext { policy: t, heartbeat }))
+                        if let Err(error) = pin(&t) {
+                            let _ = setup_tx.send(Err(error));
+                            return Ok(());
+                        }
+                        if setup_tx.send(Ok(())).is_err() {
+                            return Ok(());
+                        }
+                        f(stop.clone(), ThreadContext { policy: t, heartbeat })
                     }))
                     .unwrap_or_else(|_| Err(Error::runtime("ThreadPanic", "worker panicked", 134)));
                     if result.is_err() {
@@ -177,7 +214,16 @@ impl Workers {
                 })
                 .map_err(|e| Error::runtime("Thread", e.to_string(), 3))?,
         );
-        Ok(())
+        match setup_rx.recv() {
+            Ok(Ok(())) => Ok(()),
+            result => {
+                self.stop.store(true, Ordering::Release);
+                Err(match result {
+                    Ok(Err(error)) => error,
+                    _ => Error::runtime("ThreadPanic", "worker setup did not complete", 134),
+                })
+            }
+        }
     }
     pub fn join(&mut self) -> Result<(), Error> {
         let mut first = None;
@@ -227,6 +273,9 @@ fn run_linux(
     secrets: crate::secrets::SecretFiles,
 ) -> Result<u8, Error> {
     let c = &l.cfg;
+    #[cfg(target_os = "linux")]
+    let signals = Arc::new(crate::signals::Signals::block()?);
+    let lease = crate::recovery::InstanceLease::acquire(&c.paths.journal_cold, storage::instance(c))?;
     if c.paths
         .ctl_socket
         .try_exists()
@@ -250,38 +299,19 @@ fn run_linux(
             4,
         ));
     }
-    std::fs::create_dir_all(&cold).map_err(|e| Error::runtime("Journal", e.to_string(), 3))?;
-    let lock = cold.join("core.lock");
-    let _lock = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&lock)
-        .map_err(|_| {
-            Error::runtime(
-                "InstanceBusy",
-                "core.lock exists; verify no process is running before removing a stale lock",
-                3,
-            )
-        })?;
-    struct Cleanup(std::path::PathBuf, std::path::PathBuf);
+    struct Cleanup(std::path::PathBuf);
     impl Drop for Cleanup {
         fn drop(&mut self) {
             let _ = std::fs::remove_file(&self.0);
-            let _ = std::fs::remove_file(&self.1);
         }
     }
-    let _cleanup = Cleanup(lock, c.paths.ctl_socket.clone());
+    let _cleanup = Cleanup(c.paths.ctl_socket.clone());
     let meta = hft_journal::DurableMeta::open(&c.paths.journal_cold, &storage::instance(c))
         .map_err(|e| Error::runtime("Epoch", e.to_string(), 4))?;
-    let epoch = meta
-        .read("engine_epoch")
-        .map_err(|e| Error::runtime("Epoch", e.to_string(), 4))?
-        .unwrap_or(0)
-        .checked_add(1)
-        .and_then(|x| u32::try_from(x).ok())
-        .ok_or_else(|| Error::runtime("Epoch", "epoch exhausted", 4))?;
-    meta.write_sync("engine_epoch", u64::from(epoch))
-        .map_err(|e| Error::runtime("Epoch", e.to_string(), 4))?;
+    // Recovery is deliberately rejected above; the fresh session has no snapshot epoch.
+    let epoch = lease.reserve_epoch(&meta, None)?;
+    #[cfg(target_os = "linux")]
+    crate::budget::preflight(c, dry)?;
     l.setup = hft_sequencer::EngineSetup::decode_blob(
         &l.configs.engine_blob,
         &l.rd,
@@ -471,6 +501,8 @@ fn run_linux(
     #[cfg(not(target_os = "linux"))]
     let _ = internal_rx;
     let mut workers = Workers::new(heartbeat);
+    #[cfg(target_os = "linux")]
+    hft_rt::lock_all().map_err(|_| Error::runtime("MemLock", "mlockall failed; check LimitMEMLOCK", 3))?;
     let mut persist_workers = Workers::new(heartbeat);
     let mut persist = storage::Persist::new(sides);
     persist_workers.spawn(policy(c, "persist")?, move |stop, t| {
@@ -490,11 +522,6 @@ fn run_linux(
         )
     })?;
     let drain = Arc::new(AtomicBool::new(false));
-    #[cfg(unix)]
-    for sig in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
-        signal_hook::flag::register(sig, drain.clone())
-            .map_err(|e| Error::runtime("Signal", e.to_string(), 3))?;
-    }
     let request = drain.clone();
     let cancel = c.shutdown.cancel_open_orders;
     workers.spawn(policy(c, "ctl-gateway")?, move |stop, t| {
@@ -567,6 +594,12 @@ fn run_linux(
             task.spawn(&mut workers)?;
         }
     }
+    let ready = Arc::new(AtomicBool::new(false));
+    let hk_ready = ready.clone();
+    #[cfg(target_os = "linux")]
+    let hk_drain = drain.clone();
+    #[cfg(target_os = "linux")]
+    let hk_signals = signals.clone();
     let mut hk = hk_tx;
     let threshold = c.clock.step_threshold_ns;
     let interval = Duration::from_millis(u64::from(c.clock.interval_ms));
@@ -580,9 +613,21 @@ fn run_linux(
         let mut next = Instant::now();
         let mut seq_count = hb.read();
         let mut seq_progress = Instant::now();
-        notify("READY=1")?;
+        let mut announced = false;
         while !stop.load(Ordering::Acquire) {
             t.heartbeat.beat();
+            #[cfg(target_os = "linux")]
+            if hk_signals.drain_requested()? {
+                hk_drain.store(true, Ordering::Release);
+            }
+            if !announced {
+                if !hk_ready.load(Ordering::Acquire) {
+                    idle(&t);
+                    continue;
+                }
+                notify("READY=1")?;
+                announced = true;
+            }
             heartbeat.set_state(hk_state.load(Ordering::Acquire));
             let count = hb.read();
             if count != seq_count {
@@ -613,10 +658,12 @@ fn run_linux(
         .map(hft_types::AccountId)
         .filter(|a| rd.account(*a).id.0 != 0)
         .collect();
+    let seq_ready = ready.clone();
     let seq_thread = std::thread::Builder::new()
         .name(seq_policy.name.clone())
         .spawn(move || -> Result<(u8, u64, u64, u64), Error> {
             pin(&seq_policy)?;
+            seq_ready.store(true, Ordering::Release);
             let mut running = false;
             loop {
                 seq_slot.beat();
@@ -657,12 +704,16 @@ fn run_linux(
         })
         .map_err(|e| Error::runtime("Thread", e.to_string(), 3))?;
     eprintln!(
-        "hft-core: READY instance={} ctl={}",
+        "hft-core: STARTED instance={} ctl={}",
         c.instance.name,
         c.paths.ctl_socket.display()
     );
     let start = Instant::now();
     while !seq_thread.is_finished() {
+        #[cfg(target_os = "linux")]
+        if signals.drain_requested()? {
+            drain.store(true, Ordering::Release);
+        }
         if duration_ms.is_some_and(|ms| start.elapsed() >= Duration::from_millis(ms)) {
             drain.store(true, Ordering::Release);
         }

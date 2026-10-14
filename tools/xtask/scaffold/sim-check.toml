@@ -69,23 +69,29 @@ qty_raw = 500000000
 name = "sequencer"
 task = "sequencer"
 park_us = 100
+nice = 0
 [[threads]]
 name = "persist"
 task = "persist"
 park_us = 100
+nice = 10
 [[threads]]
 name = "housekeeping"
 task = "housekeeping"
 park_us = 100
+nice = 0
 [[threads]]
 name = "ctl-gateway"
 task = "ctl-gateway"
 park_us = 100
+nice = 10
 [[threads]]
 name = "sim-gw"
 task = "sim-gw"
 park_us = 100
+nice = 0
 [[threads]]
 name = "paper-feed"
 task = "paper-feed"
 park_us = 100
+nice = 0

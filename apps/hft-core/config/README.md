@@ -8,7 +8,7 @@
 
 引擎初始为 Shadow。等待 journal 的 ClockOk 与启动闸门通过后，通过已有 ctl 客户端对 `paper` 账户、`paper-probe` 实例发送 `SetMode Live`，按正常 preview/confirm 流程确认。探针收到固定 BBO 后发出远价 PostOnly，收到 Ack 后撤单；集成测试自动完成这一流程。未启用 Live 的 `--run-for-ms` 演示只验证启动与 Drain。模拟器每账户的连接回报展开为其配置 venue 集合的单主连接，ECF1 必须启用 `allow_missing_standby`；网络模式不替账户生成连接或身份报告。
 
-`[[threads]]` 在此子集使用 `name`、`task`、可选 `core`、必填 `park_us`。任务为 `sequencer`、`persist`、`housekeeping`、`ctl-gateway`；离线另需 `paper-feed`、`sim-gw`，网络模式每 venue 另需 `feed:<配置名>`、`conn-builder:<配置名>`、有账户时的 `gw:<配置名>`。每个任务恰好一个独占线程；空闲 park 位于任务轮转外。
+`[[threads]]` 在此子集使用 `name`、`task`、可选 `core`、必填 `park_us` 与 `nice`。`nice` 为 0–19，housekeeping 必须为 0；模板的 persist 与控制/建连线程为 10。每个线程在执行任务前设置 `SCHED_OTHER`、`timerslack_ns = 1`、nice、名称及可选绑核；设置失败退出 3，所有工作线程的设置成功后才允许 READY。任务为 `sequencer`、`persist`、`housekeeping`、`ctl-gateway`；离线另需 `paper-feed`、`sim-gw`，网络模式每 venue 另需 `feed:<配置名>`、`conn-builder:<配置名>`、有账户时的 `gw:<配置名>`。每个任务恰好一个独占线程；空闲 park 位于任务轮转外。
 
 `clock.step_threshold_ns`、`clock.interval_ms`、`watchdog.hb_stale_ms` 与 `venues.<v>.stale_guard_ms` 均为必填正整数。线程名不超过 Linux comm 的 15 字节；park 时长遵守 [心跳约束](../README.md#线程计划)。网关订单槽位容量从 ECF1 的 OMS 配置取得。缺失键逐项报 `MissingField`，凭据引用缺失报 `MissingCredential`，未知键与类型错误报单条脱敏 `ConfigParse`。加载还检查 [执行/风险与尘埃线约束](../README.md#内存与-journal-段按主机类唯一归属)，失败发生在运行资源创建前。
 
@@ -25,3 +25,5 @@
 来源：[Binance REST/市场流测试网说明](https://developers.binance.me/en/docs/products/derivatives-trading-usds-futures/general-info)、[官方 USDT-M SDK](https://github.com/binance/binance-connector-js/tree/master/clients/derivatives-trading-usds-futures)。路径由 `venue-binance` 的 route 表生成。REST 密钥和 Ed25519 session 密钥分别配置 API key 文件；Ed25519 支持原始 32 字节、PKCS#8 DER/PEM，HMAC secret 为 ASCII。文件不入库，日志不回显解析失败的 TOML 或凭据内容。`src_ip` 与 `bind_device` 必须按测试机实际出口填写。
 
 账户链路、同进程装配与限制见 [测试网 runbook](../RUNBOOK-testnet.md)。Bitget 默认启用，模板为 [bitget-demo.toml](bitget-demo.toml)，HMAC 文件用 `session_seed_path` 并提供 `passphrase_path`。
+
+`journal.segment_bytes` 与 `journal.hot_keep` 为 seq 的配置；可选的 `journal.raw_feed`、`journal.raw_gw` 各含必填的 `segment_bytes`、`hot_keep`，缺省时沿用 seq 配置。raw 允许零保留，尺寸须页对齐且在 2–256 MiB 内。双 venue 模板按 [dev2 journal 表](../README.md#内存与-journal-段按主机类唯一归属)分开配置，实际预算与打开 writer 使用同一布局；容量检查读取实例子目录的文件系统，支持每实例独立 tmpfs 挂载。

@@ -1,10 +1,14 @@
 //! Process assembly; business state belongs exclusively to hft-sequencer.
+pub mod budget;
 pub mod config;
 mod config_shape;
 pub mod io;
 pub mod paper;
+pub mod recovery;
 pub mod runtime;
 pub mod secrets;
+#[cfg(target_os = "linux")]
+pub mod signals;
 pub mod storage;
 pub mod venues;
 

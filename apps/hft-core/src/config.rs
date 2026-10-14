@@ -67,6 +67,30 @@ pub struct Shutdown {
 pub struct Journal {
     pub segment_bytes: u64,
     pub hot_keep: u8,
+    pub raw_feed: Option<JournalSize>,
+    pub raw_gw: Option<JournalSize>,
+}
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JournalSize {
+    pub segment_bytes: u64,
+    pub hot_keep: u8,
+}
+impl Journal {
+    /// Names are allocated by the assembly; omitted raw layouts retain the original config.
+    pub fn layout(&self, name: &str) -> JournalSize {
+        let raw = if name.starts_with("raw-feed-") {
+            self.raw_feed
+        } else if name.starts_with("raw-gw-") {
+            self.raw_gw
+        } else {
+            None
+        };
+        raw.unwrap_or(JournalSize {
+            segment_bytes: self.segment_bytes,
+            hot_keep: self.hot_keep,
+        })
+    }
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -86,6 +110,7 @@ pub struct Thread {
     pub task: String,
     pub core: Option<u16>,
     pub park_us: u64,
+    pub nice: u8,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -291,6 +316,14 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
     if c.shutdown.drain_timeout_ms == 0 {
         bad!("BadValue", "drain_timeout_ms must be nonzero".into());
     }
+    for raw in [c.journal.raw_feed, c.journal.raw_gw].into_iter().flatten() {
+        if !(2 << 20..=256 << 20).contains(&raw.segment_bytes) || !raw.segment_bytes.is_multiple_of(4096) {
+            bad!(
+                "BadValue",
+                "raw journal segment_bytes must be page aligned, 2..256 MiB".into()
+            );
+        }
+    }
     let mut tasks = vec![
         "sequencer".to_string(),
         "persist".into(),
@@ -379,6 +412,8 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
             || t.name.len() > 15
             || t.name.as_bytes().contains(&0)
             || t.core.is_some_and(|n| n >= 256)
+            || t.nice > 19
+            || (t.task == "housekeeping" && t.nice != 0)
             || !(1..=10000).contains(&t.park_us)
             || u128::from(t.park_us) * 4 >= u128::from(c.watchdog.hb_stale_ms) * 1000
             || !tasks.contains(&t.task)

@@ -27,10 +27,11 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
         "blobs" => (&["refdata", "engine", "risk_params", "strategy_params"], &[]),
         "blob" => (&["path", "sha256"], &[]),
         "shutdown" => (&["cancel_open_orders", "drain_timeout_ms"], &[]),
-        "journal" => (&["segment_bytes", "hot_keep"], &[]),
+        "journal" => (&["segment_bytes", "hot_keep"], &["raw_feed", "raw_gw"]),
+        "journal_size" => (&["segment_bytes", "hot_keep"], &[]),
         "clock" => (&["step_threshold_ns", "interval_ms"], &[]),
         "watchdog" => (&["hb_stale_ms"], &[]),
-        "thread" => (&["name", "task", "park_us"], &["core"]),
+        "thread" => (&["name", "task", "park_us", "nice"], &["core"]),
         "rings" => (&["elements", "bytes"], &[]),
         "venue" => (
             &["protocol", "id", "max_sub_insts", "stale_guard_ms"],
@@ -114,6 +115,7 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
             ) => Some(key.as_str()),
             ("blobs", "refdata" | "engine" | "risk_params") => Some("blob"),
             ("venue", "account_io") => Some("account_io"),
+            ("journal", "raw_feed" | "raw_gw") => Some("journal_size"),
             _ => None,
         };
         if let Some(child_shape) = child_shape {
