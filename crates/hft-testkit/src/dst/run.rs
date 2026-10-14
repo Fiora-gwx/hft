@@ -102,6 +102,22 @@ impl RunRecord {
     pub fn compared_of(&self, i: InvId) -> u64 {
         self.compared.get(usize::from(i.0)).copied().unwrap_or(0)
     }
+    /// xxh3-128 over every journal record (seq, end seq, tsc, kind, flags, body length and bytes) in
+    /// order: the run's event digest. INV-9 compares it between two in-process runs of one seed; it
+    /// is never committed to the repository (TK-181).
+    pub fn event_digest(&self) -> u128 {
+        let mut h = xxhash_rust::xxh3::Xxh3::new();
+        for r in &self.journal {
+            h.update(&r.seq.to_le_bytes());
+            h.update(&r.end_seq.to_le_bytes());
+            h.update(&r.tsc.to_le_bytes());
+            h.update(&r.kind.0.to_le_bytes());
+            h.update(&r.flags.0.to_le_bytes());
+            h.update(&(r.body.len() as u64).to_le_bytes());
+            h.update(&r.body);
+        }
+        h.digest128()
+    }
     /// Output records (`role = Output` by kind) of the journal: the intent stream compared by INV-9.
     pub fn outputs(&self) -> Vec<&JRec> {
         self.journal
@@ -145,9 +161,11 @@ pub fn run_record<E: Sut>(cfg: &DstConfig) -> RunRecord {
         c2.rerun = RerunPolicy::Never;
         let r2 = run_once::<E>(&c2);
         let same_out = rec.outputs() == r2.outputs();
-        rec.compared[usize::from(InvId::I9.0)] +=
-            (rec.trail.points.len().max(r2.trail.points.len()) + rec.outputs().len()) as u64;
-        if r2.trail != rec.trail || !same_out {
+        let (d1, d2) = (rec.event_digest(), r2.event_digest());
+        rec.compared[usize::from(InvId::I9.0)] += (rec.trail.points.len().max(r2.trail.points.len())
+            + rec.outputs().len()
+            + rec.journal.len()) as u64;
+        if r2.trail != rec.trail || !same_out || d1 != d2 {
             let step = rec.steps_run.saturating_sub(1);
             rec.outcome = DstOutcome::Fail(Box::new(DstFailure {
                 seed: cfg.seed,
@@ -155,7 +173,7 @@ pub fn run_record<E: Sut>(cfg: &DstConfig) -> RunRecord {
                 step,
                 invariant: FailKind::Inv(InvId::I9),
                 message: format!(
-                    "in-process rerun differs: trail divergence {:?}, outputs equal {same_out}",
+                    "in-process rerun differs: trail divergence {:?}, outputs equal {same_out},                      event digest {d1:032x} vs {d2:032x}",
                     crate::hash::diff_trails(&rec.trail, &r2.trail)
                 ),
                 trace: rec.trace.clone(),

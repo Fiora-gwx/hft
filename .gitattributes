@@ -3,4 +3,3 @@
 *.blob binary
 *.hdr binary
 tools/hostprobe/tests/fixtures/**/cpu_dma_latency binary
-fixtures/dst/history/** -text

@@ -89,7 +89,7 @@ fn tk_143_cli_case_selection_and_repro_are_not_baseline_runs() {
     for args in [
         vec!["run", "--case", "missing"],
         vec!["run", "--case", "LED-081", "--suite", "storage"],
-        vec!["hashtrail", "--case", "LED-081", "--seed", "0"],
+        vec!["list", "--case", "LED-081"],
         vec!["run", "--case", "LED-081", "--seeds", "0..4096"],
     ] {
         assert_eq!(call(&args).status.code(), Some(2), "{args:?}");

@@ -5,27 +5,13 @@ use hft_testkit::dst::seq::matcher::SimMatcher;
 use hft_testkit::dst::sut::{InputRec, JRec};
 use hft_testkit::dst::venue_behavior::{EXTERNAL_HISTORY_CAP, Matcher, MockVenue, MockVenueCfg};
 use hft_testkit::dst::world::{ACCT_A, BTC, P1, S1, VP, VS, WorldSpec};
-use hft_testkit::dst::{ConnKind, DstConfig, Fault, InvariantSet, RerunPolicy, RunRecord, run_record};
+use hft_testkit::dst::{ConnKind, Fault, InvariantSet, RerunPolicy, RunRecord, run_record};
 use hft_testkit::scenarios::{DstEngine, foreign_ledger, suites};
 use hft_types::{GroupId, InstId, Px, Qty, Side, SlotId, Tif, Tsc, VenueId};
 use zerocopy::{IntoBytes, TryFromBytes};
 
 const MS: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MS;
-
-// Used by the `heavy` migration proofs (feature `dst-heavy`).
-#[cfg_attr(not(feature = "dst-heavy"), allow(dead_code))]
-pub(super) fn without_late(cfg: &DstConfig) -> DstConfig {
-    let mut cfg = cfg.clone();
-    let mut plan = cfg.fault_plan();
-    for (_, fault) in &mut plan.items {
-        if let Fault::LateFillAfterRecycle { count, .. } = fault {
-            *count = 0;
-        }
-    }
-    cfg.plan = Some(plan);
-    cfg
-}
 
 fn orders(rows: &[(u64, InputRec)]) -> Vec<(u64, OrderEvent)> {
     rows.iter()

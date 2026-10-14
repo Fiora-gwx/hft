@@ -1,1 +1,0 @@
-seed=7 steps=2000 records=2419 snapshot_checks=3 trail=b7bb4145f70d6aa3bf1a4ea19a116d4b

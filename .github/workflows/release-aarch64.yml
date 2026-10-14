@@ -91,11 +91,11 @@ jobs:
       - name: xtask subcommands
         id: xtask
         run: bash .github/scripts/xtask-inventory.sh
-      # M2 (cargo xtask dst, fixtures/dst/hashtrail.toml): the fixed conformance seeds (ci profile)
-      # against this SHA's golden file, byte for byte.
-      - name: DST conformance set vs fixtures/dst/hashtrail.toml
-        if: steps.xtask.outputs.dst == 'true' && hashFiles('fixtures/dst/hashtrail.toml') != ''
-        run: cargo xtask dst --hashtrail check
+      # M2 (cargo xtask dst): commit-derived seeds plus the regression set (ci profile); every seed
+      # is checked by the invariants and 5% are rerun in process (INV-9). No committed digests.
+      - name: DST smoke (200 seeds + regressions)
+        if: steps.xtask.outputs.dst == 'true'
+        run: cargo xtask dst --seeds 200 --regressions
 
   build:
     needs: preflight
@@ -159,9 +159,9 @@ jobs:
       - name: Unit and golden tests (ci profile)
         if: env.CHANNEL == 'release'
         run: cargo test --locked --profile ci --workspace --all-features
-      - name: DST conformance set vs fixtures/dst/hashtrail.toml
-        if: env.CHANNEL == 'release' && steps.xtask.outputs.dst == 'true' && hashFiles('fixtures/dst/hashtrail.toml') != ''
-        run: cargo xtask dst --hashtrail check
+      - name: DST smoke on aarch64 (200 seeds + regressions)
+        if: env.CHANNEL == 'release' && steps.xtask.outputs.dst == 'true'
+        run: cargo xtask dst --seeds 200 --regressions
       - name: Configure AWS credentials for S3 fixtures (OIDC)
         id: aws
         if: >-

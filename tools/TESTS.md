@@ -92,19 +92,19 @@ spec: README.md
   - 记录中没有 `hot-check` 及其后的任何步骤
 - 实现:`tools/xtask/tests/ci.rs::tool_003_stops_at_first_failure`
 
-### TOOL-004 ci 全部通过时依次执行规定的十二步
+### TOOL-004 ci 全部通过时依次执行规定的十一步
 
 - 规则:[cargo xtask ci](README.md#cargo-xtask-ci)
 - 级别:unit
 - 里程碑:M1
-- 前置:记录型执行器对每步返回 0;PR 核对的一致性种子数 K = 50([testing §6](../docs/testing.md#6-ci-运行矩阵))
+- 前置:记录型执行器对每步返回 0
 - 步骤:
   1. 运行 `cargo xtask ci`
 - 期望:
-  - 退出 0;步骤序列恰为:`fmt --check` → `clippy …` → `deny check licenses bans` → `deps` → `hot-check` → `fixtures check` → 单元/属性(`cargo test --profile ci`)→ 金样 → `dst` 冒烟 → `dst --hashtrail check --first 50` → `gen-schema --check` → `doc-check`
-- 实现:`tools/xtask/tests/ci.rs::tool_004_runs_twelve_steps_in_order`
+  - 退出 0;步骤序列恰为:`fmt --check` → `clippy …` → `deny check licenses bans` → `deps` → `hot-check` → `fixtures check` → 单元/属性(`cargo test --profile ci`)→ 金样 → `dst` 冒烟 → `gen-schema --check` → `doc-check`
+- 实现:`tools/xtask/tests/ci.rs::tool_004_runs_eleven_steps_in_order`
 
-DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 个提交派生种子加完整回归集;HashTrail 调用仍紧随其后。
+DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 个提交派生种子加完整回归集。HashTrail 金样核对步已移除(负责人决定 2026-10-14)。
 
 ### TOOL-005 ci --pure-only 只选 tier = pure 的 crate 与 Python 包
 
@@ -128,7 +128,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 - 步骤:
   1. 运行 `cargo xtask ci --fast`
 - 期望:
-  - 退出 0;步骤序列中没有金样步、`dst` 冒烟与 `dst --hashtrail check`;其余九步顺序同 TOOL-004
+  - 退出 0;步骤序列中没有金样步与 `dst` 冒烟;其余九步顺序同 TOOL-004
 - 实现:`tools/xtask/tests/ci.rs::tool_006_fast_skips_dst_and_golden`
 
 ### TOOL-007 ci 从不运行 cargo deny 的 advisories
@@ -160,11 +160,11 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 - 规则:[cargo xtask ci](README.md#cargo-xtask-ci)、[cargo xtask dst](README.md#cargo-xtask-dst)
 - 级别:unit
 - 里程碑:M2
-- 前置:记录型执行器对每步返回 0;HEAD 提交 SHA 固定为 `a1b2…`(40 位);PR 核对的一致性种子数 K = 50
+- 前置:记录型执行器对每步返回 0;HEAD 提交 SHA 固定为 `a1b2…`(40 位)
 - 步骤:
   1. 运行 `cargo xtask ci`
 - 期望:
-  - `dst` 冒烟步依次调用基线 `--seeds 200 --regressions` 以及同参数分别加 `--case LED-080`、`--case LED-081` 的专属场景,三次均不含 `--seed`;紧随其后的一步参数为 `--hashtrail check --first 50`
+  - `dst` 冒烟步依次调用基线 `--seeds 200 --regressions` 以及同参数分别加 `--case LED-080`、`--case LED-081` 的专属场景,三次均不含 `--seed`;紧随其后的一步为 `gen-schema --check`(没有 HashTrail 核对)
 - 实现:`tools/xtask/tests/ci.rs::tool_009_dst_smoke_args`
 
 ### TOOL-010 ci 在 optional 组件不存在时照常通过
@@ -758,9 +758,9 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 |---|---|---|
 | TOOL-047.1 | (无参数) | 退出 2 |
 | TOOL-047.2 | `--seeds 1 --suite nosuch` | 退出 2 |
-| TOOL-047.3 | `--hashtrail check --seeds 10` | 退出 2 |
-| TOOL-047.4 | `--hashtrail check --suite core` | 退出 2 |
-| TOOL-047.5 | `--hashtrail compare` | 退出 2 |
+| TOOL-047.3 | `--hashtrail check`(选项已移除) | 退出 2 |
+| TOOL-047.4 | `--seeds 10 --first 2`(选项已移除) | 退出 2 |
+| TOOL-047.5 | `--seeds 10 --hashtrail write` | 退出 2 |
 
 ### TOOL-048 dst 缺省起点由提交 SHA 派生
 
@@ -841,22 +841,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 ### TOOL-054 --hashtrail check 与金样一致时通过,篡改一个字节时报告第一处分歧
 
-- 规则:[cargo xtask dst](README.md#cargo-xtask-dst)
-- 级别:table
-- 里程碑:M2
-- 前置:`fixtures/dst/hashtrail.toml` 登记 3 个种子(1、2、3,套件 `core`);记录型执行器扮演 `hft-dst hashtrail`,对种子 i 输出 `trail <T_i> points=4`,文件中的 `trail` 即 T_i
-- 实现:`tools/xtask/tests/dst.rs::tool_054_hashtrail_check`
-
-| 行 | 操作 | 期望 |
-|---|---|---|
-| TOOL-054.1 | `--hashtrail check` | 退出 0 |
-| TOOL-054.2 | 把文件中种子 2 的 `trail` 改一个十六进制位后 `--hashtrail check` | 退出 1;输出种子 2 与两侧摘要;不运行种子 3 |
-| TOOL-054.3 | 先 `--hashtrail write`,再 `--hashtrail check` | 两次都退出 0;文件中的种子集与改写前相同 |
-| TOOL-054.4 | 种子 3 的某点哈希改一位后 `--hashtrail check --first 2` | 退出 0;只运行种子 1、2 |
-| TOOL-054.5 | 同上改动,`--hashtrail check --first 3` | 退出 1;报告种子 3 |
-| TOOL-054.6 | `--hashtrail check --first 4`(登记数 3) | 退出 2;不运行任何种子 |
-| TOOL-054.7 | `--hashtrail check --first 0` | 退出 2 |
-| TOOL-054.8 | `--hashtrail write --first 2` | 退出 2;文件不变 |
+已删除:HashTrail 金样(`fixtures/dst/hashtrail.toml`)与 `dst --hashtrail check|write` 按负责人决定(2026-10-14)移除;DST 确定性改由进程内两次运行比较(crates/hft-testkit TK-181)。
 
 ### TOOL-055 --strategy K 运行 registry 中该策略的 DST,缺省只跑测试策略
 
@@ -1342,7 +1327,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
   - 退出 0;JSON 的 `unimplemented`、`extra`、`inconsistent` 三张清单都为空
 - 实现:`tools/xtask/tests/test_trace.rs::tool_086_clean_passes`
 
-### TOOL-087 里程碑已到的用例缺实现时列为未实现
+### TOOL-087 里程碑已到的用例缺实现时列为未实现(只报告)
 
 - 规则:[其他 xtask 子命令](README.md#其他-xtask-子命令)
 - 级别:table
@@ -1352,12 +1337,12 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 | 行 | 改动 | 期望 |
 |---|---|---|
-| TOOL-087.1 | 删除函数 `aa_001_ok` | 退出 1;`unimplemented = ["AA-001"]` |
-| TOOL-087.2 | `AA-001` 的实现字段改为 `待实现`,函数保留 | 退出 1;`unimplemented` 含 `AA-001` |
-| TOOL-087.3 | 删除 `Scenario::new("B-1", …)` | 退出 1;`unimplemented = ["B-1"]` |
-| TOOL-087.4 | 删除 Criterion id `a/hot` | 退出 1;`unimplemented = ["AA-003"]` |
-| TOOL-087.5 | `AA-001` 的函数加 `#[ignore]` | 退出 1;`unimplemented = ["AA-001"]` |
-| TOOL-087.6 | 同上,另给 `AA-001` 加 `状态:隔离:<Agent Note 链接>` | 退出 0 |
+| TOOL-087.1 | 删除函数 `aa_001_ok` | 退出 0;`unimplemented = ["AA-001"]` |
+| TOOL-087.2 | `AA-001` 的实现字段改为 `待实现`,函数保留 | 退出 0;`unimplemented` 含 `AA-001` |
+| TOOL-087.3 | 删除 `Scenario::new("B-1", …)` | 退出 0;`unimplemented = ["B-1"]` |
+| TOOL-087.4 | 删除 Criterion id `a/hot` | 退出 0;`unimplemented = ["AA-003"]` |
+| TOOL-087.5 | `AA-001` 的函数加 `#[ignore]` | 退出 0;`unimplemented = ["AA-001"]` |
+| TOOL-087.6 | 同上,另给 `AA-001` 加 `状态:隔离:<Agent Note 链接>` | 退出 0;`unimplemented = []` |
 
 ### TOOL-088 里程碑未到或需要人工的用例不要求实现
 
@@ -1370,11 +1355,11 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 | 行 | 改动 | 期望 |
 |---|---|---|
 | TOOL-088.1 | 新增 `AA-005`(unit,M3,`待实现`),`current_milestone = "M2"` | 退出 0 |
-| TOOL-088.2 | 同上,`current_milestone = "M3"` | 退出 1;`unimplemented = ["AA-005"]` |
+| TOOL-088.2 | 同上,`current_milestone = "M3"` | 退出 0;`unimplemented = ["AA-005"]` |
 | TOOL-088.3 | 新增 `AA-006`(unit,M1.5,`待实现`),`current_milestone = "M1"` | 退出 0(M1 < M1.5) |
 | TOOL-088.4 | 删除 `AA-004` 对应的任何脚本(host 级) | 退出 0 |
 
-### TOOL-089 代码中带编号而规格中没有的测试列为多余
+### TOOL-089 代码中带编号而规格中没有的测试列为多余(只报告)
 
 - 规则:[其他 xtask 子命令](README.md#其他-xtask-子命令)
 - 级别:table
@@ -1384,13 +1369,13 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 | 行 | 加入的函数 | 期望 |
 |---|---|---|
-| TOOL-089.1 | `#[test] fn aa_099_orphan()` | 退出 1;`extra = ["aa_099_orphan"]` |
-| TOOL-089.2 | `#[test] fn zz_001_unknown_prefix()` | 退出 1;`extra` 含该函数 |
-| TOOL-089.3 | `proptest!` 中的 `fn aa_098_prop(..)` | 退出 1;`extra` 含该函数 |
+| TOOL-089.1 | `#[test] fn aa_099_orphan()` | 退出 0;`extra = ["aa_099_orphan"]` |
+| TOOL-089.2 | `#[test] fn zz_001_unknown_prefix()` | 退出 0;`extra` 含该函数 |
+| TOOL-089.3 | `proptest!` 中的 `fn aa_098_prop(..)` | 退出 0;`extra` 含该函数 |
 | TOOL-089.4 | `#[test] fn helper_case()`(不匹配 `^[a-z]+_[0-9]{3}_`) | 退出 0 |
 | TOOL-089.5 | 非测试函数 `fn aa_097_helper()`(无测试属性) | 退出 0 |
 
-### TOOL-090 实现字段与找到的位置不一致时列为不一致
+### TOOL-090 实现字段与找到的位置不一致时只报告,规格格式错误与重复编号才失败
 
 - 规则:[其他 xtask 子命令](README.md#其他-xtask-子命令)
 - 级别:table
@@ -1400,11 +1385,14 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 | 行 | 改动 | 期望 |
 |---|---|---|
-| TOOL-090.1 | 函数 `aa_001_ok` 移到 `crates/a/tests/y.rs`,规格不改 | 退出 1;`inconsistent` 含 (`AA-001`, 规格 `crates/a/tests/x.rs::aa_001_ok`, 实际 `crates/a/tests/y.rs::aa_001_ok`) |
-| TOOL-090.2 | 函数改名为 `aa_001_renamed`,规格不改 | 退出 1;`AA-001` 在 `inconsistent` |
-| TOOL-090.3 | 两处代码都有 `aa_001_ok` | 退出 1;`AA-001` 在 `inconsistent` |
+| TOOL-090.1 | 函数 `aa_001_ok` 移到 `crates/a/tests/y.rs`,规格不改 | 退出 0;`inconsistent` 含 (`AA-001`, 规格 `crates/a/tests/x.rs::aa_001_ok`, 实际 `crates/a/tests/y.rs::aa_001_ok`) |
+| TOOL-090.2 | 函数改名为 `aa_001_renamed`,规格不改 | 退出 0;`AA-001` 在 `inconsistent` |
+| TOOL-090.3 | 两处代码都有 `aa_001_ok` | 退出 0;`AA-001` 在 `inconsistent` |
+| TOOL-090.4 | `AA-001` 的实现字段改为 `见 x.rs`(既不是 `待实现` 也不是 `<路径>::<函数>`) | 退出 1;`errors` 恰一项,含 `AA-001: 实现` |
+| TOOL-090.5 | `crates/a/TESTS.md` 再写一个 `AA-001` | 退出 1;`errors` 恰一项,含 `AA-001: case id defined twice` |
+| TOOL-090.6 | `AA-001` 的里程碑改为 `第二期` | 退出 1;`errors` 恰一项,含 `AA-001: unparsable 里程碑` |
 
-### TOOL-091 test-trace 读 docs/tests 下的规格并输出三张清单
+### TOOL-091 test-trace 读 docs/tests 下的规格并输出三张清单与逐里程碑计数
 
 - 规则:[其他 xtask 子命令](README.md#其他-xtask-子命令)
 - 级别:unit
@@ -1413,7 +1401,8 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 - 步骤:
   1. 运行 `cargo xtask test-trace`
 - 期望:
-  - 退出 1;`unimplemented = ["INV-1"]`;JSON 恰有 `unimplemented`、`extra`、`inconsistent` 三个清单键;stderr 摘要列出三张清单的条目数(1、0、0)
+  - 退出 0(三张清单只报告);`unimplemented = ["INV-1"]`;JSON 恰有 `unimplemented`、`extra`、`inconsistent`、`errors` 四个清单键与 `by_milestone` 对象,共 5 个键;`by_milestone` = `M1` {cases 2, implemented 1, unimplemented 1}、`M2` {cases 3, implemented 3, unimplemented 0}(只计自动级别、未删除的用例,不受 `current_milestone` 限制)
+  - stderr 摘要列出三张清单的条目数(1、0、0)、`errors=0` 与逐里程碑计数
 - 实现:`tools/xtask/tests/test_trace.rs::tool_091_reads_docs_tests`
 
 ### TOOL-092 az-probe run 多次解析端点并探测全部 A 记录
@@ -2723,14 +2712,14 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 | 行 | `enabled_extensions` 与改动 | 期望 |
 |---|---|---|
-| TOOL-180.1 | `[]`;代码中没有 `aa_010_incr`;有 `test_pp_001_ok` | 退出 0 |
-| TOOL-180.2 | `["incr-depth"]`;代码中没有 `aa_010_incr` | 退出 1;`unimplemented = ["AA-010"]` |
+| TOOL-180.1 | `[]`;代码中没有 `aa_010_incr`;有 `test_pp_001_ok` | 退出 0;三张清单为空 |
+| TOOL-180.2 | `["incr-depth"]`;代码中没有 `aa_010_incr` | 退出 0;`unimplemented = ["AA-010"]` |
 | TOOL-180.3 | `["incr-depth"]`;代码中有 `aa_010_incr` | 退出 0 |
 | TOOL-180.4 | `[]`;代码中有 `aa_010_incr` | 退出 0(规格中存在该编号,不算多余) |
-| TOOL-180.5 | 删除 `test_pp_001_ok` | 退出 1;`unimplemented = ["PP-001"]` |
-| TOOL-180.6 | 加 `def test_pp_099_orphan()` | 退出 1;`extra` 含 `test_pp_099_orphan` |
+| TOOL-180.5 | 删除 `test_pp_001_ok` | 退出 0;`unimplemented = ["PP-001"]` |
+| TOOL-180.6 | 加 `def test_pp_099_orphan()` | 退出 0;`extra` 含 `test_pp_099_orphan` |
 | TOOL-180.7 | 加 `def pp_098_helper()`(无 `test_` 前缀、不是 pytest 测试) | 退出 0 |
-| TOOL-180.8 | `test_pp_001_ok` 移到 `python/p/tests/test_y.py`,规格不改 | 退出 1;`PP-001` 在 `inconsistent` |
+| TOOL-180.8 | `test_pp_001_ok` 移到 `python/p/tests/test_y.py`,规格不改 | 退出 0;`PP-001` 在 `inconsistent` |
 
 ### TOOL-181 hft-secrets --check 只校验清单,不访问网络、不写文件
 
@@ -3173,7 +3162,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 - 里程碑:M2
 - 前置:运行器清单包含固定 core 套件的 LED-081,core/storage 回归文件各一个种子
 - 步骤:两个连续种子加全部回归种子运行 --case LED-081;复现时加 --trace
-- 期望:四个种子都实际传递 case 和默认步数,场景固定套件应用于全部种子且原回归套件保留;回归子进程输出独立证据;报告和复现不丢失 case;未知编号、冲突套件及 hashtrail/case 组合退出 2,不运行任何种子
+- 期望:四个种子都实际传递 case 和默认步数,场景固定套件应用于全部种子且原回归套件保留;回归子进程输出独立证据;报告和复现不丢失 case;未知编号、冲突套件及缺少 --seeds 的 case 退出 2,不运行任何种子
 - 实现:`tools/xtask/tests/dst.rs::tool_205_case_selection_preserves_regressions_and_evidence_identity`
 
 | 行 | 输入 | 期望 |
@@ -3182,45 +3171,47 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 | TOOL-205.2 | case LED-081 加 trace | repro 子进程保留 case |
 | TOOL-205.3 | 未知 case | 退出 2,不运行种子 |
 | TOOL-205.4 | 固定 core 场景配 storage | 退出 2,不运行种子 |
-| TOOL-205.5 | hashtrail 加 case | 退出 2,不运行种子 |
+| TOOL-205.5 | case 但缺 `--seeds` | 退出 2,不运行种子 |
 
-### TOOL-206 快速测试按本次推送选包并保守回退
+### TOOL-206 PR 快速通道选出改动包及其反向依赖并保守回退
 
 - 规则:[cargo xtask ci](README.md#cargo-xtask-ci)、[质量门](../docs/development.md#质量门quality-gatesyml)
 - 级别:table
 - 里程碑:M1
-- 前置:两个测试 crate 与 xtask 的临时 Git 仓库,含前一推送、当前推送及强推前的独立历史
-- 步骤:运行包选择与计划执行器,子进程用记录型替身
-- 期望:增量只选本次推送涉及包,改名两端均计入;无可靠祖先时回退完整 PR,共享输入选择全部包;不把快速范围用于完整验收。失败保存退出码并停止后续命令,成功才标记 complete
-- 实现:`tools/xtask/tests/test_ci_feedback.py::test_tool_206_related_tests_select_the_push_and_keep_full_fallbacks`
+- 前置:临时 workspace:`alpha`、依赖 `alpha`(经 workspace 改名的 dev 依赖)且源码引用 `fixtures/foo` 的 `beta`、`xtask`;临时 Git 仓库含两次推送
+- 步骤:运行包选择、计划与执行器,子进程用记录型替身
+- 期望:选中改动包及传递反向依赖,改名两端均计入;差异总是完整 PR(合并基);共享输入选择全部包;只跑一条 nextest 命令。失败保存退出码并停止,成功才标记 complete
+- 实现:`tools/xtask/tests/test_ci_feedback.py::test_tool_206_fast_lane_selects_affected_packages_and_reverse_deps`
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| TOOL-206.1 | synchronize 且旧头是祖先 | 仅两头之间的差异,不包含之前的包改动 |
-| TOOL-206.2 | opened/reopened、缺旧头、零 SHA、强推、不合法旧头 | 完整 PR 差异 |
+| TOOL-206.1 | 改 `crates/a`;只改 `crates/b` | `alpha`、`beta`(反向依赖);只有 `beta` |
+| TOOL-206.2 | PR 的两次推送 | 完整 PR 差异(含第一次推送的改动),不按最近一次推送缩小 |
 | TOOL-206.3 | 删除或改名 | 两个路径都参与包选择 |
-| TOOL-206.4 | 根 Cargo、工具链或 .cargo 配置,共享 fixture/测试 | 全部当前 workspace 包 |
-| TOOL-206.5 | 仅文档或 Python | 无 Rust 包,明确空计划 |
+| TOOL-206.4 | 根 Cargo、工具链或 .cargo 配置,根 `tests/`,无人引用的 `fixtures/<目录>`;有人引用的 `fixtures/foo` | 全部当前 workspace 包;引用者 `beta` |
+| TOOL-206.5 | 仅文档或 Python | 无 Rust 包,明确空计划(`has_tests=false`) |
 | TOOL-206.6 | CI 脚本或工作流 | xtask;政策回归另由静态作业先执行 |
-| TOOL-206.7 | 构建成功/失败 | 成功后运行测试,失败留证并停止;tests/examples 与全部特性保留 |
+| TOOL-206.7 | 计划与执行;`SHARD=2/2` | 一条 `cargo nextest run --locked --cargo-profile ci -p … --all-features --no-fail-fast -E 'not (binary(/^proc/) \| binary(compile_fail) \| test(/heavy::/) \| test(rpl_012_dst_journals_verify))'`,分片时另加 `--partition count:2/2`;步骤输出 `has_tests`、`packages`、`dst`(hft-testkit 受影响);失败留证并停止 |
 
-### TOOL-207 完整汇总拒绝缺失或跳过的适用检查
+### TOOL-207 每条通道的汇总拒绝缺失或跳过的适用检查
 
 - 规则:[cargo xtask ci](README.md#cargo-xtask-ci)、[质量门](../docs/development.md#质量门quality-gatesyml)
 - 级别:table
 - 里程碑:M1
-- 前置:真实作业清单,路径分类输出与各作业结论的离线表
-- 步骤:逐项替换状态并运行完整结论计算
-- 期望:只有全部适用检查通过才通过,快检成功不能代替完整验收
+- 前置:两条通道(fast:PR;full:集成分支与 main 推送、每夜)的真实作业清单,路径分类输出与各作业结论的离线表
+- 步骤:逐项替换状态并运行该通道的结论计算
+- 期望:只有本通道全部适用检查通过才通过;另一通道的作业不参与,也不能代替本通道
 - 实现:`tools/xtask/tests/test_ci_feedback.py::test_tool_207_acceptance_requires_every_applicable_job`
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| TOOL-207.1 | 全部 success | 通过 |
+| TOOL-207.1 | 本通道全部 success | 通过 |
 | TOOL-207.2 | 任一适用项失败、取消、skipped 或缺失 | 失败 |
-| TOOL-207.3 | 已确认无基准改动,benchmarks skipped | 通过;`bench_crates` 为空串或被 GitHub 省略(空输出不传递)同样通过;`benchmarks`/`toolchain` 分类字段缺失则失败 |
-| TOOL-207.4 | 纯文档,代码作业 skipped | 通过;路径、静态或解耦失败仍失败 |
-| TOOL-207.5 | 只完成快速反馈,完整作业 skipped | 失败 |
+| TOOL-207.3 | 完整通道,已确认无基准改动,benchmarks skipped | 通过;`bench_crates` 为空串或被 GitHub 省略(空输出不传递)同样通过;`benchmarks`/`toolchain` 分类字段缺失则失败 |
+| TOOL-207.4 | 快速通道纯文档,代码作业 skipped | 通过;路径、静态或解耦失败仍失败 |
+| TOOL-207.5 | 只完成另一通道的作业,本通道作业 skipped;未知通道 | 失败 |
+| TOOL-207.6 | 完整通道由每夜(schedule)触发,decoupling-gate skipped | 通过;同样的跳过在 push 时失败 |
+| TOOL-207.7 | 快速通道无受影响的 Rust 包或 hft-testkit 未受影响 | 对应的 fast-test/fast-clippy/fast-dst skipped 时通过;hft-testkit 受影响而 fast-dst skipped 时失败 |
 
 ## 验收
 

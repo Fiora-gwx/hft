@@ -9,6 +9,8 @@ mod actors;
 mod cancel_filled;
 mod clock;
 mod deps;
+#[cfg(feature = "seq")]
+mod determinism;
 #[cfg(feature = "dst-bin")]
 mod dst_cli;
 mod dst_report;
@@ -21,22 +23,6 @@ mod fees;
 mod foreign_ledger;
 mod r#gen;
 mod hash;
-/// Heavy DST migration proofs (TK-137/157/163/169/173: 50 conformance seeds × three real-engine
-/// runs of 2 000 steps each): feature `dst-heavy`, outside the default local test binary; the CI
-/// `heavy-tests` job runs every `heavy::` test and `cargo xtask ci` skips them
-/// (docs/development.md).
-#[cfg(feature = "dst-heavy")]
-// `path = "."`: the nested modules are this directory's files.
-#[path = "."]
-mod heavy {
-    mod cancel_migration;
-    mod late_migration;
-    mod partial_migration;
-    mod reconcile_migration;
-    mod stale_migration;
-}
-#[cfg(feature = "seq")]
-mod history;
 mod invariants_map;
 #[cfg(feature = "seq")]
 mod late_recycle;

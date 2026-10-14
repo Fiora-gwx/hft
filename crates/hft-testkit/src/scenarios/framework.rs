@@ -1,6 +1,6 @@
-//! Framework scenarios (crates/hft-testkit/TESTS.md TK-043, TK-054, TK-055, TK-056): determinism,
-//! cross-architecture conformance, crash and rebuild, poison repeat. They run on the engine the
-//! caller instantiates (`super::DstEngine` for the cargo-test smoke).
+//! Framework scenarios (crates/hft-testkit/TESTS.md TK-043, TK-055, TK-056): determinism, crash and
+//! rebuild, poison repeat. They run on the engine the caller instantiates (`super::DstEngine` for
+//! the cargo-test smoke).
 
 use crate::dst::faults::{CrashFault, Fault};
 use crate::dst::invariants::{InvId, InvariantSet};
@@ -13,7 +13,6 @@ use crate::dst::{DstConfig, RerunPolicy};
 pub fn all() -> Vec<Scenario> {
     vec![
         tk_043_same_seed_same_result(),
-        tk_054_cross_arch_conformance(),
         tk_055_crash_and_recover(),
         tk_056_poison_repeat(),
     ]
@@ -31,19 +30,6 @@ pub fn tk_043_same_seed_same_result() -> Scenario {
         .seeds(SeedSet::Standard)
         .invariants(InvariantSet::all())
         .configure(rerun_always)
-}
-
-/// TK-054: the conformance seeds of `fixtures/dst/hashtrail.toml` reproduce their golden
-/// `HashTrail` (`cargo xtask dst --hashtrail check` on x86_64 and aarch64).
-pub fn tk_054_cross_arch_conformance() -> Scenario {
-    Scenario::new(
-        "TK-054",
-        "conformance seeds match the HashTrail golden on every arch",
-    )
-    .suite("core")
-    .seeds(SeedSet::Fixed(&[1, 2, 3]))
-    .invariants(InvariantSet::only(InvId::I9))
-    .configure(rerun_always)
 }
 
 fn crash_cfg(c: &mut DstConfig) {

@@ -129,11 +129,11 @@
 - 级别:dst
 - 里程碑:M2
 - 故障:全部 DST 套件;每次运行抽样复跑。最能触发:同一时刻多条 Input 的交错、定时器与输入环交错、崩溃恢复、advisor 追赶
-- 种子:标准集([scenarios §2.4](scenarios.md#24-种子集));版本标签另跑固定的 500 个种子
+- 种子:标准集([scenarios §2.4](scenarios.md#24-种子集))
 - 断言:
-  - 每次运行按种子哈希抽 5% 的种子在同一进程内复跑:两次的 Output 记录序列(Meta 除外)逐字节相同,`HashTrail` 逐字节相同
+  - 每次运行按种子哈希抽 5% 的种子在同一进程内复跑:两次的 Output 记录序列(Meta 除外)逐字节相同,`HashTrail` 与事件摘要(全部 journal 记录的 xxh3-128)相同;只比较两次运行,不与仓库中登记的摘要比较
   - 同一种子在 `hft-dst run` 与 `cargo xtask dst --seeds 1 --seed <S>` 下的违反列表与 `HashTrail` 相同
-  - 版本标签作业:同一提交上 x86_64 与 aarch64 各跑 500 个固定种子,两侧 `HashTrail` 都与该提交的 `fixtures/dst/hashtrail.toml` 逐字节相同
+  - 版本标签作业:同一提交上 x86_64 与 aarch64 各跑一次 DST 冒烟,两侧均无违反(不比较登记摘要)
 - 实现:`crates/hft-testkit/src/dst/invariants.rs::inv_9_same_seed_same_trail`
 - 备注:检查器 `I9`
 

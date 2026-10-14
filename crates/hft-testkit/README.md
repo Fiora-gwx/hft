@@ -202,7 +202,7 @@ pub struct Scenario { pub id, pub title, pub suite: SuiteSel /* All | Named */, 
 pub struct DstSuite { pub name, pub title, pub faults: FaultRates, pub steps: u64, pub base: fn(u64) -> DstConfig, pub must_pass: &'static [&'static str] }
 ```
 
-显式场景用 `--case <编号>` 选择,实际执行同一 `Scenario` 的配置与断言。未指定时保留套件基线;HashTrail 金样始终使用基线。场景声明的步数不会被 cargo-test 的通用短集上限截短,CLI 显式步数不足以触发场景时断言失败。PR 的标准种子及回归集在基线之外分别跑 LED-080 与 LED-081;每夜配置与调用入口归 [tools](../../tools/README.md#cargo-xtask-dst)。
+显式场景用 `--case <编号>` 选择,实际执行同一 `Scenario` 的配置与断言。未指定时保留套件基线;场景声明的步数不会被 cargo-test 的通用短集上限截短,CLI 显式步数不足以触发场景时断言失败。PR 的标准种子及回归集在基线之外分别跑 LED-080 与 LED-081;每夜配置与调用入口归 [tools](../../tools/README.md#cargo-xtask-dst)。
 
 `confirmed_commands` 仅用于测试控制端明确要求确认的命令,不改行情片段或已有故障命令。`Sut::control_state_version` 只读当前版本,缺失即失败;未启用控制 actor、来源错误或信封截断也失败。实际提交的 `confirmed` 与版本字段进入 journal,引擎照常检查角色、版本、模式和命令,检查器开关不影响交付(TK-142)。
 
@@ -266,7 +266,7 @@ storage 回归集包含轮次结束后经历快照与重启的种子;按完整 1
 | I6 | 每 N 步、每条快照的完整事件边界与场景结束从 journal 独立重建,比较组件哈希与 Output |
 | I7 | OMS 调试视图:占用槽数 = 在途订单数,空闲槽数不单调下降 |
 | I8 | `LegLink` 发出量之和 vs 触发它的累计**净**成交量 |
-| I9 | 每次运行抽 5% 种子重跑,比较意图流与 `HashTrail`;一致性集(`fixtures/dst/hashtrail.toml` 登记的种子)的 `HashTrail` 与金样逐字节比较:PR 核对前若干个、每夜与版本标签核对全部(版本标签在同一提交上于 x86_64 与 aarch64 各跑一次;种子数归 [testing §6](../../docs/testing.md#6-ci-运行矩阵),命令归 [tools](../../tools/README.md#cargo-xtask-dst)) |
+| I9 | 每次运行抽 5% 种子在同一进程内重跑,比较意图流、`HashTrail` 与事件摘要(`RunRecord::event_digest()`,全部 journal 记录的 xxh3-128);只比较两次运行,不与仓库中登记的任何摘要比较 |
 | I10 | (可选扩展,chain)每钱包在途 nonce ≤ 1 |
 | I11–I14 | `hft-risk::mode` 调试视图:有效模式重算 = 增量值;`RISK_REDUCING` 只被 HARD 拦;cap 变化不产生开仓;门控拒绝不计 `consec_fail` |
 | I15 | 每笔对冲类出环单(第二腿、`SecondRetry`、`HedgeFix`、残余修剪、外来成交默认处理、命令补腿、自动有界平仓):数量 ≤ 出环帧的 `hedge_cap_qty`(基数 + 1 lot),名义 ≤ `max_hedge_notional`(自动有界平仓再 ≤ `max_reduce_notional`);Flatten 类出环单名义 ≤ `max_reduce_notional` |
@@ -324,17 +324,15 @@ pub fn component_hashes(snapshot_logical_body: &[u8]) -> Result<ComponentHashes,
 hft-dst run   --seeds <from>..<to> [--suite <name>|all] [--case <id>] [--steps 10000] [--deadline-s N] [--checkpoint-seeds 1000] --out <result.json> --crash-dir <dir>
 hft-dst repro --seed 0x… [--suite <name>] [--case <id>] --steps N [--trace] [--out <evidence.json>] --crash-dir <dir>
 hft-dst list                                          # 编进本二进制的套件、必过用例与各自的故障率
-hft-dst hashtrail --seed 0x… --suite <name> --steps N # 一行:trail <32 位十六进制> points=<n>
 ```
 
 - **`list`**:每个套件一行,以 `suite <名称>` 开头(其后是 `must_pass=…`、`steps=…`、`slot_ms=…`、`faults=<类别>:<千分率>,…`);`cargo xtask dst` 的套件表就取这些行。
-- **场景选择与证据**:`list` 另列 `case <编号> suite=<名称或all>`。未知场景、与场景固定套件冲突、`hashtrail --case` 均退出 2。显式场景的结果、进行中标记及失败复现保留 `case`;专属断言与普通不变量同样使运行退出 1。`run` 每批最多 4096 个显式场景种子,超出退出 2;逐种子记录实际步数、HashTrail、成功账本检查序号、AUTO 原件、迟到确认、抵扣数和最终钱包两侧数值。`repro --out` 写相同单种子证据(TK-143),不声明上线累计验收。
-- **`hashtrail`**:以该种子、套件与步数运行一次(不做 INV-9 复跑),标准输出恰一行 `trail <xxh3-128(HashTrail::to_bytes()) 的 32 位小写十六进制> points=<点数>`,退出 0;有违反时 stderr 打印复现行、退出 1;参数错误退出 2。`cargo xtask dst --hashtrail check|write` 用它核对或重写 `fixtures/dst/hashtrail.toml`(`[[seed]]` 表:`seed = "0x<16 位十六进制>"`、`suite`、`steps`、`trail`,登记顺序即文件顺序)。
+- **场景选择与证据**:`list` 另列 `case <编号> suite=<名称或all>`。未知场景、与场景固定套件冲突、`run`/`repro` 以外的子命令带 `--case` 均退出 2。显式场景的结果、进行中标记及失败复现保留 `case`;专属断言与普通不变量同样使运行退出 1。`run` 每批最多 4096 个显式场景种子,超出退出 2;逐种子记录实际步数、HashTrail、成功账本检查序号、AUTO 原件、迟到确认、抵扣数和最终钱包两侧数值。`repro --out` 写相同单种子证据(TK-143),不声明上线累计验收。
 
 - **`run`**:按升序逐个运行区间内的种子(每个种子轮转套件,由种子派生选择);到 `--deadline-s` 时在当前种子结束后停止。结果 `DstRunResult`(JSON,规范化字段顺序):`{bin_version, git_sha, profile, suites, seed_from, seed_to_done, seeds_run, steps, violations: [{seed, suite, step, invariant}], compared: {"I1": n, …}, elapsed_s}`;`compared` 为本次各种子 `RunRecord.compared` 之和,按 `I<n>` 列出全部检查器(非空比较的证据,见 [6. DST 框架](#6-dst-框架));`seed_to_done` 之后的种子视为未运行(不计入,也不算失败)。每完成 `checkpoint_seeds`(默认 1,000)个种子就把当前结果原子地写到 `--out`(先写 `.new` 再 rename);收到 `SIGINT`/`SIGTERM` 时在当前种子结束后写出结果并退出,被强杀时最近一次落盘的结果仍可计入。
 - **进行中种子标记**:每个种子开始前,`run` 原子地写 `--crash-dir/.inflight.json` = `{seed, suite, steps, started_utc}`(先写 `.new`、`fsync`、再 rename);下一个种子开始时覆盖,正常退出时删除。它以隐藏文件命名,journal-archiver 的 files source 不上传它(会被改写的文件上传会 `Conflict`,[journal-archiver](../../apps/journal-archiver/README.md#文件归档files-source))。进程被信号终止时该文件指明当时在跑的种子:以致命信号结束(如 `SIGABRT`/`SIGSEGV`:双重 panic、栈溢出、内存错误)时 `hft-verify` 按它记失败种子,被强杀或中止时该种子由下一次运行重跑(信号的分类表归 [tools](../../tools/README.md#hft-verify),清零规则归 [testing §6.1](../../docs/testing.md#61-服务器上的累计运行))。
 - **失败**:任一不变量违反,或被测代码在某个种子内 panic(每个种子在 `catch_unwind` 内运行,panic 记为 `invariant = "panic"` 的违反)→ 该种子的故障表、违反前 200 条事件的 journal 片段与一行复现命令写进 `--crash-dir/<seed>/`;`run` 继续跑剩余种子(一次运行内的全部违反都记录),退出码 1。
-- **确定性**:同一二进制、同一种子、同一套件 → 同一结果与 `HashTrail`(与 `cargo xtask dst` 在 CI 上的同种子运行逐字节相同,不变量 9);不读系统时钟(`--deadline-s` 只决定在哪个种子之后停止,不影响任何种子的结果)、不读环境变量、不访问网络。
+- **确定性**:同一二进制、同一种子、同一套件 → 同一结果、`HashTrail` 与事件摘要(不变量 9);不读系统时钟(`--deadline-s` 只决定在哪个种子之后停止,不影响任何种子的结果)、不读环境变量、不访问网络。
 - **退出码**:0 全部种子零违反;1 有违反;2 参数或环境错误(区间非法、输出目录不可写)。
 - 只含 `TestStrategies`;以已注册生产策略运行的 DST(`strategies/registry/tests/`)不在 `hft-dst` 里,它们随 PR 与 CI 每夜运行,不计入门槛 ④ 的累计。
 
@@ -439,9 +437,7 @@ pub fn per_process_file(dir: &Path, stem: &str, ext: &str) -> PathBuf; // <dir>/
 
 定向撤单竞态使用真实引擎运行,录制行情保持原频率与尾部价格,覆盖整个步数预算。原始成交首次在撤单调用内可读时,同次调用的真实撤单仍须关联到该原件。步数和时限分别约束运行;达到时限但没有跑满约定步数不能算通过,具体行数和步数归 TK-172。
 
-TK-137/157/163/169 的历史证明均将后续 CancelRejectFilled count 置零;TK-173 以 0231835 的 50 行参考核对新故障、首差异前缀与检查器透明性。TK-137/157/163 的历史证明均将 LateFillAfterRecycle count 置零,保留原计划条目、时间与随机流。TK-169 重现回收槽重送之前的 50 行参考,新轨迹首差异不得早于首次非零 LateFillAfterRecycle。TK-137 独立保存迁移前的 HashTrail 参考,用旧 actor 重现它;真实 actor 在首轮对账前须保持 journal 前缀相同,检查器开关须保持完整 journal、意图、HashTrail 和交易所真值相同。该历史证明把 PartialFills 时长与 StaleGenFill count 置零,保留原故障条目与调度。TK-157 把 StaleGenFill count 置零,重现部分成交接通前的 50 行参考,默认部分成交生效后的首条差异不得早于首次 PartialFills。TK-163 只把 StaleGenFill count 置零以重现其接通前的 50 行参考,新轨迹的首条差异不得早于首次非零 StaleGenFill。完整检查器开关比较包含 journal、交付、意图、HashTrail 和交易所真值。当前金样只接受有 CI 迁移证据支持的摘要,不减少种子、步数或比较字段。TK-137/157/163/169/173 每个各跑 50 个种子 × 3 次 2 000 步的真实引擎运行,放在测试二进制的 `heavy` 模块、feature `dst-heavy` 之后:默认的本地测试二进制不含它们,CI 的 `heavy-tests` 作业运行全部 `heavy::` 测试,`cargo xtask ci` 的单元步跳过它们([development](../../docs/development.md#质量门quality-gatesyml));逐行证据按进程写 `target/dst/<名>-<pid>.json`。
-
-10/12 的五次迁移(1af231b Drain 重启、b9d5024 定时器身份节 27、03c4607 OMS 现金行、905fc14 严格永续现金、f1f801d BalanceCheck 输出)由临时 CI 工作流独立审计;其迁移前金样、逐字节复制的审计输出与审计程序源码保存在 `fixtures/dst/history/`,`MANIFEST.toml` 登记每个文件的 SHA-256 与原制品 ZIP 摘要。这些证据把每份金样串到 `fixtures/dst/recon-before.toml`,后者由 TK-137 在当前代码上重现;核对归 TK-175,证据文件不得重新生成。
+DST 不登记 HashTrail 金样或事件摘要(负责人决定 2026-10-14):语义改动不再需要重写金样或迁移证明。可信度来自每步不变量、各场景的语义断言、非空比较计数(TK-176、TK-177)与进程内确定性(INV-9 复跑、TK-043、TK-181)。
 
 `ReconciledAdl{full,replay}` 在用户流断开且交易所永续仓位非零时结算一次,保存完整原件并省略首次推送。缺口按完整成交身份保持在途,不使用品种/资产数字排除项。实际 ReconcileBatch 事件提交后,独立冷消费者确认原件确已入账才解除缺口;拒绝的批次、仅生成的批次和其他账户/成交键都不能解除。`replay` 在此之后至少 1 ms 且用户流恢复后补推同一原件;无补推时直接恢复完整 I16。前置不满足或容量耗尽明确失败,检查器关闭仍执行相同的交付流程。原 `Adl{gap,replay}` 的普通补报时序独立保留。
 
@@ -486,9 +482,8 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 
 | 任务 | 预算 |
 |---|---|
-| 每个 PR:`cargo xtask dst` 冒烟(200 个由提交 SHA 派生的种子,步数等参数归 [tools](../../tools/README.md#cargo-xtask-dst))+ `fixtures/dst-seeds/` 全集 | ≤ 3 分钟(PR 总目标见 [testing §6](../../docs/testing.md#6-ci-运行矩阵)) |
+| 每个 PR(快速通道):`cargo xtask dst` 冒烟(20 个由提交 SHA 派生的种子)+ `fixtures/dst-seeds/` 全集;集成分支推送的完整通道用 200 个种子(参数归 [tools](../../tools/README.md#cargo-xtask-dst)) | 快速通道 ≤ 1.5 分钟,完整通道 ≤ 3 分钟(总目标见 [development](../../docs/development.md#ci-概要)) |
 | 每夜回归冒烟:`cargo xtask dst`,种子由 UTC 日期派生,种子数与步数取 `tools/xtask/dst-nightly.toml`(参数归 tools;不计入门槛 ④) | ≤ 6 分钟(单核;整个每夜作业 ≤ 15 分钟含构建,[testing §6](../../docs/testing.md#6-ci-运行矩阵)) |
-| 一致性集 `HashTrail` 核对(`cargo xtask dst --hashtrail check`;PR、每夜与版本标签各自核对的种子数归 [testing §6](../../docs/testing.md#6-ci-运行矩阵);版本标签在同一提交上于 x86_64 与 aarch64 各跑一次) | 全部登记种子每侧 ≤ 10 分钟 |
 | 服务器:`hft-dst run`(`ci` 剖面,单核,由 `hft-verify` 按预算调用) | 吞吐待实测(按 `hft-dst` 默认步数每种子 0.1–0.7 s 估算);门槛 ④ 的达成时间估算见 [testing §6.1](../../docs/testing.md#61-服务器上的累计运行) |
 | `cargo xtask scaffold-gate`(改动 `crates/`、`apps/`、`strategies/`、`tools/` 的 PR;复用主 target 目录,含一次 `hft-core --check` 装配) | ≤ 4 分钟(增量构建) |
 | 全部金样(core 六个协议 + `fixtures/sim/`) | ≤ 30 秒 |

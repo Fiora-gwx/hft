@@ -13,20 +13,6 @@ use zerocopy::TryFromBytes;
 const MS: u64 = 1_000_000;
 const SECOND: u64 = 1_000 * MS;
 
-// Used by the `heavy` migration proofs (feature `dst-heavy`).
-#[cfg_attr(not(feature = "dst-heavy"), allow(dead_code))]
-pub(super) fn without_stale(cfg: &DstConfig) -> DstConfig {
-    let mut cfg = cfg.clone();
-    let mut plan = cfg.fault_plan();
-    for (_, fault) in &mut plan.items {
-        if let Fault::StaleGenFill { count, .. } = fault {
-            *count = 0;
-        }
-    }
-    cfg.plan = Some(plan);
-    cfg
-}
-
 fn venue<M: Matcher>(world: &WorldSpec, id: VenueId, seed: u64) -> MockVenue<M> {
     let mut cfg = MockVenueCfg::w1(id);
     cfg.rate_per_s = 0;

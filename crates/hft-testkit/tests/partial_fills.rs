@@ -5,25 +5,9 @@ use hft_testkit::dst::seq::matcher::SimMatcher;
 use hft_testkit::dst::sut::InputRec;
 use hft_testkit::dst::venue_behavior::{Matcher, MockVenue, MockVenueCfg, ToyMatcher};
 use hft_testkit::dst::world::{ACCT_A, BTC, P1, S1, USDT, VP, VS, WorldSpec};
-use hft_testkit::dst::{DstConfig, InvariantSet, SeqSut, run_record};
+use hft_testkit::dst::{InvariantSet, SeqSut, run_record};
 use hft_types::{InstId, Px, Qty, Side, SlotId, Tif, Tsc, VenueId};
 use zerocopy::TryFromBytes;
-
-/// Keep the same event plan, ordering and random draws, but reproduce the former no-op.
-/// Historical actor migration tests also use this to isolate their own change.
-// Used by the `heavy` migration proofs (feature `dst-heavy`).
-#[cfg_attr(not(feature = "dst-heavy"), allow(dead_code))]
-pub(super) fn without_partial(cfg: &DstConfig) -> DstConfig {
-    let mut cfg = cfg.clone();
-    let mut plan = cfg.fault_plan();
-    for (_, fault) in &mut plan.items {
-        if let Fault::PartialFills { dur_ms, .. } = fault {
-            *dur_ms = 0;
-        }
-    }
-    cfg.plan = Some(plan);
-    cfg
-}
 
 fn venue<M: Matcher>(world: &WorldSpec, venue: VenueId) -> MockVenue<M> {
     let mut cfg = MockVenueCfg::w1(venue);

@@ -11,6 +11,12 @@
 //! - `fuzz`: a function named `<prefix>_<nnn>_…` in a fuzz-target file.
 //!
 //! The `实现` field (`<path>::<fn>`) must equal the single location found.
+//!
+//! Report-only (owner decision 2026-10-14): `unimplemented`, `extra` and `inconsistent` are printed
+//! and written to the JSON but never change the exit code; together with a per-milestone count of
+//! implemented / unimplemented cases they measure progress. Only hard spec errors exit 1: a case
+//! id defined twice, an unparsable `里程碑` or a `实现` that is neither `待实现` nor `<path>::<fn>`
+//! on an automatic-level case.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -93,13 +99,35 @@ pub struct Report {
     /// Test-function names, with their location.
     pub extra: Vec<(String, String)>,
     pub inconsistent: Vec<Inconsistent>,
-    /// Non-fatal notes (unparsable milestones).
+    /// Non-fatal notes.
     pub notes: Vec<String>,
+    /// Hard spec errors (the only findings that fail the run).
+    pub errors: Vec<String>,
+    /// Per milestone (every milestone, not only up to `current_milestone`): automatic-level cases,
+    /// and how many of them have no live test.
+    pub by_milestone: BTreeMap<Milestone, MilestoneCount>,
+}
+
+/// Automatic-level cases of one milestone (deleted cases and disabled extensions excluded).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct MilestoneCount {
+    pub cases: usize,
+    pub unimplemented: usize,
+}
+
+/// `M2`, `M1.5`.
+pub fn milestone_text(m: Milestone) -> String {
+    if m.1 == 0 {
+        format!("M{}", m.0)
+    } else {
+        format!("M{}.{}", m.0, m.1)
+    }
 }
 
 impl Report {
+    /// Only hard spec errors fail; the three lists are report-only.
     pub fn passed(&self) -> bool {
-        self.unimplemented.is_empty() && self.extra.is_empty() && self.inconsistent.is_empty()
+        self.errors.is_empty()
     }
 
     pub fn to_json(&self) -> serde_json::Value {
@@ -109,6 +137,10 @@ impl Report {
             "inconsistent": self.inconsistent.iter().map(|x| json!({
                 "id": x.id, "spec": x.spec, "found": x.found,
             })).collect::<Vec<_>>(),
+            "errors": self.errors,
+            "by_milestone": self.by_milestone.iter().map(|(m, c)| (milestone_text(*m), json!({
+                "cases": c.cases, "implemented": c.cases - c.unimplemented, "unimplemented": c.unimplemented,
+            }))).collect::<serde_json::Map<_, _>>(),
         })
     }
 }
@@ -129,26 +161,25 @@ fn named_for(name: &str, stem: &str) -> bool {
     n == stem || n.strip_prefix(stem).is_some_and(|rest| rest.starts_with('_'))
 }
 
-fn required(case: &Case, cfg: &Config, notes: &mut Vec<String>) -> bool {
+/// The milestone of an automatic-level, live case whose extension (if any) is enabled; `None` for
+/// cases outside the trace. An unparsable milestone is a hard error.
+fn traced(case: &Case, cfg: &Config, errors: &mut Vec<String>) -> Option<Milestone> {
     if !AUTO_LEVELS.contains(&case.level().as_str()) || case.is_deleted() {
-        return false;
+        return None;
     }
     let Some(ms) = case.milestone() else {
-        notes.push(format!(
+        errors.push(format!(
             "{}:{} {}: unparsable 里程碑 '{}'",
             case.file,
             case.line,
             case.id,
             case.field("里程碑")
         ));
-        return false;
+        return None;
     };
-    if ms > cfg.current_milestone {
-        return false;
-    }
     match case.extension() {
-        Some(ext) => cfg.enabled_extensions.contains(&ext),
-        None => true,
+        Some(ext) if !cfg.enabled_extensions.contains(&ext) => None,
+        _ => Some(ms),
     }
 }
 
@@ -200,19 +231,44 @@ pub fn trace(root: &Path, cfg: &Config) -> Result<Report, EnvError> {
         ..Report::default()
     };
     let ids: BTreeSet<&str> = cases.iter().map(|c| c.id.as_str()).collect();
+    let mut first_at: BTreeMap<&str, String> = BTreeMap::new();
+    for case in &cases {
+        let at = format!("{}:{}", case.file, case.line);
+        if let Some(prev) = first_at.get(case.id.as_str()) {
+            r.errors
+                .push(format!("{at} {}: case id defined twice (also {prev})", case.id));
+        } else {
+            first_at.insert(&case.id, at);
+        }
+    }
 
     for case in &cases {
-        if !required(case, cfg, &mut r.notes) {
+        let Some(ms) = traced(case, cfg, &mut r.errors) else {
             continue;
-        }
-        r.required += 1;
+        };
         let found = evidence(case, &idx);
         let live: Vec<&String> = found
             .iter()
             .filter(|(_, ign)| !*ign || case.is_quarantined())
             .map(|(l, _)| l)
             .collect();
+        let count = r.by_milestone.entry(ms).or_default();
+        count.cases += 1;
+        if live.is_empty() {
+            count.unimplemented += 1;
+        }
         let at = format!("{}:{}", case.file, case.line);
+        if let Impl::Other(raw) = case.implementation() {
+            r.errors.push(format!(
+                "{at} {}: 实现 '{raw}' is neither 待实现 nor `<path>::<fn>`",
+                case.id
+            ));
+            continue;
+        }
+        if ms > cfg.current_milestone {
+            continue;
+        }
+        r.required += 1;
         if live.is_empty() {
             let why = if found.is_empty() {
                 "no test found".to_string()
@@ -243,11 +299,7 @@ pub fn trace(root: &Path, cfg: &Config) -> Result<Report, EnvError> {
                     });
                 }
             }
-            Impl::Other(raw) => r.inconsistent.push(Inconsistent {
-                id: case.id.clone(),
-                spec: raw,
-                found: live.iter().map(|s| s.to_string()).collect(),
-            }),
+            Impl::Other(_) => unreachable!("reported as an error above"),
         }
     }
 
@@ -265,6 +317,7 @@ pub fn trace(root: &Path, cfg: &Config) -> Result<Report, EnvError> {
     r.unimplemented.dedup_by(|a, b| a.0 == b.0);
     r.extra.sort();
     r.inconsistent.sort_by(|a, b| a.id.cmp(&b.id));
+    r.errors.sort();
     Ok(r)
 }
 
@@ -295,11 +348,26 @@ pub fn summary(r: &Report, cfg: &Config) -> String {
     for x in &r.inconsistent {
         s += &format!("  {}  spec {}  found [{}]\n", x.id, x.spec, x.found.join(", "));
     }
+    s += "by milestone (automatic levels, report-only):\n";
+    for (m, c) in &r.by_milestone {
+        s += &format!(
+            "  {:<5} cases={:<5} implemented={:<5} unimplemented={}\n",
+            milestone_text(*m),
+            c.cases,
+            c.cases - c.unimplemented,
+            c.unimplemented
+        );
+    }
+    s += &format!("errors ({}):\n", r.errors.len());
+    for e in &r.errors {
+        s += &format!("  {e}\n");
+    }
     s += &format!(
-        "test-trace: unimplemented={} extra={} inconsistent={} -> {}\n",
+        "test-trace: unimplemented={} extra={} inconsistent={} (report-only) errors={} -> {}\n",
         r.unimplemented.len(),
         r.extra.len(),
         r.inconsistent.len(),
+        r.errors.len(),
         if r.passed() { "PASS" } else { "FAIL" }
     );
     s

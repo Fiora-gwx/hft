@@ -4,7 +4,6 @@
 //! hft-dst run   --seeds <from>..<to> [--suite <name>|all] [--steps 10000] [--deadline-s N] [--checkpoint-seeds 1000] --out <result.json> --crash-dir <dir>
 //! hft-dst repro --seed 0x… --suite <name> --steps N [--trace] --crash-dir <dir>
 //! hft-dst list
-//! hft-dst hashtrail --seed 0x… --suite <name> --steps N   # one line: trail <xxh3-128 hex> points=<n>
 //! ```
 //!
 //! Exit codes: 0 no violation, 1 violations, 2 argument or environment error. The engine is
@@ -83,7 +82,7 @@ fn parse() -> Result<Args, String> {
         }
     }
     if a.case.is_some() && !matches!(a.cmd.as_str(), "run" | "repro") {
-        return Err("--case is supported only by run/repro; HashTrail remains the baseline".into());
+        return Err("--case is supported only by run/repro".into());
     }
     Ok(a)
 }
@@ -459,24 +458,6 @@ fn cmd_repro(a: &Args) -> Result<ExitCode, String> {
     }
 }
 
-fn cmd_hashtrail(a: &Args) -> Result<ExitCode, String> {
-    let seed = a.seed.ok_or("hashtrail needs --seed")?;
-    let all = suites();
-    let s = pick(&all, a.suite.as_deref(), seed)?;
-    let mut cfg = s.config(seed);
-    cfg.steps = a.steps;
-    cfg.rerun = hft_testkit::dst::RerunPolicy::Never;
-    let rec = hft_testkit::dst::run_record::<DstEngine>(&cfg);
-    if let DstOutcome::Fail(f) = &rec.outcome {
-        eprintln!("{}", repro_line_case(f, None));
-        eprintln!("{}", f.message);
-        return Ok(ExitCode::from(1));
-    }
-    let digest = xxhash_rust::xxh3::xxh3_128(&rec.trail.to_bytes());
-    println!("trail {digest:032x} points={}", rec.trail.points.len());
-    Ok(ExitCode::SUCCESS)
-}
-
 fn main() -> ExitCode {
     let a = match parse() {
         Ok(a) => a,
@@ -489,7 +470,6 @@ fn main() -> ExitCode {
         "list" => Ok(cmd_list()),
         "run" => cmd_run(&a),
         "repro" => cmd_repro(&a),
-        "hashtrail" => cmd_hashtrail(&a),
         other => Err(format!("unknown command {other}")),
     };
     match r {

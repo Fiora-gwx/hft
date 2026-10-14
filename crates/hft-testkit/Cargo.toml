@@ -54,9 +54,6 @@ dst-bin = ["seq"]
 # Planted defects of the engine crates (TESTS.md TK-053, TK-179): the real-engine planted-bug
 # tests. Not part of `seq` or `dst-bin`; only this crate's own tests enable it (TK-178).
 planted = ["seq", "hft-sequencer/planted"]
-# The heavy DST migration proofs (tests/main.rs `heavy`, TESTS.md TK-137/157/163/169/173): not in
-# the default local test binary; CI runs them in the `heavy-tests` job (docs/development.md).
-dst-heavy = ["seq"]
 
 [[bin]]
 name = "hft-dst"

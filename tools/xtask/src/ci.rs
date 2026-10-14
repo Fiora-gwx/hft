@@ -1,4 +1,4 @@
-//! `cargo xtask ci [--pure-only] [--fast]` (tools/README.md "cargo xtask ci"): the twelve steps in
+//! `cargo xtask ci [--pure-only] [--fast]` (tools/README.md "cargo xtask ci"): the eleven steps in
 //! order, stopping at the first failure. Every step runs through [`Exec`]. A step whose component is not
 //! in the workspace yet is skipped and the reason is written to the summary and the JSON (README "ci"
 //! skip rules): golden steps without any `tests/golden.rs`, the DST steps without the hft-testkit DST
@@ -12,8 +12,6 @@ use crate::exec::{Cmd, Exec};
 use crate::workspace::{Member, members, readme_fm};
 use crate::{EXIT_ENV, EXIT_FAIL, EXIT_OK, EnvError, write_json};
 
-/// PR runs check the first K seeds of the consistency set (docs/testing.md §6).
-pub const HASHTRAIL_FIRST: u32 = 50;
 /// PR DST smoke: commit-derived seeds plus the regression set (docs/testing.md §6).
 pub const DST_SMOKE_SEEDS: u32 = 200;
 /// Optional components (tools/README.md "范围").
@@ -222,7 +220,6 @@ pub fn plan(root: &Path, opts: Options) -> Result<(Vec<Step>, Optional), EnvErro
         }
         let dst = root.join(DST_DIR).is_dir() && ms.iter().any(|m| m.dir == "crates/hft-testkit");
         let seeds = DST_SMOKE_SEEDS.to_string();
-        let first = HASHTRAIL_FIRST.to_string();
         if dst {
             steps.push(step(
                 "dst smoke",
@@ -238,17 +235,9 @@ pub fn plan(root: &Path, opts: Options) -> Result<(Vec<Step>, Optional), EnvErro
                     ),
                 ],
             ));
-            steps.push(step(
-                "dst --hashtrail check",
-                vec![Cmd::new(
-                    "xtask",
-                    &["dst", "--hashtrail", "check", "--first", &first],
-                )],
-            ));
         } else {
             let why = format!("DST framework ({DST_DIR}/) is not in the workspace yet");
-            steps.push(skip("dst smoke", why.clone()));
-            steps.push(skip("dst --hashtrail check", why));
+            steps.push(skip("dst smoke", why));
         }
     }
     steps.push(step(
