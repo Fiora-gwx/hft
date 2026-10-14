@@ -10,9 +10,11 @@ Status: proposed
 
 ## Proposal
 
+控制输入部分已按负责人裁决落地,见 [控制优先决定](../../implemented/architecture/2026-10-15-control-quota-priority.md)。非控制输入额度与参考机验收仍按原规格。
+
 待 owner 选择额度耗尽后的行为。如果等待上界优先,当 ctl/实盘 rep 环非空且本轮额度不足时结束本轮,由下一次 step 重置额度后先处理高优先级输入;同步修改 SEQ-063、主循环规格与 architecture。也需要明确 BBO 自身额度耗尽及高优先级同环积压时的上界口径。
 
-当前保留冻结的 SEQ-063 行为,不修改生产主循环。`tests/preemption_dst.rs::seq_077_preempt_wait_bounds` 显式 ignored,首个种子固定为上述反例,不计 SEQ-077 完成。不放宽断言、不限制 Poisson 生成器来避开额度耗尽。
+固定反例保留在 `tests/preemption_dst.rs::seq_077_preempt_wait_bounds` 的首个种子,控制优先决定落实后不再 ignored。不放宽断言、不限制 Poisson 生成器来避开额度耗尽。
 
 ## Alternatives considered
 

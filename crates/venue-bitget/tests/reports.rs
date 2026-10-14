@@ -1157,7 +1157,7 @@ fn bgt_114_account_push() {
             ACCT,
             USDT,
             Qty(800_050_000_000),
-            Qty(10_000_000_000),
+            Qty(0),
             1_790_000_000_800_000_000
         ),
         "BGT-114.1/2"
@@ -1285,5 +1285,138 @@ fn bgt_093_query_identity_cannot_redirect() {
         let (r, s) = dec_rest(200, &bad);
         assert!(r.is_err());
         assert!(s.orders.is_empty());
+    }
+}
+
+#[test]
+fn bgt_101_cumulative_fill_rejects_lost_fee_and_foreign_identity() {
+    let base = ord("partially_filled", "0.001", "65", "65000", "0.01", "");
+    let mut ctx = GwCtx::new();
+    dec(&mut ctx, &base).0.unwrap();
+    for bad in [
+        ord("filled", "0.002", "64", "32000", "0.02", ""),
+        ord("filled", "0.002", "130", "65000", "0.02", "")
+            .replace("\"feeCoin\":\"USDT\"", "\"feeCoin\":\"UNKNOWN\""),
+        ord("filled", "0.002", "130", "65000", "0.02", "")
+            .replace("\"feeCoin\":\"USDT\"", "\"feeCoin\":\"BGB\""),
+    ] {
+        let before = ctx.clone();
+        let (out, sink) = dec(&mut ctx, &bad);
+        assert!(out.is_err());
+        assert_eq!(sink.events(), 0);
+        assert_eq!(ctx, before);
+    }
+    let (out, sink) = dec(&mut ctx, &ord("filled", "0.002", "130", "65000", "0.02", ""));
+    assert_eq!(out.unwrap().events, 1);
+    assert_eq!(
+        (sink.orders[0].qty, sink.orders[0].fee),
+        (Qty(100_000), Qty(1_000_000))
+    );
+    let foreign = base.replace(
+        CID7,
+        &cid_text(&hft_types::ClientOrderId {
+            account: hft_types::AccountId(3),
+            ..cid(FUT, 3, 42, 7)
+        }),
+    );
+    let (out, sink) = dec(&mut GwCtx::new(), &foreign);
+    assert_eq!(out.unwrap().events, 1);
+    assert!(sink.orders.is_empty());
+    assert_eq!(sink.ext.len(), 1);
+}
+
+#[test]
+fn bgt_113_position_rounding_and_direction() {
+    for (side, want) in [("long", 1_000_000), ("short", -1_000_000)] {
+        let p = pos(&[("BTCUSDT", side, "0.01", "52000.555")])
+            .replace("\"avgPrice\":\"64000\"", "\"avgPrice\":\"64000.125\"");
+        let (out, sink) = dec(&mut GwCtx::new(), &p);
+        out.unwrap();
+        assert_eq!(
+            (sink.pos[0].qty.0, sink.pos[0].entry_px.0, sink.pos[0].liq_px.0),
+            (want, 6_400_012, 5_200_056)
+        );
+    }
+    for p in [
+        pos(&[("BTCUSDT", "unknown", "0.01", "")]),
+        pos(&[("BTCUSDT", "short", "-0.01", "")]),
+    ] {
+        let (out, sink) = dec(&mut GwCtx::new(), &p);
+        assert!(out.is_err());
+        assert_eq!(sink.events(), 0);
+    }
+}
+
+#[test]
+fn bgt_114_wallet_balance_is_not_available_margin() {
+    let p = acct(&[("USDT", "100", "5")]).replace("\"available\":\"100\"", "\"available\":\"20\"");
+    let (out, sink) = dec(&mut GwCtx::new(), &p);
+    out.unwrap();
+    assert_eq!(
+        (sink.bal[0].free, sink.bal[0].locked),
+        (Qty(10_000_000_000), Qty(0))
+    );
+    assert_eq!(sink.margin, 0);
+}
+
+#[test]
+fn bgt_114_spot_wallet_includes_locked_cash_once() {
+    let p = acct(&[("USDT", "100", "5"), ("BTC", "0.001", "0")])
+        .replace("\"available\":\"100\"", "\"available\":\"20\"");
+    let (out, sink) = dec_spot(&mut GwCtx::new(), &p);
+    out.unwrap();
+    assert_eq!(
+        (sink.bal[0].free, sink.bal[0].locked),
+        (Qty(9_500_000_000), Qty(500_000_000))
+    );
+    assert_eq!(sink.bal[1].free, Qty(100_000));
+}
+
+#[test]
+fn bgt_093_query_averages_round_and_transport_stays_unknown() {
+    let (out, sink) = dec_rest(200, &query("filled", "0.004", "65000.125"));
+    out.unwrap();
+    assert_eq!(sink.orders[0].avg_px, Px(6_500_012));
+    for status in [403, 429, 500, 503] {
+        let (out, sink) = dec_rest(status, r#"{"code":"25000"}"#);
+        assert!(out.unwrap().outcome_unknown.is_some());
+        assert!(sink.orders.is_empty());
+    }
+}
+
+#[test]
+fn bgt_101_batch_fill_validation_is_atomic() {
+    let first = ord("partially_filled", "0.001", "65", "65000", "0.01", "");
+    let second = ord("filled", "0.002", "64", "32000", "0.02", "");
+    let mut batch: serde_json::Value = serde_json::from_str(&first).unwrap();
+    let second: serde_json::Value = serde_json::from_str(&second).unwrap();
+    batch["data"]
+        .as_array_mut()
+        .unwrap()
+        .push(second["data"][0].clone());
+    let mut ctx = GwCtx::new();
+    let before = ctx.clone();
+    let (out, sink) = dec(&mut ctx, &batch.to_string());
+    assert!(out.is_err());
+    assert_eq!(sink.events(), 0);
+    assert_eq!(ctx, before);
+}
+
+#[test]
+fn bgt_090_ws_response_identity_cannot_redirect() {
+    for id in [
+        hft_types::ClientOrderId {
+            account: hft_types::AccountId(3),
+            ..cid(FUT, 3, 42, 7)
+        },
+        cid(SPOT, 3, 42, 7),
+        cid(FUT, 3, 43, 7),
+        cid(FUT, 3, 42, 8),
+    ] {
+        let args = serde_json::json!([{"orderId":"123", "clientOid":cid_text(&id), "symbol":"BTCUSDT"}]);
+        let p = format!(r#"{{"event":"trade","id":"p0000002a00000007","args":{args}}}"#);
+        let (out, sink) = dec(&mut GwCtx::new(), &p);
+        assert_eq!(out, Err(DecodeErr::Shape));
+        assert_eq!(sink.events(), 0);
     }
 }

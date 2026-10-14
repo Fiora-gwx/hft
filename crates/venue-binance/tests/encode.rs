@@ -440,7 +440,16 @@ fn bin_072_usdm_cancel_all_rest() {
     let c = cmd(GwOp::CancelAll, U_BTC);
     let target = tgt(cid(U, 3, 0, 0), 0);
     let mut r = RestReqBuf::default();
-    Usdm::encode_rest(rd(), &tpl::<Usdm>(1500), &c, &target, &WC, &mut r).unwrap();
+    Usdm::encode_rest_signed(
+        rd(),
+        &tpl::<Usdm>(1500),
+        &crate::support::hm1(),
+        &c,
+        &target,
+        &WC,
+        &mut r,
+    )
+    .unwrap();
     assert_eq!(r.method, Method::Delete);
     assert!(r.redacted);
     assert_eq!(
@@ -448,9 +457,10 @@ fn bin_072_usdm_cancel_all_rest() {
         "/fapi/v1/allOpenOrders?symbol=BTCUSDT&timestamp=1790000000000&recvWindow=1500&signature=381745f38cbbfe1f631e935ec6dbf44fe2f5925a7aafd70800b6b6204c139152"
     );
     assert_eq!(
-        Usdm::encode_rest(
+        Usdm::encode_rest_signed(
             rd(),
             &tpl::<Usdm>(1500),
+            &crate::support::hm1(),
             &cmd(GwOp::CancelAll, InstId(0)),
             &target,
             &WC,
@@ -505,9 +515,10 @@ fn bin_173_deadman_requests_and_response_strings() {
         account::{AccountProtocol, Query, State},
     };
     let mut out = DeadManOut::default();
-    Usdm::dead_man_refresh(
+    Usdm::dead_man_refresh_signed(
         rd(),
         &tpl::<Usdm>(1500),
+        &crate::support::hm1(),
         30_000,
         &[U_BTC, support::U_ETH],
         &WC,

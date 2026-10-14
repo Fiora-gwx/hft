@@ -43,7 +43,7 @@ pub fn rd_ignoring(names: &[&str]) -> &'static RefData {
 }
 
 fn build(names: &[&str]) -> &'static RefData {
-    let blob = build_blob(names, false);
+    let blob = build_blob(names, false, false);
     match RefData::load(&blob, None) {
         Ok(r) => Box::leak(Box::new(r)),
         Err(e) => panic!("RD-BIN rejected: {e:?}"),
@@ -51,10 +51,14 @@ fn build(names: &[&str]) -> &'static RefData {
 }
 
 pub fn demo_blob(usdm_prod: bool) -> Vec<u8> {
-    build_blob(&[], usdm_prod)
+    build_blob(&[], usdm_prod, false)
 }
 
-fn build_blob(names: &[&str], usdm_prod: bool) -> Vec<u8> {
+pub fn account_rd(unverifiable: bool) -> RefData {
+    RefData::load(&build_blob(&[], false, unverifiable), None).unwrap()
+}
+
+fn build_blob(names: &[&str], usdm_prod: bool, unverifiable: bool) -> Vec<u8> {
     let mut b = RdbBuilder::new(1);
     b.created_utc_ns(1_759_276_800_000_000_000);
     for (id, name, class, px, qty) in [
@@ -226,6 +230,11 @@ fn build_blob(names: &[&str], usdm_prod: bool) -> Vec<u8> {
             label: label.into(),
             venues: 1 << v.0,
             is_prod: usdm_prod && v == VenueId::BINANCE_USDM,
+            uid_policy: if unverifiable {
+                hft_refdata::UidPolicy::Unverifiable
+            } else {
+                hft_refdata::UidPolicy::Verified
+            },
             ..AccountSpec::default()
         });
         b.account_venue(AccountVenueSpec {

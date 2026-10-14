@@ -11,10 +11,12 @@ use hft_venue_proto::{
 };
 use serde::Deserialize;
 
+#[allow(clippy::too_many_arguments)] // Explicit borrowed credentials keep templates secret-free.
 pub(crate) fn request(
     line: Line,
     rd: &RefData,
     t: &Templates,
+    cred: &Credential,
     a: AccountId,
     q: &RoQuery,
     clk: &WallClock,
@@ -77,7 +79,7 @@ pub(crate) fn request(
             env: VenueEnv::Prod,
             stale_guard_ms: t.recv_window_ms,
         },
-        &t.rest,
+        cred,
         clk.unix_ms,
         out,
     )

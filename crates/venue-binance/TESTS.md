@@ -22,6 +22,12 @@ spec: README.md
 
 CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs::core_120_mock_accounts_bootstrap_reauth_and_drift` 以独立子进程、两家真实协议和脚本 REST 验证撤空、基线、重新核验、超时/错误模式失败与余额差异不覆盖账本；不替代真实 TLS、交易所或正式恢复验收。资金费账单复用 FundingPoll，沿用现有实际结算记账与去重。
 
+## 当前实现验收说明
+
+当前 warm `AccountProtocol` 的保证金边界与 i128 对照见 tests/acct.rs 的 BIN-148/149/151,UID 豁免见 BIN-213;旧 acct_* 的完整分步序列、ADL 缓存与无分配要求仍是独立验收缺口。BIN-508 基准测 warm account_decode 的 50 KiB 持仓响应并包含分配,不声明旧接口达标。BIN-037 与 BIN-056 覆盖接收元数据与状态隔离;尚缺完整行情金样时,隔离测试的预热使用合成消息,不计金样验收。
+
+BIN-063 对两份不同凭证构建同值小模板,显式借用凭证签名得到不同请求,旧无凭证入口拒绝;模板不留 API key、secret 或 passphrase。BIN-107 增补零手续费缺币种、非零手续费未知币种和单笔量大于累计量的反例。BIN-149 拒绝负维持保证金;BIN-213 保留 Unverifiable 实际返回 UID,仅缺失时清零。
+
 ## 覆盖
 
 | README 小节 | 用例 |

@@ -237,7 +237,6 @@ fn seq_076_preempt_positions_verify() {
 }
 
 #[test]
-#[ignore = "SEQ-063 quota continuation conflicts with SEQ-077; owner decision pending"]
 fn seq_077_preempt_wait_bounds() {
     for seed in std::iter::once(0x784b9e117907309c).chain(seeds()) {
         let mut h = baseline(false);

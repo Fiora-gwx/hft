@@ -205,8 +205,23 @@ struct Settings {
     #[serde(default)]
     multi_assets_margin: Option<bool>,
     #[serde(default)]
-    uid: Option<u64>,
+    uid: Option<Uid>,
 }
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Uid {
+    Number(u64),
+    Text(String),
+}
+impl Uid {
+    fn text(self) -> String {
+        match self {
+            Self::Number(n) => n.to_string(),
+            Self::Text(s) => s,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SymbolSetting {
@@ -329,17 +344,29 @@ fn decode(
                 ex_ts_ns: ns,
                 ..zerocopy::FromZeros::new_zeroed()
             };
-            if rd.account(a).uid_policy == UidPolicy::Verified {
-                let uid = r.uid.ok_or(DecodeErr::Shape)?.to_string();
-                if rd.venue_uid(a, v) != Some(uid.as_str()) {
-                    return Err(DecodeErr::Shape);
+            match r.uid {
+                Some(uid) => {
+                    let uid = uid.text();
+                    if !safe_token(&uid)
+                        || uid.len() > h.venue_uid.len()
+                        || (rd.account(a).uid_policy == UidPolicy::Verified
+                            && rd.venue_uid(a, v) != Some(uid.as_str()))
+                    {
+                        return Err(DecodeErr::Shape);
+                    }
+                    h.venue_uid[..uid.len()].copy_from_slice(uid.as_bytes());
+                    h.uid_keys = 3;
                 }
-                let n = uid.len();
-                if n > h.venue_uid.len() {
-                    return Err(DecodeErr::Shape);
-                }
-                h.venue_uid[..n].copy_from_slice(uid.as_bytes());
-                h.uid_keys = 3;
+                None if rd.account(a).uid_policy == UidPolicy::Unverifiable => {}
+                None => return Err(DecodeErr::Shape),
+            }
+            if matches!(q, Query::Permissions)
+                && let Some(previous) = s.config.as_ref()
+                && previous.venue_uid != [0; 24]
+                && h.venue_uid != [0; 24]
+                && previous.venue_uid != h.venue_uid
+            {
+                return Err(DecodeErr::Shape);
             }
             s.config = Some(h);
         }
@@ -381,6 +408,9 @@ fn decode(
             }
             let equity = notional(&r.total_margin_balance)?;
             let maint = notional(&r.total_maint_margin)?;
+            if maint < 0 {
+                return Err(DecodeErr::Shape);
+            }
             s.margin = Some(MarginReportHdr {
                 venue: v,
                 account: a,

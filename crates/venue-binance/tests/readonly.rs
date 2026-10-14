@@ -41,7 +41,7 @@ fn bin_175_readonly_request_and_atomic_pages() {
     let t = Usdm::build_templates(&cfg(1500), rd(), ACCT, &hm1()).unwrap();
     let mut q = query(RoKind::Fills, U_BTC, 1);
     let mut r = RestReqBuf::default();
-    Usdm::ro_request(rd(), &t, ACCT, &q, &WC, &mut r).unwrap();
+    Usdm::ro_request_signed(rd(), &t, &crate::support::hm1(), ACCT, &q, &WC, &mut r).unwrap();
     let p = std::str::from_utf8(r.path_query.as_slice()).unwrap();
     assert!(p.starts_with("/fapi/v1/userTrades?symbol=BTCUSDT&startTime=1790000000000&limit=1&timestamp="));
     assert!(p.contains("&signature="));
@@ -63,7 +63,7 @@ fn bin_175_readonly_request_and_atomic_pages() {
         (Qty(100_000), Qty(-1_000_000), None)
     );
     q.cursor = 22;
-    Usdm::ro_request(rd(), &t, ACCT, &q, &WC, &mut r).unwrap();
+    Usdm::ro_request_signed(rd(), &t, &crate::support::hm1(), ACCT, &q, &WC, &mut r).unwrap();
     let p = std::str::from_utf8(r.path_query.as_slice()).unwrap();
     assert!(p.contains("fromId=22"));
     assert!(!p.contains("startTime="));
@@ -86,10 +86,10 @@ fn bin_175_readonly_request_and_atomic_pages() {
     );
     assert!(empty.fills.is_empty());
     q.inst = InstId(0);
-    assert!(Usdm::ro_request(rd(), &t, ACCT, &q, &WC, &mut r).is_err());
+    assert!(Usdm::ro_request_signed(rd(), &t, &crate::support::hm1(), ACCT, &q, &WC, &mut r).is_err());
     let st = Spot::build_templates(&cfg(1500), rd(), ACCT, &hm1()).unwrap();
     q.kind = RoKind::Positions;
-    assert!(Spot::ro_request(rd(), &st, ACCT, &q, &WC, &mut r).is_err());
+    assert!(Spot::ro_request_signed(rd(), &st, &crate::support::hm1(), ACCT, &q, &WC, &mut r).is_err());
     q.kind = RoKind::Fills;
     q.inst = S_BTC;
     q.limit = 1;

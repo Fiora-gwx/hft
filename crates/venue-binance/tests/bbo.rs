@@ -114,3 +114,45 @@ fn bin_054_public_bbo_golden_1() {
         include_str!("../../../fixtures/binance-spot/rest.bookTicker/public_bbo.expected.jsonl"),
     );
 }
+
+#[test]
+fn bin_056_snapshot_isolation() {
+    fn run<P: VenueProtocol<FeedCtx = FeedCtx>>(
+        mut used: FeedCtx,
+        class: P::MdClass,
+        payload: &[u8],
+        inst: hft_types::InstId,
+        body: &[u8],
+    ) {
+        let mut sink = VecSink::default();
+        for _ in 0..10_000 {
+            sink.md.clear();
+            P::decode_md(rd(), &mut used, class, payload, &RX, &mut sink).unwrap();
+        }
+        let before = used;
+        let mut a = VecSink::default();
+        let mut b = VecSink::default();
+        let mut fresh = if P::VENUE == hft_types::VenueId::BINANCE_USDM {
+            FeedCtx::USDM
+        } else {
+            FeedCtx::SPOT
+        };
+        P::decode_bbo_snapshot(rd(), &mut fresh, &[inst], body, &RX, &mut a).unwrap();
+        P::decode_bbo_snapshot(rd(), &mut used, &[inst], body, &RX, &mut b).unwrap();
+        assert_eq!(
+            a.md.iter().map(MdRec::bytes).collect::<Vec<_>>(),
+            b.md.iter().map(MdRec::bytes).collect::<Vec<_>>()
+        );
+        assert_eq!(used, before);
+    }
+    run::<Usdm>(FeedCtx::USDM, venue_binance::usdm::MdClass::MarkPrice,
+        br#"{"e":"markPriceUpdate","E":1790000000125,"s":"BTCUSDT","p":"65001.23","i":"65000.50","r":"0.00010000","T":1790006400000}"#,
+        U_BTC, BBO);
+    run::<Spot>(
+        FeedCtx::SPOT,
+        venue_binance::spot::MdClass::JsonBookTicker,
+        SBT1.as_bytes(),
+        S_BTC,
+        &[b"[".as_slice(), BBO, b"]"].concat(),
+    );
+}

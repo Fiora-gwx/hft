@@ -1996,8 +1996,9 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 - 规则:[hft-cfg](README.md#hft-cfg)
 - 级别:table
 - 里程碑:M3
-- 前置:同 TOOL-129;协议 `binance-usdm` 的 `default_caps()` 不支持 `AMEND` 以外的能力 X,`dead_man()` 为 `CountdownAccount{refresh_ms = 10_000}`;每行只改 `venue_caps.toml` 一处
+- 前置:同 TOOL-129;协议 `binance-usdm` 的 `default_caps()` 不支持 `AMEND` 以外的能力 X,`dead_man()` 为 `CountdownPerInst{refresh_ms = 10_000}`;每行只改 `venue_caps.toml` 一处
 - 实现:`tools/hft-cfg/tests/refdata.rs::tool_130_caps_overrides`
+- 补充断言:成功行另做 dump → build 逐字节比较,无覆盖行不含完整 `[caps.binance-usdm]`
 
 | 行 | 覆盖 | 期望 |
 |---|---|---|

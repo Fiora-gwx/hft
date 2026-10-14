@@ -909,7 +909,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 步骤:
   1. `step()`
 - 期望:
-  - 这一轮交出 ctl 4 条、hk 4 条;各剩 2 条在环里
+  - 第一轮交出 ctl 4 条,ctl 剩 2 条、hk 剩 6 条;第二轮先交出余下 ctl,再交出 hk 4 条
 - 实现:`crates/hft-sequencer/tests/preempt.rs::seq_057_ctl_hk_per_round`
 
 ### SEQ-058 ctl 每轮载荷字节上限,至少取一条
@@ -992,8 +992,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `step()`
   2. `step()`
 - 期望:
-  - 步骤 1:ctl 4 条、B1–B10;第 5 条 ctl 不在这一轮(ctl 这一轮已达 4 条)
-  - 步骤 2:第 5 条 ctl 在 b 段交出
+  - 步骤 1:ctl 4 条、B1–B2;第 5 条 ctl 到达后结束本轮,B3–B10 留在环中(非控制输入仍计入原上限)
+  - 步骤 2:第 5 条 ctl 在 b 段交出,先于 B3–B10
 - 实现:`crates/hft-sequencer/tests/preempt.rs::seq_063_preempted_count_against_limits`
 
 ### SEQ-064 advice 每轮至多 16 条,每条之后检查 ctl 与实盘回报
@@ -1170,7 +1170,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 ### SEQ-077 实盘回报与 Bbo 的等待上界
 
-- 待裁决:每轮 ctl 额度耗尽后继续取 BBO/md 的 SEQ-063 行为与本例冲突;反例保留为显式 ignored 测试,不计验收通过。见 [额度与等待上界](../../.agents/notes/proposed/architecture/2026-10-15-sequencer-quota-wait-bound.md)。
+- 控制输入裁决:非背压轮额度耗尽即结束该轮,下一轮先处理 ctl。固定反例不忽略,见 [控制优先](../../.agents/notes/implemented/architecture/2026-10-15-control-quota-priority.md)。
 
 - 规则:[主循环](README.md#主循环step)
 - 级别:dst

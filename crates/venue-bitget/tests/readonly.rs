@@ -50,7 +50,7 @@ fn bgt_175_readonly_pages_are_atomic_and_signed() {
     .unwrap();
     let mut q = query(RoKind::Fills, F_BTC, 1);
     let mut r = RestReqBuf::default();
-    P::ro_request(rd(), &t, ACCT, &q, &WC, &mut r).unwrap();
+    P::ro_request_signed(rd(), &t, &crate::support::key(), ACCT, &q, &WC, &mut r).unwrap();
     assert_eq!(r.method, Method::Get);
     assert!(r.redacted);
     assert!(
@@ -75,7 +75,7 @@ fn bgt_175_readonly_pages_are_atomic_and_signed() {
         (Qty(100_000), Qty(2_000_000), None)
     );
     q.cursor = 21;
-    P::ro_request(rd(), &t, ACCT, &q, &WC, &mut r).unwrap();
+    P::ro_request_signed(rd(), &t, &crate::support::key(), ACCT, &q, &WC, &mut r).unwrap();
     assert!(
         std::str::from_utf8(r.path_query.as_slice())
             .unwrap()
@@ -95,7 +95,7 @@ fn bgt_175_readonly_pages_are_atomic_and_signed() {
     q.kind = RoKind::Positions;
     q.inst = S_BTC;
     let st = BitgetSpot::build_templates(&cfg(), rd(), ACCT, &key()).unwrap();
-    assert!(BitgetSpot::ro_request(rd(), &st, ACCT, &q, &WC, &mut r).is_err());
+    assert!(BitgetSpot::ro_request_signed(rd(), &st, &crate::support::key(), ACCT, &q, &WC, &mut r).is_err());
 }
 #[test]
 fn bgt_175_open_orders_preserve_foreign_identity() {

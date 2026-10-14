@@ -433,15 +433,16 @@ macro_rules! venue_impl {
             ) -> Result<ReportOutcome, DecodeErr> {
                 reports::decode_report($line, rd, ctx, reports::RClass::from(c), payload, rx, out)
             }
-            fn ro_request(
+            fn ro_request_signed(
                 rd: &RefData,
                 t: &Templates,
+                cred: &Credential,
                 acct: AccountId,
                 q: &hft_venue_proto::RoQuery,
                 clk: &WallClock,
                 out: &mut RestReqBuf,
             ) -> Result<(), EncodeErr> {
-                readonly::request($line, rd, t, acct, q, clk, out)
+                readonly::request($line, rd, t, cred, acct, q, clk, out)
             }
             fn ro_decode(
                 rd: &RefData,
@@ -462,29 +463,32 @@ macro_rules! venue_impl {
             fn dead_man() -> DeadManSpec {
                 caps::dead_man($line)
             }
-            fn dead_man_refresh(
+            fn dead_man_refresh_signed(
                 rd: &RefData,
                 t: &Templates,
+                cred: &Credential,
                 timeout_ms: u32,
                 insts: &[InstId],
                 clk: &WallClock,
                 out: &mut DeadManOut,
             ) -> Result<(), EncodeErr> {
-                rest_orders::deadman($line, rd, t, timeout_ms, insts, clk, out)
+                rest_orders::deadman($line, rd, t, cred, timeout_ms, insts, clk, out)
             }
-            fn encode_rest(
+            fn encode_rest_signed(
                 rd: &RefData,
                 t: &Templates,
+                cred: &Credential,
                 c: &GwCmd,
                 _tgt: &TargetRef,
                 clk: &WallClock,
                 out: &mut RestReqBuf,
             ) -> Result<(), EncodeErr> {
-                rest_orders::cancel_all($line, rd, t, c, clk, out)
+                rest_orders::cancel_all($line, rd, t, cred, c, clk, out)
             }
-            fn session_keepalive_request(
+            fn session_keepalive_request_signed(
                 _rd: &RefData,
                 t: &Templates,
+                cred: &Credential,
                 clk: &WallClock,
                 out: &mut RestReqBuf,
             ) -> Result<bool, EncodeErr> {
@@ -497,7 +501,7 @@ macro_rules! venue_impl {
                         env: hft_venue_proto::VenueEnv::Prod,
                         stale_guard_ms: t.recv_window_ms,
                     },
-                    &t.rest,
+                    cred,
                     &hft_venue_proto::account::Query::Keepalive,
                     clk.unix_ms,
                     out,

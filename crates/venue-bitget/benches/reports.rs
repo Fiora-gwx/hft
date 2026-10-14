@@ -95,5 +95,44 @@ fn bgt_503_encode_place(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bgt_503_encode_place, bgt_504_decode_order);
+// Warm bootstrap decoder: allocations are included, never interpreted as a hot acct_* result.
+fn bgt_505_account_positions(c: &mut Criterion) {
+    use hft_venue_proto::account::{AccountProtocol, Query, State};
+    let rd = support::rd();
+    let mut rows = Vec::new();
+    let body = loop {
+        let i = rd
+            .insts_of_venue(Fut::VENUE)
+            .get(rows.len())
+            .expect("enough configured symbols");
+        rows.push(serde_json::json!({"symbol":rd.inst_meta(*i).symbol.as_ref(), "holdMode":"one_way_mode", "marginMode":"crossed", "posSide":"long", "total":"0.001", "avgPrice":"65000.125", "unrealisedPnl":"0", "liquidationPrice":"60000.555"}));
+        let body = serde_json::to_vec(&serde_json::json!({"code":"00000","data":{"list":rows}})).unwrap();
+        if body.len() >= 50 * 1024 {
+            break body;
+        }
+    };
+    let mut state = State::default();
+    Fut::account_decode(rd, support::ACCT, &Query::Positions, 200, &body, 1, &mut state).unwrap();
+    assert_eq!(state.margin_items.len(), rows.len());
+    c.bench_function("bench_acct_decode_bitget", |b| {
+        b.iter(|| {
+            Fut::account_decode(
+                rd,
+                support::ACCT,
+                &Query::Positions,
+                200,
+                black_box(&body),
+                1,
+                &mut state,
+            )
+            .unwrap()
+        })
+    });
+}
+criterion_group!(
+    benches,
+    bgt_503_encode_place,
+    bgt_504_decode_order,
+    bgt_505_account_positions
+);
 criterion_main!(benches);

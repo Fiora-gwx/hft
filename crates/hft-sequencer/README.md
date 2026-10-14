@@ -326,6 +326,7 @@ a. 驱动生成的 Input(begin_round 决定):进程启动后的首轮只交 Engi
    到期定时器 ≤ 16(按堆键升序)→ OMS 有待发 → Timer{OmsContinue} → 通知积压非空或游标未完 → Timer{Sys, NotifyContinue}
    → 其余环境决定(按下表的行序)
 b. ctl(ByteSpsc,≤ 4 条且载荷合计 ≤ ctl_bytes_per_round)与 hk(≤ 4 条)
+   非背压轮在 b–g 的每个输入边界先查 ctl;非空而条数/字节额度耗尽即结束本轮,下一轮重新给额度后先取 ctl,不继续低优先级输入
 c. 实盘回报:rep-<venue> 轮转 + chain-in,合计 ≤ 64,每环 ≤ 32
 d. bbo-* 轮转,合计 ≤ 128,每环 ≤ 32;积压 > conflate_backlog 的环先合并(见"BBO 合并");
    **每条 Bbo 处理完之后**,下一次 take 先对 ctl 与各实盘 rep 环的环头各做一次 Acquire 读,
@@ -903,7 +904,7 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 
 独立定时器回放夹具经 `B0::boot_self_contained` 写入完整 ECF1/RKP1,含用例显式设置的执行层参数,回放端从 journal 装配配置。精简 B0 的注入解码器用于其余单元用例。
 
-SEQ-076 使用真实 LiveDriver 与预生成的虚拟到达时间表,将消费者耗时与生产者到达分开;200 个提交派生种子加 `fixtures/dst-seeds/` 回归种子,可用 `HFT_DST_SEED_ID` 指定每夜日期或复现身份。每次运行核对 VerifyDriver,同种子重跑核对完整记录;该确定性测试不提供参考主机延迟结论。SEQ-077 的额度耗尽反例与裁决状态见 [TESTS.md](TESTS.md#seq-077-实盘回报与-bbo-的等待上界)。
+SEQ-076 使用真实 LiveDriver 与预生成的虚拟到达时间表,将消费者耗时与生产者到达分开;200 个提交派生种子加 `fixtures/dst-seeds/` 回归种子,可用 `HFT_DST_SEED_ID` 指定每夜日期或复现身份。每次运行核对 VerifyDriver,同种子重跑核对完整记录;该确定性测试不提供参考主机延迟结论。SEQ-077 包含额度耗尽的固定反例与提交派生种子,规则见 [TESTS.md](TESTS.md#seq-077-实盘回报与-bbo-的等待上界)。
 
 advisor 的定时投递、重启注记去重、落后量、两种环容量的独立合并模型,以及三种检查点块大小的完整载荷续算见 [SEQ-036–046](TESTS.md#seq-036-model-的时间刻度只来自-journal-中的-timersys-advisortick)。这些验收在测试进程中生成 journal,不替代固定回放样本与参考主机延迟门槛。
 

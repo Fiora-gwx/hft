@@ -691,24 +691,36 @@ fn apply_override(base: &VenueCaps, t: &Table, n: &Names, ctx: &str) -> Res<Venu
     Ok(c)
 }
 
-/// Default capability rows of the core `venue-*` crates (`default_caps()` + `dead_man()`);
-/// none is linked yet, so every venue's base row comes from `[caps.<venue>]`.
-fn default_caps(_v: VenueId) -> Option<VenueCaps> {
-    None
+/// Linked protocol defaults; asset IDs come from this input, not a hard-coded token table.
+fn default_caps(v: VenueId, assets: &[AssetSpec]) -> Option<VenueCaps> {
+    use hft_venue_proto::VenueProtocol;
+    let asset = |name: &str| assets.iter().find(|a| a.name.as_ref() == name).map(|a| a.id);
+    Some(match v {
+        VenueId::BINANCE_USDM => venue_binance::Usdm::default_caps(asset),
+        VenueId::BINANCE_SPOT => venue_binance::Spot::default_caps(asset),
+        VenueId::BITGET_UTA_USDT_FUT => venue_bitget::BitgetUsdtFutures::default_caps(asset),
+        VenueId::BITGET_UTA_SPOT => venue_bitget::BitgetSpot::default_caps(asset),
+        _ => return None,
+    })
 }
 
 fn parse_caps(root: &Table, m: &mut Model, n: &Names) -> Res<()> {
     let full = opt_table(root, "caps", "refdata")?;
     let over = opt_table(root, "venue_caps", "refdata")?;
-    let mut venues: Vec<VenueId> = Vec::new();
-    for k in full
-        .iter()
-        .flat_map(|t| t.keys())
-        .chain(over.iter().flat_map(|t| t.keys()))
-    {
-        let v = venue_or_rej(k, "caps")?;
-        if !venues.contains(&v) {
-            venues.push(v);
+    let mut venues: Vec<VenueId> = m.venues.iter().map(|v| v.id).collect();
+    for (section, table) in [("caps", full), ("venue_caps", over)] {
+        let mut seen = Vec::new();
+        for (k, value) in table.iter().flat_map(|t| t.iter()) {
+            let ctx = format!("{section}.{k}");
+            let v = venue_or_rej(k, &ctx)?;
+            as_table(value, &ctx)?;
+            if seen.contains(&v) {
+                return rej(format!("{ctx}: duplicate venue alias"));
+            }
+            seen.push(v);
+            if !venues.contains(&v) {
+                venues.push(v);
+            }
         }
     }
     venues.sort_by_key(|v| v.0);
@@ -718,17 +730,14 @@ fn parse_caps(root: &Table, m: &mut Model, n: &Names) -> Res<()> {
             .and_then(|(k, x)| Some((k.clone(), x.as_table()?.clone())))
     };
     for v in venues {
-        let base = match (default_caps(v), find(full, v)) {
+        // Complete rows are the stable dump representation. Keep them byte-exact on a
+        // roundtrip; omitted rows use the current linked protocol defaults.
+        let base = match (default_caps(v, &m.assets), find(full, v)) {
+            (_, Some((k, t))) => caps_full(&t, v, n, &format!("caps.{k}"))?,
             (Some(d), None) => d,
-            (None, Some((k, t))) => caps_full(&t, v, n, &format!("caps.{k}"))?,
-            (Some(_), Some((k, _))) => {
-                return rej(format!(
-                    "caps.{k}: the venue's protocol defaults are linked; write only overrides in [venue_caps.{k}]"
-                ));
-            }
             (None, None) => {
                 return rej(format!(
-                    "venue_caps.{}: no default capability row (venue crate not linked) and no [caps] row",
+                    "venue_caps.{}: no protocol defaults or complete caps row",
                     venue_name(v)
                 ));
             }

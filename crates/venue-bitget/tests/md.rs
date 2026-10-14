@@ -513,6 +513,49 @@ fn ticker(sym: &str, next: u64) -> String {
 }
 
 #[test]
+fn bgt_053_snapshot_isolation() {
+    let mut used = FeedCtx::new();
+    for n in 0..10_000 {
+        dec_ctx(
+            &mut used,
+            MdClass::Books1,
+            &b1v3("123456789", "1790000000123", "1790000000125"),
+        )
+        .0
+        .unwrap();
+        dec_ctx(
+            &mut used,
+            MdClass::Ticker,
+            &ticker("BTCUSDT", 1_790_006_400_000 + n * 28_800_000),
+        )
+        .0
+        .unwrap();
+    }
+    let before = used.clone();
+    let mut fresh = FeedCtx::new();
+    let body = include_bytes!("../../../fixtures/bitget-usdt-futures/rest.orderbook/public_bbo.in");
+    let mut a = VecSink::default();
+    let mut b = VecSink::default();
+    Fut::decode_bbo_snapshot(rd(), &mut fresh, &[F_BTC], body, &RX, &mut a).unwrap();
+    Fut::decode_bbo_snapshot(rd(), &mut used, &[F_BTC], body, &RX, &mut b).unwrap();
+    assert_eq!(
+        a.md.iter().map(MdRec::bytes).collect::<Vec<_>>(),
+        b.md.iter().map(MdRec::bytes).collect::<Vec<_>>()
+    );
+    assert_eq!(used, before);
+    let mut control = before;
+    for n in 0..5 {
+        let payload = ticker("BTCUSDT", 1_790_006_400_000 + (10_000 + n) * 28_800_000);
+        let (_, a) = dec_ctx(&mut control, MdClass::Ticker, &payload);
+        let (_, b) = dec_ctx(&mut used, MdClass::Ticker, &payload);
+        assert_eq!(
+            a.iter().map(MdRec::bytes).collect::<Vec<_>>(),
+            b.iter().map(MdRec::bytes).collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
 fn bgt_033_ticker_events() {
     let p = ticker("BTCUSDT", 1_790_006_400_000);
     let (r, md) = dec(MdClass::Ticker, &p);

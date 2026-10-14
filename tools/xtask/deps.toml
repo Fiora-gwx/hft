@@ -333,7 +333,7 @@ dev_tier_ok = true
 tier = "cold"
 deps = [
     "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-strategy-sdk", "crates/hft-risk",
-    "crates/venue-binance", "crates/venue-okx", "crates/venue-bitget", "crates/hft-ctl-proto",
+    "crates/hft-venue-proto", "crates/venue-binance", "crates/venue-okx", "crates/venue-bitget", "crates/hft-ctl-proto",
 ]
 
 [pkg."tools/hostprobe"]

@@ -798,3 +798,5 @@ REST 在途项保存发送时的完整 ClientOrderId；回包省略 epoch 时只
 `SnapFetchTask::new` 接收 rd、两组请求/响应环与时钟,`attach` 在启动期注入公共 REST host/transport。当前 lane 串行一个请求、单 inst,配置 `parallel = 1`;多连接池、合批与 keep-alive 验收仍待完成。HTTP 调用非阻塞,成功或失败都只交付一条记录;环满保留记录,大于 `max_record_bytes` 只写 TooLarge 头。`timeout_ms` 默认 2000、`request_gap_ms` 默认 100、`max_record_bytes` 默认 65536;app 按 snap 环容量的 1/4 覆盖上限。请求消耗 refdata 的 IP/Weight 窗口,不足时保留请求等待。接收戳取 warm 任务观察到完整响应时的 TSC/UTC,不伪造硬件戳。
 
 FeedRuntime 缓存协议是否支持补帧,在宽限期后每 inst 至多一个在途 req_id。成功无序号报价不改变流序号水位,失败再等一个宽限期;流已恢复、请求已失效或成员全失联时丢弃迟到响应。REST 的连接号不更新 WS 活性,原始响应由 feed 单写者写 raw。
+
+账户 warm task 的认证 REST 编码调用 `VenueProtocol::encode_rest_signed`,借用该任务持有的凭证;网关 Templates 不携带密钥。

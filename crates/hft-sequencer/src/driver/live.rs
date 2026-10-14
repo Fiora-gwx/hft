@@ -800,6 +800,18 @@ impl<S: StrategySet, IO: LiveIo<S>> Driver<S> for LiveDriver<S, IO> {
             return self.handed(out, None);
         }
         loop {
+            // Exhausted control quota ends the round before any lower-priority input.
+            // The next round replenishes the quota; non-control quotas remain unchanged.
+            if !self.backpressure
+                && !matches!(self.phase, Phase::A | Phase::Done)
+                && self.io.len(RingId::Ctl) > 0
+            {
+                if self.take_ctl(out) {
+                    return self.handed(out, Some(RingId::Ctl));
+                }
+                self.phase = Phase::Done;
+                return false;
+            }
             match self.phase {
                 Phase::A => {
                     let now = self.io.tsc();

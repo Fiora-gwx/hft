@@ -242,7 +242,16 @@ fn bgt_072_query_rest() {
         Err(EncodeErr::Unsupported(GwOp::Query))
     );
     let mut out = RestReqBuf::default();
-    Fut::encode_rest(rd(), &tpl(), &c, &tgt(cid(FUT, 3, 42, 7)), &WC, &mut out).unwrap();
+    Fut::encode_rest_signed(
+        rd(),
+        &tpl(),
+        &crate::support::key(),
+        &c,
+        &tgt(cid(FUT, 3, 42, 7)),
+        &WC,
+        &mut out,
+    )
+    .unwrap();
     assert_eq!((out.endpoint, out.method, out.redacted), (0, Method::Get, true));
     let pq = std::str::from_utf8(out.path_query.as_slice()).unwrap();
     assert_eq!(pq, "/api/v3/trade/order-info?clientOid=100030a020002a000000078d");
@@ -259,13 +268,30 @@ fn bgt_072_query_rest() {
     let mut demo_cfg = cfg();
     demo_cfg.env = VenueEnv::Testnet;
     let demo = Fut::build_templates(&demo_cfg, rd(), ACCT, &key()).unwrap();
-    Fut::encode_rest(rd(), &demo, &c, &tgt(cid(FUT, 3, 42, 7)), &WC, &mut out).unwrap();
+    Fut::encode_rest_signed(
+        rd(),
+        &demo,
+        &crate::support::key(),
+        &c,
+        &tgt(cid(FUT, 3, 42, 7)),
+        &WC,
+        &mut out,
+    )
+    .unwrap();
     assert!(out.headers.as_slice().ends_with(b"paptrading: 1\r\n"));
     // Spot inst on the perpetual line.
     let mut c2 = c;
     c2.inst = S_BTC;
     assert_eq!(
-        Fut::encode_rest(rd(), &tpl(), &c2, &tgt(cid(FUT, 3, 42, 7)), &WC, &mut out),
+        Fut::encode_rest_signed(
+            rd(),
+            &tpl(),
+            &crate::support::key(),
+            &c2,
+            &tgt(cid(FUT, 3, 42, 7)),
+            &WC,
+            &mut out
+        ),
         Err(EncodeErr::UnknownInst)
     );
 }

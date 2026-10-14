@@ -22,6 +22,12 @@ spec: README.md
 
 CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs::core_120_mock_accounts_bootstrap_reauth_and_drift` 以独立子进程、两家真实协议和脚本 REST 验证撤空、基线、重新核验、超时/错误模式失败与余额差异不覆盖账本；不替代真实 TLS、交易所或正式恢复验收。资金费账单复用 FundingPoll，沿用现有实际结算记账与去重。
 
+## 当前实现验收说明
+
+当前 warm `AccountProtocol` 保证金边界与 i128 对照见 tests/acct.rs 的 BGT-147/148;负权益/不可转换的 USD→USDT 组合仍 fail closed,未覆盖冻结 BGT-147.3 的 Rate::MAX 报告要求。BGT-505 测 warm account_decode 的 50 KiB 持仓响应并包含分配,不声明旧 acct_* 无分配接口达标。BGT-053 用合成行情预热并验证公共 BBO 补帧前后状态不变;完整行情/私有金样仍须带来源的原始样本。
+
+BGT-063 对两份不同凭证构建同值小模板,显式借用凭证签名得到不同请求,旧无凭证入口拒绝。BGT-101 增补跨账户身份、未知/变化的手续费币种、累计金额倒退与同批次原子拒绝;BGT-113 增补非法方向/负量及均价舍入;BGT-114 增补钱包 balance 与 available 不同、永续不重复加冻结、现货只扣一次冻结的断言。BGT-093 增补均价取整与 403/429/5xx 保持 Unknown。
+
 ## 覆盖
 
 | README 小节 | 用例 |

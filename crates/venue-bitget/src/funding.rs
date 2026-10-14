@@ -64,7 +64,7 @@ impl FundingHistoryProtocol for BitgetUsdtFutures {
         *out = RestReqBuf::default();
         out.method = Method::Get;
         out.path_query.push(buf.get(..n).ok_or(ProtoErr::BufFull)?)?;
-        orders::sign_headers(&t, clk, out)
+        orders::sign_headers(&t, cred, clk, out)
     }
 
     fn funding_decode(

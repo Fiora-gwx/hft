@@ -330,7 +330,7 @@ Binance 的测试环境用 **Demo Trading**(演示环境);旧测试网(`testnet.
 Warm 入口支持 OpenOrders、Fills、Balance 与永续 Positions，整页校验后才调用 RoSink；错误页没有部分结果，外来 client id 保持 UNRESOLVED/None，不借用本账户槽。FundingFlow 暂由 `FundingHistoryProtocol` 的固定窗口接口承载，`ro_request(FundingFlow)` 返回 Unsupported。合成响应仅证明本地映射，真实接口权限与分页仍须测试网验证。
 
 
-`ro_request`/`ro_decode` 的实现([契约 31](../hft-venue-proto/README.md#实现方必须遵守的契约));reconciler 以只读 HMAC key 构建 `Templates` 调用,gw 不用(`CANCEL_ALL_SWEEP = false`)。签名同"账户配置核验";成交分页按 [官方 USD-M 文档](https://developers.binance.com/docs/derivatives/usds-margined-futures/trade/rest-api/Account-Trade-List) 与 [Spot 文档](https://developers.binance.com/docs/binance-spot-api-docs/rest-api/account-endpoints) 生成请求。第一页用 startTime，后续只用 fromId；满页游标取最大 id + 1，空页终止。
+`ro_request_signed`/`ro_decode` 的实现([契约 31](../hft-venue-proto/README.md#实现方必须遵守的契约));reconciler 以只读 HMAC key 构建 `Templates` 调用,gw 不用(`CANCEL_ALL_SWEEP = false`)。签名同"账户配置核验";成交分页按 [官方 USD-M 文档](https://developers.binance.com/docs/derivatives/usds-margined-futures/trade/rest-api/Account-Trade-List) 与 [Spot 文档](https://developers.binance.com/docs/binance-spot-api-docs/rest-api/account-endpoints) 生成请求。第一页用 startTime，后续只用 fromId；满页游标取最大 id + 1，空页终止。
 
 | `RoKind` | `Usdm` | `Spot` | 字段映射 |
 |---|---|---|---|
@@ -506,7 +506,13 @@ pub mod mock {
 - 评审证据(资金费按币归属、强平识别、账户模式核验):[review-2026-10-02](../../design/_work/review-2026-10-02-主策略适配与执行正确性.md);范围:[round8-decisions](../../design/_work/round8-decisions.md)
 - 现有知识来源:`E:\trading\Trading\crates\binance`(depth 同步、`/market` 路由)、`E:\trading\Trading\apps\collector\src\private.rs`(listenKey、私有对账端点)、旧套利引擎 Rust 交易模块 `cex-arb/src/exchange/bn_futures.rs`(位于 `E:\trading\Trading\` 下;logon 签名串、`positionRisk`)
 
+成交的单笔量不能超过累计量;零手续费允许缺少手续费币种,非零手续费必须能映射到 refdata,零手续费不触发 fee_rule_deviation。warm 保证金查询拒绝负维持保证金;权益非正仍报告 Rate::MAX。UID 同时接受数字与字符串,Verified 要求匹配;Unverifiable 只豁免缺失,实际返回的 UID 保留给运行时核对两把 key。
+
 ### 测试环境 warm 账户入口
+
+`Templates` 仅保存账户与非敏感帧配置。warm REST/只读请求使用 `*_signed` 入口,每次从调用方借用凭证;旧无凭证入口不发认证请求。运行时全撤经 warm account task 签名,热 gw 不持有 REST key。
+
+当前执行接口是 `AccountProtocol::{account_request, account_decode}` 与独立 `State`,允许 warm 分配;冻结的 `acct_queries/acct_decode/acct_finish` 分步接口仍待统一,不把其无分配、完整配置序列或 ADL 缓存用例视为完成。50 KiB 持仓基准测量当前 warm 解码(包括分配),不作为旧无分配入口的达标证据。
 
 USDM 的 `encode_rest(CancelAll)` 按合约生成签名 DELETE，全账户 inst=0 返回 Unsupported，供运行时逐合约展开。REST code=200 只确认请求；不生成逐单取消回报。403/429/5xx 与业务错误保留结果未知，限速/时钟偏差另发连接提示。`dead_man_refresh` 按 inst 生成签名 POST；确认的 countdownTime 接受官方字符串及数字形式，值与请求必须相等。
 
