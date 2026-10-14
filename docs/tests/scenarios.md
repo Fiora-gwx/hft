@@ -1902,7 +1902,7 @@ DST 与集成用例默认在 W1 上运行;用例只写与 W1 不同的设定。v
 - 种子:标准集(§2.4)
 - 断言:t = 1 s 那条 Input 内第一腿 `OrderDecision{reject = LINK_FUNDS}`,无出环帧;此后 1 s 内无该 group 的成交
 - 实现:`crates/hft-sequencer/tests/scenarios.rs::lk_2_unaffordable_second_leg_rejects_open`
-- 备注:LK-2.4–2.7;主例与 LK-2.1–2.3 见 `lk_2_spot_…`;实现方式:先以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,阈值取 B0 参数,见该文件头;W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补
+- 备注:LK-2.4–2.7;主例的现货第二腿与 LK-2.1–2.3 见同文件 `lk_2_1_spot_…`;实现方式:先以真实 sequencer 的确定性步骤序列在 hft-sequencer B0 夹具上实现,映射 A≙`VS`、B≙`VP`、a1≙`S1`、b1≙`P1`、账户 1/2≙`a`/`b`,阈值取 B0 参数,见该文件头;W1 种子化 DST 版本待测试策略能发出 S1 买入第一腿后补
 
 | 行 | 相对主例的变化 | 断言 |
 |---|---|---|

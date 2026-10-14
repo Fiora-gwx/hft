@@ -172,7 +172,7 @@ DST 场景写 `故障`(何时注入什么)、`种子` 与 `断言`;`步骤` 选�
 
 ## 6. 与代码的对应
 
-- 测试函数名以用例编号开头:`<前缀小写>_<三位数>_<描述>`,如 `oms_014_linked_notfound_waits_history`。Python(pytest)的测试函数必须以 `test_` 开头,写作 `test_<前缀小写>_<三位数>_<描述>`。表驱动用例的每行用 `rstest` 的 `#[case::<前缀小写>_<三位数>_<行号>]` 或在循环断言信息中带行号;属性测试的 `proptest!` 函数同名规则;DST 场景以编号注册(`Scenario::new("OMS-201", …)`);金样目录名含编号;基准的 Criterion id 等于 `基准名`;`host`/`testnet`/`drill` 用例的脚本放 `tests/host/<编号>.sh` 或指向 runbook 步骤,证据文件名含编号。
+- 测试函数名以用例编号开头:`<前缀小写>_<三位数>_<描述>`,如 `oms_014_linked_notfound_waits_history`;跨组件场景编号(`B1`、`B-6`、`BK-1`、`MS-2a` 等)取编号小写、`-` 换成 `_` 作前缀:`<编号小写>_<描述>`,如 `b1_link_open_…`、`b_6_venue_…`、`bk_1_…`,`<描述>` 不以数字开头(`b1_6_…` 是表行 B1.6,不算 B1;`b_10_…` 是 B-10,不算 B-1)。Python(pytest)的测试函数必须以 `test_` 开头,写作 `test_<前缀小写>_<三位数>_<描述>`。表驱动用例的每行用 `rstest` 的 `#[case::<前缀小写>_<三位数>_<行号>]` 或在循环断言信息中带行号;属性测试的 `proptest!` 函数同名规则;DST 场景以编号注册(`Scenario::new("OMS-201", …)`);金样目录名含编号;基准的 Criterion id 等于 `基准名`;`host`/`testnet`/`drill` 用例的脚本放 `tests/host/<编号>.sh` 或指向 runbook 步骤,证据文件名含编号。
 - `实现` 字段写 `<路径>::<函数名>`;尚未实现的写 `待实现`。
 - **追溯检查** `cargo xtask test-trace`(CI `ci.yml` 的文档作业,每个 PR):
   1. 解析全仓 `TESTS.md` 与 `docs/tests/*.md`(本页除外);xtask 测试的夹具仓库 `tools/xtask/tests/fixtures/` 既不读其规格也不扫其代码;

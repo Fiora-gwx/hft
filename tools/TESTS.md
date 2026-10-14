@@ -692,7 +692,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 - 规则:[cargo xtask replay-verify](README.md#cargo-xtask-replay-verify)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:样本中 `Keyframe` 快照头 `state_hash = 0`;其后的普通快照头带非 0 哈希
 - 步骤:
   1. 运行 `cargo xtask replay-verify <样本>`
@@ -1842,7 +1842,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 - 规则:[hft-cfg](README.md#hft-cfg)
 - 级别:integ
-- 里程碑:M2
+- 里程碑:M9
 - 前置:`fixtures/params/*.toml` 全部金样;hft-py 包装的 SDK `params` 编码器;同一 schema 与 refdata
 - 步骤:
   1. 对每个金样运行 `hft-cfg build --kind strategy …`

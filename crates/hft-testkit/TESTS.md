@@ -571,7 +571,7 @@ spec: README.md
 
 - 规则:[5. 解耦门槛夹具](README.md#5-解耦门槛夹具)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:`cargo xtask new-strategy ci-probe --kind-id 0xFF10 --with-model --with-pipeline` 生成到临时目录
 - 步骤:
   1. 构建生成物并读取其 `Model::mem_bytes`(1 个 group)
@@ -1259,7 +1259,7 @@ spec: README.md
 
 - 规则:[5. 解耦门槛夹具](README.md#5-解耦门槛夹具)
 - 级别:unit
-- 里程碑:M2
+- 里程碑:M9
 - 前置:两组装配参数 A = `ProbeBuild{build_git = "aaaa", desc_version = 3, model_layout_version = 1, model_path_version = 1, model_mem_bytes = 2 MiB, model_ckpt_bytes = 64 KiB}`,B 与 A 只差 `build_git = "bbbb"`、`desc_version = 4`、`model_layout_version = 2`
 - 步骤:
   1. 以 A 跑 1 000 步并写一份 Model 检查点
