@@ -200,8 +200,9 @@ jobs:
         if: hashFiles('apps/hft-core/Cargo.toml') != ''
         shell: bash
         run: |
-          bin=target/aarch64-unknown-linux-gnu/release-hot/hft-core
-          [[ -x $bin ]] || bin=target/aarch64-unknown-linux-gnu/release/hft-core
+          profile=release
+          [[ $CHANNEL != release ]] || profile=release-hot
+          bin=target/aarch64-unknown-linux-gnu/$profile/hft-core
           cargo build --locked --profile ci --target aarch64-unknown-linux-gnu -p hft-core --example paper_config
           target/aarch64-unknown-linux-gnu/ci/examples/paper_config "$RUNNER_TEMP/check-config" /dev/shm/hft-check
           "$bin" --config "$RUNNER_TEMP/check-config/core.toml" --dry-run --check
@@ -209,8 +210,9 @@ jobs:
         if: hashFiles('apps/hft-core/Cargo.toml') != ''
         shell: bash
         run: |
-          bin=target/aarch64-unknown-linux-gnu/release-hot/hft-core
-          [[ -x $bin ]] || bin=target/aarch64-unknown-linux-gnu/release/hft-core
+          profile=release
+          [[ $CHANNEL != release ]] || profile=release-hot
+          bin=target/aarch64-unknown-linux-gnu/$profile/hft-core
           mkdir -p dist/schemas/strategies
           "$bin" schemas --out dist/schemas/strategies
           diff -r fixtures/strategy-schemas dist/schemas/strategies
