@@ -32,7 +32,7 @@ hft-ctl / hft-telemetry / hft-sim / hft-py / hft-testkit → 按需(各 README �
 hft-ctl 的真实引擎 E2E 测试 dev 依赖:hft-sequencer + hft-oms + hft-ledger + hft-exec
 optional 链上:hft-ext-proto → L0 ;  hft-amm → hft-types ;  hft-chain-evm → 以其 README 依赖节为准
 strategies/<name> → hft-strategy-sdk + hft-strat-lib(细则见 strategies/AGENTS.md)
-strategies/registry(hft-strategy-registry)→ 各 strategies/<name>(唯一策略清单;被 apps/hft-core、apps/replayer 依赖)
+strategies/registry(hft-strategy-registry)→ 各 strategies/<name>(唯一策略清单;被 apps/hft-core、apps/replayer 依赖);dev: hft-ctl + hft-ctl-proto
 ```
 
 - `apps/hft-core` 依赖 `hft-venue-proto` 作泛型协议装配；其 dev 依赖 `hft-testkit` + `hft-ctl-proto`。

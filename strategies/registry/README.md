@@ -93,6 +93,8 @@ pub fn export_schemas() -> Vec<(String, String)>;
 
 用例与验收见 [TESTS.md](TESTS.md)。
 
+`REG-013` 使用同一单腿 quote 参数分别驱动正式 Live、测试网 Live 与 Sim 账户。ctl-gateway 和 sequencer 均检查正式账户限制；正式账户没有策略创建或参数回调，另外两类经真实命令路径生效。
+
 ## 依赖
 
 - 内部:`hft-strategy-sdk`;列表中的每个 `strategies/*` crate(optional 的经 Cargo feature)。`[dev-dependencies]`:hft-testkit 与它驱动的引擎 crate(只用于 `tests/`)。

@@ -248,6 +248,7 @@ dev = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event"]
 tier = "hot"
 deps = ["crates/hft-strategy-sdk", "strategies/*"]
 dev = [
+    "crates/hft-ctl", "crates/hft-ctl-proto", # REG-013: real gateway + sequencer validation
     "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-strat-lib", "crates/hft-book",
     "crates/hft-oms", "crates/hft-risk", "crates/hft-ledger", "crates/hft-exec", "crates/hft-sequencer",
     "crates/hft-sim", "crates/hft-journal", "crates/hft-rt",

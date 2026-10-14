@@ -972,7 +972,10 @@ dependencies = [
 name = "hft-strategy-registry"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "cross-taker",
+ "hft-ctl",
+ "hft-ctl-proto",
  "hft-event",
  "hft-ledger",
  "hft-refdata",
