@@ -1,0 +1,26 @@
+[package]
+name = "portfolio-carry"
+description = "Funding differential carry with bounded, linked delta-neutral legs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+hft-strategy-sdk.workspace = true
+hft-strat-lib.workspace = true
+
+[dev-dependencies]
+hft-strategy-sdk = { workspace = true, features = ["testing", "schema-json"] }
+hft-refdata.workspace = true
+hft-types.workspace = true
+hft-event.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "on_event"
+harness = false

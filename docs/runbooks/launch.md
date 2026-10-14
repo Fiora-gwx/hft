@@ -54,7 +54,7 @@ scope: core
 12. **压力用例**:按 [hft-sim 压力用例](../../crates/hft-sim/README.md) 以最终参数运行:门槛项"零强平"与必过的 L3 路径变体(依次出现 L1/L2/L3 且无强平),其余变体只记录;交易 inst 的分档 MMR 必须在 refdata 中,缺失时用例拒绝运行(用例清单归 testing §8 与 hft-sim)。参数在 ⑦ 期间的改动超出 schema 字段属性 `FieldDesc.minor_change` 允许的范围时,压力用例重跑。
 13. **演练**(在模拟账户上):`/simtransfer` 演练一次跨所划转;把永续所的保证金划走以拉近强平距离,观察 MarginStress 三档(按 `liq_dist`,[hft-risk](../../crates/hft-risk/README.md))的行为与 `/treasury` 建议;演练后 `/simreset` 恢复初始余额(前置条件归 [control-plane `SimReset`](../subsystems/control-plane.md))。用例:DRL-20、DRL-21;L3 期间现货报价不可用的串行兜底:DRL-22。
 14. **Broken 自动平仓**(演练):在 dev2 `sim` 实例的一个模拟账户上,Admin 经 `cli:<login>` 发控制面命令 [`SimFault`](../subsystems/control-plane.md#命令集)`{account = <模拟账户>, venue = <第二腿所在 venue>, fault = RejectNew}`(受控故障注入,sim-gw 侧语义归 [hft-sim](../../crates/hft-sim/README.md);只对 Sim 账户生效,prod 实例拒绝)让该 venue 的 sim-gw 拒单,等第一腿成交、第二腿重试耗尽进入 `Broken` 后发同一命令 `fault = Off` 撤销注入,按 [incident-response A](incident-response.md#a-裸敞口nakedexposure断腿broken) 处置并记录(DRL-12:group 进入 `Broken`、账户 `HedgeFailure` cap 生效,无人干预 `broken_auto_fix_ms` 后出现一次 `Note{ExecAutoFixDone}` 或 `Note{ExecAutoFixFailed}`)。A–C 期间自然出现的 `Broken` 同样按 incident-response A 处置并记录。
-15. **演练退出命令**(命令名与语义归 [portfolio-carry](../../strategies/portfolio-carry/README.md)):对一个有仓位的 group 发 `/cmd <模拟实例> <模拟账户> <group> exit`(`reduce_only`,不需确认),期望该 group 目标设为 0、`reason = Exit`、不受成本门约束;再用 `/params <模拟实例> set force_exit <group> true` 做一次;最后对实例发 `/cmd <模拟实例> <模拟账户> none exit_all`,期望全部 group 退出。用例:DRL-23。
+15. **演练退出控制**(语义归 [portfolio-carry](../../strategies/portfolio-carry/README.md#策略命令)):对一个有仓位的 group 设置 `enabled=false`,期望两腿零目标、`reason=Exit`;再禁用实例内全部 group,期望全部退出。用例:DRL-23;当前 schema 不提供私有 `exit/exit_all` 命令。
 16. **ops_bot 工作流**(⑪):老板以 Viewer 走完只读面板并在模拟账户上做一次 `/stop`,交易员恢复;记录进 [ops_bot 验收](../../python/ops_bot/README.md#测试与验收)。用例:DRL-24。
 
 ### C. 统一升级主机(M7)
@@ -126,7 +126,7 @@ scope: core
 
 ## 回退
 
-- **实例级**(只停这个实例):`/mode <实例> <a> closeonly`(降级,立即,不需确认)= 禁止开新仓,持仓的处理按策略规则(portfolio-carry 在 CloseOnly 下持有、不强制退出,规则归其 README);需要退出时用策略命令——单个 group `exit`(`reduce_only`)或 `/params … set force_exit <group> true`,全部 group 用实例级 `exit_all`;需要立即平仓时 `/kill account <a> flatten`(Trader + 确认;对 `Broken` 的 group 同样生效,先减永续腿;该账户同时置清仓锁,直到 `/resume kill <a>` 只接受更接近 0 的目标,规则归 [hft-exec](../../crates/hft-exec/README.md))。仓位归零后可 `/mode … shadow`。
+- **实例级**(只停这个实例):`/mode <实例> <a> closeonly`(降级,立即,不需确认)= 禁止开新仓,持仓的处理按策略规则(portfolio-carry 在 CloseOnly 下退出,规则归其 README);需要持续禁止重入时对相应 group 设置 `enabled=false`;需要立即平仓时 `/kill account <a> flatten`(Trader + 确认;对 `Broken` 的 group 同样生效,先减永续腿;该账户同时置清仓锁,直到 `/resume kill <a>` 只接受更接近 0 的目标,规则归 [hft-exec](../../crates/hft-exec/README.md))。仓位归零后可 `/mode … shadow`。
 - **老板紧急停止**:老板(Viewer)发现异常可 `/stop <a>` 或 `/stop`(停开仓、撤挂单,对冲与平仓继续,带确认);ctl-gateway 不可达时 ops_bot 改经 kill-switch 撤单并停止 hft-core(`stop_core`)并 P0;之后由值班交易员按 [incident-response R](incident-response.md#r-老板紧急停止stop之后) 接手,恢复只能由交易员做。
 - **系统级**(版本或主机问题):`/shutdown`(`Drain`,降级,不需确认;等待条件归 [hft-sequencer](../../crates/hft-sequencer/README.md),含未完成的 MarginStress/Hard 引擎减仓,满足后写快照退出);回滚版本按 [release-and-deploy 回退](release-and-deploy.md#回退)。
 - **紧急**:按 [incident-response](incident-response.md) 的"通用首五分钟";疑似 key 泄露按 K 节,先在交易所禁用 key,再 `/kill account <a> hard`;交易主机失联按 S 节。

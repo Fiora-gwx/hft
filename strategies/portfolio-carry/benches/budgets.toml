@@ -1,0 +1,4 @@
+# Provisional reference-host acceptance budget; CI smoke is report-only.
+["strategies/portfolio-carry/hold"]
+p50_ns = 60
+p99_ns = 150

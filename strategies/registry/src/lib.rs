@@ -20,6 +20,7 @@ hft_strategy_sdk::strategy_set! {
     pub struct Strategies {
         #[cfg(feature = "cross-taker")] cross_taker::CrossTaker,
         latency_probe::LatencyProbe,
+        portfolio_carry::PortfolioCarry,
     }
 }
 
