@@ -77,6 +77,39 @@ fn connect_now() -> ScriptIo {
     }
 }
 
+#[test]
+fn net_208_reconnect_backoff_is_bounded_and_isolated() {
+    let mut cfg = script_cfg();
+    cfg.reconnect_backoff_ms = (100, 250);
+    cfg.endpoints[1] = cfg.endpoints[0].clone();
+    let mut c = script_connector(&cfg, &[(ConnRole::Md, 2)]);
+    let mut now = T0;
+    c.push_script(ScriptIo {
+        connect: 111,
+        ..ScriptIo::new()
+    });
+    c.submit(sreq(1, ConnRole::Md, i64::MAX)).unwrap();
+    assert!(matches!(c.drive(now), Some(BuildEvent::Failed { .. })));
+    for delay in [100_000_000, 200_000_000, 250_000_000] {
+        c.push_script(ScriptIo {
+            connect: 111,
+            ..ScriptIo::new()
+        });
+        c.submit(sreq(1, ConnRole::Md, i64::MAX)).unwrap();
+        assert_eq!(c.drive(now + delay - 1), None);
+        now += delay;
+        assert!(matches!(c.drive(now), Some(BuildEvent::Failed { .. })));
+    }
+    c.push_script(ScriptIo {
+        connect: 111,
+        ..ScriptIo::new()
+    });
+    let mut other = sreq(2, ConnRole::Md, i64::MAX);
+    other.endpoint = EndpointId(1);
+    c.submit(other).unwrap();
+    assert!(matches!(c.drive(now), Some(BuildEvent::Failed { .. })));
+}
+
 /// Moves the client's bytes to the server and the server's answer back into the script.
 fn exchange(c: &mut Connector, job: hft_net::JobId, peer: &mut MemPeer) {
     let out = c.script(job).unwrap().take_sent();

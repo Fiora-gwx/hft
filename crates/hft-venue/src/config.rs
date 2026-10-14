@@ -253,6 +253,10 @@ pub struct SnapCfg {
     pub parallel: u8,
     pub rest_idle_check_ms: u32,
     pub rotate_margin_s: u32,
+    pub timeout_ms: u32,
+    pub request_gap_ms: u32,
+    /// No greater than one quarter of the output byte-ring capacity.
+    pub max_record_bytes: u32,
 }
 
 impl Default for SnapCfg {
@@ -261,6 +265,9 @@ impl Default for SnapCfg {
             parallel: 2,
             rest_idle_check_ms: 1000,
             rotate_margin_s: 3600,
+            timeout_ms: 2000,
+            request_gap_ms: 100,
+            max_record_bytes: 65536,
         }
     }
 }

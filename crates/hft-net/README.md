@@ -344,6 +344,7 @@ impl TxTsDrain {
 | `tcp_user_timeout_ms` | u32 | 5000 | 未确认数据超时即 `RESET` |
 | `quickack_after_read` | `{md, order}` | `{false, false}` | 有数据的读之后补 `TCP_QUICKACK`(额外一次 setsockopt;不在 [hot-path-rules T7](../../docs/hot-path-rules.md) 允许表内,A/B 证明有收益并更新该表后才可打开) |
 | `connect_timeout_ms` / `tls_timeout_ms` / `upgrade_timeout_ms` | u32 | 3000 each | `Connector` 各阶段超时 |
+| `reconnect_backoff_ms` | `(u32,u32)` | `(100, 30000)` | WS 建连/登录失败后按端点与源 IP 指数退避,成功交接清零;0 或倒置范围拒绝加载;NET-208 |
 | `rotate_stagger_s` | u32 | 3600 | 同池两条连接的计划轮换时刻至少错开 |
 | `warm_interval_ns` | u64 | 0(关) | `warm` 最小调用间隔;scratch TLS 预热是可选项,默认关 |
 | `rest_timeout_ms` | u32 | 2000 | REST 请求超时 → `RestErr::Timeout` |
@@ -591,3 +592,5 @@ HTTP/1.1 over 同一 `Conn`(`ConnRole::Rest`,无 WS)。请求在 tx 明文 scrat
 **开放问题**:QUICKACK 对下单连接的收益需 A/B(额外一次系统调用 ≈ 0.2–0.5 µs);有收益才打开并同步更新 hot-path-rules T7 的允许表。
 
 </details>
+
+连接失败与 warm 登录取消均回收作业与 arena 槽。相同 endpoint/src_ip 的后续 WS 作业等待 `reconnect_backoff_ms` 的指数退避,等待期间不连接、不消费脚本输入,其他端点可继续。调用者的 deadline 仍优先;REST 传输不自动重试,防止重发结果未知的修改请求。

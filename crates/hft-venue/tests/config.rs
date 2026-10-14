@@ -8,8 +8,8 @@
 use crate::support;
 
 use hft_net::ConnId;
+use hft_rt::Backing;
 use hft_rt::IdlePolicy;
-use hft_rt::{Backing, spsc};
 use hft_venue::{
     DepthMode, FeedCfg, FeedRoutes, GwCfg, InitErr, RawMode, ReadyPollMode, SnapCfg, SnapDeps, SnapFetchTask,
     ready_poll_on, streams,
@@ -108,17 +108,11 @@ fn feed_err(cfg: FeedCfg) -> Result<(), InitErr> {
 }
 
 fn snap_err(cfg: SnapCfg) -> Result<(), InitErr> {
-    let (_, rx) = spsc(64, Backing::Heap).unwrap();
-    let (rp, _) = spsc(64, Backing::Heap).unwrap();
-    let (bp, _) = spsc(64, Backing::Heap).unwrap();
     let (op, _) = hft_rt::byte_spsc(1 << 18, Backing::Heap).unwrap();
     let deps = SnapDeps {
         rd: rd_stub(),
         reqs: [None, None],
         out: [Some(op), None],
-        handoff: rx,
-        retire: rp,
-        build: bp,
         clock: clock(),
     };
     SnapFetchTask::<StubProto>::new(cfg, deps, ()).map(|_| ())

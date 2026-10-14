@@ -16,6 +16,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 | README 小节 | 用例 |
 |---|---|
+| 当前 BBO 补帧传输 | VEN-130、VEN-132、VEN-133、VEN-155 |
 | 测试环境账户启动与观察 | VEN-261、VEN-310 |
 | 资金费账单轮询 | VEN-258 |
 | 概要 | VEN-014、VEN-020、VEN-021、VEN-241、VEN-389 |
@@ -1393,7 +1394,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`F0`,`routes = Bbo`,`feed.bbo_refresh_grace_ms = 500`,`StubCfg{bbo_snapshot: true}`;S1 进入补帧,回执齐的时刻 `t_a = 10⁹`;对端不推 S1 的报价;每行在所列时刻 `poll_once`
-- 实现:`crates/hft-venue/tests/bbo_live.rs::ven_130_grace_then_snapreq`
+- 实现:`crates/hft-venue/tests/bbo_live.rs::ven_130_refresh_grace_sends_once`
 
 | 行 | `now` | 期望 |
 |---|---|---|
@@ -1419,7 +1420,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`F0`,`routes = Bbo`;S1 的 `last_fwd[BBO] = 300`;每行独立
-- 实现:`crates/hft-venue/tests/bbo_live.rs::ven_132_snap_bbo_rules`
+- 实现:`crates/hft-venue/tests/bbo_live.rs::ven_132_snapshot_cannot_overwrite_recovered_stream`
 
 | 行 | S1 状态 / snap 记录中的 `Bbo.update_id` | 期望 |
 |---|---|---|
@@ -1438,7 +1439,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `poll_once` 于 `t_f + 499 999 999` 与 `t_f + 500 000 000`
 - 期望:
   - 第一次无新 `SnapReq`;第二次一条 `SnapReq{Bbo, S1, attempt: 1}`;失败记录的原始体写进本任务 raw(`RestResponse`)
-- 实现:`crates/hft-venue/tests/bbo_live.rs::ven_133_refresh_retry`
+- 实现:`crates/hft-venue/tests/bbo_live.rs::ven_133_snapshot_failure_waits_new_grace`
 
 ### VEN-134 深度、成交与标记价连接的 Pong 在 md 环产出 `Alive`
 
@@ -1522,7 +1523,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 级别:table
 - 里程碑:M3
 - 前置:`S0`,hft-net `rest_timeout_ms = 2000`;每行一条 `SnapReq{Bbo, S1}`
-- 实现:`crates/hft-venue/tests/snap_fetch.rs::ven_155_failure_status`
+- 实现:`crates/hft-venue/tests/snapshot.rs::ven_155_snapshot_success_and_failures`
 
 | 行 | 响应 | 期望记录 |
 |---|---|---|
@@ -2237,6 +2238,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   - 步骤 2:第一条 `Written`(used 9 → 10),第二条 `RateLimited`
   - 步骤 3:观测按占用比例折算到本地上限(⌈2147 × 10 / 200000⌉ = 1),两条都 `Written`(M1.5 探针上未折算时日订单数 2147 被当成 10 s 计数,撤单全部 `RateLimited`)
 - 实现:`crates/hft-venue/tests/gw_report.rs::ven_224_rate_obs_correction`
+
+- 多窗口/Uid/延迟观测回归:`crates/hft-venue/tests/rate.rs::ven_224_uid_and_multiple_windows`;所有窗口同时扣额度,延迟观测不得降低已记计数。
 
 ### VEN-225 回报给出的提示立即排一次账户查询
 

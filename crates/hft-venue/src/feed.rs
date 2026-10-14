@@ -16,6 +16,7 @@ use hft_venue_proto::{
     ControlHint, DecodeErr, MsgOp, PingKind, RouteId, RouteKind, RouteSpec, RxMeta, StreamKind, SubFrames,
     SubSpec, VenueProtocol,
 };
+use zerocopy::FromBytes;
 
 use crate::codes;
 use crate::config::{DepthMode, FeedCfg, FeedRoutes, InitErr, RawMode, Ticks};
@@ -24,7 +25,7 @@ use crate::hb::{Hb, HbSend};
 use crate::raw::{Effect, RawCounters, RawLog, what};
 use crate::seq::{InstSeq, Verdict, judge, slot_of};
 use crate::sink::FeedSink;
-use crate::snap::SnapReq;
+use crate::snap::{SnapRecHdr, SnapReq};
 use crate::{FEEDCMD_PER_POLL, FRAME_EVENTS_MAX, Handover, LoopStat, min_deadline, streams};
 
 /// Rings, journal and clock of one feed task (README "运行时入口").
@@ -78,6 +79,8 @@ pub struct FeedCounters {
     pub status_lost: u64,
     pub sub_queue_full: u64,
     pub install_failed: u64,
+    pub snapshot_stale: u64,
+    pub snapshot_failed: u64,
 }
 
 const NONE8: u8 = u8::MAX;
@@ -103,6 +106,9 @@ struct Inst {
     /// BBO slots where the subscription is answered (member).
     members: u8,
     refresh: u8,
+    refresh_due: u64,
+    refresh_req: u32,
+    refresh_attempt: u16,
     /// Per-task subscription ids (`RawHdr.stream`): BBO, depth, md.
     sub_id: [u32; 3],
     sample_tsc: u64,
@@ -198,7 +204,9 @@ pub struct FeedRuntime<P: VenueProtocol> {
     md_ids: IdRange,
     cmds: Consumer<FeedCmd>,
     /// BBO refresh requests (sent from M3 on, with snap-fetch).
-    _snapreq: Option<Producer<SnapReq>>,
+    snapreq: Option<Producer<SnapReq>>,
+    snapshot_supported: bool,
+    next_snapshot: u32,
     snap: Option<ByteConsumer>,
     ready: Option<ReadyPoll>,
     ready_set: ConnSet,
@@ -514,6 +522,7 @@ impl<P: VenueProtocol> St<P> {
                         && s.refresh == REFRESH_ACTIVE
                     {
                         s.refresh = REFRESH_NONE;
+                        s.refresh_req = 0;
                     }
                 }
                 if depth
@@ -602,6 +611,10 @@ impl<P: VenueProtocol> St<P> {
                     s.members |= 1u8 << m.id.0;
                     if s.refresh == REFRESH_NEEDED {
                         s.refresh = REFRESH_ACTIVE;
+                        s.refresh_due =
+                            rx.saturating_add(self.t.ms(u64::from(self.cfg.bbo_refresh_grace_ms)));
+                        s.refresh_req = 0;
+                        s.refresh_attempt = 0;
                         refresh = true;
                     }
                 }
@@ -699,6 +712,9 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                 md_group: NONE8,
                 members: 0,
                 refresh: REFRESH_NONE,
+                refresh_due: 0,
+                refresh_req: 0,
+                refresh_attempt: 0,
                 sub_id: [0; 3],
                 sample_tsc: 0,
             })
@@ -746,6 +762,14 @@ impl<P: VenueProtocol> FeedRuntime<P> {
         conns.resize_with(64, || None);
         let mut building = Vec::with_capacity(64);
         building.resize_with(64, || None);
+        let snapshot_supported = deps.rd.insts_of_venue(P::VENUE).first().is_some_and(|inst| {
+            P::bbo_snapshot_request(
+                deps.rd,
+                &st.ctx,
+                &[*inst],
+                &mut hft_venue_proto::RestReqBuf::default(),
+            ) == Ok(true)
+        });
         Ok(FeedRuntime {
             st,
             conns,
@@ -753,7 +777,9 @@ impl<P: VenueProtocol> FeedRuntime<P> {
             slots: BboSlots::default(),
             md_ids: IdRange::new(MD_FIRST, MD_LAST),
             cmds: deps.cmds,
-            _snapreq: deps.snapreq,
+            snapshot_supported,
+            next_snapshot: 1,
+            snapreq: deps.snapreq,
             snap: deps.snap,
             ready: deps.ready,
             ready_set: ConnSet::default(),
@@ -794,6 +820,7 @@ impl<P: VenueProtocol> FeedRuntime<P> {
         let (frames, full) = self.read_all(now, probing);
         ls.frames = frames;
         ls.ring_full = full;
+        ls.did_work |= self.snapshots(now);
         // 7./8. errors, liveness, heartbeats, subscriptions, builds.
         let maint = self.maintain(now);
         ls.did_work |= frames > 0 || ls.cmds > 0 || maint;
@@ -817,6 +844,94 @@ impl<P: VenueProtocol> FeedRuntime<P> {
             }
             self.retire_pend.pop_front();
         }
+    }
+
+    /// Stream quotes win over delayed REST responses. A REST quote never proves WS liveness.
+    fn snapshots(&mut self, now: u64) -> bool {
+        let mut did = false;
+        let grace = self.st.t.ms(u64::from(self.st.cfg.bbo_refresh_grace_ms));
+        if self.st.pend_bbo.is_empty()
+            && self.st.bbo.as_ref().is_some_and(|r| r.free_hint() > 0)
+            && let Some(ring) = &mut self.snap
+            && let Some(bytes) = ring.peek()
+        {
+            if let Ok((h, tail)) = SnapRecHdr::read_from_prefix(bytes) {
+                if let Some(raw) = tail.get(..h.body_len as usize) {
+                    self.st.raw.rx(
+                        h.conn,
+                        what::REST_RESPONSE,
+                        0,
+                        h.req_id,
+                        0,
+                        hft_net::TsFlags::SW,
+                        raw,
+                        h.rx_tsc,
+                    );
+                }
+                let ix = self.st.local(h.inst);
+                if let Some(ix) = ix
+                    && self.st.insts.get(ix).is_some_and(|s| {
+                        s.refresh == REFRESH_ACTIVE && s.refresh_req == h.req_id && s.members != 0
+                    })
+                {
+                    let quote = tail
+                        .get(h.body_len as usize..)
+                        .and_then(|b| hft_event::Bbo::read_from_bytes(b).ok());
+                    let last = self.st.seqs[ix].last_fwd[slot_of(StreamKind::Bbo)];
+                    if h.status == SnapRecHdr::OK
+                        && let Some(e) = quote
+                        && e.h.inst == h.inst
+                        && e.h.venue == P::VENUE
+                        && (e.update_id == 0 || e.update_id >= last)
+                    {
+                        use hft_venue_proto::MdSink;
+                        self.st.sink.begin(1);
+                        self.st.sink.bbo(&e);
+                        self.st.publish();
+                        if e.update_id != 0 {
+                            self.st.seqs[ix].last_fwd[slot_of(StreamKind::Bbo)] = e.update_id;
+                        }
+                        self.st.insts[ix].refresh = REFRESH_NONE;
+                    } else {
+                        self.st.n.snapshot_failed += 1;
+                        self.st.insts[ix].refresh_due = now.saturating_add(grace);
+                    }
+                    self.st.insts[ix].refresh_req = 0;
+                } else {
+                    self.st.n.snapshot_stale += 1;
+                }
+            } else {
+                self.st.n.snapshot_failed += 1;
+            }
+            ring.advance();
+            did = true;
+        }
+        if self.snapshot_supported
+            && let Some(out) = &mut self.snapreq
+        {
+            for s in &mut self.st.insts {
+                if s.refresh != REFRESH_ACTIVE || s.members == 0 || s.refresh_req != 0 || now < s.refresh_due
+                {
+                    continue;
+                }
+                let req = SnapReq {
+                    kind: SnapReq::BBO,
+                    _pad: 0,
+                    attempt: s.refresh_attempt,
+                    inst: s.id,
+                    req_id: self.next_snapshot,
+                    _pad2: 0,
+                };
+                if out.try_push(req).is_err() {
+                    break;
+                }
+                s.refresh_req = self.next_snapshot;
+                s.refresh_attempt = s.refresh_attempt.saturating_add(1);
+                self.next_snapshot = self.next_snapshot.wrapping_add(1).max(1);
+                did = true;
+            }
+        }
+        did
     }
 
     fn command(&mut self, c: FeedCmd, now: u64) {
@@ -1527,8 +1642,9 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                 for s in self.st.insts.iter_mut() {
                     if s.members & bit != 0 {
                         s.members &= !bit;
-                        if s.members == 0 && s.want & streams::BBO != 0 && s.refresh == REFRESH_NONE {
+                        if s.members == 0 && s.want & streams::BBO != 0 {
                             s.refresh = REFRESH_NEEDED;
+                            s.refresh_req = 0;
                         }
                     }
                 }
@@ -1702,6 +1818,13 @@ impl<P: VenueProtocol> FeedRuntime<P> {
     fn deadline(&self, now: u64) -> Option<u64> {
         let dead = self.st.t.ms(u64::from(self.st.cfg.bbo_dead_ms));
         let mut d = None;
+        if self.snapshot_supported {
+            for s in &self.st.insts {
+                if s.refresh == REFRESH_ACTIVE && s.refresh_req == 0 && s.members != 0 {
+                    d = min_deadline(d, s.refresh_due.max(now));
+                }
+            }
+        }
         for fc in self.conns.iter().flatten() {
             let m = &fc.m;
             if m.kind == RouteKind::Bbo {

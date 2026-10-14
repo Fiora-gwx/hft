@@ -404,7 +404,7 @@ struct BboConnLive {
 
 ### 3b. 快照获取(snap-fetch)
 
-`SnapFetchTask<P>` 在 warm 线程上执行(线程计划归 hft-core),拥有该 venue 的公共行情 REST 连接(`RestPool<N>`,N = `snap.parallel`,一个池连一个端点;连接号段见 §1),以及**自己的 `P::FeedCtx` 实例**([hft-venue-proto 契约 25](../hft-venue-proto/README.md#实现方必须遵守的契约))。core 上它只做 **BBO 补帧**;`kind = L2` 的请求只在该 venue 启用增量深度时出现。
+`SnapFetchTask<P>` 在 warm 线程上执行(线程计划归 hft-core),拥有该 venue 的公共行情 REST 传输(`account::Transport`,生产为 `hft_net::rest::Client`;连接号段见 §1),以及**自己的 `P::FeedCtx` 实例**([hft-venue-proto 契约 25](../hft-venue-proto/README.md#实现方必须遵守的契约))。core 上它只做 **BBO 补帧**;`kind = L2` 的请求只在该 venue 启用增量深度时出现。
 
 ```rust
 #[repr(C)] pub struct SnapReq {          // 16 B,snapreq 环元素(进程内,不进 journal)
@@ -415,15 +415,14 @@ struct BboConnLive {
     pub req_id: u32,                     //  8 行情任务内单调,snap 记录原样带回
     pub _pad2: u32,                      // 12
 }
-pub struct SnapRecHdr {                  // snap 环记录头(进程内,不进 journal);其后 body_len 字节原始响应体,再其后 parts_len 字节
-    pub ts: Timestamps,                  // 响应完成时的接收戳(hft-net)
-    pub snap_id: u64, pub req_id: u32, pub inst: InstId,
-    pub kind: u8,                        // L2 = 1、Bbo = 2
-    pub status: u8,                      // Ok = 1、HttpErr = 2、Timeout = 3、Decode = 4、TooLarge = 5、RateLimited = 6、ReqErr = 7(无法生成请求)
-    pub http_status: u16,                // = HTTP 状态码原值(200、503…);0 = 无响应
-    pub conn: ConnId,                    // snap-fetch 的 REST 连接号(写 RawRx 用)
-    pub levels: u32, pub body_len: u32,
-    pub parts_len: u32,                  // L2:L2Snapshot 分片,格式与 md-<venue>-bulk 的 L2Snapshot 记录相同;Bbo:n 个 Bbo 体
+#[repr(C)] pub struct SnapRecHdr {  // 40 B;后接 body_len 字节原始响应,成功时再接一个 Bbo
+    pub rx_tsc: u64, pub sw_rx_ns: i64,
+    pub req_id: u32, pub inst: InstId, pub body_len: u32,
+    pub status: u8,  // 1=OK, 2=HTTP, 3=TIMEOUT, 4=DECODE, 5=TOO_LARGE, 6=RATE, 7=REQUEST
+    pub kind: u8,    // 1=L2, 2=BBO
+    pub conn: ConnId, pub _pad: u8,
+    pub http_status: u16,  // 0=无响应;其余为 HTTP 状态码
+    pub _pad2: u16, pub _pad3: u32,
 }
 ```
 
@@ -458,7 +457,7 @@ struct GwAccount<P: VenueProtocol> {
     hold: HoldBuf,                // 解析不到槽的成交类 OrderEvent 暂存(≤ gw.unmatched_hold_cap,预分配)
     acct: AcctSched,              // 账户查询的调度状态(§4a)
     inflight: [u16; 3],           // 每连接已发未回的请求数
-    rate: RateCounters,           // 发送侧计数,按 (venue, account) 独立(本账户的 API key 与出口 IP),响应 rateLimits 校正(交易所报的是另一窗口时按占用比例折算到本计数的上限);一个账户的限速风暴不消耗另一个账户的配额
+    rate: RateCounters,           // 发送侧计数,按 (venue, account) 独立(本账户的 API key 与出口 IP),响应 rateLimits 按窗口校正,不降低本地已记账的用量(未匹配窗口按占用比例保守折算);一个账户的限速风暴不消耗另一个账户的配额
     frame: MaskedFrame<CAP>, warm_frame: MaskedFrame<CAP>,
 }
 ```
@@ -475,7 +474,7 @@ struct GwAccount<P: VenueProtocol> {
 
 1. **`drain_out()`**:取 `GwCmd`(≤ `cmds_per_loop`)。**本批内重排**:稳定地把 `oflags & RISK_REDUCING` 的 `Place`/`Amend` 移到批首,其余保持原序;例外——目标槽(`target_slot`)在同批更早一条 `Place` 中的 `Cancel`/`Amend`/`Query` 不越过那条 `Place`(这样的 RR `Amend` 留在原位)。每账户每轮至多 `gw.cmds_per_account_per_loop` 条,超出的留在本地暂存(容量 = `cmds_per_loop`)下一轮先发(每次 `drain_out` 先发暂存中这一圈配额未用完的账户的命令,再从出环取至多 min(`cmds_per_loop`, 暂存空位) 条),使一个账户的突发不推迟另一个账户。跨批的优先级与 (venue, account) 配额由 sequencer 侧 OMS 的扇出队列保证([hft-oms](../hft-oms/README.md) 的输出扇出)。维护类 `op` 按"出环"表处理;订单类 `c` 按下列步骤:
    1. **kill 检查**(仅 `op ∈ {Place, Amend}`;位定义归 [hft-types `KillBits`](../hft-types/README.md),规则归 [hft-risk kill 字](../hft-risk/README.md#kill-字唯一的跨线程共享可变量)):`k = kill.load(Acquire) & (kill_mask | acct.acct_bits)`(`u32`;`acct` = `c.account` 的 `GwAccount`);`k & (HARD | account_hard(ix)) != 0` → 一律拒(含 `RISK_REDUCING`);否则 `k != 0` 且 `c.oflags & RISK_REDUCING == 0` → 拒;拒绝回 `SendReport{status: KillBlocked}`。判定是纯函数 `pub fn kill_admit(word: u32, mask: u32, acct_bits: u32, ix: u8, op: GwOp, oflags: u16) -> bool`,gw 与 hft-core 的启动自检调用同一个函数。`RISK_REDUCING`(对冲第二腿、平仓、HedgeFix)由 sequencer 置位,gw 只看位(置位规则在 [hft-oms](../hft-oms/README.md#risk_reducing-判定))。`Cancel`、`CancelAll`、`Query` 与维护类 `op` 永远放行。
-   2. **限速兜底**:该 (venue, account) 的发送侧计数显示会超交易所硬上限 → `SendReport{status: RateLimited}`(风控令牌桶应先拦住,这里是最后一道)。计数按 (venue, account) 分开;交易所按 IP 计的限额以每账户独立出口 IP(`venues.<v>.gw.src_ip`)隔离,共享 IP 的配置加载时拒绝。
+   2. **限速兜底**:该 (venue, account) 的发送侧计数显示会超交易所硬上限 → `SendReport{status: RateLimited}`(风控令牌桶应先拦住,这里是最后一道)。同时检查该账户所有 Account/Uid 的 Orders 窗口,任一窗口不足则全部窗口不扣额度。延迟响应只提高计数,不释放本地已占配额;ResetRate 清零。计数按 (venue, account) 分开;交易所按 IP 计的限额以每账户独立出口 IP(`venues.<v>.gw.src_ip`)隔离,共享 IP 的配置加载时拒绝。
    3. 选连接:该账户 primary;primary 不是 `Open` → standby;都没有 → `SendReport{status: NoConn}`。
    4. 从槽镜像取 `TargetRef`(Cancel/Amend/Query);`order_channel(op) = Rest` 的 op 走 `P::encode_rest` 并提交 REST 池(其后的第 5 步换成 `RestPool::submit`,`SendReport` 规则相同);其余 `P::encode(rd, tpl, &c, &tgt, &wall_clock, frame.body_mut())`:写入价/量/client id/请求 id/时间戳/过期字段;reduce-only 字段只在 `oflags` 带 `REDUCE_ONLY` 时填;`needs_per_order_signing()` 的 venue 在此签名(Hyperliquid)。`EncodeErr` → `SendReport{status: EncodeError}`;其中 **`op = Query` 无法编码**(槽镜像里没有该槽、venue 不支持按 client id 查询且没有 exch id)→ `SendReport{status: QueryUnsupported}`([hft-event](../hft-event/README.md#执行0x02xx) `SendStatus` = 8):OMS 保持该槽 `Unknown` 并转交 reconciler。
    5. `frame.seal(Text, len, mask)` → `conn.send_frame(&frame)`;推 `TxTag`(若启用);`inflight[conn] += 1`;New 写槽镜像。
@@ -776,3 +775,9 @@ VEN-341 用以本 crate 为根的 `cargo tree` 检查依赖闭包与特性,不�
 **实现顺序**:(hft-venue-proto 与 venue-binance 金样先全绿)→ `seq.rs` 属性测试 → `conn_id.rs` → `topn.rs` + `snap.rs`(BBO 补帧)→ `feed.rs` 对 testkit 假交易所(三种 `FeedRoutes`、就绪探测、按帧轮转)→ `idtable.rs` → `hold.rs` → `gw.rs` → `reseed.rs` → `private.rs` → `acct.rs` + `acct_fetch.rs` → `session.rs` →(可选扩展)`resync.rs`。
 
 </details>
+
+### 当前 BBO 补帧传输
+
+`SnapFetchTask::new` 接收 rd、两组请求/响应环与时钟,`attach` 在启动期注入公共 REST host/transport。当前 lane 串行一个请求、单 inst,配置 `parallel = 1`;多连接池、合批与 keep-alive 验收仍待完成。HTTP 调用非阻塞,成功或失败都只交付一条记录;环满保留记录,大于 `max_record_bytes` 只写 TooLarge 头。`timeout_ms` 默认 2000、`request_gap_ms` 默认 100、`max_record_bytes` 默认 65536;app 按 snap 环容量的 1/4 覆盖上限。请求消耗 refdata 的 IP/Weight 窗口,不足时保留请求等待。接收戳取 warm 任务观察到完整响应时的 TSC/UTC,不伪造硬件戳。
+
+FeedRuntime 缓存协议是否支持补帧,在宽限期后每 inst 至多一个在途 req_id。成功无序号报价不改变流序号水位,失败再等一个宽限期;流已恢复、请求已失效或成员全失联时丢弃迟到响应。REST 的连接号不更新 WS 活性,原始响应由 feed 单写者写 raw。

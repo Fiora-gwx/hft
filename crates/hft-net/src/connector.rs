@@ -109,6 +109,8 @@ pub struct Connector {
     napi_cache: [(u32, u32); 16],
     napi_n: usize,
     sys: SysCount,
+    retries: Vec<(u32, i64)>,
+    now_ns: i64,
     #[cfg(feature = "test-io")]
     scripts: std::collections::VecDeque<crate::sock::ScriptIo>,
     #[cfg(feature = "test-io")]
@@ -188,6 +190,9 @@ impl Connector {
             _ => None,
         };
         let tls = tls::client_config(ca.as_deref())?;
+        if cfg.reconnect_backoff_ms.0 == 0 || cfg.reconnect_backoff_ms.0 > cfg.reconnect_backoff_ms.1 {
+            return Err(ConfigErr::Backoff);
+        }
         Ok(Connector {
             arena,
             cfg: cfg.clone(),
@@ -199,6 +204,8 @@ impl Connector {
             napi_cache: [(0, 0); 16],
             napi_n: 0,
             sys: SysCount::default(),
+            retries: vec![(0, 0); cfg.endpoints.len() * cfg.src_ips.len()],
+            now_ns: 0,
             #[cfg(feature = "test-io")]
             scripts: std::collections::VecDeque::new(),
             #[cfg(feature = "test-io")]
@@ -299,6 +306,7 @@ impl Connector {
 
     /// Advances every job one step (non-blocking); returns at most one event.
     pub fn drive(&mut self, now_ns: i64) -> Option<BuildEvent> {
+        self.now_ns = now_ns;
         for k in 0..MAX_JOBS {
             let i = (self.rr + k) % MAX_JOBS;
             if let Some(ev) = self.step(i, now_ns) {
@@ -333,6 +341,14 @@ impl Connector {
             Some(j) if j.st == St::Ready => (j.slot, j.req.conn, j.req.role),
             _ => return Err(BuildErr::NotReady),
         };
+        if let Some(j) = &self.jobs[i] {
+            let k = usize::from(j.req.endpoint.0) * self.cfg.src_ips.len() + usize::from(j.req.src_ip_idx);
+            if j.req.role != ConnRole::Rest
+                && let Some(r) = self.retries.get_mut(k)
+            {
+                *r = (0, 0);
+            }
+        }
         self.jobs[i] = None;
         Ok(Handoff {
             arena: self.arena,
@@ -385,6 +401,17 @@ impl Connector {
 
     fn fail(&mut self, i: usize, stage: ConnPhase, why: BuildFail) -> Option<BuildEvent> {
         let j = self.jobs[i].take()?;
+        if j.req.role != ConnRole::Rest {
+            let k = usize::from(j.req.endpoint.0) * self.cfg.src_ips.len() + usize::from(j.req.src_ip_idx);
+            if let Some(r) = self.retries.get_mut(k) {
+                r.0 = r.0.saturating_add(1);
+                let (lo, hi) = self.cfg.reconnect_backoff_ms;
+                let delay = u64::from(lo)
+                    .saturating_mul(1u64 << r.0.saturating_sub(1).min(32))
+                    .min(u64::from(hi));
+                r.1 = self.now_ns.saturating_add(delay as i64 * 1_000_000);
+            }
+        }
         if let Some(c) = self.conn(j.slot) {
             c.sock.shutdown_close();
             c.phase = ConnPhase::Free;
@@ -478,6 +505,10 @@ impl Connector {
     fn step_init(&mut self, i: usize, slot: u16, req: BuildReq, now: i64) -> Option<BuildEvent> {
         if now >= req.deadline_ns {
             return self.fail(i, ConnPhase::TcpConnecting, BuildFail::Timeout);
+        }
+        let k = usize::from(req.endpoint.0) * self.cfg.src_ips.len() + usize::from(req.src_ip_idx);
+        if req.role != ConnRole::Rest && self.retries.get(k).is_some_and(|r| now < r.1) {
+            return None;
         }
         let seed = random_seed();
         #[cfg(feature = "test-io")]

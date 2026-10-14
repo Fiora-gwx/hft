@@ -5,6 +5,7 @@
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
 | 2026-10-15 | Bitget REST 查单非空品种与 clientOid 必须匹配原请求身份;负累计量/均价拒绝,错误响应不再重定向到另一订单槽 | BGT-093 查单身份回归 | crates/venue-bitget/src/reports.rs、tests/reports.rs、README.md、TESTS.md | 待评审(订单/资金) |
+| 2026-10-15 | 网关发送侧同时执行 Account/Uid 全部订单限速窗口;延迟观测只收紧计数。BBO 重连后经公共 REST 补帧,失效请求不覆盖已恢复报价,REST 不证明 WS 活性 | VEN-224、VEN-130/132/133 | crates/hft-venue、hft-net、apps/hft-core 的代码与规格 | 待评审(风控/报价可用性) |
 | 2026-10-14 | Unknown 与终态的撤单/改单拒绝报告仍应用新增累计成交,重复不重记,部分成交不解除 Unknown;冷消费者接受 Reject 的成交证据 | OMS-061、trading DST INV-6 | hft-oms、hft-ledger | 待评审 |
 | 2026-10-14 | 每次准入前刷新 OMS 腿摘要,消除在途改变后的过时裸露风险缓存及恢复差异 | trading DST INV-6 | hft-sequencer | 待评审 |
 | 2026-10-14 | 余额首次初始化也须通过无在途且成交静默的 quiet 闸门;冷账本用同事件 BalanceInit 证据重建 | trading DST INV-1,LED-042 | hft-ledger、hft-sequencer | 待评审 |

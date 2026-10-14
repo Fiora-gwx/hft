@@ -102,6 +102,8 @@ pub struct NetConfig {
     pub connect_timeout_ms: u32,
     pub tls_timeout_ms: u32,
     pub upgrade_timeout_ms: u32,
+    /// Failed WS builds on the same endpoint/source IP wait exponentially; REST is not retried.
+    pub reconnect_backoff_ms: (u32, u32),
     pub rotate_stagger_s: u32,
     pub warm_interval_ns: u64,
     pub rest_timeout_ms: u32,
@@ -138,6 +140,7 @@ impl Default for NetConfig {
             connect_timeout_ms: 3000,
             tls_timeout_ms: 3000,
             upgrade_timeout_ms: 3000,
+            reconnect_backoff_ms: (100, 30_000),
             rotate_stagger_s: 3600,
             warm_interval_ns: 0,
             rest_timeout_ms: 2000,

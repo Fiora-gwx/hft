@@ -54,7 +54,7 @@ pub use rate::RateCounters;
 pub use raw::{Effect, RawCounters, RawLog, what as raw_what};
 pub use seq::{InstSeq, Verdict, judge};
 pub use session::{SessErr, SessEvent, SessionCfg, SessionDriver, SessionOp};
-pub use snap::{SnapDeps, SnapFetchTask, SnapReq};
+pub use snap::{SnapDeps, SnapFetchTask, SnapRecHdr, SnapReq};
 
 /// Max `FeedCmd`s taken per `poll_once`.
 pub const FEEDCMD_PER_POLL: usize = 8;

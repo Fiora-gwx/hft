@@ -237,7 +237,7 @@ fn build<P: AccountProtocol + Send>(
     session_alg: SignAlg,
 ) -> Result<BuiltVenue, Error>
 where
-    P::FeedCtx: Send,
+    P::FeedCtx: Send + Clone,
     P::GwCtx: Send,
     P::Templates: Send,
 {
@@ -432,6 +432,37 @@ where
     };
     let (snapreq_tx, snapreq_rx) = ring(64)?;
     let (snap_tx, snap_rx) = byte_ring(c.rings.bytes)?;
+    let mut snap_net = net.clone();
+    let public_rest = endpoint(rd, P::VENUE, EndpointRole::Rest)?;
+    let snap_host = public_rest.host.clone();
+    snap_net.endpoints = vec![public_rest];
+    let snap_arena = ConnArena::new(&[(ConnRole::Rest, 1)], &snap_net, clock);
+    let snap_connector =
+        Connector::new(snap_arena, &snap_net).map_err(|_| Error::config("SnapshotNetwork", name))?;
+    let mut snapshots = hft_venue::SnapFetchTask::<P>::new(
+        hft_venue::SnapCfg {
+            parallel: 1,
+            timeout_ms: snap_net.rest_timeout_ms,
+            max_record_bytes: (c.rings.bytes / 4)
+                .try_into()
+                .map_err(|_| Error::config("SnapshotRing", name))?,
+            ..hft_venue::SnapCfg::default()
+        },
+        hft_venue::SnapDeps {
+            rd,
+            reqs: [Some(snapreq_rx), None],
+            out: [Some(snap_tx), None],
+            clock: clock.tsc_utc(&clock.base),
+        },
+        ctx.clone(),
+    )
+    .map_err(|_| Error::config("SnapshotConfig", name))?;
+    snapshots
+        .attach(
+            hft_net::rest::Client::new(snap_connector, c.rings.bytes / 4),
+            snap_host,
+        )
+        .map_err(|_| Error::config("SnapshotHost", name))?;
     let (fw, fs) = raw("feed")?;
     let mut sides = vec![fs];
     let mut feed = FeedRuntime::<P>::new(
@@ -602,9 +633,6 @@ where
     tasks.push((
         policy(c, &format!("conn-builder:{name}"))?,
         Box::new(move |stop, t| {
-            // The M1.5 runtime has no REST snapshot producer; retain both endpoints.
-            // FeedRuntime does not submit SnapReq until that upstream feature exists.
-            let _snapshot_endpoints = (snapreq_rx, snap_tx);
             let mut stopping = None;
             let mut pending_private = None;
             let mut reauth_started = false;
@@ -624,6 +652,7 @@ where
                     return Ok(());
                 }
                 if !stopping_now {
+                    snapshots.poll_once(hft_rt::tsc_now().0);
                     let now = clock.to_utc_ns(hft_rt::tsc_now());
                     if let Some(r) = fb_rx.try_pop()
                         && session.start(&mut connector, r, None, now).is_err()

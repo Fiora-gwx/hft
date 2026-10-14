@@ -1675,6 +1675,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   - 10 次均返回 `None`;`conn_mut(job).is_none()`;`handoff(job) == Err(NotReady)`
 - 实现:`crates/hft-net/tests/connector.rs::net_208_no_events_after_failed`
 
+- 重连回归:`crates/hft-net/tests/connector.rs::net_208_reconnect_backoff_is_bounded_and_isolated`;同 endpoint/src_ip 指数退避至配置上限,另一端点不受阻。
+
 ### NET-209 extra_ca 只在配置含 endpoint_override 时加载
 
 - 规则:[配置项](README.md#配置项)、[4. TLS 与 WS 握手(warm 线程 `conn-builder`,`Connector`)](README.md#4-tls-与-ws-握手warm-线程-conn-builderconnector)

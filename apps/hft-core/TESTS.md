@@ -1797,6 +1797,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   - 前者返回 `10.0.2.10`;后者返回 `10.0.1.11`
 - 实现:`apps/hft-core/tests/egress.rs::core_169_snap_fetch_src_ip`
 
+- 当前装配:`src/venues.rs` 为公共补帧复制行情 NetConfig、独立 REST arena 与 FeedCtx,在 conn-builder 线程 poll。多出口分组的完整验收仍未完成。
+
 ### CORE-170 同机时 `sim` 的全部线程只在 sim 核上运行
 
 - 规则:[主机资源隔离(slice、核与出口 IP)](README.md#主机资源隔离slice核与出口-ip)

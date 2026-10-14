@@ -631,6 +631,8 @@ pub(crate) fn start(cfg: &rustls::ClientConfig, sni: &str) -> Option<Tls> {
 /// Configuration errors (startup).
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ConfigErr {
+    /// Zero or reversed reconnect backoff bounds.
+    Backoff,
     /// `extra_ca` unreadable or not a PEM certificate.
     ExtraCa,
     /// rustls rejected the protocol/provider combination.
