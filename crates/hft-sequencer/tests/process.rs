@@ -1475,6 +1475,9 @@ mod broken_clear {
             "SEQ-341.5 out"
         );
         assert!(broken(&h));
+    }
+}
+
 // ------------------------------------------------------------------------------- ExecOut drain
 
 /// The trace split per Input (each chunk starts at its `append.input`).

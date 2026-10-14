@@ -211,6 +211,8 @@ mod flatten_broken {
     fn frames(h: &H, n: usize) -> Vec<(hft_sequencer::OutRing, hft_event::GwCmd)> {
         h.io_ref().out[n..].to_vec()
     }
+}
+
 /// g1 Broken with the spot leg a1 +0.004 extra (every second leg expired); `HedgeFix{1, g1}`
 /// goes through `exec.hedge_fix_cmd` once, its a1 sell 0.004 through the pipeline to the ring.
 #[test]
