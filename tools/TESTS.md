@@ -3218,7 +3218,7 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 |---|---|---|
 | TOOL-207.1 | 全部 success | 通过 |
 | TOOL-207.2 | 任一适用项失败、取消、skipped 或缺失 | 失败 |
-| TOOL-207.3 | 已确认无基准改动,benchmarks skipped | 通过;分类字段缺失则失败 |
+| TOOL-207.3 | 已确认无基准改动,benchmarks skipped | 通过;`bench_crates` 为空串或被 GitHub 省略(空输出不传递)同样通过;`benchmarks`/`toolchain` 分类字段缺失则失败 |
 | TOOL-207.4 | 纯文档,代码作业 skipped | 通过;路径、静态或解耦失败仍失败 |
 | TOOL-207.5 | 只完成快速反馈,完整作业 skipped | 失败 |
 

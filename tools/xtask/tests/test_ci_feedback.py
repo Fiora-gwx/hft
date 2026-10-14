@@ -141,6 +141,10 @@ class FeedbackPolicyTests(unittest.TestCase):
         no_bench["paths"]["outputs"]["bench_crates"] = ""
         no_bench["benchmarks"]["result"] = "skipped"
         self.assertTrue(summary.evaluate(no_bench)[0])
+        # An empty output is omitted by GitHub: the missing key means "no bench crates".
+        omitted = copy.deepcopy(no_bench)
+        del omitted["paths"]["outputs"]["bench_crates"]
+        self.assertTrue(summary.evaluate(omitted)[0])
         del no_bench["paths"]["outputs"]["benchmarks"]
         self.assertFalse(summary.evaluate(no_bench)[0])
         docs = copy.deepcopy(needs)
