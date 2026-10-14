@@ -91,7 +91,12 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
     };
     for key in required {
         if !table.contains_key(*key) {
-            missing.push(Error::config("MissingField", join(key)));
+            let code = if shape == "keys" && *key != "account" {
+                "MissingCredential"
+            } else {
+                "MissingField"
+            };
+            missing.push(Error::config(code, join(key)));
         }
     }
     if shape == "keys"

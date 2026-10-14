@@ -189,3 +189,78 @@ fn core_030_unknown_strategy_reports_kind() {
         "{errors:?}"
     );
 }
+
+fn replace_engine(path: &std::path::Path, text: &str, setup: &hft_sequencer::EngineSetup) {
+    let mut cfg: toml::Value = toml::from_str(text).unwrap();
+    let bytes = setup.encode_blob(1, hft_types::HostClass::Dev2, 0);
+    std::fs::write(
+        path.parent()
+            .unwrap()
+            .join(cfg["blobs"]["engine"]["path"].as_str().unwrap()),
+        &bytes,
+    )
+    .unwrap();
+    cfg["blobs"]["engine"]["sha256"] = hft_core::config::hex(&hft_core::config::digest(&bytes)).into();
+    std::fs::write(path, toml::to_string(&cfg).unwrap()).unwrap();
+}
+
+#[test]
+fn core_115_exec_risk_mismatch() {
+    let (_d, path, text) = fixture();
+    let base = hft_core::config::load(&path, true).unwrap().setup;
+    for (cross, chunk, accepted) in [
+        (10_000_000, 100_000_000, true),
+        (10_000_001, 100_000_000, false),
+        (10_000_000, 100_000_001, false),
+    ] {
+        let mut setup = base.clone();
+        setup.exec.default.force_slice.max_cross = hft_types::Rate(cross);
+        setup.exec.default.force_slice.max_chunk_notional = hft_types::Notional(chunk);
+        replace_engine(&path, &text, &setup);
+        let result = hft_core::config::load(&path, true);
+        if accepted {
+            result.unwrap();
+        } else {
+            let errors = result.unwrap_err();
+            assert_eq!(errors.len(), 1);
+            assert_eq!(errors[0].code, "ExecRiskMismatch");
+        }
+    }
+}
+
+#[test]
+fn core_116_dust_vs_min_notional() {
+    let (_d, path, text) = fixture();
+    let base = hft_core::config::load(&path, true).unwrap().setup;
+    for (dust, accepted) in [(4_999_999, false), (5_000_000, true), (5_000_001, true)] {
+        let mut setup = base.clone();
+        setup.exec.default.dust_notional = hft_types::Notional(dust);
+        replace_engine(&path, &text, &setup);
+        let result = hft_core::config::load(&path, true);
+        if accepted {
+            result.unwrap();
+        } else {
+            let errors = result.unwrap_err();
+            assert_eq!(errors.len(), 1);
+            assert_eq!(errors[0].code, "DustBelowMinNotional");
+        }
+    }
+}
+
+#[test]
+fn core_014_missing_rest_key_reference_is_a_credential_error() {
+    let (_d, path, text) = fixture();
+    let mut cfg: toml::Value = toml::from_str(&text).unwrap();
+    let accounts = toml::from_str::<toml::Value>(
+        "[[rows]]\naccount = 1\napi_key_path = 'session-key'\nsession_seed_path = 'seed'\nrest_secret_path = 'rest-secret'"
+    ).unwrap()["rows"].clone();
+    cfg["venues"]["public"]
+        .as_table_mut()
+        .unwrap()
+        .insert("accounts".into(), accounts);
+    std::fs::write(&path, toml::to_string(&cfg).unwrap()).unwrap();
+    let errors = hft_core::config::load(&path, false).unwrap_err();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].code, "MissingCredential");
+    assert!(errors[0].detail.ends_with("rest_api_key_path"));
+}

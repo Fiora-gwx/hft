@@ -354,7 +354,10 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
                     || k.session_seed_path.as_os_str().is_empty()
                     || k.rest_api_key_path.as_os_str().is_empty()
                     || k.rest_secret_path.as_os_str().is_empty()
-                    || (v.protocol.starts_with("bitget-") && k.passphrase_path.is_none())
+                    || (v.protocol.starts_with("bitget-")
+                        && k.passphrase_path
+                            .as_ref()
+                            .is_none_or(|p| p.as_os_str().is_empty()))
                 {
                     errors.push(Error::config("MissingCredential", name));
                 }
@@ -426,6 +429,21 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
         0,
     )
     .map_err(|e| one("EngineMismatch", format!("{e:?}")))?;
+    for (name, v) in &c.venues {
+        for k in &v.accounts {
+            let account = rd.account(AccountId(k.account));
+            if k.account == 0
+                || account.id != AccountId(k.account)
+                || account.venues & (1u64 << v.id) == 0
+                || !matches!(account.kind, AccountKind::Live)
+            {
+                errors.push(Error::config(
+                    "AccountMismatch",
+                    format!("venue {name}, account {}", k.account),
+                ));
+            }
+        }
+    }
     if setup.role_prod == dry || setup.drain_timeout_ms != c.shutdown.drain_timeout_ms {
         errors.push(Error::config(
             "EngineMismatch",
@@ -534,6 +552,27 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
                 format!("instance {}", p.strategy.0),
             ));
         }
+        let exec = setup
+            .exec
+            .accounts
+            .iter()
+            .find(|a| a.account == p.account)
+            .and_then(|a| a.params)
+            .unwrap_or(setup.exec.default);
+        let min_notional = p
+            .groups
+            .specs()
+            .iter()
+            .flat_map(|g| g.legs.iter().take(usize::from(g.n_legs)))
+            .map(|leg| rd.inst(leg.inst).min_notional)
+            .max()
+            .unwrap_or(hft_types::Notional(0));
+        if exec.dust_notional < min_notional {
+            errors.push(Error::config(
+                "DustBelowMinNotional",
+                format!("account {}", p.account.0),
+            ));
+        }
     }
     if let Some(paper) = &c.sim {
         if paper.quote_interval_ms == 0 || paper.quotes.is_empty() || paper.leverage == 0 {
@@ -618,6 +657,49 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
     if !errors.is_empty() {
         return Err(errors);
     }
+    // Exercise the risk owner's consistency check before any journal, key or network I/O.
+    let mut bounds = vec![hft_risk::ExecBounds::default(); 256];
+    for a in &setup.exec.accounts {
+        let p = a.params.unwrap_or(setup.exec.default);
+        bounds[usize::from(a.account.0)] = hft_risk::ExecBounds {
+            force_max_cross: p.force_slice.max_cross,
+            force_max_chunk: p.force_slice.max_chunk_notional,
+            dust_notional: p.dust_notional,
+        };
+    }
+    hft_risk::Risk::new(
+        &risk,
+        &rd,
+        &setup.gws,
+        &hft_risk::Capacities {
+            max_insts: setup.caps.max_insts,
+            max_cells_total: setup.caps.max_cells_total,
+            max_caps: hft_risk::Capacities::MAX_CAPS,
+        },
+        &bounds,
+        hft_risk::ModeCfg {
+            auto_resume_after_clean_drain: setup.seq.auto_resume_after_clean_drain == 1,
+            allow_missing_standby: setup.seq.allow_missing_standby == 1,
+        },
+    )
+    .map_err(|e| {
+        one(
+            if e == hft_risk::RiskParamError::ExecRiskMismatch {
+                "ExecRiskMismatch"
+            } else {
+                "RiskParams"
+            },
+            format!(
+                "{e:?}; accounts {:?}",
+                setup
+                    .exec
+                    .accounts
+                    .iter()
+                    .map(|a| a.account.0)
+                    .collect::<Vec<_>>()
+            ),
+        )
+    })?;
     Ok(Loaded {
         cfg: c,
         rd,
