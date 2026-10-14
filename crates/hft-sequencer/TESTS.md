@@ -2515,7 +2515,7 @@ spec: README.md
 
 | 行 | 有效模式 / 意图 | 期望 |
 |---|---|---|
-| SEQ-174.1 | Shadow / s1 `place` Open | `OrderDecision{flags & SHADOW}`;无 `GwCmd`;`IntentHandle = Shadowed` |
+| SEQ-174.1 | Shadow / s1 `place` Open | 完整 evaluate,`OrderDecision{flags & SHADOW, reject = 风控结果}`;无 `GwCmd`;`IntentHandle = Shadowed` |
 | SEQ-174.2 | Shadow / s1 `place` Close | 同 SEQ-174.1 |
 | SEQ-174.3 | Live,g1 `open_allowed = false` / s1 `place` Open | `OrderDecision{reject = MODE_SHADOW}`;无 `GwCmd` |
 | SEQ-174.4 | Live,`open_allowed = false` / s1 `place` Close | 不被模式门拦,进 `classify` |

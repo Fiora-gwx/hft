@@ -14,7 +14,7 @@ use crate::common;
 use classify_ref::{Kind, draft_parts, reference};
 use common::*;
 use hft_event::OrderFlags;
-use hft_risk::{Classification, IntentDraft, Origin, PosFacts, Risk, classify_amend};
+use hft_risk::{Classification, IntentDraft, Origin, PosFacts, PosView, Risk, classify_amend};
 use hft_strategy_sdk::{IntentClass, LinkRole};
 use hft_types::{InstId, Qty, Side, Tif};
 use proptest::prelude::*;
@@ -53,6 +53,7 @@ fn pos(p: &str, pend_buy: &str, pend_sell: &str) -> PosFacts {
         pos: q(p),
         pending_buy: q(pend_buy),
         pending_sell: q(pend_sell),
+        ..PosFacts::default()
     }
 }
 
@@ -62,6 +63,52 @@ fn cls(class: IntentClass, rr: bool, ro: bool) -> Classification {
         risk_reducing: rr,
         reduce_only: ro,
     }
+}
+
+#[test]
+fn rsk_010_unlinked_strategy_hedge_reduces_group() {
+    for (net, side, pending, qty, local, want, ro) in [
+        (10, Side::Sell, 0, 10, 0, true, false),
+        (-10, Side::Buy, 0, 10, 0, true, false),
+        (10, Side::Sell, 4, 6, 10, true, true),
+        (-10, Side::Buy, 4, 6, -10, true, true),
+        (10, Side::Sell, 4, 7, 10, false, false),
+        (10, Side::Sell, 0, 11, 10, false, false),
+        (10, Side::Buy, 0, 1, 0, false, false),
+        (0, Side::Buy, 0, 1, -10, false, false),
+        (10, Side::Sell, 10, 1, 0, false, false),
+    ] {
+        let p = PosFacts {
+            pos: Qty(local),
+            group_net: net,
+            group_pending_buy: pending,
+            group_pending_sell: pending,
+            ..PosFacts::default()
+        };
+        let d = draft(B1, side, Qty(qty), None, false, false, IntentClass::Hedge, 0);
+        assert_eq!(
+            Risk::classify(&d, Origin::Strategy, &p, caps_of(B1)),
+            cls(
+                if want {
+                    IntentClass::Hedge
+                } else {
+                    IntentClass::Open
+                },
+                want,
+                ro
+            ),
+            "net={net} pending={pending} side={side:?} qty={qty}"
+        );
+        assert_eq!(
+            Risk::classify(&d, Origin::Exec, &p, caps_of(B1)),
+            cls(IntentClass::Open, false, false)
+        );
+    }
+    let p = PosFacts {
+        group_net: i128::MIN,
+        ..PosFacts::default()
+    };
+    assert_eq!(p.hedge_cap_qty(Side::Buy), Qty(i64::MAX));
 }
 
 #[test]
@@ -265,7 +312,7 @@ proptest! {
         let c = caps_of(i);
         let side = if buy { Side::Buy } else { Side::Sell };
         let lot = if on_b { 100_000 } else { 10_000 };
-        let p = PosFacts { pos: Qty(pos_btc * 100_000_000), pending_buy: Qty(0), pending_sell: Qty(0) };
+        let p = PosFacts { pos: Qty(pos_btc * 100_000_000), pending_buy: Qty(0), pending_sell: Qty(0), ..PosFacts::default() };
         let mk = |r: LinkRole| draft(i, side, Qty(lots * lot), Some(r), false, hro, IntentClass::Hedge, flags);
         let a = Risk::classify(&mk(LinkRole::SecondRetry), Origin::Oms, &p, c);
         let b = Risk::classify(&mk(LinkRole::Second), Origin::Oms, &p, c);
@@ -340,6 +387,7 @@ proptest! {
             pos: Qty(pos_raw),
             pending_buy: Qty(if buy { pend } else { 0 }),
             pending_sell: Qty(if buy { 0 } else { pend }),
+            ..PosFacts::default()
         };
         let (role, sim, hro, hint) = draft_parts(kind);
         let mut flags = if kind == Kind::Smoke { OrderFlags::SMOKE.0 } else { 0 };

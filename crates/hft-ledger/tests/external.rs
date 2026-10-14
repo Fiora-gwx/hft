@@ -26,6 +26,42 @@ fn e1() -> ExternalFill {
     e
 }
 
+#[test]
+fn led_071_liquidation_shortfall_stays_negative() {
+    // Wallet 50,000; close a 1 BTC short opened at 60,000 at 120,000, fee 10.
+    // Both the M2 local-cost path and the explicit settlement path must retain the debt.
+    for settled in [false, true] {
+        let mut l = pre_050();
+        let mut e = ext_tid(Liquidation, Buy, BTC_P2, "1", "120000", 901);
+        e.fee = usdt("10");
+        e.fee_asset = USDT;
+        e.cash_qty = e.qty;
+        e.cash_amount = usdt("-60000");
+        let apply = |l: &mut Ledger| {
+            if settled {
+                l.apply_settled_external(&e, s(10)).expect("valid settlement")
+            } else {
+                l.apply_external(&e, false, s(10))
+            }
+        };
+        assert!(apply(&mut l).is_some());
+        assert_eq!(cash(&l, A1, P2, USDT).total, usdt("-10010"));
+        assert_eq!(l.venue_book(A1, P2).margin.wallet, n("-10010"));
+        assert_eq!(l.pos(A1, BTC_P2).qty, Qty(0));
+        assert_eq!(l.group(A1, G1).pnl.external, n("-60010"));
+        let notes = notes_of(&l, code::EXTERNAL_FILL);
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].level, NoteLevel::P0);
+        let bytes = snap(&l);
+        let mut r = restore(&bytes).expect("signed wallet restores");
+        assert_eq!(cash(&r, A1, P2, USDT).total, usdt("-10010"));
+        assert_eq!(r.venue_book(A1, P2).margin.wallet, n("-10010"));
+        assert!(apply(&mut r).is_none());
+        assert_eq!(snap(&r), bytes);
+        assert!(r.notes().is_empty());
+    }
+}
+
 fn applied(l: &mut Ledger, e: &ExternalFill, auto: bool, t: i64) -> Option<ExternalApplied> {
     l.apply_external(e, auto, t)
 }

@@ -35,6 +35,7 @@ impl Ledger {
     }
 
     /// `total += delta` of a quote/margin asset; the margin wallet follows its margin asset.
+    /// Keep signed balances, including liquidation shortfalls; never clamp debt to zero.
     pub(crate) fn quote_add(&mut self, av: usize, asset: AssetId, delta: i64) {
         if delta == 0 {
             return;

@@ -2505,13 +2505,15 @@ spec: README.md
 | SDK-164.1 | Shadow | Open | `OrderDecision` 记录头带 `SHADOW` 位、`reject = 0`、`slot = 0`;无 `GwCmd`;`outcome = Shadowed` |
 | SDK-164.2 | CloseOnly | Open | `reject = CLOSE_ONLY`、`slot = 0`;无 `GwCmd`;`outcome = Rejected(CLOSE_ONLY)` |
 | SDK-164.3 | CloseOnly | Reduce | `reject = 0`、`slot ≠ 0`;一条 `GwCmd`;`outcome = Placed(_)` |
-| SDK-164.4 | CloseOnly | Hedge(策略 `place`、无链接:hft-risk `classify` 归为 Open) | `reject = CLOSE_ONLY`、`slot = 0`;无 `GwCmd`;`outcome = Rejected(CLOSE_ONLY)` |
+| SDK-164.4 | CloseOnly | Hedge(无链接、平衡组再买入会扩大裸露) | `reject = CLOSE_ONLY`、`slot = 0`;无 `GwCmd`;`outcome = Rejected(CLOSE_ONLY)` |
 | SDK-164.5 | Live,`open_allowed = 1` | Open | `outcome = Placed(_)` |
 | SDK-164.6 | Live,`open_allowed = 0` | Open | `reject = MODE_SHADOW`(1 << 24)、`slot = 0`;无 `GwCmd`;`outcome = Shadowed` |
 | SDK-164.7 | Live,`open_allowed = 0` | Reduce | `outcome = Placed(_)` |
 | SDK-164.8 | Live,`open_allowed = 0` | Flatten | `outcome = Placed(_)` |
 
-### SDK-165 Shadow 下的意图在模式门记录且不扣资源
+- SDK-164.4 补充:组净量 +0.002 / −0.002 时分别在永续腿卖/买 0.001,同一 Input 连续两笔通过且带 RISK_REDUCING(仅买回空仓带 REDUCE_ONLY);第三笔同向与一笔反向均 CLOSE_ONLY,不出环。实现:`crates/hft-sequencer/tests/sdk_contract/mode.rs::sdk_164_unlinked_hedge_closes_naked_exposure`。
+
+### SDK-165 Shadow 下完整风控评估且不扣资源
 
 - 规则:[运行模式下意图的行为表](README.md#运行模式下意图的行为表)
 - 级别:integ
@@ -2519,9 +2521,11 @@ spec: README.md
 - 前置:`SeqRig`;G1 有效模式 Shadow、持仓 0;V1 令牌桶剩余 5;OMS 空闲槽 64(B0 中把 A 的订单限额改为 10 s 5 个、OMS 每表 64 槽;令牌数读 hft-risk 快照节 17 的 (acct-1, A) 桶行,空闲槽读 `oms.table_view(A, acct-1).free_len`)
 - 步骤:
   1. 一次 `on_event` 内 `place` 3 张 Open IOC
+  2. 分别以 Shadow 与 Live 发送相同意图,覆盖有效单、零数量、越价、超名义、HARD 及非法链接
 - 期望:
   - 3 条 `OrderDecision` 都带 `SHADOW` 位;之后令牌剩余仍为 5、空闲槽仍为 64、`v.legs(A1, G1).leg[0].inflight_immediate = 0`
-- 实现:`crates/hft-sequencer/tests/sdk_contract/mode.rs::sdk_165_shadow_no_commit`
+  - Shadow 与 Live 的首个风控拒绝位相同;Shadow 同时带 SHADOW,slot=0、outcome=Shadowed,无 GwCmd;资源不变
+- 实现:`crates/hft-sequencer/tests/sdk_contract/mode.rs::sdk_165_shadow_no_commit`、`crates/hft-sequencer/tests/sdk_contract/mode.rs::sdk_165_shadow_records_live_risk_result`
 
 ### SDK-166 目标在各有效模式下的增仓与减仓部分
 

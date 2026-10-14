@@ -292,6 +292,8 @@ spec: README.md
 | RSK-010.19 | 目标意图的增仓切片 | Exec | B | `(Open, false, false)` |
 | RSK-010.20 | 执行层订单的 `class` 提示为 Open,`role = HedgeFix` | Exec | B | `(Hedge, true, true)`(提示不生效) |
 
+- 补充负责人决定 SDK-164.4:覆盖组净量正负两向、归零边界、同向在途耗尽、反向/过量/平组拒绝、本腿 reduceOnly 与非策略来源不借用策略分类。实现:`crates/hft-risk/tests/classify.rs::rsk_010_unlinked_strategy_hedge_reduces_group`。
+
 ### RSK-011 SecondRetry 与 Second 的分类逐字段相同
 
 - 规则:[分类](README.md#分类)

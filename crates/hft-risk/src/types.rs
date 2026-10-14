@@ -69,6 +69,11 @@ pub trait PosView {
     fn pos(&self) -> Qty;
     /// Resting same-direction reduce quantity (immediate + resting).
     fn pending_reduce(&self, side: Side) -> Qty;
+    /// Unlinked strategy hedge capacity in this direction, after same-direction group orders.
+    /// Missing group facts fail closed.
+    fn hedge_cap_qty(&self, _side: Side) -> Qty {
+        Qty(0)
+    }
 }
 
 /// Plain `PosView` value.
@@ -77,6 +82,11 @@ pub struct PosFacts {
     pub pos: Qty,
     pub pending_buy: Qty,
     pub pending_sell: Qty,
+    /// Filled net quantity across the draft's group; zero for a non-member instrument.
+    pub group_net: i128,
+    /// All same-direction outstanding quantities across the group, without netting buys/sells.
+    pub group_pending_buy: i128,
+    pub group_pending_sell: i128,
 }
 
 impl Default for PosFacts {
@@ -85,6 +95,9 @@ impl Default for PosFacts {
             pos: Qty(0),
             pending_buy: Qty(0),
             pending_sell: Qty(0),
+            group_net: 0,
+            group_pending_buy: 0,
+            group_pending_sell: 0,
         }
     }
 }
@@ -98,6 +111,16 @@ impl PosView for PosFacts {
             Side::Buy => self.pending_buy,
             Side::Sell => self.pending_sell,
         }
+    }
+    fn hedge_cap_qty(&self, side: Side) -> Qty {
+        let (available, pending) = match side {
+            Side::Buy if self.group_net < 0 => (self.group_net.saturating_neg(), self.group_pending_buy),
+            Side::Sell if self.group_net > 0 => (self.group_net, self.group_pending_sell),
+            _ => return Qty(0),
+        };
+        Qty(available
+            .saturating_sub(pending.max(0))
+            .clamp(0, i128::from(i64::MAX)) as i64)
     }
 }
 

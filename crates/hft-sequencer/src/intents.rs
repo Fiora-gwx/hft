@@ -10,7 +10,7 @@ use hft_oms::{
 };
 use hft_refdata::InstKind;
 use hft_risk::mode::{CellKey, Effective, ModeInput};
-use hft_risk::{Classification, IntentDraft, IntentView, PosFacts, Risk};
+use hft_risk::{Classification, IntentDraft, IntentView, PosFacts, PosView, Risk};
 use hft_strategy_sdk::ctx::CancelReq;
 use hft_strategy_sdk::{HedgeKind, IntentClass, IntentOutcome, LinkRole, OrderIntent, OrderRef, StrategySet};
 use hft_types::{
@@ -163,12 +163,21 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
         && let Some(l) = it.link.get()
         && !link_valid(l)
     {
+        let shadow = e.risk.mode.effective(CellKey {
+            strategy: e.rd.account(it.account).bound_instance,
+            account: it.account,
+            group: it.group,
+        }) == Effective::Shadow;
         #[cfg(feature = "testkit")]
         let audit_facts = crate::audit::capture(e, &it, src, it.class);
-        record_only(e, strategy, &it, RejectBits::INVALID, false, 0, 0, intent_no);
+        record_only(e, strategy, &it, RejectBits::INVALID, shadow, 0, 0, intent_no);
         #[cfg(feature = "testkit")]
         e.audit.record((e.out.recs.len() - 1) as u32, audit_facts);
-        return Ok(PipeOut::Rejected(RejectBits::INVALID));
+        return Ok(if shadow {
+            PipeOut::Shadowed
+        } else {
+            PipeOut::Rejected(RejectBits::INVALID)
+        });
     }
     // 1. Hedge pricing.
     if let Src::Hedge { req } = src {
@@ -231,11 +240,39 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
     // 3. classify (needed by the mode gate for Exec Target increase orders).
     let pos = e.ledger.pos(account, inst_id).qty;
     let fl = e.oms.inflight().pos(account, inst_id);
-    let facts = PosFacts {
+    let mut facts = PosFacts {
         pos,
         pending_buy: fl.open_buy,
         pending_sell: fl.open_sell,
+        ..PosFacts::default()
     };
+    // Only the owning group's member instruments can repair its filled net exposure.
+    // Count both immediate and resting orders in each direction: opposing orders cannot
+    // be assumed to fill, and repeated place calls must not spend the same naked quantity.
+    if matches!(src, Src::Strategy { .. })
+        && it.class == IntentClass::Hedge
+        && it.link.get().is_none()
+        && let Some(spec) = inst.spec(account, it.group)
+        && spec
+            .legs
+            .iter()
+            .take(usize::from(spec.n_legs))
+            .any(|l| l.inst == inst_id)
+    {
+        let legs = &e.oms.legs(account, it.group).view;
+        for (def, leg) in spec
+            .legs
+            .iter()
+            .zip(legs.leg.iter())
+            .take(usize::from(spec.n_legs))
+        {
+            facts.group_net += i128::from(leg.net.0);
+            let pending = e.oms.inflight().pos(account, def.inst);
+            facts.group_pending_buy += i128::from(pending.open_buy.0);
+            facts.group_pending_sell += i128::from(pending.open_sell.0);
+        }
+        hedge_cap = facts.hedge_cap_qty(it.side);
+    }
     let link_role = it.link.get().map(|l| l.role);
     let simul = it
         .link
@@ -263,6 +300,7 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
         Src::Exec { o } => o.origin == ExecOrigin::Target && class.class == IntentClass::Open,
         _ => false,
     };
+    let mut shadow = false;
     if gated {
         let cell = CellKey {
             strategy: e.rd.account(account).bound_instance,
@@ -273,10 +311,7 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
         e.trace.rec("mode_gate", 0, 0);
         match eff {
             Effective::Shadow => {
-                record_only(e, strategy, &it, RejectBits(0), true, oflags, reason, intent_no);
-                #[cfg(feature = "testkit")]
-                e.audit.record((e.out.recs.len() - 1) as u32, audit_facts);
-                return Ok(PipeOut::Shadowed);
+                shadow = true;
             }
             Effective::Live if class.class == IntentClass::Open && !open_allowed(inst, account, it.group) => {
                 record_only(
@@ -306,14 +341,18 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
             strategy,
             &it,
             RejectBits::CLOSE_ONLY,
-            false,
+            shadow,
             oflags,
             reason,
             intent_no,
         );
         #[cfg(feature = "testkit")]
         e.audit.record((e.out.recs.len() - 1) as u32, audit_facts);
-        return Ok(PipeOut::Rejected(RejectBits::CLOSE_ONLY));
+        return Ok(if shadow {
+            PipeOut::Shadowed
+        } else {
+            PipeOut::Rejected(RejectBits::CLOSE_ONLY)
+        });
     }
     // 4. IntentView.
     let qr = quote_rate(&e.rd, &e.ledger, inst_id);
@@ -401,6 +440,13 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
         e.risk.evaluate(&iv, &v, &e.now)
     };
     e.trace.rec("risk.evaluate", u64::from(account.0), 0);
+    if shadow {
+        let bits = res.err().unwrap_or(RejectBits(0));
+        record_only(e, strategy, &it, bits, true, oflags, reason, intent_no);
+        #[cfg(feature = "testkit")]
+        e.audit.record((e.out.recs.len() - 1) as u32, audit_facts);
+        return Ok(PipeOut::Shadowed);
+    }
     let adm = match res {
         Ok(a) => a,
         Err(bits) => {
