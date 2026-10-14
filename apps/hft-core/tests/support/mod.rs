@@ -459,7 +459,12 @@ qty_raw = 200000000
         "sim-gw",
         "paper-feed",
     ] {
-        text += &format!("\n[[threads]]\nname = '{task}'\ntask = '{task}'\npark_us = 100\n");
+        let nice = if matches!(task, "persist" | "ctl-gateway") {
+            10
+        } else {
+            0
+        };
+        text += &format!("\n[[threads]]\nname = '{task}'\ntask = '{task}'\npark_us = 100\nnice = {nice}\n");
     }
     for (name, bytes) in [
         ("refdata", rdb),

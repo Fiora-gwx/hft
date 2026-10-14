@@ -8,7 +8,7 @@
 
 引擎初始为 Shadow。等待 journal 的 ClockOk 与启动闸门通过后，通过已有 ctl 客户端对 `paper` 账户、`paper-probe` 实例发送 `SetMode Live`，按正常 preview/confirm 流程确认。探针收到固定 BBO 后发出远价 PostOnly，收到 Ack 后撤单；集成测试自动完成这一流程。未启用 Live 的 `--run-for-ms` 演示只验证启动与 Drain。模拟器每账户的连接回报展开为其配置 venue 集合的单主连接，ECF1 必须启用 `allow_missing_standby`；网络模式不替账户生成连接或身份报告。
 
-`[[threads]]` 在此子集使用 `name`、`task`、可选 `core`、必填 `park_us`。任务为 `sequencer`、`persist`、`housekeeping`、`ctl-gateway`；离线另需 `paper-feed`、`sim-gw`，网络模式每 venue 另需 `feed:<配置名>`、`conn-builder:<配置名>`、有账户时的 `gw:<配置名>`。每个任务恰好一个独占线程；空闲 park 位于任务轮转外。
+`[[threads]]` 在此子集使用 `name`、`task`、可选 `core`、必填 `park_us` 与 `nice`。`nice` 为 0–19，housekeeping 必须为 0；模板的 persist 与控制/建连线程为 10。每个线程在执行任务前设置 `SCHED_OTHER`、`timerslack_ns = 1`、nice、名称及可选绑核；设置失败退出 3，所有工作线程的设置成功后才允许 READY。任务为 `sequencer`、`persist`、`housekeeping`、`ctl-gateway`；离线另需 `paper-feed`、`sim-gw`，网络模式每 venue 另需 `feed:<配置名>`、`conn-builder:<配置名>`、有账户时的 `gw:<配置名>`。每个任务恰好一个独占线程；空闲 park 位于任务轮转外。
 
 `clock.step_threshold_ns`、`clock.interval_ms`、`watchdog.hb_stale_ms` 与 `venues.<v>.stale_guard_ms` 均为必填正整数。线程名不超过 Linux comm 的 15 字节；park 时长遵守 [心跳约束](../README.md#线程计划)。网关订单槽位容量从 ECF1 的 OMS 配置取得。缺失键逐项报 `MissingField`，凭据引用缺失报 `MissingCredential`，未知键与类型错误报单条脱敏 `ConfigParse`。加载还检查 [执行/风险与尘埃线约束](../README.md#内存与-journal-段按主机类唯一归属)，失败发生在运行资源创建前。
 

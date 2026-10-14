@@ -110,6 +110,7 @@ pub struct Thread {
     pub task: String,
     pub core: Option<u16>,
     pub park_us: u64,
+    pub nice: u8,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -411,6 +412,8 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
             || t.name.len() > 15
             || t.name.as_bytes().contains(&0)
             || t.core.is_some_and(|n| n >= 256)
+            || t.nice > 19
+            || (t.task == "housekeeping" && t.nice != 0)
             || !(1..=10000).contains(&t.park_us)
             || u128::from(t.park_us) * 4 >= u128::from(c.watchdog.hb_stale_ms) * 1000
             || !tasks.contains(&t.task)

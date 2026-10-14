@@ -32,11 +32,37 @@ pub fn policy(c: &Config, task: &str) -> Result<Thread, Error> {
         .ok_or_else(|| Error::config("ThreadPlan", task))
 }
 pub fn pin(t: &Thread) -> Result<(), Error> {
-    hft_rt::name_current_thread(&t.name);
     if let Some(cpu) = t.core {
         hft_rt::pin_current_thread(cpu)
             .map_err(|e| Error::runtime("Affinity", format!("{}: {e:?}", t.name), 3))?;
     }
+    #[cfg(target_os = "linux")]
+    {
+        // All settings target the calling Linux thread; do not inherit an RT policy
+        // or the parent's nice value accidentally. Setup runs before the task body.
+        let param = libc::sched_param { sched_priority: 0 };
+        // SAFETY: param points to an initialized sched_param; pid 0 means this thread.
+        if unsafe { libc::sched_setscheduler(0, libc::SCHED_OTHER, &param) } != 0 {
+            return Err(Error::runtime(
+                "ThreadPolicy",
+                format!("{}: SCHED_OTHER", t.name),
+                3,
+            ));
+        }
+        // SAFETY: PR_SET_TIMERSLACK takes an unsigned long value, no pointers.
+        if unsafe { libc::prctl(libc::PR_SET_TIMERSLACK, 1 as libc::c_ulong, 0, 0, 0) } != 0 {
+            return Err(Error::runtime(
+                "ThreadPolicy",
+                format!("{}: timerslack", t.name),
+                3,
+            ));
+        }
+        // SAFETY: PRIO_PROCESS with id 0 addresses only the calling Linux thread.
+        if unsafe { libc::setpriority(libc::PRIO_PROCESS, 0, i32::from(t.nice)) } != 0 {
+            return Err(Error::runtime("ThreadPolicy", format!("{}: nice", t.name), 3));
+        }
+    }
+    hft_rt::name_current_thread(&t.name);
     Ok(())
 }
 pub fn idle(t: &Thread) {
@@ -160,14 +186,25 @@ impl Workers {
         t: Thread,
         f: impl FnOnce(Arc<AtomicBool>, ThreadContext) -> Result<(), Error> + Send + 'static,
     ) -> Result<(), Error> {
+        // Slot identities remain owned by the single assembly thread.
         let heartbeat = claim(self.heartbeat, &t)?;
         let stop = self.stop.clone();
+        // The main thread waits only for OS setup, never for network or task work.
+        // This keeps a failed affinity/priority setup from racing READY.
+        let (setup_tx, setup_rx) = std::sync::mpsc::sync_channel(1);
         self.joins.push(
             std::thread::Builder::new()
                 .name(t.name.clone())
                 .spawn(move || {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        pin(&t).and_then(|()| f(stop.clone(), ThreadContext { policy: t, heartbeat }))
+                        if let Err(error) = pin(&t) {
+                            let _ = setup_tx.send(Err(error));
+                            return Ok(());
+                        }
+                        if setup_tx.send(Ok(())).is_err() {
+                            return Ok(());
+                        }
+                        f(stop.clone(), ThreadContext { policy: t, heartbeat })
                     }))
                     .unwrap_or_else(|_| Err(Error::runtime("ThreadPanic", "worker panicked", 134)));
                     if result.is_err() {
@@ -177,7 +214,16 @@ impl Workers {
                 })
                 .map_err(|e| Error::runtime("Thread", e.to_string(), 3))?,
         );
-        Ok(())
+        match setup_rx.recv() {
+            Ok(Ok(())) => Ok(()),
+            result => {
+                self.stop.store(true, Ordering::Release);
+                Err(match result {
+                    Ok(Err(error)) => error,
+                    _ => Error::runtime("ThreadPanic", "worker setup did not complete", 134),
+                })
+            }
+        }
     }
     pub fn join(&mut self) -> Result<(), Error> {
         let mut first = None;
