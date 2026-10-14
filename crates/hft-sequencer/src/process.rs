@@ -49,14 +49,21 @@ pub(crate) fn process_parts<D: Driver<S>, S: StrategySet>(
     drv: &mut D,
     slot: &InputSlot,
 ) -> R<()> {
+    bench_stage!(e, JournalInput);
     e.out.clear();
     e.notify.begin();
+    // Any non-BBO input may change connections, depth or group membership. Preserve the
+    // existing gate evaluation boundary; repeated BBOs only change readiness on first quote
+    // or membership growth. A derived cache is always invalid after restore.
+    e.feeds_dirty |= slot.kind != EventKind::BBO;
+    e.gpos_bbo = None;
     e.trace.rec("append.input", u64::from(slot.kind.0), 0);
     // 1. Record first.
     let s = drv
         .journal()
         .append_var(slot.kind, slot.flags, slot.tsc, &[slot.body()])
         .map_err(|_| FatalReason::JournalFull)?;
+    bench_stage!(e, DispatchClock);
     // Meta never reaches the decision clock or callbacks. Calibration is cold-reader data.
     if crate::journal::role_of(slot.kind, slot.body()) == hft_event::Role::Meta {
         if slot.kind == EventKind::CLOCK_STATUS
@@ -104,8 +111,10 @@ pub(crate) fn process_parts<D: Driver<S>, S: StrategySet>(
     let mut q = core::mem::take(&mut e.notify.delivery);
     e.notify.take_queue(&mut q);
     crate::strategies::deliver_round(e, inst, drv, p.market, &q, p.direct)?;
+    bench_stage!(e, Exec);
     // 6. executor advance.
     crate::exec_glue::advance(e, inst, drv)?;
+    bench_stage!(e, FinalChecks);
     // 8. second delivery round (notifications produced by Ctx application and advance).
     e.notify.take_queue(&mut q);
     if !q.is_empty() {
@@ -118,6 +127,7 @@ pub(crate) fn process_parts<D: Driver<S>, S: StrategySet>(
     }
     q.clear();
     e.notify.delivery = q;
+    bench_stage!(e, FinalChecks);
     // Storage recheck while a StorageCritical drain is deferred.
     if e.risk.mode.drain_deferred() {
         e.trace.rec("apply.StorageRecheck", 0, 0);
@@ -125,6 +135,7 @@ pub(crate) fn process_parts<D: Driver<S>, S: StrategySet>(
     }
     crate::subs::position_changed(e, inst);
     crate::commands::drain_check(e, inst, drv)?;
+    bench_stage!(e, Output);
     finish_event(e, drv, slot.tsc)?;
     #[cfg(feature = "testkit")]
     {
@@ -487,10 +498,13 @@ fn bbo<'a, D: Driver<S>, S: StrategySet>(
     slot: &'a InputSlot,
     p: &mut Pending<'a>,
 ) -> R<()> {
+    bench_stage!(e, Book);
     let Some(b) = slot.read::<Bbo>() else {
         return Ok(());
     };
     let i = b.h.inst;
+    e.feeds_dirty |= e.books.top(i).seq == 0;
+    e.gpos_bbo = Some(i);
     let out = e.books.top_mut(i).apply(&b, Seq(e.cur_seq));
     e.trace.rec("top.apply", u64::from(i.0), u64::from(out.bits()));
     let applied = !(out.contains(hft_book::TopOutcome::DUPLICATE)
@@ -505,6 +519,7 @@ fn bbo<'a, D: Driver<S>, S: StrategySet>(
             c.used = true;
         }
         if let Some(r) = e.market.row_mut(i) {
+            e.feeds_dirty |= r.bbo_member_mask & (1u8 << conn) == 0;
             r.bbo_member_mask |= 1u8 << conn;
             if applied {
                 r.bbo_flags &= !BBO_RESYNC;
@@ -521,13 +536,17 @@ fn bbo<'a, D: Driver<S>, S: StrategySet>(
     if !applied {
         return Ok(());
     }
+    bench_stage!(e, Ledger);
     e.trace.rec("ledger.on_ref_px", u64::from(i.0), 0);
     e.ledger.on_ref_px(i, b.bid_px, b.ask_px, e.now.engine_ns);
     ledger_notes(e);
     upnl_pnl(e, inst, drv)?;
     e.trace.rec("exec.touch_inst", u64::from(i.0), 0);
     e.exec.touch_inst(i);
-    feeds_gate(e, inst, drv)?;
+    bench_stage!(e, FeedsGate);
+    if e.feeds_dirty {
+        feeds_gate(e, inst, drv)?;
+    }
     p.market = Some(MarketEv::Bbo {
         inst: i,
         b: e.market.bbo_view(&e.books, i),
@@ -1399,6 +1418,7 @@ pub(crate) fn feeds_gate<D: Driver<S>, S: StrategySet>(
     inst: &mut Instances<S>,
     drv: &mut D,
 ) -> R<()> {
+    e.feeds_dirty = false;
     for ix in 0..inst.slots.len() {
         let Some(s) = inst.slots.get(ix) else { continue };
         let a = s.account;

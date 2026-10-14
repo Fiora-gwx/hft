@@ -461,6 +461,8 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 
 ### USDT 统一计价
 
+参考 BBO 刷新受该资产或参考交易对报价资产影响的 venue 权益。相关持有量为零时只重算汇率过期标志,不重复换算无关现金;所有原有汇总行的 `as_of_ens` 仍推进到本事件。跨过汇率过期边界时完整刷新,数值、标志与完整重算一致(LED-210)。
+
 - 换算率只来自 journal 中的参考行情事件(`Bbo`),**不查外部 API**([07 §5](../../design/07-策略层.md))。每资产存 `(bid, ask, ens)`,换算率 = `Px::mid_floor(bid, ask)`(`par_assets` 恒为 1;基础资产在合计权益里的估值价另按 `valuation.spot`);`rate_max_age_ms` 超时(按 engine_ns:本 crate 没有时钟,以最近一次带 `t` 的入口调用的 `t` 为当前时刻,`t − ens > rate_max_age_ms` 即超时)或早于本次运行起点 → `RATE_STALE`,稳定币按 1.0 回退,其他资产沿用旧值并置 `stale` 位(报表显示,风控照用,`Equity.valid = false`)。
 - 已实现一律按**事件发生时**的换算率入账(不回溯重估);未实现与合计权益按当前换算率随 `on_ref_px` 更新。
 

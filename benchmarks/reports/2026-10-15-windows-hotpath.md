@@ -160,3 +160,81 @@ sequencer 使用 B0/TestIo/MemJournal:HashMap 队列、逐记录分配、三个�
 负责人仍需选择/提供统一 aarch64 参考主机及实盘等价负载,按既定直方图口径验收。force_step、OMS 的批量撤单/恢复、风险模式切换等剩余高成本路径需要参考机 CPU 采样继续分解;本报告未把开发机均值当作预算放宽依据。M3 全量混合 Input 零分配、生产环/RAM journal 的精确分段、真实 L2/通知积压夹具仍待补齐。策略源代码不在此引擎补丁内。
 
 复现时在可用 commit 内存至少 14 GB 后,用仓库外 memguard 包装单个 `cargo bench -p <package> --bench <target> -- --warm-up-time 0.2 --measurement-time 0.5 --sample-size 10 --save-baseline <name>`;journal append 需 `--features writer,mem-backend`。所有目标串行,LimitGB=6。参考主机使用仓库规定的 CI 制品流程。
+
+
+## BBO 逐阶段诊断
+
+本节是 `perf-bbo` 的独立复测,基准代码基于 `a2247f944ac10b664bf6c2e7925f5e18f01aca3f`。机器与工具链同上,本节所有测量进程固定到逻辑 CPU 0,仍与其他任务共机,不固定频率。逐次数据、二进制及源码摘要、Criterion 原始样本见 [BBO JSON](2026-10-15-bbo-stages.json)。预算未修改,这些数值不构成参考机验收。
+
+原来的约 4 µs 有明确的测试框架成分。`MemJournal::publish` 每次从头遍历已经发布的历史以求字节和,单次成本随历史长度增长;Criterion 的迭代数会改变测量负载。20,000 次固定样本中,该阶段 p50 为 4,284 ns、p99 为 8,421 ns。真实 RAM `JournalWriter` 对应轮末发布为 23 / 25 ns。修复在 append 和事件边界维护累计字节,发布 O(1);截尾后重算保留前缀。不能把此收益算成生产 journal 优化。
+
+生产代码的改动是参考报价只重估受影响的权益数值(零持仓仍更新汇率过期标志与时间),连续 BBO 复用没有失效的 Feeds 检查,按 inst 刷新 group 视图,按当前接收者集合投递策略。后两项针对规模增长;B0 三个订阅者都命中同一 inst,其阶段成本没有显著改善。连接/参数变化和恢复使派生缓存失效;不更改 journal、资金、风控、订单与回放契约。
+
+### 计时边界
+
+`bbo_stages` 通过 opt-in `bench-stages` feature 在真实处理函数之间插入 `hft_rt::tsc_ordered`。普通构建完全去掉计时状态和调用。硬件计数器频率 3,417,600,000 Hz;连续两次读取 p50 / p99 为 8 / 9 ns,表内不扣此成本。每个阶段记录原始间隔,各阶段分位数不可相加。开启与关闭计时分别采样,最终预算比较看关闭计时的整段值;该诊断二进制关闭采样时仍有 feature 内的未激活分支,另外的 Criterion 二进制未启用此 feature。
+
+miss 热身 2,000 次、采样 20,000 次;hit 热身 100 次、采样 1,000 次,每次使用新的可接纳订单状态,初始化和析构不计时。使用 std 分配器。数据为现有 SEQ B0 合成常量,三实例脚本策略保持安静模式,策略钩子仍有 TLS/动态调用框架成本。无外部网络、账户或生产 journal。
+
+三个边界分开报告。TestIo 使用原 HashMap 队列与 MemJournal;RAM 轮次使用真实 SPSC、LiveDriver 和预备好的 16 MiB RAM JournalWriter,包含一次处理轮与其后的 idle 轮;RAM 直接入口从已填好的 InputSlot 开始,走同一个 process 与发布函数。交易所报文解码属于 `feed-ingest`,这些 BBO 已归一化,不能从该表推算 JSON 解码时间。样本不触发滚段、持久化或定时器到期,也没有真实网关和遥测消费者。决策时间取固定的已记录夹具时间,测量计数器不反馈到引擎。
+
+### 未插入阶段读取的整段结果
+
+单位 ns,单元格为 p50 / p99。
+
+| 边界 | 修改前 | 修改后 |
+|---|---:|---:|
+| TestIo `seq/bbo_miss` | 6,054 / 10,093 | 1,473 / 1,657 |
+| TestIo `seq/bbo_hit` | 4,929 / 10,989 | 4,790 / 6,940 |
+| RAM 完整轮次 `seq/bbo_miss_ram` | 900 / 1,107 | 764 / 1,275 |
+| RAM 已解码 Input → 发布 | 502 / 678 | 365 / 638 |
+
+RAM 直接入口 p50 降低 27.3%,为 250 ns 预算的 1.46 倍;p99 638 ns 仍高于 600 ns。完整轮次 p50 降低 15.1%,但 p99 从 1,107 升到 1,275 ns,不能声称尾延迟全面改善。测试框架下 hit 的改善很小,未达到其 2 µs / 5 µs 预算。共享 Windows 核仍有明显长尾,最终 JSON 保留 p99.9 与 max,不裁掉中断样本。
+
+### 单订阅者补充样本
+
+上述 B0 是三个订阅者,而 `seq/bbo_miss` 的组件预算写明一个策略。诊断 exe 的 `--single` 只安装 S1 参数,保留同一 B0 refdata、账户与输入初始化,单独输出 `subscribers = 1`;该组没有修改前对照,不与三订阅者样本合并。
+
+| 单订阅者,阶段读取关闭 | p50 ns | p99 ns | p99.9 ns | max ns |
+|---|---:|---:|---:|---:|
+| RAM 完整轮次与 idle | 628 | 1,154 | 3,288 | 83,087 |
+| RAM 已解码 Input → 发布 | 248 | 413 | 2,620 | 3,157 |
+
+单订阅者直接处理的本次 p50/p99 数值落在 250/600 ns 以内,仅是开发机诊断结果。完整轮次仍超出该数值,生产策略、行情负载和参考机验收仍待完成;不能将调整夹具计入优化前后收益。单订阅者的全部阶段分位数在 JSON 的 `after_single_subscriber` 中,复现时给诊断 exe 传 `--single`。
+
+### 阶段表
+
+按实际执行顺序,journal 必须先于状态更新。单位 ns,单元格为 p50 / p99;下面均开启阶段读取。
+
+| 内部阶段 | TestIo 前 | TestIo 后 | RAM 直接入口前 | RAM 直接入口后 |
+|---|---:|---:|---:|---:|
+| 取环/轮调度及 idle(直接入口仅计外层) | 1,135 / 1,382 | 1,097 / 1,200 | 21 / 21 | 21 / 22 |
+| 输入 journal append / 编码 | 74 / 238 | 64 / 230 | 40 / 214 | 39 / 213 |
+| kind 分派与引擎时间 | 34 / 40 | 34 / 38 | 40 / 42 | 40 / 42 |
+| 读取 Bbo / Top 更新 | 22 / 26 | 18 / 22 | 16 / 24 | 17 / 20 |
+| ledger 参考价、PnL 与相关 risk | 234 / 299 | 122 / 141 | 206 / 234 | 112 / 143 |
+| Feeds 就绪及模式检查 | 93 / 106 | 22 / 33 | 74 / 94 | 22 / 26 |
+| group 视图刷新 | 56 / 62 | 52 / 61 | 45 / 55 | 49 / 67 |
+| 策略 fan-out / on_event / Ctx 应用 | 168 / 206 | 165 / 189 | 134 / 157 | 146 / 183 |
+| exec.advance(含其 OMS 交互) | 12 / 14 | 11 / 16 | 12 / 13 | 12 / 14 |
+| 通知后检查、订阅/Drain | 26 / 36 | 26 / 38 | 26 / 37 | 26 / 34 |
+| 输出、结束事件与 kill 发布 | 14 / 18 | 14 / 16 | 20 / 23 | 20 / 25 |
+| 轮末 journal publish | 4,284 / 8,421 | 26 / 30 | 12 / 13 | 12 / 13 |
+
+RiskView/ModeView 是借用适配器,没有独立的全状态重建步骤。miss 不下单,意图检查链不会被调用;hit 的 evaluate/commit、OMS 分配和订单决策计入 Ctx 应用阶段。hit 的完整阶段分位数与 RAM 完整轮次分位数保存在 JSON。RAM 输入 append 的 p50 约 40 ns,不是主要瓶颈;seq journal 的普通 BBO 按原有 CRC 策略写入,没有关闭校验、哈希或提交步骤。定时器无到期样本只衡量轮调度的检查,不代表堆操作的峰值成本。
+
+### Criterion 与回放对照
+
+相同的原 `seq` 基准,未启用阶段 feature;预热 0.5 s、测量 2 s,miss/hit 20 个样本,回放 10 个样本。表中为 slope 点估计,不是逐事件分位数;`seq/bbo_hit` 是本诊断对原 `seq/bbo_fire` 的称呼。
+
+| 基准 | 修改前 | 修改后 | 变化 |
+|---|---:|---:|---:|
+| `seq/bbo_miss` | 3.928 µs | 1.591 µs | -59.5% |
+| `seq/bbo_hit` | 5.814 µs | 5.024 µs | -13.6% |
+| `seq/replay_throughput` | 89.147 M events/min | 136.461 M events/min | +53.1% |
+
+回放每轮含 20,000 个 BBO 的日志克隆、从关键帧恢复和逐字节验证;修改后超过 20M events/min 预算。miss 原测量有历史长度偏差,其 59.5% 改善是测试框架与生产改动的合计,生产贡献以 RAM 对照为准。
+
+当前剩余成本集中在 ledger 与脚本策略投递,其次是完整轮次的取环/idle。三订阅者仍超出 250 / 600 ns,单订阅者本次采样数值在预算内,均未通过正式门槛验收;365 ns 也不是已证实的物理下限。下一步是在合格 aarch64 参考机上运行 CI 产物,使用生产策略、生产装配和同机 sim 负载验收;不据本报告放宽预算。该任务不含资金或风控语义变更,没有待评审语义条目。
+
+本地验证通过 sequencer 476 项、独立分配检查 3 项、ledger 207 项,以及两 crate 全 targets 的 Clippy(含 `bench-stages`,warnings 为错误)。测试覆盖填单后视图与 ledger 相等、冷恢复、连接成员变化、字节发布边界、汇率过期和零/非零库存。回放由已有 VerifyDriver 逐字节比对,PR fast lane 继续执行 DST 与质量门。构建诊断目标使用 `cargo bench -p hft-sequencer --bench bbo_stages --features bench-stages --no-run -j 1`,在本机须按 agent 规则经 6 GB memguard 串行执行;编译后单独运行生成的 exe,并设进程 affinity mask 为 1。原基准目标为 `seq`,过滤表达式 `seq/(bbo_miss|bbo_fire|replay_throughput)$`,参数 `--bench --warm-up-time 0.5 --measurement-time 2 --sample-size 20`。

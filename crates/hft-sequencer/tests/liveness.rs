@@ -39,6 +39,38 @@ fn view(h: &H, i: InstId) -> hft_strategy_sdk::BboView {
 }
 
 #[test]
+fn seq_113_feed_gate_cache_rechecks_after_connection_and_membership_changes() {
+    let mut h = base();
+    h.quote(A1, "50000", "50002");
+    h.run();
+    let ready = h.gate_bits(AC1);
+    let kf = h.keyframe().seq;
+    for state in [ConnStateKind::Down, ConnStateKind::Up] {
+        for slot in 0..2 {
+            h.push(RingId::Rep(0), &md(A, slot, state, InstId(0), h.now()));
+        }
+        h.run();
+        // A quote can reintroduce membership. A different quoted instrument must also
+        // observe the prior connection change at the original feed-gate boundary.
+        for i in [A2, A1] {
+            h.quote(i, "50000", "50002");
+            h.run();
+        }
+        if state == ConnStateKind::Down {
+            assert_ne!(h.gate_bits(AC1), ready);
+        } else {
+            assert_eq!(h.gate_bits(AC1), ready);
+        }
+        let stable = h.gate_bits(AC1);
+        h.quote(A1, "50000", "50003");
+        h.run();
+        assert_eq!(h.gate_bits(AC1), stable);
+    }
+    h.keyframe();
+    assert!(h.verify_from(Some(kf)).is_empty());
+}
+
+#[test]
 fn seq_113_conn_live_transitions() {
     let mut h = base();
     assert_eq!(mask(&h, A1), 0b11);

@@ -266,6 +266,59 @@ fn seq_029_view_sources() {
     let _ = (AccountId(0), ConnId(0));
 }
 
+#[test]
+fn seq_029_bbo_group_cache_matches_ledger_after_fills_and_recovery() {
+    reset_script();
+    let mut b = b0();
+    let extra = hft_types::GroupId(0x0100_0002);
+    b.params[0].groups.push(gspec_eth(extra));
+    let mut h = b.boot();
+    h.steady();
+    let d = h.order_at_touch(AC1, A1, Side::Buy, "0.001");
+    h.fill(&d, q("0.001"), q("0.001"), d.px);
+    let kf = h.keyframe().seq;
+    for (i, bid, ask) in [
+        (A1, "51000", "51001"),
+        (A2, "3100", "3101"),
+        (B1, "51010", "51011"),
+        (A1, "52000", "52001"),
+    ] {
+        h.quote(i, bid, ask);
+        h.run();
+        let e = h.s.engine();
+        for slot in &h.s.instances().slots {
+            for (_, group) in slot.groups().unwrap().iter() {
+                assert_eq!(
+                    *e.seq_views().group_pos(slot.account, group.id),
+                    e.ledger.group_pos(slot.account, group.id)
+                );
+            }
+        }
+    }
+    h.keyframe();
+    assert!(h.verify_from(Some(kf)).is_empty());
+    let mut h = h
+        .crash_restart(
+            plan(hft_sequencer::SnapshotSel::Latest, true, 1, 0),
+            Rerun::default(),
+        )
+        .unwrap();
+    h.bring_up(false);
+    for i in [A1, A2, B1] {
+        h.quote(i, "53000", "53001");
+        h.run();
+        let e = h.s.engine();
+        for slot in &h.s.instances().slots {
+            for (_, group) in slot.groups().unwrap().iter() {
+                assert_eq!(
+                    *e.seq_views().group_pos(slot.account, group.id),
+                    e.ledger.group_pos(slot.account, group.id)
+                );
+            }
+        }
+    }
+}
+
 /// Account 1: 1 000 USDT free at A with a resting a1 buy of 300 USDT; at B a reported available
 /// margin of 800 USDT with a resting b1 Open sell whose margin at 3× is 150 USDT.
 #[test]

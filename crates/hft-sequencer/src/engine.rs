@@ -219,10 +219,15 @@ pub struct Engine {
     pub finished: Option<StepOutcome>,
     /// Group position views (`Views::group_pos` returns references).
     pub(crate) gpos: crate::views::GposCache,
+    /// Derived cache invalidation only; never persisted or used as a business fact.
+    pub(crate) feeds_dirty: bool,
+    pub(crate) gpos_bbo: Option<InstId>,
     /// Recovery bookkeeping.
     pub(crate) rec: crate::recover::RecoverState,
     /// Call trace (feature `testing`).
     pub trace: Trace,
+    #[cfg(feature = "bench-stages")]
+    pub bench_stages: crate::bench_stages::Stages,
     /// Count of strategy timers in the heap.
     pub strat_timers: u32,
     /// `CtxFull` count of `timer_at` over the strategy quota.
@@ -471,6 +476,8 @@ impl Engine {
         };
         Ok(Engine {
             gpos: crate::views::GposCache::new(caps.max_cells_total as usize),
+            feeds_dirty: true,
+            gpos_bbo: None,
             l2_insts: (1..=n_inst)
                 .map(|i| InstId(i as u32))
                 .filter(|i| books.l2(*i).is_some())
@@ -522,6 +529,8 @@ impl Engine {
             finished: None,
             rec: crate::recover::RecoverState::default(),
             trace: Trace::default(),
+            #[cfg(feature = "bench-stages")]
+            bench_stages: crate::bench_stages::Stages::default(),
             strat_timers: 0,
             ctx_full: 0,
             sent_union: vec![0; n_inst + 1],

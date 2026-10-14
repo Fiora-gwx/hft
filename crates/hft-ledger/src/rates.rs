@@ -299,11 +299,49 @@ impl Ledger {
     }
 
     fn refresh_all_summaries_with(&mut self, asset: AssetId) {
-        // A rate change can move the value of every venue holding the asset and the staleness
-        // flags of every venue.
-        let _ = asset;
+        // tick() already handled any global stale-rate boundary. Only cash in this asset,
+        // or spot inventory whose reference pair is quoted in it, can change numerically.
+        // Keep the same summary timestamps even for unaffected venues (snapshot contract).
         for av in 0..self.avs.len() {
-            self.refresh_summary(av);
+            let Some(venue) = self.avs.get(av).map(|s| s.venue) else {
+                continue;
+            };
+            let numeric = self.books.get(av).is_some_and(|b| {
+                b.cash.iter().any(|e| {
+                    let affected = e.asset == asset
+                        || self
+                            .inst(self.asset_s(e.asset).ref_inst)
+                            .is_some_and(|i| i.quote == asset);
+                    affected
+                        && if self.is_quote(venue, e.asset) {
+                            e.total.0 != 0
+                        } else {
+                            self.cfg.valuation.include_baseline && e.baseline.0 != 0
+                                || self.cfg.valuation.include_unassigned && e.unassigned.0 != 0
+                                || b.inv.iter().any(|i| i.asset == e.asset && i.qty.0 != 0)
+                        }
+                })
+            });
+            if numeric {
+                self.refresh_summary(av);
+            } else {
+                // A zero holding still participates in RATE_STALE. Recompute that flag,
+                // but avoid converting every unrelated cash balance again.
+                let stale = self
+                    .books
+                    .get(av)
+                    .is_some_and(|b| b.cash.iter().any(|e| self.rate_stale(e.asset)));
+                if let Some(b) = self.books.get_mut(av) {
+                    b.summary.as_of_ens = self.now;
+                    if stale {
+                        b.summary.flags |= VenueEquityView::RATE_STALE;
+                        b.vflags |= vflags::STALE_RATE;
+                    } else {
+                        b.summary.flags &= !VenueEquityView::RATE_STALE;
+                        b.vflags &= !vflags::STALE_RATE;
+                    }
+                }
+            }
         }
     }
 }

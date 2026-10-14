@@ -23,6 +23,8 @@ pub struct RecordHeader {
 
 BBO 合并的保留顺序、CONFLATED 与缓冲复用规则归 [sequencer](../../crates/hft-sequencer/README.md#bbo-合并与-conflated);缓冲下标不进入事件或快照。
 
+基准内部的有序计数器只用于 [sequencer 阶段诊断](../../crates/hft-sequencer/README.md#延迟与资源契约),不参与决策、不成为事件或快照字段,普通构建不包含这些读取。
+
 | 字段 | 含义 | 来源 | 单位 |
 |---|---|---|---|
 | `ex_ts_ns` | 交易所事件时间(撮合/成交时间,如 Binance `T`) | 报文 | ns(交易所精度多为 ms/µs) |

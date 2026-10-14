@@ -158,6 +158,10 @@ impl MemRecord {
     }
 }
 
+fn record_bytes(r: &MemRecord) -> u64 {
+    24 + r.body.len().div_ceil(8) as u64 * 8
+}
+
 /// One segment of a [`MemJournal`].
 #[derive(Clone, Debug, Default)]
 pub struct MemSegment {
@@ -204,6 +208,7 @@ pub struct MemJournal {
     /// Byte length of all published records (a stand-in for `committed_len`).
     pub committed_len: u64,
     pending_len: u64,
+    boundary_len: u64,
     in_boot: bool,
     physical_seq: bool,
 }
@@ -294,6 +299,9 @@ impl MemJournal {
             .map_or(1, |r| self.record_end_seq(r.seq) + 1);
         self.boundary = self.total;
         self.committed = self.committed.min(self.total);
+        self.pending_len = self.records().map(record_bytes).sum();
+        self.boundary_len = self.pending_len;
+        self.committed_len = self.published().map(record_bytes).sum();
         self.last_non_meta = None;
         dropped
     }
@@ -353,10 +361,11 @@ impl MemJournal {
             self.last_non_meta = Some((si, seg.records.len() - 1));
         }
         self.total += 1;
+        self.pending_len += len;
         if standalone_meta {
             self.boundary = self.total;
+            self.boundary_len = self.pending_len;
         }
-        self.pending_len += len;
         Ok(seq)
     }
 }
@@ -403,6 +412,7 @@ impl BootSink for MemBoot<'_> {
         self.j.in_boot = false;
         self.j.last_non_meta = None;
         self.j.boundary = self.j.total;
+        self.j.boundary_len = self.j.pending_len;
         self.j.publish();
         Ok(Seq(seq))
     }
@@ -468,16 +478,12 @@ impl JournalSink for MemJournal {
             r.flags = RecordFlags(r.flags.0 | RecordFlags::EVENT_END.0);
         }
         self.boundary = self.total;
+        self.boundary_len = self.pending_len;
     }
     fn publish(&mut self) {
         self.publishes += 1;
         if self.boundary > self.committed {
-            // Recompute the published byte length (records are 8-aligned; header 24 B).
-            let mut len = 0u64;
-            for r in self.records().take(self.boundary) {
-                len += 24 + r.body.len().div_ceil(8) as u64 * 8;
-            }
-            self.committed_len = len;
+            self.committed_len = self.boundary_len;
             self.committed = self.boundary;
         }
     }
@@ -542,6 +548,7 @@ impl JournalSink for MemJournal {
             r.flags = RecordFlags(r.flags.0 | RecordFlags::EVENT_END.0);
         }
         self.boundary = self.total;
+        self.boundary_len = self.pending_len;
         self.last_non_meta = None;
         self.publish();
         self.segments.push(MemSegment {

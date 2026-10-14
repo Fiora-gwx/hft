@@ -45,6 +45,8 @@ macro_rules! noexec_views {
 pub struct GposCache {
     pub keys: Vec<(AccountId, GroupId)>,
     pub vals: Vec<GroupPosView>,
+    by_inst: Vec<Vec<usize>>,
+    initialized: bool,
 }
 
 static EMPTY_GPOS: GroupPosView = GroupPosView::EMPTY;
@@ -55,6 +57,8 @@ impl GposCache {
         GposCache {
             keys: Vec::with_capacity(cap + 16),
             vals: Vec::with_capacity(cap + 16),
+            by_inst: Vec::new(),
+            initialized: false,
         }
     }
     /// Sets the cell list (sorted, command path).
@@ -65,12 +69,45 @@ impl GposCache {
         self.keys.dedup();
         self.vals.clear();
         self.vals.resize(self.keys.len(), GroupPosView::EMPTY);
+        self.initialized = false;
     }
-    /// Recomputes every value from the ledger.
-    pub fn refresh(&mut self, l: &Ledger) {
+    /// Rebuilds the group-leg reverse index on parameter installation / recovery only.
+    pub(crate) fn index_insts<S: hft_strategy_sdk::StrategySet>(
+        &mut self,
+        instances: &crate::strategies::Instances<S>,
+    ) {
+        self.by_inst.clear();
+        for (ix, &(a, g)) in self.keys.iter().enumerate() {
+            if let Some(sp) = instances.spec(a, g) {
+                for leg in sp.legs.iter().take(usize::from(sp.n_legs)) {
+                    let i = leg.inst.0 as usize;
+                    self.by_inst.resize_with(self.by_inst.len().max(i + 1), Vec::new);
+                    if let Some(row) = self.by_inst.get_mut(i)
+                        && row.last() != Some(&ix)
+                    {
+                        row.push(ix);
+                    }
+                }
+            }
+        }
+    }
+    /// BBO valuation changes group rows for that instrument only. Other inputs can change
+    /// positions, fees or group tables and retain the full refresh. Initialize all rows once.
+    pub fn refresh(&mut self, l: &Ledger, bbo: Option<InstId>) {
+        if self.initialized
+            && let Some(i) = bbo
+        {
+            for ix in self.by_inst.get(i.0 as usize).into_iter().flatten() {
+                if let (Some(k), Some(v)) = (self.keys.get(*ix), self.vals.get_mut(*ix)) {
+                    *v = l.group_pos(k.0, k.1);
+                }
+            }
+            return;
+        }
         for (k, v) in self.keys.iter().zip(self.vals.iter_mut()) {
             *v = l.group_pos(k.0, k.1);
         }
+        self.initialized = true;
     }
     pub fn get(&self, a: AccountId, g: GroupId) -> &GroupPosView {
         match self.keys.binary_search(&(a, g)) {

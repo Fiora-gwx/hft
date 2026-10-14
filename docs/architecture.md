@@ -46,7 +46,7 @@ warm 任务(不在 tick-to-trade 路径,不占热核)
   persist           热段 → 冷副本复制与 fdatasync;段预创建与退役(会阻塞,独占线程)
 ```
 
-**取环**:每个 venue 的 BBO 流与其他行情流走不同连接、不同环。sequencer 优先级 `ctl > rep(实盘回报)> bbo > advice > md > rep-sim`;md、bbo 与 advice **逐条处理**:每条 md 之后查看 ctl、实盘 rep、bbo 的环头,每条 bbo 或 advice 之后查看 ctl 与实盘 rep 的环头,非空先处理它们;md 每轮另有时间片限额,`rep-sim` 每轮至多 `sim_max_per_round`(参数归 [hft-sequencer](../crates/hft-sequencer/README.md))。取出顺序写进 journal,确定性不变。同一 inst 的 BBO 积压允许合并,写进记录 `flags`。分档深度(TopN)每条快照整替换该簿;可选的增量深度按交易所消息整条成 `L2Batch`;都整条应用后才调用策略。同一事件派发给多个策略实例时,绑定实盘账户的实例在前。模拟账户的 `OutMsg` 路由到 sim 出环,不进任何 gw。
+**取环**:每个 venue 的 BBO 流与其他行情流走不同连接、不同环。sequencer 优先级 `ctl > rep(实盘回报)> bbo > advice > md > rep-sim`;md、bbo 与 advice **逐条处理**:每条 md 之后查看 ctl、实盘 rep、bbo 的环头,每条 bbo 或 advice 之后查看 ctl 与实盘 rep 的环头,非空先处理它们;md 每轮另有时间片限额,`rep-sim` 每轮至多 `sim_max_per_round`(参数归 [hft-sequencer](../crates/hft-sequencer/README.md))。取出顺序写进 journal,确定性不变。同一 inst 的 BBO 积压允许合并,写进记录 `flags`。分档深度(TopN)每条快照整替换该簿;可选的增量深度按交易所消息整条成 `L2Batch`;都整条应用后才调用策略。按接收者派发,实盘优先;BBO 视图按 inst 刷新。模拟账户的 `OutMsg` 路由到 sim 出环,不进任何 gw。
 
 **收包**只用中断驱动:交易网卡 IRQ 在专用 IRQ 核,热线程只做非阻塞 `recvmsg`,busy poll 全关([T12](hot-path-rules.md#线程t))。kill 字是启动期静态分配的 `&'static [KillWord]`(每 gw 一个),sequencer 写、gw 读。线程与核的装配只在 `apps/hft-core`;库 crate 不创建线程。
 
@@ -159,4 +159,3 @@ journal 记录分三类:**Input**(进入决策的一切,含实盘驱动当场做
 | `Position`、`FillDelta`、`Ledger`、`PnlBreakdown`、journal 冷消费者 `JournalLedger`;模拟撮合器与模拟账户 | [hft-ledger](../crates/hft-ledger/README.md);[hft-sim](../crates/hft-sim/README.md) |
 | `LiveDriver`、`RecoverDriver`、`VerifyDriver`、`engine_ns` 的累加、恢复结束时刻 `recovery_end` 与平移的调度 | [hft-sequencer](../crates/hft-sequencer/README.md) |
 | 外部 venue 帧、tx 生命周期与链上 profile(optional) | [hft-ext-proto](../crates/hft-ext-proto/README.md)、[hft-chain-evm](../crates/hft-chain-evm/README.md) |
-

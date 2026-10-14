@@ -123,3 +123,43 @@ fn led_215_realized_not_revalued() {
     // USDC cash 100 100 at 1.0010.
     assert_eq!(l.venue_book(A2, S3).summary.quote_cash, n("100200.1"), "step 2");
 }
+
+#[test]
+fn led_210_reference_quote_preserves_full_summary_projection() {
+    for held in [false, true] {
+        let mut l = booted();
+        boot_a2(&mut l, 0, "100000", "10000");
+        if held {
+            l.apply_fill(&f(Buy, BTC_S1, "0.1", "60000", "0", USDT, G1, 0), s(1));
+        }
+        // Includes unrelated USDT-only books, nonzero spot inventory, stale-to-fresh changes,
+        // and the opposite boundary where a different currency becomes stale on this quote.
+        for (inst, bid, ask, t) in [
+            (BTC_S1, "61000", "61001", s(5)),
+            (USDC_S1, "0.95", "0.96", s(61)),
+            (BNB_S1, "610", "611", s(61) + 1),
+            (BTC_S1, "62000", "62001", s(122)),
+        ] {
+            l.on_ref_px(inst, px(bid), px(ask), t);
+            let before: Vec<_> = [(A1, S1), (A1, P2), (A2, S3), (A2, P2)]
+                .map(|(a, v)| (l.venue_book(a, v).summary, l.venue_book(a, v).vflags))
+                .into();
+            // A complete recomputation at the same run start and event time is an independent
+            // oracle for both the numeric projection and its flags/timestamp.
+            let mut oracle = l.clone();
+            oracle.on_run_start(0);
+            // Restore event time and force the full sweep without changing a quote.
+            oracle.on_day_roll(t);
+            let after: Vec<_> = [(A1, S1), (A1, P2), (A2, S3), (A2, P2)]
+                .map(|(a, v)| (oracle.venue_book(a, v).summary, oracle.venue_book(a, v).vflags))
+                .into();
+            // on_run_start resets the timestamp to zero; explicitly compare values and flags.
+            for ((mut a, af), (mut b, bf)) in before.into_iter().zip(after) {
+                assert_eq!(a.as_of_ens, t);
+                a.as_of_ens = 0;
+                b.as_of_ens = 0;
+                assert_eq!((a, af), (b, bf));
+            }
+        }
+    }
+}

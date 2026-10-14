@@ -22,6 +22,8 @@ live = ["hft-journal/writer"]
 replay-io = []
 # Test hooks (call trace, state access); only enabled from [dev-dependencies] (cargo xtask deps rule 12).
 testing = []
+# Opt-in stage counters for the bench harness only; absent from production builds.
+bench-stages = ["testing", "live", "hft-journal/mem-backend"]
 testkit = ["hft-oms/testkit", "hft-exec/testkit"]
 
 [dependencies]
@@ -62,3 +64,8 @@ path = "tests/sdk_alloc.rs"
 [[bench]]
 name = "seq"
 harness = false
+
+[[bench]]
+name = "bbo_stages"
+harness = false
+required-features = ["bench-stages"]
