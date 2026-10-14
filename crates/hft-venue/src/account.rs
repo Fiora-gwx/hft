@@ -336,7 +336,17 @@ impl<P: AccountProtocol, T: Transport> Client<P, T> {
                 if let Some(uid) = session_uid
                     && uid != self.state.config.as_ref().map(|c| c.venue_uid)
                 {
-                    return Err(Error::Protocol(q.clone()));
+                    let unavailable = uid == Some([0; 24])
+                        || self.state.config.as_ref().is_some_and(|c| c.venue_uid == [0; 24]);
+                    if !unavailable
+                        || self.rd.account(self.account).uid_policy != hft_refdata::UidPolicy::Unverifiable
+                    {
+                        return Err(Error::Protocol(q.clone()));
+                    }
+                    if let Some(h) = &mut self.state.config {
+                        h.venue_uid.fill(0);
+                        h.uid_keys = 0;
+                    }
                 }
                 if self.boot && matches!(q, Query::OpenOrders { .. }) {
                     if !self.state.orders.is_empty() {

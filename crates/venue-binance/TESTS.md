@@ -1752,6 +1752,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 ### BIN-173 死手刷新对每个有挂单的 inst 发一个签名 REST 请求
 
+Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173_deadman_requests_and_response_strings` 验证。
+
 - 规则:[6. 死手与会话维护](README.md#6-死手与会话维护)、[下单:WS API](README.md#下单ws-api)
 - 级别:table
 - 里程碑:M3
@@ -1801,6 +1803,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | BIN-174.22 | `check_ctl` | 两者通过(`-1021`、`-1003`/`-1015`/429/418、`listenKeyExpired`/`eventStreamTerminated`) |
 
 ### BIN-175 只读查询的请求与解码通过 check_ro
+
+当前 warm 入口由 `crates/venue-binance/tests/readonly.rs` 验证签名、整页失败原子性、分页与外来身份；FundingFlow 保留为该表未完成项，实额查询沿用 FundingHistoryProtocol。
 
 - 规则:[只读查询](README.md#只读查询)、[hft-venue-proto 契约 31](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table

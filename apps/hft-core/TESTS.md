@@ -1787,6 +1787,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 ### CORE-169 snap-fetch 复用第一条 `stream = md` 的 `src_ip`,acct-fetch 复用该账户的 `gw.src_ip`
 
+账户入口变长 MarginReport 与容量截断由 `src/venues.rs::core_169_margin_items_cross_account_ingress` 验证。
+
 - 规则:[配置文件字段](README.md#配置文件字段)
 - 级别:unit
 - 里程碑:M3

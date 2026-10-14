@@ -790,8 +790,19 @@ fn publish_account(tx: &mut ByteProducer, state: &State) -> Result<(), Error> {
     for f in &state.funding {
         records.push((hft_event::EventKind::FUNDING_SETTLE, f.as_bytes().to_vec()));
     }
-    if let Some(m) = state.margin {
-        records.push((hft_event::EventKind::MARGIN_REPORT, m.as_bytes().to_vec()));
+    if let Some(mut m) = state.margin {
+        // Event-body capacity, including its header; a missing ADL value stays 255.
+        let max = (16_384 - size_of::<hft_event::MarginReportHdr>()) / size_of::<hft_event::MarginItem>();
+        let n = state.margin_items.len().min(max);
+        m.n = n as u16;
+        if n != state.margin_items.len() {
+            m.mflags |= hft_event::MarginReportHdr::ITEMS_TRUNCATED;
+        }
+        let mut body = m.as_bytes().to_vec();
+        for item in state.margin_items.iter().take(n) {
+            body.extend_from_slice(item.as_bytes());
+        }
+        records.push((hft_event::EventKind::MARGIN_REPORT, body));
     }
     for (kind, body) in records {
         if !io::write_record(tx, kind, &[&body]) {
@@ -821,4 +832,40 @@ pub fn registered(protocol: &str, id: VenueId) -> Result<(), Error> {
         return Err(Error::config("UnknownVenue", "protocol and VenueId differ"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod account_ingress_tests {
+    use super::*;
+    use hft_event::{MarginItem, MarginReportHdr};
+    use hft_types::{InstId, Px};
+    use zerocopy::{FromBytes, FromZeros};
+    #[test]
+    fn core_169_margin_items_cross_account_ingress() {
+        let (mut tx, mut rx) = hft_rt::byte_spsc(131_072, hft_rt::Backing::Heap).unwrap();
+        let mut state = State {
+            margin: Some(MarginReportHdr::new_zeroed()),
+            ..State::default()
+        };
+        state.margin_items = (0..1100)
+            .map(|i| MarginItem {
+                inst: InstId(i + 1),
+                adl_quantile: 255,
+                _pad: [0; 3],
+                liq_px: Px(100 + i64::from(i)),
+            })
+            .collect();
+        publish_account(&mut tx, &state).unwrap();
+        let (wire, body) = hft_event::CtlRecordHdr::read_from_prefix(rx.peek().unwrap()).unwrap();
+        assert_eq!(wire.kind, hft_event::EventKind::MARGIN_REPORT);
+        let (h, items) = MarginReportHdr::read_from_prefix(body).unwrap();
+        assert_eq!(h.n, 1020);
+        assert_ne!(h.mflags & MarginReportHdr::ITEMS_TRUNCATED, 0);
+        assert_eq!(items.len(), 1020 * 16);
+        let (item, _) = MarginItem::read_from_prefix(items).unwrap();
+        assert_eq!(
+            (item.inst, item.liq_px, item.adl_quantile),
+            (InstId(1), Px(100), 255)
+        );
+    }
 }

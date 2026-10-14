@@ -46,7 +46,7 @@ macro_rules! implementation {
 implementation!(crate::Usdm, true);
 implementation!(crate::Spot, false);
 
-fn request(
+pub(crate) fn request(
     fut: bool,
     cfg: &VenueCfg,
     k: &Credential,
@@ -111,6 +111,29 @@ fn request(
     if matches!(q, Query::ListenKey | Query::Keepalive) {
         return Ok(());
     }
+    sign_query(cfg, k, now, out)
+}
+
+pub(crate) fn sign_request(
+    cfg: &VenueCfg,
+    k: &Credential,
+    now: i64,
+    out: &mut RestReqBuf,
+) -> Result<(), ProtoErr> {
+    if k.api_key.is_empty() || k.secret.0.is_empty() || now < 0 || cfg.stale_guard_ms == 0 {
+        return Err(ProtoErr::Cfg);
+    }
+    out.headers.push(b"X-MBX-APIKEY: ")?;
+    out.headers.push(k.api_key.as_slice())?;
+    out.headers.push(b"\r\n")?;
+    out.redacted = true;
+    sign_query(cfg, k, now, out)
+}
+
+fn sign_query(cfg: &VenueCfg, k: &Credential, now: i64, out: &mut RestReqBuf) -> Result<(), ProtoErr> {
+    let path = core::str::from_utf8(out.path_query.as_slice())
+        .map_err(|_| ProtoErr::Cfg)?
+        .to_owned();
     let args = format!("timestamp={now}&recvWindow={}", cfg.stale_guard_ms);
     let mut query = path
         .split_once('?')
@@ -430,6 +453,7 @@ fn decode(
                     });
                 }
             }
+            s.position_margin_items();
         }
         Query::OpenOrders { .. } => {
             let rows: Vec<Order> = from(b)?;
@@ -451,10 +475,20 @@ fn decode(
             #[serde(rename_all = "camelCase")]
             struct Ack {
                 symbol: String,
-                countdown_time: u32,
+                countdown_time: Countdown,
+            }
+            #[derive(Deserialize)]
+            #[serde(untagged)]
+            enum Countdown {
+                Number(u32),
+                Text(String),
             }
             let r: Ack = from(b)?;
-            if &r.symbol != symbol || r.countdown_time != *timeout_ms {
+            let count = match r.countdown_time {
+                Countdown::Number(n) => n,
+                Countdown::Text(s) => s.parse::<u32>().map_err(|_| DecodeErr::Number)?,
+            };
+            if &r.symbol != symbol || count != *timeout_ms {
                 return Err(DecodeErr::Shape);
             }
         }

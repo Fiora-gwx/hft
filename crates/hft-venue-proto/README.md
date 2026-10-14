@@ -583,11 +583,11 @@ pub enum ExchIdHint { Resolved { epoch: u16, slot: SlotId, gen: u32 }, Recorded,
 `FundingHistoryProtocol` 由需要实际资金费账单的永续产品线实现。`funding_request` 生成带签名的 GET(`redacted=true`),`funding_decode` 只在 warm 任务调用,返回 `FundingPage`。`FundingQuery` 固定包含两端均包含的 UTC 毫秒窗口及页码/游标;`FundingBill` 带交易所账单 ID、inst、原始时刻与有符号现金金额(`Notional`),金额不取费率或余额。页面错误不产出部分结果;只有 `next=None` 才表示完整窗口。HTTP 状态、业务错误与分页失败必须交还调用者重试。
 ### Warm 账户扩展
 
-`account::AccountProtocol` 提供纯 `account_request` / `account_decode`，覆盖规则、账户模式/权限、余额/持仓、撤销遗留订单、listenKey 和结算流水。State 是一轮观察结果，不拥有账本；允许 warm 分配。规则使用 refdata 的 wire 指数归一化后精确匹配定点配置，金额转 Notional 时 HalfEven；错误不带凭证或响应正文。
+`account::AccountProtocol` 提供纯 `account_request` / `account_decode`，覆盖规则、账户模式/权限、余额/持仓、撤销遗留订单、listenKey 和结算流水。State 是一轮观察结果，不拥有账本；允许 warm 分配。`margin_items` 保存本轮非零持仓的强平价，未观察到 ADL 时为 255；消失持仓的 PositionReport 为零，但不留下旧 MarginItem。规则使用 refdata 的 wire 指数归一化后精确匹配定点配置，金额转 Notional 时 HalfEven；错误不带凭证或响应正文。
 
 ## 已知限制与后续工作
 
-- **M1.5 实现范围**:trait 已含行情、会话、下单编码、回报解码、BBO 补帧与死手、限速观测各节;账户查询(`AcctCtx`、`AcctScratch`、`acct_queries`/`acct_request`/`acct_decode`/`acct_finish`)与只读查询(`ro_request`/`ro_decode`、`RoSink`)随 M3 的 acct-fetch 与 reconciler 加入,在此之前 venue 实现不需要也不能提供它们。
+- **M1.5 实现范围**:trait 已含行情、会话、下单编码、回报解码、BBO 补帧与死手、限速观测各节;账户查询(`AcctCtx`、`AcctScratch`、`acct_queries`/`acct_request`/`acct_decode`/`acct_finish`)仍由后续 acct-fetch 接口统一；只读查询 `ro_request`/`ro_decode` 与 `RoSink` 可供 warm reconciler 使用，默认实现返回 Unsupported/UnknownClass。两个在用产品线族支持 OpenOrders/Fills/Balance/Positions（现货无 Positions）；FundingFlow 由带固定两端窗口的 FundingHistoryProtocol 承载，RoKind::FundingFlow 尚不支持。
 - **帧单位是 WS 消息**:FIX(Binance Spot、Bybit spot)需要非 WS 分帧,可选扩展:接入 FIX 时扩展 `MsgOp` 与 hft-net。
 - **Hyperliquid 自建节点**输出本地文件而非 WS,不适合本 trait 的帧模型;需要时另开 Agent Note 设计文件尾随变体。
 - **账户查询只走 REST 池**:部分所的 WS API 也提供账户查询(Binance ws-fapi 的账户方法,待核实,见 venue-binance 开发备忘第 10 条);改走 WS 只换 `acct_request` 的输出形式,接口不变,触发条件:REST 权重成为瓶颈。

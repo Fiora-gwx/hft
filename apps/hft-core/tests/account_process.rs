@@ -121,6 +121,7 @@ fn rd_shift(shift: i8) -> &'static RefData {
 struct Server {
     cancelled: bool,
     settings: usize,
+    uid_missing: bool,
     drift: bool,
     hedge: bool,
     funding: bool,
@@ -181,6 +182,12 @@ impl Transport for Mock {
             } else {
                 panic!("unexpected mock endpoint")
             };
+            let data = if s.uid_missing {
+                data.replace("\"uid\":\"123\",", "")
+                    .replace("\"userId\":\"123\",", "")
+            } else {
+                data
+            };
             format!(r#"{{"code":"00000","data":{data}}}"#)
         } else {
             if !path.contains("exchangeInfo") {
@@ -233,7 +240,10 @@ impl Transport for Mock {
 }
 fn exercise<P: AccountProtocol>(bitget: bool) {
     let rd = rd();
-    let server = Arc::new(Mutex::new(Server::default()));
+    let server = Arc::new(Mutex::new(Server {
+        uid_missing: bitget,
+        ..Server::default()
+    }));
     let key = Credential {
         api_key: ArrayBuf::from_bytes(b"DUMMY").unwrap(),
         secret: SecretBuf(ArrayBuf::from_bytes(b"dummy-secret").unwrap()),
@@ -283,6 +293,10 @@ fn exercise<P: AccountProtocol>(bitget: bool) {
         let m = baseline.margin.as_ref().unwrap();
         assert_eq!(m.maint_margin.0, 50_000, "USD maintenance converted to USDT");
         assert_eq!(m.margin_ratio.0, 500_000);
+        assert_eq!(baseline.config.unwrap().uid_keys, 0);
+        assert_eq!(baseline.margin_items.len(), 1);
+        assert_eq!(baseline.margin_items[0].liq_px, Px(10_000_000));
+        assert_eq!(baseline.margin_items[0].adl_quantile, 255);
     }
     assert_eq!(baseline.balances[0].free.0, 10_000_000_000);
     assert_eq!(baseline.positions[0].qty.0, if bitget { -100000 } else { 100000 });

@@ -32,7 +32,9 @@ mod line;
 mod market;
 mod md;
 mod orders;
+mod readonly;
 mod reports;
+mod rest_orders;
 mod session;
 mod sign;
 mod user_stream;
@@ -50,8 +52,9 @@ use hft_types::{AccountId, AssetId, ClientOrderId, InstId, MarketKind, VenueId};
 use hft_venue_proto::{
     Align, BootCall, ControlHint, Credential, DeadManOut, DeadManSpec, DecodeErr, EncodeErr, EndpointSpec,
     HeartbeatSpec, LoginResult, LoginStep, MdOutcome, MdSink, MsgOp, OrderChannel, Peek, ProtoErr, RateRule,
-    RawSeq, ReportOutcome, ReportSink, RestReqBuf, ResyncMethod, Role, RouteId, RouteSpec, RxMeta, SeqRule,
-    SnapshotInfo, StaleGuard, SubFrames, SubSpec, TargetRef, VenueCfg, VenueProtocol, WallClock,
+    RawSeq, ReportOutcome, ReportSink, RestOrigin, RestReqBuf, ResyncMethod, Role, RouteId, RouteSpec,
+    RxMeta, SeqRule, SnapshotInfo, StaleGuard, SubFrames, SubSpec, TargetRef, VenueCfg, VenueProtocol,
+    WallClock,
 };
 
 /// USDT-M perpetual (`binance-usdm`).
@@ -419,6 +422,26 @@ macro_rules! venue_impl {
             ) -> Result<ReportOutcome, DecodeErr> {
                 reports::decode_report($line, rd, ctx, reports::RClass::from(c), payload, rx, out)
             }
+            fn ro_request(
+                rd: &RefData,
+                t: &Templates,
+                acct: AccountId,
+                q: &hft_venue_proto::RoQuery,
+                clk: &WallClock,
+                out: &mut RestReqBuf,
+            ) -> Result<(), EncodeErr> {
+                readonly::request($line, rd, t, acct, q, clk, out)
+            }
+            fn ro_decode(
+                rd: &RefData,
+                acct: AccountId,
+                q: &hft_venue_proto::RoQuery,
+                status: u16,
+                body: &[u8],
+                out: &mut impl hft_venue_proto::RoSink,
+            ) -> Result<hft_venue_proto::RoPage, DecodeErr> {
+                readonly::decode::<Self>($line, rd, acct, q, status, body, out)
+            }
             fn rate_rules() -> &'static [RateRule] {
                 caps::rate_rules($line)
             }
@@ -429,15 +452,35 @@ macro_rules! venue_impl {
                 caps::dead_man($line)
             }
             fn dead_man_refresh(
-                _rd: &RefData,
-                _t: &Templates,
-                _timeout_ms: u32,
-                _insts: &[InstId],
-                _clk: &WallClock,
-                _out: &mut DeadManOut,
+                rd: &RefData,
+                t: &Templates,
+                timeout_ms: u32,
+                insts: &[InstId],
+                clk: &WallClock,
+                out: &mut DeadManOut,
             ) -> Result<(), EncodeErr> {
-                // USDT-M countdownCancelAll is a signed REST request (M3); spot has none.
-                Err(EncodeErr::Unsupported(GwOp::DeadManRefresh))
+                rest_orders::deadman($line, rd, t, timeout_ms, insts, clk, out)
+            }
+            fn encode_rest(
+                rd: &RefData,
+                t: &Templates,
+                c: &GwCmd,
+                _tgt: &TargetRef,
+                clk: &WallClock,
+                out: &mut RestReqBuf,
+            ) -> Result<(), EncodeErr> {
+                rest_orders::cancel_all($line, rd, t, c, clk, out)
+            }
+            fn decode_rest(
+                _rd: &RefData,
+                _ctx: &mut Self::GwCtx,
+                req: &RestOrigin,
+                status: u16,
+                body: &[u8],
+                _rx: &RxMeta,
+                _out: &mut impl ReportSink,
+            ) -> Result<ReportOutcome, DecodeErr> {
+                rest_orders::decode(req, status, body)
             }
         }
     };

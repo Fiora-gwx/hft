@@ -433,3 +433,117 @@ fn bin_076_no_batch_no_per_order_sign() {
     assert!(!Usdm::needs_per_order_signing());
     assert!(!Spot::needs_per_order_signing());
 }
+
+#[test]
+fn bin_072_usdm_cancel_all_rest() {
+    use hft_venue_proto::{Method, ReportCtl, ReqRef, RestOrigin, RestReqBuf, RestWhat};
+    let c = cmd(GwOp::CancelAll, U_BTC);
+    let target = tgt(cid(U, 3, 0, 0), 0);
+    let mut r = RestReqBuf::default();
+    Usdm::encode_rest(rd(), &tpl::<Usdm>(1500), &c, &target, &WC, &mut r).unwrap();
+    assert_eq!(r.method, Method::Delete);
+    assert!(r.redacted);
+    assert_eq!(
+        std::str::from_utf8(r.path_query.as_slice()).unwrap(),
+        "/fapi/v1/allOpenOrders?symbol=BTCUSDT&timestamp=1790000000000&recvWindow=1500&signature=381745f38cbbfe1f631e935ec6dbf44fe2f5925a7aafd70800b6b6204c139152"
+    );
+    assert_eq!(
+        Usdm::encode_rest(
+            rd(),
+            &tpl::<Usdm>(1500),
+            &cmd(GwOp::CancelAll, InstId(0)),
+            &target,
+            &WC,
+            &mut r
+        ),
+        Err(EncodeErr::Unsupported(GwOp::CancelAll))
+    );
+    let req = RestOrigin {
+        what: RestWhat::Order,
+        req: Some(ReqRef {
+            slot: 0,
+            r#gen: 0,
+            op: GwOp::CancelAll,
+        }),
+        inst: U_BTC,
+    };
+    let mut ctx = venue_binance::GwCtx::default();
+    let mut sink = support::RepSink::default();
+    let o = Usdm::decode_rest(
+        rd(),
+        &mut ctx,
+        &req,
+        200,
+        br#"{"code":200}"#,
+        &support::RX,
+        &mut sink,
+    )
+    .unwrap();
+    assert_eq!(o.events, 0);
+    assert!(o.outcome_unknown.is_none());
+    let o = Usdm::decode_rest(rd(), &mut ctx, &req, 429, b"", &support::RX, &mut sink).unwrap();
+    assert_eq!(o.ctl, ReportCtl::RateLimited);
+    assert_eq!(o.outcome_unknown, req.req);
+    let o = Usdm::decode_rest(
+        rd(),
+        &mut ctx,
+        &req,
+        200,
+        br#"{"code":-1021}"#,
+        &support::RX,
+        &mut sink,
+    )
+    .unwrap();
+    assert_eq!(o.ctl, ReportCtl::ClockSkew);
+    assert_eq!(o.outcome_unknown, req.req);
+}
+
+#[test]
+fn bin_173_deadman_requests_and_response_strings() {
+    use hft_venue_proto::{
+        DeadManOut, Method,
+        account::{AccountProtocol, Query, State},
+    };
+    let mut out = DeadManOut::default();
+    Usdm::dead_man_refresh(
+        rd(),
+        &tpl::<Usdm>(1500),
+        30_000,
+        &[U_BTC, support::U_ETH],
+        &WC,
+        &mut out,
+    )
+    .unwrap();
+    assert_eq!(out.reqs.len(), 2);
+    for r in &out.reqs {
+        assert_eq!(r.method, Method::Post);
+        assert!(r.redacted);
+        assert!(
+            std::str::from_utf8(r.path_query.as_slice())
+                .unwrap()
+                .contains("countdownTime=30000")
+        );
+    }
+    let q = Query::DeadMan {
+        symbol: "BTCUSDT".into(),
+        timeout_ms: 30_000,
+    };
+    for body in [
+        br#"{"symbol":"BTCUSDT","countdownTime":"30000"}"#.as_slice(),
+        br#"{"symbol":"BTCUSDT","countdownTime":30000}"#.as_slice(),
+    ] {
+        Usdm::account_decode(rd(), ACCT, &q, 200, body, 1, &mut State::default()).unwrap();
+    }
+    assert!(
+        Usdm::account_decode(
+            rd(),
+            ACCT,
+            &q,
+            200,
+            br#"{"symbol":"BTCUSDT","countdownTime":"0"}"#,
+            1,
+            &mut State::default()
+        )
+        .is_err()
+    );
+}

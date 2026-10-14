@@ -1,6 +1,8 @@
 //! Warm account bootstrap wire contract. No I/O; all decimal conversion is exact.
 use crate::{Credential, DecodeErr, ProtoErr, RestReqBuf, VenueCfg, VenueProtocol};
-use hft_event::{AccountConfigReportHdr, BalanceReport, LeverageItem, MarginReportHdr, PositionReport};
+use hft_event::{
+    AccountConfigReportHdr, BalanceReport, LeverageItem, MarginItem, MarginReportHdr, PositionReport,
+};
 use hft_refdata::RefData;
 use hft_types::{AccountId, InstId};
 
@@ -30,9 +32,27 @@ pub struct State {
     pub balances: Vec<BalanceReport>,
     pub positions: Vec<PositionReport>,
     pub margin: Option<MarginReportHdr>,
+    pub margin_items: Vec<MarginItem>,
     pub orders: Vec<OpenOrder>,
     pub cursor: String,
     pub funding: Vec<hft_event::FundingSettle>,
+}
+
+impl State {
+    /// Only actual nonzero positions contribute margin items. No ADL observation means unknown.
+    pub fn position_margin_items(&mut self) {
+        self.margin_items = self
+            .positions
+            .iter()
+            .filter(|p| p.qty.0 != 0)
+            .map(|p| MarginItem {
+                inst: p.inst,
+                adl_quantile: 255,
+                _pad: [0; 3],
+                liq_px: p.liq_px,
+            })
+            .collect();
+    }
 }
 
 /// Separate warm extension: implementations may allocate; no hot decoder depends on it.

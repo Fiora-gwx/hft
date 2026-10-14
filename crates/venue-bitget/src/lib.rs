@@ -34,6 +34,7 @@ mod md;
 #[cfg(feature = "mock")]
 pub mod mock;
 mod orders;
+mod readonly;
 mod reports;
 mod session;
 mod sign;
@@ -485,6 +486,26 @@ macro_rules! venue_impl {
                 out: &mut impl ReportSink,
             ) -> Result<ReportOutcome, DecodeErr> {
                 reports::decode_report($line, rd, ctx, c, payload, rx, out)
+            }
+            fn ro_request(
+                rd: &RefData,
+                t: &Templates,
+                acct: AccountId,
+                q: &hft_venue_proto::RoQuery,
+                clk: &WallClock,
+                out: &mut RestReqBuf,
+            ) -> Result<(), EncodeErr> {
+                readonly::request($line, rd, t, acct, q, clk, out)
+            }
+            fn ro_decode(
+                rd: &RefData,
+                acct: AccountId,
+                q: &hft_venue_proto::RoQuery,
+                status: u16,
+                body: &[u8],
+                out: &mut impl hft_venue_proto::RoSink,
+            ) -> Result<hft_venue_proto::RoPage, DecodeErr> {
+                readonly::decode::<Self>($line, rd, acct, q, status, body, out)
             }
             fn rate_rules() -> &'static [RateRule] {
                 caps::rate_rules()

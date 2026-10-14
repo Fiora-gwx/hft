@@ -173,7 +173,7 @@ pub(crate) fn decode_report(
 }
 
 /// Empty `OrderEvent` of this line and account carrying the frame's receive points.
-fn blank(line: Line, account: AccountId, rx: &RxMeta) -> OrderEvent {
+pub(crate) fn blank(line: Line, account: AccountId, rx: &RxMeta) -> OrderEvent {
     OrderEvent {
         venue: line.venue(),
         account,
@@ -418,7 +418,7 @@ fn status_of(s: &str) -> Result<St, DecodeErr> {
 }
 
 /// Liquidation / ADL / delivery marker of a perpetual order (README "外部成交识别").
-fn marker(trade_side: &str, delegate_type: &str) -> Option<ExternalCause> {
+pub(crate) fn marker(trade_side: &str, delegate_type: &str) -> Option<ExternalCause> {
     match delegate_type {
         "liquidation" => return Some(ExternalCause::Liquidation),
         "delivery_close_long" | "delivery_close_short" => return Some(ExternalCause::Delivery),
