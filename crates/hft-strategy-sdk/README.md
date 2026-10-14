@@ -1142,16 +1142,17 @@ hft_strategy_sdk::strategy_set! {
 
 模式状态(期望模式、cap、有效模式)的唯一归属是 [hft-risk `mode`](../hft-risk/README.md);`RunMode` 枚举与线上编码在 [hft-types](../hft-types/README.md)(`Shadow = 1`、`CloseOnly = 3`、`Live = 4`);优先级表在 [control-plane](../../docs/subsystems/control-plane.md)。本表规定**策略发出的意图**在各有效模式下怎么处理(cell = (实例, group))。模拟不是运行模式:模拟账户上的策略照常以这些模式运行。
 
-| 有效模式 | 策略 `place` 的 Open(含无链接的 `Hedge`:hft-risk 分类为 Open) | 策略 `place` 的 Reduce/Flatten | 策略链接产生的第二腿(OMS 发出) | 目标的增仓部分 | 目标的减仓部分 |
+| 有效模式 | 策略 `place` 的 Open(含不能减少组裸露的无链接 Hedge) | 策略 `place` 的 Reduce/Flatten/风险递减 Hedge | 策略链接产生的第二腿(OMS 发出) | 目标的增仓部分 | 目标的减仓部分 |
 |---|---|---|---|---|---|
-| `Shadow` | 只记录(`SHADOW`) | 只记录 | 不经模式门(第一腿只记录,不会有成交) | 目标照常接受;第一笔切片记为 `SHADOW` 决策后 `Stuck(Shadow)`,不重复出切片 | 同左 |
+| `Shadow` | 风控评估后只记录(`SHADOW`) | 同左 | 不经模式门(第一腿只记录,不会有成交) | 目标照常接受;第一笔切片记为 `SHADOW` 决策后 `Stuck(Shadow)`,不重复出切片 | 同左 |
 | `CloseOnly` | 拒绝(`CLOSE_ONLY`) | 出环 | 出环(不经模式门) | 不发(`Stuck(Gated(CLOSE_ONLY))`,目标保留) | 执行 |
 | `Live` | `open_allowed[group]` 为真才出环,否则只记录(`MODE_SHADOW`) | 出环 | 出环(不经模式门) | `open_allowed` 为真才执行,否则同 Shadow 行 | 执行 |
 
 - **结果回填**:`Shadowed` = 该订单意图只被记录——有效模式 Shadow(决策记录头带 `SHADOW` 位)或 Live 下 `open_allowed = false` 的 Open(`OrderDecision.reject = MODE_SHADOW`);`Rejected(bits)` 只用于门控拒绝,`bits` 不含 `MODE_SHADOW`。目标意图被接受时,该次 `ExecDecision` 带 SHADOW 标志 → `TargetShadowed`,否则 `TargetAccepted`(有效模式 Shadow 时由 hft-exec 标;Live 且 `open_allowed = false` 而目标使某腿离开当前净量的,由 sequencer 补标,见 [hft-sequencer 目标意图](../hft-sequencer/README.md))。
 - **模式门的作用范围**:模式门在 sequencer 里、风控之前执行,只作用于策略发出的意图与 hft-exec 为策略目标生成的切片。OMS 自动产生的第二腿、Simultaneous 反向、LegTracker HedgeFix、hft-exec 的引擎默认减仓(MarginStress L3、External 截止后的处理)不经模式门,只受 HARD 约束;已成交的第一腿不会因模式切换而裸着。
 - **Shadow 不冻结出场**:期望 Shadow 但该 cell 净仓、在途或 LegTracker 残余非 0 时,有效模式为 `CloseOnly`(`ShadowDeferred`),策略照常走平仓逻辑;归零后 sequencer 自动落到 Shadow 并写 `Note{ShadowDeferred}`。
-- **Shadow 不扣资源**:Shadow 的意图在模式门处只写带 `SHADOW` 位的 `OrderDecision`,不进风控检查链——不扣令牌、不计在途、不分配 OMS 槽(hft-sequencer 意图管线第 2、6 步)。
+- **Shadow 评估但不提交**:意图完整调用只读 `risk.evaluate`,按与 Live 相同的顺序短路;`OrderDecision` 带 `SHADOW`,`reject` 记录 0(可放行)或真实首个风控拒绝位,`slot = 0`,结果仍为 `Shadowed`。不扣令牌、不计在途、不分配 OMS 槽、不出环,每笔按当前真实资源评估,不模拟前一笔 Shadow 意图的资源消耗。
+- **策略手动对冲**:无链接 Hedge 能否减少组裸露由 [hft-risk 分类](../hft-risk/README.md#分类) 按组净量与在途量验证;CloseOnly 放行风险递减的 Hedge,其余仍按 Open 拒绝。
 - **Mode 事件**:有效模式每次变化(来源无论是 `SetMode` 还是 cap)都向该 cell 投递 `EventRef::Mode{old, new}`。降到 `CloseOnly`/`Shadow` 时 sequencer 撤销该 cell 的 Open 类挂单;执行层保留目标但停发增仓切片(见上表),回到 `Live` 后按原目标继续推进。策略不希望恢复后继续增仓时,应在 `Mode` 事件里 `clear_target` 或改发目标,并重置确认窗口等开仓状态。
 - **cell 生命周期**:`SetMode{group = *}` 同时写该 (strategy, account) 的 `default_mode`;`SetParams` 新增的 group 取 `default_mode`;移除 group 即删除其 cell。
 

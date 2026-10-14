@@ -724,6 +724,7 @@ impl Mv {
             pos: Qty(*self.pos.get(&(a, i.0)).unwrap_or(&0)),
             pending_buy: Qty(*self.pend.get(&(a, i.0, 1)).unwrap_or(&0)),
             pending_sell: Qty(*self.pend.get(&(a, i.0, 2)).unwrap_or(&0)),
+            ..PosFacts::default()
         }
     }
 }

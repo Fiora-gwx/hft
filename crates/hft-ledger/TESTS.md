@@ -854,6 +854,8 @@ spec: README.md
 | LED-071.4 | `Delivery` | P0 |
 | LED-071.5 | `Unknown` | P0 |
 
+- LED-071.1 亏空边界:钱包 50 000,1 BTC 空仓成本 60 000,强平买回价 120 000、费用 10;既有本地成本与实际结算入口均保存现金/钱包 −10 010、仓位 0、external PnL −60 010,并有一条 P0 ExternalFill。快照恢复保持负数,重复原件不重复扣款或告警。实现:`crates/hft-ledger/tests/external.rs::led_071_liquidation_shortfall_stays_negative`。M4 MS-2 端到端强平场景按此口径核对交易所钱包。
+
 ### LED-072 ExternalFill 注记的 v[] 布局与 v[0] 打包往返
 
 - 规则:[外部成交](README.md#外部成交externalfill)

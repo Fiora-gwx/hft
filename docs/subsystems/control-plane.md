@@ -16,7 +16,7 @@
 | 3 | `Kill`:Global / Account / Venue(× 账户) | Open 及无 `RISK_REDUCING` 的单;按默认参数撤挂单 | Reduce / Flatten / Hedge | `Kill` 命令(含 Viewer 的紧急停止、启动时由 kill-switch 停机标记触发的 `Kill`,见[版本与确认](#版本与确认)) | 同级同目标 `Resume{Kill}` + 确认(Trader/Admin) |
 | 4 | 锁存 CloseOnly:`DailyLoss`(账户)、`Recon`(账户, venue)、`UnknownTimeout`(账户, venue)、`Broken`(账户, group)、`HedgeFailure`(账户)、`Delisting`(venue, inst)、`Recovery`(账户)、`Halted`(策略, 账户, group)、`Reorg`(账户, group;optional 链上腿) | Open | Reduce / Flatten / Hedge | sequencer 自动;`Delisting` 由 `VenueNotice{Delisting}` | 各自 `Resume{source}` + 确认 + hft-risk 的前置条件(如 `HedgeFailure`:该账户已无 `Broken`,否则 `CmdResult{Rejected, detail = BrokenRemaining}`) |
 | 5 | 条件型 cap(不锁存,条件消失自动解除,不能被 `Resume`):`MarginStress`(账户;按各 venue 永续持仓到强平价的距离 `liq_dist` 分档:L1 禁开,L2 通知策略限期减仓,L3 引擎强制减仓;度量、阈值与滞回归 hft-risk)、`Storage`(进程;禁开)、`AccountCfg`(账户, venue);条件门:启动闸门未放行(只挡升级命令,带 `flatten` 的 `Kill` 除外)、`UNKNOWN_PENDING`、`EXPOSURE_GATE`、`VENUE_NOT_READY`、`STALE/NO_MID`、optional 链会话 Down | Open / 升级命令 | 其余(L2/L3 的减仓动作本身是 `RISK_REDUCING`) | 由输入推导:`MarginReport`、`Timer{PersistLag\|DiskLow}`、`AccountConfigReport`… | 条件消失自动解除(`MarginStress` 的档位与滞回、`Storage` 的阈值归 hft-risk) |
-| 6 | 期望模式(ModeTable):Shadow / CloseOnly / Live | Shadow:策略意图只记录;CloseOnly:Open | — | `SetMode` | `SetMode` |
+| 6 | 期望模式(ModeTable):Shadow / CloseOnly / Live | Shadow:策略意图风控评估后只记录(结果归 SDK 行为表);CloseOnly:Open | — | `SetMode` | `SetMode` |
 
 - `RunMode` 只有 **Shadow / CloseOnly / Live**;Live 永远遵守 `GroupSpec.open_allowed`。**模拟不是模式,是账户类型**:模拟账户上的 cell 按同一张表运行,cap 与 kill 同样生效(经检查链;模拟账户的单不经 gw 的 kill 字)。
 - 有效模式每次变化都向该 cell 的策略投递 Mode 事件;降到 CloseOnly / Shadow 时撤销该 cell 的 Open 类挂单。

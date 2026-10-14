@@ -1,6 +1,6 @@
 //! Run modes and intents (SDK-164–SDK-170).
 
-use hft_event::{ControlCmd, OrderAction, OrderDecision, RecordFlags};
+use hft_event::{ControlCmd, OrderAction, OrderDecision, OrderFlags, RecordFlags};
 use hft_risk::snapshot::{RiskRowHdr, SECTION_RISK_COUNTERS, row_kind};
 use hft_sequencer::codes::{detail, note, seq_note, status};
 use hft_strategy_sdk::{
@@ -143,7 +143,7 @@ fn sdk_164_mode_table_orders() {
                 assert_eq!((d.reject, d.slot.0, sent), (0, 0, 0), "{ctx}");
                 assert_eq!(o, Some(IntentOutcome::Shadowed), "{ctx}");
             }
-            // .4: a strategy `place` of class Hedge without a link is classified Open (hft-risk).
+            // .4: a balanced group's unlinked Hedge would create naked exposure.
             2 | 4 => {
                 assert_eq!(
                     (d.reject, d.slot.0, sent),
@@ -170,6 +170,56 @@ fn sdk_164_mode_table_orders() {
             }
             _ => assert!(matches!(o, Some(IntentOutcome::Placed(_))), "{ctx}"),
         }
+    }
+}
+
+#[test]
+fn sdk_164_unlinked_hedge_closes_naked_exposure() {
+    for (spot, perp, side) in [("0.01", "0.008", Side::Sell), ("0.008", "0.01", Side::Buy)] {
+        let mut b = b_gt3();
+        // Exercise manual repair before the executor's automatic HedgeFix starts.
+        b.setup_edit
+            .push(|s| s.exec.default.fix_tolerance_default = hft_types::Rate(1_000_000_000_000));
+        let mut h = b.boot();
+        h.steady();
+        open_legs(&mut h, GT1, &[(A1, Side::Buy, spot), (B1, Side::Sell, perp)]);
+        assert_eq!(set_mode(&mut h, GT1, RunMode::CloseOnly).0, status::APPLIED);
+        let n0 = gw(&h);
+        let (_, recs) = issue_with_hx(&mut h, move |hx, ctx| {
+            // The first two orders consume the entire 0.002 naked quantity. Neither a
+            // repeated order nor the exposure-increasing direction can use that capacity.
+            for s in [
+                side,
+                side,
+                side,
+                if side == Side::Buy { Side::Sell } else { Side::Buy },
+            ] {
+                let _ = ctx.place(order_in(
+                    hx,
+                    GT1,
+                    B1,
+                    s,
+                    Tif::Ioc,
+                    IntentClass::Hedge,
+                    touch(hx, B1, s),
+                    q("0.001"),
+                ));
+            }
+            None
+        });
+        let ds = decs(&recs);
+        assert_eq!(ds.len(), 4, "{ds:?}");
+        for d in &ds[..2] {
+            assert_eq!(d.reject, 0, "{d:?}");
+            assert_ne!(d.slot.0, 0);
+            assert_ne!(d.oflags & OrderFlags::RISK_REDUCING.0, 0);
+            assert_eq!(d.oflags & OrderFlags::REDUCE_ONLY.0 != 0, side == Side::Buy);
+        }
+        for d in &ds[2..] {
+            assert_eq!(d.reject, RejectBits::CLOSE_ONLY.0, "{d:?}");
+            assert_eq!(d.slot.0, 0);
+        }
+        assert_eq!(gw(&h) - n0, 2);
     }
 }
 
@@ -256,6 +306,74 @@ fn sdk_165_shadow_no_commit() {
     );
     let lv = read_view(&mut h, |hx| hx.v.legs(AC1, GT1));
     assert_eq!(lv.leg[0].inflight_immediate, Qty(0));
+}
+
+#[test]
+fn sdk_165_shadow_records_live_risk_result() {
+    // Use the same input and risk state in each mode, including failures late in the chain.
+    for (case, want) in [
+        (0, RejectBits(0)),
+        (1, RejectBits::INVALID),
+        (2, RejectBits::PX_BAND),
+        (3, RejectBits::NOTIONAL_ORDER),
+        (4, RejectBits::HARD),
+        (5, RejectBits::INVALID),
+    ] {
+        for mode in [RunMode::Shadow, RunMode::Live] {
+            let mut h = rig();
+            if mode == RunMode::Shadow {
+                assert_eq!(set_mode(&mut h, GT1, mode).0, status::APPLIED);
+            }
+            if case == 4 {
+                h.cmd(
+                    AC1,
+                    &ControlCmd::Kill {
+                        scope: scope(hft_types::StrategyId(0), AC1, GroupId(0)),
+                        level: hft_types::KillLevel::Account,
+                        hard: true,
+                        flatten: false,
+                        cancel_resting: true,
+                    },
+                );
+                h.run();
+            }
+            let n0 = gw(&h);
+            let tok0 = tokens(&h, A);
+            let free0 = h.s.engine().oms.table_view(A, AC1).expect("table").free_len;
+            let (o, recs) = issue_with_hx(&mut h, move |hx, ctx| {
+                let mut it = intent_of(hx, IntentClass::Open);
+                match case {
+                    1 => it.qty = Qty(0),
+                    2 => it.px = px("100000"),
+                    3 => it.qty = q("100"),
+                    5 => {
+                        it = pair_first(hx, q("0.001"));
+                        let mut link = *it.link.get().expect("link");
+                        link.hedge.ratio_den = 0;
+                        it.link = hft_strategy_sdk::LegLinkOpt::some(link);
+                    }
+                    _ => {}
+                }
+                ctx.place(it).ok()
+            });
+            let ds = news(&recs, A1);
+            assert_eq!(ds.len(), 1, "case={case} mode={mode:?}");
+            assert_eq!(ds[0].1.reject, want.0, "case={case} mode={mode:?}");
+            assert_eq!(ds[0].0, mode == RunMode::Shadow);
+            if mode == RunMode::Shadow {
+                assert_eq!(o, Some(IntentOutcome::Shadowed));
+                assert_eq!(
+                    (
+                        gw(&h),
+                        tokens(&h, A),
+                        h.s.engine().oms.table_view(A, AC1).unwrap().free_len
+                    ),
+                    (n0, tok0, free0)
+                );
+                assert_eq!(ds[0].1.slot.0, 0);
+            }
+        }
+    }
 }
 
 // ------------------------------------------------------------------------------- SDK-166

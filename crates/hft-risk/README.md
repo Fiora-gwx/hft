@@ -155,7 +155,7 @@ pub struct IntentView {
     pub link_inst: InstId,
     pub link_qty: Qty,                        // 第一腿全部成交时第二腿的数量 = qty × ratio(净量口径)
     pub link_notional: Notional,              // 第二腿名义的上界:两个方向都按 mid × (1 + rr_max_cross) 投影(公式归 sequencer 意图管线第 4 步)
-    // ── 对冲类上限(class = Hedge 时由产生方 hft-oms / hft-exec 填写;规则 basis + 1 lot 归 hft-exec)──
+    // ── 对冲类上限(class = Hedge):OMS/执行层提供;策略无链接 Hedge 由 sequencer 读 PosView::hedge_cap_qty(side)──
     pub hedge_cap_qty: Qty,
 }
 
@@ -337,7 +337,7 @@ pub mod mode {
 
 ### 分类
 
-`classify()` 是 RISK_REDUCING / reduceOnly 分类表的唯一归属。输入:意图草稿(来源、链接角色、side、qty、tif、`HedgePlan.reduce_only`、`OrderFlags`)、`Origin`、该 (account, inst) 当前仓位(现货为该 group 归属的库存)与已挂同向减仓量、该 venue 的 `VenueCaps.reduce_only`(`VenueId` 即产品线,能力表按 `VenueId` 一行)。
+`classify()` 是 RISK_REDUCING / reduceOnly 分类表的唯一归属。输入:意图草稿(来源、链接角色、side、qty、tif、`HedgePlan.reduce_only`、`OrderFlags`)、`Origin`、该 (account, inst) 当前仓位(现货为该 group 归属的库存)与已挂同向减仓量、该 group 已成交净量及买卖方向各自的全部在途量(含挂单)、该 venue 的 `VenueCaps.reduce_only`(`VenueId` 即产品线,能力表按 `VenueId` 一行)。
 
 | 意图 | `class` | `risk_reducing` | `reduce_only`(交易所侧) |
 |---|---|---|---|
@@ -349,10 +349,12 @@ pub mod mode {
 | `Flatten`:策略硬动作、执行层默认减仓(`reason ∈ {MarginStress, Hard}`,含 `Broken` 的 group 与 `SerialFallback` 路径)、`Kill{Account, flatten}` 清仓 | Flatten | 是 | 是(支持时) |
 | `Reduce`,品种支持 reduceOnly(永续减仓、目标意图的减仓切片) | Reduce | 仅当 `qty ≤ |pos| − 已挂同向减仓量` | 是 |
 | `Reduce`,品种不支持 reduceOnly(现货卖出) | Reduce | 仅当 `qty ≤ |pos| − 已挂同向减仓量`(`pos` = 该 group 归属的库存净量) | 否 |
+| 策略无链接 `Hedge`,数量为正、方向朝组净量的零点、数量不超过可对冲量 | Hedge | 是 | 仅本腿方向也减仓、数量不超过本腿可减量且 venue 支持时为是 |
 | 冒烟单(`Origin::Command`、`OrderFlags::SMOKE`) | Open | 否 | 否 |
 | 其余(含目标意图的增仓切片) | Open | 否 | 否 |
 | `Amend` | 沿用原单 | 原单为是且新量 ≤ 原量 | 沿用原单 |
 
+- **策略无链接 Hedge**:只有意图品种属于该账户的 group 才提供组事实;`PosFacts.group_net = Σ leg.net`(i128),`group_pending_buy/sell` 各为该组所有品种的 OMS `open_buy/open_sell` 之和(即时与挂单,两个方向不互抵)。`PosView::hedge_cap_qty(side)` 对朝零方向返回 `max(0, |group_net| − 同向在途)`(封顶 i64::MAX),其余为 0;事实缺失为 0。`qty` 超过此量或方向扩大裸露时归 Open,CloseOnly 仍以 `CLOSE_ONLY` 拒绝。被分类为 Hedge 的意图把同一可对冲量交给 #6,仍受 HARD、价格、名义、仓位与速率约束;本腿可开新仓以减少组裸量,不强加交易所 reduceOnly。
 - `SecondRetry` 只用于重试计次与 `Note`;分类与 `Second` 完全相同(重试保留第二腿语义,`reduce_only` 继承 `HedgePlan.reduce_only`,规则在 [hft-oms](../hft-oms/README.md))。`HedgeFix` 角色只用于"平掉多出的一腿"。
 - 执行层订单给出的 `class` 只是提示;最终分类以本表为准([hft-exec](../hft-exec/README.md))。
 - `Reduce` 不满足 `qty ≤ |pos| − 已挂同向减仓量` 时 `risk_reducing = false`,检查链 #7 以 `REDUCE_INVALID` 拒绝(不按 Open 放行)。
@@ -514,7 +516,7 @@ pub struct KillCmd { pub level: KillLevel, pub scope: CmdScope, pub cancel_resti
 
 `Kill{Account, flatten}` 生效后该账户处于清仓锁,**直到删除该条记录的 `Resume{Kill}`**:锁 = 覆盖该账户的 `Kill` cap 带 `flatten` 位(合并规则按位或,同一目标上后续不带 `flatten` 的 Kill 不会去掉它;`Resume` 只删完全匹配的一条)。`RiskStateView.flatten_lock` 读同一状态。
 
-- 锁内该账户的订单意图只放行 `Reduce`/`Flatten` 类,以及引擎产生的风险递减 `Hedge` 类(OMS 的第二腿、`SecondRetry`、`Reverse`,执行层的 `HedgeFix`——它们只减少裸敞口,拦下会留下裸腿);Open 一律 `KILLED`(检查链 #3,与 Kill cap 相同,不另设拒绝位)。策略经 `Ctx::place` 下的单按分类只可能是 Open/Reduce/Flatten,所以对策略而言锁内只剩 Reduce/Flatten。
+- 锁内该账户的订单意图只放行 `Reduce`/`Flatten` 类,以及风险递减 `Hedge` 类(含经组净量验证的策略无链接 Hedge、OMS 的第二腿、`SecondRetry`、`Reverse`,执行层的 `HedgeFix`——它们只减少裸敞口,拦下会留下裸腿);Open 一律 `KILLED`(检查链 #3,与 Kill cap 相同,不另设拒绝位)。策略无链接 Hedge 同样必须满足[分类](#分类)的组可对冲量约束。
 - "只接受比当前更接近 0 的目标"在目标层由 [hft-exec](../hft-exec/README.md) 判定(`engine_flatten` 置执行层的同名锁,策略新目标不能覆盖引擎目标 0);`Resume{Kill}` 删除该记录时产出 `CapCleared{Kill}`,sequencer 经 `exec.on_risk` 交执行层解除。
 - 锁不阻止 L3 `ForceDeleverage`、自动有界平仓与 `HedgeFix` 命令。
 

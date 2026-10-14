@@ -28,6 +28,18 @@ pub fn classify(it: &IntentDraft, origin: Origin, pos: &impl PosView, caps: &Ven
     if origin == Origin::Command && it.flags & OrderFlags::SMOKE.0 != 0 {
         return c(IntentClass::Open, false, false);
     }
+    if origin == Origin::Strategy
+        && it.link_role.is_none()
+        && it.class == IntentClass::Hedge
+        && it.qty.0 > 0
+        && it.qty <= pos.hedge_cap_qty(it.side)
+    {
+        let closes_local = match it.side {
+            hft_types::Side::Buy => pos.pos().0 < 0,
+            hft_types::Side::Sell => pos.pos().0 > 0,
+        } && reduces(it.qty, pos.pos(), pos.pending_reduce(it.side));
+        return c(IntentClass::Hedge, true, ro && closes_local);
+    }
     match it.link_role {
         Some(LinkRole::Second | LinkRole::SecondRetry) => {
             if it.simultaneous {

@@ -15,7 +15,7 @@ pub struct RecordHeader {
 }
 ```
 
-`RecordFlags`:`CONFLATED`(同 inst BBO 积压被合并,回放照做)、`SHADOW`(意图在 Shadow 模式下只记录不出环)、`HW_TS`(`hw_rx_ns` 来自网卡硬件)、`SW_TS`(退化为软件时间戳)、`PART`(多段记录的非末段)、`CRC`(体尾带 crc32c)、`EVENT_END`(一个输入事件及其全部输出的最后一条记录;恢复截断到最后一个带此位的记录,见 [journal-format](journal-format.md#提交游标))。位值在 [hft-event](../../crates/hft-event/README.md)。未定义的位写 0,读者忽略未知位。
+`RecordFlags`:`CONFLATED`(同 inst BBO 积压被合并,回放照做)、`SHADOW`(意图在 Shadow 模式下只记录不出环;OrderDecision.reject 保留风控评估结果,行为归 SDK 运行模式表)、`HW_TS`(`hw_rx_ns` 来自网卡硬件)、`SW_TS`(退化为软件时间戳)、`PART`(多段记录的非末段)、`CRC`(体尾带 crc32c)、`EVENT_END`(一个输入事件及其全部输出的最后一条记录;恢复截断到最后一个带此位的记录,见 [journal-format](journal-format.md#提交游标))。位值在 [hft-event](../../crates/hft-event/README.md)。未定义的位写 0,读者忽略未知位。
 
 记录分三类 **Input / Output / Meta**:Input 喂给 sequencer(含 live driver 当场写下的环境决定 `Timer`);Output 由输入确定性地产生、验证回放逐字节比对;Meta(测量与结构记录)占 seq,但不参与状态与验证比对。三类的精确定义与按体决定类别的规则在 [hft-event](../../crates/hft-event/README.md#记录头标志与-kind);每个 kind 的归类见下表。
 
