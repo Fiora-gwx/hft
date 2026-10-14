@@ -370,6 +370,22 @@ pub(crate) fn restore_at<S: StrategySet>(
             stored: v.clone(),
         });
     }
+    // Section 28 latest-fill seqs (absent = none; rows outside refdata are undecodable).
+    for r in secs.fill_seq.iter() {
+        if !e.cmd.fill_seq.set(r.account, r.inst, r.seq) {
+            return Err(BootError::SnapshotUndecodable {
+                section: crate::commands::SECTION_FILL_SEQ,
+            });
+        }
+    }
+    // Section 29 retained reconciliation views (absent = none).
+    for (v, d) in secs.recon_views.iter() {
+        if !e.cmd.recon_views.restore(*v, d) {
+            return Err(BootError::SnapshotUndecodable {
+                section: crate::commands::SECTION_RECON_VIEW,
+            });
+        }
+    }
     e.last_day_rolled = secs.seq_day.last_day_rolled;
     e.cmd.notices.extend_from_slice(&secs.notices);
     if secs.engine_clock.tsc_hz_milli != 0 {

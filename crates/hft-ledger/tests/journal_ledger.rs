@@ -353,3 +353,39 @@ fn led_273_slot_identity_includes_venue_and_account() {
         assert_eq!(j.stats().map_evicted, 0, "LED-273.{}", version + 1);
     }
 }
+
+#[test]
+fn led_304_fee_carried_by_non_fill_report_is_booked_once() {
+    for (row, report_fee, want) in [("LED-304.1", "0.5", "99399.5"), ("LED-304.2", "0", "99399.5")] {
+        let mut j = with_decision();
+        let mut c = ev(CancelReject, 5, 1, "0.01", px("60000"));
+        c.fee = usdt(report_fee);
+        c.fee_asset = USDT;
+        feed(&mut j, &c, true);
+        let mut f = ev(Fill, 5, 1, "0.01", px("60000"));
+        f.fee = usdt("0.5");
+        f.fee_asset = USDT;
+        feed(&mut j, &f, true);
+        feed(&mut j, &f, true);
+        assert_eq!(j.ledger().pos(A1, BTC_S1).qty, btc("0.01"), "{row}");
+        assert_eq!(cash(j.ledger(), A1, S1, USDT).total, usdt(want), "{row}");
+    }
+}
+
+#[test]
+fn led_305_order_event_inst_none_uses_the_mapped_inst() {
+    // .1 inst not supplied: booked on the slot's inst.
+    let mut j = with_decision();
+    let mut e = ev(CancelReject, 5, 1, "0.01", px("60000"));
+    e.inst = hft_types::INST_NONE;
+    feed(&mut j, &e, true);
+    assert_eq!(j.ledger().pos(A1, BTC_S1).qty, btc("0.01"), "LED-305.1");
+    // .2 another nonzero inst on a non-strict-cash slot: ignored like the OMS does.
+    let mut j = with_decision();
+    let before = cash(j.ledger(), A1, S1, USDT).total;
+    let mut e = ev(Fill, 5, 1, "0.01", px("60000"));
+    e.inst = BTC_P2;
+    feed(&mut j, &e, true);
+    assert_eq!(j.ledger().pos(A1, BTC_S1).qty, Qty(0), "LED-305.2");
+    assert_eq!(cash(j.ledger(), A1, S1, USDT).total, before, "LED-305.2");
+}

@@ -305,7 +305,7 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 
 `PERP_CASH` 对账用原始成交,不采用标记价估算。`validate_reconcile_batch` 在全组处理前核对完整现金覆盖、账户/品种/方向、费用资产、原始成交键、每品种凭据数量之和与报告差量,已入账键和批内重复键不得解释新差额。缺凭据、错误方向、重复键、容量不足均失败。`apply_reconciled_external` 只入账一次,按原始键保留待确认凭据,与普通去重环分开;每 (account,venue) 上限为 ext_dedup_cap,启动预分配,满时 ReceiptCapacity,不能淘汰。
 
-迟到 ExternalFill 命中待确认键时,数量、价格、费用、资产、订单号、现金覆盖/金额和交易所时间必须一致,否则 ReceiptConflict。rx_tsc 不参与比较;Unknown、ADL、Liquidation 之间的原因细分不改变资金身份。完全匹配只减少该笔 auto_held,不再次动钱包、仓位或费用。不同键照常入账,即使同方向仍有待确认记录;仅有旧数量而无原始凭据的重叠仍报 ExternalOverlap。SimReset 清除本账户待确认凭据。普通去重环绕回不淘汰待确认记录,确认后把原始键重新放回普通环。
+迟到 ExternalFill 命中待确认键时,按执行身份(venue、account、inst、订单号、trade_id;无 trade_id 时含 fill_seq)与金额字段(数量、价格、方向、费用、费用资产、现金覆盖/金额)比较;交易所时间 `ex_ts_ns` 与 `rx_tsc` 是送达事实,REST 凭据与 WS 推送可以不同,不参与比较;Unknown、ADL、Liquidation 之间的原因细分不改变资金身份。`apply_settled_external` 遇到不一致时不入账、不消耗待确认凭据、不推进时间,返回 `Ok(None)` 并写 P0 `Note{ReceiptMismatch}`(`v[5]` 位图:数量 1、价格 2、费用 4、费用资产 8、现金 16、方向 32、身份 64、原因 128,常量 `receipt_field`),不停机,由对账与人工裁决;`apply_reconciled_external` 对同键异额的新凭据仍返回 ReceiptConflict(批量路径在预检阶段已拒绝重复键)。完全匹配只减少该笔 auto_held,不再次动钱包、仓位或费用。不同键照常入账,即使同方向仍有待确认记录;仅有旧数量而无原始凭据的重叠仍报 ExternalOverlap。SimReset 清除本账户待确认凭据。普通去重环绕回不淘汰待确认记录,确认后把原始键重新放回普通环。
 
 防御成交验证由 [LED-080](TESTS.md#led-080-oms-防御路径的外来成交冷读者账本与热进程逐值相同)约束,严格原件补账验证由 [LED-081](TESTS.md#led-081-auto_external冷读者账本与-auto_held-与热进程逐值相同)约束。真实 PairOnFill 开平仓、用户流缺口与迟到确认的场景、种子入口和非空观察要求归 [testkit 世界模型](../hft-testkit/README.md#dst-的世界模型),测试证据不能替代生产历史来源验证。
 
@@ -328,8 +328,8 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 | `Note{EpochStart}` | 记当前 epoch(`v[0]`) |
 | `StateSnapshot` | 每个快照保留一份从自身已入账事实起步、清空非持久视图后继续消费后缀的冷副本。Recovery 只从该副本取得时钟、漂移标志与逐 venue 更新时间,其余派生金额从主冷账本的事实重算;不读新快照的仓位/余额覆盖累计状态。普通快照不重置主视图;副本最多一层,随下一个快照替换 |
 | `OrderDecision{action = New}`(Output,`reject = 0` 且未置 `SHADOW`) | 槽映射登记 `(venue, account, epoch, slot, gen) → (inst, side, group)`;容量 = Σ 各表 `slots` × (`tombstone_gens` + 1)(OMS 配置),满时淘汰最早登记的一项(`map_evicted` +1) |
-| `OrderEvent`(Input) | 按 `(ev.venue, ev.account, ev.epoch, ev.slot, ev.gen)` 查映射;`cum_filled` 大于该槽已记累计量时,增量 = `cum_filled − 已记`,增量名义 = `avg_px × cum_filled − 已记名义`,手续费按 [hft-oms 回报匹配与成交增量](../hft-oms/README.md#回报匹配与成交增量) 与 [成交净量](../hft-oms/README.md#成交净量b4) 的同一口径,构造 `FillDelta`/`FeeDelta`(`PERP_CASH` 使用上述结算入口;现货普通槽将增量名义直接交 `apply_spot_fill`,墓碑仍用其增量价;`seq` = 该 `OrderEvent` 的 seq,与引擎由 OMS `FillOut`/`FeeOut` 带出的值相同;group 轮次的 `open_seq` 取它)调 `apply_fill`/`apply_fee`;`cum_filled` 不增(重复、乱序)→ 不入账,例外:`PartialFill`/`Fill` 的 `cum_filled` 大于该槽此前成交类回报的最大 `cum_filled`(数量已由非成交回报带来,hft-oms 回报匹配与成交增量第 9 条)→ 只按 `FeeDelta` 入账其费用;映射缺失 → `unmapped_fills` +1,不入账(这类成交由 OMS 的 `Note{OmsForeignFill}` 另行给出,见下行) |
-| `ReconcileBatch`(Input) | 仅从原始凭据重建;同事件必须有唯一 ReconcileCash 与每笔应用的 ExternalFill 注记,字段逐项核对,缺失/重复/跨事件证据报 ReconcileEvidence 并锁存;金额不从注记或后续快照取值 |
+| `OrderEvent`(Input) | 按 `(ev.venue, ev.account, ev.epoch, ev.slot, ev.gen)` 查映射;命中后按 hft-oms 同一品种规则:`ev.inst = INST_NONE` 按映射品种处理,另一非零品种在 `PERP_CASH` 品种上报 `Identity`,其余忽略该回报;`cum_filled` 大于该槽已记累计量时,增量 = `cum_filled − 已记`,增量名义 = `avg_px × cum_filled − 已记名义`,手续费按 [hft-oms 回报匹配与成交增量](../hft-oms/README.md#回报匹配与成交增量) 与 [成交净量](../hft-oms/README.md#成交净量b4) 的同一口径,构造 `FillDelta`/`FeeDelta`(`PERP_CASH` 使用上述结算入口;现货普通槽将增量名义直接交 `apply_spot_fill`,墓碑仍用其增量价;`seq` = 该 `OrderEvent` 的 seq,与引擎由 OMS `FillOut`/`FeeOut` 带出的值相同;group 轮次的 `open_seq` 取它)调 `apply_fill`/`apply_fee`;`cum_filled` 不增(重复、乱序)→ 不入账,例外:`PartialFill`/`Fill` 的 `cum_filled` 大于该槽的费用水位(此前成交类回报的最大 `cum_filled`,以及任何随增量入账了非零费用的回报的 `cum_filled`;数量已由非成交回报带来,hft-oms 回报匹配与成交增量第 9 条)→ 只按 `FeeDelta` 入账其费用;映射缺失 → `unmapped_fills` +1,不入账(这类成交由 OMS 的 `Note{OmsForeignFill}` 另行给出,见下行) |
+| `ReconcileBatch`(Input) | 体不可解码的批次引擎从不应用(只写 `ReconcileRejected`,无 `ReconcileCash`),冷读者同样忽略;可解码的批次仅从原始凭据重建;同事件必须有唯一 ReconcileCash 与每笔应用的 ExternalFill 注记,字段逐项核对,缺失/重复/跨事件证据报 ReconcileEvidence 并锁存;金额不从注记或后续快照取值 |
 | `ExternalFill`(Input) | venue 或品种要求 `PERP_CASH` 时调 `apply_settled_external(e, t)`;其他情况调 `apply_external(e, false, t)` |
 | `ReconcileReport` 中带 `AUTO_RECON` 注记的 `AUTO_EXTERNAL` 条目 | "外部成交"第 6 步 |
 | `Note{OmsForeignFill}` | "外部成交"第 7 步(`external_from_oms_note`) |
@@ -475,7 +475,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 
 ### 快照行格式(节 1、13、22;草案,实现时以代码与编译期断言为准)
 
-`StateSnapshot` 的分节表与 `SectionHdr` 归 [journal-format](../../docs/subsystems/journal-format.md#快照记录结构);本 crate 定义节 1、13、22 的行(当前行版本:节 1 v2、节 13 无待确认凭据时 v8、有凭据时 v9,节 22 v2)。全部 `#[repr(C)]`、小端、按所列键升序;i128 以 `[u64; 2]` 小端存放。`snapshot(&self, w)` 按节 1 → 13 → 22 一次写完。
+`StateSnapshot` 的分节表与 `SectionHdr` 归 [journal-format](../../docs/subsystems/journal-format.md#快照记录结构);本 crate 定义节 1、13、22 的行(当前行版本:节 1 v2、节 13 无待确认凭据时 v8、有凭据时 v9,节 22 v2;恢复时 v8 的节 13 出现待确认凭据行 `AUTO_CASH` 即 `BadValue`)。全部 `#[repr(C)]`、小端、按所列键升序;i128 以 `[u64; 2]` 小端存放。`snapshot(&self, w)` 按节 1 → 13 → 22 一次写完。
 
 ```rust
 // 节 1 Positions:每 (account, inst) 一行,只写 qty、cost、realized、fees 任一非零的项;键 (account, inst)
@@ -599,6 +599,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 - 资金费时刻按结算边界归一化:推送或流水的时刻偏离结算边界超过半个周期会被归到相邻的结算;交易所改周期后、带新周期的 `Funding` 到达之前的那次结算仍按旧周期归一化,可能与相邻结算合并,差额由对账的 `Funding` 条目校正;`INST_NONE` 按该 venue 最短周期归一化,要求各 inst 的结算边界都落在它的网格上(已知各所成立)。
 - `BalanceOnlyPush` 推送按 `(settle_ts_ns, amount)` 去重:同一结算时刻两笔金额恰好相同的不同推送会被当作重复,差额由下一轮对账的钱包条目补回(至多晚一个对账周期)。
 - **旧能力的数量型 `auto_held` 不过期**:未启用 PERP_CASH 时,交易所不补推漏掉的强平/ADL 时,`auto_held` 会抵扣之后同向的下一笔真实强平/ADL(或无法匹配的未知成交),账本少记该笔,由下一轮对账报出(再次满足条件时 `AUTO_EXTERNAL` 补记,否则人工 `AdoptExchange`)。可选扩展:按时间或对账结果清除 `auto_held`(触发条件:测试网断流演练证实某所不补推)。
+- **任何 venue 启用 PERP_CASH 之前的阻塞项**:冷读者的外来现金来源与水位表(`journal_foreign`,上限 `SLOT_MAP_CAP`)与 hft-oms 的 `foreign_cash` 表一样只增不减,没有按订单终结回收的规则,写满后 `ForeignCapacity`;启用前必须与 hft-oms 一起定义回收条件并补用例([hft-oms](../hft-oms/README.md#已知限制与后续工作))。
 - 外来成交去重环有容量(`ext_dedup_cap`):早于环内最旧键的同一笔成交被交易所再次回放时会重复入账,由余额对账报出、人工处理(触发条件极少:回放窗口远小于 1 024 笔外来成交)。
 - 核销只改归属,不改账:被核销的残余仍是交易所上的真实仓位,作为账户级无 group 持仓(永续)或 `unassigned`(现货)留在账上,计入权益;永续部分由 L3/`Kill{flatten}` 覆盖,现货部分由人工处理(例如以 `SetBalanceBaseline` 记为基线)。
 - 现金的 free/locked 拆分只来自交易所报告(`rep_free`/`rep_locked`),引擎侧不模拟各所的冻结规则;执行层按"报告 free − 本系统在途"保守估算可用量。

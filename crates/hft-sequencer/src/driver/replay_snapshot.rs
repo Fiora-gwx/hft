@@ -89,6 +89,21 @@ pub fn check_snapshot<S: StrategySet>(log: &Log, seq: u64) -> Result<SnapshotChe
     snapshot::write_sections(&e, &inst, &mut w);
     w.status().map_err(|_| SnapshotCheckError::Size)?;
     let restored_hash = snapshot::state_hash(w.as_bytes());
+    // Sections 28 and 29 are outside state_hash; their round trip is still exact.
+    let restored = frames(w.as_bytes())?;
+    for id in [
+        crate::commands::SECTION_FILL_SEQ,
+        crate::commands::SECTION_RECON_VIEW,
+    ] {
+        let of = |f: &[(u16, &[u8])]| f.iter().find(|(s, _)| *s == id).map(|(_, b)| b.to_vec());
+        if computed == restored_hash && of(&logged) != of(&restored) {
+            return Err(SnapshotCheckError::RoundTrip {
+                section: id,
+                logged_hash: computed,
+                restored_hash,
+            });
+        }
+    }
     if computed != restored_hash {
         let restored = frames(w.as_bytes())?;
         let mut a = logged.iter().filter(|(id, _)| *id != snapshot::SECTION_CLOCK_CAL);

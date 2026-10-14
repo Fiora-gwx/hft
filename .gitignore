@@ -7,3 +7,6 @@ __pycache__/
 /fuzz/artifacts/
 /fuzz/corpus/
 .DS_Store
+/tmp/
+/docs/report/
+*.egg-info/

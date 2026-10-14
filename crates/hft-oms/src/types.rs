@@ -264,6 +264,9 @@ pub mod anomaly {
     pub const FOREIGN_EVICT: u64 = 2;
     pub const SMOKE_FILLED: u64 = 3;
     pub const RECON_IGNORED: u64 = 4;
+    /// A report matched a slot/tomb by `(slot, gen, epoch)` but names another nonzero inst on a
+    /// non-strict-cash venue: the report is ignored (level P0, `v[1]` = the reported inst).
+    pub const INST_MISMATCH: u64 = 5;
 }
 
 // ------------------------------------------------------------------------------- layouts

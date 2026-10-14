@@ -22,6 +22,7 @@ pub static NOTE_CODES: &[(NoteSource, u32, &str)] = &[
     (NoteSource::Ledger, 14, "ChainReorg"),
     (NoteSource::Ledger, 15, "ChainReorgNaked"),
     (NoteSource::Ledger, 16, "BalanceCheck"),
+    (NoteSource::Ledger, 17, "ReceiptMismatch"),
 ];
 
 /// `Note.code` values of the ledger's Notes.
@@ -41,6 +42,7 @@ pub mod code {
     pub const FUNDING_MISMATCH: u32 = note_code(NoteSource::Ledger, 12);
     pub const FUNDING_CORRECTED: u32 = note_code(NoteSource::Ledger, 13);
     pub const BALANCE_CHECK: u32 = note_code(NoteSource::Ledger, 16);
+    pub const RECEIPT_MISMATCH: u32 = note_code(NoteSource::Ledger, 17);
 
     /// hft-sequencer `EpochStart` (registry order within the `Sequencer` source; the
     /// authoritative `n` belongs to hft-sequencer's `NOTE_CODES`).

@@ -1328,6 +1328,7 @@
 | `TargetCleared` | Sequencer |  | Info |  |
 | `PositionDiff` | Sequencer |  | P1 | `venue` [0, +8)、`account` [8, +8)、`ledger_qty` [64, +64)、`report_qty` [128, +64) |
 | `ReconcileCash` | Sequencer |  | Info | `report_id` [0, +64)、`venue` [64, +8)、`account` [72, +8)、`n_reports` [128, +64)、`n_fills` [192, +64)、`applied` [256, +64) |
+| `ReconcileRejected` | Sequencer |  | P0 | `report_id` [0, +64)、`venue` [64, +8)、`account` [72, +8)、`reason` [128, +64)、`detail` [192, +64) |
 | `RateLimitHit` | Risk | 1 | P2 |  |
 | `CapSet` | Risk | 2 | Info | `cap` [0, +384) |
 | `CapCleared` | Risk | 3 | Info | `cap` [0, +384) |
@@ -1373,6 +1374,7 @@
 | `ChainReorg` | Ledger | 14 | P1 |  |
 | `ChainReorgNaked` | Ledger | 15 | P0 |  |
 | `BalanceCheck` | Ledger | 16 | Info | `venue` [0, +8)、`account` [8, +8)、`asset` [64, +64)、`free` [128, +64)、`locked` [192, +64)、`ex_ts_ns` [256, +64) |
+| `ReceiptMismatch` | Ledger | 17 | P0 | `venue` [0, +8)、`account` [8, +8)、`inst` [64, +64)、`trade_id` [128, +64)、`exch_order_id` [192, +64)、`fill_seq` [256, +64)、`fields` [320, +64) |
 | `ExecBroken` | Exec | 1 | P0 |  |
 | `ExecExternalDefault` | Exec | 2 | 按条件 |  |
 | `ExecAutoFixFailed` | Exec | 3 | P0 |  |

@@ -14,9 +14,10 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 use crate::Driver;
 use crate::clock::{EngineClockRow, SeqDayRow};
 use crate::commands::{
-    ACTIVE_CONFIG_VERSION, ActiveConfigRow, CMD_DEDUP_VERSION, CmdDedupHdr, RECON_PENDING_VERSION,
-    ReconPendingHdr, SECTION_ACTIVE_CONFIG, SECTION_CMD_DEDUP, SECTION_RECON_PENDING, SECTION_VENUE_NOTICES,
-    VENUE_NOTICES_VERSION,
+    ACTIVE_CONFIG_VERSION, ActiveConfigRow, CMD_DEDUP_VERSION, CmdDedupHdr, FILL_SEQ_VERSION, FillSeqRow,
+    RECON_PENDING_VERSION, RECON_VIEW_DIFFS, RECON_VIEW_REPORTS, RECON_VIEW_VERSION, ReconDiff, ReconDiffRow,
+    ReconPendingHdr, ReconView, ReconViewRow, SECTION_ACTIVE_CONFIG, SECTION_CMD_DEDUP, SECTION_FILL_SEQ,
+    SECTION_RECON_PENDING, SECTION_RECON_VIEW, SECTION_VENUE_NOTICES, VENUE_NOTICES_VERSION,
 };
 use crate::engine::Engine;
 use crate::journal::{BootSink, JournalSink};
@@ -296,6 +297,41 @@ fn w_seq_sections<S: StrategySet>(e: &Engine, inst: &Instances<S>, w: &mut Snaps
         }
     }
     w.end_section();
+    // 28 FillSeq: only when some (account, inst) has a fill, so fill-free snapshots keep
+    // their bytes; an absent section restores as an empty table.
+    let mut rows = e.cmd.fill_seq.rows().peekable();
+    if rows.peek().is_some() {
+        w.begin_section(SECTION_FILL_SEQ, FILL_SEQ_VERSION);
+        for r in rows {
+            w.put_row(&r);
+        }
+        w.end_section();
+    }
+    // 29 ReconView: only when some report view is retained (absent = empty table).
+    if !e.cmd.recon_views.is_empty() {
+        w.begin_section(SECTION_RECON_VIEW, RECON_VIEW_VERSION);
+        for v in e.cmd.recon_views.views() {
+            let diffs: Vec<&ReconDiff> = e.cmd.recon_views.diffs_of(v.report_id).collect();
+            w.put_row(&ReconViewRow {
+                report_id: v.report_id,
+                view_seq: v.view_seq,
+                n_diffs: diffs.len() as u32,
+                flags: u32::from(v.overflow),
+            });
+            for d in diffs {
+                w.put_bytes(
+                    ReconDiffRow {
+                        account: d.account,
+                        _pad: [0; 3],
+                        inst: d.inst,
+                        diff: d.diff,
+                    }
+                    .as_bytes(),
+                );
+            }
+        }
+        w.end_section();
+    }
 }
 
 fn active_rows<S: StrategySet>(e: &Engine, inst: &Instances<S>) -> Vec<ActiveConfigRow> {
@@ -347,7 +383,10 @@ pub(crate) fn write_sections<S: StrategySet>(e: &Engine, inst: &Instances<S>, w:
     w.end_section();
 }
 
-/// `state_hash`: xxh3-128 of every section (header + body) in write order, section 16 excluded.
+/// `state_hash`: xxh3-128 of every section (header + body) in write order, sections 16, 28 and
+/// 29 excluded. Sections 28 (latest fill seqs) and 29 (retained reconciliation views) are derived
+/// guard indexes: replay still compares their bytes and the restore self-check round-trips them,
+/// but they do not move the conformance digest.
 pub fn state_hash(sections: &[u8]) -> [u8; 16] {
     let mut h = xxhash_rust::xxh3::Xxh3::new();
     let mut off = 0usize;
@@ -357,7 +396,10 @@ pub fn state_hash(sections: &[u8]) -> [u8; 16] {
         };
         let end = off + 16 + sh.len as usize;
         let Some(all) = sections.get(off..end) else { break };
-        if sh.section != SECTION_CLOCK_CAL {
+        if !matches!(
+            sh.section,
+            SECTION_CLOCK_CAL | SECTION_FILL_SEQ | SECTION_RECON_VIEW
+        ) {
             h.update(all);
         }
         off = end;
@@ -698,6 +740,10 @@ pub struct SeqSections {
     pub conns: Vec<ConnLiveRow>,
     /// `None` distinguishes an old snapshot with no identity history from an empty table.
     pub strategy_timers: Option<Vec<(StrategyTimersHdr, Vec<StrategyTimerRow>)>>,
+    /// Section 28 (absent = no fill recorded, including snapshots written before it existed).
+    pub fill_seq: Vec<FillSeqRow>,
+    /// Section 29 (absent = no retained reconciliation view), oldest report first.
+    pub recon_views: Vec<(ReconView, Vec<ReconDiff>)>,
 }
 
 /// Parses sections 5–27 of this crate; `Err(section)` = undecodable.
@@ -843,6 +889,69 @@ pub fn read_seq_sections(body: &[u8]) -> Result<SeqSections, u16> {
             return Err(err);
         }
         out.strategy_timers = Some(states);
+    }
+    if let Some(s) = sec(SECTION_FILL_SEQ)? {
+        let err = SECTION_FILL_SEQ;
+        if s.version != FILL_SEQ_VERSION || s.body.len() != s.count as usize * 16 {
+            return Err(err);
+        }
+        let mut rr = s.reader();
+        let mut prev = (0u8, 0u32);
+        for k in 0..s.count {
+            let r: FillSeqRow = rr.get_row().map_err(|_| err)?;
+            let key = (r.account.0, r.inst.0);
+            if r._pad != [0; 3] || r.seq == 0 || r.inst.0 == 0 || (k > 0 && key <= prev) {
+                return Err(err);
+            }
+            prev = key;
+            out.fill_seq.push(r);
+        }
+    }
+    if let Some(s) = sec(SECTION_RECON_VIEW)? {
+        let err = SECTION_RECON_VIEW;
+        if s.version != RECON_VIEW_VERSION || s.count as usize > RECON_VIEW_REPORTS {
+            return Err(err);
+        }
+        let mut rr = s.reader();
+        let mut total = 0usize;
+        for _ in 0..s.count {
+            let h: ReconViewRow = rr.get_row().map_err(|_| err)?;
+            total = total.saturating_add(h.n_diffs as usize);
+            if h.flags > 1
+                || (h.flags == 1 && h.n_diffs != 0)
+                || total > RECON_VIEW_DIFFS
+                || out.recon_views.iter().any(|(v, _)| v.report_id == h.report_id)
+            {
+                return Err(err);
+            }
+            let mut diffs = Vec::with_capacity(h.n_diffs as usize);
+            for _ in 0..h.n_diffs {
+                let b = rr.get_bytes(16).map_err(|_| err)?;
+                let d = ReconDiffRow::read_from_bytes(b).map_err(|_| err)?;
+                if d._pad != [0; 3]
+                    || diffs
+                        .iter()
+                        .any(|x: &ReconDiff| x.account == d.account && x.inst == d.inst)
+                {
+                    return Err(err);
+                }
+                diffs.push(ReconDiff {
+                    report_id: h.report_id,
+                    account: d.account,
+                    inst: d.inst,
+                    diff: d.diff,
+                });
+            }
+            let v = ReconView {
+                report_id: h.report_id,
+                view_seq: h.view_seq,
+                overflow: h.flags == 1,
+            };
+            out.recon_views.push((v, diffs));
+        }
+        if !rr.is_empty() {
+            return Err(err);
+        }
     }
     Ok(out)
 }

@@ -1,4 +1,4 @@
-//! CTP-017–CTP-020, CTP-024, CTP-040–CTP-054, CTP-056, CTP-177.
+//! CTP-017–CTP-020, CTP-024, CTP-040–CTP-054, CTP-056, CTP-177–CTP-179.
 #![allow(
     clippy::type_complexity,
     clippy::disallowed_types,
@@ -65,6 +65,79 @@ fn ctp_178_reconciliation_receipts_use_one_atomic_record() {
     for raw in [vec![], vec![0; 95], vec![0; 96 * 257], vec![0; 96]] {
         v["cmd"]["receipts_b64"] = json!(b64(&raw));
         assert!(hft_ctl_proto::normalize(&parse(&v), &rd).is_err());
+    }
+}
+
+#[test]
+fn ctp_179_reconciliation_receipts_reject_bad_fill_semantics() {
+    use crate::common::p0::*;
+    use hft_event::{ExternalCause, ExternalFill};
+    use hft_types::{AccountId, Px, Qty, Tsc};
+    use zerocopy::IntoBytes;
+    let mut spec = p0_spec();
+    let caps = spec.caps.iter_mut().find(|c| c.venue == V_BN_USDM).unwrap();
+    caps.flags = caps.flags | hft_refdata::CapFlags::PERP_CASH;
+    let rd = spec.load();
+    let good = ExternalFill {
+        account: ACCT_A,
+        venue: V_BN_USDM,
+        inst: I_BN_USDM,
+        side: Side::Sell,
+        cause: ExternalCause::Unknown,
+        qty: Qty(100_000),
+        px: Px(6_000_000),
+        fee: Qty(37),
+        fee_asset: USDT,
+        _pad: [0; 6],
+        exch_order_id: 90,
+        trade_id: 7,
+        ex_ts_ns: 123,
+        rx_tsc: Tsc(0),
+        fill_seq: 0,
+        cash_qty: Qty(100_000),
+        cash_amount: Qty(-999),
+    };
+    let req = |e: &ExternalFill| {
+        let mut v = e0(
+            None,
+            json!({"type":"ReconcileReport","report_id":"7","items":[
+            {"venue":"binance-usdm","account":"acct-a","item":"Summary","view_seq":"100"},
+            {"venue":"binance-usdm","account":"acct-a","item":"Position","inst":"binance-usdm:BTCUSDT",
+             "engine_qty":"0.002","exch_qty":"0.001","view_seq":"100","sflags":["AUTO_EXTERNAL"]}],
+            "receipts_b64":b64(e.as_bytes())}),
+        );
+        v["issuer"] = json!("reconciler");
+        parse(&v)
+    };
+    assert!(hft_ctl_proto::normalize(&req(&good), &rd).is_ok());
+    let mut rows: Vec<(&str, ExternalFill)> = Vec::new();
+    let mut e = good;
+    e.qty = Qty(0);
+    e.cash_qty = Qty(0);
+    rows.push(("CTP-179.1 zero quantity", e));
+    let mut e = good;
+    e.px = Px(0);
+    rows.push(("CTP-179.2 zero price", e));
+    let mut e = good;
+    e.cash_qty = Qty(99_999);
+    rows.push(("CTP-179.3 partial cash coverage", e));
+    let mut e = good;
+    e.cause = ExternalCause::Manual;
+    rows.push(("CTP-179.4 ineligible cause", e));
+    let mut e = good;
+    e.fill_seq = 1;
+    rows.push(("CTP-179.5 trade id with fill_seq", e));
+    let mut e = good;
+    e.trade_id = 0;
+    rows.push(("CTP-179.6 no trade id and no fill_seq", e));
+    let mut e = good;
+    e.account = AccountId(ACCT_A.0 + 1);
+    rows.push(("CTP-179.7 other account", e));
+    for (row, e) in rows {
+        let Err(x) = hft_ctl_proto::normalize(&req(&e), &rd) else {
+            panic!("{row} accepted");
+        };
+        assert_eq!(x.detail, BAD_VALUE, "{row}");
     }
 }
 

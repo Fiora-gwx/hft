@@ -28,7 +28,7 @@ spec: README.md
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
 | 连接活性 | SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173 |
-| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420、SEQ-425 |
+| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420、SEQ-425–SEQ-431 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
@@ -3532,7 +3532,7 @@ spec: README.md
 - 步骤:
   1. 写按需快照,按体内顺序读各 `SectionHdr.section`
 - 期望:
-  - 顺序为 1、13、22、2、3、12、4、14、17、18、23、5、8、9、10、15、16、19、20、24、25、26、27、6、7、21;`SnapshotHdr.n_sections = 26`
+  - 顺序为 1、13、22、2、3、12、4、14、17、18、23、5、8、9、10、15、16、19、20、24、25、26、27、29、6、7、21(稳态有启动对账留下的视图,无成交所以没有节 28);`SnapshotHdr.n_sections = 27`
 - 实现:`crates/hft-sequencer/tests/snapshot.rs::seq_248_section_write_order`
 
 ### SEQ-249 state_hash 不计节 16,out_hash 屏蔽测量字段
@@ -5728,8 +5728,8 @@ spec: README.md
 - 级别:integ
 - 里程碑:M2
 - 前置:B0 严格永续结算,空头仓位数量 300000,同一组两笔买入补账
-- 步骤:第二笔分别缺现金覆盖、缺手续费资产、重复本组身份、数量超出差额、方向相反、使用已入账身份
-- 期望:六行均返回 Fatal(Settlement);第一笔也不入账,钱包、仓位、去重身份和 auto_held 保持原值,不输出财务成交注记
+- 步骤:第二笔分别缺现金覆盖、缺手续费资产、重复本组身份、数量超出差额、方向相反、使用已入账身份;处理后写关键帧
+- 期望:六行均返回 Idle(不停机);同一事件恰好一条 P0 `ReconcileRejected{reason = 3}` 与一条 `ReconcileCash{applied = 0}`;第一笔也不入账,钱包、仓位、去重身份和 auto_held 保持原值,不输出财务成交注记;冷账本从处理前关键帧起步得到同一钱包,完整与从关键帧起步的验证回放无差异
 - 实现:`crates/hft-sequencer/tests/settlement.rs::seq_418_bad_receipt_batch_cannot_partially_book`
 
 ### SEQ-419 单笔重复证明贯通真实引擎与快照窗口回放
@@ -5821,6 +5821,97 @@ spec: README.md
 |---|---|---|---|---|
 | SEQ-425.1 | 0.010 BTC 部分成交 0.001 后 Expired | 约 500,含在途 | 约 50 | 通过 |
 | SEQ-425.2 | 0.004 BTC 成交后扣 0.003 BTC FeeOnly | 约 200 | 约 50 | 通过 |
+
+### SEQ-426 不可解码或同号在途的凭据批次不应用且不停机
+
+- 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
+- 级别:table
+- 里程碑:M2
+- 前置:B0 严格永续结算;空头 300000 已入账;已有一次完整的干净报告(report 801);批次 report_id = 802,一笔买入凭据
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_426_undecodable_or_in_flight_batch_is_not_applied_and_does_not_stop`
+
+| 行 | 批次 | 期望 |
+|---|---|---|
+| SEQ-426.1 | 体截去最后 1 字节 | Idle;一条 `ReconcileRejected{report_id = 802, reason = 1}`;无 ReconcileCash;钱包与仓位不变;冷账本与验证回放无差异 |
+| SEQ-426.2 | 先以普通 ReconcileReport 送入 report 802 的首条(count = 3),再送完整批次 | Idle;一条 `ReconcileRejected{reason = 2}` 与 `ReconcileCash{applied = 0}`;在途分组仍为 (802, count 3, received 1);钱包与仓位不变;冷账本与验证回放无差异 |
+
+### SEQ-427 凭据确认不比较送达时刻,金额不一致只告警
+
+- 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
+- 级别:table
+- 里程碑:M2
+- 前置:B0 严格永续结算;一笔买入 0.001 BTC 凭据(trade_id 41,现金 −1170003 raw)已由批次补账,auto_held = 100000
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_427_receipt_confirmation_ignores_timestamps_and_mismatch_does_not_stop`
+
+| 行 | 同一成交的 WS 推送 | 期望 |
+|---|---|---|
+| SEQ-427.1 | `ex_ts_ns` 与 `rx_tsc` 不同,其余相同 | Idle;auto_held 归零;钱包不变;无 `ReceiptMismatch` |
+| SEQ-427.2 | 同上且现金少 1 raw | Idle;恰好一条 `ReceiptMismatch{v[5] = 16}`;auto_held 仍 100000;钱包不变 |
+
+两行都从补账前与待确认后的关键帧起步做冷账本与验证回放,无差异。
+
+### SEQ-428 不带品种的回报不使严格现金引擎停机
+
+- 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
+- 级别:table
+- 里程碑:M2
+- 前置:B0 严格永续结算,AC1 在 B1 上 5 张已 Ack 的订单(第一张卖 0.001 BTC)
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_428_report_without_inst_does_not_stop_a_strict_cash_engine`
+
+| 行 | 回报 | 期望 |
+|---|---|---|
+| SEQ-428.1 | 第一张 `Reject{inst = 0}`(Binance WS API 错误响应的形态) | Idle |
+| SEQ-428.2 | 第一张 `Fill{inst = 0}`,带完整现金事实 | Idle;钱包按现金与费用变化,仓位 −100000;冷账本相同;验证回放无差异 |
+
+### SEQ-429 最近成交 seq 经快照恢复后守卫判定不变
+
+- 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)、[快照](README.md#快照)
+- 级别:integ
+- 里程碑:M2
+- 前置:B0(非严格现金);AC1 已有一次干净的完整报告(report 801);策略在第一条 A1 报价时在 B1 卖出 0.001 BTC
+- 步骤:
+  1. 写关键帧 K0;订单 Ack 后记下 `view_seq` = 当前末条 seq;交付全部成交;写关键帧 K1
+  2. 送 report 802:`view_seq` 取第 1 步的值,Position 条目 `AUTO_EXTERNAL`,`engine_qty` = −0.001,`exch_qty` = −0.0005
+  3. 送 report 803:同第 2 步,`view_seq` 取当前末条 seq
+  4. 写关键帧,做完整与从 K0、K1 起步的验证回放
+- 期望:
+  - K1 的节 28 恰好一行 (AC1, B1, seq > view_seq);K0 没有节 28(SEQ-429.1、.2)
+  - 第 2 步后仓位仍 −0.001(成交晚于报告视图,AUTO_EXTERNAL 不适用)(SEQ-429.3)
+  - 第 3 步后仓位为 −0.0005(SEQ-429.4,对照)
+  - 三种验证回放均无差异(从 K1 起步时守卫判定与连续运行相同)
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_429_latest_fill_seq_survives_snapshot_recovery`
+
+### SEQ-430 AdoptExchange 的对账视图经快照恢复后守卫判定不变
+
+- 规则:[快照](README.md#快照)、[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
+- 级别:integ
+- 里程碑:M2
+- 前置:B0(非严格现金)稳态;策略在 B1 卖出 0.001 BTC 并全部成交;`RECON_VIEW_REPORTS = 16`
+- 步骤:
+  1. report 802 的 `view_seq` 取成交之前、report 803 取成交之后,两者 Position 条目都是交易所 −0.0005、引擎 −0.001;写关键帧 K
+  2. 确认后的 `AdoptExchange{report 802}`,再 `AdoptExchange{report 803}`
+  3. 登记 report 804(当前视图,交易所 −0.0004),再送 16 个只有 Summary 的报告,然后 `AdoptExchange{report 804}`
+  4. 写关键帧,做完整与从初始关键帧、K 起步的验证回放
+- 期望:
+  - K 的节 29 最后两份报告为 802、803(SEQ-430.1)
+  - 802 → `PreconditionFailed{StaleReport}`,仓位不变(SEQ-430.2);803 → `Applied`,仓位 −0.0005(SEQ-430.3)
+  - 804 被淘汰 → `PreconditionFailed{StaleReport}`,仓位仍 −0.0005(SEQ-430.4)
+  - 三种验证回放均无差异;关闭节 29 的恢复时从 K 起步的回放出现差异
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_430_adopt_stale_guard_and_retained_views_survive_recovery`
+
+### SEQ-431 对账视图表的淘汰与溢出有界且确定
+
+- 规则:[快照](README.md#快照)
+- 级别:table
+- 里程碑:M2
+- 前置:空 `ReconViews`;`RECON_VIEW_DIFFS = 4096`、`RECON_VIEW_REPORTS = 16`;每行 Position 引擎 10、交易所 4(差量 −6)
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_431_recon_view_table_overflow_is_defined_and_bounded`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| SEQ-431.1 | report 1 一行,再 report 2 的 4096 个不同品种 | 均不报溢出;report 1 被淘汰;report 2 的差量 −6 |
+| SEQ-431.2 | report 2 再来第 4097、4098 个不同品种 | 第 4097 行返回溢出(仅一次);report 2 标记 OVERFLOW,差量全部丢弃(查得 0) |
+| SEQ-431.3 | 再登记 19 个新 report(非 Position 条目) | 只保留 16 份,最旧的 report 2 与前 3 个新 report 被淘汰 |
 
 ## 验收
 

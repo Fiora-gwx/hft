@@ -229,3 +229,90 @@ fn oms_164_tomb_keep() {
         }
     }
 }
+
+#[test]
+fn oms_481_report_inst_none_is_unsupplied_and_mismatch_is_not_fatal_off_cash() {
+    use hft_types::INST_NONE;
+    // .1 non-cash slot: a WS API error reply without inst still rejects the order.
+    let mut h = H::new();
+    let r = h.place_ok(&buy_x(), 0);
+    let mut e = h.oe(r, OrderEventKind::Reject);
+    e.inst = INST_NONE;
+    h.ev(&e, 1);
+    assert_eq!(h.out.cash_error, None, "OMS-481.1");
+    assert_eq!(h.slot(r).state, OrderState::Rejected, "OMS-481.1");
+    // .2 non-cash slot: CancelReject without inst returns the order to Live.
+    let mut h = H::new();
+    let r = h.place_ok(&buy_x(), 0);
+    h.ack(r, 41, 1);
+    h.cancel(r, 2).unwrap();
+    let mut e = h.oe(r, OrderEventKind::CancelReject);
+    e.inst = INST_NONE;
+    h.ev(&e, 3);
+    assert_eq!(h.out.cash_error, None, "OMS-481.2");
+    assert_eq!(h.slot(r).state, OrderState::Live, "OMS-481.2");
+    // .3 non-cash slot: another nonzero inst is ignored with a P0 OmsAnomaly{InstMismatch}.
+    let mut h = H::new();
+    let r = h.place_ok(&buy_x(), 0);
+    let mut e = h.oe(r, OrderEventKind::Reject);
+    e.inst = Y;
+    h.ev(&e, 1);
+    assert_eq!(h.out.cash_error, None, "OMS-481.3");
+    assert_eq!(h.slot(r).state, OrderState::PendingNew, "OMS-481.3");
+    let a = h.notes(notes::ANOMALY);
+    assert_eq!(a.len(), 1, "OMS-481.3");
+    assert_eq!(
+        (a[0].level, a[0].inst, a[0].v[0], a[0].v[1]),
+        (NoteLevel::P0, X, 5, u64::from(Y.0))
+    );
+    // .4/.5 strict-cash slot: INST_NONE accepted, a nonzero mismatch stays CashError::Identity.
+    let rd = build_rd(&RdOpts {
+        vx_perp_cash: true,
+        ..RdOpts::default()
+    });
+    for (row, inst, want) in [
+        ("OMS-481.4", INST_NONE, None),
+        ("OMS-481.5", X, Some(CashError::Identity)),
+    ] {
+        let mut h = H::from_cfg(&p0(), rd);
+        let r = h.place_ok(&sell_y(), 0);
+        let mut e = h.oe(r, OrderEventKind::Reject);
+        e.inst = inst;
+        h.ev(&e, 1);
+        assert_eq!(h.out.cash_error, want, "{row}");
+        let st = if want.is_none() {
+            OrderState::Rejected
+        } else {
+            OrderState::PendingNew
+        };
+        assert_eq!(h.slot(r).state, st, "{row}");
+    }
+    // .6/.7 tomb: a late fill without inst is booked; another nonzero inst is ignored.
+    for (row, inst) in [("OMS-481.6", INST_NONE), ("OMS-481.7", Y)] {
+        let mut h = H::with(|c| c.slots.set(VS, A1, 3));
+        let (f, _) = filled_gen2(&mut h);
+        h.sweep(5001);
+        assert!(h.o.tomb(VS, A1, 3, 2).is_some());
+        let mut e = h.oe(f, OrderEventKind::Fill);
+        e.slot = hft_types::SlotId(f.slot);
+        e.r#gen = f.r#gen;
+        e.epoch = EPOCH as u16;
+        e.inst = inst;
+        e.cum_filled = q("0.011");
+        e.avg_px = p("60000.00");
+        h.ev(&e, 5002);
+        assert_eq!(h.out.cash_error, None, "{row}");
+        if inst == INST_NONE {
+            assert_eq!(h.out.fills.len(), 1, "{row}");
+            assert_eq!(
+                (h.out.fills[0].inst, h.out.fills[0].qty),
+                (X, q("0.001")),
+                "{row}"
+            );
+        } else {
+            assert!(h.out.fills.is_empty(), "{row}");
+            assert_eq!(h.notes(notes::ANOMALY).len(), 1, "{row}");
+            assert_eq!(h.o.tomb(VS, A1, 3, 2).unwrap().filled, q("0.01"), "{row}");
+        }
+    }
+}

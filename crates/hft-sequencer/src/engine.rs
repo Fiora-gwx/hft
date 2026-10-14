@@ -436,6 +436,7 @@ impl Engine {
             .map(|_| ModeOutcome::with_capacity(mode_dims.0, mode_dims.1, mode_dims.2))
             .collect();
         let market = Market::new(&rd);
+        let cmd = CmdState::new(caps.recent_cmd_ids as usize, &rd);
         let n_inst = rd.inst_count();
         let anchor = EngineClockAnchor {
             base_engine_ns: 0,
@@ -481,7 +482,7 @@ impl Engine {
             mode_pool,
             margin_pool: (0..4).map(|_| MarginOut::default()).collect(),
             mode_dims,
-            cmd: CmdState::new(caps.recent_cmd_ids as usize),
+            cmd,
             drain: DrainState::default(),
             snapshot_requested: false,
             conflated: 0,

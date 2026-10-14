@@ -48,7 +48,8 @@ pub mod types;
 pub mod views;
 
 pub use commands::{
-    ActiveConfigRow, CmdDedupHdr, CmdDedupRow, ReconPendingHdr, VenueNoticeRow, ViewerPreviewRow,
+    ActiveConfigRow, CmdDedupHdr, CmdDedupRow, FillSeqRow, RECON_VIEW_DIFFS, RECON_VIEW_REPORTS, ReconDiff,
+    ReconDiffRow, ReconPendingHdr, ReconView, ReconViewRow, ReconViews, VenueNoticeRow, ViewerPreviewRow,
 };
 pub use driver::{Driver, DriverMode, DriverView, ParseCx};
 pub use engine::{Engine, EngineSetup};

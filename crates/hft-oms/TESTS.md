@@ -19,7 +19,7 @@ spec: README.md
 | 入口(全部在 sequencer 线程调用,`&mut self`,无分配) | OMS-005–OMS-007, OMS-252, OMS-040–OMS-050, OMS-088, OMS-092, OMS-133, OMS-135, OMS-152, OMS-189, OMS-200, OMS-240, OMS-248, OMS-285–OMS-287, OMS-310, OMS-315, OMS-342–OMS-344, OMS-360, OMS-390, OMS-410 |
 | 输出 `OmsOut`(容量固定,由 sequencer 预分配并在每个输入事件后清空) | OMS-020, OMS-024, OMS-109, OMS-202, OMS-330 |
 | 消费与产生的事件 | OMS-040, OMS-055–OMS-068, OMS-070–OMS-074, OMS-080, OMS-130, OMS-142, OMS-250 |
-| 配置项(`OmsConfig`) | OMS-001–OMS-004, OMS-024, OMS-091, OMS-110, OMS-111, OMS-132, OMS-137, OMS-138, OMS-140, OMS-150, OMS-161, OMS-164, OMS-170, OMS-189, OMS-194, OMS-195, OMS-204、OMS-459, OMS-227, OMS-263, OMS-320, OMS-334、OMS-465、OMS-466 |
+| 配置项(`OmsConfig`) | OMS-001–OMS-004, OMS-024, OMS-091, OMS-110, OMS-111, OMS-132, OMS-137, OMS-138, OMS-140, OMS-150, OMS-161, OMS-164, OMS-170, OMS-189, OMS-194, OMS-195, OMS-204、OMS-459, OMS-227, OMS-263, OMS-320, OMS-334、OMS-465、OMS-466、OMS-484 |
 | 实现说明 | 不适用:见子节 |
 | 数据布局(草案,实现时以代码与编译期断言为准) | OMS-003, OMS-005, OMS-010–OMS-017, OMS-021, OMS-022, OMS-034, OMS-051, OMS-381, OMS-421 |
 | ClientOrderId | OMS-030–OMS-035 |
@@ -29,7 +29,7 @@ spec: README.md
 | 延迟样本 | OMS-012, OMS-071, OMS-080–OMS-089 |
 | REPORT_DECODE | OMS-090, OMS-091 |
 | 恢复后的 gw 映射 | OMS-092, OMS-093 |
-| 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460、OMS-467、OMS-468、OMS-470–OMS-475、OMS-476–OMS-480 |
+| 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460、OMS-467、OMS-468、OMS-470–OMS-475、OMS-476–OMS-480、OMS-481–OMS-483 |
 | 成交净量(B4) | OMS-067, OMS-120–OMS-124, OMS-184, OMS-404 |
 | Unknown 收敛流程 | OMS-032, OMS-065, OMS-066, OMS-068, OMS-070, OMS-073, OMS-089, OMS-130–OMS-154, OMS-400, OMS-402, OMS-420 |
 | 墓碑与迟到成交(C1) | OMS-013, OMS-148, OMS-160–OMS-164, OMS-287, OMS-322, OMS-462、OMS-469 |
@@ -51,7 +51,7 @@ spec: README.md
 | 输出扇出 | OMS-015, OMS-047, OMS-074, OMS-268, OMS-273, OMS-330–OMS-335, OMS-340–OMS-344, OMS-388 |
 | 链上槽(optional) | 不适用:里程碑外 |
 | 每次迁移产生的输出 | OMS-040, OMS-055, OMS-057, OMS-059, OMS-062, OMS-105, OMS-113, OMS-130, OMS-160, OMS-162, OMS-193, OMS-265, OMS-281, OMS-315, OMS-320, OMS-343 |
-| Note 码表 | OMS-023, OMS-025, OMS-026, OMS-114, OMS-145, OMS-152, OMS-222, OMS-230, OMS-267 |
+| Note 码表 | OMS-023, OMS-025, OMS-026, OMS-114, OMS-145, OMS-152, OMS-222, OMS-230, OMS-267, OMS-481 |
 | 快照行格式(节 2、3、12;草案,实现时以代码与编译期断言为准) | OMS-017, OMS-086, OMS-274, OMS-333, OMS-360–OMS-366, OMS-389, OMS-390, OMS-461、OMS-469、OMS-470 |
 | 规划源文件 | 不适用:非规范 |
 | 延迟与资源契约 | OMS-006, OMS-440–OMS-455 |
@@ -4347,6 +4347,68 @@ spec: README.md
 - 步骤:先累计 0.004 BTC、均价 60000,再累计 0.01 BTC、均价 60001;独立新槽再交付 avg_px 为零的成交
 - 期望:第二笔保留原始增量名义 360.01 USDT,与已取整 px × qty 不同;无均价时保留 ev.px × d;数量与价格既有语义不变
 - 实现:`crates/hft-oms/tests/fsm_table.rs::oms_480_fill_preserves_original_notional_before_increment_price_rounding`
+
+### OMS-481 回报 inst 为 0 视为未提供,非严格现金路径的品种不符只告警
+
+- 规则:[回报匹配与成交增量](README.md#回报匹配与成交增量)、[Note 码表](README.md#note-码表)
+- 级别:table
+- 里程碑:M2
+- 前置:普通现货槽在 VS(inst X,非 PERP_CASH);另一夹具令 VX 声明 PERP_CASH,永续槽 inst Y;墓碑夹具:VS 槽 3 的第 2 代已全部成交 0.01 后回收
+- 实现:`crates/hft-oms/tests/tomb.rs::oms_481_report_inst_none_is_unsupplied_and_mismatch_is_not_fatal_off_cash`
+
+| 行 | 回报 | 期望 |
+|---|---|---|
+| OMS-481.1 | 普通槽 PendingNew,`Reject{inst = 0}` | 无 `cash_error`;槽 Rejected |
+| OMS-481.2 | 普通槽 PendingCancel,`CancelReject{inst = 0}` | 无 `cash_error`;槽 Live |
+| OMS-481.3 | 普通槽 PendingNew,`Reject{inst = Y}` | 无 `cash_error`;槽仍 PendingNew;恰好一条 `OmsAnomaly`,级别 P0,`Note.inst = X`,`v[0] = 5`,`v[1] = Y` |
+| OMS-481.4 | 严格现金槽 PendingNew,`Reject{inst = 0}` | 无 `cash_error`;槽 Rejected |
+| OMS-481.5 | 严格现金槽 PendingNew,`Reject{inst = X}` | `cash_error = Identity`;槽仍 PendingNew |
+| OMS-481.6 | 墓碑,迟到 `Fill{inst = 0, cum = 0.011}` | 无 `cash_error`;一条 `FillOut{inst = X, qty = 0.001}` |
+| OMS-481.7 | 墓碑,迟到 `Fill{inst = Y, cum = 0.011}` | 无 `cash_error`;无 `FillOut`;一条 `OmsAnomaly`;墓碑 `filled` 仍 0.01 |
+
+### OMS-482 非成交回报带来的费用只入账一次
+
+- 规则:[回报匹配与成交增量](README.md#回报匹配与成交增量)
+- 级别:table
+- 前置:VS 现货槽 0.01 BTC 买单已 Ack,已发撤单(PendingCancel)
+- 里程碑:M2
+- 实现:`crates/hft-oms/tests/fsm.rs::oms_482_fee_carried_by_non_fill_report_is_booked_once`
+
+| 行 | 步骤 | 期望 |
+|---|---|---|
+| OMS-482.1 | `CancelAck{cum = 0.004, fee = 1000}`,再两次 `PartialFill{cum = 0.004, fee = 1000}` | CancelAck 产出一条 `FillOut{fee = 1000}`,`fee_cum = 0.004`;两条 PartialFill 都无 `FillOut`、无 `FeeOut` |
+| OMS-482.2 | `CancelAck{cum = 0.004, fee = 0}`,再两次 `PartialFill{cum = 0.004, fee = 1000}` | CancelAck 的 `FillOut.fee = 0`,`fee_cum` 仍 0;第一条 PartialFill 恰好一条 `FeeOut{fee = 1000}`,`fee_cum = 0.004`;第二条无输出 |
+
+### OMS-483 外来现金来源只接受节 12 恢复能接受的行
+
+- 规则:[回报匹配与成交增量](README.md#回报匹配与成交增量)
+- 级别:unit
+- 里程碑:M2
+- 前置:VX 声明 PERP_CASH,原始 `ExternalFill{venue = VX, inst = Y, exch_order_id = 9901}`
+- 步骤:
+  1. 对原件调用 `external_cash_guard`
+  2. 把 inst 改为 VS 的现货 X,分别调用 `external_cash_guard` 与 `remember_external_cash(booked = true)`
+  3. 把 venue 改为 VS(inst 仍为 Y),同第 2 步
+  4. 保留原件来源后快照并恢复
+- 期望:
+  - 第 1 步 `Ok(false)`
+  - 第 2、3 步两次调用都返回 `Err(Identity)`;快照字节不变且可恢复
+  - 第 4 步快照与恢复后重写的字节相同
+- 实现:`crates/hft-oms/tests/settlement.rs::oms_483_external_cash_guard_rejects_rows_the_restore_would_refuse`
+
+### OMS-484 配置段的行宽必须是整行
+
+- 规则:[配置项(`OmsConfig`)](README.md#配置项omsconfig)
+- 级别:table
+- 里程碑:M2
+- 前置:`OmsConfig::new` 的默认行编码为 N 行 × 16 B
+- 实现:`crates/hft-oms/tests/config_blob.rs::oms_484_config_section_stride_must_be_whole_rows`
+
+| 行 | 段的行宽 × 行数 | 期望 |
+|---|---|---|
+| OMS-484.1 | 16 × N | 加载成功 |
+| OMS-484.2 | 8 × 2N(同一字节) | 拒绝(容器或 `from_engine`) |
+| OMS-484.3 | 32 × ⌊N/2⌋ | 拒绝 |
 
 ## 验收
 

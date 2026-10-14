@@ -188,7 +188,8 @@ impl OmsConfig {
     pub fn from_engine(ec: &EngineConfig, rd: &RefData, epoch: u32, hz_milli: u64) -> Result<Self, LoadErr> {
         let err = LoadErr::new(LoadErrCode::Structure, EngineSection::Oms as u16, 0);
         let s = ec.section(EngineSection::Oms).ok_or(err)?;
-        if s.row_ver != OMS_CONFIG_ROW_VERSION || s.row_size != 16 {
+        // A partial trailing row is a malformed section, never silently dropped.
+        if s.row_ver != OMS_CONFIG_ROW_VERSION || s.row_size != 16 || s.bytes.len() % 16 != 0 {
             return Err(err);
         }
         let rows: Vec<_> = s

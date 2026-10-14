@@ -37,6 +37,7 @@ mod rounds;
 pub mod snapshot;
 mod types;
 pub mod views;
+pub use attrib::receipt_field;
 pub use views::Portfolio;
 
 pub use config::{

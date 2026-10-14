@@ -202,7 +202,7 @@ committed_len 之后   全零(热段由内核在缺页时清零;冷副本在封�
     pub _pad: [u8; 3],                //  1
     pub n_sections: u32,              //  4
     pub at_seq: u64,                  //  8 快照反映的是处理完该 seq 之后的状态
-    pub state_hash: [u8; 16],         // 16 各节内容按写出顺序(= hft-sequencer 快照节写出顺序,节 16 除外)的 xxh3-128;purpose = Keyframe 时恒为 0(见下)
+    pub state_hash: [u8; 16],         // 16 各节内容按写出顺序(= hft-sequencer 快照节写出顺序,节 16、28、29 除外)的 xxh3-128;purpose = Keyframe 时恒为 0(见下)
     pub n_books: u32,                 // 32 随后应出现的 L2 关键帧数(Boot、Recovery);其余 purpose 为 0
     pub _pad2: u32,                   // 36
     pub out_hash: [u8; 16],           // 40 两快照之间(不含边界)的 Output 滚动 xxh3-128,区间与字节流规则归 hft-sequencer "状态哈希"
@@ -256,6 +256,8 @@ const _: () = assert!(size_of::<SnapshotHdr>() == 96);
 | 26 | `ConnLive` | [hft-sequencer](../../crates/hft-sequencer/README.md) | 每 (venue, BBO 连接槽) 的 `ConnLive{up, resync, live_tsc}`(槽数 `MAX_BBO_CONN_SLOTS`);只含本次运行的值,处理 `EngineClock` 时清空;从关键帧起步的读者据此延续 `BboView` 的连接健康 |
 
 | 27 | `StrategyTimers` | [hft-sequencer](../../crates/hft-sequencer/README.md) | 每绑定实例的 SDK TimerId 计数器及存活登记;恢复与节 8 逐项核对,截止一起平移 |
+| 28 | `FillSeq` | [hft-sequencer](../../crates/hft-sequencer/README.md) | 每 (account, inst) 最近一笔成交的 seq(`StaleReport` 与 `AUTO_EXTERNAL` 守卫);只在有成交时写出,缺失 = 空表;**不计入 `state_hash`**(成交事件的派生索引,快照字节仍逐字节验证) |
+| 29 | `ReconView` | [hft-sequencer](../../crates/hft-sequencer/README.md) | `AdoptExchange` 用的最近对账视图(每 report 的 `view_seq` 与 Position 差量,定长、最旧先淘汰);只在非空时写出,缺失 = 空表;**不计入 `state_hash`**(对账输入的派生索引,快照字节仍逐字节验证) |
 
 各节的行格式与行版本只在归属 crate 登记(本页只登记节号、节名与归属;本页给出行格式的节 14、18、20、25 除外)。模拟账户的状态与实盘账户在同一组节里(按 `account` 区分);sim-gw 自身的撮合状态不进本快照,启动时由 [hft-sim](../../crates/hft-sim/README.md) 从这些节重建。未知节号的读者按 `len` 跳过;节内行格式的演进规则同事件体(只追加、零值表示未提供,`version` 递增)。行只由显式字段与 `_pad` 组成(无隐式填充,未用字节补零);不原样嵌入数据枚举(`#[repr(C, u8)]`)或标明"不以原始字节写进 journal"的类型,这类内容按字段展开(判别值 + 显式填充 + 定长载荷)。L2 档位不进 `StateSnapshot`,由紧随其后的 `L2Snapshot` 关键帧承载。
 

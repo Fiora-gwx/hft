@@ -56,6 +56,12 @@ impl crate::Oms {
         if e.exch_order_id == 0 {
             return Ok(false);
         }
+        // Only rows the section 12 restore accepts may be retained (a strict-cash perpetual of
+        // the reporting venue); anything else is rejected before it can be stored.
+        let inst = self.inst(e.inst);
+        if !inst.valid || !inst.perp_cash || inst.venue != e.venue {
+            return Err(CashError::Identity);
+        }
         let t = self
             .tix(e.venue, e.account)
             .and_then(|i| self.t(i))

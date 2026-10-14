@@ -197,17 +197,248 @@ pub struct CmdState {
     pub conns: ConnTable,
     pub unknown_last: Vec<u32>,
     pub feeds_last: Vec<bool>,
-    /// Last `ReplaceRefdata` version accepted or active.
-    /// `report_id → view_seq` of the latest reconciliation groups.
-    pub recon_view: Vec<(u64, u64)>,
-    /// `(report_id, account, inst) → exch − engine` of position items.
-    pub recon_diff: Vec<((u64, AccountId, InstId), Qty)>,
-    /// `(account, inst) → seq of the last fill`.
-    pub fill_seq: Vec<((AccountId, InstId), u64)>,
+    /// Retained reconciliation views and position diffs read by `AdoptExchange`
+    /// (snapshot section 29).
+    pub recon_views: ReconViews,
+    /// `(account, inst) → seq of the last fill` (snapshot section 28).
+    pub fill_seq: FillSeqTable,
 }
 
+/// `(account, inst) → seq of the latest fill` read by the `AdoptExchange` `StaleReport` guard
+/// and the `AUTO_EXTERNAL` precondition. Dense and sized from refdata at boot, so the fill path
+/// never allocates (M1); persisted in snapshot section 28 so recovery equals continuous replay.
+#[derive(Clone, Debug, Default)]
+pub struct FillSeqTable {
+    /// Row stride: `inst_count + 1` (inst 0 is never a fill inst).
+    stride: usize,
+    seqs: Vec<u64>,
+}
+
+impl FillSeqTable {
+    pub fn new(n_accounts: usize, n_insts: usize) -> FillSeqTable {
+        let stride = n_insts + 1;
+        FillSeqTable {
+            stride,
+            seqs: vec![0; (n_accounts + 1) * stride],
+        }
+    }
+    fn ix(&self, a: AccountId, i: InstId) -> Option<usize> {
+        let i = i.0 as usize;
+        (i < self.stride).then(|| usize::from(a.0) * self.stride + i)
+    }
+    /// 0 = no fill seen (or outside refdata).
+    pub fn get(&self, a: AccountId, i: InstId) -> u64 {
+        self.ix(a, i).and_then(|x| self.seqs.get(x)).copied().unwrap_or(0)
+    }
+    /// `false` = the key is outside the boot dimensions (nothing stored).
+    pub fn set(&mut self, a: AccountId, i: InstId, seq: u64) -> bool {
+        match self.ix(a, i).and_then(|x| self.seqs.get_mut(x)) {
+            Some(x) => {
+                *x = seq;
+                true
+            }
+            None => false,
+        }
+    }
+    /// Nonzero entries in `(account, inst)` order (the section 28 row order).
+    pub fn rows(&self) -> impl Iterator<Item = FillSeqRow> + '_ {
+        let stride = self.stride.max(1);
+        self.seqs
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| **s != 0)
+            .map(move |(k, s)| FillSeqRow {
+                account: AccountId((k / stride) as u8),
+                _pad: [0; 3],
+                inst: InstId((k % stride) as u32),
+                seq: *s,
+            })
+    }
+}
+
+/// Reports whose view and position diffs `AdoptExchange` can still use (oldest evicted first).
+pub const RECON_VIEW_REPORTS: usize = 16;
+/// Position-diff rows retained across those reports.
+pub const RECON_VIEW_DIFFS: usize = 4096;
+
+/// One retained reconciliation view (`AdoptExchange` precondition).
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct ReconView {
+    pub report_id: u64,
+    pub view_seq: u64,
+    /// Some position diff of this report did not fit: the report cannot be adopted.
+    pub overflow: bool,
+}
+
+/// One retained position diff `exch − engine`.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct ReconDiff {
+    pub report_id: u64,
+    pub account: AccountId,
+    pub inst: InstId,
+    pub diff: Qty,
+}
+
+/// Fixed-capacity table of the latest reconciliation views and their position diffs. Both
+/// containers are allocated at boot and never grow (FIFO eviction of whole reports). A report
+/// that is not retained (evicted, overflowed, or older than the snapshot it was restored from
+/// without section 29) cannot be adopted: `AdoptExchange` answers `StaleReport`.
+#[derive(Clone, Debug)]
+pub struct ReconViews {
+    views: VecDeque<ReconView>,
+    diffs: Vec<ReconDiff>,
+}
+
+impl Default for ReconViews {
+    fn default() -> ReconViews {
+        ReconViews {
+            views: VecDeque::with_capacity(RECON_VIEW_REPORTS),
+            diffs: Vec::with_capacity(RECON_VIEW_DIFFS),
+        }
+    }
+}
+
+impl ReconViews {
+    /// The retained view of `report_id`.
+    pub fn view(&self, report_id: u64) -> Option<ReconView> {
+        self.views.iter().find(|v| v.report_id == report_id).copied()
+    }
+    /// The retained diff (0 when the report has no position row for the key).
+    pub fn diff(&self, report_id: u64, a: AccountId, i: InstId) -> Qty {
+        self.diffs
+            .iter()
+            .find(|d| d.report_id == report_id && d.account == a && d.inst == i)
+            .map_or(Qty(0), |d| d.diff)
+    }
+    /// Views (oldest first) and diffs (insertion order): the section 29 order.
+    pub fn views(&self) -> impl Iterator<Item = &ReconView> + '_ {
+        self.views.iter()
+    }
+    pub fn diffs_of(&self, report_id: u64) -> impl Iterator<Item = &ReconDiff> + '_ {
+        self.diffs.iter().filter(move |d| d.report_id == report_id)
+    }
+    pub fn is_empty(&self) -> bool {
+        self.views.is_empty()
+    }
+    fn evict_oldest(&mut self, keep: u64) -> bool {
+        let Some(ix) = self.views.iter().position(|v| v.report_id != keep) else {
+            return false;
+        };
+        if let Some(v) = self.views.remove(ix) {
+            self.diffs.retain(|d| d.report_id != v.report_id);
+        }
+        true
+    }
+    /// Records one report row. Position rows set the view (last one wins) and their diff;
+    /// other rows only open the view. Returns `true` the first time this report overflows.
+    pub fn record(&mut self, r: &ReconcileReport, position: bool) -> bool {
+        if self.view(r.report_id).is_none() {
+            if self.views.len() >= RECON_VIEW_REPORTS {
+                self.evict_oldest(r.report_id);
+            }
+            self.views.push_back(ReconView {
+                report_id: r.report_id,
+                view_seq: r.view_seq,
+                overflow: false,
+            });
+        }
+        if !position {
+            return false;
+        }
+        let diff = Qty(r.exch_qty.0.saturating_sub(r.engine_qty.0));
+        let Some(v) = self.views.iter_mut().find(|v| v.report_id == r.report_id) else {
+            return false;
+        };
+        v.view_seq = r.view_seq;
+        if v.overflow {
+            return false;
+        }
+        if let Some(d) = self
+            .diffs
+            .iter_mut()
+            .find(|d| d.report_id == r.report_id && d.account == r.account && d.inst == r.inst)
+        {
+            d.diff = diff;
+            return false;
+        }
+        while self.diffs.len() >= RECON_VIEW_DIFFS {
+            if !self.evict_oldest(r.report_id) {
+                if let Some(v) = self.views.iter_mut().find(|v| v.report_id == r.report_id) {
+                    v.overflow = true;
+                }
+                self.diffs.retain(|d| d.report_id != r.report_id);
+                return true;
+            }
+        }
+        self.diffs.push(ReconDiff {
+            report_id: r.report_id,
+            account: r.account,
+            inst: r.inst,
+            diff,
+        });
+        false
+    }
+    /// Restores one section 29 report (rows already validated by the reader).
+    pub(crate) fn restore(&mut self, v: ReconView, diffs: &[ReconDiff]) -> bool {
+        if self.views.len() >= RECON_VIEW_REPORTS
+            || self.view(v.report_id).is_some()
+            || self.diffs.len() + diffs.len() > RECON_VIEW_DIFFS
+        {
+            return false;
+        }
+        self.views.push_back(v);
+        self.diffs.extend_from_slice(diffs);
+        true
+    }
+}
+
+pub const SECTION_RECON_VIEW: u16 = 29;
+pub const RECON_VIEW_VERSION: u16 = 1;
+
+/// Section 29 report row (24 B), followed by `n_diffs` [`ReconDiffRow`]s; reports oldest first.
+#[repr(C)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, FromBytes, IntoBytes, Immutable, KnownLayout)]
+pub struct ReconViewRow {
+    pub report_id: u64,
+    pub view_seq: u64,
+    pub n_diffs: u32,
+    /// OVERFLOW = 1.
+    pub flags: u32,
+}
+const _: () = assert!(core::mem::size_of::<ReconViewRow>() == 24);
+const _: () = assert!(core::mem::offset_of!(ReconViewRow, n_diffs) == 16);
+
+/// Section 29 position-diff row (16 B), in recording order.
+#[repr(C)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, FromBytes, IntoBytes, Immutable, KnownLayout)]
+pub struct ReconDiffRow {
+    pub account: AccountId,
+    pub _pad: [u8; 3],
+    pub inst: InstId,
+    pub diff: Qty,
+}
+const _: () = assert!(core::mem::size_of::<ReconDiffRow>() == 16);
+const _: () = assert!(core::mem::offset_of!(ReconDiffRow, diff) == 8);
+
+pub const SECTION_FILL_SEQ: u16 = 28;
+pub const FILL_SEQ_VERSION: u16 = 1;
+
+/// Section 28 row (16 B): the seq of the latest fill of `(account, inst)`; only nonzero rows,
+/// ascending `(account, inst)`. The section is written only when it has a row.
+#[repr(C)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, FromBytes, IntoBytes, Immutable, KnownLayout)]
+pub struct FillSeqRow {
+    pub account: AccountId,
+    pub _pad: [u8; 3],
+    pub inst: InstId,
+    pub seq: u64,
+}
+const _: () = assert!(core::mem::size_of::<FillSeqRow>() == 16);
+const _: () = assert!(core::mem::offset_of!(FillSeqRow, inst) == 4);
+const _: () = assert!(core::mem::offset_of!(FillSeqRow, seq) == 8);
+
 impl CmdState {
-    pub fn new(recent: usize) -> CmdState {
+    pub fn new(recent: usize, rd: &RefData) -> CmdState {
         let z = crate::strategies::zero_blob();
         CmdState {
             dedup: VecDeque::with_capacity(recent),
@@ -226,9 +457,8 @@ impl CmdState {
             conns: ConnTable::default(),
             unknown_last: vec![u32::MAX; 256],
             feeds_last: vec![false; 256],
-            recon_view: Vec::new(),
-            recon_diff: Vec::new(),
-            fill_seq: Vec::with_capacity(256),
+            recon_views: ReconViews::default(),
+            fill_seq: FillSeqTable::new(crate::engine::account_count(rd), rd.inst_count()),
         }
     }
     fn dedup_find(&self, id: &[u8; 16]) -> Option<&CmdDedupRow> {
@@ -1656,28 +1886,16 @@ fn adopt<D: Driver<S>, S: StrategySet>(
     group: GroupId,
     entry_px: hft_types::Px,
 ) -> R<Res> {
-    // Stale: a fill on the inst after the report's view seq.
-    let view_seq = e
-        .cmd
-        .recon_view
-        .iter()
-        .find(|x| x.0 == report_id)
-        .map_or(0, |x| x.1);
-    let last_fill = e
-        .cmd
-        .fill_seq
-        .iter()
-        .find(|x| x.0 == (account, inst_id))
-        .map_or(0, |x| x.1);
-    if last_fill > view_seq && view_seq != 0 {
+    // Stale: the report is not retained (evicted, overflowed or not restored), or a fill on the
+    // inst came after the report's view seq.
+    let Some(view) = e.cmd.recon_views.view(report_id).filter(|v| !v.overflow) else {
+        return Ok(res(status::PRECONDITION_FAILED, detail::STALE_REPORT));
+    };
+    let last_fill = e.cmd.fill_seq.get(account, inst_id);
+    if last_fill > view.view_seq && view.view_seq != 0 {
         return Ok(res(status::PRECONDITION_FAILED, detail::STALE_REPORT));
     }
-    let diff = e
-        .cmd
-        .recon_diff
-        .iter()
-        .find(|x| x.0 == (report_id, account, inst_id))
-        .map_or(Qty(0), |x| x.1);
+    let diff = e.cmd.recon_views.diff(report_id, account, inst_id);
     // `AdoptExchange.item` (hft-event `codes::ADOPT_ITEM`): Position = 0, Balance = 1.
     let position = item == 0;
     let kind = if position {
@@ -2382,37 +2600,104 @@ pub(crate) fn synth_funding<D: Driver<S>, S: StrategySet>(
 
 // ------------------------------------------------------------------------------- recon
 
+/// `ReconcileRejected.v[2]` reasons (hft-event README "变长记录前缀").
+pub mod recon_reject {
+    pub const UNDECODABLE: u64 = 1;
+    pub const IN_FLIGHT: u64 = 2;
+    pub const LEDGER_PREFLIGHT: u64 = 3;
+    pub const OMS_PREFLIGHT: u64 = 4;
+    /// The report's position diffs exceed the retained-view capacity; it cannot be adopted.
+    pub const VIEW_OVERFLOW: u64 = 5;
+}
+
+fn recon_rejected(
+    e: &mut Engine,
+    report_id: u64,
+    venue: VenueId,
+    account: AccountId,
+    reason: u64,
+    detail: u64,
+) {
+    e.seq_note(
+        note::RECONCILE_REJECTED,
+        NoteLevel::P0,
+        GROUP_NONE,
+        hft_types::INST_NONE,
+        [
+            report_id,
+            u64::from(venue.0) | u64::from(account.0) << 8,
+            reason,
+            detail,
+            0,
+            0,
+            0,
+            0,
+        ],
+    );
+}
+
+/// One `ReconcileBatch` Input (README "原始凭据补账"). Untrusted warm-plane evidence never stops
+/// the engine: an undecodable body, a report_id whose group is still in flight, or a group the
+/// ledger/OMS preflight refuses is not applied (`ReconcileRejected` P0, then `ReconcileCash`
+/// with applied = 0 when the header is readable). Fatal stays for broken in-engine invariants.
 pub(crate) fn reconcile_batch<D: Driver<S>, S: StrategySet>(
     e: &mut Engine,
     inst: &mut Instances<S>,
     drv: &mut D,
     slot: &InputSlot,
 ) -> R<()> {
-    let batch =
-        hft_event::ReconcileBatchView::read(slot.body()).map_err(|_| FatalReason::ReconcileEvidence)?;
-    if e.cmd.recon.iter().any(|g| {
-        g.report_id == batch.hdr.report_id && g.account == batch.hdr.account && g.venue == batch.hdr.venue
-    }) {
-        return Err(FatalReason::ReconcileEvidence);
-    }
+    let Ok(batch) = hft_event::ReconcileBatchView::read(slot.body()) else {
+        let h = crate::types::read_body_plain::<hft_event::ReconcileBatchHdr>(slot.body());
+        let (id, v, a) = h.map_or((0, VenueId(0), AccountId(0)), |h| {
+            (h.report_id, h.venue, h.account)
+        });
+        recon_rejected(e, id, v, a, recon_reject::UNDECODABLE, 0);
+        return Ok(());
+    };
+    let (report_id, venue, account) = (batch.hdr.report_id, batch.hdr.venue, batch.hdr.account);
+    let in_flight = e
+        .cmd
+        .recon
+        .iter()
+        .any(|g| g.report_id == report_id && g.account == account && g.venue == venue);
     let flags = batch
         .reports()
         .find(|r| r.item == ITEM_SUMMARY)
         .map_or(0, |r| r.sflags);
-    let applicable = flags
-        & (ReconcileReport::USERSTREAM_DOWN
-            | ReconcileReport::TRUNCATED
-            | ReconcileReport::HISTORY_UNCHECKED)
-        == 0
+    let mut applicable = !in_flight
+        && flags
+            & (ReconcileReport::USERSTREAM_DOWN
+                | ReconcileReport::TRUNCATED
+                | ReconcileReport::HISTORY_UNCHECKED)
+            == 0
         && batch
             .reports()
             .filter(|r| r.item == ITEM_POSITION && r.sflags & ReconcileReport::AUTO_EXTERNAL != 0)
             .all(|r| auto_external_check(e, &r, flags));
-    if applicable {
-        e.ledger
-            .validate_reconcile_batch(&batch)
-            .map_err(FatalReason::Settlement)?;
-        e.oms.reconcile_cash_guard(&batch).map_err(FatalReason::OmsCash)?;
+    if in_flight {
+        recon_rejected(e, report_id, venue, account, recon_reject::IN_FLIGHT, 0);
+    } else if applicable {
+        if let Err(x) = e.ledger.validate_reconcile_batch(&batch) {
+            recon_rejected(
+                e,
+                report_id,
+                venue,
+                account,
+                recon_reject::LEDGER_PREFLIGHT,
+                x as u64,
+            );
+            applicable = false;
+        } else if let Err(x) = e.oms.reconcile_cash_guard(&batch) {
+            recon_rejected(
+                e,
+                report_id,
+                venue,
+                account,
+                recon_reject::OMS_PREFLIGHT,
+                x as u64,
+            );
+            applicable = false;
+        }
     }
     e.seq_note(
         note::RECONCILE_CASH,
@@ -2420,8 +2705,8 @@ pub(crate) fn reconcile_batch<D: Driver<S>, S: StrategySet>(
         GROUP_NONE,
         hft_types::INST_NONE,
         [
-            batch.hdr.report_id,
-            u64::from(batch.hdr.venue.0) | u64::from(batch.hdr.account.0) << 8,
+            report_id,
+            u64::from(venue.0) | u64::from(account.0) << 8,
             u64::from(batch.hdr.n_reports),
             u64::from(batch.hdr.n_fills),
             u64::from(applicable),
@@ -2430,6 +2715,10 @@ pub(crate) fn reconcile_batch<D: Driver<S>, S: StrategySet>(
             0,
         ],
     );
+    // A duplicate of a group still being collected must not be merged into its counts.
+    if in_flight {
+        return Ok(());
+    }
     for r in batch.reports() {
         reconcile_row(e, inst, drv, r, Some((&batch, applicable)))?;
     }
@@ -2498,16 +2787,15 @@ fn reconcile_row<D: Driver<S>, S: StrategySet>(
     } else if let Some(g) = e.cmd.recon.get_mut(gi) {
         g.stored.push(r);
     }
-    if r.item == ITEM_POSITION {
-        e.cmd
-            .recon_diff
-            .retain(|x| x.0 != (r.report_id, r.account, r.inst));
-        e.cmd.recon_diff.push((
-            (r.report_id, r.account, r.inst),
-            Qty(r.exch_qty.0 - r.engine_qty.0),
-        ));
-        e.cmd.recon_view.retain(|x| x.0 != r.report_id);
-        e.cmd.recon_view.push((r.report_id, r.view_seq));
+    if e.cmd.recon_views.record(&r, r.item == ITEM_POSITION) {
+        recon_rejected(
+            e,
+            r.report_id,
+            r.venue,
+            r.account,
+            recon_reject::VIEW_OVERFLOW,
+            RECON_VIEW_DIFFS as u64,
+        );
     }
     let done = e.cmd.recon.get(gi).is_some_and(|g| g.received >= g.count);
     if !done {
@@ -2621,7 +2909,7 @@ fn auto_external_check(e: &Engine, it: &ReconcileReport, summary_flags: u16) -> 
     if fl.open_buy.0 != 0 || fl.open_sell.0 != 0 {
         return false;
     }
-    let last_fill = e.cmd.fill_seq.iter().find(|x| x.0 == (a, i)).map_or(0, |x| x.1);
+    let last_fill = e.cmd.fill_seq.get(a, i);
     if last_fill > it.view_seq {
         return false;
     }

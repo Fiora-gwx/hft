@@ -258,7 +258,7 @@ pub struct ForeignFill {                           // 防御路径与 StaleGen �
 
 ### 配置项(`OmsConfig`)
 
-来自 `EngineConfig` blob 的 `oms` 段;变更 = 重启。
+来自 `EngineConfig` blob 的 `oms` 段;变更 = 重启。段的行宽必须是 16 B 且字节数是 16 的整数倍,否则整段拒绝(不丢弃不完整的尾行)。
 
 | 名称 | 类型 | 默认 | 含义 / 来源 |
 |---|---|---|---|
@@ -533,22 +533,22 @@ gw 对某 (venue, account) 的回报帧解码失败时写 `ConnState{role = User
 ### 回报匹配与成交增量
 
 1. `ev.slot == SLOT_UNRESOLVED`(0)→ 外来单:无成交 → `Note{OmsForeignOrder}`;带 `cum_filled > 0`(本应由 gw 写成 `ExternalFill`,这里是防御路径)→ 按 `foreign` 表求增量,先按第 4 条扣除 `ext_held`(只对未入账部分)后产出 `ForeignFill`,sequencer 按 `ExternalFill{cause: Unknown}` 走 hft-ledger 的归属与入账;写 `Note{OmsForeignFillViaOrderEvent}`(P1,venue crate 契约偏差)。
-2. **匹配键是 `(ev.epoch, ev.slot, ev.gen)`**。与当前槽不符 → 查该槽的墓碑(见"墓碑与迟到成交");墓碑也没有 → `StaleGen`:不改本槽;不带成交的只计数(`OmsStats.stale_gen`),无 Note;带 `cum_filled > 0` 时**照样入账**——`ev.exch_order_id ≠ 0` 时按 `foreign` 表求增量并先扣除 `ext_held`(同第 1 条防御路径;扣完为 0 则不产出),产出 `ForeignFill`,sequencer 按 `ExternalFill{cause: Unknown}` 走 hft-ledger 的归属与入账(随后 hft-exec 的外来成交规则照常适用);`exch_order_id = 0` 时无法去重,不入账;两种情况都写 `Note{OmsStaleGenFill}`(P0,`v[2]` = 是否已入账);"请求对账"的载体就是这条 P0 Note,OMS 不另发命令或查询(仓位真值由 reconciler 下一轮对账裁决,重复入账或漏账都由对账采纳校正)。
+2. **匹配键是 `(ev.epoch, ev.slot, ev.gen)`**。命中槽或墓碑后核对品种:`ev.inst = INST_NONE`(0)表示 venue 没有给出品种(如 Binance WS API 的错误响应),按命中的槽/墓碑的品种处理;给出另一个非零品种时,命中品种所在 venue 声明 PERP_CASH 则为 `CashError::Identity`(第 10 条),否则该回报整条忽略(不迁移、不入账、不推进水位),写 `Note{OmsAnomaly{InstMismatch}}`(实际级别 P0,`v[1]` = 回报给出的品种)。与当前槽不符 → 查该槽的墓碑(见"墓碑与迟到成交");墓碑也没有 → `StaleGen`:不改本槽;不带成交的只计数(`OmsStats.stale_gen`),无 Note;带 `cum_filled > 0` 时**照样入账**——`ev.exch_order_id ≠ 0` 时按 `foreign` 表求增量并先扣除 `ext_held`(同第 1 条防御路径;扣完为 0 则不产出),产出 `ForeignFill`,sequencer 按 `ExternalFill{cause: Unknown}` 走 hft-ledger 的归属与入账(随后 hft-exec 的外来成交规则照常适用);`exch_order_id = 0` 时无法去重,不入账;两种情况都写 `Note{OmsStaleGenFill}`(P0,`v[2]` = 是否已入账);"请求对账"的载体就是这条 P0 Note,OMS 不另发命令或查询(仓位真值由 reconciler 下一轮对账裁决,重复入账或漏账都由对账采纳校正)。
 3. 成交增量 `d = ev.cum_filled − slot.filled`:`d ≤ 0` → 成交部分视为重复/乱序,仅状态部分按表处理;`d > 0` → 增量名义 = `ev.avg_px × ev.cum_filled − slot.filled_notional`(`OrderEvent.avg_px` 为交易所给的累计均价,i128 积),`filled_notional` 取新值。未被外来成交抵扣的完整增量通过 `FillOut.notional = Some(增量名义)` 保留原值,现货现金不从已取整的 `FillOut.px × qty` 反算;`px` 仍按增量名义除以数量 HalfEven 取整,供成本与分析使用。墓碑及被部分抵扣的增量没有完整原始名义,输出 `None` 并保留增量价路径;不按比例猜金额。
 4. **与外来成交去重**(成交去重键的唯一定义是 [hft-venue-proto](../hft-venue-proto/README.md) 契约 22:`(inst, trade_id)`,强平/ADL 等 0 或负的成交 id 改用 `(inst, exch_order_id, fill_seq)`;本 crate 不另设键):gw 无法匹配到槽的成交先暂存 `gw.unmatched_hold_ms`(默认 5 000,等同账户的 Ack 补上 exch id),超时才报为 `ExternalFill{cause: Unknown}`(规则在 [hft-venue](../hft-venue/README.md))。若之后该单被查询或迟到回报匹配到槽,且 `ext_held[slot.exch_order_id] = b > 0`(这部分已按外来成交入账):槽的 `filled`、链接的 `first_net` 照常按全量 `d` 推进,但 `FillOut` 与 LegTracker 只计 `d − min(d, b)`(为 0 时不产出 `FillOut`),`b` 同量递减,`FillOut.flags |= EXT_DEDUP`,写 `Note{OmsExtDedup}`(P1)。第 1、2 条的 `ForeignFill` 同样按 `ext_held[ev.exch_order_id]` 先扣,只产出 `d − min(d, b)`,并写同一 Note。对冲按 OnFill 规则发出,数量受**该方向裸量**约束:若这段敞口已被 hft-exec 的外来成交默认处理或策略平掉,裸量为 0,不再重复对冲;若仍裸露,照常补发。
 5. **`avg_px` 为 0**(交易所没给均价):`OrderEvent` 成交类回报 → 退回 `ev.px × d`(`ev.px` 是本笔成交价);`QueryResult`(`ev.px` 可能只是委托价)→ 以委托价计、`FillOut.flags |= PX_EST`、写 `Note{OmsFillPxEstimated}`(P1)与 `Note{OmsNeedsRestQuery, trades = 1}`,由对账的成交历史校正价格(校正走 ledger 的采纳路径)。venue 契约:`QueryResult` 在 `cum_filled > 0` 时应给均价,给不出的由 gw 先查成交再出事件。
 6. **超量成交**:`ev.cum_filled > slot.qty`(只可能是解码/单位错误)→ 成交照常入账(`FillOut.flags |= OVERFILL`,由对账裁决),但超出 `qty` 的部分**不进入对冲基数**;同一事件内先按 OnFill 第 1–5 步对不超过 `qty` 的部分产生第二腿,再把该槽所在链接置 `Broken{Overfill}`;`Note{OmsOverfill}`(P0)。
 7. `venue-<x>` 必须在每条成交回报里给出**累计成交量** `cum_filled` 与累计均价;给不出的在 gw 内按 exec id 去重合成;仍给不出则该 venue 不允许启用下单(加载时拒绝)。
 8. **冷读者的入账依据**:第 1、2 条每产出一条 `ForeignFill`,同一事件内另写一条 `Note{OmsForeignFill}`(Info,Output 类,回放比对;字段唯一定义在此):`Note.inst = inst`、`Note.group = GROUP_NONE`,`v = [venue | account << 8 | side << 16 | path << 24 | fee_asset << 32, qty, px, fee, exch_order_id, trade_id, fill_seq, cum_filled]`(`path`:防御路径 = 1、`StaleGen` = 2;数值为 raw;`fill_seq` = `trade_id = 0` 时 `cum_filled` 的 raw 值,否则 0)。这笔外来成交与对账 `AUTO_EXTERNAL` 同理,由 sequencer 在本条 Input 内按这些字段确定地构造为 `ExternalFill{cause = Unknown}`(现金字段按第 10–12 条,其余字段为 0)并入账,不另写 Input;冷读者(reconciler 的引擎视图、hft-py)在同一事件内读到本 Note 时构造同一 `ExternalFill`,经 hft-ledger 的 journal 消费路径入账(消费规则归 [hft-ledger 外部成交](../hft-ledger/README.md#外部成交externalfill),码名登记归 hft-event)。
-9. **数量先由非成交回报带来时的费用**:`CancelReject`、`CancelAck`/`Expired`、`AmendAck`/`AmendReject`、`QueryResult` 与对账收敛带来的增量不带费用(第 3 条照常入账,`fee = 0`);随后到达、数量已被覆盖(`d ≤ 0`)的 `PartialFill`/`Fill`,若 `ev.cum_filled > SlotExt.fee_cum`,它的 `fee` 按 `FeeOnly` 入账(`FeeOut`,净量补差同"成交净量");`fee_cum ≥ ev.cum_filled` 的是重复回报,不入账。每条 `PartialFill`/`Fill` 之后 `fee_cum = max(fee_cum, ev.cum_filled)`;其他回报不改 `fee_cum`。
+9. **数量先由非成交回报带来时的费用**:`CancelReject`、`CancelAck`/`Expired`、`AmendAck`/`AmendReject`、`QueryResult` 与对账收敛带来的增量通常不带费用(第 3 条照常入账,`fee = 0`);随后到达、数量已被覆盖(`d ≤ 0`)的 `PartialFill`/`Fill`,若 `ev.cum_filled > SlotExt.fee_cum`,它的 `fee` 按 `FeeOnly` 入账(`FeeOut`,净量补差同"成交净量");`fee_cum ≥ ev.cum_filled` 的是重复回报,不入账。每条 `PartialFill`/`Fill` 之后 `fee_cum = max(fee_cum, ev.cum_filled)`;**任何回报带来成交增量且 `fee ≠ 0` 时,该费用随增量入账,同时 `fee_cum = max(fee_cum, ev.cum_filled)`**——venue 契约:非成交回报若带费用,它就是这段增量(至 `cum_filled`)的费用,之后覆盖同一数量的成交回报不再记费;冷读者(hft-ledger 的 journal 消费)按同一规则。
 
-10. **显式永续结算**:venue 声明 [PERP_CASH](../hft-refdata/README.md#交易所能力表venuecaps) 时,槽与墓碑按完整身份保存 `cash_qty/cash_sum`。回报的 `inst` 必须与命中的槽或墓碑一致。成交累计量前移时,要求回报覆盖全部累计成交,已有覆盖量等于本地 `filled`;`FillOut.cash = Some(ev.cash_sum − saved.cash_sum)`,单位为该 inst 报价资产的 `qty_exp`,不含费用与资金费。已知零额也输出 `Some(0)`,重复水位金额不一致为 `Conflict`,溢出为 `Overflow`,缺失/部分覆盖为 `Missing`,非法覆盖为 `Coverage`。旧累计量不倒退水位;`FeeOnly` 不推进结算。槽回收时复制水位到墓碑,迟到成交只产出差额。未声明该能力的旧配置保持 `FillOut.cash = None`,不能据此承诺钱包实额一致。
+10. **显式永续结算**:venue 声明 [PERP_CASH](../hft-refdata/README.md#交易所能力表venuecaps) 时,槽与墓碑按完整身份保存 `cash_qty/cash_sum`。回报的非零 `inst` 必须与命中的槽或墓碑一致(`INST_NONE` 按第 2 条)。成交累计量前移时,要求回报覆盖全部累计成交,已有覆盖量等于本地 `filled`;`FillOut.cash = Some(ev.cash_sum − saved.cash_sum)`,单位为该 inst 报价资产的 `qty_exp`,不含费用与资金费。已知零额也输出 `Some(0)`,重复水位金额不一致为 `Conflict`,溢出为 `Overflow`,缺失/部分覆盖为 `Missing`,非法覆盖为 `Coverage`。旧累计量不倒退水位;`FeeOnly` 不推进结算。槽回收时复制水位到墓碑,迟到成交只产出差额。未声明该能力的旧配置保持 `FillOut.cash = None`,不能据此承诺钱包实额一致。
 11. **外来结算水位**:严格模式下防御路径与 StaleGen 的 Fill/PartialFill 要有非零交易所订单号、明确方向、正价格和完整累计结算覆盖。按 `(venue, account, inst, exch_order_id)` 保存累计毛量与现金,只产生差额;同水位异额报 Conflict,旧水位不回退。已知槽或墓碑的同品种订单号不能被错误身份重新登记为外来单;缺少已记录来源且回报代数不大于该槽已用代数时,不能证明它不是退役订单,报 Untracked。未知身份或报告种类无法证明来源时输出 `CashError::Untracked`;外来成交重叠未携带可扣的现金事实时输出 `ExternalOverlap`;现行 `ReconcileReport` 不带结算事实,需要推进成交量时输出 `Missing`。这些错误不推进相关槽、墓碑或成交/费用输出,调用方必须先处理 `OmsOut.cash_error`,不能当作无成交继续运行。跨路径支持需要成交区间与对应现金事实,不能按数量比例分摊现金。
 
 12. **来源与容量**:原始 ExternalFill 的非零交易所订单号经 `external_cash_guard` 先核验,账本验证成功后经 `remember_external_cash(e, booked)` 保留来源。`booked` 只在本条 Input 实际完整入账时为真,重复、AUTO_EXTERNAL 与迟到确认均不能建立原件证明。`external_cash_guard` 返回 true 表示金融字段逐项相同的原件已入账,即使账本普通去重环绕回也不再记账;同键异额报 Conflict。原始来源与外来累计水位不互换;`has_foreign_cash` 防止其后来被普通槽或墓碑重复认领。来源与累计水位共用每表 `foreign_fill_track` 个预分配行,写满报 Capacity,不淘汰。未知身份 FeeOnly 报 Untracked。
 13. **单笔原件与累计重复**:仅当首次实际入账的原始 Unknown 成交具有完整结算、正价格及规范去重键时保留金融字段。之后的防御路径或 StaleGen Fill/PartialFill 必须证明累计前缀只有该笔,即 `OrderEvent.qty == cum_filled == 原件.qty`、相同正 trade_id(无正 ID 时原件 fill_seq 等于累计量),且账户、venue、品种、订单号、方向、价格、现金、费用与费用资产全部一致。此时不产出成交或费用,不推进水位或消耗 ext_held;仍各写一条对应路径告警,`v[2] = 0`,不写入账或 ExtDedup 注记。严格累计水位的零增量同样保留路径告警。该订单一旦出现不同成交键,单笔证明永久失效,后来的重复不能重建;旧快照只有来源没有原件时同样不能补造证明。跨多笔累计、先累计后原始、普通槽认领及其他未证明重叠仍失败,不按比例分摊现金。
 
-`FillOut.cash: Option<Qty>` 只提供结算增量,资产由该 inst 的报价资产确定。`CashError` 的其余变体 `Identity` 表示命中的完整订单身份与 inst 不一致。
+`FillOut.cash: Option<Qty>` 只提供结算增量,资产由该 inst 的报价资产确定。`CashError` 的其余变体 `Identity` 表示命中的完整订单身份与非零的回报 inst 不一致(仅 PERP_CASH,见第 2 条),或原始 ExternalFill 的品种不是该 venue 的 PERP_CASH 品种(`external_cash_guard` 在保留来源之前拒绝,节 12 恢复同样只接受这种行,保证写出的快照都能恢复)。
 
 ### 成交净量(B4)
 
@@ -906,7 +906,7 @@ feature `chain`,随链上腿的策略迁移启用(触发条件见 [hft-chain-evm
 | `OmsHedgeNakedCapped` | P1 | 第二腿被该方向裸量截量 |
 | `OmsResumeRetry` | P1 | 恢复后的续接 |
 | `OmsResumeTimeout` | P0(零敞口链接实际级别 P1) | `resume_hold_max_ms` 内未能续接:有敞口的链接 Broken,零敞口的只清 `RESUME_HOLD` |
-| `OmsAnomaly` | P1(`SmokeFilled` 实际级别 P0) | 回报处理表中的"异常 Note"格与其他异常;`v[0]` = 种类:`Table=1`(回报处理表异常格)`ForeignEvict=2`(`foreign`/`ext_held` 表 FIFO 淘汰)`SmokeFilled=3`(冒烟单成交)`ReconIgnored=4`(`ReconcileReport` 的 `OpenOrder`/`UnknownResolved` 条目不匹配或槽已不是 Unknown/VERIFY,被忽略),其余 `v[]` 按种类 |
+| `OmsAnomaly` | P1(`SmokeFilled` 实际级别 P0) | 回报处理表中的"异常 Note"格与其他异常;`v[0]` = 种类:`Table=1`(回报处理表异常格)`ForeignEvict=2`(`foreign`/`ext_held` 表 FIFO 淘汰)`SmokeFilled=3`(冒烟单成交)`ReconIgnored=4`(`ReconcileReport` 的 `OpenOrder`/`UnknownResolved` 条目不匹配或槽已不是 Unknown/VERIFY,被忽略)`InstMismatch=5`(实际级别 P0;非 PERP_CASH 的槽/墓碑收到非零的另一品种,回报被忽略:`v[1]` = 回报品种,`v[2]` = 回报种类,`v[3]` = slot,`v[4]` = gen,`v[5]` = exch_order_id),其余 `v[]` 按种类 |
 
 ### 快照行格式(节 2、3、12;草案,实现时以代码与编译期断言为准)
 
@@ -1037,6 +1037,7 @@ const _: () = assert!(size_of::<TableRow>() == 32 && size_of::<LinkRowHdr>() == 
 ## 已知限制与后续工作
 
 - 显式结算的普通订单及不重叠外来累计回报冷热消费与剩余边界见 [hft-ledger](../hft-ledger/README.md#已知限制与后续工作);外来成交重叠和对账补量尚无完整现金事实,完整回放验证前不启用该能力作为 M2 通过依据。
+- **任何 venue 启用 PERP_CASH 之前的阻塞项**:外来现金来源表(`foreign_cash`/`foreign_receipts`,每表 `foreign_fill_track` 行)只增不减——行在整个运行期与快照中保留,没有按订单终结或对账确认回收的规则;写满后新的外来订单号一律 `CashError::Capacity`(停机)。启用前必须先定义回收条件(例如对账确认该订单号已终结且无待确认凭据)并补用例;hft-ledger 的冷读者外来来源表有同样问题([hft-ledger](../hft-ledger/README.md#已知限制与后续工作))。
 
 - 批量下单不在本规格:每个意图一个槽一个帧。可选扩展:`place_batch`(触发条件:启用需要批量的策略或 venue,且逐帧发送的限速或延迟成为瓶颈)。
 - `cancelReplace`/`amend.keepPriority` 语义按 `amend()` 处理。接入原子撤改的 venue 时(触发条件:策略需要该 venue 的改单路径)为"撤成功新单失败"的半成功情形补单独的状态迁移格。

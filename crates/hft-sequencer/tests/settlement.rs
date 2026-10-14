@@ -254,6 +254,7 @@ fn seq_418_bad_receipt_batch_cannot_partially_book() {
     use zerocopy::IntoBytes;
     for mutation in 0..6 {
         let mut h = cash_boot();
+        let start = h.keyframe();
         let open = reconcile_receipt(Side::Sell, 40, 300_000, 0);
         h.push(h.rep_ring(AC1), &open);
         assert_eq!(h.run(), StepOutcome::Idle);
@@ -281,7 +282,16 @@ fn seq_418_bad_receipt_batch_cannot_partially_book() {
         let seen_before = h.s.engine().ledger.ext_seen(AC1, B);
         let mark = h.mark();
         h.push_bytes(RingId::Ctl, EventKind::RECONCILE_BATCH, body);
-        assert!(matches!(h.run(), StepOutcome::Fatal(FatalReason::Settlement(_))));
+        // Untrusted warm-plane evidence is not applied; the engine keeps running.
+        assert_eq!(h.run(), StepOutcome::Idle, "row {mutation}");
+        let out = h.since(mark);
+        let rejected = seq_notes(&out, hft_sequencer::codes::note::RECONCILE_REJECTED);
+        assert_eq!(rejected.len(), 1, "row {mutation}");
+        assert_eq!(rejected[0].level, hft_event::NoteLevel::P0);
+        assert_eq!(rejected[0].v[2], 3, "row {mutation}: ledger preflight");
+        let cash = seq_notes(&out, hft_sequencer::codes::note::RECONCILE_CASH);
+        assert_eq!(cash.len(), 1, "row {mutation}");
+        assert_eq!(cash[0].v[4], 0, "row {mutation}: applied");
         assert_eq!(wallet(&h.s.engine().ledger), wallet_before, "row {mutation}");
         assert_eq!(*h.s.engine().ledger.pos(AC1, B1), pos_before);
         assert_eq!(h.s.engine().ledger.auto_held(AC1, B1, Side::Buy), Qty(0));
@@ -290,6 +300,254 @@ fn seq_418_bad_receipt_batch_cannot_partially_book() {
             r.read::<hft_event::Note>()
                 .is_some_and(|n| n.code == hft_ledger::notes::code::EXTERNAL_FILL)
         }));
+        h.keyframe();
+        assert_eq!(
+            wallet(cold_at(&h, &start).ledger()),
+            wallet_before,
+            "row {mutation}"
+        );
+        assert!(h.verify().is_empty(), "row {mutation}");
+        assert!(h.verify_from(Some(start.seq)).is_empty(), "row {mutation}");
+    }
+}
+
+/// `(report_id, count, received)` of the in-flight groups, read from a fresh keyframe.
+fn pending_recon(h: &mut H) -> Vec<(u64, u16, u16)> {
+    let k = h.keyframe();
+    hft_sequencer::snapshot::read_seq_sections(&k.body[96..])
+        .unwrap()
+        .recon
+        .iter()
+        .map(|(g, _)| (g.report_id, g.count, g.received))
+        .collect()
+}
+
+fn seq_notes(recs: &[MemRecord], n: u32) -> Vec<hft_event::Note> {
+    let code = hft_sequencer::codes::seq_note(n);
+    recs.iter()
+        .filter_map(|r| r.read::<hft_event::Note>())
+        .filter(|x| x.code == code)
+        .collect()
+}
+
+#[test]
+fn seq_426_undecodable_or_in_flight_batch_is_not_applied_and_does_not_stop() {
+    use hft_sequencer::driver::live::RingId;
+    for row in 0..2u64 {
+        let mut h = cash_boot();
+        let start = h.keyframe();
+        let open = reconcile_receipt(Side::Sell, 40, 300_000, 0);
+        h.push(h.rep_ring(AC1), &open);
+        assert_eq!(h.run(), StepOutcome::Idle);
+        let receipt = reconcile_receipt(Side::Buy, 41, 100_000, -111);
+        let mut body = reconcile_input(&mut h, &receipt, Qty(-200_000));
+        if row == 0 {
+            // SEQ-426.1: a truncated body (header still readable).
+            body.truncate(body.len() - 1);
+        } else {
+            // SEQ-426.2: the same report_id is still being collected as plain reports.
+            let mut part = recon_summary(AC1, B, 802, h.j().records().last().unwrap().seq);
+            part.count = 3;
+            h.push(hft_sequencer::driver::live::RingId::Ctl, &part);
+            assert_eq!(h.run(), StepOutcome::Idle);
+            assert_eq!(pending_recon(&mut h), vec![(802, 3, 1)]);
+        }
+        let wallet_before = wallet(&h.s.engine().ledger);
+        let pos_before = *h.s.engine().ledger.pos(AC1, B1);
+        let mark = h.mark();
+        h.push_bytes(RingId::Ctl, EventKind::RECONCILE_BATCH, body);
+        assert_eq!(h.run(), StepOutcome::Idle, "SEQ-426.{}", row + 1);
+        let out = h.since(mark);
+        let rejected = seq_notes(&out, hft_sequencer::codes::note::RECONCILE_REJECTED);
+        assert_eq!(rejected.len(), 1, "SEQ-426.{}", row + 1);
+        assert_eq!(rejected[0].v[0], 802);
+        assert_eq!(rejected[0].v[2], row + 1);
+        let cash = seq_notes(&out, hft_sequencer::codes::note::RECONCILE_CASH);
+        if row == 0 {
+            assert!(cash.is_empty());
+        } else {
+            assert_eq!(cash.len(), 1);
+            assert_eq!(cash[0].v[4], 0);
+            // The in-flight group keeps its own count.
+            assert_eq!(pending_recon(&mut h), vec![(802, 3, 1)]);
+        }
+        assert_eq!(wallet(&h.s.engine().ledger), wallet_before);
+        assert_eq!(*h.s.engine().ledger.pos(AC1, B1), pos_before);
+        h.keyframe();
+        assert_eq!(wallet(cold_at(&h, &start).ledger()), wallet_before);
+        assert!(h.verify().is_empty(), "SEQ-426.{}", row + 1);
+        assert!(h.verify_from(Some(start.seq)).is_empty(), "SEQ-426.{}", row + 1);
+    }
+}
+
+#[test]
+fn seq_427_receipt_confirmation_ignores_timestamps_and_mismatch_does_not_stop() {
+    use hft_sequencer::driver::live::RingId;
+    for row in 0..2 {
+        let mut h = cash_boot();
+        let start = h.keyframe();
+        let open = reconcile_receipt(Side::Sell, 40, 200_000, 0);
+        h.push(h.rep_ring(AC1), &open);
+        assert_eq!(h.run(), StepOutcome::Idle);
+        let receipt = reconcile_receipt(Side::Buy, 41, 100_000, -1_170_003);
+        let body = reconcile_input(&mut h, &receipt, Qty(-100_000));
+        h.push_bytes(RingId::Ctl, EventKind::RECONCILE_BATCH, body);
+        assert_eq!(h.run(), StepOutcome::Idle);
+        assert_eq!(h.s.engine().ledger.auto_held(AC1, B1, Side::Buy), receipt.qty);
+        let wallet_before = wallet(&h.s.engine().ledger);
+        let pending = h.keyframe();
+        // The WS push of the same execution, with other delivery timestamps.
+        let mut push = receipt;
+        push.ex_ts_ns = 1_700_000_000_000;
+        push.rx_tsc = hft_types::Tsc(42);
+        if row == 1 {
+            push.cash_amount.0 -= 1;
+        }
+        let mark = h.mark();
+        h.push(h.rep_ring(AC1), &push);
+        assert_eq!(h.run(), StepOutcome::Idle, "SEQ-427.{}", row + 1);
+        let mismatch: Vec<_> = h
+            .since(mark)
+            .iter()
+            .filter_map(|r| r.read::<hft_event::Note>())
+            .filter(|n| n.code == hft_ledger::notes::code::RECEIPT_MISMATCH)
+            .collect();
+        assert_eq!(wallet(&h.s.engine().ledger), wallet_before);
+        if row == 0 {
+            assert!(mismatch.is_empty());
+            assert_eq!(h.s.engine().ledger.auto_held(AC1, B1, Side::Buy), Qty(0));
+        } else {
+            assert_eq!(mismatch.len(), 1);
+            assert_eq!(mismatch[0].v[5], u64::from(hft_ledger::receipt_field::CASH));
+            assert_eq!(h.s.engine().ledger.auto_held(AC1, B1, Side::Buy), receipt.qty);
+        }
+        h.keyframe();
+        for from in [&start, &pending] {
+            assert_eq!(wallet(cold_at(&h, from).ledger()), wallet_before);
+            assert!(h.verify_from(Some(from.seq)).is_empty(), "SEQ-427.{}", row + 1);
+        }
+        assert!(h.verify().is_empty());
+    }
+}
+
+#[test]
+fn seq_428_report_without_inst_does_not_stop_a_strict_cash_engine() {
+    let mut h = cash_boot();
+    let initial = wallet(&h.s.engine().ledger);
+    let start = h.keyframe();
+    let ds = place_orders(&mut h);
+    // SEQ-428.1: a WS API error reply carries no inst (Binance `blank`).
+    let mut e = order_event(&ds[0], OrderEventKind::Reject, h.epoch());
+    e.inst = hft_types::INST_NONE;
+    h.push(h.rep_ring(AC1), &e);
+    assert_eq!(h.run(), StepOutcome::Idle, "SEQ-428.1");
+    // SEQ-428.2: a fill without inst is booked on the slot's inst with its cash facts.
+    let (_, qty, price, fee, amount) = FACTS[0];
+    let mut e = order_event(&ds[0], OrderEventKind::Fill, h.epoch());
+    e.inst = hft_types::INST_NONE;
+    e.px = Px(price);
+    e.avg_px = e.px;
+    e.cum_filled = Qty(qty);
+    e.cash_qty = e.cum_filled;
+    e.cash_sum = Qty(amount);
+    e.fee = Qty(fee);
+    e.fee_asset = USDT;
+    h.push(h.rep_ring(AC1), &e);
+    assert_eq!(h.run(), StepOutcome::Idle, "SEQ-428.2");
+    assert_eq!(wallet(&h.s.engine().ledger), initial + amount - fee);
+    assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, Qty(-qty));
+    h.keyframe();
+    let cold = cold_at(&h, &start);
+    assert_eq!(wallet(cold.ledger()), initial + amount - fee);
+    assert_eq!(cold.ledger().pos(AC1, B1), h.s.engine().ledger.pos(AC1, B1));
+    assert!(h.verify().is_empty());
+    assert!(h.verify_from(Some(start.seq)).is_empty());
+}
+
+#[test]
+fn seq_429_latest_fill_seq_survives_snapshot_recovery() {
+    use hft_sequencer::driver::live::RingId;
+    reset_script();
+    let mut h = b0().boot_self_contained();
+    h.steady();
+    add_hook(|hx, ev, ctx| {
+        if let EventRef::Bbo { inst, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+            && hx.v.bbo(A1).bid_px == px("50002")
+        {
+            let mut it = open_buy(hx, B1);
+            it.side = Side::Sell;
+            it.qty = Qty(100_000);
+            it.px = hx.v.bbo(B1).bid_px;
+            let _ = ctx.place(it);
+        }
+    });
+    let start = h.keyframe();
+    // An established, clean prior report enables AUTO_EXTERNAL.
+    let seen = h.j().records().last().unwrap().seq;
+    h.push(RingId::Ctl, &recon_summary(AC1, B, 801, seen));
+    assert_eq!(h.run(), StepOutcome::Idle);
+    assert!(h.s.engine().risk.auto_external_ok(AC1, B, 0));
+    let mark = h.mark();
+    h.quote(A1, "50002", "50003");
+    assert_eq!(h.run(), StepOutcome::Idle);
+    let d: Vec<_> = decisions(&h.since(mark))
+        .into_iter()
+        .filter(|(_, d)| d.inst == B1 && d.account == AC1 && d.reject == 0)
+        .map(|(_, d)| d)
+        .collect();
+    assert_eq!(d.len(), 1);
+    h.ack(&d[0]);
+    assert_eq!(h.run(), StepOutcome::Idle);
+    // The exchange view is taken here, before the fill.
+    let view_seq = h.j().records().last().unwrap().seq;
+    let mut e = order_event(&d[0], OrderEventKind::Fill, h.epoch());
+    e.cum_filled = Qty(100_000);
+    h.push(h.rep_ring(AC1), &e);
+    assert_eq!(h.run(), StepOutcome::Idle);
+    let pos = h.s.engine().ledger.pos(AC1, B1).qty;
+    assert_eq!(pos, Qty(-100_000));
+    let after_fill = h.keyframe();
+    let secs = hft_sequencer::snapshot::read_seq_sections(&after_fill.body[96..]).unwrap();
+    assert_eq!(secs.fill_seq.len(), 1, "SEQ-429.1");
+    assert_eq!((secs.fill_seq[0].account, secs.fill_seq[0].inst), (AC1, B1));
+    assert!(secs.fill_seq[0].seq > view_seq);
+    let before = hft_sequencer::snapshot::read_seq_sections(&start.body[96..]).unwrap();
+    assert!(before.fill_seq.is_empty(), "SEQ-429.2");
+    // A report viewed before that fill must not AUTO_EXTERNAL it away.
+    let mut summary = recon_summary(AC1, B, 802, view_seq);
+    summary.count = 2;
+    let mut p = summary;
+    p.idx = 1;
+    p.item = 1;
+    p.inst = B1;
+    p.engine_qty = pos;
+    p.exch_qty = Qty(-50_000);
+    p.sflags = hft_event::ReconcileReport::AUTO_EXTERNAL;
+    h.push(RingId::Ctl, &summary);
+    h.push(RingId::Ctl, &p);
+    assert_eq!(h.run(), StepOutcome::Idle);
+    assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, pos, "SEQ-429.3");
+    // Control: the same report viewed after the fill is applied.
+    let now = h.j().records().last().unwrap().seq;
+    for r in [&mut summary, &mut p] {
+        r.report_id = 803;
+        r.view_seq = now;
+    }
+    h.push(RingId::Ctl, &summary);
+    h.push(RingId::Ctl, &p);
+    assert_eq!(h.run(), StepOutcome::Idle);
+    assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, Qty(-50_000), "SEQ-429.4");
+    h.keyframe();
+    assert!(h.verify().is_empty());
+    // Recovery from either keyframe makes the same decision as the continuous run.
+    for from in [&start, &after_fill] {
+        assert!(
+            h.verify_from(Some(from.seq)).is_empty(),
+            "SEQ-429.3 from {}",
+            from.seq
+        );
     }
 }
 
@@ -884,4 +1142,164 @@ fn seq_413_external_cash_dedup_cold_snapshots_and_full_window_replay() {
         }
         assert!(h.verify().is_empty(), "full replay {order:?}");
     }
+}
+
+fn adopt_cmd(report_id: u64) -> hft_event::ControlCmd<'static> {
+    hft_event::ControlCmd::AdoptExchange {
+        account: AC1,
+        venue: B,
+        inst: B1,
+        report_id,
+        item: 0,
+        _pad: 0,
+        asset: hft_types::AssetId(0),
+        group: hft_types::GROUP_NONE,
+        entry_px: Px(0),
+    }
+}
+
+/// Plain report group `report_id`: Summary + one B1 Position row (no AUTO_EXTERNAL).
+fn position_report(h: &mut H, report_id: u64, view_seq: u64, exch: i64) {
+    use hft_sequencer::driver::live::RingId;
+    let mut summary = recon_summary(AC1, B, report_id, view_seq);
+    summary.count = 2;
+    let mut p = summary;
+    p.idx = 1;
+    p.item = 1;
+    p.inst = B1;
+    p.engine_qty = h.s.engine().ledger.pos(AC1, B1).qty;
+    p.exch_qty = Qty(exch);
+    h.push(RingId::Ctl, &summary);
+    h.push(RingId::Ctl, &p);
+    assert_eq!(h.run(), StepOutcome::Idle);
+}
+
+fn adopt_result(h: &mut H, report_id: u64) -> (u8, u32) {
+    let id = h.cmd_confirmed(AC1, &adopt_cmd(report_id));
+    assert_eq!(h.run(), StepOutcome::Idle);
+    let r = h.result_of(id).unwrap();
+    (r.status, r.detail)
+}
+
+#[test]
+fn seq_430_adopt_stale_guard_and_retained_views_survive_recovery() {
+    use hft_sequencer::codes::{detail, status};
+    use hft_sequencer::driver::live::RingId;
+    reset_script();
+    let mut h = b0().boot_self_contained();
+    h.steady();
+    add_hook(|hx, ev, ctx| {
+        if let EventRef::Bbo { inst, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+            && hx.v.bbo(A1).bid_px == px("50002")
+        {
+            let mut it = open_buy(hx, B1);
+            it.side = Side::Sell;
+            it.qty = Qty(100_000);
+            it.px = hx.v.bbo(B1).bid_px;
+            let _ = ctx.place(it);
+        }
+    });
+    let start = h.keyframe();
+    let mark = h.mark();
+    h.quote(A1, "50002", "50003");
+    assert_eq!(h.run(), StepOutcome::Idle);
+    let d: Vec<_> = decisions(&h.since(mark))
+        .into_iter()
+        .filter(|(_, d)| d.inst == B1 && d.account == AC1 && d.reject == 0)
+        .map(|(_, d)| d)
+        .collect();
+    assert_eq!(d.len(), 1);
+    h.ack(&d[0]);
+    assert_eq!(h.run(), StepOutcome::Idle);
+    let before_fill = h.j().records().last().unwrap().seq;
+    let mut e = order_event(&d[0], OrderEventKind::Fill, h.epoch());
+    e.cum_filled = Qty(100_000);
+    h.push(h.rep_ring(AC1), &e);
+    assert_eq!(h.run(), StepOutcome::Idle);
+    let now = h.j().records().last().unwrap().seq;
+    // 802 was viewed before the fill, 803 after it; both see 0.0005 BTC less short.
+    position_report(&mut h, 802, before_fill, -50_000);
+    position_report(&mut h, 803, now, -50_000);
+    let k = h.keyframe();
+    let secs = hft_sequencer::snapshot::read_seq_sections(&k.body[96..]).unwrap();
+    let ids: Vec<u64> = secs.recon_views.iter().map(|(v, _)| v.report_id).collect();
+    // Startup reconciliation groups precede them, oldest first.
+    assert_eq!(ids[ids.len() - 2..], [802, 803], "SEQ-430.1");
+    assert!(
+        !hft_sequencer::snapshot::read_seq_sections(&start.body[96..])
+            .unwrap()
+            .recon_views
+            .iter()
+            .any(|(v, _)| matches!(v.report_id, 802 | 803))
+    );
+    // .2 the stale report is refused, the fresh one applies its retained diff.
+    assert_eq!(
+        adopt_result(&mut h, 802),
+        (status::PRECONDITION_FAILED, u32::from(detail::STALE_REPORT)),
+        "SEQ-430.2"
+    );
+    assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, Qty(-100_000));
+    assert_eq!(adopt_result(&mut h, 803), (status::APPLIED, 0), "SEQ-430.3");
+    assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, Qty(-50_000));
+    // .4 an evicted report (oldest of more than RECON_VIEW_REPORTS) cannot be adopted.
+    let seen = h.j().records().last().unwrap().seq;
+    position_report(&mut h, 804, seen, -40_000);
+    for id in 0..hft_sequencer::RECON_VIEW_REPORTS as u64 {
+        h.push(RingId::Ctl, &recon_summary(AC1, B, 900 + id, seen));
+        assert_eq!(h.run(), StepOutcome::Idle);
+    }
+    assert_eq!(
+        adopt_result(&mut h, 804),
+        (status::PRECONDITION_FAILED, u32::from(detail::STALE_REPORT)),
+        "SEQ-430.4"
+    );
+    assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, Qty(-50_000));
+    h.keyframe();
+    assert!(h.verify().is_empty());
+    for from in [&start, &k] {
+        assert!(
+            h.verify_from(Some(from.seq)).is_empty(),
+            "SEQ-430.3 from {}",
+            from.seq
+        );
+    }
+}
+
+#[test]
+fn seq_431_recon_view_table_overflow_is_defined_and_bounded() {
+    use zerocopy::FromZeros;
+    let mut t = hft_sequencer::ReconViews::default();
+    let row = |report_id: u64, inst: u32| {
+        let mut r = hft_event::ReconcileReport::new_zeroed();
+        r.report_id = report_id;
+        r.account = AC1;
+        r.venue = B;
+        r.item = 1;
+        r.inst = hft_types::InstId(inst);
+        r.view_seq = 7;
+        r.engine_qty = Qty(10);
+        r.exch_qty = Qty(4);
+        r
+    };
+    // .1 an older report is evicted to make room for the current one's rows.
+    assert!(!t.record(&row(1, 1), true));
+    for i in 0..hft_sequencer::RECON_VIEW_DIFFS as u32 {
+        assert!(!t.record(&row(2, i + 1), true), "SEQ-431.1 row {i}");
+    }
+    assert!(t.view(1).is_none(), "SEQ-431.1");
+    assert_eq!(t.diff(2, AC1, hft_types::InstId(5)), Qty(-6));
+    // .2 one report alone exceeding the capacity overflows once; its diffs are dropped.
+    assert!(t.record(&row(2, u32::MAX), true), "SEQ-431.2");
+    assert!(!t.record(&row(2, u32::MAX - 1), true));
+    let v = t.view(2).unwrap();
+    assert!(v.overflow, "SEQ-431.2");
+    assert_eq!(t.diff(2, AC1, hft_types::InstId(5)), Qty(0));
+    // .3 more than RECON_VIEW_REPORTS reports keep only the newest.
+    for id in 10..10 + hft_sequencer::RECON_VIEW_REPORTS as u64 + 3 {
+        t.record(&row(id, 1), false);
+    }
+    assert_eq!(t.views().count(), hft_sequencer::RECON_VIEW_REPORTS, "SEQ-431.3");
+    assert!(t.view(2).is_none() && t.view(12).is_none() && t.view(13).is_some());
 }

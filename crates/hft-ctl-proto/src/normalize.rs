@@ -1064,6 +1064,29 @@ fn normalize_reports(
         let batch =
             hft_event::ReconcileBatchView::read(&record).map_err(|_| NormErr::new(detail::BAD_VALUE))?;
         for e in batch.fills() {
+            // Fill semantics the engine's settlement preflight would reject anyway: refuse them
+            // at the control plane so a malformed receipt never becomes an Input.
+            let identity = if e.trade_id != 0 {
+                e.fill_seq == 0
+            } else {
+                e.exch_order_id != 0 && e.fill_seq != 0
+            };
+            if e.qty.0 <= 0
+                || e.px.0 <= 0
+                || e.cash_qty != e.qty
+                || e._pad != [0; 6]
+                || e.account != h.account
+                || e.venue != h.venue
+                || !identity
+                || !matches!(
+                    e.cause,
+                    hft_event::ExternalCause::Adl
+                        | hft_event::ExternalCause::Liquidation
+                        | hft_event::ExternalCause::Unknown
+                )
+            {
+                return err(detail::BAD_VALUE);
+            }
             if e.inst.0 == 0
                 || rd.0.inst(e.inst).venue != e.venue
                 || !rd
