@@ -80,6 +80,7 @@ pub struct LegInput {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Signal {
     pub buy_px: Px,
+    pub sell_px: Px,
     pub qty: Qty,
     pub edge: Rate,
     pub reducing: bool,
@@ -146,6 +147,7 @@ pub fn signal(buy: LegInput, sell: LegInput, f: &XtFields) -> Option<Signal> {
     }
     Some(Signal {
         buy_px: bp,
+        sell_px: sp,
         qty: Qty(qty),
         edge,
         reducing,

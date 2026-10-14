@@ -54,6 +54,18 @@ fn signal_deducts_both_fee_notionals_and_requires_edge() {
     assert!(signal(a, b, &f).is_none());
 }
 #[test]
+fn signal_fixes_both_limits_within_observed_slippage() {
+    let (mut a, mut b) = (leg(999, 1000), leg(1050, 1051));
+    a.hot.tick = 3;
+    b.hot.tick = 4;
+    let mut f = params();
+    f.slip = Rate(10_000_000);
+    let s = signal(a, b, &f).unwrap();
+    assert_eq!(s.buy_px, Px(1008)); // floor to tick, never above ask * 1.01
+    assert_eq!(s.sell_px, Px(1040)); // ceil to tick, never below bid * 0.99
+    assert_eq!(s.edge, net_edge(s.buy_px, s.sell_px, a.fee, b.fee).unwrap());
+}
+#[test]
 fn signal_sizes_both_depths_caps_and_common_lot() {
     let (mut a, mut b) = (leg(999, 1000), leg(1010, 1011));
     a.hot.lot = 6;

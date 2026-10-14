@@ -1,6 +1,6 @@
 [package]
 name = "cross-taker"
-description = "Fee-aware cross-venue taker strategy with linked on-fill hedging"
+description = "Fee-aware cross-venue taker strategy with simultaneous linked IOC legs"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

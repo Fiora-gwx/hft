@@ -2,6 +2,8 @@
 
 Status: implemented
 
+2026-10-14 下单时序决定由[同时下单决定](2026-10-14-cross-taker-simultaneous.md)取代;其余信号与限额取舍保留。
+
 ## Problem
 
 首个可运行套利策略需要基于现有双腿 SDK、真实费用和双侧数量上限交易,在真实 sequencer 验证闭环。原 [策略规格](../../../../strategies/cross-taker/README.md) 要求 LeadLag 模型就绪,该慢速构件尚无实现。本次负责人任务明确要求可执行价差、可配置净边和克制的参数数量。

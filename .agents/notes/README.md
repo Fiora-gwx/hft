@@ -2,6 +2,10 @@
 
 这里只放一种设计文档。**Agent Note** 记录一个影响本仓库的决定或提案——**为什么**、**放弃了什么**、**需要什么验证**,也就是代码与 README 承载不了的部分。本文件规定 Agent Note 放在哪里、何时写、文件格式。改编自 DeepSeek Harness 的 `.agents/notes/README.md`(样例在 architecture-v2/research/_dsh/notes_README.md(未入库的资料缓存:`architecture-v2/research/_dsh/notes_README.md`));改编理由见 [dsh-style-documentation](proposed/process/2026-09-30-dsh-style-documentation.md)。
 
+## 同时下单决定(2026-10-14)
+
+[同时下单](implemented/feature/2026-10-14-cross-taker-simultaneous.md)取代[可执行价差](implemented/feature/2026-10-14-cross-taker-executable-spread.md)的 OnFill 时序决定。
+
 ## M2-lite 决定(2026-10-14)
 
 [M2-lite](implemented/architecture/2026-10-14-m2-lite.md) 收窄 M2 范围,推迟功能的用例改为里程碑 `M9`(上线后);changes.md 的批量确认结论见[签字批次 1](implemented/process/2026-10-14-signoff-batch-1.md)。

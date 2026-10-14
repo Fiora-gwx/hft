@@ -125,6 +125,14 @@ impl Rig {
         self.pump();
     }
     fn frames(&mut self, out: &StepOut) {
+        if self.sent.is_empty() && !out.frames.is_empty() {
+            assert_eq!(
+                out.frames.len(),
+                2,
+                "both legs leave in one event before any reply"
+            );
+            assert!(out.frames.iter().all(|f| f.cmd.op == GwOp::Place));
+        }
         for f in &out.frames {
             self.sent.push(f.cmd);
             self.venues
@@ -244,7 +252,7 @@ fn cross_taker_link_respects_engine_hedge_limit_before_first_leg() {
 }
 
 #[test]
-fn cross_taker_dst_retries_hedge_reject_and_is_deterministic() {
+fn cross_taker_dst_reverses_rejected_pair_and_is_deterministic() {
     use hft_testkit::dst::{
         DstConfig, Fault, MarketGen, MarketSource, MockVenueCfg, RerunPolicy, run_record,
     };
@@ -284,20 +292,12 @@ fn cross_taker_dst_retries_hedge_reject_and_is_deterministic() {
                 .iter()
                 .any(|(_, e)| e.inst == P1 && e.cum_filled.0 > 0)
         );
-        let hedges = r
+        let reversed = r
             .frames
             .iter()
-            .filter(|(_, f)| f.cmd.inst == P1 && f.cmd.op == GwOp::Place)
+            .filter(|(_, f)| f.cmd.inst == S1 && f.cmd.op == GwOp::Place && f.cmd.side == Side::Sell)
             .count();
-        let firsts = r
-            .frames
-            .iter()
-            .filter(|(_, f)| f.cmd.inst == S1 && f.cmd.op == GwOp::Place)
-            .count();
-        assert!(
-            hedges > firsts,
-            "the injected rejection must exercise an engine hedge retry"
-        );
+        assert!(reversed > 0, "the rejected pair must unwind the filled spot leg");
     }
 }
 
@@ -429,7 +429,15 @@ fn cross_taker_guards_age_connections_modes_unknown_and_cooldown() {
     MockViews::legs(&mut v, ACCT_A, G1, LegView::EMPTY);
     let r = fire(&mut s, &v, &mut ctx);
     assert_eq!(r.places.len(), 1);
-    assert_eq!(r.places[0].link.l.hedge.kind, HedgeKind::OnFill);
+    let it = r.places[0];
+    assert_eq!(it.tif, Tif::Ioc);
+    assert_eq!(it.px, Px(600_000_000));
+    let hedge = it.link.l.hedge;
+    assert_eq!(hedge.kind, HedgeKind::Simultaneous);
+    assert_eq!(hedge.on_fail, OnFail::Reverse);
+    assert_eq!(hedge.px_mode, PxMode::Limit);
+    assert_eq!(hedge.tif, Tif::Ioc);
+    assert_eq!(hedge.limit_px, Px(606_000_000));
     assert!(fire(&mut s, &v, &mut ctx).places.is_empty());
     let mut bytes = SnapshotWriter::new(1024);
     s.snapshot(&mut bytes);
@@ -458,21 +466,26 @@ fn cross_taker_halts_on_repeated_hedge_failures_and_keeps_latch() {
         gix: 0,
         b: Views::bbo(&v, P1),
     };
-    assert_eq!(ctx.run(|c| s.on_event(&ev, &v, c)).places.len(), 1);
-    MockViews::legs(
-        &mut v,
-        ACCT_A,
-        G1,
-        LegView {
-            open_links: 1,
-            ..LegView::EMPTY
-        },
-    );
     for slot in 0..3 {
+        MockViews::legs(&mut v, ACCT_A, G1, LegView::EMPTY);
+        v.at_tsc(Tsc(10_000_000 + u64::from(slot) * 20_000_000));
+        let fired = ctx.run(|c| s.on_event(&ev, &v, c));
+        assert_eq!(fired.places.len(), 1);
+        let first = fired.places[0].venue;
+        let second = fired.places[0].link.l.hedge.venue;
+        MockViews::legs(
+            &mut v,
+            ACCT_A,
+            G1,
+            LegView {
+                open_links: 1,
+                ..LegView::EMPTY
+            },
+        );
         let u = OrderUpdate {
-            r: OrderRef::new(VenueId(10), ACCT_A, slot, 1),
+            r: OrderRef::new(if slot % 2 == 0 { first } else { second }, ACCT_A, slot, 1),
             group: G1,
-            tag: 1,
+            tag: if slot % 2 == 0 { 1 } else { 0 },
             kind: OrderUpdateKind::Rejected {
                 bits: RejectBits(0),
                 venue_code: 1,
@@ -485,6 +498,17 @@ fn cross_taker_halts_on_repeated_hedge_failures_and_keeps_latch() {
                 .halts
                 .is_empty()
         );
+        let other = OrderUpdate {
+            r: OrderRef::new(if slot % 2 == 0 { second } else { first }, ACCT_A, slot, 1),
+            tag: if slot % 2 == 0 { 0 } else { 1 },
+            ..u
+        };
+        let duplicate_pair = ctx.run(|c| s.on_event(&EventRef::Order { gix: 0, u: &other }, &v, c));
+        assert!(duplicate_pair.halts.is_empty());
+        assert!(
+            duplicate_pair.notes.is_empty(),
+            "a pair counts once, including its other leg"
+        );
     }
     s.on_params(&p, &groups, &v.refview()).unwrap(); // parameter replacement cannot erase the latch
     let mut bytes = SnapshotWriter::new(1024);
@@ -494,7 +518,7 @@ fn cross_taker_halts_on_repeated_hedge_failures_and_keeps_latch() {
         .restore(&mut SnapshotReader::with_desc_version(bytes.as_bytes(), 1))
         .unwrap();
     MockViews::legs(&mut v, ACCT_A, G1, LegView::EMPTY);
-    v.at_tsc(Tsc(30_000_000));
+    v.at_tsc(Tsc(70_000_000));
     assert!(ctx.run(|c| restored.on_event(&ev, &v, c)).places.is_empty());
     restored.on_event(
         &EventRef::Mode {

@@ -64,7 +64,9 @@ impl Fast {
                 let Some(s) = self.states.get_mut(usize::from(*gix)) else {
                     return;
                 };
-                if u.tag != TAG || u.r.account != self.account {
+                // OMS-generated second/reverse legs use tag 0. Ownership is the account/group;
+                // one active pair is allowed per group, and any leg may fail first.
+                if u.r.account != self.account || u.group != g.id {
                     return;
                 }
                 if matches!(u.kind, OrderUpdateKind::Filled { .. }) {
@@ -77,12 +79,7 @@ impl Fast {
                     }
                     _ => false,
                 };
-                if s.tracking
-                    && !s.broken
-                    && u.r.venue.0 != s.first_venue
-                    && failed
-                    && s.last_failed != Some(u.r)
-                {
+                if s.tracking && !s.broken && !s.failed_this_pair && failed && s.last_failed != Some(u.r) {
                     s.last_failed = Some(u.r);
                     failure(s, g.id, f.max_hedge_failures, ctx);
                 }
@@ -212,14 +209,13 @@ impl Fast {
         };
         let ab = signal::signal(la, lb, f).filter(allowed);
         let ba = signal::signal(lb, la, f).filter(allowed);
-        let (sig, buy, sell, buy_input, sell_input, buy_ix) = match (ab, ba) {
-            (Some(x), Some(y)) if y.edge > x.edge => (y, b, a, lb, la, 1),
-            (Some(x), _) => (x, a, b, la, lb, 0),
-            (_, Some(y)) => (y, b, a, lb, la, 1),
+        let (sig, buy, sell, buy_input, buy_ix) = match (ab, ba) {
+            (Some(x), Some(y)) if y.edge > x.edge => (y, b, a, lb, 1),
+            (Some(x), _) => (x, a, b, la, 0),
+            (_, Some(y)) => (y, b, a, lb, 1),
             _ => return,
         };
         let reduce_buy = sig.reducing && !buy_input.spot;
-        let reduce_sell = sig.reducing && !sell_input.spot;
         let it = OrderIntent {
             venue: buy.venue,
             account: self.account,
@@ -242,14 +238,15 @@ impl Fast {
                 _pad: [0; 3],
                 tolerance: Rate(0),
                 hedge: HedgePlan {
-                    kind: HedgeKind::OnFill,
-                    px_mode: PxMode::Cross,
-                    on_fail: OnFail::Retry,
+                    kind: HedgeKind::Simultaneous,
+                    px_mode: PxMode::Limit,
+                    on_fail: OnFail::Reverse,
                     tif: Tif::Ioc,
                     venue: sell.venue,
                     account: self.account,
                     side: Side::Sell,
-                    reduce_only: u8::from(reduce_sell),
+                    // Semantic reduction hint, including spot; the engine selects venue flags.
+                    reduce_only: u8::from(sig.reducing),
                     inst: sell.inst,
                     ratio_num: 1,
                     ratio_den: 1,
@@ -257,7 +254,7 @@ impl Fast {
                     _pad: [0; 3],
                     px_param: f.slip,
                     max_slip: f.slip,
-                    limit_px: Px(0),
+                    limit_px: sig.sell_px,
                 },
             }),
             tag: TAG,

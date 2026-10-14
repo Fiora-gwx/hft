@@ -10,14 +10,14 @@ pub const NOTES: [NoteDesc; 3] = [
         name: "Fired",
         level: NoteLevel::Info,
         v: &["buy leg index", "quantity", "net edge (Rate)", "reduce both legs"],
-        doc: "One first-leg IOC and its on-fill hedge plan accepted by Ctx.",
+        doc: "One simultaneous pair of bounded IOC legs accepted by Ctx.",
     },
     NoteDesc {
         code: HEDGE_FAILED,
         name: "HedgeFailed",
         level: NoteLevel::P2,
         v: &["consecutive failures"],
-        doc: "Hedge rejection, empty expiry or a new Broken episode.",
+        doc: "Either leg rejected, empty expiry or a new Broken episode; once per pair.",
     },
     NoteDesc {
         code: HALTED,
