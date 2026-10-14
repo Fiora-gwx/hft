@@ -43,7 +43,15 @@ pub fn classify(it: &IntentDraft, origin: Origin, pos: &impl PosView, caps: &Ven
     match it.link_role {
         Some(LinkRole::Second | LinkRole::SecondRetry) => {
             if it.simultaneous {
-                c(IntentClass::Open, false, false)
+                if it.hedge_reduce_only {
+                    c(
+                        IntentClass::Reduce,
+                        reduces(it.qty, pos.pos(), pos.pending_reduce(it.side)),
+                        ro,
+                    )
+                } else {
+                    c(IntentClass::Open, false, false)
+                }
             } else {
                 c(IntentClass::Hedge, true, it.hedge_reduce_only && ro)
             }

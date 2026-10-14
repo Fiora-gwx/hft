@@ -467,7 +467,7 @@ pub struct AcctState {                           // 每账户
 
 ### Simultaneous
 
-两腿同一事件发出、失败反向。第一腿量同 PairOnFill 第 2 步;第一腿带 `HedgePlan { kind: Simultaneous, on_fail: params.on_fail }`,OMS 在 `place` 第一腿时于同一事件产生第二腿,任一腿未全成时按 `on_fail` 处理(`Reverse`:对已成交未对冲部分发反向 IOC;`Hold`:只记 LegTracker),规则归 [hft-oms Simultaneous](../hft-oms/README.md#simultaneous)。反向失败(OMS 链接 `Broken{ReverseFailed}`)→ `Broken{ReverseFailed}`。第二腿在风控里按 Open 分类(与第一腿同时发出,不是风险递减)。
+两腿同一事件发出、失败反向。第一腿量同 PairOnFill 第 2 步;第一腿带 `HedgePlan { kind: Simultaneous, on_fail: params.on_fail }`,OMS 在 `place` 第一腿时于同一事件产生第二腿,任一腿未全成时按 `on_fail` 处理(`Reverse`:对已成交未对冲部分发反向 IOC;`Hold`:只记 LegTracker),规则归 [hft-oms Simultaneous](../hft-oms/README.md#simultaneous)。反向失败(OMS 链接 `Broken{ReverseFailed}`)→ `Broken{ReverseFailed}`。第二腿增仓按 Open 分类;减仓提示由目标方向给出(包含现货),由风控校验可减量后按 Reduce 分类,交易所 reduceOnly 仍取决于 VenueCaps。双腿原子准入归 [sequencer 意图管线](../hft-sequencer/README.md#意图管线)。
 
 ### MakerFirst(optional)
 

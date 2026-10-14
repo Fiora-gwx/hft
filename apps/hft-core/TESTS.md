@@ -4251,6 +4251,8 @@ spec: README.md
 
 ### CORE-420 装配把实例角色、keys_required 与 allow_missing_standby 交给 sequencer
 
+- 出环装配补充:LiveIo 以单生产端 `free_hint` 提供保守容量;整对不足时均不发送的行为验收归 hft-sequencer SEQ-224。
+
 - 规则:[实现说明](README.md#实现说明)
 - 级别:table
 - 里程碑:M3

@@ -171,6 +171,19 @@ fn rsk_010_classification_table() {
         cls(Open, false, false),
         "RSK-010.6"
     );
+    let reducing = IntentDraft {
+        hedge_reduce_only: true,
+        ..sim
+    };
+    assert_eq!(
+        k(&reducing, Origin::Oms, &pos("-0.02", "0", "0"), cb),
+        cls(Reduce, true, true)
+    );
+    assert_eq!(
+        k(&reducing, Origin::Oms, &pos("-0.02", "0", "0"), ca),
+        cls(Reduce, true, false)
+    );
+    assert_eq!(k(&reducing, Origin::Oms, &flat, cb), cls(Reduce, false, true));
     assert_eq!(
         k(&role(LinkRole::Reverse, false, B1), Origin::Oms, &flat, cb),
         cls(Hedge, true, true),

@@ -224,6 +224,10 @@ impl<S: StrategySet> LiveIo<S> for DstIo<S> {
         out.set_bytes(e.kind, RecordFlags(0), Tsc(self.drv.stamp()), &e.body);
         true
     }
+    fn out_free(&mut self, ring: OutRing) -> usize {
+        let _ = ring;
+        usize::MAX
+    }
     fn push_out(&mut self, ring: OutRing, c: &GwCmd) -> bool {
         let r = match ring {
             OutRing::Venue(v) => DstRing::Venue(v),

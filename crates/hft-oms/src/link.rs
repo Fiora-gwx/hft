@@ -2,7 +2,7 @@
 //! deadlines, gating and vetoes (README "LegLink 与 HedgePlan", "OnFill", "Simultaneous").
 
 use hft_event::SendStatus;
-use hft_strategy_sdk::{HedgeKind, HedgePlan, LegLink, LinkRole, OnFail, OrderRef};
+use hft_strategy_sdk::{HedgeKind, HedgePlan, LegLink, LinkRole, OnFail, OrderIntent, OrderRef};
 use hft_types::{AccountId, InstId, Px, Qty, RoundMode, Side, Tsc, VenueId};
 
 use crate::Oms;
@@ -25,6 +25,28 @@ fn floor_lot(q: i64, lot: i64) -> i64 {
 }
 
 impl Oms {
+    /// Read-only reservation check and second-leg quantity for a simultaneous first leg.
+    /// The sequencer must place both legs without intervening mutations after admission.
+    pub fn simultaneous_preview(&self, it: &OrderIntent) -> Result<Qty, crate::PlaceError> {
+        let l = it.link.get().ok_or(crate::PlaceError::NoTable)?;
+        let p = &l.hedge;
+        for (v, a) in [(it.venue, it.account), (p.venue, p.account)] {
+            let t = self.table(v, a).ok_or(crate::PlaceError::NoTable)?;
+            if t.free.is_empty() || !t.q_rr.is_empty() || !t.q_open.is_empty() {
+                return Err(crate::PlaceError::NoFreeSlot);
+            }
+        }
+        if self.free_link_ix(it.account).is_none() {
+            return Err(crate::PlaceError::LinkTableFull);
+        }
+        let hx = self.leg_ix_of(it.account, it.group, p.inst);
+        let res = self.residual_get(it.account, it.group, hx);
+        let raw =
+            i128::from(it.qty.0) * i128::from(p.ratio_num) / i128::from(p.ratio_den.max(1)) + i128::from(res);
+        let raw = i64::try_from(raw).unwrap_or(0);
+        Ok(Qty(floor_lot(raw, self.inst(p.inst).lot)))
+    }
+
     // ------------------------------------------------------------------ lookups
 
     /// Lowest free link index of an account (Free or Done entries are free).
@@ -84,6 +106,9 @@ impl Oms {
             return (VenueId(0), AccountId(0));
         };
         match p.on_fail {
+            OnFail::Reverse if self.reverse_qty(i).is_some_and(|(first, _, _)| !first) => {
+                (p.venue, p.account)
+            }
             OnFail::Reverse => (e.first.venue, e.first.account),
             _ => (p.venue, p.account),
         }
@@ -330,6 +355,17 @@ impl Oms {
 
     /// Emits a `Reverse` request for the current imbalance; `false` when there is none.
     fn emit_reverse(&mut self, i: usize, seq: u64, out: &mut OmsOut) -> bool {
+        if self
+            .plans
+            .get(i)
+            .is_some_and(|(_, p)| p.kind == HedgeKind::Simultaneous)
+            && let Some(e) = self.links.get(i)
+        {
+            let aux = self.link_aux(e.link_id);
+            if aux.unknown > 0 || aux.rev_open > 0 || e.hedge_open.0 > 0 || !self.first_terminal(e) {
+                return false;
+            }
+        }
         let Some((on_first, q, basis)) = self.reverse_qty(i) else {
             return false;
         };
@@ -579,7 +615,9 @@ impl Oms {
         let info = *self.inst(p.inst);
         let hx = self.leg_ix_of(e.account, e.group, p.inst);
         let res = self.residual_get(e.account, e.group, hx);
-        let raw = (i128::from(qty.0) * i128::from(p.ratio_num) / i128::from(p.ratio_den.max(1))) as i64 + res;
+        let raw =
+            i128::from(qty.0) * i128::from(p.ratio_num) / i128::from(p.ratio_den.max(1)) + i128::from(res);
+        let raw = i64::try_from(raw).unwrap_or(0);
         let q = floor_lot(raw, info.lot);
         self.residual_add(e.account, e.group, hx, raw - q - res);
         if q < info.min_qty.0.max(1) {
@@ -724,6 +762,7 @@ impl Oms {
             return;
         }
         if !e.active()
+            || e.has(lf::RESUME_HOLD)
             || !self.first_terminal(&e)
             || e.hedge_open.0 > 0
             || self.link_aux(e.link_id).unknown > 0
@@ -1026,6 +1065,12 @@ impl Oms {
             if x.first_fill_tsc.0 != 0 {
                 x.first_fill_tsc = Tsc(now.0.saturating_sub(held).max(1));
             }
+        }
+        // A restored simultaneous link never retries the original second leg. Reports must
+        // establish both terminal quantities before its original on_fail policy can act.
+        if p.kind == HedgeKind::Simultaneous && !e.has(lf::REVERSING) {
+            self.simul_or_done(i, true, now, seq, out);
+            return;
         }
         match p.on_fail {
             OnFail::Hold => {

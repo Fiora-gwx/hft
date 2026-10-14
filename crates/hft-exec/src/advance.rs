@@ -1238,7 +1238,7 @@ impl Exec {
                     venue: lh.venue,
                     account: a,
                     side: side_h,
-                    reduce_only: u8::from(reduce_only_h),
+                    reduce_only: u8::from(red_h),
                     inst: lh.inst,
                     ratio_num: num,
                     ratio_den: den,

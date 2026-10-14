@@ -47,6 +47,25 @@ fn big() -> H {
     H::with(|c| c.slots.set(VS, A1, 65_535))
 }
 
+fn simultaneous_preview(c: &mut Criterion) {
+    let h = H::new();
+    let mut it = buy_x().intent;
+    let mut plan = plan_l1();
+    plan.kind = hft_strategy_sdk::HedgeKind::Simultaneous;
+    plan.on_fail = hft_strategy_sdk::OnFail::Reverse;
+    it.link = hft_strategy_sdk::LegLinkOpt::some(hft_strategy_sdk::LegLink {
+        group: it.group,
+        role: hft_strategy_sdk::LinkRole::First,
+        _pad: [0; 3],
+        tolerance: hft_types::Rate(0),
+        hedge: plan,
+    });
+    assert!(h.o.simultaneous_preview(&it).is_ok());
+    c.bench_function("oms/simultaneous_preview", |b| {
+        b.iter(|| black_box(h.o.simultaneous_preview(black_box(&it))))
+    });
+}
+
 fn nogroup(it: ApprovedIntent) -> ApprovedIntent {
     let mut it = it;
     it.intent.group = GROUP_NONE;
@@ -488,7 +507,8 @@ criterion_group!(
     oms_452_cancel_resting_8,
     oms_453_smoke,
     oms_454_write_off,
-    oms_474_foreign_cash_provenance_64
+    oms_474_foreign_cash_provenance_64,
+    simultaneous_preview
 );
 criterion_group! {
     name = slow;

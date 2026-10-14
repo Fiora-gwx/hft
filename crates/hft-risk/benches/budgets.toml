@@ -8,6 +8,11 @@ p50_ns = 15
 p99_ns = 40
 allocs = 0
 
+["risk/check_pair"]
+p50_ns = 560
+p99_ns = 1000
+allocs = 0
+
 ["risk/check_pass_open"]
 p50_ns = 200
 p99_ns = 500

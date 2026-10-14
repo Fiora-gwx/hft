@@ -89,7 +89,7 @@ pub struct HedgePlan {
     pub venue: VenueId,
     pub account: AccountId,
     pub side: Side,
-    /// 1 = the second leg carries reduceOnly (closing links only).
+    /// 1 = closing second leg. Risk validates the reduction; the venue flag requires capability.
     pub reduce_only: u8,
     pub inst: InstId,
     pub ratio_num: u32,

@@ -784,6 +784,29 @@ fn rsk_033_hedge_and_reduce_limits() {
 
 #[test]
 fn rsk_034_position_inflight() {
+    // A simultaneous Reduce hint must oppose the signed position on either leg.
+    {
+        let mut w = r0();
+        w.mv.tsc = w.now as u64;
+        w.mv.set_pos(1, A1, "-0.02");
+        w.mv.set_pos(1, B1, "0.02");
+        let first = w.reduce(1, G1, A1, Side::Buy, "0.01", "50000.00");
+        let second = w.reduce(1, G1, B1, Side::Sell, "0.01", "50000.0");
+        let now = w.nowv();
+        assert!(w.risk.evaluate_pair(&first, &second, &w.mv, &now).is_ok());
+        for reverse_first in [true, false] {
+            let (mut a, mut b) = (first, second);
+            if reverse_first {
+                a.side = Side::Sell;
+            } else {
+                b.side = Side::Buy;
+            }
+            assert_eq!(
+                w.risk.evaluate_pair(&a, &b, &w.mv, &now).map(|_| ()),
+                Err(RejectBits::REDUCE_INVALID)
+            );
+        }
+    }
     let fresh = || {
         r0_with(|p| {
             with_acct(&p, 1, |a| {

@@ -431,7 +431,7 @@ OMS 对冲的 `place` 调用前另复制完整链接身份、重试计数、目�
 1. `seq = journal.append(flags, slot.tsc, body)`——**先记录,后生效**;seq 只取自写者返回值;`slot.tsc` 是驱动交出该条时的 TSC(实盘)或日志值,批内没有排队等待,所以 `ingest`(`proc_tsc − rx_tsc`)含环内排队、`decide` 从这里开始([latency-budget](../../docs/latency-budget.md))。
 2. 过期检查(仅 `ControlCmd`):`hdr.tsc > expires_tsc` → 只写 `CmdResult{Expired}`。
 3. **引擎处理**(按 kind 分派,见下表):更新簿、OMS、ledger、风控;OMS 的第二腿/重试/反向单经意图管线出决策(对冲快路径排在本步最前);执行层按其[调用顺序](../hft-exec/README.md)更新进度;待投递给策略的通知进 `NotifyQueue`(固定容量 128 = OMS 16 + 执行层 8 + 风控 8 + 模式 64 + 行情订阅 8 + 其他 24,编译期断言;某分区满时其后的通知按产生顺序进 `NotifyBacklog`,**从不丢弃**,见[通知队列与续推](#通知队列与续推))。
-   - **OMS 输出的排空**:直接遍历池内缓冲,回报后的 group 列表使用按 `max_cells_total` 启动分配的双缓冲,嵌套回调的新增触及保留到下一轮;每次调用 OMS 带 `out` 的入口之后先检查 `OmsOut.cash_error` 、已知现金或现货原始名义成交的正价格,以及现货原始名义为正;失败即 `Fatal(OmsCash/Settlement)`,不发对冲、不入账。校验通过才排空(嵌套调用同样处理),顺序:`hedges`(→ 对冲定价 → 意图管线,对冲快路径最前)→ `fills`(转 `FillDelta`;`cash = Some(amount)` 以品种 quote 资产交 `apply_settled_fill`,包括已知零额;现货 `notional = Some(n)` 交 `ledger.apply_spot_fill`,保留价格取整前的金额;其余交 `ledger.apply_fill`;返回 `net_adjust` 时同一事件内调 `oms.net_adjust` 与 `exec.on_leg_adjust`)→ `fees`(转 `FeeDelta` 交 `ledger.apply_fee`,同上)→ `updates`(`EXEC` 槽交 `exec.on_order_update`;`SMOKE` 槽不投递给任何人;其余入队给槽的拥有者策略)→ `links`(投影为 `LinkNotice` 调 `exec.on_link`)→ `foreign_fills`(按 `ExternalFill` 行处理)→ `decisions`/`swaps`(追加 Output 并按"意图管线"第 7 步出环)→ `timers`(登记或撤销堆条目)→ `notes`、`latency`(追加)。
+   - **OMS 输出的排空**:直接遍历池内缓冲,回报后的 group 列表使用按 `max_cells_total` 启动分配的双缓冲,嵌套回调的新增触及保留到下一轮;每次调用 OMS 带 `out` 的入口之后先检查 `OmsOut.cash_error` 、已知现金或现货原始名义成交的正价格,以及现货原始名义为正;失败即 `Fatal(OmsCash/Settlement)`,不发对冲、不入账。校验通过才排空(嵌套调用同样处理),顺序:`hedges` 中非 Reverse(→ 对冲定价 → 意图管线,对冲快路径最前)→ `fills`(转 `FillDelta`;`cash = Some(amount)` 以品种 quote 资产交 `apply_settled_fill`,包括已知零额;现货 `notional = Some(n)` 交 `ledger.apply_spot_fill`,保留价格取整前的金额;其余交 `ledger.apply_fill`;返回 `net_adjust` 时同一事件内调 `oms.net_adjust` 与 `exec.on_leg_adjust`)→ `fees`(转 `FeeDelta` 交 `ledger.apply_fee`,同上)→ Reverse 请求(当前 Input 的成交/费用入账后再做可减量检查)→ `updates`(`EXEC` 槽交 `exec.on_order_update`;`SMOKE` 槽不投递给任何人;其余入队给槽的拥有者策略)→ `links`(投影为 `LinkNotice` 调 `exec.on_link`)→ `foreign_fills`(按 `ExternalFill` 行处理)→ `decisions`/`swaps`(追加 Output 并按"意图管线"第 7 步出环)→ `timers`(登记或撤销堆条目)→ `notes`、`latency`(追加)。
    - **账本注记**:成交与费用产生的 `Note`(含 `RoundClosed`)在上述注记阶段取走并追加到当前 Input 的 Output;BBO、L2 更新和标记价驱动的估值调用在返回后立即排空注记。排空直接遍历已分配缓冲并清空,不创建临时 Vec;注记不跨 `EVENT_END` 或快照保留,后续对账不重复写出(SEQ-382、SEQ-383)。已证明重复、没有成交输出的 OMS 路径告警同样排空并参与回放,归 [OMS 回报匹配](../hft-oms/README.md#回报匹配与成交增量)(SEQ-419)。
    - **之后**才对本 Input 涉及的账户与 group 调 `risk.on_pnl`/`risk.on_legs`、对链接 `Broken` 调 `apply(Auto(Broken))`,并执行由此产生的 `ModeOutcome`。**同一 Input 内,`exec.on_risk` 一律在全部 `exec.on_order_update` 与 `exec.on_link` 之后**:执行层先看到最后一片的回报,再看到 `CapCleared{Broken}`,自动有界平仓的完成判定因此不丢。
 4. **策略投递**:按入队顺序投递通知;行情事件按 CSR 索引投递给订阅者。每个实例一个 `Ctx`。**同一事件派发时实盘实例先于模拟实例**:CSR 行内与 `NotifyQueue` 按 `dispatch_order` 排序(先实盘、后模拟),所以实盘实例的意图先进管线、先出环。
@@ -471,6 +471,8 @@ OMS 对冲的 `place` 调用前另复制完整链接身份、重试计数、目�
 ### 意图管线
 
 `oms.place` 返回 `NoFreeSlot` 或 `LinkTableFull` 时,同一 Input 写 `OrderDecision{reject = CAPACITY, slot = 0, gen = 0}`;`NoTable` 写 `INVALID`。保留原意图的身份、价量、`intent_no` 与触发 seq,不出环、不扣令牌。OMS 内部对冲失败的计次与重试不变。令牌在 place 成功后、排空 OMS 输出前提交。
+
+Simultaneous 第一腿在第 5 步前预计算第二腿的实际数量、限价、分类与模式门,检查两腿槽和链接容量;链接可负担性使用含累计 lot 残余的实际第二腿数量,名义不低于实际订单。`risk.evaluate_pair` 全部通过才提交两份 admission 并连续建槽。两份 OrderDecision 属于同一 Input,EVENT_END/publish 之后以 `OutRecord::Pair` 出环。任一腿模式、风控或槽/队列容量失败,两腿均不提交;成功预检后建槽异常为 Fatal(PairAdmission),本事件不发布。两腿均用准入时限价,不等待成交后再次定价。
 
 所有来源的意图(策略 `Ctx`、执行层 `ExecOut.orders`、OMS 的 `Second`/`SecondRetry`/`Reverse`、命令)走同一条管线:
 
@@ -581,6 +583,8 @@ Model 从检查点恢复、镜像尚未追到其 `last_seq` 时,落后量以该�
 `hft-journal` 为每段预留 **2 × 引导块** 的空间;段用量超过其硬上限时实盘驱动在下一个事件边界写 `Sys{Roll}`(软阈值只在空闲轮滚动,见[环境决定写成 Input](#环境决定写成-input))。若仍出现 `AppendErr::Full`,`step` 返回 `Fatal(JournalFull)`,hft-core abort——不在没有记录的情况下继续交易;挂单由交易所死手与 kill-switch 处理,重启后按崩溃恢复。存储降级的早期信号走 `Storage` cap(见下),不等到写满。
 
 ### 出环满
+
+`LiveIo::out_free` 返回单生产者下的保守空闲槽数;后续相应数量的 push 必须成功。`OutRecord::Pair` 同时检查两个环(同一 sim 环需两槽);任一不足时两腿都不推,各产生一条 RingFull Input。此容量检查位于 journal 发布后,不从未记录的环状态生成交易决策。
 
 `drv.emit` 失败时,驱动构造一条**合成 Input** `SendReport{status = RingFull}` 作为下一条交出(像其他 Input 一样被记录),OMS 据此把槽迁到 `Rejected(LOCAL_SEND_FAIL)`。该路径只应在 gw 线程停摆时出现,并伴随 P0 告警。`feedctl-*` 环满时不合成任何 Input(`FeedCmd` 不是 journal 记录,不影响状态):`LiveDriver` 把推不进的 `FeedCmd` 按 (venue, inst) 合并暂存(同一 inst 只留最新一条,容量 = `max_insts`),每轮开头先按原顺序续推,所以启动时每个订阅 inst 各一条 `Subscribe` 的突发不受 `feedctl` 环容量限制。
 

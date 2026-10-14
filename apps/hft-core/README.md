@@ -824,6 +824,7 @@ Load ─▶ Validate ─▶ Allocate ─▶ JournalRecover ─▶ StateRestore(+
 - 行情任务:hft-core 按任务名构造每个 venue 的 `FeedRuntime<P>`(`feed-bbo:` → `routes = Bbo`,`feed-md:` → `Md`,`feed:` → `All`;`FeedCfg.ready` = `hft_venue::ready_poll_on(feed.ready_poll, 所在线程的 idle, 该线程全部行情任务的计划连接数之和)`;拆分形态下 live driver 按 `hft_venue::feed_cmd_dest` 把 `FeedCmd` 推到一个或两个 `feedctl` 环),按 [hft-venue §1](../../crates/hft-venue/README.md) 的存在条件为该 venue 建 `snapreq-*`/`snap-*` 环(拆分时 BBO 补帧一对回送到 `feed-bbo`)、把对应的 `SnapFetchTask<P>` 挂进 `snap-fetch` 任务;有 Live 账户的 venue 另建 `acctreq-<venue>`/`acct-<venue>` 环并把该 venue 的 `AcctFetchTask<P>` 挂进 `acct-fetch` 任务。
 - 秘密预取:[`hft-secrets`](../../tools/README.md#hft-secrets)(`ExecStartPre=`)写 tmpfs `secrets/`(0400);步 1 读取后逐个 `unlink`。会话 key 交给 `conn-builder`(登录与会话 UID 查询),REST key 交给 gw 与 `acct-fetch`(各自的请求种类归 hft-venue);hft-core 不链接 AWS SDK(无 tokio)。
 - 环与内存全部在步 3 分配;步 6 之后没有 `mmap`/`malloc`(advisor 的 `Model` 与 sim-gw 在各自 warm 线程按其规则使用堆,计入内存表对应行)。
+- `LiveIo::out_free` 取各出环单生产端的 `free_hint`,保证后续对应数量的推送成功;Simultaneous 整对出环契约归 [sequencer](../../crates/hft-sequencer/README.md)。
 - `venues.rs` 用 `enum VenueSet { BinanceUsdm(…), BinanceSpot(…), OkxSwap(…), OkxSpot(…), BitgetUsdtFutures(…), BitgetSpot(…), … }` 编译期分派;新增 venue = 加一个变体 + 配置 `protocol` 值([cookbook](../../docs/cookbook/adding-a-venue.md))。
 
 **规划的源文件**

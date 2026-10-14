@@ -52,6 +52,7 @@ mod scenarios_risk;
 mod sdk_contract;
 mod settlement;
 mod sim_route;
+mod simultaneous;
 mod snapshot;
 #[cfg(feature = "replay-io")]
 mod snapshot_diff;

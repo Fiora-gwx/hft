@@ -951,7 +951,7 @@ pub struct HedgePlan {                   // 48 B
     pub on_fail: OnFail,                 // OnFill 默认 Retry;Simultaneous 只取 Reverse | Hold
     pub tif: Tif,                        // 第二腿 Ioc(Simultaneous 可 Fok)
     pub venue: VenueId, pub account: AccountId, pub side: Side,
-    pub reduce_only: u8,                 // 1 = 第二腿带 reduceOnly(只用于平仓链接)
+    pub reduce_only: u8,                 // 1 = 平仓第二腿提示;风控验证可减量,交易所 reduceOnly 仅在支持时设置
     pub inst: InstId,
     pub ratio_num: u32, pub ratio_den: u32,
     pub residual: ResidualPolicy,        // hft-exec 的残余规则读取
