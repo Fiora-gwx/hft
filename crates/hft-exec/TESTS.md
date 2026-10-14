@@ -3971,7 +3971,7 @@ spec: README.md
 - 里程碑:M2
 - 输入:`fixtures/replay/exec/`(双腿开仓、补腿、Broken 自动平仓、L3 串行、清仓锁、恢复期按 venue 放行各一段)
 - 期望:`replayer verify` 重算的 `ExecDecision` 与 journal 中的逐字节相同,`state_hash` 一致
-- 实现:`crates/hft-exec/tests/replay.rs::exe_464_replay_verify`
+- 实现:`apps/replayer/tests/tail.rs::exe_464_replay_verify`
 ### EXE-475 new 之后的入口调用零分配
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)、[入口](README.md#入口全部在-sequencer-线程调用无分配)

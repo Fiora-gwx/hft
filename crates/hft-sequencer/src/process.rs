@@ -22,7 +22,7 @@ use crate::codes::note;
 use crate::engine::{Emit, Engine};
 use crate::journal::{JournalSink, role_of};
 use crate::market::{BBO_RESYNC, BBO_SW_TS};
-use crate::notify::{Notif, Queued};
+use crate::notify::Notif;
 use crate::strategies::{Direct, Instances, MarketEv};
 use crate::types::{FatalReason, InputSlot, OutRecord};
 
@@ -101,7 +101,7 @@ pub(crate) fn process_parts<D: Driver<S>, S: StrategySet>(
     // 2./3. per kind.
     dispatch(e, inst, drv, slot, &mut p)?;
     // 4./5. first delivery round.
-    let mut q: Vec<Queued> = Vec::new();
+    let mut q = core::mem::take(&mut e.notify.delivery);
     e.notify.take_queue(&mut q);
     crate::strategies::deliver_round(e, inst, drv, p.market, &q, p.direct)?;
     // 6. executor advance.
@@ -111,12 +111,13 @@ pub(crate) fn process_parts<D: Driver<S>, S: StrategySet>(
     if !q.is_empty() {
         crate::strategies::deliver_round(e, inst, drv, None, &q, None)?;
         // Notifications produced after the second round wait for NotifyContinue.
-        let mut rest: Vec<Queued> = Vec::new();
-        e.notify.take_queue(&mut rest);
-        for r in rest {
+        e.notify.take_queue(&mut q);
+        for r in q.drain(..) {
             e.notify.push_spill(r);
         }
     }
+    q.clear();
+    e.notify.delivery = q;
     // Storage recheck while a StorageCritical drain is deferred.
     if e.risk.mode.drain_deferred() {
         e.trace.rec("apply.StorageRecheck", 0, 0);
@@ -169,7 +170,7 @@ pub(crate) fn finish_event<D: Driver<S>, S: StrategySet>(e: &mut Engine, drv: &m
         }
         e.out.seqs.push(s.0);
     }
-    for r in e.out.stamped.clone().iter() {
+    for r in e.out.stamped.iter() {
         e.oms.stamp_decided(*r, measured);
     }
     drv.journal().end_event();
@@ -177,8 +178,7 @@ pub(crate) fn finish_event<D: Driver<S>, S: StrategySet>(e: &mut Engine, drv: &m
     e.last_tsc = tsc.0;
     if !e.out.emits.is_empty() {
         drv.journal().publish();
-        let emits = e.out.emits.clone();
-        for em in emits.iter() {
+        for em in e.out.emits.iter() {
             match em {
                 Emit::Gw { ring, cmd, rec } => {
                     let mut c = *cmd;
@@ -829,26 +829,35 @@ pub(crate) fn after_oms<D: Driver<S>, S: StrategySet>(
     a: AccountId,
     _v: VenueId,
 ) -> R<()> {
-    let groups: Vec<GroupId> = e.cmd.legs_touched.drain(..).collect();
-    for g in groups.iter() {
-        crate::mode_glue::on_legs(e, inst, drv, a, *g)?;
-        let cell = crate::strategies::cell(e.rd.account(a).bound_instance, a, *g);
-        let flat = {
-            let ad = crate::views::ModeAdapter {
-                oms: &e.oms,
-                ledger: &e.ledger,
-                exec: &e.exec,
+    // Callbacks can touch more groups. Swap in an empty, startup-sized buffer so they
+    // retain the same next-pass semantics without allocating a copy of this batch.
+    let mut groups = core::mem::take(&mut e.cmd.legs_spare);
+    core::mem::swap(&mut groups, &mut e.cmd.legs_touched);
+    let result = (|| {
+        for g in &groups {
+            crate::mode_glue::on_legs(e, inst, drv, a, *g)?;
+            let cell = crate::strategies::cell(e.rd.account(a).bound_instance, a, *g);
+            let flat = {
+                let ad = crate::views::ModeAdapter {
+                    oms: &e.oms,
+                    ledger: &e.ledger,
+                    exec: &e.exec,
+                };
+                hft_risk::ModeView::cell_flat(&ad, cell)
             };
-            hft_risk::ModeView::cell_flat(&ad, cell)
-        };
-        crate::mode_glue::apply_mode(e, inst, drv, ModeInput::CellFlat { cell, flat })?;
-    }
-    unknown_gate(e, inst, drv, a)
+            crate::mode_glue::apply_mode(e, inst, drv, ModeInput::CellFlat { cell, flat })?;
+        }
+        unknown_gate(e, inst, drv, a)
+    })();
+    groups.clear();
+    e.cmd.legs_spare = groups;
+    result
 }
 
 /// Marks a group whose legs changed in this Input.
 pub(crate) fn touch_legs(e: &mut Engine, _a: AccountId, g: GroupId) {
     if g.0 != 0 && !e.cmd.legs_touched.contains(&g) {
+        debug_assert!(e.cmd.legs_touched.len() < e.cmd.legs_touched.capacity());
         e.cmd.legs_touched.push(g);
     }
 }

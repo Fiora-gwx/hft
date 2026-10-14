@@ -153,10 +153,16 @@ fn oms_056_reject_row() {
     ] {
         let (mut h, s) = mk(false, st, true, Free, "0");
         rej(&mut h, s);
-        assert_eq!(h.state(s), st, "{row}");
-        let a = h.notes(notes::ANOMALY);
-        assert_eq!((a.len(), a[0].v[0], a[0].level), (1, 1, NoteLevel::P1), "{row}");
-        assert!(transitions(&h).is_empty(), "{row}");
+        assert_eq!(h.state(s), Rejected, "{row}");
+        assert_eq!(h.slot(s).reject_code, 2010);
+        assert_eq!(transitions(&h), vec![(st as u8, 7, 5)], "{row}");
+        assert_eq!(
+            updates(&h),
+            vec![OrderUpdateKind::Rejected {
+                bits: RejectBits(0),
+                venue_code: 2010,
+            }]
+        );
     }
     let (mut h, s) = mk(false, Unknown, false, PendingNew, "0");
     rej(&mut h, s);
@@ -180,6 +186,48 @@ fn oms_056_reject_row() {
         assert!(h.out.is_empty(), "{row}");
         assert_eq!(h.o.stats().dup, d + 1, "{row}");
     }
+    // Real Ack/fill/reject sequences also preserve the cumulative fill evidence.
+    for cum in ["0", "0.004", "0.01"] {
+        let mut h = H::new();
+        let s = h.place_ok(&buy_x(), 0);
+        h.ack(s, 777, 1);
+        if cum != "0" {
+            pfill(&mut h, s, cum);
+        }
+        let before = h.o.inflight().pos(A1, X);
+        let legs = h.legs(A1, g1()).view;
+        h.out.clear();
+        ev(&mut h, s, OrderEventKind::Reject, |e| e.reject_code = 2010);
+        assert_eq!(h.slot(s).filled, q(cum));
+        if cum == "0" {
+            assert_eq!(h.state(s), Rejected);
+            assert_eq!(h.o.inflight().pos(A1, X).open_buy, Qty(0));
+            assert_eq!(h.legs(A1, g1()).view.leg[0].inflight_resting, Qty(0));
+        } else {
+            assert_ne!(h.state(s), Rejected);
+            assert_eq!(h.o.inflight().pos(A1, X), before);
+            assert_eq!(h.legs(A1, g1()).view, legs);
+            assert_eq!(anomaly(&h), 1);
+            assert!(h.out.fills.is_empty());
+            assert!(
+                updates(&h)
+                    .iter()
+                    .all(|u| !matches!(u, OrderUpdateKind::Rejected { .. }))
+            );
+        }
+    }
+    // A reject can itself carry the first cumulative fill. Book it exactly once and alarm.
+    let mut h = H::new();
+    let s = h.place_ok(&buy_x(), 0);
+    h.ack(s, 777, 1);
+    ev(&mut h, s, OrderEventKind::Reject, |e| {
+        e.cum_filled = q("0.004");
+        e.avg_px = p("60000");
+    });
+    assert_eq!(h.state(s), Live);
+    assert_eq!(h.slot(s).filled, q("0.004"));
+    assert_eq!(h.out.fills.len(), 1);
+    assert_eq!(anomaly(&h), 1);
 }
 
 fn pfill(h: &mut H, r: OrderRef, cum: &str) {

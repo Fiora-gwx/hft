@@ -441,13 +441,19 @@ impl Oms {
                 }
             }
             OrderEventKind::Reject => match st {
-                S::PendingNew | S::Unknown => {
+                S::PendingNew | S::Live | S::PendingCancel | S::PendingAmend | S::Unknown
+                    if sl.filled.0 == 0 && ev.cum_filled.0 == 0 =>
+                {
                     if let Some(sl) = self.tm(ti).and_then(|t| t.slots.get_mut(s as usize)) {
                         sl.reject_code = ev.reject_code;
                     }
                     self.transition(ti, s, S::Rejected, TransitionCause::Reject, now, seq, out);
                 }
-                S::Live | S::PendingCancel | S::PendingAmend => self.table_anomaly(ti, s, ev, now, seq, out),
+                _ if sl.filled.0 > 0 || ev.cum_filled.0 > 0 => {
+                    // A reject cannot erase a known fill or prove the remainder dead.
+                    // Account for any new cumulative fill and keep the exposure reserved.
+                    self.table_anomaly(ti, s, ev, now, seq, out);
+                }
                 _ => self.stats.dup += 1,
             },
             OrderEventKind::PartialFill | OrderEventKind::Fill => {

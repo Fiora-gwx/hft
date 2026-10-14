@@ -438,8 +438,7 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
             return Ok(PipeOut::Rejected(bits));
         }
     };
-    // 7. commit → place.
-    e.risk.commit(&adm, &e.now);
+    // 7. Place, then commit the admission only when OMS allocated an order.
     let lev = if e.rd.inst(inst_id).kind == InstKind::Perp && class.class == IntentClass::Open {
         e.risk
             .leverage(account, venue, inst_id)
@@ -474,6 +473,20 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
     #[cfg(feature = "testkit")]
     let place_facts = crate::audit::capture_place(e, &ai);
     let r = e.oms.place(&ai, e.now.tsc, e.cur_seq, &mut o);
+    if r.is_ok() {
+        e.risk.commit(&adm, &e.now);
+    }
+    let rejection = r.err().map(|error| match error {
+        hft_oms::PlaceError::NoFreeSlot | hft_oms::PlaceError::LinkTableFull => RejectBits::CAPACITY,
+        hft_oms::PlaceError::NoTable => RejectBits::INVALID,
+    });
+    // A failed place has no OMS decision or slot. It is still a strategy/exec decision:
+    // journal the original intent before draining any hedge-failure side effects.
+    if let Some(bits) = rejection {
+        record_only(e, strategy, &it, bits, false, oflags, reason, intent_no);
+        #[cfg(feature = "testkit")]
+        e.audit.record((e.out.recs.len() - 1) as u32, audit_facts);
+    }
     #[cfg(feature = "testkit")]
     if let (Some(facts), Err(error)) = (place_facts, r) {
         e.audit.place_failed(facts, error);
@@ -489,7 +502,7 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
             e.out.stamped.push(h);
             Ok(PipeOut::Placed(h))
         }
-        Err(_) => Ok(PipeOut::Rejected(RejectBits::LOCAL_SEND_FAIL)),
+        Err(_) => Ok(PipeOut::Rejected(rejection.unwrap_or(RejectBits::INVALID))),
     }
 }
 

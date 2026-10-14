@@ -38,6 +38,58 @@ fn views(h: &H) -> Vec<IntentView> {
 }
 
 #[test]
+fn seq_175_capacity_rejection_is_journaled_and_replayable() {
+    reset_script();
+    let mut b = b0();
+    b.setup_edit.push(|s| s.oms.slots = hft_oms::PerTable::new(1));
+    let mut h = b.boot();
+    h.steady();
+    let start = h.keyframe().seq;
+    set_hook(|hx, ev, ctx| {
+        if let EventRef::Bbo { inst, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+        {
+            let _ = ctx.place(open_buy(hx, A1));
+        }
+    });
+    let mark = h.mark();
+    h.quote(A1, "50000", "50003");
+    h.run();
+    let first = decisions(&h.since(mark))[0].1;
+    assert_eq!(first.reject, 0);
+    let before = h.s.engine().oms.inflight().pos(AC1, A1);
+    let risk_snapshot = |h: &H| {
+        let mut w = hft_strategy_sdk::SnapshotWriter::new(1 << 20);
+        h.s.engine().risk.snapshot(&mut w);
+        w.as_bytes().to_vec()
+    };
+    let risk_before = risk_snapshot(&h);
+    let sends = h.io_ref().out.len();
+    let mark = h.mark();
+    h.quote(A1, "50000", "50004");
+    h.run();
+    let ds = decisions(&h.since(mark));
+    assert_eq!(ds.len(), 1);
+    let rejected = ds[0].1;
+    assert_eq!(rejected.reject, RejectBits::CAPACITY.0);
+    assert_eq!((rejected.slot.0, rejected.r#gen), (0, 0));
+    assert_eq!(
+        (rejected.account, rejected.strategy, rejected.group),
+        (AC1, S1, G1)
+    );
+    assert_eq!(h.io_ref().out.len(), sends);
+    assert_eq!(h.s.engine().oms.inflight().pos(AC1, A1), before);
+    assert_eq!(
+        risk_snapshot(&h),
+        risk_before,
+        "rejection must not consume tokens"
+    );
+    assert!(h.verify_from(Some(start)).is_empty());
+    clear_hook();
+}
+
+#[test]
 fn seq_170_hedge_gated() {
     let mut h = steady();
     let m = s1_place(&mut h, |hx| pair_first(hx, q("0.01")));

@@ -16,6 +16,8 @@ pub mod ledger;
 pub mod oms;
 #[cfg(feature = "seq")]
 pub mod pair;
+#[cfg(feature = "seq")]
+pub mod seq;
 
 /// The engine the three DST entries run (`tests/dst/`, `cargo xtask dst`, `hft-dst`): the real
 /// sequencer over `SimExchange` with the test strategies (feature `seq`).
@@ -140,6 +142,7 @@ pub fn scenarios() -> Vec<Scenario> {
     let mut v = framework::all();
     #[cfg(feature = "seq")]
     v.extend([
+        seq::seq_344_full_dst(),
         foreign_ledger::led_080_foreign_order_cold_hot_equal(),
         ledger::led_081_auto_external_cold_hot_equal(),
         oms::oms_400_faults_reconcile_zero(),

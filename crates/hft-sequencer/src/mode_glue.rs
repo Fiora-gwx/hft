@@ -154,7 +154,7 @@ pub(crate) fn apply_mode_r<D: Driver<S>, S: StrategySet>(
     };
     e.trace.rec("risk.apply", tag, u64::from(r.is_ok()));
     if r.is_ok() {
-        execute(e, inst, drv, &out)?;
+        execute(e, inst, drv, &mut out)?;
     }
     e.put_mode(out);
     Ok(r)
@@ -225,15 +225,29 @@ pub(crate) fn execute<D: Driver<S>, S: StrategySet>(
     e: &mut Engine,
     inst: &mut Instances<S>,
     drv: &mut D,
-    out: &ModeOutcome,
+    out: &mut ModeOutcome,
 ) -> R<()> {
     // ① cells: Mode events (live instances first), ledger shadow flag, ShadowDeferred notes.
-    let mut cells: Vec<(CellKey, Effective, Effective)> = out.cells.as_slice().to_vec();
-    cells.sort_by_key(|c| {
+    let cells = out.cells.as_mut_slice();
+    let key = |c: &(CellKey, Effective, Effective)| {
         inst.ix(c.0.strategy)
             .and_then(|i| inst.dispatch_pos.get(i).copied())
             .unwrap_or(u16::MAX)
-    });
+    };
+    // Stable in-place insertion sort: bounded by the configured cell count, no heap scratch.
+    for i in 1..cells.len() {
+        let mut j = i;
+        while j > 0 {
+            let (Some(a), Some(b)) = (cells.get(j - 1), cells.get(j)) else {
+                break;
+            };
+            if key(a) <= key(b) {
+                break;
+            }
+            cells.swap(j - 1, j);
+            j -= 1;
+        }
+    }
     for (k, old, new) in cells.iter() {
         let (om, nm) = (eff_mode(*old), eff_mode(*new));
         if om != nm

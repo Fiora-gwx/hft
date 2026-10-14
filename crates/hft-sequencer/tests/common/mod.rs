@@ -995,6 +995,8 @@ pub struct TestIo<S: StrategySet> {
     pub arrivals: Vec<Arrival>,
     /// Ring ids handed over, in order.
     pub handed: Vec<Option<RingId>>,
+    /// Optional independent observation at the actual ring pop boundary.
+    pub popped: Option<Vec<(RingId, Elem)>>,
     pub tsc_reads: u64,
     /// `HostProfile.build_git` of this binary.
     pub build: [u8; 20],
@@ -1036,6 +1038,7 @@ impl<S: StrategySet> TestIo<S> {
             takes: 0,
             arrivals: Vec::new(),
             handed: Vec::new(),
+            popped: None,
             tsc_reads: 0,
             build: [0; 20],
             old: None,
@@ -1087,6 +1090,9 @@ impl<S: StrategySet> LiveIo<S> for TestIo<S> {
             return false;
         };
         out.set_bytes(e.kind, e.flags, Tsc(self.tsc), &e.body);
+        if let Some(log) = &mut self.popped {
+            log.push((r, e));
+        }
         true
     }
     fn push_out(&mut self, ring: OutRing, c: &GwCmd) -> bool {

@@ -453,7 +453,7 @@ impl Engine {
             .map(|_| ModeOutcome::with_capacity(mode_dims.0, mode_dims.1, mode_dims.2))
             .collect();
         let market = Market::new(&rd);
-        let cmd = CmdState::new(caps.recent_cmd_ids as usize, &rd);
+        let cmd = CmdState::new(caps.recent_cmd_ids as usize, caps.max_cells_total as usize, &rd);
         let n_inst = rd.inst_count();
         let anchor = EngineClockAnchor {
             base_engine_ns: 0,

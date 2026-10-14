@@ -360,24 +360,46 @@ fn tk_121_hedge_place_failure_requires_exact_evidence() {
         .find(|e| {
             e.records
                 .first()
-                .is_some_and(|first| crate::seq_sut::seq_before_balance_checks(&r.journal, first.seq) == 1572)
+                .is_some_and(|first| first.kind == EventKind::TIMER)
+                && e.info.place_failures.len() == 1
+                && e.info.place_failures.iter().any(|f| {
+                    f.error == PlaceFailureKind::NoFreeSlot
+                        && f.free_slots == Some(0)
+                        && f.retries_before == 1
+                        && e.after
+                            .links
+                            .iter()
+                            .any(|l| l.key == Some(f.key) && l.retries == 2)
+                })
         })
-        .expect("original failing Input was not exercised");
+        .expect("full-table hedge retry was not exercised");
     assert_eq!(e.records[0].kind, EventKind::TIMER);
     assert_eq!(e.info.place_failures.len(), 1);
     let f = e.info.place_failures[0];
     assert_eq!(f.input_seq, e.records[0].seq);
-    assert_eq!(
-        crate::seq_sut::seq_before_balance_checks(&r.journal, f.input_seq),
-        1572
-    );
-    assert_eq!(f.key.id, 17);
     assert_eq!(f.free_slots, Some(0));
     assert_eq!(f.error, PlaceFailureKind::NoFreeSlot);
     assert_eq!(f.retries_before, 1);
     let at = e.after.links.iter().position(|l| l.key == Some(f.key)).unwrap();
     assert_eq!(e.after.links[at].retries, 2);
-    assert!(e.records.iter().all(|r| r.kind != EventKind::ORDER_DECISION));
+    let decisions: Vec<_> = e
+        .records
+        .iter()
+        .filter_map(|r| r.try_read::<OrderDecision>())
+        .collect();
+    assert_eq!(decisions.len(), 1);
+    let d = decisions[0];
+    assert_eq!(d.reject, hft_types::RejectBits::CAPACITY.0);
+    assert_eq!((d.slot.0, d.r#gen), (0, 0));
+    assert_eq!(d.trigger_seq, f.input_seq);
+    assert_eq!(
+        (d.account.0, d.group, d.venue, d.inst),
+        (f.key.account, f.group, f.venue, f.inst)
+    );
+    assert!(
+        e.frames.is_empty(),
+        "a capacity rejection must not reach the gateway"
+    );
     assert!(check(InvId::I14, e).is_ok());
 
     let mut unchanged = e.clone();

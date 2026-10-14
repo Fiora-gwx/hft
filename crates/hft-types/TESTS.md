@@ -1156,17 +1156,19 @@ spec: README.md
 | TYP-113.28 | `LINK_STALE` | `1 << 28` |
 | TYP-113.29 | `LINK_FUNDS` | `1 << 29` |
 
+同一位号表还校验 `CAPACITY = 1 << 30`,TYP-114 包含该位。
+
 ### TYP-114 RejectBits 两两不重叠且不使用退役位 21
 
 - 规则:[模式、kill 级别、cap 来源与风控拒绝位](README.md#模式kill-级别cap-来源与风控拒绝位)
 - 级别:unit
 - 里程碑:M1
-- 前置:TYP-113 的 29 个常量
+- 前置:TYP-113 的 30 个常量(含 CAPACITY)
 - 步骤:
   1. 两两求与;求全体的或
   2. 读取 `size_of::<RejectBits>()`
 - 期望:
-  - 两两相与全为 0;全体的或 == `0x3FDF_FFFF`(bit 21 与 bit 30–31 为 0)
+  - 两两相与全为 0;全体的或 == `0x7FDF_FFFF`(bit 21 与 bit 31 为 0)
   - `size_of::<RejectBits>() == 4`
 - 实现:`crates/hft-types/tests/codes.rs::typ_114_reject_bits_disjoint`
 

@@ -580,7 +580,6 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
         crate::advisor::deliver(e, inst, market, queued, manual);
     }
     inst.touched.clear();
-    let order: Vec<u16> = inst.dispatch_order.clone();
     // Reserve in the same instance/callback order used below. One shared balance spans all
     // market, queued and direct deliveries; a later instance cannot reuse an earlier promise.
     let mut timer_remaining = e
@@ -589,7 +588,10 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
         .saturating_sub(e.engine_timer_demand)
         .saturating_sub(e.strat_timers);
     let mut ro_ix: Option<usize> = None;
-    for &ix16 in order.iter() {
+    for pos in 0..inst.dispatch_order.len() {
+        let Some(ix16) = inst.dispatch_order.get(pos).copied() else {
+            continue;
+        };
         let ix = usize::from(ix16);
         let mut any = false;
         // Market entries of this instance (CSR row order: dispatch position, gix).
@@ -625,7 +627,7 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
             let Some(slot) = inst.slots.get_mut(ix) else {
                 continue;
             };
-            let groups = slot.cur.as_ref().map(|p| p.groups.clone());
+            let groups = slot.cur.as_ref().map(|p| &p.groups);
             let Some(st) = slot.inst.as_mut() else { continue };
             if !any {
                 slot.bufs.begin();
@@ -709,8 +711,10 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
             inst.touched.push(ix16);
         }
     }
-    let touched: Vec<u16> = inst.touched.clone();
-    for ix16 in touched {
+    for pos in 0..inst.touched.len() {
+        let Some(ix16) = inst.touched.get(pos).copied() else {
+            continue;
+        };
         let ix = usize::from(ix16);
         apply_ctx(e, inst, drv, ix, ro_ix == Some(ix))?;
     }
@@ -807,8 +811,10 @@ pub(crate) fn apply_ctx<D: crate::Driver<S>, S: StrategySet>(
     inst.notes.clear();
     inst.notes.extend_from_slice(slot.bufs.notes());
     inst.outcomes.clear();
-    let ops: Vec<(IntentHandle, OpOwned)> = inst.ops.clone();
-    for (h, op) in ops {
+    for pos in 0..inst.ops.len() {
+        let Some((h, op)) = inst.ops.get(pos).copied() else {
+            continue;
+        };
         match op {
             OpOwned::Place(it) => {
                 e.trace
@@ -889,8 +895,7 @@ pub(crate) fn apply_ctx<D: crate::Driver<S>, S: StrategySet>(
         }
     }
     // Notes.
-    let notes: Vec<NoteReq> = inst.notes.clone();
-    for n in notes {
+    for n in &inst.notes {
         // `Note.code` = source << 24 | the strategy's code (low 24 bits, hft-event Note codes).
         let note = Note {
             code: ((NoteSource::Strategy as u32) << 24) | (n.code & 0xFF_FFFF),

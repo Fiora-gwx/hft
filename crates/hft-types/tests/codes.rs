@@ -111,7 +111,7 @@ fn typ_112_cap_source() {
     }
 }
 
-fn reject_table() -> [(&'static str, RejectBits, u32); 29] {
+fn reject_table() -> [(&'static str, RejectBits, u32); 30] {
     [
         ("TYP-113.1", RejectBits::INVALID, 0),
         ("TYP-113.2", RejectBits::NOT_TRADABLE, 1),
@@ -142,6 +142,7 @@ fn reject_table() -> [(&'static str, RejectBits, u32); 29] {
         ("TYP-113.27", RejectBits::NOT_BOUND, 27),
         ("TYP-113.28", RejectBits::LINK_STALE, 28),
         ("TYP-113.29", RejectBits::LINK_FUNDS, 29),
+        ("TYP-113 capacity", RejectBits::CAPACITY, 30),
     ]
 }
 
@@ -161,6 +162,6 @@ fn typ_114_reject_bits_disjoint() {
         }
     }
     let all = t.iter().fold(0u32, |acc, (_, c, _)| acc | c.0);
-    assert_eq!(all, 0x3FDF_FFFF);
+    assert_eq!(all, 0x7FDF_FFFF);
     assert_eq!(size_of::<RejectBits>(), 4);
 }

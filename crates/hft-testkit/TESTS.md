@@ -1557,7 +1557,7 @@ spec: README.md
 - 故障:套件原有故障计划,实际触发 Drain 和自动重启
 - 种子:固定种子 7、28、34,每行 2000 步
 - 断言:每行实际完成至少一次 Drain 和对应恢复;Drain 快照含 Draining,其他 cap 非空,Recovery 快照不含旧 Draining,其余 cap 原样保留,全部账户仍有 Recovery 且闸门未放行;每条快照通过 INV-6,检查数与 journal 快照数相同;全部不变量通过,强制复跑的 Output 和非空 HashTrail 逐字节一致
-- 恢复后 New 意图:种子 28 的三条开仓决策均以 CloseOnly 拒绝且没有分配槽,其余两行没有开仓决策;默认外来成交可触发已分配槽的 risk_reducing 防御单,方向和数量仍经过完整不变量检查;订单查询照常处理
+- 恢复后 New 意图:逐条验证开仓决策以 CloseOnly 拒绝且没有分配槽,种子 28 必须实际出现拒单;拒单数量随此前订单终态变化,不固定历史计数;默认外来成交可触发已分配槽的 risk_reducing 防御单,方向和数量仍经过完整不变量检查;订单查询照常处理
 - 实现:`crates/hft-testkit/tests/journal_config.rs::tk_120_drain_restart_conformance_keeps_recovery_gates`
 
 ### TK-121 对冲 place 失败必须有同一链接实例的原始证据
@@ -1568,10 +1568,10 @@ spec: README.md
 - 前置:真实 `SeqSut<TestStrategies>` 与原始 core 套件,不改故障率与时限
 - 故障:套件原有计划
 - 种子:固定种子 `0x1af231bb1d6440e2`,完整 10000 步
-- 断言:全部不变量与强制复跑通过;Input 1572 为对冲重试 Timer,链接 17 调用前空闲槽为 0,place 返回 NoFreeSlot,重试从 1 到 2,没有 OrderDecision;删除/重复观察、改错 Input/epoch/slot/gen/创建事件/链接号/账户/组、非满表、错误失败种类、错误计数水位、多加计数和缺链接身份共 17 行反例失败;未增加计数的失败也不能漏观察。四种门控 SendReport 不能单独解释计数增加;链接号复用后不能借旧实例证据。关闭检查器后完整 journal 和非空 HashTrail 逐字节相同
+- 断言:全部不变量与强制复跑通过;按原始观察选取对冲重试 Timer,同一链接实例调用前空闲槽为 0,place 返回 NoFreeSlot,重试从 1 到 2;同事件恰有一条 CAPACITY OrderDecision,trigger_seq/账户/组/venue/品种吻合,slot/gen 为 0且不出环;删除/重复观察、改错 Input/epoch/slot/gen/创建事件/链接号/账户/组、非满表、错误失败种类、错误计数水位、多加计数和缺链接身份共 17 行反例失败;未增加计数的失败也不能漏观察。四种门控 SendReport 不能单独解释计数增加;链接号复用后不能借旧实例证据。关闭检查器后完整 journal 和非空 HashTrail 逐字节相同
 - 实现:`crates/hft-testkit/tests/observations.rs::tk_121_hedge_place_failure_requires_exact_evidence`
 - 对账覆盖:两次运行均保持原始对账 actor,确认 journal 包含 ReconcileReport;关闭检查器仍刷新 actor 所需仓位,逐记录比较数量、序号、种类、TSC、标志及全部体字节,失败仅输出首个差异位置
-- 历史定位:Input 1572 指追加 BalanceCheck 之前的序号;定位时仅扣除此前新增的该种 Note,观察的 input_seq 仍须等于当前记录的原始序号
+- 定位:不固定派生 seq 或链接号;用 Timer、NoFreeSlot、空闲槽和重试水位选择真实事件,观察的 input_seq 仍须等于当前记录的原始序号,全部反例比较完整链接身份
 
 ### TK-122 恢复链接同事件内复用仍保留 place 时的身份
 
