@@ -1,6 +1,6 @@
 # hft-core 可执行配置
 
-这是开发与测试网装配入口。生产主机的完整规格归 [README](../README.md)，当前限制归其“已知限制与后续工作”。配置相对路径均相对于 TOML 所在目录；`deny_unknown_fields` 拒绝未知字段。RDB1、ECF1、风险参数与策略参数文件必须提供 SHA-256，文件内容在启动时进入 seq journal。凭据只从路径读取，`--check` 不读凭据内容。
+这是开发与测试网装配入口。生产主机的完整规格归 [README](../README.md)，当前限制归其“已知限制与后续工作”。配置相对路径均相对于 TOML 所在目录；`deny_unknown_fields` 拒绝未知字段。RDB1、ECF1、风险参数与策略参数文件必须提供 SHA-256，文件内容在启动时进入 seq journal。实际 prod 启动在配置语法解析后、blob 与线程计划校验前读取并删除凭据普通文件；共享路径只读一次，原始缓冲交接后清零。`--check` 与 Sim 不读、不删凭据。
 
 可选策略在构建时选择 `hft-strategy-registry/<feature>`，无需修改 app；名字与 kind 归 [registry](../../../strategies/registry/README.md)。CI 的完整 schema 校验同时选择 app 与 registry 并启用全部 feature；`--version` 列出该制品实际包含的策略。
 

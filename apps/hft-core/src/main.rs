@@ -56,10 +56,20 @@ fn run() -> Result<u8, Vec<Error>> {
         }
     }
     let path = path.ok_or_else(usage)?;
+    let secrets = if check || dry {
+        hft_core::secrets::SecretFiles::default()
+    } else {
+        let parsed = hft_core::config::parse(&path)?;
+        if parsed.instance.name == "prod" {
+            hft_core::secrets::SecretFiles::read_and_unlink(&parsed)?
+        } else {
+            hft_core::secrets::SecretFiles::default()
+        }
+    };
     let loaded = hft_core::config::load(&path, dry)?;
     if check {
         println!("hft-core: configuration valid");
         return Ok(0);
     }
-    hft_core::runtime::run(loaded, dry, duration).map_err(|e| vec![e])
+    hft_core::runtime::run(loaded, dry, duration, secrets).map_err(|e| vec![e])
 }

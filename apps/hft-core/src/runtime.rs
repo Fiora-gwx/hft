@@ -163,10 +163,15 @@ impl Drop for Workers {
         let _ = self.join();
     }
 }
-pub fn run(l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, Error> {
+pub fn run(
+    l: Loaded,
+    dry: bool,
+    duration_ms: Option<u64>,
+    secrets: crate::secrets::SecretFiles,
+) -> Result<u8, Error> {
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (l, dry, duration_ms);
+        let _ = (l, dry, duration_ms, secrets);
         Err(Error::runtime(
             "HostCheck",
             "runtime requires Linux (tmpfs journal and Unix ctl); --check and schemas are portable",
@@ -175,12 +180,17 @@ pub fn run(l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, Error> 
     }
     #[cfg(target_os = "linux")]
     {
-        run_linux(l, dry, duration_ms)
+        run_linux(l, dry, duration_ms, secrets)
     }
 }
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, Error> {
+fn run_linux(
+    mut l: Loaded,
+    dry: bool,
+    duration_ms: Option<u64>,
+    secrets: crate::secrets::SecretFiles,
+) -> Result<u8, Error> {
     let c = &l.cfg;
     if c.paths
         .ctl_socket
@@ -309,7 +319,7 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
             let _ = (md_tx, bulk_tx);
         } else {
             let vtask = crate::venues::assemble(
-                c, &l.setup, name, v, rd, clock, epoch, bbo_tx, md_tx, bulk_tx, feed_rx,
+                c, &l.setup, name, v, rd, clock, epoch, bbo_tx, md_tx, bulk_tx, feed_rx, &secrets,
             )?;
             let (task, gw, js, baseline) = vtask;
             initial_balances.extend(baseline.balances);
@@ -321,6 +331,7 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
             sides.extend(js);
         }
     }
+    drop(secrets); // zeroize raw input buffers after handing credentials to their owners
     let (writer, seq_side) = storage::open(jcfg, epoch)?;
     sides.push(seq_side);
     // Gateway order must be the same as ECF1/GwMap's kill-word order.

@@ -4,6 +4,7 @@ mod config_shape;
 pub mod io;
 pub mod paper;
 pub mod runtime;
+pub mod secrets;
 pub mod storage;
 pub mod venues;
 

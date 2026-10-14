@@ -181,7 +181,7 @@ fn read_blob(b: &Blob) -> Result<Vec<u8>, Error> {
     }
     Ok(bytes)
 }
-pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
+pub fn parse(path: &Path) -> Result<Config, Vec<Error>> {
     let text = std::fs::read_to_string(path)
         .map_err(|_| vec![Error::config("FileRead", path.display().to_string())])?;
     crate::config_shape::check(&text)?;
@@ -226,6 +226,11 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
             }
         }
     }
+    Ok(c)
+}
+
+pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
+    let c = parse(path)?;
     let mut errors = Vec::new();
     macro_rules! bad {
         ($code:expr, $s:expr) => {{
