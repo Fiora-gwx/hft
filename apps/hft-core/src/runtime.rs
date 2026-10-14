@@ -467,7 +467,7 @@ fn run_linux(
         if note.v[0] == 4 && note.v[1] == 0 {
             for warning in rd.warnings() {
                 let warning = crate::startup::note(
-                    4,
+                    crate::startup::REFDATA_WARNING,
                     hft_event::NoteLevel::P1,
                     [
                         warning.code as u64,

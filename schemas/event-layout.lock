@@ -761,6 +761,17 @@ note Exec 10 ExecManualHold
 note Exec 11 ExecUngroupedReduce
 note Exec 12 ExecGateHeldNaked
 note Exec 13 ExecChainLegExcess
+note Boot 1 PartialEventDropped
+note Boot 2 TailSkipped
+note Boot 3 RecoverFromSnapshot
+note Boot 4 KillSelfTest
+note Boot 5 InputQuarantined
+note Boot 6 StartupStep
+note Boot 7 HostDegraded
+note Boot 8 JournalTailLost
+note Boot 9 RefdataWarning
+note Boot 10 StopMarkerCorrupt
+note Boot 11 EndpointOverride
 struct StrategyParamsHdr 48
   0 strategy id:strategy
   1 account id:account

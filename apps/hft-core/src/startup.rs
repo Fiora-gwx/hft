@@ -5,9 +5,20 @@ use serde::Deserialize;
 use std::time::Instant;
 
 pub const NOTE_CODES: &[(NoteSource, u32, &str)] = &[
-    (NoteSource::Boot, 1, "StartupStep"),
-    (NoteSource::Boot, 4, "RefdataWarning"),
+    (NoteSource::Boot, 1, "PartialEventDropped"),
+    (NoteSource::Boot, 2, "TailSkipped"),
+    (NoteSource::Boot, 3, "RecoverFromSnapshot"),
+    (NoteSource::Boot, 4, "KillSelfTest"),
+    (NoteSource::Boot, 5, "InputQuarantined"),
+    (NoteSource::Boot, 6, "StartupStep"),
+    (NoteSource::Boot, 7, "HostDegraded"),
+    (NoteSource::Boot, 8, "JournalTailLost"),
+    (NoteSource::Boot, 9, "RefdataWarning"),
+    (NoteSource::Boot, 10, "StopMarkerCorrupt"),
+    (NoteSource::Boot, 11, "EndpointOverride"),
 ];
+pub const STARTUP_STEP: u32 = 6;
+pub const REFDATA_WARNING: u32 = 9;
 
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -40,7 +51,7 @@ pub fn note(n: u32, level: NoteLevel, values: [u64; 4]) -> Note {
 fn step(step: u8, end: bool, us: u64, budget_us: u64, flags: u64) -> Note {
     let flags = if end { flags | u64::from(us > budget_us) } else { 0 };
     note(
-        1,
+        STARTUP_STEP,
         if flags != 0 {
             NoteLevel::P1
         } else {

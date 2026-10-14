@@ -95,7 +95,7 @@ mod process {
             match reader.poll() {
                 hft_journal::Next::Record(r) if r.hdr.kind == EventKind::NOTE.0 => {
                     let n = r.read::<hft_event::Note>().unwrap();
-                    if n.code == note_code(NoteSource::Boot, 1) {
+                    if n.code == note_code(NoteSource::Boot, 6) {
                         steps.push(n);
                     }
                 }
