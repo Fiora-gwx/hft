@@ -12,9 +12,11 @@
 | 预测可见前不进场、实际结算符号、衰减退出、陈旧预测持有 | test_carry_no_lookahead_settlement_sign_exit_and_stale_hold |
 | 同刻先结算后入场、不领取过去现金 | test_carry_settlement_before_entry_cannot_be_collected |
 | 目标按双侧深度分片、名义不随杠杆放大 | test_carry_depth_slices_keep_target_and_margin_not_levered |
+| 价格变化后的下一片重新受单笔名义上限约束 | test_carry_remaining_slice_obeys_cap_after_price_moves |
 | 日合计仅筛选、期限敏感性 | test_daily_totals_never_create_timestamped_trades |
 | 倍率异常及坏盘口不可产生利润 | test_scale_and_invalid_quotes_are_not_opportunities |
 | 参数/费率/元数据缺失拒绝、资金费事件去重和周期校验 | test_config_rejects_unknown_fee_missing_contract_and_invalid_params、test_funding_rejects_duplicates_and_future_prediction_contract |
+| 旧 CSV 导出器的 true 首行被识别,其他坏表头拒绝 | test_legacy_daily_csv_success_prefix_is_not_a_funding_row |
 | Parquet 真实 CLI、交集对齐、不向前填充、JSON/CSV/中文报告/数据哈希 | test_cli_parquet_outputs_and_no_future_fill |
 
 Python 验证命令为 `python -m pytest -q tools/strat-calib/tests`;Rust 为 `cargo test -p strat-calib-conformance --test conformance -- --test-threads 2`。本地 Cargo 命令必须经操作者指定的 memguard,构建前检查提交内存;CI 的 fast-test 选择本工具包,ops-py 独立运行 Python 测试和 ruff。两侧必须同时通过,不能只用 Python 自证与 Rust 一致。

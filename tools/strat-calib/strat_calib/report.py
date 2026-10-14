@@ -15,8 +15,17 @@ def render(result: dict) -> str:
     provenance = result["provenance"]
     rows = result["pairs"]
     good = [r for r in rows if not r.get("excluded")]
+    traded = [r for r in good if r["taker"]["trades"]]
+    profitable = sum(r["taker"]["pnl_after_liquidation_quote"] > 0 for r in traded)
+    horizons = provenance["config"].get("carry_horizons_days", [1, 3, 7])
     lines = [
         "# 策略离线校准报告",
+        "",
+        (
+            f"配置情景下，{len(rows)} 个候选组合中 {len(good)} 个通过价格与数据检查；"
+            f"{len(traded)} 个发生套利模拟成交，其中 {profitable} 个在扣除期末退出成本后为正。"
+            "资金费日汇总的筛选结果与有时间戳数据的模拟结果分别列示。"
+        ),
         "",
         (
             "本报告用已记录行情筛选研究参数。金额单位为计价币，费率为配置中的情景费率，未核实账户实际费率。"
@@ -34,7 +43,7 @@ def render(result: dict) -> str:
         ),
         (
             "- 本地 funding_raw.csv 只有日合计和结算次数。结算次数不能反推周期，日合计不能充当当时已知预测。"
-            "资金费时间序列及实际入退场仅在另行提供 funding-events CSV 后产生。"
+            "资金费汇总没有日期边界，不能确认与 BBO 区间一致。资金费时间序列及实际入退场仅在另行提供 funding-events CSV 后产生。"
         ),
         (
             "- 1 秒快照看不到秒内价差、订单队列、撤单、网络时延、Unknown、拒单、非对称成交和 Reverse 修复成本。"
@@ -76,7 +85,7 @@ def render(result: dict) -> str:
             "两边钱包各全额备资时，资本回报约为该值的一半。实际收益还受基差变化、保证金、强平及借贷约束。"
         ),
         "",
-        "| 标的 / 两腿 | 做空腿 | 收取差额 bps/日 | 配置净年化% | 往返成本 bps | 回本天数 | 100名义持有1/3/7天净额 | 顶档容量 P50 |",
+        f"| 标的 / 两腿 | 做空腿 | 收取差额 bps/日 | 配置净年化% | 往返成本 bps | 回本天数 | 100名义持有{'/'.join(map(str, horizons))}天净额 | 顶档容量 P50 |",
         "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     funding = [r for r in good if "net_apr" in r["carry_daily"]]
@@ -126,7 +135,15 @@ def render(result: dict) -> str:
         taker = "保持禁用；费用后 P99≤0" if edge99 <= 0 else "min_edge 1–5；slip 0–1，逐笔复核"
         cg = [r for r in funding if r["symbol"] == symbol and r["carry_daily"]["income_day_bps"] > 0]
         if cg:
-            best_c = max(cg, key=lambda r: r["carry_daily"]["income_day_bps"])
+            # Choose among sufficiently observed pairs first; a sparse higher-rate pair must
+            # not hide a viable, better-covered pair of the same canonical symbol.
+            covered = [r for r in cg if r["coverage_pct"] >= 80]
+            best_c = max(
+                covered or cg,
+                key=lambda r: (
+                    r["carry_daily"]["income_day_bps"] - r["carry_daily"]["round_trip_cost_bps"] / 3
+                ),
+            )
             c = best_c["carry_daily"]
             days = c["breakeven_days"]
             if days is not None and days < 7:

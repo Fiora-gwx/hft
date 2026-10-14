@@ -186,6 +186,24 @@ def test_carry_depth_slices_keep_target_and_margin_not_levered():
     assert stats["final_position_raw"] == [-100, 100]
 
 
+def test_carry_remaining_slice_obeys_cap_after_price_moves():
+    m = Meta(-2, -2, 1, 1, 1, 100000, 0)
+    data = frame([(100, 100, 100, 100), (200, 200, 200, 200)])
+    data.loc[0, "bid_base_a"] = data.loc[0, "ask_base_b"] = 0.1
+    e = [FundingEvent("a", "prediction", 100 * 10**9, 1000000, 28800, 120 * 10**9, "")]
+    _, trades, _ = carry_simulate(
+        data,
+        (m, replace(m, spot=True)),
+        (0, 0),
+        CarryParams(max_cross=0),
+        (e, []),
+        (10000000000,) * 2,
+        (1, 1),
+        (100, 0),
+    )
+    assert [t["qty_raw"] for t in trades] == [10, 50]  # second slice cannot spend 180 against cap 100
+
+
 def test_daily_totals_never_create_timestamped_trades():
     a, b = "binance:linear_perpetual:X", "okx:linear_perpetual:X"
     d = carry_daily(

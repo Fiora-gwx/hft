@@ -16,6 +16,7 @@ from .core import (
     limit,
     min_qty_at,
     pair_lot,
+    qty_for_notional,
     signal,
 )
 from .data import FundingEvent, books, raw
@@ -263,7 +264,7 @@ def carry_simulate(
                 settlements += 1
             index += 1
         previous_time, previous_books = now, pair
-        fa, fb = forecasts
+        fa, fb = forecasts[0], None if metas[1].spot else forecasts[1]
         fresh = fa is not None and fa.fresh(now, p.funding_max_age_ms)
         fresh = fresh and (metas[1].spot or (fb is not None and fb.fresh(now, p.funding_max_age_ms)))
         edge = None
@@ -317,7 +318,11 @@ def carry_simulate(
         buy, sell = (0, 1) if remaining > 0 else (1, 0)
         bp = limit(pair[buy], p.max_cross, metas[buy].tick, True)
         sp = limit(pair[sell], p.max_cross, metas[sell].tick, False)
-        q = min(abs(remaining), pair[buy].ask_qty, pair[sell].bid_qty) // lot * lot
+        q = min(abs(remaining), pair[buy].ask_qty, pair[sell].bid_qty)
+        for i, px in ((buy, bp), (sell, sp)):
+            cap = qty_for_notional(p.max_notional, max(px, pair[i].ask), metas[i])
+            q = min(q, cap or 0, metas[i].max_qty)
+        q = q // lot * lot
         if (
             q <= 0
             or bp < pair[buy].ask
