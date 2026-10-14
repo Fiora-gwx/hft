@@ -27,6 +27,8 @@ pub struct MarketActor {
     next_rec: usize,
     /// Drift per inst (OneSidedMove): (inst, start_ns, over_ns, pct_bp, start_mid).
     moves: Vec<(InstId, u64, u64, i32, i64)>,
+    /// Perpetual insts: each of their quote updates also publishes the mid as the mark price.
+    perps: Vec<InstId>,
 }
 
 /// One market update for a venue.
@@ -39,6 +41,8 @@ pub enum MarketOut {
         bid: (i64, i64),
         ask: (i64, i64),
     },
+    /// Generated mark price of a perpetual inst (the new mid), through the venue's md layer.
+    Mark { venue: VenueId, inst: InstId, px: i64 },
     /// A recorded Input, delivered as is.
     Recorded(InputRec),
 }
@@ -60,6 +64,11 @@ impl MarketActor {
             recorded,
             next_rec: 0,
             moves: Vec::new(),
+            perps: if world.margin_feed {
+                world.insts.iter().filter(|i| i.perp).map(|i| i.id).collect()
+            } else {
+                Vec::new()
+            },
         }
     }
     pub fn is_recorded(&self) -> bool {
@@ -108,15 +117,18 @@ impl MarketActor {
         self.state[ix].3 = na;
         let jitter = self.mgen.tick_ms * 1_000_000 / n.max(1);
         let next = now + jitter / 2 + self.rng.below(jitter.max(1));
-        (
-            vec![MarketOut::Bbo {
-                venue,
-                inst,
-                bid: (nb, depth),
-                ask: (na, depth),
-            }],
-            next,
-        )
+        let mut out = vec![MarketOut::Bbo {
+            venue,
+            inst,
+            bid: (nb, depth),
+            ask: (na, depth),
+        }];
+        if self.perps.contains(&inst) {
+            // Perpetual mark = the new mid on the tick (margin data stays fresh, scenarios §2.2).
+            let px = (nb + na) / 2 / tick * tick;
+            out.push(MarketOut::Mark { venue, inst, px });
+        }
+        (out, next)
     }
     pub fn apply_fault(&mut self, f: &Fault, now: u64) {
         if let Fault::OneSidedMove {

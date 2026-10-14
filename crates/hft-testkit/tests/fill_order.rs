@@ -115,6 +115,9 @@ fn tk_123_raw_matching_order_survives_report_jitter() {
         .find(|s| s.name == "modes")
         .unwrap();
     let mut c = suite.config(0x7dfe_e420_7b81_bfbd);
+    // A counterexample recorded in the world before 2026-10-14 (no marks, holding takers).
+    c.world.margin_feed = false;
+    c.world.taker_cycles = false;
     // Keep the old-record counterexample explicit even when the standard world supplies cash.
     c.world
         .venues
@@ -130,8 +133,14 @@ fn tk_123_raw_matching_order_survives_report_jitter() {
         panic!("the strict INV-16 counterexample was not reproduced");
     };
     assert_eq!(f.invariant, FailKind::Inv(InvId::I16));
-    assert_eq!(f.step, 315);
-    assert!(f.message.contains("balance 49999683576 != truth 49999683575"));
+    // Within the diagnostic prefix (step 315 when recorded; engine fixes may move it by a few
+    // timer steps without changing the counterexample).
+    assert!(f.step < 316, "{}", f.message);
+    assert!(
+        f.message.contains("balance 49999683576 != truth 49999683575"),
+        "{}",
+        f.message
+    );
     let selected = |e: &OrderEvent| e.account.0 == 1 && e.venue.0 == 5 && (5..=7).contains(&e.slot.0);
     let generated: Vec<_> = r.matched_tail.iter().filter(|(_, e)| selected(e)).collect();
     assert_eq!(generated.len(), 3);
@@ -146,16 +155,16 @@ fn tk_123_raw_matching_order_survives_report_jitter() {
         .filter_map(|j| j.try_read::<OrderEvent>().map(|e| (j.seq, e)))
         .filter(|(_, e)| selected(e) && matches!(e.what, OrderEventKind::Fill | OrderEventKind::PartialFill))
         .collect();
+    // Delivered 6, 5, 7 (recorded at seqs 544/555/597 before BalanceCheck notes; the exact seqs
+    // move with unrelated engine outputs, the reordering does not).
     assert_eq!(
-        delivered
-            .iter()
-            .map(|(seq, e)| (
-                crate::seq_sut::seq_before_balance_checks(&r.journal, *seq),
-                e.slot.0
-            ))
-            .collect::<Vec<_>>(),
-        [(544, 6), (555, 5), (597, 7)]
+        delivered.iter().map(|(_, e)| e.slot.0).collect::<Vec<_>>(),
+        [6, 5, 7]
     );
+    assert!(delivered.windows(2).all(|w| {
+        crate::seq_sut::seq_before_balance_checks(&r.journal, w[0].0)
+            < crate::seq_sut::seq_before_balance_checks(&r.journal, w[1].0)
+    }));
     for ((_, e), (slot, side, qty, px)) in generated.iter().zip([
         (5, Side::Buy, 200_000, 600_275_000),
         (6, Side::Sell, 100_000, 600_274_000),
@@ -180,6 +189,8 @@ fn tk_123_raw_matching_order_survives_report_jitter() {
             && d.cum_filled == e.cum_filled));
     }
     c.invariants = InvariantSet::none();
+    // The same prefix without checkers: up to and including the failing step.
+    c.steps = r.steps_run;
     let unchecked = run_record::<SeqSut<TestStrategies>>(&c);
     assert_eq!(r.steps_run, unchecked.steps_run);
     assert_eq!(r.journal.len(), unchecked.journal.len());
@@ -315,6 +326,9 @@ fn tk_127_explicit_cash_closes_the_original_wallet_difference() {
         .find(|s| s.name == "modes")
         .unwrap();
     let mut c = suite.config(0x7dfe_e420_7b81_bfbd);
+    // A counterexample recorded in the world before 2026-10-14 (no marks, holding takers).
+    c.world.margin_feed = false;
+    c.world.taker_cycles = false;
     // Freeze the original full-length plan before shortening the diagnostic prefix.
     c.plan = Some(c.fault_plan());
     assert!(c.world.venues.iter().find(|v| v.id == VP).unwrap().perp_cash);

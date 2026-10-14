@@ -1,7 +1,9 @@
 //! `probe-taker` (README "5. 解耦门槛夹具"): when leg A's bid exceeds leg B's ask by more than
 //! `spread_th`, sells A with a `LegLink` whose OnFill second leg buys B; on `Exec`, `External` or
 //! `Risk` events selected by `close_on` it sets a 0/0 exit target. In the same event as an opening
-//! it arms a hold timer and writes `Note{Opened}`. Uses only hft-strategy-sdk (and hft-strat-lib).
+//! it arms a hold timer and writes `Note{Opened}`. With `close_on` bit 3 the hold timer of a held
+//! group sets the same exit target and re-arms itself as a cool-down, after which the group may
+//! open again (so a run trades in cycles). Uses only hft-strategy-sdk (and hft-strat-lib).
 //! `ProbeNp` is the same code with `non_prod_only = true` and its own kind_id.
 
 use hft_strategy_sdk::prelude::*;
@@ -20,8 +22,8 @@ macro_rules! taker_params {
                 spread_th: Rate [min = 0, max = 1_000_000_000, default = 1_000_000, per_group],
                 /// first-leg quantity in lots of leg A
                 qty_lots: Count [min = 1, max = 1_000, default = 1, per_group],
-                /// close on events: bit 0 Exec, bit 1 External, bit 2 Risk
-                close_on: Count [min = 0, max = 7, default = 7],
+                /// close on events: bit 0 Exec, bit 1 External, bit 2 Risk, bit 3 hold timer (then cool down)
+                close_on: Count [min = 0, max = 15, default = 7],
                 /// hold timer after an opening (ms)
                 hold_ms: DurationMs [min = 0, max = 3_600_000, default = 5_000],
             }
@@ -74,6 +76,8 @@ taker_params!(NpParams, NpFields, 0xFF03);
 pub const CLOSE_EXEC: u32 = 1;
 pub const CLOSE_EXTERNAL: u32 = 2;
 pub const CLOSE_RISK: u32 = 4;
+/// Exit when the hold timer fires, then cool down for another `hold_ms` before reopening.
+pub const CLOSE_HOLD: u32 = 8;
 /// Note code of an opening.
 pub const NOTE_OPENED: u32 = 1;
 /// Timer tag of the hold timer.
@@ -97,6 +101,8 @@ pub struct TakerGroup {
     pub a: (u8, u32),
     pub b: (u8, u32),
     pub held: bool,
+    /// Closed by its hold timer; no new opening until the cool-down timer fires.
+    pub cooling: bool,
     pub opens: u32,
     pub closes: u32,
 }
@@ -169,6 +175,7 @@ impl<P: TakerCfg> ProbeTakerT<P> {
                     a: (a.venue.0, a.inst.0),
                     b: (b.venue.0, b.inst.0),
                     held: keep && slot.held,
+                    cooling: keep && slot.cooling,
                     opens: if keep { slot.opens } else { 0 },
                     closes: if keep { slot.closes } else { 0 },
                 };
@@ -235,12 +242,7 @@ impl<P: TakerCfg> ProbeTakerT<P> {
         if ctx.place(it).is_err() {
             return;
         }
-        let now = v.now();
-        let at = now.tsc_of(
-            now.engine_ns
-                .saturating_add(i64::from(f.hold_ms).saturating_mul(1_000_000)),
-        );
-        let _ = ctx.timer_at(at, TAG_HOLD, gid);
+        self.arm_hold(gix, v, ctx);
         ctx.note(
             NOTE_OPENED,
             NoteLevel::Info,
@@ -254,12 +256,42 @@ impl<P: TakerCfg> ProbeTakerT<P> {
         }
     }
 
-    fn close(&mut self, gix: u16, ctx: &mut Ctx<'_>) {
-        let Some(g) = self.groups.get_mut(usize::from(gix)) else {
+    /// Arms the hold timer of `gix` `hold_ms` from now.
+    fn arm_hold<V: Views>(&self, gix: u16, v: &V, ctx: &mut Ctx<'_>) {
+        let Some(g) = self.groups.get(usize::from(gix)) else {
             return;
         };
-        if !g.held {
+        let now = v.now();
+        let hold = i64::from(self.p.cfg(gix).hold_ms);
+        let at = now.tsc_of(now.engine_ns.saturating_add(hold.saturating_mul(1_000_000)));
+        let _ = ctx.timer_at(at, TAG_HOLD, GroupId(g.id));
+    }
+
+    /// Hold timer: a held group is closed and cools down for another `hold_ms`; a cooling group
+    /// may open again on its next quote.
+    fn on_hold<V: Views>(&mut self, gix: u16, v: &V, ctx: &mut Ctx<'_>) {
+        let Some(g) = self.groups.get(usize::from(gix)).copied() else {
             return;
+        };
+        if g.cooling {
+            if let Some(g) = self.groups.get_mut(usize::from(gix)) {
+                g.cooling = false;
+            }
+        } else if g.held && self.close(gix, ctx) {
+            if let Some(g) = self.groups.get_mut(usize::from(gix)) {
+                g.cooling = true;
+            }
+            self.arm_hold(gix, v, ctx);
+        }
+    }
+
+    /// Sets the 0/0 exit target of a held group; `true` when it was accepted.
+    fn close(&mut self, gix: u16, ctx: &mut Ctx<'_>) -> bool {
+        let Some(g) = self.groups.get_mut(usize::from(gix)) else {
+            return false;
+        };
+        if !g.held {
+            return false;
         }
         let t = TargetIntent {
             account: self.inst.account,
@@ -283,7 +315,9 @@ impl<P: TakerCfg> ProbeTakerT<P> {
         if ctx.target(t).is_ok() {
             g.held = false;
             g.closes += 1;
+            return true;
         }
+        false
     }
 }
 
@@ -334,18 +368,25 @@ impl<P: TakerKind> Strategy for ProbeTakerT<P> {
                 if self
                     .groups
                     .get(usize::from(gix))
-                    .is_some_and(|g| g.id != 0 && !g.held)
+                    .is_some_and(|g| g.id != 0 && !g.held && !g.cooling)
                 {
                     self.open(gix, v, ctx);
                 }
             }
-            EventRef::Exec { gix, .. } if close_on & CLOSE_EXEC != 0 => self.close(gix, ctx),
-            EventRef::External { gix, .. } if close_on & CLOSE_EXTERNAL != 0 => self.close(gix, ctx),
+            EventRef::Exec { gix, .. } if close_on & CLOSE_EXEC != 0 => {
+                self.close(gix, ctx);
+            }
+            EventRef::External { gix, .. } if close_on & CLOSE_EXTERNAL != 0 => {
+                self.close(gix, ctx);
+            }
             EventRef::Risk { .. } if close_on & CLOSE_RISK != 0 => {
                 for gix in 0..self.n {
                     self.close(gix, ctx);
                 }
             }
+            EventRef::Timer {
+                tag: TAG_HOLD, gix, ..
+            } if close_on & CLOSE_HOLD != 0 => self.on_hold(gix, v, ctx),
             _ => {}
         }
     }
@@ -360,7 +401,8 @@ impl<P: TakerKind> Strategy for ProbeTakerT<P> {
         w.put_u16(self.n);
         for g in self.groups.iter().take(usize::from(self.n)) {
             w.put_u32(g.id);
-            w.put_u8(u8::from(g.held));
+            // bit 0 held, bit 1 cooling (one byte, the layout of version 1).
+            w.put_u8(u8::from(g.held) | u8::from(g.cooling) << 1);
             w.put_u32(g.opens);
             w.put_u32(g.closes);
         }
@@ -370,11 +412,12 @@ impl<P: TakerKind> Strategy for ProbeTakerT<P> {
         let n = r.get_u16()?;
         for g in self.groups.iter_mut().take(usize::from(n)) {
             let id = r.get_u32()?;
-            let held = r.get_u8()? != 0;
+            let state = r.get_u8()?;
             let opens = r.get_u32()?;
             let closes = r.get_u32()?;
             if g.id == id {
-                g.held = held;
+                g.held = state & 1 != 0;
+                g.cooling = state & 2 != 0;
                 g.opens = opens;
                 g.closes = closes;
             }

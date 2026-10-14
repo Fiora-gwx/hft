@@ -232,30 +232,43 @@ fn tk_101_observes_last_oms_slot() {
         .into_iter()
         .find(|s| s.name == "core")
         .expect("core suite");
-    let mut c = suite.config(0xbe41_3439_dca2_4fad);
-    c.steps = 780;
-    c.rerun = RerunPolicy::Never;
-    let r = run_record::<E>(&c);
-    assert!(r.outcome.is_pass(), "{}", show(&r));
-    assert_eq!(r.steps_run, c.steps);
-    // This prefix reaches the highest valid slot. A check on an empty table would miss the
-    // observer's old 0..capacity range, which silently omitted that slot.
-    assert!(r.obs.tables.iter().any(|t| {
-        r.obs
-            .slots
-            .iter()
-            .any(|s| s.venue == t.venue && s.account == t.account && s.slot == t.capacity)
-    }));
-    for t in &r.obs.tables {
-        let occupied: Vec<_> = r
-            .obs
-            .slots
-            .iter()
-            .filter(|s| s.venue == t.venue && s.account == t.account)
-            .collect();
-        assert_eq!(occupied.len() + t.free as usize, t.capacity as usize);
-        assert!(occupied.iter().all(|s| (1..=t.capacity).contains(&s.slot)));
+    // The first core seed (the 2026-10 seed first, then 1, 2, …) whose 780-step prefix ends with
+    // the highest valid slot occupied: a check on an empty table would miss the observer's old
+    // 0..capacity range, which silently omitted that slot. Tables of 4 slots make the last slot
+    // reachable at any trading pace. Every run checks every table.
+    let mut reached = None;
+    for seed in std::iter::once(0xbe41_3439_dca2_4fad).chain(1..=32) {
+        let mut c = suite.config(seed);
+        c.world.oms_slots = Some(4);
+        c.steps = 780;
+        c.rerun = RerunPolicy::Never;
+        let r = run_record::<E>(&c);
+        assert!(r.outcome.is_pass(), "seed {seed:#x}: {}", show(&r));
+        assert_eq!(r.steps_run, c.steps);
+        for t in &r.obs.tables {
+            let occupied: Vec<_> = r
+                .obs
+                .slots
+                .iter()
+                .filter(|s| s.venue == t.venue && s.account == t.account)
+                .collect();
+            assert_eq!(occupied.len() + t.free as usize, t.capacity as usize);
+            assert!(occupied.iter().all(|s| (1..=t.capacity).contains(&s.slot)));
+        }
+        if r.obs.tables.iter().any(|t| {
+            r.obs
+                .slots
+                .iter()
+                .any(|s| s.venue == t.venue && s.account == t.account && s.slot == t.capacity)
+        }) {
+            reached = Some(seed);
+            break;
+        }
     }
+    assert!(
+        reached.is_some(),
+        "TK-101: no core seed reached the highest OMS slot"
+    );
 }
 
 #[test]

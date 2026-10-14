@@ -421,6 +421,38 @@ impl<S: StrategySet> SeqSut<S> {
                     self.push_bytes(r, EventKind::MARGIN_REPORT, h.as_bytes().to_vec());
                 }
             }
+            // With `margin_feed` the session snapshot lists every base asset of the account's
+            // spot insts, zero included (as an account snapshot does), so the ledger's entry is
+            // initialised before trading instead of by a truth report taken while fills are
+            // still being delivered.
+            if self.world.margin_feed {
+                for i in self
+                    .world
+                    .insts
+                    .clone()
+                    .iter()
+                    .filter(|i| !i.perp && a.venues.contains(&i.venue))
+                {
+                    if a.balances
+                        .iter()
+                        .any(|(v, asset, _)| *v == i.venue && *asset == i.base)
+                    {
+                        continue;
+                    }
+                    let r = RingId::Rep(self.s().driver().io.venue_ix(i.venue));
+                    let br = BalanceReport {
+                        venue: i.venue,
+                        account: a.id,
+                        asset: i.base,
+                        _pad: 0,
+                        free: Qty(0),
+                        locked: Qty(0),
+                        ex_ts_ns: 0,
+                        rx_tsc: Tsc(t),
+                    };
+                    self.push(r, &br);
+                }
+            }
         }
     }
     /// Startup quotes: one neutral BBO for every inst (the widest bid/ask of the world on the

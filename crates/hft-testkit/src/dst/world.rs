@@ -266,10 +266,23 @@ pub struct WorldSpec {
     pub risk: RiskSpec,
     /// Optional fixture override, recorded in the engine configuration. None keeps the OMS default.
     pub oms_tombstone_keep_ms: Option<u32>,
+    /// Optional OMS slots per (account, venue) table; None keeps the DST default 64.
+    pub oms_slots: Option<u32>,
     /// Reserve Multi-record physical seq spans during execution for file replay fixtures.
     pub physical_journal: bool,
     /// Read committed journal Inputs through the real Advisor instead of synthetic advice.
     pub model_advice: bool,
+    /// Live margin data: every generated perpetual quote also publishes the mid as the mark price,
+    /// the startup account snapshot lists every spot base asset (zero included), and after each
+    /// engine restart and every 5 s the venues send their margin snapshot of every account (as a
+    /// gateway does after reconnecting and on its poll). Off = the world before 2026-10-14 (no marks), kept for
+    /// counterexamples recorded in it. Off in W1 until the engine failures it surfaces are fixed
+    /// ([`WorldSpec::w1_trading`]).
+    pub margin_feed: bool,
+    /// The takers exit on their hold timer and reopen after a cool-down (`close_on` bit 3), so a
+    /// run trades in cycles instead of holding its first position. Off in W1 for now: the cycles
+    /// expose engine failures still open (docs: hft-testkit README "DST 的世界模型").
+    pub taker_cycles: bool,
 }
 
 /// `VS`, `VP`, `VQ` (scenarios §2.2): Binance spot, OKX USDT swap, Bitget spot (fixed `VenueId`s).
@@ -403,9 +416,32 @@ impl WorldSpec {
                 unknown_blocks_open: true,
             },
             oms_tombstone_keep_ms: None,
+            oms_slots: None,
             physical_journal: false,
             model_advice: false,
+            margin_feed: false,
+            taker_cycles: false,
         }
+    }
+
+    /// W1 as before 2026-10-14 (no marks or restart margin snapshots, takers hold their first
+    /// position): the world of counterexamples recorded then (TK-121, TK-123, TK-127 …). Equal
+    /// to [`WorldSpec::w1`] while the live margin feed is opt-in.
+    pub fn w1_legacy() -> WorldSpec {
+        let mut w = WorldSpec::w1();
+        w.margin_feed = false;
+        w.taker_cycles = false;
+        w
+    }
+
+    /// W1 with live margin data (`margin_feed`) and, with `cycles`, cycling takers: a world that
+    /// trades through the whole run. Opt-in: over 594 runs of 10 000 steps it surfaces engine
+    /// failures still open (INV-1/6/8/14/19, hft-testkit README "DST 的世界模型").
+    pub fn w1_trading(cycles: bool) -> WorldSpec {
+        let mut w = WorldSpec::w1();
+        w.margin_feed = true;
+        w.taker_cycles = cycles;
+        w
     }
 
     /// W1-SIM: W1 with account `s` (`AccountKind::Sim`) instead of a and b.

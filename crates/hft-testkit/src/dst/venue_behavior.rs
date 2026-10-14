@@ -117,6 +117,11 @@ pub trait Matcher: Sized {
     fn on_bbo(&mut self, inst: InstId, bid: (i64, i64), ask: (i64, i64), now_ns: u64);
     /// A recorded mark price of `inst` (margin, liquidation); matchers without margin ignore it.
     fn on_mark(&mut self, _inst: InstId, _px: i64, _now_ns: u64) {}
+    /// The account's current margin on this venue as a `MarginReport` (perpetual venues only):
+    /// the snapshot a gateway fetches when the engine restarts.
+    fn margin_report(&self, _a: AccountId) -> Option<hft_event::MarginReportHdr> {
+        None
+    }
     fn on_command(&mut self, cmd: &GwCmd, now_ns: u64);
     /// Reports due at or before `now_ns`, in due order.
     fn drain_due(&mut self, now_ns: u64, out: &mut Vec<VenueOut>);
@@ -931,6 +936,42 @@ impl<M: Matcher> MockVenue<M> {
         };
         self.produced += 1;
         Some((now + lat, InputRec::of(&b, Source::Market)))
+    }
+
+    /// A generated mark price of a perpetual `inst`: the matcher always sees it (margin and
+    /// liquidation truth); the engine gets a `MarkPrice` on the market connection unless the md
+    /// connection is down or silent or the inst is quiet. Delivered after the minimum md latency
+    /// (no draw from the venue's stream, so the venue's other random choices are unchanged).
+    pub fn on_mark(&mut self, inst: InstId, px: i64, now: u64) -> Option<(u64, InputRec)> {
+        self.finish_partial(now);
+        self.m.on_mark(inst, px, now);
+        if now < self.md_down_until || self.quiet.get(&inst.0).is_some_and(|t| now < *t) {
+            return None;
+        }
+        let mut h: hft_event::MarketHdr = zerocopy::FromZeros::new_zeroed();
+        h.venue = self.cfg.venue;
+        h.conn = ConnId(0);
+        h.inst = inst;
+        h.ex_ts_ns = now as i64;
+        let m = hft_event::MarkPrice { h, px: Px(px) };
+        self.produced += 1;
+        Some((now + self.cfg.md_latency_ns.0, InputRec::of(&m, Source::Market)))
+    }
+
+    /// The gateway's margin snapshot of every account on a perpetual venue (the exchange truth):
+    /// after an engine restart and on the gateway's periodic poll, so the engine has fresh margin
+    /// data also for a flat account (whose venue pushes margin only with a position).
+    pub fn margin_snapshot(&mut self, now: u64) -> Vec<(u64, InputRec)> {
+        let src = self.src();
+        self.m
+            .accounts()
+            .into_iter()
+            .filter_map(|a| self.m.margin_report(a))
+            .map(|mut h| {
+                h.rx_tsc = Tsc(now + self.cfg.md_latency_ns.0);
+                (now + self.cfg.md_latency_ns.0, InputRec::of(&h, src))
+            })
+            .collect()
     }
 
     /// A frame from the engine: gw `SendReport`, behaviour layer, then the matcher.
