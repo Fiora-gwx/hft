@@ -300,7 +300,7 @@ UTA 文档目录有"Demo Trading"一节(官方,本地缓存的目录页),端点(
 | 入口 | p50 / p99 预算 | 基准名 |
 |---|---|---|
 | `classify` | ≤ 30 ns / ≤ 60 ns | `bench_classify_bitget` |
-| `decode_md` books1 → `Bbo` | ≤ 0.4 µs / ≤ 0.8 µs | `bench_decode_bitget_books1` |
+| `decode_md` books1 → `Bbo`(永续 / 现货) | ≤ 0.4 µs / ≤ 0.8 µs | `bench_decode_bitget_books1`、`bench_decode_bitget_books1/spot` |
 | `decode_md` books15 → `L2Snapshot{TopN}` | ≤ 1 µs / ≤ 2 µs | `bench_decode_bitget_books15` |
 | `decode_md` books 增量 1 KiB(增量深度,可选扩展) | ≤ 1.5 µs / ≤ 3 µs | `bench_decode_bitget_books` |
 | `encode` place-order | ≤ 0.3 µs / ≤ 0.6 µs | `bench_encode_bitget_place` |
@@ -308,6 +308,8 @@ UTA 文档目录有"Demo Trading"一节(官方,本地缓存的目录页),端点(
 | `acct_decode` 持仓列表 50 KiB | ≤ 60 µs / ≤ 100 µs | `bench_acct_decode_bitget` |
 
 `books1` 1 ms 节拍下每个 inst 最多 1000 条/s,feed 核余量按 [01 §3.2](../../design/01-总体架构.md) 的"每条 2–5 µs"估算仍 ≥ 90%。纯函数,热路径零分配零系统调用。
+
+`benches/md.rs` 使用 BGT-500/501 的合成 UTA 报文,计时范围为生产 `classify` 或 `decode_md` 调用;报文构造、refdata 加载和接收缓冲预分配不计时。Criterion 结果只作相对比较,参考机分位数门槛保持上表。
 
 ## 测试与验收
 
@@ -335,7 +337,7 @@ AccountProtocol 使用 UTA V3 instruments/settings/info/assets/current-position/
 ## 已知限制与后续工作
 
 - **无死手**:进程崩溃到 kill-switch 撤单之间有窗口(kill-switch 心跳检测周期决定)。
-- **未实现**(核实与模拟盘冒烟前不能通过上线门槛):账户配置核验与保证金轮询(`acct.rs`,hft-venue-proto 尚无 `acct_queries` 成员)、只读查询(`ro_request`)、BBO REST 补帧、`mock` 特性、金样(BGT-300–338)、fuzz 与基准。
+- **未实现**(核实与模拟盘冒烟前不能通过上线门槛):账户配置核验与保证金轮询(`acct.rs`,hft-venue-proto 尚无 `acct_queries` 成员)、只读查询(`ro_request`)、BBO REST 补帧、`mock` 特性、金样(BGT-300–338)、fuzz 与 BGT-502–505 基准。
 - **交易所侧死手未接**:官方 `POST /api/v3/trade/countdown-cancel-all`(5–60 s,需向商务申请开通)可作为 `CountdownAccount` 死手,开通后再接;当前仍靠 kill-switch。
 - **资金费实收**:`account` 频道在资金费结算时推送,但不带品种与金额明细,`funding_settle = RateOnly`;实际结算经[资金费实额](#资金费实额)查询。真实账户的账单延迟与 timestamp 相对结算网格的偏差待核实(方法:持仓跨结算采集)。
 - **保证金数据靠轮询**:5 s 周期;若核实账户频道推送保证金率,改为 `Push`。

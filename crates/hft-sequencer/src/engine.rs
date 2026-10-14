@@ -164,6 +164,8 @@ pub struct Engine {
     pub caps: CapacitiesRow,
     pub sp: SeqParamsRow,
     pub books: BookSet,
+    /// Inst ids with allocated L2 books, ascending; derived once from the assembled BookSet.
+    pub(crate) l2_insts: Vec<InstId>,
     pub oms: hft_oms::Oms,
     pub risk: Risk,
     pub ledger: Ledger,
@@ -469,6 +471,10 @@ impl Engine {
         };
         Ok(Engine {
             gpos: crate::views::GposCache::new(caps.max_cells_total as usize),
+            l2_insts: (1..=n_inst)
+                .map(|i| InstId(i as u32))
+                .filter(|i| books.l2(*i).is_some())
+                .collect(),
             rd,
             setup: setup.clone(),
             caps,

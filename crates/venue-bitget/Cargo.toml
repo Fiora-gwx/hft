@@ -32,6 +32,7 @@ base64 = "0.22"
 hft-venue-proto = { workspace = true, features = ["testkit"] }
 hft-testkit.workspace = true
 proptest.workspace = true
+criterion.workspace = true
 # Golden comparison only (README "依赖": never in [dependencies]).
 serde_json = "1"
 
@@ -42,3 +43,7 @@ path = "tests/alloc.rs"
 [[test]]
 name = "bitget"
 path = "tests/main.rs"
+
+[[bench]]
+name = "md"
+harness = false

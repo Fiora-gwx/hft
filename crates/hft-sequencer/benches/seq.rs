@@ -33,6 +33,8 @@ fn steady() -> H {
     reset_script();
     let mut h = b0().boot();
     h.steady();
+    // The test strategy's Debug formatting and event log are not production work.
+    SCRIPT.with(|s| s.borrow_mut().quiet = true);
     h
 }
 
@@ -294,6 +296,7 @@ fn seq_329_fill_to_hedge(c: &mut Criterion) {
                 reset_script();
                 let mut h = b0().boot();
                 h.steady();
+                SCRIPT.with(|s| s.borrow_mut().quiet = true);
                 let d = {
                     let m = h.mark();
                     add_hook(|hx, ev, ctx| {

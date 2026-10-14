@@ -67,20 +67,27 @@ impl Exec {
         }
         let n = self.cell_count();
         for sim in [false, true] {
-            for cix in 0..n {
-                if !Self::bit(&self.advancing, cix) {
-                    continue;
+            // Enumerate the pending bits in cix order. Inactive cells never need their
+            // account or state loaded, even when the configured table is mostly empty.
+            for word in 0..n.div_ceil(64) {
+                let mut bits = self.advancing.get(word).copied().unwrap_or(0);
+                while bits != 0 {
+                    let cix = word * 64 + bits.trailing_zeros() as usize;
+                    bits &= bits - 1;
+                    if cix >= n {
+                        break;
+                    }
+                    let k = self.acct_of_cix(cix);
+                    if self.accts.get(k).is_some_and(|a| a.sim) != sim {
+                        continue;
+                    }
+                    if !out.room_for_cell() {
+                        self.stop_for_capacity(out);
+                        return;
+                    }
+                    let forced = self.take_advancing(cix);
+                    self.step_cell(cix, forced, v, now, out);
                 }
-                let k = self.acct_of_cix(cix);
-                if self.accts.get(k).is_some_and(|a| a.sim) != sim {
-                    continue;
-                }
-                if !out.room_for_cell() {
-                    self.stop_for_capacity(out);
-                    return;
-                }
-                let forced = self.take_advancing(cix);
-                self.step_cell(cix, forced, v, now, out);
             }
         }
     }

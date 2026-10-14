@@ -213,7 +213,7 @@ impl<'a> DriverView<'a> {
         &self.e.sp
     }
     /// Insts with a Live L2 book.
-    pub fn live_books(&self) -> Vec<hft_types::InstId> {
+    pub fn live_books(&self) -> impl Iterator<Item = hft_types::InstId> + Clone + '_ {
         crate::snapshot::live_books(self.e)
     }
     /// The engine clock has been set in this run.
@@ -221,14 +221,11 @@ impl<'a> DriverView<'a> {
         self.e.clock.is_set() && self.e.boot_seq != 0
     }
     /// Next funding settle times of the subscribed venues (Roll avoidance window).
-    pub fn funding_times(&self) -> Vec<i64> {
-        let mut v = Vec::new();
-        for (ix, r) in self.e.market.rows.iter().enumerate() {
-            if ix != 0 && r.next_funding_ns != 0 && self.e.sent_union.get(ix).is_some_and(|u| *u != 0) {
-                v.push(r.next_funding_ns);
-            }
-        }
-        v
+    pub fn funding_times(&self) -> impl Iterator<Item = i64> + '_ {
+        self.e.market.rows.iter().enumerate().filter_map(|(ix, r)| {
+            (ix != 0 && r.next_funding_ns != 0 && self.e.sent_union.get(ix).is_some_and(|u| *u != 0))
+                .then_some(r.next_funding_ns)
+        })
     }
     pub fn tsc_hz_milli(&self) -> u64 {
         self.e.seg.tsc_hz_milli

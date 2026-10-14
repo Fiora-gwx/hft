@@ -434,7 +434,7 @@ pub(crate) fn build_snapshot<S: StrategySet>(
     crate::recover::derive_gate_caches(e);
     let sections = w.as_bytes();
     let n_books = if purpose == PURPOSE_BOOT || purpose == PURPOSE_RECOVERY {
-        live_books(e).len() as u32
+        live_books(e).count() as u32
     } else {
         0
     };
@@ -470,15 +470,12 @@ pub(crate) fn build_snapshot<S: StrategySet>(
 }
 
 /// Insts with a Live L2 book (ascending).
-pub(crate) fn live_books(e: &Engine) -> Vec<InstId> {
-    (1..=e.rd.inst_count())
-        .map(|i| InstId(i as u32))
-        .filter(|i| {
-            e.books
-                .l2(*i)
-                .is_some_and(|b| b.state() == hft_book::BookState::Live)
-        })
-        .collect()
+pub(crate) fn live_books(e: &Engine) -> impl Iterator<Item = InstId> + Clone + '_ {
+    e.l2_insts.iter().copied().filter(|i| {
+        e.books
+            .l2(*i)
+            .is_some_and(|b| b.state() == hft_book::BookState::Live)
+    })
 }
 
 /// A snapshot written within the current event (keyframe, on demand, Drain).
@@ -613,10 +610,7 @@ pub(crate) fn boot_block<D: Driver<S>, S: StrategySet>(
         b.extend_from_slice(content);
         cfg.push(b);
     }
-    let books: Vec<Vec<u8>> = live_books(e)
-        .iter()
-        .filter_map(|i| l2_keyframe_body(e, *i))
-        .collect();
+    let books: Vec<Vec<u8>> = live_books(e).filter_map(|i| l2_keyframe_body(e, i)).collect();
     {
         let j = drv.journal();
         let mut b = match j.roll(reason, &meta) {

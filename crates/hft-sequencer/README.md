@@ -378,6 +378,10 @@ g. rep-sim ≤ sim_max_per_round
 
 ### BBO 合并与 CONFLATED
 
+环境查询借用 funding 行与启动时建立的 L2 品种索引,不构造逐轮临时列表;资金费避让窗口只在整点滚动满足其他条件时扫描。feed 控制重试在原 staging 中压紧未发送的后缀,合成 RingFull 回报按值排队并复用输入槽。`taken_log` 仅在 `testing` 特性下记录。
+
+合并工作区在驱动构造时分配固定数量的 BBO 槽,待交出队列只保存槽下标;保留项复制到可复用输入槽,不转移或释放其缓冲。保留项按原批次最后一次出现的位置升序交出。
+
 仅对 `Bbo` 且仅在该 bbo 环积压 > `conflate_backlog` 时:驱动从该环一次取出 ≤ 32 条,同一 inst 的多条 `Bbo` 只保留最后一条并置记录头 `CONFLATED`,再逐条交出(逐条之间照常做环头检查与定时器中途检查);被丢弃的 `Bbo` 不进 seq journal(raw journal 里仍有原始帧)、不对任何状态可见,丢弃计数经 `Timer{ConflateReport}` 输出。深度与成交从不合并。
 
 ### 引擎时间(engine_ns)
@@ -593,6 +597,8 @@ Model 从检查点恢复、镜像尚未追到其 `last_seq` 时,落后量以该�
 `drv.emit` 失败时,驱动构造一条**合成 Input** `SendReport{status = RingFull}` 作为下一条交出(像其他 Input 一样被记录),OMS 据此把槽迁到 `Rejected(LOCAL_SEND_FAIL)`。该路径只应在 gw 线程停摆时出现,并伴随 P0 告警。`feedctl-*` 环满时不合成任何 Input(`FeedCmd` 不是 journal 记录,不影响状态):`LiveDriver` 把推不进的 `FeedCmd` 按 (venue, inst) 合并暂存(同一 inst 只留最新一条,容量 = `max_insts`),每轮开头先按原顺序续推,所以启动时每个订阅 inst 各一条 `Subscribe` 的突发不受 `feedctl` 环容量限制。
 
 ### inst → 策略的稠密索引
+
+快速行情投递借用 CSR 行并按实例过滤,不为每个订阅者复制临时 Vec;实例顺序与行内 gix 顺序保持不变。
 
 订阅 inst 在首次订阅时得到稠密下标 `sub_ix`(`InstId → sub_ix` 映射按 refdata 宇宙预分配,u16;下标进程生命周期内不回收)。CSR:`sub_off: [u32; max_insts + 1]`、`sub_ent: [(instance_ix: u16, gix: u16); max_insts × max_subs_per_inst]`;行情事件经 `sub_ix` 直接下标,行内顺序按 `(dispatch_order 中的位置, gix)` 升序——先实盘实例、后模拟实例(确定)。由各实例 `subscriptions()` 在启动与 `SetParams` 改变订阅时原地重建(命令路径,O(总订阅数),不分配)。**行情订阅随之下发**:重建时对每个 inst 求全部实例(快速部分与 Model)订阅的 SDK `EvMask` 之并,再并上**引擎自身的订阅**(持仓驱动):① 任一已绑定 GroupSpec 的交易腿含 `BBO`,永续交易腿另含 `MARK` 与 `FUNDING`;② 本实例账户中 `InstPos.qty ≠ 0` 的永续 inst 含 `BBO`、`MARK`、`FUNDING`,有现货库存(现货 `InstPos.qty ≠ 0`)的 inst 含 `BBO`——含核销、外来成交与人工交易留下的账户级无 group 持仓;③ EngineConfig 段 2 的每个 `ref_inst` 含 `BBO`。ledger 的保证金、未实现与换算率、资金费合成、MarginStress 与 L3 依赖它们;只为引擎订阅、策略未订阅的事件不投递给策略。并集在启动与 `SetParams` 改变订阅时重算,ledger 使某 (account, inst) 的 `InstPos.qty` 在 0 与非 0 之间变化时在同一 Input 内重算该 inst;只由 ②③ 引入的 inst 同样占 `sub_ix`(CSR 行为空),`max_insts` 用尽时该 inst 不订阅(永续持仓因此没有标记价,hft-risk 按标记价断流至少 L1 并告警)。与上次下发的值不同时出环一条 `FeedCmd::Subscribe{inst, streams = 新并集}`(首次订阅与并集变化都重发;并集变为空 → `Unsubscribe{inst}`;字段归 [hft-event](../hft-event/README.md#环元素类型),按位分发到 feed-bbo/feed-md 的规则归 [hft-venue](../hft-venue/README.md));上次下发的并集不进快照(只在本次运行有效),启动时每个并集非空的 inst 各发一次。group 级事件用 `group → (instance_ix, gix)` 的同构索引。
 
@@ -882,6 +888,8 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 - 检查点文件编解码只在冷路径调用;`decode` 零分配、O(文件长),`encode` 分配一份文件大小的缓冲。两者均受调用方的体长上限约束,不计入 sequencer 热路径或 advisor 分块写入的预算。
 
 ## 测试与验收
+
+`benches/seq.rs` 使用 B0、TestIo 的内存队列与 MemJournal,关闭测试策略的 Debug 格式化和事件字符串日志。计时包含处理后的空闲轮与测试接收器开销;Criterion 只作同夹具的相对比较,不替代生产环/RAM journal 上的逐事件分位数验收。
 
 用例与验收见 [TESTS.md](TESTS.md)。
 

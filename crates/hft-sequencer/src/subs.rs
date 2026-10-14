@@ -74,19 +74,11 @@ impl SubIndex {
         Some(x)
     }
     /// Fast entries `(gix, mask)` of one instance on an inst, in gix order.
-    pub fn fast_entries(&self, i: InstId, inst_ix: u16) -> Vec<(u16, EvMask)> {
-        let Some(x) = self.ix_of(i) else {
-            return Vec::new();
-        };
-        let a = self.off.get(usize::from(x)).copied().unwrap_or(0) as usize;
-        let b = self.off.get(usize::from(x) + 1).copied().unwrap_or(0) as usize;
-        self.ent
-            .get(a..b)
-            .unwrap_or(&[])
+    pub fn fast_entries(&self, i: InstId, inst_ix: u16) -> impl Iterator<Item = (u16, EvMask)> + '_ {
+        self.row(i)
             .iter()
-            .filter(|e| e.0 == inst_ix)
+            .filter(move |e| e.0 == inst_ix)
             .map(|e| (e.1, e.2))
-            .collect()
     }
     /// Fast CSR row of an inst.
     pub fn row(&self, i: InstId) -> &[(u16, u16, EvMask)] {

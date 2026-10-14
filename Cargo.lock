@@ -2371,6 +2371,7 @@ name = "venue-bitget"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "criterion",
  "hft-event",
  "hft-refdata",
  "hft-testkit",

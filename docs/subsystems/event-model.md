@@ -21,6 +21,8 @@ pub struct RecordHeader {
 
 ## 时间戳语义
 
+BBO 合并的保留顺序、CONFLATED 与缓冲复用规则归 [sequencer](../../crates/hft-sequencer/README.md#bbo-合并与-conflated);缓冲下标不进入事件或快照。
+
 | 字段 | 含义 | 来源 | 单位 |
 |---|---|---|---|
 | `ex_ts_ns` | 交易所事件时间(撮合/成交时间,如 Binance `T`) | 报文 | ns(交易所精度多为 ms/µs) |

@@ -12,6 +12,11 @@ p50_ns = 60
 p99_ns = 150
 allocs = 0
 
+["exec_step/hold/1024_cells"]
+p50_ns = 60
+p99_ns = 150
+allocs = 0
+
 ["exec_step/slice_pair"]
 p50_ns = 300
 p99_ns = 800
