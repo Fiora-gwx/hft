@@ -309,6 +309,9 @@ drain_timeout_ms = 3000
 [journal]
 segment_bytes = 8388608
 hot_keep = 2
+[clock]
+step_threshold_ns = 50000
+interval_ms = 1000
 [rings]
 elements = 1024
 bytes = 1048576
@@ -316,6 +319,7 @@ bytes = 1048576
 protocol = 'binance-spot'
 id = {}
 max_sub_insts = 1
+stale_guard_ms = 1500
 [sim]
 seed = 123
 entry_us = 100

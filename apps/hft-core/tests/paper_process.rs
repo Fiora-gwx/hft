@@ -52,8 +52,19 @@ fn core_048_sim_instance_boots_without_keys() {
         },
     );
     let preview = ctl.preview(&req).unwrap();
+    assert_eq!(
+        preview.code,
+        Some(ResultCode::Applied),
+        "preview={preview:?}; {}",
+        diagnostic(&path, d.path())
+    );
     let result = ctl.confirm(&req, preview.ctl_state_version).unwrap();
-    assert_eq!(result.code, Some(ResultCode::Applied), "{result:?}");
+    assert_eq!(
+        result.code,
+        Some(ResultCode::Applied),
+        "{result:?}; {}",
+        diagnostic(&path, d.path())
+    );
     let mut reader = hft_core::storage::reader(&hft_core::config::load(&path, true).unwrap().cfg).unwrap();
     let mut placed = false;
     let mut ack = false;
@@ -110,4 +121,25 @@ fn core_048_sim_instance_boots_without_keys() {
         Some(4),
         "restart must not discard account state"
     );
+}
+
+fn diagnostic(config: &std::path::Path, dir: &std::path::Path) -> String {
+    let mut kinds = std::collections::BTreeMap::<u16, usize>::new();
+    let c = hft_core::config::load(config, true).unwrap();
+    let mut reader = hft_core::storage::reader(&c.cfg).unwrap();
+    let mut tail = String::new();
+    for _ in 0..10000 {
+        match reader.poll() {
+            hft_journal::Next::Record(r) => *kinds.entry(r.hdr.kind).or_default() += 1,
+            hft_journal::Next::Event(e) => *kinds.entry(e.kind.0).or_default() += 1,
+            other => {
+                tail = format!("{other:?}");
+                break;
+            }
+        }
+    }
+    format!(
+        "journal={kinds:?} tail={tail}; {}",
+        std::fs::read_to_string(dir.join("stderr")).unwrap()
+    )
 }

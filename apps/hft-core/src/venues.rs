@@ -47,6 +47,7 @@ impl VenueTasks {
 #[allow(clippy::too_many_arguments)]
 pub fn assemble(
     c: &Config,
+    setup: &hft_sequencer::EngineSetup,
     name: &str,
     v: &Venue,
     rd: &'static RefData,
@@ -60,6 +61,7 @@ pub fn assemble(
     match v.protocol.as_str() {
         "binance-usdm" => build::<venue_binance::Usdm>(
             c,
+            setup,
             name,
             v,
             rd,
@@ -71,9 +73,11 @@ pub fn assemble(
             commands,
             venue_binance::FeedCtx::USDM,
             || venue_binance::GwCtx,
+            SignAlg::Ed25519,
         ),
         "binance-spot" => build::<venue_binance::Spot>(
             c,
+            setup,
             name,
             v,
             rd,
@@ -85,6 +89,41 @@ pub fn assemble(
             commands,
             venue_binance::FeedCtx::SPOT,
             || venue_binance::GwCtx,
+            SignAlg::Ed25519,
+        ),
+        #[cfg(feature = "bitget")]
+        "bitget-usdt-futures" => build::<venue_bitget::BitgetUsdtFutures>(
+            c,
+            setup,
+            name,
+            v,
+            rd,
+            clock,
+            epoch,
+            bbo,
+            md,
+            bulk,
+            commands,
+            venue_bitget::FeedCtx::new(),
+            venue_bitget::GwCtx::default,
+            SignAlg::HmacSha256,
+        ),
+        #[cfg(feature = "bitget")]
+        "bitget-spot" => build::<venue_bitget::BitgetSpot>(
+            c,
+            setup,
+            name,
+            v,
+            rd,
+            clock,
+            epoch,
+            bbo,
+            md,
+            bulk,
+            commands,
+            venue_bitget::FeedCtx::new(),
+            venue_bitget::GwCtx::default,
+            SignAlg::HmacSha256,
         ),
         _ => Err(Error::config("VenueNotBuilt", &v.protocol)),
     }
@@ -113,7 +152,12 @@ fn endpoint(rd: &RefData, venue: VenueId, role: EndpointRole) -> Result<Endpoint
     })
 }
 
-fn credential(key: &std::path::Path, secret: &std::path::Path, alg: SignAlg) -> Result<Credential, Error> {
+fn credential(
+    key: &std::path::Path,
+    secret: &std::path::Path,
+    passphrase: Option<&std::path::Path>,
+    alg: SignAlg,
+) -> Result<Credential, Error> {
     use std::io::Read;
     use zeroize::Zeroizing;
     fn read(path: &std::path::Path, max: usize) -> Result<Zeroizing<Vec<u8>>, Error> {
@@ -128,6 +172,7 @@ fn credential(key: &std::path::Path, secret: &std::path::Path, alg: SignAlg) -> 
     }
     let key = read(key, 128)?;
     let secret = read(secret, 256)?;
+    let passphrase = passphrase.map(|p| read(p, 64)).transpose()?;
     let key = key.trim_ascii();
     let secret = if alg == SignAlg::Ed25519 {
         secret.as_slice()
@@ -150,13 +195,15 @@ fn credential(key: &std::path::Path, secret: &std::path::Path, alg: SignAlg) -> 
             ArrayBuf::from_bytes(secret).ok_or_else(|| Error::config("CredentialShape", "secret length"))?,
         ),
         alg,
-        ..Credential::default()
+        passphrase: ArrayBuf::from_bytes(passphrase.as_ref().map_or(&[], |p| p.trim_ascii()))
+            .ok_or_else(|| Error::config("CredentialShape", "passphrase length"))?,
     })
 }
 
 #[allow(clippy::too_many_arguments)]
 fn build<P: VenueProtocol + Send>(
     c: &Config,
+    setup: &hft_sequencer::EngineSetup,
     name: &str,
     v: &Venue,
     rd: &'static RefData,
@@ -168,6 +215,7 @@ fn build<P: VenueProtocol + Send>(
     commands: Consumer<FeedCmd>,
     ctx: P::FeedCtx,
     gw_ctx: fn() -> P::GwCtx,
+    session_alg: SignAlg,
 ) -> Result<(VenueTasks, Option<io::GatewayInput>, Vec<storage::Side>), Error>
 where
     P::FeedCtx: Send,
@@ -176,7 +224,7 @@ where
 {
     let venue = VenueCfg {
         env: VenueEnv::Testnet,
-        stale_guard_ms: 1500,
+        stale_guard_ms: v.stale_guard_ms,
     };
     let mut net = hft_net::NetConfig::default();
     let ip = v.src_ip.ok_or_else(|| Error::config("SourceBind", name))?;
@@ -218,13 +266,24 @@ where
     }
     let mut gwcfg = GwCfg {
         env: VenueEnv::Testnet,
+        oms_slots: v
+            .accounts
+            .iter()
+            .map(|k| setup.oms.slots.get(P::VENUE, AccountId(k.account)))
+            .max()
+            .unwrap_or(1),
         ..GwCfg::default()
     };
     let mut accounts = Vec::new();
     let mut creds = Vec::new();
     for k in &v.accounts {
         let a = AccountId(k.account);
-        let rest = credential(&k.rest_api_key_path, &k.rest_secret_path, SignAlg::HmacSha256)?;
+        let rest = credential(
+            &k.rest_api_key_path,
+            &k.rest_secret_path,
+            k.passphrase_path.as_deref(),
+            SignAlg::HmacSha256,
+        )?;
         let tpl = P::build_templates(&venue, rd, a, &rest)
             .map_err(|_| Error::config("Templates", "cannot build account templates"))?;
         accounts.push(GwAccountSpec::<P> {
@@ -235,7 +294,12 @@ where
         });
         creds.push((
             a,
-            credential(&k.api_key_path, &k.session_seed_path, SignAlg::Ed25519)?,
+            credential(
+                &k.api_key_path,
+                &k.session_seed_path,
+                k.passphrase_path.as_deref(),
+                session_alg,
+            )?,
         ));
     }
     if !accounts.is_empty() {
@@ -446,10 +510,15 @@ pub fn registered(protocol: &str, id: VenueId) -> Result<(), Error> {
     let expected = match protocol {
         "binance-usdm" => VenueId::BINANCE_USDM,
         "binance-spot" => VenueId::BINANCE_SPOT,
+        #[cfg(feature = "bitget")]
+        "bitget-usdt-futures" => VenueId::BITGET_UTA_USDT_FUT,
+        #[cfg(feature = "bitget")]
+        "bitget-spot" => VenueId::BITGET_UTA_SPOT,
+        #[cfg(not(feature = "bitget"))]
         "bitget-usdt-futures" | "bitget-spot" => {
             return Err(Error::config(
                 "VenueNotBuilt",
-                "Bitget registration reserved; requires venue-bitget from m3-bitget",
+                "Bitget requires the bitget Cargo feature",
             ));
         }
         _ => return Err(Error::config("UnknownVenue", protocol)),

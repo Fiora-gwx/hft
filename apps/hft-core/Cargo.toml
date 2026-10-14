@@ -6,6 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+default = []
+bitget = ["dep:venue-bitget"]
+
 [dependencies]
 hft-types.workspace = true
 hft-event.workspace = true
@@ -22,6 +26,7 @@ hft-net.workspace = true
 hft-venue.workspace = true
 hft-venue-proto.workspace = true
 venue-binance.workspace = true
+venue-bitget = { workspace = true, optional = true }
 serde = { version = "1", features = ["derive"] }
 toml.workspace = true
 # Cold configuration hashing also runs in Windows --check; no assembly toolchain needed.

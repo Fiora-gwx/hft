@@ -72,8 +72,18 @@ fn core_045_rejects_live_accounts_in_paper_and_unbuilt_venues() {
         hft_core::config::load(&path, true)
             .unwrap_err()
             .iter()
-            .any(|e| e.code == "VenueNotBuilt")
+            .any(|e| e.code
+                == if cfg!(feature = "bitget") {
+                    "UnknownVenue"
+                } else {
+                    "VenueNotBuilt"
+                })
     );
+    #[cfg(feature = "bitget")]
+    {
+        hft_core::venues::registered("bitget-spot", hft_types::VenueId::BITGET_UTA_SPOT).unwrap();
+        hft_core::venues::registered("bitget-usdt-futures", hft_types::VenueId::BITGET_UTA_USDT_FUT).unwrap();
+    }
 }
 #[test]
 fn core_002_version_lists_registry() {
@@ -105,4 +115,11 @@ fn core_012_atomic_control_batch_has_no_partial_publication() {
     let oversized = vec![(EventKind::NOTE, RecordFlags(0), vec![0; 262144])];
     assert!(!tx.write_all(&oversized));
     assert!(!rx.pending());
+    assert!(hft_core::io::write_record(
+        &mut tx.0,
+        EventKind::SEND_REPORT,
+        &[&[0; 96]]
+    ));
+    assert!(rx.pop(hft_types::Tsc(2), &mut slot));
+    assert_eq!(slot.kind, EventKind::SEND_REPORT);
 }

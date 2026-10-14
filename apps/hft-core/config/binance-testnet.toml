@@ -16,6 +16,9 @@ drain_timeout_ms = 30000
 [journal]
 segment_bytes = 16777216
 hot_keep = 2
+[clock]
+step_threshold_ns = 50000
+interval_ms = 1000
 [rings]
 elements = 4096
 bytes = 1048576
@@ -23,6 +26,7 @@ bytes = 1048576
 protocol = "binance-usdm"
 id = 2
 max_sub_insts = 1
+stale_guard_ms = 1500
 src_ip = "192.0.2.10"
 bind_device = "eth0"
 [[venues.futures.accounts]]

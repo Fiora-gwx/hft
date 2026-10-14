@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-进程直接装配 registry、sequencer、SPSC、journal、ctl 与泛型 venue runtime。离线模式用已有 SimExchange 和固定行情，仍经过正式策略、风控、OMS 与控制命令路径。真实账户的身份与账户闸门保留；不合成成功的交易所报告。Bitget 使用保留注册名，未知或未编译协议加载失败。
+进程直接装配 registry、sequencer、SPSC、journal、ctl 与泛型 venue runtime。离线模式用已有 SimExchange 和固定行情，仍经过正式策略、风控、OMS 与控制命令路径。真实账户的身份与账户闸门保留；不合成成功的交易所报告。Bitget 使用可选 feature 注册，未知或未编译协议加载失败。
 
 已有 journal 一律拒绝按空状态启动，直到恢复装配完成。线程停止后消耗 venue runtime 的所有权封 raw 段，persister 最后退出；这需要两个公开冷路径方法，未改变库的交易语义。文件路径式秘密来源仅用于当前开发/测试网入口，遵循本次负责人明确要求。
 

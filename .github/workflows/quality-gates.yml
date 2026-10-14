@@ -178,6 +178,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           cargo xtask fixtures check
+          cargo build -p hft-core --bin hft-core
           cargo xtask gen-schema --check
       - name: cargo xtask test-trace (report-only)
         # docs/tests/README.md §6: unimplemented/extra/inconsistent are reported, never fail; only

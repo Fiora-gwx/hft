@@ -689,6 +689,7 @@ dependencies = [
  "tempfile",
  "toml 0.8.23",
  "venue-binance",
+ "venue-bitget",
  "zerocopy",
  "zeroize",
 ]

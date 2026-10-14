@@ -20,6 +20,7 @@ pub struct Config {
     pub blobs: Blobs,
     pub shutdown: Shutdown,
     pub journal: Journal,
+    pub clock: Clock,
     pub threads: Vec<Thread>,
     pub venues: BTreeMap<String, Venue>,
     pub rings: Rings,
@@ -66,6 +67,12 @@ pub struct Journal {
     pub segment_bytes: u64,
     pub hot_keep: u8,
 }
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Clock {
+    pub step_threshold_ns: u32,
+    pub interval_ms: u32,
+}
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Thread {
@@ -86,6 +93,7 @@ pub struct Venue {
     pub protocol: String,
     pub id: u8,
     pub max_sub_insts: u32,
+    pub stale_guard_ms: u32,
     pub src_ip: Option<std::net::Ipv4Addr>,
     pub bind_device: Option<String>,
     #[serde(default)]
@@ -97,9 +105,11 @@ pub struct Venue {
 pub struct Keys {
     pub account: u8,
     pub api_key_path: PathBuf,
+    #[serde(alias = "session_secret_path")]
     pub session_seed_path: PathBuf,
     pub rest_api_key_path: PathBuf,
     pub rest_secret_path: PathBuf,
+    pub passphrase_path: Option<PathBuf>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -193,6 +203,9 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
             ] {
                 resolve(root, p);
             }
+            if let Some(p) = &mut k.passphrase_path {
+                resolve(root, p);
+            }
         }
     }
     let mut errors = Vec::new();
@@ -204,6 +217,9 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
     }
     if c.schema != 1 {
         bad!("BadValue", "schema must be 1".into());
+    }
+    if c.clock.step_threshold_ns == 0 || c.clock.interval_ms == 0 {
+        bad!("BadValue", "clock threshold and interval must be positive".into());
     }
     if c.instance.config_source != "file" {
         bad!(
@@ -268,7 +284,7 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
         if let Err(e) = crate::venues::registered(&v.protocol, VenueId(v.id)) {
             errors.push(e);
         }
-        if v.max_sub_insts == 0 {
+        if v.max_sub_insts == 0 || v.stale_guard_ms == 0 {
             errors.push(Error::config("SubCapacity", name));
         }
         if dry && !v.accounts.is_empty() {
@@ -296,7 +312,9 @@ pub fn load(path: &Path, dry: bool) -> Result<Loaded, Vec<Error>> {
             for k in &v.accounts {
                 if k.api_key_path.as_os_str().is_empty()
                     || k.session_seed_path.as_os_str().is_empty()
+                    || k.rest_api_key_path.as_os_str().is_empty()
                     || k.rest_secret_path.as_os_str().is_empty()
+                    || (v.protocol.starts_with("bitget-") && k.passphrase_path.is_none())
                 {
                     errors.push(Error::config("MissingCredential", name));
                 }

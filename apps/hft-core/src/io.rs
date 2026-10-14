@@ -5,7 +5,7 @@ use hft_rt::{ByteConsumer, ByteProducer, Consumer, KillWord, MailReceiver, MailS
 use hft_sequencer::driver::{LiveIo, RingId, RollInfo};
 use hft_sequencer::{InputSlot, JournalSink, OutRing, ParsedConfig};
 use hft_types::{InstId, KillBits, Tsc, VenueId};
-use zerocopy::{FromZeros, IntoBytes};
+use zerocopy::{FromBytes, FromZeros, IntoBytes};
 
 /// A complete ctl request (audit + blob chunks + command) occupies one byte-ring reservation.
 #[derive(Debug)]
@@ -58,13 +58,11 @@ impl Inputs {
         self.ring.has_data()
     }
     pub fn peek_len(&mut self) -> Option<usize> {
-        CtlRecord::read(self.ring.peek()?.get(self.offset..)?)
-            .ok()
-            .map(|r| r.body.len())
+        frame(self.ring.peek()?.get(self.offset..)?).map(|r| r.body.len())
     }
     pub fn pop(&mut self, now: Tsc, out: &mut InputSlot) -> bool {
         let Some(buf) = self.ring.peek() else { return false };
-        let Ok(r) = CtlRecord::read(&buf[self.offset..]) else {
+        let Some(r) = frame(&buf[self.offset..]) else {
             return false;
         };
         out.set_bytes(r.kind, r.flags, now, r.body);
@@ -75,6 +73,18 @@ impl Inputs {
         }
         true
     }
+}
+// Both ctl batches and simulated replies use this framing. CtlRecord::read intentionally
+// accepts only ctl input kinds, so it cannot decode OrderEvent/SendReport from sim-gw.
+fn frame(bytes: &[u8]) -> Option<CtlRecord<'_>> {
+    let (h, rest) = CtlRecordHdr::read_from_prefix(bytes).ok()?;
+    let body = rest.get(..h.len as usize)?;
+    let r = CtlRecord {
+        kind: h.kind,
+        flags: RecordFlags(h.flags),
+        body,
+    };
+    (bytes.len() >= r.encoded_len()).then_some(r)
 }
 pub fn write_record(tx: &mut ByteProducer, kind: EventKind, pieces: &[&[u8]]) -> bool {
     let len: usize = pieces.iter().map(|p| p.len()).sum();

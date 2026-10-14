@@ -118,6 +118,17 @@ pub fn run(l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, Error> 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, Error> {
     let c = &l.cfg;
+    if c.paths
+        .ctl_socket
+        .try_exists()
+        .map_err(|_| Error::runtime("CtlSocket", "cannot inspect socket path", 3))?
+    {
+        return Err(Error::runtime(
+            "InstanceBusy",
+            "ctl socket already exists; verify its owner before removing it",
+            3,
+        ));
+    }
     let clock = TscClock::calibrate(&hft_rt::CalibConfig::default())
         .map_err(|e| Error::runtime("Clock", format!("{e:?}"), 3))?;
     // A partial recovery implementation must never silently reset account/OMS state.
@@ -227,8 +238,9 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
             });
             let _ = (md_tx, bulk_tx);
         } else {
-            let vtask =
-                crate::venues::assemble(c, name, v, rd, clock, epoch, bbo_tx, md_tx, bulk_tx, feed_rx)?;
+            let vtask = crate::venues::assemble(
+                c, &l.setup, name, v, rd, clock, epoch, bbo_tx, md_tx, bulk_tx, feed_rx,
+            )?;
             let (task, gw, js) = vtask;
             venue_tasks.push(task);
             if let Some(g) = gw {
@@ -427,8 +439,10 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
         }
     }
     let mut hk = hk_tx;
+    let threshold = c.clock.step_threshold_ns;
+    let interval = Duration::from_millis(u64::from(c.clock.interval_ms));
     workers.spawn(policy(c, "housekeeping")?, move |stop, t| {
-        let mut tracker = hft_rt::DriftTracker::new(50_000);
+        let mut tracker = hft_rt::DriftTracker::new(threshold);
         let mut last = None;
         let mut next = Instant::now();
         while !stop.load(Ordering::Acquire) {
@@ -455,7 +469,7 @@ fn run_linux(mut l: Loaded, dry: bool, duration_ms: Option<u64>) -> Result<u8, E
                     last = Some(good);
                 }
                 eprintln!("hft-core: heartbeat={} clock_synced={good}", hb.read());
-                next += Duration::from_secs(1);
+                next += interval;
             }
             idle(&t);
         }

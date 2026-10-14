@@ -790,3 +790,13 @@ struct LegDef 16
   6 _pad pad:2
   8 route u32
   12 _pad2 pad:4
+strategy 5 latency-probe
+  note 1 ProbeFilled
+  note 2 ProbeRejected
+  note 3 ProbeGated
+  note 4 PairNoFill
+  note 5 Skipped
+  note 6 FlattenIncomplete
+  note 7 ProbeHalted
+  note 8 TargetStuck
+  note 9 TargetRejected
