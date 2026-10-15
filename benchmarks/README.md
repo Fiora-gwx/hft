@@ -469,11 +469,11 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 
 ## 延伸阅读
 
-
 - [Windows 开发机热点测量与前后对照(2026-10-15)](reports/2026-10-15-windows-hotpath.md)(诊断报告,非参考机验收)
 - [latency-budget.md](../docs/latency-budget.md)、[testing.md](../docs/testing.md)、[hot-path-rules.md](../docs/hot-path-rules.md)
 - [architecture-v2/00](../design/00-目标与延迟预算.md)、[03 §7](../design/03-网络与传输层.md)、[09 §2](../design/09-可观测性、风控与控制面.md)、[10 §5](../design/10-语言分工与代码组织.md)、[11 实施路线图](../design/11-实施路线图.md)(M1.5 延迟探针)、[research/04 §7](../design/research/04-oss-frameworks-and-patterns.md)
 - DSH 样例:`architecture-v2/research/_dsh/benchmarks_AGENTS.md`
+- [Wire 轮询审查与测量](reports/2026-10-15-wire-io.md)（Windows 共享主机诊断）
 - [round8-decisions](../design/_work/round8-decisions.md)(延迟验收与 CI 只用免费托管 runner 的决定)
 
 ## 已知限制与后续工作
@@ -493,4 +493,3 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 - 实现顺序:`seq-decide`(最早可跑,纯回放驱动)→ `startup-cold` → `gw-ingest/poll-cadence`(M1.5 前,gw 收包方式的依据)→ `seq/l2burst`(M2)→ `feed-ingest` → `gw-egress` → `leg-link`;冒烟模式随第一个基准一起做;`tick-to-trade/*` 等 mock-exchange 解冻。
 
 </details>
-- [Wire 轮询审查与测量](reports/2026-10-15-wire-io.md)（Windows 共享主机诊断）
