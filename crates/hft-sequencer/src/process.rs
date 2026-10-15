@@ -57,7 +57,10 @@ pub(crate) fn process_parts<D: Driver<S>, S: StrategySet>(
             0
         },
         kind_inst: u64::from(slot.kind.0),
-        venue_conn: if (0x100..0x300).contains(&slot.kind.0) {
+        venue_conn: if slot.kind == EventKind::SEND_REPORT {
+            crate::types::read_body::<SendReport>(slot.body())
+                .map_or(0, |r| u64::from(r.venue.0) | (u64::from(r.conn.0) << 8))
+        } else if (0x100..0x300).contains(&slot.kind.0) {
             slot.body().first().map_or(0, |v| u64::from(*v))
         } else {
             0
