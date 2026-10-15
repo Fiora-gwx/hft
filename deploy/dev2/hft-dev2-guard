@@ -3,7 +3,10 @@
 import argparse
 import datetime
 import os
+import sys
 import time
+
+sys.dont_write_bytecode = True
 from guard import Effects, Guard, Sampler, load_config
 
 

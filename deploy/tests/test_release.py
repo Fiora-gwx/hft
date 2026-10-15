@@ -377,6 +377,19 @@ def dep_235_common_items(tmp_path, monkeypatch):
     assert not preflight.check(host)["host-profile"]
 
 
+def dep_235_lifecycle_entrypoints_preserve_release(tmp_path):
+    import shutil
+    for n, entry in enumerate(("dev2/hft-window", "dev2/hft-dev2-guard", "bin/hft-shm-release")):
+        scripts = tmp_path / str(n) / "deploy"
+        shutil.copytree(Path(__file__).parents[1], scripts, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        before = {str(p.relative_to(scripts)): p.read_bytes() for p in scripts.rglob("*") if p.is_file()}
+        env = {k: v for k, v in os.environ.items() if k not in ("PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX")}
+        result = subprocess.run([sys.executable, str(scripts / entry), "--help"], env=env, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        after = {str(p.relative_to(scripts)): p.read_bytes() for p in scripts.rglob("*") if p.is_file()}
+        assert after == before, "lifecycle entrypoint import polluted the immutable release: " + entry
+
+
 def dep_237_dev2_items(tmp_path, monkeypatch):
     preflight, host = preflight_host(tmp_path, monkeypatch)
     host.compilers = {"gcc", "cc"}
