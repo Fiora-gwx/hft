@@ -1591,10 +1591,11 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             return;
         }
         self.batch.clear();
-        while self.batch.len() < room {
-            let Some(c) = self.cmds.try_pop() else { break };
-            self.batch.push(c);
-        }
+        let pending = self.cmds.read_batch(room);
+        let (first, second) = pending.slices();
+        self.batch.extend_from_slice(first);
+        self.batch.extend_from_slice(second);
+        pending.release();
         if self.batch.is_empty() {
             return;
         }

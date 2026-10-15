@@ -198,6 +198,12 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 | `net_ready_probe` | hft-net | [hft-net 延迟与资源契约](../crates/hft-net/README.md#延迟与资源契约) | NET-325 |
 | `net_rss_pick` | hft-net | [hft-net 延迟与资源契约](../crates/hft-net/README.md#延迟与资源契约) | NET-331 |
 | `net_rx_2k_mem` | hft-net | [hft-net 延迟与资源契约](../crates/hft-net/README.md#延迟与资源契约) | NET-321 |
+| `net_wire_poll/274/eager` | hft-net | 生产 poll + next_frame；5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器；脚本 recv 计数 | NET-320 |
+| `net_wire_poll/274/buffered` | hft-net | 生产 poll + next_frame；5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器；脚本 recv 计数 | NET-320 |
+| `net_wire_poll/2048/eager` | hft-net | 生产 poll + next_frame；5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器；脚本 recv 计数 | NET-320 |
+| `net_wire_poll/2048/buffered` | hft-net | 生产 poll + next_frame；5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器；脚本 recv 计数 | NET-320 |
+| `net_wire_handoff/item` | hft-net | SPSC 写入 + 取出 16 个 64 B 元素；5,000 / 50,000 次；smoke 不绑核、系统分配器 | NET-322 |
+| `net_wire_handoff/batch` | hft-net | SPSC 写入 + 取出 16 个 64 B 元素；5,000 / 50,000 次；smoke 不绑核、系统分配器 | NET-322 |
 | `net_rx_300b_mem` | hft-net | [hft-net 延迟与资源契约](../crates/hft-net/README.md#延迟与资源契约) | NET-320 |
 | `net_rx_first_of_64k` | hft-net | [hft-net 延迟与资源契约](../crates/hft-net/README.md#延迟与资源契约) | NET-322 |
 | `net_seal_300b` | hft-net | [hft-net 延迟与资源契约](../crates/hft-net/README.md#延迟与资源契约) | NET-326 |
@@ -462,6 +468,8 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 - 禁止:产品 crate 依赖 `hft-benchmarks`;基准代码联网;在共享 runner 上以时间数值作门槛或基线。
 
 ## 延伸阅读
+
+- [Wire 轮询审查与测量](reports/2026-10-15-wire-io.md)（Windows 共享主机诊断）
 
 - [Windows 开发机热点测量与前后对照(2026-10-15)](reports/2026-10-15-windows-hotpath.md)(诊断报告,非参考机验收)
 - [latency-budget.md](../docs/latency-budget.md)、[testing.md](../docs/testing.md)、[hot-path-rules.md](../docs/hot-path-rules.md)

@@ -71,6 +71,11 @@ harness = false
 required-features = ["test-io"]
 
 [[bench]]
+name = "wire_poll"
+harness = false
+required-features = ["test-io"]
+
+[[bench]]
 name = "tx"
 harness = false
 required-features = ["test-io"]

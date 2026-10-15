@@ -49,6 +49,7 @@ fn net_285_steady_state_zero_alloc() {
         out.seal(Opcode::Text, 292, round);
         let s = CountingAlloc::scope();
         conn.poll_rx(round as u64);
+        conn.poll_rx_if_needed(round as u64);
         while let Some(f) = conn.next_frame() {
             std::hint::black_box(f.payload);
             frames += 1;

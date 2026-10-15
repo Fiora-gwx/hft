@@ -276,8 +276,10 @@ fn ven_051_single_backlog_cap() {
     let ls = h.poll(now + 10);
     assert_eq!(classify_order(), (1..=8).map(|k| (0, k)).collect::<Vec<_>>());
     assert_eq!(ls.frames, 8);
+    let reads = h.rt.conn(ConnId(0)).unwrap().sys().recvmsg;
     let ls = h.poll(now + 20);
     assert_eq!(ls.frames, 8, "12 were left: 8 now");
+    assert_eq!(h.rt.conn(ConnId(0)).unwrap().sys().recvmsg, reads);
 }
 
 #[test]

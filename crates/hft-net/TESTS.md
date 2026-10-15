@@ -12,6 +12,8 @@ spec: README.md
 
 CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs::core_120_mock_accounts_bootstrap_reauth_and_drift` 以独立子进程、两家真实协议和脚本 REST 验证撤空、基线、重新核验、超时/错误模式失败与余额差异不覆盖账本；不替代真实 TLS、交易所或正式恢复验收。资金费账单复用 FundingPoll，沿用现有实际结算记账与去重。
 
+NET-080/081 同时验证缓冲优先轮询的 syscall 计数、跨记录帧、部分记录补读与时间戳不变；NET-320/322 的 `wire_poll` 基准逐条采样，并分别报告脚本 recv 调用数与 SPSC 批量交接。
+
 ## 覆盖
 
 | README 小节 | 用例 |

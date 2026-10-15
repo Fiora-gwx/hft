@@ -47,6 +47,52 @@ fn net_080_short_read_single_syscall() {
 }
 
 #[test]
+fn net_080_buffered_poll_preserves_frames_and_stamps() {
+    let (mut conn, mut peer) = pair();
+    let mut plain = text(b"first");
+    plain.extend(text(b"second"));
+    deliver(&mut conn, 100, 120, peer.records(&[&plain]));
+    assert!(conn.poll_rx_if_needed(0) > 0);
+    assert_eq!(conn.poll_rx_if_needed(0), 0); // complete ciphertext
+    assert_eq!(conn.sys().recvmsg, 1);
+    let f = conn.next_frame().unwrap();
+    assert_eq!(f.payload, b"first");
+    assert_eq!(f.ts.rx_tsc, 120);
+    assert_eq!(conn.poll_rx_if_needed(0), 0); // complete plaintext
+    assert_eq!(conn.sys().recvmsg, 1);
+    let f = conn.next_frame().unwrap();
+    assert_eq!(f.payload, b"second");
+    assert_eq!(f.ts.rx_tsc, 120);
+    assert_eq!(conn.poll_rx_if_needed(0), 0); // drained: EAGAIN again
+    assert_eq!(conn.sys().recvmsg, 2);
+}
+
+#[test]
+fn net_081_buffered_poll_reads_partial_records_and_frames() {
+    for cut in [1, 4, 5, 10, 25] {
+        let (mut conn, mut peer) = pair();
+        let wire = peer.records(&[&text(b"partial-record")]);
+        deliver(&mut conn, 100, 120, wire[..cut].to_vec());
+        conn.poll_rx_if_needed(0);
+        assert!(conn.next_frame().is_none());
+        deliver(&mut conn, 200, 240, wire[cut..].to_vec());
+        assert!(conn.poll_rx_if_needed(0) > 0);
+        let f = conn.next_frame().unwrap();
+        assert_eq!(f.payload, b"partial-record");
+        assert_eq!(f.ts.rx_tsc, 240);
+        assert_eq!(conn.sys().recvmsg, 2);
+    }
+    let (mut conn, mut peer) = pair();
+    let frame = text(b"frame-spans-records");
+    deliver(&mut conn, 100, 120, peer.records(&[&frame[..4]]));
+    conn.poll_rx_if_needed(0);
+    assert!(conn.next_frame().is_none());
+    deliver(&mut conn, 200, 240, peer.records(&[&frame[4..]]));
+    assert!(conn.poll_rx_if_needed(0) > 0);
+    assert_eq!(conn.next_frame().unwrap().payload, b"frame-spans-records");
+}
+
+#[test]
 fn net_081_full_read_no_confirmation() {
     let mut c = cfg();
     c.rx_buf = 4096;

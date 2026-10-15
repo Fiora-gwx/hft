@@ -1,0 +1,152 @@
+{
+  "base_sha": "408b496c",
+  "host": "Windows x86_64 shared/unpinned",
+  "profile": "dev opt-level=3 debug=0",
+  "reference_acceptance": false,
+  "io": "ScriptIo receive-call count; not Linux syscall trace",
+  "timestamp_source": "ordered TSC with nominal frequency or calibration",
+  "rows": [
+    {
+      "max_ns": 472319,
+      "n": 50000,
+      "name": "net_wire_poll/274/eager",
+      "p50_ns": 948,
+      "p999_ns": 1508,
+      "p99_ns": 1131,
+      "scripted_recv_calls_per_message": 1.0,
+      "warmup": 5000
+    },
+    {
+      "max_ns": 706047,
+      "n": 50000,
+      "name": "net_wire_poll/274/buffered",
+      "p50_ns": 151,
+      "p999_ns": 6103,
+      "p99_ns": 988,
+      "scripted_recv_calls_per_message": 0.0046,
+      "warmup": 5000
+    },
+    {
+      "max_ns": 2705407,
+      "n": 50000,
+      "name": "net_wire_poll/2048/eager",
+      "p50_ns": 1205,
+      "p999_ns": 3793,
+      "p99_ns": 2237,
+      "scripted_recv_calls_per_message": 1.0,
+      "warmup": 5000
+    },
+    {
+      "max_ns": 2705407,
+      "n": 50000,
+      "name": "net_wire_poll/2048/buffered",
+      "p50_ns": 323,
+      "p999_ns": 4003,
+      "p99_ns": 3459,
+      "scripted_recv_calls_per_message": 0.03227272727272727,
+      "warmup": 5000
+    },
+    {
+      "max_ns": 25439,
+      "messages_per_sample": 16,
+      "n": 50000,
+      "name": "net_wire_handoff/item",
+      "p50_ns": 45,
+      "p999_ns": 79,
+      "p99_ns": 63,
+      "warmup": 5000
+    },
+    {
+      "max_ns": 16751,
+      "messages_per_sample": 16,
+      "n": 50000,
+      "name": "net_wire_handoff/batch",
+      "p50_ns": 33,
+      "p999_ns": 51,
+      "p99_ns": 39,
+      "warmup": 5000
+    }
+  ],
+  "feed_criterion": [
+    {
+      "phase": "before",
+      "name": "venue_feed_bbo_path",
+      "low": 5.2243,
+      "estimate": 5.4235,
+      "high": 5.652,
+      "unit": "\u00b5s"
+    },
+    {
+      "phase": "before",
+      "name": "venue_feed_dup_drop",
+      "low": 11.336,
+      "estimate": 11.937,
+      "high": 12.616,
+      "unit": "\u00b5s"
+    },
+    {
+      "phase": "before",
+      "name": "venue_bbo_live_tick",
+      "low": 12.043,
+      "estimate": 13.186,
+      "high": 14.307,
+      "unit": "\u00b5s"
+    },
+    {
+      "phase": "before",
+      "name": "venue_idle_loop_bbo",
+      "low": 12.988,
+      "estimate": 14.73,
+      "high": 16.316,
+      "unit": "\u00b5s"
+    },
+    {
+      "phase": "before",
+      "name": "venue_idle_loop_bbo_ready",
+      "low": 15.357,
+      "estimate": 19.452,
+      "high": 23.305,
+      "unit": "\u00b5s"
+    },
+    {
+      "phase": "after",
+      "name": "venue_feed_bbo_path",
+      "low": 4.6165,
+      "estimate": 4.8465,
+      "high": 5.1391,
+      "unit": "\u00b5s"
+    },
+    {
+      "phase": "after",
+      "name": "venue_feed_dup_drop",
+      "low": 4.5424,
+      "estimate": 4.8857,
+      "high": 5.343,
+      "unit": "\u00b5s"
+    },
+    {
+      "phase": "after",
+      "name": "venue_bbo_live_tick",
+      "low": 4.0419,
+      "estimate": 4.3413,
+      "high": 4.659,
+      "unit": "\u00b5s"
+    },
+    {
+      "phase": "after",
+      "name": "venue_idle_loop_bbo",
+      "low": 3.5805,
+      "estimate": 3.7705,
+      "high": 3.9743,
+      "unit": "\u00b5s"
+    },
+    {
+      "phase": "after",
+      "name": "venue_idle_loop_bbo_ready",
+      "low": 3.872,
+      "estimate": 4.0613,
+      "high": 4.2743,
+      "unit": "\u00b5s"
+    }
+  ]
+}
