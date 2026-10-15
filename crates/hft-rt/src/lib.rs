@@ -10,6 +10,9 @@
 //! Linux-only facilities (mmap, futex, epoll, sched_setaffinity, mlockall, PHC) compile on every
 //! platform; off Linux they return `RtErr::Os(ENOSYS)` / `ShmErr::Io` / `ClockErr::Os(ENOSYS)`.
 //! Specification: `crates/hft-rt/README.md`.
+// Clippy 1.97 does not honor a local allowance on thread_local! expansions.
+// hot-check enforces the macro ban here, except measurement-only latency TLS.
+#![allow(clippy::disallowed_macros)]
 #![deny(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -30,6 +33,7 @@ mod host_aarch64;
 #[cfg(not(target_arch = "aarch64"))]
 mod host_x86;
 mod idle;
+pub mod latency_trace;
 mod mailbox;
 mod mem;
 mod ring;

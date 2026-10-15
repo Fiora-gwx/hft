@@ -5,6 +5,7 @@
 use hft_event::{BlobRef, CmdScope, GroupSpec, Note, NoteSource, RecordFlags};
 use hft_refdata::{AccountKind, RefData};
 use hft_risk::mode::{CellKey, ModeInput};
+use hft_rt::latency_trace::{self as lt, Stage as TraceStage};
 use hft_strategy_sdk::ctx::{CancelReq, NoteReq, Op, SubEntry, TimerReq};
 use hft_strategy_sdk::{
     CtxBufs, EventRef, GroupSpecExt, GroupTable, IntentHandle, IntentOutcome, OrderIntent, OwnEvMask, Part,
@@ -649,12 +650,14 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
                         .rec("deliver.market", u64::from(slot.id.0), u64::from(gix));
                     let v = full_views(e);
                     let ev = market_ev(&m, gix, &e.market);
+                    lt::stamp(TraceStage::StrategyStart, [u64::from(slot.id.0), 0, 0, 0]);
                     S::on_event(
                         st,
                         &ev,
                         &v,
                         &mut slot.bufs.ctx_with_timer_quota(&mut timer_remaining, &slot.timers),
                     );
+                    lt::stamp(TraceStage::StrategyEnd, [u64::from(slot.id.0), 0, 0, 0]);
                 }
             }
         }
@@ -677,12 +680,14 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
                     .and_then(|t| t.gix_of(g))
                     .unwrap_or(hft_strategy_sdk::GIX_NONE)
             });
+            lt::stamp(TraceStage::StrategyStart, [u64::from(slot.id.0), 0, 0, 0]);
             S::on_event(
                 st,
                 &ev,
                 &v,
                 &mut slot.bufs.ctx_with_timer_quota(&mut timer_remaining, &slot.timers),
             );
+            lt::stamp(TraceStage::StrategyEnd, [u64::from(slot.id.0), 0, 0, 0]);
         }
         if let Some((dix, d, ro)) = direct
             && dix == ix
@@ -732,12 +737,14 @@ pub(crate) fn deliver_round<D: crate::Driver<S>, S: StrategySet>(
                     payload,
                 },
             };
+            lt::stamp(TraceStage::StrategyStart, [u64::from(slot.id.0), 0, 0, 0]);
             S::on_event(
                 st,
                 &ev,
                 &v,
                 &mut slot.bufs.ctx_with_timer_quota(&mut timer_remaining, &slot.timers),
             );
+            lt::stamp(TraceStage::StrategyEnd, [u64::from(slot.id.0), 0, 0, 0]);
             if ro {
                 ro_ix = Some(ix);
             }

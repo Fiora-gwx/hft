@@ -6,6 +6,8 @@ spec: README.md
 
 # hft-rt 测试规格
 
+RT-002/166 验证测量环溢出与零分配，见 [延迟采集测试](../../tools/latency-report/TESTS.md)。
+
 格式与规则见 [docs/tests](../../docs/tests/README.md)。级别在本组件的含义:
 
 - `unit`:任意平台(含开发机)可跑的确定性测试——纯逻辑、注入的时钟读数(`ClockReads`)、`SysRoot` 夹具目录、`loom` 模型(`RUSTFLAGS="--cfg loom"`,每个 PR);标注"aarch64"的 unit 只在 aarch64 编译,在 CI 每夜 `ubuntu-24.04-arm` 专项运行。

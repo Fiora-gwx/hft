@@ -6,6 +6,8 @@ spec: README.md
 
 # hft-net 测试规格
 
+NET-125 验证同一次 read 的多帧仍有独立测量标识，见 [延迟采集测试](../../tools/latency-report/TESTS.md)。
+
 公共 REST 池交接、超时退役与重建的跨组件回归见 [hft-venue VEN-151–161](../hft-venue/TESTS.md#ven-151-每条-snapreq-恰好得到一条-snap-记录)；脚本 wait fd 的观察由该组件 VEN-210 覆盖。
 
 格式与规则见 [docs/tests](../../docs/tests/README.md)。

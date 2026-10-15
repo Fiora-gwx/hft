@@ -47,6 +47,16 @@ fn on_demand(h: &mut H) -> hft_sequencer::MemRecord {
 }
 
 #[test]
+fn seq_053_optional_trace_overflow_does_not_change_journal() {
+    let before = on_demand(&mut steady());
+    let (writer, reader) = hft_rt::latency_trace::channel(2).unwrap();
+    hft_rt::latency_trace::install(writer).unwrap();
+    let after = on_demand(&mut steady());
+    assert_eq!(before.body, after.body);
+    assert!(reader.dropped() > 0);
+}
+
+#[test]
 fn seq_242_bootblock_order() {
     let mut h = steady();
     let n_out = h.io_ref().out.len();

@@ -169,6 +169,7 @@ pub(crate) fn notify(_message: &str) -> Result<(), Error> {
 
 #[derive(Debug)]
 pub struct Workers {
+    pub(crate) trace: std::collections::BTreeMap<String, hft_rt::latency_trace::Writer>,
     pub stop: Arc<AtomicBool>,
     joins: Vec<JoinHandle<Result<(), Error>>>,
     heartbeat: &'static hft_rt::HeartbeatBlock,
@@ -176,6 +177,7 @@ pub struct Workers {
 impl Workers {
     pub fn new(heartbeat: &'static hft_rt::HeartbeatBlock) -> Self {
         Self {
+            trace: std::collections::BTreeMap::new(),
             stop: Arc::new(AtomicBool::new(false)),
             joins: Vec::new(),
             heartbeat,
@@ -192,10 +194,15 @@ impl Workers {
         // The main thread waits only for OS setup, never for network or task work.
         // This keeps a failed affinity/priority setup from racing READY.
         let (setup_tx, setup_rx) = std::sync::mpsc::sync_channel(1);
+        let trace = self.trace.remove(&t.name);
         self.joins.push(
             std::thread::Builder::new()
                 .name(t.name.clone())
                 .spawn(move || {
+                    if let Some(trace) = trace {
+                        hft_rt::latency_trace::install(trace)
+                            .map_err(|_| Error::runtime("LatencyTrace", "writer already installed", 3))?;
+                    }
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         if let Err(error) = pin(&t) {
                             let _ = setup_tx.send(Err(error));
@@ -538,6 +545,9 @@ fn run_linux(
     #[cfg(not(target_os = "linux"))]
     let _ = internal_rx;
     let mut workers = Workers::new(heartbeat);
+    let (mut trace_writers, mut trace_drain) = crate::latency_trace::prepare(c, clock)?;
+    let seq_trace = trace_writers.remove(&policy(c, "sequencer")?.name);
+    workers.trace = trace_writers;
     #[cfg(target_os = "linux")]
     hft_rt::lock_all().map_err(|_| Error::runtime("MemLock", "mlockall failed; check LimitMEMLOCK", 3))?;
     let mut persist_workers = Workers::new(heartbeat);
@@ -546,6 +556,7 @@ fn run_linux(
         let start = Instant::now();
         while !stop.load(Ordering::Acquire) {
             t.heartbeat.beat();
+            trace_drain.poll()?;
             if !persist.poll(
                 start.elapsed().as_nanos() as u64,
                 clock.to_utc_ns(hft_rt::tsc_now()),
@@ -553,6 +564,7 @@ fn run_linux(
                 idle(&t);
             }
         }
+        trace_drain.finish()?;
         persist.flush(
             start.elapsed().as_nanos() as u64,
             clock.to_utc_ns(hft_rt::tsc_now()),
@@ -713,6 +725,10 @@ fn run_linux(
     let seq_thread = std::thread::Builder::new()
         .name(seq_policy.name.clone())
         .spawn(move || -> Result<(u8, u64, u64, u64), Error> {
+            if let Some(trace) = seq_trace {
+                hft_rt::latency_trace::install(trace)
+                    .map_err(|_| Error::runtime("LatencyTrace", "writer already installed", 3))?;
+            }
             pin(&seq_policy)?;
             seq_ready.store(true, Ordering::Release);
             let mut running = false;

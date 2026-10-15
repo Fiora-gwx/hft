@@ -138,7 +138,7 @@ Drain 退出前的发布边界由 [sequencer 主循环](../crates/hft-sequencer/
 
 恢复核容量、结束旧 Drain 状态并接替 Draining,新容量入引导配置;快照保留停止点 engine_ns,分歧入输出哈希。
 
-journal 记录分三类:**Input**(进入决策的一切,含实盘驱动当场做出的环境相关决定,记为 `Timer`)、**Output**(决策、意图与执行层决定)、**Meta**(测量,不参与验证比对与状态)。确定性前提:时钟、随机数、配置内容、定时器全部来自 Input 记录;无 `HashMap` 迭代依赖;无全局可变状态。细节见 [`hft-sequencer`](../crates/hft-sequencer/README.md) 与 [`replayer`](../apps/replayer/README.md)。
+journal 分为 **Input**(决策输入，含驱动以 `Timer` 记录的环境决定)、**Output**(意图与执行决定)、**Meta**(测量，不参与状态与验证)。时钟、随机数、配置、定时器来自 Input；无 `HashMap` 迭代依赖或全局业务可变状态。[逐事件测量](../tools/latency-report/README.md) 经独立有界环落盘，不影响主循环。详见 [`hft-sequencer`](../crates/hft-sequencer/README.md) 与 [`replayer`](../apps/replayer/README.md)。
 
 ## 10. 核心类型归属
 

@@ -359,3 +359,21 @@ fn core_012_control_adapter_reaches_live_sequencer() {
         seq.driver_mut().taken_log
     );
 }
+
+#[test]
+fn core_012_latency_ring_capacity_is_validated_without_starting() {
+    let d = tempfile::tempdir().unwrap();
+    let path = support::write(d.path(), &d.path().join("hot"), None);
+    let original = std::fs::read_to_string(&path).unwrap();
+    for (capacity, valid) in [(4096, true), (3, false), (128, false), (131072, false)] {
+        std::fs::write(
+            &path,
+            original.replace(
+                "[journal]",
+                &format!("[journal]\nlatency_trace_capacity = {capacity}"),
+            ),
+        )
+        .unwrap();
+        assert_eq!(hft_core::config::load(&path, true).is_ok(), valid);
+    }
+}

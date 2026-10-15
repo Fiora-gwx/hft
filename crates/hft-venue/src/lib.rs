@@ -24,6 +24,7 @@ pub mod account;
 mod acct;
 mod acct_fetch;
 mod acct_wire;
+mod latency;
 mod private;
 mod rest;
 pub use private::prepare as prepare_private;

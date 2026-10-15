@@ -39,6 +39,8 @@ status: impl
 
 ## 使用本组件
 
+`journal.latency_trace_capacity` 可选启用逐事件测量环；每线程独立 producer，已有 persist 冷线程落盘，关闭时排空并记录丢点数。容量约束、文件格式与离线分析归 [latency-report](../../tools/latency-report/README.md)。省略该项时不分配测量环。
+
 ### 命令行与退出码
 
 ```

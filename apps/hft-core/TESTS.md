@@ -6,6 +6,8 @@ spec: README.md
 
 # hft-core 测试规格
 
+CORE-012 验证可选测量环配置，CORE-220 验证进程干净停止后的测量文件与关闭标记；见 [延迟采集测试](../../tools/latency-report/TESTS.md)。
+
 跨组件场景的实现与未覆盖项见 [C6、C12、C15、FP-8](../../docs/tests/scenarios.md)，使用真实 sequencer 与进程内网关；这些测试不改变本文件的里程碑或完整主机验收要求。
 
 当前实现覆盖说明：`tests/config.rs` 验证 CORE-002、CORE-012、CORE-045 的可执行子集，含控制批次原子发布、分片头重组、模拟回报解码、模拟连接与行情的启动闸门、真实 LiveDriver 与 registry 策略的下单/撤单闭环（含发送报告和 epoch 匹配）及 Drain；`tests/paper_process.rs::core_048_sim_instance_boots_without_keys` 以固定行情和真实 `SimExchange` 启动进程，等待 ClockOk 后经控制 socket 启用 registry 策略，检查发送、Ack、CancelAck、SIGTERM Drain、冷副本、共享心跳的 Stopped 与重启拒绝。CORE-048 的部署目录与完整主机验收仍待完成；本说明不改变原用例期望或里程碑。

@@ -506,6 +506,8 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 ### TOOL-032 hot-check 对每项检查的反例失败、对合规写法通过
 
+测量 TLS 的受控例外仍检查 hft-rt 的宏调用和重命名导入：统一模板禁止的宏在普通源文件拒绝；`latency_trace.rs` 仅允许 `thread_local!`，该文件中的格式化仍拒绝。由 `tool_032_rt_measurement_tls_exception_preserves_macro_bans` 覆盖。
+
 - 规则:[cargo xtask hot-check](README.md#cargo-xtask-hot-check)
 - 级别:table
 - 里程碑:M1

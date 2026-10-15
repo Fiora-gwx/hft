@@ -3,6 +3,7 @@
 //! as Inputs, BBO conflation, synthetic `SendReport{RingFull}`, staged `FeedCmd`, kill words and
 //! quarantine. The rings, the TSC source and the Mailbox come through [`LiveIo`].
 
+use hft_rt::latency_trace::{self as lt, Context as TraceContext, Stage as TraceStage};
 use std::collections::VecDeque;
 
 use hft_event::{
@@ -676,6 +677,10 @@ impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
     }
 
     fn handed(&mut self, _out: &InputSlot, r: Option<RingId>) -> bool {
+        {
+            let _scope = lt::scope(TraceContext::default());
+            lt::event(TraceStage::InputHanded, _out.kind.0, _out.body());
+        }
         self.took_any = true;
         #[cfg(feature = "testing")]
         self.taken_log.push((_out.kind, r));
@@ -985,6 +990,7 @@ impl<S: StrategySet, IO: LiveIo<S>> Driver<S> for LiveDriver<S, IO> {
                 if room {
                     for (ring, cmd) in *pair {
                         let pushed = self.io.push_out(*ring, cmd);
+                        trace_out(cmd, pushed);
                         debug_assert!(pushed, "LiveIo::out_free reservation violated");
                     }
                     EmitResult::Pushed
@@ -997,6 +1003,7 @@ impl<S: StrategySet, IO: LiveIo<S>> Driver<S> for LiveDriver<S, IO> {
             }
             OutRecord::Out(ring, c) => {
                 if self.io.push_out(*ring, c) {
+                    trace_out(c, true);
                     return EmitResult::Pushed;
                 }
                 self.ring_full(
@@ -1116,3 +1123,15 @@ fn stop_kill_input(out: &mut InputSlot, now: Tsc, level: KillLevel, scope: CmdSc
 
 #[allow(dead_code)]
 fn _unused(_: RollReason, _: AccountId, _: SlotId) {}
+
+fn trace_out(c: &hft_event::GwCmd, pushed: bool) {
+    let _scope = lt::scope(TraceContext {
+        decision_seq: c.decision_seq,
+        order: (u64::from(c.r#gen) << 32) | u64::from(c.slot.0),
+        ..lt::context()
+    });
+    lt::stamp(
+        TraceStage::OutPush,
+        [u64::from(pushed), u64::from(c.op as u8), 0, 0],
+    );
+}

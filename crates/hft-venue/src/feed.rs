@@ -1,6 +1,7 @@
 //! `FeedRuntime<P>`: one feed task's loop body (README §2 fixed order, §3 dedup, §3a BBO connection
 //! health, §3c TopN depth, §1 connection numbers and full rings).
 
+use hft_rt::latency_trace::{self as lt, Stage as TraceStage};
 use std::collections::VecDeque;
 
 use hft_event::{ConnRole, ConnState, ConnStateKind, EventKind, FeedCmd, FeedMsg, L2SnapHdr};
@@ -265,6 +266,7 @@ impl<P: VenueProtocol> St<P> {
         let Some(r) = ring.as_mut() else { return };
         self.raw.note(if to_bbo { Effect::Bbo } else { Effect::Md });
         if pend.is_empty() && r.try_push(m).is_ok() {
+            crate::latency::feed(TraceStage::FeedPush, &m);
             return;
         }
         if pend.len() < PEND_CAP {
@@ -285,6 +287,7 @@ impl<P: VenueProtocol> St<P> {
                 if r.try_push(m).is_err() {
                     break;
                 }
+                crate::latency::feed(TraceStage::FeedPush, &m);
                 pend.pop_front();
             }
         }
@@ -385,14 +388,17 @@ impl<P: VenueProtocol> St<P> {
             let Some(m) = self.sink.evs.get(k).copied() else {
                 break;
             };
+            crate::latency::feed(TraceStage::DecodedEvent, &m);
             match m {
                 FeedMsg::Bbo(_) => self.emit(true, m),
-                FeedMsg::Bulk { len, .. } => {
+                FeedMsg::Bulk { kind, len } => {
                     let end = bulk_off + len as usize;
                     if let (Some(b), Some(src)) = (self.bulk.as_mut(), self.sink.bulk.get(bulk_off..end)) {
+                        crate::latency::market_bytes(TraceStage::DecodedEvent, kind, src);
                         if let Some(dst) = b.reserve(len) {
                             dst.copy_from_slice(src);
                             b.commit();
+                            crate::latency::market_bytes(TraceStage::FeedPush, kind, src);
                         } else {
                             self.n.status_lost += 1;
                             bulk_off = end;
@@ -409,6 +415,7 @@ impl<P: VenueProtocol> St<P> {
 
     /// README §2 step 5 for one data/control frame of connection `m`.
     fn frame(&mut self, m: &mut Meta, f: &Frame<'_>) {
+        lt::stamp(TraceStage::DecodeStart, [0; 4]);
         let payload = f.payload;
         let ts = f.ts;
         let op = if f.opcode == Opcode::Binary {
@@ -511,6 +518,7 @@ impl<P: VenueProtocol> St<P> {
         let depth = pk.stream == StreamKind::DepthTopN;
         match P::decode_md(self.rd, &mut self.ctx, c, payload, &rx, &mut self.sink) {
             Ok(_) if !self.sink.over => {
+                lt::stamp(TraceStage::DecodeEnd, [0; 4]);
                 self.publish();
                 if let Some(q) = self.seqs.get_mut(ix)
                     && let Some(v) = q.last_fwd.get_mut(sl)

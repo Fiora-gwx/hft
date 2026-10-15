@@ -244,3 +244,25 @@ fn tool_032_check_counterexamples() {
     assert_eq!(vs.len(), 1, "TOOL-032.30: {vs:?}");
     assert_eq!(vs[0].file, OMS_A, "TOOL-032.30");
 }
+
+#[test]
+fn tool_032_rt_measurement_tls_exception_preserves_macro_bans() {
+    for (name, source, allowed) in [
+        ("tls", "thread_local! { static W: u8 = const { 0 }; }", false),
+        ("format", "fn f() { let _ = format!(\"x\"); }", false),
+        ("alias", "use std::println as output;", false),
+        ("logger", "fn f() { tracing::info!(\"x\"); }", false),
+        ("trace_tls", "thread_local! { static W: u8 = const { 0 }; }", true),
+        ("trace_format", "fn f() { let _ = format!(\"x\"); }", false),
+    ] {
+        let f = hot_clean(&format!("hot-rt-macro-{name}"));
+        let path = if name.starts_with("trace_") {
+            "crates/hft-rt/src/latency_trace.rs"
+        } else {
+            RT_A
+        };
+        f.append(path, source);
+        let r = f.xtask(&["hot-check"]);
+        assert_eq!(r.code, i32::from(!allowed), "{name}: {}", r.stderr);
+    }
+}

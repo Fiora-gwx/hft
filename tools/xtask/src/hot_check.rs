@@ -612,6 +612,16 @@ pub fn check(root: &Path) -> Result<Vec<Violation>, EnvError> {
     // Lint configuration: clippy.toml copies and lib.rs attribute blocks.
     let tpl = |t: &str| read(root, &format!("tools/lint/clippy-{t}.toml"));
     let (clippy_hot, clippy_pure) = (tpl("hot")?, tpl("pure")?);
+    let hot_lints: toml::Value =
+        toml::from_str(&clippy_hot).map_err(|e| EnvError(format!("parse hot lint template: {e}")))?;
+    let macro_names: BTreeSet<&str> = hot_lints
+        .get("disallowed-macros")
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m.get("path").and_then(toml::Value::as_str))
+        .filter_map(|p| p.rsplit("::").next())
+        .collect();
     let (attrs_hot, attrs_pure, attrs_unsafe) = (
         template_levels(root, "hot")?,
         template_levels(root, "pure")?,
@@ -761,6 +771,26 @@ pub fn check(root: &Path) -> Result<Vec<Violation>, EnvError> {
             continue;
         }
         let live = |t: bool| !t && !file_test;
+
+        // Clippy 1.97 loses local lint scope in thread_local! expansions.
+        // Independently enforce the macro ban for hft-rt's root exception.
+        if f.starts_with("crates/hft-rt/src/") {
+            for m in s.macro_paths.iter().filter(|m| live(m.test)) {
+                let name = m.what.rsplit("::").next().unwrap_or("");
+                let tls = name == "thread_local";
+                let banned = macro_names.contains(name);
+                let cold_exception =
+                    !tls && f != "crates/hft-rt/src/lib.rs" && allow.allows(f, "clippy::disallowed_macros");
+                if banned && !cold_exception && !(tls && f == "crates/hft-rt/src/latency_trace.rs") {
+                    out.push(v(
+                        if tls { "D3" } else { "C3" },
+                        f,
+                        m.line,
+                        format!("disallowed macro invocation/import `{}`", m.what),
+                    ));
+                }
+            }
+        }
 
         if let Some(c) = krate {
             // N6 / S1: trait objects.

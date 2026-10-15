@@ -46,6 +46,12 @@ mod process {
         let root = tempfile::tempdir().unwrap();
         let hot = tempfile::tempdir_in("/dev/shm").unwrap();
         let path = support::write(root.path(), hot.path(), None);
+        let config = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(
+            &path,
+            config.replace("[journal]", "[journal]\nlatency_trace_capacity = 4096"),
+        )
+        .unwrap();
         let socket = root.path().join("notify");
         let notify = UnixDatagram::bind(&socket).unwrap();
         notify.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
@@ -88,6 +94,32 @@ mod process {
         assert!(notices.iter().position(|n| n == "STATUS=Startup step 5").unwrap() < ready);
         assert!(notices.iter().position(|n| n == "STATUS=Startup step 6").unwrap() > ready);
         let cfg = hft_core::config::load(&path, true).unwrap();
+        let trace_root = cfg
+            .cfg
+            .paths
+            .journal_cold
+            .join(hft_core::storage::instance(&cfg.cfg).as_str())
+            .join("latency");
+        let traces: Vec<_> = std::fs::read_dir(trace_root).unwrap().collect();
+        assert_eq!(traces.len(), 1);
+        let trace = traces[0].as_ref().unwrap().path();
+        let completion = std::fs::read_to_string(trace.join("completion.json")).unwrap();
+        assert!(completion.contains("\"closed\":true"));
+        let data = std::fs::read(trace.join("sequencer.bin")).unwrap();
+        assert!(!data.is_empty());
+        assert_eq!(data.len() % 120, 0);
+        let mut serial = 0;
+        let mut process_start = false;
+        for row in data.chunks_exact(120) {
+            let words: Vec<u64> = row
+                .chunks_exact(8)
+                .map(|w| u64::from_le_bytes(w.try_into().unwrap()))
+                .collect();
+            assert!(words[1] > serial);
+            serial = words[1];
+            process_start |= words[3] == hft_rt::latency_trace::Stage::ProcessStart as u64;
+        }
+        assert!(process_start);
         let mut reader = hft_core::storage::reader(&cfg.cfg).unwrap();
         let mut steps = Vec::new();
         let mut first_input = None;

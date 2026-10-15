@@ -24,6 +24,8 @@ status: spec
 
 ## 使用本组件
 
+可选 [latency_trace](../../tools/latency-report/README.md) 在现有 recvmsg、TLS open/seal、WS 交付和 sendmsg 边界记录测量戳；网络 API 与业务事件布局不变。RX 使用现有内核戳，未实现的 kernel TX 不伪造。
+
 ### 类型总览
 
 | 类型 | 用途 | 所有者线程 |

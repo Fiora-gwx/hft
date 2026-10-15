@@ -24,6 +24,8 @@ status: spec
 
 ## 使用本组件
 
+可选 [latency_trace](../../tools/latency-report/README.md) 记录输入、journal、策略、风险、OMS、执行与输出边界；input_seq、decision_seq 和 slot/gen 连接因果链。测量上下文不参与引擎状态、hash 或恢复，开启及溢出必须保持业务 journal 一致。
+
 ### 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用)
 
 

@@ -9,6 +9,7 @@ mod bytes;
 mod compile_fail;
 mod config;
 mod host;
+mod latency_trace;
 mod layout;
 mod prop_bytes;
 mod prop_time;

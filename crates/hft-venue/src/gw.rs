@@ -4,6 +4,7 @@
 //! quotas, kill check, rate backstop, encode, send and exactly one `SendReport` per order-class
 //! command; the slot mirror and client ids; reports into the rep ring.
 
+use hft_rt::latency_trace::{self as lt, Stage as TraceStage};
 use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
 
@@ -579,6 +580,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             if self.out.try_push(m).is_err() {
                 break;
             }
+            crate::latency::rep(TraceStage::RepPush, &m);
             self.pend_rep.pop_front();
         }
     }
@@ -586,6 +588,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
     fn push_rep(&mut self, m: RepMsg) {
         self.raw.note(Effect::Rep);
         if self.pend_rep.is_empty() && self.out.try_push(m).is_ok() {
+            crate::latency::rep(TraceStage::RepPush, &m);
             return;
         }
         if self.pend_rep.len() < REP_PEND_CAP {
@@ -1172,11 +1175,13 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             key: [0; 36],
             key_len: 0,
         };
+        lt::stamp(TraceStage::DecodeStart, [0; 4]);
         let res = if discard || private_ack.is_some() {
             Ok(ReportOutcome::default())
         } else {
             decode_one::<P>(self.rd, ctx, &f, id, account, &mut sink)
         };
+        lt::stamp(TraceStage::DecodeEnd, [0; 4]);
         let (over, unsupported) = (sink.over, sink.unsupported);
         let mut event_name = [0; 32];
         let name = if matches!(&res, Ok(o) if o.skip == Skip::Unknown) {
@@ -1355,6 +1360,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 }
                 self.order_terminal(a, e, key, now);
             }
+            crate::latency::rep(TraceStage::DecodedEvent, &m);
             self.push_sink(k, m);
         }
         self.release_holds(a, now);
@@ -1596,6 +1602,10 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         self.batch.extend_from_slice(first);
         self.batch.extend_from_slice(second);
         pending.release();
+        for c in &self.batch {
+            let _scope = lt::scope(crate::latency::command(c, P::VENUE.0));
+            lt::stamp(TraceStage::OutPop, [u64::from(c.op as u8), 0, 0, 0]);
+        }
         if self.batch.is_empty() {
             return;
         }
@@ -1616,6 +1626,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
     }
 
     fn process(&mut self, c: GwCmd, now: u64) {
+        let _trace_scope = lt::scope(crate::latency::command(&c, P::VENUE.0));
         self.cmds_done += 1;
         if !is_order(c.op) {
             self.maintenance(c, now);
@@ -1687,7 +1698,9 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             None => return,
         };
         self.frame.unseal();
+        lt::stamp(TraceStage::EncodeStart, [0; 4]);
         let r = P::encode(self.rd, &x.tpl, &c, &tgt, &clk, self.frame.body_mut());
+        lt::stamp(TraceStage::EncodeEnd, [0; 4]);
         let len = match r {
             Ok(n) => n,
             Err(_) => {
