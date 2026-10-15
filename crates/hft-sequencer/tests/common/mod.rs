@@ -915,6 +915,9 @@ impl<S: StrategySet> B0<S> {
     /// Full ECF1/RKP1 configuration for readers that reconstruct solely from the journal.
     /// The compact `boot` fixture remains available for tests of injected config decoders.
     pub fn boot_self_contained(self) -> H<S> {
+        self.boot_self_contained_accounts(&[])
+    }
+    pub fn boot_self_contained_accounts(self, balances: &[hft_event::BalanceReport]) -> H<S> {
         let rd = self.rd.load();
         let mut setup = self.setup(&rd);
         setup.risk_decode = Some(hft_sequencer::config_blob::decode_risk_blob);
@@ -924,13 +927,7 @@ impl<S: StrategySet> B0<S> {
         configs.risk_sha256 = sha(&configs.risk_blob);
         let heartbeat = hb();
         let drv = LiveDriver::new(TestIo::new(setup.clock), self.live);
-        let s = Sequencer::boot(
-            hft_sequencer::BootSource::Empty { configs },
-            &setup,
-            drv,
-            heartbeat,
-        )
-        .unwrap();
+        let s = Sequencer::boot_accounts(configs, &setup, drv, heartbeat, balances, &[]).unwrap();
         H {
             s,
             rd,

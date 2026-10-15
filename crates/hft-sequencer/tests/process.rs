@@ -16,6 +16,60 @@ fn steady() -> H {
 }
 
 #[test]
+fn seq_160_physical_order_ids_and_rotated_user_streams_replay() {
+    use hft_event::{ConnRole, ConnStateKind};
+    reset_script();
+    let mut h = b0().boot_self_contained();
+    h.step();
+    let mut checkpoints = Vec::new();
+    for (role, id, up, primary, standby) in [
+        (ConnRole::UserStream, 114, true, false, false),
+        (ConnRole::Order, 112, true, true, false),
+        (ConnRole::Order, 113, true, true, true),
+        (ConnRole::Order, 113, true, true, true),
+        (ConnRole::Order, 112, false, true, false),
+        (ConnRole::Order, 112, false, true, false),
+        (ConnRole::Order, 255, true, true, true),
+        (ConnRole::UserStream, 115, true, true, true),
+        (ConnRole::UserStream, 114, false, true, true),
+        (ConnRole::UserStream, 115, false, false, true),
+        (ConnRole::UserStream, 200, true, true, true),
+        (ConnRole::Order, 113, false, true, false),
+        (ConnRole::Order, 255, false, false, false),
+    ] {
+        h.trace_on();
+        h.push(
+            RingId::Rep(1),
+            &conn(
+                B,
+                id,
+                if up {
+                    ConnStateKind::Up
+                } else {
+                    ConnStateKind::Down
+                },
+                role,
+                B1,
+                AC1,
+                h.now(),
+            ),
+        );
+        h.run();
+        assert!(
+            h.s.engine().trace.ev.iter().any(|r| r.what == "gate.order_conns"
+                && r.a == u64::from(primary)
+                && r.b == u64::from(standby)),
+            "role={role:?} id={id} up={up}"
+        );
+        checkpoints.push(h.keyframe().seq);
+    }
+    assert!(h.verify().is_empty());
+    for seq in checkpoints {
+        assert!(h.verify_from(Some(seq)).is_empty(), "snapshot {seq}");
+    }
+}
+
+#[test]
 fn seq_160_conn_state_order_and_depth() {
     use hft_event::{ConnRole, ConnStateKind, L2SnapHdr, Level};
     use hft_strategy_sdk::{EvMask, Part};

@@ -717,6 +717,8 @@ pub(crate) fn boot_accounts<D: Driver<S>, S: StrategySet>(
             return Err(BootError::Config(ConfigErr::Component("AccountBootstrap")));
         }
     }
+    // Bootstrap balances belong to the initial snapshot, not the first live input.
+    e.ledger.clear_notes();
     let mut inst = Instances::<S>::new(&e.rd, &e.caps)?;
     let ec = hft_refdata::EngineConfig::load(&configs.engine_blob, None).map_err(|r| {
         BootError::Config(ConfigErr::Blob {

@@ -2525,6 +2525,8 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 - 实现:`deploy/tests/test_release.py::dep_225_activate_ok`
 - 覆盖边界:覆盖组链接、冷激活顺序、文件安装及末步 hostprobe；完整主机配置、命令链接及 refdata/HostProfile 记录字段仍待验收。
 
+DEP-225 子例覆盖首次激活缺失且 inactive 单元，只有安装并 reload 后才 disable；缺失但 active 或查询无效必须在替换链接前失败。DEP-121/125 验证 ctl 主组及读取配置的附加组，DEP-247 验证显式 IMDS device-index 映射。
+
 ### DEP-226 激活在校验失败时不切换或回退切换
 
 - 规则:[发布归档与 releasectl](README.md#发布归档与-releasectl)

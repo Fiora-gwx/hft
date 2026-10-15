@@ -577,6 +577,8 @@ pub struct AcctRecHdr {                // acct-<venue> 环记录头(进程内,�
 
 ### 5. 心跳
 
+gw 的最近入站时刻包括完整 WS Ping/Pong 控制帧；安静的下单/用户流连接可由心跳证明存活。未完成的 TLS/WS 字节不更新该时刻，真正断流仍触发 idle_timeout。
+
 | 场景 | 动作 |
 |---|---|
 | 服务端 WS Ping | `hft-net` 自动回 Pong |

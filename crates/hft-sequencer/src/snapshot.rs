@@ -332,6 +332,13 @@ fn w_seq_sections<S: StrategySet>(e: &Engine, inst: &Instances<S>, w: &mut Snaps
         }
         w.end_section();
     }
+    if e.cmd.conns.physical {
+        w.begin_section(crate::commands::SECTION_ORDER_CONNS, 1);
+        for row in e.cmd.conns.snapshot_rows() {
+            w.put_row(&row);
+        }
+        w.end_section();
+    }
 }
 
 fn active_rows<S: StrategySet>(e: &Engine, inst: &Instances<S>) -> Vec<ActiveConfigRow> {
@@ -732,6 +739,7 @@ pub struct SeqSections {
     pub notices: Vec<crate::commands::VenueNoticeRow>,
     pub engine_clock: EngineClockRow,
     pub conns: Vec<ConnLiveRow>,
+    pub order_conns: Option<Vec<crate::commands::OrderConnsRow>>,
     /// `None` distinguishes an old snapshot with no identity history from an empty table.
     pub strategy_timers: Option<Vec<(StrategyTimersHdr, Vec<StrategyTimerRow>)>>,
     /// Section 28 (absent = no fill recorded, including snapshots written before it existed).
@@ -946,6 +954,39 @@ pub fn read_seq_sections(body: &[u8]) -> Result<SeqSections, u16> {
         if !rr.is_empty() {
             return Err(err);
         }
+    }
+    if let Some(s) = sec(crate::commands::SECTION_ORDER_CONNS)? {
+        let err = crate::commands::SECTION_ORDER_CONNS;
+        if s.version != 1 {
+            return Err(err);
+        }
+        let mut rr = s.reader();
+        let mut rows = Vec::new();
+        let mut last = None;
+        for _ in 0..s.count {
+            let row: crate::commands::OrderConnsRow = rr.get_row().map_err(|_| err)?;
+            let key = (row.account.0, row.venue.0);
+            let orders: u32 = row.orders.iter().map(|x| x.count_ones()).sum();
+            let users = row.users.iter().any(|x| *x != 0);
+            if row._pad != [0; 5]
+                || row.flags & !15 != 0
+                || row.account.0 == 0
+                || row.venue.0 >= 64
+                || last.is_some_and(|v| v >= key)
+                || (row.flags & 1 != 0) != (orders > 0)
+                || (row.flags & 2 != 0) != (orders > 1)
+                || (row.flags & 8 != 0) != users
+                || (users && row.flags & 4 == 0)
+            {
+                return Err(err);
+            }
+            last = Some(key);
+            rows.push(row);
+        }
+        if !rr.is_empty() {
+            return Err(err);
+        }
+        out.order_conns = Some(rows);
     }
     Ok(out)
 }

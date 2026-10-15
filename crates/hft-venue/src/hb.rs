@@ -96,6 +96,11 @@ impl Hb {
 
     /// Earliest instant something above changes.
     pub fn next_deadline(&self, last_data: u64) -> Option<u64> {
+        self.next_deadline_with_activity(last_data)
+    }
+
+    /// GW idle liveness includes control frames; application-ping scheduling stays data-only.
+    pub fn next_deadline_with_activity(&self, last_activity: u64) -> Option<u64> {
         let mut d: Option<u64> = None;
         let mut put = |x: u64| d = Some(d.map_or(x, |y: u64| y.min(x)));
         if self.interval > 0 {
@@ -108,7 +113,7 @@ impl Hb {
             put(t.saturating_add(self.pong_to).saturating_add(1));
         }
         if self.idle_to > 0 {
-            put(last_data.saturating_add(self.idle_to).saturating_add(1));
+            put(last_activity.saturating_add(self.idle_to).saturating_add(1));
         }
         d
     }

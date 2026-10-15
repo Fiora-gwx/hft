@@ -20,8 +20,11 @@ def validate(host):
         raise ValueError("verification services require the complete release generator")
     if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]*", host["host"]):
         raise ValueError("host name")
-    if set(host["eni_b"]) != {"name"} or not re.fullmatch(r"[a-zA-Z0-9_.-]+", host["eni_b"]["name"]):
+    if not {"name"} <= set(host["eni_b"]) <= {"name", "device_index"} or not re.fullmatch(r"[a-zA-Z0-9_.-]+", host["eni_b"]["name"]):
         raise ValueError("interface name")
+    index = host["eni_b"].get("device_index", 1)
+    if type(index) is not int or not 0 <= index <= 31:
+        raise ValueError("interface device index")
     if set(host["egress"]) != {"prod"} or not host["egress"]["prod"]:
         raise ValueError("prod egress required")
     for item in host["egress"]["prod"]:
@@ -64,8 +67,9 @@ StartLimitIntervalSec=600
 [Service]
 Type=notify
 User=hft
+Group=hft-ctl
 Slice=hft-core.slice
-SupplementaryGroups=hft-ctl hft-stopmark
+SupplementaryGroups=hft hft-stopmark
 RuntimeDirectory=hft/core-prod
 RuntimeDirectoryMode=0751
 ExecCondition=+/usr/bin/test ! -e /var/lib/hft/guard/tripped
@@ -108,6 +112,8 @@ ReadWritePaths=/data/prod /dev/shm/hft/prod -/var/lib/hft/kill-switch
     expectation += [("guard.slices.hft.slice.cpu_max", str(r["quota"] * 1000) + " 100000"), ("guard.slices.hft.slice.cpu_weight", r["weight"]), ("guard.slices.hft-core.slice.cpu_weight", 100), ("guard.slices.hftbatch.slice.cpu_idle", 1), ("guard.slices.hftbatch.slice.cpu_max", "max 100000")]
     expectation += [("nic.egress[*].nic", host["eni_b"]["name"]), ("nic.egress[*].on_nic", True)]
     profile = 'manifest = "' + host["host"] + '"\nclass = "dev2"\n'
+    if "device_index" in host["eni_b"]:
+        profile += '\n[roles]\neni_b = ' + str(host["eni_b"]["device_index"]) + '\n'
     for key, value in expectation:
         profile += '\n[[expect]]\nkey = ' + json.dumps(key) + '\neq = ' + json.dumps(value) + '\nlevel = "required"\n'
     return result, profile

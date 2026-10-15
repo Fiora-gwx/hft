@@ -455,6 +455,9 @@ fn engine_clock<D: Driver<S>, S: StrategySet>(
     _slot: &InputSlot,
 ) -> R<()> {
     e.market.clear_run();
+    if e.cmd.conns.physical {
+        e.cmd.conns.clear_run();
+    }
     e.cmd.previews.clear();
     let base = e.clock.row.base_engine_ns;
     e.trace.rec("ledger.on_run_start", base as u64, 0);
@@ -1404,13 +1407,33 @@ fn order_conns<D: Driver<S>, S: StrategySet>(
         return Ok(());
     }
     let mut st = e.cmd.conns.get(c.account, c.venue);
-    match (c.role, c.conn) {
-        (ConnRole::UserStream, _) => {
+    if e.cmd.conns.physical {
+        let bits = if c.role == ConnRole::UserStream {
             st.us_seen = true;
-            st.us_up = up;
+            &mut st.users
+        } else {
+            &mut st.orders
+        };
+        let word = usize::from(c.conn) / 64;
+        let mask = 1u64 << (c.conn % 64);
+        if up {
+            bits[word] |= mask;
+        } else {
+            bits[word] &= !mask;
         }
-        (_, 0) => st.primary = up,
-        _ => st.standby = up,
+        let orders: u32 = st.orders.iter().map(|x| x.count_ones()).sum();
+        st.primary = orders != 0;
+        st.standby = orders > 1;
+        st.us_up = st.users.iter().any(|x| *x != 0);
+    } else {
+        match (c.role, c.conn) {
+            (ConnRole::UserStream, _) => {
+                st.us_seen = true;
+                st.us_up = up;
+            }
+            (_, 0) => st.primary = up,
+            _ => st.standby = up,
+        }
     }
     e.cmd.conns.set(c.account, c.venue, st);
     let primary_up = st.primary && (!st.us_seen || st.us_up);

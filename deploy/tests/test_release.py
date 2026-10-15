@@ -69,6 +69,8 @@ class Runner:
     def __call__(self, argv):
         argv = [str(x) for x in argv]
         self.calls.append(argv)
+        if argv[:2] == ["systemctl", "show"]:
+            return b"LoadState=loaded\nActiveState=inactive\n"
         if argv[1:3] == ["-m", "venv"]:
             Path(argv[-1]).mkdir()
 
@@ -187,7 +189,7 @@ def dep_225_activate_ok(tmp_path):
         (base / ("current-" + group)).symlink_to("releases/v1.2.2")
     runner.calls.clear()
     def first_boot(argv):
-        runner(argv)
+        output = runner(argv)
         args = [str(x) for x in argv]
         if args[0] == "install":
             assert args[1:] == ["-d", "-o", "hft", "-g", "hft-journal-ro", "-m", "2750", str(root / "data/prod")]
@@ -195,6 +197,7 @@ def dep_225_activate_ok(tmp_path):
             Path(args[-1]).mkdir(parents=True)
         if "verify" in args and args[0].endswith("hostprobe"):
             assert (root / "data/prod").is_dir(), "first activation must prepare the cold path"
+        return output
     record = release.activate("v1.2.3", "core", root, first_boot)
     assert record["acceptance"] == "pending" and record["hostprobe"] == "passed"
     assert os.readlink(base / "current-core") == "releases/v1.2.3"
@@ -203,8 +206,38 @@ def dep_225_activate_ok(tmp_path):
     assert os.readlink(base / "current-cold") == "releases/v1.2.2"
     assert runner.calls[-1][:2] == [str(base / "current-core/bin/hostprobe"), "verify"]
     assert "--expected" in runner.calls[-1] and "--out" in runner.calls[-1]
-    assert [c for c in runner.calls if c[0] == "systemctl"] == [["systemctl", "disable", "--now", "hft-core@prod.service"], ["systemctl", "daemon-reload"]]
+    assert [c[1] for c in runner.calls if c[0] == "systemctl"] == ["show", "disable", "daemon-reload", "disable"]
     assert (root / "etc/systemd/system/hft-core@prod.service").is_file()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Linux activation uses POSIX symlinks")
+def dep_225_first_activation_absent_unit(tmp_path):
+    # deploy/conftest.py collects dep_* without parametrize support: loop explicitly.
+    for active in ("inactive", "active"):
+        _first_activation_absent_unit(tmp_path / active, active)
+
+
+def _first_activation_absent_unit(tmp_path, active):
+    tmp_path.mkdir()
+    root, archive, checksum = fixture(tmp_path)
+    runner = Runner()
+    release.install(archive, checksum, root, runner)
+    base = root / "opt/hft"
+    def missing(argv):
+        result = runner(argv)
+        if list(argv)[:2] == ["systemctl", "show"]:
+            return ("LoadState=not-found\nActiveState=" + active + "\n").encode()
+        if list(argv)[:2] == ["systemctl", "disable"]:
+            assert (root / "etc/systemd/system/hft-core@prod.service").is_file()
+            assert ["systemctl", "daemon-reload"] in runner.calls
+        return result
+    if active == "active":
+        with pytest.raises(release.ReleaseError, match="missing unit is not inactive"):
+            release.activate("v1.2.3", "core", root, missing)
+        assert not (base / "current-core").exists()
+    else:
+        release.activate("v1.2.3", "core", root, missing)
+        assert [c[1] for c in runner.calls if c[0] == "systemctl"] == ["show", "daemon-reload", "disable"]
 
 
 def dep_222_fetch(tmp_path, monkeypatch):

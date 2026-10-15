@@ -26,6 +26,7 @@ def dep_121_explicit_user_slice():
             assert "\nUser=" in text and "\nSlice=" in text
     core = files["hft-core@prod.service"]
     assert "User=hft\n" in core and "Slice=hft-core.slice\n" in core
+    assert "Group=hft-ctl\n" in core and "SupplementaryGroups=hft hft-stopmark\n" in core
 
 
 def dep_122_runtime_dir_unique():
@@ -53,7 +54,7 @@ def dep_124_restart_policy():
 def dep_125_core_template():
     files, _ = generated()
     lines = files["hft-core@prod.service"].splitlines()
-    assert {"Type=notify", "WatchdogSec=10", "TimeoutStartSec=45", "TimeoutStopSec=20", "LimitMEMLOCK=infinity", "LimitNOFILE=65536", "RuntimeDirectoryMode=0751", "SupplementaryGroups=hft-ctl hft-stopmark"} <= set(lines)
+    assert {"Type=notify", "WatchdogSec=10", "TimeoutStartSec=45", "TimeoutStopSec=20", "LimitMEMLOCK=infinity", "LimitNOFILE=65536", "RuntimeDirectoryMode=0751", "Group=hft-ctl", "SupplementaryGroups=hft hft-stopmark"} <= set(lines)
     assert "[Install]" not in lines
     assert any(line.startswith("ExecStartPre=+") and "preflight.sh" in line for line in lines)
     assert "ExecStopPost=+/opt/hft/current-core/deploy/bin/hft-shm-release prod" in lines
@@ -104,6 +105,8 @@ def check_dev2_profile(manifest):
     assert "prod" in tomllib.loads(files["egress.toml"])
     assert expected["nic.egress[*].nic"]["eq"] == inventory["eni_b"]["name"]
     assert tomllib.loads(files["egress.toml"])["prod"] == inventory["egress"]["prod"]
+    if "device_index" in inventory["eni_b"]:
+        assert tomllib.loads(profile)["roles"] == {"eni_b": inventory["eni_b"]["device_index"]}
 
 
 @pytest.mark.skipif(os.environ.get("CI") != "true" or os.name != "posix", reason="isolated hosted-CI network namespace")

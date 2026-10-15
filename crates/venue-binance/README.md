@@ -321,11 +321,11 @@ Binance 的测试环境用 **Demo Trading**(演示环境);旧测试网(`testnet.
 | 连接 | 服务端 Ping | 无 Pong 断开 | 我们的动作 | 来源 |
 |---|---|---|---|---|
 | `Usdm` 行情 `fstream`(`/public`、`/market`)与用户流 `/private` | 每 3 min | 10 min | `hft-net` 自动回 Pong;BBO 连接另每 `feed.bbo_ping_ms` 发一次 WS Ping(`bbo_probe() = WsPing`);fstream 的 Pong 被批处理到约 50 ms,只用于存活,不进 RTT 直方图 | USDⓈ-M 文档口径([research/02 §1.4](../../design/research/02-exchange-connectivity.md)),待核实(方法 A) |
-| `Usdm` 下单 `ws-fapi` | 待核实 | 待核实 | 回 Pong;往返用 `{"method":"ping"}` 测(p50 1.95 ms,自测) | 待核实(开发备忘第 18 条) |
+| `Usdm` 下单 `ws-fapi` | 每 3 min | 10 min | 回显 Ping payload 的 Pong；每 5 s WS RTT 探测 | [官方 WS API](https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/websocket-api-general-info)，2026-10-15 核实 |
 | `Spot` 行情 `stream.binance.com` | 每 20 s | 1 min | 回 Pong;BBO 连接每 `feed.bbo_ping_ms` 发 WS Ping | 现货文档口径,当前值待核实(开发备忘第 18 条) |
 | `Spot` 下单 + 用户流 `ws-api` | 每 20 s | 1 min | 回 Pong | 现货 WS API 文档口径,待核实(开发备忘第 18 条) |
 
-- `heartbeat(role)`:四种连接都是 `HeartbeatSpec{ping: WsPing, interval_ms: 0(不发应用层 ping), unconditional: false, pong_timeout_ms: 10000, idle_timeout_ms: 服务端 Ping 间隔 × 2}`——`Usdm` 行情与用户流 360000;`Spot` 行情与 ws-api 40000;`Usdm` ws-fapi 核实前取 40000(下单连接每 5 s 有 RTT 探测的 Pong,不会因安静而超时);`app_ping` 写 0 字节(用 WS Ping)。
+- `heartbeat(role)`:四种连接都是 `HeartbeatSpec{ping: WsPing, interval_ms: 0(不发应用层 ping), unconditional: false, pong_timeout_ms: 10000, idle_timeout_ms: 服务端 Ping 间隔 × 2}`——`Usdm` 行情、用户流与 ws-fapi 360000；`Spot` 行情与 ws-api 40000;`app_ping` 写 0 字节(用 WS Ping)。
 - 每秒一次的 Ping 与回帧计入行情连接的入向消息限额(`Usdm` 10 条/s、`Spot` 5 条/s;Ping/Pong 帧是否计数待核实(开发备忘第 18 条),核实前按计数处理):订阅帧按限额的一半再减 1 条/s 发送。
 - BBO 补帧:`@bookTicker` 订阅后是否立即推当前 BBO 待核实(方法 B);核实前 `bbo_snapshot_request` 返回 `Ok(true)`:`Usdm` `GET /fapi/v1/ticker/bookTicker?symbol=`(权重 2;`BBO_SNAPSHOT_BATCH = 1`,`insts.len() > 1` → `ProtoErr::BufFull`;响应的 `lastUpdateId` 作 `update_id`(缺失为 0,字段待核实,开发备忘第 17 条),`time` → `ex_ts_ns`)、`Spot` `GET /api/v3/ticker/bookTicker?symbols=[…]`(`BBO_SNAPSHOT_BATCH = u16::MAX`;JSON 数组 URL 编码,如 `symbols=%5B%22BTCUSDT%22%2C%22BNBUSDT%22%5D`;放不进 `path_query` → `ProtoErr::BufFull`;无序号与时间,`update_id = 0`、`ex_ts_ns = 0`)。`decode_bbo_snapshot` 返回产出的 `Bbo` 条数;响应里不在传入 `insts` 中的 symbol 跳过;响应是错误体(`{"code":…}`)→ `DecodeErr::Shape`。
 
