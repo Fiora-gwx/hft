@@ -470,6 +470,8 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 ### BGT-034 资金费周期由相邻两次不同的 nextFundingTime 推出
 
+- REST 子用例：current-fund-rate 提供 1/2/4/8 小时周期与未来 nextUpdate；拒绝错误品种、零周期、过期/越界时间、429/500。seed 后同时间戳首帧保持周期，后续变化重算。
+
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:table
 - 里程碑:M3
@@ -2160,7 +2162,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 规则:[账户配置核验](README.md#账户配置核验)
 - 级别:golden
 - 里程碑:M3
-- 输入:`fixtures/bitget-usdt-futures/rest.account_info/demo_unknown_permissions.in` 为真实 demo unknown/空权限列表;Verified 与 Unverifiable 均拒绝。ok/withdraw_perm/no_trade_perm/uid_mismatch 及现货正常权限样本仍待采集;用户与父账户 UID 清洗为 `acct-0001`。
+- 输入:`fixtures/bitget-usdt-futures/rest.account_info/demo_unknown_permissions.in` 为真实 demo unknown/空权限列表；生产严格入口的 Verified 与 Unverifiable 均拒绝。显式 Testnet + 非正式账户的环境入口接受此精确组合并继续核验 UID；合成 read-only/含 withdraw/UID 矛盾仍拒绝。ok/withdraw_perm/no_trade_perm/uid_mismatch 及现货正常权限实采仍待补充；UID 清洗为 `acct-0001`。
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_328_account_info`
 

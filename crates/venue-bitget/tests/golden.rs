@@ -168,6 +168,79 @@ fn bgt_328_account_info() {
         compare(&expected, &[serde_json::json!({"error":format!("{error:?}")})]);
         assert!(state.config.is_none());
     }
+    // The explicit demo-only waiver does not manufacture a permission fact or waive identity.
+    let rd = account_rd(false);
+    let mut state = State::default();
+    let (settings, _) = capture("rest.account_settings", "basic_oneway");
+    BitgetUsdtFutures::account_decode(rd, ACCT, &Query::Settings, 200, &settings, 1, &mut state).unwrap();
+    let mut demo = cfg();
+    demo.env = hft_venue_proto::VenueEnv::Testnet;
+    BitgetUsdtFutures::account_decode_env(&demo, rd, ACCT, &Query::Permissions, 200, &input, 1, &mut state)
+        .unwrap();
+    assert_eq!(state.config.unwrap().uid_keys, 3);
+    assert!(
+        BitgetUsdtFutures::account_decode_env(
+            &demo,
+            formal_account_rd(),
+            ACCT,
+            &Query::Permissions,
+            200,
+            &input,
+            1,
+            &mut state
+        )
+        .is_err()
+    );
+    for replacement in ["read-only", "read-and-write", "unexpected"] {
+        let bad = String::from_utf8(input.clone())
+            .unwrap()
+            .replace("unknown", replacement);
+        assert!(
+            BitgetUsdtFutures::account_decode_env(
+                &demo,
+                rd,
+                ACCT,
+                &Query::Permissions,
+                200,
+                bad.as_bytes(),
+                1,
+                &mut state
+            )
+            .is_err()
+        );
+    }
+    let wrong_uid = String::from_utf8(input.clone())
+        .unwrap()
+        .replace("acct-0001", "acct-0002");
+    assert!(
+        BitgetUsdtFutures::account_decode_env(
+            &demo,
+            rd,
+            ACCT,
+            &Query::Permissions,
+            200,
+            wrong_uid.as_bytes(),
+            1,
+            &mut state
+        )
+        .is_err()
+    );
+    let withdraw = String::from_utf8(input)
+        .unwrap()
+        .replace("\"permissions\":[]", "\"permissions\":[\"withdraw\"]");
+    assert!(
+        BitgetUsdtFutures::account_decode_env(
+            &demo,
+            rd,
+            ACCT,
+            &Query::Permissions,
+            200,
+            withdraw.as_bytes(),
+            1,
+            &mut state
+        )
+        .is_err()
+    );
 }
 
 #[test]

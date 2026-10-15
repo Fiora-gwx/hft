@@ -78,7 +78,7 @@ pub mod spot { pub enum MdClass { JsonBookTicker, JsonDepthTopN /* combined 流�
 | `<s>@depth@100ms`(增量深度,可选扩展) | `Chain` | 一条 `L2Batch{prev_id = pu, last_id = u}`(快照后首条 `prev_id = snap_id`) | 同上 |
 | REST `GET /fapi/v1/depth?symbol=&limit=1000`(增量深度,可选扩展) | 快照 | `L2Snapshot{origin = Exchange, snap_id = lastUpdateId}` | `ex_ts_ns ← T`(响应体),`ex_send_ns ← E` |
 | `<s>@aggTrade` | `Monotonic` on `a` | `Trade{trade_id=a, taker_side = m ? Sell : Buy}` | `ex_ts_ns ← T`,`ex_send_ns ← E` |
-| `<s>@markPrice@1s` | `ByTime` on `E` | `MarkPrice{p}`、`IndexPrice{i}`、`Funding{r, next=T}`(实际结算周期取相邻 `T` 之差,周期变化即反映在 `Funding` 里;`FeedCtx` 按 inst 记上一个不同的 `T` 与最近一次的差:该 inst 还没见过 `T` 变化时 `interval_s = 0`,之后为最近一次变化的差(秒)) | `ex_send_ns ← E`(`ex_ts_ns = 0`) |
+| `<s>@markPrice@1s` | `ByTime` on `E` | `MarkPrice{p}`、`IndexPrice{i}`、`Funding{r, next=T}`；`FeedCtx` 按 inst 记录周期，未取得 REST seed 且还未见过 `T` 变化时为 0，之后取最近一次不同 `T` 的正差(秒)；启动 seed 规则见[测试环境 warm 账户入口](#测试环境-warm-账户入口) | `ex_send_ns ← E`(`ex_ts_ns = 0`) |
 | `<s>@forceOrder` | `None` | `Liquidation{px ← o.ap, qty ← o.z, side ← o.S}`(公共强平流,与本账户无关) | `ex_ts_ns ← o.T`,`ex_send_ns ← E` |
 
 | 频道(`Spot`) | 规则 | 事件 | 时间戳 |
@@ -527,6 +527,8 @@ BBO 常见字段顺序直接扫描借用切片；真实捕获的 `ps/st` 跳过�
 USDM 的 `encode_rest(CancelAll)` 按合约生成签名 DELETE，全账户 inst=0 返回 Unsupported，供运行时逐合约展开。REST code=200 只确认请求；不生成逐单取消回报。403/429/5xx 与业务错误保留结果未知，限速/时钟偏差另发连接提示。`dead_man_refresh` 按 inst 生成签名 POST；确认的 countdownTime 接受官方字符串及数字形式，值与请求必须相等。
 
 AccountProtocol 核对 exchangeInfo 的 tick/lot/minQty/minNotional；USDM accountConfig、symbolConfig 核验单向、单资产、全仓与杠杆，v3/account 和 v3/positionRisk 提供基线。遗留订单逐笔取消后查到空。REST 支持 HMAC/Ed25519，listenKey 由 REST 创建续期。accountConfig 不返回 UID，Demo 的非正式 Unverifiable 账户须使用同一 REST/WS key 并经人工身份确认；正式账户与完整跨主机权限/UID 查询不由此入口放行。
+
+启动期公共 `GET /fapi/v1/fundingInfo` 的成功完整列表提供调整后的 fundingIntervalHours，未调整品种采用协议标准 8h；随后逐品种 `premiumIndex` 提供 nextFundingTime，必须处于当前时刻之后的一个周期内。两个观察都成功才 seed feed 的周期，第一条 WS Funding 将该值写入 journal；任一步不可用则不使用部分 seed，保持等待 WS 时间戳变化。接口含义见 [官方 fundingInfo](https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Get-Funding-Info)。这不替代认证 funding income 的实际金额记账。
 
 私有流支持 ORDER_TRADE_UPDATE、ACCOUNT_UPDATE、现货包装 executionReport/outboundAccountPosition；成交按有限窗口去重，非正 trade id 按订单累计量去重；资金费推送按时刻与钱包余额去重。流结束触发运行时重连认证。
 

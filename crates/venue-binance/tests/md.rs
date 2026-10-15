@@ -90,6 +90,34 @@ fn bin_033_funding_interval() {
         .unwrap();
         assert!(matches!(&sink.md[2], MdRec::Funding(f) if f.interval_s == expected));
     }
+    use hft_venue_proto::account::{AccountProtocol, FundingSchedule};
+    let mut seeded = FeedCtx::USDM;
+    Usdm::seed_funding(
+        &mut seeded,
+        &[FundingSchedule {
+            inst: U_BTC,
+            next_ms: 1_790_006_400_000,
+            interval_s: 28_800,
+        }],
+    )
+    .unwrap();
+    for (offset, interval) in [(0, 28_800), (0, 28_800), (14_400_000, 14_400)] {
+        let msg = format!(
+            r#"{{"E":1790000000125,"s":"BTCUSDT","p":"65001.23","i":"65000.50","r":"0.0001","T":{}}}"#,
+            1_790_006_400_000i64 + offset
+        );
+        let mut sink = VecSink::default();
+        Usdm::decode_md(
+            rd(),
+            &mut seeded,
+            usdm::MdClass::MarkPrice,
+            msg.as_bytes(),
+            &RX,
+            &mut sink,
+        )
+        .unwrap();
+        assert!(matches!(&sink.md[2], MdRec::Funding(f) if f.interval_s == interval));
+    }
 }
 
 #[test]

@@ -587,6 +587,8 @@ pub enum ExchIdHint { Resolved { epoch: u16, slot: SlotId, gen: u32 }, Recorded,
 
 `account::AccountProtocol` 提供纯 `account_request` / `account_decode`，覆盖规则、账户模式/权限、余额/持仓、撤销遗留订单、listenKey 和结算流水。State 是一轮观察结果，不拥有账本；允许 warm 分配。`margin_items` 保存本轮非零持仓的强平价，未观察到 ADL 时为 255；消失持仓的 PositionReport 为零，但不留下旧 MarginItem。规则使用 refdata 的 wire 指数归一化后精确匹配定点配置，金额转 Notional 时 HalfEven；错误不带凭证或响应正文。
 
+`account_decode_env` 显式携带 VenueCfg，缺省转发生产严格入口；产品线可仅在 Testnet + 非正式账户豁免其已证实不可用的权限枚举，身份/读取/实际订单响应仍验证。`funding_bootstrap_queries` 返回启动期可选公共 REST 查询，成功后 `State.funding_schedule` 只含 inst、下次结算 UTC 毫秒与实际周期秒数；`seed_funding` 在 feed 启动前装入私有上下文。第一条 WS Funding 的完整事件记录这些输入，不生成推测的结算金额。
+
 ### 有界账户查询与私有订阅扩展
 
 `AcctProtocol` 不为缺失实现提供成功默认值；`acct_request_signed` 调用期间借用凭证，默认转发 `acct_request`，需签名的实现必须覆盖；每账户的 ctx 与 scratch 由 warm 任务独占，完整序列到齐才调用 finish。`AcctQuery::selected` 同时约束轮次和推送兜底标记。`GoldenDriver::run_acct` 逐字段比对每步请求及整组带类型标签的报告，返回首个不同记录/字节的位置。具体产品线的有界解码接入仍待完成。

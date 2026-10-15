@@ -10,6 +10,23 @@ macro_rules! implementation {
     ($p:ty, $fut:expr) => {
         impl AccountProtocol for $p {
             type Funding = crate::BitgetUsdtFutures;
+            fn funding_bootstrap_queries(rd: &RefData) -> Vec<Query> {
+                if !$fut {
+                    return Vec::new();
+                }
+                rd.insts_of_venue(Self::VENUE)
+                    .iter()
+                    .map(|i| Query::FundingSchedule {
+                        symbol: rd.inst_meta(*i).symbol.to_string(),
+                    })
+                    .collect()
+            }
+            fn seed_funding(ctx: &mut Self::FeedCtx, rows: &[FundingSchedule]) -> Result<(), DecodeErr> {
+                for row in rows {
+                    ctx.seed_funding(row.inst, row.next_ms, row.interval_s)?;
+                }
+                Ok(())
+            }
             fn account_request(
                 c: &VenueCfg,
                 k: &Credential,
@@ -31,6 +48,30 @@ macro_rules! implementation {
                 decode(
                     <Self as VenueProtocol>::VENUE,
                     $fut,
+                    VenueEnv::Prod,
+                    rd,
+                    a,
+                    q,
+                    status,
+                    b,
+                    t,
+                    s,
+                )
+            }
+            fn account_decode_env(
+                cfg: &VenueCfg,
+                rd: &RefData,
+                a: AccountId,
+                q: &Query,
+                status: u16,
+                b: &[u8],
+                t: i64,
+                s: &mut State,
+            ) -> Result<(), DecodeErr> {
+                decode(
+                    <Self as VenueProtocol>::VENUE,
+                    $fut,
+                    cfg.env,
                     rd,
                     a,
                     q,
@@ -62,6 +103,9 @@ fn request(
         Query::Permissions => "/api/v3/account/info".into(),
         Query::Balances => "/api/v3/account/assets".into(),
         Query::Positions if fut => format!("/api/v3/position/current-position?category={cat}"),
+        Query::FundingSchedule { symbol } if fut && safe_token(symbol) => {
+            format!("/api/v3/market/current-fund-rate?category={cat}&symbol={symbol}")
+        }
         Query::OpenOrders { cursor } => {
             if !cursor.is_empty() && !safe_token(cursor) {
                 return Err(ProtoErr::Cfg);
@@ -236,6 +280,7 @@ fn identity(
 fn decode(
     v: VenueId,
     fut: bool,
+    env: VenueEnv,
     rd: &RefData,
     a: AccountId,
     q: &Query,
@@ -244,11 +289,48 @@ fn decode(
     t: i64,
     s: &mut State,
 ) -> Result<(), DecodeErr> {
+    if let Query::FundingSchedule { symbol } = q {
+        if status != 200 {
+            return Err(DecodeErr::Shape);
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Row {
+            symbol: String,
+            funding_rate_interval: String,
+            next_update: String,
+        }
+        let rows: Vec<Row> = data(b)?;
+        if rows.len() != 1 || rows[0].symbol != *symbol {
+            return Err(DecodeErr::Shape);
+        }
+        let hours = rows[0]
+            .funding_rate_interval
+            .parse::<u32>()
+            .map_err(|_| DecodeErr::Number)?;
+        if ![1, 2, 4, 8].contains(&hours) {
+            return Err(DecodeErr::Shape);
+        }
+        let next_ms = rows[0]
+            .next_update
+            .parse::<i64>()
+            .map_err(|_| DecodeErr::Number)?;
+        let until = next_ms.checked_sub(t).ok_or(DecodeErr::Number)?;
+        if until <= 0 || until > i64::from(hours) * 3_600_000 {
+            return Err(DecodeErr::Shape);
+        }
+        s.funding_schedule.push(FundingSchedule {
+            inst: instrument(rd, v, symbol)?,
+            next_ms,
+            interval_s: hours * 3600,
+        });
+        return Ok(());
+    }
     let mut next = State {
         config: s.config,
         ..State::default()
     };
-    decode_page(v, fut, rd, a, q, status, b, t, &mut next)?;
+    decode_page(v, fut, env, rd, a, q, status, b, t, &mut next)?;
     for (n, row) in next.balances.iter().enumerate() {
         if row.locked.0 < 0
             || (!fut && row.free.0 < 0)
@@ -301,6 +383,7 @@ fn decode(
 fn decode_page(
     v: VenueId,
     fut: bool,
+    env: VenueEnv,
     rd: &RefData,
     a: AccountId,
     q: &Query,
@@ -379,9 +462,14 @@ fn decode_page(
         }
         Query::Permissions => {
             let r: Permissions = data(b)?;
-            if r.perm_type != "read-and-write"
-                || !r.permissions.iter().any(|x| x == "uta_trade")
-                || r.permissions.iter().any(|x| x == "withdraw")
+            let demo_unavailable = env == VenueEnv::Testnet
+                && !rd.account(a).is_prod
+                && r.perm_type == "unknown"
+                && r.permissions.is_empty();
+            if !demo_unavailable
+                && (r.perm_type != "read-and-write"
+                    || !r.permissions.iter().any(|x| x == "uta_trade")
+                    || r.permissions.iter().any(|x| x == "withdraw"))
             {
                 return Err(DecodeErr::Shape);
             }

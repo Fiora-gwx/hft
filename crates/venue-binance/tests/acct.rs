@@ -3,6 +3,53 @@ use crate::support::*;
 use hft_venue_proto::account::{AccountProtocol, Query, State};
 use venue_binance::Usdm;
 
+#[test]
+fn bin_033_rest_schedule_requires_complete_successful_observation() {
+    let rd = rd();
+    let mut state = State::default();
+    let next = 1_790_006_400_000i64;
+    let query = Query::FundingSchedule {
+        symbol: "BTCUSDT".into(),
+    };
+    let premium = format!(r#"{{"symbol":"BTCUSDT","nextFundingTime":{next}}}"#);
+    assert!(
+        Usdm::account_decode(rd, ACCT, &query, 200, premium.as_bytes(), next - 1000, &mut state).is_err()
+    );
+    assert!(
+        Usdm::account_decode(rd, ACCT, &Query::FundingInfo, 500, b"[]", next - 1000, &mut state).is_err()
+    );
+    Usdm::account_decode(rd, ACCT, &Query::FundingInfo, 200, b"[]", next - 1000, &mut state).unwrap();
+    Usdm::account_decode(rd, ACCT, &query, 200, premium.as_bytes(), next - 1000, &mut state).unwrap();
+    assert_eq!(state.funding_schedule[0].interval_s, 28_800);
+    let info = br#"[{"symbol":"BTCUSDT","fundingIntervalHours":4}]"#;
+    Usdm::account_decode(rd, ACCT, &Query::FundingInfo, 200, info, next - 1000, &mut state).unwrap();
+    state.funding_schedule.clear();
+    Usdm::account_decode(rd, ACCT, &query, 200, premium.as_bytes(), next - 1000, &mut state).unwrap();
+    assert_eq!(state.funding_schedule[0].interval_s, 14_400);
+    for body in [
+        br#"{}"#.as_slice(),
+        br#"[{"symbol":"BTCUSDT","fundingIntervalHours":0}]"#,
+        br#"[{"symbol":"BTCUSDT","fundingIntervalHours":4},{"symbol":"BTCUSDT","fundingIntervalHours":8}]"#,
+    ] {
+        assert!(
+            Usdm::account_decode(rd, ACCT, &Query::FundingInfo, 200, body, next - 1000, &mut state).is_err()
+        );
+    }
+    assert!(Usdm::account_decode(rd, ACCT, &query, 200, premium.as_bytes(), next, &mut state).is_err());
+    assert!(
+        Usdm::account_decode(
+            rd,
+            ACCT,
+            &query,
+            200,
+            premium.as_bytes(),
+            next - 14_400_001,
+            &mut state
+        )
+        .is_err()
+    );
+}
+
 fn margin(equity: &str, maintenance: &str) -> State {
     let body = serde_json::json!({
         "totalMarginBalance": equity, "totalMaintMargin": maintenance,

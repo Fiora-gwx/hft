@@ -10,6 +10,26 @@ macro_rules! implementation {
     ($p:ty, $fut:expr) => {
         impl AccountProtocol for $p {
             type Funding = crate::Usdm;
+            fn funding_bootstrap_queries(rd: &RefData) -> Vec<Query> {
+                if !$fut {
+                    return Vec::new();
+                }
+                let mut queries = vec![Query::FundingInfo];
+                queries.extend(
+                    rd.insts_of_venue(Self::VENUE)
+                        .iter()
+                        .map(|i| Query::FundingSchedule {
+                            symbol: rd.inst_meta(*i).symbol.to_string(),
+                        }),
+                );
+                queries
+            }
+            fn seed_funding(ctx: &mut Self::FeedCtx, rows: &[FundingSchedule]) -> Result<(), DecodeErr> {
+                for row in rows {
+                    ctx.seed_funding(row.inst, row.next_ms, row.interval_s)?;
+                }
+                Ok(())
+            }
             fn account_request(
                 c: &VenueCfg,
                 k: &Credential,
@@ -76,6 +96,10 @@ pub(crate) fn request(
         }
         Query::Positions if fut => "/fapi/v3/positionRisk".into(),
         Query::Positions => return Err(ProtoErr::Unsupported),
+        Query::FundingInfo if fut => "/fapi/v1/fundingInfo".into(),
+        Query::FundingSchedule { symbol } if fut && safe_token(symbol) => {
+            format!("/fapi/v1/premiumIndex?symbol={symbol}")
+        }
         Query::DeadMan { symbol, timeout_ms } if fut && safe_token(symbol) => {
             out.method = Method::Post;
             format!("/fapi/v1/countdownCancelAll?symbol={symbol}&countdownTime={timeout_ms}")
@@ -101,7 +125,7 @@ pub(crate) fn request(
         _ => return Err(ProtoErr::Cfg),
     };
     out.path_query.push(path.as_bytes())?;
-    if matches!(q, Query::Instruments) {
+    if matches!(q, Query::Instruments) || q.optional_funding() {
         return Ok(());
     }
     out.headers.push(b"X-MBX-APIKEY: ")?;
@@ -283,6 +307,9 @@ fn decode(
     t: i64,
     s: &mut State,
 ) -> Result<(), DecodeErr> {
+    if q.optional_funding() {
+        return funding_schedule(v, rd, q, status, b, t, s);
+    }
     let mut next = State {
         config: s.config,
         ..State::default()
@@ -333,6 +360,81 @@ fn decode(
     Ok(())
 }
 
+fn funding_schedule(
+    v: VenueId,
+    rd: &RefData,
+    q: &Query,
+    status: u16,
+    b: &[u8],
+    now: i64,
+    s: &mut State,
+) -> Result<(), DecodeErr> {
+    if status != 200 {
+        return Err(DecodeErr::Shape);
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Info {
+        symbol: String,
+        funding_interval_hours: u32,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Premium {
+        symbol: String,
+        next_funding_time: i64,
+    }
+    match q {
+        Query::FundingInfo => {
+            let rows: Vec<Info> = from(b)?;
+            // fundingInfo lists adjusted contracts only; the documented standard interval is 8h.
+            let mut intervals: Vec<_> = rd.insts_of_venue(v).iter().map(|i| (*i, 28_800)).collect();
+            let mut seen = Vec::new();
+            for row in rows {
+                if !(1..=24).contains(&row.funding_interval_hours) {
+                    return Err(DecodeErr::Shape);
+                }
+                if let Ok(inst) = instrument(rd, v, &row.symbol) {
+                    if seen.contains(&inst) {
+                        return Err(DecodeErr::Shape);
+                    }
+                    seen.push(inst);
+                    let item = intervals
+                        .iter_mut()
+                        .find(|x| x.0 == inst)
+                        .ok_or(DecodeErr::Shape)?;
+                    item.1 = row.funding_interval_hours * 3600;
+                }
+            }
+            s.funding_intervals = intervals;
+        }
+        Query::FundingSchedule { symbol } => {
+            let row: Premium = from(b)?;
+            if row.symbol != *symbol {
+                return Err(DecodeErr::Shape);
+            }
+            let inst = instrument(rd, v, symbol)?;
+            let interval_s = s
+                .funding_intervals
+                .iter()
+                .find(|x| x.0 == inst)
+                .ok_or(DecodeErr::Shape)?
+                .1;
+            let until = row.next_funding_time.checked_sub(now).ok_or(DecodeErr::Number)?;
+            if until <= 0 || until > i64::from(interval_s) * 1000 {
+                return Err(DecodeErr::Shape);
+            }
+            s.funding_schedule.push(FundingSchedule {
+                inst,
+                next_ms: row.next_funding_time,
+                interval_s,
+            });
+        }
+        _ => return Err(DecodeErr::Shape),
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn decode_page(
     v: VenueId,
@@ -350,6 +452,7 @@ fn decode_page(
     }
     let ns = t.checked_mul(1_000_000).ok_or(DecodeErr::Overflow)?;
     match q {
+        Query::FundingInfo | Query::FundingSchedule { .. } => return Err(DecodeErr::Shape),
         Query::Instruments => {
             let rows: Instruments = from(b)?;
             for i in rd.insts_of_venue(v) {

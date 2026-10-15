@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-15 | 非正式 Testnet 的 Bitget unknown/空权限枚举允许通过权限部分，身份/认证读取保持严格、实测须首单 ack；启动 REST fundingInfo/premiumIndex/current-fund-rate seed 真实周期，失败继续等待 WS 变化，首个 Funding 输入记录周期 | 负责人批准 demo 冷启动，BGT-328、BIN-033、BGT-034、CORE-120 | venue-proto、venue runtime、两所 account/feed ctx 与 core 装配及规格 | 待评审(账户/资金费) |
 | 2026-10-15 | 显式 local_demo 秘密源仅用于 testnet 端点与非正式账户，root 0700/0400-0600 文件检查替代该模式的 IAM 预检；生产与其他安全检查保持严格 | 负责人批准无 IAM demo 主机启动，DEP-168/CORE-222 | deploy 准备器/预检、core 配置与规格；[决定](../.agents/notes/implemented/architecture/2026-10-15-demo-runtime-prerequisites.md) | 待评审(启动安全) |
 | 2026-10-15 | Binance/Bitget 资金费历史金额在 Notional -6 边界作一次 HalfEven 舍入,保留符号/IN-OUT 方向,允许交易所八位小数;每笔至多 0.5 微 USDT 表示误差,不把舍入视为原始现金逐位无损 | BGT-336 实采 0.00238005 导致整页 Number,BIN-332 同边界回归 | 两个 venue 的 funding、README、TESTS 与真实金样 | 待评审(资金精度) |
 | 2026-10-15 | Bitget 只读挂单/成交分页接受真实 null cursor 与显式 null 空列表;仍拒绝缺 list、空页带续页、重复/非法游标 | BGT-334/335,真实 demo 空页无法完成对账 | venue-bitget readonly、README、TESTS 与双产品金样 | 待评审(对账) |

@@ -739,6 +739,8 @@ VEN-341 用以本 crate 为根的 `cargo tree` 检查依赖闭包与特性,不�
 
 `account::Client<P>` 串行执行 warm 协议。撤单按“查一页、逐笔撤、重查第一页”，超过 max_cancel_rounds 失败，不沿已失效的删除分页 cursor 继续。只交付完整 State。私有重连前重新核验账户/身份，再调用 SessionDriver::start_prepared；独立用户流使用 bootstrap 路径。周期失败丢弃部分状态，由调用方发布不可读闸门并重试。
 
+启动最后可执行协议声明的公共资金费周期查询；传输/HTTP/解析失败只丢弃整组 funding_schedule 并保持此前等待 WS 时间戳变化的行为，不放宽必需账户检查。成功观察在 feed 启动前 seed 其上下文，第一条实时 Funding 输入包含周期并先写 seq journal；不以估计费率或余额差生成 FundingSettle。周期账户核验不重新覆盖 feed 的已观察周期。
+
 固定容量 order_rest SPSC 将查单送 warm worker，响应回到 gw 唯一上下文解码；失败保持 OutcomeUnknown。CancelAll 可退化为镜像内逐单 WS 撤单。资金费流水按有界 cursor 分页，只供比较，截断/循环拒绝整轮。
 
 账户 warm 调度在 REST 与会话 UID 比对时，只对 Unverifiable 账户容许缺失值，并发布 uid_keys=0；双方都有值但不同仍失败。保证金条目随同一轮持仓观察传递，失败轮次不发布部分 State。

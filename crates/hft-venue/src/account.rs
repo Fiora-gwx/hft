@@ -143,6 +143,9 @@ impl<P: AccountProtocol, T: Transport> Client<P, T> {
         if caps.dms != hft_refdata::DeadManCap::None {
             self.deadman(caps.dms_timeout_ms);
         }
+        for q in P::funding_bootstrap_queries(self.rd) {
+            self.add(q);
+        }
     }
     fn deadman(&mut self, timeout_ms: u32) {
         for i in self.rd.insts_of_venue(P::VENUE) {
@@ -306,6 +309,26 @@ impl<P: AccountProtocol, T: Transport> Client<P, T> {
                 return Ok(true);
             }
             let work = self.active.take().ok_or(Error::Busy)?;
+            if work.query.optional_funding() {
+                let valid = result.is_ok_and(|r| {
+                    P::account_decode_env(
+                        &self.venue,
+                        self.rd,
+                        self.account,
+                        &work.query,
+                        r.status,
+                        &r.body,
+                        now / 1_000_000,
+                        &mut self.state,
+                    )
+                    .is_ok()
+                });
+                if !valid {
+                    self.discard_funding_bootstrap();
+                }
+                self.finish_query(now);
+                return Ok(true);
+            }
             let r = result.map_err(Error::Transport)?;
             let q = &work.query;
             if matches!(q, Query::ListenKey | Query::Keepalive) {
@@ -335,7 +358,8 @@ impl<P: AccountProtocol, T: Transport> Client<P, T> {
                 } else {
                     &mut self.state
                 };
-                P::account_decode(
+                P::account_decode_env(
+                    &self.venue,
                     self.rd,
                     self.account,
                     q,
@@ -389,11 +413,7 @@ impl<P: AccountProtocol, T: Transport> Client<P, T> {
                     }
                 }
             }
-            self.next = now + i64::from(self.cfg.request_gap_ms) * 1_000_000;
-            if self.queue.is_empty() {
-                self.ready = true;
-                self.last_poll = now;
-            }
+            self.finish_query(now);
             return Ok(true);
         }
         if self.ready
@@ -445,11 +465,29 @@ impl<P: AccountProtocol, T: Transport> Client<P, T> {
         };
         let key = if w.session { &self.session } else { &self.rest };
         let mut req = RestReqBuf::default();
-        P::account_request(&self.venue, key, &w.query, now / 1_000_000, &mut req)
-            .map_err(|_| Error::Protocol(w.query.clone()))?;
-        self.send(&req, now)?;
+        let request = P::account_request(&self.venue, key, &w.query, now / 1_000_000, &mut req)
+            .map_err(|_| Error::Protocol(w.query.clone()));
+        let sent = request.and_then(|()| self.send(&req, now));
+        if w.query.optional_funding() && sent.is_err() {
+            self.discard_funding_bootstrap();
+            self.finish_query(now);
+            return Ok(true);
+        }
+        sent?;
         self.active = Some(w);
         Ok(true)
+    }
+    fn discard_funding_bootstrap(&mut self) {
+        self.state.funding_intervals.clear();
+        self.state.funding_schedule.clear();
+        self.queue.retain(|w| !w.query.optional_funding());
+    }
+    fn finish_query(&mut self, now: i64) {
+        self.next = now + i64::from(self.cfg.request_gap_ms) * 1_000_000;
+        if self.queue.is_empty() {
+            self.ready = true;
+            self.last_poll = now;
+        }
     }
     fn send(&mut self, req: &RestReqBuf, now: i64) -> Result<(), Error> {
         let method = match req.method {

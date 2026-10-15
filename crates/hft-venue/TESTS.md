@@ -3659,3 +3659,5 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 
 账户执行、私有归属与 REST 池的实现回归分别见 tests/acct_sched.rs、tests/acct_fetch.rs、tests/private.rs、tests/gw_rest.rs。VEN-313 当前覆盖调用方提供证据及缺证据失败的交接路径；VEN-314 的驱动内 UID 重试仍未完成。VEN-073/294 前置修订由 [容量边界说明](../../.agents/notes/proposed/testing/2026-10-15-venue-capacity-preconditions.md) 待负责人确认。
 warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入口显式传参;VEN-228/391 验证查单、会话维护与全撤扫描传入账户凭证,模板不保留密钥的回归归 BIN-063/BGT-063。
+
+启动资金费周期的可选 REST 队列由 CORE-120 的真实两协议 mock 进程覆盖：成功、超时、429、坏正文及部分观察丢弃；账户必需检查仍失败关闭。feed seed 的结果按 BIN-033/BGT-034 验证。

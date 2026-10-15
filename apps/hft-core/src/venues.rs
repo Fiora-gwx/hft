@@ -234,7 +234,7 @@ fn build<P: AccountProtocol + Send>(
     md: Producer<FeedMsg>,
     bulk: ByteProducer,
     commands: Consumer<FeedCmd>,
-    ctx: P::FeedCtx,
+    mut ctx: P::FeedCtx,
     gw_ctx: fn() -> P::GwCtx,
     session_alg: SignAlg,
     secrets: &crate::secrets::SecretFiles,
@@ -381,6 +381,10 @@ where
             }
             std::thread::sleep(Duration::from_millis(1));
         }
+        // The first live Funding event records this REST-derived interval in seq journal.
+        // Rates/timestamps still come from the live frame; failed REST keeps the existing wait.
+        P::seed_funding(&mut ctx, &baseline.funding_schedule)
+            .map_err(|_| Error::config("FundingBootstrap", "feed schedule capacity or shape"))?;
         account_client = Some(client);
         let tpl = P::build_templates(&venue, rd, a, &rest)
             .map_err(|_| Error::config("Templates", "cannot build account templates"))?;

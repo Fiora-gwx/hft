@@ -12,6 +12,8 @@ MarginItem 由 warm State 传至账户入口，CORE-169 验证变长编码；只
 
 CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs::core_120_mock_accounts_bootstrap_reauth_and_drift` 以独立子进程、两家真实协议和脚本 REST 验证单位倍率规则归一化、撤空、基线、重新核验、超时/错误模式失败与余额差异不覆盖账本；不替代真实 TLS、交易所或正式恢复验收。资金费账单复用 FundingPoll，沿用现有实际结算记账与去重。
 
+同用例验证可选资金费周期 REST 的成功、超时、429 与坏正文；失败丢弃周期观察、保持账户基线。BGT-328 验证环境感知权限入口；BIN-033/BGT-034 验证 REST seed 后第一条 WS 的周期及后续变更。
+
 认证入口不把凭证放入 Templates;当前 signed warm 方法按调用借用 Credential。模板生命周期回归归 BIN-063/BGT-063,见对应组件 TESTS。旧签名兼容入口不能恢复模板密钥。
 
 字段投影的语法、重复字段与使用字段校验由 BIN-026、BGT-027 的差分检查覆盖；VPR-132 的零分配契约沿用 venue alloc 测试。
