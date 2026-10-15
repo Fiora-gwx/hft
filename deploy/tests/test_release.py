@@ -211,8 +211,14 @@ def dep_225_activate_ok(tmp_path):
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Linux activation uses POSIX symlinks")
-@pytest.mark.parametrize("active", ["inactive", "active"])
-def dep_225_first_activation_absent_unit(tmp_path, active):
+def dep_225_first_activation_absent_unit(tmp_path):
+    # deploy/conftest.py collects dep_* without parametrize support: loop explicitly.
+    for active in ("inactive", "active"):
+        _first_activation_absent_unit(tmp_path / active, active)
+
+
+def _first_activation_absent_unit(tmp_path, active):
+    tmp_path.mkdir()
     root, archive, checksum = fixture(tmp_path)
     runner = Runner()
     release.install(archive, checksum, root, runner)
