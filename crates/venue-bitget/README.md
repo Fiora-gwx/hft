@@ -276,6 +276,8 @@ UTA 设置接受 `accountMode = unified | hybrid` 且 `accountLevel = basic`;`cl
 
 ### 只读查询
 
+真实 demo 查单与未成交订单页的覆盖范围归 BGT-333/334;外来 client ID 不取得自有槽身份,分页 cursor 按交易所返回值继续查询。
+
 Warm 入口支持 OpenOrders、Fills、Balance 与永续 Positions，整页校验后才调用 RoSink；错误页没有部分结果，外来 client id 保持 UNRESOLVED/None，不借用本账户槽。FundingFlow 暂由 `FundingHistoryProtocol` 的固定窗口接口承载，`ro_request(FundingFlow)` 返回 Unsupported。合成响应仅证明本地映射，真实接口权限与分页仍须测试网验证。
 
 UTA V3 分页取响应 cursor，空/null 游标表示末页，显式 list=null 表示空列表；缺 list、空列表带续页游标、重复或非数值游标返回错误，不伪造末页。查询按 category 请求，inst 过滤在完整响应中完成，避免缩小页面后丢失下一页。Fills 的 feeDetail 必须可归到同一已登记资产；混合手续费币种拒绝该页。字段来源为 [官方订单查询文档](https://www.bitget.com/docs/catalog/trading/order-management)。

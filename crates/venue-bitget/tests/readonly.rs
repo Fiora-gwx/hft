@@ -142,17 +142,18 @@ fn captured_page<T: VenueProtocol<FeedCtx = venue_bitget::FeedCtx, GwCtx = venue
     };
     let mut sink = Sink::default();
     let page = T::ro_decode(rd_spot_capture(), ACCT, &q, 200, &input, &mut sink).unwrap();
-    let mut actual: Vec<_> = sink
-        .fills
-        .iter()
-        .map(|f| {
-            serde_json::json!({
-                "inst":f.inst.0,"side":if f.side == Side::Buy {"buy"} else {"sell"},
-                "qty":f.qty.0.to_string(),"px":f.px.0.to_string(),"fee":f.fee.0.to_string(),
-                "fee_asset":f.fee_asset.0,"trade_id":f.trade_id,"exch_order_id":f.exch_order_id
-            })
+    let mut actual: Vec<_> = sink.orders.iter().map(|e| serde_json::json!({
+        "kind":"QueryResult","inst":e.inst.0,"epoch":e.epoch,"slot":e.slot.0,"gen":e.r#gen,"detail":e.detail,
+        "px":e.px.0.to_string(),"qty":e.qty.0.to_string(),"cum_filled":e.cum_filled.0.to_string(),
+        "avg_px":e.avg_px.0.to_string(),"exch_order_id":e.exch_order_id,"ex_ts_ns":e.ex_ts_ns
+    })).collect();
+    actual.extend(sink.fills.iter().map(|f| {
+        serde_json::json!({
+            "inst":f.inst.0,"side":if f.side == Side::Buy {"buy"} else {"sell"},
+            "qty":f.qty.0.to_string(),"px":f.px.0.to_string(),"fee":f.fee.0.to_string(),
+            "fee_asset":f.fee_asset.0,"trade_id":f.trade_id,"exch_order_id":f.exch_order_id
         })
-        .collect();
+    }));
     actual.push(serde_json::json!({"rows":page.rows,"next_cursor":page.next_cursor}));
     assert_eq!(actual, expected);
     if name == "empty" {
@@ -187,8 +188,10 @@ fn captured_page<T: VenueProtocol<FeedCtx = venue_bitget::FeedCtx, GwCtx = venue
 
 #[test]
 fn bgt_334_ro_open_orders() {
-    captured_page::<P>("rest.open_orders", "empty", RoKind::OpenOrders);
-    captured_page::<BitgetSpot>("rest.open_orders", "empty", RoKind::OpenOrders);
+    for name in ["empty", "two_orders_one_foreign"] {
+        captured_page::<P>("rest.open_orders", name, RoKind::OpenOrders);
+        captured_page::<BitgetSpot>("rest.open_orders", name, RoKind::OpenOrders);
+    }
 }
 
 #[test]

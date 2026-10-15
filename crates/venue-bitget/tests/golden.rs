@@ -451,3 +451,46 @@ fn bgt_336_ro_funding() {
         assert!(BitgetUsdtFutures::funding_decode(rd(), &query, 200, input).is_err());
     }
 }
+
+#[test]
+fn bgt_333_order_detail() {
+    use hft_event::GwOp;
+    use hft_types::InstId;
+    use hft_venue_proto::{ReqRef, RestOrigin, RestWhat};
+    fn check<T: VenueProtocol<FeedCtx = FeedCtx, GwCtx = GwCtx>>() {
+        for name in ["filled", "live", "canceled", "not_found"] {
+            let (input, expected) = product_capture(T::NAME, "rest.order_detail", name);
+            let e = &expected[0];
+            let origin = RestOrigin {
+                what: RestWhat::Order,
+                inst: InstId(e["inst"].as_u64().unwrap() as u32),
+                req: Some(ReqRef {
+                    slot: e["slot"].as_u64().unwrap() as u32,
+                    r#gen: 1,
+                    op: GwOp::Query,
+                }),
+            };
+            let mut sink = RepSink::default();
+            let outcome = T::decode_rest(
+                rd_spot_capture(),
+                &mut GwCtx::new(),
+                &origin,
+                if name == "not_found" { 400 } else { 200 },
+                &input,
+                &RX,
+                &mut sink,
+            )
+            .unwrap();
+            assert_eq!(outcome.events, 1);
+            assert!(outcome.outcome_unknown.is_none());
+            let actual: Vec<_> = sink.orders.iter().map(|e| serde_json::json!({
+                "kind":format!("{:?}",e.what),"inst":e.inst.0,"epoch":e.epoch,"slot":e.slot.0,"gen":e.r#gen,
+                "detail":e.detail,"cum_filled":e.cum_filled.0.to_string(),"avg_px":e.avg_px.0.to_string(),
+                "exch_order_id":e.exch_order_id,"ex_ts_ns":e.ex_ts_ns
+            })).collect();
+            compare(&expected, &actual);
+        }
+    }
+    check::<BitgetUsdtFutures>();
+    check::<BitgetSpot>();
+}

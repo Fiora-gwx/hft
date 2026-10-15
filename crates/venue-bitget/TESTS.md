@@ -2205,7 +2205,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 规则:[下单:UTA V3 WS](README.md#下单uta-v3-ws)
 - 级别:golden
 - 里程碑:M3
-- 输入:`fixtures/bitget-usdt-futures/rest.order_detail/{filled,live,canceled_partial,not_found}.in`、`fixtures/bitget-spot/rest.order_detail/filled.in`;待采集(方法 B)
+- 输入:两个产品线 `rest.order_detail/{filled,live,canceled,not_found}.in` 为真实 demo 查单;`canceled_partial` 仍待采集(方法 B)。
 - 期望文件:同目录 `<case>.expected.jsonl`(`QueryResult` 行,`cum_filled` 与 `avg_px` 非 0 的成对出现)
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_333_order_detail`
 
@@ -2214,10 +2214,10 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 规则:[只读查询](README.md#只读查询)
 - 级别:golden
 - 里程碑:M5
-- 输入:`fixtures/bitget-usdt-futures/rest.open_orders/two_orders_one_foreign.in`、`fixtures/bitget-spot/rest.open_orders/two_orders_one_foreign.in`;来源:待采集(方法 A + B)
+- 输入:`fixtures/bitget-usdt-futures/rest.open_orders/two_orders_one_foreign.in`、`fixtures/bitget-spot/rest.open_orders/two_orders_one_foreign.in`;来源:真实 demo,两笔 post-only 挂单均撤销,无成交。
 - 期望文件:同目录 `<case>.expected.jsonl`(`open_order` 行)
 - 实现:`crates/venue-bitget/tests/readonly.rs::bgt_334_ro_open_orders`
-- 真实覆盖:两产品线 `rest.open_orders/empty.in` 的 `list=[]/cursor=null`;非空订单页仍待补。
+- 真实覆盖:两产品线 `rest.open_orders/empty.in` 的 `list=[]/cursor=null`;非空页保留自有 epoch/slot/gen,外来 client ID 为 UNRESOLVED,分页 cursor 与脱敏后的末订单 ID 一致。
 - 备注:依赖待核实:开发备忘第 18 条
 
 ### BGT-335 金样:UTA 成交查询(只读查询)
