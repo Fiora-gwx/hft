@@ -57,7 +57,7 @@ status: impl
 
 Read 在 recvmsg 返回后；解密包围实际 TLS open；Frame 在 WS 交付前；decode 包围协议分派/JSON 规范化；环 push 在成功发布之后，pop 在取出时/转换后。push 的观测可能晚于并行消费者的 pop，负值单列，不截断为零。InputHanded 是合并/调度后交给处理器的边界；process 包围 journal、业务处理、输出与出环；strategy 包围每个真实 on_event；risk 包围单腿或整对 evaluate；OMS 包围实际 place。encode 是订单帧模板写入，加密包围真实 seal，Send 是 sendmsg 返回戳，短写的返回值/请求字节数保留。
 
-TxQueued/TxWrite 追加为阶段 32/33：`frame` 在这两个阶段表示连接发送实例标识；前者 v0/v1 是密文绝对字节区间，后者 v0/v1/v2 是已消费偏移、带符号返回值、请求字节数。离线按区间匹配包含 flush 的每次写入，输出 `send_complete_tsc` 与次数；不把首次短写当整单发送完成。
+TxQueued/TxWrite 的编号为 32/33：`frame` 在这两类记录中表示连接发送实例标识；前者 v0/v1 是密文绝对字节区间，后者 v0/v1/v2 是已消费偏移、带符号返回值、请求字节数。离线按区间匹配包含 flush 的每次写入，输出 `send_complete_tsc` 与次数；不把首次短写当整单发送完成。
 
 分段是 [latency-budget](../../docs/latency-budget.md) 的诊断细分，不构成新预算。网络往返按每次实际 ack/fill 接收分别计算；同时双腿偏差保留正负方向。经验分位数始终带 n；小样本尾部不能作为门槛或回归裁决。
 
