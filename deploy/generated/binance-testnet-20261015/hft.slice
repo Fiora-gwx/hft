@@ -1,0 +1,5 @@
+[Slice]
+MemoryMax=1376M
+MemorySwapMax=0
+CPUQuota=100%
+CPUWeight=50

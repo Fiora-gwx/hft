@@ -2808,7 +2808,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 - 里程碑:M3
 - 前置:夹具 `dev2-1` 与 hft-core `dev2` 档生成的期望剖面
 - 实现:`deploy/tests/test_gen.py::dep_247_dev2_profile`
-- 覆盖边界:覆盖已装配 slice、守护与本地出口检查；EIP 与完整 advisory 剖面仍待验收，IMDS 规则由预检另查。
+- 覆盖边界:覆盖已装配 slice、守护与本地出口检查；可执行生成器用例同时读取 `test-dev2-prod` 与 `binance-testnet-20261015` 清单，核对网卡和出口地址取自各自清单。EIP 与完整 advisory 剖面仍待验收，IMDS 规则由预检另查。
 
 | 行 | 项 | 期望(级别 `required`) |
 |---|---|---|

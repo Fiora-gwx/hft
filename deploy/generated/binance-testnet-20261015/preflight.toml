@@ -1,0 +1,9 @@
+disk_free_block_pct = 15
+memory = 384
+parent_memory = 1376
+quota = 100
+weight = 50
+batch_memory = 512
+tmpfs = 192
+read = 40
+write = 20

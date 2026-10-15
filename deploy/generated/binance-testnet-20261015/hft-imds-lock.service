@@ -1,0 +1,13 @@
+[Unit]
+Description=hft dev2 IMDS uid isolation
+Before=hft-core@prod.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+Slice=system.slice
+ExecStart=/opt/hft/current-core/deploy/imds/hft-imds-lock.sh load
+
+[Install]
+WantedBy=multi-user.target
