@@ -32,10 +32,10 @@
 
 | 剖面 | 发布目标三元组 | `target-cpu` | 运行在 | 说明 |
 |---|---|---|---|---|
-| 基准形态(core) | `aarch64-unknown-linux-gnu` | `neoverse-v1` | `dev2`(c7g,Graviton3)与 `c8`/`c16`/`c32`(c8g,Graviton4)——**同一个二进制** | Neoverse-V1 是两代 Graviton 的公共基线;与现有 Trading 仓库同为 ARM64 |
+| 基准形态(core) | `aarch64-unknown-linux-gnu` | `neoverse-v1` + `target-feature=-sm4,-rand,-dit` | `dev2`(c7g,Graviton3)与 `c8`/`c16`/`c32`(c8g,Graviton4)——**同一个二进制** | 保留 V1 调优，禁用 V2 缺失的 SM3/SM4 及 ARM CI runner 未提供的 RNG/DIT，以同一制品执行 CI 冒烟 |
 | 可选扩展:x86 / `metal` | `x86_64-unknown-linux-gnu` | 按 bake-off 选定的实例族 | `metal` 主机类 | 独立剖面、独立构建、独立基线;触发条件:实测证明 Graviton 上的 p99 不够,或需要裸金属 + Onload |
 
-- `target-cpu` 写在 `.cargo/config.toml` 的发布目标段与 `RELEASE.json`;hft-core 启动时检查 CPU 特性是发布构建要求的超集,否则拒绝启动(规则 [B2](hot-path-rules.md#构建b))。
+- 编译参数唯一配置在 `.cargo/config.toml`。发布器按同一参数运行 `rustc --print cfg`，将用户态指令特性映射为 Linux HWCAP，保存 `rustflags`、`compiler_cpu_features`、`cpu_features` 到 `RELEASE.json`；未知特性拒绝发布。系统特性与向后兼容 hint 不要求额外 HWCAP，映射归 [cpu.py](../deploy/release/cpu.py)。启动预检逐核检查必需特性的超集，缺失即拒绝；不把 CI CPU 额外具备的 SVE2/SM4 等能力算作二进制要求(规则 [B2](hot-path-rules.md#构建b))。
 - CI 质量门在 x86_64 runner 上以 `target-cpu` 缺省值(`x86-64`)构建与测试;ISA 专属代码(`hft-rt` 的计时器读取、环与 journal 的原子序)由 `cargo check --target aarch64-unknown-linux-gnu` 保持可编译,由每夜的 `nightly-arm` 作业与正式版的 aarch64 一致性集在 arm runner 上原生测试(见[每夜任务](#每夜任务nightlyyml)、[发布工作流](#发布工作流release-aarch64yml))。内存序的正确性不依赖硬件:环与 journal 的 loom 模型检查在 x86 上跑,它按 C11 内存模型穷举弱序交错。
 - **换架构 = 版本变化**:按恢复规则只能从 Drain 快照冷启动([recovery-epoch-and-boot-rules](../.agents/notes/proposed/architecture/2026-10-01-recovery-epoch-and-boot-rules.md))。
 - 依据:[build-target-aarch64](../.agents/notes/proposed/process/2026-10-01-build-target-aarch64.md)、[ci-org-and-profiles](../.agents/notes/proposed/architecture/2026-10-03-ci-org-and-profiles.md)。
@@ -56,7 +56,7 @@
 - **验证包里的 `hft-dst`/`hft-verify`** 以 `ci` 剖面构建,但构建步设环境变量 `CARGO_PROFILE_CI_OPT_LEVEL=3`、`CARGO_PROFILE_CI_DEBUG=line-tables-only`(服务器上累计 DST 的吞吐随优化级别,崩溃回溯要行号);PR 的基准冒烟沿用 `ci` 的 1 级,数值只报告。
 - **开发构建**(`vX.Y.Z-dev.N`)全部用 `release`,只构建 dev2 运行的二进制(发布归档 `bin/` 中的 core 二进制与 Python wheel;不含基准制品与 optional 组件),跳过 aarch64 一致性集。
 - **fuzz 目标**不用上表的剖面:由 `cargo fuzz build`(固定 nightly、AddressSanitizer、开 debug-assertions)构建,只出现在验证包与 CI 的 fuzz 冒烟里。
-- `ubuntu-24.04-arm` runner 的 CPU 是否满足 `neoverse-v1` 的特性集**待核实**(方法:发布作业打印 `/proc/cpuinfo` 的 `Features` 与 `rustc --print cfg -C target-cpu=neoverse-v1` 比对)。不满足时,发布作业里的冒烟测试与 schema 导出改用 `target-cpu=generic` 的同源构建运行,打包的仍是 `neoverse-v1` 构建,其 CPU 特性检查在服务器安装时由 `hft-core --check` 完成。
+- ARM 发布作业在执行制品前验证 runner 满足编译特性包络；不满足即失败，不用不同 ISA 构建代替制品冒烟。部署预检使用同一包络检查每个 CPU。
 
 ## 开发机
 

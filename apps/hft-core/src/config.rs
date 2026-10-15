@@ -35,6 +35,15 @@ pub struct Instance {
     pub name: String,
     pub order_env: Option<String>,
     pub config_source: String,
+    #[serde(default)]
+    pub secrets_mode: SecretsMode,
+}
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SecretsMode {
+    #[default]
+    AwsSecretsManager,
+    LocalDemo,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -220,6 +229,14 @@ pub fn parse(path: &Path) -> Result<Config, Vec<Error>> {
             "invalid TOML, unknown field, or missing required field",
         )]
     })?;
+    if c.instance.secrets_mode == SecretsMode::LocalDemo
+        && (c.instance.name != "prod" || c.instance.order_env.as_deref() != Some("testnet"))
+    {
+        return Err(vec![Error::config(
+            "LocalSecretEnvironment",
+            "local secrets require demo/testnet",
+        )]);
+    }
     let root = path.parent().unwrap_or(Path::new("."));
     for p in [
         &mut c.paths.journal_ram,

@@ -90,6 +90,33 @@ fn core_013_check_keeps_secret_files() {
 }
 
 #[test]
+fn core_222_local_demo_mode_rejects_production_before_secret_read() {
+    let (_d, path, paths) = cli_fixture();
+    let original = std::fs::read_to_string(&path).unwrap();
+    let mut config: toml::Value = toml::from_str(&original).unwrap();
+    config["instance"]
+        .as_table_mut()
+        .unwrap()
+        .insert("secrets_mode".into(), "local_demo".into());
+    std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+    assert_eq!(
+        hft_core::config::parse(&path).unwrap().instance.secrets_mode,
+        hft_core::config::SecretsMode::LocalDemo
+    );
+    for env in ["prod", "live", ""] {
+        config["instance"]["order_env"] = env.into();
+        std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_hft-core"))
+            .args(["--config", path.to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("LocalSecretEnvironment"));
+        assert!(paths.iter().all(|p| p.exists()));
+    }
+}
+
+#[test]
 fn test_malformed_secret_removes_files_and_redacts_errors() {
     let (_d, c, paths) = fixture();
     std::fs::write(&paths[1], [0xab; 4097]).unwrap();

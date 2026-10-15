@@ -442,7 +442,7 @@ sim  = [{ ip = "<第二个私有 IP>", eip_alloc = "eipalloc-…" }]  # sim 常�
   - 升级主机(`formal_live = true`):实例角色授权 `hft/live/*`、`hft/testnet/*`(M7 延迟验收与测试网演练用测试网)与 `hft/ops/*`、`sts:AssumeRole` 到各消费者角色,以及托管策略 `AmazonSSMManagedInstanceCore`(SSM 是破窗通道,[AMI 构建](#ami-构建));实例角色没有 S3 权限,触及 S3 的运维命令按[运维命令的身份](#imds-锁定与凭证代理)运行。
   - 探针主机(`probe-*` 清单):租用实例的角色只授权 `hft/testnet/*` 与 `hft/ops/*`(探针不运行 S3 消费者)。
   - 消费者角色(`iam-consumers.json.tmpl`,每个消费者一个,信任 dev2 与升级主机的实例角色):S3 只覆盖[S3 前缀表](#身份路径与-s3-前缀)里登记给它的前缀(读者 `s3:GetObject`/`s3:ListBucket`,写者另加 `s3:PutObject`),KMS 按 SSE-KMS 一条(写者 `kms:GenerateDataKey` + `kms:Decrypt`,读者 `kms:Decrypt`)。新建或修改这些角色是 `[需授权]` 的 IAM 变更。
-- **预检**(`preflight.sh`,`formal_live = false` 时):`/etc/hft/hft-core-prod.toml` 的 `instance.order_env` 必须是 `testnet`;hft-secrets 清单只引用 `hft/testnet/` 与 `hft/ops/` 前缀;以本机角色对哨兵秘密 `hft/live/_sentinel` 调 `DescribeSecret` 必须得到 `AccessDenied`。任一项不满足 → 预检失败,不激活。hft-core 启动时另以 `ProdAccountOnDev2`、`DevBuildWithProdAccount` 拒绝(规则归 [hft-core](../apps/hft-core/README.md#实例角色prod-与-sim))。
+- **预检**(`preflight.sh`,`formal_live = false` 时):`/etc/hft/hft-core-prod.toml` 的 `instance.order_env` 必须是 `testnet`。默认 `instance.secrets_mode=aws_secrets_manager`：清单只引用 `hft/testnet/` 与 `hft/ops/` 前缀，本机角色对 `hft/live/_sentinel` 的 `DescribeSecret` 必须得到 `AccessDenied`。显式 `local_demo` 只用于非正式 demo 账户：`/etc/hft/secrets/hft-core.toml` 顶层 `mode=local_demo`，每个 `[[secret]]` 只有 `name`、`path`；源文件位于 `/run/secrets/<私有目录>/`，沿途目录 root:0700，普通文件 root:0400/0600，拒绝符号链接、路径穿越与超长文件。预检核对这些属性代替 IAM/Secrets Manager，不读取内容；IMDS 隔离、其他主机检查和 core 配置检查仍必需。`prepare-secrets.py` 先检查 core 的 demo 端点与 `is_prod=false`，再复制到 hft:0400 的 `/run/hft/core-prod/secrets/<name>`，目标集合须与配置全部 credential 路径相等；core 读取后 unlink 副本，root 源文件保留。正式 Live/production 无此模式。
 
 ### IMDS 锁定与凭证代理
 

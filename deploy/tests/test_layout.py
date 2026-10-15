@@ -18,6 +18,7 @@ def dep_001_ci_stage_to_install(tmp_path):
     repo, dist = tmp_path / "repo", tmp_path / "dist"
     for path in ("deploy", "schemas", "apps/hft-core/config"):
         stager.copy_tree(REPO / path, repo / path)
+    stager.copy_tree(REPO / ".cargo", repo / ".cargo")
     shutil.copyfile(REPO / "Cargo.lock", repo / "Cargo.lock")
     stager.copy_tree(REPO / "fixtures/strategy-schemas", dist / "schemas/strategies")
     (dist / "python/wheelhouse").mkdir(parents=True)
@@ -36,9 +37,11 @@ def dep_001_ci_stage_to_install(tmp_path):
         if argv[0] == "cargo":
             return json.dumps(metadata).encode()
         if argv[0] == "rustc":
+            if "cfg" in argv:
+                return b'target_feature="aes"\ntarget_feature="neon"\ntarget_feature="sve"\n'
             return b"rustc fixture"
         if argv[0] == "cat":
-            return b"Features : aes asimd sve\n"
+            return b"Features : fp aes pmull asimd sve sm3 sm4 svesm4\n"
         return b"kind_id=1 portfolio-carry version=1\nkind_id=3 cross-taker version=1\nkind_id=5 latency-probe version=1\n"
     tree, info = stager.stage(repo, dist, "v1.2.3-dev.4", "a" * 40, "123", dict(ci_run_id=122, decoupling_check_run_id=121), run)
     archive = load("package").package_tree(tree, tmp_path / "packed", info, 0, compress=False)
@@ -46,6 +49,8 @@ def dep_001_ci_stage_to_install(tmp_path):
     extracted.mkdir()
     actual = release.verify_tree(release.unpack(archive, extracted))
     assert actual["profiles"] == {n: "release" for n in names}
+    assert actual["cpu_features"] == ["aes", "asimd", "fp", "pmull", "sve"]
+    assert actual["target_features"] == "-sm4,-rand,-dit"
     assert len(actual["strategies"]) == 3
     assert actual["evidence"]["ci_run_id"] == 122
     assert actual["sbom_sha256"] == release.sha256(tree / "sbom.json")

@@ -3,7 +3,7 @@ xtask = "run --package xtask --"
 
 # Release target CPU: single home is docs/development.md#目标-cpu.
 [target.aarch64-unknown-linux-gnu]
-rustflags = ["-C", "target-cpu=neoverse-v1"]
+rustflags = ["-C", "target-cpu=neoverse-v1", "-C", "target-feature=-sm4,-rand,-dit"]
 
 # hft-py (PyO3): never link libpython. The extension module resolves it from the interpreter at
 # import time; Rust test binaries of hft-py do not call Python. maturin sets the same variable.
