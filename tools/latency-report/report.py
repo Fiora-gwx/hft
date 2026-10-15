@@ -1,5 +1,6 @@
 """Read-only latency-chain extraction. Uses the released hft_py journal reader."""
 import argparse
+import bisect
 import collections
 import csv
 import json
@@ -15,6 +16,39 @@ SAFE = set("seq tsc proc_ns flags kind venue conn inst account strategy trigger_
 KINDS = ["Bbo", "Trade", "Funding", "MarkPrice", "IndexPrice", "Liquidation", "L2Snapshot", "OrderDecision", "SendReport", "OrderEvent", "ExecDecision", "ClockStatus", "LatencySample"]
 SAFE.add("body_tsc")
 CHAIN_COLUMNS = "chain thread frame event_hash venue kind input_seq ex_ts_ns ex_send_ns hw_rx_ns sw_rx_ns rx_tsc decrypt_done_tsc frame_done_tsc decode_start_tsc decode_done_tsc ring_push_tsc ring_pop_tsc handed_tsc process_start_tsc journal_input_tsc process_end_tsc".split()
+CHAIN_COLUMNS += "rx_realtime_ns calibration_error_ns kernel_to_user_ns".split()
+
+
+class Calibration:
+    """SW-domain counterpart of hft-telemetry ClockCal; never extrapolate tails."""
+    def __init__(self, rows, max_error=1000):
+        self.rows = sorted(rows, key=lambda r: r['body_tsc'])
+        self.ticks = [r['body_tsc'] for r in self.rows]
+        if len(set(self.ticks)) != len(self.ticks):
+            raise ValueError('duplicate calibration anchor')
+        self.max_error = max_error
+
+    def realtime(self, tick):
+        index = bisect.bisect_right(self.ticks, tick) - 1
+        if index < 0 or index + 1 >= len(self.rows):
+            return None
+        a, b = self.rows[index:index+2]
+        if a.get('state') == 3 or b.get('state') == 3:
+            return None
+        length = b['body_tsc'] - a['body_tsc']
+        error = max(a['calib_err_ns'], b['calib_err_ns'])
+        if index:
+            previous = self.rows[index-1]
+            dt = a['body_tsc'] - previous['body_tsc']
+            dp = b['phc_ns'] - a['phc_ns']
+            prior_dp = a['phc_ns'] - previous['phc_ns']
+            numerator = abs(dp * dt - prior_dp * length) * abs(dp)
+            denominator = 2 * length * dt
+            error += (2 * numerator + denominator) // (2 * denominator)
+        if error > self.max_error:
+            return None
+        numerator = (tick - a['body_tsc']) * (b['realtime_ns'] - a['realtime_ns'])
+        return a['realtime_ns'] + (2 * numerator + length) // (2 * length), error
 
 
 def scalar(value):
@@ -148,7 +182,7 @@ def exchange_times(raw_paths, out, hot=None, db=None):
 
 
 class Analysis:
-    def __init__(self, db, schema):
+    def __init__(self, db, schema, cal_max_err_ns=1000):
         self.db = db
         self.schema = schema
         self.hz = schema["clock"]["hz_milli"]
@@ -156,6 +190,15 @@ class Analysis:
             raise ValueError("invalid counter frequency")
         self.db.execute("CREATE TABLE samples(venue INTEGER,stage TEXT,chain TEXT,ns INTEGER)")
         self.issues = collections.Counter()
+        clocks = []
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name='events'").fetchone():
+            clocks = [json.loads(row[0]) for row in db.execute("SELECT body FROM events WHERE kind='ClockStatus'")]
+        self.calibration = Calibration(clocks, cal_max_err_ns)
+
+    def sample(self, venue, name, chain, delta):
+        self.db.execute("INSERT INTO samples VALUES(?,?,?,?)", (venue, name, chain, delta))
+        if delta < 0:
+            self.issues["negative_" + name] += 1
 
     def unique(self, stage, **filters):
         query = "SELECT * FROM trace WHERE stage=?" + "".join(' AND "' + k + '"=?' for k in filters)
@@ -170,9 +213,7 @@ class Analysis:
             self.issues["missing_" + name] += 1
             return
         delta = (end - start) * 1_000_000_000_000 // self.hz
-        self.db.execute("INSERT INTO samples VALUES(?,?,?,?)", (venue, name, chain, delta))
-        if delta < 0:
-            self.issues["negative_" + name] += 1
+        self.sample(venue, name, chain, delta)
 
     def market(self, out):
         cols = CHAIN_COLUMNS
@@ -186,6 +227,15 @@ class Analysis:
                 frame = self.unique(4, thread=d["thread"], frame=d["frame"])
                 if frame:
                     row.update(rx_tsc=frame["v0"], hw_rx_ns=frame["v1"], sw_rx_ns=frame["v2"], decrypt_done_tsc=frame["v3"], frame_done_tsc=frame["tsc"])
+                    if row['sw_rx_ns']:
+                        calibrated = self.calibration.realtime(row['rx_tsc'])
+                        if calibrated:
+                            realtime, error = calibrated
+                            row.update(rx_realtime_ns=realtime, calibration_error_ns=error,
+                                kernel_to_user_ns=realtime-row['sw_rx_ns'])
+                            self.sample(row['venue'], 'kernel_to_user', chain, row['kernel_to_user_ns'])
+                        else:
+                            self.issues['unsynced_cal'] += 1
                 if 0x100 <= row["kind"] < 0x200:
                     row.update(ex_ts_ns=d["v0"], ex_send_ns=d["v1"])
                 elif row["kind"] == 0x203:
@@ -269,7 +319,12 @@ class Analysis:
                     self.interval(venue, name, chain, row.get(start), row.get(end))
                 trigger = self.db.execute("SELECT rx_tsc,kind FROM chains WHERE input_seq=?", (event.get("trigger_seq", 0),)).fetchall()
                 if len(trigger) == 1:
-                    self.interval(venue, "tick_to_trade" if 0x100 <= trigger[0][1] < 0x200 else "rep_to_order", chain, trigger[0][0], row.get("send_return_tsc"))
+                    name = "tick_to_trade" if 0x100 <= trigger[0][1] < 0x200 else "rep_to_order"
+                    self.interval(venue, name + '.userspace', chain, trigger[0][0], row.get("send_return_tsc"))
+                    kernel = row.get('input_kernel_to_user_ns')
+                    if kernel is not None and kernel >= 0 and trigger[0][0] and row.get('send_return_tsc'):
+                        delta = (row['send_return_tsc']-trigger[0][0])*1_000_000_000_000//self.hz
+                        self.sample(venue, name+'.sw', chain, kernel+delta)
                 reports = self.db.execute("SELECT body FROM events WHERE kind='OrderEvent' AND slot=? AND gen=? ORDER BY seq", (event.get("slot", 0), event.get("gen", 0))).fetchall()
                 matched = 0
                 for (report_body,) in reports:
@@ -352,16 +407,20 @@ def main():
     parser.add_argument("--hot")
     parser.add_argument("--raw", type=Path, action="append", default=[])
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--cal-max-err-ns", type=int, default=1000)
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=False)
     db = sqlite3.connect(args.out / "analysis.sqlite")
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA cache_size=-32768")
     schema = load_trace(db, args.trace, args.out)
+    schema['analysis_cal_max_err_ns'] = args.cal_max_err_ns
     load_journal(db, journal_rows(args.journal,args.hot), args.out)
     if args.raw:
         exchange_times(args.raw,args.out,args.hot,db)
-    analysis = Analysis(db, schema)
+    if args.cal_max_err_ns <= 0:
+        raise ValueError('calibration error threshold must be positive')
+    analysis = Analysis(db, schema, args.cal_max_err_ns)
     analysis.market(args.out)
     analysis.orders(args.out)
     analysis.subdivisions()

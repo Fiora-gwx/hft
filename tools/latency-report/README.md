@@ -63,6 +63,8 @@ RawRecord 的编号为 34，v0..v3 为 raw seq、raw kind、接收/发送 TSC、
 
 分段是 [latency-budget](../../docs/latency-budget.md) 的诊断细分，不构成新预算。网络往返按每次实际 ack/fill 接收分别计算；同时双腿偏差保留正负方向。经验分位数始终带 n；小样本尾部不能作为门槛或回归裁决。
 
+`kernel_to_user` 用样本前后两条 ClockStatus 的 REALTIME 端线性插值；逐样本误差界沿用 hft-telemetry 的相邻速率变化公式，默认 `--cal-max-err-ns 1000`。缺后一锚点、Stepped 或超界只计 `unsynced_cal`。事件行保留换算值与误差界，负间隔单列。`tick_to_trade.sw` / `rep_to_order.sw` 包含有效的内核软件戳到用户态部分；`.userspace` 明确从 recvmsg 返回开始，不能作为完整主机口径。HW 数据集的预算验收仍用发布包 replayer latency；这里不混合 HW 与 SW。回报 RTT 诊断从 send 返回到用户态收包，不能冒充内核收包口径的 order_rtt。
+
 ## 延迟与资源契约
 
 热路径只读计数器并写预分配 SPSC，不做文件 I/O、分配、锁或新增 syscall。测量环默认无 wake；满时丢诊断点并递增独立计数，不等待、不改变订单结果。线程私有 RefCell 仅持有测量上下文和 producer，启动期安装；不提供业务条件分支依据。冷线程每轮每环最多排 4096 条，文件缓冲 64 KiB。最终丢失数即使尾部再无成功记录也在 completion 中保留；缺 completion 不能声称完整。
