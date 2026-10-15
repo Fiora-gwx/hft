@@ -135,6 +135,30 @@ pub fn assemble(
     }
 }
 
+/// Local demo credentials must never be sent to a production host hidden under a testnet tag.
+pub fn local_demo_endpoint(protocol: &str, role: EndpointRole, url: &str) -> bool {
+    let scheme = if role == EndpointRole::Rest {
+        "https://"
+    } else {
+        "wss://"
+    };
+    let Some(address) = url.strip_prefix(scheme) else {
+        return false;
+    };
+    let host = address.split('/').next().unwrap_or("");
+    match (protocol, role) {
+        ("binance-usdm", EndpointRole::Rest) => host == "demo-fapi.binance.com",
+        ("binance-usdm", EndpointRole::OrderWs) => host == "testnet.binancefuture.com",
+        ("binance-usdm", _) => host == "demo-fstream.binance.com",
+        ("binance-spot", EndpointRole::Rest) => host == "demo-api.binance.com",
+        ("binance-spot", EndpointRole::OrderWs | EndpointRole::UserData) => host == "demo-ws-api.binance.com",
+        ("binance-spot", _) => host == "demo-stream.binance.com",
+        ("bitget-usdt-futures" | "bitget-spot", EndpointRole::Rest) => host == "api.bitget.com",
+        ("bitget-usdt-futures" | "bitget-spot", _) => host == "wspap.bitget.com",
+        _ => false,
+    }
+}
+
 fn endpoint(rd: &RefData, venue: VenueId, role: EndpointRole) -> Result<Endpoint, Error> {
     let e = rd
         .endpoints(venue, EndpointEnv::Testnet)
@@ -234,7 +258,7 @@ fn build<P: AccountProtocol + Send>(
     md: Producer<FeedMsg>,
     bulk: ByteProducer,
     commands: Consumer<FeedCmd>,
-    ctx: P::FeedCtx,
+    mut ctx: P::FeedCtx,
     gw_ctx: fn() -> P::GwCtx,
     session_alg: SignAlg,
     secrets: &crate::secrets::SecretFiles,
@@ -381,6 +405,10 @@ where
             }
             std::thread::sleep(Duration::from_millis(1));
         }
+        // The first live Funding event records this REST-derived interval in seq journal.
+        // Rates/timestamps still come from the live frame; failed REST keeps the existing wait.
+        P::seed_funding(&mut ctx, &baseline.funding_schedule)
+            .map_err(|_| Error::config("FundingBootstrap", "feed schedule capacity or shape"))?;
         account_client = Some(client);
         let tpl = P::build_templates(&venue, rd, a, &rest)
             .map_err(|_| Error::config("Templates", "cannot build account templates"))?;

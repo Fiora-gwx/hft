@@ -2381,6 +2381,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   - 三个文件都已不存在;`strace` 中每个文件恰好一次 `openat` 与一次 `unlink`,都在步 2 开始之前
   - 会话 key 的内存只交给 `conn-builder`,REST key 只交给 gw 与 `acct-fetch`(测试构建的交接记录)
 - 实现:`apps/hft-core/tests/secrets.rs::core_222_unlink_after_read`
+- 同用例覆盖显式 local_demo：testnet 可解析，prod/live/空环境在读取秘密前拒绝；正式账户仍由 EnvAccountMismatch 拒绝。标为 testnet 的生产域名、混入生产端点和伪装的域名在读取秘密前拒绝。
 
 ### CORE-223 步 2 失败退出时秘密文件也已删除
 
@@ -4317,5 +4318,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 上线门槛的唯一定义在 [testing §8](../../docs/testing.md#8-上线门槛);上线步骤见 [launch](../../docs/runbooks/launch.md)。
 
 CORE-090 的网关入口包含配对 rep-bulk，变长 MarginReport/AccountConfigReport 的完整长度由 peek_len 预留后交给 InputSlot；发布顺序回归见 [VEN-242](../../crates/hft-venue/TESTS.md)。
+
+CORE-120 同时验证两协议 funding_schedule 的可选启动查询：成功提供周期；超时/429/坏正文清空部分 seed、保留必需账户基线；实际费率/结算金额仍来自各自正式输入路径。
 
 网关 REST 凭证装配由 CORE-120 的进程构建路径校验;签名入口传参与模板无凭证的行为分别归 VEN-228/391 与 BIN-063/BGT-063。

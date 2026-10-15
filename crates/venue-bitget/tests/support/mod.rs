@@ -54,6 +54,18 @@ pub fn account_rd(unverifiable: bool) -> &'static RefData {
 }
 
 fn build(ignorable: &[&str], compact: bool, unverifiable: bool, spot_eth: bool) -> &'static RefData {
+    build_account_kind(ignorable, compact, unverifiable, spot_eth, false)
+}
+pub fn formal_account_rd() -> &'static RefData {
+    build_account_kind(&[], true, false, false, true)
+}
+fn build_account_kind(
+    ignorable: &[&str],
+    compact: bool,
+    unverifiable: bool,
+    spot_eth: bool,
+    is_prod: bool,
+) -> &'static RefData {
     let mut b = RdbBuilder::new(1);
     b.created_utc_ns(1_759_276_800_000_000_000);
     for (id, name, class, px, qty) in [
@@ -194,6 +206,7 @@ fn build(ignorable: &[&str], compact: bool, unverifiable: bool, spot_eth: bool) 
         b.account(AccountSpec {
             id,
             label: label.into(),
+            is_prod,
             uid_policy: if unverifiable {
                 hft_refdata::UidPolicy::Unverifiable
             } else {
@@ -205,7 +218,14 @@ fn build(ignorable: &[&str], compact: bool, unverifiable: bool, spot_eth: bool) 
         b.account_venue(AccountVenueSpec {
             account: id,
             venue: v,
-            uid: if unverifiable { "" } else { "acct-0001" }.into(),
+            uid: if unverifiable {
+                ""
+            } else if is_prod && id.0 == 1 {
+                "acct-spot"
+            } else {
+                "acct-0001"
+            }
+            .into(),
         });
     }
     let blob = b.finish();

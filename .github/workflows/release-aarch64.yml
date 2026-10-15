@@ -142,11 +142,10 @@ jobs:
         id: xtask
         shell: bash
         run: bash .github/scripts/xtask-inventory.sh
-      - name: CPU features of the runner vs neoverse-v1 (待核实, docs/development.md#构建剖面)
+      - name: Verify compiled CPU envelope on the ARM runner
         shell: bash
         run: |
-          grep -m1 '^Features' /proc/cpuinfo | tee -a "$GITHUB_STEP_SUMMARY"
-          rustc --print cfg -C target-cpu=neoverse-v1 | sed -n 's/^target_feature="\(.*\)"/\1/p' | tr '\n' ' ' | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 deploy/release/cpu.py | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Version check
         shell: bash

@@ -19,6 +19,19 @@ pub enum Query {
     ListenKey,
     Keepalive,
     DeadMan { symbol: String, timeout_ms: u32 },
+    FundingInfo,
+    FundingSchedule { symbol: String },
+}
+impl Query {
+    pub fn optional_funding(&self) -> bool {
+        matches!(self, Self::FundingInfo | Self::FundingSchedule { .. })
+    }
+}
+#[derive(Clone, Copy, Debug)]
+pub struct FundingSchedule {
+    pub inst: InstId,
+    pub next_ms: i64,
+    pub interval_s: u32,
 }
 #[derive(Clone, Debug)]
 pub struct OpenOrder {
@@ -36,6 +49,9 @@ pub struct State {
     pub orders: Vec<OpenOrder>,
     pub cursor: String,
     pub funding: Vec<hft_event::FundingSettle>,
+    /// Public REST observations used only to seed the feed decoder before its first WS frame.
+    pub funding_intervals: Vec<(InstId, u32)>,
+    pub funding_schedule: Vec<FundingSchedule>,
 }
 
 impl State {
@@ -58,6 +74,16 @@ impl State {
 /// Separate warm extension: implementations may allocate; no hot decoder depends on it.
 pub trait AccountProtocol: VenueProtocol {
     type Funding: crate::FundingHistoryProtocol + Send;
+    fn funding_bootstrap_queries(_rd: &RefData) -> Vec<Query> {
+        Vec::new()
+    }
+    fn seed_funding(_ctx: &mut Self::FeedCtx, schedules: &[FundingSchedule]) -> Result<(), DecodeErr> {
+        if schedules.is_empty() {
+            Ok(())
+        } else {
+            Err(DecodeErr::Shape)
+        }
+    }
     fn account_request(
         cfg: &VenueCfg,
         cred: &Credential,
@@ -74,6 +100,20 @@ pub trait AccountProtocol: VenueProtocol {
         now_ms: i64,
         state: &mut State,
     ) -> Result<(), DecodeErr>;
+    /// Environment-aware warm validation. The legacy entry remains production-strict.
+    #[allow(clippy::too_many_arguments)]
+    fn account_decode_env(
+        _cfg: &VenueCfg,
+        rd: &RefData,
+        account: AccountId,
+        query: &Query,
+        status: u16,
+        body: &[u8],
+        now_ms: i64,
+        state: &mut State,
+    ) -> Result<(), DecodeErr> {
+        Self::account_decode(rd, account, query, status, body, now_ms, state)
+    }
 }
 
 pub fn instrument(rd: &RefData, venue: hft_types::VenueId, symbol: &str) -> Result<InstId, DecodeErr> {

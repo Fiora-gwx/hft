@@ -73,7 +73,7 @@ UTA 有三种账户模式:**逐仓模式**(每个仓位独立风险,只支持逐
 
 - 订阅后的第一条 `trade` 推送是 `action:"snapshot"` 的历史批,丢弃,不产生 `Trade`;之后每条 `update` 的 `data[]` 每笔一条 `Trade`(`trade_id` ← 成交 id 按十进制解析为 u64,非数字 → `DecodeErr::Number`;`taker_side` ← `S`)。BGT-305 的真实 demo 采样确认 snapshot 后为 update;正式环境同字段仍需核验。
 - `books1` 某一侧为空数组 → 产出 `Bbo`,该侧 `px = 0`、`qty = 0`(下游按"缺一侧"处理,与其他所一致);`books5`/`books15` 中数量为 0 的档不输出。
-- `ticker` 的 `Funding.interval_s` = 相邻两次不同 `nextFundingTime` 之差(秒);本 `FeedCtx` 首次见到该 inst、`nextFundingTime` 尚未变过、或差值 ≤ 0 时为 0(未知)。
+- `ticker` 的 `Funding.interval_s` = 相邻两次不同 `nextFundingTime` 之差(秒)；启动可从 [current-fund-rate](https://www.bitget.com/legacy-docs/uta/public/Get-Current-Funding-Rate) 的 `fundingRateInterval`(1/2/4/8 小时)与 `nextUpdate` seed 同一上下文，第一条同时间戳推送即带实际周期。未取得有效 REST seed 且时间戳尚未变化、或差值 ≤ 0 时为 0；随后以观察到的时间戳变化为准。
 - `ticker` 的 mark/index 是估算参考价,可超过交易价格小数位,按资产价格指数作一次 HalfEven 舍入;盘口与实际成交价格仍要求精确表示。真实 V3 指数价的 15 位小数样本归 BGT-307。
 - 非 `Chain` 类的 `peek`:`ids.last_id` = 去重键(`books1`、`books5`/`books15` 取 `seq`,成交取成交 id,`ticker` 取 `ts` 换算的 ns),`ids.prev_id = 0`。
 - 增量深度(可选扩展,路由 `public-books`):`action = snapshot` 或 `pseq = 0` 的推送解码为 `L2Snapshot{origin = Exchange, snap_id = seq}`(零量档不输出),其余每条一条 `L2Batch{prev_id = pseq, last_id = seq}`(量 0 = 删档);`peek` 给 `ids = {pseq, seq}`;`align_first`:快照 `seq` 落在首条增量的 `[pseq, seq]` 内 → `Apply`,`seq ≤ snap_id` → `Drop`,否则 `Gap`;每边至多 1000 档(`maxDepth` 上限),超出 → `DecodeErr::Shape`;重同步 `ResyncMethod::Resubscribe`(重新订阅即得新快照)。
@@ -186,7 +186,7 @@ UTA 订单推送不带本笔成交:`GwCtx` 按 `orderId` 记上次的累计量�
 
 ### 账户配置核验
 
-UTA 设置接受 `accountMode = unified | hybrid` 且 `accountLevel = basic`;`classic`、`upgrading`、`switching` 与未知值拒绝。字段含义归 [官方账户设置](https://www.bitget.com/docs/catalog/account/account-settings)。demo 实测 basic/单向账户返回 `hybrid` 与 `assetMode=multi_assets`;保证金资格按账户级别、零债务和逐品种 crossed/杠杆核验,不把该 assetMode 字面值当成 advanced。demo `account/info` 的 `permType=unknown`、空 permissions 仍拒绝;Unverifiable 只放宽缺失身份,不豁免权限。
+UTA 设置接受 `accountMode = unified | hybrid` 且 `accountLevel = basic`;`classic`、`upgrading`、`switching` 与未知值拒绝。字段含义归 [官方账户设置](https://www.bitget.com/docs/catalog/account/account-settings)。demo 实测 basic/单向账户返回 `hybrid` 与 `assetMode=multi_assets`;保证金资格按账户级别、零债务和逐品种 crossed/杠杆核验。仅 `VenueEnv::Testnet` 且账户 `is_prod=false` 时，`account_decode_env` 允许准确的 `permType=unknown` + 空 permissions 组合通过权限部分；这表示权限枚举不可用，不是已验证交易权限。认证账户读取必须成功，实际测试以首个真实订单 ack 证明 trade 可用；未取得 ack 不得报告交易验收通过。生产入口、read-only、缺字段、非空无 trade 或含 withdraw 均拒绝，身份矛盾仍拒绝；Unverifiable 不自动授权此豁免。
 
 `acct_queries(Config)`([契约 16](../hft-venue-proto/README.md#实现方必须遵守的契约)),端点与字段全部待核实(开发备忘第 5、15 条),核实前按下表的"要读到什么"实现,读不到即 `UNREADABLE`(fail closed,启动闸门不放行):
 

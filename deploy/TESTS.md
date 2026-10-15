@@ -1893,6 +1893,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 - 里程碑:M5
 - 前置:替身根,清单 `dev2-1`;其余预检项都通过;`aws secretsmanager describe-secret --secret-id hft/live/_sentinel` 的替身结果按行;hft-core 自身的启动拒绝由 CORE-041、CORE-046 覆盖
 - 实现:`deploy/tests/test_preflight.py::dep_168_not_formal_live`
+- 本地 demo 子用例见 `test_local_secrets.py`：显式环境、root 0700 目录、0400/0600 普通文件、无符号链接/穿越、目标引用闭包；默认 AWS 分支继续核验正式秘密访问被拒绝。
 
 | 行 | 条件 | 期望 |
 |---|---|---|
@@ -2657,6 +2658,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 | DEP-235.23 | `PATH` 中有 `rustup`;另一次有 `clang`;另一次有 `cc` | 每次退出 1 |
 
 - 回归:在无 PYTHONDONTWRITEBYTECODE/PYTHONPYCACHEPREFIX 的新进程运行归档内 preflight 与 fetch 入口,导入帮助模块后目录文件集与字节不变,不产生 __pycache__。
+- CPU 子用例见 `test_cpu.py`：发布参数与编译器特性一致、未知特性拒绝、逐核缺特性拒绝、CI 原生额外特性不扩大运行要求。
 
 ### DEP-236 升级主机类的预检项
 

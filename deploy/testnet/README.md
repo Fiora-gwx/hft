@@ -7,7 +7,7 @@
 以 CI 制品运行 `hft-cfg build --kind strategy --schemas schemas --refdata refdata.bin --in strategy.toml --out params.spb1`。将输出文件直接用于 hft-core 的 blobs.strategy_params，并填写其 SHA-256。启动默认 Shadow，启用参数不绕过模式或账户闸门。资金费策略使用集成分支 registry 已登记的实现和导出 schema；不要在 app 中补算法或硬编码其 kind。
 
 
-构建与安装使用 `release-aarch64.yml` 的 `workflow_dispatch`，选择已通过草稿 PR CI 的 SHA、唯一 `dev_n`，设置 `artifact_only = true`。下载该运行的 `release-dist`，在主机上核对 `.sha256`；`RELEASE.json` 记录提交、CI 证据、CPU 特性、schema 和逐文件摘要。安装器不编译。原生 runner 的 CPU 特性是保守包络，首台 AWS 主机的 preflight 必须通过，不能绕过不匹配。
+构建与安装使用 `release-aarch64.yml` 的 `workflow_dispatch`，选择经批准且 CI 通过的 SHA、唯一 `dev_n`，设置 `artifact_only = true`；本轮专用主机只接受合并后 main 制品。下载该运行的 `release-dist`，在主机上核对 `.sha256`；`RELEASE.json` 记录提交、CI 证据、编译 CPU 包络、schema 和逐文件摘要。安装器不编译；CPU 参数与包络归 [构建目标](../../docs/development.md#目标-cpu)，主机预检必须通过，不能绕过不匹配。
 
 以 root 准备 `/etc/hft/host-local.toml`、主机清单、测试网配置与 blob、秘密引用、签发者和独立冷卷，按[发布步骤](../../docs/runbooks/release-and-deploy.md)安装归档，再运行 `activate-release.sh --version <版本> --group core`。激活保持交易单元停止；单独启动护栏、IMDS 和 slice 后运行预检。联调只能由 `deploy/dev2/hft-window start` 开窗，`stop` 走正常 Drain。失败保留窗口标志，确认 prod 停止后再关闭窗口。
 

@@ -124,6 +124,32 @@ impl Default for FeedCtx {
 }
 
 impl FeedCtx {
+    pub(crate) fn seed_funding(
+        &mut self,
+        inst: InstId,
+        next_ms: i64,
+        interval_s: u32,
+    ) -> Result<(), DecodeErr> {
+        if inst.0 == 0 || next_ms <= 0 || interval_s == 0 {
+            return Err(DecodeErr::Shape);
+        }
+        let home = inst.0 as usize % FUND_SLOTS;
+        for k in 0..FUND_SLOTS {
+            let slot = self
+                .fund
+                .get_mut((home + k) % FUND_SLOTS)
+                .ok_or(DecodeErr::Overflow)?;
+            if slot.inst == inst || slot.inst.0 == 0 {
+                *slot = FundSlot {
+                    inst,
+                    next_ms: next_ms as u64,
+                    interval_s,
+                };
+                return Ok(());
+            }
+        }
+        Err(DecodeErr::Overflow)
+    }
     pub const fn new() -> FeedCtx {
         FeedCtx {
             fund: [FundSlot {

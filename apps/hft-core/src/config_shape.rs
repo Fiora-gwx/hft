@@ -19,7 +19,7 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
             ],
             &["sim", "startup"],
         ),
-        "instance" => (&["name", "config_source"], &["order_env"]),
+        "instance" => (&["name", "config_source"], &["order_env", "secrets_mode"]),
         "paths" => (
             &["journal_ram", "journal_cold", "ctl_socket", "ctl_principals"],
             &[],

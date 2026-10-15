@@ -9,6 +9,7 @@ import subprocess
 import tomllib
 
 from release import ReleaseError, check_binaries, sha256, version
+from cpu import compatible, envelope
 
 
 def copy_tree(source, target):
@@ -88,14 +89,11 @@ def stage(repo, dist, tag, sha, run_id, evidence, runner=subprocess.check_output
     exported = runner([str(root / "bin/hft-core"), "--version"], cwd=repo).decode()
     versions = {int(k): int(v) for k, v in re.findall(r"kind_id=(\d+) \S+ version=(\d+)", exported)}
     strategies = [{"name": row["name"], "kind_id": row["kind_id"], "version": versions[row["kind_id"]], "schema_id": row["schema_id"], "schema_ver": row["schema_version"]} for row in index]
-    # Conservative compatibility envelope: all user-visible features of the native CI CPU.
-    # The selected host must satisfy this envelope as well as the compiled target profile.
-    cpuinfo = runner(["cat", "/proc/cpuinfo"], cwd=repo).decode()
-    features = next((line.split(":", 1)[1].split() for line in cpuinfo.splitlines() if line.startswith("Features")), [])
-    if not features:
-        raise ReleaseError("native aarch64 CPU feature evidence missing")
+    cpu_contract = envelope(repo, runner)
+    if not compatible(cpu_contract, runner(["cat", "/proc/cpuinfo"], cwd=repo).decode()):
+        raise ReleaseError("native CI CPU does not satisfy compiled feature envelope")
     schemas = {p.relative_to(root / "schemas").as_posix(): sha256(p) for p in sorted((root / "schemas").rglob("*")) if p.is_file()}
-    result = dict(version=tag, git_sha=sha, ci_run_id=str(run_id), target=target, target_cpu="neoverse-v1", cpu_features=sorted(set(features)), rust_version=runner(["rustc", "--version"], cwd=repo).decode().strip(), profiles=profiles, strategies=strategies, schemas=schemas, evidence=evidence, sbom_sha256=sha256(root / "sbom.json"))
+    result = dict(version=tag, git_sha=sha, ci_run_id=str(run_id), target=target, **cpu_contract, rust_version=runner(["rustc", "--version"], cwd=repo).decode().strip(), profiles=profiles, strategies=strategies, schemas=schemas, evidence=evidence, sbom_sha256=sha256(root / "sbom.json"))
     (dist / "release-metadata.json").write_text(json.dumps(result, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     return root, result
 

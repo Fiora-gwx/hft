@@ -149,6 +149,23 @@ pub struct FeedCtx {
 }
 
 impl FeedCtx {
+    pub(crate) fn seed_funding(
+        &mut self,
+        inst: InstId,
+        next_ms: i64,
+        interval_s: u32,
+    ) -> Result<(), DecodeErr> {
+        if inst.0 == 0 || next_ms <= 0 || interval_s == 0 {
+            return Err(DecodeErr::Shape);
+        }
+        let slot = self
+            .fund
+            .iter_mut()
+            .find(|s| s.0 == inst || s.0.0 == 0)
+            .ok_or(DecodeErr::Overflow)?;
+        *slot = (inst, next_ms, interval_s);
+        Ok(())
+    }
     /// `fstream` connections (no `timeUnit` parameter): milliseconds.
     pub const USDM: FeedCtx = FeedCtx {
         time_unit: TimeUnit::Ms,

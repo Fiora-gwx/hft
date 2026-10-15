@@ -127,6 +127,7 @@ struct Server {
     funding: bool,
     fail: bool,
     requests: usize,
+    funding_bootstrap_failure: u8,
 }
 struct Mock {
     state: Arc<Mutex<Server>>,
@@ -142,6 +143,22 @@ impl Transport for Mock {
         s.requests += 1;
         if s.fail {
             self.pending = Some(Err(hft_net::rest::Error::Timeout));
+            return Ok(());
+        }
+        if (path.contains("current-fund-rate") || path.contains("premiumIndex"))
+            && s.funding_bootstrap_failure != 0
+        {
+            self.pending = Some(match s.funding_bootstrap_failure {
+                1 => Err(hft_net::rest::Error::Timeout),
+                2 => Ok(hft_net::rest::Response {
+                    status: 429,
+                    body: b"{}".to_vec(),
+                }),
+                _ => Ok(hft_net::rest::Response {
+                    status: 200,
+                    body: b"{}".to_vec(),
+                }),
+            });
             return Ok(());
         }
         let body = if self.bitget {
@@ -173,6 +190,8 @@ impl Transport for Mock {
                 )
             } else if path.contains("current-position") {
                 r#"{"list":[{"symbol":"BTCUSDT","holdMode":"one_way_mode","marginMode":"crossed","posSide":"short","total":"0.001","avgPrice":"60000","unrealisedPnl":"0","liquidationPrice":"100000"}]}"#.into()
+            } else if path.contains("current-fund-rate") {
+                r#"[{"symbol":"BTCUSDT","fundingRateInterval":"8","nextUpdate":"1790006400000"}]"#.into()
             } else if path.contains("financial-records") {
                 if s.funding {
                     r#"{"list":[{"id":"900","symbol":"BTCUSDT","coin":"USDT","category":"USDT-FUTURES","type":"CONTRACT_MAIN_SETTLE_FEE_USER_OUT","amount":"0.02","ts":"1790006400000"}],"cursor":""}"#.into()
@@ -190,11 +209,18 @@ impl Transport for Mock {
             };
             format!(r#"{{"code":"00000","data":{data}}}"#)
         } else {
-            if !path.contains("exchangeInfo") {
+            if !path.contains("exchangeInfo")
+                && !path.contains("fundingInfo")
+                && !path.contains("premiumIndex")
+            {
                 assert!(request.contains("X-MBX-APIKEY: DUMMY"));
             }
             if path.contains("exchangeInfo") {
                 r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.1"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001"},{"filterType":"MIN_NOTIONAL","notional":"5"}]}]}"#.into()
+            } else if path.contains("fundingInfo") {
+                "[]".into()
+            } else if path.contains("premiumIndex") {
+                r#"{"symbol":"BTCUSDT","nextFundingTime":1790006400000}"#.into()
             } else if path.contains("accountConfig") {
                 s.settings += 1;
                 format!(
@@ -238,10 +264,11 @@ impl Transport for Mock {
         self.pending.take()
     }
 }
-fn exercise<P: AccountProtocol>(bitget: bool) {
+fn exercise<P: AccountProtocol>(bitget: bool, funding_bootstrap_failure: u8) {
     let rd = rd();
     let server = Arc::new(Mutex::new(Server {
         uid_missing: bitget,
+        funding_bootstrap_failure,
         ..Server::default()
     }));
     let key = Credential {
@@ -287,6 +314,13 @@ fn exercise<P: AccountProtocol>(bitget: bool) {
     };
     assert!(server.lock().unwrap().cancelled);
     assert!(baseline.orders.is_empty());
+    if funding_bootstrap_failure == 0 {
+        assert_eq!(baseline.funding_schedule.len(), 1);
+        assert_eq!(baseline.funding_schedule[0].interval_s, 28_800);
+    } else {
+        assert!(baseline.funding_schedule.is_empty());
+        assert!(baseline.funding_intervals.is_empty());
+    }
     assert_eq!(baseline.config.unwrap().position_mode, 2);
     assert_eq!(baseline.leverage[0].leverage.0, 2_000_000_000);
     if bitget {
@@ -429,6 +463,8 @@ fn core_120_mock_accounts_bootstrap_reauth_and_drift() {
         );
         return;
     }
-    exercise::<venue_binance::Usdm>(false);
-    exercise::<venue_bitget::BitgetUsdtFutures>(true);
+    for failure in 0..=3 {
+        exercise::<venue_binance::Usdm>(false, failure);
+        exercise::<venue_bitget::BitgetUsdtFutures>(true, failure);
+    }
 }

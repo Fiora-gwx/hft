@@ -607,6 +607,22 @@ fn bgt_034_funding_interval() {
         assert_eq!(f.interval_s, want, "{row}");
         assert_eq!(f.h.inst, if sym == "ETHUSDT" { F_ETH } else { F_BTC }, "{row}");
     }
+    use hft_venue_proto::account::{AccountProtocol, FundingSchedule};
+    let mut seeded = FeedCtx::new();
+    Fut::seed_funding(
+        &mut seeded,
+        &[FundingSchedule {
+            inst: F_BTC,
+            next_ms: A as i64,
+            interval_s: 28_800,
+        }],
+    )
+    .unwrap();
+    for (next, interval) in [(A, 28_800), (A, 28_800), (A + 14_400_000, 14_400)] {
+        let (r, md) = dec_ctx(&mut seeded, MdClass::Ticker, &ticker("BTCUSDT", next));
+        assert!(r.is_ok());
+        assert!(matches!(md[2], MdRec::Funding(f) if f.interval_s == interval));
+    }
 }
 
 #[test]

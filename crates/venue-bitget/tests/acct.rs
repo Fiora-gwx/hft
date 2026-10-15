@@ -7,6 +7,63 @@ use hft_venue_proto::{
 use venue_bitget::BitgetUsdtFutures as P;
 
 #[test]
+fn bgt_034_rest_funding_schedule_validation() {
+    let rd = account_rd(false);
+    let mut s = State::default();
+    let next = 1_790_006_400_000i64;
+    let q = Query::FundingSchedule {
+        symbol: "BTCUSDT".into(),
+    };
+    for hours in [1u32, 2, 4, 8] {
+        let body = format!(
+            r#"{{"code":"00000","data":[{{"symbol":"BTCUSDT","fundingRateInterval":"{hours}","nextUpdate":"{next}"}}]}}"#
+        );
+        P::account_decode(rd, ACCT, &q, 200, body.as_bytes(), next - 1000, &mut s).unwrap();
+        assert_eq!(s.funding_schedule.last().unwrap().interval_s, hours * 3600);
+        for status in [429, 500] {
+            assert!(P::account_decode(rd, ACCT, &q, status, body.as_bytes(), next - 1000, &mut s).is_err());
+        }
+        assert!(P::account_decode(rd, ACCT, &q, 200, body.as_bytes(), next, &mut s).is_err());
+        assert!(
+            P::account_decode(
+                rd,
+                ACCT,
+                &q,
+                200,
+                body.as_bytes(),
+                next - i64::from(hours) * 3_600_000 - 1,
+                &mut s
+            )
+            .is_err()
+        );
+        assert!(
+            P::account_decode(
+                rd,
+                ACCT,
+                &q,
+                200,
+                body.replace("BTCUSDT", "ETHUSDT").as_bytes(),
+                next - 1000,
+                &mut s
+            )
+            .is_err()
+        );
+        assert!(
+            P::account_decode(
+                rd,
+                ACCT,
+                &q,
+                200,
+                body.replace(&format!("\"{hours}\""), "\"0\"").as_bytes(),
+                next - 1000,
+                &mut s
+            )
+            .is_err()
+        );
+    }
+}
+
+#[test]
 fn bgt_078_rest_headers() {
     use base64::Engine;
     use hmac::{Hmac, Mac};

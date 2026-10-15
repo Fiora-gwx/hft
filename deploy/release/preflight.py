@@ -18,6 +18,8 @@ import tomllib
 # Importing its helpers must not create __pycache__ inside that immutable tree.
 sys.dont_write_bytecode = True
 from release import selected_host, verify_tree
+from cpu import compatible
+from local_secrets import entries as local_entries
 
 
 class Host:
@@ -71,7 +73,7 @@ def check(host):
         return {"configuration-and-release": False}
     probe("assembled-profile", lambda: inventory["class"] == "dev2" and inventory["instances"] == ["prod"] and inventory["formal_live"] is False)
     probe("architecture", lambda: host.command("uname", "-m") == manifest["target"].split("-")[0])
-    probe("cpu-features", lambda: bool(manifest["cpu_features"]) and set(manifest["cpu_features"]) <= set(host.text("/proc/cpuinfo").split()))
+    probe("cpu-features", lambda: compatible(manifest, host.text("/proc/cpuinfo")))
     probe("cold-volume", lambda: host.command("findmnt", "-n", "-o", "SOURCE", "-T", cold) != host.command("findmnt", "-n", "-o", "SOURCE", "-T", "/"))
 
     def disk():
@@ -108,11 +110,17 @@ def check(host):
     probe("host-profile", profile)
 
     probe("imds-rules", lambda: valid_imds(json.loads(host.command("nft", "-j", "list", "table", "inet", "hft_imds")), host.service_uids()))
-    probe("live-secret-denied", host.live_secret_denied)
+    local = config["instance"].get("secrets_mode", "aws_secrets_manager") == "local_demo"
+    probe("secret-mode", lambda: config["instance"].get("secrets_mode", "aws_secrets_manager") in ("aws_secrets_manager", "local_demo"))
+    if not local:
+        probe("live-secret-denied", host.live_secret_denied)
     # These commands validate local references without returning secret values.
     secrets = sorted(host.path("/etc/hft/secrets").glob("*.toml"))
     probe("secrets-manifests", lambda: bool(secrets))
     for secret in secrets:
+        if local:
+            probe("local-secrets:" + secret.name, lambda secret=secret: secret.name == "hft-core.toml" and bool(local_entries(config, tomllib.loads(secret.read_text(encoding="utf-8")), host.root)))
+            continue
         def allowed_prefix(secret=secret):
             entries = tomllib.loads(secret.read_text())["secret"]
             return bool(entries) and all(entry["secret_id"].split(":secret:", 1)[-1].startswith(("hft/testnet/", "hft/ops/")) for entry in entries)

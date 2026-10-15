@@ -15,6 +15,7 @@ spec = importlib.util.spec_from_file_location("hft_release", Path(__file__).pare
 release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(release)
 sys.modules["release"] = release
+sys.path.insert(0, str(Path(__file__).parents[1] / "release"))
 
 
 def load(name):
@@ -356,7 +357,7 @@ def dep_235_common_items(tmp_path, monkeypatch):
     # to an immutable tree before verify_tree checks its exact file set.
     scripts = tmp_path / "shipped-preflight"
     scripts.mkdir()
-    for name in ("preflight.py", "fetch.py", "release.py"):
+    for name in ("preflight.py", "fetch.py", "release.py", "cpu.py", "local_secrets.py"):
         (scripts / name).write_bytes((Path(__file__).parents[1] / "release" / name).read_bytes())
     before = {p.name: p.read_bytes() for p in scripts.iterdir()}
     env = {k: v for k, v in os.environ.items() if k not in ("PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX")}
