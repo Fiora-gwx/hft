@@ -1,0 +1,17 @@
+source = "testnet-capture"
+source_ref = "run-2026-10-15/dual-9/hft-evidence/captures/bitget-usdt-futures/funding-rest.bills/early_1792051233563.in"
+captured_at = "2026-10-15T08:00:33.734181+00:00"
+refdata = "RD-BGT"
+exchange_doc = "https://www.bitget.com/docs/catalog/account/assets-balance"
+reviewed_by = "pending-human-review"
+review_status = "draft; actual cash amount and independent Decimal HalfEven boundary"
+scrubbed = true
+case_id = "BGT-336"
+environment = "demo"
+endpoint = "https://api.bitget.com/api/v3/account/financial-records"
+http_status = 200
+sha256 = "be9da91b23a68bce2e2a4c0c4940b92d0603ea1c1dc5e9d19534f1772e080533"
+sanitization = "Credential fields removed; UID/account identity replaced with acct-0001; JSON whitespace normalized. Requests and login frames never stored. Bill IDs and matching cursor replaced by fixed same-width placeholders."
+wire_exponents = "Notional=-6; original USDT cash amount retains eight decimal places in input"
+representation_residual_usdt = "5E-8"
+sample_scope = "One real ETHUSDT short funding credit, 2026-10-15 08:00 UTC. Capture client, not engine ledger acceptance."

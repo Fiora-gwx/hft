@@ -293,9 +293,11 @@ core 的深度来源([hft-venue-proto 契约 26](../hft-venue-proto/README.md#�
 
 ### 资金费实额
 
-`Usdm` 实现 `FundingHistoryProtocol`:HMAC-SHA256 签名的 `GET /fapi/v1/income?incomeType=FUNDING_FEE`,明确 `startTime/endTime/page/limit=100/timestamp`;仅接受 `FUNDING_FEE` + `USDT`,按 `symbol` 找 inst,`tranId` 为账单键,`time` 为毫秒,`income` 为有符号实额。满页继续请求下一页,不足一页才结束。未知合约、数值错误或非 200 状态拒绝整页。请求与 headers 标记为敏感,不可写原文日志。接口参数来源为 [官方连接器](https://github.com/binance/binance-futures-connector-python/blob/main/binance/um_futures/account.py)。
+`Usdm` 实现 `FundingHistoryProtocol`:按凭证算法使用 HMAC-SHA256 或 Ed25519 签名的 `GET /fapi/v1/income?incomeType=FUNDING_FEE`,与账户 REST 共用签名入口,明确 `startTime/endTime/page/limit=100/timestamp/recvWindow`;Ed25519 的标准 Base64 签名作 URL 编码。仅接受 `FUNDING_FEE` + `USDT`,按 `symbol` 找 inst,`tranId` 为账单键,`time` 为毫秒,`income` 为有符号实额。满页继续请求下一页,不足一页才结束。未知合约、数值错误或非 200 状态拒绝整页。请求与 headers 标记为敏感,不可写原文日志。接口参数来源为 [官方连接器](https://github.com/binance/binance-futures-connector-python/blob/main/binance/um_futures/account.py)。
 
 `markPriceUpdate` 解码出 MarkPrice、IndexPrice、Funding;费率与下次结算时间供策略只读视图使用,不代表资金费已到账。周期由同合约相邻不同 `T` 的差得出,首次与倒退时未知(0),表容量 256,超容量保持未知。轮询的原始账单由 [FundingPoll](../hft-venue/README.md#资金费账单轮询) 完成去重、汇总和 journal 入口。
+
+资金费 `income` 在 Notional 的 -6 指数边界作一次 HalfEven 舍入,保留有符号现金方向,每笔表示误差至多 0.5 微 USDT。超精度金额不使整页丢失；数值溢出与格式错误仍拒绝。BIN-332 的小数边界是单元输入,不替代真实 Binance 结算金样。
 
 ### 测试网/模拟盘
 
@@ -357,6 +359,8 @@ pub mod mock {
 ```
 
 ## 实现说明
+
+成交 `PartialFill`/`Fill.detail` 保留 wire `S` 的 Buy=1/Sell=2,供 OMS 对迟到或无归属成交确定净量方向;该字段其余回报的状态/拒绝分类归 [hft-event](../hft-event/README.md)。
 
 <details><summary>实现要点</summary>
 
@@ -561,7 +565,7 @@ AccountProtocol 核对 exchangeInfo 的 tick/lot/minQty/minNotional；USDM accou
 14. **Demo Trading 演示环境(M3 之前必须核实)**:按官方 Spot "Demo Mode"(developers.binance.com/docs/binance-spot-api-docs/demo-mode/general-info)与 USDⓈ-M "General Info"(developers.binance.com/docs/derivatives/usds-margined-futures/general-info)缓存原文,核对"测试网/模拟盘"表的每个端点;USDⓈ-M 演示环境是否提供 WS API 下单(`ws-fapi` 的演示端点)——决定门槛 ⑥ 的下单通道与 egress 形态;`demo-fstream` 是否有 `/public`、`/market`、`/private` 路由拆分;同一把演示 key 是否同时用于现货与 USDⓈ-M、`/api/v3/account` 是否返回 `uid`、`sapi` 类端点是否存在(决定 `uid_policy` 与冒烟时记为"不可用"的项);演示环境 symbol 与主网的映射(名称、品种集合、tick/lot/过滤器)与行情来源:A + B。
 15. (启用 L2 双路合并时)同一 inst 两条连接的 depth 增量批是否逐条相同。
 16. **会话 key 的 UID 查询**:只开合约权限的 Ed25519 key 能否签名读取现货 `GET /api/v3/account`;不能时 ws-api `account.status` 是否返回 `uid`:A + B。
-17. **`@bookTicker` 订阅后是否立即推当前 BBO**(决定 `bbo_snapshot_request`)、`/fapi/v1/ticker/bookTicker` 的 `lastUpdateId` 字段:B。
+17. **`@bookTicker` 订阅后是否立即推当前 BBO**(决定 `bbo_snapshot_request`):B。demo REST `lastUpdateId` 与毫秒 `time` 的实际字段由 BIN-306 金样覆盖;正式环境仍待核实。
 18. **心跳口径按产品线**:fstream、ws-fapi、现货 stream、ws-api 各自的服务端 Ping 间隔与无 Pong 断开时限;客户端 Ping/Pong 帧是否计入"入向消息/s"限额:A。
 19. **成交历史不带 client id**:`GET /fapi/v1/userTrades` 与 `myTrades` 的记录是否只有 `orderId`(无 `clientOrderId`);`GET /fapi/v1/order?origClientOrderId=` 对已过期或从未被接受的 client id 返回的码(`-2013`)与可见性延迟:A + B(演示环境下单后立即按 client id 查询)。结论决定 reconciler 的 `history_checked` 判据能否简化。
 20. **分档快照流**:`Usdm` `<s>@depth<N>@100ms` 在 `/public` 还是 `/market` 路由、推送体是否与增量 depth 同名(`depthUpdate`)、`u` 是否单调、订阅后首帧是否立即推当前快照;`Spot` 部分深度推送体是否不带 symbol(决定用 combined 流)、`lastUpdateId` 是否单调、是否接受 `timeUnit=MICROSECOND`;两者在突发时的实际节拍与单条字节数:A + B。核实前按本 README "分档快照流" 表实现,结论写回该表。

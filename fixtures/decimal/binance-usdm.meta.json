@@ -1,0 +1,39 @@
+{
+  "case_id": "TYP-049",
+  "source": "testnet-capture",
+  "environment": "demo",
+  "reviewed_by": "pending-human-review",
+  "review_status": "draft; independent arbitrary-precision Decimal expectations",
+  "source_ref": "run-2026-10-15/decimal-binance-usdm-sources.json",
+  "sha256": "2c53046cec6b1416eef14b06c1f55165c10b8e310bb054f05174c54819357d88",
+  "counts": {
+    "price": 800,
+    "funding_rate": 200,
+    "quantity": 400
+  },
+  "full_case_complete": false,
+  "limitations": "Four Binance/Bitget product subsets only. OKX and 200 fee-rate observations per product remain unavailable. No engine raw journal was produced.",
+  "refdata_exponents": {
+    "symbol": "ETHUSDT",
+    "price": -2,
+    "quantity": -8,
+    "funding_rate": -9,
+    "fee_quantity": -8
+  },
+  "sources": [
+    {
+      "source_ref": "run-2026-10-15/dual-8/hft-evidence/decimal-public/binance-usdm-mark.jsonl",
+      "sha256": "eb64cd252b9dacef36c00eaa8abfbca01418065328afdad7ba9af20336826e91",
+      "endpoint": "wss://demo-fstream.binance.com/market/ws",
+      "first_received_utc": "2026-10-15T07:23:24.080898+00:00",
+      "last_received_utc": "2026-10-15T07:26:43.075288+00:00"
+    },
+    {
+      "source_ref": "run-2026-10-15/dual-8/hft-evidence/decimal-public/binance-usdm.jsonl",
+      "sha256": "7a9a0d24615dc282a05edd4b2d673a7c619baa9b0cb3443716a90da944f51a99",
+      "endpoint": "wss://demo-fstream.binance.com/public/ws",
+      "first_received_utc": "2026-10-15T07:23:23.498248+00:00",
+      "last_received_utc": "2026-10-15T07:23:55.798918+00:00"
+    }
+  ]
+}

@@ -3,11 +3,9 @@ use hft_refdata::RefData;
 use hft_types::Notional;
 use hft_venue_proto::{
     Credential, DecodeErr, FundingBill, FundingHistoryProtocol, FundingPage, FundingQuery, Method, ProtoErr,
-    RestReqBuf, SignAlg, VenueCfg, VenueProtocol, WallClock,
+    RestReqBuf, VenueCfg, VenueProtocol, WallClock,
 };
-use hmac::{Hmac, Mac};
 use serde::Deserialize;
-use sha2::Sha256;
 
 use crate::{Usdm, json, wr::Wr};
 
@@ -28,20 +26,13 @@ struct Bill<'a> {
 
 impl FundingHistoryProtocol for Usdm {
     fn funding_request(
-        _: &VenueCfg,
+        cfg: &VenueCfg,
         cred: &Credential,
         q: &FundingQuery,
         clk: &WallClock,
         out: &mut RestReqBuf,
     ) -> Result<(), ProtoErr> {
-        if cred.alg != SignAlg::HmacSha256
-            || cred.api_key.is_empty()
-            || cred.secret.0.is_empty()
-            || q.start_ms < 0
-            || q.end_ms < q.start_ms
-            || q.page == 0
-            || !q.cursor.is_empty()
-        {
+        if q.start_ms < 0 || q.end_ms < q.start_ms || q.page == 0 || !q.cursor.is_empty() {
             return Err(ProtoErr::Cfg);
         }
         let mut buf = [0; 256];
@@ -52,28 +43,15 @@ impl FundingHistoryProtocol for Usdm {
             .i64(q.end_ms)
             .bytes(b"&page=")
             .u64(u64::from(q.page))
-            .bytes(b"&limit=100&timestamp=")
-            .i64(clk.unix_ms);
+            .bytes(b"&limit=100");
         let n = w.finish().ok_or(ProtoErr::BufFull)?;
         let query = buf.get(..n).ok_or(ProtoErr::BufFull)?;
-        let mut mac = Hmac::<Sha256>::new_from_slice(cred.secret.0.as_slice()).map_err(|_| ProtoErr::Cfg)?;
-        mac.update(query);
-        let signature = mac.finalize().into_bytes();
         *out = RestReqBuf::default();
         out.method = Method::Get;
         out.redacted = true;
         out.path_query.push(b"/fapi/v1/income?")?;
         out.path_query.push(query)?;
-        out.path_query.push(b"&signature=")?;
-        for b in signature {
-            let hex = b"0123456789abcdef";
-            out.path_query
-                .push(&[hex[usize::from(b >> 4)], hex[usize::from(b & 15)]])?;
-        }
-        out.headers.push(b"X-MBX-APIKEY: ")?;
-        out.headers.push(cred.api_key.as_slice())?;
-        out.headers.push(b"\r\n")?;
-        Ok(())
+        crate::account::sign_request(cfg, cred, clk.unix_ms, out)
     }
 
     fn funding_decode(
@@ -114,7 +92,10 @@ impl FundingHistoryProtocol for Usdm {
                 id: r.id,
                 inst,
                 time_ns: ms.checked_mul(1_000_000).ok_or(DecodeErr::Overflow)?,
-                amount: Notional(json::fixed(r.income, -6)?),
+                amount: Notional(
+                    hft_types::parse_round(r.income.as_bytes(), -6, hft_types::RoundMode::HalfEven)
+                        .map_err(json::fx)?,
+                ),
             });
         }
         Ok(FundingPage { bills, next })

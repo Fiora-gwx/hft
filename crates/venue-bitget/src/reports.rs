@@ -531,9 +531,15 @@ fn side_of(s: &str) -> Option<Side> {
     }
 }
 
-/// Absolute value of a signed decimal at `exp` (V2 reports fees negative).
+/// Fees may carry more decimals than the fee asset; round once at its quantity boundary.
 fn abs_fixed(s: &str, exp: i8) -> Result<i64, DecodeErr> {
-    fixed_or_zero(s, exp)?.checked_abs().ok_or(DecodeErr::Overflow)
+    if s.is_empty() {
+        return Ok(0);
+    }
+    parse_round(s.as_bytes(), exp, RoundMode::HalfEven)
+        .map_err(fx)?
+        .checked_abs()
+        .ok_or(DecodeErr::Overflow)
 }
 
 /// One validated order row, before the `GwCtx` comparison.
@@ -859,6 +865,10 @@ fn emit(
     };
     let mut e = blank(line, rx.account, rx);
     e.what = what;
+    if matches!(what, OrderEventKind::PartialFill | OrderEventKind::Fill) {
+        // parse_row requires a known side whenever cumulative filled quantity is nonzero.
+        e.detail = x.side.map_or(0, |side| side as u8);
+    }
     e.epoch = epoch;
     e.slot = slot;
     e.r#gen = r#gen;
@@ -1016,7 +1026,7 @@ fn account(
             continue;
         }
         let qe = rd.asset(asset).exp.qty_exp;
-        let total = fixed(c.balance, qe)?;
+        let balance = fixed(c.balance, qe)?;
         let locked = if line == Line::Spot {
             fixed_or_zero(c.locked, qe)?
         } else {
@@ -1030,7 +1040,8 @@ fn account(
             account: rx.account,
             asset,
             _pad: 0,
-            free: Qty(total.checked_sub(locked).ok_or(DecodeErr::Overflow)?),
+            // UTA balance excludes spot locks; subtracting locked again loses cash.
+            free: Qty(balance),
             locked: Qty(locked),
             ex_ts_ns: ts,
             rx_tsc: Tsc(rx.rx_tsc),

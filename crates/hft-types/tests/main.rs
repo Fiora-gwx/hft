@@ -13,6 +13,7 @@ mod err;
 mod fixed;
 mod format;
 mod funding;
+mod golden;
 mod hedge;
 mod ids;
 mod kill;

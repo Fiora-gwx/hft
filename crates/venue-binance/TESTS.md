@@ -2063,6 +2063,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 期望文件:同目录 `<case>.expected.jsonl`(每条推送三行:`MarkPrice`、`IndexPrice`、`Funding`;`interval_s` 按 BIN-033 规则)
 - 实现:`crates/venue-binance/tests/golden.rs::bin_303_usdm_markprice`
 - 采样覆盖:`testnet-capture` 覆盖正常标记/指数/费率;RD-BIN-8 保留八位价格小数,与交易 tick 分开;人工复核状态见 meta。其余分支仍待采集,只比较期望文件列出的业务字段及事件数,不宣称全量验收。
+- `funding_rollover.in` 保留 2026-10-15 08:00 UTC 结算前后三帧,同一 FeedCtx 从 interval_s=0 变为 28800；这不是 8 h 变 4 h 的周期变化样本。
 
 ### BIN-304 金样:Usdm forceOrder(公共强平流)
 
@@ -2090,6 +2091,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-usdm/rest.ticker_bookTicker/` 的 `single.in`、`error_body.in`;来源:待采集(方法 B:演示环境与主网各一次 `GET /fapi/v1/ticker/bookTicker?symbol=BTCUSDT`)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-binance/tests/golden.rs::bin_306_usdm_bbo_refresh`
+- 已采样范围:真实 demo ETHUSDT 单品种响应含 `lastUpdateId` 与毫秒 `time`,错误响应整页拒绝且无 BBO 输出;未采正式环境。
 - 备注:依赖待核实:开发备忘第 17 条
 
 ### BIN-307 金样:Usdm session.logon 响应
@@ -2301,6 +2303,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-spot/executionReport/` 的 `new.in`、`partially_filled.in`、`filled.in`、`canceled.in`、`expired.in`、`replaced.in`、`web_order_fill.in`、`fee_bnb.in`(BNB 抵扣)、`fee_base_asset.in`(不抵扣,扣所得 BTC)、`dup_trade.in`;来源:待采集(方法 B:演示环境分别开关 BNB 抵扣各成交一笔,开发备忘第 7 条)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-binance/tests/golden.rs::bin_327_spot_execution_report`
+- 补充断言:实采买卖成交与部分成交的 detail 必须等于 wire S 的 Buy=1/Sell=2,保证迟到与无归属成交保留净仓方向。
 - 采样覆盖:`source = "testnet-capture"` 覆盖NEW/PARTIALLY_FILLED/FILLED/CANCELED/EXPIRED/REPLACED、base asset 手续费与同一订单连续部分成交;dup_trade 是实采部分成交帧的显式合成重复;期望独立按线值计算,核对状态见 meta。其余列出的分支仍待采集,当前测试只比较期望文件列出的业务字段及事件数,不宣称本用例全量验收。
 - 备注:依赖待核实:开发备忘第 3、7 条
 
@@ -2353,6 +2356,10 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 实现:`crates/venue-binance/tests/golden.rs::bin_332_funding_flow`
 
 BIN-332 补充单元验收:签名 GET、正负现金金额、同刻多合约、满页继续、HTTP/JSON 错误整页失败。实现:`tests/funding.rs::bin_332_income_history_actual_amount_and_signing`、`bin_332_full_page_requires_following_page`。默认 caps 采用 RateOnly;BIN-113–116 保留为可选 BalanceOnlyPush 用户流配置,不与实额历史并用。
+
+BIN-332 的 Ed25519 查询用 RFC 8032 测试密钥核验完整查询串、recvWindow、签名 URL 编码和公钥验签,同时要求敏感标记;实现:`tests/funding.rs::bin_332_ed25519_income_history_signing`。不以空账户 income 响应声称真实资金费入账通过。
+
+BIN-332 单元输入验证带符号的八位小数金额与 HalfEven 半值取偶；同一页的类型、币种、时间窗、合约与溢出检查仍生效。真实 Binance 资金费样本仍待采集。
 
 ### BIN-333 金样:Usdm balance 与 Spot account 余额(只读查询)
 

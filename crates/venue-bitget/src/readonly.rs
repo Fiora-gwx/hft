@@ -59,10 +59,12 @@ struct Envelope<T> {
     data: T,
 }
 #[derive(Deserialize)]
+#[serde(bound(deserialize = "T: serde::de::DeserializeOwned"))]
 struct Page<T> {
+    #[serde(deserialize_with = "crate::json::nullable_list")]
     list: Vec<T>,
     #[serde(default)]
-    cursor: String,
+    cursor: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -124,10 +126,11 @@ fn page<T: serde::de::DeserializeOwned>(body: &[u8], q: &RoQuery) -> Result<(Vec
     if e.data.list.len() > limit {
         return Err(DecodeErr::Shape);
     }
-    let c = if e.data.cursor.is_empty() {
+    let cursor = e.data.cursor.as_deref().unwrap_or("");
+    let c = if cursor.is_empty() {
         0
     } else {
-        e.data.cursor.parse::<u64>().map_err(|_| DecodeErr::Number)?
+        cursor.parse::<u64>().map_err(|_| DecodeErr::Number)?
     };
     if c != 0 && (c == q.cursor || e.data.list.is_empty()) {
         return Err(DecodeErr::Shape);

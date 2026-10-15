@@ -1,0 +1,15 @@
+source = "testnet-capture"
+source_ref = "run-2026-10-15/dual-8/hft-evidence/captures/binance-usdm/rest.ticker_bookTicker/single.in"
+captured_at = "2026-10-15T05:00:46.991418+00:00"
+refdata = "RD-BIN"
+exchange_doc = "https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Symbol-Order-Book-Ticker"
+reviewed_by = "pending-human-review"
+review_status = "draft; independent Decimal expectations"
+scrubbed = true
+case_id = "BIN-306"
+environment = "demo"
+endpoint = "https://demo-fapi.binance.com/fapi/v1/ticker/bookTicker"
+http_status = 200
+sha256 = "54fd78d79c12833dedf56a8dd69dce97c87aeb8c680920cffcc47c964c0fb570"
+sanitization = "Credentials/signatures/listenKeys -> fixed REDACTED placeholders; UID/accountAlias -> acct-0001. JSON whitespace normalized. Requests and login frames never stored."
+wire_exponents = "ETH px=-2 qty=-8"

@@ -642,7 +642,7 @@ fn bgt_101_partial_fill_fields() {
             venue: FUT,
             account: ACCT,
             what: OrderEventKind::PartialFill,
-            detail: 0,
+            detail: Side::Buy as u8,
             slot: SlotId(42),
             r#gen: 7,
             inst: F_BTC,
@@ -1360,14 +1360,14 @@ fn bgt_114_wallet_balance_is_not_available_margin() {
 }
 
 #[test]
-fn bgt_114_spot_wallet_includes_locked_cash_once() {
+fn bgt_114_spot_balance_excludes_locked_cash() {
     let p = acct(&[("USDT", "100", "5"), ("BTC", "0.001", "0")])
         .replace("\"available\":\"100\"", "\"available\":\"20\"");
     let (out, sink) = dec_spot(&mut GwCtx::new(), &p);
     out.unwrap();
     assert_eq!(
         (sink.bal[0].free, sink.bal[0].locked),
-        (Qty(9_500_000_000), Qty(500_000_000))
+        (Qty(10_000_000_000), Qty(500_000_000))
     );
     assert_eq!(sink.bal[1].free, Qty(100_000));
 }

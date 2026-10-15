@@ -167,7 +167,9 @@ struct Asset {
     debt: String,
 }
 #[derive(Deserialize)]
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
 struct List<T> {
+    #[serde(deserialize_with = "crate::json::nullable_list")]
     list: Vec<T>,
 }
 #[derive(Deserialize)]
@@ -335,7 +337,7 @@ fn decode_page(
         }
         Query::Settings | Query::SymbolSettings => {
             let r: Settings = data(b)?;
-            if r.account_mode != "unified"
+            if !matches!(r.account_mode.as_str(), "unified" | "hybrid")
                 || r.account_level != "basic"
                 || (fut && r.hold_mode != "one_way_mode")
             {
@@ -405,14 +407,14 @@ fn decode_page(
                 }
                 if let Some(asset) = asset(rd, &row.coin) {
                     let exp = rd.asset(asset).exp.qty_exp;
-                    // A futures wallet total excludes unrealized PnL; available is a margin fact.
-                    let total = decimal(&row.balance, exp)?;
+                    // UTA balance excludes spot locks. Available remains a margin fact.
+                    let balance = decimal(&row.balance, exp)?;
                     let locked = if fut { 0 } else { decimal(&row.locked, exp)? };
                     s.balances.push(BalanceReport {
                         venue: v,
                         account: a,
                         asset,
-                        free: Qty(total.checked_sub(locked).ok_or(DecodeErr::Overflow)?),
+                        free: Qty(balance),
                         locked: Qty(locked),
                         ex_ts_ns: ns,
                         ..zerocopy::FromZeros::new_zeroed()

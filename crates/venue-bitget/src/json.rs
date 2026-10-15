@@ -24,6 +24,14 @@ pub(crate) fn from<'a, T: Deserialize<'a>>(p: &'a [u8]) -> Result<T, DecodeErr> 
     })
 }
 
+/// UTA empty REST pages use explicit null. The enclosing field remains required, so a
+/// missing list cannot erase positions or advance a completed funding window.
+pub(crate) fn nullable_list<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<Vec<T>, D::Error> {
+    Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
+}
+
 /// Decimal string → fixed point at `exp` (contract 4).
 pub(crate) fn fixed(s: &str, exp: i8) -> Result<i64, DecodeErr> {
     parse_exact(s.as_bytes(), exp).map_err(fx)

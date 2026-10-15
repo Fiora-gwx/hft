@@ -1,0 +1,33 @@
+{
+  "case_id": "TYP-049",
+  "source": "testnet-capture",
+  "environment": "demo",
+  "reviewed_by": "pending-human-review",
+  "review_status": "draft; independent arbitrary-precision Decimal expectations",
+  "source_ref": "run-2026-10-15/decimal-bitget-usdt-futures-sources.json",
+  "sha256": "8d9989f01a8da2737bb515efc63e91ddef73d6b2e501cfffb6601e3d43b48656",
+  "counts": {
+    "price": 800,
+    "funding_rate": 200,
+    "quantity": 400,
+    "fee_quantity": 4
+  },
+  "full_case_complete": false,
+  "limitations": "Four Binance/Bitget product subsets only. OKX and 200 fee-rate observations per product remain unavailable. No engine raw journal was produced.",
+  "refdata_exponents": {
+    "symbol": "ETHUSDT",
+    "price": -2,
+    "quantity": -8,
+    "funding_rate": -9,
+    "fee_quantity": -8
+  },
+  "sources": [
+    {
+      "source_ref": "run-2026-10-15/dual-8/hft-evidence/decimal-public/bitget-usdt-futures.jsonl",
+      "sha256": "28d4304ec31d67031edf4300a37900654b2c01b9538a322f7143ae7eea5f5712",
+      "endpoint": "wss://wspap.bitget.com/v3/ws/public",
+      "first_received_utc": "2026-10-15T07:23:23.415224+00:00",
+      "last_received_utc": "2026-10-15T07:25:06.163975+00:00"
+    }
+  ]
+}

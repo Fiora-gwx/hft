@@ -704,6 +704,7 @@ spec: README.md
 - 输入:从 6 个 core 产品线(Binance、OKX、Bitget 的现货与 USDT 永续)的 raw journal 抽取的价格、数量、费率与资金费率原文,每产品线每类字段至少 200 条(含科学计数法写法,若出现),连同各 inst 的线格式指数
 - 期望文件:`fixtures/decimal/<venue>.tsv`(每行:原文、线格式指数、`parse_exact` 期望 raw 或错误位名、`parse_round(HalfEven)` 期望 raw)
 - 实现:`crates/hft-types/tests/golden.rs::typ_049_venue_decimal_samples`
+- 当前覆盖:Binance/Bitget 四产品的 demo 公共流与 Bitget 私有费用数量子集;逐字解析结果由独立 Decimal 参考计算,来源行映射与分类计数随样本记录。该测试通过只证明已采样行的解析;OKX、每类 200 条与 raw journal 来源的完整验收仍待补,不得据此标记 TYP-049 完成。
 
 ### TYP-050 十进制解析的 fuzz 目标不崩溃且与参考一致
 

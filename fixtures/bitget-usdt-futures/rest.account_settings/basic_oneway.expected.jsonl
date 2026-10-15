@@ -1,0 +1,3 @@
+{"kind":"AccountConfigReport","position_mode":2,"margin_mode":2,"multi_asset":2,"uid_keys":3,"mismatches":0}
+{"kind":"LeverageItem","inst":1,"leverage":"1000000000"}
+{"kind":"LeverageItem","inst":2,"leverage":"1000000000"}

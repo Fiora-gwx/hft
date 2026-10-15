@@ -12,7 +12,7 @@ status: impl
 
 `venue-bitget` 实现两个 [`VenueProtocol`](../hft-venue-proto/README.md#venueprotocol静态分派):`BitgetUsdtFutures`(USDT 本位永续,`MarketKind::LinearPerp`)与 `BitgetSpot`(现货,`MarketKind::Spot`),两者都是 core,以 **UTA(统一账户)V3** 接口为主(Classic V2 只作核对与行情对照)。它拥有 Bitget 的协议知识:`books1`(1 ms JSON 快照,BBO)、分档快照 `books5`/`books50`(core 深度)、增量 `books` 的 `seq/pseq` 严格链续(可选扩展;UTA 无 checksum)、永续 `ticker` 的标记价/指数价/资金费、**每 25 s 无条件发应用层 `ping`**(research/02 的口径是客户端每 30 s 发一次;服务端 120 s 没收到 ping 就断,即使数据在流,实测约 150 s;取 25 s 留余量)、`login` 签名、UTA V3 WS `place-order`/`modify-order`/`cancel-order` 帧、账户模式核验、保证金与强平价轮询、强平/ADL 成交识别、`clientOid` 格式、限速与 `VenueCaps` 默认值。Bitget **没有交易所侧死手**,由 [kill-switch](../../apps/kill-switch/README.md) 兜底。
 
-**线上事实的来源**:UTA V3 的公共/私有频道、订阅写法、WS 下单帧与响应、REST 签名与订单详情、错误码与枚举(开平类型、撤单原因)取自官方 UTA 文档原文(GitHub 上的文档镜像,见[延伸阅读](#延伸阅读));本机仍连不上 Bitget,模拟盘未跑过。标"待核实"的是官方原文没写清、要在模拟盘确认的项(开发备忘);**官方资料中未找到 Bitget SBE 与 "LOLA" 线路**,本规格不依赖它们。纯函数,运行时见 [`hft-venue`](../hft-venue/README.md)。
+**线上事实的来源**:UTA V3 的公共/私有频道、订阅写法、WS 下单帧与响应、REST 签名与订单详情、错误码与枚举(开平类型、撤单原因)取自官方 UTA 文档原文与 2026-10-15 demo 脱敏采样。对应金样及未覆盖范围归 [TESTS.md](TESTS.md);采集客户端的开平不代表 hft-core 联调通过。标"待核实"的是仍需模拟盘确认的项(开发备忘);**官方资料中未找到 Bitget SBE 与 "LOLA" 线路**,本规格不依赖它们。纯函数,运行时见 [`hft-venue`](../hft-venue/README.md)。
 
 ## 目录
 
@@ -71,9 +71,10 @@ UTA 有三种账户模式:**逐仓模式**(每个仓位独立风险,只支持逐
 | `publicTrade`(New-Trades) | 两者 | 实时 | `Monotonic` on 成交 id(`peek` 取一帧内最大的 `i`) | `Trade`(`i` → `trade_id`、`p`、`v`、`S` → `taker_side`;V2 名 `tradeId`/`price`/`size`/`side` 同样接受) | `T`(成交时间) |
 | `ticker` | 永续 | 300–400 ms | `ByTime` | `MarkPrice ← markPrice`、`IndexPrice ← indexPrice`、`Funding{rate ← fundingRate, next ← nextFundingTime}`(官方 UTA 字段;V2 同名,现有采集系统已验证) | `data.ts`;UTA `ticker` 的 `data` 没有 `ts` 时取顶层 `ts` |
 
-- 订阅后的第一条 `trade` 推送是 `action:"snapshot"` 的历史批,丢弃,不产生 `Trade`;之后每条推送的 `data[]` 每笔一条 `Trade`(`trade_id` ← 成交 id 按十进制解析为 u64,非数字 → `DecodeErr::Number`;`taker_side` ← `S`)。官方示例里的实时推送也写作 `snapshot`,若模拟盘确认如此,丢弃规则改为"只丢订阅后的第一帧"(开发备忘第 1 条)。
+- 订阅后的第一条 `trade` 推送是 `action:"snapshot"` 的历史批,丢弃,不产生 `Trade`;之后每条 `update` 的 `data[]` 每笔一条 `Trade`(`trade_id` ← 成交 id 按十进制解析为 u64,非数字 → `DecodeErr::Number`;`taker_side` ← `S`)。BGT-305 的真实 demo 采样确认 snapshot 后为 update;正式环境同字段仍需核验。
 - `books1` 某一侧为空数组 → 产出 `Bbo`,该侧 `px = 0`、`qty = 0`(下游按"缺一侧"处理,与其他所一致);`books5`/`books15` 中数量为 0 的档不输出。
 - `ticker` 的 `Funding.interval_s` = 相邻两次不同 `nextFundingTime` 之差(秒);本 `FeedCtx` 首次见到该 inst、`nextFundingTime` 尚未变过、或差值 ≤ 0 时为 0(未知)。
+- `ticker` 的 mark/index 是估算参考价,可超过交易价格小数位,按资产价格指数作一次 HalfEven 舍入;盘口与实际成交价格仍要求精确表示。真实 V3 指数价的 15 位小数样本归 BGT-307。
 - 非 `Chain` 类的 `peek`:`ids.last_id` = 去重键(`books1`、`books5`/`books15` 取 `seq`,成交取成交 id,`ticker` 取 `ts` 换算的 ns),`ids.prev_id = 0`。
 - 增量深度(可选扩展,路由 `public-books`):`action = snapshot` 或 `pseq = 0` 的推送解码为 `L2Snapshot{origin = Exchange, snap_id = seq}`(零量档不输出),其余每条一条 `L2Batch{prev_id = pseq, last_id = seq}`(量 0 = 删档);`peek` 给 `ids = {pseq, seq}`;`align_first`:快照 `seq` 落在首条增量的 `[pseq, seq]` 内 → `Apply`,`seq ≤ snap_id` → `Drop`,否则 `Gap`;每边至多 1000 档(`maxDepth` 上限),超出 → `DecodeErr::Shape`;重同步 `ResyncMethod::Resubscribe`(重新订阅即得新快照)。
 - 公共强平流:V2 没有;UTA 有 Liquidation 频道(格式待核实,开发备忘第 1 条),不订阅(与本账户无关)。
@@ -83,7 +84,7 @@ UTA 有三种账户模式:**逐仓模式**(每个仓位独立风险,只支持逐
 
 | 操作 | 帧(官方 UTA Place/Cancel/Modify-Order-Channel) | 对应 REST |
 |---|---|---|
-| 登录 | `{"op":"login","args":[{apiKey, passphrase, timestamp, sign}]}`,`sign = Base64(HMAC-SHA256(secret, ts + "GET" + "/user/verify"))`,`ts` 为秒(V2 已在生产验证;V3 是否改为 ms 待核实,开发备忘第 10 条);回执 `{"event":"login","code":"0"}`,失败 `{"event":"error","code":…}` | — |
+| 登录 | `{"op":"login","args":[{apiKey, passphrase, timestamp, sign}]}`,`sign = Base64(HMAC-SHA256(secret, ts + "GET" + "/user/verify"))`,`ts` 发秒;BGT-310 真实 demo 秒/毫秒均登录成功,不据此要求毫秒;回执 `{"event":"login","code":"0"}`,失败 `{"event":"error","code":…}` | — |
 | 下单 | `{"op":"trade","id":<请求 id>,"category":"usdt-futures"\|"spot","topic":"place-order","args":[{symbol, side, orderType:"limit", price, qty, timeInForce, clientOid[, reduceOnly:"YES"]}]}` | `/api/v3/trade/place-order` |
 | 改单 | `topic = "modify-order"`,`args = [{symbol, clientOid, price, qty, autoCancel:"no"}]` | `/api/v3/trade/modify-order` |
 | 撤单 | `topic = "cancel-order"`,`args = [{clientOid}]` | `/api/v3/trade/cancel-order` |
@@ -132,7 +133,9 @@ core 的深度来源([hft-venue-proto 契约 26](../hft-venue-proto/README.md#�
 
 ### 累计量与费用来源
 
-UTA 订单回报的累计量比已保存量小时不产出事件,也不回退累计金额、费用或终态基线;累计量未增长时保留已有金额基线。`avgPrice` 按资产价格指数作 HalfEven 舍入,允许成交均价含更多小数位。负累计量、金额、均价以及超过累计量的单笔数量在更新上下文之前拒绝。
+`PartialFill`/`Fill.detail` 保留 wire `side` 的 Buy=1/Sell=2,供 OMS 对迟到或无归属成交确定净量方向;其他回报继续使用各自状态/拒绝分类。带非零累计成交量却缺失方向的行拒绝,不猜测买卖。
+
+UTA 订单回报的累计量比已保存量小时不产出事件,也不回退累计金额、费用或终态基线;累计量未增长时保留已有金额基线。`avgPrice` 按资产价格指数作 HalfEven 舍入,允许成交均价含更多小数位。手续费按扣费资产数量指数作一次 HalfEven 舍入后取绝对值,允许真实订单频道比资产指数多出小数位。负累计量、金额、均价以及超过累计量的单笔数量在更新上下文之前拒绝。
 
 | 流 | `cum_filled` | `avg_px` | 费用 |
 |---|---|---|---|
@@ -183,6 +186,8 @@ UTA 订单推送不带本笔成交:`GwCtx` 按 `orderId` 记上次的累计量�
 
 ### 账户配置核验
 
+UTA 设置接受 `accountMode = unified | hybrid` 且 `accountLevel = basic`;`classic`、`upgrading`、`switching` 与未知值拒绝。字段含义归 [官方账户设置](https://www.bitget.com/docs/catalog/account/account-settings)。demo 实测 basic/单向账户返回 `hybrid` 与 `assetMode=multi_assets`;保证金资格按账户级别、零债务和逐品种 crossed/杠杆核验,不把该 assetMode 字面值当成 advanced。demo `account/info` 的 `permType=unknown`、空 permissions 仍拒绝;Unverifiable 只放宽缺失身份,不豁免权限。
+
 `acct_queries(Config)`([契约 16](../hft-venue-proto/README.md#实现方必须遵守的契约)),端点与字段全部待核实(开发备忘第 5、15 条),核实前按下表的"要读到什么"实现,读不到即 `UNREADABLE`(fail closed,启动闸门不放行):
 
 | 步 | 请求(候选,待核实:开发备忘第 5 条) | 要读到什么 → 判定 |
@@ -199,6 +204,8 @@ UTA 订单推送不带本笔成交:`GwCtx` 按 `orderId` 记上次的累计量�
 运行中:若核实存在账户配置变化推送,给 `hint = ConfigRecheck`;否则依赖 `gw.acct_cfg_recheck_s` 周期重查。
 
 ### 保证金数据换算
+
+当前持仓响应的 `data.list = null` 与空数组都表示零持仓;缺失 `list` 或错误类型拒绝整页,保留上次真值。此语义覆盖 warm 启动与只读对账复用的账户解析器。
 
 `margin_data = Poll{interval_ms: 5000}`([契约 17](../hft-venue-proto/README.md#实现方必须遵守的契约)),只对 `BitgetUsdtFutures`:
 
@@ -240,7 +247,7 @@ UTA 订单推送不带本笔成交:`GwCtx` 按 `orderId` 记上次的累计量�
 | `order`(`{"instType":"UTA","topic":"order"}`;只保留 `category` = 本产品线) | 先过"外部成交识别";`live`/`new` → `Ack`;累计量前进 → `PartialFill`/`Fill`;`cancelled` → `CancelAck`,`timeInForce ∈ {ioc, fok}` 或 `cancelReason ∈ {ioc_not_full_cancel, fok_not_full_cancel, post_only_fill_cancel}` 时 `Expired`(都带当时的累计量与本笔增量) | — |
 | `fill` / `fast-fill` | 不订阅;收到时 `skip = Listed` | — |
 | `position`(只永续订阅;现货不产出) | `PositionReport{qty ← size(posSide = short 取负), entry_px ← avgPrice, upnl ← unrealisedPnl, liq_px ← liqPrice(空 → 0)}`(只校验;refdata 外品种跳过) | — |
-| `account` | `data[0].coin[]` 每币种一条 `BalanceReport`:永续 `free ← balance, locked ← 0`;现货 `free ← balance − locked`(有符号),`locked ← locked`(必须非负)(只校验;refdata 外币种跳过);`margin_data = Poll` 期间不产出 `MarginReport`;若核实带保证金率则 `MarginReport`(并把 `margin_data` 改为 `Push`;推送在 gw 线程上解码,预算上限见 [hft-venue](../hft-venue/README.md#延迟与资源契约) `venue_gw_margin_push`) | — |
+| `account` | `data[0].coin[]` 每币种一条 `BalanceReport`:永续 `free ← balance, locked ← 0`;现货 `free ← balance`(有符号),`locked ← locked`(必须非负)(只校验;refdata 外币种跳过);`margin_data = Poll` 期间不产出 `MarginReport`;若核实带保证金率则 `MarginReport`(并把 `margin_data` 改为 `Push`;推送在 gw 线程上解码,预算上限见 [hft-venue](../hft-venue/README.md#延迟与资源契约) `venue_gw_margin_push`) | — |
 | `{"event":"login"|"subscribe"|"error"}` | 无(控制回执;订阅被拒 `code` 为数字,如 `30001`) | — |
 | `pong` | 无(心跳回应) | — |
 | 其他 | 无(`skip = Unknown`;核实后把确认无用的名字加入 `ignorable_user_events`) | — |
@@ -249,11 +256,13 @@ UTA 订单推送不带本笔成交:`GwCtx` 按 `orderId` 记上次的累计量�
 
 `BitgetUsdtFutures` 实现 `FundingHistoryProtocol`,HMAC 签名查询 `GET /api/v3/account/financial-records?category=USDT-FUTURES&coin=USDT`,明确起止毫秒、`limit=100` 和返回的 cursor。这不是资金账户的 `funding-financial-records`。只接受 `CONTRACT_MAIN_SETTLE_FEE_USER_IN/OUT` 的交易账单,`id` 去重,`symbol` 定位合约,`ts` 为毫秒,`amount` 为现金金额,由 IN/OUT 规范正负。交易费、转账与 RWA 分红类型不当作普通资金费。分页错误、未知合约、错误币种或非成功响应拒绝整页。来源为 [官方财务记录](https://www.bitget.com/docs/catalog/account/assets-balance) 与 [官方枚举](https://www.bitget.com/docs/uta/enum)。
 
+`amount` 在 Notional 的 -6 指数边界作一次 HalfEven 舍入,再按 IN/OUT 规范正负;原始账单金额保留在金样中。BGT-336 的真实八位小数资金费不能要求六位精确表示,每笔表示误差至多 0.5 微 USDT,不宣称原始现金逐位无损。
+
 `ticker` 的费率/下次结算时间经 Funding 进入策略;account 推送的余额不能推导逐合约收付。`RateOnly` 保留行情估算,认证账单经 [FundingPoll](../hft-venue/README.md#资金费账单轮询) 和 [ledger 实额完成](../hft-ledger/README.md#资金费) 修正金额,不等待 M9 的资金费自动对账。
 
 ### 测试网/模拟盘
 
-UTA 文档目录有"Demo Trading"一节(官方,本地缓存的目录页),端点(行情与下单)、请求头、模拟盘符号与主网符号的映射(Classic V2 的模拟盘曾用带前缀的符号与产品类型,UTA 是否沿用待核实)、API key 申请方式与 UTA V3 接口的覆盖范围待核实(开发备忘第 9 条);模拟盘读不到 UID 时该账户按 `uid_policy = "unverifiable"` 配置(规则归 [hft-refdata](../hft-refdata/README.md#数据结构))。模拟盘 refdata 由 hft-cfg 按模拟盘的品种接口单独生成。上线门槛第 ⑥ 项([testing §8](../../docs/testing.md#8-上线门槛))要求 Bitget 模拟盘联调,行情与下单都用模拟盘(`feed_env = "testnet"` + 模拟盘 refdata);模拟盘不覆盖的接口逐项记录,处理方式归 testing §8,不以实盘小单替代。
+真实 demo 采样使用 `wspap.bitget.com/v3/ws/{public,private}`、REST `api.bitget.com/api/v3` 与 `paptrading: 1`,REST 签名时间戳为毫秒;ETHUSDT/BTCUSDT 不加模拟币前缀。`account/info` 返回 unknown/空权限仍拒绝配置闸门,不能由成功下单推断无提现权限;`deduct-info` 在本轮 demo 返回 404,覆盖范围仍待核实。模拟盘读不到 UID 时该账户按 `uid_policy = "unverifiable"` 配置(规则归 [hft-refdata](../hft-refdata/README.md#数据结构)),该策略不豁免权限核验。模拟盘 refdata 由 hft-cfg 按模拟盘的品种接口单独生成。上线门槛第 ⑥ 项([testing §8](../../docs/testing.md#8-上线门槛))要求 Bitget 模拟盘联调,行情与下单都用模拟盘(`feed_env = "testnet"` + 模拟盘 refdata);模拟盘不覆盖的接口逐项记录,处理方式归 testing §8,不以实盘小单替代。
 
 ### 心跳与 BBO 探测
 
@@ -269,9 +278,11 @@ UTA 文档目录有"Demo Trading"一节(官方,本地缓存的目录页),端点(
 
 ### 只读查询
 
+真实 demo 查单与未成交订单页的覆盖范围归 BGT-333/334;外来 client ID 不取得自有槽身份,分页 cursor 按交易所返回值继续查询。
+
 Warm 入口支持 OpenOrders、Fills、Balance 与永续 Positions，整页校验后才调用 RoSink；错误页没有部分结果，外来 client id 保持 UNRESOLVED/None，不借用本账户槽。FundingFlow 暂由 `FundingHistoryProtocol` 的固定窗口接口承载，`ro_request(FundingFlow)` 返回 Unsupported。合成响应仅证明本地映射，真实接口权限与分页仍须测试网验证。
 
-UTA V3 分页取响应 cursor，重复游标和非数值游标返回错误，不伪造末页。查询按 category 请求，inst 过滤在完整响应中完成，避免缩小页面后丢失下一页。Fills 的 feeDetail 必须可归到同一已登记资产；混合手续费币种拒绝该页。字段来源为 [官方订单查询文档](https://www.bitget.com/docs/catalog/trading/order-management)。
+UTA V3 分页取响应 cursor，空/null 游标表示末页，显式 list=null 表示空列表；缺 list、空列表带续页游标、重复或非数值游标返回错误，不伪造末页。查询按 category 请求，inst 过滤在完整响应中完成，避免缩小页面后丢失下一页。Fills 的 feeDetail 必须可归到同一已登记资产；混合手续费币种拒绝该页。字段来源为 [官方订单查询文档](https://www.bitget.com/docs/catalog/trading/order-management)。
 
 
 `ro_request_signed`/`ro_decode` 的实现([契约 31](../hft-venue-proto/README.md#实现方必须遵守的契约));reconciler 以只读 key 构建 `Templates` 调用,gw 不用(`CANCEL_ALL_SWEEP = false`)。UTA 端点、分页与字段**全部待核实**(开发备忘第 18 条),核实前按下表"要读到什么"实现,读不到即 `DecodeErr::Shape`。
@@ -339,7 +350,7 @@ UTA V3 分页取响应 cursor，重复游标和非数值游标返回错误，不
 - 现有知识来源:`E:\trading\Trading\crates\bitget`(seq/pseq、无条件 ping、登录签名与测试向量)、`E:\trading\Trading\apps\collector\src\private.rs`(V2 私有登录与 `orders` 订阅)
 - 官方 UTA 文档原文的镜像(2026-10-14 取得,本地缓存 `E:\trading\analysis\bitget-src\`):GitHub `metafrogmeme-droid/001` 的 `docs/bitget-uta/*.md`(由 www.bitget.com/api-doc/uta 抓取,含 WebSocket 全部频道、Trade、Market、枚举与错误码页)、官方 SDK `Bitget-AI/agent-sdk` 的 `openapi.yaml`(UTA REST 请求结构)
 
-私有推送的 `balance` 是钱包余额,`available` 是可用保证金/购买力,不能替代现金余额;字段依据 [官方账户频道](https://www.bitget.com/docs/uta/websocket/private/Account-Channel)。持仓 size 必须非负,posSide 只接受 long/short,均价与强平估算价按资产价格指数 HalfEven 舍入。订单推送的已解析 clientOid 必须属于当前产品线与账户,否则作为外来成交;WS 下单响应中的有效 clientOid 若与请求槽/gen 或当前账户不符则拒绝。
+UTA REST 与私有推送的 `balance` 已排除现货冻结金额,`BalanceReport.free` 直接取该值,现货 `locked` 单独取原字段;永续 `locked=0`。`available` 是可用保证金/购买力,不能替代现金余额。字段依据 [官方账户频道](https://www.bitget.com/docs/uta/websocket/private/Account-Channel),冻结前后现金守恒由 BGT-324 的 demo REST/WS 金样核实。持仓 size 必须非负,posSide 只接受 long/short,均价与强平估算价按资产价格指数 HalfEven 舍入。订单推送的已解析 clientOid 必须属于当前产品线与账户,否则作为外来成交;WS 下单响应中的有效 clientOid 若与请求槽/gen 或当前账户不符则拒绝。
 
 累计成交量推进而金额倒退、非零手续费币种未知/跨累计基线变化、多个非空 feeDetail 币种行均拒绝整帧,不改 GwCtx、不产出部分事件;同帧先后记录也经过该检查。未带新费用的重复推送保留旧费用币种,绝对值溢出拒绝。
 
@@ -353,7 +364,7 @@ UTA V3 分页取响应 cursor，重复游标和非数值游标返回错误，不
 
 AccountProtocol 使用 UTA V3 instruments/settings/info/assets/current-position/unfilled-orders。basic unified 账户要求单向/全仓、杠杆不超配置、无债务；key 要有 uta_trade 且无 withdraw，REST/WS 分别读取 UID 并匹配。现货订单显式 autoBorrow=no，demo REST 带 paptrading: 1。
 
-永续资金费读 [account/financial-records](https://www.bitget.com/docs/catalog/account/assets-balance)，过滤 CONTRACT_MAIN_SETTLE_FEE_USER_IN/OUT，按 id 去重并完成分页；funding-financial-records 是资金账户流水。RateOnly 真实 FundingSettle 入 journal 后仅检查差异，不重复记现金。真实 demo 字段仍须按开发备忘采样核验。
+永续资金费读 [account/financial-records](https://www.bitget.com/docs/catalog/account/assets-balance)，过滤 CONTRACT_MAIN_SETTLE_FEE_USER_IN/OUT，按 id 去重并完成分页；funding-financial-records 是资金账户流水。显式 `list=null` 且无 cursor 是合法空末页；缺 list、空页带 cursor 均拒绝。RateOnly 真实 FundingSettle 入 journal 后仅检查差异，不重复记现金。真实 demo 入账样本及未覆盖范围归 BGT-336；捕获客户端不证明引擎记账通过。
 
 账户 UID 缺失仅在 refdata 明确 Unverifiable 时允许，报告 uid_keys=0、venue_uid 全零；Verified 缺失或不匹配仍失败。两把凭证都返回 UID 时必须一致。持仓总量必须非负，再按 posSide 赋号；本轮 MarginItem 只含非零仓位，liq_px 随当前持仓更新，ADL 缺失为 255。
 
@@ -362,7 +373,7 @@ AccountProtocol 使用 UTA V3 instruments/settings/info/assets/current-position/
 ## 已知限制与后续工作
 
 - **无死手**:进程崩溃到 kill-switch 撤单之间有窗口(kill-switch 心跳检测周期决定)。
-- **验收缺口**:账户配置与保证金轮询已有 warm `AccountProtocol` 接口及应用接线,与规格中的 `acct_*` 分步接口尚未统一;只读查询族、账户字段实测核验、完整金样(BGT-300–338)与基准仍未完成。公共 BBO REST、mock 与两条产品线 fuzz 入口已实现;新增固定输入均为 synthetic、待人工复核,不替代模拟盘样本与累计 fuzz 门槛。
+- **验收缺口**:账户配置与保证金轮询已有 warm `AccountProtocol` 接口及应用接线,与规格中的 `acct_*` 分步接口尚未统一;只读查询族、账户字段实测核验、完整金样(BGT-300–338)与基准仍未完成。公共 BBO REST、mock 与两条产品线 fuzz 入口已实现;固定输入按 meta 区分真实 demo 与 synthetic,人工复核和累计 fuzz 门槛仍须完成。
 - **交易所侧死手未接**:官方 `POST /api/v3/trade/countdown-cancel-all`(5–60 s,需向商务申请开通)可作为 `CountdownAccount` 死手,开通后再接;当前仍靠 kill-switch。
 - **资金费实收**:`account` 频道在资金费结算时推送,但不带品种与金额明细,`funding_settle = RateOnly`;实际结算经[资金费实额](#资金费实额)查询。真实账户的账单延迟与 timestamp 相对结算网格的偏差待核实(方法:持仓跨结算采集)。
 - **保证金数据靠轮询**:5 s 周期;若核实账户频道推送保证金率,改为 `Push`。
@@ -375,18 +386,18 @@ AccountProtocol 使用 UTA V3 instruments/settings/info/assets/current-position/
 
 **实现前置**(未完成不得开始 `orders.rs`/`reports.rs`/`acct.rs`):方法 A = 经东京服务器抓取官方 UTA 文档原文并缓存到 `research/_src/`;方法 B = 模拟盘实测抓 raw;方法 C = 正式实盘开始后从 raw journal 补核(只用于上线后才可能出现的样本,实现前置项不得依赖它);方法 D = 向 Bitget 机构团队书面确认。
 
-1. ~~UTA V3 WS 公共/私有路径、订阅 `args` 字段名、私有频道名全集~~(已按官方原文实现:`instType`/`topic`/`symbol`,私有 `instType = UTA`)。剩:`publicTrade` 实时推送的 `action` 取值、单向模式持仓推送的 `posSide` 取值:B。
-2. ~~WS 下单频道是否可用与字段~~(官方原文:`op = trade`,见"下单:UTA V3 WS")。剩:每频道限速、错误帧是否总带 `id`、`reduceOnly` 大小写(WS 页写 `YES`/`NO`,REST 页写 `yes`/`no`):B。原文:`place-order` 等频道是否在 WS 上可用(否则下单只能走 REST,下单路径需重新设计)、字段(`clientOid` 长度与字符集、`reduceOnly`、post-only、IOC、FOK 写法、`pxAmendType`)、每频道限速、批量上限、响应字段(是否有网关时间戳)、STP、过期保护:A + B。
+1. 私有频道全集与公共强平流仍待核实:B。普通成交标签与单向 posSide 的已采样范围归 BGT-305/317/322。
+2. 每频道硬限速、错误帧是否总带 `id`、FOK/改单/STP/过期保护仍待核实:B。demo 的 place/cancel 各报告 limit=20,无效请求短突发未触发限流,不据此放宽默认限速;WS reduceOnly 的 YES 与 yes 均完成实际平仓。
 3. 订单推送的累计量、均价、手续费字段(本笔还是累计)与扣费币种;成交频道是否存在、费用是否晚于订单终态:B。
 4. ~~错误码全表~~(官方 UTA 错误码页已登记,见"结果未知码表");模拟盘逐码确认确定拒绝表:B。
 5. 账户设置、账户信息(UID、key 权限)、账户资产、当前持仓的端点、字段与限速;是否有账户配置变化推送:A + B。
 6. 开平类型字段在 UTA 中的名字与强平/ADL/交割取值:A;模拟盘高杠杆小仓制造强平(B);ADL 取不到样本时按文档构造并标"合成"。
 7. 资金费实收是否有私有推送、是否带品种(决定 `funding_settle`);资金费账单的 REST 端点(reconciler 校正用):A + B(模拟盘持仓跨过一次结算);模拟盘不结算时按偏安全的 `RateOnly` 上线,C 补核。
 8. 现货 BGB 抵扣的开关端点与余额不足时的回退:A + B。
-9. 模拟盘的行情与下单端点、请求头与符号规则(与主网符号的映射,门槛 ⑥ 用模拟盘行情与模拟盘 refdata):A + B。
-10. 登录 `timestamp` 在 V3 是否改为 ms:B。
+9. 模拟盘尚未覆盖接口与正式环境字段差异:A + B;已观察的连接/头/符号规则归"测试网/模拟盘"。
+10. 正式 V3 登录时间戳容忍范围:B;demo 秒/毫秒接受情况归 BGT-310。
 11. "LOLA" 线路与 SBE 是否存在:D。
-12. **私有频道双订阅(M3 之前必须核实)**:同一账户两条私有连接同时订阅订单频道是否都收到推送(决定先建后断):B。不允许时切换退化为"先断后建 + VERIFY"并写进本 README。
+12. 私有频道双订阅的正式环境与长时间重连验证:B。本轮 demo 两条连接均收到 order/account/fill 推送;BGT-318 覆盖重复累计量只记一次,尚不代表引擎连接切换验收。
 13. (启用 L2 双路合并时)`books` 双连接增量批是否逐条相同。
 14. **单向持仓模式下强平/ADL/交割成交的开平类型取值**,以及单向模式普通开平的取值全集(决定"外部成交识别"表):A + B(模拟盘单向持仓高杠杆小仓制造强平)。
 15. UTA 现货杠杆/借币开关的端点与字段;每品种杠杆的读取端点:A + B。

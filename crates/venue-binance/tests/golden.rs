@@ -1,6 +1,6 @@
 //! Independently calculated, sanitized demo captures. The selected wire-derived fields are
 //! reviewed in the adjacent expected files; this is not a claim of complete M3 coverage.
-use crate::support::{RX, RepSink, rd};
+use crate::support::{RX, RepSink, U_ETH, rd};
 use hft_event::GwOp;
 use hft_types::{AccountId, InstId};
 use hft_venue_proto::account::{AccountProtocol, Query, State};
@@ -79,6 +79,19 @@ fn report<P: VenueProtocol<GwCtx = GwCtx>>(product: &str, channel: &str, name: &
     assert!(sink.ext.is_empty(), "unexpected external fill: {sink:?}");
     assert!(sink.positions.is_empty() && sink.funding.is_empty());
     assert_eq!(events, sink.orders.len() + sink.balances.len());
+    for event in &sink.orders {
+        if matches!(
+            event.what,
+            hft_event::OrderEventKind::Fill | hft_event::OrderEventKind::PartialFill
+        ) {
+            // Existing real executionReport fixtures preserve the exchange side independently.
+            let wire: Value =
+                serde_json::from_slice(input.split(|b| *b == b'\n').find(|p| !p.is_empty()).unwrap())
+                    .unwrap();
+            let side = wire.get("event").unwrap_or(&wire)["S"].as_str().unwrap();
+            assert_eq!(event.detail, if side == "BUY" { 1 } else { 2 });
+        }
+    }
     let mut actual: Vec<Value> = sink
         .orders
         .iter()
@@ -307,10 +320,14 @@ fn market<P: VenueProtocol<FeedCtx = venue_binance::FeedCtx>>(product: &str, cha
     } else {
         venue_binance::FeedCtx::USDM
     };
-    let class = P::classify(route, MsgOp::Text, &input[..input.len().min(64)]);
     let mut sink = VecSink::default();
-    let result = P::decode_md(data, &mut ctx, class, &input, &RX, &mut sink).unwrap();
-    assert_eq!(usize::from(result.events), expected.len());
+    let mut events = 0;
+    for frame in input.split(|b| *b == b'\n').filter(|f| !f.is_empty()) {
+        let class = P::classify(route, MsgOp::Text, &frame[..frame.len().min(64)]);
+        let result = P::decode_md(data, &mut ctx, class, frame, &RX, &mut sink).unwrap();
+        events += usize::from(result.events);
+    }
+    assert_eq!(events, expected.len());
     let actual: Vec<_> = sink
         .md
         .iter()
@@ -351,6 +368,31 @@ fn bin_302_usdm_aggtrade() {
 #[test]
 fn bin_303_usdm_markprice() {
     market::<Usdm>("usdm", "markPriceUpdate", "normal");
+    market::<Usdm>("usdm", "markPriceUpdate", "funding_rollover");
+}
+
+#[test]
+fn bin_306_usdm_bbo_refresh() {
+    use hft_venue_proto::testkit::{MdRec, VecSink};
+    for name in ["single", "error_body"] {
+        let (input, expected) = fixture("usdm", "rest.ticker_bookTicker", name);
+        let mut sink = VecSink::default();
+        let mut ctx = venue_binance::FeedCtx::USDM;
+        let result = Usdm::decode_bbo_snapshot(rd(), &mut ctx, &[U_ETH], &input, &RX, &mut sink);
+        let actual = match result {
+            Ok(count) => {
+                assert_eq!(count, 1);
+                let MdRec::Bbo(e) = sink.md[0] else {
+                    panic!("expected BBO")
+                };
+                json!({"kind":"Bbo","inst":e.h.inst.0,"bid_px":e.bid_px.0.to_string(),"bid_qty":e.bid_qty.0.to_string(),
+                    "ask_px":e.ask_px.0.to_string(),"ask_qty":e.ask_qty.0.to_string(),"update_id":e.update_id,
+                    "ex_ts_ns":e.h.ex_ts_ns,"ex_send_ns":e.h.ex_send_ns})
+            }
+            Err(error) => json!({"error":format!("{error:?}"),"events":sink.md.len()}),
+        };
+        compare(&expected, &[actual], name);
+    }
 }
 #[test]
 fn bin_320_spot_bookticker() {

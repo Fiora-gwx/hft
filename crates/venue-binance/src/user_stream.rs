@@ -181,6 +181,9 @@ fn order(
     let fill = matches!(what, OrderEventKind::PartialFill | OrderEventKind::Fill);
     let mut e = blank(line, rx.account, rx);
     e.what = what;
+    if fill {
+        e.detail = side as u8;
+    }
     e.inst = inst;
     e.exch_order_id = r.i;
     e.qty = Qty(fixed(r.l, h.qty_wire_exp)?);

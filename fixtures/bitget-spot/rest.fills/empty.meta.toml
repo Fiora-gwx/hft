@@ -1,0 +1,16 @@
+source = "testnet-capture"
+source_ref = "run-2026-10-15/dual-5/hft-evidence/captures/bitget-spot/rest.reconcile/empty_fills.in"
+captured_at = "2026-10-15T06:52:35.502025+00:00"
+refdata = "RD-BGT-spot-capture"
+exchange_doc = "https://www.bitget.com/docs/catalog/trading/order-management"
+reviewed_by = "pending-human-review"
+review_status = "draft; expectations independently calculated from wire fields, not decoder output"
+scrubbed = true
+case_id = "BGT-335"
+environment = "demo"
+endpoint = "https://api.bitget.com/api/v3/trade/fills"
+http_status = 200
+sha256 = "5620ffdc966be5c9db7f0175663227c72c669d9239e697197d6c48019dc22171"
+sanitization = "Credential fields removed; UID/account identity replaced with acct-0001; JSON whitespace normalized. Requests and login frames never stored. Order IDs replaced with deterministic same-width placeholders; connId fixed conn-0001; canonical client IDs retained."
+wire_exponents = "BTC/ETH px=-2 qty=-8; USDT notional=-6 qty=-8"
+response_headers_json = "{\"date\": \"Thu, 15 Oct 2026 06:52:35 GMT\", \"content-type\": \"application/json\"}"
