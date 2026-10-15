@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-15 | Bitget 只读挂单/成交分页接受真实 null cursor 与显式 null 空列表;仍拒绝缺 list、空页带续页、重复/非法游标 | BGT-334/335,真实 demo 空页无法完成对账 | venue-bitget readonly、README、TESTS 与双产品金样 | 待评审(对账) |
 | 2026-10-15 | Bitget 资金费账单接受显式 list=null 的无 cursor 空末页;缺字段与空页带 cursor 仍拒绝,避免无账单窗口永远无法完成 | BGT-336,真实 demo 空财务流水 | venue-bitget funding/json、README、TESTS 与金样 | 待评审(资金费对账) |
 | 2026-10-15 | Bitget UTA 现货 free 直接取已排除冻结的 balance,REST/WS 不重复扣 locked;订单累计手续费按扣费资产数量指数 HalfEven 舍入,容纳真实 9 位小数费用 | BGT-318/324,真实 demo 成交解码失败与冻结现金重复扣减 | venue-bitget account/reports、README、TESTS、金样;[证据决定](../.agents/notes/implemented/bug-fix/2026-10-15-bitget-demo-cash-boundaries.md) | 待评审(余额/手续费) |
 | 2026-10-15 | Binance/Bitget 真实成交回报向 Fill/PartialFill.detail 写入已校验的 wire 买卖方向,供迟到/无归属成交的净量判断;同步契约 28 与 hft-event 已有定义 | BIN-327、BGT-317,真实买卖金样复现 detail=0 | 两所 user_stream/reports、README、TESTS、venue-proto README 与金样 | 待评审(成交/净仓方向) |

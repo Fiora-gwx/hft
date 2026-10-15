@@ -2216,7 +2216,8 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 里程碑:M5
 - 输入:`fixtures/bitget-usdt-futures/rest.open_orders/two_orders_one_foreign.in`、`fixtures/bitget-spot/rest.open_orders/two_orders_one_foreign.in`;来源:待采集(方法 A + B)
 - 期望文件:同目录 `<case>.expected.jsonl`(`open_order` 行)
-- 实现:`crates/venue-bitget/tests/golden.rs::bgt_334_ro_open_orders`
+- 实现:`crates/venue-bitget/tests/readonly.rs::bgt_334_ro_open_orders`
+- 真实覆盖:两产品线 `rest.open_orders/empty.in` 的 `list=[]/cursor=null`;非空订单页仍待补。
 - 备注:依赖待核实:开发备忘第 18 条
 
 ### BGT-335 金样:UTA 成交查询(只读查询)
@@ -2226,7 +2227,8 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 里程碑:M5
 - 输入:`fixtures/bitget-usdt-futures/rest.fills/page.in`、`fixtures/bitget-spot/rest.fills/page.in`;来源:待采集(方法 A + B)
 - 期望文件:同目录 `<case>.expected.jsonl`(`fill` 行与 `RoPage`)
-- 实现:`crates/venue-bitget/tests/golden.rs::bgt_335_ro_fills`
+- 实现:`crates/venue-bitget/tests/readonly.rs::bgt_335_ro_fills`
+- 真实覆盖:两产品线 `rest.fills/{page,empty}.in`;空页 list/cursor 均为 null,非空页验证成交量、价、费、标识与续页。缺 list/空页带 cursor 仍拒绝。
 - 备注:依赖待核实:开发备忘第 18 条
 
 ### BGT-336 金样:UTA 资金费账单(永续)(只读查询)

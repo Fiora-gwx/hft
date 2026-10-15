@@ -1,0 +1,16 @@
+source = "testnet-capture"
+source_ref = "run-2026-10-15/dual-5/hft-evidence/captures/bitget-spot/rest.openOrders/after_locked.in"
+captured_at = "2026-10-15T06:29:19.912724+00:00"
+refdata = "RD-BGT-spot-capture"
+exchange_doc = "https://www.bitget.com/docs/catalog/account/account-settings"
+reviewed_by = "pending-human-review"
+review_status = "draft; expectations independently calculated from wire fields, not decoder output"
+scrubbed = true
+case_id = "BGT-334"
+environment = "demo"
+endpoint = "https://api.bitget.com/api/v3/trade/unfilled-orders"
+http_status = 200
+sha256 = "dd1dc73071d53c2208905aab96ee0b144c19f283b6b4f0f4da7a40390a1c1cbb"
+sanitization = "Credential fields removed; UID/account identity replaced with acct-0001; JSON whitespace normalized. Requests and login frames never stored. Order IDs replaced with deterministic same-width placeholders; connId fixed conn-0001; canonical client IDs retained."
+wire_exponents = "BTC/ETH px=-2 qty=-8; USDT notional=-6 qty=-8"
+response_headers_json = "{\"date\": \"Thu, 15 Oct 2026 06:29:19 GMT\", \"content-type\": \"application/json\"}"

@@ -116,3 +116,85 @@ fn bgt_175_open_orders_preserve_foreign_identity() {
     );
     assert_eq!(out.orders[0].avg_px, Px(6_000_000));
 }
+
+fn captured_page<T: VenueProtocol<FeedCtx = venue_bitget::FeedCtx, GwCtx = venue_bitget::GwCtx>>(
+    channel: &str,
+    name: &str,
+    kind: RoKind,
+) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures")
+        .join(T::NAME)
+        .join(channel)
+        .join(name);
+    let input = std::fs::read(path.with_extension("in")).unwrap();
+    let expected: Vec<serde_json::Value> = std::fs::read_to_string(path.with_extension("expected.jsonl"))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let q = RoQuery {
+        kind,
+        inst: InstId(0),
+        limit: 100,
+        cursor: 0,
+        since_ms: 1_792_018_800_000,
+    };
+    let mut sink = Sink::default();
+    let page = T::ro_decode(rd_spot_capture(), ACCT, &q, 200, &input, &mut sink).unwrap();
+    let mut actual: Vec<_> = sink
+        .fills
+        .iter()
+        .map(|f| {
+            serde_json::json!({
+                "inst":f.inst.0,"side":if f.side == Side::Buy {"buy"} else {"sell"},
+                "qty":f.qty.0.to_string(),"px":f.px.0.to_string(),"fee":f.fee.0.to_string(),
+                "fee_asset":f.fee_asset.0,"trade_id":f.trade_id,"exch_order_id":f.exch_order_id
+            })
+        })
+        .collect();
+    actual.push(serde_json::json!({"rows":page.rows,"next_cursor":page.next_cursor}));
+    assert_eq!(actual, expected);
+    if name == "empty" {
+        let mut malformed: serde_json::Value = serde_json::from_slice(&input).unwrap();
+        malformed["data"].as_object_mut().unwrap().remove("list");
+        assert!(
+            T::ro_decode(
+                rd_spot_capture(),
+                ACCT,
+                &q,
+                200,
+                &serde_json::to_vec(&malformed).unwrap(),
+                &mut Sink::default()
+            )
+            .is_err()
+        );
+        malformed["data"]["list"] = serde_json::Value::Null;
+        malformed["data"]["cursor"] = "123".into();
+        assert!(
+            T::ro_decode(
+                rd_spot_capture(),
+                ACCT,
+                &q,
+                200,
+                &serde_json::to_vec(&malformed).unwrap(),
+                &mut Sink::default()
+            )
+            .is_err()
+        );
+    }
+}
+
+#[test]
+fn bgt_334_ro_open_orders() {
+    captured_page::<P>("rest.open_orders", "empty", RoKind::OpenOrders);
+    captured_page::<BitgetSpot>("rest.open_orders", "empty", RoKind::OpenOrders);
+}
+
+#[test]
+fn bgt_335_ro_fills() {
+    for name in ["empty", "page"] {
+        captured_page::<P>("rest.fills", name, RoKind::Fills);
+        captured_page::<BitgetSpot>("rest.fills", name, RoKind::Fills);
+    }
+}
