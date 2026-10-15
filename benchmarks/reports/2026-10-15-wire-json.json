@@ -1,0 +1,449 @@
+{
+  "base_sha": "408b496c",
+  "host": "shared Windows x86_64, unpinned, concurrent builds",
+  "profile": "dev opt-level=3 debug=0; overflow checks enabled",
+  "reference_acceptance": false,
+  "timestamp_source": "HistBench Instant (Windows)",
+  "rows": [
+    {
+      "max_ns": 11703,
+      "n": 50000,
+      "name": "wire/binance/bbo/peek",
+      "p50_ns": 254,
+      "p999_ns": 1094,
+      "p99_ns": 955,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 36575,
+      "n": 50000,
+      "name": "wire/binance/bbo/decode",
+      "p50_ns": 301,
+      "p999_ns": 1240,
+      "p99_ns": 1031,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 12927,
+      "n": 50000,
+      "name": "wire/binance/spot-bbo/peek",
+      "p50_ns": 161,
+      "p999_ns": 969,
+      "p99_ns": 830,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 13679,
+      "n": 50000,
+      "name": "wire/binance/spot-bbo/decode",
+      "p50_ns": 260,
+      "p999_ns": 1115,
+      "p99_ns": 963,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 31503,
+      "n": 50000,
+      "name": "wire/binance/captured-bbo/peek",
+      "p50_ns": 287,
+      "p999_ns": 1019,
+      "p99_ns": 896,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 8871,
+      "n": 50000,
+      "name": "wire/binance/captured-bbo/decode",
+      "p50_ns": 353,
+      "p999_ns": 592,
+      "p99_ns": 375,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 11103,
+      "n": 50000,
+      "name": "wire/binance/trade/peek",
+      "p50_ns": 292,
+      "p999_ns": 613,
+      "p99_ns": 515,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 67519,
+      "n": 50000,
+      "name": "wire/binance/trade/decode",
+      "p50_ns": 338,
+      "p999_ns": 1284,
+      "p99_ns": 391,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 96831,
+      "n": 50000,
+      "name": "wire/binance/funding-mark/peek",
+      "p50_ns": 266,
+      "p999_ns": 503,
+      "p99_ns": 289,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 8951,
+      "n": 50000,
+      "name": "wire/binance/funding-mark/decode",
+      "p50_ns": 305,
+      "p999_ns": 654,
+      "p99_ns": 494,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 8135,
+      "n": 50000,
+      "name": "wire/binance/depth/peek",
+      "p50_ns": 244,
+      "p999_ns": 493,
+      "p99_ns": 391,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 89343,
+      "n": 50000,
+      "name": "wire/binance/depth/decode",
+      "p50_ns": 544,
+      "p999_ns": 1290,
+      "p99_ns": 867,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 60671,
+      "n": 50000,
+      "name": "wire/binance/bbo/peek",
+      "p50_ns": 162,
+      "p999_ns": 336,
+      "p99_ns": 293,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 13007,
+      "n": 50000,
+      "name": "wire/binance/bbo/decode",
+      "p50_ns": 213,
+      "p999_ns": 453,
+      "p99_ns": 340,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 3969,
+      "n": 50000,
+      "name": "wire/binance/spot-bbo/peek",
+      "p50_ns": 133,
+      "p999_ns": 258,
+      "p99_ns": 163,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 14903,
+      "n": 50000,
+      "name": "wire/binance/spot-bbo/decode",
+      "p50_ns": 191,
+      "p999_ns": 412,
+      "p99_ns": 264,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 23983,
+      "n": 50000,
+      "name": "wire/binance/captured-bbo/peek",
+      "p50_ns": 202,
+      "p999_ns": 367,
+      "p99_ns": 347,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 51039,
+      "n": 50000,
+      "name": "wire/binance/captured-bbo/decode",
+      "p50_ns": 287,
+      "p999_ns": 572,
+      "p99_ns": 372,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 15735,
+      "n": 50000,
+      "name": "wire/binance/trade/peek",
+      "p50_ns": 194,
+      "p999_ns": 340,
+      "p99_ns": 211,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 12463,
+      "n": 50000,
+      "name": "wire/binance/trade/decode",
+      "p50_ns": 355,
+      "p999_ns": 577,
+      "p99_ns": 391,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 14287,
+      "n": 50000,
+      "name": "wire/binance/funding-mark/peek",
+      "p50_ns": 204,
+      "p999_ns": 287,
+      "p99_ns": 222,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 14439,
+      "n": 50000,
+      "name": "wire/binance/funding-mark/decode",
+      "p50_ns": 314,
+      "p999_ns": 656,
+      "p99_ns": 357,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 38591,
+      "n": 50000,
+      "name": "wire/binance/depth/peek",
+      "p50_ns": 163,
+      "p999_ns": 292,
+      "p99_ns": 171,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 42335,
+      "n": 50000,
+      "name": "wire/binance/depth/decode",
+      "p50_ns": 601,
+      "p999_ns": 1428,
+      "p99_ns": 931,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 55039,
+      "n": 50000,
+      "name": "wire/bitget/bbo/peek",
+      "p50_ns": 471,
+      "p999_ns": 1019,
+      "p99_ns": 735,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 13143,
+      "n": 50000,
+      "name": "wire/bitget/bbo/decode",
+      "p50_ns": 621,
+      "p999_ns": 1204,
+      "p99_ns": 703,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 8687,
+      "n": 50000,
+      "name": "wire/bitget/spot-bbo/peek",
+      "p50_ns": 469,
+      "p999_ns": 693,
+      "p99_ns": 490,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 81407,
+      "n": 50000,
+      "name": "wire/bitget/spot-bbo/decode",
+      "p50_ns": 620,
+      "p999_ns": 1328,
+      "p99_ns": 724,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 59039,
+      "n": 50000,
+      "name": "wire/bitget/depth/peek",
+      "p50_ns": 474,
+      "p999_ns": 735,
+      "p99_ns": 502,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 74431,
+      "n": 50000,
+      "name": "wire/bitget/depth/decode",
+      "p50_ns": 699,
+      "p999_ns": 1402,
+      "p99_ns": 996,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 12511,
+      "n": 50000,
+      "name": "wire/bitget/trade/peek",
+      "p50_ns": 360,
+      "p999_ns": 1321,
+      "p99_ns": 1116,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 151423,
+      "n": 50000,
+      "name": "wire/bitget/trade/decode",
+      "p50_ns": 2477,
+      "p999_ns": 6315,
+      "p99_ns": 3405,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 65599,
+      "n": 50000,
+      "name": "wire/bitget/funding-ticker/peek",
+      "p50_ns": 326,
+      "p999_ns": 1038,
+      "p99_ns": 414,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 10191,
+      "n": 50000,
+      "name": "wire/bitget/funding-ticker/decode",
+      "p50_ns": 437,
+      "p999_ns": 561,
+      "p99_ns": 458,
+      "warmup": 5000,
+      "phase": "before"
+    },
+    {
+      "max_ns": 58495,
+      "n": 50000,
+      "name": "wire/bitget/bbo/peek",
+      "p50_ns": 249,
+      "p999_ns": 1172,
+      "p99_ns": 1011,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 51007,
+      "n": 50000,
+      "name": "wire/bitget/bbo/decode",
+      "p50_ns": 400,
+      "p999_ns": 1312,
+      "p99_ns": 1208,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 47615,
+      "n": 50000,
+      "name": "wire/bitget/spot-bbo/peek",
+      "p50_ns": 349,
+      "p999_ns": 1266,
+      "p99_ns": 1135,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 25935,
+      "n": 50000,
+      "name": "wire/bitget/spot-bbo/decode",
+      "p50_ns": 399,
+      "p999_ns": 1307,
+      "p99_ns": 1243,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 3769,
+      "n": 50000,
+      "name": "wire/bitget/depth/peek",
+      "p50_ns": 241,
+      "p999_ns": 1024,
+      "p99_ns": 983,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 7231,
+      "n": 50000,
+      "name": "wire/bitget/depth/decode",
+      "p50_ns": 471,
+      "p999_ns": 587,
+      "p99_ns": 491,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 5855,
+      "n": 50000,
+      "name": "wire/bitget/trade/peek",
+      "p50_ns": 273,
+      "p999_ns": 343,
+      "p99_ns": 299,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 92415,
+      "n": 50000,
+      "name": "wire/bitget/trade/decode",
+      "p50_ns": 1428,
+      "p999_ns": 3077,
+      "p99_ns": 1743,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 31935,
+      "n": 50000,
+      "name": "wire/bitget/funding-ticker/peek",
+      "p50_ns": 241,
+      "p999_ns": 413,
+      "p99_ns": 271,
+      "warmup": 5000,
+      "phase": "after"
+    },
+    {
+      "max_ns": 33503,
+      "n": 50000,
+      "name": "wire/bitget/funding-ticker/decode",
+      "p50_ns": 362,
+      "p999_ns": 778,
+      "p99_ns": 475,
+      "warmup": 5000,
+      "phase": "after"
+    }
+  ]
+}

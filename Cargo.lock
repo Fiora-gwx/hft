@@ -1708,6 +1708,7 @@ dependencies = [
  "hft-refdata",
  "hft-testkit",
  "hft-types",
+ "memchr",
  "xxhash-rust",
  "zerocopy",
 ]

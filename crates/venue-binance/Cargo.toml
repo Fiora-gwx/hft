@@ -55,3 +55,7 @@ path = "tests/main.rs"
 [[bench]]
 name = "reports"
 harness = false
+
+[[bench]]
+name = "wire"
+harness = false

@@ -4,6 +4,7 @@
 use hft_event::{Bbo, Funding, IndexPrice, MarkPrice, MarketHdr};
 use hft_refdata::RefData;
 use hft_types::{InstId, Px, Qty, Rate};
+use hft_venue_proto::json as wire;
 use hft_venue_proto::{
     ControlHint, DecodeErr, MdOutcome, MdSink, MsgOp, Peek, RawSeq, ResyncMethod, RouteId, RxMeta, SeqIds,
     SeqRule, StreamKind,
@@ -203,6 +204,19 @@ fn peek_of(inst: InstId, stream: StreamKind, last: u64) -> Peek {
     }
 }
 
+fn wire_pair<'a>(p: &'a [u8], id_key: &[u8]) -> Option<(&'a str, &'a [u8])> {
+    let [symbol, id] = wire::project(p, |key| {
+        if key == b"s" {
+            Some(0)
+        } else if key == id_key {
+            Some(1)
+        } else {
+            None
+        }
+    })?;
+    Some((wire::string(symbol)?, id))
+}
+
 pub(crate) fn peek(line: Line, rd: &RefData, ctx: &FeedCtx, c: Class, p: &[u8]) -> Result<Peek, DecodeErr> {
     #[derive(Deserialize)]
     struct SymU<'a> {
@@ -262,11 +276,24 @@ pub(crate) fn peek(line: Line, rd: &RefData, ctx: &FeedCtx, c: Class, p: &[u8]) 
     }
     match c {
         Class::BookTicker => {
-            let m: SymU = from(p)?;
+            let fast = || {
+                let [s, u] = wire::project(p, |key| match key {
+                    b"s" => Some(0),
+                    b"u" => Some(1),
+                    _ => None,
+                })?;
+                Some(SymU {
+                    s: wire::string(s)?,
+                    u: wire::uint(u)?,
+                })
+            };
+            let m: SymU = fast().map_or_else(|| from(p), Ok)?;
             Ok(peek_of(inst_of(line, rd, m.s.as_bytes()), StreamKind::Bbo, m.u))
         }
         Class::DepthTopN if line == Line::Usdm => {
-            let m: SymU = from(p)?;
+            let m: SymU = wire_pair(p, b"u")
+                .and_then(|(s, n)| Some(SymU { s, u: wire::uint(n)? }))
+                .map_or_else(|| from(p), Ok)?;
             Ok(peek_of(
                 inst_of(line, rd, m.s.as_bytes()),
                 StreamKind::DepthTopN,
@@ -285,15 +312,21 @@ pub(crate) fn peek(line: Line, rd: &RefData, ctx: &FeedCtx, c: Class, p: &[u8]) 
             Ok(peek_of(inst, StreamKind::DepthTopN, m.data.last))
         }
         Class::AggTrade => {
-            let m: Agg = from(p)?;
+            let m: Agg = wire_pair(p, b"a")
+                .and_then(|(s, n)| Some(Agg { s, a: wire::uint(n)? }))
+                .map_or_else(|| from(p), Ok)?;
             Ok(peek_of(inst_of(line, rd, m.s.as_bytes()), StreamKind::Trade, m.a))
         }
         Class::SpotTrade => {
-            let m: SpotTrade = from(p)?;
+            let m: SpotTrade = wire_pair(p, b"t")
+                .and_then(|(s, n)| Some(SpotTrade { s, t: wire::uint(n)? }))
+                .map_or_else(|| from(p), Ok)?;
             Ok(peek_of(inst_of(line, rd, m.s.as_bytes()), StreamKind::Trade, m.t))
         }
         Class::MarkPrice => {
-            let m: Mark = from(p)?;
+            let m: Mark = wire_pair(p, b"E")
+                .and_then(|(s, n)| Some(Mark { s, e: wire::int(n)? }))
+                .map_or_else(|| from(p), Ok)?;
             let ns = time_ns(m.e, ctx.time_unit.ns())?;
             Ok(peek_of(
                 inst_of(line, rd, m.s.as_bytes()),
@@ -382,6 +415,67 @@ struct SpotTicker<'a> {
     aq: &'a str,
 }
 
+/// Project only the BBO fields; fallback retains the checked decoder's exact error taxonomy.
+fn ticker(line: Line, p: &[u8]) -> Result<UsdmTicker<'_>, DecodeErr> {
+    let fast = || {
+        let [u, s, b, bq, a, aq, t, e] = if line == Line::Usdm {
+            if let Some([_kind, u, s, b, bq, a, aq, t, e]) = wire::ordered(
+                p,
+                &[
+                    b"\"e\":", b"\"u\":", b"\"s\":", b"\"b\":", b"\"B\":", b"\"a\":", b"\"A\":", b"\"T\":",
+                    b"\"E\":",
+                ],
+            ) {
+                [u, s, b, bq, a, aq, t, e]
+            } else {
+                let [_kind, u, s, _pair, b, bq, a, aq, t, e, _status] = wire::ordered(
+                    p,
+                    &[
+                        b"\"e\":", b"\"u\":", b"\"s\":", b"\"ps\":", b"\"b\":", b"\"B\":", b"\"a\":",
+                        b"\"A\":", b"\"T\":", b"\"E\":", b"\"st\":",
+                    ],
+                )?;
+                [u, s, b, bq, a, aq, t, e]
+            }
+        } else {
+            let [u, s, b, bq, a, aq] = wire::ordered(
+                p,
+                &[b"\"u\":", b"\"s\":", b"\"b\":", b"\"B\":", b"\"a\":", b"\"A\":"],
+            )?;
+            [u, s, b, bq, a, aq, &[], &[]]
+        };
+        Some(UsdmTicker {
+            u: wire::uint(u)?,
+            s: wire::string(s)?,
+            b: wire::string(b)?,
+            bq: wire::string(bq)?,
+            a: wire::string(a)?,
+            aq: wire::string(aq)?,
+            t: if line == Line::Usdm { wire::int(t)? } else { 0 },
+            e: if line == Line::Usdm { wire::int(e)? } else { 0 },
+        })
+    };
+    if let Some(m) = fast() {
+        return Ok(m);
+    }
+    match line {
+        Line::Usdm => from(p),
+        Line::Spot => {
+            let m: SpotTicker = from(p)?;
+            Ok(UsdmTicker {
+                u: m.u,
+                s: m.s,
+                b: m.b,
+                bq: m.bq,
+                a: m.a,
+                aq: m.aq,
+                t: 0,
+                e: 0,
+            })
+        }
+    }
+}
+
 /// Every receive field of `rx` copied unchanged (contract 3).
 pub(crate) fn hdr(line: Line, inst: InstId, rx: &RxMeta) -> MarketHdr {
     MarketHdr {
@@ -410,18 +504,10 @@ pub(crate) fn decode_md(
 ) -> Result<MdOutcome, DecodeErr> {
     match c {
         Class::BookTicker => {
-            let (u, s, b, bq, a, aq, ex) = match line {
-                Line::Usdm => {
-                    let m: UsdmTicker = from(p)?;
-                    let unit = ctx.time_unit.ns();
-                    let ex = (time_ns(m.t, unit)?, time_ns(m.e, unit)?);
-                    (m.u, m.s, m.b, m.bq, m.a, m.aq, ex)
-                }
-                Line::Spot => {
-                    let m: SpotTicker = from(p)?;
-                    (m.u, m.s, m.b, m.bq, m.a, m.aq, (0, 0))
-                }
-            };
+            let m = ticker(line, p)?;
+            let unit = ctx.time_unit.ns();
+            let ex = (time_ns(m.t, unit)?, time_ns(m.e, unit)?);
+            let (u, s, b, bq, a, aq) = (m.u, m.s, m.b, m.bq, m.a, m.aq);
             let inst = inst_of(line, rd, s.as_bytes());
             if inst.0 == 0 {
                 return Ok(MdOutcome { events: 0, inst });

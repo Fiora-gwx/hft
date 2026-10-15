@@ -12,7 +12,10 @@ use serde::de::{Deserializer, IgnoredAny, SeqAccess, Visitor};
 
 /// Parses `p` into `T`; the input ending early → `Truncated`, anything else → `Shape`.
 pub(crate) fn from<'a, T: Deserialize<'a>>(p: &'a [u8]) -> Result<T, DecodeErr> {
-    sonic_rs::from_slice::<T>(p).map_err(|e| {
+    // LazyValue may expose unchecked text in sonic-rs; reject invalid UTF-8 before it reaches
+    // the borrowed raw-value visitor (including malformed fuzz inputs).
+    let text = core::str::from_utf8(p).map_err(|_| DecodeErr::Shape)?;
+    sonic_rs::from_str::<T>(text).map_err(|e| {
         if e.is_eof() {
             DecodeErr::Truncated
         } else {
@@ -78,6 +81,24 @@ pub(crate) enum UInt {
 }
 
 impl UInt {
+    /// Scalar in a validated projection; unusual numeric syntax uses the reference decoder.
+    pub fn wire(raw: &[u8]) -> Option<Self> {
+        use hft_venue_proto::json::{int, string, uint};
+        if raw.is_empty() || raw == b"null" {
+            return Some(Self::Absent);
+        }
+        if let Some(s) = string(raw) {
+            return Some(if s.is_empty() {
+                Self::Absent
+            } else {
+                digits_u64(s.as_bytes())
+            });
+        }
+        if raw.starts_with(b"-") {
+            return int(raw).map(|n| u64::try_from(n).map_or(Self::Bad, Self::Val));
+        }
+        uint(raw).map(Self::Val)
+    }
     /// Required value.
     pub fn get(self) -> Result<u64, DecodeErr> {
         match self {
@@ -229,17 +250,23 @@ impl<'de> Deserialize<'de> for Code {
 }
 
 /// The raw JSON text of a value (borrowed; no allocation for text without escapes).
-pub(crate) struct Raw<'a>(sonic_rs::LazyValue<'a>);
+pub(crate) enum Raw<'a> {
+    Checked(sonic_rs::LazyValue<'a>),
+    Slice(&'a [u8]),
+}
 
 impl<'a> Raw<'a> {
     pub fn text(&self) -> &[u8] {
-        self.0.as_raw_str().as_bytes()
+        match self {
+            Self::Checked(v) => v.as_raw_str().as_bytes(),
+            Self::Slice(v) => v,
+        }
     }
 }
 
 impl<'de: 'a, 'a> Deserialize<'de> for Raw<'a> {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        sonic_rs::LazyValue::deserialize(d).map(Raw)
+        sonic_rs::LazyValue::deserialize(d).map(Raw::Checked)
     }
 }
 
@@ -378,7 +405,7 @@ impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for Arr<T, N> {
             }
             fn visit_seq<A: SeqAccess<'de>>(self, mut s: A) -> Result<Arr<T, N>, A::Error> {
                 let mut out = Arr {
-                    items: core::array::from_fn(|_| None),
+                    items: [const { None }; N],
                     over: false,
                 };
                 let mut n = 0usize;

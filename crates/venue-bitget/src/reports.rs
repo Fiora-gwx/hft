@@ -121,6 +121,33 @@ struct PushHead<'a> {
     arg: Arg<'a>,
 }
 
+fn push_head(p: &[u8]) -> Result<PushHead<'_>, DecodeErr> {
+    use hft_venue_proto::json::{self as wire, Select};
+    let fast = || {
+        let [topic, symbol] = wire::nested(p, 0b11, |state, key| match (state, key) {
+            (0, b"arg") => Select::Object(1),
+            (1, b"topic" | b"channel") => Select::Raw(0),
+            (1, b"symbol" | b"instId") => Select::Raw(1),
+            _ => Select::Skip,
+        })?;
+        Some(PushHead {
+            arg: Arg {
+                topic: if topic.is_empty() {
+                    ""
+                } else {
+                    wire::string(topic)?
+                },
+                symbol: if symbol.is_empty() {
+                    ""
+                } else {
+                    wire::string(symbol)?
+                },
+            },
+        })
+    };
+    fast().map_or_else(|| from(p), Ok)
+}
+
 fn listed(line: Line, rd: &RefData, name: &str) -> Skip {
     let hit = !name.is_empty()
         && rd
@@ -146,7 +173,7 @@ pub(crate) fn decode_report(
         ReportClass::Positions => positions(line, rd, p, rx, out),
         ReportClass::Account => account(line, rd, p, rx, out),
         ReportClass::Push => {
-            let h: PushHead = from(p)?;
+            let h = push_head(p)?;
             match topic_class(h.arg.topic.as_bytes()) {
                 ReportClass::Push | ReportClass::Unknown => Ok(ReportOutcome {
                     skip: listed(line, rd, h.arg.topic),

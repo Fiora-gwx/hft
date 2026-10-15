@@ -21,6 +21,8 @@ pub struct RecordHeader {
 
 ## 时间戳语义
 
+字段投影与严格解码路径使用同一事件归一化，元数据与时间单位遵循 [VenueProtocol](../../crates/hft-venue-proto/README.md#实现方必须遵守的契约)。
+
 BBO 合并的保留顺序、CONFLATED 与缓冲复用规则归 [sequencer](../../crates/hft-sequencer/README.md#bbo-合并与-conflated);缓冲下标不进入事件或快照。
 
 基准内部的有序计数器只用于 [sequencer 阶段诊断](../../crates/hft-sequencer/README.md#延迟与资源契约),不参与决策、不成为事件或快照字段,普通构建不包含这些读取。

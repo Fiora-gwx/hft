@@ -56,3 +56,7 @@ harness = false
 [[bench]]
 name = "reports"
 harness = false
+
+[[bench]]
+name = "wire"
+harness = false

@@ -540,9 +540,11 @@ pub enum ExchIdHint { Resolved { epoch: u16, slot: SlotId, gen: u32 }, Recorded,
 
 </details>
 
+`json::{project, nested, ordered}` 提供零分配字段投影。未知值仅校验语法边界，不建立 token 表或转换数值。使用字段借用原始切片，重复字段与别名回退严格解码。转义、非 ASCII、指数数字或深度超过 16 层也回退。`nested` 检查必需容器状态；`uint/int/string` 转换使用字段，价格数量仍走 `parse_exact`。预算与基准随实际 venue 入口测量。外部依赖 `memchr = "2"` 用于字符串边界扫描，版本由 Cargo.lock 锁定。
+
 ## 延迟与资源契约
 
-本 crate 自身除 `TradeIdRing`、`dedup_key` 与码编码外没有运行时代码;trait 方法的预算由每个实现在其 README 给出(基准名 `bench_classify_<venue>`、`bench_decode_*`、`bench_encode_*`、`bench_acct_decode_*`),**每个 venue 的 p50 与 p99 都不得宽于下表统一门槛**(`doc-check` 比对 venue README 与 `benches/budgets.toml`):
+本 crate 自身除 `TradeIdRing`、`dedup_key`、字段投影与码编码外没有运行时代码;trait 方法的预算由每个实现在其 README 给出(基准名 `bench_classify_<venue>`、`bench_decode_*`、`bench_encode_*`、`bench_acct_decode_*`),**每个 venue 的 p50 与 p99 都不得宽于下表统一门槛**(`doc-check` 比对 venue README 与 `benches/budgets.toml`):
 
 | 入口 | p50 门槛 | p99 门槛 | 说明 |
 |---|---|---|---|

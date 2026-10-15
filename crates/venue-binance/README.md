@@ -460,6 +460,8 @@ pub mod mock {
 
 </details>
 
+BBO 常见字段顺序直接扫描借用切片；真实捕获的 `ps/st` 跳过数值转换。`peek` 与用户流事件分派只投影使用字段，其他形态回退严格解码器。回退先校验 UTF-8，再调用 sonic-rs，非法文本返回 Shape。
+
 ## 延迟与资源契约
 
 纯函数,无系统调用、无分配(`login`/`build_templates`/`subscribe`/`private_subscribe` 在 warm 线程,可分配)。

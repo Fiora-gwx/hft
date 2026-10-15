@@ -83,7 +83,7 @@ tier 定义见 [crates/AGENTS.md](../crates/AGENTS.md#tier)。一个 crate 按�
 | N4 | 禁 `rust_decimal`、`bigdecimal`、`num-bigint` 于 hot/pure;链上 `U256` 只在 `hft-amm`/`hft-chain-evm` 内部,进入 sequencer 前按资产指数换算一次 | `cargo deny` `bans`;`cargo xtask deps`(`alloy-primitives` 只允许出现在 `hft-amm`/`hft-chain-evm`/`hft-py`/`apps/chain-core` 闭包) |
 | N5 | 交易所数字字符串 → 定点直接解析(不经浮点);JSON 数字按字符串借用 | 金样 + fuzz 差分测试(对照十进制参考实现,见 [testing](testing.md)) |
 | N6 | 编译期分派:`enum` + `match`,交易所差异用泛型/`const` 参数;hot/pure crate 不用 `dyn Trait` | `hot-check`:类型位置出现 trait object 即失败(启动期构建器登记例外) |
-| N7 | JSON 用 `sonic-rs` + 每消息专用结构体、借用字段、先按固定偏移/`memchr` 取分派字段;禁通用值类型 | clippy `disallowed-types`:`serde_json::Value`、`sonic_rs::Value`、`simd_json::OwnedValue` |
+| N7 | JSON 先按固定偏移/`memchr` 取分派字段，使用字段可直接借用字节投影；其余形态用 `sonic-rs` 专用借用结构体；保持使用字段严格校验，禁通用值类型 | clippy `disallowed-types`:`serde_json::Value`、`sonic_rs::Value`、`simd_json::OwnedValue` |
 
 ## 控制流(C)
 

@@ -20,6 +20,7 @@ mod acct;
 mod code;
 mod dedup;
 mod funding;
+pub mod json;
 mod readonly;
 mod sink;
 mod types;
