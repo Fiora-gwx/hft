@@ -147,6 +147,8 @@ impl Conn {
     /// 短读(返回字节数 < 所给空闲空间)或 EAGAIN 视为内核队列已空;读满(缓冲已满)本次不再读。空闲空间为 0 时不做系统调用。
     /// 只把密文追加进缓冲并记下这次读取的戳;不解密。返回读到的字节数(0 = 无新数据)。phase 不是 Open 时返回 0、不做系统调用。
     pub fn poll_rx(&mut self, now_tsc: u64) -> u32;
+    /// 已有完整 WS 帧或 TLS 记录时先交给 next_frame；否则调用 poll_rx。部分记录不能阻止补读。
+    pub fn poll_rx_if_needed(&mut self, now_tsc: u64) -> u32;
     /// 取下一条完整帧;明文区没有完整帧时**按需**逐条解密 TLS 记录,凑齐一帧即停;不做系统调用。
     /// 控制帧在内部处理(Ping→排队 Pong,Close→排队 Close 并置 WS_CLOSE,Pong→记 RTT),不返回。
     /// 读位置存在 Conn 里:两次 next_frame 之间可以对同一连接 send_frame(gw 每解一帧回报就 drain_out 一次)。
@@ -501,6 +503,8 @@ HTTP/1.1 over 同一 `Conn`(`ConnRole::Rest`,无 WS)。请求在 tx 明文 scrat
 | `src/txts.rs` | `TxTsDrain` |
 
 </details>
+
+`poll_rx_if_needed` 供 BBO feed 的轮询入口使用。完整明文帧或密文记录尚未消费时，跳过 recvmsg 与缓冲压缩；部分 WS 帧或部分 TLS 记录仍立即补读。此判断不解密、不消费、不更新读取戳或空队列确认点；控制帧和错误仍由 `next_frame` 处理。底层 `poll_rx` 的直接读取契约不变。
 
 ## 延迟与资源契约
 

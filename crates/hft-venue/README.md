@@ -314,7 +314,7 @@ sequencer ──FeedCmd(feedctl-<v>)──▶ feed-md          sequencer ──F
 
 1. 取 `FeedCmd`(≤ `FEEDCMD_PER_POLL` 条)。
 2. **就绪探测**(`feed.ready_poll` 生效时):`ReadyPoll::probe` 一次(`epoll_pwait(timeout = 0)`,[hft-net](../hft-net/README.md#签名草案)),得到本任务就绪连接的集合,对未就绪的每条活跃连接调 `Conn::note_empty(探测前读的 TSC)`(`rx_empty_gap_ns` 的确认点,hft-net §7);未生效时把全部活跃连接视为就绪。就绪集合只是提示:误报只多一次空 `recvmsg`;缓冲里还有未处理完整帧的连接(上一轮因帧数上限留下)不需要就绪也参加第 3、4 步。
-3. **Bbo 路由**(`routes ∈ {Bbo, All}`):对每条就绪的 BBO 连接 `poll_rx`;然后**按帧轮转**:起点连接每次 `poll_once` 轮换一位,按连接号顺序每条连接取一帧(`next_frame`)按第 5 步处理,一圈接一圈,直到各连接没有完整帧或已各处理 `feed.bbo_frames_per_poll` 帧。
+3. **Bbo 路由**(`routes ∈ {Bbo, All}`):对每条就绪的 BBO 连接 `poll_rx_if_needed`;然后**按帧轮转**:起点连接每次 `poll_once` 轮换一位,按连接号顺序每条连接取一帧(`next_frame`)按第 5 步处理,一圈接一圈,直到各连接没有完整帧或已各处理 `feed.bbo_frames_per_poll` 帧。
 4. **其余路由**(`routes ∈ {Md, All}`;`DepthTopN` 与 `Md`):对每条就绪连接 `poll_rx`,逐连接逐帧(≤ `feed.frames_per_poll`)按第 5 步处理。`routes = All` 时第 3、4 步按顺序各做一次,即简单轮转:BBO 可能等本任务一整轮其余路由的帧,这一形态只用于没有延迟验收的 dev2/c4 与 `sim` 实例。
 5. 对每帧:
    1. `c = P::classify(route, op, &payload[..64])`(`route` = 该连接所属路由);控制类(订阅回执、应用 pong、服务端下线预告)→ 订阅回执更新该连接的订阅状态(被拒 → `ConnState{Degraded, reason=SUB_REJECTED}`),pong 记心跳,下线预告置 `SERVER_HINT` 触发替补(第 8 步),不产生行情事件;本路由不认识的类(`Unknown`)→ 计数丢弃(raw 照写);
@@ -474,7 +474,7 @@ struct GwAccount<P: VenueProtocol> {
 
 全部账户处理完后:**acct 记录**——至多应用一条(§4a),排在本圈最后一次 `drain_out()` 之后。这样出环里的订单最多等一条回报帧的处理时间(或一个空 socket 的 poll、一条 acct 记录的应用),而不是一整批回报或一整圈;对冲第二腿的主机内等待计入 `hedge_host`([latency-budget](../../docs/latency-budget.md))。
 
-1. **`drain_out()`**:取 `GwCmd`(≤ `cmds_per_loop`)。**本批内重排**:稳定地把 `oflags & RISK_REDUCING` 的 `Place`/`Amend` 移到批首,其余保持原序;例外——目标槽(`target_slot`)在同批更早一条 `Place` 中的 `Cancel`/`Amend`/`Query` 不越过那条 `Place`(这样的 RR `Amend` 留在原位)。每账户每轮至多 `gw.cmds_per_account_per_loop` 条,超出的留在本地暂存(容量 = `cmds_per_loop`)下一轮先发(每次 `drain_out` 先发暂存中这一圈配额未用完的账户的命令,再从出环取至多 min(`cmds_per_loop`, 暂存空位) 条),使一个账户的突发不推迟另一个账户。跨批的优先级与 (venue, account) 配额由 sequencer 侧 OMS 的扇出队列保证([hft-oms](../hft-oms/README.md) 的输出扇出)。维护类 `op` 按"出环"表处理;订单类 `c` 按下列步骤:
+1. **`drain_out()`**:以 `read_batch` 取得当前已发布的 `GwCmd`(≤ `cmds_per_loop` 与可用空间)，复制到预分配批缓冲后一次 Release 归还环槽。**本批内重排**:稳定地把 `oflags & RISK_REDUCING` 的 `Place`/`Amend` 移到批首,其余保持原序;例外——目标槽(`target_slot`)在同批更早一条 `Place` 中的 `Cancel`/`Amend`/`Query` 不越过那条 `Place`(这样的 RR `Amend` 留在原位)。每账户每轮至多 `gw.cmds_per_account_per_loop` 条,超出的留在本地暂存(容量 = `cmds_per_loop`)下一轮先发(每次 `drain_out` 先发暂存中这一圈配额未用完的账户的命令,再从出环取至多 min(`cmds_per_loop`, 暂存空位) 条),使一个账户的突发不推迟另一个账户。跨批的优先级与 (venue, account) 配额由 sequencer 侧 OMS 的扇出队列保证([hft-oms](../hft-oms/README.md) 的输出扇出)。维护类 `op` 按"出环"表处理;订单类 `c` 按下列步骤:
    1. **kill 检查**(仅 `op ∈ {Place, Amend}`;位定义归 [hft-types `KillBits`](../hft-types/README.md),规则归 [hft-risk kill 字](../hft-risk/README.md#kill-字唯一的跨线程共享可变量)):`k = kill.load(Acquire) & (kill_mask | acct.acct_bits)`(`u32`;`acct` = `c.account` 的 `GwAccount`);`k & (HARD | account_hard(ix)) != 0` → 一律拒(含 `RISK_REDUCING`);否则 `k != 0` 且 `c.oflags & RISK_REDUCING == 0` → 拒;拒绝回 `SendReport{status: KillBlocked}`。判定是纯函数 `pub fn kill_admit(word: u32, mask: u32, acct_bits: u32, ix: u8, op: GwOp, oflags: u16) -> bool`,gw 与 hft-core 的启动自检调用同一个函数。`RISK_REDUCING`(对冲第二腿、平仓、HedgeFix)由 sequencer 置位,gw 只看位(置位规则在 [hft-oms](../hft-oms/README.md#risk_reducing-判定))。`Cancel`、`CancelAll`、`Query` 与维护类 `op` 永远放行。
    2. **限速兜底**:该 (venue, account) 的发送侧计数显示会超交易所硬上限 → `SendReport{status: RateLimited}`(风控令牌桶应先拦住,这里是最后一道)。同时检查该账户所有 Account/Uid 的 Orders 窗口,任一窗口不足则全部窗口不扣额度。延迟响应只提高计数,不释放本地已占配额;ResetRate 清零。计数按 (venue, account) 分开;交易所按 IP 计的限额以每账户独立出口 IP(`venues.<v>.gw.src_ip`)隔离,共享 IP 的配置加载时拒绝。
    3. 选连接:该账户 primary;primary 不是 `Open` → standby;都没有 → `SendReport{status: NoConn}`。
@@ -663,6 +663,8 @@ struct IdTable {
 | `src/bbo_live.rs` | `BboConnLive`:探测、`Alive`/成员/补帧记录、静默判定(§3a) |
 
 </details>
+
+BBO 接收端通过 [hft-net 的缓冲优先入口](../hft-net/README.md#1-接收路径) 排空已收到的完整帧或记录后再读 socket；部分记录仍立即补读。帧数限额、BBO 轮转、公平性、每帧后的 `drain_out` 与空队列确认规则保持原契约。
 
 ## 延迟与资源契约
 

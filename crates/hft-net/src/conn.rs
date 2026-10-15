@@ -348,6 +348,30 @@ impl Conn {
         self.recv_once()
     }
 
+    /// Drain buffered work before receiving again. A partial WS frame or TLS record still
+    /// needs a read; only a complete frame/record (or a detectable framing error) defers it.
+    /// Like `poll_rx`, this never decrypts and returns only newly received bytes.
+    #[inline]
+    pub fn poll_rx_if_needed(&mut self, _now_tsc: u64) -> u32 {
+        if self.phase != ConnPhase::Open {
+            return 0;
+        }
+        let plain = &self.rx[self.ps..self.pe];
+        match ws::parse_head(plain) {
+            Head::Proto => return 0,
+            Head::Ok(h) if h.len <= plain.len().saturating_sub(h.hdr_len) as u64 => return 0,
+            _ => {}
+        }
+        let avail = self.ce - self.cs;
+        if avail >= REC_HDR {
+            let body = u16::from_be_bytes([self.rx[self.cs + 3], self.rx[self.cs + 4]]) as usize;
+            if body > MAX_BODY || REC_HDR + body <= avail {
+                return 0;
+            }
+        }
+        self.recv_once()
+    }
+
     /// `poll_rx` without the phase check (handshake, Upgrade and ticket wait on the warm thread).
     pub(crate) fn recv_once(&mut self) -> u32 {
         self.compact();

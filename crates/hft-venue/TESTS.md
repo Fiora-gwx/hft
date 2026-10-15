@@ -12,6 +12,8 @@ spec: README.md
 
 CORE-120 同时验证 Unverifiable 缺 UID 的完整启动与重认证序列、保证金条目传递。非正式账户启动链路由 `apps/hft-core/tests/account_process.rs::core_120_mock_accounts_bootstrap_reauth_and_drift` 以独立子进程、两家真实协议和脚本 REST 验证撤空、基线、重新核验、超时/错误模式失败与余额差异不覆盖账本；不替代真实 TLS、交易所或正式恢复验收。资金费账单复用 FundingPoll，沿用现有实际结算记账与去重。
 
+VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VEN-190/191/207/208/212 的 gateway 测试同时覆盖 SPSC 批量取出后的逐帧 drain、配额与顺序；接收缓冲优先与部分记录补读见 [NET-080/081](../hft-net/TESTS.md)。
+
 ## 覆盖
 
 | README 小节 | 用例 |

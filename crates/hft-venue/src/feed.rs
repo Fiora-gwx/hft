@@ -1373,7 +1373,11 @@ impl<P: VenueProtocol> FeedRuntime<P> {
             }
             let Some(conn) = fc.pool.primary() else { continue };
             if !probing || self.ready_set.contains(id) {
-                conn.poll_rx(now);
+                if bbo {
+                    conn.poll_rx_if_needed(now);
+                } else {
+                    conn.poll_rx(now);
+                }
             } else {
                 conn.note_empty(now);
             }
