@@ -64,6 +64,11 @@ impl DstDriver {
             trigger_seq,
         });
     }
+    /// Drops the pending frames of one maintenance op (boot-time frames already applied by the
+    /// io, e.g. a fresh boot's `SetEpoch`), keeping the others in order.
+    pub fn drop_emitted(&mut self, op: hft_event::GwOp) {
+        self.emitted.retain(|f| f.cmd.op != op);
+    }
     /// Frames emitted since the last call.
     pub fn drain_emitted(&mut self, out: &mut Vec<FrameRec>) {
         out.append(&mut self.emitted);

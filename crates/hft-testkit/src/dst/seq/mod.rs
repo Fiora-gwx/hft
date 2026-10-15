@@ -825,6 +825,9 @@ impl<S: StrategySet> Sut for SeqSut<S> {
         sut.prologue(true);
         sut.mirror(None);
         sut.io().events.clear();
+        // A fresh boot announces its epoch on the first EngineClock; the io's gw model has
+        // applied it already. Those frames belong to the boot, not to the first scenario step.
+        sut.io().drv.drop_emitted(hft_event::GwOp::SetEpoch);
         Ok(sut)
     }
 

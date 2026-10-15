@@ -125,13 +125,15 @@ impl Rig {
         self.pump();
     }
     fn frames(&mut self, out: &StepOut) {
-        // SetEpoch (first EngineClock of a fresh boot) is handled by SeqSut's gateway adapter.
-        let orders: Vec<_> = out.frames.iter().filter(|f| f.cmd.op != GwOp::SetEpoch).collect();
-        if self.sent.is_empty() && !orders.is_empty() {
-            assert_eq!(orders.len(), 2, "both legs leave in one event before any reply");
-            assert!(orders.iter().all(|f| f.cmd.op == GwOp::Place));
+        if self.sent.is_empty() && !out.frames.is_empty() {
+            assert_eq!(
+                out.frames.len(),
+                2,
+                "both legs leave in one event before any reply"
+            );
+            assert!(out.frames.iter().all(|f| f.cmd.op == GwOp::Place));
         }
-        for f in orders {
+        for f in &out.frames {
             self.sent.push(f.cmd);
             self.venues
                 .iter_mut()
