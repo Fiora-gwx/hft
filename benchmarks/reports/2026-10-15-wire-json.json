@@ -3,7 +3,7 @@
   "host": "shared Windows x86_64, unpinned, concurrent builds",
   "profile": "dev opt-level=3 debug=0; overflow checks enabled",
   "reference_acceptance": false,
-  "timestamp_source": "HistBench Instant (Windows)",
+  "timestamp_source": "HistBench ordered TSC, nominal frequency or one-round calibration",
   "rows": [
     {
       "max_ns": 11703,
@@ -444,6 +444,242 @@
       "p99_ns": 475,
       "warmup": 5000,
       "phase": "after"
+    }
+  ],
+  "criterion": [
+    {
+      "venue": "binance",
+      "phase": "before",
+      "name": "bench_decode_otu/own",
+      "low": 2.5757,
+      "estimate": 2.7498,
+      "high": 2.9442,
+      "unit": "\u00b5s"
+    },
+    {
+      "venue": "binance",
+      "phase": "before",
+      "name": "bench_decode_otu/own-duplicate",
+      "low": 1.0856,
+      "estimate": 1.1639,
+      "high": 1.2624,
+      "unit": "\u00b5s"
+    },
+    {
+      "venue": "binance",
+      "phase": "before",
+      "name": "bench_decode_otu/external",
+      "low": 4.9423,
+      "estimate": 5.3625,
+      "high": 5.7518,
+      "unit": "\u00b5s"
+    },
+    {
+      "venue": "binance",
+      "phase": "before",
+      "name": "bench_decode_otu/external-duplicate",
+      "low": 1.9453,
+      "estimate": 2.1614,
+      "high": 2.4228,
+      "unit": "\u00b5s"
+    },
+    {
+      "venue": "binance",
+      "phase": "before",
+      "name": "bench_skip_event_usdm/listed",
+      "low": 21.488,
+      "estimate": 23.833,
+      "high": 26.334,
+      "unit": "ns"
+    },
+    {
+      "venue": "binance",
+      "phase": "before",
+      "name": "bench_skip_event_usdm/unknown",
+      "low": 32.594,
+      "estimate": 35.272,
+      "high": 38.702,
+      "unit": "ns"
+    },
+    {
+      "venue": "binance",
+      "phase": "before",
+      "name": "bench_acct_decode_position_risk",
+      "low": 2.3146,
+      "estimate": 2.6011,
+      "high": 2.9172,
+      "unit": "ms"
+    },
+    {
+      "venue": "binance",
+      "phase": "after",
+      "name": "bench_decode_otu/own",
+      "low": 5.2499,
+      "estimate": 5.5094,
+      "high": 5.7831,
+      "unit": "\u00b5s"
+    },
+    {
+      "venue": "binance",
+      "phase": "after",
+      "name": "bench_decode_otu/own-duplicate",
+      "low": 1.9089,
+      "estimate": 2.031,
+      "high": 2.1614,
+      "unit": "\u00b5s"
+    },
+    {
+      "venue": "binance",
+      "phase": "after",
+      "name": "bench_decode_otu/external",
+      "low": 5.5096,
+      "estimate": 5.8454,
+      "high": 6.2039,
+      "unit": "\u00b5s"
+    },
+    {
+      "venue": "binance",
+      "phase": "after",
+      "name": "bench_decode_otu/external-duplicate",
+      "low": 1.784,
+      "estimate": 1.9048,
+      "high": 2.0503,
+      "unit": "\u00b5s"
+    },
+    {
+      "venue": "binance",
+      "phase": "after",
+      "name": "bench_skip_event_usdm/listed",
+      "low": 22.132,
+      "estimate": 23.023,
+      "high": 24.039,
+      "unit": "ns"
+    },
+    {
+      "venue": "binance",
+      "phase": "after",
+      "name": "bench_skip_event_usdm/unknown",
+      "low": 37.758,
+      "estimate": 39.346,
+      "high": 41.151,
+      "unit": "ns"
+    },
+    {
+      "venue": "binance",
+      "phase": "after",
+      "name": "bench_acct_decode_position_risk",
+      "low": 1.8701,
+      "estimate": 1.9271,
+      "high": 1.9856,
+      "unit": "ms"
+    },
+    {
+      "venue": "bitget",
+      "phase": "before",
+      "name": "bench_encode_bitget_place",
+      "low": 75.296,
+      "estimate": 79.387,
+      "high": 84.167,
+      "unit": "ns"
+    },
+    {
+      "venue": "bitget",
+      "phase": "before",
+      "name": "bench_decode_bitget_order/own",
+      "low": 3.0589,
+      "estimate": 3.3238,
+      "high": 3.5921,
+      "unit": "\u00b5s"
+    },
+    {
+      "venue": "bitget",
+      "phase": "before",
+      "name": "bench_decode_bitget_order/own-duplicate",
+      "low": 8.3602,
+      "estimate": 9.0377,
+      "high": 9.8279,
+      "unit": "\u00b5s"
+    },
+    {
+      "venue": "bitget",
+      "phase": "before",
+      "name": "bench_decode_bitget_order/external",
+      "low": 9.3311,
+      "estimate": 10.621,
+      "high": 12.008,
+      "unit": "\u00b5s"
+    },
+    {
+      "venue": "bitget",
+      "phase": "before",
+      "name": "bench_decode_bitget_order/external-duplicate",
+      "low": 8.1497,
+      "estimate": 8.9801,
+      "high": 9.9458,
+      "unit": "\u00b5s"
+    },
+    {
+      "venue": "bitget",
+      "phase": "before",
+      "name": "bench_acct_decode_bitget",
+      "low": 1.6654,
+      "estimate": 1.7819,
+      "high": 1.9112,
+      "unit": "ms"
+    },
+    {
+      "venue": "bitget",
+      "phase": "after",
+      "name": "bench_encode_bitget_place",
+      "low": 175.16,
+      "estimate": 181.92,
+      "high": 188.95,
+      "unit": "ns"
+    },
+    {
+      "venue": "bitget",
+      "phase": "after",
+      "name": "bench_decode_bitget_order/own",
+      "low": 11.481,
+      "estimate": 12.012,
+      "high": 12.593,
+      "unit": "\u00b5s"
+    },
+    {
+      "venue": "bitget",
+      "phase": "after",
+      "name": "bench_decode_bitget_order/own-duplicate",
+      "low": 9.342,
+      "estimate": 9.8743,
+      "high": 10.46,
+      "unit": "\u00b5s"
+    },
+    {
+      "venue": "bitget",
+      "phase": "after",
+      "name": "bench_decode_bitget_order/external",
+      "low": 11.578,
+      "estimate": 12.152,
+      "high": 12.766,
+      "unit": "\u00b5s"
+    },
+    {
+      "venue": "bitget",
+      "phase": "after",
+      "name": "bench_decode_bitget_order/external-duplicate",
+      "low": 9.036,
+      "estimate": 9.641,
+      "high": 10.346,
+      "unit": "\u00b5s"
+    },
+    {
+      "venue": "bitget",
+      "phase": "after",
+      "name": "bench_acct_decode_bitget",
+      "low": 2.0925,
+      "estimate": 2.1952,
+      "high": 2.3104,
+      "unit": "ms"
     }
   ]
 }
