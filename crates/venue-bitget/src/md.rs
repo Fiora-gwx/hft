@@ -678,8 +678,20 @@ pub(crate) fn decode_md(
                 return Ok(MdOutcome { events: 0, inst });
             }
             let row = rd.inst(inst);
-            let mark = Px(fixed(d.mark, row.px_wire_exp)?);
-            let index = Px(fixed(d.index, row.px_wire_exp)?);
+            // Estimated reference prices are not constrained to the tradable price grid.
+            // Round once at the fixed-point boundary; BBO/trade prices remain exact.
+            let mark = Px(hft_types::parse_round(
+                d.mark.as_bytes(),
+                row.px_wire_exp,
+                hft_types::RoundMode::HalfEven,
+            )
+            .map_err(crate::json::fx)?);
+            let index = Px(hft_types::parse_round(
+                d.index.as_bytes(),
+                row.px_wire_exp,
+                hft_types::RoundMode::HalfEven,
+            )
+            .map_err(crate::json::fx)?);
             let rate = Rate(fixed(d.rate, -9)?);
             let interval_s = ctx.funding_interval(inst, next_ms);
             let h = hdr(line, inst, rx, ex, send);

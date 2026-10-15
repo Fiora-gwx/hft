@@ -74,6 +74,7 @@ UTA 有三种账户模式:**逐仓模式**(每个仓位独立风险,只支持逐
 - 订阅后的第一条 `trade` 推送是 `action:"snapshot"` 的历史批,丢弃,不产生 `Trade`;之后每条推送的 `data[]` 每笔一条 `Trade`(`trade_id` ← 成交 id 按十进制解析为 u64,非数字 → `DecodeErr::Number`;`taker_side` ← `S`)。官方示例里的实时推送也写作 `snapshot`,若模拟盘确认如此,丢弃规则改为"只丢订阅后的第一帧"(开发备忘第 1 条)。
 - `books1` 某一侧为空数组 → 产出 `Bbo`,该侧 `px = 0`、`qty = 0`(下游按"缺一侧"处理,与其他所一致);`books5`/`books15` 中数量为 0 的档不输出。
 - `ticker` 的 `Funding.interval_s` = 相邻两次不同 `nextFundingTime` 之差(秒);本 `FeedCtx` 首次见到该 inst、`nextFundingTime` 尚未变过、或差值 ≤ 0 时为 0(未知)。
+- `ticker` 的 mark/index 是估算参考价,可超过交易价格小数位,按资产价格指数作一次 HalfEven 舍入;盘口与实际成交价格仍要求精确表示。真实 V3 指数价的 15 位小数样本归 BGT-307。
 - 非 `Chain` 类的 `peek`:`ids.last_id` = 去重键(`books1`、`books5`/`books15` 取 `seq`,成交取成交 id,`ticker` 取 `ts` 换算的 ns),`ids.prev_id = 0`。
 - 增量深度(可选扩展,路由 `public-books`):`action = snapshot` 或 `pseq = 0` 的推送解码为 `L2Snapshot{origin = Exchange, snap_id = seq}`(零量档不输出),其余每条一条 `L2Batch{prev_id = pseq, last_id = seq}`(量 0 = 删档);`peek` 给 `ids = {pseq, seq}`;`align_first`:快照 `seq` 落在首条增量的 `[pseq, seq]` 内 → `Apply`,`seq ≤ snap_id` → `Drop`,否则 `Gap`;每边至多 1000 档(`maxDepth` 上限),超出 → `DecodeErr::Shape`;重同步 `ResyncMethod::Resubscribe`(重新订阅即得新快照)。
 - 公共强平流:V2 没有;UTA 有 Liquidation 频道(格式待核实,开发备忘第 1 条),不订阅(与本账户无关)。

@@ -1894,6 +1894,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 级别:golden
 - 里程碑:M3
 - 输入:`fixtures/bitget-usdt-futures/books1/{v2_normal,v3_normal,seq_as_string,price_scientific,empty_bids,missing_ts}.in`;V2 来自现有采集系统 raw WAL,V3 待采集(方法 B,BGT-210),异常样本合成
+- 采样范围:v3_normal 为 2026-10-15 ETHUSDT demo 实帧;其余金样仍待补齐。
 - 期望文件:同目录 `<case>.expected.jsonl`(`empty_bids`、`missing_ts` 期望 `{"error":"Shape"}`)
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_300_fut_books1`
 
@@ -1939,6 +1940,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 级别:golden
 - 里程碑:M3
 - 输入:`fixtures/bitget-usdt-futures/publicTrade/{v2_snapshot_then_update,v3_snapshot_then_update,multi_trades_one_push,non_numeric_trade_id}.in`
+- 采样范围:真实 V3 `v3_snapshot.in` 无输出,`v3_update.in` 逐笔归一;其他样本仍待补齐。
 - 期望文件:同目录 `<case>.expected.jsonl`(snapshot 批无输出行;`non_numeric_trade_id` 期望 `{"error":"Number"}`)
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_305_fut_trade`
 
@@ -1957,6 +1959,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 级别:golden
 - 里程碑:M3
 - 输入:`fixtures/bitget-usdt-futures/ticker/{v2_normal,v3_normal,interval_8h_to_4h}.in`;`interval_8h_to_4h` 为跨两次结算、周期由 8 h 变 4 h 的连续推送(采集系统 raw 中有则抽取,否则合成并标注)
+- 采样范围:v3_normal 是真实 ETHUSDT demo,指数价格带 15 位小数,HalfEven 到 RD-BGT 的 -2 价格指数;独立期望包含 mark/index/funding,首帧周期仍未知。周期切换样本仍待补齐。
 - 期望文件:同目录 `<case>.expected.jsonl`(每帧 `MarkPrice`、`IndexPrice`、`Funding` 三行;`interval_s` 依次 0、28800、14400)
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_307_fut_ticker`
 

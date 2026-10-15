@@ -232,3 +232,48 @@ fn bgt_329_margin_poll() {
         "maint_margin":m.maint_margin.0.to_string(),"avail_margin":m.avail_margin.0.to_string(),"margin_ratio":m.margin_ratio.0.to_string()}));
     compare(&expected, &actual);
 }
+
+fn market(channel: &str, name: &str, route: u8) {
+    use hft_venue_proto::testkit::{MdRec, VecSink};
+    use serde_json::json;
+    let (input, expected) = capture(channel, name);
+    let class = BitgetUsdtFutures::classify(RouteId(route), MsgOp::Text, &input[..input.len().min(64)]);
+    let mut sink = VecSink::default();
+    let result =
+        BitgetUsdtFutures::decode_md(rd(), &mut FeedCtx::new(), class, &input, &RX, &mut sink).unwrap();
+    assert_eq!(usize::from(result.events), expected.len());
+    let actual: Vec<_> = sink.md.iter().map(|e| {
+        let mut value = match e {
+            MdRec::Bbo(b) => json!({"kind":"Bbo","bid_px":b.bid_px.0.to_string(),"bid_qty":b.bid_qty.0.to_string(),
+                "ask_px":b.ask_px.0.to_string(),"ask_qty":b.ask_qty.0.to_string(),"update_id":b.update_id}),
+            MdRec::Trade(t) => json!({"kind":"Trade","trade_id":t.trade_id,"px":t.px.0.to_string(),
+                "qty":t.qty.0.to_string(),"side":format!("{:?}",t.taker_side).to_lowercase()}),
+            MdRec::Mark(m) => json!({"kind":"MarkPrice","px":m.px.0.to_string()}),
+            MdRec::Index(m) => json!({"kind":"IndexPrice","px":m.px.0.to_string()}),
+            MdRec::Funding(f) => json!({"kind":"Funding","rate":f.rate.0.to_string(),"next_ts_ns":f.next_funding_ns,"interval_s":f.interval_s}),
+            other => panic!("unexpected market event: {other:?}"),
+        };
+        let h = e.market_hdr().unwrap();
+        value["inst"] = h.inst.0.into();
+        value["ex_ts_ns"] = h.ex_ts_ns.into();
+        value["ex_send_ns"] = h.ex_send_ns.into();
+        value
+    }).collect();
+    compare(&expected, &actual);
+}
+
+#[test]
+fn bgt_300_fut_books1() {
+    market("books1", "v3_normal", 0);
+}
+
+#[test]
+fn bgt_305_fut_trade() {
+    market("publicTrade", "v3_snapshot", 2);
+    market("publicTrade", "v3_update", 2);
+}
+
+#[test]
+fn bgt_307_fut_ticker() {
+    market("ticker", "v3_normal", 3);
+}
