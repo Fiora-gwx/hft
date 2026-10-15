@@ -9,7 +9,7 @@
 
    无 IAM 的专用 demo 主机可显式配置 `instance.secrets_mode="local_demo"`，默认仍是 `aws_secrets_manager`。源文件仅经 scp 放入 root 0700 的 `/run/secrets/<目录>/`，以 checksum 核对、不输出内容；manifest 的 `mode`、`name/path` 和运行时目标路径遵循 [deploy 秘密模式](../../deploy/README.md#秘密与实例角色)。不修改生成的 unit 绕过预检，使用发布内的准备器。`prod` 在此是交易所连接的进程角色；`order_env=prod` 或任何 `is_prod=true` 的正式账户都拒绝 local_demo。
 5. 填实际 `src_ip` / `bind_device`；RDB1 地址必须都是相应 demo 环境。`hft-core check-config --config core.toml` 与 `--check` 等价，只检查文件，不读取 key、不联网。它不证明交易所规则正确。检查成功后运行 `hft-core --config core.toml`；启动 REST 会撤销该专用账户的全部遗留挂单，任一步失败都不会启动策略任务。
-6. 等待配置、身份、连接、时钟、kill 自检和初始对账闸门，保持 Shadow 观察。Unverifiable 的 `Resume` 必须按控制面的身份确认流程带 `ack_identity`；缺闸门不能跳过。用现有 ctl 客户端 preview/confirm 设置 Live。观察 journal 的 SendReport、OrderEvent、余额/持仓差异、FundingMismatch、AccountCfg 与连接状态，以及 stderr 的 heartbeat/clock_synced。周期差异只告警，不覆盖账本；查询失败关闭配置闸门后重试。Binance countdownCancelAll 在启动时设置，之后仅响应 sequencer 的 DeadManRefresh，不由独立 worker 永久续命。
+6. 等待配置、身份、连接、时钟、kill 自检和初始对账闸门，保持 Shadow 观察。Unverifiable 由 refdata 的 Admin 签字声明，启动后按 [IDENTITY 闸门](../../crates/hft-risk/README.md#启动闸门)核对签名只读报告、kill 自检和 `IdentityUnverified` 注记；缺闸门不能跳过。用现有 ctl 客户端 preview/confirm 设置 Live。观察 journal 的 SendReport、OrderEvent、余额/持仓差异、FundingMismatch、AccountCfg 与连接状态，以及 stderr 的 heartbeat/clock_synced。周期差异只告警，不覆盖账本；查询失败关闭配置闸门后重试。Binance countdownCancelAll 在启动时设置，之后仅响应 sequencer 的 DeadManRefresh，不由独立 worker 永久续命。
 7. 停止用 SIGTERM（或 ctl Drain），停止开仓并撤单，等待退出与冷盘落盘。超时/断连后订单仍视为 Unknown，须到 demo 确认订单；不能把请求失败当作撤单成功。保留 seq/raw journal、退出计数和 CI 提交用于排障。再次启动使用恢复功能前，需人工核对并明确建立新的测试会话。
 
 本地与 CI 的 `account_process` 测试使用独立子进程、脚本 REST 和假 key，覆盖两家协议的撤空、基线、重认证、失败与差异；不访问真实交易所。Linux `paper_process` 验证控制 socket、订单闭环及 SIGTERM。正式上线门槛仍以 [launch](../../docs/runbooks/launch.md) 为准。

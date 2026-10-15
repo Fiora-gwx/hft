@@ -2657,7 +2657,8 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 | DEP-235.22 | `/etc/hft/ctl-principals.toml` 与生成器对当前 `ctl-operators.toml` 的输出差一个字节 | 退出 1,指出该文件 |
 | DEP-235.23 | `PATH` 中有 `rustup`;另一次有 `clang`;另一次有 `cc` | 每次退出 1 |
 
-- 回归:在无 PYTHONDONTWRITEBYTECODE/PYTHONPYCACHEPREFIX 的新进程运行归档内 preflight 与 fetch 入口,导入帮助模块后目录文件集与字节不变,不产生 __pycache__。
+- 回归:在无 PYTHONDONTWRITEBYTECODE/PYTHONPYCACHEPREFIX 的新进程运行归档内 preflight、fetch、hft-window、hft-dev2-guard 与 hft-shm-release 入口,导入帮助模块后目录文件集与字节不变,不产生 __pycache__。
+- 实现:`deploy/tests/test_release.py::dep_235_lifecycle_entrypoints_preserve_release`
 - CPU 子用例见 `test_cpu.py`：发布参数与编译器特性一致、未知特性拒绝、逐核缺特性拒绝、CI 原生额外特性不扩大运行要求。
 
 ### DEP-236 升级主机类的预检项
