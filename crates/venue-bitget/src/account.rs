@@ -169,13 +169,8 @@ struct Asset {
 #[derive(Deserialize)]
 #[serde(bound(deserialize = "T: Deserialize<'de>"))]
 struct List<T> {
-    #[serde(deserialize_with = "nullable_list")]
+    #[serde(deserialize_with = "crate::json::nullable_list")]
     list: Vec<T>,
-}
-// UTA returns an explicit null after closing the last position. The field remains required:
-// a missing list is malformed and must not erase a previously validated position baseline.
-fn nullable_list<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Vec<T>, D::Error> {
-    Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -412,14 +407,14 @@ fn decode_page(
                 }
                 if let Some(asset) = asset(rd, &row.coin) {
                     let exp = rd.asset(asset).exp.qty_exp;
-                    // A futures wallet total excludes unrealized PnL; available is a margin fact.
-                    let total = decimal(&row.balance, exp)?;
+                    // UTA balance excludes spot locks. Available remains a margin fact.
+                    let balance = decimal(&row.balance, exp)?;
                     let locked = if fut { 0 } else { decimal(&row.locked, exp)? };
                     s.balances.push(BalanceReport {
                         venue: v,
                         account: a,
                         asset,
-                        free: Qty(total.checked_sub(locked).ok_or(DecodeErr::Overflow)?),
+                        free: Qty(balance),
                         locked: Qty(locked),
                         ex_ts_ns: ns,
                         ..zerocopy::FromZeros::new_zeroed()

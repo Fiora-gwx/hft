@@ -63,8 +63,13 @@ fn bgt_311_subscribe_ack() {
 }
 
 fn capture(channel: &str, name: &str) -> (Vec<u8>, Vec<serde_json::Value>) {
+    product_capture("bitget-usdt-futures", channel, name)
+}
+
+fn product_capture(product: &str, channel: &str, name: &str) -> (Vec<u8>, Vec<serde_json::Value>) {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fixtures/bitget-usdt-futures")
+        .join("../../fixtures")
+        .join(product)
         .join(channel)
         .join(name);
     let input = std::fs::read(path.with_extension("in")).unwrap();
@@ -283,12 +288,19 @@ fn bgt_307_fut_ticker() {
 }
 
 fn report(channel: &str, name: &str) {
+    product_report::<BitgetUsdtFutures>(rd(), channel, name);
+}
+
+fn product_report<T: VenueProtocol<FeedCtx = FeedCtx, GwCtx = GwCtx>>(
+    data: &hft_refdata::RefData,
+    channel: &str,
+    name: &str,
+) {
     use serde_json::json;
-    let (input, expected) = capture(channel, name);
+    let (input, expected) = product_capture(T::NAME, channel, name);
     let mut sink = RepSink::default();
-    let class = BitgetUsdtFutures::classify_report(MsgOp::Text, &input[..input.len().min(64)]);
-    let result =
-        BitgetUsdtFutures::decode_report(rd(), &mut GwCtx::new(), class, &input, &RX, &mut sink).unwrap();
+    let class = T::classify_report(MsgOp::Text, &input[..input.len().min(64)]);
+    let result = T::decode_report(data, &mut GwCtx::new(), class, &input, &RX, &mut sink).unwrap();
     assert!(sink.ext.is_empty());
     assert_eq!(usize::from(result.events), sink.events());
     let mut actual: Vec<_> = sink
@@ -339,4 +351,103 @@ fn bgt_322_positions() {
 #[test]
 fn bgt_323_fut_account() {
     report("account", "usdt_only");
+}
+
+#[test]
+fn bgt_318_spot_orders() {
+    for name in [
+        "live",
+        "canceled",
+        "ioc_expired",
+        "partially_filled",
+        "filled",
+        "sell_partial",
+        "sell_filled",
+    ] {
+        product_report::<BitgetSpot>(rd_spot_capture(), "orders", name);
+    }
+    // The real stream sends equal-cumulative partial/terminal frames; overlapping delivery
+    // cannot charge the same fill or fee again.
+    let mut ctx = GwCtx::new();
+    let mut sink = RepSink::default();
+    for name in ["partially_filled", "filled", "partially_filled", "filled"] {
+        let (input, _) = product_capture(BitgetSpot::NAME, "orders", name);
+        let class = BitgetSpot::classify_report(MsgOp::Text, &input[..64]);
+        BitgetSpot::decode_report(rd_spot_capture(), &mut ctx, class, &input, &RX, &mut sink).unwrap();
+    }
+    assert_eq!(sink.orders.len(), 1);
+    assert_eq!(sink.orders[0].qty.0, 500_000);
+    assert_eq!(sink.orders[0].fee.0, 500);
+}
+
+#[test]
+fn bgt_324_spot_account() {
+    use hft_venue_proto::account::{AccountProtocol, Query, State};
+    for name in ["locked", "multi_coin"] {
+        product_report::<BitgetSpot>(rd_spot_capture(), "account", name);
+    }
+    let (input, expected) = product_capture(BitgetSpot::NAME, "rest.account_assets", "locked");
+    let mut state = State::default();
+    BitgetSpot::account_decode(
+        rd_spot_capture(),
+        hft_types::AccountId(1),
+        &Query::Balances,
+        200,
+        &input,
+        1,
+        &mut state,
+    )
+    .unwrap();
+    let actual: Vec<_> = state.balances.iter().filter(|b| b.asset == USDT || b.asset == ETH).map(|b| {
+        serde_json::json!({"kind":"BalanceReport","asset":b.asset.0,"free":b.free.0.to_string(),"locked":b.locked.0.to_string()})
+    }).collect();
+    compare(&expected, &actual);
+}
+
+#[test]
+fn bgt_321_fill_channel() {
+    for name in ["buy", "sell"] {
+        let (input, expected) = product_capture(BitgetSpot::NAME, "fill", name);
+        let class = BitgetSpot::classify_report(MsgOp::Text, &input[..64]);
+        let mut sink = RepSink::default();
+        let result = BitgetSpot::decode_report(
+            rd_spot_capture(),
+            &mut GwCtx::new(),
+            class,
+            &input,
+            &RX,
+            &mut sink,
+        )
+        .unwrap();
+        assert_eq!(sink.events(), 0);
+        compare(
+            &expected,
+            &[serde_json::json!({"skip":format!("{:?}",result.skip),"events":result.events})],
+        );
+    }
+}
+
+#[test]
+fn bgt_336_ro_funding() {
+    use hft_venue_proto::{FundingHistoryProtocol, FundingQuery};
+    let query = FundingQuery {
+        start_ms: 1_792_018_800_000,
+        end_ms: 1_792_051_200_000,
+        page: 1,
+        cursor: Default::default(),
+    };
+    for name in ["empty", "trades_only"] {
+        let (input, expected) = capture("rest.bills", name);
+        let result = BitgetUsdtFutures::funding_decode(rd(), &query, 200, &input).unwrap();
+        compare(
+            &expected,
+            &[serde_json::json!({"bills":result.bills.len(),"has_next":result.next.is_some()})],
+        );
+    }
+    for input in [
+        br#"{"code":"00000","data":{"cursor":null}}"#.as_slice(),
+        br#"{"code":"00000","data":{"list":null,"cursor":"123"}}"#,
+    ] {
+        assert!(BitgetUsdtFutures::funding_decode(rd(), &query, 200, input).is_err());
+    }
 }

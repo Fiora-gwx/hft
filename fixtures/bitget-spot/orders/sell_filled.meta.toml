@@ -1,0 +1,16 @@
+source = "testnet-capture"
+source_ref = "run-2026-10-15/dual-4/hft-evidence/captures/bitget-spot/order/primary_order_snapshot_7.in"
+captured_at = "2026-10-15T06:27:22.613002+00:00"
+refdata = "RD-BGT-spot-capture"
+exchange_doc = "https://www.bitget.com/docs/catalog/account/account-settings"
+reviewed_by = "pending-human-review"
+review_status = "draft; expectations independently calculated from wire fields, not decoder output"
+scrubbed = true
+case_id = "BGT-318"
+environment = "demo"
+endpoint = "wss://wspap.bitget.com/v3/ws/private"
+http_status = 200
+sha256 = "b1d14b1dec74b794ae7ad75df96f712798dbdebd036201335c338192aab573cb"
+sanitization = "Credential fields removed; UID/account identity replaced with acct-0001; JSON whitespace normalized. Requests and login frames never stored. Order IDs replaced with deterministic same-width placeholders; connId fixed conn-0001; canonical client IDs retained."
+wire_exponents = "BTC/ETH px=-2 qty=-8; USDT notional=-6 qty=-8"
+response_headers_json = "{}"

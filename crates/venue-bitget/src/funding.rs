@@ -17,7 +17,7 @@ struct Response<'a> {
 }
 #[derive(Deserialize)]
 struct Page<'a> {
-    #[serde(borrow)]
+    #[serde(borrow, deserialize_with = "crate::json::nullable_list")]
     list: Vec<Bill<'a>>,
     #[serde(default)]
     cursor: Option<&'a str>,

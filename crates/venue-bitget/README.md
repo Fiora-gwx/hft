@@ -135,7 +135,7 @@ core 的深度来源([hft-venue-proto 契约 26](../hft-venue-proto/README.md#�
 
 `PartialFill`/`Fill.detail` 保留 wire `side` 的 Buy=1/Sell=2,供 OMS 对迟到或无归属成交确定净量方向;其他回报继续使用各自状态/拒绝分类。带非零累计成交量却缺失方向的行拒绝,不猜测买卖。
 
-UTA 订单回报的累计量比已保存量小时不产出事件,也不回退累计金额、费用或终态基线;累计量未增长时保留已有金额基线。`avgPrice` 按资产价格指数作 HalfEven 舍入,允许成交均价含更多小数位。负累计量、金额、均价以及超过累计量的单笔数量在更新上下文之前拒绝。
+UTA 订单回报的累计量比已保存量小时不产出事件,也不回退累计金额、费用或终态基线;累计量未增长时保留已有金额基线。`avgPrice` 按资产价格指数作 HalfEven 舍入,允许成交均价含更多小数位。手续费按扣费资产数量指数作一次 HalfEven 舍入后取绝对值,允许真实订单频道比资产指数多出小数位。负累计量、金额、均价以及超过累计量的单笔数量在更新上下文之前拒绝。
 
 | 流 | `cum_filled` | `avg_px` | 费用 |
 |---|---|---|---|
@@ -247,7 +247,7 @@ UTA 设置接受 `accountMode = unified | hybrid` 且 `accountLevel = basic`;`cl
 | `order`(`{"instType":"UTA","topic":"order"}`;只保留 `category` = 本产品线) | 先过"外部成交识别";`live`/`new` → `Ack`;累计量前进 → `PartialFill`/`Fill`;`cancelled` → `CancelAck`,`timeInForce ∈ {ioc, fok}` 或 `cancelReason ∈ {ioc_not_full_cancel, fok_not_full_cancel, post_only_fill_cancel}` 时 `Expired`(都带当时的累计量与本笔增量) | — |
 | `fill` / `fast-fill` | 不订阅;收到时 `skip = Listed` | — |
 | `position`(只永续订阅;现货不产出) | `PositionReport{qty ← size(posSide = short 取负), entry_px ← avgPrice, upnl ← unrealisedPnl, liq_px ← liqPrice(空 → 0)}`(只校验;refdata 外品种跳过) | — |
-| `account` | `data[0].coin[]` 每币种一条 `BalanceReport`:永续 `free ← balance, locked ← 0`;现货 `free ← balance − locked`(有符号),`locked ← locked`(必须非负)(只校验;refdata 外币种跳过);`margin_data = Poll` 期间不产出 `MarginReport`;若核实带保证金率则 `MarginReport`(并把 `margin_data` 改为 `Push`;推送在 gw 线程上解码,预算上限见 [hft-venue](../hft-venue/README.md#延迟与资源契约) `venue_gw_margin_push`) | — |
+| `account` | `data[0].coin[]` 每币种一条 `BalanceReport`:永续 `free ← balance, locked ← 0`;现货 `free ← balance`(有符号),`locked ← locked`(必须非负)(只校验;refdata 外币种跳过);`margin_data = Poll` 期间不产出 `MarginReport`;若核实带保证金率则 `MarginReport`(并把 `margin_data` 改为 `Push`;推送在 gw 线程上解码,预算上限见 [hft-venue](../hft-venue/README.md#延迟与资源契约) `venue_gw_margin_push`) | — |
 | `{"event":"login"|"subscribe"|"error"}` | 无(控制回执;订阅被拒 `code` 为数字,如 `30001`) | — |
 | `pong` | 无(心跳回应) | — |
 | 其他 | 无(`skip = Unknown`;核实后把确认无用的名字加入 `ignorable_user_events`) | — |
@@ -346,7 +346,7 @@ UTA V3 分页取响应 cursor，重复游标和非数值游标返回错误，不
 - 现有知识来源:`E:\trading\Trading\crates\bitget`(seq/pseq、无条件 ping、登录签名与测试向量)、`E:\trading\Trading\apps\collector\src\private.rs`(V2 私有登录与 `orders` 订阅)
 - 官方 UTA 文档原文的镜像(2026-10-14 取得,本地缓存 `E:\trading\analysis\bitget-src\`):GitHub `metafrogmeme-droid/001` 的 `docs/bitget-uta/*.md`(由 www.bitget.com/api-doc/uta 抓取,含 WebSocket 全部频道、Trade、Market、枚举与错误码页)、官方 SDK `Bitget-AI/agent-sdk` 的 `openapi.yaml`(UTA REST 请求结构)
 
-私有推送的 `balance` 是钱包余额,`available` 是可用保证金/购买力,不能替代现金余额;字段依据 [官方账户频道](https://www.bitget.com/docs/uta/websocket/private/Account-Channel)。持仓 size 必须非负,posSide 只接受 long/short,均价与强平估算价按资产价格指数 HalfEven 舍入。订单推送的已解析 clientOid 必须属于当前产品线与账户,否则作为外来成交;WS 下单响应中的有效 clientOid 若与请求槽/gen 或当前账户不符则拒绝。
+UTA REST 与私有推送的 `balance` 已排除现货冻结金额,`BalanceReport.free` 直接取该值,现货 `locked` 单独取原字段;永续 `locked=0`。`available` 是可用保证金/购买力,不能替代现金余额。字段依据 [官方账户频道](https://www.bitget.com/docs/uta/websocket/private/Account-Channel),冻结前后现金守恒由 BGT-324 的 demo REST/WS 金样核实。持仓 size 必须非负,posSide 只接受 long/short,均价与强平估算价按资产价格指数 HalfEven 舍入。订单推送的已解析 clientOid 必须属于当前产品线与账户,否则作为外来成交;WS 下单响应中的有效 clientOid 若与请求槽/gen 或当前账户不符则拒绝。
 
 累计成交量推进而金额倒退、非零手续费币种未知/跨累计基线变化、多个非空 feeDetail 币种行均拒绝整帧,不改 GwCtx、不产出部分事件;同帧先后记录也经过该检查。未带新费用的重复推送保留旧费用币种,绝对值溢出拒绝。
 
@@ -360,7 +360,7 @@ UTA V3 分页取响应 cursor，重复游标和非数值游标返回错误，不
 
 AccountProtocol 使用 UTA V3 instruments/settings/info/assets/current-position/unfilled-orders。basic unified 账户要求单向/全仓、杠杆不超配置、无债务；key 要有 uta_trade 且无 withdraw，REST/WS 分别读取 UID 并匹配。现货订单显式 autoBorrow=no，demo REST 带 paptrading: 1。
 
-永续资金费读 [account/financial-records](https://www.bitget.com/docs/catalog/account/assets-balance)，过滤 CONTRACT_MAIN_SETTLE_FEE_USER_IN/OUT，按 id 去重并完成分页；funding-financial-records 是资金账户流水。RateOnly 真实 FundingSettle 入 journal 后仅检查差异，不重复记现金。真实 demo 字段仍须按开发备忘采样核验。
+永续资金费读 [account/financial-records](https://www.bitget.com/docs/catalog/account/assets-balance)，过滤 CONTRACT_MAIN_SETTLE_FEE_USER_IN/OUT，按 id 去重并完成分页；funding-financial-records 是资金账户流水。显式 `list=null` 且无 cursor 是合法空末页；缺 list、空页带 cursor 均拒绝。RateOnly 真实 FundingSettle 入 journal 后仅检查差异，不重复记现金。真实 demo 资金费金额仍须按开发备忘采样核验。
 
 账户 UID 缺失仅在 refdata 明确 Unverifiable 时允许，报告 uid_keys=0、venue_uid 全零；Verified 缺失或不匹配仍失败。两把凭证都返回 UID 时必须一致。持仓总量必须非负，再按 posSide 赋号；本轮 MarginItem 只含非零仓位，liq_px 随当前持仓更新，ADL 缺失为 255。
 

@@ -36,19 +36,24 @@ pub const SPOT: VenueId = VenueId::BITGET_UTA_SPOT;
 /// `RD-BGT` with the effective caps = `default_caps()`.
 pub fn rd() -> &'static RefData {
     static RD: OnceLock<&'static RefData> = OnceLock::new();
-    RD.get_or_init(|| build(&[], false, false))
+    RD.get_or_init(|| build(&[], false, false, false))
+}
+
+pub fn rd_spot_capture() -> &'static RefData {
+    static RD: OnceLock<&'static RefData> = OnceLock::new();
+    RD.get_or_init(|| build(&[], false, false, true))
 }
 
 /// `RD-BGT` with extra `ignorable_user_events` on both lines (BGT-115.6).
 pub fn rd_ignoring(names: &[&str]) -> &'static RefData {
-    build(names, false, false)
+    build(names, false, false, false)
 }
 
 pub fn account_rd(unverifiable: bool) -> &'static RefData {
-    build(&[], true, unverifiable)
+    build(&[], true, unverifiable, false)
 }
 
-fn build(ignorable: &[&str], compact: bool, unverifiable: bool) -> &'static RefData {
+fn build(ignorable: &[&str], compact: bool, unverifiable: bool, spot_eth: bool) -> &'static RefData {
     let mut b = RdbBuilder::new(1);
     b.created_utc_ns(1_759_276_800_000_000_000);
     for (id, name, class, px, qty) in [
@@ -126,7 +131,13 @@ fn build(ignorable: &[&str], compact: bool, unverifiable: bool) -> &'static RefD
             );
         }
     }
-    for id in 1..=if compact { 4 } else { 1902u32 } {
+    for id in 1..=if compact {
+        4
+    } else if spot_eth {
+        1903u32
+    } else {
+        1902u32
+    } {
         let wire_id = if compact {
             [1801, 1802, 1901, 1902][id as usize - 1]
         } else {
@@ -136,6 +147,7 @@ fn build(ignorable: &[&str], compact: bool, unverifiable: bool) -> &'static RefD
             1801 => (FUT, InstKind::Perp, "BTCUSDT", BTC, 10, 100_000, "0.1", "0.001"),
             1802 => (FUT, InstKind::Perp, "ETHUSDT", ETH, 1, 1_000_000, "0.01", "0.01"),
             1901 => (SPOT, InstKind::Spot, "BTCUSDT", BTC, 1, 100, "0.01", "0.000001"),
+            1903 => (SPOT, InstKind::Spot, "ETHUSDT", ETH, 1, 10_000, "0.01", "0.0001"),
             1902 => (
                 SPOT,
                 InstKind::Spot,
