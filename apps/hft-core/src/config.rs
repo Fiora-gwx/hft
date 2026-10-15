@@ -506,6 +506,22 @@ pub fn load_timed(
     )
     .map_err(|e| one("EngineMismatch", format!("{e:?}")))?;
     for (name, v) in &c.venues {
+        if c.instance.secrets_mode == SecretsMode::LocalDemo {
+            let endpoints = rd.endpoints(VenueId(v.id), hft_refdata::EndpointEnv::Testnet);
+            if endpoints.is_empty()
+                || !rd
+                    .endpoints(VenueId(v.id), hft_refdata::EndpointEnv::Prod)
+                    .is_empty()
+                || endpoints
+                    .iter()
+                    .any(|e| !crate::venues::local_demo_endpoint(&v.protocol, e.role, &e.url))
+            {
+                errors.push(Error::config(
+                    "LocalSecretEndpoint",
+                    "local demo mode requires explicit demo hosts only",
+                ));
+            }
+        }
         for k in &v.accounts {
             let account = rd.account(AccountId(k.account));
             if k.account == 0

@@ -2381,7 +2381,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   - 三个文件都已不存在;`strace` 中每个文件恰好一次 `openat` 与一次 `unlink`,都在步 2 开始之前
   - 会话 key 的内存只交给 `conn-builder`,REST key 只交给 gw 与 `acct-fetch`(测试构建的交接记录)
 - 实现:`apps/hft-core/tests/secrets.rs::core_222_unlink_after_read`
-- 同用例覆盖显式 local_demo：testnet 可解析，prod/live/空环境在读取秘密前拒绝；正式账户仍由 EnvAccountMismatch 拒绝。
+- 同用例覆盖显式 local_demo：testnet 可解析，prod/live/空环境在读取秘密前拒绝；正式账户仍由 EnvAccountMismatch 拒绝。标为 testnet 的生产域名、混入生产端点和伪装的域名在读取秘密前拒绝。
 
 ### CORE-223 步 2 失败退出时秘密文件也已删除
 

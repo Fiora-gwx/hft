@@ -135,6 +135,30 @@ pub fn assemble(
     }
 }
 
+/// Local demo credentials must never be sent to a production host hidden under a testnet tag.
+pub fn local_demo_endpoint(protocol: &str, role: EndpointRole, url: &str) -> bool {
+    let scheme = if role == EndpointRole::Rest {
+        "https://"
+    } else {
+        "wss://"
+    };
+    let Some(address) = url.strip_prefix(scheme) else {
+        return false;
+    };
+    let host = address.split('/').next().unwrap_or("");
+    match (protocol, role) {
+        ("binance-usdm", EndpointRole::Rest) => host == "demo-fapi.binance.com",
+        ("binance-usdm", EndpointRole::OrderWs) => host == "testnet.binancefuture.com",
+        ("binance-usdm", _) => host == "demo-fstream.binance.com",
+        ("binance-spot", EndpointRole::Rest) => host == "demo-api.binance.com",
+        ("binance-spot", EndpointRole::OrderWs | EndpointRole::UserData) => host == "demo-ws-api.binance.com",
+        ("binance-spot", _) => host == "demo-stream.binance.com",
+        ("bitget-usdt-futures" | "bitget-spot", EndpointRole::Rest) => host == "api.bitget.com",
+        ("bitget-usdt-futures" | "bitget-spot", _) => host == "wspap.bitget.com",
+        _ => false,
+    }
+}
+
 fn endpoint(rd: &RefData, venue: VenueId, role: EndpointRole) -> Result<Endpoint, Error> {
     let e = rd
         .endpoints(venue, EndpointEnv::Testnet)

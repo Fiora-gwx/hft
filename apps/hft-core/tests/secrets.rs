@@ -117,6 +117,53 @@ fn core_222_local_demo_mode_rejects_production_before_secret_read() {
 }
 
 #[test]
+fn core_222_local_demo_rejects_production_host_under_testnet_label() {
+    use hft_core::venues::local_demo_endpoint as allowed;
+    use hft_refdata::EndpointRole as R;
+    for (protocol, role, good, bad) in [
+        (
+            "binance-usdm",
+            R::Rest,
+            "https://demo-fapi.binance.com",
+            "https://fapi.binance.com",
+        ),
+        (
+            "binance-usdm",
+            R::OrderWs,
+            "wss://testnet.binancefuture.com/ws-fapi/v1",
+            "wss://ws-fapi.binance.com/ws-fapi/v1",
+        ),
+        (
+            "binance-usdm",
+            R::MdPublic,
+            "wss://demo-fstream.binance.com/public/ws",
+            "wss://fstream.binance.com/public/ws",
+        ),
+        (
+            "bitget-usdt-futures",
+            R::Rest,
+            "https://api.bitget.com",
+            "https://api.bitget.com.evil.invalid",
+        ),
+        (
+            "bitget-usdt-futures",
+            R::OrderWs,
+            "wss://wspap.bitget.com/v3/ws/private",
+            "wss://ws.bitget.com/v3/ws/private",
+        ),
+    ] {
+        assert!(allowed(protocol, role, good));
+        assert!(!allowed(protocol, role, bad));
+        assert!(!allowed(protocol, role, &good.replace("://", "://user@")));
+        assert!(!allowed(
+            protocol,
+            role,
+            &good.replace("://", "://evil.invalid?host=")
+        ));
+    }
+}
+
+#[test]
 fn test_malformed_secret_removes_files_and_redacts_errors() {
     let (_d, c, paths) = fixture();
     std::fs::write(&paths[1], [0xab; 4097]).unwrap();
