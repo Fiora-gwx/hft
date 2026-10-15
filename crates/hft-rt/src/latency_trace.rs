@@ -122,9 +122,12 @@ pub fn channel(capacity: usize) -> Result<(Writer, Reader), RtErr> {
 }
 
 // D3 exception: measurement-only single-writer state; never read by decisions.
-fn with_writer<R>(f: impl FnOnce(&RefCell<Option<Writer>>) -> R) -> R {
+// No TLS destructor: even the first disabled access cannot register one.
+type WriterSlot = RefCell<Option<&'static mut Writer>>;
+const _: () = assert!(!std::mem::needs_drop::<WriterSlot>());
+fn with_writer<R>(f: impl FnOnce(&WriterSlot) -> R) -> R {
     thread_local! {
-        static WRITER: RefCell<Option<Writer>> = const { RefCell::new(None) };
+        static WRITER: WriterSlot = const { RefCell::new(None) };
     }
     WRITER.with(f)
 }
@@ -136,7 +139,8 @@ pub struct AlreadyInstalled;
 pub fn install(writer: Writer) -> Result<(), AlreadyInstalled> {
     with_writer(|w| match w.try_borrow_mut() {
         Ok(mut w) if w.is_none() => {
-            *w = Some(writer);
+            // Startup allocation; this single bounded producer has process lifetime.
+            *w = Some(Box::leak(Box::new(writer)));
             Ok(())
         }
         _ => Err(AlreadyInstalled),
