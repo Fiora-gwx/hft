@@ -21,6 +21,7 @@ hft-types.workspace = true
 hft-refdata.workspace = true
 hft-event.workspace = true
 xxhash-rust.workspace = true
+memchr = "2"
 zerocopy = { workspace = true, optional = true }
 
 [dev-dependencies]

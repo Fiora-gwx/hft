@@ -9,6 +9,7 @@ use hft_event::{
 };
 use hft_refdata::RefData;
 use hft_types::{InstId, Px, Qty, Rate, Side};
+use hft_venue_proto::json as wire;
 use hft_venue_proto::{
     Align, ControlHint, DecodeErr, MdOutcome, MdSink, MsgOp, Peek, RawSeq, ResyncMethod, RouteId, RxMeta,
     SeqIds, SeqRule, StreamKind,
@@ -163,6 +164,40 @@ struct PeekBook<'a> {
     data: One<SeqOnly>,
 }
 
+fn peek_book(p: &[u8]) -> Result<PeekBook<'_>, DecodeErr> {
+    let fast = || {
+        use wire::Select::{First, Object, Raw as Keep, Skip};
+        let [topic, symbol, seq, pseq] = wire::nested(p, 0b111, |state, key| match (state, key) {
+            (0, b"arg") => Object(1),
+            (0, b"data") => First(2),
+            (1, b"topic" | b"channel") => Keep(0),
+            (1, b"symbol" | b"instId") => Keep(1),
+            (2, b"seq") => Keep(2),
+            (2, b"pseq") => Keep(3),
+            _ => Skip,
+        })?;
+        Some(PeekBook {
+            arg: Arg {
+                topic: if topic.is_empty() {
+                    ""
+                } else {
+                    wire::string(topic)?
+                },
+                symbol: if symbol.is_empty() {
+                    ""
+                } else {
+                    wire::string(symbol)?
+                },
+            },
+            data: One(SeqOnly {
+                seq: UInt::wire(seq)?,
+                pseq: UInt::wire(pseq)?,
+            }),
+        })
+    };
+    fast().map_or_else(|| from(p), Ok)
+}
+
 #[derive(Deserialize)]
 struct TsOnly {
     #[serde(default)]
@@ -238,7 +273,7 @@ pub(crate) fn peek(
 ) -> Result<Peek, DecodeErr> {
     match c {
         MdClass::Books1 | MdClass::BooksTopN => {
-            let m: PeekBook = from(p)?;
+            let m = peek_book(p)?;
             let stream = if c == MdClass::Books1 {
                 StreamKind::Bbo
             } else {
@@ -251,7 +286,7 @@ pub(crate) fn peek(
             ))
         }
         MdClass::BooksIncr => {
-            let m: PeekBook = from(p)?;
+            let m = peek_book(p)?;
             let seq = m.data.0.seq.get()?;
             let pseq = m.data.0.pseq.opt()?.unwrap_or(0);
             Ok(Peek {
@@ -320,6 +355,58 @@ struct BookMsg<'a> {
     data: One<Book<'a>>,
     #[serde(default)]
     ts: UInt,
+}
+
+fn book_message(p: &[u8]) -> Result<BookMsg<'_>, DecodeErr> {
+    let fast = || {
+        use wire::Select::{First, Object, Raw as Keep, Skip};
+        let [topic, symbol, action, ts, a, b, seq, pseq, time] =
+            wire::nested(p, 0b111, |state, key| match (state, key) {
+                (0, b"arg") => Object(1),
+                (0, b"data") => First(2),
+                (0, b"action") => Keep(2),
+                (0, b"ts") => Keep(3),
+                (1, b"topic" | b"channel") => Keep(0),
+                (1, b"symbol" | b"instId") => Keep(1),
+                (2, b"a" | b"asks") => Keep(4),
+                (2, b"b" | b"bids") => Keep(5),
+                (2, b"seq") => Keep(6),
+                (2, b"pseq") => Keep(7),
+                (2, b"ts") => Keep(8),
+                _ => Skip,
+            })?;
+        if a.is_empty() || b.is_empty() || seq.is_empty() {
+            return None;
+        }
+        Some(BookMsg {
+            arg: Arg {
+                topic: if topic.is_empty() {
+                    ""
+                } else {
+                    wire::string(topic)?
+                },
+                symbol: if symbol.is_empty() {
+                    ""
+                } else {
+                    wire::string(symbol)?
+                },
+            },
+            action: if action.is_empty() {
+                ""
+            } else {
+                wire::string(action)?
+            },
+            data: One(Book {
+                a: Raw::Slice(a),
+                b: Raw::Slice(b),
+                seq: UInt::wire(seq)?,
+                pseq: UInt::wire(pseq)?,
+                ts: UInt::wire(time)?,
+            }),
+            ts: UInt::wire(ts)?,
+        })
+    };
+    fast().map_or_else(|| from(p), Ok)
 }
 
 fn opt_ms_ns(v: UInt) -> Result<i64, DecodeErr> {
@@ -405,7 +492,7 @@ pub(crate) fn decode_md(
 ) -> Result<MdOutcome, DecodeErr> {
     match c {
         MdClass::Books1 => {
-            let m: BookMsg = from(p)?;
+            let m = book_message(p)?;
             let d = &m.data.0;
             let seq = d.seq.get()?;
             let (ex, send) = (opt_ms_ns(d.ts)?, opt_ms_ns(m.ts)?);
@@ -433,7 +520,7 @@ pub(crate) fn decode_md(
             Ok(MdOutcome { events: 1, inst })
         }
         MdClass::BooksTopN => {
-            let m: BookMsg = from(p)?;
+            let m = book_message(p)?;
             let d = &m.data.0;
             let seq = d.seq.get()?;
             let (ex, send) = (opt_ms_ns(d.ts)?, opt_ms_ns(m.ts)?);
@@ -476,7 +563,7 @@ pub(crate) fn decode_md(
             Ok(MdOutcome { events: 1, inst })
         }
         MdClass::BooksIncr => {
-            let m: BookMsg = from(p)?;
+            let m = book_message(p)?;
             let d = &m.data.0;
             let seq = d.seq.get()?;
             let pseq = d.pseq.opt()?.unwrap_or(0);

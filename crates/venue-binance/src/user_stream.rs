@@ -86,7 +86,14 @@ pub(crate) fn decode(
     } else {
         p
     };
-    let h: Head = from(p)?;
+    let fast = || {
+        use hft_venue_proto::json as wire;
+        let [event] = wire::project(p, |key| (key == b"e").then_some(0))?;
+        Some(Head {
+            e: wire::string(event)?,
+        })
+    };
+    let h: Head = fast().map_or_else(|| from(p), Ok)?;
     match h.e {
         "ORDER_TRADE_UPDATE" => order(line, rd, ctx, &from::<FutOrder>(p)?.o, rx, out),
         "executionReport" => order(line, rd, ctx, &from::<Order>(p)?, rx, out),

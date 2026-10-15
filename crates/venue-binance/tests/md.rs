@@ -557,3 +557,54 @@ fn bin_034_public_liquidation() {
         matches!(&sink.md[0], MdRec::Liquidation(t) if t.side == hft_types::Side::Sell && t.qty.0 == 100000)
     );
 }
+
+// The escaped unknown field forces the reference decoder without changing selected fields.
+// Cover every byte position, malformed selected values, duplicate keys and nested unknown data.
+#[test]
+fn bin_026_projection_matches_checked() {
+    fn decode(p: &[u8]) -> (Result<MdOutcome, DecodeErr>, Vec<MdRec>) {
+        let mut out = VecSink::default();
+        let result = Usdm::decode_md(
+            support::rd(),
+            &mut { FeedCtx::USDM },
+            usdm::MdClass::BookTicker,
+            p,
+            &support::RX,
+            &mut out,
+        );
+        (result, out.md)
+    }
+    fn check(p: &[u8]) {
+        if p.first() != Some(&b'{') {
+            return;
+        }
+        let mut reference = br#"{"_wire_reference":"\u0061","#.to_vec();
+        reference.extend_from_slice(&p[1..]);
+        assert_eq!(
+            decode(p),
+            decode(&reference),
+            "payload={}",
+            String::from_utf8_lossy(p)
+        );
+    }
+    let seed = support::BT1.as_bytes().to_vec();
+    check(&seed);
+    for at in 1..seed.len() {
+        for byte in [b'0', b'-', b'"', b'\\', b'{', b']', b',', b' ', 0, 0xff] {
+            let mut p = seed.clone();
+            p[at] = byte;
+            check(&p);
+        }
+    }
+    for extra in [
+        r#", "unused":{"s":"wrong","values":[true,null,1.25,{"u":99}]}"#,
+        r#", "u":2"#,
+        r#", "arg":{}"#,
+        r#", "data":[]"#,
+    ] {
+        let mut p = seed[..seed.len() - 1].to_vec();
+        p.extend_from_slice(extra.as_bytes());
+        p.push(b'}');
+        check(&p);
+    }
+}

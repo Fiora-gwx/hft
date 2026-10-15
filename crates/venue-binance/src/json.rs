@@ -10,7 +10,10 @@ use serde::de::{Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 
 /// Parses `p` into `T`; the input ending early → `Truncated`, anything else → `Shape`.
 pub(crate) fn from<'a, T: Deserialize<'a>>(p: &'a [u8]) -> Result<T, DecodeErr> {
-    sonic_rs::from_slice::<T>(p).map_err(|e| {
+    // LazyValue may expose unchecked text in sonic-rs; reject invalid UTF-8 before it reaches
+    // the borrowed raw-value visitor (including malformed fuzz inputs).
+    let text = core::str::from_utf8(p).map_err(|_| DecodeErr::Shape)?;
+    sonic_rs::from_str::<T>(text).map_err(|e| {
         if e.is_eof() {
             DecodeErr::Truncated
         } else {
@@ -236,7 +239,7 @@ impl<'de, T: Deserialize<'de>, const N: usize> Deserialize<'de> for Arr<T, N> {
             }
             fn visit_seq<A: SeqAccess<'de>>(self, mut s: A) -> Result<Arr<T, N>, A::Error> {
                 let mut out = Arr {
-                    items: core::array::from_fn(|_| None),
+                    items: [const { None }; N],
                     over: false,
                 };
                 let mut n = 0usize;

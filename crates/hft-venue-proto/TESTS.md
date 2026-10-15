@@ -14,6 +14,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 认证入口不把凭证放入 Templates;当前 signed warm 方法按调用借用 Credential。模板生命周期回归归 BIN-063/BGT-063,见对应组件 TESTS。旧签名兼容入口不能恢复模板密钥。
 
+字段投影的语法、重复字段与使用字段校验由 BIN-026、BGT-027 的差分检查覆盖；VPR-132 的零分配契约沿用 venue alloc 测试。
+
 ## 覆盖
 
 | README 小节 | 用例 |

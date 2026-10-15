@@ -93,6 +93,28 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 | `bench_classify_bitget` | venue-bitget | [venue-bitget 延迟与资源契约](../crates/venue-bitget/README.md#延迟与资源契约) | BGT-500 |
 | `bench_classify_okx` | venue-okx | [venue-okx 延迟与资源契约](../crates/venue-okx/README.md#延迟与资源契约) | OKX-500 |
 | `bench_classify_usdm` | venue-binance | [venue-binance 延迟与资源契约](../crates/venue-binance/README.md#延迟与资源契约) | BIN-500 |
+| `wire/binance/bbo/peek` | venue-binance | 单次生产 `peek` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BIN-502 |
+| `wire/binance/bbo/decode` | venue-binance | 单次生产 `decode` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BIN-502 |
+| `wire/binance/spot-bbo/peek` | venue-binance | 单次生产 `peek` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BIN-502 |
+| `wire/binance/spot-bbo/decode` | venue-binance | 单次生产 `decode` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BIN-502 |
+| `wire/binance/captured-bbo/peek` | venue-binance | 单次生产 `peek` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BIN-502 |
+| `wire/binance/captured-bbo/decode` | venue-binance | 单次生产 `decode` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BIN-502 |
+| `wire/binance/trade/peek` | venue-binance | 单次生产 `peek` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BIN-502 |
+| `wire/binance/trade/decode` | venue-binance | 单次生产 `decode` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BIN-502 |
+| `wire/binance/funding-mark/peek` | venue-binance | 单次生产 `peek` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BIN-502 |
+| `wire/binance/funding-mark/decode` | venue-binance | 单次生产 `decode` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BIN-502 |
+| `wire/binance/depth/peek` | venue-binance | 单次生产 `peek` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BIN-502 |
+| `wire/binance/depth/decode` | venue-binance | 单次生产 `decode` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BIN-502 |
+| `wire/bitget/bbo/peek` | venue-bitget | 单次生产 `peek` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BGT-501 |
+| `wire/bitget/bbo/decode` | venue-bitget | 单次生产 `decode` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BGT-501 |
+| `wire/bitget/spot-bbo/peek` | venue-bitget | 单次生产 `peek` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BGT-501 |
+| `wire/bitget/spot-bbo/decode` | venue-bitget | 单次生产 `decode` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BGT-501 |
+| `wire/bitget/depth/peek` | venue-bitget | 单次生产 `peek` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BGT-501 |
+| `wire/bitget/depth/decode` | venue-bitget | 单次生产 `decode` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BGT-501 |
+| `wire/bitget/trade/peek` | venue-bitget | 单次生产 `peek` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BGT-501 |
+| `wire/bitget/trade/decode` | venue-bitget | 单次生产 `decode` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BGT-501 |
+| `wire/bitget/funding-ticker/peek` | venue-bitget | 单次生产 `peek` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BGT-501 |
+| `wire/bitget/funding-ticker/decode` | venue-bitget | 单次生产 `decode` 调用，HistBench 5,000 次预热 / 50,000 次采样；smoke 不绑核、系统分配器 | BGT-501 |
 | `bench_decode_bitget_books1` | venue-bitget | [venue-bitget 延迟与资源契约](../crates/venue-bitget/README.md#延迟与资源契约) | BGT-501 |
 | `bench_decode_bitget_books1/spot` | venue-bitget | [venue-bitget 延迟与资源契约](../crates/venue-bitget/README.md#延迟与资源契约) | BGT-501 |
 | `bench_decode_bitget_books15` | venue-bitget | [venue-bitget 延迟与资源契约](../crates/venue-bitget/README.md#延迟与资源契约) | BGT-502 |
@@ -407,6 +429,8 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 
 基线:参考机最近 7 次通过运行的 p99 中位数,按 `(基准名, HostProfile 哈希)` 存放在 S3 `hft-bench/` 前缀下;`HostProfile` 变化(含主机类从探针同型实例换到选定主机类)即开启新基线序列,旧序列不参与比较。基线不足 7 次时用已有的全部通过运行。CI 冒烟的数值不进基线。
 
+两家 venue 的 `wire` 基准用 HistBench，热身 5,000 次、逐次采样 50,000 次，不绑核；测量公开 peek/decode 调用前至返回。VecSink 在测量前预留容量，清空包含在 decode 中；使用系统分配器，不声明分配数。输入为已登记 capture 与现有测试合成消息，不联网，只报告，不判参考机门槛。
+
 ### 输出格式
 
 每个基准写 `target/bench/<path>/<case>.json`:
@@ -462,6 +486,8 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 - 禁止:产品 crate 依赖 `hft-benchmarks`;基准代码联网;在共享 runner 上以时间数值作门槛或基线。
 
 ## 延伸阅读
+
+- [Wire JSON 字段投影测量](reports/2026-10-15-wire-json.md)（Windows 共享主机诊断）
 
 - [Windows 开发机热点测量与前后对照(2026-10-15)](reports/2026-10-15-windows-hotpath.md)(诊断报告,非参考机验收)
 - [latency-budget.md](../docs/latency-budget.md)、[testing.md](../docs/testing.md)、[hot-path-rules.md](../docs/hot-path-rules.md)
