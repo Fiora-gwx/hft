@@ -6,7 +6,7 @@ spec: README.md
 
 # hft-venue 测试规格
 
-VEN-199 的解码测量边界与关联说明见 [延迟采集测试](../../tools/latency-report/TESTS.md)。
+VEN-199 的解码测量边界、VEN-068 的原始记录帧关联说明见 [延迟采集测试](../../tools/latency-report/TESTS.md)。
 
 生命周期装配说明：`FeedRuntime` 与 `GwRuntime` 的 `seal_and_close` 将已停止任务的 raw writer 交给 journal 封段流程；连接退役断言沿用现有用例，进程退出的持久化验证归 [hft-core TESTS](../../apps/hft-core/TESTS.md)。
 

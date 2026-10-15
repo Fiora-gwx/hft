@@ -40,6 +40,7 @@ pub enum Stage {
     ExecEnd,
     TxQueued,
     TxWrite,
+    RawRecord,
 }
 
 /// Correlation only. Zero means unavailable; order packs generation above slot.

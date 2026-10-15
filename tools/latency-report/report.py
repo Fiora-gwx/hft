@@ -10,10 +10,11 @@ import struct
 
 COLUMNS = "tsc serial dropped stage input_seq decision_seq order frame event_hash venue_conn kind_inst v0 v1 v2 v3".split()
 STAGES = ("read decrypt_start decrypt_end frame decode_start decode_end decoded_event feed_push rep_push input_pop process_start journal_input strategy_start strategy_end risk_start risk_end oms_start oms_end decision out_push out_pop encode_start encode_end encrypt_start encrypt_end send process_end tx_stamp input_handed exec_start exec_end").split()
-STAGES += ["tx_queued", "tx_write"]
+STAGES += ["tx_queued", "tx_write", "raw_record"]
 SAFE = set("seq tsc proc_ns flags kind venue conn inst account strategy trigger_seq decision_seq slot gen target_slot action link_role reason intent_no reject what detail trade_id exch_order_id ex_ts_ns ex_send_ns hw_rx_ns sw_rx_ns rx_tsc decided_tsc sent_tsc group status tsc_hz_milli realtime_ns phc_ns chrony_offset_ns max_error_ns rms_ns calib_err_ns source state".split())
 KINDS = ["Bbo", "Trade", "Funding", "MarkPrice", "IndexPrice", "Liquidation", "L2Snapshot", "OrderDecision", "SendReport", "OrderEvent", "ExecDecision", "ClockStatus", "LatencySample"]
 SAFE.add("body_tsc")
+CHAIN_COLUMNS = "chain thread frame event_hash venue kind input_seq ex_ts_ns ex_send_ns hw_rx_ns sw_rx_ns rx_tsc decrypt_done_tsc frame_done_tsc decode_start_tsc decode_done_tsc ring_push_tsc ring_pop_tsc handed_tsc process_start_tsc journal_input_tsc process_end_tsc".split()
 
 
 def scalar(value):
@@ -64,7 +65,7 @@ def load_trace(db, trace, out):
             coverage[name] = {"records": count, "reported_dropped": dropped, "last_serial": serial}
     finally:
         output.close()
-    for index, columns in enumerate(["stage,event_hash", "stage,input_seq", "stage,decision_seq", "thread,frame,stage", "thread,tsc,stage"]):
+    for index, columns in enumerate(["stage,event_hash", "stage,input_seq", "stage,decision_seq", "thread,frame,stage", "thread,tsc,stage", "thread,serial", "stage,v0,v2,v3,venue_conn"]):
         db.execute(f"CREATE INDEX trace_{index} ON trace({columns})")
     completion = trace / "completion.json"
     closed = completion.exists() and json.loads(completion.read_text()).get("closed", False)
@@ -89,22 +90,23 @@ def journal_rows(path, hot=None):
 
 
 def load_journal(db, rows, out):
-    db.execute("CREATE TABLE events(seq INTEGER,kind TEXT,slot INTEGER,gen INTEGER,body TEXT)")
+    db.execute("CREATE TABLE events(seq INTEGER,kind TEXT,slot INTEGER,gen INTEGER,body TEXT,trigger_seq INTEGER,group_id INTEGER)")
     output, writer = csv_file(out / "journal_events.csv", ["kind_name"] + sorted(SAFE))
     try:
         for row in rows:
             writer.writerow(row)
-            db.execute("INSERT INTO events VALUES(?,?,?,?,?)", (row.get("seq", 0), row["kind_name"], row.get("slot", 0), row.get("gen", 0), json.dumps(row)))
+            db.execute("INSERT INTO events VALUES(?,?,?,?,?,?,?)", (row.get("seq", 0), row["kind_name"], row.get("slot", 0), row.get("gen", 0), json.dumps(row),row.get("trigger_seq",0),row.get("group",0)))
     finally:
         output.close()
     db.execute("CREATE INDEX event_seq ON events(seq)")
     db.execute("CREATE INDEX event_order ON events(kind,slot,gen)")
+    db.execute("CREATE INDEX event_trigger ON events(kind,trigger_seq,group_id)")
 
 
-def exchange_times(raw_paths, out, hot=None):
+def exchange_times(raw_paths, out, hot=None, db=None):
     """Export timestamp leaves only. Never persist private-stream JSON or identifiers."""
     import hft_py
-    stream, writer = csv_file(out / "exchange_times.csv", "journal raw_seq venue conn rx_tsc json_path field value unit".split())
+    stream, writer = csv_file(out / "exchange_times.csv", "journal raw_seq venue conn rx_tsc trace_thread trace_frame trace_match json_path field value unit".split())
     fields = {"E", "T", "ts", "cTime", "uTime", "fillTime", "tradeTime", "requestTime", "transactTime", "updateTime", "workingTime"}
     def walk(value, path=""):
         if isinstance(value, dict):
@@ -130,6 +132,12 @@ def exchange_times(raw_paths, out, hot=None):
                     except (ValueError,UnicodeDecodeError,TypeError):
                         continue
                     base = {"journal":path.name,"raw_seq":scalar(batch["seq"][i]),"rx_tsc":scalar(batch["tsc"][i]),"venue":scalar(batch["venue"][i]),"conn":scalar(batch["conn"][i])}
+                    if db is not None:
+                        candidates = db.execute("SELECT thread,frame FROM trace WHERE stage=34 AND v0=? AND v2=? AND v3=? AND venue_conn=? AND frame>0 LIMIT 2",
+                            (base["raw_seq"],base["rx_tsc"],decoded["what"],base["venue"] | base["conn"] << 8)).fetchall()
+                        base["trace_match"] = "unique" if len(candidates)==1 else "ambiguous" if candidates else "missing"
+                        if len(candidates)==1:
+                            base["trace_thread"],base["trace_frame"]=candidates[0]
                     for json_path,field,value in walk(body):
                         # Protocol fields are retained verbatim; lengths only label units,
                         # never silently scale a value whose precision is uncertain.
@@ -167,9 +175,9 @@ class Analysis:
             self.issues["negative_" + name] += 1
 
     def market(self, out):
-        cols = "chain thread frame event_hash venue kind input_seq ex_ts_ns ex_send_ns hw_rx_ns sw_rx_ns rx_tsc decrypt_done_tsc frame_done_tsc decode_start_tsc decode_done_tsc ring_push_tsc ring_pop_tsc handed_tsc process_start_tsc journal_input_tsc process_end_tsc".split()
+        cols = CHAIN_COLUMNS
         output, writer = csv_file(out / "event_chains.csv", cols)
-        self.db.execute("CREATE TABLE chains(input_seq INTEGER,chain TEXT,venue INTEGER,rx_tsc INTEGER,kind INTEGER)")
+        self.db.execute("CREATE TABLE chains(input_seq INTEGER,chain TEXT,venue INTEGER,rx_tsc INTEGER,kind INTEGER,body TEXT)")
         try:
             for raw in self.db.execute("SELECT * FROM trace WHERE stage=7 ORDER BY thread,serial"):
                 d = dict(raw)
@@ -196,7 +204,7 @@ class Analysis:
                     point = self.unique(27, input_seq=row["input_seq"])
                     if point:
                         row["process_end_tsc"] = point["tsc"]
-                    self.db.execute("INSERT INTO chains VALUES(?,?,?,?,?)", (row["input_seq"], chain, row["venue"], row.get("rx_tsc"), row["kind"]))
+                    self.db.execute("INSERT INTO chains VALUES(?,?,?,?,?,?)", (row["input_seq"], chain, row["venue"], row.get("rx_tsc"), row["kind"],json.dumps(row)))
                 else:
                     self.issues["decoded_without_seq_input"] += 1
                 writer.writerow(row)
@@ -209,12 +217,33 @@ class Analysis:
 
     def orders(self, out):
         cols = "decision_seq trigger_seq venue slot gen group link_role reason action intent_no reject decision_tsc out_push_tsc out_pop_tsc encode_start_tsc encode_done_tsc encrypt_start_tsc encrypt_done_tsc send_return_tsc send_complete_tsc tx_write_count report_seq report_what ack_fill_rx_tsc report_ex_ts_ns exch_order_id trade_id".split()
+        cols += "strategy risk_owner_intent_no strategy_start_tsc strategy_end_tsc risk_start_tsc risk_end_tsc oms_start_tsc oms_end_tsc".split()
+        cols += ["input_"+c for c in CHAIN_COLUMNS]
         output, writer = csv_file(out / "order_chains.csv", cols)
         try:
             for (body,) in self.db.execute("SELECT body FROM events WHERE kind='OrderDecision' ORDER BY seq"):
                 event = json.loads(body)
                 row = {k: v for k, v in event.items() if k in cols}
                 row["decision_seq"] = event["seq"]
+                trigger_seq=event.get("trigger_seq",0)
+                inputs=self.db.execute("SELECT body FROM chains WHERE input_seq=? LIMIT 2",(trigger_seq,)).fetchall()
+                if len(inputs)==1:
+                    row.update({"input_"+k:v for k,v in json.loads(inputs[0][0]).items()})
+                for stage,column in [(13,"strategy_start_tsc"),(14,"strategy_end_tsc")]:
+                    point=self.unique(stage,input_seq=trigger_seq,v0=event.get("strategy",0))
+                    if point: row[column]=point["tsc"]
+                for stage,column in [(17,"oms_start_tsc"),(18,"oms_end_tsc")]:
+                    point=self.unique(stage,input_seq=trigger_seq,v0=event.get("intent_no",0),v1=event.get("inst",0))
+                    if point: row[column]=point["tsc"]
+                risk_owner=event
+                if event.get("link_role")==2:
+                    peers=[json.loads(b[0]) for b in self.db.execute("SELECT body FROM events WHERE kind='OrderDecision' AND trigger_seq=? AND group_id=?",(trigger_seq,event.get("group",0)))]
+                    peers=[r for r in peers if r.get("trigger_seq")==trigger_seq and r.get("group")==event.get("group") and r.get("link_role")==1 and r.get("action")==1]
+                    if len(peers)==1: risk_owner=peers[0]
+                row["risk_owner_intent_no"]=risk_owner.get("intent_no",0)
+                for stage,column in [(15,"risk_start_tsc"),(16,"risk_end_tsc")]:
+                    point=self.unique(stage,input_seq=trigger_seq,v0=risk_owner.get("intent_no",0),v1=risk_owner.get("inst",0))
+                    if point: row[column]=point["tsc"]
                 for stage, column in [(19,"decision_tsc"),(20,"out_push_tsc"),(21,"out_pop_tsc"),(22,"encode_start_tsc"),(23,"encode_done_tsc"),(24,"encrypt_start_tsc"),(25,"encrypt_done_tsc"),(26,"send_return_tsc")]:
                     point = self.unique(stage, decision_seq=event["seq"])
                     if point:
@@ -331,7 +360,7 @@ def main():
     schema = load_trace(db, args.trace, args.out)
     load_journal(db, journal_rows(args.journal,args.hot), args.out)
     if args.raw:
-        exchange_times(args.raw,args.out,args.hot)
+        exchange_times(args.raw,args.out,args.hot,db)
     analysis = Analysis(db, schema)
     analysis.market(args.out)
     analysis.orders(args.out)

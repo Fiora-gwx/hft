@@ -18,14 +18,18 @@ class Chains(unittest.TestCase):
         batch = Batch(body=[b"binary-prefix-json"], seq=[4], tsc=[123], venue=[10], conn=[2])
         reader = SimpleNamespace(events=lambda *a, **k: [batch])
         module = SimpleNamespace(open_journal=lambda *a, **k: reader,
-            decode=SimpleNamespace(raw_rx=lambda b: {"payload": b'{"ts":"1792051200000","uid":"PRIVATE","data":[{"T":1792051200001,"signature":"SECRET"}]}'}))
+            decode=SimpleNamespace(raw_rx=lambda b: {"what":1,"payload": b'{"ts":"1792051200000","uid":"PRIVATE","data":[{"T":1792051200001,"signature":"SECRET"}]}'}))
         with tempfile.TemporaryDirectory() as root, patch.dict("sys.modules", {"hft_py": module}):
             root = Path(root)
-            report.exchange_times([Path("raw-gw")],root)
+            db=sqlite3.connect(":memory:")
+            db.execute("CREATE TABLE trace(stage INTEGER,v0 INTEGER,v2 INTEGER,v3 INTEGER,venue_conn INTEGER,thread TEXT,frame INTEGER)")
+            db.execute("INSERT INTO trace VALUES(34,4,123,1,522,'gw-second',91)")
+            report.exchange_times([Path("raw-gw")],root,db=db)
             text = (root / "exchange_times.csv").read_text()
             self.assertNotIn("PRIVATE",text)
             self.assertNotIn("SECRET",text)
             self.assertIn("1792051200001,ms",text)
+            self.assertIn("gw-second,91,unique",text)
 
     def test_rpl_203_md_only_and_each_fill_and_missing_stages(self):
         with tempfile.TemporaryDirectory() as root:
@@ -54,6 +58,9 @@ class Chains(unittest.TestCase):
             write("sequencer",[
                 dict(stage=10,tsc=150,event_hash=31),dict(stage=29,tsc=155,event_hash=31),
                 dict(stage=11,tsc=160,event_hash=31),dict(stage=12,tsc=165,event_hash=31,input_seq=10),
+                dict(stage=13,tsc=166,input_seq=10,v0=1),dict(stage=14,tsc=167,input_seq=10,v0=1),
+                dict(stage=15,tsc=168,input_seq=10,v0=1,v1=4),dict(stage=16,tsc=169,input_seq=10,v0=1,v1=4),
+                dict(stage=17,tsc=170,input_seq=10,v0=1,v1=4),dict(stage=18,tsc=171,input_seq=10,v0=1,v1=4),
                 dict(stage=19,tsc=180,input_seq=10,decision_seq=11),dict(stage=20,tsc=190,input_seq=10,decision_seq=11),
                 dict(stage=27,tsc=195,input_seq=10),
             ])
@@ -65,7 +72,7 @@ class Chains(unittest.TestCase):
             db = sqlite3.connect(":memory:")
             db.row_factory = sqlite3.Row
             loaded = report.load_trace(db,trace,out)
-            events = [dict(kind_name="OrderDecision",seq=11,trigger_seq=10,slot=4,gen=2,venue=1,action=1),
+            events = [dict(kind_name="OrderDecision",seq=11,trigger_seq=10,slot=4,gen=2,venue=1,action=1,inst=4,intent_no=1,strategy=1),
                       dict(kind_name="OrderEvent",seq=12,slot=4,gen=2,what=1,rx_tsc=300),
                       dict(kind_name="OrderEvent",seq=13,slot=4,gen=2,what=3,rx_tsc=350,trade_id=101),
                       dict(kind_name="OrderEvent",seq=14,slot=4,gen=2,what=4,rx_tsc=400,trade_id=102)]
@@ -84,6 +91,7 @@ class Chains(unittest.TestCase):
                 orders = list(csv.DictReader(stream))
             self.assertEqual([r["report_what"] for r in orders],["1","3","4"])
             self.assertTrue(all(r["send_complete_tsc"] == "280" and r["tx_write_count"] == "2" for r in orders))
+            self.assertTrue(all(r["oms_start_tsc"]=="170" and r["risk_start_tsc"]=="168" and r["strategy_start_tsc"]=="166" and r["input_rx_tsc"]=="100" for r in orders))
             self.assertEqual(next(t["p50_ns"] for t in tables if t["stage"]=="tick_to_trade"),150)
             self.assertEqual(next(t["p99_ns"] for t in tables if t["stage"]=="feed.decode.bbo"),10)
             self.assertGreater(analysis.issues["missing_egress.encrypt"],0)

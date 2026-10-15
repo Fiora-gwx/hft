@@ -24,7 +24,7 @@ status: spec
 
 ## 使用本组件
 
-可选 [latency_trace](../../tools/latency-report/README.md) 记录协议解码、规范化事件发布、订单出环及编码边界；关联使用固定事件指纹和 decision_seq，满环只丢测量点。
+可选 [latency_trace](../../tools/latency-report/README.md) 记录协议解码、规范化事件发布、订单出环及编码边界；关联使用固定事件指纹、decision_seq 和 raw 序号到 frame 的映射，满环只丢测量点。
 
 ### 协议接口
 

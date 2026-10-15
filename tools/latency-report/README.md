@@ -35,9 +35,9 @@ status: impl
 | `raw_points.csv` | 每个固定记录一行，含线程、流水号、丢失累计、阶段、原始时间与关联键 |
 | `journal_events.csv` | 白名单字段的规范化行情、订单/执行事件与全部 ClockStatus；不导出配置、秘密或 UID |
 | `event_chains.csv` | 每个已解码输入一行，MD 无交易也输出；空 input_seq 表示未关联到 sequencer 输入 |
-| `order_chains.csv` | 每个决策及其逐次 ack/fill 一行，保留交易所订单与成交标识 |
+| `order_chains.csv` | 每个决策及其逐次 ack/fill 一行，含 `input_*` 触发链、strategy/risk/OMS、出站戳与交易所订单/成交标识 |
 | `leg_skew.csv` | 同一 trigger_seq/group 的 First/Second 对，第二腿减第一腿的出环和发送时间；不把 OnFill 当同时下单 |
-| `exchange_times.csv` | 可选 raw 输入的 E/T/ts 等时间叶子，关联 raw seq、venue/conn、rx_tsc；没有报文内容 |
+| `exchange_times.csv` | 可选 raw 输入的 E/T/ts 等时间叶子，通过 raw seq 映射 `trace_thread/trace_frame`；没有报文内容 |
 | `stages.csv`, `histograms.csv` | 每 venue/分段的 n、负间隔数、经验最近秩 p50/p90/p99/p99.9/max 和 log2 桶 |
 | `summary.json`, `analysis.sqlite` | 覆盖率、歧义/缺失/负值、时钟来源及可重复查询数据 |
 
@@ -58,6 +58,8 @@ status: impl
 Read 在 recvmsg 返回后；解密包围实际 TLS open；Frame 在 WS 交付前；decode 包围协议分派/JSON 规范化；环 push 在成功发布之后，pop 在取出时/转换后。push 的观测可能晚于并行消费者的 pop，负值单列，不截断为零。InputHanded 是合并/调度后交给处理器的边界；process 包围 journal、业务处理、输出与出环；strategy 包围每个真实 on_event；risk 包围单腿或整对 evaluate；OMS 包围实际 place。encode 是订单帧模板写入，加密包围真实 seal，Send 是 sendmsg 返回戳，短写的返回值/请求字节数保留。
 
 TxQueued/TxWrite 的编号为 32/33：`frame` 在这两类记录中表示连接发送实例标识；前者 v0/v1 是密文绝对字节区间，后者 v0/v1/v2 是已消费偏移、带符号返回值、请求字节数。离线按区间匹配包含 flush 的每次写入，输出 `send_complete_tsc` 与次数；不把首次短写当整单发送完成。
+
+RawRecord 的编号为 34，v0..v3 为 raw seq、raw kind、接收/发送 TSC、what；在原始记录成功追加后写入当前 frame 关联。原始交易所时间可精确回连同读多帧；缺失或多匹配明确标记。订单行按 trigger_seq 和 intent_no/inst 连接 OMS、按 strategy 连接回调；同时双腿共享风险准入时 `risk_owner_intent_no` 标识第一腿，独立 OnFill/Reverse 仍用自身准入。多次同策略回调无法唯一连接时留空。
 
 分段是 [latency-budget](../../docs/latency-budget.md) 的诊断细分，不构成新预算。网络往返按每次实际 ack/fill 接收分别计算；同时双腿偏差保留正负方向。经验分位数始终带 n；小样本尾部不能作为门槛或回归裁决。
 
