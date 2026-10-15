@@ -2656,6 +2656,8 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 | DEP-235.22 | `/etc/hft/ctl-principals.toml` 与生成器对当前 `ctl-operators.toml` 的输出差一个字节 | 退出 1,指出该文件 |
 | DEP-235.23 | `PATH` 中有 `rustup`;另一次有 `clang`;另一次有 `cc` | 每次退出 1 |
 
+- 回归:在无 PYTHONDONTWRITEBYTECODE/PYTHONPYCACHEPREFIX 的新进程运行归档内 preflight 与 fetch 入口,导入帮助模块后目录文件集与字节不变,不产生 __pycache__。
+
 ### DEP-236 升级主机类的预检项
 
 - 规则:[发布归档与 releasectl](README.md#发布归档与-releasectl)
@@ -2808,7 +2810,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 - 里程碑:M3
 - 前置:夹具 `dev2-1` 与 hft-core `dev2` 档生成的期望剖面
 - 实现:`deploy/tests/test_gen.py::dep_247_dev2_profile`
-- 覆盖边界:覆盖已装配 slice、守护与本地出口检查；EIP 与完整 advisory 剖面仍待验收，IMDS 规则由预检另查。
+- 覆盖边界:覆盖已装配 slice、守护与本地出口检查；可执行生成器用例同时读取 `test-dev2-prod` 与 `binance-testnet-20261015` 清单，核对网卡和出口地址取自各自清单。EIP 与完整 advisory 剖面仍待验收，IMDS 规则由预检另查。
 
 | 行 | 项 | 期望(级别 `required`) |
 |---|---|---|

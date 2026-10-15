@@ -1,0 +1,64 @@
+{
+  "groups": {
+    "cold": [],
+    "core": [
+      {
+        "destination": "etc/systemd/system/hft.slice",
+        "source": "deploy/generated/binance-testnet-20261015/hft.slice"
+      },
+      {
+        "destination": "etc/systemd/system/hft-core.slice",
+        "source": "deploy/generated/binance-testnet-20261015/hft-core.slice"
+      },
+      {
+        "destination": "etc/systemd/system/hftbatch.slice",
+        "source": "deploy/generated/binance-testnet-20261015/hftbatch.slice"
+      },
+      {
+        "destination": "etc/systemd/system/dev-shm-hft-prod.mount",
+        "source": "deploy/generated/binance-testnet-20261015/dev-shm-hft-prod.mount"
+      },
+      {
+        "destination": "etc/systemd/system/hft-core@prod.service",
+        "source": "deploy/generated/binance-testnet-20261015/hft-core@prod.service"
+      },
+      {
+        "destination": "etc/systemd/system/hft-dev2-guard.service",
+        "source": "deploy/generated/binance-testnet-20261015/hft-dev2-guard.service"
+      },
+      {
+        "destination": "etc/systemd/system/hft-imds-lock.service",
+        "source": "deploy/generated/binance-testnet-20261015/hft-imds-lock.service"
+      },
+      {
+        "destination": "etc/systemd/system/hft-core.target",
+        "source": "deploy/generated/binance-testnet-20261015/hft-core.target"
+      },
+      {
+        "destination": "etc/hft/egress.toml",
+        "source": "deploy/generated/binance-testnet-20261015/egress.toml"
+      },
+      {
+        "destination": "etc/hft/preflight.toml",
+        "source": "deploy/generated/binance-testnet-20261015/preflight.toml"
+      },
+      {
+        "destination": "etc/hft/dev2-guard.toml",
+        "source": "deploy/dev2/dev2-guard.toml.tmpl"
+      },
+      {
+        "destination": "etc/polkit-1/rules.d/50-hft-dev2-guard.rules",
+        "source": "deploy/polkit/50-hft-dev2-guard.rules"
+      }
+    ],
+    "sim": []
+  },
+  "units": {
+    "cold": [],
+    "core": [
+      "hft-core@prod.service",
+      "hft-core.target"
+    ],
+    "sim": []
+  }
+}

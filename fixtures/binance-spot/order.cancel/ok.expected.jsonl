@@ -1,0 +1,1 @@
+{"kind":"OrderEvent","what":"CancelAck","slot":42,"gen":7,"detail":0,"reject_code":0,"exch_order_id":70000000001}

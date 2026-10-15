@@ -79,13 +79,15 @@ fixtures/
 - 定点值写成整数字符串(已按 refdata 的资产指数换算),不写小数;字段顺序固定。
 - `hw_rx_ns`、`rx_tsc` 不出现在期望里:测试注入固定值,比对时忽略。
 - 输入产生错误时,期望行为 `{"error":"<ErrorBit 名>"}`;可忽略的用户流事件期望为 `{"ignored":"<事件名>"}`(计数,不是错误)。
+- 私有订阅回执的期望为 `{"private_ack":{"bit":<通道位索引>,"success":<bool>}}`。
 - 解码结果中不是事件的部分各渲染为一行:编码类金样每条命令一行 `{"frame":"<帧文本>"}`(与 `encode`/`encode_batch` 的输出逐字节相等);`login_result` → `{"login":"Ok"}` / `{"login":"Rejected","code":<码>}`;`ReportOutcome.hint` → `{"hint":"MarginNow"|"ConfigRecheck"}`;结果未知 → `{"outcome_unknown":<ReqRef>,"raw_code":<码>}`;控制提示 → `{"ctl":"ClockSkew"|"RateLimited"|"UserStreamEnded"|"ServerShutdown"}`;只读查询的分页 → `{"page":{"rows":<n>,"next_cursor":<c>}}`。
 - 分档快照消息的期望是一条 `L2Snapshot{origin = TopN}`(按 `feed.snapshot_part_levels` 切片后的各片);增量深度(可选扩展)消息的期望是一条 `L2Batch`(一条交易所消息一条记录),REST 快照的期望是若干 `L2SnapshotPart`。
 - `<case>.meta.toml`:
 
 | 键 | 类型 | 含义 |
 |---|---|---|
-| `source` | `"collector-fixture" \| "raw-journal" \| "s3-wal" \| "exchange-doc" \| "synthetic"` | 来源类别 |
+| `source` | `"testnet-capture" \| "collector-fixture" \| "raw-journal" \| "s3-wal" \| "exchange-doc" \| "synthetic"` | 来源类别 |
+| `review_status` | string(可选) | `draft` 表示期望待人工核对;代理不得填写虚构核对人,合并前由核对人更新 `reviewed_by` |
 | `source_ref` | string | 原始位置(文件路径、S3 key + seq 范围、文档 URL) |
 | `captured_at` | UTC 日期 | 报文日期 |
 | `refdata` | string | `refdata/<version>.blob` 版本 |
@@ -165,6 +167,8 @@ hft-sim 的用例目录名带用例编号(`sim-125-<case>/`、`sim-123-mixed/`),
 fixture 桶与市场数据桶分开;发布归档不进这两个桶。CI 只对需要拉 fixture 的作业开 GitHub OIDC(`id-token: write`),扮演只读 fixture 桶的角色(该角色的创建是 `[需授权]` 的 IAM 变更;工作流与权限归 [development](../docs/development.md))。工具不创建桶或角色、不上传对象。`aws` 与 `zstd` 由运行环境提供;CI 的质量门与 ARM 发布环境安装 zstd。
 
 ### 来源
+
+`testnet-capture` 是获准测试主机直接从演示环境采集的服务端响应,不是引擎 journal。meta 记录端点、产品、时间、HTTP 状态与可得的限速头;请求与登录帧不保存,身份和订单标识按下述规则清洗。
 
 | 来源 | 用于 | 方法 |
 |---|---|---|

@@ -1,0 +1,1 @@
+{"id":"l0000000000000000","status":200,"result":{"authorizedSince":1792040924778,"connectedSince":1792040924777,"returnRateLimits":true,"serverTime":1792040924779,"userDataStream":false},"rateLimits":[{"rateLimitType":"REQUEST_WEIGHT","interval":"MINUTE","intervalNum":1,"limit":6000,"count":12}]}

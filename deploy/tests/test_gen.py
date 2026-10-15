@@ -86,7 +86,13 @@ def dep_134_systemd_analyze():
 
 
 def dep_247_dev2_profile():
-    files, profile = generated()
+    for manifest in ("test-dev2-prod", "binance-testnet-20261015"):
+        check_dev2_profile(manifest)
+
+
+def check_dev2_profile(manifest):
+    inventory = tomllib.loads((REPO / "deploy/hosts" / (manifest + ".toml")).read_text())
+    files, profile = generator.render(inventory, (REPO / "apps/hft-core/README.md").read_text(encoding="utf-8"), (REPO / "deploy/dev2/hft-dev2-guard.service").read_text())
     expected = {row["key"]: row for row in tomllib.loads(profile)["expect"]}
     assert all(row["level"] == "required" for row in expected.values())
     assert expected["guard.slices.hftbatch.slice.parent"]["eq"] == "/"
@@ -96,6 +102,8 @@ def dep_247_dev2_profile():
     assert expected["guard.slices.hft.slice.memory_max"]["eq"] == str(1376 * 1024 * 1024)
     assert expected["nic.egress[*].on_nic"]["eq"] is True
     assert "prod" in tomllib.loads(files["egress.toml"])
+    assert expected["nic.egress[*].nic"]["eq"] == inventory["eni_b"]["name"]
+    assert tomllib.loads(files["egress.toml"])["prod"] == inventory["egress"]["prod"]
 
 
 @pytest.mark.skipif(os.environ.get("CI") != "true" or os.name != "posix", reason="isolated hosted-CI network namespace")

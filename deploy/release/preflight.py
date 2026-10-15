@@ -14,6 +14,9 @@ import subprocess
 import sys
 import tomllib
 
+# The release is checksummed as an exact file set, including when preflight runs as root.
+# Importing its helpers must not create __pycache__ inside that immutable tree.
+sys.dont_write_bytecode = True
 from release import selected_host, verify_tree
 
 

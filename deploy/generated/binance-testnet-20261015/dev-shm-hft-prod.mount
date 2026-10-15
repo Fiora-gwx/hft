@@ -1,0 +1,9 @@
+[Unit]
+Description=hft prod journal tmpfs
+Before=hft-core@prod.service
+
+[Mount]
+What=tmpfs
+Where=/dev/shm/hft/prod
+Type=tmpfs
+Options=size=192M,uid=hft,gid=hft-journal-ro,mode=2750

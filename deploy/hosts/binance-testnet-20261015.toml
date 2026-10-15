@@ -1,0 +1,12 @@
+schema = 4
+host = "binance-testnet-20261015"
+instance_type = "c8g.large"
+class = "dev2"
+instances = ["prod"]
+formal_live = false
+verify = false
+replay_verify = false
+[eni_b]
+name = "ens34"
+[egress]
+prod = [{ eni = "b", ip = "172.31.15.143" }]

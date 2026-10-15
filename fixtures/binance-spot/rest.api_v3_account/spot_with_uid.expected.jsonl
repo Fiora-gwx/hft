@@ -1,0 +1,5 @@
+{"kind":"AccountConfigReport","venue_uid":"acct-0001","position_mode":1,"margin_mode":1,"multi_asset":1,"uid_keys":3}
+{"kind":"BalanceReport","asset":1,"free":"498347247920","locked":"1652752080"}
+{"kind":"BalanceReport","asset":2,"free":"0","locked":"0"}
+{"kind":"BalanceReport","asset":3,"free":"0","locked":"0"}
+{"kind":"BalanceReport","asset":4,"free":"0","locked":"0"}

@@ -10,6 +10,7 @@ mod demo;
 mod encode;
 mod endpoint;
 mod funding;
+mod golden;
 mod md;
 mod prop_encode;
 mod reports;

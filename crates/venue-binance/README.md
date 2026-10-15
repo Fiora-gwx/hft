@@ -127,7 +127,7 @@ pub mod spot { pub enum MdClass { JsonBookTicker, JsonDepthTopN /* combined 流�
 | 新连接 | 核实前按现货口径 300 次 / 5 min / IP(合约值待核实,开发备忘第 11 条) | 300 次 / 5 min / IP |
 | 强制断开 | 24 h | 24 h |
 
-来源 [research/02 §2.1](../../design/research/02-exchange-connectivity.md)。`rate_rules()` 按上表逐行给出(`LimitScope` 账户 ORDERS → `Account`,IP 类 → `Ip`,每连接 → `Conn`;"每连接流数"与"强制断开"不是限速规则,分别在 `RouteSpec.max_streams` 与 refdata `ws_max_conn_age_s`)。WS API 每个响应带 `rateLimits[]`(`rateLimitType, interval, intervalNum, limit, count`),`decode_report` 把它变成 `RateObs` 交给 gw 校正发送侧计数:`ORDERS` → `Orders`、`REQUEST_WEIGHT` → `Weight`、`RAW_REQUESTS` 不映射;`window_ms` = `interval`(`SECOND`/`MINUTE`/`DAY`)× `intervalNum`;多条时取 `count / limit` 最大的一条(相同取窗口最短者)。保证金与配置查询的 REST 权重见"保证金数据换算"与"账户配置核验"。
+来源 [research/02 §2.1](../../design/research/02-exchange-connectivity.md)。`rate_rules()` 按上表逐行给出(`LimitScope` 账户 ORDERS → `Account`,IP 类 → `Ip`,每连接 → `Conn`;"每连接流数"与"强制断开"不是限速规则,分别在 `RouteSpec.max_streams` 与 refdata `ws_max_conn_age_s`)。WS API 每个响应带 `rateLimits[]`(`rateLimitType, interval, intervalNum, limit, count`),`decode_report` 把它变成 `RateObs` 交给 gw 校正发送侧计数:`ORDERS` → `Orders`、`REQUEST_WEIGHT` → `Weight`、`RAW_REQUESTS` 不映射;`window_ms` = `interval`(`SECOND`/`MINUTE`/`DAY`)× `intervalNum`;多条时取 `count / limit` 最大的一条(相同取窗口最短者)。`REQUEST_WEIGHT` 同时带 `limit = -1`、`count = -1` 表示该观测不可用,只跳过该条,继续处理业务响应与其余桶,不替换本地额度;其他负数或超出 u32 的值仍为 `Shape`。保证金与配置查询的 REST 权重见"保证金数据换算"与"账户配置核验"。
 
 ### 分档快照流
 

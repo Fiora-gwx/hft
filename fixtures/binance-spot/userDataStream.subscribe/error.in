@@ -1,0 +1,1 @@
+{"id":"u0000000000000000","status":400,"error":{"code":-2035,"msg":"User Data Stream subscription already active."},"rateLimits":[{"rateLimitType":"REQUEST_WEIGHT","interval":"MINUTE","intervalNum":1,"limit":6000,"count":20}]}

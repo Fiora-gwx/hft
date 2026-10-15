@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import subprocess
 from pathlib import Path
 import tarfile
 import sys
@@ -351,6 +352,19 @@ def preflight_host(tmp_path, monkeypatch):
 
 
 def dep_235_common_items(tmp_path, monkeypatch):
+    # Run the shipped entrypoint in a clean process: importing a sibling must not add files
+    # to an immutable tree before verify_tree checks its exact file set.
+    scripts = tmp_path / "shipped-preflight"
+    scripts.mkdir()
+    for name in ("preflight.py", "fetch.py", "release.py"):
+        (scripts / name).write_bytes((Path(__file__).parents[1] / "release" / name).read_bytes())
+    before = {p.name: p.read_bytes() for p in scripts.iterdir()}
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX")}
+    for entrypoint in ("preflight.py", "fetch.py"):
+        result = subprocess.run([sys.executable, str(scripts / entrypoint), "--help"], env=env, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        assert sorted(p.name for p in scripts.iterdir()) == sorted(before), "entrypoint import polluted the release"
+    assert all((scripts / name).read_bytes() == content for name, content in before.items())
     preflight, host = preflight_host(tmp_path, monkeypatch)
     assert all(preflight.check(host).values())
     for field, bad, failed in [("free", 14999, "disk-free"), ("machine", "x86_64", "architecture"), ("chrony", "Leap status : Normal\nLast offset : -0.005001 seconds", "chrony"), ("chrony", "Leap status : Not synchronised\nLast offset : 0.0 seconds", "chrony"), ("compilers", {"cargo"}, "no-compiler")]:

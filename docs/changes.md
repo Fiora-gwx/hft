@@ -285,3 +285,5 @@
 | 2026-10-11 | 固定 HashTrail 集采用 CI 38113953546 在轮次费用与输出边界修正后的重生成摘要,50 个种子的身份、场景、2000 步和顺序不变 | LED-274 与 TK-114 在该 CI 通过;SEQ-314/382 修正夹具的按需快照调度与费用资产指数后随同验证 | fixtures/dst/hashtrail.toml、crates/hft-sequencer/tests/(hash.rs、process.rs) | 否 |
 | 2026-10-11 | BBO、L2 和标记价估值产生的账本注记在原始行情事件内写出;排空直接遍历既有缓冲,不复制临时 Vec | 复核 RoundClosed 的所有产生入口发现行情封轮也可跨快照遗留注记;SEQ-383 三行逐字节回放 | crates/hft-sequencer/(src/process.rs、tests/process.rs、README.md、TESTS.md)、docs/architecture.md | 否 |
 | 2026-10-11 | 恢复、验证与镜像驱动仅从已消费日志前缀解析配置,按完整 BlobRef 和内容 SHA 核验,不提前使用预读或 extend 带来的未来配置,不以旧合法副本掩盖最近损坏 | SEQ-388 三驱动八类边界、SEQ-389 真实命令顺序反例 | crates/hft-sequencer/(src、tests、README.md、TESTS.md) | 是(2026-10-14 批量确认) |
+
+| 2026-10-15 | Binance WS 限速观测仅将 REQUEST_WEIGHT 的 limit/count 同为 -1 视为不可用,保留业务响应与有效 ORDERS 观测;其他负数/越界仍拒绝,本地额度不放宽 | demo 实采 -2019 回包被 u32 解码整帧拒绝;BIN-091/BIN-308 | crates/venue-binance、fixtures/binance-usdm | 待评审 |

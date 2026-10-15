@@ -1,0 +1,5 @@
+{"kind":"BalanceReport","asset":1,"free":"0","locked":"0"}
+{"kind":"BalanceReport","asset":2,"free":"0","locked":"0"}
+{"kind":"BalanceReport","asset":3,"free":"0","locked":"0"}
+{"kind":"BalanceReport","asset":4,"free":"0","locked":"0"}
+{"kind":"MarginReport","margin_balance":"0","maint_margin":"0","avail_margin":"0","margin_ratio":"9223372036854775807"}
