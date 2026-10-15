@@ -70,3 +70,32 @@ fn bgt_336_funding_bills_are_cash_not_ticker_or_wallet() {
         assert!(P::funding_decode(rd(), &query(), 200, &empty).is_err());
     }
 }
+
+/// A shared account can carry funding bills of contracts outside refdata: they are skipped and
+/// counted, while in-refdata bills still decode; wrong coin/category and out-of-window rows
+/// still reject the whole page.
+#[test]
+fn bgt_336_foreign_symbol_bill_skipped_and_counted() {
+    let msg = br#"{"code":"00000","data":{"list":[
+        {"id":"7","symbol":"BTCUSDT","coin":"USDT","category":"USDT-FUTURES","type":"CONTRACT_MAIN_SETTLE_FEE_USER_IN","amount":"0.35","balance":"9999","ts":"1790006400000"},
+        {"id":"8","symbol":"NOTINREFDATAUSDT","coin":"USDT","category":"USDT-FUTURES","type":"CONTRACT_MAIN_SETTLE_FEE_USER_OUT","amount":"0.20","balance":"9999","ts":"1790006400000"},
+        {"id":"9","symbol":"NOTINREFDATAUSDT","coin":"USDT","category":"USDT-FUTURES","type":"CONTRACT_MAIN_SETTLE_FEE_USER_IN","amount":"0.10","balance":"9999","ts":"1790006400000"}
+    ],"cursor":""}}"#;
+    let p = P::funding_decode(rd(), &query(), 200, msg).unwrap();
+    assert!(p.next.is_none());
+    assert_eq!(p.skipped_foreign, 2);
+    assert_eq!(p.bills.len(), 1);
+    assert_eq!((p.bills[0].inst, p.bills[0].amount), (F_BTC, Notional(350_000)));
+    let s = std::str::from_utf8(msg).unwrap();
+    // Shape errors stay for the in-refdata row's wrong coin / category / window.
+    for bad in [
+        s.replacen(r#""coin":"USDT""#, r#""coin":"USDC""#, 1),
+        s.replacen(r#""category":"USDT-FUTURES""#, r#""category":"COIN-FUTURES""#, 1),
+        s.replacen(r#""ts":"1790006400000""#, r#""ts":"1790006500000""#, 1),
+    ] {
+        assert!(
+            P::funding_decode(rd(), &query(), 200, bad.as_bytes()).is_err(),
+            "{bad}"
+        );
+    }
+}

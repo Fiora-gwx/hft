@@ -2357,7 +2357,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 期望文件:同目录 `<case>.expected.jsonl`(`funding` 行,逐笔带 inst 与结算时刻)
 - 实现:`crates/venue-binance/tests/golden.rs::bin_332_funding_flow`
 
-BIN-332 补充单元验收:签名 GET、正负现金金额、同刻多合约、满页继续、HTTP/JSON 错误整页失败。实现:`tests/funding.rs::bin_332_income_history_actual_amount_and_signing`、`bin_332_full_page_requires_following_page`。默认 caps 采用 RateOnly;BIN-113–116 保留为可选 BalanceOnlyPush 用户流配置,不与实额历史并用。
+BIN-332 补充单元验收:签名 GET、正负现金金额、同刻多合约、满页继续、HTTP/JSON 错误整页失败。实现:`tests/funding.rs::bin_332_income_history_actual_amount_and_signing`、`bin_332_full_page_requires_following_page`;refdata 外 symbol 的流水跳过并计数(`skipped_foreign`),同页 refdata 内流水照常解码,窗口外仍拒绝:`bin_332_foreign_symbol_bill_skipped_and_counted`。默认 caps 采用 RateOnly;BIN-113–116 保留为可选 BalanceOnlyPush 用户流配置,不与实额历史并用。
 
 BIN-332 的 Ed25519 查询用 RFC 8032 测试密钥核验完整查询串、recvWindow、签名 URL 编码和公钥验签,同时要求敏感标记;实现:`tests/funding.rs::bin_332_ed25519_income_history_signing`。不以空账户 income 响应声称真实资金费入账通过。
 

@@ -2244,7 +2244,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_336_ro_funding`
 - 备注:依赖待核实:开发备忘第 18 条
 
-BGT-336 补充单元验收:签名 trading-account financial-records 查询、IN/OUT 实额、忽略交易费、cursor 续页及循环拒绝,失败无部分输出。实现:`tests/funding.rs::bgt_336_funding_bills_are_cash_not_ticker_or_wallet`。
+BGT-336 补充单元验收:签名 trading-account financial-records 查询、IN/OUT 实额、忽略交易费、cursor 续页及循环拒绝,失败无部分输出。实现:`tests/funding.rs::bgt_336_funding_bills_are_cash_not_ticker_or_wallet`。refdata 外 symbol 的账单跳过并计数(`skipped_foreign`),同页 refdata 内账单照常解码,错误币种/类别/窗口外仍拒绝整页:`tests/funding.rs::bgt_336_foreign_symbol_bill_skipped_and_counted`(潜在缺陷:共享账户的 refdata 外账单落入窗口会永久卡住 FundingPoll)。
 - 实现补充:空 list 且非空 cursor 返回 Shape,禁止将不完整账单窗口判为完成。
 - 真实金样:`rest.bills/{empty,trades_only}` 覆盖 null 空末页及非资金费交易流水续页;缺 list 与 null 配非空 cursor 均拒绝。实现:`tests/golden.rs::bgt_336_ro_funding`。
 - BGT-336 单元输入同时覆盖八位小数与 HalfEven 半值取偶、IN/OUT 正负方向；不把单元输入标作真实扣款样本。BGT-323 的 `account/funding_balance` 是同一结算时的真实余额推送,只产生 BalanceReport,不从余额推导 FundingSettle。

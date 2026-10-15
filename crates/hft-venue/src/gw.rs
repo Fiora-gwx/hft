@@ -1657,7 +1657,9 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             self.report(&c, self.target_gen(&c), NO_CONN, SendStatus::RateLimited, 0, 0);
             return;
         }
-        if c.op == GwOp::CancelAll && P::order_channel(c.op) != OrderChannel::Rest {
+        // An account-wide CancelAll (inst 0) has no REST encoding on venues whose per-inst
+        // cancel-all is REST (Binance USD-M): expand it like a WS one (per inst, then per order).
+        if c.op == GwOp::CancelAll && (P::order_channel(c.op) != OrderChannel::Rest || c.inst.0 == 0) {
             self.cancel_all(a, &c, now);
             return;
         }

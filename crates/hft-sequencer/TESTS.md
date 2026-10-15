@@ -3785,6 +3785,8 @@ SEQ-160 同时覆盖真实 ConnId 112/113/255、重复 Up/Down、主连接退出
 | SEQ-263.2 | 9 / 7 | 10 |
 | SEQ-263.3 | 8 / 8 | 9 |
 
+补充(live testnet BUG-3):空启动(非恢复)在第一条 `EngineClock` 内对每个 live (venue, account) 发 `SetEpoch{epoch = view().engine_epoch()}`,且先于该出环第一条 `Place`;sim 环不收。实现:`crates/hft-sequencer/tests/process.rs::seq_263_fresh_boot_set_epoch_before_place`。
+
 ### SEQ-264 恢复的新段以 Recovery 引导块开头,随后是 EngineClock
 
 - 规则:[冷启动恢复](README.md#冷启动恢复recoverdriver)

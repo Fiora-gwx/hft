@@ -254,7 +254,7 @@ UTA 设置接受 `accountMode = unified | hybrid` 且 `accountLevel = basic`;`cl
 
 ### 资金费实额
 
-`BitgetUsdtFutures` 实现 `FundingHistoryProtocol`,HMAC 签名查询 `GET /api/v3/account/financial-records?category=USDT-FUTURES&coin=USDT`,明确起止毫秒、`limit=100` 和返回的 cursor。这不是资金账户的 `funding-financial-records`。只接受 `CONTRACT_MAIN_SETTLE_FEE_USER_IN/OUT` 的交易账单,`id` 去重,`symbol` 定位合约,`ts` 为毫秒,`amount` 为现金金额,由 IN/OUT 规范正负。交易费、转账与 RWA 分红类型不当作普通资金费。分页错误、未知合约、错误币种或非成功响应拒绝整页。来源为 [官方财务记录](https://www.bitget.com/docs/catalog/account/assets-balance) 与 [官方枚举](https://www.bitget.com/docs/uta/enum)。
+`BitgetUsdtFutures` 实现 `FundingHistoryProtocol`,HMAC 签名查询 `GET /api/v3/account/financial-records?category=USDT-FUTURES&coin=USDT`,明确起止毫秒、`limit=100` 和返回的 cursor。这不是资金账户的 `funding-financial-records`。只接受 `CONTRACT_MAIN_SETTLE_FEE_USER_IN/OUT` 的交易账单,`id` 去重,`symbol` 定位合约,`ts` 为毫秒,`amount` 为现金金额,由 IN/OUT 规范正负。交易费、转账与 RWA 分红类型不当作普通资金费。分页错误、错误币种/类别、窗口外时刻或非成功响应拒绝整页;`symbol` 不在 refdata 的合法账单(共享账户的其他合约)跳过并计入 `FundingPage.skipped_foreign`,不阻塞本窗口。来源为 [官方财务记录](https://www.bitget.com/docs/catalog/account/assets-balance) 与 [官方枚举](https://www.bitget.com/docs/uta/enum)。
 
 `amount` 在 Notional 的 -6 指数边界作一次 HalfEven 舍入,再按 IN/OUT 规范正负;原始账单金额保留在金样中。BGT-336 的真实八位小数资金费不能要求六位精确表示,每笔表示误差至多 0.5 微 USDT,不宣称原始现金逐位无损。
 

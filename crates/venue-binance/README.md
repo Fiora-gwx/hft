@@ -293,7 +293,7 @@ core 的深度来源([hft-venue-proto 契约 26](../hft-venue-proto/README.md#�
 
 ### 资金费实额
 
-`Usdm` 实现 `FundingHistoryProtocol`:按凭证算法使用 HMAC-SHA256 或 Ed25519 签名的 `GET /fapi/v1/income?incomeType=FUNDING_FEE`,与账户 REST 共用签名入口,明确 `startTime/endTime/page/limit=100/timestamp/recvWindow`;Ed25519 的标准 Base64 签名作 URL 编码。仅接受 `FUNDING_FEE` + `USDT`,按 `symbol` 找 inst,`tranId` 为账单键,`time` 为毫秒,`income` 为有符号实额。满页继续请求下一页,不足一页才结束。未知合约、数值错误或非 200 状态拒绝整页。请求与 headers 标记为敏感,不可写原文日志。接口参数来源为 [官方连接器](https://github.com/binance/binance-futures-connector-python/blob/main/binance/um_futures/account.py)。
+`Usdm` 实现 `FundingHistoryProtocol`:按凭证算法使用 HMAC-SHA256 或 Ed25519 签名的 `GET /fapi/v1/income?incomeType=FUNDING_FEE`,与账户 REST 共用签名入口,明确 `startTime/endTime/page/limit=100/timestamp/recvWindow`;Ed25519 的标准 Base64 签名作 URL 编码。仅接受 `FUNDING_FEE` + `USDT`,按 `symbol` 找 inst,`tranId` 为账单键,`time` 为毫秒,`income` 为有符号实额。满页继续请求下一页,不足一页才结束。数值错误、窗口外时刻或非 200 状态拒绝整页;`symbol` 不在 refdata 的合法流水(共享账户的其他合约)跳过并计入 `FundingPage.skipped_foreign`。请求与 headers 标记为敏感,不可写原文日志。接口参数来源为 [官方连接器](https://github.com/binance/binance-futures-connector-python/blob/main/binance/um_futures/account.py)。
 
 `markPriceUpdate` 解码出 MarkPrice、IndexPrice、Funding;费率与下次结算时间供策略只读视图使用,不代表资金费已到账。周期由同合约相邻不同 `T` 的差得出,首次与倒退时未知(0),表容量 256,超容量保持未知。轮询的原始账单由 [FundingPoll](../hft-venue/README.md#资金费账单轮询) 完成去重、汇总和 journal 入口。
 

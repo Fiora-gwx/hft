@@ -76,14 +76,16 @@ impl FundingHistoryProtocol for Usdm {
             None
         };
         let mut bills = Vec::with_capacity(rows.len());
+        let mut skipped_foreign = 0u32;
         for r in rows {
             if r.income_type != "FUNDING_FEE" || r.asset != "USDT" {
                 continue;
             }
-            let inst = rd
-                .symbols(Self::VENUE)
-                .get(r.symbol.as_bytes())
-                .ok_or(DecodeErr::Shape)?;
+            // A shared account can hold bills of contracts outside refdata: skip, count.
+            let Some(inst) = rd.symbols(Self::VENUE).get(r.symbol.as_bytes()) else {
+                skipped_foreign = skipped_foreign.checked_add(1).ok_or(DecodeErr::Overflow)?;
+                continue;
+            };
             let ms = i64::try_from(r.time).map_err(|_| DecodeErr::Overflow)?;
             if ms < q.start_ms || ms > q.end_ms {
                 return Err(DecodeErr::Shape);
@@ -98,6 +100,10 @@ impl FundingHistoryProtocol for Usdm {
                 ),
             });
         }
-        Ok(FundingPage { bills, next })
+        Ok(FundingPage {
+            bills,
+            next,
+            skipped_foreign,
+        })
     }
 }

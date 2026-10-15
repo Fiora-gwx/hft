@@ -771,6 +771,11 @@ pub(crate) fn boot_accounts<D: Driver<S>, S: StrategySet>(
         slot: crate::types::InputSlot::with_capacity(1 << 20),
     };
     crate::subs::rebuild_all(&mut seq.e, &mut seq.inst);
+    // A fresh boot also announces its engine epoch: the gw starts at epoch 0 and encodes its
+    // current epoch in every client order id, while the OMS matches reports on (slot, gen,
+    // epoch). The SetEpoch frames go out while processing the first `EngineClock`, i.e. ahead
+    // of any Place on the same out ring.
+    seq.e.set_epoch_due = true;
     crate::snapshot::write_boot_block(&mut seq, hft_journal::RollReason::Startup, 1)
         .map_err(|_| BootError::Journal(crate::types::JournalErr::Chain))?;
     Ok(seq)
