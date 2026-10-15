@@ -1903,7 +1903,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:golden
 - 里程碑:M3
-- 输入:`fixtures/bitget-spot/books1/{v2_normal,v3_normal,tiny_price,empty_asks}.in`;V2 来自采集系统 raw WAL,V3 待采集(方法 B)
+- 输入:`fixtures/bitget-spot/books1/{v2_normal,v3_normal,tiny_price,empty_asks}.in`;v3_normal 为真实 demo,其他样本仍待补。
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_301_spot_books1`
 
@@ -1950,6 +1950,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 级别:golden
 - 里程碑:M3
 - 输入:`fixtures/bitget-spot/publicTrade/{v2_snapshot_then_update,v3_update}.in`
+- 真实覆盖:`v3_snapshot.in` 初始历史批无输出;本轮未收到 update,不宣称成交更新验收通过。
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_306_spot_trade`
 
@@ -1968,7 +1969,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 规则:[心跳与 BBO 探测](README.md#心跳与-bbo-探测)
 - 级别:golden
 - 里程碑:M3
-- 输入:`fixtures/bitget-usdt-futures/rest.bbo_depth/{normal,error_code}.in`;待采集(方法 B,BGT-218)
+- 输入:`fixtures/bitget-usdt-futures/rest.bbo_depth/{normal,error_code}.in`;真实 demo 一档与未知品种 25100 响应。
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_308_fut_bbo_snapshot`
 
@@ -1977,7 +1978,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 规则:[心跳与 BBO 探测](README.md#心跳与-bbo-探测)
 - 级别:golden
 - 里程碑:M3
-- 输入:`fixtures/bitget-spot/rest.bbo_depth/{normal,unknown_symbol}.in`;待采集(方法 B)
+- 输入:`fixtures/bitget-spot/rest.bbo_depth/{normal,unknown_symbol}.in`;真实 demo 一档与未知品种 40034 响应。
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_309_spot_bbo_snapshot`
 
@@ -2017,7 +2018,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 规则:[下单:UTA V3 WS](README.md#下单uta-v3-ws)、[结果未知码表](README.md#结果未知码表)
 - 级别:golden
 - 里程碑:M3
-- 输入:`fixtures/bitget-usdt-futures/place-order/{ok,unregistered_code,param_error_unregistered,system_busy}.in`;`ok` 待采集(方法 B,BGT-211),错误样本按文档构造(`source = "exchange-doc"`)或合成
+- 输入:`fixtures/bitget-usdt-futures/place-order/{ok,param_error_unregistered,reduce_only_unregistered}.in` 为真实 demo;45111/22002 未登记为确定拒绝,保持 OutcomeUnknown。其他未知码与 system_busy 仍待覆盖。
 - 期望文件:同目录 `<case>.expected.jsonl`(错误样本期望 `OutcomeUnknown` 行,`reject_code` 按契约 8)
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_313_fut_place_resp`
 
@@ -2026,7 +2027,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 规则:[下单:UTA V3 WS](README.md#下单uta-v3-ws)、[结果未知码表](README.md#结果未知码表)
 - 级别:golden
 - 里程碑:M3
-- 输入:`fixtures/bitget-spot/place-order/{ok,unregistered_code}.in`;待采集(方法 B)
+- 输入:`fixtures/bitget-spot/place-order/ok.in` 为真实 demo;`unregistered_code` 仍待采集。
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_314_spot_place_resp`
 
@@ -2044,8 +2045,8 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 规则:[下单:UTA V3 WS](README.md#下单uta-v3-ws)
 - 级别:golden
 - 里程碑:M3
-- 输入:`fixtures/bitget-usdt-futures/cancel-order/{ok,already_filled,unknown_order}.in`、`fixtures/bitget-spot/cancel-order/ok.in`;待采集(方法 B)
-- 期望文件:同目录 `<case>.expected.jsonl`(核实前 `already_filled`、`unknown_order` 期望 `OutcomeUnknown`)
+- 输入:真实 demo `fixtures/bitget-usdt-futures/cancel-order/unknown_order.in` 与 `fixtures/bitget-spot/cancel-order/ok.in`;永续 `ok/already_filled` 仍待覆盖。
+- 期望文件:同目录 `<case>.expected.jsonl`;25204 为 CancelReject/GONE,成功回执只确认请求接收,等待订单频道终态。
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_316_cancel_resp`
 
 ### BGT-317 金样:永续订单频道全状态

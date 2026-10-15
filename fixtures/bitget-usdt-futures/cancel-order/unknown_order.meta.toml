@@ -1,0 +1,16 @@
+source = "testnet-capture"
+source_ref = "run-2026-10-15/dual-7/hft-evidence/captures/bitget-usdt-futures/cancel-order/rate_probe_1.in"
+captured_at = "2026-10-15T06:13:43.747069+00:00"
+refdata = "RD-BGT"
+exchange_doc = "https://www.bitget.com/docs/catalog/account/account-settings"
+reviewed_by = "pending-human-review"
+review_status = "draft; expectations independently calculated from wire fields, not decoder output"
+scrubbed = true
+case_id = "BGT-316"
+environment = "demo"
+endpoint = "wss://wspap.bitget.com/v3/ws/private"
+http_status = 200
+sha256 = "eadc0e906f68e08c749d75ef6f31d398254c493fdcdabf736b3491eb568a2d1b"
+sanitization = "Credential fields removed; UID/account identity replaced with acct-0001; JSON whitespace normalized. Requests and login frames never stored. Order IDs replaced with deterministic same-width placeholders; connId fixed conn-0001; canonical client IDs retained."
+wire_exponents = "BTC/ETH px=-2 qty=-8; USDT notional=-6 qty=-8"
+response_headers_json = "{}"

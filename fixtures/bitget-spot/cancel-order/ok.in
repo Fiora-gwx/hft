@@ -1,0 +1,1 @@
+{"event":"trade","id":"c0000000100000001","topic":"cancel-order","args":[{"orderId":"1000000000000000007","clientOid":"100080b02000010000000100"}],"code":"0","msg":"Success","ts":"1792045639934","connId":"conn-0001","rateLimit":[{"limit":"20","remaining":"19"}],"receiveTime":"1792045639931900","pushTime":"1792045639934977"}

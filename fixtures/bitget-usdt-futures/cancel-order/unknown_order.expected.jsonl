@@ -1,0 +1,2 @@
+{"kind":"OrderEvent","what":"CancelReject","slot":1,"gen":1,"detail":1,"reject_code":25204}
+{"events":1,"op":"Cancel","slot":1,"unknown":false,"raw_code":25204}

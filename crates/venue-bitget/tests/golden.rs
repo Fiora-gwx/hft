@@ -91,7 +91,7 @@ fn compare(expected: &[serde_json::Value], actual: &[serde_json::Value]) {
 }
 
 #[test]
-fn bgt_310_login() {
+fn bgt_310_login_result() {
     for name in ["ok_seconds", "ok_milliseconds", "rejected"] {
         let (input, expected) = capture("login", name);
         let actual = match BitgetUsdtFutures::login_result(&input) {
@@ -243,13 +243,24 @@ fn bgt_329_margin_poll() {
 }
 
 fn market(channel: &str, name: &str, route: u8) {
+    product_market::<BitgetUsdtFutures>(channel, name, route);
+}
+
+fn product_market<T: VenueProtocol<FeedCtx = FeedCtx, GwCtx = GwCtx>>(channel: &str, name: &str, route: u8) {
     use hft_venue_proto::testkit::{MdRec, VecSink};
     use serde_json::json;
-    let (input, expected) = capture(channel, name);
-    let class = BitgetUsdtFutures::classify(RouteId(route), MsgOp::Text, &input[..input.len().min(64)]);
+    let (input, expected) = product_capture(T::NAME, channel, name);
+    let class = T::classify(RouteId(route), MsgOp::Text, &input[..input.len().min(64)]);
     let mut sink = VecSink::default();
-    let result =
-        BitgetUsdtFutures::decode_md(rd(), &mut FeedCtx::new(), class, &input, &RX, &mut sink).unwrap();
+    let result = T::decode_md(
+        rd_spot_capture(),
+        &mut FeedCtx::new(),
+        class,
+        &input,
+        &RX,
+        &mut sink,
+    )
+    .unwrap();
     assert_eq!(usize::from(result.events), expected.len());
     let actual: Vec<_> = sink.md.iter().map(|e| {
         let mut value = match e {
@@ -493,4 +504,95 @@ fn bgt_333_order_detail() {
     }
     check::<BitgetUsdtFutures>();
     check::<BitgetSpot>();
+}
+
+#[test]
+fn bgt_301_spot_books1() {
+    product_market::<BitgetSpot>("books1", "v3_normal", 0);
+}
+
+#[test]
+fn bgt_306_spot_trade() {
+    product_market::<BitgetSpot>("publicTrade", "v3_snapshot", 2);
+}
+
+fn rest_book<T: VenueProtocol<FeedCtx = FeedCtx, GwCtx = GwCtx>>(name: &str, inst: hft_types::InstId) {
+    use hft_venue_proto::testkit::{MdRec, VecSink};
+    let (input, expected) = product_capture(T::NAME, "rest.bbo_depth", name);
+    let mut sink = VecSink::default();
+    let result = T::decode_bbo_snapshot(
+        rd_spot_capture(),
+        &mut FeedCtx::new(),
+        &[inst],
+        &input,
+        &RX,
+        &mut sink,
+    );
+    let actual = match result {
+        Ok(events) => {
+            assert_eq!(events, 1);
+            let MdRec::Bbo(e) = sink.md[0] else {
+                panic!("expected BBO")
+            };
+            serde_json::json!({"kind":"Bbo","inst":e.h.inst.0,"bid_px":e.bid_px.0.to_string(),"bid_qty":e.bid_qty.0.to_string(),
+                "ask_px":e.ask_px.0.to_string(),"ask_qty":e.ask_qty.0.to_string(),"update_id":e.update_id,
+                "ex_ts_ns":e.h.ex_ts_ns,"ex_send_ns":e.h.ex_send_ns})
+        }
+        Err(error) => serde_json::json!({"error":format!("{error:?}"),"events":sink.md.len()}),
+    };
+    compare(&expected, &[actual]);
+}
+
+#[test]
+fn bgt_308_fut_bbo_snapshot() {
+    for name in ["normal", "error_code"] {
+        rest_book::<BitgetUsdtFutures>(name, F_ETH);
+    }
+}
+
+#[test]
+fn bgt_309_spot_bbo_snapshot() {
+    for name in ["normal", "unknown_symbol"] {
+        rest_book::<BitgetSpot>(name, hft_types::InstId(1903));
+    }
+}
+
+fn command_response<T: VenueProtocol<FeedCtx = FeedCtx, GwCtx = GwCtx>>(channel: &str, name: &str) {
+    let (input, expected) = product_capture(T::NAME, channel, name);
+    let mut sink = RepSink::default();
+    let class = T::classify_report(MsgOp::Text, &input[..input.len().min(64)]);
+    let outcome = T::decode_report(
+        rd_spot_capture(),
+        &mut GwCtx::new(),
+        class,
+        &input,
+        &RX,
+        &mut sink,
+    )
+    .unwrap();
+    let req = outcome.req.unwrap();
+    let mut actual:Vec<_>=sink.orders.iter().map(|e| serde_json::json!({
+        "kind":"OrderEvent","what":format!("{:?}",e.what),"inst":e.inst.0,"epoch":e.epoch,"slot":e.slot.0,"gen":e.r#gen,
+        "detail":e.detail,"reject_code":e.reject_code,"exch_order_id":e.exch_order_id,"ex_ts_ns":e.ex_ts_ns
+    })).collect();
+    actual.push(serde_json::json!({"events":outcome.events,"op":format!("{:?}",req.op),"slot":req.slot,"unknown":outcome.outcome_unknown.is_some(),"raw_code":outcome.raw_code}));
+    compare(&expected, &actual);
+}
+
+#[test]
+fn bgt_313_fut_place_resp() {
+    for name in ["ok", "param_error_unregistered", "reduce_only_unregistered"] {
+        command_response::<BitgetUsdtFutures>("place-order", name);
+    }
+}
+
+#[test]
+fn bgt_314_spot_place_resp() {
+    command_response::<BitgetSpot>("place-order", "ok");
+}
+
+#[test]
+fn bgt_316_cancel_resp() {
+    command_response::<BitgetSpot>("cancel-order", "ok");
+    command_response::<BitgetUsdtFutures>("cancel-order", "unknown_order");
 }

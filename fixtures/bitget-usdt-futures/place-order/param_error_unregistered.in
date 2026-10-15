@@ -1,0 +1,1 @@
+{"event":"error","id":"p0000000500000001","code":"45111","msg":"less than the minimum order quantity 0.01ETH","connId":"conn-0001","rateLimit":[{"limit":"20","remaining":"18"}],"receiveTime":"1792043776532494","pushTime":"1792043776535260"}

@@ -371,7 +371,7 @@ AccountProtocol 使用 UTA V3 instruments/settings/info/assets/current-position/
 ## 已知限制与后续工作
 
 - **无死手**:进程崩溃到 kill-switch 撤单之间有窗口(kill-switch 心跳检测周期决定)。
-- **验收缺口**:账户配置与保证金轮询已有 warm `AccountProtocol` 接口及应用接线,与规格中的 `acct_*` 分步接口尚未统一;只读查询族、账户字段实测核验、完整金样(BGT-300–338)与基准仍未完成。公共 BBO REST、mock 与两条产品线 fuzz 入口已实现;新增固定输入均为 synthetic、待人工复核,不替代模拟盘样本与累计 fuzz 门槛。
+- **验收缺口**:账户配置与保证金轮询已有 warm `AccountProtocol` 接口及应用接线,与规格中的 `acct_*` 分步接口尚未统一;只读查询族、账户字段实测核验、完整金样(BGT-300–338)与基准仍未完成。公共 BBO REST、mock 与两条产品线 fuzz 入口已实现;固定输入按 meta 区分真实 demo 与 synthetic,人工复核和累计 fuzz 门槛仍须完成。
 - **交易所侧死手未接**:官方 `POST /api/v3/trade/countdown-cancel-all`(5–60 s,需向商务申请开通)可作为 `CountdownAccount` 死手,开通后再接;当前仍靠 kill-switch。
 - **资金费实收**:`account` 频道在资金费结算时推送,但不带品种与金额明细,`funding_settle = RateOnly`;实际结算经[资金费实额](#资金费实额)查询。真实账户的账单延迟与 timestamp 相对结算网格的偏差待核实(方法:持仓跨结算采集)。
 - **保证金数据靠轮询**:5 s 周期;若核实账户频道推送保证金率,改为 `Push`。

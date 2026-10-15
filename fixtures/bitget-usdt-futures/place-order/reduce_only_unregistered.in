@@ -1,0 +1,1 @@
+{"event":"error","id":"p0000000600000001","code":"22002","msg":"No position to close","connId":"conn-0001","rateLimit":[{"limit":"20","remaining":"19"}],"receiveTime":"1792043776894591","pushTime":"1792043776896663"}
