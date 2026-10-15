@@ -368,6 +368,7 @@ fn bin_302_usdm_aggtrade() {
 #[test]
 fn bin_303_usdm_markprice() {
     market::<Usdm>("usdm", "markPriceUpdate", "normal");
+    market::<Usdm>("usdm", "markPriceUpdate", "funding_rollover");
 }
 
 #[test]
@@ -376,14 +377,8 @@ fn bin_306_usdm_bbo_refresh() {
     for name in ["single", "error_body"] {
         let (input, expected) = fixture("usdm", "rest.ticker_bookTicker", name);
         let mut sink = VecSink::default();
-        let result = Usdm::decode_bbo_snapshot(
-            rd(),
-            &mut venue_binance::FeedCtx::USDM,
-            &[U_ETH],
-            &input,
-            &RX,
-            &mut sink,
-        );
+        let mut ctx = venue_binance::FeedCtx::USDM;
+        let result = Usdm::decode_bbo_snapshot(rd(), &mut ctx, &[U_ETH], &input, &RX, &mut sink);
         let actual = match result {
             Ok(count) => {
                 assert_eq!(count, 1);

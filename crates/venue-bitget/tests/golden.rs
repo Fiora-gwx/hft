@@ -293,6 +293,7 @@ fn bgt_305_fut_trade() {
 #[test]
 fn bgt_307_fut_ticker() {
     market("ticker", "v3_normal", 3);
+    market("ticker", "funding_rollover", 3);
 }
 
 fn report(channel: &str, name: &str) {
@@ -310,6 +311,7 @@ fn product_report<T: VenueProtocol<FeedCtx = FeedCtx, GwCtx = GwCtx>>(
     let class = T::classify_report(MsgOp::Text, &input[..input.len().min(64)]);
     let result = T::decode_report(data, &mut GwCtx::new(), class, &input, &RX, &mut sink).unwrap();
     assert!(sink.ext.is_empty());
+    assert_eq!(sink.funding, 0);
     assert_eq!(usize::from(result.events), sink.events());
     let mut actual: Vec<_> = sink
         .orders
@@ -359,6 +361,7 @@ fn bgt_322_positions() {
 #[test]
 fn bgt_323_fut_account() {
     report("account", "usdt_only");
+    report("account", "funding_balance");
 }
 
 #[test]
@@ -440,7 +443,7 @@ fn bgt_336_ro_funding() {
     use hft_venue_proto::{FundingHistoryProtocol, FundingQuery};
     let query = FundingQuery {
         start_ms: 1_792_018_800_000,
-        end_ms: 1_792_051_200_000,
+        end_ms: 1_792_051_500_000,
         page: 1,
         cursor: Default::default(),
     };
@@ -452,6 +455,13 @@ fn bgt_336_ro_funding() {
             &[serde_json::json!({"bills":result.bills.len(),"has_next":result.next.is_some()})],
         );
     }
+    let (input, expected) = capture("rest.bills", "funding");
+    let result = BitgetUsdtFutures::funding_decode(rd(), &query, 200, &input).unwrap();
+    let mut actual: Vec<_> = result.bills.iter().map(|b| {
+        serde_json::json!({"id":b.id,"inst":b.inst.0,"amount":b.amount.0.to_string(),"time_ns":b.time_ns})
+    }).collect();
+    actual.push(serde_json::json!({"has_next":result.next.is_some()}));
+    compare(&expected, &actual);
     for input in [
         br#"{"code":"00000","data":{"cursor":null}}"#.as_slice(),
         br#"{"code":"00000","data":{"list":null,"cursor":"123"}}"#,

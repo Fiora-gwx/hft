@@ -37,6 +37,20 @@ fn bgt_336_funding_bills_are_cash_not_ticker_or_wallet() {
     assert_eq!(p.bills.len(), 2);
     assert_eq!((p.bills[0].inst, p.bills[0].amount), (F_BTC, Notional(350_000)));
     assert_eq!((p.bills[1].inst, p.bills[1].amount), (F_ETH, Notional(-200_000)));
+    for (wire, expected) in [
+        ("0.00238005", 2380),
+        ("0.0000005", 0),
+        ("0.0000015", 2),
+        ("0.0000025", 2),
+    ] {
+        let precise = std::str::from_utf8(msg)
+            .unwrap()
+            .replace("0.35", wire)
+            .replace("0.20", wire);
+        let page = P::funding_decode(rd(), &query(), 200, precise.as_bytes()).unwrap();
+        assert_eq!(page.bills[0].amount, Notional(expected));
+        assert_eq!(page.bills[1].amount, Notional(-expected));
+    }
     assert!(P::funding_decode(rd(), &query(), 403, msg).is_err());
     assert!(P::funding_decode(rd(), &query(), 200, br#"{"code":"40009","data":{}}"#).is_err());
     let paged = String::from_utf8(msg.to_vec())

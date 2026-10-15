@@ -256,6 +256,8 @@ UTA 设置接受 `accountMode = unified | hybrid` 且 `accountLevel = basic`;`cl
 
 `BitgetUsdtFutures` 实现 `FundingHistoryProtocol`,HMAC 签名查询 `GET /api/v3/account/financial-records?category=USDT-FUTURES&coin=USDT`,明确起止毫秒、`limit=100` 和返回的 cursor。这不是资金账户的 `funding-financial-records`。只接受 `CONTRACT_MAIN_SETTLE_FEE_USER_IN/OUT` 的交易账单,`id` 去重,`symbol` 定位合约,`ts` 为毫秒,`amount` 为现金金额,由 IN/OUT 规范正负。交易费、转账与 RWA 分红类型不当作普通资金费。分页错误、未知合约、错误币种或非成功响应拒绝整页。来源为 [官方财务记录](https://www.bitget.com/docs/catalog/account/assets-balance) 与 [官方枚举](https://www.bitget.com/docs/uta/enum)。
 
+`amount` 在 Notional 的 -6 指数边界作一次 HalfEven 舍入,再按 IN/OUT 规范正负;原始账单金额保留在金样中。BGT-336 的真实八位小数资金费不能要求六位精确表示,每笔表示误差至多 0.5 微 USDT,不宣称原始现金逐位无损。
+
 `ticker` 的费率/下次结算时间经 Funding 进入策略;account 推送的余额不能推导逐合约收付。`RateOnly` 保留行情估算,认证账单经 [FundingPoll](../hft-venue/README.md#资金费账单轮询) 和 [ledger 实额完成](../hft-ledger/README.md#资金费) 修正金额,不等待 M9 的资金费自动对账。
 
 ### 测试网/模拟盘
@@ -362,7 +364,7 @@ UTA REST 与私有推送的 `balance` 已排除现货冻结金额,`BalanceReport
 
 AccountProtocol 使用 UTA V3 instruments/settings/info/assets/current-position/unfilled-orders。basic unified 账户要求单向/全仓、杠杆不超配置、无债务；key 要有 uta_trade 且无 withdraw，REST/WS 分别读取 UID 并匹配。现货订单显式 autoBorrow=no，demo REST 带 paptrading: 1。
 
-永续资金费读 [account/financial-records](https://www.bitget.com/docs/catalog/account/assets-balance)，过滤 CONTRACT_MAIN_SETTLE_FEE_USER_IN/OUT，按 id 去重并完成分页；funding-financial-records 是资金账户流水。显式 `list=null` 且无 cursor 是合法空末页；缺 list、空页带 cursor 均拒绝。RateOnly 真实 FundingSettle 入 journal 后仅检查差异，不重复记现金。真实 demo 资金费金额仍须按开发备忘采样核验。
+永续资金费读 [account/financial-records](https://www.bitget.com/docs/catalog/account/assets-balance)，过滤 CONTRACT_MAIN_SETTLE_FEE_USER_IN/OUT，按 id 去重并完成分页；funding-financial-records 是资金账户流水。显式 `list=null` 且无 cursor 是合法空末页；缺 list、空页带 cursor 均拒绝。RateOnly 真实 FundingSettle 入 journal 后仅检查差异，不重复记现金。真实 demo 入账样本及未覆盖范围归 BGT-336；捕获客户端不证明引擎记账通过。
 
 账户 UID 缺失仅在 refdata 明确 Unverifiable 时允许，报告 uid_keys=0、venue_uid 全零；Verified 缺失或不匹配仍失败。两把凭证都返回 UID 时必须一致。持仓总量必须非负，再按 posSide 赋号；本轮 MarginItem 只含非零仓位，liq_px 随当前持仓更新，ADL 缺失为 255。
 

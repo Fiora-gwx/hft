@@ -113,7 +113,9 @@ impl FundingHistoryProtocol for BitgetUsdtFutures {
             if ms < q.start_ms || ms > q.end_ms {
                 return Err(DecodeErr::Shape);
             }
-            let raw = json::fixed(b.amount, -6)?;
+            // Exchange cash can carry more than Notional's six fractional digits.
+            let raw = hft_types::parse_round(b.amount.as_bytes(), -6, hft_types::RoundMode::HalfEven)
+                .map_err(json::fx)?;
             // Direction is explicit in the bill type; accept signed or magnitude-form amounts.
             let amount = raw.checked_abs().ok_or(DecodeErr::Overflow)?;
             bills.push(FundingBill {

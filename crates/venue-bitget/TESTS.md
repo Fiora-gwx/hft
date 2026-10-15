@@ -1960,7 +1960,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 级别:golden
 - 里程碑:M3
 - 输入:`fixtures/bitget-usdt-futures/ticker/{v2_normal,v3_normal,interval_8h_to_4h}.in`;`interval_8h_to_4h` 为跨两次结算、周期由 8 h 变 4 h 的连续推送(采集系统 raw 中有则抽取,否则合成并标注)
-- 采样范围:v3_normal 是真实 ETHUSDT demo,指数价格带 15 位小数,HalfEven 到 RD-BGT 的 -2 价格指数;独立期望包含 mark/index/funding,首帧周期仍未知。周期切换样本仍待补齐。
+- 采样范围:v3_normal 是真实 ETHUSDT demo,指数价格带 15 位小数,HalfEven 到 RD-BGT 的 -2 价格指数;独立期望包含 mark/index/funding。funding_rollover 是 2026-10-15 08:00 UTC 结算前后三帧,同一 FeedCtx 的周期从未知 0 变为 28800 秒;8 h 变 4 h 样本仍待补齐。
 - 期望文件:同目录 `<case>.expected.jsonl`(每帧 `MarkPrice`、`IndexPrice`、`Funding` 三行;`interval_s` 依次 0、28800、14400)
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_307_fut_ticker`
 
@@ -2237,7 +2237,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 规则:[只读查询](README.md#只读查询)
 - 级别:golden
 - 里程碑:M5
-- 输入:`fixtures/bitget-usdt-futures/rest.bills/funding.in`;来源:待采集(方法 A + B)
+- 输入:`fixtures/bitget-usdt-futures/rest.bills/funding.in`;来源:真实 demo ETHUSDT 空头持仓跨 2026-10-15 08:00 UTC 结算,收入 0.00238005 USDT,账单 ts 晚于整点 1550 ms。HalfEven 到 Notional 得 2380,原值与表示值差 0.00000005 USDT 保留在 meta;实际引擎记账与扣款分支仍未实跑。
 - 期望文件:同目录 `<case>.expected.jsonl`(`funding` 行)
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_336_ro_funding`
 - 备注:依赖待核实:开发备忘第 18 条
@@ -2245,6 +2245,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 BGT-336 补充单元验收:签名 trading-account financial-records 查询、IN/OUT 实额、忽略交易费、cursor 续页及循环拒绝,失败无部分输出。实现:`tests/funding.rs::bgt_336_funding_bills_are_cash_not_ticker_or_wallet`。
 - 实现补充:空 list 且非空 cursor 返回 Shape,禁止将不完整账单窗口判为完成。
 - 真实金样:`rest.bills/{empty,trades_only}` 覆盖 null 空末页及非资金费交易流水续页;缺 list 与 null 配非空 cursor 均拒绝。实现:`tests/golden.rs::bgt_336_ro_funding`。
+- BGT-336 单元输入同时覆盖八位小数与 HalfEven 半值取偶、IN/OUT 正负方向；不把单元输入标作真实扣款样本。BGT-323 的 `account/funding_balance` 是同一结算时的真实余额推送,只产生 BalanceReport,不从余额推导 FundingSettle。
 
 
 ### BGT-337 金样:UTA 资产(只读查询)
