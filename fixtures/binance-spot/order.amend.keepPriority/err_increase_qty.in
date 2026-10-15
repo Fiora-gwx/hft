@@ -1,0 +1,1 @@
+{"id":"m0000002a00000007","status":400,"error":{"code":-2038,"msg":"Order amend (quantity increase) is not supported."},"rateLimits":[{"rateLimitType":"REQUEST_WEIGHT","interval":"MINUTE","intervalNum":1,"limit":6000,"count":54}]}

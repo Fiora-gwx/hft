@@ -42,6 +42,12 @@ pub fn rd_ignoring(names: &[&str]) -> &'static RefData {
     build(names)
 }
 
+/// The captured mark/index feed has eight fractional price digits, independently of tick size.
+pub fn rd_market() -> &'static RefData {
+    static RD: OnceLock<RefData> = OnceLock::new();
+    RD.get_or_init(|| RefData::load(&build_blob_precision(&[], false, false, true), None).unwrap())
+}
+
 fn build(names: &[&str]) -> &'static RefData {
     let blob = build_blob(names, false, false);
     match RefData::load(&blob, None) {
@@ -59,6 +65,15 @@ pub fn account_rd(unverifiable: bool) -> RefData {
 }
 
 fn build_blob(names: &[&str], usdm_prod: bool, unverifiable: bool) -> Vec<u8> {
+    build_blob_precision(names, usdm_prod, unverifiable, false)
+}
+
+fn build_blob_precision(
+    names: &[&str],
+    usdm_prod: bool,
+    unverifiable: bool,
+    full_precision: bool,
+) -> Vec<u8> {
     let mut b = RdbBuilder::new(1);
     b.created_utc_ns(1_759_276_800_000_000_000);
     for (id, name, class, px, qty) in [
@@ -72,7 +87,11 @@ fn build_blob(names: &[&str], usdm_prod: bool, unverifiable: bool) -> Vec<u8> {
             name: name.into(),
             class,
             exp: AssetExp {
-                px_exp: px,
+                px_exp: if full_precision && (id == BTC || id == ETH) {
+                    -8
+                } else {
+                    px
+                },
                 qty_exp: qty,
             },
             px_max: Px(1_000_000_000_000_000),
@@ -203,7 +222,11 @@ fn build_blob(names: &[&str], usdm_prod: bool, unverifiable: bool) -> Vec<u8> {
             kind,
             asset,
             quote: USDT,
-            tick,
+            tick: if full_precision && (asset == BTC || asset == ETH) {
+                tick * 1_000_000
+            } else {
+                tick
+            },
             lot,
             min_qty: Qty(lot),
             max_qty: Qty(100_000_000_000_000),

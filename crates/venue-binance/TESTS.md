@@ -2030,6 +2030,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-usdm/bookTicker/` 的 `normal.in`、`tiny_px_1e-8.in`(1000 倍前缀合约,极小价)、`huge_qty_1e11.in`、`sci_notation_px.in`、`dup_u.in`(同一 `u` 两条)、`missing_T.in`、`empty_qty.in`;来源:现有 collector 的 raw WAL(`fixtures extract --wal`,`source = "s3-wal"`),异常样本 `source = "synthetic"`
 - 期望文件:同目录 `<case>.expected.jsonl`(`dup_u` 两行 `Bbo` 相同、去重归运行时;`missing_T` 与 `empty_qty` 为 `{"error":…}`)
 - 实现:`crates/venue-binance/tests/golden.rs::bin_300_usdm_bookticker`
+- 采样覆盖:`testnet-capture` 覆盖正常 BBO;人工复核状态见 meta。其余分支仍待采集,只比较期望文件列出的业务字段及事件数,不宣称全量验收。
 
 ### BIN-301 金样:Usdm 分档快照 depth5/10/20
 
@@ -2049,6 +2050,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-usdm/aggTrade/` 的 `taker_buy.in`(`m = false`)、`taker_sell.in`(`m = true`)、`missing_m.in`、`overflow_qty.in`;来源:collector raw WAL 与合成
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-binance/tests/golden.rs::bin_302_usdm_aggtrade`
+- 采样覆盖:`testnet-capture` 覆盖主动买/卖;人工复核状态见 meta。其余分支仍待采集,只比较期望文件列出的业务字段及事件数,不宣称全量验收。
 
 ### BIN-303 金样:Usdm markPriceUpdate
 
@@ -2058,6 +2060,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-usdm/markPriceUpdate/` 的 `normal.in`、`interval_change.in`(一段跨两次结算且结算周期由 8 h 变为 4 h 的连续推送)、`sci_notation_rate.in`;来源:collector raw WAL(周期变化样本按 WAL 时段抽取)
 - 期望文件:同目录 `<case>.expected.jsonl`(每条推送三行:`MarkPrice`、`IndexPrice`、`Funding`;`interval_s` 按 BIN-033 规则)
 - 实现:`crates/venue-binance/tests/golden.rs::bin_303_usdm_markprice`
+- 采样覆盖:`testnet-capture` 覆盖正常标记/指数/费率;RD-BIN-8 保留八位价格小数,与交易 tick 分开;人工复核状态见 meta。其余分支仍待采集,只比较期望文件列出的业务字段及事件数,不宣称全量验收。
 
 ### BIN-304 金样:Usdm forceOrder(公共强平流)
 
@@ -2205,6 +2208,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-usdm/rest.positionSide_dual/` 的 `false.in`、`true.in`;`rest.multiAssetsMargin/` 的 `false.in`、`true.in`;`rest.symbolConfig/` 的 `all_cross.in`、`mixed.in`;`rest.feeBurn/` 的 `false.in`、`true.in`;`rest.fapi_v3_account/` 的 `ok.in`、`pm_rejected.in`;`rest.api_v3_account/` 的 `with_uid.in`、`without_uid.in`;`rest.apiRestrictions/` 的 `no_withdraw.in`、`withdraw_on.in`;每个 case 以 Config 序列组合后跑 `acct_finish`;来源:待采集(方法 B:演示环境;`sapi` 类不可用时 `source = "exchange-doc"`,方法 A);`pm_rejected` 为 `source = "exchange-doc"`
 - 期望文件:同目录 `<case>.expected.jsonl`(`AccountConfigReport` 头与杠杆条目)
 - 实现:`crates/venue-binance/tests/golden.rs::bin_318_usdm_config_queries`
+- 采样覆盖:`testnet-capture` 覆盖accountConfig 缺 UID 时 Verified 拒绝;人工复核状态见 meta。其余分支仍待采集,只比较期望文件列出的业务字段及事件数,不宣称全量验收。
 - 备注:依赖待核实:开发备忘第 5、14、16 条
 
 ### BIN-319 金样:Usdm 保证金轮询响应
@@ -2215,6 +2219,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-usdm/rest.fapi_v3_account/margin.in`、`rest.positionRisk/` 的 `two_positions.in`、`liq_px_zero.in`、`large_50k.in`、`rest.adlQuantile/normal.in`;来源:待采集(方法 B)
 - 期望文件:同目录 `<case>.expected.jsonl`(`MarginReport` 与 `PositionReport`)
 - 实现:`crates/venue-binance/tests/golden.rs::bin_319_usdm_margin_poll`
+- 采样覆盖:`testnet-capture` 覆盖零余额保证金与空持仓;人工复核状态见 meta。其余分支仍待采集,只比较期望文件列出的业务字段及事件数,不宣称全量验收。
 - 备注:依赖待核实:开发备忘第 6 条
 
 ### BIN-320 金样:Spot JSON bookTicker
@@ -2225,6 +2230,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-spot/bookTicker/` 的 `normal.in`、`sci_notation.in`、`missing_b.in`、`huge_qty.in`;来源:collector raw WAL / 合成
 - 期望文件:同目录 `<case>.expected.jsonl`(`ex_ts_ns = 0`)
 - 实现:`crates/venue-binance/tests/golden.rs::bin_320_spot_bookticker`
+- 采样覆盖:`testnet-capture` 覆盖正常 BBO;人工复核状态见 meta。其余分支仍待采集,只比较期望文件列出的业务字段及事件数,不宣称全量验收。
 
 ### BIN-321 金样:Spot combined 流分档快照 depth5/10/20
 
@@ -2244,6 +2250,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-spot/trade/` 的 `taker_buy.in`、`taker_sell.in`、`ms_unit_on_us_conn.in`(合成:毫秒量级时间戳出现在 µs 连接上,期望按 µs 原样换算)、`missing_t.in`;来源:collector raw WAL / 合成
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-binance/tests/golden.rs::bin_322_spot_trade`
+- 采样覆盖:`testnet-capture` 覆盖微秒连接上的主动买/卖;人工复核状态见 meta。其余分支仍待采集,只比较期望文件列出的业务字段及事件数,不宣称全量验收。
 
 ### BIN-323 金样:Spot BBO 补帧 REST 响应
 
@@ -2272,7 +2279,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-spot/order.place/` 的 `ack.in`、`err_-2010_balance.in`、`err_-1013_filter.in`、`http_503.in`、`unregistered.in`;`fixtures/binance-spot/order.cancel/` 的 `ok.in`、`err_-2011.in`;`fixtures/binance-spot/openOrders.cancelAll/ok.in`;来源:待采集(方法 B)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-binance/tests/golden.rs::bin_325_spot_order_responses`
-- 采样覆盖:`source = "testnet-capture"` 覆盖place Ack、过滤拒绝、撤单成功/不存在/已成交;期望独立按线值计算,核对状态见 meta。其余列出的分支仍待采集,当前测试只比较期望文件列出的业务字段及事件数,不宣称本用例全量验收。
+- 采样覆盖:`source = "testnet-capture"` 覆盖place Ack、过滤拒绝、撤单成功/不存在/已成交及 order.test 实采 429/-1003 的通用 WS 传输未知处理;期望独立按线值计算,核对状态见 meta。其余列出的分支仍待采集,当前测试只比较期望文件列出的业务字段及事件数,不宣称本用例全量验收。
 
 ### BIN-326 金样:Spot order.amend.keepPriority 与 order.status 响应
 
@@ -2282,7 +2289,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-spot/order.amend.keepPriority/` 的 `ok.in`、`err_increase_qty.in`;`fixtures/binance-spot/order.status/` 的 `filled.in`、`partially_filled.in`、`not_found.in`;来源:待采集(方法 B)
 - 期望文件:同目录 `<case>.expected.jsonl`(`avg_px = cummulativeQuoteQty / executedQty`)
 - 实现:`crates/venue-binance/tests/golden.rs::bin_326_spot_amend_status`
-- 采样覆盖:`source = "testnet-capture"` 覆盖减量改单成功与 NEW/FILLED/CANCELED 查询;期望独立按线值计算,核对状态见 meta。其余列出的分支仍待采集,当前测试只比较期望文件列出的业务字段及事件数,不宣称本用例全量验收。
+- 采样覆盖:`source = "testnet-capture"` 覆盖减量改单成功、增量改单未登记 -2038 结果未知与 NEW/FILLED/CANCELED 查询;期望独立按线值计算,核对状态见 meta。其余列出的分支仍待采集,当前测试只比较期望文件列出的业务字段及事件数,不宣称本用例全量验收。
 
 ### BIN-327 金样:Spot executionReport 全状态与网页单成交
 
@@ -2292,7 +2299,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-spot/executionReport/` 的 `new.in`、`partially_filled.in`、`filled.in`、`canceled.in`、`expired.in`、`replaced.in`、`web_order_fill.in`、`fee_bnb.in`(BNB 抵扣)、`fee_base_asset.in`(不抵扣,扣所得 BTC)、`dup_trade.in`;来源:待采集(方法 B:演示环境分别开关 BNB 抵扣各成交一笔,开发备忘第 7 条)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-binance/tests/golden.rs::bin_327_spot_execution_report`
-- 采样覆盖:`source = "testnet-capture"` 覆盖NEW/FILLED/CANCELED/EXPIRED/REPLACED 与 base asset 手续费;期望独立按线值计算,核对状态见 meta。其余列出的分支仍待采集,当前测试只比较期望文件列出的业务字段及事件数,不宣称本用例全量验收。
+- 采样覆盖:`source = "testnet-capture"` 覆盖NEW/PARTIALLY_FILLED/FILLED/CANCELED/EXPIRED/REPLACED、base asset 手续费与同一订单连续部分成交;dup_trade 是实采部分成交帧的显式合成重复;期望独立按线值计算,核对状态见 meta。其余列出的分支仍待采集,当前测试只比较期望文件列出的业务字段及事件数,不宣称本用例全量验收。
 - 备注:依赖待核实:开发备忘第 3、7 条
 
 ### BIN-328 金样:Spot outboundAccountPosition、可忽略、未知与 eventStreamTerminated
@@ -2313,6 +2320,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-spot/rest.api_v3_account/` 的 `spot_with_uid.in`、`margin_account.in`、`without_uid.in`;`rest.apiRestrictions/` 的 `no_withdraw.in`、`withdraw_on.in`;`rest.bnbBurn/` 的 `on.in`、`off.in`;来源:待采集(方法 B;演示环境无 `sapi` 时方法 A + `source = "exchange-doc"`)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-binance/tests/golden.rs::bin_329_spot_config_queries`
+- 采样覆盖:`testnet-capture` 覆盖账户 UID/余额与不可用的 SAPI HTTP 404;人工复核状态见 meta。其余分支仍待采集,只比较期望文件列出的业务字段及事件数,不宣称全量验收。
 - 备注:依赖待核实:开发备忘第 5、14 条
 
 ### BIN-330 金样:Usdm 与 Spot 挂单列表(只读查询)

@@ -5,10 +5,13 @@ import json
 import os
 from pathlib import Path
 import stat
+import sys
 import tempfile
 import urllib.parse
 import urllib.request
 
+# This entrypoint can run from current-core; do not mutate its checksummed file set.
+sys.dont_write_bytecode = True
 from release import ReleaseError, sha256, version
 
 

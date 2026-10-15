@@ -1,0 +1,3 @@
+{"kind":"MarkPrice","venue":1,"inst":1042,"ex_ts_ns":0,"ex_send_ns":1792041911000000000,"px":"8116307690217"}
+{"kind":"IndexPrice","venue":1,"inst":1042,"ex_ts_ns":0,"ex_send_ns":1792041911000000000,"px":"8118002304348"}
+{"kind":"Funding","venue":1,"inst":1042,"ex_ts_ns":0,"ex_send_ns":1792041911000000000,"rate":"100000","next_funding_ns":1792051200000000000,"interval_s":0}

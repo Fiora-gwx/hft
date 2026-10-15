@@ -3,6 +3,7 @@
 use crate::support::{RX, RepSink, rd};
 use hft_event::GwOp;
 use hft_types::{AccountId, InstId};
+use hft_venue_proto::account::{AccountProtocol, Query, State};
 use hft_venue_proto::{LoginResult, MsgOp, RestOrigin, RestWhat, VenueProtocol};
 use serde_json::{Value, json};
 use std::{fs, path::PathBuf};
@@ -50,32 +51,34 @@ fn report<P: VenueProtocol<GwCtx = GwCtx>>(product: &str, channel: &str, name: &
     };
     let mut sink = RepSink::default();
     let mut ctx = GwCtx::default();
-    let outcome = if channel.starts_with("rest.") {
-        let origin = RestOrigin {
-            what: if channel == "rest.countdownCancelAll" {
-                RestWhat::DeadMan
-            } else {
-                RestWhat::Order
-            },
-            req: Some(hft_venue_proto::ReqRef {
-                slot: 0,
-                r#gen: 0,
-                op: GwOp::CancelAll,
-            }),
-            inst: InstId(0),
-        };
-        P::decode_rest(rd(), &mut ctx, &origin, 200, &input, &rx, &mut sink)
-    } else {
-        let class = P::classify_report(MsgOp::Text, &input[..input.len().min(64)]);
-        P::decode_report(rd(), &mut ctx, class, &input, &rx, &mut sink)
+    let mut outcome = hft_venue_proto::ReportOutcome::default();
+    let mut events = 0;
+    for input in input.split(|b| *b == b'\n').filter(|p| !p.is_empty()) {
+        outcome = if channel.starts_with("rest.") {
+            let origin = RestOrigin {
+                what: if channel == "rest.countdownCancelAll" {
+                    RestWhat::DeadMan
+                } else {
+                    RestWhat::Order
+                },
+                req: Some(hft_venue_proto::ReqRef {
+                    slot: 0,
+                    r#gen: 0,
+                    op: GwOp::CancelAll,
+                }),
+                inst: InstId(0),
+            };
+            P::decode_rest(rd(), &mut ctx, &origin, 200, input, &rx, &mut sink)
+        } else {
+            let class = P::classify_report(MsgOp::Text, &input[..input.len().min(64)]);
+            P::decode_report(rd(), &mut ctx, class, input, &rx, &mut sink)
+        }
+        .unwrap_or_else(|e| panic!("{product}/{channel}/{name}: {e:?}"));
+        events += usize::from(outcome.events);
     }
-    .unwrap_or_else(|e| panic!("{product}/{channel}/{name}: {e:?}"));
     assert!(sink.ext.is_empty(), "unexpected external fill: {sink:?}");
     assert!(sink.positions.is_empty() && sink.funding.is_empty());
-    assert_eq!(
-        usize::from(outcome.events),
-        sink.orders.len() + sink.balances.len()
-    );
+    assert_eq!(events, sink.orders.len() + sink.balances.len());
     let mut actual: Vec<Value> = sink
         .orders
         .iter()
@@ -103,6 +106,8 @@ fn report<P: VenueProtocol<GwCtx = GwCtx>>(product: &str, channel: &str, name: &
     if channel.starts_with("rest.") {
         actual.push(json!({"events":outcome.events,"raw_code":outcome.raw_code,
             "ctl":format!("{:?}",outcome.ctl)}));
+    } else if outcome.ctl != hft_venue_proto::ReportCtl::None {
+        actual.push(json!({"ctl":format!("{:?}",outcome.ctl)}));
     }
     compare(&expected, &actual, &format!("{product}/{channel}/{name}"));
 }
@@ -162,6 +167,7 @@ fn bin_324_spot_session() {
 
 #[test]
 fn bin_325_spot_order_responses() {
+    report::<Spot>("spot", "order.test", "rate_limited_429");
     for name in ["ack", "err_-1013_filter"] {
         report::<Spot>("spot", "order.place", name);
     }
@@ -173,6 +179,7 @@ fn bin_325_spot_order_responses() {
 #[test]
 fn bin_326_spot_amend_status() {
     report::<Spot>("spot", "order.amend.keepPriority", "ok");
+    report::<Spot>("spot", "order.amend.keepPriority", "err_increase_qty");
     for name in ["new", "filled", "canceled"] {
         report::<Spot>("spot", "order.status", name);
     }
@@ -187,6 +194,9 @@ fn bin_327_spot_execution_report() {
         "expired",
         "replaced",
         "fee_base_asset",
+        "partially_filled",
+        "partial_then_filled",
+        "dup_trade",
     ] {
         report::<Spot>("spot", "executionReport", name);
     }
@@ -195,4 +205,160 @@ fn bin_327_spot_execution_report() {
 #[test]
 fn bin_328_spot_user_stream_misc() {
     report::<Spot>("spot", "outboundAccountPosition", "normal");
+}
+
+fn account_balances(state: &State) -> Vec<Value> {
+    let mut rows: Vec<_> = state.balances.iter().collect();
+    rows.sort_by_key(|b| b.asset.0);
+    rows.into_iter()
+        .map(|b| {
+            json!({"kind":"BalanceReport", "asset":b.asset.0,
+        "free":b.free.0.to_string(), "locked":b.locked.0.to_string()})
+        })
+        .collect()
+}
+
+#[test]
+fn bin_318_usdm_config_queries() {
+    let (input, expected) = fixture("usdm", "rest.accountConfig", "missing_uid");
+    let mut state = State::default();
+    let error =
+        Usdm::account_decode(rd(), AccountId(2), &Query::Settings, 200, &input, 10, &mut state).unwrap_err();
+    compare(
+        &expected,
+        &[json!({"error":format!("{error:?}")})],
+        "verified UID is required",
+    );
+    assert!(state.config.is_none());
+}
+
+#[test]
+fn bin_319_usdm_margin_poll() {
+    let (input, expected) = fixture("usdm", "rest.fapi_v3_account", "margin");
+    let mut state = State::default();
+    Usdm::account_decode(rd(), AccountId(2), &Query::Balances, 200, &input, 10, &mut state).unwrap();
+    let m = state.margin.unwrap();
+    let mut actual = account_balances(&state);
+    actual.push(
+        json!({"kind":"MarginReport", "margin_balance":m.margin_balance.0.to_string(),
+        "maint_margin":m.maint_margin.0.to_string(), "avail_margin":m.avail_margin.0.to_string(),
+        "margin_ratio":m.margin_ratio.0.to_string()}),
+    );
+    compare(&expected, &actual, "empty futures wallet");
+    let (input, expected) = fixture("usdm", "rest.positionRisk", "empty");
+    Usdm::account_decode(rd(), AccountId(2), &Query::Positions, 200, &input, 10, &mut state).unwrap();
+    compare(
+        &expected,
+        &[
+            json!({"positions_nonzero":state.positions.iter().filter(|p|p.qty.0!=0).count(),
+        "margin_items":state.margin_items.len()}),
+        ],
+        "no positions",
+    );
+}
+
+#[test]
+fn bin_329_spot_config_queries() {
+    let (input, expected) = fixture("spot", "rest.api_v3_account", "spot_with_uid");
+    let mut state = State::default();
+    Spot::account_decode(rd(), AccountId(1), &Query::Settings, 200, &input, 10, &mut state).unwrap();
+    Spot::account_decode(rd(), AccountId(1), &Query::Balances, 200, &input, 10, &mut state).unwrap();
+    let cfg = state.config.unwrap();
+    let end = cfg
+        .venue_uid
+        .iter()
+        .position(|b| *b == 0)
+        .unwrap_or(cfg.venue_uid.len());
+    let mut actual = vec![json!({"kind":"AccountConfigReport",
+        "venue_uid":std::str::from_utf8(&cfg.venue_uid[..end]).unwrap(),
+        "position_mode":cfg.position_mode,"margin_mode":cfg.margin_mode,
+        "multi_asset":cfg.multi_asset,"uid_keys":cfg.uid_keys})];
+    actual.extend(account_balances(&state));
+    compare(&expected, &actual, "spot account UID and balances");
+    for channel in ["rest.apiRestrictions", "rest.bnbBurn"] {
+        let (input, expected) = fixture("spot", channel, "unavailable_http_404");
+        let before = format!("{state:?}");
+        let error = Spot::account_decode(
+            rd(),
+            AccountId(1),
+            &Query::Permissions,
+            404,
+            &input,
+            10,
+            &mut state,
+        )
+        .unwrap_err();
+        compare(&expected, &[json!({"error":format!("{error:?}")})], channel);
+        assert_eq!(format!("{state:?}"), before);
+    }
+}
+
+fn market<P: VenueProtocol<FeedCtx = venue_binance::FeedCtx>>(product: &str, channel: &str, name: &str) {
+    use hft_venue_proto::testkit::{MdRec, VecSink};
+    let (input, expected) = fixture(product, channel, name);
+    let data = if channel == "markPriceUpdate" {
+        crate::support::rd_market()
+    } else {
+        rd()
+    };
+    let route = hft_venue_proto::RouteId(if channel == "bookTicker" { 1 } else { 3 });
+    let mut ctx = if product == "spot" {
+        venue_binance::FeedCtx::SPOT
+    } else {
+        venue_binance::FeedCtx::USDM
+    };
+    let class = P::classify(route, MsgOp::Text, &input[..input.len().min(64)]);
+    let mut sink = VecSink::default();
+    let result = P::decode_md(data, &mut ctx, class, &input, &RX, &mut sink).unwrap();
+    assert_eq!(usize::from(result.events), expected.len());
+    let actual: Vec<_> = sink
+        .md
+        .iter()
+        .map(|e| {
+            let mut row = match e {
+                MdRec::Bbo(b) => json!({"kind":"Bbo", "bid_px":b.bid_px.0.to_string(),
+                "bid_qty":b.bid_qty.0.to_string(),"ask_px":b.ask_px.0.to_string(),
+                "ask_qty":b.ask_qty.0.to_string(),"update_id":b.update_id}),
+                MdRec::Trade(t) => json!({"kind":"Trade","px":t.px.0.to_string(),
+                "qty":t.qty.0.to_string(),"trade_id":t.trade_id,"taker_side":format!("{:?}",t.taker_side)}),
+                MdRec::Mark(m) => json!({"kind":"MarkPrice","px":m.px.0.to_string()}),
+                MdRec::Index(m) => json!({"kind":"IndexPrice","px":m.px.0.to_string()}),
+                MdRec::Funding(f) => json!({"kind":"Funding","rate":f.rate.0.to_string(),
+                "next_funding_ns":f.next_funding_ns,"interval_s":f.interval_s}),
+                other => panic!("unexpected market event: {other:?}"),
+            };
+            let h = e.market_hdr().unwrap();
+            row["venue"] = h.venue.0.into();
+            row["inst"] = h.inst.0.into();
+            row["ex_ts_ns"] = h.ex_ts_ns.into();
+            row["ex_send_ns"] = h.ex_send_ns.into();
+            row
+        })
+        .collect();
+    compare(&expected, &actual, &format!("{product}/{channel}/{name}"));
+}
+
+#[test]
+fn bin_300_usdm_bookticker() {
+    market::<Usdm>("usdm", "bookTicker", "normal");
+}
+#[test]
+fn bin_302_usdm_aggtrade() {
+    for name in ["taker_buy", "taker_sell"] {
+        market::<Usdm>("usdm", "aggTrade", name);
+    }
+}
+#[test]
+fn bin_303_usdm_markprice() {
+    market::<Usdm>("usdm", "markPriceUpdate", "normal");
+}
+#[test]
+fn bin_320_spot_bookticker() {
+    market::<Spot>("spot", "bookTicker", "normal");
+}
+#[test]
+fn bin_322_spot_trade() {
+    for name in ["taker_buy", "taker_sell"] {
+        market::<Spot>("spot", "trade", name);
+    }
 }
