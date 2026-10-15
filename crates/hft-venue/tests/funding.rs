@@ -42,6 +42,7 @@ impl FundingHistoryProtocol for StubProto {
                 page: q.page + 1,
                 ..q.clone()
             }),
+            skipped_foreign: 0,
         })
     }
 }

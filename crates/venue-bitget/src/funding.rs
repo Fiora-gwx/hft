@@ -96,6 +96,7 @@ impl FundingHistoryProtocol for BitgetUsdtFutures {
             _ => None,
         };
         let mut bills = Vec::with_capacity(r.data.list.len());
+        let mut skipped_foreign = 0u32;
         for b in r.data.list {
             let credit = match b.kind {
                 "CONTRACT_MAIN_SETTLE_FEE_USER_IN" => true,
@@ -105,10 +106,11 @@ impl FundingHistoryProtocol for BitgetUsdtFutures {
             if b.coin != "USDT" || b.category != "USDT-FUTURES" {
                 return Err(DecodeErr::Shape);
             }
-            let inst = rd
-                .symbols(Self::VENUE)
-                .get(b.symbol.as_bytes())
-                .ok_or(DecodeErr::Shape)?;
+            // A shared account can hold bills of contracts outside refdata: skip, count.
+            let Some(inst) = rd.symbols(Self::VENUE).get(b.symbol.as_bytes()) else {
+                skipped_foreign = skipped_foreign.checked_add(1).ok_or(DecodeErr::Overflow)?;
+                continue;
+            };
             let ms = b.ts.parse::<i64>().map_err(|_| DecodeErr::Number)?;
             if ms < q.start_ms || ms > q.end_ms {
                 return Err(DecodeErr::Shape);
@@ -125,6 +127,10 @@ impl FundingHistoryProtocol for BitgetUsdtFutures {
                 amount: Notional(if credit { amount } else { -amount }),
             });
         }
-        Ok(FundingPage { bills, next })
+        Ok(FundingPage {
+            bills,
+            next,
+            skipped_foreign,
+        })
     }
 }

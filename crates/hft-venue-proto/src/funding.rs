@@ -29,10 +29,14 @@ pub struct FundingPage {
     pub bills: Vec<FundingBill>,
     /// `None` is the only proof that the window has been exhausted.
     pub next: Option<FundingQuery>,
+    /// Well-formed funding bills of symbols outside this venue's refdata (e.g. a shared account
+    /// trading other contracts): skipped, not decoded, and counted here so it is not silent.
+    pub skipped_foreign: u32,
 }
 
 /// Optional pure protocol extension. The caller owns HTTP, pacing, retries and journal ingress.
-/// No callbacks or partial output: any malformed row rejects the entire page.
+/// No callbacks or partial output: any malformed row rejects the entire page (a bill whose
+/// symbol is not in refdata is not malformed: it is skipped and counted in `skipped_foreign`).
 pub trait FundingHistoryProtocol: VenueProtocol {
     fn funding_request(
         cfg: &VenueCfg,

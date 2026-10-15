@@ -3604,10 +3604,11 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 - 里程碑:M3
 - 前置:`G0`,`Stub<2048, V_REST_CANCEL_ALL>`,`StubCfg{account_cancel_all: true, rest_query: false}`;gw 的 REST 池已交接(原 VEN-206.5;M1.5 的 gw 对 REST 通道的命令回 `NoConn`)
 - 步骤:
-  1. 处理 `CancelAll{account: A1, inst: 0}`
+  1. 处理 `CancelAll{account: A1, inst: S1}`
 - 期望:
   - 无 WS 帧;1 个 REST 请求(`encode_rest`);1 条 `SendReport{CancelAll, Written}`
 - 实现:`crates/hft-venue/tests/gw_rest.rs::ven_392_cancel_all_uses_declared_rest_channel`
+- 补充(live testnet BUG-4):OMS 发出的账户级 `CancelAll{inst: 0}` 在 REST 通道无编码(Binance USD-M 拒绝 inst 0 → 原先 `EncodeError`);现按展开规则走 ① 账户级 → ② 逐 inst → ③ 逐单 `Cancel`,不调用 `encode_rest`,1 条 `SendReport{CancelAll, Written}`。`StubCfg{account_cancel_all: false, inst_cancel_all: false}`,A1 三张活动单;实现:`gw_rest.rs::ven_392_account_cancel_all_on_rest_channel_expands_per_order`
 
 ### VEN-393 gw REST 连接的轮询节拍
 

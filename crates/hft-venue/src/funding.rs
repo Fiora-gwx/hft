@@ -47,6 +47,8 @@ pub struct FundingPoll<P: FundingHistoryProtocol> {
     bills: Vec<FundingBill>,
     ready: Vec<FundingSettle>,
     sent: usize,
+    /// Bills of symbols outside refdata skipped by the decoder (diagnostic, per validated page).
+    skipped_foreign: u64,
     _protocol: PhantomData<P>,
 }
 
@@ -74,6 +76,7 @@ impl<P: FundingHistoryProtocol> FundingPoll<P> {
             bills: Vec::new(),
             ready: Vec::new(),
             sent: 0,
+            skipped_foreign: 0,
             _protocol: PhantomData,
         })
     }
@@ -155,6 +158,9 @@ impl<P: FundingHistoryProtocol> FundingPoll<P> {
                 staged.push(bill);
             }
         }
+        self.skipped_foreign = self
+            .skipped_foreign
+            .saturating_add(u64::from(page.skipped_foreign));
         if let Some(next) = page.next {
             self.bills = staged;
             self.query = Some(next);
@@ -214,6 +220,11 @@ impl<P: FundingHistoryProtocol> FundingPoll<P> {
             return Vec::new();
         }
         std::mem::take(&mut self.ready)
+    }
+
+    /// Total bills of off-refdata symbols the decoder skipped (shared-account noise).
+    pub fn skipped_foreign(&self) -> u64 {
+        self.skipped_foreign
     }
 
     pub fn pending(&self) -> &[FundingSettle] {

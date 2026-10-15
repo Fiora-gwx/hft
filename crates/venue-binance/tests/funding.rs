@@ -94,3 +94,23 @@ fn bin_332_ed25519_income_history_signing() {
     key.verify(query.as_bytes(), &Signature::from_slice(&signature).unwrap())
         .unwrap();
 }
+
+/// A shared account can carry funding income of contracts outside refdata: skipped and counted,
+/// the in-refdata row still decodes; wrong asset rows are ignored and out-of-window rows reject.
+#[test]
+fn bin_332_foreign_symbol_bill_skipped_and_counted() {
+    let body = r#"[
+        {"symbol":"BTCUSDT","incomeType":"FUNDING_FEE","income":"-0.35","asset":"USDT","time":1790006400000,"tranId":7},
+        {"symbol":"NOTINREFDATAUSDT","incomeType":"FUNDING_FEE","income":"0.35","asset":"USDT","time":1790006400000,"tranId":8}
+    ]"#;
+    let page = Usdm::funding_decode(rd(), &query(), 200, body.as_bytes()).unwrap();
+    assert!(page.next.is_none());
+    assert_eq!(page.skipped_foreign, 1);
+    assert_eq!(page.bills.len(), 1);
+    assert_eq!(
+        (page.bills[0].inst, page.bills[0].amount),
+        (U_BTC, Notional(-350_000))
+    );
+    let late = body.replacen("1790006400000", "1790006500000", 1);
+    assert!(Usdm::funding_decode(rd(), &query(), 200, late.as_bytes()).is_err());
+}

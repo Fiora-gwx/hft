@@ -582,7 +582,7 @@ pub enum ExchIdHint { Resolved { epoch: u16, slot: SlotId, gen: u32 }, Recorded,
 
 ### 认证资金费历史扩展
 
-`FundingHistoryProtocol` 由需要实际资金费账单的永续产品线实现。`funding_request` 生成带签名的 GET(`redacted=true`),`funding_decode` 只在 warm 任务调用,返回 `FundingPage`。`FundingQuery` 固定包含两端均包含的 UTC 毫秒窗口及页码/游标;`FundingBill` 带交易所账单 ID、inst、原始时刻与有符号现金金额(`Notional`),金额不取费率或余额。页面错误不产出部分结果;只有 `next=None` 才表示完整窗口。HTTP 状态、业务错误与分页失败必须交还调用者重试。
+`FundingHistoryProtocol` 由需要实际资金费账单的永续产品线实现。`funding_request` 生成带签名的 GET(`redacted=true`),`funding_decode` 只在 warm 任务调用,返回 `FundingPage`。`FundingQuery` 固定包含两端均包含的 UTC 毫秒窗口及页码/游标;`FundingBill` 带交易所账单 ID、inst、原始时刻与有符号现金金额(`Notional`),金额不取费率或余额。页面错误不产出部分结果;`symbol` 不在 refdata 的账单不算错误:跳过并计入 `FundingPage.skipped_foreign`(`FundingPoll::skipped_foreign()` 累计)。只有 `next=None` 才表示完整窗口。HTTP 状态、业务错误与分页失败必须交还调用者重试。
 ### Warm 账户扩展
 
 `account::AccountProtocol` 提供纯 `account_request` / `account_decode`，覆盖规则、账户模式/权限、余额/持仓、撤销遗留订单、listenKey 和结算流水。State 是一轮观察结果，不拥有账本；允许 warm 分配。`margin_items` 保存本轮非零持仓的强平价，未观察到 ADL 时为 255；消失持仓的 PositionReport 为零，但不留下旧 MarginItem。规则使用 refdata 的 wire 指数归一化后精确匹配定点配置，金额转 Notional 时 HalfEven；错误不带凭证或响应正文。

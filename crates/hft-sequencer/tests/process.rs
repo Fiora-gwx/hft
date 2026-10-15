@@ -2266,3 +2266,36 @@ mod seq_136 {
         }
     }
 }
+
+/// A fresh (non-recovery) boot announces the engine epoch to every live gw while processing
+/// the first `EngineClock`, ahead of the first `Place` on that out ring: the gw encodes its
+/// epoch in the client order id and the OMS matches reports on (slot, gen, epoch).
+#[test]
+fn seq_263_fresh_boot_set_epoch_before_place() {
+    let mut h = steady();
+    let epoch = h.epoch();
+    assert!(epoch >= 1);
+    let m = s1_on_bbo(&mut h, |hx| vec![open_buy(hx, A1)]);
+    let d = decisions(&h.since(m))[0].1;
+    assert_eq!(d.reject, 0);
+    let out = &h.io_ref().out;
+    let first_place = out
+        .iter()
+        .position(|(r, c)| c.op == hft_event::GwOp::Place && *r == hft_sequencer::OutRing::Venue(d.venue))
+        .expect("place pushed");
+    let se = out[..first_place]
+        .iter()
+        .find(|(r, c)| {
+            c.op == hft_event::GwOp::SetEpoch
+                && *r == hft_sequencer::OutRing::Venue(d.venue)
+                && c.account == d.account
+        })
+        .expect("SetEpoch before the first Place");
+    assert_eq!(se.1.epoch(), epoch);
+    // Exactly one SetEpoch per (live venue, account): none for the sim ring.
+    assert!(
+        out.iter()
+            .filter(|(_, c)| c.op == hft_event::GwOp::SetEpoch)
+            .all(|(r, _)| matches!(r, hft_sequencer::OutRing::Venue(_)))
+    );
+}

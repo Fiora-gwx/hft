@@ -292,11 +292,48 @@ fn ven_228_rest_failures_preserve_unknown_outcome() {
 fn ven_392_cancel_all_uses_declared_rest_channel() {
     let mut h = setup::<V_REST_CANCEL_ALL>();
     stub::take_log();
-    h.cmd(base(GwOp::CancelAll, A1));
+    let mut c = base(GwOp::CancelAll, A1);
+    c.inst = S1;
+    h.cmd(c);
     h.poll(4000);
     assert_eq!(statuses(&h.reps()), vec![SendStatus::Written]);
     assert_eq!(stub::calls("encode_rest").len(), 1);
     assert!(stub::calls("encode").is_empty());
+}
+/// An account-wide CancelAll (inst 0, as the OMS emits it) on a venue whose per-inst cancel-all
+/// is REST (Binance USD-M) has no REST encoding: it expands into per-order cancels instead of
+/// failing with `EncodeError`.
+#[test]
+fn ven_392_account_cancel_all_on_rest_channel_expands_per_order() {
+    stub::set_cfg(|c| {
+        c.account_cancel_all = false;
+        c.inst_cancel_all = false;
+    });
+    let mut h = setup::<V_REST_CANCEL_ALL>();
+    for (slot, inst) in [(1, S1), (2, S1), (3, S2)] {
+        let p = h.place(A1, slot, 1, inst, false);
+        h.cmd(p);
+    }
+    h.poll(3500);
+    h.reps();
+    stub::take_log();
+    h.cmd(base(GwOp::CancelAll, A1));
+    h.poll(4000);
+    assert_eq!(statuses(&h.reps()), vec![SendStatus::Written]);
+    assert!(stub::calls("encode_rest").is_empty());
+    let enc: Vec<String> = stub::calls("encode").into_iter().map(|c| c.arg).collect();
+    assert_eq!(enc[0], "CancelAll slot=0 inst=0", "{enc:?}");
+    // Per order: one batch of the three live orders (or one Cancel encode each).
+    let batch = stub::calls("encode_batch");
+    let cancels = enc.iter().filter(|e| e.starts_with("Cancel ")).count();
+    assert!(
+        batch.iter().any(|b| b.arg == "3") || cancels == 3,
+        "{enc:?} {batch:?}"
+    );
+    stub::set_cfg(|c| {
+        c.account_cancel_all = true;
+        c.inst_cancel_all = true;
+    });
 }
 #[test]
 fn ven_391_cancel_all_sweep_decodes_owned_open_orders() {
