@@ -1025,6 +1025,8 @@ BIN-063 对两份不同凭证构建同值小模板,显式借用凭证签名得�
 | BIN-091.5 | 字段缺失 | `None`,事件照常产出 |
 | BIN-091.6 | ORDERS `interval = "DAY"`,`intervalNum = 1`,100/200000 | `RateObs{Orders, 100, 200000, 86400000}` |
 
+同一用例覆盖 demo 实采 `REQUEST_WEIGHT(-1,-1)` 与正常 ORDERS 并存及仅有不可用观测:业务回报照常产出,只选有效桶;其他负数组合与 u32 越界仍拒绝。实采回归见 BIN-308 的 `err_-2019.in`。
+
 ### BIN-092 错误码按两张表映射为 Reject 或结果未知
 
 - 规则:[结果未知码表](README.md#结果未知码表)、[5. 回报解码](README.md#5-回报解码)、[hft-venue-proto 契约 6](../hft-venue-proto/README.md#实现方必须遵守的契约)、[hft-venue-proto 契约 8](../hft-venue-proto/README.md#实现方必须遵守的契约)
@@ -2093,6 +2095,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-usdm/session.logon/` 的 `ok.in`、`bad_signature.in`(`-1022`)、`clock_skew.in`(`-1021`);来源:待采集(方法 B:演示环境 ws-fapi;登录帧本身不入库,只存响应)
 - 期望文件:同目录 `<case>.expected.jsonl`(`LoginResult` 渲染)
 - 实现:`crates/venue-binance/tests/golden.rs::bin_307_usdm_logon`
+- 采样覆盖:`source = "testnet-capture"` 覆盖三个登录响应;期望独立按线值计算,核对状态见 meta。其余列出的分支仍待采集,当前测试只比较期望文件列出的业务字段及事件数,不宣称本用例全量验收。
 - 备注:依赖待核实:开发备忘第 14 条(演示环境 ws-fapi 端点)
 
 ### BIN-308 金样:Usdm order.place 响应与错误码
@@ -2103,6 +2106,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-usdm/order.place/` 的 `ack.in`、`err_-1007.in`、`err_-1021.in`、`err_-2019.in`、`err_-2022.in`、`err_-5022.in`、`err_-1013.in`、`err_-1111.in`、`err_-4164.in`、`err_-4061.in`、`http_429.in`、`http_418.in`、`http_503.in`、`unregistered_-9999.in`(合成)、`rate_limits_3types.in`;来源:待采集(方法 B:演示环境逐个构造:精度错、余额不足、GTX 吃单、reduceOnly 无仓位、过期时间戳);拿不到的码 `source = "exchange-doc"`
 - 期望文件:同目录 `<case>.expected.jsonl`(`Ack`;登记为确定拒绝的码为 `Reject`;结果未知与未登记码为 `{"outcome_unknown":…,"raw_code":…}`,没有 `Reject`)
 - 实现:`crates/venue-binance/tests/golden.rs::bin_308_usdm_place_responses`
+- 采样覆盖:`source = "testnet-capture"` 覆盖余额不足、精度、最小金额、持仓方向与未登记 -4118;期望独立按线值计算,核对状态见 meta。其余列出的分支仍待采集,当前测试只比较期望文件列出的业务字段及事件数,不宣称本用例全量验收。
 
 ### BIN-309 金样:Usdm order.modify 响应
 
@@ -2121,6 +2125,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-usdm/order.cancel/` 的 `ok.in`、`err_-2011_filled.in`、`http_503.in`;来源:待采集(方法 B:先成交再撤得 `-2011`)
 - 期望文件:同目录 `<case>.expected.jsonl`(`-2011` → `CancelReject`)
 - 实现:`crates/venue-binance/tests/golden.rs::bin_310_usdm_cancel_responses`
+- 采样覆盖:`source = "testnet-capture"` 覆盖未知订单 -2011;期望独立按线值计算,核对状态见 meta。其余列出的分支仍待采集,当前测试只比较期望文件列出的业务字段及事件数,不宣称本用例全量验收。
 
 ### BIN-311 金样:Usdm order.status 响应
 
@@ -2130,6 +2135,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-usdm/order.status/` 的 `filled_avgPrice.in`、`partially_filled.in`、`new.in`、`canceled.in`、`expired.in`、`not_found_-2013.in`;来源:待采集(方法 B)
 - 期望文件:同目录 `<case>.expected.jsonl`(`QueryResult`,带 `cum_filled` 与 `avg_px`;`-2013` 为 NotFound 形态)
 - 实现:`crates/venue-binance/tests/golden.rs::bin_311_usdm_order_status`
+- 采样覆盖:`source = "testnet-capture"` 覆盖NotFound -2013;期望独立按线值计算,核对状态见 meta。其余列出的分支仍待采集,当前测试只比较期望文件列出的业务字段及事件数,不宣称本用例全量验收。
 - 备注:依赖待核实:开发备忘第 19 条
 
 ### BIN-312 金样:Usdm 全撤与死手 REST 响应
@@ -2140,6 +2146,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-usdm/rest.allOpenOrders/` 的 `ok.in`、`http_429.in`;`fixtures/binance-usdm/rest.countdownCancelAll/` 的 `ok.in`、`err_body.in`;来源:待采集(方法 B)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-binance/tests/golden.rs::bin_312_usdm_cancel_all_dead_man`
+- 采样覆盖:`source = "testnet-capture"` 覆盖全撤与死手成功;期望独立按线值计算,核对状态见 meta。其余列出的分支仍待采集,当前测试只比较期望文件列出的业务字段及事件数,不宣称本用例全量验收。
 - 备注:依赖待核实:开发备忘第 10 条
 
 ### BIN-313 金样:Usdm ORDER_TRADE_UPDATE 各状态
@@ -2255,6 +2262,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-spot/session.logon/` 的 `ok.in`、`bad_signature.in`;`fixtures/binance-spot/userDataStream.subscribe/` 的 `ok.in`、`error.in`;来源:待采集(方法 B:演示环境 ws-api)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-binance/tests/golden.rs::bin_324_spot_session`
+- 采样覆盖:`source = "testnet-capture"` 覆盖三个登录响应与订阅成功/重复订阅失败;期望独立按线值计算,核对状态见 meta。其余列出的分支仍待采集,当前测试只比较期望文件列出的业务字段及事件数,不宣称本用例全量验收。
 
 ### BIN-325 金样:Spot order.place、order.cancel、openOrders.cancelAll 响应
 
@@ -2264,6 +2272,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-spot/order.place/` 的 `ack.in`、`err_-2010_balance.in`、`err_-1013_filter.in`、`http_503.in`、`unregistered.in`;`fixtures/binance-spot/order.cancel/` 的 `ok.in`、`err_-2011.in`;`fixtures/binance-spot/openOrders.cancelAll/ok.in`;来源:待采集(方法 B)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-binance/tests/golden.rs::bin_325_spot_order_responses`
+- 采样覆盖:`source = "testnet-capture"` 覆盖place Ack、过滤拒绝、撤单成功/不存在/已成交;期望独立按线值计算,核对状态见 meta。其余列出的分支仍待采集,当前测试只比较期望文件列出的业务字段及事件数,不宣称本用例全量验收。
 
 ### BIN-326 金样:Spot order.amend.keepPriority 与 order.status 响应
 
@@ -2273,6 +2282,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-spot/order.amend.keepPriority/` 的 `ok.in`、`err_increase_qty.in`;`fixtures/binance-spot/order.status/` 的 `filled.in`、`partially_filled.in`、`not_found.in`;来源:待采集(方法 B)
 - 期望文件:同目录 `<case>.expected.jsonl`(`avg_px = cummulativeQuoteQty / executedQty`)
 - 实现:`crates/venue-binance/tests/golden.rs::bin_326_spot_amend_status`
+- 采样覆盖:`source = "testnet-capture"` 覆盖减量改单成功与 NEW/FILLED/CANCELED 查询;期望独立按线值计算,核对状态见 meta。其余列出的分支仍待采集,当前测试只比较期望文件列出的业务字段及事件数,不宣称本用例全量验收。
 
 ### BIN-327 金样:Spot executionReport 全状态与网页单成交
 
@@ -2282,6 +2292,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-spot/executionReport/` 的 `new.in`、`partially_filled.in`、`filled.in`、`canceled.in`、`expired.in`、`replaced.in`、`web_order_fill.in`、`fee_bnb.in`(BNB 抵扣)、`fee_base_asset.in`(不抵扣,扣所得 BTC)、`dup_trade.in`;来源:待采集(方法 B:演示环境分别开关 BNB 抵扣各成交一笔,开发备忘第 7 条)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-binance/tests/golden.rs::bin_327_spot_execution_report`
+- 采样覆盖:`source = "testnet-capture"` 覆盖NEW/FILLED/CANCELED/EXPIRED/REPLACED 与 base asset 手续费;期望独立按线值计算,核对状态见 meta。其余列出的分支仍待采集,当前测试只比较期望文件列出的业务字段及事件数,不宣称本用例全量验收。
 - 备注:依赖待核实:开发备忘第 3、7 条
 
 ### BIN-328 金样:Spot outboundAccountPosition、可忽略、未知与 eventStreamTerminated
@@ -2292,6 +2303,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-spot/outboundAccountPosition/normal.in`、`fixtures/binance-spot/balanceUpdate/normal.in`、`fixtures/binance-spot/listStatus/normal.in`、`fixtures/binance-spot/externalLockUpdate/normal.in`(`source = "exchange-doc"`)、`fixtures/binance-spot/eventStreamTerminated/normal.in`、`fixtures/binance-spot/unknown_event/synthetic.in`;来源:待采集(方法 B)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-binance/tests/golden.rs::bin_328_spot_user_stream_misc`
+- 采样覆盖:`source = "testnet-capture"` 覆盖outboundAccountPosition;期望独立按线值计算,核对状态见 meta。其余列出的分支仍待采集,当前测试只比较期望文件列出的业务字段及事件数,不宣称本用例全量验收。
 
 ### BIN-329 金样:Spot 账户配置查询响应
 

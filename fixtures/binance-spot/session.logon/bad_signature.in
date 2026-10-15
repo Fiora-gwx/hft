@@ -1,0 +1,1 @@
+{"id":"l0000000000000000","status":400,"error":{"code":-1022,"msg":"Signature for this request is not valid."},"rateLimits":[{"rateLimitType":"REQUEST_WEIGHT","interval":"MINUTE","intervalNum":1,"limit":6000,"count":4}]}

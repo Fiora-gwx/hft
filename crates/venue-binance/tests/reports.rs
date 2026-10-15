@@ -146,6 +146,31 @@ fn bin_091_rate_limits_pick() {
         assert_eq!(r.unwrap().rate, want, "{row}");
         assert_eq!(s.orders.len(), 1, "{row}");
     }
+    let captured = include_str!("../../../fixtures/binance-usdm/order.place/err_-2019.in");
+    let (r, s) = dec_u(captured);
+    assert_eq!(r.unwrap().rate, obs(LimitBucket::Orders, 1, 300, 10_000));
+    assert_eq!(one(&s).what, OrderEventKind::Reject);
+    assert_eq!(one(&s).reject_code, (-2019i32) as u32);
+    let unavailable =
+        r#"[{"rateLimitType":"REQUEST_WEIGHT","interval":"MINUTE","intervalNum":1,"limit":-1,"count":-1}]"#;
+    let (r, s) = dec_u(&ack(Some(unavailable)));
+    assert_eq!(r.unwrap().rate, None);
+    assert_eq!(one(&s).what, OrderEventKind::Ack);
+    for (kind, limit, count) in [
+        ("ORDERS", -1i64, -1i64),
+        ("REQUEST_WEIGHT", -1, 0),
+        ("REQUEST_WEIGHT", 300, -1),
+        ("REQUEST_WEIGHT", -2, -2),
+        ("ORDERS", i64::from(u32::MAX) + 1, 1),
+        ("ORDERS", 300, i64::from(u32::MAX) + 1),
+    ] {
+        let invalid = format!(
+            r#"[{{"rateLimitType":"{kind}","interval":"SECOND","intervalNum":10,"limit":{limit},"count":{count}}}]"#
+        );
+        let (r, s) = dec_u(&ack(Some(&invalid)));
+        assert_eq!(r, Err(DecodeErr::Shape), "{invalid}");
+        assert!(s.orders.is_empty());
+    }
 }
 
 fn query(status: &str, z: &str, ap_field: &str, ap: &str) -> String {

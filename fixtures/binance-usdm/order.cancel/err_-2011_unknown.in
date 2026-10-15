@@ -1,0 +1,1 @@
+{"id":"c0000002a00000007","status":400,"error":{"code":-2011,"msg":"Unknown order sent."},"rateLimits":[{"rateLimitType":"REQUEST_WEIGHT","interval":"MINUTE","intervalNum":1,"limit":6000,"count":26}]}

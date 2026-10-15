@@ -1,0 +1,1 @@
+{"id":"q0000002a00000007","status":400,"error":{"code":-2013,"msg":"Order does not exist."},"rateLimits":[{"rateLimitType":"REQUEST_WEIGHT","interval":"MINUTE","intervalNum":1,"limit":6000,"count":25}]}

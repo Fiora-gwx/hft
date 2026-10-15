@@ -52,8 +52,8 @@ struct RateItem<'a> {
     interval: &'a str,
     #[serde(rename = "intervalNum")]
     interval_num: u32,
-    limit: u32,
-    count: u32,
+    limit: i64,
+    count: i64,
 }
 
 /// Bucket of a `rateLimitType` (README "限速默认值").
@@ -80,6 +80,15 @@ impl<'de> Deserialize<'de> for RateSel {
             fn visit_seq<A: SeqAccess<'de>>(self, mut s: A) -> Result<RateSel, A::Error> {
                 let mut best: Option<(RateKind, u32, u32, u32)> = None;
                 while let Some(it) = s.next_element::<RateItem<'de>>()? {
+                    // Demo WS replies use this exact pair for an unavailable weight observation.
+                    // Preserve the business response and other buckets; never manufacture a limit.
+                    if it.kind == "REQUEST_WEIGHT" && it.limit == -1 && it.count == -1 {
+                        continue;
+                    }
+                    let limit = u32::try_from(it.limit)
+                        .map_err(|_| serde::de::Error::custom("invalid rate limit"))?;
+                    let count = u32::try_from(it.count)
+                        .map_err(|_| serde::de::Error::custom("invalid rate count"))?;
                     let kind = match it.kind {
                         "ORDERS" => RateKind::Orders,
                         "REQUEST_WEIGHT" => RateKind::Weight,
@@ -92,17 +101,17 @@ impl<'de> Deserialize<'de> for RateSel {
                         "DAY" => 86_400_000,
                         _ => continue,
                     };
-                    if it.limit == 0 {
+                    if limit == 0 {
                         continue;
                     }
                     let win = unit.saturating_mul(it.interval_num);
-                    let cand = (kind, it.count, it.limit, win);
+                    let cand = (kind, count, limit, win);
                     best = match best {
                         None => Some(cand),
                         Some(b) => {
                             // count/limit compared exactly: c1 × l2 vs c2 × l1.
-                            let lhs = u64::from(it.count) * u64::from(b.2);
-                            let rhs = u64::from(b.1) * u64::from(it.limit);
+                            let lhs = u64::from(count) * u64::from(b.2);
+                            let rhs = u64::from(b.1) * u64::from(limit);
                             if lhs > rhs || (lhs == rhs && win < b.3) {
                                 Some(cand)
                             } else {

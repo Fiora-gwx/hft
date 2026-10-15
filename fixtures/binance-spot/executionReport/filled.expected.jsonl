@@ -1,0 +1,1 @@
+{"kind":"OrderEvent","what":"Fill","venue":2,"account":1,"inst":2001,"exch_order_id":70000000002,"ex_ts_ns":1792040925314638000,"qty":"11000","cum_filled":"11000","px":"8142699","fee":"11","fee_asset":2,"epoch":7,"slot":45,"gen":7}
