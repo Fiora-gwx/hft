@@ -1,0 +1,4 @@
+{"kind":"BalanceReport","asset":1,"free":"999986812704","locked":"0"}
+{"kind":"BalanceReport","asset":2,"free":"0","locked":"0"}
+{"kind":"BalanceReport","asset":3,"free":"0","locked":"0"}
+{"kind":"MarginReport","margin_balance":"20012582024","maint_margin":"0","avail_margin":"9999868127","margin_ratio":"0"}

@@ -167,8 +167,15 @@ struct Asset {
     debt: String,
 }
 #[derive(Deserialize)]
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
 struct List<T> {
+    #[serde(deserialize_with = "nullable_list")]
     list: Vec<T>,
+}
+// UTA returns an explicit null after closing the last position. The field remains required:
+// a missing list is malformed and must not erase a previously validated position baseline.
+fn nullable_list<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Vec<T>, D::Error> {
+    Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -335,7 +342,7 @@ fn decode_page(
         }
         Query::Settings | Query::SymbolSettings => {
             let r: Settings = data(b)?;
-            if r.account_mode != "unified"
+            if !matches!(r.account_mode.as_str(), "unified" | "hybrid")
                 || r.account_level != "basic"
                 || (fut && r.hold_mode != "one_way_mode")
             {

@@ -1983,7 +1983,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 规则:[下单:UTA V3 WS](README.md#下单uta-v3-ws)
 - 级别:golden
 - 里程碑:M3
-- 输入:`fixtures/bitget-usdt-futures/login/{ok,rejected}.in`(只含服务端回执,登录帧本身不入库);V2 回执来自采集系统私有流记录,V3 待采集(方法 B)
+- 输入:V3 demo `fixtures/bitget-usdt-futures/login/{ok_seconds,ok_milliseconds,rejected}.in`(只含服务端回执,登录帧不入库);V2 回执仍待采集。
 - 期望文件:同目录 `<case>.expected.jsonl`(`LoginResult` 的规范渲染)
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_310_login_result`
 
@@ -2133,7 +2133,8 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 规则:[账户配置核验](README.md#账户配置核验)
 - 级别:golden
 - 里程碑:M3
-- 输入:`fixtures/bitget-usdt-futures/rest.account_settings/{basic_oneway,advanced,isolated_mode,hedge_mode,classic}.in`;待采集(方法 B,BGT-214)
+- 输入:`fixtures/bitget-usdt-futures/rest.account_settings/basic_oneway.in` 为真实 demo hybrid/basic/one-way、两个 crossed 1 倍杠杆配置;其余 advanced/isolated/hedge/classic 真实样本待采集。
+- 补充断言:从该样本显式合成 classic/upgrading/switching/unknown,均拒绝且保留已验证状态;不将这些变体标为真实采样。
 - 期望文件:同目录 `<case>.expected.jsonl`(配合其余步的基准响应得到的 `AccountConfigReport`)
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_326_account_settings`
 
@@ -2151,7 +2152,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 规则:[账户配置核验](README.md#账户配置核验)
 - 级别:golden
 - 里程碑:M3
-- 输入:`fixtures/bitget-usdt-futures/rest.account_info/{ok,withdraw_perm,no_trade_perm,uid_mismatch}.in`、`fixtures/bitget-spot/rest.account_info/ok.in`;待采集(方法 B;UID 清洗为 `acct-0001`)
+- 输入:`fixtures/bitget-usdt-futures/rest.account_info/demo_unknown_permissions.in` 为真实 demo unknown/空权限列表;Verified 与 Unverifiable 均拒绝。ok/withdraw_perm/no_trade_perm/uid_mismatch 及现货正常权限样本仍待采集;用户与父账户 UID 清洗为 `acct-0001`。
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_328_account_info`
 
@@ -2160,7 +2161,8 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 规则:[保证金数据换算](README.md#保证金数据换算)
 - 级别:golden
 - 里程碑:M3
-- 输入:`fixtures/bitget-usdt-futures/rest.account_assets/ok.in` + `fixtures/bitget-usdt-futures/rest.positions/{two_positions,empty}.in`;待采集(方法 B)
+- 输入:真实 demo `fixtures/bitget-usdt-futures/rest.account_assets/ok.in` 与 `rest.positions/{long,short,empty}.in`;empty 的 list 为 null,必须清除之前持仓。多品种同时持仓样本仍待采集。
+- 补充断言:显式合成缺失 list 的错误响应必须拒绝且保留先前非零仓位;余额和保证金期望用 wire 十进制独立计算。
 - 期望文件:同目录 `<case>.expected.jsonl`(`MarginReport` 与 `PositionReport` 行)
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_329_margin_poll`
 

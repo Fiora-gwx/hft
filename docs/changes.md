@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-15 | Bitget UTA 设置接受官方 hybrid/basic 模式,仍拒绝切换中/未知模式与未知权限;当前持仓显式 null list 归一为零持仓,缺失字段仍拒绝并保留真值 | BGT-326/328/329,真实 demo 启动与平仓后 REST 响应 | venue-bitget account、README、TESTS 与脱敏金样 | 待评审(账户/仓位) |
 | 2026-10-15 | Fill/PartialFill.detail 按冻结 README 保留买卖方向，通用检查器拒绝零方向；同步旧测试冲突，产品线已有方向编码不变 | VPR-124，外来与迟到成交不得猜测方向 | hft-venue-proto 检查器、README、TESTS；[决定](../.agents/notes/proposed/testing/2026-10-15-fill-detail-contract.md) | 待评审(成交方向/资金归属) |
 | 2026-10-15 | Binance/Bitget 的 HTTP 403/408/418/429/5xx 优先于业务码,不生成 Reject/GONE/NotFound;429/418 仍执行各协议限速提示 | BIN-092、BGT-093;传输错误不能证明订单失败 | 两所错误映射、回报解码、README、TESTS;[决定](../.agents/notes/implemented/bug-fix/2026-10-15-account-page-and-transport-evidence.md) | 待评审(订单) |
 | 2026-10-15 | warm 账户页面完整校验后原子替换对应 State;撤单回执绑定请求订单,重复资产/订单与坏游标拒绝;Bitget 空资金费页带 cursor 不再结束窗口 | BIN-006/153、BGT-006/150/336;部分页面污染与资金费遗漏 | 两所 account、Bitget funding、README、TESTS | 待评审(账户/资金) |

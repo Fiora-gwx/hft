@@ -12,7 +12,7 @@ status: impl
 
 `venue-bitget` 实现两个 [`VenueProtocol`](../hft-venue-proto/README.md#venueprotocol静态分派):`BitgetUsdtFutures`(USDT 本位永续,`MarketKind::LinearPerp`)与 `BitgetSpot`(现货,`MarketKind::Spot`),两者都是 core,以 **UTA(统一账户)V3** 接口为主(Classic V2 只作核对与行情对照)。它拥有 Bitget 的协议知识:`books1`(1 ms JSON 快照,BBO)、分档快照 `books5`/`books50`(core 深度)、增量 `books` 的 `seq/pseq` 严格链续(可选扩展;UTA 无 checksum)、永续 `ticker` 的标记价/指数价/资金费、**每 25 s 无条件发应用层 `ping`**(research/02 的口径是客户端每 30 s 发一次;服务端 120 s 没收到 ping 就断,即使数据在流,实测约 150 s;取 25 s 留余量)、`login` 签名、UTA V3 WS `place-order`/`modify-order`/`cancel-order` 帧、账户模式核验、保证金与强平价轮询、强平/ADL 成交识别、`clientOid` 格式、限速与 `VenueCaps` 默认值。Bitget **没有交易所侧死手**,由 [kill-switch](../../apps/kill-switch/README.md) 兜底。
 
-**线上事实的来源**:UTA V3 的公共/私有频道、订阅写法、WS 下单帧与响应、REST 签名与订单详情、错误码与枚举(开平类型、撤单原因)取自官方 UTA 文档原文(GitHub 上的文档镜像,见[延伸阅读](#延伸阅读));本机仍连不上 Bitget,模拟盘未跑过。标"待核实"的是官方原文没写清、要在模拟盘确认的项(开发备忘);**官方资料中未找到 Bitget SBE 与 "LOLA" 线路**,本规格不依赖它们。纯函数,运行时见 [`hft-venue`](../hft-venue/README.md)。
+**线上事实的来源**:UTA V3 的公共/私有频道、订阅写法、WS 下单帧与响应、REST 签名与订单详情、错误码与枚举(开平类型、撤单原因)取自官方 UTA 文档原文与 2026-10-15 demo 脱敏采样。对应金样及未覆盖范围归 [TESTS.md](TESTS.md);采集客户端的开平不代表 hft-core 联调通过。标"待核实"的是仍需模拟盘确认的项(开发备忘);**官方资料中未找到 Bitget SBE 与 "LOLA" 线路**,本规格不依赖它们。纯函数,运行时见 [`hft-venue`](../hft-venue/README.md)。
 
 ## 目录
 
@@ -183,6 +183,8 @@ UTA 订单推送不带本笔成交:`GwCtx` 按 `orderId` 记上次的累计量�
 
 ### 账户配置核验
 
+UTA 设置接受 `accountMode = unified | hybrid` 且 `accountLevel = basic`;`classic`、`upgrading`、`switching` 与未知值拒绝。字段含义归 [官方账户设置](https://www.bitget.com/docs/catalog/account/account-settings)。demo 实测 basic/单向账户返回 `hybrid` 与 `assetMode=multi_assets`;保证金资格按账户级别、零债务和逐品种 crossed/杠杆核验,不把该 assetMode 字面值当成 advanced。demo `account/info` 的 `permType=unknown`、空 permissions 仍拒绝;Unverifiable 只放宽缺失身份,不豁免权限。
+
 `acct_queries(Config)`([契约 16](../hft-venue-proto/README.md#实现方必须遵守的契约)),端点与字段全部待核实(开发备忘第 5、15 条),核实前按下表的"要读到什么"实现,读不到即 `UNREADABLE`(fail closed,启动闸门不放行):
 
 | 步 | 请求(候选,待核实:开发备忘第 5 条) | 要读到什么 → 判定 |
@@ -199,6 +201,8 @@ UTA 订单推送不带本笔成交:`GwCtx` 按 `orderId` 记上次的累计量�
 运行中:若核实存在账户配置变化推送,给 `hint = ConfigRecheck`;否则依赖 `gw.acct_cfg_recheck_s` 周期重查。
 
 ### 保证金数据换算
+
+当前持仓响应的 `data.list = null` 与空数组都表示零持仓;缺失 `list` 或错误类型拒绝整页,保留上次真值。此语义覆盖 warm 启动与只读对账复用的账户解析器。
 
 `margin_data = Poll{interval_ms: 5000}`([契约 17](../hft-venue-proto/README.md#实现方必须遵守的契约)),只对 `BitgetUsdtFutures`:
 
