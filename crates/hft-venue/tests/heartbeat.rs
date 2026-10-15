@@ -205,7 +205,10 @@ fn ven_281_app_heartbeat() {
 
 #[test]
 fn ven_282_rtt_ping() {
-    let mut gw = order_hb(stub::HB_OFF);
+    let mut gw = order_hb(HeartbeatSpec {
+        idle_timeout_ms: 10_000,
+        ..stub::HB_OFF
+    });
     stub::set_cfg(|c| c.hb_md = stub::HB_OFF);
     let mut md = feed(FeedCfg {
         routes: FeedRoutes::Md,
@@ -238,7 +241,11 @@ fn ven_282_rtt_ping() {
         }
         gw.poll(now + 3_000_000);
         md.poll(now + 3_000_000);
-        gw.reps();
+        assert!(
+            !support::gwh::conn_states(&gw.reps())
+                .iter()
+                .any(|c| c.conn == 112 && c.state == ConnStateKind::Down)
+        );
         md.drain_md();
     }
     assert_eq!(counts, [4, 4]);
@@ -250,6 +257,12 @@ fn ven_282_rtt_ping() {
     ] {
         assert_eq!((hist.min_ns, hist.max_ns), (3_000_000, 3_000_000));
     }
+    gw.poll(31_000_000_000);
+    assert!(
+        support::gwh::conn_states(&gw.reps())
+            .iter()
+            .any(|c| c.state == ConnStateKind::Down && c.reason & ErrBits::IDLE_TIMEOUT.bits() != 0)
+    );
 }
 
 #[test]

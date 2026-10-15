@@ -87,7 +87,7 @@ fn bin_190_heartbeat_spec() {
     };
     assert_eq!(Usdm::heartbeat(Role::Md), hb(360_000), "BIN-190.1");
     assert_eq!(Usdm::heartbeat(Role::UserStream), hb(360_000), "BIN-190.2");
-    assert_eq!(Usdm::heartbeat(Role::Order), hb(40_000), "BIN-190.3");
+    assert_eq!(Usdm::heartbeat(Role::Order), hb(360_000), "BIN-190.3");
     assert_eq!(Spot::heartbeat(Role::Md), hb(40_000), "BIN-190.4");
     assert_eq!(Spot::heartbeat(Role::Order), hb(40_000), "BIN-190.5");
 }

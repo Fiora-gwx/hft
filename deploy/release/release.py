@@ -29,7 +29,7 @@ def sha256(path):
 
 def run(argv):
     # No shell, no environment dumps, no credentials in command arguments.
-    subprocess.run([str(x) for x in argv], check=True, timeout=300)
+    return subprocess.run([str(x) for x in argv], check=True, timeout=300, stdout=subprocess.PIPE).stdout
 
 
 def atomic_json(path, value):
@@ -257,7 +257,22 @@ def activate(ver, group, root, runner=run, dry_run=False):
         return {"version": ver, "group": group, "units": units, "files": files}
     identities(runner)
     # Stop the old process before replacing any pointer or unit content it might execute.
-    runner(["systemctl", "disable", "--now", *units])
+    present = []
+    for unit in units:
+        output = runner(["systemctl", "show", "--property=LoadState,ActiveState", "--", unit])
+        try:
+            state = dict(line.split("=", 1) for line in output.decode().splitlines())
+        except (AttributeError, ValueError, UnicodeError) as error:
+            raise ReleaseError("cannot determine current unit state") from error
+        if set(state) != {"LoadState", "ActiveState"}:
+            raise ReleaseError("incomplete current unit state")
+        if state["LoadState"] == "not-found":
+            if state["ActiveState"] != "inactive":
+                raise ReleaseError("missing unit is not inactive")
+        else:
+            present.append(unit)
+    if present:
+        runner(["systemctl", "disable", "--now", *present])
     if group == "core":
         # First boot needs this before systemd constructs ReadWritePaths and preflight
         # probes the cold filesystem. ExecStartPre still repairs its mode on every start.
@@ -280,6 +295,7 @@ def activate(ver, group, root, runner=run, dry_run=False):
         shutil.copyfile(src, dst)
         dst.chmod(0o644)
     runner(["systemctl", "daemon-reload"])
+    runner(["systemctl", "disable", "--now", *units])
     record = dict(version=ver, group=group, manifest=name, channel=manifest["channel"], git_sha=manifest["git_sha"], archive_sha256=installed["archive_sha256"], current="releases/" + ver, previous=old, acceptance="pending", host_expect_sha256=manifest["host_expect"][name])
     try:
         output = root / "run/hft/hostprofile.json"

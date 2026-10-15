@@ -2947,6 +2947,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
   1. 运行 20 s
 - 期望:
   - 112 与 8 各发出 4 个 WS Ping(5、10、15、20 s);每个 Pong 记一个 3 ms 的 RTT 样本
+  - gw 配置 10 s idle_timeout，无业务回报但有 Pong 时不退役；停止 Pong 后超过该期限仍按 IDLE_TIMEOUT 退役
 - 实现:`crates/hft-venue/tests/heartbeat.rs::ven_282_rtt_ping`
 
 ### VEN-283 `pong_timeout_ms` 与 `idle_timeout_ms` 超时按致命处理

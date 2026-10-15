@@ -8,8 +8,9 @@ StartLimitIntervalSec=600
 [Service]
 Type=notify
 User=hft
+Group=hft-ctl
 Slice=hft-core.slice
-SupplementaryGroups=hft-ctl hft-stopmark
+SupplementaryGroups=hft hft-stopmark
 RuntimeDirectory=hft/core-prod
 RuntimeDirectoryMode=0751
 ExecCondition=+/usr/bin/test ! -e /var/lib/hft/guard/tripped

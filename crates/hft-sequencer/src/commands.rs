@@ -161,14 +161,62 @@ pub struct ConnRow {
     pub standby: bool,
     pub us_seen: bool,
     pub us_up: bool,
+    pub orders: [u64; 4],
+    pub users: [u64; 4],
 }
 
-#[derive(Clone, Debug, Default)]
+pub const SECTION_ORDER_CONNS: u16 = 30;
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, FromBytes, IntoBytes, KnownLayout, Immutable)]
+pub struct OrderConnsRow {
+    pub account: AccountId,
+    pub venue: VenueId,
+    pub flags: u8,
+    pub _pad: [u8; 5],
+    pub orders: [u64; 4],
+    pub users: [u64; 4],
+}
+const _: () = assert!(core::mem::size_of::<OrderConnsRow>() == 72);
+
+#[derive(Clone, Debug)]
 pub struct ConnTable {
     rows: Vec<((AccountId, VenueId), ConnRow)>,
+    /// Absent section 30 retains legacy replay semantics until recovery ends.
+    pub physical: bool,
 }
 
 impl ConnTable {
+    pub fn new(rd: &RefData) -> Self {
+        let mut rows = Vec::new();
+        for a in 1..=255 {
+            let account = AccountId(a);
+            for v in 0..64 {
+                if rd.account(account).venues & (1u64 << v) != 0 {
+                    rows.push(((account, VenueId(v)), ConnRow::default()));
+                }
+            }
+        }
+        Self { rows, physical: true }
+    }
+    pub fn clear_run(&mut self) {
+        for (_, row) in &mut self.rows {
+            *row = ConnRow::default();
+        }
+    }
+    pub fn snapshot_rows(&self) -> impl Iterator<Item = OrderConnsRow> + '_ {
+        self.rows.iter().map(|((account, venue), r)| OrderConnsRow {
+            account: *account,
+            venue: *venue,
+            flags: u8::from(r.primary)
+                | (u8::from(r.standby) << 1)
+                | (u8::from(r.us_seen) << 2)
+                | (u8::from(r.us_up) << 3),
+            _pad: [0; 5],
+            orders: r.orders,
+            users: r.users,
+        })
+    }
     pub fn get(&self, a: AccountId, v: VenueId) -> ConnRow {
         self.rows
             .iter()
@@ -176,9 +224,9 @@ impl ConnTable {
             .map_or(ConnRow::default(), |x| x.1)
     }
     pub fn set(&mut self, a: AccountId, v: VenueId, r: ConnRow) {
-        match self.rows.iter_mut().find(|(k, _)| *k == (a, v)) {
-            Some(x) => x.1 = r,
-            None => self.rows.push(((a, v), r)),
+        // Only configured account/venue pairs can own a gate.
+        if let Some(x) = self.rows.iter_mut().find(|(k, _)| *k == (a, v)) {
+            x.1 = r;
         }
     }
 }
@@ -456,7 +504,7 @@ impl CmdState {
             recon: Vec::with_capacity(8),
             legs_touched: Vec::with_capacity(cells),
             legs_spare: Vec::with_capacity(cells),
-            conns: ConnTable::default(),
+            conns: ConnTable::new(rd),
             unknown_last: vec![u32::MAX; 256],
             feeds_last: vec![false; 256],
             recon_views: ReconViews::default(),

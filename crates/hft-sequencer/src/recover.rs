@@ -496,7 +496,31 @@ pub(crate) fn restore_at<S: StrategySet>(
     e.gpos.index_insts(&inst);
     e.feeds_dirty = true;
     // Gate input caches from the restored gate state.
+    e.cmd.conns.physical = secs.order_conns.is_some();
     derive_gate_caches(&mut e);
+    if let Some(rows) = &secs.order_conns {
+        let expected = e.cmd.conns.snapshot_rows().count();
+        if rows.len() != expected {
+            return Err(BootError::SnapshotUndecodable { section: 30 });
+        }
+        for row in rows {
+            if e.rd.account(row.account).venues & (1u64 << row.venue.0) == 0 {
+                return Err(BootError::SnapshotUndecodable { section: 30 });
+            }
+            e.cmd.conns.set(
+                row.account,
+                row.venue,
+                crate::commands::ConnRow {
+                    primary: row.flags & 1 != 0,
+                    standby: row.flags & 2 != 0,
+                    us_seen: row.flags & 4 != 0,
+                    us_up: row.flags & 8 != 0,
+                    orders: row.orders,
+                    users: row.users,
+                },
+            );
+        }
+    }
     // Subscription index; the feed commands of a start are sent at EngineClock.
     crate::subs::rebuild_all(&mut e, &mut inst);
     let insts_over = inst.subs.overflow > 0;
@@ -933,6 +957,9 @@ pub(crate) fn derive_gate_caches(e: &mut Engine) {
         if let Some(x) = e.cmd.unknown_last.get_mut(a) {
             *x = last;
         }
+        if e.cmd.conns.physical {
+            continue;
+        }
         let vb = e.risk.mode.venue_bitmaps(acc);
         for v in 0..64u8 {
             if e.rd.account(acc).venues & (1u64 << v) == 0 {
@@ -948,6 +975,7 @@ pub(crate) fn derive_gate_caches(e: &mut Engine) {
                     standby,
                     us_seen: primary,
                     us_up: primary,
+                    ..Default::default()
                 },
             );
         }
@@ -969,6 +997,9 @@ fn recovery_end<D: Driver<S>, S: StrategySet>(
     let fatal = |_| BootError::Journal(JournalErr::Chain);
     e.rec.recovery_now = now;
     e.out.clear();
+    // A new live run cannot inherit physical socket liveness from a dead process.
+    e.cmd.conns.physical = true;
+    e.cmd.conns.clear_run();
     // New epoch (apps/hft-core formula): max(snapshot, persisted) + 1, written into the OMS
     // counters (section 3) by reloading its sections with the new configuration.
     let new_epoch = e.rec.snap_epoch.max(plan.epoch) + 1;

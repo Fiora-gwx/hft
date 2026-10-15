@@ -113,11 +113,11 @@ pub(crate) fn dead_man(line: Line) -> DeadManSpec {
     }
 }
 
-pub(crate) fn heartbeat(line: Line, role: Role) -> HeartbeatSpec {
-    let idle_timeout_ms = match (line, role) {
-        // fstream (market and user stream): server ping every 3 min → twice that.
-        (Line::Usdm, Role::Md | Role::UserStream) => 360_000,
-        // ws-fapi (until verified), spot stream and ws-api: server ping every 20 s → 40 s.
+pub(crate) fn heartbeat(line: Line, _role: Role) -> HeartbeatSpec {
+    let idle_timeout_ms = match line {
+        // fstream and ws-fapi: server ping every 3 min → twice that.
+        Line::Usdm => 360_000,
+        // Spot stream and ws-api: server ping every 20 s → 40 s.
         _ => 40_000,
     };
     HeartbeatSpec {

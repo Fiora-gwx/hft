@@ -296,3 +296,7 @@
 | 2026-10-11 | 恢复、验证与镜像驱动仅从已消费日志前缀解析配置,按完整 BlobRef 和内容 SHA 核验,不提前使用预读或 extend 带来的未来配置,不以旧合法副本掩盖最近损坏 | SEQ-388 三驱动八类边界、SEQ-389 真实命令顺序反例 | crates/hft-sequencer/(src、tests、README.md、TESTS.md) | 是(2026-10-14 批量确认) |
 
 | 2026-10-15 | Binance WS 限速观测仅将 REQUEST_WEIGHT 的 limit/count 同为 -1 视为不可用,保留业务响应与有效 ORDERS 观测;其他负数/越界仍拒绝,本地额度不放宽 | demo 实采 -2019 回包被 u32 解码整帧拒绝;BIN-091/BIN-308 | crates/venue-binance、fixtures/binance-usdm | 待评审 |
+
+| 2026-10-15 | 下单闸门按真实 ConnId 集合聚合并快照，启动基线清空待发余额注记，防止轮换误判与重复初始化污染冷账本；冷激活严格区分不存在且未运行的单元 | SEQ-160/414、DEP-225；实际 demo Shadow 复现 | sequencer、deploy、架构与 journal 规格 | 待评审（连接健康/资金恢复；owner 允许 money-safer bug fix 自行合并） |
+
+| 2026-10-15 | gw 完整 WS Ping/Pong 更新连接活性，未完成字节不延长健康；USD-M Order idle 按已核实 3 min 服务端 Ping 的两倍 | VEN-282、BIN-190；demo 安静连接每 40 s 被错误退役 | hft-venue、venue-binance 与规格 | 待评审（连接健康，防止虚假 Unknown/断流） |

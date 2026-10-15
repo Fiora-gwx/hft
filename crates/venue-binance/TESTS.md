@@ -1856,7 +1856,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 |---|---|---|
 | BIN-190.1 | `Usdm` / `Md` | `{ping: WsPing, interval_ms: 0, unconditional: false, pong_timeout_ms: 10000, idle_timeout_ms: 360000}` |
 | BIN-190.2 | `Usdm` / `UserStream` | 同 .1 |
-| BIN-190.3 | `Usdm` / `Order` | `{WsPing, 0, false, 10000, 40000}` |
+| BIN-190.3 | `Usdm` / `Order` | `{WsPing, 0, false, 10000, 360000}`；ws-fapi 官方服务端 Ping 周期为 3 min |
 | BIN-190.4 | `Spot` / `Md` | `{WsPing, 0, false, 10000, 40000}` |
 | BIN-190.5 | `Spot` / `Order` | `{WsPing, 0, false, 10000, 40000}` |
 

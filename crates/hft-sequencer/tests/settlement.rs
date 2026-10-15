@@ -883,6 +883,49 @@ fn seq_414_balance_check_gate_matches_cold_view_and_full_window_replay() {
 }
 
 // B0 uses USDT qty_exp=-8. These are the original five matching facts rescaled from -6.
+#[test]
+fn seq_414_bootstrap_balances_are_snapshot_baselines_not_pending_notes() {
+    use hft_event::{BalanceReport, Note};
+    use hft_sequencer::driver::live::RingId;
+    use hft_types::Tsc;
+    reset_script();
+    let balances: Vec<_> = [A, B]
+        .into_iter()
+        .map(|venue| BalanceReport {
+            venue,
+            account: AC1,
+            asset: USDT,
+            _pad: 0,
+            free: q("5000"),
+            locked: Qty(0),
+            ex_ts_ns: UTC0,
+            rx_tsc: Tsc(T0),
+        })
+        .collect();
+    let mut h = b0().boot_self_contained_accounts(&balances);
+    let start = h.snapshots()[0].clone();
+    for b in &balances {
+        h.push(RingId::Rep(0), b);
+        h.run();
+    }
+    let init_count = h
+        .j()
+        .records()
+        .filter_map(|r| r.read::<Note>())
+        .filter(|n| n.code == hft_ledger::notes::code::BALANCE_INIT)
+        .count();
+    assert_eq!(init_count, 0);
+    let cold = cold_at(&h, &start);
+    for venue in [A, B] {
+        assert_eq!(
+            cold.ledger().venue_book(AC1, venue).cash,
+            h.s.engine().ledger.venue_book(AC1, venue).cash
+        );
+    }
+    assert!(h.verify().is_empty());
+    assert!(h.verify_from(Some(start.seq)).is_empty());
+}
+
 const FACTS: [(Side, i64, i64, i64, i64); 5] = [
     (Side::Sell, 100_000, 6_001_890, 3_001_000, 0),
     (Side::Sell, 100_000, 6_002_440, 3_001_300, 0),

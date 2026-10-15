@@ -163,6 +163,7 @@ struct CMeta {
     fd: i32,
     hb: Hb,
     last_data: u64,
+    last_activity: u64,
     pong_seen: u64,
     /// Consecutive report decode failures and the first one's time.
     dec_fail: u8,
@@ -1089,10 +1090,12 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         if let Some(id) = id {
             let mut buffered = false;
             let mut pong = 0;
+            let mut received = 0;
             if let Some(c) = self.conn_of(a, id) {
                 c.finish_poll(now);
                 buffered = c.rx_buffered() > 0;
                 pong = c.last_pong_tsc();
+                received = c.last_rx_tsc();
             }
             if let Some(m) = self
                 .accts
@@ -1100,6 +1103,9 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 .and_then(|x| x.metas.iter_mut().find(|m| m.id == id))
             {
                 m.buffered = buffered;
+                // A complete authenticated WS control frame also proves liveness.
+                // TCP bytes or incomplete TLS/WS frames do not advance this timestamp.
+                m.last_activity = m.last_activity.max(received);
                 if pong > m.pong_seen {
                     m.pong_seen = pong;
                     m.hb.on_pong();
@@ -2448,6 +2454,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     fd,
                     hb: Hb::new(&spec, &t, now, role == ConnRole::Order),
                     last_data: now,
+                    last_activity: now,
                     pong_seen: 0,
                     dec_fail: 0,
                     dec_first: 0,
@@ -2605,7 +2612,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     let Some(m) = x.metas.iter_mut().find(|m| m.id == id) else {
                         continue;
                     };
-                    let t = m.hb.check(now, m.last_data);
+                    let t = m.hb.check(now, m.last_activity);
                     let send = m.hb.due(now, m.last_data);
                     (t, send)
                 };
@@ -2838,7 +2845,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 );
             }
             for m in x.metas.iter() {
-                if let Some(t) = m.hb.next_deadline(m.last_data) {
+                if let Some(t) = m.hb.next_deadline_with_activity(m.last_activity) {
                     d = min_deadline(d, t);
                 }
             }

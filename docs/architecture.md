@@ -69,7 +69,7 @@ warm 任务(不在 tick-to-trade 路径,不占热核)
 
 | 状态 | 唯一写者 | 其他线程/进程如何看到 |
 |---|---|---|
-| 簿、BBO、BBO 成员连接健康、最新成交、资金费、mark | sequencer | 冷进程读 journal 重建 |
+| 簿、BBO、行情/下单/用户流连接集合、最新成交、资金费、mark | sequencer | 冷进程读 journal 重建 |
 | 仓位、现货库存、权益视图数据、挂单槽、LegTracker、风控计数与 cap、执行层目标、策略快速部分状态、引擎时间 `engine_ns` | sequencer | 同上;`StateSnapshot` 每段首与周期关键帧;快照里的时刻存 `engine_ns`,只有 [D6](hot-path-rules.md#确定性d) 登记的 TSC 行例外,恢复时的处置按 D6 |
 | 策略 Model 状态 | advisor 线程(只读 journal 输入,确定性) | 输出 `Advice` 进 journal,回放读日志不重算;检查点只用于重启免预热 |
 | 模拟账户的交易所侧真值 | sim 实例的 sim-gw([hft-sim](../crates/hft-sim/README.md)) | 回报经回报环进入并记 journal;账本侧由 sequencer 记账 |

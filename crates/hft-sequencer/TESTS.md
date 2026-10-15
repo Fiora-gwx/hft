@@ -2348,6 +2348,8 @@ SEQ-158 补充验收:RateOnly 的实额输入替换已有合成额,重复实额�
 | SEQ-160.3 | 深度连接 `ConnState{Down, conn 8}`(a1 订阅深度) | a1 的簿失效(非 Live);s1 收到 `EventRef::Conn` |
 | SEQ-160.4 | 深度连接 `ConnState{Alive, conn 8}` | 无任何状态变化与投递 |
 
+SEQ-160 同时覆盖真实 ConnId 112/113/255、重复 Up/Down、主连接退出后的存活通路、重叠用户流轮换，以及每步关键帧起步的逐字节回放。实现 `seq_160_physical_order_ids_and_rotated_user_streams_replay`。
+
 ### SEQ-161 对账报告的 Funding 条目到达即处理、不暂存
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
@@ -3556,7 +3558,7 @@ SEQ-158 补充验收:RateOnly 的实额输入替换已有合成额,重复实额�
 - 步骤:
   1. 写按需快照,按体内顺序读各 `SectionHdr.section`
 - 期望:
-  - 顺序为 1、13、22、2、3、12、4、14、17、18、23、5、8、9、10、15、16、19、20、24、25、26、27、29、6、7、21(稳态有启动对账留下的视图,无成交所以没有节 28);`SnapshotHdr.n_sections = 27`
+  - 顺序为 1、13、22、2、3、12、4、14、17、18、23、5、8、9、10、15、16、19、20、24、25、26、27、29、30、6、7、21(稳态有启动对账留下的视图,无成交所以没有节 28);`SnapshotHdr.n_sections = 28`
 - 实现:`crates/hft-sequencer/tests/snapshot.rs::seq_248_section_write_order`
 
 ### SEQ-249 state_hash 不计节 16,out_hash 屏蔽测量字段
@@ -6065,6 +6067,8 @@ SEQ-158 补充验收:RateOnly 的实额输入替换已有合成额,重复实额�
 | SEQ-413.1 | 1、2、3、4、5 |
 | SEQ-413.2 | 1、2、4、3、5 |
 | SEQ-413.3 | 5、3、4、2、1 |
+
+SEQ-414 的启动子例 `seq_414_bootstrap_balances_are_snapshot_baselines_not_pending_notes` 验证双 venue 余额快照后没有待发 BalanceInit；随后实时余额输入在冷热账本一致并通过完整/快照起步回放。
 
 ### SEQ-414 余额校验事实贯通完整视图与回放
 

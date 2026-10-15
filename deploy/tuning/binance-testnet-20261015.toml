@@ -1,6 +1,9 @@
 manifest = "binance-testnet-20261015"
 class = "dev2"
 
+[roles]
+eni_b = 0
+
 [[expect]]
 key = "guard.dev2_guard_active"
 eq = true
