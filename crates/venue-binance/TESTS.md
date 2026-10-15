@@ -2090,6 +2090,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-usdm/rest.ticker_bookTicker/` 的 `single.in`、`error_body.in`;来源:待采集(方法 B:演示环境与主网各一次 `GET /fapi/v1/ticker/bookTicker?symbol=BTCUSDT`)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-binance/tests/golden.rs::bin_306_usdm_bbo_refresh`
+- 已采样范围:真实 demo ETHUSDT 单品种响应含 `lastUpdateId` 与毫秒 `time`,错误响应整页拒绝且无 BBO 输出;未采正式环境。
 - 备注:依赖待核实:开发备忘第 17 条
 
 ### BIN-307 金样:Usdm session.logon 响应

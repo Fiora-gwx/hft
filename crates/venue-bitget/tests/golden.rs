@@ -250,18 +250,15 @@ fn product_market<T: VenueProtocol<FeedCtx = FeedCtx, GwCtx = GwCtx>>(channel: &
     use hft_venue_proto::testkit::{MdRec, VecSink};
     use serde_json::json;
     let (input, expected) = product_capture(T::NAME, channel, name);
-    let class = T::classify(RouteId(route), MsgOp::Text, &input[..input.len().min(64)]);
     let mut sink = VecSink::default();
-    let result = T::decode_md(
-        rd_spot_capture(),
-        &mut FeedCtx::new(),
-        class,
-        &input,
-        &RX,
-        &mut sink,
-    )
-    .unwrap();
-    assert_eq!(usize::from(result.events), expected.len());
+    let mut ctx = FeedCtx::new();
+    let mut events = 0;
+    for frame in input.split(|b| *b == b'\n').filter(|f| !f.is_empty()) {
+        let class = T::classify(RouteId(route), MsgOp::Text, &frame[..frame.len().min(64)]);
+        let result = T::decode_md(rd_spot_capture(), &mut ctx, class, frame, &RX, &mut sink).unwrap();
+        events += usize::from(result.events);
+    }
+    assert_eq!(events, expected.len());
     let actual: Vec<_> = sink.md.iter().map(|e| {
         let mut value = match e {
             MdRec::Bbo(b) => json!({"kind":"Bbo","bid_px":b.bid_px.0.to_string(),"bid_qty":b.bid_qty.0.to_string(),
