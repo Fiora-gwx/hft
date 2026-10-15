@@ -27,7 +27,10 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
         "blobs" => (&["refdata", "engine", "risk_params", "strategy_params"], &[]),
         "blob" => (&["path", "sha256"], &[]),
         "shutdown" => (&["cancel_open_orders", "drain_timeout_ms"], &[]),
-        "journal" => (&["segment_bytes", "hot_keep"], &["raw_feed", "raw_gw"]),
+        "journal" => (
+            &["segment_bytes", "hot_keep"],
+            &["raw_feed", "raw_gw", "latency_trace_capacity"],
+        ),
         "journal_size" => (&["segment_bytes", "hot_keep"], &[]),
         "clock" => (&["step_threshold_ns", "interval_ms"], &[]),
         "watchdog" => (&["hb_stale_ms"], &[]),

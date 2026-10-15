@@ -6,6 +6,8 @@
 //! Records are opened in place one at a time, only when the next frame needs them, and their
 //! plaintext is moved down to `pe`, so a frame spanning records is contiguous.
 
+use hft_rt::latency_trace::{self as lt, Context as TraceContext, Stage as TraceStage};
+
 use std::cell::Cell;
 use std::marker::PhantomData;
 
@@ -77,6 +79,7 @@ struct Seg {
     first: Src,
     /// `rx_tsc` of the read holding the record's last byte.
     done_tsc: u64,
+    decrypted_tsc: u64,
 }
 
 /// The connection. Owned by exactly one thread at a time (not `Sync`); moves between threads only
@@ -125,6 +128,8 @@ pub struct Conn {
     tx: Box<[u8]>,
     ts: usize,
     te: usize,
+    trace_tx_instance: u64,
+    trace_tx_consumed: u64,
     mask: u64,
     scratch: Option<Box<MaskedFrame<TEXT_CAP>>>,
     stats: ConnStats,
@@ -218,6 +223,8 @@ impl Conn {
             tx,
             ts: 0,
             te: 0,
+            trace_tx_instance: 0,
+            trace_tx_consumed: 0,
             mask: 0x9E37_79B9_7F4A_7C15,
             scratch: Some(Box::new(MaskedFrame::new())),
             stats: ConnStats::default(),
@@ -386,6 +393,20 @@ impl Conn {
         };
         let r = self.sock.recv(dst);
         if r.ret > 0 {
+            lt::set_context(TraceContext {
+                venue_conn: u64::from(self.venue.0) | (u64::from(self.id.0) << 8),
+                ..TraceContext::default()
+            });
+            lt::at(
+                TraceStage::Read,
+                r.post,
+                [
+                    r.stamp.hw_rx_ns as u64,
+                    r.stamp.sw_rx_ns as u64,
+                    r.ret as u64,
+                    u64::from(r.stamp.flags),
+                ],
+            );
             let n = r.ret as usize;
             let (gap, confirmed) = match self.empty_tsc {
                 Some(e) => (self.delta(e, r.post).min(u32::MAX as u64) as u32, true),
@@ -517,6 +538,7 @@ impl Conn {
                 pend: b.pend,
                 first: a.first,
                 done_tsc: b.done_tsc,
+                decrypted_tsc: b.decrypted_tsc,
             };
             self.segs.copy_within(3..SEGS, 2);
             self.nsegs -= 1;
@@ -612,6 +634,14 @@ impl Conn {
         }
         let rec_first = self.read_at(self.cipher_abs);
         let rec_last = self.read_at(self.cipher_abs + total as u64 - 1);
+        lt::set_context(TraceContext {
+            venue_conn: u64::from(self.venue.0) | (u64::from(self.id.0) << 8),
+            ..TraceContext::default()
+        });
+        lt::stamp(
+            TraceStage::DecryptStart,
+            [rec_last.rx_tsc, self.cipher_abs, total as u64, 0],
+        );
         let opened = match &mut self.tls {
             Tls::Ready(rl) => rl.open_record(&mut self.rx[cs..cs + total]),
             Tls::Handshaking(_) | Tls::None => {
@@ -620,6 +650,12 @@ impl Conn {
                 return Dec::Fatal;
             }
         };
+        let decrypted_tsc = if lt::enabled() { hft_rt::tsc_ordered().0 } else { 0 };
+        lt::at(
+            TraceStage::DecryptEnd,
+            decrypted_tsc,
+            [rec_last.rx_tsc, self.cipher_abs, total as u64, 0],
+        );
         let Some(o) = opened else {
             self.set_err(ErrBits::TLS_PROTO);
             return Dec::Fatal;
@@ -636,6 +672,7 @@ impl Conn {
                         pend: pstart + o.len as u64,
                         first,
                         done_tsc: rec_last.rx_tsc,
+                        decrypted_tsc,
                     });
                     self.pe += o.len;
                 }
@@ -691,6 +728,7 @@ impl Conn {
         };
         match rl.encode_handshake_or_keyupdate(false, &mut self.tx[te..te + need]) {
             Some(n) => {
+                self.trace_queued(n);
                 self.te += n;
                 true
             }
@@ -796,7 +834,7 @@ impl Conn {
                         Opcode::Binary
                     };
                     if h.fin {
-                        return Some(self.deliver(op, p0, p1, ts, false));
+                        return Some(self.deliver(op, p0, p1, ts, false, last_seg.decrypted_tsc));
                     }
                     self.frag_on = true;
                     self.frag_op = op;
@@ -811,7 +849,14 @@ impl Conn {
                         self.frag_on = false;
                         let ts = self.compose(self.frag_first, last_seg.done_tsc);
                         self.stats.reassembled += 1;
-                        return Some(self.deliver(self.frag_op, 0, self.frag_len, ts, true));
+                        return Some(self.deliver(
+                            self.frag_op,
+                            0,
+                            self.frag_len,
+                            ts,
+                            true,
+                            last_seg.decrypted_tsc,
+                        ));
                     }
                 }
             }
@@ -835,7 +880,13 @@ impl Conn {
         b: usize,
         ts: Timestamps,
         reassembled: bool,
+        decrypted_tsc: u64,
     ) -> Frame<'_> {
+        lt::frame(
+            self.venue.0,
+            self.id.0,
+            [ts.rx_tsc, ts.hw_rx_ns as u64, ts.sw_rx_ns as u64, decrypted_tsc],
+        );
         self.stats.frames += 1;
         self.stats.bytes += (b - a) as u64;
         if ts.flags & TsFlags::MULTI_SKB != 0 {
@@ -1019,8 +1070,28 @@ impl Conn {
         let Tls::Ready(rl) = &mut self.tls else {
             return Err(SendErr::Encrypt);
         };
-        match rl.seal_app_record(data, &mut self.tx[te..te + need]) {
+        lt::stamp(
+            TraceStage::EncryptStart,
+            [
+                u64::from(self.venue.0),
+                u64::from(self.id.0),
+                data.len() as u64,
+                0,
+            ],
+        );
+        let sealed = rl.seal_app_record(data, &mut self.tx[te..te + need]);
+        lt::stamp(
+            TraceStage::EncryptEnd,
+            [
+                u64::from(self.venue.0),
+                u64::from(self.id.0),
+                data.len() as u64,
+                0,
+            ],
+        );
+        match sealed {
             Some(n) => {
+                self.trace_queued(n);
                 self.te += n;
                 Ok(te)
             }
@@ -1048,7 +1119,50 @@ impl Conn {
         } else {
             self.sock.send(&[&self.tx[ts..te]])
         };
+        lt::at(
+            TraceStage::Send,
+            out.post,
+            [
+                u64::from(self.venue.0),
+                u64::from(self.id.0),
+                out.ret as u64,
+                (te - ts) as u64,
+            ],
+        );
+        self.trace_write(out.ret, out.post, te - ts);
         self.after_send(out.ret, out.post)
+    }
+
+    fn trace_queued(&mut self, n: usize) {
+        if lt::enabled() {
+            if self.trace_tx_instance == 0 {
+                self.trace_tx_instance = hft_rt::tsc_ordered().0;
+            }
+            let mut context = lt::context();
+            context.frame = self.trace_tx_instance;
+            context.venue_conn = u64::from(self.venue.0) | (u64::from(self.id.0) << 8);
+            let _scope = lt::scope(context);
+            let start = self.trace_tx_consumed + (self.te - self.ts) as u64;
+            lt::stamp(TraceStage::TxQueued, [start, start + n as u64, 0, 0]);
+        }
+    }
+
+    fn trace_write(&mut self, ret: isize, post: u64, requested: usize) {
+        if lt::enabled() {
+            let _scope = lt::scope(TraceContext {
+                frame: self.trace_tx_instance,
+                venue_conn: u64::from(self.venue.0) | (u64::from(self.id.0) << 8),
+                ..TraceContext::default()
+            });
+            lt::at(
+                TraceStage::TxWrite,
+                post,
+                [self.trace_tx_consumed, ret as u64, requested as u64, 0],
+            );
+            if ret > 0 {
+                self.trace_tx_consumed += ret as u64;
+            }
+        }
     }
 
     fn after_send(&mut self, ret: isize, post: u64) -> Result<SendOk, SendErr> {
@@ -1097,6 +1211,7 @@ impl Conn {
 
     pub(crate) fn flush_inner(&mut self) -> Result<SendOk, SendErr> {
         let out = self.sock.send(&[&self.tx[self.ts..self.te]]);
+        self.trace_write(out.ret, out.post, self.te - self.ts);
         self.after_send(out.ret, out.post)
     }
 

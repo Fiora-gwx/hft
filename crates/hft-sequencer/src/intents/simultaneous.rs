@@ -181,10 +181,18 @@ pub(super) fn place<D: Driver<S>, S: StrategySet>(
     let mut out = e.take_oms();
     #[cfg(feature = "testkit")]
     let facts = crate::audit::capture(e, &p.ai.intent, Src::Hedge { req }, p.ai.class);
+    hft_rt::latency_trace::stamp(
+        hft_rt::latency_trace::Stage::OmsStart,
+        [u64::from(p.ai.intent_no), u64::from(p.ai.intent.inst.0), 1, 0],
+    );
     let h = e
         .oms
         .place(&p.ai, e.now.tsc, e.cur_seq, &mut out)
         .map_err(|_| FatalReason::PairAdmission)?;
+    hft_rt::latency_trace::stamp(
+        hft_rt::latency_trace::Stage::OmsEnd,
+        [u64::from(p.ai.intent_no), u64::from(p.ai.intent.inst.0), 1, 0],
+    );
     e.risk.commit(&admission, &e.now);
     #[cfg(feature = "testkit")]
     for d in out.decisions.as_slice() {

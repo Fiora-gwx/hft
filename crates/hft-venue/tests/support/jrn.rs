@@ -28,6 +28,7 @@ pub struct RawJ {
 /// One raw record read back.
 #[derive(Clone, Debug)]
 pub struct RawRec {
+    pub seq: u64,
     pub kind: EventKind,
     pub tsc: u64,
     pub flags: RecordFlags,
@@ -136,6 +137,7 @@ impl RawJ {
                     if e.kind == EventKind::RAW_RX || e.kind == EventKind::RAW_TX {
                         let (h, rest) = RawHdr::read_from_prefix(e.body).unwrap();
                         out.push(RawRec {
+                            seq: e.seq,
                             kind: e.kind,
                             tsc: e.tsc,
                             flags: e.flags,

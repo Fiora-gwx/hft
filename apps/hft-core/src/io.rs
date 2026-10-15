@@ -222,6 +222,7 @@ pub fn feed(msg: FeedMsg, now: Tsc, out: &mut InputSlot, bulk: &mut ByteConsumer
             bulk.advance();
         }
     }
+    hft_rt::latency_trace::event(hft_rt::latency_trace::Stage::InputPop, out.kind.0, out.body());
     true
 }
 pub fn rep_parts<R>(msg: &RepMsg, bulk: &[u8], mut f: impl FnMut(EventKind, &[&[u8]]) -> R) -> R {
@@ -279,6 +280,9 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
             }
             if g.pending_report.is_none() {
                 g.pending_report = g.reports.try_pop();
+                if let Some(m) = g.pending_report {
+                    trace_rep_pop(&m);
+                }
             }
             return g.pending_report.map(|m| match m {
                 RepMsg::MarginReport(h) => 64 + usize::from(h.n) * 16,
@@ -354,7 +358,13 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
                 let Some(g) = self.gws.get_mut(n as usize) else {
                     return false;
                 };
-                let Some(m) = g.pending_report.take().or_else(|| g.reports.try_pop()) else {
+                let Some(m) = g.pending_report.take().or_else(|| {
+                    let m = g.reports.try_pop();
+                    if let Some(m) = m {
+                        trace_rep_pop(&m);
+                    }
+                    m
+                }) else {
                     return false;
                 };
                 self.reports += u64::from(matches!(m, RepMsg::OrderEvent(_)));
@@ -442,5 +452,15 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
     }
     fn utc_of(&self, t: Tsc) -> i64 {
         self.clock.to_utc_ns(t)
+    }
+}
+
+fn trace_rep_pop(m: &RepMsg) {
+    if hft_rt::latency_trace::enabled() {
+        rep_parts(m, &[], |kind, pieces| {
+            if pieces.len() == 1 {
+                hft_rt::latency_trace::event(hft_rt::latency_trace::Stage::InputPop, kind.0, pieces[0]);
+            }
+        });
     }
 }

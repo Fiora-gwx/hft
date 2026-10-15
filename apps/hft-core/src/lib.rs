@@ -3,6 +3,7 @@ pub mod budget;
 pub mod config;
 mod config_shape;
 pub mod io;
+mod latency_trace;
 pub mod paper;
 pub mod recovery;
 pub mod runtime;

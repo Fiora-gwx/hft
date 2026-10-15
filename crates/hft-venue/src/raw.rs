@@ -154,9 +154,13 @@ impl RawLog {
         }
         let pieces: [&[u8]; 2] = [h.as_bytes(), payload];
         match self.w.append_var(kind, RecordFlags(f), Tsc(tsc), &pieces) {
-            Ok(_) => {
+            Ok(seq) => {
                 self.n.records += 1;
                 self.w.publish();
+                hft_rt::latency_trace::stamp(
+                    hft_rt::latency_trace::Stage::RawRecord,
+                    [seq.0, u64::from(kind.0), tsc, u64::from(what)],
+                );
             }
             Err(e) => {
                 let i = match e {

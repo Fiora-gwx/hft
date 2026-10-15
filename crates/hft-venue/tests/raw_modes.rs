@@ -51,6 +51,39 @@ fn ven_068_raw_dups() {
 }
 
 #[test]
+fn ven_068_raw_trace_retains_frame_identity_and_journal_sequence() {
+    use hft_rt::latency_trace::{self as trace, Stage};
+    let (mut h, now) = bbo_up(|c| c.raw_bbo = RawMode::On, &[S1]);
+    let (writer, mut reader) = trace::channel(256).unwrap();
+    trace::install(writer).unwrap();
+    h.net.push(ConnId(0), &b("S1", 99));
+    h.poll(now + 1);
+    let mut points = Vec::new();
+    while let Some(p) = reader.rx.try_pop() {
+        points.push(p);
+    }
+    let raw = h.raw.records();
+    let frame = raw.iter().find(|r| r.payload == b("S1", 99)).unwrap();
+    let point = points
+        .iter()
+        .find(|p| {
+            p.stage == Stage::RawRecord as u64
+                && p.values[2] == frame.tsc
+                && p.values[3] == u64::from(frame.hdr.what)
+        })
+        .unwrap();
+    let delivered = points
+        .iter()
+        .find(|p| p.stage == Stage::Frame as u64 && p.values[0] == frame.tsc)
+        .unwrap();
+    assert_eq!(point.context.frame, delivered.context.frame);
+    assert_ne!(point.context.frame, 0);
+    assert_eq!(point.values[1], u64::from(frame.kind.0));
+    assert_eq!(point.values[0], frame.seq);
+    assert_eq!(reader.dropped(), 0);
+}
+
+#[test]
 fn ven_067_raw_modes_and_exact_sample_boundary() {
     use hft_venue::{FeedCfg, streams};
     for (bbo, md, nb, nm) in [

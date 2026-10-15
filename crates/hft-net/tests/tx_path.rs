@@ -100,6 +100,13 @@ fn f322(p: &[u8; 1]) -> Box<MaskedFrame<2048>> {
 #[test]
 fn net_152_short_write_resumes() {
     let (mut conn, mut peer) = pair();
+    use hft_rt::latency_trace::{self as trace, Context, Stage};
+    let (writer, mut reader) = trace::channel(256).unwrap();
+    trace::install(writer).unwrap();
+    trace::set_context(Context {
+        decision_seq: 42,
+        ..Context::default()
+    });
     push_send(&mut conn, 1, SendKind::Bytes(100));
     let f = f322(b"a");
     assert_eq!(f.as_bytes().len(), 300);
@@ -107,12 +114,29 @@ fn net_152_short_write_resumes() {
     assert_eq!(r.queued, 222);
     assert!(conn.err().contains(ErrBits::TX_PARTIAL));
     assert_eq!(conn.stats().short_writes, 1);
+    trace::set_context(Context::default());
     conn.finish_poll(0);
     assert_eq!(conn.sys().sendmsg, 2);
     assert_eq!(last_iovs(&conn).1[0], 222);
     peer.pump(&mut conn);
     assert_eq!(peer.recs.len(), 1, "one record: no re-encryption");
     assert_eq!(payloads(&mut peer).len(), 1);
+    let mut points = Vec::new();
+    while let Some(point) = reader.rx.try_pop() {
+        points.push(point);
+    }
+    let queued = points.iter().find(|p| p.stage == Stage::TxQueued as u64).unwrap();
+    assert_eq!(queued.context.decision_seq, 42);
+    assert_eq!(queued.values[..2], [0, 322]);
+    let writes: Vec<_> = points
+        .iter()
+        .filter(|p| p.stage == Stage::TxWrite as u64)
+        .collect();
+    assert_eq!(writes.len(), 2);
+    assert!(writes.iter().all(|p| p.context.frame == queued.context.frame));
+    assert_eq!(writes[0].values[..3], [0, 100, 322]);
+    assert_eq!(writes[1].values[..3], [100, 222, 222]);
+    assert_eq!(reader.dropped(), 0);
 }
 
 #[test]

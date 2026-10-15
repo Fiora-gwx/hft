@@ -75,6 +75,12 @@ impl PollTask for Idle {
 
 #[test]
 fn rt_166_zero_alloc_hot_entries() {
+    ENABLED.with(|e| e.set(true));
+    let disabled_start = count();
+    assert!(!latency_trace::enabled());
+    latency_trace::stamp(latency_trace::Stage::Read, [0; 4]);
+    assert_eq!(count(), disabled_start, "first disabled access allocates nothing");
+    ENABLED.with(|e| e.set(false));
     let (mut p, mut c) = spsc::<u64>(1024, Backing::Heap).unwrap();
     let (mut bp, mut bc) = byte_spsc(4096, Backing::Heap).unwrap();
     let mb: &'static Mailbox<Box<u64>> = Box::leak(Box::new(Mailbox::new()));
@@ -94,9 +100,13 @@ fn rt_166_zero_alloc_hot_entries() {
         &clk,
     );
 
+    let (trace_writer, mut trace_reader) = latency_trace::channel(256).unwrap();
+    latency_trace::install(trace_writer).unwrap();
     ENABLED.with(|e| e.set(true));
     let c0 = count();
     for i in 0..100_000u64 {
+        latency_trace::stamp(latency_trace::Stage::Read, [i; 4]);
+        black_box(trace_reader.rx.try_pop());
         let _ = p.try_push(i);
         black_box(c.try_pop());
         let mut b = p.write_batch(4);

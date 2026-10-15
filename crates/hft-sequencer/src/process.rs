@@ -12,6 +12,7 @@ use hft_ledger::PnlDelta;
 use hft_refdata::FundingSettleKind;
 use hft_risk::mode::{GateEvent, ModeInput};
 use hft_risk::{EquitySource, EquityView, MarginSample, RiskTimer};
+use hft_rt::latency_trace::{self as lt, Context as TraceContext, Stage as TraceStage};
 use hft_strategy_sdk::{ExternalFillView, LiquidationView, StrategySet, TradeView};
 use hft_types::{AccountId, GROUP_NONE, GroupId, InstId, MAX_BBO_CONN_SLOTS, Px, Qty, Seq, Tsc, VenueId};
 use zerocopy::IntoBytes;
@@ -49,6 +50,24 @@ pub(crate) fn process_parts<D: Driver<S>, S: StrategySet>(
     drv: &mut D,
     slot: &InputSlot,
 ) -> R<()> {
+    let _trace_scope = lt::scope(TraceContext {
+        event_hash: if lt::enabled() {
+            lt::fingerprint(slot.body())
+        } else {
+            0
+        },
+        kind_inst: u64::from(slot.kind.0),
+        venue_conn: if slot.kind == EventKind::SEND_REPORT {
+            crate::types::read_body::<SendReport>(slot.body())
+                .map_or(0, |r| u64::from(r.venue.0) | (u64::from(r.conn.0) << 8))
+        } else if (0x100..0x300).contains(&slot.kind.0) {
+            slot.body().first().map_or(0, |v| u64::from(*v))
+        } else {
+            0
+        },
+        ..TraceContext::default()
+    });
+    lt::stamp(TraceStage::ProcessStart, [slot.tsc.0, 0, 0, 0]);
     bench_stage!(e, JournalInput);
     e.out.clear();
     e.notify.begin();
@@ -63,6 +82,11 @@ pub(crate) fn process_parts<D: Driver<S>, S: StrategySet>(
         .journal()
         .append_var(slot.kind, slot.flags, slot.tsc, &[slot.body()])
         .map_err(|_| FatalReason::JournalFull)?;
+    lt::set_context(TraceContext {
+        input_seq: s.0,
+        ..lt::context()
+    });
+    lt::stamp(TraceStage::JournalInput, [0; 4]);
     bench_stage!(e, DispatchClock);
     // Meta never reaches the decision clock or callbacks. Calibration is cold-reader data.
     if crate::journal::role_of(slot.kind, slot.body()) == hft_event::Role::Meta {
@@ -113,7 +137,9 @@ pub(crate) fn process_parts<D: Driver<S>, S: StrategySet>(
     crate::strategies::deliver_round(e, inst, drv, p.market, &q, p.direct)?;
     bench_stage!(e, Exec);
     // 6. executor advance.
+    lt::stamp(TraceStage::ExecStart, [0; 4]);
     crate::exec_glue::advance(e, inst, drv)?;
+    lt::stamp(TraceStage::ExecEnd, [0; 4]);
     bench_stage!(e, FinalChecks);
     // 8. second delivery round (notifications produced by Ctx application and advance).
     e.notify.take_queue(&mut q);
@@ -137,6 +163,7 @@ pub(crate) fn process_parts<D: Driver<S>, S: StrategySet>(
     crate::commands::drain_check(e, inst, drv)?;
     bench_stage!(e, Output);
     finish_event(e, drv, slot.tsc)?;
+    lt::stamp(TraceStage::ProcessEnd, [0; 4]);
     #[cfg(feature = "testkit")]
     {
         drv.observe_input(e, slot, false);
@@ -170,6 +197,28 @@ pub(crate) fn finish_event<D: Driver<S>, S: StrategySet>(e: &mut Engine, drv: &m
             .journal()
             .append_var(r.kind, r.flags, tsc, &[body])
             .map_err(|_| FatalReason::JournalFull)?;
+        if r.kind == EventKind::ORDER_DECISION
+            && lt::enabled()
+            && let Some(d) = crate::types::read_body::<hft_event::OrderDecision>(body)
+        {
+            let _scope = lt::scope(TraceContext {
+                input_seq: d.trigger_seq,
+                decision_seq: s.0,
+                order: (u64::from(d.r#gen) << 32) | u64::from(d.slot.0),
+                venue_conn: u64::from(d.venue.0),
+                kind_inst: u64::from(d.inst.0) << 32,
+                ..TraceContext::default()
+            });
+            lt::stamp(
+                TraceStage::Decision,
+                [
+                    u64::from(d.intent_no),
+                    u64::from(d.link_role),
+                    u64::from(d.reason),
+                    u64::from(d.reject),
+                ],
+            );
+        }
         if role_of(r.kind, body) == hft_event::Role::Output {
             e.out_hash.add(r.kind, r.flags, &[body]);
         }

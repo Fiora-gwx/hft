@@ -24,6 +24,8 @@ status: spec
 
 ## 使用本组件
 
+`latency_trace` 提供可选的线程私有测量 producer、有界 SPSC 与冷消费者；120 B 固定记录和显式丢点计数不参与业务状态。启动安装、溢出语义及文件格式归 [latency-report](../../tools/latency-report/README.md)。
+
 ### SPSC 环(进程内与共享内存同一实现)
 
 ```rust

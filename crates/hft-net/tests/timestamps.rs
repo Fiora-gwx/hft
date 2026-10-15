@@ -110,6 +110,9 @@ fn net_124_frame_across_reads() {
 
 #[test]
 fn net_125_frames_share_read_stamps() {
+    use hft_rt::latency_trace::{self as lt, Stage};
+    let (writer, mut reader) = lt::channel(256).unwrap();
+    lt::install(writer).unwrap();
     let (mut conn, mut peer) = pair();
     let b = peer.frames(&[text(b"1"), text(b"2"), text(b"3")]);
     deliver_stamped(&mut conn, 3_000, 4_000, b, 30, 31);
@@ -119,6 +122,24 @@ fn net_125_frames_share_read_stamps() {
         ts.push(f.ts);
     }
     assert_eq!(ts.len(), 3);
+    let mut frames = Vec::new();
+    while let Some(record) = reader.rx.try_pop() {
+        if record.stage == Stage::Frame as u64 {
+            frames.push(record);
+        }
+    }
+    assert_eq!(frames.len(), 3);
+    assert!(
+        frames
+            .windows(2)
+            .all(|w| w[0].context.frame != w[1].context.frame)
+    );
+    assert!(
+        frames
+            .iter()
+            .all(|r| r.values[0] == 4000 && r.values[1] == 30 && r.values[2] == 31 && r.values[3] > 0)
+    );
+    assert_eq!(reader.dropped(), 0);
     for t in &ts {
         assert_eq!(
             (t.rx_tsc, t.hw_rx_ns, t.rx_empty_gap_ns),

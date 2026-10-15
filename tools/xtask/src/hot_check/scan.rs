@@ -43,6 +43,8 @@ pub struct FileScan {
     /// Paths into `std::time`, `std::fs` or `std::net` (forbidden in pure crates).
     pub std_io: Vec<At<String>>,
     pub encrypt_calls: Vec<At<String>>,
+    /// Macro invocations and imports (including renamed imports).
+    pub macro_paths: Vec<At<String>>,
     /// `#[allow]`/`#[expect]` (also inside `cfg_attr`): lint paths.
     pub allows: Vec<At<Vec<String>>>,
     pub structs: Vec<At<StructDef>>,
@@ -254,6 +256,16 @@ impl V<'_> {
 }
 
 impl<'ast> Visit<'ast> for V<'_> {
+    fn visit_macro(&mut self, m: &'ast syn::Macro) {
+        if let Some(first) = m.path.segments.first() {
+            self.out.macro_paths.push(At {
+                line: line(first.ident.span()),
+                test: self.t(),
+                what: path_str(&m.path),
+            });
+        }
+        visit::visit_macro(self, m);
+    }
     fn visit_item(&mut self, i: &'ast Item) {
         let test = is_cfg_test(item_attrs(i));
         if test {
@@ -376,6 +388,11 @@ impl<'ast> Visit<'ast> for V<'_> {
         let mut out = Vec::new();
         use_paths(&u.tree, &mut Vec::new(), &mut out);
         for segs in out {
+            self.out.macro_paths.push(At {
+                line: line(u.use_token.span),
+                test: self.t(),
+                what: segs.join("::"),
+            });
             if let Some(r) = std_io(&segs) {
                 self.out.std_io.push(At {
                     line: line(u.use_token.span),

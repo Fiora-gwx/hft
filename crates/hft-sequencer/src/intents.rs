@@ -11,6 +11,7 @@ use hft_oms::{
 use hft_refdata::InstKind;
 use hft_risk::mode::{CellKey, Effective, ModeInput};
 use hft_risk::{Classification, IntentDraft, IntentView, PosFacts, PosView, Risk};
+use hft_rt::latency_trace::{self as lt, Stage as TraceStage};
 use hft_strategy_sdk::ctx::CancelReq;
 use hft_strategy_sdk::{HedgeKind, IntentClass, IntentOutcome, LinkRole, OrderIntent, OrderRef, StrategySet};
 use hft_types::{
@@ -491,6 +492,15 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
             e.trace.views.push(p.view);
         }
     }
+    lt::stamp(
+        TraceStage::RiskStart,
+        [
+            u64::from(intent_no),
+            u64::from(inst_id.0),
+            u64::from(strategy.0),
+            0,
+        ],
+    );
     let res = {
         let v = RiskAdapter { v: views_noexec(e) };
         if let Some(p) = pair.as_mut() {
@@ -502,6 +512,15 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
             e.risk.evaluate(&iv, &v, &e.now)
         }
     };
+    lt::stamp(
+        TraceStage::RiskEnd,
+        [
+            u64::from(intent_no),
+            u64::from(inst_id.0),
+            u64::from(strategy.0),
+            0,
+        ],
+    );
     e.trace.rec("risk.evaluate", u64::from(account.0), 0);
     if shadow {
         let bits = res.err().unwrap_or(RejectBits(0));
@@ -581,7 +600,15 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
     let mut o = e.take_oms();
     #[cfg(feature = "testkit")]
     let place_facts = crate::audit::capture_place(e, &ai);
+    lt::stamp(
+        TraceStage::OmsStart,
+        [u64::from(intent_no), u64::from(inst_id.0), 0, 0],
+    );
     let r = e.oms.place(&ai, e.now.tsc, e.cur_seq, &mut o);
+    lt::stamp(
+        TraceStage::OmsEnd,
+        [u64::from(intent_no), u64::from(inst_id.0), 0, 0],
+    );
     if r.is_ok() {
         e.risk.commit(&adm, &e.now);
     }

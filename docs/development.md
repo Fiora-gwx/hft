@@ -252,6 +252,8 @@ replayer 的定向文件用例([RPL-283](../apps/replayer/TESTS.md#rpl-283-dst-�
 
 ## 分支与发布
 
+`release-aarch64.yml` 的可选 `wire_benchmarks` 输入在原生 ARM runner 生成独立 wire 基准包；含两家协议的 Criterion 可执行文件、SHA-256 和 `WIRE.json` 的 Git/CPU 包络元数据，随正式 archive 分开下载。主机只运行制品，不编译；用于 decode 分布复核，不能代替真实运行的逐事件链。
+
 1. 合并绿的分支 → 等 `main` CI 与当夜任务通过 → 在该提交上打带注释的 `vMAJOR.MINOR.PATCH` 标签。**标签不移动**,修复发新补丁版本。
 2. **开发构建**:需要在 `dev2` 联调时,按[日常流程](#日常流程)第 5 步出 `vX.Y.Z-dev.N`(`N` 从 1 递增,`X.Y.Z` = 当前工作区版本);发布工作流产出 `channel = dev` 的 pre-release。开发构建只用于 `dev2`([deploy](../deploy/README.md#制品从哪里来))。
 3. 发布工作流构建 aarch64 归档([目标 CPU](#目标-cpu)),写入 Git SHA、`ci_run_id`、schema 版本、目标三元组与 `target-cpu`、事件 kind 表哈希与各策略的 `(kind_id, version, schema_id, schema_ver)` 到 `RELEASE.json`;正式版同时发布验证包与基准制品。

@@ -27,6 +27,10 @@ on:
         description: Build the immutable CI artifact without creating a tag or GitHub Release
         type: boolean
         default: false
+      wire_benchmarks:
+        description: Also build standalone venue wire diagnostics for the test host (artifact only)
+        type: boolean
+        default: false
       skip_nightly:
         description: Skip the formal-release nightly condition (Admins in .github/hft-admins.txt only)
         type: boolean
@@ -77,6 +81,77 @@ jobs:
           IN_SKIP_VERIFY: ${{ inputs.skip_verify }}
           ACTOR: ${{ github.actor }}
         run: python3 .github/scripts/release-preflight.py
+
+  wire-benchmarks:
+    needs: preflight
+    if: github.event_name == 'workflow_dispatch' && inputs.wire_benchmarks == true
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: ubuntu:24.04
+    timeout-minutes: 40
+    steps:
+      - name: Install build prerequisites
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+            build-essential ca-certificates curl file git pkg-config zstd python3
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+      - name: Mark the workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: arm64-wire-bench
+      - name: Build standalone venue wire diagnostics
+        shell: bash
+        env:
+          SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          set -euo pipefail
+          python3 deploy/release/cpu.py > wire-cpu.json
+          cargo bench --locked --no-run --target aarch64-unknown-linux-gnu \
+            -p venue-binance -p venue-bitget --bench wire \
+            --message-format=json-render-diagnostics > wire-build.jsonl
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, shutil, subprocess
+          expected = {"venue-binance", "venue-bitget"}
+          metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1"]))
+          names = {p["id"]: p["name"] for p in metadata["packages"]}
+          root = pathlib.Path("wire-stage") / ("hft-wire-" + os.environ["SHA"][:12] + "-aarch64")
+          (root / "bin").mkdir(parents=True)
+          files = {}
+          for line in pathlib.Path("wire-build.jsonl").read_text().splitlines():
+              message = json.loads(line)
+              name = names.get(message.get("package_id"))
+              if message.get("reason") != "compiler-artifact" or name not in expected or message.get("target", {}).get("name") != "wire" or not message.get("executable"):
+                  continue
+              source = pathlib.Path(message["executable"])
+              assert "ARM aarch64" in subprocess.check_output(["file", str(source)], text=True)
+              target = root / "bin" / (name + "-wire")
+              shutil.copy2(source, target)
+              files[target.relative_to(root).as_posix()] = hashlib.sha256(target.read_bytes()).hexdigest()
+          assert set(files) == {"bin/" + name + "-wire" for name in expected}
+          contract = json.loads(pathlib.Path("wire-cpu.json").read_text())
+          contract.update(git_sha=os.environ["SHA"], ci_run_id=os.environ["GITHUB_RUN_ID"], target="aarch64-unknown-linux-gnu", profile="bench", files=files)
+          (root / "WIRE.json").write_text(json.dumps(contract, sort_keys=True, indent=2) + "\n")
+          PY
+          mkdir -p wire-out
+          name="hft-wire-${SHA:0:12}-aarch64"
+          epoch=$(git show -s --format=%ct "$SHA")
+          tar -C wire-stage --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner -cf - "$name" |
+            zstd -19 -T4 -q -o "wire-out/$name.tar.zst"
+          (cd wire-out && sha256sum "$name.tar.zst" > "$name.tar.zst.sha256")
+      - name: Upload wire diagnostic artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wire-benchmarks
+          path: wire-out/
+          if-no-files-found: error
+          retention-days: 7
 
   conformance-x86:
     needs: preflight

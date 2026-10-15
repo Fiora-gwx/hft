@@ -253,3 +253,8 @@ reason = "Warm account HTTP request construction; no hot task calls this schedul
 file = "crates/hft-venue/src/snap.rs"
 lints = ["clippy::disallowed_macros"]
 reason = "Warm public REST request construction on conn-builder; the feed receives bounded records"
+
+[[allow]]
+file = "crates/hft-rt/src/lib.rs"
+lints = ["clippy::disallowed_macros"]
+reason = "Clippy 1.97 thread_local expansion loses local lint scope; hot-check independently rejects banned macro calls/imports throughout hft-rt except measurement TLS in latency_trace.rs. See tools/latency-report/README.md"

@@ -76,6 +76,8 @@ pub struct Shutdown {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Journal {
+    /// Optional bounded per-worker diagnostic transport, drained by persist.
+    pub latency_trace_capacity: Option<usize>,
     pub segment_bytes: u64,
     pub hot_keep: u8,
     pub raw_feed: Option<JournalSize>,
@@ -333,6 +335,16 @@ pub fn load_timed(
         bad!(
             "EngineMismatch",
             "ring elements 256..65536 and bytes 262144..4194304 must be powers of two".into()
+        );
+    }
+    if let Some(cap) = c.journal.latency_trace_capacity
+        && (!(256..=65536).contains(&cap)
+            || !cap.is_power_of_two()
+            || (cap as u128) * (c.threads.len() as u128) * 120 > 32 << 20)
+    {
+        bad!(
+            "BadValue",
+            "latency trace: power-of-two capacity 256..65536 and total ring storage <=32 MiB required".into()
         );
     }
     if !(8 << 20..=256 << 20).contains(&c.journal.segment_bytes)

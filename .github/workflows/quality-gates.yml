@@ -812,6 +812,8 @@ jobs:
       - name: CI script policy regression tests
         if: needs.paths.outputs.ops == 'true'
         run: python -m unittest discover -s tools/xtask/tests -p 'test_ci_*.py' -v
+      - name: Latency-chain extraction tests
+        run: python -m unittest discover -s tools/latency-report -p 'test_*.py' -v
       - name: Offline calibration Python tests
         if: hashFiles('tools/strat-calib/pyproject.toml') != ''
         run: |

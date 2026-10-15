@@ -24,6 +24,8 @@ status: spec
 
 ## 使用本组件
 
+可选 [latency_trace](../../tools/latency-report/README.md) 记录协议解码、规范化事件发布、订单出环及编码边界；关联使用固定事件指纹、decision_seq 和 raw 序号到 frame 的映射，满环只丢测量点。
+
 ### 协议接口
 
 `VenueProtocol` trait 及其全部纯类型(`SeqRule`、`Align`、`RouteKind`、`StreamKind`、`MdSink`/`ReportSink`、`TargetRef`、`WallClock`、`HeartbeatSpec`、`DeadManSpec`、`RateRule`、`AcctQuery`、`AcctHint`、`Skip`、`TradeKey`…)与实现方契约定义在 [hft-venue-proto](../hft-venue-proto/README.md)。本 crate 依赖它,**不依赖任何具体 `venue-*`**;具体 venue 由 apps/hft-core 以泛型参数装进 `FeedRuntime<P>`/`SnapFetchTask<P>`/`GwRuntime<P>`/`AcctFetchTask<P>`。本 crate 实现 trait 规定的两个 sink(写入环)并按 trait 的返回值驱动去重、分档快照、发送、切换与账户查询。所有 `P::*` 热路径调用都显式传入 `rd: &RefData`(进程生命周期内不变的 `&'static RefData`;refdata 变更 = 写 ConfigBlob 后 Drain + 重启);运行时行为差异(保证金数据来源、可忽略事件、是否支持 reduceOnly、连接的流数与入向消息上限)一律读 refdata 里的生效值(`VenueCaps`、`VenueMeta`,按 `P::VENUE` 取),不读 `P::default_caps()` 与 `P::routes()` 里的默认数值。

@@ -32,6 +32,8 @@ status: impl
 
 ## 使用本组件
 
+逐事件细分延迟可由 [latency-report](../../tools/latency-report/README.md) 连接只读 journal 与独立测量文件生成；诊断戳不参与逐字节业务回放验证。
+
 ```
 replayer verify  --journal <dir|s3://…> [--from-seq N] [--to-seq M] [--instance prod|sim] [--advice journal|recompute]
                  [--model-checkpoint <file|dir|s3://…>] [--keep-going] [--report out.json | --report-dir <dir>]
