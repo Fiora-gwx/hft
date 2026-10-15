@@ -469,7 +469,6 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 
 ## 延伸阅读
 
-- [Wire 轮询审查与测量](reports/2026-10-15-wire-io.md)（Windows 共享主机诊断）
 
 - [Windows 开发机热点测量与前后对照(2026-10-15)](reports/2026-10-15-windows-hotpath.md)(诊断报告,非参考机验收)
 - [latency-budget.md](../docs/latency-budget.md)、[testing.md](../docs/testing.md)、[hot-path-rules.md](../docs/hot-path-rules.md)
@@ -494,3 +493,4 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 - 实现顺序:`seq-decide`(最早可跑,纯回放驱动)→ `startup-cold` → `gw-ingest/poll-cadence`(M1.5 前,gw 收包方式的依据)→ `seq/l2burst`(M2)→ `feed-ingest` → `gw-egress` → `leg-link`;冒烟模式随第一个基准一起做;`tick-to-trade/*` 等 mock-exchange 解冻。
 
 </details>
+- [Wire 轮询审查与测量](reports/2026-10-15-wire-io.md)（Windows 共享主机诊断）
