@@ -2301,6 +2301,7 @@ Warm 请求与 countdownTime 字符串/数字确认由 `tests/encode.rs::bin_173
 - 输入:`fixtures/binance-spot/executionReport/` 的 `new.in`、`partially_filled.in`、`filled.in`、`canceled.in`、`expired.in`、`replaced.in`、`web_order_fill.in`、`fee_bnb.in`(BNB 抵扣)、`fee_base_asset.in`(不抵扣,扣所得 BTC)、`dup_trade.in`;来源:待采集(方法 B:演示环境分别开关 BNB 抵扣各成交一笔,开发备忘第 7 条)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-binance/tests/golden.rs::bin_327_spot_execution_report`
+- 补充断言:实采买卖成交与部分成交的 detail 必须等于 wire S 的 Buy=1/Sell=2,保证迟到与无归属成交保留净仓方向。
 - 采样覆盖:`source = "testnet-capture"` 覆盖NEW/PARTIALLY_FILLED/FILLED/CANCELED/EXPIRED/REPLACED、base asset 手续费与同一订单连续部分成交;dup_trade 是实采部分成交帧的显式合成重复;期望独立按线值计算,核对状态见 meta。其余列出的分支仍待采集,当前测试只比较期望文件列出的业务字段及事件数,不宣称本用例全量验收。
 - 备注:依赖待核实:开发备忘第 3、7 条
 

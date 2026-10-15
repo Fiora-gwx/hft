@@ -358,6 +358,8 @@ pub mod mock {
 
 ## 实现说明
 
+成交 `PartialFill`/`Fill.detail` 保留 wire `S` 的 Buy=1/Sell=2,供 OMS 对迟到或无归属成交确定净量方向;该字段其余回报的状态/拒绝分类归 [hft-event](../hft-event/README.md)。
+
 <details><summary>实现要点</summary>
 
 ### 1. 分派(`classify` / `classify_report`,只看前 64 B)

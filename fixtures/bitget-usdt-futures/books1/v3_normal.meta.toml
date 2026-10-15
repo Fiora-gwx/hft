@@ -11,6 +11,6 @@ environment = "demo"
 endpoint = "wss://wspap.bitget.com/v3/ws/public"
 http_status = 200
 sha256 = "d6a225467a478343a1d1f04f6a98b502b6fc3bb1ca3676c7d787631a0277c794"
-sanitization = "Credential fields removed; UID/account identity replaced with acct-0001; JSON whitespace normalized. Requests and login frames never stored."
+sanitization = "Credential fields removed; UID/account identity replaced with acct-0001; JSON whitespace normalized. Requests and login frames never stored. Order IDs replaced with deterministic same-width placeholders; connId fixed conn-0001; canonical client IDs retained."
 wire_exponents = "BTC/ETH px=-2 qty=-8; USDT notional=-6 qty=-8"
 response_headers_json = "{}"

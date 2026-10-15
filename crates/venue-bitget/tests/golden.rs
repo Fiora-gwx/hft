@@ -48,7 +48,11 @@ fn bgt_311_subscribe_ack() {
             let c = T::classify(RouteId(0), MsgOp::Text, &b[..b.len().min(64)]);
             match T::control(c, b).unwrap() {
                 hft_venue_proto::ControlHint::SubAck { ok, code } => {
-                    vec![serde_json::json!({"control":"SubAck","ok":ok,"code":code})]
+                    if let Some((bit, success)) = T::private_ack(b) {
+                        vec![serde_json::json!({"bit":bit,"success":success})]
+                    } else {
+                        vec![serde_json::json!({"control":"SubAck","ok":ok,"code":code})]
+                    }
                 }
                 other => panic!("unexpected control: {other:?}"),
             }
@@ -276,4 +280,63 @@ fn bgt_305_fut_trade() {
 #[test]
 fn bgt_307_fut_ticker() {
     market("ticker", "v3_normal", 3);
+}
+
+fn report(channel: &str, name: &str) {
+    use serde_json::json;
+    let (input, expected) = capture(channel, name);
+    let mut sink = RepSink::default();
+    let class = BitgetUsdtFutures::classify_report(MsgOp::Text, &input[..input.len().min(64)]);
+    let result =
+        BitgetUsdtFutures::decode_report(rd(), &mut GwCtx::new(), class, &input, &RX, &mut sink).unwrap();
+    assert!(sink.ext.is_empty());
+    assert_eq!(usize::from(result.events), sink.events());
+    let mut actual: Vec<_> = sink
+        .orders
+        .iter()
+        .map(|e| {
+            json!({"kind":"OrderEvent","what":format!("{:?}",e.what),
+        "epoch":e.epoch,"slot":e.slot.0,"gen":e.r#gen,"inst":e.inst.0,"detail":e.detail,
+        "qty":e.qty.0.to_string(),"cum_filled":e.cum_filled.0.to_string(),"px":e.px.0.to_string(),
+        "avg_px":e.avg_px.0.to_string(),"fee":e.fee.0.to_string(),"fee_asset":e.fee_asset.0,
+        "exch_order_id":e.exch_order_id,"trade_id":e.trade_id,"ex_ts_ns":e.ex_ts_ns})
+        })
+        .collect();
+    actual.extend(sink.pos.iter().map(|p| {
+        json!({"kind":"PositionReport","inst":p.inst.0,
+        "qty":p.qty.0.to_string(),"entry_px":p.entry_px.0.to_string(),"upnl":p.upnl.0.to_string(),
+        "liq_px":p.liq_px.0.to_string(),"ex_ts_ns":p.ex_ts_ns})
+    }));
+    actual.extend(sink.bal.iter().map(|b| {
+        json!({"kind":"BalanceReport","asset":b.asset.0,
+        "free":b.free.0.to_string(),"locked":b.locked.0.to_string(),"ex_ts_ns":b.ex_ts_ns})
+    }));
+    compare(&expected, &actual);
+}
+
+#[test]
+fn bgt_317_fut_orders() {
+    for name in [
+        "post_only_live",
+        "canceled",
+        "ioc_expired",
+        "filled_long",
+        "closed_long",
+        "filled_short",
+        "closed_short",
+    ] {
+        report("orders", name);
+    }
+}
+
+#[test]
+fn bgt_322_positions() {
+    for name in ["long", "short", "flat"] {
+        report("positions", name);
+    }
+}
+
+#[test]
+fn bgt_323_fut_account() {
+    report("account", "usdt_only");
 }

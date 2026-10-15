@@ -2054,6 +2054,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 级别:golden
 - 里程碑:M3
 - 输入:`fixtures/bitget-usdt-futures/orders/{live,partially_filled,filled,canceled,ioc_expired,post_only_live,duplicate_fill,trade_id_zero}.in`;V2 私有 `orders` 来自采集系统(若有),V3 待采集(方法 B,BGT-212)
+- 采样覆盖:真实 V3 post_only_live/canceled/ioc_expired 与 filled_long/closed_long/filled_short/closed_short;累计量、费用、方向 detail 和时间戳由 wire 独立计算。部分成交、重复及其他列出的分支仍待补齐,不宣称全量验收。
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_317_fut_orders`
 
@@ -2099,6 +2100,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 级别:golden
 - 里程碑:M3
 - 输入:`fixtures/bitget-usdt-futures/positions/{long,short,no_liq_px,unknown_symbol}.in`;待采集(方法 B)
+- 采样覆盖:真实 V3 long/short/flat;flat 的 liqPrice 为空,数量为零。其他分支仍待补齐。
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_322_positions`
 
@@ -2108,6 +2110,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 - 级别:golden
 - 里程碑:M3
 - 输入:`fixtures/bitget-usdt-futures/account/{usdt_only,with_margin_ratio}.in`;待采集(方法 B)
+- 采样覆盖:usdt_only 为真实 V3 成交后钱包余额推送,只产出 BalanceReport;推送含 margin 字段不改变 Poll 能力。
 - 期望文件:同目录 `<case>.expected.jsonl`(`BalanceReport` 行;`margin_data = Poll` 时无 `MarginReport` 行)
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_323_fut_account`
 

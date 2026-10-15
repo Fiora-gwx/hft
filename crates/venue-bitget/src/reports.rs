@@ -859,6 +859,10 @@ fn emit(
     };
     let mut e = blank(line, rx.account, rx);
     e.what = what;
+    if matches!(what, OrderEventKind::PartialFill | OrderEventKind::Fill) {
+        // parse_row requires a known side whenever cumulative filled quantity is nonzero.
+        e.detail = x.side.map_or(0, |side| side as u8);
+    }
     e.epoch = epoch;
     e.slot = slot;
     e.r#gen = r#gen;

@@ -11,6 +11,6 @@ environment = "demo"
 endpoint = "https://api.bitget.com/api/v3/account/settings"
 http_status = 200
 sha256 = "bbf03ceccdfffe2d0ef9ce476be19ef91fa40d4b3cf096d919b9d5c43b8d85ae"
-sanitization = "Credential fields removed; UID/account identity replaced with acct-0001; JSON whitespace normalized. Requests and login frames never stored."
+sanitization = "Credential fields removed; UID/account identity replaced with acct-0001; JSON whitespace normalized. Requests and login frames never stored. Order IDs replaced with deterministic same-width placeholders; connId fixed conn-0001; canonical client IDs retained."
 wire_exponents = "BTC/ETH px=-2 qty=-8; USDT notional=-6 qty=-8"
 response_headers_json = "{\"date\": \"Thu, 15 Oct 2026 05:56:11 GMT\", \"content-type\": \"application/json\"}"

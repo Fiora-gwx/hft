@@ -79,6 +79,19 @@ fn report<P: VenueProtocol<GwCtx = GwCtx>>(product: &str, channel: &str, name: &
     assert!(sink.ext.is_empty(), "unexpected external fill: {sink:?}");
     assert!(sink.positions.is_empty() && sink.funding.is_empty());
     assert_eq!(events, sink.orders.len() + sink.balances.len());
+    for event in &sink.orders {
+        if matches!(
+            event.what,
+            hft_event::OrderEventKind::Fill | hft_event::OrderEventKind::PartialFill
+        ) {
+            // Existing real executionReport fixtures preserve the exchange side independently.
+            let wire: Value =
+                serde_json::from_slice(input.split(|b| *b == b'\n').find(|p| !p.is_empty()).unwrap())
+                    .unwrap();
+            let side = wire.get("event").unwrap_or(&wire)["S"].as_str().unwrap();
+            assert_eq!(event.detail, if side == "BUY" { 1 } else { 2 });
+        }
+    }
     let mut actual: Vec<Value> = sink
         .orders
         .iter()

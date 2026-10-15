@@ -642,7 +642,7 @@ fn bgt_101_partial_fill_fields() {
             venue: FUT,
             account: ACCT,
             what: OrderEventKind::PartialFill,
-            detail: 0,
+            detail: Side::Buy as u8,
             slot: SlotId(42),
             r#gen: 7,
             inst: F_BTC,
