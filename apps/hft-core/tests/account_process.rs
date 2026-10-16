@@ -468,3 +468,53 @@ fn core_120_mock_accounts_bootstrap_reauth_and_drift() {
         exercise::<venue_bitget::BitgetUsdtFutures>(true, failure);
     }
 }
+
+#[test]
+fn core_120_funding_boundary_real_empty_response_completes_and_polls_again() {
+    use hft_venue::{FundingPoll, FundingPollCfg};
+    use hft_venue_proto::WallClock;
+    let start = 1_792_000_000_000;
+    let mut poll = FundingPoll::<venue_bitget::BitgetUsdtFutures>::new(
+        AccountId(1),
+        start,
+        FundingPollCfg {
+            poll_ms: 5000,
+            lookback_ms: 172_800_000,
+            settle_lag_ms: 600_000,
+            max_settlement_skew_ms: 1000,
+            max_pages: 64,
+            max_bills: 4096,
+        },
+    )
+    .unwrap();
+    let venue = VenueCfg {
+        env: VenueEnv::Testnet,
+        stale_guard_ms: 1500,
+    };
+    let key = Credential {
+        api_key: ArrayBuf::from_bytes(b"DUMMY").unwrap(),
+        secret: SecretBuf(ArrayBuf::from_bytes(b"dummy-secret").unwrap()),
+        passphrase: ArrayBuf::from_bytes(b"dummy-pass").unwrap(),
+        alg: SignAlg::HmacSha256,
+    };
+    let mut clock = WallClock {
+        unix_ms: start + 600_000,
+        unix_us: 0,
+    };
+    assert!(poll.request(&venue, &key, &clock).unwrap().is_none());
+    for _ in 0..3 {
+        clock.unix_ms += 5001;
+        let request = poll.request(&venue, &key, &clock).unwrap().unwrap();
+        let path = std::str::from_utf8(request.path_query.as_slice()).unwrap();
+        assert!(path.ends_with(&format!("&endTime={}", clock.unix_ms - 600_000)));
+        poll.response(
+            rd(),
+            200,
+            include_bytes!("../../../fixtures/bitget-usdt-futures/rest.bills/one_ms.in"),
+            clock.unix_ms,
+            Tsc(1),
+        )
+        .unwrap();
+        assert!(poll.take_ready().is_empty());
+    }
+}

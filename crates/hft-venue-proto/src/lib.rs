@@ -163,6 +163,16 @@ pub trait VenueProtocol: Sized + 'static {
     fn bootstrap(role: Role, cfg: &VenueCfg, cred: Option<&Credential>) -> Option<BootCall>;
     /// Market-data route table (Bbo, DepthTopN and Md routes).
     fn routes() -> &'static [RouteSpec];
+    /// Route carrying a stream. Protocols with several Md routes must select explicitly;
+    /// the default is for products with one route per kind.
+    fn stream_route(stream: StreamKind) -> Option<RouteId> {
+        let kind = match stream {
+            StreamKind::Bbo => RouteKind::Bbo,
+            StreamKind::DepthTopN => RouteKind::DepthTopN,
+            _ => RouteKind::Md,
+        };
+        Self::routes().iter().find(|r| r.kind == kind).map(|r| r.id)
+    }
     /// Upgrade request target and extra headers.
     fn endpoint(
         role: Role,

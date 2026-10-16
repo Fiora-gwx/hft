@@ -35,7 +35,7 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
         "clock" => (&["step_threshold_ns", "interval_ms"], &[]),
         "watchdog" => (&["hb_stale_ms"], &[]),
         "startup" => (&["budget_s", "gate_timeout_s"], &[]),
-        "thread" => (&["name", "task", "park_us", "nice"], &["core"]),
+        "thread" => (&["name", "task", "park_us", "nice"], &["core", "idle"]),
         "rings" => (&["elements", "bytes"], &[]),
         "venue" => (
             &["protocol", "id", "max_sub_insts", "stale_guard_ms"],

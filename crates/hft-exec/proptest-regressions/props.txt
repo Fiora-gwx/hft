@@ -1,3 +1,4 @@
 # Default SourceParallel persistence path reported by proptest in CI.
 # The reduced four-step case is also exercised by EXE-516, including snapshot restore.
 cc 1b34924f66b9b633b256751eb7ad6eee445ccd6e8b1279e459094a35677c2100 # shrinks to o = [(7, 15590), (9, 65457), (12, 112), (3, 34016)]
+cc a7e1e7670650139ab29815c287d59061655df554e18b98926a347ea83cb15c99 # shrinks to o = [(0, 52419), (7, 30147), (3, 25184), (9, 6836), (8, 54756), (12, 9441)]

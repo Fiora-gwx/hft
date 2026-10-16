@@ -4,6 +4,8 @@
 
 ## 三类 journal
 
+tmpfs 热段计入进程 cgroup 的 memory.max；宿主预检按 [hft-core 内存预算](../../apps/hft-core/README.md#内存与-journal-段按主机类唯一归属) 检查挂载上限、进程余量与实际布局。OMS 快照私有查询等待位的定义归 [订单槽](../../crates/hft-oms/README.md)，不作为 wire 订单标志。
+
 进程对 seq/raw 写者的创建、停止与持久化顺序归 [hft-core 可执行装配](../../apps/hft-core/config/README.md)；文件结构与封段契约仍由本页及 hft-journal 定义。
 
 | journal 名 | scope | 写者(唯一) | 记录头 `seq` | 记录头 `tsc` | 引导块 | CRC |

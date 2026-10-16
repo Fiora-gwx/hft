@@ -435,7 +435,7 @@ spec: README.md
 - 参考:逐条断言上列性质(mock 视图按成交更新 `legs` 与 `portfolio`)
 - 例数:PR 2 000
 - 实现:`crates/hft-exec/tests/props.rs::exe_050_cell_invariants`
-- 回归:固定序列见 EXE-513。
+- 回归:固定序列见 EXE-513；`exe_050_external_deadline_survives_force_mode_changes` 覆盖外来成交计时中强制减仓/L1 改变 Stuck 原因后仍暂停策略目标，截止清除时不多发一片。
 
 ### EXE-051 TargetCell 不超过 640 B,AutoFixState 为 56 B 且字段偏移固定
 

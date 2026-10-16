@@ -33,6 +33,25 @@ fn rec_end(h: &mut H, now: u64, stop: u64) {
     h.o.recovery_end(ms(now), ms(stop), HZ, HZ, 1, &mut h.out);
 }
 
+#[test]
+fn oms_138_rest_query_handoff_survives_snapshot_and_reconnect() {
+    let mut h = H::new();
+    let s = h.place_ok(&buy_x(), 0);
+    h.what(s, OrderEventKind::OutcomeUnknown, 1);
+    for _ in 0..6 {
+        h.send(VS, A1, GwOp::Query, s.slot, s.r#gen, SendStatus::Written, 2, 2);
+    }
+    assert_ne!(h.flags(s) & SlotFlags::REST_QUERY, 0);
+    let mut h = restored(&snapshot(&h));
+    rec_end(&mut h, 10000, 3);
+    h.conn(VS, A1, ConnRole::Order, ConnStateKind::Up, 10001);
+    h.uq(s, 11000);
+    assert_eq!(h.state(s), OrderState::Unknown);
+    assert!(h.decisions(OrderAction::Query).is_empty());
+    assert_eq!(h.n_notes(notes::NEEDS_REST_QUERY), 1);
+    assert_ne!(h.flags(s) & SlotFlags::REST_QUERY, 0);
+}
+
 fn check_simultaneous_recovery_waits_for_both_terminal() {
     for policy in [OnFail::Reverse, OnFail::Hold] {
         let mut h = H::new();

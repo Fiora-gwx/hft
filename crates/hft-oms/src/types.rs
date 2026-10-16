@@ -199,8 +199,10 @@ impl SlotFlags {
     pub const HIST_WAIT: u16 = 256;
     pub const ALARMED: u16 = 512;
     pub const AGED: u16 = 1024;
+    /// Gateway queries exhausted or unsupported; reconciliation owns convergence.
+    pub const REST_QUERY: u16 = 2048;
     /// Union of every defined bit.
-    pub const ALL: u16 = 0x07FF;
+    pub const ALL: u16 = 0x0FFF;
 
     #[inline]
     pub const fn has(self, b: u16) -> bool {

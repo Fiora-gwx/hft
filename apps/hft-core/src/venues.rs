@@ -322,7 +322,9 @@ where
         match route.kind {
             RouteKind::Bbo => targets.bbo = id,
             RouteKind::DepthTopN => targets.depth = id,
-            RouteKind::Md => targets.md = id,
+            RouteKind::Md => {
+                targets.md_routes[usize::from(route.id.0)] = Some(id);
+            }
         }
     }
     let mut gwcfg = GwCfg {
@@ -820,7 +822,9 @@ fn account_error(name: &str, e: &hft_venue::account::Error) -> Error {
         hft_venue::account::Error::Transport(_) => "REST transport failed; exchange outcome unknown",
         hft_venue::account::Error::CancelNotQuiescent => "startup open orders did not converge to empty",
         hft_venue::account::Error::Busy => "account request already active",
-        hft_venue::account::Error::Funding(_) => "funding history incomplete or invalid",
+        hft_venue::account::Error::Funding(reason) => {
+            return Error::config("AccountBootstrap", format!("{name}: funding history {reason:?}"));
+        }
     };
     Error::config("AccountBootstrap", format!("{name}: {detail}"))
 }

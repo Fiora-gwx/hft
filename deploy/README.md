@@ -594,6 +594,8 @@ sim  = [{ ip = "<第二个私有 IP>", eip_alloc = "eipalloc-…" }]  # sim 常�
 
 ## 延迟与资源契约
 
+dev2 预检的 `journal-memory-budget` 同时检查实例 tmpfs 挂载、cgroup 总预算、实际 journal 布局和滚动余量；预算与进程余量数字由 [hft-core](../apps/hft-core/README.md#内存与-journal-段按主机类唯一归属) 生成。tmpfs 页全额计入 MemoryMax，不能只按匿名 RSS 验收。
+
 本目录不在任何运行路径上。它交付三类验收数字:
 
 - **升级主机层面**([02 §6](../design/02-硬件与托管方案.md)):隔离核 `osnoise` 24 h max < 20 µs、p99.9 < 5 µs;到 Binance `minrtt` 比现状(dev2)降 ≥ 0.5 ms、p99 RTT 抖动(24 h 内 RTT 样本的 p99 − p50)< 100 µs;chrony PHC 误差界 < 40 µs;冷启动开机到 hostprobe 通过 < 3 min。chrony 误差界是主机层的验收;µs 级分段的跨时钟域换算按 `ClockStatus` 校准对插值并逐样本给误差界(规则归 [latency-budget](../docs/latency-budget.md)),不依赖这个界。`kernel_rx` 等主机内分段的预算归 latency-budget。

@@ -4,6 +4,8 @@ sequencer 的一切输入与决策都是事件;本页是**记录头、kind 编�
 
 ## 记录头(24 B,全系统唯一)
 
+行情 stream 到连接路由的接口归 [VenueProtocol](../../crates/hft-venue-proto/README.md)，Funding 输入与实额账单输入仍使用本页已有 kind；窗口边界与重试归 [FundingPoll](../../crates/hft-venue/README.md#资金费账单轮询)。
+
 ```rust
 #[repr(C, align(8))]
 pub struct RecordHeader {

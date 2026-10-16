@@ -44,7 +44,7 @@ impl FundingHistoryProtocol for BitgetUsdtFutures {
         out: &mut RestReqBuf,
     ) -> Result<(), ProtoErr> {
         if q.start_ms < 0
-            || q.end_ms < q.start_ms
+            || q.end_ms <= q.start_ms
             || q.end_ms - q.start_ms > 30 * 86_400_000
             || !q.cursor.as_slice().iter().all(u8::is_ascii_digit)
         {

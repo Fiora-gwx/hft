@@ -494,9 +494,10 @@ impl Exec {
         let Some(c) = self.cells.get(cix).copied() else {
             return;
         };
-        // Other external events can change the Stuck reason while a manual hold remains.
-        // The durable hold bit, rather than the presentation state alone, owns this gate.
-        if c.hold & MANUAL_HOLD != 0 && c.view.origin == TargetOrigin::Strategy {
+        // Force/margin transitions can replace the displayed Stuck reason while an external
+        // fill still awaits handling. Its deadline and the manual hold own the pause; do not
+        // reopen the affected leg before ext_deadline_step clears the suspended target.
+        if (c.hold & MANUAL_HOLD != 0 || c.ext_deadline.0 != 0) && c.view.origin == TargetOrigin::Strategy {
             return;
         }
         let ln = self.legs_now(cix, v);

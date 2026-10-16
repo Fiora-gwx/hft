@@ -46,7 +46,10 @@ def resources(specification):
     batch_memory = int(re.search(r"`MemoryMax=(\d+)M`", batch)[1])
     tmpfs = int(re.search(r"dev2 `prod` `size=(\d+)M`", specification)[1])
     io = re.search(r"\| `hftbatch.slice` \| 读 (\d+) MB/s、写 (\d+) MB/s", specification)
-    return dict(memory=memory, parent_memory=int(parent[1]), quota=int(parent[2]), weight=int(parent[3]), batch_memory=batch_memory, tmpfs=tmpfs, read=int(io[1]), write=int(io[2]))
+    process_memory = int(re.search(r"`process_memory=(\d+) MiB`", specification)[1])
+    if memory < tmpfs + process_memory:
+        raise ValueError("tmpfs plus process reserve exceeds MemoryMax")
+    return dict(memory=memory, process_memory=process_memory, parent_memory=int(parent[1]), quota=int(parent[2]), weight=int(parent[3]), batch_memory=batch_memory, tmpfs=tmpfs, read=int(io[1]), write=int(io[2]))
 
 
 def render(host, core_spec, guard_unit):

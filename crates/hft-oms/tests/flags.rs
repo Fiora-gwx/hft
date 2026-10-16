@@ -61,8 +61,9 @@ fn oms_021_slot_flags_never_on_wire() {
         SlotFlags::HIST_WAIT,
         SlotFlags::ALARMED,
         SlotFlags::AGED,
+        SlotFlags::REST_QUERY,
     ];
-    assert_eq!(bits, [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]);
+    assert_eq!(bits, [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]);
     assert_eq!(bits.iter().fold(0u16, |a, b| a | b), SlotFlags::ALL);
 }
 

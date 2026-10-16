@@ -28,6 +28,8 @@ status: spec
 
 ### 协议接口
 
+每个 MD stream 按 `VenueProtocol::stream_route` 分组，连接的 `RouteId` 同时用于订阅归属、端点选择与 classify。不同路由不能共享同一 MD 连接；重连重发原分组的订阅。`FeedEndpoints.md_routes` 按 RouteId 指定端点，缺省沿用 `md`。
+
 `VenueProtocol` trait 及其全部纯类型(`SeqRule`、`Align`、`RouteKind`、`StreamKind`、`MdSink`/`ReportSink`、`TargetRef`、`WallClock`、`HeartbeatSpec`、`DeadManSpec`、`RateRule`、`AcctQuery`、`AcctHint`、`Skip`、`TradeKey`…)与实现方契约定义在 [hft-venue-proto](../hft-venue-proto/README.md)。本 crate 依赖它,**不依赖任何具体 `venue-*`**;具体 venue 由 apps/hft-core 以泛型参数装进 `FeedRuntime<P>`/`SnapFetchTask<P>`/`GwRuntime<P>`/`AcctFetchTask<P>`。本 crate 实现 trait 规定的两个 sink(写入环)并按 trait 的返回值驱动去重、分档快照、发送、切换与账户查询。所有 `P::*` 热路径调用都显式传入 `rd: &RefData`(进程生命周期内不变的 `&'static RefData`;refdata 变更 = 写 ConfigBlob 后 Drain + 重启);运行时行为差异(保证金数据来源、可忽略事件、是否支持 reduceOnly、连接的流数与入向消息上限)一律读 refdata 里的生效值(`VenueCaps`、`VenueMeta`,按 `P::VENUE` 取),不读 `P::default_caps()` 与 `P::routes()` 里的默认数值。
 
 ### 出环:`OutMsg = GwCmd`
@@ -555,6 +557,8 @@ pub struct AcctRecHdr {                // acct-<venue> 环记录头(进程内,�
 6. 调度延迟:`AcctReq` 在 acct-fetch 下一次被调用时才发出,上界 = warm 线程的 park 超时(§1);`MarginNow` 的响应因此多出至多一个 park 周期。
 
 ### 资金费账单轮询
+
+首次请求必须满足 `end_ms > start_ms`。启动时刻加 `settle_lag_ms` 的边界仍无正宽窗口时返回等待，不保存请求、不标记账户读取失败；下一轮重新计算边界。失败后的重试仍保持同一个合法窗口，避免漏页。
 
 `FundingPoll<P: FundingHistoryProtocol>` 是 warm 账户查询驱动,单账户同时只有一个在途页面。调用者以 `request` 取得签名 GET,向选定产品线的 REST origin 发送,在完成时调用 `response`;超时调用 `retry`。调度与 HTTP 的所有时刻由调用者传入,不读系统时钟。`FundingPollCfg` 的 `poll_ms`、`lookback_ms`、`settle_lag_ms`、`max_settlement_skew_ms`、`max_pages`、`max_bills` 均在加载时校验;`poll_ms` 同时限制分页与错误重试节拍,部署按该账户和 IP 的 REST 权重余量配置。查询每段不超过 30 天,`lookback_ms` 必须小于 30 天;起点由账本历史水位提供。
 

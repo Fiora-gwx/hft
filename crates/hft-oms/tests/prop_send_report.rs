@@ -202,8 +202,8 @@ fn run_case(inits: &[Init], reps: &[Rep]) -> Result<(), TestCaseError> {
             }
             let not_sent = effects.iter().any(|e| e.cancel_not_sent);
             prop_assert_eq!(h.n_notes(notes::CANCEL_NOT_SENT), usize::from(not_sent));
-            let rest = effects.iter().any(|e| e.needs_rest);
-            prop_assert_eq!(h.n_notes(notes::NEEDS_REST_QUERY), usize::from(rest));
+            let rest = effects.iter().filter(|e| e.needs_rest).count();
+            prop_assert_eq!(h.n_notes(notes::NEEDS_REST_QUERY), rest);
             // Queries: emitted now or queued for the continuation (bounded fan-out, T10).
             let want_q: Vec<u32> = slots
                 .iter()

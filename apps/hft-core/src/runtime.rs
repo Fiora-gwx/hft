@@ -1,7 +1,7 @@
 //! Startup ordering, task ownership, supervision and graceful drain.
 use crate::{
     Error, Strategies,
-    config::{Config, Loaded, Thread},
+    config::{Config, Idle, Loaded, Thread},
     io, paper, storage,
 };
 use hft_event::{HkMsg, SysTimer, TimerCode};
@@ -32,6 +32,26 @@ pub fn policy(c: &Config, task: &str) -> Result<Thread, Error> {
         .ok_or_else(|| Error::config("ThreadPlan", task))
 }
 pub fn pin(t: &Thread) -> Result<(), Error> {
+    if t.idle == Idle::Spin {
+        let isolated = std::fs::read_to_string("/sys/devices/system/cpu/isolated").unwrap_or_default();
+        let allowed = t.core.is_some_and(|cpu| {
+            isolated.trim().split(',').any(|part| {
+                let (first, last) = part.split_once('-').unwrap_or((part, part));
+                first
+                    .parse::<u16>()
+                    .ok()
+                    .zip(last.parse::<u16>().ok())
+                    .is_some_and(|(first, last)| first <= cpu && cpu <= last)
+            })
+        });
+        if !allowed {
+            return Err(Error::runtime(
+                "ThreadPolicy",
+                "spin requires a dedicated isolated CPU",
+                3,
+            ));
+        }
+    }
     if let Some(cpu) = t.core {
         hft_rt::pin_current_thread(cpu)
             .map_err(|e| Error::runtime("Affinity", format!("{}: {e:?}", t.name), 3))?;
@@ -66,7 +86,10 @@ pub fn pin(t: &Thread) -> Result<(), Error> {
     Ok(())
 }
 pub fn idle(t: &Thread) {
-    std::thread::park_timeout(Duration::from_micros(t.park_us));
+    match t.idle {
+        Idle::Park => std::thread::park_timeout(Duration::from_micros(t.park_us)),
+        Idle::Spin => std::hint::spin_loop(),
+    }
 }
 
 /// A worker owns the only writer of its claimed heartbeat slot.

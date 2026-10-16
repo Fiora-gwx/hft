@@ -60,6 +60,52 @@ fn core_070_housekeeping_priority_is_validated_at_load() {
     );
 }
 
+#[test]
+fn core_061_spin_requires_one_dedicated_hot_core_and_park_remains_default() {
+    let (_d, path, base) = fixture();
+    let loaded = hft_core::config::load(&path, true).unwrap();
+    assert!(
+        loaded
+            .cfg
+            .threads
+            .iter()
+            .all(|t| t.idle == hft_core::config::Idle::Park)
+    );
+    let seq = base["threads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|t| t["task"].as_str() == Some("sequencer"))
+        .unwrap();
+    for (core, shared, valid) in [
+        (None, false, false),
+        (Some(2), false, true),
+        (Some(2), true, false),
+    ] {
+        let mut value = base.clone();
+        value["threads"][seq]
+            .as_table_mut()
+            .unwrap()
+            .insert("idle".into(), "spin".into());
+        value["threads"][seq].as_table_mut().unwrap().remove("core");
+        if let Some(core) = core {
+            value["threads"][seq]
+                .as_table_mut()
+                .unwrap()
+                .insert("core".into(), core.into());
+        }
+        if shared {
+            let other = if seq == 0 { 1 } else { 0 };
+            value["threads"][other]
+                .as_table_mut()
+                .unwrap()
+                .insert("core".into(), 2.into());
+        }
+        std::fs::write(&path, toml::to_string(&value).unwrap()).unwrap();
+        assert_eq!(hft_core::config::load(&path, true).is_ok(), valid);
+    }
+}
+
 #[cfg(target_os = "linux")]
 mod linux {
     use hft_core::{config::Thread, runtime::Workers};
@@ -98,6 +144,7 @@ mod linux {
                         core: Some(cpu),
                         park_us: 100,
                         nice,
+                        idle: Default::default(),
                     },
                     move |_, context| {
                         let set = allowed();
@@ -145,6 +192,7 @@ mod linux {
                 core: None,
                 park_us: 100,
                 nice: 0,
+                idle: Default::default(),
             })
             .unwrap();
             // SAFETY: sched_getscheduler queries the calling thread for pid 0.

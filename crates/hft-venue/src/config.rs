@@ -95,12 +95,26 @@ pub enum RawMode {
 }
 
 /// Connection targets of a feed task (from hft-core `venues.<v>.feed.conns` and the endpoint table).
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct FeedEndpoints {
     pub bbo: EndpointId,
     pub depth: EndpointId,
     pub md: EndpointId,
+    /// Explicit endpoints for protocols with multiple Md routes. Unset entries use `md`.
+    pub md_routes: [Option<EndpointId>; 256],
     pub src_ip_idx: u8,
+}
+
+impl Default for FeedEndpoints {
+    fn default() -> Self {
+        Self {
+            bbo: EndpointId(0),
+            depth: EndpointId(0),
+            md: EndpointId(0),
+            md_routes: [None; 256],
+            src_ip_idx: 0,
+        }
+    }
 }
 
 /// Feed-task configuration: the README keys plus the hft-core assembly results.

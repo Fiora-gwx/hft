@@ -6,6 +6,8 @@ spec: README.md
 
 # hft-core 测试规格
 
+CORE-061 覆盖 idle 默认 Park、Spin 缺绑核/共享核拒绝；CORE-120 用真实 Bitget 零宽错误与空页验证资金费边界等待及后续轮询。CORE-303 的 `epoch_reverse` 回归把真实 boot 出环的 SetEpoch 交给 gateway，用其实际编码 client id 的私有成交进入 sequencer/OMS/exec；另一腿 Expired 后自动 Reverse、平仓并完整回放。
+
 CORE-012 验证可选测量环配置，CORE-220 验证进程干净停止后的测量文件与关闭标记；见 [延迟采集测试](../../tools/latency-report/TESTS.md)。
 
 跨组件场景的实现与未覆盖项见 [C6、C12、C15、FP-8](../../docs/tests/scenarios.md)，使用真实 sequencer 与进程内网关；这些测试不改变本文件的里程碑或完整主机验收要求。

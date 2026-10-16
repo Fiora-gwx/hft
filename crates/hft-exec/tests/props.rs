@@ -812,6 +812,30 @@ fn exe_513_manual_hold_survives_other_external_events() {
     );
 }
 
+#[test]
+fn exe_050_external_deadline_survives_force_mode_changes() {
+    // CI's reduced sequence: target, liquidation, own fill, force request, L1, deadline.
+    // Changing the displayed Stuck reason must not resume the suspended strategy target.
+    let w = run(
+        &[
+            (0, 52419),
+            (7, 30147),
+            (3, 25184),
+            (9, 6836),
+            (8, 54756),
+            (12, 9441),
+        ],
+        Checks {
+            inv50: true,
+            ..Checks::default()
+        },
+    );
+    let c = w.fx.ex.cell(A1, G8).unwrap();
+    assert!(!c.has_target);
+    assert_eq!(c.ext_deadline, Tsc(0));
+    assert_eq!(c.view.state, TargetState::Idle);
+}
+
 fn strip(d: &[ExecDecision]) -> Vec<ExecDecision> {
     d.iter()
         .map(|x| {

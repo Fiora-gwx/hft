@@ -6,6 +6,8 @@ spec: README.md
 
 # hft-venue 测试规格
 
+VEN-021 的运行时回归覆盖 trade/ticker 独立 RouteId、端点与重连订阅，Funding 与 Mark 正确进入 md 环。VEN-258 同时覆盖首次 settle-lag 边界不发零宽请求、下一毫秒产生合法窗口；CORE-120 使用实采空页验证连续轮询完成。
+
 VEN-199 的解码测量边界、VEN-068 的原始记录帧关联说明见 [延迟采集测试](../../tools/latency-report/TESTS.md)。
 
 生命周期装配说明：`FeedRuntime` 与 `GwRuntime` 的 `seal_and_close` 将已停止任务的 raw writer 交给 journal 封段流程；连接退役断言沿用现有用例，进程退出的持久化验证归 [hft-core TESTS](../../apps/hft-core/TESTS.md)。

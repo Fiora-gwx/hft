@@ -1,6 +1,6 @@
 use crate::support::*;
 use hft_types::Notional;
-use hft_venue_proto::{FundingHistoryProtocol, FundingQuery, RestReqBuf};
+use hft_venue_proto::{FundingHistoryProtocol, FundingQuery, ProtoErr, RestReqBuf};
 use venue_bitget::BitgetUsdtFutures as P;
 
 fn query() -> FundingQuery {
@@ -98,4 +98,20 @@ fn bgt_336_foreign_symbol_bill_skipped_and_counted() {
             "{bad}"
         );
     }
+}
+
+#[test]
+fn bgt_336_zero_width_window_is_rejected_before_sending() {
+    let mut q = query();
+    q.end_ms = q.start_ms;
+    let mut out = RestReqBuf::default();
+    assert_eq!(
+        P::funding_request(&cfg(), &key(), &q, &WC, &mut out),
+        Err(ProtoErr::Cfg)
+    );
+    let capture = include_bytes!("../../../fixtures/bitget-usdt-futures/rest.bills/zero_window.in");
+    assert!(P::funding_decode(rd(), &q, 400, capture).is_err());
+    let error: serde_json::Value = serde_json::from_slice(capture).unwrap();
+    assert_eq!(error["code"], "20001");
+    assert_eq!(error["msg"], "startTime should be less than endTime");
 }

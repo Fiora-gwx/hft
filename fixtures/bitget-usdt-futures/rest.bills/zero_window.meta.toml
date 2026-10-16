@@ -1,0 +1,14 @@
+source = "testnet-capture"
+source_ref = "run-2026-10-16/zero_window.in"
+captured_at = "2026-10-16T02:41:52.882587+00:00"
+refdata = "RD-BGT"
+exchange_doc = "https://www.bitget.com/legacy-docs/uta/account/Get-Financial-Records"
+reviewed_by = "pending-human-review"
+review_status = "draft"
+scrubbed = true
+case_id = "BGT-336"
+environment = "demo"
+endpoint = "https://api.bitget.com/api/v3/account/financial-records"
+http_status = 400
+sha256 = "0171ad09ba3a2e425c2ccd333d1074686192bc32f2294f53265c0db7368bf604"
+sanitization = "Credential fields removed; UID/account identity replaced with acct-0001; JSON whitespace normalized. Requests and login frames never stored."
