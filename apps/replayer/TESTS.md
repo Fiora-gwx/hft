@@ -6,6 +6,8 @@ spec: README.md
 
 # replayer 测试规格
 
+RPL-260/264/275/282 与 EXE-464 的通用文件夹具优先选择 `non_prod_only` 描述符，独立于业务策略的注册顺序及产品形态；仍使用真实 sequencer、journal 文件与 CLI 验证恢复和输出。
+
 RPL-203 的逐事件统计、缺失与歧义检查见 [延迟采集测试](../../tools/latency-report/TESTS.md)。
 
 格式与规则见 [docs/tests](../../docs/tests/README.md)。逐字节比对的分类表、状态哈希算法与关键帧规则归 [hft-sequencer](../../crates/hft-sequencer/README.md);Model 检查点的键与重建点定义归 [hft-strategy-sdk](../../crates/hft-strategy-sdk/README.md#model-检查点);按事件加权统计的计算、分层与上下界算法归 [hft-telemetry](../../crates/hft-telemetry/README.md)(其单元用例在 hft-telemetry 的 TESTS.md);压力用例的变换与判定归 [hft-sim](../../crates/hft-sim/README.md)。本文件只验证 replayer 自己的输入定位、驱动、比对、选项、报告与退出码。
