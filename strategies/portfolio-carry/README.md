@@ -12,7 +12,7 @@ status: impl
 
 每个 group 持有同一资产的等量反向两腿,赚取净资金费差。第 0 腿为协议 VenueId 1 的线性永续,第 1 腿为 VenueId 11 的现货,同一 base、USDT quote;只做空第 0 腿、多第 1 腿。两腿必须在不同交易所,使用同一计价资产与资产数量指数。策略只输出 SDK `TargetIntent`,入场和退出均由执行层 `Simultaneous` 在同一事件内发出两腿 IOC。
 
-规则未定、在模拟账户上研究。当前参数默认值均为暂定研究值,生产上线仍需通过 [上线门槛](../../docs/testing.md#8-上线门槛)。`kind_id=1`、schema_id=1、schema.version=2、描述符 version=2,`NoModel<CarryParams>` 不消费 Advice 或预热。实际资金费记账归 [ledger](../../crates/hft-ledger/README.md#资金费),策略不按预测费率修改 PnL。
+策略参数在模拟账户上标定。当前参数默认值均为暂定研究值,生产上线仍需通过 [上线门槛](../../docs/testing.md#8-上线门槛)。`kind_id=1`、schema_id=1、schema.version=2、描述符 version=2,`NoModel<CarryParams>` 不消费 Advice 或预热。实际资金费记账归 [ledger](../../crates/hft-ledger/README.md#资金费),策略不按预测费率修改 PnL。
 
 ## 目录
 
