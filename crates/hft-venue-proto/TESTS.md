@@ -1713,3 +1713,5 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - **属性测试的大例数运行**(每夜):VPR-021 10⁶ 例;VPR-031 10 例(每例 10⁶ 个输入);VPR-035 100 例。
 - **门槛**:VPR-131、VPR-132 在 `doc-check` 中通过(每个 venue 的 p50、p99 不宽于统一门槛;门槛与 [latency-budget §3](../../docs/latency-budget.md#3-cex-路径预算) 的 `ingest` 分配一致);VPR-140、VPR-141 在参考机上满足本 README 的门槛(判定规则归 [benchmarks](../../benchmarks/README.md))。
 - **依赖**:VPR-150 通过(normal 依赖只含 `hft-types`、`hft-refdata`、`hft-event` 与 `xxhash-rust`)。
+
+position-close 的请求路由、最短间隔、请求回执绑定与早到 fill 暂存由 VEN-228、BGT-065 覆盖;ReportSink 默认 pending_position_close=false。

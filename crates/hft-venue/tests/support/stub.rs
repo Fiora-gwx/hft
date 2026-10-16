@@ -940,6 +940,16 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
             OrderChannel::Ws
         }
     }
+    fn order_channel_for(c: &GwCmd) -> OrderChannel {
+        if c.op == GwOp::Place && c.oflags & hft_event::OrderFlags::POSITION_CLOSE.0 != 0 {
+            OrderChannel::Rest
+        } else {
+            Self::order_channel(c.op)
+        }
+    }
+    fn position_close_interval_ms() -> u32 {
+        200
+    }
 
     fn encode(
         _rd: &RefData,
@@ -1058,7 +1068,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         _clk: &WallClock,
         out: &mut RestReqBuf,
     ) -> Result<(), EncodeErr> {
-        if Self::order_channel(c.op) != OrderChannel::Rest {
+        if Self::order_channel_for(c) != OrderChannel::Rest {
             return Err(EncodeErr::Unsupported(c.op));
         }
         log("encode_rest", || format!("{:?}", c.op));
@@ -1110,6 +1120,14 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         if let Some(r) = origin.req {
             e.slot = SlotId(r.slot);
             e.r#gen = r.r#gen;
+            if r.op == GwOp::Place {
+                e.what = OrderEventKind::Ack;
+                e.exch_order_id = 12345;
+                let _ = out.exch_id(b"12345", None);
+                out.order(&e);
+                result.events = 1;
+                return Ok(result);
+            }
             if r.op != GwOp::Query {
                 return Ok(result);
             }

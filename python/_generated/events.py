@@ -218,7 +218,7 @@ ENUMS = {
     "NoteSource": {1: "Sequencer", 2: "Strategy", 3: "Risk", 4: "Oms", 5: "Venue", 6: "CtlAudit", 7: "Measure", 8: "Housekeeping", 9: "Ledger", 10: "Exec", 11: "Boot", 12: "Advisor"},
     "OrderAction": {1: "New", 2: "Cancel", 3: "Amend", 4: "CancelAll", 5: "Query"},
     "OrderEventKind": {1: "Ack", 2: "Reject", 3: "PartialFill", 4: "Fill", 5: "CancelAck", 6: "CancelReject", 7: "AmendAck", 8: "AmendReject", 9: "Expired", 10: "QueryResult", 11: "OutcomeUnknown", 12: "FeeOnly"},
-    "OrderFlags": {1: "REDUCE_ONLY", 2: "POST_ONLY", 4: "LINKED", 8: "HEDGE_FIX", 16: "RISK_REDUCING", 32: "SMOKE"},
+    "OrderFlags": {1: "REDUCE_ONLY", 2: "POST_ONLY", 4: "LINKED", 8: "HEDGE_FIX", 16: "RISK_REDUCING", 32: "SMOKE", 64: "POSITION_CLOSE"},
     "OrderStatus": {1: "New", 2: "PartiallyFilled", 3: "Filled", 4: "Cancelled", 5: "Rejected", 6: "Expired", 7: "NotFound"},
     "ParamSource": {1: "Pipeline", 2: "Manual"},
     "PoolLevel": {1: "L0", 2: "L1"},

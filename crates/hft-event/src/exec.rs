@@ -62,7 +62,9 @@ impl OrderFlags {
     pub const HEDGE_FIX: Self = OrderFlags(1 << 3);
     pub const RISK_REDUCING: Self = OrderFlags(1 << 4);
     pub const SMOKE: Self = OrderFlags(1 << 5);
-    /// Bits allowed on the wire (6..7 reserved for future wire flags).
+    /// Engine Kill/flatten tail: venue position-close, with exact remaining quantity for accounting.
+    pub const POSITION_CLOSE: Self = OrderFlags(1 << 6);
+    /// Bits allowed on the wire (7 reserved for future wire flags).
     pub const WIRE_MASK: Self = OrderFlags(0x00FF);
 
     #[inline]

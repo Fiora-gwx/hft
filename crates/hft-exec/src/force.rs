@@ -152,7 +152,7 @@ impl Exec {
         }
         // Ungrouped perps.
         let venues = if flatten { info.venues } else { st.force_venues };
-        self.load_ungrouped(k, venues, flatten, st.force_frac, v, now);
+        self.load_ungrouped(k, venues, flatten || st.flatten_lock, st.force_frac, v, now);
     }
 
     fn in_band_dust<V: Views>(&self, cix: usize, i: usize, pos: Qty, v: &V) -> bool {
@@ -321,10 +321,10 @@ impl Exec {
                 }
                 let h = self.inst(i);
                 let mark = self.mark(v, i);
-                if calc::notional_le(uq, mark, h, p.dust_notional) {
+                if uq.0 == 0 || (!flatten && calc::notional_le(uq, mark, h, p.dust_notional)) {
                     continue;
                 }
-                let nv = calc::notional_ceil(uq, mark, h);
+                let nv = calc::notional_ceil(uq, mark, h).max(1);
                 if let Some(pos) = best.iter().position(|b| nv > b.0) {
                     let mut j = 3;
                     while j > pos {
@@ -766,7 +766,15 @@ impl Exec {
                                 LegOut::MinOrder
                             );
                             if below {
-                                perp_pending = false;
+                                if self
+                                    .acct
+                                    .get(self.acct_of_cix(cix))
+                                    .is_some_and(|a| a.flatten_lock)
+                                {
+                                    self.min_order(cix, i, tq, x.pos, v, now, out);
+                                } else {
+                                    perp_pending = false;
+                                }
                             }
                         }
                     }

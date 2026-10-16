@@ -516,6 +516,16 @@ macro_rules! venue_impl {
             fn order_channel(op: GwOp) -> OrderChannel {
                 orders::order_channel(op)
             }
+            fn order_channel_for(c: &GwCmd) -> OrderChannel {
+                if c.op == GwOp::Place && c.oflags & hft_event::OrderFlags::POSITION_CLOSE.0 != 0 {
+                    OrderChannel::Rest
+                } else {
+                    orders::order_channel(c.op)
+                }
+            }
+            fn position_close_interval_ms() -> u32 {
+                200
+            }
             fn encode(
                 rd: &RefData,
                 t: &Templates,

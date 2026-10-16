@@ -4440,3 +4440,5 @@ spec: README.md
   - 墓碑 `filled = 0.01`、`fee_cum = 0`;快照节 12 为 v5,恢复后 `fee_cum` 仍为 0
   - 第一条 Fill:无 `FillOut`,恰好一条 `FeeOut{fee = 600 000, USDT}`,墓碑 `fee_cum = 0.01`;第二条无输出
 - 实现:`crates/hft-oms/tests/tomb.rs::oms_485_late_fill_fee_after_feeless_query_on_tomb`
+
+POSITION_CLOSE 仅由执行层风险递减平仓携带,ACK 不更新仓位;镜像恢复保留 oflags。跨组件验收见 [SEQ-185](../hft-sequencer/TESTS.md)。

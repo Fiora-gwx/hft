@@ -1225,7 +1225,7 @@ pub(crate) fn mirror_restore_all(e: &mut Engine) {
             let mut batch = hft_oms::FixedVec::<hft_oms::MirrorRestore, 256>::new();
             let more = e.oms.mirror_restore(v, a, &mut batch, &mut cursor);
             for m in batch.as_slice() {
-                let c = hft_event::GwCmd::mirror_restore(
+                let mut c = hft_event::GwCmd::mirror_restore(
                     a,
                     m.inst,
                     hft_types::SlotId(m.slot),
@@ -1233,6 +1233,7 @@ pub(crate) fn mirror_restore_all(e: &mut Engine) {
                     m.epoch,
                     m.exch_order_id,
                 );
+                c.oflags = m.oflags;
                 e.out.emits.push(crate::engine::Emit::Gw {
                     ring: crate::types::OutRing::Venue(v),
                     cmd: c,

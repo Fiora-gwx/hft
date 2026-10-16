@@ -77,12 +77,23 @@ impl Exec {
         let Some(cix) = self.cix_of(u.r.account, u.group) else {
             return;
         };
-        let Some(i) = self.leg_of_venue(cix, u.r.venue) else {
-            return;
-        };
         let Some(c) = self.cells.get(cix).copied() else {
             return;
         };
+        // Ungrouped cells can contain several symbols of the same venue. An order update
+        // belongs to its slot, not to the first leg on that venue.
+        let i = if c.is_ungrouped() {
+            (0..usize::from(c.n_legs))
+                .find(|&i| c.legs[i].venue == u.r.venue && c.slot[i] == u.r.slot)
+                .or_else(|| {
+                    let mut legs = (0..usize::from(c.n_legs)).filter(|&i| c.legs[i].venue == u.r.venue);
+                    let first = legs.next()?;
+                    legs.next().is_none().then_some(first)
+                })
+        } else {
+            self.leg_of_venue(cix, u.r.venue)
+        };
+        let Some(i) = i else { return };
         let bit = 1u8 << i;
         let slot = c.slot.get(i).copied().unwrap_or(0);
         let tracked = c.active.ext[1] & bit != 0 && (!c.is_ungrouped() || slot == 0 || slot == u.r.slot);

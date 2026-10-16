@@ -555,13 +555,22 @@ impl<'a> Tables<'a> {
         let is_spot = |c: &CapsRow| VenueId(c.venue).market() == Some(MarketKind::Spot);
         let is_perp = |c: &CapsRow| VenueId(c.venue).market() == Some(MarketKind::LinearPerp);
         for (i, c) in self.caps.iter().enumerate() {
+            let close = c.flags & crate::caps::CapFlags::POSITION_CLOSE.0 != 0;
+            let all = c.flags & crate::caps::CapFlags::POSITION_CLOSE_ALL.0 != 0;
+            if (all && !close) || (close && (!is_perp(c) || c.reduce_only != 1)) {
+                push(e, C::CapsMarketMismatch, sec::VENUE_CAPS, i);
+            }
             if is_spot(c)
                 && (c.position_mode != PositionMode::NotApplicable as u8
                     || c.margin_mode != MarginMode::NotApplicable as u8
                     || c.funding_settle != FundingSettleKind::NotApplicable as u8
                     || c.margin_data != MarginData::NotApplicable.code()
                     || c.multi_asset != 1
-                    || c.flags & crate::caps::CapFlags::PERP_CASH.0 != 0)
+                    || c.flags
+                        & (crate::caps::CapFlags::PERP_CASH.0
+                            | crate::caps::CapFlags::POSITION_CLOSE.0
+                            | crate::caps::CapFlags::POSITION_CLOSE_ALL.0)
+                        != 0)
             {
                 push(e, C::CapsMarketMismatch, sec::VENUE_CAPS, i);
             }

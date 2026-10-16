@@ -37,6 +37,11 @@ pub enum ExchIdHint {
 
 /// Report sink (gw thread; tests: `VecSink`).
 pub trait ReportSink {
+    /// A submitted position-close on this instrument awaits exchange order identity.
+    /// Unrecognized fills may be held by exchange id; this is never ownership evidence.
+    fn pending_position_close(&self, _inst: hft_types::InstId) -> bool {
+        false
+    }
     /// `cum_filled`/`avg_px` (contract 9) and `epoch` (contract 13) filled; late fees as `FeeOnly`
     /// (contract 12); `slot` may be `SlotId::UNRESOLVED`.
     fn order(&mut self, e: &OrderEvent);

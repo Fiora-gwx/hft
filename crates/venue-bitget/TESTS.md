@@ -61,6 +61,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 | `mock` 特性 | 不适用:里程碑外 |
 | 实现说明 | BGT-010–BGT-014, BGT-025–BGT-027, BGT-037, BGT-077, BGT-078, BGT-100, BGT-108, BGT-171, BGT-191, BGT-192, BGT-200, BGT-201, BGT-311, BGT-400, BGT-401 |
 | 延迟与资源契约 | BGT-038, BGT-500–BGT-505 |
+| UTA 永续尾仓平仓 | BGT-065 |
 | 测试与验收 | 不适用:非规范 |
 | 依赖 | BGT-221 |
 | 延伸阅读 | 不适用:非规范 |
@@ -710,6 +711,8 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 | BGT-065.6 | `oflags = SMOKE` | `Ok`;帧与 BGT-064 逐字节相同 |
 | BGT-065.7 | `inst = 1901`(现货 inst) | `Err(EncodeErr::UnknownInst)` |
 | BGT-065.8 | `inst = 9999`(refdata 中没有) | `Err(EncodeErr::UnknownInst)` |
+
+补充验收:已关联尾仓的 Cancel 按 orderId 编码;尾仓标记走 REST 整仓端点,Buy→short/Sell→long,必须 symbol,WS 编码拒绝。成功行仅 ACK,顶层成功但行 24056 或 HTTP 5xx 保持 Unknown;服务端 clientOid 的早到 fill 暂存,映射后为本地 OrderEvent,不重复外来入账。
 
 ### BGT-066 现货限价单编码,带 REDUCE_ONLY 不支持
 

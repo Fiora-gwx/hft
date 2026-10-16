@@ -903,6 +903,8 @@ CI 用 `clippy::disallowed_methods`/`disallowed_types` 强制([08 §5](../../des
 - advisor 镜像持有一份与 sequencer 同规模的状态(内存计入 hft-core 的主机类预算,见 [apps/hft-core 内存与 journal 段](../../apps/hft-core/README.md#内存与-journal-段按主机类唯一归属))。
 - 检查点文件编解码只在冷路径调用;`decode` 零分配、O(文件长),`encode` 分配一份文件大小的缓冲。两者均受调用方的体长上限约束,不计入 sequencer 热路径或 advisor 分块写入的预算。
 
+执行层的 Engine-origin `position_close` 经意图管线作为 `OrderFlags::POSITION_CLOSE` 交给风险链与 OMS,写入 journal 的 `OrderDecision` 并传递到 `GwCmd`。清仓中的 Drain 等待严格零目标及续扫描完成;规则归 [hft-exec 清仓永续尾仓](../hft-exec/README.md#清仓永续尾仓)。
+
 ## 测试与验收
 
 `benches/seq.rs` 使用 B0、TestIo 的内存队列与 MemJournal,关闭测试策略的 Debug 格式化和事件字符串日志。计时包含处理后的空闲轮与测试接收器开销;Criterion 只作同夹具的相对比较,不替代生产环/RAM journal 上的逐事件分位数验收。

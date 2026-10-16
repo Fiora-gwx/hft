@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-17 | Kill/account flatten/带清仓 Drain 的永续零目标不再容忍 dust/lot 尾仓;以能力位选择精确量 reduce-only MARKET 或整仓端点,严格等待成交归零;spot 不可交易尾量保留库存。风险 #0 只对引擎平仓标记放宽 lot;无组多品种按槽关联并续批扫描 | 负责人确认 2026-10-17;10/16 shape run 尾仓;EXE-361/SEQ-185/BIN-065/BGT-065/VEN-228/RSK-021 | exec、risk、OMS、sequencer、refdata、event、venue-proto/runtime、两协议及规格;[决定](../.agents/notes/implemented/bug-fix/2026-10-17-kill-perpetual-zero.md) | 待评审(owner-confirmed 2026-10-17) |
 | 2026-10-16 | 风险递减修复不检查/消耗普通单 inst 秒级桶,仍消耗 venue 预留预算并受交易所硬限额约束;RATE/退避按最早可用时刻重试,未获准尝试不额外施加 cooldown,避免普通开仓阻塞 Reverse/HedgeFix/Kill flatten | 10/16 非对称成交后 Reverse 等待 1 s;RSK-036/037、OMS-189、EXE-381、SEQ-178 | risk、OMS、exec、sequencer 与规格;[决定](../.agents/notes/implemented/bug-fix/2026-10-16-repair-rate-priority.md) | 待评审(风控/修复时序) |
 | 2026-10-16 | 两策略只交易 Binance USDⓈ-M 永续空头 + Bitget SPOT 多头,同 base/USDT;禁止双永续及反向开仓,现货卖出只平所持非 baseline 库存;cross 以独立 close_edge 减仓,carry 扣预期基差成本并按净边退出 | 负责人 2026-10-16 产品形态决定 | 两策略、registry、strat-calib 与测试规格;[决定](../.agents/notes/implemented/feature/2026-10-16-perp-spot-shape.md) | 已确认(owner 2026-10-16) |
 | 2026-10-16 | 外来成交待处理计时独立于 Stuck 展示原因暂停策略目标，强制减仓/L1 状态变化不能在截止清除前重新开回该腿 | EXE-050，CI 缩减六步反例 | hft-exec advance、README、TESTS、固定/属性回归 | 待评审(执行/风控) |

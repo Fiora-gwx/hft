@@ -387,6 +387,69 @@ fn dec_rest(status: u16, body: &str) -> (Result<ReportOutcome, DecodeErr>, RepSi
 }
 
 #[test]
+fn bgt_065_position_close_receipt_and_early_fill() {
+    let origin = RestOrigin {
+        what: RestWhat::Order,
+        req: Some(ReqRef {
+            slot: 42,
+            r#gen: 7,
+            op: GwOp::Place,
+        }),
+        inst: F_BTC,
+    };
+    let ok = r#"{"code":"00000","data":{"list":[{"orderId":"1234567890123","clientOid":"server-generated","code":"","msg":""}]}}"#;
+    for (status, body, success) in [
+        (200, ok.to_string(), true),
+        (503, ok.to_string(), false),
+        (200, ok.replace("\"code\":\"\"", "\"code\":\"24056\""), false),
+    ] {
+        let mut sink = RepSink::default();
+        let result = Fut::decode_rest(
+            rd(),
+            &mut GwCtx::new(),
+            &origin,
+            status,
+            body.as_bytes(),
+            &RX,
+            &mut sink,
+        )
+        .unwrap();
+        assert_eq!(result.outcome_unknown.is_none(), success);
+        assert_eq!(sink.orders.len(), usize::from(success));
+        if success {
+            let e = one(&sink);
+            assert_eq!(
+                (e.what, e.slot, e.r#gen, e.cum_filled),
+                (OrderEventKind::Ack, SlotId(42), 7, Qty(0))
+            );
+        }
+    }
+    let push = ord("filled", "0.004", "260", "65000", "0", "").replace(CID7, "server-generated");
+    for mapped in [false, true] {
+        let mut sink = RepSink {
+            pending_close: !mapped,
+            ..RepSink::default()
+        };
+        if mapped {
+            sink.hint = ExchIdHint::Resolved {
+                epoch: 3,
+                slot: SlotId(42),
+                r#gen: 7,
+            };
+        }
+        let cls = Fut::classify_report(MsgOp::Text, support::head(&push));
+        Fut::decode_report(rd(), &mut GwCtx::new(), cls, push.as_bytes(), &RX, &mut sink).unwrap();
+        assert!(
+            sink.ext.is_empty(),
+            "close fill cannot be booked again as manual inventory"
+        );
+        let e = one(&sink);
+        assert_eq!(e.slot, if mapped { SlotId(42) } else { SlotId::UNRESOLVED });
+        assert_eq!(e.cum_filled, Qty(400_000));
+    }
+}
+
+#[test]
 fn bgt_093_query_result() {
     let rows = [
         ("BGT-093.1", "filled", "0.004", "65000.1", 3u8, 400_000, 6_500_010),

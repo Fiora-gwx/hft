@@ -23,6 +23,25 @@ fn caps_edit(row: usize, f: impl FnOnce(&mut VenueCaps)) -> Vec<u8> {
 }
 
 #[test]
+fn ref_021_position_close_capabilities() {
+    use hft_refdata::CapFlags;
+    ok(&caps_edit(0, |c| {
+        c.flags = c.flags | CapFlags::POSITION_CLOSE | CapFlags::POSITION_CLOSE_ALL
+    }));
+    for (row, flags, ro) in [
+        (0, CapFlags::POSITION_CLOSE_ALL, true),
+        (0, CapFlags::POSITION_CLOSE, false),
+        (1, CapFlags::POSITION_CLOSE, true),
+    ] {
+        let bytes = caps_edit(row, |c| {
+            c.flags = flags;
+            c.reduce_only = ro;
+        });
+        assert!(hft_refdata::RefData::load(&bytes, None).is_err());
+    }
+}
+
+#[test]
 fn ref_020_missing_caps() {
     let mut s = f0_spec();
     s.caps.retain(|c| c.venue != V5);

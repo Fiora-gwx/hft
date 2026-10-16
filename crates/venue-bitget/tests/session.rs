@@ -347,7 +347,11 @@ fn bgt_172_fut_default_caps() {
     assert!(!c.amend_qty_down_only);
     assert_eq!(
         c.flags,
-        CapFlags(CapFlags::POST_ONLY.0 | CapFlags::IOC.0 | CapFlags::FOK.0)
+        CapFlags::POST_ONLY
+            | CapFlags::IOC
+            | CapFlags::FOK
+            | CapFlags::POSITION_CLOSE
+            | CapFlags::POSITION_CLOSE_ALL
     );
     assert!(
         !c.flags.contains(CapFlags::AMEND),

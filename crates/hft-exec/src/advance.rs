@@ -34,6 +34,7 @@ pub(crate) struct Emit {
     pub engine: bool,
     pub class: IntentClass,
     pub reduce_only: bool,
+    pub position_close: bool,
     pub link: LegLinkOpt,
     pub hedge_cap: Qty,
     pub act: u8,
@@ -339,6 +340,9 @@ impl Exec {
         let h = self.inst(l.inst);
         let mark = self.mark(v, l.inst);
         if t.0 == 0 {
+            if self.flatten_perp(cix, i) {
+                return x.0 == 0;
+            }
             return calc::notional_le(x, mark, h, p.dust_notional);
         }
         let floor = calc::floor_lot(calc::qty_of_notional(p.band_floor_notional, mark, h), l.lot.0);
@@ -346,6 +350,29 @@ impl Exec {
         let band = if c.has_target { c.view.intent.band } else { Rate(0) };
         let width = calc::mul_rate(base, band);
         (t.0 - x.0).unsigned_abs() <= width.0.unsigned_abs()
+    }
+
+    /// Kill's perpetual target is exact zero, including when a strategy replaces the target.
+    fn flatten_perp(&self, cix: usize, i: usize) -> bool {
+        self.cells.get(cix).is_some_and(|c| c.legs[i].kind == LEG_PERP)
+            && self
+                .acct
+                .get(self.acct_of_cix(cix))
+                .is_some_and(|a| a.flatten_lock)
+    }
+
+    fn close_tail(&self, cix: usize, i: usize, qty: Qty, px: Px) -> bool {
+        let Some(c) = self.cells.get(cix) else {
+            return false;
+        };
+        let l = c.legs[i];
+        let h = self.inst(l.inst);
+        let q = qty.0.unsigned_abs();
+        self.flatten_perp(cix, i)
+            && q != 0
+            && (q < l.min_qty.0.max(1) as u64
+                || !q.is_multiple_of(l.lot.0.max(1) as u64)
+                || calc::notional_le(qty, px, h, Notional(h.min_notional.0 - 1)))
     }
 
     pub(crate) fn cooldown_eff(&self, cix: usize, cd: u32) -> u32 {
@@ -577,8 +604,11 @@ impl Exec {
                 if c.is_ungrouped() {
                     c.view.filled[i] = c.aux[i];
                 }
-                // The leg's next slice records its own slot.
-                if let Some(sl) = c.slot.get_mut(i) {
+                // Ungrouped legs need the slot to identify late updates when several
+                // instruments share a venue. A subsequent slice records its own slot.
+                if !c.is_ungrouped()
+                    && let Some(sl) = c.slot.get_mut(i)
+                {
                     *sl = u32::MAX;
                 }
                 if c.active.ext[1] == 0 {
@@ -617,6 +647,15 @@ impl Exec {
         }
         if engine {
             self.convert_deferred_hold(cix, v, now, out);
+        }
+        if c.is_ungrouped()
+            && self
+                .acct
+                .get(self.acct_of_cix(cix))
+                .is_some_and(|a| a.flatten_lock)
+        {
+            // A cell has four legs; keep scanning until every ungrouped perpetual is zero.
+            self.engine_flatten(c.account, now, out);
         }
     }
 
@@ -753,7 +792,7 @@ impl Exec {
 
     /// Zero-target leg below the exchange minimum: above dust → Stuck{MinOrder}.
     #[allow(clippy::too_many_arguments)]
-    fn min_order<V: Views>(
+    pub(crate) fn min_order<V: Views>(
         &mut self,
         cix: usize,
         i: usize,
@@ -889,7 +928,26 @@ impl Exec {
             q.0 >= l.min_qty.0.max(1) && !calc::notional_le(q, px, &h, Notional(h.min_notional.0 - 1))
         };
         let below_chunk = calc::notional_le(chunk, px, &h, Notional(slice.min_chunk_notional.0 - 1));
-        let qty = if chunk.0 > 0 && !below_chunk && min_ok(chunk) {
+        let close_caps = self.venue_close[usize::from(l.venue.0)];
+        let position_close = t.0 == 0
+            && self.close_tail(cix, i, absdiff, px)
+            && close_caps.contains(hft_refdata::CapFlags::POSITION_CLOSE)
+            && l.reduce_only_cap != 0
+            && cap_n.0 > 0
+            && calc::usdt_ceil(absdiff, px, rf.quote_rate, &h) <= i128::from(cap_n.0);
+        let qty = if position_close {
+            // Do not retry an unknown close or race any other immediate reduction.
+            if x.infl.0 != 0 {
+                return LegOut::Wait;
+            }
+            if close_caps.contains(hft_refdata::CapFlags::POSITION_CLOSE_ALL) {
+                use hft_strategy_sdk::PortfolioRead;
+                if v.portfolio(a).perp(l.venue, l.inst).qty != x.pos {
+                    return LegOut::Gate(RejectBits::REDUCE_INVALID);
+                }
+            }
+            absdiff
+        } else if chunk.0 > 0 && !below_chunk && min_ok(chunk) {
             chunk
         } else {
             let last = calc::floor_lot(absdiff, l.lot.0.max(1));
@@ -921,6 +979,7 @@ impl Exec {
             engine,
             class,
             reduce_only,
+            position_close,
             link: LegLinkOpt::NONE,
             hedge_cap: Qty(0),
             act: if engine_target {
@@ -1051,6 +1110,15 @@ impl Exec {
             return;
         }
         let ln = self.legs_now(cix, v);
+        if (0..usize::from(c.n_legs)).any(|i| {
+            c.target_of(i) == Some(Qty(0)) && self.close_tail(cix, i, ln[i].pos, self.mark(v, c.legs[i].inst))
+        }) {
+            // A close-position tail has no paired lot and must not create an OnFill hedge.
+            let perp = self.perp_first(cix, v);
+            self.serial_fallback(cix, perp, crate::decision::serial::MIN_ORDER, v, now, out);
+            self.serial_step(cix, v, now, out);
+            return;
+        }
         let eff = [
             Qty(ln[0].pos.0.saturating_add(ln[0].infl.0)),
             Qty(ln[1].pos.0.saturating_add(ln[1].infl.0)),
@@ -1305,6 +1373,7 @@ impl Exec {
             engine,
             class,
             reduce_only: red_f && lf.reduce_only_cap != 0,
+            position_close: false,
             link,
             hedge_cap: Qty(0),
             act,
@@ -1603,6 +1672,7 @@ impl Exec {
             },
             kind: e.kind,
             reason,
+            position_close: e.position_close,
             hedge_cap_qty: e.hedge_cap,
         });
         let signed = if e.side == Side::Sell { -e.qty.0 } else { e.qty.0 };

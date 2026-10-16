@@ -29,6 +29,7 @@ pub(crate) fn default_caps(line: Line, asset: impl Fn(&str) -> Option<AssetId>) 
     c.dms = DeadManCap::None;
     match line {
         Line::Fut => {
+            c.flags = c.flags | CapFlags::POSITION_CLOSE | CapFlags::POSITION_CLOSE_ALL;
             c.market = MarketKind::LinearPerp;
             c.fee_asset_rule = FeeAssetRule::Quote;
             c.reduce_only = true;

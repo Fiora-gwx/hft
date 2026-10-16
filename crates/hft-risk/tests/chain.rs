@@ -91,6 +91,39 @@ fn short_b1(w: &mut W) {
     w.mv.set_pos(1, B1, "-0.02");
 }
 
+#[test]
+fn rsk_021_position_close_lot_exception_is_scoped() {
+    for supported in [false, true] {
+        let mut sp = r0_spec();
+        if supported {
+            let c = sp.caps.iter_mut().find(|c| c.venue == B).unwrap();
+            c.flags = c.flags | hft_refdata::CapFlags::POSITION_CLOSE;
+        }
+        let rd = load(&sp);
+        let mut w = world(rd, p0_for(rd, 3), MC, CAPS);
+        w.mv.set_pos(1, B1, "-0.00001");
+        let mut it = w.flatten(1, G1, B1, Side::Buy, "0.00001", "50005.0", Origin::Exec);
+        it.flags |= OrderFlags::POSITION_CLOSE.0;
+        assert_eq!(w.eval(&it).is_ok(), supported);
+        if !supported {
+            continue;
+        }
+        for origin in [Origin::Strategy, Origin::Command, Origin::Oms] {
+            let bad = IntentView { origin, ..it };
+            rej(&mut w, &bad, RejectBits::INVALID, "close owner");
+        }
+        for flag in [OrderFlags::REDUCE_ONLY, OrderFlags::RISK_REDUCING] {
+            let bad = IntentView {
+                flags: it.flags & !flag.0,
+                ..it
+            };
+            rej(&mut w, &bad, RejectBits::INVALID, "close flags");
+        }
+        w.mv.pend_imm.insert((1, B1.0, Side::Buy as u8), 1);
+        rej(&mut w, &it, RejectBits::REDUCE_INVALID, "no double spend");
+    }
+}
+
 fn acfg(a: u8, v: hft_types::VenueId) -> ModeInput<'static> {
     ModeInput::Auto(rec(
         CapSource::ACCOUNT_CFG,

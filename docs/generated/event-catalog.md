@@ -2034,6 +2034,7 @@
 | 8 | `HEDGE_FIX` |
 | 16 | `RISK_REDUCING` |
 | 32 | `SMOKE` |
+| 64 | `POSITION_CLOSE` |
 
 ### 码表 OrderStatus
 

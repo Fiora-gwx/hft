@@ -66,6 +66,27 @@ fn enc<P: VenueProtocol<Templates = Templates>>(
 
 const U: VenueId = VenueId::BINANCE_USDM;
 const S: VenueId = VenueId::BINANCE_SPOT;
+
+#[test]
+fn bin_065_position_close_is_exact_reduce_only_market() {
+    for side in [Side::Buy, Side::Sell] {
+        let c = GwCmd {
+            side,
+            qty: Qty(1),
+            oflags: (OrderFlags::REDUCE_ONLY | OrderFlags::POSITION_CLOSE).0,
+            ..place_u()
+        };
+        let f = enc::<Usdm>(&c, &tgt(cid(U, 3, 42, 7), 0), &WC, 1500);
+        let j: serde_json::Value = serde_json::from_str(&f).unwrap();
+        let p = &j["params"];
+        assert_eq!(p["type"], "MARKET");
+        assert_eq!(p["quantity"], "0.00000001");
+        assert_eq!(p["reduceOnly"], "true");
+        for absent in ["price", "timeInForce", "closePosition"] {
+            assert!(p.get(absent).is_none());
+        }
+    }
+}
 const PLACE_U: &str = r#"{"id":"p0000002a00000007","method":"order.place","params":{"symbol":"BTCUSDT","side":"BUY","type":"LIMIT","timeInForce":"IOC","price":"65000.1","quantity":"0.004","newClientOrderId":"1000301020002a000000073d","newOrderRespType":"ACK","timestamp":1790000000000,"recvWindow":1500}}"#;
 
 #[test]

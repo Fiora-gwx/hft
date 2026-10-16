@@ -106,29 +106,39 @@ pub(crate) fn encode(
                 return Err(EncodeErr::Unsupported(GwOp::Place));
             }
             let req = encode_req_id(GwOp::Place, c.slot.0, c.r#gen).ok_or(EncodeErr::Unsupported(c.op))?;
+            let close = flags.contains(OrderFlags::POSITION_CLOSE);
+            if close && (line != Line::Usdm || !flags.contains(OrderFlags::REDUCE_ONLY) || c.qty.0 <= 0) {
+                return Err(EncodeErr::Unsupported(c.op));
+            }
             // For a Place the gw hands over the new order's own client id.
             let cid = cid_text(tgt);
             head(&mut w, &req, b"order.place", sym);
             w.bytes(b",\"side\":\"").bytes(side(c.side)).byte(b'"');
-            match (line, c.tif) {
-                (Line::Spot, Tif::PostOnly) => {
-                    w.bytes(b",\"type\":\"LIMIT_MAKER\"");
+            if close {
+                // USD-M closePosition=true belongs to conditional orders, not MARKET.
+                w.bytes(b",\"type\":\"MARKET\"");
+            } else {
+                match (line, c.tif) {
+                    (Line::Spot, Tif::PostOnly) => {
+                        w.bytes(b",\"type\":\"LIMIT_MAKER\"");
+                    }
+                    (_, tif) => {
+                        let tif: &[u8] = match tif {
+                            Tif::Gtc => b"GTC",
+                            Tif::Ioc => b"IOC",
+                            Tif::Fok => b"FOK",
+                            Tif::PostOnly => b"GTX",
+                        };
+                        w.bytes(b",\"type\":\"LIMIT\",\"timeInForce\":\"")
+                            .bytes(tif)
+                            .byte(b'"');
+                    }
                 }
-                (_, tif) => {
-                    let tif: &[u8] = match tif {
-                        Tif::Gtc => b"GTC",
-                        Tif::Ioc => b"IOC",
-                        Tif::Fok => b"FOK",
-                        Tif::PostOnly => b"GTX",
-                    };
-                    w.bytes(b",\"type\":\"LIMIT\",\"timeInForce\":\"")
-                        .bytes(tif)
-                        .byte(b'"');
-                }
+                w.bytes(b",\"price\":\"")
+                    .fixed(c.px.0, row.px_wire_exp)
+                    .byte(b'"');
             }
-            w.bytes(b",\"price\":\"")
-                .fixed(c.px.0, row.px_wire_exp)
-                .bytes(b"\",\"quantity\":\"")
+            w.bytes(b",\"quantity\":\"")
                 .fixed(c.qty.0, row.qty_wire_exp)
                 .byte(b'"');
             if line == Line::Usdm && flags.contains(OrderFlags::REDUCE_ONLY) {

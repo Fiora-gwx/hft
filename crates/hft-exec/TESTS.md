@@ -51,6 +51,7 @@ spec: README.md
 | 快照与恢复 | EXE-509、EXE-164、EXE-186、EXE-251、EXE-314、EXE-319、EXE-329、EXE-450、EXE-451、EXE-452、EXE-453、EXE-454、EXE-455、EXE-456、EXE-457、EXE-458、EXE-459、EXE-460、EXE-461、EXE-462、EXE-463、EXE-464、EXE-493 |
 | 规划源文件 | EXE-133、EXE-184、EXE-187、EXE-434 |
 | 延迟与资源契约 | EXE-051、EXE-475、EXE-477、EXE-480、EXE-481、EXE-482、EXE-483、EXE-484、EXE-485、EXE-486、EXE-487、EXE-488、EXE-489、EXE-490、EXE-491、EXE-492、EXE-493、EXE-494 |
+| 清仓永续尾仓 | EXE-361 |
 | 测试与验收 | 不适用:非规范(README 中只保留指向本文件的链接) |
 | 依赖 | EXE-476、EXE-477 |
 | 延伸阅读 | 不适用:非规范 |
@@ -3066,6 +3067,8 @@ spec: README.md
   - 步骤 1:g7、g8、g11 与无组 cell 各有 `ExecDecision{ForceStep, detail = 5 \| 1 << 8, reason = Hard, origin = Engine(KillFlatten)}`(无组 cell 为 `Engine/Ungrouped`),引擎目标各腿 0;Acct 行 `flatten_lock = 1`、`force_kind = 0`;a2 无决定
   - 步骤 2:与步骤 1 后相比,引擎目标与锁不变;不重复下已在途的量
 - 实现:`crates/hft-exec/tests/flatten.rs::exe_361_engine_flatten_all`
+
+补充验收(负责人 2026-10-17):正负低于 lot/minimum 的永续尾仓,配对与单腿均发精确量 POSITION_CLOSE 且无链接;未成交前 Drain 不就绪,成交归零后完成;spot 尾量保留。六个同 venue 无组尾仓分批全部关闭,成交不串腿,最后一批后完成扫描。
 
 ### EXE-362 清仓的算法:非 Broken 配对永续先、第二腿不可用退回串行;Broken 串行;CapCleared{Broken} 不清目标
 

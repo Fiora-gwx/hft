@@ -239,6 +239,7 @@ impl Exec {
             engine: true,
             class: IntentClass::Hedge,
             reduce_only: l.reduce_only_cap != 0,
+            position_close: false,
             link: LegLinkOpt::NONE,
             hedge_cap: Qty(sum.abs().saturating_add(l.lot.0)),
             act: ACT_NONE,

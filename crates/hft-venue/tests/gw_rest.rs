@@ -25,6 +25,36 @@ fn response<const V: u32>(h: &mut Gh<Stub<2048, V>>, status: u16, now: u64) {
 }
 
 #[test]
+fn ven_228_position_close_rest_binds_early_fill() {
+    let mut h = setup::<0>();
+    let mut c = h.place(A1, 7, 3, S1, false);
+    c.oflags |= hft_event::OrderFlags::POSITION_CLOSE.0 | hft_event::OrderFlags::REDUCE_ONLY.0;
+    h.cmd(c);
+    h.poll(4000);
+    assert!(h.rt.mirror(7).unwrap().position_close);
+    h.reps();
+    h.net.push(ConnId(112), b"O||12345|Fill|1|1|100|0|0|0");
+    h.poll(4500);
+    assert!(events(&h.reps()).is_empty());
+    assert_eq!(h.rt.held(A1), 1);
+    response(&mut h, 200, 6000);
+    let es = events(&h.reps());
+    assert_eq!(es.len(), 2, "{es:?}");
+    assert_eq!(es[0].what, OrderEventKind::Ack);
+    assert_eq!(es[1].what, OrderEventKind::Fill);
+    assert!(
+        es.iter()
+            .all(|e| e.slot == c.slot && e.r#gen == 3 && e.epoch == 5)
+    );
+    assert_eq!(h.rt.held(A1), 0);
+    let mut second = c;
+    second.slot = hft_types::SlotId(8);
+    h.cmd(second);
+    h.poll(7000);
+    assert_eq!(reports(&h.reps())[0].status, SendStatus::RateLimited);
+}
+
+#[test]
 fn ven_210_wait_fds_only_pending_rest() {
     use hft_rt::PollTask;
     let mut h = setup::<0>();

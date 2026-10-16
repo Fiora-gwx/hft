@@ -160,6 +160,7 @@ impl Oms {
                     epoch: sl.epoch,
                     inst: sl.inst,
                     exch_order_id: sl.exch_order_id,
+                    oflags: sl.oflags,
                 };
                 if out.push(m).is_err() {
                     *cursor = s;

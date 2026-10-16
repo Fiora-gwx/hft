@@ -55,6 +55,7 @@ pub mod serial {
     pub const NOT_READY: u16 = 4;
     pub const RESUME_HOLD: u16 = 5;
     pub const FIRST_UNKNOWN: u16 = 6;
+    pub const MIN_ORDER: u16 = 7;
 }
 
 /// Table 6 (`External`) handling (`arg`).

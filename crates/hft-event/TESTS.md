@@ -2098,3 +2098,5 @@ spec: README.md
 - **fuzz**:EVT-200–EVT-203 进 `tools/xtask/fuzz-targets.toml` 的每夜轮转;任何失败按 [testing §3.3](../../docs/testing.md#33-fuzz) 最小化后进回归语料并修复;这四个目标不计入上线门槛 ③。
 - **基准**:EVT-190–EVT-195 在 CI 只做冒烟;数值上限以本组件 README [延迟与资源契约](README.md#延迟与资源契约) 为准(`benches/budgets.toml` 不得更宽),判定在参考机上按 [benchmarks](../../benchmarks/README.md) 执行。
 - **金样**:`fixtures/hft-event/` 的文件只由 EVT-173、EVT-071 的生成器重写;重写须与布局变更同一提交且 `gen-schema` 只追加核对通过。
+
+OrderFlags bit 6 = POSITION_CLOSE,不改变布局;生成 schema 与 OrderDecision/GwCmd 保留该位,端到端由 SEQ-185 覆盖。

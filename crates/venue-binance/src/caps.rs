@@ -21,6 +21,7 @@ pub(crate) fn default_caps(line: Line, asset: impl Fn(&str) -> Option<AssetId>) 
     c.testnet = TestnetKind::Demo;
     match line {
         Line::Usdm => {
+            c.flags = c.flags | CapFlags::POSITION_CLOSE;
             c.market = MarketKind::LinearPerp;
             c.fee_asset_rule = FeeAssetRule::Quote;
             c.reduce_only = true;
