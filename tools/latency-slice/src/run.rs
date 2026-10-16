@@ -655,6 +655,7 @@ where
             depth: EP_DEPTH,
             md: EP_DEPTH,
             src_ip_idx: 0,
+            ..FeedEndpoints::default()
         },
         ..FeedCfg::default()
     };
