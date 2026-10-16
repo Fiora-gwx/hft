@@ -170,6 +170,11 @@ impl LinkNotice {
 /// Result of one `ExecOrder` in the intent pipeline, fed back in the same event.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum PlaceResult {
+    /// Local rate admission deferred until the limiter's earliest permitted TSC.
+    RateLimited {
+        bits: hft_types::RejectBits,
+        retry_at: Tsc,
+    },
     Placed(OrderRef),
     Rejected(hft_types::RejectBits),
     Shadowed,

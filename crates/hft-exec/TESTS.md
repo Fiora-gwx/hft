@@ -3195,6 +3195,8 @@ spec: README.md
 
 ### EXE-381 门控期间每个 cell 每 gated_backoff_ms 至多一条被拒意图
 
+- 限速例外回归:`RateLimited` 指定 3 ms 或 750 ms 可用时,覆盖普通切片、HedgeFix 与 Kill flatten;此前逐毫秒触摸均不重试,拒绝尝试不额外施加 cooldown,到期只产出一条;沿用既有 Wake 与快照恢复路径。
+
 - 规则:[门控拒绝与退避](README.md#门控拒绝与退避)
 - 级别:unit
 - 里程碑:M2

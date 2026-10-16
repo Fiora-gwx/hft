@@ -359,7 +359,9 @@ pub(crate) fn evaluate_with_peer<V: RiskView>(
         .get(s.buckets.iix(a, it.inst))
         .copied()
         .unwrap_or_default();
-    if iw.at(ib.tokens, ib.last_ens, t) < TOKEN {
+    // The instrument bucket is a strategy pacing budget. Repairs use the reserved
+    // venue budget, so an opening order cannot lock its own hedge out for a second.
+    if !rr && iw.at(ib.tokens, ib.last_ens, t) < TOKEN {
         return Err(RejectBits::RATE);
     }
     if linked {
@@ -430,7 +432,43 @@ fn affordable<V: RiskView>(s: &Side, lf: &InstFacts, it: &IntentView, v: &V, buf
     }
 }
 
-/// Deducts one token from the (venue, account) windows and the (account, inst) bucket.
+/// Earliest admission by all applicable rate buckets (other risk checks still apply).
+pub(crate) fn rate_ready_at(s: &Side, it: &IntentView, now: &Now) -> i64 {
+    let rr = it.flags & OrderFlags::RISK_REDUCING.0 != 0;
+    let venue_ready = |a, v, reducing| {
+        let b = s
+            .buckets
+            .venue
+            .get(Buckets::vix(a, v))
+            .copied()
+            .unwrap_or_default();
+        let (w10, w60) = s.buckets.windows(v, s.params.rate_headroom);
+        let reserve = s.lim().venue(a, v).rr_reserve;
+        let need =
+            |w: crate::bucket::Window| TOKEN.saturating_add(if reducing { 0 } else { w.reserve(reserve) });
+        now.engine_ns
+            .max(b.backoff_until_ens)
+            .max(w10.ready_at(b.tokens_10s, b.last_ens, now.engine_ns, need(w10)))
+            .max(w60.ready_at(b.tokens_min, b.last_ens, now.engine_ns, need(w60)))
+    };
+    let mut at = venue_ready(it.account, it.venue, rr);
+    if !rr {
+        let w = Buckets::inst_window(s.lim().venue(it.account, it.venue).inst_bucket_per_s);
+        let b = s
+            .buckets
+            .inst
+            .get(s.buckets.iix(it.account, it.inst))
+            .copied()
+            .unwrap_or_default();
+        at = at.max(w.ready_at(b.tokens, b.last_ens, now.engine_ns, TOKEN));
+    }
+    if it.link_venue != VENUE_NONE {
+        at = at.max(venue_ready(it.link_account, it.link_venue, false));
+    }
+    at
+}
+
+/// Deducts venue tokens for every order; only ordinary orders consume strategy pacing tokens.
 pub(crate) fn commit(s: &mut Side, adm: &Admission, now: &Now) {
     let t = now.engine_ns;
     let headroom = s.params.rate_headroom;
@@ -447,7 +485,9 @@ pub(crate) fn commit(s: &mut Side, adm: &Admission, now: &Now) {
     }
     let iw = Buckets::inst_window(per_s);
     let ix = s.buckets.iix(adm.account, adm.inst);
-    if let Some(b) = s.buckets.inst.get_mut(ix) {
+    if !adm.risk_reducing
+        && let Some(b) = s.buckets.inst.get_mut(ix)
+    {
         b.tokens = iw.at(b.tokens, b.last_ens, t).saturating_sub(TOKEN);
         b.last_ens = t;
     }

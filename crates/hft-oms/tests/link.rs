@@ -445,7 +445,8 @@ fn oms_189_retry_interval() {
             450u64,
             450u64,
         ),
-        ("OMS-189.3", HedgeGate::Risk(RejectBits::RATE_BACKOFF), 250, 300),
+        ("OMS-189.3", HedgeGate::Risk(RejectBits::RATE_BACKOFF), 250, 250),
+        ("OMS-189.3", HedgeGate::Risk(RejectBits::RATE), 201, 201),
         ("OMS-189.5", HedgeGate::Px(HedgePxErr::StaleQuote), 0, 300),
     ] {
         let (mut h, l) = setup(100);

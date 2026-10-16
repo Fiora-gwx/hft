@@ -325,7 +325,7 @@ step():
 a. 驱动生成的 Input(begin_round 决定):进程启动后的首轮只交 EngineClock(见"引擎时间";有停机标记时紧接一条
    cli:systemd 的 Kill,见"命令路径");关键帧可写(条件见下表 Sys{Snapshot})时,这一轮只交 Timer{Sys, Snapshot}(见"快照");
    背压时只交 Timer{Sys, NotifyContinue}(见下);其余轮次按以下顺序:Timer{Sys, RefdataRecheck}(到期时)→
-   到期定时器 ≤ 16(按堆键升序)→ OMS 有待发 → Timer{OmsContinue} → 通知积压非空或游标未完 → Timer{Sys, NotifyContinue}
+   到期定时器 ≤ 16 且从首条起未满 md_round_ns(按堆键升序,相邻回调间让一条 ctl/rep/bbo/md 输入)→ OMS 有待发 → Timer{OmsContinue} → 通知积压非空或游标未完 → Timer{Sys, NotifyContinue}
    → 其余环境决定(按下表的行序)
 b. ctl(ByteSpsc,≤ 4 条且载荷合计 ≤ ctl_bytes_per_round)与 hk(≤ 4 条)
    非背压轮在 b–g 的每个输入边界先查 ctl;非空而条数/字节额度耗尽即结束本轮,下一轮重新给额度后先取 ctl,不继续低优先级输入
@@ -338,7 +338,8 @@ f. md-* 轮转,逐条交出;**每条 md 消息处理完之后**,下一次 take �
    任一非空 → 按 b → c → d 交出它们(计入同一轮上面的上限),再回到 md。
    交出每条 md 之前,自这一轮首条 md 被交出起已过去 ≥ md_round_ns(按 TSC 换算)→ 这一轮不再交 md
 g. rep-sim ≤ sim_max_per_round
-定时器中途检查:c–g 每交出一条之前,把 view().next_deadline() 与当前 TSC 比较一次;已到期 → 这一轮到此为止
+定时器时间片为协作式边界,单条 Input 仍完整处理;快照耗时按延迟表验收。
+定时器中途检查:c–g 每交出一条之前,把 view().next_deadline() 与当前 TSC 比较一次;已到期且本轮尚未交出堆定时器 → 这一轮到此为止
    (take 返回 false),下一轮的 a 交出到期定时器
 背压:通知积压余量 < 2U(U = 单个 Input 的通知上界 max_cells_total + 128)时,a 只交 Timer{Sys, NotifyContinue},
    随后只交实盘回报(c),且每交一条之前要求余量 ≥ U;其余环这一轮不取(见"通知队列与续推")
@@ -346,9 +347,9 @@ g. rep-sim ≤ sim_max_per_round
 
 "空闲轮"指 `step` 返回 Idle 的一轮,与线程是否随后 park 无关;环境决定表中"在(第一个)空闲轮写"一律指:上一轮为空闲轮、且这一轮开始时全部输入环为空、`wants_continue()` 为假的那一轮,在其 a 段写;线程 park 时超时取 `next_deadline`,环境决定最多推迟 `park_us`,它们仍由实盘驱动当场写成 Input,回放照读。优先级与让位给出以下等待上界(各项处理耗时见[延迟与资源契约](#延迟与资源契约)):
 
-- 实盘回报(对冲腿)最多等**正在处理的那一条** Bbo、Advice 或 md 消息,加一次环头检查;
+- 实盘回报(对冲腿)最多等**正在处理的那一条** Bbo、Advice 或 md 消息,加一次环头检查;到期 Timer 批次另受数量与时间片约束,回调间检查回报;
 - BBO 最多等正在应用的那一条 md 消息(`L2Batch` 的全部档、一条 `L2Snapshot{TopN}`,或一片 REST 快照,每片 ≤ hft-venue `feed.snapshot_part_levels` 档)加一次环头检查([latency-budget §2.3](../../docs/latency-budget.md#23-bbo-与深度的通道)、[13 O9](../../design/13-设计评审与优化.md));
-- 到期定时器(`HedgeRetry`、`Timer{Exec, Wake}` 等)最多等一条环输入;
+- 尚未服务堆定时器的轮次,到期定时器(`HedgeRetry`、`Timer{Exec, Wake}` 等)最多等一条环输入;本轮已服务的过期堆余项在输入阶段后于下一轮继续,避免 Timer 连续抢占;
 - 关键帧一次写完的停顿发生在空闲轮之后;只有持续不空闲到最大推迟时才在事件边界强制写(见[快照](#快照))。
 
 让位与停止条件只决定这一轮取什么、取多少,取出与处理的顺序照常写进 journal,回放只按 journal 顺序,确定性不受影响。**模拟账户的回报排在全部实盘输入之后**,每轮至多 `sim_max_per_round` 条,所以模拟负载再大也只在实盘输入处理完之后占用有界的时间,而每轮都会取一次、不会饿死。恢复、验证与镜像驱动按 journal 顺序交出,每轮 ≤ `replay_per_round` 条。
@@ -635,7 +636,7 @@ Model 从检查点恢复、镜像尚未追到其 `last_seq` 时,落后量以该�
 - **关键帧**(`StateSnapshot{purpose=Keyframe}`)**一次写完**:实盘驱动按[环境决定表](#环境决定写成-input)的 `Sys{Snapshot}` 行(时间或事件数到期、空闲轮、最大推迟 2 个周期)交出 `Timer{Sys, Snapshot}`;sequencer 处理它时在同一事件内写完整个快照,随后 `end_event`、`publish`。停顿 ≤ 300 µs,是 [latency-budget §3.1](../../docs/latency-budget.md#31-p999-记录项) 的 p99.9 记录项;写出期间到达的输入在环中等待。两种触发与最大推迟一起给出恢复重放尾部的上界(数值写在 [apps/hft-core](../../apps/hft-core/README.md) 启动步骤)。**关键帧不计算 `state_hash`**:头部该字段写 0(四种驱动相同,逐字节比对不受影响),需要它的读者从节内容按[状态哈希](#状态哈希)的规则计算。恢复、验证与镜像驱动读到 `Timer{Sys, Snapshot}` 时同样一次写完(验证驱动逐字节比对)。
 - **L2 关键帧**:每个 Live 簿的 `L2Snapshot{origin=Keyframe}` 由 `Timer{Keyframe, inst}` 在每个 `keyframe_period_ms` 窗口内均摊写出(每簿每窗口一条;引导块另有一条),不在同一时刻导出全部簿。
 - **按需**(`SnapshotNow`)、**Drain**、**Recovery** 与引导块的快照同样一次写完。
-- **写出**:sequencer 按固定顺序调用各组件的 `snapshot(&self, w)`,每个组件一次写完本 crate 的全部节:[hft-ledger](../hft-ledger/README.md)(节 1、13、22)→ [hft-oms](../hft-oms/README.md)(节 2、3、12)→ [hft-risk](../hft-risk/README.md)(节 4、14、17、18、23)→ 本 crate(节 5、8、9、10、15、16、19、20、24、25、26、27,有成交记录时另有节 28,有保留的对账视图时另有节 29，最后写节 30)→ [hft-book](../hft-book/README.md) `BookSet::snapshot`(节 6、7)→ [hft-exec](../hft-exec/README.md)(节 21)。快照体内各节按这个写出顺序排列(节号不要求递增;读者按 `SectionHdr.section` 定位);`state_hash` 按写出顺序对各节内容累积(节 16、28、29 除外;关键帧不算、写 0),写完全部节后与 `n_sections` 一起回填 `SnapshotHdr`(此时尚未 publish,读者不可见)。写完任一快照后 `rx_from_seq` = 该快照的 `at_seq`(见[只读视图](#只读视图seqviews实现-sdk-views))。
+- **写出**:64 MiB 节缓冲与 256 KiB 策略缓冲在 Engine 启动时分配并复用,避免 `mlockall(MCL_FUTURE)` 下每次 Timer 都锁页/缺页;快照仍在一个事件内原子写完。sequencer 按固定顺序调用各组件的 `snapshot(&self, w)`,每个组件一次写完本 crate 的全部节:[hft-ledger](../hft-ledger/README.md)(节 1、13、22)→ [hft-oms](../hft-oms/README.md)(节 2、3、12)→ [hft-risk](../hft-risk/README.md)(节 4、14、17、18、23)→ 本 crate(节 5、8、9、10、15、16、19、20、24、25、26、27,有成交记录时另有节 28,有保留的对账视图时另有节 29，最后写节 30)→ [hft-book](../hft-book/README.md) `BookSet::snapshot`(节 6、7)→ [hft-exec](../hft-exec/README.md)(节 21)。快照体内各节按这个写出顺序排列(节号不要求递增;读者按 `SectionHdr.section` 定位);`state_hash` 按写出顺序对各节内容累积(节 16、28、29 除外;关键帧不算、写 0),写完全部节后与 `n_sections` 一起回填 `SnapshotHdr`(此时尚未 publish,读者不可见)。写完任一快照后 `rx_from_seq` = 该快照的 `at_seq`(见[只读视图](#只读视图seqviews实现-sdk-views))。
 - **内容**:分节表与 `SnapshotHdr`/`SectionHdr` 归 [journal-format 快照记录结构](../../docs/subsystems/journal-format.md#快照记录结构);行格式由节的归属 crate 定义。本 crate 负责节 5、8–10、15、16、19、20、24、25、26、27、28、29、30(全部 `#[repr(C)]`、显式填充、按所列键升序;节 20 与节 25 的行格式在 journal-format;节 5 的实例状态字节由策略经 SDK 的 `SnapshotWriter` 写出)。
 - **快照中的 TSC 字段**(本 crate 的已登记行;其余持久时刻一律 engine_ns):节 8 `TimerRow.deadline_tsc` 与节 27 `StrategyTimerRow.deadline_tsc`(恢复结束时按[定时器](#定时器)的公式平移);节 26 `ConnLiveRow.live_tsc`(本次运行的值,处理 `EngineClock` 时清零,不平移);节 16 `ClockCalRow.tsc`(不计入 `state_hash`,只供冷读者换算 UTC)。
 - **从快照起步**(恢复、验证、镜像同一流程):各组件 `restore` 之后、处理任何 Input 之前,以节 25 的 `base_engine_ns` 恢复 `risk.set_run_start`(保证金数据的新旧运行判定沿用该快照的运行起点),`rx_from_seq` = 该快照的 `at_seq`,对每个实例按生效的 `StrategyParams` 调 `ledger.on_groups_changed`、`risk.on_groups_changed`,并重算 `model_mem`、`model_ckpt`;对每个 group 以恢复出的 LegTracker 摘要调一次 `risk.on_legs`(只重建 hft-risk 的 `on_legs` 缓存;返回的 `AutoClear` 不执行、不写记录——快照之前的 Input 已对同一状态判定过);引导块与之后读到的 `L2Snapshot{origin = Keyframe}` 只写档位、不改 `restore` 读回的簿元数据([hft-book](../hft-book/README.md));再以节 10 每 inst 的 `(mark_px, mark_ens)` 调一次 `ledger.restore_marks`、以 `interval_s ≠ 0` 的行逐 inst 调 `ledger.on_funding_interval`——这些只重建不进快照的派生索引与缓存,不产生任何记录。

@@ -257,6 +257,56 @@ fn terminal(h: &mut H, d: &OrderDecision, qty: Qty, query: bool) {
     h.run();
 }
 
+#[test]
+fn seq_178_reverse_uses_priority_budget_after_asymmetric_fill() {
+    reset_script();
+    let mut b = b0();
+    let mut rp = b0_risk(&b.rd.load());
+    let mut venues = rp.venues.as_slice().to_vec();
+    for v in &mut venues {
+        v.inst_bucket_per_s = 1;
+    }
+    rp.venues = hft_risk::PreVec::from_vec(venues);
+    b.risk = Some(rp);
+    let mut h = b.boot_self_contained();
+    h.steady();
+    install(OnFail::Reverse);
+    let (_, ds) = fire(&mut h);
+    assert_eq!(ds.len(), 2);
+    assert!(ds.iter().all(|d| d.reject == 0));
+    clear_hook();
+    let first = *ds.iter().find(|d| d.inst == A1).unwrap();
+    let second = *ds.iter().find(|d| d.inst == B1).unwrap();
+    terminal(&mut h, &first, first.qty, false);
+    let m = h.mark();
+    let at = h.now();
+    let mut expired = order_event(&second, OrderEventKind::Expired, h.epoch());
+    expired.qty = Qty(0);
+    expired.cum_filled = Qty(0);
+    h.push(RingId::Rep(0), &expired);
+    h.run();
+    let reverse: Vec<_> = decs(&h, m)
+        .into_iter()
+        .filter(|d| d.link_role == LinkRole::Reverse as u8)
+        .collect();
+    assert_eq!(reverse.len(), 1, "no repeated local RATE rejections");
+    let rv = reverse[0];
+    assert_eq!(rv.reject, 0);
+    assert_eq!(rv.qty, first.qty);
+    assert!(rv.decided_tsc.0.saturating_sub(at) < MS, "{rv:?}");
+    assert!(
+        h.io_ref()
+            .out
+            .iter()
+            .any(|(_, c)| c.op == GwOp::Place && c.slot == rv.slot && c.r#gen == rv.r#gen)
+    );
+    h.fill(&rv, rv.qty, rv.qty, rv.px);
+    assert_eq!(h.s.engine().ledger.pos(AC1, A1).qty, Qty(0));
+    assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, Qty(0));
+    install(OnFail::Reverse);
+    assert!(h.verify().is_empty());
+}
+
 pub(super) fn check_simultaneous_fault_seeds_and_snapshot_replay() {
     for seed in 1..=12u64 {
         for policy in [OnFail::Reverse, OnFail::Hold] {

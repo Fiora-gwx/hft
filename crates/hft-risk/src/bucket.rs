@@ -74,6 +74,22 @@ impl Window {
     pub fn full(&self) -> i64 {
         self.cap.unwrap_or(0)
     }
+
+    /// Earliest engine time with `need` nano-tokens; rounds up, never retries early.
+    pub fn ready_at(&self, tokens: i64, last: i64, now: i64, need: i64) -> i64 {
+        let Some(cap) = self.cap else { return now };
+        if need > cap || cap <= 0 {
+            return i64::MAX;
+        }
+        if self.at(tokens, last, now) >= need {
+            return now;
+        }
+        let deficit = (i128::from(need) - i128::from(tokens)).max(0);
+        let ns = (deficit * i128::from(self.window_ns.max(0)) + i128::from(cap) - 1) / i128::from(cap);
+        i128::from(last)
+            .saturating_add(ns)
+            .clamp(i128::from(now), i128::from(i64::MAX)) as i64
+    }
 }
 
 /// Whether `tokens` admits one order: risk-reducing ≥ 1 token; otherwise ≥ 1 token above the reserve.

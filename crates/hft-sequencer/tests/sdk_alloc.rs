@@ -24,6 +24,25 @@ use crate::common::*;
 static ALLOC: CountingAlloc = CountingAlloc;
 
 #[test]
+fn seq_337_snapshot_and_roll_reuse_large_workspace() {
+    reset_script();
+    let mut h = b0().boot();
+    h.steady();
+    for id in [1, 2, 1, 2] {
+        let scope = CountingAlloc::scope();
+        let start = std::time::Instant::now();
+        h.sys(id);
+        let elapsed = start.elapsed();
+        let bytes = scope.bytes();
+        eprintln!("snapshot timer={id} requested_bytes={bytes} elapsed={elapsed:?}");
+        // The small real-engine fixture includes journal copies and (for Roll) a boot block.
+        // Fresh 64 MiB snapshot scratch under MCL_FUTURE used to lock/fault every timer.
+        assert!(bytes < 1 << 20, "timer {id} allocated {bytes} bytes");
+    }
+    assert!(h.verify().is_empty());
+}
+
+#[test]
 fn seq_315_live_driver_buffers() {
     use hft_event::{FeedCmd, RecordFlags};
     use hft_sequencer::Driver;

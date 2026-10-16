@@ -138,6 +138,8 @@ Drain 退出前的发布边界由 [sequencer 主循环](../crates/hft-sequencer/
 
 恢复核容量、结束旧 Drain 状态并接替 Draining,新容量入引导配置;快照保留停止点 engine_ns,分歧入输出哈希。
 
+到期定时器按数量与 `md_round_ns` 双重限制服务,回调间检查优先输入;本轮处理过定时器后仍须到达市场输入阶段。快照复用启动期工作区,在单个事件内写完;具体顺序与边界归 [`hft-sequencer`](../crates/hft-sequencer/README.md#主循环step)。
+
 journal 分为 **Input**(决策输入，含驱动以 `Timer` 记录的环境决定)、**Output**(意图与执行决定)、**Meta**(测量，不参与状态与验证)。时钟、随机数、配置、定时器来自 Input；无 `HashMap` 迭代依赖或全局业务可变状态。[逐事件测量](../tools/latency-report/README.md) 经独立有界环落盘，不影响主循环。详见 [`hft-sequencer`](../crates/hft-sequencer/README.md) 与 [`replayer`](../apps/replayer/README.md)。
 
 ## 10. 核心类型归属

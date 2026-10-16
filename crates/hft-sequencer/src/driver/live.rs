@@ -130,6 +130,8 @@ struct Counts {
     advice: u16,
     sim: u16,
     timers: u16,
+    timer_start: Option<u64>,
+    timer_yield: bool,
     md_start: Option<u64>,
     rep_rr: u8,
     bbo_rr: u8,
@@ -394,6 +396,11 @@ impl<S: StrategySet, IO: LiveIo<S>> LiveDriver<S, IO> {
 
     /// Mid-round check: a timer is due → end the round.
     fn timer_due(&mut self, v: &DriverView<'_>) -> bool {
+        // A round which already serviced timers must reach the input queues even
+        // when the timer count/time budget ran out with overdue entries remaining.
+        if self.c.timers != 0 {
+            return false;
+        }
         match v.next_deadline() {
             Some(d) => self.io.tsc().0 >= d.0,
             None => false,
@@ -874,9 +881,25 @@ impl<S: StrategySet, IO: LiveIo<S>> Driver<S> for LiveDriver<S, IO> {
                         return self.handed(out, None);
                     }
                     if self.c.timers < PER_ROUND_TIMERS
+                        && self.c.timer_start.is_none_or(|start| {
+                            now.0.saturating_sub(start) < Self::ns_ticks(v, u64::from(v.params().md_round_ns))
+                        })
                         && let Some(t) = v.heap_top()
                         && now.0 >= t.deadline
                     {
+                        // One queued input can interrupt between timer callbacks. Keep
+                        // the timer quota/time slice as a second bound on large bursts.
+                        if self.c.timer_yield {
+                            self.c.timer_yield = false;
+                            if let Some(r) = self.preempt(out, v, true) {
+                                return self.handed(out, Some(r));
+                            }
+                            if self.take_md(out, v) {
+                                return self.handed(out, Some(RingId::Md(0)));
+                            }
+                        }
+                        self.c.timer_start.get_or_insert(now.0);
+                        self.c.timer_yield = true;
                         self.c.timers += 1;
                         Self::timer_input(out, t.owner, t.timer_id, GroupId(t.group), t.deadline, now);
                         return self.handed(out, None);

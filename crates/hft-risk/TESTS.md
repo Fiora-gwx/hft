@@ -693,7 +693,7 @@ spec: README.md
 | RSK-036.3 | 99 次提交(余 1) | H | 放行 |
 | RSK-036.4 | 100 次提交(余 0) | H | 拒 `RATE` |
 | RSK-036.5 | (A, 1) 10 s 限额改为 1 000;479 次提交(1 min 桶余 121);480 次 | N | 放行;拒 `RATE` |
-| RSK-036.6 | `inst_bucket_per_s = 5`;对 a1 5 次提交 | H(a1);`Open(1, g3, a2, Buy, 0.001 @ 2 500.00)` | 拒 `RATE`;放行(inst 桶按 (account, inst),无预留) |
+| RSK-036.6 | `inst_bucket_per_s = 5`;对 a1 5 次普通单提交 | N(a1);H(a1);`Open(1, g3, a2, Buy, 0.001 @ 2 500.00)` | 普通单拒 `RATE`;修复放行;另一 inst 放行 |
 | RSK-036.7 | `on_rate_limit_hit(A, 1)`,1 ms 后 | N;H | 拒 `RATE_BACKOFF`;拒 `RATE_BACKOFF` |
 | RSK-036.8 | `on_rate_limit_hit(B, 1)` | `LinkOpen(1, g1, a1, Buy, 0.01 @ 50 000.00; link = (1, B, b1, Sell, 0.01, 495))` | 拒 `RATE_BACKOFF` |
 | RSK-036.9 | (B, 1) 上 79 次提交(余 21) | 同 .8 的链接 Open,`evaluate` + `commit` 后再 `evaluate` 一次 | 两次都放行((B, 1) 只查不扣,仍余 21) |
@@ -704,6 +704,8 @@ spec: README.md
 | RSK-036.14 | (A, 1) 上 `on_rate_limit_hit(A, 1)`,另 (B, 1) 上 80 次提交 | 同 .8 | 拒 `RATE_BACKOFF` |
 
 ### RSK-037 令牌按 engine_ns 惰性补充、不超过容量,容量扣除 rate_headroom
+
+- 补充回归:`rate_ready_at` 在 10 s/1 min/秒级桶与退避共同约束下给出最早时刻;此前 1 ns 拒绝、该时刻放行,非整除补充率向上取整;修复跳过已耗尽的普通单秒级桶。
 
 - 规则:[令牌桶](README.md#令牌桶)
 - 级别:table

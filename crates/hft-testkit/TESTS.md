@@ -1186,6 +1186,8 @@ spec: README.md
 
 ### TK-089 CountingAlloc 只计本线程自 scope 起的分配
 
+- 同时核对 `bytes()` 为本线程累计请求字节数(realloc 计完整新大小,不是存活内存);空操作、其他线程与释放计 0。
+
 - 规则:[9. 分配计数与基准驱动](README.md#9-分配计数与基准驱动)
 - 级别:table
 - 里程碑:M1

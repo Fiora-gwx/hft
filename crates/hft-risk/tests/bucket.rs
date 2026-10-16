@@ -78,8 +78,14 @@ fn rsk_036_rr_reserve() {
     }
     {
         let mut w = r0_with(|p| with_venue(&p, A, 1, |v| v.inst_bucket_per_s = 5));
-        w.commits(&h_it(), 5);
-        check(&mut w, &h_it(), Some(R::RATE), "RSK-036.6 a");
+        w.commits(&n_it(), 5);
+        check(
+            &mut w,
+            &n_it(),
+            Some(R::RATE),
+            "RSK-036.6 normal pacing exhausted",
+        );
+        check(&mut w, &h_it(), None, "RSK-036.6 repair priority");
         let it = open(1, G3, A2, Side::Buy, "0.001", "2500.00", Tif::Gtc);
         check(&mut w, &it, None, "RSK-036.6 b");
     }
@@ -177,6 +183,26 @@ fn rsk_037_lazy_refill() {
     check(&mut w, &h_it(), Some(RejectBits::RATE), "RSK-037.5 b");
     w.now = T0 + 100_000_000;
     check(&mut w, &h_it(), None, "RSK-037.5 c");
+}
+
+#[test]
+fn rsk_037_rate_ready_deadline_is_first_admissible_instant() {
+    for (l10, l60) in [(100, 600), (1_000, 600), (3, 600)] {
+        let mut w = r0_limits(l10, l60);
+        exhaust(&mut w);
+        let ready = w.risk.rate_ready_at(&h_it(), &w.nowv());
+        assert!(ready > w.now && ready <= w.now + 4 * SEC);
+        w.now = ready - 1;
+        check(&mut w, &h_it(), Some(RejectBits::RATE), "before next token");
+        w.now = ready;
+        check(&mut w, &h_it(), None, "first next token");
+    }
+    let mut w = r0_with(|p| with_venue(&p, A, 1, |v| v.inst_bucket_per_s = 1));
+    w.commits(&n_it(), 1);
+    assert_eq!(w.risk.rate_ready_at(&n_it(), &w.nowv()), T0 + SEC);
+    assert_eq!(w.risk.rate_ready_at(&h_it(), &w.nowv()), T0);
+    w.hit(A, 1);
+    assert_eq!(w.risk.rate_ready_at(&h_it(), &w.nowv()), T0 + SEC);
 }
 
 #[test]

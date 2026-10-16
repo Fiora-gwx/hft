@@ -893,7 +893,11 @@ impl Oms {
     }
 
     fn register_retry(&mut self, i: usize, retry_at: Tsc, now: Tsc, out: &mut OmsOut) {
-        let at = Tsc(now.0.saturating_add(self.p.hedge_retry_min).max(retry_at.0));
+        let at = if retry_at.0 > now.0 {
+            retry_at
+        } else {
+            Tsc(now.0.saturating_add(self.p.hedge_retry_min))
+        };
         let Some(x) = self.links.get_mut(i) else { return };
         x.flags |= lf::RETRY_PENDING;
         let id = x.link_id;

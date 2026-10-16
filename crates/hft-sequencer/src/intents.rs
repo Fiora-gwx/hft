@@ -43,6 +43,7 @@ pub(crate) enum Src {
 pub(crate) enum PipeOut {
     Placed(OrderRef),
     Rejected(RejectBits),
+    RateLimited(RejectBits, Tsc),
     Shadowed,
     /// Hedge gated (price), nothing written.
     Gated,
@@ -448,7 +449,7 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
             Err(outcome) => {
                 let bits = match outcome {
                     PipeOut::Shadowed => RejectBits::MODE_SHADOW,
-                    PipeOut::Rejected(bits) => bits,
+                    PipeOut::Rejected(bits) | PipeOut::RateLimited(bits, _) => bits,
                     _ => RejectBits::INVALID,
                 };
                 record_only(e, strategy, &it, bits, shadow, oflags, reason, intent_no);
@@ -532,6 +533,12 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
     let adm = match res {
         Ok(a) => a,
         Err(bits) => {
+            let rate_limited = bits.0 & (RejectBits::RATE.0 | RejectBits::RATE_BACKOFF.0) != 0;
+            let retry_at = if rate_limited {
+                e.now.tsc_of(e.risk.rate_ready_at(&iv, &e.now))
+            } else {
+                Tsc(0)
+            };
             record_only(e, strategy, &it, bits, false, oflags, reason, intent_no);
             #[cfg(feature = "testkit")]
             e.audit.record((e.out.recs.len() - 1) as u32, audit_facts);
@@ -544,11 +551,6 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
                     e.put_oms(o);
                     crate::mode_glue::broken(e, inst, drv, req.account, req.group)?;
                 } else {
-                    let retry_at = if bits.0 & RejectBits::RATE_BACKOFF.0 != 0 {
-                        e.now.tsc_of(e.risk.backoff_until(req.venue, req.account))
-                    } else {
-                        Tsc(0)
-                    };
                     e.trace.rec("oms.hedge_gated", u64::from(req.link_id), retry_at.0);
                     let mut o = e.take_oms();
                     e.oms.hedge_gated(
@@ -563,7 +565,11 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
                     e.put_oms(o);
                 }
             }
-            return Ok(PipeOut::Rejected(bits));
+            return Ok(if rate_limited {
+                PipeOut::RateLimited(bits, retry_at)
+            } else {
+                PipeOut::Rejected(bits)
+            });
         }
     };
     // 7. Place, then commit the admission only when OMS allocated an order.
@@ -677,7 +683,7 @@ pub(crate) fn place_strategy<D: Driver<S>, S: StrategySet>(
     )?;
     Ok(match r {
         PipeOut::Placed(h) => IntentOutcome::Placed(h),
-        PipeOut::Rejected(b) => IntentOutcome::Rejected(b),
+        PipeOut::Rejected(b) | PipeOut::RateLimited(b, _) => IntentOutcome::Rejected(b),
         PipeOut::Shadowed => IntentOutcome::Shadowed,
         PipeOut::Gated => IntentOutcome::Rejected(RejectBits::INVALID),
     })
@@ -705,6 +711,7 @@ pub(crate) fn place_exec<D: Driver<S>, S: StrategySet>(
     let pr = match r {
         PipeOut::Placed(h) => PlaceResult::Placed(h),
         PipeOut::Rejected(b) => PlaceResult::Rejected(b),
+        PipeOut::RateLimited(bits, retry_at) => PlaceResult::RateLimited { bits, retry_at },
         PipeOut::Shadowed | PipeOut::Gated => PlaceResult::Shadowed,
     };
     // `HEDGE_LIMIT` is terminal; the caller sets Broken after `on_place_result` (README "意图管线" 6).

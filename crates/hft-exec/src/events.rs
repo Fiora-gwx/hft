@@ -292,8 +292,19 @@ impl Exec {
         let i = usize::from(po.leg);
         let kind = po.kind;
         match r {
+            PlaceResult::RateLimited { bits, retry_at } => {
+                self.drop_slice(cix, i, po);
+                if kind.is_fix() {
+                    self.cancel_timer(cix, ExecTimerKind::Fix, out);
+                    if let Some(c) = self.cells.get_mut(cix) {
+                        c.fix.next_tsc = Tsc(0);
+                    }
+                }
+                self.rejected(cix, po, bits, now, Some(retry_at), out);
+            }
             PlaceResult::Placed(rf) => {
                 if let Some(cm) = self.cells.get_mut(cix) {
+                    cm.gated_bits.0 &= !(RejectBits::RATE.0 | RejectBits::RATE_BACKOFF.0);
                     if cm.active.n == id.n {
                         cm.active.first = OrderRefRow::of(rf);
                     }
@@ -331,7 +342,7 @@ impl Exec {
             }
             PlaceResult::Rejected(bits) => {
                 self.drop_slice(cix, i, po);
-                self.rejected(cix, po, bits, now, out);
+                self.rejected(cix, po, bits, now, None, out);
             }
         }
         self.mark_pending(cix, true);
@@ -355,7 +366,15 @@ impl Exec {
         }
     }
 
-    fn rejected(&mut self, cix: usize, po: PendOrder, bits: RejectBits, now: Now, out: &mut ExecOut) {
+    fn rejected(
+        &mut self,
+        cix: usize,
+        po: PendOrder,
+        bits: RejectBits,
+        now: Now,
+        retry_at: Option<Tsc>,
+        out: &mut ExecOut,
+    ) {
         let kind = po.kind;
         let Some(c) = self.cells.get(cix).copied() else {
             return;
@@ -436,7 +455,29 @@ impl Exec {
             d.leg_ix = po.leg;
             out.decisions.push(d);
         }
-        self.gate(cix, bits, true, is_target_kind(kind), now, out);
+        self.gate(cix, bits, retry_at.is_none(), is_target_kind(kind), now, out);
+        if let Some(retry_at) = retry_at {
+            // One bounded wake, rather than repeated generic gated retries.
+            let mut at = retry_at.0;
+            // A long venue backoff must not postpone the naked-leg repair deadline.
+            // Waking there expires the existing repair; it does not retry the rate gate.
+            if c.fix.first_tsc.0 != 0 {
+                let p = self.params(self.acct_of_cix(cix));
+                at = at.min(
+                    c.fix
+                        .first_tsc
+                        .0
+                        .saturating_add(Self::ms(&now, p.fix_deadline_ms))
+                        .saturating_add(1),
+                );
+            }
+            let at = Tsc(at.max(now.tsc.0.saturating_add(1)));
+            let saved = self.cells.get(cix).map_or(Tsc(0), |c| c.wake_at);
+            self.reg_timer(cix, ExecTimerKind::Wake, at, saved, out);
+            if let Some(c) = self.cells.get_mut(cix) {
+                c.wake_at = at;
+            }
+        }
     }
 
     /// Link state change from the OMS.

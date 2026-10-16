@@ -10,11 +10,13 @@ thread_local! {
     // Const-initialized and without a destructor: reading it never allocates and works during
     // thread teardown.
     static ALLOCS: Cell<u64> = const { Cell::new(0) };
+    static BYTES: Cell<u64> = const { Cell::new(0) };
 }
 
 #[inline]
-fn bump() {
+fn bump(bytes: usize) {
     let _ = ALLOCS.try_with(|c| c.set(c.get().wrapping_add(1)));
+    let _ = BYTES.try_with(|c| c.set(c.get().wrapping_add(bytes as u64)));
 }
 
 #[inline]
@@ -31,6 +33,7 @@ impl CountingAlloc {
     pub fn scope() -> AllocScope {
         AllocScope {
             start: current(),
+            start_bytes: BYTES.try_with(Cell::get).unwrap_or(0),
             _thread_bound: PhantomData,
         }
     }
@@ -50,6 +53,7 @@ impl CountingAlloc {
 #[derive(Debug)]
 pub struct AllocScope {
     start: u64,
+    start_bytes: u64,
     _thread_bound: PhantomData<*const ()>,
 }
 
@@ -58,23 +62,31 @@ impl AllocScope {
     pub fn allocs(&self) -> u64 {
         current().wrapping_sub(self.start)
     }
+
+    /// Total requested bytes (including the full new size of reallocations), not live memory.
+    pub fn bytes(&self) -> u64 {
+        BYTES
+            .try_with(Cell::get)
+            .unwrap_or(0)
+            .wrapping_sub(self.start_bytes)
+    }
 }
 
 // SAFETY: every method forwards to `System` with the caller's arguments unchanged; the extra work
 // only touches a const-initialized thread-local `Cell<u64>`, which never allocates.
 unsafe impl GlobalAlloc for CountingAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        bump();
+        bump(layout.size());
         // SAFETY: same contract as the caller's.
         unsafe { System.alloc(layout) }
     }
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        bump();
+        bump(layout.size());
         // SAFETY: same contract as the caller's.
         unsafe { System.alloc_zeroed(layout) }
     }
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        bump();
+        bump(new_size);
         // SAFETY: same contract as the caller's.
         unsafe { System.realloc(ptr, layout, new_size) }
     }

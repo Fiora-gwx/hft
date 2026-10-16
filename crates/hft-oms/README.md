@@ -102,7 +102,7 @@ impl Oms {
     pub fn hedge_vetoed(&mut self, link_id: u32, now: Tsc, cause_seq: u64, out: &mut OmsOut);
     /// 本 crate 产生的对冲请求在出环前被门控:`price_hedge` 的 `StaleQuote`(报价连接不健康)/`BeyondCross`,或 HEDGE_LIMIT 以外的风控 RejectBits。
     /// 不计次、时间照算,登记 HedgeRetry(见 OnFill 第 6 条)。
-    /// retry_at = 该 venue 的退避截止(hft-risk 给出;无退避为 0),HedgeRetry 到期时刻取 max(now + hedge_retry_min_ms, retry_at)。
+    /// retry_at = 风控限速最早可用时刻;大于 now 时直接用于 HedgeRetry,否则取 now + hedge_retry_min_ms。
     pub fn hedge_gated(&mut self, link_id: u32, why: HedgeGate, retry_at: Tsc, now: Tsc, cause_seq: u64, out: &mut OmsOut);
     /// hft-risk 报告 (a, v) 的对冲闸门子集——该 venue 的 IDENTITY、ACCOUNT_CFG、ORDER_CONNS 条件(hft-risk `hedge_gate_ok`,
     /// 经 `ModeOutcome.hedge_gate_open` 列出)——由假变真时由 sequencer 调用(由 Input 驱动;完整闸门放行之前或同时;重复调用无害):
@@ -279,7 +279,7 @@ pub struct ForeignFill {                           // 防御路径与 StaleGen �
 | `sweep_batch` | u16 | 256 | 每次 sweep 最多检查的槽数 |
 | `max_out_per_event` | u16 | 16 | 每个 Input 最多交出的出环决策数(K),其余经 `Timer{OmsContinue}` 续发 |
 | `hedge_retry_max` | u8 | 3 | 第二腿执行结果类失败后的 `SecondRetry` 次数上限(门控拒绝不计次) |
-| `hedge_retry_min_ms` | u32 | 100 | `HedgeRetry` 定时器最小间隔(实际 = max(此值, 该 venue 退避截止)) |
+| `hedge_retry_min_ms` | u32 | 100 | 未提供未来限速可用时刻时的 `HedgeRetry` 间隔 |
 | `hedge_deadline_ms` | u32 | 3000 | 从最早一笔尚未对冲完的第一腿成交起(`first_fill_tsc`,见 OnFill 第 1 条),**引擎运行时间**超过此值仍未对冲完(含门控拒绝期间)→ 链接 Broken + P0;停机时间与恢复后 `RESUME_HOLD` 期间不计(见"恢复") |
 | `resume_hold_max_ms` | u32 | 30000 | `recovery_end` 之后链接停在 `RESUME_HOLD` 的最长**引擎运行时间**(等续接单所在 venue 的对冲闸门子集、等该链接的 Unknown 收敛);超时 → 链接 `Broken{ResumeTimeout}` + `Note{OmsResumeTimeout}`(P0) |
 | `foreign_fill_track[(venue, account)]` | u16 | 64 | 防御路径:按 `exch_order_id` 跟踪外来单累计成交的表容量(见"外来成交") |
@@ -654,7 +654,7 @@ const _: () = assert!(size_of::<LinkEntry>() == 80 && offset_of!(LinkEntry, firs
 4. 否则 `residual = raw − q_fill`;**第二腿数量上限**(D2):`q = min(q_fill, floor_to_lot(naked_dir))`,`naked_dir` 是 LegTracker 在对冲方向上的裸量(定义见 [LegTracker](#legtracker))。`q < q_fill` → 差额 `q_fill − q` 不计入余数、不计入 `hedge_req`(这段敞口已由别的途径覆盖),写 `Note{OmsHedgeNakedCapped}`(P1,`v = [link_id, q_fill, q, naked_dir]`);`q` 低于最小下单量 → 本次不发。
 5. 发出时 `hedge_req += q`;产出 `HedgeRequest{role: Second, qty: q, basis: raw, hedge_cap_qty: raw + 1 lot, reduce_only: plan.reduce_only, ref_px}`。sequencer:`price_hedge` → 投影 `IntentView`(含 `hedge_cap_qty`)→ `classify` → `evaluate`(检查链 #6 `HEDGE_LIMIT`)→ `commit` → `place()`。第二腿永远 IOC。
 6. **第二腿失败**(`HEDGE_LIMIT` 以外的风控拒、`price_hedge` 门控、`place` 错误、本地发送失败(`SendReport` 确定未写出)、交易所拒、IOC 未全成)且 `owed > 0`:
-   - `on_fail = Retry`(OnFill 默认):登记 `Timer{Oms, HedgeRetry{link_id}}`,到期时刻 `max(now + hedge_retry_min_ms, retry_at)`(`retry_at` = 该 venue 的退避截止,只经 `hedge_gated` 传入,其余失败为 0);到期 `on_hedge_retry` 以当时价格产出 `HedgeRequest{role: SecondRetry, qty: min(owed, floor_to_lot(naked_dir)), basis: owed, hedge_cap_qty: owed + 1 lot, reduce_only: plan.reduce_only}`(新槽、新 id、重新过风控)。被裸量上限截掉的部分从 `hedge_req` 核销(`owed` 随之减少;`owed` 归零且无在途 → 链接 Done),写 `Note{OmsHedgeNakedCapped}`。**角色保持第二腿语义**:开仓链接的重试不带 reduceOnly,分类为 Hedge、RISK_REDUCING(分类表在 hft-risk)。该链接有 Unknown 的第二腿槽时不重试,等收敛。
+   - `on_fail = Retry`(OnFill 默认):登记 `Timer{Oms, HedgeRetry{link_id}}`,到期时刻取 `hedge_gated` 传入的未来 `retry_at`(风控令牌桶与退避共同允许的最早时刻);未提供未来时刻的失败取 `now + hedge_retry_min_ms`;到期 `on_hedge_retry` 以当时价格产出 `HedgeRequest{role: SecondRetry, qty: min(owed, floor_to_lot(naked_dir)), basis: owed, hedge_cap_qty: owed + 1 lot, reduce_only: plan.reduce_only}`(新槽、新 id、重新过风控)。被裸量上限截掉的部分从 `hedge_req` 核销(`owed` 随之减少;`owed` 归零且无在途 → 链接 Done),写 `Note{OmsHedgeNakedCapped}`。**角色保持第二腿语义**:开仓链接的重试不带 reduceOnly,分类为 Hedge、RISK_REDUCING(分类表在 hft-risk)。该链接有 Unknown 的第二腿槽时不重试,等收敛。
    - `on_fail = Reverse`:不重试,对第一腿已成交未对冲的净量(`first_net − hedge_filled × den / num`,lot 向零取整)发 `HedgeRequest{role: Reverse, reduce_only: true}`(不受裸量上限约束;`basis` = 该未对冲量,`ref_px = 0`),同时 `hedge_req = hedge_filled + hedge_open`(未对冲部分改由 Reverse 处置,`owed` 归 0;Done 条件中的"无在途 `Reverse`"保证反向终态前不 Done)。`Reverse` 的成交从被反向那一腿的链接计数中扣除(第一腿 `first_net −= d_net`;Simultaneous 在第二腿上反向时 `hedge_filled −= d`);`Reverse` 失败同样经 HedgeRetry 以当时的未对冲量重发 `Reverse`,计次与截止同下,计次耗尽 → `Broken{ReverseFailed}`。
    - `on_fail = Hold`:不发单,只记 LegTracker;链接置 Done,剩余敞口交 hft-exec 规则。
    - 计次:执行结果类失败(交易所拒、IOC 未全成、`place` 错误、计次类的本地发送失败)`retries += 1`,上限 `hedge_retry_max`(失败后 `retries ≤ hedge_retry_max` 才登记重试,`retries > hedge_retry_max` 即计次耗尽:最多发出 `hedge_retry_max` 次重试单);**门控拒绝(kill、cap、风控门、`price_hedge` 的 `StaleQuote`/`BeyondCross`,经 `hedge_gated` 交回;不计次类的本地发送失败)不计次但时间照算**;本地发送失败的分类见"SendReport 处理"。链接不处于 `RESUME_HOLD`/`RESUME_RETRY` 时,`now − first_fill_tsc > hedge_deadline_ms` 仍未对冲完,或计次耗尽 → `LinkState::Broken` + `Note{OmsHedgeBroken}`(P0)+ `LinkUpdate`;sequencer 设 `Broken{account, group}` cap(hft-risk 据此对该账户设 `HedgeFailure`,挡全部 Open)。此后该 group 的未对冲量由 [hft-exec 的 Broken 处置](../hft-exec/README.md#broken-处置)(`broken_auto_fix_ms` 后一次可执行的自动有界平仓尝试、L3/flatten 永续先)或 `HedgeFix` 命令处理。
