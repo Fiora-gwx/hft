@@ -1975,7 +1975,7 @@ NET-080/081 同时验证缓冲优先轮询的 syscall 计数、跨记录帧、�
 
 - 规则:[8. `ConnPool` 与轮换](README.md#8-connpool-与轮换)、[配置项](README.md#配置项)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:测试时钟;`rotate_stagger_s = 3600`(`stagger_tsc = 3_600_000_000_000`);池里已有 A,`rotate_at = 10_000 s`;每行再 `install(B, 行内时刻)`;时刻以秒写,换算为 ns
 - 实现:`crates/hft-net/tests/pool.rs::net_250_rotate_stagger`
 
@@ -2006,7 +2006,7 @@ NET-080/081 同时验证缓冲优先轮询的 syscall 计数、跨记录帧、�
 
 - 规则:[8. `ConnPool` 与轮换](README.md#8-connpool-与轮换)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:PrimaryStandby,target 2;每行新池、无在建
 - 实现:`crates/hft-net/tests/pool.rs::net_252_build_priority`
 
@@ -2022,7 +2022,7 @@ NET-080/081 同时验证缓冲优先轮询的 syscall 计数、跨记录帧、�
 
 - 规则:[签名草案](README.md#签名草案)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:一条活跃连接,`install(h, None)`
 - 步骤:
   1. `rotate_due(u64::MAX)`
@@ -2182,7 +2182,7 @@ NET-080/081 同时验证缓冲优先轮询的 syscall 计数、跨记录帧、�
 
 - 规则:[9. REST 客户端](README.md#9-rest-客户端)
 - 级别:integ
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`RestPool::<2>`,r0、r1 都空闲;每个请求在下一次 submit 前完成
 - 步骤:
   1. 依次 submit 3 个请求
@@ -2501,7 +2501,7 @@ NET-080/081 同时验证缓冲优先轮询的 syscall 计数、跨记录帧、�
 
 - 规则:[9. REST 客户端](README.md#9-rest-客户端)
 - 级别:fuzz
-- 里程碑:M3
+- 里程碑:M6
 - 目标:`fuzz_http_response`:任意字节作为一条在途请求的响应送入 `RestPool::poll`
 - 语料:各所 REST 响应样本(`fixtures/<venue>/rest.*`)+ NET-260–NET-266 的构造响应
 - 判定:同 [testing §3.3](../../docs/testing.md#33-fuzz);结果只可能是 `None`、`Ok(RestResp)` 或 `Err(RestFail)`
@@ -2521,7 +2521,7 @@ NET-080/081 同时验证缓冲优先轮询的 syscall 计数、跨记录帧、�
 
 - 规则:[配置项](README.md#配置项)、[1. 接收路径](README.md#1-接收路径)
 - 级别:prop
-- 里程碑:M3
+- 里程碑:M9
 - 性质:`tls_mode = buffered` 时 NET-092 与 NET-136 的性质成立,且同一输入下两种后端返回的帧序列与 `Timestamps` 逐字段相同
 - 生成:同 NET-092
 - 参考:同一输入在 `unbuffered` 后端上的输出
@@ -2532,7 +2532,7 @@ NET-080/081 同时验证缓冲优先轮询的 syscall 计数、跨记录帧、�
 
 - 规则:[配置项](README.md#配置项)、[2. 发送路径](README.md#2-发送路径)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:同 NET-151,`tls_mode = buffered`
 - 步骤:
   1. 执行 NET-151 的全部步骤
@@ -2544,7 +2544,7 @@ NET-080/081 同时验证缓冲优先轮询的 syscall 计数、跨记录帧、�
 
 - 规则:[配置项](README.md#配置项)、[2. 发送路径](README.md#2-发送路径)
 - 级别:integ
-- 里程碑:M3
+- 里程碑:M9
 - 前置:同 NET-163,`tls_mode = buffered`
 - 步骤:
   1. 执行 NET-163 的步骤

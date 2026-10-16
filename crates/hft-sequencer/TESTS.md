@@ -2115,7 +2115,7 @@ TK-115 的 modes 回归另覆盖节 25 的运行起点恢复给风控:旧运行�
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:B0 稳态;a1 簿为 Live 并订阅深度;s1 订阅 a1 的 `BOOK`
 - 步骤:
   1. 投递一条含 20 档更新的 `L2Batch`
@@ -2127,7 +2127,7 @@ TK-115 的 modes 回归另覆盖节 25 的运行起点恢复给风控:旧运行�
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:B0 稳态;a1 订阅分档深度(TopN 流)
 - 步骤:
   1. 投递 `L2Snapshot{origin = TopN, 10 档}`
@@ -2139,7 +2139,7 @@ TK-115 的 modes 回归另覆盖节 25 的运行起点恢复给风控:旧运行�
 
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:B0 稳态;a1 启用增量深度,簿处于 `Resyncing`;REST 快照分 3 片
 - 步骤:
   1. 依次投递 3 条 `L2Snapshot{origin = Exchange}` 分片,中间穿插 1 条 bbo-A
@@ -4823,7 +4823,7 @@ SEQ-160 同时覆盖真实 ConnId 112/113/255、重复 Up/Down、主连接退出
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M5
 - 基准名:`seq/replay_throughput`
 - 实现:`crates/hft-sequencer/benches/seq.rs::seq_338_replay_throughput`
 

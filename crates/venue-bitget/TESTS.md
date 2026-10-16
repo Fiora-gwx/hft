@@ -354,7 +354,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[实现说明](README.md#实现说明)
 - 级别:prop
-- 里程碑:M3
+- 里程碑:M9
 - 性质:同一 `books1`/`books5`/`ticker` 推送中 `seq`、`data.ts`、顶层 `ts` 各自随机写成数字或字符串时,`peek` 与 `decode_md` 的输出逐字节相同
 - 生成:`seq ∈ [0, 2^63)`,`ts ∈ [1, 9_223_372_036_853]`(ms,乘 10^6 不溢出);价量取 RD-BGT 合法 tick/lot 的随机倍数;每个字段独立以 1/2 概率取字符串
 - 参考:全数字形式的输出
@@ -750,7 +750,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[下单:UTA V3 WS](README.md#下单uta-v3-ws)
 - 级别:prop
-- 里程碑:M3
+- 里程碑:M9
 - 撤销:官方 UTA 下单参数没有 `pxAmendType`(超出价格带的单以 `25205`/`25206` 拒绝,不夹到边界);编号保留不复用
 - 性质:任意合法 `Place`/`Amend` 命令编码成功时,帧经 `sonic-rs` 解析后订单参数恰有一个 `pxAmendType` 键,取值为"超出价格带拒单";删掉该键的帧视为本性质失败
 - 生成:两个产品线;inst 取 RD-BGT 全部;`side`、`tif ∈ {Gtc, Ioc, PostOnly}`;`px`、`qty` 为 tick/lot 的 1..10^9 倍;`slot < 2^20`;`gen` 任意 u32
@@ -1095,7 +1095,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[累计量与费用来源](README.md#累计量与费用来源)、[契约](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 撤销:UTA `order` 推送必带 `cumExecQty`(官方);缺失时按 BGT-100.7 返回 `Shape`。编号保留不复用
 - 前置:同一新 `GwCtx`;三条推送都不带累计量字段:t1(`tradeId "9101"`,本笔 `0.001`)、t2(`"9102"`,本笔 `0.002`)、t1 重复
 - 步骤:
@@ -1123,7 +1123,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[累计量与费用来源](README.md#累计量与费用来源)、[用户流事件表](README.md#用户流事件表)、[契约](../hft-venue-proto/README.md#实现方必须遵守的契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M6
 - 暂缓:费用取自 `order` 推送的订单累计 `feeDetail`(随成交差分产出);`fill` 频道不订阅,核实费用晚于订单终态到达后再启用
 - 前置:同一 `GwCtx`;先解码 BGT-100.3(`Fill`,不带费用,`fee: 0`、`fee_asset: ASSET_NONE`);再解码成交频道推送(若存在)
 - 实现:`crates/venue-bitget/tests/reports.rs::bgt_107_fee_only`
@@ -1575,7 +1575,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[契约](../hft-venue-proto/README.md#实现方必须遵守的契约)、[VenueCaps 默认值](README.md#venuecaps-默认值)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`tests/contract.rs` 对两个产品线各调用 hft-venue-proto `testkit` 的全部契约检查;样本取本 crate 金样(BGT-300–BGT-333)
 - 实现:`crates/venue-bitget/tests/contract.rs::bgt_174_contract_checks`
 
@@ -1657,7 +1657,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[实现说明](README.md#实现说明)、[心跳与 BBO 探测](README.md#心跳与-bbo-探测)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:同 BGT-191,但客户端调度使用 `heartbeat(Role::Md)` 改成 `unconditional = false` 的副本
 - 步骤:
   1. 运行 600 s
@@ -1794,7 +1794,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[外部成交识别](README.md#外部成交识别)、[开发备忘](README.md#开发备忘)
 - 级别:testnet
-- 里程碑:M3
+- 里程碑:M6
 - 环境:dev2 联调窗口;模拟盘永续账户,单向持仓
 - 授权:`[需授权]`
 - 步骤:
@@ -1853,7 +1853,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[行情频道 → 事件](README.md#行情频道--事件)
 - 级别:host
-- 里程碑:M3
+- 里程碑:M9
 - 环境:dev2,`prod` 角色测试网实例的 feed(主网公共行情),同时段 Classic V2 `books1` 连接作对照
 - 授权:`[需授权]`
 - 步骤:
@@ -1882,7 +1882,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[依赖](README.md#依赖)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`cargo xtask deps`(读 `tools/xtask/deps.toml`);反例夹具 `crates/venue-bitget/tests/fixtures/bad-deps/Cargo.toml` = 本 crate 清单的副本,`[dependencies]` 多一行 `serde_json`
 - 步骤:
   1. 对 venue-bitget 运行检查
@@ -1915,7 +1915,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[分档快照流](README.md#分档快照流)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/bitget-usdt-futures/books5/{v2_normal,v3_normal,duplicate_seq,fewer_levels,zero_qty_level}.in`;`duplicate_seq` 为同一 `seq` 连续两帧
 - 期望文件:同目录 `<case>.expected.jsonl`(每帧一条 `L2Snapshot{origin = TopN}`;`duplicate_seq` 两条内容相同)
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_302_fut_books5`
@@ -1924,7 +1924,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[分档快照流](README.md#分档快照流)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/bitget-usdt-futures/books15/{v2_normal,v3_normal,fewer_levels}.in`;V3 待采集(方法 B)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_303_fut_books15`
@@ -1933,7 +1933,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[分档快照流](README.md#分档快照流)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/bitget-spot/books5/{v2_normal,v3_normal,duplicate_seq}.in`、`fixtures/bitget-spot/books15/{v3_normal,fewer_levels}.in`
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_304_spot_books_topn`
@@ -2039,7 +2039,7 @@ BGT-027 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 
 - 规则:[下单:UTA V3 WS](README.md#下单uta-v3-ws)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/bitget-usdt-futures/modify-order/{ok,unregistered_code}.in`、`fixtures/bitget-spot/modify-order/ok.in`;待采集(方法 B)
 - 期望文件:同目录 `<case>.expected.jsonl`
 - 实现:`crates/venue-bitget/tests/golden.rs::bgt_315_modify_resp`
@@ -2298,7 +2298,7 @@ BGT-336 补充单元验收:签名 trading-account financial-records 查询、IN/
 
 - 规则:[下单:UTA V3 WS](README.md#下单uta-v3-ws)
 - 级别:fuzz
-- 里程碑:M3
+- 里程碑:M9
 - 目标:`fuzz_bitget_encode_roundtrip`:任意字节构造 `GwCmd`(两个产品线、全部订单类 `op`)→ `encode`;成功时帧经 `sonic-rs` 解析,请求 id、`clientOid`、价量与输入一致(BGT-075 的性质);失败时只能是 `EncodeErr`
 - 语料:BGT-064–BGT-071 的命令序列化 + 变异
 - 判定:零 panic、零单输入超时(口径见 [testing §3.3](../../docs/testing.md#33-fuzz));往返不一致按崩溃处理
@@ -2324,7 +2324,7 @@ BGT-336 补充单元验收:签名 trading-account financial-records 查询、IN/
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M9
 - 基准名:`bench_decode_bitget_books15`
 - 实现:`crates/venue-bitget/benches/md.rs::bgt_502_decode_books15`
 

@@ -1039,7 +1039,7 @@ spec: README.md
 
 - 规则:[API](README.md#api)
 - 级别:golden
-- 里程碑:M3
+- 里程碑:M9
 - 输入:`fixtures/binance-usdm/depth20/` 下的全部 `<case>.in`,经 venue-binance 解码为 `L2Snapshot{origin = TopN}` 后按序应用到一个簿
 - 期望文件:同目录各 `<case>.expected.jsonl`;每条之后簿两侧逐档等于该条期望快照,重复 `snap_id` 的条目返回 `DUPLICATE`
 - 实现:`crates/hft-book/tests/golden.rs::book_105_topn_golden`

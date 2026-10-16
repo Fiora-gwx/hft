@@ -99,7 +99,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[目录布局](README.md#目录布局)、[单元组与分组激活](README.md#单元组与分组激活)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M5
 - 前置:DEP-001 的解包目录;夹具 `hosts/` 全部清单的生成物
 - 步骤:
   1. 在 `deploy/`、`systemd/`、`polkit/`、`config-templates/` 与全部生成物中搜索正则 `/opt/hft/(current|previous)(/|"|'|\s|$)` 与 `/opt/hft/venv`
@@ -142,7 +142,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[制品从哪里来](README.md#制品从哪里来)
 - 级别:host
-- 里程碑:M3
+- 里程碑:M7
 - 环境:按需租用的 `c8g.4xlarge` 或 `c8g.8xlarge`(预建 ENI-B/ENI-C 与 EIP 已挂),Ubuntu 24.04
 - 授权:`[需授权]`(租用实例、挂网卡与 EIP 是 AWS 操作)
 - 步骤:
@@ -158,7 +158,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[主机清单](README.md#主机清单)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:夹具 `hosts/` 与 hft-core `c32`、`dev2`、`c4` 档;每行只做该行改动,运行 `cargo xtask gen-host --host <行内清单>`
 - 实现:`tools/xtask/tests/deploy_gen.rs::dep_010_manifest_failures`
 
@@ -195,7 +195,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[主机清单](README.md#主机清单)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:夹具 `hosts/` 与 hft-core 各档;运行 `cargo xtask gen-host`,取每份清单的生成物文件名集合
 - 实现:`tools/xtask/tests/deploy_gen.rs::dep_011_outputs_by_class`
 
@@ -211,7 +211,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[主机清单](README.md#主机清单)、[实现说明](README.md#实现说明)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M7
 - 前置:夹具 `tokyo-cex-1` 的生成物已提交;`c32` 档中把 `feed-md-bg` 从核 11 移到核 18,冷核由 18 改为 11
 - 步骤:
   1. 不重新生成,运行 `cargo xtask gen-host --check`
@@ -225,7 +225,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[主机清单](README.md#主机清单)、[HostProfile](README.md#hostprofile)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M7
 - 前置:夹具 `hosts/` 共 8 份清单(`tokyo-cex-1`、`tokyo-cex-1-live`、两份待命清单、`probe-c16`、`probe-c32`、`dev2-1`、`c4-1`);`SOURCE_DATE_EPOCH = 0`
 - 步骤:
   1. 打包,读 `RELEASE.json.host_expect`
@@ -271,7 +271,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[主机清单](README.md#主机清单)、[systemd 单元](README.md#systemd-单元)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:夹具清单的生成物;读 `hft-replay-verify.service` 的 `ExecStartPre=` 行
 - 实现:`tools/xtask/tests/deploy_gen.rs::dep_016_verify_flag`
 
@@ -300,7 +300,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[主机清单](README.md#主机清单)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:夹具 `dev2-1`、`c4-1` 的生成物
 - 实现:`tools/xtask/tests/deploy_gen.rs::dep_018_dev2_and_c4_layout`
 
@@ -317,7 +317,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[主机清单](README.md#主机清单)、[GRUB](README.md#grub)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`tokyo-cex-1` 改为 `[eni_b2].enabled = true`、`prod_bulk = [{eni = "b2", ip = "10.0.1.12", eip_alloc = "eipalloc-0b2"}]`;`c32` 档已预留 `eni_b2` 核 28(档不改动)
 - 实现:`tools/xtask/tests/deploy_gen.rs::dep_019_eni_b2_enable`
 
@@ -335,7 +335,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[GRUB](README.md#grub)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:夹具 `tokyo-cex-1`、hft-core `c32` 档(大页行:1 GiB 页 `n1g`、2 MiB 页 `n2m` 取该档内存表的值);生成的 `GRUB_CMDLINE_LINUX_DEFAULT` 按空格拆成参数集合
 - 实现:`tools/xtask/tests/deploy_gen.rs::dep_020_grub_c32`
 
@@ -355,7 +355,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[GRUB](README.md#grub)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:夹具 `c4-1`、`dev2-1` 与对应 hft-core 档
 - 实现:`tools/xtask/tests/deploy_gen.rs::dep_021_grub_c4_dev2`
 
@@ -371,7 +371,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[运行期调优](README.md#运行期调优)、[systemd 单元](README.md#systemd-单元)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:夹具 `tokyo-cex-1`、`c4-1`、`dev2-1` 的生成物
 - 实现:`tools/xtask/tests/deploy_units.rs::dep_030_tuning_units`
 
@@ -386,7 +386,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[运行期调优](README.md#运行期调优)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:替身根;`/proc/interrupts` 夹具含 ENI-A 2 个队列 IRQ(40、41)、ENI-B 8 个(50–57)、ENI-C 1 个(60)、另一个可迁移 IRQ 70、NVMe managed IRQ 80;`irq-plan.json` 为 `tokyo-cex-1` 的生成物;运行 `irq/hft-irq-pin.sh`
 - 实现:`deploy/tests/test_tune.py::dep_031_irq_pin`
 
@@ -404,7 +404,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[运行期调优](README.md#运行期调优)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M7
 - 前置:替身根含 `/sys/devices/virtual/workqueue/cpumask` 与两个 workqueue 的 `cpumask`(初值 `ffffffff`);hk 掩码 = `1`(核 0);替身时钟
 - 步骤:
   1. 在 t = 0 运行 `irq/hft-workqueue.sh`,推进替身时钟到 t = 6 s
@@ -417,7 +417,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[运行期调优](README.md#运行期调优)、[出口 IP](README.md#出口-ip)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:替身根;IMDS 替身的 `network/interfaces/macs/` 下 `0a:00:00:00:00:01`(`device-number = 1`,接口 `ens6`)与 `0a:00:00:00:00:02`(`device-number = 2`,接口 `ens7`);清单 `tokyo-cex-1`;运行 `net/hft-eni-attach.sh`
 - 实现:`deploy/tests/test_tune.py::dep_033_eni_attach`
 
@@ -432,7 +432,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[出口 IP](README.md#出口-ip)、[运行期调优](README.md#运行期调优)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:替身根;清单 `tokyo-cex-1`(DEP-033 的网卡映射);IMDS 替身 `local-ipv4s` 与 `ipv4-associations/` 按行;运行 `net/hft-egress-ip.sh`
 - 实现:`deploy/tests/test_tune.py::dep_034_egress_ip`
 
@@ -448,7 +448,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[运行期调优](README.md#运行期调优)、[systemd 单元](README.md#systemd-单元)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M7
 - 前置:容器;`c32` 布局的单元(调优脚本以替身代替);`hft-core@sim` 的替身二进制按 `Type=notify` 运行
 - 步骤:
   1. 让 `hft-host-tune.service` 以退出 1 失败;`systemctl start hft-core@sim`
@@ -465,7 +465,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[运行期调优](README.md#运行期调优)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:替身根;`ethtool -l` 替身报告 `ens6` 预设上限 8、`ens7` 上限 2;清单 `tokyo-cex-1`;运行 `net/hft-net-tune.sh`
 - 实现:`deploy/tests/test_tune.py::dep_036_net_tune`
 
@@ -480,7 +480,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[运行期调优](README.md#运行期调优)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:替身根;`/sys/class/net/{ens6,ens7}/napi_defer_hard_irqs` 初值 2、`gro_flush_timeout` 初值 20000;运行 `net/hft-net-tune.sh`
 - 实现:`deploy/tests/test_tune.py::dep_037_napi_zero`
 
@@ -495,7 +495,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[运行期调优](README.md#运行期调优)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:读 `deploy/sysctl/90-hft.conf`,按 `键 = 值` 解析
 - 实现:`deploy/tests/test_tune.py::dep_038_sysctl_values`
 
@@ -516,7 +516,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[运行期调优](README.md#运行期调优)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:读归档中的 `hft-host-tune` 调用的内存脚本、`udev/60-hft.rules`、`tuned/hft-latency/tuned.conf`、`chrony/chrony.conf`;替身根运行 `hft-host-tune.service` 的 `ExecStart`
 - 实现:`deploy/tests/test_tune.py::dep_039_static_config`
 
@@ -534,7 +534,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[运行期调优](README.md#运行期调优)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:替身根;`ens6` 有 16 个 TX 队列、16 个 RX 队列;发送热核 = 5–17(13 个,队列数不少于热核数);`irq-plan.json` 为 `tokyo-cex-1` 的生成物(16 队列版本);运行 `net/hft-net-tune.sh`
 - 实现:`deploy/tests/test_tune.py::dep_040_xps_rps_qdisc`
 
@@ -549,7 +549,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[实现说明](README.md#实现说明)、[运行期调优](README.md#运行期调优)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:替身根(初值与期望不同);每行对一个脚本依次:运行一次、再运行一次、在新替身根上以 `--dry-run` 运行、在"写后读回原值"的替身根上运行
 - 实现:`deploy/tests/test_tune.py::dep_041_idempotent_dry_run`
 
@@ -582,7 +582,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[运行期调优](README.md#运行期调优)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:夹具全部清单的生成物与单元文件
 - 实现:`tools/xtask/tests/deploy_units.rs::dep_043_not_done_items`
 
@@ -613,7 +613,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[出口 IP](README.md#出口-ip)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:夹具清单的生成物 `/etc/hft/egress.toml`
 - 实现:`tools/xtask/tests/deploy_gen.rs::dep_050_egress_toml`
 
@@ -719,7 +719,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[slice 与资源切分](README.md#slice-与资源切分)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:夹具 `tokyo-cex-1`、`c4-1`、`dev2-1` 的生成物
 - 实现:`tools/xtask/tests/deploy_units.rs::dep_066_system_slice_cpus`
 
@@ -1004,7 +1004,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[dev2 护栏](README.md#dev2-护栏)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:另一个夹具目录 `hosts-fallback/`(不与 `hosts/` 一起打包,DEP-013 的计数不含它)含 `batch-1`(`class = "dev2"`、`instances = []`、`formal_live = false`、`verify = true`、无 `[egress]`)、`dev2-2`(`class = "dev2"`、护栏 `dedicated`)与改为 `verify = false` 的 `dev2-1`(退路 (a) 的原主机)
 - 实现:`tools/xtask/tests/deploy_gen.rs::dep_087_fallback_manifests`
 
@@ -1020,7 +1020,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[hugepages 与 hugetlbfs](README.md#hugepages-与-hugetlbfs)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M7
 - 前置:夹具 `tokyo-cex-1`、hft-core `c32` 档;新增段 `raw-feed-okx-swap-bbo`:`segment_bytes = 64 MiB`、`hot_keep = 2`,在 hft-core 内存表同时加对应的大页行
 - 步骤:
   1. 记录生成的 2 MiB 页数 `n0`;加入新段后重新生成,记录 `n1`;运行 `cargo xtask gen-host --check`
@@ -1033,7 +1033,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[hugepages 与 hugetlbfs](README.md#hugepages-与-hugetlbfs)、[systemd 单元](README.md#systemd-单元)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:夹具 `tokyo-cex-1`、`dev2-1` 的生成物
 - 实现:`tools/xtask/tests/deploy_units.rs::dep_091_hugetlbfs_mounts`
 
@@ -1061,7 +1061,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[resctrl / CAT](README.md#resctrl--cat)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:夹具 `tokyo-cex-1`,`[resctrl].enabled` 按行
 - 实现:`tools/xtask/tests/deploy_gen.rs::dep_095_resctrl_flag`
 
@@ -1087,7 +1087,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[systemd 单元](README.md#systemd-单元)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:夹具 `tokyo-cex-1` 与 `dev2-1` 的全部 `.service` 生成物(含 drop-in 合并后)
 - 实现:`tools/xtask/tests/deploy_units.rs::dep_120_hardening`
 
@@ -1406,7 +1406,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[实现说明](README.md#实现说明)、[systemd 单元](README.md#systemd-单元)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`systemctl is-active` 替身按行返回状态;运行 `bin/hft-unit-idle <单元…>`
 - 实现:`deploy/tests/test_unit_idle.py::dep_139_unit_idle`
 
@@ -1518,7 +1518,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[systemd 单元](README.md#systemd-单元)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:夹具 `tokyo-cex-1` 的生成物
 - 实现:`tools/xtask/tests/deploy_units.rs::dep_146_probe_and_imds_order`
 
@@ -1579,7 +1579,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[身份、路径与 S3 前缀](README.md#身份路径与-s3-前缀)、[AMI 构建](README.md#ami-构建)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:两个容器分别运行 AMI provision 的建用户步骤(升级主机)与 dev2 的安装脚本;读 `getent passwd`、`id <用户>`
 - 实现:`deploy/tests/container/test_identity.py::dep_150_users_and_groups`
 
@@ -1604,7 +1604,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[身份、路径与 S3 前缀](README.md#身份路径与-s3-前缀)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:同 DEP-150;`getent group <组>` 加上以该组为主组的用户
 - 实现:`deploy/tests/container/test_identity.py::dep_151_group_members`
 
@@ -1627,7 +1627,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[身份、路径与 S3 前缀](README.md#身份路径与-s3-前缀)、[systemd 单元](README.md#systemd-单元)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M5
 - 前置:夹具 `tokyo-cex-1`、`dev2-1` 的全部单元(合并 drop-in 后);用户表的机读版本 `deploy/gen/identity.toml`
 - 步骤:
   1. 对每个单元比较 `SupplementaryGroups=` 的集合与其 `User=` 在用户表中的附加组集合
@@ -2160,7 +2160,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[验证包与 hft-verify](README.md#验证包与-hft-verify)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M6
 - 前置:夹具提交;`SOURCE_DATE_EPOCH = 0`;夹具目标清单 2 个 core 解码器目标 `decode_bbo_binance`、`decode_ack_okx`
 - 步骤:
   1. 运行两次 `deploy/release/package-verify.sh v1.2.3 <sha> dist`(第二次写 `dist2`)
@@ -2174,7 +2174,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[验证包与 hft-verify](README.md#验证包与-hft-verify)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M6
 - 前置:替身根;`/opt/hft/current-core` → `releases/v1.2.3`;`fetch-release.sh --asset verify` 的替身返回夹具验证包;`systemctl` 替身记录调用
 - 实现:`deploy/tests/test_verify_bundle.py::dep_191_install_verify`
 
@@ -2190,7 +2190,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[验证包与 hft-verify](README.md#验证包与-hft-verify)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M6
 - 前置:夹具 `tokyo-cex-1`(升级主机类)的 `hft-verify.service`/`.timer`;预算取默认
 - 实现:`tools/xtask/tests/deploy_units.rs::dep_192_verify_unit`
 
@@ -2208,7 +2208,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[验证包与 hft-verify](README.md#验证包与-hft-verify)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M6
 - 前置:容器;`hft-verify` 驱动替身启动一个子进程,子进程记录收到的信号;驱动收到 SIGTERM 后向子进程转发 SIGTERM 并在 2 s 后退出
 - 步骤:
   1. 启动单元,`systemctl stop hft-verify`
@@ -2222,7 +2222,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[验证包与 hft-verify](README.md#验证包与-hft-verify)
 - 级别:proc
-- 里程碑:M3
+- 里程碑:M6
 - 前置:容器;驱动替身尝试三种操作并记录结果
 - 步骤:
   1. 在单元内创建 `AF_INET` socket;创建 `AF_UNIX` socket;`getaddrinfo("github.com")`
@@ -2234,7 +2234,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[验证包与 hft-verify](README.md#验证包与-hft-verify)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M6
 - 前置:容器;`tokyo-cex-1` 布局;每行单独设置条件后 `systemctl start hft-verify`
 - 实现:`deploy/tests/container/test_units.py::dep_195_verify_conditions`
 
@@ -2422,7 +2422,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[发布归档与 releasectl](README.md#发布归档与-releasectl)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:DEP-003.1 产出的 `hft-v1.2.3-aarch64.tar.zst`,解包
 - 实现:`deploy/tests/test_release.py::dep_220_archive_and_manifest`
 
@@ -2442,7 +2442,7 @@ DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实
 
 - 规则:[发布归档与 releasectl](README.md#发布归档与-releasectl)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M5
 - 前置:同一夹具提交,`SOURCE_DATE_EPOCH = 1759536000`
 - 步骤:
   1. 在两个不同的临时目录各运行一次 `package-release.sh v1.2.3 <sha> dist`
@@ -2531,7 +2531,7 @@ DEP-225 子例覆盖首次激活缺失且 inactive 单元，只有安装并 relo
 
 - 规则:[发布归档与 releasectl](README.md#发布归档与-releasectl)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:同 DEP-225;每行只做该行改动
 - 实现:`deploy/tests/test_release.py::dep_226_activate_rejects`
 
@@ -2562,7 +2562,7 @@ DEP-225 子例覆盖首次激活缺失且 inactive 单元，只有安装并 relo
 
 - 规则:[发布归档与 releasectl](README.md#发布归档与-releasectl)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M5
 - 前置:替身根;`current-core` → `v1.2.3`、`previous-core` → `v1.2.2`;`current-cold` → `v1.2.3`
 - 步骤:
   1. `releasectl rollback --version v1.2.2 --group core`
@@ -2574,7 +2574,7 @@ DEP-225 子例覆盖首次激活缺失且 inactive 单元，只有安装并 relo
 
 - 规则:[发布归档与 releasectl](README.md#发布归档与-releasectl)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:替身根;记录 `/opt/hft` 的文件树哈希;`hft-core --check` 替身的退出码按行
 - 实现:`deploy/tests/test_release.py::dep_229_verify_subcommand`
 
@@ -2602,7 +2602,7 @@ DEP-225 子例覆盖首次激活缺失且 inactive 单元，只有安装并 relo
 
 - 规则:[发布归档与 releasectl](README.md#发布归档与-releasectl)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M5
 - 前置:替身根;`deployments/` 中已有 `20261004T075900Z-v1.2.3.json`(`pending`);替身时钟 `2026-10-04T08:00:00Z`;`current-core` → `v1.2.3`
 - 步骤:
   1. `releasectl record --version v1.2.3 --archive-sha256 <64 位十六进制> --acceptance-result passed`
@@ -2616,7 +2616,7 @@ DEP-225 子例覆盖首次激活缺失且 inactive 单元，只有安装并 relo
 
 - 规则:[发布归档与 releasectl](README.md#发布归档与-releasectl)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M5
 - 前置:替身根,`/opt/hft/` 下没有任何 `current-*`;归档已解包在 `/opt/hft/staging/hft-v1.2.3-aarch64/`
 - 步骤:
   1. 运行 `/opt/hft/staging/hft-v1.2.3-aarch64/deploy/release/releasectl.sh install …`,再 `activate --version v1.2.3 --group core`
@@ -2771,7 +2771,7 @@ DEP-225 子例覆盖首次激活缺失且 inactive 单元，只有安装并 relo
 
 - 规则:[HostProfile](README.md#hostprofile)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:夹具 `tokyo-cex-1` 生成的 `deploy/tuning/tokyo-cex-1.toml`;hft-rt 的 ENA PHC 读取上限取 125 次/s
 - 实现:`tools/xtask/tests/deploy_profile.rs::dep_245_upgrade_profile`
 
@@ -2800,7 +2800,7 @@ DEP-225 子例覆盖首次激活缺失且 inactive 单元，只有安装并 relo
 
 - 规则:[HostProfile](README.md#hostprofile)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:夹具 `c4-1` 生成的期望剖面
 - 实现:`tools/xtask/tests/deploy_profile.rs::dep_246_c4_profile`
 
@@ -2832,7 +2832,7 @@ DEP-225 子例覆盖首次激活缺失且 inactive 单元，只有安装并 relo
 
 - 规则:[HostProfile](README.md#hostprofile)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`tokyo-cex-1` 的 GRUB 片段(DEP-020 的参数集合);`/proc/cmdline` 按行;判定函数取自期望剖面的生成实现
 - 实现:`tools/xtask/tests/deploy_profile.rs::dep_248_pending_reboot`
 
@@ -3055,7 +3055,7 @@ DEP-225 子例覆盖首次激活缺失且 inactive 单元，只有安装并 relo
 
 - 规则:[目录布局](README.md#目录布局)、[实现说明](README.md#实现说明)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:仓库中的 `deploy/hosts/test-*.toml` 与已提交的生成物
 - 步骤:
   1. 列出测试清单的 `class`

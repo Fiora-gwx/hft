@@ -120,7 +120,7 @@ spec: README.md
 
 - 规则:[1. 金样](README.md#1-金样)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:同 TK-001(2 个用例);测试文件写一行 `golden_suite!(StubVenue, "stub-venue")`
 - 步骤:
   1. `cargo test -- --list`
@@ -132,7 +132,7 @@ spec: README.md
 
 - 规则:[1. 金样](README.md#1-金样)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:仓库 `fixtures/`(金样由各 venue 维护,覆盖要求归 [fixtures](../../fixtures/README.md))
 - 实现:`crates/hft-testkit/tests/golden.rs::tk_008_core_suites_present`
 
@@ -1236,7 +1236,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M9
 - 基准名:`testkit/golden_all`
 - 实现:`crates/hft-testkit/benches/golden.rs::tk_093_golden_all`
 

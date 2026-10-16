@@ -3051,7 +3051,7 @@ spec: README.md
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`cargo xtask new-strategy probe-x --kind-id 0xFF20` 在临时副本中生成;每行一种生成选项
 - 实现:`tools/xtask/tests/new_strategy.rs::sdk_206_template_budget_entries`
 

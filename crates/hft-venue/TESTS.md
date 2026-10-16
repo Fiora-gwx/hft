@@ -97,7 +97,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§3b](README.md#3b-快照获取snap-fetch)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数
 - 实现:`crates/hft-venue/tests/layout.rs::ven_002_snap_req_layout`
 
@@ -111,7 +111,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§4a](README.md#4a-账户查询保证金轮询与配置核验)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数
 - 实现:`crates/hft-venue/tests/layout.rs::ven_003_acct_req_layout`
 
@@ -127,7 +127,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§6](README.md#6-exch-id--slot-私有表idtable)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:无参数
 - 实现:`crates/hft-venue/tests/layout.rs::ven_004_id_entry_layout`
 
@@ -157,7 +157,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[配置项](README.md#配置项)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:行 `{venue: V7, rotate_margin_s: 3600}`
 - 实现:`crates/hft-venue/tests/layout.rs::ven_006_ecf1_conn_row`
 
@@ -171,7 +171,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§3b](README.md#3b-快照获取snap-fetch)、[§4a](README.md#4a-账户查询保证金轮询与配置核验)、[运行时入口](README.md#运行时入口)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:按各行构造记录头,经本 crate 的写函数写入字节环再由读函数读回
 - 实现:`crates/hft-venue/tests/codes.rs::ven_007_inproc_headers`
 
@@ -206,7 +206,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[配置项](README.md#配置项)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`GwCfg::default()`、`AcctCfg::default()`、`SnapCfg::default()`,不设任何键
 - 实现:`crates/hft-venue/tests/config.rs::ven_009_warm_defaults`
 
@@ -406,7 +406,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§1](README.md#1-线程与环由-hft-core-装配)、[§2](README.md#2-feedruntimepoll_once-的固定顺序)
 - 级别:prop
-- 里程碑:M3
+- 里程碑:M9
 - 性质:同一脚本(订阅命令 + 各连接上的帧 + 断开 + 时钟推进)分别喂给 `Bbo + Md` 两个任务与单个 `All` 任务后,两种形态的 bbo 环元素序列逐字节相同,md 环与 bulk 环的元素序列逐字节相同
 - 生成:3 个 inst;每 inst 的 `streams` 从 {BBO, BOOK, TRADE, MARK, FUNDING} 的子集抽取;0–400 帧,类别随机、`u`/序号单调或重复(30%)、每条连接 0–2 次 `eof`;`bbo_frames_per_poll` 取 1–8,`frames_per_poll` 取 1–64;各连接帧量保证每帧在两种形态下都在同一 `now_tsc` 前被读到
 - 参考:逐元素比较两种形态的输出
@@ -433,7 +433,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§1](README.md#1-线程与环由-hft-core-装配)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`F0`,`routes = Bbo`,BBO 连接 0、1 已 Up 且订阅了 S1
 - 步骤:
   1. 投递 `Resync{S1}`、`Rotate{conn: 9}`,`poll_once`
@@ -493,7 +493,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[配置项](README.md#配置项)、[§3c](README.md#3c-分档快照depthtopn)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`F0`;`StubProto` 的 DepthTopN 路由档位如列;对 S1 订阅 `BOOK`
 - 实现:`crates/hft-venue/tests/topn.rs::ven_028_topn_level_pick`
 
@@ -960,7 +960,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§1](README.md#1-线程与环由-hft-core-装配)、[§3c](README.md#3c-分档快照depthtopn)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`F0`,`routes = Md`;md-bulk 环剩余空间小于一片 64 档 `L2Snapshot` 的记录长度;深度连接有 2 帧 `D|S1|…`
 - 步骤:
   1. `poll_once`
@@ -1162,7 +1162,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§3](README.md#3-去重断裂与重同步)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`F0`,`routes = Md`;S1 订阅 `MARK`,`last_fwd[Mark] = 1_000`(ms 转 ns 后为 10⁹)
 - 实现:`crates/hft-venue/tests/seq.rs::ven_101_by_time`
 
@@ -1465,7 +1465,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§3b](README.md#3b-快照获取snap-fetch)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`S0`,`snap.parallel = 2`;`StubCfg{bbo_batch: 1}`;snapreq-bbo 环中 6 条 `SnapReq{Bbo}`(S1、S2、S3、P001、P002、P003),`req_id` 1–6
 - 步骤:
   1. `poll_once`
@@ -1490,7 +1490,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§3b](README.md#3b-快照获取snap-fetch)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`S0`,`snap.parallel = 2`;`StubCfg{bbo_batch: 4}`;`SNAP_BBO_BATCH_MAX = 32`;FIFO 中 6 条连续的 `SnapReq{Bbo}`
 - 步骤:
   1. `poll_once` 直到全部响应
@@ -1545,7 +1545,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§3b](README.md#3b-快照获取snap-fetch)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`S0`,snap 环容量 64 KiB(上限 16 384 B);每行响应体长度如列(头与尾部合计 128 B)
 - 实现:`crates/hft-venue/tests/snap_fetch.rs::ven_156_too_large`
 
@@ -1625,7 +1625,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§3b](README.md#3b-快照获取snap-fetch)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`S0`,`snap.parallel = 2`;`StubCfg{bbo_batch: 64}`;`SNAP_BBO_BATCH_MAX = 32`;FIFO 中连续的 `SnapReq{Bbo}` 条数如列
 - 实现:`crates/hft-venue/tests/snap_fetch.rs::ven_162_batch_max`
 
@@ -1639,7 +1639,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§3b](README.md#3b-快照获取snap-fetch)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`S0`,`snap.parallel = 2`;`StubCfg{bbo_batch: 64}`;`SNAP_BBO_BATCH_MAX = 32`;FIFO 中 5 条连续的 `SnapReq{Bbo}`(S1、S2、S3、S1、S2)
 - 实现:`crates/hft-venue/tests/snap.rs::ven_163_bbo_batch_const`
 
@@ -1653,7 +1653,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§3c](README.md#3c-分档快照depthtopn)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`F0`,`routes = Md`,`feed.depth = topn`,`feed.topn_levels = 5`
 - 步骤:
   1. `Subscribe{S1, BOOK}`,完成建连并回 `ACK`,`poll_once`
@@ -1667,7 +1667,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§3c](README.md#3c-分档快照depthtopn)、[§3](README.md#3-去重断裂与重同步)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`F0`,`routes = Md`;S1 已 `Live`,`last_fwd[深度] = 10`;按行顺序喂入
 - 实现:`crates/hft-venue/tests/topn.rs::ven_171_snapshot_dedup`
 
@@ -1682,7 +1682,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§3c](README.md#3c-分档快照depthtopn)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`F0`,`routes = Md`;S1、S2 在连接 8 上 `Live`
 - 步骤:
   1. `eof(8)`,`poll_once`
@@ -1696,7 +1696,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§3c](README.md#3c-分档快照depthtopn)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`F0`,`routes = Md`;S1 `Live`,`last_fwd[深度] = 40`
 - 步骤:
   1. 投递 `Resync{S1}`,`poll_once`
@@ -1710,7 +1710,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§3c](README.md#3c-分档快照depthtopn)、[§2](README.md#2-feedruntimepoll_once-的固定顺序)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`F0`,`routes = Md`;S1 `Live`
 - 步骤:
   1. 推坏帧 `D|S1|50|5|x`,`poll_once`
@@ -1724,7 +1724,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§3c](README.md#3c-分档快照depthtopn)
 - 级别:prop
-- 里程碑:M3
+- 里程碑:M9
 - 性质:`feed.depth = topn` 时,任意深度帧、断连、`Resync` 命令与订阅变化的序列之后:snapreq 环中 `kind = L2` 的请求数为 0;md 环中 `L2Batch` 为 0;`CallLog` 中 `snapshot_request`、`decode_snapshot`、`align_first` 调用数为 0
 - 生成:1–5 个 inst;0–500 步,每步从 {深度帧(序号随机前进或重复)、坏帧、`eof`、`Resync{inst}`、`Subscribe`/`Unsubscribe`} 抽取
 - 参考:计数断言
@@ -1735,7 +1735,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§3c](README.md#3c-分档快照depthtopn)、[配置项](README.md#配置项)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`F0`,`routes = Md`,`feed.snapshot_part_levels = 64`;每行一帧档数如列(买卖合计)
 - 实现:`crates/hft-venue/tests/topn.rs::ven_176_snapshot_parts`
 
@@ -2435,7 +2435,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[出环](README.md#出环outmsg--gwcmd)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`G0`;`SetEpoch{epoch: 9, accept_prev: true, prev_epoch: 8}` 已处理;OMS 槽数 2048;`StubCfg{query_by_cid: false}`
 - 实现:`crates/hft-venue/tests/gw_maint.rs::ven_238_mirror_restore`
 
@@ -2451,7 +2451,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§4](README.md#4-gwruntimepoll_once-的循环结构)、[配置项](README.md#配置项)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`G0`;A1 primary 112;每行空闲运行 5 ms
 - 实现:`crates/hft-venue/tests/gw_loop.rs::ven_239_warm`
 
@@ -2585,7 +2585,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 
 - 规则:[§4](README.md#4-gwruntimepoll_once-的循环结构)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`G0`;A1 的 3 条 Place(槽 40、41、42)经 `encode_batch` 合成 1 帧已发出;`StubProto` 对批量响应逐条产出 `Ack{40}`、`OrderEvent{what: OutcomeUnknown, slot: 41, reject_code: 50004}`、`Reject{42}`,`ReportOutcome.outcome_unknown = None`
 - 步骤:
   1. 注入该批量响应
@@ -2811,7 +2811,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 
 - 规则:[§4a](README.md#4a-账户查询保证金轮询与配置核验)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`C0`,`ACCT_RAW_CHUNK = 16384`;单请求 Margin 序列,响应 200,体长如列
 - 实现:`crates/hft-venue/tests/acct_fetch.rs::ven_265_chunk_boundary`
 
@@ -3050,7 +3050,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 
 - 规则:[§6](README.md#6-exch-id--slot-私有表idtable)
 - 级别:prop
-- 里程碑:M3
+- 里程碑:M9
 - 性质:插入、查找、置终态、淘汰的任意序列之后,每次查找结果与参考模型相同;后移删除后其余条目全部可查;负载 0.5 时最长探测长度 ≤ 32
 - 生成:10⁶ 次操作,键为随机 1–36 B 字节串,时钟随机前进 0–10 s
 - 参考:`HashMap<Vec<u8>, (u16, u32, u32, Option<Tsc>)>` 加按终态时刻排序的队列
@@ -3061,7 +3061,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 
 - 规则:[§6](README.md#6-exch-id--slot-私有表idtable)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`G0`,`gw.unmatched_hold_ms = 5000`;新建 `GwRuntime`(id 表为空),`MirrorRestore` 只恢复了非终态槽
 - 步骤:
   1. `t = 0` 收到只带 `EX-OLD` 的 `FeeOnly`;`poll_once` 于 `5 × 10⁹ + 1`
@@ -3073,7 +3073,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 
 - 规则:[§6a](README.md#6a-去重环的重启重建)
 - 级别:integ
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`G0`,`gw.dedup_reseed_ms = 900000`;第一个 `GwRuntime` 已产出 A1 的一条 `X|Adl|…`(`ExternalFill`,`tid = 0`,按 `(inst, exch_order_id, fill_seq)` 去重)与一条 `FS|S1|<settle>|…`;关闭
 - 步骤:
   1. 用同一 raw-gw journal 新建 `GwRuntime`(`now` = 上述记录之后 10 min)
@@ -3086,7 +3086,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 
 - 规则:[§6a](README.md#6a-去重环的重启重建)、[配置项](README.md#配置项)
 - 级别:table
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`G0`,`gw.dedup_reseed_ms = 900000`;`new()` 时 `now = t_n`;raw-gw 中有一条成交推送记录,其记录头 `tsc` 如列;重启后交易所重推同一笔
 - 实现:`crates/hft-venue/tests/reseed.rs::ven_301_window_boundary`
 
@@ -3099,7 +3099,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 
 - 规则:[§6a](README.md#6a-去重环的重启重建)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`G0`;raw-gw 尾部含 Ack、Fill、余额推送、保证金推送、资金费推送共 200 条
 - 步骤:
   1. `GwRuntime::new`
@@ -3112,7 +3112,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 
 - 规则:[§6a](README.md#6a-去重环的重启重建)、[产生与消费的事件](README.md#产生与消费的事件)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`G0`;raw-gw 中连接 112 的 `Connect` 记录体 `[A1, Order]`、连接 140 的 `[A2, Order]`;112 上有一笔 `tid = 9001` 的成交
 - 步骤:
   1. 重建后,A2 的连接上到达 `tid = 9001` 的成交(同 inst)
@@ -3124,7 +3124,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 
 - 规则:[§6a](README.md#6a-去重环的重启重建)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M5
 - 前置:`G0`;raw-gw 中 acct-fetch 连接 80 上有 `RestResponse` 记录
 - 步骤:
   1. `GwRuntime::new`
@@ -3150,7 +3150,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 
 - 规则:[§7](README.md#7-会话建立warm-线程-conn-buildersessiondriver)
 - 级别:unit
-- 里程碑:M3
+- 里程碑:M7
 - 前置:`SessionDriver`;`Connector::napi_ifindex` 对该连接返回与计划网卡不同的 ifindex
 - 步骤:
   1. 驱动到 `Open` 与登录成功
@@ -3241,7 +3241,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 
 - 规则:[§3c](README.md#3c-分档快照depthtopn)、[§2](README.md#2-feedruntimepoll_once-的固定顺序)
 - 级别:integ
-- 里程碑:M3
+- 里程碑:M9
 - 前置:`F0`,`routes = Md`;S1、S2 订阅 `BOOK`;随机种子固定
 - 步骤:
   1. 1000 次:随机时刻 `eof`/`rst` 深度连接、随机延迟 0–2 s 后交接替补、随机 0–5 帧旧序号快照与新快照交错
@@ -3299,7 +3299,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M9
 - 基准名:`venue_feed_topn_path`
 - 实现:`crates/hft-venue/benches/feed.rs::ven_352_feed_topn_path`
 
@@ -3427,7 +3427,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)
 - 级别:bench
-- 里程碑:M3
+- 里程碑:M9
 - 基准名:`venue_idle_loop`
 - 实现:`crates/hft-venue/benches/feed.rs::ven_368_idle_loop`
 
@@ -3513,7 +3513,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 
 - 规则:[§3c](README.md#3c-分档快照depthtopn)、[开发备忘](README.md#开发备忘)
 - 级别:host
-- 里程碑:M3
+- 里程碑:M9
 - 环境:dev2,主网公共行情,`feed.raw.md = on`
 - 授权:无
 - 步骤:
