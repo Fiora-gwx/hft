@@ -1,10 +1,14 @@
 # 双交易所 demo 参数
 
-使用 [hft-core 双 venue 模板](../../apps/hft-core/config/dual-testnet.toml)，Binance USDM 与 Bitget UTA USDT Futures 的 BTCUSDT 分别登记在 refdata。该示例只绑定非正式账户 `demo` 与实例 `demo-spread`；实例 kind_id 为 3。构建使用 registry 的全部 features，先检查 `hft-core --version` 和导出的 schema。
+使用 [hft-core 双 venue 模板](../../apps/hft-core/config/dual-testnet.toml)，refdata 第 0 腿为 `binance-usdm:ETHUSDT`（USDⓈ-M 永续，VenueId 1），第 1 腿为 `bitget-uta-spot:ETHUSDT`（SPOT，VenueId 11），同 base/USDT。只开空永续、多现货，卖出现货仅关闭所持非 baseline 库存；不配置借币或自动借币。构建使用 registry 的全部 features，先检查 `hft-core --version` 和导出的 schema。
 
-[参数示例](strategy.toml) 显式启用 cross-taker，单腿每笔上限 200 USDT、持仓上限 400 USDT；RiskParams 应独立约束相同或更小的限额。实际 tick、lot 与最低名义须从 demo exchange info 确认；若最小可交易订单超过 cap，应保持禁用并重新评估配置。该值只是可审阅的 demo 配置，不是收益假设。
+[价差参数](strategy.toml) 绑定非正式账户 `demo`、实例 `demo-spread`（kind_id 3、schema v2），单腿每笔上限 25 USDT、持仓上限 50 USDT，`close_edge = 0`。[资金费参数](carry.toml) 绑定同一账户、实例 `demo-carry`（kind_id 1、schema v2），每腿上限 25 USDT，实际永续杠杆上限 1 倍，预期持有期基差成本暂取 10 bp。两份参数是互斥示例，一个账户同一时刻只能绑定一个实例；切换前 Drain、核对平仓并重新生成账户绑定。要同时运行必须使用独立交易所子账户与独立绑定。
 
-以 CI 制品运行 `hft-cfg build --kind strategy --schemas schemas --refdata refdata.bin --in strategy.toml --out params.spb1`。将输出文件直接用于 hft-core 的 blobs.strategy_params，并填写其 SHA-256。启动默认 Shadow，启用参数不绕过模式或账户闸门。资金费策略使用集成分支 registry 已登记的实现和导出 schema；不要在 app 中补算法或硬编码其 kind。
+RiskParams 应独立约束相同或更小的限额。实际 tick、lot、最低名义、手续费及现货可用余额须从 demo 账户/交易规则确认；若最小可交易订单超过 cap，应保持禁用并重新评估配置。参数只是待标定的 demo 假设，不能为了促成交易放宽收益阈值。现货基准库存由账户快照/分配流程确定，不用于开反向仓。
+
+选币证据为 2026-10-16 09:22:57 UTC 收到的 Bitget demo `spot / ETHUSDT / books1` 快照：bid 2453.84 × 1000 ETH，ask 2454.14 × 3010 ETH；来源为[官方 demo WebSocket](https://www.bitget.com/docs/uta/demo-trading/websocket) 的 `wss://wspap.bitget.com/v3/ws/public`。该样本只证明当时有双边报价，不证明持续流动性或账户下单权限。启动前重查新鲜深度、交易规则和 spot 账户能力；新形态的真实下单验收仍待执行，已接受的 M3-lite 旧形态运行不能替代它。
+
+以 CI 制品运行 `hft-cfg build --kind strategy --schemas schemas --refdata refdata.bin --in strategy.toml --out params.spb1`；选择资金费示例时输入为 `carry.toml`。将输出文件直接用于 hft-core 的 blobs.strategy_params，并填写其 SHA-256。启动默认 Shadow，启用参数不绕过模式或账户闸门。两个策略的固定产品形态还会在 registry 加载与 SetParams 时检查。
 
 
 构建与安装使用 `release-aarch64.yml` 的 `workflow_dispatch`，选择经批准且 CI 通过的 SHA、唯一 `dev_n`，设置 `artifact_only = true`；本轮专用主机只接受合并后 main 制品。下载该运行的 `release-dist`，在主机上核对 `.sha256`；`RELEASE.json` 记录提交、CI 证据、编译 CPU 包络、schema 和逐文件摘要。安装器不编译；CPU 参数与包络归 [构建目标](../../docs/development.md#目标-cpu)，主机预检必须通过，不能绕过不匹配。

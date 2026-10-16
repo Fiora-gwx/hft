@@ -484,6 +484,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 ### CORE-045 `[sim]` 只属于 `sim` 实例,`endpoint_override` 只属于测试网配置
 
+可执行子集 `tests/config.rs::core_045_rejects_live_accounts_in_paper_and_unbuilt_venues` 同时解析单 venue 与双 venue 测试网模板，检查每项协议/VenueId 能由当前构建注册；双 venue 使用永续与现货。
+
 - 规则:[实例角色(prod 与 sim)](README.md#实例角色prod-与-sim)、[配置文件字段](README.md#配置文件字段)
 - 级别:table
 - 里程碑:M3
