@@ -410,6 +410,12 @@ impl Risk {
         chain::commit(&mut self.s, a, now);
     }
 
+    /// Earliest engine_ns allowed by the current rate budgets and exchange backoff.
+    /// O(1), read-only; callers must re-evaluate on wake because another order can spend tokens.
+    pub fn rate_ready_at(&self, it: &IntentView, now: &Now) -> i64 {
+        chain::rate_ready_at(&self.s, it, now)
+    }
+
     /// `mode.apply` with the risk side of `ModeView` (`naked_cleared`, `recon_resumable`,
     /// `daily_loss_resumable`, `lev_bad`) answered by this `Risk`; `ext` answers the rest.
     pub fn apply(

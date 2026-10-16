@@ -2097,10 +2097,12 @@ fn smoke<D: Driver<S>, S: StrategySet>(
     Ok(match out {
         crate::intents::PipeOut::Placed(_) => ok(),
         // control-plane: arg = the lowest set `RejectBits` bit.
-        crate::intents::PipeOut::Rejected(b) if b.0 != 0 => res_d(
-            status::REJECTED,
-            detail::pack(detail::SMOKE_RISK_REJECT, b.0.trailing_zeros() as u16),
-        ),
+        crate::intents::PipeOut::Rejected(b) | crate::intents::PipeOut::RateLimited(b, _) if b.0 != 0 => {
+            res_d(
+                status::REJECTED,
+                detail::pack(detail::SMOKE_RISK_REJECT, b.0.trailing_zeros() as u16),
+            )
+        }
         _ => res(status::REJECTED, detail::SMOKE_RISK_REJECT),
     })
 }

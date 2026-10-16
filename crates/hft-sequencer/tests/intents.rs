@@ -950,7 +950,7 @@ fn seq_360_oms_hooks() {
         &tr[input_start..input_end]
     );
 
-    // .2 / .3 the second leg refused with RATE_BACKOFF → retry_at = backoff end; with RATE → 0.
+    // .2 / .3 both rate refusals carry the earliest admissible retry time.
     for backoff in [true, false] {
         reset_script();
         let mut b = b0();
@@ -1010,7 +1010,7 @@ fn seq_360_oms_hooks() {
                 RejectBits::RATE.0,
                 ".3 {second:?}"
             );
-            assert_eq!(gated.last().map(|g| g.b), Some(0), ".3");
+            assert_eq!(gated.last().map(|g| g.b), Some(h.now() + 100 * MS), ".3");
         }
     }
 

@@ -132,7 +132,9 @@ fn seq_056_due_timers_per_round() {
         .collect();
     assert_eq!(tm, (1..=16).collect::<Vec<u32>>());
     assert!(inp.iter().any(|r| r.kind == EventKind::CONTROL_CMD));
-    assert_eq!(len(&mut h, RingId::Rep(0)), 1);
+    assert_eq!(len(&mut h, RingId::Rep(0)), 0);
+    let p_rep = inp.iter().position(|r| r.kind == EventKind::CONN_STATE).unwrap();
+    assert!(inp[..p_rep].iter().filter(|r| r.kind == EventKind::TIMER).count() <= 2);
     let m = h.mark();
     h.step();
     let inp = inputs_since(&h, m);
@@ -144,14 +146,25 @@ fn seq_056_due_timers_per_round() {
         .map(|t| t.timer_id)
         .collect();
     assert_eq!(tm, vec![17, 18, 19, 20]);
-    let p_last_timer = inp
-        .iter()
-        .rposition(|r| {
-            r.kind == EventKind::TIMER && r.read::<hft_event::Timer>().is_some_and(|t| t.owner >= 16)
-        })
-        .unwrap();
-    let p_rep = inp.iter().position(|r| r.kind == EventKind::CONN_STATE).unwrap();
-    assert!(p_rep > p_last_timer);
+}
+
+#[test]
+fn seq_056_timer_time_slice_reaches_market_queues_with_overdue_backlog() {
+    let mut h = steady();
+    let at = h.now() + MS;
+    timers(&mut h, 40, at);
+    h.at(at);
+    let slice = u64::from(h.s.engine().sp.md_round_ns);
+    h.io().tsc_per_take = slice;
+    h.quote(A1, "50000", "50004");
+    h.push(RingId::Md(0), &alive(A, at));
+    let m = h.mark();
+    h.step();
+    let inp = inputs_since(&h, m);
+    assert_eq!(inp.iter().filter(|r| r.kind == EventKind::TIMER).count(), 1);
+    assert_eq!(len(&mut h, RingId::Bbo(0)), 0);
+    assert_eq!(len(&mut h, RingId::Md(0)), 0);
+    assert!(h.s.engine().heap.len() >= 39);
 }
 
 #[test]

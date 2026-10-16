@@ -911,7 +911,7 @@ fn seq_397_rejected_force_backoff_replays_from_both_sides() {
     assert_eq!(cell.gated_bits, hft_types::RejectBits::RATE);
     assert!(cell.wake_at.0 > h.now());
     assert_eq!(cell.fix.first_tsc, hft_types::Tsc(0));
-    // The initial position consumed the sole venue token; the next wake is still rate-gated.
+    // The initial position consumed the sole venue token; no generic 500 ms retry is emitted.
     tick(&mut h, 500);
     h.keyframe();
     let cell = h.s.engine().exec.cell(AC1, GT1).unwrap();
@@ -921,9 +921,9 @@ fn seq_397_rejected_force_backoff_replays_from_both_sides() {
         .into_iter()
         .filter(|d| d.account == AC1 && d.inst == B1 && d.reject & hft_types::RejectBits::RATE.0 != 0)
         .count();
-    assert!(
-        rate_rejects >= 2,
-        "initial force and wake retry must both reach the rate gate"
+    assert_eq!(
+        rate_rejects, 1,
+        "remain quiet until the venue token is replenished"
     );
     for snapshot in [before, during] {
         let log = hft_sequencer::driver::replay::Log::from_segments(&h.j().segments);

@@ -16,11 +16,13 @@ fn tk_089_counting_alloc() {
     // TK-089.1: nothing in the scope.
     let s = CountingAlloc::scope();
     assert_eq!(s.allocs(), 0, "TK-089.1");
+    assert_eq!(s.bytes(), 0);
 
     // TK-089.2: one Vec::with_capacity(8).
     let s = CountingAlloc::scope();
     let v: Vec<u64> = black_box(Vec::with_capacity(8));
     assert_eq!(s.allocs(), 1, "TK-089.2");
+    assert_eq!(s.bytes(), 64);
     drop(v);
 
     // TK-089.3: the 9th push into a capacity-8 Vec reallocates once.
@@ -32,6 +34,7 @@ fn tk_089_counting_alloc() {
     v.push(8);
     black_box(&v);
     assert_eq!(s.allocs(), 1, "TK-089.3");
+    assert_eq!(s.bytes(), (v.capacity() * size_of::<u64>()) as u64);
 
     // TK-089.4: another thread allocates 10 times. The thread is spawned before the scope and
     // released through an atomic flag so no allocation of the spawn falls inside the scope.
@@ -54,12 +57,15 @@ fn tk_089_counting_alloc() {
         std::hint::spin_loop();
     }
     let n = s.allocs();
+    let bytes = s.bytes();
     h.join().expect("allocating thread");
     assert_eq!(n, 0, "TK-089.4");
+    assert_eq!(bytes, 0);
 
     // TK-089.5: dropping a Vec is not counted.
     let v: Vec<u64> = black_box(vec![1, 2, 3]);
     let s = CountingAlloc::scope();
     drop(black_box(v));
     assert_eq!(s.allocs(), 0, "TK-089.5");
+    assert_eq!(s.bytes(), 0);
 }

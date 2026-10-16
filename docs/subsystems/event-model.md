@@ -226,3 +226,5 @@ Simultaneous 的两份 OrderDecision 共用 trigger_seq;整对出环容量失败
 
 
 网关诊断经 `RepMsg::Note` 进入 live driver，按 `Note.source = Venue` 记录为 Meta；分类归 [hft-event](../../crates/hft-event/README.md#note-来源与码登记表)，有界事件名与频率归 [hft-venue](../../crates/hft-venue/README.md)。
+
+到期 Timer 的批次时间片、输入让位和原子快照工作区复用归 [sequencer 主循环](../../crates/hft-sequencer/README.md#主循环step);重试截止来自风控令牌预算,经 Timer Input 记录后执行。

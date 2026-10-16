@@ -163,7 +163,7 @@ pub struct ExecOrder {
                                   //   hedge_fix_cmd、自动有界平仓为 Manual
     pub hedge_cap_qty: Qty,       // Hedge 类订单的数量上限(见"对冲量上限"),sequencer 填进 IntentView;其余为 0
 }
-pub enum PlaceResult { Placed(OrderRef), Rejected(RejectBits), Shadowed }
+pub enum PlaceResult { Placed(OrderRef), Rejected(RejectBits), RateLimited { bits: RejectBits, retry_at: Tsc }, Shadowed }
 // 目标拒绝原因用 SDK 的 TargetReject(本 crate 定义各值的判定,见"目标的接受与替换");Stuck/Broken 原因用 SDK 的 StuckReason/BrokenReason;
 // 线上码与 ExecDecision.detail 的打包见"ExecDecision.detail 打包与子码"。
 ```
@@ -222,7 +222,7 @@ pub enum PlaceResult { Placed(OrderRef), Rejected(RejectBits), Shadowed }
 | `external_deadline_ms` | u32 | 5 000(待标定) | 外来成交后等待策略处理的时长 |
 | `gate_naked_alarm_ms` | u32 | 300 000 | 闸门滞留与自动平仓等待的告警阈值:`Note{ExecGateHeldNaked}`(P0,见"人工保持与恢复期抑制") |
 | `stuck_after_ms` | u32 | 2 000 | 同一原因持续不能推进多久报 `Stuck` |
-| `gated_backoff_ms` | u32 | 500 | 门控拒绝后同一 cell 再次尝试的最小间隔 |
+| `gated_backoff_ms` | u32 | 500 | 一般门控拒绝后同一 cell 再次尝试的最小间隔;`RateLimited` 按风控给出的未来 `retry_at` 精确登记 Wake,期间触摸不重试,已有修复截止仍先到期 |
 | `max_slice_fails` | u8 | 3 | 连续执行失败(交易所拒单)→ `Stuck{SliceFails}` |
 | `max_nofill` | u8 | 5 | 连续 IOC 零成交 → `Stuck{NoLiquidity}` |
 | `urgent_cooldown_ms` | u32 | 100 | `Urgent` 时切片间隔取 min(参数, 此值) |
@@ -670,7 +670,7 @@ Broken 的 (account, group) 有三条出路,优先级从高到低:人工 `HedgeF
 
 ### 门控拒绝与退避
 
-- **门控**(不计执行失败):风控 `RejectBits`(`HEDGE_LIMIT` 除外,见对冲量上限;`LINK_STALE`/`LINK_FUNDS` 见 PairOnFill 第 7 条;引擎单的 `PX_BAND`/`NOTIONAL_*` 除外,见"限价与单笔名义"第 5 条)、模式门拒绝、OMS 本地发送失败中不计次的那几类(`KillBlocked`、`RateLimited`、`NoConn`、`RingFull`;分类唯一定义在 [hft-oms SendReport 处理](../hft-oms/README.md#sendreport-处理))。→ `gated_bits`、`wake_at = now + gated_backoff_ms`;连续门控 ≥ `stuck_after_ms` → `Stuck{Gated(bits)}`。每个 cell 每 `gated_backoff_ms` 至多产生一条被拒的意图,所以门控期间 journal 里的 `OrderDecision{reject ≠ 0}` 有界。自动有界平仓同样按本条退避重试,但不进 `Stuck`,它的失败条件只看"Broken 处置"的结束表。
+- **门控**(不计执行失败):风控 `RejectBits`(`HEDGE_LIMIT` 除外,见对冲量上限;`LINK_STALE`/`LINK_FUNDS` 见 PairOnFill 第 7 条;引擎单的 `PX_BAND`/`NOTIONAL_*` 除外,见"限价与单笔名义"第 5 条)、模式门拒绝、OMS 本地发送失败中不计次的那几类(`KillBlocked`、`RateLimited`、`NoConn`、`RingFull`;分类唯一定义在 [hft-oms SendReport 处理](../hft-oms/README.md#sendreport-处理))。→ `gated_bits`、`wake_at = now + gated_backoff_ms`;连续门控 ≥ `stuck_after_ms` → `Stuck{Gated(bits)}`。一般门控每个 cell 每 `gated_backoff_ms` 至多产生一条被拒意图。`RateLimited{retry_at}` 改按最早可用时刻登记一次 Wake,未获准的尝试不新增切片/修复 cooldown,接受后恢复正常 cooldown;已有修复窗口的截止仍先到期。自动有界平仓同样按本条退避重试,但不进 `Stuck`,它的失败条件只看"Broken 处置"的结束表。
 - **执行失败**:交易所 `Reject`、本地发送失败 `EncodeError`、引擎单的 `RiskReject` → `fail_streak += 1`,≥ `max_slice_fails` → `Stuck{SliceFails}` + `Note{ExecStuck}`(P1),直到目标被替换或清除(L3 的每一步重新设定引擎目标,即替换)。
 - **零成交**:IOC 终态且成交为 0 → `nofill_streak += 1`,≥ `max_nofill` → `Stuck{NoLiquidity}`,`stuck_after_ms` 后再试。任何成交清零两个计数。
 - 有效模式变化、`CapCleared`、`venue_ready` 恢复(经 `on_mode`/`on_risk`)→ 立即重置 `wake_at` 并标记待推进。

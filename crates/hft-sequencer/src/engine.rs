@@ -204,6 +204,9 @@ pub struct Engine {
     pub drain: DrainState,
     /// `SnapshotNow` applied, snapshot not yet written.
     pub snapshot_requested: bool,
+    /// Reused startup allocations: live snapshots must not fault/lock fresh large mappings.
+    pub(crate) snapshot_writer: hft_strategy_sdk::SnapshotWriter,
+    pub(crate) strategy_snapshot_writer: hft_strategy_sdk::SnapshotWriter,
     /// Bbo dropped by conflation since the last report (fed by the live driver through Inputs).
     pub conflated: u64,
     /// `resolve_broken` scan cursor: (account, cursor) while not finished.
@@ -520,6 +523,10 @@ impl Engine {
             cmd,
             drain: DrainState::default(),
             snapshot_requested: false,
+            snapshot_writer: hft_strategy_sdk::SnapshotWriter::new(64 << 20),
+            strategy_snapshot_writer: hft_strategy_sdk::SnapshotWriter::new(
+                crate::snapshot::STRATEGY_SNAPSHOT_MAX,
+            ),
             conflated: 0,
             naked_scan: None,
             set_epoch_due: false,

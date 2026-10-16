@@ -2156,7 +2156,7 @@ spec: README.md
 |---|---|---|
 | OMS-189.1 | 交易所拒;`hedge_retry_min_ms = 100` | 300 ms |
 | OMS-189.2 | `hedge_gated(Risk(RATE_BACKOFF), retry_at = 450 ms)`;100 | 450 ms |
-| OMS-189.3 | `hedge_gated(Risk(RATE_BACKOFF), retry_at = 250 ms)`;100 | 300 ms |
+| OMS-189.3 | `hedge_gated(Risk(RATE_BACKOFF), retry_at = 250 ms)`;100;另测 `RATE` 在 201 ms 可用 | 250 ms;另例 201 ms,不额外等待 100 ms |
 | OMS-189.4 | 交易所拒;`hedge_retry_min_ms = 1` | 201 ms |
 | OMS-189.5 | `hedge_gated(Px(StaleQuote), retry_at = 0)`;100 | 300 ms |
 

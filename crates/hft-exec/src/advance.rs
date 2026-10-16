@@ -349,6 +349,15 @@ impl Exec {
     }
 
     pub(crate) fn cooldown_eff(&self, cix: usize, cd: u32) -> u32 {
+        // A rate-refused intent never became an order. Its precise Wake owns the
+        // retry spacing; the speculative slice must not start another cooldown.
+        if self
+            .cells
+            .get(cix)
+            .is_some_and(|c| c.gated_bits.0 & (RejectBits::RATE.0 | RejectBits::RATE_BACKOFF.0) != 0)
+        {
+            return 0;
+        }
         let p = self.params(self.acct_of_cix(cix));
         match self.urgency_of(cix) {
             Urgency::Passive => cd.saturating_mul(u32::from(p.passive_cooldown_mult)),

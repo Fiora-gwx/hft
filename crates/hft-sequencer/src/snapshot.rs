@@ -134,10 +134,14 @@ impl ClockCalRow {
 /// Size limit of one strategy's fast-part snapshot.
 pub const STRATEGY_SNAPSHOT_MAX: usize = 256 * 1024;
 
-fn w_seq_sections<S: StrategySet>(e: &Engine, inst: &Instances<S>, w: &mut SnapshotWriter) {
+fn w_seq_sections<S: StrategySet>(
+    e: &Engine,
+    inst: &Instances<S>,
+    w: &mut SnapshotWriter,
+    sw: &mut SnapshotWriter,
+) {
     // 5 StrategyState.
     w.begin_section(SECTION_STRATEGY, STRATEGY_VERSION);
-    let mut sw = SnapshotWriter::new(STRATEGY_SNAPSHOT_MAX);
     let mut order: Vec<usize> = (0..inst.slots.len()).collect();
     order.sort_by_key(|i| inst.slots.get(*i).map_or(0, |s| s.id.0));
     for &ix in &order {
@@ -146,7 +150,7 @@ fn w_seq_sections<S: StrategySet>(e: &Engine, inst: &Instances<S>, w: &mut Snaps
             continue;
         };
         sw.clear();
-        S::snapshot(st, &mut sw);
+        S::snapshot(st, sw);
         let bytes = sw.as_bytes();
         let desc = S::kinds().iter().find(|d| d.kind_id == s.kind_id);
         let hdr = StrategyRowHdr {
@@ -381,10 +385,20 @@ fn active_rows<S: StrategySet>(e: &Engine, inst: &Instances<S>) -> Vec<ActiveCon
 
 /// Writes every component's sections in the fixed order into `w`.
 pub(crate) fn write_sections<S: StrategySet>(e: &Engine, inst: &Instances<S>, w: &mut SnapshotWriter) {
+    let mut sw = SnapshotWriter::new(STRATEGY_SNAPSHOT_MAX);
+    write_sections_with_scratch(e, inst, w, &mut sw);
+}
+
+fn write_sections_with_scratch<S: StrategySet>(
+    e: &Engine,
+    inst: &Instances<S>,
+    w: &mut SnapshotWriter,
+    sw: &mut SnapshotWriter,
+) {
     e.ledger.snapshot(w);
     e.oms.snapshot(w);
     e.risk.snapshot(w);
-    w_seq_sections(e, inst, w);
+    w_seq_sections(e, inst, w, sw);
     e.books.snapshot(w);
     e.exec.snapshot(w);
     w.end_section();
@@ -435,8 +449,12 @@ pub(crate) fn build_snapshot<S: StrategySet>(
     purpose: u8,
     snap_tsc: Tsc,
 ) -> Vec<u8> {
-    let mut w = SnapshotWriter::new(64 << 20);
-    write_sections(e, inst, &mut w);
+    // A fresh 64 MiB allocation here faults and locks pages under MCL_FUTURE. Keep the
+    // same atomic snapshot contract, but pay that allocation cost only during startup.
+    let mut w = std::mem::replace(&mut e.snapshot_writer, SnapshotWriter::new(0));
+    let mut sw = std::mem::replace(&mut e.strategy_snapshot_writer, SnapshotWriter::new(0));
+    w.clear();
+    write_sections_with_scratch(e, inst, &mut w, &mut sw);
     // The gate-input caches restart from the snapshotted state, as in a replay from here.
     crate::recover::derive_gate_caches(e);
     let sections = w.as_bytes();
@@ -473,6 +491,8 @@ pub(crate) fn build_snapshot<S: StrategySet>(
     let mut body = Vec::with_capacity(96 + sections.len());
     body.extend_from_slice(hdr.as_bytes());
     body.extend_from_slice(sections);
+    e.snapshot_writer = w;
+    e.strategy_snapshot_writer = sw;
     body
 }
 

@@ -33,7 +33,7 @@
   feed-bbo:<venue>  BBO 连接 → 解码 → bbo 环;按 bbo_ping_ms 发 ping;BBO 补帧来自 snap-fetch(可跨 venue 合并到一个线程)
   feed-md:<venue>   成交/标记价/资金费/分档深度(TopN)连接 → 解码 → md 环;可选的增量深度及其 L2 重同步也在这里
   gw:<venue>        每个下单 venue 独占;out 环(OutMsg)→ 填帧模板/掩码/加密/write;回报 → rep 环
-  sequencer         按优先级取环 → 赋 seq → 写 seq journal → 簿 → 策略快速部分 → 执行层 → 风控 → OMS → out 环
+  sequencer         按优先级取环(Timer 限批并让位输入) → 赋 seq → 写 seq journal → 簿 → 策略快速部分 → 执行层 → 风控 → OMS → out 环
   ext:<chain>       可选:与 chain-core 的外部 venue 会话
 warm 任务(不在 tick-to-trade 路径,不占热核)
   snap-fetch        行情 REST 的请求、读取、解析:BBO 补帧 → snap-<venue>-bbo 环 → feed-bbo;(增量深度启用时)L2 快照 → snap-<venue> 环 → feed-md

@@ -44,6 +44,45 @@ fn exe_381_backoff_bounded() {
     assert_eq!(times, want);
 }
 
+#[test]
+fn exe_381_rate_retry_uses_next_free_without_spinning() {
+    for (kind, ready) in [(0, 3), (0, 750), (1, 3), (1, 750), (2, 3), (2, 750)] {
+        let mut fx = Fx::new();
+        let (group, o) = match kind {
+            1 => {
+                fx.legs(A1, G7, &["1.00", "-1.5"]);
+                fx.leg_adjust(A1, G7);
+                (G7, fx.adv().ord(ExecOrderKind::HedgeFix)[0])
+            }
+            2 => {
+                fx.legs(A1, G8, &["-10"]);
+                fx.flatten(A1);
+                (G8, fx.adv().ord(ExecOrderKind::ForceStep)[0])
+            }
+            _ => (G8, fx.go(&t1("-10")).orders[0]),
+        };
+        fx.place_res(
+            &o,
+            PlaceResult::RateLimited {
+                bits: RejectBits::RATE,
+                retry_at: t(ready),
+            },
+        );
+        assert_eq!(fx.cell(A1, group).wake_at, t(ready));
+        for ms in 0..ready {
+            fx.at(ms);
+            fx.touch(P);
+            assert!(fx.adv().orders.is_empty(), "premature retry at {ms}");
+        }
+        fx.at(ready);
+        fx.touch(P);
+        let retry = fx.adv();
+        assert_eq!(retry.orders.len(), 1, "kind={kind} ready={ready}");
+        fx.placed(&retry.orders[0]);
+        assert!(fx.adv().orders.is_empty(), "one retry per wake");
+    }
+}
+
 fn reject_n(fx: &mut Fx, n: u64, start: u64) -> u64 {
     let mut ms = start;
     for _ in 0..n {

@@ -349,7 +349,8 @@ pub struct CountingAlloc;
 impl CountingAlloc { pub fn scope() -> AllocScope;            // 从此刻起计本线程的分配次数
                      pub fn is_installed() -> bool; }         // 是否已装为全局分配器(本线程一次探测分配被计入)
 pub struct AllocScope { /* … */ }
-impl AllocScope { pub fn allocs(&self) -> u64; }               // 本线程自 scope() 以来的分配次数;其他线程的分配不计入
+impl AllocScope { pub fn allocs(&self) -> u64; pub fn bytes(&self) -> u64; }               // 本线程自 scope() 以来的分配次数;其他线程的分配不计入
+// bytes() 累计本线程请求字节数,realloc 计完整新大小,释放不抵扣;用于大型临时分配回归。
 /// Criterion 之外的直方图基准驱动(HistBench):每次迭代前后各读一次 TSC,记进预分配的 hdrhistogram,同时以 CountingAlloc 计分配。
 pub struct HistBench { /* name、迭代与热身次数、是否冒烟模式 */ }
 impl HistBench { pub fn smoke(name: &str) -> HistBench;                       // 热身 1 000、迭代 10 000、不绑核

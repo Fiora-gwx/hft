@@ -890,6 +890,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 ### SEQ-056 每轮至多交出 16 个到期定时器
 
+- 追加时间片回归:40 个到期定时器,单次回调耗满 `md_round_ns`;同轮只处理一个回调,随后交出排队 BBO 与 MD;持续到期堆不能跳过输入阶段,回报可在相邻回调间进入。
+
 - 规则:[主循环](README.md#主循环step)
 - 级别:unit
 - 里程碑:M2
@@ -898,8 +900,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
   1. `step()`
   2. `step()`
 - 期望:
-  - 步骤 1:交出 k1–k16 的 16 条 `Timer`、ctl 那 1 条;交出 rep-A 之前的中途检查发现 k17 已到期,这一轮结束,rep-A 仍在环里
-  - 步骤 2:先交 k17–k20,再交 rep-A 那条
+  - 步骤 1:交出 k1–k16 的 16 条 `Timer`、ctl 与 rep-A;回报在相邻回调间进入,不等到全部到期 Timer 排空
+  - 步骤 2:交出 k17–k20;rep-A 已在前一轮交出
 - 实现:`crates/hft-sequencer/tests/preempt.rs::seq_056_due_timers_per_round`
 
 ### SEQ-057 ctl 与 hk 每轮各至多 4 条
@@ -2582,6 +2584,8 @@ SEQ-160 同时覆盖真实 ConnId 112/113/255、重复 Up/Down、主连接退出
 - 实现:`crates/hft-sequencer/tests/intents.rs::seq_177_second_leg_within_link_notional`
 
 ### SEQ-178 Simultaneous 第二腿与 Hedge 类意图的投影字段
+
+- 实机序列回归:普通单耗尽每 inst 秒级桶后,真实双腿一侧成交、另一侧零成交终态;同一事件产出唯一 Reverse 并写入出环(手动时钟 < 1 ms),无 RATE 重试;Reverse 成交后两侧归零,完整回放一致。
 
 - 残余数量补充:`tests/simultaneous.rs::check_simultaneous_residual_affordability` 验证累计 lot 残余使第二腿增量越过 HEDGE_LIMIT 时整对拒绝,第一腿无副作用。
 
@@ -4813,6 +4817,8 @@ SEQ-160 同时覆盖真实 ConnId 112/113/255、重复 Up/Down、主连接退出
 
 ### SEQ-337 关键帧一次写完
 
+- 分配回归:`sdk_alloc::seq_337_snapshot_and_roll_reuse_large_workspace` 连续运行 Snapshot/Roll,小配置每次申请总字节 < 1 MiB(含测试 journal 拷贝),排除重复申请 64 MiB 工作区;保持快照原子性与完整回放一致。
+
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)、[快照](README.md#快照)
 - 级别:bench
 - 里程碑:M2
@@ -5121,7 +5127,7 @@ SEQ-160 同时覆盖真实 ConnId 112/113/255、重复 Up/Down、主连接退出
 |---|---|---|
 | SEQ-360.1 | `Timer{Oms, UnknownQuery}`(槽 s) | 调 `oms.on_unknown_query`,不调 `on_sweep` |
 | SEQ-360.2 | L 的第二腿被检查链以 `RATE_BACKOFF` 拒,(B, 1) `backoff_until = E` | `hedge_gated(L, Risk(RATE_BACKOFF), retry_at = now.tsc_of(E), …)` |
-| SEQ-360.3 | 第二腿被 `RATE` 拒 | `retry_at = 0` |
+| SEQ-360.3 | 第二腿被 `RATE` 拒 | `retry_at` 为该 venue 令牌补足一个且退避结束的最早时刻 |
 | SEQ-360.4 | s1 发带 LegLink 的第一腿(第二腿卖) | `ApprovedIntent.hedge_ref_px = 60 000.0`(卖取 bid) |
 | SEQ-360.5 | OMS 第二腿请求放行 | `ApprovedIntent.hedge_px` = 第 1 步 `price_hedge` 的结果 |
 
@@ -5589,7 +5595,7 @@ SEQ-160 同时覆盖真实 ConnId 112/113/255、重复 Up/Down、主连接退出
 - 里程碑:M2
 - 输入:真实 sequencer、OMS、ledger、risk、exec;永续 venue 的 10 秒桶只有一个令牌,建仓已消耗;已成交现货 +0.01、永续 −0.01
 - 步骤:完整启动配置写入 journal;快照后投递永续 ADL 卖出 0.005,提交非 HARD 的账户 Kill/flatten;退避期间请求关键帧,推进 500 ms 后再请求关键帧;分别只用 ADL 前和首次退避中的快照及其前置配置独立装配,逐字节验证后续 journal
-- 期望:至少两条永续清仓决策被 RATE 拒绝;退避中的补腿窗口未启动,没有 Broken;两次验证均无输出或快照分歧
+- 期望:首次永续清仓决策被 RATE 拒绝,500 ms 内不重复尝试,等待最早可用时刻;退避中的补腿窗口未启动,没有 Broken;两次验证均无输出或快照分歧
 - 实现:`crates/hft-sequencer/tests/sdk_contract/target.rs::seq_397_rejected_force_backoff_replays_from_both_sides`
 
 ### SEQ-398 指定快照恢复审计只覆盖完整提交尾部
