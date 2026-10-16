@@ -33,7 +33,7 @@
   feed-bbo:<venue>  BBO 连接 → 解码 → bbo 环;按 bbo_ping_ms 发 ping;BBO 补帧来自 snap-fetch(可跨 venue 合并到一个线程)
   feed-md:<venue>   成交/标记价/资金费/分档深度(TopN)连接 → 解码 → md 环;可选的增量深度及其 L2 重同步也在这里
   gw:<venue>        每个下单 venue 独占;out 环(OutMsg)→ 填帧模板/掩码/加密/write;回报 → rep 环
-  sequencer         按优先级取环 → 赋 seq → 写 seq journal → 簿 → 策略快速部分 → 执行层 → 风控 → OMS → out 环
+  sequencer         按优先级取环(Timer 限批并让位输入) → 赋 seq → 写 seq journal → 簿 → 策略快速部分 → 执行层 → 风控 → OMS → out 环
   ext:<chain>       可选:与 chain-core 的外部 venue 会话
 warm 任务(不在 tick-to-trade 路径,不占热核)
   snap-fetch        行情 REST 的请求、读取、解析:BBO 补帧 → snap-<venue>-bbo 环 → feed-bbo;(增量深度启用时)L2 快照 → snap-<venue> 环 → feed-md
@@ -137,8 +137,6 @@ DST 的只读观察仅在 `testkit` 构建启用。策略定时器先预留配�
 Drain 退出前的发布边界由 [sequencer 主循环](../crates/hft-sequencer/README.md#主循环step) 保证,退出前最后一个完整事件及 Drain 快照对恢复读者可见;封段与关闭由装配层执行。
 
 恢复核容量、结束旧 Drain 状态并接替 Draining,新容量入引导配置;快照保留停止点 engine_ns,分歧入输出哈希。
-
-到期定时器按数量与 `md_round_ns` 双重限制服务,回调间检查优先输入;本轮处理过定时器后仍须到达市场输入阶段。快照复用启动期工作区,在单个事件内写完;具体顺序与边界归 [`hft-sequencer`](../crates/hft-sequencer/README.md#主循环step)。
 
 journal 分为 **Input**(决策输入，含驱动以 `Timer` 记录的环境决定)、**Output**(意图与执行决定)、**Meta**(测量，不参与状态与验证)。时钟、随机数、配置、定时器来自 Input；无 `HashMap` 迭代依赖或全局业务可变状态。[逐事件测量](../tools/latency-report/README.md) 经独立有界环落盘，不影响主循环。详见 [`hft-sequencer`](../crates/hft-sequencer/README.md) 与 [`replayer`](../apps/replayer/README.md)。
 
