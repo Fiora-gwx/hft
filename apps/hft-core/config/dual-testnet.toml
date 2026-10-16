@@ -1,5 +1,6 @@
 # Template: replace blob paths/hashes and source binding before --check.
 # Endpoints belong to RDB1; see README.md. Never put credentials inline.
+# The two RDB1 instruments are ETHUSDT: perpetual first, spot second.
 schema = 1
 [instance]
 name = "prod"
@@ -86,8 +87,8 @@ task = "conn-builder:futures"
 park_us = 500
 nice = 10
 [venues.second]
-protocol = "bitget-usdt-futures"
-id = 10
+protocol = "bitget-spot"
+id = 11
 max_sub_insts = 1
 stale_guard_ms = 1500
 src_ip = "192.0.2.10"

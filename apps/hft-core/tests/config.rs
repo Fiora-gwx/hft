@@ -86,6 +86,12 @@ fn core_045_rejects_live_accounts_in_paper_and_unbuilt_venues() {
     );
     #[cfg(feature = "bitget")]
     {
+        let dual: hft_core::config::Config =
+            toml::from_str(include_str!("../config/dual-testnet.toml")).unwrap();
+        assert_eq!(dual.venues.len(), 2);
+        for venue in dual.venues.values() {
+            hft_core::venues::registered(&venue.protocol, hft_types::VenueId(venue.id)).unwrap();
+        }
         hft_core::venues::registered("bitget-spot", hft_types::VenueId::BITGET_UTA_SPOT).unwrap();
         hft_core::venues::registered("bitget-usdt-futures", hft_types::VenueId::BITGET_UTA_USDT_FUT).unwrap();
     }

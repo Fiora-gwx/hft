@@ -1,0 +1,28 @@
+[strategy]
+instance = "demo-carry"
+account = "demo"
+schema = { id = 1, version = 2 }
+version = 1
+source = "manual"
+
+[defaults]
+enabled = true
+enter_apr = "0.10"
+exit_apr = "0.02"
+borrow_apr = "0"
+fee_horizon_ms = "1d"
+entry_window_ms = "5m"
+min_lead_ms = "10s"
+funding_max_age_ms = "30s"
+max_notional = "25"
+capital_fraction = "0.1"
+max_leverage_x100 = "100"
+max_cross = "0.0005"
+retry_ms = "1s"
+expected_basis_cost = "0.001"
+
+[[groups]]
+n = 1
+asset = "ETH"
+open_allowed = true
+legs = [{ inst = "binance-usdm:ETHUSDT" }, { inst = "bitget-uta-spot:ETHUSDT" }]
