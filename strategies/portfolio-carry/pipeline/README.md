@@ -24,7 +24,7 @@ status: spec
 
 ## 使用本组件
 
-无 compute/explain/warmup 实现、owned_fields 或预热载荷。策略的 13 个参数与两腿 GroupSpec 定义见[策略规格](../README.md#参数表)。不输出旧研究方案的 liq_score/restricted/历史分位参数。
+无 compute/explain/warmup 实现、owned_fields 或预热载荷。策略参数与两腿 GroupSpec 定义见[策略规格](../README.md#参数表)。不输出旧研究方案的 liq_score/restricted/历史分位参数。
 
 ## 实现说明
 
