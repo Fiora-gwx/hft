@@ -74,10 +74,14 @@ class Chains(unittest.TestCase):
             loaded = report.load_trace(db,trace,out)
             events = [dict(kind_name='ClockStatus',seq=1,body_tsc=0,realtime_ns=920,phc_ns=920,calib_err_ns=5,state=1),
                       dict(kind_name='ClockStatus',seq=20,body_tsc=1000,realtime_ns=1920,phc_ns=1920,calib_err_ns=5,state=1),
-                      dict(kind_name="OrderDecision",seq=11,trigger_seq=10,slot=4,gen=2,venue=1,action=1,inst=4,intent_no=1,strategy=1),
-                      dict(kind_name="OrderEvent",seq=12,slot=4,gen=2,what=1,rx_tsc=300),
-                      dict(kind_name="OrderEvent",seq=13,slot=4,gen=2,what=3,rx_tsc=350,trade_id=101),
-                      dict(kind_name="OrderEvent",seq=14,slot=4,gen=2,what=4,rx_tsc=400,trade_id=102)]
+                      dict(kind_name="OrderDecision",seq=11,trigger_seq=10,slot=4,gen=2,venue=1,account=1,action=1,inst=4,intent_no=1,strategy=1),
+                      dict(kind_name="OrderEvent",seq=12,slot=4,gen=2,venue=1,account=1,epoch=7,what=1,rx_tsc=300),
+                      dict(kind_name="OrderEvent",seq=13,slot=4,gen=2,venue=1,account=1,epoch=7,what=3,rx_tsc=350,trade_id=101),
+                      dict(kind_name="OrderEvent",seq=14,slot=4,gen=2,venue=1,account=1,epoch=7,what=4,rx_tsc=400,trade_id=102),
+                      # Independent order tables reuse the same slot/gen in live two-leg runs.
+                      dict(kind_name="OrderEvent",seq=15,slot=4,gen=2,venue=10,account=1,epoch=7,what=4,rx_tsc=900,trade_id=201),
+                      dict(kind_name="OrderEvent",seq=16,slot=4,gen=2,venue=1,account=2,epoch=7,what=4,rx_tsc=950,trade_id=202),
+                      dict(kind_name="OrderEvent",seq=17,slot=4,gen=2,venue=1,what=4,rx_tsc=999,trade_id=203)]
             report.load_journal(db,events,out)
             analysis = report.Analysis(db,loaded)
             analysis.market(out)
@@ -92,6 +96,10 @@ class Chains(unittest.TestCase):
             with (out / "order_chains.csv").open() as stream:
                 orders = list(csv.DictReader(stream))
             self.assertEqual([r["report_what"] for r in orders],["1","3","4"])
+            self.assertEqual([r["report_seq"] for r in orders],["12","13","14"])
+            self.assertTrue(all(r["account"] == "1" and r["report_epoch"] == "7" for r in orders))
+            self.assertEqual(next(t["n"] for t in tables if t["stage"]=="ack_fill_rtt.4"),1)
+            self.assertEqual(next(t["p99_ns"] for t in tables if t["stage"]=="ack_fill_rtt.4"),150)
             self.assertTrue(all(r["send_complete_tsc"] == "280" and r["tx_write_count"] == "2" for r in orders))
             self.assertTrue(all(r["oms_start_tsc"]=="170" and r["risk_start_tsc"]=="168" and r["strategy_start_tsc"]=="166" and r["input_rx_tsc"]=="100" for r in orders))
             self.assertEqual(next(t["p50_ns"] for t in tables if t["stage"]=="tick_to_trade.userspace"),150)
@@ -112,6 +120,12 @@ class Chains(unittest.TestCase):
         rows[2]['state']=3
         self.assertIsNone(report.Calibration(rows).realtime(150))
         with self.assertRaises(ValueError): report.Calibration(rows+rows[:1])
+
+    def test_rpl_203_sw_rate_error_without_phc(self):
+        rows=[dict(body_tsc=t,realtime_ns=r,phc_ns=0,calib_err_ns=5,state=1)
+              for t,r in [(0,1000),(100,1100),(200,1220)]]
+        self.assertEqual(report.Calibration(rows).realtime(150),(1160,17))
+        self.assertIsNone(report.Calibration(rows,16).realtime(150))
 
     def test_rpl_203_negative_and_ambiguous_are_not_zero_samples(self):
         db = sqlite3.connect(":memory:")

@@ -14,7 +14,7 @@ STAGES = ("read decrypt_start decrypt_end frame decode_start decode_end decoded_
 STAGES += ["tx_queued", "tx_write", "raw_record"]
 SAFE = set("seq tsc proc_ns flags kind venue conn inst account strategy trigger_seq decision_seq slot gen target_slot action link_role reason intent_no reject what detail trade_id exch_order_id ex_ts_ns ex_send_ns hw_rx_ns sw_rx_ns rx_tsc decided_tsc sent_tsc group status tsc_hz_milli realtime_ns phc_ns chrony_offset_ns max_error_ns rms_ns calib_err_ns source state".split())
 KINDS = ["Bbo", "Trade", "Funding", "MarkPrice", "IndexPrice", "Liquidation", "L2Snapshot", "OrderDecision", "SendReport", "OrderEvent", "ExecDecision", "ClockStatus", "LatencySample"]
-SAFE.add("body_tsc")
+SAFE.update(("body_tsc", "epoch"))
 CHAIN_COLUMNS = "chain thread frame event_hash venue kind input_seq ex_ts_ns ex_send_ns hw_rx_ns sw_rx_ns rx_tsc decrypt_done_tsc frame_done_tsc decode_start_tsc decode_done_tsc ring_push_tsc ring_pop_tsc handed_tsc process_start_tsc journal_input_tsc process_end_tsc".split()
 CHAIN_COLUMNS += "rx_realtime_ns calibration_error_ns kernel_to_user_ns".split()
 
@@ -40,8 +40,8 @@ class Calibration:
         if index:
             previous = self.rows[index-1]
             dt = a['body_tsc'] - previous['body_tsc']
-            dp = b['phc_ns'] - a['phc_ns']
-            prior_dp = a['phc_ns'] - previous['phc_ns']
+            dp = b['realtime_ns'] - a['realtime_ns']
+            prior_dp = a['realtime_ns'] - previous['realtime_ns']
             numerator = abs(dp * dt - prior_dp * length) * abs(dp)
             denominator = 2 * length * dt
             error += (2 * numerator + denominator) // (2 * denominator)
@@ -124,16 +124,16 @@ def journal_rows(path, hot=None):
 
 
 def load_journal(db, rows, out):
-    db.execute("CREATE TABLE events(seq INTEGER,kind TEXT,slot INTEGER,gen INTEGER,body TEXT,trigger_seq INTEGER,group_id INTEGER)")
+    db.execute("CREATE TABLE events(seq INTEGER,kind TEXT,slot INTEGER,gen INTEGER,body TEXT,trigger_seq INTEGER,group_id INTEGER,venue INTEGER,account INTEGER)")
     output, writer = csv_file(out / "journal_events.csv", ["kind_name"] + sorted(SAFE))
     try:
         for row in rows:
             writer.writerow(row)
-            db.execute("INSERT INTO events VALUES(?,?,?,?,?,?,?)", (row.get("seq", 0), row["kind_name"], row.get("slot", 0), row.get("gen", 0), json.dumps(row),row.get("trigger_seq",0),row.get("group",0)))
+            db.execute("INSERT INTO events VALUES(?,?,?,?,?,?,?,?,?)", (row.get("seq", 0), row["kind_name"], row.get("slot", 0), row.get("gen", 0), json.dumps(row),row.get("trigger_seq",0),row.get("group",0),row.get("venue"),row.get("account")))
     finally:
         output.close()
     db.execute("CREATE INDEX event_seq ON events(seq)")
-    db.execute("CREATE INDEX event_order ON events(kind,slot,gen)")
+    db.execute("CREATE INDEX event_order ON events(kind,venue,account,slot,gen)")
     db.execute("CREATE INDEX event_trigger ON events(kind,trigger_seq,group_id)")
 
 
@@ -266,7 +266,7 @@ class Analysis:
         self.db.execute("CREATE INDEX chain_input ON chains(input_seq)")
 
     def orders(self, out):
-        cols = "decision_seq trigger_seq venue slot gen group link_role reason action intent_no reject decision_tsc out_push_tsc out_pop_tsc encode_start_tsc encode_done_tsc encrypt_start_tsc encrypt_done_tsc send_return_tsc send_complete_tsc tx_write_count report_seq report_what ack_fill_rx_tsc report_ex_ts_ns exch_order_id trade_id".split()
+        cols = "decision_seq trigger_seq venue account slot gen group link_role reason action intent_no reject decision_tsc out_push_tsc out_pop_tsc encode_start_tsc encode_done_tsc encrypt_start_tsc encrypt_done_tsc send_return_tsc send_complete_tsc tx_write_count report_seq report_what report_epoch ack_fill_rx_tsc report_ex_ts_ns exch_order_id trade_id".split()
         cols += "strategy risk_owner_intent_no strategy_start_tsc strategy_end_tsc risk_start_tsc risk_end_tsc oms_start_tsc oms_end_tsc".split()
         cols += ["input_"+c for c in CHAIN_COLUMNS]
         output, writer = csv_file(out / "order_chains.csv", cols)
@@ -325,14 +325,14 @@ class Analysis:
                     if kernel is not None and kernel >= 0 and trigger[0][0] and row.get('send_return_tsc'):
                         delta = (row['send_return_tsc']-trigger[0][0])*1_000_000_000_000//self.hz
                         self.sample(venue, name+'.sw', chain, kernel+delta)
-                reports = self.db.execute("SELECT body FROM events WHERE kind='OrderEvent' AND slot=? AND gen=? ORDER BY seq", (event.get("slot", 0), event.get("gen", 0))).fetchall()
+                reports = self.db.execute("SELECT body FROM events WHERE kind='OrderEvent' AND venue=? AND account=? AND slot=? AND gen=? ORDER BY seq", (event.get("venue"), event.get("account"), event.get("slot", 0), event.get("gen", 0))).fetchall()
                 matched = 0
                 for (report_body,) in reports:
                     report = json.loads(report_body)
                     allowed = {1:{1,2,3,4,9,11,12}, 2:{5,6,11}, 3:{7,8,11}, 5:{10,11}}
                     if report.get("what") not in allowed.get(event.get("action"),set()) or report.get("seq",0) <= event["seq"]:
                         continue
-                    writer.writerow(dict(row, report_seq=report.get("seq"), report_what=report.get("what"), ack_fill_rx_tsc=report.get("rx_tsc"), report_ex_ts_ns=report.get("ex_ts_ns"), exch_order_id=report.get("exch_order_id"), trade_id=report.get("trade_id")))
+                    writer.writerow(dict(row, report_seq=report.get("seq"), report_what=report.get("what"), report_epoch=report.get("epoch"), ack_fill_rx_tsc=report.get("rx_tsc"), report_ex_ts_ns=report.get("ex_ts_ns"), exch_order_id=report.get("exch_order_id"), trade_id=report.get("trade_id")))
                     matched += 1
                     self.interval(venue, "ack_fill_rtt." + str(report.get("what")), chain, row.get("send_return_tsc"), report.get("rx_tsc"))
                 if not matched:
