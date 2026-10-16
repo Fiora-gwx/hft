@@ -73,7 +73,8 @@ pub fn net_edge(
             Some(b) => annual(b.rate, b.interval_s)?,
             None => 0,
         };
-    let round_trip = i128::from(fees.0.max(0)) * 2 + i128::from(f.max_cross.0) * 4;
+    let round_trip =
+        i128::from(fees.0.max(0)) * 2 + i128::from(f.max_cross.0) * 4 + i128::from(f.expected_basis_cost.0);
     let horizon = i128::from(f.fee_horizon_ms);
     if horizon == 0 {
         return None;
@@ -250,21 +251,14 @@ impl Fast {
                 .max(0)
                 .saturating_add(v.fee(a, insts[1]).taker.0.max(0)),
         );
-        let short0 = net_edge(fa, fb, fees, f, -1);
-        let direction = if held {
-            if pos.legs[0].qty.0 > 0 || pos.legs[1].qty.0 < 0 {
-                1
-            } else {
-                -1
-            }
-        } else if spot || short0 >= net_edge(fa, fb, fees, f, 1) {
-            -1
-        } else {
-            1
-        };
+        // Validation permits only short leg 0 / long spot leg 1. Legacy opposite
+        // inventory can be reduced, never used to select a reverse opening target.
+        let direction = -1;
         let edge = net_edge(fa, fb, fees, f, direction).unwrap_or(i64::MIN);
         let opening_target = target.is_some_and(|t| t.intent.legs.iter().take(2).any(|l| l.qty.0 != 0));
-        let close = g.exiting
+        let close = pos.legs[0].qty.0 > 0
+            || pos.legs[1].qty.0 < 0
+            || g.exiting
             || !f.enabled
             || g.spec.open_allowed == 0
             || v.mode(a, g.spec.id) == RunMode::CloseOnly
@@ -450,7 +444,7 @@ impl Fast {
         }
     }
     pub fn restore(&mut self, r: &mut SnapshotReader<'_>) -> Result<(), RestoreError> {
-        if r.desc_version() != 1 {
+        if !matches!(r.desc_version(), 1 | 2) {
             return Err(RestoreError::VersionUnsupported);
         }
         let n = r.get_u16()?;

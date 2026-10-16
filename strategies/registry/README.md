@@ -24,6 +24,8 @@ status: impl
 
 ## 使用本组件
 
+两条交易策略的参数 schema 为 version 2,固定第 0 腿为协议 VenueId 1 的 USDT 永续、第 1 腿为 VenueId 11 的同资产 USDT 现货;加载、创建与 SetParams 均由参数检查拒绝其他形态。交易所映射及负责人决定见[产品形态](../../.agents/notes/implemented/feature/2026-10-16-perp-spot-shape.md)。
+
 当前列表包含默认的 latency-probe、portfolio-carry 与 feature 门控的 cross-taker。追加策略保留既有项顺序,按 kind_id 排序的 schema 导出不受注册顺序影响。后者的真实引擎/模拟撮合、参数恢复和报价门控测试位于 `tests/cross_taker_e2e.rs`;schema 金样保存全部已实现策略,默认构建只比较启用项。
 
 ```rust

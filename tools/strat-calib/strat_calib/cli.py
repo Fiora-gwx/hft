@@ -79,7 +79,7 @@ def run(quotes: Path, config: Path, output: Path, daily_path=None, events_path=N
             record["equal_fee_sensitivity"] = {}
             for fee in cfg.fee_scenarios:
                 rates = (int(float(fee) * 100000),) * 2
-                edges = np.maximum(*price_edges(data, metas, rates, cfg.taker.slip))
+                edges = price_edges(data, metas, rates, cfg.taker.slip)[1]
                 record["equal_fee_sensitivity"][str(fee)] = {
                     "net_edge_bps": quantiles(edges),
                     "above_threshold": int((edges > cfg.taker.min_edge / 100000).sum()),

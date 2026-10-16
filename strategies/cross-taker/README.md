@@ -10,7 +10,7 @@ status: impl
 
 ## 概要
 
-`CrossTaker` 在 sequencer 线程比较同一资产的两个 venue 的 BBO,选择扣除两腿 taker 费和价格余量后仍达到 min_edge 的方向。买入低价腿作为链接的 First,通过 SDK LegLink 让 OMS 在同一事件同时发出买卖两腿;策略不等待成交再发第二腿,不直接发修复订单。两腿可以是现货或 USDT 线性永续,现货只能卖出分配给该 group 的现有库存。默认禁止开火,上线必须显式配置并通过仓库上线门槛。
+`CrossTaker` 在 sequencer 线程比较同一资产的两个 venue 的 BBO,只在永续 bid 相对现货 ask 的净边严格超过 min_edge 时做空永续、多现货。买入低价腿作为链接的 First,通过 SDK LegLink 让 OMS 在同一事件同时发出买卖两腿;策略不等待成交再发第二腿,不直接发修复订单。第 0 腿固定为协议 VenueId 1 的 USDT 线性永续,第 1 腿固定为 VenueId 11 的现货;现货只卖出本组持有且不属于 baseline 的库存来平仓。默认禁止开火,上线必须显式配置并通过仓库上线门槛。
 
 ## 目录
 
@@ -26,16 +26,17 @@ status: impl
 
 ### 装配与组
 
-registry 的 cross-taker feature 注册 CrossTaker,kind_id/schema_id = 3,version = 1;`Model = NoModel<XtParams>`。每组恰好两腿,同一 base/quote、相同定点指数、不同交易所。同一实例不允许两个 group 引用同一 inst,避免逐品种限额被重复组放大。账户必须覆盖两腿 venue;加载时拒绝无效引用、同所组合、不支持的市场、无效 tick/lot 和无效限额。两侧 BBO 都订阅 Part::Fast,状态只读 SDK Views。
+registry 的 cross-taker feature 注册 CrossTaker,kind_id/schema_id = 3,version = 2;`Model = NoModel<XtParams>`。每组恰好两腿,同一 base/quote、相同定点指数、不同交易所。同一实例不允许两个 group 引用同一 inst,避免逐品种限额被重复组放大。账户必须覆盖两腿 venue;加载时拒绝无效引用、同所组合、不支持的市场、无效 tick/lot 和无效限额。两侧 BBO 都订阅 Part::Fast,状态只读 SDK Views。
 
 ### 参数 schema
 
-所有字段 minor_change = None,参数变动按上线门槛重新评估。非零默认值均为暂定值。Notional 为 1e-6 quote 单位,Rate 为 1e-9;组必须使用相同 quote,首批部署配置 USDT。
+所有字段 minor_change = None,参数变动按上线门槛重新评估。非零默认值均为暂定值。Notional 为 1e-6 quote 单位,Rate 为 1e-9;组必须使用相同 quote,加载时仅接受 USDT。
 
 | 字段 | 单位 | 默认 | per_group | 含义 |
 |---|---|---|---|---|
 | enabled | Bool | false | 否 | 人工启用;默认不交易 |
-| min_edge | Rate | 0 | 是 | 扣费与价格余量后的收益率;启用时必须 > 0 |
+| min_edge | Rate | 0 | 是 | 开仓净收益率严格下界;启用时必须 > 0 |
+| close_edge | Rate | 0 | 是 | 平仓反向净收益率下界,包含等号;允许负值,须人工标定 |
 | slip | Rate | 0 | 是 | 每腿 IOC 价格余量,0 为吃到触价 |
 | depth_frac | Rate | 50% | 是 | 两侧对应顶档量的使用比例 |
 | max_chunk_notional | Notional | 0 | 是 | 任一腿单笔上限;启用时必须 > 0 |
@@ -48,11 +49,11 @@ registry 的 cross-taker feature 注册 CrossTaker,kind_id/schema_id = 3,version
 
 ### 信号与数量
 
-令 B 为买腿 IOC 限价,S 为卖腿按相同余量计算的限价,fb/fs 为非负 taker 费率。触发条件为 `(S × (1 − fs) − B × (1 + fb)) / B >= min_edge`,用 i128 计算、收益率向下取整。两方向可行时选择净收益率较高者,相同则买 leg 0。两腿限价固定于本次观察的 BBO:买价不高于 ask × (1 + slip),卖价不低于 bid × (1 − slip),按 tick 保守取整。卖腿使用 PxMode::Limit;引擎风险价格带只能收紧限价,不因后续报价放宽。信号不是利润保证。
+令 B 为买腿 IOC 限价,S 为卖腿按相同余量计算的限价,fb/fs 为非负 taker 费率。触发条件为 `(S × (1 − fs) − B × (1 + fb)) / B > min_edge`,用 i128 计算、收益率向下取整。开仓只买 leg 1、卖 leg 0;持有空永续/多现货时,反向可执行净边 `>= close_edge` 才买回 leg 0、卖出 leg 1,优先处理减仓。反向信号不得产生新仓。两腿限价固定于本次观察的 BBO:买价不高于 ask × (1 + slip),卖价不低于 bid × (1 − slip),按 tick 保守取整。卖腿使用 PxMode::Limit;引擎风险价格带只能收紧限价,不因后续报价放宽。信号不是利润保证。
 
 数量取两侧对应顶档量 × depth_frac、两侧 max_qty、每腿单笔名义余额、每腿持仓余量的最小值,再向下取到两腿 lot 的最小公倍数。名义上限以对应 ask 与限价的较大值计算;低于任一腿最小数量或最小名义则不交易。现货卖量还受 group 持仓与账户非 baseline 库存限制;可负担性和预留由引擎检查。
 
-两腿都减小绝对仓位时标 Reduce,数量不穿过零,永续腿带 reduceOnly;其他方向标 Open。超限腿仅允许向零减少。无获利反向价差时不主动清仓,强制降仓和裸腿修复归引擎。
+平仓两腿都减小绝对仓位时标 Reduce,数量不穿过零,永续腿带 reduceOnly;合法方向的加仓标 Open。超限腿仅允许向零减少。反向净边未达 close_edge 时不主动清仓,强制降仓和裸腿修复归引擎。
 
 ### 事件与状态
 
@@ -82,7 +83,7 @@ registry 的 cross-taker feature 注册 CrossTaker,kind_id/schema_id = 3,version
 
 每组状态预分配,只含 engine_ns 冷却、UTC 公告期限、失败锁存、Broken 镜像和订单去重身份,不存 TSC、不复制仓位。快照按 GroupId/fingerprint 验证;参数替换保留相同 GroupId/指纹的状态。params.rs 定义 schema;fast/signal.rs 实现整数信号和数量;fast/mod.rs 处理事件、意图、快照;desc.rs 定义 Note;lib.rs 接 SDK trait。
 
-BBO 处理先完成轮次结算与 halt 投递。正 min_edge 下,若两个方向均为原始 bid ≤ 对侧 ask,直接结束本次信号计算;限价不得比触价更有利、负费率不计收益,因此该条件不会排除有效信号。其余报价继续完整的健康、机会年龄、费用、限价和数量检查;已读取的 BBO 在本次调用内复用。
+BBO 处理先完成轮次结算与 halt 投递,再复用本次 BBO 做健康、机会年龄、费用、限价和数量检查。close_edge 可独立于 min_edge,不能用开仓阈值提前过滤减仓。
 
 ## 延迟与资源契约
 
@@ -107,15 +108,16 @@ on_event 无分配、无锁、无系统调用、无浮点数;每个 BBO 最多�
 - [Windows 开发机前后测量](../../benchmarks/reports/2026-10-15-windows-cross-taker.md)(非参考机验收)
 - [SDK](../../crates/hft-strategy-sdk/README.md)、[执行层](../../crates/hft-exec/README.md)、[OMS](../../crates/hft-oms/README.md)
 - [策略规则](../AGENTS.md)、[上线门槛](../../docs/testing.md#8-上线门槛)
+- [产品形态决定](../../.agents/notes/implemented/feature/2026-10-16-perp-spot-shape.md)
 - [同时下单决定](../../.agents/notes/implemented/feature/2026-10-14-cross-taker-simultaneous.md)
 - [范围与待评审取舍](../../.agents/notes/implemented/feature/2026-10-14-cross-taker-executable-spread.md)
 
 ## 已知限制与后续工作
 
-- LeadLag/Advice 和无利润自动库存退出不在本实现;触发为可执行价差。基线差异见 docs/changes.md,待负责人评审。
+- LeadLag/Advice、最大持有时间与相对入场基差止损不启用;退出由 close_edge 与引擎风险处置决定。持有期限/基差止损已考虑,缺少持有期标定时保持关闭,不引入未经标定的强制亏损退出参数。
 - 非 dust 裸量等待引擎修复,现货费用 dust 按引擎阈值保留。
 - 延迟验收、14 天模拟、费率与成交校准、零成交冒烟和正式实例 Shadow 仍是上线前工作。
 
 ### 开发备忘
 
-待实测:在统一升级主机记录各事件入口的分段直方图;在模拟账户上校准 min_edge、slip、机会年龄与手续费舍入的影响。持仓期间资金费和库存退出规则待负责人确认。
+待实测:在统一升级主机记录各事件入口的分段直方图;在模拟账户上校准 min_edge、slip、机会年龄与手续费舍入的影响。持仓期间资金费成本及未来最大持有时间/基差止损参数需单独标定。

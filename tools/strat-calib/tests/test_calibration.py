@@ -25,6 +25,40 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = json.loads((Path(__file__).parent / "fixtures/signals.json").read_text())
 
 
+def test_shape_filter_and_no_reverse_open():
+    config = json.loads((ROOT / "example.json").read_text())
+    for pair in [
+        "binance:linear_perpetual:ETHUSDT|bitget:linear_perpetual:ETHUSDT",
+        "bitget:spot:ETHUSDT|binance:linear_perpetual:ETHUSDT",
+        "binance:linear_perpetual:BTCUSDT|bitget:spot:ETHUSDT",
+    ]:
+        with pytest.raises(ValueError, match="pair_allowlist"):
+            Config({**config, "pair_allowlist": [pair]})
+    m = Meta(-2, -2, 1, 1, 1, 100000, 0)
+    stats, trades = taker_simulate(
+        frame([(100, 100, 102, 102)]), (m, replace(m, spot=True)), (0, 0), TakerParams(slip=0)
+    )
+    assert not trades and stats["above_threshold"] == 0
+    assert stats["final_position_raw"] == [0, 0]
+
+
+def test_basis_cost_and_spot_zero_funding():
+    funding = Funding(1, 1_000_000, 28800, 100)
+    p = CarryParams(max_cross=0)
+    before = carry_edge(funding, None, 0, p, -1)
+    assert carry_edge(funding, None, 0, replace(p, expected_basis_cost=1_000_000), -1) == before - 365_000_000
+    daily = carry_daily(
+        "binance:linear_perpetual:ETHUSDT",
+        "bitget:spot:ETHUSDT",
+        {("binance", "ETHUSDT"): 30},
+        (0, 0),
+        p,
+        (100, 100),
+        [1],
+    )
+    assert daily["day_bps_b"] == 0 and daily["short_leg"] == 0
+
+
 @pytest.mark.parametrize("c", FIXTURES["taker"], ids=lambda c: c["name"])
 def test_shared_rust_signal_sizing(c):
     bm = Meta(-2, -2, 1, 2, 2, 1000000, 1000000)
@@ -69,7 +103,7 @@ def test_shared_real_rust_carry_target(c):
 
 
 def frame(prices=None, ages=None):
-    prices = prices or [(100, 100, 102, 102)] * 6
+    prices = prices or [(102, 102, 100, 100)] * 6
     ages = ages or [0] * len(prices)
     records = []
     for k, (ba, aa, bb, ab) in enumerate(prices):
@@ -101,20 +135,24 @@ def test_caps_cooldown_age_and_terminal_cost_prevent_fake_arbitrage_profit():
         max_chunk_notional=100000000,
         max_position_notional=200000000,
     )
-    stats, trades = taker_simulate(frame(ages=[0, 5_000_000, 0, 0, 0, 0]), (m, m), (500000, 500000), p)
+    stats, trades = taker_simulate(
+        frame(ages=[0, 5_000_000, 0, 0, 0, 0]), (m, replace(m, spot=True)), (500000, 500000), p
+    )
     assert [t["ts_ns"] for t in trades] == [100_000_000_000, 102_000_000_000]
     assert stats["age_eligible"] == 5  # equality fails strictly, unlike funding age
     assert stats["final_position_raw"][0] <= 196
     assert stats["spread_cash_quote"] > 0
     assert stats["pnl_after_liquidation_quote"] < 0  # persistent basis is not locked-in profit
-    disabled, _ = taker_simulate(frame(), (m, m), (0, 0), replace(p, enabled=False))
+    disabled, _ = taker_simulate(frame(), (m, replace(m, spot=True)), (0, 0), replace(p, enabled=False))
     assert disabled["trades"] == 0
 
 
 def test_reversal_reduces_to_zero_and_keeps_both_legs_equal():
     m = Meta(-2, -2, 1, 1, 1, 100000, 0)
     p = TakerParams(min_edge=100000, slip=0, max_chunk_notional=100000000, max_position_notional=100000000)
-    stats, trades = taker_simulate(frame([(100, 100, 102, 102), (102, 102, 100, 100)]), (m, m), (0, 0), p)
+    stats, trades = taker_simulate(
+        frame([(102, 102, 100, 100), (100, 100, 102, 102)]), (m, replace(m, spot=True)), (0, 0), p
+    )
     assert len(trades) == 2 and trades[1]["reducing"]
     assert stats["final_position_raw"] == [0, 0]
     assert stats["pnl_after_liquidation_quote"] > 0
@@ -205,10 +243,8 @@ def test_carry_remaining_slice_obeys_cap_after_price_moves():
 
 
 def test_daily_totals_never_create_timestamped_trades():
-    a, b = "binance:linear_perpetual:X", "okx:linear_perpetual:X"
-    d = carry_daily(
-        a, b, {("binance", "X"): 10, ("okx", "X"): 2}, (500000,) * 2, CarryParams(), (1000, 2000), [1, 3, 7]
-    )
+    a, b = "binance:linear_perpetual:XUSDT", "bitget:spot:XUSDT"
+    d = carry_daily(a, b, {("binance", "XUSDT"): 8}, (500000,) * 2, CarryParams(), (1000, 2000), [1, 3, 7])
     assert d["differential_day_bps"] == 8
     assert d["capacity_quote"] == 1000
     assert d["net_apr"] < 0
@@ -260,13 +296,13 @@ def test_legacy_daily_csv_success_prefix_is_not_a_funding_row(tmp_path):
 
 def test_cli_parquet_outputs_and_no_future_fill(tmp_path):
     records = []
-    for v, px, secs in (("binance", 100, [100, 101]), ("okx", 102, [101, 102])):
+    for v, px, secs in (("binance", 102, [100, 101]), ("bitget", 100, [101, 102])):
         for sec in secs:
             records.append(
                 {
                     "exchange": v,
-                    "market": "linear_perpetual",
-                    "symbol": "X",
+                    "market": "linear_perpetual" if v == "binance" else "spot",
+                    "symbol": "XUSDT",
                     "canonical_id": "x",
                     "sec": sec,
                     "last_ns": sec * 10**9,

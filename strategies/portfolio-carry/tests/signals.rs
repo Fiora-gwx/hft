@@ -54,7 +54,7 @@ fn params(g: &GroupTable) -> CarryParams {
     };
     raw.defaults[0] = 1;
     let body = encode_body(&CarryParams::SCHEMA, 1, &raw).unwrap();
-    CarryParams::decode(&body, 1, g).unwrap()
+    CarryParams::decode(&body, 2, g).unwrap()
 }
 fn funding(rate: i64, interval_s: u32) -> FundingView {
     FundingView {
@@ -151,6 +151,19 @@ fn carry_001_annual_differential_fees_borrow_and_intervals() {
     assert!(portfolio_carry::fast::net_edge(&a, Some(&b), Rate(500_000), &f, -1).unwrap() < 0);
     assert_eq!(portfolio_carry::fast::annual(Rate(10), 0), None);
     assert!(portfolio_carry::fast::net_edge(&b, Some(&a), Rate(0), &f, 1).unwrap() > 0);
+    let before = portfolio_carry::fast::net_edge(&a, None, Rate(0), &f, -1).unwrap();
+    f.expected_basis_cost = Rate(1_000_000);
+    assert_eq!(
+        portfolio_carry::fast::net_edge(&a, None, Rate(0), &f, -1),
+        Some(before - 365_000_000)
+    );
+}
+
+#[test]
+fn carry_001_negative_funding_never_opens_reverse_spot() {
+    let (mut s, mut v, mut h) = setup();
+    MockViews::funding(&mut v, I2, funding(-20_000_000, 28_800));
+    assert!(tick(&mut s, &v, &mut h).targets.is_empty());
 }
 #[test]
 fn carry_002_entry_has_equal_linked_legs_and_cap() {
@@ -263,7 +276,7 @@ fn carry_008_disabled_and_closeonly_exit_held_positions() {
                 defaults: CarryParams::SCHEMA.fields.iter().map(|f| f.default).collect(),
                 overrides: vec![],
             };
-            let p = CarryParams::decode(&encode_body(&CarryParams::SCHEMA, 1, &raw).unwrap(), 1, &g).unwrap();
+            let p = CarryParams::decode(&encode_body(&CarryParams::SCHEMA, 1, &raw).unwrap(), 2, &g).unwrap();
             s.on_params(&p, &g, &RefView::new(&fixture_rd(), A1)).unwrap();
         } else {
             MockViews::mode(&mut v, A1, G4, RunMode::CloseOnly);

@@ -97,7 +97,12 @@ pub fn signal(buy: LegInput, sell: LegInput, f: &XtFields) -> Option<Signal> {
         return None;
     }
     let edge = net_edge(bp, sp, buy.fee, sell.fee)?;
-    if edge < f.min_edge {
+    let reducing = buy.position.0 < 0 && sell.position.0 > 0;
+    if if reducing {
+        edge < f.close_edge
+    } else {
+        edge <= f.min_edge
+    } {
         return None;
     }
     let lot = pair_lot(buy.hot.lot, sell.hot.lot)?;
@@ -137,7 +142,6 @@ pub fn signal(buy: LegInput, sell: LegInput, f: &XtFields) -> Option<Signal> {
         }
     }
     // Closing pairs stop at zero on either leg, allowing Reduce/Halt to remain meaningful.
-    let reducing = buy.position.0 < 0 && sell.position.0 > 0;
     if reducing {
         qty = qty.min(buy.position.0.saturating_abs()).min(sell.position.0);
     }

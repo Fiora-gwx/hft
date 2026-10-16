@@ -39,7 +39,7 @@ spec: README.md
 - 里程碑:M4
 - 前置:两个交易所的同资产现货/永续 fixture,启用策略,显式输入资金、杠杆、报价与费率。
 - 步骤:向 SDK MockViews/策略送入标题所列输入变化。
-- 期望:不同周期按年化比较,手续费与借贷成本降低信号;周期零不入场。
+- 期望:不同周期按年化比较,手续费、借贷与 expected_basis_cost 降低信号;周期零不入场,负资金费不反向开仓。
 - 实现:`strategies/portfolio-carry/tests/signals.rs::carry_001_annual_differential_fees_borrow_and_intervals`
 
 ### CARRY-002 等量 linked 双腿与硬上限
@@ -123,12 +123,14 @@ spec: README.md
 - 期望:未入场/持有/Exec 不产生目标;BBO 与定时器入场每次产生等量反向目标;Risk 锁存后下一 group 事件退出至零。参考机 p50/p99 不超过 README/SDK 预算;CI smoke 只报告;慢侧与 Advice 明确不适用。
 - 实现:`strategies/portfolio-carry/benches/on_event.rs::carry_009_entries`
 
-### CARRY-010 真实 sequencer 的双向 linked 成交、资金费与重放
+### CARRY-010 真实 sequencer 的永续/现货 linked 成交、资金费与重放
 
 - 规则:[测试与验收](README.md#测试与验收)
 - 级别:integ
 - 里程碑:M4
-- 前置:registry 静态 Strategies,真实 sequencer 与两个模拟永续 venue,mock 仅响应引擎发出的订单。
-- 步骤:分别缩小两条腿各自对手侧的深度,反侧深度设置为干扰值;四组费率各跑两个方向;在任何成交前读取两腿订单与 OrderDecision;注入实际资金费两次;将净资金费差降至零并检查退出双发。12 个故障种子覆盖任一腿多成、单腿拒单和在途 venue 断线,断线后先恢复连接再用 QueryResult 确认终态;每种子重复运行并验证 journal 重放。
-- 期望:入场和退出两笔订单的 trigger_seq 相同、Second.target_slot 指向 First.slot,两腿限价在 BBO ± max_cross 内,IOC 数量取双方可执行深度与上限的较小值;两个等量反向仓位、资金费只记一次、退出后两腿归零。未知结果确认前不修复或重发,断线不改变仓位;终态后只对超额腿发一次 Reverse,成交后恢复等量对冲;重复执行的决策/账本字节一致,replay verify 零差异。
+- 前置:registry 静态 Strategies,真实 sequencer 与一个模拟永续和一个模拟现货 venue,mock 仅响应引擎发出的订单。
+- 步骤:分别缩小两条腿各自对手侧的深度,反侧深度设置为干扰值;四组正资金费跑空永续/多现货方向;在任何成交前读取两腿订单与 OrderDecision;注入永续实际资金费两次;将净资金费差降至零并检查退出双发。12 个故障种子覆盖任一腿多成、单腿拒单和在途 venue 断线,断线后先恢复连接再用 QueryResult 确认终态;每种子重复运行并验证 journal 重放。
+- 期望:入场和退出两笔订单的 trigger_seq 相同、Second.target_slot 指向 First.slot,两腿限价在 BBO ± max_cross 内,IOC 数量取双方可执行深度与上限的较小值;永续空/现货多等量仓位、现货成交有原始 quote cash、永续资金费只记一次、退出后两腿归零。未知结果确认前不修复或重发,断线不改变仓位;终态后只对超额腿发一次 Reverse,成交后恢复等量对冲;重复执行的决策/账本字节一致,replay verify 零差异。
 - 实现:`strategies/registry/tests/portfolio_carry.rs::carry_010_linked_entry_funding_and_edge_decay_exit`
+
+固定产品形态与原子拒绝回归见 registry/tests/product_shape.rs;负费率无反向开仓见 carry_001_negative_funding_never_opens_reverse_spot。纯计算差分公式保留的测试不表示双永续交易可启用。

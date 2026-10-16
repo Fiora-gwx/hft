@@ -51,6 +51,7 @@ class TakerParams:
     max_quote_age_ms: int = 5
     cooldown_ms: int = 100
     max_hedge_failures: int = 3
+    close_edge: int = 0
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,7 @@ class CarryParams:
     max_leverage_x100: int = 300
     max_cross: int = 100_000
     retry_ms: int = 1000
+    expected_basis_cost: int = 0
 
 
 @dataclass(frozen=True)
@@ -156,7 +158,10 @@ def signal(
     if bp < buy.ask or sp > sell.bid:
         return None
     edge, lot = net_edge(bp, sp, *fees), pair_lot(bm.lot, sm.lot)
-    if edge is None or edge < p.min_edge or lot is None:
+    reducing = positions[0] < 0 < positions[1]
+    if edge is None or lot is None:
+        return None
+    if (edge < p.close_edge) if reducing else (edge <= p.min_edge):
         return None
     qty = min(buy.ask_qty, sell.bid_qty) * p.depth_frac // ONE
     if qty > I64:
@@ -194,7 +199,9 @@ def carry_edge(a: Funding, b: Funding | None, fees: int, p: CarryParams, directi
     aa, bb = annual(a.rate, a.interval_s), annual(b.rate, b.interval_s) if b else 0
     if aa is None or bb is None or p.fee_horizon_ms <= 0:
         return None
-    cost = ceildiv((max(0, fees) * 2 + p.max_cross * 4) * YEAR_S * 1000, p.fee_horizon_ms)
+    cost = ceildiv(
+        (max(0, fees) * 2 + p.max_cross * 4 + p.expected_basis_cost) * YEAR_S * 1000, p.fee_horizon_ms
+    )
     value = (aa - bb) * -direction - cost - p.borrow_apr
     return value if -I64 - 1 <= value <= I64 else None
 
