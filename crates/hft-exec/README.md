@@ -609,6 +609,8 @@ Broken 的 (account, group) 有三条出路,优先级从高到低:人工 `HedgeF
 2. **已处理**:策略对该 (account, group) 调 `set_target`(替换了当前目标的;与当前目标逐字段相同的不算,同 `manual_hold` 解除的口径)/`clear_target`,或 `Ctx::place`/链上意图下了该 group 的订单(`note_strategy_action`)→ 清 `ext_deadline` 与暂停;新目标照常进入 `Working`(`flatten_lock` 与 L3 期间仍按"目标的接受与替换"校验)。`ext_deadline` 不经截止而清零时(本条、`manual_hold` 置位、`clear_account`)写一条 `ExecDecision{ExternalSeen, detail = External/0/Cleared}`。`manual_hold` 的解除另有规则(`clear_target` 不算),见下一节。
 3. **截止**未处理(只有表中最后一行会到这里):清除暂停的 `origin = Strategy` 目标(通知 `Done{cleared_by_engine}`);若 `naked_filled` 超过补腿阈值且高于尘埃线 → 对多出的一腿发 `ExternalDefault`(补腿同一动作、计次、冷却、截止与抑制条件,含 `quote_ok`;多出的是链上腿时只写 `Note{ExecChainLegExcess}`);无论是否发单都写 `ExecDecision{ExternalDefault}`(不发单时 `qty = 0`)与一条 `Note{ExecExternalDefault}`,级别按条件:`naked_filled` 超过补腿阈值且高于尘埃线(进入默认处理:发 `ExternalDefault` 单,或多出的是链上腿)→ **P0**;否则(裸量在阈值内或在尘埃线以下,不发单)→ **P1**;`ext_deadline` 清零。
 
+`ext_deadline != 0` 期间策略目标始终暂停；保证金/强制减仓事件改变 `Stuck` 原因不解除该暂停。截止处理先清掉未处理的策略目标，该次推进不再为它发切片；已有在途 IOC 仍等终态。
+
 ### 人工保持与恢复期抑制
 
 两类状态暂停引擎的**自动**处置——补腿(`HedgeFix`)、残余修剪(`ResidualTrim`)、外来成交默认处理(`ExternalDefault`)与自动有界平仓;期间不计次、不判截止。L3 默认减仓、`engine_flatten`、对齐目标与人工 `HedgeFix` 命令不受影响。

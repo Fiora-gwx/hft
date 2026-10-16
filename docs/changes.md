@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-16 | 外来成交待处理计时独立于 Stuck 展示原因暂停策略目标，强制减仓/L1 状态变化不能在截止清除前重新开回该腿 | EXE-050，CI 缩减六步反例 | hft-exec advance、README、TESTS、固定/属性回归 | 待评审(执行/风控) |
 | 2026-10-16 | Unknown/VERIFY 查询超过既有阈值或 QueryUnsupported 后持久化 REST_QUERY，停止 gateway 定时/重连查询并持续请求对账；仅交易所证据可收敛 | BUG-query、OMS-138，gone 订单每秒无限查询 | hft-oms 代码、README、TESTS、属性模型 | 待评审(订单/恢复) |
 | 2026-10-16 | MD stream 按协议路由独立分组，恢复 ticker 的 Funding 输入；资金费首次轮询等待正宽窗口，不冻结零宽请求，保留合法窗口重试与实额差分 | BUG-2/BUG-poll、VEN-021/258、BGT-307/336，真实 REST code 20001 | venue-proto、venue、venue-bitget、core 装配与规格/实采 fixture | 待评审(资金费/账户闸门) |
 | 2026-10-15 | 非正式 Testnet 的 Bitget unknown/空权限枚举允许通过权限部分，身份/认证读取保持严格、实测须首单 ack；启动 REST fundingInfo/premiumIndex/current-fund-rate seed 真实周期，失败继续等待 WS 变化，首个 Funding 输入记录周期 | 负责人批准 demo 冷启动，BGT-328、BIN-033、BGT-034、CORE-120 | venue-proto、venue runtime、两所 account/feed ctx 与 core 装配及规格 | 待评审(账户/资金费) |
