@@ -690,7 +690,14 @@ fn create_with_receipt<S: StrategySet>(
         binding.kind_id = if model {
             0xFF02
         } else {
-            S::kinds().first().unwrap().kind_id
+            // Generic file/recovery fixtures need a non-production probe, not
+            // whichever business strategy happens to sort first in the registry.
+            S::kinds()
+                .iter()
+                .find(|d| d.non_prod_only)
+                .or_else(|| S::kinds().first())
+                .unwrap()
+                .kind_id
         };
     }
     if let Some(spec) = model_restarts {
