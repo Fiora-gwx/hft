@@ -406,7 +406,7 @@ fn inject_snapshot(h: &mut Fh, req: hft_venue::SnapReq, update: u64, status: u8)
         _pad: 0,
         http_status: 200,
         _pad2: 0,
-        _pad3: 0,
+        ts_flags: 0,
     };
     let mut e = hft_event::Bbo::new_zeroed();
     e.h.venue = V7;

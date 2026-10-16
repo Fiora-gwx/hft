@@ -80,7 +80,7 @@ impl Obs for Cum {
             self.ok = true;
             self.ok_init = true;
         }
-        if let RepMsg::OrderEvent(e) = m
+        if let RepMsg::OrderEvent(e, _) = m
             && matches!(
                 e.what,
                 hft_event::OrderEventKind::PartialFill | hft_event::OrderEventKind::Fill
@@ -115,7 +115,7 @@ impl Obs for Enc {
         let mut buf = vec![0u8; 70_000];
         let f = RecordFlags(0);
         let n = match m {
-            RepMsg::OrderEvent(x) => Ok(encode_fixed(&mut buf, 1, 1, f, x)),
+            RepMsg::OrderEvent(x, _) => Ok(encode_fixed(&mut buf, 1, 1, f, x)),
             RepMsg::SendReport(x) => Ok(encode_fixed(&mut buf, 1, 1, f, x)),
             RepMsg::PositionReport(x) => Ok(encode_fixed(&mut buf, 1, 1, f, x)),
             RepMsg::BalanceReport(x) => Ok(encode_fixed(&mut buf, 1, 1, f, x)),

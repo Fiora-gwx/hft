@@ -104,7 +104,7 @@ impl Feed {
             connection.inst = InstId(0);
             let _ = self.out.try_push(FeedMsg::ConnState(connection));
             let _ = self.out.try_push(FeedMsg::ConnState(state));
-            let _ = self.out.try_push(FeedMsg::Bbo(b));
+            let _ = self.out.try_push(FeedMsg::Bbo(b, hft_event::RecordFlags(0)));
         }
         Ok(true)
     }
@@ -272,12 +272,12 @@ pub fn reply_parts(
                 io::rep_parts(&RepMsg::ConnState(state), &[], &mut emit);
             }
         }
-    } else if let RepMsg::OrderEvent(e) = msg {
+    } else if let RepMsg::OrderEvent(e, _) = msg {
         // This adapter only boots a fresh simulator; recovery is rejected at startup.
         // The pure simulator has no engine epoch, while OMS matches (slot, gen, epoch).
         let mut event = *e;
         event.epoch = epoch;
-        io::rep_parts(&RepMsg::OrderEvent(event), bulk, emit);
+        io::rep_parts(&RepMsg::OrderEvent(event, hft_event::RecordFlags(0)), bulk, emit);
     } else {
         io::rep_parts(msg, bulk, emit);
     }

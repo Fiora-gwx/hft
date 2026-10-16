@@ -56,8 +56,8 @@ fn ven_021_md_task_only_md() {
         .collect();
     assert_eq!(e.len(), 3);
     assert!(matches!(e[0], FeedMsg::Bulk { .. }));
-    assert!(matches!(e[1], FeedMsg::Trade(_)));
-    assert!(matches!(e[2], FeedMsg::MarkPrice(_)));
+    assert!(matches!(e[1], FeedMsg::Trade(_, _)));
+    assert!(matches!(e[2], FeedMsg::MarkPrice(_, _)));
     assert!(h.bulk.as_mut().unwrap().peek().is_some());
     assert_eq!(h.rt.counters().unknown_class, 1);
 }
@@ -95,14 +95,14 @@ fn ven_021_md_routes_keep_trade_and_ticker_separate_after_reconnect() {
         h.net.push(ticker, format!("F|S1|{t}|0.0001|2000").as_bytes());
         h.poll(t + 1);
         let events = h.drain_md();
-        assert!(events.iter().any(|e| matches!(e, FeedMsg::Trade(_))));
+        assert!(events.iter().any(|e| matches!(e, FeedMsg::Trade(_, _))));
         assert!(
-            events.iter().any(|e| matches!(e, FeedMsg::MarkPrice(_))),
+            events.iter().any(|e| matches!(e, FeedMsg::MarkPrice(_, _))),
             "reconnect={reconnect}, events={events:?}, builds={:?}, counts={:?}",
             h.all_builds,
             h.rt.counters()
         );
-        assert!(events.iter().any(|e| matches!(e, FeedMsg::Funding(_))));
+        assert!(events.iter().any(|e| matches!(e, FeedMsg::Funding(_, _))));
         assert_eq!(h.rt.counters().unknown_class, 0);
     }
 }
@@ -210,7 +210,7 @@ fn ven_073_md_full_bbo_continues() {
     assert_eq!(ls.ring_full, 1);
     assert_eq!(bbos(&h.drain_bbo()).len(), 3);
     assert_eq!(h.rt.conn(ConnId(8)).unwrap().sys().recvmsg, before);
-    assert!(h.drain_md().iter().all(|m| matches!(m, FeedMsg::Trade(_))));
+    assert!(h.drain_md().iter().all(|m| matches!(m, FeedMsg::Trade(_, _))));
 }
 #[test]
 fn ven_078_depth_drop_isolated() {
@@ -261,10 +261,10 @@ fn ven_065_event_rings() {
         .collect();
     assert_eq!(e.len(), 6);
     assert!(matches!(e[0], FeedMsg::Bulk { .. }));
-    assert!(matches!(e[1], FeedMsg::Trade(_)));
-    assert!(matches!(e[2], FeedMsg::MarkPrice(_)));
-    assert!(matches!(e[3], FeedMsg::IndexPrice(_)));
-    assert!(matches!(e[4], FeedMsg::Funding(_)));
-    assert!(matches!(e[5], FeedMsg::Liquidation(_)));
+    assert!(matches!(e[1], FeedMsg::Trade(_, _)));
+    assert!(matches!(e[2], FeedMsg::MarkPrice(_, _)));
+    assert!(matches!(e[3], FeedMsg::IndexPrice(_, _)));
+    assert!(matches!(e[4], FeedMsg::Funding(_, _)));
+    assert!(matches!(e[5], FeedMsg::Liquidation(_, _)));
     assert!(h.bulk.as_mut().unwrap().peek().is_some());
 }

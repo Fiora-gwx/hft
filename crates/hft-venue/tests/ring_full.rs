@@ -136,6 +136,7 @@ fn ven_072_ring_full_parks() {
     let _ = (
         stub::cfg(),
         FeedMsg::Bulk {
+            flags: hft_event::RecordFlags(0),
             kind: hft_event::EventKind::BBO,
             len: 0,
         },

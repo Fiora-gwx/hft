@@ -6,6 +6,8 @@ spec: README.md
 
 # hft-core 测试规格
 
+CORE-012 同时验证 FeedMsg 的 HW/SW/Missing 标志通过普通行情与 bulk 输入适配器保留。
+
 CORE-061 覆盖 idle 默认 Park、Spin 缺绑核/共享核拒绝；CORE-120 用真实 Bitget 零宽错误与空页验证资金费边界等待及后续轮询。CORE-303 的 `epoch_reverse` 回归把真实 boot 出环的 SetEpoch 交给 gateway，用其实际编码 client id 的私有成交进入 sequencer/OMS/exec；另一腿 Expired 后自动 Reverse、平仓并完整回放。
 
 CORE-012 验证可选测量环配置，CORE-220 验证进程干净停止后的测量文件与关闭标记；见 [延迟采集测试](../../tools/latency-report/TESTS.md)。

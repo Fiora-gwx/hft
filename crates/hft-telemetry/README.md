@@ -87,6 +87,8 @@ pub enum ReportScope { Instance, Group }
 
 ### 输入:时间点
 
+行情记录的接收来源必须有明确的 `HW_TS` 或 `SW_TS`；标志缺失或冲突时不把非零 `hw_rx_ns` 推断成 HW，不产出依赖该端点的分段。独立的 TSC `ingest` 与有效 `sw_rx_ns` 的 `kernel_to_user` 仍可统计，来源维度为 Missing；旧记录不补造来源。
+
 时间点的名称、编号、时钟域与语义**只在 [latency-budget §1](../../docs/latency-budget.md) 定义**(含尾部追加、常态记录的 `sw_rx`);`LatencySample`(含触发事件 kind `trigger_kind` 与 `link_role`)与 `MarketHdr` 的字节布局在 [hft-event](../hft-event/README.md)。本 crate 读 `LatencySample`、行情记录头与 `MarketHdr`、`ClockStatus`,以及触发/回报事件体;链上分段(可选扩展)读 seq journal 与 chain journal 的对应记录。
 
 ### 分段(`StageSet`)

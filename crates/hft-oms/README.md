@@ -376,7 +376,8 @@ pub struct SlotStamps {                // 80 B,与槽平行;只在下单/撤单/
     pub trigger_seq: u64,                                                                               // 64
     pub trig_kind: u16,                // 72 触发事件的 EventKind 编号(码表 = event-model kind 编号表;→ LatencySample.trigger_kind)
     pub op: u8,                        // 74 待合成样本的操作:New=0 Cancel=1 Amend=2(= LatencySample.action);0xFF = 无
-    pub _pad: [u8; 5],                 // 75
+    pub rx_flags: u8,                 // 75 触发记录的接收来源标志
+    pub _pad: [u8; 4],                 // 76
 }
 
 #[repr(C)]
@@ -522,7 +523,7 @@ pub struct VenueAcctTable {            // 每 (venue, account) 一个
 `LatencySample` 的写入时机唯一归属本节(记录布局与 `action` 码归 [hft-event](../hft-event/README.md),分段公式与分组归 [latency-budget](../../docs/latency-budget.md)):
 
 1. **记戳**:`place`(新单)与拥有者的 `cancel`、`amend` 把触发事件的 `TrigStamps` 与操作 `op` 写进该槽的 `SlotStamps`,sequencer 随后填 `decided_tsc`;该操作的 `SendReport{Written}` 填 `sent_tsc`。槽上已有未合成的样本(`op ≠ 0xFF`)时,新的撤改不记戳、不产生样本,新单的样本不被覆盖。批量撤单(`cancel_all`、`cancel_open`、`cancel_resting_on`、`reissue_cancels`)与冒烟单到期撤单不记戳。
-2. **合成**:该操作的首个交易所响应到达的同一事件内合成一条,`action = op`,随后 `op = 0xFF`。首个响应:新单 = 该槽的任何交易所回报(Ack、Reject、成交、CancelAck/Expired);撤单 = `CancelAck` 或 `CancelReject`;改单 = `AmendAck` 或 `AmendReject`。`ack_*` 取该回报,`link_role` 取 `SlotExt.role`,`trigger_kind` 取 `trig_kind`,`sw_rx_ns` 取 `trig_sw_rx_ns`。
+2. **合成**:该操作的首个交易所响应到达的同一事件内合成一条,`action = op`,随后 `op = 0xFF`。首个响应:新单 = 该槽的任何交易所回报(Ack、Reject、成交、CancelAck/Expired);撤单 = `CancelAck` 或 `CancelReject`;改单 = `AmendAck` 或 `AmendReject`。`ack_*` 取该回报,`link_role` 取 `SlotExt.role`,`trigger_kind` 取 `trig_kind`,`sw_rx_ns` 取 `trig_sw_rx_ns`。`src` 的触发/响应接收点分别取触发记录与本条回报记录的来源标志，未知或零值记 Missing；其余有效点按交易所时间或 TSC 域编码，码表归 hft-event。
 3. 不合成、直接 `op = 0xFF` 的情形:该操作的 `SendReport` 报告确定未写出;恢复后的在途槽(`SlotStamps` 不进快照,恢复后 `op = 0xFF`);槽回收。
 4. `sent_tsc` 同时是 NotFound grace 的起点(见"Unknown 收敛流程"):撤改写出后它是撤改的写出时刻,只会更晚(偏保守)。
 

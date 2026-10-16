@@ -249,6 +249,8 @@ spec: README.md
 
 ### SLC-014 Ack 写新单样本并在同一事件撤单
 
+接收来源由环元素传入；不能以期望 HW 配置或接收戳数值相等推断。
+
 - 规则:[简化 sequencer](README.md#简化-sequencer)
 - 级别:unit
 - 里程碑:M1.5
@@ -372,11 +374,11 @@ spec: README.md
 - 前置:`SEQ0`;每行投递一条 Bbo,读回其记录头 `flags`
 - 实现:`tools/latency-slice/tests/seq.rs::slc_023_bbo_ts_flags`
 
-| 行 | `hw_rx_ns` / `sw_rx_ns` | 期望 |
+| 行 | `hw_rx_ns` / `sw_rx_ns`（环元素来源） | 期望 |
 |---|---|---|
-| SLC-023.1 | 1000 / 2000 | `HW_TS`,无 `SW_TS` |
-| SLC-023.2 | 2000 / 2000 | `SW_TS`,无 `HW_TS` |
-| SLC-023.3 | 0 / 2000 | 两者都无 |
+| SLC-023.1 | 1000 / 2000 或 2000 / 2000（HW_TS） | `HW_TS`,无 `SW_TS` |
+| SLC-023.2 | 2000 / 2000（SW_TS） | `SW_TS`,无 `HW_TS` |
+| SLC-023.3 | 0 / 2000（无来源） | 两者都无 |
 
 ### SLC-024 取环优先级 hk > rep > bbo,一条输入一个事件
 

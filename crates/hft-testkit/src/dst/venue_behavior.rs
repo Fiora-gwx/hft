@@ -292,7 +292,7 @@ impl ToyMatcher {
         let ev = order_event(self.venue, &o, what, px, qty, (fee as i64, fee_asset), now_ns);
         self.push(
             now_ns + self.latency_ns,
-            RepMsg::OrderEvent(ev),
+            RepMsg::OrderEvent(ev, hft_event::RecordFlags(0)),
             format!("o-{}-{}", o.slot.0, o.r#gen),
         );
     }
@@ -401,7 +401,7 @@ impl Matcher for ToyMatcher {
                 );
                 self.push(
                     due,
-                    RepMsg::OrderEvent(ack),
+                    RepMsg::OrderEvent(ack, hft_event::RecordFlags(0)),
                     format!("o-{}-{}", o.slot.0, o.r#gen),
                 );
                 self.orders.push(o);
@@ -418,7 +418,11 @@ impl Matcher for ToyMatcher {
                         (0, AssetId(0)),
                         now_ns,
                     );
-                    self.push(due, RepMsg::OrderEvent(ev), format!("o-{}-{}", o.slot.0, o.r#gen));
+                    self.push(
+                        due,
+                        RepMsg::OrderEvent(ev, hft_event::RecordFlags(0)),
+                        format!("o-{}-{}", o.slot.0, o.r#gen),
+                    );
                     self.orders.remove(ix);
                 } else if o.filled >= o.qty {
                     self.orders.remove(ix);
@@ -441,7 +445,11 @@ impl Matcher for ToyMatcher {
                             (0, AssetId(0)),
                             now_ns,
                         );
-                        self.push(due, RepMsg::OrderEvent(ev), format!("o-{}-{}", o.slot.0, o.r#gen));
+                        self.push(
+                            due,
+                            RepMsg::OrderEvent(ev, hft_event::RecordFlags(0)),
+                            format!("o-{}-{}", o.slot.0, o.r#gen),
+                        );
                     }
                     None => {
                         let o = TOrder {
@@ -466,7 +474,11 @@ impl Matcher for ToyMatcher {
                             (0, AssetId(0)),
                             now_ns,
                         );
-                        self.push(due, RepMsg::OrderEvent(ev), String::new());
+                        self.push(
+                            due,
+                            RepMsg::OrderEvent(ev, hft_event::RecordFlags(0)),
+                            String::new(),
+                        );
                     }
                 }
             }
@@ -535,7 +547,11 @@ impl Matcher for ToyMatcher {
                 (0, AssetId(0)),
                 now_ns,
             );
-            self.push(due, RepMsg::OrderEvent(ev), format!("o-{}-{}", o.slot.0, o.r#gen));
+            self.push(
+                due,
+                RepMsg::OrderEvent(ev, hft_event::RecordFlags(0)),
+                format!("o-{}-{}", o.slot.0, o.r#gen),
+            );
         }
     }
     fn free_quote(&self, a: AccountId) -> i128 {
@@ -648,7 +664,7 @@ impl Matcher for ToyMatcher {
 /// Account of a report.
 pub fn rep_account(r: &RepMsg) -> Option<AccountId> {
     match r {
-        RepMsg::OrderEvent(e) => Some(e.account),
+        RepMsg::OrderEvent(e, _) => Some(e.account),
         RepMsg::SendReport(e) => Some(e.account),
         RepMsg::PositionReport(e) => Some(e.account),
         RepMsg::BalanceReport(e) => Some(e.account),
@@ -664,7 +680,7 @@ pub fn rep_account(r: &RepMsg) -> Option<AccountId> {
 /// A report as the engine Input it becomes.
 pub fn rep_input(r: &RepMsg, src: Source) -> InputRec {
     match r {
-        RepMsg::OrderEvent(e) => InputRec::of(e, src),
+        RepMsg::OrderEvent(e, _) => InputRec::of(e, src),
         RepMsg::SendReport(e) => InputRec::of(e, src),
         RepMsg::PositionReport(e) => InputRec::of(e, src),
         RepMsg::BalanceReport(e) => InputRec::of(e, src),
@@ -1203,7 +1219,7 @@ impl<M: Matcher> MockVenue<M> {
             }
             let mut due =
                 r.due_ns.max(now) + self.rng.range(0, self.cfg.latency_ns.1 - self.cfg.latency_ns.0);
-            if fba && matches!(&rep, RepMsg::OrderEvent(e) if e.what == OrderEventKind::Ack) {
+            if fba && matches!(&rep, RepMsg::OrderEvent(e, _) if e.what == OrderEventKind::Ack) {
                 due += 2_000_000;
                 self.next_order.retain(|x| *x != NextOrder::FillBeforeAck);
                 fba = false;
@@ -1226,7 +1242,7 @@ impl<M: Matcher> MockVenue<M> {
                     due += (due - now) * 99;
                 }
             }
-            if let RepMsg::OrderEvent(e) = &rep
+            if let RepMsg::OrderEvent(e, _) = &rep
                 && e.what == OrderEventKind::Ack
                 && e.exch_order_id != 0
                 && e.slot != SlotId::UNRESOLVED
@@ -1248,7 +1264,7 @@ impl<M: Matcher> MockVenue<M> {
             // once (FeeOnly is a delta, without a duplicate-report idempotency key).
             let mut fee_due = due;
             if !late_copy
-                && let RepMsg::OrderEvent(e) = &mut rep
+                && let RepMsg::OrderEvent(e, _) = &mut rep
                 && matches!(e.what, OrderEventKind::Fill | OrderEventKind::PartialFill)
                 && e.fee.0 != 0
                 && let Some(delay_ms) = self.late_fees.pop_front()
@@ -1270,7 +1286,7 @@ impl<M: Matcher> MockVenue<M> {
                 *e = (*e).max(fee_due);
             }
             if !self.clean
-                && let RepMsg::OrderEvent(e) = &rep
+                && let RepMsg::OrderEvent(e, _) = &rep
                 && matches!(e.what, OrderEventKind::PartialFill | OrderEventKind::Fill)
                 && let Some(p) = self.next_order.iter().position(|x| *x == NextOrder::NoClientId)
             {
@@ -1304,7 +1320,7 @@ impl<M: Matcher> MockVenue<M> {
             if duplicate {
                 out.push((due + 1, input.clone()));
             }
-            if let RepMsg::OrderEvent(e) = &rep
+            if let RepMsg::OrderEvent(e, _) = &rep
                 && let Some(execution) = self
                     .stale_executions
                     .iter_mut()
@@ -1315,14 +1331,14 @@ impl<M: Matcher> MockVenue<M> {
                     .entry(e.account.0)
                     .and_modify(|last| *last = (*last).max(execution.delivered_ns));
             }
-            if late_copy && let RepMsg::OrderEvent(e) = &rep {
+            if late_copy && let RepMsg::OrderEvent(e, _) = &rep {
                 self.late.scheduled(e, due + u64::from(duplicate));
                 self.last_due
                     .entry(e.account.0)
                     .and_modify(|last| *last = (*last).max(due + u64::from(duplicate)));
             }
             if !self.clean
-                && let RepMsg::OrderEvent(e) = &rep
+                && let RepMsg::OrderEvent(e, _) = &rep
             {
                 let last = due + u64::from(duplicate);
                 if let Err(e) = self.cancel_filled.rejected(e, last) {
@@ -1792,7 +1808,7 @@ impl<M: Matcher> MockVenue<M> {
             });
             self.stale_replies.push_back(VenueOut {
                 due_ns: due,
-                rep: RepMsg::OrderEvent(order),
+                rep: RepMsg::OrderEvent(order, hft_event::RecordFlags(0)),
                 client_id: "stale-gen-fault".into(),
             });
             self.last_due

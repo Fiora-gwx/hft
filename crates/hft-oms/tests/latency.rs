@@ -7,7 +7,7 @@
 mod common;
 
 use common::*;
-use hft_event::{ConnRole, ConnStateKind, GwOp, OrderEventKind, SendStatus};
+use hft_event::{ConnRole, ConnStateKind, GwOp, OrderEventKind, RecordFlags, SendStatus};
 use hft_oms::*;
 use hft_strategy_sdk::{OrderRef, SnapshotReader, SnapshotWriter};
 use hft_types::{Tif, Tsc};
@@ -22,6 +22,7 @@ fn trig(seq: u64, kind: u16) -> TrigStamps {
         proc_tsc: Tsc(1010),
         trigger_seq: seq,
         kind,
+        rx_flags: RecordFlags::HW_TS.0 as u8,
     }
 }
 
@@ -55,6 +56,27 @@ fn placed(h: &mut H, it: &ApprovedIntent, t: TrigStamps) -> OrderRef {
 
 #[test]
 fn oms_080_new_sample_on_first_response() {
+    // Explicit receive domains survive independently for trigger and acknowledgment.
+    for (trigger, ack, expected_trigger, expected_ack) in [
+        (RecordFlags::SW_TS, RecordFlags::HW_TS, 2, 1),
+        (RecordFlags::HW_TS, RecordFlags::SW_TS, 1, 2),
+        (RecordFlags(0), RecordFlags(0), 0, 0),
+    ] {
+        let mut h = H::new();
+        let mut t = trig(77, 0x0101);
+        t.rx_flags = trigger.0 as u8;
+        let s = placed(&mut h, &buy_x(), t);
+        let mut e = h.oe(s, OrderEventKind::Ack);
+        e.hw_rx_ns = 1990;
+        e.rx_tsc = 2000;
+        let mut hdr = h.hdr(0);
+        hdr.flags = ack.0;
+        h.o.on_order_event(&e, &hdr, &mut h.out);
+        let src = h.out.latency[0].src;
+        assert_eq!((src >> 4) & 3, expected_trigger);
+        assert_eq!((src >> 14) & 3, expected_ack);
+        assert_eq!((src >> 12) & 3, 3); // sent_tsc
+    }
     let mut h = H::new();
     let s = placed(&mut h, &buy_x(), trig(77, 0x0101));
     let mut e = h.oe(s, OrderEventKind::Ack);

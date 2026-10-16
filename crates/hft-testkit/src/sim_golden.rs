@@ -54,7 +54,7 @@ pub fn run_sim_case(
             SimStep::Advance(t) => exchange.advance(*t),
         }
         exchange.drain_due(Tsc(at), |reply| {
-            if let RepMsg::OrderEvent(event) = reply.msg {
+            if let RepMsg::OrderEvent(event, _) = reply.msg {
                 actual.push(event);
             }
         });

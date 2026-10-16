@@ -70,7 +70,7 @@ fn sim_012_drain_order() {
     let accts: Vec<_> = s
         .out
         .iter()
-        .filter(|r| matches!(r.msg, hft_event::RepMsg::OrderEvent(_)))
+        .filter(|r| matches!(r.msg, hft_event::RepMsg::OrderEvent(_, _)))
         .map(|r| (r.account, r.due))
         .collect();
     let n8 = accts.iter().filter(|(a, _)| *a == A8).count();

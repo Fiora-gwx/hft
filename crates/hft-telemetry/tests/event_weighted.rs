@@ -90,6 +90,15 @@ fn single(gap: u32, flags: u16) -> (Vec<EventWeightedReport>, Vec<EwSample>) {
 
 #[test]
 fn tel_027_kernel_rx_hi() {
+    // A nonzero legacy value without source evidence is not hardware timing.
+    for flags in [0, RecordFlags::HW_TS.0 | RecordFlags::SW_TS.0] {
+        let (_, samples) = single(30_000, flags);
+        assert!(values(&samples, Stage::KernelRx, false).is_empty());
+        assert!(values(&samples, Stage::FeedHost, false).is_empty());
+        assert_eq!(values(&samples, Stage::Ingest, false), vec![3_000]);
+        assert_eq!(values(&samples, Stage::KernelToUser, false), vec![7_000]);
+        assert!(samples.iter().all(|s| s.key.ts_src == TsSrc::Missing));
+    }
     // TEL-027.1
     let (r, v) = single(30_000, HW);
     assert_eq!(values(&v, Stage::KernelRx, true), vec![35_000], "TEL-027.1");

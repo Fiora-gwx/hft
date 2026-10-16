@@ -153,7 +153,12 @@ impl SimExchange {
             }
         }
         ev.rx_tsc = due;
-        self.push_reply(id, due, RepMsg::OrderEvent(ev), Bulk::None);
+        self.push_reply(
+            id,
+            due,
+            RepMsg::OrderEvent(ev, hft_event::RecordFlags(0)),
+            Bulk::None,
+        );
     }
 
     /// Latest record of `slot` (highest insertion sequence).
@@ -819,7 +824,12 @@ impl SimExchange {
     /// Pushes an event without touching the order table.
     fn push_event_raw(&mut self, ai: usize, ev: OrderEvent, due: u64) {
         if let Some(id) = self.accts.get(ai).map(|a| a.id) {
-            self.push_reply(id, due, RepMsg::OrderEvent(ev), Bulk::None);
+            self.push_reply(
+                id,
+                due,
+                RepMsg::OrderEvent(ev, hft_event::RecordFlags(0)),
+                Bulk::None,
+            );
         }
     }
 

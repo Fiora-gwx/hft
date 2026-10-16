@@ -494,14 +494,17 @@ impl EwAcc {
     }
 }
 
-/// `ts_src` of a market record: SW when the record carries `SW_TS`, missing when `hw_rx_ns = 0`.
+/// Receive domain requires explicit source evidence; legacy unlabelled values are unknown.
 fn rec_ts_src(r: &Rec) -> TsSrc {
+    let source = r.flags & (RecordFlags::HW_TS.0 | RecordFlags::SW_TS.0);
     if r.h.hw_rx_ns == 0 {
         TsSrc::Missing
-    } else if RecordFlags(r.flags).contains(RecordFlags::SW_TS) {
+    } else if source == RecordFlags::SW_TS.0 {
         TsSrc::Sw
-    } else {
+    } else if source == RecordFlags::HW_TS.0 {
         TsSrc::Hw
+    } else {
+        TsSrc::Missing
     }
 }
 
@@ -544,7 +547,7 @@ fn on_market(acc: &mut EwAcc, f: &Final, rdata: &RefData, visit: &mut impl FnMut
             }
         }
     };
-    let hw = (h.hw_rx_ns != 0).then_some(h.hw_rx_ns);
+    let hw = (ts_src != TsSrc::Missing).then_some(h.hw_rx_ns);
     let rx = (h.rx_tsc != 0).then_some(h.rx_tsc);
     let sw = (h.sw_rx_ns != 0).then_some(h.sw_rx_ns);
     let ingest = rx.map(|x| cal.tsc_ns(x, r.tsc));

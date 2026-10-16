@@ -10,7 +10,7 @@ use crate::state::Bulk;
 
 fn rep_bytes(h: &mut Xxh3, m: &RepMsg) {
     match m {
-        RepMsg::OrderEvent(x) => {
+        RepMsg::OrderEvent(x, _) => {
             h.update(&[1]);
             h.update(x.as_bytes());
         }

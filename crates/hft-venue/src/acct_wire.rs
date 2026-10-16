@@ -239,7 +239,10 @@ pub(crate) fn report(b: &[u8]) -> Option<(RepMsg, &[u8], usize)> {
     let body = b.get(4..4 + n)?;
     let (m, tail) = match tag {
         1 => (
-            RepMsg::OrderEvent(OrderEvent::try_read_from_bytes(body).ok()?),
+            RepMsg::OrderEvent(
+                OrderEvent::try_read_from_bytes(body).ok()?,
+                hft_event::RecordFlags(0),
+            ),
             &[][..],
         ),
         2 => (

@@ -1131,6 +1131,7 @@ spec: README.md
 - 期望:
   - 步骤 2 输出恰好一条 `LatencySample{trigger_seq 77, ack_seq 80, slot, gen, venue 2, account 1, strategy 1, ex_ts_ns 100, ex_send_ns 110, hw_rx_ns 120, rx_tsc 1000, proc_tsc 1010, decided_tsc 1020, sent_tsc 1030, ack_hw_rx_ns 1990, ack_rx_tsc 2000, ack_ex_ts_ns 1980, sw_rx_ns 125, link_role 0, action 0, trigger_kind 0x0101}`;之后 `SlotStamps.op = 0xFF`
   - 步骤 3 无 `LatencySample`
+  - 触发与响应的 HW/SW/Missing 组合分别传入 `src` 的接收点；有效 `sent_tsc` 为 TSC，不把未知来源标为 HW。
 - 实现:`crates/hft-oms/tests/latency.rs::oms_080_new_sample_on_first_response`
 
 ### OMS-081 Ack 后同一事件撤单:新单与撤单各一条样本

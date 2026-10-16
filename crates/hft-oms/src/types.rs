@@ -431,7 +431,8 @@ pub struct SlotStamps {
     pub trig_kind: u16,
     /// Operation awaiting its sample: New 0, Cancel 1, Amend 2; `OP_NONE` = none.
     pub op: u8,
-    pub _pad: [u8; 5],
+    pub rx_flags: u8,
+    pub _pad: [u8; 4],
 }
 const _: () = assert!(offset_of!(SlotStamps, trig_kind) == 72 && offset_of!(SlotStamps, op) == 74);
 
@@ -452,7 +453,8 @@ impl SlotStamps {
         trigger_seq: 0,
         trig_kind: 0,
         op: Self::OP_NONE,
-        _pad: [0; 5],
+        rx_flags: 0,
+        _pad: [0; 4],
     };
 }
 
@@ -1162,6 +1164,8 @@ pub struct TrigStamps {
     pub trigger_seq: u64,
     /// `EventKind` number of the trigger.
     pub kind: u16,
+    /// Selected receive clock domain from the triggering record.
+    pub rx_flags: u8,
 }
 
 impl Default for TrigStamps {
@@ -1175,6 +1179,7 @@ impl Default for TrigStamps {
             proc_tsc: Tsc(0),
             trigger_seq: 0,
             kind: 0,
+            rx_flags: 0,
         }
     }
 }

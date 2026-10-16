@@ -26,7 +26,7 @@ const SLOT_SCAN: u32 = 64;
 /// Venue of a reply.
 pub fn rep_venue(r: &RepMsg) -> VenueId {
     match r {
-        RepMsg::OrderEvent(e) => e.venue,
+        RepMsg::OrderEvent(e, _) => e.venue,
         RepMsg::SendReport(e) => e.venue,
         RepMsg::PositionReport(e) => e.venue,
         RepMsg::BalanceReport(e) => e.venue,
@@ -145,7 +145,7 @@ impl SimMatcher {
             match &mut msg {
                 RepMsg::AccountConfigReport(_) => return,
                 RepMsg::MarginReport(h) => h.n = 0,
-                RepMsg::OrderEvent(e) => {
+                RepMsg::OrderEvent(e, _) => {
                     if e.what == hft_event::OrderEventKind::QueryResult
                         && e.r#gen == 0
                         && let Some((g, ep)) = queries.get(&(e.account.0, e.slot.0))
@@ -162,7 +162,7 @@ impl SimMatcher {
                 _ => {}
             }
             if rep_venue(&msg) == venue {
-                if let RepMsg::OrderEvent(e) = msg
+                if let RepMsg::OrderEvent(e, _) = msg
                     && matches!(
                         e.what,
                         hft_event::OrderEventKind::Fill | hft_event::OrderEventKind::PartialFill

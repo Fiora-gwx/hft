@@ -129,7 +129,7 @@ impl Obs for Model {
 
     fn on_reply(&mut self, acc: AccountId, due: u64, _gen_seq: u64, m: &RepMsg, _b: &[u8]) {
         let a = acc.0;
-        if let RepMsg::OrderEvent(e) = m {
+        if let RepMsg::OrderEvent(e, _) = m {
             let k = (a, e.slot.0);
             if let Some(&(dec, qty)) = self.decided.get(&k) {
                 if due < dec {
@@ -219,7 +219,7 @@ impl SideModel {
         // its generation order can reproduce average-cost realised PnL. No account truth is read.
         for (_, a, m) in self.pending.drain(..) {
             match m {
-                RepMsg::OrderEvent(e) => {
+                RepMsg::OrderEvent(e, _) => {
                     let side = self.sides[&(a.0, e.slot.0)];
                     let fee = i128::from(e.fee.0) + i128::from(self.corrupt_fee);
                     self.corrupt_fee = false;
@@ -261,7 +261,7 @@ impl Obs for SideModel {
         // Timing checks use actual delivery order; never sort these observations.
         self.model.on_reply(a, due, gen_seq, m, b);
         let settlement = match m {
-            RepMsg::OrderEvent(e) => matches!(e.what, OrderEventKind::PartialFill | OrderEventKind::Fill),
+            RepMsg::OrderEvent(e, _) => matches!(e.what, OrderEventKind::PartialFill | OrderEventKind::Fill),
             RepMsg::ExternalFill(_) | RepMsg::FundingSettle(_) => true,
             _ => false,
         };

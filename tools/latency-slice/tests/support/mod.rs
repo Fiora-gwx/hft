@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use hft_event::{
     Bbo, ClockStatus, ConnRole, ConnState, ConnStateKind, EventKind, FeedCmd, FeedMsg, GwCmd, GwOp, HkMsg,
-    MarketHdr, OrderEvent, OrderEventKind, RecordHeader, RepMsg, SendReport, SendStatus,
+    MarketHdr, OrderEvent, OrderEventKind, RecordFlags, RecordHeader, RepMsg, SendReport, SendStatus,
 };
 use hft_journal::{JournalKind, Next};
 use hft_rt::{Backing, CalibPair, Consumer, Producer, TscClock, spsc};
@@ -244,7 +244,18 @@ impl H {
             ask_qty: Qty(100_000),
             update_id: t,
         };
-        self.bbo.try_push(FeedMsg::Bbo(b)).unwrap();
+        self.bbo
+            .try_push(FeedMsg::Bbo(
+                b,
+                if hw == 0 {
+                    RecordFlags(0)
+                } else if hw == sw {
+                    RecordFlags::SW_TS
+                } else {
+                    RecordFlags::HW_TS
+                },
+            ))
+            .unwrap();
         self.at(t, step);
         self.drain();
     }
@@ -288,7 +299,16 @@ impl H {
     /// An `OrderEvent` of `slot`/`gen` received at `rx` (clock at `rx`, step `step`).
     pub fn ev(&mut self, what: OrderEventKind, slot: u32, r#gen: u32, rx: u64, hw: i64, step: u64) {
         let e = order_event(what, slot, r#gen, rx, hw);
-        self.rep.try_push(RepMsg::OrderEvent(e)).unwrap();
+        self.rep
+            .try_push(RepMsg::OrderEvent(
+                e,
+                if hw == 0 {
+                    RecordFlags(0)
+                } else {
+                    RecordFlags::HW_TS
+                },
+            ))
+            .unwrap();
         self.at(rx, step);
         self.drain();
     }

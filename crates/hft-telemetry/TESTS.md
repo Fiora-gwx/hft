@@ -392,6 +392,8 @@ spec: README.md
 
 ### TEL-027 kernel_rx 上界等于空队列间隔加网卡到软中断一段
 
+非零接收戳无来源标志或同时带 HW/SW 时，不进入 HW/SW 分段；独立的 ingest/kernel_to_user 保留在 Missing 数据集。
+
 - 规则:[按事件加权的离线统计(`event_weighted`)](README.md#按事件加权的离线统计event_weighted)
 - 级别:table
 - 里程碑:M1.5

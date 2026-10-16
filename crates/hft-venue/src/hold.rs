@@ -32,14 +32,15 @@ impl IdKey {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Held {
     pub event: OrderEvent,
+    pub flags: hft_event::RecordFlags,
     pub key: IdKey,
     pub since: u64,
 }
 
 /// Timeout changes attribution, never creates a synthetic fill or guesses realized cash.
-pub(crate) fn expired(e: OrderEvent) -> RepMsg {
+pub(crate) fn expired(e: OrderEvent, flags: hft_event::RecordFlags) -> RepMsg {
     if e.what == OrderEventKind::FeeOnly || ![Side::Buy as u8, Side::Sell as u8].contains(&e.detail) {
-        return RepMsg::OrderEvent(e);
+        return RepMsg::OrderEvent(e, flags);
     }
     RepMsg::ExternalFill(ExternalFill {
         venue: e.venue,

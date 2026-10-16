@@ -383,3 +383,35 @@ fn core_012_latency_ring_capacity_is_validated_without_starting() {
         assert_eq!(hft_core::config::load(&path, true).is_ok(), valid);
     }
 }
+
+#[test]
+fn core_012_receive_source_survives_feed_adapter() {
+    use hft_event::{Bbo, EventKind, FeedMsg, RecordFlags};
+    use hft_types::Tsc;
+    use zerocopy::FromZeros;
+    let (mut tx, mut rx) = hft_core::runtime::byte_ring(4096).unwrap();
+    let mut slot = hft_sequencer::InputSlot::with_capacity(4096);
+    for flags in [RecordFlags::HW_TS, RecordFlags::SW_TS, RecordFlags(0)] {
+        assert!(hft_core::io::feed(
+            FeedMsg::Bbo(Bbo::new_zeroed(), flags),
+            Tsc(7),
+            &mut slot,
+            &mut rx
+        ));
+        assert_eq!(slot.flags, flags);
+        tx.reserve(16).unwrap().fill(7);
+        tx.commit();
+        assert!(hft_core::io::feed(
+            FeedMsg::Bulk {
+                kind: EventKind::L2_BATCH,
+                len: 16,
+                flags
+            },
+            Tsc(9),
+            &mut slot,
+            &mut rx
+        ));
+        assert_eq!(slot.flags, flags);
+        assert_eq!(slot.body(), &[7; 16]);
+    }
+}

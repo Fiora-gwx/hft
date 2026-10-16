@@ -28,7 +28,7 @@ pub(crate) fn feed(stage: Stage, m: &FeedMsg) {
         return;
     }
     match m {
-        FeedMsg::Bbo(x) => lt::event_values(
+        FeedMsg::Bbo(x, _) => lt::event_values(
             stage,
             K::BBO.0,
             x.as_bytes(),
@@ -39,7 +39,7 @@ pub(crate) fn feed(stage: Stage, m: &FeedMsg) {
                 x.h.rx_tsc,
             ],
         ),
-        FeedMsg::L2Delta(x) => lt::event_values(
+        FeedMsg::L2Delta(x, _) => lt::event_values(
             stage,
             K::L2_DELTA.0,
             x.as_bytes(),
@@ -50,7 +50,7 @@ pub(crate) fn feed(stage: Stage, m: &FeedMsg) {
                 x.h.rx_tsc,
             ],
         ),
-        FeedMsg::Trade(x) => lt::event_values(
+        FeedMsg::Trade(x, _) => lt::event_values(
             stage,
             K::TRADE.0,
             x.as_bytes(),
@@ -61,7 +61,7 @@ pub(crate) fn feed(stage: Stage, m: &FeedMsg) {
                 x.h.rx_tsc,
             ],
         ),
-        FeedMsg::Funding(x) => lt::event_values(
+        FeedMsg::Funding(x, _) => lt::event_values(
             stage,
             K::FUNDING.0,
             x.as_bytes(),
@@ -72,7 +72,7 @@ pub(crate) fn feed(stage: Stage, m: &FeedMsg) {
                 x.h.rx_tsc,
             ],
         ),
-        FeedMsg::MarkPrice(x) => lt::event_values(
+        FeedMsg::MarkPrice(x, _) => lt::event_values(
             stage,
             K::MARK_PRICE.0,
             x.as_bytes(),
@@ -83,7 +83,7 @@ pub(crate) fn feed(stage: Stage, m: &FeedMsg) {
                 x.h.rx_tsc,
             ],
         ),
-        FeedMsg::IndexPrice(x) => lt::event_values(
+        FeedMsg::IndexPrice(x, _) => lt::event_values(
             stage,
             K::INDEX_PRICE.0,
             x.as_bytes(),
@@ -94,7 +94,7 @@ pub(crate) fn feed(stage: Stage, m: &FeedMsg) {
                 x.h.rx_tsc,
             ],
         ),
-        FeedMsg::Liquidation(x) => lt::event_values(
+        FeedMsg::Liquidation(x, _) => lt::event_values(
             stage,
             K::LIQUIDATION.0,
             x.as_bytes(),
@@ -115,7 +115,7 @@ pub(crate) fn rep(stage: Stage, m: &RepMsg) {
         return;
     }
     match m {
-        RepMsg::OrderEvent(x) => lt::event_values(
+        RepMsg::OrderEvent(x, _) => lt::event_values(
             stage,
             K::ORDER_EVENT.0,
             x.as_bytes(),
@@ -139,5 +139,19 @@ pub(crate) fn command(c: &GwCmd, venue: u8) -> Context {
         venue_conn: u64::from(venue),
         kind_inst: u64::from(c.inst.0) << 32,
         ..Context::default()
+    }
+}
+
+/// Selected clock domain of `Timestamps::best_rx()` in an input record.
+#[inline]
+pub(crate) fn rx_flags(ts_flags: u32) -> hft_event::RecordFlags {
+    use hft_event::RecordFlags;
+    use hft_net::TsFlags;
+    if ts_flags & TsFlags::HW != 0 {
+        RecordFlags::HW_TS
+    } else if ts_flags & TsFlags::SW != 0 {
+        RecordFlags::SW_TS
+    } else {
+        RecordFlags(0)
     }
 }

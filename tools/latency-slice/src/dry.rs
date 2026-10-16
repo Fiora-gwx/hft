@@ -74,7 +74,11 @@ struct RingMd<'a> {
 
 impl MdSink for RingMd<'_> {
     fn bbo(&mut self, e: &Bbo) {
-        if self.out.try_push(FeedMsg::Bbo(*e)).is_err() {
+        if self
+            .out
+            .try_push(FeedMsg::Bbo(*e, hft_event::RecordFlags::SW_TS))
+            .is_err()
+        {
             self.dropped += 1;
         }
     }
@@ -240,7 +244,9 @@ struct RingRep<'a> {
 
 impl ReportSink for RingRep<'_> {
     fn order(&mut self, e: &OrderEvent) {
-        let _ = self.out.try_push(RepMsg::OrderEvent(*e));
+        let _ = self
+            .out
+            .try_push(RepMsg::OrderEvent(*e, hft_event::RecordFlags::SW_TS));
     }
     fn position(&mut self, _e: &PositionReport) {}
     fn balance(&mut self, _e: &BalanceReport) {}

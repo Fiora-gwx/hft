@@ -99,7 +99,7 @@ fn levels(v: &Value, k: &str) -> Vec<Level> {
 fn render(acct: AccountId, due: u64, m: &RepMsg, bulk: &[u8]) -> String {
     let head = format!("{{\"due\":{due},\"acct\":{}", acct.0);
     let body = match m {
-        RepMsg::OrderEvent(e) => {
+        RepMsg::OrderEvent(e, _) => {
             let (pe, qe) = (-4, -8);
             format!(
                 "\"ev\":\"OrderEvent\",\"what\":\"{:?}\",\"slot\":{},\"inst\":\"{}\",\"px\":\"{}\",\"qty\":\"{}\",\"cum\":\"{}\",\"avg\":\"{}\",\"fee\":\"{}\",\"fee_asset\":\"{}\",\"code\":{},\"detail\":{},\"ex_ts\":{}",
