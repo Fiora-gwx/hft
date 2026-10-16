@@ -859,7 +859,7 @@ impl Sim {
             .iter()
             .filter(|r| r.account == a)
             .filter_map(|r| match r.msg {
-                RepMsg::OrderEvent(e) => Some((r.due, e)),
+                RepMsg::OrderEvent(e, _) => Some((r.due, e)),
                 _ => None,
             })
             .collect()

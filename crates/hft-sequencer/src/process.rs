@@ -277,6 +277,7 @@ fn trig_of(slot: &InputSlot, seq: u64) -> hft_oms::TrigStamps {
         proc_tsc: slot.tsc,
         trigger_seq: seq,
         kind: slot.kind.0,
+        rx_flags: (slot.flags.0 & (RecordFlags::HW_TS.0 | RecordFlags::SW_TS.0)) as u8,
         ..hft_oms::TrigStamps::default()
     };
     // Every market body starts with MarketHdr.
@@ -304,6 +305,9 @@ fn trig_of(slot: &InputSlot, seq: u64) -> hft_oms::TrigStamps {
     {
         t.ex_ts_ns = o.ex_ts_ns;
         t.hw_rx_ns = o.hw_rx_ns;
+        if slot.flags.contains(RecordFlags::SW_TS) {
+            t.sw_rx_ns = o.hw_rx_ns;
+        }
         t.rx_tsc = Tsc(o.rx_tsc);
     }
     t

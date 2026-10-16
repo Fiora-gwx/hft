@@ -306,7 +306,7 @@ pub fn statuses(v: &[RepMsg]) -> Vec<SendStatus> {
 pub fn events(v: &[RepMsg]) -> Vec<hft_event::OrderEvent> {
     v.iter()
         .filter_map(|m| match m {
-            RepMsg::OrderEvent(e) => Some(*e),
+            RepMsg::OrderEvent(e, _) => Some(*e),
             _ => None,
         })
         .collect()

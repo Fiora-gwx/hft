@@ -322,7 +322,7 @@ impl GwSink<'_> {
 
 impl ReportSink for GwSink<'_> {
     fn order(&mut self, e: &OrderEvent) {
-        self.push(RepMsg::OrderEvent(*e));
+        self.push(RepMsg::OrderEvent(*e, hft_event::RecordFlags(0)));
     }
     fn position(&mut self, e: &hft_event::PositionReport) {
         self.push(RepMsg::PositionReport(*e));
@@ -708,7 +708,8 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             account: r.account,
             conn,
             rx_tsc: ts.rx_tsc,
-            hw_rx_ns: ts.hw_rx_ns,
+            hw_rx_ns: ts.best_rx().0,
+            ts_flags: ts.flags,
             sw_rx_ns: ts.sw_rx_ns,
             rx_empty_gap_ns: ts.rx_empty_gap_ns,
             ..RxMeta::default()
@@ -748,8 +749,9 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 .req
                 .zip(r.identity)
                 .map(|(req, id)| (req, id, r.origin.inst)),
-            now,
-            0,
+            ts.rx_tsc,
+            ts.best_rx().0,
+            crate::latency::rx_flags(ts.flags),
             key.get(..n).unwrap_or(&[]),
             now,
         );
@@ -1250,6 +1252,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     None,
                     ts.rx_tsc,
                     ts.best_rx().0,
+                    crate::latency::rx_flags(ts.flags),
                     &event_name[..name_len],
                     now,
                 );
@@ -1299,6 +1302,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         rest_identity: Option<(ReqRef, ClientOrderId, InstId)>,
         rx: u64,
         hw: i64,
+        rx_flags: hft_event::RecordFlags,
         event_name: &[u8],
         now: u64,
     ) {
@@ -1318,7 +1322,8 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             let Some(mut m) = self.sink_evs.get(k).copied() else {
                 break;
             };
-            if let RepMsg::OrderEvent(e) = &mut m {
+            if let RepMsg::OrderEvent(e, flags) = &mut m {
+                *flags = rx_flags;
                 // Some request responses omit the client id (and therefore epoch).
                 // Only an outstanding request on this connection can fill that gap.
                 if e.epoch == 0
@@ -1353,11 +1358,12 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                         .and_then(|x| (x.hold.len() == cap).then(|| x.hold.pop_front()).flatten());
                     if let Some(old) = evicted {
                         self.n.hold_evicted += 1;
-                        self.push_rep(crate::hold::expired(old.event));
+                        self.push_rep(crate::hold::expired(old.event, old.flags));
                     }
                     if let Some(x) = self.accts.get_mut(a) {
                         x.hold.push_back(Held {
                             event: *e,
+                            flags: rx_flags,
                             key,
                             since: now,
                         });
@@ -1404,7 +1410,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             e.reject_code = o.raw_code;
             e.rx_tsc = rx;
             e.hw_rx_ns = hw;
-            self.push_rep(RepMsg::OrderEvent(e));
+            self.push_rep(RepMsg::OrderEvent(e, rx_flags));
         }
         match o.skip {
             Skip::No => {}
@@ -1537,9 +1543,9 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 e.slot = SlotId(slot);
                 e.r#gen = r#gen;
                 self.order_terminal(a, &e, h.key, now);
-                self.push_rep(RepMsg::OrderEvent(e));
+                self.push_rep(RepMsg::OrderEvent(e, h.flags));
             } else {
-                self.push_rep(crate::hold::expired(h.event));
+                self.push_rep(crate::hold::expired(h.event, h.flags));
             }
         }
     }

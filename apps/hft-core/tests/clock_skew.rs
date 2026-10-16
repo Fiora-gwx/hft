@@ -79,7 +79,7 @@ fn fp_8_clock_skew_reject_and_clockbad_blocks_open() {
     assert!(
         unmatched
             .iter()
-            .any(|m| matches!(m, RepMsg::OrderEvent(e) if e.slot == hft_types::SlotId::UNRESOLVED))
+            .any(|m| matches!(m, RepMsg::OrderEvent(e, _) if e.slot == hft_types::SlotId::UNRESOLVED))
     );
     assert_eq!(gateway.runtime.inflight(ConnId(112)), 1);
     assert_eq!(
@@ -118,7 +118,7 @@ fn fp_8_clock_skew_reject_and_clockbad_blocks_open() {
             .state,
         hft_oms::OrderState::Rejected
     );
-    assert!(reports.iter().any(|m| matches!(m, RepMsg::OrderEvent(e) if e.what == OrderEventKind::Reject && e.reject_code == 0xFFFF_FC03)));
+    assert!(reports.iter().any(|m| matches!(m, RepMsg::OrderEvent(e, _) if e.what == OrderEventKind::Reject && e.reject_code == 0xFFFF_FC03)));
     assert!(reports.iter().any(|m| matches!(m, RepMsg::ConnState(c) if c.reason == 9 && c.state == hft_event::ConnStateKind::Degraded)));
     assert!(log().iter().any(|x| x.s == S1 && x.kind == "Conn" && !x.model));
     assert!(h.s.engine().oms.venue_ready(A, AC1));
@@ -128,7 +128,7 @@ fn fp_8_clock_skew_reject_and_clockbad_blocks_open() {
     assert!(
         duplicate
             .iter()
-            .any(|m| matches!(m, RepMsg::OrderEvent(e) if e.slot == hft_types::SlotId::UNRESOLVED))
+            .any(|m| matches!(m, RepMsg::OrderEvent(e, _) if e.slot == hft_types::SlotId::UNRESOLVED))
     );
     assert_eq!(
         h.s.engine()

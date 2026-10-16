@@ -97,7 +97,7 @@ fn ven_272_make_before_break_shared_dedup() {
     assert_eq!(
         events
             .iter()
-            .filter(|m| matches!(m,RepMsg::OrderEvent(e) if e.trade_id==77))
+            .filter(|m| matches!(m,RepMsg::OrderEvent(e, _) if e.trade_id==77))
             .count(),
         1
     );

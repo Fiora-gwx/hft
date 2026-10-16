@@ -10,7 +10,7 @@ status: impl
 
 ## 概要
 
-`latency-slice` 是 [M1.5 延迟探针](../../design/11-实施路线图.md#31-m15-延迟探针)的纵切片程序:在按需租用的 `c8g.4xlarge` 上,把 [hft-net](../../crates/hft-net/README.md) + 一个 venue 的 BBO feed([hft-venue](../../crates/hft-venue/README.md) `FeedRuntime`,主网公共行情)+ **简化 sequencer**(本程序自带)+ gw(`GwRuntime`,测试网/演示环境 WS API 下单)按 [hft-core 线程计划](../../apps/hft-core/README.md#线程计划) `c16` 的子集绑核运行,下单负载按 [latency-probe](../../strategies/latency-probe/README.md) 的 `quote` 口径(远离对手价的最小名义 PostOnly,Ack 后同一事件撤单)。它写与 hft-core 同格式的 seq journal(行情记录、回报、`OrderDecision`、`LatencySample`、`ClockStatus`)与 raw journal,运行结束后用 [hft-telemetry](../../crates/hft-telemetry/README.md) 对 seq journal 出分段直方图(HW 与 SW 时间戳分开)、按事件加权统计(突发/平静分层、`kernel_rx` 上下界)与探针样本分层。它还提供 hft-net host 用例 NET-370–NET-374 需要的探测模式,以及不连网、用 [hft-testkit](../../crates/hft-testkit/README.md) 生成行情驱动全部线程的 `--dry-run`(CI 验证线程与直方图管线)。它**只用于探针**:不承载策略、OMS、风控与账本,不进任何生产发布归档,只允许测试网下单端点,主网下单端点在加载配置时硬拒绝。M3 末满订阅探针与门槛 ⑩ 用正式的 hft-core,不用本程序。
+`latency-slice` 是 [M1.5 延迟探针](../../design/11-实施路线图.md#31-m15-延迟探针)的纵切片程序:在按需租用的 `c8g.4xlarge` 上,把 [hft-net](../../crates/hft-net/README.md) + 一个 venue 的 BBO feed([hft-venue](../../crates/hft-venue/README.md) `FeedRuntime`,主网公共行情)+ **简化 sequencer**(本程序自带)+ gw(`GwRuntime`,测试网/演示环境 WS API 下单)按 [hft-core 线程计划](../../apps/hft-core/README.md#线程计划) `c16` 的子集绑核运行,下单负载按 [latency-probe](../../strategies/latency-probe/README.md) 的 `quote` 口径(远离对手价的最小名义 PostOnly,Ack 后同一事件撤单)。来源标志直接取环元素，与 hft-core 的 [接收来源契约](../../docs/subsystems/event-model.md#时间戳语义) 一致。它写与 hft-core 同格式的 seq journal(行情记录、回报、`OrderDecision`、`LatencySample`、`ClockStatus`)与 raw journal,运行结束后用 [hft-telemetry](../../crates/hft-telemetry/README.md) 对 seq journal 出分段直方图(HW 与 SW 时间戳分开)、按事件加权统计(突发/平静分层、`kernel_rx` 上下界)与探针样本分层。它还提供 hft-net host 用例 NET-370–NET-374 需要的探测模式,以及不连网、用 [hft-testkit](../../crates/hft-testkit/README.md) 生成行情驱动全部线程的 `--dry-run`(CI 验证线程与直方图管线)。它**只用于探针**:不承载策略、OMS、风控与账本,不进任何生产发布归档,只允许测试网下单端点,主网下单端点在加载配置时硬拒绝。M3 末满订阅探针与门槛 ⑩ 用正式的 hft-core,不用本程序。
 
 ## 目录
 
@@ -133,7 +133,7 @@ TOML;未列出的键取默认值,未知键 → 退出 2。
 |---|---|
 | `ClockStatus` | 写 Meta 记录 |
 | `ConnState` | 写记录;gw 下单连接 `Up` 之后才开始探测,`Down` 期间不探测 |
-| `Bbo` | 写记录(`hw_rx_ns ≠ 0` 且等于 `sw_rx_ns` → 记录头 `SW_TS`,否则 `HW_TS`;`hw_rx_ns = 0` 都不置);更新该 inst 的最优价;按下面的条件决定是否挂单 |
+| `Bbo` | 写记录（接收来源标志直接取 `FeedMsg`）;更新该 inst 的最优价;按下面的条件决定是否挂单 |
 | `SendReport` | 写记录;记该单该操作的 `sent_tsc`;状态不是 `Written` → 该单结束(计 `send_fail`,不产生样本) |
 | `OrderEvent` | 写记录;按下表迁移该单 |
 
@@ -150,7 +150,7 @@ TOML;未列出的键取默认值,未知键 → 退出 2。
 | 任意 / `PartialFill`、`Fill` | 安全停机 |
 | 未终态超过 `quote_rest_ms` | 重发撤单(触发 = 无,样本照常按首个回报写);第 3 次重发后仍未终态 → 安全停机 |
 
-`LatencySample` 的八个时间点按 [latency-budget §1.2](../../docs/latency-budget.md#12-每笔订单再加三个) 填:点 0–4 取触发记录(行情触发取 `MarketHdr`;回报触发取 `OrderEvent` 的 `ex_ts_ns`、`hw_rx_ns`、`rx_tsc` 与该记录的 `proc_tsc`),点 5 取该操作的 `decided_tsc`,点 6 取其 `SendReport.sent_tsc`,点 7 取首个回报的 `hw_rx_ns`;`src` 中点 2 与点 7 的 HW/SW 按记录头规则(回报记录不带 `sw_rx`,按 `net.ts_expect_hw` 标 HW 或 SW),点 3–6 为 TSC;`trigger_kind` = 触发记录的 kind;`link_role = 0`;`strategy = 0`。
+`LatencySample` 的八个时间点按 [latency-budget §1.2](../../docs/latency-budget.md#12-每笔订单再加三个) 填:点 0–4 取触发记录(行情触发取 `MarketHdr`;回报触发取 `OrderEvent` 的 `ex_ts_ns`、`hw_rx_ns`、`rx_tsc` 与该记录的 `proc_tsc`),点 5 取该操作的 `decided_tsc`,点 6 取其 `SendReport.sent_tsc`,点 7 取首个回报的 `hw_rx_ns`;`src` 中点 2 与点 7 的 HW/SW 取行情与回报环元素的来源标志，缺失不推断；SW 回报触发时 `sw_rx_ns` 取其软件接收戳,点 3–6 为 TSC;`trigger_kind` = 触发记录的 kind;`link_role = 0`;`strategy = 0`。
 
 ### 产出
 
@@ -240,7 +240,6 @@ TOML;未列出的键取默认值,未知键 → 退出 2。
 ## 已知限制与后续工作
 
 - 回报只取 WS API 响应(下单 ACK、撤单与改单应答);USDT-M 的 listenKey 用户流不建(conn-builder 不处理 `UserStream` 的建连请求,gw 的该请求一直挂起),现货不订阅用户流,因此看不到成交推送:PostOnly 远离对手价且 Ack 后立即撤单,成交概率极低,一旦从应答中看到成交即安全停机。
-- 回报记录的 HW/SW 来源按运行级 `net.ts_expect_hw` 标注(`OrderEvent` 不带 `sw_rx`),HW 戳缺失的个别回报会被标为 HW;HW 覆盖率见 NET-370。
 - USDT-M 演示环境的 ws-fapi 端点待核实(venue-binance 开发备忘第 14 条);核实前 `usdm` 产品线必须显式给出 `orders.host`。
 - BBO 补帧(snap-fetch REST)不运行:hft-venue 的 snap-fetch REST 随 M3;连接恢复后等交易所自然推送。
 

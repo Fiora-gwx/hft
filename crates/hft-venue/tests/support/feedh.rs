@@ -328,7 +328,7 @@ pub fn states(v: &[FeedMsg]) -> Vec<ConnState> {
 pub fn bbos(v: &[FeedMsg]) -> Vec<hft_event::Bbo> {
     v.iter()
         .filter_map(|m| match m {
-            FeedMsg::Bbo(b) => Some(*b),
+            FeedMsg::Bbo(b, _) => Some(*b),
             _ => None,
         })
         .collect()

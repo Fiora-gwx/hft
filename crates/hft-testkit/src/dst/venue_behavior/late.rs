@@ -57,7 +57,7 @@ impl LateRecycle {
     }
 
     pub fn capture(&mut self, original: &RepMsg, report: &RepMsg) {
-        if let (RepMsg::OrderEvent(raw), RepMsg::OrderEvent(e)) = (original, report)
+        if let (RepMsg::OrderEvent(raw, _), RepMsg::OrderEvent(e, _)) = (original, report)
             && e.detail == 0
             && e.slot != SlotId::UNRESOLVED
             && e.exch_order_id != 0
@@ -144,7 +144,7 @@ impl LateRecycle {
             });
             replies.push(VenueOut {
                 due_ns: due,
-                rep: RepMsg::OrderEvent(report),
+                rep: RepMsg::OrderEvent(report, hft_event::RecordFlags(0)),
                 client_id: COPY_ID.into(),
             });
             self.held.remove(ix);

@@ -84,7 +84,7 @@ fn core_303_fresh_boot_gateway_fill_triggers_simultaneous_reverse_and_replays() 
     gateway.poll(h.now());
     let reports = gateway.deliver(&mut h);
     assert!(
-        reports.iter().any(|r| matches!(r, RepMsg::OrderEvent(e)
+        reports.iter().any(|r| matches!(r, RepMsg::OrderEvent(e, _)
         if e.what == OrderEventKind::Fill && e.epoch == h.epoch() && e.slot == first.slot)),
         "cid={cid}; reports={reports:?}"
     );

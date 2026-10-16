@@ -806,6 +806,10 @@ refdata 不做热替换(可选扩展:允许热替换的变更集,触发条件:Dr
 
 ## 实现说明
 
+输入适配器把行情（含 bulk）与订单回报环元素的接收来源原样传给 `InputSlot`，规则见 [事件模型](../../docs/subsystems/event-model.md#时间戳语义)。
+
+
+
 <details><summary>实现要点</summary>
 
 **启动状态机**(主线程串行段 + sequencer 循环内段):

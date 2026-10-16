@@ -1150,7 +1150,8 @@ pub(crate) fn stamps_of(tr: &TrigStamps, op: u8) -> SlotStamps {
         trigger_seq: tr.trigger_seq,
         trig_kind: tr.kind,
         op,
-        _pad: [0; 5],
+        rx_flags: tr.rx_flags,
+        _pad: [0; 4],
     }
 }
 

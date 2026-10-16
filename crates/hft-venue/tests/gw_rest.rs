@@ -226,7 +226,7 @@ fn ven_228_query_uses_persistent_rest_and_stable_origin() {
     response(&mut h, 200, 6000);
     let v = h.reps();
     assert!(reports(&v).is_empty(), "one send report, at submission");
-    assert!(v.iter().any(|m|matches!(m,RepMsg::OrderEvent(e) if e.what==OrderEventKind::QueryResult && e.epoch==5 && e.slot.0==7 && e.r#gen==3 && e.cum_filled.0==3)));
+    assert!(v.iter().any(|m|matches!(m,RepMsg::OrderEvent(e, _) if e.what==OrderEventKind::QueryResult && e.epoch==5 && e.slot.0==7 && e.r#gen==3 && e.cum_filled.0==3)));
     assert_eq!(stub::calls("encode_rest").len(), 1);
     assert_eq!(stub::calls("encode_rest_signed").len(), 1);
 }
@@ -280,11 +280,11 @@ fn ven_228_rest_failures_preserve_unknown_outcome() {
         response(&mut h, status, 6000);
         let v = h.reps();
         assert!(v.iter().any(
-            |m| matches!(m,RepMsg::OrderEvent(e) if e.what==OrderEventKind::OutcomeUnknown && e.slot.0==7)
+            |m| matches!(m,RepMsg::OrderEvent(e, _) if e.what==OrderEventKind::OutcomeUnknown && e.slot.0==7)
         ));
         assert!(
             !v.iter()
-                .any(|m| matches!(m,RepMsg::OrderEvent(e) if e.what==OrderEventKind::Reject))
+                .any(|m| matches!(m,RepMsg::OrderEvent(e, _) if e.what==OrderEventKind::Reject))
         );
     }
 }
@@ -348,9 +348,9 @@ fn ven_391_cancel_all_sweep_decodes_owned_open_orders() {
     assert_eq!(stub::calls("ro_request_signed").len(), 1);
     response(&mut h, 200, 5000);
     assert!(
-        h.reps()
-            .iter()
-            .any(|m| matches!(m,RepMsg::OrderEvent(e) if e.what==OrderEventKind::QueryResult && e.slot.0==7))
+        h.reps().iter().any(
+            |m| matches!(m,RepMsg::OrderEvent(e, _) if e.what==OrderEventKind::QueryResult && e.slot.0==7)
+        )
     );
 }
 

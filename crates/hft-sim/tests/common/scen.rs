@@ -168,7 +168,7 @@ pub fn reply_bytes(account: AccountId, due: u64, m: &RepMsg, bulk: &[u8]) -> Vec
     let mut v = vec![account.0];
     v.extend_from_slice(&due.to_le_bytes());
     let (tag, body): (u8, &[u8]) = match m {
-        RepMsg::OrderEvent(x) => (1, x.as_bytes()),
+        RepMsg::OrderEvent(x, _) => (1, x.as_bytes()),
         RepMsg::SendReport(x) => (2, x.as_bytes()),
         RepMsg::PositionReport(x) => (3, x.as_bytes()),
         RepMsg::BalanceReport(x) => (4, x.as_bytes()),

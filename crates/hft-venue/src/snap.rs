@@ -42,7 +42,7 @@ pub struct SnapRecHdr {
     pub _pad: u8,
     pub http_status: u16,
     pub _pad2: u16,
-    pub _pad3: u32,
+    pub ts_flags: u32,
 }
 impl SnapRecHdr {
     pub const OK: u8 = 1;
@@ -147,7 +147,7 @@ impl<P: VenueProtocol, T: Transport> SnapFetchTask<P, T> {
         let ns = self.deps.clock.utc_ns(Tsc(now));
         let mut hdr = SnapRecHdr {
             rx_tsc: now,
-            sw_rx_ns: ns,
+            sw_rx_ns: 0,
             req_id: req.req_id,
             inst: req.inst,
             body_len: 0,
@@ -157,7 +157,7 @@ impl<P: VenueProtocol, T: Transport> SnapFetchTask<P, T> {
             _pad: 0,
             http_status: 0,
             _pad2: 0,
-            _pad3: 0,
+            ts_flags: 0,
         };
         let mut body = Vec::new();
         let mut quote = None;
@@ -175,12 +175,12 @@ impl<P: VenueProtocol, T: Transport> SnapFetchTask<P, T> {
                     let rx = RxMeta {
                         rx_tsc: now,
                         hw_rx_ns: 0,
-                        sw_rx_ns: ns,
+                        sw_rx_ns: 0,
                         conn: hdr.conn,
                         account: AccountId(0),
                         prev_override: 0,
                         _pad: [0; 2],
-                        ts_flags: hft_net::TsFlags::SW,
+                        ts_flags: 0,
                         rx_empty_gap_ns: 0,
                         _pad2: 0,
                     };
@@ -196,7 +196,7 @@ impl<P: VenueProtocol, T: Transport> SnapFetchTask<P, T> {
                     ) == Ok(1)
                         && !self.sink.over
                         && self.sink.n == 1
-                        && let Some(FeedMsg::Bbo(e)) = self.sink.evs.first()
+                        && let Some(FeedMsg::Bbo(e, _)) = self.sink.evs.first()
                         && e.h.inst == req.inst
                         && e.h.venue == P::VENUE
                     {

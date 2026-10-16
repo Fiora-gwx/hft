@@ -121,6 +121,28 @@ fn ven_063_md_decode_errors() {
 
 #[test]
 fn ven_064_rx_meta_passthrough() {
+    for (hw, sw, expected) in [
+        (4100, 4500, hft_event::RecordFlags::HW_TS),
+        (4500, 4500, hft_event::RecordFlags::HW_TS),
+        (0, 4500, hft_event::RecordFlags::SW_TS),
+        (0, 0, hft_event::RecordFlags(0)),
+    ] {
+        let (mut h, _) = bbo_up(|_| {}, &[S1]);
+        h.net
+            .deliver_stamped(&mut h.rt, C1, &[&b("S1", 20)], 4900, 5000, hw, sw);
+        h.rt.poll_once(5000);
+        let messages = h.drain_bbo();
+        let (body, flags) = messages
+            .iter()
+            .find_map(|m| match m {
+                FeedMsg::Bbo(body, flags) => Some((body, flags)),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(*flags, expected);
+        assert_eq!(body.h.hw_rx_ns, if hw != 0 { hw } else { sw });
+        assert_eq!(body.h.sw_rx_ns, sw);
+    }
     let (mut h, _) = bbo_up(|_| {}, &[S1]);
     // The queue of connection 1 was confirmed empty at 4300 (an EAGAIN read then).
     h.net.idle(&mut h.rt, 4300);
@@ -184,6 +206,6 @@ fn ven_066_ring_then_raw() {
     );
     assert_eq!(r.tsc, 9000);
     assert_eq!(&r.payload[..], &frame[..]);
-    assert!(matches!(h.drain_bbo()[..], [FeedMsg::Bbo(_)]));
+    assert!(matches!(h.drain_bbo()[..], [FeedMsg::Bbo(_, _)]));
     let _ = codes::DECODE;
 }

@@ -205,15 +205,15 @@ impl<J: JournalSink> std::fmt::Debug for Io<J> {
 pub fn feed(msg: FeedMsg, now: Tsc, out: &mut InputSlot, bulk: &mut ByteConsumer) -> bool {
     let flags = RecordFlags(0);
     match msg {
-        FeedMsg::Bbo(b) => out.set(flags, now, &b),
-        FeedMsg::Trade(b) => out.set(flags, now, &b),
-        FeedMsg::Funding(b) => out.set(flags, now, &b),
-        FeedMsg::MarkPrice(b) => out.set(flags, now, &b),
-        FeedMsg::IndexPrice(b) => out.set(flags, now, &b),
-        FeedMsg::Liquidation(b) => out.set(flags, now, &b),
+        FeedMsg::Bbo(b, flags) => out.set(flags, now, &b),
+        FeedMsg::Trade(b, flags) => out.set(flags, now, &b),
+        FeedMsg::Funding(b, flags) => out.set(flags, now, &b),
+        FeedMsg::MarkPrice(b, flags) => out.set(flags, now, &b),
+        FeedMsg::IndexPrice(b, flags) => out.set(flags, now, &b),
+        FeedMsg::Liquidation(b, flags) => out.set(flags, now, &b),
         FeedMsg::ConnState(b) => out.set(flags, now, &b),
-        FeedMsg::L2Delta(b) => out.set(flags, now, &b),
-        FeedMsg::Bulk { kind, len } => {
+        FeedMsg::L2Delta(b, flags) => out.set(flags, now, &b),
+        FeedMsg::Bulk { kind, len, flags } => {
             let Some(b) = bulk.peek() else { return false };
             if b.len() != len as usize {
                 return false;
@@ -227,7 +227,7 @@ pub fn feed(msg: FeedMsg, now: Tsc, out: &mut InputSlot, bulk: &mut ByteConsumer
 }
 pub fn rep_parts<R>(msg: &RepMsg, bulk: &[u8], mut f: impl FnMut(EventKind, &[&[u8]]) -> R) -> R {
     match msg {
-        RepMsg::OrderEvent(b) => f(EventKind::ORDER_EVENT, &[b.as_bytes()]),
+        RepMsg::OrderEvent(b, _) => f(EventKind::ORDER_EVENT, &[b.as_bytes()]),
         RepMsg::SendReport(b) => f(EventKind::SEND_REPORT, &[b.as_bytes()]),
         RepMsg::PositionReport(b) => f(EventKind::POSITION_REPORT, &[b.as_bytes()]),
         RepMsg::BalanceReport(b) => f(EventKind::BALANCE_REPORT, &[b.as_bytes()]),
@@ -300,7 +300,7 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
         if let RingId::Bbo(n) = r {
             let batch = self.feeds.get_mut(n as usize)?.bbo.read_batch(1);
             match batch.slices().0.first() {
-                Some(FeedMsg::Bbo(b)) => Some(b.h.inst),
+                Some(FeedMsg::Bbo(b, _)) => Some(b.h.inst),
                 _ => None,
             }
         } else {
@@ -367,7 +367,11 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
                 }) else {
                     return false;
                 };
-                self.reports += u64::from(matches!(m, RepMsg::OrderEvent(_)));
+                let flags = match m {
+                    RepMsg::OrderEvent(_, flags) => flags,
+                    _ => RecordFlags(0),
+                };
+                self.reports += u64::from(matches!(m, RepMsg::OrderEvent(_, _)));
                 let variable = matches!(m, RepMsg::MarginReport(_) | RepMsg::AccountConfigReport(_));
                 let body = if variable {
                     let expected = match m {
@@ -383,9 +387,7 @@ impl<J: JournalSink> LiveIo<Strategies> for Io<J> {
                 } else {
                     &[]
                 };
-                rep_parts(&m, body, |kind, pieces| {
-                    out.set_pieces(kind, RecordFlags(0), now, pieces)
-                });
+                rep_parts(&m, body, |kind, pieces| out.set_pieces(kind, flags, now, pieces));
                 if variable {
                     g.rep_bulk.advance();
                 }

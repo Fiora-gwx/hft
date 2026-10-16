@@ -21,18 +21,19 @@ use crate::{DecodeErr, EncodeErr, EventKind};
 /// `bbo-<venue>` / `md-<venue>` ring element.
 #[derive(Copy, Clone, Debug)]
 pub enum FeedMsg {
-    Bbo(Bbo),
-    L2Delta(L2Delta),
-    Trade(Trade),
-    Funding(Funding),
-    MarkPrice(MarkPrice),
-    IndexPrice(IndexPrice),
-    Liquidation(Liquidation),
+    Bbo(Bbo, RecordFlags),
+    L2Delta(L2Delta, RecordFlags),
+    Trade(Trade, RecordFlags),
+    Funding(Funding, RecordFlags),
+    MarkPrice(MarkPrice, RecordFlags),
+    IndexPrice(IndexPrice, RecordFlags),
+    Liquidation(Liquidation, RecordFlags),
     ConnState(ConnState),
     /// Next variable logical body (L2Batch, L2Snapshot) is in the paired `md-<venue>-bulk` byte ring.
     Bulk {
         kind: EventKind,
         len: u32,
+        flags: RecordFlags,
     },
 }
 const _: () = assert!(size_of::<FeedMsg>() <= 128);
@@ -40,7 +41,7 @@ const _: () = assert!(size_of::<FeedMsg>() <= 128);
 /// `rep-<venue>` / `rep-sim` ring element.
 #[derive(Copy, Clone, Debug)]
 pub enum RepMsg {
-    OrderEvent(OrderEvent),
+    OrderEvent(OrderEvent, RecordFlags),
     SendReport(SendReport),
     PositionReport(PositionReport),
     BalanceReport(BalanceReport),

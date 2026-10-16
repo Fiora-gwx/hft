@@ -873,17 +873,18 @@ pub fn parse_spb1(blob: &[u8]) -> Result<SpbView<'_>, ParamsErr>;     // 只做�
 
 ## 环元素类型
 
-hft-core 进程内各 SPSC 环的元素类型定义在这里,因为生产者与消费者分属不同 crate(feed/gw 在 [hft-venue](../hft-venue/README.md),sim-gw 在 [hft-sim](../hft-sim/README.md),advisor 在 apps/hft-core,sequencer 在 [hft-sequencer](../hft-sequencer/README.md)),而它们都只能向下依赖。它们只在进程内流动、不进 journal(sequencer 记录的是其中的事件体),因此不要求字节布局稳定,只要求 `Copy` 与大小上限。
+hft-core 进程内各 SPSC 环的元素类型定义在这里,因为生产者与消费者分属不同 crate(feed/gw 在 [hft-venue](../hft-venue/README.md),sim-gw 在 [hft-sim](../hft-sim/README.md),advisor 在 apps/hft-core,sequencer 在 [hft-sequencer](../hft-sequencer/README.md)),而它们都只能向下依赖。它们只在进程内流动、不进 journal(sequencer 记录事件体及接收来源 `RecordFlags`),因此不要求字节布局稳定,只要求 `Copy` 与大小上限。
 
 ```rust
 pub enum FeedMsg {                   // bbo-<venue> 环(只有 Bbo 与 BBO 连接的 ConnState)与 md-<venue> 环(其余行情与 md 连接的 ConnState)的元素;
                                      // size_of ≤ 128 B(编译期断言)
-    Bbo(Bbo), L2Delta(L2Delta), Trade(Trade), Funding(Funding), MarkPrice(MarkPrice),
-    IndexPrice(IndexPrice), Liquidation(Liquidation), ConnState(ConnState),
-    Bulk { kind: EventKind, len: u32 }, // 只在 md-<venue> 环:下一条变长逻辑体(L2Batch、L2Snapshot)在配套的 md-<venue>-bulk ByteSpsc 里,sequencer 按此处的顺序取
+    Bbo(Bbo, RecordFlags), L2Delta(L2Delta, RecordFlags), Trade(Trade, RecordFlags),
+    Funding(Funding, RecordFlags), MarkPrice(MarkPrice, RecordFlags),
+    IndexPrice(IndexPrice, RecordFlags), Liquidation(Liquidation, RecordFlags), ConnState(ConnState),
+    Bulk { kind: EventKind, len: u32, flags: RecordFlags }, // 只在 md-<venue> 环:下一条变长逻辑体(L2Batch、L2Snapshot)在配套的 md-<venue>-bulk ByteSpsc 里,sequencer 按此处的顺序取
 }
 pub enum RepMsg {                    // rep-<venue> 环与 sim-gw 的 rep-sim 环(同一类型);size_of ≤ 128 B
-    OrderEvent(OrderEvent), SendReport(SendReport), PositionReport(PositionReport),
+    OrderEvent(OrderEvent, RecordFlags), SendReport(SendReport), PositionReport(PositionReport),
     BalanceReport(BalanceReport), FundingSettle(FundingSettle), ConnState(ConnState),
     ExternalFill(ExternalFill),
     AccountConfigReport(AccountConfigReportHdr), // 其后 hdr.n_lev 条 LeverageItem 在配套的 rep-<venue>-bulk ByteSpsc 里

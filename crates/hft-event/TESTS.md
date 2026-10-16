@@ -1417,8 +1417,8 @@ spec: README.md
 
 | 行 | 类型 | 期望 |
 |---|---|---|
-| EVT-140.1 | `FeedMsg` | `size_of ≤ 128`;`Copy` |
-| EVT-140.2 | `RepMsg` | `size_of ≤ 128`;`Copy` |
+| EVT-140.1 | 含来源标志的 `FeedMsg` | `size_of ≤ 128`;`Copy` |
+| EVT-140.2 | 含来源标志的 `RepMsg` | `size_of ≤ 128`;`Copy` |
 | EVT-140.3 | `HkMsg` | `size_of ≤ 128`;`Copy` |
 | EVT-140.4 | `FeedCmd` | `size_of ≤ 16`;`Copy` |
 | EVT-140.5 | `GwCmd` | `size_of == 64`、`align_of == 8`;`Copy` |

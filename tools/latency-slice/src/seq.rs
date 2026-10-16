@@ -212,13 +212,15 @@ impl<C: Clock> std::fmt::Debug for Seq<C> {
     }
 }
 
-fn hdr_flags(hw: i64, sw: i64) -> u16 {
-    if hw == 0 {
+fn receive_source(value: i64, flags: u16) -> u32 {
+    if value == 0 {
         0
-    } else if hw == sw {
-        RecordFlags::SW_TS.0
+    } else if flags & RecordFlags::HW_TS.0 != 0 {
+        SRC_HW
+    } else if flags & RecordFlags::SW_TS.0 != 0 {
+        SRC_SW
     } else {
-        RecordFlags::HW_TS.0
+        0
     }
 }
 
@@ -395,7 +397,7 @@ impl<C: Clock> Seq<C> {
     fn on_feed(&mut self, m: FeedMsg) {
         let now = self.clock.now();
         match m {
-            FeedMsg::Bbo(b) => self.on_bbo(&b, now),
+            FeedMsg::Bbo(b, flags) => self.on_bbo(&b, flags.0, now),
             FeedMsg::ConnState(c) => {
                 self.stats.conn_states += 1;
                 self.append(0, now, &c);
@@ -411,9 +413,8 @@ impl<C: Clock> Seq<C> {
         self.cfg.insts.iter().position(|i| i.inst == inst)
     }
 
-    fn on_bbo(&mut self, b: &Bbo, now: u64) {
+    fn on_bbo(&mut self, b: &Bbo, flags: u16, now: u64) {
         self.stats.bbo += 1;
-        let flags = hdr_flags(b.h.hw_rx_ns, b.h.sw_rx_ns);
         let seq = self.append(flags, now, b);
         let burst = b.h.rx_tsc != 0 && b.h.rx_tsc == self.last_bbo_rx;
         self.last_bbo_rx = b.h.rx_tsc;
@@ -429,11 +430,7 @@ impl<C: Clock> Seq<C> {
                 sw: b.h.sw_rx_ns,
                 rx_tsc: b.h.rx_tsc,
                 proc_tsc: now,
-                hw_src: match flags {
-                    f if f == RecordFlags::HW_TS.0 => SRC_HW,
-                    f if f == RecordFlags::SW_TS.0 => SRC_SW,
-                    _ => 0,
-                },
+                hw_src: receive_source(b.h.hw_rx_ns, flags),
             };
             self.maybe_probe(ix, now, burst, trig);
         }
@@ -664,7 +661,7 @@ impl<C: Clock> Seq<C> {
         let now = self.clock.now();
         match m {
             RepMsg::SendReport(r) => self.on_send(&r, now),
-            RepMsg::OrderEvent(e) => self.on_order(&e, now),
+            RepMsg::OrderEvent(e, flags) => self.on_order(&e, flags.0, now),
             RepMsg::ConnState(c) => self.on_conn(&c, now),
             _ => self.end(now),
         }
@@ -721,36 +718,27 @@ impl<C: Clock> Seq<C> {
         self.end(now);
     }
 
-    fn rep_trig(&self, e: &OrderEvent, seq: u64, now: u64) -> Trig {
+    fn rep_trig(&self, e: &OrderEvent, flags: u16, seq: u64, now: u64) -> Trig {
         Trig {
             seq,
             kind: KIND_ORDER_EVENT,
             ex_ts: e.ex_ts_ns,
             ex_send: 0,
             hw: e.hw_rx_ns,
-            sw: 0,
+            sw: if flags & RecordFlags::SW_TS.0 != 0 {
+                e.hw_rx_ns
+            } else {
+                0
+            },
             rx_tsc: e.rx_tsc,
             proc_tsc: now,
-            hw_src: self.rep_src(e.hw_rx_ns),
+            hw_src: receive_source(e.hw_rx_ns, flags),
         }
     }
 
-    fn rep_src(&self, hw: i64) -> u32 {
-        match (hw, self.cfg.ts_expect_hw) {
-            (0, _) => 0,
-            (_, true) => SRC_HW,
-            (_, false) => SRC_SW,
-        }
-    }
-
-    fn on_order(&mut self, e: &OrderEvent, now: u64) {
-        let flags = match self.rep_src(e.hw_rx_ns) {
-            SRC_HW => RecordFlags::HW_TS.0,
-            SRC_SW => RecordFlags::SW_TS.0,
-            _ => 0,
-        };
+    fn on_order(&mut self, e: &OrderEvent, flags: u16, now: u64) {
         let seq = self.append(flags, now, e);
-        let trig = self.rep_trig(e, seq, now);
+        let trig = self.rep_trig(e, flags, seq, now);
         if matches!(e.what, OrderEventKind::PartialFill | OrderEventKind::Fill) {
             if let Some(k) = self.slot_ix(e.slot.0, e.r#gen) {
                 self.free(k);
@@ -768,13 +756,13 @@ impl<C: Clock> Seq<C> {
             (OState::New, OrderEventKind::Ack) => {
                 self.stats.acks += 1;
                 self.consec_fail = 0;
-                self.sample(k, false, e, seq, now);
+                self.sample(k, false, e, flags, seq, now);
                 self.orders[k].new.answered = true;
                 self.issue_cancel(k, now, trig);
             }
             (OState::New, OrderEventKind::Reject) => {
                 self.stats.rejects += 1;
-                self.sample(k, false, e, seq, now);
+                self.sample(k, false, e, flags, seq, now);
                 self.free(k);
                 self.consec_fail += 1;
                 if self.consec_fail >= self.cfg.max_consec_fail {
@@ -791,7 +779,7 @@ impl<C: Clock> Seq<C> {
             }
             (_, OrderEventKind::CancelAck | OrderEventKind::Expired | OrderEventKind::CancelReject) => {
                 if o.cxl.issued && !o.cxl.answered {
-                    self.sample(k, true, e, seq, now);
+                    self.sample(k, true, e, flags, seq, now);
                     self.orders[k].cxl.answered = true;
                 }
                 let gone = e.what != OrderEventKind::CancelReject || e.detail == 1;
@@ -808,7 +796,7 @@ impl<C: Clock> Seq<C> {
     }
 
     /// `LatencySample` of the first answer of operation new (`cancel = false`) or cancel.
-    fn sample(&mut self, k: usize, cancel: bool, ack: &OrderEvent, ack_seq: u64, now: u64) {
+    fn sample(&mut self, k: usize, cancel: bool, ack: &OrderEvent, flags: u16, ack_seq: u64, now: u64) {
         let o = self.orders[k];
         let op = if cancel { o.cxl } else { o.new };
         if op.answered {
@@ -824,7 +812,7 @@ impl<C: Clock> Seq<C> {
         src |= p(t.proc_tsc) << 8;
         src |= p(op.decided) << 10;
         src |= p(op.sent) << 12;
-        src |= self.rep_src(ack.hw_rx_ns) << 14;
+        src |= receive_source(ack.hw_rx_ns, flags) << 14;
         let mut s = LatencySample::new_zeroed();
         s.trigger_seq = t.seq;
         s.ack_seq = ack_seq;

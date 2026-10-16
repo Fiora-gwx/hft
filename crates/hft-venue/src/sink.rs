@@ -21,6 +21,7 @@ const BULK_SCRATCH: usize = 1 << 20;
 pub(crate) struct FeedSink {
     pub evs: Box<[FeedMsg]>,
     pub n: usize,
+    pub rx_flags: hft_event::RecordFlags,
     /// More events than allowed: the frame is dropped as a decode error.
     pub over: bool,
     /// Bulk bodies of `FeedMsg::Bulk` events, back to back.
@@ -38,6 +39,7 @@ impl FeedSink {
         FeedSink {
             evs: vec![
                 FeedMsg::Bulk {
+                    flags: hft_event::RecordFlags(0),
                     kind: EventKind::BBO,
                     len: 0
                 };
@@ -45,6 +47,7 @@ impl FeedSink {
             ]
             .into_boxed_slice(),
             n: 0,
+            rx_flags: hft_event::RecordFlags(0),
             over: false,
             bulk: vec![0u8; BULK_SCRATCH].into_boxed_slice(),
             bulk_used: 0,
@@ -56,6 +59,7 @@ impl FeedSink {
 
     pub fn begin(&mut self, limit: usize) {
         self.n = 0;
+        self.rx_flags = hft_event::RecordFlags(0);
         self.over = false;
         self.bulk_used = 0;
         self.limit = limit.min(FRAME_EVENTS_MAX);
@@ -94,6 +98,7 @@ impl FeedSink {
         }
         self.bulk_used = end;
         self.push(FeedMsg::Bulk {
+            flags: self.rx_flags,
             kind: EventKind::L2_SNAPSHOT,
             len: len as u32,
         });
@@ -102,7 +107,7 @@ impl FeedSink {
 
 impl MdSink for FeedSink {
     fn bbo(&mut self, e: &Bbo) {
-        self.push(FeedMsg::Bbo(*e));
+        self.push(FeedMsg::Bbo(*e, self.rx_flags));
     }
     fn l2_begin(&mut self, _h: &L2BatchHdr) {
         self.l2_batches += 1;
@@ -131,18 +136,18 @@ impl MdSink for FeedSink {
         }
     }
     fn trade(&mut self, e: &Trade) {
-        self.push(FeedMsg::Trade(*e));
+        self.push(FeedMsg::Trade(*e, self.rx_flags));
     }
     fn mark(&mut self, e: &MarkPrice) {
-        self.push(FeedMsg::MarkPrice(*e));
+        self.push(FeedMsg::MarkPrice(*e, self.rx_flags));
     }
     fn index(&mut self, e: &IndexPrice) {
-        self.push(FeedMsg::IndexPrice(*e));
+        self.push(FeedMsg::IndexPrice(*e, self.rx_flags));
     }
     fn funding(&mut self, e: &Funding) {
-        self.push(FeedMsg::Funding(*e));
+        self.push(FeedMsg::Funding(*e, self.rx_flags));
     }
     fn liquidation(&mut self, e: &Liquidation) {
-        self.push(FeedMsg::Liquidation(*e));
+        self.push(FeedMsg::Liquidation(*e, self.rx_flags));
     }
 }

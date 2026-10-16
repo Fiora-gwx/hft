@@ -30,6 +30,27 @@ fn ack_line(slot: u32) -> String {
 
 #[test]
 fn ven_207_drain_after_each_frame() {
+    for (hw, sw, expected) in [
+        (4100, 4500, hft_event::RecordFlags::HW_TS),
+        (4500, 4500, hft_event::RecordFlags::HW_TS),
+        (0, 4500, hft_event::RecordFlags::SW_TS),
+        (0, 0, hft_event::RecordFlags(0)),
+    ] {
+        let mut h = gw::<StubProto>();
+        h.net
+            .deliver_stamped(&mut h.rt, P, &[ack_line(1).as_bytes()], 4900, 5000, hw, sw);
+        h.rt.poll_once(5000);
+        let messages = h.reps();
+        let (body, flags) = messages
+            .iter()
+            .find_map(|m| match m {
+                RepMsg::OrderEvent(body, flags) => Some((body, flags)),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(*flags, expected);
+        assert_eq!(body.hw_rx_ns, if hw != 0 { hw } else { sw });
+    }
     let mut h = gw::<StubProto>();
     for s in 1..=64 {
         h.net.push(P, ack_line(s).as_bytes());
@@ -52,7 +73,7 @@ fn ven_207_drain_after_each_frame() {
     let v = h.reps();
     let pos_ev = |slot: u32| {
         v.iter()
-            .position(|m| matches!(m, RepMsg::OrderEvent(e) if e.slot.0 == slot))
+            .position(|m| matches!(m, RepMsg::OrderEvent(e, _) if e.slot.0 == slot))
             .unwrap()
     };
     let pos_send = v

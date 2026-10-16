@@ -480,6 +480,7 @@ fn ven_085_has_pending() {
     h.bbo.as_mut().unwrap().try_pop().unwrap();
     assert!(PollTask::has_pending(&h.rt), "VEN-085.4");
     let _ = FeedMsg::Bulk {
+        flags: hft_event::RecordFlags(0),
         kind: hft_event::EventKind::BBO,
         len: 0,
     };

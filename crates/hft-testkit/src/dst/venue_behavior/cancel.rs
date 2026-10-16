@@ -89,7 +89,7 @@ impl CancelFilled {
         let Some(&(requested_ns, hold_ms)) = self.requests.front() else {
             return Ok(false);
         };
-        let RepMsg::OrderEvent(e) = r.rep else {
+        let RepMsg::OrderEvent(e, _) = r.rep else {
             return Ok(false);
         };
         if r.client_id == RELEASE_ID
@@ -179,7 +179,7 @@ impl CancelFilled {
             x.release_ns = Some(now);
             out.push(VenueOut {
                 due_ns: now,
-                rep: RepMsg::OrderEvent(x.original),
+                rep: RepMsg::OrderEvent(x.original, hft_event::RecordFlags(0)),
                 client_id: RELEASE_ID.into(),
             });
             false

@@ -322,7 +322,7 @@ impl<P: VenueProtocol, const N: usize> PooledSnapFetchTask<P, N> {
         };
         let quote = if self.status == SnapRecHdr::OK {
             self.sink.evs[..self.sink.n].iter().find_map(|e| match e {
-                FeedMsg::Bbo(b) if b.h.inst == r.req.inst => Some(b),
+                FeedMsg::Bbo(b, _) if b.h.inst == r.req.inst => Some(b),
                 _ => None,
             })
         } else {
@@ -345,7 +345,7 @@ impl<P: VenueProtocol, const N: usize> PooledSnapFetchTask<P, N> {
             http_status: self.http,
             _pad: 0,
             _pad2: 0,
-            _pad3: 0,
+            ts_flags: self.rx.ts_flags,
         };
         let len = size_of::<SnapRecHdr>() + raw.len() + quote.map_or(0, |_| size_of::<Bbo>());
         let oversized = len > self.cfg.max_record_bytes as usize;
@@ -454,6 +454,7 @@ impl<P: VenueProtocol, const N: usize> PooledSnapFetchTask<P, N> {
                                 for (dst, req) in insts.iter_mut().zip(&self.batches[ix].requests) {
                                     *dst = req.req.inst;
                                 }
+                                self.sink.rx_flags = crate::latency::rx_flags(self.rx.ts_flags);
                                 let decoded = P::decode_bbo_snapshot(
                                     self.deps.rd,
                                     &mut self.ctx,
@@ -463,7 +464,7 @@ impl<P: VenueProtocol, const N: usize> PooledSnapFetchTask<P, N> {
                                     &mut self.sink,
                                 );
                                 let valid = decoded == Ok(n as u16) && self.sink.n == n && !self.sink.over
-                                    && insts[..n].iter().all(|i| self.sink.evs[..self.sink.n].iter().filter(|e| matches!(e, FeedMsg::Bbo(b) if b.h.inst == *i && b.h.venue == P::VENUE)).count() == 1);
+                                    && insts[..n].iter().all(|i| self.sink.evs[..self.sink.n].iter().filter(|e| matches!(e, FeedMsg::Bbo(b, _) if b.h.inst == *i && b.h.venue == P::VENUE)).count() == 1);
                                 status = if valid { SnapRecHdr::OK } else { SnapRecHdr::DECODE };
                             }
                         }

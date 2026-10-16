@@ -219,7 +219,10 @@ fn ven_087_frame_events_over_is_decode_error() {
         h.poll(now + 1);
         let events = h.drain_md();
         assert_eq!(
-            events.iter().filter(|e| matches!(e, FeedMsg::Trade(_))).count(),
+            events
+                .iter()
+                .filter(|e| matches!(e, FeedMsg::Trade(_, _)))
+                .count(),
             if count == 65 { 0 } else { count }
         );
         assert_eq!(h.rt.counters().frame_events_over, u64::from(count == 65));
@@ -228,7 +231,7 @@ fn ven_087_frame_events_over_is_decode_error() {
         assert_eq!(
             h.drain_md()
                 .iter()
-                .filter(|e| matches!(e, FeedMsg::Trade(_)))
+                .filter(|e| matches!(e, FeedMsg::Trade(_, _)))
                 .count(),
             1
         );
@@ -256,10 +259,10 @@ fn ven_102_streams_independent() {
         got.extend(h.drain_md());
     }
     assert_eq!(got.len(), 4);
-    assert!(matches!(got[0], FeedMsg::Bbo(e) if e.h.inst == S1 && e.update_id == 50));
-    assert!(matches!(got[1], FeedMsg::Trade(e) if e.h.inst == S1 && e.trade_id == 50));
-    assert!(matches!(got[2], FeedMsg::Bbo(e) if e.h.inst == S2 && e.update_id == 50));
-    assert!(matches!(got[3], FeedMsg::Bbo(e) if e.update_id == 51));
+    assert!(matches!(got[0], FeedMsg::Bbo(e, _) if e.h.inst == S1 && e.update_id == 50));
+    assert!(matches!(got[1], FeedMsg::Trade(e, _) if e.h.inst == S1 && e.trade_id == 50));
+    assert!(matches!(got[2], FeedMsg::Bbo(e, _) if e.h.inst == S2 && e.update_id == 50));
+    assert!(matches!(got[3], FeedMsg::Bbo(e, _) if e.update_id == 51));
 }
 
 #[test]

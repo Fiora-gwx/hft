@@ -231,6 +231,10 @@ fn slc_014_ack_cancels_same_event() {
     );
     assert!(!e.end() && !s.end() && d.end());
     let ls = sample(s);
+    assert_eq!((ls.src >> 4) & 3, 1);
+    assert_eq!((ls.src >> 14) & 3, 1); // fixture flags, despite ts_expect_hw = false
+    assert_ne!(e.hdr.flags & RecordFlags::HW_TS.0, 0);
+
     assert_eq!(
         (
             ls.action,
@@ -317,7 +321,9 @@ fn slc_016_reject_and_consec_fail() {
             (t * MS + 1_000_000) as i64,
         );
         e.reject_code = 0xFFFF_EC62;
-        h.rep.try_push(hft_event::RepMsg::OrderEvent(e)).unwrap();
+        h.rep
+            .try_push(hft_event::RepMsg::OrderEvent(e, hft_event::RecordFlags(0)))
+            .unwrap();
         h.at(t * MS + 1_000_000, 0);
         h.drain();
         assert_eq!(h.s().open_orders(), 0);
@@ -428,14 +434,22 @@ fn slc_022_drain_cancels_all() {
 
 #[test]
 fn slc_023_bbo_ts_flags() {
-    let rows: [(&str, i64, i64, u16); 3] = [
+    let rows: [(&str, i64, i64, u16); 4] = [
         ("SLC-023.1", 1000, 2000, RecordFlags::HW_TS.0),
+        ("SLC-023.1 equal values", 2000, 2000, RecordFlags::HW_TS.0),
         ("SLC-023.2", 2000, 2000, RecordFlags::SW_TS.0),
         ("SLC-023.3", 0, 2000, 0),
     ];
     for (row, hw, sw, want) in rows {
         let mut h = H::new(cfg_with(""), false);
-        h.bbo_at(1, 1000 * MS, 1000 * MS, 6_500_000, 6_500_010, hw, sw, 0);
+        let mut event: hft_event::Bbo = zerocopy::FromZeros::new_zeroed();
+        event.h.hw_rx_ns = hw;
+        event.h.sw_rx_ns = sw;
+        h.bbo
+            .try_push(hft_event::FeedMsg::Bbo(event, RecordFlags(want)))
+            .unwrap();
+        h.at(1000 * MS, 0);
+        h.drain();
         let r = of_kind(&mut h, EventKind::BBO).pop().unwrap();
         let f = r.hdr.flags & (RecordFlags::HW_TS.0 | RecordFlags::SW_TS.0);
         assert_eq!(f, want, "{row}");
@@ -494,7 +508,9 @@ fn slc_024_input_priority_and_events() {
             update_id: 1,
         }
     };
-    h.bbo.try_push(hft_event::FeedMsg::Bbo(b)).unwrap();
+    h.bbo
+        .try_push(hft_event::FeedMsg::Bbo(b, hft_event::RecordFlags(0)))
+        .unwrap();
     h.rep.try_push(hft_event::RepMsg::ConnState(up)).unwrap();
     h.at(t, 0);
     for _ in 0..3 {

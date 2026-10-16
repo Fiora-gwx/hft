@@ -979,7 +979,14 @@ fn seq_127_trig_stamps_passed() {
     b.h.sw_rx_ns = 14;
     b.h.rx_tsc = 15;
     let m = h.mark();
-    h.push(RingId::Bbo(0), &b);
+    h.push_e(
+        RingId::Bbo(0),
+        Elem {
+            kind: EventKind::BBO,
+            flags: RecordFlags::SW_TS,
+            body: zerocopy::IntoBytes::as_bytes(&b).to_vec(),
+        },
+    );
     h.run();
     clear_hook();
     let rec = h
@@ -1000,6 +1007,7 @@ fn seq_127_trig_stamps_passed() {
     ] {
         let st = e.oms.slot_stamps(r).copied().expect("stamps");
         assert_eq!(st.op, op);
+        assert_eq!(st.rx_flags, RecordFlags::SW_TS.0 as u8);
         assert_eq!(
             (
                 st.trig_ex_ts_ns,

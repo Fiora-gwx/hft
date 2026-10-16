@@ -838,6 +838,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
   1. 推 `B|S1|20|…`,`poll_once`
 - 期望:
   - `CallLog` 中 `decode_md` 的 `RxMeta = {rx_tsc: 5000, hw_rx_ns: 4100, sw_rx_ns: 4500, prev_override: 0, conn: 1, ts_flags: HW | SW, rx_empty_gap_ns: 700}`;转发的 `Bbo.h` 对应字段相同
+  - 来源矩阵覆盖 HW+SW（含数值相等）、仅 SW、均无；环元素标志与 best_rx 的选择一致。
 - 实现:`crates/hft-venue/tests/feed_frame.rs::ven_064_rx_meta_passthrough`
 
 ### VEN-065 各类行情事件进对应的环
@@ -1994,6 +1995,8 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 | VEN-206.3 | false,且 `inst_cancel_all = false` / 同上 | `inst = 0`、`S1`、`S2` 都返回 `Unsupported(CancelAll)`;随后 A1 的 3 张活动单展开为 `Cancel`:`encode_batch` 返回 `Ok` 时 1 帧,返回 `Unsupported` 时 3 帧(逐条 `encode`);1 条 `SendReport{CancelAll, Written}`,展开的 `Cancel` 不另回 `SendReport` |
 
 ### VEN-207 回报突发期间每处理一帧就检查一次出环
+
+同时验证订单回报环的接收来源覆盖 HW+SW、相等值、仅 SW 与缺失。
 
 - 规则:[§4](README.md#4-gwruntimepoll_once-的循环结构)
 - 级别:integ

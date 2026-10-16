@@ -390,8 +390,8 @@ impl<P: VenueProtocol> St<P> {
             };
             crate::latency::feed(TraceStage::DecodedEvent, &m);
             match m {
-                FeedMsg::Bbo(_) => self.emit(true, m),
-                FeedMsg::Bulk { kind, len } => {
+                FeedMsg::Bbo(_, _) => self.emit(true, m),
+                FeedMsg::Bulk { kind, len, .. } => {
                     let end = bulk_off + len as usize;
                     if let (Some(b), Some(src)) = (self.bulk.as_mut(), self.sink.bulk.get(bulk_off..end)) {
                         crate::latency::market_bytes(TraceStage::DecodedEvent, kind, src);
@@ -515,6 +515,7 @@ impl<P: VenueProtocol> St<P> {
             _pad2: 0,
         };
         self.sink.begin(if to_bbo { 1 } else { FRAME_EVENTS_MAX });
+        self.sink.rx_flags = crate::latency::rx_flags(rx.ts_flags);
         let depth = pk.stream == StreamKind::DepthTopN;
         match P::decode_md(self.rd, &mut self.ctx, c, payload, &rx, &mut self.sink) {
             Ok(_) if !self.sink.over => {
@@ -870,14 +871,17 @@ impl<P: VenueProtocol> FeedRuntime<P> {
             && let Some(bytes) = ring.peek()
         {
             if let Ok((h, tail)) = SnapRecHdr::read_from_prefix(bytes) {
+                let quote = tail
+                    .get(h.body_len as usize..)
+                    .and_then(|b| hft_event::Bbo::read_from_bytes(b).ok());
                 if let Some(raw) = tail.get(..h.body_len as usize) {
                     self.st.raw.rx(
                         h.conn,
                         what::REST_RESPONSE,
                         0,
                         h.req_id,
-                        0,
-                        hft_net::TsFlags::SW,
+                        quote.map_or(0, |e| e.h.hw_rx_ns),
+                        if quote.is_some() { h.ts_flags } else { 0 },
                         raw,
                         h.rx_tsc,
                     );
@@ -888,9 +892,6 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                         s.refresh == REFRESH_ACTIVE && s.refresh_req == h.req_id && s.members != 0
                     })
                 {
-                    let quote = tail
-                        .get(h.body_len as usize..)
-                        .and_then(|b| hft_event::Bbo::read_from_bytes(b).ok());
                     let last = self.st.seqs[ix].last_fwd[slot_of(StreamKind::Bbo)];
                     if h.status == SnapRecHdr::OK
                         && let Some(e) = quote
@@ -900,6 +901,7 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                     {
                         use hft_venue_proto::MdSink;
                         self.st.sink.begin(1);
+                        self.st.sink.rx_flags = crate::latency::rx_flags(h.ts_flags);
                         self.st.sink.bbo(&e);
                         self.st.publish();
                         if e.update_id != 0 {

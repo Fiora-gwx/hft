@@ -1886,6 +1886,8 @@ TK-115 的 modes 回归另覆盖节 25 的运行起点恢复给风控:旧运行�
 
 ### SEQ-127 撤单、改单与新单传本 Input 的 TrigStamps
 
+触发记录的 SW_TS 来源标志同时保留到三种操作的 SlotStamps。
+
 - 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)、[意图管线](README.md#意图管线)
 - 级别:unit
 - 里程碑:M2
