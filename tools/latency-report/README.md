@@ -61,6 +61,8 @@ TxQueued/TxWrite 的编号为 32/33：`frame` 在这两类记录中表示连接�
 
 RawRecord 的编号为 34，v0..v3 为 raw seq、raw kind、接收/发送 TSC、what；在原始记录成功追加后写入当前 frame 关联。原始交易所时间可精确回连同读多帧；缺失或多匹配明确标记。订单行按 trigger_seq 和 intent_no/inst 连接 OMS、按 strategy 连接回调；同时双腿共享风险准入时 `risk_owner_intent_no` 标识第一腿，独立 OnFill/Reverse 仍用自身准入。多次同策略回调无法唯一连接时留空。
 
+跨 journal 段的 boot block 可重复记录同一 ClockStatus。所有原始记录保留在 CSV；插值表仅合并 body_tsc 与全部时钟载荷相同的锚点，并报告 `repeated_calibration_anchors`。同一 body_tsc 的载荷冲突直接拒绝分析。
+
 分段是 [latency-budget](../../docs/latency-budget.md) 的诊断细分，不构成新预算。网络往返按同一次进程运行内完整 `(venue, account, slot, gen)` 身份匹配每次实际 ack/fill，不把其他订单表的同号回报归入当前订单；缺少 venue/account 时不关联。CSV 保留 account 与回报 epoch。同时双腿偏差保留正负方向。经验分位数始终带 n；小样本尾部不能作为门槛或回归裁决。
 
 `kernel_to_user` 用样本前后两条 ClockStatus 的 REALTIME 端线性插值；逐样本误差界以同一 REALTIME 域的相邻速率变化计算，不依赖 PHC 是否存在，默认 `--cal-max-err-ns 1000`。缺后一锚点、Stepped 或超界只计 `unsynced_cal`。事件行保留换算值与误差界，负间隔单列。`tick_to_trade.sw` / `rep_to_order.sw` 包含有效的内核软件戳到用户态部分；`.userspace` 明确从 recvmsg 返回开始，不能作为完整主机口径。HW 数据集的预算验收仍用发布包 replayer latency；这里不混合 HW 与 SW。回报 RTT 诊断从 send 返回到用户态收包，不能冒充内核收包口径的 order_rtt。

@@ -22,10 +22,18 @@ CHAIN_COLUMNS += "rx_realtime_ns calibration_error_ns kernel_to_user_ns".split()
 class Calibration:
     """SW-domain counterpart of hft-telemetry ClockCal; never extrapolate tails."""
     def __init__(self, rows, max_error=1000):
-        self.rows = sorted(rows, key=lambda r: r['body_tsc'])
+        fields = "body_tsc realtime_ns phc_ns tsc_hz_milli chrony_offset_ns max_error_ns rms_ns calib_err_ns source state".split()
+        self.rows = []
+        self.duplicate_anchors = 0
+        for row in sorted(rows, key=lambda r: r['body_tsc']):
+            if self.rows and row['body_tsc'] == self.rows[-1]['body_tsc']:
+                if any(row.get(k) != self.rows[-1].get(k) for k in fields):
+                    raise ValueError('conflicting calibration anchor')
+                # Segment boot blocks repeat the current ClockStatus with new record headers.
+                self.duplicate_anchors += 1
+            else:
+                self.rows.append(row)
         self.ticks = [r['body_tsc'] for r in self.rows]
-        if len(set(self.ticks)) != len(self.ticks):
-            raise ValueError('duplicate calibration anchor')
         self.max_error = max_error
 
     def realtime(self, tick):
@@ -194,6 +202,8 @@ class Analysis:
         if db.execute("SELECT 1 FROM sqlite_master WHERE name='events'").fetchone():
             clocks = [json.loads(row[0]) for row in db.execute("SELECT body FROM events WHERE kind='ClockStatus'")]
         self.calibration = Calibration(clocks, cal_max_err_ns)
+        if self.calibration.duplicate_anchors:
+            self.issues['repeated_calibration_anchors'] = self.calibration.duplicate_anchors
 
     def sample(self, venue, name, chain, delta):
         self.db.execute("INSERT INTO samples VALUES(?,?,?,?)", (venue, name, chain, delta))

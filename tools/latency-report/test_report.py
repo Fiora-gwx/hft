@@ -119,7 +119,11 @@ class Chains(unittest.TestCase):
         self.assertIsNone(report.Calibration(rows,16).realtime(150))
         rows[2]['state']=3
         self.assertIsNone(report.Calibration(rows).realtime(150))
-        with self.assertRaises(ValueError): report.Calibration(rows+rows[:1])
+        repeated = report.Calibration(rows + [dict(rows[0], seq=100, tsc=999, flags=0)])
+        self.assertEqual(repeated.duplicate_anchors,1)
+        self.assertEqual(len(repeated.rows),3)
+        with self.assertRaisesRegex(ValueError, 'conflicting calibration anchor'):
+            report.Calibration(rows + [dict(rows[0], realtime_ns=1001)])
 
     def test_rpl_203_sw_rate_error_without_phc(self):
         rows=[dict(body_tsc=t,realtime_ns=r,phc_ns=0,calib_err_ns=5,state=1)
