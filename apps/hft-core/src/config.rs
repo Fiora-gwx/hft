@@ -34,9 +34,32 @@ pub struct Config {
 pub struct Instance {
     pub name: String,
     pub order_env: Option<String>,
+    #[serde(default)]
+    pub feed_env: FeedEnv,
     pub config_source: String,
     #[serde(default)]
     pub secrets_mode: SecretsMode,
+}
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FeedEnv {
+    Prod,
+    #[default]
+    Testnet,
+}
+impl FeedEnv {
+    pub fn endpoint_env(self) -> hft_refdata::EndpointEnv {
+        match self {
+            Self::Prod => hft_refdata::EndpointEnv::Prod,
+            Self::Testnet => hft_refdata::EndpointEnv::Testnet,
+        }
+    }
+    pub fn venue_env(self) -> hft_venue_proto::VenueEnv {
+        match self {
+            Self::Prod => hft_venue_proto::VenueEnv::Prod,
+            Self::Testnet => hft_venue_proto::VenueEnv::Testnet,
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -534,9 +557,6 @@ pub fn load_timed(
         if c.instance.secrets_mode == SecretsMode::LocalDemo {
             let endpoints = rd.endpoints(VenueId(v.id), hft_refdata::EndpointEnv::Testnet);
             if endpoints.is_empty()
-                || !rd
-                    .endpoints(VenueId(v.id), hft_refdata::EndpointEnv::Prod)
-                    .is_empty()
                 || endpoints
                     .iter()
                     .any(|e| !crate::venues::local_demo_endpoint(&v.protocol, e.role, &e.url))
@@ -546,6 +566,25 @@ pub fn load_timed(
                     "local demo mode requires explicit demo hosts only",
                 ));
             }
+        }
+        let public = rd.endpoints(VenueId(v.id), hft_refdata::EndpointEnv::Prod);
+        if (c.instance.feed_env == FeedEnv::Testnet && !public.is_empty())
+            || (c.instance.feed_env == FeedEnv::Prod
+                && (public
+                    .iter()
+                    .any(|e| !crate::venues::public_market_endpoint(&v.protocol, e.role, &e.url))
+                    || [
+                        hft_refdata::EndpointRole::MdPublic,
+                        hft_refdata::EndpointRole::MdMarket,
+                        hft_refdata::EndpointRole::Rest,
+                    ]
+                    .iter()
+                    .any(|role| !public.iter().any(|e| e.role == *role))))
+        {
+            errors.push(Error::config(
+                "PublicFeedEndpoint",
+                "production feed requires only explicit public market endpoints",
+            ));
         }
         for k in &v.accounts {
             let account = rd.account(AccountId(k.account));

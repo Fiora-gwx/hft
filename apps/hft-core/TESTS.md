@@ -407,6 +407,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 ### CORE-041 `is_prod`、`order_env`、`feed_env` 与主机类的组合
 
+当前文件配置子集由 `secrets.rs::core_041_public_feed_keeps_demo_private_endpoints` 验证主网公共行情与 demo 私有端点并存；缺少公共角色、生产表混入私有角色、demo 私有角色指向主网均拒绝。CORE-222 同时验证公共主机白名单与凭据端点的边界。
+
 - 规则:[实例角色(prod 与 sim)](README.md#实例角色prod-与-sim)、[配置文件字段](README.md#配置文件字段)
 - 级别:table
 - 里程碑:M3

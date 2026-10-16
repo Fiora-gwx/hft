@@ -19,12 +19,17 @@ pub fn write(root: &Path, hot: &Path, user: Option<&str>) -> PathBuf {
 }
 
 pub fn write_for_kind(root: &Path, hot: &Path, user: Option<&str>, kind: Option<u16>) -> PathBuf {
-    write_mode(root, hot, user, kind, false, false)
+    write_mode(root, hot, user, kind, false, false, &[])
 }
 
 #[allow(dead_code)]
 pub fn write_live(root: &Path, hot: &Path, is_prod: bool) -> PathBuf {
-    write_mode(root, hot, None, None, true, is_prod)
+    write_mode(root, hot, None, None, true, is_prod, &[])
+}
+
+#[allow(dead_code)]
+pub fn write_live_endpoints(root: &Path, rows: &[(EndpointEnv, EndpointRole, &str)]) -> PathBuf {
+    write_mode(root, &root.join("hot"), None, None, true, false, rows)
 }
 
 fn write_mode(
@@ -34,6 +39,7 @@ fn write_mode(
     kind: Option<u16>,
     live: bool,
     is_prod: bool,
+    endpoints: &[(EndpointEnv, EndpointRole, &str)],
 ) -> PathBuf {
     std::fs::create_dir_all(root).unwrap();
     let v = VenueId::BINANCE_SPOT;
@@ -120,6 +126,17 @@ fn write_mode(
         crossed_tolerance_default: 0,
         stale_guard: StaleGuardKind::RecvWindow,
     });
+    for (env, role, url) in endpoints {
+        b.endpoint(
+            v,
+            Endpoint {
+                env: *env,
+                role: *role,
+                url: (*url).into(),
+                conn_group: 0,
+            },
+        );
+    }
     use hft_venue_proto::VenueProtocol;
     b.caps(venue_binance::Spot::default_caps(|s| match s {
         "USDT" => Some(usdt),

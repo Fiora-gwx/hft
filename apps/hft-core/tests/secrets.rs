@@ -1,5 +1,92 @@
 use hft_core::{config::Config, secrets::SecretFiles};
 use std::path::PathBuf;
+#[allow(dead_code)]
+mod support;
+
+#[test]
+fn core_041_public_feed_keeps_demo_private_endpoints() {
+    use hft_refdata::{EndpointEnv as E, EndpointRole as R};
+    let mut endpoints = vec![
+        (E::Testnet, R::Rest, "https://demo-api.binance.com"),
+        (E::Testnet, R::OrderWs, "wss://demo-ws-api.binance.com/ws-api/v3"),
+        (E::Testnet, R::MdPublic, "wss://demo-stream.binance.com/ws"),
+        (E::Testnet, R::MdMarket, "wss://demo-stream.binance.com/ws"),
+        (E::Prod, R::Rest, "https://api.binance.com"),
+        (E::Prod, R::MdPublic, "wss://stream.binance.com/ws"),
+        (E::Prod, R::MdMarket, "wss://stream.binance.com/ws"),
+    ];
+    let check = |rows: &[(E, R, &str)], feed: &str| {
+        let d = tempfile::tempdir().unwrap();
+        let path = support::write_live_endpoints(d.path(), rows);
+        let mut value: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        value["instance"]
+            .as_table_mut()
+            .unwrap()
+            .insert("feed_env".into(), feed.into());
+        value["instance"]
+            .as_table_mut()
+            .unwrap()
+            .insert("secrets_mode".into(), "local_demo".into());
+        std::fs::write(&path, toml::to_string(&value).unwrap()).unwrap();
+        hft_core::config::load(&path, false)
+    };
+    let loaded = check(&endpoints, "prod").unwrap();
+    assert_eq!(loaded.cfg.instance.feed_env, hft_core::config::FeedEnv::Prod);
+    assert!(
+        check(&endpoints, "testnet")
+            .unwrap_err()
+            .iter()
+            .any(|e| e.code == "PublicFeedEndpoint")
+    );
+    endpoints.push((E::Prod, R::OrderWs, "wss://ws-api.binance.com/ws-api/v3"));
+    assert!(
+        check(&endpoints, "prod")
+            .unwrap_err()
+            .iter()
+            .any(|e| e.code == "PublicFeedEndpoint")
+    );
+    endpoints.pop();
+    endpoints.pop();
+    assert!(
+        check(&endpoints, "prod")
+            .unwrap_err()
+            .iter()
+            .any(|e| e.code == "PublicFeedEndpoint")
+    );
+    endpoints.push((E::Prod, R::MdMarket, "wss://stream.binance.com/ws"));
+    endpoints[0].2 = "https://api.binance.com";
+    assert!(
+        check(&endpoints, "prod")
+            .unwrap_err()
+            .iter()
+            .any(|e| e.code == "LocalSecretEndpoint")
+    );
+}
+
+#[test]
+fn core_222_public_feed_allowlist_is_public_only() {
+    use hft_core::venues::public_market_endpoint as allowed;
+    use hft_refdata::EndpointRole as R;
+    for (p, role, url) in [
+        ("binance-usdm", R::MdPublic, "wss://fstream.binance.com/public/ws"),
+        ("binance-usdm", R::Rest, "https://fapi.binance.com"),
+        (
+            "bitget-usdt-futures",
+            R::MdMarket,
+            "wss://ws.bitget.com/v3/ws/public",
+        ),
+        ("bitget-usdt-futures", R::Rest, "https://api.bitget.com"),
+    ] {
+        assert!(allowed(p, role, url));
+        for private in [R::OrderWs, R::UserData] {
+            assert!(!allowed(p, private, url));
+        }
+        assert!(!allowed(p, role, &url.replace("://", "://user@")));
+        assert!(!allowed(p, role, &url.replace(".com", ".com.evil.invalid")));
+    }
+    let c: Config = toml::from_str(include_str!("../config/binance-testnet.toml")).unwrap();
+    assert_eq!(c.instance.feed_env, hft_core::config::FeedEnv::Testnet);
+}
 
 fn fixture() -> (tempfile::TempDir, Config, Vec<PathBuf>) {
     let d = tempfile::tempdir().unwrap();

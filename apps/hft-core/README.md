@@ -901,7 +901,7 @@ hft-core 自身不在 tick-to-trade 路径上增加代码;路径上的分段预�
 
 ### 测试环境账户装配
 
-网络模式只接受非正式 Live 账户与 testnet 端点。`venues.<name>.account_io` 显式指定 `timeout_ms`、`interval_ms`、`request_gap_ms`、`max_cancel_rounds`、`listen_keepalive_ms`。启动先串行核对交易规则、账户模式和身份，撤销遗留订单并查到空，再读取余额与永续持仓。余额与账户 unassigned 持仓进入第一份完整 StateSnapshot，不猜测 group。启动 Summary 只证明本次快照与空 OMS 一致；seq journal 在 bootstrap 完成后创建。
+网络模式只接受非正式 Live 账户与 testnet 账户端点。公共行情环境由 [可执行配置](config/README.md) 的 `instance.feed_env` 选择，私有链路保持 testnet。`venues.<name>.account_io` 显式指定 `timeout_ms`、`interval_ms`、`request_gap_ms`、`max_cancel_rounds`、`listen_keepalive_ms`。启动先串行核对交易规则、账户模式和身份，撤销遗留订单并查到空，再读取余额与永续持仓。余额与账户 unassigned 持仓进入第一份完整 StateSnapshot，不猜测 group。启动 Summary 只证明本次快照与空 OMS 一致；seq journal 在 bootstrap 完成后创建。
 
 凭据由 `src/secrets.rs` 在实际启动的配置验证前读入并 unlink，同一普通文件的共享引用去重；原始输入用 `Zeroizing` 保存，交给连接组件后丢弃。语法解析失败不消费文件，`--check` 与 Sim 不读取文件；完整启动阶段 Note 与各持有组件的密钥生命周期验收仍待完成。
 

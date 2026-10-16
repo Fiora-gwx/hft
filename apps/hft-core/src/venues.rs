@@ -159,9 +159,40 @@ pub fn local_demo_endpoint(protocol: &str, role: EndpointRole, url: &str) -> boo
     }
 }
 
+/// Public-only endpoints used by a production feed alongside demo order credentials.
+pub fn public_market_endpoint(protocol: &str, role: EndpointRole, url: &str) -> bool {
+    let scheme = match role {
+        EndpointRole::MdPublic | EndpointRole::MdMarket => "wss://",
+        EndpointRole::Rest => "https://",
+        _ => return false,
+    };
+    let Some(address) = url.strip_prefix(scheme) else {
+        return false;
+    };
+    let host = address.split('/').next().unwrap_or("");
+    match (protocol, role) {
+        ("binance-usdm", EndpointRole::Rest) => host == "fapi.binance.com",
+        ("binance-usdm", _) => host == "fstream.binance.com",
+        ("binance-spot", EndpointRole::Rest) => host == "api.binance.com",
+        ("binance-spot", _) => host == "stream.binance.com",
+        ("bitget-usdt-futures" | "bitget-spot", EndpointRole::Rest) => host == "api.bitget.com",
+        ("bitget-usdt-futures" | "bitget-spot", _) => host == "ws.bitget.com",
+        _ => false,
+    }
+}
+
 fn endpoint(rd: &RefData, venue: VenueId, role: EndpointRole) -> Result<Endpoint, Error> {
+    endpoint_for(rd, venue, role, EndpointEnv::Testnet)
+}
+
+fn endpoint_for(
+    rd: &RefData,
+    venue: VenueId,
+    role: EndpointRole,
+    env: EndpointEnv,
+) -> Result<Endpoint, Error> {
     let e = rd
-        .endpoints(venue, EndpointEnv::Testnet)
+        .endpoints(venue, env)
         .iter()
         .find(|e| e.role == role)
         .ok_or_else(|| Error::config("Endpoint", format!("venue={} role={role:?}", venue.0)))?;
@@ -287,6 +318,10 @@ where
         env: VenueEnv::Testnet,
         stale_guard_ms: v.stale_guard_ms,
     };
+    let feed_venue = VenueCfg {
+        env: c.instance.feed_env.venue_env(),
+        stale_guard_ms: v.stale_guard_ms,
+    };
     let mut net = hft_net::NetConfig::default();
     let ip = v.src_ip.ok_or_else(|| Error::config("SourceBind", name))?;
     net.src_ips.push(ip);
@@ -304,9 +339,9 @@ where
         } else {
             EndpointRole::MdPublic
         };
-        let mut e = endpoint(rd, P::VENUE, role)?;
+        let mut e = endpoint_for(rd, P::VENUE, role, c.instance.feed_env.endpoint_env())?;
         let mut spec = hft_venue_proto::EndpointSpec::default();
-        P::endpoint(ConnRole::Md, route.id, &venue, None, None, 0, &mut spec)
+        P::endpoint(ConnRole::Md, route.id, &feed_venue, None, None, 0, &mut spec)
             .map_err(|_| Error::config("Endpoint", name))?;
         e.path = std::str::from_utf8(spec.path_query.as_slice())
             .map_err(|_| Error::config("Endpoint", "invalid path"))?
@@ -492,7 +527,12 @@ where
     let (snapreq_tx, snapreq_rx) = ring(64)?;
     let (snap_tx, snap_rx) = byte_ring(c.rings.bytes)?;
     let mut snap_net = net.clone();
-    let public_rest = endpoint(rd, P::VENUE, EndpointRole::Rest)?;
+    let public_rest = endpoint_for(
+        rd,
+        P::VENUE,
+        EndpointRole::Rest,
+        c.instance.feed_env.endpoint_env(),
+    )?;
     let snap_host = public_rest.host.clone();
     snap_net.endpoints = vec![public_rest];
     let snap_arena = ConnArena::new(&[(ConnRole::Rest, 1)], &snap_net, clock);
@@ -526,7 +566,7 @@ where
     let mut feed = FeedRuntime::<P>::new(
         FeedCfg {
             max_sub_insts: v.max_sub_insts,
-            venue,
+            venue: feed_venue,
             endpoints: targets,
             ..FeedCfg::default()
         },
