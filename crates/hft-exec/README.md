@@ -162,6 +162,7 @@ pub struct ExecOrder {
     pub reason: TargetReason,     // 来自目标(引擎目标即 MarginStress | Hard);补腿类订单取 cell 当前目标的 reason,无目标时与
                                   //   hedge_fix_cmd、自动有界平仓为 Manual
     pub hedge_cap_qty: Qty,       // Hedge 类订单的数量上限(见"对冲量上限"),sequencer 填进 IntentView;其余为 0
+    pub position_close: bool,     // 清仓永续尾量,经风险链与 OMS 写 POSITION_CLOSE
 }
 pub enum PlaceResult { Placed(OrderRef), Rejected(RejectBits), RateLimited { bits: RejectBits, retry_at: Tsc }, Shadowed }
 // 目标拒绝原因用 SDK 的 TargetReject(本 crate 定义各值的判定,见"目标的接受与替换");Stuck/Broken 原因用 SDK 的 StuckReason/BrokenReason;
@@ -645,10 +646,10 @@ Broken 的 (account, group) 有三条出路,优先级从高到低:人工 `HedgeF
    - 同 group 的其他交易所腿按同一规则;链上腿不设目标(执行层不能下链上单),由此产生的多出部分写 `Note{ExecChainLegExcess}` 留给策略;`reason = MarginStress`、`urgency = Urgent`、`band = 0`。原有的策略目标被替换,写 `ExecDecision{ForceStep, detail = Engine/Step}` 并通知策略 `Stuck{EngineOverride}`;设下引擎目标即解除 `manual_hold`。
    - **先撤策略挂单**:设定 `reason ∈ {MarginStress, Hard}` 的引擎目标时(本条、`engine_flatten`、第 5 条的对齐目标、无组 cell),对该目标每条交易所腿的 inst 写一条 `cancel_resting{account, inst}`,sequencer 调 OMS `cancel_resting_on(a, inst, …)` 撤该 inst 上本账户全部非 EXEC 挂单(范围归 [hft-oms](../hft-oms/README.md#输出扇出));L3 每一步重设引擎目标时再请求一次(策略期间新挂的减仓单同样被撤),每次设定在该 cell 写一条 `ExecDecision{ForceStep, detail = Engine/CancelResting}`(`arg` = 请求撤单的腿位图;同一 `advance` 内重复的 (account, inst) 只出一条 `cancel_resting`)。撤单确认前,每片数量另 ≤ `|pos_i| − |该腿同向即时在途|`;风控 #7 对 Flatten/Hedge 类只扣即时在途(规则归 hft-risk),所以策略挂着的 reduce-only 单不会让引擎单被 `REDUCE_INVALID` 拒。
 2. **算法**:
-   - **非 Broken 的 cell**:`PairOnFill{first_leg: PerpFirst, slice: force_slice, residual: TrimExcess}`(单腿 cell 用 `TakerSlice{force_slice}`)。预检只要求第一腿(永续腿)`quote_ok`。第二腿不可用——第二腿 inst 的 `quote_ok`、`v.venue_ready(a, 第二腿 venue)`(无 Unknown 槽且下单连接 Up)任一不成立——或该 cell 的在途链接处于 `LINK_HOLD`(OMS `RESUME_HOLD`,重启后续接前)、在途链接的第一腿槽处于 `Unknown` 时**不等第二腿**,改走下一条的串行腿,称 **`SerialFallback`**:置 cell 的 `serial`,`active` 释放该链接(链接本身仍由 OMS 续接或超时,其第二腿在途照常计入 LegTracker),写 `ExecDecision{ForceStep, detail = Engine/SerialFallback}` 与 `Note{ExecSerialFallback}`(**P0**,`v = [account, 第二腿 leg_ix, 原因(StaleQuote=1 NotReady=4 ResumeHold=5 FirstUnknown=6;2、3 保留不用), 永续腿净量, 现货腿净量, reason]`;多个原因同时成立时记码值最小的一个,即按 StaleQuote、NotReady、ResumeHold、FirstUnknown 的顺序取第一条成立的,`ExecDecision` 的 `arg` 与 `v[2]` 同值)。进入后直到该 cell 到达引擎目标(或引擎目标被清除)都走串行腿,不切回 PairOnFill:永续腿先减,现货腿在其报价恢复后再减,**接受短时现货裸多**(已报 P0);期间不做自动补腿。
+   - **非 Broken 的 cell**:`PairOnFill{first_leg: PerpFirst, slice: force_slice, residual: TrimExcess}`(单腿 cell 用 `TakerSlice{force_slice}`)。预检只要求第一腿(永续腿)`quote_ok`。第二腿不可用——第二腿 inst 的 `quote_ok`、`v.venue_ready(a, 第二腿 venue)`(无 Unknown 槽且下单连接 Up)任一不成立——或该 cell 的在途链接处于 `LINK_HOLD`(OMS `RESUME_HOLD`,重启后续接前)、在途链接的第一腿槽处于 `Unknown` 时**不等第二腿**,改走下一条的串行腿,称 **`SerialFallback`**:置 cell 的 `serial`,`active` 释放该链接(链接本身仍由 OMS 续接或超时,其第二腿在途照常计入 LegTracker),写 `ExecDecision{ForceStep, detail = Engine/SerialFallback}` 与 `Note{ExecSerialFallback}`(**P0**,`v = [account, 第二腿 leg_ix, 原因(StaleQuote=1 NotReady=4 ResumeHold=5 FirstUnknown=6 MinOrder=7;2、3 保留不用), 永续腿净量, 现货腿净量, reason]`;多个原因同时成立时记码值最小的一个,即按 StaleQuote、NotReady、ResumeHold、FirstUnknown 的顺序取第一条成立的,`ExecDecision` 的 `arg` 与 `v[2]` 同值)。进入后直到该 cell 到达引擎目标(或引擎目标被清除)都走串行腿,不切回 PairOnFill:永续腿先减,现货腿在其报价恢复后再减,**接受短时现货裸多**(已报 P0);期间不做自动补腿。
    - **Broken 的 cell 与 `SerialFallback` 的 cell**:不建链接(Broken 的 group 链接机制已失效;SerialFallback 的第二腿不可用),按腿**串行**:先全部永续腿(`Flatten` 类,reduce-only),永续腿全部到达引擎目标(或剩余低于最小下单量)后才开始现货腿(卖出 ≤ min(group 库存, 可用余额);报价不可用时门控等待);`ExecDecision.algo = Engine`。Broken 的 cell 状态保持 `Broken`,不发 Target 订单。
 3. 推进照常(限价与单笔名义按"限价与单笔名义"的引擎单规则,越价上限可取 `l3_max_cross`;对手价按 `quote_ok`,盘口长时间不变照常减仓;永续腿在途切片 Unknown 时按"推进"第 4 条扣量继续);订单 `origin = Engine`、`Flatten` 类、永续先。每一步写 `ExecDecision{ForceStep}` 与 `Note{ExecForceStep}`(P1)。
-4. **无组永续持仓**:该账户在 `venue` 上不属于任何 cell 的永续持仓同样减。数量 `u_i = portfolio(a).perp(v, i).qty − Σ 引用该 inst 的 cell 的 group_pos(a, g).legs[ix].qty`(两者同一写者 hft-ledger,同一 Input 内一致);只在 `u_i` 与账户该 inst 持仓 `perp(v, i).qty` **同号**时装入,数量 ≤ |账户持仓|(异号说明 group 归属与账户持仓不一致,不对它下单,由对账处理);扫描 refdata 中该 venue 的永续 inst 表(只在设定目标时一次,不在 tick 路径)。由该账户的**无组 cell**(`group = GROUP_NONE`)执行:至多 4 条永续腿,按 `|u_i| × mark` 从大到小装入(到达目标的腿在下一次设定目标时换入下一个;`|u_i| × mark ≤ dust_notional` 的不装);每腿 `TakerSlice{force_slice}`、`Flatten` 类、reduce-only,目标与第 1 条同一公式(基准为该腿未完成的上一步目标,否则 `u_i`);在途取本 cell 的 `own_infl`(无 LegTracker)。每次设定写 `ExecDecision{ForceStep, group = GROUP_NONE, detail = Engine/Ungrouped}` 与 `Note{ExecUngroupedReduce}`(**P0**,`v = [account, venue(清仓时 0xFF), n_legs, Σ |u_i| × mark, 本次装入的 inst 数, reason]`);不通知策略(无 group)。无组的现货(`unassigned`、基线资产)不动。
+4. **无组永续持仓**:该账户在 `venue` 上不属于任何 cell 的永续持仓同样减。数量 `u_i = portfolio(a).perp(v, i).qty − Σ 引用该 inst 的 cell 的 group_pos(a, g).legs[ix].qty`(两者同一写者 hft-ledger,同一 Input 内一致);只在 `u_i` 与账户该 inst 持仓 `perp(v, i).qty` **同号**时装入,数量 ≤ |账户持仓|(异号说明 group 归属与账户持仓不一致,不对它下单,由对账处理);扫描 refdata 中该 venue 的永续 inst 表(只在设定目标时一次,不在 tick 路径)。由该账户的**无组 cell**(`group = GROUP_NONE`)执行:至多 4 条永续腿,按 `|u_i| × mark` 从大到小装入(到达目标的腿在下一次设定目标时换入下一个;非清仓时 `|u_i| × mark ≤ dust_notional` 的不装;清仓见下节);每腿 `TakerSlice{force_slice}`、`Flatten` 类、reduce-only,目标与第 1 条同一公式(基准为该腿未完成的上一步目标,否则 `u_i`);在途取本 cell 的 `own_infl`(无 LegTracker)。每次设定写 `ExecDecision{ForceStep, group = GROUP_NONE, detail = Engine/Ungrouped}` 与 `Note{ExecUngroupedReduce}`(**P0**,`v = [account, venue(清仓时 0xFF), n_legs, Σ |u_i| × mark, 本次装入的 inst 数, reason]`);不通知策略(无 group)。无组的现货(`unassigned`、基线资产)不动。
 5. `RiskEvent::MarginStress` 降到 L3 以下 → `force_active = false`;在途切片照常完成,之后:
    - 非串行的 cell 与无组 cell:引擎目标清除(`serial` 清零),通知 `Done{engine}`;不恢复被替换的策略目标(策略按新的保证金状况重新给目标,增仓受 L1 禁开约束)。
    - `serial ≠ 0` 的 cell:引擎目标改设为 **`Hard` 对齐目标**——永续腿目标 = 其当前净量,现货腿目标 = 永续腿当前净量按对冲比折算的对冲量(与现货同号、|目标| ≤ 现货当前净量,按 lot 向零取整),`reason = Hard`、`urgency = Urgent`、`band = 0`、`origin = Engine(MarginStress)`,写 `ExecDecision{ForceStep, detail = Engine/HardAlign}`;仍走串行腿(现货在其报价恢复后减到对齐量),到达后清除并通知 `Done{engine}`。这样另一所仍断时现货残余由引擎目标门控等待,不进补腿截止、不判 Broken。对齐目标被替换时:新的引擎目标(L3 再次进入)沿用 `serial`;策略目标(此时账户已不在 `force_active`,按普通规则接受)清除 `serial`,之后按普通目标推进,第二腿不可用时按预检门控等待,剩余的多出一腿交补腿。
@@ -667,6 +668,14 @@ Broken 的 (account, group) 有三条出路,优先级从高到低:人工 `HedgeF
 2. 策略经 `Ctx::place` 直接下的意图只放行 Reduce/Flatten 类(以及 OMS 的第二腿、重试与反向),规则归 [hft-risk](../hft-risk/README.md)(Kill cap 的 flatten 位);本 crate 只管目标。
 3. L3 `force_deleverage` 照常(引擎目标以现有的 0 为基准,仍为 0);自动有界平仓照常排在引擎目标之后。
 4. `flatten_lock` 进快照,重启后保持;`clear_account`(`SimReset`)不清它(锁跟随 Kill cap)。
+
+### 清仓永续尾仓
+
+账户处于 `flatten_lock` 时,永续零目标仅在实际净量严格为 0 且即时在途为 0 时完成;`dust_notional` 不参与永续清仓完成判定。策略切片、L3 非清仓及现货的 dust 规则保留。无组 cell 装入所有非零永续候选,每批最多四腿,完成后继续扫描;扫描请求未执行时 Drain 不可完成。同 venue 多个无组品种的成交按订单槽归属到腿。
+
+余量低于 `min_qty`、`min_notional` 或不整 lot 时,具有 `POSITION_CLOSE` 能力的场所收到精确余量的无链接 `Flatten` reduce-only 单,标记 `OrderFlags::POSITION_CLOSE`;不再向零舍 lot。配对目标退回永续优先的串行路径,子码 `MinOrder=7`,无需用现货最小量凑对冲。仍检查连接健康、HARD、单笔名义上限与风险链;实际 MARKET 成交价由场所决定,请求的 `px` 仅用于预交易估值。已有即时在途或 Unknown 余量时不再发尾仓平仓。
+
+`POSITION_CLOSE_ALL` 端点只在本腿净量等于账户该品种净量时使用,避免清掉其他 group 的仓位后错记到单腿;共享品种归属不满足时保持 `REDUCE_INVALID` 门控、清仓未完成。无能力、交易所拒绝或结果未知都不得写 Done/视作归零;保留未完成目标供告警与对账处理。现货不足最小量/lot 的剩余库存继续记在 ledger 中,不伪造成交或自动核销。
 
 ### 门控拒绝与退避
 

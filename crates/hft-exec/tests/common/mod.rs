@@ -179,7 +179,13 @@ fn venue(b: &mut RdbBuilder, id: VenueId, exchange: Exchange, product: InstKind)
         own_liquidation_marker: LiqMarker::NotIdentifiable,
         liq_marker_arg: "".into(),
         ignorable_user_events: Vec::new().into(),
-        flags: CapFlags::POST_ONLY | CapFlags::IOC,
+        flags: CapFlags::POST_ONLY
+            | CapFlags::IOC
+            | if perp {
+                CapFlags::POSITION_CLOSE
+            } else {
+                CapFlags(0)
+            },
         amend_qty_down_only: false,
         dms: DeadManCap::None,
         dms_min_ms: 0,

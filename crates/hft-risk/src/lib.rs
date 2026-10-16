@@ -75,6 +75,7 @@ pub(crate) struct InstFacts {
     pub venue: VenueId,
     pub status: InstStatus,
     pub perp: bool,
+    pub position_close: bool,
     pub exp: AssetExp,
     pub quote: AssetId,
     pub tick: i64,
@@ -82,11 +83,15 @@ pub(crate) struct InstFacts {
 }
 
 impl InstFacts {
-    fn of(h: &InstHot) -> InstFacts {
+    fn of(h: &InstHot, rd: &RefData) -> InstFacts {
         InstFacts {
             venue: h.venue,
             status: h.status,
             perp: h.venue.market() == Some(MarketKind::LinearPerp),
+            position_close: rd
+                .caps(h.venue)
+                .flags
+                .contains(hft_refdata::CapFlags::POSITION_CLOSE),
             exp: AssetExp {
                 px_exp: h.px_exp,
                 qty_exp: h.qty_exp,
@@ -262,9 +267,9 @@ impl Risk {
             .groups
             .as_mut_slice()
             .sort_unstable_by_key(|r| (r.account, r.group));
-        let mut insts = vec![InstFacts::of(rd.inst(InstId(0))); n_insts + 1];
+        let mut insts = vec![InstFacts::of(rd.inst(InstId(0)), rd); n_insts + 1];
         for (i, f) in insts.iter_mut().enumerate().skip(1) {
-            *f = InstFacts::of(rd.inst(InstId(i as u32)));
+            *f = InstFacts::of(rd.inst(InstId(i as u32)), rd);
         }
         let mut dust = vec![1i64; usize::from(u16::MAX) + 1];
         for (k, d) in dust.iter_mut().enumerate().skip(1) {

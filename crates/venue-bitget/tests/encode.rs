@@ -17,6 +17,40 @@ fn tpl() -> Templates {
     Fut::build_templates(&cfg(), rd(), ACCT, &key()).unwrap()
 }
 
+#[test]
+fn bgt_065_position_close_rest_is_symbol_scoped() {
+    for (side, pos_side) in [(Side::Buy, "short"), (Side::Sell, "long")] {
+        let c = GwCmd {
+            side,
+            oflags: (OrderFlags::POSITION_CLOSE | OrderFlags::REDUCE_ONLY).0,
+            ..place()
+        };
+        let mut out = RestReqBuf::default();
+        assert_eq!(Fut::order_channel_for(&c), OrderChannel::Rest);
+        Fut::encode_rest_signed(rd(), &tpl(), &key(), &c, &tgt(cid(FUT, 3, 42, 7)), &WC, &mut out).unwrap();
+        assert_eq!(out.method, Method::Post);
+        assert_eq!(out.path_query.as_slice(), b"/api/v3/trade/close-positions");
+        let body: serde_json::Value = serde_json::from_slice(out.body.as_slice()).unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({"category":"USDT-FUTURES", "symbol":"BTCUSDT", "posSide":pos_side})
+        );
+        assert!(enc::<Fut>(&c, &tgt(cid(FUT, 3, 42, 7))).is_err());
+        let target = TargetRef {
+            id: cid(FUT, 3, 42, 7),
+            exch_order_id: 12345,
+        };
+        let cancel = GwCmd {
+            op: GwOp::Cancel,
+            ..c
+        };
+        assert_eq!(
+            json(&enc::<Fut>(&cancel, &target).unwrap())["args"][0],
+            serde_json::json!({"orderId":"12345"})
+        );
+    }
+}
+
 fn cmd(op: GwOp, inst: InstId, side: Side, tif: Tif, px: i64, qty: i64, oflags: u16) -> GwCmd {
     GwCmd {
         decision_seq: 1,

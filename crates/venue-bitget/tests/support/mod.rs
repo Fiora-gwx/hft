@@ -324,6 +324,7 @@ pub struct RepSink {
     pub margin: usize,
     pub exch_ids: Vec<(Vec<u8>, Option<ClientOrderId>)>,
     pub hint: ExchIdHint,
+    pub pending_close: bool,
 }
 
 impl Default for RepSink {
@@ -337,6 +338,7 @@ impl Default for RepSink {
             margin: 0,
             exch_ids: Vec::new(),
             hint: ExchIdHint::Unknown,
+            pending_close: false,
         }
     }
 }
@@ -348,6 +350,9 @@ impl RepSink {
 }
 
 impl ReportSink for RepSink {
+    fn pending_position_close(&self, _inst: InstId) -> bool {
+        self.pending_close
+    }
     fn order(&mut self, e: &OrderEvent) {
         self.orders.push(*e);
     }

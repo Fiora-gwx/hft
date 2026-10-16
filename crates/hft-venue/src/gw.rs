@@ -91,6 +91,7 @@ pub struct SlotMirror {
     pub live: bool,
     pub inst: InstId,
     pub exch_order_id: u64,
+    pub position_close: bool,
 }
 
 impl Default for SlotMirror {
@@ -102,6 +103,7 @@ impl Default for SlotMirror {
             live: false,
             inst: InstId(0),
             exch_order_id: 0,
+            position_close: false,
         }
     }
 }
@@ -187,6 +189,7 @@ struct Acct<P: VenueProtocol> {
     ids: IdTable,
     hold: VecDeque<Held>,
     rate: RateCounters,
+    close_after: u64,
     rest_weight: RateCounters,
     http: Option<rest_io::Pools>,
     sched: crate::AcctSched,
@@ -321,6 +324,11 @@ impl GwSink<'_> {
 }
 
 impl ReportSink for GwSink<'_> {
+    fn pending_position_close(&self, inst: InstId) -> bool {
+        self.mirror.iter().any(|m| {
+            m.live && m.account == self.account && m.inst == inst && m.position_close && m.exch_order_id == 0
+        })
+    }
     fn order(&mut self, e: &OrderEvent) {
         self.push(RepMsg::OrderEvent(*e, hft_event::RecordFlags(0)));
     }
@@ -462,6 +470,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 ids: IdTable::new(cfg.id_table_cap, cfg.id_tomb_cap, t.ms(u64::from(cfg.id_tomb_ms))),
                 hold: VecDeque::with_capacity(usize::from(cfg.unmatched_hold_cap)),
                 rate: RateCounters::new(limits, |ms| t.ms(ms)),
+                close_after: 0,
                 private: crate::private::Private::default(),
                 http: None,
                 rest_weight: RateCounters::account_rest(limits, |ms| t.ms(ms)),
@@ -1345,6 +1354,32 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     e.r#gen = 0;
                 }
                 let key = self.sink_keys[k];
+                // A position-close endpoint may allocate its own client id. Bind its returned
+                // exchange id only to the captured request, then release any earlier fills.
+                if e.what == OrderEventKind::Ack
+                    && request_identity.is_some_and(|(r, epoch, inst)| {
+                        r.op == GwOp::Place
+                            && r.slot == e.slot.0
+                            && r.r#gen == e.r#gen
+                            && epoch == e.epoch
+                            && inst == e.inst
+                    })
+                    && e.exch_order_id != 0
+                    && exch_id_value(key.bytes()) == e.exch_order_id
+                    && let Some(mirror) = self.mirror.get_mut(e.slot.0 as usize)
+                    && mirror.live
+                    && mirror.position_close
+                    && mirror.account == account
+                    && mirror.epoch == e.epoch
+                    && mirror.r#gen == e.r#gen
+                    && let Some(acct) = self.accts.get_mut(a)
+                    && acct
+                        .ids
+                        .insert(key.bytes(), e.epoch, e.slot.0, e.r#gen, now)
+                        .is_ok()
+                {
+                    mirror.exch_order_id = e.exch_order_id;
+                }
                 if e.slot == SlotId::UNRESOLVED
                     && matches!(
                         e.what,
@@ -1663,6 +1698,14 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             self.report(&c, self.target_gen(&c), NO_CONN, SendStatus::RateLimited, 0, 0);
             return;
         }
+        if c.op == GwOp::Place && c.oflags & hft_event::OrderFlags::POSITION_CLOSE.0 != 0 {
+            if now < self.accts[a].close_after {
+                self.report(&c, self.target_gen(&c), NO_CONN, SendStatus::RateLimited, 0, 0);
+                return;
+            }
+            self.accts[a].close_after =
+                now.saturating_add(self.t.ms(u64::from(P::position_close_interval_ms())));
+        }
         // An account-wide CancelAll (inst 0) has no REST encoding on venues whose per-inst
         // cancel-all is REST (Binance USD-M): expand it like a WS one (per inst, then per order).
         if c.op == GwOp::CancelAll && (P::order_channel(c.op) != OrderChannel::Rest || c.inst.0 == 0) {
@@ -1690,7 +1733,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             }
         };
         let clk = self.wall(now);
-        if P::order_channel(c.op) == OrderChannel::Rest {
+        if P::order_channel_for(&c) == OrderChannel::Rest {
             if self.accts[a].http.is_some() {
                 self.order_http(a, c, tgt, now);
                 return;
@@ -1704,6 +1747,8 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             }
             if !sent {
                 self.report(&c, self.target_gen(&c), NO_CONN, SendStatus::NoConn, 0, 0);
+            } else if c.op == GwOp::Place {
+                self.write_mirror(&c);
             }
             return;
         }
@@ -1796,6 +1841,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     live: true,
                     inst: c.inst,
                     exch_order_id: 0,
+                    position_close: c.oflags & hft_event::OrderFlags::POSITION_CLOSE.0 != 0,
                 };
             }
             None => self.n.mirror_out_of_range += 1,
@@ -2146,6 +2192,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                         live: true,
                         inst: c.inst,
                         exch_order_id: c.exch_order_id(),
+                        position_close: c.oflags & hft_event::OrderFlags::POSITION_CLOSE.0 != 0,
                     };
                 }
                 if c.exch_order_id() != 0

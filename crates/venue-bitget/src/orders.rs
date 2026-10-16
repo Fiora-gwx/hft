@@ -96,6 +96,9 @@ pub(crate) fn encode(
     }
     let sym = rd.inst_meta(c.inst).symbol.as_bytes();
     let flags = OrderFlags(c.oflags);
+    if flags.contains(OrderFlags::POSITION_CLOSE) && (c.op != GwOp::Cancel || tgt.exch_order_id == 0) {
+        return Err(EncodeErr::Unsupported(c.op));
+    }
     if line == Line::Spot && flags.contains(OrderFlags::REDUCE_ONLY) {
         return Err(EncodeErr::Unsupported(c.op));
     }
@@ -129,7 +132,11 @@ pub(crate) fn encode(
             let req =
                 encode_req_id(GwOp::Cancel, tgt.id.slot, tgt.id.r#gen).ok_or(EncodeErr::Unsupported(c.op))?;
             head(&mut w, line, &req, b"cancel-order");
-            w.bytes(b"\"clientOid\":\"").bytes(&cid_text(tgt)).byte(b'"');
+            if tgt.exch_order_id != 0 {
+                w.bytes(b"\"orderId\":\"").u64(tgt.exch_order_id).byte(b'"');
+            } else {
+                w.bytes(b"\"clientOid\":\"").bytes(&cid_text(tgt)).byte(b'"');
+            }
         }
         GwOp::Amend => {
             let req =
@@ -211,20 +218,50 @@ pub(crate) fn encode_rest(
     clk: &WallClock,
     out: &mut RestReqBuf,
 ) -> Result<(), EncodeErr> {
-    if c.op != GwOp::Query {
+    let close = c.op == GwOp::Place && c.oflags & OrderFlags::POSITION_CLOSE.0 != 0;
+    if c.op != GwOp::Query && !close {
         return Err(EncodeErr::Unsupported(c.op));
     }
     if c.inst.0 == 0 || rd.inst(c.inst).venue != line.venue() {
         return Err(EncodeErr::UnknownInst);
     }
     out.endpoint = 0;
-    out.method = Method::Get;
+    out.method = if close { Method::Post } else { Method::Get };
     out.path_query.clear();
     out.body.clear();
     let ovf = |_| EncodeErr::FieldOverflow;
-    out.path_query.push(ORDER_INFO).map_err(ovf)?;
-    out.path_query.push(b"?clientOid=").map_err(ovf)?;
-    out.path_query.push(&cid_text(tgt)).map_err(ovf)?;
+    if close {
+        if line != Line::Fut || c.oflags & OrderFlags::REDUCE_ONLY.0 == 0 || c.qty.0 <= 0 {
+            return Err(EncodeErr::Unsupported(c.op));
+        }
+        out.path_query
+            .push(b"/api/v3/trade/close-positions")
+            .map_err(ovf)?;
+        out.body
+            .push(b"{\"category\":\"USDT-FUTURES\",\"symbol\":\"")
+            .map_err(ovf)?;
+        out.body
+            .push(rd.inst_meta(c.inst).symbol.as_bytes())
+            .map_err(ovf)?;
+        out.body.push(b"\",\"posSide\":\"").map_err(ovf)?;
+        out.body
+            .push(if c.side == Side::Buy { b"short" } else { b"long" })
+            .map_err(ovf)?;
+        out.body.push(b"\"}").map_err(ovf)?;
+    } else {
+        out.path_query.push(ORDER_INFO).map_err(ovf)?;
+        if tgt.exch_order_id != 0 {
+            let mut buf = [0; 20];
+            let mut w = Wr::new(&mut buf);
+            w.u64(tgt.exch_order_id);
+            let n = w.finish().ok_or(EncodeErr::FieldOverflow)?;
+            out.path_query.push(b"?orderId=").map_err(ovf)?;
+            out.path_query.push(&buf[..n]).map_err(ovf)?;
+        } else {
+            out.path_query.push(b"?clientOid=").map_err(ovf)?;
+            out.path_query.push(&cid_text(tgt)).map_err(ovf)?;
+        }
+    }
     sign_headers(t, cred, clk, out).map_err(|e| match e {
         ProtoErr::Cfg => EncodeErr::Unsupported(c.op),
         _ => EncodeErr::FieldOverflow,

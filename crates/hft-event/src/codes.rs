@@ -77,6 +77,7 @@ desc!(
         HEDGE_FIX = 8,
         RISK_REDUCING = 16,
         SMOKE = 32,
+        POSITION_CLOSE = 64,
     ]
 );
 desc!(

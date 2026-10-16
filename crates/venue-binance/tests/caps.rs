@@ -133,7 +133,11 @@ fn bin_171_default_caps() {
         ["balanceUpdate", "listStatus", "externalLockUpdate"],
         "BIN-171.11"
     );
-    assert_eq!((u.flags, s.flags), (CapFlags(31), CapFlags(31)), "BIN-171.12");
+    assert_eq!(
+        (u.flags, s.flags),
+        (CapFlags(31) | CapFlags::POSITION_CLOSE, CapFlags(31)),
+        "BIN-171.12"
+    );
     assert!(
         !u.flags.contains(CapFlags::PERP_CASH) && !s.flags.contains(CapFlags::PERP_CASH),
         "BIN-171.12"

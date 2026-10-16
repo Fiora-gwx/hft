@@ -115,6 +115,7 @@ pub struct Exec {
     pub(crate) perps: Box<[Box<[InstId]>]>,
     /// `VenueCaps.reduce_only` per venue.
     pub(crate) venue_ro: [bool; 64],
+    pub(crate) venue_close: [hft_refdata::CapFlags; 64],
     pub(crate) continue_set: bool,
     /// TSC ticks per ms of the latest call (alarm planning without a `Now`).
     pub(crate) tsc_per_ms: u64,
@@ -242,6 +243,7 @@ impl Exec {
             none_inst,
             perps: vec![Box::<[InstId]>::default(); 64].into_boxed_slice(),
             venue_ro: [false; 64],
+            venue_close: [hft_refdata::CapFlags(0); 64],
             continue_set: false,
             tsc_per_ms: 1_000_000,
         })
@@ -509,6 +511,9 @@ impl Exec {
             if let Some(r) = self.venue_ro.get_mut(usize::from(v.0)) {
                 *r = rd.caps(*v).reduce_only;
             }
+            if let Some(r) = self.venue_close.get_mut(usize::from(v.0)) {
+                *r = rd.caps(*v).flags;
+            }
         }
         self.insts = insts.into_boxed_slice();
         self.perps = perps.into_boxed_slice();
@@ -568,6 +573,13 @@ impl Exec {
 
     /// Execution-layer Drain condition of one account.
     pub fn drain_ready_acct(&self, a: AccountId) -> bool {
+        if self
+            .acct_ix(a)
+            .and_then(|k| self.acct.get(k))
+            .is_some_and(|s| s.force_kind != FORCE_NONE)
+        {
+            return false;
+        }
         self.cells
             .iter()
             .take(self.cell_count())
@@ -583,10 +595,12 @@ impl Exec {
 
     /// Some account has an unreached `MarginStress`/`Hard` engine target.
     pub fn engine_reduce_pending(&self) -> bool {
-        self.cells
-            .iter()
-            .take(self.cell_count())
-            .any(Self::engine_unreached)
+        self.acct.iter().any(|a| a.force_kind != FORCE_NONE)
+            || self
+                .cells
+                .iter()
+                .take(self.cell_count())
+                .any(Self::engine_unreached)
     }
 
     pub(crate) fn engine_unreached(c: &TargetCell) -> bool {

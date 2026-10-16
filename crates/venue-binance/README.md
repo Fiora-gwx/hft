@@ -180,6 +180,12 @@ core 的深度来源([hft-venue-proto 契约 26](../hft-venue-proto/README.md#�
 
 撤单响应 `-2011`(未知订单,常因已成交)→ `CancelReject{detail = GONE}`(属 `GONE` 类,契约 28;sequencer 等成交回报,不重试);其余确定拒绝码在撤改上 `detail = 0`。查询 `order.status` 返回 `-2013`(订单不存在)→ `QueryResult` 的 NotFound 形态,**不定终态**:`stale_guard()` 是 `RecvWindow`,按[契约 10](../hft-venue-proto/README.md#实现方必须遵守的契约) 由 OMS 保持 `Unknown` 并经成交历史(`Usdm` `GET /fapi/v1/userTrades`,`Spot` `myTrades`,按 symbol + 时间窗)确认收敛。**成交历史的记录只带 `orderId`、不带 client id**(待核实,开发备忘第 19 条),所以"这笔从未成交"不能按 client id 在历史里直接查到;判据归 [reconciler](../../apps/reconciler/README.md):成交历史窗口内出现既不属于已知槽、也不属于已登记外来单的 `orderId` → `history_checked = 0` 并报 P0;grace 后按 client id 查询(`order.status`,或 REST `GET /fapi/v1/order?origClientOrderId=`)连续两次仍 `-2013`、且窗口内没有未归属的成交,才给 `history_checked = 1`。控制提示([契约 30](../hft-venue-proto/README.md#实现方必须遵守的契约)):`-1021` → `ctl = ClockSkew`(运行时推 `ConnState{Degraded, reason=CLOCK_SKEW}`);`-1003`、`-1015`、HTTP 429/418 → `ctl = RateLimited`,`RateObs` 置满;`listenKey` 续期返回 `-1125`(listenKey 不存在)→ `ctl = UserStreamEnded`。
 
+### USDⓈ-M 尾仓平仓
+
+永续默认声明 `POSITION_CLOSE`,现货不声明。标记且 reduce-only 的 Place 编码为 WS `order.place` 的 `type=MARKET`,带精确 `quantity`、`reduceOnly=true` 与原 client id,不带 price/timeInForce。普通订单仍用 LIMIT。官方 [New Order](https://developers.binance.com/docs/derivatives/usds-margined-futures/trade/rest-api/New-Order) 的 `closePosition=true` 只支持条件 STOP_MARKET/TAKE_PROFIT_MARKET,因此普通 MARKET 不发送该字段。官方 [错误码 -4164](https://developers.binance.com/docs/derivatives/usds-margined-futures/error-code) 明确 reduce-only 豁免最小名义金额。
+
+2026-10-16 shape run 的人工 BUY 0.001 ETH reduce-only 清尾仓记录支持低于最小名义的路线。低于 `minQty`/步长的豁免没有官方或实采保证,仅发送精确量并保留拒绝/Unknown,须用 testnet 真实残仓验证。合成编码测试不冒充实采 fixture。
+
 ### VenueCaps 默认值
 
 `default_caps()` 返回下表([hft-refdata](../hft-refdata/README.md) 的 `VenueCaps`;[契约 15](../hft-venue-proto/README.md#实现方必须遵守的契约))。来源等级:官方 = 官方文档(含本地缓存);自测 = 现有系统生产或我们的实测;待核实 = 未经官方确认,方法写在开发备忘对应条目。

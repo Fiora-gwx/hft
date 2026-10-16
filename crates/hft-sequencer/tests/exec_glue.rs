@@ -127,12 +127,54 @@ fn seq_187_draining_no_increase() {
 // ===================================================================================================
 
 mod flatten_broken {
-    use hft_event::OrderFlags;
+    use hft_event::{ControlCmd, OrderFlags};
     use hft_sequencer::codes::status;
     use hft_types::{CapSource, Side};
 
     use crate::common::risk_kit::*;
     use crate::common::*;
+
+    #[test]
+    fn seq_185_kill_dust_perp_zero_and_replay() {
+        for drain in [false, true] {
+            reset_script();
+            let mut b = b0();
+            let caps = b.rd.caps.iter_mut().find(|c| c.venue == B).unwrap();
+            caps.flags = caps.flags | hft_refdata::CapFlags::POSITION_CLOSE;
+            let mut h = b.boot_self_contained();
+            h.steady();
+            let open = h.order_at_touch(AC2, B1, Side::Sell, "0.001");
+            h.fill(&open, q("0.00001"), q("0.00001"), open.px);
+            let end = order_event(&open, hft_event::OrderEventKind::CancelAck, h.epoch());
+            h.push(h.rep_ring(AC2), &end);
+            h.run();
+            let m = h.mark();
+            h.cmd_confirmed(AC2, &kill_account(AC2, false, true, true));
+            h.run();
+            let ds = decs_since(&h, m);
+            let close = *ds
+                .iter()
+                .find(|d| d.inst == B1 && d.reject == 0)
+                .expect("tail close");
+            assert_eq!(close.qty, q("0.00001"));
+            assert_ne!(close.oflags & OrderFlags::POSITION_CLOSE.0, 0);
+            assert_ne!(close.oflags & OrderFlags::REDUCE_ONLY.0, 0);
+            assert!(!h.s.engine().exec.drain_ready());
+            if drain {
+                h.cmd_confirmed(
+                    hft_types::AccountId(0),
+                    &ControlCmd::Drain { cancel_resting: true },
+                );
+                h.run();
+                assert!(!h.s.engine().exec.drain_ready());
+            }
+            h.ack(&close);
+            h.fill(&close, close.qty, close.qty, close.px);
+            assert_eq!(h.s.engine().ledger.pos(AC2, B1).qty, q("0"));
+            assert!(h.s.engine().exec.drain_ready());
+            assert!(h.verify().is_empty(), "replay must reproduce decisions and state");
+        }
+    }
 
     #[test]
     fn seq_185_engine_flatten_covers_broken() {

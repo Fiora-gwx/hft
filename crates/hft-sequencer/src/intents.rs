@@ -233,6 +233,9 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
     if let Src::Exec { o } = src {
         hedge_cap = o.hedge_cap_qty;
         reason = u32::from(o.kind.code());
+        if o.position_close && o.origin == hft_exec::ExecOrigin::Engine {
+            extra_flags |= OrderFlags::POSITION_CLOSE.0;
+        }
     }
     if let Src::Smoke { ttl_ms } = src {
         extra_flags |= OrderFlags::SMOKE.0;
@@ -589,6 +592,7 @@ pub(crate) fn pipeline<D: Driver<S>, S: StrategySet>(
     }
     ai.risk_reducing = class.risk_reducing;
     ai.reduce_only = class.reduce_only;
+    ai.position_close = extra_flags & OrderFlags::POSITION_CLOSE.0 != 0;
     if !class.reduce_only {
         ai.intent.flags &= !OrderIntent::REDUCE_ONLY;
     }

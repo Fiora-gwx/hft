@@ -2303,6 +2303,8 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 - 实现:`crates/hft-venue/tests/gw_report.rs::ven_228_query_result`
 - 回归:`tests/gw_rest.rs` 验证省略 epoch 的回包使用请求发送时身份；SetEpoch 后即使同槽同 gen 复用，成功与 503 回包也不借用新 epoch，原 epoch 不再接受时 QueryResult 保持 UNRESOLVED。
 
+补充验收:POSITION_CLOSE REST Place 保存镜像,先到的未解析 fill 暂存;回执 exchange-id 绑定发送时 epoch/slot/gen 后按 ACK→Fill 释放;200 ms 内的再次请求 RateLimited。
+
 ### VEN-229 请求超过 `inflight_timeout_ms` 无响应推一次 `Degraded{INFLIGHT_TIMEOUT}` 并移出在途
 
 - 规则:[§4](README.md#4-gwruntimepoll_once-的循环结构)、[配置项](README.md#配置项)

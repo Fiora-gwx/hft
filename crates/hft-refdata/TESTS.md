@@ -1591,3 +1591,5 @@ spec: README.md
 - fuzz:REF-080 在 PR 冒烟、CI 每夜与服务器累计中零失败(不计入上线门槛 ③,口径见 [testing §3.3](../../docs/testing.md#33-fuzz))。
 - 基准:REF-081–REF-087 从 M1.5 起每个里程碑末在参考机上满足 [延迟与资源契约](README.md#延迟与资源契约) 的预算与 [benchmarks](../../benchmarks/README.md) 的单 crate 上限。
 - 里程碑 M3:REF-089 的证据归档(真实 core venue refdata 的加载时间与 `VenueCaps` 出处核对)。
+
+POSITION_CLOSE 仅限 reduce-only 永续;POSITION_CLOSE_ALL 必须包含 POSITION_CLOSE,否则 CapsMarketMismatch。

@@ -116,8 +116,12 @@ impl CapFlags {
     /// Perpetual execution/query reports supply complete realized-cash settlement facts.
     /// Consumers require coverage and never reconstruct wallet cash from local average cost.
     pub const PERP_CASH: CapFlags = CapFlags(32);
+    /// Perpetual tail close using exact reduce-only quantity or a full-position endpoint.
+    pub const POSITION_CLOSE: CapFlags = CapFlags(64);
+    /// Position-close ignores the requested quantity and closes the symbol's entire position.
+    pub const POSITION_CLOSE_ALL: CapFlags = CapFlags(128);
     /// Union of every defined bit.
-    pub const ALL: CapFlags = CapFlags(63);
+    pub const ALL: CapFlags = CapFlags(255);
 
     #[inline]
     pub const fn contains(self, other: CapFlags) -> bool {

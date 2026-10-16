@@ -87,14 +87,14 @@ UTA 有三种账户模式:**逐仓模式**(每个仓位独立风险,只支持逐
 | 登录 | `{"op":"login","args":[{apiKey, passphrase, timestamp, sign}]}`,`sign = Base64(HMAC-SHA256(secret, ts + "GET" + "/user/verify"))`,`ts` 发秒;BGT-310 真实 demo 秒/毫秒均登录成功,不据此要求毫秒;回执 `{"event":"login","code":"0"}`,失败 `{"event":"error","code":…}` | — |
 | 下单 | `{"op":"trade","id":<请求 id>,"category":"usdt-futures"\|"spot","topic":"place-order","args":[{symbol, side, orderType:"limit", price, qty, timeInForce, clientOid[, reduceOnly:"YES"]}]}` | `/api/v3/trade/place-order` |
 | 改单 | `topic = "modify-order"`,`args = [{symbol, clientOid, price, qty, autoCancel:"no"}]` | `/api/v3/trade/modify-order` |
-| 撤单 | `topic = "cancel-order"`,`args = [{clientOid}]` | `/api/v3/trade/cancel-order` |
+| 撤单 | `topic = "cancel-order"`,`args = [{orderId}]`(已知),否则 `[{clientOid}]` | `/api/v3/trade/cancel-order` |
 | 全撤(`CancelAll`) | WS 无按品种全撤;运行时展开为逐单 `cancel-order` | `/api/v3/trade/cancel-symbol-order`(按 `category` + `symbol`,本 crate 未用) |
-| 查单 | REST(`order_channel(Query) = Rest`,`encode_rest`):`GET /api/v3/trade/order-info?clientOid=<cid>` | — |
+| 查单 | REST(`order_channel(Query) = Rest`,`encode_rest`):`GET /api/v3/trade/order-info?orderId=<id>`(已知 exchange-id),否则 `?clientOid=<cid>` | — |
 
 - 响应:`{"event":"trade","id":…,"topic":…,"args":[{orderId, clientOid[, symbol, cTime]}],"code":"0","msg":"success","ts":…}`;失败为 `{"event":"error","id":…,"code":"<码>","msg":…}`(`event = trade` 而 `code ≠ 0` 同样按失败处理)。**官方:下单、改单、撤单的成功响应只表示交易所收到请求**,订单状态以私有 `order` 频道为准;下单在入撮合前被拒也只体现为响应码。因此:下单成功响应 → `Ack`(`exch_order_id ← orderId`,`exch_id` 登记);**撤单与改单的成功响应不产生事件**(只结束在途请求),`CancelAck` 由订单频道的 `cancelled` 推送产出;改单是异步的、失败不另行通知,所以 `VenueCaps.flags` 不含 `AMEND`(帧仍可编码,运行时不会发)。
 - 价/量按 inst 的 tick/lot 格式化为最短十进制(不补零、不经 f64);`Tif::Gtc/Ioc/Fok/PostOnly` → `gtc`/`ioc`/`fok`/`post_only`;永续 `oflags` 带 `REDUCE_ONLY` 时写 `"reduceOnly":"YES"`,否则不写(缺省为否);现货带 `REDUCE_ONLY` → `EncodeErr::Unsupported`。UTA 下单没有 `pxAmendType` 参数:超出价格带的单以 `25205`/`25206` 拒绝(登记为确定拒绝),不夹到边界。`ORDER_FRAME_CAP = 2048`;`encode_batch` 保持默认 `Unsupported`(官方批量上限 20,[hft-oms](../hft-oms/README.md) 每个意图一个槽一个帧)。
 - `CancelAll`:`encode` 对 `CancelAll` 返回 `EncodeErr::Unsupported(CancelAll)`;运行时把槽镜像中该账户的活动订单展开为逐条 `Cancel`([hft-venue 出环](../hft-venue/README.md#出环outmsg--gwcmd) 的第 ③ 级),回报按 `Cancel` 解码;`CANCEL_ALL_SWEEP = false`。
-- `Query`:签名同实现说明第 8 点(`ACCESS-TIMESTAMP` 为 ms,另带 `locale: en-US`,模拟盘 `paptrading: 1`);响应经 `decode_rest`(槽取自 `RestOrigin`,`clientOid` 必须与请求的 venue/account/槽/代一致后取其 epoch;非空品种必须匹配原请求):`orderStatus` → `OrderEvent.detail`(`live`/`new` → New、`partially_filled`、`filled`、`cancelled`,契约 28)、`cumExecQty`/`avgPrice` → `cum_filled`/`avg_px`(契约 9);码 `25204`(订单不存在)→ `detail = NotFound(7)`,不定终态;其余失败 → 结果未知(HTTP 429 置 `RateLimited`)。
+- `Query`:签名同实现说明第 8 点(`ACCESS-TIMESTAMP` 为 ms,另带 `locale: en-US`,模拟盘 `paptrading: 1`);响应经 `decode_rest`(槽取自 `RestOrigin`,本地 `clientOid` 必须与请求的 venue/account/槽/代一致后取其 epoch;服务端 clientOid 必须由 exchange-id 映射到同一槽/代;非空品种必须匹配原请求):`orderStatus` → `OrderEvent.detail`(`live`/`new` → New、`partially_filled`、`filled`、`cancelled`,契约 28)、`cumExecQty`/`avgPrice` → `cum_filled`/`avg_px`(契约 9);码 `25204`(订单不存在)→ `detail = NotFound(7)`,不定终态;其余失败 → 结果未知(HTTP 429 置 `RateLimited`)。
 - 每频道限速、STP、过期保护字段:官方未写,按 10 单/s 与"无过期字段"处理(`stale_guard() = None`,见实现说明第 7 点);响应无网关时间戳,`ReportOutcome.gw_dwell_us = 0`。
 
 ### 限速默认值
@@ -157,6 +157,12 @@ UTA 订单推送不带本笔成交:`GwCtx` 按 `orderId` 记上次的累计量�
 传输失败状态优先于业务码,即使响应含 `25204` 也保持 Unknown,不生成 NotFound。
 
 `GONE`(契约 28):撤单、改单失败码 `25204`(订单不存在)→ `CancelReject`/`AmendReject{detail = 1}`;查单 `25204` → `NotFound`。`40008`(时间戳过期)→ `ctl = ClockSkew`;HTTP 429 → `RateLimited`。
+
+### UTA 永续尾仓平仓
+
+永续声明 `POSITION_CLOSE | POSITION_CLOSE_ALL`,现货不声明。标记的 Place 走签名 POST `/api/v3/trade/close-positions`,body 必须有 `category=USDT-FUTURES`、精确 symbol 与 `posSide`(Buy 平 short、Sell 平 long),不带 quantity/clientOid;不允许省略 symbol 扩大到全账户。官方 [Close All Positions](https://www.bitget.com/docs/catalog/trading/position-management) 定义 MARKET 整仓关闭及 5/s/UID;gw 以每账户 200 ms 最小间隔限制请求。成交存在滑点,数量范围前置条件归 [hft-exec](../hft-exec/README.md#清仓永续尾仓)。
+
+响应须 HTTP 2xx、顶层成功、恰一条成功行且 orderId 非零,才产生无成交量 ACK;行级 `24056` 等错误不证明清零。服务端分配的 clientOid 用请求回执的 exchange-id 关联本地槽;早到成交暂存,未知归属按既有超时规则处置。已知 exchange-id 的 Query 与 Cancel 用 orderId([撤单识别规则](https://www.bitget.com/docs/uta/websocket/private/Cancel-Order-Channel)),并验证回包的映射身份。无关联证据的外来成交仍走 ExternalFill。全仓端点和低于最小量的实采 fixture 待 testnet 补采;当前端点测试为官方结构的合成响应。
 
 ### VenueCaps 默认值
 
@@ -234,7 +240,7 @@ UTA 设置接受 `accountMode = unified | hybrid` 且 `accountLevel = basic`;`cl
 | `tradeSide` ∈ {`burst_close_*`, `reduce_close_*`, `burst_buy_single`, `burst_sell_single`, `reduce_buy_single`, `reduce_sell_single`},或 `delegateType = liquidation` | `Liquidation` | 官方枚举页 |
 | `tradeSide` ∈ {`dte_sys_adl_close_*`, `dte_sys_adl_buy_in_single_side_mode`, `dte_sys_adl_sell_in_single_side_mode`} | `Adl` | 官方枚举页 |
 | `tradeSide` ∈ {`delivery_close_*`, `delivery_buy_single`, `delivery_sell_single`},或 `delegateType = delivery_close_*` | `Delivery` | 官方枚举页 |
-| 无上述标记且 `clientOid` 非空、非我们的格式 | `Unknown`(偏安全:仍作外部成交入账并 P0) | — |
+| 无上述标记且 `clientOid` 非空、非我们的格式、无已确认 exchange-id 归属且无待关联平仓请求 | `Unknown`(偏安全:仍作外部成交入账并 P0) | — |
 | `parse_cid(clientOid)` 成功 | 本系统订单 → `OrderEvent` | — |
 | `clientOid` 为空 | 成交交运行时按 `IdTable` 解析(`exch_id(orderId, None)`;`Resolved` 时直接用其槽,否则 `slot = UNRESOLVED`),非成交事件丢弃 | 契约 18 |
 

@@ -2699,6 +2699,8 @@ SEQ-160 同时覆盖真实 ConnId 112/113/255、重复 Up/Down、主连接退出
   - `CmdResult{Applied}`;`exec.engine_flatten(2, ..)` 一次;同一 Input 内先出环 b1 的 reduce-only 买单(永续腿先),现货腿在永续腿到达后才发
 - 实现:`crates/hft-sequencer/tests/exec_glue.rs::seq_185_engine_flatten_covers_broken`
 
+补充真实引擎验收:正常订单部分成交形成 dust 永续仓,取消剩余后 Kill(flatten) 经 exec → risk → OMS → GwCmd 发 POSITION_CLOSE;受理不视为成交,实际 fill 后 ledger.qty=0。Kill 后进入 Drain 同样等待成交;自足 journal replay 的决定流与状态哈希一致。
+
 ### SEQ-186 HedgeFix 命令经执行层出单
 
 - 规则:[目标意图与执行层](README.md#目标意图与执行层)、[命令路径](README.md#命令路径)

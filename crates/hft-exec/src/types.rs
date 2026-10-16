@@ -269,6 +269,8 @@ pub struct ExecOrder {
     pub origin: ExecOrigin,
     pub kind: ExecOrderKind,
     pub reason: TargetReason,
+    /// Engine-only position-close tail; the sequencer records POSITION_CLOSE on the order.
+    pub position_close: bool,
     /// Quantity cap of Hedge-class orders (`naked_filled + 1 lot`); 0 for the rest.
     pub hedge_cap_qty: Qty,
 }

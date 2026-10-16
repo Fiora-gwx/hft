@@ -1063,6 +1063,7 @@ pub struct MirrorRestore {
     pub epoch: u16,
     pub inst: InstId,
     pub exch_order_id: u64,
+    pub oflags: u16,
 }
 
 /// Output of one OMS call; capacities are per-call limits, never dropped (see "输出扇出").
@@ -1238,6 +1239,8 @@ pub struct ApprovedIntent {
     pub lev_x100: u16,
     /// Smoke orders only; 0 otherwise.
     pub smoke_ttl_ms: u32,
+    /// Engine-only Kill/flatten venue position close, after risk admission.
+    pub position_close: bool,
     /// Pricing result of this crate's hedge requests; zero otherwise.
     pub hedge_px: HedgePx,
     /// First leg of a link: second leg's touch when placing; 0 otherwise.
@@ -1268,6 +1271,7 @@ impl ApprovedIntent {
             reduce_only: false,
             lev_x100: 0,
             smoke_ttl_ms: 0,
+            position_close: false,
             hedge_px: HedgePx::default(),
             hedge_ref_px: Px(0),
             trig: TrigStamps::default(),

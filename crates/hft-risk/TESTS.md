@@ -373,6 +373,8 @@ spec: README.md
 | RSK-021.13 | `qty = 0` 且 `strategy = 2` | 拒 `INVALID`(同一检查内按列出顺序) |
 | RSK-021.14 | `qty = 0`,存在 `Kill{Global, hard}` | 拒 `INVALID`(#0 先于 #1) |
 
+补充验收:声明能力的 perp、Exec Flatten、RR+RO 且无链接的 POSITION_CLOSE 可以不整 lot;策略伪造、现货、无能力、非 RR/RO 一律 INVALID;实际持仓与在途仍约束数量。核心路径由 SEQ-185 覆盖。
+
 ### RSK-022 #1 HARD 拦全部类别,账户 HARD 只拦该账户与以它为链接腿的单
 
 - 规则:[检查链](README.md#检查链按廉价--昂贵短路适用范围以本表为唯一定义)(#1)、[断腿](README.md#断腿broken自动有界平仓l3-与-flatten)第 1 条

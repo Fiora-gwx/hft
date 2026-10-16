@@ -364,6 +364,8 @@ pub mod mode {
 
 ### 检查链(按廉价 → 昂贵,短路;适用范围以本表为唯一定义)
 
+检查链 #0 的 lot 例外只适用于 `POSITION_CLOSE` 标记、`origin = Exec`、`class = Flatten`、`RISK_REDUCING | REDUCE_ONLY`、无链接且 refdata 声明 `POSITION_CLOSE` 的永续单。其余带该标记的意图以 `INVALID` 拒绝。该例外只放宽 lot 整数倍;正量、tick、绑定、HARD、报价、名义上限及 #7 在途扣减照常检查。
+
 | # | 检查 | 失败位 | Open | Hedge | Reduce / Flatten |
 |---|---|---|---|---|---|
 | 0 | 结构:`qty > 0`、tick/lot 网格、inst 可交易(`InstStatus::Trading`;`ReduceOnly` 只放行 `RISK_REDUCING` 单;其余状态 `NOT_TRADABLE`);意图的 `account` 绑定到发出它的实例(`AccountMeta.bound_instance`;OMS/执行层/命令的意图按所属 group 的实例;冒烟单的 `strategy` 由 hft-oms 填为该账户绑定的实例,照常查绑定,另要求账户为 Live,否则 `INVALID`) | `INVALID`、`NOT_TRADABLE`、`NOT_BOUND` | ✓ | ✓ | ✓ |

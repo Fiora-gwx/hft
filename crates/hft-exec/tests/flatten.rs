@@ -8,6 +8,73 @@ use hft_strategy_sdk::{FirstLeg, MarginLevel, OrderUpdateKind, TargetReason, Tar
 use hft_types::{CapSource, RejectBits, Side};
 
 #[test]
+fn exe_361_flatten_dust_perp_exact_zero() {
+    for (net, side) in [("-0.01", Side::Buy), ("0.01", Side::Sell)] {
+        for paired in [false, true] {
+            let g = if paired { G7 } else { G8 };
+            let mut fx = Fx::new();
+            if paired {
+                fx.legs(A1, g, &["0.001", net]);
+                fx.spot(A1, A, g, "0.001", "0.001");
+            } else {
+                fx.legs(A1, g, &[net]);
+            }
+            fx.flatten(A1);
+            let orders = fx.adv().orders;
+            let close = orders.iter().find(|o| o.intent.group == g).unwrap();
+            assert!(close.position_close && close.intent.reduce_only());
+            assert_eq!((close.intent.qty, close.intent.side), (q("0.01"), side));
+            assert!(close.intent.link.get().is_none());
+            assert!(!fx.ex.drain_ready());
+            let r = fx.placed(close);
+            fx.at(1000);
+            fx.touch(P);
+            assert!(fx.adv().orders.is_empty(), "no duplicate while close is pending");
+            if paired {
+                fx.legs(A1, g, &["0.001", "0"]);
+            } else {
+                fx.legs(A1, g, &["0"]);
+            }
+            fx.fill(r, g, "0.01", true);
+            fx.touch(P);
+            fx.adv();
+            assert!(!fx.cell(A1, g).has_target);
+            assert!(fx.ex.drain_ready());
+        }
+    }
+}
+
+#[test]
+fn exe_361_flatten_scans_all_ungrouped_dust() {
+    let mut fx = Fx::with(c0(), vec![]);
+    let insts = [P, P2, P3, P4, PX[0], PX[1]];
+    for inst in insts {
+        fx.perp(A1, B, inst, "-0.01");
+    }
+    fx.flatten(A1);
+    let mut closed = Vec::new();
+    for round in 0..12 {
+        fx.at(1000 * round);
+        for inst in insts {
+            fx.touch(inst);
+        }
+        let orders = fx.adv().orders;
+        for close in orders {
+            assert!(close.position_close);
+            let r = fx.placed(&close);
+            fx.perp(A1, B, close.intent.inst, "0");
+            fx.fill(r, GNONE, "0.01", true);
+            closed.push(close.intent.inst);
+        }
+    }
+    closed.sort_by_key(|i| i.0);
+    let mut expected = insts.to_vec();
+    expected.sort_by_key(|i| i.0);
+    assert_eq!(closed, expected);
+    assert!(fx.ex.drain_ready());
+}
+
+#[test]
 fn exe_361_engine_flatten_all() {
     let g9 = gspec(G9, &[(P, B)]);
     let mut fx = Fx::with(c0(), vec![g7(), g8(), gspec(G11, &[(P, B), (Q, C)]), g9]);

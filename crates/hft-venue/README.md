@@ -713,6 +713,8 @@ BBO 接收端通过 [hft-net 的缓冲优先入口](../hft-net/README.md#1-接�
 - **共享缓存行**:只读 `KillWord`;其余只经 SPSC。
 - **内存**(每 venue):`InstSeq` 64 B × inst 数 × 行情任务数;重同步槽(只在增量深度)`feed.resync_slots` × `resync_buf` 条消息(解码后 L2Batch,平均 ≤ 1 KiB)≈ 4 MiB;snap/acct 环按 hft-core 环容量表 + snap-fetch 与 acct-fetch 记录缓冲;`IdTable` 16384 × 64 B = 1 MiB/账户;`hold` 256 × 176 B = 44 KiB/账户(包含完整交易所 id 与到达时刻);`AcctScratch` 与 `AcctCtx` 由 venue 定(≤ 64 KiB/账户,在 acct-fetch)。
 
+带 `POSITION_CLOSE` 的 Place 按协议的 `order_channel_for` 路由,使用 `position_close_interval_ms` 的账户间隔护栏;过早请求回 `RateLimited`。REST 提交时登记槽镜像。专用端点返回的 exchange-id 仅在 ACK 与发送时保存的 account/inst/epoch/slot/gen 一致、镜像仍为该代时绑定;随后释放先到的暂存成交。HTTP/解码失败仍为 Unknown,不把 ACK 当仓位清零。恢复镜像保留平仓标记。
+
 ## 测试与验收
 
 用例与验收见 [TESTS.md](TESTS.md)。

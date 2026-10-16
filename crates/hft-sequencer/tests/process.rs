@@ -1750,6 +1750,7 @@ fn one_of_each(h: &H) -> hft_exec::ExecOut {
         origin: hft_exec::ExecOrigin::Engine,
         kind: hft_exec::ExecOrderKind::Slice,
         reason: hft_strategy_sdk::TargetReason::Rebalance,
+        position_close: false,
         hedge_cap_qty: Qty(0),
     });
     xo.cancels.push(hft_strategy_sdk::OrderRef::new(B, AC2, 15, 0));

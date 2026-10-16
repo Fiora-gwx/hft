@@ -114,6 +114,9 @@ impl Oms {
         if it.risk_reducing {
             oflags |= OrderFlags::RISK_REDUCING.0;
         }
+        if it.position_close && it.origin == Origin::Exec && it.reduce_only && it.risk_reducing {
+            oflags |= OrderFlags::POSITION_CLOSE.0;
+        }
         let smoke = it.origin == Origin::Command && it.smoke_ttl_ms > 0;
         if smoke {
             oflags |= OrderFlags::SMOKE.0;

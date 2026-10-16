@@ -315,6 +315,14 @@ pub trait VenueProtocol: Sized + 'static {
         let _ = op;
         OrderChannel::Ws
     }
+    /// Command-sensitive routing (e.g. an engine position-close Place uses REST).
+    fn order_channel_for(c: &GwCmd) -> OrderChannel {
+        Self::order_channel(c.op)
+    }
+    /// Protocol minimum spacing of full-position closes per account (0: no extra limit).
+    fn position_close_interval_ms() -> u32 {
+        0
+    }
     /// Fills Place/Cancel/Amend/CancelAll/Query into `body`; returns the length.
     fn encode(
         rd: &RefData,

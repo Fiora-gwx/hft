@@ -531,6 +531,8 @@ pub struct VenueAcctTable {            // 每 (venue, account) 一个
 
 gw 对某 (venue, account) 的回报帧解码失败时写 `ConnState{role = UserStream, kind = Degraded, reason = REPORT_DECODE}`:OMS 按用户流缺口处理——该 (venue, account) 全部非终态槽置 `VERIFY` 并按 client id 查询;连续 `decode_fail_down_n` 次视为 Down(Pending* 进 `Unknown`)。计数 `decode_fails` 在该 (venue, account) 收到 `ConnState{UserStream, Up}` 时清零;达到 `decode_fail_down_n` 的那一次按 `ConnState{Order, Down}` 的槽迁移处理(Pending* → `Unknown`、`Live` 置 `VERIFY`;`conn_up` 不变)并清零计数。
 
+`ApprovedIntent.position_close` 只在 `Origin::Exec` 且风控认定风险递减、reduce-only 时编码为 `POSITION_CLOSE`。槽持有该标志;恢复的 `MirrorRestore.oflags` 将它传回 gw。ACK 仅代表受理,仓位变化仍只来自成交/查询证据。
+
 ### 恢复后的 gw 映射
 
 `restore` 与 `SetEpoch` 之后,sequencer 对每个 (venue, account) 调 `mirror_restore`,把每个非终态槽(含 Unknown、VERIFY)作为 `GwCmd{MirrorRestore{slot, gen, epoch, inst, exch_order_id}}` 发给 gw(分批,经扇出队列),让 gw 重建 exch id → slot 私有表并能对上一 epoch 的槽查单;gw 无法为其编码查询的槽回 `QueryUnsupported`,OMS 保持 Unknown 并写 `Note{OmsNeedsRestQuery}` 转交 reconciler。

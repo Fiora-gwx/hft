@@ -110,7 +110,19 @@ pub(crate) fn evaluate_with_peer<V: RiskView>(
     if it.qty.0 <= 0 || it.px.0 <= 0 || f.venue != it.venue || a.0 == 0 || usize::from(a.0) > s.n_accounts {
         return Err(RejectBits::INVALID);
     }
-    if (f.lot > 0 && it.qty.0 % f.lot != 0) || (f.tick > 0 && it.px.0 % f.tick != 0) {
+    let close = it.flags & OrderFlags::POSITION_CLOSE.0 != 0;
+    if close
+        && !(f.perp
+            && f.position_close
+            && it.origin == Origin::Exec
+            && it.class == IntentClass::Flatten
+            && rr
+            && it.flags & OrderFlags::REDUCE_ONLY.0 != 0
+            && !linked)
+    {
+        return Err(RejectBits::INVALID);
+    }
+    if (!close && f.lot > 0 && it.qty.0 % f.lot != 0) || (f.tick > 0 && it.px.0 % f.tick != 0) {
         return Err(RejectBits::INVALID);
     }
     if smoke && !s.acct_live.get(usize::from(a.0)).copied().unwrap_or(false) {

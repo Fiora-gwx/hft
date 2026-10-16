@@ -66,6 +66,7 @@ BIN-026 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 | 7. 订阅节奏 | BIN-002, BIN-200–BIN-202 |
 | 8. 源文件规划 | BIN-142, BIN-174, BIN-400, BIN-401 |
 | 延迟与资源契约 | BIN-038, BIN-039, BIN-500–BIN-508 |
+| USDⓈ-M 尾仓平仓 | BIN-065 |
 | 测试与验收 | 不适用:非规范 |
 | 依赖 | BIN-210 |
 | 延伸阅读 | 不适用:非规范 |
@@ -759,6 +760,8 @@ BIN-026 的字段投影差分检查覆盖逐字节损坏、未知嵌套值和重
 | BIN-065.5 | `oflags = REDUCE_ONLY` | `"quantity":"0.004","reduceOnly":"true","newClientOrderId":…` |
 | BIN-065.6 | `oflags = RISK_REDUCING`(不含 `REDUCE_ONLY`) | 帧中没有 `reduceOnly` |
 | BIN-065.7 | `oflags = SMOKE` | 帧除 `id`、`newClientOrderId` 外与 `oflags = 0` 时逐字节相同 |
+
+补充验收:POSITION_CLOSE + REDUCE_ONLY 的 Buy/Sell 精确数量 MARKET 编码,不带 price/timeInForce/closePosition;用于低于最小名义的尾仓。合成 sub-lot 编码用例仅验证不舍入,不宣称 venue 接受。
 
 ### BIN-066 Spot Place 的类型、tif、STP 与 reduceOnly 拒绝
 

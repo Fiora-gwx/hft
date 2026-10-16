@@ -824,7 +824,17 @@ fn emit(
     let mut key_buf = [0u8; 20];
     let key = exch_key(x.order_id, &mut key_buf);
     // External fills: own-liquidation markers win over the client id (README "外部成交识别").
-    let foreign = x.cause.is_some() || (x.cid.is_none() && !x.cid_empty);
+    let mapped = if x.cid.is_none() {
+        out.exch_id(key, None)
+    } else {
+        ExchIdHint::Unknown
+    };
+    let pending_close = out.pending_position_close(x.inst);
+    let foreign = x.cause.is_some()
+        || (x.cid.is_none()
+            && !x.cid_empty
+            && !matches!(mapped, ExchIdHint::Resolved { .. })
+            && !pending_close);
     if foreign {
         if advanced {
             out.external_fill(&ExternalFill {
@@ -854,10 +864,10 @@ fn emit(
         Some(c) => (c.epoch, SlotId(c.slot), c.r#gen),
         // No client id: fills go to the runtime's IdTable (contract 18); other events are dropped.
         None => {
-            if !advanced {
+            if !advanced && !matches!(mapped, ExchIdHint::Resolved { .. }) {
                 return;
             }
-            match out.exch_id(key, None) {
+            match mapped {
                 ExchIdHint::Resolved { epoch, slot, r#gen } => (epoch, slot, r#gen),
                 _ => (0, SlotId::UNRESOLVED, 0),
             }
@@ -1099,6 +1109,9 @@ pub(crate) fn decode_rest(
     rx: &RxMeta,
     out: &mut impl ReportSink,
 ) -> Result<ReportOutcome, DecodeErr> {
+    if req.what == RestWhat::Order && req.req.is_some_and(|r| r.op == GwOp::Place) {
+        return decode_close(line, req, status, body, rx, out);
+    }
     let r = match (req.what, req.req) {
         (RestWhat::Order, Some(r)) if r.op == GwOp::Query => r,
         _ => return Err(DecodeErr::UnknownClass),
@@ -1164,14 +1177,91 @@ pub(crate) fn decode_rest(
     }
     e.exch_order_id = d.order_id.get()?;
     if !d.client_oid.is_empty() {
-        let c = parse_cid(d.client_oid.as_bytes()).ok_or(DecodeErr::Shape)?;
-        if c.venue != line.venue() || c.account != rx.account || c.slot != r.slot || c.r#gen != r.r#gen {
-            return Err(DecodeErr::Shape);
+        if let Some(c) = parse_cid(d.client_oid.as_bytes()) {
+            if c.venue != line.venue() || c.account != rx.account || c.slot != r.slot || c.r#gen != r.r#gen {
+                return Err(DecodeErr::Shape);
+            }
+            e.epoch = c.epoch;
+        } else {
+            let mut buf = [0; 20];
+            match out.exch_id(exch_key(e.exch_order_id, &mut buf), None) {
+                ExchIdHint::Resolved { epoch, slot, r#gen } if slot.0 == r.slot && r#gen == r.r#gen => {
+                    e.epoch = epoch
+                }
+                _ => return Err(DecodeErr::Shape),
+            }
         }
-        e.epoch = c.epoch;
     }
     e.ex_ts_ns = d.updated.opt()?.map_or(Ok(0), ms_ns)?;
     out.order(&e);
     o.events = 1;
+    Ok(o)
+}
+
+#[derive(Deserialize)]
+struct CloseRow<'a> {
+    #[serde(rename = "orderId", default)]
+    order_id: UInt,
+    #[serde(default, borrow)]
+    code: &'a str,
+}
+
+#[derive(Deserialize)]
+struct CloseData<'a> {
+    #[serde(borrow)]
+    list: Arr<CloseRow<'a>, 1>,
+}
+
+#[derive(Deserialize)]
+struct CloseResp<'a> {
+    #[serde(borrow)]
+    data: CloseData<'a>,
+}
+
+fn decode_close(
+    line: Line,
+    req: &RestOrigin,
+    status: u16,
+    body: &[u8],
+    rx: &RxMeta,
+    out: &mut impl ReportSink,
+) -> Result<ReportOutcome, DecodeErr> {
+    let r = req.req.ok_or(DecodeErr::Shape)?;
+    if line != Line::Fut || req.inst.0 == 0 {
+        return Err(DecodeErr::Shape);
+    }
+    let code = from::<CodeOnly>(body).map_or(Code::Absent, |c| c.code);
+    let mut o = ReportOutcome {
+        req: Some(r),
+        outcome_unknown: Some(r),
+        raw_code: code.raw(status),
+        ..ReportOutcome::default()
+    };
+    if !(200..300).contains(&status) || !code.is_zero() {
+        if status == 429 || code.num() == Some(RATE_LIMITED) {
+            o.ctl = ReportCtl::RateLimited;
+        }
+        return Ok(o);
+    }
+    let m: CloseResp = from(body)?;
+    let row = m.data.list.iter().next().ok_or(DecodeErr::Shape)?;
+    if !matches!(row.code, "" | "0" | "00000") {
+        return Ok(o);
+    }
+    let id = row.order_id.get()?;
+    if id == 0 {
+        return Err(DecodeErr::Shape);
+    }
+    let mut e = blank(line, rx.account, rx);
+    e.slot = SlotId(r.slot);
+    e.r#gen = r.r#gen;
+    e.inst = req.inst;
+    e.exch_order_id = id;
+    let mut buf = [0; 20];
+    let _ = out.exch_id(exch_key(id, &mut buf), None);
+    out.order(&e); // Receipt only: fills/queries must still prove quantity zero.
+    o.events = 1;
+    o.outcome_unknown = None;
+    o.raw_code = 0;
     Ok(o)
 }
