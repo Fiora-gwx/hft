@@ -312,6 +312,47 @@ fn oms_138_unknown_stuck() {
 }
 
 #[test]
+fn oms_138_stuck_query_stops_on_timer_and_reconnect_until_reconciled() {
+    for unsupported in [false, true] {
+        let mut h = H::with(|c| c.unknown_max_queries = 1);
+        let s = unknown_s(&mut h, &buy_x(), 0);
+        for _ in 0..2 {
+            h.send(
+                VS,
+                A1,
+                GwOp::Query,
+                s.slot,
+                s.r#gen,
+                if unsupported {
+                    SendStatus::QueryUnsupported
+                } else {
+                    SendStatus::Written
+                },
+                1,
+                1,
+            );
+        }
+        assert_ne!(h.flags(s) & SlotFlags::REST_QUERY, 0);
+        for t in 2..12 {
+            h.uq(s, t * 1000);
+            assert!(h.decisions(OrderAction::Query).is_empty());
+            assert_eq!(h.n_notes(notes::NEEDS_REST_QUERY), 1);
+            assert_eq!(h.state(s), OrderState::Unknown);
+        }
+        h.conn(VS, A1, ConnRole::Order, ConnStateKind::Down, 13000);
+        h.conn(VS, A1, ConnRole::Order, ConnStateKind::Up, 14000);
+        assert!(h.decisions(OrderAction::Query).is_empty());
+        assert_eq!(h.n_notes(notes::NEEDS_REST_QUERY), 1);
+        h.recon(&recon(s, 4, 4, 1, Qty(0)), 15000);
+        assert_eq!(h.state(s), OrderState::Cancelled);
+        assert_eq!(h.flags(s) & SlotFlags::REST_QUERY, 0);
+        h.uq(s, 16000);
+        assert!(h.decisions(OrderAction::Query).is_empty());
+        assert_eq!(h.n_notes(notes::NEEDS_REST_QUERY), 0);
+    }
+}
+
+#[test]
 fn oms_139_notfound_within_grace() {
     let mut h = H::new();
     let s = h.place_ok(&buy_x(), 0);

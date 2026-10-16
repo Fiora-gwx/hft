@@ -318,8 +318,8 @@ def preflight_host(tmp_path, monkeypatch):
     monkeypatch.setattr(preflight, "verify_tree", lambda *args, **kw: manifest)
     monkeypatch.setattr(preflight, "selected_host", lambda *args: ("test-host", dict(**{"class": "dev2"}, instances=["prod"], formal_live=False)))
     for path, text in {
-        "etc/hft/hft-core-prod.toml": '[instance]\nname="prod"\norder_env="testnet"\n[paths]\njournal_cold="/data"\n',
-        "etc/hft/preflight.toml": "disk_free_block_pct=15\nmemory=768\nparent_memory=1376\nbatch_memory=512\nquota=100\nweight=50\nread=40\nwrite=20\n",
+        "etc/hft/hft-core-prod.toml": '[instance]\nname="prod"\norder_env="testnet"\n[paths]\njournal_cold="/data"\njournal_ram="/dev/shm/hft"\n[journal]\nsegment_bytes=16777216\nhot_keep=1\n[venues]\n',
+        "etc/hft/preflight.toml": "disk_free_block_pct=15\nmemory=768\ntmpfs=192\nprocess_memory=384\nparent_memory=1376\nbatch_memory=512\nquota=100\nweight=50\nread=40\nwrite=20\n",
         "proc/cpuinfo": "Features: aes atomics\n",
         "sys/fs/cgroup/hftbatch.slice/cpu.idle": "1",
         "sys/fs/cgroup/cgroup.subtree_control": "cpu memory io",
@@ -362,6 +362,8 @@ def preflight_host(tmp_path, monkeypatch):
             if argv[0] == "uname":
                 return self.machine
             if argv[0] == "findmnt":
+                if "FSTYPE" in argv:
+                    return "tmpfs"
                 return "259:1" if "MAJ:MIN" in argv else argv[-1]
             if argv[0] == "chronyc":
                 return self.chrony
@@ -377,6 +379,8 @@ def preflight_host(tmp_path, monkeypatch):
         def available(self, name):
             return name in self.compilers
         def space(self, path):
+            if "shm" in str(path):
+                return 192 * 1024 * 1024, 192 * 1024 * 1024
             return self.free, 100000
         def service_uids(self):
             return {1001, 1002}
@@ -421,6 +425,25 @@ def dep_235_lifecycle_entrypoints_preserve_release(tmp_path):
         assert result.returncode == 0, result.stderr
         after = {str(p.relative_to(scripts)): p.read_bytes() for p in scripts.rglob("*") if p.is_file()}
         assert after == before, "lifecycle entrypoint import polluted the immutable release: " + entry
+
+
+def dep_235_journal_and_cgroup_budget(tmp_path, monkeypatch):
+    preflight, host = preflight_host(tmp_path, monkeypatch)
+    config = preflight.tomllib.loads(host.text("/etc/hft/hft-core-prod.toml"))
+    policy = preflight.tomllib.loads(host.text("/etc/hft/preflight.toml"))
+    assert preflight.journal_memory_budget(host, config, policy)
+    # The previous 384 MiB cap excluded the 192 MiB tmpfs charged to this cgroup.
+    assert not preflight.journal_memory_budget(host, config, dict(policy, memory=384))
+    assert preflight.journal_memory_budget(host, config, dict(policy, memory=576))
+    config["venues"] = {"a": {"accounts": [1]}, "b": {"accounts": [1]}}
+    config["journal"]["raw_feed"] = {"segment_bytes": 8 * 1024 * 1024, "hot_keep": 1}
+    config["journal"]["raw_gw"] = {"segment_bytes": 4 * 1024 * 1024, "hot_keep": 1}
+    assert preflight.journal_memory_budget(host, config, policy)
+    config["journal"]["raw_feed"]["segment_bytes"] = 64 * 1024 * 1024
+    assert not preflight.journal_memory_budget(host, config, policy)
+    config["journal"]["raw_feed"]["segment_bytes"] = 8 * 1024 * 1024
+    host.space = lambda path: (1024, 192 * 1024 * 1024)
+    assert not preflight.journal_memory_budget(host, config, policy)
 
 
 def dep_237_dev2_items(tmp_path, monkeypatch):

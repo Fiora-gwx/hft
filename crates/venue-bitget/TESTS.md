@@ -6,6 +6,8 @@ spec: README.md
 
 # venue-bitget 测试规格
 
+BGT-307 使用 `stream_route(Funding)` 解码实采 ticker 与 rollover，并断言其与 Trade 分离。BGT-336 覆盖实采零宽窗口 code 20001 与正宽 1 ms 空页；无效窗口在签名前拒绝，空页由 CORE-120 验证完成轮询。
+
 格式与规则见 [docs/tests](../../docs/tests/README.md)。本 crate 的待核实项多(README 开发备忘第 1–17 条):依赖待核实事实的用例在 `备注` 写明条目号;字段名未定的用例按 README 写的语义写期望,金样输入来源写"待采集(方法)"。"实现前置"与"M3 之前必须核实"的事实本身写成 `testnet` 用例(BGT-210–BGT-218),通过标准是结论写回 README 对应表。
 
 本文件的记号(各用例在 `前置` 中引用,数值即定义,不依赖默认值):

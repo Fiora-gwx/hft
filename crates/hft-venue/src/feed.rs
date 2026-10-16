@@ -103,7 +103,7 @@ struct Inst {
     want: u8,
     bbo_group: u8,
     depth_group: u8,
-    md_group: u8,
+    md_group: [u8; MD_STREAMS.len()],
     /// BBO slots where the subscription is answered (member).
     members: u8,
     refresh: u8,
@@ -187,7 +187,7 @@ struct St<P: VenueProtocol> {
     next_sub_id: u32,
     bbo_route: Option<RouteSpec>,
     depth_route: Option<RouteSpec>,
-    md_route: Option<RouteSpec>,
+    md_routes: Vec<Option<RouteSpec>>,
     topn: u8,
     spc: u32,
     max_groups: u8,
@@ -723,7 +723,7 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                 want: 0,
                 bbo_group: NONE8,
                 depth_group: NONE8,
-                md_group: NONE8,
+                md_group: [NONE8; MD_STREAMS.len()],
                 members: 0,
                 refresh: REFRESH_NONE,
                 refresh_due: 0,
@@ -764,7 +764,7 @@ impl<P: VenueProtocol> FeedRuntime<P> {
             next_sub_id: 1,
             bbo_route: pick(RouteKind::Bbo),
             depth_route,
-            md_route: pick(RouteKind::Md),
+            md_routes: vec![None; md_groups],
             topn,
             spc,
             max_groups,
@@ -1122,69 +1122,74 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                 }
             }
         }
-        // Md streams.
-        if self.st.md_route.is_some() {
-            let added = add & streams::MD_ALL & !streams::BOOK;
-            let removed = del & streams::MD_ALL & !streams::BOOK;
-            if added != 0 {
-                let mut g = self.st.insts.get(ix).map_or(NONE8, |s| s.md_group);
-                if g == NONE8 {
-                    g = self.assign(RouteKind::Md, 0).unwrap_or(NONE8);
-                    let id = self.st.next_sub_id;
-                    self.st.next_sub_id += 1;
-                    if let Some(s) = self.st.insts.get_mut(ix) {
-                        s.md_group = g;
-                        s.sub_id[2] = id;
-                    }
+        // Each MD stream belongs to its protocol route. Groups never change route while
+        // connections may still be installed/reconnecting, including after unsubscribe.
+        for (stream_ix, (bit, stream)) in MD_STREAMS.iter().copied().enumerate() {
+            if add & bit != 0 {
+                let Some(route) = P::stream_route(stream).and_then(|id| {
+                    P::routes()
+                        .iter()
+                        .find(|r| r.id == id && r.kind == RouteKind::Md)
+                        .copied()
+                }) else {
+                    continue;
+                };
+                let Some(g) = self.assign_md(route) else {
+                    self.st.n.no_group += 1;
+                    continue;
+                };
+                let id = self.st.next_sub_id;
+                self.st.next_sub_id += 1;
+                if let Some(s) = self.st.insts.get_mut(ix) {
+                    s.md_group[stream_ix] = g;
+                    s.sub_id[2] = id;
                 }
-                if g != NONE8 {
-                    for (b, sk) in MD_STREAMS {
-                        if added & b != 0 {
-                            if let Some(l) = self.st.md_load.get_mut(g as usize) {
-                                *l += 1;
-                            }
-                            self.enqueue(
-                                RouteKind::Md,
-                                g,
-                                SubItem {
-                                    ix: ix32,
-                                    stream: sk,
-                                    levels: 0,
-                                    unsub: false,
-                                },
-                            );
-                        }
-                    }
-                }
+                self.enqueue(
+                    RouteKind::Md,
+                    g,
+                    SubItem {
+                        ix: ix32,
+                        stream,
+                        levels: 0,
+                        unsub: false,
+                    },
+                );
             }
-            if removed != 0 {
-                let g = self.st.insts.get(ix).map_or(NONE8, |s| s.md_group);
+            if del & bit != 0 {
+                let g = self.st.insts.get(ix).map_or(NONE8, |s| s.md_group[stream_ix]);
                 if g != NONE8 {
-                    for (b, sk) in MD_STREAMS {
-                        if removed & b != 0 {
-                            if let Some(l) = self.st.md_load.get_mut(g as usize) {
-                                *l = l.saturating_sub(1);
-                            }
-                            self.enqueue(
-                                RouteKind::Md,
-                                g,
-                                SubItem {
-                                    ix: ix32,
-                                    stream: sk,
-                                    levels: 0,
-                                    unsub: true,
-                                },
-                            );
-                        }
+                    if let Some(l) = self.st.md_load.get_mut(g as usize) {
+                        *l = l.saturating_sub(1);
                     }
-                    if new & streams::MD_ALL & !streams::BOOK == 0
-                        && let Some(s) = self.st.insts.get_mut(ix)
-                    {
-                        s.md_group = NONE8;
+                    self.enqueue(
+                        RouteKind::Md,
+                        g,
+                        SubItem {
+                            ix: ix32,
+                            stream,
+                            levels: 0,
+                            unsub: true,
+                        },
+                    );
+                    if let Some(s) = self.st.insts.get_mut(ix) {
+                        s.md_group[stream_ix] = NONE8;
                     }
                 }
             }
         }
+    }
+
+    fn assign_md(&mut self, route: RouteSpec) -> Option<u8> {
+        let g = self
+            .st
+            .md_routes
+            .iter()
+            .zip(&self.st.md_load)
+            .position(|(r, load)| r.is_some_and(|r| r.id == route.id) && *load < self.st.spc)
+            .or_else(|| self.st.md_routes.iter().position(Option::is_none))?;
+        *self.st.md_routes.get_mut(g)? = Some(route);
+        *self.st.md_load.get_mut(g)? += 1;
+        u8::try_from(g).ok()
     }
 
     /// First group of a non-BBO route with room for `need` more streams (`need = 0`: room for one).
@@ -1240,7 +1245,7 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                 let route = match b.kind {
                     RouteKind::Bbo => self.st.bbo_route,
                     RouteKind::DepthTopN => self.st.depth_route,
-                    RouteKind::Md => self.st.md_route,
+                    RouteKind::Md => self.st.md_routes.get(b.group as usize).copied().flatten(),
                 }
                 .map_or(RouteId(0), |r| r.id);
                 let vm = self.st.rd.venue(P::VENUE);
@@ -1306,9 +1311,9 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                                 unsub: false,
                             });
                         }
-                        RouteKind::Md if s.md_group == b.group => {
-                            for (bit, sk) in MD_STREAMS {
-                                if s.want & bit != 0 {
+                        RouteKind::Md => {
+                            for (stream_ix, (bit, sk)) in MD_STREAMS.iter().copied().enumerate() {
+                                if s.want & bit != 0 && s.md_group[stream_ix] == b.group {
                                     m.pend.push_back(SubItem {
                                         ix,
                                         stream: sk,
@@ -1807,7 +1812,14 @@ impl<P: VenueProtocol> FeedRuntime<P> {
         let endpoint = match kind {
             RouteKind::Bbo => ep.bbo,
             RouteKind::DepthTopN => ep.depth,
-            RouteKind::Md => ep.md,
+            RouteKind::Md => self
+                .st
+                .md_routes
+                .get(group as usize)
+                .copied()
+                .flatten()
+                .and_then(|r| ep.md_routes[usize::from(r.id.0)])
+                .unwrap_or(ep.md),
         };
         let req = BuildReq {
             venue: P::VENUE,

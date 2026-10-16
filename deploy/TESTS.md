@@ -2626,6 +2626,8 @@ DEP-225 子例覆盖首次激活缺失且 inactive 单元，只有安装并 relo
 
 ### DEP-235 预检的通用项
 
+当前装配的 `journal-memory-budget` 回归拒绝未包含 tmpfs 的 MemoryMax，校验各 raw/seq 热段、滚动余量与挂载剩余空间；预算数字归 hft-core。测试不对主机施加内存压力。
+
 - 规则:[发布归档与 releasectl](README.md#发布归档与-releasectl)、[制品从哪里来](README.md#制品从哪里来)
 - 级别:table
 - 里程碑:M3

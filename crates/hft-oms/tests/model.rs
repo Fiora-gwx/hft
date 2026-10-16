@@ -334,7 +334,7 @@ pub struct SendEffect {
     pub needs_rest: bool,
 }
 
-const MASK: u16 = SlotFlags::CANCEL_SENT | SlotFlags::AMEND_SENT | SlotFlags::VERIFY;
+const MASK: u16 = SlotFlags::CANCEL_SENT | SlotFlags::AMEND_SENT | SlotFlags::VERIFY | SlotFlags::REST_QUERY;
 
 impl SendEffect {
     pub fn unchanged(s: &SendSlot) -> SendEffect {
@@ -394,9 +394,14 @@ pub fn send_report_table(s: &SendSlot, op: GwOp, st: SendStatus) -> SendEffect {
             }
         }
         GwOp::Query => {
-            if written {
+            if written && s.sflags & SlotFlags::REST_QUERY == 0 {
                 e.query_count = s.query_count.saturating_add(1);
+                if e.query_count > 5 {
+                    e.flags |= SlotFlags::REST_QUERY;
+                    e.needs_rest = true;
+                }
             } else if st == SendStatus::QueryUnsupported {
+                e.flags |= SlotFlags::REST_QUERY;
                 e.needs_rest = true;
             }
         }
@@ -415,6 +420,10 @@ pub fn send_report_table(s: &SendSlot, op: GwOp, st: SendStatus) -> SendEffect {
             }
         }
         _ => {}
+    }
+    if e.query && s.sflags & SlotFlags::REST_QUERY != 0 {
+        e.query = false;
+        e.needs_rest = true;
     }
     e
 }

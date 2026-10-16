@@ -1687,6 +1687,8 @@ spec: README.md
 
 ### OMS-138 写出的查询超过 unknown_max_queries 时写一次 OmsUnknownStuck
 
+超过阈值后 `REST_QUERY` 保存到槽/快照，后续定时器与断连重连均只请求 reconciler；`QueryUnsupported` 同样停止 gateway 查询。回归保持 Unknown，匹配对账证据确认 Cancelled 后清位并停止轮询。0/5 的既有“超过”阈值不变，255 饱和停止。
+
 - 规则:[Unknown 收敛流程](README.md#unknown-收敛流程)、[配置项](README.md#配置项omsconfig)
 - 级别:table
 - 里程碑:M2

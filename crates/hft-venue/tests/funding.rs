@@ -12,10 +12,11 @@ impl FundingHistoryProtocol for StubProto {
     fn funding_request(
         _: &VenueCfg,
         _: &Credential,
-        _: &FundingQuery,
+        q: &FundingQuery,
         _: &WallClock,
         out: &mut RestReqBuf,
     ) -> Result<(), ProtoErr> {
+        assert!(q.end_ms > q.start_ms, "venue rejects an empty funding window");
         out.redacted = true;
         Ok(())
     }
@@ -45,6 +46,48 @@ impl FundingHistoryProtocol for StubProto {
             skipped_foreign: 0,
         })
     }
+}
+
+#[test]
+fn ven_258_first_funding_window_waits_past_settle_lag_boundary() {
+    let start = 1_792_000_000_000;
+    let mut poll = FundingPoll::<StubProto>::new(
+        A1,
+        start,
+        FundingPollCfg {
+            poll_ms: 5000,
+            lookback_ms: 172_800_000,
+            settle_lag_ms: 600_000,
+            max_settlement_skew_ms: 1000,
+            max_pages: 64,
+            max_bills: 4096,
+        },
+    )
+    .unwrap();
+    let venue = VenueCfg {
+        env: VenueEnv::Testnet,
+        stale_guard_ms: 1500,
+    };
+    for elapsed in [0, 599_999, 600_000] {
+        let clock = WallClock {
+            unix_ms: start + elapsed,
+            unix_us: 0,
+        };
+        assert!(
+            poll.request(&venue, &Credential::default(), &clock)
+                .unwrap()
+                .is_none()
+        );
+    }
+    let clock = WallClock {
+        unix_ms: start + 600_001,
+        unix_us: 0,
+    };
+    assert!(
+        poll.request(&venue, &Credential::default(), &clock)
+            .unwrap()
+            .is_some()
+    );
 }
 
 #[test]

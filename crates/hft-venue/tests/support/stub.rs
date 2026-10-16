@@ -37,6 +37,7 @@ pub const V_SWEEP: u32 = 1;
 pub const V_SIGN: u32 = 2;
 pub const V_REST_CANCEL_ALL: u32 = 4;
 pub const V_USER_STREAM: u32 = 8;
+pub const V_MD_SPLIT: u32 = 16;
 
 pub struct Stub<const FCAP: usize, const V: u32>;
 pub type StubProto = Stub<2048, 0>;
@@ -341,6 +342,17 @@ static ROUTES: [RouteSpec; 3] = [
     },
 ];
 
+static SPLIT_ROUTES: [RouteSpec; 4] = [
+    ROUTES[0],
+    ROUTES[1],
+    ROUTES[2],
+    RouteSpec {
+        id: RouteId(3),
+        name: "ticker",
+        ..ROUTES[2]
+    },
+];
+
 /// `"st-"` + canonical text.
 pub fn cid_text(id: &ClientOrderId) -> String {
     let mut b = [0u8; 24];
@@ -457,7 +469,20 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
     }
 
     fn routes() -> &'static [RouteSpec] {
-        &ROUTES
+        if V & V_MD_SPLIT != 0 {
+            &SPLIT_ROUTES
+        } else {
+            &ROUTES
+        }
+    }
+
+    fn stream_route(stream: StreamKind) -> Option<RouteId> {
+        Some(match stream {
+            StreamKind::Bbo => RouteId(0),
+            StreamKind::DepthTopN | StreamKind::DepthIncr => RouteId(1),
+            StreamKind::Mark | StreamKind::Index | StreamKind::Funding if V & V_MD_SPLIT != 0 => RouteId(3),
+            _ => RouteId(2),
+        })
     }
 
     fn endpoint(
@@ -637,9 +662,9 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         match k {
             b"B" if route == RouteId(0) => Md::Bbo,
             b"T" if route == RouteId(2) => Md::Trade,
-            b"M" if route == RouteId(2) => Md::Mark,
-            b"I" if route == RouteId(2) => Md::Index,
-            b"F" if route == RouteId(2) => Md::Funding,
+            b"M" if Some(route) == Self::stream_route(StreamKind::Mark) => Md::Mark,
+            b"I" if Some(route) == Self::stream_route(StreamKind::Index) => Md::Index,
+            b"F" if Some(route) == Self::stream_route(StreamKind::Funding) => Md::Funding,
             b"L" if route == RouteId(2) => Md::Liquidation,
             b"D" if route == RouteId(1) => Md::Depth,
             b"DT" if route == RouteId(1) => Md::DepthT,

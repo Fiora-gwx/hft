@@ -96,6 +96,7 @@ def check(host):
     probe("guard-active", lambda: host.command("systemctl", "is-active", "hft-dev2-guard.service") == "active")
     probe("batch-idle", lambda: host.text("/sys/fs/cgroup/hftbatch.slice/cpu.idle").strip() == "1" and not host.path("/sys/fs/cgroup/hft.slice/hftbatch.slice").exists())
     results.update(resource_checks(host, policy, cold))
+    probe("journal-memory-budget", lambda: journal_memory_budget(host, config, policy))
     probe("guard-polkit", lambda: host.path("/etc/polkit-1/rules.d/50-hft-dev2-guard.rules").read_bytes() == (tree / "deploy/polkit/50-hft-dev2-guard.rules").read_bytes())
     for unit in ("hft.slice", "hft-core.slice", "hftbatch.slice"):
         probe("unit:" + unit, lambda unit=unit: host.path("/etc/systemd/system/" + unit).read_bytes() == (tree / "deploy/generated" / name / unit).read_bytes())
@@ -128,6 +129,40 @@ def check(host):
         probe("secrets:" + secret.name, lambda secret=secret: host.command(str(tree / "bin/hft-secrets"), "--check", "--manifest", str(secret)) is not None)
     probe("core-config", lambda: host.command(str(tree / "bin/hft-core"), "--check", "--config", str(host.path("/etc/hft/hft-core-prod.toml"))) is not None)
     return results
+
+
+def journal_memory_budget(host, config, policy):
+    """tmpfs pages are charged to memory.max as well as the process heap/stacks."""
+    mib = 1024 * 1024
+    mounted = str(Path(config["paths"]["journal_ram"]) / config["instance"]["name"])
+    if host.command("findmnt", "-n", "-o", "FSTYPE", "-T", mounted) != "tmpfs":
+        return False
+    if host.command("findmnt", "-n", "-o", "TARGET", "-T", mounted) != mounted:
+        return False
+    free, total = host.space(mounted)
+    if total != policy["tmpfs"] * mib or policy["memory"] < policy["tmpfs"] + policy["process_memory"]:
+        return False
+    if policy["memory"] > policy["parent_memory"]:
+        return False
+    journal = config["journal"]
+    layouts = [journal]
+    for venue in config["venues"].values():
+        layouts.append(journal.get("raw_feed", journal))
+        if venue.get("accounts"):
+            layouts.append(journal.get("raw_gw", journal))
+    sizes = []
+    for layout in layouts:
+        size, keep = layout["segment_bytes"], layout["hot_keep"]
+        if type(size) is not int or type(keep) is not int or size <= 0 or not 0 <= keep <= 255:
+            return False
+        sizes.append((size, keep))
+    need = sum(size * (2 + keep) for size, keep in sizes) + max(size for size, _ in sizes)
+    # The heartbeat and tmpfs metadata also need space. Full configured occupancy plus one
+    # roll must fit even if the filesystem currently happens to be empty.
+    if need + mib > total:
+        return False
+    held = sum(p.stat().st_size for p in host.path(mounted).glob("*/*.jrn"))
+    return free >= max(0, need - held) + mib
 
 
 def resource_checks(host, policy, cold):

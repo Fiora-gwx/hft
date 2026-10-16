@@ -1,6 +1,6 @@
 //! Synthetic BGT-312/325 cases and independently calculated, sanitized demo captures.
 use crate::support::*;
-use hft_venue_proto::{MsgOp, RouteId, VenueProtocol};
+use hft_venue_proto::{MsgOp, RouteId, StreamKind, VenueProtocol};
 use venue_bitget::{BitgetSpot, BitgetUsdtFutures, FeedCtx, GwCtx};
 
 fn fixtures<T: VenueProtocol<FeedCtx = FeedCtx, GwCtx = GwCtx>>(
@@ -365,8 +365,11 @@ fn bgt_305_fut_trade() {
 
 #[test]
 fn bgt_307_fut_ticker() {
-    market("ticker", "v3_normal", 3);
-    market("ticker", "funding_rollover", 3);
+    let route = BitgetUsdtFutures::stream_route(StreamKind::Funding).unwrap();
+    assert_ne!(Some(route), BitgetUsdtFutures::stream_route(StreamKind::Trade));
+    assert_eq!(Some(route), BitgetUsdtFutures::stream_route(StreamKind::Mark));
+    market("ticker", "v3_normal", route.0);
+    market("ticker", "funding_rollover", route.0);
 }
 
 fn report(channel: &str, name: &str) {

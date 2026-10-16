@@ -258,6 +258,8 @@ UTA 设置接受 `accountMode = unified | hybrid` 且 `accountLevel = basic`;`cl
 
 `amount` 在 Notional 的 -6 指数边界作一次 HalfEven 舍入,再按 IN/OUT 规范正负;原始账单金额保留在金样中。BGT-336 的真实八位小数资金费不能要求六位精确表示,每笔表示误差至多 0.5 微 USDT,不宣称原始现金逐位无损。
 
+`funding_request` 要求 `end_ms > start_ms`；相等时在本地拒绝。实采零宽窗口返回 code 20001，正宽 1 ms 的空窗口可成功完成。轮询边界等待规则归 [FundingPoll](../hft-venue/README.md#资金费账单轮询)。Trade 映射 publicTrade route，Mark/Index/Funding 映射 ticker route；运行时必须保留该路由传给 classify。
+
 `ticker` 的费率/下次结算时间经 Funding 进入策略;account 推送的余额不能推导逐合约收付。`RateOnly` 保留行情估算,认证账单经 [FundingPoll](../hft-venue/README.md#资金费账单轮询) 和 [ledger 实额完成](../hft-ledger/README.md#资金费) 修正金额,不等待 M9 的资金费自动对账。
 
 ### 测试网/模拟盘

@@ -96,7 +96,9 @@ impl<P: FundingHistoryProtocol> FundingPoll<P> {
                 .unix_ms
                 .saturating_sub(self.cfg.settle_lag_ms)
                 .min(self.from_ms.saturating_add(30 * 86_400_000));
-            if end_ms < self.from_ms {
+            // An empty interval is rejected by venue APIs. Do not freeze it as the
+            // retry window at the first settle-lag boundary; wait for time to advance.
+            if end_ms <= self.from_ms {
                 return Ok(None);
             }
             self.query = Some(FundingQuery {

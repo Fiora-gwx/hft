@@ -61,6 +61,51 @@ fn ven_021_md_task_only_md() {
     assert!(h.bulk.as_mut().unwrap().peek().is_some());
     assert_eq!(h.rt.counters().unknown_class, 1);
 }
+
+#[test]
+fn ven_021_md_routes_keep_trade_and_ticker_separate_after_reconnect() {
+    type Split = stub::Stub<2048, { stub::V_MD_SPLIT }>;
+    let mut cfg = f0();
+    cfg.routes = FeedRoutes::Md;
+    cfg.endpoints.md_routes[2] = Some(hft_net::EndpointId(2));
+    cfg.endpoints.md_routes[3] = Some(hft_net::EndpointId(3));
+    let mut h = feed_with::<Split>(cfg, Caps::default());
+    let mut t = 100;
+    h.up(
+        &[S1],
+        streams::TRADE | streams::MARK | streams::INDEX | streams::FUNDING,
+        &mut t,
+    );
+    assert_eq!(h.rt.conn_ids().collect::<Vec<_>>(), [ConnId(8), ConnId(9)]);
+    assert_eq!(h.all_builds[0].endpoint, hft_net::EndpointId(2));
+    assert_eq!(h.all_builds[1].endpoint, hft_net::EndpointId(3));
+    for reconnect in [false, true] {
+        if reconnect {
+            h.net.at(ConnId(9), 0, crate::support::net::Ev::Eof);
+            h.poll(t + 1);
+            t += 10_000_000_000;
+            h.up(&[], 0, &mut t);
+        }
+        h.clear();
+        let ticker = h.all_builds.last().unwrap();
+        assert_eq!(ticker.endpoint, hft_net::EndpointId(3));
+        let ticker = ticker.conn;
+        h.net.push(ConnId(8), format!("T|S1|{t}|100|1|B").as_bytes());
+        h.net.push(ticker, format!("M|S1|{t}|100").as_bytes());
+        h.net.push(ticker, format!("F|S1|{t}|0.0001|2000").as_bytes());
+        h.poll(t + 1);
+        let events = h.drain_md();
+        assert!(events.iter().any(|e| matches!(e, FeedMsg::Trade(_))));
+        assert!(
+            events.iter().any(|e| matches!(e, FeedMsg::MarkPrice(_))),
+            "reconnect={reconnect}, events={events:?}, builds={:?}, counts={:?}",
+            h.all_builds,
+            h.rt.counters()
+        );
+        assert!(events.iter().any(|e| matches!(e, FeedMsg::Funding(_))));
+        assert_eq!(h.rt.counters().unknown_class, 0);
+    }
+}
 #[test]
 fn ven_027_unknown_inst() {
     let mut h = feed(f0());

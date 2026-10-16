@@ -1,8 +1,6 @@
 //! `SendReport` handling, local send-failure classes, connection state and `REPORT_DECODE`.
 
-use hft_event::{
-    ConnRole, ConnState, ConnStateKind, GwOp, OrderAction, RecordHeader, SendReport, SendStatus,
-};
+use hft_event::{ConnRole, ConnState, ConnStateKind, GwOp, RecordHeader, SendReport, SendStatus};
 use hft_types::{GROUP_NONE, Tsc};
 
 use crate::Oms;
@@ -122,6 +120,9 @@ impl Oms {
                 if written {
                     self.query_written(ti, s, out);
                 } else if ev.status == SendStatus::QueryUnsupported {
+                    if let Some(slot) = self.tm(ti).and_then(|t| t.slots.get_mut(s as usize)) {
+                        slot.sflags.0 |= SlotFlags::REST_QUERY;
+                    }
                     self.needs_rest(&sl, false, out);
                 }
             }
@@ -206,7 +207,7 @@ impl Oms {
                         x.state == OrderState::Unknown || (x.state.open() && x.sflags.has(SlotFlags::VERIFY))
                     });
                     if q {
-                        self.push_decision(ti, OrderAction::Query, s, seq, out);
+                        self.query_or_reconcile(ti, s, true, seq, out);
                     }
                 }
                 self.check_ready(ti, was, out);

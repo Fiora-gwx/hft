@@ -52,8 +52,8 @@ use hft_venue_proto::{
     Align, BootCall, ControlHint, Credential, DeadManOut, DeadManSpec, DecodeErr, EncodeErr, EndpointSpec,
     HeartbeatSpec, LoginResult, LoginStep, MdOutcome, MdSink, MsgOp, OrderChannel, Peek, PingKind, ProtoErr,
     RateRule, RawSeq, ReportOutcome, ReportSink, RestOrigin, RestReqBuf, ResyncMethod, Role, RouteId,
-    RouteSpec, RxMeta, SeqRule, SnapshotInfo, StaleGuard, SubFrames, SubSpec, TargetRef, VenueCfg,
-    VenueProtocol, WallClock,
+    RouteSpec, RxMeta, SeqRule, SnapshotInfo, StaleGuard, StreamKind, SubFrames, SubSpec, TargetRef,
+    VenueCfg, VenueProtocol, WallClock,
 };
 
 /// USDT-M perpetual (`bitget-usdt-futures`).
@@ -342,6 +342,18 @@ macro_rules! venue_impl {
             }
             fn routes() -> &'static [RouteSpec] {
                 session::routes($line)
+            }
+            fn stream_route(stream: StreamKind) -> Option<RouteId> {
+                Some(match stream {
+                    StreamKind::Bbo => session::ROUTE_BOOKS1,
+                    StreamKind::DepthTopN => session::ROUTE_TOPN,
+                    StreamKind::DepthIncr => session::ROUTE_BOOKS,
+                    StreamKind::Trade => session::ROUTE_TRADE,
+                    StreamKind::Mark | StreamKind::Index | StreamKind::Funding if $line == Line::Fut => {
+                        session::ROUTE_TICKER
+                    }
+                    _ => return None,
+                })
             }
             fn endpoint(
                 role: Role,

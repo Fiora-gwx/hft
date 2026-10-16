@@ -12,6 +12,8 @@
 
 `clock.step_threshold_ns`、`clock.interval_ms`、`watchdog.hb_stale_ms` 与 `venues.<v>.stale_guard_ms` 均为必填正整数。线程名不超过 Linux comm 的 15 字节；park 时长遵守 [心跳约束](../README.md#线程计划)。网关订单槽位容量从 ECF1 的 OMS 配置取得。缺失键逐项报 `MissingField`，凭据引用缺失报 `MissingCredential`，未知键与类型错误报单条脱敏 `ConfigParse`。加载还检查 [执行/风险与尘埃线约束](../README.md#内存与-journal-段按主机类唯一归属)，失败发生在运行资源创建前。
 
+`threads.idle` 可选 `"park"`（默认，保留 `park_us`）或 `"spin"`。Spin 只允许 sequencer/feed/gw 热线程，必须显式绑定且无其他配置线程共用该核；启动还要求该核位于 Linux isolated CPU 列表，否则在 READY 前退出 3。低延迟主机可使用用户态持续轮询，dev2 模板保持 Park；这不启用网卡/socket 的内核 busy poll。
+
 `binance-testnet.toml` 是网络模式模板，使用 `prod/testnet` 和非正式 Live 账户。先生成该账户的 RDB1、ECF1、风险与 registry 参数文件并填入哈希；模板中的零哈希故意不能通过校验。RDB1 的 Testnet endpoints 应包含下列地址，不能把浏览器网站 `demo.binance.com` 当作 API URL：
 
 | EndpointRole | URL |

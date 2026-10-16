@@ -124,6 +124,15 @@ pub struct Thread {
     pub core: Option<u16>,
     pub park_us: u64,
     pub nice: u8,
+    #[serde(default)]
+    pub idle: Idle,
+}
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Idle {
+    #[default]
+    Park,
+    Spin,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -460,6 +469,10 @@ pub fn load_timed(
             || !(1..=10000).contains(&t.park_us)
             || u128::from(t.park_us) * 4 >= u128::from(c.watchdog.hb_stale_ms) * 1000
             || !tasks.contains(&t.task)
+            || (t.idle == Idle::Spin
+                && (t.core.is_none()
+                    || !(t.task == "sequencer" || t.task.starts_with("feed:") || t.task.starts_with("gw:"))
+                    || c.threads.iter().filter(|other| other.core == t.core).count() != 1))
         {
             errors.push(Error::config("ThreadPlan", &t.name));
         }

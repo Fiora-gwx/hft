@@ -248,7 +248,7 @@ impl Oms {
             *f &= !SlotFlags::AMEND_SENT;
         }
         if to != OrderState::Unknown {
-            *f &= !(SlotFlags::HIST_WAIT | SlotFlags::ALARMED);
+            *f &= !(SlotFlags::HIST_WAIT | SlotFlags::ALARMED | SlotFlags::REST_QUERY);
         }
         if to == OrderState::Live {
             *f |= SlotFlags::ACKED;
@@ -774,7 +774,11 @@ impl Oms {
                 OrderAction::Amend => {
                     sl.state != OrderState::PendingAmend && sl.state != OrderState::PendingCancel
                 }
-                OrderAction::Query => !(sl.state == OrderState::Unknown || sl.sflags.has(SlotFlags::VERIFY)),
+                OrderAction::Query => {
+                    !(sl.state == OrderState::Unknown || sl.sflags.has(SlotFlags::VERIFY))
+                        || sl.sflags.has(SlotFlags::REST_QUERY | SlotFlags::HIST_WAIT)
+                        || sl.query_count > self.p.unknown_max_queries
+                }
                 _ => false,
             };
             if stale {

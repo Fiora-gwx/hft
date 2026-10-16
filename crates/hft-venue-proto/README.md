@@ -61,6 +61,7 @@ pub trait VenueProtocol: Sized + 'static {
     /// 连接前需要先执行的 REST 请求(Binance USDT-M listenKey、KuCoin bullet token);cred = 该账户的 REST 凭证,行情角色为 None
     fn bootstrap(role: Role, cfg: &VenueCfg, cred: Option<&Credential>) -> Option<BootCall>;
     fn routes() -> &'static [RouteSpec];                                          // 行情路由表(如 Binance /public、/market);含 Bbo、DepthTopN 与 Md 路由
+    fn stream_route(stream: StreamKind) -> Option<RouteId>;                       // 流所属路由;默认取对应 kind 首条,多 Md 路由必须显式映射
     fn endpoint(role: Role, route: RouteId, cfg: &VenueCfg, cred: Option<&Credential>, boot: Option<&[u8]>,
                 now_ms: i64, out: &mut EndpointSpec) -> Result<(), ProtoErr>;     // path、query、额外 Upgrade 头
     fn login(role: Role, cfg: &VenueCfg, cred: &Credential, step: u8, now_ms: i64, out: &mut Vec<u8>)

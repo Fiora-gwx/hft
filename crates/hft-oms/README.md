@@ -268,7 +268,7 @@ pub struct ForeignFill {                           // 防御路径与 StaleGen �
 | `cancel_timeout_ms[venue]` | u32 | 2000 | `PendingCancel`/`PendingAmend` 同上 |
 | `ioc_timeout_ms[venue]` | u32 | 1000 | IOC/FOK `Live` 超时仍无终态 → `Unknown` |
 | `unknown_query_interval_ms` | u32 | 1000 | Unknown 查询重试间隔 |
-| `unknown_max_queries` | u8 | 5 | 超过后升级:请求对账 + P0 告警 |
+| `unknown_max_queries` | u8 | 5 | 超过后停止 gateway 查询、请求对账 + P0 告警;255 时计数饱和即停止 |
 | `unknown_alarm_ms` | u32 | 30000 | Unknown 持续超过 → sequencer 设 `UnknownTimeout{account, venue}` cap(只挡 Open,不暂停对冲) |
 | `out_quota[(venue, account)]` | u16 | `max_out_per_event` × 4 | 扇出队列按 (venue, account) 分配额,一个账户的风暴不占另一个账户的出环名额 |
 | `not_found_grace_ms[venue]` | u32 | 该所过期保护窗口 + 500;无过期保护的所 2 000 | 查询"不存在"后,`sent_tsc` 之后超过此值才请求成交历史确认;只有 `stale_guard = ExpireAt` 的 venue 上的非链接槽可在此之后直接定终态(见 Unknown 收敛)。成交历史确认本身的等待由 reconciler 的 `notfound_grace_ms` 与轮次规则决定,不是本参数 |
@@ -344,6 +344,7 @@ pub struct OrderSlot {                 // 128 B = 2 条缓存行
                                        //        CANCEL_SENT=1 AMEND_SENT=2 FILL_BEFORE_ACK=4 VERIFY=8 QUEUED=16 EXEC=32
                                        //        SMOKE_DUE=64(冒烟单已到期、待撤)ACKED=128(收到过 Ack 或成交,在途分类用,见"LegTracker")
                                        //        HIST_WAIT=256(NotFound 已过 grace、等成交历史确认)ALARMED=512(本次 Unknown 已按 unknown_alarm_ms 升级)
+                                       //        REST_QUERY=2048(查询不支持或预算耗尽,等待 reconciler;快照保存)
                                        //        AGED=1024(本次 Live 已发过 Aged);其余预留
     pub reject_code: u32,              // 108 交易所原始码或 LocalReject 码
     pub t_state: Tsc,                  // 112 进入当前状态时的事件 tsc(sweep 用;进快照的已登记 TSC 字段,见"恢复")
@@ -562,6 +563,8 @@ LegTracker、对冲基数与 `FillOut.net_qty` 一律用**净量**(仓位与库�
 - 现货卖出量取 min(库存, 可用余额) 是下单方的规则(hft-exec 切片、策略);OMS 不检查余额。
 
 ### Unknown 收敛流程
+
+`QueryUnsupported` 或写出查询超过 `unknown_max_queries` 后置 `REST_QUERY`，该槽保持原业务状态；计数 255 饱和也停止。定时器与重连只重写 `OmsNeedsRestQuery`，不再发 gateway Query；`HIST_WAIT` 时同时要求成交历史。离开 Unknown 或取得有效终态/Live 证据时清除等待位。沿用“超过”阈值口径，默认 5 允许最多 6 次写出，0 允许首次写出；传输拒绝不会推导订单终态。
 
 1. **进入**:① 下单连接 `ConnState{role=Order, Down}` → 该 (venue, account) 所有 `PendingNew/PendingCancel/PendingAmend` 进 `Unknown`(保存 `prev_state`),所有 `Live` 置 `VERIFY` 标志;用户流 `ConnState{role=UserStream, Down}` → 该 (venue, account) 所有非终态槽置 `VERIFY`(回报可能有缺口);② sweep 发现 `PendingNew` 超 `ack_timeout`、`Pending{Cancel,Amend}` 超 `cancel_timeout`、IOC/FOK `Live` 超 `ioc_timeout`;③ `SendReport` 报告加密后 I/O 错误(字节可能已部分发出);④ 冷启动恢复结束(`recovery_end`)时的全部非终态槽。**传输错误只能到这里,不能到 Rejected/Cancelled**([defensive-patterns](../../docs/defensive-patterns.md))。
 2. **隔离**:`unknown_count += 1` → `venue_ready(v, a) = false`;风控对该 (account, group) 的开仓意图拒绝(`UNKNOWN_PENDING`),减仓与对冲照常。

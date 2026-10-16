@@ -45,7 +45,18 @@ impl Oms {
         let id = OmsTimerReq::unknown_query_id(t.tix, s);
         let deadline = Tsc(now.0.saturating_add(self.p.query_interval));
         self.push_timer(OmsTimerKind::UnknownQuery, id, deadline, false, out);
-        if up {
+        self.query_or_reconcile(ti, s, up, seq, out);
+    }
+
+    pub(crate) fn query_or_reconcile(&mut self, ti: usize, s: u32, up: bool, seq: u64, out: &mut OmsOut) {
+        let Some(sl) = self.t(ti).and_then(|t| t.slot(s)).copied() else {
+            return;
+        };
+        if sl.sflags.has(SlotFlags::HIST_WAIT) {
+            self.needs_rest(&sl, true, out);
+        } else if sl.sflags.has(SlotFlags::REST_QUERY) || sl.query_count > self.p.unknown_max_queries {
+            self.needs_rest(&sl, false, out);
+        } else if up {
             self.push_decision(ti, OrderAction::Query, s, seq, out);
         }
     }
@@ -70,13 +81,7 @@ impl Oms {
         if !(sl.state == OrderState::Unknown || (sl.state.open() && sl.sflags.has(SlotFlags::VERIFY))) {
             return;
         }
-        if t.conn_up {
-            if sl.sflags.has(SlotFlags::HIST_WAIT) {
-                self.needs_rest(&sl, true, out);
-            } else {
-                self.push_decision(ti, OrderAction::Query, s, cause_seq, out);
-            }
-        }
+        self.query_or_reconcile(ti, s, t.conn_up, cause_seq, out);
         let id = OmsTimerReq::unknown_query_id(tix, s);
         let deadline = Tsc(now.0.saturating_add(self.p.query_interval));
         self.push_timer(OmsTimerKind::UnknownQuery, id, deadline, false, out);
@@ -325,8 +330,15 @@ impl Oms {
         let Some(sl) = self.tm(ti).and_then(|t| t.slots.get_mut(s as usize)) else {
             return;
         };
+        if sl.sflags.has(SlotFlags::REST_QUERY) {
+            return;
+        }
         sl.query_count = sl.query_count.saturating_add(1);
-        let stuck = sl.state == OrderState::Unknown && u16::from(sl.query_count) == u16::from(max) + 1;
+        let stuck = (sl.state == OrderState::Unknown || sl.sflags.has(SlotFlags::VERIFY))
+            && (sl.query_count > max || sl.query_count == u8::MAX);
+        if stuck {
+            sl.sflags.0 |= SlotFlags::REST_QUERY;
+        }
         let sl = *sl;
         if stuck {
             let v0 = u64::from(sl.venue.0) | u64::from(sl.account.0) << 8;
@@ -347,6 +359,7 @@ impl Oms {
                 ],
             );
             self.note(n, out);
+            self.needs_rest(&sl, false, out);
         }
     }
 }

@@ -1,5 +1,6 @@
 disk_free_block_pct = 15
-memory = 384
+memory = 576
+process_memory = 384
 parent_memory = 1376
 quota = 100
 weight = 50
