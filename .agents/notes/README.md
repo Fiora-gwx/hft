@@ -6,6 +6,10 @@
 
 [同时下单](implemented/feature/2026-10-14-cross-taker-simultaneous.md)取代[可执行价差](implemented/feature/2026-10-14-cross-taker-executable-spread.md)的 OnFill 时序决定。
 
+## M3-lite 决定(2026-10-16)
+
+[M3-lite](implemented/architecture/2026-10-15-m3-lite.md) 收窄两所测试网范围；负责人接受 2026-10-16 已完成运行，不要求连续 24 小时测试网长跑；正式上线门槛保持。
+
 ## M2-lite 决定(2026-10-14)
 
 [M2-lite](implemented/architecture/2026-10-14-m2-lite.md) 收窄 M2 范围,推迟功能的用例改为里程碑 `M9`(上线后);changes.md 的批量确认结论见[签字批次 1](implemented/process/2026-10-14-signoff-batch-1.md)。
