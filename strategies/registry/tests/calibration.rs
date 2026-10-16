@@ -70,6 +70,7 @@ fn calibration_shared_taker_signal_and_sizing() {
             max_quote_age_ms: 5,
             cooldown_ms: 100,
             max_hedge_failures: 3,
+            close_edge: Rate(0),
         };
         let got = signal(buy, sell, &p).map_or(Value::Null, |s| {
             json!({"buy_px":s.buy_px.0,"sell_px":s.sell_px.0,"qty":s.qty.0,
@@ -103,6 +104,7 @@ fn fields() -> CarryFields {
         max_leverage_x100: 300,
         max_cross: Rate(100_000),
         retry_ms: 1_000,
+        expected_basis_cost: Rate(0),
     }
 }
 
@@ -174,7 +176,7 @@ fn calibration_shared_carry_target_uses_real_strategy() {
             },
         )
         .unwrap();
-        let params = CarryParams::decode(&body, 1, &groups).unwrap();
+        let params = CarryParams::decode(&body, 2, &groups).unwrap();
         let rd = fixture_rd();
         let mut strategy = PortfolioCarry::new(
             StrategyInstance {

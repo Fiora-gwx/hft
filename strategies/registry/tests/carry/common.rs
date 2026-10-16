@@ -1,4 +1,4 @@
-//! Test fixture of `portfolio-carry`: a refdata with one spot venue (`V1`, inst `I1`) and one USDT perpetual
+//! Test fixture of `portfolio-carry`: one USDT perpetual venue (`V1`, inst `I1`) and one spot
 //! venue (`V2`, inst `I2`) on two exchanges, both BTC/USDT; account `A1` (Sim) bound to instance `S1`
 //! of this kind; group `G1` = (I1, I2).
 #![allow(dead_code)]
@@ -17,7 +17,7 @@ use hft_types::{
 };
 
 pub const V1: VenueId = VenueId::BINANCE_USDM;
-pub const V2: VenueId = VenueId::BITGET_UTA_USDT_FUT;
+pub const V2: VenueId = VenueId::BITGET_UTA_SPOT;
 pub const I1: InstId = InstId(1);
 pub const I2: InstId = InstId(2);
 pub const BTC: AssetId = AssetId(1);
@@ -154,9 +154,9 @@ pub fn refdata() -> RefData {
     }
     // Venue rows in ascending id order.
     venue(&mut b, V1, Exchange::Binance, InstKind::Perp);
-    venue(&mut b, V2, Exchange::Bitget, InstKind::Perp);
+    venue(&mut b, V2, Exchange::Bitget, InstKind::Spot);
     inst(&mut b, I1, V1, InstKind::Perp);
-    inst(&mut b, I2, V2, InstKind::Perp);
+    inst(&mut b, I2, V2, InstKind::Spot);
     b.instance(InstanceSpec {
         id: S1,
         kind_id: 1,

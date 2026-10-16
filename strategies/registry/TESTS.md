@@ -268,3 +268,5 @@ spec: README.md
 - 依赖方向:REG-015 与 SDK-001、SDK-002(`strategy_set!` 只出现在本 crate、hft-testkit 与 SDK 自己的 `tests/`)全部通过;引擎 crate(含 dev 依赖)与 hft-testkit 都不依赖本 crate。
 - 新增一个策略时,只有 `strategies/<new>`、本 crate 的列表(`strategy_set!` 一行与 kind_id 登记表一行)、`Cargo.toml` 与 schema 金样有 diff(本 crate 的 `tests/` 可同时加该策略的引擎级测试);由 SDK-004、SDK-007 的解耦门槛用例检查。
 - 各策略的引擎级场景、DST 与恢复测试放在本 crate 的 `tests/`,用例编号归各策略的 `TESTS.md`(如 latency-probe 的 LPR-065–LPR-071)。
+
+产品形态回归 `tests/product_shape.rs::product_shape_rejects_wrong_venue_market_order_asset_and_missing_reference` 验证默认禁用配置也检查 venue/市场/同 base/腿顺序及缺引用,覆盖 validate_params、create、on_params,拒绝后合法配置仍可应用。

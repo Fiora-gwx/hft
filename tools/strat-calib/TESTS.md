@@ -20,3 +20,5 @@
 | Parquet 真实 CLI、交集对齐、不向前填充、JSON/CSV/中文报告/数据哈希 | test_cli_parquet_outputs_and_no_future_fill |
 
 Python 验证命令为 `python -m pytest -q tools/strat-calib/tests`;Rust 为 `cargo test -p hft-strategy-registry --features cross-taker --test calibration -- --test-threads 2`。本地 Cargo 命令必须经操作者指定的 memguard,构建前检查提交内存;CI 的 fast-test 对工具源码或共享夹具的改动选择 registry,ops-py 独立运行 Python 测试和 ruff。两侧必须同时通过,不能只用 Python 自证与 Rust 一致。
+
+固定配对与只减仓方向见 test_shape_filter_and_no_reverse_open；预期基差成本与现货零资金费见 test_basis_cost_and_spot_zero_funding。期初配置与 S3 访问缺失是数据前提,不把合成测试当作真实样本校准。

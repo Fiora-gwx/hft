@@ -2,6 +2,8 @@
 
 Status: implemented
 
+产品范围与方向由 [2026-10-16 产品形态决定](2026-10-16-perp-spot-shape.md) 收窄；本页其余执行机制仍适用。
+
 2026-10-14 下单时序决定由[同时下单决定](2026-10-14-cross-taker-simultaneous.md)取代;其余信号与限额取舍保留。
 
 ## Problem

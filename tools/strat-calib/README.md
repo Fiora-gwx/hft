@@ -28,7 +28,7 @@ status: impl
 
 `example.json` 是明确的研究假设,费率不是交易所当前费率声明。费率按 `exchange:market` 配置,可用完整 `exchange:market:symbol` 覆盖;单位 bps,负费率按零计收入。策略参数名称、整数单位与实际参数一致,权威定义归策略 README。`taker` 的研究初值启用、min_edge=2 bps、每腿 slip=1 bps、单笔 100/持仓 500;与未配置时禁用的生产默认不同。carry 使用启用的暂定参数。配置缺少费率、参数越界、未知字段会拒绝加载。
 
-`metadata` 按完整 instrument key 映射 `px_exp/qty_exp/tick/lot/min_qty/max_qty/min_notional`,单位与 InstHot 相同。缺失时必须显式提供 `assumed_metadata`,报告标记假设;不得将推测步长用于生产。`capital_quote` 与 `leverage_x100` 按交易所配置,缺失资金/杠杆阻止 carry 开仓。`initial_position_qty` 是按完整 instrument key 的人类单位库存,默认零,现货不可裸卖。`symbols` 是 canonical_id 列表,`pair_allowlist` 是 `leg0|leg1` 完整键列表,不配置则枚举跨所组合;有永续时第 0 腿为永续。相同交易所不配对。
+`metadata` 按完整 instrument key 映射 `px_exp/qty_exp/tick/lot/min_qty/max_qty/min_notional`,单位与 InstHot 相同。缺失时必须显式提供 `assumed_metadata`,报告标记假设;不得将推测步长用于生产。`capital_quote` 与 `leverage_x100` 按交易所配置,缺失资金/杠杆阻止 carry 开仓。`initial_position_qty` 是按完整 instrument key 的人类单位库存,默认零,现货不可裸卖。`symbols` 是 canonical_id 列表,`pair_allowlist` 是 `leg0|leg1` 完整键列表,不配置则只枚举 Binance linear_perpetual（第 0 腿）与 Bitget spot（第 1 腿）的同 symbol USDT 组合。显式 allowlist 包含其他形态时拒绝配置。
 
 Parquet 必需列为 `exchange,market,symbol,canonical_id,sec,last_ns,bid,ask,bid_base,ask_base`。market 仅为 `spot/linear_perpetual`,sec 是 UTC Unix 秒,last_ns 是该秒内最后观察的 UTC 纳秒,深度为基础资产数量而非合约张数。重复 instrument/second、空列、错位时间戳拒绝处理。只 join 同一秒的双方记录,不填充。`max_price_ratio`（示例 1.1）排除中位数倍率异常组合与单行异常;这只是数据质量检查,不是合约等价性证明。
 
@@ -48,17 +48,17 @@ Parquet 必需列为 `exchange,market,symbol,canonical_id,sec,last_ns,bid,ask,bi
 
 同 inst/kind/ts_ns 重复则拒绝。预测按可见时刻更新,实际结算只记账不参与信号,同刻先结算再下单。资金费序列记录预测更新时的净年化和新鲜度。缺少任一永续腿预测时不模拟 carry,不会把缺失当成零。缺失实际结算记录不能证明零成本,输出 `funding_complete=false`。
 
-输出 `summary.json` 包含参数、数据/源文件 SHA-256、缺陷/排除计数、方向分位数、阈值次数、费率敏感性及两策略结果;`trades.csv` 是假设成交,`funding_series.csv` 是预测事件序列,`report.md` 是中文说明及每标的研究范围。每个 pair 为独立钱包情景,资本份额 shares=1,不能把重叠 pair 的收益相加。`threshold_grid_bps` 给出严格大于阈值的采样次数;实际信号的等于阈值也可触发。`fee_scenarios_bps` 是两腿相同费率的展示敏感性,不是实际账户档位。
+输出 `summary.json` 包含参数、数据/源文件 SHA-256、缺陷/排除计数、方向分位数、entry_basis_bps/exit_basis_bps、只计合法开仓方向的阈值次数、费率敏感性及两策略结果;`trades.csv` 是假设成交,`funding_series.csv` 是预测事件序列,`report.md` 是中文说明及每标的研究范围。每个 pair 为独立钱包情景,资本份额 shares=1,不能把重叠 pair 的收益相加。`threshold_grid_bps` 给出严格大于阈值的采样次数;开仓阈值严格大于,平仓阈值包含等号。`fee_scenarios_bps` 是两腿相同费率的展示敏感性,不是实际账户档位。
 
 ## 实现说明
 
 `core.py` 使用整数复制真实策略的净边、限价、共同 lot 和 sizing。`tests/fixtures/signals.json` 同时由 Python 与 [registry 对照测试](../../strategies/registry/tests/calibration.rs)读取;Rust 对照直接调用 cross-taker 信号、portfolio-carry 年化,并驱动真实 carry Strategy 验证资本/杠杆与目标数量。真实参数与进程模型的归属见延伸阅读。
 
-`data.py` 按标的一次只读一个过滤后的 Arrow 表,使用单线程解码。`simulation.py` 在同秒记录的较晚 last_ns 计算机会,只在保留观察点评估,不制造秒内事件。套利选可行方向中净边最高者,平手买 leg 0;保留冷却和实际模拟持仓,遇 cap 停止,双腿减仓不穿零。现货库存来自显式初始库存及模拟成交。
+`data.py` 按标的一次只读一个过滤后的 Arrow 表,使用单线程解码。`simulation.py` 在同秒记录的较晚 last_ns 计算机会,只在保留观察点评估,不制造秒内事件。套利仅买 leg 1、卖 leg 0 开仓,净边严格 > min_edge;反向只在净边 >= close_edge 时平已持有仓位,优先减仓;保留冷却和实际模拟持仓,遇 cap 停止,双腿减仓不穿零。现货库存来自显式初始库存及模拟成交。
 
 carry 保留已发目标并按顶档深度切片,预测过期时持有已对冲仓位,收益衰减或禁用时退出,结算前窗口与 retry 生效。数量受静态资金、杠杆事实假设、lot 与最小订单约束。跨事件变化的保证金、引擎风险价格带和市场状态不在模型中;使用 ask 代替未知 mark 计算资金上限。模拟成交固定为两腿 IOC 在本次限价同时全部成交,费用按计价币保守向上取整。
 
-开仓现金流不是利润。结果单列成交现金、尚存仓位和期末立即平仓估值,期末再扣两腿费用和 slip。套利持仓资金费未计;carry 只计显式实际结算与 borrow_apr 持有成本。每日 carry 年化扣往返两腿费用、四次 max_cross 和借贷/机会成本,分母为单腿名义金额;双钱包全额备资的资本收益通常约减半。方向、最小订单等决策用整数;分位数/敏感性展示用 float64,候选订单再过整数信号。
+开仓现金流不是利润。结果单列成交现金、尚存仓位和期末立即平仓估值,期末再扣两腿费用和 slip。套利持仓资金费未计;carry 只计显式实际结算与 borrow_apr 持有成本。每日 carry 年化扣往返两腿费用、四次 max_cross、expected_basis_cost 和借贷/机会成本,分母为单腿名义金额;双钱包全额备资的资本收益通常约减半。方向、最小订单等决策用整数;分位数/敏感性展示用 float64,候选订单再过整数信号。
 
 ## 延迟与资源契约
 
@@ -79,6 +79,8 @@ Python 3.12+、NumPy、pandas、PyArrow;测试 pytest。工具不增加 Rust 依
 - [journal 回放](../../apps/replayer/README.md)与[模拟账户](../../crates/hft-sim/README.md)
 
 ## 已知限制与后续工作
+
+S3 访问尚缺,本工具没有抓取或推测缺失历史数据。需要同步的 Binance 永续 bid/ask/基础币深度与 Bitget 现货 bid/ask/基础币深度（同资产 USDT）,永续逐次可见预测费率/周期/下次结算时间、实际结算费率与 mark,以及两腿 tick/lot/最小名义、账户 taker 费用与可用资金。现货不需要资金费文件。expected_basis_cost 是 fee_horizon_ms 内不利基差变动的人工假设,默认 0,示例 10 bps;示例不构成标定结论。最大持有期限和基差止损保持关闭。
 
 旧系统逐秒行情不是 hft journal,没有账户、连接、时钟可信状态、订单回报、参数事件及完整 refdata,不能送入确定性验证路径并声称重现了当时决策。Python 模型不模拟 Unknown、断腿/Reverse、失败 halt、清算、公告和风险干预。`max_hedge_failures` 被记录但无拒单事件时不触发,不提供真实双腿成功率。
 

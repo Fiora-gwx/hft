@@ -40,7 +40,7 @@ fn spb() -> Vec<u8> {
         account: A1,
         kind_id: 1,
         schema_id: 1,
-        schema_ver: 1,
+        schema_ver: 2,
         source: ParamSource::Manual,
         _pad: 0,
         n_groups: 1,
@@ -49,7 +49,7 @@ fn spb() -> Vec<u8> {
         generated_at_ns: UTC0,
         body_len: body.len() as u32,
         group_ctr_hwm: 1,
-        schema_digest: schema_digest(&PortfolioCarry::DESC, 1),
+        schema_digest: schema_digest(&PortfolioCarry::DESC, 2),
     };
     let mut bytes = header.as_bytes().to_vec();
     bytes.extend_from_slice(g.as_bytes());
@@ -178,6 +178,9 @@ fn quote_depth(r: &mut SeqRig<Strategies>, i: InstId, bid: i64, ask: i64) {
     );
 }
 fn rate(r: &mut SeqRig<Strategies>, i: InstId, amount: i64, next: i64) {
+    if i == I2 {
+        return;
+    }
     r.push_body(
         RingId::Md(vi(venue(i))),
         &Funding {
@@ -219,21 +222,23 @@ fn ready(r: &mut SeqRig<Strategies>) {
         let mut config = AccountConfigReportHdr::new_zeroed();
         config.venue = v;
         config.account = A1;
-        config.position_mode = 2;
-        config.margin_mode = 2;
+        config.position_mode = if v == V1 { 2 } else { 1 };
+        config.margin_mode = if v == V1 { 2 } else { 1 };
         config.multi_asset = 1;
         config.source = 1;
-        config.n_lev = 1;
+        config.n_lev = u16::from(v == V1);
         config.rx_tsc = Tsc(r.tsc());
         let mut body = config.as_bytes().to_vec();
-        body.extend_from_slice(
-            LeverageItem {
-                inst: i,
-                _pad: 0,
-                leverage: Rate(2_000_000_000),
-            }
-            .as_bytes(),
-        );
+        if v == V1 {
+            body.extend_from_slice(
+                LeverageItem {
+                    inst: i,
+                    _pad: 0,
+                    leverage: Rate(2_000_000_000),
+                }
+                .as_bytes(),
+            );
+        }
         r.push(RingId::RepSim, EventKind::ACCOUNT_CONFIG_REPORT, body);
         let mut recon = ReconcileReport::new_zeroed();
         recon.report_id = u64::from(v.0);
@@ -330,8 +335,8 @@ fn fill_orders(r: &mut SeqRig<Strategies>, cursor: &mut usize) -> Vec<GwCmd> {
                         hw_rx_ns: 0,
                         rx_tsc: r.tsc(),
                         avg_px: c.px,
-                        cash_qty: Qty(0),
-                        cash_sum: Qty(0),
+                        cash_qty: spot_cash(c, if fill { c.qty } else { Qty(0) }),
+                        cash_sum: spot_cash(c, if fill { c.qty } else { Qty(0) }),
                         trade_id: 0,
                     },
                 );
@@ -386,6 +391,14 @@ fn dispatch_pair(r: &mut SeqRig<Strategies>, cursor: usize) -> [GwCmd; 2] {
     [out[0], out[1]]
 }
 
+fn spot_cash(c: GwCmd, qty: Qty) -> Qty {
+    Qty(if c.inst == I2 {
+        (i128::from(c.px.0) * i128::from(qty.0) / 10_000) as i64
+    } else {
+        0
+    })
+}
+
 fn terminal(r: &mut SeqRig<Strategies>, c: GwCmd, qty: Qty, query: bool) {
     let what = if query {
         OrderEventKind::QueryResult
@@ -422,8 +435,8 @@ fn terminal(r: &mut SeqRig<Strategies>, c: GwCmd, qty: Qty, query: bool) {
             hw_rx_ns: 0,
             rx_tsc: r.tsc(),
             avg_px: c.px,
-            cash_qty: Qty(0),
-            cash_sum: Qty(0),
+            cash_qty: spot_cash(c, qty),
+            cash_sum: spot_cash(c, qty),
             trade_id: 0,
         },
     );
@@ -455,36 +468,28 @@ fn carry_010_linked_entry_funding_and_edge_decay_exit() {
     check_simultaneous_slice_uses_both_sides_depth_and_caps();
     check_simultaneous_fault_seeds_repair_and_replay();
     for seed in 0..4 {
-        for reverse in [false, true] {
-            scenario(seed, reverse);
-        }
+        scenario(seed);
     }
 }
 
-fn scenario(seed: i64, reverse: bool) {
+fn scenario(seed: i64) {
     let mut r = rig();
     ready(&mut r);
     let mut cursor = r.out().len();
     let high = 2_000_000 + seed * 100_000;
-    rate(&mut r, I1, if reverse { 200_000 } else { high }, SETTLE);
-    rate(&mut r, I2, if reverse { high } else { 200_000 }, SETTLE);
+    rate(&mut r, I1, high, SETTLE);
+    rate(&mut r, I2, 200_000, SETTLE);
     let pair = dispatch_pair(&mut r, cursor);
     let entry = fill_orders(&mut r, &mut cursor);
     assert_eq!(entry.len(), 2, "out={:?}", r.out());
-    assert_eq!(
-        (pair[0].inst, pair[0].side),
-        (I1, if reverse { Side::Buy } else { Side::Sell })
-    );
-    assert_eq!(
-        (pair[1].inst, pair[1].side),
-        (I2, if reverse { Side::Sell } else { Side::Buy })
-    );
+    assert_eq!((pair[0].inst, pair[0].side), (I1, Side::Sell));
+    assert_eq!((pair[1].inst, pair[1].side), (I2, Side::Buy));
     assert_eq!(entry[0].qty, entry[1].qty);
     let pos = r.ledger().group_pos(A1, G1);
-    assert_eq!(pos.legs[0].qty.0 > 0, reverse);
+    assert!(pos.legs[0].qty.0 < 0);
     assert_eq!(pos.legs[0].qty.0, -pos.legs[1].qty.0);
     r.set_tsc(120_000_000_000);
-    let actual = Notional(if reverse { -123_456 } else { 123_456 });
+    let actual = Notional(123_456);
     let settlement = FundingSettle {
         venue: V1,
         account: A1,
@@ -522,29 +527,27 @@ fn scenario(seed: i64, reverse: bool) {
 }
 
 fn check_simultaneous_slice_uses_both_sides_depth_and_caps() {
-    for reverse in [false, true] {
-        // Make each venue's executable side the bottleneck in turn. The other side is a decoy.
-        for thin in [I1, I2] {
-            let mut r = rig();
-            ready(&mut r);
-            r.set_tsc(1_001_000_000); // A new update_id makes the changed depth authoritative.
-            for i in [I1, I2] {
-                let depth = if i == thin { 20_000_000 } else { 30_000_000 };
-                let buy = (i == I1) == reverse;
-                quote_depth(
-                    &mut r,
-                    i,
-                    if buy { 1_000 } else { depth },
-                    if buy { depth } else { 1_000 },
-                );
-            }
-            let cursor = r.out().len();
-            rate(&mut r, I1, if reverse { 200_000 } else { 2_000_000 }, SETTLE);
-            rate(&mut r, I2, if reverse { 2_000_000 } else { 200_000 }, SETTLE);
-            let pair = dispatch_pair(&mut r, cursor);
-            assert_eq!(pair[0].qty, Qty(20_000_000));
-            verify(&r);
+    // Make each venue's executable side the bottleneck in turn. The other side is a decoy.
+    for thin in [I1, I2] {
+        let mut r = rig();
+        ready(&mut r);
+        r.set_tsc(1_001_000_000); // A new update_id makes the changed depth authoritative.
+        for i in [I1, I2] {
+            let depth = if i == thin { 20_000_000 } else { 30_000_000 };
+            let buy = i == I2;
+            quote_depth(
+                &mut r,
+                i,
+                if buy { 1_000 } else { depth },
+                if buy { depth } else { 1_000 },
+            );
         }
+        let cursor = r.out().len();
+        rate(&mut r, I1, 2_000_000, SETTLE);
+        rate(&mut r, I2, 200_000, SETTLE);
+        let pair = dispatch_pair(&mut r, cursor);
+        assert_eq!(pair[0].qty, Qty(20_000_000));
+        verify(&r);
     }
 }
 
@@ -558,9 +561,8 @@ fn check_simultaneous_fault_seeds_repair_and_replay() {
 fn fault_scenario(seed: usize) -> Vec<u8> {
     let mut r = rig();
     ready(&mut r);
-    let reverse = !seed.is_multiple_of(2);
-    rate(&mut r, I1, if reverse { 200_000 } else { 2_000_000 }, SETTLE);
-    rate(&mut r, I2, if reverse { 2_000_000 } else { 200_000 }, SETTLE);
+    rate(&mut r, I1, 2_000_000, SETTLE);
+    rate(&mut r, I2, 200_000, SETTLE);
     let pair = dispatch_pair(&mut r, 0);
     let full = seed / 3 % 2;
     let other = 1 - full;

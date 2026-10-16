@@ -19,7 +19,7 @@ from .core import (
     qty_for_notional,
     signal,
 )
-from .data import FundingEvent, books, raw
+from .data import FundingEvent, books, raw, supported_pair
 
 
 def quantiles(values) -> dict:
@@ -103,17 +103,18 @@ def clean_pair(d, max_price_ratio):
 
 
 def taker_simulate(d, metas, fees, p: TakerParams, positions=(0, 0), thresholds=(1, 2, 3, 5, 10)):
+    if metas[0].spot or not metas[1].spot:
+        raise ValueError("taker requires leg 0 perpetual / leg 1 spot")
     ab, ba = price_edges(d, metas, fees, p.slip)
-    best = np.maximum(ab, ba)
+    best = ba
     age_ok = np.abs(d.last_ns_a.to_numpy() - d.last_ns_b.to_numpy()) < p.max_quote_age_ms * 1_000_000
-    caps = np.maximum(
-        np.minimum(d.ask_base_a, d.bid_base_b) * np.minimum(d.ask_a, d.bid_b),
-        np.minimum(d.ask_base_b, d.bid_base_a) * np.minimum(d.ask_b, d.bid_a),
-    )
+    caps = np.minimum(d.ask_base_b, d.bid_base_a) * np.minimum(d.ask_b, d.bid_a)
     out = {
         "observations": len(d),
         "age_eligible": int(age_ok.sum()),
         "net_edge_bps": quantiles(best),
+        "entry_basis_bps": quantiles((d.bid_a / d.ask_b - 1) * 10000),
+        "exit_basis_bps": quantiles((d.bid_b / d.ask_a - 1) * 10000),
         "buy0_edge_bps": quantiles(ab),
         "buy1_edge_bps": quantiles(ba),
         "top_capacity_quote": quantiles(caps),
@@ -122,7 +123,7 @@ def taker_simulate(d, metas, fees, p: TakerParams, positions=(0, 0), thresholds=
         "at_or_above_threshold": int((best >= p.min_edge / 100000).sum()),
         "parameters": asdict(p),
     }
-    candidates = age_ok & (best >= p.min_edge / 100000 - 1e-6)
+    candidates = age_ok  # Closing thresholds may be below the opening threshold.
     pos, cash, last_ns, trades = list(positions), 0, None, []
     first = next(books(d.iloc[:1], metas))
     initial_value = sum(
@@ -144,11 +145,11 @@ def taker_simulate(d, metas, fees, p: TakerParams, positions=(0, 0), thresholds=
                 p,
                 spot_free=max(0, pos[j]),
             )
-            if s:
+            if s and ((i == 0 and s.reducing) or (i == 1 and not s.reducing and pos[0] <= 0 <= pos[1])):
                 signals.append((i, j, s))
         if not signals:
             continue
-        i, j, s = max(signals, key=lambda x: (x[2].edge, -x[0]))
+        i, j, s = max(signals, key=lambda x: (x[2].reducing, x[2].edge))
         change = cash_delta(s.qty, s.buy_px, metas[i], fees[i]) + cash_delta(
             -s.qty, s.sell_px, metas[j], fees[j]
         )
@@ -191,13 +192,15 @@ def carry_daily(a, b, daily, fees, p: CarryParams, capacity, horizons):
         venue, market, symbol = inst.split(":")
         return 0.0 if market == "spot" else daily.get((venue, symbol))
 
+    if not supported_pair(a, b):
+        return {"status": "unsupported product shape"}
     ra, rb = rate(a), rate(b)
     if ra is None or rb is None or a.split(":")[1] == "spot":
         return {"status": "missing funding or unsupported spot/spot"}
     difference = ra - rb
-    direction = -1 if b.split(":")[1] == "spot" or difference >= 0 else 1
+    direction = -1
     income = difference * -direction
-    round_trip_bps = (2 * sum(max(0, f) for f in fees) + 4 * p.max_cross) / 100000
+    round_trip_bps = (2 * sum(max(0, f) for f in fees) + 4 * p.max_cross + p.expected_basis_cost) / 100000
     net = (
         income * 365 / 10000 - round_trip_bps / 10000 * YEAR_S * 1000 / p.fee_horizon_ms - p.borrow_apr / ONE
     )
@@ -235,7 +238,9 @@ def carry_simulate(
     Decisions/slices occur on retained paired BBO observations, not unobserved timer ticks.
     Marks used for sizing are BBO ask proxies, clearly labelled in the report.
     """
-    if metas[0].spot or not funding[0] or (not metas[1].spot and not funding[1]):
+    if metas[0].spot or not metas[1].spot:
+        raise ValueError("carry requires leg 0 perpetual / leg 1 spot")
+    if not funding[0]:
         return {"status": "unavailable: timestamped predictions/settlements required"}, [], []
     if not any(e.kind == "prediction" for e in funding[0]):
         return {"status": "unavailable: no timestamped predictions"}, [], []
@@ -268,19 +273,11 @@ def carry_simulate(
         fresh = fa is not None and fa.fresh(now, p.funding_max_age_ms)
         fresh = fresh and (metas[1].spot or (fb is not None and fb.fresh(now, p.funding_max_age_ms)))
         edge = None
-        direction = 1 if pos[0] > 0 else -1
+        direction = -1
         if fresh:
             fees_sum = sum(max(0, f) for f in fees)
             short0 = carry_edge(fa, fb, fees_sum, p, -1)
-            short1 = carry_edge(fa, fb, fees_sum, p, 1)
-            if not pos[0]:
-                # Rust Option ordering: None sorts below Some; both missing tie at short leg 0.
-                direction = (
-                    -1
-                    if metas[1].spot or (short0 is not None, short0 or 0) >= (short1 is not None, short1 or 0)
-                    else 1
-                )
-            edge = short0 if direction < 0 else short1
+            edge = short0
             if edge is None:
                 edge = -(2**63)
         if changed:

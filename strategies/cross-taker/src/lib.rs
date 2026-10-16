@@ -25,7 +25,7 @@ impl Strategy for CrossTaker {
     const DESC: StrategyDesc = StrategyDesc {
         name: "cross-taker",
         kind_id: 3,
-        version: 1,
+        version: 2,
         non_prod_only: false,
         schema: &XtParams::SCHEMA,
         notes: &desc::NOTES,

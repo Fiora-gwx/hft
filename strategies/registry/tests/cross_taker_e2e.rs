@@ -27,29 +27,33 @@ fn world() -> WorldSpec {
     w.groups.truncate(1);
     w.strategies.truncate(1);
     // Use the configured spot and USDT-perpetual venues, without venue branches in the strategy.
-    let other = VenueId(10);
+    let old_spot = w.insts.iter().find(|i| i.id == S1).unwrap().venue;
+    let remap = |id: VenueId| {
+        if id == VP {
+            VenueId(1)
+        } else if id == old_spot {
+            VenueId(11)
+        } else {
+            id
+        }
+    };
     for v in &mut w.venues {
-        if v.id == VP {
-            v.id = other;
-        }
+        v.id = remap(v.id);
     }
+    w.venues.sort_by_key(|v| v.id.0);
     for i in &mut w.insts {
-        if i.venue == VP {
-            i.venue = other;
-        }
+        i.venue = remap(i.venue);
     }
     for a in &mut w.accounts {
         for v in &mut a.venues {
-            if *v == VP {
-                *v = other;
-            }
+            *v = remap(*v);
         }
         for (v, _, _) in &mut a.balances {
-            if *v == VP {
-                *v = other;
-            }
+            *v = remap(*v);
         }
     }
+    w.groups[0].first = P1;
+    w.groups[0].second = S1;
     let raw = RawParams {
         defaults: vec![
             1,
@@ -61,6 +65,7 @@ fn world() -> WorldSpec {
             1_000,
             10,
             3,
+            0,
         ],
         overrides: vec![],
     };
@@ -178,6 +183,16 @@ impl Rig {
 }
 
 #[test]
+fn cross_taker_reverse_spread_never_opens_spot_short() {
+    let mut r = Rig::new(&world());
+    r.feed(S1, 606_000_000, 606_001_000, 200_000_000);
+    r.feed(P1, 599_999_900, 600_000_000, 500_000_000);
+    assert!(r.sent.is_empty());
+    assert_eq!(r.positions(), (0, 0));
+    assert!(r.sut.verify_journal().unwrap().is_some());
+}
+
+#[test]
 fn cross_taker_trades_both_legs_obeys_caps_and_replays() {
     let w = world();
     let mut r = Rig::new(&w);
@@ -272,7 +287,7 @@ fn cross_taker_dst_reverses_rejected_pair_and_is_deterministic() {
         cfg.actors.ctl = false;
         cfg.actors.advisor = false;
         cfg.scripted
-            .push((1, Fault::SecondLegReject { venue: VenueId(10) }));
+            .push((1, Fault::SecondLegReject { venue: VenueId(1) }));
         cfg.rerun = RerunPolicy::Always;
         cfg.rebuild_every = 50;
         let r = run_record::<SeqSut<Strategies>>(&cfg);
@@ -314,7 +329,7 @@ fn mock() -> (
     let leg = |i| LegDef {
         inst: i,
         venue: rd.inst(i).venue,
-        kind: if i == S1 { 1 } else { 2 },
+        kind: LegDef::CEX,
         _pad: 0,
         route: 0,
         _pad2: 0,
@@ -324,11 +339,11 @@ fn mock() -> (
         asset: rd.inst(S1).asset,
         n_legs: 2,
         open_allowed: 1,
-        legs: [leg(S1), leg(P1), LegDef::new_zeroed(), LegDef::new_zeroed()],
+        legs: [leg(P1), leg(S1), LegDef::new_zeroed(), LegDef::new_zeroed()],
         _rsv: 0,
     };
     let groups = GroupTable::new(&[g], 4);
-    let p = XtParams::decode(&w.strategies[0].params, 1, &groups).unwrap();
+    let p = XtParams::decode(&w.strategies[0].params, 2, &groups).unwrap();
     let strategy = cross_taker::CrossTaker::new(
         StrategyInstance {
             strategy: StrategyId(1),

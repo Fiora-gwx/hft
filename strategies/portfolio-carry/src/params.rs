@@ -2,7 +2,7 @@
 use hft_strategy_sdk::prelude::*;
 
 hft_strategy_sdk::define_params! {
-    pub struct CarryParams(schema_id = 1, version = 1, fields = CarryFields) {
+    pub struct CarryParams(schema_id = 1, version = 2, fields = CarryFields) {
         /// Enable new positions; false exits existing positions.
         enabled: Bool [default = 0, per_group, manual_only, relax = Up],
         /// Annualised net edge required to enter.
@@ -29,6 +29,8 @@ hft_strategy_sdk::define_params! {
         max_cross: Rate [min = 0, max = 10_000_000, default = 100_000, per_group, relax = Up],
         /// Evaluation timer and target retry interval, measured in engine time.
         retry_ms: DurationMs [min = 100, max = 60_000, default = 1_000],
+        /// Expected adverse basis change over fee_horizon_ms, charged as a return before annualising.
+        expected_basis_cost: Rate [since = 2, min = 0, max = 100_000_000, default = 0, per_group, manual_only],
     }
 }
 
@@ -44,16 +46,20 @@ impl CarryParams {
             {
                 return Err(bad(1));
             }
-            let a = rd.inst(g.legs[0].inst);
-            let b = rd.inst(g.legs[1].inst);
+            let a = rd.try_inst(g.legs[0].inst).ok_or(bad(2))?;
+            let b = rd.try_inst(g.legs[1].inst).ok_or(bad(2))?;
             if rd.caps(a.venue).market != MarketKind::LinearPerp
-                || !matches!(rd.caps(b.venue).market, MarketKind::Spot | MarketKind::LinearPerp)
+                || rd.caps(b.venue).market != MarketKind::Spot
+                // Fixed deployment allowlist (protocol IDs), separate from execution capabilities.
+                || a.venue != VenueId(1) || b.venue != VenueId(11)
+                || rd.refdata().asset(a.quote).name.as_ref() != "USDT"
             {
                 return Err(bad(2));
             }
             if a.asset != g.asset
                 || b.asset != g.asset
                 || a.qty_exp != b.qty_exp
+                || a.px_exp != b.px_exp
                 || a.quote != b.quote
                 || a.venue != g.legs[0].venue
                 || b.venue != g.legs[1].venue

@@ -2,7 +2,7 @@
 use hft_strategy_sdk::prelude::*;
 
 hft_strategy_sdk::define_params! {
-    pub struct XtParams(schema_id = 3, version = 1, fields = XtFields) {
+    pub struct XtParams(schema_id = 3, version = 2, fields = XtFields) {
         /// Explicit operator enable; provisional default is disabled.
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// Required net return after both taker fees and price allowances; must be set before enabling.
@@ -21,6 +21,8 @@ hft_strategy_sdk::define_params! {
         cooldown_ms: DurationMs [min = 0, max = 3_600_000, default = 100, per_group, relax = Down],
         /// Consecutive hedge failures before requesting a group halt; provisional three.
         max_hedge_failures: Count [min = 1, max = 100, default = 3, per_group, relax = Up],
+        /// Minimum executable net return for closing held inventory; provisional zero.
+        close_edge: Rate [since = 2, min = -100_000_000, max = 100_000_000, default = 0, per_group, relax = Down],
     }
 }
 
@@ -28,7 +30,12 @@ impl XtParams {
     pub fn check(&self, groups: &GroupTable, rd: &RefView<'_>) -> Result<(), ParamError> {
         for (gix, g) in groups.iter() {
             let err = |code| ParamError::GroupShape { gix, code };
-            if g.n_legs != 2 {
+            if g.n_legs != 2
+                || g.legs
+                    .iter()
+                    .take(2)
+                    .any(|l| l.kind != LegDef::CEX || l.route != 0)
+            {
                 return Err(err(1));
             }
             let [a, b, ..] = g.legs;
@@ -45,6 +52,16 @@ impl XtParams {
                 || ah.qty_exp != bh.qty_exp
             {
                 return Err(err(3));
+            }
+            // Fixed deployment allowlist: protocol VenueId 1 is the short perpetual,
+            // 11 is the long spot. See the owner product-shape decision, not venue behaviour.
+            if a.venue != VenueId(1)
+                || b.venue != VenueId(11)
+                || rd.caps(a.venue).market != MarketKind::LinearPerp
+                || rd.caps(b.venue).market != MarketKind::Spot
+                || rd.refdata().asset(ah.quote).name.as_ref() != "USDT"
+            {
+                return Err(err(6));
             }
             for l in [a, b] {
                 let h = rd.inst(l.inst);

@@ -8,10 +8,12 @@
 | 两腿限价固定于观察 BBO,slip 边界与 tick 舍入 | signal_fixes_both_limits_within_observed_slippage |
 | 双侧顶档、单笔 cap、共同 lot | signal_sizes_both_depths_caps_and_common_lot |
 | 逐腿库存 cap、现货不裸卖 | signal_caps_each_position_and_never_shorts_spot |
+| 开仓阈值严格大于、平仓阈值含等号、卖量排除 baseline | signal_open_is_strict_close_inclusive_and_spot_sales_exclude_baseline |
 | 超限仅减少、Reduce 不穿零 | signal_reduction_stops_at_zero_even_above_position_cap |
 | 坏盘口、零价、溢出 | signal_rejects_bad_books_and_arithmetic_overflow |
 | 精确最小名义、资产指数 | signal_accepts_exact_minimum_notional_and_all_asset_exponents |
 | 同一事件先发双腿、实际成交、cap 停手、反向清仓、验证回放 | cross_taker_trades_both_legs_obeys_caps_and_replays |
+| 空仓遇到反向价差不借币、不卖空现货、不发订单且回放一致 | cross_taker_reverse_spread_never_opens_spot_short |
 | 链接第二腿超过 HEDGE_LIMIT 时第一腿不发出 | cross_taker_link_respects_engine_hedge_limit_before_first_leg |
 | 三个 DST 种子、实际拒单后 Reverse 平掉超额腿、全不变量与重跑确定性 | cross_taker_dst_reverses_rejected_pair_and_is_deterministic |
 | 未命中不改快照且不阻止下一次机会、年龄边界、健康 pong、断连、模式、Unknown、恢复冷却 | cross_taker_guards_age_connections_modes_unknown_and_cooldown |
@@ -22,3 +24,5 @@ signal_* 在 tests/signal.rs;cross_taker_* 在 registry/tests/cross_taker_e2e.rs
 短场景与三个 DST 种子不替代 docs/testing.md 上线门槛。真实行情长期模拟、大规模故障 DST、参考机延迟与资金费持有成本校准仍待完成。
 
 延迟验收由 benches/on_event.rs 的 on_event 基准覆盖未命中、开火、Exec Broken、Risk HedgeBroken,每次恢复初态后计时真实策略入口。SDK 的 slow_update、advice、target_set 无对应功能,以 not-applicable.toml 明确登记,不得拿空操作样本作为验收。基准登记与上限见 README;CI 只验证编译和运行。
+
+两策略加载、新建和 SetParams 的固定 venue/市场/腿顺序及无效引用拒绝见 registry/tests/product_shape.rs。实际策略只允许空第 0 腿永续、多第 1 腿现货;反向可执行价差只减少已持有仓位。

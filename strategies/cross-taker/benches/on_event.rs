@@ -27,34 +27,38 @@ fn fixture() -> (CrossTaker, MockViews) {
     w.accounts.truncate(1);
     w.groups.truncate(1);
     w.strategies.truncate(1);
-    let other = VenueId(10);
+    let old_spot = w.insts.iter().find(|i| i.id == S1).unwrap().venue;
+    let remap = |id: VenueId| {
+        if id == VP {
+            VenueId(1)
+        } else if id == old_spot {
+            VenueId(11)
+        } else {
+            id
+        }
+    };
     for v in &mut w.venues {
-        if v.id == VP {
-            v.id = other;
-        }
+        v.id = remap(v.id);
     }
+    w.venues.sort_by_key(|v| v.id.0);
     for i in &mut w.insts {
-        if i.venue == VP {
-            i.venue = other;
-        }
+        i.venue = remap(i.venue);
     }
     for a in &mut w.accounts {
         for v in &mut a.venues {
-            if *v == VP {
-                *v = other;
-            }
+            *v = remap(*v);
         }
         for (v, _, _) in &mut a.balances {
-            if *v == VP {
-                *v = other;
-            }
+            *v = remap(*v);
         }
     }
+    w.groups[0].first = P1;
+    w.groups[0].second = S1;
     let rd = build::load_refdata(&build::refdata_blob(&w, false).unwrap()).unwrap();
     let leg = |i| LegDef {
         inst: i,
         venue: rd.inst(i).venue,
-        kind: if i == S1 { 1 } else { 2 },
+        kind: LegDef::CEX,
         _pad: 0,
         route: 0,
         _pad2: 0,
@@ -65,7 +69,7 @@ fn fixture() -> (CrossTaker, MockViews) {
             asset: rd.inst(S1).asset,
             n_legs: 2,
             open_allowed: 1,
-            legs: [leg(S1), leg(P1), LegDef::new_zeroed(), LegDef::new_zeroed()],
+            legs: [leg(P1), leg(S1), LegDef::new_zeroed(), LegDef::new_zeroed()],
             _rsv: 0,
         }],
         4,
@@ -81,11 +85,12 @@ fn fixture() -> (CrossTaker, MockViews) {
             1000,
             10,
             3,
+            0,
         ],
         overrides: vec![],
     };
     let bytes = encode_body(&XtParams::SCHEMA, 1, &raw).unwrap();
-    let params = XtParams::decode(&bytes, 1, &groups).unwrap();
+    let params = XtParams::decode(&bytes, 2, &groups).unwrap();
     let strategy = CrossTaker::new(
         StrategyInstance {
             strategy: StrategyId(1),

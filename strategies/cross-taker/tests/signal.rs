@@ -13,6 +13,7 @@ fn params() -> XtFields {
         max_quote_age_ms: 5,
         cooldown_ms: 100,
         max_hedge_failures: 3,
+        close_edge: Rate(0),
     }
 }
 fn leg(bid: i64, ask: i64) -> LegInput {
@@ -57,6 +58,7 @@ fn signal_deducts_both_fee_notionals_and_requires_edge() {
 fn signal_uncrossed_touches_cannot_have_positive_net_edge() {
     let mut f = params();
     f.min_edge = Rate(1);
+    f.close_edge = Rate(1);
     for (ab, aa, bb, ba) in [
         (999, 1000, 999, 1000),
         (999, 1000, 1000, 1001),
@@ -86,7 +88,7 @@ fn signal_uncrossed_touches_cannot_have_positive_net_edge() {
     b.fee = Rate(0);
     f.min_edge = Rate(0);
     f.slip = Rate(0);
-    assert_eq!(signal(a, b, &f).unwrap().edge, Rate(0));
+    assert!(signal(a, b, &f).is_none());
 }
 #[test]
 fn signal_fixes_both_limits_within_observed_slippage() {
@@ -175,4 +177,27 @@ fn signal_accepts_exact_minimum_notional_and_all_asset_exponents() {
             Some(expected)
         );
     }
+}
+
+#[test]
+fn signal_open_is_strict_close_inclusive_and_spot_sales_exclude_baseline() {
+    let (mut buy, mut sell) = (leg(999, 1000), leg(1010, 1011));
+    let mut f = params();
+    f.min_edge = net_edge(Px(1000), Px(1010), buy.fee, sell.fee).unwrap();
+    assert!(signal(buy, sell, &f).is_none(), "opening equality must not fire");
+    f.min_edge.0 -= 1;
+    assert!(signal(buy, sell, &f).is_some());
+    buy.position = Qty(-100);
+    sell.position = Qty(100);
+    sell.spot = true;
+    sell.spot_free = Qty(40);
+    f.close_edge = Rate(f.min_edge.0 + 1);
+    let close = signal(buy, sell, &f).unwrap();
+    assert!(close.reducing);
+    assert_eq!(close.qty, Qty(40));
+    f.close_edge.0 += 1;
+    assert!(signal(buy, sell, &f).is_none());
+    f.close_edge = Rate(0);
+    sell.spot_free = Qty(0);
+    assert!(signal(buy, sell, &f).is_none(), "baseline cannot fund a sale");
 }

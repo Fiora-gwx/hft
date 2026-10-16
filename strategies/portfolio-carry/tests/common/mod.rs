@@ -16,8 +16,8 @@ use hft_types::{
     AccountId, AssetExp, AssetId, GroupId, InstId, MarketKind, Notional, Px, Qty, Rate, StrategyId, VenueId,
 };
 
-pub const V1: VenueId = VenueId::BINANCE_SPOT;
-pub const V2: VenueId = VenueId::BITGET_UTA_USDT_FUT;
+pub const V1: VenueId = VenueId::BITGET_UTA_SPOT;
+pub const V2: VenueId = VenueId::BINANCE_USDM;
 pub const V3: VenueId = VenueId::OKX_SWAP;
 pub const V4: VenueId = VenueId::GATE_SPOT;
 pub const I1: InstId = InstId(101);
@@ -36,7 +36,7 @@ pub const S3: StrategyId = StrategyId(3);
 pub const G4: GroupId = GroupId(0x0300_0004);
 
 /// Venues with a feed in the test hft-core instance (V1, V2, V3).
-pub const FEEDS: VenueSet = VenueSet((1 << 2) | (1 << 5) | (1 << 10));
+pub const FEEDS: VenueSet = VenueSet((1 << V1.0) | (1 << V2.0) | (1 << V3.0));
 
 fn venue(b: &mut RdbBuilder, id: VenueId, exchange: Exchange, product: InstKind) {
     b.venue(VenueSpec {
@@ -164,11 +164,11 @@ pub fn fixture_rd() -> RefData {
             dust: Qty(1_000),
         });
     }
-    // Venue rows in ascending id order (V1 = 2, V4 = 4, V2 = 5, V3 = 10).
-    venue(&mut b, V1, Exchange::Binance, InstKind::Spot);
+    // Refdata rows must be sorted by protocol ID.
+    venue(&mut b, V2, Exchange::Binance, InstKind::Perp);
     venue(&mut b, V4, Exchange::Gate, InstKind::Spot);
     venue(&mut b, V3, Exchange::Okx, InstKind::Perp);
-    venue(&mut b, V2, Exchange::Bitget, InstKind::Perp);
+    venue(&mut b, V1, Exchange::Bitget, InstKind::Spot);
     // Inst ids are dense from 1: fillers 1..=100 (V1 spot) put I1–I5 at 101–105.
     for id in 1..=100u32 {
         inst(&mut b, InstId(id), V1, InstKind::Spot, FILLER);

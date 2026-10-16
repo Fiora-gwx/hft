@@ -24,7 +24,7 @@ impl Strategy for PortfolioCarry {
     const DESC: StrategyDesc = StrategyDesc {
         name: "portfolio-carry",
         kind_id: 1,
-        version: 1,
+        version: 2,
         non_prod_only: false,
         schema: &CarryParams::SCHEMA,
         notes: &fast::NOTES,

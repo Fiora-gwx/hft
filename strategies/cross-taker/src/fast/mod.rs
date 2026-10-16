@@ -174,12 +174,6 @@ impl Fast {
             return;
         }
         let (a_book, b_book) = (v.bbo(a.inst), v.bbo(b.inst));
-        // Signal requires buy_limit >= ask and sell_limit <= bid and never credits
-        // rebates. With a positive required edge, uncrossed touches cannot qualify.
-        // Keep settlement and halt delivery above this read-only rejection.
-        if f.min_edge.0 > 0 && a_book.bid_px <= b_book.ask_px && b_book.bid_px <= a_book.ask_px {
-            return;
-        }
         let input = |l: LegDef, k: usize, book: BboView| -> Option<LegInput> {
             if !v.quote_ok(self.account, l.inst)
                 || !v.venue_ready(self.account, l.venue)
@@ -216,10 +210,15 @@ impl Fast {
                     && !risk.flatten_lock
                     && matches!(v.mode(self.account, g.id), RunMode::Live | RunMode::Shadow))
         };
-        let ab = signal::signal(la, lb, f).filter(allowed);
-        let ba = signal::signal(lb, la, f).filter(allowed);
-        let (sig, buy, sell, buy_input, buy_ix) = match (ab, ba) {
-            (Some(x), Some(y)) if y.edge > x.edge => (y, b, a, lb, 1),
+        // Leg 0 is the short perpetual; leg 1 is the long spot. Selling spot is
+        // exclusively a paired reduction, even if an operator assigned spot inventory.
+        let close = signal::signal(la, lb, f).filter(|x| x.reducing).filter(allowed);
+        let open = if la.position.0 <= 0 && lb.position.0 >= 0 {
+            signal::signal(lb, la, f).filter(|x| !x.reducing).filter(allowed)
+        } else {
+            None
+        };
+        let (sig, buy, sell, buy_input, buy_ix) = match (close, open) {
             (Some(x), _) => (x, a, b, la, 0),
             (_, Some(y)) => (y, b, a, lb, 1),
             _ => return,
@@ -326,7 +325,7 @@ impl Fast {
         self.read_snapshot(r, true)
     }
     fn read_snapshot(&mut self, r: &mut SnapshotReader<'_>, apply: bool) -> Result<(), RestoreError> {
-        if r.desc_version() != 1 {
+        if !matches!(r.desc_version(), 1 | 2) {
             return Err(RestoreError::VersionUnsupported);
         }
         let n = r.get_u16()?;

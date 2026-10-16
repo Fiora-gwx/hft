@@ -56,6 +56,7 @@ def validate_params(p: TakerParams | CarryParams) -> None:
     if isinstance(p, TakerParams):
         ranges = {
             "min_edge": (1, 100_000_000),
+            "close_edge": (-100_000_000, 100_000_000),
             "slip": (0, 50_000_000),
             "depth_frac": (1, ONE),
             "max_chunk_notional": (1, 10**15),
@@ -78,6 +79,7 @@ def validate_params(p: TakerParams | CarryParams) -> None:
             "max_leverage_x100": (100, 1000),
             "max_cross": (0, 10_000_000),
             "retry_ms": (100, 60_000),
+            "expected_basis_cost": (0, 100_000_000),
         }
     for name, (low, high) in ranges.items():
         bounded_int(getattr(p, name), low, high, name)
@@ -104,6 +106,10 @@ class Config:
         unknown = content.keys() - allowed
         if unknown:
             raise ValueError(f"unknown config fields: {sorted(unknown)}")
+        for pair in content.get("pair_allowlist", []):
+            parts = pair.split("|")
+            if len(parts) != 2 or not supported_pair(*parts):
+                raise ValueError("pair_allowlist requires Binance perpetual / Bitget spot, same USDT symbol")
         self.content = content
         self.taker = TakerParams(**content.get("taker", {}))
         self.carry = CarryParams(**content.get("carry", {}))
@@ -195,12 +201,25 @@ def read_symbol(path: Path, symbol: str) -> pd.DataFrame:
     return d.sort_values(["inst", "sec"])
 
 
+def supported_pair(a: str, b: str) -> bool:
+    aa, bb = a.split(":"), b.split(":")
+    return (
+        len(aa) == len(bb) == 3
+        and aa[:2] == ["binance", "linear_perpetual"]
+        and bb[:2] == ["bitget", "spot"]
+        and aa[2] == bb[2]
+        and aa[2].endswith("USDT")
+    )
+
+
 def pairs(d: pd.DataFrame, cfg: Config):
     for a, b in itertools.combinations(sorted(d.inst.unique()), 2):
         if a.split(":")[0] == b.split(":")[0]:
             continue
         if a.split(":")[1] == "spot" and b.split(":")[1] != "spot":
             a, b = b, a
+        if not supported_pair(a, b):
+            continue
         name = a + "|" + b
         allowed = cfg.content.get("pair_allowlist")
         if allowed is not None and name not in allowed:
