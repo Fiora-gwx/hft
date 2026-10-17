@@ -114,19 +114,44 @@ fn net_125_frames_share_read_stamps() {
     let (writer, mut reader) = lt::channel(256).unwrap();
     lt::install(writer).unwrap();
     let (mut conn, mut peer) = pair();
-    let b = peer.frames(&[text(b"1"), text(b"2"), text(b"3")]);
+    let b = peer.frames(&[text(b"1"), text(&vec![b'2'; 2048]), text(&vec![b'3'; 8192])]);
+    let bytes = b.len() as u64;
     deliver_stamped(&mut conn, 3_000, 4_000, b, 30, 31);
+    conn.note_empty(2500);
     conn.poll_rx(0);
     let mut ts = Vec::new();
-    while let Some(f) = conn.next_frame() {
+    let mut begins = Vec::new();
+    for _ in 0..3 {
+        begins.push(hft_rt::tsc_ordered().0);
+        let f = conn.next_frame().unwrap();
         ts.push(f.ts);
     }
+    assert!(conn.next_frame().is_none());
     assert_eq!(ts.len(), 3);
     let mut frames = Vec::new();
+    let mut timing = Vec::new();
+    let mut reads = Vec::new();
     while let Some(record) = reader.rx.try_pop() {
         if record.stage == Stage::Frame as u64 {
             frames.push(record);
+        } else if record.stage == Stage::FrameTiming as u64 {
+            timing.push(record);
+        } else if record.stage == Stage::ReadTiming as u64 && record.tsc == 4000 {
+            reads.push(record);
         }
+    }
+    assert_eq!(reads.len(), 1);
+    assert_eq!(reads[0].values[0], 3000);
+    assert!(reads[0].values[2] >= bytes);
+    assert_eq!(reads[0].values[3], 2500);
+    assert_eq!(timing.len(), 3);
+    for (i, t) in timing.iter().enumerate() {
+        assert_eq!(t.context.frame, frames[i].context.frame);
+        assert!(t.values[0] >= begins[i]);
+        assert!(t.tsc >= t.values[0]);
+        assert!(t.tsc <= frames[i].tsc);
+        assert_eq!(t.values[2], [1, 2048, 8192][i]);
+        assert_eq!(t.values[3], 0);
     }
     assert_eq!(frames.len(), 3);
     assert!(

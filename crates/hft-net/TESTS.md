@@ -1033,6 +1033,8 @@ NET-080/081 同时验证缓冲优先轮询的 syscall 计数、跨记录帧、�
 
 ### NET-125 同一次读取里的多帧共享该次读取的戳与 rx_tsc
 
+测量扩展同时覆盖 1 B、2 KiB、8 KiB 帧；每次 next_frame 的起止独立，ReadTiming 保留读取前戳、容量与空确认，见 [测量用例](../../tools/latency-report/TESTS.md)。
+
 - 规则:[7. 时间戳](README.md#7-时间戳)
 - 级别:unit
 - 里程碑:M1.5
@@ -1183,6 +1185,8 @@ NET-080/081 同时验证缓冲优先轮询的 syscall 计数、跨记录帧、�
 - 实现:`crates/hft-net/tests/rx_prop.rs::net_136_stamp_source_model`
 
 ### NET-150 send_frame 加密一次、sendmsg 一次,返回 sendmsg 返回后的 TSC
+
+Linux 回环扩展验证 TxWrite 的真实 syscall pre/post 与 SendOk 同一次发送，覆盖 `net_150_loopback_trace_brackets_send_syscall`。
 
 - 规则:[2. 发送路径](README.md#2-发送路径)、[签名草案](README.md#签名草案)
 - 级别:unit

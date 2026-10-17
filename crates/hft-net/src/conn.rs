@@ -413,6 +413,11 @@ impl Conn {
                 None => (0, false),
             };
             let start = self.cipher_abs + (self.ce - self.cs) as u64;
+            lt::at(
+                TraceStage::ReadTiming,
+                r.post,
+                [r.pre, start, free as u64, self.empty_tsc.unwrap_or(0)],
+            );
             self.push_read(ReadRec {
                 start,
                 end: start + n as u64,
@@ -745,6 +750,12 @@ impl Conn {
         if self.phase != ConnPhase::Open {
             return None;
         }
+        // No diagnostic counter read on empty polls or when tracing is disabled.
+        let started = if self.rx_buffered() != 0 && lt::enabled() {
+            hft_rt::tsc_ordered().0
+        } else {
+            0
+        };
         // Bounded: each iteration consumes a frame or a record, or returns.
         loop {
             let head = ws::parse_head(&self.rx[self.ps..self.pe]);
@@ -834,7 +845,7 @@ impl Conn {
                         Opcode::Binary
                     };
                     if h.fin {
-                        return Some(self.deliver(op, p0, p1, ts, false, last_seg.decrypted_tsc));
+                        return Some(self.deliver(op, p0, p1, ts, false, (last_seg.decrypted_tsc, started)));
                     }
                     self.frag_on = true;
                     self.frag_op = op;
@@ -855,7 +866,7 @@ impl Conn {
                             self.frag_len,
                             ts,
                             true,
-                            last_seg.decrypted_tsc,
+                            (last_seg.decrypted_tsc, started),
                         ));
                     }
                 }
@@ -880,13 +891,21 @@ impl Conn {
         b: usize,
         ts: Timestamps,
         reassembled: bool,
-        decrypted_tsc: u64,
+        trace: (u64, u64),
     ) -> Frame<'_> {
+        let done = if trace.1 != 0 { hft_rt::tsc_ordered().0 } else { 0 };
         lt::frame(
             self.venue.0,
             self.id.0,
-            [ts.rx_tsc, ts.hw_rx_ns as u64, ts.sw_rx_ns as u64, decrypted_tsc],
+            [ts.rx_tsc, ts.hw_rx_ns as u64, ts.sw_rx_ns as u64, trace.0],
         );
+        if trace.1 != 0 {
+            lt::at(
+                TraceStage::FrameTiming,
+                done,
+                [trace.1, trace.0, (b - a) as u64, u64::from(reassembled)],
+            );
+        }
         self.stats.frames += 1;
         self.stats.bytes += (b - a) as u64;
         if ts.flags & TsFlags::MULTI_SKB != 0 {
@@ -1129,7 +1148,7 @@ impl Conn {
                 (te - ts) as u64,
             ],
         );
-        self.trace_write(out.ret, out.post, te - ts);
+        self.trace_write(out.ret, out.pre, out.post, te - ts);
         self.after_send(out.ret, out.post)
     }
 
@@ -1147,7 +1166,7 @@ impl Conn {
         }
     }
 
-    fn trace_write(&mut self, ret: isize, post: u64, requested: usize) {
+    fn trace_write(&mut self, ret: isize, pre: u64, post: u64, requested: usize) {
         if lt::enabled() {
             let _scope = lt::scope(TraceContext {
                 frame: self.trace_tx_instance,
@@ -1157,7 +1176,7 @@ impl Conn {
             lt::at(
                 TraceStage::TxWrite,
                 post,
-                [self.trace_tx_consumed, ret as u64, requested as u64, 0],
+                [self.trace_tx_consumed, ret as u64, requested as u64, pre],
             );
             if ret > 0 {
                 self.trace_tx_consumed += ret as u64;
@@ -1211,7 +1230,7 @@ impl Conn {
 
     pub(crate) fn flush_inner(&mut self) -> Result<SendOk, SendErr> {
         let out = self.sock.send(&[&self.tx[self.ts..self.te]]);
-        self.trace_write(out.ret, out.post, self.te - self.ts);
+        self.trace_write(out.ret, out.pre, out.post, self.te - self.ts);
         self.after_send(out.ret, out.post)
     }
 

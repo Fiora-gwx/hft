@@ -41,6 +41,8 @@ pub enum Stage {
     TxQueued,
     TxWrite,
     RawRecord,
+    ReadTiming,
+    FrameTiming,
 }
 
 /// Correlation only. Zero means unavailable; order packs generation above slot.

@@ -11,6 +11,47 @@ import report
 
 
 class Chains(unittest.TestCase):
+    def test_rpl_203_network_call_boundaries_and_shared_record_wait(self):
+        with tempfile.TemporaryDirectory() as root:
+            out = Path(root)
+            db = sqlite3.connect(':memory:')
+            db.row_factory = sqlite3.Row
+            db.execute('CREATE TABLE trace(thread TEXT,' + ','.join('"'+k+'" INTEGER' for k in report.COLUMNS) + ')')
+            def point(stage, tsc, **values):
+                row = dict.fromkeys(report.COLUMNS, 0)
+                row.update(values, stage=stage, tsc=tsc, serial=db.execute('SELECT count(*) FROM trace').fetchone()[0]+1, venue_conn=1)
+                db.execute('INSERT INTO trace VALUES ('+','.join('?' for _ in range(16))+')', ['feed']+[row[k] for k in report.COLUMNS])
+            point(1,100,v1=1000,v2=300)
+            point(35,100,v0=90,v1=44,v2=4096,v3=80)
+            for frame, start, done, sw in [(1,110,118,1000),(2,1000,1018,900)]:
+                point(4,done+2,frame=frame,v0=100,v2=sw,v3=115)
+                point(36,done,frame=frame,v0=start,v1=115,v2=100)
+                point(7,done+10,frame=frame,event_hash=frame,kind_inst=0x101)
+            point(33,250,v0=0,v1=300,v2=300,v3=245)
+            # An older trace has no pre-call timestamp: no zero-duration syscall invented.
+            point(33,300,v0=300,v1=300,v2=300)
+            report.load_journal(db,[dict(kind_name='ClockStatus',body_tsc=t,realtime_ns=t+1000,calib_err_ns=0,state=1) for t in (0,2000)],out)
+            analysis = report.Analysis(db,dict(clock=dict(hz_milli=1_000_000_000_000)))
+            analysis.market(out)
+            analysis.reads(out)
+            analysis.subdivisions()
+            def samples(stage):
+                return [r[0] for r in db.execute('SELECT ns FROM samples WHERE stage=? ORDER BY rowid',(stage,))]
+            self.assertEqual(samples('feed.frame'),[3,18])
+            self.assertEqual(samples('feed.next_frame'),[8,18])
+            self.assertEqual(samples('feed.decrypt_to_frame'),[5,905])
+            self.assertEqual(samples('read.kernel_to_user'),[100])
+            self.assertEqual(samples('read.syscall'),[10])
+            self.assertEqual(samples('egress.send_syscall'),[5])
+            with (out/'event_chains.csv').open() as f:
+                chains=list(csv.DictReader(f))
+            self.assertEqual([r['last_read_kernel_to_user_ns'] for r in chains],['100','100'])
+            self.assertEqual([r['frame_sw_span_ns'] for r in chains],['0','100'])
+            with (out/'read_batches.csv').open() as f:
+                batches=list(csv.DictReader(f))
+            self.assertEqual(len(batches),1)
+            self.assertEqual((batches[0]['cipher_offset'],batches[0]['pre_kernel_to_user_ns'],batches[0]['empty_tsc']),('44','90','80'))
+
     def test_rpl_203_raw_body_decode_exports_only_timestamp_leaves(self):
         class Batch(dict):
             column_names = ["body", "seq", "tsc", "venue", "conn"]
@@ -108,6 +149,7 @@ class Chains(unittest.TestCase):
             self.assertEqual(rows[0]['kernel_to_user_ns'], '20')
             self.assertEqual(next(t["p99_ns"] for t in tables if t["stage"]=="feed.decode.bbo"),10)
             self.assertGreater(analysis.issues["missing_egress.encrypt"],0)
+            self.assertFalse(any(t['stage']=='feed.frame' for t in tables))
 
     def test_rpl_203_sw_calibration_brackets_steps_and_error_filter(self):
         rows=[dict(body_tsc=t,realtime_ns=r,phc_ns=r,calib_err_ns=5,state=1)

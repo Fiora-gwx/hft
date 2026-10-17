@@ -29,6 +29,36 @@ fn one(md_rx: u32) -> (LoopPeer, Connector, Box<ConnPool<128>>, PeerConn) {
 }
 
 #[test]
+fn net_150_loopback_trace_brackets_send_syscall() {
+    use hft_rt::latency_trace::{self as trace, Stage};
+    let (_peer, _connector, mut pool, mut peer_conn) = one(262_144);
+    let (writer, mut reader) = trace::channel(256).unwrap();
+    trace::install(writer).unwrap();
+    let conn = pool.get(ConnId(1)).unwrap();
+    let mut frame = MaskedFrame::<2048>::new();
+    frame.body_mut()[..300].fill(b'x');
+    frame.seal(Opcode::Text, 300, 7);
+    let before = tsc_now().0;
+    let sent = conn.send_frame(&frame).unwrap();
+    assert_eq!(sent.queued, 0);
+    let mut writes = Vec::new();
+    while let Some(record) = reader.rx.try_pop() {
+        if record.stage == Stage::TxWrite as u64 {
+            writes.push(record);
+        }
+    }
+    assert_eq!(writes.len(), 1);
+    assert!(writes[0].values[3] >= before);
+    assert!(writes[0].values[3] <= writes[0].tsc);
+    assert_eq!(writes[0].tsc, sent.sent_tsc);
+    assert_eq!(writes[0].values[1], writes[0].values[2]);
+    assert_eq!(
+        peer_conn.read_frames(1, &mut Vec::new())[0].payload,
+        vec![b'x'; 300]
+    );
+}
+
+#[test]
 fn net_086_loopback_short_read() {
     let (_peer, _c, mut p, mut pc) = one(262_144);
     let conn = p.get(ConnId(1)).unwrap();

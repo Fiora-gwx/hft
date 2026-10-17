@@ -7,6 +7,7 @@ spec: README.md
 # hft-rt 测试规格
 
 RT-002/166 验证测量环溢出与零分配，见 [延迟采集测试](../../tools/latency-report/TESTS.md)。
+网络调用边界沿用 NET-125/152 与 RPL-203 的跨组件测量验收，不改变环记录布局。
 
 格式与规则见 [docs/tests](../../docs/tests/README.md)。级别在本组件的含义:
 

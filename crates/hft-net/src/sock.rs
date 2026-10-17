@@ -199,6 +199,8 @@ pub(crate) struct RecvOut {
 /// Result of one `sendmsg`.
 #[derive(Copy, Clone, Debug, Default)]
 pub(crate) struct SendOut {
+    /// Diagnostic-only pre-call TSC; zero when tracing is off or scripted.
+    pub pre: u64,
     pub post: u64,
     /// Bytes written, < 0 = −errno.
     pub ret: isize,
@@ -437,8 +439,7 @@ impl Sock {
         if let Some(s) = self.script.as_deref_mut() {
             return script_send(s, iov);
         }
-        let ret = sys_sendmsg(self.fd, iov);
-        SendOut { post: tsc(), ret }
+        sys_sendmsg(self.fd, iov)
     }
 
     pub fn setsockopt_i32(&mut self, level: i32, name: i32, val: i32) -> Result<(), i32> {
@@ -667,12 +668,14 @@ fn script_send(s: &mut ScriptIo, iov: &[&[u8]]) -> SendOut {
         SendKind::Bytes(n) => n.min(total),
         SendKind::Eagain => {
             return SendOut {
+                pre: 0,
                 post: step.post_tsc,
                 ret: -(errno::EAGAIN as isize),
             };
         }
         SendKind::Errno(e) => {
             return SendOut {
+                pre: 0,
                 post: step.post_tsc,
                 ret: -(e as isize),
             };
@@ -685,6 +688,7 @@ fn script_send(s: &mut ScriptIo, iov: &[&[u8]]) -> SendOut {
         left -= k;
     }
     SendOut {
+        pre: 0,
         post: step.post_tsc,
         ret: n as isize,
     }
@@ -736,7 +740,7 @@ fn sys_recvmsg(fd: i32, buf: &mut [u8], ctl: &mut [u64; CMSG_BUF / 8]) -> (isize
 }
 
 #[cfg(target_os = "linux")]
-fn sys_sendmsg(fd: i32, bufs: &[&[u8]]) -> isize {
+fn sys_sendmsg(fd: i32, bufs: &[&[u8]]) -> SendOut {
     let mut iov = [libc::iovec {
         iov_base: std::ptr::null_mut(),
         iov_len: 0,
@@ -750,9 +754,19 @@ fn sys_sendmsg(fd: i32, bufs: &[&[u8]]) -> isize {
     let mut mh: libc::msghdr = unsafe { std::mem::zeroed() };
     mh.msg_iov = iov.as_mut_ptr();
     mh.msg_iovlen = n as _;
+    let pre = if hft_rt::latency_trace::enabled() {
+        tsc()
+    } else {
+        0
+    };
     // SAFETY: the iovecs point at the caller's slices (read-only for sendmsg), valid for the call.
     let r = unsafe { libc::sendmsg(fd, &mh, libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL) };
-    if r < 0 { -(last_errno() as isize) } else { r }
+    let post = tsc();
+    SendOut {
+        pre,
+        post,
+        ret: if r < 0 { -(last_errno() as isize) } else { r },
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -863,8 +877,12 @@ fn sys_recvmsg(_: i32, _: &mut [u8], _: &mut [u64; CMSG_BUF / 8]) -> (isize, usi
     (-(errno::ENOSYS as isize), 0, 0)
 }
 #[cfg(not(target_os = "linux"))]
-fn sys_sendmsg(_: i32, _: &[&[u8]]) -> isize {
-    -(errno::ENOSYS as isize)
+fn sys_sendmsg(_: i32, _: &[&[u8]]) -> SendOut {
+    SendOut {
+        pre: 0,
+        post: tsc(),
+        ret: -(errno::ENOSYS as isize),
+    }
 }
 #[cfg(not(target_os = "linux"))]
 fn sys_setsockopt(_: i32, _: i32, _: i32, _: &[u8]) -> Result<(), i32> {
