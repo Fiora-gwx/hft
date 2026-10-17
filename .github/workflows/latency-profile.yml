@@ -1,0 +1,60 @@
+name: Latency profile
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'crates/venue-binance/src/user_stream.rs'
+      - 'crates/venue-bitget/src/reports.rs'
+      - 'crates/hft-venue-proto/src/json.rs'
+      - 'crates/*/benches/private_wire.rs'
+      - '.github/workflows/latency-profile.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: latency-profile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  private-reports:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Install pinned Rust
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: arm-private-profile
+      - name: Same harness and machine, base / head / base
+        shell: bash
+        run: |
+          set -euo pipefail
+          uname -a
+          lscpu
+          for turn in base head base-repeat; do
+            sha="$BASE_SHA"
+            if [[ "$turn" == head ]]; then sha="$HEAD_SHA"; fi
+            git checkout --detach "$sha"
+            for venue in binance bitget; do
+              path="crates/venue-$venue"
+              git show "$HEAD_SHA:$path/benches/private_wire.rs" > "$path/benches/private_wire.rs"
+              if ! grep -q 'name = "private_wire"' "$path/Cargo.toml"; then
+                printf '\n[[bench]]\nname = "private_wire"\nharness = false\n' >> "$path/Cargo.toml"
+              fi
+              echo "PROFILE $turn $sha $venue"
+              cargo bench --locked -p "venue-$venue" --bench private_wire
+            done
+            git restore --worktree .
+            git clean -f -- crates/venue-binance/benches/private_wire.rs crates/venue-bitget/benches/private_wire.rs
+          done

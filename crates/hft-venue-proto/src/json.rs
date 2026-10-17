@@ -49,6 +49,8 @@ pub enum Select {
     Raw(usize),
     Object(u8),
     First(u8),
+    /// Exactly one object in the array; otherwise decline to the reference decoder.
+    One(u8),
 }
 
 /// Project selected nested objects in one traversal. `First` selects only the first object in
@@ -184,7 +186,7 @@ impl<'a> Cursor<'a> {
                     Select::Skip => None,
                     Select::Raw(i) if i < 32 => Some(i),
                     Select::Object(s) if s < 16 => Some(32 + usize::from(s)),
-                    Select::First(s) if s < 16 => Some(48 + usize::from(s)),
+                    Select::First(s) | Select::One(s) if s < 16 => Some(48 + usize::from(s)),
                     _ => return None,
                 };
                 if let Some(tag) = tag {
@@ -202,10 +204,13 @@ impl<'a> Cursor<'a> {
                         *fields.get_mut(i)? = self.input.get(start..self.at)?;
                     }
                     Select::Object(s) => self.object(s, select, fields, depth + 1)?,
-                    Select::First(s) => {
+                    Select::First(s) | Select::One(s) => {
                         self.byte(b'[')?;
                         self.object(s, select, fields, depth + 1)?;
                         while self.peek()? == b',' {
+                            if matches!(action, Select::One(_)) {
+                                return None;
+                            }
                             self.at += 1;
                             self.skip(depth + 1)?;
                         }

@@ -541,7 +541,7 @@ pub enum ExchIdHint { Resolved { epoch: u16, slot: SlotId, gen: u32 }, Recorded,
 
 </details>
 
-`json::{project, nested, ordered}` 提供零分配字段投影。未知值仅校验语法边界，不建立 token 表或转换数值。使用字段借用原始切片，重复字段与别名回退严格解码。转义、非 ASCII、指数数字或深度超过 16 层也回退。`nested` 检查必需容器状态；`uint/int/string` 转换使用字段，价格数量仍走 `parse_exact`。预算与基准随实际 venue 入口测量。外部依赖 `memchr = "2"` 用于字符串边界扫描，版本由 Cargo.lock 锁定。
+`json::{project, nested, ordered}` 提供零分配字段投影。未知值仅校验语法边界，不建立 token 表或转换数值。使用字段借用原始切片，重复字段与别名回退严格解码。转义、非 ASCII、指数数字或深度超过 16 层也回退。`nested` 检查必需容器状态；`Select::One` 只接受恰好一个对象的数组，空数组或多行回退；`uint/int/string` 转换使用字段，价格数量仍走 `parse_exact`。预算与基准随实际 venue 入口测量。外部依赖 `memchr = "2"` 用于字符串边界扫描，版本由 Cargo.lock 锁定。
 
 `VenueProtocol::order_channel_for(&GwCmd)` 默认沿用 `order_channel(op)`,允许平仓标记选择专用 REST 端点。`position_close_interval_ms()` 默认 0,协议可声明每账户平仓请求的最短间隔。`ReportSink::pending_position_close(inst)` 仅提示存在尚未取得交易所订单号的请求,用于暂存先到的未知 client-id 成交,不能据此确认归属;归属必须由请求回执中的 exchange-id 建立。
 

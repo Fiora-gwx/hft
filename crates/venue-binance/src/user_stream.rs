@@ -71,6 +71,86 @@ fn asset(rd: &RefData, name: &str) -> AssetId {
     hft_venue_proto::account::asset(rd, name).unwrap_or(AssetId(0))
 }
 
+/// Common order/fill envelopes in one checked traversal. No context is mutated until the
+/// complete message has passed projection and the existing normalizer validates every field.
+fn projected_order(line: Line, p: &[u8]) -> Option<Order<'_>> {
+    use hft_venue_proto::json::{self as wire, Select};
+    let f: [&[u8]; 19] = wire::nested(p, 0b11, |state, key| {
+        if state == 0 {
+            return match (line, key) {
+                (Line::Spot, b"event") | (Line::Usdm, b"o") => Select::Object(1),
+                (Line::Usdm, b"e") => Select::Raw(0),
+                _ => Select::Skip,
+            };
+        }
+        let slot = match key {
+            b"e" if line == Line::Spot => 0,
+            b"s" => 1,
+            b"c" => 2,
+            b"C" => 3,
+            b"S" => 4,
+            b"o" => 5,
+            b"x" => 6,
+            b"X" => 7,
+            b"i" => 8,
+            b"l" => 9,
+            b"z" => 10,
+            b"L" => 11,
+            b"ap" => 12,
+            b"Z" => 13,
+            b"n" => 14,
+            b"N" => 15,
+            b"rp" => 16,
+            b"T" => 17,
+            b"t" => 18,
+            _ => return Select::Skip,
+        };
+        Select::Raw(slot)
+    })?;
+    let expected = if line == Line::Usdm {
+        "ORDER_TRADE_UPDATE"
+    } else {
+        "executionReport"
+    };
+    if wire::string(f[0])? != expected {
+        return None;
+    }
+    let default = |i: usize| {
+        if f[i].is_empty() {
+            Some("")
+        } else {
+            wire::string(f[i])
+        }
+    };
+    let optional = |i: usize| {
+        if f[i].is_empty() || f[i] == b"null" {
+            Some(None)
+        } else {
+            wire::string(f[i]).map(Some)
+        }
+    };
+    Some(Order {
+        s: wire::string(f[1])?,
+        c: default(2)?,
+        C: default(3)?,
+        S: wire::string(f[4])?,
+        o: wire::string(f[5])?,
+        x: wire::string(f[6])?,
+        X: wire::string(f[7])?,
+        i: wire::uint(f[8])?,
+        l: wire::string(f[9])?,
+        z: wire::string(f[10])?,
+        L: wire::string(f[11])?,
+        ap: optional(12)?,
+        Z: optional(13)?,
+        n: optional(14)?,
+        N: optional(15)?,
+        rp: optional(16)?,
+        T: wire::int(f[17])?,
+        t: if f[18].is_empty() { 0 } else { wire::int(f[18])? },
+    })
+}
+
 pub(crate) fn decode(
     line: Line,
     rd: &RefData,
@@ -79,6 +159,9 @@ pub(crate) fn decode(
     rx: &RxMeta,
     out: &mut impl ReportSink,
 ) -> Result<ReportOutcome, DecodeErr> {
+    if let Some(r) = projected_order(line, p) {
+        return order(line, rd, ctx, &r, rx, out);
+    }
     let wrapper;
     let p = if line == Line::Spot {
         wrapper = from::<Wrapped>(p)?;
