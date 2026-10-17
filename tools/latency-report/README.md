@@ -35,6 +35,7 @@ status: impl
 | `raw_points.csv` | 每个固定记录一行，含线程、流水号、丢失累计、阶段、原始时间与关联键 |
 | `journal_events.csv` | 白名单字段的规范化行情、订单/执行事件与全部 ClockStatus；不导出配置、秘密或 UID |
 | `event_chains.csv` | 每个已解码输入一行，MD 无交易也输出；空 input_seq 表示未关联到 sequencer 输入 |
+| `read_batches.csv` | 每次成功 recvmsg 一行，保留 pre/post、上次队列空确认、密文偏移、请求/返回字节数与最后读取 SW 间隔；不按事件数重复计权 |
 | `order_chains.csv` | 每个决策及其逐次 ack/fill 一行，含 `input_*` 触发链、strategy/risk/OMS、出站戳与交易所订单/成交标识 |
 | `leg_skew.csv` | 同一 trigger_seq/group 的 First/Second 对，第二腿减第一腿的出环和发送时间；不把 OnFill 当同时下单 |
 | `exchange_times.csv` | 可选 raw 输入的 E/T/ts 等时间叶子，通过 raw seq 映射 `trace_thread/trace_frame`；没有报文内容 |
@@ -58,6 +59,12 @@ status: impl
 Read 在 recvmsg 返回后；解密包围实际 TLS open；Frame 在 WS 交付前；decode 包围协议分派/JSON 规范化；环 push 在成功发布之后，pop 在取出时/转换后。push 的观测可能晚于并行消费者的 pop，负值单列，不截断为零。InputHanded 是合并/调度后交给处理器的边界；process 包围 journal、业务处理、输出与出环；strategy 包围每个真实 on_event；risk 包围单腿或整对 evaluate；OMS 包围实际 place。encode 是订单帧模板写入，加密包围真实 seal，Send 是 sendmsg 返回戳，短写的返回值/请求字节数保留。
 
 TxQueued/TxWrite 的编号为 32/33：`frame` 在这两类记录中表示连接发送实例标识；前者 v0/v1 是密文绝对字节区间，后者 v0/v1/v2 是已消费偏移、带符号返回值、请求字节数。离线按区间匹配包含 flush 的每次写入，输出 `send_complete_tsc` 与次数；不把首次短写当整单发送完成。
+
+TxWrite 的 v3 是紧邻 sendmsg 前的计数器戳，0 表示旧记录或脚本未提供；`egress.send_syscall` 只统计非零的真实调用边界。`egress.send` 仍是加密完成至发送返回，包含 trace 与发送准备，不能称为纯 syscall，更不是线上时刻。
+
+ReadTiming/FrameTiming 的编号为 35/36。ReadTiming 与 Read 以线程、连接和返回 TSC 关联，v0..v3 是 recvmsg 前 TSC、密文起始偏移、请求字节数、读取前最近队列空确认 TSC；只随成功读取输出，不逐次记录空轮询。FrameTiming 使用 Frame 的关联 ID，tsc 为交付测量前时刻，v0..v3 为本次 next_frame 进入 TSC、最后 TLS 解密完成 TSC、payload 长度、分片标志。
+
+`feed.next_frame` 是成功调用从进入到交付的时间，包含该调用的 TLS 工作；`feed.frame` 从本次进入和最后 TLS 解密完成两者较晚者开始，表示最终解密之后的解帧工作。旧 trace 无 FrameTiming 时不生成这两个分段；原来的解密完成到交付差值保留为 `feed.decrypt_to_frame`，它可能包含同记录前面消息的解码、发布、raw journal 与 gw 出环工作。事件行另列最后读取的 `last_read_kernel_to_user_ns` 和首末读取 SW 跨度 `frame_sw_span_ns`；两者之和等于原有 `kernel_to_user_ns`。前者也可能包含 TCP 队头阻塞，不能直接解释成线程未运行。
 
 RawRecord 的编号为 34，v0..v3 为 raw seq、raw kind、接收/发送 TSC、what；在原始记录成功追加后写入当前 frame 关联。原始交易所时间可精确回连同读多帧；缺失或多匹配明确标记。订单行按 trigger_seq 和 intent_no/inst 连接 OMS、按 strategy 连接回调；同时双腿共享风险准入时 `risk_owner_intent_no` 标识第一腿，独立 OnFill/Reverse 仍用自身准入。多次同策略回调无法唯一连接时留空。
 
@@ -88,6 +95,7 @@ TLS 槽只持有启动期分配的 producer 静态引用，类型经 `needs_drop
 ## 延伸阅读
 
 - [隔离测量上下文的决定](../../.agents/notes/implemented/architecture/2026-10-15-latency-chain.md)
+- [16 核接收尾部归因与测量边界](../../.agents/notes/implemented/testing/2026-10-17-latency-tail-attribution.md)
 - [hft-core](../../apps/hft-core/README.md)、[replayer](../../apps/replayer/README.md)
 
 ## 已知限制与后续工作

@@ -12,11 +12,13 @@ import struct
 COLUMNS = "tsc serial dropped stage input_seq decision_seq order frame event_hash venue_conn kind_inst v0 v1 v2 v3".split()
 STAGES = ("read decrypt_start decrypt_end frame decode_start decode_end decoded_event feed_push rep_push input_pop process_start journal_input strategy_start strategy_end risk_start risk_end oms_start oms_end decision out_push out_pop encode_start encode_end encrypt_start encrypt_end send process_end tx_stamp input_handed exec_start exec_end").split()
 STAGES += ["tx_queued", "tx_write", "raw_record"]
+STAGES += ["read_timing", "frame_timing"]
 SAFE = set("seq tsc proc_ns flags kind venue conn inst account strategy trigger_seq decision_seq slot gen target_slot action link_role reason intent_no reject what detail trade_id exch_order_id ex_ts_ns ex_send_ns hw_rx_ns sw_rx_ns rx_tsc decided_tsc sent_tsc group status tsc_hz_milli realtime_ns phc_ns chrony_offset_ns max_error_ns rms_ns calib_err_ns source state".split())
 KINDS = ["Bbo", "Trade", "Funding", "MarkPrice", "IndexPrice", "Liquidation", "L2Snapshot", "OrderDecision", "SendReport", "OrderEvent", "ExecDecision", "ClockStatus", "LatencySample"]
 SAFE.update(("body_tsc", "epoch"))
 CHAIN_COLUMNS = "chain thread frame event_hash venue kind input_seq ex_ts_ns ex_send_ns hw_rx_ns sw_rx_ns rx_tsc decrypt_done_tsc frame_done_tsc decode_start_tsc decode_done_tsc ring_push_tsc ring_pop_tsc handed_tsc process_start_tsc journal_input_tsc process_end_tsc".split()
 CHAIN_COLUMNS += "rx_realtime_ns calibration_error_ns kernel_to_user_ns".split()
+CHAIN_COLUMNS += "last_read_sw_ns last_read_kernel_to_user_ns frame_sw_span_ns frame_start_tsc frame_work_done_tsc".split()
 
 
 class Calibration:
@@ -237,6 +239,15 @@ class Analysis:
                 frame = self.unique(4, thread=d["thread"], frame=d["frame"])
                 if frame:
                     row.update(rx_tsc=frame["v0"], hw_rx_ns=frame["v1"], sw_rx_ns=frame["v2"], decrypt_done_tsc=frame["v3"], frame_done_tsc=frame["tsc"])
+                    timing = self.unique(36, thread=d['thread'], frame=d['frame'])
+                    if timing:
+                        row.update(frame_start_tsc=timing['v0'], frame_work_done_tsc=timing['tsc'])
+                        self.interval(row['venue'], 'feed.next_frame', chain, timing['v0'], timing['tsc'])
+                        # Only the framing work after the final decrypt in this call. A reused
+                        # TLS record may have been decrypted before earlier messages ran.
+                        self.interval(row['venue'], 'feed.frame', chain,
+                            max(timing['v0'], timing['v1']), timing['tsc'])
+                    read = self.unique(1, thread=d['thread'], tsc=frame['v0'], venue_conn=frame['venue_conn'])
                     if row['sw_rx_ns']:
                         calibrated = self.calibration.realtime(row['rx_tsc'])
                         if calibrated:
@@ -244,6 +255,10 @@ class Analysis:
                             row.update(rx_realtime_ns=realtime, calibration_error_ns=error,
                                 kernel_to_user_ns=realtime-row['sw_rx_ns'])
                             self.sample(row['venue'], 'kernel_to_user', chain, row['kernel_to_user_ns'])
+                            if read and read['v1']:
+                                row.update(last_read_sw_ns=read['v1'],
+                                    last_read_kernel_to_user_ns=realtime-read['v1'],
+                                    frame_sw_span_ns=read['v1']-row['sw_rx_ns'])
                         else:
                             self.issues['unsynced_cal'] += 1
                 if 0x100 <= row["kind"] < 0x200:
@@ -268,12 +283,43 @@ class Analysis:
                 else:
                     self.issues["decoded_without_seq_input"] += 1
                 writer.writerow(row)
-                for name, start, end in [("feed.read_to_decrypt","rx_tsc","decrypt_done_tsc"),("feed.frame","decrypt_done_tsc","frame_done_tsc"),("feed.decode","decode_start_tsc","decode_done_tsc"),("feed.publish","decode_done_tsc","ring_push_tsc"),("queue","ring_push_tsc","ring_pop_tsc"),("seq.intake","ring_pop_tsc","process_start_tsc"),("seq.journal_input","process_start_tsc","journal_input_tsc"),("seq.process","process_start_tsc","process_end_tsc")]:
+                for name, start, end in [("feed.read_to_decrypt","rx_tsc","decrypt_done_tsc"),("feed.decrypt_to_frame","decrypt_done_tsc","frame_done_tsc"),("feed.decode","decode_start_tsc","decode_done_tsc"),("feed.publish","decode_done_tsc","ring_push_tsc"),("queue","ring_push_tsc","ring_pop_tsc"),("seq.intake","ring_pop_tsc","process_start_tsc"),("seq.journal_input","process_start_tsc","journal_input_tsc"),("seq.process","process_start_tsc","process_end_tsc")]:
                     suffix = ".bbo" if name == "feed.decode" and row["kind"] == 0x101 else ""
                     self.interval(row["venue"], name + suffix, chain, row.get(start), row.get(end))
         finally:
             output.close()
         self.db.execute("CREATE INDEX chain_input ON chains(input_seq)")
+
+    def reads(self, out):
+        """Independent successful recvmsg batches, never weighted by decoded event count."""
+        columns = 'thread venue conn read_serial rx_tsc read_pre_tsc empty_tsc cipher_offset requested_bytes bytes flags sw_rx_ns rx_realtime_ns calibration_error_ns kernel_to_user_ns pre_kernel_to_user_ns syscall_ns'.split()
+        output, writer = csv_file(out / 'read_batches.csv', columns)
+        try:
+            for raw in self.db.execute('SELECT * FROM trace WHERE stage=1 ORDER BY thread,serial'):
+                r = dict(raw)
+                vc = r['venue_conn']
+                row = dict(thread=r['thread'], venue=vc & 255, conn=vc >> 8,
+                    read_serial=r['serial'], rx_tsc=r['tsc'], bytes=r['v2'], flags=r['v3'], sw_rx_ns=r['v1'])
+                chain = f"read:{r['thread']}:{r['serial']}"
+                timing = self.unique(35, thread=r['thread'], venue_conn=vc, tsc=r['tsc'])
+                if timing:
+                    row.update(read_pre_tsc=timing['v0'], cipher_offset=timing['v1'],
+                        requested_bytes=timing['v2'], empty_tsc=timing['v3'])
+                    if timing['v0']:
+                        row['syscall_ns'] = (r['tsc']-timing['v0'])*1_000_000_000_000//self.hz
+                        self.sample(row['venue'], 'read.syscall', chain, row['syscall_ns'])
+                calibrated = self.calibration.realtime(r['tsc']) if r['v1'] else None
+                if calibrated:
+                    realtime, error = calibrated
+                    row.update(rx_realtime_ns=realtime, calibration_error_ns=error,
+                        kernel_to_user_ns=realtime-r['v1'])
+                    self.sample(row['venue'], 'read.kernel_to_user', chain, row['kernel_to_user_ns'])
+                    pre = self.calibration.realtime(row.get('read_pre_tsc',0)) if row.get('read_pre_tsc') else None
+                    if pre:
+                        row['pre_kernel_to_user_ns'] = pre[0]-r['v1']
+                writer.writerow(row)
+        finally:
+            output.close()
 
     def orders(self, out):
         cols = "decision_seq trigger_seq venue account slot gen group link_role reason action intent_no reject decision_tsc out_push_tsc out_pop_tsc encode_start_tsc encode_done_tsc encrypt_start_tsc encrypt_done_tsc send_return_tsc send_complete_tsc tx_write_count report_seq report_what report_epoch ack_fill_rx_tsc report_ex_ts_ns exch_order_id trade_id".split()
@@ -351,6 +397,10 @@ class Analysis:
             output.close()
 
     def subdivisions(self):
+        for raw in self.db.execute('SELECT * FROM trace WHERE stage=33 AND v3!=0 ORDER BY thread,serial'):
+            r = dict(raw)
+            self.interval(r['venue_conn'] & 255, 'egress.send_syscall',
+                f"write:{r['thread']}:{r['serial']}", r['v3'], r['tsc'])
         for start, end, name in [(2,3,"feed.tls_decrypt"),(13,14,"seq.strategy"),(15,16,"seq.risk"),(17,18,"seq.oms"),(30,31,"seq.exec")]:
             for row in self.db.execute("SELECT * FROM trace WHERE stage=? ORDER BY thread,serial", (start,)):
                 a = dict(row)
@@ -432,6 +482,7 @@ def main():
         raise ValueError('calibration error threshold must be positive')
     analysis = Analysis(db, schema, args.cal_max_err_ns)
     analysis.market(args.out)
+    analysis.reads(args.out)
     analysis.orders(args.out)
     analysis.subdivisions()
     analysis.pair_skew(args.out)
