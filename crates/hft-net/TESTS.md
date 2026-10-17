@@ -16,6 +16,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 NET-080/081 同时验证缓冲优先轮询的 syscall 计数、跨记录帧、部分记录补读与时间戳不变；NET-320/322 的 `wire_poll` 基准逐条采样，并分别报告脚本 recv 调用数与 SPSC 批量交接。
 
+NET-040 检查 300 B、2 KiB、8 KiB 的连续 TLS 记录直接借用解密位置；NET-092/136 覆盖跨记录半帧拼接与时间戳。NET-320 的 wire_poll 逐次报告至 8 KiB 的接收直方图。NET-328 的 send_profile 在 Linux loopback 比较 send/sendmsg/writev、单/双 iovec、缓冲、空闲间隔、逐单 uncork 与 MSG_ZEROCOPY；后者等待完成通知并统计 copied 标志。接收排空与完成队列成本不计入提交计时，共享 ARM runner 只作报告。
+
 ## 覆盖
 
 | README 小节 | 用例 |

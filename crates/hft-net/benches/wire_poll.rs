@@ -78,7 +78,7 @@ fn handoff(batch: bool) {
 }
 
 fn main() {
-    for payload in [274, 2048] {
+    for payload in [274, 2048, 8192] {
         receive(false, payload);
         receive(true, payload);
     }

@@ -371,7 +371,7 @@ impl TxTsDrain {
 
 1. **`poll_rx`**:先压缩缓冲(把未消费的明文与未解密的密文移到缓冲头;稳态下为 0 或几百字节)。然后 `recvmsg(fd, iov=[rx 空闲尾部], control=cmsg_buf[128], MSG_DONTWAIT)`,每次 `poll_rx` **至多一次**:**短读即停**——返回的字节数小于所给的空闲空间即认为内核队列已空,不再补一次必然返回 `EAGAIN` 的 `recvmsg`;读满所给空间时缓冲已满,本次不再读(不算确认为空),剩余数据留在内核,下一次 `poll_rx` 再读;空闲空间为 0 时不调用 `recvmsg`(零长度读的返回 0 会被误认为 EOF)。没有数据时是一次返回 `EAGAIN` 的调用(`net_poll_empty`),用 `ReadyPoll` 的任务对未就绪的连接不调用。调用前读一次 TSC(队列为空的确认时刻,§7),返回后立即读 TSC 写 `rx_tsc`,解析 cmsg 的 `SCM_TIMESTAMPING`:`ts[0]` → `sw_rx_ns`,`ts[2]` → `hw_rx_ns`,按 §7 写 `rx_empty_gap_ns`;把 `(该次读取的密文起止偏移, 读到的字节数, Timestamps)` 记进每连接的读取戳表(定长 16 项;溢出时合并最老两项、保留较早的戳并置 `MULTI_SKB`)。不解密。
 2. **`next_frame`**:明文区已有完整 WS 帧 → 直接解出;否则从 `cipher_start` 取**一条**完整记录原地解密,并入明文区后再试解帧,直到凑齐一帧或没有完整记录。因此一次调用的解密量以"这一帧所跨的记录"为界,一大段积压不会在第一帧之前整段解密。记录长度 > 2^14 + 256 → `TLS_PROTO`;一条记录在压缩后的缓冲里也放不下(明文区未消费字节 + 记录长度 > `rx_buf`)→ `RX_FULL`。
-3. **并入连续明文**:把每条记录的 payload `memmove` 到明文区尾 `plain_end`(payload 地址必然 ≥ `plain_end`,因为其前的记录头与 tag 已被消费)。结果是 `[连续明文 | 未处理密文]` 同处一个缓冲;WS 帧跨 TLS 记录也连续,只移动一次(300 B ≈ 10 ns,2 KB ≈ 40 ns)。
+3. **并入连续明文**:没有未消费明文时直接将明文区指向原地解密的 payload，不搬移记录；只有已有跨记录的半帧时，才把新记录 payload `memmove` 到明文区尾。消费与时间戳仍按绝对流偏移推进；补充接收空间时按需压缩缓冲。
 4. 在明文区上解 WS 帧:读 2–14 B 头,校验 FIN/RSV/opcode/MASK 位;完整帧就产出 `Frame{payload: &plain[a..b]}`,不复制。时间戳按 §7 从读取戳表取。
 5. `finish_poll`:发出排队的 Pong/Close;续写 tx 剩余密文;若 `quickack_after_read` 对该角色为真且这一轮读到数据,`setsockopt(TCP_QUICKACK, 1)`(默认关)。
 6. 接收缓冲满且解密全部密文后仍无完整帧 → `RX_FULL`。调用方因下游环满而停读时不调用 `poll_rx`,数据留在内核缓冲(TCP 背压)。

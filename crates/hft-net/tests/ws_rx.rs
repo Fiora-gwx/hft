@@ -389,16 +389,30 @@ fn net_039_fragments_exceed_max_msg() {
 
 #[test]
 fn net_040_payload_borrows_rx_buffer() {
-    let (mut conn, mut peer) = pair();
-    let b = peer.frames(&[text(&payload(300))]);
-    deliver(&mut conn, 0, 0, b);
-    conn.poll_rx(0);
-    let (lo, hi) = conn.test_rx_range();
-    let f = conn.next_frame().unwrap();
-    let p = f.payload.as_ptr() as usize;
-    assert!(p >= lo && p + f.payload.len() <= hi);
-    assert!(!f.reassembled);
-    assert_eq!(conn.stats().reassembled, 0);
+    for size in [300, 2048, 8192] {
+        let (mut conn, mut peer) = pair();
+        let body = payload(size);
+        let frame = text(&body);
+        let first = peer.records(&[&frame]);
+        let second = peer.records(&[&frame]);
+        let record_len = first.len();
+        let mut bytes = first;
+        bytes.extend(second);
+        deliver(&mut conn, 0, 0, bytes);
+        conn.poll_rx(0);
+        let (lo, hi) = conn.test_rx_range();
+        for record in 0..2 {
+            let f = conn.next_frame().unwrap();
+            let p = f.payload.as_ptr() as usize;
+            // TLS 1.3 header + extended WS header: no plaintext move on either record.
+            assert_eq!(p, lo + record * record_len + 5 + 4);
+            assert!(p + f.payload.len() <= hi);
+            assert_eq!(f.payload, body);
+            assert!(!f.reassembled);
+        }
+        assert!(conn.next_frame().is_none());
+        assert_eq!(conn.stats().reassembled, 0);
+    }
 }
 
 #[test]

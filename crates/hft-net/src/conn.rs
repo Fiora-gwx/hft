@@ -664,8 +664,15 @@ impl Conn {
             CT_APP => {
                 if o.len > 0 {
                     let from = cs + o.off;
-                    self.rx.copy_within(from..from + o.len, self.pe);
                     let pstart = self.plain_abs + (self.pe - self.ps) as u64;
+                    if self.ps == self.pe {
+                        // The record was opened in place. With no partial frame to join, borrow
+                        // that plaintext directly; absolute stream offsets stay unchanged.
+                        self.ps = from;
+                        self.pe = from;
+                    } else {
+                        self.rx.copy_within(from..from + o.len, self.pe);
+                    }
                     let first = self.src_of(&rec_first);
                     self.push_seg(Seg {
                         pstart,
