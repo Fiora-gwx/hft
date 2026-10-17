@@ -22,3 +22,31 @@ Status: implemented
 ## Consequences
 
 没有订单、费用、风控、TLS 序号或 journal 语义变化。目标机需用分离后的 send_syscall 点及相同市场窗口复测，连同 IRQ/softirq、TCP OFO 和 pre-recv/empty-poll 记录一起核实毫秒接收尾部；共享 runner 的 loopback 数字不能代替订单 decision→wire 验收。生产 send 形式与 socket 参数只有可重复收益才调整。
+
+
+## Evidence
+
+[Transport profile 38998741699](https://github.com/Fiora-gwx/hft/actions/runs/38998741699)，2026-10-17，GitHub ubuntu-24.04-arm / Neoverse-N2，bench 优化 profile。接收 base fd2dc3b / head 074dc528 / base，50,000 次采样及 5,000 次预热；TLS 加密准备不计时，ScriptIo 接收与解密/解帧计时，不代表真实 syscall。
+
+| buffered 接收 | base p50 前 / 后 (µs) | head p50 (µs) | base p99 前 / 后 (µs) | head p99 (µs) |
+|---|---:|---:|---:|---:|
+| 274 B | 0.240 / 0.240 | 0.240 | 0.264 / 0.264 | 0.256 |
+| 2048 B | 0.728 / 0.728 | 0.704 | 4.275 / 3.665 | 3.817 |
+| 8192 B | 2.449 / 2.449 | 2.345 | 7.075 / 6.843 | 6.979 |
+
+长帧 p50 收益约 0.10 µs，小帧无收益；p99 无稳定改善。eager 小帧 p50 1.384/1.416 → 1.440 µs，不能声称所有形态都更快。脚本接收复制和共享 runner 调度使 max 达毫秒，不能拿该 max 推断生产接收尾部。
+
+同一 runner 的 322 B warm loopback 提交，10,000 次采样、500 次预热，单位 µs：
+
+| 形式 | p50 | p99 |
+|---|---:|---:|
+| send | 1.688 | 1.976 |
+| sendmsg 单 iovec | 1.753 | 2.048 |
+| sendmsg 双 iovec | 1.768 | 2.064 |
+| writev | 1.776 | 1.840 |
+| MSG_ZEROCOPY | 2.160 | 2.456 |
+| sendmsg + uncork | 2.096 | 2.152 |
+
+零拷贝全部 10,500 次完成均为 copied（含预热），且表中没有计入 errqueue 开销。16 KiB 报文也为 copied，sendmsg/zerocopy p50 为 2.216/3.360 µs。SO_SNDBUF 请求 16 KiB、256 KiB、1 MiB 时，322 B sendmsg p50 为 1.752、1.744、1.752 µs，未显示有用收益。空闲 1 ms 后 sendmsg/send p50 为 2.288/2.504 µs，p99 为 6.920/8.193 µs；睡眠影响调度与缓存，不能据此在生产周期发包。
+
+这里可重复测得的是 warm 小包提交约 1.7 µs 的实验量级，不是统一升级主机的物理 wire 下限。send 相对 sendmsg 仅约 0.065 µs，且 idle 结果方向相反，暂不扩展热路径系统调用允许表或改变生产调用；没有证据支持靠 socket 参数把原包围段 4.2–4.4 µs 直接压到此值。真实目标机必须用 send_syscall 的前后点复测后裁决。
