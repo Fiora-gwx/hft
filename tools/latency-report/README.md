@@ -97,6 +97,8 @@ TLS 槽只持有启动期分配的 producer 静态引用，类型经 `needs_drop
 
 标准 Python 库与发布包的 `hft_py`；SQLite 用于有界缓存下的离线连接。热记录原语只依赖 hft-rt 的 SPSC 与计数器。
 
+`hft_py` 的列访问会生成整列 Python 列表。报告器在每批内只读取一次所需列，逐行复用；seq 输入仍只读取白名单列，raw 输入仍只导出时间叶子。批次结束后释放列引用，不缓存整个 journal。
+
 ## 延伸阅读
 
 - [隔离测量上下文的决定](../../.agents/notes/implemented/architecture/2026-10-15-latency-chain.md)
