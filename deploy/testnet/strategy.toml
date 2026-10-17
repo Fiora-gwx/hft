@@ -1,7 +1,7 @@
 [strategy]
 instance = "demo-spread"
 account = "demo"
-schema = { id = 3, version = 2 }
+schema = { id = 3, version = 3 }
 version = 1
 source = "manual"
 

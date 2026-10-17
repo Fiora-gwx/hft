@@ -143,6 +143,10 @@ fn inst(b: &mut RdbBuilder, id: InstId, v: VenueId, kind: InstKind, asset: Asset
 
 /// The GT3 refdata.
 pub fn fixture_rd() -> RefData {
+    fixture_rd_with_prod(false)
+}
+
+pub fn fixture_rd_with_prod(is_prod: bool) -> RefData {
     let mut b = RdbBuilder::new(1);
     b.created_utc_ns(1_759_276_800_000_000_000);
     for (id, name, class, px, qty) in [
@@ -187,25 +191,35 @@ pub fn fixture_rd() -> RefData {
     }
     b.account(AccountSpec {
         id: A1,
-        sim: true,
+        sim: !is_prod,
         bound_instance: S3,
-        is_prod: false,
+        is_prod,
         venues: (1 << V1.0) | (1 << V2.0),
         label: "sim-a1".into(),
         ..AccountSpec::default()
     });
-    b.sim(SimSpec {
-        account: A1,
-        fee_tier: 0,
-        latency_model: 0,
-        margin_model: 0,
-    });
-    b.sim_balance(SimBalanceSpec {
-        account: A1,
-        venue: V1,
-        asset: USDT,
-        qty: Qty(1_000_000_000_000),
-    });
+    if is_prod {
+        for venue in [V1, V2] {
+            b.account_venue(hft_refdata::AccountVenueSpec {
+                account: A1,
+                venue,
+                uid: "fixture-prod-uid".into(),
+            });
+        }
+    } else {
+        b.sim(SimSpec {
+            account: A1,
+            fee_tier: 0,
+            latency_model: 0,
+            margin_model: 0,
+        });
+        b.sim_balance(SimBalanceSpec {
+            account: A1,
+            venue: V1,
+            asset: USDT,
+            qty: Qty(1_000_000_000_000),
+        });
+    }
     b.account(AccountSpec {
         id: A2,
         sim: true,

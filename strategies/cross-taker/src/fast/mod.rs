@@ -325,7 +325,7 @@ impl Fast {
         self.read_snapshot(r, true)
     }
     fn read_snapshot(&mut self, r: &mut SnapshotReader<'_>, apply: bool) -> Result<(), RestoreError> {
-        if !matches!(r.desc_version(), 1 | 2) {
+        if !matches!(r.desc_version(), 1..=3) {
             return Err(RestoreError::VersionUnsupported);
         }
         let n = r.get_u16()?;
