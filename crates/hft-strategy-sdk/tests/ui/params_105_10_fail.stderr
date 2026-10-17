@@ -1,8 +1,8 @@
-error[E0080]: evaluation panicked: schema: version must equal the largest since
+error[E0080]: evaluation panicked: schema: version must cover the largest since
  --> tests/ui/params_105_10_fail.rs:2:1
   |
 2 | / hft_strategy_sdk::define_params! {
-3 | |     pub struct P(schema_id = 0xFF01, version = 3, fields = PF) {
+3 | |     pub struct P(schema_id = 0xFF01, version = 1, fields = PF) {
 4 | |         a: Count [max = 1],
 5 | |         b: Count [max = 1, since = 2],
 6 | |     }
@@ -16,5 +16,5 @@ note: inside `validate_schema`
   |
  ::: src/check.rs
   |
-  |     assert!(since == s.version, "schema: version must equal the largest since");
+  |     assert!(since <= s.version, "schema: version must cover the largest since");
   |     --------------------------------------------------------------------------- in this macro invocation

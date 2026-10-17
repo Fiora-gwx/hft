@@ -12,9 +12,9 @@ const REPORT: &[ReportFieldDesc] = &[
     ReportFieldDesc { name: "fires", unit: Unit::Count, agg: ReportAgg::Count, scope: ReportScope::Group, note: 1, v_ix: 0, doc: "" },
 ];
 const CMDS: &[CmdDesc] = &[
-    CmdDesc { op: 1, name: "open", reduce_only: false, fields: &[FieldDesc { name: "notional", unit: Unit::Notional, min: 0, max: 10_000_000_000, default: 0, per_group: false, structural: false, manual_only: false, relax: Relax::None, minor_change: MinorChange::None, since: 1, doc: "" }], doc: "" },
+    CmdDesc { op: 1, name: "open", reduce_only: false, fields: &[FieldDesc { name: "notional", unit: Unit::Notional, min: 0, max: 10_000_000_000, default: 0, per_group: false, structural: false, manual_only: false, prod_min: None, relax: Relax::None, minor_change: MinorChange::None, since: 1, doc: "" }], doc: "" },
     CmdDesc { op: 2, name: "open", reduce_only: true, fields: &[], doc: "" },
-    CmdDesc { op: 3, name: "set_mode", reduce_only: false, fields: &[FieldDesc { name: "m", unit: Unit::Enum(&["x", "y"]), min: 0, max: 1, default: 0, per_group: false, structural: false, manual_only: false, relax: Relax::None, minor_change: MinorChange::None, since: 1, doc: "" }], doc: "" },
+    CmdDesc { op: 3, name: "set_mode", reduce_only: false, fields: &[FieldDesc { name: "m", unit: Unit::Enum(&["x", "y"]), min: 0, max: 1, default: 0, per_group: false, structural: false, manual_only: false, prod_min: None, relax: Relax::None, minor_change: MinorChange::None, since: 1, doc: "" }], doc: "" },
 ];
 const DESC: StrategyDesc = StrategyDesc {
     name: "echo_probe",

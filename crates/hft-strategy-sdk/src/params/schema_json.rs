@@ -94,6 +94,10 @@ fn push_field(out: &mut String, f: &FieldRef<'_>, full: bool) {
     let _ = write!(out, "{}", f.min);
     push_key(out, &mut first, "max");
     let _ = write!(out, "{}", f.max);
+    if let Some(min) = f.prod_min {
+        push_key(out, &mut first, "prod_min");
+        let _ = write!(out, "{min}");
+    }
     push_key(out, &mut first, "default");
     let _ = write!(out, "{}", f.default);
     push_key(out, &mut first, "per_group");
@@ -321,8 +325,8 @@ pub fn schema_json(d: &StrategyDesc, layout: &ModelLayoutDesc, ver: u16) -> Stri
 }
 
 /// SHA-256 of the digest input JSON (`name`, `kind_id`, `schema_id`, `schema_version`, and
-/// `fields` cut at `ver` with only `ix/name/unit/enum/min/max/default/per_group/since`), first
-/// 8 bytes read little-endian. Docs, field attributes, `non_prod_only`, descriptors and sections
+/// `fields` cut at `ver` with only `ix/name/unit/enum/min/max/prod_min/default/per_group/since`), first
+/// 8 bytes read little-endian. Docs, non-validation attributes, `non_prod_only`, descriptors and sections
 /// are not covered: changing them does not affect encoded parameters.
 pub fn schema_digest(d: &StrategyDesc, ver: u16) -> u64 {
     digest_of(d.name, d.kind_id, d.schema, ver)

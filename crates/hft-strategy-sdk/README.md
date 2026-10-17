@@ -312,6 +312,7 @@ pub struct FieldDesc {
     pub per_group: bool,                                     // 是否允许按 group 覆盖
     pub structural: bool,                                    // 改值会改变 Model 已存样本的解释(见"参数变化时的 group 重置")
     pub manual_only: bool,                                   // 只允许人工设定(hft-cfg、人工覆盖项);pipeline 插件不得声明拥有它
+    pub prod_min: Option<i64>,                               // 正式账户的附加下界;包含等号
     pub relax: Relax,                                        // 哪个方向的改动是放宽
     pub minor_change: MinorChange,                           // 门槛 ⑦ 的小改判定:多大的改动不使模拟账户长跑重新计时
     pub since: u16,                                          // 加入该字段的 schema 版本;字段只追加,since 非递减
@@ -396,7 +397,7 @@ pub mod params {
     /// 更新的版本 → SchemaTooNew)→ 缺失的新字段取 default → 检查范围、per_group、枚举。
     pub fn decode_body(s: &ParamSchemaDesc, schema_ver: u16, n_groups: u16, body: &[u8]) -> Result<RawParams, ParamError>;
     /// 规范 schema JSON 与摘要(schema-json 特性)。摘要 = SHA-256(按 ver 截取字段前缀后、只含 name/kind_id/schema_id/
-    /// schema_version/fields 五个键、且 fields 元素只含编码相关键 ix/name/unit/enum/min/max/default/per_group/since 的规范 JSON)
+    /// schema_version/fields 五个键、且 fields 元素只含编码相关键 ix/name/unit/enum/min/max/prod_min/default/per_group/since 的规范 JSON)
     /// 前 8 字节(按小端解释为 u64),写入 StrategyParamsHdr.schema_digest;ctl-gateway 比对不一致 → InvalidArgs。
     /// doc、字段属性(structural/manual_only/relax/minor_change)、non_prod_only 与 notes/report/cmds 不进摘要:改它们不影响已编码的参数。
     /// layout = 该策略的 Model::LAYOUT(无 Model 为 ModelLayoutDesc::EMPTY),给出 sections;StrategySet::schema_json 按此调用。
@@ -456,8 +457,9 @@ pub mod params {
 
 #### schema JSON 与 define_params!
 
-- **规范 schema JSON**(本模块生成,`GetSchema`、hft-cfg、ops_bot、pipeline、watchtower、journal-archiver 只认它):`{"name", "kind_id", "non_prod_only", "schema_id", "schema_version", "fields": [{"ix", "name", "unit", "enum"?, "min", "max", "default", "per_group", "structural", "manual_only", "relax", "minor_change", "since", "doc"}], "notes": [{"code", "name", "level", "v", "doc"}], "report": [{"name", "unit", "agg", "scope", "note", "v_ix", "doc"}], "cmds": [{"op", "name", "reduce_only", "fields": [同 fields 的元素形状], "doc"}], "sections": [{"tag", "name"}]}`(`sections` 是 `Model::LAYOUT` 各节的 `tag` 与 `name`,无 Model 为空数组;gen-schema 据它核对检查点节 `tag` 只追加);键按此顺序、无多余空白、数值为十进制整数(原始定点);`minor_change` 写成字符串 `"none"`、`"any"`、`"rel_pct:<n>"` 或 `"abs:<原始值>"`;单位、`relax`、Note `level`、报表 `agg`/`scope` 写成小写字符串(`"rate"`、`"notional"`、`"qty"`、`"px"`、`"duration_ms"`、`"count"`、`"bool"`、`"enum"`;`"up"`/`"down"`/`"none"`;`"p1"`/`"p2"`/`"info"`;`"count"`/`"sum"`/`"last"`/`"max"`/`"p99"`;`"instance"`/`"group"`);参数字段与命令字段的每个元素在 `doc` 之后另附 `"display":{"min","max","default"}` 子对象,值为 `format_value` 的输出(`Qty`/`Px` 无资产指数,写原始整数)。
+- **规范 schema JSON**(本模块生成,`GetSchema`、hft-cfg、ops_bot、pipeline、watchtower、journal-archiver 只认它):`{"name", "kind_id", "non_prod_only", "schema_id", "schema_version", "fields": [{"ix", "name", "unit", "enum"?, "min", "max", "prod_min"?, "default", "per_group", "structural", "manual_only", "relax", "minor_change", "since", "doc"}], "notes": [{"code", "name", "level", "v", "doc"}], "report": [{"name", "unit", "agg", "scope", "note", "v_ix", "doc"}], "cmds": [{"op", "name", "reduce_only", "fields": [同 fields 的元素形状], "doc"}], "sections": [{"tag", "name"}]}`(`sections` 是 `Model::LAYOUT` 各节的 `tag` 与 `name`,无 Model 为空数组;gen-schema 据它核对检查点节 `tag` 只追加);键按此顺序、无多余空白、数值为十进制整数(原始定点);`minor_change` 写成字符串 `"none"`、`"any"`、`"rel_pct:<n>"` 或 `"abs:<原始值>"`;单位、`relax`、Note `level`、报表 `agg`/`scope` 写成小写字符串(`"rate"`、`"notional"`、`"qty"`、`"px"`、`"duration_ms"`、`"count"`、`"bool"`、`"enum"`;`"up"`/`"down"`/`"none"`;`"p1"`/`"p2"`/`"info"`;`"count"`/`"sum"`/`"last"`/`"max"`/`"p99"`;`"instance"`/`"group"`);参数字段与命令字段的每个元素在 `doc` 之后另附 `"display":{"min","max","default"}` 子对象,值为 `format_value` 的输出(`Qty`/`Px` 无资产指数,写原始整数)。
 - **`decode`/`validate` 的执行位置与预算**:`SetParams` 时它们在 ctl-gateway 的 warm 线程上运行(不在 sequencer 热线程);必须有界、无 I/O,预算 p99 ≤ 2 ms(按 group 数线性,`params/validate` 基准);超预算视为参数无效(`InvalidArgs`),旧参数继续生效。**禁止 panic**:发布剖面 `panic = "abort"`,ctl-gateway 线程上的 panic 使整个 hft-core 进程退出(退出码见 [apps/hft-core](../../apps/hft-core/README.md));越界、溢出、除零一律用 checked 运算返回 `ParamError`(属性测试覆盖,见 [TESTS.md](TESTS.md) SDK-102)。hft-cfg 离线只做 schema 级校验,跨字段校验只在发送前的 PREVIEW 中由 gateway 执行。
+- **生产参数下界**:`prod_min` 为可选原始整数,须在 min..=max 内;缺省不增加限制,命令载荷字段不得声明此属性。声明宏接受 `prod_min = <raw>`,生成的 validate 在账户 is_prod=true 时检查全部默认值与有效组值,违例返回 OutOfRange,不受 enabled/模式影响。hft-cfg 读取同一元数据检查默认值和覆盖。它进入 schema_digest,旧 schema 缺字段时按 None 读取;仅调整边界也可增加 schema version 而不追加 body 字段。
 - **`define_params!`**:SDK 提供的声明宏,一处声明生成字段结构体、`ParamSchemaDesc` 常量、`ParamSet::decode`(= `params::decode_body` + 类型化 + 按 gix 展开)与按 group 解析后的访问表;交叉校验由策略写一个 `fn check(&self, groups, rd) -> Result<(), ParamError>` 挂入 `validate`。
 
 ```rust
@@ -473,7 +475,7 @@ hft_strategy_sdk::define_params! {
 // 生成:FooParams { d: FooFields, g: Box<[FooFields]> };p.at(gix).open_th = 覆盖后的值(O(1),热路径可读)。
 ```
 
-- **schema 编译期校验**(`const` 断言):字段名唯一、`min ≤ default ≤ max`、`Qty`/`Px` 必须 `per_group`、`Enum` 默认下标合法、`since` 非递减且最大值 = `version`、字段数 ≤ 256;`structural` 字段的 `minor_change` 必须为 `None`;`Bool`/`Enum` 字段只能取 `None` 或 `Any`;`RelPct(n)` 要求 1 ≤ n ≤ 100。
+- **schema 编译期校验**(`const` 断言):字段名唯一、`min ≤ default ≤ max`、`Qty`/`Px` 必须 `per_group`、`Enum` 默认下标合法、`since` 非递减且最大值 ≤ `version`、字段数 ≤ 256;`structural` 字段的 `minor_change` 必须为 `None`;`Bool`/`Enum` 字段只能取 `None` 或 `Any`;`RelPct(n)` 要求 1 ≤ n ≤ 100。
 - **schema 导出**(只有一种方式):`hft-core schemas --out <dir>` 经 [registry](../../strategies/registry/README.md) 的 `export_schemas()` 为每个策略写 `<kind_id>-<name>.schema.json`(内容 = `params::schema_json` 的输出),另写 `index.json`(格式归 registry);发布制品附带该目录。运行中用 `GetSchema{strategy_kind}` 命令([control-plane](../../docs/subsystems/control-plane.md))取同一内容。`hft-cfg`、ops_bot、pipeline(经 hft-py)、watchtower、journal-archiver 都读这份 JSON,按 schema 与描述符通用处理参数、Note、报表与策略命令,新增策略不改这些工具。
 - `SetParams` 的头与 `GroupSpec`(引擎理解的部分:订阅、账户绑定、LegTracker、ledger 归属、两腿不同交易所)由 ctl-gateway 通用解析与校验;body 经装配处的 `StrategySet::decode_params` 解码、`StrategySet::validate_params` 校验;账户未绑定到该实例 → `InvalidArgs{AccountBound}`;需要 sequencer 状态的校验(`GroupId` 全局唯一、同一 (account, inst) 的引用规则、有仓位的 group 不得移除)归 [hft-sequencer](../hft-sequencer/README.md)。
 

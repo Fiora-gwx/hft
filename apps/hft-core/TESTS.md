@@ -4332,3 +4332,5 @@ CORE-090 的网关入口包含配对 rep-bulk，变长 MarginReport/AccountConfi
 CORE-120 同时验证两协议 funding_schedule 的可选启动查询：成功提供周期；超时/429/坏正文清空部分 seed、保留必需账户基线；实际费率/结算金额仍来自各自正式输入路径。
 
 网关 REST 凭证装配由 CORE-120 的进程构建路径校验;签名入口传参与模板无凭证的行为分别归 VEN-228/391 与 BIN-063/BGT-063。
+
+CORE-033 的 core_033_testnet_variants_check_production_bounds 枚举 deploy/testnet 的 strategy*.toml 参数,用非正式永续/现货双 venue 夹具执行实际 `hft-core --check`;凡默认值低于 schema prod_min,同参在正式账户须被拒;全 feature CI 覆盖,不读取秘密或连接网络。

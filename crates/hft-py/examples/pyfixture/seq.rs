@@ -54,6 +54,7 @@ static FIELDS: [FieldDesc; 1] = [FieldDesc {
     per_group: false,
     structural: false,
     manual_only: false,
+    prod_min: None,
     relax: Relax::None,
     minor_change: MinorChange::None,
     since: 1,

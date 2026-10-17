@@ -744,3 +744,51 @@ fn tool_123_schema_dir_errors() {
     assert!(r.stderr.contains("nosuch"), "TOOL-123.5: {}", r.stderr);
     assert!(!out.exists(), "TOOL-123.5: no blob");
 }
+
+#[test]
+fn tool_124_production_minimum_rejects_negative_defaults_and_overrides() {
+    use common::schemas::{FIELDS, SCHEMA};
+    use hft_strategy_sdk::{ParamSchemaDesc, StrategyDesc};
+    let mut fields = FIELDS;
+    fields[0].min = -100_000_000;
+    fields[0].prod_min = Some(0);
+    let schema = Box::leak(Box::new(ParamSchemaDesc {
+        fields: Box::leak(Box::new(fields)),
+        ..SCHEMA
+    }));
+    let desc = StrategyDesc { schema, ..DESC };
+    for is_prod in [false, true] {
+        let edits = if is_prod {
+            vec![]
+        } else {
+            vec![(
+                "accounts.toml",
+                "is_prod = true\nbound_instance = \"pc-main\"",
+                "is_prod = false\nbound_instance = \"pc-main\"",
+            )]
+        };
+        let env = Env::with_refdata(&format!("prod-min-{is_prod}"), &edits);
+        write_schema_dir(&env.schemas, &[&desc, &TARGET_DESC, &EXTRA_DESC]);
+        for value in ["-0.0030", "-0.000000001", "0", "0.002"] {
+            for overridden in [false, true] {
+                let toml = if overridden {
+                    format!("{}\nspread_th = \"{value}\"\n", base_toml())
+                } else {
+                    base_toml().replace("spread_th = \"0.0005\"", &format!("spread_th = \"{value}\""))
+                };
+                let (r, out) = env.build("case", &toml, None);
+                if is_prod && value.starts_with('-') {
+                    assert_eq!(r.code, 1, "{}", r.stderr);
+                    assert!(
+                        r.stderr.contains("production account") && r.stderr.contains("spread_th"),
+                        "{}",
+                        r.stderr
+                    );
+                    assert!(!out.exists());
+                } else {
+                    assert_eq!(r.code, 0, "{}", r.stderr);
+                }
+            }
+        }
+    }
+}

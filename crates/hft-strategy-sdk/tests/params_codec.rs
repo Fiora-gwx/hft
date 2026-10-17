@@ -221,6 +221,7 @@ impl RandSchema {
                 per_group: per_group || matches!(unit, Unit::Qty | Unit::Px),
                 structural: false,
                 manual_only: false,
+                prod_min: None,
                 relax: Relax::None,
                 minor_change: MinorChange::None,
                 since: 1,

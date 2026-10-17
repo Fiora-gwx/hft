@@ -47,6 +47,9 @@ pub const fn trim_doc(s: &'static str) -> &'static str {
 const fn check_field(f: &FieldDesc) {
     assert!(f.min <= f.default, "field: min > default");
     assert!(f.default <= f.max, "field: default > max");
+    if let Some(min) = f.prod_min {
+        assert!(f.min <= min && min <= f.max, "field: prod_min outside min/max");
+    }
     match f.unit {
         Unit::Qty | Unit::Px => assert!(f.per_group, "field: Qty/Px fields must be per_group"),
         Unit::Enum(names) => {
@@ -83,7 +86,7 @@ const fn check_field(f: &FieldDesc) {
 }
 
 /// Schema rules: unique names, `min ≤ default ≤ max`, Qty/Px per group, valid Enum default,
-/// `since` non-decreasing with maximum = `version`, ≤ 256 fields, structural ⇒ `minor = None`,
+/// `since` non-decreasing with maximum <= `version`, ≤ 256 fields, structural ⇒ `minor = None`,
 /// Bool/Enum ⇒ `minor ∈ {None, Any}`, `RelPct(n)` with 1 ≤ n ≤ 100.
 pub const fn validate_schema(s: &ParamSchemaDesc) {
     assert!(s.fields.len() <= MAX_FIELDS, "schema: more than 256 fields");
@@ -100,7 +103,7 @@ pub const fn validate_schema(s: &ParamSchemaDesc) {
         }
         rest = tail;
     }
-    assert!(since == s.version, "schema: version must equal the largest since");
+    assert!(since <= s.version, "schema: version must cover the largest since");
 }
 
 const fn validate_cmd(c: &CmdDesc) {
@@ -111,6 +114,10 @@ const fn validate_cmd(c: &CmdDesc) {
         check_field(f);
         assert!(!f.per_group, "cmds: command fields cannot be per_group");
         assert!(!f.structural, "cmds: command fields cannot be structural");
+        assert!(
+            f.prod_min.is_none(),
+            "cmds: prod_min is only for strategy parameters"
+        );
         assert!(
             matches!(f.minor_change, MinorChange::None),
             "cmds: command fields need minor_change = None"

@@ -26,6 +26,8 @@
 
 ## 通用规则
 
+策略参数的账户相关下界由 [SDK 参数 schema](../../crates/hft-strategy-sdk/README.md#schema-json-与-define_params) 的 prod_min 表达,离线编码与 SetParams validate 都检查正式账户;校验失败不替换生效参数。
+
 ### 信封
 
 每条命令带:`cmd_id`(UUID,客户端生成,重试复用)、`issuer`(`tg:<from.id>`、`ops_bot`、`pipeline`、`reconciler`、`cli:<login>`、`cli:systemd`;watchtower 与 treasury 不发命令)、`issued_at_ns`、`expires_at_ns`(必填,≤ 签发后 300 s,推荐 30 s)、`account`、命令体与目标 `CmdScope`。gateway 写环时把信封填进 [hft-event](../../crates/hft-event/README.md#控制命令编码) 的 `CmdHdr`,并加上 `expires_tsc`、`peer_uid`、有效 `role`、`preview` 标志、`confirmed`、`expect_state_version`、`cmd_hash`(规范化命令的 SHA-256,**覆盖 `CmdHdr.account` 与完整载荷**)与 `base_version`;gateway 不复制任何 sequencer 状态。审计 `Note{CtlAudit}` 另记 `view_account`(bot 当时的默认账户视图)与 `chat_type`。

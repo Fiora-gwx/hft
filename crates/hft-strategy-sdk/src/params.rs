@@ -53,6 +53,8 @@ pub struct FieldDesc {
     pub structural: bool,
     /// Only set by humans (hft-cfg, manual overrides); pipeline plugins may not own it.
     pub manual_only: bool,
+    /// Additional inclusive lower bound for production accounts; None uses only min/max.
+    pub prod_min: Option<i64>,
     /// Which direction of change is a relaxation.
     pub relax: Relax,
     /// Gate ⑦ minor-change rule.
@@ -79,6 +81,7 @@ impl FieldDesc {
             per_group: self.per_group,
             structural: self.structural,
             manual_only: self.manual_only,
+            prod_min: self.prod_min,
             relax: self.relax,
             minor_change: self.minor_change,
             since: self.since,
@@ -231,6 +234,7 @@ pub struct FieldRef<'a> {
     pub per_group: bool,
     pub structural: bool,
     pub manual_only: bool,
+    pub prod_min: Option<i64>,
     pub relax: Relax,
     pub minor_change: MinorChange,
     pub since: u16,
@@ -245,6 +249,29 @@ pub trait SchemaView {
     fn n_fields(&self) -> u16;
     /// `None` when `ix ≥ n_fields()`.
     fn field(&self, ix: u16) -> Option<FieldRef<'_>>;
+}
+
+/// Account-aware cold-path bounds. Check defaults and every effective group, even when disabled.
+pub fn check_production_values(
+    schema: &impl SchemaView,
+    values: &[i64],
+    is_prod: bool,
+    group_ix: u16,
+) -> Result<(), ParamError> {
+    if !is_prod {
+        return Ok(());
+    }
+    for ix in 0..schema.n_fields() {
+        let f = schema.field(ix).ok_or(ParamError::BodyLen)?;
+        let value = values.get(usize::from(ix)).ok_or(ParamError::BodyLen)?;
+        if f.prod_min.is_some_and(|min| *value < min) {
+            return Err(ParamError::OutOfRange {
+                field_ix: ix,
+                group_ix,
+            });
+        }
+    }
+    Ok(())
 }
 
 impl SchemaView for ParamSchemaDesc {

@@ -577,6 +577,7 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 - xtask 是 cold tier:可用 `serde_json`、`syn`、`walkdir`、`tokio`(仅 fixtures fetch)。`gen-schema` 调用已构建的 `hft-core` 二进制导出策略 schema,xtask 自身不链接策略 crate。
 - `doc-check` 的锚点生成按 GitHub 规则:小写、去掉标点(含全角标点)、空格变 `-`,保留中日韩字符。
 - hostprobe 的 `ethtool` 信息经 `SIOCETHTOOL` ioctl 读取,不启动外部进程;chrony 信息需调用 `chronyc`(启动期,允许)。
+- hft-cfg 的策略编码按 SDK schema 的可选 `prod_min` 对正式账户检查默认值与所有组覆盖,即使策略禁用或组关闭也不豁免;跨字段规则仍由策略 validate 拥有。
 - hft-cfg 的十进制 → 定点换算用 hft-types 的 `parse_exact`(单位换算按 schema 与 refdata 资产指数),不经 f64。
 - hft-verify 的账本折叠是纯函数(输入:运行记录集合;输出:账本),`run` 结束时与 `ledger rebuild` 调用同一实现;子进程管理只用 `fork`/`exec`/`waitpid` 与信号,不用异步运行时。
 

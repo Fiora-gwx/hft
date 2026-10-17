@@ -3231,3 +3231,5 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 - 上线门槛 ⑧ 中由本组件承担的部分:TOOL-012–TOOL-029 与 TOOL-030–TOOL-031 全部通过([testing §8](../docs/testing.md#8-上线门槛))。
 - 上线门槛 ③④ 的累计口径由 TOOL-145–TOOL-172 保证;阈值与账本规则归 [testing §6.1](../docs/testing.md#61-服务器上的累计运行) 与 [testing §8](../docs/testing.md#8-上线门槛)。
 - 基准用例(TOOL-173–TOOL-176)的上限只登记在 [benchmarks](../benchmarks/README.md)。
+
+TOOL-124 的 tool_124_production_minimum_rejects_negative_defaults_and_overrides 验证 schema 驱动的生产下界:负默认/组覆盖在正式账户失败且无输出 blob,非正式账户接受,零和正值按 schema 边界接受。
