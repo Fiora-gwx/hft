@@ -43,6 +43,10 @@ class Chains(unittest.TestCase):
             self.assertEqual(samples('read.kernel_to_user'),[100])
             self.assertEqual(samples('read.syscall'),[10])
             self.assertEqual(samples('egress.send_syscall'),[5])
+            self.assertEqual(samples('receive.frame_wait_sw'),[0,100])
+            self.assertEqual(samples('receive.complete_to_read_sw'),[100,100])
+            self.assertEqual(samples('receive.read_to_frame'),[18,918])
+            self.assertEqual(samples('receive.complete_to_frame_sw'),[118,1018])
             with (out/'event_chains.csv').open() as f:
                 chains=list(csv.DictReader(f))
             self.assertEqual([r['last_read_kernel_to_user_ns'] for r in chains],['100','100'])
@@ -51,6 +55,48 @@ class Chains(unittest.TestCase):
                 batches=list(csv.DictReader(f))
             self.assertEqual(len(batches),1)
             self.assertEqual((batches[0]['cipher_offset'],batches[0]['pre_kernel_to_user_ns'],batches[0]['empty_tsc']),('44','90','80'))
+            with (out/'receive_frames.csv').open() as f:
+                frames=list(csv.DictReader(f))
+            self.assertEqual(len(frames),2)
+            for f in frames:
+                self.assertEqual(int(f['complete_to_frame_sw_ns']),int(f['complete_to_read_sw_ns'])+int(f['read_to_frame_ns']))
+                self.assertEqual(f['read_pre_tsc'],'90')
+
+    def test_rpl_203_receive_split_missing_negative_and_frame_weight(self):
+        with tempfile.TemporaryDirectory() as root:
+            out=Path(root)
+            db=sqlite3.connect(':memory:')
+            db.row_factory=sqlite3.Row
+            db.execute('CREATE TABLE trace(thread TEXT,' + ','.join('"'+k+'" INTEGER' for k in report.COLUMNS) + ')')
+            def point(stage, tsc, **values):
+                row=dict.fromkeys(report.COLUMNS,0)
+                row.update(values,stage=stage,tsc=tsc,serial=db.execute('SELECT count(*) FROM trace').fetchone()[0]+1,venue_conn=513)
+                db.execute('INSERT INTO trace VALUES ('+','.join('?' for _ in range(16))+')',['feed']+[row[k] for k in report.COLUMNS])
+            point(1,100,v1=1000,v2=80)
+            point(4,140,frame=1,v0=100,v2=1010)
+            point(36,135,frame=1,v0=120)
+            # Several decoded events from one frame must not multiply receive samples.
+            point(7,145,frame=1,event_hash=1,kind_inst=0x203)
+            point(7,146,frame=1,event_hash=2,kind_inst=0x203)
+            # Missing read, and a legacy frame without FrameTiming, stay incomplete.
+            point(4,200,frame=2,v0=180,v2=1050)
+            point(4,210,frame=3,v0=100,v2=1000)
+            report.load_journal(db,[],out)
+            analysis=report.Analysis(db,dict(clock=dict(hz_milli=1_000_000_000_000)))
+            analysis.market(out)
+            tables=analysis.summaries(out)
+            wait=next(r for r in tables if r['stage']=='receive.frame_wait_sw')
+            self.assertEqual((wait['n'],wait['negative'],wait['p50_ns']),(1,1,0))
+            self.assertEqual(db.execute("SELECT count(*) FROM samples WHERE stage='receive.read_to_frame'").fetchone()[0],1)
+            self.assertEqual(db.execute("SELECT count(*) FROM samples WHERE stage='receive.complete_to_read_sw'").fetchone()[0],0)
+            self.assertEqual(analysis.issues['receive_missing_last_read'],1)
+            self.assertEqual(analysis.issues['receive_unsynced_cal'],2)
+            with (out/'receive_frames.csv').open() as f:
+                frames=list(csv.DictReader(f))
+            self.assertEqual(frames[0]['receive_wait_sw_ns'],'-10')
+            self.assertEqual(frames[0]['read_pre_tsc'],'')
+            self.assertEqual(frames[1]['complete_to_frame_sw_ns'],'')
+            self.assertEqual(frames[2]['read_to_frame_ns'],'')
 
     def test_rpl_203_raw_body_decode_exports_only_timestamp_leaves(self):
         class Batch(dict):

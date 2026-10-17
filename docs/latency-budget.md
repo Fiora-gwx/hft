@@ -65,6 +65,19 @@ sequencer 线程内的 OMS 对每次新单、撤单与改单,在该操作的首�
 | `leg_gap` | 第二腿 `sent_tsc` − 触发它的事件(第一腿 `Fill` 或链上 `TxLifecycle{IncludedOk}`)的 `proc_tsc` | 双腿间隔的 sequencer 之后部分;`LegLink` 在同一事件内出环。成交在 rep 环与 gw 里的等待看 `hedge_host` | — |
 | `ws_rtt` | 连接级 ping/pong 往返 | 到交易所的网络健康;不是事件分段 | — |
 
+### 接收诊断
+
+[latency-report](../tools/latency-report/README.md) 按交付帧输出以下诊断分段，不设新预算。SW 戳属于读取所关联的 skb，并非逐字节到达证明；收全等待与末读间隔是代理量，不能直接等同纯网络耗时或调度耗时。
+
+| 分段 | 端点 | 计量边界 |
+|---|---|---|
+| `receive.frame_wait_sw` | 末次读取 SW − 帧首来源 SW | 同钟域的收全到达跨度代理 |
+| `receive.complete_to_read_sw` | 末次 recvmsg 返回 − 末次读取 SW | 含内核、TCP 队头阻塞及应用轮询的剩余间隔 |
+| `receive.read_to_frame` | FrameTiming 交付 − 末次 recvmsg 返回 | 用户态解密验证、解帧及同记录前序消息处理 |
+| `receive.complete_to_frame_sw` | 末读 SW → FrameTiming 交付 | 上述后两项逐样本相加；不减分位数 |
+
+旧 trace 缺调用边界时不生成对应样本；跨时钟项按 §2.1 过滤。原 `kernel_to_user` 与主机预算口径保持独立。
+
 ### 2.1 跨时钟域换算
 
 - 纯 TSC 分段(`ingest`、`decide`、`egress`、`leg_gap`)直接相减再按段头 `tsc_hz` 换算为 ns,没有同步误差。

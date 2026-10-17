@@ -36,6 +36,7 @@ status: impl
 | `journal_events.csv` | 白名单字段的规范化行情、订单/执行事件与全部 ClockStatus；不导出配置、秘密或 UID |
 | `event_chains.csv` | 每个已解码输入一行，MD 无交易也输出；空 input_seq 表示未关联到 sequencer 输入 |
 | `read_batches.csv` | 每次成功 recvmsg 一行，保留 pre/post、上次队列空确认、密文偏移、请求/返回字节数与最后读取 SW 间隔；不按事件数重复计权 |
+| `receive_frames.csv` | 每个交付帧一行，拆分首末 SW 到达跨度、末读返回与 TLS 验证后交付；保留末次 recvmsg pre/post、队列空确认及缺失字段，不按解码事件数重复计权 |
 | `order_chains.csv` | 每个决策及其逐次 ack/fill 一行，含 `input_*` 触发链、strategy/risk/OMS、出站戳与交易所订单/成交标识 |
 | `leg_skew.csv` | 同一 trigger_seq/group 的 First/Second 对，第二腿减第一腿的出环和发送时间；不把 OnFill 当同时下单 |
 | `exchange_times.csv` | 可选 raw 输入的 E/T/ts 等时间叶子，通过 raw seq 映射 `trace_thread/trace_frame`；没有报文内容 |
@@ -65,6 +66,10 @@ TxWrite 的 v3 是紧邻 sendmsg 前的计数器戳，0 表示旧记录或脚本
 ReadTiming/FrameTiming 的编号为 35/36。ReadTiming 与 Read 以线程、连接和返回 TSC 关联，v0..v3 是 recvmsg 前 TSC、密文起始偏移、请求字节数、读取前最近队列空确认 TSC；只随成功读取输出，不逐次记录空轮询。FrameTiming 使用 Frame 的关联 ID，tsc 为交付测量前时刻，v0..v3 为本次 next_frame 进入 TSC、最后 TLS 解密完成 TSC、payload 长度、分片标志。
 
 `feed.next_frame` 是成功调用从进入到交付的时间，包含该调用的 TLS 工作；`feed.frame` 从本次进入和最后 TLS 解密完成两者较晚者开始，表示最终解密之后的解帧工作。旧 trace 无 FrameTiming 时不生成这两个分段；原来的解密完成到交付差值保留为 `feed.decrypt_to_frame`，它可能包含同记录前面消息的解码、发布、raw journal 与 gw 出环工作。事件行另列最后读取的 `last_read_kernel_to_user_ns` 和首末读取 SW 跨度 `frame_sw_span_ns`；两者之和等于原有 `kernel_to_user_ns`。前者也可能包含 TCP 队头阻塞，不能直接解释成线程未运行。
+
+接收拆分按交付帧计权，包含控制帧；逐事件与订单触发链携带同一帧的拆分列。`receive.frame_wait_sw` 是首末读取的软件戳跨度，作为收全等待的代理；`receive.complete_to_read_sw` 是末次读取 SW 戳到 recvmsg 返回；`receive.read_to_frame` 是该返回到 FrameTiming 交付；`receive.complete_to_frame_sw` 是后两项逐样本相加。分位数分别从样本计算，不能相减得到另一段。各列定义归 [latency-budget 接收诊断](../../docs/latency-budget.md#接收诊断)。
+
+SO_TIMESTAMPING 不逐字节标记到达时刻；末次读取的软件戳不证明最后一个字节已在该时刻到达，TCP 队头阻塞、合并与调度仍可能混入 SW 拆分。只有 `receive.read_to_frame` 完全位于用户态，包含解密验证、解帧及同记录前序消息处理。`read_pre_tsc`、`read_empty_tsc` 与 `read_syscall_ns` 保留逐次调用证据，不把空队列确认间隔当作纯网络时间。缺失 Read/FrameTiming/校准不补零，负间隔单列；缺旧格式的交付边界时仍可报告同钟域 SW 跨度。
 
 RawRecord 的编号为 34，v0..v3 为 raw seq、raw kind、接收/发送 TSC、what；在原始记录成功追加后写入当前 frame 关联。原始交易所时间可精确回连同读多帧；缺失或多匹配明确标记。订单行按 trigger_seq 和 intent_no/inst 连接 OMS、按 strategy 连接回调；同时双腿共享风险准入时 `risk_owner_intent_no` 标识第一腿，独立 OnFill/Reverse 仍用自身准入。多次同策略回调无法唯一连接时留空。
 

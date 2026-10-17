@@ -19,6 +19,8 @@ SAFE.update(("body_tsc", "epoch"))
 CHAIN_COLUMNS = "chain thread frame event_hash venue kind input_seq ex_ts_ns ex_send_ns hw_rx_ns sw_rx_ns rx_tsc decrypt_done_tsc frame_done_tsc decode_start_tsc decode_done_tsc ring_push_tsc ring_pop_tsc handed_tsc process_start_tsc journal_input_tsc process_end_tsc".split()
 CHAIN_COLUMNS += "rx_realtime_ns calibration_error_ns kernel_to_user_ns".split()
 CHAIN_COLUMNS += "last_read_sw_ns last_read_kernel_to_user_ns frame_sw_span_ns frame_start_tsc frame_work_done_tsc".split()
+RECEIVE_COLUMNS = "conn read_serial read_pre_tsc read_empty_tsc read_flags read_syscall_ns receive_wait_sw_ns complete_to_read_sw_ns read_to_frame_ns complete_to_frame_sw_ns".split()
+CHAIN_COLUMNS += RECEIVE_COLUMNS
 
 
 class Calibration:
@@ -228,6 +230,7 @@ class Analysis:
         self.sample(venue, name, chain, delta)
 
     def market(self, out):
+        self.frames(out)
         cols = CHAIN_COLUMNS
         output, writer = csv_file(out / "event_chains.csv", cols)
         self.db.execute("CREATE TABLE chains(input_seq INTEGER,chain TEXT,venue INTEGER,rx_tsc INTEGER,kind INTEGER,body TEXT)")
@@ -238,6 +241,10 @@ class Analysis:
                 row = dict(chain=chain, thread=d["thread"], frame=d["frame"], event_hash=d["event_hash"], venue=d["venue_conn"] & 255, kind=d["kind_inst"] & 65535)
                 frame = self.unique(4, thread=d["thread"], frame=d["frame"])
                 if frame:
+                    receive = self.db.execute('SELECT body FROM receive_frames WHERE thread=? AND frame=?',
+                        (d['thread'], d['frame'])).fetchone()
+                    if receive:
+                        row.update({k:v for k,v in json.loads(receive[0]).items() if k in RECEIVE_COLUMNS})
                     row.update(rx_tsc=frame["v0"], hw_rx_ns=frame["v1"], sw_rx_ns=frame["v2"], decrypt_done_tsc=frame["v3"], frame_done_tsc=frame["tsc"])
                     timing = self.unique(36, thread=d['thread'], frame=d['frame'])
                     if timing:
@@ -289,6 +296,59 @@ class Analysis:
         finally:
             output.close()
         self.db.execute("CREATE INDEX chain_input ON chains(input_seq)")
+
+    def frames(self, out):
+        """Receive attribution counted once per delivered frame, including control frames.
+
+        SO_TIMESTAMPING labels a read's skb, not each byte. The SW arrival span is a
+        proxy for collection wait; only read return -> frame is wholly userspace.
+        Never subtract aggregate percentiles or invent missing call boundaries.
+        """
+        self.db.execute('CREATE TABLE receive_frames(thread TEXT,frame INTEGER,body TEXT,PRIMARY KEY(thread,frame))')
+        columns = 'thread frame venue rx_tsc sw_rx_ns last_read_sw_ns rx_realtime_ns calibration_error_ns frame_work_done_tsc'.split() + RECEIVE_COLUMNS
+        output, writer = csv_file(out / 'receive_frames.csv', columns)
+        try:
+            for raw in self.db.execute('SELECT * FROM trace WHERE stage=4 ORDER BY thread,serial'):
+                f = dict(raw)
+                row = dict(thread=f['thread'], frame=f['frame'], venue=f['venue_conn'] & 255,
+                    conn=f['venue_conn'] >> 8, rx_tsc=f['v0'], sw_rx_ns=f['v2'])
+                chain = f"frame:{f['thread']}:{f['frame']}"
+                timing = self.unique(36, thread=f['thread'], frame=f['frame'])
+                if timing:
+                    row['frame_work_done_tsc'] = timing['tsc']
+                read = self.unique(1, thread=f['thread'], venue_conn=f['venue_conn'], tsc=f['v0'])
+                if read:
+                    row.update(read_serial=read['serial'], read_flags=read['v3'], last_read_sw_ns=read['v1'])
+                    call = self.unique(35, thread=f['thread'], venue_conn=f['venue_conn'], tsc=read['tsc'])
+                    if call:
+                        row.update(read_pre_tsc=call['v0'], read_empty_tsc=call['v3'])
+                        if call['v0']:
+                            row['read_syscall_ns'] = (read['tsc']-call['v0'])*1_000_000_000_000//self.hz
+                    if timing and read['tsc']:
+                        row['read_to_frame_ns'] = (timing['tsc']-read['tsc'])*1_000_000_000_000//self.hz
+                        self.sample(row['venue'], 'receive.read_to_frame', chain, row['read_to_frame_ns'])
+                    # Same-clock arrival span needs no TSC calibration. A missing
+                    # endpoint stays absent, and negative spans remain visible.
+                    if f['v2'] and read['v1']:
+                        row['receive_wait_sw_ns'] = read['v1']-f['v2']
+                        self.sample(row['venue'], 'receive.frame_wait_sw', chain, row['receive_wait_sw_ns'])
+                    calibrated = self.calibration.realtime(read['tsc']) if read['v1'] else None
+                    if calibrated:
+                        realtime, error = calibrated
+                        row.update(rx_realtime_ns=realtime, calibration_error_ns=error,
+                            complete_to_read_sw_ns=realtime-read['v1'])
+                        self.sample(row['venue'], 'receive.complete_to_read_sw', chain, row['complete_to_read_sw_ns'])
+                        if 'read_to_frame_ns' in row:
+                            row['complete_to_frame_sw_ns'] = row['complete_to_read_sw_ns']+row['read_to_frame_ns']
+                            self.sample(row['venue'], 'receive.complete_to_frame_sw', chain, row['complete_to_frame_sw_ns'])
+                    elif read['v1']:
+                        self.issues['receive_unsynced_cal'] += 1
+                else:
+                    self.issues['receive_missing_last_read'] += 1
+                writer.writerow(row)
+                self.db.execute('INSERT INTO receive_frames VALUES(?,?,?)', (f['thread'],f['frame'],json.dumps(row)))
+        finally:
+            output.close()
 
     def reads(self, out):
         """Independent successful recvmsg batches, never weighted by decoded event count."""
