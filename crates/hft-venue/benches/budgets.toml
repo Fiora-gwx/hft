@@ -42,6 +42,10 @@ p99_ns = 1500
 p50_ns = 1000
 p99_ns = 2500
 
+[venue_gw_private_report_burst]
+p50_ns = 1000
+p99_ns = 2500
+
 [venue_gw_drain_during_burst]
 p50_ns = 1200
 p99_ns = 3000

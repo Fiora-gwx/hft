@@ -223,7 +223,7 @@ pub mod link_flags {
     pub const RETRY_PENDING: u8 = 32;
     /// A resumption `Hedge` item waits in `pending_out`.
     pub const HEDGE_QUEUED: u8 = 64;
-    /// The failure handling switched to `Reverse` (`on_fail = Reverse` or Simultaneous mismatch).
+    /// Failure compensation: opening Reverse or closing simultaneous SecondRetry.
     pub const REVERSING: u8 = 128;
 }
 
@@ -1284,7 +1284,11 @@ impl ApprovedIntent {
     /// The intent of one of this crate's hedge requests priced by `price_hedge` (`hp.px` is the
     /// limit price; tif = the plan's for Second/SecondRetry, Ioc for Reverse).
     pub fn hedge(req: &HedgeRequest, plan: &HedgePlan, hp: HedgePx, class: IntentClass) -> ApprovedIntent {
-        let tif = if req.role == LinkRole::Reverse {
+        let tif = if req.role == LinkRole::Reverse
+            || (req.role == LinkRole::SecondRetry
+                && plan.kind == hft_strategy_sdk::HedgeKind::Simultaneous
+                && plan.reduce_only != 0)
+        {
             Tif::Ioc
         } else {
             plan.tif

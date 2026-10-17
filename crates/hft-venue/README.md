@@ -691,6 +691,7 @@ BBO 接收端通过 [hft-net 的缓冲优先入口](../hft-net/README.md#1-接�
 | 订单类 `GwCmd` 出环 → `sendmsg` 返回(encode + seal + 加密 + sendmsg,回环) | gw | ≤ 3 µs / ≤ 8 µs | `venue_gw_place_loopback` |
 | 同上,不含 `sendmsg` 系统调用 | gw | ≤ 0.8 µs / ≤ 1.5 µs | `venue_gw_place_mem` |
 | 回报帧 → `OrderEvent` 入环 | gw | ≤ 1 µs / ≤ 2.5 µs | `venue_gw_report_path` |
+| 下单连接已有 64 帧时首笔独立私有回报入环 | gw | ≤ 1 µs / ≤ 2.5 µs | `venue_gw_private_report_burst` |
 | 回报突发(64 帧连续到达)期间,出环订单被 `drain_out` 取出的等待 | gw | ≤ 1.2 µs / ≤ 3 µs | `venue_gw_drain_during_burst` |
 | `IdTable` 查/插/置终态/淘汰 | gw | ≤ 40 ns / ≤ 100 ns | `venue_idtable` |
 | `kill_admit`(一次 `load(Acquire)` + 位运算) | gw | ≤ 3 ns / ≤ 8 ns | `venue_kill_admit` |
@@ -716,6 +717,8 @@ BBO 接收端通过 [hft-net 的缓冲优先入口](../hft-net/README.md#1-接�
 带 `POSITION_CLOSE` 的 Place 按协议的 `order_channel_for` 路由,使用 `position_close_interval_ms` 的账户间隔护栏;过早请求回 `RateLimited`。REST 提交时登记槽镜像。专用端点返回的 exchange-id 仅在 ACK 与发送时保存的 account/inst/epoch/slot/gen 一致、镜像仍为该代时绑定;随后释放先到的暂存成交。HTTP/解码失败仍为 Unknown,不把 ACK 当仓位清零。恢复镜像保留平仓标记。
 
 ## 测试与验收
+
+独立私有用户流先于同账户下单连接读取,帧严格保持连接内顺序。gw 先排空已缓冲的完整帧/记录再补读 socket;每帧解码后立即发布并 drain_out,不等整批。VEN-207 验证同次 read 内前帧在后帧解码开始前可见,私有回报不等待另一下单连接的突发。
 
 用例与验收见 [TESTS.md](TESTS.md)。
 

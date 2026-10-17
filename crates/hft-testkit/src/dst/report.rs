@@ -18,7 +18,7 @@ pub fn trace_line(t: &crate::dst::TraceItem) -> String {
     )
 }
 
-/// `DST FAILED seed=0x… step=N invariant=I3(exposure) -> cargo xtask dst --seeds 1 --seed 0x… --suite core --steps N+1 --trace`.
+/// `DST FAILED seed=0x… step=N invariant=I3(exposure) -> cargo xtask dst --seeds 1 --seed 0x… --suite core --steps <original length> --trace`.
 pub fn repro_line(f: &DstFailure) -> String {
     repro_line_case(f, None)
 }
@@ -43,9 +43,7 @@ pub fn repro_command_case(f: &DstFailure, case: Option<&str>) -> String {
     let case = case.map_or(String::new(), |id| format!(" --case {id}"));
     format!(
         "cargo xtask dst --seeds 1 --seed {:#018x} --suite {}{case} --steps {} --trace",
-        f.seed,
-        f.suite,
-        f.step + 1
+        f.seed, f.suite, f.planned_steps
     )
 }
 

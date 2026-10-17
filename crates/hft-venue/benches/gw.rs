@@ -204,6 +204,62 @@ thread_local! {
     static TAKEN: Cell<Option<Instant>> = const { Cell::new(None) };
 }
 
+// Scheduling cost to publication of the first private report while an order socket has
+// 64 complete acknowledgements ready in the same poll. No exchange/network latency.
+fn ven_356_private_report_burst(c: &mut Criterion) {
+    use support::stub::{Stub, V_USER_STREAM};
+    type U = Stub<2048, V_USER_STREAM>;
+    stub::log_enabled(false);
+    let mut h = gw_full::<U>(g0(), &[A1], GhOpts::default());
+    h.reps();
+    let line = |slot| {
+        let id = ClientOrderId {
+            epoch: 5,
+            venue: V7,
+            account: A1,
+            slot,
+            r#gen: 1,
+        };
+        format!("O|{}|EX-{slot}|Ack|0|0|0|0|0|0", stub::cid_text(&id))
+    };
+    let (_unused, replacement) = hft_rt::spsc::<hft_event::RepMsg>(64, hft_rt::Backing::Heap).unwrap();
+    let mut rep = std::mem::replace(&mut h.rep, replacement);
+    stub::set_report_hook(Some(Box::new(move |_| {
+        while let Some(m) = rep.try_pop() {
+            if matches!(m, hft_event::RepMsg::OrderEvent(e, _) if e.slot.0 == 900) {
+                TAKEN.with(|c| c.set(Some(Instant::now())));
+            }
+        }
+    })));
+    let mut now = 10_000_000;
+    c.bench_function("venue_gw_private_report_burst", |b| {
+        b.iter_custom(|iters| {
+            let mut total = Duration::ZERO;
+            for _ in 0..iters {
+                now += 1;
+                for slot in 1..=64 {
+                    h.net
+                        .push(ConnId(112), format!("R|{slot}-1-1-5|-2010").as_bytes());
+                }
+                for slot in 900..=901 {
+                    h.net.push(ConnId(114), line(slot).as_bytes());
+                }
+                h.net.flush(&mut h.rt, now);
+                TAKEN.with(|c| c.set(None));
+                let start = Instant::now();
+                h.rt.poll_once(now);
+                total += TAKEN
+                    .with(|c| c.get())
+                    .expect("private report published before next decode")
+                    .duration_since(start);
+            }
+            total
+        })
+    });
+    stub::set_report_hook(None);
+    stub::log_enabled(true);
+}
+
 fn ven_357_gw_drain_during_burst(c: &mut Criterion) {
     stub::log_enabled(false);
     let mut h = quiet_gw(&[A1, A2]);
@@ -424,7 +480,7 @@ fn ven_364_gw_acct_apply_16k(c: &mut Criterion) {
 criterion_group!(
     name = benches;
     config = Criterion::default().sample_size(20).measurement_time(Duration::from_secs(2)).warm_up_time(Duration::from_millis(300));
-    targets = ven_354_gw_place_loopback, ven_355_gw_place_mem, ven_356_gw_report_path, ven_357_gw_drain_during_burst,
+    targets = ven_354_gw_place_loopback, ven_355_gw_place_mem, ven_356_gw_report_path, ven_356_private_report_burst, ven_357_gw_drain_during_burst,
         ven_358_idtable, ven_359_kill_admit, ven_361_gw_external_fill, ven_362_gw_skip_event, ven_363_gw_margin_push, ven_364_gw_acct_apply_16k, ven_369_gw_idle_8sock
 );
 criterion_main!(benches);

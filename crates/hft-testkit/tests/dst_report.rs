@@ -18,17 +18,15 @@ fn tk_049_single_repro_line() {
     let line = repro_line(&f);
     let want = format!(
         "DST FAILED seed={:#018x} step={} invariant=I1(fill_evidence) -> cargo xtask dst --seeds 1 --seed {:#018x} --suite core --steps {} --trace",
-        c.seed,
-        f.step,
-        c.seed,
-        f.step + 1
+        c.seed, f.step, c.seed, f.planned_steps
     );
+    assert_eq!(f.planned_steps, c.steps);
     assert_eq!(line, want);
     assert_eq!(line.lines().count(), 1);
     assert!(line.contains(&format!("seed=0x{:016x}", c.seed)), "16 hex digits");
     // Rerunning with the line's parameters reproduces the same line.
     let mut again = c.clone();
-    again.steps = f.step + 1;
+    again.steps = f.planned_steps;
     match run::<ToyEngine>(&again) {
         DstOutcome::Fail(g) => assert_eq!(repro_line(&g), line),
         DstOutcome::Pass { .. } => panic!("repro did not fail"),

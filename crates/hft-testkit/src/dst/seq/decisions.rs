@@ -149,7 +149,13 @@ pub fn fill(
                 return Err("invalid hedge ratio in observation".into());
             }
             // Simultaneous second legs are Open, not a hedge against already filled inventory.
-            if p.kind != hft_strategy_sdk::HedgeKind::Simultaneous || role == LinkRole::Reverse {
+            let closing_retry = p.kind == hft_strategy_sdk::HedgeKind::Simultaneous
+                && p.reduce_only != 0
+                && role == LinkRole::SecondRetry;
+            if p.kind != hft_strategy_sdk::HedgeKind::Simultaneous
+                || role == LinkRole::Reverse
+                || closing_retry
+            {
                 hedge = match role {
                     LinkRole::Second => Some(HedgeKind::Second),
                     LinkRole::SecondRetry => Some(HedgeKind::SecondRetry),
@@ -158,6 +164,12 @@ pub fn fill(
                 };
             }
             basis = match role {
+                LinkRole::SecondRetry if closing_retry && d.inst == raw.first_inst => {
+                    (i128::from(l.first_net.0) - i128::from(l.hedge_filled.0) * den / num).abs()
+                }
+                LinkRole::SecondRetry if closing_retry => {
+                    (i128::from(l.first_net.0) * num / den - i128::from(l.hedge_filled.0)).abs()
+                }
                 LinkRole::Second => {
                     raw.first_after * num / den - raw.first_before * num / den + raw.residual_before
                 }
@@ -191,6 +203,9 @@ pub fn fill(
             } else {
                 (-exposure - fi.max(0) - hi.max(0)).max(0)
             };
+            if closing_retry && d.inst == raw.first_inst {
+                naked_dir = naked_dir * den / num;
+            }
         }
         // qty * px * quote_rate at quote exponent -6, with one final round toward +infinity.
         let product = i128::from(d.qty.0)

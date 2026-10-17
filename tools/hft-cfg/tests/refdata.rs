@@ -661,6 +661,8 @@ fn tool_130_caps_overrides() {
     let defaults = toml::to_string(&value).unwrap();
     let overrides = std::fs::read_to_string(fixtures().join("refdata-basic/venue_caps.toml")).unwrap();
     let base = venue_binance::Usdm::default_caps(|_| None);
+    assert!(base.flags.contains(hft_refdata::CapFlags::POSITION_CLOSE));
+    assert!(base.reduce_only);
     let disabled = format!(
         "flags = {}\nreason = \"disable amend\"",
         base.flags.0 & !hft_refdata::CapFlags::AMEND.0
@@ -677,6 +679,12 @@ fn tool_130_caps_overrides() {
         ("1", "", 0, ""),
         ("2", disabled.as_str(), 0, ""),
         ("3", unsupported.as_str(), 1, "not supported"),
+        (
+            "stale",
+            "flags = 31\nreason = \"obsolete deployment\"",
+            1,
+            "KillCapsMissing",
+        ),
         ("4", "required_margin_mode = \"cross\"", 1, "reason"),
         ("5", "ignorable_user_events = []", 1, "may only append"),
         ("6", appended.as_str(), 0, ""),

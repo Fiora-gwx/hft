@@ -15,7 +15,10 @@ pub fn price_hedge(
     tick: i64,
     tsc_per_ms: u64,
 ) -> Result<HedgePx, HedgePxErr> {
-    let reverse = req.role == LinkRole::Reverse;
+    let reverse = req.role == LinkRole::Reverse
+        || (req.role == LinkRole::SecondRetry
+            && plan.kind == HedgeKind::Simultaneous
+            && plan.reduce_only != 0);
     let side = req.side;
     let silence = u64::from(lim.conn_liveness_ms).saturating_mul(tsc_per_ms);
     let live = bbo.quote_live(now, silence) && bbo.bid_px.0 > 0 && bbo.ask_px.0 > 0;

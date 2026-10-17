@@ -14,3 +14,4 @@
 0xd975b663903a5073 2026-10-14 world=trading INV-14 交易世界反例复核
 0xffcfb3918b4c9b42 2026-10-14 world=trading INV-19 无裸腿重试反例复核
 0xffcfb3918b4c9b0c 2026-10-14 world=trading INV-6 Unknown 撤单拒绝携带的累计成交漏记
+0x7442aaf1b5dea253 2026-10-17 world=trading Same-input recovery requests reserve naked quantity (INV-19/OMS-318); original 10000-step fault plan

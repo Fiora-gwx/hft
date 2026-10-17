@@ -1997,6 +1997,8 @@ DST 冒烟步含基线、LED-080 与 LED-081 三次调用,三者均使用 200 �
 
 ### TOOL-130 能力表以 default_caps 为底叠加覆盖,覆盖规则逐条生效
 
+- Binance USDM 默认含 POSITION_CLOSE、IOC、reduce-only。实账户旧覆盖 flags=31 必须失败 KillCapsMissing;删除完整旧行后生成协议默认值。
+
 - 规则:[hft-cfg](README.md#hft-cfg)
 - 级别:table
 - 里程碑:M3

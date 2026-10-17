@@ -94,6 +94,71 @@ fn check_simultaneous_recovery_waits_for_both_terminal() {
 }
 
 #[test]
+fn oms_317_closing_recovery_waits_and_does_not_duplicate_completion() {
+    for first_short in [false, true] {
+        let mut h = H::new();
+        let mut hp = plan_l1();
+        hp.kind = hft_strategy_sdk::HedgeKind::Simultaneous;
+        hp.on_fail = OnFail::Reverse;
+        hp.reduce_only = 1;
+        let (first, link) = place_first(&mut h, q("0.012"), Tif::Ioc, hp, 0);
+        let req = one_hedge(&h);
+        let second = place_hedge(&mut h, &req, 0).unwrap();
+        let (filled, short) = if first_short {
+            (second, first)
+        } else {
+            (first, second)
+        };
+        h.fill(filled, q("0.012"), p("60000"), 1);
+        h = restored(&snapshot(&h));
+        rec_end(&mut h, 10_000, 2);
+        gate(&mut h, VS, 10_000);
+        gate(&mut h, VX, 10_000);
+        h.query(short, 1, Qty(0), p("60000"), 10_001);
+        assert!(h.out.hedges.is_empty());
+        h.what(short, OrderEventKind::Expired, 10_002);
+        assert!(h.out.hedges.is_empty());
+        h.retry(link, 10_102);
+        let req = one_hedge(&h);
+        assert_eq!(req.role, LinkRole::SecondRetry);
+        assert_eq!(req.inst, if first_short { X } else { Y });
+        let retry = place_hedge(&mut h, &req, 10_102).unwrap();
+        h = restored(&snapshot(&h));
+        rec_end(&mut h, 20_000, 10_103);
+        gate(&mut h, VS, 20_000);
+        gate(&mut h, VX, 20_000);
+        h.query(retry, 1, Qty(0), p("60000"), 20_001);
+        assert!(h.out.hedges.is_empty());
+        h.fill(retry, q("0.012"), p("60000"), 20_002);
+        assert_eq!(h.link(link).state, LinkState::Done);
+    }
+}
+
+#[test]
+fn oms_318_multiple_resumed_links_reserve_same_input_naked_quantity() {
+    let mut h = H::new();
+    for _ in 0..3 {
+        let (first, _) = place_first(&mut h, q("0.012"), Tif::Ioc, plan_l1(), 0);
+        h.fill(first, q("0.012"), p("60000"), 1);
+        // The original hedge was gated; leave its obligation without an in-flight slot.
+    }
+    // Other recorded repairs have already reduced the group's remaining naked inventory.
+    h = restored(&snapshot(&h));
+    h.o.on_groups_changed(&groups_s1(true));
+    rec_end(&mut h, 10_000, 2);
+    h.o.test_set_net(A1, g1(), Y, q("-0.024"));
+    gate(&mut h, VX, 10_001);
+    let total: i64 = h.out.hedges.iter().map(|r| r.qty.0).sum();
+    assert_eq!(total, q("0.012").0);
+    assert_eq!(h.out.hedges.len(), 1);
+    let req = one_hedge(&h);
+    assert_eq!(req.role, LinkRole::SecondRetry);
+    let second = place_hedge(&mut h, &req, 10_001).unwrap();
+    h.fill(second, q("0.012"), p("60000"), 10_002);
+    assert_eq!(h.legs(A1, g1()).view.naked_qty, q("0"));
+}
+
+#[test]
 fn oms_464_late_first_fill_does_not_double_resume() {
     let mut h = H::new();
     let (first, link) = place_first(&mut h, q("0.012"), Tif::Ioc, plan_l1(), 0);

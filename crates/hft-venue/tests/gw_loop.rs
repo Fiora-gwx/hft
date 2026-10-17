@@ -17,6 +17,46 @@ use support::stub::{self, Stub, StubProto, V_USER_STREAM};
 
 const P: ConnId = ConnId(112);
 
+#[test]
+fn ven_207_private_frames_publish_before_next_decode_and_order_burst() {
+    use std::{cell::RefCell, rc::Rc};
+    type U = Stub<2048, V_USER_STREAM>;
+    let mut h = gw_full::<U>(g0(), &[A1], GhOpts::default());
+    h.reps();
+    let uid = ConnId(114);
+    for slot in 1..=64 {
+        h.net.push(P, format!("R|{slot}-1-1-5|-2010").as_bytes());
+    }
+    for slot in 101..=103 {
+        let fill = ack_line(slot).replace(
+            "|Ack|0|0|0|0|0|0",
+            &format!("|Fill|100000|100000|100000|0|2|{slot}"),
+        );
+        h.net.push(uid, fill.as_bytes());
+    }
+    h.net.flush(&mut h.rt, 3_000_000);
+    let (_unused, replacement) = hft_rt::spsc::<RepMsg>(64, hft_rt::Backing::Heap).unwrap();
+    let mut rep = std::mem::replace(&mut h.rep, replacement);
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let captured = seen.clone();
+    let mut decoded = 0;
+    stub::set_report_hook(Some(Box::new(move |_| {
+        while let Some(m) = rep.try_pop() {
+            if let RepMsg::OrderEvent(e, _) = m {
+                captured.borrow_mut().push(e.slot.0);
+            }
+        }
+        // Every preceding frame was visible before this decoder starts, even in one read.
+        assert_eq!(captured.borrow().len(), decoded);
+        decoded += 1;
+    })));
+    h.rt.poll_once(3_000_000);
+    stub::set_report_hook(None);
+    let seen = seen.borrow();
+    assert_eq!(&seen[..3], &[101, 102, 103]);
+    assert_eq!(&seen[3..], &(1..64).collect::<Vec<_>>());
+}
+
 fn ack_line(slot: u32) -> String {
     let id = ClientOrderId {
         epoch: 5,

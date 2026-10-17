@@ -131,3 +131,81 @@ fn oms_214_simul_equal_done() {
     assert!(h.out.hedges.is_empty());
     assert_eq!(h.link(l).state, LinkState::Done);
 }
+
+#[test]
+fn oms_211_closing_pair_completes_only_the_unfilled_leg() {
+    for first_short in [false, true] {
+        let mut h = H::new();
+        h.o.test_set_net(A1, g1(), X, q("-0.012"));
+        h.o.test_set_net(A1, g1(), Y, q("0.012"));
+        let mut plan = plan_l2(OnFail::Reverse);
+        plan.reduce_only = 1;
+        plan.tif = Tif::Fok;
+        let (f, l) = place_first(&mut h, q("0.012"), Tif::Ioc, plan, 0);
+        let req = one_hedge(&h);
+        let s = place_hedge(&mut h, &req, 0).unwrap();
+        let (filled, unfilled) = if first_short { (s, f) } else { (f, s) };
+        h.fill(filled, q("0.012"), p("60000"), 1);
+        reject(&mut h, unfilled, 2);
+        assert!(h.out.hedges.is_empty());
+        assert_eq!(h.link(l).retries, 1);
+        h.retry(l, 102);
+        let req = one_hedge(&h);
+        assert_eq!(req.role, LinkRole::SecondRetry);
+        assert_eq!(req.inst, if first_short { X } else { Y });
+        assert_eq!(req.side, if first_short { Side::Buy } else { Side::Sell });
+        assert!(req.reduce_only);
+        assert_eq!(req.qty, q("0.012"));
+        let retry = place_hedge(&mut h, &req, 102).unwrap();
+        assert_eq!(h.slot(retry).tif, Tif::Ioc);
+        // Duplicate timer delivery cannot create a second order while this close is in flight.
+        h.retry(l, 103);
+        assert!(h.out.hedges.is_empty());
+        h.fill(retry, q("0.012"), p("60000"), 104);
+        assert_eq!(h.link(l).state, LinkState::Done);
+        assert_eq!(h.link(l).first_net, h.link(l).hedge_filled);
+        assert_eq!(h.legs(A1, g1()).view.leg[0].net, q("0"));
+        assert_eq!(h.legs(A1, g1()).view.leg[1].net, q("0"));
+    }
+}
+
+#[test]
+fn oms_213_closing_pair_retry_budget_and_limiter_backoff() {
+    let mut h = H::new();
+    let mut plan = plan_l2(OnFail::Reverse);
+    plan.reduce_only = 1;
+    let (f, l) = place_first(&mut h, q("0.012"), Tif::Ioc, plan, 0);
+    let req = one_hedge(&h);
+    let s = place_hedge(&mut h, &req, 0).unwrap();
+    h.fill(f, q("0.012"), p("60000"), 1);
+    reject(&mut h, s, 2);
+    h.retry(l, 102);
+    h.out.clear();
+    h.o.hedge_gated(
+        l,
+        HedgeGate::Risk(hft_types::RejectBits::RATE),
+        ms(500),
+        ms(102),
+        50,
+        &mut h.out,
+    );
+    assert!(h.out.hedges.is_empty());
+    assert_eq!(h.link(l).retries, 1);
+    assert!(h.out.timers.iter().any(|t| t.deadline_tsc == ms(500)));
+    for attempt in 0..3 {
+        h.retry(l, 500 + attempt * 200);
+        let req = one_hedge(&h);
+        assert_eq!(req.role, LinkRole::SecondRetry);
+        let retry = place_hedge(&mut h, &req, 500 + attempt * 200).unwrap();
+        reject(&mut h, retry, 501 + attempt * 200);
+    }
+    assert_eq!(h.link(l).state, LinkState::Broken);
+    assert!(
+        h.out
+            .links
+            .iter()
+            .any(|u| u.broken_reason == LinkBroken::RetryExhausted)
+    );
+    h.retry(l, 1200);
+    assert!(h.out.hedges.is_empty());
+}

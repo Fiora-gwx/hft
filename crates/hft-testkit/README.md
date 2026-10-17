@@ -499,6 +499,8 @@ dev 组件,无热路径约束。运行时间预算(GitHub 托管 `ubuntu-latest`
 
 ## 测试与验收
 
+失败报告的复现命令保留原始 `planned_steps`,不截为失败步数加一。storage 故障计划用总步数生成崩溃时刻,缩短运行长度会改变输入序列。固定种子 `0x7442aaf1b5dea253` 在 trading 世界运行完整 10000 步并核对真实引擎不变量、确定性与 journal。
+
 用例与验收见 [TESTS.md](TESTS.md)。
 
 ## 依赖
