@@ -8,7 +8,7 @@ spec: README.md
 
 格式与规则见 [docs/tests](../docs/tests/README.md)。
 
-发布链路的 `tests/test_release_preflight.py` 验证 DEP-251 的 CI lane 汇总准入：fast lane 的 `rust` 跳过不阻止已通过 acceptance 的开发制品，acceptance 缺失、失败或跳过均拒绝。
+发布链路的 `tests/test_release_preflight.py` 验证 DEP-251 的 CI lane 汇总准入：fast lane 的 `rust` 跳过不阻止已通过 acceptance 的开发制品，acceptance 缺失、失败或跳过均拒绝。每夜跳过的 decoupling 不覆盖最近非 skipped 的结论；只有 skipped、最近失败/取消/未完成均拒绝发布。
 
 DEP-225 的首次激活回归从不存在的冷目录开始，验证停止旧实例后、hostprobe 前准备 `/data/prod`；真实目录属主和挂载权限仍在主机验收。
 
