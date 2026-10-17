@@ -429,6 +429,46 @@ fn otu(x: &str, status: &str) -> String {
         r#"{{"e":"ORDER_TRADE_UPDATE","o":{{"s":"BTCUSDT","c":"1000301020002a000000073d","S":"BUY","o":"LIMIT","x":"{x}","X":"{status}","i":325078477,"l":"0.001","z":"0.003","L":"65000.1","ap":"65000.05","n":"0.0130","N":"USDT","rp":"0","T":1790000000010,"t":9001}}}}"#
     )
 }
+
+#[test]
+fn bin_026_private_projection_matches_reference() {
+    fn check<P: VenueProtocol<GwCtx = GwCtx>>(seed: &str) {
+        let class = P::classify_report(MsgOp::Text, seed.as_bytes());
+        assert_eq!(decode::<P>(&mut GwCtx::default(), seed).0.unwrap().events, 1);
+        let compare = |p: &[u8]| {
+            let mut fast = GwCtx::default();
+            let mut reference = GwCtx::default();
+            // An escaped unknown key forces the checked reference parser, without changing
+            // selected fields. Keep dispatch fixed while corrupting payload bytes.
+            for payload in [p, p, seed.as_bytes()] {
+                let mut fallback = br#"{"\u005fwire_reference":0,"#.to_vec();
+                fallback.extend_from_slice(&payload[1..]);
+                let mut a = RepSink::default();
+                let mut b = RepSink::default();
+                let ra = P::decode_report(rd(), &mut fast, class, payload, &RX, &mut a);
+                let rb = P::decode_report(rd(), &mut reference, class, &fallback, &RX, &mut b);
+                assert_eq!(format!("{ra:?}|{a:?}"), format!("{rb:?}|{b:?}"), "{payload:?}");
+            }
+        };
+        compare(seed.as_bytes());
+        let mut p = seed.as_bytes().to_vec();
+        for i in 1..p.len() {
+            let saved = p[i];
+            for byte in [b'0', b'-', b'"', b'\\', b'{', b']', b',', b' ', 0, 0xff] {
+                p[i] = byte;
+                compare(&p);
+            }
+            p[i] = saved;
+        }
+        for extra in [r#""extra":{"a":[null,1,true]},"#, r#""e":"ignored","#] {
+            compare(format!("{{{extra}{}", &seed[1..]).as_bytes());
+        }
+    }
+    check::<Usdm>(&otu("TRADE", "PARTIALLY_FILLED"));
+    check::<venue_binance::Spot>(&spot_report(
+        "TRADE", "FILLED", "web_77", "", "0.003", "0.003", "195", 503,
+    ));
+}
 #[test]
 fn bin_101_fill_fields() {
     let p = otu("TRADE", "PARTIALLY_FILLED");

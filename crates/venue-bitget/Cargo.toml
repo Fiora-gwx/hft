@@ -60,3 +60,7 @@ harness = false
 [[bench]]
 name = "wire"
 harness = false
+
+[[bench]]
+name = "private_wire"
+harness = false

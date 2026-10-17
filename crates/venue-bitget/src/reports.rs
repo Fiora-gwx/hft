@@ -438,6 +438,94 @@ struct OrderMsg<'a> {
     ts: UInt,
 }
 
+/// Single-row pushes avoid constructing the maximum-capacity borrowed row array. Multi-row,
+/// escaped, duplicate-key or unusual numeric messages retain the reference decoder unchanged.
+fn projected_order(p: &[u8]) -> Option<(OrderRow<'_>, UInt)> {
+    use hft_venue_proto::json::{self as wire, Select};
+    let f: [&[u8]; 22] = wire::nested(p, 0b11, |state, key| {
+        if state == 0 {
+            return match key {
+                b"ts" => Select::Raw(0),
+                b"data" => Select::One(1),
+                _ => Select::Skip,
+            };
+        }
+        let slot = match key {
+            b"category" => 1,
+            b"symbol" | b"instId" => 2,
+            b"orderId" => 3,
+            b"clientOid" => 4,
+            b"side" => 5,
+            b"timeInForce" | b"force" => 6,
+            b"orderStatus" | b"status" => 7,
+            b"tradeSide" => 8,
+            b"delegateType" => 9,
+            b"cancelReason" => 10,
+            b"cumExecQty" | b"accBaseVolume" => 11,
+            b"cumExecValue" => 12,
+            b"avgPrice" | b"priceAvg" => 13,
+            b"feeDetail" => 14,
+            b"baseVolume" => 15,
+            b"fillPrice" => 16,
+            b"fillFee" => 17,
+            b"fillFeeCoin" => 18,
+            b"tradeId" => 19,
+            b"fillTime" => 20,
+            b"updatedTime" | b"uTime" => 21,
+            _ => return Select::Skip,
+        };
+        Select::Raw(slot)
+    })?;
+    // `orderId` is required, unlike the defaulted time fields.
+    if f[3].is_empty() {
+        return None;
+    }
+    let default = |i: usize| {
+        if f[i].is_empty() {
+            Some("")
+        } else {
+            wire::string(f[i])
+        }
+    };
+    let optional = |i: usize| {
+        if f[i].is_empty() || f[i] == b"null" {
+            Some(None)
+        } else {
+            wire::string(f[i]).map(Some)
+        }
+    };
+    Some((
+        OrderRow {
+            category: default(1)?,
+            symbol: wire::string(f[2])?,
+            order_id: UInt::wire(f[3])?,
+            client_oid: default(4)?,
+            side: default(5)?,
+            tif: default(6)?,
+            status: wire::string(f[7])?,
+            trade_side: default(8)?,
+            delegate_type: default(9)?,
+            cancel_reason: default(10)?,
+            cum_qty: optional(11)?,
+            cum_value: optional(12)?,
+            avg_px: optional(13)?,
+            fee_detail: if f[14].is_empty() || f[14] == b"null" {
+                None
+            } else {
+                Some(from(f[14]).ok()?)
+            },
+            fill_qty: optional(15)?,
+            fill_px: optional(16)?,
+            fill_fee: optional(17)?,
+            fill_fee_coin: optional(18)?,
+            trade_id: optional(19)?,
+            fill_time: UInt::wire(f[20])?,
+            updated: UInt::wire(f[21])?,
+        },
+        UInt::wire(f[0])?,
+    ))
+}
+
 /// Order status of a push or a query.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 enum St {
@@ -700,14 +788,29 @@ fn orders(
     rx: &RxMeta,
     out: &mut impl ReportSink,
 ) -> Result<ReportOutcome, DecodeErr> {
+    if let Some((row, ts)) = projected_order(p) {
+        return order_rows(line, rd, ctx, core::iter::once(&row), ts, rx, out);
+    }
     let m: OrderMsg = from(p)?;
     if m.data.over {
         return Err(DecodeErr::Shape);
     }
+    order_rows(line, rd, ctx, m.data.iter(), m.ts, rx, out)
+}
+
+fn order_rows<'a>(
+    line: Line,
+    rd: &RefData,
+    ctx: &mut GwCtx,
+    input: impl Iterator<Item = &'a OrderRow<'a>>,
+    ts: UInt,
+    rx: &RxMeta,
+    out: &mut impl ReportSink,
+) -> Result<ReportOutcome, DecodeErr> {
     // Validate every row first: a failing message writes no event and leaves `ctx` unchanged.
     let mut rows: [Option<Parsed>; ORDERS_MAX] = [None; ORDERS_MAX];
-    for (k, r) in m.data.iter().enumerate() {
-        let mut row = parse_row(line, rd, r, m.ts)?;
+    for (k, r) in input.enumerate() {
+        let mut row = parse_row(line, rd, r, ts)?;
         if let Some(x) = row.as_mut() {
             x.cid = x.cid.filter(|c| c.account == rx.account);
             let mut prev = ctx.get(x.order_id).map(|p| (p.cum, p.value, p.fee, p.fee_asset));
