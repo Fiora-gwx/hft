@@ -30,3 +30,28 @@ def test_dep_251_release_requires_lane_acceptance(monkeypatch, verdict, accepted
     else:
         with pytest.raises(preflight.Fail, match="acceptance"):
             preflight.check_ci("example/hft", "a" * 40)
+
+
+@pytest.mark.parametrize("verdict", ["success", "failure", "cancelled", None])
+def test_dep_251_nightly_skip_preserves_latest_decoupling_verdict(monkeypatch, verdict):
+    checks = [
+        {"id": 1, "name": "decoupling-gate", "started_at": "2026-10-16T17:00:00Z",
+         "status": "completed", "conclusion": "success"},
+        {"id": 2, "name": "quality-gates / decoupling-gate", "started_at": "2026-10-16T18:00:00Z",
+         "status": "completed" if verdict else "in_progress", "conclusion": verdict},
+        {"id": 3, "name": "quality-gates / decoupling-gate", "started_at": "2026-10-16T21:00:00Z",
+         "status": "completed", "conclusion": "skipped"},
+    ]
+    monkeypatch.setattr(preflight.gh, "paged", lambda *args, **kwargs: checks)
+    if verdict == "success":
+        assert preflight.check_decoupling("example/hft", "a" * 40) == 2
+    else:
+        with pytest.raises(preflight.Fail, match="check run 2"):
+            preflight.check_decoupling("example/hft", "a" * 40)
+
+
+def test_dep_251_skipped_decoupling_is_not_release_evidence(monkeypatch):
+    checks = [{"id": 3, "name": "quality-gates / decoupling-gate", "conclusion": "skipped"}]
+    monkeypatch.setattr(preflight.gh, "paged", lambda *args, **kwargs: checks)
+    with pytest.raises(preflight.Fail, match="no non-skipped"):
+        preflight.check_decoupling("example/hft", "a" * 40)

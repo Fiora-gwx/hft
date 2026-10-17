@@ -103,6 +103,7 @@ deploy/
 | 验证包 | `hft-verify-<ver>-aarch64.tar.zst`(随正式版;另可对任一已有标签的全绿提交单独产出) | `verify-bundle.yml`([development](../docs/development.md#验证包工作流verify-bundleyml)) | 只由 `hft-verify.service` 运行;不含任何生产二进制,安装不影响生产版本激活([验证包与 hft-verify](#验证包与-hft-verify)) |
 
 - 前两类走同一条安装路径(校验 SHA-256、`RELEASE.json`、逐文件哈希、冷激活);验证包用 `releasectl install-verify`。`channel = "dev"` 的归档只能装在本机清单 `class = "dev2"` 的主机上,其他主机上 `releasectl install` 退出 1。服务器上没有 `cargo`、`rustc` 或任何构建工具,`preflight.sh` 检查到它们即失败(检查的命令名见[发布归档](#发布归档与-releasectl)的预检一行)。
+- 发布预检的 CI 与 decoupling 结论选择规则归 [development 发布工作流](../docs/development.md#发布工作流release-aarch64yml)，回归覆盖归 [DEP-251](TESTS.md)。
 - **租用实例**:M1.5 延迟探针与参考机([development 参考机](../docs/development.md#参考机))只解包运行 CI 产出的制品(基准制品等),不经 `releasectl install`、不需要主机清单与 `host_expect`;调优按 [host-tuning](../docs/runbooks/host-tuning.md) C 节逐项核对。**M3 末满订阅探针**要按 c16(或 c32)线程计划带隔离核、大页、IRQ 专核与 `egress.toml` 运行 prod 与 sim,因此按正式版安装:清单 `hosts/probe-c16.toml`、`hosts/probe-c32.toml`(`class` 分别为 `c16`、`c32`,`formal_live = false`、`verify = false`,`[egress]` 是为探针预建的 ENI-B/ENI-C 的固定私有 IP 与 EIP)随每个正式版发布,MAC 不进哈希,所以每次租用新实例不需要先发版;步骤在 [host-tuning](../docs/runbooks/host-tuning.md)。"开发构建只用于 dev2"的规则不受影响。
 
 ### 主机清单

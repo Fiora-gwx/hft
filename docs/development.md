@@ -177,7 +177,7 @@ replayer 的定向文件用例([RPL-283](../apps/replayer/TESTS.md#rpl-283-dst-�
 
 1. **`preflight`**(`ubuntu-latest`,`actions: read`、`checks: read`)确定 SHA:标签触发取标签指向的提交;`workflow_dispatch` 取输入 `sha`(必须是某个 PR 的头提交或 `main` 上的提交;判定为 `origin/main` 的祖先或某个已推送分支的头提交)或输入 `tag` 指向的提交。实现:`.github/scripts/release-preflight.py`(`release-x86-cross.yml` 共用)。下列任一不满足即失败,**不在发布工作流里补跑质量门**:
    1. `gh api …/actions/workflows/ci.yml/runs?head_sha=<SHA>&status=success` 有结果，且该次运行的 `acceptance` 作业结论为 `success`；它核对该 lane 全部适用门槛，不能以某个被跳过的作业代替通过；
-   2. 该 SHA 最近一次名为 `decoupling-gate` 的 check run 结论为 `success`(`ci.yml` 或 `decoupling.yml` 产生;`pull_request_review` 触发的运行与 PR 头 SHA 的关联方式待核实,方法:M1 第一周提交一次评审后用 `gh api …/commits/<SHA>/check-runs` 查看);
+   2. 该 SHA 最近一次非 `skipped`、名为 `decoupling-gate` 的 check run 结论为 `success`(`ci.yml` 或 `decoupling.yml` 产生;每夜跳过没有判定差异，不覆盖已有结论；缺少非 skipped 记录、最近失败/取消/未完成均拒绝，不回退至更早的成功记录；`pull_request_review` 触发的运行与 PR 头 SHA 的关联方式待核实,方法:M1 第一周提交一次评审后用 `gh api …/commits/<SHA>/check-runs` 查看);
    3. 正式版 `vX.Y.Z`:该 SHA 是 `origin/main` 的祖先,且 `main` 上实际执行了的最近一次 `nightly.yml` 运行结论为 `success`;`nightly` 作业被跳过的运行不计入最近一次,也不当作通过;最近一次实际执行失败时不得回退查找更早的成功运行;
    4. 由 `workflow_dispatch` 创建开发构建时,标签 `vX.Y.Z-dev.<dev_n>` 尚不存在(`X.Y.Z` = 该 SHA 的工作区版本)。
 

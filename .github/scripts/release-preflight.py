@@ -4,7 +4,7 @@
 Rules: docs/development.md#发布工作流release-aarch64yml step 1. It never re-runs quality gates; it
 only proves existing verdicts for the SHA being released:
   1. a successful ci.yml run for the SHA whose lane-aware `acceptance` job concluded `success`;
-  2. the latest check run named `decoupling-gate` on the SHA concluded `success`;
+  2. the latest non-skipped check run named `decoupling-gate` on the SHA concluded `success`;
   3. formal vX.Y.Z: the SHA is an ancestor of origin/main and the latest nightly.yml run on main
      that actually executed (its `nightly` job was not skipped) succeeded;
   4. a dispatched dev build needs the tag vX.Y.Z-dev.<dev_n> not to exist yet.
@@ -117,10 +117,11 @@ def check_decoupling(repo: str, sha: str) -> int:
     runs = [
         c
         for c in gh.paged(f"/repos/{repo}/commits/{sha}/check-runs", "check_runs", limit=1000)
-        if c.get("name") == "decoupling-gate" or c.get("name", "").endswith(" / decoupling-gate")
+        if (c.get("name") == "decoupling-gate" or c.get("name", "").endswith(" / decoupling-gate"))
+        and c.get("conclusion") != "skipped"
     ]
     if not runs:
-        raise Fail(f"2: no `decoupling-gate` check run for {sha}")
+        raise Fail(f"2: no non-skipped `decoupling-gate` check run for {sha}")
     latest = max(runs, key=lambda c: c.get("started_at") or "")
     if latest.get("conclusion") != "success":
         raise Fail(
