@@ -248,6 +248,8 @@ sim-gw 按该 venue 的 [`VenueCaps`](../hft-refdata/README.md) 模仿交易所�
 | `PositionReport` / `BalanceReport` | 事件时间 0(随启动回报)、此后每 `report_interval_s`,以及每次 `SimTransfer`/`SimReset` | 模拟真值,供 ledger 校验与 `SimDrift`;每个非零余额/仓位一条,上一条报告非零而现在为零的再报一次;`due_tsc` = 该事件时刻(不加 resp 延迟) |
 | `ConnState{Up}` | 启动时每账户一次 | `venue = 0`、`conn = 0`、`role = Order`;`set_order_conn` 另按 (账户, venue) 推 Down/Up |
 
+撤、改、查的目标按 `(account, inst, target_slot, gen)` 匹配订单表,可命中仍保留的旧代订单;同 slot 的其他品种或代数不能代替目标。未命中时回报沿用请求的 slot、gen、inst,不携带其他订单的累计成交、均价、交易所订单号或现金结算事实。
+
 ### 拒单规则
 
 按 refdata(`InstMeta`)与 `VenueCaps` 判定,在撮合前依次检查,首个不满足即拒(`reject_code = SIM_CODE_BASE + n`):
@@ -527,6 +529,7 @@ pub struct StressVerdict {
 - [research/04 §1.2、§7](../../design/research/04-oss-frameworks-and-patterns.md)(hftbacktest 评估)、[research/06 §4](../../design/research/06-data-plane-replay-observability.md)(延迟与队列建模的陷阱)
 - [apps/hft-core 线程计划](../../apps/hft-core/README.md#线程计划)、[replayer](../../apps/replayer/README.md)、[hft-testkit](../hft-testkit/README.md)、[testing.md](../../docs/testing.md)
 - Agent Note:[sim-accounts-not-backtest](../../.agents/notes/proposed/architecture/2026-10-02-sim-accounts-not-backtest.md)
+- [模拟订单目标身份与 DST I8 诊断](../../.agents/notes/implemented/bug-fix/2026-10-17-sim-order-target-identity.md)
 
 ## 已知限制与后续工作
 

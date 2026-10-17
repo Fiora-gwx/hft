@@ -759,7 +759,17 @@ impl SimExchange {
     // ---- cancel / amend / cancel-all / query ----
 
     fn target(&self, ai: usize, c: &GwCmd) -> Option<usize> {
-        self.find_slot(ai, c.target_slot.0)
+        let inst = self.inst_index(c.inst)?;
+        self.accts
+            .get(ai)?
+            .orders
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| {
+                o.used && o.slot == c.target_slot.0 && o.r#gen == c.r#gen && usize::from(o.inst) == inst
+            })
+            .max_by_key(|(_, o)| o.ins_seq)
+            .map(|(k, _)| k)
     }
 
     fn exec_cancel(&mut self, ai: usize, pc: &PendCmd) {
@@ -799,6 +809,7 @@ impl SimExchange {
                 let mut ghost = o.unwrap_or(Order {
                     used: true,
                     slot: c.target_slot.0,
+                    r#gen: c.r#gen,
                     inst: self.inst_index(c.inst).map_or(u16::MAX, |x| x as u16),
                     ..Order::EMPTY
                 });
@@ -895,6 +906,7 @@ impl SimExchange {
             None => {
                 let mut ghost = o.unwrap_or(Order {
                     used: true,
+                    r#gen: c.r#gen,
                     inst: self.inst_index(c.inst).map_or(u16::MAX, |x| x as u16),
                     ..Order::EMPTY
                 });
@@ -1008,6 +1020,7 @@ impl SimExchange {
                 Order {
                     used: true,
                     slot: c.target_slot.0,
+                    r#gen: c.r#gen,
                     inst: self.inst_index(c.inst).map_or(u16::MAX, |x| x as u16),
                     ..Order::EMPTY
                 },

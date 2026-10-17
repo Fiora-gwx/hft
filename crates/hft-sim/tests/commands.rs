@@ -5,8 +5,8 @@
 use crate::common;
 
 use common::*;
-use hft_event::{OrderEvent, OrderEventKind};
-use hft_types::{InstId, SlotId, Tif};
+use hft_event::{GwCmd, GwOp, OrderEvent, OrderEventKind};
+use hft_types::{InstId, Qty, SlotId, Tif, Tsc};
 
 /// SIM-080 step 1 (slot 1 resting buy 0.1 @ 59 000) plus slot 2: an IOC filled 0.1 @ 60 000.
 fn base() -> Sim {
@@ -21,6 +21,92 @@ fn base() -> Sim {
 
 fn evs(s: &Sim) -> Vec<OrderEvent> {
     s.order_events(A9).into_iter().map(|(_, e)| e).collect()
+}
+
+fn order_identity(op: GwOp) {
+    for (generation, inst, found) in [(1, BTC_S1, true), (3, BTC_S1, false), (2, BNB_S1, false)] {
+        let mut s = base();
+        // Retain the filled generation, then reuse its slot for a resting order. A place
+        // rejected by the outer MockVenue would leave precisely these older records behind.
+        let mut cmd = GwCmd::sim_reset(A9);
+        cmd.op = GwOp::Place;
+        cmd.slot = SlotId(2);
+        cmd.r#gen = 2;
+        cmd.inst = BTC_S1;
+        cmd.side = Buy;
+        cmd.tif = Tif::Gtc;
+        cmd.qty = q("0.1");
+        cmd.px = px("58000");
+        s.ex.on_command(&cmd, Tsc(ms(120)));
+        s.run_to(ms(130));
+        assert_eq!(s.view(A9).resting_count(), 2);
+        let balance = s.view(A9).balance(S1, USDT);
+        s.out.clear();
+        cmd.op = op;
+        cmd.target_slot = cmd.slot;
+        cmd.r#gen = generation;
+        cmd.inst = inst;
+        cmd.px = px("57000");
+        s.ex.on_command(&cmd, Tsc(ms(200)));
+        s.run_to(ms(210));
+        let reports = evs(&s);
+        assert_eq!(reports.len(), 1);
+        let e = reports[0];
+        assert_eq!((e.slot, e.r#gen, e.inst), (SlotId(2), generation, inst));
+        assert_eq!(
+            e.what,
+            match op {
+                GwOp::Cancel => OrderEventKind::CancelReject,
+                GwOp::Amend => OrderEventKind::AmendReject,
+                _ => OrderEventKind::QueryResult,
+            }
+        );
+        assert_eq!(e.cum_filled, if found { q("0.1") } else { Qty(0) });
+        if op == GwOp::Query {
+            assert_eq!(e.detail, if found { 3 } else { 7 });
+        }
+        if !found {
+            assert_eq!(
+                (e.exch_order_id, e.avg_px.0, e.cash_qty.0, e.cash_sum.0),
+                (0, 0, 0, 0)
+            );
+        }
+        assert_eq!(s.view(A9).resting_count(), 2);
+        assert_eq!(s.view(A9).order(SlotId(2)).unwrap().px, px("58000"));
+        assert_eq!(s.view(A9).balance(S1, USDT), balance);
+
+        // The current generation still accepts the same command.
+        s.out.clear();
+        cmd.r#gen = 2;
+        cmd.inst = BTC_S1;
+        s.ex.on_command(&cmd, Tsc(ms(220)));
+        s.run_to(ms(230));
+        let e = evs(&s)[0];
+        assert_eq!((e.r#gen, e.cum_filled), (2, Qty(0)));
+        assert_eq!(
+            e.what,
+            match op {
+                GwOp::Cancel => OrderEventKind::CancelAck,
+                GwOp::Amend => OrderEventKind::AmendAck,
+                _ => OrderEventKind::QueryResult,
+            }
+        );
+    }
+}
+
+#[test]
+fn sim_100_cancel_targets_order_identity() {
+    order_identity(GwOp::Cancel);
+}
+
+#[test]
+fn sim_101_amend_targets_order_identity() {
+    order_identity(GwOp::Amend);
+}
+
+#[test]
+fn sim_103_query_targets_order_identity() {
+    order_identity(GwOp::Query);
 }
 
 #[test]

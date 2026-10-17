@@ -18,3 +18,4 @@
 0xffcfb3918b4c9af7 2026-10-14 world=trading INV-8 交易世界反例复核
 0xffcfb3918b4c9af6 2026-10-14 world=trading INV-6 准入前腿摘要与快照恢复不同
 0xe7cae53f900f5924 2026-10-14 world=trading INV-3 replay_config 旧代数外来持仓超限后先平永续的例外识别及解除
+0xdc523111e89863ee 2026-10-17 world=trading 模拟撤单按 slot 误取旧代成交,OMS 拒绝不明现金后误标 I8 观察缺失(SIM-100/101/103;https://github.com/Fiora-gwx/hft/actions/runs/39000761210)
