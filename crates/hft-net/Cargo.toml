@@ -92,3 +92,7 @@ required-features = ["test-io"]
 
 [[test]]
 name = "rest_warm"
+
+[[bench]]
+name = "send_profile"
+harness = false

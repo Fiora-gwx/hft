@@ -1,0 +1,58 @@
+name: Transport profile
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'crates/hft-net/src/conn.rs'
+      - 'crates/hft-net/benches/send_profile.rs'
+      - 'crates/hft-net/benches/wire_poll.rs'
+      - '.github/workflows/transport-profile.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: transport-profile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  transport:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Install pinned Rust
+        run: bash .github/scripts/install-rust.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: arm-transport-profile
+      - name: Receive same harness, base / head / base
+        shell: bash
+        run: |
+          set -euo pipefail
+          uname -a
+          lscpu
+          for turn in base head base-repeat; do
+            sha="$BASE_SHA"
+            if [[ "$turn" == head ]]; then sha="$HEAD_SHA"; fi
+            git checkout --detach "$sha"
+            git show "$HEAD_SHA:crates/hft-net/benches/wire_poll.rs" > crates/hft-net/benches/wire_poll.rs
+            echo "PROFILE $turn $sha"
+            cargo bench --locked -p hft-net --features test-io --bench wire_poll
+            git restore --worktree .
+          done
+      - name: Linux TCP send variants (loopback only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --detach "$HEAD_SHA"
+          cargo bench --locked -p hft-net --bench send_profile
