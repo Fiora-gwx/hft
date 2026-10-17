@@ -933,6 +933,34 @@ pub fn registered(protocol: &str, id: VenueId) -> Result<(), Error> {
     Ok(())
 }
 
+/// Cold assembly guard for the engine's strict-zero perpetual Kill path.
+pub fn check_kill_caps(protocol: &str, caps: &hft_refdata::VenueCaps) -> Result<(), Error> {
+    use hft_refdata::CapFlags;
+    use hft_venue_proto::VenueProtocol;
+    registered(protocol, caps.venue)?;
+    let defaults = match protocol {
+        "binance-usdm" => venue_binance::Usdm::default_caps(|_| None),
+        #[cfg(feature = "bitget")]
+        "bitget-usdt-futures" => venue_bitget::BitgetUsdtFutures::default_caps(|_| None),
+        _ => return Ok(()),
+    };
+    let required = CapFlags::IOC | CapFlags::POSITION_CLOSE;
+    let close_mode = CapFlags::POSITION_CLOSE_ALL;
+    if !caps.reduce_only
+        || caps.market != defaults.market
+        || !caps.flags.contains(required)
+        || caps.flags.contains(close_mode) != defaults.flags.contains(close_mode)
+    {
+        return Err(Error::config(
+            "KillCapsMissing",
+            format!(
+                "{protocol}: strict-zero Kill requires protocol position-close mode, reduce-only and IOC"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// Cold self-test of the same atomic word handed to the live gateway.
 pub fn selftest_word(kill: &hft_rt::KillWord, ix: u8) -> Result<(), Error> {
     if ix >= 12 {

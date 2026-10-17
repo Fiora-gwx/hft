@@ -654,14 +654,16 @@ spec: README.md
 
 ### TK-049 失败时只打印一行可复制的复现命令
 
+- `--steps` 等于原运行长度,包括早期失败;不得改成失败步数加一而改变 storage 故障时刻。
+
 - 规则:[6. DST 框架](README.md#6-dst-框架)
 - 级别:unit
 - 里程碑:M2
-- 前置:同 TK-044,种子 S 在套件 `core` 中运行,第 48213 步违反 I3
+- 前置:同 TK-044,种子 S 在套件 `core` 中计划运行 100000 步,第 48213 步违反 I3
 - 步骤:
   1. 经 `cargo xtask dst --seeds 1 --seed S` 运行并截取 stderr
 - 期望:
-  - 恰一行以 `DST FAILED` 开头:`DST FAILED seed=<S 的 16 位十六进制> step=48213 invariant=I3(<名>) -> cargo xtask dst --seeds 1 --seed <同一种子> --suite core --steps 48214 --trace`
+  - 恰一行以 `DST FAILED` 开头:`DST FAILED seed=<S 的 16 位十六进制> step=48213 invariant=I3(<名>) -> cargo xtask dst --seeds 1 --seed <同一种子> --suite core --steps 100000 --trace`
   - 按该行命令再运行,得到同一行输出
 - 实现:`crates/hft-testkit/tests/dst_report.rs::tk_049_single_repro_line`
 
@@ -1179,7 +1181,7 @@ spec: README.md
 - 里程碑:M6
 - 前置:植入缺陷 `planted-slot-leak`;`run` 报告种子 S、套件 X、步 N 违反 I7
 - 步骤:
-  1. `hft-dst repro --seed S --suite X --steps N+1 --trace --crash-dir d2`
+  1. `hft-dst repro --seed S --suite X --steps <原运行长度> --trace --crash-dir d2`
 - 期望:
   - 退出 1;报告同一 (S, X, N, I7);`--trace` 输出 N+1 行步级轨迹
 - 实现:`crates/hft-testkit/tests/hft_dst.rs::tk_088_repro`

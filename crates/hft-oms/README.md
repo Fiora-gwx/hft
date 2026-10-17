@@ -669,13 +669,14 @@ const _: () = assert!(size_of::<LinkEntry>() == 80 && offset_of!(LinkEntry, firs
 
 ### Simultaneous
 
-sequencer 先用 `simultaneous_preview` 只读检查两腿槽、链接槽、待发送队列及第二腿量,再按[意图管线](../hft-sequencer/README.md#意图管线)整对准入。两腿 venue 必须不同;任一资源不足不分配槽。恢复后的原始两腿先查询收敛,均终态后才按 on_fail 处理差额;仍在途的 Reverse 不重复发送。Reverse 等待多出那条腿所在 venue 的闸门。
+sequencer 先用 `simultaneous_preview` 只读检查两腿槽、链接槽、待发送队列及第二腿量,再按[意图管线](../hft-sequencer/README.md#意图管线)整对准入。两腿 venue 必须不同;任一资源不足不分配槽。恢复后的原始两腿先查询收敛,均终态后才按 on_fail 处理差额;仍在途的补偿单不重复发送。补偿等待实际下单腿所在 venue 的闸门。
 
 `HedgePlan.kind = Simultaneous` 的第一腿在 `place()` 的**同一事件内**产出第二腿 `HedgeRequest{role: Second, qty: floor_to_lot(qty × ratio + residual)}`(第二腿增仓按 Open、减仓提示按 Reduce 分类,检查两腿 venue;尚无成交,不受裸量上限约束)。两腿都终态后按成交净量比较:
 
-- 第二腿少于第一腿 × ratio:`on_fail = Reverse` → 对第一腿已成交未对冲部分发 `Reverse`(reduce-only,IOC);`Hold` → 只进 LegTracker。
-- 第一腿少于第二腿 / ratio(第一腿被拒或部分成交):对称处理,在第二腿上发 `Reverse`。
-- 反向单失败按 OnFill 第 6 条的计次与截止,耗尽 → `Broken{ReverseFailed}`。
+- 开仓链接(`plan.reduce_only = 0`):第二腿少于第一腿 × ratio 时,`on_fail = Reverse` 对第一腿已成交未对冲部分发 `Reverse`(reduce-only,IOC);第一腿少成则在第二腿反向。失败按 OnFill 第 6 条计次与截止,耗尽 → `Broken{ReverseFailed}`。
+- 平仓链接(`plan.reduce_only ≠ 0`):`on_fail = Reverse` 的补偿只完成少成交的原平仓腿,角色 `SecondRetry`,保持该腿原方向、reduce-only 提示与 IOC,绝不反向已成交的平仓腿。数量按实际补偿腿 lot 向零取整,第一腿补成累加 `first_net`,第二腿补成累加 `hedge_filled`;`hedge_open` 记录当前补偿在途量。`REVERSING` 位表示已进入补偿阶段,平仓时不代表 Reverse 订单。
+- 平仓原双腿失败消耗一次执行失败计数,等待 `hedge_retry_min_ms` 后首次重试;限速门控按 `retry_at` 等到最早可用时刻,不在同事件重发。最多 `hedge_retry_max` 次执行重试,耗尽 → `Broken{RetryExhausted}`;`REDUCE_INVALID` 直接交 Broken。其他门控不计次,但仍受 `hedge_deadline_ms` 限制。Unknown 或补偿在途期间不重复出单。
+- `Hold` 只保留 LegTracker 真实敞口,不自动补偿。
 
 是否选用 Simultaneous 由下单方(hft-exec 的 `ExecSpec` 或策略)决定;本 crate 只提供机制。
 
@@ -691,7 +692,7 @@ sequencer 先用 `simultaneous_preview` 只读检查两腿槽、链接槽、待�
    - `dev > max_slip`(**超滑点改价而不失败**):`Cross`/`Mid` 直接以 `cap` 作限价(`capped = true`),写 `Note{OmsHedgeSlipCapped}`(P1,`v = [link_id, ref_px, touch, cap]`;每链接每次进入此状态一条);`Limit` 仍用 `limit_px`(策略指定的价不被覆盖),夹到 `cap`。
    - 仍是 IOC。
 5. 两种 `Err` 都是**门控**:sequencer 调 `hedge_gated(link_id, Px(err))`,本 crate 登记 HedgeRetry、不计次、截止照算。超滑点本身不是失败;IOC 在 `cap` 内仍未成交才按执行失败计次。
-   - `ref_px = 0`(第一腿 `place` 时第二腿报价不可用)时第 4 步按 `dev ≤ max_slip` 处理(无基准,不判超滑点);`Reverse` 一律按 `Cross` 定价(`px_param` 取 `HedgePlan.px_param`),不用 `limit_px`、`ref_px = 0`,报价取被反向那一腿的 inst。
+   - `ref_px = 0`(第一腿 `place` 时第二腿报价不可用)时第 4 步按 `dev ≤ max_slip` 处理(无基准,不判超滑点);`Reverse` 与平仓 Simultaneous 的 `SecondRetry` 一律按 `Cross` 定价(`px_param` 取 `HedgePlan.px_param`),不用原 `limit_px`、`ref_px = 0`,报价取实际补偿腿的 inst,必须连接健康且受当前 `rr_max_cross` 上限约束。
 6. 风控价格带对风险递减单只查越价上限([hft-risk](../hft-risk/README.md));本函数不重复其余检查。
 7. **Note 的写入**(`price_hedge` 是纯函数,不写 Note):`OmsHedgePxStale`/`OmsHedgePxGated` 由 `hedge_gated` 按 `HedgeGate::Px(StaleQuote | BeyondCross)` 写,`OmsHedgeSlipCapped` 由该对冲请求的 `place` 按 `ApprovedIntent.hedge_px.slipped` 写;每链接每次进入该状态一条:写后置 `LinkEntry.flags` 的 `STALE_NOTED`/`BEYOND_NOTED`/`SLIP_NOTED`,该链接下一次 `place` 对冲请求时清 `STALE_NOTED` 与 `BEYOND_NOTED`,`hedge_px.slipped = false` 时清 `SLIP_NOTED`。
 
@@ -1034,6 +1035,8 @@ const _: () = assert!(size_of::<TableRow>() == 32 && size_of::<LinkRowHdr>() == 
 
 ## 测试与验收
 
+同一 Input 输出的对冲请求在 `place` 建立在途槽之前也占用裸量预算。恢复批量续接与普通 OnFill 都扣除本批已请求量,同账户、组、方向按计划比例换算;多条链接不能重复使用同一份裸量。
+
 用例与验收见 [TESTS.md](TESTS.md)。
 
 ## 依赖
@@ -1043,6 +1046,8 @@ const _: () = assert!(size_of::<TableRow>() == 32 && size_of::<LinkRowHdr>() == 
 - 禁止:`hft-ledger`、`hft-risk`、`hft-exec`(L1 互不依赖;与 hft-exec 的交换由 sequencer 用 SDK 类型与各自的输出结构投影完成;风控参数经 `HedgePxLimits` 传入)、`hft-sequencer`、`hft-strat-lib`、任何 `strategies/*`、`hft-venue`、`venue-*`、任何 I/O 或 `std::time`。
 
 ## 延伸阅读
+
+- [平仓同发的补偿方向](../../.agents/notes/implemented/bug-fix/2026-10-17-close-pair-compensation.md)
 
 - [容量与 Ack 后 Reject 的成交保护](../../.agents/notes/implemented/bug-fix/2026-10-14-order-capacity-and-late-reject.md)
 

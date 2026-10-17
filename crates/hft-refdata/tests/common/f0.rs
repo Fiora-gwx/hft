@@ -245,7 +245,14 @@ pub fn perp_caps(v: VenueId) -> VenueCaps {
         own_liquidation_marker: LiqMarker::ClientIdPrefix,
         liq_marker_arg: "autoclose-".into(),
         ignorable_user_events: vec!["TRADE_LITE".into()].into(),
-        flags: CapFlags::AMEND | CapFlags::POST_ONLY | CapFlags::IOC,
+        flags: CapFlags::AMEND
+            | CapFlags::POST_ONLY
+            | CapFlags::IOC
+            | if v == VenueId::BINANCE_USDM {
+                CapFlags::POSITION_CLOSE
+            } else {
+                CapFlags(0)
+            },
         amend_qty_down_only: false,
         dms: DeadManCap::None,
         dms_min_ms: 0,

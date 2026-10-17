@@ -554,6 +554,11 @@ pub fn load_timed(
     )
     .map_err(|e| one("EngineMismatch", format!("{e:?}")))?;
     for (name, v) in &c.venues {
+        if !v.accounts.is_empty()
+            && let Err(e) = crate::venues::check_kill_caps(&v.protocol, rd.caps(VenueId(v.id)))
+        {
+            errors.push(e);
+        }
         if c.instance.secrets_mode == SecretsMode::LocalDemo {
             let endpoints = rd.endpoints(VenueId(v.id), hft_refdata::EndpointEnv::Testnet);
             if endpoints.is_empty()

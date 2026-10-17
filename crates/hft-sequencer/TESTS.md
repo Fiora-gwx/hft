@@ -2587,6 +2587,8 @@ SEQ-160 同时覆盖真实 ConnId 112/113/255、重复 Up/Down、主连接退出
 
 ### SEQ-178 Simultaneous 第二腿与 Hedge 类意图的投影字段
 
+- 平仓非对称回归:`seq_178_closing_asymmetry_completes_short_leg_and_replays` 用真实引擎开平仓,种子 1–8 组合两腿先后终态、零/部分成交;只在重试时刻补少成交腿,无 Reverse/REDUCE_INVALID,双腿严格归零,完整与中途快照回放一致。
+
 - 实机序列回归:普通单耗尽每 inst 秒级桶后,真实双腿一侧成交、另一侧零成交终态;同一事件产出唯一 Reverse 并写入出环(手动时钟 < 1 ms),无 RATE 重试;Reverse 成交后两侧归零,完整回放一致。
 
 - 残余数量补充:`tests/simultaneous.rs::check_simultaneous_residual_affordability` 验证累计 lot 残余使第二腿增量越过 HEDGE_LIMIT 时整对拒绝,第一腿无副作用。

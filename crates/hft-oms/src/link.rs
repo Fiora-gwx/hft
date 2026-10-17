@@ -120,8 +120,15 @@ impl Oms {
         let (Some(e), Some((_, p))) = (self.links.get(i), self.plans.get(i)) else {
             return (VenueId(0), AccountId(0));
         };
+        if self.closing_pair(i) {
+            return if Self::diff_h(e, p) < 0 {
+                (e.first.venue, e.first.account)
+            } else {
+                (p.venue, p.account)
+            };
+        }
         match p.on_fail {
-            OnFail::Reverse if self.reverse_qty(i).is_some_and(|(first, _, _)| !first) => {
+            OnFail::Reverse if self.compensation_qty(i).is_some_and(|(first, _, _)| !first) => {
                 (p.venue, p.account)
             }
             OnFail::Reverse => (e.first.venue, e.first.account),
@@ -177,6 +184,32 @@ impl Oms {
             Side::Buy => (-(ex + wf.max(0) + wh.max(0))).max(0),
         };
         Some(v.min(i128::from(i64::MAX)) as i64)
+    }
+
+    /// Requests in this output have not reached place() yet, but already reserve naked quantity.
+    fn unreserved_naked_dir(&self, i: usize, out: &OmsOut) -> Option<i64> {
+        let naked = self.naked_dir(i)?;
+        let e = self.links.get(i)?;
+        let (_, p) = self.plans.get(i)?;
+        let first = self.first_inst(i);
+        let mut reserved = 0i128;
+        for r in out.hedges.iter() {
+            if r.group != e.group
+                || r.side != p.side
+                || !self
+                    .link_ix(r.link_id)
+                    .and_then(|ix| self.links.get(ix))
+                    .is_some_and(|other| other.account == e.account)
+            {
+                continue;
+            }
+            if r.inst == p.inst {
+                reserved += i128::from(r.qty.0);
+            } else if r.inst == first {
+                reserved += i128::from(r.qty.0) * i128::from(p.ratio_num) / i128::from(p.ratio_den.max(1));
+            }
+        }
+        Some((i128::from(naked) - reserved).max(0) as i64)
     }
 
     // ------------------------------------------------------------------ creation
@@ -383,7 +416,7 @@ impl Oms {
         {
             return;
         }
-        if e.has(lf::REVERSING) && self.reverse_qty(i).is_some() {
+        if e.has(lf::REVERSING) && self.compensation_qty(i).is_some() {
             return;
         }
         if p.kind == HedgeKind::Simultaneous && !e.has(lf::REVERSING) && self.simul_imbalance(i) {
@@ -406,7 +439,7 @@ impl Oms {
 
     /// Simultaneous legs out of balance by at least one lot of the leg to reverse.
     fn simul_imbalance(&self, i: usize) -> bool {
-        self.reverse_qty(i).is_some()
+        self.compensation_qty(i).is_some()
     }
 
     // ------------------------------------------------------------------ requests
@@ -441,29 +474,38 @@ impl Oms {
         })
     }
 
-    /// Quantity, inst side and basis of a reverse order; `None` when balanced within a lot.
-    fn reverse_qty(&self, i: usize) -> Option<(bool, Qty, Qty)> {
+    /// Closing simultaneous pairs complete the short leg; opening pairs reverse the excess.
+    fn closing_pair(&self, i: usize) -> bool {
+        self.plans
+            .get(i)
+            .is_some_and(|(_, p)| p.kind == HedgeKind::Simultaneous && p.reduce_only != 0)
+    }
+
+    /// Repair leg, quantity and basis; `None` when balanced within that leg's lot.
+    fn compensation_qty(&self, i: usize) -> Option<(bool, Qty, Qty)> {
         let e = self.links.get(i)?;
         let (_, p) = self.plans.get(i)?;
         let d = Self::diff_h(e, p);
-        if d > 0 {
-            // First leg ahead: reverse on the first leg, in first-leg units.
-            let unhedged = i128::from(e.first_net.0)
+        let closing = self.closing_pair(i);
+        if (d > 0 && !closing) || (d < 0 && closing) {
+            // First-leg units: reverse its excess when opening, complete its shortfall when closing.
+            let unhedged = (i128::from(e.first_net.0)
                 - i128::from(e.hedge_filled.0) * i128::from(p.ratio_den.max(1))
-                    / i128::from(p.ratio_num.max(1));
+                    / i128::from(p.ratio_num.max(1)))
+            .abs();
             let lot = self.inst(self.first_inst(i)).lot;
             let q = floor_lot(unhedged.min(i128::from(i64::MAX)) as i64, lot);
-            (q > 0).then_some((true, Qty(q), Qty(unhedged as i64)))
+            (q > 0).then_some((true, Qty(q), Qty(unhedged.min(i128::from(i64::MAX)) as i64)))
         } else {
             let lot = self.inst(p.inst).lot;
-            let b = (-d).min(i128::from(i64::MAX)) as i64;
+            let b = d.abs().min(i128::from(i64::MAX)) as i64;
             let q = floor_lot(b, lot);
             (q > 0).then_some((false, Qty(q), Qty(b)))
         }
     }
 
-    /// Emits a `Reverse` request for the current imbalance; `false` when there is none.
-    fn emit_reverse(&mut self, i: usize, seq: u64, out: &mut OmsOut) -> bool {
+    /// Emits opening Reverse or closing SecondRetry for the current imbalance.
+    fn emit_compensation(&mut self, i: usize, seq: u64, out: &mut OmsOut) -> bool {
         if self
             .plans
             .get(i)
@@ -475,10 +517,16 @@ impl Oms {
                 return false;
             }
         }
-        let Some((on_first, q, basis)) = self.reverse_qty(i) else {
+        let Some((on_first, q, basis)) = self.compensation_qty(i) else {
             return false;
         };
-        let Some(mut r) = self.base_req(i, LinkRole::Reverse, seq) else {
+        let closing = self.closing_pair(i);
+        let role = if closing {
+            LinkRole::SecondRetry
+        } else {
+            LinkRole::Reverse
+        };
+        let Some(mut r) = self.base_req(i, role, seq) else {
             return false;
         };
         let Some(e) = self.links.get(i).copied() else {
@@ -492,11 +540,15 @@ impl Oms {
             r.venue = e.first.venue;
             r.account = e.first.account;
             r.inst = inst;
-            r.side = self.first_side(i).opposite();
+            r.side = if closing {
+                self.first_side(i)
+            } else {
+                self.first_side(i).opposite()
+            };
             r.peer_venue = p.venue;
             r.peer_account = p.account;
         } else {
-            r.side = p.side.opposite();
+            r.side = if closing { p.side } else { p.side.opposite() };
         }
         let lot = self.inst(r.inst).lot;
         r.reduce_only = true;
@@ -526,7 +578,7 @@ impl Oms {
         }
         let info = *self.inst(p.inst);
         let owed_l = floor_lot(owed, info.lot);
-        let naked = self.naked_dir(i);
+        let naked = self.unreserved_naked_dir(i, out);
         let mut q = match naked {
             Some(n) => owed_l.min(floor_lot(n, info.lot)),
             None => owed_l,
@@ -624,8 +676,14 @@ impl Oms {
                 }
             }
             r if r == LinkRole::Second as u8 || r == LinkRole::SecondRetry as u8 => {
+                let completing_first =
+                    r == LinkRole::SecondRetry as u8 && self.closing_pair(i) && sl.inst == self.first_inst(i);
                 if let Some(x) = self.links.get_mut(i) {
-                    x.hedge_filled = Qty(x.hedge_filled.0.saturating_add(fd.d_net.0));
+                    if completing_first {
+                        x.first_net = Qty(x.first_net.0.saturating_add(fd.hedge_net.0));
+                    } else {
+                        x.hedge_filled = Qty(x.hedge_filled.0.saturating_add(fd.d_net.0));
+                    }
                     x.hedge_open = Qty(x.hedge_open.0.saturating_sub(fd.d.0).max(0));
                 }
                 self.update_fft(i, before, now);
@@ -672,7 +730,7 @@ impl Oms {
             return;
         }
         self.residual_add(e.account, e.group, hx, raw - q_fill - res);
-        let naked = self.naked_dir(i);
+        let naked = self.unreserved_naked_dir(i, out);
         let mut q = q_fill;
         if let Some(n) = naked {
             q = q_fill.min(floor_lot(n, info.lot));
@@ -869,7 +927,7 @@ impl Oms {
     }
 
     /// Simultaneous: once both legs are terminal, reverse the imbalance or hold; else Done check.
-    fn simul_or_done(&mut self, i: usize, simul: bool, _now: Tsc, seq: u64, out: &mut OmsOut) {
+    fn simul_or_done(&mut self, i: usize, simul: bool, now: Tsc, seq: u64, out: &mut OmsOut) {
         let Some(e) = self.links.get(i).copied() else {
             return;
         };
@@ -885,7 +943,7 @@ impl Oms {
         {
             return;
         }
-        if self.reverse_qty(i).is_none() {
+        if self.compensation_qty(i).is_none() {
             if let Some(x) = self.links.get_mut(i) {
                 x.hedge_req = Qty(x.hedge_filled.0 + x.hedge_open.0);
             }
@@ -900,7 +958,12 @@ impl Oms {
             if let Some(x) = self.links.get_mut(i) {
                 x.flags |= lf::REVERSING;
             }
-            self.emit_reverse(i, seq, out);
+            if self.closing_pair(i) {
+                // The failed original pair consumes the first attempt. Never spin in this Input.
+                self.failure(i, true, Tsc(0), now, seq, out);
+            } else {
+                self.emit_compensation(i, seq, out);
+            }
         } else {
             self.set_state(i, LinkState::Done, LinkBroken::None, seq, out);
         }
@@ -912,8 +975,9 @@ impl Oms {
         if e.first_fill_tsc.0 == 0 || e.has(lf::RESUME_HOLD | lf::RESUME_RETRY) {
             return false;
         }
-        let exposed =
-            e.owed().0 > 0 || e.hedge_open.0 > 0 || (e.has(lf::REVERSING) && self.reverse_qty(i).is_some());
+        let exposed = e.owed().0 > 0
+            || e.hedge_open.0 > 0
+            || (e.has(lf::REVERSING) && self.compensation_qty(i).is_some());
         exposed && now.0.saturating_sub(e.first_fill_tsc.0) > self.p.hedge_deadline
     }
 
@@ -949,7 +1013,7 @@ impl Oms {
         };
         let reversing = e.has(lf::REVERSING);
         let needed = if reversing {
-            self.reverse_qty(i).is_some()
+            self.compensation_qty(i).is_some()
         } else {
             e.owed().0 > 0
         };
@@ -970,7 +1034,7 @@ impl Oms {
         }
         let retries = self.links.get(i).map_or(0, |e| e.retries);
         if retries > self.p.hedge_retry_max {
-            let why = if reversing {
+            let why = if reversing && !self.closing_pair(i) {
                 LinkBroken::ReverseFailed
             } else {
                 LinkBroken::RetryExhausted
@@ -983,7 +1047,7 @@ impl Oms {
                 x.flags |= lf::REVERSING;
                 x.hedge_req = Qty(x.hedge_filled.0.saturating_add(x.hedge_open.0));
             }
-            if !self.emit_reverse(i, seq, out) {
+            if !self.emit_compensation(i, seq, out) {
                 self.done_check(i, seq, out);
             }
             return;
@@ -1030,7 +1094,7 @@ impl Oms {
             return;
         }
         if e.has(lf::REVERSING) {
-            if !self.emit_reverse(i, seq, out) {
+            if !self.emit_compensation(i, seq, out) {
                 self.done_check(i, seq, out);
             }
             return;
@@ -1078,7 +1142,23 @@ impl Oms {
                 );
                 self.note(n, out);
             }
-            self.failure(i, false, retry_at, now, cause_seq, out);
+            // A structurally invalid close cannot become valid by retrying it every 100 ms.
+            if self.closing_pair(i)
+                && matches!(why, HedgeGate::Risk(bits) if bits.0 & hft_types::RejectBits::REDUCE_INVALID.0 != 0)
+            {
+                self.set_broken(i, LinkBroken::RetryExhausted, cause_seq, out);
+            } else {
+                let rate_wait = matches!(why, HedgeGate::Risk(bits)
+                    if bits.0 & (hft_types::RejectBits::RATE.0 | hft_types::RejectBits::RATE_BACKOFF.0) != 0);
+                self.failure(
+                    i,
+                    self.closing_pair(i) && !rate_wait,
+                    retry_at,
+                    now,
+                    cause_seq,
+                    out,
+                );
+            }
         }
         self.flush(out);
     }
@@ -1131,9 +1211,9 @@ impl Oms {
         let q = if queued {
             Qty(0)
         } else if reversing {
-            let q = self.reverse_qty(i).map_or(Qty(0), |(_, q, _)| q);
+            let q = self.compensation_qty(i).map_or(Qty(0), |(_, q, _)| q);
             if q.0 > 0 {
-                self.emit_reverse(i, seq, out);
+                self.emit_compensation(i, seq, out);
             }
             q
         } else {

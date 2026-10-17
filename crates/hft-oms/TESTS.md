@@ -2415,6 +2415,8 @@ spec: README.md
 
 ### OMS-211 Simultaneous 第二腿少于第一腿时按 on_fail 处理
 
+- 平仓补充:`oms_211_closing_pair_completes_only_the_unfilled_leg` 覆盖两种少成交方向,只补原平仓方向的 SecondRetry IOC,重复定时器不重复下单,补成后两腿归零;OMS-213 的 `oms_213_closing_pair_retry_budget_and_limiter_backoff` 验证限速下一可用时刻与三次重试耗尽后 Broken;OMS-317 的 `oms_317_closing_recovery_waits_and_does_not_duplicate_completion` 验证 Unknown 收敛和补偿在途再次恢复。
+
 - 规则:[Simultaneous](README.md#simultaneous)
 - 级别:table
 - 里程碑:M2
@@ -3371,6 +3373,8 @@ spec: README.md
 - 实现:`crates/hft-oms/tests/recover.rs::oms_317_resume_waits_unknown`
 
 ### OMS-318 续接量被裸量上限截为 0 时不置 RESUME_RETRY
+
+- 同账户组的三条链接恢复后只剩一条请求的裸量:同次 gate-open 只发出一笔 SecondRetry,其余核销,成交后净敞口为零。固定反例 storage `0x7442aaf1b5dea253`,原始 10000 步。
 
 - 规则:[恢复:停机时间不计与闸门续接](README.md#恢复停机时间不计与闸门续接)
 - 级别:table

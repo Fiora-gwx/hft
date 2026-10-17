@@ -257,6 +257,92 @@ fn terminal(h: &mut H, d: &OrderDecision, qty: Qty, query: bool) {
     h.run();
 }
 
+fn install_open_and_close() {
+    set_hook(|hx, ev, ctx| {
+        if let EventRef::Bbo { inst, b, .. } = ev
+            && *inst == A1
+            && hx.s.strategy == S1
+            && [px("50003"), px("50004")].contains(&b.ask_px)
+        {
+            let closing = b.ask_px == px("50004");
+            let mut it = pair_first(hx, q("0.01"));
+            let mut link = *it.link.get().unwrap();
+            link.hedge.kind = HedgeKind::Simultaneous;
+            link.hedge.on_fail = OnFail::Reverse;
+            if closing {
+                it.side = it.side.opposite();
+                it.class = hft_strategy_sdk::IntentClass::Reduce;
+                it.flags |= hft_strategy_sdk::OrderIntent::REDUCE_ONLY;
+                it.px = b.bid_px;
+                link.hedge.side = link.hedge.side.opposite();
+                link.hedge.reduce_only = 1;
+            }
+            it.link = LegLinkOpt::some(link);
+            let _ = ctx.place(it);
+        }
+    });
+}
+
+#[test]
+fn seq_178_closing_asymmetry_completes_short_leg_and_replays() {
+    for seed in 1..=8u64 {
+        reset_script();
+        let mut h = b0().boot_self_contained();
+        h.steady();
+        install_open_and_close();
+        let (_, opened) = fire(&mut h);
+        assert_eq!(opened.len(), 2);
+        for d in &opened {
+            assert_eq!(d.reject, 0);
+            terminal(&mut h, d, d.qty, false);
+        }
+        let m = h.mark();
+        h.quote(A1, "50000", "50004");
+        h.run();
+        let closed: Vec<_> = decs(&h, m)
+            .into_iter()
+            .filter(|d| d.action == OrderAction::New)
+            .collect();
+        assert_eq!(closed.len(), 2, "seed {seed}: {closed:?}");
+        assert!(closed.iter().all(|d| d.reject == 0), "{closed:?}");
+        let window = h.keyframe().seq;
+        let full = &closed[(seed % 2) as usize];
+        let short = &closed[1 - (seed % 2) as usize];
+        let partial = if seed & 2 == 0 { Qty(0) } else { q("0.004") };
+        let m = h.mark();
+        if seed & 4 != 0 {
+            terminal(&mut h, short, partial, false);
+        }
+        terminal(&mut h, full, full.qty, false);
+        if seed & 4 == 0 {
+            terminal(&mut h, short, partial, false);
+        }
+        assert!(decs(&h, m).is_empty(), "close repair must wait for retry time");
+        h.adv(101 * MS);
+        h.run();
+        let repairs: Vec<_> = decs(&h, m)
+            .into_iter()
+            .filter(|d| d.action == OrderAction::New)
+            .collect();
+        assert_eq!(repairs.len(), 1, "seed {seed}: {repairs:?}");
+        let repair = repairs[0];
+        assert_eq!(repair.reject, 0, "seed {seed}: {repair:?}");
+        assert_eq!(repair.link_role, LinkRole::SecondRetry as u8);
+        assert_eq!((repair.inst, repair.side), (short.inst, short.side));
+        assert_eq!(repair.qty, Qty(short.qty.0 - partial.0));
+        assert_eq!(repair.tif, hft_types::Tif::Ioc);
+        terminal(&mut h, &repair, repair.qty, false);
+        assert_eq!(h.s.engine().ledger.pos(AC1, A1).qty, Qty(0));
+        assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, Qty(0));
+        assert_eq!(last_link(&h, AC1).unwrap().state, hft_oms::LinkState::Done);
+        assert!(h.verify().is_empty(), "seed {seed}: full replay");
+        assert!(
+            h.verify_from(Some(window)).is_empty(),
+            "seed {seed}: snapshot replay"
+        );
+    }
+}
+
 #[test]
 fn seq_178_reverse_uses_priority_budget_after_asymmetric_fill() {
     reset_script();

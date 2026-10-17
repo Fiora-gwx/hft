@@ -1,4 +1,84 @@
 mod support;
+
+#[test]
+fn core_044_strict_zero_kill_rejects_stale_perpetual_caps() {
+    use hft_refdata::CapFlags;
+    use hft_venue_proto::VenueProtocol;
+    let base = venue_binance::Usdm::default_caps(|_| None);
+    assert!(hft_core::venues::check_kill_caps("binance-usdm", &base).is_ok());
+    for (flags, reduce_only) in [
+        (31, true),
+        (base.flags.0 & !CapFlags::IOC.0, true),
+        (base.flags.0, false),
+        (base.flags.0 | CapFlags::POSITION_CLOSE_ALL.0, true),
+    ] {
+        let mut caps = base.clone();
+        caps.flags = CapFlags(flags);
+        caps.reduce_only = reduce_only;
+        assert_eq!(
+            hft_core::venues::check_kill_caps("binance-usdm", &caps)
+                .unwrap_err()
+                .code,
+            "KillCapsMissing"
+        );
+    }
+    let spot = venue_binance::Spot::default_caps(|_| None);
+    assert!(hft_core::venues::check_kill_caps("binance-spot", &spot).is_ok());
+    #[cfg(feature = "bitget")]
+    {
+        let mut caps = venue_bitget::BitgetUsdtFutures::default_caps(|_| None);
+        assert!(hft_core::venues::check_kill_caps("bitget-usdt-futures", &caps).is_ok());
+        caps.flags.0 &= !CapFlags::POSITION_CLOSE_ALL.0;
+        assert_eq!(
+            hft_core::venues::check_kill_caps("bitget-usdt-futures", &caps)
+                .unwrap_err()
+                .code,
+            "KillCapsMissing"
+        );
+    }
+}
+
+#[test]
+fn core_044_check_fails_before_starting_with_stale_kill_caps() {
+    use hft_strategy_sdk::StrategySet;
+    use zerocopy::FromBytes;
+    let d = tempfile::tempdir().unwrap();
+    let kind = hft_core::Strategies::kinds()
+        .iter()
+        .find(|k| k.non_prod_only)
+        .unwrap()
+        .kind_id;
+    let params = toml::from_str(&format!(
+        "[strategy.schema]\nid = {kind}\n[[groups]]\nasset = 'BTC'\n"
+    ))
+    .unwrap();
+    let path = support::write_strategy_testnet(d.path(), &params, false);
+    let mut config: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let file = d
+        .path()
+        .join(config["blobs"]["refdata"]["path"].as_str().unwrap());
+    let mut blob = std::fs::read(&file).unwrap();
+    let header = hft_refdata::blob::RdbHeader::read_from_bytes(&blob[..64]).unwrap();
+    let caps = (0..usize::from(header.n_sections))
+        .find_map(|i| {
+            let s =
+                hft_refdata::blob::SectionEntry::read_from_bytes(&blob[64 + i * 24..88 + i * 24]).unwrap();
+            (s.id == hft_refdata::blob::sec::VENUE_CAPS).then_some(s)
+        })
+        .unwrap();
+    let row = (0..caps.count as usize)
+        .map(|i| caps.offset as usize + i * caps.row_size as usize)
+        .find(|&i| blob[i] == hft_types::VenueId::BINANCE_USDM.0)
+        .unwrap();
+    let flags = row + std::mem::offset_of!(hft_refdata::blob::CapsRow, flags);
+    blob[flags..flags + 4].copy_from_slice(&31u32.to_le_bytes());
+    std::fs::write(&file, &blob).unwrap();
+    config["blobs"]["refdata"]["sha256"] = hft_core::config::hex(&hft_core::config::digest(&blob)).into();
+    std::fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
+    let errors = hft_core::config::load(&path, false).unwrap_err();
+    assert!(errors.iter().any(|e| e.code == "KillCapsMissing"), "{errors:?}");
+    assert!(!d.path().join("hot").exists());
+}
 use hft_types::{AccountId, VenueId};
 fn live(prod: bool) -> (tempfile::TempDir, std::path::PathBuf) {
     let d = tempfile::tempdir().unwrap();

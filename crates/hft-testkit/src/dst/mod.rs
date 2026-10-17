@@ -216,7 +216,9 @@ pub struct TraceItem {
 pub struct DstFailure {
     pub seed: u64,
     pub suite: &'static str,
-    /// 0-based step of the violation (`--steps` of the repro = step + 1).
+    /// Original run length; storage fault scheduling depends on this value.
+    pub planned_steps: u64,
+    /// 0-based step of the violation.
     pub step: u64,
     pub invariant: FailKind,
     pub message: String,

@@ -6,6 +6,8 @@ spec: README.md
 
 # hft-venue 测试规格
 
+VEN-207 补充:下单连接 64 帧与独立私有连接 3 帧同时就绪时,私有 3 帧先交付且内部次序不变;每一帧在下一次解码前已经可被 rep 消费者读取。
+
 VEN-021 的运行时回归覆盖 trade/ticker 独立 RouteId、端点与重连订阅，Funding 与 Mark 正确进入 md 环。VEN-258 同时覆盖首次 settle-lag 边界不发零宽请求、下一毫秒产生合法窗口；CORE-120 使用实采空页验证连续轮询完成。
 
 VEN-199 的解码测量边界、VEN-068 的原始记录帧关联说明见 [延迟采集测试](../../tools/latency-report/TESTS.md)。

@@ -174,6 +174,7 @@ pub fn run_record<E: Sut>(cfg: &DstConfig) -> RunRecord {
             rec.outcome = DstOutcome::Fail(Box::new(DstFailure {
                 seed: cfg.seed,
                 suite: cfg.suite,
+                planned_steps: cfg.steps,
                 step,
                 invariant: FailKind::Inv(InvId::I9),
                 message: format!(
@@ -239,6 +240,7 @@ fn run_once<E: Sut>(cfg: &DstConfig) -> RunRecord {
             rec.outcome = DstOutcome::Fail(Box::new(DstFailure {
                 seed: cfg.seed,
                 suite: cfg.suite,
+                planned_steps: cfg.steps,
                 step: 0,
                 invariant: FailKind::Boot,
                 message: e.0,
@@ -255,6 +257,7 @@ fn run_once<E: Sut>(cfg: &DstConfig) -> RunRecord {
             rec.outcome = DstOutcome::Fail(Box::new(DstFailure {
                 seed: cfg.seed,
                 suite: cfg.suite,
+                planned_steps: cfg.steps,
                 step: 0,
                 invariant: FailKind::Boot,
                 message: e.0,
@@ -1055,6 +1058,7 @@ impl<E: Sut> Loop<'_, E> {
             Some((step, invariant, message)) => DstOutcome::Fail(Box::new(DstFailure {
                 seed: self.cfg.seed,
                 suite: self.cfg.suite,
+                planned_steps: self.cfg.steps,
                 step,
                 invariant,
                 message,

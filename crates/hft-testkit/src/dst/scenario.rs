@@ -171,6 +171,7 @@ impl Scenario {
             r.outcome = DstOutcome::Fail(Box::new(DstFailure {
                 seed,
                 suite: "?",
+                planned_steps: self.steps.unwrap_or(0),
                 step: 0,
                 invariant: FailKind::Scenario(self.id),
                 message: format!("{}: unknown suite {:?}", self.id, self.suite),
@@ -195,6 +196,7 @@ impl Scenario {
             rec.outcome = DstOutcome::Fail(Box::new(DstFailure {
                 seed: cfg.seed,
                 suite: cfg.suite,
+                planned_steps: cfg.steps,
                 step,
                 invariant: FailKind::Scenario(self.id),
                 message: msg,

@@ -267,6 +267,24 @@ pub fn build(root: &Table, o: &RefdataOpts<'_>) -> Res<RefdataOut> {
         Err(r) => return rej(format!("RefData::load: {}", report_text(&r))),
     };
     let warnings = warnings(&rd);
+    for v in rd.venues_in_order() {
+        let caps = rd.caps(*v);
+        if !m.accounts.iter().any(|a| !a.sim && a.venues & (1u64 << v.0) != 0) {
+            continue;
+        }
+        if let Some(protocol) = default_caps(*v, &m.assets)
+            && protocol.market == MarketKind::LinearPerp
+            && (!caps.reduce_only
+                || !caps.flags.contains(CapFlags::IOC | CapFlags::POSITION_CLOSE)
+                || caps.flags.contains(CapFlags::POSITION_CLOSE_ALL)
+                    != protocol.flags.contains(CapFlags::POSITION_CLOSE_ALL))
+        {
+            return rej(format!(
+                "KillCapsMissing: {} requires protocol position-close mode, reduce-only and IOC; omit obsolete complete caps rows to use protocol defaults",
+                venue_name(*v)
+            ));
+        }
+    }
     Ok(RefdataOut {
         blob,
         signoffs: m.signoffs,

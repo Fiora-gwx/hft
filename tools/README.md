@@ -589,6 +589,8 @@ crashes/dst/<seed>.json、crashes/dst/.inflight.json
 
 ## 测试与验收
 
+refdata 生成默认省略完整 caps 行,由已链接 `VenueProtocol::default_caps` 生成最新能力。实账户的永续行缺少严格清仓所需 POSITION_CLOSE/IOC/reduce-only,或 POSITION_CLOSE_ALL 与协议不符,生成失败 `KillCapsMissing`。完整旧行不得自动静默补位,应移除过时行后重新生成并经 hft-core --check。
+
 用例与验收见 [TESTS.md](TESTS.md)。
 
 ## 依赖

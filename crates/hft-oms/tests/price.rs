@@ -15,6 +15,25 @@ use hft_types::{Px, Side, StrategyId, Tif, Tsc, cap_cross_px};
 
 const NOW: u64 = 100_000;
 
+#[test]
+fn oms_220_closing_retry_uses_live_marketable_bounded_ioc_price() {
+    for side in [Side::Buy, Side::Sell] {
+        let mut rq = req(side, Px(0), LinkRole::SecondRetry);
+        rq.reduce_only = true;
+        let mut pl = plan(PxMode::Limit, "0.001", p("100"));
+        pl.kind = hft_strategy_sdk::HedgeKind::Simultaneous;
+        pl.reduce_only = 1;
+        let mut b = book("59990", "60010");
+        let got = ph(&rq, &pl, &b, 10).unwrap();
+        match side {
+            Side::Buy => assert!(got.px >= b.ask_px && got.px <= got.cap),
+            Side::Sell => assert!(got.px <= b.bid_px && got.px >= got.cap),
+        }
+        b.conn_up = false;
+        assert_eq!(ph(&rq, &pl, &b, 10), Err(HedgePxErr::StaleQuote));
+    }
+}
+
 fn req(side: Side, ref_px: Px, role: LinkRole) -> HedgeRequest {
     HedgeRequest {
         link_id: 1,

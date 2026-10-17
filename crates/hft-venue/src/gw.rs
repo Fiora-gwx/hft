@@ -798,13 +798,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         let mut frames = 0u16;
         let cmds0 = self.cmds_done;
         for a in 0..self.accts.len() {
-            // 1. primary.
-            let pid = self
-                .accts
-                .get_mut(a)
-                .and_then(|x| x.pool.primary().map(|c| c.id()));
-            frames += self.read_conn(a, pid, ConnRole::Order, now);
-            // 2. user stream.
+            // Private executions precede order acknowledgements on a separate connection.
             if P::USER_STREAM {
                 let uid = self
                     .accts
@@ -816,6 +810,11 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     frames += self.read_conn(a, uid, ConnRole::UserStream, now);
                 }
             }
+            let pid = self
+                .accts
+                .get_mut(a)
+                .and_then(|x| x.pool.primary().map(|c| c.id()));
+            frames += self.read_conn(a, pid, ConnRole::Order, now);
             let candidate = self.accts[a].private.candidate.map(|c| c.id);
             let owner = self.accts[a].private.owner;
             if let Some(id) = candidate
@@ -1082,7 +1081,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             && self.pend_rep.is_empty()
         {
             if let Some(c) = self.conn_of(a, id) {
-                c.poll_rx(now);
+                c.poll_rx_if_needed(now);
             }
             loop {
                 if self.out.free_hint() <= reserve || !self.pend_rep.is_empty() {

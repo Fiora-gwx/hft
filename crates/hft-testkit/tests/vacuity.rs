@@ -147,6 +147,7 @@ fn trading_world_smoke_exercises_hedges() {
 fn tk_177_trading_world_regression_seeds() {
     let mut errors = Vec::new();
     for (name, seed) in [
+        ("storage", 0x7442_aaf1_b5de_a253),
         ("storage", 0xd975_b663_903a_5073),
         ("core", 0xffcf_b391_8b4c_9ae0),
         ("storage", 0xffcf_b391_8b4c_9b42),
