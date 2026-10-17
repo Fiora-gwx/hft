@@ -434,6 +434,7 @@ fn otu(x: &str, status: &str) -> String {
 fn bin_026_private_projection_matches_reference() {
     fn check<P: VenueProtocol<GwCtx = GwCtx>>(seed: &str) {
         let class = P::classify_report(MsgOp::Text, seed.as_bytes());
+        assert_eq!(decode::<P>(&mut GwCtx::default(), seed).0.unwrap().events, 1);
         let compare = |p: &[u8]| {
             let mut fast = GwCtx::default();
             let mut reference = GwCtx::default();

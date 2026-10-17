@@ -559,6 +559,19 @@ fn ord(status: &str, cum: &str, value: &str, avg: &str, fee: &str, extra: &str) 
 fn bgt_027_private_projection_matches_reference() {
     fn check<P: VenueProtocol<GwCtx = GwCtx>>(seed: &str) {
         let class = P::classify_report(MsgOp::Text, seed.as_bytes());
+        assert_eq!(
+            P::decode_report(
+                rd(),
+                &mut GwCtx::new(),
+                class,
+                seed.as_bytes(),
+                &RX,
+                &mut RepSink::default()
+            )
+            .unwrap()
+            .events,
+            1
+        );
         let compare = |p: &[u8]| {
             let mut fast = GwCtx::new();
             let mut reference = GwCtx::new();
@@ -584,7 +597,28 @@ fn bgt_027_private_projection_matches_reference() {
             p[i] = saved;
         }
         // Multiple rows must retain all-message validation and may never project only row 0.
-        compare(seed.replace("}],\"ts\"", ",{}],\"ts\"").as_bytes());
+        compare(seed.replace("}],\"ts\"", "},{}],\"ts\"").as_bytes());
+        let mut batch: serde_json::Value = serde_json::from_str(seed).unwrap();
+        let rows = batch["data"].as_array_mut().unwrap();
+        let mut second = rows[0].clone();
+        second["orderId"] = "1234567890124".into();
+        second["clientOid"] = "web_second".into();
+        rows.push(second);
+        let batch = serde_json::to_vec(&batch).unwrap();
+        assert_eq!(
+            P::decode_report(
+                rd(),
+                &mut GwCtx::new(),
+                class,
+                &batch,
+                &RX,
+                &mut RepSink::default()
+            )
+            .unwrap()
+            .events,
+            2
+        );
+        compare(&batch);
         compare(
             seed.replace("\"orderStatus\":", "\"status\":\"new\",\"orderStatus\":")
                 .as_bytes(),
