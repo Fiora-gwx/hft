@@ -20,7 +20,7 @@ use hft_strategy_sdk::{LinkRole, Strategy};
 use hft_testkit::seq_rig::{RigConfig, RingId, SeqRig};
 use hft_types::*;
 use portfolio_carry::{CarryParams, PortfolioCarry};
-use zerocopy::{FromZeros, IntoBytes};
+use zerocopy::{FromZeros, IntoBytes, TryFromBytes};
 
 const D: i64 = 1_759_276_800_000_000_000;
 const SETTLE: i64 = D + 8 * 3_600_000_000_000;
@@ -337,7 +337,7 @@ fn fill_orders(r: &mut SeqRig<Strategies>, cursor: &mut usize) -> Vec<GwCmd> {
                         avg_px: c.px,
                         cash_qty: spot_cash(c, if fill { c.qty } else { Qty(0) }),
                         cash_sum: spot_cash(c, if fill { c.qty } else { Qty(0) }),
-                        trade_id: 0,
+                        ..empty_order_event()
                     },
                 );
             }
@@ -437,7 +437,7 @@ fn terminal(r: &mut SeqRig<Strategies>, c: GwCmd, qty: Qty, query: bool) {
             avg_px: c.px,
             cash_qty: spot_cash(c, qty),
             cash_sum: spot_cash(c, qty),
-            trade_id: 0,
+            ..empty_order_event()
         },
     );
     r.run().unwrap();
@@ -614,4 +614,11 @@ fn fault_scenario(seed: usize) -> Vec<u8> {
         evidence.extend_from_slice(d.as_bytes());
     }
     evidence
+}
+
+// Optional appended wire fields default to unavailable in this mock exchange.
+fn empty_order_event() -> OrderEvent {
+    let mut bytes = [0u8; size_of::<OrderEvent>()];
+    bytes[std::mem::offset_of!(OrderEvent, what)] = OrderEventKind::Ack as u8;
+    OrderEvent::try_read_from_bytes(&bytes).unwrap()
 }
