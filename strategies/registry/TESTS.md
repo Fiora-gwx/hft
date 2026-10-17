@@ -270,3 +270,5 @@ spec: README.md
 - 各策略的引擎级场景、DST 与恢复测试放在本 crate 的 `tests/`,用例编号归各策略的 `TESTS.md`(如 latency-probe 的 LPR-065–LPR-071)。
 
 产品形态回归 `tests/product_shape.rs::product_shape_rejects_wrong_venue_market_order_asset_and_missing_reference` 验证默认禁用配置也检查 venue/市场/同 base/腿顺序及缺引用,覆盖 validate_params、create、on_params,拒绝后合法配置仍可应用。
+
+真实引擎订单夹具的可选尾字段默认未提供,覆盖不同事件布局版本;已有策略用例的价量、费用、现金和回放断言保持。
