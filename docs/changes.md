@@ -4,7 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
-| 2026-10-17 | 系统订单逐笔永续现金事实优先于均价估算,连续覆盖/去重/快照保持一致;缺口失败,不启用完整外来 PERP_CASH;OrderEvent v4 尾部追加现金量/额,rep 元素上限 144 B | 测试网现金投影少 0.000001 USDT;BIN-101、EVT-205、SEQ-411/412、LED-279 | event、OMS、ledger、协议与规格;[决定](../.agents/notes/implemented/bug-fix/2026-10-17-execution-cash-facts.md) | 待评审(owner default accepted) |
+| 2026-10-17 | 系统订单逐笔永续现金事实优先于均价估算,连续覆盖/去重/快照保持一致;缺口失败,不启用完整外来 PERP_CASH;OrderEvent v4 尾部追加现金量/额,rep 元素上限 144 B | 测试网现金投影少 0.000001 USDT;BIN-101、EVT-205、SEQ-411/412、LED-279;SIM-123 的 60 个零尾字段保留全部旧字节,旧 120 B 哈希审计通过原基线,仅迁移该 sim 金样 | event、OMS、ledger、协议、规格与 SIM-123;[决定与审计](../.agents/notes/implemented/bug-fix/2026-10-17-execution-cash-facts.md) | 待评审(owner default accepted;LEAD 已批准 SIM-123 基线迁移) |
 | 2026-10-17 | 私有用户流优先于下单连接突发,已有完整缓冲先交付再读 socket;连接内不重排,逐帧发布 | 测试网 read→frame 排队;VEN-207,private burst 基准 | hft-venue 与规格 | 待评审(owner default accepted) |
 | 2026-10-17 | refdata 生成与实账户启动拒绝缺少严格零仓清仓能力的永续 caps;默认能力来自协议,旧完整行必须显式迁移 | 测试网 Binance flags=31 导致 Kill MinOrder;CORE-044/TOOL-130/SEQ-185 | hft-cfg、core 装配与规格,部署生成脚本 | 待评审(owner default accepted) |
 | 2026-10-17 | 同一 Input 已输出、尚未 place 的对冲请求预留裸量,批量恢复不能重复占用;storage 失败报告保留原始步数 | storage 0x7442aaf1b5dea253 原始 10000 步第 1631 步 I19;OMS-318/TK-049/177 | OMS、testkit、固定 seed;[决定](../.agents/notes/implemented/bug-fix/2026-10-17-recovery-hedge-reservation.md) | 待评审(owner default accepted) |

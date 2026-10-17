@@ -1,4 +1,4 @@
 covers = "Empirical latency, RefdataTiers, funding, liquidation and spot taker/maker fills: reply bytes and state-hash trail on every architecture"
 source = "synthetic"
-reviewed_by = "pending"
-note = "Flat-margin contract: all 83 existing binary replies are byte-identical; two flat debt margin reports at 5104786000/8001356000 ns are appended. Only final two SimExchange state hashes change (indices 113/114). Human review pending; these are not DST HashTrail fixtures."
+reviewed_by = "LEAD: OrderEvent v4 zero-tail migration only (2026-10-17)"
+note = "85 replies retain every original byte; 60 OrderEvent bodies append 16 zero bytes each (9962 -> 10922 bytes). Hashes at indices 6..113 change solely because pending replies hash the appended fields; the first six and final hash are unchanged. An isolated audit hashing only the old 120-byte OrderEvent prefix passed the complete old hash baseline; that audit code was removed. Only this SIM-123 baseline is migrated; DST HashTrail fixtures are untouched."
