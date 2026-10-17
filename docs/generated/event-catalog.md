@@ -331,8 +331,8 @@
 - 编号:`0x0203`
 - 域:Exec
 - 角色:Input
-- 布局:fixed 120
-- schema_version:3
+- 布局:fixed 136
+- schema_version:4
 - journal:seq;CRC:never
 
 | 偏移 | 字段 | 类型 | 单位 | 测量 | 说明 |
@@ -359,6 +359,8 @@
 | 96 | `cash_qty` | `qty` | 数量(资产 qty_exp) |  | v2: cumulative quantity covered by `cash_sum`; 0 = settlement facts unavailable. |
 | 104 | `cash_sum` | `qty` | 数量(资产 qty_exp) |  | v2: cumulative realized perpetual cash in the quote asset's qty_exp, income positive; excludes fees and funding. Known zero has `cash_qty = cum_filled > 0`. |
 | 112 | `trade_id` | `u64` |  |  | v3: exchange id of this PartialFill/Fill execution, using ExternalFill's id normalization; 0 = absent/nonpositive or a non-execution report. This identifies only this execution, never the whole cumulative quantity or cash prefix. |
+| 120 | `fill_cash_qty` | `qty` | 数量(资产 qty_exp) |  | v4: quantity of this execution covered by `fill_cash_amount`; 0 = unavailable. Applies only to PartialFill/Fill and must equal `qty`, never `cum_filled` by inference. |
+| 128 | `fill_cash_amount` | `qty` | 数量(资产 qty_exp) |  | v4: this execution's realized perpetual cash in quote qty_exp; excludes fees/funding. Known zero has fill_cash_qty > 0. Mutually exclusive with cumulative cash facts. |
 
 码表:[OrderEventKind](#码表-ordereventkind)
 

@@ -112,6 +112,7 @@ impl Oms {
             fee_asset: ev.fee_asset,
             cash_qty: ev.cash_qty,
             cash_sum: ev.cash_sum,
+            execution_cash: ev.fill_cash_qty.0 > 0,
             query: true,
             seq,
         };
@@ -263,6 +264,7 @@ impl Oms {
             cash_sum: ex
                 .filter(|_| ev.exch_qty == sl.filled)
                 .map_or(Qty(0), |x| x.cash_sum),
+            execution_cash: false,
             query: true,
             seq,
         };

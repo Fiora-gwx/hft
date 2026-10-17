@@ -4449,3 +4449,5 @@ spec: README.md
 - 实现:`crates/hft-oms/tests/tomb.rs::oms_485_late_fill_fee_after_feeless_query_on_tomb`
 
 POSITION_CLOSE 仅由执行层风险递减平仓携带,ACK 不更新仓位;镜像恢复保留 oflags。跨组件验收见 [SEQ-185](../hft-sequencer/TESTS.md)。
+
+逐笔现金入口复用 SEQ-411/412 真实引擎验证:连续分笔、重复、缺口、终态查询、快照累计水位和失败前无记账。

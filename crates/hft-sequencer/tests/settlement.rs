@@ -719,6 +719,8 @@ fn foreign_event(slot: u32, cum: i64, cash: i64) -> hft_event::OrderEvent {
         cash_qty: Qty(cum),
         cash_sum: Qty(cash),
         trade_id: 0,
+        fill_cash_qty: hft_types::Qty(0),
+        fill_cash_amount: hft_types::Qty(0),
     }
 }
 
@@ -933,6 +935,161 @@ const FACTS: [(Side, i64, i64, i64, i64); 5] = [
     (Side::Sell, 100_000, 6_002_740, 3_001_400, 0),
     (Side::Buy, 100_000, 6_002_750, 3_001_400, -10_000),
 ];
+
+#[test]
+fn seq_411_execution_cash_matches_strict_balance_and_replay_without_cap_claim() {
+    use hft_event::BalanceReport;
+    use hft_types::Tsc;
+    reset_script();
+    // Deterministic orders below carry the captured session's aggregate cash/fee facts.
+    // The exchange precision is -8; quote_cash exposes -6 only after summing the wallet.
+    let initial = 498_890_231_663i64;
+    let final_cash = 498_648_684_452i64;
+    let baseline = BalanceReport {
+        venue: B,
+        account: AC1,
+        asset: USDT,
+        _pad: 0,
+        free: Qty(initial),
+        locked: Qty(0),
+        ex_ts_ns: UTC0,
+        rx_tsc: Tsc(T0),
+    };
+    let mut h = b0().boot_self_contained_accounts(&[baseline]);
+    h.steady();
+    assert!(!h.rd.caps(B).flags.contains(CapFlags::PERP_CASH));
+    let start = h.keyframe();
+    let ds = place_orders(&mut h);
+    let mut partial = None;
+    for (ix, d) in ds.iter().enumerate() {
+        let mut e = order_event(d, OrderEventKind::Fill, h.epoch());
+        e.qty = d.qty;
+        e.cum_filled = d.qty;
+        e.px = Px(FACTS[ix].2);
+        e.avg_px = e.px;
+        e.cash_qty = Qty(0);
+        e.cash_sum = Qty(0);
+        e.fill_cash_qty = e.qty;
+        e.fill_cash_amount = Qty(if ix == 4 { -16_010_941 } else { 0 });
+        e.fee = Qty(if ix == 4 { 225_536_270 } else { 0 });
+        e.fee_asset = USDT;
+        e.trade_id = 10 + ix as u64;
+        if ix == 0 {
+            let mut first = e;
+            first.what = OrderEventKind::PartialFill;
+            first.qty.0 /= 2;
+            first.cum_filled = first.qty;
+            first.fill_cash_qty = first.qty;
+            h.push(h.rep_ring(AC1), &first);
+            assert_eq!(h.run(), StepOutcome::Idle);
+            partial = Some(h.keyframe());
+            e.qty = first.qty;
+            e.fill_cash_qty = first.qty;
+            e.trade_id += 100;
+        }
+        h.push(h.rep_ring(AC1), &e);
+        assert_eq!(h.run(), StepOutcome::Idle);
+        // Duplicate receipt and a fee-less terminal query cannot erase/rebook known cash.
+        h.push(h.rep_ring(AC1), &e);
+        assert_eq!(h.run(), StepOutcome::Idle);
+        let mut terminal = e;
+        terminal.what = OrderEventKind::QueryResult;
+        terminal.detail = 3;
+        terminal.fill_cash_qty = Qty(0);
+        terminal.fill_cash_amount = Qty(0);
+        terminal.fee = Qty(0);
+        h.push(h.rep_ring(AC1), &terminal);
+        assert_eq!(h.run(), StepOutcome::Idle);
+    }
+    assert_eq!(wallet(&h.s.engine().ledger), final_cash);
+    assert_eq!(h.s.engine().ledger.pos(AC1, B1).qty, Qty(0));
+    h.push(
+        h.rep_ring(AC1),
+        &BalanceReport {
+            free: Qty(final_cash),
+            ..baseline
+        },
+    );
+    assert_eq!(h.run(), StepOutcome::Idle);
+    assert_eq!(
+        h.s.engine().ledger.venue_book(AC1, B).vflags & hft_ledger::vflags::DRIFT,
+        0
+    );
+    for from in [&start, partial.as_ref().unwrap()] {
+        let cold = cold_at(&h, from);
+        assert_eq!(wallet(cold.ledger()), final_cash);
+        assert_eq!(
+            cold.ledger().venue_book(AC1, B).summary.quote_cash.0,
+            4_986_486_844
+        );
+        assert_eq!(
+            cold.ledger().venue_book(AC1, B).cash,
+            h.s.engine().ledger.venue_book(AC1, B).cash
+        );
+        assert!(h.verify_from(Some(from.seq)).is_empty());
+    }
+    assert!(h.verify().is_empty());
+}
+
+#[test]
+fn seq_411_execution_cash_preserves_legacy_fields_without_cap() {
+    reset_script();
+    let mut h = b0().boot_self_contained();
+    h.steady();
+    let initial = wallet(&h.s.engine().ledger);
+    let start = h.keyframe();
+    let ds = place_orders(&mut h);
+    let mut e = order_event(&ds[0], OrderEventKind::Fill, h.epoch());
+    e.cum_filled = ds[0].qty;
+    // v2/v3 journals did not use cumulative cash fields without PERP_CASH.
+    e.cash_qty = e.cum_filled;
+    e.cash_sum = Qty(123_456);
+    h.push(h.rep_ring(AC1), &e);
+    assert_eq!(h.run(), StepOutcome::Idle);
+    assert_eq!(wallet(&h.s.engine().ledger), initial);
+    assert_eq!(wallet(cold_at(&h, &start).ledger()), initial);
+    h.keyframe();
+    assert!(h.verify().is_empty());
+    assert!(h.verify_from(Some(start.seq)).is_empty());
+}
+
+#[test]
+fn seq_412_execution_cash_gap_and_missing_fact_stop_before_booking() {
+    for row in 0..3 {
+        reset_script();
+        let mut h = b0().boot_self_contained();
+        h.steady();
+        let ds = place_orders(&mut h);
+        let mut e = order_event(&ds[0], OrderEventKind::PartialFill, h.epoch());
+        e.qty = Qty(ds[0].qty.0 / 2);
+        e.cum_filled = e.qty;
+        e.fill_cash_qty = e.qty;
+        e.fill_cash_amount = Qty(0);
+        let expected = if row == 0 {
+            e.cum_filled = ds[0].qty; // An omitted earlier execution has no cash fact.
+            hft_oms::CashError::Missing
+        } else {
+            h.push(h.rep_ring(AC1), &e);
+            assert_eq!(h.run(), StepOutcome::Idle);
+            e.cum_filled = ds[0].qty;
+            if row == 1 {
+                e.fill_cash_qty = Qty(0);
+                hft_oms::CashError::Missing
+            } else {
+                e.cash_qty = e.cum_filled;
+                hft_oms::CashError::Coverage
+            }
+        };
+        let before = wallet(&h.s.engine().ledger);
+        let pos = *h.s.engine().ledger.pos(AC1, B1);
+        let mark = h.mark();
+        h.push(h.rep_ring(AC1), &e);
+        assert_eq!(h.run(), StepOutcome::Fatal(FatalReason::OmsCash(expected)));
+        assert_eq!(wallet(&h.s.engine().ledger), before);
+        assert_eq!(*h.s.engine().ledger.pos(AC1, B1), pos);
+        assert!(decisions(&h.since(mark)).is_empty());
+    }
+}
 
 fn place_orders(h: &mut H) -> Vec<OrderDecision> {
     // The quote itself identifies the order; replay never relies on an unsaved closure counter.

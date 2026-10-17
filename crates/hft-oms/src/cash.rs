@@ -6,6 +6,26 @@ use zerocopy::FromZeros;
 use crate::CashError;
 use crate::types::ForeignCashReceipt;
 
+pub(crate) fn normalize_execution(
+    event: &hft_event::OrderEvent,
+    previous: (Qty, Qty, Qty),
+    spot: bool,
+    strict: bool,
+) -> Result<hft_event::OrderEvent, CashError> {
+    let mut event = *event;
+    if spot && (event.fill_cash_qty.0 != 0 || event.fill_cash_amount.0 != 0) {
+        return Err(CashError::Identity);
+    }
+    if !strict || event.fill_cash_qty.0 != 0 || event.fill_cash_amount.0 != 0 {
+        event.normalize_fill_cash(previous).map_err(|e| match e {
+            hft_event::CashFactError::Coverage => CashError::Coverage,
+            hft_event::CashFactError::Missing => CashError::Missing,
+            hft_event::CashFactError::Overflow => CashError::Overflow,
+        })?;
+    }
+    Ok(event)
+}
+
 impl crate::Oms {
     /// Preflight provenance and all distinct new order identities in one reconciliation.
     /// No mutation/allocation; budget: oms/reconcile_cash_guard.

@@ -490,6 +490,30 @@ fn bin_101_fill_fields() {
         (0, 0),
         "per-fill rp is not cumulative cash"
     );
+    assert_eq!((e.fill_cash_qty.0, e.fill_cash_amount.0), (100000, 0));
+}
+
+#[test]
+fn bin_101_execution_cash_keeps_quote_precision_and_missing_is_not_zero() {
+    for amount in [None, Some("0"), Some("-0.16010941"), Some("0.00000059")] {
+        let p = match amount {
+            Some(x) => otu("TRADE", "PARTIALLY_FILLED").replace("\"rp\":\"0\"", &format!("\"rp\":\"{x}\"")),
+            None => otu("TRADE", "PARTIALLY_FILLED").replace("\"rp\":\"0\",", ""),
+        };
+        let (result, sink) = decode::<Usdm>(&mut GwCtx::default(), &p);
+        result.unwrap();
+        let e = sink.orders[0];
+        assert_eq!(e.fill_cash_qty.0, if amount.is_some() { 100000 } else { 0 });
+        assert_eq!(
+            e.fill_cash_amount.0,
+            match amount {
+                Some("-0.16010941") => -16010941,
+                Some("0.00000059") => 59,
+                _ => 0,
+            }
+        );
+        assert_eq!((e.cash_qty.0, e.cash_sum.0), (0, 0));
+    }
 }
 #[test]
 fn bin_102_trade_dedup() {

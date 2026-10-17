@@ -56,6 +56,8 @@ fn order(what: OrderEventKind, qty: i64, cum: i64, detail: u8) -> OrderEvent {
         cash_qty: Qty(0),
         cash_sum: Qty(0),
         trade_id: 77,
+        fill_cash_qty: hft_types::Qty(0),
+        fill_cash_amount: hft_types::Qty(0),
     }
 }
 fn wire(kind: &str, qty: i64, cum: i64, extra: &str) -> String {

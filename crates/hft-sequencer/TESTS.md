@@ -6096,3 +6096,5 @@ SEQ-414 的启动子例 `seq_414_bootstrap_balances_are_snapshot_baselines_not_p
 - 期望:每个报告有且仅有一条 BalanceCheck;Drift 先置位再清除,完整现金、summary/vflags 与冷账本相等,钱包始终不变;完整与两个窗口回放无差异
 - 反例:篡改校验事实的原始余额或把该 Output 伪装成 Meta,完整后缀回放必须发现分歧
 - 实现:`crates/hft-sequencer/tests/settlement.rs::seq_414_balance_check_gate_matches_cold_view_and_full_window_replay`
+
+SEQ-411/412 补充未声明 PERP_CASH 的逐笔现金连续前缀:分笔/重复/终态查询/快照窗口与全量回放,缺口/混合事实/后续缺失在仓位、钱包和对冲输出前失败。

@@ -1756,7 +1756,7 @@ BIN-026 的行情及私有订单/成交字段投影差分检查覆盖逐字节�
 | BIN-171.9 | `margin_data` | `Poll{interval_ms: 5000}` / `NotApplicable` |
 | BIN-171.10 | `own_liquidation_marker`、`liq_marker_arg` | `ClientIdPrefix`、`"autoclose-\|adl_autoclose\|settlement_autoclose-"` / `NotIdentifiable`、`""` |
 | BIN-171.11 | `ignorable_user_events` | `["TRADE_LITE", "STRATEGY_UPDATE", "GRID_UPDATE", "CONDITIONAL_ORDER_TRIGGER_REJECT"]` / `["balanceUpdate", "listStatus", "externalLockUpdate"]` |
-| BIN-171.12 | `flags` | 31(`AMEND | POST_ONLY | IOC | FOK | BATCH_CANCEL`)/ 31;两者均不自动声明 PERP_CASH |
+| BIN-171.12 | `flags` | 95(`AMEND | POST_ONLY | IOC | FOK | BATCH_CANCEL | POSITION_CLOSE`)/ 31;两者均不自动声明 PERP_CASH |
 | BIN-171.13 | `dms` 与四个时长 | `CountdownPerInst`,`dms_min_ms = 5000`,`dms_max_ms = 0`,`dms_timeout_ms = 30000`,`dms_refresh_ms = 10000` / `None`,四个 0 |
 | BIN-171.14 | `testnet` | `Demo` / `Demo` |
 | BIN-171.15 | `amend_qty_down_only` | `Usdm` false / `Spot` true |
@@ -2497,3 +2497,5 @@ BIN-332 单元输入验证带符号的八位小数金额与 HalfEven 半值取�
 - **基准**:BIN-500–BIN-508 在参考机 `bench-gate --reference` 下不超过 README"延迟与资源契约"的预算与 [hft-venue-proto 统一门槛](../hft-venue-proto/README.md#延迟与资源契约)(数值不在本文件);热路径分配为 0(BIN-038)。
 - **演示环境**:BIN-214、BIN-215 在 M3 之前完成并写回 README;BIN-216 连续 3 天通过(门槛 ⑥)。
 - **可选扩展**:增量深度(`@depth@100ms`、REST 深度快照、`align_first` 四种对齐、`L2Batch` 序号归一化)、现货 SBE(feature `spot-sbe`)、`mock` 反向编解码、`order.cancelReplace` 的用例与对应基准(`bench_decode_depth_2k`、`bench_decode_sbe_bba`、`bench_decode_snapshot_1000`)在启用该扩展的同一改动中补写,启用前必须全绿。
+
+BIN-101 补充校验系统订单 rp 的八位精度、正/负/零金额与缺失区别;保留本笔覆盖量,累计现金字段仍为零。

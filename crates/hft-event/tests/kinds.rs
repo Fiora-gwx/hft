@@ -67,7 +67,7 @@ fn evt_004_kinds_registry() {
         (0x0109, "L2Batch", Market, L::V(80, 64_000), I, 1, s, N, false),
         (0x0201, "OrderDecision", Exec, L::F(88), O, 1, s, N, false),
         (0x0202, "SendReport", Exec, L::F(48), I, 1, s, N, false),
-        (0x0203, "OrderEvent", Exec, L::F(120), I, 3, s, N, false),
+        (0x0203, "OrderEvent", Exec, L::F(136), I, 4, s, N, false),
         (0x0204, "PositionReport", Exec, L::F(56), I, 1, s, N, false),
         (0x0205, "BalanceReport", Exec, L::F(40), I, 1, s, N, false),
         (0x0206, "FundingSettle", Exec, L::F(56), B, 2, s, N, false),

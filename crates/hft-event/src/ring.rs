@@ -55,7 +55,7 @@ pub enum RepMsg {
     /// Venue diagnostics; sequencer records these as Meta, never as an order observation.
     Note(Note),
 }
-const _: () = assert!(size_of::<RepMsg>() <= 128);
+const _: () = assert!(size_of::<RepMsg>() <= 144);
 
 /// `hk` ring element (housekeeping → sequencer).
 #[derive(Copy, Clone, Debug)]

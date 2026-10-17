@@ -274,6 +274,8 @@ core 的深度来源([hft-venue-proto 契约 26](../hft-venue-proto/README.md#�
 
 `ExternalFill` 字段:`side ← S`、`qty ← l`、`px ← L`、`fee ← n`、`fee_asset ← N`、`exch_order_id ← i`、`trade_id ← t`(`t ≤ 0` 填 0)、`ex_ts_ns ← T`;去重键 `(inst, t)`,`t ≤ 0` 时 `(inst, i, z)`。强平单的清算费若以独立的余额变动出现(`ACCOUNT_UPDATE m = INSURANCE_CLEAR` 等),只作余额校验,不并入 `ExternalFill`(待核实其字段后再定,开发备忘第 2 条)。
 
+`Usdm` 系统订单 TRADE/CALCULATED 的 `rp` 按计价资产 qty_exp 精确写入 `OrderEvent.fill_cash_amount`,覆盖量取本笔 `l`;缺字段表示未提供,字符串零表示已知零。`rp` 不填累计 `cash_sum`,Spot 不产出永续现金。累计与逐笔字段的契约归 [hft-event](../hft-event/README.md),缺口与恢复归 [hft-oms](../hft-oms/README.md)。
+
 ### 用户流事件表
 
 | 事件(`Usdm`) | 产出 | 提示 |
