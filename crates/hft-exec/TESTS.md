@@ -1323,8 +1323,8 @@ spec: README.md
 | 行 | 场景 | 期望 `first_leg_ix` |
 |---|---|---|
 | EXE-157.1 | `force_deleverage(a1, C, 0.2)` 设下的引擎目标 | 1(Q,指定 venue) |
-| EXE-157.2 | `engine_flatten(a1)`;`PortfolioView` 保证金率 B 0.50、C 0.70 | 1(C 较高) |
-| EXE-157.3 | `engine_flatten(a1)`;保证金率相同,P 净量 −8.0、Q +5.0 | 0(名义较大) |
+| EXE-157.2 | `engine_flatten(a1)`;`PortfolioView` 保证金率 B 0.50、C 0.70 | 无链接串行先发腿 1(C 较高),reduce-only |
+| EXE-157.3 | `engine_flatten(a1)`;保证金率相同,P 净量 −8.0、Q +5.0 | 无链接串行先发腿 0(名义较大),reduce-only |
 
 ### EXE-158 风险目标没有永续腿或参数找不到对应市场类型时退回 ByLiquidity
 
@@ -3070,7 +3070,7 @@ spec: README.md
 
 补充验收(负责人 2026-10-17):正负低于 lot/minimum 的永续尾仓,配对与单腿均发精确量 POSITION_CLOSE 且无链接;未成交前 Drain 不就绪,成交归零后完成;spot 尾量保留。六个同 venue 无组尾仓分批全部关闭,成交不串腿,最后一批后完成扫描。
 
-### EXE-362 清仓的算法:非 Broken 配对永续先、第二腿不可用退回串行;Broken 串行;CapCleared{Broken} 不清目标
+### EXE-362 清仓的算法:无链接串行永续先;原有链接保留回退;CapCleared{Broken} 不清目标
 
 - 规则:[保证金危急的默认减仓](README.md#保证金危急的默认减仓a5与-engine_flatten)
 - 级别:table
@@ -3080,8 +3080,8 @@ spec: README.md
 
 | 行 | cell | 期望 |
 |---|---|---|
-| EXE-362.1 | g7 非 Broken,两腿可用 | 第一腿买 P 带 LegLink,`first_leg_ix = 1` |
-| EXE-362.2 | g7 非 Broken,在途链接 `LINK_HOLD` | `SerialFallback` 原因 5 |
+| EXE-362.1 | g7 非 Broken,两腿可用 | 买 P reduce-only,无 LegLink,`leg_ix = 1` |
+| EXE-362.2 | g7 非 Broken,Kill 前已建在途链接 `LINK_HOLD` | `SerialFallback` 原因 5 |
 | EXE-362.3 | g7 Broken | 只出买 P reduce-only(无 LegLink),P 到 0 后才卖 S |
 | EXE-362.4 | g7 Broken,裸量降到尘埃线下后收到 `CapCleared{Broken}` | 引擎目标仍为 0;`State → Working`;继续推进到 0 |
 
@@ -3113,7 +3113,7 @@ spec: README.md
 | EXE-364.4 | g8 后来出现仓位 P −2.0(无引擎目标)/ P −1.5 | `Ok` |
 | EXE-364.5 | 同 .4 / P +1.0(变号) | `Err(FlattenLocked)` |
 | EXE-364.6 | 同 .4 / P −2.5(远离 0) | `Err(FlattenLocked)` |
-| EXE-364.7 | g7 清仓进行中 / S 0、P 0 的 `Exit`,`first_leg = SpotFirst` | `Ok`;下一片 `first_leg_ix = 1`(仍 PerpFirst) |
+| EXE-364.7 | g7 清仓进行中 / S 0、P 0 的 `Exit`,`first_leg = SpotFirst` | `Ok`;下一片无链接串行 `leg_ix = 1`(仍 PerpFirst) |
 
 ### EXE-365 清仓锁与默认减仓期间 clear_target 一律忽略
 
@@ -4372,6 +4372,8 @@ spec: README.md
 - 实现:`crates/hft-exec/tests/fix.rs::exe_517_started_fix_deadline_counts_during_backoff`
 
 ## 验收
+
+- Kill 容量回归:锁定期间各腿均为无链接减仓单,沿用永续严格零仓/尾仓端点约束;跨组件满链接表、策略定时器配额耗尽、两腿归零与快照回放见 [SEQ-175](../hft-sequencer/TESTS.md#seq-175-shadow-或被拒的意图不扣令牌不计在途不分配槽)。
 
 `testkit` 强制目标原始事实与独立计算的跨组件验收归 [TK-109](../hft-testkit/TESTS.md#tk-109-真实保证金强制目标独立重算)。
 

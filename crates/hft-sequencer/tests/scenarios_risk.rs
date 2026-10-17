@@ -1934,6 +1934,87 @@ fn fl_1_flatten_lock_rejects_away_from_zero() {
     assert!(td.iter().all(|x| x.action != xa::TARGET_REJECTED));
 }
 
+#[test]
+fn fl_1_kill_flattens_with_full_links_and_strategy_timer_quota() {
+    let mut h = boot_with(|b| {
+        b.caps.max_timers = 1024;
+        b.setup_edit.push(|s| {
+            s.oms.links_per_account = 16;
+            s.oms.slots = hft_oms::PerTable::new(64);
+            s.exec.default.force_slice.max_chunk_notional = n("10000");
+        });
+    });
+    exact_position(&mut h, S1, 0);
+    let mut blockers = Vec::new();
+    for _ in 0..16 {
+        let m = crate::scenarios::place_on_a1(&mut h, &[S1], |hx| pair_first(hx, q("0.001")));
+        let d = decs_since(&h, m).into_iter().find(|d| d.link_role == 1).unwrap();
+        assert_eq!(d.reject, 0, "{d:?}");
+        h.ack(&d);
+        blockers.push(d);
+    }
+    assert_eq!(h.s.engine().oms.legs(AC1, G1).view.open_links, 16);
+    let quota = h.s.engine().caps.max_timers - h.s.engine().engine_timer_demand;
+    set_hook(|hx, ev, ctx| {
+        if hx.s.strategy == S1 && matches!(ev, EventRef::Bbo { inst, .. } if *inst == A1) {
+            for _ in 0..8 {
+                let _ = ctx.timer_at(hft_types::Tsc(hx.v.now().tsc.0 + 120 * SEC), 901, G1);
+            }
+        }
+    });
+    for _ in 0..quota.div_ceil(8) + 1 {
+        h.quote(A1, "50000", "50003");
+        h.run();
+    }
+    clear_hook();
+    assert_eq!(h.s.engine().strat_timers, quota);
+    let start = h.keyframe().seq;
+    let m = h.mark();
+    let id = h.cmd_confirmed(AC1, &kill_account(AC1, false, true, true));
+    h.run();
+    assert_eq!(h.res(id).0, status::APPLIED);
+    let perp = decs_since(&h, m)
+        .into_iter()
+        .find(|d| d.action == hft_event::OrderAction::New && d.inst == B1)
+        .expect("Kill perp order");
+    assert_eq!((perp.reject, perp.link_role, perp.qty), (0, 0, q("0.1")));
+    assert_ne!(perp.oflags & OrderFlags::REDUCE_ONLY.0, 0);
+    assert_eq!(h.s.engine().oms.legs(AC1, G1).view.open_links, 16);
+    for d in blockers {
+        let ev = order_event(&d, hft_event::OrderEventKind::CancelAck, h.epoch());
+        h.push(RingId::Rep(0), &ev);
+        h.run();
+    }
+    h.ack(&perp);
+    h.fill(&perp, perp.qty, perp.qty, perp.px);
+    for _ in 0..20 {
+        let t = h.now() + 100 * MS;
+        live_to(&mut h, t);
+        let orders: Vec<_> = decs_since(&h, m)
+            .into_iter()
+            .filter(|d| {
+                d.action == hft_event::OrderAction::New
+                    && d.reject == 0
+                    && d.inst == A1
+                    && h.s
+                        .engine()
+                        .oms
+                        .slot(hft_strategy_sdk::OrderRef::new(
+                            d.venue, d.account, d.slot.0, d.r#gen,
+                        ))
+                        .is_some_and(|s| s.state.open())
+            })
+            .collect();
+        for d in orders {
+            h.ack(&d);
+            h.fill(&d, d.qty, d.qty, d.px);
+        }
+    }
+    let lv = &h.s.engine().oms.legs(AC1, G1).view;
+    assert_eq!((lv.leg[0].net, lv.leg[1].net), (Qty(0), Qty(0)));
+    assert!(h.verify_from(Some(start)).is_empty());
+}
+
 // ===================================================================================== BK-7
 
 /// After a restart: venue `v`'s market and order connections, account configuration, balances

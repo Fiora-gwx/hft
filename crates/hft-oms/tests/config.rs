@@ -19,7 +19,7 @@ fn oms_001_defaults() {
     let rd = rd();
     let rows: [(&str, u64, u64); 25] = [
         ("OMS-001.1", u64::from(c.slots.get(VS, A1)), 4096),
-        ("OMS-001.2", u64::from(c.links_per_account), 4096),
+        ("OMS-001.2", u64::from(c.links_per_account), 1024),
         ("OMS-001.3", u64::from(c.ack_timeout_ms.get(VS)), 2000),
         ("OMS-001.4", u64::from(c.cancel_timeout_ms.get(VS)), 2000),
         ("OMS-001.5", u64::from(c.ioc_timeout_ms.get(VS)), 1000),

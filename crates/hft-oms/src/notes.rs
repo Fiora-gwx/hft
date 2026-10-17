@@ -44,6 +44,8 @@ codes! {
     RESUME_RETRY = 21, "OmsResumeRetry", P1;
     RESUME_TIMEOUT = 22, "OmsResumeTimeout", P0;
     ANOMALY = 23, "OmsAnomaly", P1;
+    HEDGE_RESIDUAL = 24, "OmsHedgeResidual", P1;
+    LINK_CAPACITY = 25, "OmsLinkCapacity", P1;
 }
 
 /// The same table in the form `cargo xtask gen-schema` scans (hft-event README "const 表的形式").
@@ -71,6 +73,8 @@ pub const NOTE_CODES: &[(NoteSource, u32, &str)] = &[
     (NoteSource::Oms, 21, "OmsResumeRetry"),
     (NoteSource::Oms, 22, "OmsResumeTimeout"),
     (NoteSource::Oms, 23, "OmsAnomaly"),
+    (NoteSource::Oms, 24, "OmsHedgeResidual"),
+    (NoteSource::Oms, 25, "OmsLinkCapacity"),
 ];
 
 /// `Note.code` of an Oms code.

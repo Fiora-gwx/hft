@@ -18,6 +18,7 @@ pub struct FeeCycle {
     high: i64,
     interval_ns: i64,
     next_ns: i64,
+    perp_first: bool,
 }
 
 impl Strategy for FeeCycle {
@@ -42,7 +43,7 @@ impl Strategy for FeeCycle {
         let (_, g) = groups.iter().next().unwrap();
         let a = g.legs[0];
         let b = g.legs[1];
-        let qty = rd.inst(b.inst).lot * 2;
+        let qty = rd.inst(a.inst).lot.max(rd.inst(b.inst).lot) * 2;
         Ok(Self {
             inst,
             group: g.id,
@@ -52,6 +53,7 @@ impl Strategy for FeeCycle {
             high: qty * i64::from(p.at(0).qty_lots),
             interval_ns: i64::from(p.at(0).hold_ms) * 1_000_000,
             next_ns: 0,
+            perp_first: rd.inst(a.inst).kind == hft_refdata::InstKind::Perp,
         })
     }
     fn subscriptions(&self, groups: &GroupTable, out: &mut SubsBuilder<'_>) {
@@ -69,11 +71,13 @@ impl Strategy for FeeCycle {
         if legs.has_pending || legs.has_unknown {
             return;
         }
-        let side = if legs.leg[0].net.0 >= self.high {
-            Side::Sell
+        let net = if self.perp_first {
+            -legs.leg[0].net.0
         } else {
-            Side::Buy
+            legs.leg[0].net.0
         };
+        let side = if net >= self.high { Side::Sell } else { Side::Buy };
+        let side = if self.perp_first { side.opposite() } else { side };
         let hedge_side = if side == Side::Buy { Side::Sell } else { Side::Buy };
         let bbo = v.bbo(self.first.1);
         let link = LegLinkOpt::some(LegLink {
@@ -133,6 +137,52 @@ impl Strategy for FeeCycle {
 }
 
 hft_strategy_sdk::strategy_set! { pub struct FeeStrategies { FeeCycle } }
+
+#[test]
+fn tk_106_perp_first_fee_residual_reclaims_links_seed_1017c4() {
+    use hft_event::{Note, OrderAction, OrderDecision};
+    use hft_testkit::dst::{RerunPolicy, SeqSut, run_record};
+    let mut c = config(0);
+    c.seed = 0x1017c4;
+    c.steps = 20_000;
+    c.horizon_ns = 30_000_000_000;
+    c.scripted.clear();
+    c.world.accounts.truncate(1);
+    c.world.groups.truncate(1);
+    c.world.strategies.truncate(1);
+    for group in &mut c.world.groups {
+        core::mem::swap(&mut group.first, &mut group.second);
+    }
+    c.rerun = RerunPolicy::Always;
+    let r = run_record::<SeqSut<FeeStrategies>>(&c);
+    assert!(r.outcome.is_pass(), "{}", crate::seq_sut::show(&r));
+    let orders: Vec<_> = r
+        .journal
+        .iter()
+        .filter_map(|j| j.try_read::<OrderDecision>())
+        .filter(|d| d.action == OrderAction::New)
+        .collect();
+    assert!(
+        orders
+            .iter()
+            .filter(|d| d.link_role == 1 && d.reject == 0)
+            .count()
+            > 32,
+        "orders={orders:?}"
+    );
+    assert!(
+        orders
+            .iter()
+            .all(|d| d.reject & hft_types::RejectBits::CAPACITY.0 == 0)
+    );
+    assert!(
+        r.journal
+            .iter()
+            .filter_map(|j| j.try_read::<Note>())
+            .any(|n| n.code == hft_oms::notes::code_of(hft_oms::notes::HEDGE_RESIDUAL))
+    );
+    assert!(r.snapshot_checks > 0);
+}
 
 pub fn config(delay_ms: u32) -> hft_testkit::dst::DstConfig {
     use hft_testkit::dst::{MarketGen, MarketSource, faults::Fault, seq::build, world::VS};

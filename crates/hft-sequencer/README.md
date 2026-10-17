@@ -628,6 +628,8 @@ Model 从检查点恢复、镜像尚未追到其 `last_seq` 时,落后量以该�
 
 `TimerHeap`:预分配二叉堆(容量 `max_timers`),键 `(deadline_tsc, owner, timer_id, group)`,整序确定;堆内容是状态(进快照),"是否到期"是环境判断,由实盘驱动比较 TSC 后写一条 `Timer` Input(每轮开头,以及环输入之间的中途检查,见[主循环](#主循环step))。周期性系统定时器(`OmsSweep` 1 s;`DeadMan(venue, account)` 周期 = 该 venue `DeadManSpec.refresh_ms`,每次发 `GwCmd{DeadManRefresh, arg: timeout_ms}`(`timeout_ms ≥ 2 × refresh_ms`,取值归 [hft-venue-proto](../hft-venue-proto/README.md));`ConnRotate(venue)` 周期按 hft-venue ECF1 段 6 的计划切换时刻(`ws_max_conn_age_s − conn.rotate_margin_s`,[hft-venue](../hft-venue/README.md)),仅在无 Pending 槽时发 `GwCmd{Rotate}`)以 `Deadline` 形式进堆;`DeadMan` 由 sequencer 驱动,sequencer 卡死时刷新自然停止,交易所侧撤单生效,无接口的所由 kill-switch 兜底。
 
+Kill 清仓使用执行层的无链接串行订单,无需新增 OMS 链接或 HedgeRetry;策略定时器配额用尽仍保留全部引擎登记方的容量。链接退休会撤销其 HedgeRetry,不会将旧定时器带到复用链接。
+
 **容量**:引擎登记方(执行层、OMS、风控、系统周期定时器)在堆中的条目数有构造上界 `engine_timer_demand` = 执行层 `3 × max_cells_total + 1`(每 cell 同时至多 3 种定时器,另加全局唯一的 Continue,[hft-exec](../hft-exec/README.md))+ OMS `Σ links_per_account + Σ slots + 1`(每链接一个 HedgeRetry、每槽一个 UnknownQuery、一个 Sweep,[hft-oms](../hft-oms/README.md))+ 风控 `3 × (account, 永续 venue) 数`(MarginStale、MarginDeadline、MarginForce)+ 系统周期定时器数(上段的登记,按装配出的 venue 与账户计)。`boot` 按装配出的配置计算它并要求 `max_timers > engine_timer_demand`,否则 `BootError::TimerCapacity{demand}`(退出码归 apps/hft-core);策略定时器的配额 = `max_timers − engine_timer_demand` 由全部策略共享,`Ctx::timer_at` 登记会超出它时返回 `CtxFull`(计数,不进堆)。因此运行中堆满只可能是引擎缺陷:`push` 失败 → `StepOutcome::Fatal(TimerOverflow)`,hft-core abort 并进入崩溃恢复。
 
 ### 快照

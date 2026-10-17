@@ -13,6 +13,61 @@ use crate::common::*;
 use crate::scenarios::*;
 use crate::scenarios_hedge::{case, exec_decs};
 
+#[test]
+fn seq_175_fee_residual_link_reuse_real_engine_replay() {
+    reset_script();
+    let mut b = b0();
+    b.caps.max_timers = 4096;
+    b.setup_edit.push(|s| {
+        s.oms.links_per_account = 16;
+        s.oms.slots = hft_oms::PerTable::new(128);
+    });
+    let mut h = b.boot();
+    h.steady();
+    let start = h.keyframe().seq;
+    set_hook(|hx, ev, ctx| {
+        if hx.s.strategy == S1 && matches!(ev, EventRef::Bbo { inst, .. } if *inst == A1) {
+            let mut it = pair_first(hx, q("0.001"));
+            it.venue = B;
+            it.inst = B1;
+            it.side = Side::Sell;
+            it.px = hx.v.bbo(B1).bid_px;
+            let mut link = *it.link.get().unwrap();
+            link.hedge = onfill(AC1, A1, Side::Buy);
+            it.link = hft_strategy_sdk::LegLinkOpt::some(link);
+            let _ = ctx.place(it);
+        }
+    });
+    for cycle in 0..48 {
+        let m = h.mark();
+        h.quote(A1, "50000", "50003");
+        h.run();
+        let first = decs(&h, m).into_iter().find(|d| d.inst == B1).unwrap();
+        assert_eq!(first.reject, 0, "cycle {cycle}: {first:?}");
+        h.ack(&first);
+        h.fill(&first, first.qty, first.qty, first.px);
+        let second = decs(&h, m).into_iter().find(|d| d.inst == A1).unwrap();
+        assert_eq!(second.reject, 0);
+        h.ack(&second);
+        let mut ev = order_event(&second, OrderEventKind::Fill, h.epoch());
+        ev.cum_filled = second.qty;
+        ev.avg_px = second.px;
+        ev.fee_asset = BTC;
+        ev.fee = Qty(10);
+        h.push(RingId::Rep(0), &ev);
+        h.run();
+        let lv = &h.s.engine().oms.legs(AC1, G1).view;
+        assert_eq!(lv.open_links, 0, "cycle {cycle}");
+        assert_eq!(lv.naked_qty, Qty((cycle + 1) * 10));
+        assert_eq!(lv.leg[0].residual, Qty((cycle + 1) * 10));
+        assert!(notes_of(&h, m, notes::HEDGE_RESIDUAL).len() == 1);
+        let t = h.now() + 100 * MS;
+        keep_alive_to(&mut h, t);
+    }
+    assert!(h.verify_from(Some(start)).is_empty());
+    clear_hook();
+}
+
 fn slot_of(h: &H, d: &OrderDecision) -> hft_oms::OrderSlot {
     let r = hft_strategy_sdk::OrderRef::new(d.venue, d.account, d.slot.0, d.r#gen);
     *h.s.engine().oms.slot(r).expect("slot")

@@ -186,6 +186,8 @@ sequencer 以该 `ControlCmd` 记录头的 `tsc` 与 `expires_tsc` 比较:过期
 
 gateway 侧的拒绝(`Unauthorized`、`Forbidden`、`RateLimited`、`Busy`、gateway 产生的 `InvalidArgs` 与 `Rejected{RefdataAssembly}`)用同一码表,名字随响应 JSON 返回。hft-risk `ModeErr` 与 hft-exec `ExecCmdErr` 到本表的映射在 [hft-sequencer](../../crates/hft-sequencer/README.md#命令路径) 命令路径(`ModeErr::UnknownPending` → `PreconditionFailed{UnknownPresent}`;`ExecCmdErr::UnknownGroup` → `InvalidArgs{UnknownGroup}`,其余 `ExecCmdErr` → `PreconditionFailed{同名 detail}`,码 316–320)。新增 detail 码按 [cookbook](../cookbook/adding-a-control-command.md) 在本表追加。
 
+Kill 的清仓进度与严格零仓判据归 [执行层](../../crates/hft-exec/README.md#清仓永续尾仓);清仓订单不申请 OMS link,满链接表不会阻断清仓,Applied 仅表示命令生效。
+
 ## 命令集
 
 命令按 `scope` 分两类:**core** = 首次上线(新子账户上线 ccex 策略)必须具备、必须通过上线门槛的命令;**optional** = 已分配编码与语义、首次上线不实现的命令,未实现前 [hft-ctl-proto `perms.rs`](../../crates/hft-ctl-proto/README.md#权限表) 不含它们,gateway 返回 `Forbidden`,触发条件写在语义列。编码(载荷布局)与 `CmdKind` 编号归 [hft-event 控制命令编码](../../crates/hft-event/README.md#控制命令编码);本页的命令名与其变体名一一对应。

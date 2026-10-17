@@ -162,6 +162,11 @@ impl Oms {
             && let Some(i) = (c.link_id as usize).checked_sub(1)
             && let Some(a) = self.aux.get_mut(i)
         {
+            a.open = if k > 0 {
+                a.open.saturating_add(1)
+            } else {
+                a.open.saturating_sub(1)
+            };
             if c.unknown {
                 a.unknown = add_u16(a.unknown, k);
             }

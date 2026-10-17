@@ -89,7 +89,7 @@ spec: README.md
 | 行 | 参数 | 期望默认值 |
 |---|---|---|
 | OMS-001.1 | `slots[(VS, a1)]` | 4096 |
-| OMS-001.2 | `links_per_account` | 4096 |
+| OMS-001.2 | `links_per_account` | 1024 |
 | OMS-001.3 | `ack_timeout_ms[VS]` | 2000 |
 | OMS-001.4 | `cancel_timeout_ms[VS]` | 2000 |
 | OMS-001.5 | `ioc_timeout_ms[VS]` | 1000 |
@@ -416,9 +416,9 @@ spec: README.md
 
 | 行 | 检查 | 期望 |
 |---|---|---|
-| OMS-025.1 | 码名集合 | 恰为 23 个:`OmsTransition OmsUnknown OmsUnknownStuck OmsVenueReady OmsNeedsRestQuery OmsStaleGenFill OmsLateFill OmsOverfill OmsForeignOrder OmsForeignFillViaOrderEvent OmsForeignFill OmsExtDedup OmsFillPxEstimated OmsFeeUnattributed OmsCancelNotSent OmsHedgeBroken OmsHedgePxStale OmsHedgePxGated OmsHedgeSlipCapped OmsHedgeNakedCapped OmsResumeRetry OmsResumeTimeout OmsAnomaly`;与登记表中 `source = Oms` 的名字集合相等 |
-| OMS-025.2 | `n` 唯一 | 23 个 `n` 两两不同;`Note.code = 4 << 24 \| n` |
-| OMS-025.3 | 默认级别 | P0:`OmsUnknownStuck OmsStaleGenFill OmsLateFill OmsOverfill OmsHedgeBroken OmsResumeTimeout`;P1:`OmsUnknown OmsForeignOrder OmsForeignFillViaOrderEvent OmsExtDedup OmsFillPxEstimated OmsFeeUnattributed OmsHedgePxStale OmsHedgePxGated OmsHedgeSlipCapped OmsHedgeNakedCapped OmsResumeRetry OmsAnomaly`;P2:`OmsCancelNotSent`;Info:`OmsTransition OmsVenueReady OmsNeedsRestQuery OmsForeignFill` |
+| OMS-025.1 | 码名集合 | 恰为 25 个:`OmsTransition OmsUnknown OmsUnknownStuck OmsVenueReady OmsNeedsRestQuery OmsStaleGenFill OmsLateFill OmsOverfill OmsForeignOrder OmsForeignFillViaOrderEvent OmsForeignFill OmsExtDedup OmsFillPxEstimated OmsFeeUnattributed OmsCancelNotSent OmsHedgeBroken OmsHedgePxStale OmsHedgePxGated OmsHedgeSlipCapped OmsHedgeNakedCapped OmsResumeRetry OmsResumeTimeout OmsAnomaly OmsHedgeResidual OmsLinkCapacity`;与登记表中 `source = Oms` 的名字集合相等 |
+| OMS-025.2 | `n` 唯一 | 25 个 `n` 两两不同;`Note.code = 4 << 24 \| n` |
+| OMS-025.3 | 默认级别 | P0:`OmsUnknownStuck OmsStaleGenFill OmsLateFill OmsOverfill OmsHedgeBroken OmsResumeTimeout`;P1:`OmsUnknown OmsForeignOrder OmsForeignFillViaOrderEvent OmsExtDedup OmsFillPxEstimated OmsFeeUnattributed OmsHedgePxStale OmsHedgePxGated OmsHedgeSlipCapped OmsHedgeNakedCapped OmsResumeRetry OmsAnomaly OmsHedgeResidual OmsLinkCapacity`;P2:`OmsCancelNotSent`;Info:`OmsTransition OmsVenueReady OmsNeedsRestQuery OmsForeignFill` |
 
 ### OMS-026 OmsAnomaly 的种类码
 
@@ -2316,6 +2316,9 @@ spec: README.md
 - 实现:`crates/hft-oms/tests/link.rs::oms_200_hedge_vetoed`
 
 ### OMS-201 链接状态迁到 Done 的条件
+
+- 补充回归:基础币手续费使全成第二腿留下亚 lot 欠量时,1 个 link 槽连续 64 轮可复用,所有净仓与 residual 守恒;旧快照的正小数欠量由 sweep 交接一次并取消重试,Unknown 期间不回收。实现 `crates/hft-oms/tests/link.rs::oms_201_fee_residual_retires_and_reuses_link_without_losing_position`、`oms_201_sweep_residual_cancels_retry_but_keeps_unknown_identity`。
+- 真实 journal 回放:原样恢复 probe-spin-01 seq 7154 的 OMS 节,16 条 Hedging 的 owed 分别 1000、15 × 990;一次 sweep 全部 Done、open_links 归零,净仓不变、对冲腿 residual 增加 15850,二次运行快照一致。实现 `crates/hft-oms/tests/snapshot.rs::oms_201_recorded_probe_snapshot_reclaims_all_sixteen_orphans`;来源与 SHA-256 见 [夹具说明](tests/fixtures/linkcap/README.md)。
 
 - 规则:[LegLink 与 HedgePlan](README.md#leglink-与-hedgeplan)
 - 级别:table

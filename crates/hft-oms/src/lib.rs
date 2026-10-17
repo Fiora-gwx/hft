@@ -85,6 +85,8 @@ pub(crate) struct Params {
 /// Per-link bookkeeping recomputable from the slots (not in the snapshot).
 #[derive(Copy, Clone, Debug, Default)]
 pub(crate) struct LinkAux {
+    /// All non-terminal slots; prevents reuse while a zero-remainder order is unresolved.
+    pub(crate) open: u32,
     /// Non-terminal `Reverse` slots.
     pub(crate) rev_open: u16,
     /// `Unknown` slots of the link.

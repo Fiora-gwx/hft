@@ -117,6 +117,8 @@ fn evt_075_note_registry_rows() {
         ("EVT-075.38", "OmsCancelNotSent", Oms, Some(P2), &[]),
         ("EVT-075.39", "OmsNeedsRestQuery", Oms, Some(Info), &[]),
         ("EVT-075.40", "OmsAnomaly", Oms, None, &[]),
+        ("EVT-075.96", "OmsHedgeResidual", Oms, Some(P1), &[]),
+        ("EVT-075.97", "OmsLinkCapacity", Oms, Some(P1), &[]),
         ("EVT-075.41", "RoundClosed", Ledger, Some(Info), &[]),
         (
             "EVT-075.42",
@@ -223,8 +225,8 @@ fn evt_075_note_registry_rows() {
         ("EVT-075.82", "AdvisorStats", Advisor, Some(Info), &[]),
         ("EVT-075.88", "ModelCkptSkipped", Advisor, Some(P1), &[]),
     ];
-    assert_eq!(NOTE_NAMES.len(), 92);
-    assert_eq!(rows.len(), 92);
+    assert_eq!(NOTE_NAMES.len(), 94);
+    assert_eq!(rows.len(), 94);
     for (i, (row, name, src, lvl, v)) in rows.iter().enumerate() {
         let n = note_name(name).unwrap_or_else(|| panic!("{row}"));
         assert_eq!(NOTE_NAMES[i].name, *name, "{row} order");

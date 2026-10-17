@@ -102,7 +102,7 @@ impl OmsConfig {
             engine_epoch,
             tsc_hz_milli,
             slots: PerTable::new(4096),
-            links_per_account: 4096,
+            links_per_account: 1024,
             max_groups: 4096,
             ack_timeout_ms: PerVenue::new(2000),
             cancel_timeout_ms: PerVenue::new(2000),

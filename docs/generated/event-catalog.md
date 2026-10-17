@@ -1358,6 +1358,8 @@
 | `OmsCancelNotSent` | Oms | 15 | P2 |  |
 | `OmsNeedsRestQuery` | Oms | 5 | Info |  |
 | `OmsAnomaly` | Oms | 23 | 按条件 |  |
+| `OmsHedgeResidual` | Oms | 24 | P1 |  |
+| `OmsLinkCapacity` | Oms | 25 | P1 |  |
 | `RoundClosed` | Ledger | 1 | Info |  |
 | `Adjusted` | Ledger | 2 | Info | `account` [0, +8)、`venue` [8, +8)、`inst_or_asset` [64, +64)、`report_id` [128, +64)、`qty` [192, +64)、`px` [256, +64)、`realized` [320, +64) |
 | `BaselineSet` | Ledger | 3 | Info |  |

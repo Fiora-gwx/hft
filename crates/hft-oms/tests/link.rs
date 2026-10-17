@@ -13,6 +13,67 @@ use hft_oms::*;
 use hft_strategy_sdk::{HedgeKind, HedgePlan, LegLink, LinkRole, OnFail, OrderRef};
 use hft_types::{Qty, RejectBits, Tif, Tsc};
 
+#[test]
+fn oms_201_fee_residual_retires_and_reuses_link_without_losing_position() {
+    let mut h = H::with(|c| {
+        c.links_per_account = 1;
+        c.reuse_quarantine_ms = 0;
+    });
+    // Perpetual first, spot hedge: received-base fees leave net < gross hedge request.
+    let mut plan = plan_l1();
+    plan.venue = VS;
+    plan.inst = X;
+    plan.side = hft_types::Side::Buy;
+    for cycle in 0..64u64 {
+        let t = cycle * 10;
+        let mut it = first_leg(q("0.012"), Tif::Ioc, plan);
+        it.intent.venue = VX;
+        it.intent.inst = Y;
+        it.intent.side = hft_types::Side::Sell;
+        let first = h.place_ok(&it, t);
+        assert_eq!(h.n_notes(notes::LINK_CAPACITY), 1);
+        let id = h.slot(first).link_id;
+        h.fill(first, it.intent.qty, p("60000"), t + 1);
+        let req = one_hedge(&h);
+        let second = place_hedge(&mut h, &req, t + 2).unwrap();
+        let mut ev = h.oe(second, OrderEventKind::Fill);
+        ev.cum_filled = req.qty;
+        ev.avg_px = p("60000");
+        ev.fee_asset = BTC;
+        ev.fee = Qty(10);
+        h.ev(&ev, t + 3);
+        assert_eq!(h.link(id).state, LinkState::Done, "cycle {cycle}");
+        assert_eq!(h.link(id).owed(), Qty(0));
+        assert_eq!(h.legs(A1, g1()).view.open_links, 0);
+        assert_eq!(h.n_notes(notes::HEDGE_RESIDUAL), 1);
+        assert_eq!(h.legs(A1, g1()).view.naked_qty, Qty((cycle as i64 + 1) * 10));
+        assert_eq!(
+            h.legs(A1, g1()).view.leg[0].residual,
+            Qty((cycle as i64 + 1) * 10)
+        );
+        h.sweep(t + 4);
+    }
+}
+
+#[test]
+fn oms_201_sweep_residual_cancels_retry_but_keeps_unknown_identity() {
+    let (mut h, first, id) = filled(plan_l1(), "0.012");
+    let second = place_req(&mut h, 1);
+    reject(&mut h, second, 2);
+    // A legacy snapshot's positive sub-lot debt must not retain its retry slot forever.
+    h.o.test_link_mut(id, |e| e.hedge_req = Qty(1));
+    h.o.test_set_state(first, OrderState::Unknown, OrderState::Live);
+    h.sweep(3);
+    assert_eq!(h.link(id).state, LinkState::Hedging);
+    h.o.test_set_state(first, OrderState::Filled, OrderState::Live);
+    h.sweep(4);
+    assert_eq!(h.link(id).state, LinkState::Done);
+    assert_eq!(h.legs(A1, g1()).view.leg[1].residual, Qty(1));
+    assert!(retry_timers(&h).iter().any(|t| t.id == id && t.cancel));
+    h.sweep(5);
+    assert_eq!(h.legs(A1, g1()).view.leg[1].residual, Qty(1));
+}
+
 /// L1 first leg (IOC, `qty`) filled at t = 0; returns (h, first, link) with the Second request in `h.out`.
 fn filled(plan: HedgePlan, qty: &str) -> (H, OrderRef, u32) {
     let mut h = H::new();
