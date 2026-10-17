@@ -2,6 +2,8 @@
 
 Status: implemented
 
+负退出阈值的可用账户范围由 [demo 负净边测量](2026-10-17-demo-negative-edge.md) 收窄为非正式账户。
+
 ## Problem
 
 双向跨所价差与双永续资金费选择不符合负责人当前产品范围，现货反向开仓还需要借币与做空能力。2026-10-16 负责人指定同资产 USDT 计价的 Binance USDⓈ-M 永续与 Bitget SPOT。

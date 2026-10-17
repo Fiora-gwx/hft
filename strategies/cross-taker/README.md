@@ -26,7 +26,7 @@ status: impl
 
 ### 装配与组
 
-registry 的 cross-taker feature 注册 CrossTaker,kind_id/schema_id = 3,version = 2;`Model = NoModel<XtParams>`。每组恰好两腿,同一 base/quote、相同定点指数、不同交易所。同一实例不允许两个 group 引用同一 inst,避免逐品种限额被重复组放大。账户必须覆盖两腿 venue;加载时拒绝无效引用、同所组合、不支持的市场、无效 tick/lot 和无效限额。两侧 BBO 都订阅 Part::Fast,状态只读 SDK Views。
+registry 的 cross-taker feature 注册 CrossTaker,kind_id/schema_id = 3,version = 3;`Model = NoModel<XtParams>`。每组恰好两腿,同一 base/quote、相同定点指数、不同交易所。同一实例不允许两个 group 引用同一 inst,避免逐品种限额被重复组放大。账户必须覆盖两腿 venue;加载时拒绝无效引用、同所组合、不支持的市场、无效 tick/lot 和无效限额。两侧 BBO 都订阅 Part::Fast,状态只读 SDK Views。
 
 ### 参数 schema
 
@@ -35,8 +35,8 @@ registry 的 cross-taker feature 注册 CrossTaker,kind_id/schema_id = 3,version
 | 字段 | 单位 | 默认 | per_group | 含义 |
 |---|---|---|---|---|
 | enabled | Bool | false | 否 | 人工启用;默认不交易 |
-| min_edge | Rate | 0 | 是 | 开仓净收益率严格下界;启用时必须 > 0 |
-| close_edge | Rate | 0 | 是 | 平仓反向净收益率下界,包含等号;允许负值,须人工标定 |
+| min_edge | Rate | 0 | 是 | 开仓净收益率严格下界;正式账户启用时必须 > 0,负值仅非正式账户测试可用 |
+| close_edge | Rate | 0 | 是 | 平仓反向净收益率下界,包含等号;正式账户须 ≥ 0,负值仅非正式账户测试可用 |
 | slip | Rate | 0 | 是 | 每腿 IOC 价格余量,0 为吃到触价 |
 | depth_frac | Rate | 50% | 是 | 两侧对应顶档量的使用比例 |
 | max_chunk_notional | Notional | 0 | 是 | 任一腿单笔上限;启用时必须 > 0 |
@@ -44,6 +44,10 @@ registry 的 cross-taker feature 注册 CrossTaker,kind_id/schema_id = 3,version
 | max_quote_age_ms | DurationMs | 5 | 是 | 两侧报价机会年龄上限,等于上限即不交易 |
 | cooldown_ms | DurationMs | 100 | 是 | 两次尝试间的 engine_ns 间隔;门控、Shadow 也消耗冷却 |
 | max_hedge_failures | Count | 3 | 是 | 连续失败的双腿尝试达到此值请求 group halt |
+
+`min_edge` 与 `close_edge` 的范围为 −10%..=10%,schema 标记 `prod_min = 0`。只有绑定账户 `is_prod = false` 才允许负值,用于 demo/testnet 的 TD 链路测量;账户标签、实例名、Shadow 或禁用状态均不能豁免正式账户。hft-cfg 检查默认值与所有组覆盖;策略 check、加载、新建和 SetParams 再检查默认值与有效组值。负默认值不能被正组覆盖隐藏,空组与 enabled=false 同样受限。正式账户启用时 min_edge=0 仍拒绝。
+
+v3 更新参数边界与摘要,字段顺序和 body 布局保持;部署须用同一发布制品的 schema 重建 SPB1。快照布局保持,恢复接受 descriptor v1–v3。两腿 IOC、费用计算、cap、模式与引擎风险门控保持。测试配置与频率假设归 [demo 参数](../../deploy/testnet/README.md)。
 
 费率读取 Views::fee().taker,由账户 refdata 费率档提供。负费率保守按零计,不计返佣收益。
 
@@ -108,6 +112,7 @@ on_event 无分配、无锁、无系统调用、无浮点数;每个 BBO 最多�
 - [Windows 开发机前后测量](../../benchmarks/reports/2026-10-15-windows-cross-taker.md)(非参考机验收)
 - [SDK](../../crates/hft-strategy-sdk/README.md)、[执行层](../../crates/hft-exec/README.md)、[OMS](../../crates/hft-oms/README.md)
 - [策略规则](../AGENTS.md)、[上线门槛](../../docs/testing.md#8-上线门槛)
+- [demo 负净边测量决定](../../.agents/notes/implemented/feature/2026-10-17-demo-negative-edge.md)
 - [产品形态决定](../../.agents/notes/implemented/feature/2026-10-16-perp-spot-shape.md)
 - [同时下单决定](../../.agents/notes/implemented/feature/2026-10-14-cross-taker-simultaneous.md)
 - [范围与待评审取舍](../../.agents/notes/implemented/feature/2026-10-14-cross-taker-executable-spread.md)

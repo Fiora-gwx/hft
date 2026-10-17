@@ -343,7 +343,7 @@ fn mock() -> (
         _rsv: 0,
     };
     let groups = GroupTable::new(&[g], 4);
-    let p = XtParams::decode(&w.strategies[0].params, 2, &groups).unwrap();
+    let p = XtParams::decode(&w.strategies[0].params, XtParams::SCHEMA.version, &groups).unwrap();
     let strategy = cross_taker::CrossTaker::new(
         StrategyInstance {
             strategy: StrategyId(1),
@@ -570,4 +570,57 @@ fn cross_taker_halts_on_repeated_hedge_failures_and_keeps_latch() {
         1,
         "safe explicit mode resume"
     );
+}
+
+#[test]
+fn cross_taker_demo_negative_edge_pairs_respect_cooldown_and_replay() {
+    let mut w = world();
+    // Keep fixture price and initial mark aligned; make the minimum lot fit the demo cap.
+    for i in &mut w.insts {
+        i.lot = 1_000;
+        i.min_qty = 1_000;
+    }
+    let mut raw = hft_strategy_sdk::params::decode_body(
+        &XtParams::SCHEMA,
+        XtParams::SCHEMA.version,
+        1,
+        &w.strategies[0].params,
+    )
+    .unwrap();
+    raw.defaults[1] = -3_000_000;
+    raw.defaults[4] = 25_000_000;
+    raw.defaults[5] = 50_000_000;
+    raw.defaults[7] = 7_000;
+    raw.defaults[9] = -3_000_000;
+    w.strategies[0].params = encode_body(&XtParams::SCHEMA, 1, &raw).unwrap();
+    let mut r = Rig::new(&w);
+    for cycle in 0..4 {
+        r.feed(S1, 599_999_000, 600_000_000, 200_000_000);
+        r.feed(P1, 599_999_000, 600_000_000, 500_000_000);
+        assert_eq!(
+            r.sent.len(),
+            (cycle + 1) * 2,
+            "one simultaneous pair per eligible opportunity"
+        );
+        assert!(
+            r.sent
+                .iter()
+                .all(|c| c.tif == Tif::Ioc && c.qty.0 * 600 < 25_000_000)
+        );
+        if cycle % 2 == 0 {
+            let (spot, perp) = r.positions();
+            assert!(spot > 0);
+            assert_eq!(spot, -perp);
+        } else {
+            assert_eq!(r.positions(), (0, 0));
+        }
+        let count = r.sent.len();
+        r.now += 5_000_000_000;
+        r.feed(S1, 599_999_000, 600_000_000, 200_000_000);
+        r.feed(P1, 599_999_000, 600_000_000, 500_000_000);
+        assert_eq!(r.sent.len(), count, "cooldown survives both fills");
+        r.now += 2_000_000_000;
+    }
+    assert_eq!(r.sut.rebuilt_hashes(), Ok(Some(r.sut.hashes())));
+    assert!(r.sut.verify_journal().unwrap().is_some());
 }

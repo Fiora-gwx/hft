@@ -2,11 +2,11 @@
 use hft_strategy_sdk::prelude::*;
 
 hft_strategy_sdk::define_params! {
-    pub struct XtParams(schema_id = 3, version = 2, fields = XtFields) {
+    pub struct XtParams(schema_id = 3, version = 3, fields = XtFields) {
         /// Explicit operator enable; provisional default is disabled.
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// Required net return after both taker fees and price allowances; must be set before enabling.
-        min_edge: Rate [min = 0, max = 100_000_000, default = 0, per_group, relax = Down],
+        min_edge: Rate [min = -100_000_000, max = 100_000_000, prod_min = 0, default = 0, per_group, relax = Down],
         /// IOC price allowance on each leg; provisional default crosses only the touch.
         slip: Rate [min = 0, max = 50_000_000, default = 0, per_group, relax = Up],
         /// Fraction of each taking top level; provisional default 50 percent.
@@ -22,12 +22,19 @@ hft_strategy_sdk::define_params! {
         /// Consecutive hedge failures before requesting a group halt; provisional three.
         max_hedge_failures: Count [min = 1, max = 100, default = 3, per_group, relax = Up],
         /// Minimum executable net return for closing held inventory; provisional zero.
-        close_edge: Rate [since = 2, min = -100_000_000, max = 100_000_000, default = 0, per_group, relax = Down],
+        close_edge: Rate [since = 2, min = -100_000_000, max = 100_000_000, prod_min = 0, default = 0, per_group, relax = Down],
     }
 }
 
 impl XtParams {
     pub fn check(&self, groups: &GroupTable, rd: &RefView<'_>) -> Result<(), ParamError> {
+        let is_prod = rd.account().is_prod;
+        hft_strategy_sdk::params::check_production_values(
+            &Self::SCHEMA,
+            &self.defaults().raw(),
+            is_prod,
+            hft_strategy_sdk::params::GROUP_IX_NONE,
+        )?;
         for (gix, g) in groups.iter() {
             let err = |code| ParamError::GroupShape { gix, code };
             if g.n_legs != 2
@@ -85,8 +92,9 @@ impl XtParams {
                 return Err(err(5));
             }
             let f = self.at(gix);
+            hft_strategy_sdk::params::check_production_values(&Self::SCHEMA, &f.raw(), is_prod, gix)?;
             if f.enabled
-                && (f.min_edge.0 <= 0
+                && ((is_prod && f.min_edge.0 <= 0)
                     || f.max_chunk_notional.0 <= 0
                     || f.max_position_notional.0 < f.max_chunk_notional.0)
             {

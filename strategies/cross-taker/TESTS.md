@@ -4,6 +4,8 @@
 
 | 行为 | 测试函数 |
 |---|---|
+| 负开/平仓阈值仅非正式账户可用;默认/覆盖、禁用、隐藏默认、空组、加载/新建/SetParams;正式启用仍要求正开仓阈值 | cross_taker_negative_edges_are_demo_only_on_every_param_entry |
+| 负净边实际开平仓、同事件双腿 IOC、25 USDT 单笔 cap、7 秒冷却、v3 快照恢复与完整回放 | cross_taker_demo_negative_edge_pairs_respect_cooldown_and_replay |
 | 双边价格加权费用、净边、滑点;原始双向不交叉时正净边不可能成立(含触价相等、负费率、tick 舍入、减仓) | signal_deducts_both_fee_notionals_and_requires_edge、signal_uncrossed_touches_cannot_have_positive_net_edge |
 | 两腿限价固定于观察 BBO,slip 边界与 tick 舍入 | signal_fixes_both_limits_within_observed_slippage |
 | 双侧顶档、单笔 cap、共同 lot | signal_sizes_both_depths_caps_and_common_lot |
@@ -26,3 +28,5 @@ signal_* 在 tests/signal.rs;cross_taker_* 在 registry/tests/cross_taker_e2e.rs
 延迟验收由 benches/on_event.rs 的 on_event 基准覆盖未命中、开火、Exec Broken、Risk HedgeBroken,每次恢复初态后计时真实策略入口。SDK 的 slow_update、advice、target_set 无对应功能,以 not-applicable.toml 明确登记,不得拿空操作样本作为验收。基准登记与上限见 README;CI 只验证编译和运行。
 
 两策略加载、新建和 SetParams 的固定 venue/市场/腿顺序及无效引用拒绝见 registry/tests/product_shape.rs。实际策略只允许空第 0 腿永续、多第 1 腿现货;反向可执行价差只减少已持有仓位。
+
+生产下界的通用离线校验见 tools/hft-cfg/tests/strategy.rs::tool_124_production_minimum_rejects_negative_defaults_and_overrides。deploy/testnet 的负阈值参数由 core_033_testnet_variants_check_production_bounds 装配离线 ETH 双 venue 夹具并执行真实 `hft-core --check`;不连接交易所、不读取秘密,不代替主机上的实时规则与权限核验。
