@@ -129,8 +129,10 @@ def journal_rows(path, hot=None):
     for kind in KINDS:
         for batch in journal.events(kind, batch_rows=2048):
             names = [n for n in batch.column_names if n in SAFE or n.startswith("h.") and n[2:] in SAFE]
+            # hft_py materializes a whole Python list on each column access.
+            columns = {n: batch[n] for n in names}
             for i in range(batch.num_rows):
-                row = {n.removeprefix("h."): scalar(batch[n][i]) for n in names}
+                row = {n.removeprefix("h."): scalar(columns[n][i]) for n in names}
                 row["kind_name"] = kind
                 yield row
 
@@ -171,13 +173,14 @@ def exchange_times(raw_paths, out, hot=None, db=None):
             for batch in journal.events("RawRx",batch_rows=1024):
                 if "body" not in batch.column_names:
                     raise ValueError("RawRx reader did not expose its binary body")
+                columns = {n: batch[n] for n in ("body", "seq", "tsc", "venue", "conn")}
                 for i in range(batch.num_rows):
-                    decoded = hft_py.decode.raw_rx(scalar(batch["body"][i]))
+                    decoded = hft_py.decode.raw_rx(scalar(columns["body"][i]))
                     try:
                         body = json.loads(decoded["payload"])
                     except (ValueError,UnicodeDecodeError,TypeError):
                         continue
-                    base = {"journal":path.name,"raw_seq":scalar(batch["seq"][i]),"rx_tsc":scalar(batch["tsc"][i]),"venue":scalar(batch["venue"][i]),"conn":scalar(batch["conn"][i])}
+                    base = {"journal":path.name,"raw_seq":scalar(columns["seq"][i]),"rx_tsc":scalar(columns["tsc"][i]),"venue":scalar(columns["venue"][i]),"conn":scalar(columns["conn"][i])}
                     if db is not None:
                         candidates = db.execute("SELECT thread,frame FROM trace WHERE stage=34 AND v0=? AND v2=? AND v3=? AND venue_conn=? AND frame>0 LIMIT 2",
                             (base["raw_seq"],base["rx_tsc"],decoded["what"],base["venue"] | base["conn"] << 8)).fetchall()

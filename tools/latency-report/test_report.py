@@ -11,6 +11,23 @@ import report
 
 
 class Chains(unittest.TestCase):
+    def test_rpl_203_journal_columns_materialized_once_per_batch(self):
+        class Batch(dict):
+            column_names = ["h.seq", "venue", "ex_ts_ns", "private_payload"]
+            num_rows = 3
+            def __getitem__(self, name):
+                reads.append(name)
+                return super().__getitem__(name)
+        reads = []
+        batch = Batch({"h.seq": [1, 2, 3], "venue": [1, 1, 11], "ex_ts_ns": [10, None, 30]})
+        reader = SimpleNamespace(events=lambda kind, **k: [batch] if kind == "Bbo" else [])
+        module = SimpleNamespace(open_journal=lambda *a, **k: reader)
+        with patch.dict("sys.modules", {"hft_py": module}):
+            rows = list(report.journal_rows("seq"))
+        self.assertEqual(rows, [dict(seq=s, venue=v, ex_ts_ns=t, kind_name="Bbo")
+                                for s, v, t in [(1, 1, 10), (2, 1, None), (3, 11, 30)]])
+        self.assertEqual(reads, ["h.seq", "venue", "ex_ts_ns"])
+
     def test_rpl_203_network_call_boundaries_and_shared_record_wait(self):
         with tempfile.TemporaryDirectory() as root:
             out = Path(root)
@@ -101,8 +118,12 @@ class Chains(unittest.TestCase):
     def test_rpl_203_raw_body_decode_exports_only_timestamp_leaves(self):
         class Batch(dict):
             column_names = ["body", "seq", "tsc", "venue", "conn"]
-            num_rows = 1
-        batch = Batch(body=[b"binary-prefix-json"], seq=[4], tsc=[123], venue=[10], conn=[2])
+            num_rows = 3
+            def __getitem__(self, name):
+                reads.append(name)
+                return super().__getitem__(name)
+        reads = []
+        batch = Batch(body=[b"binary-prefix-json"]*3, seq=[4, 5, 6], tsc=[123, 124, 125], venue=[10]*3, conn=[2]*3)
         reader = SimpleNamespace(events=lambda *a, **k: [batch])
         module = SimpleNamespace(open_journal=lambda *a, **k: reader,
             decode=SimpleNamespace(raw_rx=lambda b: {"what":1,"payload": b'{"ts":"1792051200000","uid":"PRIVATE","data":[{"T":1792051200001,"signature":"SECRET"}]}'}))
@@ -117,6 +138,10 @@ class Chains(unittest.TestCase):
             self.assertNotIn("SECRET",text)
             self.assertIn("1792051200001,ms",text)
             self.assertIn("gw-second,91,unique",text)
+            self.assertEqual(reads, Batch.column_names)
+            with (root / "exchange_times.csv").open() as f:
+                rows = list(csv.DictReader(f))
+            self.assertEqual([r["raw_seq"] for r in rows], ["4", "4", "5", "5", "6", "6"])
 
     def test_rpl_203_md_only_and_each_fill_and_missing_stages(self):
         with tempfile.TemporaryDirectory() as root:
