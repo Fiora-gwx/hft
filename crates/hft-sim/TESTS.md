@@ -694,6 +694,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:SIM-080 步骤 1 之后(slot 1 为挂单);slot 2 为已成交的 IOC
 - 实现:`crates/hft-sim/tests/commands.rs::sim_100_cancel`
+- 身份回归:`sim_100_cancel_targets_order_identity`;slot 复用后撤旧代仍只读旧单,不存在的代数或品种回 `CancelReject` 且保留请求身份、成交与现金字段为零;当前挂单及锁定余额不变,当前代仍可撤销。固定 DST seed 见 [core.txt](../../fixtures/dst-seeds/core.txt)。
 
 | 行 | 指令 | 期望 |
 |---|---|---|
@@ -708,6 +709,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:SIM-080 步骤 1 之后
 - 实现:`crates/hft-sim/tests/commands.rs::sim_101_amend`
+- 身份回归:`sim_101_amend_targets_order_identity`;同 SIM-100 的旧代、未知代与错误品种,只拒绝对应目标,不修改当前挂单与锁定余额;当前代仍可改单。
 
 | 行 | 指令 | 期望 |
 |---|---|---|
@@ -737,6 +739,7 @@ spec: README.md
 - 里程碑:M2
 - 前置:`A9` 订单表:slot 1 挂单(0.1 中已成交 0.04 @ 59 000)、slot 2 IOC 已全部成交 0.1 @ 60 000、slot 3 IOC `Expired`(成交 0.03 @ 60 000)、slot 4 被拒
 - 实现:`crates/hft-sim/tests/commands.rs::sim_103_query`
+- 身份回归:`sim_103_query_targets_order_identity`;slot 复用后查询保留的旧代返回该代累计成交,未知代或错误品种返回 `NotFound`、请求身份与零成交/现金,当前代仍返回当前挂单。
 
 | 行 | `Query(target)` | 期望 `QueryResult` |
 |---|---|---|
