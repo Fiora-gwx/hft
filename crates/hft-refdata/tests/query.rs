@@ -72,7 +72,7 @@ fn ref_051_caps_account_asset_venue() {
     let rd = ok(&f0());
     let c = rd.caps(VenueId(1));
     assert_eq!(c, &perp_caps(VenueId(1)), "REF-051.1");
-    assert_eq!(c.flags.0, 7, "REF-051.1");
+    assert_eq!(c.flags.0, 71, "REF-051.1");
     assert_eq!(c.funding_settle, FundingSettleKind::PerSymbolPush, "REF-051.1");
     assert_eq!(
         &*c.ignorable_user_events,

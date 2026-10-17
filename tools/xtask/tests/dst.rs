@@ -240,8 +240,9 @@ fn tool_052_failure_output() {
     assert!(exec.stderr.contains("invariant=I1(fill_evidence)"));
     assert!(
         exec.stderr
-            .ends_with(&format!("--steps {} --trace\n", failure.step + 1))
+            .ends_with(&format!("--steps {} --trace\n", failure.planned_steps))
     );
+    assert_eq!(failure.planned_steps, 3000);
     let base = format!("target/dst/{seed:016x}");
     let bytes = std::fs::read(f.path(&format!("{base}/journal.bin"))).unwrap();
     let mut rest = bytes.as_slice();
