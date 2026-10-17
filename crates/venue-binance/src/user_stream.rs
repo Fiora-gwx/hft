@@ -378,6 +378,10 @@ fn order(
             e.slot = slot;
             e.r#gen = g;
         }
+        if line == Line::Usdm {
+            e.fill_cash_qty = cash_qty;
+            e.fill_cash_amount = cash_amount;
+        }
         out.order(&e);
     }
     Ok(ReportOutcome {

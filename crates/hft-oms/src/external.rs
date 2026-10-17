@@ -92,6 +92,12 @@ impl Oms {
         ev: &OrderEvent,
         out: &mut OmsOut,
     ) -> Option<(Qty, Option<Qty>)> {
+        if ev.fill_cash_qty.0 != 0 || ev.fill_cash_amount.0 != 0 {
+            // Per-execution cash needs a retained system-order prefix. Never silently fall
+            // back to self-computed cash or guess an evicted/foreign cumulative watermark.
+            out.cash_error = Some(crate::CashError::Untracked);
+            return None;
+        }
         if self.inst(ev.inst).perp_cash {
             return match self.foreign_cash_increment(ti, ev) {
                 // A proven duplicate still needs its defensive-path alarm. Keep zero
@@ -309,11 +315,40 @@ impl Oms {
             return false;
         }
         let (venue, account) = (t.venue, t.account);
+        if tb.cash_qty.0 > 0 && ev.inst != hft_types::INST_NONE && ev.inst != tb.inst {
+            out.cash_error = Some(crate::CashError::Identity);
+            return true;
+        }
         if self.inst_mismatch((tb.inst, tb.strategy, tb.group), ev, out) {
             return true;
         }
+        let info = self.inst(tb.inst);
+        let normalized = match crate::cash::normalize_execution(
+            ev,
+            (tb.filled, tb.cash_qty, tb.cash_sum),
+            info.spot,
+            info.perp_cash,
+        ) {
+            Ok(e) => e,
+            Err(e) => {
+                out.cash_error = Some(e);
+                return true;
+            }
+        };
+        let ev = &normalized;
+        let uses_cash = info.perp_cash || (!info.spot && (tb.cash_qty.0 > 0 || ev.fill_cash_qty.0 > 0));
+        if uses_cash
+            && ev.cum_filled > tb.filled
+            && self
+                .t(ti)
+                .and_then(|t| t.ext_held.get(tb.exch_order_id))
+                .is_some_and(|q| q.0 > 0)
+        {
+            out.cash_error = Some(crate::CashError::ExternalOverlap);
+            return true;
+        }
         let cash = match crate::cash::delta(
-            self.inst(tb.inst).perp_cash,
+            uses_cash,
             (tb.filled, tb.cash_qty, tb.cash_sum),
             (ev.cum_filled, ev.cash_qty, ev.cash_sum),
         ) {

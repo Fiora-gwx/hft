@@ -182,3 +182,73 @@ fn evt_205_order_execution_id_survives_record_and_crc() {
         }
     }
 }
+
+#[test]
+fn evt_205_execution_cash_is_append_only_and_legacy_is_unavailable() {
+    use hft_types::Qty;
+    let mut e = OrderEvent::try_read_from_bytes(&canonical(OrderEvent::FIELDS)).unwrap();
+    e.what = OrderEventKind::Fill;
+    let prefix = e.as_bytes()[..120].to_vec();
+    let old = raw_record(EventKind::ORDER_EVENT.0, RecordFlags::EVENT_END.0, 1, 2, &prefix);
+    let legacy = decode_record(&old).unwrap().read::<OrderEvent>().unwrap();
+    assert_eq!(&legacy.as_bytes()[..120], &prefix);
+    assert_eq!((legacy.fill_cash_qty, legacy.fill_cash_amount), (Qty(0), Qty(0)));
+    for amount in [i64::MIN, -16_010_941, 0, 59, i64::MAX] {
+        e.fill_cash_qty = Qty(100_000);
+        e.fill_cash_amount = Qty(amount);
+        let bytes = enc(&e, 7, 9, RecordFlags::CRC);
+        assert_eq!(decode_record(&bytes).unwrap().read::<OrderEvent>().unwrap(), e);
+        assert_eq!(&e.as_bytes()[..120], &prefix);
+    }
+}
+
+#[test]
+fn evt_205_execution_cash_prefix_rejects_gaps_mixed_forms_and_overflow() {
+    use hft_types::Qty;
+    let mut e = OrderEvent::try_read_from_bytes(&canonical(OrderEvent::FIELDS)).unwrap();
+    e.what = OrderEventKind::PartialFill;
+    e.qty = Qty(10);
+    e.cum_filled = Qty(10);
+    e.cash_qty = Qty(0);
+    e.cash_sum = Qty(0);
+    e.fill_cash_qty = e.qty;
+    e.fill_cash_amount = Qty(0);
+    let mut first = e;
+    first.normalize_fill_cash((Qty(0), Qty(0), Qty(0))).unwrap();
+    assert_eq!((first.cash_qty, first.cash_sum), (Qty(10), Qty(0)));
+    let mut next = e;
+    next.cum_filled = Qty(20);
+    next.fill_cash_amount = Qty(-59);
+    next.normalize_fill_cash((Qty(10), Qty(10), Qty(0))).unwrap();
+    assert_eq!((next.cash_qty, next.cash_sum), (Qty(20), Qty(-59)));
+    for row in 0..4 {
+        let mut bad = e;
+        let before = match row {
+            0 => {
+                bad.cum_filled = Qty(20);
+                (Qty(0), Qty(0), Qty(0))
+            }
+            1 => {
+                bad.cum_filled = Qty(20);
+                (Qty(10), Qty(0), Qty(0))
+            }
+            2 => {
+                bad.cash_qty = Qty(10);
+                (Qty(0), Qty(0), Qty(0))
+            }
+            _ => {
+                bad.cum_filled = Qty(20);
+                bad.fill_cash_amount = Qty(1);
+                (Qty(10), Qty(10), Qty(i64::MAX))
+            }
+        };
+        assert_eq!(
+            bad.normalize_fill_cash(before),
+            Err(match row {
+                0 | 1 => CashFactError::Missing,
+                2 => CashFactError::Coverage,
+                _ => CashFactError::Overflow,
+            })
+        );
+    }
+}

@@ -90,6 +90,8 @@ pub(super) fn exercise<S: StrategySet>(
             cash_qty: raw.qty,
             cash_sum: raw.cash_amount,
             trade_id: raw.trade_id,
+            fill_cash_qty: hft_types::Qty(0),
+            fill_cash_amount: hft_types::Qty(0),
         };
         input(s, (2, vi), EventKind::ORDER_EVENT, e.as_bytes().to_vec());
         input(s, (2, vi), EventKind::EXTERNAL_FILL, raw.as_bytes().to_vec());

@@ -808,6 +808,8 @@ fn bgt_101_partial_fill_fields() {
             cash_qty: Qty(0),
             cash_sum: Qty(0),
             trade_id: 0,
+            fill_cash_qty: hft_types::Qty(0),
+            fill_cash_amount: hft_types::Qty(0),
         }
     );
     let o = r.unwrap();

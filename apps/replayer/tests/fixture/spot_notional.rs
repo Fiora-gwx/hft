@@ -80,6 +80,8 @@ pub(super) fn exercise<S: StrategySet>(
             cash_qty: Qty(0),
             cash_sum: Qty(0),
             trade_id: ix as u64 + 1,
+            fill_cash_qty: hft_types::Qty(0),
+            fill_cash_amount: hft_types::Qty(0),
         };
         input(s, (2, vi), EventKind::ORDER_EVENT, e.as_bytes().to_vec());
         settle(s);

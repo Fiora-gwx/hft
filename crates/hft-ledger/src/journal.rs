@@ -925,6 +925,9 @@ impl JournalLedger {
             r#gen: ev.r#gen,
         };
         let Some(e) = self.map.get_mut(key).copied() else {
+            if ev.fill_cash_qty.0 != 0 || ev.fill_cash_amount.0 != 0 {
+                return Err(JournalApplyError::MissingCash);
+            }
             if self.ledger.inst(ev.inst).is_some_and(|i| i.perp_cash)
                 && (ev.cum_filled.0 != 0
                     || ev.cash_qty.0 != 0
@@ -946,24 +949,40 @@ impl JournalLedger {
         if norm.inst == hft_types::INST_NONE {
             norm.inst = e.inst;
         } else if norm.inst != e.inst {
-            if self.ledger.inst(e.inst).is_some_and(|i| i.perp_cash) {
+            if self.ledger.inst(e.inst).is_some_and(|i| i.perp_cash)
+                || ev.fill_cash_qty.0 != 0
+                || ev.fill_cash_amount.0 != 0
+                || e.cash_qty > 0
+            {
                 return Err(JournalApplyError::Identity);
             }
             return Ok(());
         }
-        let ev = &norm;
         let s = self
             .ledger
-            .inst(ev.inst)
+            .inst(norm.inst)
             .copied()
             .ok_or(JournalApplyError::Identity)?;
         if s.venue != e.venue {
             return Err(JournalApplyError::Identity);
         }
-        if s.perp_cash && self.foreign.overlaps_order(ev) {
+        if !s.perp && (norm.fill_cash_qty.0 != 0 || norm.fill_cash_amount.0 != 0) {
+            return Err(JournalApplyError::Identity);
+        }
+        if !s.perp_cash || norm.fill_cash_qty.0 != 0 || norm.fill_cash_amount.0 != 0 {
+            norm.normalize_fill_cash((Qty(e.cum), Qty(e.cash_qty), Qty(e.cash_sum)))
+                .map_err(|err| match err {
+                    hft_event::CashFactError::Coverage => JournalApplyError::CashCoverage,
+                    hft_event::CashFactError::Missing => JournalApplyError::MissingCash,
+                    hft_event::CashFactError::Overflow => JournalApplyError::CashOverflow,
+                })?;
+        }
+        let ev = &norm;
+        let uses_cash = s.perp_cash || (s.perp && (e.cash_qty > 0 || ev.fill_cash_qty.0 > 0));
+        if uses_cash && self.foreign.overlaps_order(ev) {
             return Err(JournalApplyError::UnsupportedExternalCash);
         }
-        let cash = cash_increment(s.perp_cash, &e, ev)?;
+        let cash = cash_increment(uses_cash, &e, ev)?;
         let fee = FeeDelta {
             account: e.account,
             venue: e.venue,

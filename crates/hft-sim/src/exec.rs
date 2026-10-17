@@ -134,6 +134,8 @@ impl SimExchange {
             cash_qty: Qty(o.cash_qty),
             cash_sum: Qty(o.cash_sum),
             trade_id: 0,
+            fill_cash_qty: hft_types::Qty(0),
+            fill_cash_amount: hft_types::Qty(0),
         }
     }
 

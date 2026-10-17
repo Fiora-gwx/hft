@@ -24,6 +24,8 @@ pub(crate) struct FillIn {
     pub(crate) fee_asset: AssetId,
     pub(crate) cash_qty: Qty,
     pub(crate) cash_sum: Qty,
+    /// This increment carries a v4 per-execution cash fact.
+    pub(crate) execution_cash: bool,
     /// QueryResult / reconciliation: without `avg_px` the order price is used (`PX_EST`).
     pub(crate) query: bool,
     pub(crate) seq: u64,
@@ -368,7 +370,12 @@ impl Oms {
             return;
         }
         match self.tix(ev.venue, ev.account) {
-            None => self.stats.unmatched_table += 1,
+            None => {
+                self.stats.unmatched_table += 1;
+                if ev.fill_cash_qty.0 != 0 || ev.fill_cash_amount.0 != 0 {
+                    out.cash_error = Some(crate::CashError::Untracked);
+                }
+            }
             Some(ti) => {
                 if ev.slot.0 == 0 {
                     self.foreign_report(ti, ev, now, seq, out);
@@ -397,18 +404,37 @@ impl Oms {
         else {
             return;
         };
+        if ex.cash_qty.0 > 0 && ev.inst != hft_types::INST_NONE && ev.inst != sl.inst {
+            out.cash_error = Some(crate::CashError::Identity);
+            return;
+        }
         if self.inst_mismatch((sl.inst, sl.strategy, sl.group), ev, out) {
             return;
         }
+        let info = self.inst(sl.inst);
+        let normalized = match crate::cash::normalize_execution(
+            ev,
+            (sl.filled, ex.cash_qty, ex.cash_sum),
+            info.spot,
+            info.perp_cash,
+        ) {
+            Ok(e) => e,
+            Err(e) => {
+                out.cash_error = Some(e);
+                return;
+            }
+        };
+        let ev = &normalized;
+        let uses_cash = info.perp_cash || (!info.spot && (ex.cash_qty.0 > 0 || ev.fill_cash_qty.0 > 0));
         if let Err(e) = crate::cash::delta(
-            self.inst(sl.inst).perp_cash,
+            uses_cash,
             (sl.filled, ex.cash_qty, ex.cash_sum),
             (ev.cum_filled, ev.cash_qty, ev.cash_sum),
         ) {
             out.cash_error = Some(e);
             return;
         }
-        if self.inst(sl.inst).perp_cash
+        if uses_cash
             && ev.cum_filled.0 > sl.filled.0
             && self
                 .t(ti)
@@ -685,7 +711,7 @@ impl Oms {
         if ev.inst == hft_types::INST_NONE || ev.inst == own {
             return false;
         }
-        if self.inst(own).perp_cash {
+        if self.inst(own).perp_cash || ev.fill_cash_qty.0 != 0 || ev.fill_cash_amount.0 != 0 {
             out.cash_error = Some(crate::CashError::Identity);
             return true;
         }
@@ -746,6 +772,7 @@ impl Oms {
             fee_asset: ev.fee_asset,
             cash_qty: ev.cash_qty,
             cash_sum: ev.cash_sum,
+            execution_cash: ev.fill_cash_qty.0 > 0,
             query: false,
             seq,
         };
@@ -774,6 +801,7 @@ impl Oms {
             fee_asset: ev.fee_asset,
             cash_qty: ev.cash_qty,
             cash_sum: ev.cash_sum,
+            execution_cash: ev.fill_cash_qty.0 > 0,
             query: false,
             seq,
         };
@@ -899,7 +927,8 @@ impl Oms {
         let sl = *t.slot(s)?;
         let ex = *t.ext.get(s as usize)?;
         let cash = match crate::cash::delta(
-            self.inst(sl.inst).perp_cash,
+            self.inst(sl.inst).perp_cash
+                || (!self.inst(sl.inst).spot && (ex.cash_qty.0 > 0 || f.execution_cash)),
             (sl.filled, ex.cash_qty, ex.cash_sum),
             (f.cum, f.cash_qty, f.cash_sum),
         ) {

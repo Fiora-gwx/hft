@@ -136,7 +136,7 @@ layout!(SendReport, 48, 8; decision_seq @ 0, sent_tsc @ 8, slot @ 16, r#gen @ 20
 
 crate::event_body! {
     /// Order report (0x0203, Input).
-    pub struct OrderEvent : fixed(EventKind::ORDER_EVENT, 3), TryFromBytes {
+    pub struct OrderEvent : fixed(EventKind::ORDER_EVENT, 4), TryFromBytes {
         pub venue: VenueId,
         pub account: AccountId,
         pub what: OrderEventKind,
@@ -166,11 +166,18 @@ crate::event_body! {
         /// normalization; 0 = absent/nonpositive or a non-execution report. This identifies
         /// only this execution, never the whole cumulative quantity or cash prefix.
         pub trade_id: u64,
+        /// v4: quantity of this execution covered by `fill_cash_amount`; 0 = unavailable.
+        /// Applies only to PartialFill/Fill and must equal `qty`, never `cum_filled` by inference.
+        pub fill_cash_qty: Qty,
+        /// v4: this execution's realized perpetual cash in quote qty_exp; excludes fees/funding.
+        /// Known zero has fill_cash_qty > 0. Mutually exclusive with cumulative cash facts.
+        pub fill_cash_amount: Qty,
     }
 }
-layout!(OrderEvent, 120, 8; venue @ 0, account @ 1, what @ 2, detail @ 3, slot @ 4, r#gen @ 8, inst @ 12,
+layout!(OrderEvent, 136, 8; venue @ 0, account @ 1, what @ 2, detail @ 3, slot @ 4, r#gen @ 8, inst @ 12,
     px @ 16, qty @ 24, cum_filled @ 32, fee @ 40, fee_asset @ 48, epoch @ 50, reject_code @ 52,
-    exch_order_id @ 56, ex_ts_ns @ 64, hw_rx_ns @ 72, rx_tsc @ 80, avg_px @ 88, cash_qty @ 96, cash_sum @ 104, trade_id @ 112);
+    exch_order_id @ 56, ex_ts_ns @ 64, hw_rx_ns @ 72, rx_tsc @ 80, avg_px @ 88, cash_qty @ 96, cash_sum @ 104, trade_id @ 112,
+    fill_cash_qty @ 120, fill_cash_amount @ 128);
 
 crate::event_body! {
     /// Exchange position push (0x0204, Input; check only).

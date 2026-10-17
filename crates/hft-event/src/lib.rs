@@ -25,6 +25,7 @@ extern crate self as hft_event;
 mod macros;
 
 mod bytes;
+mod cash;
 mod chain;
 mod cmd;
 mod codec;
@@ -44,6 +45,7 @@ mod system;
 mod timer;
 mod var;
 
+pub use cash::CashFactError;
 pub use chain::{ChainHead, PoolQuote, SwapDecision, TxLifecycle, TxState};
 pub use cmd::{BlobRef, CmdHdr, CmdKind, CmdScope, ControlCmd, STRATEGY_CMD_MAX_PAYLOAD, WARMUP_MAX_PAYLOAD};
 pub use codec::{

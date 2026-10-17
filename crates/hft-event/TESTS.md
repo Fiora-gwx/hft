@@ -113,7 +113,7 @@ spec: README.md
 | EVT-004.9 | `0x0109` | `L2Batch` / Market / Var prefix 80 max 64 000 / Input / 1 / SEQ / Never / false |
 | EVT-004.10 | `0x0201` | `OrderDecision` / Exec / Fixed 88 / Output / 1 / SEQ / Never / false |
 | EVT-004.11 | `0x0202` | `SendReport` / Exec / Fixed 48 / Input / 1 / SEQ / Never / false |
-| EVT-004.12 | `0x0203` | `OrderEvent` / Exec / Fixed 120 / Input / 3 / SEQ / Never / false |
+| EVT-004.12 | `0x0203` | `OrderEvent` / Exec / Fixed 136 / Input / 4 / SEQ / Never / false |
 | EVT-004.13 | `0x0204` | `PositionReport` / Exec / Fixed 56 / Input / 1 / SEQ / Never / false |
 | EVT-004.14 | `0x0205` | `BalanceReport` / Exec / Fixed 40 / Input / 1 / SEQ / Never / false |
 | EVT-004.15 | `0x0206` | `FundingSettle` / Exec / Fixed 56 / ByBody / 2 / SEQ / Never / false |
@@ -598,7 +598,7 @@ spec: README.md
 |---|---|---|
 | EVT-050.1 | `OrderDecision` | size 88;`trigger_seq`@0、`decided_tsc`@8、`px`@16、`qty`@24、`group`@32、`inst`@36、`slot`@40、`gen`@44、`target_slot`@48、`reject`@52、`strategy`@56、`venue`@57、`account`@58、`action`@59、`side`@60、`tif`@61、`oflags`@62、`reason`@64、`intent_no`@68、`req_px`@72、`link_role`@80、`_pad`@81 |
 | EVT-050.2 | `SendReport` | size 48;`decision_seq`@0、`sent_tsc`@8、`slot`@16、`gen`@20、`target_slot`@24、`target_gen`@28、`venue`@32、`account`@33、`conn`@34、`status`@35、`op`@36、`_pad`@37、`os_errno`@40、`_pad2`@44 |
-| EVT-050.3 | `OrderEvent` | size 120;`venue`@0、`account`@1、`what`@2、`detail`@3、`slot`@4、`gen`@8、`inst`@12、`px`@16、`qty`@24、`cum_filled`@32、`fee`@40、`fee_asset`@48、`epoch`@50、`reject_code`@52、`exch_order_id`@56、`ex_ts_ns`@64、`hw_rx_ns`@72、`rx_tsc`@80、`avg_px`@88、`cash_qty`@96、`cash_sum`@104、`trade_id`@112 |
+| EVT-050.3 | `OrderEvent` | size 136;`venue`@0、`account`@1、`what`@2、`detail`@3、`slot`@4、`gen`@8、`inst`@12、`px`@16、`qty`@24、`cum_filled`@32、`fee`@40、`fee_asset`@48、`epoch`@50、`reject_code`@52、`exch_order_id`@56、`ex_ts_ns`@64、`hw_rx_ns`@72、`rx_tsc`@80、`avg_px`@88、`cash_qty`@96、`cash_sum`@104、`trade_id`@112、`fill_cash_qty`@120、`fill_cash_amount`@128 |
 | EVT-050.4 | `PositionReport` | size 56;`venue`@0、`account`@1、`_pad`@2、`inst`@4、`qty`@8、`entry_px`@16、`upnl`@24、`liq_px`@32、`ex_ts_ns`@40、`rx_tsc`@48 |
 | EVT-050.5 | `BalanceReport` | size 40;`venue`@0、`account`@1、`asset`@2、`_pad`@4、`free`@8、`locked`@16、`ex_ts_ns`@24、`rx_tsc`@32 |
 | EVT-050.6 | `FundingSettle` | size 56;`venue`@0、`account`@1、`_pad`@2、`inst`@4、`amount`@8、`rate`@16、`pos_qty`@24、`settle_ts_ns`@32、`rx_tsc`@40、`synth`@48、`_pad2`@49 |
@@ -1420,7 +1420,7 @@ spec: README.md
 | 行 | 类型 | 期望 |
 |---|---|---|
 | EVT-140.1 | 含来源标志的 `FeedMsg` | `size_of ≤ 128`;`Copy` |
-| EVT-140.2 | 含来源标志的 `RepMsg` | `size_of ≤ 128`;`Copy` |
+| EVT-140.2 | 含来源标志的 `RepMsg` | `size_of ≤ 144`;`Copy` |
 | EVT-140.3 | `HkMsg` | `size_of ≤ 128`;`Copy` |
 | EVT-140.4 | `FeedCmd` | `size_of ≤ 16`;`Copy` |
 | EVT-140.5 | `GwCmd` | `size_of == 64`、`align_of == 8`;`Copy` |
@@ -2102,3 +2102,5 @@ spec: README.md
 - **金样**:`fixtures/hft-event/` 的文件只由 EVT-173、EVT-071 的生成器重写;重写须与布局变更同一提交且 `gen-schema` 只追加核对通过。
 
 OrderFlags bit 6 = POSITION_CLOSE,不改变布局;生成 schema 与 OrderDecision/GwCmd 保留该位,端到端由 SEQ-185 覆盖。
+
+EVT-205 补充覆盖逐笔现金的尾部编码、CRC 与旧 120 B 前缀补零;连续前缀转换拒绝缺口、混合累计/逐笔事实及金额溢出。

@@ -78,7 +78,7 @@ E.base_engine_ns = engine_ns(上次运行最后一条已提交记录)           
 | 0x0109 | `L2Batch` | Var | Input | 增量深度(可选扩展)的产出:一条交易所增量消息一条记录 |
 | 0x0201 | `OrderDecision` | 定长 88 | Output | 意图 + 风控结果 + OMS 分配 |
 | 0x0202 | `SendReport` | 定长 48 | Input | gw/sim-gw 写出结果 |
-| 0x0203 | `OrderEvent` | 定长 120 | Input | 回执/拒绝/成交/撤单/改单/过期/查询结果/结果未知/仅费用 |
+| 0x0203 | `OrderEvent` | 定长 136 | Input | 回执/拒绝/成交/撤单/改单/过期/查询结果/结果未知/仅费用 |
 | 0x0204 | `PositionReport` | 定长 56 | Input | 交易所推送,只校验 |
 | 0x0205 | `BalanceReport` | 定长 40 | Input | |
 | 0x0206 | `FundingSettle` | 定长 56 | 按体:`synth = 1` Output,否则 Input | `inst = INST_NONE` = 只推账户级合计;认证历史实额的完整总额口径见 [ledger](../../crates/hft-ledger/README.md#资金费) |
@@ -148,7 +148,7 @@ Simultaneous 的两份 OrderDecision 共用 trigger_seq;整对出环容量失败
 }
 #[repr(C)] pub struct Trade { pub h: MarketHdr, pub px: Px, pub qty: Qty, pub trade_id: u64, pub taker_side: Side, pub _pad: [u8; 7] } // 88 B
 
-#[repr(C)] pub struct OrderEvent {       // gw/sim-gw 解码或产生回报后写入,120 B(schema_version 3)
+#[repr(C)] pub struct OrderEvent {       // gw/sim-gw 解码或产生回报后写入,136 B(schema_version 4)
     pub venue: VenueId, pub account: AccountId, pub what: OrderEventKind, pub detail: u8 /* 按 what 取值(QueryResult 订单状态码;CancelReject/AmendReject 拒绝分类 GONE;PartialFill/Fill 订单方向),码表见 hft-event */
     pub slot: u32, pub gen: u32, pub inst: InstId,
     pub px: Px, pub qty: Qty, pub cum_filled: Qty,
@@ -158,6 +158,7 @@ Simultaneous 的两份 OrderDecision 共用 trigger_seq;整对出环容量失败
     pub avg_px: Px,                      // 累计成交均价(0 = 未成交);OMS 用 avg_px × cum_filled − 已记名义 求本次增量名义
     pub cash_qty: Qty, pub cash_sum: Qty, // v2 的结算事实;单位、覆盖量与缺失语义归 hft-event
     pub trade_id: u64,                  // v3 本笔成交 ID,0 表示无正 ID;不代表整个累计区间,语义归 hft-event
+    pub fill_cash_qty: Qty, pub fill_cash_amount: Qty, // v4 本笔成交现金,覆盖语义归 hft-event
 }
 // cum_filled 是毛量且必须是累计量:给不出累计量的 venue 由 gw 按 exec id 合成(方法写在各 venue-* README)
 // 净量 = 毛量按 refdata VenueCaps.fee_asset_rule 与本条 fee/fee_asset 扣减,由 hft-ledger 计算(FillDelta.net_qty)

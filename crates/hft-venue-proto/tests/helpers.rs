@@ -350,6 +350,8 @@ fn vpr_041_vec_sink_report() {
         cash_qty: Qty(0),
         cash_sum: Qty(0),
         trade_id: 0,
+        fill_cash_qty: hft_types::Qty(0),
+        fill_cash_amount: hft_types::Qty(0),
     };
     let p = PositionReport::new_zeroed();
     let b = BalanceReport::new_zeroed();

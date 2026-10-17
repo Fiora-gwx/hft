@@ -248,9 +248,11 @@ pub struct FundingSettle {          // 0x0206,56 B,Input(交易所推送)或 Out
 
 资金费的来源按 [hft-refdata `VenueCaps.funding_settle`](../hft-refdata/README.md#交易所能力表venuecaps):`PerSymbolPush` → 交易所推送带 inst 的实收,直接入账;`BalanceOnlyPush` → 交易所推送 `inst = INST_NONE` 的合计(Input,只用于校验),sequencer 合成每 inst 的 `synth = 1` 记录入账;`RateOnly` → 无推送,只合成。合成规则与校验差异的处理归 [hft-sequencer](../hft-sequencer/README.md) 与 [hft-ledger](../hft-ledger/README.md)。
 
-`OrderEvent` v3 体长 120 B。v2 字段为 `cash_qty: Qty`(96)与 `cash_sum: Qty`(104);`cash_sum` 表示本订单被覆盖成交的永续实际已实现现金之和,按该 inst 计价资产的 `qty_exp` 计,收入为正,不含手续费、资金费和划转。它来自撮合/成交明细,不从余额差反推。完整事实满足 `cash_qty == cum_filled > 0`;已知零额仍携带正覆盖量;`cash_qty == 0` 表示未提供,部分覆盖不能视为完整累计结算。查询与终态回报复用同一订单累计事实,`FeeOnly` 不增加它。现货两字段均为 0。旧 v1 解码补零,不能据此宣称钱包实额已知。消费者的配对、缺失处理与去重归 [hft-oms](../hft-oms/README.md),账本入口归 [hft-ledger](../hft-ledger/README.md)。
+`OrderEvent` v4 体长 136 B。v2 字段为 `cash_qty: Qty`(96)与 `cash_sum: Qty`(104);`cash_sum` 表示本订单被覆盖成交的永续实际已实现现金之和,按该 inst 计价资产的 `qty_exp` 计,收入为正,不含手续费、资金费和划转。它来自撮合/成交明细,不从余额差反推。完整事实满足 `cash_qty == cum_filled > 0`;已知零额仍携带正覆盖量;`cash_qty == 0` 表示未提供,部分覆盖不能视为完整累计结算。查询与终态回报复用同一订单累计事实,`FeeOnly` 不增加它。现货两字段均为 0。旧 v1 解码补零,不能据此宣称钱包实额已知。消费者的配对、缺失处理与去重归 [hft-oms](../hft-oms/README.md),账本入口归 [hft-ledger](../hft-ledger/README.md)。
 
 v3 尾部 `trade_id: u64`(112)记录这条 `PartialFill`/`Fill` 对应的单笔交易所成交 ID,正值原样保留;缺失、非正 ID 与非成交类回报填 0,不从订单号、累计量或本地序号伪造。ID 的归一化与 `ExternalFill.trade_id` 相同。它只识别本笔,不能代表累计量跨过的其他成交,也不能单独证明现金或费用重叠。v1/v2 的缺失字段补零,表示没有正 ID 事实;旧字段偏移与语义保持不变。
+
+v4 尾部 `fill_cash_qty: Qty`(120)、`fill_cash_amount: Qty`(128)保存本笔永续成交的覆盖量与实际现金,金额单位和排除项同累计事实。仅 Fill/PartialFill 可携带,正覆盖量必须等于 `qty`,已知零额以正覆盖量表示;未提供时两字段为零。它与累计 `cash_qty/cash_sum` 互斥,不把本笔金额冒充累计金额。`normalize_fill_cash` 只转换已匹配订单的连续前缀表示,不拥有订单身份或入账状态。v1–v3 的尾部补零表示未提供。回报环元素上限为 144 B,其余环上限不变。
 
 `OrderEventKind`(event-model 列出)编码:`Ack=1 Reject=2 PartialFill=3 Fill=4 CancelAck=5 CancelReject=6 AmendAck=7 AmendReject=8 Expired=9 QueryResult=10 OutcomeUnknown=11 FeeOnly=12`。`FeeOnly`:只携带费用(延迟到达的手续费回报);OMS 在任何状态下只把 `fee` 交给 ledger,不迁移状态、不请求对账;`gen` 不符时按 `(venue, account, exch_order_id)` 入账;ledger 与 LegTracker 据此补净量差(手续费资产 = 基础资产时)。`OutcomeUnknown`:gw 收到 venue 协议判为"结果未知"的响应码(含未登记码,[hft-venue-proto](../hft-venue-proto/README.md))时产出,`slot/gen` 取自 `ReportOutcome.outcome_unknown`,`reject_code` = 原始码,价量与成交字段为 0;OMS 据此把该槽置 `Unknown` 并查询。`QueryResult` 必须带 `cum_filled` 与 `avg_px`(交易所给不出均价时由 venue 协议按成交明细合成,不得填 0 而 `cum_filled > 0`)。`OrderEvent.detail`(偏移 3,u8,由 venue 协议按其 `codes.rs` 填写)按 `what` 取值:`QueryResult` = 订单状态码,与 `ReconcileReport.order_status` 同码(`New=1 PartiallyFilled=2 Filled=3 Cancelled=4 Rejected=5 Expired=6 NotFound=7`);`CancelReject`/`AmendReject` = 拒绝分类 `OTHER=0 GONE=1`(GONE:订单已成交或不存在);`PartialFill`/`Fill` = 订单方向(`Buy=1 Sell=2`,未知 0;OMS 对外来单与过期代次成交按此记净量);其余 `what` 写 0。各分类如何处理归 [hft-oms](../hft-oms/README.md)。
 
@@ -885,7 +887,7 @@ pub enum FeedMsg {                   // bbo-<venue> 环(只有 Bbo 与 BBO 连�
     IndexPrice(IndexPrice, RecordFlags), Liquidation(Liquidation, RecordFlags), ConnState(ConnState),
     Bulk { kind: EventKind, len: u32, flags: RecordFlags }, // 只在 md-<venue> 环:下一条变长逻辑体(L2Batch、L2Snapshot)在配套的 md-<venue>-bulk ByteSpsc 里,sequencer 按此处的顺序取
 }
-pub enum RepMsg {                    // rep-<venue> 环与 sim-gw 的 rep-sim 环(同一类型);size_of ≤ 128 B
+pub enum RepMsg {                    // rep-<venue> 环与 sim-gw 的 rep-sim 环(同一类型);size_of ≤ 144 B
     OrderEvent(OrderEvent, RecordFlags), SendReport(SendReport), PositionReport(PositionReport),
     BalanceReport(BalanceReport), FundingSettle(FundingSettle), ConnState(ConnState),
     ExternalFill(ExternalFill),

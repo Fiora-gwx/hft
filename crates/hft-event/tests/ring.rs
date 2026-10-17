@@ -183,7 +183,7 @@ fn assert_copy<T: Copy>() {}
 fn evt_140_ring_element_sizes() {
     assert!(size_of::<FeedMsg>() <= 128, "EVT-140.1");
     assert_copy::<FeedMsg>();
-    assert!(size_of::<RepMsg>() <= 128, "EVT-140.2");
+    assert!(size_of::<RepMsg>() <= 144, "EVT-140.2");
     assert_copy::<RepMsg>();
     assert!(size_of::<HkMsg>() <= 128, "EVT-140.3");
     assert_copy::<HkMsg>();

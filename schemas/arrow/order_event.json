@@ -159,12 +159,28 @@
       "name": "trade_id",
       "nullable": false,
       "type": "UInt64"
+    },
+    {
+      "metadata": {
+        "hft.type": "qty"
+      },
+      "name": "fill_cash_qty",
+      "nullable": false,
+      "type": "Int64"
+    },
+    {
+      "metadata": {
+        "hft.type": "qty"
+      },
+      "name": "fill_cash_amount",
+      "nullable": false,
+      "type": "Int64"
     }
   ],
   "metadata": {
     "hft.kind": "0x0203",
-    "hft.layout": "fixed 120",
+    "hft.layout": "fixed 136",
     "hft.name": "OrderEvent",
-    "hft.schema_version": "3"
+    "hft.schema_version": "4"
   }
 }

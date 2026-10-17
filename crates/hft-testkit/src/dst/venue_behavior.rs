@@ -244,6 +244,8 @@ fn order_event(
         cash_qty: hft_types::Qty(0),
         cash_sum: hft_types::Qty(0),
         trade_id: 0,
+        fill_cash_qty: hft_types::Qty(0),
+        fill_cash_amount: hft_types::Qty(0),
     }
 }
 
@@ -768,6 +770,8 @@ fn foreign_order_event(fill: ExternalFill, identity: (SlotId, u32, u16)) -> Orde
         cash_qty: fill.cash_qty,
         cash_sum: fill.cash_amount,
         trade_id: fill.trade_id,
+        fill_cash_qty: hft_types::Qty(0),
+        fill_cash_amount: hft_types::Qty(0),
     }
 }
 
@@ -1131,6 +1135,8 @@ impl<M: Matcher> MockVenue<M> {
             cash_qty: hft_types::Qty(0),
             cash_sum: hft_types::Qty(0),
             trade_id: 0,
+            fill_cash_qty: hft_types::Qty(0),
+            fill_cash_amount: hft_types::Qty(0),
         }
     }
 
