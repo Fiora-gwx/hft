@@ -4,10 +4,10 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
-| 2026-10-17 | 私有用户流优先于下单连接突发,已有完整缓冲先交付再读 socket;连接内不重排,逐帧发布 | round4 read→frame 排队;VEN-207,private burst 基准 | hft-venue 与规格 | 待评审(owner default accepted) |
-| 2026-10-17 | refdata 生成与实账户启动拒绝缺少严格零仓清仓能力的永续 caps;默认能力来自协议,旧完整行必须显式迁移 | round4 Binance flags=31 导致 Kill MinOrder;CORE-044/TOOL-130/SEQ-185 | hft-cfg、core 装配与规格,部署生成脚本 | 待评审(owner default accepted) |
+| 2026-10-17 | 私有用户流优先于下单连接突发,已有完整缓冲先交付再读 socket;连接内不重排,逐帧发布 | ??? read→frame 排队;VEN-207,private burst 基准 | hft-venue 与规格 | 待评审(owner default accepted) |
+| 2026-10-17 | refdata 生成与实账户启动拒绝缺少严格零仓清仓能力的永续 caps;默认能力来自协议,旧完整行必须显式迁移 | ??? Binance flags=31 导致 Kill MinOrder;CORE-044/TOOL-130/SEQ-185 | hft-cfg、core 装配与规格,部署生成脚本 | 待评审(owner default accepted) |
 | 2026-10-17 | 同一 Input 已输出、尚未 place 的对冲请求预留裸量,批量恢复不能重复占用;storage 失败报告保留原始步数 | storage 0x7442aaf1b5dea253 原始 10000 步第 1631 步 I19;OMS-318/TK-049/177 | OMS、testkit、固定 seed;[决定](../.agents/notes/implemented/bug-fix/2026-10-17-recovery-hedge-reservation.md) | 待评审(owner default accepted) |
-| 2026-10-17 | Simultaneous 平仓非对称只沿少成交腿原方向补 SecondRetry IOC,按 limiter 可用时刻退避与既有次数/截止有界重试;无效减仓或耗尽交 Broken,开仓 Reverse 不变 | round4 关闭 link 的 30 次 REDUCE_INVALID;OMS-211/213/317、SEQ-178 | OMS、真实引擎回放与规格;[决定](../.agents/notes/implemented/bug-fix/2026-10-17-close-pair-compensation.md) | 待评审(owner default accepted) |
+| 2026-10-17 | Simultaneous 平仓非对称只沿少成交腿原方向补 SecondRetry IOC,按 limiter 可用时刻退避与既有次数/截止有界重试;无效减仓或耗尽交 Broken,开仓 Reverse 不变 | ??? 关闭 link 的 30 次 REDUCE_INVALID;OMS-211/213/317、SEQ-178 | OMS、真实引擎回放与规格;[决定](../.agents/notes/implemented/bug-fix/2026-10-17-close-pair-compensation.md) | 待评审(owner default accepted) |
 | 2026-10-17 | OMS 亚最小量欠对冲交接为 group residual 后退休并取消 HedgeRetry,有界回收旧链接与容量告警;Kill 锁定期全部用无链接永续优先串行减仓,保持严格零仓 | c4 probe-spin-01:31 首腿后 16 链接耗尽,Kill Applied 后未平;原 journal seq 7154、OMS-201、SEQ-175、FL-1、TK-106 | OMS、exec、真实引擎回放/DST 与规格;[决定](../.agents/notes/implemented/bug-fix/2026-10-17-linkcap-kill.md) | 待评审(风控/残余交接与清仓顺序) |
 | 2026-10-17 | cross-taker 负 min_edge/close_edge 仅非正式账户可用,生产负值含禁用/覆盖均拒绝;生产启用 min_edge 仍须正数;demo 配置用于亏损净边的 TD 测量,参数 schema v3 | owner-requested 2026-10-17,demo-only | 策略、SDK prod_min、hft-cfg、deploy/testnet 与测试;[决定](../.agents/notes/implemented/feature/2026-10-17-demo-negative-edge.md) | 待评审(owner-requested 2026-10-17,demo-only) |
 | 2026-10-17 | 模拟交易所撤/改/查按账户、品种、slot、gen 匹配;未知目标只回请求身份与零成交/现金,不借用复用槽的旧单事实或修改另一代挂单 | DST core dc523111e89863ee 第 8217 步;SIM-100/101/103 | hft-sim、规格、固定 seed;[决定](../.agents/notes/implemented/bug-fix/2026-10-17-sim-order-target-identity.md) | 待评审(模拟资金/订单身份) |
