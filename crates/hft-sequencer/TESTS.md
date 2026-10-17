@@ -5965,6 +5965,8 @@ SEQ-160 同时覆盖真实 ConnId 112/113/255、重复 Up/Down、主连接退出
 
 ## 验收
 
+- 链接容量回归: `scenarios_oms::seq_175_fee_residual_link_reuse_real_engine_replay` 在 16 个 link 槽下运行 48 次永续首腿/现货基础币费用对冲,逐轮检查残余和链接完成,全程 journal 验证回放。`scenarios_risk::fl_1_kill_flattens_with_full_links_and_strategy_timer_quota` 使用真实成交建立配对仓,16 条未完成 First 填满链接表,策略计时配额全部使用;Kill Applied 的同一事件发出无链接 reduce-only 永续平仓,之后现货归零,从满表快照回放一致。
+
 本组件在 M2 的完成标准(门槛编号与累计量的唯一定义在 [testing §8](../../docs/testing.md#8-上线门槛);数值上限在 [benchmarks](../../benchmarks/README.md)):
 
 1. **用例**:里程碑 ≤ 当前里程碑的全部用例有同编号的测试函数、场景或基准,`cargo xtask test-trace` 三张清单为空([docs/tests §6](../../docs/tests/README.md#6-与代码的对应))。

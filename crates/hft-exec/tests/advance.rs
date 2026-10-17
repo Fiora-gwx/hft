@@ -239,15 +239,17 @@ fn exe_086_unknown_wait_cases() {
     fx.at(500);
     fx.touch(P);
     assert!(fx.adv().orders.is_empty(), "EXE-086.2");
-    // .3 pair first leg with LegLink.
+    // .3 a pair first leg created before Kill still owns its Unknown order.
     let mut fx = Fx::new();
     fx.legs(A1, G7, &["3.00", "-3.0"]);
     fx.spot(A1, A, G7, "3", "3");
-    fx.flatten(A1);
-    let r = fx.adv();
+    let mut tg = t0("0", "0");
+    tg.reason = hft_strategy_sdk::TargetReason::Hard;
+    let r = fx.go(&tg);
     let o = r.orders.iter().find(|o| o.intent.group == G7).copied().unwrap();
     assert!(o.intent.link.get().is_some());
     let rf = fx.placed(&o);
+    fx.flatten(A1);
     fx.upd(rf, G7, OrderUpdateKind::Unknown);
     fx.at(500);
     fx.touch(P);

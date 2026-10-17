@@ -9,7 +9,7 @@ max_insts = 4096
 max_cells_total = 256
 max_subs_per_inst = 8
 max_groups_per_instance = 64
-max_timers = 4096
+max_timers = 131072
 recent_cmd_ids = 4096
 max_instances = 8
 

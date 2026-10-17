@@ -327,6 +327,8 @@ pub static NOTE_NAMES: &[NoteName] = notes![
     OmsCancelNotSent: Oms, P2, [];
     OmsNeedsRestQuery: Oms, Info, [];
     OmsAnomaly: Oms, None, [];
+    OmsHedgeResidual: Oms, P1, [];
+    OmsLinkCapacity: Oms, P1, [];
     RoundClosed: Ledger, Info, [];
     Adjusted: Ledger, Info, [f("account", 0, 8), f("venue", 8, 8), f("inst_or_asset", 64, 64), f("report_id", 128, 64),
         f("qty", 192, 64), f("px", 256, 64), f("realized", 320, 64)];

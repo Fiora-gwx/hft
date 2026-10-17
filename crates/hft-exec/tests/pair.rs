@@ -158,12 +158,18 @@ fn exe_157_both_perp_first_leg() {
         p.margin(C, m("0.7"));
     });
     fx.flatten(A1);
-    assert_eq!(first_ix(&fx.adv()), 1, "EXE-157.2");
+    let r = fx.adv();
+    let o = r.orders.iter().find(|o| o.intent.group == G11).unwrap();
+    assert_eq!(o.intent.inst, Q, "EXE-157.2");
+    assert!(o.intent.link.get().is_none() && o.intent.reduce_only());
     // .3
     let mut fx = Fx::with(c0(), vec![g7(), g8(), g11()]);
     fx.legs(A1, G11, &["-8.0", "5.0"]);
     fx.flatten(A1);
-    assert_eq!(first_ix(&fx.adv()), 0, "EXE-157.3");
+    let r = fx.adv();
+    let o = r.orders.iter().find(|o| o.intent.group == G11).unwrap();
+    assert_eq!(o.intent.inst, P, "EXE-157.3");
+    assert!(o.intent.link.get().is_none() && o.intent.reduce_only());
 }
 
 #[test]

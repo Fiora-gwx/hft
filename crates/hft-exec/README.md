@@ -660,7 +660,7 @@ Broken 的 (account, group) 有三条出路,优先级从高到低:人工 `HedgeF
 
 **引擎目标与 cell 状态**(本节全部引擎目标:L3、清仓、对齐目标与无组 cell;Broken 的 cell 状态保持 Broken):设定时替换了策略目标的 cell 进入 `Stuck{EngineOverride}`,原本无策略目标的进入 `Working`(各写一条 `State` 决定);引擎目标在 `Stuck{EngineOverride}` 下照常推进;到达时按"推进"第 3 步写 `State → Idle` 并通知 `Done`(设定时已到达的 cell 在同一 `advance` 内写 `Working` 与 `Idle` 两条)。清仓目标与对齐目标到达后随之清除(不另写 `TargetCleared`,通知的 `cleared_by_engine = true`);L3 的引擎目标到达后保留,到第 5 条清除。
 
-`engine_flatten`(`Kill{Account, flatten}`)用同一机制(登记 `force_req = Flatten`,advance 设定):对该账户**全部** cell(含 Broken)与全部 venue 上的无组永续持仓设引擎目标 0、`reason = Hard`(同一账户再次调用幂等),同样先请求撤策略挂单;非 Broken 的 cell 用 PairOnFill 永续先(第二腿不可用或链接 `LINK_HOLD` 时同样 `SerialFallback`),Broken 的 cell 用上面的串行腿(永续 reduce-only 先、再现货)。两腿都到 0 后 naked 为 0,Broken cap 由 hft-risk 解除;cell 的引擎目标(0)保留到到达,`CapCleared{Broken}` 不清它。HARD 生效时引擎单全部停止,目标保留并按门控记 `Stuck{Gated(HARD)}`(`ExecStuck` P1)。
+`engine_flatten`(`Kill{Account, flatten}`)用同一机制(登记 `force_req = Flatten`,advance 设定):对该账户**全部** cell(含 Broken)与全部 venue 上的无组永续持仓设引擎目标 0、`reason = Hard`(同一账户再次调用幂等),同样先请求撤策略挂单;锁定期间全部 cell 直接用无链接串行腿(永续 reduce-only 先、确认归零后再现货),包括替换引擎目标的合法策略退出目标;无需 LinkTable 空位或 HedgeRetry 定时器,执行层计时仍使用 sequencer 的预留容量。Broken 的 cell 保持其 Broken 状态。两腿都到 0 后 naked 为 0,Broken cap 由 hft-risk 解除;cell 的引擎目标(0)保留到到达,`CapCleared{Broken}` 不清它。HARD 生效时引擎单全部停止,目标保留并按门控记 `Stuck{Gated(HARD)}`(`ExecStuck` P1)。
 
 **清仓锁 `flatten_lock`**:`engine_flatten` 同时置 `AcctState[a].flatten_lock`;它**不随清仓完成而解除**,只在 `on_risk` 收到该账户 Kill cap 的 `CapCleared`(即 Trader/Admin 的 `Resume{Kill}`)时清除。锁定期间:
 

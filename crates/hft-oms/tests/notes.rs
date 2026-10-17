@@ -44,7 +44,7 @@ fn oms_025_note_codes_registered() {
         notes::ALL.iter().map(|c| (c.n, c.name)).collect::<Vec<_>>(),
         "OMS-025.2"
     );
-    assert_eq!(mine.len(), 23, "OMS-025.1");
+    assert_eq!(mine.len(), 25, "OMS-025.1");
     let mut reg: Vec<&str> = NOTE_NAMES
         .iter()
         .filter(|n| n.source == NoteSource::Oms)
@@ -57,7 +57,7 @@ fn oms_025_note_codes_registered() {
     let mut ns: Vec<u32> = notes::ALL.iter().map(|c| c.n).collect();
     ns.sort_unstable();
     ns.dedup();
-    assert_eq!(ns.len(), 23, "OMS-025.2");
+    assert_eq!(ns.len(), 25, "OMS-025.2");
     for c in notes::ALL {
         assert_eq!(notes::code_of(*c), 4 << 24 | c.n, "OMS-025.2");
     }

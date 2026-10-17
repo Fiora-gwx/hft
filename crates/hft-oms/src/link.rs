@@ -58,6 +58,7 @@ impl Oms {
             self.links
                 .get(i)
                 .is_some_and(|e| matches!(e.state, LinkState::Free | LinkState::Done))
+                && !self.gq.iter().any(|item| item.link_id == i as u32 + 1)
         })
     }
 
@@ -229,6 +230,30 @@ impl Oms {
         if let Some(a) = self.aux.get_mut(ix) {
             *a = crate::LinkAux::default();
         }
+        // Warn with one event's output budget left, and again when the last slot is used.
+        // This is capacity headroom, not a trading threshold.
+        let base = self.aix(account).unwrap_or(0) * self.p.lpa as usize;
+        let used = self
+            .links
+            .iter()
+            .skip(base)
+            .take(self.p.lpa as usize)
+            .filter(|e| !matches!(e.state, LinkState::Free | LinkState::Done))
+            .count();
+        let capacity = self.p.lpa as usize;
+        let warn = capacity.saturating_sub(usize::from(self.p.k)).max(1);
+        if used == warn || used == capacity {
+            self.note(
+                notes::note(
+                    notes::LINK_CAPACITY,
+                    self.strategy_of(account),
+                    group,
+                    it.intent.inst,
+                    [u64::from(account.0), used as u64, capacity as u64, 0, 0, 0, 0, 0],
+                ),
+                out,
+            );
+        }
         if let Some(gi) = self.group_ix(account, group)
             && let Some(g) = self.groups.get_mut(gi)
         {
@@ -240,7 +265,14 @@ impl Oms {
         link_id
     }
 
-    fn set_state(&mut self, i: usize, to: LinkState, reason: LinkBroken, seq: u64, out: &mut OmsOut) {
+    pub(crate) fn set_state(
+        &mut self,
+        i: usize,
+        to: LinkState,
+        reason: LinkBroken,
+        seq: u64,
+        out: &mut OmsOut,
+    ) {
         let Some(e) = self.links.get(i).copied() else {
             return;
         };
@@ -248,8 +280,14 @@ impl Oms {
             return;
         }
         let was_active = e.active();
+        if matches!(to, LinkState::Done | LinkState::Broken) && e.has(lf::RETRY_PENDING) {
+            self.push_timer(OmsTimerKind::HedgeRetry, e.link_id, Tsc(0), true, out);
+        }
         if let Some(x) = self.links.get_mut(i) {
             x.state = to;
+            if matches!(to, LinkState::Done | LinkState::Broken) {
+                x.flags &= !lf::RETRY_PENDING;
+            }
             if to == LinkState::Broken {
                 x.plan = (x.plan & PLAN_IX_MASK) | u32::from(reason as u8) << 24;
             }
@@ -262,6 +300,9 @@ impl Oms {
             }
             if to == LinkState::Broken {
                 g.st.broken_links = g.st.broken_links.saturating_add(1);
+            }
+            if e.state == LinkState::Broken && to == LinkState::Done {
+                g.st.broken_links = g.st.broken_links.saturating_sub(1);
             }
         }
         let note = if to == LinkState::Broken {
@@ -284,7 +325,44 @@ impl Oms {
         }
     }
 
-    /// Done when the first leg is terminal and nothing is owed, open, pending or reversing.
+    /// Hand unsendable hedge debt to the group residual, without changing any booked position.
+    pub(crate) fn defer_hedge_residual(&mut self, i: usize, qty: i64, out: &mut OmsOut) {
+        if qty <= 0 {
+            return;
+        }
+        let Some(e) = self.links.get(i).copied() else {
+            return;
+        };
+        let Some((_, p)) = self.plans.get(i).copied() else {
+            return;
+        };
+        let hx = self.leg_ix_of(e.account, e.group, p.inst);
+        self.residual_add(e.account, e.group, hx, qty);
+        if let Some(x) = self.links.get_mut(i) {
+            x.hedge_req = Qty(x.hedge_req.0.saturating_sub(qty));
+        }
+        self.note(
+            notes::note(
+                notes::HEDGE_RESIDUAL,
+                self.strategy_of(e.account),
+                e.group,
+                p.inst,
+                [
+                    u64::from(e.link_id),
+                    qty as u64,
+                    self.residual_get(e.account, e.group, hx) as u64,
+                    self.inst(p.inst).lot as u64,
+                    self.inst(p.inst).min_qty.0 as u64,
+                    0,
+                    0,
+                    0,
+                ],
+            ),
+            out,
+        );
+    }
+
+    /// Done when the first leg is terminal and nothing sendable is owed, open or pending.
     pub(crate) fn done_check(&mut self, i: usize, seq: u64, out: &mut OmsOut) {
         let Some(e) = self.links.get(i).copied() else {
             return;
@@ -296,10 +374,12 @@ impl Oms {
             return;
         };
         if !self.first_terminal(&e)
-            || e.owed().0 > 0
             || e.hedge_open.0 > 0
-            || e.has(lf::RETRY_PENDING | lf::HEDGE_QUEUED)
+            || e.has(lf::HEDGE_QUEUED | lf::RESUME_HOLD)
             || self.link_aux(e.link_id).rev_open > 0
+            || self.link_aux(e.link_id).unknown > 0
+            || self.link_aux(e.link_id).open > 0
+            || out.hedges.iter().any(|r| r.link_id == e.link_id)
         {
             return;
         }
@@ -308,6 +388,18 @@ impl Oms {
         }
         if p.kind == HedgeKind::Simultaneous && !e.has(lf::REVERSING) && self.simul_imbalance(i) {
             return;
+        }
+        let owed = e.owed().0;
+        if owed > 0 {
+            let info = self.inst(p.inst);
+            let q = floor_lot(owed, info.lot);
+            let below = q < info.min_qty.0.max(1)
+                || (e.ref_px.0 > 0
+                    && e.ref_px.mul_qty(Qty(q), info.exp, RoundMode::HalfEven).0.0 < info.min_notional.0);
+            if !below {
+                return;
+            }
+            self.defer_hedge_residual(i, owed, out);
         }
         self.set_state(i, LinkState::Done, LinkBroken::None, seq, out);
     }
@@ -442,11 +534,18 @@ impl Oms {
         if q < info.min_qty.0 {
             q = 0;
         }
+        // Rounding debt belongs to the group even when a retry sends only whole lots.
+        let residual = if owed_l < info.min_qty.0.max(1) {
+            owed
+        } else {
+            owed - owed_l
+        };
+        self.defer_hedge_residual(i, residual, out);
         if q < owed_l
             && let Some(n) = naked
         {
             #[cfg(feature = "testkit")]
-            self.audit_cap(i, i128::from(owed - q));
+            self.audit_cap(i, i128::from(owed - residual - q));
             let note = notes::note(
                 notes::HEDGE_NAKED_CAPPED,
                 self.strategy_of(e.account),
@@ -459,7 +558,7 @@ impl Oms {
         if q < owed
             && let Some(x) = self.links.get_mut(i)
         {
-            x.hedge_req = Qty(x.hedge_req.0.saturating_sub(owed - q));
+            x.hedge_req = Qty(x.hedge_req.0.saturating_sub(owed - residual - q));
         }
         let _ = seq;
         (Qty(q), Qty(owed))

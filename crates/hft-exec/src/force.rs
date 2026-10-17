@@ -706,11 +706,22 @@ impl Exec {
         }
         let ln = self.legs_now(cix, v);
         let mut perp_pending = false;
+        let mut targets = c.view.intent.legs;
+        if c.n_legs == 2
+            && c.view.intent.n_legs == 2
+            && self
+                .acct
+                .get(self.acct_of_cix(cix))
+                .is_some_and(|a| a.flatten_lock)
+            && usize::from(targets[0].leg_ix) != self.perp_first(cix, v)
+        {
+            targets.swap(0, 1);
+        }
         for pass in [LEG_PERP, LEG_SPOT] {
             if pass == LEG_SPOT && perp_pending {
                 break;
             }
-            for lt in c.view.intent.legs() {
+            for lt in targets.iter().take(usize::from(c.view.intent.n_legs)) {
                 let i = usize::from(lt.leg_ix);
                 if c.legs[i].kind != pass {
                     continue;

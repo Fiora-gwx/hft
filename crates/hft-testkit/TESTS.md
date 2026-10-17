@@ -1403,6 +1403,8 @@ spec: README.md
 
 ### TK-106 真实引擎的基础币费用配置与对冲余数观察
 
+- 永续首腿/现货对冲补充:seed `0x1017c4`,真实 SimExchange 基础币扣费,16 个 link 槽,超过 32 条获准首腿、无 CAPACITY、存在 `OmsHedgeResidual`;全部不变量、快照验证与同种子重跑通过。实现 `crates/hft-testkit/tests/fee_cycle.rs::tk_106_perp_first_fee_residual_reclaims_links_seed_1017c4`。
+
 - 规则:[DST 的世界模型](README.md#dst-的世界模型)、[INV-8](../../docs/tests/invariants.md#inv-8-onfill-第二腿的对冲数量之和等于触发它的第一腿累计净成交量)
 - 级别:dst
 - 里程碑:M2

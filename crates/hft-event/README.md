@@ -614,6 +614,7 @@ pub struct Note {                   // 0x0506,80 B;热路径唯一的"日志",�
 | `OmsCancelNotSent` | Oms | P2 | 撤单/改单确定未写出(撤单义务仍在时由 OMS 重发) |
 | `OmsNeedsRestQuery` | Oms | Info | 请 reconciler 经 REST 查询(含成交历史) |
 | `OmsAnomaly` | Oms | 按条件:冒烟单成交(`SmokeFilled`)P0,其余 P1 | 其余 OMS 异常(种类与 `v[]` 归 hft-oms) |
+| `OmsHedgeResidual`、`OmsLinkCapacity` | Oms | P1 | 残余交接与链接余量告警,字段归 [hft-oms](../hft-oms/README.md#note-码表) |
 | `RoundClosed`、`Adjusted`、`BaselineSet`、`BalanceInit`、`SimReset` | Ledger | Info | `RoundClosed`:带结束轮次的 group(`Note.group`),不带策略 `tag`(内容归 hft-ledger);`Adjusted`:`AdoptExchange` 采纳的调整,v[0] = account \| venue << 8,v[1] = inst 或 asset,v[2] = report_id,v[3] = qty,v[4] = px,v[5] = 调整计入的已实现 Notional;其余 `v[]` 归 hft-ledger |
 | `ResidualWrittenOff` | Ledger | P1 | `WriteOffResidual` 把某 group 多出的那一腿(单腿)的已成交裸量移到 unassigned(`AdjustDelta::WriteOff`;`v[]` 归 hft-ledger) |
 | `ExternalFill` | Ledger | 按 `cause`:`Manual` P1,其余 P0 | 外来成交入账(hft-ledger) |

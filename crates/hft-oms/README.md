@@ -263,7 +263,7 @@ pub struct ForeignFill {                           // 防御路径与 StaleGen �
 | 名称 | 类型 | 默认 | 含义 / 来源 |
 |---|---|---|---|
 | `slots[(venue, account)]` | u32 | 4096 | 槽数;24 h 最大在途 + 余量([05 §2.1](../../design/05-CEX执行层.md))。取值 1..=65 535(槽号 1..=N,0 保留),且 (venue, account) 表数 ≤ 256(`Timer{Oms, UnknownQuery}` 的编码位宽,见 `OmsTimerReq`),超出 → `OmsConfigError` |
-| `links_per_account` | u32 | 4096 | `LinkTable` 容量 |
+| `links_per_account` | u32 | 1024 | 每账户 `LinkTable` 容量;生产定时器与槽位配套容量归 [hft-core](../../apps/hft-core/README.md#内存与-journal-段按主机类唯一归属) |
 | `ack_timeout_ms[venue]` | u32 | 2000 | `PendingNew` 无回执多久进 `Unknown` 并查询 |
 | `cancel_timeout_ms[venue]` | u32 | 2000 | `PendingCancel`/`PendingAmend` 同上 |
 | `ioc_timeout_ms[venue]` | u32 | 1000 | IOC/FOK `Live` 超时仍无终态 → `Unknown` |
@@ -641,7 +641,11 @@ const _: () = assert!(size_of::<LinkEntry>() == 80 && offset_of!(LinkEntry, firs
 
 含枚举字段的结构(`OrderSlot`、`SlotExt`、`LinkEntry`、`Tomb`,以及快照中的 `HedgePlan`)从快照读回时用 `zerocopy::TryFromBytes`,非法判别值 → `RestoreError`。链接的欠对冲量 `owed = hedge_req − hedge_filled − hedge_open`。
 
-**链接状态**(唯一定义):带 `LegLink{role = First}` 的意图 `place` 成功时建链接(`Open`;`first` = 该槽,`ref_px = ApprovedIntent.hedge_ref_px`;该账户 `LinkTable` 已满 → `Err(PlaceError::LinkTableFull)`);产出第一条对冲请求(OnFill 第 5 条或 Simultaneous)时 → `Hedging`;第一腿已终态且 `owed = 0`、`hedge_open = 0`、无已登记的 HedgeRetry、无在途 `Reverse` 时 → `Done`(第一腿零成交终态的 OnFill 链接同样 `Done`;`on_fail = Hold` 的失败处理 → `Done`);`Broken` 的来源见 OnFill 第 6、7 条、"回报匹配与成交增量"第 6 条与"恢复"第 5 条。每次状态变化产出一条 `LinkUpdate`。**链接号分配**:`link_id` = 全局链接表下标 + 1,取最低的空闲(`Free` 或 `Done`)下标(确定性);`Broken` 条目保留到 hft-exec 处置完。**`hedge_deadline_ms` 的判定时机**:该链接的失败处理(OnFill 第 6 条)、`hedge_gated`、`on_hedge_retry`,以及该链接任一槽的 `on_unknown_query` 与 sweep ③;以当次调用的 `now` 判定,条件为 `first_fill_tsc ≠ 0`、不处于 `RESUME_HOLD`/`RESUME_RETRY`、`owed > 0` 或 `hedge_open > 0`,且 `now − first_fill_tsc > hedge_deadline_ms` → `Broken{Deadline}`。
+**残余交接与容量**:第一腿已终态、全部关联槽已终态、没有待交出对冲请求或恢复保持时,若正 `owed` 按 lot 向下取整后不足 `min_qty`(至少 1),或按链接 `ref_px` 估值不足 `min_notional`,把 `owed` 从 `hedge_req` 转入该 group 对冲腿的 `residual`,写 `OmsHedgeResidual`,然后完成链接。第二腿基础币手续费造成的净量不足同样适用。重试向下取整的尾数也进入 residual。腿净量、账户持仓和现金不变,已有裸量视图和执行层残余/补腿路径继续负责;这不是 `WriteOffResidual`。无可靠价格时仅按 lot/min_qty 判断。
+
+`Done` 与 `Broken` 取消已登记的 HedgeRetry。Sweep 扫描预分配链接表,每次最多退休 `sweep_batch` 条,输出空间不足即停;已有亚最小量滞留链接用上述规则回收。已发出 Broken 通知、无关联非终态槽/待交出请求的链接交接欠量后也退休,执行层 Broken 状态及风险 cap 继续按实际敞口处理。Unknown、在途或未终态第一腿绝不因容量不足而退休。待交出的链接输出消费完之前不得复用编号。创建链接后剩余容量进入一事件输出预算(`max_out_per_event`)时写一次 `OmsLinkCapacity`,用完最后一项时再写一次;较小表从第一项使用时告警。
+
+**链接状态**(唯一定义):带 `LegLink{role = First}` 的意图 `place` 成功时建链接(`Open`;`first` = 该槽,`ref_px = ApprovedIntent.hedge_ref_px`;该账户 `LinkTable` 已满 → `Err(PlaceError::LinkTableFull)`);产出第一条对冲请求(OnFill 第 5 条或 Simultaneous)时 → `Hedging`;第一腿与关联槽已终态且交接后 `owed ≤ 0`、`hedge_open = 0`、无待交出请求或恢复保持时 → `Done`(第一腿零成交终态的 OnFill 链接同样 `Done`;`on_fail = Hold` 的失败处理 → `Done`);`Broken` 的来源见 OnFill 第 6、7 条、"回报匹配与成交增量"第 6 条与"恢复"第 5 条。每次状态变化产出一条 `LinkUpdate`。**链接号分配**:`link_id` = 全局链接表下标 + 1,取最低的空闲(`Free` 或 `Done`)下标(确定性);`Broken` 条目保留到 hft-exec 处置完。**`hedge_deadline_ms` 的判定时机**:该链接的失败处理(OnFill 第 6 条)、`hedge_gated`、`on_hedge_retry`,以及该链接任一槽的 `on_unknown_query` 与 sweep ③;以当次调用的 `now` 判定,条件为 `first_fill_tsc ≠ 0`、不处于 `RESUME_HOLD`/`RESUME_RETRY`、`owed > 0` 或 `hedge_open > 0`,且 `now − first_fill_tsc > hedge_deadline_ms` → `Broken{Deadline}`。
 
 ### OnFill
 
@@ -915,6 +919,8 @@ feature `chain`,随链上腿的策略迁移启用(触发条件见 [hft-chain-evm
 | `OmsHedgePxGated` | P1 | 对手价越过越价上限 |
 | `OmsHedgeSlipCapped` | P1 | 超滑点按越价上限定价 |
 | `OmsHedgeNakedCapped` | P1 | 第二腿被该方向裸量截量 |
+| `OmsHedgeResidual` | P1 | 欠量交给 group 残余处理;`v = [link_id, qty, residual_after, lot, min_qty]`,不改变腿净量 |
+| `OmsLinkCapacity` | P1 | 链接表余量告警;`v = [account, used, capacity]` |
 | `OmsResumeRetry` | P1 | 恢复后的续接 |
 | `OmsResumeTimeout` | P0(零敞口链接实际级别 P1) | `resume_hold_max_ms` 内未能续接:有敞口的链接 Broken,零敞口的只清 `RESUME_HOLD` |
 | `OmsAnomaly` | P1(`SmokeFilled` 实际级别 P0) | 回报处理表中的"异常 Note"格与其他异常;`v[0]` = 种类:`Table=1`(回报处理表异常格)`ForeignEvict=2`(`foreign`/`ext_held` 表 FIFO 淘汰)`SmokeFilled=3`(冒烟单成交)`ReconIgnored=4`(`ReconcileReport` 的 `OpenOrder`/`UnknownResolved` 条目不匹配或槽已不是 Unknown/VERIFY,被忽略)`InstMismatch=5`(实际级别 P0;非 PERP_CASH 的槽/墓碑收到非零的另一品种,回报被忽略:`v[1]` = 回报品种,`v[2]` = 回报种类,`v[3]` = slot,`v[4]` = gen,`v[5]` = exch_order_id),其余 `v[]` 按种类 |
@@ -1023,7 +1029,7 @@ const _: () = assert!(size_of::<TableRow>() == 32 && size_of::<LinkRowHdr>() == 
 - `ClientOrderId` 编码与解码在 hft-types,预算与基准(`types/clid_encode`、`types/clid_decode`)归那里。
 - 第一腿成交回报取出 → 第二腿 `OrderDecision` 入出环:主机内 ≤ 20 µs([05 §1](../../design/05-CEX执行层.md)),OMS 份额(OnFill + `price_hedge` + `place`)≤ 1 µs;风控检查链(含 #6 `HEDGE_LIMIT`)另计。
 - 风控可负担性读数(`avail_quote`、`avail_margin`)读 InflightBook 的增量和,O(1),与在途单数无关。
-- 分配:只在 `new`/`restore` 与命令路径 `on_groups_changed`(容量预分配,只重写内容);运行期零分配。内存:每 (venue, account) 表 = N × (128 + 64 + 80 + 56 × T + 4) B,N = 4096、T = 2 时 ≈ 1.52 MiB(另加 `foreign`/`ext_held` 各 64 × 16 B,另有结算来源表 64 × (32 + 72) B);`LinkTable` 每账户 = `links_per_account` × (80 + 56) B(链接 + 计划表项),4096 时 ≈ 544 KiB;LegTracker 每 group ≈ 240 B(`LegState` 192 B + 归属表项);`pending_out` = 32 B × (2 × 全部表槽数 + 全部账户链接数),每张 4096 槽表约摊 256 KiB + 128 KiB(链接)。
+- 分配:只在 `new`/`restore` 与命令路径 `on_groups_changed`(容量预分配,只重写内容);运行期零分配。内存:每 (venue, account) 表 = N × (128 + 64 + 80 + 56 × T + 4) B,N = 4096、T = 2 时 ≈ 1.52 MiB(另加 `foreign`/`ext_held` 各 64 × 16 B,另有结算来源表 64 × (32 + 72) B);`LinkTable` 每账户 = `links_per_account` × (80 + 56) B(链接 + 计划表项),1024 时 ≈ 136 KiB;LegTracker 每 group ≈ 240 B(`LegState` 192 B + 归属表项);`pending_out` = 32 B × (2 × 全部表槽数 + 全部账户链接数),每张 4096 槽表约摊 256 KiB + 128 KiB(链接)。
 - 无系统调用、无锁、无共享缓存行(只被 sequencer 线程触碰)。
 
 ## 测试与验收

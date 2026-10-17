@@ -129,18 +129,29 @@ fn exe_362_flatten_algo() {
     let r = fx.adv();
     let o = r.orders.iter().find(|o| o.intent.group == G7).copied().unwrap();
     assert_eq!((o.intent.inst, o.intent.side), (P, Side::Buy), "EXE-362.1");
-    assert!(o.intent.link.get().is_some(), "EXE-362.1");
+    assert!(
+        o.intent.link.get().is_none() && o.intent.reduce_only(),
+        "EXE-362.1"
+    );
     assert_eq!(
-        r.dec(5).into_iter().find(|d| d.group == G7).unwrap().first_leg_ix,
+        r.dec(5).into_iter().find(|d| d.group == G7).unwrap().leg_ix,
         1,
         "EXE-362.1"
     );
     // .2
+    let mut fx = Fx::new();
+    fx.legs(A1, G7, &["3.00", "-3.0"]);
+    fx.spot(A1, A, G7, "3", "3");
+    let mut tg = t0("0", "0");
+    tg.reason = TargetReason::Hard;
+    let r = fx.go(&tg);
+    let o = r.orders.iter().find(|o| o.intent.group == G7).copied().unwrap();
     let rf = fx.placed(&o);
     let mut l = link(1, A1, G7, LinkPhase::Open, LinkBrokenCause::None);
     l.first = rf;
     fx.link(&l);
     fx.cm(A1, G7).hold |= LINK_HOLD;
+    fx.flatten(A1);
     fx.at(1000);
     fx.touch(P);
     assert!(fx.adv().has_dec(11, pack(5, 2, 5)), "EXE-362.2");
@@ -298,7 +309,7 @@ fn exe_364_lock_accept() {
     fx.at(1000);
     let r = fx.adv();
     assert_eq!(
-        r.dec(5).into_iter().find(|d| d.group == G7).unwrap().first_leg_ix,
+        r.dec(5).into_iter().find(|d| d.group == G7).unwrap().leg_ix,
         1,
         "EXE-364.7"
     );

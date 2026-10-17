@@ -40,8 +40,49 @@ impl Oms {
                 t.sweep_cursor = if cur >= n { 0 } else { cur };
             }
         }
+        self.reclaim_links(seq, out);
         self.resume_timeouts(now, seq, out);
         self.flush(out);
+    }
+
+    /// Inspect only the preallocated table and retire at most `sweep_batch` rows. Output
+    /// headroom also bounds the work; already retired rows cannot starve later candidates.
+    fn reclaim_links(&mut self, seq: u64, out: &mut OmsOut) {
+        let mut reclaimed = 0;
+        for i in 0..self.links.len() {
+            if reclaimed >= self.p.sweep_batch || out.notes.room() < 2 {
+                break;
+            }
+            let Some(e) = self.links.get(i).copied() else {
+                continue;
+            };
+            if matches!(e.state, LinkState::Free | LinkState::Done)
+                || self.gq.iter().any(|item| item.link_id == e.link_id)
+            {
+                continue;
+            }
+            if e.state == LinkState::Broken {
+                // The Broken notice has already handed the exposure to exec/risk. Do not
+                // reuse identities while an order or a queued hedge can still act on them.
+                let aux = self.link_aux(e.link_id);
+                if !self.first_terminal(&e)
+                    || e.hedge_open.0 != 0
+                    || aux.unknown != 0
+                    || aux.open != 0
+                    || aux.rev_open != 0
+                    || e.has(lf::HEDGE_QUEUED)
+                {
+                    continue;
+                }
+                self.defer_hedge_residual(i, e.owed().0, out);
+                self.set_state(i, LinkState::Done, LinkBroken::None, seq, out);
+            } else {
+                self.done_check(i, seq, out);
+            }
+            if self.links.get(i).is_some_and(|x| x.state == LinkState::Done) {
+                reclaimed += 1;
+            }
+        }
     }
 
     fn expire_tombs(&mut self, ti: usize, s: u32, now: Tsc) {
@@ -186,6 +227,10 @@ impl Oms {
         if let Some(x) = self.links.get_mut(i) {
             x.state = LinkState::Broken;
             x.plan = (x.plan & 0x00FF_FFFF) | u32::from(reason as u8) << 24;
+            x.flags &= !lf::RETRY_PENDING;
+        }
+        if e.has(lf::RETRY_PENDING) {
+            self.push_timer(crate::OmsTimerKind::HedgeRetry, e.link_id, Tsc(0), true, out);
         }
         if let Some(gi) = self.group_ix(e.account, e.group)
             && let Some(g) = self.groups.get_mut(gi)

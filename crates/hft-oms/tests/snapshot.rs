@@ -12,6 +12,78 @@ use hft_oms::*;
 use hft_strategy_sdk::{GroupTable, OrderRef, SnapshotReader, SnapshotWriter};
 use hft_types::{AccountId, Side, Tif};
 
+#[test]
+fn oms_201_recorded_probe_snapshot_reclaims_all_sixteen_orphans() {
+    let rd = hft_refdata::RefData::load(include_bytes!("fixtures/linkcap/refdata.bin"), None).unwrap();
+    let ec = hft_refdata::EngineConfig::load(include_bytes!("fixtures/linkcap/engine.bin"), None).unwrap();
+    let cfg = OmsConfig::from_engine(&ec, &rd, 1, HZ).unwrap();
+    assert_eq!(cfg.links_per_account, 16);
+    let bytes = include_bytes!("fixtures/linkcap/oms-7154.bin");
+    let replay = |batch| {
+        let mut cfg = cfg.clone();
+        cfg.sweep_batch = batch;
+        let mut oms = Oms::restore(&mut SnapshotReader::new(bytes), &cfg, &rd).unwrap();
+        let first = *oms.link(1).unwrap();
+        let g = first.group;
+        let a = first.account;
+        oms.on_groups_changed(&GroupTable::new(
+            &[group_spec(
+                g,
+                &[
+                    (hft_types::InstId(1), hft_types::VenueId(1)),
+                    (hft_types::InstId(2), hft_types::VenueId(11)),
+                ],
+            )],
+            1,
+        ));
+        let before = oms.legs(a, g).view;
+        assert_eq!(before.open_links, 16);
+        for id in 1..=16 {
+            let link = oms.link(id).unwrap();
+            assert_eq!(link.state, LinkState::Hedging);
+            assert_eq!(link.owed().0, if id == 1 { 1000 } else { 990 });
+            assert_eq!(link.hedge_open.0, 0);
+        }
+        let mut out = OmsOut::new();
+        let mut notes = 0;
+        let mut remaining = 16;
+        while remaining > 0 {
+            out.clear();
+            oms.on_sweep(hft_types::Tsc(19_093_497_467_020), &mut out);
+            let retired = remaining.min(u32::from(batch));
+            remaining -= retired;
+            assert_eq!(u32::from(oms.legs(a, g).view.open_links), remaining);
+            let n = out
+                .notes
+                .iter()
+                .filter(|n| n.code == notes::code_of(notes::HEDGE_RESIDUAL))
+                .count();
+            assert_eq!(n, retired as usize);
+            notes += n;
+            assert!(out.hedges.is_empty());
+            while oms.wants_continue() {
+                out.clear();
+                oms.on_continue(hft_types::Tsc(0), 0, &mut out);
+            }
+        }
+        for id in 1..=16 {
+            assert_eq!(oms.link(id).unwrap().state, LinkState::Done);
+        }
+        assert_eq!(oms.legs(a, g).view.open_links, 0);
+        assert_eq!(oms.legs(a, g).view.leg[0].net, before.leg[0].net);
+        assert_eq!(oms.legs(a, g).view.leg[1].net, before.leg[1].net);
+        assert_eq!(
+            oms.legs(a, g).view.leg[1].residual.0 - before.leg[1].residual.0,
+            15_850
+        );
+        assert_eq!(notes, 16);
+        snap(&oms)
+    };
+    for batch in [3, 256] {
+        assert_eq!(replay(batch), replay(batch));
+    }
+}
+
 fn snap(o: &Oms) -> Vec<u8> {
     let mut w = SnapshotWriter::new(1 << 22);
     o.snapshot(&mut w);

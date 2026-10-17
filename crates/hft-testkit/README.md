@@ -151,6 +151,8 @@ impl<S: Strategy> ModelHarness<S> {
 
 ### 6. DST 框架
 
+TK-106 的永续首腿变体用固定 seed `0x1017c4`,在 16 个链接槽和真实 SimExchange 基础币扣费下完成超过 32 条首腿,检查没有 CAPACITY、确实交接残余、快照检查和同种子重跑一致。
+
 `scenarios/seq.rs` 的 SEQ-344 使用全部不变量、物理编号 journal、周期快照验证与同种子二次执行;它与 OMS/执行层场景共用注册表,由 DST 入口选择套件和种子。
 
 ```rust

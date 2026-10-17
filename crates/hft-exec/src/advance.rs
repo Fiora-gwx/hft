@@ -538,9 +538,16 @@ impl Exec {
         }
         let ln = self.legs_now(cix, v);
         let engine_risk = self.engine_risk_target(cix);
+        let flatten = self
+            .acct
+            .get(self.acct_of_cix(cix))
+            .is_some_and(|a| a.flatten_lock);
         // Unknown slices of engine reduce-only perp legs are released (README "推进" 4).
         if engine_risk
-            && (c.serial != 0 || c.is_ungrouped() || matches!(c.view.intent.exec, ExecSpec::TakerSlice(_)))
+            && (flatten
+                || c.serial != 0
+                || c.is_ungrouped()
+                || matches!(c.view.intent.exec, ExecSpec::TakerSlice(_)))
         {
             self.release_unknown(cix);
         }
@@ -572,7 +579,13 @@ impl Exec {
         ) {
             return;
         }
-        if c.serial != 0 || (engine_risk && c.is_ungrouped()) {
+        if flatten && matches!(c.active.kind, ACT_PAIR | ACT_SIMUL) {
+            // Existing links still own their in-flight orders. Retain their Unknown/hold
+            // fallback handling; pair_step cannot allocate while this active pair exists.
+            self.pair_step(cix, v, now, out);
+            return;
+        }
+        if flatten || c.serial != 0 || (engine_risk && c.is_ungrouped()) {
             self.serial_step(cix, v, now, out);
             return;
         }
