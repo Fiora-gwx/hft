@@ -20,4 +20,18 @@ BIN-026 与 BGT-027 用转义未知字段强制参考路径，逐字节变异订
 
 ## Consequences
 
-没有资金、风控或 journal schema 语义变更。目标主机需要复测真实回报 decode、分离后的 frame 和 rep_to_order；合成与补齐报文不能替代真实线上分布。ARM 基准结果待本 PR 的 Latency profile 日志确认。
+没有资金、风控或 journal schema 语义变更。目标主机需要复测真实回报 decode、分离后的 frame 和 rep_to_order；合成与补齐报文不能替代真实线上分布。ARM 基准见下表。
+
+
+## Evidence
+
+[Latency profile 38998416226](https://github.com/Fiora-gwx/hft/actions/runs/38998416226)，2026-10-17，GitHub ubuntu-24.04-arm、4 vCPU Neoverse-N2，bench 优化 profile。base 为 fd2dc3b，head 为 facd1158；同机 base/head/base，相同 harness，每格 20,000 次采样、2,000 次预热；计时包含 Instant 边界开销，不包含账户上下文构建或销毁。单位 µs。base 范围为前后两次；全部为新成交。
+
+| 报文 | base p50 | head p50 | base p99 | head p99 |
+|---|---:|---:|---:|---:|
+| Binance 262 B | 1.488 / 1.488 | 1.152 | 1.520 / 1.520 | 1.176 |
+| Binance 补齐 2324 B | 2.968 / 2.800 | 2.176 | 3.104 / 2.992 | 2.528 |
+| Bitget 520 B | 3.296 / 3.200 | 1.383 | 3.424 / 3.287 | 1.416 |
+| Bitget 补齐 2582 B | 3.600 / 3.512 | 2.360 | 3.759 / 3.599 | 2.640 |
+
+正常报文重复成交 p50：Binance 1.064/1.088 → 0.744 µs，Bitget 2.976/2.976 → 1.296 µs。收益支持保留投影；不把共享机器的 max 或合成回报数字换算为实盘 rep_to_order 达标结论。
