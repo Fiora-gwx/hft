@@ -45,6 +45,12 @@ jobs:
         with:
           key: x86-replay-dst-v1
           cache-on-failure: true
+      - name: Discard stale cached replay evidence
+        # rust-cache may restore target/dst from an earlier run. Runner PIDs repeat; fixed
+        # regression seeds then collide before export. Preserve only this run's new evidence.
+        run: |
+          test "$PWD" = "$GITHUB_WORKSPACE"
+          rm -rf -- "$GITHUB_WORKSPACE/target/dst"
       - name: Build replayer and DST test assemblies
         run: cargo build --locked --profile ci -p replayer --tests --examples
       - name: Derive 100 seeds
