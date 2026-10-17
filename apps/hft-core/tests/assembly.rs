@@ -23,6 +23,20 @@ fn core_033_probe_on_testnet_ok() {
     assert!(loaded.setup.role_prod);
     assert!(!loaded.rd.account(AccountId(1)).is_prod);
     assert_eq!(loaded.configs.params.len(), 1);
+    // SDK-005 supplies only a kind id: preserve its original BTC spot/spot reference data.
+    use hft_strategy_sdk::StrategySet;
+    let kind = hft_core::Strategies::kinds()
+        .iter()
+        .find(|d| d.non_prod_only)
+        .unwrap()
+        .kind_id;
+    let d = tempfile::tempdir().unwrap();
+    support::write_for_kind(d.path(), &d.path().join("hot"), None, Some(kind));
+    let bytes = std::fs::read(d.path().join("refdata.bin")).unwrap();
+    let rd = hft_refdata::RefData::load(&bytes, None).unwrap();
+    assert_eq!(rd.asset(hft_types::AssetId(1)).name.as_ref(), "BTC");
+    assert_eq!(rd.inst(hft_types::InstId(1)).venue, VenueId::BINANCE_SPOT);
+    assert_eq!(rd.inst(hft_types::InstId(2)).venue, VenueId::BITGET_UTA_SPOT);
 }
 #[test]
 fn core_043_credential_account_matches_refdata() {

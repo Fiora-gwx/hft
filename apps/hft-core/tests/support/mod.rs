@@ -44,7 +44,8 @@ fn write_mode(
     endpoints: &[(EndpointEnv, EndpointRole, &str)],
 ) -> PathBuf {
     std::fs::create_dir_all(root).unwrap();
-    let dual = params.is_some();
+    let second = params.is_some();
+    let perp_spot = params.is_some_and(|p| p.get("groups").is_some());
     let base = params
         .and_then(|p| p.get("groups"))
         .and_then(toml::Value::as_array)
@@ -53,7 +54,7 @@ fn write_mode(
         .and_then(toml::Value::as_str)
         .unwrap_or("BTC");
     let symbol = format!("{base}USDT");
-    let v = if dual {
+    let v = if perp_spot {
         VenueId::BINANCE_USDM
     } else {
         VenueId::BINANCE_SPOT
@@ -110,7 +111,7 @@ fn write_mode(
             dust: Qty(1),
         });
     }
-    if dual {
+    if second {
         b.asset(AssetSpec {
             id: AssetId(4),
             name: "BGB".into(),
@@ -127,7 +128,7 @@ fn write_mode(
     b.venue(VenueSpec {
         id: v,
         exchange: Exchange::Binance,
-        product: if dual { InstKind::Perp } else { InstKind::Spot },
+        product: if perp_spot { InstKind::Perp } else { InstKind::Spot },
         ws_max_streams_per_conn: 1024,
         ws_max_in_msgs_per_s: 5,
         ws_max_conn_age_s: 86400,
@@ -158,7 +159,7 @@ fn write_mode(
         "BNB" => Some(AssetId(3)),
         _ => None,
     };
-    b.caps(if dual {
+    b.caps(if perp_spot {
         venue_binance::Usdm::default_caps(asset)
     } else {
         venue_binance::Spot::default_caps(asset)
@@ -185,7 +186,7 @@ fn write_mode(
         id: InstId(1),
         venue: v,
         symbol: symbol.clone(),
-        kind: if dual { InstKind::Perp } else { InstKind::Spot },
+        kind: if perp_spot { InstKind::Perp } else { InstKind::Spot },
         asset: btc,
         quote: usdt,
         tick: 100,
@@ -199,7 +200,6 @@ fn write_mode(
         min_qty_str: "0.00001".into(),
         ..InstSpec::default()
     });
-    let second = dual;
     let other = VenueId::BITGET_UTA_SPOT;
     #[cfg(feature = "bitget")]
     if second {
@@ -291,7 +291,7 @@ fn write_mode(
             venue: v,
             uid: "123".into(),
         });
-        if dual {
+        if perp_spot {
             b.account_venue(AccountVenueSpec {
                 account: a,
                 venue: other,
@@ -421,7 +421,7 @@ fn write_mode(
     risk.accounts.push((
         a,
         hft_risk::AcctSpec {
-            max_order_notional: Notional(if dual { 25_000_000 } else { 100_000_000 }),
+            max_order_notional: Notional(if perp_spot { 25_000_000 } else { 100_000_000 }),
             max_account_notional: Notional(1_000_000_000),
             account_notional_from_equity: Rate(1_000_000_000),
             default_group: hft_risk::GroupLimits {
@@ -430,8 +430,8 @@ fn write_mode(
                 naked_gate: Rate(500_000_000),
                 naked_gate_min: Notional(100_000_000),
             },
-            max_hedge_notional: Some(Notional(if dual { 25_000_000 } else { 100_000_000 })),
-            max_reduce_notional: Some(Notional(if dual { 25_000_000 } else { 100_000_000 })),
+            max_hedge_notional: Some(Notional(if perp_spot { 25_000_000 } else { 100_000_000 })),
+            max_reduce_notional: Some(Notional(if perp_spot { 25_000_000 } else { 100_000_000 })),
             daily_loss_kill: Rate(100_000_000),
             daily_loss_abs: Notional(100_000_000),
             recon_closeonly_notional: Notional(5_000_000),
@@ -487,13 +487,13 @@ fn write_mode(
         engine.role_prod = true;
         engine.gws.venues = vec![v];
         engine.keys_required = vec![(a, v, 3)];
-        if dual {
+        if perp_spot {
             engine.gws.venues.push(other);
             engine.keys_required.push((a, other, 3));
         }
     }
     engine.exec.default.force_slice.max_chunk_notional =
-        Notional(if dual { 25_000_000 } else { 100_000_000 });
+        Notional(if perp_spot { 25_000_000 } else { 100_000_000 });
     let ecf = engine.encode_blob(1, HostClass::Dev2, 0);
     let principals = user.map_or_else(String::new, |u| {
         format!("[uids]\n{u:?} = \"cli\"\n[issuers]\n\"cli:{u}\" = [\"Admin\"]\n")
@@ -595,7 +595,7 @@ qty_raw = 200000000
             .unwrap()
             .insert("order_env".into(), "testnet".into());
         let venue = config["venues"]["public"].as_table_mut().unwrap();
-        if dual {
+        if perp_spot {
             venue.insert("protocol".into(), "binance-usdm".into());
         }
         venue.insert("src_ip".into(), "127.0.0.1".into());
@@ -613,7 +613,7 @@ qty_raw = 200000000
             threads
                 .push(toml::from_str(&format!("name='{name}'\ntask='{task}'\npark_us=100\nnice=0")).unwrap());
         }
-        if dual {
+        if perp_spot {
             let credentials = config["venues"]["public"]["accounts"].clone();
             let io = config["venues"]["public"]["account_io"].clone();
             let venue = config["venues"]["second"].as_table_mut().unwrap();
