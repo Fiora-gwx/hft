@@ -165,3 +165,61 @@ fn sdk_109_owned_schema_rejects() {
         assert!(OwnedSchema::from_json(&text).is_err(), "SDK-109.{row}");
     }
 }
+
+#[test]
+fn sdk_107_production_minimum_roundtrip_and_digest() {
+    let d = variant(|_, f| {
+        f[0].min = -100_000_000;
+        f[0].prod_min = Some(0);
+    });
+    let json = schema_json(d, &ModelLayoutDesc::EMPTY, 2);
+    let owned = OwnedSchema::from_json(&json).unwrap();
+    assert_eq!(owned.field(0).unwrap().prod_min, Some(0));
+    assert_eq!(owned.schema_digest(2), schema_digest(d, 2));
+    let without = variant(|_, f| {
+        f[0].min = -100_000_000;
+    });
+    assert_ne!(schema_digest(d, 2), schema_digest(without, 2));
+    let mut values: Vec<_> = d.schema.fields.iter().map(|f| f.default).collect();
+    values[0] = -1;
+    assert!(check_production_values(&owned, &values, false, GROUP_IX_NONE).is_ok());
+    assert_eq!(
+        check_production_values(&owned, &values, true, 2),
+        Err(ParamError::OutOfRange {
+            field_ix: 0,
+            group_ix: 2
+        })
+    );
+    values[0] = 0;
+    assert!(check_production_values(&owned, &values, true, 2).is_ok());
+    assert!(OwnedSchema::from_json(&json.replace("\"prod_min\":0", "\"prod_min\":false")).is_err());
+}
+
+#[test]
+fn sdk_105_bound_only_schema_revision_preserves_field_prefix() {
+    hft_strategy_sdk::define_params! {
+        pub struct BoundsOnly(schema_id = 65400, version = 3, fields = BoundsFields) {
+            threshold: Rate [min = -100_000_000, max = 100_000_000, prod_min = 0, default = 0, per_group],
+        }
+    }
+    let groups = hft_strategy_sdk::GroupTable::new(&[], 0);
+    let body = encode_body(
+        &BoundsOnly::SCHEMA,
+        0,
+        &RawParams {
+            defaults: vec![-3_000_000],
+            overrides: vec![],
+        },
+    )
+    .unwrap();
+    for version in [1, 2, 3] {
+        assert_eq!(
+            BoundsOnly::decode(&body, version, &groups)
+                .unwrap()
+                .defaults()
+                .threshold
+                .0,
+            -3_000_000
+        );
+    }
+}

@@ -23,6 +23,7 @@ pub struct OwnedField {
     pub per_group: bool,
     pub structural: bool,
     pub manual_only: bool,
+    pub prod_min: Option<i64>,
     pub relax: Relax,
     pub minor_change: MinorChange,
     pub since: u16,
@@ -42,6 +43,7 @@ impl OwnedField {
             per_group: self.per_group,
             structural: self.structural,
             manual_only: self.manual_only,
+            prod_min: self.prod_min,
             relax: self.relax,
             minor_change: self.minor_change,
             since: self.since,
@@ -156,6 +158,7 @@ fn field(v: &Json, ix: usize) -> Result<OwnedField, ParamError> {
         per_group: boolean(v, "per_group")?,
         structural: boolean(v, "structural")?,
         manual_only: boolean(v, "manual_only")?,
+        prod_min: v.get("prod_min").map(|_| int(v, "prod_min")).transpose()?,
         relax: v.get("relax").and_then(Json::as_str).and_then(relax).ok_or(BAD)?,
         minor_change: v
             .get("minor_change")
@@ -166,6 +169,7 @@ fn field(v: &Json, ix: usize) -> Result<OwnedField, ParamError> {
         doc: text(v, "doc")?,
     };
     let range_ok = f.min <= f.default && f.default <= f.max;
+    let prod_ok = f.prod_min.is_none_or(|m| f.min <= m && m <= f.max);
     let enum_ok = f.unit != UnitKind::Enum
         || usize::try_from(f.default).is_ok_and(|d| d < f.enum_names.len()) && !f.enum_names.is_empty();
     let asset_ok = !matches!(f.unit, UnitKind::Qty | UnitKind::Px) || f.per_group;
@@ -176,7 +180,7 @@ fn field(v: &Json, ix: usize) -> Result<OwnedField, ParamError> {
     } && (!matches!(f.unit, UnitKind::Bool | UnitKind::Enum)
         || matches!(f.minor_change, MinorChange::None | MinorChange::Any))
         && (!f.structural || f.minor_change == MinorChange::None);
-    if f.name.is_empty() || !range_ok || !enum_ok || !asset_ok || !minor_ok {
+    if f.name.is_empty() || !range_ok || !prod_ok || !enum_ok || !asset_ok || !minor_ok {
         return Err(BAD);
     }
     Ok(f)
@@ -194,7 +198,7 @@ impl OwnedSchema {
     /// or mistyped key, an unknown unit/relax/minor_change text, `ix` out of sequence, duplicate
     /// names, `min ≤ default ≤ max` violated, an illegal enum default, `Qty`/`Px` without
     /// `per_group`, an illegal `minor_change` for the field, `since` decreasing, 0, or above
-    /// `schema_version` (or its maximum not equal to it), more than 256 fields; command fields
+    /// `schema_version`, more than 256 fields; command fields
     /// additionally `per_group`/`structural` true, `minor_change ≠ none` or more than 31.
     /// `notes`, `report`, `sections` and `display` are not read.
     pub fn from_json(s: &str) -> Result<OwnedSchema, ParamError> {
@@ -213,7 +217,7 @@ impl OwnedSchema {
             && fields
                 .windows(2)
                 .all(|w| w.first().map(|a| a.since) <= w.get(1).map(|b| b.since))
-            && fields.last().is_none_or(|f| f.since == version);
+            && version > 0;
         if !since_ok || !unique_names(&fields) {
             return Err(BAD);
         }
@@ -228,10 +232,9 @@ impl OwnedSchema {
                 .enumerate()
                 .map(|(i, f)| field(f, i))
                 .collect::<Result<Vec<_>, _>>()?;
-            if cf
-                .iter()
-                .any(|f| f.per_group || f.structural || f.minor_change != MinorChange::None)
-                || !unique_names(&cf)
+            if cf.iter().any(|f| {
+                f.per_group || f.structural || f.prod_min.is_some() || f.minor_change != MinorChange::None
+            }) || !unique_names(&cf)
             {
                 return Err(BAD);
             }

@@ -129,6 +129,7 @@ macro_rules! __param_base {
             per_group: false,
             structural: false,
             manual_only: false,
+            prod_min: None,
             relax: $crate::params::Relax::None,
             minor_change: $crate::params::MinorChange::None,
             since: 1,
@@ -152,6 +153,7 @@ macro_rules! __param_base {
             per_group: false,
             structural: false,
             manual_only: false,
+            prod_min: None,
             relax: $crate::params::Relax::None,
             minor_change: $crate::params::MinorChange::None,
             since: 1,
@@ -182,6 +184,10 @@ macro_rules! __param_attrs {
     };
     ($fd:ident; since = $v:expr $(, $($r:tt)*)?) => {
         $fd.since = $v;
+        $crate::__param_attrs!($fd; $($($r)*)?);
+    };
+    ($fd:ident; prod_min = $v:expr $(, $($r:tt)*)?) => {
+        $fd.prod_min = Some($v);
         $crate::__param_attrs!($fd; $($($r)*)?);
     };
     ($fd:ident; per_group $(, $($r:tt)*)?) => {
@@ -349,6 +355,15 @@ macro_rules! define_params {
             ) -> ::core::result::Result<(), $crate::ParamError> {
                 #[allow(unused_imports)]
                 use $crate::params::ParamCheck as _;
+                $crate::params::check_production_values(
+                    &Self::SCHEMA, &self.defaults().raw(), rd.account().is_prod,
+                    $crate::params::GROUP_IX_NONE,
+                )?;
+                for (gix, _) in groups.iter() {
+                    $crate::params::check_production_values(
+                        &Self::SCHEMA, &self.at(gix).raw(), rd.account().is_prod, gix,
+                    )?;
+                }
                 self.check(groups, rd)
             }
             fn structural_changed(&self, old: &Self, old_gix: u16, gix: u16) -> bool {

@@ -19,6 +19,7 @@ const fn field(name: &'static str, unit: Unit, min: i64, max: i64, default: i64)
         per_group: false,
         structural: false,
         manual_only: false,
+        prod_min: None,
         relax: Relax::None,
         minor_change: MinorChange::None,
         since: 1,

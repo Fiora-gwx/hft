@@ -1584,7 +1584,7 @@ spec: README.md
 | SDK-105.7 | `Px` 字段不带 `per_group` | 编译失败 |
 | SDK-105.8 | `Enum(["a", "b"])` 的 `default = 2` | 编译失败 |
 | SDK-105.9 | 字段 `since` 依次为 1、2、1 | 编译失败 |
-| SDK-105.10 | `version = 3` 而最大 `since = 2` | 编译失败 |
+| SDK-105.10 | `version = 1` 而最大 `since = 2` | 编译失败 |
 | SDK-105.11 | 257 个字段 | 编译失败 |
 | SDK-105.12 | 256 个字段 | 编译通过 |
 | SDK-105.13 | `structural` 字段带 `minor = Abs(1)` | 编译失败 |
@@ -3158,3 +3158,5 @@ spec: README.md
 - 编译期用例(`trybuild`:SDK-057、SDK-105、SDK-114、SDK-174、SDK-187)在 PR 中运行。
 - 基准:SDK-196–SDK-205 的数值上限只在 [benchmarks](../../benchmarks/README.md) 登记;CI 只报告,参考机上由 `cargo xtask bench-gate --reference` 判定。
 - 上线门槛 ⑧(解耦,[testing §8](../../docs/testing.md#8-上线门槛)):SDK-004–SDK-009 全部通过;M2 末在干净的 `main` 上再跑一次 SDK-004,`crates/`、`apps/`、`tools/hft-cfg`、`python/` 的 diff 为零。
+
+SDK-107 的 sdk_107_production_minimum_roundtrip_and_digest 覆盖可选 prod_min 的 JSON 往返、类型拒绝、摘要与生产/非生产原始值校验。仅边界变化的 schema 可以升版本而不追加字段,既有字段的 since 保持。

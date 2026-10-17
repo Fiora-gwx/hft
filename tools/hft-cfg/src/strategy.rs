@@ -507,6 +507,39 @@ pub fn build(t: &Table, schemas: &Path, rd: &RefData, against: Option<&Against<'
         })
         .collect();
     let n_groups = u16::try_from(specs.len()).or_else(|_| rej("too many groups"))?;
+    if rd.account(account).is_prod {
+        hft_strategy_sdk::params::check_production_values(
+            &view,
+            &defaults,
+            true,
+            hft_strategy_sdk::params::GROUP_IX_NONE,
+        )
+        .or_else(|e| {
+            rej(format!(
+                "production account `{acct_name}`: {}",
+                param_err(e, &view, &specs)
+            ))
+        })?;
+        for o in &overrides {
+            if view
+                .field(o.field_ix)
+                .and_then(|f| f.prod_min)
+                .is_some_and(|min| o.value < min)
+            {
+                return rej(format!(
+                    "production account `{acct_name}`: {}",
+                    param_err(
+                        ParamError::OutOfRange {
+                            field_ix: o.field_ix,
+                            group_ix: o.group_ix
+                        },
+                        &view,
+                        &specs,
+                    )
+                ));
+            }
+        }
+    }
     let body = encode_body(&view, n_groups, &RawParams { defaults, overrides })
         .or_else(|e| rej(param_err(e, &view, &specs)))?;
     let hdr = StrategyParamsHdr {
