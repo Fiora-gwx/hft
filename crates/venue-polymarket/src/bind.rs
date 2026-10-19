@@ -62,7 +62,9 @@ pub struct FeedCtx {
 
 impl core::fmt::Debug for FeedCtx {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("FeedCtx").field("capacity", &self.entries.len()).finish()
+        f.debug_struct("FeedCtx")
+            .field("capacity", &self.entries.len())
+            .finish()
     }
 }
 

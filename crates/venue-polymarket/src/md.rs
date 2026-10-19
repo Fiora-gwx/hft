@@ -329,9 +329,7 @@ pub(crate) fn peek(_rd: &RefData, ctx: &FeedCtx, c: MdClass, p: &[u8]) -> Result
         "book" => (StreamKind::DepthTopN, m.asset_id),
         "price_change" => (
             StreamKind::DepthTopN,
-            m.price_changes
-                .and_then(|f| f.0)
-                .map_or("", |a| a.asset_id),
+            m.price_changes.and_then(|f| f.0).map_or("", |a| a.asset_id),
         ),
         "last_trade_price" => (StreamKind::Trade, m.asset_id),
         // tick_size_change, best_bid_ask, new_market, market_resolved: not decoded.
@@ -409,7 +407,10 @@ fn levels(raw: &[u8], pe: i8, qe: i8, out: &mut [Level]) -> Result<usize, Decode
 
 /// Objects of a raw JSON array; not an array → `Shape`.
 fn array(raw: &[u8]) -> Result<Elements<'_>, DecodeErr> {
-    let t = raw.iter().position(|b| !b.is_ascii_whitespace()).unwrap_or(raw.len());
+    let t = raw
+        .iter()
+        .position(|b| !b.is_ascii_whitespace())
+        .unwrap_or(raw.len());
     if raw.get(t) != Some(&b'[') {
         return Err(DecodeErr::Shape);
     }
@@ -504,7 +505,12 @@ fn price_change(
     rx: &RxMeta,
     out: &mut impl MdSink,
 ) -> Result<(u16, InstId), DecodeErr> {
-    let raw = m.price_changes.as_ref().ok_or(DecodeErr::Shape)?.as_raw_str().as_bytes();
+    let raw = m
+        .price_changes
+        .as_ref()
+        .ok_or(DecodeErr::Shape)?
+        .as_raw_str()
+        .as_bytes();
     // Distinct bound tokens in order of appearance; every entry is validated before any event.
     let mut assets: [(&str, usize, InstId, u16, u16); ASSETS_MAX] = [("", 0, InstId(0), 0, 0); ASSETS_MAX];
     let mut na = 0usize;

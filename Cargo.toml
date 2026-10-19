@@ -38,6 +38,7 @@ members = [
     "tools/hostprobe",
     "tools/hft-secrets",
     "tools/latency-slice",
+    "tools/pm-md-probe",
 ]
 
 [workspace.package]

@@ -1,5 +1,5 @@
 # M1.5 latency probe binaries (tools/latency-slice/README.md, design/11 §3.1).
-# latency-slice and hostprobe are not part of any production release archive; this manual workflow
+# latency-slice, hostprobe and pm-md-probe are not part of any production release archive; this manual workflow
 # builds them for the rented probe host (aarch64, release profile, target-cpu neoverse-v1) from a
 # commit whose ci.yml is green, and keeps them as a short-lived workflow artifact. Never runs on
 # servers; the probe host only runs the downloaded binaries.
@@ -42,14 +42,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: probe-arm64
-      - name: Build latency-slice and hostprobe
+      - name: Build latency-slice, hostprobe and pm-md-probe
         shell: bash
         run: |
           set -euo pipefail
           export PATH="$HOME/.cargo/bin:$PATH"
-          cargo build --locked --release -p latency-slice -p hostprobe
+          cargo build --locked --release -p latency-slice -p hostprobe -p pm-md-probe
           mkdir -p out/bin
-          cp target/release/latency-slice target/release/hostprobe out/bin/
+          cp target/release/latency-slice target/release/hostprobe target/release/pm-md-probe out/bin/
+          cp -r tools/pm-md-probe/scripts out/
           git rev-parse HEAD > out/SHA
           (cd out && sha256sum bin/* > SHA256SUMS && tar --zstd -cf ../probe-aarch64.tar.zst .)
           sha256sum probe-aarch64.tar.zst

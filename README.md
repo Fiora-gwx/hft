@@ -37,6 +37,7 @@
 | [crates/hft-venue-proto](crates/hft-venue-proto/README.md) | pure | core | `VenueProtocol` trait 与纯协议类型 |
 | [crates/hft-venue](crates/hft-venue/README.md) | hot | core | feed(BBO 与其他行情分任务)/gw 运行时、行情 REST 获取(`snap-fetch`)、账户查询(`acct-fetch`)、重同步、会话驱动 |
 | [crates/venue-binance](crates/venue-binance/README.md) · [venue-okx](crates/venue-okx/README.md) · [venue-bitget](crates/venue-bitget/README.md) | pure | core | 首批三所的纯协议:现货 + USDT 永续(Binance 现货 SBE 为可选) |
+| [crates/venue-polymarket](crates/venue-polymarket/README.md) | pure | optional | Polymarket CLOB 二元结果代币的纯协议:行情(整簿、增量、成交)与运行期代币绑定;下单待实现 |
 | [crates/venue-gate](crates/venue-gate/README.md) · [bybit](crates/venue-bybit/README.md) · [kucoin](crates/venue-kucoin/README.md) | pure | optional | 其余 CEX(冻结) |
 | [crates/venue-hyperliquid](crates/venue-hyperliquid/README.md) | pure | optional | 链上永续场所(冻结) |
 | [crates/hft-oms](crates/hft-oms/README.md) | hot | core | 订单槽、状态机、LegLink、LegTracker |
@@ -64,4 +65,5 @@
 | [contracts/](contracts/README.md) | — | optional | SwapGuard 合约(链上策略迁移时启用;冻结) |
 | [deploy/](deploy/README.md) · [benchmarks/](benchmarks/README.md) · [fixtures/](fixtures/README.md) · [tools/](tools/README.md) | — | core | 部署、资源护栏与调优;基准;金样;工具(含 `hft-cfg`、`hft-verify`) |
 | [tools/latency-slice](tools/latency-slice/README.md) | cold | core | M1.5 延迟探针的纵切片程序(主网 BBO + 简化 sequencer + 测试网下单,出分段直方图);只用于探针,不进生产 |
+| [tools/pm-md-probe](tools/pm-md-probe/README.md) | cold | optional | Polymarket 行情接入验收探针(生产行情路径 + 重建簿,与独立录制比对);只用于验收,不进生产 |
 | [tools/strat-calib](tools/strat-calib/README.md) | cold | optional | 记录行情的离线参数筛选、费用与容量情景分析;不替代模拟账户或上线门槛 |

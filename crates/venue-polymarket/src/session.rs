@@ -2,8 +2,8 @@
 
 use hft_refdata::RefData;
 use hft_venue_proto::{
-    EndpointSpec, HeartbeatSpec, PingKind, ProtoErr, Role, RouteId, RouteKind, RouteSpec, StreamKind, SubFrames,
-    SubSpec,
+    EndpointSpec, HeartbeatSpec, PingKind, ProtoErr, Role, RouteId, RouteKind, RouteSpec, StreamKind,
+    SubFrames, SubSpec,
 };
 
 use crate::FeedCtx;
@@ -71,7 +71,10 @@ pub(crate) fn subscribe(
     out: &mut SubFrames,
 ) -> Result<(), ProtoErr> {
     for s in subs {
-        if !matches!(s.stream, StreamKind::DepthTopN | StreamKind::DepthIncr | StreamKind::Trade) {
+        if !matches!(
+            s.stream,
+            StreamKind::DepthTopN | StreamKind::DepthIncr | StreamKind::Trade
+        ) {
             return Err(ProtoErr::Unsupported);
         }
         if ctx.token_of(s.inst).is_none() {

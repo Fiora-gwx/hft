@@ -29,11 +29,11 @@ use hft_refdata::{RefData, VenueCaps};
 use hft_types::{AccountId, AssetId, ClientOrderId, InstId, MarketKind, VenueId};
 use hft_venue_proto::account::{AccountProtocol, Query, State};
 use hft_venue_proto::{
-    Align, BootCall, ControlHint, Credential, DeadManSpec, DecodeErr, EncodeErr, EndpointSpec, FundingHistoryProtocol,
-    FundingPage, FundingQuery, HeartbeatSpec, LoginResult, LoginStep, MdOutcome, MdSink, MsgOp, Peek, PingKind,
-    ProtoErr, RateRule, RawSeq, ReportOutcome, ReportSink, RestReqBuf, ResyncMethod, Role, RouteId, RouteSpec,
-    RxMeta, SeqRule, SnapshotInfo, StaleGuard, StreamKind, SubFrames, SubSpec, TargetRef, VenueCfg,
-    VenueProtocol, WallClock,
+    Align, BootCall, ControlHint, Credential, DeadManSpec, DecodeErr, EncodeErr, EndpointSpec,
+    FundingHistoryProtocol, FundingPage, FundingQuery, HeartbeatSpec, LoginResult, LoginStep, MdOutcome,
+    MdSink, MsgOp, Peek, PingKind, ProtoErr, RateRule, RawSeq, ReportOutcome, ReportSink, RestReqBuf,
+    ResyncMethod, Role, RouteId, RouteSpec, RxMeta, SeqRule, SnapshotInfo, StaleGuard, StreamKind, SubFrames,
+    SubSpec, TargetRef, VenueCfg, VenueProtocol, WallClock,
 };
 
 /// Polymarket CLOB (`polymarket-clob`).

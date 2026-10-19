@@ -1,8 +1,9 @@
 //! The feed task's `MdSink` (README §2 step 5.4, §1 "环满"): collects the events of one frame and
 //! publishes them only when the frame decoded completely — a frame over `FRAME_EVENTS_MAX` events
 //! publishes nothing. `L2Snapshot` parts are cut to `feed.snapshot_part_levels` levels and written as
-//! variable bodies (`L2SnapHdr` + levels) for the bulk ring; incremental depth (`L2Batch`) is the
-//! optional extension and is not produced in this build.
+//! variable bodies (`L2SnapHdr` + levels) for the bulk ring; an incremental `L2Batch` is written as
+//! one variable body (`L2BatchHdr` + `[Level; n_bids + n_asks]`, bids first). A batch whose level
+//! calls do not match its header counts, or whose sides are out of order, drops the frame.
 
 use hft_event::{
     Bbo, EventKind, FeedMsg, Funding, IndexPrice, L2BatchHdr, L2SnapHdr, L2SnapshotPart, Level, Liquidation,
@@ -30,8 +31,10 @@ pub(crate) struct FeedSink {
     /// Events allowed for this frame (Bbo route 1, others `FRAME_EVENTS_MAX`).
     pub limit: usize,
     pub part_levels: usize,
-    /// Incremental-depth calls (not supported in this build).
+    /// Incremental-depth batches written.
     pub l2_batches: u64,
+    /// Open batch: bulk offset of its header, levels still expected per side.
+    batch: Option<(usize, u16, u16)>,
 }
 
 impl FeedSink {
@@ -54,6 +57,7 @@ impl FeedSink {
             limit: FRAME_EVENTS_MAX,
             part_levels: usize::from(part_levels.max(1)),
             l2_batches: 0,
+            batch: None,
         }
     }
 
@@ -63,6 +67,22 @@ impl FeedSink {
         self.over = false;
         self.bulk_used = 0;
         self.limit = limit.min(FRAME_EVENTS_MAX);
+        self.batch = None;
+    }
+
+    fn put_bytes(&mut self, b: &[u8]) -> bool {
+        let end = self.bulk_used + b.len();
+        match self.bulk.get_mut(self.bulk_used..end) {
+            Some(d) => {
+                d.copy_from_slice(b);
+                self.bulk_used = end;
+                true
+            }
+            None => {
+                self.over = true;
+                false
+            }
+        }
     }
 
     fn push(&mut self, m: FeedMsg) {
@@ -109,11 +129,47 @@ impl MdSink for FeedSink {
     fn bbo(&mut self, e: &Bbo) {
         self.push(FeedMsg::Bbo(*e, self.rx_flags));
     }
-    fn l2_begin(&mut self, _h: &L2BatchHdr) {
-        self.l2_batches += 1;
+    fn l2_begin(&mut self, h: &L2BatchHdr) {
+        if self.batch.is_some() {
+            self.over = true;
+            return;
+        }
+        let at = self.bulk_used;
+        if self.put_bytes(h.as_bytes()) {
+            self.batch = Some((at, h.n_bids, h.n_asks));
+        }
     }
-    fn l2_level(&mut self, _side: Side, _px: Px, _qty: Qty) {}
-    fn l2_end(&mut self) {}
+    fn l2_level(&mut self, side: Side, px: Px, qty: Qty) {
+        let Some((at, nb, na)) = self.batch else {
+            self.over = true;
+            return;
+        };
+        // Bids first: a bid after the first ask, or more levels than announced, is malformed.
+        let next = match side {
+            Side::Buy if nb > 0 => (at, nb - 1, na),
+            Side::Sell if nb == 0 && na > 0 => (at, nb, na - 1),
+            _ => {
+                self.over = true;
+                return;
+            }
+        };
+        if self.put_bytes(Level { px, qty }.as_bytes()) {
+            self.batch = Some(next);
+        }
+    }
+    fn l2_end(&mut self) {
+        match self.batch.take() {
+            Some((at, 0, 0)) => {
+                self.l2_batches += 1;
+                self.push(FeedMsg::Bulk {
+                    flags: self.rx_flags,
+                    kind: EventKind::L2_BATCH,
+                    len: (self.bulk_used - at) as u32,
+                });
+            }
+            _ => self.over = true,
+        }
+    }
     fn l2_snapshot(&mut self, part: &L2SnapshotPart<'_>) {
         let k = self.part_levels;
         if part.bids.len() + part.asks.len() <= k {

@@ -1,6 +1,8 @@
 //! Protocol defaults: `VenueCaps` (README "VenueCaps 默认值"), rate rules, expiry and dead man.
 
-use hft_refdata::{CapFlags, DeadManCap, FeeAssetRule, LimitBucket, LimitScope, LiqMarker, TestnetKind, VenueCaps};
+use hft_refdata::{
+    CapFlags, DeadManCap, FeeAssetRule, LimitBucket, LimitScope, LiqMarker, TestnetKind, VenueCaps,
+};
 use hft_types::{AssetId, MarketKind, VenueId};
 use hft_venue_proto::{DeadManSpec, RateRule, StaleGuard};
 

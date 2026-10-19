@@ -70,6 +70,12 @@ pub trait VenueProtocol: Sized + 'static {
     /// 订阅(unsub = false)或退订帧,分批;每帧记它覆盖 subs 的前几项。feed 线程在 install 后调用:写进预分配的 out,不分配;
     /// 流名所需的交易所符号从 rd 取(SubSpec 只带 InstId)。
     fn subscribe(rd: &RefData, subs: &[SubSpec], unsub: bool, cfg: &VenueCfg, out: &mut SubFrames) -> Result<(), ProtoErr>;
+    /// 带 feed 状态的订阅帧:交易所线上 id 在运行期绑定(不是 refdata 符号)的 venue 从 ctx 取;默认 = subscribe。
+    /// 运行时只调用本方法。
+    fn subscribe_ctx(rd: &RefData, ctx: &Self::FeedCtx, subs: &[SubSpec], unsub: bool, cfg: &VenueCfg, out: &mut SubFrames)
+        -> Result<(), ProtoErr> { Self::subscribe(rd, subs, unsub, cfg, out) }
+    /// false:交易所从不回复订阅帧,运行时把发出的帧当作已确认(默认 true)。
+    const SUB_ACKS: bool = true;
     /// 私有频道订阅帧(用户流、订单、持仓、账户、保证金推送);只在被选为私有频道归属的连接上发(见 hft-venue §4b)。
     fn private_subscribe(cfg: &VenueCfg, acct: AccountId, unsub: bool, out: &mut SubFrames) -> Result<(), ProtoErr>;
     fn heartbeat(role: Role) -> HeartbeatSpec;

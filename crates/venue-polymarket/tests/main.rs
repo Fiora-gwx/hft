@@ -11,8 +11,8 @@ use hft_refdata::{
 use hft_types::{AccountId, AssetExp, AssetId, ConnId, InstId, Notional, Px, Qty, Rate, Side, VenueId};
 use hft_venue_proto::testkit::{MdRec, VecSink};
 use hft_venue_proto::{
-    DecodeErr, MsgOp, ProtoErr, RouteId, RxMeta, SeqRule, StreamKind, SubFrames, SubSpec, VenueCfg,
-    VenueEnv, VenueProtocol,
+    DecodeErr, MsgOp, ProtoErr, RouteId, RxMeta, SeqRule, StreamKind, SubFrames, SubSpec, VenueCfg, VenueEnv,
+    VenueProtocol,
 };
 use venue_polymarket::{BindErr, FeedCtx, MdClass, PolymarketClob as Pm};
 
@@ -156,7 +156,11 @@ fn hdr(inst: InstId, ex_ms: i64) -> MarketHdr {
 
 fn dec(ctx: &mut FeedCtx, p: &str) -> (Result<hft_venue_proto::MdOutcome, DecodeErr>, Vec<MdRec>) {
     let mut s = VecSink::default();
-    let c = Pm::classify(MARKET, MsgOp::Text, p.as_bytes().get(..64).unwrap_or(p.as_bytes()));
+    let c = Pm::classify(
+        MARKET,
+        MsgOp::Text,
+        p.as_bytes().get(..64).unwrap_or(p.as_bytes()),
+    );
     let r = Pm::decode_md(rd(), ctx, c, p.as_bytes(), &RX, &mut s);
     (r, s.md)
 }
@@ -195,19 +199,31 @@ fn last_trade() -> String {
 }
 
 #[test]
-fn pm_001_classify_push_pong_unknown() {
-    assert_eq!(Pm::classify(MARKET, MsgOp::Text, b"{\"market\":\"0x"), MdClass::Push);
-    assert_eq!(Pm::classify(MARKET, MsgOp::Text, b"[{\"market\":\"0x"), MdClass::Push);
+fn pmk_001_classify_push_pong_unknown() {
+    assert_eq!(
+        Pm::classify(MARKET, MsgOp::Text, b"{\"market\":\"0x"),
+        MdClass::Push
+    );
+    assert_eq!(
+        Pm::classify(MARKET, MsgOp::Text, b"[{\"market\":\"0x"),
+        MdClass::Push
+    );
     assert_eq!(Pm::classify(MARKET, MsgOp::Text, b"PONG"), MdClass::Pong);
     assert_eq!(Pm::classify(MARKET, MsgOp::Binary, b"{}"), MdClass::Unknown);
-    assert_eq!(Pm::classify(MARKET, MsgOp::Text, b"INVALID OPERATION"), MdClass::Unknown);
-    assert_eq!(Pm::control(MdClass::Pong, b"PONG"), Some(hft_venue_proto::ControlHint::Pong));
+    assert_eq!(
+        Pm::classify(MARKET, MsgOp::Text, b"INVALID OPERATION"),
+        MdClass::Unknown
+    );
+    assert_eq!(
+        Pm::control(MdClass::Pong, b"PONG"),
+        Some(hft_venue_proto::ControlHint::Pong)
+    );
     assert_eq!(Pm::control(MdClass::Push, b"{}"), None);
     assert_eq!(Pm::seq_rule(MdClass::Push), SeqRule::None);
 }
 
 #[test]
-fn pm_002_peek_stream_and_bound_inst() {
+fn pmk_002_peek_stream_and_bound_inst() {
     let ctx = bound();
     let p = |s: &str| Pm::peek(rd(), &ctx, MdClass::Push, s.as_bytes());
     let b = p(&book_up()).ok();
@@ -225,7 +241,7 @@ fn pm_002_peek_stream_and_bound_inst() {
 }
 
 #[test]
-fn pm_003_book_is_a_snapshot_without_zero_levels() {
+fn pmk_003_book_is_a_snapshot_without_zero_levels() {
     let mut ctx = bound();
     let (r, ev) = dec(&mut ctx, &book_up());
     assert_eq!(r.map(|o| (o.events, o.inst)), Ok((1, UP)));
@@ -250,7 +266,7 @@ fn pm_003_book_is_a_snapshot_without_zero_levels() {
 }
 
 #[test]
-fn pm_004_price_change_one_chained_batch_per_token() {
+fn pmk_004_price_change_one_chained_batch_per_token() {
     let mut ctx = bound();
     let _ = dec(&mut ctx, &book_up());
     let (r, ev) = dec(&mut ctx, &price_change());
@@ -281,7 +297,7 @@ fn pm_004_price_change_one_chained_batch_per_token() {
 }
 
 #[test]
-fn pm_005_last_trade_price_is_a_trade_with_a_synthetic_id() {
+fn pmk_005_last_trade_price_is_a_trade_with_a_synthetic_id() {
     let mut ctx = bound();
     let (r, ev) = dec(&mut ctx, &last_trade());
     assert_eq!(r.map(|o| o.events), Ok(1));
@@ -301,7 +317,7 @@ fn pm_005_last_trade_price_is_a_trade_with_a_synthetic_id() {
 }
 
 #[test]
-fn pm_006_list_frame_of_two_books() {
+fn pmk_006_list_frame_of_two_books() {
     let mut ctx = bound();
     let dn = book_up().replace(T_UP, T_DN);
     let frame = format!("[{},{}]", book_up(), dn);
@@ -318,7 +334,7 @@ fn pm_006_list_frame_of_two_books() {
 }
 
 #[test]
-fn pm_007_bad_number_writes_nothing() {
+fn pmk_007_bad_number_writes_nothing() {
     let mut ctx = bound();
     let bad = price_change().replace("\"0.58\"", "\"0.5x\"");
     let (r, ev) = dec(&mut ctx, &bad);
@@ -335,7 +351,7 @@ fn pm_007_bad_number_writes_nothing() {
 }
 
 #[test]
-fn pm_008_subscribe_frames_from_bindings() {
+fn pmk_008_subscribe_frames_from_bindings() {
     let ctx = bound();
     let cfg = VenueCfg {
         env: VenueEnv::Prod,
@@ -353,17 +369,30 @@ fn pm_008_subscribe_frames_from_bindings() {
         spec(DN, StreamKind::DepthTopN),
     ];
     let mut out = SubFrames::with_capacity(1 << 16, 8);
-    assert_eq!(Pm::subscribe_ctx(rd(), &ctx, &subs, false, &cfg, &mut out), Ok(()));
-    let want = format!("{{\"type\":\"market\",\"operation\":\"subscribe\",\"assets_ids\":[\"{T_UP}\",\"{T_DN}\"]}}");
-    assert_eq!(out.get(0).map(|(t, n)| (t.to_vec(), n)), Some((want.into_bytes(), 3)));
+    assert_eq!(
+        Pm::subscribe_ctx(rd(), &ctx, &subs, false, &cfg, &mut out),
+        Ok(())
+    );
+    let want =
+        format!("{{\"type\":\"market\",\"operation\":\"subscribe\",\"assets_ids\":[\"{T_UP}\",\"{T_DN}\"]}}");
+    assert_eq!(
+        out.get(0).map(|(t, n)| (t.to_vec(), n)),
+        Some((want.into_bytes(), 3))
+    );
     out.clear();
-    assert_eq!(Pm::subscribe_ctx(rd(), &ctx, &subs[2..], true, &cfg, &mut out), Ok(()));
+    assert_eq!(
+        Pm::subscribe_ctx(rd(), &ctx, &subs[2..], true, &cfg, &mut out),
+        Ok(())
+    );
     let want = format!("{{\"type\":\"market\",\"operation\":\"unsubscribe\",\"assets_ids\":[\"{T_DN}\"]}}");
     assert_eq!(out.get(0).map(|(t, _)| t.to_vec()), Some(want.into_bytes()));
     // Unbound inst or an unsupported stream refuses the call.
     out.clear();
     let unbound = FeedCtx::with_capacity(4);
-    assert_eq!(Pm::subscribe_ctx(rd(), &unbound, &subs, false, &cfg, &mut out), Err(ProtoErr::Cfg));
+    assert_eq!(
+        Pm::subscribe_ctx(rd(), &unbound, &subs, false, &cfg, &mut out),
+        Err(ProtoErr::Cfg)
+    );
     assert_eq!(
         Pm::subscribe_ctx(rd(), &ctx, &[spec(UP, StreamKind::Bbo)], false, &cfg, &mut out),
         Err(ProtoErr::Unsupported)
@@ -372,7 +401,7 @@ fn pm_008_subscribe_frames_from_bindings() {
 }
 
 #[test]
-fn pm_009_binding_table_rules() {
+fn pmk_009_binding_table_rules() {
     let mut c = FeedCtx::with_capacity(2);
     assert_eq!(c.bind(UP, b""), Err(BindErr::Token));
     assert_eq!(c.bind(UP, b"12a"), Err(BindErr::Token));
@@ -393,7 +422,7 @@ fn pm_009_binding_table_rules() {
 }
 
 #[test]
-fn pm_010_rebinding_keeps_the_chain_monotonic() {
+fn pmk_010_rebinding_keeps_the_chain_monotonic() {
     let mut ctx = bound();
     let _ = dec(&mut ctx, &book_up());
     let _ = dec(&mut ctx, &price_change());
@@ -405,7 +434,10 @@ fn pm_010_rebinding_keeps_the_chain_monotonic() {
 }
 
 /// Applies decoded events to per-inst price → size maps (bids, asks).
-type Book = (std::collections::BTreeMap<i64, i64>, std::collections::BTreeMap<i64, i64>);
+type Book = (
+    std::collections::BTreeMap<i64, i64>,
+    std::collections::BTreeMap<i64, i64>,
+);
 
 fn apply(books: &mut std::collections::HashMap<InstId, Book>, ev: &[MdRec], cur: &mut Option<(InstId, u64)>) {
     for e in ev {
@@ -433,7 +465,7 @@ fn apply(books: &mut std::collections::HashMap<InstId, Book>, ev: &[MdRec], cur:
 }
 
 #[test]
-fn pm_011_recorded_window_matches_exchange_best_prices() {
+fn pmk_011_recorded_window_matches_exchange_best_prices() {
     // 400 consecutive frames of btc-updown-5m (pmrec 2026-10-19, company eu-west-1 box).
     let text = include_str!("../../../fixtures/polymarket/market-btc-400.jsonl");
     let mut ctx = bound();
@@ -451,7 +483,11 @@ fn pm_011_recorded_window_matches_exchange_best_prices() {
                     last_id.insert(hdr.h.inst, hdr.snap_id);
                 }
                 MdRec::L2Begin(h) => {
-                    assert_eq!(last_id.get(&h.h.inst).copied().unwrap_or(0), h.prev_id, "frame {frames}");
+                    assert_eq!(
+                        last_id.get(&h.h.inst).copied().unwrap_or(0),
+                        h.prev_id,
+                        "frame {frames}"
+                    );
                     last_id.insert(h.h.inst, h.last_id);
                 }
                 _ => {}
@@ -464,17 +500,37 @@ fn pm_011_recorded_window_matches_exchange_best_prices() {
             continue;
         }
         for ch in v["price_changes"].as_array().into_iter().flatten() {
-            let inst = if ch["asset_id"] == T_UP { UP } else if ch["asset_id"] == T_DN { DN } else { continue };
+            let inst = if ch["asset_id"] == T_UP {
+                UP
+            } else if ch["asset_id"] == T_DN {
+                DN
+            } else {
+                continue;
+            };
             let Some(b) = books.get(&inst) else { continue };
-            let px = |s: &serde_json::Value| s.as_str().and_then(|x| hft_types::parse_exact(x.as_bytes(), -3).ok());
+            let px = |s: &serde_json::Value| {
+                s.as_str()
+                    .and_then(|x| hft_types::parse_exact(x.as_bytes(), -3).ok())
+            };
             // Only once the token's book exists (the window may start mid-stream).
             if b.0.is_empty() && b.1.is_empty() {
                 continue;
             }
-            assert_eq!(b.0.keys().next_back().copied(), px(&ch["best_bid"]), "frame {frames} bid");
-            assert_eq!(b.1.keys().next().copied(), px(&ch["best_ask"]), "frame {frames} ask");
+            assert_eq!(
+                b.0.keys().next_back().copied(),
+                px(&ch["best_bid"]),
+                "frame {frames} bid"
+            );
+            assert_eq!(
+                b.1.keys().next().copied(),
+                px(&ch["best_ask"]),
+                "frame {frames} ask"
+            );
             checked += 1;
         }
     }
-    assert!(frames >= 390 && checked > 100, "frames {frames} checked {checked}");
+    assert!(
+        frames >= 390 && checked > 100,
+        "frames {frames} checked {checked}"
+    );
 }
