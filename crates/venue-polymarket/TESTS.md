@@ -25,7 +25,7 @@ spec: README.md
 | 槽位绑定 | PMK-009, PMK-010 |
 | 订阅 | PMK-008 |
 | 行情频道 → 事件 | PMK-001–PMK-007, PMK-011 |
-| 合成序号 | PMK-003–PMK-005, PMK-010, PMK-011 |
+| 合成序号 | PMK-003–PMK-005, PMK-010–PMK-012 |
 | 心跳 | PMK-001 |
 | VenueCaps 默认值 | PMK-011 |
 | 实现说明 | PMK-006, PMK-007 |
@@ -170,6 +170,20 @@ spec: README.md
 - 前置:`bound()`;`fixtures/polymarket/market-btc-400.jsonl`(2026-10-19 pmrec 录制的连续 400 帧,含 `book`、`price_change`、`last_trade_price`)
 - 期望:每帧解码成功;每个 `L2Batch` 的 `prev_id` 等于该 inst 上一个 id;每条 `price_change` 之后,按事件重建的簿的最优买/卖价等于该条给出的 `best_bid`/`best_ask`(簿建立之后,至少 100 处)
 - 实现:`crates/venue-polymarket/tests/main.rs::pmk_011_recorded_window_matches_exchange_best_prices`
+
+### PMK-012 早于最近整簿的增量丢弃
+
+- 规则:[行情频道 → 事件](README.md#行情频道--事件)
+- 级别:golden
+- 里程碑:M3
+- 前置:`bound()`;先解码 PMK-003 的 `book`(时间 `1792424113368`)
+- 实现:`crates/venue-polymarket/tests/main.rs::pmk_012_changes_older_than_the_book_are_dropped`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-012.1 | `T_UP` 的 `price_change`,时间 `1792424113367` | `Ok(events 0)`,无事件 |
+| PMK-012.2 | 同上,时间 `1792424113368` | 一个 `L2Batch{prev_id 1, last_id 2}` |
+| PMK-012.3 | inst 1 改绑新代币后,新代币的 `1792424113367` 增量 | 应用(`events 1`) |
 
 ## 验收
 

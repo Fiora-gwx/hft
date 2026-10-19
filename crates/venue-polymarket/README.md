@@ -54,6 +54,8 @@ pub const TOKEN_MAX: usize = 80;
 
 只有一条路由 `market`(`RouteId(0)`),声明为 `DepthTopN`、档位 `[100]`:价格网格每边最多 99 档,"前 100 档" 就是全簿。同一连接还推送成交,所以 `Trade` 没有独立路由(`stream_route(Trade) = None`),订阅了成交的 inst 在这条连接上直接收到成交。
 
+协议默认每条连接 2 个流(`max_streams = 2`,即一个市场的 Up/Down 两个代币;实际值取 refdata `ws_max_streams_per_conn`):服务端在某条连接的发送缓冲写满时以 WS 1013 关闭它(2026-10-19 实测,16 个代币挤在一条连接上 13 分钟断开 3 次,每条连接只放一个市场的录制器约每小时 5 次,只发生在最活跃的 BTC),每次重连后丢失约 0.2–0.3 s。
+
 ### 槽位绑定
 
 refdata 为每个资产预置固定数量的槽位 inst(符号如 `btc-up-0`)。槽位 ↔ 代币 id 的对应由 `FeedCtx::bind` 写入,规则:
@@ -90,6 +92,7 @@ refdata 为每个资产预置固定数量的槽位 inst(符号如 `btc-up-0`)。
 
 - 时间:`timestamp`(毫秒字符串)→ `MarketHdr.ex_ts_ns`;交易所不给发送时间,`ex_send_ns = 0`。
 - 价格、数量按 inst 的 `px_wire_exp`/`qty_wire_exp` 精确解析,多余小数位 → `DecodeErr::Number`。一条消息先校验全部条目再写事件:任一条出错时不写任何事件。
+- 过期增量:(重)订阅后交易所先推当前整簿,之后仍可能送达时间戳早于该整簿的 `price_change`(2026-10-19 实测重连后出现),它们已包含在整簿里,再应用会把簿退回旧状态。`FeedCtx` 记录每个 inst 最近一次 `book` 的交易所时间,时间戳早于它的 `price_change` 条目丢弃(同一毫秒的照常应用);改绑新代币时清零。
 - 未绑定的代币静默跳过(不是错误)。`peek` 返回首个代币的 inst,`stream = DepthTopN`(簿)或 `Trade`。
 - `seq_rule = None`,`resync_method(Push) = Resubscribe`:重订阅后交易所先推整簿。
 

@@ -479,6 +479,7 @@ fn book(
         None => return Err(DecodeErr::Shape),
     };
     let snap_id = ctx.next_snapshot(ix);
+    ctx.set_book_ms(ix, m.timestamp.0.unwrap_or(0));
     out.l2_snapshot(&L2SnapshotPart {
         hdr: L2SnapHdr {
             h: hdr(venue, inst, rx, ex),
@@ -523,6 +524,11 @@ fn price_change(
         let Some((ix, inst)) = ctx.lookup(e.asset_id.as_bytes()) else {
             continue;
         };
+        // After a (re)subscription the exchange sends the current `book` and may then still
+        // deliver queued changes timestamped before it: those are already in the book.
+        if ctx.stale_change(ix, m.timestamp.0.unwrap_or(0)) {
+            continue;
+        }
         let row = rd.inst(inst);
         fixed(e.price, row.px_wire_exp)?;
         fixed(e.size, row.qty_wire_exp)?;

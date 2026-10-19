@@ -1,5 +1,6 @@
 //! venue-polymarket tests (TESTS.md). Frames are copied from the market channel as recorded on
 //! 2026-10-19 (pmrec, eu-west-1); token ids shortened only where the case says so.
+#![allow(clippy::disallowed_types)] // allow-list: test code, not a hot path
 
 use std::sync::OnceLock;
 
@@ -533,4 +534,29 @@ fn pmk_011_recorded_window_matches_exchange_best_prices() {
         frames >= 390 && checked > 100,
         "frames {frames} checked {checked}"
     );
+}
+
+#[test]
+fn pmk_012_changes_older_than_the_book_are_dropped() {
+    let mut ctx = bound();
+    // book at 1792424113368; a change stamped 1 ms earlier arrives after it (resubscription).
+    let _ = dec(&mut ctx, &book_up());
+    let older = price_change()
+        .replace("1792424114058", "1792424113367")
+        .replace(T_DN, "99");
+    let (r, ev) = dec(&mut ctx, &older);
+    assert_eq!(r.map(|o| o.events), Ok(0));
+    assert!(ev.is_empty());
+    // Same timestamp as the book: applied.
+    let same = price_change()
+        .replace("1792424114058", "1792424113368")
+        .replace(T_DN, "99");
+    let (r, ev) = dec(&mut ctx, &same);
+    assert_eq!(r.map(|o| o.events), Ok(1));
+    assert!(matches!(ev.first(), Some(MdRec::L2Begin(h)) if h.prev_id == 1 && h.last_id == 2));
+    // Rebinding to a new token forgets the book time.
+    let next = "22222222222222222222222222222222222222222222222222222222222222222222222222222";
+    assert_eq!(ctx.bind(UP, next.as_bytes()), Ok(()));
+    let (r, _) = dec(&mut ctx, &older.replace(T_UP, next));
+    assert_eq!(r.map(|o| o.events), Ok(1));
 }

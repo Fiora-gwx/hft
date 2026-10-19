@@ -126,7 +126,8 @@ fn refdata(binds: &[Bind]) -> Result<&'static RefData, String> {
         id: V,
         exchange: Exchange::Polymarket,
         product: InstKind::Spot,
-        ws_max_streams_per_conn: 500,
+        // One market (two tokens) per connection (venue-polymarket README "端点").
+        ws_max_streams_per_conn: 2,
         ws_max_in_msgs_per_s: 10,
         ws_max_conn_age_s: 86_400,
         ws_new_conn_per_5min_ip: 300,
@@ -355,7 +356,7 @@ fn run(a: Args) -> Result<(), String> {
     };
     let arena = ConnArena::new(
         &[
-            (ConnRole::Md, 8),
+            (ConnRole::Md, 32),
             (ConnRole::Order, 1),
             (ConnRole::UserStream, 1),
             (ConnRole::Rest, 1),

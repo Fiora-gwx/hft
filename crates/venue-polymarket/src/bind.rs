@@ -30,6 +30,8 @@ struct Entry {
     book_id: u64,
     /// Last synthetic trade id handed out for this inst.
     trade_id: u64,
+    /// Exchange time (ms) of the last `book` of this inst; older level changes are stale.
+    book_ms: u64,
 }
 
 const EMPTY: Entry = Entry {
@@ -38,6 +40,7 @@ const EMPTY: Entry = Entry {
     token: [0; TOKEN_MAX],
     book_id: 0,
     trade_id: 0,
+    book_ms: 0,
 };
 
 /// FNV-1a over the token text.
@@ -112,6 +115,8 @@ impl FeedCtx {
             d.copy_from_slice(token);
         }
         e.len = token.len() as u8;
+        // A new token starts without a book.
+        e.book_ms = 0;
         self.reindex();
         Ok(())
     }
@@ -193,6 +198,18 @@ impl FeedCtx {
             e.book_id = e.book_id.wrapping_add(1);
             e.book_id
         })
+    }
+
+    /// Records the exchange time of entry `i`'s latest `book`.
+    pub(crate) fn set_book_ms(&mut self, i: usize, ms: u64) {
+        if let Some(e) = self.entries.get_mut(i) {
+            e.book_ms = e.book_ms.max(ms);
+        }
+    }
+
+    /// Whether a level change at `ms` predates entry `i`'s latest `book` (already contained in it).
+    pub(crate) fn stale_change(&self, i: usize, ms: u64) -> bool {
+        self.entries.get(i).is_some_and(|e| ms < e.book_ms)
     }
 
     /// Next book ids of entry `i` for an increment: `(prev_id, last_id)`.

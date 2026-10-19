@@ -19,7 +19,9 @@ static ROUTES: [RouteSpec; 1] = [RouteSpec {
     kind: RouteKind::DepthTopN,
     name: "market",
     race: false,
-    max_streams: 500,
+    // Polymarket closes a connection whose send buffer fills (WS 1013); one market (two tokens)
+    // per connection keeps each connection's burst small. Effective value: refdata.
+    max_streams: 2,
     max_in_msgs_per_s: 10,
     topn_levels: &[100],
 }];
