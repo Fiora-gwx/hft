@@ -74,7 +74,7 @@ wire_enum!(
 );
 wire_enum!(
     /// Exchange a `VenueId` belongs to.
-    Exchange { Binance = 1, Okx = 2, Bitget = 3, Gate = 4, Bybit = 5, Kucoin = 6, Hyperliquid = 7, Chain = 32 }
+    Exchange { Binance = 1, Okx = 2, Bitget = 3, Gate = 4, Bybit = 5, Kucoin = 6, Hyperliquid = 7, Polymarket = 8, Chain = 32 }
 );
 wire_enum!(
     /// Whether the exchange UID of an account can be verified (TOML `uid_policy`, default `verified`).

@@ -203,6 +203,22 @@ pub trait VenueProtocol: Sized + 'static {
         cfg: &VenueCfg,
         out: &mut SubFrames,
     ) -> Result<(), ProtoErr>;
+    /// `subscribe` with the feed state: venues whose wire ids are bound at run time (not refdata
+    /// symbols) render them from `ctx`. Default: `subscribe`.
+    fn subscribe_ctx(
+        rd: &RefData,
+        ctx: &Self::FeedCtx,
+        subs: &[SubSpec],
+        unsub: bool,
+        cfg: &VenueCfg,
+        out: &mut SubFrames,
+    ) -> Result<(), ProtoErr> {
+        let _ = ctx;
+        Self::subscribe(rd, subs, unsub, cfg, out)
+    }
+    /// `false`: the venue never answers subscription frames; the runtime counts a sent frame as
+    /// acknowledged.
+    const SUB_ACKS: bool = true;
     /// Private channel frames; only on the owning connection (hft-venue §4b).
     fn private_subscribe(
         cfg: &VenueCfg,

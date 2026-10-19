@@ -79,7 +79,7 @@ fn typ_083_group_id_parts() {
 #[test]
 fn typ_085_venue_table() {
     use MarketKind::{LinearPerp, Spot};
-    let rows: [(&str, u8, Option<MarketKind>, Option<&str>); 21] = [
+    let rows: [(&str, u8, Option<MarketKind>, Option<&str>); 22] = [
         ("TYP-085.1", 0, None, None),
         ("TYP-085.2", 1, Some(LinearPerp), Some("BINANCE_USDM")),
         ("TYP-085.3", 2, Some(Spot), Some("BINANCE_SPOT")),
@@ -95,7 +95,8 @@ fn typ_085_venue_table() {
         ("TYP-085.13", 12, Some(LinearPerp), Some("KUCOIN_FUT")),
         ("TYP-085.14", 13, Some(Spot), Some("KUCOIN_SPOT")),
         ("TYP-085.15", 14, Some(LinearPerp), Some("HYPERLIQUID_PERP")),
-        ("TYP-085.16", 15, None, None),
+        ("TYP-085.16", 15, Some(Spot), Some("POLYMARKET_CLOB")),
+        ("TYP-085.22", 16, None, None),
         ("TYP-085.17", 31, None, None),
         ("TYP-085.18", 32, None, Some("CHAIN_BSC")),
         ("TYP-085.19", 33, None, Some("CHAIN_SOLANA")),
@@ -120,6 +121,7 @@ fn typ_085_venue_table() {
         (VenueId::KUCOIN_FUT, "KUCOIN_FUT"),
         (VenueId::KUCOIN_SPOT, "KUCOIN_SPOT"),
         (VenueId::HYPERLIQUID_PERP, "HYPERLIQUID_PERP"),
+        (VenueId::POLYMARKET_CLOB, "POLYMARKET_CLOB"),
         (VenueId::CHAIN_BSC, "CHAIN_BSC"),
         (VenueId::CHAIN_SOLANA, "CHAIN_SOLANA"),
     ];

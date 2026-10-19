@@ -2007,8 +2007,9 @@ fn send_sub<P: VenueProtocol>(
         }
     }
     frames.clear();
-    let ok = P::subscribe(
+    let ok = P::subscribe_ctx(
         st.rd,
+        &st.ctx,
         specs.get(..k).unwrap_or(&[]),
         first.unsub,
         &st.cfg.venue,
@@ -2035,6 +2036,10 @@ fn send_sub<P: VenueProtocol>(
         }
     }
     m.acks.push_back((covered as u16, first.unsub));
+    if !P::SUB_ACKS {
+        // The venue never answers: the sent frame counts as acknowledged now.
+        st.on_ack(m, true, 0, now);
+    }
     m.next_sub = m
         .next_sub
         .max(now.saturating_sub(m.sub_period))

@@ -191,7 +191,7 @@ spec: README.md
 | REF-009.2 | Insts 0 `kind` | 0 | `[{Structure, 3, 0}]` |
 | REF-009.3 | Insts 0 `kind` | 4 | `[{Structure, 3, 0}]` |
 | REF-009.4 | Assets 0 `class` | 5 | `[{Structure, 1, 0}]` |
-| REF-009.5 | Venues 0 `exchange` | 8 | `[{Structure, 2, 0}]` |
+| REF-009.5 | Venues 0 `exchange` | 9 | `[{Structure, 2, 0}]` |
 | REF-009.6 | Venues 0 `stale_guard` | 0 | `[{Structure, 2, 0}]` |
 | REF-009.7 | Venues 0 `ts_unit` | 4 | `[{Structure, 2, 0}]` |
 | REF-009.8 | Accounts 0 `kind` | 3 | `[{Structure, 4, 0}]` |
@@ -308,7 +308,7 @@ spec: README.md
 |---|---|---|
 | REF-015.1 | 0 | `[{UnknownVenue, 2, 0}]` |
 | REF-015.2 | 7(保留的 `BINANCE_COINM`) | `[{UnknownVenue, 2, 4}]` |
-| REF-015.3 | 15 | `[{UnknownVenue, 2, 4}]` |
+| REF-015.3 | 16 | `[{UnknownVenue, 2, 4}]` |
 | REF-015.4 | 34 | `[{UnknownVenue, 2, 4}]` |
 | REF-015.5 | 3(`GATE_USDT_FUT`,optional) | `Ok` |
 | REF-015.6 | 33(`CHAIN_SOLANA`,optional) | `Ok` |
@@ -1329,7 +1329,7 @@ spec: README.md
 | REF-075.7 | `EndpointRole` | MdPublic 1、MdMarket 2、UserData 3、OrderWs 4、Rest 5、RestBackup 6 |
 | REF-075.8 | `EndpointEnv`、`TsUnit` | Prod 1、Testnet 2、Demo 3;Ms 1、Us 2、Ns 3 |
 | REF-075.9 | `StaleGuardKind` | None 1、RecvWindow 2、ExpireAt 3 |
-| REF-075.10 | `Exchange` | Binance 1、Okx 2、Bitget 3、Gate 4、Bybit 5、Kucoin 6、Hyperliquid 7、Chain 32 |
+| REF-075.10 | `Exchange` | Binance 1、Okx 2、Bitget 3、Gate 4、Bybit 5、Kucoin 6、Hyperliquid 7、Polymarket 8、Chain 32 |
 | REF-075.11 | `UidPolicy`、`AccountKind` 行内编码 | Verified 1、Unverifiable 2;Live 1、Sim 2 |
 | REF-075.12 | `FundingSettleKind` | PerSymbolPush 1、BalanceOnlyPush 2、RateOnly 3、NotApplicable 4 |
 | REF-075.13 | `MarginData` 判别 | Push 1、Poll 2(带 `interval_ms`)、NotApplicable 3 |

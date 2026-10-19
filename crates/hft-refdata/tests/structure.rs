@@ -197,7 +197,7 @@ fn ref_009_bad_discriminants() {
             edit_row::<AssetRow, _>(r, 1, 0, |x| x.class = 5)
         }),
         ("REF-009.5", 2, |r| {
-            edit_row::<VenueRow, _>(r, 2, 0, |x| x.exchange = 8)
+            edit_row::<VenueRow, _>(r, 2, 0, |x| x.exchange = 9)
         }),
         ("REF-009.6", 2, |r| {
             edit_row::<VenueRow, _>(r, 2, 0, |x| x.stale_guard = 0)

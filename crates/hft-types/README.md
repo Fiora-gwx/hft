@@ -199,6 +199,7 @@ pub const MAX_BBO_CONN_SLOTS: u8 = 8;
 | 12 | `KUCOIN_FUT` | `LinearPerp` | optional |
 | 13 | `KUCOIN_SPOT` | `Spot` | optional |
 | 14 | `HYPERLIQUID_PERP` | `LinearPerp`(USDC 结算) | optional |
+| 15 | `POLYMARKET_CLOB` | `Spot`(二元结果代币,USDC 计价) | optional |
 | 32 | `CHAIN_BSC`(外部 venue) | — | optional |
 | 33 | `CHAIN_SOLANA`(外部 venue) | — | optional |
 
