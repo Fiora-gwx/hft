@@ -31,6 +31,9 @@ use hft_venue::{
 use hft_venue_proto::{VenueCfg, VenueEnv, VenueProtocol};
 use serde::Deserialize;
 use venue_polymarket::{FeedCtx, PolymarketClob as Pm};
+
+mod tap;
+use tap::Tap;
 use zerocopy::FromBytes;
 
 const V: VenueId = VenueId::POLYMARKET_CLOB;
@@ -395,7 +398,7 @@ fn run(a: Args) -> Result<(), String> {
         },
         ..FeedCfg::default()
     };
-    let mut feed = FeedRuntime::<Pm>::new(
+    let mut feed = FeedRuntime::<Tap>::new(
         cfg,
         FeedDeps {
             rd,
@@ -430,7 +433,7 @@ fn run(a: Args) -> Result<(), String> {
     let warm = std::thread::Builder::new()
         .name("warm".into())
         .spawn(move || {
-            let mut d = SessionDriver::<Pm>::new(
+            let mut d = SessionDriver::<Tap>::new(
                 SessionCfg {
                     venue,
                     ready_bbo: None,

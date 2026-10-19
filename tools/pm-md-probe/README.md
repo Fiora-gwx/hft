@@ -68,7 +68,7 @@ pm-md-probe --bindings FILE --seconds N --out FILE --dir DIR --src-ip IP --bind-
 - refdata 在程序内构建:USDC 加每个绑定一个代币资产与一个现货 inst(tick 0.01、lot 0.000001,与 venue-polymarket 测试相同)。
 - 线程:`warm`(conn-builder:`SessionDriver` 建连与交接)、`feed`(`FeedRuntime::poll_once`)、主线程消费 md 环与 bulk 环。启动时为每个 inst 发 `FeedCmd::Subscribe{BOOK | TRADE}`。
 - `FeedCfg`:`routes = Md`、`depth = TopN`(100 档)、原始帧记录关闭。
-- 单文件 `src/main.rs`;脚本在 `scripts/`。
+- `src/main.rs`;`src/tap.rs` 包一层协议:`peek`/`decode_md` 的错误(未知类除外)把前 20 帧的开头打到 stderr,运行时只计数的帧可以直接看到;脚本在 `scripts/`。
 
 </details>
 

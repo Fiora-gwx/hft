@@ -46,14 +46,16 @@ pub(crate) fn endpoint(role: Role, route: RouteId, out: &mut EndpointSpec) -> Re
     }
 }
 
-/// Text `PING` every 10 s; the server answers `PONG` and drops silent connections.
+/// Text `PING` every 10 s; the server answers `PONG` and drops silent connections. No idle timeout:
+/// a market that has not opened yet, or has closed, is legitimately silent for minutes; liveness
+/// is the `PONG`.
 pub(crate) fn heartbeat(_role: Role) -> HeartbeatSpec {
     HeartbeatSpec {
         ping: PingKind::AppText,
         interval_ms: 10_000,
         unconditional: true,
         pong_timeout_ms: 10_000,
-        idle_timeout_ms: 30_000,
+        idle_timeout_ms: 0,
     }
 }
 
