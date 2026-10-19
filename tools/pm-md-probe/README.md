@@ -41,6 +41,7 @@ pm-md-probe --bindings FILE --seconds N --out FILE --dir DIR --src-ip IP --bind-
 | `--dir` | 运行时要求的 raw journal 目录(原始帧记录关闭,只有状态记录) |
 | `--src-ip`、`--bind-device` | 本机源地址与网卡(hft-net 要求显式绑定) |
 | `--host` | 默认 `ws-subscriptions-clob.polymarket.com` |
+| `--so-rcvbuf` | 行情连接的 `SO_RCVBUF`(字节);不给 = hft-net 默认 262144 |
 
 ### 产出
 

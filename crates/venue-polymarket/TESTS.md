@@ -67,6 +67,7 @@ spec: README.md
 | PMK-002.3 | `last_trade_price`(`T_UP`) | `(1, Trade)` |
 | PMK-002.4 | `tick_size_change` | `Err(UnknownClass)` |
 | PMK-002.5 | `book`,代币未绑定 | inst 0 |
+| PMK-002.6 | `[]`、`[ ]` 加换行(空数组) | `Err(UnknownClass)`;`[`、`[[` → `Err(Shape)` |
 
 ### PMK-003 book 是整簿快照,数量 0 的档丢弃
 

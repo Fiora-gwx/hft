@@ -89,6 +89,7 @@ refdata 为每个资产预置固定数量的槽位 inst(符号如 `btc-up-0`)。
 | `price_change` | 每个已绑定代币一个 `L2Batch` | 每条为一档的新总量(`"0"` = 删档),`BUY` → 买边,`SELL` → 卖边;一条消息通常同时含 Up/Down 两个代币 |
 | `last_trade_price` | `Trade` | `side` 为吃单方向;`trade_id` 为合成序号 |
 | `tick_size_change` 及其他 | 无 | `peek` → `UnknownClass`(运行时计数并记原始帧) |
+| 空数组 `[]` | 无 | 部分订阅帧之后服务端推送(2026-10-19 实测);`peek` → `UnknownClass`,不算解码错误 |
 
 - 时间:`timestamp`(毫秒字符串)→ `MarketHdr.ex_ts_ns`;交易所不给发送时间,`ex_send_ns = 0`。
 - 价格、数量按 inst 的 `px_wire_exp`/`qty_wire_exp` 精确解析,多余小数位 → `DecodeErr::Number`。一条消息先校验全部条目再写事件:任一条出错时不写任何事件。

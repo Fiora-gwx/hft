@@ -323,7 +323,16 @@ pub(crate) fn peek(_rd: &RefData, ctx: &FeedCtx, c: MdClass, p: &[u8]) -> Result
     if c != MdClass::Push {
         return Err(DecodeErr::UnknownClass);
     }
-    let first = elements(p).next().ok_or(DecodeErr::Shape)?;
+    // An empty array (`[]`, sent after some subscription frames) carries no data.
+    let Some(first) = elements(p).next() else {
+        let mut t = p.iter().filter(|b| !b.is_ascii_whitespace());
+        let empty = t.next() == Some(&b'[') && t.next() == Some(&b']') && t.next().is_none();
+        return Err(if empty {
+            DecodeErr::UnknownClass
+        } else {
+            DecodeErr::Shape
+        });
+    };
     let m: PeekMsg = from(first)?;
     let (stream, token) = match m.event_type {
         "book" => (StreamKind::DepthTopN, m.asset_id),

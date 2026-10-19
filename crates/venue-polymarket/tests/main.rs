@@ -237,6 +237,10 @@ fn pmk_002_peek_stream_and_bound_inst() {
         "{{\"event_type\":\"tick_size_change\",\"asset_id\":\"{T_UP}\",\"market\":\"0x1\",\"old_tick_size\":\"0.01\",\"new_tick_size\":\"0.001\",\"timestamp\":\"1\"}}"
     );
     assert_eq!(p(&tick).map(|x| x.inst), Err(DecodeErr::UnknownClass));
+    assert_eq!(p("[]").map(|x| x.inst), Err(DecodeErr::UnknownClass));
+    assert_eq!(p("[ ]\n").map(|x| x.inst), Err(DecodeErr::UnknownClass));
+    assert_eq!(p("[[").map(|x| x.inst), Err(DecodeErr::Shape));
+    assert_eq!(p("[").map(|x| x.inst), Err(DecodeErr::Shape));
     let other = book_up().replace(T_UP, "12345");
     assert_eq!(p(&other).map(|x| x.inst), Ok(InstId(0)));
 }

@@ -58,12 +58,14 @@ struct Args {
     src_ip: Ipv4Addr,
     bind_device: String,
     host: String,
+    /// `SO_RCVBUF` of the market connections; 0 = hft-net default.
+    so_rcvbuf: u32,
 }
 
 fn usage() -> ! {
     eprintln!(
         "usage: pm-md-probe --bindings FILE --seconds N --out FILE --dir DIR --src-ip IP --bind-device DEV \
-         [--host ws-subscriptions-clob.polymarket.com]"
+         [--host ws-subscriptions-clob.polymarket.com] [--so-rcvbuf BYTES]"
     );
     std::process::exit(2)
 }
@@ -73,6 +75,7 @@ fn args() -> Args {
     let (mut bindings, mut seconds, mut out, mut dir, mut src_ip, mut dev) =
         (None, None, None, None, None, None);
     let mut host = "ws-subscriptions-clob.polymarket.com".to_string();
+    let mut so_rcvbuf = 0u32;
     while let Some(k) = a.next() {
         let v = a.next().unwrap_or_else(|| usage());
         match k.as_str() {
@@ -83,6 +86,7 @@ fn args() -> Args {
             "--src-ip" => src_ip = v.parse().ok(),
             "--bind-device" => dev = Some(v),
             "--host" => host = v,
+            "--so-rcvbuf" => so_rcvbuf = v.parse().unwrap_or_else(|_| usage()),
             _ => usage(),
         }
     }
@@ -95,6 +99,7 @@ fn args() -> Args {
             src_ip,
             bind_device,
             host,
+            so_rcvbuf,
         },
         _ => usage(),
     }
@@ -343,7 +348,7 @@ fn run(a: Args) -> Result<(), String> {
         &mut path,
     )
     .map_err(|e| format!("endpoint: {e:?}"))?;
-    let net = NetConfig {
+    let mut net = NetConfig {
         endpoints: vec![Endpoint {
             host: a.host.clone(),
             sni: a.host.clone(),
@@ -357,6 +362,9 @@ fn run(a: Args) -> Result<(), String> {
         ts_expect_hw: false,
         ..NetConfig::default()
     };
+    if a.so_rcvbuf > 0 {
+        net.so_rcvbuf = a.so_rcvbuf;
+    }
     let arena = ConnArena::new(
         &[
             (ConnRole::Md, 32),
