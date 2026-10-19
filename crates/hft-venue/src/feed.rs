@@ -1882,9 +1882,7 @@ impl<P: VenueProtocol> FeedRuntime<P> {
     // ---------------------------------------------------------------- views (tests, telemetry)
 
     pub fn counters(&self) -> FeedCounters {
-        let mut n = self.st.n;
-        n.unknown_class += self.st.sink.l2_batches;
-        n
+        self.st.n
     }
 
     pub fn raw_counters(&self) -> RawCounters {

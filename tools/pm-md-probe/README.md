@@ -59,7 +59,7 @@ pm-md-probe --bindings FILE --seconds N --out FILE --dir DIR --src-ip IP --bind-
 
 1. `discover.py --out bindings.json --windows 2` 取下两个窗口 × 4 个资产的 16 个代币,打印第一个窗口的开始时间。
 2. 在第一个窗口开始前启动,`--seconds` 覆盖两个窗口结束后 60 s。
-3. `compare.py --probe out.jsonl --bindings bindings.json --pmrec <pmrec raw/日期目录>`:每个代币在两边都覆盖的时间段内,交易所 `price_change` 给出的 `best_bid`/`best_ask` 序列与探针每个 `batch` 之后的最优价序列逐条相等,即为通过。
+3. `compare.py --probe out.jsonl --bindings bindings.json --pmrec <pmrec raw/日期目录>`:每个代币在两边都覆盖的时间段内按交易所时间戳(ms)分组比对,交易所 `price_change` 给出的 `best_bid`/`best_ask` 与探针每个 `batch` 之后的最优价在两边都有的每个时间戳上相等;只有一边有的时间戳(任一录制方的重连缺口,Polymarket 会以 1013 断开发送缓冲满的连接)不超过 1%(或 5 个)。
 
 ## 实现说明
 

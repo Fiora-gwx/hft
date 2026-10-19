@@ -4,9 +4,10 @@
 usage: compare.py --probe out.jsonl --bindings bindings.json --pmrec DIR
 DIR is pmrec's raw/<YYYYMMDD> directory (clob/<asset>_<start_ts>.jsonl.gz, lines "<rx_ns>\t<json>").
 
-Per token: the exchange's `price_change` entries (timestamp, best_bid, best_ask) in arrival order
-versus the probe's `batch` lines (ex_ms, bb, ba) of the slot, over the time range both cover, plus
-`book` and trade counts. A token passes when both sequences are equal in that range.
+Per token, grouped by exchange timestamp (ms) over the time range both cover: the exchange's
+`price_change` best_bid/best_ask versus the probe's best prices after each `batch`. A token passes
+when every timestamp seen by both sides carries equal values and at most 1 % (or 5) timestamps are
+seen by one side only (reconnect gaps of either recorder).
 """
 import argparse
 import gzip
@@ -72,21 +73,45 @@ def main() -> None:
             continue
         lo = max(ref[0][0], got[0][0])
         hi = min(ref[-1][0], got[-1][0])
-        r = [x for x in ref if lo <= x[0] <= hi]
-        g = [x for x in got if lo <= x[0] <= hi]
-        # The probe's book exists only after its first snapshot: compare from its first non-empty book.
-        first = next((i for i, x in enumerate(g) if x[1] >= 0 or x[2] >= 0), 0)
-        start_ms = g[first][0] if g else lo
-        r = [x for x in r if x[0] > start_ms]
-        g = [x for x in g if x[0] > start_ms]
-        same = r == g
-        mism = sum(1 for x, y in zip(r, g) if x != y)
-        ok_all &= same
+        # The probe's book exists only after its first snapshot.
+        first = next((x[0] for x in got if x[1] >= 0 or x[2] >= 0), lo)
+        lo = max(lo, first + 1)
+        by_r, by_g = {}, {}
+        for x in ref:
+            if lo <= x[0] <= hi:
+                by_r.setdefault(x[0], []).append(x[1:])
+        for x in got:
+            if lo <= x[0] <= hi:
+                by_g.setdefault(x[0], []).append(x[1:])
+        common = sorted(set(by_r) & set(by_g))
+        same = sum(1 for t in common if by_r[t] == by_g[t])
+        diff = [t for t in common if by_r[t] != by_g[t]]
+        only_r = sorted(set(by_r) - set(by_g))
+        only_g = sorted(set(by_g) - set(by_r))
+        n_r = sum(len(v) for v in by_r.values())
+        n_g = sum(len(v) for v in by_g.values())
+        ok = not diff and len(only_r) + len(only_g) <= max(5, (len(common) + 99) // 100)
+        ok_all &= ok
+        def spans(ts):
+            out, s0, prev = [], None, None
+            for t in ts:
+                if s0 is None:
+                    s0 = prev = t
+                elif t - prev > 3000:
+                    out.append((s0, prev)); s0 = t
+                prev = t
+            if s0 is not None:
+                out.append((s0, prev))
+            return out[:4]
         print(
-            f"{b['slot']}: {'OK ' if same else 'DIFF'} compared {len(r)} vs {len(g)} level changes "
-            f"(mismatch {mism}); books pmrec {ref_books} probe {n_snap}; trades pmrec {ref_trades} probe {n_trade}; "
-            f"range {lo}..{hi}"
+            f"{b['slot']}: {'OK ' if ok else 'DIFF'} timestamps equal {same}/{len(common)} "
+            f"(entries pmrec {n_r}, probe {n_g}); value mismatch {len(diff)}; only pmrec {len(only_r)} {spans(only_r)}; "
+            f"only probe {len(only_g)} {spans(only_g)}; books pmrec {ref_books} probe {n_snap}; "
+            f"trades pmrec {ref_trades} probe {n_trade}"
         )
+        if diff:
+            t = diff[0]
+            print(f"   first mismatch at {t}: pmrec {by_r[t]} probe {by_g[t]}")
     print("RESULT", "PASS" if ok_all else "FAIL")
     sys.exit(0 if ok_all else 1)
 
