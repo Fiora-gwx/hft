@@ -9,6 +9,10 @@ use hft_types::{InstId, Side, VenueId};
 use crate::SimExchange;
 use crate::types::MarketEventRef;
 
+/// `MakerFill::Queue`: a level decrease not matched by a trade at the price within this exchange
+/// time is a cancellation (README "4. 挂单").
+const QUEUE_MATCH_NS: i64 = 500_000_000;
+
 /// Matching-view source flags.
 pub(crate) struct ViewInfo {
     /// Only the `Bbo` stream exists for the inst (one level to take).
@@ -93,10 +97,12 @@ impl SimExchange {
                     r.bbo.ex_ts = h.ex_ts_ns;
                     r.bbo.set = true;
                 }
+                self.queue_levels(ii, h.ex_ts_ns);
                 self.cross_resting(ii, t, h.ex_ts_ns);
             }
             MarketEventRef::L2Snapshot(p) => {
                 if self.snapshot_part(ii, &p) {
+                    self.queue_levels(ii, h.ex_ts_ns);
                     self.cross_resting(ii, t, h.ex_ts_ns);
                 }
             }
@@ -106,9 +112,13 @@ impl SimExchange {
                     r.book_ex_ts = h.ex_ts_ns;
                     r.book_set = true;
                 }
+                self.queue_levels(ii, h.ex_ts_ns);
                 self.cross_resting(ii, t, h.ex_ts_ns);
             }
-            MarketEventRef::Trade(x) => self.trade_through(ii, x.px.0, x.qty.0, t, h.ex_ts_ns),
+            MarketEventRef::Trade(x) => {
+                self.trade_through(ii, x.px.0, x.qty.0, t, h.ex_ts_ns);
+                self.queue_trade(ii, x.px.0, x.qty.0, x.taker_side, t, h.ex_ts_ns);
+            }
             MarketEventRef::Funding(x) => {
                 if let Some(r) = self.insts.get_mut(ii) {
                     r.rate = x.rate.0;
@@ -280,6 +290,132 @@ impl SimExchange {
                 self.collect_resting(ai, ii, side, |p| if side == Side::Buy { px < p } else { px > p });
                 self.fill_resting(ai, qty, t, ex_ts);
             }
+        }
+    }
+
+    /// Displayed quantity of inst `ii`'s `side` (bids for `Buy`) at `px`: the book when live, else
+    /// the Bbo when it quotes `px`; 0 when the level is absent.
+    pub(crate) fn level_qty(&self, ii: usize, side: Side, px: i64) -> i64 {
+        let Some(r) = self.insts.get(ii) else {
+            return 0;
+        };
+        if r.book_set && r.book.state() == BookState::Live {
+            for l in r.book.iter(side) {
+                let better = if side == Side::Buy {
+                    l.px.0 > px
+                } else {
+                    l.px.0 < px
+                };
+                if l.px.0 == px {
+                    return l.qty.0.max(0);
+                }
+                if !better {
+                    return 0;
+                }
+            }
+            return 0;
+        }
+        if r.bbo.set {
+            let (p, q) = if side == Side::Buy {
+                (r.bbo.bid_px, r.bbo.bid_qty)
+            } else {
+                (r.bbo.ask_px, r.bbo.ask_qty)
+            };
+            if p == px {
+                return q.max(0);
+            }
+        }
+        0
+    }
+
+    /// `MakerFill::Queue` (README "4. 挂单"), after a book or Bbo update of inst `ii`: a decrease of
+    /// a resting order's level is held as unexplained until a trade at the price matches it (the
+    /// exchange publishes the level change before the trade); one older than `QUEUE_MATCH_NS` is
+    /// a cancellation behind the order. The quantity ahead never exceeds the level plus the
+    /// unexplained decrease.
+    fn queue_levels(&mut self, ii: usize, ex_ts: i64) {
+        if self.tune.maker_fill != crate::types::MakerFill::Queue {
+            return;
+        }
+        for ai in 0..self.accts.len() {
+            let n = self
+                .accts
+                .get(ai)
+                .map_or(0, |a| if a.n_resting == 0 { 0 } else { a.orders.len() });
+            for k in 0..n {
+                let o = self.order_at(ai, k);
+                if !(o.used && o.resting && usize::from(o.inst) == ii) {
+                    continue;
+                }
+                let shown = self.level_qty(ii, o.side, o.px);
+                let Some(x) = self.accts.get_mut(ai).and_then(|a| a.orders.get_mut(k)) else {
+                    continue;
+                };
+                if x.unexp > 0 && ex_ts.saturating_sub(x.unexp_ts) > QUEUE_MATCH_NS {
+                    x.unexp = 0;
+                }
+                if shown < x.lvl {
+                    if x.unexp == 0 {
+                        x.unexp_ts = ex_ts;
+                    }
+                    x.unexp = x.unexp.saturating_add(x.lvl - shown);
+                }
+                x.lvl = shown;
+                x.ahead = x.ahead.min(shown.saturating_add(x.unexp));
+            }
+        }
+    }
+
+    /// `MakerFill::Queue`: a public trade `(px, qty)` at a resting order's own price whose taker is
+    /// on the other side consumes the quantity ahead of the orders at that price first (priority
+    /// order); the rest fills them.
+    fn queue_trade(&mut self, ii: usize, px: i64, qty: i64, taker: Side, t: u64, ex_ts: i64) {
+        if self.tune.maker_fill != crate::types::MakerFill::Queue {
+            return;
+        }
+        let side = if taker == Side::Buy { Side::Sell } else { Side::Buy };
+        for ai in 0..self.accts.len() {
+            if self.accts.get(ai).is_none_or(|a| a.n_resting == 0) {
+                continue;
+            }
+            self.collect_resting(ai, ii, side, |p| p == px);
+            let cand = core::mem::take(&mut self.cand);
+            let mut left = qty;
+            let mut due = None;
+            for &oi in &cand {
+                if left <= 0 {
+                    break;
+                }
+                let Some(x) = self
+                    .accts
+                    .get_mut(ai)
+                    .and_then(|a| a.orders.get_mut(usize::from(oi)))
+                else {
+                    continue;
+                };
+                x.unexp = x.unexp.saturating_sub(qty).max(0);
+                if left <= x.ahead {
+                    x.ahead -= left;
+                    break;
+                }
+                left -= x.ahead;
+                x.ahead = 0;
+                let q = x.remaining().min(left);
+                if q <= 0 {
+                    continue;
+                }
+                let d = match due {
+                    Some(d) => d,
+                    None => {
+                        let d = self.resp_due(ai, t);
+                        due = Some(d);
+                        d
+                    }
+                };
+                left -= q;
+                self.maker_fill(ai, usize::from(oi), q, t, d, ex_ts);
+            }
+            self.cand = cand;
         }
     }
 

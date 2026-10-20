@@ -757,7 +757,7 @@ refdata 不做热替换(可选扩展:允许热替换的变更集,触发条件:Dr
 | `[[accounts]].id` / `.label` | u8 / string | 必须与 refdata `AccountMeta.id`/`AccountMeta.label` 一致;账户名前缀规则见[实例角色](#实例角色prod-与-sim) | 必填 |
 | `[[accounts]].keys` | {venue → {session, rest} 秘密名} | Live 账户必填(会话 key 与 REST key 是同一把的 venue 两项指向同一秘密);Sim 账户出现即退出 2 | — |
 | `[[accounts]].deadman` | {venue → bool} | Live 账户是否启用交易所侧死手;能力来自 refdata `VenueCaps.dms` | Live 必填 |
-| `sim.*` | 表 | `SimTuning`:`seed`、`consume_decay_ms`、`take_avail_bp`、`quiet_ms`、`report_interval_s`、`transfer_delay_ms`、`rate_limit`、`late_fee`、`maker_fill` | 语义与默认见 [hft-sim 配置](../../crates/hft-sim/README.md#配置);`sim` 实例必填 `seed`;`prod` 实例出现即退出 2 |
+| `sim.*` | 表 | `SimTuning`:`seed`、`consume_decay_ms`、`take_avail_bp`、`quiet_ms`、`report_interval_s`、`transfer_delay_ms`、`rate_limit`、`late_fee`、`maker_fill`(`trade_through` \| `queue`,`--dry-run` 的 `[sim]` 已接) | 语义与默认见 [hft-sim 配置](../../crates/hft-sim/README.md#配置);`sim` 实例必填 `seed`;`prod` 实例出现即退出 2 |
 | `[[sim.latency_models]]` | 表数组 | `LatencyModel` 取值表:`{kind = "Fixed", entry_us, resp_us}` 或 `{kind = "Empirical", entry = [[q_bp, us], …], resp = [[q_bp, us], …]}`;`SimAccountCfg.latency_model` 是下标(出现顺序,从 0 起) | `sim` 实例至少一项;定义与校验归 [hft-sim](../../crates/hft-sim/README.md#配置) |
 | `[[sim.margin_models]]` | 表数组 | `MarginModel` 取值表:`{mmr = "RefdataTiers" 或 { Flat = "0.005" }, leverage, liq_fee, liq_slippage_bp}`;`SimAccountCfg.margin_model` 是下标 | 同上 |
 | `advisor.mem_budget_mib` | u32 | 本实例全部已绑定策略实例的 Model 内存预算([规则 5](#内存与-journal-段按主机类唯一归属));须等于 EngineConfig ECF1 段 5 的 `advisor_mem_budget_mib`,不等退出 2 | 必填(deploy 按内存表 advisor 一行生成) |

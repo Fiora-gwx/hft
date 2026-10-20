@@ -4376,6 +4376,20 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-424.3 | `depth_conns = 300` | `ConfigParse` |
 | CORE-424.4 | `pm_sim_config` 生成的配置 | `venues.pm.feed.depth_conns = 2` |
 
+### CORE-425 模拟撮合的挂单成交模型 `sim.maker_fill`
+
+- 规则:[配置文件字段](README.md#配置文件字段)
+- 级别:table
+- 里程碑:M3
+- 前置:`support::write` 的离线配置
+- 实现:`apps/hft-core/tests/config.rs::core_425_sim_maker_fill`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-425.1 | 未配置 | `TradeThrough` |
+| CORE-425.2 | `maker_fill = "queue"` | `Queue` |
+| CORE-425.3 | `maker_fill = "prob"` | `ConfigParse` |
+
 ## 验收
 
 - 本组件完成的标准:里程碑已到的非 `host`/`testnet`/`drill` 用例全部有同编号的实现且通过([docs/tests §1](../../docs/tests/README.md#1-地位)、§6 的追溯检查)。

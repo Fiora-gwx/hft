@@ -83,7 +83,7 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
                 "liq_slippage_bp",
                 "quote_interval_ms",
             ],
-            &["quotes"],
+            &["quotes", "maker_fill"],
         ),
         "quote" => (&["inst", "bid_raw", "ask_raw", "qty_raw"], &[]),
         _ => return Err(Error::config("ConfigParse", "unknown configuration section")),

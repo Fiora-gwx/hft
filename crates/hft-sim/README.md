@@ -227,7 +227,7 @@ pub enum MmrSource { RefdataTiers, Flat(Rate) }
 | `transfer_delay_ms` | u32 | `SimTransfer` 到账延迟 | 300 000(待标定) |
 | `rate_limit` | bool | 按 refdata `RateLimitTable` 中 `Orders` 桶、范围 Ip/Uid/Account 的行计数(按到达时刻的固定窗口,到达第 10 条规则的新单计入),超限以 `RateLimited` 回拒 | true |
 | `late_fee` | bool | 模拟"成交后手续费另行到达"(`FeeOnly`)的所 | false(DST 打开) |
-| `maker_fill` | `TradeThrough` \| `Queue`(需 `queue-hftbacktest` feature) | 挂单成交模型 | `TradeThrough` |
+| `maker_fill` | `TradeThrough` \| `Queue` | 挂单成交模型(§4) | `TradeThrough` |
 
 改 `SimAccountCfg`(含换模型下标)= 改 refdata([tools/hft-cfg](../../tools/README.md))→ `ReplaceRefdata`(Drain + 重启);改 `SimTuning` 或两张模型表 = 改 hft-core 配置后重启。`[sim]` 全表随启动写入 journal(写法归 [hft-core 配置文件字段](../../apps/hft-core/README.md#配置文件字段)),[replayer sim](../../apps/replayer/README.md#sim) 从 journal 取同一份,重演不读当前配置文件。
 
@@ -416,7 +416,12 @@ pub struct StressVerdict {
 ### 4. 挂单(预留给 MakerFirst)
 
 - `TradeThrough`(默认,保守):挂买单在价 P,只有出现成交价 < P 的 `Trade` 或卖一 < P 时才成交,数量 = min(剩余, 穿价成交量);挂卖单对称。不建模排队位置。
-- `Queue`(`queue-hftbacktest` feature,可选):移植 hftbacktest `rust-v0.9.4` 的 `ProbQueueModel` 族(先合入上游 PR #323),`powf/ln` 用 `libm` 保证跨平台逐位一致;源码在 `vendor/hftbacktest/`,`PATCHES.md` 列出与上游差异。触发条件:MakerFirst 执行算法立项。
+- `Queue`:在 `TradeThrough` 之上加挂价处的先进先出排队位置,不依赖外部数据,只用本 crate 的簿副本与成交。挂单开始排队时记下该价位(买单看买边)当时的显示数量为"前方数量" `ahead`;之后:
+  1. **簿或 Bbo 更新**:该价位显示数量比上次减少的部分记为"未对上"(`unexp`,并记首次出现的交易所时刻)——交易所先发价位变化、约 20 ms 后才发成交(2026-10-20 Polymarket 录制);未对上部分超过 500 ms(交易所时间)仍无成交对上,按撤单处理且视为发生在本单之后(偏保守),清零;`ahead` 始终不超过"显示数量 + 未对上部分"。
+  2. **挂价处的成交**(价格等于挂价、吃单方在另一侧):先抵掉未对上部分,再按优先次序(价格、到达先后)从前方数量里扣;扣完的剩余量成交本单(至多剩余数量),再给下一张同价挂单。
+  3. 吃单方与挂单同侧的同价成交、穿价成交与穿价的簿,按 `TradeThrough` 规则处理。
+  4. 重启恢复的挂单排在该价位末尾(首个更新把 `ahead` 截到显示数量)。
+  已知限制:二元市场里另一个结果代币的买单与本单撮合(铸造)时,本代币没有成交消息,只能从价位减少看到,按上面第 1 条当作撤单(低估成交)。另一种实现是移植 hftbacktest `rust-v0.9.4` 的 `ProbQueueModel` 族(`queue-hftbacktest` feature,未做),触发条件:MakerFirst 执行算法立项。
 
 ### 5. 手续费与扣费资产
 

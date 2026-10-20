@@ -585,3 +585,50 @@ depth_conns = 300
         assert_eq!(c.venues["pm"].feed.depth_conns, Some(2), "CORE-424.4");
     }
 }
+
+#[test]
+fn core_425_sim_maker_fill() {
+    use hft_core::config::MakerFillKind;
+    let d = tempfile::tempdir().unwrap();
+    let path = support::write(d.path(), &d.path().join("hot"), None);
+    let text = std::fs::read_to_string(&path).unwrap();
+    // .1 absent → trade_through.
+    let c = hft_core::config::parse(&path).unwrap();
+    assert_eq!(
+        c.sim.as_ref().map(|p| p.maker_fill),
+        Some(MakerFillKind::TradeThrough),
+        "CORE-425.1"
+    );
+    // .2 `queue`.
+    std::fs::write(
+        &path,
+        text.replace(
+            "[sim]
+",
+            "[sim]
+maker_fill = 'queue'
+",
+        ),
+    )
+    .unwrap();
+    let c = hft_core::config::parse(&path).unwrap();
+    assert_eq!(
+        c.sim.as_ref().map(|p| p.maker_fill),
+        Some(MakerFillKind::Queue),
+        "CORE-425.2"
+    );
+    // .3 an unknown model → ConfigParse.
+    std::fs::write(
+        &path,
+        text.replace(
+            "[sim]
+",
+            "[sim]
+maker_fill = 'prob'
+",
+        ),
+    )
+    .unwrap();
+    let e = hft_core::config::parse(&path).unwrap_err();
+    assert!(e.iter().any(|e| e.code == "ConfigParse"), "CORE-425.3: {e:?}");
+}

@@ -254,6 +254,16 @@ pub struct Paper {
     /// Required while any venue is a paper venue (not `live_feed`).
     #[serde(default)]
     pub quotes: Vec<Quote>,
+    /// hft-sim `maker_fill` (resting-order fill model); absent = `trade_through`.
+    #[serde(default)]
+    pub maker_fill: MakerFillKind,
+}
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MakerFillKind {
+    #[default]
+    TradeThrough,
+    Queue,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

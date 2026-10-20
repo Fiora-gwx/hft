@@ -20,7 +20,13 @@ pub fn exchange(p: &Paper, rd: &RefData, hz: u64) -> Result<SimExchange, Error> 
         .collect();
     SimExchange::new(
         &SimSetup {
-            tuning: hft_sim::SimTuning::with_seed(p.seed),
+            tuning: hft_sim::SimTuning {
+                maker_fill: match p.maker_fill {
+                    crate::config::MakerFillKind::TradeThrough => hft_sim::MakerFill::TradeThrough,
+                    crate::config::MakerFillKind::Queue => hft_sim::MakerFill::Queue,
+                },
+                ..hft_sim::SimTuning::with_seed(p.seed)
+            },
             tsc_hz_milli: hz,
             accounts,
             latency_models: vec![hft_sim::LatencyModel::Fixed {

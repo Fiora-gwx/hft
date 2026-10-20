@@ -1254,6 +1254,11 @@ impl SimExchange {
                 last_due: 0,
                 lock: 0,
                 lock_asset: AssetId(0),
+                // Queue position is unknown after a restart: the back of the level (first update caps it).
+                ahead: i64::MAX,
+                lvl: 0,
+                unexp: 0,
+                unexp_ts: 0,
             };
             if let Some(x) = a.orders.get_mut(k) {
                 *x = o;

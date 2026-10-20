@@ -30,7 +30,7 @@ spec: README.md
 | 1. 时间 | SIM-010–SIM-012 |
 | 2. 簿副本 | SIM-020–SIM-023 |
 | 3. 吃单撮合 | SIM-030–SIM-036、SIM-125 |
-| 4. 挂单(预留给 MakerFirst) | SIM-040、SIM-041、SIM-162 |
+| 4. 挂单(预留给 MakerFirst) | SIM-228、SIM-040、SIM-041、SIM-162 |
 | 5. 手续费与扣费资产 | SIM-050–SIM-053、SIM-125、SIM-223 |
 | 6. 资金费 | SIM-060–SIM-063、SIM-125、SIM-166、SIM-203 |
 | 7. 永续全仓保证金与强平 | SIM-070–SIM-075、SIM-125、SIM-221、SIM-225 |
@@ -1736,3 +1736,18 @@ spec: README.md
   - 步骤 1:挂单 `CancelAck`;恰好一条 `ExternalFill{Delivery, Sell, BTC_S1, qty = 买入后的 BTC 余额, px 65000, fee 0, exch_order_id 1792425600, fill_seq = qty}`;BTC 余额 0;USDT 余额增加 qty × 65000
   - 步骤 2:没有 `ExternalFill`
 - 实现:`crates/hft-sim/tests/spot.rs::sim_227_settle_delivers_inventory`
+
+### SIM-228 `maker_fill = Queue`:挂价处的排队位置
+
+- 规则:[4. 挂单(预留给 MakerFirst)](README.md#4-挂单预留给-makerfirst)
+- 级别:table
+- 里程碑:M3
+- 前置:`setup_sim()` 且 `maker_fill = Queue`;`BTC_S1` 买一 59000 显示 1 BTC;账户 9 挂买 0.1 @ 59000(GTC)
+- 实现:`crates/hft-sim/tests/maker.rs::sim_228_queue_position`
+
+| 行 | 行情序列 | 期望 |
+|---|---|---|
+| SIM-228.1 | 买一 59000 显示 0.6,随后卖方吃单成交 0.4 @ 59000;显示 0.1,随后成交 0.5;再成交 0.15 | 前两次不成交;第三次成交 0.05 @ 59000 |
+| SIM-228.2 | 显示 0.5(无成交);600 ms 后再次显示 0.5;随后成交 0.55 | 成交 0.05(前方数量截到 0.5) |
+| SIM-228.3 | 买方吃单成交 5 @ 59000 | 不成交 |
+| SIM-228.4 | `TradeThrough`(`Sim::std()`),卖方吃单成交 5 @ 59000 | 不成交 |

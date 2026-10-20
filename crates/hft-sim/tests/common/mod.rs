@@ -682,12 +682,17 @@ impl Sim {
     }
 
     pub fn trade(&mut self, t: u64, inst: InstId, p: &str, x: &str) {
+        self.trade_by(t, inst, p, x, Side::Buy);
+    }
+
+    /// A public trade with the given taker side.
+    pub fn trade_by(&mut self, t: u64, inst: InstId, p: &str, x: &str, taker: Side) {
         let tr = Trade {
             h: mhdr(venue_of(inst), inst, t as i64),
             px: px(p),
             qty: q(x),
             trade_id: 1,
-            taker_side: Side::Buy,
+            taker_side: taker,
             _pad: [0; 7],
         };
         self.feed(t, MarketEventRef::Trade(&tr));
