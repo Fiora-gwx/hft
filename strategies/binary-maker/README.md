@@ -1,0 +1,131 @@
+---
+description: "binary-maker 策略(kind_id 7):二元结果代币(每个时间窗口一对 Up/Down)的挂单策略。参考市场的实现波动足够高、窗口离结束还远、参考价没有刚跳动时,在当前窗口 Up 与 Down 两个代币的买一价各挂一张 post-only 买单;其余时间撤单"
+kind: crate
+tier: hot
+scope: core
+status: impl
+---
+
+# binary-maker
+
+## 概要
+
+`binary-maker` 是二元结果代币的挂单策略(kind_id 7,登记在 [registry](../registry/README.md))。市场按固定长度的时间窗口滚动,每个窗口有一对结果代币(Up、Down),结算时赢的代币每单位兑付 1、输的兑付 0;代币 inst 是运行期绑定的槽位(绑定与交割由发现进程经 `BindSlot`/`Settle` 完成,[control-plane](../../docs/subsystems/control-plane.md#命令集))。规则来自对 2026-08 盘口与成交的事件级挂单回放(仓库外研究报告,2026-10-20):吃单没有正边际;排在买一的挂单只在参考市场的波动率 σ ≥ 0.5–0.7 bp/√s 时每份有 +0.1–0.2 美分,窗口最后一分钟、剩余标准差 < 1 bp 时为负;参考市场 ≥ 1σ 的跳动后 0.15 s 内的成交是有信息的(对挂单不利)。本策略只挂 post-only 买单、不吃单、不对冲,持仓到窗口结算。
+
+## 目录
+
+- [使用本组件](#使用本组件)
+  - [group 形态](#group-形态)
+  - [参数](#参数)
+  - [订阅](#订阅)
+  - [波动率](#波动率)
+  - [规则](#规则)
+  - [Note 码表与报表字段](#note-码表与报表字段)
+- [实现说明](#实现说明)
+- [延迟与资源契约](#延迟与资源契约)
+- [测试与验收](#测试与验收)
+- [依赖](#依赖)
+- [延伸阅读](#延伸阅读)
+- [已知限制与后续工作](#已知限制与后续工作)
+
+## 使用本组件
+
+### group 形态
+
+全部 group 都是单腿:前 `2 × pairs` 个是槽位(按顺序为第 0 对的 Up、Down,第 1 对的 Up、Down,……),都在同一个 venue;最后一个是参考市场(另一个 venue,只读,不下单)。group 总数须为奇数且 ≥ 3。`check` 的 `GroupShape` 码:1 = 数目不是 ≥ 3 的奇数;2 = 某 group 不是单腿;3 = 槽位腿不在第一个槽位的 venue 上,或参考腿在;4 = 腿的 inst 不在 refdata。开始时刻为 S 的窗口用第 (S / `window_s`) mod `pairs` 对槽位,与发现进程的槽位规则一致(`bind_slots.py --slots pairs`)。
+
+### 参数
+
+| 字段 | 单位 | 默认 | 说明 | relax |
+|---|---|---|---|---|
+| `enabled` | Bool | 0 | 关闭时不挂单,已挂的撤掉;人工设定 | Up |
+| `window_s` | Count | 300 | 窗口长度(秒) | None |
+| `clip_shares` | Count | 10 | 每张挂单的份数 | Up |
+| `inv_max_shares` | Count | 100 | 当前窗口 Up 减 Down 的净份数达到它时,多的一侧不再挂单 | Up |
+| `p_min` / `p_max` | Rate | 0.10 / 0.90 | 只在买一价落在 [p_min, p_max](占 1 的比例)内时挂单 | Down / Up |
+| `sigma_min` | Rate | 0.5 bp | 隐含波动率(每 √秒)下限 | Down |
+| `sigma_scale` | Rate | 1.39 | 隐含波动率 / 参考市场 1 秒实现波动率(研究里 5 分钟方差比 1.6–2.2 的平方根量级,隐含 σ ≈ 1.39 × 参考市场 30 分钟实现 σ) | None |
+| `min_rem_sd` | Rate | 1 bp | 剩余标准差(隐含 σ × √剩余秒数)下限 | Down |
+| `move_k` | Rate | 1.0 | 参考价相对上一个整秒样本的变动达到 `move_k` × σ 时撤掉全部挂单 | Up |
+| `pause_ms` | DurationMs | 1000 | 上述跳动之后不挂单的时长 | Down |
+| `stop_before_ms` | DurationMs | 60 000 | 窗口最后这段时间不挂单 | Down |
+| `vol_window_s` | Count | 1800 | 实现波动率用的 1 秒收益个数(30 分钟) | None |
+| `vol_min_samples` | Count | 300 | 至少这么多个样本才挂单 | Down |
+| `requote_ms` | DurationMs | 200 | 同一腿两次改价(撤单或挂单)的最短间隔(引擎时间) | Down |
+| `max_rest_ms` | DurationMs | 360 000 | 每张挂单的最长挂单时长(OMS 到期发 `Aged`) | Up |
+
+全部字段只有默认值(不按 group 覆盖);`minor_change` 均为 `None`。
+
+### 订阅
+
+槽位腿订阅 `BOOK`,参考腿订阅 `BBO`,都投递给快速部分(`Part::Fast`)。没有 Model。
+
+### 波动率
+
+参考腿每条 `Bbo` 取 2 × 中间价(买一 + 卖一)。UTC 秒内的第一条报价记一个样本:与上一个样本的相对变化 r(1e-9,截到 ±1),进入长度 `vol_window_s` 的环,同时维护 Σr²。σ = ⌊√(Σr² / 样本数)⌋(每秒,1e-9);样本数不足 `vol_min_samples` 时没有 σ(不挂单)。没有报价的秒不记样本。`clock_ok = false` 时不记样本。
+
+### 规则
+
+每条参考腿 `Bbo`、槽位腿 `Book` 与本实例的 `Order` 事件之后判一次:
+
+1. **跳动**:参考腿 `Bbo` 先判:有 σ 时,当前报价相对上一个样本的 |r| ≥ `move_k` × σ → `pause_until = now + pause_ms`(之后才记样本)。
+2. **当前窗口**:S = ⌊UTC 秒 / `window_s`⌋ × `window_s`,当前对 = (S / `window_s`) mod `pairs`,剩余 = S + `window_s` − 现在。
+3. **能否挂单**:`enabled`、`clock_ok`、`now.engine_ns ≥ pause_until`、剩余 > `stop_before_ms`、有 σ、隐含 σ = σ × `sigma_scale` ≥ `sigma_min`、隐含 σ × √剩余秒数 ≥ `min_rem_sd`(平方根取整数下界)。
+4. **每条槽位腿的目标价**:只有当前对的两条腿、且第 3 步成立时才有目标:该腿簿 `Live`、有买一 b、b 在 [p_min, p_max] 内、b < 卖一(或无卖一)、该侧净份数(Up 腿为 Up − Down,Down 腿为 Down − Up,仓位取 `group_pos` 第 0 腿)< `inv_max_shares`;目标价 = b。
+5. **动作**:有挂单且价格等于目标 → 不动;有挂单而目标不同或没有目标 → 撤单(有新目标时须距上次改价 ≥ `requote_ms`);没有挂单而有目标、距上次改价 ≥ `requote_ms` → `place` 一张 `OrderIntent{Buy, PostOnly, class Open, px = 目标, qty = clip_shares 份, tag = gix + 1, max_rest_ms}`(不带链接)。一条腿同时至多一张挂单;撤单在途时不再挂。
+6. **订单状态**:`place` 后下一个事件读 `Ctx::outcome`:`Placed(r)` → 记下 `r`,其余(`Rejected`、`Shadowed`、无结果)→ 视为没有挂单;`Order` 事件里 `Filled{done}`、`Cancelled`、`Rejected`、`Aged` → 没有挂单。
+
+持仓不平:窗口结束后由发现进程的 `Settle` 交割(模拟账户经 sim-gw;实盘交割尚未实现)。
+
+### Note 码表与报表字段
+
+无 Note、无报表字段、无策略命令(`desc.rs` 三表为空)。
+
+## 实现说明
+
+<details><summary>实现要点</summary>
+
+- 状态:每个槽位 group 一条 `Quote{id, inst, venue, state, handle, r, px, last_ens}`(`state` ∈ None/Placing/Live/Cancelling);参考 inst;波动率环 `Vol`;`pause_until`(engine_ns)。容量在 `new` 时按 `GroupTable::capacity()` 预留,`on_params` 只在 `vol_window_s` 变化时重建环。`GroupId` 与腿都不变的槽位保留挂单状态。
+- 全部整数运算:相对变化 ×1e9 用 i128,平方和 u128,整数平方根(牛顿法)。
+- 快照:`n: u16`,每个槽位 `id: u32, state: u8, venue: u8, account: u8, slot: u32, gen: u32, px: i64`,最后 `pause_until: i64`;`Placing` 存为 None。恢复按 `GroupId`;波动率环不进快照(重启后重新积累 `vol_min_samples` 个样本才挂单)。
+
+| 文件 | 职责 |
+|---|---|
+| `src/lib.rs` | `StrategyDesc` 与 `impl Strategy`,转发到 `fast` |
+| `src/fast/mod.rs` | 订阅、规则、订单状态、快照 |
+| `src/vol.rs` | 1 秒收益的实现波动率与整数平方根 |
+| `src/params.rs`、`src/desc.rs` | 参数 schema 与 `check`;空描述符 |
+| `tests/` | 场景测试与 refdata 夹具 |
+
+</details>
+
+## 延迟与资源契约
+
+每个事件 O(槽位数) 的整数运算,不分配(场景测试以计数分配器核对);`Model = NoModel`。状态每个槽位 64 B 以内,波动率环 `vol_window_s` × 8 B(默认 14.4 KB)。
+
+## 测试与验收
+
+用例见 [TESTS.md](TESTS.md)。上线前按模拟盘提案(`.agents/notes/proposed/architecture/2026-10-20-polymarket-sim-maker.md`)在 `sim` 实例连续运行两天。
+
+## 依赖
+
+只依赖 `hft-strategy-sdk`;测试另依赖 hft-testkit、hft-types、hft-refdata、hft-event(只在 `[dev-dependencies]`)。
+
+## 延伸阅读
+
+- [cookbook:新增一个策略](../../docs/cookbook/adding-a-strategy.md)
+- 模拟盘与挂单策略提案:`.agents/notes/proposed/architecture/2026-10-20-polymarket-sim-maker.md`
+
+## 已知限制与后续工作
+
+- 只挂买单:持有的代币不卖出、不合并,持仓到结算;库存只由 `inv_max_shares` 限制。
+- 返佣不计入;实盘挂单的排队位置与撤单竞争在模拟盘只能近似(hft-sim `maker_fill = Queue`)。
+- 实盘时本实例自己的挂单会出现在簿上,"买一"可能就是自己;实盘前需要在目标价里排除自己的数量。
+
+### 开发备忘
+
+<details><summary>给实现者</summary>
+
+参数默认值取研究报告的起点值;模拟两天后按成交与盈亏调整。
+
+</details>

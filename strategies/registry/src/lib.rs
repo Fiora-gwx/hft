@@ -22,6 +22,7 @@ hft_strategy_sdk::strategy_set! {
         latency_probe::LatencyProbe,
         portfolio_carry::PortfolioCarry,
         book_observer::BookObserver,
+        binary_maker::BinaryMaker,
     }
 }
 

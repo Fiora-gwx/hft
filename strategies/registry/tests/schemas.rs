@@ -290,5 +290,5 @@ fn reg_014_get_schema_same() {
     let lp = &e.iter().find(|f| f.0 == "5-latency-probe.schema.json").unwrap().1;
     assert_eq!(Strategies::schema_json(5).as_ref(), Some(lp), "REG-014.1");
     assert_eq!(Strategies::schema_json(0xFF01), None, "REG-014.2");
-    assert_eq!(Strategies::schema_json(7), None, "REG-014.3");
+    assert_eq!(Strategies::schema_json(8), None, "REG-014.3");
 }

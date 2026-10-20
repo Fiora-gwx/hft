@@ -40,6 +40,7 @@ members = [
     "tools/latency-slice",
     "tools/pm-md-probe",
     "strategies/book-observer",
+    "strategies/binary-maker",
 ]
 
 [workspace.package]
