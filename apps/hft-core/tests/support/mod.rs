@@ -666,23 +666,74 @@ pub fn write_polymarket_sim(
     src_ip: &str,
     bind_device: &str,
 ) -> PathBuf {
+    write_pm(
+        root,
+        hot,
+        user,
+        pipeline,
+        src_ip,
+        bind_device,
+        &PM_COINS,
+        2,
+        false,
+    )
+}
+
+/// The maker simulation (`--dry-run`, `live_feed` venues): `polymarket-clob` with three BTC slot
+/// pairs (InstId 1–6: up-0, dn-0, up-1, dn-1, up-2, dn-2) and `binance-spot` BTCUSDT (InstId 7) as
+/// the reference; Sim account `sim-pm` (10 000 USDC) bound to a `binary-maker` instance (enabled,
+/// other parameters at their defaults) with one single-leg group per slot plus the reference group;
+/// `[sim] maker_fill = "queue"`. Discovery: `bind_slots.py --assets btc --slots 3 --settle`.
+#[cfg(feature = "polymarket")]
+#[allow(dead_code)]
+pub fn write_polymarket_maker_sim(
+    root: &Path,
+    hot: &Path,
+    user: Option<&str>,
+    pipeline: Option<&str>,
+    src_ip: &str,
+    bind_device: &str,
+) -> PathBuf {
+    write_pm(root, hot, user, pipeline, src_ip, bind_device, &["btc"], 3, true)
+}
+
+#[cfg(feature = "polymarket")]
+#[allow(clippy::too_many_arguments)]
+fn write_pm(
+    root: &Path,
+    hot: &Path,
+    user: Option<&str>,
+    pipeline: Option<&str>,
+    src_ip: &str,
+    bind_device: &str,
+    coins: &[&str],
+    pairs: usize,
+    maker: bool,
+) -> PathBuf {
     use hft_venue_proto::VenueProtocol;
     std::fs::create_dir_all(root).unwrap();
     let v = VenueId::POLYMARKET_CLOB;
+    let bn = VenueId::BINANCE_SPOT;
     let a = AccountId(1);
     let usdc = AssetId(1);
     let desc = Strategies::kinds()
         .iter()
-        .find(|d| d.name == "book-observer")
+        .find(|d| d.name == if maker { "binary-maker" } else { "book-observer" })
         .unwrap();
     let mut slots = Vec::new();
-    for coin in PM_COINS {
-        for k in 0..2 {
+    for coin in coins {
+        for k in 0..pairs {
             for side in ["up", "dn"] {
                 slots.push(format!("{coin}-{side}-{k}"));
             }
         }
     }
+    // Reference market of the maker: BTC and USDT assets after the token assets.
+    let btc = AssetId(slots.len() as u16 + 2);
+    let usdt = AssetId(slots.len() as u16 + 3);
+    // Binance spot's fee rule names BNB (fee discount asset).
+    let bnb = AssetId(slots.len() as u16 + 4);
+    let reference = InstId(slots.len() as u32 + 1);
     let token = |i: usize| AssetId(i as u16 + 2);
     let mut b = RdbBuilder::new(1);
     b.asset(AssetSpec {
@@ -710,6 +761,78 @@ pub fn write_polymarket_sim(
             qty_max: Qty(1_000_000_000_000_000),
             dust: Qty(1),
         });
+    }
+    if maker {
+        for (id, name, class, px_exp, qty_exp) in [
+            (btc, "BTC", AssetClass::Crypto, -4, -8),
+            (usdt, "USDT", AssetClass::Stable, -6, -6),
+            (bnb, "BNB", AssetClass::Crypto, -4, -8),
+        ] {
+            b.asset(AssetSpec {
+                id,
+                name: name.into(),
+                class,
+                exp: AssetExp { px_exp, qty_exp },
+                px_max: Px(1_000_000_000_000),
+                qty_max: Qty(1_000_000_000_000_000),
+                dust: Qty(1),
+            });
+        }
+        b.venue(VenueSpec {
+            id: bn,
+            exchange: Exchange::Binance,
+            product: InstKind::Spot,
+            ws_max_streams_per_conn: 1024,
+            ws_max_in_msgs_per_s: 5,
+            ws_max_conn_age_s: 86400,
+            ws_new_conn_per_5min_ip: 300,
+            app_ping_interval_s: 0,
+            ts_unit: TsUnit::Us,
+            client_id_max_len: 36,
+            client_id_prefix: "".into(),
+            max_batch: 5,
+            max_inflight_amend: 1,
+            crossed_tolerance_default: 0,
+            stale_guard: StaleGuardKind::RecvWindow,
+        });
+        for (role, url) in [
+            (EndpointRole::MdPublic, "wss://stream.binance.com/ws"),
+            (EndpointRole::MdMarket, "wss://stream.binance.com/ws"),
+            (EndpointRole::Rest, "https://api.binance.com"),
+        ] {
+            b.endpoint(
+                bn,
+                Endpoint {
+                    env: EndpointEnv::Prod,
+                    role,
+                    url: url.into(),
+                    conn_group: 0,
+                },
+            );
+        }
+        b.caps(venue_binance::Spot::default_caps(|s| match s {
+            "USDT" => Some(usdt),
+            "BNB" => Some(bnb),
+            _ => None,
+        }));
+        b.fee(FeeSpec {
+            venue: bn,
+            tier: 0,
+            fee: FeePair {
+                maker: Rate(1_000_000),
+                taker: Rate(1_000_000),
+            },
+        });
+        b.limit(
+            bn,
+            RateLimit {
+                scope: LimitScope::Account,
+                bucket: LimitBucket::Orders,
+                limit: 100,
+                window_ms: 1000,
+                default_cost: 1,
+            },
+        );
     }
     b.venue(VenueSpec {
         id: v,
@@ -789,10 +912,30 @@ pub fn write_polymarket_sim(
             ..InstSpec::default()
         });
     }
+    if maker {
+        b.inst(InstSpec {
+            id: reference,
+            venue: bn,
+            symbol: "BTCUSDT".into(),
+            kind: InstKind::Spot,
+            asset: btc,
+            quote: usdt,
+            tick: 100,
+            lot: 1000,
+            min_qty: Qty(1000),
+            max_qty: Qty(100_000_000_000),
+            min_notional: Notional(5_000_000),
+            book_window: 4096,
+            tick_str: "0.01".into(),
+            lot_str: "0.00001".into(),
+            min_qty_str: "0.00001".into(),
+            ..InstSpec::default()
+        });
+    }
     b.instance(InstanceSpec {
         id: StrategyId(1),
         kind_id: desc.kind_id,
-        name: "pm-observer".into(),
+        name: if maker { "pm-maker" } else { "pm-observer" }.into(),
     });
     b.account(AccountSpec {
         id: a,
@@ -813,15 +956,21 @@ pub fn write_polymarket_sim(
         account: a,
         venue: v,
         asset: usdc,
-        qty: Qty(1_000_000_000),
+        qty: Qty(if maker { 10_000_000_000 } else { 1_000_000_000 }),
     });
     let rdb = b.finish();
     let rd = RefData::load(&rdb, None).unwrap();
     let schema = desc.schema;
-    let n = slots.len() as u16;
-    let defaults: Vec<_> = (0..schema.n_fields())
+    let n = slots.len() as u16 + u16::from(maker);
+    let mut defaults: Vec<_> = (0..schema.n_fields())
         .map(|i| schema.field(i).unwrap().default)
         .collect();
+    if maker {
+        let enabled = (0..schema.n_fields())
+            .position(|i| schema.field(i).unwrap().name == "enabled")
+            .unwrap();
+        defaults[enabled] = 1;
+    }
     let body = encode_body(
         schema,
         n,
@@ -857,15 +1006,16 @@ pub fn write_polymarket_sim(
     };
     let mut params = h.as_bytes().to_vec();
     for i in 0..usize::from(n) {
+        let (asset, venue) = if i < slots.len() { (token(i), v) } else { (btc, bn) };
         let g = GroupSpec {
             id: GroupId::compose(StrategyId(1), i as u32 + 1).unwrap(),
-            asset: token(i),
+            asset,
             n_legs: 1,
-            open_allowed: 0,
+            open_allowed: u8::from(maker && i < slots.len()),
             legs: [
                 LegDef {
                     inst: InstId(i as u32 + 1),
-                    venue: v,
+                    venue,
                     kind: LegDef::CEX,
                     ..none
                 },
@@ -881,7 +1031,8 @@ pub fn write_polymarket_sim(
     let mut risk = hft_risk::ParamsBuilder::new(&rd);
     risk.rate_headroom = Rate(100_000_000);
     risk.classes.push(hft_risk::BandSpec {
-        max_px_dev: Rate(30_000_000),
+        // Outcome-token spreads are wide relative to their price (0.01 at 0.10 is 10 %).
+        max_px_dev: Rate(if maker { 500_000_000 } else { 30_000_000 }),
         ioc_max_cross: Rate(5_000_000),
         rr_max_cross: Some(Rate(10_000_000)),
     });
@@ -889,18 +1040,29 @@ pub fn write_polymarket_sim(
         a,
         hft_risk::AcctSpec {
             max_order_notional: Notional(10_000_000),
-            max_account_notional: Notional(100_000_000),
+            max_account_notional: Notional(if maker { 10_000_000_000 } else { 100_000_000 }),
             account_notional_from_equity: Rate(1_000_000_000),
-            default_group: hft_risk::GroupLimits {
-                max_group_notional: Notional(10_000_000),
-                max_pos_qty: Qty(100_000_000),
-                naked_gate: Rate(500_000_000),
-                naked_gate_min: Notional(10_000_000),
+            // A slot group is one leg held to settlement: its whole position is "naked" (ratio 1),
+            // so the exposure gate is off for the maker (naked_gate = 1).
+            default_group: if maker {
+                hft_risk::GroupLimits {
+                    max_group_notional: Notional(1_000_000_000),
+                    max_pos_qty: Qty(1_000_000_000),
+                    naked_gate: Rate(1_000_000_000),
+                    naked_gate_min: Notional(1_000_000_000),
+                }
+            } else {
+                hft_risk::GroupLimits {
+                    max_group_notional: Notional(10_000_000),
+                    max_pos_qty: Qty(100_000_000),
+                    naked_gate: Rate(500_000_000),
+                    naked_gate_min: Notional(10_000_000),
+                }
             },
             max_hedge_notional: Some(Notional(10_000_000)),
             max_reduce_notional: Some(Notional(10_000_000)),
             daily_loss_kill: Rate(100_000_000),
-            daily_loss_abs: Notional(10_000_000),
+            daily_loss_abs: Notional(if maker { 1_000_000_000 } else { 10_000_000 }),
             recon_closeonly_notional: Notional(5_000_000),
             ..hft_risk::AcctSpec::default()
         },
@@ -909,7 +1071,7 @@ pub fn write_polymarket_sim(
         v,
         a,
         hft_risk::VenueSpec {
-            max_venue_notional: Notional(100_000_000),
+            max_venue_notional: Notional(if maker { 10_000_000_000 } else { 100_000_000 }),
             inst_bucket_per_s: 10,
             backoff_base_ms: 500,
             backoff_max_ms: 8000,
@@ -935,7 +1097,7 @@ pub fn write_polymarket_sim(
             max_instances: 4,
         },
         ledger,
-        venues: vec![v],
+        venues: if maker { vec![v, bn] } else { vec![v] },
         keys: vec![],
         epoch: 1,
         tsc_hz_milli: 1_000_000_000_000,
@@ -947,7 +1109,7 @@ pub fn write_polymarket_sim(
     let mut engine = engine_setup(&rig, &rd);
     engine.drain_timeout_ms = 3000;
     engine.gws.venues.clear();
-    engine.feeds = VenueSet(1 << v.0);
+    engine.feeds = VenueSet((1 << v.0) | if maker { 1 << bn.0 } else { 0 });
     engine.seq.rings[7] = hft_sequencer::RingLimit::default();
     engine.seq.allow_missing_standby = 1;
     engine.exec.default.force_slice.max_chunk_notional = Notional(10_000_000);
@@ -994,15 +1156,15 @@ bytes = 4194304
 [venues.pm]
 protocol = 'polymarket-clob'
 id = {}
-max_sub_insts = 16
+max_sub_insts = {n_slots}
 stale_guard_ms = 1500
 src_ip = '{src_ip}'
 bind_device = '{bind_device}'
 live_feed = true
 [venues.pm.feed]
 depth_conns = 2
-[sim]
-seed = 123
+{bn_text}[sim]
+{maker_fill}seed = 123
 entry_us = 100
 resp_us = 100
 leverage = 1
@@ -1012,7 +1174,18 @@ liq_slippage_bp = 10
 quote_interval_ms = 1000
 "#,
         hot.display(),
-        v.0
+        v.0,
+        n_slots = slots.len(),
+        bn_text = if maker {
+            format!(
+                "[venues.bn]\nprotocol = 'binance-spot'\nid = {}\nmax_sub_insts = 1\nstale_guard_ms = 1500\n\
+                 src_ip = '{src_ip}'\nbind_device = '{bind_device}'\nlive_feed = true\n",
+                bn.0
+            )
+        } else {
+            String::new()
+        },
+        maker_fill = if maker { "maker_fill = 'queue'\n" } else { "" },
     );
     for (name, task, nice) in [
         ("sequencer", "sequencer", 0),
@@ -1025,6 +1198,12 @@ quote_interval_ms = 1000
         ("build-pm", "conn-builder:pm", 10),
     ] {
         text += &format!("\n[[threads]]\nname = '{name}'\ntask = '{task}'\npark_us = 100\nnice = {nice}\n");
+    }
+    if maker {
+        for (name, task, nice) in [("feed-bn", "feed:bn", 0), ("build-bn", "conn-builder:bn", 10)] {
+            text +=
+                &format!("\n[[threads]]\nname = '{name}'\ntask = '{task}'\npark_us = 100\nnice = {nice}\n");
+        }
     }
     for (name, bytes) in [
         ("refdata", rdb),

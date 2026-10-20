@@ -79,6 +79,10 @@ pm-md-probe journal --refdata RDB1 --out FILE --bindings-out FILE SEG...
 - `pm-md-probe journal`:按 `BindSlot` 命令记录跟踪每个槽位当前的窗口,输出与[产出](#产出)相同的事件行,`slot` 为 `<asset>-<S>-<up|dn>`,改绑时清空该 inst 的簿,并像引擎重同步一样丢弃其增量直到该代币的第一个整簿;只用 `origin = EXCHANGE` 的 `L2Snapshot`(sequencer 关键帧里的簿副本不是行情);`--bindings-out` 写 `compare.py` 的绑定文件(每次绑定一项)。
 - 通过标准与[验收步骤](#验收步骤)第 3 步相同,覆盖至少两个连续窗口(含一次改绑)。
 
+### 挂单模拟
+
+`pm_sim_config --maker OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]` 生成挂单模拟的配置([CORE-426](../../apps/hft-core/TESTS.md#core-426-polymarket-挂单模拟配置可加载)):`polymarket-clob` 三对 BTC 槽位(`btc-{up,dn}-{0,1,2}`)与 `binance-spot` BTCUSDT 参考,两个 venue 都是 `live_feed`;模拟账户 10 000 USDC 绑定 `binary-maker`(已启用,其余参数取默认,[binary-maker](../../strategies/binary-maker/README.md));`[sim] maker_fill = "queue"`。发现进程:`bind_slots.py --assets btc --slots 3 --settle`(窗口结束后按 CLOB 公布的赢家发 `Settle`,模拟库存按 1/0 交割)。结果从 seq journal 读(成交、`ExternalFill{Delivery}`、余额)。
+
 ### 存储
 
 hft-core 验收运行的 journal 量(2026-10-20,16 个槽位):raw-feed 约 63 GB/天、seq 约 23 GB/天,zstd -3 压缩比约 6×。因此:

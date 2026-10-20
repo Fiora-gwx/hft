@@ -632,3 +632,39 @@ maker_fill = 'prob'
     let e = hft_core::config::parse(&path).unwrap_err();
     assert!(e.iter().any(|e| e.code == "ConfigParse"), "CORE-425.3: {e:?}");
 }
+
+#[cfg(feature = "polymarket")]
+#[test]
+fn core_426_polymarket_maker_sim_config_loads() {
+    use hft_types::{InstId, VenueId};
+    let d = tempfile::tempdir().unwrap();
+    let path =
+        support::write_polymarket_maker_sim(d.path(), &d.path().join("hot"), None, None, "127.0.0.1", "lo");
+    let l = match hft_core::config::load(&path, true) {
+        Ok(l) => l,
+        Err(e) => panic!("CORE-426.1: {e:?}"),
+    };
+    // .2 three BTC slot pairs on polymarket-clob and the BTCUSDT reference on binance-spot.
+    assert_eq!(
+        l.rd.insts_of_venue(VenueId::POLYMARKET_CLOB).len(),
+        6,
+        "CORE-426.2"
+    );
+    assert_eq!(
+        l.rd.insts_of_venue(VenueId::BINANCE_SPOT),
+        [InstId(7)],
+        "CORE-426.2"
+    );
+    assert_eq!(
+        l.rd.inst_meta(InstId(3)).symbol.as_ref(),
+        "btc-up-1",
+        "CORE-426.2"
+    );
+    // .3 both venues live; the sim fills resting orders by queue position.
+    assert!(l.cfg.venues.values().all(|v| v.live_feed), "CORE-426.3");
+    assert_eq!(
+        l.cfg.sim.as_ref().map(|p| p.maker_fill),
+        Some(hft_core::config::MakerFillKind::Queue),
+        "CORE-426.3"
+    );
+}
