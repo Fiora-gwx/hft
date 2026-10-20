@@ -585,9 +585,14 @@ where
     let mut sides = vec![fs];
     // A protocol without a Bbo route (Polymarket) runs the Md routes only, with its whole
     // DepthTopN book; the others keep the defaults (BBO racing plus TopN depth).
+    let dry = c.sim.is_some();
+    let raw_bbo = crate::config::RawKind::resolve(v.feed.raw.bbo, dry);
+    let raw_md = crate::config::RawKind::resolve(v.feed.raw.md, dry);
     let feed_cfg = if P::routes().iter().any(|r| r.kind == RouteKind::Bbo) {
         FeedCfg {
             max_sub_insts: v.max_sub_insts,
+            raw_bbo,
+            raw_md,
             venue: feed_venue,
             endpoints: targets,
             ..FeedCfg::default()
@@ -605,6 +610,8 @@ where
             depth: hft_venue::DepthMode::TopN,
             topn_levels: levels,
             snapshot_part_levels: 256,
+            raw_bbo,
+            raw_md,
             venue: feed_venue,
             endpoints: targets,
             ..FeedCfg::default()

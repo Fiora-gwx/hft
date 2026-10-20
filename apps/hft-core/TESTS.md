@@ -56,7 +56,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 多账户 | CORE-330、CORE-168、CORE-247、CORE-313 |
 | HostProfile | CORE-340–CORE-343、CORE-419 |
 | HeartbeatBlock | CORE-350–CORE-352 |
-| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422 |
+| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423 |
 | 实现说明 | CORE-380–CORE-387、CORE-409、CORE-415–CORE-418、CORE-420 |
 | 延迟与资源契约 | CORE-400–CORE-408、CORE-267 |
 | 测试与验收 | 不适用:非规范 |
@@ -4346,6 +4346,20 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 - 步骤:按 `--dry-run` 加载生成的配置
 - 期望:加载成功;refdata 的 `polymarket-clob` 每连接 2 个流、16 个槽位 inst,inst 1 的 tick 为 1(px_exp −3,即 0.001)
 - 实现:`apps/hft-core/tests/config.rs::core_422_polymarket_sim_config_loads`
+
+### CORE-423 raw-feed 的写入粒度
+
+- 规则:[配置文件字段](README.md#配置文件字段)
+- 级别:table
+- 里程碑:M3
+- 前置:`support::write` 的离线配置
+- 实现:`apps/hft-core/tests/config.rs::core_423_feed_raw_modes`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-423.1 | 未配置,网络模式 / `--dry-run`;配置 `sampled`、`on` 于 `--dry-run` | `On` / `Off`;配置值优先 |
+| CORE-423.2 | `[venues.public.feed.raw] bbo = "off"`、`md = "sampled"` | 解析为 `Off`、`Sampled` |
+| CORE-423.3 | `md = "all"`;未知键 `dups` | `ConfigParse` |
 
 ## 验收
 

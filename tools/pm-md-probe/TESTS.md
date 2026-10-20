@@ -19,6 +19,7 @@ spec: README.md
 | 产出 | PMP-001 |
 | 验收步骤 | PMP-001 |
 | hft-core 验收 | PMP-002 |
+| 存储 | PMP-003 |
 | 实现说明 | PMP-001、PMP-002 |
 | 延迟与资源契约 | 不适用:无门槛 |
 | 测试与验收 | 不适用:非规范 |
@@ -47,6 +48,17 @@ spec: README.md
 - 步骤:启动 `hft-core --dry-run`,随后启动 `bind_slots.py`;运行跨越至少两个连续窗口加 60 s 后停止;`pm-md-probe journal` 读 seq 段,`compare.py` 比对
 - 期望:每个窗口的 `BindSlot` 结果为 `Applied`(重发为 `NoOp`),同一槽位相隔一个窗口改绑一次;全部绑定 `OK`,`RESULT PASS`
 - 实现:手动运行,结果写回本文件"验收"一节
+
+### PMP-003 journal 清理不碰运行中的段
+
+- 规则:[存储](README.md#存储)
+- 级别:host
+- 里程碑:M3
+- 前置:pm-strategy-euw1;两个已停止的运行与一个正在运行的 `pmcore_run.sh`
+- 步骤:运行中以 `PMCORE_MIN_AGE_MIN=0 PMCORE_KEEP_DAYS=0` 执行 `journal_housekeep.sh`,运行结束后再执行一次
+- 期望:运行中最新段保持 `.jrn`、运行目录不删除、hft-core 正常 Drain 退出 0;结束后全部冷段为 `.jrn.zst`;已停止运行的冷段全部压缩
+- 证据:2026-10-20 06:03 UTC 手动执行,两个已停止运行 1.1 GB/1.3 GB → 548 MB/517 MB(其余为验收产物),运行中的段未动,hft-core `STOPPED exit=0`
+- 实现:手动运行
 
 ## 验收
 

@@ -492,3 +492,50 @@ fn core_422_polymarket_sim_config_loads() {
     let i = l.rd.inst(hft_types::InstId(1));
     assert_eq!((i.tick, i.px_exp), (1, -3), "CORE-422.2");
 }
+#[test]
+fn core_423_feed_raw_modes() {
+    use hft_core::config::RawKind;
+    use hft_venue::RawMode;
+    // .1 defaults: network mode on, --dry-run off; an explicit value wins.
+    assert_eq!(RawKind::resolve(None, false), RawMode::On, "CORE-423.1");
+    assert_eq!(RawKind::resolve(None, true), RawMode::Off, "CORE-423.1");
+    assert_eq!(
+        RawKind::resolve(Some(RawKind::Sampled), true),
+        RawMode::Sampled,
+        "CORE-423.1"
+    );
+    assert_eq!(
+        RawKind::resolve(Some(RawKind::On), true),
+        RawMode::On,
+        "CORE-423.1"
+    );
+    let d = tempfile::tempdir().unwrap();
+    let path = support::write(d.path(), &d.path().join("hot"), None);
+    let text = std::fs::read_to_string(&path).unwrap();
+    // .2 `venues.<v>.feed.raw` parses.
+    let with = text.replace(
+        "[sim]",
+        "[venues.public.feed.raw]\nbbo = 'off'\nmd = 'sampled'\n[sim]",
+    );
+    std::fs::write(&path, &with).unwrap();
+    let c = hft_core::config::parse(&path).unwrap();
+    let v = &c.venues["public"];
+    assert_eq!(
+        (v.feed.raw.bbo, v.feed.raw.md),
+        (Some(RawKind::Off), Some(RawKind::Sampled)),
+        "CORE-423.2"
+    );
+    // .3 an unknown mode or key is a parse error.
+    for bad in ["md = 'all'", "dups = true"] {
+        std::fs::write(
+            &path,
+            text.replace("[sim]", &format!("[venues.public.feed.raw]\n{bad}\n[sim]")),
+        )
+        .unwrap();
+        let e = hft_core::config::parse(&path).unwrap_err();
+        assert!(
+            e.iter().any(|e| e.code == "ConfigParse"),
+            "CORE-423.3 {bad}: {e:?}"
+        );
+    }
+}

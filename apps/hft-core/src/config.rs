@@ -179,6 +179,40 @@ pub struct Venue {
     /// `sim.quotes` (orders stay in sim-gw; no account, no key).
     #[serde(default)]
     pub live_feed: bool,
+    /// hft-venue feed keys (`venues.<v>.feed.*`); only `feed.raw` in this assembly.
+    #[serde(default)]
+    pub feed: FeedOpts,
+}
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FeedOpts {
+    #[serde(default)]
+    pub raw: RawOpts,
+}
+/// `venues.<v>.feed.raw.{bbo,md}` (hft-venue): absent = the instance default, `on` for network
+/// mode and `off` for `--dry-run` (the sim instance of the memory table).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawOpts {
+    pub bbo: Option<RawKind>,
+    pub md: Option<RawKind>,
+}
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RawKind {
+    Off,
+    Sampled,
+    On,
+}
+impl RawKind {
+    /// The configured mode, else `on` in network mode and `off` in `--dry-run`.
+    pub fn resolve(v: Option<RawKind>, dry: bool) -> hft_venue::RawMode {
+        match v.unwrap_or(if dry { RawKind::Off } else { RawKind::On }) {
+            RawKind::Off => hft_venue::RawMode::Off,
+            RawKind::Sampled => hft_venue::RawMode::Sampled,
+            RawKind::On => hft_venue::RawMode::On,
+        }
+    }
 }
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(deny_unknown_fields)]

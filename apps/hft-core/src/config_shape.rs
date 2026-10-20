@@ -42,8 +42,17 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
         "rings" => (&["elements", "bytes"], &[]),
         "venue" => (
             &["protocol", "id", "max_sub_insts", "stale_guard_ms"],
-            &["src_ip", "bind_device", "account_io", "accounts", "live_feed"],
+            &[
+                "src_ip",
+                "bind_device",
+                "account_io",
+                "accounts",
+                "live_feed",
+                "feed",
+            ],
         ),
+        "venue_feed" => (&[], &["raw"]),
+        "feed_raw" => (&[], &["bbo", "md"]),
         "account_io" => (
             &[
                 "timeout_ms",
@@ -121,6 +130,8 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
             ) => Some(key.as_str()),
             ("blobs", "refdata" | "engine" | "risk_params") => Some("blob"),
             ("venue", "account_io") => Some("account_io"),
+            ("venue", "feed") => Some("venue_feed"),
+            ("venue_feed", "raw") => Some("feed_raw"),
             ("journal", "raw_feed" | "raw_gw") => Some("journal_size"),
             _ => None,
         };
