@@ -59,6 +59,7 @@ impl CmdKind {
     pub const SMOKE_ORDER: Self = CmdKind(0x001A);
     pub const WRITE_OFF_RESIDUAL: Self = CmdKind(0x001B);
     pub const SIM_FAULT: Self = CmdKind(0x001C);
+    pub const BIND_SLOT: Self = CmdKind(0x001D);
 
     /// Name of an assigned number; reserved, retired and unassigned → `None`.
     pub fn name(self) -> Option<&'static str> {
@@ -277,6 +278,16 @@ pub enum ControlCmd<'a> {
         _pad: u8,
         delay_ms: u32,
     },
+    /// Binds a slot inst of a run-time-bound venue to an exchange wire id (Polymarket outcome
+    /// token: uint256, big-endian; all zero = unbind) for the window `[start_s, end_s)` (UTC s).
+    BindSlot {
+        venue: VenueId,
+        _pad: [u8; 3],
+        inst: InstId,
+        start_s: i64,
+        end_s: i64,
+        wire_id: [u8; 32],
+    },
 }
 
 /// Fixed payload size of `(cmd, cmd_ver)`; `None` = unknown command or version.
@@ -304,6 +315,7 @@ fn payload_size(cmd: CmdKind, ver: u16) -> Option<usize> {
         (CmdKind::INJECT_WARMUP, 1) => 16,
         (CmdKind::SMOKE_ORDER, 1) => 16,
         (CmdKind::WRITE_OFF_RESIDUAL | CmdKind::SIM_FAULT, 1) => 8,
+        (CmdKind::BIND_SLOT, 1) => 56,
         _ => return None,
     };
     Some(n)
@@ -421,6 +433,7 @@ impl<'a> ControlCmd<'a> {
             ControlCmd::SmokeOrder { .. } => CmdKind::SMOKE_ORDER,
             ControlCmd::WriteOffResidual { .. } => CmdKind::WRITE_OFF_RESIDUAL,
             ControlCmd::SimFault { .. } => CmdKind::SIM_FAULT,
+            ControlCmd::BindSlot { .. } => CmdKind::BIND_SLOT,
         }
     }
 
@@ -648,6 +661,21 @@ impl<'a> ControlCmd<'a> {
                 w.u8(3, *_pad);
                 w.u32(4, *delay_ms);
             }
+            ControlCmd::BindSlot {
+                venue,
+                _pad,
+                inst,
+                start_s,
+                end_s,
+                wire_id,
+            } => {
+                w.u8(0, venue.0);
+                w.b(1, _pad);
+                w.u32(4, inst.0);
+                w.i64(8, *start_s);
+                w.i64(16, *end_s);
+                w.b(24, wire_id);
+            }
         }
         Ok(total)
     }
@@ -862,6 +890,17 @@ impl<'a> ControlCmd<'a> {
                 _pad: r.u8(3),
                 delay_ms: r.u32(4),
             },
+            CmdKind::BIND_SLOT => {
+                r.zero(1, 4)?;
+                ControlCmd::BindSlot {
+                    venue: venue(0),
+                    _pad: [0; 3],
+                    inst: InstId(r.u32(4)),
+                    start_s: r.i64(8),
+                    end_s: r.i64(16),
+                    wire_id: r.arr(24),
+                }
+            }
             _ => return Err(DecodeErr::UnknownKind),
         };
         Ok((hdr, cmd))

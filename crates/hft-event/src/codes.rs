@@ -50,6 +50,7 @@ desc!(
     CancelAll = 0x000F, Drain = 0x0010, RecordTransfer = 0x0011, Annotate = 0x0012, AdoptExchange = 0x0013,
     SimReset = 0x0014, SimTransfer = 0x0015, VenueNotice = 0x0016, SetBalanceBaseline = 0x0017,
     StrategyCmd = 0x0018, InjectWarmup = 0x0019, SmokeOrder = 0x001A, WriteOffResidual = 0x001B, SimFault = 0x001C,
+    BindSlot = 0x001D,
 ]);
 
 // Execution.

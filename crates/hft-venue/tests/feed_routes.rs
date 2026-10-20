@@ -268,3 +268,81 @@ fn ven_065_event_rings() {
     assert!(matches!(e[5], FeedMsg::Liquidation(_, _)));
     assert!(h.bulk.as_mut().unwrap().peek().is_some());
 }
+
+#[test]
+fn ven_396_bind_wire_rebinds_and_resubscribes() {
+    use hft_event::{ConnStateKind, FeedCmd};
+    let mut h = feed(f0());
+    let mut t = 100;
+    h.up(&[S1], streams::BOOK, &mut t);
+    let depth = ConnId(8);
+    h.clear();
+    let parts = |h: &mut crate::support::feedh::Fh, id: [u8; 32], upto: u8| {
+        for p in 0..upto {
+            let mut chunk = [0u8; 8];
+            chunk.copy_from_slice(&id[usize::from(p) * 8..usize::from(p) * 8 + 8]);
+            h.cmd
+                .try_push(FeedCmd::BindWire {
+                    inst: S1,
+                    part: p,
+                    chunk,
+                })
+                .unwrap();
+        }
+    };
+    // .1 four parts: bound once, then UNSUB and SUB of the depth stream on its connection, and
+    // the book waits for a snapshot (Resync NEW_SUB).
+    let id: [u8; 32] = core::array::from_fn(|k| k as u8);
+    parts(&mut h, id, 4);
+    // Subscription frames are paced: give the queue time to drain.
+    for _ in 0..4 {
+        t += 1_000_000_000;
+        h.poll(t);
+    }
+    assert_eq!(h.rt.ctx().bound, vec![(S1, id)], "VEN-396.1");
+    let sent = h.net.sent_text(&mut h.rt, depth);
+    let unsub = sent
+        .iter()
+        .position(|f| f.starts_with("UNSUB|") && f.contains(&format!("{}d", S1.0)));
+    let sub = sent
+        .iter()
+        .rposition(|f| f.starts_with("SUB|") && f.contains(&format!("{}d", S1.0)));
+    assert!(
+        matches!((unsub, sub), (Some(u), Some(s)) if u < s),
+        "VEN-396.1 {sent:?}"
+    );
+    let st = states(&h.drain_md());
+    assert!(
+        st.iter().any(|s| s.state == ConnStateKind::Resync
+            && s.inst == S1
+            && s.reason == hft_venue::codes::NEW_SUB),
+        "VEN-396.1 {st:?}"
+    );
+    assert_eq!(h.rt.counters().binds, 1, "VEN-396.1");
+    // .2 a missing part: part 3 alone does not bind.
+    let before = h.rt.counters().cmd_ignored;
+    h.cmd
+        .try_push(FeedCmd::BindWire {
+            inst: S1,
+            part: 3,
+            chunk: [9; 8],
+        })
+        .unwrap();
+    t += 10;
+    h.poll(t);
+    assert_eq!(h.rt.ctx().bound.len(), 1, "VEN-396.2");
+    assert_eq!(h.rt.counters().cmd_ignored, before + 1, "VEN-396.2");
+    // .3 refused by the protocol: counted, no resubscription.
+    h.clear();
+    parts(&mut h, [0xFF; 32], 4);
+    t += 10;
+    h.poll(t);
+    assert_eq!(h.rt.counters().bind_failed, 1, "VEN-396.3");
+    assert!(
+        h.net
+            .sent_text(&mut h.rt, depth)
+            .iter()
+            .all(|f| !f.starts_with("UNSUB|")),
+        "VEN-396.3"
+    );
+}

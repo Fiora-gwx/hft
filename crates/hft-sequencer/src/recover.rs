@@ -388,6 +388,7 @@ pub(crate) fn restore_at<S: StrategySet>(
     }
     e.last_day_rolled = secs.seq_day.last_day_rolled;
     e.cmd.notices.extend_from_slice(&secs.notices);
+    e.cmd.bindings.extend_from_slice(&secs.bindings);
     if secs.engine_clock.tsc_hz_milli != 0 {
         e.clock = crate::clock::EngineClock::new(secs.engine_clock)
             .map_err(|_| BootError::SnapshotUndecodable { section: 25 })?;

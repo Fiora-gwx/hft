@@ -745,6 +745,21 @@ impl<S: StrategySet, R: CtlRing> Core<S, R> {
                     Ok(None)
                 }
             }
+            C::BindSlot {
+                venue,
+                inst,
+                start_s,
+                end_s,
+                ..
+            } => {
+                if inst.0 == 0 || self.rd.inst(inst).venue != venue {
+                    Err(Fail::args(detail::UNKNOWN_NAME))
+                } else if start_s >= end_s {
+                    Err(Fail::args(detail::BAD_VALUE))
+                } else {
+                    Ok(None)
+                }
+            }
             C::AdoptExchange { item: 1, group, .. }
                 if group != GROUP_NONE && group.strategy() != meta.bound_instance =>
             {

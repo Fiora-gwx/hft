@@ -17,7 +17,8 @@ use crate::commands::{
     ACTIVE_CONFIG_VERSION, ActiveConfigRow, CMD_DEDUP_VERSION, CmdDedupHdr, FILL_SEQ_VERSION, FillSeqRow,
     RECON_PENDING_VERSION, RECON_VIEW_DIFFS, RECON_VIEW_REPORTS, RECON_VIEW_VERSION, ReconDiff, ReconDiffRow,
     ReconPendingHdr, ReconView, ReconViewRow, SECTION_ACTIVE_CONFIG, SECTION_CMD_DEDUP, SECTION_FILL_SEQ,
-    SECTION_RECON_PENDING, SECTION_RECON_VIEW, SECTION_VENUE_NOTICES, VENUE_NOTICES_VERSION,
+    SECTION_RECON_PENDING, SECTION_RECON_VIEW, SECTION_SLOT_BINDINGS, SECTION_VENUE_NOTICES,
+    SLOT_BINDINGS_VERSION, VENUE_NOTICES_VERSION,
 };
 use crate::engine::Engine;
 use crate::journal::{BootSink, JournalSink};
@@ -340,6 +341,15 @@ fn w_seq_sections<S: StrategySet>(
         w.begin_section(crate::commands::SECTION_ORDER_CONNS, 1);
         for row in e.cmd.conns.snapshot_rows() {
             w.put_row(&row);
+        }
+        w.end_section();
+    }
+    // 31 SlotBindings (written only when there are any, so snapshots of venues without run-time
+    // binding are unchanged).
+    if !e.cmd.bindings.is_empty() {
+        w.begin_section(SECTION_SLOT_BINDINGS, SLOT_BINDINGS_VERSION);
+        for r in e.cmd.bindings.iter() {
+            w.put_row(r);
         }
         w.end_section();
     }
@@ -757,6 +767,8 @@ pub struct SeqSections {
     pub recon: Vec<(ReconPendingHdr, Vec<hft_event::ReconcileReport>)>,
     pub seq_day: SeqDayRow,
     pub notices: Vec<crate::commands::VenueNoticeRow>,
+    /// Section 31 (absent = no binding).
+    pub bindings: Vec<crate::commands::SlotBindingRow>,
     pub engine_clock: EngineClockRow,
     pub conns: Vec<ConnLiveRow>,
     pub order_conns: Option<Vec<crate::commands::OrderConnsRow>>,
@@ -858,6 +870,13 @@ pub fn read_seq_sections(body: &[u8]) -> Result<SeqSections, u16> {
         let mut rr = s.reader();
         for _ in 0..s.count {
             out.notices.push(rr.get_row().map_err(|_| SECTION_VENUE_NOTICES)?);
+        }
+    }
+    if let Some(s) = sec(SECTION_SLOT_BINDINGS)? {
+        let mut rr = s.reader();
+        for _ in 0..s.count {
+            out.bindings
+                .push(rr.get_row().map_err(|_| SECTION_SLOT_BINDINGS)?);
         }
     }
     if let Some(s) = sec(SECTION_ENGINE_CLOCK)? {

@@ -87,6 +87,13 @@ pub enum FeedCmd {
     Unsubscribe {
         inst: InstId,
     },
+    /// One 8-byte part (`part` 0..=3, big-endian order) of the 32-byte wire id a `BindSlot`
+    /// command binds to `inst`; part 3 completes the binding (all-zero id = unbind).
+    BindWire {
+        inst: InstId,
+        part: u8,
+        chunk: [u8; 8],
+    },
 }
 const _: () = assert!(size_of::<FeedCmd>() <= 16);
 

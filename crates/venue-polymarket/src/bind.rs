@@ -32,6 +32,10 @@ struct Entry {
     trade_id: u64,
     /// Exchange time (ms) of the last `book` of this inst; older level changes are stale.
     book_ms: u64,
+    /// The token this inst was bound to before its latest rebinding: an unsubscription frame
+    /// still names it.
+    old_len: u8,
+    old: [u8; TOKEN_MAX],
 }
 
 const EMPTY: Entry = Entry {
@@ -41,6 +45,8 @@ const EMPTY: Entry = Entry {
     book_id: 0,
     trade_id: 0,
     book_ms: 0,
+    old_len: 0,
+    old: [0; TOKEN_MAX],
 };
 
 /// FNV-1a over the token text.
@@ -109,6 +115,10 @@ impl FeedCtx {
                 .ok_or(BindErr::Full)?,
         };
         let e = self.entries.get_mut(at).ok_or(BindErr::Full)?;
+        if e.inst == inst && e.len != 0 && e.token.get(..usize::from(e.len)) != Some(token) {
+            e.old = e.token;
+            e.old_len = e.len;
+        }
         e.inst = inst;
         e.token = [0; TOKEN_MAX];
         if let Some(d) = e.token.get_mut(..token.len()) {
@@ -121,13 +131,63 @@ impl FeedCtx {
         Ok(())
     }
 
-    /// Removes the token of `inst` (its counters stay).
+    /// Removes the token of `inst` (its counters stay; the token remains its previous one).
     pub fn unbind(&mut self, inst: InstId) {
         if let Some(e) = self.entries.iter_mut().find(|e| e.inst == inst) {
+            if e.len != 0 {
+                e.old = e.token;
+                e.old_len = e.len;
+            }
             e.len = 0;
             e.token = [0; TOKEN_MAX];
         }
         self.reindex();
+    }
+
+    /// The token an unsubscription of `inst` names: its previous token after a rebinding,
+    /// else the current one.
+    pub fn unsub_token_of(&self, inst: InstId) -> Option<&[u8]> {
+        let e = self.entries.iter().find(|e| e.inst == inst)?;
+        if e.old_len != 0 {
+            e.old.get(..usize::from(e.old_len))
+        } else if e.len != 0 {
+            e.token.get(..usize::from(e.len))
+        } else {
+            None
+        }
+    }
+
+    /// Binds `inst` to a uint256 wire id (32 bytes, big-endian; all zero = unbind), rendered as
+    /// the exchange's decimal token text.
+    pub fn bind_wire(&mut self, inst: InstId, id: &[u8; 32]) -> Result<(), BindErr> {
+        if *id == [0; 32] {
+            if inst.0 == 0 {
+                return Err(BindErr::Inst);
+            }
+            self.unbind(inst);
+            return Ok(());
+        }
+        let mut n = *id;
+        let mut digits = [0u8; TOKEN_MAX];
+        let mut k = 0usize;
+        while n != [0; 32] {
+            // n /= 10, remainder = next digit (least significant first).
+            let mut rem: u32 = 0;
+            for b in n.iter_mut() {
+                let cur = (rem << 8) | u32::from(*b);
+                *b = (cur / 10) as u8;
+                rem = cur % 10;
+            }
+            let d = digits.get_mut(k).ok_or(BindErr::Token)?;
+            *d = b'0' + rem as u8;
+            k += 1;
+        }
+        let text = digits.get_mut(..k).ok_or(BindErr::Token)?;
+        text.reverse();
+        let mut out = [0u8; TOKEN_MAX];
+        let t = out.get_mut(..k).ok_or(BindErr::Token)?;
+        t.copy_from_slice(text);
+        self.bind(inst, out.get(..k).unwrap_or(&[]))
     }
 
     fn reindex(&mut self) {

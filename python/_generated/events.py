@@ -189,7 +189,7 @@ ENUMS = {
     "ClockSource": {1: "Phc", 2: "Ntp", 3: "None"},
     "ClockState": {1: "Synced", 2: "Unsynced", 3: "Stepped"},
     "CmdHdrFlags": {1: "PREVIEW"},
-    "CmdKind": {1: "SetMode", 2: "SetParams", 3: "SetRisk", 4: "Kill", 6: "RotateConn", 7: "Resubscribe", 8: "SnapshotNow", 9: "ReplaceRefdata", 10: "Resume", 14: "HedgeFix", 15: "CancelAll", 16: "Drain", 17: "RecordTransfer", 18: "Annotate", 19: "AdoptExchange", 20: "SimReset", 21: "SimTransfer", 22: "VenueNotice", 23: "SetBalanceBaseline", 24: "StrategyCmd", 25: "InjectWarmup", 26: "SmokeOrder", 27: "WriteOffResidual", 28: "SimFault"},
+    "CmdKind": {1: "SetMode", 2: "SetParams", 3: "SetRisk", 4: "Kill", 6: "RotateConn", 7: "Resubscribe", 8: "SnapshotNow", 9: "ReplaceRefdata", 10: "Resume", 14: "HedgeFix", 15: "CancelAll", 16: "Drain", 17: "RecordTransfer", 18: "Annotate", 19: "AdoptExchange", 20: "SimReset", 21: "SimTransfer", 22: "VenueNotice", 23: "SetBalanceBaseline", 24: "StrategyCmd", 25: "InjectWarmup", 26: "SmokeOrder", 27: "WriteOffResidual", 28: "SimFault", 29: "BindSlot"},
     "CmdResultFlags": {1: "PREVIEW", 2: "NEEDS_CONFIRM", 4: "PREVIEW_TTL"},
     "CmdRole": {0: "Process", 1: "Viewer", 2: "Trader", 4: "Admin"},
     "ConnRole": {1: "Md", 2: "Order", 3: "UserStream", 4: "Rest"},
@@ -276,4 +276,5 @@ CMD_KINDS = {
     0x001A: "SmokeOrder",
     0x001B: "WriteOffResidual",
     0x001C: "SimFault",
+    0x001D: "BindSlot",
 }

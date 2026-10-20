@@ -436,6 +436,8 @@ fn blank_order(account: AccountId) -> OrderEvent {
 #[derive(Default, Debug)]
 pub struct FeedCtx {
     pub decoded: u64,
+    /// `bind_wire` calls accepted, in order.
+    pub bound: Vec<(InstId, [u8; 32])>,
 }
 
 impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
@@ -539,6 +541,15 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
             Some(b"LOGIN_REJ") => LoginResult::Rejected(num(f.get(1)).unwrap_or(0) as u32),
             _ => LoginResult::NotMine,
         }
+    }
+
+    /// Accepts any id except one starting with 0xFF (the refused case of VEN-396).
+    fn bind_wire(ctx: &mut FeedCtx, inst: InstId, id: &[u8; 32]) -> Result<(), ProtoErr> {
+        if id[0] == 0xFF {
+            return Err(ProtoErr::Cfg);
+        }
+        ctx.bound.push((inst, *id));
+        Ok(())
     }
 
     fn subscribe(

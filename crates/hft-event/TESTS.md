@@ -1533,8 +1533,9 @@ spec: README.md
 | EVT-151.5 | `0x0005`(保留) | `decode` 为 `Err(UnknownKind)` |
 | EVT-151.6 | `0x000B`、`0x000C`、`0x000D`(退役) | 各为 `Err(UnknownKind)` |
 | EVT-151.7 | `0x0000` | `Err(UnknownKind)` |
-| EVT-151.8 | `0x001D`(未分配) | `Err(UnknownKind)` |
+| EVT-151.8 | `0x001E`(未分配) | `Err(UnknownKind)` |
 | EVT-151.9 | `0x001C` | `SimFault` |
+| EVT-151.10 | `0x001D` | `BindSlot` |
 
 ### EVT-152 每个命令载荷的大小与关键偏移
 

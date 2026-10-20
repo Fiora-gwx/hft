@@ -260,7 +260,7 @@ fn account_rule(cmd: &CmdBody) -> Rule {
                 missing_ok: !flatten.unwrap_or(false),
             },
         },
-        B::InjectWarmup { .. } | B::Drain { .. } | B::ReconcileReport { .. } => {
+        B::InjectWarmup { .. } | B::Drain { .. } | B::ReconcileReport { .. } | B::BindSlot { .. } => {
             Rule::Star { missing_ok: true }
         }
         B::VenueNotice { kind, .. } => Rule::Star {
@@ -376,6 +376,27 @@ fn uint<T: TryFrom<u64>>(s: &str) -> R<T> {
         .ok()
         .and_then(|v| T::try_from(v).ok())
         .ok_or(NormErr::new(detail::BAD_VALUE))
+}
+
+/// A decimal uint256 (at most 78 digits) → 32 bytes, big-endian.
+fn uint256(s: &str) -> R<[u8; 32]> {
+    if s.is_empty() || s.len() > 78 || !s.bytes().all(|b| b.is_ascii_digit()) {
+        return err(detail::BAD_VALUE);
+    }
+    let mut out = [0u8; 32];
+    for d in s.bytes() {
+        // out = out * 10 + d, carrying from the least significant byte.
+        let mut carry = u32::from(d - b'0');
+        for b in out.iter_mut().rev() {
+            let v = u32::from(*b) * 10 + carry;
+            *b = (v & 0xFF) as u8;
+            carry = v >> 8;
+        }
+        if carry != 0 {
+            return err(detail::BAD_VALUE);
+        }
+    }
+    Ok(out)
 }
 
 fn int64(s: &str) -> R<i64> {
@@ -849,6 +870,28 @@ fn build<'p>(req: &CmdRequest, rd: &Rd<'_>, payload: &'p mut Vec<u8>) -> R<Built
                     inst: i,
                     a,
                     b,
+                },
+                account,
+            )
+        }
+        B::BindSlot {
+            venue,
+            inst,
+            start_s,
+            end_s,
+            wire_id,
+            ..
+        } => {
+            let v = rd.venue(venue)?;
+            let i = rd.inst(inst)?;
+            simple(
+                ControlCmd::BindSlot {
+                    venue: v,
+                    _pad: [0; 3],
+                    inst: i,
+                    start_s: int64(start_s)?,
+                    end_s: int64(end_s)?,
+                    wire_id: uint256(wire_id)?,
                 },
                 account,
             )

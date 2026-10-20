@@ -1309,6 +1309,7 @@
 | `0x001A` | `SmokeOrder` |
 | `0x001B` | `WriteOffResidual` |
 | `0x001C` | `SimFault` |
+| `0x001D` | `BindSlot` |
 
 ## Note 码
 
@@ -1694,6 +1695,7 @@
 | 26 | `SmokeOrder` |
 | 27 | `WriteOffResidual` |
 | 28 | `SimFault` |
+| 29 | `BindSlot` |
 
 ### 码表 CmdResultFlags
 
