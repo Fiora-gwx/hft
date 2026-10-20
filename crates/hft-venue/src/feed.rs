@@ -982,7 +982,7 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                     if let Some(q) = self.st.seqs.get_mut(ix) {
                         q.l2_state = InstSeq::L2_AWAIT_FIRST;
                     }
-                    let conn = self.depth_conn_of(ix).unwrap_or(ConnId(0));
+                    let conn = self.depth_resync_conn(ix);
                     self.st
                         .cs(false, conn, ConnStateKind::Resync, inst, codes::REQUESTED, now);
                 }
@@ -1050,9 +1050,16 @@ impl<P: VenueProtocol> FeedRuntime<P> {
         if let Some(q) = self.st.seqs.get_mut(ix) {
             q.l2_state = InstSeq::L2_AWAIT_FIRST;
         }
-        let conn = self.depth_conn_of(ix).unwrap_or(ConnId(0));
+        let conn = self.depth_resync_conn(ix);
         self.st
             .cs(false, conn, ConnStateKind::Resync, inst, codes::NEW_SUB, now);
+    }
+
+    /// The connection a depth `Resync{inst}` names: one of the inst's depth group, or `MD_FIRST`
+    /// before the group has one. Never a BBO slot: the sequencer reads `conn < MAX_BBO_CONN_SLOTS`
+    /// as a BBO connection (README §3 "状态").
+    fn depth_resync_conn(&self, ix: usize) -> ConnId {
+        self.depth_conn_of(ix).unwrap_or(ConnId(MD_FIRST))
     }
 
     fn depth_conn_of(&self, ix: usize) -> Option<ConnId> {
@@ -1175,8 +1182,9 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                         unsub: false,
                     },
                 );
+                let conn = self.depth_resync_conn(ix);
                 self.st
-                    .cs(false, ConnId(0), ConnStateKind::Resync, inst, codes::NEW_SUB, now);
+                    .cs(false, conn, ConnStateKind::Resync, inst, codes::NEW_SUB, now);
             }
         }
         if del & streams::BOOK != 0 {
