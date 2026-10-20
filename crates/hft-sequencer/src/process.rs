@@ -615,6 +615,7 @@ fn after_book<D: Driver<S>, S: StrategySet>(
     inst: &mut Instances<S>,
     drv: &mut D,
     i: InstId,
+    h: &hft_event::MarketHdr,
 ) -> R<()> {
     let (bid, ask) = {
         let b = e.books.l2(i);
@@ -623,6 +624,26 @@ fn after_book<D: Driver<S>, S: StrategySet>(
             b.and_then(|b| b.best_ask()).map_or(Px(0), |l| l.px),
         )
     };
+    // README "连接活性": an inst no BBO connection quotes (a venue whose depth stream is the whole
+    // book) takes its top of book from the L2 book after every update.
+    if e.market.row(i).is_none_or(|r| r.bbo_member_mask == 0) {
+        let lvl = |s: Option<Level>| s.map_or((Px(0), Qty(0)), |l| (l.px, l.qty));
+        let (b, a) = match e.books.l2(i) {
+            Some(x) => (lvl(x.best_bid()), lvl(x.best_ask())),
+            None => ((Px(0), Qty(0)), (Px(0), Qty(0))),
+        };
+        let top = Bbo {
+            h: *h,
+            bid_px: b.0,
+            bid_qty: b.1,
+            ask_px: a.0,
+            ask_qty: a.1,
+            // 0 = unsequenced: a later Bbo of a BBO connection is never judged older than it.
+            update_id: 0,
+        };
+        let out = e.books.top_mut(i).apply(&top, Seq(e.cur_seq));
+        e.trace.rec("top.from_l2", u64::from(i.0), u64::from(out.bits()));
+    }
     if bid.0 > 0 && ask.0 > 0 {
         e.trace.rec("ledger.on_ref_px", u64::from(i.0), 1);
         e.ledger.on_ref_px(i, bid, ask, e.now.engine_ns);
@@ -652,7 +673,7 @@ fn l2_batch<'a, D: Driver<S>, S: StrategySet>(
         b.apply_batch(&h, &levels);
         e.trace.rec("book.apply_batch", u64::from(i.0), n as u64);
     }
-    after_book(e, inst, drv, i)?;
+    after_book(e, inst, drv, i, &h.h)?;
     p.market = Some(MarketEv::Book { inst: i });
     Ok(())
 }
@@ -677,7 +698,7 @@ fn l2_snapshot<'a, D: Driver<S>, S: StrategySet>(
             .rec("book.apply_snapshot", u64::from(i.0), u64::from(h.origin));
     }
     if h.origin == L2SnapHdr::TOP_N {
-        after_book(e, inst, drv, i)?;
+        after_book(e, inst, drv, i, &h.h)?;
         p.market = Some(MarketEv::Book { inst: i });
     }
     Ok(())

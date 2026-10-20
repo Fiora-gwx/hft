@@ -2384,3 +2384,61 @@ fn seq_263_fresh_boot_set_epoch_before_place() {
             .all(|(r, _)| matches!(r, hft_sequencer::OutRing::Venue(_)))
     );
 }
+
+/// SEQ-436: an inst no BBO connection quotes takes its top of book from the L2 book; it is healthy
+/// while the book is Live; a BBO connection's quote then takes over.
+#[test]
+fn seq_436_top_from_l2_without_bbo_connection() {
+    use hft_event::{ConnRole, ConnStateKind, L2SnapHdr, Level};
+    use zerocopy::{FromZeros, IntoBytes};
+    reset_script();
+    let mut b = b0();
+    b.rd.insts.iter_mut().find(|i| i.id == A1).unwrap().l2_depth = 5;
+    let mut h = b.boot();
+    let mut hd = L2SnapHdr::new_zeroed();
+    hd.h.venue = A;
+    hd.h.inst = A1;
+    hd.h.conn = hft_types::ConnId(8);
+    hd.h.rx_tsc = h.now();
+    hd.snap_id = 1;
+    hd.origin = L2SnapHdr::TOP_N;
+    hd.n_bids = 1;
+    hd.n_asks = 1;
+    let mut body = hd.as_bytes().to_vec();
+    for p in ["50000", "50001"] {
+        body.extend_from_slice(
+            Level {
+                px: px(p),
+                qty: q("2"),
+            }
+            .as_bytes(),
+        );
+    }
+    h.push_bytes(RingId::Md(0), EventKind::L2_SNAPSHOT, body);
+    h.run();
+    let view = |h: &H| {
+        let e = h.s.engine();
+        e.market.bbo_view(&e.books, A1)
+    };
+    // .1 top from the book, healthy (Live book, evidence = the snapshot's receive time).
+    let v = view(&h);
+    assert_eq!(
+        (v.bid_px, v.ask_px, v.bid_qty),
+        (px("50000"), px("50001"), q("2")),
+        "SEQ-436.1"
+    );
+    assert!(v.conn_up && !v.resync, "SEQ-436.1");
+    assert!(v.quote_live(Tsc(h.now()), 1_000_000_000), "SEQ-436.1");
+    // .2 the depth connection's per-inst resync: not healthy.
+    h.push(
+        RingId::Md(0),
+        &conn(A, 8, ConnStateKind::Resync, ConnRole::Md, A1, AC1, h.now()),
+    );
+    h.step();
+    assert!(!view(&h).quote_live(Tsc(h.now()), 1_000_000_000), "SEQ-436.2");
+    // .3 a BBO connection's quote replaces it.
+    h.quote(A1, "50002", "50003");
+    h.run();
+    let v = view(&h);
+    assert_eq!((v.bid_px, v.ask_px), (px("50002"), px("50003")), "SEQ-436.3");
+}

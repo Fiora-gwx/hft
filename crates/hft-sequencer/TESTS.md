@@ -32,7 +32,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 环境决定写成 Input | SEQ-036、SEQ-055、SEQ-079–SEQ-098、SEQ-244 |
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
-| 连接活性 | SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173、SEQ-434 |
+| 连接活性 | SEQ-436、SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173、SEQ-434 |
 | 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420、SEQ-425–SEQ-431、SEQ-434 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
@@ -6153,3 +6153,19 @@ SEQ-411/412 补充未声明 PERP_CASH 的逐笔现金连续前缀:分笔/重复/
 | SEQ-435.2 | 绑定 `end_s = 1300` 后:`end_s = 1200`;`payout = one + 1` | 各为 `InvalidArgs{BadValue}` |
 | SEQ-435.3 | 模拟账户 9 持有 `a1` 后 `Settle{A, a1, 1300, one}` | `Applied`;`out-sim` 恰好一条 `SimSettle{account 9, a1, px = one, arg = A, arg2 = 1300}` |
 | SEQ-435.4 | 新稳态;绑定后实盘账户 1 持有 `a1`,`Settle{…, payout 0}` | `InvalidArgs{NotSim}` |
+
+### SEQ-436 没有 BBO 连接报价的 inst 以 L2 簿顶为报价
+
+- 规则:[连接活性](README.md#连接活性)
+- 级别:unit
+- 里程碑:M3
+- 前置:B0,`a1` 的 `l2_depth = 5`,尚无 BBO 成员
+- 步骤:
+  1. 连接 8 推 `a1` 的分档快照(买一 50000 量 2、卖一 50001)
+  2. `ConnState{Resync, conn 8, inst a1}`
+  3. BBO 连接推 `a1` 报价 50002/50003
+- 期望:
+  - 步骤 1:`bbo(a1)` = 50000/50001(量 2),`conn_up` 且非 `resync`,`quote_live` 为真
+  - 步骤 2:`quote_live` 为假
+  - 步骤 3:`bbo(a1)` = 50002/50003
+- 实现:`crates/hft-sequencer/tests/process.rs::seq_436_top_from_l2_without_bbo_connection`
