@@ -129,6 +129,8 @@ pub struct FeedCfg {
     pub max_sub_insts: u32,
     pub ready_poll: ReadyPollMode,
     pub bbo_conns: u8,
+    /// Connections per DepthTopN group (README "配置项" `feed.depth_conns`).
+    pub depth_conns: u8,
     pub bbo_frames_per_poll: u16,
     pub frames_per_poll: u16,
     pub bbo_ping_ms: u32,
@@ -158,6 +160,7 @@ impl Default for FeedCfg {
             max_sub_insts: 0,
             ready_poll: ReadyPollMode::Auto,
             bbo_conns: 2,
+            depth_conns: 1,
             bbo_frames_per_poll: 8,
             frames_per_poll: 64,
             bbo_ping_ms: 1000,

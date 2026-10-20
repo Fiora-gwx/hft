@@ -19,6 +19,7 @@
 
 mod bind;
 mod caps;
+mod dedup;
 mod md;
 mod session;
 

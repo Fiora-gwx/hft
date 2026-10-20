@@ -999,6 +999,8 @@ stale_guard_ms = 1500
 src_ip = '{src_ip}'
 bind_device = '{bind_device}'
 live_feed = true
+[venues.pm.feed]
+depth_conns = 2
 [sim]
 seed = 123
 entry_us = 100

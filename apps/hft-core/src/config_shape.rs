@@ -51,7 +51,7 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
                 "feed",
             ],
         ),
-        "venue_feed" => (&[], &["raw"]),
+        "venue_feed" => (&[], &["raw", "depth_conns"]),
         "feed_raw" => (&[], &["bbo", "md"]),
         "account_io" => (
             &[

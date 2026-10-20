@@ -179,7 +179,8 @@ pub struct Venue {
     /// `sim.quotes` (orders stay in sim-gw; no account, no key).
     #[serde(default)]
     pub live_feed: bool,
-    /// hft-venue feed keys (`venues.<v>.feed.*`); only `feed.raw` in this assembly.
+    /// hft-venue feed keys (`venues.<v>.feed.*`); `feed.raw` and `feed.depth_conns` in this
+    /// assembly.
     #[serde(default)]
     pub feed: FeedOpts,
 }
@@ -188,6 +189,9 @@ pub struct Venue {
 pub struct FeedOpts {
     #[serde(default)]
     pub raw: RawOpts,
+    /// `venues.<v>.feed.depth_conns` (hft-venue): connections per DepthTopN group; absent = 1, or
+    /// 2 for a protocol without a Bbo route (Polymarket, whose depth stream is the whole book).
+    pub depth_conns: Option<u8>,
 }
 /// `venues.<v>.feed.raw.{bbo,md}` (hft-venue): absent = the instance default, `on` for network
 /// mode and `off` for `--dry-run` (the sim instance of the memory table).

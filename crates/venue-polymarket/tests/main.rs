@@ -166,6 +166,24 @@ fn dec(ctx: &mut FeedCtx, p: &str) -> (Result<hft_venue_proto::MdOutcome, Decode
     (r, s.md)
 }
 
+/// `dec` with the frame received on connection `conn`.
+fn dec_on(ctx: &mut FeedCtx, p: &str, conn: u8) -> u16 {
+    let mut s = VecSink::default();
+    let c = Pm::classify(
+        MARKET,
+        MsgOp::Text,
+        p.as_bytes().get(..64).unwrap_or(p.as_bytes()),
+    );
+    let rx = RxMeta {
+        conn: ConnId(conn),
+        ..RX
+    };
+    match Pm::decode_md(rd(), ctx, c, p.as_bytes(), &rx, &mut s) {
+        Ok(o) => o.events,
+        Err(e) => panic!("decode: {e:?}"),
+    }
+}
+
 fn lv(px: i64, qty: i64) -> Level {
     Level {
         px: Px(px),
@@ -655,4 +673,64 @@ fn pmk_015_peek_routes_by_the_first_bound_token() {
         matches!(ev.first(), Some(MdRec::L2Begin(h)) if h.h.inst == DN),
         "PMK-015.4"
     );
+}
+
+#[test]
+fn pmk_016_copies_from_another_connection_are_dropped() {
+    let mut ctx = bound();
+    // .1 the same book on connections 3 and 4.
+    assert_eq!(dec_on(&mut ctx, &book_up(), 3), 1);
+    assert_eq!(dec_on(&mut ctx, &book_up(), 4), 0);
+    assert_eq!(ctx.dups(), 1);
+    // .2 the same price_change, connection 4 first.
+    assert_eq!(dec_on(&mut ctx, &price_change(), 4), 2);
+    assert_eq!(dec_on(&mut ctx, &price_change(), 3), 0);
+    // .3 two identical fills on connection 3 are two trades; connection 4's copies are not,
+    // until it delivers the message a third time.
+    let t = last_trade();
+    assert_eq!(dec_on(&mut ctx, &t, 3), 1);
+    assert_eq!(dec_on(&mut ctx, &t, 3), 1);
+    assert_eq!(dec_on(&mut ctx, &t, 4), 0);
+    assert_eq!(dec_on(&mut ctx, &t, 4), 0);
+    assert_eq!(dec_on(&mut ctx, &t, 4), 1);
+    assert_eq!(ctx.dups(), 4);
+    // .4 one connection alone: a repeated message is applied each time.
+    let mut one = bound();
+    assert_eq!(dec_on(&mut one, &price_change(), 3), 2);
+    assert_eq!(dec_on(&mut one, &price_change(), 3), 2);
+    assert_eq!(one.dups(), 0);
+}
+
+#[test]
+fn pmk_017_late_books_and_messages_are_dropped() {
+    let mut ctx = bound();
+    let at = |ms: &str, hash: &str| {
+        price_change()
+            .replace("1792424114058", ms)
+            .replace("d96398aa668ede9a7247a2cc71296c96c924c4ee", hash)
+            .replace(T_DN, "99")
+    };
+    assert_eq!(dec_on(&mut ctx, &book_up(), 3), 1);
+    assert_eq!(dec_on(&mut ctx, &at("1792424118000", "a1"), 3), 1);
+    // .1 a book older than data already applied (another connection resubscribed).
+    let old_book = book_up()
+        .replace("1792424113368", "1792424117999")
+        .replace("40d4258e2ed98c21699147377fa43ffe35665bd7", "b1");
+    assert_eq!(dec_on(&mut ctx, &old_book, 4), 0);
+    assert_eq!(ctx.lates(), 1);
+    // .2 a change more than 2000 ms before the latest applied time is late; within it, applied.
+    assert_eq!(dec_on(&mut ctx, &at("1792424115500", "a2"), 4), 0);
+    assert_eq!(ctx.lates(), 2);
+    assert_eq!(dec_on(&mut ctx, &at("1792424116500", "a3"), 4), 1);
+    // .3 a trade more than 2000 ms late.
+    let late_trade = last_trade().replace("1792424441146", "1792424115000").replace(
+        "0xfef1f6c5dd0f86a783f8056e1e7249d063715fe18bc379040a5236a59490a21a",
+        "0x1",
+    );
+    assert_eq!(dec_on(&mut ctx, &late_trade, 3), 0);
+    assert_eq!(ctx.lates(), 3);
+    // .4 rebinding forgets the applied time: the old book of the new token applies.
+    let next = "44444444444444444444444444444444444444444444444444444444444444444444444444444";
+    assert_eq!(ctx.bind(UP, next.as_bytes()), Ok(()));
+    assert_eq!(dec_on(&mut ctx, &old_book.replace(T_UP, next), 4), 1);
 }

@@ -1271,22 +1271,15 @@ fn conn_state<D: Driver<S>, S: StrategySet>(
     } else if c.state == ConnStateKind::Alive {
         return Ok(());
     }
-    // Depth connections: book invalidation / resync.
-    if c.role == ConnRole::Md && !bbo_conn {
-        if c.inst.0 != 0 {
-            if let Some(b) = e.books.l2_mut(c.inst) {
-                b.on_conn(c.state);
-            }
-            if c.state == ConnStateKind::Up {
-                feeds_gate(e, inst, drv)?;
-            }
-        } else if c.state == ConnStateKind::Down {
-            let insts: Vec<InstId> = e.rd.insts_of_venue(c.venue).to_vec();
-            for i in insts {
-                if let Some(b) = e.books.l2_mut(i) {
-                    b.on_conn(ConnStateKind::Down);
-                }
-            }
+    // Depth connections: book invalidation / resync, per inst only. The feed sends
+    // `Resync{inst, CONN_LOST}` for every inst a closed connection held (none while another
+    // connection of its group holds it), so a connection-level `Down{inst = 0}` changes no book.
+    if c.role == ConnRole::Md && !bbo_conn && c.inst.0 != 0 {
+        if let Some(b) = e.books.l2_mut(c.inst) {
+            b.on_conn(c.state);
+        }
+        if c.state == ConnStateKind::Up {
+            feeds_gate(e, inst, drv)?;
         }
     }
     // Order/user-stream connections: OMS, rate limit, gates, cancel obligation.

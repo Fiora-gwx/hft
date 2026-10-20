@@ -213,6 +213,7 @@ pub struct AcctDeps {
 | 名称 | 类型 | 默认 | 含义 |
 |---|---|---|---|
 | `feed.bbo_conns` | u8 | 2 | 每组 BBO 连接的活跃条数(双路赛马,单路是降级);组数 = ⌈该 venue BBO 订阅 inst 数 / 生效 `ws_max_streams_per_conn`⌉;`bbo_conns × 组数 + 1(在建)> MAX_BBO_CONN_SLOTS` → `InitErr::BboSlots`(§1);"BBO 订阅 inst 数"取 `FeedCfg.max_sub_insts`;为 1 时不产出 `RACE_SINGLE`。**BBO 连接条数只由本键决定**;hft-core 的连接配置 `venues.<v>.feed.conns`(每项 `{stream, src_ip}`,字段归 [hft-core](../../apps/hft-core/README.md#配置文件字段))只给各流连接的源地址 |
+| `feed.depth_conns` | u8 | 1 | 每个 `DepthTopN` 组的活跃连接条数(同订阅,互为备份,§3c);组数 = ⌈该 venue 深度订阅 inst 数 / 生效 `ws_max_streams_per_conn`⌉(取 `FeedCfg.max_sub_insts`);深度连接与其余 md 连接共用连接号 `MD_FIRST..=MD_LAST`(§1),`depth_conns × 组数 + 1(在建)> 56` → `InitErr::Cfg("feed.depth_conns")`;为 1 时不产出深度组的 `RACE_SINGLE` |
 | `feed.bbo_frames_per_poll` | u16 | 8 | Bbo 路由每条连接每次 `poll_once` 至多处理的帧数;连接之间按帧轮转(§2 第 3 步) |
 | `feed.frames_per_poll` | u16 | 64 | 非 Bbo 路由每条连接每次 `poll_once` 至多处理的帧数 |
 | `feed.ready_poll` | `auto \| off` | `auto` | 就绪探测(§2 第 2 步):`auto` = 本任务所在线程为 `Spin`、且该线程全部行情任务的计划连接数之和 ≥ 3 时生效(hft-core 装配时以 `ready_poll_on` 按线程计划判定,结果写进 `FeedCfg`);`off` 不探测 |
@@ -254,7 +255,7 @@ pub struct AcctDeps {
 | `gw.acct_body_max` | u32 | 262144 | 账户查询响应体上限(字节);超过 → 该序列 `Failed{TooLarge}`,原始响应只记元数据 |
 | `gw.unknown_evt_note_every` | u32 | 1000 | 未知用户流事件的第 1 条与第 k × N 条(k ≥ 1)各写一条 Meta Note(源 `Venue`) |
 
-**取值为 0 的键**:`feed.bbo_conns`、`feed.bbo_frames_per_poll`、`feed.frames_per_poll`、`feed.bbo_ping_ms`、`feed.bbo_dead_ms`、`snap.parallel`、`gw.cmds_per_loop`、`gw.cmds_per_account_per_loop`、`gw.aux_every`、`gw.unmatched_hold_cap`、`gw.acct_query_degraded_after`、`gw.report_decode_down_after` 为 0 时,用到它的运行时 `new()` 返回 `InitErr::Cfg(<键名>)`。
+**取值为 0 的键**:`feed.bbo_conns`、`feed.depth_conns`、`feed.bbo_frames_per_poll`、`feed.frames_per_poll`、`feed.bbo_ping_ms`、`feed.bbo_dead_ms`、`snap.parallel`、`gw.cmds_per_loop`、`gw.cmds_per_account_per_loop`、`gw.aux_every`、`gw.unmatched_hold_cap`、`gw.acct_query_degraded_after`、`gw.report_decode_down_after` 为 0 时,用到它的运行时 `new()` 返回 `InitErr::Cfg(<键名>)`。
 
 环容量(`snapreq-*`、`snap-*`、`acctreq-*`、`acct-*` 与各 bulk 环)不在本表:唯一权威值是 hft-core 的环容量表(ECF1 段 4,[hft-core 配置文件字段](../../apps/hft-core/README.md#配置文件字段));本 crate 只规定字节环的单条记录 ≤ 容量 / 4。
 
@@ -314,7 +315,7 @@ sequencer ──FeedCmd(feedctl-<v>)──▶ feed-md          sequencer ──F
 
 ### 2. `FeedRuntime::poll_once` 的固定顺序
 
-每条路由一个或多个连接池(`ConnPool`;路由表来自 `P::routes()`,本任务只建 `routes` 包含、且有订阅的那些):`RouteKind::Bbo` 路由(`bookTicker` 类)按组建池,每组双路赛马;`DepthTopN` 与 `Md` 路由各 1 条连接(订阅超过单连接流数时按组拆分)。
+每条路由一个或多个连接池(`ConnPool`;路由表来自 `P::routes()`,本任务只建 `routes` 包含、且有订阅的那些):`RouteKind::Bbo` 路由(`bookTicker` 类)按组建池,每组双路赛马;`DepthTopN` 路由每组 `feed.depth_conns` 条连接(默认 1,§3c),`Md` 路由每组 1 条连接(订阅超过单连接流数时按组拆分)。
 
 1. 取 `FeedCmd`(≤ `FEEDCMD_PER_POLL` 条)。
 2. **就绪探测**(`feed.ready_poll` 生效时):`ReadyPoll::probe` 一次(`epoll_pwait(timeout = 0)`,[hft-net](../hft-net/README.md#签名草案)),得到本任务就绪连接的集合,对未就绪的每条活跃连接调 `Conn::note_empty(探测前读的 TSC)`(`rx_empty_gap_ns` 的确认点,hft-net §7);未生效时把全部活跃连接视为就绪。就绪集合只是提示:误报只多一次空 `recvmsg`;缓冲里还有未处理完整帧的连接(上一轮因帧数上限留下)不需要就绪也参加第 3、4 步。
@@ -328,7 +329,7 @@ sequencer ──FeedCmd(feedctl-<v>)──▶ feed-md          sequencer ──F
    5. 追加 `RawRx`(`RawHdr{venue, conn, what=WsText|WsBinary, stream, hw_rx_ns, payload_len}` + payload,记录头 `tsc = rx_tsc`,记录头标志 `HW_TS`/`SW_TS` 由本运行时按 `ts_flags` 置位;**先入环,后写 raw**);是否写由该路由的 `feed.raw.bbo`/`feed.raw.md` 模式决定,重复帧再按 `raw_dups`。
    每条连接处理完后 `finish_poll`。
 6. **snap 记录**(每轮至多一条,§3b):Bbo 部分 → BBO 补帧(§3a 第 5 步);启用增量深度时 Md 部分 → 重同步状态机(§3)。记录里的原始响应体写 `RawRx`(`what = RestResponse`,`conn` 为 snap-fetch 的 REST 连接号,戳取响应的接收戳)。
-7. 每条连接的 `ErrBits`:致命 → `retire`,推 `ConnState{Down, conn, role=Md, inst = 0, reason=bits}`;Bbo 赛马池只剩一条 → `ConnState{Degraded, reason=RACE_SINGLE}`;深度连接(分档快照或增量深度)断开 → 其上的全部 inst 推 `ConnState{Resync, inst, reason=CONN_LOST}`。
+7. 每条连接的 `ErrBits`:致命 → `retire`,推 `ConnState{Down, conn, role=Md, inst = 0, reason=bits}`;Bbo 赛马池只剩一条 → `ConnState{Degraded, reason=RACE_SINGLE}`;深度连接(分档快照或增量深度)断开 → 其上的 inst 推 `ConnState{Resync, inst, reason=CONN_LOST}`,同组另有已应答该 inst 订阅的连接时不推(§3c);`feed.depth_conns ≥ 2` 时该组只剩一条连接 → 对它推 `ConnState{Degraded, reason=RACE_SINGLE}`(md 环)。
 8. 心跳(§5)与空闲超时;连接池维护:`next_build` → 按 §1 分配连接号(BBO 连接此时就占用一个空闲槽)→ `BuildReq`;建连失败 → `ConnPool::build_failed` 并释放该号(从未推过记录,可直接复用);`handoff` 到来 → 按 `conn.rotate_margin_s` 算计划轮换时刻 → `install` → 推 `ConnState{Up, conn, inst = 0}` → 以 ⌊生效 `ws_max_in_msgs_per_s` / 2⌋ 帧/s(BBO 连接再减 ⌈1000 / `feed.bbo_ping_ms`⌉)发订阅帧(结果 < 1 → `new()` 返回 `InitErr::SubRate`);`rotate_due` / `ServerShutdown` 提示 → 建替补;赛马池的替补订阅回执齐并收到第一帧数据后,退役同组最早 `install` 的连接。
 9. 统计写入本任务的 `LoopStat`(每 1 s 由 hft-core 汇总为 Meta 类 `LatencySample`/`Note`)。
 
@@ -446,8 +447,9 @@ core 的深度来源。venue 在 `routes()` 里给出 `RouteKind::DepthTopN` 路
 
 1. 每条消息是该 inst 前 N 档的完整快照:`decode_md` 经 `MdSink::l2_snapshot` 交出 `L2Snapshot{origin = TopN}`([hft-venue-proto 契约 26](../hft-venue-proto/README.md#实现方必须遵守的契约)),sink 按 `feed.snapshot_part_levels` 切片(N ≤ 64 时恰好一片)写入 `md-<venue>-bulk` 并推 `FeedMsg::Bulk`;不产出 `L2Batch`。
 2. 去重按 `seq_rule`(`Snapshot`:交易所序号单调;`ByTime`:只有时间戳),写在 `InstSeq.last_fwd` 的深度槽;**没有序号链、没有断裂判定、不发 REST 快照**。簿按整替换应用(hft-book `apply_snapshot`;sequencer 侧规则归 [hft-sequencer](../hft-sequencer/README.md))。
-3. **状态**:新订阅 → 推 `ConnState{Resync, inst, reason=NEW_SUB}`,`l2_state = AwaitFirst`;该路由的连接断开或重连 → 其上每个 inst 推 `ConnState{Resync, inst, reason=CONN_LOST}`;`FeedCmd::Resync{inst}` → `ConnState{Resync, inst, reason=REQUESTED}`。三者都在该 inst 下一条被转发的分档快照之后推 `ConnState{Up, inst}`,`l2_state = Live`。重连后的第一条快照本身就是恢复手段。
+3. **状态**:新订阅 → 推 `ConnState{Resync, inst, reason=NEW_SUB}`,`l2_state = AwaitFirst`;该路由的连接断开或重连 → 其上每个 inst 推 `ConnState{Resync, inst, reason=CONN_LOST}`(多连接时见第 5 项);`FeedCmd::Resync{inst}` → `ConnState{Resync, inst, reason=REQUESTED}`。三者都在该 inst 下一条被转发、且解码出事件的深度帧之后推 `ConnState{Up, inst}`,`l2_state = Live`。重连后的第一条快照本身就是恢复手段。
 4. `ResyncMethod` 对 `DepthTopN` 类恒为 `None`;解码失败只计数并推 `ConnState{Resync, inst, reason=DECODE}`,等下一条快照恢复。
+5. **多连接**(`feed.depth_conns ≥ 2`):每组保持该数目的活跃连接,订阅相同(组内每条连接都订阅组内全部 inst;断开的连接按第 8 步补建,补建前组内连接少一条)。同一条交易所消息从每条连接各到一次:有序号的流按 `seq_rule` 在 `InstSeq.last_fwd` 去重(第 2 项);`SeqRule::None` 的流(如 [venue-polymarket](../venue-polymarket/README.md#多连接去重))由协议在 `decode_md` 里去重,重复的帧解出 0 个事件,不推送、不结束 `AwaitFirst`。一条连接断开时,其上的 inst 若同组还有已应答其订阅的连接,则保持 `Live`、不推 `Resync`;组内只剩一条连接时对它推 `ConnState{Degraded, reason=RACE_SINGLE}`;最后一条持有该 inst 的连接断开才推 `Resync{CONN_LOST}`。
 
 ### 4. `GwRuntime::poll_once` 的循环结构
 
