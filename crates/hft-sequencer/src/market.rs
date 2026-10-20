@@ -208,6 +208,23 @@ impl Market {
             }
         }
         let book_resync = books.l2(i).is_some_and(|b| b.state() == BookState::Resyncing);
+        // An inst no BBO connection quotes (top of book from its L2 book): healthy while the book
+        // is Live, the evidence being the receive time of its last applied update.
+        if mask == 0
+            && let Some(b) = books.l2(i)
+            && b.state() != BookState::Uninit
+        {
+            let live = b.state() == BookState::Live;
+            let rx = if top.seq > self.rx_from_seq {
+                top.rx_tsc.0
+            } else {
+                0
+            };
+            conn_up = live;
+            any_clean = live;
+            best_live = rx;
+            best_any = rx;
+        }
         let resync = !any_clean || row.bbo_flags & BBO_RESYNC != 0 || book_resync;
         let rx_tsc = if top.seq > self.rx_from_seq {
             top.rx_tsc

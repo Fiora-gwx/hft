@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-20 | 没有 BBO 连接报价的 inst(`bbo_member_mask = 0` 且有 L2 簿)以 L2 簿顶写 `Top`(`update_id = 0`),`Views::bbo` 的健康按簿状态与最近一次 L2 记录的接收时刻 | Polymarket 没有 Bbo 路由,风控 #5 对全部 Polymarket 下单报 `NO_MID`,模拟盘无法挂单;SEQ-436 | hft-sequencer、hft-strategy-sdk 的规格与代码 | 待评审(负责人 2026-10-20 要求先做模拟盘) |
 | 2026-10-20 | hft-sim 新增挂单成交模型 `maker_fill = Queue`:挂价处先进先出排队,同价成交先扣前方数量,价位减少先等成交对上(500 ms 未对上视为本单之后的撤单);hft-core `[sim] maker_fill` | Polymarket 1 美分档位排队长,`TradeThrough` 下挂单几乎不成交,模拟盘评估不了挂单策略;SIM-228、CORE-425 | hft-sim、apps/hft-core 的规格与代码 | 待评审(负责人 2026-10-20 要求先做模拟盘) |
 | 2026-10-20 | 新增中性命令 `Settle`(0x001E):运行期绑定 venue 的槽位 inst 在窗口结算后按 `payout` 交割;只对模拟账户(实盘有仓位或挂单 → `NotSim`),sim-gw 撤销该 inst 挂单并把库存按兑付价卖出、回报 `ExternalFill{Delivery}`;新增 `GwOp::SimSettle`(16)与 detail `NotEnded`(321) | Polymarket 模拟盘:持仓不结转则槽位不能改绑、盈亏算不出;SEQ-435、SIM-227、CTP-181、EVT-151.11 | hft-event、hft-ctl-proto、hft-ctl、hft-sequencer、hft-sim、control-plane 的规格与代码 | 待评审(负责人 2026-10-20 要求先做模拟盘) |
 | 2026-10-20 | 深度连接的连接级 `ConnState{Down, inst = 0}` 不再使同 venue 全部簿失效,只按 feed 逐 inst 的 `Resync{CONN_LOST}`;hft-venue 新增 `feed.depth_conns`(每个 DepthTopN 组的同订阅连接数,默认 1,hft-core 对没有 Bbo 路由的协议缺省 2),组内另有连接持有该 inst 时不推 Resync、只剩一条推 `Degraded{RACE_SINGLE}`;venue-polymarket 在解码时跨连接去重并丢弃迟到的整簿与消息 | Polymarket 每次单连接 1013 或结算后的正常关闭都使全部 Polymarket 簿失效到下一次整簿;SEQ-434、VEN-397/398、PMK-016/017、CORE-424 | hft-sequencer、hft-venue、venue-polymarket、apps/hft-core、tools/pm-md-probe 的 README/TESTS 与代码 | 待评审(负责人 2026-10-20 要求修复断线影响) |
