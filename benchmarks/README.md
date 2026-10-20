@@ -332,6 +332,14 @@ cargo xtask bench-gate --reference --syscall-audit     # 端到端路径运行�
 | `sim/replay_day` | hft-sim | [hft-sim 延迟与资源契约](../crates/hft-sim/README.md#延迟与资源契约) | SIM-213 |
 | `startup-cold` | hft-core | [路径基准与门槛](#路径基准与门槛) | CORE-267 |
 | `strategies/portfolio-carry/hold` | portfolio-carry | [portfolio-carry 延迟与资源契约](../strategies/portfolio-carry/README.md#延迟与资源契约) | CARRY-009 |
+| `strategies/binary-maker/exec_update` | binary-maker | [binary-maker 延迟与资源契约](../strategies/binary-maker/README.md#延迟与资源契约) | —(策略延迟验收) |
+| `strategies/binary-maker/risk_event` | binary-maker | [binary-maker 延迟与资源契约](../strategies/binary-maker/README.md#延迟与资源契约) | —(策略延迟验收) |
+| `strategies/binary-maker/tick_fire` | binary-maker | [binary-maker 延迟与资源契约](../strategies/binary-maker/README.md#延迟与资源契约) | —(策略延迟验收) |
+| `strategies/binary-maker/tick_miss` | binary-maker | [binary-maker 延迟与资源契约](../strategies/binary-maker/README.md#延迟与资源契约) | —(策略延迟验收) |
+| `strategies/book-observer/exec_update` | book-observer | [book-observer 延迟与资源契约](../strategies/book-observer/README.md#延迟与资源契约) | —(策略延迟验收) |
+| `strategies/book-observer/risk_event` | book-observer | [book-observer 延迟与资源契约](../strategies/book-observer/README.md#延迟与资源契约) | —(策略延迟验收) |
+| `strategies/book-observer/tick_fire` | book-observer | [book-observer 延迟与资源契约](../strategies/book-observer/README.md#延迟与资源契约) | —(策略延迟验收) |
+| `strategies/book-observer/tick_miss` | book-observer | [book-observer 延迟与资源契约](../strategies/book-observer/README.md#延迟与资源契约) | —(策略延迟验收) |
 | `strategies/cross-taker/exec_update` | cross-taker | [cross-taker 延迟与资源契约](../strategies/cross-taker/README.md#延迟与资源契约) | —(策略延迟验收) |
 | `strategies/cross-taker/risk_event` | cross-taker | [cross-taker 延迟与资源契约](../strategies/cross-taker/README.md#延迟与资源契约) | —(策略延迟验收) |
 | `strategies/cross-taker/tick_fire` | cross-taker | [cross-taker 延迟与资源契约](../strategies/cross-taker/README.md#延迟与资源契约) | —(策略延迟验收) |

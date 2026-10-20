@@ -23,3 +23,8 @@ hft-testkit = { workspace = true, features = ["sdk-mock"] }
 hft-types.workspace = true
 hft-refdata.workspace = true
 hft-event.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "on_event"
+harness = false

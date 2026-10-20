@@ -1,0 +1,4 @@
+# Unsupported SDK interfaces; these are coverage declarations, never timing samples.
+slow_update = "Every subscription is Part::Fast; no cached slow-side trigger or Model."
+advice = "NoModel<BookObserverParams>; no Advice payload or subscription."
+target_set = "Never sends an intent."

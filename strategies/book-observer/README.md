@@ -70,6 +70,10 @@ status: impl
 
 每个事件 O(腿数 ≤ 4) 的整数运算,不分配(场景测试以计数分配器核对);`Model = NoModel`。状态每 group 200 B 以内。
 
+保留基线预算:每个入口 p50 ≤ 50 ns/p99 ≤ 150 ns;参考机实测尚未完成,不是性能声明。`benches/on_event.rs` 经真实 BookObserver::on_event 测量 tick_fire(Book 事件,读顶档并计数)、tick_miss(Trade 事件,只计数)、exec_update(Order 事件,忽略)、risk_event(忽略);本策略从不发意图,fire 指完整记录路径。夹具为 tests/common 的单 group 两腿,计数只增长,样本间不复位。
+
+所有订阅都是 Part::Fast,无慢侧缓存更新、Advice 或 TargetIntent;`benches/not-applicable.toml` 为 slow_update、advice、target_set 登记理由。
+
 ## 测试与验收
 
 用例见 [TESTS.md](TESTS.md)。
