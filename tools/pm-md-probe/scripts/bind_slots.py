@@ -2,6 +2,7 @@
 """Slot discovery for hft-core: binds the Polymarket 5-minute windows to the refdata slot insts.
 
 usage: bind_slots.py --socket CORE_SOCK [--assets btc,eth,sol,xrp] [--lead 120] [--once] [--log FILE]
+                     [--issuer pipeline]
 
 Slots (refdata of `pm_sim_config`): `<asset>-<up|dn>-<k>`, k = (window start / 300) mod 2, so the
 current and the next window of an asset use different slots. The window starting at S is bound
@@ -9,10 +10,11 @@ from S - lead on; the slot's previous window ended at S - 300 and the exchange r
 147 s after its end, so the default lead (120 s) rebinds a slot 180 s after its previous window
 ended. Token ids come from the Gamma API; a missing market leaves the slot unchanged.
 
-Every binding is one ctl `BindSlot` (issuer `pipeline`, account `*`) on the Unix socket: a 4-byte
-big-endian length and the request JSON; an `accepted` response is re-sent with the same cmd_id
-until the result is final. Run it as the system user that the principal table maps to
-`pipeline`. Each request and response is logged as one JSON line.
+Every binding is one ctl `BindSlot` (account `*`) on the Unix socket: a 4-byte big-endian length
+and the request JSON; an `accepted` response is re-sent with the same cmd_id until the result is
+final; requests are paced (`--gap`, default 0.25 s) under the gateway's per-issuer rate limit and a
+`RateLimited` binding is retried on the next pass. Run it as the system user that the principal table maps to `pipeline` (or, by hand, with
+`--issuer cli:<login>` as a Trader/Admin cli user). Each request and response is one JSON line.
 """
 import argparse
 import json
@@ -63,12 +65,12 @@ def exchange(path: str, body: bytes, timeout: float = 10.0) -> dict:
         s.close()
 
 
-def bind(path: str, slot: str, token: str, start: int, log) -> bool:
+def bind(path: str, issuer: str, slot: str, token: str, start: int, log) -> bool:
     now = time.time_ns()
     req = {
         "v": 2,
         "cmd_id": str(uuid.uuid4()),
-        "issuer": "pipeline",
+        "issuer": issuer,
         "issued_at_ns": now,
         "expires_at_ns": now + 30_000_000_000,
         "cmd": {
@@ -98,6 +100,8 @@ def main() -> None:
     ap.add_argument("--lead", type=int, default=120)
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--log")
+    ap.add_argument("--issuer", default="pipeline")
+    ap.add_argument("--gap", type=float, default=0.25)
     a = ap.parse_args()
     out = open(a.log, "a", encoding="utf-8") if a.log else sys.stdout
 
@@ -129,10 +133,11 @@ def main() -> None:
                     if bound.get(slot) == (token, start):
                         continue
                     try:
-                        if bind(a.socket, slot, token, start, log):
+                        if bind(a.socket, a.issuer, slot, token, start, log):
                             bound[slot] = (token, start)
                     except OSError as e:
                         log({"t": time.time(), "slot": slot, "ctl_error": str(e)})
+                    time.sleep(a.gap)
         cache = {key: v for key, v in cache.items() if key[1] >= base - WINDOW}
         if a.once:
             break

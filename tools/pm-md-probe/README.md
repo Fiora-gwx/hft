@@ -68,11 +68,11 @@ pm-md-probe --bindings FILE --seconds N --out FILE --dir DIR --src-ip IP --bind-
 正式进程的验收(提案 P1b):`hft-core --dry-run` 以 `pm_sim_config` 生成的配置运行(venue `polymarket-clob`、`live_feed = true`、book-observer 订阅 16 个槽位 inst),`scripts/bind_slots.py` 作发现进程,`pm-md-probe journal` 从 seq journal 取出事件,再用同一个 `compare.py` 与 pmrec 比对。
 
 ```text
-bind_slots.py --socket CORE_SOCK [--assets btc,eth,sol,xrp] [--lead 120] [--once] [--log FILE]
+bind_slots.py --socket CORE_SOCK [--assets btc,eth,sol,xrp] [--lead 120] [--once] [--log FILE] [--issuer pipeline] [--gap 0.25]
 pm-md-probe journal --refdata RDB1 --out FILE --bindings-out FILE SEG...
 ```
 
-- `bind_slots.py`:每 5 s 对当前与下一个窗口(开始时间 S)取 Gamma 的 Up/Down 代币,写进槽位 `<asset>-<up|dn>-<k>`(k = S / 300 mod 2,相邻窗口用不同槽位);下一个窗口在 S − lead 起绑定,此时该槽位的上一个窗口已结束 300 − lead 秒(默认 180 s,晚于交易所约 147 s 后的结算断开)。每次绑定是一条 `BindSlot`(issuer `pipeline`、account `*`;`accepted` 时用同一 cmd_id 重发直到终态),以 pipeline 主体的系统用户运行;已生效的 (代币, S) 不重发。Gamma 没有该市场时不改槽位。
+- `bind_slots.py`:每 5 s 对当前与下一个窗口(开始时间 S)取 Gamma 的 Up/Down 代币,写进槽位 `<asset>-<up|dn>-<k>`(k = S / 300 mod 2,相邻窗口用不同槽位);下一个窗口在 S − lead 起绑定,此时该槽位的上一个窗口已结束 300 − lead 秒(默认 180 s,晚于交易所约 147 s 后的结算断开)。每次绑定是一条 `BindSlot`(issuer `pipeline`、account `*`;`accepted` 时用同一 cmd_id 重发直到终态;请求间隔 `--gap` 秒以低于 gateway 的每 issuer 限速,`RateLimited` 的绑定下一轮重试),以 pipeline 主体的系统用户运行(手工调试可用 `--issuer cli:<login>` 以 Trader/Admin 的 cli 用户运行);已生效的 (代币, S) 不重发。Gamma 没有该市场时不改槽位。
 - `pm-md-probe journal`:按 `BindSlot` 命令记录跟踪每个槽位当前的窗口,输出与[产出](#产出)相同的事件行,`slot` 为 `<asset>-<S>-<up|dn>`,改绑时清空该 inst 的簿;`--bindings-out` 写 `compare.py` 的绑定文件(每次绑定一项)。
 - 通过标准与[验收步骤](#验收步骤)第 3 步相同,覆盖至少两个连续窗口(含一次改绑)。
 
