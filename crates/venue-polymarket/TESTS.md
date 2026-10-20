@@ -245,6 +245,7 @@ spec: README.md
 | PMK-016.2 | PMK-004 的 `price_change` 先经连接 4、再经连接 3 | 连接 4 `events 2`;连接 3 `events 0` |
 | PMK-016.3 | 同一条 `last_trade_price`:连接 3 两次,再连接 4 三次 | 连接 3 各 `events 1`;连接 4 前两次 `events 0`、第三次 `events 1`;`dups() = 4` |
 | PMK-016.4 | 新的 `bound()`,同一条 `price_change` 经连接 3 两次 | 两次都 `events 2`;`dups() = 0` |
+| PMK-016.5 | 新的 `bound()`:PMK-004 的 `price_change` 经连接 3,再一条时间戳、`hash` 相同但价格不同(`0.41`)的经连接 4 | 两条都 `events 2`(不是副本);`dups() = 0` |
 
 ### PMK-017 迟到的整簿与消息丢弃
 

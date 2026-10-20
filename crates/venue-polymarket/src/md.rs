@@ -586,16 +586,16 @@ fn price_change(
         .as_bytes();
     let ms = m.timestamp.0.unwrap_or(0);
     let mut key = Key::new(2).num(ms);
+    // The `hash` of an entry is not unique per change (about 3.5 % of messages share timestamp
+    // and hashes with a different message, 2026-10-20), so the key covers every field.
     for el in array(raw)? {
         let e = fields(el)?;
-        key = if e.hash.is_empty() {
-            key.bytes(e.asset_id.as_bytes())
-                .bytes(e.price.as_bytes())
-                .bytes(e.size.as_bytes())
-                .bytes(e.side.as_bytes())
-        } else {
-            key.bytes(e.hash.as_bytes())
-        };
+        key = key
+            .bytes(e.asset_id.as_bytes())
+            .bytes(e.price.as_bytes())
+            .bytes(e.size.as_bytes())
+            .bytes(e.side.as_bytes())
+            .bytes(e.hash.as_bytes());
     }
     if !ctx.fresh(key.done(), rx.conn.0) {
         return Ok((0, InstId(0)));

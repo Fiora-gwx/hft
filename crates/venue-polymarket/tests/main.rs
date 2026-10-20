@@ -694,6 +694,12 @@ fn pmk_016_copies_from_another_connection_are_dropped() {
     assert_eq!(dec_on(&mut ctx, &t, 4), 0);
     assert_eq!(dec_on(&mut ctx, &t, 4), 1);
     assert_eq!(ctx.dups(), 4);
+    // .5 same timestamp and hashes, different content (seen in recordings): not a copy.
+    let mut two = bound();
+    assert_eq!(dec_on(&mut two, &price_change(), 3), 2);
+    let other = price_change().replace("\"0.42\"", "\"0.41\"");
+    assert_eq!(dec_on(&mut two, &other, 4), 2);
+    assert_eq!(two.dups(), 0);
     // .4 one connection alone: a repeated message is applied each time.
     let mut one = bound();
     assert_eq!(dec_on(&mut one, &price_change(), 3), 2);
