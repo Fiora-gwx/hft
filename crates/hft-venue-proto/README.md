@@ -76,6 +76,9 @@ pub trait VenueProtocol: Sized + 'static {
         -> Result<(), ProtoErr> { Self::subscribe(rd, subs, unsub, cfg, out) }
     /// false:交易所从不回复订阅帧,运行时把发出的帧当作已确认(默认 true)。
     const SUB_ACKS: bool = true;
+    /// BindSlot:把槽位 inst 绑定到 32 字节交易所 id(全零 = 解绑),写进 FeedCtx;只有运行期绑定 id 的 venue 支持,
+    /// 其余默认 Err(Unsupported)。旧 id 保留到下一次退订帧渲染完。
+    fn bind_wire(ctx: &mut Self::FeedCtx, inst: InstId, id: &[u8; 32]) -> Result<(), ProtoErr> { Err(ProtoErr::Unsupported) }
     /// 私有频道订阅帧(用户流、订单、持仓、账户、保证金推送);只在被选为私有频道归属的连接上发(见 hft-venue §4b)。
     fn private_subscribe(cfg: &VenueCfg, acct: AccountId, unsub: bool, out: &mut SubFrames) -> Result<(), ProtoErr>;
     fn heartbeat(role: Role) -> HeartbeatSpec;

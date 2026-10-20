@@ -186,5 +186,13 @@ pub fn all_samples(w: &[u8]) -> Vec<ControlCmd<'_>> {
             _pad: 0,
             delay_ms: 3000,
         },
+        ControlCmd::BindSlot {
+            venue: VenueId(15),
+            _pad: [0; 3],
+            inst: InstId(7),
+            start_s: 1_792_425_300,
+            end_s: 1_792_425_600,
+            wire_id: [0xA5; 32],
+        },
     ]
 }

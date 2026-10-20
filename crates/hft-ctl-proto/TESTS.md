@@ -15,7 +15,7 @@ spec: README.md
 | 概要 | CTP-057、CTP-094、CTP-173 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | CTP-001–CTP-004、CTP-090、CTP-162、CTP-170 |
-| 请求与响应 | CTP-010–CTP-025、CTP-040–CTP-053、CTP-070–CTP-072、CTP-140–CTP-161、CTP-177、CTP-178、CTP-179 |
+| 请求与响应 | CTP-010–CTP-025、CTP-040–CTP-053、CTP-070–CTP-072、CTP-140–CTP-161、CTP-177、CTP-178、CTP-179、CTP-180 |
 | 二次确认 | CTP-001、CTP-011、CTP-016、CTP-071、CTP-072、CTP-080–CTP-082 |
 | 策略参数 schema JSON | CTP-175 |
 | 权限表 | CTP-081、CTP-082、CTP-090、CTP-093、CTP-095、CTP-100–CTP-139、CTP-176 |
@@ -2332,6 +2332,22 @@ spec: README.md
 | CTP-179.7 | account 与分组不同 | `InvalidArgs{BadValue}` |
 
 未改动的合法凭据规范化成功。
+
+### CTP-180 BindSlot 的名字与账户
+
+- 规则:[请求与响应](README.md#请求与响应)
+- 级别:table
+- 里程碑:M3
+- 前置:P0 加 venue `polymarket-clob`(VenueId 15)与其现货 inst 5(符号 `btc-up-0`);issuer `pipeline`;`start_s` 1792425300、`end_s` 1792425600、`wire_id` 为 78 位十进制代币 id(大端首字节 0xCE)
+- 实现:`crates/hft-ctl-proto/tests/normalize.rs::ctp_180_bind_slot_names_and_account`
+
+| 行 | venue / inst / account | 期望 |
+|---|---|---|
+| CTP-180.1 | `polymarket-clob` / `polymarket-clob:btc-up-0` / `*` | `ControlCmd::BindSlot{venue 15, inst 5, start_s, end_s}`,`wire_id[0] = 0xCE` |
+| CTP-180.2 | `15` / `5` / `*` | 同样规范化为 `BindSlot` |
+| CTP-180.3 | `POLYMARKET_CLOB` / … / `*` | `InvalidArgs{UnknownName}` |
+| CTP-180.4 | … / `btc-up-0`(无 venue 前缀)/ `*` | `InvalidArgs{UnknownName}` |
+| CTP-180.5 | … / … / 缺省 | `InvalidArgs{AccountRequired}` |
 
 ## 验收
 

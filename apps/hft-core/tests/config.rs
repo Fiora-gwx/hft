@@ -415,3 +415,127 @@ fn core_012_receive_source_survives_feed_adapter() {
         assert_eq!(slot.body(), &[7; 16]);
     }
 }
+#[test]
+fn core_421_dry_run_live_feed_venue() {
+    let d = tempfile::tempdir().unwrap();
+    let path = support::write(d.path(), &d.path().join("hot"), None);
+    let base: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let codes = |cfg: &toml::Value, dry: bool| -> Vec<String> {
+        std::fs::write(&path, toml::to_string(cfg).unwrap()).unwrap();
+        match hft_core::config::load(&path, dry) {
+            Ok(_) => Vec::new(),
+            Err(e) => e.iter().map(|e| e.code.to_string()).collect(),
+        }
+    };
+    // .1 live_feed without a source address or a feed thread.
+    let mut c = base.clone();
+    c["venues"]["public"]
+        .as_table_mut()
+        .unwrap()
+        .insert("live_feed".into(), true.into());
+    let got = codes(&c, true);
+    for code in ["MissingField", "ThreadPlan"] {
+        assert!(got.iter().any(|g| g == code), "CORE-421.1 {code}: {got:?}");
+    }
+    // .2 source address and threads added; a paper quote on the live venue is still rejected.
+    let v = c["venues"]["public"].as_table_mut().unwrap();
+    v.insert("src_ip".into(), "127.0.0.1".into());
+    v.insert("bind_device".into(), "lo".into());
+    for (name, task) in [("feed", "feed:public"), ("build", "conn-builder:public")] {
+        let mut t = toml::map::Map::new();
+        t.insert("name".into(), name.into());
+        t.insert("task".into(), task.into());
+        t.insert("park_us".into(), 100.into());
+        t.insert("nice".into(), 0.into());
+        c["threads"].as_array_mut().unwrap().push(t.into());
+    }
+    let got = codes(&c, true);
+    assert!(got.iter().any(|g| g == "SimConfig"), "CORE-421.2: {got:?}");
+    // .3 without quotes on it the venue is complete; its raw feed journal is reserved.
+    c["sim"].as_table_mut().unwrap().remove("quotes");
+    let got = codes(&c, true);
+    for code in ["MissingField", "ThreadPlan", "SimConfig", "LiveFeed"] {
+        assert!(!got.iter().any(|g| g == code), "CORE-421.3 {code}: {got:?}");
+    }
+    let parsed = hft_core::config::parse(&path).unwrap();
+    assert_eq!(
+        hft_core::budget::journals(&parsed, true),
+        ["seq", "raw-feed-public"],
+        "CORE-421.3"
+    );
+    // .4 network mode rejects the option.
+    assert!(codes(&c, false).iter().any(|g| g == "LiveFeed"), "CORE-421.4");
+    // .5 the polymarket-clob protocol is built only with its Cargo feature.
+    let r = hft_core::venues::registered("polymarket-clob", hft_types::VenueId::POLYMARKET_CLOB);
+    if cfg!(feature = "polymarket") {
+        assert!(r.is_ok(), "CORE-421.5");
+    } else {
+        assert_eq!(r.unwrap_err().code, "VenueNotBuilt", "CORE-421.5");
+    }
+}
+#[cfg(feature = "polymarket")]
+#[test]
+fn core_422_polymarket_sim_config_loads() {
+    let d = tempfile::tempdir().unwrap();
+    let path = support::write_polymarket_sim(d.path(), &d.path().join("hot"), None, None, "127.0.0.1", "lo");
+    let l = match hft_core::config::load(&path, true) {
+        Ok(l) => l,
+        Err(e) => panic!("CORE-422.1: {e:?}"),
+    };
+    let v = l.rd.venue(hft_types::VenueId::POLYMARKET_CLOB);
+    assert_eq!(v.ws_max_streams_per_conn, 2, "CORE-422.2");
+    assert_eq!(
+        l.rd.insts_of_venue(hft_types::VenueId::POLYMARKET_CLOB).len(),
+        16,
+        "CORE-422.2"
+    );
+    let i = l.rd.inst(hft_types::InstId(1));
+    assert_eq!((i.tick, i.px_exp), (1, -3), "CORE-422.2");
+}
+#[test]
+fn core_423_feed_raw_modes() {
+    use hft_core::config::RawKind;
+    use hft_venue::RawMode;
+    // .1 defaults: network mode on, --dry-run off; an explicit value wins.
+    assert_eq!(RawKind::resolve(None, false), RawMode::On, "CORE-423.1");
+    assert_eq!(RawKind::resolve(None, true), RawMode::Off, "CORE-423.1");
+    assert_eq!(
+        RawKind::resolve(Some(RawKind::Sampled), true),
+        RawMode::Sampled,
+        "CORE-423.1"
+    );
+    assert_eq!(
+        RawKind::resolve(Some(RawKind::On), true),
+        RawMode::On,
+        "CORE-423.1"
+    );
+    let d = tempfile::tempdir().unwrap();
+    let path = support::write(d.path(), &d.path().join("hot"), None);
+    let text = std::fs::read_to_string(&path).unwrap();
+    // .2 `venues.<v>.feed.raw` parses.
+    let with = text.replace(
+        "[sim]",
+        "[venues.public.feed.raw]\nbbo = 'off'\nmd = 'sampled'\n[sim]",
+    );
+    std::fs::write(&path, &with).unwrap();
+    let c = hft_core::config::parse(&path).unwrap();
+    let v = &c.venues["public"];
+    assert_eq!(
+        (v.feed.raw.bbo, v.feed.raw.md),
+        (Some(RawKind::Off), Some(RawKind::Sampled)),
+        "CORE-423.2"
+    );
+    // .3 an unknown mode or key is a parse error.
+    for bad in ["md = 'all'", "dups = true"] {
+        std::fs::write(
+            &path,
+            text.replace("[sim]", &format!("[venues.public.feed.raw]\n{bad}\n[sim]")),
+        )
+        .unwrap();
+        let e = hft_core::config::parse(&path).unwrap_err();
+        assert!(
+            e.iter().any(|e| e.code == "ConfigParse"),
+            "CORE-423.3 {bad}: {e:?}"
+        );
+    }
+}

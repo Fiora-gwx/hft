@@ -75,6 +75,8 @@ pub fn feed_cmd_dest(c: &FeedCmd) -> FeedCmdDest {
         FeedCmd::Rotate { conn } if conn.0 < MAX_BBO_CONN_SLOTS => FeedCmdDest::Bbo,
         FeedCmd::Rotate { .. } => FeedCmdDest::Md,
         FeedCmd::Subscribe { .. } | FeedCmd::Unsubscribe { .. } => FeedCmdDest::Both,
+        // Wire ids are rendered by the depth/Md routes' subscription frames.
+        FeedCmd::BindWire { .. } => FeedCmdDest::Md,
     }
 }
 

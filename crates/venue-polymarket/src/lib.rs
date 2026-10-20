@@ -136,6 +136,9 @@ impl VenueProtocol for PolymarketClob {
     ) -> Result<(), ProtoErr> {
         session::subscribe(rd, ctx, subs, unsub, out)
     }
+    fn bind_wire(ctx: &mut FeedCtx, inst: InstId, id: &[u8; 32]) -> Result<(), ProtoErr> {
+        ctx.bind_wire(inst, id).map_err(|_| ProtoErr::Cfg)
+    }
     fn private_subscribe(
         _cfg: &VenueCfg,
         _acct: AccountId,

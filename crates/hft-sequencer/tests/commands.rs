@@ -952,3 +952,90 @@ fn seq_289_lot_and_dust() {
         ".8 old params"
     );
 }
+
+#[test]
+fn seq_432_bind_slot() {
+    use hft_event::FeedCmd;
+    let mut h = steady();
+    let bind = |inst, start_s: i64, end_s: i64, fill: u8| ControlCmd::BindSlot {
+        venue: A,
+        _pad: [0; 3],
+        inst,
+        start_s,
+        end_s,
+        wire_id: [fill; 32],
+    };
+    // .1 a subscribed inst: recorded and sent to the feed as four parts, in order.
+    let n = h.io_ref().feed.len();
+    let id = h.cmd_confirmed(AC1, &bind(A1, 1_000, 1_300, 0x5A));
+    h.run();
+    assert_eq!(h.res(id).0, status::APPLIED);
+    let parts: Vec<_> = h.io_ref().feed[n..]
+        .iter()
+        .filter_map(|(v, c)| match c {
+            FeedCmd::BindWire { inst, part, chunk } if *v == A && *inst == A1 => Some((*part, *chunk)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        parts,
+        (0u8..4).map(|p| (p, [0x5A; 8])).collect::<Vec<_>>(),
+        "SEQ-432.1"
+    );
+    // .2 the same binding again: NoOp, nothing sent.
+    let n = h.io_ref().feed.len();
+    let id = h.cmd_confirmed(AC1, &bind(A1, 1_000, 1_300, 0x5A));
+    h.run();
+    assert_eq!(h.res(id).0, status::NO_OP, "SEQ-432.2");
+    assert_eq!(h.io_ref().feed.len(), n, "SEQ-432.2");
+    // .3 an inst of another venue, an empty window: InvalidArgs.
+    let id = h.cmd_confirmed(
+        AC1,
+        &ControlCmd::BindSlot {
+            venue: B,
+            _pad: [0; 3],
+            inst: A1,
+            start_s: 1_000,
+            end_s: 1_300,
+            wire_id: [1; 32],
+        },
+    );
+    h.run();
+    assert_eq!(
+        h.res(id),
+        (status::INVALID_ARGS, u32::from(detail::BAD_VALUE)),
+        "SEQ-432.3"
+    );
+    let id = h.cmd_confirmed(AC1, &bind(A1, 1_300, 1_300, 1));
+    h.run();
+    assert_eq!(
+        h.res(id),
+        (status::INVALID_ARGS, u32::from(detail::BAD_VALUE)),
+        "SEQ-432.3"
+    );
+    // .4 the binding is in the keyframe (section 31).
+    let kf = h.keyframe();
+    let b = snap(&kf).1.bindings;
+    assert!(
+        b.iter()
+            .any(|r| r.inst == A1 && r.wire_id == [0x5A; 32] && r.end_s == 1_300),
+        "SEQ-432.4"
+    );
+    // .5 a slot holding a position cannot be rebound.
+    h.open_position(AC1, A1, hft_types::Side::Buy, "0.001");
+    let id = h.cmd_confirmed(AC1, &bind(A1, 1_300, 1_600, 0x6B));
+    h.run();
+    assert_eq!(
+        h.res(id),
+        (status::PRECONDITION_FAILED, u32::from(detail::GROUP_HAS_POSITION)),
+        "SEQ-432.5"
+    );
+    // .6 the discovery process: issuer `pipeline` without a role, account `*` (0).
+    let mut h = steady();
+    let id = h.cmd_with("pipeline", 0, AccountId(0), &bind(A1, 1_000, 1_300, 0x5A), |_| {});
+    h.run();
+    assert_eq!(h.res(id).0, status::APPLIED, "SEQ-432.6");
+    let id = h.cmd_with("ops_bot", 0, AccountId(0), &bind(A1, 1_300, 1_600, 0x6B), |_| {});
+    h.run();
+    assert_eq!(h.res(id).0, status::ROLE_INSUFFICIENT, "SEQ-432.6");
+}

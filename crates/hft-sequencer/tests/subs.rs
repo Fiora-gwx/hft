@@ -212,3 +212,58 @@ fn seq_233_group_index_delivery() {
     assert_eq!(m[0].s, S2);
     assert_eq!(m[0].gix, 1);
 }
+
+#[test]
+fn seq_433_binding_precedes_first_subscription() {
+    let mut h = steady();
+    // a3 is not subscribed: the binding is recorded, nothing reaches the feed yet.
+    let n = h.io_ref().feed.len();
+    let id = h.cmd_confirmed(
+        AC1,
+        &ControlCmd::BindSlot {
+            venue: hft_types::VenueId::BINANCE_SPOT,
+            _pad: [0; 3],
+            inst: A3,
+            start_s: 1_000,
+            end_s: 1_300,
+            wire_id: [0x33; 32],
+        },
+    );
+    h.run();
+    assert_eq!(h.res(id).0, hft_sequencer::codes::status::APPLIED);
+    assert!(
+        h.io_ref().feed[n..]
+            .iter()
+            .all(|(_, c)| !matches!(c, FeedCmd::BindWire { inst, .. } if *inst == A3)),
+        "SEQ-433.1"
+    );
+    // The first subscription of a3: its four parts first, then Subscribe.
+    let n = h.io_ref().feed.len();
+    set_subs(
+        S1,
+        vec![(A1, 0, EvMask::BBO, Part::Fast), (A3, 0, EvMask::BBO, Part::Fast)],
+    );
+    let mut p = Spb::s1(2);
+    p.values[F_THR] = 7;
+    h.set_params(&p);
+    h.run();
+    let a3: Vec<_> = h.io_ref().feed[n..]
+        .iter()
+        .filter(|(_, c)| match c {
+            FeedCmd::BindWire { inst, .. } | FeedCmd::Subscribe { inst, .. } => *inst == A3,
+            _ => false,
+        })
+        .map(|(_, c)| *c)
+        .collect();
+    assert_eq!(a3.len(), 5, "SEQ-433.2 {a3:?}");
+    for (k, c) in a3.iter().take(4).enumerate() {
+        assert!(
+            matches!(c, FeedCmd::BindWire { part, chunk, .. } if usize::from(*part) == k && *chunk == [0x33; 8]),
+            "SEQ-433.2 {a3:?}"
+        );
+    }
+    assert!(
+        matches!(a3.get(4), Some(FeedCmd::Subscribe { .. })),
+        "SEQ-433.2 {a3:?}"
+    );
+}

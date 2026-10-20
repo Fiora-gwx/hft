@@ -564,3 +564,95 @@ fn pmk_012_changes_older_than_the_book_are_dropped() {
     let (r, _) = dec(&mut ctx, &older.replace(T_UP, next));
     assert_eq!(r.map(|o| o.events), Ok(1));
 }
+
+#[test]
+fn pmk_013_wire_id_binds_the_decimal_token() {
+    // T_UP as uint256, big-endian.
+    const ID: [u8; 32] = [
+        0xce, 0x2f, 0xbf, 0xfb, 0xbb, 0x97, 0xcf, 0xd6, 0xd8, 0x7a, 0x19, 0xd4, 0x4d, 0xea, 0xe1, 0x2f, 0x8f,
+        0xd4, 0xad, 0xc3, 0xaa, 0xf7, 0x03, 0x9a, 0xe6, 0x5b, 0xa2, 0x88, 0x5a, 0x54, 0x8c, 0xb2,
+    ];
+    let mut ctx = FeedCtx::with_capacity(4);
+    assert_eq!(Pm::bind_wire(&mut ctx, UP, &ID), Ok(()));
+    assert_eq!(ctx.token_of(UP), Some(T_UP.as_bytes()));
+    assert_eq!(ctx.inst_of(T_UP.as_bytes()), UP);
+    let mut one = [0u8; 32];
+    one[31] = 7;
+    assert_eq!(Pm::bind_wire(&mut ctx, DN, &one), Ok(()));
+    assert_eq!(ctx.token_of(DN), Some(&b"7"[..]));
+    // All zero unbinds; inst 0 is refused.
+    assert_eq!(Pm::bind_wire(&mut ctx, DN, &[0; 32]), Ok(()));
+    assert_eq!(ctx.token_of(DN), None);
+    assert_eq!(Pm::bind_wire(&mut ctx, InstId(0), &ID), Err(ProtoErr::Cfg));
+}
+
+#[test]
+fn pmk_014_rebinding_unsubscribes_the_previous_token() {
+    let cfg = VenueCfg {
+        env: VenueEnv::Prod,
+        stale_guard_ms: 0,
+    };
+    let spec = |inst| SubSpec {
+        inst,
+        stream: StreamKind::DepthTopN,
+        levels: 0,
+        route: MARKET,
+    };
+    let mut ctx = bound();
+    let next = "33333333333333333333333333333333333333333333333333333333333333333333333333333";
+    assert_eq!(ctx.bind(UP, next.as_bytes()), Ok(()));
+    let mut out = SubFrames::with_capacity(1 << 16, 8);
+    assert_eq!(
+        Pm::subscribe_ctx(rd(), &ctx, &[spec(UP)], true, &cfg, &mut out),
+        Ok(())
+    );
+    let want = format!("{{\"type\":\"market\",\"operation\":\"unsubscribe\",\"assets_ids\":[\"{T_UP}\"]}}");
+    assert_eq!(out.get(0).map(|(t, _)| t.to_vec()), Some(want.into_bytes()));
+    out.clear();
+    assert_eq!(
+        Pm::subscribe_ctx(rd(), &ctx, &[spec(UP)], false, &cfg, &mut out),
+        Ok(())
+    );
+    let want = format!("{{\"type\":\"market\",\"operation\":\"subscribe\",\"assets_ids\":[\"{next}\"]}}");
+    assert_eq!(out.get(0).map(|(t, _)| t.to_vec()), Some(want.into_bytes()));
+    // An unbound inst is skipped when another one is bound.
+    ctx.unbind(DN);
+    out.clear();
+    assert_eq!(
+        Pm::subscribe_ctx(rd(), &ctx, &[spec(DN), spec(UP)], false, &cfg, &mut out),
+        Ok(())
+    );
+    assert_eq!(out.get(0).map(|(_, n)| n), Some(2));
+}
+
+#[test]
+fn pmk_015_peek_routes_by_the_first_bound_token() {
+    // Only the Down token bound (the Up slot not yet / no longer bound).
+    let mut ctx = FeedCtx::with_capacity(16);
+    assert_eq!(ctx.bind(DN, T_DN.as_bytes()), Ok(()));
+    let p =
+        |ctx: &FeedCtx, s: &str| Pm::peek(rd(), ctx, MdClass::Push, s.as_bytes()).map(|x| (x.inst, x.stream));
+    // .1 a price_change whose first change is the unbound token.
+    assert_eq!(
+        p(&ctx, &price_change()),
+        Ok((DN, StreamKind::DepthTopN)),
+        "PMK-015.1"
+    );
+    // .2 a list frame whose first book is the unbound token.
+    let list = format!("[{},{}]", book_up(), book_up().replace(T_UP, T_DN));
+    assert_eq!(p(&ctx, &list), Ok((DN, StreamKind::DepthTopN)), "PMK-015.2");
+    // .3 nothing bound: the first token's (unbound) inst, as before.
+    let none = FeedCtx::with_capacity(16);
+    assert_eq!(
+        p(&none, &price_change()),
+        Ok((InstId(0), StreamKind::DepthTopN)),
+        "PMK-015.3"
+    );
+    // .4 decoding the .1 message still writes only the bound token's batch.
+    let (r, ev) = dec(&mut ctx, &price_change());
+    assert_eq!(r.map(|o| o.events), Ok(1), "PMK-015.4");
+    assert!(
+        matches!(ev.first(), Some(MdRec::L2Begin(h)) if h.h.inst == DN),
+        "PMK-015.4"
+    );
+}

@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-20 | 新增中性命令 `BindSlot`(0x001D):运行期绑定 venue 的槽位 inst ↔ 交易所 id,inst 在任一账户有仓位或挂单时拒绝;绑定表进快照节 31;`FeedCmd::BindWire` 分 4 段交付,先于该 inst 的首次订阅(含重启);feed 收齐后经 `VenueProtocol::bind_wire` 生效并重订阅深度 | Polymarket 5 分钟市场每窗口更换代币;SEQ-432/433、VEN-396、PMK-013/014、EVT-151.10 | hft-event、hft-ctl-proto、hft-ctl、hft-sequencer、hft-venue、hft-venue-proto、venue-polymarket、control-plane、journal-format | 负责人 2026-10-19(接入方案) |
 | 2026-10-19 | 新增 optional venue `polymarket-clob`(VenueId 15,`Exchange::Polymarket` = 8):结果代币按现货 inst、槽位 ↔ 代币 id 在 feed 绑定表;`VenueProtocol` 追加 `subscribe_ctx`/`SUB_ACKS`(默认不变);feed 的 bulk 输出写 `L2Batch` | 负责人 2026-10-19 确认 Polymarket 接入方案;PMK-001–011、TYP-085、REF-009/015/075 | hft-types、hft-refdata、hft-venue-proto、hft-venue、venue-polymarket、[提案](../.agents/notes/proposed/architecture/2026-10-19-polymarket-venue.md) | 负责人 2026-10-19 |
 | 2026-10-17 | 系统订单逐笔永续现金事实优先于均价估算,连续覆盖/去重/快照保持一致;缺口失败,不启用完整外来 PERP_CASH;OrderEvent v4 尾部追加现金量/额,rep 元素上限 144 B | 测试网现金投影少 0.000001 USDT;BIN-101、EVT-205、SEQ-411/412、LED-279;SIM-123 的 60 个零尾字段保留全部旧字节,旧 120 B 哈希审计通过原基线,仅迁移该 sim 金样 | event、OMS、ledger、协议、规格与 SIM-123;[决定与审计](../.agents/notes/implemented/bug-fix/2026-10-17-execution-cash-facts.md) | 待评审(owner default accepted;LEAD 已批准 SIM-123 基线迁移) |
 | 2026-10-17 | 私有用户流优先于下单连接突发,已有完整缓冲先交付再读 socket;连接内不重排,逐帧发布 | 测试网 read→frame 排队;VEN-207,private burst 基准 | hft-venue 与规格 | 待评审(owner default accepted) |

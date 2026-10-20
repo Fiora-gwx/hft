@@ -718,6 +718,7 @@ fn default_caps(v: VenueId, assets: &[AssetSpec]) -> Option<VenueCaps> {
         VenueId::BINANCE_SPOT => venue_binance::Spot::default_caps(asset),
         VenueId::BITGET_UTA_USDT_FUT => venue_bitget::BitgetUsdtFutures::default_caps(asset),
         VenueId::BITGET_UTA_SPOT => venue_bitget::BitgetSpot::default_caps(asset),
+        VenueId::POLYMARKET_CLOB => venue_polymarket::PolymarketClob::default_caps(asset),
         _ => return None,
     })
 }

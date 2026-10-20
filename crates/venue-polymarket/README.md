@@ -65,7 +65,7 @@ refdata 为每个资产预置固定数量的槽位 inst(符号如 `btc-up-0`)。
 - 重新绑定一个 inst 换掉它的代币,保留它的合成序号计数;`unbind` 只清代币。
 - 查找按代币文本的 FNV-1a 开放寻址,不分配。
 
-绑定由谁、在什么时候写入不归本 crate:当前由装配方在启动时按配置写入;运行期绑定命令见[已知限制与后续工作](#已知限制与后续工作)。
+绑定由 [`BindSlot`](../../docs/subsystems/control-plane.md#命令集) 命令写入:sequencer 记录并把 32 字节交易所 id 经 `FeedCmd::BindWire` 交给 feed 任务,feed 任务调用 `bind_wire`(uint256 大端 → 十进制代币文本)。改绑时旧代币保留到下一个退订帧(`unsub_token_of`),订阅帧跳过尚未绑定的 inst。
 
 ### 订阅
 
@@ -94,7 +94,7 @@ refdata 为每个资产预置固定数量的槽位 inst(符号如 `btc-up-0`)。
 - 时间:`timestamp`(毫秒字符串)→ `MarketHdr.ex_ts_ns`;交易所不给发送时间,`ex_send_ns = 0`。
 - 价格、数量按 inst 的 `px_wire_exp`/`qty_wire_exp` 精确解析,多余小数位 → `DecodeErr::Number`。一条消息先校验全部条目再写事件:任一条出错时不写任何事件。
 - 过期增量:(重)订阅后交易所先推当前整簿,之后仍可能送达时间戳早于该整簿的 `price_change`(2026-10-19 实测重连后出现),它们已包含在整簿里,再应用会把簿退回旧状态。`FeedCtx` 记录每个 inst 最近一次 `book` 的交易所时间,时间戳早于它的 `price_change` 条目丢弃(同一毫秒的照常应用);改绑新代币时清零。
-- 未绑定的代币静默跳过(不是错误)。`peek` 返回首个代币的 inst,`stream = DepthTopN`(簿)或 `Trade`。
+- 未绑定的代币静默跳过(不是错误)。`peek` 返回首个**已绑定**代币的 inst(`price_change` 的各条变化按出现顺序取前 4 个不同代币,列表帧看前 8 个元素;都未绑定时返回首个代币,即 inst 0),`stream = DepthTopN`(簿)或 `Trade`。运行时按 `peek` 的 inst 决定整帧是否交付:一个市场的两个代币分别绑定时,首个代币尚未绑定的 `price_change` 不能因此丢掉另一个代币的变化(2026-10-20 hft-core 验收中出现)。
 - `seq_rule = None`,`resync_method(Push) = Resubscribe`:重订阅后交易所先推整簿。
 
 ### 合成序号
@@ -158,7 +158,7 @@ refdata 为每个资产预置固定数量的槽位 inst(符号如 `btc-up-0`)。
 ## 已知限制与后续工作
 
 - 下单:EIP-712(secp256k1)逐单签名的 REST `POST /order`、撤单、GTD 到期时间、用户频道回报、`FeeModel` 非线性手续费,按提案 P2 实现。
-- 运行期绑定:当前绑定只在装配时写入;提案 P1b 的绑定命令(先写 journal 再生效)与市场发现进程尚未实现。
+- 市场发现进程(按 Gamma 接口为即将开始的窗口发 `BindSlot`,收盘结算前改绑或解绑)尚未实现。
 - `tick_size_change` 不解码:每个 5 分钟市场在价格接近 0 或 1 时(约开盘 4 分钟后)把 tick 从 0.01 改为 0.001,之后出现三位小数价格。解码按 px_exp −3 照常解析,但 refdata 的 tick 为 0.01 时 hft-book 会拒绝不在网格上的档位;P1b 改为 refdata tick 0.001 或按事件切换。
 - 服务端 1013 断开:hft-net 连接上约每 13 分钟 3–4 次(独立的 Python 录制器同期 0–1 次),与接收缓冲大小无关;重连后按整簿恢复,缺口约 0.2–0.5 s。待查原因;可选缓解是同一市场两条连接互为备份。
 

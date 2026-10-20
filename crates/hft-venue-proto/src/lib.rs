@@ -219,6 +219,13 @@ pub trait VenueProtocol: Sized + 'static {
     /// `false`: the venue never answers subscription frames; the runtime counts a sent frame as
     /// acknowledged.
     const SUB_ACKS: bool = true;
+    /// Binds slot `inst` to a 32-byte exchange wire id (`BindSlot`; all zero = unbind) in the
+    /// feed state. Only venues whose wire ids are bound at run time support it. The previous id
+    /// stays renderable for one unsubscription frame.
+    fn bind_wire(ctx: &mut Self::FeedCtx, inst: InstId, id: &[u8; 32]) -> Result<(), ProtoErr> {
+        let _ = (ctx, inst, id);
+        Err(ProtoErr::Unsupported)
+    }
     /// Private channel frames; only on the owning connection (hft-venue §4b).
     fn private_subscribe(
         cfg: &VenueCfg,

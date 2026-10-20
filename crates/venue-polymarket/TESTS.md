@@ -22,9 +22,9 @@ spec: README.md
 | 目录 | 不适用:非规范 |
 | 使用本组件 | PMK-001 |
 | 端点 | PMK-008 |
-| 槽位绑定 | PMK-009, PMK-010 |
-| 订阅 | PMK-008 |
-| 行情频道 → 事件 | PMK-001–PMK-007, PMK-011 |
+| 槽位绑定 | PMK-009, PMK-010, PMK-013, PMK-014 |
+| 订阅 | PMK-008, PMK-014 |
+| 行情频道 → 事件 | PMK-001–PMK-007, PMK-011, PMK-015 |
 | 合成序号 | PMK-003–PMK-005, PMK-010–PMK-012 |
 | 心跳 | PMK-001 |
 | VenueCaps 默认值 | PMK-011 |
@@ -186,6 +186,50 @@ spec: README.md
 | PMK-012.2 | 同上,时间 `1792424113368` | 一个 `L2Batch{prev_id 1, last_id 2}` |
 | PMK-012.3 | inst 1 改绑新代币后,新代币的 `1792424113367` 增量 | 应用(`events 1`) |
 
+### PMK-013 交易所 id(uint256)绑定为十进制代币
+
+- 规则:[槽位绑定](README.md#槽位绑定)
+- 级别:table
+- 里程碑:M3
+- 前置:容量 4 的 `FeedCtx`
+- 实现:`crates/venue-polymarket/tests/main.rs::pmk_013_wire_id_binds_the_decimal_token`
+
+| 行 | `bind_wire` 输入 | 期望 |
+|---|---|---|
+| PMK-013.1 | inst 1,`T_UP` 的 32 字节大端 | `Ok`;`token_of(1) = T_UP`,`inst_of(T_UP) = 1` |
+| PMK-013.2 | inst 2,值 7 | `token_of(2) = "7"` |
+| PMK-013.3 | inst 2,全零 | 解绑:`token_of(2) = None` |
+| PMK-013.4 | inst 0 | `Err(Cfg)` |
+
+### PMK-014 改绑后退订旧代币、订阅新代币
+
+- 规则:[订阅](README.md#订阅)、[槽位绑定](README.md#槽位绑定)
+- 级别:golden
+- 里程碑:M3
+- 前置:`bound()`;inst 1 改绑到新代币
+- 实现:`crates/venue-polymarket/tests/main.rs::pmk_014_rebinding_unsubscribes_the_previous_token`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-014.1 | 退订 inst 1 | 帧里是旧代币 `T_UP` |
+| PMK-014.2 | 订阅 inst 1 | 帧里是新代币 |
+| PMK-014.3 | inst 2 解绑后订阅 `[2, 1]` | 未绑定的 inst 2 跳过,帧覆盖 2 条 |
+
+### PMK-015 peek 按首个已绑定代币路由
+
+- 规则:[行情频道 → 事件](README.md#行情频道--事件)
+- 级别:table
+- 里程碑:M3
+- 前置:容量 16 的 `FeedCtx`,只有 `T_DN` → 2 绑定
+- 实现:`crates/venue-polymarket/tests/main.rs::pmk_015_peek_routes_by_the_first_bound_token`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-015.1 | PMK-004 的 `price_change`(首条为 `T_UP`) | `(2, DepthTopN)` |
+| PMK-015.2 | 列表帧 `[<book T_UP>,<book T_DN>]` | `(2, DepthTopN)` |
+| PMK-015.3 | 空绑定表,同 .1 | `(0, DepthTopN)` |
+| PMK-015.4 | 解码 .1 | 只写 inst 2 的一个 `L2Batch` |
+
 ## 验收
 
-PMK-001–PMK-011 全部通过;线上验收(两个完整 5 分钟窗口)见 [pm-md-probe](../../tools/pm-md-probe/TESTS.md)。
+PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗口)见 [pm-md-probe](../../tools/pm-md-probe/TESTS.md)。

@@ -18,7 +18,7 @@ use hft_venue_proto::{
     SeqIds, SeqRule, StreamKind,
 };
 use serde::Deserialize;
-use serde::de::{Deserializer, IgnoredAny, SeqAccess, Visitor};
+use serde::de::{Deserializer, SeqAccess, Visitor};
 
 use crate::{FeedCtx, MdClass};
 
@@ -190,7 +190,7 @@ pub(crate) struct Msg<'a> {
     side: &'a str,
 }
 
-/// `peek` view: the type and the first token, nothing else decoded.
+/// `peek` view: the type and the tokens, nothing else decoded.
 #[derive(Deserialize)]
 struct PeekMsg<'a> {
     #[serde(default, borrow)]
@@ -198,34 +198,47 @@ struct PeekMsg<'a> {
     #[serde(default, borrow)]
     asset_id: &'a str,
     #[serde(default, borrow)]
-    price_changes: Option<First<AssetOnly<'a>>>,
+    price_changes: Option<Tokens<'a>>,
+}
+
+/// Distinct `asset_id`s of a `price_changes` array in order, at most `PEEK_TOKENS` (a market
+/// has two tokens); the remaining elements are skipped. No allocation.
+const PEEK_TOKENS: usize = 4;
+struct Tokens<'a> {
+    ids: [&'a str; PEEK_TOKENS],
+    n: usize,
+}
+
+impl<'de: 'a, 'a> Deserialize<'de> for Tokens<'a> {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V<'a>(PhantomData<&'a ()>);
+        impl<'de: 'a, 'a> Visitor<'de> for V<'a> {
+            type Value = Tokens<'a>;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("array")
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut s: A) -> Result<Tokens<'a>, A::Error> {
+                let mut t = Tokens {
+                    ids: [""; PEEK_TOKENS],
+                    n: 0,
+                };
+                while let Some(a) = s.next_element::<AssetOnly<'de>>()? {
+                    if t.n < PEEK_TOKENS && !t.ids[..t.n].contains(&a.asset_id) {
+                        t.ids[t.n] = a.asset_id;
+                        t.n += 1;
+                    }
+                }
+                Ok(t)
+            }
+        }
+        d.deserialize_seq(V(PhantomData))
+    }
 }
 
 #[derive(Deserialize)]
 struct AssetOnly<'a> {
     #[serde(borrow)]
     asset_id: &'a str,
-}
-
-/// First element of an array (the rest skipped); empty → `None`.
-struct First<T>(Option<T>);
-
-impl<'de, T: Deserialize<'de>> Deserialize<'de> for First<T> {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        struct V<T>(PhantomData<T>);
-        impl<'de, T: Deserialize<'de>> Visitor<'de> for V<T> {
-            type Value = First<T>;
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("array")
-            }
-            fn visit_seq<A: SeqAccess<'de>>(self, mut s: A) -> Result<First<T>, A::Error> {
-                let first = s.next_element::<T>()?;
-                while s.next_element::<IgnoredAny>()?.is_some() {}
-                Ok(First(first))
-            }
-        }
-        d.deserialize_seq(V(PhantomData))
-    }
 }
 
 pub(crate) fn from<'a, T: Deserialize<'a>>(p: &'a [u8]) -> Result<T, DecodeErr> {
@@ -333,24 +346,45 @@ pub(crate) fn peek(_rd: &RefData, ctx: &FeedCtx, c: MdClass, p: &[u8]) -> Result
             DecodeErr::Shape
         });
     };
-    let m: PeekMsg = from(first)?;
-    let (stream, token) = match m.event_type {
-        "book" => (StreamKind::DepthTopN, m.asset_id),
-        "price_change" => (
-            StreamKind::DepthTopN,
-            m.price_changes.and_then(|f| f.0).map_or("", |a| a.asset_id),
-        ),
-        "last_trade_price" => (StreamKind::Trade, m.asset_id),
-        // tick_size_change, best_bid_ask, new_market, market_resolved: not decoded.
-        _ => return Err(DecodeErr::UnknownClass),
-    };
-    Ok(Peek {
-        inst: ctx.inst_of(token.as_bytes()),
-        stream,
-        ids: SeqIds::default(),
-        raw: RawSeq::default(),
-    })
+    // The message is routed by its first *bound* token: a `price_change` carries both tokens of
+    // a market and a list frame several messages, and one of them may not be bound (yet).
+    let mut out: Option<Peek> = None;
+    for (k, el) in core::iter::once(first).chain(elements(p).skip(1)).enumerate() {
+        if k >= PEEK_ELEMENTS {
+            break;
+        }
+        let m: PeekMsg = from(el)?;
+        let stream = match m.event_type {
+            "book" | "price_change" => StreamKind::DepthTopN,
+            "last_trade_price" => StreamKind::Trade,
+            // tick_size_change, best_bid_ask, new_market, market_resolved: not decoded.
+            _ if k == 0 => return Err(DecodeErr::UnknownClass),
+            _ => continue,
+        };
+        let one = [m.asset_id];
+        let tokens: &[&str] = match &m.price_changes {
+            Some(t) if m.event_type == "price_change" => &t.ids[..t.n],
+            _ => &one,
+        };
+        for t in tokens {
+            let inst = ctx.inst_of(t.as_bytes());
+            let pk = Peek {
+                inst,
+                stream,
+                ids: SeqIds::default(),
+                raw: RawSeq::default(),
+            };
+            if inst.0 != 0 {
+                return Ok(pk);
+            }
+            out.get_or_insert(pk);
+        }
+    }
+    out.ok_or(DecodeErr::Shape)
 }
+
+/// Elements of a list frame `peek` looks at for a bound token.
+const PEEK_ELEMENTS: usize = 8;
 
 // ---------------------------------------------------------------- decode
 

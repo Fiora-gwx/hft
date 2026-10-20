@@ -175,6 +175,44 @@ pub struct Venue {
     pub account_io: Option<AccountIo>,
     #[serde(default)]
     pub accounts: Vec<Keys>,
+    /// `--dry-run` only: this venue's market data comes from the exchange's public feed instead of
+    /// `sim.quotes` (orders stay in sim-gw; no account, no key).
+    #[serde(default)]
+    pub live_feed: bool,
+    /// hft-venue feed keys (`venues.<v>.feed.*`); only `feed.raw` in this assembly.
+    #[serde(default)]
+    pub feed: FeedOpts,
+}
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FeedOpts {
+    #[serde(default)]
+    pub raw: RawOpts,
+}
+/// `venues.<v>.feed.raw.{bbo,md}` (hft-venue): absent = the instance default, `on` for network
+/// mode and `off` for `--dry-run` (the sim instance of the memory table).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawOpts {
+    pub bbo: Option<RawKind>,
+    pub md: Option<RawKind>,
+}
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RawKind {
+    Off,
+    Sampled,
+    On,
+}
+impl RawKind {
+    /// The configured mode, else `on` in network mode and `off` in `--dry-run`.
+    pub fn resolve(v: Option<RawKind>, dry: bool) -> hft_venue::RawMode {
+        match v.unwrap_or(if dry { RawKind::Off } else { RawKind::On }) {
+            RawKind::Off => hft_venue::RawMode::Off,
+            RawKind::Sampled => hft_venue::RawMode::Sampled,
+            RawKind::On => hft_venue::RawMode::On,
+        }
+    }
 }
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -209,6 +247,8 @@ pub struct Paper {
     pub liq_fee_raw: i64,
     pub liq_slippage_bp: u16,
     pub quote_interval_ms: u32,
+    /// Required while any venue is a paper venue (not `live_feed`).
+    #[serde(default)]
     pub quotes: Vec<Quote>,
 }
 #[derive(Clone, Debug, Deserialize)]
@@ -423,6 +463,19 @@ pub fn load_timed(
         }
         if dry && !v.accounts.is_empty() {
             errors.push(Error::config("SecretsInSim", name));
+        }
+        if v.live_feed && !dry {
+            errors.push(Error::config("LiveFeed", "live_feed is a --dry-run venue option"));
+        }
+        if dry && v.live_feed {
+            tasks.push(format!("feed:{name}"));
+            tasks.push(format!("conn-builder:{name}"));
+            if v.src_ip.is_none() || v.bind_device.as_ref().is_none_or(|s| s.is_empty()) {
+                errors.push(Error::config(
+                    "MissingField",
+                    format!("venues.{name}.src_ip/bind_device"),
+                ));
+            }
         }
         if !dry {
             if v.accounts.len() > 1 {
@@ -736,7 +789,8 @@ pub fn load_timed(
         }
     }
     if let Some(paper) = &c.sim {
-        if paper.quote_interval_ms == 0 || paper.quotes.is_empty() || paper.leverage == 0 {
+        let paper_venues = c.venues.values().any(|v| !v.live_feed);
+        if paper.quote_interval_ms == 0 || (paper_venues && paper.quotes.is_empty()) || paper.leverage == 0 {
             errors.push(Error::config(
                 "SimConfig",
                 "quotes, quote_interval_ms and leverage required",
@@ -748,6 +802,9 @@ pub fn load_timed(
                 || q.bid_raw <= 0
                 || q.ask_raw <= q.bid_raw
                 || q.qty_raw <= 0
+                || c.venues
+                    .values()
+                    .any(|v| v.live_feed && VenueId(v.id) == rd.inst(hft_types::InstId(q.inst)).venue)
             {
                 errors.push(Error::config("SimConfig", format!("quote {}", q.inst)));
             }

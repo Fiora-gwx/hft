@@ -26,6 +26,14 @@ def px(s):
     return round(float(s) * 1000)
 
 
+def lines(f):
+    """Lines of a gzip file that may still be open (a missing end-of-stream marker ends it)."""
+    try:
+        yield from f
+    except EOFError:
+        return
+
+
 def best(side, top):
     live = [p for p, q in side.items() if q > 0]
     if not live:
@@ -39,7 +47,7 @@ def pmrec_rows(path, token):
     have = False
     rows, books, trades = [], 0, 0
     with gzip.open(path, "rt", encoding="utf-8", errors="replace") as f:
-        for line in f:
+        for line in lines(f):
             parts = line.rstrip("\n").split("\t", 1)
             if len(parts) != 2:
                 continue
@@ -141,7 +149,10 @@ def main() -> None:
             ok_all = False
             continue
         first = min(t for t, v in got.items() if v != (-1, -1)) if any(v != (-1, -1) for v in got.values()) else 0
-        lo = max(min(rb), min(got), first + 1)
+        # The probe's view starts when it starts receiving (a bound slot's first snapshot can
+        # carry an older exchange time).
+        rx0 = min((d["rx_ns"] // 1_000_000 for d in mine if d.get("rx_ns")), default=0)
+        lo = max(min(rb), min(got), first + 1, rx0)
         hi = min(max(rb), max(got))
         r = {t: v for t, v in rb.items() if lo <= t <= hi}
         g = {t: v for t, v in got.items() if lo <= t <= hi}
@@ -162,7 +173,7 @@ def main() -> None:
         )
         if diff:
             t = diff[0]
-            print(f"   first mismatch at {t}: rebuilt {r[t]} probe {g[t]}")
+            print(f"   first mismatch at {t}: rebuilt {r[t]} probe {g[t]}; mismatch spans {spans(diff)}")
     print(f"RESULT {'PASS' if ok_all else 'FAIL'}: {total_common - total_diff}/{total_common} timestamps equal")
     sys.exit(0 if ok_all else 1)
 

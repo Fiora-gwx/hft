@@ -1104,11 +1104,14 @@ impl<S: StrategySet, IO: LiveIo<S>> Driver<S> for LiveDriver<S, IO> {
     }
 }
 
+/// Key of a staged feed command: a newer command for the same inst supersedes it. `BindWire`
+/// parts are never superseded (all four are needed, in order).
 fn feed_inst(c: &FeedCmd) -> Option<InstId> {
     match c {
         FeedCmd::Subscribe { inst, .. } | FeedCmd::Unsubscribe { inst } | FeedCmd::Resync { inst } => {
             Some(*inst)
         }
+        FeedCmd::BindWire { .. } => None,
         FeedCmd::Rotate { .. } => None,
     }
 }

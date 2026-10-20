@@ -32,6 +32,7 @@ use hft_venue_proto::{VenueCfg, VenueEnv, VenueProtocol};
 use serde::Deserialize;
 use venue_polymarket::{FeedCtx, PolymarketClob as Pm};
 
+mod journal;
 mod tap;
 use tap::Tap;
 use zerocopy::FromBytes;
@@ -312,6 +313,14 @@ fn levels(body: &[u8], n: usize) -> Vec<Level> {
 }
 
 fn main() {
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    if raw.first().map(String::as_str) == Some("journal") {
+        if let Err(e) = journal::run(&raw[1..]) {
+            eprintln!("pm-md-probe: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if let Err(e) = run(args()) {
         eprintln!("pm-md-probe: {e}");
         std::process::exit(1);

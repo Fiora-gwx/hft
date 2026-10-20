@@ -131,6 +131,24 @@ pub fn assemble(
             SignAlg::HmacSha256,
             secrets,
         ),
+        #[cfg(feature = "polymarket")]
+        "polymarket-clob" => build::<venue_polymarket::PolymarketClob>(
+            c,
+            setup,
+            name,
+            v,
+            rd,
+            clock,
+            epoch,
+            bbo,
+            md,
+            bulk,
+            commands,
+            venue_polymarket::FeedCtx::with_capacity(rd.insts_of_venue(VenueId::POLYMARKET_CLOB).len()),
+            venue_polymarket::GwCtx::default,
+            SignAlg::HmacSha256,
+            secrets,
+        ),
         _ => Err(Error::config("VenueNotBuilt", &v.protocol)),
     }
 }
@@ -177,6 +195,8 @@ pub fn public_market_endpoint(protocol: &str, role: EndpointRole, url: &str) -> 
         ("binance-spot", _) => host == "stream.binance.com",
         ("bitget-usdt-futures" | "bitget-spot", EndpointRole::Rest) => host == "api.bitget.com",
         ("bitget-usdt-futures" | "bitget-spot", _) => host == "ws.bitget.com",
+        ("polymarket-clob", EndpointRole::Rest) => host == "clob.polymarket.com",
+        ("polymarket-clob", _) => host == "ws-subscriptions-clob.polymarket.com",
         _ => false,
     }
 }
@@ -563,21 +583,56 @@ where
         .map_err(|_| Error::config("SnapshotHost", name))?;
     let (fw, fs) = raw("feed")?;
     let mut sides = vec![fs];
-    let mut feed = FeedRuntime::<P>::new(
+    // A protocol without a Bbo route (Polymarket) runs the Md routes only, with its whole
+    // DepthTopN book; the others keep the defaults (BBO racing plus TopN depth).
+    let dry = c.sim.is_some();
+    let raw_bbo = crate::config::RawKind::resolve(v.feed.raw.bbo, dry);
+    let raw_md = crate::config::RawKind::resolve(v.feed.raw.md, dry);
+    let feed_cfg = if P::routes().iter().any(|r| r.kind == RouteKind::Bbo) {
         FeedCfg {
             max_sub_insts: v.max_sub_insts,
+            raw_bbo,
+            raw_md,
             venue: feed_venue,
             endpoints: targets,
             ..FeedCfg::default()
-        },
+        }
+    } else {
+        let levels = P::routes()
+            .iter()
+            .filter(|r| r.kind == RouteKind::DepthTopN)
+            .flat_map(|r| r.topn_levels.iter().copied())
+            .max()
+            .ok_or_else(|| Error::config("Feed", "protocol has neither Bbo nor DepthTopN routes"))?;
+        FeedCfg {
+            routes: hft_venue::FeedRoutes::Md,
+            max_sub_insts: v.max_sub_insts,
+            depth: hft_venue::DepthMode::TopN,
+            topn_levels: levels,
+            snapshot_part_levels: 256,
+            raw_bbo,
+            raw_md,
+            venue: feed_venue,
+            endpoints: targets,
+            ..FeedCfg::default()
+        }
+    };
+    let snap_needed = feed_cfg.routes.has_bbo() || feed_cfg.depth == hft_venue::DepthMode::Incremental;
+    let (snapreq_tx, snap_rx) = if snap_needed {
+        (Some(snapreq_tx), Some(snap_rx))
+    } else {
+        (None, None)
+    };
+    let mut feed = FeedRuntime::<P>::new(
+        feed_cfg,
         FeedDeps {
             rd,
-            bbo: Some(bbo),
+            bbo: feed_cfg.routes.has_bbo().then_some(bbo),
             md: Some(md),
             bulk: Some(bulk),
             cmds: commands,
-            snapreq: Some(snapreq_tx),
-            snap: Some(snap_rx),
+            snapreq: snapreq_tx,
+            snap: snap_rx,
             ready: None,
             raw: fw,
             handoff: fh_rx,
@@ -923,6 +978,15 @@ pub fn registered(protocol: &str, id: VenueId) -> Result<(), Error> {
             return Err(Error::config(
                 "VenueNotBuilt",
                 "Bitget requires the bitget Cargo feature",
+            ));
+        }
+        #[cfg(feature = "polymarket")]
+        "polymarket-clob" => VenueId::POLYMARKET_CLOB,
+        #[cfg(not(feature = "polymarket"))]
+        "polymarket-clob" => {
+            return Err(Error::config(
+                "VenueNotBuilt",
+                "Polymarket requires the polymarket Cargo feature",
             ));
         }
         _ => return Err(Error::config("UnknownVenue", protocol)),

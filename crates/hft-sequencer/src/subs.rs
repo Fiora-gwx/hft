@@ -282,19 +282,33 @@ pub(crate) fn pos_nonzero(e: &Engine, i: InstId) -> bool {
 
 /// Emits `Subscribe`/`Unsubscribe` for every inst whose union differs from the last sent value.
 pub(crate) fn send_union_changes<S: StrategySet>(e: &mut Engine, inst: &mut Instances<S>) {
-    for (ix, (u, sent)) in inst.subs.union.iter().zip(e.sent_union.iter_mut()).enumerate() {
-        if *u == *sent {
+    let n = inst.subs.union.len().min(e.sent_union.len());
+    for ix in 0..n {
+        let (Some(&u), Some(&sent)) = (inst.subs.union.get(ix), e.sent_union.get(ix)) else {
+            continue;
+        };
+        if u == sent {
             continue;
         }
         let i = InstId(ix as u32);
         let venue = e.rd.inst(i).venue;
-        let cmd = if *u == 0 {
+        let cmd = if u == 0 {
             FeedCmd::Unsubscribe { inst: i }
         } else {
-            FeedCmd::Subscribe { inst: i, streams: *u }
+            FeedCmd::Subscribe { inst: i, streams: u }
         };
+        // A run-time-bound slot reaches the feed with its wire id before its first subscription
+        // (also after a restart: the feed starts without bindings).
+        if sent == 0
+            && u != 0
+            && let Some(row) = e.cmd.bindings.iter().find(|x| x.inst == i).copied()
+        {
+            crate::commands::emit_binding(e, &row);
+        }
         e.out.emits.push(Emit::Feed { venue, cmd });
-        *sent = *u;
+        if let Some(s) = e.sent_union.get_mut(ix) {
+            *s = u;
+        }
     }
 }
 

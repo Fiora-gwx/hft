@@ -214,6 +214,15 @@ pub enum CmdBody {
         ttl_ms: Option<String>,
         account: Option<String>,
     },
+    /// `wire_id`: the exchange id as a decimal uint256 (`"0"` = unbind).
+    BindSlot {
+        venue: String,
+        inst: String,
+        start_s: String,
+        end_s: String,
+        wire_id: String,
+        account: Option<String>,
+    },
     StrategyCmd {
         strategy: String,
         group: Option<String>,
@@ -280,6 +289,7 @@ impl CmdBody {
             CmdBody::AdoptExchange { .. } => "AdoptExchange",
             CmdBody::VenueNotice { .. } => "VenueNotice",
             CmdBody::SmokeOrder { .. } => "SmokeOrder",
+            CmdBody::BindSlot { .. } => "BindSlot",
             CmdBody::StrategyCmd { .. } => "StrategyCmd",
             CmdBody::InjectWarmup { .. } => "InjectWarmup",
             CmdBody::ReplaceRefdata { .. } => "ReplaceRefdata",
@@ -318,6 +328,7 @@ impl CmdBody {
             CmdBody::SmokeOrder { .. } => 0x001A,
             CmdBody::WriteOffResidual { .. } => 0x001B,
             CmdBody::SimFault { .. } => 0x001C,
+            CmdBody::BindSlot { .. } => 0x001D,
             CmdBody::GetSchema { .. } | CmdBody::ReconcileReport { .. } => 0,
         }
     }
@@ -343,6 +354,7 @@ impl CmdBody {
             | CmdBody::AdoptExchange { account, .. }
             | CmdBody::VenueNotice { account, .. }
             | CmdBody::SmokeOrder { account, .. }
+            | CmdBody::BindSlot { account, .. }
             | CmdBody::StrategyCmd { account, .. }
             | CmdBody::InjectWarmup { account, .. }
             | CmdBody::ReplaceRefdata { account, .. }
@@ -781,6 +793,14 @@ fn parse_body(v: &Value) -> R<CmdBody> {
                 Side::Sell
             },
             ttl_ms: o.dec_opt("ttl_ms")?,
+            account: o.str_opt("account")?,
+        },
+        "BindSlot" => CmdBody::BindSlot {
+            venue: o.str_req("venue")?,
+            inst: o.str_req("inst")?,
+            start_s: o.dec_req("start_s")?,
+            end_s: o.dec_req("end_s")?,
+            wire_id: o.dec_req("wire_id")?,
             account: o.str_opt("account")?,
         },
         "StrategyCmd" => CmdBody::StrategyCmd {
@@ -1229,6 +1249,21 @@ fn write_body(o: &mut Out, b: &CmdBody) {
             o.str("inst", inst);
             o.str("side", enum_name(&c::SIDE, *side as u32));
             o.str_opt("ttl_ms", ttl_ms);
+        }
+        CmdBody::BindSlot {
+            venue,
+            inst,
+            start_s,
+            end_s,
+            wire_id,
+            account,
+        } => {
+            o.str_opt("account", account);
+            o.str("venue", venue);
+            o.str("inst", inst);
+            o.str("start_s", start_s);
+            o.str("end_s", end_s);
+            o.str("wire_id", wire_id);
         }
         CmdBody::StrategyCmd {
             strategy,

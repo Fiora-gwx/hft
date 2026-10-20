@@ -82,6 +82,9 @@ pub struct FeedCounters {
     pub install_failed: u64,
     pub snapshot_stale: u64,
     pub snapshot_failed: u64,
+    /// `BindWire` bindings applied / refused by the protocol.
+    pub binds: u64,
+    pub bind_failed: u64,
 }
 
 const NONE8: u8 = u8::MAX;
@@ -194,6 +197,8 @@ struct St<P: VenueProtocol> {
     bbo_load: Vec<u32>,
     depth_load: Vec<u32>,
     md_load: Vec<u32>,
+    /// Per inst: the wire id being assembled from `BindWire` parts and the parts seen (bit mask).
+    bind_pend: Vec<([u8; 32], u8)>,
 }
 
 /// One feed task (README "运行时入口").
@@ -772,6 +777,7 @@ impl<P: VenueProtocol> FeedRuntime<P> {
             bbo_load: vec![0; usize::from(max_groups)],
             depth_load: vec![0; md_groups],
             md_load: vec![0; md_groups],
+            bind_pend: vec![([0; 32], 0); n],
         };
         let mut conns = Vec::with_capacity(64);
         conns.resize_with(64, || None);
@@ -976,7 +982,68 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                 Some(fc) => fc.m.rotate = true,
                 None => self.st.n.cmd_ignored += 1,
             },
+            FeedCmd::BindWire { inst, part, chunk } => self.bind_part(inst, part, chunk, now),
         }
+    }
+
+    /// One `BindWire` part; the last part binds the assembled id and, when the inst carries a
+    /// depth subscription, resubscribes it: unsubscribe (the previous id) then subscribe (the
+    /// new one) on its group, and the book waits for the new id's first snapshot.
+    fn bind_part(&mut self, inst: InstId, part: u8, chunk: [u8; 8], now: u64) {
+        let Some(ix) = self.st.local(inst) else {
+            self.st.n.cmd_bad_inst += 1;
+            return;
+        };
+        let Some((buf, seen)) = self.st.bind_pend.get_mut(ix) else {
+            return;
+        };
+        let at = usize::from(part) * 8;
+        match buf.get_mut(at..at + 8) {
+            Some(d) if part < 4 => {
+                d.copy_from_slice(&chunk);
+                *seen |= 1 << part;
+            }
+            _ => {
+                self.st.n.cmd_ignored += 1;
+                return;
+            }
+        }
+        if part != 3 {
+            return;
+        }
+        let (id, complete) = (*buf, *seen == 0b1111);
+        *buf = [0; 32];
+        *seen = 0;
+        if !complete {
+            self.st.n.cmd_ignored += 1;
+            return;
+        }
+        if P::bind_wire(&mut self.st.ctx, inst, &id).is_err() {
+            self.st.n.bind_failed += 1;
+            return;
+        }
+        self.st.n.binds += 1;
+        let Some(s) = self.st.insts.get(ix) else { return };
+        if s.want & streams::BOOK == 0 || s.depth_group == NONE8 {
+            return;
+        }
+        let (g, levels, unbind) = (s.depth_group, self.st.topn, id == [0; 32]);
+        let item = |unsub| SubItem {
+            ix: ix as u32,
+            stream: StreamKind::DepthTopN,
+            levels,
+            unsub,
+        };
+        self.enqueue(RouteKind::DepthTopN, g, item(true));
+        if !unbind {
+            self.enqueue(RouteKind::DepthTopN, g, item(false));
+        }
+        if let Some(q) = self.st.seqs.get_mut(ix) {
+            q.l2_state = InstSeq::L2_AWAIT_FIRST;
+        }
+        let conn = self.depth_conn_of(ix).unwrap_or(ConnId(0));
+        self.st
+            .cs(false, conn, ConnStateKind::Resync, inst, codes::NEW_SUB, now);
     }
 
     fn depth_conn_of(&self, ix: usize) -> Option<ConnId> {

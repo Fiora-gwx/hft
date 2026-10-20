@@ -1,4 +1,4 @@
-//! CTP-017–CTP-020, CTP-024, CTP-040–CTP-054, CTP-056, CTP-177–CTP-179.
+//! CTP-017–CTP-020, CTP-024, CTP-040–CTP-054, CTP-056, CTP-177–CTP-180.
 #![allow(
     clippy::type_complexity,
     clippy::disallowed_types,
@@ -138,6 +138,84 @@ fn ctp_179_reconciliation_receipts_reject_bad_fill_semantics() {
             panic!("{row} accepted");
         };
         assert_eq!(x.detail, BAD_VALUE, "{row}");
+    }
+}
+
+#[test]
+fn ctp_180_bind_slot_names_and_account() {
+    use crate::common::p0::*;
+    use hft_types::{InstId, VenueId};
+    let pm = VenueId::POLYMARKET_CLOB;
+    let mut spec = p0_spec();
+    spec.venues.push(venue(
+        pm,
+        hft_refdata::Exchange::Polymarket,
+        hft_refdata::InstKind::Spot,
+    ));
+    spec.caps.push(spot_caps(pm));
+    let mut i = inst(InstId(5), pm, hft_refdata::InstKind::Spot);
+    i.symbol = "btc-up-0".into();
+    spec.insts.push(i);
+    let rd = spec.load();
+    let token = "93260813640452160844731182437467962294350968265707341153474211213683765578930";
+    let body = |venue: &str, inst: &str, account: Option<&str>| {
+        let mut c = json!({"type":"BindSlot","venue":venue,"inst":inst,
+            "start_s":"1792425300","end_s":"1792425600","wire_id":token});
+        if let Some(a) = account {
+            c["account"] = json!(a);
+        }
+        let mut v = e0(None, c);
+        v["issuer"] = json!("pipeline");
+        hft_ctl_proto::normalize(&parse(&v), &rd)
+    };
+    let n = body("polymarket-clob", "polymarket-clob:btc-up-0", Some("*")).unwrap();
+    match dec(&n).1 {
+        ControlCmd::BindSlot {
+            venue,
+            inst,
+            start_s,
+            end_s,
+            wire_id,
+            ..
+        } => {
+            assert_eq!(
+                (venue, inst, start_s, end_s),
+                (pm, InstId(5), 1_792_425_300, 1_792_425_600),
+                "CTP-180.1"
+            );
+            assert_eq!(wire_id[0], 0xce, "CTP-180.1");
+        }
+        x => panic!("CTP-180.1 {x:?}"),
+    }
+    let n = body("15", "5", Some("*")).unwrap();
+    assert!(matches!(dec(&n).1, ControlCmd::BindSlot { .. }), "CTP-180.2");
+    for (row, venue, inst, account, detail) in [
+        (
+            "CTP-180.3",
+            "POLYMARKET_CLOB",
+            "polymarket-clob:btc-up-0",
+            Some("*"),
+            UNKNOWN_NAME,
+        ),
+        (
+            "CTP-180.4",
+            "polymarket-clob",
+            "btc-up-0",
+            Some("*"),
+            UNKNOWN_NAME,
+        ),
+        (
+            "CTP-180.5",
+            "polymarket-clob",
+            "polymarket-clob:btc-up-0",
+            None,
+            ACCOUNT_REQUIRED,
+        ),
+    ] {
+        let Err(e) = body(venue, inst, account) else {
+            panic!("{row} accepted");
+        };
+        assert_eq!(e.detail, detail, "{row}");
     }
 }
 

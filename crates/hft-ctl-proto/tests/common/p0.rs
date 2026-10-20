@@ -61,7 +61,7 @@ fn asset(id: AssetId, name: &str, class: AssetClass, exp: (i8, i8), px_max: i64,
     }
 }
 
-fn venue(id: VenueId, exchange: Exchange, product: InstKind) -> VenueSpec {
+pub fn venue(id: VenueId, exchange: Exchange, product: InstKind) -> VenueSpec {
     VenueSpec {
         id,
         exchange,
@@ -108,7 +108,7 @@ fn perp_caps(v: VenueId) -> VenueCaps {
     }
 }
 
-fn spot_caps(v: VenueId) -> VenueCaps {
+pub fn spot_caps(v: VenueId) -> VenueCaps {
     VenueCaps {
         venue: v,
         market: MarketKind::Spot,
@@ -135,7 +135,7 @@ fn spot_caps(v: VenueId) -> VenueCaps {
     }
 }
 
-fn inst(id: InstId, venue: VenueId, kind: InstKind) -> InstSpec {
+pub fn inst(id: InstId, venue: VenueId, kind: InstKind) -> InstSpec {
     let perp = kind == InstKind::Perp;
     InstSpec {
         id,

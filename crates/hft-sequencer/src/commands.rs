@@ -36,6 +36,8 @@ pub const SECTION_RECON_PENDING: u16 = 19;
 pub const RECON_PENDING_VERSION: u16 = 2;
 pub const SECTION_VENUE_NOTICES: u16 = 24;
 pub const VENUE_NOTICES_VERSION: u16 = 1;
+pub const SECTION_SLOT_BINDINGS: u16 = 31;
+pub const SLOT_BINDINGS_VERSION: u16 = 1;
 /// Viewer emergency-stop confirmation TTL.
 pub const VIEWER_CONFIRM_TTL_MS: i64 = 60_000;
 
@@ -112,6 +114,37 @@ pub struct VenueNoticeRow {
 const _: () = assert!(core::mem::size_of::<VenueNoticeRow>() == 32);
 const _: () = assert!(core::mem::offset_of!(VenueNoticeRow, inst) == 4);
 const _: () = assert!(core::mem::offset_of!(VenueNoticeRow, cmd_seq) == 24);
+
+/// Section 31 row (64 B; key inst): the wire id a `BindSlot` bound to a slot inst.
+#[repr(C)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, FromBytes, IntoBytes, Immutable, KnownLayout)]
+pub struct SlotBindingRow {
+    pub venue: VenueId,
+    pub _pad: [u8; 3],
+    pub inst: InstId,
+    pub start_s: i64,
+    pub end_s: i64,
+    pub wire_id: [u8; 32],
+    pub cmd_seq: u64,
+}
+const _: () = assert!(core::mem::size_of::<SlotBindingRow>() == 64);
+const _: () = assert!(core::mem::offset_of!(SlotBindingRow, wire_id) == 24);
+
+/// The `BindWire` parts carrying `row`'s wire id to the venue's feed.
+pub(crate) fn emit_binding(e: &mut Engine, row: &SlotBindingRow) {
+    for (part, c) in row.wire_id.chunks_exact(8).enumerate() {
+        let mut chunk = [0u8; 8];
+        chunk.copy_from_slice(c);
+        e.out.emits.push(Emit::Feed {
+            venue: row.venue,
+            cmd: hft_event::FeedCmd::BindWire {
+                inst: row.inst,
+                part: part as u8,
+                chunk,
+            },
+        });
+    }
+}
 
 /// The active configuration (section 9) plus the pending refdata reference.
 #[derive(Copy, Clone, Debug)]
@@ -238,6 +271,8 @@ pub struct CmdState {
     pub dedup_cap: usize,
     pub previews: Vec<ViewerPreviewRow>,
     pub notices: Vec<VenueNoticeRow>,
+    /// Slot bindings (section 31), sorted by inst.
+    pub bindings: Vec<SlotBindingRow>,
     pub active: ActiveConfig,
     pub blobs: BlobStore,
     pub recon: Vec<ReconGroupState>,
@@ -494,6 +529,7 @@ impl CmdState {
             dedup_cap: recent,
             previews: Vec::with_capacity(16),
             notices: Vec::with_capacity(64),
+            bindings: Vec::with_capacity(256),
             active: ActiveConfig {
                 refdata: z,
                 engine: z,
@@ -632,6 +668,7 @@ fn role_ok(h: &CmdHdr, c: &ControlCmd<'_>) -> bool {
                 c,
                 ControlCmd::SetParams { .. }
                     | ControlCmd::InjectWarmup { .. }
+                    | ControlCmd::BindSlot { .. }
                     | ControlCmd::SetMode {
                         mode: RunMode::CloseOnly | RunMode::Shadow,
                         ..
@@ -1347,6 +1384,14 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
             notice_delivery(e, inst, &row);
             Ok(ok())
         }
+        ControlCmd::BindSlot {
+            venue,
+            inst: slot,
+            start_s,
+            end_s,
+            wire_id,
+            ..
+        } => Ok(bind_slot(e, *venue, *slot, *start_s, *end_s, wire_id)),
         ControlCmd::SimReset { account } => sim_reset(e, inst, drv, *account),
         ControlCmd::SimTransfer {
             account,
@@ -1523,6 +1568,60 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
         }
         ControlCmd::RotateConn { .. } | ControlCmd::Resubscribe { .. } => Ok(ok()),
     }
+}
+
+/// `BindSlot`: the inst must be a slot of `venue` with no position and no open order in any
+/// account; the binding is recorded (section 31) and, when the inst's feed subscription is live,
+/// sent to the feed now (else just before its next subscription, `subs::send_union_changes`).
+fn bind_slot(
+    e: &mut Engine,
+    venue: VenueId,
+    slot: InstId,
+    start_s: i64,
+    end_s: i64,
+    wire_id: &[u8; 32],
+) -> Res {
+    if slot.0 == 0 || e.rd.inst(slot).venue != venue || venue.0 == 0 || start_s >= end_s {
+        return res(status::INVALID_ARGS, detail::BAD_VALUE);
+    }
+    let accounts = crate::engine::account_count(&e.rd);
+    if (1..=accounts).any(|a| e.ledger.pos(AccountId(a as u8), slot).qty.0 != 0) {
+        return res(status::PRECONDITION_FAILED, detail::GROUP_HAS_POSITION);
+    }
+    let infl = e.oms.inflight();
+    if (1..=accounts).any(|a| {
+        let a = AccountId(a as u8);
+        infl.open_buy(a, slot).0 != 0 || infl.open_sell(a, slot).0 != 0
+    }) {
+        return res(status::PRECONDITION_FAILED, detail::NOT_QUIESCENT);
+    }
+    let row = SlotBindingRow {
+        venue,
+        _pad: [0; 3],
+        inst: slot,
+        start_s,
+        end_s,
+        wire_id: *wire_id,
+        cmd_seq: e.cur_seq,
+    };
+    let same = e
+        .cmd
+        .bindings
+        .iter()
+        .any(|x| x.inst == slot && x.wire_id == *wire_id && x.start_s == start_s && x.end_s == end_s);
+    if same {
+        return res(status::NO_OP, 0);
+    }
+    e.cmd.bindings.retain(|x| x.inst != slot);
+    if *wire_id != [0; 32] {
+        e.cmd.bindings.push(row);
+        e.cmd.bindings.sort_by_key(|x| x.inst.0);
+    }
+    e.trace.rec("cmd.bind_slot", u64::from(slot.0), 0);
+    if e.sent_union.get(slot.0 as usize).is_some_and(|u| *u != 0) {
+        emit_binding(e, &row);
+    }
+    ok()
 }
 
 fn exec_err(x: hft_exec::ExecCmdErr) -> Res {

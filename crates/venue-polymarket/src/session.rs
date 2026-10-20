@@ -66,7 +66,9 @@ const TOKENS_PER_FRAME: usize = 100;
 
 /// `{"type":"market","operation":"subscribe","assets_ids":["<token>",…]}` (or `unsubscribe`).
 /// Book and trade streams of one inst share the token: the inst is written once. The exchange
-/// sends no answer to these frames. An unbound inst or another stream refuses the whole call.
+/// sends no answer to these frames. An unsubscription names the inst's previous token after a
+/// rebinding. Insts without a token are skipped (counted as covered); none at all → `Cfg`;
+/// another stream refuses the whole call.
 pub(crate) fn subscribe(
     _rd: &RefData,
     ctx: &FeedCtx,
@@ -74,6 +76,13 @@ pub(crate) fn subscribe(
     unsub: bool,
     out: &mut SubFrames,
 ) -> Result<(), ProtoErr> {
+    let token = |inst| {
+        if unsub {
+            ctx.unsub_token_of(inst)
+        } else {
+            ctx.token_of(inst)
+        }
+    };
     for s in subs {
         if !matches!(
             s.stream,
@@ -81,9 +90,9 @@ pub(crate) fn subscribe(
         ) {
             return Err(ProtoErr::Unsupported);
         }
-        if ctx.token_of(s.inst).is_none() {
-            return Err(ProtoErr::Cfg);
-        }
+    }
+    if subs.iter().all(|s| token(s.inst).is_none()) {
+        return Err(ProtoErr::Cfg);
     }
     let op: &[u8] = if unsub { b"unsubscribe" } else { b"subscribe" };
     let mut frame = [0u8; 64 + TOKENS_PER_FRAME * (TOKEN_MAX + 3)];
@@ -109,11 +118,10 @@ pub(crate) fn subscribe(
             let seen = subs
                 .get(start..k)
                 .is_some_and(|prev| prev.iter().any(|p| p.inst == s.inst));
-            if !seen {
+            if let (false, Some(t)) = (seen, token(s.inst)) {
                 if tokens == TOKENS_PER_FRAME {
                     break;
                 }
-                let t = ctx.token_of(s.inst).ok_or(ProtoErr::Cfg)?;
                 if tokens > 0 {
                     put(b",", &mut len)?;
                 }
