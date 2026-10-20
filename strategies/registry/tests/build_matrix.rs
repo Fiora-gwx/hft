@@ -38,7 +38,7 @@ fn features() -> Vec<String> {
 fn reg_003_build_matrix() {
     let k = Strategies::kinds();
     // REG-003.1: the default build lists the core strategies only (every row without a feature).
-    let core: BTreeSet<&str> = ["latency-probe", "portfolio-carry"].into_iter().collect();
+    let core: BTreeSet<&str> = ["latency-probe", "portfolio-carry", "book-observer"].into_iter().collect();
     let feats = features();
     let names: BTreeSet<&str> = k.iter().map(|d| d.name).collect();
     for n in &names {

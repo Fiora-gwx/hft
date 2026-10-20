@@ -823,3 +823,4 @@ strategy 5 latency-probe
   note 7 ProbeHalted
   note 8 TargetStuck
   note 9 TargetRejected
+strategy 6 book-observer
