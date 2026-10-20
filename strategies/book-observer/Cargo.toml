@@ -1,0 +1,25 @@
+[package]
+name = "book-observer"
+description = "book-observer strategy: subscribes to the books (and trades) of its group legs and never trades"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# Only the SDK and hft-strat-lib (strategies/AGENTS.md "依赖"; cargo xtask deps rule 9).
+[dependencies]
+hft-strategy-sdk.workspace = true
+hft-strat-lib.workspace = true
+
+# Tests: the SDK stubs and hft-testkit's StrategyHarness/ModelHarness; the refdata fixture of
+# tests/common is built with hft-refdata's RDB1 builder.
+[dev-dependencies]
+hft-strategy-sdk = { workspace = true, features = ["testing", "schema-json"] }
+hft-testkit = { workspace = true, features = ["sdk-mock"] }
+hft-types.workspace = true
+hft-refdata.workspace = true
+hft-event.workspace = true

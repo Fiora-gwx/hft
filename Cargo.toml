@@ -39,6 +39,7 @@ members = [
     "tools/hft-secrets",
     "tools/latency-slice",
     "tools/pm-md-probe",
+    "strategies/book-observer",
 ]
 
 [workspace.package]
