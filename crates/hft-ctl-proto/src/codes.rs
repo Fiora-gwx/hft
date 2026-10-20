@@ -144,6 +144,7 @@ pub mod detail {
     pub const NOTHING_TO_FIX: u16 = 318;
     pub const QUOTE_UNAVAILABLE: u16 = 319;
     pub const CHAIN_LEG: u16 = 320;
+    pub const NOT_ENDED: u16 = 321;
     pub const BROKEN_REMAINING: u16 = 400;
     pub const REFDATA_RECHECK: u16 = 401;
     pub const REFDATA_ASSEMBLY: u16 = 402;

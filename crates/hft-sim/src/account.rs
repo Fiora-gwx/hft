@@ -1020,6 +1020,83 @@ impl SimExchange {
         self.push_config_reports(ai, t, lev);
     }
 
+    /// `SimSettle` (README "交割"): cancels the account's resting orders on the inst, then sells its
+    /// whole spot inventory of the inst's base asset at `cmd.px` (the payout) without fee and
+    /// reports it as `ExternalFill{Delivery}` (`exch_order_id = end_s`, `fill_seq` = the quantity).
+    pub(crate) fn sim_settle(&mut self, ai: usize, cmd: &hft_event::GwCmd, t: u64) {
+        let Some(ii) = self.inst_index(cmd.inst) else {
+            return;
+        };
+        let Some((venue, base, perp, inst)) = self.insts.get(ii).map(|r| (r.venue, r.base, r.perp, r.id))
+        else {
+            return;
+        };
+        if perp || u32::from(venue.0) != cmd.arg {
+            return;
+        }
+        let n = self.accts.get(ai).map_or(0, |a| a.orders.len());
+        for k in 0..n {
+            let o = self.order_at(ai, k);
+            if !(o.used && o.resting && usize::from(o.inst) == ii) {
+                continue;
+            }
+            let ex = self.inst_ex_ts(ii);
+            self.finish(ai, k, st::CANCELLED);
+            let o = self.order_at(ai, k);
+            let ev = self.order_event(
+                ai,
+                &o,
+                hft_event::OrderEventKind::CancelAck,
+                o.px,
+                o.remaining(),
+                0,
+                AssetId(0),
+                0,
+                0,
+                ex,
+                t,
+            );
+            self.emit(ai, ev, t);
+        }
+        let q = self.bal(ai, venue, base).total;
+        if q <= 0 {
+            return;
+        }
+        let due = self.resp_due(ai, t);
+        let px = cmd.px.0;
+        let quote = self.insts.get(ii).map_or(AssetId(0), |r| r.quote);
+        let _ = self.settle_fill(ai, ii, Side::Sell, px, q, 0, due);
+        let id = self.accts.get(ai).map_or(AccountId(0), |a| a.id);
+        let ef = ExternalFill {
+            venue,
+            account: id,
+            side: Side::Sell,
+            cause: ExternalCause::Delivery,
+            inst,
+            qty: Qty(q),
+            px: Px(px),
+            fee: Qty(0),
+            fee_asset: quote,
+            _pad: [0; 6],
+            exch_order_id: u64::from(cmd.arg2),
+            trade_id: 0,
+            ex_ts_ns: i64::from(cmd.arg2).saturating_mul(1_000_000_000),
+            rx_tsc: Tsc(due),
+            fill_seq: q as u64,
+            cash_qty: Qty(0),
+            cash_amount: Qty(0),
+        };
+        self.push_reply(id, due, RepMsg::ExternalFill(ef), Bulk::None);
+        for asset in [base, quote] {
+            let b = self.bal(ai, venue, asset);
+            let br = self.balance_report(ai, venue, asset, b, due);
+            if let Some(y) = self.bal_mut(ai, venue, asset) {
+                y.reported = b.total != 0 || b.locked != 0;
+            }
+            self.push_reply(id, due, RepMsg::BalanceReport(br), Bulk::None);
+        }
+    }
+
     // ---- seeding ----
 
     /// `seed_account_from` (README "重启恢复").

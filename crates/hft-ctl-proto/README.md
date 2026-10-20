@@ -92,6 +92,7 @@ pub const VIEWER_CONFIRM_TTL_MS: u32 = 60_000;   // 语义归 control-plane;sequ
 - `SmokeOrder` 的 JSON 形状:`{"type":"SmokeOrder","account":"<label>","venue":"binance-usdm","inst":"binance-usdm:BTCUSDT","side":"Buy","ttl_ms":"10000"}`;`ttl_ms` 缺省时 `normalize` 填 control-plane 规定的缺省值,越出范围 → `InvalidArgs{BadValue}`。`WriteOffResidual`:`{"type":"WriteOffResidual","account":"<label>","group":"16777317"}`。两者都是升级类,`account` 必须显式。`SimFault`:`{"type":"SimFault","account":"<label>","venue":"binance-usdm","fault":"RejectNew","delay_ms":"0"}`;`fault` 写变体名,`delay_ms` 只在 `fault = DelayReports` 时为 1..=60 000,其余必须为 0,否则 `InvalidArgs{BadValue}`;`account` 必须显式。
 - `ReconcileReport` 的 JSON 形状:`{"type":"ReconcileReport","report_id":"…","items":[{…}, …]}`,每个条目的字段名与 [hft-event `ReconcileReport`](../hft-event/README.md#控制与系统0x04xx0x05xx) 相同(`venue`、`account`、`inst`、`asset` 写名字,`item`、`severity`、`order_status` 写码名,数量与金额写十进制字符串,`sflags` 写位名数组);`idx` 与 `count` 由 `normalize` 按条目顺序填写(条目 ≥ 1,否则 `invalid_request`);不是 `ControlCmd`,没有 `cmd_hash`。
 - `BindSlot` 的 JSON 形状:`{"type":"BindSlot","venue":"polymarket-clob","inst":"polymarket-clob:btc-up-0","start_s":"1792425300","end_s":"1792425600","wire_id":"9326…8930","account":"*"}`;`wire_id` 是交易所 id 的十进制 uint256(最多 78 位,`"0"` = 解绑),规范化为 32 字节大端;`venue` 与 `inst` 按通用名字规则(协议名或十进制 id;`<venue>:<符号>` 或十进制 id);`account` 必须给出且只能是 `"*"`(venue 级中性命令,编码为 0;缺省 → `InvalidArgs{AccountRequired}`)。执行语义归 [hft-sequencer](../hft-sequencer/README.md)。
+- `Settle` 的 JSON 形状:`{"type":"Settle","venue":"polymarket-clob","inst":"polymarket-clob:btc-up-0","end_s":"1792425600","payout":"1","account":"*"}`;`payout` 是每单位兑付的十进制价格,按该 inst 的价格指数转定点(多余小数位 → `InvalidArgs{BadValue}`);`end_s` 为所交割窗口的结束 UTC 秒;`account` 规则同 `BindSlot`。执行语义归 [hft-sequencer](../hft-sequencer/README.md)。
 - `InjectWarmup` 的 JSON 形状:`{"type":"InjectWarmup","strategy":"pc-main","local_kind":"3","chunk_no":"0","last":false,"payload_b64":"…"}`;`account` 必须缺省或为 `"*"`(实例级命令,编码为 0;给出具体账户 → `InvalidArgs{AccountNotAllowed}`);解码后 ≤ 4096 B。一个请求只携带一块:块由生产者(策略的 pipeline 插件)产出,每块自身完整;客户端按块列表逐块发送并递增 `chunk_no`,不切字节(见 [hft-ctl 客户端](../hft-ctl/README.md#客户端))。
 
 ### 二次确认
@@ -138,6 +139,7 @@ pub const VIEWER_CONFIRM_TTL_MS: u32 = 60_000;   // 语义归 control-plane;sequ
 | `VenueNotice{Delisting}` | core | 降级 | — | ✓ | ✓ | — | — | 否 |
 | `VenueNotice{FundingInterval \| Maintenance}` | core | 中性 | — | ✓ | ✓ | — | — | 否 |
 | `BindSlot`(运行期绑定 venue 的槽位 inst ↔ 交易所 id) | core | 中性 | — | ✓ | ✓ | — | pipeline | 否 |
+| `Settle`(运行期绑定 venue 的槽位 inst 按结果交割;只对 Sim 账户) | core | 中性 | — | ✓ | ✓ | — | pipeline | 否 |
 | `SimReset`(只对 Sim 账户) | core | 中性 | — | ✓ | ✓ | — | — | 是 |
 | `SimTransfer`(只对 Sim 账户) | core | 中性 | — | ✓ | ✓ | — | — | 否 |
 | `SimFault`(受控故障注入,只对 Sim 账户) | core | 中性 | — | — | ✓(仅 `cli:<login>`) | — | — | 否 |
@@ -163,7 +165,7 @@ optional 的 chain-core 会话(链上策略接入时启用)沿用同一帧与模
 | ops_bot 自身(不代表任何 Telegram 用户) | `hft-opsbot` | `ops_bot` | 只允许默认参数的 `Kill{Global \| Account}`(非 HARD、不带 flatten;恢复后自动补发兜底期间未进 journal 的 `/stop`,范围与原 `/stop` 相同,[ops_bot 紧急停止](../../python/ops_bot/README.md#紧急停止stop))与 `Annotate{OpsNote}` |
 | 运维 CLI | 运维登录用户(须能访问 ctl socket:`hft-ctl` 组成员资格的登记方式归 deploy) | `cli:<login>` | 个人配置的角色 |
 | reconciler | `hft-recon` | `reconciler` | 只允许写 `ReconcileReport` 记录(不发任何 `ControlCmd`) |
-| pipeline | `hft-pipeline` | `pipeline` | 只允许 `SetParams`、group 级 `SetMode → Shadow/CloseOnly`(`group` 为具体 GroupId;`"*"` → `Forbidden`)、`InjectWarmup`、`BindSlot`(市场发现)、`GetSchema` |
+| pipeline | `hft-pipeline` | `pipeline` | 只允许 `SetParams`、group 级 `SetMode → Shadow/CloseOnly`(`group` 为具体 GroupId;`"*"` → `Forbidden`)、`InjectWarmup`、`BindSlot`(市场发现)、`Settle`(市场发现交割)、`GetSchema` |
 | hft-core 自身(进程内,不经 socket) | — | `cli:systemd` | 只允许 `CancelAll`、`Drain`(SIGTERM 路径,经 gateway 的内部通道),以及**仅在启动时由 kill-switch 停机标记触发**的默认参数 `Kill{Global \| Account}`(非 HARD、不带 flatten、范围 = 标记的 `scope`;由启动步 5 写成 Input,流程归 [apps/hft-core](../../apps/hft-core/README.md)) |
 | watchtower、treasury | — | — | **不是主体**:只读 journal、只告警或给建议,不发命令(行情/时钟/磁盘/保证金类降级由 hft-risk 的条件型 cap 负责) |
 

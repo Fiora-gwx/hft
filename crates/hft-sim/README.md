@@ -133,7 +133,7 @@ impl hft_rt::PollTask for SimGwTask {
 `poll_once` 的固定顺序:
 
 1. 尾随 seq journal 到 `committed_len`(每次 ≤ 4,096 条):行情记录 → `on_record`;Sim 账户的 `OrderDecision` → 记入 `decisions`。
-2. 取 `out-sim` 指令(每次至多 `CMDS_PER_POLL` = 256 条):订单类以 `decisions` 中同 `(account, slot, gen)` 的 `decided_tsc` 调 `on_command`(`OrderDecision` 在 `OutMsg` 入环之前已提交,[journal-format 提交游标](../../docs/subsystems/journal-format.md),所以第 1 步之后一定查得到);模拟命令(`SimReset`、`SimTransfer`,`GwCmd` 变体名以 [hft-event](../hft-event/README.md) 为准)以已消费的最后一条记录的 `tsc` 为时刻;维护类(`DeadManRefresh`、`Rotate`、`ResetRate`、`Resubscribe`、`SetEpoch`、`SessionKeepalive`、`MirrorRestore`)在模拟交易所没有对应状态,取出即丢弃、不回报、只计数 `maint_ignored`。
+2. 取 `out-sim` 指令(每次至多 `CMDS_PER_POLL` = 256 条):订单类以 `decisions` 中同 `(account, slot, gen)` 的 `decided_tsc` 调 `on_command`(`OrderDecision` 在 `OutMsg` 入环之前已提交,[journal-format 提交游标](../../docs/subsystems/journal-format.md),所以第 1 步之后一定查得到);模拟命令(`SimReset`、`SimTransfer`、`SimSettle`,`GwCmd` 变体名以 [hft-event](../hft-event/README.md) 为准)以已消费的最后一条记录的 `tsc` 为时刻;维护类(`DeadManRefresh`、`Rotate`、`ResetRate`、`Resubscribe`、`SetEpoch`、`SessionKeepalive`、`MirrorRestore`)在模拟交易所没有对应状态,取出即丢弃、不回报、只计数 `maint_ignored`。
 3. `advance(已消费最后一条记录的 tsc)`。若 `tuning.quiet_ms` 内 journal 无新记录而有指令等待,以本地 TSC 推进并计数 `quiet_advance`(这类撮合在重演中不保证逐笔一致)。
 4. `drain_due(now)` → 推入 `rep-sim`;环满时留在待交付堆,下一轮重试,**从不丢弃**。
 5. **回报洪峰**:待交付堆(容量 16,384)剩余 < `REPLY_RESERVE` = 4,096 项时,本次调用跳过第 2、3 步(不取指令、不推进撮合),只做第 1、4 步,计数 `reply_backpressure`;指令留在 `out-sim` 环里(环满时 sequencer 按出环满处理,规则归 [hft-sequencer](../hft-sequencer/README.md))。撮合与回报的 `due_tsc` 只取决于事件时间,跳过只推迟交付,不改变撮合结果。
@@ -461,6 +461,7 @@ pub struct StressVerdict {
 - 每 (Sim 账户, venue, asset) `{free, locked}`;IOC 在 `arrive_tsc` 锁定、成交即结算;挂单锁定直到终态。锁定额 = 拒单规则第 8 条检查用的金额(现货买:限价名义,手续费扣计价资产时另加按 taker 费率算的费用;现货卖:数量);部分成交按比例释放。
 - `SimTransfer{account, from_venue, to_venue, asset, amount}`:sequencer 已按 ledger 可用余额校验;sim 在命令时刻从源 venue 扣减、`transfer_delay_ms` 后在目标 venue 入账,两端各发 `BalanceReport`。
 - `SimReset{account}`:撤销该账户全部挂单(各发 `CancelAck`)、余额恢复 `initial_balances`、仓位与记忆清零、发真值报告;前置条件与 ledger 侧的同步清零分别归 [control-plane](../../docs/subsystems/control-plane.md) 与 [hft-ledger](../hft-ledger/README.md)。
+- **交割** `SimSettle{account, venue, inst, payout, end_s}`(sequencer 执行 `Settle` 后发出,[control-plane](../../docs/subsystems/control-plane.md#命令集)):只对现货 inst,`arg` 的 venue 与 inst 的 venue 不符或 inst 为永续时忽略。先撤销该账户在该 inst 的全部挂单(各发 `CancelAck`,释放锁定),再把该 inst 基础资产的全部余额 q(> 0 时)按 `payout` 卖出:与一笔费率 0 的现货卖出成交同一套余额计算(计价资产按 `Floor` 取整),回报一条 `ExternalFill{cause = Delivery, side = Sell, qty = q, px = payout, fee = 0, fee_asset = 计价资产, exch_order_id = end_s, trade_id = 0, fill_seq = q, ex_ts_ns = end_s × 10⁹}`(去重键 `(inst, end_s, q)`,槽位改绑后不与下一个窗口冲突),并为基础资产与计价资产各发一条 `BalanceReport`;`due_tsc` = 收到时刻 + `sample(resp)`。余额为 0 时只撤单。
 
 ### 9. 确定性
 

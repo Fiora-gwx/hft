@@ -41,7 +41,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 模型检查点 | SEQ-045–SEQ-051、SEQ-363、SEQ-399–SEQ-403 |
 | 资金费合成 | SEQ-092、SEQ-192–SEQ-196、SEQ-361 |
 | 模式与 cap 的驱动 | SEQ-132、SEQ-183、SEQ-197–SEQ-213、SEQ-342、SEQ-353、SEQ-368 |
-| 模拟账户 | SEQ-067、SEQ-179、SEQ-201、SEQ-214–SEQ-217、SEQ-298 |
+| 模拟账户 | SEQ-435、SEQ-067、SEQ-179、SEQ-201、SEQ-214–SEQ-217、SEQ-298 |
 | 输出扇出 | SEQ-218、SEQ-219、SEQ-343 |
 | 通知队列与续推 | SEQ-071、SEQ-072、SEQ-084、SEQ-133、SEQ-204、SEQ-220–SEQ-223 |
 | journal 满 | SEQ-013、SEQ-083 |
@@ -55,7 +55,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 版本变化与回滚 | SEQ-257、SEQ-272–SEQ-274 |
 | 启动闸门 | SEQ-094、SEQ-157、SEQ-160、SEQ-207、SEQ-210、SEQ-275、SEQ-345 |
 | 存储降级 | SEQ-093、SEQ-276、SEQ-277 |
-| 命令路径 | SEQ-009、SEQ-040、SEQ-122、SEQ-185、SEQ-186、SEQ-189、SEQ-211、SEQ-235、SEQ-255、SEQ-278–SEQ-304、SEQ-348、SEQ-354、SEQ-355、SEQ-357、SEQ-358、SEQ-365 |
+| 命令路径 | SEQ-435、SEQ-009、SEQ-040、SEQ-122、SEQ-185、SEQ-186、SEQ-189、SEQ-211、SEQ-235、SEQ-255、SEQ-278–SEQ-304、SEQ-348、SEQ-354、SEQ-355、SEQ-357、SEQ-358、SEQ-365 |
 | Drain | SEQ-187、SEQ-209、SEQ-222、SEQ-284、SEQ-305–SEQ-309、SEQ-370、SEQ-421 |
 | 确定性规则 | SEQ-043、SEQ-053、SEQ-076、SEQ-097、SEQ-254、SEQ-267、SEQ-310–SEQ-313、SEQ-344 |
 | 状态哈希 | SEQ-054、SEQ-245、SEQ-247、SEQ-249、SEQ-311、SEQ-314、SEQ-396 |
@@ -6138,3 +6138,18 @@ SEQ-411/412 补充未声明 PERP_CASH 的逐笔现金连续前缀:分笔/重复/
 |---|---|---|
 | SEQ-434.1 | 深度连接 `ConnState{Down, conn 9, inst 0}` | a1 的簿仍 `Live`;s1 收到 `EventRef::Conn` |
 | SEQ-434.2 | `ConnState{Resync, conn 8, inst a1}` | a1 的簿离开 `Live` |
+
+### SEQ-435 Settle 的校验与模拟账户交割
+
+- 规则:[命令路径](README.md#命令路径)、[control-plane Settle](../../docs/subsystems/control-plane.md#命令集)
+- 级别:table
+- 里程碑:M3
+- 前置:B0 稳态;命令由 issuer `pipeline`、无角色、账户 0 发出;`one` = `a1` 价格单位的 1
+- 实现:`crates/hft-sequencer/tests/commands.rs::seq_435_settle`
+
+| 行 | 命令 | 期望 |
+|---|---|---|
+| SEQ-435.1 | `BindSlot{A, a1, …, end_s = 1300}` 后 `Settle{A, a1, 1300, one}`(无人持有);绑定 `end_s = 4 000 000 000` 后同样 | 前者 `NoOp`;后者 `PreconditionFailed{NotEnded}` |
+| SEQ-435.2 | 绑定 `end_s = 1300` 后:`end_s = 1200`;`payout = one + 1` | 各为 `InvalidArgs{BadValue}` |
+| SEQ-435.3 | 模拟账户 9 持有 `a1` 后 `Settle{A, a1, 1300, one}` | `Applied`;`out-sim` 恰好一条 `SimSettle{account 9, a1, px = one, arg = A, arg2 = 1300}` |
+| SEQ-435.4 | 新稳态;绑定后实盘账户 1 持有 `a1`,`Settle{…, payout 0}` | `InvalidArgs{NotSim}` |

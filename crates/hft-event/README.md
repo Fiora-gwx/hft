@@ -913,13 +913,13 @@ pub struct GwCmd {                   // out-<venue> 环与 out-sim 环元素,64 
     pub target_slot: SlotId,         // 44 Cancel/Amend/Query 的目标;gw 从私有槽镜像取其 gen 与交易所 id
     pub op: GwOp,                    // 48 订单类与 OrderAction 同值:Place=1(= New) Cancel=2 Amend=3 CancelAll=4 Query=5;
                                      //    维护类:DeadManRefresh=6 Rotate=7 ResetRate=8 Resubscribe=9 SetEpoch=10 SessionKeepalive=11 MirrorRestore=12;
-                                     //    模拟账户专用(只出现在 out-sim 环):SimReset=13 SimTransfer=14 SimFault=15
+                                     //    模拟账户专用(只出现在 out-sim 环):SimReset=13 SimTransfer=14 SimFault=15 SimSettle=16
     pub account: AccountId,          // 49
     pub side: Side, pub tif: Tif,    // 50 仅 Place/Amend 有意义
     pub oflags: u16,                 // 52 = OrderDecision.oflags 原样复制;维护类 0
     pub _pad: [u8; 2],               // 54
-    pub arg: u32,                    // 56 DeadManRefresh:timeout_ms;SetEpoch 与 MirrorRestore:epoch(u16,高 16 位为 0);SimTransfer:asset | from_venue << 16 | to_venue << 24;SimFault:venue | fault << 8;其余 0
-    pub arg2: u32,                   // 60 SetEpoch:accept_prev(位 0)| prev_epoch << 16(位 1..16 为 0);SimFault:delay_ms;其余 0
+    pub arg: u32,                    // 56 DeadManRefresh:timeout_ms;SetEpoch 与 MirrorRestore:epoch(u16,高 16 位为 0);SimTransfer:asset | from_venue << 16 | to_venue << 24;SimFault:venue | fault << 8;SimSettle:venue;其余 0
+    pub arg2: u32,                   // 60 SetEpoch:accept_prev(位 0)| prev_epoch << 16(位 1..16 为 0);SimFault:delay_ms;SimSettle:end_s(UTC 秒);其余 0
 }
 const _: () = assert!(size_of::<GwCmd>() == 64);
 impl GwCmd {
@@ -933,11 +933,13 @@ impl GwCmd {
     pub fn sim_reset(account: AccountId) -> GwCmd;
     pub fn sim_transfer(account: AccountId, from: VenueId, to: VenueId, asset: AssetId, amount: Qty) -> GwCmd; // amount 装在 qty
     pub fn sim_fault(account: AccountId, venue: VenueId, fault: u8, delay_ms: u32) -> GwCmd; // fault 同 ControlCmd::SimFault
+    pub fn sim_settle(account: AccountId, venue: VenueId, inst: InstId, payout: Px, end_s: u32) -> GwCmd; // payout 装在 px
 }
 // MirrorRestore:冷启动恢复并 SetEpoch 之后,sequencer 为每个非终态槽发一条,让 gw 重建私有槽镜像(slot → gen、epoch、inst、交易所 id);
 //   exch_order_id 装在 px 的 64 位(qty = 0)、槽的 epoch 装在 arg,只经构造器与访问器读写。无法编码查询的槽保持 Unknown,交 reconciler。
 // SimReset/SimTransfer:sequencer 执行同名命令后投影给 sim-gw,让模拟交易所的余额与仓位与 ledger 同步变化(语义归 hft-sim)。
 // SimFault:sequencer 执行同名命令后原样投影给 sim-gw(受控故障注入,语义归 hft-sim)。
+// SimSettle:sequencer 执行 Settle 后对每个在该 inst 有库存或挂单的 Sim 账户发一条(撤单并按 payout 交割,语义归 hft-sim)。
 pub enum FeedCmd {                   // sequencer → feed 的 feedctl-<venue> 环;非 repr(C) 的进程内枚举,size_of ≤ 16 B(编译期断言)
     Resync { inst: InstId }, Rotate { conn: ConnId },
     Subscribe { inst: InstId, streams: u8 }, // streams:该 inst 需要的流集合,位值与 SDK EvMask 相同
@@ -1077,6 +1079,8 @@ pub enum ControlCmd<'a> {            // Rust 侧类型化视图(InjectWarmup 的
                delay_ms: u32 /* 只用于 DelayReports(1..=60 000),其余 0 */ },   //   参数与校验见 control-plane,sim-gw 语义见 hft-sim
     BindSlot { venue: VenueId, _pad: [u8; 3], inst: InstId, start_s: i64, end_s: i64, // 0x001D 56 B(1+3 填充+4+8+8+32);venue 级,CmdHdr.account 为 0
                wire_id: [u8; 32] /* 交易所 id,uint256 大端;全零 = 解绑 */ },     //   语义见 control-plane,执行见 hft-sequencer
+    Settle { venue: VenueId, _pad: [u8; 3], inst: InstId, end_s: i64,              // 0x001E 24 B(1+3 填充+4+8+8);venue 级,CmdHdr.account 为 0
+             payout: Px /* 每单位兑付,该 inst 的价格单位 */ },                     //   语义见 control-plane,执行见 hft-sequencer,交割见 hft-sim
 }
 pub const STRATEGY_CMD_MAX_PAYLOAD: usize = 256;
 pub const WARMUP_MAX_PAYLOAD: usize = 4096;   // 整条 ControlCmd 记录 ≤ 24 + 16 + 128 + 16 + 4096 + 4(CRC)向上取 8 = 4 288 B,单段
@@ -1096,7 +1100,7 @@ impl ControlCmd {
 
 `RunMode`、`KillLevel`、`CapSource`、`RejectBits` 的枚举与编码在 [hft-types](../hft-types/README.md#模式kill-级别cap-来源与风控拒绝位),语义在 [hft-risk](../hft-risk/README.md);`decode` 的 `UnknownKind`/`InvalidEnum` 由 gateway 与 sequencer 回 `InvalidArgs{UnknownDiscriminant}`(control-plane 结果码)。`ReconcileReport` 不是命令变体,见[事件体](#控制与系统0x04xx0x05xx)。`GetSchema` 是 gateway 本地应答的只读请求,不进 ctl 环、没有 `CmdKind`(见 [hft-ctl](../hft-ctl/README.md))。
 
-**CmdKind 编号**(只追加、永不复用):`0x0001 SetMode`、`0x0002 SetParams`、`0x0003 SetRisk`、`0x0004 Kill`、`0x0005` 保留、`0x0006 RotateConn`、`0x0007 Resubscribe`、`0x0008 SnapshotNow`、`0x0009 ReplaceRefdata`、`0x000A Resume`、`0x000B` 退役、`0x000C` 退役、`0x000D` 退役、`0x000E HedgeFix`、`0x000F CancelAll`、`0x0010 Drain`、`0x0011 RecordTransfer`、`0x0012 Annotate`、`0x0013 AdoptExchange`、`0x0014 SimReset`、`0x0015 SimTransfer`、`0x0016 VenueNotice`、`0x0017 SetBalanceBaseline`、`0x0018 StrategyCmd`、`0x0019 InjectWarmup`、`0x001A SmokeOrder`、`0x001B WriteOffResidual`、`0x001C SimFault`、`0x001D BindSlot`。各命令是 core 还是 optional 以 [control-plane](../../docs/subsystems/control-plane.md#命令集) 为准;编码全部在此定义。新增命令按 [cookbook](../../docs/cookbook/adding-a-control-command.md) 走;**新增策略不需要新命令**:策略专属的人工操作用 `StrategyCmd`,冷启动预热数据用 `InjectWarmup`,两者的载荷都由策略定义。
+**CmdKind 编号**(只追加、永不复用):`0x0001 SetMode`、`0x0002 SetParams`、`0x0003 SetRisk`、`0x0004 Kill`、`0x0005` 保留、`0x0006 RotateConn`、`0x0007 Resubscribe`、`0x0008 SnapshotNow`、`0x0009 ReplaceRefdata`、`0x000A Resume`、`0x000B` 退役、`0x000C` 退役、`0x000D` 退役、`0x000E HedgeFix`、`0x000F CancelAll`、`0x0010 Drain`、`0x0011 RecordTransfer`、`0x0012 Annotate`、`0x0013 AdoptExchange`、`0x0014 SimReset`、`0x0015 SimTransfer`、`0x0016 VenueNotice`、`0x0017 SetBalanceBaseline`、`0x0018 StrategyCmd`、`0x0019 InjectWarmup`、`0x001A SmokeOrder`、`0x001B WriteOffResidual`、`0x001C SimFault`、`0x001D BindSlot`、`0x001E Settle`。各命令是 core 还是 optional 以 [control-plane](../../docs/subsystems/control-plane.md#命令集) 为准;编码全部在此定义。新增命令按 [cookbook](../../docs/cookbook/adding-a-control-command.md) 走;**新增策略不需要新命令**:策略专属的人工操作用 `StrategyCmd`,冷启动预热数据用 `InjectWarmup`,两者的载荷都由策略定义。
 
 **两个策略通道命令的投递**(语义、类别与权限在 control-plane;SDK 侧的 `EventRef` 形状以 [hft-strategy-sdk](../hft-strategy-sdk/README.md) 为准):
 

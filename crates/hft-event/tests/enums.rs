@@ -250,6 +250,7 @@ fn evt_074_code_tables() {
         ("SimReset", 13),
         ("SimTransfer", 14),
         ("SimFault", 15),
+        ("SimSettle", 16),
     ];
     assert_table("EVT-074.4", ty_desc(SendReport::FIELDS, "op"), &gw);
     assert_table("EVT-074.4", ty_desc(GwCmd::FIELDS, "op"), &gw);

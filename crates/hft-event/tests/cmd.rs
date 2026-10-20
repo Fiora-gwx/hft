@@ -57,6 +57,7 @@ fn evt_151_cmd_kind_numbers() {
         (0x001B, "WriteOffResidual", "EVT-151.4"),
         (0x001C, "SimFault", "EVT-151.9"),
         (0x001D, "BindSlot", "EVT-151.10"),
+        (0x001E, "Settle", "EVT-151.11"),
     ];
     let w = [1u8; 10];
     let samples = all_samples(&w);
@@ -71,7 +72,7 @@ fn evt_151_cmd_kind_numbers() {
         ("EVT-151.6", 0x000C),
         ("EVT-151.6", 0x000D),
         ("EVT-151.7", 0x0000),
-        ("EVT-151.8", 0x001E),
+        ("EVT-151.8", 0x001F),
     ] {
         assert_eq!(CmdKind(n).name(), None, "{row}");
         assert_eq!(

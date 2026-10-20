@@ -263,6 +263,7 @@ pub enum Match {
     VenueNoticeDelisting,
     VenueNoticeOther,
     BindSlot,
+    Settle,
     SimReset,
     SimTransfer,
     SimFault,
@@ -760,6 +761,24 @@ pub const PERM_ROWS: &[PermRow] = &[
     },
     PermRow {
         text: [
+            "`Settle`(运行期绑定 venue 的槽位 inst 按结果交割;只对 Sim 账户)",
+            "core",
+            "中性",
+            "—",
+            "✓",
+            "✓",
+            "—",
+            "pipeline",
+            "否",
+        ],
+        m: Match::Settle,
+        roles: TA,
+        cli_only: false,
+        group_chat: false,
+        procs: &[(Principal::Pipeline, Cond::Any)],
+    },
+    PermRow {
+        text: [
             "`SimReset`(只对 Sim 账户)",
             "core",
             "中性",
@@ -948,6 +967,7 @@ fn row_matches(m: Match, cmd: &CmdBody) -> bool {
         | (Match::SimFault, B::SimFault { .. })
         | (Match::RecordTransfer, B::RecordTransfer { .. })
         | (Match::BindSlot, B::BindSlot { .. })
+        | (Match::Settle, B::Settle { .. })
         | (Match::ReconcileReport, B::ReconcileReport { .. }) => true,
         (Match::StrategyCmd { reduce_only: want }, B::StrategyCmd { reduce_only, .. }) => {
             want == reduce_only.unwrap_or(false)
@@ -1073,6 +1093,7 @@ pub fn class_of(cmd: &CmdBody) -> CmdClass {
         | B::RotateConn { .. }
         | B::Resubscribe { .. }
         | B::BindSlot { .. }
+        | B::Settle { .. }
         | B::SnapshotNow { .. } => CmdClass::Neutral,
     }
 }

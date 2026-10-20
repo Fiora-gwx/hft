@@ -28,7 +28,7 @@ wire_enum!(
     GwOp: u8 = "GwOp" {
         Place = 1, Cancel = 2, Amend = 3, CancelAll = 4, Query = 5, DeadManRefresh = 6, Rotate = 7, ResetRate = 8,
         Resubscribe = 9, SetEpoch = 10, SessionKeepalive = 11, MirrorRestore = 12, SimReset = 13, SimTransfer = 14,
-        SimFault = 15,
+        SimFault = 15, SimSettle = 16,
     }
 );
 wire_enum!(

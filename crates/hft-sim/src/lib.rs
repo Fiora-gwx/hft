@@ -489,6 +489,10 @@ impl SimExchange {
                 let t = self.last_tsc;
                 self.sim_transfer(ai, cmd, t);
             }
+            GwOp::SimSettle => {
+                let t = self.last_tsc;
+                self.sim_settle(ai, cmd, t);
+            }
             _ => {}
         }
     }

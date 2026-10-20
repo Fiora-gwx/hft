@@ -189,7 +189,7 @@ ENUMS = {
     "ClockSource": {1: "Phc", 2: "Ntp", 3: "None"},
     "ClockState": {1: "Synced", 2: "Unsynced", 3: "Stepped"},
     "CmdHdrFlags": {1: "PREVIEW"},
-    "CmdKind": {1: "SetMode", 2: "SetParams", 3: "SetRisk", 4: "Kill", 6: "RotateConn", 7: "Resubscribe", 8: "SnapshotNow", 9: "ReplaceRefdata", 10: "Resume", 14: "HedgeFix", 15: "CancelAll", 16: "Drain", 17: "RecordTransfer", 18: "Annotate", 19: "AdoptExchange", 20: "SimReset", 21: "SimTransfer", 22: "VenueNotice", 23: "SetBalanceBaseline", 24: "StrategyCmd", 25: "InjectWarmup", 26: "SmokeOrder", 27: "WriteOffResidual", 28: "SimFault", 29: "BindSlot"},
+    "CmdKind": {1: "SetMode", 2: "SetParams", 3: "SetRisk", 4: "Kill", 6: "RotateConn", 7: "Resubscribe", 8: "SnapshotNow", 9: "ReplaceRefdata", 10: "Resume", 14: "HedgeFix", 15: "CancelAll", 16: "Drain", 17: "RecordTransfer", 18: "Annotate", 19: "AdoptExchange", 20: "SimReset", 21: "SimTransfer", 22: "VenueNotice", 23: "SetBalanceBaseline", 24: "StrategyCmd", 25: "InjectWarmup", 26: "SmokeOrder", 27: "WriteOffResidual", 28: "SimFault", 29: "BindSlot", 30: "Settle"},
     "CmdResultFlags": {1: "PREVIEW", 2: "NEEDS_CONFIRM", 4: "PREVIEW_TTL"},
     "CmdRole": {0: "Process", 1: "Viewer", 2: "Trader", 4: "Admin"},
     "ConnRole": {1: "Md", 2: "Order", 3: "UserStream", 4: "Rest"},
@@ -199,7 +199,7 @@ ENUMS = {
     "ExecAlgo": {0: "None", 1: "TakerSlice", 2: "PairOnFill", 3: "Simultaneous", 4: "MakerFirst", 5: "Engine"},
     "ExecFlags": {1: "SHADOW", 2: "CLEARED_BY_ENGINE"},
     "ExternalCause": {1: "Liquidation", 2: "Adl", 3: "Manual", 4: "Delivery", 5: "Unknown"},
-    "GwOp": {1: "Place", 2: "Cancel", 3: "Amend", 4: "CancelAll", 5: "Query", 6: "DeadManRefresh", 7: "Rotate", 8: "ResetRate", 9: "Resubscribe", 10: "SetEpoch", 11: "SessionKeepalive", 12: "MirrorRestore", 13: "SimReset", 14: "SimTransfer", 15: "SimFault"},
+    "GwOp": {1: "Place", 2: "Cancel", 3: "Amend", 4: "CancelAll", 5: "Query", 6: "DeadManRefresh", 7: "Rotate", 8: "ResetRate", 9: "Resubscribe", 10: "SetEpoch", 11: "SessionKeepalive", 12: "MirrorRestore", 13: "SimReset", 14: "SimTransfer", 15: "SimFault", 16: "SimSettle"},
     "HedgePxMode": {1: "Cross", 2: "Mid", 3: "LimitBp"},
     "JournalKind": {1: "Raw", 2: "Seq", 3: "Chain"},
     "KillLevel": {2: "Venue", 3: "Account", 4: "Global"},
@@ -277,4 +277,5 @@ CMD_KINDS = {
     0x001B: "WriteOffResidual",
     0x001C: "SimFault",
     0x001D: "BindSlot",
+    0x001E: "Settle",
 }

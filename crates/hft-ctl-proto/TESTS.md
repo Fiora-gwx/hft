@@ -2349,6 +2349,22 @@ spec: README.md
 | CTP-180.4 | … / `btc-up-0`(无 venue 前缀)/ `*` | `InvalidArgs{UnknownName}` |
 | CTP-180.5 | … / … / 缺省 | `InvalidArgs{AccountRequired}` |
 
+### CTP-181 Settle 的名字、兑付价与账户
+
+- 规则:[请求与响应](README.md#请求与响应)
+- 级别:table
+- 里程碑:M3
+- 前置:同 CTP-180;issuer `pipeline`;`venue = polymarket-clob`、`end_s` 1792425600
+- 实现:`crates/hft-ctl-proto/tests/normalize.rs::ctp_181_settle_names_payout_and_account`
+
+| 行 | inst / payout / account | 期望 |
+|---|---|---|
+| CTP-181.1 | `polymarket-clob:btc-up-0` / `"1"` / `*` | `ControlCmd::Settle{venue 15, inst 5, end_s, payout}`,`payout` = 该 inst 价格单位的 1 |
+| CTP-181.2 | 同上 / `"0"` / `*` | `payout = 0` |
+| CTP-181.3 | `btc-up-0`(无 venue 前缀)/ `"1"` / `*` | `InvalidArgs{UnknownName}` |
+| CTP-181.4 | … / `"1"` / 缺省 | `InvalidArgs{AccountRequired}` |
+| CTP-181.5 | … / `"0.00000000001"`(小数位多于价格指数)/ `*` | `InvalidArgs{BadValue}` |
+
 ## 验收
 
 - 本 crate 在 M2 完成的标准:本文件里程碑为 M2 的用例全部有同编号的实现且通过([docs/tests §1](../../docs/tests/README.md#1-地位))。

@@ -1310,6 +1310,7 @@
 | `0x001B` | `WriteOffResidual` |
 | `0x001C` | `SimFault` |
 | `0x001D` | `BindSlot` |
+| `0x001E` | `Settle` |
 
 ## Note 码
 
@@ -1696,6 +1697,7 @@
 | 27 | `WriteOffResidual` |
 | 28 | `SimFault` |
 | 29 | `BindSlot` |
+| 30 | `Settle` |
 
 ### 码表 CmdResultFlags
 
@@ -1828,6 +1830,7 @@
 | 13 | `SimReset` |
 | 14 | `SimTransfer` |
 | 15 | `SimFault` |
+| 16 | `SimSettle` |
 
 ### 码表 HedgePxMode
 
