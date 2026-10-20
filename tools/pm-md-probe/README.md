@@ -56,6 +56,10 @@ pm-md-probe --bindings FILE --seconds N --out FILE --dir DIR --src-ip IP --bind-
 | `batch` | `slot`、`ex_ms`、`rx_ns`、`prev`、`last`、`bb`、`ba` |
 | `trade` | `slot`、`ex_ms`、`rx_ns`、`px`、`qty`、`side` |
 | `conn` | 连接状态事件 |
+| `dec` | (`journal` 子命令)`OrderDecision`:`slot`、`action`、`side`、`tif`、`px`、`qty`、`oslot`、`gen`、`reject` |
+| `oev` | (`journal`)`OrderEvent`:`slot`、`what`、`px`、`qty`、`cum`、`fee`、`oslot`、`gen`、`ex_ms`、`code` |
+| `ext` | (`journal`)`ExternalFill`(交割为 `cause` 4):`slot`、`cause`、`side`、`px`、`qty`、`end_s` |
+| `settle` / `cmdres` | (`journal`)`Settle` 命令(`slot`、`end_s`、`payout`、`cmd_id`)与命令结果(`cmd_id`、`status`、`detail`) |
 
 `bb`/`ba` 为重建簿的最优买/卖价(px_exp −3 的整数,空边为 −1)。结束时打印各类事件数、feed 计数器与解码器的去重计数(`decoder dups`、`lates`)。`conn` 行的 `Down` 原因 64(hft-net `WS_CLOSE`)既包括 1013,也包括市场结算后约 147 s 交易所的正常关闭,统计异常断开时要按时间排除后者。
 
@@ -78,6 +82,10 @@ pm-md-probe journal --refdata RDB1 --out FILE --bindings-out FILE SEG...
 - `bind_slots.py --settle`(模拟盘):窗口结束 60 s 后起每 5 s 查 CLOB `/markets/<conditionId>`,有 `winner` 后对该窗口的两个槽位各发一条 `Settle`(赢的代币 `payout` "1"、另一个 "0";[control-plane `Settle`](../../docs/subsystems/control-plane.md#命令集),只交割模拟账户,没有持有者时 `NoOp`)。交易所在结束后约 178–204 s 标出 `winner`(2026-10-20 实测),持有库存的槽位交割前不能改绑,所以要配 `--slots 3`(结束后 480 s 才改绑);结束 1 小时仍未结算的窗口记 `unresolved` 后放弃。
 - `pm-md-probe journal`:按 `BindSlot` 命令记录跟踪每个槽位当前的窗口,输出与[产出](#产出)相同的事件行,`slot` 为 `<asset>-<S>-<up|dn>`,改绑时清空该 inst 的簿,并像引擎重同步一样丢弃其增量直到该代币的第一个整簿;只用 `origin = EXCHANGE` 的 `L2Snapshot`(sequencer 关键帧里的簿副本不是行情);`--bindings-out` 写 `compare.py` 的绑定文件(每次绑定一项)。
 - 通过标准与[验收步骤](#验收步骤)第 3 步相同,覆盖至少两个连续窗口(含一次改绑)。
+
+### 挂单模拟
+
+`pm_sim_config --maker OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]` 生成挂单模拟的配置([CORE-426](../../apps/hft-core/TESTS.md#core-426-polymarket-挂单模拟配置可加载)):`polymarket-clob` 三对 BTC 槽位(`btc-{up,dn}-{0,1,2}`)与 `binance-spot` BTCUSDT 参考,两个 venue 都是 `live_feed`;模拟账户 10 000 USDC 绑定 `binary-maker`(已启用,其余参数取默认,[binary-maker](../../strategies/binary-maker/README.md));`[sim] maker_fill = "queue"`。发现进程:`bind_slots.py --assets btc --slots 3 --settle`(窗口结束后按 CLOB 公布的赢家发 `Settle`,模拟库存按 1/0 交割)。结果从 seq journal 读(成交、`ExternalFill{Delivery}`、余额)。
 
 ### 存储
 
