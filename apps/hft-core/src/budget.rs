@@ -9,12 +9,12 @@ pub fn hot_resident(segment_bytes: u64, hot_keep: u8) -> Result<u64, Error> {
 
 pub fn journals(c: &Config, dry: bool) -> Vec<String> {
     let mut names = vec!["seq".into()];
-    if !dry {
-        for (name, venue) in &c.venues {
+    for (name, venue) in &c.venues {
+        if !dry || venue.live_feed {
             names.push(format!("raw-feed-{name}"));
-            if !venue.accounts.is_empty() {
-                names.push(format!("raw-gw-{name}"));
-            }
+        }
+        if !dry && !venue.accounts.is_empty() {
+            names.push(format!("raw-gw-{name}"));
         }
     }
     names

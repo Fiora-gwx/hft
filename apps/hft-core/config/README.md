@@ -6,6 +6,8 @@
 
 离线演示不需要密钥或交易所。CI 构建 `hft-core` 与 `paper_config` example 后，将制品带到 Linux；`paper_config OUTPUT_DIR TMPFS_DIR USER` 生成完整 TOML、四个二进制配置及仅允许当前用户的 ctl principal 表。例如先运行 `paper_config /tmp/hft-paper /dev/shm/hft-paper "$USER"`，再运行 `hft-core --config /tmp/hft-paper/core.toml --dry-run --check`，最后运行 `hft-core --config /tmp/hft-paper/core.toml --dry-run --run-for-ms 10000`。每次使用新目录；保留旧 journal，不能把删除日志当作恢复。
 
+Polymarket 行情模拟(构建 `--features polymarket` 的 `hft-core` 与 `pm_sim_config` example):`pm_sim_config OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]` 生成 `--dry-run` 配置,唯一的 venue `pm` 为 `polymarket-clob` 且 `live_feed = true`(公共行情、订单只进 sim-gw、无密钥),refdata 含 4 个币 × 2 个窗口 × Up/Down 共 16 个槽位 inst(`btc-up-0` 等,tick 0.001),Sim 账户 `sim-pm` 绑定 book-observer,每个槽位一个单腿 group。`USER` 为 Admin 的 cli 主体,`PIPELINE_USER` 是发现进程运行用的系统用户(pipeline 主体,发 `BindSlot`)。槽位在绑定前不订阅;绑定由发现进程按窗口写入(见 [pm-md-probe](../../../tools/pm-md-probe/README.md))。
+
 引擎初始为 Shadow。等待 journal 的 ClockOk 与启动闸门通过后，通过已有 ctl 客户端对 `paper` 账户、`paper-probe` 实例发送 `SetMode Live`，按正常 preview/confirm 流程确认。探针收到固定 BBO 后发出远价 PostOnly，收到 Ack 后撤单；集成测试自动完成这一流程。未启用 Live 的 `--run-for-ms` 演示只验证启动与 Drain。模拟器每账户的连接回报展开为其配置 venue 集合的单主连接，ECF1 必须启用 `allow_missing_standby`；网络模式不替账户生成连接或身份报告。
 
 `[[threads]]` 在此子集使用 `name`、`task`、可选 `core`、必填 `park_us` 与 `nice`。`nice` 为 0–19，housekeeping 必须为 0；模板的 persist 与控制/建连线程为 10。每个线程在执行任务前设置 `SCHED_OTHER`、`timerslack_ns = 1`、nice、名称及可选绑核；设置失败退出 3，所有工作线程的设置成功后才允许 READY。任务为 `sequencer`、`persist`、`housekeeping`、`ctl-gateway`；离线另需 `paper-feed`、`sim-gw`，网络模式每 venue 另需 `feed:<配置名>`、`conn-builder:<配置名>`、有账户时的 `gw:<配置名>`。每个任务恰好一个独占线程；空闲 park 位于任务轮转外。

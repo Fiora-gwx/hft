@@ -18,7 +18,8 @@ spec: README.md
 | 命令行 | PMP-001 |
 | 产出 | PMP-001 |
 | 验收步骤 | PMP-001 |
-| 实现说明 | PMP-001 |
+| hft-core 验收 | PMP-002 |
+| 实现说明 | PMP-001、PMP-002 |
 | 延迟与资源契约 | 不适用:无门槛 |
 | 测试与验收 | 不适用:非规范 |
 | 依赖 | 不适用:由 `cargo xtask deps` 机检 |
@@ -37,9 +38,19 @@ spec: README.md
 - 期望:16 个代币全部 `OK`(两边都有的每个交易所时间戳上最优价相等,值不一致为 0;只有一边有的时间戳 ≤ 1% 或 5 个,来自重连缺口),`RESULT PASS`;探针无畸形 bulk 记录
 - 实现:手动运行,结果写回本文件"验收"一节
 
+### PMP-002 hft-core 连续两个窗口(含改绑)与独立录制一致
+
+- 规则:[hft-core 验收](README.md#hft-core-验收)
+- 级别:live
+- 里程碑:M3
+- 前置:eu-west-1 主机;同一时段 pmrec 在录制;`pm_sim_config` 生成的配置,`PIPELINE_USER` 为运行 `bind_slots.py` 的系统用户
+- 步骤:启动 `hft-core --dry-run`,随后启动 `bind_slots.py`;运行跨越至少两个连续窗口加 60 s 后停止;`pm-md-probe journal` 读 seq 段,`compare.py` 比对
+- 期望:每个窗口的 `BindSlot` 结果为 `Applied`(重发为 `NoOp`),同一槽位相隔一个窗口改绑一次;全部绑定 `OK`,`RESULT PASS`
+- 实现:手动运行,结果写回本文件"验收"一节
+
 ## 验收
 
-PMP-001 通过即完成 P1 行情验收。
+PMP-001 通过即完成 P1 行情验收;PMP-002 通过即完成 P1b(正式进程)验收。
 
 | 运行(2026-10-19 UTC) | 构建 | 窗口 | 结果 |
 |---|---|---|---|

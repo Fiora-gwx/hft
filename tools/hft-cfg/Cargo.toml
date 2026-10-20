@@ -20,6 +20,7 @@ hft-types.workspace = true
 hft-venue-proto.workspace = true
 venue-binance.workspace = true
 venue-bitget.workspace = true
+venue-polymarket.workspace = true
 hft-refdata = { workspace = true, features = ["tools"] }
 hft-event.workspace = true
 hft-risk.workspace = true

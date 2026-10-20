@@ -9,6 +9,8 @@ publish.workspace = true
 [features]
 default = ["bitget"]
 bitget = ["dep:venue-bitget"]
+# Polymarket CLOB market data (slot insts bound at run time; order entry not built yet).
+polymarket = ["dep:venue-polymarket"]
 
 [dependencies]
 hft-types.workspace = true
@@ -27,6 +29,7 @@ hft-venue.workspace = true
 hft-venue-proto.workspace = true
 venue-binance.workspace = true
 venue-bitget = { workspace = true, optional = true }
+venue-polymarket = { workspace = true, optional = true }
 serde = { version = "1", features = ["derive"] }
 toml.workspace = true
 # Cold configuration hashing also runs in Windows --check; no assembly toolchain needed.
@@ -54,3 +57,7 @@ tempfile = "3"
 
 [lints]
 workspace = true
+
+[[example]]
+name = "pm_sim_config"
+required-features = ["polymarket"]

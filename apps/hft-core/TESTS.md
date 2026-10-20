@@ -56,7 +56,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 多账户 | CORE-330、CORE-168、CORE-247、CORE-313 |
 | HostProfile | CORE-340–CORE-343、CORE-419 |
 | HeartbeatBlock | CORE-350–CORE-352 |
-| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416 |
+| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422 |
 | 实现说明 | CORE-380–CORE-387、CORE-409、CORE-415–CORE-418、CORE-420 |
 | 延迟与资源契约 | CORE-400–CORE-408、CORE-267 |
 | 测试与验收 | 不适用:非规范 |
@@ -4320,6 +4320,32 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-420.2 | `dev2_sim()` | 实例角色 `sim`;每个 Sim 账户的 `keys_required = 0` |
 | CORE-420.3 | `dev2_prod()`,`startup.allow_missing_standby = true`,ECF1 段 5 同为 true | `ModeCfg.allow_missing_standby = true` |
 | CORE-420.4 | `dev2_prod()`,两处都为 false | `ModeCfg.allow_missing_standby = false` |
+
+### CORE-421 `--dry-run` 的 live_feed venue
+
+- 规则:[配置文件字段](README.md#配置文件字段)
+- 级别:table
+- 里程碑:M3
+- 前置:`support::write` 的离线配置(venue `public`,一条 `sim.quotes`);依次叠加各行的改动
+- 实现:`apps/hft-core/tests/config.rs::core_421_dry_run_live_feed_venue`
+
+| 行 | 改动 | 期望 |
+|---|---|---|
+| CORE-421.1 | `venues.public.live_feed = true` | `--dry-run` 加载报 `MissingField`(`src_ip`/`bind_device`)与 `ThreadPlan`(缺 `feed:public`、`conn-builder:public`) |
+| CORE-421.2 | 加 `src_ip`、`bind_device` 与两个线程 | 报 `SimConfig`(该 venue 仍有报价) |
+| CORE-421.3 | 删除 `sim.quotes` | 不再报上述任一码,也不报 `LiveFeed`;`budget::journals(dry)` = `["seq", "raw-feed-public"]` |
+| CORE-421.4 | 同一文件按网络模式加载 | 报 `LiveFeed` |
+| CORE-421.5 | `venues::registered("polymarket-clob", 15)` | 启用 `polymarket` feature 时 `Ok`,否则 `VenueNotBuilt` |
+
+### CORE-422 Polymarket 行情模拟配置通过加载校验
+
+- 规则:[配置文件字段](README.md#配置文件字段)
+- 级别:unit
+- 里程碑:M3
+- 前置:`polymarket` feature;`support::write_polymarket_sim`(无 principal)
+- 步骤:按 `--dry-run` 加载生成的配置
+- 期望:加载成功;refdata 的 `polymarket-clob` 每连接 2 个流、16 个槽位 inst,inst 1 的 tick 为 1(px_exp −3,即 0.001)
+- 实现:`apps/hft-core/tests/config.rs::core_422_polymarket_sim_config_loads`
 
 ## 验收
 

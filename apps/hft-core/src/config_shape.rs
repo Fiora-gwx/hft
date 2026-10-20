@@ -42,7 +42,7 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
         "rings" => (&["elements", "bytes"], &[]),
         "venue" => (
             &["protocol", "id", "max_sub_insts", "stale_guard_ms"],
-            &["src_ip", "bind_device", "account_io", "accounts"],
+            &["src_ip", "bind_device", "account_io", "accounts", "live_feed"],
         ),
         "account_io" => (
             &[
@@ -73,9 +73,8 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
                 "liq_fee_raw",
                 "liq_slippage_bp",
                 "quote_interval_ms",
-                "quotes",
             ],
-            &[],
+            &["quotes"],
         ),
         "quote" => (&["inst", "bid_raw", "ask_raw", "qty_raw"], &[]),
         _ => return Err(Error::config("ConfigParse", "unknown configuration section")),

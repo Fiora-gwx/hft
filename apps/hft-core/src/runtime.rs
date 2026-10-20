@@ -390,7 +390,7 @@ fn run_linux(
             bulk: bulk_rx,
             commands: feed_tx,
         });
-        if dry {
+        if dry && !v.live_feed {
             let p = c
                 .sim
                 .as_ref()
@@ -661,10 +661,10 @@ fn run_linux(
             }
             Ok(())
         })?;
-    } else {
-        for task in venue_tasks {
-            task.spawn(&mut workers)?;
-        }
+    }
+    // Network venues: every venue in network mode, `live_feed` venues in --dry-run.
+    for task in venue_tasks {
+        task.spawn(&mut workers)?;
     }
     let ready = Arc::new(AtomicBool::new(false));
     let ready_sent = Arc::new(AtomicBool::new(false));

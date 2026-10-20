@@ -77,6 +77,7 @@ sequencer 的 `StepOutcome::Done{cause}` 到退出码的映射(cause 的定义�
 | `EnvCombo` | 2 | `feed_env = "testnet"` 而 `order_env = "prod"`;`sim` 实例出现 `order_env` 或 `feed_env = "testnet"` |
 | `AccountMismatch` | 2 | `[[accounts]]` 的 `id`/`label` 与 refdata `AccountMeta` 不一致,或引用 refdata 中没有的账户 |
 | `SecretsInSim` | 2 | `sim` 实例出现 `paths.secrets_dir` 或任一 `[[accounts]].keys` |
+| `LiveFeed` | 2 | 网络模式(非 `--dry-run`)出现 `venues.<v>.live_feed` |
 | `MissingCredential` | 2 | Live 账户在其交易的某个 venue 缺会话 key 或 REST key 的秘密名 |
 | `EndpointOverrideInProd` | 2 | `order_env = "prod"` 的配置出现 `endpoint_override` 或 `test.extra_ca` |
 | `SimSectionInProd` | 2 | `prod` 实例出现 `sim.*` 或 `[[sim.*_models]]` |
@@ -744,9 +745,10 @@ refdata 不做热替换(可选扩展:允许热替换的变更集,触发条件:Dr
 | `[[threads]]` | 数组 `{name, core, idle, nice?, tasks}` | 线程计划 | 必填(deploy 按主机类模板生成) |
 | `rt.*` | 表 | 校准、PHC、`rt.host.mode` | 见 [hft-rt 配置项](../../crates/hft-rt/README.md) |
 | `journal.<name>.segment_bytes` / `.hot_keep`、`journal.page` | u64 / u8 / `huge`\|`normal` | 键由 hft-journal 定义 | 取值按[内存表](#内存与-journal-段按主机类唯一归属);tmpfs 主机类与 `sim` 实例必须 `normal` |
-| `venues.<v>.protocol` | enum | core:`binance-usdm`、`binance-spot`、`okx-swap`、`okx-spot`、`bitget-usdt-futures`、`bitget-spot`;可选扩展:`gate-futures`、`gate-spot`、`bybit-linear`、`bybit-spot`、`kucoin-spot`、`kucoin-futures`、`hyperliquid-perp` | 必填 |
+| `venues.<v>.protocol` | enum | core:`binance-usdm`、`binance-spot`、`okx-swap`、`okx-spot`、`bitget-usdt-futures`、`bitget-spot`;可选扩展:`gate-futures`、`gate-spot`、`bybit-linear`、`bybit-spot`、`kucoin-spot`、`kucoin-futures`、`hyperliquid-perp`、`polymarket-clob`(Cargo feature `polymarket`;当前只有行情) | 必填 |
 | `venues.<v>.max_sub_insts` | u16 | 该 venue 订阅 inst 上限;Σ ≤ 容量 `max_insts`(装配期交叉校验);装配时写进该 venue 每个行情任务的 `FeedCfg.max_sub_insts` | 必填(deploy 生成:`dev2` 按线程计划,其他按容量表) |
 | `venues.<v>.optional` | bool | true 时该 venue 起不来不阻塞其他 venue 的闸门 | 必填 |
+| `venues.<v>.live_feed` | bool | 只用于 `--dry-run`:该 venue 的行情取自交易所公共行情而不是 `sim.quotes`(订单仍进 sim-gw);网络模式出现即退出 2(`LiveFeed`) | false |
 | `venues.<v>.feed.conns` | [`{stream, src_ip}`] | 行情连接的出口地址:`stream ∈ bbo\|md`;`src_ip` 须在本实例的出口 IP 列表内(启用 ENI-B2 时 `md` 可用 `prod_bulk` 的地址)。snap-fetch 的公共 REST 连接没有单独的键:复用该 venue 第一条 `stream = md` 条目的 `src_ip`。BBO 赛马的条数与 md 连接的组织归 hft-venue(`feed.bbo_conns` 等) | 必填 |
 | `venues.<v>.feed.*` / `venues.<v>.snap.*` / `venues.<v>.conn.*` / `venues.<v>.gw.*`(其余键) | — | hft-venue 的运行时配置(`feed.raw.bbo`/`feed.raw.md`、`feed.bbo_frames_per_poll`、`snap.parallel` 等;各 REST 连接数也在其中),键名、默认值与语义归 [hft-venue 配置项](../../crates/hft-venue/README.md#配置项) | raw 模式按[内存表](#内存与-journal-段按主机类唯一归属);其余按 hft-venue 默认 |
 | `venues.<v>.gw.accounts` / `.gw.src_ip` | [string] / {account → ip} | 在该 venue 下单的 Live 账户(按 `AccountMeta.label`)与出口 IP(只能是 ENI-B 的地址);acct-fetch 对该账户的连接复用同一 `src_ip` | 有 Live 账户时必填 |
@@ -931,7 +933,7 @@ hft-core 自身不在 tick-to-trade 路径上增加代码;路径上的分段预�
 - `binance-spot`、`binance-usdm` 静态装配 `FeedRuntime`、`GwRuntime`、`SessionDriver`。`bitget-spot`、`bitget-usdt-futures` 通过 `bitget` Cargo feature 装配 UTA 协议，未启用时返回 `VenueNotBuilt`。单 venue 最多一个交易所账户；ECF1 必须要求两种 key 的身份闸门，app 不伪造账户配置、身份或对账成功。账户链路与限制见“测试环境账户装配”，完整恢复和正式权限核验仍未装配。
 - 启动先取得冷盘实例目录的内核文件锁，锁文件不删除，进程死亡由内核释放所有权。持锁期间用 `max(snapshot_epoch, durable_epoch) + 1` 预约 epoch，`write_sync` 成功后才能建立账户连接；腐坏与溢出退出 4。当前新会话没有 snapshot epoch。启动前按实际 journal 列表检查 tmpfs 可用量与本实例持有量，创建工作线程前 `mlockall`，失败退出 3；完整引擎区预算仍待接线。
 - 既有 seq journal 返回 `RecoveryRequired`(4)，不按空账户重启。`SetRefdata`、advisor、主机 profile 验证、完整资源预算与大页尚未装配。共享心跳块记录 sequencer 进度、每个线程的进度与进程状态；`Running` 跟随全部账户首次闸门放行，信号和控制命令的 Drain 都进入 `Draining`。housekeeping 独占 `READY`/`WATCHDOG` 通知；`READY` 等待全部工作线程的绑核与调度设置成功；sequencer 停摆达到配置时限后不续 watchdog。`Stopped` 只在 seq/raw 封存且 persist 刷完后发布。完整规格与上线门槛仍以本页其余部分为准。
-- `--dry-run` 只用 Sim 账户和配置中的固定报价，不连接交易所；撮合由 `hft-sim::SimExchange` 执行。模拟任务沿 journal 前缀推进，在成功订单决定处等待 out-sim 交接；不使用后来行情处理先前决定。SIGINT/SIGTERM 与 `--run-for-ms` 经 ctl-gateway 的内部 Drain 命令停止开仓、按配置撤单；sequencer 完成后封 seq/raw 段，persist 最后落盘并退出。它是装配冒烟工具，不替代实时模拟账户的上线观察。
+- `--dry-run` 只用 Sim 账户；行情默认来自配置中的固定报价，不连接交易所。`venues.<v>.live_feed = true` 的 venue 改为装配真实的公共行情任务（`feed:<v>`、`conn-builder:<v>` 与 `raw-feed-<v>`，需 `src_ip`/`bind_device` 与 `feed_env = "prod"` 的公共端点），不得有该 venue 的 `sim.quotes`（只剩 live venue 时 `sim.quotes` 可省略）；订单仍只进 sim-gw，不读任何 key；网络模式出现该键退出 2（`LiveFeed`）。`polymarket-clob` 经 Cargo feature `polymarket` 装配（只有行情，槽位 inst 由 `BindSlot` 运行期绑定），用于没有交易所账户时拉取并模拟 Polymarket 行情，配置生成器为 `examples/pm_sim_config`。撮合由 `hft-sim::SimExchange` 执行。模拟任务沿 journal 前缀推进，在成功订单决定处等待 out-sim 交接；不使用后来行情处理先前决定。SIGINT/SIGTERM 与 `--run-for-ms` 经 ctl-gateway 的内部 Drain 命令停止开仓、按配置撤单；sequencer 完成后封 seq/raw 段，persist 最后落盘并退出。它是装配冒烟工具，不替代实时模拟账户的上线观察。
 
 - **单机 SPOF**:`prod` 实例一台;停得安全靠死手 + kill-switch + 冷启动 < 30 s;整机失联时的机外告警与人工处置归 watchtower 的 `healthz`、dev2 上的机外看门狗与 incident-response。可选扩展:第二台 warm standby(人工切),在单机故障的停机时间成为收益瓶颈时再做。
 - **整机掉电**丢 persist 滞后部分;靠交易所真值 + 严格对账收敛。
