@@ -264,3 +264,40 @@ fn bmk_008_inventory_cap() {
     let insts: Vec<InstId> = out.places().map(|it| it.inst).collect();
     assert_eq!(insts, vec![SLOTS[3]], "BMK-008.1");
 }
+
+#[test]
+fn bmk_009_subscriptions_and_trades() {
+    let p = params(|_| {});
+    let h = harness(&p);
+    let rd = refdata();
+    let room = vec![16u16; 16];
+    let lim = SubsLimits {
+        rd: &rd,
+        feeds: VenueSet::EMPTY.with(VB).with(VR),
+        room: &room,
+    };
+    let mut sb = SubsBuilder::new(lim, 16);
+    h.strategy().subscriptions(&groups(), &mut sb);
+    let got: Vec<_> = sb
+        .entries()
+        .iter()
+        .map(|e| (e.inst, e.gix, e.ev, e.part))
+        .collect();
+    let mut want: Vec<_> = SLOTS
+        .iter()
+        .enumerate()
+        .map(|(k, i)| (*i, k as u16, EvMask(EvMask::BOOK.0 | EvMask::TRADE.0), Part::Fast))
+        .collect();
+    want.push((R, 6, EvMask::BBO, Part::Fast));
+    assert_eq!(got, want, "BMK-009.1");
+    let mut h = harness(&p);
+    warm(&mut h, 400, 399, 1);
+    let t = TradeView {
+        px: Px(450),
+        qty: Qty(5_000_000),
+        side: Side::Sell,
+        ex_ts_ns: 1,
+    };
+    let out = h.feed(&ev::trade(SLOTS[2], 2, t).as_ref());
+    assert!(out.items.is_empty(), "BMK-009.2 {:?}", out.items);
+}
