@@ -19,7 +19,7 @@ spec: README.md
 | 使用本组件 | 不适用:见子节 |
 | group 形态 | BMK-001 |
 | 参数 | BMK-003, BMK-004, BMK-008 |
-| 订阅 | BMK-003 |
+| 订阅 | BMK-003、BMK-009 |
 | 波动率 | BMK-002 |
 | 规则 | BMK-003–BMK-005, BMK-007, BMK-008 |
 | Note 码表与报表字段 | BMK-003 |
@@ -144,3 +144,18 @@ spec: README.md
 
 - 本组件完成的标准:里程碑已到的用例全部有同编号的实现且通过。
 - 上线前在 `sim` 实例连续运行两天(规则归 [testing ⑦](../../docs/testing.md#8-上线门槛)与模拟盘提案 `.agents/notes/proposed/architecture/2026-10-20-polymarket-sim-maker.md`)。
+
+### BMK-009 订阅与成交事件
+
+- 规则:[订阅](README.md#订阅)
+- 级别:table
+- 里程碑:M3
+- 前置:默认夹具;`SubsBuilder` 的 feeds 含 `VB`、`VR`
+- 步骤:依次执行下表各行
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_009_subscriptions_and_trades`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-009.1 | `subscriptions` | 6 个槽位腿 `BOOK | TRADE`、参考腿 `R` `BBO`,全部 `Part::Fast`,按 gix 顺序 |
+| BMK-009.2 | `warm(400, 399, 1)` 后 `U1` 一条成交 | 不产生任何意图;不分配 |
+

@@ -14,12 +14,17 @@ pub fn tag_of(gix: u16) -> u32 {
     u32::from(gix) + 1
 }
 
-/// Book of every slot leg and the BBO of the reference leg (the last group).
+/// Book and trades of every slot leg (the trades drive the simulator's queue fills; the strategy
+/// ignores them) and the BBO of the reference leg (the last group).
 pub fn subscribe(groups: &GroupTable, out: &mut SubsBuilder<'_>) {
     let n = groups.len();
     for (gix, g) in groups.iter() {
         let Some(l) = g.legs.first() else { continue };
-        let mask = if gix + 1 == n { EvMask::BBO } else { EvMask::BOOK };
+        let mask = if gix + 1 == n {
+            EvMask::BBO
+        } else {
+            EvMask(EvMask::BOOK.0 | EvMask::TRADE.0)
+        };
         let _ = out.market(l.inst, gix, mask, Part::Fast);
     }
 }
