@@ -3674,3 +3674,17 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入口显式传参;VEN-228/391 验证查单、会话维护与全撤扫描传入账户凭证,模板不保留密钥的回归归 BIN-063/BGT-063。
 
 启动资金费周期的可选 REST 队列由 CORE-120 的真实两协议 mock 进程覆盖：成功、超时、429、坏正文及部分观察丢弃；账户必需检查仍失败关闭。feed seed 的结果按 BIN-033/BGT-034 验证。
+
+### VEN-396 BindWire 拼装、交给协议并重订阅深度
+
+- 规则:[1. 线程与环(由 hft-core 装配)](README.md#1-线程与环由-hft-core-装配)
+- 级别:table
+- 里程碑:M3
+- 前置:`f0()`;`S1` 以 `BOOK` 订阅并在深度连接 8 上就绪;测试桩的 `bind_wire` 记录调用、拒绝以 `0xFF` 开头的 id
+- 实现:`crates/hft-venue/tests/feed_routes.rs::ven_396_bind_wire_rebinds_and_resubscribes`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| VEN-396.1 | 4 条 `BindWire{S1, part 0..=3}`(id = 0,1,…,31) | `bind_wire` 收到 `(S1, id)` 一次;连接 8 上先 `UNSUB` 后 `SUB` 该 inst 的深度流;`md` 环有 `ConnState{Resync, S1, NEW_SUB}`;`binds = 1` |
+| VEN-396.2 | 只有 `part = 3` | 不调用 `bind_wire`;`cmd_ignored` 加 1 |
+| VEN-396.3 | 4 条,id 全为 `0xFF` | 协议拒绝:`bind_failed = 1`,不发退订帧 |

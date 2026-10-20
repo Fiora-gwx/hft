@@ -942,6 +942,7 @@ pub enum FeedCmd {                   // sequencer → feed 的 feedctl-<venue> �
     Resync { inst: InstId }, Rotate { conn: ConnId },
     Subscribe { inst: InstId, streams: u8 }, // streams:该 inst 需要的流集合,位值与 SDK EvMask 相同
     Unsubscribe { inst: InstId },
+    BindWire { inst: InstId, part: u8, chunk: [u8; 8] }, // BindSlot 的 32 字节交易所 id 分 4 段(part 0..=3,大端顺序),part 3 完成绑定
 }
 // Subscribe.streams:位定义归 hft-strategy-sdk EvMask(本 crate 不依赖 SDK,故用 u8);值 = 该 inst 全部订阅的 EvMask 之并,
 //   sequencer 在并集变化时重发 Subscribe;按位分发到 feed-bbo/feed-md 与各路由的规则归 hft-venue §1。
@@ -1074,6 +1075,8 @@ pub enum ControlCmd<'a> {            // Rust 侧类型化视图(InjectWarmup 的
     WriteOffResidual { account: AccountId, _pad: [u8; 3], group: GroupId },        // 0x001B   8 B;残余核销(语义见 control-plane)
     SimFault { account: AccountId, venue: VenueId, fault: u8 /* Off=1 RejectNew=2 Disconnect=3 DelayReports=4 */, _pad: u8, // 0x001C 8 B;只对 Sim 账户
                delay_ms: u32 /* 只用于 DelayReports(1..=60 000),其余 0 */ },   //   参数与校验见 control-plane,sim-gw 语义见 hft-sim
+    BindSlot { venue: VenueId, _pad: [u8; 3], inst: InstId, start_s: i64, end_s: i64, // 0x001D 56 B(1+3 填充+4+8+8+32);venue 级,CmdHdr.account 为 0
+               wire_id: [u8; 32] /* 交易所 id,uint256 大端;全零 = 解绑 */ },     //   语义见 control-plane,执行见 hft-sequencer
 }
 pub const STRATEGY_CMD_MAX_PAYLOAD: usize = 256;
 pub const WARMUP_MAX_PAYLOAD: usize = 4096;   // 整条 ControlCmd 记录 ≤ 24 + 16 + 128 + 16 + 4096 + 4(CRC)向上取 8 = 4 288 B,单段
@@ -1093,7 +1096,7 @@ impl ControlCmd {
 
 `RunMode`、`KillLevel`、`CapSource`、`RejectBits` 的枚举与编码在 [hft-types](../hft-types/README.md#模式kill-级别cap-来源与风控拒绝位),语义在 [hft-risk](../hft-risk/README.md);`decode` 的 `UnknownKind`/`InvalidEnum` 由 gateway 与 sequencer 回 `InvalidArgs{UnknownDiscriminant}`(control-plane 结果码)。`ReconcileReport` 不是命令变体,见[事件体](#控制与系统0x04xx0x05xx)。`GetSchema` 是 gateway 本地应答的只读请求,不进 ctl 环、没有 `CmdKind`(见 [hft-ctl](../hft-ctl/README.md))。
 
-**CmdKind 编号**(只追加、永不复用):`0x0001 SetMode`、`0x0002 SetParams`、`0x0003 SetRisk`、`0x0004 Kill`、`0x0005` 保留、`0x0006 RotateConn`、`0x0007 Resubscribe`、`0x0008 SnapshotNow`、`0x0009 ReplaceRefdata`、`0x000A Resume`、`0x000B` 退役、`0x000C` 退役、`0x000D` 退役、`0x000E HedgeFix`、`0x000F CancelAll`、`0x0010 Drain`、`0x0011 RecordTransfer`、`0x0012 Annotate`、`0x0013 AdoptExchange`、`0x0014 SimReset`、`0x0015 SimTransfer`、`0x0016 VenueNotice`、`0x0017 SetBalanceBaseline`、`0x0018 StrategyCmd`、`0x0019 InjectWarmup`、`0x001A SmokeOrder`、`0x001B WriteOffResidual`、`0x001C SimFault`。各命令是 core 还是 optional 以 [control-plane](../../docs/subsystems/control-plane.md#命令集) 为准;编码全部在此定义。新增命令按 [cookbook](../../docs/cookbook/adding-a-control-command.md) 走;**新增策略不需要新命令**:策略专属的人工操作用 `StrategyCmd`,冷启动预热数据用 `InjectWarmup`,两者的载荷都由策略定义。
+**CmdKind 编号**(只追加、永不复用):`0x0001 SetMode`、`0x0002 SetParams`、`0x0003 SetRisk`、`0x0004 Kill`、`0x0005` 保留、`0x0006 RotateConn`、`0x0007 Resubscribe`、`0x0008 SnapshotNow`、`0x0009 ReplaceRefdata`、`0x000A Resume`、`0x000B` 退役、`0x000C` 退役、`0x000D` 退役、`0x000E HedgeFix`、`0x000F CancelAll`、`0x0010 Drain`、`0x0011 RecordTransfer`、`0x0012 Annotate`、`0x0013 AdoptExchange`、`0x0014 SimReset`、`0x0015 SimTransfer`、`0x0016 VenueNotice`、`0x0017 SetBalanceBaseline`、`0x0018 StrategyCmd`、`0x0019 InjectWarmup`、`0x001A SmokeOrder`、`0x001B WriteOffResidual`、`0x001C SimFault`、`0x001D BindSlot`。各命令是 core 还是 optional 以 [control-plane](../../docs/subsystems/control-plane.md#命令集) 为准;编码全部在此定义。新增命令按 [cookbook](../../docs/cookbook/adding-a-control-command.md) 走;**新增策略不需要新命令**:策略专属的人工操作用 `StrategyCmd`,冷启动预热数据用 `InjectWarmup`,两者的载荷都由策略定义。
 
 **两个策略通道命令的投递**(语义、类别与权限在 control-plane;SDK 侧的 `EventRef` 形状以 [hft-strategy-sdk](../hft-strategy-sdk/README.md) 为准):
 
@@ -1104,7 +1107,7 @@ impl ControlCmd {
 
 **内容与引用分离**:`SetParams`/`SetRisk`/`ReplaceRefdata` 的命令只携带 `BlobRef`;内容(`ConfigBlob` 分段)**先于**该命令写入 journal,本身是惰性的,命令 `Applied` 才生效。回放读到命令时,按 `sha256` 在已读过的 `ConfigBlob` 中取。
 
-**账户编码一致性**:命令只有一个目标账户来源——`CmdHdr.account`。带 `CmdScope` 的命令要求 `CmdScope.account == CmdHdr.account`,不带 scope 但有 `account` 字段的命令(`AdoptExchange`、`SimReset`、`SimTransfer`、`SetBalanceBaseline`、`RecordTransfer`、`SmokeOrder`、`WriteOffResidual`、`SimFault`)要求该字段 `== CmdHdr.account`,否则 gateway 返回 `InvalidArgs`(sequencer 也复核);不带账户的命令(`SetRisk`、`ReplaceRefdata`、`VenueNotice`、`StrategyCmd`…)只看 `CmdHdr.account`。`account = 0` 编码 `*`;每个命令允许的账户取值(必须具体、只能 `*`、两者均可)只在 [control-plane 账户语义](../../docs/subsystems/control-plane.md#账户语义)第 9 条登记,本 crate 只定义编码。`cmd_hash` 覆盖 `CmdHdr.account` 与完整载荷。
+**账户编码一致性**:命令只有一个目标账户来源——`CmdHdr.account`。带 `CmdScope` 的命令要求 `CmdScope.account == CmdHdr.account`,不带 scope 但有 `account` 字段的命令(`AdoptExchange`、`SimReset`、`SimTransfer`、`SetBalanceBaseline`、`RecordTransfer`、`SmokeOrder`、`WriteOffResidual`、`SimFault`)要求该字段 `== CmdHdr.account`,否则 gateway 返回 `InvalidArgs`(sequencer 也复核);不带账户的命令(`SetRisk`、`ReplaceRefdata`、`VenueNotice`、`BindSlot`、`StrategyCmd`…)只看 `CmdHdr.account`。`account = 0` 编码 `*`;每个命令允许的账户取值(必须具体、只能 `*`、两者均可)只在 [control-plane 账户语义](../../docs/subsystems/control-plane.md#账户语义)第 9 条登记,本 crate 只定义编码。`cmd_hash` 覆盖 `CmdHdr.account` 与完整载荷。
 
 ## 变长记录前缀
 

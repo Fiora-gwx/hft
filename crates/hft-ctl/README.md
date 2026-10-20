@@ -80,6 +80,7 @@ impl<S: StrategySet, R: CtlRing, J: ResultSource> hft_rt::PollTask for Gateway<S
 | `SetRisk` | 按 hft-risk 的编码解析 `RiskParams`(解析失败 → `BadValue`),作用域外字段改动 → `OutOfScope`;与 `ExecConfig` 的一致性(`ExecRiskMismatch`)由 sequencer 判定 |
 | `SimReset`、`SimTransfer`、`SimFault` | 目标账户 `AccountMeta.kind == Sim`(`NotSim`;`prod` 实例没有 Sim 账户,`SimFault` 在那里一律以此被拒);`SimTransfer` 的两个 venue 与 `SimFault` 的 venue 都在该账户 `venues` 内、资产存在(否则 `UnknownName`) |
 | `VenueNotice` | venue 存在;`inst ≠ 0` 时属于该 venue(两者不满足 → `UnknownName`);`FundingInterval` 的 `new_s ∈ {3600, 7200, 14400, 28800}`(其他值 → `InvalidArgs{BadValue}`;是否另有别的周期待核实(方法:见开发备忘));`Maintenance` 的 `from_ns < to_ns`(否则 `BadValue`) |
+| `BindSlot` | inst 非 0 且属于该 venue(否则 `UnknownName`);`start_s < end_s`(否则 `BadValue`);`wire_id` 的十进制形式在规范化时已核对(≤ 78 位、不溢出 uint256) |
 | `AdoptExchange` | `item = Balance` 时 `asset` 存在(否则 `UnknownName`)、`group` 为 `GROUP_NONE` 或高 8 位是该账户绑定的实例(否则 `BadGroup`;是否属于当前参数由 sequencer 复核) |
 | `Kill` | `hard` 只与 Global 或 Account 组合;`flatten` 只与 Account 组合且不与 `hard` 同用(否则 `InvalidArgs{BadCombination}`);issuer 角色只有 Viewer 时只接受默认参数的 Global/Account(其余组合在 `allowed` 阶段已 `Forbidden`) |
 | `SmokeOrder` | 目标账户 `AccountMeta.kind == Live`(`NotLive`);`venue` 在该账户 `venues` 内、`inst` 属于该 venue(否则 `InvalidArgs{UnknownName}`);`ttl_ms` 在 control-plane 规定的范围内(`BadValue`);其余前置条件(同时至多一张、Kill、报价)由 sequencer 判定 |

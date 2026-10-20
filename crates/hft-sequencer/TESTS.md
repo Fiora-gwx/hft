@@ -6097,4 +6097,30 @@ SEQ-414 的启动子例 `seq_414_bootstrap_balances_are_snapshot_baselines_not_p
 - 反例:篡改校验事实的原始余额或把该 Output 伪装成 Meta,完整后缀回放必须发现分歧
 - 实现:`crates/hft-sequencer/tests/settlement.rs::seq_414_balance_check_gate_matches_cold_view_and_full_window_replay`
 
+### SEQ-432 BindSlot 的校验、绑定表与行情交付
+
+- 规则:[命令路径](README.md#命令路径)、[control-plane BindSlot](../../docs/subsystems/control-plane.md#命令集)
+- 级别:table
+- 里程碑:M3
+- 前置:B0 稳态;`a1`(venue A)已订阅;命令均为确认后的 `BindSlot`(账户 1 发出)
+- 实现:`crates/hft-sequencer/tests/commands.rs::seq_432_bind_slot`
+
+| 行 | 命令 | 期望 |
+|---|---|---|
+| SEQ-432.1 | `{A, a1, 1000, 1300, [0x5A; 32]}` | `Applied`;同一批输出含 venue A 的 4 条 `BindWire{a1, part 0..=3, [0x5A; 8]}`,按 part 升序 |
+| SEQ-432.2 | 同 .1 再发一次 | `NoOp`,不发任何 feed 命令 |
+| SEQ-432.3 | venue B + `a1`;`start_s = end_s` | 各为 `InvalidArgs{BadValue}` |
+| SEQ-432.4 | 取关键帧 | 节 31 有 `a1` 的一行,`wire_id = [0x5A; 32]`、`end_s = 1300` |
+| SEQ-432.5 | 账户 1 持有 `a1` 仓位后改绑 | `PreconditionFailed{GroupHasPosition}` |
+
+### SEQ-433 未订阅的槽位在首次订阅前收到绑定
+
+- 规则:[命令路径](README.md#命令路径)
+- 级别:unit
+- 里程碑:M3
+- 前置:B0 稳态;`a3` 未订阅
+- 步骤:`BindSlot{A, a3, 1000, 1300, [0x33; 32]}`;再让 s1 订阅 `a3`
+- 期望:绑定时 `Applied` 且不发 `a3` 的 `BindWire`;订阅那一批里 `a3` 依次是 4 条 `BindWire`(part 0..=3,`[0x33; 8]`)和 1 条 `Subscribe`
+- 实现:`crates/hft-sequencer/tests/subs.rs::seq_433_binding_precedes_first_subscription`
+
 SEQ-411/412 补充未声明 PERP_CASH 的逐笔现金连续前缀:分笔/重复/终态查询/快照窗口与全量回放,缺口/混合事实/后续缺失在仓位、钱包和对冲输出前失败。

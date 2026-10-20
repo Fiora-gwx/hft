@@ -260,9 +260,11 @@ fn account_rule(cmd: &CmdBody) -> Rule {
                 missing_ok: !flatten.unwrap_or(false),
             },
         },
-        B::InjectWarmup { .. } | B::Drain { .. } | B::ReconcileReport { .. } | B::BindSlot { .. } => {
+        B::InjectWarmup { .. } | B::Drain { .. } | B::ReconcileReport { .. } => {
             Rule::Star { missing_ok: true }
         }
+        // Venue-wide and neutral: the account must be given, and only as `*`.
+        B::BindSlot { .. } => Rule::Star { missing_ok: false },
         B::VenueNotice { kind, .. } => Rule::Star {
             missing_ok: matches!(kind, NoticeKind::Delisting { .. }),
         },

@@ -264,6 +264,7 @@ const _: () = assert!(size_of::<SnapshotHdr>() == 96);
 | 29 | `ReconView` | [hft-sequencer](../../crates/hft-sequencer/README.md) | `AdoptExchange` 用的最近对账视图(每 report 的 `view_seq` 与 Position 差量,定长、最旧先淘汰);只在非空时写出,缺失 = 空表;**不计入 `state_hash`**(对账输入的派生索引,快照字节仍逐字节验证) |
 
 | 30 | `OrderConns` | [hft-sequencer](../../crates/hft-sequencer/README.md) | 每账户/venue 实际下单与用户流 ConnId 位图；参与状态哈希，新运行清空，旧快照兼容规则归组件 |
+| 31 | `SlotBindings` | [hft-sequencer](../../crates/hft-sequencer/README.md) | `BindSlot` 绑定表:每个已绑定槽位 inst 一行(`SlotBindingRow` 64 B:venue、inst、窗口、32 字节交易所 id、命令 seq),按 inst 升序;只在非空时写出且最后写,缺失 = 空表;计入 `state_hash` |
 
 各节的行格式与行版本只在归属 crate 登记(本页只登记节号、节名与归属;本页给出行格式的节 14、18、20、25 除外)。模拟账户的状态与实盘账户在同一组节里(按 `account` 区分);sim-gw 自身的撮合状态不进本快照,启动时由 [hft-sim](../../crates/hft-sim/README.md) 从这些节重建。未知节号的读者按 `len` 跳过;节内行格式的演进规则同事件体(只追加、零值表示未提供,`version` 递增)。行只由显式字段与 `_pad` 组成(无隐式填充,未用字节补零);不原样嵌入数据枚举(`#[repr(C, u8)]`)或标明"不以原始字节写进 journal"的类型,这类内容按字段展开(判别值 + 显式填充 + 定长载荷)。L2 档位不进 `StateSnapshot`,由紧随其后的 `L2Snapshot` 关键帧承载。
 

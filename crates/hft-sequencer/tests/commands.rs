@@ -954,7 +954,7 @@ fn seq_289_lot_and_dust() {
 }
 
 #[test]
-fn seq_415_bind_slot() {
+fn seq_432_bind_slot() {
     use hft_event::FeedCmd;
     let mut h = steady();
     let bind = |inst, start_s: i64, end_s: i64, fill: u8| ControlCmd::BindSlot {
@@ -980,14 +980,14 @@ fn seq_415_bind_slot() {
     assert_eq!(
         parts,
         (0u8..4).map(|p| (p, [0x5A; 8])).collect::<Vec<_>>(),
-        "SEQ-415.1"
+        "SEQ-432.1"
     );
     // .2 the same binding again: NoOp, nothing sent.
     let n = h.io_ref().feed.len();
     let id = h.cmd_confirmed(AC1, &bind(A1, 1_000, 1_300, 0x5A));
     h.run();
-    assert_eq!(h.res(id).0, status::NO_OP, "SEQ-415.2");
-    assert_eq!(h.io_ref().feed.len(), n, "SEQ-415.2");
+    assert_eq!(h.res(id).0, status::NO_OP, "SEQ-432.2");
+    assert_eq!(h.io_ref().feed.len(), n, "SEQ-432.2");
     // .3 an inst of another venue, an empty window: InvalidArgs.
     let id = h.cmd_confirmed(
         AC1,
@@ -1004,14 +1004,14 @@ fn seq_415_bind_slot() {
     assert_eq!(
         h.res(id),
         (status::INVALID_ARGS, u32::from(detail::BAD_VALUE)),
-        "SEQ-415.3"
+        "SEQ-432.3"
     );
     let id = h.cmd_confirmed(AC1, &bind(A1, 1_300, 1_300, 1));
     h.run();
     assert_eq!(
         h.res(id),
         (status::INVALID_ARGS, u32::from(detail::BAD_VALUE)),
-        "SEQ-415.3"
+        "SEQ-432.3"
     );
     // .4 the binding is in the keyframe (section 31).
     let kf = h.keyframe();
@@ -1019,7 +1019,7 @@ fn seq_415_bind_slot() {
     assert!(
         b.iter()
             .any(|r| r.inst == A1 && r.wire_id == [0x5A; 32] && r.end_s == 1_300),
-        "SEQ-415.4"
+        "SEQ-432.4"
     );
     // .5 a slot holding a position cannot be rebound.
     h.open_position(AC1, A1, hft_types::Side::Buy, "0.001");
@@ -1028,6 +1028,6 @@ fn seq_415_bind_slot() {
     assert_eq!(
         h.res(id),
         (status::PRECONDITION_FAILED, u32::from(detail::GROUP_HAS_POSITION)),
-        "SEQ-415.5"
+        "SEQ-432.5"
     );
 }

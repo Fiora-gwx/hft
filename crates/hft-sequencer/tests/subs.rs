@@ -214,7 +214,7 @@ fn seq_233_group_index_delivery() {
 }
 
 #[test]
-fn seq_416_binding_precedes_first_subscription() {
+fn seq_433_binding_precedes_first_subscription() {
     let mut h = steady();
     // a3 is not subscribed: the binding is recorded, nothing reaches the feed yet.
     let n = h.io_ref().feed.len();
@@ -235,7 +235,7 @@ fn seq_416_binding_precedes_first_subscription() {
         h.io_ref().feed[n..]
             .iter()
             .all(|(_, c)| !matches!(c, FeedCmd::BindWire { inst, .. } if *inst == A3)),
-        "SEQ-416.1"
+        "SEQ-433.1"
     );
     // The first subscription of a3: its four parts first, then Subscribe.
     let n = h.io_ref().feed.len();
@@ -255,15 +255,15 @@ fn seq_416_binding_precedes_first_subscription() {
         })
         .map(|(_, c)| *c)
         .collect();
-    assert_eq!(a3.len(), 5, "SEQ-416.2 {a3:?}");
+    assert_eq!(a3.len(), 5, "SEQ-433.2 {a3:?}");
     for (k, c) in a3.iter().take(4).enumerate() {
         assert!(
             matches!(c, FeedCmd::BindWire { part, chunk, .. } if usize::from(*part) == k && *chunk == [0x33; 8]),
-            "SEQ-416.2 {a3:?}"
+            "SEQ-433.2 {a3:?}"
         );
     }
     assert!(
         matches!(a3.get(4), Some(FeedCmd::Subscribe { .. })),
-        "SEQ-416.2 {a3:?}"
+        "SEQ-433.2 {a3:?}"
     );
 }
