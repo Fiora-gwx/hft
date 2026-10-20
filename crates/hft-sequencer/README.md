@@ -434,6 +434,8 @@ g. rep-sim ≤ sim_max_per_round
 
 `Views::bbo(i)` **按值**投影:报价取 hft-book `Top`;`conn_up` = 任一成员槽 `up`;`conn_live_tsc` = `up ∧ ¬resync` 成员槽 `live_tsc` 的最大值,没有这样的成员时取 `up` 成员的最大值(无 `up` 成员为 0);`resync` = 没有任何 `up ∧ ¬resync` 的成员槽 ∨ 该 inst 的 `RESYNC` ∨ 该 inst 的簿处于 `Resyncing`;`rx_tsc`/`hw_rx_ns` 见[只读视图](#只读视图seqviews实现-sdk-views)。成员 ≤ `MAX_BBO_CONN_SLOTS` 个,投影 O(成员数)。hft-risk 的 `RiskView::bbo`、OMS `price_hedge`、hft-exec 读的是同一投影。因此繁忙连接上的安静 inst 随连接的存活证据保持健康;一条成员连接退役、断开或在补帧时,其他成员仍 up 且未补帧的 inst 不被判不可用。
 
+**没有 BBO 连接报价的 inst**(`bbo_member_mask = 0` 且有 L2 簿,如深度流就是整簿、没有 Bbo 路由的 venue):每条 `L2Batch` 与分档快照 `L2Snapshot{origin = TopN}` 应用之后,以 L2 簿的买一、卖一(价与量)、该记录的 `MarketHdr` 和 `update_id = 0`(不排序:之后 BBO 连接的报价不会被判为更旧)写 `Top`;`Views::bbo` 对这类 inst 的连接健康取簿状态:`conn_up` = `¬resync` = 簿 `Live`,`conn_live_tsc` = `Top.rx_tsc`(本次运行最近一次被应用的 L2 记录的接收时刻,`rx_from_seq` 规则同上)。所以风控 #5、OMS 与执行层对它们用同一个 `quote_live` 判定:簿在重同步或静默超过 `conn_liveness_ms` 即不可用。一旦有 BBO 连接成为成员,回到上文的规则。
+
 ### 每条 Input 的处理顺序(`process`)
 
 `testkit` feature 在每条实际 Input 的分派前与完成后向驱动提供只读观察,包含实盘驱动生成的定时器;观察不进入 journal、快照与生产构建。驱动只读业务状态,诊断缓冲丢失须使 DST 失败。验收归 [TK-070](../hft-testkit/TESTS.md#tk-070-每步只读访问调试视图) 与 [TK-106](../hft-testkit/TESTS.md#tk-106-真实引擎的基础币费用配置与对冲余数观察)。
