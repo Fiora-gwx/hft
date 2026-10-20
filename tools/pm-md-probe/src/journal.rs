@@ -113,6 +113,10 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             let Ok((h, rest)) = L2SnapHdr::read_from_prefix(body) else {
                 continue;
             };
+            // Keyframe copies of the engine's books are state, not market data.
+            if h.origin != L2SnapHdr::EXCHANGE {
+                continue;
+            }
             let (nb, na) = (usize::from(h.n_bids), usize::from(h.n_asks));
             let Some(b) = books.get_mut(h.h.inst.0 as usize) else {
                 continue;
