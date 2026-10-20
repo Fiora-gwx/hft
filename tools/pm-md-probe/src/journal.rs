@@ -1,12 +1,17 @@
 //! `pm-md-probe journal` (README "hft-core 验收"): reads an hft-core seq journal, follows the
 //! `BindSlot` commands and rebuilds every slot inst's book from the journalled `L2Snapshot` /
 //! `L2Batch` / `Trade` events. Writes the same JSON lines as the live probe, labelled per bound
-//! window (`<asset>-<start_s>-<up|dn>`), and a bindings file in the `compare.py` format.
+//! window (`<asset>-<start_s>-<up|dn>`), and a bindings file in the `compare.py` format. Order
+//! decisions, order events, external fills (settlement deliveries), `Settle` commands, command
+//! results and connection states are written too (README "产出").
 
 use std::io::Write;
 use std::path::PathBuf;
 
-use hft_event::{ControlCmd, EventKind, L2BatchHdr, L2SnapHdr, Trade};
+use hft_event::{
+    CmdResult, ConnState, ControlCmd, EventKind, ExternalFill, L2BatchHdr, L2SnapHdr, OrderDecision,
+    OrderEvent, Trade,
+};
 use hft_journal::{JournalReader, Next};
 use hft_refdata::RefData;
 use hft_types::{InstId, Side, VenueId};
@@ -49,6 +54,11 @@ fn args(raw: &[String]) -> Result<Args, String> {
     }
 }
 
+/// Lower-case hex of a 16-byte id.
+fn hex16(b: &[u8; 16]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
 /// `btc-up-0` → (`btc`, `up`).
 fn asset_side(symbol: &str) -> (&str, &str) {
     let mut p = symbol.split('-');
@@ -71,6 +81,14 @@ pub fn run(raw: &[String]) -> Result<(), String> {
         std::fs::File::create(&a.out).map_err(|e| format!("{}: {e}", a.out.display()))?,
     );
     let (mut n_bind, mut n_snap, mut n_batch, mut n_trade) = (0u64, 0u64, 0u64, 0u64);
+    let (mut n_dec, mut n_oev, mut n_ext, mut n_settle, mut n_conn) = (0u64, 0u64, 0u64, 0u64, 0u64);
+    let name = |label: &[String], i: InstId| -> String {
+        label
+            .get(i.0 as usize)
+            .filter(|l| l.as_str() != "?")
+            .cloned()
+            .unwrap_or_else(|| format!("inst{}", i.0))
+    };
     loop {
         let (kind, body) = match reader.poll() {
             Next::Record(r) => (EventKind(r.hdr.kind), r.body),
@@ -80,6 +98,24 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             Next::Err(e) => return Err(format!("journal read: {e:?}")),
         };
         if kind == EventKind::CONTROL_CMD {
+            let decoded = ControlCmd::decode(body);
+            if let Ok((
+                h,
+                ControlCmd::Settle {
+                    inst, end_s, payout, ..
+                },
+            )) = decoded
+            {
+                n_settle += 1;
+                let _ = writeln!(
+                    out,
+                    "{{\"k\":\"settle\",\"slot\":\"{}\",\"end_s\":{end_s},\"payout\":{},\"cmd_id\":\"{}\"}}",
+                    name(&label, inst),
+                    payout.0,
+                    hex16(&h.cmd_id)
+                );
+                continue;
+            }
             let Ok((
                 _,
                 ControlCmd::BindSlot {
@@ -89,7 +125,7 @@ pub fn run(raw: &[String]) -> Result<(), String> {
                     wire_id,
                     ..
                 },
-            )) = ControlCmd::decode(body)
+            )) = decoded
             else {
                 continue;
             };
@@ -179,6 +215,79 @@ pub fn run(raw: &[String]) -> Result<(), String> {
                 bb.unwrap_or(-1),
                 ba.unwrap_or(-1)
             );
+        } else if kind == EventKind::ORDER_DECISION {
+            let Ok((d, _)) = OrderDecision::try_read_from_prefix(body) else {
+                continue;
+            };
+            n_dec += 1;
+            let _ = writeln!(
+                out,
+                "{{\"k\":\"dec\",\"slot\":\"{}\",\"action\":{},\"side\":\"{}\",\"tif\":{},\"px\":{},\"qty\":{},\"oslot\":{},\"gen\":{},\"reject\":{}}}",
+                name(&label, d.inst),
+                d.action as u8,
+                if d.side == Side::Buy { "BUY" } else { "SELL" },
+                d.tif as u8,
+                d.px.0,
+                d.qty.0,
+                d.slot.0,
+                d.r#gen,
+                d.reject
+            );
+        } else if kind == EventKind::ORDER_EVENT {
+            let Ok((e, _)) = OrderEvent::try_read_from_prefix(body) else {
+                continue;
+            };
+            n_oev += 1;
+            let _ = writeln!(
+                out,
+                "{{\"k\":\"oev\",\"slot\":\"{}\",\"what\":{},\"px\":{},\"qty\":{},\"cum\":{},\"fee\":{},\"oslot\":{},\"gen\":{},\"ex_ms\":{},\"code\":{}}}",
+                name(&label, e.inst),
+                e.what as u8,
+                e.px.0,
+                e.qty.0,
+                e.cum_filled.0,
+                e.fee.0,
+                e.slot.0,
+                e.r#gen,
+                e.ex_ts_ns / 1_000_000,
+                e.reject_code
+            );
+        } else if kind == EventKind::EXTERNAL_FILL {
+            let Ok((e, _)) = ExternalFill::try_read_from_prefix(body) else {
+                continue;
+            };
+            n_ext += 1;
+            let _ = writeln!(
+                out,
+                "{{\"k\":\"ext\",\"slot\":\"{}\",\"cause\":{},\"side\":\"{}\",\"px\":{},\"qty\":{},\"end_s\":{}}}",
+                name(&label, e.inst),
+                e.cause as u8,
+                if e.side == Side::Buy { "BUY" } else { "SELL" },
+                e.px.0,
+                e.qty.0,
+                e.exch_order_id
+            );
+        } else if kind == EventKind::CMD_RESULT {
+            let Ok((r, _)) = CmdResult::try_read_from_prefix(body) else {
+                continue;
+            };
+            let _ = writeln!(
+                out,
+                "{{\"k\":\"cmdres\",\"cmd_id\":\"{}\",\"status\":{},\"detail\":{}}}",
+                hex16(&r.cmd_id),
+                r.status,
+                r.detail
+            );
+        } else if kind == EventKind::CONN_STATE {
+            let Ok((c, _)) = ConnState::try_read_from_prefix(body) else {
+                continue;
+            };
+            n_conn += 1;
+            let _ = writeln!(
+                out,
+                "{{\"k\":\"conn\",\"venue\":{},\"conn\":{},\"state\":{},\"inst\":{},\"reason\":{},\"role\":{}}}",
+                c.venue.0, c.conn, c.state as u8, c.inst.0, c.reason, c.role as u8
+            );
         } else if kind == EventKind::TRADE {
             let Ok((t, _)) = Trade::try_read_from_prefix(body) else {
                 continue;
@@ -202,6 +311,9 @@ pub fn run(raw: &[String]) -> Result<(), String> {
     let _ = out.flush();
     std::fs::write(&a.bindings_out, format!("[{}]\n", binds.join(",\n")))
         .map_err(|e| format!("{}: {e}", a.bindings_out.display()))?;
-    println!("pm-md-probe journal: binds {n_bind}, snapshots {n_snap}, batches {n_batch}, trades {n_trade}");
+    println!(
+        "pm-md-probe journal: binds {n_bind}, snapshots {n_snap}, batches {n_batch}, trades {n_trade}, \
+         decisions {n_dec}, order events {n_oev}, external fills {n_ext}, settles {n_settle}, conn states {n_conn}"
+    );
     Ok(())
 }

@@ -56,6 +56,10 @@ pm-md-probe --bindings FILE --seconds N --out FILE --dir DIR --src-ip IP --bind-
 | `batch` | `slot`、`ex_ms`、`rx_ns`、`prev`、`last`、`bb`、`ba` |
 | `trade` | `slot`、`ex_ms`、`rx_ns`、`px`、`qty`、`side` |
 | `conn` | 连接状态事件 |
+| `dec` | (`journal` 子命令)`OrderDecision`:`slot`、`action`、`side`、`tif`、`px`、`qty`、`oslot`、`gen`、`reject` |
+| `oev` | (`journal`)`OrderEvent`:`slot`、`what`、`px`、`qty`、`cum`、`fee`、`oslot`、`gen`、`ex_ms`、`code` |
+| `ext` | (`journal`)`ExternalFill`(交割为 `cause` 4):`slot`、`cause`、`side`、`px`、`qty`、`end_s` |
+| `settle` / `cmdres` | (`journal`)`Settle` 命令(`slot`、`end_s`、`payout`、`cmd_id`)与命令结果(`cmd_id`、`status`、`detail`) |
 
 `bb`/`ba` 为重建簿的最优买/卖价(px_exp −3 的整数,空边为 −1)。结束时打印各类事件数、feed 计数器与解码器的去重计数(`decoder dups`、`lates`)。`conn` 行的 `Down` 原因 64(hft-net `WS_CLOSE`)既包括 1013,也包括市场结算后约 147 s 交易所的正常关闭,统计异常断开时要按时间排除后者。
 
