@@ -30,10 +30,14 @@ pub const MAX_VENUES_PER_ACCOUNT: usize = 8;
 /// `MarginReport` items per (account, venue).
 pub const MAX_MARGIN_ITEMS: usize = 64;
 
-/// Resting-order fill model (README "4. 挂单"); `Queue` arrives with the `queue-hftbacktest` feature.
+/// Resting-order fill model (README "4. 挂单").
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum MakerFill {
+    /// Fills only on trades or book levels strictly through the resting price.
     TradeThrough,
+    /// `TradeThrough`, plus FIFO queue position at the resting price: trades at that price
+    /// consume the displayed quantity that was ahead of the order first.
+    Queue,
 }
 
 /// `[sim]` of the hft-core configuration (README "配置"). `seed` has no default: the only

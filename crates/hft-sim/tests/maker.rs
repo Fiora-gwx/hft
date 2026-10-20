@@ -1,4 +1,4 @@
-//! SIM-040–SIM-041: TradeThrough fills of resting orders.
+//! SIM-040–SIM-041: TradeThrough fills of resting orders; SIM-228: Queue position.
 
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
@@ -58,4 +58,53 @@ fn sim_041_trade_through_sell() {
     s.trade(ms(200), BTC_S1, "61000.01", "0.2");
     s.run_to(ms(210));
     assert_eq!(s.fills_of(A9, o), vec![(px("61000"), q("0.1"))]);
+}
+
+/// `Sim` with `maker_fill = Queue`; bid level 59000 shows 1 BTC; account 9 rests a buy 0.1 @ 59000.
+fn queue_rig() -> (Sim, hft_types::SlotId) {
+    let mut setup = setup_sim();
+    setup.tuning.maker_fill = hft_sim::MakerFill::Queue;
+    let mut s = Sim::with(&setup, &rd_sim());
+    s.topn(ms(100), BTC_S1, &[("60000", "1")], &[("59000", "1")]);
+    let o = s.place(A9, BTC_S1, Buy, "0.1", "59000", Tif::Gtc, ms(100));
+    s.run_to(ms(110));
+    (s, o)
+}
+
+#[test]
+fn sim_228_queue_position() {
+    use hft_types::Side;
+    // .1 a trade at the price consumes the 1 BTC ahead before the order: 0.4 (level shown first,
+    // then the trade, as the exchange publishes them), then 0.5, then 0.15 → 0.05 filled.
+    let (mut s, o) = queue_rig();
+    s.topn(ms(200), BTC_S1, &[("60000", "1")], &[("59000", "0.6")]);
+    s.trade_by(ms(220), BTC_S1, "59000", "0.4", Side::Sell);
+    s.topn(ms(300), BTC_S1, &[("60000", "1")], &[("59000", "0.1")]);
+    s.trade_by(ms(320), BTC_S1, "59000", "0.5", Side::Sell);
+    s.run_to(ms(330));
+    assert!(s.fills_of(A9, o).is_empty(), "SIM-228.1");
+    s.trade_by(ms(400), BTC_S1, "59000", "0.15", Side::Sell);
+    s.run_to(ms(410));
+    assert_eq!(s.fills_of(A9, o), vec![(px("59000"), q("0.05"))], "SIM-228.1");
+    // .2 a decrease without a trade within 500 ms is a cancellation behind the order: the queue
+    // ahead only shrinks to the displayed level (0.5), so a 0.55 trade fills 0.05.
+    let (mut s, o) = queue_rig();
+    s.topn(ms(200), BTC_S1, &[("60000", "1")], &[("59000", "0.5")]);
+    s.topn(ms(800), BTC_S1, &[("60000", "1")], &[("59000", "0.5")]);
+    s.trade_by(ms(900), BTC_S1, "59000", "0.55", Side::Sell);
+    s.run_to(ms(910));
+    assert_eq!(s.fills_of(A9, o), vec![(px("59000"), q("0.05"))], "SIM-228.2");
+    // .3 a trade at the price whose taker is on the order's own side does not touch the queue.
+    let (mut s, o) = queue_rig();
+    s.trade_by(ms(200), BTC_S1, "59000", "5", Side::Buy);
+    s.run_to(ms(210));
+    assert!(s.fills_of(A9, o).is_empty(), "SIM-228.3");
+    // .4 TradeThrough ignores trades at the price.
+    let mut s = Sim::std();
+    s.topn(ms(100), BTC_S1, &[("60000", "1")], &[("59000", "1")]);
+    let o = s.place(A9, BTC_S1, Buy, "0.1", "59000", Tif::Gtc, ms(100));
+    s.run_to(ms(110));
+    s.trade_by(ms(200), BTC_S1, "59000", "5", Side::Sell);
+    s.run_to(ms(210));
+    assert!(s.fills_of(A9, o).is_empty(), "SIM-228.4");
 }

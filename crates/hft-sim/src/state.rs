@@ -144,6 +144,14 @@ pub(crate) struct Order {
     /// Spot lock held by this resting order (in `lock_asset` raw units).
     pub lock: i64,
     pub lock_asset: AssetId,
+    /// `MakerFill::Queue`: displayed quantity ahead of the order at its price.
+    pub ahead: i64,
+    /// `MakerFill::Queue`: last displayed quantity of the order's price level.
+    pub lvl: i64,
+    /// `MakerFill::Queue`: decrease of the level not yet matched by a trade at the price, and the
+    /// exchange time it was first seen.
+    pub unexp: i64,
+    pub unexp_ts: i64,
 }
 
 impl Order {
@@ -169,6 +177,10 @@ impl Order {
         last_due: 0,
         lock: 0,
         lock_asset: AssetId(0),
+        ahead: 0,
+        lvl: 0,
+        unexp: 0,
+        unexp_ts: 0,
     };
 
     pub fn remaining(&self) -> i64 {

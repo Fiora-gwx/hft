@@ -259,6 +259,10 @@ impl SimExchange {
             last_due: 0,
             lock: 0,
             lock_asset: AssetId(0),
+            ahead: 0,
+            lvl: 0,
+            unexp: 0,
+            unexp_ts: 0,
         };
         let verdict = match ii {
             Some(ii) if in_acct => self.check_place(ai, ii, &c, t),
@@ -381,10 +385,18 @@ impl SimExchange {
     /// Order `k` becomes resting with its remaining quantity locked.
     fn rest(&mut self, ai: usize, k: usize) {
         let o = self.order_at(ai, k);
+        let shown = if self.tune.maker_fill == crate::types::MakerFill::Queue {
+            self.level_qty(usize::from(o.inst), o.side, o.px)
+        } else {
+            0
+        };
         if let Some(a) = self.accts.get_mut(ai) {
             if let Some(x) = a.orders.get_mut(k) {
                 x.resting = true;
                 x.status = if o.filled > 0 { st::PARTIAL } else { st::NEW };
+                x.ahead = shown;
+                x.lvl = shown;
+                x.unexp = 0;
             }
             a.n_resting += 1;
         }
