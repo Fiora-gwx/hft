@@ -24,3 +24,12 @@ args=(--profile minimal --no-self-update)
 rustup toolchain install "$channel" "${args[@]}"
 rustc --version
 cargo --version
+
+# Tests create their scratch directories under TMPDIR and several assert that they are disk-backed
+# (hft-journal rejects tmpfs for offline writers and requires it for hot segments). Some hosted
+# runners mount /tmp as tmpfs (seen 2026-10-20: JNL-039/101/130, replay_file, replayer fixtures
+# failed with OfflineTarget), so point TMPDIR at the runner's disk-backed temp directory.
+if [[ -n ${GITHUB_ENV:-} && -n ${RUNNER_TEMP:-} ]]; then
+  echo "/tmp: $(findmnt -n -o FSTYPE /tmp 2>/dev/null || echo unknown); TMPDIR -> $RUNNER_TEMP"
+  echo "TMPDIR=$RUNNER_TEMP" >>"$GITHUB_ENV"
+fi
