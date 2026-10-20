@@ -487,6 +487,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
+name = "binary-maker"
+version = "0.1.0"
+dependencies = [
+ "hft-event",
+ "hft-refdata",
+ "hft-strat-lib",
+ "hft-strategy-sdk",
+ "hft-testkit",
+ "hft-types",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1595,6 +1607,7 @@ name = "hft-strategy-registry"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "binary-maker",
  "book-observer",
  "cross-taker",
  "hft-ctl",
