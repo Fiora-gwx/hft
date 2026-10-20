@@ -103,6 +103,12 @@ status: impl
 
 每个事件 O(槽位数) 的整数运算,不分配(场景测试以计数分配器核对);`Model = NoModel`。状态每个槽位 64 B 以内,波动率环 `vol_window_s` × 8 B(默认 14.4 KB)。
 
+保留 `decided_tsc − proc_tsc` 的基线预算:参考 BBO 未变更挂单(tick_miss)与产生挂单(tick_fire)p50 ≤ 1 µs/p99 ≤ 3 µs(每次重算环上 σ),Order 更新 p50 ≤ 1 µs/p99 ≤ 3 µs,Risk p50 ≤ 100 ns/p99 ≤ 300 ns。参考机实测尚未完成,这些不是性能声明。
+
+`benches/on_event.rs` 经真实 BinaryMaker::on_event 测量 tick_miss(两腿已在最优买价挂单,参考 BBO 无动作)、tick_fire(同一参考 BBO,无挂单 → 两笔 post-only 买单)、exec_update(Up 挂单被撤 → 重挂)、risk_event(只读取上一事件的下单结果)。夹具为 tests/common 与场景测试 BMK-003 的 400 s 预热;每个样本前在计时外恢复挂单表与暂停时刻,并在计时外核对一次挂单数。Criterion 默认配置,仅作相对比较。
+
+所有订阅都是 Part::Fast,无慢侧缓存更新、Advice 或 TargetIntent;`benches/not-applicable.toml` 为 slow_update、advice、target_set 登记理由。
+
 ## 测试与验收
 
 用例见 [TESTS.md](TESTS.md)。上线前按模拟盘提案(`.agents/notes/proposed/architecture/2026-10-20-polymarket-sim-maker.md`)在 `sim` 实例连续运行两天。

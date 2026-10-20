@@ -1,0 +1,16 @@
+# Reference-machine limits from the strategy README; CI reports timings only.
+["strategies/binary-maker/tick_miss"]
+p50_ns = 1000
+p99_ns = 3000
+
+["strategies/binary-maker/tick_fire"]
+p50_ns = 1000
+p99_ns = 3000
+
+["strategies/binary-maker/exec_update"]
+p50_ns = 1000
+p99_ns = 3000
+
+["strategies/binary-maker/risk_event"]
+p50_ns = 100
+p99_ns = 300
