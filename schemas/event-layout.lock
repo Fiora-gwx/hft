@@ -654,6 +654,7 @@ cmd 0x001A SmokeOrder
 cmd 0x001B WriteOffResidual
 cmd 0x001C SimFault
 cmd 0x001D BindSlot
+cmd 0x001E Settle
 load-err 1 Structure
 load-err 2 Strings
 load-err 3 Ids

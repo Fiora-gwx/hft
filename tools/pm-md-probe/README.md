@@ -70,11 +70,12 @@ pm-md-probe --bindings FILE --seconds N --out FILE --dir DIR --src-ip IP --bind-
 正式进程的验收(提案 P1b):`hft-core --dry-run` 以 `pm_sim_config` 生成的配置运行(venue `polymarket-clob`、`live_feed = true`、book-observer 订阅 16 个槽位 inst),`scripts/bind_slots.py` 作发现进程,`pm-md-probe journal` 从 seq journal 取出事件,再用同一个 `compare.py` 与 pmrec 比对。
 
 ```text
-bind_slots.py --socket CORE_SOCK [--assets btc,eth,sol,xrp] [--lead 120] [--once] [--log FILE] [--issuer pipeline] [--gap 0.25]
+bind_slots.py --socket CORE_SOCK [--assets btc,eth,sol,xrp] [--lead 120] [--once] [--log FILE] [--issuer pipeline] [--gap 0.25] [--slots 2] [--settle]
 pm-md-probe journal --refdata RDB1 --out FILE --bindings-out FILE SEG...
 ```
 
-- `bind_slots.py`:每 5 s 对当前与下一个窗口(开始时间 S)取 Gamma 的 Up/Down 代币,写进槽位 `<asset>-<up|dn>-<k>`(k = S / 300 mod 2,相邻窗口用不同槽位);下一个窗口在 S − lead 起绑定,此时该槽位的上一个窗口已结束 300 − lead 秒(默认 180 s,晚于交易所约 147 s 后的结算断开)。每次绑定是一条 `BindSlot`(issuer `pipeline`、account `*`;`accepted` 时用同一 cmd_id 重发直到终态;请求间隔 `--gap` 秒以低于 gateway 的每 issuer 限速,`RateLimited` 的绑定下一轮重试),以 pipeline 主体的系统用户运行(手工调试可用 `--issuer cli:<login>` 以 Trader/Admin 的 cli 用户运行);已生效的 (代币, S) 不重发。Gamma 没有该市场时不改槽位。
+- `bind_slots.py`:每 5 s 对当前与下一个窗口(开始时间 S)取 Gamma 的 Up/Down 代币,写进槽位 `<asset>-<up|dn>-<k>`(k = S / 300 mod `--slots`,默认 2;相邻窗口用不同槽位);下一个窗口在 S − lead 起绑定,此时该槽位的上一个窗口已结束 300 − lead 秒(默认 180 s,晚于交易所约 147 s 后的结算断开)。每次绑定是一条 `BindSlot`(issuer `pipeline`、account `*`;`accepted` 时用同一 cmd_id 重发直到终态;请求间隔 `--gap` 秒以低于 gateway 的每 issuer 限速,`RateLimited` 的绑定下一轮重试),以 pipeline 主体的系统用户运行(手工调试可用 `--issuer cli:<login>` 以 Trader/Admin 的 cli 用户运行);已生效的 (代币, S) 不重发。Gamma 没有该市场时不改槽位。
+- `bind_slots.py --settle`(模拟盘):窗口结束 60 s 后起每 5 s 查 CLOB `/markets/<conditionId>`,有 `winner` 后对该窗口的两个槽位各发一条 `Settle`(赢的代币 `payout` "1"、另一个 "0";[control-plane `Settle`](../../docs/subsystems/control-plane.md#命令集),只交割模拟账户,没有持有者时 `NoOp`)。交易所在结束后约 178–204 s 标出 `winner`(2026-10-20 实测),持有库存的槽位交割前不能改绑,所以要配 `--slots 3`(结束后 480 s 才改绑);结束 1 小时仍未结算的窗口记 `unresolved` 后放弃。
 - `pm-md-probe journal`:按 `BindSlot` 命令记录跟踪每个槽位当前的窗口,输出与[产出](#产出)相同的事件行,`slot` 为 `<asset>-<S>-<up|dn>`,改绑时清空该 inst 的簿,并像引擎重同步一样丢弃其增量直到该代币的第一个整簿;只用 `origin = EXCHANGE` 的 `L2Snapshot`(sequencer 关键帧里的簿副本不是行情);`--bindings-out` 写 `compare.py` 的绑定文件(每次绑定一项)。
 - 通过标准与[验收步骤](#验收步骤)第 3 步相同,覆盖至少两个连续窗口(含一次改绑)。
 

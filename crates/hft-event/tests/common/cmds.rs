@@ -194,5 +194,12 @@ pub fn all_samples(w: &[u8]) -> Vec<ControlCmd<'_>> {
             end_s: 1_792_425_600,
             wire_id: [0xA5; 32],
         },
+        ControlCmd::Settle {
+            venue: VenueId(15),
+            _pad: [0; 3],
+            inst: InstId(7),
+            end_s: 1_792_425_600,
+            payout: Px(1000),
+        },
     ]
 }

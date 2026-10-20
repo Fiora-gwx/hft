@@ -214,6 +214,17 @@ impl GwCmd {
         }
     }
 
+    /// `inst`, `px = payout`, `arg = venue`, `arg2 = end_s` (UTC s, u32).
+    pub fn sim_settle(account: AccountId, venue: VenueId, inst: InstId, payout: Px, end_s: u32) -> GwCmd {
+        GwCmd {
+            px: payout,
+            inst,
+            arg: u32::from(venue.0),
+            arg2: end_s,
+            ..Self::base(GwOp::SimSettle, account)
+        }
+    }
+
     /// `arg = venue | fault << 8`, `arg2 = delay_ms`.
     pub fn sim_fault(account: AccountId, venue: VenueId, fault: u8, delay_ms: u32) -> GwCmd {
         GwCmd {

@@ -669,6 +669,7 @@ fn role_ok(h: &CmdHdr, c: &ControlCmd<'_>) -> bool {
                 ControlCmd::SetParams { .. }
                     | ControlCmd::InjectWarmup { .. }
                     | ControlCmd::BindSlot { .. }
+                    | ControlCmd::Settle { .. }
                     | ControlCmd::SetMode {
                         mode: RunMode::CloseOnly | RunMode::Shadow,
                         ..
@@ -1392,6 +1393,13 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
             wire_id,
             ..
         } => Ok(bind_slot(e, *venue, *slot, *start_s, *end_s, wire_id)),
+        ControlCmd::Settle {
+            venue,
+            inst: slot,
+            end_s,
+            payout,
+            ..
+        } => Ok(settle(e, *venue, *slot, *end_s, *payout)),
         ControlCmd::SimReset { account } => sim_reset(e, inst, drv, *account),
         ControlCmd::SimTransfer {
             account,
@@ -1621,6 +1629,62 @@ fn bind_slot(
     if e.sent_union.get(slot.0 as usize).is_some_and(|u| *u != 0) {
         emit_binding(e, &row);
     }
+    ok()
+}
+
+/// `Settle`: the inst must be a slot of `venue` whose binding ends at `end_s`, the window must have
+/// ended (engine UTC ≥ `end_s`) and `0 ≤ payout ≤` one unit of the inst's price. Live accounts are
+/// not settled here (P3): a Live position or open order on the inst → `NotSim`. Every Sim account
+/// with inventory or an open order on the inst gets a `SimSettle` on `out-sim` (sim-gw cancels the
+/// orders and delivers the inventory at `payout`, hft-sim); none → `NoOp`.
+fn settle(e: &mut Engine, venue: VenueId, slot: InstId, end_s: i64, payout: hft_types::Px) -> Res {
+    if slot.0 == 0 || venue.0 == 0 || e.rd.inst(slot).venue != venue {
+        return res(status::INVALID_ARGS, detail::BAD_VALUE);
+    }
+    let one = 10i64.checked_pow(u32::from(e.rd.inst(slot).px_exp.unsigned_abs()));
+    let bound = e.cmd.bindings.iter().any(|x| x.inst == slot && x.end_s == end_s);
+    let Some(one) = one else {
+        return res(status::INVALID_ARGS, detail::BAD_VALUE);
+    };
+    if !bound || payout.0 < 0 || payout.0 > one || e.rd.inst(slot).px_exp > 0 {
+        return res(status::INVALID_ARGS, detail::BAD_VALUE);
+    }
+    if e.now.utc_ns < end_s.saturating_mul(1_000_000_000) {
+        return res(status::PRECONDITION_FAILED, detail::NOT_ENDED);
+    }
+    let accounts = crate::engine::account_count(&e.rd);
+    let infl = e.oms.inflight();
+    let mut targets = Vec::new();
+    for k in 1..=accounts {
+        let a = AccountId(k as u8);
+        let held = e.ledger.pos(a, slot).qty.0 != 0
+            || infl.open_buy(a, slot).0 != 0
+            || infl.open_sell(a, slot).0 != 0;
+        if !held {
+            continue;
+        }
+        if !e.is_sim(a) {
+            return res(status::INVALID_ARGS, detail::NOT_SIM);
+        }
+        targets.push(a);
+    }
+    if targets.is_empty() {
+        return res(status::NO_OP, 0);
+    }
+    for a in targets {
+        e.out.emits.push(Emit::Gw {
+            ring: OutRing::Sim,
+            cmd: hft_event::GwCmd::sim_settle(
+                a,
+                venue,
+                slot,
+                payout,
+                end_s.clamp(0, i64::from(u32::MAX)) as u32,
+            ),
+            rec: None,
+        });
+    }
+    e.trace.rec("cmd.settle", u64::from(slot.0), payout.0 as u64);
     ok()
 }
 

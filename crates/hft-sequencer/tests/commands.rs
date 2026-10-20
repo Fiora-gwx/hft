@@ -1039,3 +1039,83 @@ fn seq_432_bind_slot() {
     h.run();
     assert_eq!(h.res(id).0, status::ROLE_INSUFFICIENT, "SEQ-432.6");
 }
+
+#[test]
+fn seq_435_settle() {
+    use hft_sequencer::OutRing;
+    use hft_types::{Px, Side};
+    let bind = |end_s: i64| ControlCmd::BindSlot {
+        venue: A,
+        _pad: [0; 3],
+        inst: A1,
+        start_s: end_s - 300,
+        end_s,
+        wire_id: [0x5A; 32],
+    };
+    let settle = |end_s: i64, payout: i64| ControlCmd::Settle {
+        venue: A,
+        _pad: [0; 3],
+        inst: A1,
+        end_s,
+        payout: Px(payout),
+    };
+    let mut h = steady();
+    let pe = h.s.engine().rd.inst(A1).px_exp;
+    let one = 10i64.pow(u32::from(pe.unsigned_abs()));
+    let future = 4_000_000_000i64;
+    for end_s in [1_300, future] {
+        let id = h.cmd_with("pipeline", 0, AccountId(0), &bind(end_s), |_| {});
+        h.run();
+        assert_eq!(h.res(id).0, status::APPLIED, "SEQ-435 bind {end_s}");
+        // .1 nothing held: NoOp (window ended); a window not yet ended: NotEnded.
+        let id = h.cmd_with("pipeline", 0, AccountId(0), &settle(end_s, one), |_| {});
+        h.run();
+        if end_s == future {
+            assert_eq!(
+                h.res(id),
+                (status::PRECONDITION_FAILED, u32::from(detail::NOT_ENDED)),
+                "SEQ-435.1"
+            );
+        } else {
+            assert_eq!(h.res(id).0, status::NO_OP, "SEQ-435.1");
+        }
+    }
+    // .2 an end_s other than the binding's, a payout above one unit: BadValue.
+    let id = h.cmd_with("pipeline", 0, AccountId(0), &bind(1_300), |_| {});
+    h.run();
+    assert_eq!(h.res(id).0, status::APPLIED, "SEQ-435 rebind");
+    for (end_s, payout) in [(1_200, one), (1_300, one + 1)] {
+        let id = h.cmd_with("pipeline", 0, AccountId(0), &settle(end_s, payout), |_| {});
+        h.run();
+        assert_eq!(
+            h.res(id),
+            (status::INVALID_ARGS, u32::from(detail::BAD_VALUE)),
+            "SEQ-435.2 {end_s} {payout}"
+        );
+    }
+    // .3 a Sim account holds the inst: one SimSettle on out-sim for it.
+    h.open_position(AC9, A1, Side::Buy, "0.001");
+    let n = h.io_ref().out.len();
+    let id = h.cmd_with("pipeline", 0, AccountId(0), &settle(1_300, one), |_| {});
+    h.run();
+    assert_eq!(h.res(id).0, status::APPLIED, "SEQ-435.3");
+    let sent: Vec<_> = h.io_ref().out[n..]
+        .iter()
+        .filter(|(r, c)| *r == OutRing::Sim && c.op == hft_event::GwOp::SimSettle)
+        .map(|(_, c)| (c.account, c.inst, c.px, c.arg, c.arg2))
+        .collect();
+    assert_eq!(sent, vec![(AC9, A1, Px(one), u32::from(A.0), 1_300)], "SEQ-435.3");
+    // .4 a Live account holds the inst: NotSim (live settlement is not built).
+    let mut h = steady();
+    let id = h.cmd_with("pipeline", 0, AccountId(0), &bind(1_300), |_| {});
+    h.run();
+    h.open_position(AC1, A1, Side::Buy, "0.001");
+    let id2 = h.cmd_with("pipeline", 0, AccountId(0), &settle(1_300, 0), |_| {});
+    h.run();
+    assert_eq!(h.res(id).0, status::APPLIED, "SEQ-435.4 bind");
+    assert_eq!(
+        h.res(id2),
+        (status::INVALID_ARGS, u32::from(detail::NOT_SIM)),
+        "SEQ-435.4"
+    );
+}

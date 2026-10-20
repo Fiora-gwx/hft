@@ -264,7 +264,7 @@ fn account_rule(cmd: &CmdBody) -> Rule {
             Rule::Star { missing_ok: true }
         }
         // Venue-wide and neutral: the account must be given, and only as `*`.
-        B::BindSlot { .. } => Rule::Star { missing_ok: false },
+        B::BindSlot { .. } | B::Settle { .. } => Rule::Star { missing_ok: false },
         B::VenueNotice { kind, .. } => Rule::Star {
             missing_ok: matches!(kind, NoticeKind::Delisting { .. }),
         },
@@ -894,6 +894,27 @@ fn build<'p>(req: &CmdRequest, rd: &Rd<'_>, payload: &'p mut Vec<u8>) -> R<Built
                     start_s: int64(start_s)?,
                     end_s: int64(end_s)?,
                     wire_id: uint256(wire_id)?,
+                },
+                account,
+            )
+        }
+        B::Settle {
+            venue,
+            inst,
+            end_s,
+            payout,
+            ..
+        } => {
+            let v = rd.venue(venue)?;
+            let i = rd.inst(inst)?;
+            let pe = rd.0.asset(rd.0.inst(i).asset).exp.px_exp;
+            simple(
+                ControlCmd::Settle {
+                    venue: v,
+                    _pad: [0; 3],
+                    inst: i,
+                    end_s: int64(end_s)?,
+                    payout: Px(fixed(payout, pe)?),
                 },
                 account,
             )

@@ -223,6 +223,14 @@ pub enum CmdBody {
         wire_id: String,
         account: Option<String>,
     },
+    /// `payout`: decimal price per unit (`"1"`, `"0"`).
+    Settle {
+        venue: String,
+        inst: String,
+        end_s: String,
+        payout: String,
+        account: Option<String>,
+    },
     StrategyCmd {
         strategy: String,
         group: Option<String>,
@@ -290,6 +298,7 @@ impl CmdBody {
             CmdBody::VenueNotice { .. } => "VenueNotice",
             CmdBody::SmokeOrder { .. } => "SmokeOrder",
             CmdBody::BindSlot { .. } => "BindSlot",
+            CmdBody::Settle { .. } => "Settle",
             CmdBody::StrategyCmd { .. } => "StrategyCmd",
             CmdBody::InjectWarmup { .. } => "InjectWarmup",
             CmdBody::ReplaceRefdata { .. } => "ReplaceRefdata",
@@ -329,6 +338,7 @@ impl CmdBody {
             CmdBody::WriteOffResidual { .. } => 0x001B,
             CmdBody::SimFault { .. } => 0x001C,
             CmdBody::BindSlot { .. } => 0x001D,
+            CmdBody::Settle { .. } => 0x001E,
             CmdBody::GetSchema { .. } | CmdBody::ReconcileReport { .. } => 0,
         }
     }
@@ -355,6 +365,7 @@ impl CmdBody {
             | CmdBody::VenueNotice { account, .. }
             | CmdBody::SmokeOrder { account, .. }
             | CmdBody::BindSlot { account, .. }
+            | CmdBody::Settle { account, .. }
             | CmdBody::StrategyCmd { account, .. }
             | CmdBody::InjectWarmup { account, .. }
             | CmdBody::ReplaceRefdata { account, .. }
@@ -801,6 +812,13 @@ fn parse_body(v: &Value) -> R<CmdBody> {
             start_s: o.dec_req("start_s")?,
             end_s: o.dec_req("end_s")?,
             wire_id: o.dec_req("wire_id")?,
+            account: o.str_opt("account")?,
+        },
+        "Settle" => CmdBody::Settle {
+            venue: o.str_req("venue")?,
+            inst: o.str_req("inst")?,
+            end_s: o.dec_req("end_s")?,
+            payout: o.dec_req("payout")?,
             account: o.str_opt("account")?,
         },
         "StrategyCmd" => CmdBody::StrategyCmd {
@@ -1264,6 +1282,19 @@ fn write_body(o: &mut Out, b: &CmdBody) {
             o.str("start_s", start_s);
             o.str("end_s", end_s);
             o.str("wire_id", wire_id);
+        }
+        CmdBody::Settle {
+            venue,
+            inst,
+            end_s,
+            payout,
+            account,
+        } => {
+            o.str_opt("account", account);
+            o.str("venue", venue);
+            o.str("inst", inst);
+            o.str("end_s", end_s);
+            o.str("payout", payout);
         }
         CmdBody::StrategyCmd {
             strategy,

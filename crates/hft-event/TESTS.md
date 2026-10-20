@@ -428,7 +428,7 @@ spec: README.md
 | EVT-022.2 | `OrderDecision.side` = 0 / 3;= 2 | `InvalidEnum` / `InvalidEnum`;`Ok` |
 | EVT-022.3 | `OrderDecision.tif` = 0 / 5;= 4 | `InvalidEnum` / `InvalidEnum`;`Ok` |
 | EVT-022.4 | `SendReport.status` = 0 / 9;= 8 | `InvalidEnum` / `InvalidEnum`;`Ok` |
-| EVT-022.5 | `SendReport.op` = 0 / 15;= 14 | `InvalidEnum` / `InvalidEnum`;`Ok` |
+| EVT-022.5 | `SendReport.op` = 0 / 17;= 16 | `InvalidEnum` / `InvalidEnum`;`Ok` |
 | EVT-022.6 | `OrderEvent.what` = 0 / 13;= 12 | `InvalidEnum` / `InvalidEnum`;`Ok` |
 | EVT-022.7 | `ExternalFill.side` = 0;`cause` = 0 / 6;`cause` = 5 | `InvalidEnum`;`InvalidEnum` / `InvalidEnum`;`Ok` |
 | EVT-022.8 | `L2Delta.side` = 0;`Trade.taker_side` = 3;`Liquidation.side` = 0 | 各为 `InvalidEnum` |
@@ -814,7 +814,7 @@ spec: README.md
 | EVT-074.1 | `OrderDecision.action`(`OrderAction`) | `New=1 Cancel=2 Amend=3 CancelAll=4 Query=5` |
 | EVT-074.2 | `OrderDecision.link_role`、`LatencySample.link_role` | `0` 无、`First=1 Second=2 SecondRetry=3 HedgeFix=4 Reverse=5` |
 | EVT-074.3 | `SendReport.status`(`SendStatus`) | `Written=1 KillBlocked=2 RateLimited=3 WriteError=4 NoConn=5 EncodeError=6 RingFull=7 QueryUnsupported=8` |
-| EVT-074.4 | `SendReport.op`、`GwCmd.op`(`GwOp`) | `Place=1 Cancel=2 Amend=3 CancelAll=4 Query=5 DeadManRefresh=6 Rotate=7 ResetRate=8 Resubscribe=9 SetEpoch=10 SessionKeepalive=11 MirrorRestore=12 SimReset=13 SimTransfer=14 SimFault=15`;1..=5 与 `OrderAction` 同值 |
+| EVT-074.4 | `SendReport.op`、`GwCmd.op`(`GwOp`) | `Place=1 Cancel=2 Amend=3 CancelAll=4 Query=5 DeadManRefresh=6 Rotate=7 ResetRate=8 Resubscribe=9 SetEpoch=10 SessionKeepalive=11 MirrorRestore=12 SimReset=13 SimTransfer=14 SimFault=15 SimSettle=16`;1..=5 与 `OrderAction` 同值 |
 | EVT-074.5 | `OrderEvent.what`(`OrderEventKind`) | `Ack=1 Reject=2 PartialFill=3 Fill=4 CancelAck=5 CancelReject=6 AmendAck=7 AmendReject=8 Expired=9 QueryResult=10 OutcomeUnknown=11 FeeOnly=12` |
 | EVT-074.6 | `ExternalFill.cause`(`ExternalCause`) | `Liquidation=1 Adl=2 Manual=3 Delivery=4 Unknown=5` |
 | EVT-074.7 | `MarginReportHdr.source` | `Push=1 Poll=2` |
@@ -1533,9 +1533,10 @@ spec: README.md
 | EVT-151.5 | `0x0005`(保留) | `decode` 为 `Err(UnknownKind)` |
 | EVT-151.6 | `0x000B`、`0x000C`、`0x000D`(退役) | 各为 `Err(UnknownKind)` |
 | EVT-151.7 | `0x0000` | `Err(UnknownKind)` |
-| EVT-151.8 | `0x001E`(未分配) | `Err(UnknownKind)` |
+| EVT-151.8 | `0x001F`(未分配) | `Err(UnknownKind)` |
 | EVT-151.9 | `0x001C` | `SimFault` |
 | EVT-151.10 | `0x001D` | `BindSlot` |
+| EVT-151.11 | `0x001E` | `Settle` |
 
 ### EVT-152 每个命令载荷的大小与关键偏移
 

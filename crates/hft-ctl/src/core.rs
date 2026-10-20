@@ -760,6 +760,17 @@ impl<S: StrategySet, R: CtlRing> Core<S, R> {
                     Ok(None)
                 }
             }
+            C::Settle {
+                venue, inst, payout, ..
+            } => {
+                if inst.0 == 0 || self.rd.inst(inst).venue != venue {
+                    Err(Fail::args(detail::UNKNOWN_NAME))
+                } else if payout.0 < 0 {
+                    Err(Fail::args(detail::BAD_VALUE))
+                } else {
+                    Ok(None)
+                }
+            }
             C::AdoptExchange { item: 1, group, .. }
                 if group != GROUP_NONE && group.strategy() != meta.bound_instance =>
             {

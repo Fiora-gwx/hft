@@ -219,6 +219,75 @@ fn ctp_180_bind_slot_names_and_account() {
     }
 }
 
+#[test]
+fn ctp_181_settle_names_payout_and_account() {
+    use crate::common::p0::*;
+    use hft_types::{InstId, Px, VenueId};
+    let pm = VenueId::POLYMARKET_CLOB;
+    let mut spec = p0_spec();
+    spec.venues.push(venue(
+        pm,
+        hft_refdata::Exchange::Polymarket,
+        hft_refdata::InstKind::Spot,
+    ));
+    spec.caps.push(spot_caps(pm));
+    let mut i = inst(InstId(5), pm, hft_refdata::InstKind::Spot);
+    i.symbol = "btc-up-0".into();
+    spec.insts.push(i);
+    let rd = spec.load();
+    let pe = rd.asset(rd.inst(InstId(5)).asset).exp.px_exp;
+    let one = 10i64.pow(u32::from(pe.unsigned_abs()));
+    let body = |inst: &str, payout: &str, account: Option<&str>| {
+        let mut c = json!({"type":"Settle","venue":"polymarket-clob","inst":inst,
+            "end_s":"1792425600","payout":payout});
+        if let Some(a) = account {
+            c["account"] = json!(a);
+        }
+        let mut v = e0(None, c);
+        v["issuer"] = json!("pipeline");
+        hft_ctl_proto::normalize(&parse(&v), &rd)
+    };
+    for (row, payout, want) in [("CTP-181.1", "1", one), ("CTP-181.2", "0", 0)] {
+        let n = body("polymarket-clob:btc-up-0", payout, Some("*")).unwrap();
+        match dec(&n).1 {
+            ControlCmd::Settle {
+                venue,
+                inst,
+                end_s,
+                payout,
+                ..
+            } => assert_eq!(
+                (venue, inst, end_s, payout),
+                (pm, InstId(5), 1_792_425_600, Px(want)),
+                "{row}"
+            ),
+            x => panic!("{row} {x:?}"),
+        }
+    }
+    for (row, inst, payout, account, detail) in [
+        ("CTP-181.3", "btc-up-0", "1", Some("*"), UNKNOWN_NAME),
+        (
+            "CTP-181.4",
+            "polymarket-clob:btc-up-0",
+            "1",
+            None,
+            ACCOUNT_REQUIRED,
+        ),
+        (
+            "CTP-181.5",
+            "polymarket-clob:btc-up-0",
+            "0.00000000001",
+            Some("*"),
+            BAD_VALUE,
+        ),
+    ] {
+        let Err(e) = body(inst, payout, account) else {
+            panic!("{row} accepted");
+        };
+        assert_eq!(e.detail, detail, "{row}");
+    }
+}
+
 fn dec(n: &Normalized) -> (CmdHdr, ControlCmd<'_>) {
     ControlCmd::decode(&n.record).unwrap()
 }

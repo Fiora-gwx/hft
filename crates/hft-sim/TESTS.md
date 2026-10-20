@@ -34,7 +34,7 @@ spec: README.md
 | 5. 手续费与扣费资产 | SIM-050–SIM-053、SIM-125、SIM-223 |
 | 6. 资金费 | SIM-060–SIM-063、SIM-125、SIM-166、SIM-203 |
 | 7. 永续全仓保证金与强平 | SIM-070–SIM-075、SIM-125、SIM-221、SIM-225 |
-| 8. 现货余额与划转 | SIM-036、SIM-080–SIM-083 |
+| 8. 现货余额与划转 | SIM-036、SIM-080–SIM-083、SIM-227 |
 | 9. 确定性 | SIM-004、SIM-120–SIM-123、SIM-165、SIM-205 |
 | 10. 不变量 | SIM-124、SIM-204、SIM-222 |
 | 11. 源文件 | 不适用:非规范 |
@@ -1722,3 +1722,17 @@ spec: README.md
 - 上线门槛 ⑦:与交易所一致(SIM-202、SIM-203)、资金守恒(SIM-204)与实例池(SIM-201)的证据;门槛压力用例以每个上线策略的最终参数运行,用例在 `strategies/registry/tests/`,变换、故障与判定由 SIM-180–SIM-196 验证。
 - 校准(M8):SIM-206 的日报;未达目标差异时模拟结论只作方向性参考(规则见[与正式实盘并行校准](README.md#与正式实盘并行校准))。
 - `queue-hftbacktest` feature(挂单排队模型)与链上腿模拟的用例在各自的触发条件满足、启用时补写。
+
+### SIM-227 交割:撤单并把库存按兑付价卖出
+
+- 规则:[8. 现货余额与划转](README.md#8-现货余额与划转)
+- 级别:unit
+- 里程碑:M3
+- 前置:`Sim::std()`;账户 9 以 IOC 买入 `BTC_S1` 0.1(卖一 60000),再挂卖单 0.05 @ 70000(GTC)
+- 步骤:
+  1. `GwCmd::sim_settle(A9, S1, BTC_S1, 65000, 1792425600)`,推进到 300 ms
+  2. 同一命令再发一次,推进到 500 ms
+- 期望:
+  - 步骤 1:挂单 `CancelAck`;恰好一条 `ExternalFill{Delivery, Sell, BTC_S1, qty = 买入后的 BTC 余额, px 65000, fee 0, exch_order_id 1792425600, fill_seq = qty}`;BTC 余额 0;USDT 余额增加 qty × 65000
+  - 步骤 2:没有 `ExternalFill`
+- 实现:`crates/hft-sim/tests/spot.rs::sim_227_settle_delivers_inventory`

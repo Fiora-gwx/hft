@@ -132,3 +132,72 @@ fn sim_083_sim_reset() {
     s.run_to(ms(310));
     assert!(s.fills_of(A9, r1).is_empty() && s.fills_of(A9, r2).is_empty());
 }
+
+#[test]
+fn sim_227_settle_delivers_inventory() {
+    let mut s = Sim::std();
+    s.topn(ms(100), BTC_S1, &[("60000", "1")], &[]);
+    s.place(A9, BTC_S1, Buy, "0.1", "60000", Tif::Ioc, ms(100));
+    s.run_to(ms(110));
+    let held = s.total(A9, S1, BTC);
+    assert!(held > 0, "SIM-227 setup");
+    let r = s.place(A9, BTC_S1, Sell, "0.05", "70000", Tif::Gtc, ms(120));
+    s.run_to(ms(130));
+    let usdt0 = s.total(A9, S1, USDT);
+    s.out.clear();
+    s.clock(ms(200));
+    s.ex.on_command(
+        &GwCmd::sim_settle(A9, S1, BTC_S1, px("65000"), 1_792_425_600),
+        Tsc(ms(200)),
+    );
+    s.run_to(ms(300));
+    // .1 the resting order is cancelled, the whole inventory delivered at the payout, no fee.
+    assert!(s.whats(A9, r).contains(&OrderEventKind::CancelAck), "SIM-227.1");
+    let ef: Vec<_> = s
+        .out
+        .iter()
+        .filter_map(|x| match x.msg {
+            RepMsg::ExternalFill(e) => Some(e),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ef.len(), 1, "SIM-227.1");
+    let e = ef[0];
+    assert_eq!(
+        (
+            e.cause,
+            e.side,
+            e.inst,
+            e.qty.0,
+            e.px,
+            e.fee.0,
+            e.exch_order_id,
+            e.fill_seq
+        ),
+        (
+            hft_event::ExternalCause::Delivery,
+            Sell,
+            BTC_S1,
+            held,
+            px("65000"),
+            0,
+            1_792_425_600,
+            held as u64
+        ),
+        "SIM-227.1"
+    );
+    assert_eq!(s.total(A9, S1, BTC), 0, "SIM-227.1");
+    let gain = usdt("6500").0 * held / q("0.1").0;
+    assert_eq!(s.total(A9, S1, USDT) - usdt0, gain, "SIM-227.1");
+    // .2 nothing left: a second settlement delivers nothing.
+    s.out.clear();
+    s.ex.on_command(
+        &GwCmd::sim_settle(A9, S1, BTC_S1, px("65000"), 1_792_425_600),
+        Tsc(ms(400)),
+    );
+    s.run_to(ms(500));
+    assert!(
+        !s.out.iter().any(|x| matches!(x.msg, RepMsg::ExternalFill(_))),
+        "SIM-227.2"
+    );
+}

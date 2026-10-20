@@ -60,6 +60,7 @@ impl CmdKind {
     pub const WRITE_OFF_RESIDUAL: Self = CmdKind(0x001B);
     pub const SIM_FAULT: Self = CmdKind(0x001C);
     pub const BIND_SLOT: Self = CmdKind(0x001D);
+    pub const SETTLE: Self = CmdKind(0x001E);
 
     /// Name of an assigned number; reserved, retired and unassigned → `None`.
     pub fn name(self) -> Option<&'static str> {
@@ -288,6 +289,15 @@ pub enum ControlCmd<'a> {
         end_s: i64,
         wire_id: [u8; 32],
     },
+    /// Settles a slot inst of a run-time-bound venue whose window `[start, end_s)` has resolved:
+    /// every unit pays `payout` (price units of the inst; 0 or one unit for a binary outcome).
+    Settle {
+        venue: VenueId,
+        _pad: [u8; 3],
+        inst: InstId,
+        end_s: i64,
+        payout: Px,
+    },
 }
 
 /// Fixed payload size of `(cmd, cmd_ver)`; `None` = unknown command or version.
@@ -316,6 +326,7 @@ fn payload_size(cmd: CmdKind, ver: u16) -> Option<usize> {
         (CmdKind::SMOKE_ORDER, 1) => 16,
         (CmdKind::WRITE_OFF_RESIDUAL | CmdKind::SIM_FAULT, 1) => 8,
         (CmdKind::BIND_SLOT, 1) => 56,
+        (CmdKind::SETTLE, 1) => 24,
         _ => return None,
     };
     Some(n)
@@ -434,6 +445,7 @@ impl<'a> ControlCmd<'a> {
             ControlCmd::WriteOffResidual { .. } => CmdKind::WRITE_OFF_RESIDUAL,
             ControlCmd::SimFault { .. } => CmdKind::SIM_FAULT,
             ControlCmd::BindSlot { .. } => CmdKind::BIND_SLOT,
+            ControlCmd::Settle { .. } => CmdKind::SETTLE,
         }
     }
 
@@ -676,6 +688,19 @@ impl<'a> ControlCmd<'a> {
                 w.i64(16, *end_s);
                 w.b(24, wire_id);
             }
+            ControlCmd::Settle {
+                venue,
+                _pad,
+                inst,
+                end_s,
+                payout,
+            } => {
+                w.u8(0, venue.0);
+                w.b(1, _pad);
+                w.u32(4, inst.0);
+                w.i64(8, *end_s);
+                w.i64(16, payout.0);
+            }
         }
         Ok(total)
     }
@@ -899,6 +924,16 @@ impl<'a> ControlCmd<'a> {
                     start_s: r.i64(8),
                     end_s: r.i64(16),
                     wire_id: r.arr(24),
+                }
+            }
+            CmdKind::SETTLE => {
+                r.zero(1, 4)?;
+                ControlCmd::Settle {
+                    venue: venue(0),
+                    _pad: [0; 3],
+                    inst: InstId(r.u32(4)),
+                    end_s: r.i64(8),
+                    payout: Px(r.i64(16)),
                 }
             }
             _ => return Err(DecodeErr::UnknownKind),
