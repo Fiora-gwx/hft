@@ -440,6 +440,8 @@ struct BboConnLive {
 
 ### 3c. 分档快照(DepthTopN)
 
+深度连接上的整簿流若同时推增量(交易所不给序号,venue 为每个 inst 合成连续的 `prev_id`/`last_id`,如 [venue-polymarket](../venue-polymarket/README.md#合成序号)),增量以 `L2Batch` 变长体写入 bulk 环(`L2BatchHdr` + 先买后卖的 `[Level; n_bids + n_asks]`);一帧内档位调用与头部计数不符或买卖顺序颠倒 → 整帧按解码错误丢弃。
+
 core 的深度来源。venue 在 `routes()` 里给出 `RouteKind::DepthTopN` 路由(Binance `depth<N>@100ms`、OKX `books5`、Bitget `books5`/`books15`;频道名、档位与节拍以各 venue README"分档快照流"一节为准,均待核实,方法见各 venue 的开发备忘),feed-md 只为带 `BOOK` 位的 inst 订阅它,档数按 `feed.topn_levels` 选择。
 
 1. 每条消息是该 inst 前 N 档的完整快照:`decode_md` 经 `MdSink::l2_snapshot` 交出 `L2Snapshot{origin = TopN}`([hft-venue-proto 契约 26](../hft-venue-proto/README.md#实现方必须遵守的契约)),sink 按 `feed.snapshot_part_levels` 切片(N ≤ 64 时恰好一片)写入 `md-<venue>-bulk` 并推 `FeedMsg::Bulk`;不产出 `L2Batch`。

@@ -1,0 +1,29 @@
+[package]
+name = "pm-md-probe"
+description = "Polymarket market-data acceptance probe: hft-net + hft-venue FeedRuntime + venue-polymarket on live 5-minute markets, books rebuilt from the emitted events, JSON lines for comparison with an independent recording (probe only, never in a production archive); spec: tools/pm-md-probe/README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "pm-md-probe"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+hft-types.workspace = true
+hft-refdata.workspace = true
+hft-event.workspace = true
+hft-rt.workspace = true
+hft-journal = { workspace = true, features = ["writer"] }
+hft-net.workspace = true
+hft-venue-proto.workspace = true
+hft-venue.workspace = true
+venue-polymarket.workspace = true
+zerocopy.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -167,7 +167,7 @@ fn ref_075_code_tables() {
     // 075.10 Exchange (on a venue without accounts or insts)
     assert_eq!(
         Exchange::ALL.iter().map(|x| *x as u8).collect::<Vec<_>>(),
-        vec![1, 2, 3, 4, 5, 6, 7, 32],
+        vec![1, 2, 3, 4, 5, 6, 7, 8, 32],
         "REF-075.10"
     );
     for x in Exchange::ALL {

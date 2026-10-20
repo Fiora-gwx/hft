@@ -226,7 +226,7 @@ pub struct VenueMeta {               // 连接与协议常量;交易语义在 Ve
                                      // 其余(链接腿、None/RecvWindow venue 的全部槽)按 Unknown + 成交历史确认收敛(规则归 hft-oms)
 }
 #[repr(u8)] pub enum StaleGuardKind { None = 1, RecvWindow = 2, ExpireAt = 3 }   // 与 hft-venue-proto `VenueProtocol::stale_guard()` 一致(启动时交叉校验)
-#[repr(u8)] pub enum Exchange { Binance = 1, Okx = 2, Bitget = 3, Gate = 4, Bybit = 5, Kucoin = 6, Hyperliquid = 7, Chain = 32 }
+#[repr(u8)] pub enum Exchange { Binance = 1, Okx = 2, Bitget = 3, Gate = 4, Bybit = 5, Kucoin = 6, Hyperliquid = 7, Polymarket = 8, Chain = 32 }
 
 pub struct InstanceMeta {            // 策略实例表(RDB1 段 15);StrategyInstanceId 的唯一分配处
     pub id: StrategyInstanceId,      // 稠密,1..=254(GroupId 的构造用它作高 8 位,hft-types),永久绑定 (kind_id, name)

@@ -484,7 +484,7 @@ RX_WEEK = re.compile(r"第\s*\d+(?:\s*[–\-~至]\s*\d+)?\s*周")
 RX_CANARY = re.compile(r"[Cc]anary|金丝雀|Primary\s*=\s*1|\"shadow\"|'shadow'")
 RX_STRATNAME = re.compile(r"PortfolioCarry|Cdex|CrossTaker|MakerTaker|StockToken|(?<![A-Za-z0-9_])Carry(?![A-Za-z0-9_])"
                           r"|portfolio[-_]carry|cross[-_]taker|maker[-_]taker|stock[-_]?token")
-RX_VENUE = re.compile(r"(?<![A-Za-z0-9_\-])(Binance|OKX|Bitget|Gate(?:\.io)?|Bybit|KuCoin|Kucoin|Hyperliquid|binance|okx|bitget|bybit|kucoin|hyperliquid)(?![A-Za-z0-9_])")
+RX_VENUE = re.compile(r"(?<![A-Za-z0-9_\-])(Binance|OKX|Bitget|Gate(?:\.io)?|Bybit|KuCoin|Kucoin|Hyperliquid|Polymarket|binance|okx|bitget|bybit|kucoin|hyperliquid|polymarket)(?![A-Za-z0-9_])")
 RX_OLD = re.compile(r"迁移前门槛|HypoDriver|假设回放|(?<![A-Za-z])Armed(?![A-Za-z])")
 RX_CDEX = re.compile(r"cdex")  # lowercase only; Cdex is covered by STRATNAME
 RX_BALDOM = re.compile(r"balance_domain")

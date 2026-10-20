@@ -916,12 +916,13 @@ spec: README.md
 | TYP-085.13 | 12 | `Some(LinearPerp)` | `Some("KUCOIN_FUT")` |
 | TYP-085.14 | 13 | `Some(Spot)` | `Some("KUCOIN_SPOT")` |
 | TYP-085.15 | 14 | `Some(LinearPerp)` | `Some("HYPERLIQUID_PERP")` |
-| TYP-085.16 | 15 | `None` | `None` |
+| TYP-085.16 | 15 | `Some(Spot)` | `Some("POLYMARKET_CLOB")` |
 | TYP-085.17 | 31 | `None` | `None` |
 | TYP-085.18 | 32 | `None` | `Some("CHAIN_BSC")` |
 | TYP-085.19 | 33 | `None` | `Some("CHAIN_SOLANA")` |
 | TYP-085.20 | 34 | `None` | `None` |
 | TYP-085.21 | 255 | `None` | `None` |
+| TYP-085.22 | 16 | `None` | `None` |
 
 ### TYP-086 线格式枚举的码值往返,0 与越界值解码失败
 

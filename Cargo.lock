@@ -2339,6 +2339,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
+name = "pm-md-probe"
+version = "0.1.0"
+dependencies = [
+ "hft-event",
+ "hft-journal",
+ "hft-net",
+ "hft-refdata",
+ "hft-rt",
+ "hft-types",
+ "hft-venue",
+ "hft-venue-proto",
+ "serde",
+ "serde_json",
+ "venue-polymarket",
+ "zerocopy",
+]
+
+[[package]]
 name = "portable-atomic"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3677,6 +3695,19 @@ dependencies = [
  "sha2 0.10.9",
  "sonic-rs",
  "zerocopy",
+]
+
+[[package]]
+name = "venue-polymarket"
+version = "0.1.0"
+dependencies = [
+ "hft-event",
+ "hft-refdata",
+ "hft-types",
+ "hft-venue-proto",
+ "serde",
+ "serde_json",
+ "sonic-rs",
 ]
 
 [[package]]

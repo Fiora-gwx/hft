@@ -103,6 +103,10 @@ deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hf
 tier = "pure"
 deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-venue-proto"]
 
+[pkg."crates/venue-polymarket"]
+tier = "pure"
+deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-venue-proto"]
+
 [pkg."crates/venue-bybit"]
 tier = "pure"
 deps = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-venue-proto"]
@@ -354,6 +358,15 @@ deps = [
     "crates/hft-testkit",
 ]
 dev_tier_ok = true
+
+# Polymarket market-data acceptance probe (tools/pm-md-probe/README.md): probe only, never in a
+# production archive.
+[pkg."tools/pm-md-probe"]
+tier = "cold"
+deps = [
+    "crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-rt", "crates/hft-journal",
+    "crates/hft-net", "crates/hft-venue-proto", "crates/hft-venue", "crates/venue-polymarket",
+]
 
 [pkg."tools/hft-verify"]
 tier = "cold"
