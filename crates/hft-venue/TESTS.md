@@ -43,7 +43,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 | 3. 去重、断裂与重同步 | VEN-001、VEN-100–VEN-109、VEN-129、VEN-171 |
 | 3a. BBO 连接健康 | VEN-026、VEN-031、VEN-075、VEN-076、VEN-079、VEN-082、VEN-103、VEN-104、VEN-120–VEN-134、VEN-360、VEN-389 |
 | 3b. 快照获取(snap-fetch) | VEN-002、VEN-007、VEN-130、VEN-133、VEN-150–VEN-163、VEN-387、VEN-395 |
-| 3c. 分档快照(DepthTopN) | VEN-028、VEN-074、VEN-078、VEN-170–VEN-176、VEN-330、VEN-385、VEN-397 |
+| 3c. 分档快照(DepthTopN) | VEN-028、VEN-074、VEN-078、VEN-170–VEN-176、VEN-330、VEN-385、VEN-397、VEN-399 |
 | 4. `GwRuntime::poll_once` 的循环结构 | VEN-014、VEN-190–VEN-249、VEN-357、VEN-369、VEN-386、VEN-389、VEN-391–VEN-393 |
 | 4a. 账户查询:保证金轮询与配置核验 | VEN-003、VEN-007、VEN-015、VEN-211、VEN-225、VEN-227、VEN-250–VEN-265、VEN-313、VEN-364、VEN-365、VEN-389、VEN-390、VEN-395 |
 | 4b. 私有频道归属与热备连接 | VEN-014、VEN-241、VEN-270–VEN-276、VEN-381 |
@@ -3725,3 +3725,17 @@ warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入�
 | VEN-398.2 | 1 | 构建成功 |
 | VEN-398.3 | 2 | 构建成功 |
 | VEN-398.4 | 56 | `InitErr::Cfg("feed.depth_conns")`(`56 × 组数 + 1 > 56`) |
+
+### VEN-399 深度 `Resync{inst}` 的连接号不取 BBO 槽
+
+- 规则:[3c. 分档快照(DepthTopN)](README.md#3c-分档快照depthtopn)
+- 级别:table
+- 里程碑:M3
+- 前置:`f0()`;`S1` 尚未订阅,无任何连接
+- 步骤:依次执行下表各行
+- 实现:`crates/hft-venue/tests/feed_routes.rs::ven_399_depth_resync_names_a_depth_connection`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| VEN-399.1 | `Subscribe{S1, BOOK}`,建连之前 poll 一次 | `md` 环的 `ConnState{Resync, S1, NEW_SUB}` 的 `conn ≥ MAX_BBO_CONN_SLOTS`(`MD_FIRST`) |
+| VEN-399.2 | 深度连接 8 就绪后 `FeedCmd::Resync{S1}` | `ConnState{Resync, S1, REQUESTED}` 的 `conn = 8` |

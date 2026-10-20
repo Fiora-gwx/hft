@@ -346,3 +346,33 @@ fn ven_396_bind_wire_rebinds_and_resubscribes() {
         "VEN-396.3"
     );
 }
+
+#[test]
+fn ven_399_depth_resync_names_a_depth_connection() {
+    use hft_event::{ConnStateKind, FeedCmd};
+    use hft_types::MAX_BBO_CONN_SLOTS;
+    let mut h = feed(f0());
+    let mut t = 100;
+    let resync_conns = |h: &mut crate::support::feedh::Fh| -> Vec<u8> {
+        states(&h.drain_md())
+            .iter()
+            .filter(|s| s.state == ConnStateKind::Resync && s.inst == S1)
+            .map(|s| s.conn)
+            .collect()
+    };
+    // .1 a new depth subscription before any connection exists: not a BBO slot.
+    h.sub(S1, streams::BOOK);
+    h.poll(t);
+    let c = resync_conns(&mut h);
+    assert!(
+        !c.is_empty() && c.iter().all(|&k| k >= MAX_BBO_CONN_SLOTS),
+        "VEN-399.1 {c:?}"
+    );
+    // .2 once the group has a connection, `FeedCmd::Resync` names it.
+    h.up(&[S1], streams::BOOK, &mut t);
+    h.clear();
+    h.cmd.try_push(FeedCmd::Resync { inst: S1 }).unwrap();
+    t += 1_000;
+    h.poll(t);
+    assert_eq!(resync_conns(&mut h), vec![8], "VEN-399.2");
+}
