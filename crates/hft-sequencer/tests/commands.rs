@@ -1030,4 +1030,12 @@ fn seq_432_bind_slot() {
         (status::PRECONDITION_FAILED, u32::from(detail::GROUP_HAS_POSITION)),
         "SEQ-432.5"
     );
+    // .6 the discovery process: issuer `pipeline` without a role, account `*` (0).
+    let mut h = steady();
+    let id = h.cmd_with("pipeline", 0, AccountId(0), &bind(A1, 1_000, 1_300, 0x5A), |_| {});
+    h.run();
+    assert_eq!(h.res(id).0, status::APPLIED, "SEQ-432.6");
+    let id = h.cmd_with("ops_bot", 0, AccountId(0), &bind(A1, 1_300, 1_600, 0x6B), |_| {});
+    h.run();
+    assert_eq!(h.res(id).0, status::ROLE_INSUFFICIENT, "SEQ-432.6");
 }

@@ -6112,6 +6112,7 @@ SEQ-414 的启动子例 `seq_414_bootstrap_balances_are_snapshot_baselines_not_p
 | SEQ-432.3 | venue B + `a1`;`start_s = end_s` | 各为 `InvalidArgs{BadValue}` |
 | SEQ-432.4 | 取关键帧 | 节 31 有 `a1` 的一行,`wire_id = [0x5A; 32]`、`end_s = 1300` |
 | SEQ-432.5 | 账户 1 持有 `a1` 仓位后改绑 | `PreconditionFailed{GroupHasPosition}` |
+| SEQ-432.6 | 新稳态;issuer `pipeline`、无角色、账户 0 发 .1 的命令;再以 `ops_bot` 发 | `Applied`;`ops_bot` 为 `RoleInsufficient` |
 
 ### SEQ-433 未订阅的槽位在首次订阅前收到绑定
 

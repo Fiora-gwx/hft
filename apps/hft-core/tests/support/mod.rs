@@ -981,7 +981,7 @@ ctl_principals = 'principals.toml'
 cancel_open_orders = true
 drain_timeout_ms = 3000
 [journal]
-segment_bytes = 33554432
+segment_bytes = 8388608
 hot_keep = 2
 [clock]
 step_threshold_ns = 50000

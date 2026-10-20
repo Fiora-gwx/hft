@@ -668,6 +668,7 @@ fn role_ok(h: &CmdHdr, c: &ControlCmd<'_>) -> bool {
                 c,
                 ControlCmd::SetParams { .. }
                     | ControlCmd::InjectWarmup { .. }
+                    | ControlCmd::BindSlot { .. }
                     | ControlCmd::SetMode {
                         mode: RunMode::CloseOnly | RunMode::Shadow,
                         ..
