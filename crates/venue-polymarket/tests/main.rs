@@ -624,3 +624,35 @@ fn pmk_014_rebinding_unsubscribes_the_previous_token() {
     );
     assert_eq!(out.get(0).map(|(_, n)| n), Some(2));
 }
+
+#[test]
+fn pmk_015_peek_routes_by_the_first_bound_token() {
+    // Only the Down token bound (the Up slot not yet / no longer bound).
+    let mut ctx = FeedCtx::with_capacity(16);
+    assert_eq!(ctx.bind(DN, T_DN.as_bytes()), Ok(()));
+    let p =
+        |ctx: &FeedCtx, s: &str| Pm::peek(rd(), ctx, MdClass::Push, s.as_bytes()).map(|x| (x.inst, x.stream));
+    // .1 a price_change whose first change is the unbound token.
+    assert_eq!(
+        p(&ctx, &price_change()),
+        Ok((DN, StreamKind::DepthTopN)),
+        "PMK-015.1"
+    );
+    // .2 a list frame whose first book is the unbound token.
+    let list = format!("[{},{}]", book_up(), book_up().replace(T_UP, T_DN));
+    assert_eq!(p(&ctx, &list), Ok((DN, StreamKind::DepthTopN)), "PMK-015.2");
+    // .3 nothing bound: the first token's (unbound) inst, as before.
+    let none = FeedCtx::with_capacity(16);
+    assert_eq!(
+        p(&none, &price_change()),
+        Ok((InstId(0), StreamKind::DepthTopN)),
+        "PMK-015.3"
+    );
+    // .4 decoding the .1 message still writes only the bound token's batch.
+    let (r, ev) = dec(&mut ctx, &price_change());
+    assert_eq!(r.map(|o| o.events), Ok(1), "PMK-015.4");
+    assert!(
+        matches!(ev.first(), Some(MdRec::L2Begin(h)) if h.h.inst == DN),
+        "PMK-015.4"
+    );
+}

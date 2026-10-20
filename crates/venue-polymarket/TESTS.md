@@ -24,7 +24,7 @@ spec: README.md
 | 端点 | PMK-008 |
 | 槽位绑定 | PMK-009, PMK-010, PMK-013, PMK-014 |
 | 订阅 | PMK-008, PMK-014 |
-| 行情频道 → 事件 | PMK-001–PMK-007, PMK-011 |
+| 行情频道 → 事件 | PMK-001–PMK-007, PMK-011, PMK-015 |
 | 合成序号 | PMK-003–PMK-005, PMK-010–PMK-012 |
 | 心跳 | PMK-001 |
 | VenueCaps 默认值 | PMK-011 |
@@ -215,6 +215,21 @@ spec: README.md
 | PMK-014.2 | 订阅 inst 1 | 帧里是新代币 |
 | PMK-014.3 | inst 2 解绑后订阅 `[2, 1]` | 未绑定的 inst 2 跳过,帧覆盖 2 条 |
 
+### PMK-015 peek 按首个已绑定代币路由
+
+- 规则:[行情频道 → 事件](README.md#行情频道--事件)
+- 级别:table
+- 里程碑:M3
+- 前置:容量 16 的 `FeedCtx`,只有 `T_DN` → 2 绑定
+- 实现:`crates/venue-polymarket/tests/main.rs::pmk_015_peek_routes_by_the_first_bound_token`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-015.1 | PMK-004 的 `price_change`(首条为 `T_UP`) | `(2, DepthTopN)` |
+| PMK-015.2 | 列表帧 `[<book T_UP>,<book T_DN>]` | `(2, DepthTopN)` |
+| PMK-015.3 | 空绑定表,同 .1 | `(0, DepthTopN)` |
+| PMK-015.4 | 解码 .1 | 只写 inst 2 的一个 `L2Batch` |
+
 ## 验收
 
-PMK-001–PMK-011 全部通过;线上验收(两个完整 5 分钟窗口)见 [pm-md-probe](../../tools/pm-md-probe/TESTS.md)。
+PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗口)见 [pm-md-probe](../../tools/pm-md-probe/TESTS.md)。

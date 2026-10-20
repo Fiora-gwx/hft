@@ -94,7 +94,7 @@ refdata 为每个资产预置固定数量的槽位 inst(符号如 `btc-up-0`)。
 - 时间:`timestamp`(毫秒字符串)→ `MarketHdr.ex_ts_ns`;交易所不给发送时间,`ex_send_ns = 0`。
 - 价格、数量按 inst 的 `px_wire_exp`/`qty_wire_exp` 精确解析,多余小数位 → `DecodeErr::Number`。一条消息先校验全部条目再写事件:任一条出错时不写任何事件。
 - 过期增量:(重)订阅后交易所先推当前整簿,之后仍可能送达时间戳早于该整簿的 `price_change`(2026-10-19 实测重连后出现),它们已包含在整簿里,再应用会把簿退回旧状态。`FeedCtx` 记录每个 inst 最近一次 `book` 的交易所时间,时间戳早于它的 `price_change` 条目丢弃(同一毫秒的照常应用);改绑新代币时清零。
-- 未绑定的代币静默跳过(不是错误)。`peek` 返回首个代币的 inst,`stream = DepthTopN`(簿)或 `Trade`。
+- 未绑定的代币静默跳过(不是错误)。`peek` 返回首个**已绑定**代币的 inst(`price_change` 的各条变化按出现顺序取前 4 个不同代币,列表帧看前 8 个元素;都未绑定时返回首个代币,即 inst 0),`stream = DepthTopN`(簿)或 `Trade`。运行时按 `peek` 的 inst 决定整帧是否交付:一个市场的两个代币分别绑定时,首个代币尚未绑定的 `price_change` 不能因此丢掉另一个代币的变化(2026-10-20 hft-core 验收中出现)。
 - `seq_rule = None`,`resync_method(Push) = Resubscribe`:重订阅后交易所先推整簿。
 
 ### 合成序号

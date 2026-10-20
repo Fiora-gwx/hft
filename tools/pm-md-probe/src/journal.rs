@@ -63,6 +63,8 @@ pub fn run(raw: &[String]) -> Result<(), String> {
     let mut ctx = FeedCtx::with_capacity(n);
     let mut label: Vec<String> = vec!["?".into(); n + 1];
     let mut books: Vec<Book> = (0..=n).map(|_| Book::default()).collect();
+    // After a bind the engine's book resyncs: increments wait for the token's first book.
+    let mut awaiting = vec![false; n + 1];
     let mut binds = Vec::new();
     let mut reader = JournalReader::open_files(&a.files, 128 << 20).map_err(|e| format!("journal: {e:?}"))?;
     let mut out = std::io::BufWriter::new(
@@ -108,6 +110,9 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             if let Some(b) = books.get_mut(inst.0 as usize) {
                 *b = Book::default();
             }
+            if let Some(w) = awaiting.get_mut(inst.0 as usize) {
+                *w = true;
+            }
             n_bind += 1;
         } else if kind == EventKind::L2_SNAPSHOT {
             let Ok((h, rest)) = L2SnapHdr::read_from_prefix(body) else {
@@ -123,6 +128,9 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             };
             b.bids.clear();
             b.asks.clear();
+            if let Some(w) = awaiting.get_mut(h.h.inst.0 as usize) {
+                *w = false;
+            }
             for (k, l) in levels(rest, nb + na).iter().enumerate() {
                 let side = if k < nb { &mut b.bids } else { &mut b.asks };
                 side.insert(l.px.0, l.qty.0);
@@ -143,6 +151,9 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             let Ok((h, rest)) = L2BatchHdr::read_from_prefix(body) else {
                 continue;
             };
+            if awaiting.get(h.h.inst.0 as usize).copied().unwrap_or(true) {
+                continue;
+            }
             let (nb, na) = (usize::from(h.n_bids), usize::from(h.n_asks));
             let Some(b) = books.get_mut(h.h.inst.0 as usize) else {
                 continue;
