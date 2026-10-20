@@ -32,7 +32,7 @@ status: impl
 ### 命令行
 
 ```text
-pm-md-probe --bindings FILE --seconds N --out FILE --dir DIR --src-ip IP --bind-device DEV [--host HOST]
+pm-md-probe --bindings FILE --seconds N --out FILE --dir DIR --src-ip IP --bind-device DEV [--host HOST] [--so-rcvbuf BYTES] [--depth-conns N]
 ```
 
 | 参数 | 含义 |
@@ -44,6 +44,7 @@ pm-md-probe --bindings FILE --seconds N --out FILE --dir DIR --src-ip IP --bind-
 | `--src-ip`、`--bind-device` | 本机源地址与网卡(hft-net 要求显式绑定) |
 | `--host` | 默认 `ws-subscriptions-clob.polymarket.com` |
 | `--so-rcvbuf` | 行情连接的 `SO_RCVBUF`(字节);不给 = hft-net 默认 262144 |
+| `--depth-conns` | hft-venue `feed.depth_conns`:每组深度连接条数,默认 2(与 hft-core 对 Polymarket 的缺省相同,[venue-polymarket 多连接去重](../../crates/venue-polymarket/README.md#多连接去重));1 = 单连接 |
 
 ### 产出
 
@@ -56,7 +57,7 @@ pm-md-probe --bindings FILE --seconds N --out FILE --dir DIR --src-ip IP --bind-
 | `trade` | `slot`、`ex_ms`、`rx_ns`、`px`、`qty`、`side` |
 | `conn` | 连接状态事件 |
 
-`bb`/`ba` 为重建簿的最优买/卖价(px_exp −3 的整数,空边为 −1)。结束时打印各类事件数与 feed 计数器。
+`bb`/`ba` 为重建簿的最优买/卖价(px_exp −3 的整数,空边为 −1)。结束时打印各类事件数、feed 计数器与解码器的去重计数(`decoder dups`、`lates`)。`conn` 行的 `Down` 原因 64(hft-net `WS_CLOSE`)既包括 1013,也包括市场结算后约 147 s 交易所的正常关闭,统计异常断开时要按时间排除后者。
 
 ### 验收步骤
 

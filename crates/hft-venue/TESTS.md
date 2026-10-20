@@ -36,14 +36,14 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 | 出环:`OutMsg = GwCmd` | VEN-194、VEN-196、VEN-199–VEN-206、VEN-214、VEN-235–VEN-238、VEN-240、VEN-241、VEN-391、VEN-392 |
 | 运行时入口 | VEN-007、VEN-011、VEN-013、VEN-071、VEN-084、VEN-085、VEN-161、VEN-210、VEN-245、VEN-264 |
 | 产生与消费的事件 | VEN-005、VEN-065、VEN-160、VEN-205、VEN-233、VEN-242、VEN-243、VEN-303、VEN-320、VEN-321 |
-| 配置项 | VEN-006、VEN-008–VEN-012、VEN-015–VEN-017、VEN-028、VEN-067、VEN-068、VEN-076、VEN-080、VEN-081、VEN-159、VEN-176、VEN-208、VEN-209、VEN-219、VEN-222、VEN-229、VEN-234、VEN-239、VEN-246、VEN-251、VEN-253、VEN-256、VEN-257、VEN-261、VEN-293、VEN-301、VEN-388、VEN-393 |
+| 配置项 | VEN-006、VEN-008–VEN-012、VEN-015–VEN-017、VEN-028、VEN-067、VEN-068、VEN-076、VEN-080、VEN-081、VEN-159、VEN-176、VEN-208、VEN-209、VEN-219、VEN-222、VEN-229、VEN-234、VEN-239、VEN-246、VEN-251、VEN-253、VEN-256、VEN-257、VEN-261、VEN-293、VEN-301、VEN-388、VEN-393、VEN-398 |
 | 实现说明 | 不适用:见子节 |
 | 1. 线程与环(由 hft-core 装配) | VEN-013、VEN-020–VEN-027、VEN-030–VEN-036、VEN-069–VEN-074、VEN-086、VEN-087、VEN-212、VEN-380、VEN-383 |
 | 2. `FeedRuntime::poll_once` 的固定顺序 | VEN-017、VEN-040–VEN-046、VEN-050–VEN-056、VEN-060–VEN-069、VEN-075、VEN-077–VEN-084、VEN-330、VEN-367、VEN-384 |
 | 3. 去重、断裂与重同步 | VEN-001、VEN-100–VEN-109、VEN-129、VEN-171 |
 | 3a. BBO 连接健康 | VEN-026、VEN-031、VEN-075、VEN-076、VEN-079、VEN-082、VEN-103、VEN-104、VEN-120–VEN-134、VEN-360、VEN-389 |
 | 3b. 快照获取(snap-fetch) | VEN-002、VEN-007、VEN-130、VEN-133、VEN-150–VEN-163、VEN-387、VEN-395 |
-| 3c. 分档快照(DepthTopN) | VEN-028、VEN-074、VEN-078、VEN-170–VEN-176、VEN-330、VEN-385 |
+| 3c. 分档快照(DepthTopN) | VEN-028、VEN-074、VEN-078、VEN-170–VEN-176、VEN-330、VEN-385、VEN-397 |
 | 4. `GwRuntime::poll_once` 的循环结构 | VEN-014、VEN-190–VEN-249、VEN-357、VEN-369、VEN-386、VEN-389、VEN-391–VEN-393 |
 | 4a. 账户查询:保证金轮询与配置核验 | VEN-003、VEN-007、VEN-015、VEN-211、VEN-225、VEN-227、VEN-250–VEN-265、VEN-313、VEN-364、VEN-365、VEN-389、VEN-390、VEN-395 |
 | 4b. 私有频道归属与热备连接 | VEN-014、VEN-241、VEN-270–VEN-276、VEN-381 |
@@ -3688,3 +3688,40 @@ warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入�
 | VEN-396.1 | 4 条 `BindWire{S1, part 0..=3}`(id = 0,1,…,31) | `bind_wire` 收到 `(S1, id)` 一次;连接 8 上先 `UNSUB` 后 `SUB` 该 inst 的深度流;`md` 环有 `ConnState{Resync, S1, NEW_SUB}`;`binds = 1` |
 | VEN-396.2 | 只有 `part = 3` | 不调用 `bind_wire`;`cmd_ignored` 加 1 |
 | VEN-396.3 | 4 条,id 全为 `0xFF` | 协议拒绝:`bind_failed = 1`,不发退订帧 |
+
+### VEN-397 `feed.depth_conns = 2`:同组两条深度连接互为备份
+
+- 规则:[§3c](README.md#3c-分档快照depthtopn)、[§2](README.md#2-feedruntimepoll_once-的固定顺序)
+- 级别:unit
+- 里程碑:M3
+- 前置:`f0()`,`routes = Md`,`depth_conns = 2`;`S1` 以 `BOOK` 订阅,全部连接建好并应答
+- 步骤:
+  1. 建好连接后查看深度组 0 的连接
+  2. 连接 8、9 各推 `D|S1|20|…`,`poll_once`
+  3. 连接 8 EOF,`poll_once`
+  4. 连接 9 推 `D|S1|21|…`,`poll_once`;补建连接 r 交接并应答订阅
+  5. 连接 9 EOF,`poll_once`
+  6. r EOF(此时另一条补建未完成),`poll_once`
+- 期望:
+  - 步骤 1:两条连接 8、9,都订阅 `S1`
+  - 步骤 2:md 环恰好一条快照(`Bulk`)与 `Up{S1}`;`dup` 计数 1
+  - 步骤 3:md 环有 `Down{conn 8, inst 0}`、`Degraded{conn 9, reason 5(RACE_SINGLE)}`,没有任何 `Resync`
+  - 步骤 4:转发一条快照;只请求了一条补建连接 r
+  - 步骤 5:没有 `Resync`;`Degraded{conn r, RACE_SINGLE}`
+  - 步骤 6:`Resync{S1, reason 15(CONN_LOST)}`
+- 实现:`crates/hft-venue/tests/depth_race.rs::ven_397_depth_conns_back_each_other_up`
+
+### VEN-398 `feed.depth_conns` 的取值校验
+
+- 规则:[配置项](README.md#配置项)
+- 级别:table
+- 里程碑:M3
+- 前置:`f0()`,`routes = Md`
+- 实现:`crates/hft-venue/tests/depth_race.rs::ven_398_depth_conns_limits`
+
+| 行 | `depth_conns` | 期望 |
+|---|---|---|
+| VEN-398.1 | 0 | `InitErr::Cfg("feed.depth_conns")` |
+| VEN-398.2 | 1 | 构建成功 |
+| VEN-398.3 | 2 | 构建成功 |
+| VEN-398.4 | 56 | `InitErr::Cfg("feed.depth_conns")`(`56 × 组数 + 1 > 56`) |

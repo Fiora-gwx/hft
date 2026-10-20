@@ -162,6 +162,80 @@ fn seq_160_conn_state_order_and_depth() {
     assert!(h.verify().is_empty());
 }
 
+/// SEQ-434: a depth connection's connection-level `Down{inst = 0}` changes no book; the per-inst
+/// `Resync{CONN_LOST}` the feed sends does.
+#[test]
+fn seq_434_depth_conn_down_is_per_inst() {
+    use hft_event::{ConnRole, ConnStateKind, L2SnapHdr, Level};
+    use hft_strategy_sdk::{EvMask, Part};
+    use zerocopy::{FromZeros, IntoBytes};
+    reset_script();
+    let mut b = b0();
+    b.rd.insts.iter_mut().find(|i| i.id == A1).unwrap().l2_depth = 5;
+    set_subs(
+        S1,
+        vec![(A1, 0, EvMask(EvMask::BBO.0 | EvMask::BOOK.0), Part::Fast)],
+    );
+    let mut h = b.boot();
+    h.bring_up(false);
+    let mut hd = L2SnapHdr::new_zeroed();
+    hd.h.venue = A;
+    hd.h.inst = A1;
+    hd.h.conn = hft_types::ConnId(8);
+    hd.h.rx_tsc = h.now();
+    hd.snap_id = 1;
+    hd.origin = L2SnapHdr::TOP_N;
+    hd.n_bids = 1;
+    hd.n_asks = 1;
+    let mut bytes = hd.as_bytes().to_vec();
+    for p in ["50000", "50001"] {
+        bytes.extend_from_slice(
+            Level {
+                px: px(p),
+                qty: q("1"),
+            }
+            .as_bytes(),
+        );
+    }
+    h.push_bytes(RingId::Md(0), EventKind::L2_SNAPSHOT, bytes);
+    h.run();
+    assert_eq!(
+        h.s.engine().books.l2(A1).unwrap().state(),
+        hft_book::BookState::Live
+    );
+    // .1 connection 9 (another connection of the venue) retires: the book stays live.
+    clear_log();
+    h.push(
+        RingId::Md(0),
+        &conn(
+            A,
+            9,
+            ConnStateKind::Down,
+            ConnRole::Md,
+            hft_types::InstId(0),
+            AC1,
+            h.now(),
+        ),
+    );
+    h.step();
+    assert_eq!(
+        h.s.engine().books.l2(A1).unwrap().state(),
+        hft_book::BookState::Live
+    );
+    assert!(log().iter().any(|g| g.s == S1 && g.kind == "Conn"));
+    // .2 the feed's per-inst resync for a1: the book leaves Live.
+    h.push(
+        RingId::Md(0),
+        &conn(A, 8, ConnStateKind::Resync, ConnRole::Md, A1, AC1, h.now()),
+    );
+    h.step();
+    assert_ne!(
+        h.s.engine().books.l2(A1).unwrap().state(),
+        hft_book::BookState::Live
+    );
+    assert!(h.verify().is_empty());
+}
+
 /// s1 places `f(hx)` on the next a1 Bbo.
 fn s1_on_bbo(h: &mut H, f: fn(&Hx<'_>) -> Vec<hft_strategy_sdk::OrderIntent>) -> usize {
     set_hook(move |hx, ev, ctx| {

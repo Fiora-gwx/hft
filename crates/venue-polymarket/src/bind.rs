@@ -5,6 +5,8 @@
 
 use hft_types::InstId;
 
+use crate::dedup::Seen;
+
 /// Longest token id accepted (uint256 in decimal is at most 78 digits).
 pub const TOKEN_MAX: usize = 80;
 
@@ -32,6 +34,8 @@ struct Entry {
     trade_id: u64,
     /// Exchange time (ms) of the last `book` of this inst; older level changes are stale.
     book_ms: u64,
+    /// Latest exchange time (ms) applied for this inst (book, level change or trade).
+    last_ms: u64,
     /// The token this inst was bound to before its latest rebinding: an unsubscription frame
     /// still names it.
     old_len: u8,
@@ -45,6 +49,7 @@ const EMPTY: Entry = Entry {
     book_id: 0,
     trade_id: 0,
     book_ms: 0,
+    last_ms: 0,
     old_len: 0,
     old: [0; TOKEN_MAX],
 };
@@ -61,12 +66,16 @@ fn hash(t: &[u8]) -> u64 {
 
 /// Feed-task state (contract 25: no refdata cached). Entries are per inst; an inst keeps its
 /// entry (and its id counters) when it is rebound to a new token, and an unbound inst keeps its
-/// counters with an empty token.
+/// counters with an empty token. The de-duplication table is shared by every connection of the
+/// task (README "多连接去重").
 #[derive(Clone, Eq, PartialEq)]
 pub struct FeedCtx {
     entries: Box<[Entry]>,
     /// Open-addressed token index into `entries` (`u16::MAX` = empty); rebuilt on every change.
     index: Box<[u16]>,
+    seen: Seen,
+    dup: u64,
+    late: u64,
 }
 
 impl core::fmt::Debug for FeedCtx {
@@ -90,6 +99,9 @@ impl FeedCtx {
         FeedCtx {
             entries: vec![EMPTY; n].into_boxed_slice(),
             index: vec![u16::MAX; (n * 2).next_power_of_two()].into_boxed_slice(),
+            seen: Seen::new(),
+            dup: 0,
+            late: 0,
         }
     }
 
@@ -127,6 +139,7 @@ impl FeedCtx {
         e.len = token.len() as u8;
         // A new token starts without a book.
         e.book_ms = 0;
+        e.last_ms = 0;
         self.reindex();
         Ok(())
     }
@@ -270,6 +283,46 @@ impl FeedCtx {
     /// Whether a level change at `ms` predates entry `i`'s latest `book` (already contained in it).
     pub(crate) fn stale_change(&self, i: usize, ms: u64) -> bool {
         self.entries.get(i).is_some_and(|e| ms < e.book_ms)
+    }
+
+    /// One delivery of message `key` by connection `conn`: `true` = new, `false` = already
+    /// delivered by another connection (counted).
+    pub(crate) fn fresh(&mut self, key: u64, conn: u8) -> bool {
+        let new = self.seen.note(key, conn);
+        if !new {
+            self.dup += 1;
+        }
+        new
+    }
+
+    /// Whether data of entry `i` at `ms` is late: more than `slack` ms before the latest time
+    /// applied for it (a lagging connection's message the table no longer remembers). Counted.
+    pub(crate) fn late(&mut self, i: usize, ms: u64, slack: u64) -> bool {
+        let late = self
+            .entries
+            .get(i)
+            .is_some_and(|e| ms.saturating_add(slack) < e.last_ms);
+        if late {
+            self.late += 1;
+        }
+        late
+    }
+
+    /// Records `ms` as applied for entry `i`.
+    pub(crate) fn applied(&mut self, i: usize, ms: u64) {
+        if let Some(e) = self.entries.get_mut(i) {
+            e.last_ms = e.last_ms.max(ms);
+        }
+    }
+
+    /// Messages dropped because another connection delivered them first.
+    pub fn dups(&self) -> u64 {
+        self.dup
+    }
+
+    /// Books and messages dropped as late (README "多连接去重").
+    pub fn lates(&self) -> u64 {
+        self.late
     }
 
     /// Next book ids of entry `i` for an increment: `(prev_id, last_id)`.

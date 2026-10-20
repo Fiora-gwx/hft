@@ -14,6 +14,7 @@ mod codes;
 mod config;
 mod conn_id;
 mod deps;
+mod depth_race;
 mod feed_err;
 mod feed_frame;
 mod feed_poll;

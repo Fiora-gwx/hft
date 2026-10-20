@@ -61,12 +61,14 @@ struct Args {
     host: String,
     /// `SO_RCVBUF` of the market connections; 0 = hft-net default.
     so_rcvbuf: u32,
+    /// hft-venue `feed.depth_conns`: connections per depth group.
+    depth_conns: u8,
 }
 
 fn usage() -> ! {
     eprintln!(
         "usage: pm-md-probe --bindings FILE --seconds N --out FILE --dir DIR --src-ip IP --bind-device DEV \
-         [--host ws-subscriptions-clob.polymarket.com] [--so-rcvbuf BYTES]"
+         [--host ws-subscriptions-clob.polymarket.com] [--so-rcvbuf BYTES] [--depth-conns 2]"
     );
     std::process::exit(2)
 }
@@ -77,6 +79,7 @@ fn args() -> Args {
         (None, None, None, None, None, None);
     let mut host = "ws-subscriptions-clob.polymarket.com".to_string();
     let mut so_rcvbuf = 0u32;
+    let mut depth_conns = 2u8;
     while let Some(k) = a.next() {
         let v = a.next().unwrap_or_else(|| usage());
         match k.as_str() {
@@ -88,6 +91,7 @@ fn args() -> Args {
             "--bind-device" => dev = Some(v),
             "--host" => host = v,
             "--so-rcvbuf" => so_rcvbuf = v.parse().unwrap_or_else(|_| usage()),
+            "--depth-conns" => depth_conns = v.parse().unwrap_or_else(|_| usage()),
             _ => usage(),
         }
     }
@@ -101,6 +105,7 @@ fn args() -> Args {
             bind_device,
             host,
             so_rcvbuf,
+            depth_conns,
         },
         _ => usage(),
     }
@@ -403,6 +408,7 @@ fn run(a: Args) -> Result<(), String> {
         depth: DepthMode::TopN,
         topn_levels: 100,
         snapshot_part_levels: 256,
+        depth_conns: a.depth_conns,
         raw_bbo: RawMode::Off,
         raw_md: RawMode::Off,
         venue,
@@ -514,8 +520,9 @@ fn run(a: Args) -> Result<(), String> {
                 }
             }
             let n = feed.counters();
+            let (dups, lates) = (feed.ctx().dups(), feed.ctx().lates());
             feed.retire_all(hft_rt::tsc_now().0);
-            format!("{n:?}")
+            format!("{n:?}, decoder dups {dups}, lates {lates}")
         })
         .map_err(|e| format!("spawn feed: {e}"))?;
 

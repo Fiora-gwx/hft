@@ -32,8 +32,8 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 环境决定写成 Input | SEQ-036、SEQ-055、SEQ-079–SEQ-098、SEQ-244 |
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
-| 连接活性 | SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173 |
-| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420、SEQ-425–SEQ-431 |
+| 连接活性 | SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173、SEQ-434 |
+| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420、SEQ-425–SEQ-431、SEQ-434 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
@@ -6125,3 +6125,16 @@ SEQ-414 的启动子例 `seq_414_bootstrap_balances_are_snapshot_baselines_not_p
 - 实现:`crates/hft-sequencer/tests/subs.rs::seq_433_binding_precedes_first_subscription`
 
 SEQ-411/412 补充未声明 PERP_CASH 的逐笔现金连续前缀:分笔/重复/终态查询/快照窗口与全量回放,缺口/混合事实/后续缺失在仓位、钱包和对冲输出前失败。
+
+### SEQ-434 深度连接的连接级 `Down` 不使簿失效,逐 inst 的 `Resync` 才使
+
+- 规则:[连接活性](README.md#连接活性)、[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process)
+- 级别:table
+- 里程碑:M3
+- 前置:B0,a1 订阅深度并已由连接 8 的分档快照 `Live`;s1 订阅 a1 的 BBO 与 BOOK
+- 实现:`crates/hft-sequencer/tests/process.rs::seq_434_depth_conn_down_is_per_inst`
+
+| 行 | Input | 期望 |
+|---|---|---|
+| SEQ-434.1 | 深度连接 `ConnState{Down, conn 9, inst 0}` | a1 的簿仍 `Live`;s1 收到 `EventRef::Conn` |
+| SEQ-434.2 | `ConnState{Resync, conn 8, inst a1}` | a1 的簿离开 `Live` |

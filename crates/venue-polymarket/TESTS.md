@@ -26,6 +26,7 @@ spec: README.md
 | 订阅 | PMK-008, PMK-014 |
 | 行情频道 → 事件 | PMK-001–PMK-007, PMK-011, PMK-015 |
 | 合成序号 | PMK-003–PMK-005, PMK-010–PMK-012 |
+| 多连接去重 | PMK-016, PMK-017 |
 | 心跳 | PMK-001 |
 | VenueCaps 默认值 | PMK-011 |
 | 实现说明 | PMK-006, PMK-007 |
@@ -229,6 +230,36 @@ spec: README.md
 | PMK-015.2 | 列表帧 `[<book T_UP>,<book T_DN>]` | `(2, DepthTopN)` |
 | PMK-015.3 | 空绑定表,同 .1 | `(0, DepthTopN)` |
 | PMK-015.4 | 解码 .1 | 只写 inst 2 的一个 `L2Batch` |
+
+### PMK-016 另一条连接送来的同一条消息丢弃
+
+- 规则:[多连接去重](README.md#多连接去重)
+- 级别:golden
+- 里程碑:M3
+- 前置:`bound()`;`RX` 的连接号改为 3 或 4
+- 实现:`crates/venue-polymarket/tests/main.rs::pmk_016_copies_from_another_connection_are_dropped`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-016.1 | PMK-003 的 `book` 先经连接 3、再经连接 4 | 连接 3 `events 1`;连接 4 `events 0`;`dups() = 1` |
+| PMK-016.2 | PMK-004 的 `price_change` 先经连接 4、再经连接 3 | 连接 4 `events 2`;连接 3 `events 0` |
+| PMK-016.3 | 同一条 `last_trade_price`:连接 3 两次,再连接 4 三次 | 连接 3 各 `events 1`;连接 4 前两次 `events 0`、第三次 `events 1`;`dups() = 4` |
+| PMK-016.4 | 新的 `bound()`,同一条 `price_change` 经连接 3 两次 | 两次都 `events 2`;`dups() = 0` |
+
+### PMK-017 迟到的整簿与消息丢弃
+
+- 规则:[多连接去重](README.md#多连接去重)
+- 级别:golden
+- 里程碑:M3
+- 前置:`bound()`;PMK-003 的 `book`,再一条 `T_UP` 的 `price_change`(时间 `1792424118000`)经连接 3 应用
+- 实现:`crates/venue-polymarket/tests/main.rs::pmk_017_late_books_and_messages_are_dropped`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-017.1 | 连接 4:`T_UP` 的 `book`,时间 `1792424117999`、另一 `hash` | `events 0`;`lates() = 1` |
+| PMK-017.2 | 连接 4:`price_change` 时间 `1792424115500`;再一条时间 `1792424116500`(`hash` 各不相同) | 前者 `events 0`、`lates() = 2`;后者 `events 1` |
+| PMK-017.3 | `last_trade_price` 时间 `1792424115000`、另一 `transaction_hash` | `events 0`;`lates() = 3` |
+| PMK-017.4 | inst 1 改绑新代币后,新代币的 PMK-017.1 整簿 | `events 1` |
 
 ## 验收
 

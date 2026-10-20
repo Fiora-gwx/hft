@@ -591,6 +591,7 @@ where
     let feed_cfg = if P::routes().iter().any(|r| r.kind == RouteKind::Bbo) {
         FeedCfg {
             max_sub_insts: v.max_sub_insts,
+            depth_conns: v.feed.depth_conns.unwrap_or(1),
             raw_bbo,
             raw_md,
             venue: feed_venue,
@@ -610,6 +611,8 @@ where
             depth: hft_venue::DepthMode::TopN,
             topn_levels: levels,
             snapshot_part_levels: 256,
+            // Two connections per group: the exchange closes single connections (WS 1013).
+            depth_conns: v.feed.depth_conns.unwrap_or(2),
             raw_bbo,
             raw_md,
             venue: feed_venue,

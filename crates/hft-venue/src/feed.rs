@@ -525,6 +525,9 @@ impl<P: VenueProtocol> St<P> {
         match P::decode_md(self.rd, &mut self.ctx, c, payload, &rx, &mut self.sink) {
             Ok(_) if !self.sink.over => {
                 lt::stamp(TraceStage::DecodeEnd, [0; 4]);
+                // A frame the protocol dropped (a copy another connection delivered first,
+                // README §3c) carries no snapshot and does not end AwaitFirst.
+                let produced = self.sink.n > 0;
                 self.publish();
                 if let Some(q) = self.seqs.get_mut(ix)
                     && let Some(v) = q.last_fwd.get_mut(sl)
@@ -541,6 +544,7 @@ impl<P: VenueProtocol> St<P> {
                     s.refresh_req = 0;
                 }
                 if depth
+                    && produced
                     && let Some(q) = self.seqs.get_mut(ix)
                     && q.l2_state == InstSeq::L2_AWAIT_FIRST
                 {
@@ -675,6 +679,7 @@ impl<P: VenueProtocol> FeedRuntime<P> {
     pub fn new(cfg: FeedCfg, deps: FeedDeps, ctx: P::FeedCtx) -> Result<Self, InitErr> {
         for (v, k) in [
             (u32::from(cfg.bbo_conns), "feed.bbo_conns"),
+            (u32::from(cfg.depth_conns), "feed.depth_conns"),
             (u32::from(cfg.bbo_frames_per_poll), "feed.bbo_frames_per_poll"),
             (u32::from(cfg.frames_per_poll), "feed.frames_per_poll"),
             (cfg.bbo_ping_ms, "feed.bbo_ping_ms"),
@@ -705,6 +710,10 @@ impl<P: VenueProtocol> FeedRuntime<P> {
         let groups = cfg.max_sub_insts.div_ceil(spc);
         if routes.has_bbo() && u32::from(cfg.bbo_conns) * groups + 1 > u32::from(MAX_BBO_CONN_SLOTS) {
             return Err(InitErr::BboSlots);
+        }
+        // Depth connections share the md connection numbers (one more for a build in flight).
+        if routes.has_md() && u32::from(cfg.depth_conns) * groups + 1 > u32::from(MD_LAST - MD_FIRST + 1) {
+            return Err(InitErr::Cfg("feed.depth_conns"));
         }
         let half = u32::from(vm.ws_max_in_msgs_per_s) / 2;
         let probes = 1000u32.div_ceil(cfg.bbo_ping_ms);
@@ -1766,6 +1775,7 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                 }
             }
             RouteKind::DepthTopN => {
+                let g = fc.m.group;
                 for (w, bits) in fc.m.insts.iter().enumerate() {
                     let mut b = *bits;
                     while b != 0 {
@@ -1775,6 +1785,16 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                         let Some(inst) = self.st.insts.get(ix).map(|s| s.id) else {
                             continue;
                         };
+                        // Another connection of the group with an answered subscription keeps
+                        // the inst live (`feed.depth_conns ≥ 2`, §3c).
+                        let covered = self.conns.iter().flatten().any(|c| {
+                            c.m.kind == RouteKind::DepthTopN
+                                && c.m.group == g
+                                && c.m.insts.get(w).is_some_and(|x| x & (1u64 << k) != 0)
+                        });
+                        if covered {
+                            continue;
+                        }
                         if let Some(q) = self.st.seqs.get_mut(ix) {
                             q.l2_state = InstSeq::L2_AWAIT_FIRST;
                         }
@@ -1783,6 +1803,24 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                     }
                 }
                 self.md_ids.free(id);
+                if self.st.cfg.depth_conns >= 2 {
+                    let mut left = self
+                        .conns
+                        .iter()
+                        .flatten()
+                        .filter(|c| c.m.kind == RouteKind::DepthTopN && c.m.group == g);
+                    if let (Some(l), None) = (left.next(), left.next()) {
+                        let l = l.m.id;
+                        self.st.cs(
+                            false,
+                            l,
+                            ConnStateKind::Degraded,
+                            InstId(0),
+                            codes::RACE_SINGLE,
+                            now,
+                        );
+                    }
+                }
             }
             RouteKind::Md => self.md_ids.free(id),
         }
@@ -1852,18 +1890,29 @@ impl<P: VenueProtocol> FeedRuntime<P> {
                     continue;
                 }
                 let g8 = g as u8;
-                let have = self
+                // DepthTopN: `feed.depth_conns` live connections per group (§3c); Md: one.
+                let want = if kind == RouteKind::DepthTopN {
+                    usize::from(self.st.cfg.depth_conns)
+                } else {
+                    1
+                };
+                let live = self
                     .conns
                     .iter()
                     .flatten()
-                    .any(|c| c.m.kind == kind && c.m.group == g8)
-                    || self
-                        .building
-                        .iter()
-                        .flatten()
-                        .any(|b| b.kind == kind && b.group == g8);
-                if !have {
-                    did |= self.request(kind, g8, None, now);
+                    .filter(|c| c.m.kind == kind && c.m.group == g8 && c.m.replaced_by.is_none())
+                    .count();
+                let bld = self
+                    .building
+                    .iter()
+                    .flatten()
+                    .filter(|b| b.kind == kind && b.group == g8 && b.replaces.is_none())
+                    .count();
+                for _ in live + bld..want {
+                    if !self.request(kind, g8, None, now) {
+                        break;
+                    }
+                    did = true;
                 }
             }
         }

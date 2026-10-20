@@ -539,3 +539,49 @@ fn core_423_feed_raw_modes() {
         );
     }
 }
+
+#[test]
+fn core_424_feed_depth_conns() {
+    let d = tempfile::tempdir().unwrap();
+    let path = support::write(d.path(), &d.path().join("hot"), None);
+    let text = std::fs::read_to_string(&path).unwrap();
+    // .1 absent → None (the assembly default applies).
+    let c = hft_core::config::parse(&path).unwrap();
+    assert_eq!(c.venues["public"].feed.depth_conns, None, "CORE-424.1");
+    // .2 `venues.<v>.feed.depth_conns` parses next to `feed.raw`.
+    std::fs::write(
+        &path,
+        text.replace(
+            "[sim]",
+            "[venues.public.feed]
+depth_conns = 2
+[venues.public.feed.raw]
+md = 'off'
+[sim]",
+        ),
+    )
+    .unwrap();
+    let c = hft_core::config::parse(&path).unwrap();
+    assert_eq!(c.venues["public"].feed.depth_conns, Some(2), "CORE-424.2");
+    // .3 not a u8 → ConfigParse.
+    std::fs::write(
+        &path,
+        text.replace(
+            "[sim]",
+            "[venues.public.feed]
+depth_conns = 300
+[sim]",
+        ),
+    )
+    .unwrap();
+    let e = hft_core::config::parse(&path).unwrap_err();
+    assert!(e.iter().any(|e| e.code == "ConfigParse"), "CORE-424.3: {e:?}");
+    // .4 the Polymarket sim configuration asks for two depth connections.
+    #[cfg(feature = "polymarket")]
+    {
+        let pm =
+            support::write_polymarket_sim(d.path(), &d.path().join("hot2"), None, None, "127.0.0.1", "lo");
+        let c = hft_core::config::parse(&pm).unwrap();
+        assert_eq!(c.venues["pm"].feed.depth_conns, Some(2), "CORE-424.4");
+    }
+}

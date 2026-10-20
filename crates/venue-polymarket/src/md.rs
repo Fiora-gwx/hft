@@ -20,6 +20,7 @@ use hft_venue_proto::{
 use serde::Deserialize;
 use serde::de::{Deserializer, SeqAccess, Visitor};
 
+use crate::dedup::Key;
 use crate::{FeedCtx, MdClass};
 
 /// Levels per side of one `book` (the price grid has at most 999 levels).
@@ -30,6 +31,9 @@ pub(crate) const CHANGES_MAX: usize = 512;
 const ASSETS_MAX: usize = 8;
 /// Books in one list frame.
 const LIST_MAX: usize = 16;
+/// A level change or trade more than this many ms before the latest time applied for its inst is
+/// late (README "多连接去重"); the de-duplication table remembers keys far longer than this.
+pub(crate) const LATE_SLACK_MS: u64 = 2000;
 
 pub(crate) fn classify(_route: RouteId, op: MsgOp, head: &[u8]) -> MdClass {
     if op != MsgOp::Text {
@@ -114,6 +118,7 @@ pub(crate) struct Fields<'a> {
     pub price: &'a str,
     pub size: &'a str,
     pub side: &'a str,
+    pub hash: &'a str,
 }
 
 /// One object of a raw array (`{"price":…,"size":…}` or a `price_changes` entry): the fast
@@ -128,21 +133,23 @@ fn text(raw: &[u8]) -> Option<&str> {
 }
 
 fn fields(el: &[u8]) -> Result<Fields<'_>, DecodeErr> {
-    let fast = hft_venue_proto::json::project::<4>(el, |k| match k {
+    let fast = hft_venue_proto::json::project::<5>(el, |k| match k {
         b"asset_id" => Some(0),
         b"price" => Some(1),
         b"size" => Some(2),
         b"side" => Some(3),
+        b"hash" => Some(4),
         _ => None,
     });
-    if let Some([a, p, z, d]) = fast
-        && let (Some(a), Some(p), Some(z), Some(d)) = (text(a), text(p), text(z), text(d))
+    if let Some([a, p, z, d, h]) = fast
+        && let (Some(a), Some(p), Some(z), Some(d), Some(h)) = (text(a), text(p), text(z), text(d), text(h))
     {
         return Ok(Fields {
             asset_id: a,
             price: p,
             size: z,
             side: d,
+            hash: h,
         });
     }
     let f: FieldsSlow = from(el)?;
@@ -151,6 +158,7 @@ fn fields(el: &[u8]) -> Result<Fields<'_>, DecodeErr> {
         price: f.price,
         size: f.size,
         side: f.side,
+        hash: f.hash,
     })
 }
 
@@ -164,6 +172,8 @@ struct FieldsSlow<'a> {
     size: &'a str,
     #[serde(default, borrow)]
     side: &'a str,
+    #[serde(default, borrow)]
+    hash: &'a str,
 }
 
 /// Every message shape of the market channel; absent fields stay empty. Arrays stay raw text
@@ -188,6 +198,10 @@ pub(crate) struct Msg<'a> {
     size: &'a str,
     #[serde(default, borrow)]
     side: &'a str,
+    #[serde(default, borrow)]
+    hash: &'a str,
+    #[serde(default, borrow)]
+    transaction_hash: &'a str,
 }
 
 /// `peek` view: the type and the tokens, nothing else decoded.
@@ -506,9 +520,23 @@ fn book(
     rx: &RxMeta,
     out: &mut impl MdSink,
 ) -> Result<(u16, InstId), DecodeErr> {
+    let ms = m.timestamp.0.unwrap_or(0);
+    let key = Key::new(1)
+        .bytes(m.asset_id.as_bytes())
+        .num(ms)
+        .bytes(m.hash.as_bytes())
+        .done();
+    if !ctx.fresh(key, rx.conn.0) {
+        return Ok((0, InstId(0)));
+    }
     let Some((ix, inst)) = ctx.lookup(m.asset_id.as_bytes()) else {
         return Ok((0, InstId(0)));
     };
+    // A book older than data already applied (a connection that lags or has just resubscribed
+    // while another one kept the inst live) would roll the book back.
+    if ctx.late(ix, ms, 0) {
+        return Ok((0, InstId(0)));
+    }
     let row = rd.inst(inst);
     let (pe, qe) = (row.px_wire_exp, row.qty_wire_exp);
     let mut bids = [ZERO; BOOK_MAX];
@@ -522,7 +550,8 @@ fn book(
         None => return Err(DecodeErr::Shape),
     };
     let snap_id = ctx.next_snapshot(ix);
-    ctx.set_book_ms(ix, m.timestamp.0.unwrap_or(0));
+    ctx.set_book_ms(ix, ms);
+    ctx.applied(ix, ms);
     out.l2_snapshot(&L2SnapshotPart {
         hdr: L2SnapHdr {
             h: hdr(venue, inst, rx, ex),
@@ -555,6 +584,22 @@ fn price_change(
         .ok_or(DecodeErr::Shape)?
         .as_raw_str()
         .as_bytes();
+    let ms = m.timestamp.0.unwrap_or(0);
+    let mut key = Key::new(2).num(ms);
+    for el in array(raw)? {
+        let e = fields(el)?;
+        key = if e.hash.is_empty() {
+            key.bytes(e.asset_id.as_bytes())
+                .bytes(e.price.as_bytes())
+                .bytes(e.size.as_bytes())
+                .bytes(e.side.as_bytes())
+        } else {
+            key.bytes(e.hash.as_bytes())
+        };
+    }
+    if !ctx.fresh(key.done(), rx.conn.0) {
+        return Ok((0, InstId(0)));
+    }
     // Distinct bound tokens in order of appearance; every entry is validated before any event.
     let mut assets: [(&str, usize, InstId, u16, u16); ASSETS_MAX] = [("", 0, InstId(0), 0, 0); ASSETS_MAX];
     let mut na = 0usize;
@@ -569,7 +614,7 @@ fn price_change(
         };
         // After a (re)subscription the exchange sends the current `book` and may then still
         // deliver queued changes timestamped before it: those are already in the book.
-        if ctx.stale_change(ix, m.timestamp.0.unwrap_or(0)) {
+        if ctx.stale_change(ix, ms) || ctx.late(ix, ms, LATE_SLACK_MS) {
             continue;
         }
         let row = rd.inst(inst);
@@ -615,6 +660,7 @@ fn price_change(
             }
         }
         out.l2_end();
+        ctx.applied(ix, ms);
         events += 1;
     }
     Ok((events, assets.first().map_or(InstId(0), |a| a.2)))
@@ -629,14 +675,30 @@ fn trade(
     rx: &RxMeta,
     out: &mut impl MdSink,
 ) -> Result<(u16, InstId), DecodeErr> {
+    let ms = m.timestamp.0.unwrap_or(0);
+    let key = Key::new(3)
+        .bytes(m.asset_id.as_bytes())
+        .num(ms)
+        .bytes(m.transaction_hash.as_bytes())
+        .bytes(m.price.as_bytes())
+        .bytes(m.size.as_bytes())
+        .bytes(m.side.as_bytes())
+        .done();
+    if !ctx.fresh(key, rx.conn.0) {
+        return Ok((0, InstId(0)));
+    }
     let Some((ix, inst)) = ctx.lookup(m.asset_id.as_bytes()) else {
         return Ok((0, InstId(0)));
     };
+    if ctx.late(ix, ms, LATE_SLACK_MS) {
+        return Ok((0, InstId(0)));
+    }
     let row = rd.inst(inst);
     let px = Px(fixed(m.price, row.px_wire_exp)?);
     let qty = Qty(fixed(m.size, row.qty_wire_exp)?);
     let taker_side = side(m.side)?;
     let trade_id = ctx.next_trade(ix);
+    ctx.applied(ix, ms);
     out.trade(&Trade {
         h: hdr(venue, inst, rx, ex),
         px,

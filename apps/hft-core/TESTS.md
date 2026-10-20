@@ -4361,6 +4361,21 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-423.2 | `[venues.public.feed.raw] bbo = "off"`、`md = "sampled"` | 解析为 `Off`、`Sampled` |
 | CORE-423.3 | `md = "all"`;未知键 `dups` | `ConfigParse` |
 
+### CORE-424 深度连接条数 `feed.depth_conns`
+
+- 规则:[配置文件字段](README.md#配置文件字段)
+- 级别:table
+- 里程碑:M3
+- 前置:`support::write` 的离线配置;`support::write_polymarket_sim`
+- 实现:`apps/hft-core/tests/config.rs::core_424_feed_depth_conns`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-424.1 | 未配置 | `None`(装配取默认:有 Bbo 路由的协议 1,没有的 2) |
+| CORE-424.2 | `[venues.public.feed] depth_conns = 2`,同时有 `[venues.public.feed.raw]` | `Some(2)` |
+| CORE-424.3 | `depth_conns = 300` | `ConfigParse` |
+| CORE-424.4 | `pm_sim_config` 生成的配置 | `venues.pm.feed.depth_conns = 2` |
+
 ## 验收
 
 - 本组件完成的标准:里程碑已到的非 `host`/`testnet`/`drill` 用例全部有同编号的实现且通过([docs/tests §1](../../docs/tests/README.md#1-地位)、§6 的追溯检查)。
