@@ -583,21 +583,49 @@ where
         .map_err(|_| Error::config("SnapshotHost", name))?;
     let (fw, fs) = raw("feed")?;
     let mut sides = vec![fs];
-    let mut feed = FeedRuntime::<P>::new(
+    // A protocol without a Bbo route (Polymarket) runs the Md routes only, with its whole
+    // DepthTopN book; the others keep the defaults (BBO racing plus TopN depth).
+    let feed_cfg = if P::routes().iter().any(|r| r.kind == RouteKind::Bbo) {
         FeedCfg {
             max_sub_insts: v.max_sub_insts,
             venue: feed_venue,
             endpoints: targets,
             ..FeedCfg::default()
-        },
+        }
+    } else {
+        let levels = P::routes()
+            .iter()
+            .filter(|r| r.kind == RouteKind::DepthTopN)
+            .flat_map(|r| r.topn_levels.iter().copied())
+            .max()
+            .ok_or_else(|| Error::config("Feed", "protocol has neither Bbo nor DepthTopN routes"))?;
+        FeedCfg {
+            routes: hft_venue::FeedRoutes::Md,
+            max_sub_insts: v.max_sub_insts,
+            depth: hft_venue::DepthMode::TopN,
+            topn_levels: levels,
+            snapshot_part_levels: 256,
+            venue: feed_venue,
+            endpoints: targets,
+            ..FeedCfg::default()
+        }
+    };
+    let snap_needed = feed_cfg.routes.has_bbo() || feed_cfg.depth == hft_venue::DepthMode::Incremental;
+    let (snapreq_tx, snap_rx) = if snap_needed {
+        (Some(snapreq_tx), Some(snap_rx))
+    } else {
+        (None, None)
+    };
+    let mut feed = FeedRuntime::<P>::new(
+        feed_cfg,
         FeedDeps {
             rd,
-            bbo: Some(bbo),
+            bbo: feed_cfg.routes.has_bbo().then_some(bbo),
             md: Some(md),
             bulk: Some(bulk),
             cmds: commands,
-            snapreq: Some(snapreq_tx),
-            snap: Some(snap_rx),
+            snapreq: snapreq_tx,
+            snap: snap_rx,
             ready: None,
             raw: fw,
             handoff: fh_rx,
