@@ -283,10 +283,10 @@ print(json.dumps(out))
         assert_eq!(v["load_err"][val.to_string()], name);
     }
 
-    // Lock: 40 kinds, 24 CmdKind, every LoadErrCode.
+    // Lock: 40 kinds, 25 CmdKind, every LoadErrCode.
     let l = lock::parse(&lock_text).unwrap();
     assert_eq!(l.kinds.len(), 40);
-    assert_eq!(l.cmds.len(), 24);
+    assert_eq!(l.cmds.len(), 25);
     assert_eq!(l.load_errs.len(), hft_refdata::schema::load_err_codes().count());
 
     // notes_catalog.rs: one entry per (source, n), name and default level as NOTE_NAMES.

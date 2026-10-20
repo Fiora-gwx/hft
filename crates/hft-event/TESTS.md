@@ -1825,7 +1825,7 @@ spec: README.md
   - `schemas/arrow/` 下 40 个 `<kind>.json`;`Px`/`Qty` 列为 `Int64` 且带元数据 `hft.type = px`/`qty`
   - 每个 kind 的 dtype `itemsize` 等于 `size`(Var/Multi 等于 `prefix`),`names` 与 `offsets` 与 `FieldDesc` 逐项相同;`StrategyParamsHdr`、`GroupSpec`、`LegDef` 的 dtype itemsize 为 48、80、16
   - `refdata.py` 含 `LoadErrCode` 每个变体一项,数值与 hft-refdata 相同
-  - `event-layout.lock` 含 40 个 kind、全部已分配的 `CmdKind`(24 个)与 `LoadErrCode`
+  - `event-layout.lock` 含 40 个 kind、全部已分配的 `CmdKind`(25 个,含 `BindSlot`)与 `LoadErrCode`
   - `crates/hft-telemetry/src/notes_catalog.rs` 对每个 source crate `const` 表中的每个 `(source, n)` 恰有一项,名字与默认级别同 `NOTE_NAMES`
 - 实现:`tools/xtask/tests/gen_schema.rs::evt_172_outputs_and_python_dtype`
 
