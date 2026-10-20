@@ -21,6 +21,7 @@ hft_strategy_sdk::strategy_set! {
         #[cfg(feature = "cross-taker")] cross_taker::CrossTaker,
         latency_probe::LatencyProbe,
         portfolio_carry::PortfolioCarry,
+        book_observer::BookObserver,
     }
 }
 

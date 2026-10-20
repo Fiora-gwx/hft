@@ -33,7 +33,7 @@ spec: README.md
 
 ## 用例
 
-**共用夹具**:`Strategies` 为本 crate 的 `strategy_set!` 生成的集合;"默认构建"指不加 feature 的 `cargo build -p hft-strategy-registry`,"全 feature 构建"指 `--all-features`;`LP` = `latency_probe::LatencyProbe::DESC`;临时目录 `tmp` 由测试创建。默认列表为 latency-probe 与 portfolio-carry;策略级场景用例归各策略 TESTS.md。
+**共用夹具**:`Strategies` 为本 crate 的 `strategy_set!` 生成的集合;"默认构建"指不加 feature 的 `cargo build -p hft-strategy-registry`,"全 feature 构建"指 `--all-features`;`LP` = `latency_probe::LatencyProbe::DESC`;临时目录 `tmp` 由测试创建。默认列表为 latency-probe、portfolio-carry 与 book-observer;策略级场景用例归各策略 TESTS.md。
 
 ### REG-001 默认构建的集合包含 latency-probe,且不含测试策略段
 
@@ -48,7 +48,7 @@ spec: README.md
   - 每一项 `schema.id == kind_id as u32`;没有 `kind_id` ∈ [0xFF00, 0xFFFF] 的项
 - 实现:`strategies/registry/tests/kinds.rs::reg_001_default_kinds`
 
-### REG-002 加入 portfolio-carry 后默认构建的集合与顺序
+### REG-002 默认构建的集合与顺序
 
 - 规则:[使用本组件](README.md#使用本组件)
 - 级别:unit
@@ -57,7 +57,7 @@ spec: README.md
 - 步骤:
   1. 读 `Strategies::kinds()`
 - 期望:
-  - 默认恰好两项,按列表顺序:(`latency-probe`, 5, `non_prod_only = true`)、(`portfolio-carry`, 1, `non_prod_only = false`);启用 cross-taker 时在既有首位加入 kind 3,不改变 core 项顺序
+  - 默认恰好三项,按列表顺序:(`latency-probe`, 5, `non_prod_only = true`)、(`portfolio-carry`, 1, `non_prod_only = false`)、(`book-observer`, 6, `non_prod_only = false`);启用 cross-taker 时在既有首位加入 kind 3,不改变 core 项顺序
 - 实现:`strategies/registry/tests/kinds.rs::reg_002_default_kinds_m4`
 
 ### REG-003 默认与全 feature 两种构建都能编译,编译期唯一性断言通过
@@ -90,8 +90,8 @@ spec: README.md
 | REG-004.5 | latency-probe 行的 crate 列改为 `latency-probe2` | `Err`:名字不符 |
 | REG-004.6 | latency-probe 行的 crate 列改为"退役:latency-probe" | `Err`:已编译的策略被标退役 |
 | REG-004.7 | latency-probe 行的 scope 列去掉 `non_prod_only` | `Err`:`non_prod_only` 不符 |
-| REG-004.8 | 追加一行 kind_id 6(尚无代码) | `Ok` |
-| REG-004.9 | 追加一行 kind_id 7、没有 6 | `Err`:编号不连续 |
+| REG-004.8 | 追加一行 kind_id 7(尚无代码) | `Ok` |
+| REG-004.9 | 追加一行 kind_id 8、没有 7 | `Err`:编号不连续 |
 | REG-004.10 | 删去 0xFF00–0xFFFF 行 | `Ok`(测试段不参与连续性检查) |
 
 ### REG-005 `export_schemas` 按 kind_id 升序返回各策略文件,最后是 `index.json`
@@ -227,7 +227,7 @@ spec: README.md
 |---|---|---|
 | REG-014.1 | `Strategies::schema_json(5)` | `Some(s)`,`s` 与 `5-latency-probe.schema.json` 的导出内容逐字节相同 |
 | REG-014.2 | `Strategies::schema_json(0xFF01)` | `None` |
-| REG-014.3 | `Strategies::schema_json(6)` | `None` |
+| REG-014.3 | `Strategies::schema_json(7)`(未登记) | `None` |
 
 ### REG-015 只有 hft-core 与 replayer 依赖本 crate,本 crate 不正式依赖引擎 crate
 

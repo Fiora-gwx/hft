@@ -20,6 +20,7 @@ hft-strategy-sdk = { workspace = true, features = ["schema-json"] }
 latency-probe.workspace = true
 cross-taker = { workspace = true, optional = true }
 portfolio-carry.workspace = true
+book-observer = { path = "../book-observer" }
 
 [dev-dependencies]
 hft-ctl = { path = "../../crates/hft-ctl" }

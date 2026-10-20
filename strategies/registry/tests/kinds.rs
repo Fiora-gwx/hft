@@ -21,6 +21,7 @@ fn reg_002_default_kinds_m4() {
     }
     expected.push(("latency-probe", 5, true));
     expected.push(("portfolio-carry", 1, false));
+    expected.push(("book-observer", 6, false));
     assert_eq!(kinds, expected);
 }
 

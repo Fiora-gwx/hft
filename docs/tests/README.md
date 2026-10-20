@@ -41,7 +41,7 @@
 | venue-binance | BIN | hft-ctl | CTL | deploy | DEP |
 | venue-okx | OKX | hft-telemetry | TEL | ops_bot | OPS |
 | venue-bitget | BGT | hft-testkit | TK | pipeline | PIP |
-| hft-py | PY | | | treasury | TRS |
+| hft-py | PY | book-observer | OBS | treasury | TRS |
 | latency-slice | SLC | | | | |
 | portfolio-carry | CARRY | | | | |
 

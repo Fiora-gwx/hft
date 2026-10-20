@@ -42,7 +42,7 @@ def dep_001_ci_stage_to_install(tmp_path):
             return b"rustc fixture"
         if argv[0] == "cat":
             return b"Features : fp aes pmull asimd sve sm3 sm4 svesm4\n"
-        return b"kind_id=1 portfolio-carry version=1\nkind_id=3 cross-taker version=1\nkind_id=5 latency-probe version=1\n"
+        return b"kind_id=1 portfolio-carry version=1\nkind_id=3 cross-taker version=1\nkind_id=5 latency-probe version=1\nkind_id=6 book-observer version=1\n"
     tree, info = stager.stage(repo, dist, "v1.2.3-dev.4", "a" * 40, "123", dict(ci_run_id=122, decoupling_check_run_id=121), run)
     archive = load("package").package_tree(tree, tmp_path / "packed", info, 0, compress=False)
     extracted = tmp_path / "unpacked"
@@ -51,7 +51,7 @@ def dep_001_ci_stage_to_install(tmp_path):
     assert actual["profiles"] == {n: "release" for n in names}
     assert actual["cpu_features"] == ["aes", "asimd", "fp", "pmull", "sve"]
     assert actual["target_features"] == "-sm4,-rand,-dit"
-    assert len(actual["strategies"]) == 3
+    assert len(actual["strategies"]) == 4
     assert actual["evidence"]["ci_run_id"] == 122
     assert actual["sbom_sha256"] == release.sha256(tree / "sbom.json")
     for path in ("bin/hft-core", "bin/hostprobe", "bin/hft-secrets", "deploy/dev2/hft-window", "deploy/release/preflight.py", "deploy/generated/test-dev2-prod/install.json", "schemas/strategies/index.json", "config-templates/dual-testnet.toml"):

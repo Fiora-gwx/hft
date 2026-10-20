@@ -526,6 +526,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "book-observer"
+version = "0.1.0"
+dependencies = [
+ "hft-event",
+ "hft-refdata",
+ "hft-strat-lib",
+ "hft-strategy-sdk",
+ "hft-testkit",
+ "hft-types",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1581,6 +1593,7 @@ name = "hft-strategy-registry"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "book-observer",
  "cross-taker",
  "hft-ctl",
  "hft-ctl-proto",
