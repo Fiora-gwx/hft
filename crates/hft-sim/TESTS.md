@@ -30,7 +30,7 @@ spec: README.md
 | 1. 时间 | SIM-010–SIM-012 |
 | 2. 簿副本 | SIM-020–SIM-023 |
 | 3. 吃单撮合 | SIM-030–SIM-036、SIM-125 |
-| 4. 挂单(预留给 MakerFirst) | SIM-228、SIM-040、SIM-041、SIM-162 |
+| 4. 挂单(预留给 MakerFirst) | SIM-228、SIM-229、SIM-040、SIM-041、SIM-162 |
 | 5. 手续费与扣费资产 | SIM-050–SIM-053、SIM-125、SIM-223 |
 | 6. 资金费 | SIM-060–SIM-063、SIM-125、SIM-166、SIM-203 |
 | 7. 永续全仓保证金与强平 | SIM-070–SIM-075、SIM-125、SIM-221、SIM-225 |
@@ -50,6 +50,7 @@ spec: README.md
 **夹具**(各用例的"前置"按名字引用;实现在 `crates/hft-sim/tests/common/mod.rs`,参数一律显式赋值):
 
 - `rd_sim()`:refdata(以 `RdbBuilder` 构建;资产、inst、账户 id 稠密)。资产 `USDT`(`AssetId(1)`,`qty_exp = −6`)、`BTC`(2)、`ETH`(3)、`BNB`(4)(三者 `px_exp = −4`,`qty_exp = −8`);venue `S1`(`VenueId(2)` = `BINANCE_SPOT`,现货,交易所 E1 = Binance,`reduce_only = false`)、`P2`(`VenueId(5)` = `OKX_SWAP`,USDT 永续,交易所 E2 = OKX,`required_margin_mode = Cross`,`reduce_only = true`,`margin_data = Push`,`funding_settle = PerSymbolPush`)、`S4`(`VenueId(6)` = `OKX_SPOT`,现货,交易所 E2,只用于同所两 venue 的用例);inst `BTC/S1`(`InstId(11)`,tick 0.01,lot 0.00001,`min_qty` 0.00001,`min_notional` 5,`Trading`,`book_window` 4096)、`BNB/S1`(12,tick 0.01,lot 0.001)、`BTC/P2`(21,tick 0.1,lot 0.001,`min_qty` 0.001,`min_notional` 5)、`ETH/P2`(22,tick 0.01,lot 0.01),inst 1–10、13–20 为 `S1` 上 `Delisted` 的占位行;账户 1–9 都是 venues {S1, P2} 的 Sim 账户;`Fees`:(S1, 档 1)maker 0.0002、taker 0.0004,(S1, 档 2)maker 0.0002、taker 0.0003,(P2, 档 1)与(P2, 档 2)maker 0.0002、taker 0.0005,(S4, 档 1)同 (S1, 档 1);各 venue 的 `fee_asset_rule` 与 `funding_settle` 在用例"前置"里写明。
+- `rd_binary()`:`rd_sim()` 加 venue `B5`(`VenueId(15)` = `POLYMARKET_CLOB`,现货,交易所 Polymarket)与两个结果代币 `UP_B5`(`InstId(23)`,symbol `btc-up-0`,资产 BTC)、`DN_B5`(24,`btc-dn-0`,资产 ETH),两者 `px_exp = −4`(1.0 = 10 000 raw)、tick 0.01、lot 1、`min_notional` 0.000001;B5 费率 0;账户 1–9 的 venues 加上 B5。
 - 账户:`A9`(Sim,venues {S1, P2},`initial_balances` = S1 USDT 100 000、S1 BNB 1、P2 USDT 18 000,`latency_model = 0`、`fee_tier = 1`、`margin_model = 0`);`A8`(Sim,venues {S1, P2},`initial_balances` = S1 USDT 50 000、P2 USDT 10 000,其余同 `A9`;只在注明加入的用例中存在)。
 - `setup_sim()`:`SimSetup { tuning: SimTuning { seed: 42, consume_decay_ms: 1 000, take_avail_bp: 10 000, quiet_ms: 50, report_interval_s: 60, transfer_delay_ms: 300 000, rate_limit: false, late_fee: false, maker_fill: TradeThrough }, tsc_hz_milli: 1 000 000 000 000(1 GHz,1 TSC = 1 ns), latency_models: [Fixed { entry_us: 2 000, resp_us: 2 000 }], margin_models: [MarginModel { mmr: Flat(0.005), leverage: 5, liq_fee: 0.005, liq_slippage_bp: 50 }], accounts: [A9] }`;用例改动其中某项时在"前置"里写出新值。
 - 记法:事件时间写成 ms(1 GHz TSC);"`@t`"表示记录头 `tsc = t`,行情记录的 `ex_ts_ns` 默认等于 `t` 的 ns 值;`Bbo(inst, bid×量, ask×量) @t`;`TopN(inst, asks[…], bids[…]) @t` 是 `L2Snapshot{origin = TopN}`;`Place(inst, side, qty, px, tif) decided @t` 是一条 `op = Place` 的 `GwCmd` 经 `on_command(cmd, decided_tsc = t)`,slot 按出现顺序为 1、2、…,`gen = 1`;"撮合"由下一条 `tsc` 更大的记录或 `advance` 触发。数量、价格写十进制(raw = 十进制 × 10^(−exp));`Rate` 指数 −9。
@@ -1751,3 +1752,19 @@ spec: README.md
 | SIM-228.2 | 显示 0.5(无成交);600 ms 后再次显示 0.5;随后成交 0.55 | 成交 0.05(前方数量截到 0.5) |
 | SIM-228.3 | 买方吃单成交 5 @ 59000 | 不成交 |
 | SIM-228.4 | `TradeThrough`(`Sim::std()`),卖方吃单成交 5 @ 59000 | 不成交 |
+
+### SIM-229 二元结果代币的互补成交
+
+- 规则:[4. 挂单(预留给 MakerFirst)](README.md#4-挂单预留给-makerfirst)
+- 级别:table
+- 里程碑:M3
+- 前置:`setup_sim()` 且 `maker_fill = Queue`,`A9` 的 `initial_balances` = B5 USDT 1 000;`rd_binary()`;`UP_B5` 买一 0.45 显示 50、卖一 0.47;`A9` 挂买 100 `UP_B5` @ 0.45(GTC)
+- 步骤:依次执行下表各行(每行从前置重新开始)
+- 实现:`crates/hft-sim/tests/maker.rs::sim_229_binary_complement_prints`
+
+| 行 | 行情序列 | 期望 |
+|---|---|---|
+| SIM-229.1 | `DN_B5` 买方吃单 30 @ 0.55;再 40 @ 0.55 | 第一次不成交;第二次成交 20 @ 0.45 |
+| SIM-229.2 | `DN_B5` 卖方吃单 500 @ 0.55 | 不成交(镜像后吃单方与挂单同侧) |
+| SIM-229.3 | `DN_B5` 买方吃单 10 @ 0.60 | 穿价:成交 10 @ 0.45(镜像价 0.40 < 0.45) |
+| SIM-229.4 | `UP_B5` 卖方吃单 60 @ 0.45 | 同代币规则不变:成交 10 |
