@@ -159,6 +159,7 @@ impl Gateway {
     pub fn poll(&mut self, now: Tsc) -> Result<bool, Error> {
         use hft_journal::Next;
         let mut busy = false;
+        let mut caught_up = false;
         while let Some((kind, bytes)) = self.pending.front() {
             if !io::write_record(&mut self.replies, *kind, &[bytes]) {
                 return Ok(busy);
@@ -235,10 +236,21 @@ impl Gateway {
                         }
                     }
                 }
-                Next::Pending | Next::End => break,
+                Next::Pending | Next::End => {
+                    caught_up = true;
+                    break;
+                }
                 Next::Err(e) => return Err(Error::runtime("PaperJournal", format!("{e:?}"), 4)),
                 Next::Gap(_) => return Err(Error::runtime("PaperJournal", "journal gap", 4)),
                 Next::Event(_) => {}
+            }
+        }
+        // Commands that project no decision (SimSettle, SimReset, SimTransfer) run once the
+        // journal is consumed and no decision is awaited: they must not wait for the next order.
+        if caught_up && self.awaiting.is_none() {
+            while let Some(cmd) = pop_unsequenced(&mut self.orders) {
+                self.exchange.on_command(&cmd, cmd.decided_tsc);
+                busy = true;
             }
         }
         // Paper time is the consumed journal prefix, never wall time ahead of that prefix.
@@ -314,4 +326,16 @@ pub fn written(cmd: &GwCmd, venue: VenueId, now: Tsc) -> Option<SendReport> {
         os_errno: 0,
         _pad2: 0,
     })
+}
+
+/// Pops the `out-sim` head when it projects no order decision (`decision_seq = 0`); an order
+/// command stays at the head for the decision barrier of `Gateway::poll`.
+pub fn pop_unsequenced(orders: &mut Consumer<GwCmd>) -> Option<GwCmd> {
+    let b = orders.read_batch(1);
+    let head = b.slices().0.first().copied()?;
+    if head.decision_seq != 0 {
+        return None;
+    }
+    b.release();
+    Some(head)
 }

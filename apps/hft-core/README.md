@@ -699,7 +699,7 @@ refdata 不做热替换(可选扩展:允许热替换的变更集,触发条件:Dr
 - 每个 `[[accounts]]` 是一个 `AccountId(u8)`。账户列表、账户名(`label`)、类型(`Live` | `Sim(SimAccountCfg)`)、`is_prod` 与绑定的策略实例(`bound_instance`)的**唯一归属**是 refdata 的 `AccountMeta`,每 (account, venue) 的交易所 UID(`venue_uid`)在 refdata 的 `AccountVenues`([hft-refdata](../../crates/hft-refdata/README.md));配置只按 `id`/`label` 引用并核对一致。**一个账户只绑定一个策略实例**;不存在多个系统或多个策略共用一个交易所账户的情形,账户上的全部挂单与仓位都属于该策略实例;一个交易所子账户(同一 `venue_uid`)只登记在一个 `AccountId` 下。账户名前缀规则见[实例角色](#实例角色prod-与-sim)。
 - **一个账户在同一交易所只用一个市场**(现货或永续):账户的 venue 集合中不得有两个 `exchange` 相同的 VenueId,Sim 账户同样适用(refdata 加载失败 `SameExchangeMarkets`,规则归 [hft-refdata](../../crates/hft-refdata/README.md))。同所现货与永续共用钱包的情形因此不出现;跨所两腿由同一账户在两个交易所各用一个市场完成。
 - **Live 账户**:交易所子账户——测试网/模拟盘账户(`is_prod = false`,dev2 联调与 M7 延迟验收)或新开的正式实盘子账户(`is_prod = true`,M8 起);每 venue 一组交易 key(无提现权限、IP 白名单;会话 key 与 REST key 各自核对 UID),独立 `RiskParams` 行、独立 kill、独立死手刷新;下单连接按 (venue, account) 建,一个 `gw-<venue>` 任务轮询该 venue 下所有 Live 账户的主/备连接;每 (venue, account) 固定出口 IP(`src_ip`,共享 IP 的配置加载时拒绝)。reconciler 用只读 key,kill-switch 用独立的撤单 key([python/AGENTS.md](../../python/AGENTS.md) 的持 key 划分)。
-- **Sim 账户**:没有任何 key、死手与出口 IP;只在 `sim` 实例里;订单经 `out-sim` 进 sim-gw;其余(风控档、kill、模式、执行层)与 Live 相同。开通流程见 [launch](../../docs/runbooks/launch.md)。
+- **Sim 账户**:没有任何 key、死手与出口 IP;只在 `sim` 实例里;订单经 `out-sim` 进 sim-gw(sim-gw 沿 seq journal 推进,在每个成功订单决定处等它的 out-sim 命令;不对应订单决定的命令(`decision_seq = 0`:`SimSettle`、`SimReset`、`SimTransfer`)在 journal 已读到末尾且没有等待中的决定时从环头取出执行,不等下一笔订单);其余(风控档、kill、模式、执行层)与 Live 相同。开通流程见 [launch](../../docs/runbooks/launch.md)。
 - 行情连接按 venue 共享,不按账户复制。每账户的限速令牌桶在 gw 与风控各记一份(发送侧计数在 gw,准入在 sequencer)。
 - client order id 的编解码归 [hft-types](../../crates/hft-types/README.md)、分配语义归 [hft-oms](../../crates/hft-oms/README.md)。
 

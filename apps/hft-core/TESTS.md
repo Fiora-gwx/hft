@@ -53,7 +53,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 崩溃隔离与从快照恢复 | CORE-280–CORE-288 |
 | 优雅退出与 kill 语义 | CORE-300–CORE-314 |
 | refdata 变更(Drain + 重启) | CORE-320–CORE-326 |
-| 多账户 | CORE-330、CORE-168、CORE-247、CORE-313 |
+| 多账户 | CORE-330、CORE-168、CORE-247、CORE-313、CORE-427 |
 | HostProfile | CORE-340–CORE-343、CORE-419 |
 | HeartbeatBlock | CORE-350–CORE-352 |
 | 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423 |
@@ -4403,6 +4403,21 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-426.1 | `config::load(path, dry_run = true)` | `Ok` |
 | CORE-426.2 | refdata | `polymarket-clob` 6 个槽位 inst(InstId 3 = `btc-up-1`);`binance-spot` 只有 InstId 7 |
 | CORE-426.3 | venues 与 `[sim]` | 两个 venue 都是 `live_feed`;`maker_fill = Queue` |
+
+### CORE-427 不对应订单决定的 out-sim 命令不等下一笔订单
+
+- 规则:[多账户](README.md#多账户)
+- 级别:table
+- 里程碑:M3
+- 前置:容量 16 的 `GwCmd` 环;`SimSettle` 命令 `decision_seq = 0`,订单命令 `decision_seq = 7`
+- 步骤:依次执行下表各行
+- 实现:`apps/hft-core/tests/paper_cmds.rs::core_427_unsequenced_commands_do_not_wait_for_an_order`
+
+| 行 | 环内容 | 期望 |
+|---|---|---|
+| CORE-427.1 | 空 | `pop_unsequenced` 为 `None` |
+| CORE-427.2 | 两条 `SimSettle`(end_s 100、200) | 依次取出 100、200 |
+| CORE-427.3 | 订单(7),其后 `SimSettle`(300) | 订单在环头时 `None` 且不丢;订单取走后取出 300 |
 
 ## 验收
 
