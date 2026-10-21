@@ -18,8 +18,10 @@ rebound before that, so `--settle` needs `--slots 3` (rebinding 480 s after the 
 
 Every binding is one ctl `BindSlot` (account `*`) on the Unix socket: a 4-byte big-endian length
 and the request JSON; an `accepted` response is re-sent with the same cmd_id until the result is
-final; requests are paced (`--gap`, default 0.25 s) under the gateway's per-issuer rate limit and a
-`RateLimited` binding is retried on the next pass. Run it as the system user that the principal table maps to `pipeline` (or, by hand, with
+final; requests are paced (`--gap`, default 0.25 s) under the gateway's per-issuer rate limit. A
+refused binding or settlement (`RateLimited`, `PreconditionFailed` such as `GroupHasPosition`) is
+retried with a per-slot backoff of 5 s doubling to 60 s; an `InvalidArgs` settlement (the slot is
+not bound to that window) is dropped, and a window that has ended is never bound. Run it as the system user that the principal table maps to `pipeline` (or, by hand, with
 `--issuer cli:<login>` as a Trader/Admin cli user). Each request and response is one JSON line.
 """
 import argparse
@@ -84,8 +86,9 @@ def exchange(path: str, body: bytes, timeout: float = 10.0) -> dict:
         s.close()
 
 
-def command(path: str, issuer: str, cmd: dict, log, info: dict) -> bool:
-    """Sends one ctl command; an `accepted` response is re-sent with the same cmd_id until final."""
+def command(path: str, issuer: str, cmd: dict, log, info: dict) -> str:
+    """Sends one ctl command; an `accepted` response is re-sent with the same cmd_id until final.
+    Returns "ok" (Applied or NoOp), "invalid" (InvalidArgs) or "retry"."""
     now = time.time_ns()
     req = {
         "v": 2,
@@ -102,10 +105,29 @@ def command(path: str, issuer: str, cmd: dict, log, info: dict) -> bool:
         if resp.get("status") != "accepted":
             break
         time.sleep(0.5)
-    return resp.get("status") == "ok" and resp.get("code") in ("Applied", "NoOp")
+    if resp.get("status") == "ok" and resp.get("code") in ("Applied", "NoOp"):
+        return "ok"
+    return "invalid" if resp.get("code") == "InvalidArgs" else "retry"
 
 
-def bind(path: str, issuer: str, slot: str, token: str, start: int, log) -> bool:
+class Backoff:
+    """Per-key retry delay: 5 s after the first refusal, doubling to 60 s; cleared on success."""
+
+    def __init__(self):
+        self.due = {}
+
+    def ready(self, key, now: float) -> bool:
+        return self.due.get(key, (0.0, 0))[0] <= now
+
+    def fail(self, key, now: float):
+        n = self.due.get(key, (0.0, 0))[1] + 1
+        self.due[key] = (now + min(5 * 2 ** (n - 1), 60), n)
+
+    def clear(self, key):
+        self.due.pop(key, None)
+
+
+def bind(path: str, issuer: str, slot: str, token: str, start: int, log) -> str:
     cmd = {
         "type": "BindSlot",
         "venue": "polymarket-clob",
@@ -118,7 +140,7 @@ def bind(path: str, issuer: str, slot: str, token: str, start: int, log) -> bool
     return command(path, issuer, cmd, log, {"slot": slot, "start": start, "token": token})
 
 
-def settle(path: str, issuer: str, slot: str, end: int, payout: str, log) -> bool:
+def settle(path: str, issuer: str, slot: str, end: int, payout: str, log) -> str:
     cmd = {
         "type": "Settle",
         "venue": "polymarket-clob",
@@ -151,6 +173,8 @@ def main() -> None:
     bound = {}  # slot -> (token, start) last applied
     cache = {}  # (asset, start) -> ([up, dn], conditionId) | None
     unsettled = {}  # (asset, start) -> ([up, dn], conditionId, k) of bound windows not yet settled
+    backoff = Backoff()
+    settled = set()  # (slot, end) settled or dropped
     while True:
         now = int(time.time())
         base = now // WINDOW * WINDOW
@@ -171,15 +195,22 @@ def main() -> None:
                 ids, cid = hit
                 for side, token in zip(("up", "dn"), ids):
                     slot = f"{asset}-{side}-{k}"
-                    if bound.get(slot) == (token, start):
+                    if bound.get(slot) == (token, start) or now >= start + WINDOW:
+                        continue
+                    if not backoff.ready(("bind", slot), time.time()):
                         continue
                     try:
-                        if bind(a.socket, a.issuer, slot, token, start, log):
-                            bound[slot] = (token, start)
-                            if a.settle:
-                                unsettled[(asset, start)] = (ids, cid, k)
+                        r = bind(a.socket, a.issuer, slot, token, start, log)
                     except OSError as e:
                         log({"t": time.time(), "slot": slot, "ctl_error": str(e)})
+                        r = "retry"
+                    if r == "ok":
+                        backoff.clear(("bind", slot))
+                        bound[slot] = (token, start)
+                        if a.settle:
+                            unsettled[(asset, start)] = (ids, cid, k)
+                    else:
+                        backoff.fail(("bind", slot), time.time())
                     time.sleep(a.gap)
         cache = {key: v for key, v in cache.items() if key[1] >= base - WINDOW}
         for (asset, start), (ids, cid, k) in list(unsettled.items()):
@@ -196,18 +227,32 @@ def main() -> None:
                     log({"t": time.time(), "asset": asset, "start": start, "unresolved": True})
                     unsettled.pop((asset, start))
                 continue
+            key = ("settle", asset, start)
+            if not backoff.ready(key, time.time()):
+                continue
             done = True
             for side, token in zip(("up", "dn"), ids):
                 slot = f"{asset}-{side}-{k}"
+                if (slot, end) in settled:
+                    continue
                 try:
-                    ok = settle(a.socket, a.issuer, slot, end, "1" if token == win else "0", log)
+                    r = settle(a.socket, a.issuer, slot, end, "1" if token == win else "0", log)
                 except OSError as e:
                     log({"t": time.time(), "settle": slot, "ctl_error": str(e)})
-                    ok = False
-                done &= ok
+                    r = "retry"
+                if r == "invalid":
+                    log({"t": time.time(), "settle": slot, "end": end, "dropped": True})
+                if r == "retry":
+                    done = False
+                else:
+                    settled.add((slot, end))
                 time.sleep(a.gap)
             if done:
+                backoff.clear(key)
                 unsettled.pop((asset, start))
+            else:
+                backoff.fail(key, time.time())
+        settled = {x for x in settled if x[1] >= now - 2 * 3600}
         if a.once:
             break
         time.sleep(5)
