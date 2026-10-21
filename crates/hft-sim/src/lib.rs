@@ -33,7 +33,7 @@ use hft_event::{
     RecordHeader, RepMsg,
 };
 use hft_refdata::{
-    FeePair, InstKind, InstStatus, LimitBucket, LimitScope, MarginMode, RefData, SimAccountCfg,
+    Exchange, FeePair, InstKind, InstStatus, LimitBucket, LimitScope, MarginMode, RefData, SimAccountCfg,
     blob::{FeeOverrideRow, FeeRow, RawBlob, sec},
 };
 use hft_types::{AccountId, AssetId, InstId, Px, Qty, Rate, Side, Tsc, VenueId};
@@ -319,6 +319,7 @@ impl SimExchange {
                     rate: 0,
                     next_funding_ns: 0,
                     settled_ns: 0,
+                    complement: NONE16,
                 });
                 if let Some(vr) = venues.get_mut(usize::from(v)) {
                     vr.insts.push(ix);
@@ -326,6 +327,29 @@ impl SimExchange {
                         vr.margin_asset = h.quote;
                     }
                 }
+            }
+        }
+        // Binary outcome venues: pair each `<a>-up-<k>` slot with its `<a>-dn-<k>` token.
+        for ix in 0..insts.len() {
+            let Some(r) = insts.get(ix) else { continue };
+            if rd.venue(r.venue).exchange != Exchange::Polymarket {
+                continue;
+            }
+            let sym = &*rd.inst_meta(r.id).symbol;
+            let other = if sym.contains("-up-") {
+                sym.replacen("-up-", "-dn-", 1)
+            } else if sym.contains("-dn-") {
+                sym.replacen("-dn-", "-up-", 1)
+            } else {
+                continue;
+            };
+            let venue = r.venue;
+            let j = insts
+                .iter()
+                .position(|o| o.venue == venue && *rd.inst_meta(o.id).symbol == *other)
+                .map_or(NONE16, |j| j as u16);
+            if let Some(r) = insts.get_mut(ix) {
+                r.complement = j;
             }
         }
         let n_insts = insts.len();
