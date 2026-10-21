@@ -20,8 +20,7 @@ use hft_strategy_sdk::params::{RawParams, SchemaView};
 use hft_strategy_sdk::prelude::*;
 use hft_strategy_sdk::testing::{MockViews, ev};
 
-/// The parameters of tests/scenario.rs: defaults with `enabled = 1`, `move_k` = 3σ,
-/// `vol_min_samples` = 60.
+/// The parameters of tests/scenario.rs: defaults with `enabled = 1`, `vol_min_samples` = 60.
 fn params() -> BinaryMakerParams {
     let schema = BinaryMaker::DESC.schema;
     let mut defaults: Vec<i64> = (0..schema.n_fields())
@@ -33,7 +32,6 @@ fn params() -> BinaryMakerParams {
             .unwrap()
     };
     defaults[ix("enabled")] = 1;
-    defaults[ix("move_k")] = 3_000_000_000;
     defaults[ix("vol_min_samples")] = 60;
     BinaryMakerParams::from_raw(
         &RawParams {
@@ -107,10 +105,9 @@ fn measure(
     event: ev::Ev,
     places: usize,
 ) {
-    // The quote table and pause are the decision state; restoring them makes every sample take
-    // the same path (the volatility ring gets no new sample within the same second).
+    // The quote table is the decision state; restoring it makes every sample take the same path
+    // (the volatility ring gets no new sample within the same second).
     let quotes: Vec<Quote> = strategy.fast.quotes.clone();
-    let pause = strategy.fast.pause_until;
     let mut bufs = CtxBufs::new();
     bufs.begin();
     strategy.on_event(&event.as_ref(), &views, &mut bufs.ctx());
@@ -121,7 +118,6 @@ fn measure(
             let mut elapsed = Duration::ZERO;
             for _ in 0..n {
                 strategy.fast.quotes.copy_from_slice(&quotes);
-                strategy.fast.pause_until = pause;
                 bufs.begin();
                 let mut ctx = bufs.ctx();
                 let event = event.as_ref();
