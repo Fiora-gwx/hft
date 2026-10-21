@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 1, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 2, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -22,10 +22,10 @@ hft_strategy_sdk::define_params! {
         sigma_scale: Rate [min = 1, max = 10_000_000_000, default = 1_390_000_000, relax = None],
         /// minimum remaining standard deviation to quote, implied sigma times sqrt(seconds left) (1e-9)
         min_rem_sd: Rate [min = 0, max = 1_000_000_000, default = 100_000, relax = Down],
-        /// reference move since the last one-second sample, in sigmas, that pulls every quote (1e-9)
-        move_k: Rate [min = 1, max = 100_000_000_000, default = 1_000_000_000, relax = Up],
-        /// quiet time after such a move
-        pause_ms: DurationMs [min = 0, max = 600_000, default = 1_000, relax = Down],
+        /// fair-value move since placement (fraction of one, 1e-9) that cancels a quote; 0 = off
+        fv_cancel: Rate [min = 0, max = 1_000_000_000, default = 5_000_000, relax = Up],
+        /// no new quote on a leg for this long after its fair-value cancel
+        fv_cool_ms: DurationMs [min = 0, max = 600_000, default = 2_000, relax = Down],
         /// no quotes this close to the window end
         stop_before_ms: DurationMs [min = 0, max = 3_600_000, default = 60_000, relax = Down],
         /// one-second returns in the realized volatility
@@ -36,6 +36,9 @@ hft_strategy_sdk::define_params! {
         requote_ms: DurationMs [min = 0, max = 60_000, default = 200, relax = Down],
         /// resting limit of every quote (OMS ages it out)
         max_rest_ms: DurationMs [min = 1_000, max = 3_600_000, default = 360_000, relax = Up],
+        /// a bid that would complete Up/Down pairs rests at most at 1 − (other side's average cost) −
+        /// pair_margin (fraction of one, 1e-9)
+        pair_margin: Rate [min = 0, max = 1_000_000_000, default = 10_000_000, relax = Down],
     }
 }
 

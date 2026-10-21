@@ -19,7 +19,7 @@ use hft_testkit::sdk_mock::StrategyHarness;
 #[global_allocator]
 static ALLOC: hft_testkit::CountingAlloc = hft_testkit::CountingAlloc;
 
-/// Defaults with `enabled = 1`, `move_k` = 3σ, `vol_min_samples` = 60, then `edit`.
+/// Defaults with `enabled = 1`, `vol_min_samples` = 60, then `edit`.
 fn params(edit: impl FnOnce(&mut Vec<i64>)) -> BinaryMakerParams {
     let schema = BinaryMaker::DESC.schema;
     let mut defaults: Vec<i64> = (0..schema.n_fields())
@@ -31,7 +31,6 @@ fn params(edit: impl FnOnce(&mut Vec<i64>)) -> BinaryMakerParams {
             .unwrap()
     };
     defaults[ix("enabled")] = 1;
-    defaults[ix("move_k")] = 3_000_000_000;
     defaults[ix("vol_min_samples")] = 60;
     edit(&mut defaults);
     BinaryMakerParams::from_raw(
@@ -173,27 +172,72 @@ fn bmk_004_no_quotes_when_gated() {
     assert_eq!(warm(&mut h, 400, 399, 1).places().count(), 0, "BMK-004.4");
 }
 
-#[test]
-fn bmk_005_reference_jump_pauses() {
-    let p = params(|_| {});
-    let mut h = harness(&p);
-    warm(&mut h, 400, 399, 1);
-    // A 10 bp jump (10 sigma) within the second: no new quote for pause_ms.
-    h.views_mut().at_engine_ns(399_700_000_000);
-    ref_quote(h.views_mut(), 10_010_000);
-    let b = h.views_mut().bbo_of(R);
-    let out = h.feed(&ev::bbo(R, 6, b).as_ref());
-    assert_eq!(out.places().count(), 0, "BMK-005.1");
-    assert!(h.strategy().fast.pause_until > 399_700_000_000, "BMK-005.1");
-    // The next second's sample is still 10 bp from the previous one: paused again; one second
-    // later the reference is flat and quoting resumes.
-    for (t, want) in [(400_000_000_000, 0), (401_200_000_000, 2)] {
-        h.views_mut().at_engine_ns(t);
-        ref_quote(h.views_mut(), 10_010_000);
-        let b = h.views_mut().bbo_of(R);
-        let out = h.feed(&ev::bbo(R, 6, b).as_ref());
-        assert_eq!(out.places().count(), want, "BMK-005.2 {t} {:?}", out.items);
+/// `warm(400, 399, 1)`, then both quotes of pair 1 live at 0.450 (OMS slots 11 and 12).
+fn live_pair(h: &mut StrategyHarness<BinaryMaker>) {
+    use binary_maker::fast::QState;
+    warm(h, 400, 399, 1);
+    for (i, slot) in [(2usize, 11u32), (3, 12)] {
+        let q = &mut h.strategy_mut().fast.quotes[i];
+        q.state = QState::Live;
+        q.r = Some(order_ref(slot));
+        q.px = 450;
     }
+}
+
+/// Reference quote with mid `mid` at engine time `t` (ns).
+fn ref_at(h: &mut StrategyHarness<BinaryMaker>, t: i64, mid: i64) -> hft_testkit::sdk_mock::CtxCapture {
+    h.views_mut().at_engine_ns(t);
+    ref_quote(h.views_mut(), mid);
+    let b = h.views_mut().bbo_of(R);
+    h.feed(&ev::bbo(R, 6, b).as_ref())
+}
+
+#[test]
+fn bmk_005_fair_value_cancel() {
+    // Placed at reference mid 100 005.00 with Up mid 0.460, sigma ~1 bp, 200.5 s left: a 0.5 c
+    // fair-value move is ~0.2 bp of the reference.
+    let p = params(|_| {});
+    // .1 a 0.1 bp move: nothing.
+    let mut h = harness(&p);
+    live_pair(&mut h);
+    let out = ref_at(&mut h, 399_600_000_000, 10_000_400);
+    assert!(cancels(&out).is_empty(), "BMK-005.1 {:?}", out.items);
+    // .2 0.5 bp down: the Up bid is cancelled, the Down bid stays.
+    let mut h = harness(&p);
+    live_pair(&mut h);
+    let up_q = h.strategy().fast.quotes[2];
+    let out = ref_at(&mut h, 399_600_000_000, 10_000_000);
+    assert!(h.strategy().fast.dfv(&up_q) <= -5_000_000, "BMK-005.2");
+    assert_eq!(cancels(&out), vec![11], "BMK-005.2");
+    // .3 0.5 bp up: only the Down bid.
+    let mut h = harness(&p);
+    live_pair(&mut h);
+    let out = ref_at(&mut h, 399_600_000_000, 10_001_000);
+    assert_eq!(cancels(&out), vec![12], "BMK-005.3");
+    // .4 after the cancel completes the Up leg waits fv_cool_ms (2 s): nothing at +1 s, a new
+    // bid at +2.1 s.
+    let mut h = harness(&p);
+    live_pair(&mut h);
+    ref_at(&mut h, 399_600_000_000, 10_000_000);
+    h.views_mut().at_engine_ns(399_700_000_000);
+    let out = h.feed(
+        &ev::order(
+            2,
+            OrderUpdate {
+                r: order_ref(11),
+                group: gid(2),
+                tag: binary_maker::fast::tag_of(2),
+                kind: OrderUpdateKind::Cancelled,
+            },
+        )
+        .as_ref(),
+    );
+    assert_eq!(out.places().count(), 0, "BMK-005.4");
+    let out = ref_at(&mut h, 400_600_000_000, 10_000_000);
+    assert_eq!(out.places().count(), 0, "BMK-005.4");
+    let out = ref_at(&mut h, 401_700_000_000, 10_000_000);
+    let insts: Vec<InstId> = out.places().map(|it| it.inst).collect();
+    assert_eq!(insts, vec![SLOTS[2]], "BMK-005.4");
 }
 
 #[test]
@@ -300,4 +344,77 @@ fn bmk_009_subscriptions_and_trades() {
     };
     let out = h.feed(&ev::trade(SLOTS[2], 2, t).as_ref());
     assert!(out.items.is_empty(), "BMK-009.2 {:?}", out.items);
+}
+
+#[test]
+fn bmk_010_stay_when_the_level_clears() {
+    let p = params(|_| {});
+    let mut h = harness(&p);
+    live_pair(&mut h);
+    // .1 the Up bid level 0.450 empties (best bid 0.440): the quote stays.
+    slot_book(h.views_mut(), SLOTS[2], 440, 470);
+    h.views_mut().at_engine_ns(399_600_000_000);
+    let out = h.feed(&ev::book(SLOTS[2], 2).as_ref());
+    assert!(out.items.is_empty(), "BMK-010.1 {:?}", out.items);
+    // .2 a better bid (0.460): cancelled to requote.
+    slot_book(h.views_mut(), SLOTS[2], 460, 470);
+    h.views_mut().at_engine_ns(399_700_000_000);
+    let out = h.feed(&ev::book(SLOTS[2], 2).as_ref());
+    assert_eq!(cancels(&out), vec![11], "BMK-010.2");
+}
+
+/// Long `qty` shares of slot group `k` at average cost `px` (1/1000).
+fn hold(h: &mut StrategyHarness<BinaryMaker>, k: u32, qty: i64, px: i64) {
+    let mut pos = GroupPosView::EMPTY;
+    pos.n_legs = 1;
+    pos.legs[0].qty = Qty(qty * 1_000_000);
+    pos.legs[0].entry_px = Px(px);
+    h.views_mut().group_pos(A1, gid(k), pos);
+}
+
+#[test]
+fn bmk_011_pair_cost_limit() {
+    let p = params(|_| {});
+    // .1 holding 50 Down at 0.560: the Up bid rests at 1 − 0.560 − 0.01 = 0.430 (below the
+    // 0.450 best bid); the Down bid at the best bid.
+    let mut h = harness(&p);
+    hold(&mut h, 3, 50, 560);
+    let out = warm(&mut h, 400, 399, 1);
+    let got: Vec<(InstId, Px)> = out.places().map(|it| (it.inst, it.px)).collect();
+    assert_eq!(got, vec![(SLOTS[2], Px(430)), (SLOTS[3], Px(450))], "BMK-011.1");
+    // .2 a live Up bid at 0.450 above the limit is cancelled.
+    let mut h = harness(&p);
+    live_pair(&mut h);
+    hold(&mut h, 3, 50, 560);
+    h.views_mut().at_engine_ns(399_600_000_000);
+    let out = h.feed(&ev::book(SLOTS[2], 2).as_ref());
+    assert_eq!(cancels(&out), vec![11], "BMK-011.2");
+    // .3 a limit below p_min (Down at 0.950 → 0.040): no Up bid.
+    let mut h = harness(&p);
+    hold(&mut h, 3, 50, 950);
+    let out = warm(&mut h, 400, 399, 1);
+    let insts: Vec<InstId> = out.places().map(|it| it.inst).collect();
+    assert_eq!(insts, vec![SLOTS[3]], "BMK-011.3");
+}
+
+#[test]
+fn bmk_012_normal_cdf() {
+    use binary_maker::norm::{cdf, inv_cdf};
+    let near = |a: i64, b: i64, tol: i64| (a - b).abs() <= tol;
+    // .1 Φ at 0, ±1, 1.96 and beyond the table (1e-9; tolerance 2e-5).
+    for (z, want) in [
+        (0, 500_000_000),
+        (1_000_000_000, 841_344_746),
+        (-1_000_000_000, 158_655_254),
+        (1_960_000_000, 975_002_105),
+        (9_000_000_000, 999_999_713),
+    ] {
+        assert!(near(cdf(z), want, 20_000), "BMK-012.1 {z} {}", cdf(z));
+    }
+    // .2 Φ⁻¹ round trip within 1e-3 over [0.01, 0.99]; clamped to [0.001, 0.999].
+    for p in (1..100).map(|k| k * 10_000_000) {
+        assert!(near(cdf(inv_cdf(p)), p, 1_000_000), "BMK-012.2 {p}");
+    }
+    assert_eq!(inv_cdf(0), inv_cdf(1_000_000), "BMK-012.2");
+    assert!(near(inv_cdf(500_000_000), 0, 1_000_000), "BMK-012.2");
 }

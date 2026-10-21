@@ -1,13 +1,20 @@
 //! Fast part of `binary-maker` (sequencer thread, hot). README "规则": one post-only bid at the
 //! best bid on the Up and the Down slot of the current window while the reference volatility is
-//! high enough, the window is not about to end and the reference has not just jumped. No
-//! allocation after `new`/`on_params`; snapshots are keyed by `GroupId`.
+//! high enough and the window is not about to end; a quote stays when its level clears, is
+//! cancelled when undercut or when the reference moves its fair value against it, and a bid that
+//! completes pairs rests no higher than the pair-cost limit. No allocation after
+//! `new`/`on_params`; snapshots are keyed by `GroupId`.
 #![deny(clippy::float_arithmetic)]
 
 use hft_strategy_sdk::prelude::*;
 
+use crate::norm::{cdf, inv_cdf};
 use crate::params::BinaryMakerParams;
 use crate::vol::{ONE, Vol, isqrt};
+
+/// The settlement averages the reference over the last 60 s of the window: the variance left
+/// `t` seconds before the end (t ≥ 60 s) is that of `t − 40` seconds of the spot.
+pub const TWAP_TAIL_MS: i64 = 40_000;
 
 /// Order tag of the quote of slot group `gix` (`gix + 1`).
 pub fn tag_of(gix: u16) -> u32 {
@@ -53,6 +60,13 @@ pub struct Quote {
     pub px: i64,
     /// Engine time of the last place or cancel.
     pub last_ens: i64,
+    /// At placement (README "规则" 5): reference 2 × mid; Φ⁻¹(Up mid) and implied σ ×
+    /// √(seconds left − 40), both 1e-9.
+    pub b0: i64,
+    pub d0: i64,
+    pub den: i64,
+    /// Engine time before which this leg places nothing (after a fair-value cancel).
+    pub cool_until: i64,
 }
 
 #[derive(Debug)]
@@ -64,8 +78,8 @@ pub struct Fast {
     scratch: Vec<Quote>,
     pub reference: InstId,
     pub vol: Vol,
-    /// Engine time until which no quote rests (after a reference jump).
-    pub pause_until: i64,
+    /// Last reference 2 × mid (0 = none yet).
+    pub ref_mid_x2: i64,
 }
 
 impl Fast {
@@ -78,7 +92,7 @@ impl Fast {
             scratch: Vec::with_capacity(cap),
             reference: INST_NONE,
             vol: Vol::new(p.defaults().vol_window_s as usize),
-            pause_until: 0,
+            ref_mid_x2: 0,
         };
         f.on_params(p, groups);
         f
@@ -111,6 +125,10 @@ impl Fast {
                 r: None,
                 px: 0,
                 last_ens: i64::MIN / 2,
+                b0: 0,
+                d0: 0,
+                den: 0,
+                cool_until: i64::MIN / 2,
             };
             let kept = self
                 .scratch
@@ -126,20 +144,13 @@ impl Fast {
         self.outcomes(ctx);
         match *ev {
             EventRef::Bbo { inst, b, .. } if inst == self.reference => {
-                let mid_x2 = i128::from(b.bid_px.0) + i128::from(b.ask_px.0);
                 if b.bid_px.0 > 0 && b.ask_px.0 > 0 {
+                    let mid_x2 = b.bid_px.0.saturating_add(b.ask_px.0);
+                    self.ref_mid_x2 = mid_x2;
                     let now = v.now();
-                    let d = self.p.defaults();
-                    if let Some(s) = self.vol.sigma(d.vol_min_samples as usize) {
-                        let jump = self.vol.ret_from_sample(mid_x2).unsigned_abs();
-                        let lim = i128::from(s) * i128::from(d.move_k.0) / i128::from(ONE);
-                        if i128::from(jump) >= lim && lim > 0 {
-                            self.pause_until =
-                                now.engine_ns.saturating_add(i64::from(d.pause_ms) * 1_000_000);
-                        }
-                    }
                     if now.clock_ok {
-                        self.vol.on_mid(mid_x2, now.utc_ns.div_euclid(1_000_000_000));
+                        self.vol
+                            .on_mid(i128::from(mid_x2), now.utc_ns.div_euclid(1_000_000_000));
                     }
                 }
                 self.run(v, ctx);
@@ -180,6 +191,20 @@ impl Fast {
         }
     }
 
+    /// Change of the Up probability (1e-9) since quote `q` was placed: the reference move since
+    /// then through the digital delta, Φ(d0 + move / den) − Φ(d0) (README "规则" 5); 0 without
+    /// an anchor.
+    pub fn dfv(&self, q: &Quote) -> i64 {
+        if q.den <= 0 || q.b0 <= 0 || self.ref_mid_x2 <= 0 {
+            return 0;
+        }
+        let one = i128::from(ONE);
+        let moved = (i128::from(self.ref_mid_x2) - i128::from(q.b0)) * one / i128::from(q.b0);
+        let shift = moved * one / i128::from(q.den);
+        let z = (i128::from(q.d0) + shift).clamp(-6 * one, 6 * one) as i64;
+        cdf(z) - cdf(q.d0)
+    }
+
     /// README "规则": decides every slot leg's quote.
     fn run<V: Views>(&mut self, v: &V, ctx: &mut Ctx<'_>) {
         let now = v.now();
@@ -195,18 +220,40 @@ impl Fast {
             -1
         };
         let left_ms = (start + w) * 1_000 - utc_ms;
-        let quoting = ok
-            && now.engine_ns >= self.pause_until
-            && left_ms > i64::from(d.stop_before_ms)
-            && self.vol_ok(left_ms);
-        // Net shares of the current window: Up minus Down.
+        let quoting = ok && left_ms > i64::from(d.stop_before_ms) && self.vol_ok(left_ms);
+        // Shares and average cost of the current window's Up and Down legs.
         let pos = |q: Option<&Quote>| {
-            q.and_then(|q| v.group_pos(self.account, q.id).legs.first().map(|l| l.qty.0))
-                .unwrap_or(0)
+            q.and_then(|q| {
+                v.group_pos(self.account, q.id)
+                    .legs
+                    .first()
+                    .map(|l| (l.qty.0, l.entry_px.0))
+            })
+            .unwrap_or((0, 0))
         };
         let up = usize::try_from(cur * 2).unwrap_or(usize::MAX);
-        let net = pos(self.quotes.get(up)).saturating_sub(pos(self.quotes.get(up.wrapping_add(1))));
+        let (qu, cu) = pos(self.quotes.get(up));
+        let (qd, cd) = pos(self.quotes.get(up.wrapping_add(1)));
+        // Fair-value anchor of new quotes: Φ⁻¹(Up token mid) and implied σ × √(left − 40 s).
+        let up_mid = self.quotes.get(up).map_or(ONE / 2, |q| {
+            let b = v.book(q.inst);
+            let unit = 10i64.saturating_pow(u32::from(v.inst(q.inst).px_exp.unsigned_abs()));
+            match (b.best(Side::Buy), b.best(Side::Sell)) {
+                (Some(x), Some(y)) if unit > 0 => {
+                    ((i128::from(x.px.0) + i128::from(y.px.0)) * i128::from(ONE) / (2 * i128::from(unit)))
+                        as i64
+                }
+                _ => ONE / 2,
+            }
+        });
+        let den = self.vol.sigma(d.vol_min_samples as usize).map_or(0, |s| {
+            let implied = i128::from(s) * i128::from(d.sigma_scale.0) / i128::from(ONE);
+            let v_ms = (left_ms - TWAP_TAIL_MS).max(1);
+            let root_milli = isqrt(u128::try_from(v_ms).unwrap_or(1) * 1_000) as i128;
+            (implied * root_milli / 1_000) as i64
+        });
         let requote = i64::from(d.requote_ms) * 1_000_000;
+        let cool = i64::from(d.fv_cool_ms) * 1_000_000;
         for i in 0..self.quotes.len() {
             let Some(q) = self.quotes.get(i).copied() else {
                 continue;
@@ -214,39 +261,65 @@ impl Fast {
             let hot = *v.inst(q.inst);
             let unit_px = 10i64.saturating_pow(u32::from(hot.px_exp.unsigned_abs()));
             let unit_qty = 10i64.saturating_pow(u32::from(hot.qty_exp.unsigned_abs()));
-            let mut want = None;
-            if quoting && i / 2 == up / 2 {
-                let long = if i % 2 == 0 { net } else { -net };
-                let book = v.book(q.inst);
-                if book.status() == BookStatus::Live
-                    && long < i64::from(d.inv_max_shares).saturating_mul(unit_qty)
-                    && let Some(bid) = book.best(Side::Buy)
+            let is_up = i % 2 == 0;
+            let mine = quoting && i / 2 == up / 2;
+            let book = v.book(q.inst);
+            let live = book.status() == BookStatus::Live;
+            let bid = book.best(Side::Buy).map(|l| l.px.0);
+            let ask = book.best(Side::Sell).map(|l| l.px.0);
+            // Pair-cost limit when this bid completes pairs: 1 − other side's cost − margin,
+            // floored to a whole cent.
+            let (own_q, other_q, other_c) = if is_up { (qu, qd, cd) } else { (qd, qu, cu) };
+            let lim = (other_q > own_q).then(|| {
+                let margin = (i128::from(d.pair_margin.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
+                let cent = (unit_px / 100).max(1);
+                (unit_px - other_c - margin).div_euclid(cent) * cent
+            });
+            let lo = (i128::from(d.p_min.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
+            let hi = (i128::from(d.p_max.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
+            let cap = i64::from(d.inv_max_shares).saturating_mul(unit_qty);
+            let target = match (mine && live, bid, ask) {
+                (true, Some(b), Some(a))
+                    if b < a && b >= lo && b <= hi && own_q.saturating_sub(other_q) < cap =>
                 {
-                    let px = bid.px.0;
-                    let lo = i128::from(d.p_min.0) * i128::from(unit_px) / i128::from(ONE);
-                    let hi = i128::from(d.p_max.0) * i128::from(unit_px) / i128::from(ONE);
-                    let below_ask = book.best(Side::Sell).is_none_or(|a| a.px.0 > px);
-                    if i128::from(px) >= lo && i128::from(px) <= hi && below_ask {
-                        want = Some(px);
-                    }
+                    let t = lim.map_or(b, |l| b.min(l));
+                    (t >= lo).then_some(t)
                 }
-            }
+                _ => None,
+            };
             let since = now.engine_ns.saturating_sub(q.last_ens);
-            match (q.state, want) {
-                (QState::Live, Some(px)) if px == q.px => {}
-                (QState::Live, _) => {
-                    if want.is_some() && since < requote {
-                        continue;
+            match q.state {
+                QState::Live => {
+                    let mut cancel = !(mine && live);
+                    let mut cooled = false;
+                    if !cancel && d.fv_cancel.0 > 0 {
+                        let x = self.dfv(&q);
+                        if (is_up && x <= -d.fv_cancel.0) || (!is_up && x >= d.fv_cancel.0) {
+                            cancel = true;
+                            cooled = true;
+                        }
                     }
-                    if let Some(r) = q.r
+                    // Undercut (a better bid than ours where we would quote higher) or above the
+                    // pair-cost limit; a cleared level (best bid below ours) keeps the quote.
+                    cancel |= bid.is_some_and(|b| b > q.px) && target.is_none_or(|t| t > q.px);
+                    cancel |= lim.is_some_and(|l| q.px > l);
+                    if cancel
+                        && let Some(r) = q.r
                         && ctx.cancel(r).is_ok()
                         && let Some(m) = self.quotes.get_mut(i)
                     {
                         m.state = QState::Cancelling;
                         m.last_ens = now.engine_ns;
+                        if cooled {
+                            m.cool_until = now.engine_ns.saturating_add(cool);
+                        }
                     }
                 }
-                (QState::None, Some(px)) if since >= requote => {
+                QState::None => {
+                    let Some(px) = target else { continue };
+                    if since < requote || now.engine_ns < q.cool_until {
+                        continue;
+                    }
                     let it = OrderIntent {
                         venue: q.venue,
                         account: self.account,
@@ -270,6 +343,9 @@ impl Fast {
                         m.handle = h.0;
                         m.px = px;
                         m.last_ens = now.engine_ns;
+                        m.b0 = self.ref_mid_x2;
+                        m.d0 = inv_cdf(up_mid);
+                        m.den = den;
                     }
                 }
                 _ => {}
@@ -291,7 +367,8 @@ impl Fast {
     }
 
     /// `n: u16`, then per slot group `id: u32, state: u8, r?: (venue u8, account u8, slot u32,
-    /// gen u32), px: i64`; then `pause_until: i64`. Placing quotes are saved as none.
+    /// gen u32), px: i64, b0: i64, d0: i64, den: i64, cool_until: i64`. Placing quotes are saved
+    /// as none.
     pub fn snapshot(&self, w: &mut SnapshotWriter) {
         w.put_u16(self.quotes.len() as u16);
         for q in &self.quotes {
@@ -315,8 +392,11 @@ impl Fast {
             w.put_u32(r.slot);
             w.put_u32(r.r#gen);
             w.put_i64(q.px);
+            w.put_i64(q.b0);
+            w.put_i64(q.d0);
+            w.put_i64(q.den);
+            w.put_i64(q.cool_until);
         }
-        w.put_i64(self.pause_until);
     }
 
     /// Restores by `GroupId`; saved groups no longer configured are dropped.
@@ -330,6 +410,10 @@ impl Fast {
             let slot = r.get_u32()?;
             let r#gen = r.get_u32()?;
             let px = r.get_i64()?;
+            let b0 = r.get_i64()?;
+            let d0 = r.get_i64()?;
+            let den = r.get_i64()?;
+            let cool_until = r.get_i64()?;
             if let Some(q) = self.quotes.iter_mut().find(|q| q.id == id) {
                 let (st, oref) = match state {
                     2 => (QState::Live, true),
@@ -345,9 +429,12 @@ impl Fast {
                     r#gen,
                 });
                 q.px = px;
+                q.b0 = b0;
+                q.d0 = d0;
+                q.den = den;
+                q.cool_until = cool_until;
             }
         }
-        self.pause_until = r.get_i64()?;
         Ok(())
     }
 }
