@@ -108,3 +108,47 @@ fn sim_228_queue_position() {
     s.run_to(ms(210));
     assert!(s.fills_of(A9, o).is_empty(), "SIM-228.4");
 }
+
+/// `rd_binary()` with `maker_fill = Queue`: Up shows a 50-share bid at 0.45; account 9 rests a buy
+/// of 100 Up @ 0.45.
+fn binary_rig() -> (Sim, hft_types::SlotId) {
+    let mut setup = setup_sim();
+    setup.tuning.maker_fill = hft_sim::MakerFill::Queue;
+    let mut a9 = cfg_a9();
+    a9.initial_balances = vec![bal(B5, USDT, usdt("1000"))].into();
+    setup.accounts = vec![(A9, a9)];
+    let mut s = Sim::with(&setup, &rd_binary());
+    s.topn(ms(100), UP_B5, &[("0.47", "50")], &[("0.45", "50")]);
+    let o = s.place(A9, UP_B5, Buy, "100", "0.45", Tif::Gtc, ms(100));
+    s.run_to(ms(110));
+    (s, o)
+}
+
+#[test]
+fn sim_229_binary_complement_prints() {
+    use hft_types::Side;
+    // .1 buyers of Down at 0.55 are sellers of Up at 0.45: 30 then 40 shares consume the 50 ahead,
+    // then fill 20.
+    let (mut s, o) = binary_rig();
+    s.trade_by(ms(200), DN_B5, "0.55", "30", Side::Buy);
+    s.run_to(ms(210));
+    assert!(s.fills_of(A9, o).is_empty(), "SIM-229.1");
+    s.trade_by(ms(300), DN_B5, "0.55", "40", Side::Buy);
+    s.run_to(ms(310));
+    assert_eq!(s.fills_of(A9, o), vec![(px("0.45"), q("20"))], "SIM-229.1");
+    // .2 sellers of Down at 0.55 are buyers of Up: no fill.
+    let (mut s, o) = binary_rig();
+    s.trade_by(ms(200), DN_B5, "0.55", "500", Side::Sell);
+    s.run_to(ms(210));
+    assert!(s.fills_of(A9, o).is_empty(), "SIM-229.2");
+    // .3 a Down buy at 0.60 trades through the Up bid (mirrored at 0.40 < 0.45).
+    let (mut s, o) = binary_rig();
+    s.trade_by(ms(200), DN_B5, "0.60", "10", Side::Buy);
+    s.run_to(ms(210));
+    assert_eq!(s.fills_of(A9, o), vec![(px("0.45"), q("10"))], "SIM-229.3");
+    // .4 the same-token rule is unchanged: Up sellers at 0.45 consume the queue first.
+    let (mut s, o) = binary_rig();
+    s.trade_by(ms(200), UP_B5, "0.45", "60", Side::Sell);
+    s.run_to(ms(210));
+    assert_eq!(s.fills_of(A9, o), vec![(px("0.45"), q("10"))], "SIM-229.4");
+}

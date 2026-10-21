@@ -126,6 +126,8 @@ pub struct Gateway {
     awaiting: Option<(u64, VenueId)>,
     epoch: u16,
     pending: VecDeque<(EventKind, Vec<u8>)>,
+    /// Decoded levels of the current L2 record (bodies are not 8-byte aligned).
+    levels: Vec<Level>,
 }
 impl std::fmt::Debug for Gateway {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -154,6 +156,7 @@ impl Gateway {
             awaiting: None,
             epoch: (epoch & 0x7fff) as u16,
             pending: VecDeque::with_capacity(hft_sim::PENDING_REPLY_CAP),
+            levels: Vec::with_capacity(4096),
         }
     }
     pub fn poll(&mut self, now: Tsc) -> Result<bool, Error> {
@@ -217,6 +220,15 @@ impl Gateway {
                                     .on_record(&r.hdr, SimInput::Market(MarketEventRef::Mark(&b)));
                             }
                         }
+                        EventKind::L2_SNAPSHOT | EventKind::L2_BATCH => {
+                            l2(
+                                &mut self.exchange,
+                                &mut self.levels,
+                                &r.hdr,
+                                EventKind(r.hdr.kind),
+                                r.body,
+                            );
+                        }
                         EventKind::FUNDING => {
                             if let Ok(b) = r.read::<Funding>() {
                                 self.exchange
@@ -242,7 +254,22 @@ impl Gateway {
                 }
                 Next::Err(e) => return Err(Error::runtime("PaperJournal", format!("{e:?}"), 4)),
                 Next::Gap(_) => return Err(Error::runtime("PaperJournal", "journal gap", 4)),
-                Next::Event(_) => {}
+                // Multi-part records (large L2 snapshots) arrive reassembled.
+                Next::Event(ev) => {
+                    if matches!(ev.kind, EventKind::L2_SNAPSHOT | EventKind::L2_BATCH) {
+                        self.seen = ev.seq;
+                        self.event_tsc = self.event_tsc.max(ev.tsc);
+                        busy = true;
+                        let hdr = RecordHeader {
+                            len: ev.body.len() as u32,
+                            kind: ev.kind.0,
+                            flags: ev.flags.0,
+                            seq: ev.seq,
+                            tsc: ev.tsc,
+                        };
+                        l2(&mut self.exchange, &mut self.levels, &hdr, ev.kind, ev.body);
+                    }
+                }
             }
         }
         // Commands that project no decision (SimSettle, SimReset, SimTransfer) run once the
@@ -326,6 +353,54 @@ pub fn written(cmd: &GwCmd, venue: VenueId, now: Tsc) -> Option<SendReport> {
         os_errno: 0,
         _pad2: 0,
     })
+}
+
+/// An `L2Snapshot` (exchange or TopN origin; engine keyframes are book state, not market
+/// data) or `L2Batch` record to the simulated exchange: venues without a Bbo stream
+/// (Polymarket) have no other source of displayed depth for the queue model.
+pub fn l2(
+    exchange: &mut SimExchange,
+    levels: &mut Vec<Level>,
+    hdr: &RecordHeader,
+    kind: EventKind,
+    body: &[u8],
+) {
+    use zerocopy::FromBytes;
+    let read = |levels: &mut Vec<Level>, rest: &[u8], n: usize| {
+        levels.clear();
+        for c in rest.chunks_exact(size_of::<Level>()).take(n) {
+            if let Ok(l) = Level::read_from_bytes(c) {
+                levels.push(l);
+            }
+        }
+    };
+    if kind == EventKind::L2_SNAPSHOT {
+        let Ok((h, rest)) = L2SnapHdr::read_from_prefix(body) else {
+            return;
+        };
+        if h.origin == L2SnapHdr::KEYFRAME {
+            return;
+        }
+        let nb = usize::from(h.n_bids);
+        read(levels, rest, nb + usize::from(h.n_asks));
+        let split = nb.min(levels.len());
+        let (bids, asks) = levels.split_at(split);
+        let part = L2SnapshotPart {
+            hdr: h,
+            bids,
+            asks,
+            part: 0,
+            parts: 1,
+        };
+        exchange.on_record(hdr, SimInput::Market(MarketEventRef::L2Snapshot(part)));
+    } else {
+        let Ok((h, rest)) = L2BatchHdr::read_from_prefix(body) else {
+            return;
+        };
+        read(levels, rest, usize::from(h.n_bids) + usize::from(h.n_asks));
+        let view = L2BatchView { hdr: h, levels };
+        exchange.on_record(hdr, SimInput::Market(MarketEventRef::L2Batch(view)));
+    }
 }
 
 /// Pops the `out-sim` head when it projects no order decision (`decision_seq = 0`); an order

@@ -118,6 +118,24 @@ impl SimExchange {
             MarketEventRef::Trade(x) => {
                 self.trade_through(ii, x.px.0, x.qty.0, t, h.ex_ts_ns);
                 self.queue_trade(ii, x.px.0, x.qty.0, x.taker_side, t, h.ex_ts_ns);
+                // Binary outcome tokens: a print on one token is also flow against the
+                // complement's book at `one − px` with the taker side flipped (README §4).
+                let comp = self.insts.get(ii).map(|r| (usize::from(r.complement), r.px_exp));
+                if let Some((jj, px_exp)) = comp
+                    && jj != usize::from(crate::state::NONE16)
+                {
+                    let one = 10i64.saturating_pow(u32::from(px_exp.unsigned_abs()));
+                    let px = one - x.px.0;
+                    let taker = if x.taker_side == Side::Buy {
+                        Side::Sell
+                    } else {
+                        Side::Buy
+                    };
+                    if px > 0 {
+                        self.trade_through(jj, px, x.qty.0, t, h.ex_ts_ns);
+                        self.queue_trade(jj, px, x.qty.0, taker, t, h.ex_ts_ns);
+                    }
+                }
             }
             MarketEventRef::Funding(x) => {
                 if let Some(r) = self.insts.get_mut(ii) {

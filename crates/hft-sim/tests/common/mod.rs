@@ -31,6 +31,12 @@ pub const S1: VenueId = VenueId::BINANCE_SPOT;
 pub const P2: VenueId = VenueId::OKX_SWAP;
 /// `S4`: spot, exchange E2 (OKX); only for the same-exchange cases.
 pub const S4: VenueId = VenueId::OKX_SPOT;
+/// `B5`: binary outcome venue (Polymarket); only in `rd_binary()`.
+pub const B5: VenueId = VenueId::POLYMARKET_CLOB;
+/// `rd_binary()` outcome tokens on `B5`: `btc-up-0` (asset BTC) and `btc-dn-0` (asset ETH), both
+/// `px_exp = −4` (one = 10 000 raw).
+pub const UP_B5: InstId = InstId(23);
+pub const DN_B5: InstId = InstId(24);
 pub const BTC_S1: InstId = InstId(11);
 pub const BNB_S1: InstId = InstId(12);
 pub const BTC_P2: InstId = InstId(21);
@@ -370,6 +376,10 @@ pub fn build_rd(s: &RdSpec) -> RefData {
     b.venue(venue(S1, Exchange::Binance, InstKind::Spot));
     b.venue(venue(P2, Exchange::Okx, InstKind::Perp));
     b.venue(venue(S4, Exchange::Okx, InstKind::Spot));
+    let binary = s.insts.iter().any(|i| i.venue == B5);
+    if binary {
+        b.venue(venue(B5, Exchange::Polymarket, InstKind::Spot));
+    }
     for c in &s.caps {
         b.caps(c.clone());
     }
@@ -395,6 +405,14 @@ pub fn build_rd(s: &RdSpec) -> RefData {
             asset: USDT,
             qty: usdt("1000"),
         });
+        if binary {
+            b.sim_balance(SimBalanceSpec {
+                account: *a,
+                venue: B5,
+                asset: USDT,
+                qty: usdt("1000"),
+            });
+        }
     }
     for (v, l) in &s.limits {
         b.limit(*v, *l);
@@ -412,6 +430,34 @@ pub fn rd_with(f: impl FnOnce(&mut RdSpec)) -> RefData {
     let mut s = rd_spec();
     f(&mut s);
     build_rd(&s)
+}
+
+/// `rd_binary()` of TESTS.md: `rd_sim()` plus venue `B5` with the tokens `UP_B5`/`DN_B5`
+/// (tick 0.01, lot 1), fees 0, every account also on `B5` with 1 000 USDT there.
+pub fn rd_binary() -> RefData {
+    rd_with(|s| {
+        for (id, sym, a) in [(23, "btc-up-0", BTC), (24, "btc-dn-0", ETH)] {
+            let mut i = inst(
+                id,
+                sym,
+                B5,
+                InstKind::Spot,
+                a,
+                "0.01",
+                "1",
+                "1",
+                InstStatus::Trading,
+                4096,
+            );
+            i.min_notional = Notional(1);
+            s.insts.push(i);
+        }
+        s.caps.push(spot_caps(B5));
+        s.fees.push(fee(B5, 1, "0", "0"));
+        for a in &mut s.accounts {
+            a.venues = vbits(&[S1, P2, B5]);
+        }
+    })
 }
 
 /// `rd_sim()` of TESTS.md.
@@ -543,7 +589,13 @@ pub fn rhdr(t: u64) -> RecordHeader {
 }
 
 pub fn venue_of(i: InstId) -> VenueId {
-    if i.0 >= 21 { P2 } else { S1 }
+    if i.0 >= 23 {
+        B5
+    } else if i.0 >= 21 {
+        P2
+    } else {
+        S1
+    }
 }
 
 /// One delivered reply (bulk copied).

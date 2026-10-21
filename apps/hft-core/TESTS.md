@@ -53,7 +53,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 崩溃隔离与从快照恢复 | CORE-280–CORE-288 |
 | 优雅退出与 kill 语义 | CORE-300–CORE-314 |
 | refdata 变更(Drain + 重启) | CORE-320–CORE-326 |
-| 多账户 | CORE-330、CORE-168、CORE-247、CORE-313、CORE-427 |
+| 多账户 | CORE-330、CORE-168、CORE-247、CORE-313、CORE-427、CORE-428 |
 | HostProfile | CORE-340–CORE-343、CORE-419 |
 | HeartbeatBlock | CORE-350–CORE-352 |
 | 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423 |
@@ -4418,6 +4418,20 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | CORE-427.1 | 空 | `pop_unsequenced` 为 `None` |
 | CORE-427.2 | 两条 `SimSettle`(end_s 100、200) | 依次取出 100、200 |
 | CORE-427.3 | 订单(7),其后 `SimSettle`(300) | 订单在环头时 `None` 且不丢;订单取走后取出 300 |
+
+### CORE-428 sim-gw 把 journal 的 L2 记录交给模拟交易所
+
+- 规则:[多账户](README.md#多账户)
+- 级别:table
+- 里程碑:M3
+- 前置:`support::write` 的配置,`[sim] maker_fill = "queue"`;`paper::exchange`(1 GHz);journal 格式的 TopN `L2Snapshot` 记录体(BTCUSDT 买一 59 000 显示 0.4、卖一 60 000)经 `paper::l2` 交入;账户 1 挂买 0.01 @ 59 000(GTC)
+- 步骤:依次执行下表各行
+- 实现:`apps/hft-core/tests/paper_cmds.rs::core_428_paper_forwards_l2_to_the_queue_model`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-428.1 | 卖方吃单 0.3 @ 59 000 | 不成交(前方还有 0.1;不交 L2 时前方为 0,会立即成交) |
+| CORE-428.2 | 再 0.2 @ 59 000 | 成交 0.01 |
 
 ## 验收
 

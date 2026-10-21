@@ -62,6 +62,9 @@ pub(crate) struct InstRow {
     pub next_funding_ns: i64,
     /// `next_funding_ns` value already settled (no second settlement).
     pub settled_ns: i64,
+    /// Binary outcome venue: tracked index of the complementary token (`<a>-up-<k>` ↔
+    /// `<a>-dn-<k>`), `NONE16` otherwise. Its trades are mirrored at `one − px` (README §4).
+    pub complement: u16,
 }
 
 impl InstRow {
