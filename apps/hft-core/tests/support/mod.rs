@@ -979,14 +979,15 @@ fn write_pm(
             quote: usdc,
             tick: 1,
             lot: 1,
-            min_qty: Qty(1),
+            // The exchange's minimum order is 5 shares (live; the sim keeps one unit).
+            min_qty: Qty(if live.is_some() { 5_000_000 } else { 1 }),
             max_qty: Qty(1_000_000_000_000),
             min_notional: Notional(1_000_000),
             book_window: 128,
             l2_depth: 100,
             tick_str: "0.001".into(),
             lot_str: "0.000001".into(),
-            min_qty_str: "0.000001".into(),
+            min_qty_str: if live.is_some() { "5" } else { "0.000001" }.into(),
             ..InstSpec::default()
         });
     }
@@ -1217,6 +1218,8 @@ fn write_pm(
         engine.role_prod = true;
         engine.gws.venues = vec![v];
         engine.keys_required = vec![(a, v, 3)];
+        // A SmokeOrder bids half the ask (an outcome token at 0.50 → 0.25): it must never fill.
+        engine.oms.smoke_far_bp = Rate(500_000_000);
     }
     engine.exec.default.force_slice.max_chunk_notional = Notional(10_000_000);
     let ecf = engine.encode_blob(1, HostClass::Dev2, 0);
