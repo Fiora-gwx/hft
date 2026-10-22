@@ -187,6 +187,7 @@ fn sign_query(cfg: &VenueCfg, k: &Credential, now: i64, out: &mut RestReqBuf) ->
                 .map(|b| format!("{b:02x}"))
                 .collect::<String>()
         }
+        SignAlg::Secp256k1 => return Err(ProtoErr::Cfg),
     };
     out.path_query
         .push(if path.contains('?') { b"&" } else { b"?" })?;
