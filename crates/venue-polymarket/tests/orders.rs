@@ -218,6 +218,8 @@ fn pmk_023_place_is_a_signed_post_only_gtd_order() {
     let mut mac = [0u8; 44];
     let want = l2_hmac(SECRET, &ts, "POST", "/order", text(r.body.as_slice()), &mut mac).unwrap();
     assert_eq!(header(&r, "POLY_SIGNATURE"), Some(want), "PMK-023.6");
+    assert!(text(r.headers.as_slice()).ends_with("\r\n"), "PMK-023.6");
+    assert_eq!(header(&r, "Content-Type"), Some("application/json"), "PMK-023.6");
     // .7 a sell of the Down token swaps the amounts; a GTC order is not post-only.
     let c = cmd(GwOp::Place, DN, Side::Sell, 550, 5_000_000, Tif::Gtc);
     let b: serde_json::Value =
@@ -762,6 +764,17 @@ fn pmk_030_account_baseline() {
             q != Query::Instruments,
             "PMK-030.1 {path}"
         );
+        // The account client writes Host, Content-Type and the blank line itself.
+        let h = text(r.headers.as_slice());
+        assert!(
+            h.is_empty()
+                || h.ends_with(
+                    "
+"
+                ),
+            "PMK-030.1 {path}"
+        );
+        assert_eq!(header(&r, "Content-Type"), None, "PMK-030.1 {path}");
     }
     let q = Query::Cancel {
         symbol: T_UP.into(),

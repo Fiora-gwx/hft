@@ -347,7 +347,7 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 | PMK-023.3 | 同上 | `expiration` = 时钟秒 + 300;`orderType` GTD、`postOnly` true、`deferExec` false、`owner` = API key |
 | PMK-023.4 | 同上 | `salt` < 2⁵³,低 20 位 = 槽号 7 |
 | PMK-023.5 | 同上 | `signature` = 用同一组字段算出的存款钱包签名 |
-| PMK-023.6 | 同上 | L2 头:`POLY_ADDRESS` = EOA(EIP-55)、`POLY_API_KEY`、`POLY_PASSPHRASE`、`POLY_TIMESTAMP` = 时钟秒、`POLY_SIGNATURE` = 对该请求体的 L2 HMAC |
+| PMK-023.6 | 同上 | L2 头:`POLY_ADDRESS` = EOA(EIP-55)、`POLY_API_KEY`、`POLY_PASSPHRASE`、`POLY_TIMESTAMP` = 时钟秒、`POLY_SIGNATURE` = 对该请求体的 L2 HMAC;`Content-Type: application/json`;每行以 CRLF 结尾 |
 | PMK-023.7 | `Place{DN, Sell, 0.55, 5 份, Gtc}` | `makerAmount` 5000000、`takerAmount` 2750000、`side` SELL;`postOnly` false |
 
 ### PMK-024 下单拒绝编码
@@ -457,7 +457,7 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 
 | 行 | 输入 | 期望 |
 |---|---|---|
-| PMK-030.1 | 各查询的请求 | 路径同[账户配置核验](README.md#账户配置核验);除 `/time` 外都带 L2 头;`Cancel` 为 `DELETE /order {"orderID"}` |
+| PMK-030.1 | 各查询的请求 | 路径同[账户配置核验](README.md#账户配置核验);除 `/time` 外都带 L2 头,每行以 CRLF 结尾、不带 `Content-Type`(账户客户端自己写);`Cancel` 为 `DELETE /order {"orderID"}` |
 | PMK-030.2 | `/auth/api-keys` 含测试 key;只含另一把 key | `venue_uid` = 登记的 24 个字符、`uid_keys = 3`;失败 |
 | PMK-030.3 | `closed_only` false;true | 通过;失败 |
 | PMK-030.4 | 一页一张挂单(游标 `MTAw`);再查到末页 `LTE=` | 1 张、游标 `MTAw`;0 张、游标空 |

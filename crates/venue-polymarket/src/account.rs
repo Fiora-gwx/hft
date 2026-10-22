@@ -64,6 +64,8 @@ pub(crate) fn request(
             unix_ms: now_ms,
             unix_us: now_ms.saturating_mul(1000),
         },
+        // hft-venue's account client writes its own Content-Type.
+        false,
         out,
     )
 }

@@ -84,12 +84,15 @@ pub(crate) fn build_templates(acct: AccountId, rest: &Credential) -> Result<Temp
     })
 }
 
-/// `POLY_*` L2 headers over `out`'s method, path (no query) and body, signed at `clk` (unix s).
+/// `POLY_*` L2 headers over `out`'s method, path (no query) and body, signed at `clk` (unix s);
+/// every line ends with CRLF. `content_type`: add `Content-Type: application/json` to a request
+/// with a body (the gw's REST lanes do not add it; the account client does).
 pub(crate) fn sign_headers(
     eoa: &[u8; 20],
     api_secret: &str,
     cred: &Credential,
     clk: &WallClock,
+    content_type: bool,
     out: &mut RestReqBuf,
 ) -> Result<(), ProtoErr> {
     let mut ts = [0u8; 20];
@@ -122,8 +125,9 @@ pub(crate) fn sign_headers(
     h.push(cred.api_key.as_slice())?;
     h.push(b"\r\nPOLY_PASSPHRASE: ")?;
     h.push(cred.passphrase.as_slice())?;
-    if !out.body.is_empty() {
-        h.push(b"\r\nContent-Type: application/json")?;
+    h.push(b"\r\n")?;
+    if content_type && !out.body.is_empty() {
+        h.push(b"Content-Type: application/json\r\n")?;
     }
     out.redacted = true;
     Ok(())
@@ -203,7 +207,7 @@ pub(crate) fn encode(
         }
         _ => return Err(EncodeErr::Unsupported(c.op)),
     }
-    sign_headers(&t.eoa, k.api_secret, cred, clk, out).map_err(of)
+    sign_headers(&t.eoa, k.api_secret, cred, clk, true, out).map_err(of)
 }
 
 /// `DELETE /cancel-market-orders {"asset_id": <token of c.inst>}`.
