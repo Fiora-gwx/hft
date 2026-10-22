@@ -3748,6 +3748,7 @@ warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入�
 - 里程碑:M3
 - 前置:`Stub<2048, V_BINDS_ID>`(`REST_PLACE_BINDS_ID = true`,Place 走 REST,`bind_order_wire` 拒绝首字节 0xFF 的 id);A1 的 REST 池已交接
 - 步骤:依次执行下表各行
+- 期望:见下表各行
 - 实现:`crates/hft-venue/tests/gw_rest.rs::ven_400_bind_wire_and_rest_place_binds_id`
 
 | 行 | 输入 | 期望 |
