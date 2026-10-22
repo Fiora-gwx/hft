@@ -29,10 +29,12 @@ const fn rule(scope: LimitScope, bucket: LimitBucket, window_ms: u32, limit: u32
     }
 }
 
-/// Order entry is not built yet; only the connection and inbound-message limits apply.
-static RULES: [RateRule; 2] = [
+/// Connections, inbound messages and orders. The exchange allows 40 orders/s (burst 60) and 80
+/// cancels/s per key (README "VenueCaps 默认值"); the default keeps half of the order rate.
+static RULES: [RateRule; 3] = [
     rule(LimitScope::Ip, LimitBucket::NewConns, 300_000, 300),
     rule(LimitScope::Conn, LimitBucket::WsInMsgs, 1_000, 10),
+    rule(LimitScope::Account, LimitBucket::Orders, 1_000, 20),
 ];
 
 pub(crate) fn rate_rules() -> &'static [RateRule] {

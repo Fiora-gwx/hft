@@ -111,6 +111,27 @@ fn rd() -> &'static RefData {
                 ..InstSpec::default()
             });
         }
+        // Live account 1 with its venue UID = the first 24 characters of the test API key
+        // (README "账户配置核验"; `orders.rs`).
+        b.instance(hft_refdata::InstanceSpec {
+            id: hft_types::StrategyId(1),
+            kind_id: 7,
+            name: "pm-test".into(),
+        });
+        b.account(hft_refdata::AccountSpec {
+            id: AccountId(1),
+            sim: false,
+            bound_instance: hft_types::StrategyId(1),
+            is_prod: true,
+            venues: 1 << V.0,
+            label: "pm-live".into(),
+            uid_policy: hft_refdata::UidPolicy::Verified,
+        });
+        b.account_venue(hft_refdata::AccountVenueSpec {
+            account: AccountId(1),
+            venue: V,
+            uid: "0f5e8d2a-1111-2222-3333-".into(),
+        });
         let blob = b.finish();
         match RefData::load(&blob, None) {
             Ok(r) => Box::leak(Box::new(r)),
@@ -740,6 +761,8 @@ fn pmk_017_late_books_and_messages_are_dropped() {
     assert_eq!(ctx.bind(UP, next.as_bytes()), Ok(()));
     assert_eq!(dec_on(&mut ctx, &old_book.replace(T_UP, next), 4), 1);
 }
+
+mod orders;
 
 mod sign_v2 {
     use venue_polymarket::sign::{
