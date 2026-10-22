@@ -149,7 +149,10 @@ pub(crate) fn emit_binding(e: &mut Engine, row: &SlotBindingRow) {
 /// `BindWire` (2 parts) of one binding to the venue's gw when the venue has a Live account: the
 /// gw's protocol needs the wire id to encode orders (Polymarket token ids). All zero = unbind.
 pub(crate) fn emit_order_binding(e: &mut Engine, venue: VenueId, inst: InstId, wire_id: &[u8; 32]) {
-    if !crate::engine::live_gw_venues(&e.rd).iter().any(|(v, _)| *v == venue) {
+    if !crate::engine::live_gw_venues(&e.rd)
+        .iter()
+        .any(|(v, _)| *v == venue)
+    {
         return;
     }
     for (part, c) in wire_id.chunks_exact(16).enumerate() {
@@ -165,7 +168,12 @@ pub(crate) fn emit_order_binding(e: &mut Engine, venue: VenueId, inst: InstId, w
 
 /// After `SetEpoch`: every recorded binding again to the (fresh) gws.
 pub(crate) fn emit_order_bindings_all(e: &mut Engine) {
-    let rows: Vec<_> = e.cmd.bindings.iter().map(|r| (r.venue, r.inst, r.wire_id)).collect();
+    let rows: Vec<_> = e
+        .cmd
+        .bindings
+        .iter()
+        .map(|r| (r.venue, r.inst, r.wire_id))
+        .collect();
     for (v, inst, id) in rows {
         emit_order_binding(e, v, inst, &id);
     }

@@ -63,7 +63,11 @@ fn ven_400_bind_wire_and_rest_place_binds_id() {
     h.cmd(hft_event::GwCmd::bind_wire(S1, 1, &[2; 16]));
     h.poll(3500);
     let n = h.rt.counters();
-    assert_eq!((n.binds - n0.binds, n.bind_failed - n0.bind_failed), (1, 0), "VEN-400.1");
+    assert_eq!(
+        (n.binds - n0.binds, n.bind_failed - n0.bind_failed),
+        (1, 0),
+        "VEN-400.1"
+    );
     // .2 a lone part 1, an inst outside the venue, part 2: ignored, nothing bound.
     h.cmd(hft_event::GwCmd::bind_wire(S2, 1, &[3; 16]));
     h.cmd(hft_event::GwCmd::bind_wire(hft_types::InstId(9999), 0, &[3; 16]));
@@ -98,9 +102,14 @@ fn ven_400_bind_wire_and_rest_place_binds_id() {
     response(&mut h, 200, 6000);
     let es = events(&h.reps());
     assert_eq!(es.len(), 2, "{es:?}");
-    assert_eq!((es[0].what, es[1].what), (OrderEventKind::Ack, OrderEventKind::Fill), "VEN-400.4");
+    assert_eq!(
+        (es[0].what, es[1].what),
+        (OrderEventKind::Ack, OrderEventKind::Fill),
+        "VEN-400.4"
+    );
     assert!(
-        es.iter().all(|e| e.slot == c.slot && e.r#gen == 3 && e.epoch == 5),
+        es.iter()
+            .all(|e| e.slot == c.slot && e.r#gen == 3 && e.epoch == 5),
         "VEN-400.4"
     );
     assert_eq!(h.rt.held(A1), 0, "VEN-400.4");
