@@ -978,15 +978,16 @@ fn write_pm(
             asset: token(i),
             quote: usdc,
             tick: 1,
-            lot: 1,
-            // The exchange's minimum order is 5 shares (live; the sim keeps one unit).
+            // Live: the exchange takes sizes in 0.01 shares (taker amount of a buy at most 2
+            // decimals) and at least 5 shares; the sim keeps one unit.
+            lot: if live.is_some() { 10_000 } else { 1 },
             min_qty: Qty(if live.is_some() { 5_000_000 } else { 1 }),
             max_qty: Qty(1_000_000_000_000),
             min_notional: Notional(1_000_000),
             book_window: 128,
             l2_depth: 100,
             tick_str: "0.001".into(),
-            lot_str: "0.000001".into(),
+            lot_str: if live.is_some() { "0.01" } else { "0.000001" }.into(),
             min_qty_str: if live.is_some() { "5" } else { "0.000001" }.into(),
             ..InstSpec::default()
         });
