@@ -74,7 +74,8 @@ sequencer 的 `StepOutcome::Done{cause}` 到退出码的映射(cause 的定义�
 | `BlobHash` | 2 | blob 的 SHA-256 与 `{path, sha256}` 不符 |
 | `InstanceHostClass` | 2 | 实例角色或 `order_env` 与 `host.class` 不允许组合([实例角色](#实例角色prod-与-sim)) |
 | `SimAccountInProdInstance` / `LiveAccountInSimInstance` / `EnvAccountMismatch` / `ProdAccountOnDev2` / `AccountNamePrefix` / `DevBuildWithProdAccount` | 2 | 见[实例角色](#实例角色prod-与-sim) |
-| `EnvCombo` | 2 | `feed_env = "testnet"` 而 `order_env = "prod"`;`sim` 实例出现 `order_env` 或 `feed_env = "testnet"` |
+| `EnvCombo` | 2 | `feed_env = "testnet"` 而 `order_env = "prod"`;`sim` 实例出现 `order_env` 或 `feed_env = "testnet"`;`prod` 实例的 `order_env` 不是 `testnet`/`prod` |
+| `ProdOrderVenue` | 2 | `order_env = "prod"` 而某个带账户的 venue 不在正式下单白名单(当前只有 `polymarket-clob`,[实例角色](#实例角色prod-与-sim)) |
 | `AccountMismatch` | 2 | `[[accounts]]` 的 `id`/`label` 与 refdata `AccountMeta` 不一致,或引用 refdata 中没有的账户 |
 | `SecretsInSim` | 2 | `sim` 实例出现 `paths.secrets_dir` 或任一 `[[accounts]].keys` |
 | `LiveFeed` | 2 | 网络模式(非 `--dry-run`)出现 `venues.<v>.live_feed` |
@@ -131,7 +132,7 @@ sequencer 的 `StepOutcome::Done{cause}` 到退出码的映射(cause 的定义�
 | 交易所 key | 每个 Live 账户每 venue 一组:下单会话 key 与 REST key(Binance 为两把,OKX/Bitget 为同一把),从 `paths.secrets_dir` 读 | 不加载任何 key:配置出现 `paths.secrets_dir` 或任一 `[[accounts]].keys` → 退出 2;`hft-secrets` 不运行 |
 | 任务 | 行情任务(`feed-bbo:`/`feed-md:` 或 `feed:`)、`gw:`、`acct-fetch`、`sequencer`、`advisor`、`snap-fetch`;没有 `sim-gw` | 行情任务、`sequencer`、`advisor`、`snap-fetch`、`sim-gw`;没有 `gw:` 与 `acct-fetch` |
 | 行情 | 自己的 feed 连接;端点按 `instance.feed_env`(`prod` = 正式行情,`testnet` = 测试网行情);`feed_env = "testnet"` 只允许与 `order_env = "testnet"` 组合 | 自己的 feed 连接,恒为正式行情端点(`feed_env = "prod"`);不读 `prod` 实例的环或 journal |
-| 下单端点 | 按 `instance.order_env`:`prod` = 正式端点,`testnet` = refdata `Endpoint{env ∈ Testnet\|Demo}` | 无 |
+| 下单端点 | 按 `instance.order_env`:`prod` = 正式端点,`testnet` = refdata `Endpoint{env ∈ Testnet\|Demo}`。本装配只对 `polymarket-clob` 开放 `prod`(交易所没有测试网;负责人 2026-10-22 决定只对 Polymarket 放开):其余 venue 带账户时 `order_env = "prod"` → 退出 2(`ProdOrderVenue`);`prod` 下该 venue 的正式端点表可含其私有下单端点(用户频道 `OrderWs`),其余仍只能是公共行情端点 | 无 |
 | 冷进程 | kill-switch、reconciler(只管本实例的 Live 账户)、watchtower、journal-archiver、ops_bot、pipeline、treasury | 不需要 kill-switch 与 reconciler;watchtower、journal-archiver、ops_bot、pipeline 按 `instance` 区分两份 journal |
 | `RELEASE.json.channel = "dev"`(读本实例所属激活组的清单 `paths.release_manifest`) | 有 `is_prod = true` 账户时退出 2(`DevBuildWithProdAccount`);测试网账户允许 | 允许 |
 

@@ -668,3 +668,49 @@ fn core_426_polymarket_maker_sim_config_loads() {
         "CORE-426.3"
     );
 }
+#[cfg(feature = "polymarket")]
+#[test]
+fn core_430_production_orders_polymarket_only() {
+    let codes = |path: &std::path::Path| -> Vec<String> {
+        hft_core::config::load(path, false)
+            .err()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| e.code.to_string())
+            .collect()
+    };
+    let d = tempfile::tempdir().unwrap();
+    let live = support::PmLive {
+        uid: "0f5e8d2a-1111-2222-3333-".into(),
+        keys_dir: d.path().join("keys"),
+    };
+    let hot = d.path().join("hot");
+    let path = support::write_polymarket_maker_live(d.path(), &hot, None, None, "127.0.0.1", "lo", &live);
+    // .1 the live Polymarket maker: production orders accepted.
+    assert_eq!(codes(&path), Vec::<String>::new(), "CORE-430.1");
+    let text = std::fs::read_to_string(&path).unwrap();
+    // .2 the same accounts (is_prod) with testnet orders.
+    std::fs::write(
+        &path,
+        text.replace("order_env = \"prod\"", "order_env = \"testnet\""),
+    )
+    .unwrap();
+    assert!(
+        codes(&path).contains(&"EnvAccountMismatch".to_string()),
+        "CORE-430.2"
+    );
+    // .3 production orders need production market data.
+    std::fs::write(
+        &path,
+        text.replace("feed_env = \"prod\"", "feed_env = \"testnet\""),
+    )
+    .unwrap();
+    assert!(codes(&path).contains(&"EnvCombo".to_string()), "CORE-430.3");
+    // .4 a Binance account with production orders: refused.
+    let d2 = tempfile::tempdir().unwrap();
+    let bn = support::write_live(d2.path(), &d2.path().join("hot"), true);
+    let t = std::fs::read_to_string(&bn).unwrap();
+    assert!(t.contains("order_env = \"testnet\""));
+    std::fs::write(&bn, t.replace("order_env = \"testnet\"", "order_env = \"prod\"")).unwrap();
+    assert!(codes(&bn).contains(&"ProdOrderVenue".to_string()), "CORE-430.4");
+}

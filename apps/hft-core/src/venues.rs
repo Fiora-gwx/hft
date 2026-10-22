@@ -16,7 +16,7 @@ use hft_venue::{FeedCfg, FeedEndpoints, GwCfg};
 use hft_venue::{FeedDeps, FeedRuntime, GwAccountSpec, GwDeps, GwRuntime, Handover};
 use hft_venue::{SessEvent, SessionCfg, SessionDriver};
 use hft_venue_proto::account::{AccountProtocol, State};
-use hft_venue_proto::{ArrayBuf, Credential, RouteKind, SecretBuf, SignAlg, VenueCfg, VenueEnv};
+use hft_venue_proto::{ArrayBuf, Credential, RouteKind, SecretBuf, SignAlg, VenueCfg};
 use std::{
     sync::{
         Arc,
@@ -201,8 +201,22 @@ pub fn public_market_endpoint(protocol: &str, role: EndpointRole, url: &str) -> 
     }
 }
 
-fn endpoint(rd: &RefData, venue: VenueId, role: EndpointRole) -> Result<Endpoint, Error> {
-    endpoint_for(rd, venue, role, EndpointEnv::Testnet)
+/// An order-side endpoint (account REST, order and user-data WS): production only with
+/// `order_env = "prod"` (Polymarket), else the venue's testnet/demo row.
+/// Private production endpoints of the venues allowed to trade with `order_env = "prod"`.
+pub fn prod_order_endpoint(protocol: &str, role: EndpointRole, url: &str) -> bool {
+    let Some(address) = url.strip_prefix("wss://") else {
+        return false;
+    };
+    let host = address.split('/').next().unwrap_or("");
+    match (protocol, role) {
+        ("polymarket-clob", EndpointRole::OrderWs) => host == "ws-subscriptions-clob.polymarket.com",
+        _ => false,
+    }
+}
+
+fn endpoint(c: &Config, rd: &RefData, venue: VenueId, role: EndpointRole) -> Result<Endpoint, Error> {
+    endpoint_for(rd, venue, role, c.instance.order_env().endpoint_env())
 }
 
 fn endpoint_for(
@@ -335,7 +349,7 @@ where
         Some(word)
     };
     let venue = VenueCfg {
-        env: VenueEnv::Testnet,
+        env: c.instance.order_env().venue_env(),
         stale_guard_ms: v.stale_guard_ms,
     };
     let feed_venue = VenueCfg {
@@ -383,7 +397,7 @@ where
         }
     }
     let mut gwcfg = GwCfg {
-        env: VenueEnv::Testnet,
+        env: c.instance.order_env().venue_env(),
         oms_slots: v
             .accounts
             .iter()
@@ -426,7 +440,7 @@ where
         }
         let params = v.account_io.ok_or_else(|| Error::config("AccountIo", name))?;
         let mut rest_net = net.clone();
-        let rest_endpoint = endpoint(rd, P::VENUE, EndpointRole::Rest)?;
+        let rest_endpoint = endpoint(c, rd, P::VENUE, EndpointRole::Rest)?;
         let host = rest_endpoint.host.clone();
         rest_net.endpoints = vec![rest_endpoint];
         let rest_arena = ConnArena::new(&[(ConnRole::Rest, 2)], &rest_net, clock);
@@ -480,16 +494,17 @@ where
     }
     if !accounts.is_empty() {
         gwcfg.order_endpoint = EndpointId(net.endpoints.len() as u8);
-        net.endpoints.push(endpoint(rd, P::VENUE, EndpointRole::OrderWs)?);
+        net.endpoints
+            .push(endpoint(c, rd, P::VENUE, EndpointRole::OrderWs)?);
         gwcfg.user_endpoint = EndpointId(net.endpoints.len() as u8);
         if P::USER_STREAM {
             net.endpoints
-                .push(endpoint(rd, P::VENUE, EndpointRole::UserData)?);
+                .push(endpoint(c, rd, P::VENUE, EndpointRole::UserData)?);
         }
     }
     let mut gateway_rest = None;
     if !accounts.is_empty() {
-        let ep = endpoint(rd, P::VENUE, EndpointRole::Rest)?;
+        let ep = endpoint(c, rd, P::VENUE, EndpointRole::Rest)?;
         let id = EndpointId(net.endpoints.len() as u8);
         gateway_rest = Some((id, ep.host.clone()));
         net.endpoints.push(ep);

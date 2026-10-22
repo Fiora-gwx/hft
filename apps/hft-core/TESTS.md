@@ -4466,3 +4466,21 @@ CORE-120 同时验证两协议 funding_schedule 的可选启动查询：成功�
 CORE-033 的 core_033_testnet_variants_check_production_bounds 枚举 deploy/testnet 的 strategy*.toml 参数,用非正式永续/现货双 venue 夹具执行实际 `hft-core --check`;凡默认值低于 schema prod_min,同参在正式账户须被拒;全 feature CI 覆盖,不读取秘密或连接网络。
 
 CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 SDK-005 脚手架验证复用。
+
+### CORE-430 正式下单只对 Polymarket 开放
+
+- 规则:[实例角色(prod 与 sim)](README.md#实例角色prod-与-sim)、[命令行与退出码](README.md#命令行与退出码)
+- 级别:table
+- 里程碑:M3
+- 前置:`write_polymarket_maker_live`(`order_env = feed_env = "prod"`,实盘账户 `pm-live` `is_prod`,正式端点含用户频道 `OrderWs`);`write_live(is_prod = true)`(Binance 现货实盘账户)
+- 步骤:依次执行下表各行,对配置调 `config::load(_, dry = false)`
+- 期望:见下表各行
+- 实现:`apps/hft-core/tests/config.rs::core_430_production_orders_polymarket_only`
+
+| 行 | 配置 | 期望错误码 |
+|---|---|---|
+| CORE-430.1 | Polymarket 实盘做市配置 | 无 |
+| CORE-430.2 | 同上改 `order_env = "testnet"` | 含 `EnvAccountMismatch` |
+| CORE-430.3 | 同上改 `feed_env = "testnet"` | 含 `EnvCombo` |
+| CORE-430.4 | Binance 实盘配置改 `order_env = "prod"` | 含 `ProdOrderVenue` |
+
