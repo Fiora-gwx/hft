@@ -457,6 +457,9 @@ pub enum LoginStep {
     /// `out` holds the first frame of a challenge login: on `LoginResult::Continue` the driver calls
     /// `login` again with `step + 1`.
     Handshake,
+    /// `out` holds one login frame the venue never answers (Polymarket's authenticated user
+    /// subscription): the session is logged in once it is sent.
+    Sent,
 }
 
 /// Answer to a login frame.

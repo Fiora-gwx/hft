@@ -521,6 +521,14 @@ impl<P: VenueProtocol, T: crate::AcctTransport> SessionDriver<P, T> {
         );
         match r {
             Ok(LoginStep::NotNeeded) => self.identity_or_finish(c, i, now_ns),
+            Ok(LoginStep::Sent) => {
+                let sent = c.conn_mut(j.job).map(|conn| conn.send_text(&self.out, 0).is_ok());
+                if sent != Some(true) {
+                    return Some(self.fail(c, i, 0));
+                }
+                self.note(SessionOp::LoginFrame(j.req.conn, step));
+                self.identity_or_finish(c, i, now_ns)
+            }
             Ok(LoginStep::Frame | LoginStep::Handshake) => {
                 let sent = c.conn_mut(j.job).map(|conn| conn.send_text(&self.out, 0).is_ok());
                 if sent != Some(true) {

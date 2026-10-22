@@ -49,6 +49,8 @@ pub enum LoginMode {
     None,
     One,
     Two,
+    /// One frame the venue never answers (`LoginStep::Sent`).
+    Sent,
 }
 
 #[derive(Clone, Debug)]
@@ -526,6 +528,11 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         let mode = cfg().login;
         match mode {
             LoginMode::None => Ok(LoginStep::NotNeeded),
+            LoginMode::Sent => {
+                out.extend_from_slice(format!("LOGIN{step}|").as_bytes());
+                out.extend_from_slice(cred.api_key.as_slice());
+                Ok(LoginStep::Sent)
+            }
             LoginMode::One | LoginMode::Two => {
                 out.extend_from_slice(format!("LOGIN{step}|").as_bytes());
                 out.extend_from_slice(cred.api_key.as_slice());

@@ -66,7 +66,7 @@ pub trait VenueProtocol: Sized + 'static {
     fn endpoint(role: Role, route: RouteId, cfg: &VenueCfg, cred: Option<&Credential>, boot: Option<&[u8]>,
                 now_ms: i64, out: &mut EndpointSpec) -> Result<(), ProtoErr>;     // path、query、额外 Upgrade 头
     fn login(role: Role, cfg: &VenueCfg, cred: &Credential, step: u8, now_ms: i64, out: &mut Vec<u8>)
-             -> Result<LoginStep, ProtoErr>;                                      // NotNeeded / Frame / Handshake;step = 第几步(0 起;login_result 返回 Continue 后加一再调)
+             -> Result<LoginStep, ProtoErr>;                                      // NotNeeded / Frame / Handshake / Sent(交易所不回复的登录帧,发出即视为登录完成;Polymarket 用户频道的带鉴权订阅);step = 第几步(0 起;login_result 返回 Continue 后加一再调)
     fn login_result(payload: &[u8]) -> LoginResult;                               // Ok / Rejected(code) / Continue / NotMine
     /// 订阅(unsub = false)或退订帧,分批;每帧记它覆盖 subs 的前几项。feed 线程在 install 后调用:写进预分配的 out,不分配;
     /// 流名所需的交易所符号从 rd 取(SubSpec 只带 InstId)。
