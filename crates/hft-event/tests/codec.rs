@@ -410,7 +410,7 @@ fn evt_022_invalid_enums() {
     bad::<OrderDecision>("EVT-022.2", 60, &[0, 3], Some(2));
     bad::<OrderDecision>("EVT-022.3", 61, &[0, 5], Some(4));
     bad::<SendReport>("EVT-022.4", 35, &[0, 9], Some(8));
-    bad::<SendReport>("EVT-022.5", 36, &[0, 18], Some(17));
+    bad::<SendReport>("EVT-022.5", 36, &[0, 19], Some(18));
     bad::<OrderEvent>("EVT-022.6", 2, &[0, 13], Some(12));
     bad::<ExternalFill>("EVT-022.7", 2, &[0], None);
     bad::<ExternalFill>("EVT-022.7", 3, &[0, 6], Some(5));

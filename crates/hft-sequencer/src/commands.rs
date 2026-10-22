@@ -1668,10 +1668,12 @@ fn bind_slot(
 }
 
 /// `Settle`: the inst must be a slot of `venue` whose binding ends at `end_s`, the window must have
-/// ended (engine UTC ≥ `end_s`) and `0 ≤ payout ≤` one unit of the inst's price. Live accounts are
-/// not settled here (P3): a Live position or open order on the inst → `NotSim`. Every Sim account
+/// ended (engine UTC ≥ `end_s`) and `0 ≤ payout ≤` one unit of the inst's price. Every Sim account
 /// with inventory or an open order on the inst gets a `SimSettle` on `out-sim` (sim-gw cancels the
-/// orders and delivers the inventory at `payout`, hft-sim); none → `NoOp`.
+/// orders and delivers the inventory at `payout`, hft-sim). A Live account with an open order on
+/// the inst → `NotQuiescent` (nothing sent); every Live account with inventory gets a `Deliver` on
+/// `out-<venue>` (its gw reports the delivery, hft-venue; the exchange redeems on chain). None →
+/// `NoOp`.
 fn settle(e: &mut Engine, venue: VenueId, slot: InstId, end_s: i64, payout: hft_types::Px) -> Res {
     if slot.0 == 0 || venue.0 == 0 || e.rd.inst(slot).venue != venue {
         return res(status::INVALID_ARGS, detail::BAD_VALUE);
@@ -1692,32 +1694,38 @@ fn settle(e: &mut Engine, venue: VenueId, slot: InstId, end_s: i64, payout: hft_
     let mut targets = Vec::new();
     for k in 1..=accounts {
         let a = AccountId(k as u8);
-        let held = e.ledger.pos(a, slot).qty.0 != 0
-            || infl.open_buy(a, slot).0 != 0
-            || infl.open_sell(a, slot).0 != 0;
-        if !held {
+        let pos = e.ledger.pos(a, slot).qty;
+        let open = infl.open_buy(a, slot).0 != 0 || infl.open_sell(a, slot).0 != 0;
+        if pos.0 == 0 && !open {
             continue;
         }
         if !e.is_sim(a) {
-            return res(status::INVALID_ARGS, detail::NOT_SIM);
+            if open {
+                return res(status::PRECONDITION_FAILED, detail::NOT_QUIESCENT);
+            }
+            if pos.0 < 0 {
+                continue;
+            }
         }
-        targets.push(a);
+        targets.push((a, pos));
     }
     if targets.is_empty() {
         return res(status::NO_OP, 0);
     }
-    for a in targets {
-        e.out.emits.push(Emit::Gw {
-            ring: OutRing::Sim,
-            cmd: hft_event::GwCmd::sim_settle(
-                a,
-                venue,
-                slot,
-                payout,
-                end_s.clamp(0, i64::from(u32::MAX)) as u32,
-            ),
-            rec: None,
-        });
+    let end = end_s.clamp(0, i64::from(u32::MAX)) as u32;
+    for (a, pos) in targets {
+        let (ring, cmd) = if e.is_sim(a) {
+            (
+                OutRing::Sim,
+                hft_event::GwCmd::sim_settle(a, venue, slot, payout, end),
+            )
+        } else {
+            (
+                OutRing::Venue(venue),
+                hft_event::GwCmd::deliver(a, venue, slot, payout, end, pos),
+            )
+        };
+        e.out.emits.push(Emit::Gw { ring, cmd, rec: None });
     }
     e.trace.rec("cmd.settle", u64::from(slot.0), payout.0 as u64);
     ok()

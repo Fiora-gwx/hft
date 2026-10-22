@@ -323,6 +323,28 @@ fn evt_142_gwcmd_ctors() {
         [0; 16],
         "EVT-142.12"
     );
+    let c = GwCmd::deliver(
+        AccountId(9),
+        VenueId(15),
+        InstId(4),
+        Px(1_000),
+        1_300,
+        Qty(5_000_000),
+    );
+    assert_eq!(
+        (c.op, c.account, c.inst, c.px, c.qty, c.arg, c.arg2),
+        (
+            GwOp::Deliver,
+            AccountId(9),
+            InstId(4),
+            Px(1_000),
+            Qty(5_000_000),
+            15,
+            1_300
+        ),
+        "EVT-142.13"
+    );
+    assert!(rest_zero(&c) && c.slot == SlotId(0), "EVT-142.13");
 }
 
 #[test]

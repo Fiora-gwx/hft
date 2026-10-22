@@ -138,6 +138,8 @@ pub struct GwCounters {
     /// `BindWire` bindings applied (per account) and refused by the protocol.
     pub binds: u64,
     pub bind_failed: u64,
+    /// `Deliver` reports sent.
+    pub delivered: u64,
 }
 
 const NO_CONN: ConnId = ConnId(0);
@@ -151,6 +153,8 @@ const SINK_CAP: usize = 64;
 const BATCH_CAP: usize = 64;
 /// Insts with a `BindWire` part 0 waiting for its part 1.
 const BIND_PEND_CAP: usize = 64;
+/// Deliveries remembered against a repeated `Deliver`.
+const DELIVERED_CAP: usize = 64;
 
 #[derive(Copy, Clone, Debug)]
 struct Inflight {
@@ -254,6 +258,8 @@ pub struct GwRuntime<P: VenueProtocol, const CAP: usize = 2048> {
     venue_insts: Box<[InstId]>,
     /// `BindWire` part 0 waiting for its part 1, per inst.
     bind_pend: Vec<(InstId, [u8; 16])>,
+    /// `(account, inst, end_s)` of the last deliveries (repeats are not reported again).
+    delivered: VecDeque<(AccountId, InstId, u32)>,
     n: GwCounters,
     last: LoopStat,
     rest: Option<(
@@ -555,6 +561,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             cmds_done: 0,
             venue_insts: venue_insts.into_boxed_slice(),
             bind_pend: Vec::with_capacity(BIND_PEND_CAP),
+            delivered: VecDeque::with_capacity(DELIVERED_CAP),
             n: GwCounters::default(),
             last: LoopStat::default(),
             rest: None,
@@ -2233,8 +2240,48 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                 }
             }
             GwOp::BindWire => self.bind_wire(c),
+            GwOp::Deliver => self.deliver(c, now),
             _ => self.n.maint_ignored += 1,
         }
+    }
+
+    /// `Deliver` (README "出环"): the settlement of an account's inventory, reported as
+    /// `ExternalFill{Delivery}` (dedup key `(inst, end_s, qty)`; the same command twice reports once).
+    fn deliver(&mut self, c: GwCmd, now: u64) {
+        let ok_inst = self.venue_insts.binary_search(&c.inst).is_ok();
+        if self.acct_ix(c.account).is_none() || !ok_inst || c.qty.0 <= 0 || c.px.0 < 0 {
+            self.n.maint_ignored += 1;
+            return;
+        }
+        let key = (c.account, c.inst, c.arg2);
+        if self.delivered.contains(&key) {
+            self.n.maint_ignored += 1;
+            return;
+        }
+        if self.delivered.len() == DELIVERED_CAP {
+            self.delivered.pop_front();
+        }
+        self.delivered.push_back(key);
+        self.push_rep(RepMsg::ExternalFill(hft_event::ExternalFill {
+            venue: P::VENUE,
+            account: c.account,
+            side: hft_types::Side::Sell,
+            cause: hft_event::ExternalCause::Delivery,
+            inst: c.inst,
+            qty: c.qty,
+            px: c.px,
+            fee: hft_types::Qty(0),
+            fee_asset: self.rd.inst(c.inst).quote,
+            _pad: [0; 6],
+            exch_order_id: u64::from(c.arg2),
+            trade_id: 0,
+            ex_ts_ns: i64::from(c.arg2).saturating_mul(1_000_000_000),
+            rx_tsc: hft_types::Tsc(now),
+            fill_seq: c.qty.0 as u64,
+            cash_qty: hft_types::Qty(0),
+            cash_amount: hft_types::Qty(0),
+        }));
+        self.n.delivered += 1;
     }
 
     /// `BindWire` (README "出环"): part 0 waits for part 1 of the same inst; the assembled id goes
