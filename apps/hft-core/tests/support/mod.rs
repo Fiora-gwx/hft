@@ -676,6 +676,7 @@ pub fn write_polymarket_sim(
         &PM_COINS,
         2,
         false,
+        None,
     )
 }
 
@@ -694,7 +695,76 @@ pub fn write_polymarket_maker_sim(
     src_ip: &str,
     bind_device: &str,
 ) -> PathBuf {
-    write_pm(root, hot, user, pipeline, src_ip, bind_device, &["btc"], 3, true)
+    write_pm(
+        root,
+        hot,
+        user,
+        pipeline,
+        src_ip,
+        bind_device,
+        &["btc"],
+        3,
+        true,
+        None,
+    )
+}
+
+/// The live account of `write_polymarket_maker_live`.
+#[cfg(feature = "polymarket")]
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct PmLive {
+    /// Venue UID: the first 24 characters of the CLOB API key (venue-polymarket README "账户配置核验").
+    pub uid: String,
+    /// Directory of the credential files `api_key`, `secret` (`<api secret>|<EOA key>|<deposit
+    /// wallet>`) and `passphrase`; hft-core reads and unlinks them at startup.
+    pub keys_dir: PathBuf,
+}
+
+/// Binary-maker parameters of the first live run (`micro_s2_c5_cap10_mc20`, research reply
+/// 2026-10-22): 5 shares per quote, net 10, no-chase 1 s, fair-value cooldown 1 s, streak pause
+/// (2 fills within 10 s → 10 s), at most 20 USDC bought per window.
+#[cfg(feature = "polymarket")]
+#[allow(dead_code)]
+pub const PM_LIVE_PARAMS: [(&str, i64); 9] = [
+    ("enabled", 1),
+    ("clip_shares", 5),
+    ("inv_max_shares", 10),
+    ("fv_cool_ms", 1_000),
+    ("nochase_ms", 1_000),
+    ("streak_k", 2),
+    ("streak_window_ms", 10_000),
+    ("streak_pause_ms", 10_000),
+    ("max_window_cost", 20_000_000),
+];
+
+/// The live maker (`order_env = "prod"`, no `--dry-run`): the maker simulation's venues, slots and
+/// strategy with a Live account `pm-live` (`is_prod`, UID `live.uid`) on Polymarket, its keys in
+/// `live.keys_dir`, `PM_LIVE_PARAMS` and the micro risk limits (order 10 USDC, account and venue
+/// 55, slot group 25, daily loss 15).
+#[cfg(feature = "polymarket")]
+#[allow(dead_code)]
+pub fn write_polymarket_maker_live(
+    root: &Path,
+    hot: &Path,
+    user: Option<&str>,
+    pipeline: Option<&str>,
+    src_ip: &str,
+    bind_device: &str,
+    live: &PmLive,
+) -> PathBuf {
+    write_pm(
+        root,
+        hot,
+        user,
+        pipeline,
+        src_ip,
+        bind_device,
+        &["btc"],
+        3,
+        true,
+        Some(live),
+    )
 }
 
 #[cfg(feature = "polymarket")]
@@ -709,6 +779,7 @@ fn write_pm(
     coins: &[&str],
     pairs: usize,
     maker: bool,
+    live: Option<&PmLive>,
 ) -> PathBuf {
     use hft_venue_proto::VenueProtocol;
     std::fs::create_dir_all(root).unwrap();
@@ -852,11 +923,18 @@ fn write_pm(
         stale_guard: StaleGuardKind::None,
     });
     let market = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
-    for (role, url) in [
+    let mut pm_endpoints = vec![
         (EndpointRole::MdPublic, market),
         (EndpointRole::MdMarket, market),
         (EndpointRole::Rest, "https://clob.polymarket.com"),
-    ] {
+    ];
+    if live.is_some() {
+        pm_endpoints.push((
+            EndpointRole::OrderWs,
+            "wss://ws-subscriptions-clob.polymarket.com/ws/user",
+        ));
+    }
+    for (role, url) in pm_endpoints {
         b.endpoint(
             v,
             Endpoint {
@@ -939,25 +1017,33 @@ fn write_pm(
     });
     b.account(AccountSpec {
         id: a,
-        sim: true,
+        sim: live.is_none(),
         bound_instance: StrategyId(1),
-        is_prod: false,
+        is_prod: live.is_some(),
         venues: 1 << v.0,
-        label: "sim-pm".into(),
+        label: if live.is_some() { "pm-live" } else { "sim-pm" }.into(),
         uid_policy: UidPolicy::Verified,
     });
-    b.sim(SimSpec {
-        account: a,
-        fee_tier: 0,
-        latency_model: 0,
-        margin_model: 0,
-    });
-    b.sim_balance(SimBalanceSpec {
-        account: a,
-        venue: v,
-        asset: usdc,
-        qty: Qty(if maker { 10_000_000_000 } else { 1_000_000_000 }),
-    });
+    if let Some(l) = live {
+        b.account_venue(AccountVenueSpec {
+            account: a,
+            venue: v,
+            uid: l.uid.as_str().into(),
+        });
+    } else {
+        b.sim(SimSpec {
+            account: a,
+            fee_tier: 0,
+            latency_model: 0,
+            margin_model: 0,
+        });
+        b.sim_balance(SimBalanceSpec {
+            account: a,
+            venue: v,
+            asset: usdc,
+            qty: Qty(if maker { 10_000_000_000 } else { 1_000_000_000 }),
+        });
+    }
     let rdb = b.finish();
     let rd = RefData::load(&rdb, None).unwrap();
     let schema = desc.schema;
@@ -970,6 +1056,14 @@ fn write_pm(
             .position(|i| schema.field(i).unwrap().name == "enabled")
             .unwrap();
         defaults[enabled] = 1;
+    }
+    if live.is_some() {
+        for (name, value) in PM_LIVE_PARAMS {
+            let k = (0..schema.n_fields())
+                .position(|i| schema.field(i).unwrap().name == name)
+                .unwrap();
+            defaults[k] = value;
+        }
     }
     let body = encode_body(
         schema,
@@ -1036,17 +1130,24 @@ fn write_pm(
         ioc_max_cross: Rate(5_000_000),
         rr_max_cross: Some(Rate(10_000_000)),
     });
+    // Live micro limits (USDC, 1e-6): account and venue 55 (two overlapping windows plus resting
+    // quotes, below the 82 deposited), one slot group 25, daily loss 15.
+    let (acct_cap, group_cap, loss_cap) = match (live.is_some(), maker) {
+        (true, _) => (55_000_000, 25_000_000, 15_000_000),
+        (false, true) => (10_000_000_000, 1_000_000_000, 1_000_000_000),
+        (false, false) => (100_000_000, 10_000_000, 10_000_000),
+    };
     risk.accounts.push((
         a,
         hft_risk::AcctSpec {
             max_order_notional: Notional(10_000_000),
-            max_account_notional: Notional(if maker { 10_000_000_000 } else { 100_000_000 }),
+            max_account_notional: Notional(acct_cap),
             account_notional_from_equity: Rate(1_000_000_000),
             // A slot group is one leg held to settlement: its whole position is "naked" (ratio 1),
             // so the exposure gate is off for the maker (naked_gate = 1).
             default_group: if maker {
                 hft_risk::GroupLimits {
-                    max_group_notional: Notional(1_000_000_000),
+                    max_group_notional: Notional(group_cap),
                     max_pos_qty: Qty(1_000_000_000),
                     naked_gate: Rate(1_000_000_000),
                     naked_gate_min: Notional(1_000_000_000),
@@ -1062,7 +1163,7 @@ fn write_pm(
             max_hedge_notional: Some(Notional(10_000_000)),
             max_reduce_notional: Some(Notional(10_000_000)),
             daily_loss_kill: Rate(100_000_000),
-            daily_loss_abs: Notional(if maker { 1_000_000_000 } else { 10_000_000 }),
+            daily_loss_abs: Notional(loss_cap),
             recon_closeonly_notional: Notional(5_000_000),
             ..hft_risk::AcctSpec::default()
         },
@@ -1071,7 +1172,7 @@ fn write_pm(
         v,
         a,
         hft_risk::VenueSpec {
-            max_venue_notional: Notional(if maker { 10_000_000_000 } else { 100_000_000 }),
+            max_venue_notional: Notional(acct_cap),
             inst_bucket_per_s: 10,
             backoff_base_ms: 500,
             backoff_max_ms: 8000,
@@ -1112,6 +1213,11 @@ fn write_pm(
     engine.feeds = VenueSet((1 << v.0) | if maker { 1 << bn.0 } else { 0 });
     engine.seq.rings[7] = hft_sequencer::RingLimit::default();
     engine.seq.allow_missing_standby = 1;
+    if live.is_some() {
+        engine.role_prod = true;
+        engine.gws.venues = vec![v];
+        engine.keys_required = vec![(a, v, 3)];
+    }
     engine.exec.default.force_slice.max_chunk_notional = Notional(10_000_000);
     let ecf = engine.encode_blob(1, HostClass::Dev2, 0);
     let mut uids = String::new();
@@ -1224,6 +1330,41 @@ quote_interval_ms = 1000
         );
     }
     let path = root.join("core.toml");
+    if let Some(l) = live {
+        let mut config: toml::Value = toml::from_str(&text).unwrap();
+        config.as_table_mut().unwrap().remove("sim");
+        let instance = config["instance"].as_table_mut().unwrap();
+        instance.insert("name".into(), "prod".into());
+        instance.insert("order_env".into(), "prod".into());
+        for name in ["pm", "bn"] {
+            if let Some(v) = config["venues"].get_mut(name).and_then(toml::Value::as_table_mut) {
+                v.remove("live_feed");
+            }
+        }
+        let k = |f: &str| l.keys_dir.join(f).display().to_string();
+        let keys: toml::Value = toml::from_str(&format!(
+            "account=1\napi_key_path={:?}\nsession_seed_path={:?}\nrest_api_key_path={:?}\nrest_secret_path={:?}\npassphrase_path={:?}",
+            k("api_key"),
+            k("secret"),
+            k("api_key"),
+            k("secret"),
+            k("passphrase")
+        ))
+        .unwrap();
+        let pm = config["venues"]["pm"].as_table_mut().unwrap();
+        pm.insert("accounts".into(), toml::Value::Array(vec![keys]));
+        pm.insert(
+            "account_io".into(),
+            toml::from_str(
+                "timeout_ms=5000\ninterval_ms=60000\nrequest_gap_ms=200\nmax_cancel_rounds=3\nlisten_keepalive_ms=600000",
+            )
+            .unwrap(),
+        );
+        let threads = config["threads"].as_array_mut().unwrap();
+        threads.retain(|t| !matches!(t["task"].as_str(), Some("sim-gw" | "paper-feed")));
+        threads.push(toml::from_str("name='gw-pm'\ntask='gw:pm'\npark_us=100\nnice=0").unwrap());
+        text = toml::to_string(&config).unwrap();
+    }
     std::fs::write(&path, text).unwrap();
     path
 }

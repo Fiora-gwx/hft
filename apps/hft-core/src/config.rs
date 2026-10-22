@@ -40,6 +40,24 @@ pub struct Instance {
     #[serde(default)]
     pub secrets_mode: SecretsMode,
 }
+impl Instance {
+    /// `order_env = "prod"`: orders and account queries go to production endpoints. Allowed only
+    /// when every venue with accounts is Polymarket (`ProdOrderVenue`; README "运行模式").
+    pub fn prod_orders(&self) -> bool {
+        self.order_env.as_deref() == Some("prod")
+    }
+    pub fn order_env(&self) -> FeedEnv {
+        if self.prod_orders() {
+            FeedEnv::Prod
+        } else {
+            FeedEnv::Testnet
+        }
+    }
+}
+
+/// Protocols whose accounts may trade on production endpoints (`order_env = "prod"`).
+pub const PROD_ORDER_PROTOCOLS: &[&str] = &["polymarket-clob"];
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FeedEnv {
@@ -398,12 +416,28 @@ pub fn load_timed(
         );
     }
     if (dry && (c.instance.name != "sim" || c.instance.order_env.is_some()))
-        || (!dry && (c.instance.name != "prod" || c.instance.order_env.as_deref() != Some("testnet")))
+        || (!dry
+            && (c.instance.name != "prod"
+                || !matches!(c.instance.order_env.as_deref(), Some("testnet" | "prod"))))
     {
         bad!(
             "EnvCombo",
-            "--dry-run requires sim without order_env; network mode requires prod/testnet".into()
+            "--dry-run requires sim without order_env; network mode requires prod with order_env testnet or prod"
+                .into()
         );
+    }
+    if c.instance.prod_orders() {
+        if c.instance.feed_env != FeedEnv::Prod {
+            bad!("EnvCombo", "order_env prod requires feed_env prod".into());
+        }
+        for (name, v) in &c.venues {
+            if !v.accounts.is_empty() && !PROD_ORDER_PROTOCOLS.contains(&v.protocol.as_str()) {
+                bad!(
+                    "ProdOrderVenue",
+                    format!("venue {name}: production orders are enabled for Polymarket only")
+                );
+            }
+        }
     }
     if dry != c.sim.is_some() {
         bad!(
@@ -642,16 +676,17 @@ pub fn load_timed(
         let public = rd.endpoints(VenueId(v.id), hft_refdata::EndpointEnv::Prod);
         if (c.instance.feed_env == FeedEnv::Testnet && !public.is_empty())
             || (c.instance.feed_env == FeedEnv::Prod
-                && (public
-                    .iter()
-                    .any(|e| !crate::venues::public_market_endpoint(&v.protocol, e.role, &e.url))
-                    || [
-                        hft_refdata::EndpointRole::MdPublic,
-                        hft_refdata::EndpointRole::MdMarket,
-                        hft_refdata::EndpointRole::Rest,
-                    ]
-                    .iter()
-                    .any(|role| !public.iter().any(|e| e.role == *role))))
+                && (public.iter().any(|e| {
+                    !crate::venues::public_market_endpoint(&v.protocol, e.role, &e.url)
+                        && !(c.instance.prod_orders()
+                            && crate::venues::prod_order_endpoint(&v.protocol, e.role, &e.url))
+                }) || [
+                    hft_refdata::EndpointRole::MdPublic,
+                    hft_refdata::EndpointRole::MdMarket,
+                    hft_refdata::EndpointRole::Rest,
+                ]
+                .iter()
+                .any(|role| !public.iter().any(|e| e.role == *role))))
         {
             errors.push(Error::config(
                 "PublicFeedEndpoint",
@@ -736,7 +771,7 @@ pub fn load_timed(
         if m.id.0 == 0 {
             continue;
         }
-        if matches!(m.kind, AccountKind::Sim(_)) != dry || m.is_prod {
+        if matches!(m.kind, AccountKind::Sim(_)) != dry || m.is_prod != c.instance.prod_orders() {
             errors.push(Error::config("EnvAccountMismatch", format!("account {a}")));
         }
         let rows: Vec<_> = parsed
