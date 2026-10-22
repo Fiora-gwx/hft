@@ -51,7 +51,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | dev2 护栏 | CORE-180–CORE-217 |
 | 启动顺序 | CORE-220–CORE-279、CORE-289、CORE-409–CORE-411、CORE-415 |
 | 崩溃隔离与从快照恢复 | CORE-280–CORE-288 |
-| 优雅退出与 kill 语义 | CORE-300–CORE-314 |
+| 优雅退出与 kill 语义 | CORE-300–CORE-314、CORE-429 |
 | refdata 变更(Drain + 重启) | CORE-320–CORE-326 |
 | 多账户 | CORE-330、CORE-168、CORE-247、CORE-313、CORE-427、CORE-428 |
 | HostProfile | CORE-340–CORE-343、CORE-419 |
@@ -4432,6 +4432,22 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 |---|---|---|
 | CORE-428.1 | 卖方吃单 0.3 @ 59 000 | 不成交(前方还有 0.1;不交 L2 时前方为 0,会立即成交) |
 | CORE-428.2 | 再 0.2 @ 59 000 | 成交 0.01 |
+
+### CORE-429 退出等待有上限
+
+- 规则:[优雅退出与 kill 语义](README.md#优雅退出与-kill-语义)
+- 级别:table
+- 里程碑:M3
+- 前置:`runtime::join_all_within`,上限 200 ms;线程以名字创建
+- 步骤:依次执行下表各行
+- 实现:`apps/hft-core/tests/shutdown_join.rs::core_429_bounded_shutdown_join`
+
+| 行 | 线程 | 期望 |
+|---|---|---|
+| CORE-429.1 | 两个线程正常结束 | `Ok` |
+| CORE-429.2 | 一个返回 `Boom` | 返回 `Boom` |
+| CORE-429.3 | `persist` 不退出 | 2 s 内返回 `ShutdownStuck`(退出码 134,`detail` 含 `persist`) |
+| CORE-429.4 | `feed` 返回 `Boom`,`persist` 不退出 | 返回 `Boom`(首个原因) |
 
 ## 验收
 

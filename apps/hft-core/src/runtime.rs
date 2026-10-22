@@ -190,6 +190,11 @@ pub(crate) fn notify(_message: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// Bounded shutdown joins (README "优雅退出与 kill 语义"): workers, then the persister (its final
+/// sync copies the hot tail).
+pub const SHUTDOWN_WORKERS: Duration = Duration::from_secs(30);
+pub const SHUTDOWN_PERSIST: Duration = Duration::from_secs(120);
+
 #[derive(Debug)]
 pub struct Workers {
     pub(crate) trace: std::collections::BTreeMap<String, hft_rt::latency_trace::Writer>,
@@ -218,6 +223,7 @@ impl Workers {
         // This keeps a failed affinity/priority setup from racing READY.
         let (setup_tx, setup_rx) = std::sync::mpsc::sync_channel(1);
         let trace = self.trace.remove(&t.name);
+        let t_name = t.name.clone();
         self.joins.push(
             std::thread::Builder::new()
                 .name(t.name.clone())
@@ -237,7 +243,9 @@ impl Workers {
                         f(stop.clone(), ThreadContext { policy: t, heartbeat })
                     }))
                     .unwrap_or_else(|_| Err(Error::runtime("ThreadPanic", "worker panicked", 134)));
-                    if result.is_err() {
+                    if let Err(e) = &result {
+                        // Reported at once: the shutdown that follows may not finish.
+                        eprintln!("hft-core: {} thread {} failed: {e}", utc_stamp(), t_name);
                         stop.store(true, Ordering::Release);
                     }
                     result
@@ -256,23 +264,65 @@ impl Workers {
         }
     }
     pub fn join(&mut self) -> Result<(), Error> {
-        let mut first = None;
-        for j in self.joins.drain(..) {
-            if let Err(e) = j
-                .join()
-                .unwrap_or_else(|_| Err(Error::runtime("ThreadPanic", "worker panicked", 134)))
-            {
-                first.get_or_insert(e);
-            }
-        }
-        first.map_or(Ok(()), Err)
+        join_all_within(std::mem::take(&mut self.joins), None)
+    }
+    /// `join` bounded by `limit`: threads still running then are named in a `ShutdownStuck` error
+    /// and left detached (the process exits without them).
+    pub fn join_within(&mut self, limit: Duration) -> Result<(), Error> {
+        join_all_within(std::mem::take(&mut self.joins), Some(limit))
     }
 }
 impl Drop for Workers {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
-        let _ = self.join();
+        let _ = self.join_within(Duration::from_secs(5));
     }
+}
+
+/// Wall-clock `unix_seconds.millis` for diagnostics on stderr.
+fn utc_stamp() -> String {
+    let d = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("{}.{:03}", d.as_secs(), d.subsec_millis())
+}
+
+/// Joins `joins` (first error wins). With `limit`, waits at most that long for all of them; the
+/// ones still running are reported (stderr and `ShutdownStuck`, exit 134) and not joined.
+pub fn join_all_within(
+    joins: Vec<JoinHandle<Result<(), Error>>>,
+    limit: Option<Duration>,
+) -> Result<(), Error> {
+    if let Some(limit) = limit {
+        let deadline = Instant::now() + limit;
+        while joins.iter().any(|j| !j.is_finished()) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    let mut first = None;
+    let mut stuck = Vec::new();
+    for j in joins {
+        if limit.is_some() && !j.is_finished() {
+            stuck.push(j.thread().name().unwrap_or("?").to_string());
+            continue;
+        }
+        if let Err(e) = j
+            .join()
+            .unwrap_or_else(|_| Err(Error::runtime("ThreadPanic", "worker panicked", 134)))
+        {
+            first.get_or_insert(e);
+        }
+    }
+    if !stuck.is_empty() {
+        let e = Error::runtime(
+            "ShutdownStuck",
+            format!("threads not exiting: {}", stuck.join(", ")),
+            134,
+        );
+        eprintln!("hft-core: {} {e}", utc_stamp());
+        return Err(first.unwrap_or(e));
+    }
+    first.map_or(Ok(()), Err)
 }
 pub fn run(
     l: Loaded,
@@ -834,10 +884,13 @@ fn run_linux(
     let result = seq_thread
         .join()
         .map_err(|_| Error::runtime("ThreadPanic", "sequencer", 134))?;
+    if let Err(e) = &result {
+        eprintln!("hft-core: {} thread sequencer stopped: {e}", utc_stamp());
+    }
     workers.stop.store(true, Ordering::Release);
-    let work_result = workers.join();
+    let work_result = workers.join_within(SHUTDOWN_WORKERS);
     persist_workers.stop.store(true, Ordering::Release);
-    let persist_result = persist_workers.join();
+    let persist_result = persist_workers.join_within(SHUTDOWN_PERSIST);
     work_result?;
     persist_result?;
     let (code, orders, cancels, reports) = result?;
