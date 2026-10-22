@@ -3,9 +3,10 @@
 //! Built: the market channel (`book` → `L2Snapshot`, `price_change` → `L2Batch`,
 //! `last_trade_price` → `Trade`) with synthetic per-inst sequence ids, the text `PING`/`PONG`
 //! heartbeat, `subscribe`/`unsubscribe` frames rendered from the token binding table of
-//! `FeedCtx`, capability and rate defaults. Not built: order entry (EIP-712 signed REST orders),
-//! the user channel and account queries (README "已知限制与后续工作"). Pure functions: no I/O, no
-//! threads, no global state. Specification: `crates/venue-polymarket/README.md`.
+//! `FeedCtx`, capability and rate defaults; order entry over REST (Deposit Wallet signed,
+//! post-only GTD orders, cancels, order query), the authenticated user channel (`order` events →
+//! fills and cancels) and the warm account baseline. Pure functions: no I/O, no threads, no
+//! global state. Specification: `crates/venue-polymarket/README.md`.
 #![forbid(unsafe_code)]
 #![deny(
     clippy::float_arithmetic,
@@ -17,25 +18,30 @@
     clippy::unimplemented
 )]
 
+mod account;
 mod bind;
 mod caps;
 mod dedup;
 mod md;
+mod orders;
+mod reports;
 mod session;
 pub mod sign;
 
 pub use bind::{BindErr, FeedCtx, TOKEN_MAX};
+pub use orders::{GTD_S, Templates};
+pub use reports::GwCtx;
 
-use hft_event::GwCmd;
+use hft_event::{GwCmd, GwOp};
 use hft_refdata::{RefData, VenueCaps};
 use hft_types::{AccountId, AssetId, ClientOrderId, InstId, MarketKind, VenueId};
 use hft_venue_proto::account::{AccountProtocol, Query, State};
 use hft_venue_proto::{
     Align, BootCall, ControlHint, Credential, DeadManSpec, DecodeErr, EncodeErr, EndpointSpec,
     FundingHistoryProtocol, FundingPage, FundingQuery, HeartbeatSpec, LoginResult, LoginStep, MdOutcome,
-    MdSink, MsgOp, Peek, PingKind, ProtoErr, RateRule, RawSeq, ReportOutcome, ReportSink, RestReqBuf,
-    ResyncMethod, Role, RouteId, RouteSpec, RxMeta, SeqRule, SnapshotInfo, StaleGuard, StreamKind, SubFrames,
-    SubSpec, TargetRef, VenueCfg, VenueProtocol, WallClock,
+    MdSink, MsgOp, OrderChannel, Peek, PingKind, ProtoErr, RateRule, RawSeq, ReportOutcome, ReportSink,
+    RestOrigin, RestReqBuf, ResyncMethod, Role, RouteId, RouteSpec, RxMeta, SeqRule, SnapshotInfo,
+    StaleGuard, StreamKind, SubFrames, SubSpec, TargetRef, VenueCfg, VenueProtocol, WallClock,
 };
 
 /// Polymarket CLOB (`polymarket-clob`).
@@ -52,22 +58,17 @@ pub enum MdClass {
     Unknown,
 }
 
-/// Report dispatch classes; order entry is not built yet, so every frame is unknown.
+/// Report dispatch classes of the user channel (README "用户流事件表").
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum ReportClass {
+    /// A JSON object or array: `order` / `trade` events (the type sits at the end of the frame).
+    Push,
+    /// `PONG`.
     Ignorable,
     Unknown,
 }
 
-/// Order templates (order entry not built yet).
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
-pub struct Templates;
-
-/// gw-task state (order entry not built yet).
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
-pub struct GwCtx;
-
-const VENUE: VenueId = VenueId::POLYMARKET_CLOB;
+pub(crate) const VENUE: VenueId = VenueId::POLYMARKET_CLOB;
 
 impl VenueProtocol for PolymarketClob {
     const NAME: &'static str = "polymarket-clob";
@@ -80,6 +81,7 @@ impl VenueProtocol for PolymarketClob {
     type GwCtx = GwCtx;
     type Templates = Templates;
     const SUB_ACKS: bool = false;
+    const REST_PLACE_BINDS_ID: bool = true;
 
     fn default_caps(asset: impl Fn(&str) -> Option<AssetId>) -> VenueCaps {
         caps::default_caps(VENUE, asset)
@@ -105,15 +107,14 @@ impl VenueProtocol for PolymarketClob {
         session::endpoint(role, route, out)
     }
     fn login(
-        _role: Role,
+        role: Role,
         _cfg: &VenueCfg,
-        _cred: &Credential,
+        cred: &Credential,
         _step: u8,
         _now_ms: i64,
         out: &mut Vec<u8>,
     ) -> Result<LoginStep, ProtoErr> {
-        out.clear();
-        Ok(LoginStep::NotNeeded)
+        session::login(role, cred, out)
     }
     fn login_result(_payload: &[u8]) -> LoginResult {
         LoginResult::NotMine
@@ -141,13 +142,21 @@ impl VenueProtocol for PolymarketClob {
     fn bind_wire(ctx: &mut FeedCtx, inst: InstId, id: &[u8; 32]) -> Result<(), ProtoErr> {
         ctx.bind_wire(inst, id).map_err(|_| ProtoErr::Cfg)
     }
+    fn bind_order_wire(ctx: &mut GwCtx, inst: InstId, id: &[u8; 32]) -> Result<(), ProtoErr> {
+        ctx.bind(inst, id)
+    }
     fn private_subscribe(
         _cfg: &VenueCfg,
         _acct: AccountId,
         _unsub: bool,
-        _out: &mut SubFrames,
+        out: &mut SubFrames,
     ) -> Result<(), ProtoErr> {
-        Err(ProtoErr::Unsupported)
+        // The login frame subscribes the whole account; there is nothing else to send.
+        out.clear();
+        Ok(())
+    }
+    fn is_private_report(class: ReportClass) -> bool {
+        class == ReportClass::Push
     }
     fn heartbeat(role: Role) -> HeartbeatSpec {
         session::heartbeat(role)
@@ -170,7 +179,8 @@ impl VenueProtocol for PolymarketClob {
         _now_ms: i64,
         _out: &mut RestReqBuf,
     ) -> Result<bool, ProtoErr> {
-        Err(ProtoErr::Unsupported)
+        // The user channel and REST use the same API key (README "账户配置核验").
+        Ok(false)
     }
     fn decode_identity(_status: u16, _body: &[u8], _uid: &mut [u8; 24]) -> Result<(), DecodeErr> {
         Err(DecodeErr::UnknownClass)
@@ -225,10 +235,48 @@ impl VenueProtocol for PolymarketClob {
     fn build_templates(
         _cfg: &VenueCfg,
         _rd: &RefData,
-        _acct: AccountId,
-        _rest: &Credential,
+        acct: AccountId,
+        rest: &Credential,
     ) -> Result<Templates, ProtoErr> {
-        Err(ProtoErr::Unsupported)
+        orders::build_templates(acct, rest)
+    }
+    fn order_channel(_op: GwOp) -> OrderChannel {
+        OrderChannel::Rest
+    }
+    fn encode_rest_ctx(
+        rd: &RefData,
+        t: &Templates,
+        ctx: &GwCtx,
+        cred: &Credential,
+        c: &GwCmd,
+        tgt: &TargetRef,
+        clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<(), EncodeErr> {
+        orders::encode(rd, t, ctx, cred, c, tgt, clk, out)
+    }
+    fn encode_rest_signed(
+        _rd: &RefData,
+        _t: &Templates,
+        _cred: &Credential,
+        c: &GwCmd,
+        _tgt: &TargetRef,
+        _clk: &WallClock,
+        _out: &mut RestReqBuf,
+    ) -> Result<(), EncodeErr> {
+        // Token ids and order hashes live in `GwCtx`: only `encode_rest_ctx` can encode.
+        Err(EncodeErr::Unsupported(c.op))
+    }
+    fn decode_rest(
+        rd: &RefData,
+        ctx: &mut GwCtx,
+        req: &RestOrigin,
+        status: u16,
+        body: &[u8],
+        rx: &RxMeta,
+        out: &mut impl ReportSink,
+    ) -> Result<ReportOutcome, DecodeErr> {
+        reports::decode_rest(rd, ctx, req, status, body, rx, out)
     }
     fn encode(
         _rd: &RefData,
@@ -254,18 +302,21 @@ impl VenueProtocol for PolymarketClob {
         }
         ClientOrderId::decode(bytes).ok()
     }
-    fn classify_report(_op: MsgOp, _head: &[u8]) -> ReportClass {
-        ReportClass::Unknown
+    fn classify_report(op: MsgOp, head: &[u8]) -> ReportClass {
+        reports::classify_report(op, head)
+    }
+    fn report_event_name(payload: &[u8]) -> &[u8] {
+        reports::event_name(payload)
     }
     fn decode_report(
-        _rd: &RefData,
-        _ctx: &mut GwCtx,
-        _c: ReportClass,
-        _payload: &[u8],
-        _rx: &RxMeta,
-        _out: &mut impl ReportSink,
+        rd: &RefData,
+        ctx: &mut GwCtx,
+        c: ReportClass,
+        payload: &[u8],
+        rx: &RxMeta,
+        out: &mut impl ReportSink,
     ) -> Result<ReportOutcome, DecodeErr> {
-        Err(DecodeErr::UnknownClass)
+        reports::decode_report(rd, ctx, c, payload, rx, out)
     }
     fn rate_rules() -> &'static [RateRule] {
         caps::rate_rules()
@@ -303,22 +354,22 @@ impl AccountProtocol for PolymarketClob {
     type Funding = PolymarketClob;
     fn account_request(
         _cfg: &VenueCfg,
-        _cred: &Credential,
-        _query: &Query,
-        _now_ms: i64,
-        _out: &mut RestReqBuf,
+        cred: &Credential,
+        query: &Query,
+        now_ms: i64,
+        out: &mut RestReqBuf,
     ) -> Result<(), ProtoErr> {
-        Err(ProtoErr::Unsupported)
+        account::request(cred, query, now_ms, out)
     }
     fn account_decode(
-        _rd: &RefData,
-        _account: AccountId,
-        _query: &Query,
-        _status: u16,
-        _body: &[u8],
-        _now_ms: i64,
-        _state: &mut State,
+        rd: &RefData,
+        account: AccountId,
+        query: &Query,
+        status: u16,
+        body: &[u8],
+        now_ms: i64,
+        state: &mut State,
     ) -> Result<(), DecodeErr> {
-        Err(DecodeErr::UnknownClass)
+        account::decode(VENUE, rd, account, query, status, body, now_ms, state)
     }
 }

@@ -21,7 +21,7 @@ spec: README.md
 | 概要 | PMK-001 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | PMK-001 |
-| 端点 | PMK-008 |
+| 端点 | PMK-008, PMK-029 |
 | 槽位绑定 | PMK-009, PMK-010, PMK-013, PMK-014 |
 | 订阅 | PMK-008, PMK-014 |
 | 行情频道 → 事件 | PMK-001–PMK-007, PMK-011, PMK-015 |
@@ -29,6 +29,12 @@ spec: README.md
 | 多连接去重 | PMK-016, PMK-017 |
 | 心跳 | PMK-001 |
 | 签名 | PMK-018–PMK-022 |
+| 凭证 | PMK-023, PMK-024 |
+| 下单 | PMK-023–PMK-026, PMK-028 |
+| 用户流事件表 | PMK-027, PMK-029 |
+| 累计量与费用来源 | PMK-027 |
+| 结果未知码表 | PMK-026 |
+| 账户配置核验 | PMK-030 |
 | VenueCaps 默认值 | PMK-011 |
 | 实现说明 | PMK-006, PMK-007 |
 | 延迟与资源契约 | PMK-011 |
@@ -325,4 +331,135 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 - 步骤:两笔订单(买 5 份 @0.45、卖 5 份 @0.55)按存款钱包格式签名
 - 期望:`0x` + 十六进制等于金样 `signature`(内层签名 ‖ 域分隔符 ‖ 订单结构哈希 ‖ 类型串 ‖ 长度)
 - 实现:`crates/venue-polymarket/tests/main.rs::sign_v2_1271::pmk_022_deposit_wallet_signature_matches_the_official_client`
+
+### PMK-023 下单编码:存款钱包签名的 post-only GTD 订单
+
+- 规则:[下单](README.md#下单)、[凭证](README.md#凭证)
+- 级别:unit
+- 里程碑:M3
+- 前置:测试私钥(同 PMK-018)、测试 API key/secret/passphrase、存款钱包 `0x7cB0…8cB2`;`GwCtx` 绑定 `btc-up-0`、`btc-dn-0` 的 token;时钟 1 792 687 605 366 ms
+- 实现:`crates/venue-polymarket/tests/orders.rs::pmk_023_place_is_a_signed_post_only_gtd_order`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-023.1 | `Place{UP, Buy, 0.45, 5 份, PostOnly, slot 7}` | `POST /order`,`redacted` |
+| PMK-023.2 | 同上 | `maker = signer` = 存款钱包;`tokenId` = UP 的 token;`makerAmount` 2250000、`takerAmount` 5000000;`side` BUY;`signatureType` 3;`timestamp` = 时钟毫秒 |
+| PMK-023.3 | 同上 | `expiration` = 时钟秒 + 300;`orderType` GTD、`postOnly` true、`deferExec` false、`owner` = API key |
+| PMK-023.4 | 同上 | `salt` < 2⁵³,低 20 位 = 槽号 7 |
+| PMK-023.5 | 同上 | `signature` = 用同一组字段算出的存款钱包签名 |
+| PMK-023.6 | 同上 | L2 头:`POLY_ADDRESS` = EOA(EIP-55)、`POLY_API_KEY`、`POLY_PASSPHRASE`、`POLY_TIMESTAMP` = 时钟秒、`POLY_SIGNATURE` = 对该请求体的 L2 HMAC |
+| PMK-023.7 | `Place{DN, Sell, 0.55, 5 份, Gtc}` | `makerAmount` 5000000、`takerAmount` 2750000、`side` SELL;`postOnly` false |
+
+### PMK-024 下单拒绝编码
+
+- 规则:[下单](README.md#下单)、[凭证](README.md#凭证)
+- 级别:table
+- 里程碑:M3
+- 前置:同 PMK-023
+- 实现:`crates/venue-polymarket/tests/orders.rs::pmk_024_place_refusals`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-024.1 | `GwCtx` 没有绑定 | `UnknownInst` |
+| PMK-024.2 | `Tif` IOC、FOK;`REDUCE_ONLY` | `Unsupported(Place)` |
+| PMK-024.3 | 价 0.001 × 量 0.000001(金额不足 1e-6) | `FieldOverflow` |
+| PMK-024.4 | secret 少一段;存款钱包不是地址 | `build_templates` 与 `encode_rest_ctx` 都失败 |
+| PMK-024.5 | `encode_rest_signed` | 失败(只有 `encode_rest_ctx` 能编码) |
+
+### PMK-025 REST 回执绑定订单哈希,撤单与查单用它
+
+- 规则:[下单](README.md#下单)
+- 级别:unit
+- 里程碑:M3
+- 前置:同 PMK-023;`RestOrigin{Order, (slot 7, gen 3, op), UP}`
+- 实现:`crates/venue-polymarket/tests/orders.rs::pmk_025_ack_binds_the_hash_and_cancel_uses_it`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-025.1 | 实采 `POST /order` 应答(200,`orderID` H1) | 一条 `Ack{slot 7, gen 3, UP, exch_order_id = H1 前 8 字节, epoch 0}`;`exch_id(十进制键, None)` 一次 |
+| PMK-025.2 | `Cancel`,`exch_order_id` = H1 的键 | `DELETE /order`,体 `{"orderID":"H1"}`,带 L2 头 |
+| PMK-025.3 | `Cancel`,`exch_order_id` 0 | `DELETE /cancel-market-orders`,体 `{"asset_id":<UP token>}` |
+| PMK-025.4 | `CancelAll{DN}`;`CancelAll{inst 0}` | 前者按 DN 的 token;后者 `DELETE /cancel-all`、无体、无 `Content-Type` |
+| PMK-025.5 | `Query`,H1 的键;未知键 | `GET /data/order/H1`;`UnknownTarget` |
+
+### PMK-026 REST 拒绝与结果未知
+
+- 规则:[结果未知码表](README.md#结果未知码表)
+- 级别:table
+- 里程碑:M3
+- 前置:同 PMK-025
+- 实现:`crates/venue-polymarket/tests/orders.rs::pmk_026_rest_refusals_and_unknown_outcomes`
+
+| 行 | 应答 | 期望 |
+|---|---|---|
+| PMK-026.1 | 400 `{"error":"invalid post-only order: order crosses book"}` | `Reject{slot 7}`,`reject_code` = `raw_code_str(消息)`,`raw_code` 相同,非 `outcome_unknown` |
+| PMK-026.2 | 200 `{"success":false,"errorMsg":"not enough balance / allowance"}` | `Reject` |
+| PMK-026.3 | 429;425 | `Reject`,`reject_code` = HTTP 码;`ctl = RateLimited` |
+| PMK-026.4 | 500、502、0 | 无事件,`outcome_unknown` |
+| PMK-026.5 | 单笔撤单 `not_canceled` 非空 | `CancelReject{detail = GONE(1), slot 7}` |
+| PMK-026.6 | 200 截断的 JSON | `DecodeErr` |
+
+### PMK-027 用户频道:成交、撤单与去重
+
+- 规则:[用户流事件表](README.md#用户流事件表)、[累计量与费用来源](README.md#累计量与费用来源)
+- 级别:unit
+- 里程碑:M3
+- 前置:同 PMK-023;帧按实采 `order` 事件的字段与顺序构造;sink 已把 H1、H2 绑定到 `(epoch 5, slot 7, gen 3)`
+- 实现:`crates/venue-polymarket/tests/orders.rs::pmk_027_user_channel_fills_and_cancels`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-027.1 | H1 `PLACEMENT` | 无事件,`skip = Listed` |
+| PMK-027.2 | H1 `UPDATE` `size_matched` 2,再 5(原始 5 份,价 0.02) | `PartialFill{qty 2, cum 2}`、`Fill{qty 3, cum 5}`;`px = avg_px` = 0.02;`detail` = Buy;slot 7、epoch 5、`exch_order_id` = H1 键、`ex_ts_ns` = 帧时间 |
+| PMK-027.3 | 再送一次 `size_matched` 5 | 无新事件 |
+| PMK-027.4 | H2 `CANCELLATION`,再送列出 H2 的撤单应答 | 恰一条 `CancelAck{slot 7, H2 键, UP}` |
+| PMK-027.5 | 未绑定订单的 `UPDATE` 1 份 | `PartialFill{slot UNRESOLVED, qty 1}` |
+| PMK-027.6 | `asset_id` 不在绑定表;`trade` 事件;`PONG` | 无事件;`trade` 为 `skip = Listed`;`PONG` 分类 `Ignorable` |
+| PMK-027.7 | `event_type = market_resolved` | `skip = Unknown`;`report_event_name` = `market_resolved` |
+| PMK-027.8 | 两个 `UPDATE`(1、4)的数组帧;`size_matched` 非数字 | 增量 1、3;后者 `DecodeErr`;`is_private_report(Push)` |
+
+### PMK-028 查单结果
+
+- 规则:[下单](README.md#下单)
+- 级别:table
+- 里程碑:M3
+- 前置:同 PMK-025
+- 实现:`crates/venue-polymarket/tests/orders.rs::pmk_028_query_result`
+
+| 行 | 应答 | 期望 |
+|---|---|---|
+| PMK-028.1 | 200 `LIVE`,原始 5、成交 2、价 0.45 | `QueryResult{PartiallyFilled(2), cum 2, avg_px 0.45, H1 键}` |
+| PMK-028.2 | `MATCHED`;`CANCELED` | Filled(3);Cancelled(4) |
+| PMK-028.3 | 200 `null`;404 | NotFound(7) |
+
+### PMK-029 用户频道会话
+
+- 规则:[用户流事件表](README.md#用户流事件表)、[端点](README.md#端点)
+- 级别:unit
+- 里程碑:M3
+- 前置:同 PMK-023
+- 实现:`crates/venue-polymarket/tests/orders.rs::pmk_029_user_channel_session`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-029.1 | `endpoint(Order)`;`login(Order)` | 路径 `/ws/user`;`LoginStep::Sent`,帧 = `{"auth":{"apiKey","secret","passphrase"},"type":"user"}` |
+| PMK-029.2 | `login(Md)`;`private_subscribe` | `NotNeeded`;不发帧 |
+| PMK-029.3 | passphrase 含双引号 | 登录失败 |
+
+### PMK-030 账户启动核验
+
+- 规则:[账户配置核验](README.md#账户配置核验)
+- 级别:table
+- 里程碑:M3
+- 前置:RD-PM 另有实盘账户 1(`is_prod`,`Verified`,venue UID = 测试 API key 的前 24 个字符)
+- 实现:`crates/venue-polymarket/tests/orders.rs::pmk_030_account_baseline`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-030.1 | 各查询的请求 | 路径同[账户配置核验](README.md#账户配置核验);除 `/time` 外都带 L2 头;`Cancel` 为 `DELETE /order {"orderID"}` |
+| PMK-030.2 | `/auth/api-keys` 含测试 key;只含另一把 key | `venue_uid` = 登记的 24 个字符、`uid_keys = 3`;失败 |
+| PMK-030.3 | `closed_only` false;true | 通过;失败 |
+| PMK-030.4 | 一页一张挂单(游标 `MTAw`);再查到末页 `LTE=` | 1 张、游标 `MTAw`;0 张、游标空 |
+| PMK-030.5 | `balance` 82254260 | 计价资产 USDC `free` 82 254 260(1e-6)、`locked` 0 |
+| PMK-030.6 | 401 | 失败 |
 

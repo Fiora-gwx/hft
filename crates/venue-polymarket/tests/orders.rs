@@ -1,0 +1,825 @@
+//! Order entry, REST answers, the user channel and the account baseline (PMK-023 – PMK-030).
+//! REST answers and user-channel frames are copied from a capture of 2026-10-22 (post-only bids
+//! at 0.02, never fillable; `owner` API keys replaced by the test key).
+
+use hft_event::{GwCmd, GwOp, OrderEventKind};
+use hft_types::{AccountId, ClientOrderId, InstId, Px, Qty, Side, SlotId, Tif};
+use hft_venue_proto::account::{AccountProtocol, Query, State};
+use hft_venue_proto::testkit::{ReportRec, VecSink};
+use hft_venue_proto::{
+    ArrayBuf, Credential, EncodeErr, ExchIdHint, LoginStep, Method, MsgOp, ReportSink, ReqRef, RestOrigin,
+    RestReqBuf, RestWhat, Role, SecretBuf, SignAlg, Skip, TargetRef, VenueCfg, VenueEnv, VenueProtocol,
+    WallClock, raw_code_http, raw_code_str,
+};
+use venue_polymarket::sign::{
+    CHAIN_ID, EXCHANGE_V2, OrderV2, Wallet, exchange_domain, hex_bytes, l2_hmac, parse_u256, sign_order_1271,
+};
+use venue_polymarket::{GwCtx, PolymarketClob as Pm, ReportClass};
+
+use super::{DN, RX, T_DN, T_UP, UP, V, rd};
+
+/// Test-only key of the signing golden (never a real key).
+const KEY: &str = "0x1111111111111111111111111111111111111111111111111111111111111111";
+const EOA: &str = "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A";
+const WALLET: &str = "0x7cB001deBC0984d5a9e796dd5dc35676d97A8cB2";
+const API_KEY: &str = "0f5e8d2a-1111-2222-3333-444455556666";
+const SECRET: &str = "dGhpc2lzYXRlc3RzZWNyZXRrZXkxMjM0NTY3ODkwYWI=";
+const PASS: &str = "test-passphrase";
+const NOW_MS: i64 = 1_792_687_605_366;
+/// Order hashes of the capture.
+const H1: &str = "0x766cf144ea53ad8d1726f1a230dc5e5535d8eb296d114aee313cd83520685f6e";
+const H2: &str = "0xd4098b206afb2471eaca3a1b58dc23dbf71f7187eef4d54194046e53e1a04615";
+
+fn cred() -> Credential {
+    Credential {
+        api_key: ArrayBuf::from_bytes(API_KEY.as_bytes()).unwrap(),
+        secret: SecretBuf(ArrayBuf::from_bytes(format!("{SECRET}|{KEY}|{WALLET}").as_bytes()).unwrap()),
+        passphrase: ArrayBuf::from_bytes(PASS.as_bytes()).unwrap(),
+        alg: SignAlg::Secp256k1,
+    }
+}
+
+fn cfg() -> VenueCfg {
+    VenueCfg {
+        env: VenueEnv::Prod,
+        stale_guard_ms: 0,
+    }
+}
+
+fn clk() -> WallClock {
+    WallClock {
+        unix_ms: NOW_MS,
+        unix_us: NOW_MS * 1000,
+    }
+}
+
+fn ctx() -> GwCtx {
+    let mut c = GwCtx::default();
+    Pm::bind_order_wire(&mut c, UP, &parse_u256(T_UP).unwrap()).unwrap();
+    Pm::bind_order_wire(&mut c, DN, &parse_u256(T_DN).unwrap()).unwrap();
+    c
+}
+
+fn cmd(op: GwOp, inst: InstId, side: Side, px: i64, qty: i64, tif: Tif) -> GwCmd {
+    let mut c = GwCmd::sim_reset(AccountId(1));
+    c.op = op;
+    c.inst = inst;
+    c.side = side;
+    c.px = Px(px);
+    c.qty = Qty(qty);
+    c.tif = tif;
+    c.slot = SlotId(7);
+    c.r#gen = 3;
+    c
+}
+
+fn tgt(exch: u64) -> TargetRef {
+    TargetRef {
+        id: ClientOrderId {
+            epoch: 5,
+            venue: V,
+            account: AccountId(1),
+            slot: 7,
+            r#gen: 3,
+        },
+        exch_order_id: exch,
+    }
+}
+
+fn encode(ctx: &GwCtx, c: &GwCmd, t: &TargetRef) -> Result<RestReqBuf, EncodeErr> {
+    let tpl = Pm::build_templates(&cfg(), rd(), AccountId(1), &cred()).unwrap();
+    let mut out = RestReqBuf::default();
+    Pm::encode_rest_ctx(rd(), &tpl, ctx, &cred(), c, t, &clk(), &mut out).map(|()| out)
+}
+
+fn text(b: &[u8]) -> &str {
+    core::str::from_utf8(b).unwrap()
+}
+
+fn header<'a>(r: &'a RestReqBuf, name: &str) -> Option<&'a str> {
+    text(r.headers.as_slice())
+        .split("\r\n")
+        .find_map(|l| l.strip_prefix(&format!("{name}: ")[..]))
+}
+
+fn key_of(h: &str) -> u64 {
+    u64::from_str_radix(&h[2..18], 16).unwrap()
+}
+
+fn orders(s: &VecSink) -> Vec<hft_event::OrderEvent> {
+    s.reports
+        .iter()
+        .filter_map(|r| match r {
+            ReportRec::Order(e) => Some(*e),
+            _ => None,
+        })
+        .collect()
+}
+
+fn origin(op: GwOp, inst: InstId) -> RestOrigin {
+    RestOrigin {
+        what: RestWhat::Order,
+        req: Some(ReqRef {
+            slot: 7,
+            r#gen: 3,
+            op,
+        }),
+        inst,
+    }
+}
+
+/// The gw's binding of a REST Place ack (`REST_PLACE_BINDS_ID`): exchange id → slot 7, gen 3.
+fn bind(s: &mut VecSink, hash: &str) {
+    let _ = s.exch_id(key_of(hash).to_string().as_bytes(), Some(&tgt(0).id));
+}
+
+#[test]
+fn pmk_023_place_is_a_signed_post_only_gtd_order() {
+    let c = cmd(GwOp::Place, UP, Side::Buy, 450, 5_000_000, Tif::PostOnly);
+    let r = encode(&ctx(), &c, &tgt(0)).unwrap();
+    assert_eq!(
+        (r.method, text(r.path_query.as_slice())),
+        (Method::Post, "/order"),
+        "PMK-023.1"
+    );
+    assert!(r.redacted, "PMK-023.1");
+    let b: serde_json::Value = serde_json::from_slice(r.body.as_slice()).unwrap();
+    let o = &b["order"];
+    assert_eq!(o["maker"], WALLET, "PMK-023.2");
+    assert_eq!(o["signer"], WALLET, "PMK-023.2");
+    assert_eq!(o["tokenId"], T_UP, "PMK-023.2");
+    assert_eq!(
+        (o["makerAmount"].as_str(), o["takerAmount"].as_str()),
+        (Some("2250000"), Some("5000000")),
+        "PMK-023.2"
+    );
+    assert_eq!(
+        (o["side"].as_str(), o["signatureType"].as_u64()),
+        (Some("BUY"), Some(3)),
+        "PMK-023.2"
+    );
+    assert_eq!(
+        o["timestamp"].as_str(),
+        Some(NOW_MS.to_string().as_str()),
+        "PMK-023.2"
+    );
+    assert_eq!(
+        o["expiration"].as_str(),
+        Some((NOW_MS / 1000 + 300).to_string().as_str()),
+        "PMK-023.3"
+    );
+    assert_eq!(
+        (b["orderType"].as_str(), b["postOnly"].as_bool()),
+        (Some("GTD"), Some(true)),
+        "PMK-023.3"
+    );
+    assert_eq!(
+        (b["owner"].as_str(), b["deferExec"].as_bool()),
+        (Some(API_KEY), Some(false)),
+        "PMK-023.3"
+    );
+    let salt = o["salt"].as_u64().unwrap();
+    assert!(salt < 1 << 53 && salt & 0xF_FFFF == 7, "PMK-023.4 {salt}");
+    // .5 the signature is the Deposit Wallet signature of exactly these fields.
+    let w = Wallet::from_hex(KEY).unwrap();
+    let order = OrderV2 {
+        salt,
+        maker: venue_wallet(),
+        signer: venue_wallet(),
+        token_id: parse_u256(T_UP).unwrap(),
+        maker_amount: 2_250_000,
+        taker_amount: 5_000_000,
+        side: 0,
+        signature_type: 3,
+        timestamp_ms: NOW_MS as u64,
+        metadata: [0; 32],
+        builder: [0; 32],
+    };
+    let mut sig = [0u8; 512];
+    let n = sign_order_1271(
+        &w,
+        &exchange_domain("2", CHAIN_ID, &EXCHANGE_V2),
+        CHAIN_ID,
+        &order,
+        &mut sig,
+    );
+    let mut hex = [0u8; 1026];
+    assert_eq!(
+        o["signature"].as_str(),
+        hex_bytes(&sig[..n], &mut hex),
+        "PMK-023.5"
+    );
+    // .6 L2 headers: the wallet, key, passphrase, seconds and the HMAC over this body.
+    assert_eq!(header(&r, "POLY_ADDRESS"), Some(EOA), "PMK-023.6");
+    assert_eq!(header(&r, "POLY_API_KEY"), Some(API_KEY), "PMK-023.6");
+    assert_eq!(header(&r, "POLY_PASSPHRASE"), Some(PASS), "PMK-023.6");
+    let ts = (NOW_MS / 1000).to_string();
+    assert_eq!(header(&r, "POLY_TIMESTAMP"), Some(ts.as_str()), "PMK-023.6");
+    let mut mac = [0u8; 44];
+    let want = l2_hmac(SECRET, &ts, "POST", "/order", text(r.body.as_slice()), &mut mac).unwrap();
+    assert_eq!(header(&r, "POLY_SIGNATURE"), Some(want), "PMK-023.6");
+    // .7 a sell of the Down token swaps the amounts; a GTC order is not post-only.
+    let c = cmd(GwOp::Place, DN, Side::Sell, 550, 5_000_000, Tif::Gtc);
+    let b: serde_json::Value =
+        serde_json::from_slice(encode(&ctx(), &c, &tgt(0)).unwrap().body.as_slice()).unwrap();
+    assert_eq!(
+        (
+            b["order"]["makerAmount"].as_str(),
+            b["order"]["takerAmount"].as_str(),
+            b["order"]["side"].as_str()
+        ),
+        (Some("5000000"), Some("2750000"), Some("SELL")),
+        "PMK-023.7"
+    );
+    assert_eq!(b["postOnly"].as_bool(), Some(false), "PMK-023.7");
+}
+
+fn venue_wallet() -> [u8; 20] {
+    let h = &WALLET[2..];
+    core::array::from_fn(|i| u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap())
+}
+
+#[test]
+fn pmk_024_place_refusals() {
+    let ok = cmd(GwOp::Place, UP, Side::Buy, 450, 5_000_000, Tif::PostOnly);
+    // .1 an unbound inst (no token id yet).
+    assert_eq!(
+        encode(&GwCtx::default(), &ok, &tgt(0)).unwrap_err(),
+        EncodeErr::UnknownInst,
+        "PMK-024.1"
+    );
+    // .2 IOC / FOK; reduce-only.
+    for tif in [Tif::Ioc, Tif::Fok] {
+        let c = cmd(GwOp::Place, UP, Side::Buy, 450, 5_000_000, tif);
+        assert_eq!(
+            encode(&ctx(), &c, &tgt(0)).unwrap_err(),
+            EncodeErr::Unsupported(GwOp::Place),
+            "PMK-024.2"
+        );
+    }
+    let mut c = ok;
+    c.oflags = hft_event::OrderFlags::REDUCE_ONLY.0;
+    assert_eq!(
+        encode(&ctx(), &c, &tgt(0)).unwrap_err(),
+        EncodeErr::Unsupported(GwOp::Place),
+        "PMK-024.2"
+    );
+    // .3 a USDC amount below 1e-6 (0.001 × 0.000001 shares).
+    let c = cmd(GwOp::Place, UP, Side::Buy, 1, 1, Tif::PostOnly);
+    assert_eq!(
+        encode(&ctx(), &c, &tgt(0)).unwrap_err(),
+        EncodeErr::FieldOverflow,
+        "PMK-024.3"
+    );
+    // .4 a credential whose secret lacks a part, or whose deposit wallet is not an address.
+    let tpl = Pm::build_templates(&cfg(), rd(), AccountId(1), &cred()).unwrap();
+    for bad in [format!("{SECRET}|{KEY}"), format!("{SECRET}|{KEY}|0x12")] {
+        let mut k = cred();
+        k.secret = SecretBuf(ArrayBuf::from_bytes(bad.as_bytes()).unwrap());
+        let mut out = RestReqBuf::default();
+        assert!(
+            Pm::build_templates(&cfg(), rd(), AccountId(1), &k).is_err(),
+            "PMK-024.4"
+        );
+        assert!(
+            Pm::encode_rest_ctx(rd(), &tpl, &ctx(), &k, &ok, &tgt(0), &clk(), &mut out).is_err(),
+            "PMK-024.4"
+        );
+    }
+    // .5 the context-free entry never encodes (token ids live in GwCtx).
+    let mut out = RestReqBuf::default();
+    assert!(
+        Pm::encode_rest_signed(rd(), &tpl, &cred(), &ok, &tgt(0), &clk(), &mut out).is_err(),
+        "PMK-024.5"
+    );
+}
+
+#[test]
+fn pmk_025_ack_binds_the_hash_and_cancel_uses_it() {
+    let mut c = ctx();
+    let mut s = VecSink::default();
+    // .1 the capture's POST /order answer: an Ack of slot 7 / gen 3 with the hash's key.
+    let body = format!(
+        "{{\"errorMsg\":\"\",\"orderID\":\"{H1}\",\"takingAmount\":\"\",\"makingAmount\":\"\",\"status\":\"live\",\"success\":true}}"
+    );
+    let o = Pm::decode_rest(
+        rd(),
+        &mut c,
+        &origin(GwOp::Place, UP),
+        200,
+        body.as_bytes(),
+        &RX,
+        &mut s,
+    )
+    .unwrap();
+    let e = orders(&s);
+    assert_eq!((o.events, e.len()), (1, 1), "PMK-025.1");
+    assert_eq!(
+        (
+            e[0].what,
+            e[0].slot,
+            e[0].r#gen,
+            e[0].inst,
+            e[0].exch_order_id,
+            e[0].epoch
+        ),
+        (OrderEventKind::Ack, SlotId(7), 3, UP, key_of(H1), 0),
+        "PMK-025.1"
+    );
+    assert_eq!(
+        s.id_calls,
+        vec![(key_of(H1).to_string().into_bytes(), None)],
+        "PMK-025.1"
+    );
+    // .2 a cancel of that order names its full hash.
+    let r = encode(
+        &c,
+        &cmd(GwOp::Cancel, UP, Side::Buy, 0, 0, Tif::Gtc),
+        &tgt(key_of(H1)),
+    )
+    .unwrap();
+    assert_eq!(
+        (r.method, text(r.path_query.as_slice())),
+        (Method::Delete, "/order"),
+        "PMK-025.2"
+    );
+    assert_eq!(
+        text(r.body.as_slice()),
+        format!("{{\"orderID\":\"{H1}\"}}"),
+        "PMK-025.2"
+    );
+    assert!(header(&r, "POLY_SIGNATURE").is_some(), "PMK-025.2");
+    // .3 an order not acked yet: every order of the account on its token.
+    let r = encode(&c, &cmd(GwOp::Cancel, UP, Side::Buy, 0, 0, Tif::Gtc), &tgt(0)).unwrap();
+    assert_eq!(
+        text(r.path_query.as_slice()),
+        "/cancel-market-orders",
+        "PMK-025.3"
+    );
+    assert_eq!(
+        text(r.body.as_slice()),
+        format!("{{\"asset_id\":\"{T_UP}\"}}"),
+        "PMK-025.3"
+    );
+    // .4 CancelAll of one inst; of the account.
+    let r = encode(&c, &cmd(GwOp::CancelAll, DN, Side::Buy, 0, 0, Tif::Gtc), &tgt(0)).unwrap();
+    assert_eq!(
+        text(r.body.as_slice()),
+        format!("{{\"asset_id\":\"{T_DN}\"}}"),
+        "PMK-025.4"
+    );
+    let r = encode(
+        &c,
+        &cmd(GwOp::CancelAll, InstId(0), Side::Buy, 0, 0, Tif::Gtc),
+        &tgt(0),
+    )
+    .unwrap();
+    assert_eq!(
+        (text(r.path_query.as_slice()), r.body.is_empty()),
+        ("/cancel-all", true),
+        "PMK-025.4"
+    );
+    assert_eq!(header(&r, "Content-Type"), None, "PMK-025.4");
+    // .5 Query by hash; unknown hash → UnknownTarget.
+    let r = encode(
+        &c,
+        &cmd(GwOp::Query, UP, Side::Buy, 0, 0, Tif::Gtc),
+        &tgt(key_of(H1)),
+    )
+    .unwrap();
+    assert_eq!(
+        (r.method, text(r.path_query.as_slice())),
+        (Method::Get, format!("/data/order/{H1}").as_str()),
+        "PMK-025.5"
+    );
+    let e = encode(&c, &cmd(GwOp::Query, UP, Side::Buy, 0, 0, Tif::Gtc), &tgt(42)).unwrap_err();
+    assert_eq!(e, EncodeErr::UnknownTarget, "PMK-025.5");
+}
+
+#[test]
+fn pmk_026_rest_refusals_and_unknown_outcomes() {
+    let mut c = ctx();
+    // .1 a post-only order that would cross: Reject with the message's code.
+    let msg = "invalid post-only order: order crosses book";
+    let body = format!("{{\"error\":\"{msg}\"}}");
+    let mut s = VecSink::default();
+    let o = Pm::decode_rest(
+        rd(),
+        &mut c,
+        &origin(GwOp::Place, UP),
+        400,
+        body.as_bytes(),
+        &RX,
+        &mut s,
+    )
+    .unwrap();
+    let e = orders(&s);
+    assert_eq!(
+        (e[0].what, e[0].slot, e[0].reject_code),
+        (OrderEventKind::Reject, SlotId(7), raw_code_str(msg.as_bytes())),
+        "PMK-026.1"
+    );
+    assert_eq!(
+        (o.raw_code, o.outcome_unknown),
+        (raw_code_str(msg.as_bytes()), None),
+        "PMK-026.1"
+    );
+    // .2 `success: false` with a message.
+    let mut s = VecSink::default();
+    let body = br#"{"errorMsg":"not enough balance / allowance","orderID":"","status":"","success":false}"#;
+    Pm::decode_rest(rd(), &mut c, &origin(GwOp::Place, UP), 200, body, &RX, &mut s).unwrap();
+    assert_eq!(orders(&s)[0].what, OrderEventKind::Reject, "PMK-026.2");
+    // .3 rate limited (429) or the engine restarting (425): Reject + RateLimited.
+    for st in [429u16, 425] {
+        let mut s = VecSink::default();
+        let o = Pm::decode_rest(rd(), &mut c, &origin(GwOp::Place, UP), st, b"", &RX, &mut s).unwrap();
+        assert_eq!(orders(&s)[0].reject_code, raw_code_http(st), "PMK-026.3");
+        assert_eq!(o.ctl, hft_venue_proto::ReportCtl::RateLimited, "PMK-026.3");
+    }
+    // .4 5xx and no answer: outcome unknown, no event.
+    for st in [500u16, 502, 0] {
+        let mut s = VecSink::default();
+        let o = Pm::decode_rest(rd(), &mut c, &origin(GwOp::Place, UP), st, b"", &RX, &mut s).unwrap();
+        assert!(
+            s.reports.is_empty() && o.outcome_unknown.is_some(),
+            "PMK-026.4 {st}"
+        );
+    }
+    // .5 a cancel the exchange refused: CancelReject GONE.
+    let mut s = VecSink::default();
+    let body = format!(
+        "{{\"not_canceled\":{{\"{H1}\":\"order can't be found - already canceled or matched\"}},\"canceled\":[]}}"
+    );
+    Pm::decode_rest(
+        rd(),
+        &mut c,
+        &origin(GwOp::Cancel, UP),
+        200,
+        body.as_bytes(),
+        &RX,
+        &mut s,
+    )
+    .unwrap();
+    let e = orders(&s);
+    assert_eq!(
+        (e[0].what, e[0].detail, e[0].slot),
+        (OrderEventKind::CancelReject, 1, SlotId(7)),
+        "PMK-026.5"
+    );
+    // .6 a malformed success body is a decode error.
+    let mut s = VecSink::default();
+    assert!(
+        Pm::decode_rest(
+            rd(),
+            &mut c,
+            &origin(GwOp::Place, UP),
+            200,
+            b"{\"success\":",
+            &RX,
+            &mut s
+        )
+        .is_err(),
+        "PMK-026.6"
+    );
+}
+
+fn order_frame(id: &str, kind: &str, status: &str, matched: &str) -> String {
+    format!(
+        "{{\"id\":\"{id}\", \"owner\":\"{API_KEY}\", \"market\":\"0xf5fb7c18bcbb23bb2afb83e5fe7f6e78eb2127c12bcd9bb74e3899cce30bbf23\", \"asset_id\":\"{T_UP}\", \"side\":\"BUY\", \"order_owner\":\"{API_KEY}\", \"original_size\":\"5\", \"size_matched\":\"{matched}\", \"price\":\"0.02\", \"associate_trades\":[], \"outcome\":\"Up\", \"type\":\"{kind}\", \"created_at\":\"1792687605\", \"expiration\":\"0\", \"order_type\":\"GTC\", \"status\":\"{status}\", \"maker_address\":\"{WALLET}\", \"timestamp\":\"1792687605408\", \"event_type\":\"order\"}}"
+    )
+}
+
+fn report(c: &mut GwCtx, s: &mut VecSink, frame: &str) -> hft_venue_proto::ReportOutcome {
+    let class = Pm::classify_report(MsgOp::Text, &frame.as_bytes()[..64.min(frame.len())]);
+    Pm::decode_report(rd(), c, class, frame.as_bytes(), &RX, s).unwrap()
+}
+
+#[test]
+fn pmk_027_user_channel_fills_and_cancels() {
+    let mut c = ctx();
+    let mut s = VecSink::default();
+    bind(&mut s, H1);
+    // .1 PLACEMENT: nothing (the REST answer is the Ack).
+    let o = report(&mut c, &mut s, &order_frame(H1, "PLACEMENT", "LIVE", "0"));
+    assert_eq!((orders(&s).len(), o.skip), (0, Skip::Listed), "PMK-027.1");
+    // .2 UPDATE 2 of 5 → PartialFill 2; UPDATE 5 → Fill 3 (cum 5), at the order price.
+    report(&mut c, &mut s, &order_frame(H1, "UPDATE", "LIVE", "2"));
+    report(&mut c, &mut s, &order_frame(H1, "UPDATE", "MATCHED", "5"));
+    let e = orders(&s);
+    let got: Vec<_> = e
+        .iter()
+        .map(|e| (e.what, e.qty, e.cum_filled, e.px, e.avg_px, e.detail, e.slot))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            (
+                OrderEventKind::PartialFill,
+                Qty(2_000_000),
+                Qty(2_000_000),
+                Px(20),
+                Px(20),
+                Side::Buy as u8,
+                SlotId(7)
+            ),
+            (
+                OrderEventKind::Fill,
+                Qty(3_000_000),
+                Qty(5_000_000),
+                Px(20),
+                Px(20),
+                Side::Buy as u8,
+                SlotId(7)
+            ),
+        ],
+        "PMK-027.2"
+    );
+    assert!(
+        e.iter().all(|e| e.exch_order_id == key_of(H1)
+            && e.inst == UP
+            && e.epoch == 5
+            && e.ex_ts_ns == 1_792_687_605_408_000_000),
+        "PMK-027.2"
+    );
+    // .3 a repeated UPDATE (second connection, replay) adds nothing.
+    let n = s.reports.len();
+    report(&mut c, &mut s, &order_frame(H1, "UPDATE", "MATCHED", "5"));
+    assert_eq!(s.reports.len(), n, "PMK-027.3");
+    // .4 CANCELLATION of a live order → one CancelAck; the REST answer naming it adds none.
+    bind(&mut s, H2);
+    report(&mut c, &mut s, &order_frame(H2, "CANCELLATION", "CANCELED", "0"));
+    let body = format!("{{\"not_canceled\":{{}},\"canceled\":[\"{H2}\"]}}");
+    Pm::decode_rest(
+        rd(),
+        &mut c,
+        &origin(GwOp::Cancel, UP),
+        200,
+        body.as_bytes(),
+        &RX,
+        &mut s,
+    )
+    .unwrap();
+    let cancels: Vec<_> = orders(&s)
+        .into_iter()
+        .filter(|e| e.what == OrderEventKind::CancelAck)
+        .collect();
+    assert_eq!(cancels.len(), 1, "PMK-027.4");
+    assert_eq!(
+        (cancels[0].slot, cancels[0].exch_order_id, cancels[0].inst),
+        (SlotId(7), key_of(H2), UP),
+        "PMK-027.4"
+    );
+    // .5 a fill of an order the runtime has not bound yet: UNRESOLVED (held by the gw).
+    let h3 = "0x189601a886d3182e6abc6afee63361744721fa72ef31ac48a96b88d5c88f214d";
+    let mut s2 = VecSink::default();
+    report(&mut c, &mut s2, &order_frame(h3, "UPDATE", "LIVE", "1"));
+    let e = orders(&s2);
+    assert_eq!(
+        (e[0].what, e[0].slot, e[0].qty),
+        (OrderEventKind::PartialFill, SlotId::UNRESOLVED, Qty(1_000_000)),
+        "PMK-027.5"
+    );
+    // .6 a token no slot is bound to, `trade` events, PONG: no events.
+    let mut s3 = VecSink::default();
+    let other = order_frame(H1, "UPDATE", "LIVE", "1").replace(T_UP, "123");
+    report(&mut c, &mut s3, &other);
+    let o = report(
+        &mut c,
+        &mut s3,
+        r#"{"event_type":"trade","type":"TRADE","id":"t1","status":"MATCHED"}"#,
+    );
+    assert_eq!(o.skip, Skip::Listed, "PMK-027.6");
+    assert_eq!(
+        Pm::classify_report(MsgOp::Text, b"PONG"),
+        ReportClass::Ignorable,
+        "PMK-027.6"
+    );
+    assert!(s3.reports.is_empty(), "PMK-027.6");
+    // .7 an unknown event type: skip Unknown, its name for the note.
+    let f = r#"{"event_type":"market_resolved","x":1}"#;
+    assert_eq!(report(&mut c, &mut s3, f).skip, Skip::Unknown, "PMK-027.7");
+    assert_eq!(
+        Pm::report_event_name(f.as_bytes()),
+        b"market_resolved",
+        "PMK-027.7"
+    );
+    // .8 an array frame of two events; a malformed number is a decode error.
+    let mut s4 = VecSink::default();
+    let h4 = "0xdd8473af003833b1b6fc568247e146ae153586a3e06e16bd0f730dce7a748c19";
+    bind(&mut s4, h4);
+    let arr = format!(
+        "[{},{}]",
+        order_frame(h4, "UPDATE", "LIVE", "1"),
+        order_frame(h4, "UPDATE", "LIVE", "4")
+    );
+    report(&mut c, &mut s4, &arr);
+    let q: Vec<_> = orders(&s4).iter().map(|e| e.qty.0).collect();
+    assert_eq!(q, vec![1_000_000, 3_000_000], "PMK-027.8");
+    let bad = order_frame(h4, "UPDATE", "LIVE", "x");
+    let class = Pm::classify_report(MsgOp::Text, &bad.as_bytes()[..64]);
+    assert!(
+        Pm::decode_report(rd(), &mut c, class, bad.as_bytes(), &RX, &mut s4).is_err(),
+        "PMK-027.8"
+    );
+    assert!(Pm::is_private_report(ReportClass::Push), "PMK-027.8");
+}
+
+#[test]
+fn pmk_028_query_result() {
+    let mut c = ctx();
+    let body = format!(
+        "{{\"id\":\"{H1}\",\"status\":\"LIVE\",\"asset_id\":\"{T_UP}\",\"original_size\":\"5\",\"size_matched\":\"2\",\"price\":\"0.45\",\"side\":\"BUY\"}}"
+    );
+    let mut s = VecSink::default();
+    Pm::decode_rest(
+        rd(),
+        &mut c,
+        &origin(GwOp::Query, UP),
+        200,
+        body.as_bytes(),
+        &RX,
+        &mut s,
+    )
+    .unwrap();
+    let e = orders(&s);
+    assert_eq!(
+        (
+            e[0].what,
+            e[0].detail,
+            e[0].cum_filled,
+            e[0].avg_px,
+            e[0].exch_order_id
+        ),
+        (
+            OrderEventKind::QueryResult,
+            2,
+            Qty(2_000_000),
+            Px(450),
+            key_of(H1)
+        ),
+        "PMK-028.1"
+    );
+    for (st, want) in [("MATCHED", 3u8), ("CANCELED", 4)] {
+        let mut s = VecSink::default();
+        let b = body.replace("LIVE", st);
+        Pm::decode_rest(
+            rd(),
+            &mut c,
+            &origin(GwOp::Query, UP),
+            200,
+            b.as_bytes(),
+            &RX,
+            &mut s,
+        )
+        .unwrap();
+        assert_eq!(orders(&s)[0].detail, want, "PMK-028.2 {st}");
+    }
+    for (st, b) in [(200u16, &b"null"[..]), (404, b"{\"error\":\"not found\"}")] {
+        let mut s = VecSink::default();
+        Pm::decode_rest(rd(), &mut c, &origin(GwOp::Query, UP), st, b, &RX, &mut s).unwrap();
+        assert_eq!(orders(&s)[0].detail, 7, "PMK-028.3 {st}");
+    }
+}
+
+#[test]
+fn pmk_029_user_channel_session() {
+    // .1 the order connection is the user channel, authenticated by its (unanswered) login frame.
+    let mut spec = hft_venue_proto::EndpointSpec::default();
+    Pm::endpoint(
+        Role::Order,
+        hft_venue_proto::RouteId(0),
+        &cfg(),
+        Some(&cred()),
+        None,
+        0,
+        &mut spec,
+    )
+    .unwrap();
+    assert_eq!(text(spec.path_query.as_slice()), "/ws/user", "PMK-029.1");
+    let mut out = Vec::new();
+    assert_eq!(
+        Pm::login(Role::Order, &cfg(), &cred(), 0, 0, &mut out),
+        Ok(LoginStep::Sent),
+        "PMK-029.1"
+    );
+    let f: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(
+        f,
+        serde_json::json!({"auth": {"apiKey": API_KEY, "secret": SECRET, "passphrase": PASS}, "type": "user"}),
+        "PMK-029.1"
+    );
+    assert_eq!(
+        Pm::login(Role::Md, &cfg(), &cred(), 0, 0, &mut out),
+        Ok(LoginStep::NotNeeded),
+        "PMK-029.2"
+    );
+    let mut frames = hft_venue_proto::SubFrames::with_capacity(1024, 4);
+    Pm::private_subscribe(&cfg(), AccountId(1), false, &mut frames).unwrap();
+    assert_eq!(frames.len(), 0, "PMK-029.2");
+    // .3 a passphrase with a quote cannot be put into the frame.
+    let mut k = cred();
+    k.passphrase = ArrayBuf::from_bytes(b"a\"b").unwrap();
+    assert!(
+        Pm::login(Role::Order, &cfg(), &k, 0, 0, &mut out).is_err(),
+        "PMK-029.3"
+    );
+}
+
+fn acct(q: &Query, status: u16, body: &str, s: &mut State) -> Result<(), hft_venue_proto::DecodeErr> {
+    Pm::account_decode(rd(), AccountId(1), q, status, body.as_bytes(), NOW_MS, s)
+}
+
+#[test]
+fn pmk_030_account_baseline() {
+    // .1 requests: paths and the L2 headers (Instruments is public).
+    let mut r = RestReqBuf::default();
+    for (q, path) in [
+        (Query::Instruments, "/time"),
+        (Query::Settings, "/auth/api-keys"),
+        (Query::Permissions, "/auth/ban-status/closed-only"),
+        (
+            Query::Balances,
+            "/balance-allowance?asset_type=COLLATERAL&signature_type=3",
+        ),
+        (
+            Query::OpenOrders {
+                cursor: String::new(),
+            },
+            "/data/orders?next_cursor=MA==",
+        ),
+    ] {
+        Pm::account_request(&cfg(), &cred(), &q, NOW_MS, &mut r).unwrap();
+        assert_eq!(text(r.path_query.as_slice()), path, "PMK-030.1");
+        assert_eq!(
+            header(&r, "POLY_API_KEY").is_some(),
+            q != Query::Instruments,
+            "PMK-030.1 {path}"
+        );
+    }
+    let q = Query::Cancel {
+        symbol: T_UP.into(),
+        order_id: H1.into(),
+    };
+    Pm::account_request(&cfg(), &cred(), &q, NOW_MS, &mut r).unwrap();
+    assert_eq!(
+        (r.method, text(r.body.as_slice())),
+        (Method::Delete, format!("{{\"orderID\":\"{H1}\"}}").as_str()),
+        "PMK-030.1"
+    );
+    // .2 the configured UID (24 characters) prefixes one of the wallet's API keys.
+    let mut s = State::default();
+    acct(&Query::Instruments, 200, "1792689496", &mut s).unwrap();
+    let keys = format!("{{\"apiKeys\":[\"{API_KEY}\"]}}");
+    acct(&Query::Settings, 200, &keys, &mut s).unwrap();
+    let h = s.config.unwrap();
+    assert_eq!(
+        (&h.venue_uid[..24], h.uid_keys),
+        (&API_KEY.as_bytes()[..24], 3),
+        "PMK-030.2"
+    );
+    let other = "{\"apiKeys\":[\"aaaaaaaa-1111-2222-3333-444455556666\"]}";
+    assert!(
+        acct(&Query::Settings, 200, other, &mut State::default()).is_err(),
+        "PMK-030.2"
+    );
+    // .3 closed-only mode refuses the account.
+    acct(&Query::Permissions, 200, "{\"closed_only\":false}", &mut s).unwrap();
+    assert!(
+        acct(&Query::Permissions, 200, "{\"closed_only\":true}", &mut s).is_err(),
+        "PMK-030.3"
+    );
+    // .4 open orders: one page, then the end cursor.
+    let q = Query::OpenOrders {
+        cursor: String::new(),
+    };
+    let page = format!(
+        "{{\"data\":[{{\"id\":\"{H1}\",\"asset_id\":\"{T_UP}\"}}],\"next_cursor\":\"MTAw\",\"limit\":100,\"count\":1}}"
+    );
+    acct(&q, 200, &page, &mut s).unwrap();
+    assert_eq!((s.orders.len(), s.cursor.as_str()), (1, "MTAw"), "PMK-030.4");
+    acct(
+        &q,
+        200,
+        "{\"data\":[],\"next_cursor\":\"LTE=\",\"limit\":5000,\"count\":0}",
+        &mut s,
+    )
+    .unwrap();
+    assert_eq!((s.orders.len(), s.cursor.as_str()), (0, ""), "PMK-030.4");
+    // .5 the pUSD balance (1e-6 units) as the quote asset's balance.
+    acct(
+        &Query::Balances,
+        200,
+        "{\"balance\":\"82254260\",\"allowances\":{}}",
+        &mut s,
+    )
+    .unwrap();
+    let b: Vec<_> = s.balances.iter().map(|b| (b.asset, b.free, b.locked)).collect();
+    assert_eq!(
+        b,
+        vec![(hft_types::AssetId(1), Qty(82_254_260), Qty(0))],
+        "PMK-030.5"
+    );
+    // .6 any non-2xx answer fails the baseline.
+    assert!(acct(&Query::Balances, 401, "{}", &mut s).is_err(), "PMK-030.6");
+    let _ = ExchIdHint::Unknown;
+}

@@ -2,8 +2,8 @@
 
 use hft_refdata::RefData;
 use hft_venue_proto::{
-    EndpointSpec, HeartbeatSpec, PingKind, ProtoErr, Role, RouteId, RouteKind, RouteSpec, StreamKind,
-    SubFrames, SubSpec,
+    Credential, EndpointSpec, HeartbeatSpec, LoginStep, PingKind, ProtoErr, Role, RouteId, RouteKind,
+    RouteSpec, StreamKind, SubFrames, SubSpec,
 };
 
 use crate::FeedCtx;
@@ -42,8 +42,36 @@ pub(crate) fn endpoint(role: Role, route: RouteId, out: &mut EndpointSpec) -> Re
     out.headers.clear();
     match role {
         Role::Md if route == ROUTE_MARKET => out.path_query.push(b"/ws/market"),
+        // The user channel is the order connection: orders themselves go over REST.
+        Role::Order => out.path_query.push(b"/ws/user"),
         _ => Err(ProtoErr::Unsupported),
     }
+}
+
+/// Order connection: `{"auth":{"apiKey","secret","passphrase"},"type":"user"}` subscribes every
+/// market of the account and is never answered (`LoginStep::Sent`). The runtime keeps login
+/// frames out of the raw journal (contract 7).
+pub(crate) fn login(role: Role, cred: &Credential, out: &mut Vec<u8>) -> Result<LoginStep, ProtoErr> {
+    out.clear();
+    if role != Role::Order {
+        return Ok(LoginStep::NotNeeded);
+    }
+    let k = crate::orders::keys(cred)?;
+    let ok = |b: &[u8]| {
+        b.iter()
+            .all(|c| c.is_ascii_graphic() && *c != b'"' && *c != b'\\')
+    };
+    if !ok(cred.api_key.as_slice()) || !ok(k.api_secret.as_bytes()) || !ok(cred.passphrase.as_slice()) {
+        return Err(ProtoErr::Cfg);
+    }
+    out.extend_from_slice(b"{\"auth\":{\"apiKey\":\"");
+    out.extend_from_slice(cred.api_key.as_slice());
+    out.extend_from_slice(b"\",\"secret\":\"");
+    out.extend_from_slice(k.api_secret.as_bytes());
+    out.extend_from_slice(b"\",\"passphrase\":\"");
+    out.extend_from_slice(cred.passphrase.as_slice());
+    out.extend_from_slice(b"\"},\"type\":\"user\"}");
+    Ok(LoginStep::Sent)
 }
 
 /// Text `PING` every 10 s; the server answers `PONG` and drops silent connections. No idle timeout:
