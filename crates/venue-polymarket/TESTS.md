@@ -28,7 +28,7 @@ spec: README.md
 | 合成序号 | PMK-003–PMK-005, PMK-010–PMK-012 |
 | 多连接去重 | PMK-016, PMK-017 |
 | 心跳 | PMK-001 |
-| 签名 | PMK-018–PMK-021 |
+| 签名 | PMK-018–PMK-022 |
 | VenueCaps 默认值 | PMK-011 |
 | 实现说明 | PMK-006, PMK-007 |
 | 延迟与资源契约 | PMK-011 |
@@ -315,4 +315,14 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 | PMK-021.1 | 私钥长度不对、非十六进制、全零 | `BadKey` |
 | PMK-021.2 | token id 255、256、2²⁵⁶ − 1、2²⁵⁶、`12a`、空串 | 前三个按大端 32 字节解析;后三个 `None` |
 | PMK-021.3 | API secret 不是 URL-safe base64 | `BadSecret` |
+
+### PMK-022 存款钱包签名与官方客户端一致
+
+- 规则:[签名](README.md#签名)
+- 级别:golden
+- 里程碑:M3
+- 前置:同 PMK-018;金样 `orders_1271`(签名类型 3,`maker = signer` = 存款钱包 `0x7cB0…8cB2`)
+- 步骤:两笔订单(买 5 份 @0.45、卖 5 份 @0.55)按存款钱包格式签名
+- 期望:`0x` + 十六进制等于金样 `signature`(内层签名 ‖ 域分隔符 ‖ 订单结构哈希 ‖ 类型串 ‖ 长度)
+- 实现:`crates/venue-polymarket/tests/main.rs::sign_v2_1271::pmk_022_deposit_wallet_signature_matches_the_official_client`
 

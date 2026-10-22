@@ -136,6 +136,11 @@ pub fn exchange_domain(version: &str, chain: u64, contract: &[u8; 20]) -> [u8; 3
 
 /// The EIP-712 digest of `o` under `domain`.
 pub fn order_digest(domain: &[u8; 32], o: &OrderV2) -> [u8; 32] {
+    typed(domain, &order_struct_hash(o))
+}
+
+/// `hashStruct(Order)`.
+pub fn order_struct_hash(o: &OrderV2) -> [u8; 32] {
     let mut h = Keccak256::new();
     h.update(keccak(ORDER_TYPE));
     h.update(word_u64(o.salt));
@@ -149,8 +154,50 @@ pub fn order_digest(domain: &[u8; 32], o: &OrderV2) -> [u8; 32] {
     h.update(word_u64(o.timestamp_ms));
     h.update(o.metadata);
     h.update(o.builder);
+    h.finalize().into()
+}
+
+/// `TypedDataSign` type of the Deposit Wallet (ERC-7739 nested typed data), with `Order` appended.
+const TYPED_DATA_SIGN: &[u8] = b"TypedDataSign(Order contents,string name,string version,uint256 chainId,address verifyingContract,bytes32 salt)Order(uint256 salt,address maker,address signer,uint256 tokenId,uint256 makerAmount,uint256 takerAmount,uint8 side,uint8 signatureType,uint256 timestamp,bytes32 metadata,bytes32 builder)";
+
+/// Signature type 3 (Deposit Wallet, ERC-1271 via ERC-7739): the wallet key signs
+/// keccak(`0x19 0x01` ‖ exchange domain ‖ hashStruct(TypedDataSign{contents = hashStruct(order),
+/// name "DepositWallet", version "1", chain, verifyingContract = order.signer, salt 0})); the
+/// signature sent is `r‖s‖v ‖ exchange domain ‖ hashStruct(order) ‖ Order type string ‖ its
+/// length (u16, big-endian)`. Writes it into `out`; returns its length.
+pub fn sign_order_1271(w: &Wallet, domain: &[u8; 32], chain: u64, o: &OrderV2, out: &mut [u8; 512]) -> usize {
+    let contents = order_struct_hash(o);
+    let mut h = Keccak256::new();
+    h.update(keccak(TYPED_DATA_SIGN));
+    h.update(contents);
+    h.update(keccak(b"DepositWallet"));
+    h.update(keccak(b"1"));
+    h.update(word_u64(chain));
+    h.update(word_addr(&o.signer));
+    h.update([0u8; 32]);
     let s: [u8; 32] = h.finalize().into();
-    typed(domain, &s)
+    let inner = w.sign(&typed(domain, &s));
+    let n = 65 + 32 + 32 + ORDER_TYPE.len() + 2;
+    out[..65].copy_from_slice(&inner);
+    out[65..97].copy_from_slice(domain);
+    out[97..129].copy_from_slice(&contents);
+    out[129..129 + ORDER_TYPE.len()].copy_from_slice(ORDER_TYPE);
+    out[129 + ORDER_TYPE.len()..n].copy_from_slice(&(ORDER_TYPE.len() as u16).to_be_bytes());
+    n
+}
+
+/// `0x` + lower-case hex of `b` into `out`; `None` when `out` is too small.
+pub fn hex_bytes<'a>(b: &[u8], out: &'a mut [u8]) -> Option<&'a str> {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let n = 2 + 2 * b.len();
+    let o = out.get_mut(..n)?;
+    o[0] = b'0';
+    o[1] = b'x';
+    for (i, x) in b.iter().enumerate() {
+        o[2 + 2 * i] = HEX[usize::from(x >> 4)];
+        o[3 + 2 * i] = HEX[usize::from(x & 15)];
+    }
+    core::str::from_utf8(o).ok()
 }
 
 fn typed(domain: &[u8; 32], s: &[u8; 32]) -> [u8; 32] {

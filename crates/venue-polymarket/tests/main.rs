@@ -866,3 +866,47 @@ mod sign_v2 {
         );
     }
 }
+
+mod sign_v2_1271 {
+    use venue_polymarket::sign::{
+        EXCHANGE_V2, OrderV2, Wallet, exchange_domain, hex_bytes, parse_u256, sign_order_1271,
+    };
+
+    fn addr(s: &str) -> [u8; 20] {
+        let mut a = [0u8; 20];
+        for (i, c) in a.iter_mut().enumerate() {
+            *c = u8::from_str_radix(&s[2 + 2 * i..4 + 2 * i], 16).unwrap();
+        }
+        a
+    }
+
+    #[test]
+    fn pmk_022_deposit_wallet_signature_matches_the_official_client() {
+        let g: serde_json::Value = serde_json::from_str(include_str!("sign_v2_golden.json")).unwrap();
+        let w = Wallet::from_hex(g["key"].as_str().unwrap()).unwrap();
+        let domain = exchange_domain("2", 137, &EXCHANGE_V2);
+        for (k, o) in g["orders_1271"].as_array().unwrap().iter().enumerate() {
+            let order = OrderV2 {
+                salt: o["salt"].as_str().unwrap().parse().unwrap(),
+                maker: addr(o["maker"].as_str().unwrap()),
+                signer: addr(o["signer"].as_str().unwrap()),
+                token_id: parse_u256(o["tokenId"].as_str().unwrap()).unwrap(),
+                maker_amount: o["makerAmount"].as_str().unwrap().parse().unwrap(),
+                taker_amount: o["takerAmount"].as_str().unwrap().parse().unwrap(),
+                side: o["side"].as_u64().unwrap() as u8,
+                signature_type: 3,
+                timestamp_ms: o["timestamp"].as_str().unwrap().parse().unwrap(),
+                metadata: [0; 32],
+                builder: [0; 32],
+            };
+            let mut sig = [0u8; 512];
+            let n = sign_order_1271(&w, &domain, 137, &order, &mut sig);
+            let mut hex = [0u8; 1026];
+            assert_eq!(
+                hex_bytes(&sig[..n], &mut hex).unwrap(),
+                o["signature"].as_str().unwrap(),
+                "PMK-022 order {k}"
+            );
+        }
+    }
+}
