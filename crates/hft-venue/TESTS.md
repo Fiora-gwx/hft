@@ -3739,3 +3739,20 @@ warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入�
 |---|---|---|
 | VEN-399.1 | `Subscribe{S1, BOOK}`,建连之前 poll 一次 | `md` 环的 `ConnState{Resync, S1, NEW_SUB}` 的 `conn ≥ MAX_BBO_CONN_SLOTS`(`MD_FIRST`) |
 | VEN-399.2 | 深度连接 8 就绪后 `FeedCmd::Resync{S1}` | `ConnState{Resync, S1, REQUESTED}` 的 `conn = 8` |
+
+### VEN-400 `BindWire` 进协议的 gw 状态;无 client id 的 REST Place 由 Ack 绑定交易所 id
+
+- 规则:[出环](README.md#出环outmsg--gwcmd)
+- 级别:unit
+- 里程碑:M3
+- 前置:`Stub<2048, V_BINDS_ID>`(`REST_PLACE_BINDS_ID = true`,Place 走 REST,`bind_order_wire` 拒绝首字节 0xFF 的 id);A1 的 REST 池已交接
+- 步骤:依次执行下表各行
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_400_bind_wire_and_rest_place_binds_id`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| VEN-400.1 | `BindWire{S1, 段 0, 0x01 × 16}`、`BindWire{S1, 段 1, 0x02 × 16}` | `binds` +1(一个账户),`bind_failed` 不变 |
+| VEN-400.2 | 只有段 1 的 `S2`;本 venue 之外的 inst;`part` 2 | `maint_ignored` +3,`binds` 不变 |
+| VEN-400.3 | 首字节 0xFF 的 id(两段) | `bind_failed` +1 |
+| VEN-400.4 | 普通 `Place{A1, slot 7, gen 3, S1}`(无平仓标记);响应前私有频道先到交易所 id 12345 的成交;响应 200 | 恰一次 `encode_rest_ctx`,看到 S1 的绑定(首字节 0x01);成交先暂存(`held` = 1);响应后依次出 `Ack`、`Fill`,都是 slot 7、gen 3、epoch 5,`held` = 0 |
+

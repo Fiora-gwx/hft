@@ -71,6 +71,23 @@ pub trait VenueProtocol: Sized + 'static {
         let _ = cred;
         Self::encode_rest(rd, t, c, tgt, clk, out)
     }
+    /// `encode_rest_signed` with the account's gw state: venues whose REST order operations
+    /// need run-time bindings or exchange ids kept in `GwCtx` (Polymarket token ids and order
+    /// hashes). The gw calls this entry; the default ignores `ctx`.
+    #[allow(clippy::too_many_arguments)]
+    fn encode_rest_ctx(
+        rd: &RefData,
+        t: &Self::Templates,
+        ctx: &Self::GwCtx,
+        cred: &Credential,
+        c: &GwCmd,
+        tgt: &TargetRef,
+        clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<(), EncodeErr> {
+        let _ = ctx;
+        Self::encode_rest_signed(rd, t, cred, c, tgt, clk, out)
+    }
     fn ro_request_signed(
         rd: &RefData,
         t: &Self::Templates,
@@ -153,6 +170,9 @@ pub trait VenueProtocol: Sized + 'static {
     /// The private channels live on a separate user-data connection (Binance USDT-M listenKey
     /// stream) instead of the order connection (hft-venue §4b).
     const USER_STREAM: bool = false;
+    /// Orders carry no client id: the `Ack` that `decode_rest` produces for a REST Place binds
+    /// the exchange id it names to that request (contract 29; Polymarket).
+    const REST_PLACE_BINDS_ID: bool = false;
 
     // ---- capability defaults (cold; hft-cfg only, never called by the runtime) ----
     /// Contract 15; asset names resolve through `asset` (unknown → `ASSET_NONE`).
@@ -223,6 +243,12 @@ pub trait VenueProtocol: Sized + 'static {
     /// feed state. Only venues whose wire ids are bound at run time support it. The previous id
     /// stays renderable for one unsubscription frame.
     fn bind_wire(ctx: &mut Self::FeedCtx, inst: InstId, id: &[u8; 32]) -> Result<(), ProtoErr> {
+        let _ = (ctx, inst, id);
+        Err(ProtoErr::Unsupported)
+    }
+    /// Binds slot `inst` to a 32-byte exchange wire id in one account's gw state (`GwOp::BindWire`;
+    /// all zero = unbind). Only venues whose order encoding needs the run-time id support it.
+    fn bind_order_wire(ctx: &mut Self::GwCtx, inst: InstId, id: &[u8; 32]) -> Result<(), ProtoErr> {
         let _ = (ctx, inst, id);
         Err(ProtoErr::Unsupported)
     }

@@ -385,6 +385,46 @@ fn seq_263_epoch() {
 }
 
 #[test]
+fn seq_437_bindings_resent_to_gw_after_restart() {
+    let mut h = steady();
+    let id = h.cmd_confirmed(
+        AC1,
+        &ControlCmd::BindSlot {
+            venue: A,
+            _pad: [0; 3],
+            inst: A1,
+            start_s: 1_000,
+            end_s: 1_300,
+            wire_id: [0x5A; 32],
+        },
+    );
+    h.run();
+    assert_eq!(h.res(id).0, hft_sequencer::codes::status::APPLIED);
+    h.keyframe();
+    let mut h2 = H::crash_restart(h, plan(SnapshotSel::Latest, true, 9, 0), Rerun::default()).unwrap();
+    let n = h2.io_ref().out.len();
+    h2.step();
+    let out = &h2.io_ref().out[n..];
+    let epoch = out
+        .iter()
+        .position(|o| o.1.op == hft_event::GwOp::SetEpoch)
+        .expect("SetEpoch");
+    let parts: Vec<_> = out
+        .iter()
+        .enumerate()
+        .filter(|(_, o)| o.1.op == hft_event::GwOp::BindWire)
+        .map(|(i, o)| (i > epoch, o.0, o.1.inst, o.1.arg, o.1.wire_chunk()))
+        .collect();
+    assert_eq!(
+        parts,
+        (0u32..2)
+            .map(|p| (true, hft_sequencer::OutRing::Venue(A), A1, p, [0x5A; 16]))
+            .collect::<Vec<_>>(),
+        "SEQ-437"
+    );
+}
+
+#[test]
 fn seq_264_recovery_segment() {
     let mut h = steady();
     h.keyframe();

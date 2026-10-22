@@ -491,6 +491,7 @@ fn engine_clock<D: Driver<S>, S: StrategySet>(
             }
         }
         crate::recover::mirror_restore_all(e);
+        crate::commands::emit_order_bindings_all(e);
     }
     crate::subs::resend_all(e, inst);
     let _ = drv;

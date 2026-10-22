@@ -135,6 +135,9 @@ pub struct GwCounters {
     pub fee_rule_deviation: u64,
     pub hold_evicted: u64,
     pub private_unowned: u64,
+    /// `BindWire` bindings applied (per account) and refused by the protocol.
+    pub binds: u64,
+    pub bind_failed: u64,
 }
 
 const NO_CONN: ConnId = ConnId(0);
@@ -146,6 +149,8 @@ const INFLIGHT_CAP: usize = 4096;
 const SINK_CAP: usize = 64;
 /// Orders per `encode_batch` call of the CancelAll expansion.
 const BATCH_CAP: usize = 64;
+/// Insts with a `BindWire` part 0 waiting for its part 1.
+const BIND_PEND_CAP: usize = 64;
 
 #[derive(Copy, Clone, Debug)]
 struct Inflight {
@@ -247,6 +252,8 @@ pub struct GwRuntime<P: VenueProtocol, const CAP: usize = 2048> {
     round: u64,
     cmds_done: u64,
     venue_insts: Box<[InstId]>,
+    /// `BindWire` part 0 waiting for its part 1, per inst.
+    bind_pend: Vec<(InstId, [u8; 16])>,
     n: GwCounters,
     last: LoopStat,
     rest: Option<(
@@ -547,6 +554,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             round: 0,
             cmds_done: 0,
             venue_insts: venue_insts.into_boxed_slice(),
+            bind_pend: Vec::with_capacity(BIND_PEND_CAP),
             n: GwCounters::default(),
             last: LoopStat::default(),
             rest: None,
@@ -1353,8 +1361,9 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     e.r#gen = 0;
                 }
                 let key = self.sink_keys[k];
-                // A position-close endpoint may allocate its own client id. Bind its returned
-                // exchange id only to the captured request, then release any earlier fills.
+                // A position-close endpoint may allocate its own client id, and a venue without
+                // client ids (REST_PLACE_BINDS_ID) has none at all. Bind the returned exchange id
+                // only to the captured request, then release any earlier fills.
                 if e.what == OrderEventKind::Ack
                     && request_identity.is_some_and(|(r, epoch, inst)| {
                         r.op == GwOp::Place
@@ -1367,7 +1376,7 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     && exch_id_value(key.bytes()) == e.exch_order_id
                     && let Some(mirror) = self.mirror.get_mut(e.slot.0 as usize)
                     && mirror.live
-                    && mirror.position_close
+                    && (mirror.position_close || P::REST_PLACE_BINDS_ID)
                     && mirror.account == account
                     && mirror.epoch == e.epoch
                     && mirror.r#gen == e.r#gen
@@ -2221,6 +2230,43 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
                     self.accts[a].private.owner = None;
                     self.conn_state(c.account, ConnRole::UserStream, id, ConnStateKind::Down, 0, now);
                     self.private_start(a, id, now);
+                }
+            }
+            GwOp::BindWire => self.bind_wire(c),
+            _ => self.n.maint_ignored += 1,
+        }
+    }
+
+    /// `BindWire` (README "出环"): part 0 waits for part 1 of the same inst; the assembled id goes
+    /// to every account's protocol state. An inst outside this venue, a lone part 1 or a protocol
+    /// without run-time bindings → counted, nothing bound.
+    fn bind_wire(&mut self, c: GwCmd) {
+        if self.venue_insts.binary_search(&c.inst).is_err() {
+            self.n.maint_ignored += 1;
+            return;
+        }
+        let pend = self.bind_pend.iter().position(|(i, _)| *i == c.inst);
+        match c.arg {
+            0 => match pend {
+                Some(k) => self.bind_pend[k].1 = c.wire_chunk(),
+                None if self.bind_pend.len() < BIND_PEND_CAP => self.bind_pend.push((c.inst, c.wire_chunk())),
+                None => self.n.maint_ignored += 1,
+            },
+            1 => {
+                let Some(k) = pend else {
+                    self.n.maint_ignored += 1;
+                    return;
+                };
+                let (_, head) = self.bind_pend.swap_remove(k);
+                let mut id = [0u8; 32];
+                id[..16].copy_from_slice(&head);
+                id[16..].copy_from_slice(&c.wire_chunk());
+                for x in &mut self.accts {
+                    if P::bind_order_wire(&mut x.ctx, c.inst, &id).is_ok() {
+                        self.n.binds += 1;
+                    } else {
+                        self.n.bind_failed += 1;
+                    }
                 }
             }
             _ => self.n.maint_ignored += 1,

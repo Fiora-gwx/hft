@@ -50,6 +50,7 @@ pub trait VenueProtocol: Sized + 'static {
     const CANCEL_ALL_SWEEP: bool = false; // true:gw 发完 CancelAll 后再查一次挂单列表兜底(契约 29;OKX)
     const BBO_SNAPSHOT_BATCH: u16 = 1;   // 一次 BBO 补帧请求可覆盖的 inst 上限(契约 24);u16::MAX = 只受 RestReqBuf 长度限制
     const USER_STREAM: bool = false;     // true:私有频道在独立的用户流连接上(Binance USDT-M listenKey 流),而不是下单连接(hft-venue §4b)
+    const REST_PLACE_BINDS_ID: bool = false; // true:订单不带 client id,REST Place 的 Ack 把它给出的交易所 id 绑到该请求(契约 29;Polymarket)
     type AcctCtx: Default;               // 账户查询跨序列的 venue 私有状态(如上一次的 ADL 档);acct-fetch 每账户一个(契约 27)
     type AcctScratch: Default;           // 一次账户查询序列的中间结果;定长,不含堆(契约 16、17)
 
@@ -79,6 +80,8 @@ pub trait VenueProtocol: Sized + 'static {
     /// BindSlot:把槽位 inst 绑定到 32 字节交易所 id(全零 = 解绑),写进 FeedCtx;只有运行期绑定 id 的 venue 支持,
     /// 其余默认 Err(Unsupported)。旧 id 保留到下一次退订帧渲染完。
     fn bind_wire(ctx: &mut Self::FeedCtx, inst: InstId, id: &[u8; 32]) -> Result<(), ProtoErr> { Err(ProtoErr::Unsupported) }
+    /// GwOp::BindWire:同一绑定写进一个账户的 GwCtx(下单编码要用运行期 id 的 venue 支持,其余默认 Err(Unsupported))。
+    fn bind_order_wire(ctx: &mut Self::GwCtx, inst: InstId, id: &[u8; 32]) -> Result<(), ProtoErr> { Err(ProtoErr::Unsupported) }
     /// 私有频道订阅帧(用户流、订单、持仓、账户、保证金推送);只在被选为私有频道归属的连接上发(见 hft-venue §4b)。
     fn private_subscribe(cfg: &VenueCfg, acct: AccountId, unsub: bool, out: &mut SubFrames) -> Result<(), ProtoErr>;
     fn heartbeat(role: Role) -> HeartbeatSpec;
@@ -123,6 +126,10 @@ pub trait VenueProtocol: Sized + 'static {
     /// order_channel(c.op) = Rest 的订单操作(如 Binance USDT-M 按 symbol 全撤、OKX/Bitget 查单):生成签名 REST 请求(契约 29)。
     fn encode_rest(rd: &RefData, t: &Self::Templates, c: &GwCmd, tgt: &TargetRef, clk: &WallClock, out: &mut RestReqBuf)
                    -> Result<(), EncodeErr> { Err(EncodeErr::Unsupported(c.op)) }
+    /// gw 实际调用的入口:同 encode_rest_signed,另借该账户的 GwCtx(运行期绑定的 token id、交易所订单哈希;Polymarket)。
+    /// 默认忽略 ctx,转 encode_rest_signed(凭证按调用借用,契约 7)。
+    fn encode_rest_ctx(rd: &RefData, t: &Self::Templates, ctx: &Self::GwCtx, cred: &Credential, c: &GwCmd, tgt: &TargetRef,
+                       clk: &WallClock, out: &mut RestReqBuf) -> Result<(), EncodeErr> { Self::encode_rest_signed(rd, t, cred, c, tgt, clk, out) }
     /// 会话维护请求(GwOp::SessionKeepalive,如 Binance USDT-M listenKey PUT 续期);不需要维护的所返回 Ok(false)(默认)。
     fn session_keepalive_request(rd: &RefData, t: &Self::Templates, clk: &WallClock, out: &mut RestReqBuf)
                                  -> Result<bool, EncodeErr> { Ok(false) }
@@ -264,7 +271,7 @@ pub struct VenueCfg {
 pub enum VenueEnv { Prod, Testnet }
 /// 一把 API 凭证:调用方(hft-core 从 Secrets Manager 载入、reconciler 读只读 key)持有,venue 只借用;Debug 不输出密钥材料。
 pub struct Credential { pub api_key: ArrayBuf<128>, pub secret: SecretBuf, pub passphrase: ArrayBuf<64> /* OKX、Bitget;其余空 */, pub alg: SignAlg }
-pub enum SignAlg { HmacSha256, Ed25519 }
+pub enum SignAlg { HmacSha256, Ed25519, Secp256k1 /* Polymarket:secret 装钱包私钥与 API secret,见该 venue README */ }
 /// bootstrap 的输出:warm 线程先执行的 REST 请求;2xx 响应体原样作为 endpoint 的 boot 参数。
 pub type BootCall = RestReqBuf;
 /// dead_man_refresh 的输出:Via::Ws → frame 一帧(经下单 primary 发送);Via::Rest → reqs 每个请求一项(按 inst 计时的所每个 inst 一个)。
@@ -278,7 +285,7 @@ pub enum RestWhat { Order, DeadMan, Keepalive, Sweep /* CANCEL_ALL_SWEEP 的挂�
 pub struct RestReqBuf {
     pub endpoint: u8,          // 该 venue REST 端点表的下标(0 = 主端点;表的顺序与默认主机由 venue README 的端点表给出,配置规则归 hft-venue §4a)
     pub method: Method,
-    pub path_query: ArrayBuf<1024>, pub headers: ArrayBuf<512>, pub body: ArrayBuf<1024>,
+    pub path_query: ArrayBuf<1024>, pub headers: ArrayBuf<512>, pub body: ArrayBuf<2048> /* Polymarket 下单体约 1.4 KiB */,
     pub redacted: bool,        // 含签名:运行时写 RawTx 时只记元数据
 }
 
@@ -504,7 +511,7 @@ pub enum ExchIdHint { Resolved { epoch: u16, slot: SlotId, gen: u32 }, Recorded,
 **订单事件细节、REST 出口、控制提示与只读查询**
 
 28. **`OrderEvent.detail`**(u8;字段与码值归 [hft-event](../hft-event/README.md)):`QueryResult` 填订单状态码(New=1 … NotFound=7,与 `ReconcileReport.order_status` 同码);`CancelReject`/`AmendReject` 在 `codes.rs` 把该码登记为"订单已成交、已撤或不存在"类时填 `GONE`,其他原因填 0;`PartialFill`/`Fill` 填已确认的订单方向 Buy=1/Sell=2;其余 `what` 填 0。每个 venue README 的"结果未知码表"写明哪些码属 `GONE` 类,查询响应的状态映射写在下单一节。
-29. **REST 形态的订单操作与会话维护**:`order_channel(op) = Rest` 的订单类 op 由 `encode_rest` 生成签名请求,其余 op 由 `encode` 写 WS 帧;同一 op 只走一种通道。`CancelAll` 的展开(账户级 → 按 inst → 按单)由运行时按 `Unsupported(CancelAll)` 逐级进行,两种通道相同([hft-venue 出环](../hft-venue/README.md#出环outmsg--gwcmd));`CANCEL_ALL_SWEEP = true` 的所,运行时发完 `CancelAll` 后用 `ro_request(OpenOrders)` 查一次挂单列表,响应经 `decode_rest`(`RestWhat::Sweep`)对 client id 可解析为本账户的每个订单产出 `OrderEvent{what: QueryResult}`。需要会话维护的所实现 `session_keepalive_request`。gw 的全部 REST 响应经 `decode_rest` 解码:槽与操作取自 `RestOrigin`(响应不带 client id 时不得猜测),输出与 `decode_report` 遵守同样的契约 8、9、10、13、28、30;死手与会话维护响应不产出订单事件,失败只体现在 `ReportOutcome.raw_code` 与 `ctl`。
+29. **REST 形态的订单操作与会话维护**:`order_channel(op) = Rest` 的订单类 op 由 `encode_rest` 生成签名请求,其余 op 由 `encode` 写 WS 帧;同一 op 只走一种通道。`CancelAll` 的展开(账户级 → 按 inst → 按单)由运行时按 `Unsupported(CancelAll)` 逐级进行,两种通道相同([hft-venue 出环](../hft-venue/README.md#出环outmsg--gwcmd));`CANCEL_ALL_SWEEP = true` 的所,运行时发完 `CancelAll` 后用 `ro_request(OpenOrders)` 查一次挂单列表,响应经 `decode_rest`(`RestWhat::Sweep`)对 client id 可解析为本账户的每个订单产出 `OrderEvent{what: QueryResult}`。需要会话维护的所实现 `session_keepalive_request`。gw 的全部 REST 响应经 `decode_rest` 解码:槽与操作取自 `RestOrigin`(响应不带 client id 时不得猜测),输出与 `decode_report` 遵守同样的契约 8、9、10、13、28、30;死手与会话维护响应不产出订单事件,失败只体现在 `ReportOutcome.raw_code` 与 `ctl`。订单不带 client id 的所(`REST_PLACE_BINDS_ID = true`,Polymarket)由 `decode_rest` 为成功的 REST Place 产出 `Ack{slot, gen, exch_order_id}` 并以交易所 id 为键调 `exch_id(key, None)`,运行时把该 key 绑到发起请求的 `(slot, gen, epoch)`,之后私有频道里只带交易所 id 的回报按它定槽;运行期绑定的 id 经 `bind_order_wire` 进 `GwCtx`,`encode_rest_ctx` 从中取。
 30. **控制提示 `ReportOutcome.ctl`**:`decode_report`/`decode_rest` 遇时间戳越界拒单置 `ClockSkew`、遇交易所限速置 `RateLimited`(两者照常按码表产出 `Reject` 等事件)、遇用户流被交易所终止置 `UserStreamEnded`、遇私有连接上的下线或维护预告置 `ServerShutdown`;不产出 `ConnState`(由运行时按 [hft-venue §4](../hft-venue/README.md#4-gwruntimepoll_once-的循环结构) 第 2 步产出)。各 venue README 的"结果未知码表"与"用户流事件表"写明哪些码与事件置哪种提示。
 31. **只读查询族**(reconciler 的对账输入,[reconciler](../../apps/reconciler/README.md#覆盖范围与数据来源)):`ro_request` 只生成 `GET` 类只读请求(signed 入口按调用借用只读 key,`redacted = true`);`ro_decode` 按 `RoKind` 经 `RoSink` 逐行产出——`OpenOrders` → `open_order`、`Fills` → `fill`、`FundingFlow` → `funding`(逐笔带 inst 与交易所原始结算时刻)、`Balance` → `balance`、`Positions` → `position`;只保留 refdata 中该账户可交易的 inst 与资产;分页以 `RoPage.next_cursor` 交回调用方。产品线没有的查询(现货的 `Positions`、`FundingFlow`)返回 `Unsupported`。不依赖 `GwCtx`/`AcctCtx`,同一输入的输出确定。每个 venue README 有"只读查询"表(按产品线:端点、分页与游标、字段映射、是否带 client id)。kill-switch 不使用本族:它零依赖、自写每所的查挂单与查 UID([kill-switch 依赖](../../apps/kill-switch/README.md#依赖)),与本族只共用 fixtures 中的原始响应。
 

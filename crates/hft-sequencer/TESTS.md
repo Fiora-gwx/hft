@@ -6113,6 +6113,17 @@ SEQ-414 的启动子例 `seq_414_bootstrap_balances_are_snapshot_baselines_not_p
 | SEQ-432.4 | 取关键帧 | 节 31 有 `a1` 的一行,`wire_id = [0x5A; 32]`、`end_s = 1300` |
 | SEQ-432.5 | 账户 1 持有 `a1` 仓位后改绑 | `PreconditionFailed{GroupHasPosition}` |
 | SEQ-432.6 | 新稳态;issuer `pipeline`、无角色、账户 0 发 .1 的命令;再以 `ops_bot` 发 | `Applied`;`ops_bot` 为 `RoleInsufficient` |
+| SEQ-432.7 | 同 .1(venue A 有实盘账户 1) | 同一批输出含 `out-A` 的 2 条 `GwCmd::BindWire{account 0, a1, part 0、1, [0x5A; 16]}`,按 part 升序;.2 不发 |
+
+### SEQ-437 冷启动后绑定表重发给 gw
+
+- 规则:[命令路径](README.md#命令路径)
+- 级别:unit
+- 里程碑:M3
+- 前置:B0 稳态;`BindSlot{A, a1, 1000, 1300, [0x5A; 32]}` 已 `Applied`;取关键帧
+- 步骤:崩溃重启(最新快照、重放尾部、持久 epoch 9),执行第一步
+- 期望:`out-A` 在 `SetEpoch` 之后有 2 条 `BindWire{a1, part 0、1, [0x5A; 16]}`
+- 实现:`crates/hft-sequencer/tests/recover.rs::seq_437_bindings_resent_to_gw_after_restart`
 
 ### SEQ-433 未订阅的槽位在首次订阅前收到绑定
 
