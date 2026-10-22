@@ -3758,3 +3758,18 @@ warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入�
 | VEN-400.3 | 首字节 0xFF 的 id(两段) | `bind_failed` +1 |
 | VEN-400.4 | 普通 `Place{A1, slot 7, gen 3, S1}`(无平仓标记);响应前私有频道先到交易所 id 12345 的成交;响应 200 | 恰一次 `encode_rest_ctx`,看到 S1 的绑定(首字节 0x01);成交先暂存(`held` = 1);响应后依次出 `Ack`、`Fill`,都是 slot 7、gen 3、epoch 5,`held` = 0 |
 
+### VEN-401 `Deliver` 报一次 `ExternalFill{Delivery}`
+
+- 规则:[出环](README.md#出环outmsg--gwcmd)
+- 级别:table
+- 里程碑:M3
+- 前置:`StubProto`,A1 的 REST 池已交接
+- 步骤:依次执行下表各行
+- 期望:见下表各行
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_401_deliver_reports_an_external_delivery_once`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| VEN-401.1 | `Deliver{A1, S1, payout 1000, end_s 1300, qty 5000}` | 一条 `ExternalFill{A1, S1, Sell, Delivery, qty 5000, px 1000, fee 0, exch_order_id 1300, trade_id 0, fill_seq 5000, ex_ts_ns 1300 × 10⁹}` |
+| VEN-401.2 | 同一命令再来;A9(不归本 gw);`qty 0` | 不报;`delivered` 共 +1,`maint_ignored` +3 |
+

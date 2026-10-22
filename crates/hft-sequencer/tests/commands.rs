@@ -1121,17 +1121,26 @@ fn seq_435_settle() {
         .map(|(_, c)| (c.account, c.inst, c.px, c.arg, c.arg2))
         .collect();
     assert_eq!(sent, vec![(AC9, A1, Px(one), u32::from(A.0), 1_300)], "SEQ-435.3");
-    // .4 a Live account holds the inst: NotSim (live settlement is not built).
+    // .4 a Live account holds the inst: one Deliver of its inventory on its venue's out ring.
     let mut h = steady();
     let id = h.cmd_with("pipeline", 0, AccountId(0), &bind(1_300), |_| {});
     h.run();
     h.open_position(AC1, A1, Side::Buy, "0.001");
+    let held = h.s.engine().ledger.pos(AC1, A1).qty;
+    let n = h.io_ref().out.len();
     let id2 = h.cmd_with("pipeline", 0, AccountId(0), &settle(1_300, 0), |_| {});
     h.run();
     assert_eq!(h.res(id).0, status::APPLIED, "SEQ-435.4 bind");
+    assert_eq!(h.res(id2).0, status::APPLIED, "SEQ-435.4");
+    let sent: Vec<_> = h.io_ref().out[n..]
+        .iter()
+        .filter(|(_, c)| c.op == hft_event::GwOp::Deliver)
+        .map(|(r, c)| (*r, c.account, c.inst, c.px, c.qty, c.arg, c.arg2))
+        .collect();
+    assert!(held.0 > 0, "SEQ-435.4 {held:?}");
     assert_eq!(
-        h.res(id2),
-        (status::INVALID_ARGS, u32::from(detail::NOT_SIM)),
+        sent,
+        vec![(OutRing::Venue(A), AC1, A1, Px(0), held, u32::from(A.0), 1_300)],
         "SEQ-435.4"
     );
 }

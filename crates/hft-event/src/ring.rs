@@ -225,6 +225,26 @@ impl GwCmd {
         }
     }
 
+    /// `op = Deliver` (Live settlement on `out-<venue>`): `inst`, `px = payout`, `qty` = the
+    /// delivered inventory, `arg = venue`, `arg2 = end_s` (UTC s, u32).
+    pub fn deliver(
+        account: AccountId,
+        venue: VenueId,
+        inst: InstId,
+        payout: Px,
+        end_s: u32,
+        qty: Qty,
+    ) -> GwCmd {
+        GwCmd {
+            px: payout,
+            qty,
+            inst,
+            arg: u32::from(venue.0),
+            arg2: end_s,
+            ..Self::base(GwOp::Deliver, account)
+        }
+    }
+
     /// `op = BindWire`: part `part` (0 or 1) of the 32-byte wire id a `BindSlot` binds to `inst`
     /// (account 0: every account of the venue); bytes `16·part ..` ride in `px` then `qty`, each
     /// big-endian. Part 1 completes the binding; an all-zero id unbinds.

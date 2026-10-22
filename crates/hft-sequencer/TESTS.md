@@ -6163,7 +6163,7 @@ SEQ-411/412 补充未声明 PERP_CASH 的逐笔现金连续前缀:分笔/重复/
 | SEQ-435.1 | `BindSlot{A, a1, …, end_s = 1300}` 后 `Settle{A, a1, 1300, one}`(无人持有);绑定 `end_s = 4 000 000 000` 后同样 | 前者 `NoOp`;后者 `PreconditionFailed{NotEnded}` |
 | SEQ-435.2 | 绑定 `end_s = 1300` 后:`end_s = 1200`;`payout = one + 1` | 各为 `InvalidArgs{BadValue}` |
 | SEQ-435.3 | 模拟账户 9 持有 `a1` 后 `Settle{A, a1, 1300, one}` | `Applied`;`out-sim` 恰好一条 `SimSettle{account 9, a1, px = one, arg = A, arg2 = 1300}` |
-| SEQ-435.4 | 新稳态;绑定后实盘账户 1 持有 `a1`,`Settle{…, payout 0}` | `InvalidArgs{NotSim}` |
+| SEQ-435.4 | 新稳态;绑定后实盘账户 1 持有 `a1`,`Settle{…, payout 0}` | `Applied`;`out-A` 恰好一条 `Deliver{account 1, a1, px 0, qty = 账户 1 在 a1 的持仓, arg = A, arg2 = 1300}`(有挂单时为 `PreconditionFailed{NotQuiescent}`,不发任何输出) |
 
 ### SEQ-436 没有 BBO 连接报价的 inst 以 L2 簿顶为报价
 

@@ -1832,6 +1832,7 @@
 | 15 | `SimFault` |
 | 16 | `SimSettle` |
 | 17 | `BindWire` |
+| 18 | `Deliver` |
 
 ### 码表 HedgePxMode
 

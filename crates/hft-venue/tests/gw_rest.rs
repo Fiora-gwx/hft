@@ -116,6 +116,66 @@ fn ven_400_bind_wire_and_rest_place_binds_id() {
 }
 
 #[test]
+fn ven_401_deliver_reports_an_external_delivery_once() {
+    use hft_event::{ExternalCause, GwCmd};
+    use hft_types::{Px, Qty, Side};
+    let mut h = setup::<0>();
+    let fills = |h: &mut Gh<Stub<2048, 0>>| -> Vec<hft_event::ExternalFill> {
+        h.reps()
+            .into_iter()
+            .filter_map(|m| match m {
+                RepMsg::ExternalFill(x) => Some(x),
+                _ => None,
+            })
+            .collect()
+    };
+    let n0 = h.rt.counters();
+    let d = GwCmd::deliver(A1, V7, S1, Px(1_000), 1_300, Qty(5_000));
+    h.cmd(d);
+    h.poll(4000);
+    let x = fills(&mut h);
+    assert_eq!(x.len(), 1, "VEN-401.1");
+    assert_eq!(
+        (
+            x[0].account,
+            x[0].inst,
+            x[0].side,
+            x[0].cause,
+            x[0].qty,
+            x[0].px,
+            x[0].fee
+        ),
+        (
+            A1,
+            S1,
+            Side::Sell,
+            ExternalCause::Delivery,
+            Qty(5_000),
+            Px(1_000),
+            Qty(0)
+        ),
+        "VEN-401.1"
+    );
+    assert_eq!(
+        (x[0].exch_order_id, x[0].trade_id, x[0].fill_seq, x[0].ex_ts_ns),
+        (1_300, 0, 5_000, 1_300_000_000_000),
+        "VEN-401.1"
+    );
+    // .2 the same delivery again; an account of another gw; qty 0: nothing reported.
+    h.cmd(d);
+    h.cmd(GwCmd::deliver(A9, V7, S1, Px(1_000), 1_300, Qty(5_000)));
+    h.cmd(GwCmd::deliver(A1, V7, S1, Px(1_000), 1_600, Qty(0)));
+    h.poll(4100);
+    assert!(fills(&mut h).is_empty(), "VEN-401.2");
+    let n = h.rt.counters();
+    assert_eq!(
+        (n.delivered - n0.delivered, n.maint_ignored - n0.maint_ignored),
+        (1, 3),
+        "VEN-401.2"
+    );
+}
+
+#[test]
 fn ven_210_wait_fds_only_pending_rest() {
     use hft_rt::PollTask;
     let mut h = setup::<0>();

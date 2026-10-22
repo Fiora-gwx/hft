@@ -913,13 +913,14 @@ pub struct GwCmd {                   // out-<venue> 环与 out-sim 环元素,64 
     pub target_slot: SlotId,         // 44 Cancel/Amend/Query 的目标;gw 从私有槽镜像取其 gen 与交易所 id
     pub op: GwOp,                    // 48 订单类与 OrderAction 同值:Place=1(= New) Cancel=2 Amend=3 CancelAll=4 Query=5;
                                      //    维护类:DeadManRefresh=6 Rotate=7 ResetRate=8 Resubscribe=9 SetEpoch=10 SessionKeepalive=11 MirrorRestore=12 BindWire=17;
+                                     //    实盘交割(只出现在 out-<venue> 环):Deliver=18;
                                      //    模拟账户专用(只出现在 out-sim 环):SimReset=13 SimTransfer=14 SimFault=15 SimSettle=16
     pub account: AccountId,          // 49
     pub side: Side, pub tif: Tif,    // 50 仅 Place/Amend 有意义
     pub oflags: u16,                 // 52 = OrderDecision.oflags 原样复制;维护类 0
     pub _pad: [u8; 2],               // 54
-    pub arg: u32,                    // 56 DeadManRefresh:timeout_ms;SetEpoch 与 MirrorRestore:epoch(u16,高 16 位为 0);SimTransfer:asset | from_venue << 16 | to_venue << 24;SimFault:venue | fault << 8;SimSettle:venue;BindWire:part(0 或 1);其余 0
-    pub arg2: u32,                   // 60 SetEpoch:accept_prev(位 0)| prev_epoch << 16(位 1..16 为 0);SimFault:delay_ms;SimSettle:end_s(UTC 秒);其余 0
+    pub arg: u32,                    // 56 DeadManRefresh:timeout_ms;SetEpoch 与 MirrorRestore:epoch(u16,高 16 位为 0);SimTransfer:asset | from_venue << 16 | to_venue << 24;SimFault:venue | fault << 8;SimSettle、Deliver:venue;BindWire:part(0 或 1);其余 0
+    pub arg2: u32,                   // 60 SetEpoch:accept_prev(位 0)| prev_epoch << 16(位 1..16 为 0);SimFault:delay_ms;SimSettle、Deliver:end_s(UTC 秒);其余 0
 }
 const _: () = assert!(size_of::<GwCmd>() == 64);
 impl GwCmd {
@@ -936,6 +937,7 @@ impl GwCmd {
     pub fn sim_settle(account: AccountId, venue: VenueId, inst: InstId, payout: Px, end_s: u32) -> GwCmd; // payout 装在 px
     pub fn bind_wire(inst: InstId, part: u8, chunk: &[u8; 16]) -> GwCmd; // account 0;chunk 前 8 字节大端装 px、后 8 字节大端装 qty
     pub fn wire_chunk(&self) -> [u8; 16]; // 只对 BindWire 有意义:px、qty 各按大端还原
+    pub fn deliver(account: AccountId, venue: VenueId, inst: InstId, payout: Px, end_s: u32, qty: Qty) -> GwCmd; // payout 装在 px,交割量装在 qty
 }
 // MirrorRestore:冷启动恢复并 SetEpoch 之后,sequencer 为每个非终态槽发一条,让 gw 重建私有槽镜像(slot → gen、epoch、inst、交易所 id);
 //   exch_order_id 装在 px 的 64 位(qty = 0)、槽的 epoch 装在 arg,只经构造器与访问器读写。无法编码查询的槽保持 Unknown,交 reconciler。
@@ -944,6 +946,8 @@ impl GwCmd {
 // SimSettle:sequencer 执行 Settle 后对每个在该 inst 有库存或挂单的 Sim 账户发一条(撤单并按 payout 交割,语义归 hft-sim)。
 // BindWire:运行期绑定的 venue(Polymarket)下单要用交易所 id(token id)。BindSlot 生效后、以及冷启动 SetEpoch 之后,sequencer 对有
 //   Live 账户的 venue 按段 0、1 各发一条(32 字节 id 的前、后 16 字节),gw 收齐段 1 后交给该 venue 每个账户的协议状态(hft-venue)。
+// Deliver:sequencer 执行 Settle 时对每个在该 inst 有库存的实盘账户发一条到 out-<venue>(交易所的兑付在链上另行完成,gw 只把交割
+//   作为 ExternalFill{Delivery} 报回,语义归 hft-venue)。
 pub enum FeedCmd {                   // sequencer → feed 的 feedctl-<venue> 环;非 repr(C) 的进程内枚举,size_of ≤ 16 B(编译期断言)
     Resync { inst: InstId }, Rotate { conn: ConnId },
     Subscribe { inst: InstId, streams: u8 }, // streams:该 inst 需要的流集合,位值与 SDK EvMask 相同

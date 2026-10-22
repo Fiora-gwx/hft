@@ -199,7 +199,7 @@ ENUMS = {
     "ExecAlgo": {0: "None", 1: "TakerSlice", 2: "PairOnFill", 3: "Simultaneous", 4: "MakerFirst", 5: "Engine"},
     "ExecFlags": {1: "SHADOW", 2: "CLEARED_BY_ENGINE"},
     "ExternalCause": {1: "Liquidation", 2: "Adl", 3: "Manual", 4: "Delivery", 5: "Unknown"},
-    "GwOp": {1: "Place", 2: "Cancel", 3: "Amend", 4: "CancelAll", 5: "Query", 6: "DeadManRefresh", 7: "Rotate", 8: "ResetRate", 9: "Resubscribe", 10: "SetEpoch", 11: "SessionKeepalive", 12: "MirrorRestore", 13: "SimReset", 14: "SimTransfer", 15: "SimFault", 16: "SimSettle", 17: "BindWire"},
+    "GwOp": {1: "Place", 2: "Cancel", 3: "Amend", 4: "CancelAll", 5: "Query", 6: "DeadManRefresh", 7: "Rotate", 8: "ResetRate", 9: "Resubscribe", 10: "SetEpoch", 11: "SessionKeepalive", 12: "MirrorRestore", 13: "SimReset", 14: "SimTransfer", 15: "SimFault", 16: "SimSettle", 17: "BindWire", 18: "Deliver"},
     "HedgePxMode": {1: "Cross", 2: "Mid", 3: "LimitBp"},
     "JournalKind": {1: "Raw", 2: "Seq", 3: "Chain"},
     "KillLevel": {2: "Venue", 3: "Account", 4: "Global"},
