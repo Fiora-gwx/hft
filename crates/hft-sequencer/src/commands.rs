@@ -146,6 +146,39 @@ pub(crate) fn emit_binding(e: &mut Engine, row: &SlotBindingRow) {
     }
 }
 
+/// `BindWire` (2 parts) of one binding to the venue's gw when the venue has a Live account: the
+/// gw's protocol needs the wire id to encode orders (Polymarket token ids). All zero = unbind.
+pub(crate) fn emit_order_binding(e: &mut Engine, venue: VenueId, inst: InstId, wire_id: &[u8; 32]) {
+    if !crate::engine::live_gw_venues(&e.rd)
+        .iter()
+        .any(|(v, _)| *v == venue)
+    {
+        return;
+    }
+    for (part, c) in wire_id.chunks_exact(16).enumerate() {
+        let mut chunk = [0u8; 16];
+        chunk.copy_from_slice(c);
+        e.out.emits.push(Emit::Gw {
+            ring: OutRing::Venue(venue),
+            cmd: hft_event::GwCmd::bind_wire(inst, part as u8, &chunk),
+            rec: None,
+        });
+    }
+}
+
+/// After `SetEpoch`: every recorded binding again to the (fresh) gws.
+pub(crate) fn emit_order_bindings_all(e: &mut Engine) {
+    let rows: Vec<_> = e
+        .cmd
+        .bindings
+        .iter()
+        .map(|r| (r.venue, r.inst, r.wire_id))
+        .collect();
+    for (v, inst, id) in rows {
+        emit_order_binding(e, v, inst, &id);
+    }
+}
+
 /// The active configuration (section 9) plus the pending refdata reference.
 #[derive(Copy, Clone, Debug)]
 pub struct ActiveConfig {
@@ -1580,7 +1613,8 @@ fn apply_cmd<'a, D: Driver<S>, S: StrategySet>(
 
 /// `BindSlot`: the inst must be a slot of `venue` with no position and no open order in any
 /// account; the binding is recorded (section 31) and, when the inst's feed subscription is live,
-/// sent to the feed now (else just before its next subscription, `subs::send_union_changes`).
+/// sent to the feed now (else just before its next subscription, `subs::send_union_changes`);
+/// a venue with a Live account also gets it on its gw (`emit_order_binding`).
 fn bind_slot(
     e: &mut Engine,
     venue: VenueId,
@@ -1629,6 +1663,7 @@ fn bind_slot(
     if e.sent_union.get(slot.0 as usize).is_some_and(|u| *u != 0) {
         emit_binding(e, &row);
     }
+    emit_order_binding(e, venue, slot, wire_id);
     ok()
 }
 

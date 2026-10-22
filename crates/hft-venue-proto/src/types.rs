@@ -392,6 +392,8 @@ pub enum SignAlg {
     #[default]
     HmacSha256,
     Ed25519,
+    /// Polymarket: the secret holds the wallet key and the API secret (venue README).
+    Secp256k1,
 }
 
 /// One API credential, borrowed by the venue (contract 7).
@@ -429,7 +431,8 @@ pub struct RestReqBuf {
     pub method: Method,
     pub path_query: ArrayBuf<1024>,
     pub headers: ArrayBuf<512>,
-    pub body: ArrayBuf<1024>,
+    /// 2048: a Polymarket order body with its ERC-7739 signature is ~1.4 KiB.
+    pub body: ArrayBuf<2048>,
     /// Signed: the runtime records only metadata in `RawTx`.
     pub redacted: bool,
 }
@@ -454,6 +457,9 @@ pub enum LoginStep {
     /// `out` holds the first frame of a challenge login: on `LoginResult::Continue` the driver calls
     /// `login` again with `step + 1`.
     Handshake,
+    /// `out` holds one login frame the venue never answers (Polymarket's authenticated user
+    /// subscription): the session is logged in once it is sent.
+    Sent,
 }
 
 /// Answer to a login frame.

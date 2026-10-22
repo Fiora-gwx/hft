@@ -2,7 +2,7 @@ use crate::support::{
     gwh::*,
     mempeer, net,
     rd::*,
-    stub::{self, Stub, V_REST_CANCEL_ALL, V_SWEEP},
+    stub::{self, Stub, V_BINDS_ID, V_REST_CANCEL_ALL, V_SWEEP},
 };
 use hft_event::{GwOp, OrderEventKind, RepMsg, SendStatus};
 use hft_net::{ConnId, EndpointId, RestPool};
@@ -52,6 +52,67 @@ fn ven_228_position_close_rest_binds_early_fill() {
     h.cmd(second);
     h.poll(7000);
     assert_eq!(reports(&h.reps())[0].status, SendStatus::RateLimited);
+}
+
+#[test]
+fn ven_400_bind_wire_and_rest_place_binds_id() {
+    let mut h = setup::<V_BINDS_ID>();
+    let n0 = h.rt.counters();
+    // .1 part 0 then part 1 of S1: one account bound with the assembled id.
+    h.cmd(hft_event::GwCmd::bind_wire(S1, 0, &[1; 16]));
+    h.cmd(hft_event::GwCmd::bind_wire(S1, 1, &[2; 16]));
+    h.poll(3500);
+    let n = h.rt.counters();
+    assert_eq!(
+        (n.binds - n0.binds, n.bind_failed - n0.bind_failed),
+        (1, 0),
+        "VEN-400.1"
+    );
+    // .2 a lone part 1, an inst outside the venue, part 2: ignored, nothing bound.
+    h.cmd(hft_event::GwCmd::bind_wire(S2, 1, &[3; 16]));
+    h.cmd(hft_event::GwCmd::bind_wire(hft_types::InstId(9999), 0, &[3; 16]));
+    h.cmd(hft_event::GwCmd::bind_wire(S1, 2, &[3; 16]));
+    h.poll(3600);
+    let m = h.rt.counters();
+    assert_eq!(
+        (m.binds, m.maint_ignored - n.maint_ignored),
+        (n.binds, 3),
+        "VEN-400.2"
+    );
+    // .3 refused by the protocol: counted, the previous binding stays.
+    h.cmd(hft_event::GwCmd::bind_wire(S1, 0, &[0xFF; 16]));
+    h.cmd(hft_event::GwCmd::bind_wire(S1, 1, &[0; 16]));
+    h.poll(3700);
+    assert_eq!(h.rt.counters().bind_failed - n0.bind_failed, 1, "VEN-400.3");
+    // .4 a plain REST Place encodes with the account's gw state; its fill arrives before the
+    // response and is held, the Ack binds the exchange id, the fill is released.
+    stub::take_log();
+    let c = h.place(A1, 7, 3, S1, false);
+    h.cmd(c);
+    h.poll(4000);
+    let enc = stub::calls("encode_rest_ctx");
+    assert_eq!(enc.len(), 1, "VEN-400.4");
+    assert_eq!(enc[0].arg, "Some(1)", "VEN-400.4");
+    assert!(!h.rt.mirror(7).unwrap().position_close);
+    h.reps();
+    h.net.push(ConnId(112), b"O||12345|Fill|1|1|100|0|0|0");
+    h.poll(4500);
+    assert!(events(&h.reps()).is_empty(), "VEN-400.4");
+    assert_eq!(h.rt.held(A1), 1, "VEN-400.4");
+    response(&mut h, 200, 6000);
+    let es = events(&h.reps());
+    assert_eq!(es.len(), 2, "{es:?}");
+    assert_eq!(
+        (es[0].what, es[1].what),
+        (OrderEventKind::Ack, OrderEventKind::Fill),
+        "VEN-400.4"
+    );
+    assert!(
+        es.iter()
+            .all(|e| e.slot == c.slot && e.r#gen == 3 && e.epoch == 5),
+        "VEN-400.4"
+    );
+    assert_eq!(h.rt.held(A1), 0, "VEN-400.4");
 }
 
 #[test]

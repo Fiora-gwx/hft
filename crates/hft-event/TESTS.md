@@ -428,7 +428,7 @@ spec: README.md
 | EVT-022.2 | `OrderDecision.side` = 0 / 3;= 2 | `InvalidEnum` / `InvalidEnum`;`Ok` |
 | EVT-022.3 | `OrderDecision.tif` = 0 / 5;= 4 | `InvalidEnum` / `InvalidEnum`;`Ok` |
 | EVT-022.4 | `SendReport.status` = 0 / 9;= 8 | `InvalidEnum` / `InvalidEnum`;`Ok` |
-| EVT-022.5 | `SendReport.op` = 0 / 17;= 16 | `InvalidEnum` / `InvalidEnum`;`Ok` |
+| EVT-022.5 | `SendReport.op` = 0 / 18;= 17 | `InvalidEnum` / `InvalidEnum`;`Ok` |
 | EVT-022.6 | `OrderEvent.what` = 0 / 13;= 12 | `InvalidEnum` / `InvalidEnum`;`Ok` |
 | EVT-022.7 | `ExternalFill.side` = 0;`cause` = 0 / 6;`cause` = 5 | `InvalidEnum`;`InvalidEnum` / `InvalidEnum`;`Ok` |
 | EVT-022.8 | `L2Delta.side` = 0;`Trade.taker_side` = 3;`Liquidation.side` = 0 | 各为 `InvalidEnum` |
@@ -814,7 +814,7 @@ spec: README.md
 | EVT-074.1 | `OrderDecision.action`(`OrderAction`) | `New=1 Cancel=2 Amend=3 CancelAll=4 Query=5` |
 | EVT-074.2 | `OrderDecision.link_role`、`LatencySample.link_role` | `0` 无、`First=1 Second=2 SecondRetry=3 HedgeFix=4 Reverse=5` |
 | EVT-074.3 | `SendReport.status`(`SendStatus`) | `Written=1 KillBlocked=2 RateLimited=3 WriteError=4 NoConn=5 EncodeError=6 RingFull=7 QueryUnsupported=8` |
-| EVT-074.4 | `SendReport.op`、`GwCmd.op`(`GwOp`) | `Place=1 Cancel=2 Amend=3 CancelAll=4 Query=5 DeadManRefresh=6 Rotate=7 ResetRate=8 Resubscribe=9 SetEpoch=10 SessionKeepalive=11 MirrorRestore=12 SimReset=13 SimTransfer=14 SimFault=15 SimSettle=16`;1..=5 与 `OrderAction` 同值 |
+| EVT-074.4 | `SendReport.op`、`GwCmd.op`(`GwOp`) | `Place=1 Cancel=2 Amend=3 CancelAll=4 Query=5 DeadManRefresh=6 Rotate=7 ResetRate=8 Resubscribe=9 SetEpoch=10 SessionKeepalive=11 MirrorRestore=12 SimReset=13 SimTransfer=14 SimFault=15 SimSettle=16 BindWire=17`;1..=5 与 `OrderAction` 同值 |
 | EVT-074.5 | `OrderEvent.what`(`OrderEventKind`) | `Ack=1 Reject=2 PartialFill=3 Fill=4 CancelAck=5 CancelReject=6 AmendAck=7 AmendReject=8 Expired=9 QueryResult=10 OutcomeUnknown=11 FeeOnly=12` |
 | EVT-074.6 | `ExternalFill.cause`(`ExternalCause`) | `Liquidation=1 Adl=2 Manual=3 Delivery=4 Unknown=5` |
 | EVT-074.7 | `MarginReportHdr.source` | `Push=1 Poll=2` |
@@ -1459,6 +1459,8 @@ spec: README.md
 | EVT-142.8 | `set_epoch(70, false, 5)` | `arg2 == 0x0005_0000`;`accept_prev() == false`、`prev_epoch() == 5` |
 | EVT-142.9 | `set_epoch(u16::MAX, true, u16::MAX)` | `arg == 0x0000_FFFF`、`arg2 == 0xFFFF_0001` |
 | EVT-142.10 | `sim_fault(account 9, venue 3, fault 4(DelayReports), delay_ms 3 000)` | `op == SimFault`(15)、`account == 9`、`arg == 0x0000_0403`、`arg2 == 3 000`,其余字段 0 |
+| EVT-142.11 | `bind_wire(inst 77, part 1, 字节 0xF0..=0xFF)` | `op == BindWire`(17)、`account == 0`、`inst == 77`、`arg == 1`;`px` = 前 8 字节大端、`qty` = 后 8 字节大端,其余字段 0;`wire_chunk()` 返回原 16 字节 |
+| EVT-142.12 | `bind_wire(inst 1, part 0, 全零)` | `wire_chunk()` 全零 |
 
 ### EVT-143 CtlRecord 帧编码后读回相同并拒绝截断与不允许的 kind
 

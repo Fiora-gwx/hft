@@ -38,6 +38,8 @@ pub const V_SIGN: u32 = 2;
 pub const V_REST_CANCEL_ALL: u32 = 4;
 pub const V_USER_STREAM: u32 = 8;
 pub const V_MD_SPLIT: u32 = 16;
+/// REST Places without client ids (`REST_PLACE_BINDS_ID`) and run-time order bindings.
+pub const V_BINDS_ID: u32 = 32;
 
 pub struct Stub<const FCAP: usize, const V: u32>;
 pub type StubProto = Stub<2048, 0>;
@@ -47,6 +49,8 @@ pub enum LoginMode {
     None,
     One,
     Two,
+    /// One frame the venue never answers (`LoginStep::Sent`).
+    Sent,
 }
 
 #[derive(Clone, Debug)]
@@ -245,6 +249,8 @@ pub struct Tpl {
 #[derive(Debug, Default)]
 pub struct GwCtx {
     pub dedup: hft_venue_proto::TradeIdRing<128>,
+    /// `bind_order_wire` bindings (inst, id), last one per inst.
+    pub bound: Vec<(InstId, [u8; 32])>,
 }
 
 /// Fields of a `|`-separated line (fixed array, no allocation).
@@ -451,6 +457,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
     type GwCtx = GwCtx;
     type Templates = Tpl;
     const CANCEL_ALL_SWEEP: bool = V & V_SWEEP != 0;
+    const REST_PLACE_BINDS_ID: bool = V & V_BINDS_ID != 0;
     const BBO_SNAPSHOT_BATCH: u16 = u16::MAX;
     const USER_STREAM: bool = V & V_USER_STREAM != 0;
 
@@ -521,6 +528,11 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         let mode = cfg().login;
         match mode {
             LoginMode::None => Ok(LoginStep::NotNeeded),
+            LoginMode::Sent => {
+                out.extend_from_slice(format!("LOGIN{step}|").as_bytes());
+                out.extend_from_slice(cred.api_key.as_slice());
+                Ok(LoginStep::Sent)
+            }
             LoginMode::One | LoginMode::Two => {
                 out.extend_from_slice(format!("LOGIN{step}|").as_bytes());
                 out.extend_from_slice(cred.api_key.as_slice());
@@ -548,6 +560,19 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         if id[0] == 0xFF {
             return Err(ProtoErr::Cfg);
         }
+        ctx.bound.push((inst, *id));
+        Ok(())
+    }
+
+    /// `V_BINDS_ID` only; refuses an id starting with 0xFF like `bind_wire`.
+    fn bind_order_wire(ctx: &mut GwCtx, inst: InstId, id: &[u8; 32]) -> Result<(), ProtoErr> {
+        if V & V_BINDS_ID == 0 {
+            return Err(ProtoErr::Unsupported);
+        }
+        if id[0] == 0xFF {
+            return Err(ProtoErr::Cfg);
+        }
+        ctx.bound.retain(|(i, _)| *i != inst);
         ctx.bound.push((inst, *id));
         Ok(())
     }
@@ -954,7 +979,9 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         }
     }
     fn order_channel_for(c: &GwCmd) -> OrderChannel {
-        if c.op == GwOp::Place && c.oflags & hft_event::OrderFlags::POSITION_CLOSE.0 != 0 {
+        if c.op == GwOp::Place
+            && (c.oflags & hft_event::OrderFlags::POSITION_CLOSE.0 != 0 || V & V_BINDS_ID != 0)
+        {
             OrderChannel::Rest
         } else {
             Self::order_channel(c.op)
@@ -1058,6 +1085,21 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
         Ok(w.n)
     }
 
+    /// Logs the first byte of the order binding of `c.inst` (`None` when unbound).
+    fn encode_rest_ctx(
+        rd: &RefData,
+        t: &Tpl,
+        ctx: &GwCtx,
+        cred: &Credential,
+        c: &GwCmd,
+        tgt: &TargetRef,
+        clk: &WallClock,
+        out: &mut RestReqBuf,
+    ) -> Result<(), EncodeErr> {
+        let b = ctx.bound.iter().find(|(i, _)| *i == c.inst).map(|(_, id)| id[0]);
+        log("encode_rest_ctx", || format!("{b:?}"));
+        Self::encode_rest_signed(rd, t, cred, c, tgt, clk, out)
+    }
     fn encode_rest_signed(
         rd: &RefData,
         t: &Tpl,

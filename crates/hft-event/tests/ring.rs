@@ -294,6 +294,35 @@ fn evt_142_gwcmd_ctors() {
         "EVT-142.10"
     );
     assert!(rest_zero(&c) && c.px == Px(0) && c.qty == Qty(0), "EVT-142.10");
+    let mut id = [0u8; 16];
+    for (i, b) in id.iter_mut().enumerate() {
+        *b = 0xF0 | i as u8;
+    }
+    let c = GwCmd::bind_wire(InstId(77), 1, &id);
+    assert_eq!(
+        (c.op, c.account, c.inst, c.arg, c.arg2),
+        (GwOp::BindWire, AccountId(0), InstId(77), 1, 0),
+        "EVT-142.11"
+    );
+    assert_eq!(
+        (c.px, c.qty),
+        (
+            Px(i64::from_be_bytes([
+                0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7
+            ])),
+            Qty(i64::from_be_bytes([
+                0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF
+            ]))
+        ),
+        "EVT-142.11"
+    );
+    assert!(rest_zero(&c) && c.slot == SlotId(0) && c.r#gen == 0, "EVT-142.11");
+    assert_eq!(c.wire_chunk(), id, "EVT-142.11");
+    assert_eq!(
+        GwCmd::bind_wire(InstId(1), 0, &[0; 16]).wire_chunk(),
+        [0; 16],
+        "EVT-142.12"
+    );
 }
 
 #[test]

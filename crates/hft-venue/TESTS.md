@@ -68,7 +68,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
   - 回报:`O|<cid>|<exch_id>|<what>|<qty>|<cum>|<avg>|<fee>|<fee_asset>|<tid>`(`what` ∈ Ack/Fill/PartialFill/CancelAck/FeeOnly/Reject…;`cid` 为空表示回报不带 client id)、`X|<cause>|…`(venue 直接判定的 `ExternalFill`)、`E|<name>`(用户流事件:`listenKeyExtended` 为名单内,其余名字为未知)、`R|<req>|<code>`(响应码:`-2010` 登记为确定拒绝,`-1007` 登记为结果未知,其余未登记)、`MP|…`(保证金推送)、`FS|<sym>|<settle_ms>|<amt>|<disc>`(资金费结算)、`H|MARGIN_CALL`(`hint = MarginNow`)、`H|CFG`(`hint = ConfigRecheck`)、`Z|…`(类别已知、字段坏 → `DecodeErr::Shape`)。
   - 订单帧:`P|<req>|<cid>|<inst>|<side>|<px>|<qty>|<exp>|<oflags>`、`C|<req>|<cid>|<exch>|<inst>`、`A|<req>|<cid>|<px>|<qty>`、`Q|<req>|<cid>|<exch>`、`CA|<req>|<inst>`、`BC|<req>|<cid>,<cid>…`、`DM|<timeout>|<inst>,…`;`req` = `<slot>-<gen>-<op>-<epoch>`,响应 `R|<req>|<code>[|<used>|<limit>|<window>]`。
   - client id 外形:`"st-"` + hft-types 规范 24 位十六进制。
-  - 开关 `StubCfg`:`bbo_snapshot`(`bbo_snapshot_request` 返回 `Ok(true)` / `Ok(false)`)、`bbo_batch`(一次请求可覆盖的 inst 上限,传入更多时返回 `Err(ProtoErr::BufFull)`)、`account_cancel_all`(为假时 `encode` 对 `CancelAll{inst = 0}` 返回 `Err(EncodeErr::Unsupported(GwOp::CancelAll))`)、`query_by_cid`(为假时 `exch_order_id = 0` 的 Query/Cancel 返回 `Err(EncodeErr::UnknownTarget)`)、`dead_man`(`None` / `CountdownPerInst{min_ms: 5000, timeout_ms: 30000, refresh_ms: 10000, via: Ws}` / `CountdownAccount{…, via: Rest}`)、`session_identity`(`session_identity_request` 返回 `Ok(true)` / `Ok(false)`)、`inst_cancel_all`(为假时 `encode` 对 `CancelAll{inst ≠ 0}` 也返回 `Unsupported(CancelAll)`)、`rest_query`(为真时 `order_channel(Query) = Rest`,查单经 `encode_rest`/`decode_rest`)、`keepalive`(`session_keepalive_request` 返回 `Ok(true)` / `Ok(false)`);`R|<req>|-1125` 置 `ctl = UserStreamEnded`,`E|SHUTDOWN` 置 `ctl = ServerShutdown`。另有 `subs_per_frame`、`encode_batch_ok`、`bootstrap`、`login`(无 / 一步 / 两步)、`hb_md`/`hb_order`(`HeartbeatSpec`)、`encode_err`。`StubProto = Stub<2048, 0>`;`Stub<FCAP, V>` 的 `FCAP` 为 `ORDER_FRAME_CAP`,`V` 为变体位:`V_SWEEP`(`CANCEL_ALL_SWEEP = true`)、`V_SIGN`(逐单签名)、`V_REST_CANCEL_ALL`(`order_channel(CancelAll) = Rest`)、`V_USER_STREAM`(`USER_STREAM = true`,私有频道在独立用户流连接上;它是 trait 常量,不能按线程开关,用例前置写 `StubCfg{user_stream: true}` 即指此变体);`BBO_SNAPSHOT_BATCH = u16::MAX`(BBO 补帧的 `BufFull` 由 `bbo_batch` 模拟请求长度上限,VEN-163 另用类型参数)。
+  - 开关 `StubCfg`:`bbo_snapshot`(`bbo_snapshot_request` 返回 `Ok(true)` / `Ok(false)`)、`bbo_batch`(一次请求可覆盖的 inst 上限,传入更多时返回 `Err(ProtoErr::BufFull)`)、`account_cancel_all`(为假时 `encode` 对 `CancelAll{inst = 0}` 返回 `Err(EncodeErr::Unsupported(GwOp::CancelAll))`)、`query_by_cid`(为假时 `exch_order_id = 0` 的 Query/Cancel 返回 `Err(EncodeErr::UnknownTarget)`)、`dead_man`(`None` / `CountdownPerInst{min_ms: 5000, timeout_ms: 30000, refresh_ms: 10000, via: Ws}` / `CountdownAccount{…, via: Rest}`)、`session_identity`(`session_identity_request` 返回 `Ok(true)` / `Ok(false)`)、`inst_cancel_all`(为假时 `encode` 对 `CancelAll{inst ≠ 0}` 也返回 `Unsupported(CancelAll)`)、`rest_query`(为真时 `order_channel(Query) = Rest`,查单经 `encode_rest`/`decode_rest`)、`keepalive`(`session_keepalive_request` 返回 `Ok(true)` / `Ok(false)`);`R|<req>|-1125` 置 `ctl = UserStreamEnded`,`E|SHUTDOWN` 置 `ctl = ServerShutdown`。另有 `subs_per_frame`、`encode_batch_ok`、`bootstrap`、`login`(无 / 一步 / 两步 / `Sent`)、`hb_md`/`hb_order`(`HeartbeatSpec`)、`encode_err`。`StubProto = Stub<2048, 0>`;`Stub<FCAP, V>` 的 `FCAP` 为 `ORDER_FRAME_CAP`,`V` 为变体位:`V_SWEEP`(`CANCEL_ALL_SWEEP = true`)、`V_SIGN`(逐单签名)、`V_REST_CANCEL_ALL`(`order_channel(CancelAll) = Rest`)、`V_USER_STREAM`(`USER_STREAM = true`,私有频道在独立用户流连接上;它是 trait 常量,不能按线程开关,用例前置写 `StubCfg{user_stream: true}` 即指此变体);`BBO_SNAPSHOT_BATCH = u16::MAX`(BBO 补帧的 `BufFull` 由 `bbo_batch` 模拟请求长度上限,VEN-163 另用类型参数)。
   - 每次 trait 方法调用记入 `CallLog`(方法名、调用线程 id、参数摘要),用于"从不调用"类断言。
 - **`ScriptNet`**:基于 hft-net feature `test-io` 的 `ScriptIo` 与 `MemPeer`(真实 rustls 会话、真实 WS 分帧,[hft-net TESTS](../hft-net/TESTS.md) 的同名夹具):`push(conn, payload, at_tsc)` 让对端发一条 WS 文本帧,`pong(conn, at_tsc)` 回 WS Pong,`eof(conn)`/`rst(conn)` 断开,`set_ready(conn, bool)` 决定 `ReadyPoll::probe` 的结果,`sent(conn)` 返回本端发出的明文帧序列,`SysCount` 按连接与种类(`recvmsg`、`sendmsg`、`epoll_pwait`、`epoll_ctl`)计数。
 - **`BuildStub`**:代替 conn-builder:读 `BuildReq` 环;用例调用 `complete(req, conn)` 把一条 `ScriptNet` 连接以请求方给出的 `ConnId` 交接,`fail(req)` 报建连失败;`retired()` 返回收到的 `RetireMsg`。
@@ -3152,6 +3152,7 @@ VEN-258 补充验收:warm 驱动固定窗口、分页失败无部分输出、跨
 | VEN-310.1 | Md / `bootstrap = None`,无登录 | 不调用 `endpoint`;`submit` → `Open` → `SessEvent::Ready`;交接的连接号 = `BuildReq.conn` |
 | VEN-310.3 | Order / `login_result`:`Continue` 后 `Ok` | 发两步登录帧,`Ready` |
 | VEN-310.4 | Order / `Rejected(4001)` | `SessEvent::Failed`,带码 4001;不交接,连接被 `reclaim` |
+| VEN-310.5 | Order / `login` 返回 `Sent` | 发一帧登录帧,不等回复即 `Ready` |
 
 ### VEN-311 NAPI 落点不符的连接不交接
 
@@ -3739,3 +3740,21 @@ warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入�
 |---|---|---|
 | VEN-399.1 | `Subscribe{S1, BOOK}`,建连之前 poll 一次 | `md` 环的 `ConnState{Resync, S1, NEW_SUB}` 的 `conn ≥ MAX_BBO_CONN_SLOTS`(`MD_FIRST`) |
 | VEN-399.2 | 深度连接 8 就绪后 `FeedCmd::Resync{S1}` | `ConnState{Resync, S1, REQUESTED}` 的 `conn = 8` |
+
+### VEN-400 `BindWire` 进协议的 gw 状态;无 client id 的 REST Place 由 Ack 绑定交易所 id
+
+- 规则:[出环](README.md#出环outmsg--gwcmd)
+- 级别:unit
+- 里程碑:M3
+- 前置:`Stub<2048, V_BINDS_ID>`(`REST_PLACE_BINDS_ID = true`,Place 走 REST,`bind_order_wire` 拒绝首字节 0xFF 的 id);A1 的 REST 池已交接
+- 步骤:依次执行下表各行
+- 期望:见下表各行
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_400_bind_wire_and_rest_place_binds_id`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| VEN-400.1 | `BindWire{S1, 段 0, 0x01 × 16}`、`BindWire{S1, 段 1, 0x02 × 16}` | `binds` +1(一个账户),`bind_failed` 不变 |
+| VEN-400.2 | 只有段 1 的 `S2`;本 venue 之外的 inst;`part` 2 | `maint_ignored` +3,`binds` 不变 |
+| VEN-400.3 | 首字节 0xFF 的 id(两段) | `bind_failed` +1 |
+| VEN-400.4 | 普通 `Place{A1, slot 7, gen 3, S1}`(无平仓标记);响应前私有频道先到交易所 id 12345 的成交;响应 200 | 恰一次 `encode_rest_ctx`,看到 S1 的绑定(首字节 0x01);成交先暂存(`held` = 1);响应后依次出 `Ack`、`Fill`,都是 slot 7、gen 3、epoch 5,`held` = 0 |
+

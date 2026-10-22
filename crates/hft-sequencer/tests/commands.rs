@@ -967,9 +967,23 @@ fn seq_432_bind_slot() {
     };
     // .1 a subscribed inst: recorded and sent to the feed as four parts, in order.
     let n = h.io_ref().feed.len();
+    let n_out = h.io_ref().out.len();
     let id = h.cmd_confirmed(AC1, &bind(A1, 1_000, 1_300, 0x5A));
     h.run();
     assert_eq!(h.res(id).0, status::APPLIED);
+    // .7 venue A has a Live account: its gw gets the binding as two BindWire parts.
+    let gw: Vec<_> = h.io_ref().out[n_out..]
+        .iter()
+        .filter(|(_, c)| c.op == hft_event::GwOp::BindWire)
+        .map(|(r, c)| (*r, c.account, c.inst, c.arg, c.wire_chunk()))
+        .collect();
+    assert_eq!(
+        gw,
+        (0u32..2)
+            .map(|p| (hft_sequencer::OutRing::Venue(A), AccountId(0), A1, p, [0x5A; 16]))
+            .collect::<Vec<_>>(),
+        "SEQ-432.7"
+    );
     let parts: Vec<_> = h.io_ref().feed[n..]
         .iter()
         .filter_map(|(v, c)| match c {
@@ -984,10 +998,12 @@ fn seq_432_bind_slot() {
     );
     // .2 the same binding again: NoOp, nothing sent.
     let n = h.io_ref().feed.len();
+    let n_out = h.io_ref().out.len();
     let id = h.cmd_confirmed(AC1, &bind(A1, 1_000, 1_300, 0x5A));
     h.run();
     assert_eq!(h.res(id).0, status::NO_OP, "SEQ-432.2");
     assert_eq!(h.io_ref().feed.len(), n, "SEQ-432.2");
+    assert_eq!(h.io_ref().out.len(), n_out, "SEQ-432.2");
     // .3 an inst of another venue, an empty window: InvalidArgs.
     let id = h.cmd_confirmed(
         AC1,

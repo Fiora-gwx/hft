@@ -169,6 +169,22 @@ fn ven_310_session_flow() {
         net.c()
             .reclaim(p.retire(ConnId(112), hft_net::ErrBits::empty()).unwrap());
     }
+    // .5: Sent: one login frame, no answer awaited.
+    stub::set_cfg(|c| c.login = LoginMode::Sent);
+    let (job, mut peer) = start(&mut drv, &mut net, req(114, ConnRole::Order), Some(A1));
+    let ev = run(&mut drv, net.c(), job, &mut peer, 150, |_| None);
+    assert!(matches!(ev, SessEvent::Ready(_)), "VEN-310.5 {ev:?}");
+    let frames: Vec<_> = drv
+        .log()
+        .filter(|o| matches!(o, SessionOp::LoginFrame(ConnId(114), _)))
+        .collect();
+    assert_eq!(frames, vec![SessionOp::LoginFrame(ConnId(114), 0)], "VEN-310.5");
+    if let SessEvent::Ready(h) = ev {
+        let mut p = ConnPool::<1>::new(PoolMode::Race, 1, RotatePolicy::default());
+        p.install(h, None).unwrap();
+        net.c()
+            .reclaim(p.retire(ConnId(114), hft_net::ErrBits::empty()).unwrap());
+    }
     // .4: Rejected(4001).
     stub::set_cfg(|c| c.login = LoginMode::One);
     let free0 = net.c().test_free_slots();

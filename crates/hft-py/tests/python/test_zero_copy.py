@@ -36,4 +36,4 @@ def test_py_056_pyarrow_duckdb(j_md: Journal, row: str) -> None:
         b = pa.RecordBatchReader.from_stream(rdr).read_next_batch()
         assert b.column("bid_px").buffers()[1].address == testing.last_buffer_addrs()["bid_px"]
     else:
-        assert duckdb.sql("select count(*), sum(bid_px) from rdr").fetchone() == (60000, 360000000000)
+        assert duckdb.sql("select count(*), sum(bid_px) from rdr").fetchall() == [(60000, 360000000000)]

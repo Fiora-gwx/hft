@@ -225,6 +225,31 @@ impl GwCmd {
         }
     }
 
+    /// `op = BindWire`: part `part` (0 or 1) of the 32-byte wire id a `BindSlot` binds to `inst`
+    /// (account 0: every account of the venue); bytes `16·part ..` ride in `px` then `qty`, each
+    /// big-endian. Part 1 completes the binding; an all-zero id unbinds.
+    pub fn bind_wire(inst: InstId, part: u8, chunk: &[u8; 16]) -> GwCmd {
+        let mut hi = [0u8; 8];
+        let mut lo = [0u8; 8];
+        hi.copy_from_slice(&chunk[..8]);
+        lo.copy_from_slice(&chunk[8..]);
+        GwCmd {
+            px: Px(i64::from_be_bytes(hi)),
+            qty: Qty(i64::from_be_bytes(lo)),
+            inst,
+            arg: u32::from(part),
+            ..Self::base(GwOp::BindWire, AccountId(0))
+        }
+    }
+
+    /// BindWire only: the 16 id bytes of this part.
+    pub fn wire_chunk(&self) -> [u8; 16] {
+        let mut out = [0u8; 16];
+        out[..8].copy_from_slice(&self.px.0.to_be_bytes());
+        out[8..].copy_from_slice(&self.qty.0.to_be_bytes());
+        out
+    }
+
     /// `arg = venue | fault << 8`, `arg2 = delay_ms`.
     pub fn sim_fault(account: AccountId, venue: VenueId, fault: u8, delay_ms: u32) -> GwCmd {
         GwCmd {
