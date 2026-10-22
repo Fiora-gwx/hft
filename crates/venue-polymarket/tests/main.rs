@@ -748,7 +748,7 @@ mod sign_v2 {
     };
 
     fn golden() -> serde_json::Value {
-        serde_json::from_str(include_str!("../../../fixtures/polymarket/sign-v2-golden.json")).unwrap()
+        serde_json::from_str(include_str!("sign_v2_golden.json")).unwrap()
     }
 
     fn wallet(g: &serde_json::Value) -> Wallet {

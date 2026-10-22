@@ -272,7 +272,7 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 - 规则:[签名](README.md#签名)
 - 级别:golden
 - 里程碑:M3
-- 前置:金样 `fixtures/polymarket/sign-v2-golden.json`(`py-clob-client-v2` 生成;测试私钥 `0x11…11`,salt 1234567890123,timestamp 1761100000123)
+- 前置:金样 `crates/venue-polymarket/tests/sign_v2_golden.json`(`py-clob-client-v2` 生成;测试私钥 `0x11…11`,salt 1234567890123,timestamp 1761100000123)
 - 步骤:依次执行下表各行
 - 实现:`crates/venue-polymarket/tests/main.rs::sign_v2::pmk_018_order_signature_matches_the_official_client`
 

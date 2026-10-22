@@ -141,7 +141,7 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 - **ECDSA**:secp256k1,RFC 6979 确定性随机数,低 s;输出 `r ‖ s ‖ v`(65 字节,v = 27 + 恢复位),写成 `0x` 加小写十六进制。
 - **L2 请求签名**:HMAC-SHA256,密钥为 API secret 的 URL-safe base64 解码,消息为 `timestamp ‖ method ‖ path ‖ body`(秒级时间戳文本、大写方法、带查询串的路径、原样请求体;无请求体时为空),结果为带填充的 URL-safe base64。
 
-三者与官方 `py-clob-client-v2` 在固定测试私钥、salt 与时间戳下的输出逐字节一致(金样 `fixtures/polymarket/sign-v2-golden.json`)。
+三者与官方 `py-clob-client-v2` 在固定测试私钥、salt 与时间戳下的输出逐字节一致(金样 `tests/sign_v2_golden.json`,测试私钥;签名类字段不放 `fixtures/`,`cargo xtask fixtures check` 会拦)。
 
 ## 实现说明
 
