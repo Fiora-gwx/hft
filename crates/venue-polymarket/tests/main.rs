@@ -740,3 +740,129 @@ fn pmk_017_late_books_and_messages_are_dropped() {
     assert_eq!(ctx.bind(UP, next.as_bytes()), Ok(()));
     assert_eq!(dec_on(&mut ctx, &old_book.replace(T_UP, next), 4), 1);
 }
+
+mod sign_v2 {
+    use venue_polymarket::sign::{
+        EXCHANGE_V2, OrderV2, Wallet, auth_digest, checksum_address, exchange_domain, hex_signature, l2_hmac,
+        order_digest, parse_u256,
+    };
+
+    fn golden() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../../fixtures/polymarket/sign-v2-golden.json")).unwrap()
+    }
+
+    fn wallet(g: &serde_json::Value) -> Wallet {
+        Wallet::from_hex(g["key"].as_str().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn pmk_018_order_signature_matches_the_official_client() {
+        let g = golden();
+        let w = wallet(&g);
+        let mut a = [0u8; 42];
+        assert_eq!(
+            checksum_address(&w.address(), &mut a),
+            g["address"].as_str().unwrap(),
+            "PMK-018.1"
+        );
+        let domain = exchange_domain("2", 137, &EXCHANGE_V2);
+        for (k, o) in g["orders"].as_array().unwrap().iter().enumerate() {
+            let order = OrderV2 {
+                salt: o["salt"].as_str().unwrap().parse().unwrap(),
+                maker: w.address(),
+                signer: w.address(),
+                token_id: parse_u256(o["tokenId"].as_str().unwrap()).unwrap(),
+                maker_amount: o["makerAmount"].as_str().unwrap().parse().unwrap(),
+                taker_amount: o["takerAmount"].as_str().unwrap().parse().unwrap(),
+                side: o["side"].as_u64().unwrap() as u8,
+                signature_type: 0,
+                timestamp_ms: o["timestamp"].as_str().unwrap().parse().unwrap(),
+                metadata: [0; 32],
+                builder: [0; 32],
+            };
+            let sig = w.sign(&order_digest(&domain, &order));
+            let mut buf = [0u8; 132];
+            assert_eq!(
+                hex_signature(&sig, &mut buf),
+                o["signature"].as_str().unwrap(),
+                "PMK-018.2 order {k}"
+            );
+        }
+    }
+
+    #[test]
+    fn pmk_019_l1_auth_signature_matches_the_official_client() {
+        let g = golden();
+        let w = wallet(&g);
+        for a in g["auth"].as_array().unwrap() {
+            let d = auth_digest(
+                137,
+                &w.address(),
+                a["timestamp"].as_u64().unwrap(),
+                a["nonce"].as_u64().unwrap(),
+            );
+            let mut buf = [0u8; 132];
+            assert_eq!(
+                hex_signature(&w.sign(&d), &mut buf),
+                a["signature"].as_str().unwrap(),
+                "PMK-019"
+            );
+        }
+    }
+
+    #[test]
+    fn pmk_020_l2_hmac_matches_the_official_client() {
+        let g = golden();
+        for h in g["hmac"].as_array().unwrap() {
+            let mut out = [0u8; 44];
+            let s = l2_hmac(
+                h["secret"].as_str().unwrap(),
+                h["timestamp"].as_str().unwrap(),
+                h["method"].as_str().unwrap(),
+                h["path"].as_str().unwrap(),
+                h["body"].as_str().unwrap_or(""),
+                &mut out,
+            )
+            .unwrap();
+            assert_eq!(s, h["signature"].as_str().unwrap(), "PMK-020");
+        }
+    }
+
+    #[test]
+    fn pmk_021_inputs_are_validated() {
+        // .1 keys: wrong length, non-hex, zero scalar.
+        assert!(Wallet::from_hex("0x1234").is_err(), "PMK-021.1");
+        assert!(
+            Wallet::from_hex(&format!("0x{}", "zz".repeat(32))).is_err(),
+            "PMK-021.1"
+        );
+        assert!(
+            Wallet::from_hex(&format!("0x{}", "00".repeat(32))).is_err(),
+            "PMK-021.1"
+        );
+        // .2 uint256 token ids: decimal only, at most 2^256 - 1.
+        assert_eq!(parse_u256("255").map(|b| b[31]), Some(255), "PMK-021.2");
+        assert_eq!(
+            parse_u256("256").map(|b| (b[30], b[31])),
+            Some((1, 0)),
+            "PMK-021.2"
+        );
+        let max = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
+        assert_eq!(parse_u256(max), Some([0xff; 32]), "PMK-021.2");
+        assert!(
+            parse_u256("115792089237316195423570985008687907853269984665640564039457584007913129639936")
+                .is_none(),
+            "PMK-021.2"
+        );
+        assert!(
+            parse_u256("12a").is_none() && parse_u256("").is_none(),
+            "PMK-021.2"
+        );
+        // .3 a secret that is not URL-safe base64.
+        let mut out = [0u8; 44];
+        assert!(
+            l2_hmac("not base64!", "1", "GET", "/", "", &mut out).is_err(),
+            "PMK-021.3"
+        );
+    }
+}

@@ -23,6 +23,7 @@ status: impl
   - [多连接去重](#多连接去重)
   - [心跳](#心跳)
   - [VenueCaps 默认值](#venuecaps-默认值)
+  - [签名](#签名)
 - [实现说明](#实现说明)
 - [延迟与资源契约](#延迟与资源契约)
 - [测试与验收](#测试与验收)
@@ -130,6 +131,18 @@ refdata 为每个资产预置固定数量的槽位 inst(符号如 `btc-up-0`)。
 
 限速默认值只有连接与入站消息两条(`Ip`/`NewConns` 300 次每 5 分钟,`Conn`/`WsInMsgs` 每秒 10 条);下单限速随下单实现补齐。
 
+### 签名
+
+CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不分配。下单网关(提案 P2)用它们,本节只规定算法。
+
+- **钱包**:EOA(签名类型 0,`maker = signer = 钱包地址`)。私钥 32 字节十六进制(可带 `0x`);地址 = keccak-256(未压缩公钥去掉首字节)的后 20 字节,对外写成 EIP-55 大小写混合形式。
+- **订单签名**:EIP-712。域 `EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)`,`name = "Polymarket CTF Exchange"`、`version = "2"`、`chainId = 137`、`verifyingContract` = CTF Exchange V2 `0xE111180000d2663C0091e4f400237545B87B996B`(本 venue 的 5 分钟盘不是 neg-risk)。类型 `Order(uint256 salt,address maker,address signer,uint256 tokenId,uint256 makerAmount,uint256 takerAmount,uint8 side,uint8 signatureType,uint256 timestamp,bytes32 metadata,bytes32 builder)`;`side` 0 = 买、1 = 卖;金额以 1e-6 为单位(买单 `makerAmount` = 价格 × 份数的 pUSD,`takerAmount` = 份数);`timestamp` 为下单时刻(毫秒),V2 用它代替 nonce 保证唯一;`metadata`、`builder` 为 0。摘要 = keccak(`0x19 0x01` ‖ 域分隔符 ‖ 结构哈希)。`expiration`(GTD)不在签名结构里,只在请求体。
+- **L1 认证**(派生 API 凭证):域 `EIP712Domain(string name,string version,uint256 chainId)`,`name = "ClobAuthDomain"`、`version = "1"`;类型 `ClobAuth(address address,string timestamp,uint256 nonce,string message)`,`timestamp` 为十进制秒的字符串,`message` 固定为 `This message attests that I control the given wallet`。
+- **ECDSA**:secp256k1,RFC 6979 确定性随机数,低 s;输出 `r ‖ s ‖ v`(65 字节,v = 27 + 恢复位),写成 `0x` 加小写十六进制。
+- **L2 请求签名**:HMAC-SHA256,密钥为 API secret 的 URL-safe base64 解码,消息为 `timestamp ‖ method ‖ path ‖ body`(秒级时间戳文本、大写方法、带查询串的路径、原样请求体;无请求体时为空),结果为带填充的 URL-safe base64。
+
+三者与官方 `py-clob-client-v2` 在固定测试私钥、salt 与时间戳下的输出逐字节一致(金样 `fixtures/polymarket/sign-v2-golden.json`)。
+
 ## 实现说明
 
 <details><summary>实现要点</summary>
@@ -141,6 +154,7 @@ refdata 为每个资产预置固定数量的槽位 inst(符号如 `btc-up-0`)。
 | `src/md.rs` | 分类、`peek`、三种消息的解码 |
 | `src/session.rs` | 路由、端点、订阅帧、心跳 |
 | `src/caps.rs` | `VenueCaps`、限速、过期与死手默认值 |
+| `src/sign.rs` | EIP-712 订单与 L1 认证摘要、secp256k1 签名、L2 HMAC、地址([签名](#签名)) |
 
 - 解析:消息头字段用 sonic-rs 借用字符串;`bids`/`asks`/`price_changes` 保持原始文本(`LazyValue`),逐个对象投影(`hft_venue_proto::json::project`,失败回落到校验解码),不在栈上为每档预留空间。
 - 列表帧按顶层对象切分(跟踪字符串与嵌套),每帧最多 16 个对象;`price_changes` 每条消息最多 512 条、8 个不同代币,超出 → `Shape`。
@@ -158,7 +172,7 @@ refdata 为每个资产预置固定数量的槽位 inst(符号如 `btc-up-0`)。
 
 ## 依赖
 
-允许:`hft-types`、`hft-refdata`、`hft-event`、`hft-venue-proto`;外部 `sonic-rs` 0.5、`serde`(与其他 venue crate 同版本)。dev:`hft-venue-proto`(`testkit`)、`serde_json`(仅金样比对)。禁止依赖运行时、I/O 与任何 `strategies/*`。
+允许:`hft-types`、`hft-refdata`、`hft-event`、`hft-venue-proto`;外部 `sonic-rs` 0.5、`serde`(与其他 venue crate 同版本);签名用 `k256` 0.13(`ecdsa`)、`sha3` 0.10(keccak-256)、`hmac` 0.12、`sha2` 0.10、`base64` 0.22(后三者与 venue-bitget 同版本)。dev:`hft-venue-proto`(`testkit`)、`serde_json`(仅金样比对)。禁止依赖运行时、I/O 与任何 `strategies/*`。
 
 ## 延伸阅读
 

@@ -29,7 +29,7 @@ hot_pure_forbidden = [
 ]
 # rule 3: venue-* direct dependencies.
 venue_internal = ["crates/hft-types", "crates/hft-refdata", "crates/hft-event", "crates/hft-venue-proto"]
-venue_codecs = ["sonic-rs", "serde", "memchr", "zerocopy", "ed25519-dalek", "hmac", "sha2", "base64"]
+venue_codecs = ["sonic-rs", "serde", "memchr", "zerocopy", "ed25519-dalek", "hmac", "sha2", "base64", "k256", "sha3"]
 # rule 4: chain crates ("*" = prefix) only in the closure of these packages.
 chain_crates = ["alloy-*", "revm"]
 chain_allowed = ["crates/hft-amm", "crates/hft-chain-evm", "apps/chain-core", "crates/hft-py"]

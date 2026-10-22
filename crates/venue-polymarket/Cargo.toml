@@ -19,6 +19,13 @@ hft-venue-proto.workspace = true
 # Per-message structs over borrowed strings, as in the other venue crates; no generic JSON values.
 sonic-rs = "0.5"
 serde = { version = "1", default-features = false, features = ["derive"] }
+# Order and API signatures (README "签名"): EIP-712 digests over keccak-256, secp256k1 ECDSA,
+# L2 Base64(HMAC-SHA256). Not the workspace sha2 entry (its `asm` feature needs a C toolchain).
+k256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
+sha3 = "0.10"
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
 
 [dev-dependencies]
 hft-venue-proto = { workspace = true, features = ["testkit"] }

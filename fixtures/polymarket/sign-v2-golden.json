@@ -1,0 +1,63 @@
+{
+ "_note": "Generated 2026-10-22 with py-clob-client-v2 (ExchangeOrderBuilderV2, sign_clob_auth_message, build_hmac_signature) from a test-only key; salt and timestamp fixed. Never a real key.",
+ "key": "0x1111111111111111111111111111111111111111111111111111111111111111",
+ "address": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+ "orders": [
+  {
+   "side": 0,
+   "tokenId": "71321045679252212594626385532706912750332728571942532289631379312455583992563",
+   "makerAmount": "4500000",
+   "takerAmount": "10000000",
+   "salt": "1234567890123",
+   "timestamp": "1761100000123",
+   "signature": "0xa517c4b0dba5c2f9fbd8e0593de1b3bbaa30068856309dcd2b0496f48225e21c41de3b97179d6c08a349b89908d37036bc502c57dad6468ae8c9fd60ede844fb1b"
+  },
+  {
+   "side": 1,
+   "tokenId": "52114319501245915516055106046884209969926127482827954674443846427813813222426",
+   "makerAmount": "10000000",
+   "takerAmount": "5500000",
+   "salt": "1234567890123",
+   "timestamp": "1761100000123",
+   "signature": "0xa6a4ee5af4a0101fd099864e3d332daef78823212e187d6d9380a2880927778d4cafed0c2d8e2234a59ce2a4f3d805db497a8c68e0abf304dbf6e801dad5f33a1b"
+  }
+ ],
+ "auth": [
+  {
+   "timestamp": 1761100000,
+   "nonce": 0,
+   "signature": "0x46ab615841063cf4f19decc9accfad992cb02ed63b7b8ffa79ef4cc4937f56d158536fe4bb1899db71e1b2b417ddc54abe745ec68a92f1c9de0ef33937dc93d11b"
+  },
+  {
+   "timestamp": 1761100123,
+   "nonce": 7,
+   "signature": "0xfbbc9a30e7233551deb0ea7c78e60a169d52c0c2f8fbbafa3891a03c0dfa206a6d02125e0ff987dcc67878d4cceed37eb1c0edf07d64efd79cc43d91618ba64c1c"
+  }
+ ],
+ "hmac": [
+  {
+   "secret": "dGhpc2lzYXRlc3RzZWNyZXRrZXkxMjM0NTY3ODkwYWI=",
+   "timestamp": "1761100000",
+   "method": "POST",
+   "path": "/order",
+   "body": "{\"a\": 1}",
+   "signature": "agX559RvgSjUa_bLBL8Mdvm8fzmqs-Bs-eH6fANcCoQ="
+  },
+  {
+   "secret": "dGhpc2lzYXRlc3RzZWNyZXRrZXkxMjM0NTY3ODkwYWI=",
+   "timestamp": "1761100000",
+   "method": "DELETE",
+   "path": "/order",
+   "body": null,
+   "signature": "vPHBuUnq77aYEYNn4LQvfAkWtXP5R0k2wKikscDyuzw="
+  },
+  {
+   "secret": "dGhpc2lzYXRlc3RzZWNyZXRrZXkxMjM0NTY3ODkwYWI=",
+   "timestamp": "1761100000",
+   "method": "GET",
+   "path": "/data/orders",
+   "body": null,
+   "signature": "JGipuczhHiWPII4MDvH0yVr59tgVqDBS1ycT0elZXSU="
+  }
+ ]
+}
