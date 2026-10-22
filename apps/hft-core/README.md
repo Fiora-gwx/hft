@@ -676,6 +676,7 @@ dev2 上每个批处理单元(`hft-verify`、`hft-replay-verify`、`hft-journal-
 | `SIGHUP` | 忽略。配置只经控制环命令改变 |
 | `Drain{cancel_resting}`(ops_bot `/shutdown` 或运维 CLI;确认规则归 [control-plane](../../docs/subsystems/control-plane.md#类别)) | 同 SIGTERM 的 sequencer 部分;`Done` 后同样退出 0 |
 | 崩溃(`panic=abort`、SIGKILL、OOM) | 无清理。RAM 热段在进程外存活;[kill-switch](../kill-switch/README.md) 在心跳停止后对全部 Live 账户撤单,有死手接口的 venue 另由交易所在倒计时到期后撤单;systemd 重启,走完整启动顺序(含毒丸守卫) |
+| 工作线程或 sequencer 返回错误 | 出错的线程立即在 stderr 写一行 `hft-core: <unix 秒.毫秒> thread <名字> failed: <错误>`(sequencer 为 `stopped`),再置停止标志;sequencer 以 `WorkerFailed` 结束,主线程依次等待其余工作线程至多 30 s、persist 至多 120 s(`SHUTDOWN_WORKERS`/`SHUTDOWN_PERSIST`),到时仍未退出的线程写一行 `ShutdownStuck`(列出线程名)并不再等待,进程以首个错误的退出码结束(`ShutdownStuck` 为 134 → abort);RAM 热段保留。此前等待没有上限:2026-10-21/22 两次模拟运行在 sequencer 退出后一直挂住、错误从未打印 |
 | sequencer 停摆(主循环计数 `hb_stale_ms` 内不前进) | housekeeping 不再 `sd_notify(WATCHDOG=1)`;systemd `WatchdogSec` 到期发 SIGABRT;kill-switch 同时看到心跳停止 |
 | `Kill{level ∈ Account\|Venue\|Global, hard, cancel_resting, flatten}` | 语义归 [control-plane](../../docs/subsystems/control-plane.md) 与 [hft-risk](../../crates/hft-risk/README.md);`hard` 可与 `Global` 或 `Account` 组合(按账户 HARD 只封该账户)。hft-core 只负责接线:步 3 分配的 `KillWord`(每 gw 一个 `CachePadded<AtomicU32>`,位定义 `KillBits` 在 [hft-types](../../crates/hft-types/README.md),含 `account(ix)` 与 `account_hard(ix)`),由 `LiveDriver` 按 hft-risk 的投影写入,gw 用 `kill_admit` 判定([hft-venue §4](../../crates/hft-venue/README.md#4-gwruntimepoll_once-的循环结构))。Sim 账户不占 kill 字位,kill 与 HARD 对它们与实盘一样经 hft-risk 的检查链生效(规则归 hft-risk 与 hft-sequencer) |
 
