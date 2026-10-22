@@ -28,6 +28,7 @@ spec: README.md
 | 合成序号 | PMK-003–PMK-005, PMK-010–PMK-012 |
 | 多连接去重 | PMK-016, PMK-017 |
 | 心跳 | PMK-001 |
+| 签名 | PMK-018–PMK-022 |
 | VenueCaps 默认值 | PMK-011 |
 | 实现说明 | PMK-006, PMK-007 |
 | 延迟与资源契约 | PMK-011 |
@@ -265,3 +266,63 @@ spec: README.md
 ## 验收
 
 PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗口)见 [pm-md-probe](../../tools/pm-md-probe/TESTS.md)。
+
+### PMK-018 订单签名与官方客户端一致
+
+- 规则:[签名](README.md#签名)
+- 级别:golden
+- 里程碑:M3
+- 前置:金样 `crates/venue-polymarket/tests/sign_v2_golden.json`(`py-clob-client-v2` 生成;测试私钥 `0x11…11`,salt 1234567890123,timestamp 1761100000123)
+- 步骤:依次执行下表各行
+- 实现:`crates/venue-polymarket/tests/main.rs::sign_v2::pmk_018_order_signature_matches_the_official_client`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-018.1 | 私钥 | EIP-55 地址等于金样 `address` |
+| PMK-018.2 | 金样两笔订单(买 10 份 @0.45、卖 10 份 @0.55),域 version "2"、CTF Exchange V2 | `0x` + `r‖s‖v` 十六进制等于金样 `signature` |
+
+### PMK-019 L1 认证签名与官方客户端一致
+
+- 规则:[签名](README.md#签名)
+- 级别:golden
+- 里程碑:M3
+- 前置:同 PMK-018
+- 步骤:金样 `auth` 的两组 (timestamp, nonce) 各签一次
+- 期望:签名等于金样
+- 实现:`crates/venue-polymarket/tests/main.rs::sign_v2::pmk_019_l1_auth_signature_matches_the_official_client`
+
+### PMK-020 L2 请求签名与官方客户端一致
+
+- 规则:[签名](README.md#签名)
+- 级别:golden
+- 里程碑:M3
+- 前置:同 PMK-018
+- 步骤:金样 `hmac` 的三组(POST 带请求体、DELETE、GET)
+- 期望:URL-safe base64 结果等于金样
+- 实现:`crates/venue-polymarket/tests/main.rs::sign_v2::pmk_020_l2_hmac_matches_the_official_client`
+
+### PMK-021 输入校验
+
+- 规则:[签名](README.md#签名)
+- 级别:table
+- 里程碑:M3
+- 前置:无
+- 步骤:依次执行下表各行
+- 实现:`crates/venue-polymarket/tests/main.rs::sign_v2::pmk_021_inputs_are_validated`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-021.1 | 私钥长度不对、非十六进制、全零 | `BadKey` |
+| PMK-021.2 | token id 255、256、2²⁵⁶ − 1、2²⁵⁶、`12a`、空串 | 前三个按大端 32 字节解析;后三个 `None` |
+| PMK-021.3 | API secret 不是 URL-safe base64 | `BadSecret` |
+
+### PMK-022 存款钱包签名与官方客户端一致
+
+- 规则:[签名](README.md#签名)
+- 级别:golden
+- 里程碑:M3
+- 前置:同 PMK-018;金样 `orders_1271`(签名类型 3,`maker = signer` = 存款钱包 `0x7cB0…8cB2`)
+- 步骤:两笔订单(买 5 份 @0.45、卖 5 份 @0.55)按存款钱包格式签名
+- 期望:`0x` + 十六进制等于金样 `signature`(内层签名 ‖ 域分隔符 ‖ 订单结构哈希 ‖ 类型串 ‖ 长度)
+- 实现:`crates/venue-polymarket/tests/main.rs::sign_v2_1271::pmk_022_deposit_wallet_signature_matches_the_official_client`
+

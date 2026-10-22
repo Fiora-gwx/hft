@@ -22,6 +22,7 @@ mod caps;
 mod dedup;
 mod md;
 mod session;
+pub mod sign;
 
 pub use bind::{BindErr, FeedCtx, TOKEN_MAX};
 
