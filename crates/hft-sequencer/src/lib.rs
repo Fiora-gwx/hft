@@ -130,8 +130,9 @@ impl<D: Driver<S>, S: StrategySet> core::fmt::Debug for Sequencer<D, S> {
 }
 
 impl<D: Driver<S>, S: StrategySet> Sequencer<D, S> {
-    /// Fresh non-production Live account bootstrap. Baselines are persisted in the initial
-    /// StateSnapshot before EngineClock or strategy inputs. Recovery must use `boot(Journal)`.
+    /// Fresh Live account bootstrap (production accounts only reach it on venues hft-core admits
+    /// for production orders). Baselines are persisted in the initial StateSnapshot before
+    /// EngineClock or strategy inputs. Recovery must use `boot(Journal)`.
     pub fn boot_accounts(
         configs: ConfigSet<S>,
         setup: &EngineSetup,

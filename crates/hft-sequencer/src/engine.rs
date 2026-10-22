@@ -701,8 +701,7 @@ pub(crate) fn boot_accounts<D: Driver<S>, S: StrategySet>(
     })?;
     let mut e = Engine::new(rd, setup, &configs.risk)?;
     for (ix, r) in balances.iter().enumerate() {
-        if e.rd.account(r.account).is_prod
-            || e.is_sim(r.account)
+        if e.is_sim(r.account)
             || e.rd.account(r.account).venues & (1u64 << r.venue.0.min(63)) == 0
             || e.rd.asset(r.asset).id.0 == 0
             || balances[..ix]
@@ -714,8 +713,7 @@ pub(crate) fn boot_accounts<D: Driver<S>, S: StrategySet>(
         let _ = e.ledger.on_balance(r, true, 0);
     }
     for (ix, r) in positions.iter().enumerate() {
-        if e.rd.account(r.account).is_prod
-            || e.is_sim(r.account)
+        if e.is_sim(r.account)
             || positions[..ix]
                 .iter()
                 .any(|p| (p.account, p.inst) == (r.account, r.inst))
