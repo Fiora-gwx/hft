@@ -716,6 +716,13 @@ fn pmk_029_user_channel_session() {
     let mut frames = hft_venue_proto::SubFrames::with_capacity(1024, 4);
     Pm::private_subscribe(&cfg(), AccountId(1), false, &mut frames).unwrap();
     assert_eq!(frames.len(), 0, "PMK-029.2");
+    // .4 user-channel liveness: no pong matching, 30 s without any frame.
+    let hb = Pm::heartbeat(Role::Order);
+    assert_eq!(
+        (hb.interval_ms, hb.pong_timeout_ms, hb.idle_timeout_ms),
+        (10_000, 0, 30_000),
+        "PMK-029.4"
+    );
     // .3 a passphrase with a quote cannot be put into the frame.
     let mut k = cred();
     k.passphrase = ArrayBuf::from_bytes(b"a\"b").unwrap();

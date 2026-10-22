@@ -445,6 +445,7 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 | PMK-029.1 | `endpoint(Order)`;`login(Order)` | 路径 `/ws/user`;`LoginStep::Sent`,帧 = `{"auth":{"apiKey","secret","passphrase"},"type":"user"}` |
 | PMK-029.2 | `login(Md)`;`private_subscribe` | `NotNeeded`;不发帧 |
 | PMK-029.3 | passphrase 含双引号 | 登录失败 |
+| PMK-029.4 | `heartbeat(Order)` | 文本 `PING` 每 10 s;`pong_timeout_ms` 0;`idle_timeout_ms` 30 000 |
 
 ### PMK-030 账户启动核验
 

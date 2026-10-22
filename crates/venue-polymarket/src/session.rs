@@ -74,16 +74,19 @@ pub(crate) fn login(role: Role, cred: &Credential, out: &mut Vec<u8>) -> Result<
     Ok(LoginStep::Sent)
 }
 
-/// Text `PING` every 10 s; the server answers `PONG` and drops silent connections. No idle timeout:
-/// a market that has not opened yet, or has closed, is legitimately silent for minutes; liveness
-/// is the `PONG`.
-pub(crate) fn heartbeat(_role: Role) -> HeartbeatSpec {
+/// Text `PING` every 10 s; the server answers `PONG` and drops silent connections. Market
+/// channel: no idle timeout (a market that has not opened yet, or has closed, is legitimately
+/// silent for minutes; liveness is the `PONG`). User channel (order connection): the gw counts any
+/// complete frame, `PONG` included, as activity but matches pongs only at the WS level, so the
+/// liveness test there is 30 s without any frame (three missed `PONG`s) instead of a pong timeout.
+pub(crate) fn heartbeat(role: Role) -> HeartbeatSpec {
+    let order = role == Role::Order;
     HeartbeatSpec {
         ping: PingKind::AppText,
         interval_ms: 10_000,
         unconditional: true,
-        pong_timeout_ms: 10_000,
-        idle_timeout_ms: 0,
+        pong_timeout_ms: if order { 0 } else { 10_000 },
+        idle_timeout_ms: if order { 30_000 } else { 0 },
     }
 }
 
