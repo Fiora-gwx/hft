@@ -54,6 +54,11 @@ status: impl
 | `requote_ms` | DurationMs | 200 | 同一腿两次改价(撤单或挂单)的最短间隔(引擎时间) | Down |
 | `max_rest_ms` | DurationMs | 360 000 | 每张挂单的最长挂单时长(OMS 到期发 `Aged`) | Up |
 | `pair_margin` | Rate | 0.01 | 会凑成对的一侧买单的价格上限:1 − 另一侧平均成本 − `pair_margin`(规则 4) | Down |
+| `nochase_ms` | DurationMs | 0(关) | 因被抢先撤单后,该腿这段时间内不再挂单(不追价,规则 6) | Down |
+| `streak_k` | Count | 0(关) | 连续成交暂停的成交笔数;≥ 2 时生效(规则 7) | Down |
+| `streak_window_ms` | DurationMs | 10 000 | 最近 `streak_k` 笔成交须落在这段时间内 | Down |
+| `streak_pause_ms` | DurationMs | 10 000 | 暂停持续到该腿最后一笔成交之后这么久 | Down |
+| `max_window_cost` | Notional | 0(无上限) | 当前窗口两腿已买入成本(份数 × 平均成本之和)达到它时不再新挂单(规则 7) | Up |
 
 全部字段只有默认值(不按 group 覆盖);`minor_change` 均为 `None`。
 
@@ -74,11 +79,11 @@ status: impl
 3. **仓位**:当前对 Up、Down 两腿的份数 U、D 与平均成本 cu、cd 取 `group_pos` 第 0 腿的 `qty` 与 `entry_px`。
 4. **每条槽位腿的目标价**:只有当前对的两条腿、且第 2 步成立时才有目标:该腿簿 `Live`、有买一 b 与卖一 a 且 b < a、b 在 [p_min, p_max] 内、该侧净份数(Up 腿 U − D,Down 腿 D − U)< `inv_max_shares`;目标 = b。**对价上限**:这一侧的份数少于另一侧(这张买单成交会凑成对)时,上限 = 1 − 另一侧平均成本 − `pair_margin`,向下取整到 1 美分(0.01);目标 = min(b, 上限),低于 p_min 则没有目标。
 5. **公允价撤单**:挂单时记下参考中间价 B₀、d₀ = Φ⁻¹(Up 代币中间价,截到 [0.001, 0.999])与 den = 隐含 σ × √(剩余秒数 − 40)(结算取窗口最后 60 s 的时间平均,剩余 t 秒时尚未确定的方差相当于 t − 40 秒的现价)。之后 Δ = (B − B₀) / B₀,dfv = Φ(d₀ + Δ / den) − Φ(d₀)(Up 的概率变化)。Up 腿的挂单在 dfv ≤ −`fv_cancel`、Down 腿在 dfv ≥ +`fv_cancel` 时撤单,该腿 `fv_cool_ms` 内不再挂单。Φ 与 Φ⁻¹ 用 z = k/64(k = 0..320)的整数表线性插值。
-6. **挂单的去留**:有挂单时,下列任一成立则撤单(撤单不受 `requote_ms` 限制):不再满足第 2 步、不是当前对、簿不是 `Live`;第 5 步触发;买一高于挂单价且目标为空或高于挂单价(被抢先,改挂更高);有对价上限且挂单价高于它。**买一低于挂单价(本价位已被吃空)时留守**,不跟着降价。
-7. **新挂单**:没有挂单而有目标、距上次改价 ≥ `requote_ms`、过了冷却 → `place` 一张 `OrderIntent{Buy, PostOnly, class Open, px = 目标, qty = clip_shares 份, tag = gix + 1, max_rest_ms}`(不带链接)。一条腿同时至多一张挂单;撤单在途时不再挂。
+6. **挂单的去留**:有挂单时,下列任一成立则撤单(撤单不受 `requote_ms` 限制):不再满足第 2 步、不是当前对、簿不是 `Live`;第 5 步触发;买一高于挂单价且目标为空或高于挂单价(被抢先,改挂更高);有对价上限且挂单价高于它。**买一低于挂单价(本价位已被吃空)时留守**,不跟着降价。因被抢先而撤单时,若 `nochase_ms` > 0,该腿冷却到撤单时刻 + `nochase_ms`(与第 5 步的冷却取较晚者)。
+7. **新挂单**:没有挂单而有目标、距上次改价 ≥ `requote_ms`、过了冷却、该腿不在连续成交暂停中(`streak_k` ≥ 2 且已有 ≥ `streak_k` 笔成交时,倒数第 `streak_k` 笔距今 < `streak_window_ms` 且最后一笔距今 < `streak_pause_ms` 即为暂停;每次 `Filled` 的 d > 0 计一笔)、当前窗口已买入成本 < `max_window_cost`(为 0 时不限)→ `place` 一张 `OrderIntent{Buy, PostOnly, class Open, px = 目标, qty = clip_shares 份, tag = gix + 1, max_rest_ms}`(不带链接)。一条腿同时至多一张挂单;撤单在途时不再挂。
 8. **订单状态**:`place` 后下一个事件读 `Ctx::outcome`:`Placed(r)` → 记下 `r`,其余(`Rejected`、`Shadowed`、无结果)→ 视为没有挂单;`Order` 事件里 `Filled{done}`、`Cancelled`、`Rejected`、`Aged` → 没有挂单。
 
-依据:2026-08 逐事件回放(1 985–2 221 个市场,`E:\trade\staging\pm5m\mm_event2.py` 的 `final` 变体):原规则 −0.11 c/份;加留守 +0.16、再以公允价撤单代替 1σ 跳动暂停 +0.25、再加对价上限 +0.52 c/份(t 3.6,7/7 天)。
+依据:2026-08 逐事件回放(1 985–2 221 个市场,`E:\trade\staging\pm5m\mm_event2.py` 的 `final` 变体):原规则 −0.11 c/份;加留守 +0.16、再以公允价撤单代替 1σ 跳动暂停 +0.25、再加对价上限 +0.52 c/份(t 3.6,7/7 天)。v3 三条(不追价 1 s、冷却 1 s、同腿 10 s 内 2 笔成交暂停 10 s,即回放的 `s2`)在同一回放中把净库存的亏损从每净份 −22.7 降到 −5.7 美分;82 美元账户的 `micro_s2_c5_cap10_mc20`(每张 5 份、净上限 10 份、每窗成本 ≤ 20 美元)+1.03 c/份。
 
 持仓不平:窗口结束后由发现进程的 `Settle` 交割(模拟账户经 sim-gw;实盘交割尚未实现)。
 
@@ -90,9 +95,9 @@ status: impl
 
 <details><summary>实现要点</summary>
 
-- 状态:每个槽位 group 一条 `Quote{id, inst, venue, state, handle, r, px, last_ens, b0, d0, den, cool_until}`(`state` ∈ None/Placing/Live/Cancelling;后四项是规则 5 的锚点与冷却);参考 inst 与最新参考 2 × 中间价;波动率环 `Vol`。容量在 `new` 时按 `GroupTable::capacity()` 预留,`on_params` 只在 `vol_window_s` 变化时重建环。`GroupId` 与腿都不变的槽位保留挂单状态。
+- 状态:每个槽位 group 一条 `Quote{id, inst, venue, state, handle, r, px, last_ens, b0, d0, den, cool_until, fill_ens, n_fill}`(`state` ∈ None/Placing/Live/Cancelling;`b0`–`cool_until` 是规则 5 的锚点与冷却;`fill_ens` 是该腿最近 8 笔成交的引擎时间环,`n_fill` 为累计笔数);参考 inst 与最新参考 2 × 中间价;波动率环 `Vol`。容量在 `new` 时按 `GroupTable::capacity()` 预留,`on_params` 只在 `vol_window_s` 变化时重建环。`GroupId` 与腿都不变的槽位保留挂单状态。
 - 全部整数运算:相对变化 ×1e9 用 i128,平方和 u128,整数平方根(牛顿法)。
-- 快照(`DESC_VERSION` 2):`n: u16`,每个槽位 `id: u32, state: u8, venue: u8, account: u8, slot: u32, gen: u32, px: i64, b0: i64, d0: i64, den: i64, cool_until: i64`;`Placing` 存为 None。恢复按 `GroupId`;波动率环不进快照(重启后重新积累 `vol_min_samples` 个样本才挂单)。
+- 快照(`DESC_VERSION` 3):`n: u16`,每个槽位 `id: u32, state: u8, venue: u8, account: u8, slot: u32, gen: u32, px: i64, b0: i64, d0: i64, den: i64, cool_until: i64, n_fill: u32, fill_ens: 8 × i64`;`Placing` 存为 None。恢复按 `GroupId`;波动率环不进快照(重启后重新积累 `vol_min_samples` 个样本才挂单)。
 
 | 文件 | 职责 |
 |---|---|

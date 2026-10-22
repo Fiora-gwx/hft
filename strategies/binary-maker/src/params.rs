@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 2, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 3, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -39,6 +39,16 @@ hft_strategy_sdk::define_params! {
         /// a bid that would complete Up/Down pairs rests at most at 1 − (other side's average cost) −
         /// pair_margin (fraction of one, 1e-9)
         pair_margin: Rate [min = 0, max = 1_000_000_000, default = 10_000_000, relax = Down],
+        /// no new quote on a leg for this long after it was cancelled for being undercut; 0 = off
+        nochase_ms: DurationMs [min = 0, max = 600_000, default = 0, relax = Down],
+        /// fills of one leg that start a streak pause; 0 = off (minimum 2 when on)
+        streak_k: Count [min = 0, max = 8, default = 0, relax = Down],
+        /// the last `streak_k` fills of a leg within this window pause the leg
+        streak_window_ms: DurationMs [min = 0, max = 600_000, default = 10_000, relax = Down],
+        /// the paused leg places nothing until this long after its last fill
+        streak_pause_ms: DurationMs [min = 0, max = 600_000, default = 10_000, relax = Down],
+        /// bought cost of the current window (both legs) at which no new quote is placed; 0 = no limit
+        max_window_cost: Notional [min = 0, max = 1_000_000_000_000, default = 0, relax = Up],
     }
 }
 
