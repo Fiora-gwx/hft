@@ -65,8 +65,24 @@ pub struct Quote {
     pub b0: i64,
     pub d0: i64,
     pub den: i64,
-    /// Engine time before which this leg places nothing (after a fair-value cancel).
+    /// Engine time before which this leg places nothing (after a fair-value cancel or, with
+    /// `nochase_ms`, after an undercut cancel).
     pub cool_until: i64,
+    /// Engine times of this leg's last fills (ring of 8; `n_fill` counts all fills).
+    pub fill_ens: [i64; 8],
+    pub n_fill: u32,
+}
+
+impl Quote {
+    /// Streak pause (README "规则" 7): the last `k` fills within `window` ns and the last fill
+    /// less than `pause` ns ago.
+    pub fn streak_paused(&self, now: i64, k: u32, window: i64, pause: i64) -> bool {
+        if k < 2 || self.n_fill < k {
+            return false;
+        }
+        let at = |back: u32| self.fill_ens[((self.n_fill - back) % 8) as usize];
+        now.saturating_sub(at(k)) < window && now.saturating_sub(at(1)) < pause
+    }
 }
 
 #[derive(Debug)]
@@ -129,6 +145,8 @@ impl Fast {
                 d0: 0,
                 den: 0,
                 cool_until: i64::MIN / 2,
+                fill_ens: [i64::MIN / 2; 8],
+                n_fill: 0,
             };
             let kept = self
                 .scratch
@@ -157,7 +175,14 @@ impl Fast {
             }
             EventRef::Book { .. } => self.run(v, ctx),
             EventRef::Order { u, .. } => {
+                let now = v.now().engine_ns;
                 if let Some(q) = self.quotes.iter_mut().find(|q| q.r == Some(u.r)) {
+                    if let OrderUpdateKind::Filled { d, .. } = u.kind
+                        && d.0 > 0
+                    {
+                        q.fill_ens[(q.n_fill % 8) as usize] = now;
+                        q.n_fill = q.n_fill.wrapping_add(1);
+                    }
                     match u.kind {
                         OrderUpdateKind::Filled { done: true, .. }
                         | OrderUpdateKind::Cancelled
@@ -234,6 +259,19 @@ impl Fast {
         let up = usize::try_from(cur * 2).unwrap_or(usize::MAX);
         let (qu, cu) = pos(self.quotes.get(up));
         let (qd, cd) = pos(self.quotes.get(up.wrapping_add(1)));
+        // Bought cost of the window (1e-6 units) against `max_window_cost`.
+        let cost_full = d.max_window_cost.0 > 0
+            && self.quotes.get(up).is_some_and(|q| {
+                let hot = v.inst(q.inst);
+                let e = i32::from(hot.qty_exp) + i32::from(hot.px_exp) + 6;
+                let raw = i128::from(qu) * i128::from(cu) + i128::from(qd) * i128::from(cd);
+                let cost = if e >= 0 {
+                    raw * 10i128.pow(e.unsigned_abs())
+                } else {
+                    raw / 10i128.pow(e.unsigned_abs())
+                };
+                cost >= i128::from(d.max_window_cost.0)
+            });
         // Fair-value anchor of new quotes: Φ⁻¹(Up token mid) and implied σ × √(left − 40 s).
         let up_mid = self.quotes.get(up).map_or(ONE / 2, |q| {
             let b = v.book(q.inst);
@@ -254,6 +292,9 @@ impl Fast {
         });
         let requote = i64::from(d.requote_ms) * 1_000_000;
         let cool = i64::from(d.fv_cool_ms) * 1_000_000;
+        let nochase = i64::from(d.nochase_ms) * 1_000_000;
+        let streak_window = i64::from(d.streak_window_ms) * 1_000_000;
+        let streak_pause = i64::from(d.streak_pause_ms) * 1_000_000;
         for i in 0..self.quotes.len() {
             let Some(q) = self.quotes.get(i).copied() else {
                 continue;
@@ -301,7 +342,8 @@ impl Fast {
                     }
                     // Undercut (a better bid than ours where we would quote higher) or above the
                     // pair-cost limit; a cleared level (best bid below ours) keeps the quote.
-                    cancel |= bid.is_some_and(|b| b > q.px) && target.is_none_or(|t| t > q.px);
+                    let undercut = bid.is_some_and(|b| b > q.px) && target.is_none_or(|t| t > q.px);
+                    cancel |= undercut;
                     cancel |= lim.is_some_and(|l| q.px > l);
                     if cancel
                         && let Some(r) = q.r
@@ -313,11 +355,18 @@ impl Fast {
                         if cooled {
                             m.cool_until = now.engine_ns.saturating_add(cool);
                         }
+                        if undercut && nochase > 0 {
+                            m.cool_until = m.cool_until.max(now.engine_ns.saturating_add(nochase));
+                        }
                     }
                 }
                 QState::None => {
                     let Some(px) = target else { continue };
-                    if since < requote || now.engine_ns < q.cool_until {
+                    if since < requote
+                        || now.engine_ns < q.cool_until
+                        || cost_full
+                        || q.streak_paused(now.engine_ns, d.streak_k, streak_window, streak_pause)
+                    {
                         continue;
                     }
                     let it = OrderIntent {
@@ -367,8 +416,8 @@ impl Fast {
     }
 
     /// `n: u16`, then per slot group `id: u32, state: u8, r?: (venue u8, account u8, slot u32,
-    /// gen u32), px: i64, b0: i64, d0: i64, den: i64, cool_until: i64`. Placing quotes are saved
-    /// as none.
+    /// gen u32), px: i64, b0: i64, d0: i64, den: i64, cool_until: i64, n_fill: u32,
+    /// fill_ens: 8 × i64`. Placing quotes are saved as none.
     pub fn snapshot(&self, w: &mut SnapshotWriter) {
         w.put_u16(self.quotes.len() as u16);
         for q in &self.quotes {
@@ -396,6 +445,10 @@ impl Fast {
             w.put_i64(q.d0);
             w.put_i64(q.den);
             w.put_i64(q.cool_until);
+            w.put_u32(q.n_fill);
+            for t in q.fill_ens {
+                w.put_i64(t);
+            }
         }
     }
 
@@ -414,6 +467,11 @@ impl Fast {
             let d0 = r.get_i64()?;
             let den = r.get_i64()?;
             let cool_until = r.get_i64()?;
+            let n_fill = r.get_u32()?;
+            let mut fill_ens = [0i64; 8];
+            for t in fill_ens.iter_mut() {
+                *t = r.get_i64()?;
+            }
             if let Some(q) = self.quotes.iter_mut().find(|q| q.id == id) {
                 let (st, oref) = match state {
                     2 => (QState::Live, true),
@@ -433,6 +491,8 @@ impl Fast {
                 q.d0 = d0;
                 q.den = den;
                 q.cool_until = cool_until;
+                q.n_fill = n_fill;
+                q.fill_ens = fill_ens;
             }
         }
         Ok(())

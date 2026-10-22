@@ -418,3 +418,159 @@ fn bmk_012_normal_cdf() {
     assert_eq!(inv_cdf(0), inv_cdf(1_000_000), "BMK-012.2");
     assert!(near(inv_cdf(500_000_000), 0, 1_000_000), "BMK-012.2");
 }
+
+/// Defaults (as `params`) with the named fields set.
+fn params_with(fields: &[(&str, i64)]) -> BinaryMakerParams {
+    let schema = BinaryMaker::DESC.schema;
+    let ix = |name: &str| {
+        (0..schema.n_fields())
+            .position(|i| schema.field(i).is_some_and(|f| f.name == name))
+            .unwrap()
+    };
+    let idx: Vec<(usize, i64)> = fields.iter().map(|(n, v)| (ix(n), *v)).collect();
+    params(|d| {
+        for (i, v) in idx {
+            d[i] = v;
+        }
+    })
+}
+
+fn book_at(h: &mut StrategyHarness<BinaryMaker>, t: i64, bid: i64) -> hft_testkit::sdk_mock::CtxCapture {
+    slot_book(h.views_mut(), SLOTS[2], bid, 470);
+    h.views_mut().at_engine_ns(t);
+    h.feed(&ev::book(SLOTS[2], 2).as_ref())
+}
+
+fn order_at(
+    h: &mut StrategyHarness<BinaryMaker>,
+    t: i64,
+    kind: OrderUpdateKind,
+) -> hft_testkit::sdk_mock::CtxCapture {
+    h.views_mut().at_engine_ns(t);
+    h.feed(
+        &ev::order(
+            2,
+            OrderUpdate {
+                r: order_ref(11),
+                group: gid(2),
+                tag: binary_maker::fast::tag_of(2),
+                kind,
+            },
+        )
+        .as_ref(),
+    )
+}
+
+fn up_places(out: &hft_testkit::sdk_mock::CtxCapture) -> Vec<Px> {
+    out.places()
+        .filter(|it| it.inst == SLOTS[2])
+        .map(|it| it.px)
+        .collect()
+}
+
+#[test]
+fn bmk_013_nochase_after_undercut() {
+    // .1 default (nochase off): undercut at 399.6 s, cancelled at 399.7 s, rejoins at 399.9 s.
+    let mut h = harness(&params(|_| {}));
+    live_pair(&mut h);
+    assert_eq!(
+        cancels(&book_at(&mut h, 399_600_000_000, 460)),
+        vec![11],
+        "BMK-013.1"
+    );
+    order_at(&mut h, 399_700_000_000, OrderUpdateKind::Cancelled);
+    assert_eq!(
+        up_places(&book_at(&mut h, 399_900_000_000, 460)),
+        vec![Px(460)],
+        "BMK-013.1"
+    );
+    // .2 nochase_ms 1000: nothing before 400.6 s, then the new best bid.
+    let mut h = harness(&params_with(&[("nochase_ms", 1000)]));
+    live_pair(&mut h);
+    assert_eq!(
+        cancels(&book_at(&mut h, 399_600_000_000, 460)),
+        vec![11],
+        "BMK-013.2"
+    );
+    order_at(&mut h, 399_700_000_000, OrderUpdateKind::Cancelled);
+    assert!(
+        up_places(&book_at(&mut h, 399_900_000_000, 460)).is_empty(),
+        "BMK-013.2"
+    );
+    assert!(
+        up_places(&book_at(&mut h, 400_500_000_000, 460)).is_empty(),
+        "BMK-013.2"
+    );
+    assert_eq!(
+        up_places(&book_at(&mut h, 400_700_000_000, 460)),
+        vec![Px(460)],
+        "BMK-013.2"
+    );
+}
+
+fn filled(d: i64, cum: i64, done: bool) -> OrderUpdateKind {
+    OrderUpdateKind::Filled {
+        d: Qty(d),
+        px: Px(450),
+        fee: 0,
+        fee_asset: USDC,
+        cum: Qty(cum),
+        done,
+    }
+}
+
+#[test]
+fn bmk_014_streak_pause() {
+    // Two fills of the Up leg 0.2 s apart (the second completes the order).
+    let run = |p: &BinaryMakerParams| {
+        let mut h = harness(p);
+        live_pair(&mut h);
+        order_at(&mut h, 399_600_000_000, filled(5_000_000, 5_000_000, false));
+        order_at(&mut h, 399_800_000_000, filled(5_000_000, 10_000_000, true));
+        let mut placed = Vec::new();
+        for t in [400_100_000_000i64, 409_500_000_000, 409_700_000_000] {
+            placed.push(!up_places(&book_at(&mut h, t, 450)).is_empty());
+        }
+        placed
+    };
+    // .1 off: the leg rejoins at once.
+    assert!(run(&params(|_| {}))[0], "BMK-014.1");
+    // .2 streak_k 2 / 10 s / 10 s: paused while the first of the two fills is within 10 s and the
+    // last one less than 10 s ago, i.e. until 409.6 s (as the August replay).
+    let p = params_with(&[
+        ("streak_k", 2),
+        ("streak_window_ms", 10_000),
+        ("streak_pause_ms", 10_000),
+    ]);
+    assert_eq!(run(&p), vec![false, false, true], "BMK-014.2");
+    // .3 fills 12 s apart are not a streak.
+    let mut h = harness(&p);
+    live_pair(&mut h);
+    order_at(&mut h, 387_000_000_000, filled(5_000_000, 5_000_000, false));
+    order_at(&mut h, 399_800_000_000, filled(5_000_000, 10_000_000, true));
+    assert!(
+        !up_places(&book_at(&mut h, 400_100_000_000, 450)).is_empty(),
+        "BMK-014.3"
+    );
+}
+
+#[test]
+fn bmk_015_window_cost_cap() {
+    let p = params_with(&[("max_window_cost", 20_000_000)]);
+    // .1 50 Up held at 0.45 = 22.50 USDC ≥ 20: no new quote on either leg.
+    let mut h = harness(&p);
+    hold(&mut h, 2, 50, 450);
+    assert_eq!(warm(&mut h, 400, 399, 1).places().count(), 0, "BMK-015.1");
+    // .2 30 Up at 0.45 = 13.50 USDC: both legs quote.
+    let mut h = harness(&p);
+    hold(&mut h, 2, 30, 450);
+    assert_eq!(warm(&mut h, 400, 399, 1).places().count(), 2, "BMK-015.2");
+    // .3 a live quote is not cancelled by the cap.
+    let mut h = harness(&p);
+    live_pair(&mut h);
+    hold(&mut h, 2, 50, 450);
+    assert!(
+        cancels(&book_at(&mut h, 399_600_000_000, 450)).is_empty(),
+        "BMK-015.3"
+    );
+}
