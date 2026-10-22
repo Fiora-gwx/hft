@@ -928,6 +928,37 @@ fn seq_414_bootstrap_balances_are_snapshot_baselines_not_pending_notes() {
     assert!(h.verify_from(Some(start.seq)).is_empty());
 }
 
+#[test]
+fn seq_438_production_live_account_baseline() {
+    use hft_event::BalanceReport;
+    use hft_types::Tsc;
+    reset_script();
+    let bal = BalanceReport {
+        venue: B,
+        account: AC1,
+        asset: USDT,
+        _pad: 0,
+        free: q("5000"),
+        locked: Qty(0),
+        ex_ts_ns: UTC0,
+        rx_tsc: Tsc(T0),
+    };
+    let mut b = b0();
+    b.rd.accounts.iter_mut().find(|a| a.id == AC1).unwrap().is_prod = true;
+    let mut h = b.boot_self_contained_accounts(&[bal]);
+    assert!(h.rd.account(AC1).is_prod, "SEQ-438");
+    // The baseline is the account's quote cash from the first snapshot on.
+    h.push(hft_sequencer::driver::live::RingId::Rep(0), &bal);
+    h.run();
+    let init = h
+        .j()
+        .records()
+        .filter_map(|r| r.read::<hft_event::Note>())
+        .filter(|n| n.code == hft_ledger::notes::code::BALANCE_INIT)
+        .count();
+    assert_eq!(init, 0, "SEQ-438");
+}
+
 const FACTS: [(Side, i64, i64, i64, i64); 5] = [
     (Side::Sell, 100_000, 6_001_890, 3_001_000, 0),
     (Side::Sell, 100_000, 6_002_440, 3_001_300, 0),

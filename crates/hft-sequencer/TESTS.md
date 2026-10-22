@@ -16,7 +16,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 
 | README 小节 | 用例 |
 |---|---|
-| 非正式账户 bootstrap | SEQ-011、SEQ-159 |
+| 实盘账户 bootstrap | SEQ-011、SEQ-159、SEQ-438 |
 | 概要 | SEQ-018、SEQ-310 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
@@ -6124,6 +6124,16 @@ SEQ-414 的启动子例 `seq_414_bootstrap_balances_are_snapshot_baselines_not_p
 - 步骤:崩溃重启(最新快照、重放尾部、持久 epoch 9),执行第一步
 - 期望:`out-A` 在 `SetEpoch` 之后有 2 条 `BindWire{a1, part 0、1, [0x5A; 16]}`
 - 实现:`crates/hft-sequencer/tests/recover.rs::seq_437_bindings_resent_to_gw_after_restart`
+
+### SEQ-438 正式实盘账户的启动余额基线
+
+- 规则:[实盘账户 bootstrap](README.md#实盘账户-bootstrap)
+- 级别:unit
+- 里程碑:M3
+- 前置:B0,账户 1 改为 `is_prod`
+- 步骤:以 venue B、USDT 5000 的余额基线 `boot_accounts`;再送同一条 `BalanceReport`
+- 期望:启动成功;之后的同值余额不再产生 `BALANCE_INIT`(基线已在初始快照)
+- 实现:`crates/hft-sequencer/tests/settlement.rs::seq_438_production_live_account_baseline`
 
 ### SEQ-433 未订阅的槽位在首次订阅前收到绑定
 

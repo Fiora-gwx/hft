@@ -948,9 +948,9 @@ advisor 的定时投递、重启注记去重、落后量、两种环容量的独
 - [指定快照恢复审计范围](../../.agents/notes/implemented/bug-fix/2026-10-11-snapshot-recovery-audit-range.md)
 - [恢复快照的引擎时间](../../.agents/notes/implemented/bug-fix/2026-10-11-recovery-snapshot-engine-time.md)
 
-### 非正式账户 bootstrap
+### 实盘账户 bootstrap
 
-`Sequencer::boot_accounts` 只给新 journal 的非正式 Live 账户接受余额/持仓基线；绑定错误、重复资产/持仓、正式或 Sim 账户、无效持仓拒绝启动。策略初始化前建立账户 unassigned 状态并写第一份完整快照。RateOnly 真实结算输入先记录再检查差异，不自动纠正现金。
+`Sequencer::boot_accounts` 只给新 journal 的 Live 账户接受余额/持仓基线(正式账户只会出现在 hft-core 放开正式下单的 venue,即 Polymarket,[hft-core 实例角色](../../apps/hft-core/README.md#实例角色prod-与-sim));绑定错误、重复资产/持仓、Sim 账户、无效持仓拒绝启动。策略初始化前建立账户 unassigned 状态并写第一份完整快照。RateOnly 真实结算输入先记录再检查差异，不自动纠正现金。
 
 ## 已知限制与后续工作
 
