@@ -920,3 +920,45 @@ fn core_431_live_maker_set_params_accepts_the_startup_shape() {
     let e = hft_core::config::load(&path, false).unwrap_err();
     assert!(e.iter().any(|e| e.code == "StrategyParams"), "CORE-431.3: {e:?}");
 }
+
+#[cfg(feature = "polymarket")]
+#[test]
+fn core_432_polymarket_expiry_window_is_the_gtd_lifetime() {
+    use hft_venue_proto::VenueProtocol;
+    let hft_venue_proto::StaleGuard::ExpireAt { default_ms } =
+        venue_polymarket::PolymarketClob::stale_guard()
+    else {
+        panic!("CORE-432.1 {:?}", venue_polymarket::PolymarketClob::stale_guard());
+    };
+    let v = hft_types::VenueId::POLYMARKET_CLOB;
+    let d = tempfile::tempdir().unwrap();
+    let live = support::PmLive {
+        uid: "0f5e8d2a-1111-2222-3333-".into(),
+        keys_dir: d.path().join("keys"),
+    };
+    let hot = d.path().join("hot");
+    let live_path =
+        support::write_polymarket_maker_live(d.path(), &hot, None, None, "127.0.0.1", "lo", &live);
+    let d2 = tempfile::tempdir().unwrap();
+    let sim_path =
+        support::write_polymarket_maker_sim(d2.path(), &d2.path().join("hot"), None, None, "127.0.0.1", "lo");
+    for (path, dry) in [(live_path, false), (sim_path, true)] {
+        let l = match hft_core::config::load(&path, dry) {
+            Ok(l) => l,
+            Err(e) => panic!("CORE-432 dry={dry}: {e:?}"),
+        };
+        assert_eq!(
+            l.rd.venue(v).stale_guard,
+            hft_refdata::StaleGuardKind::ExpireAt,
+            "CORE-432.1"
+        );
+        assert_eq!(
+            l.setup.oms.expire_window_ms.get(v),
+            Some(default_ms),
+            "CORE-432.2"
+        );
+        assert_eq!(default_ms, 300_000, "CORE-432.2");
+        assert_eq!(l.setup.oms.not_found_grace_of(v, &l.rd), 300_500, "CORE-432.2");
+        assert_eq!(l.setup.oms.unknown_alarm_ms, 30_000, "CORE-432.3");
+    }
+}

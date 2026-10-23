@@ -741,7 +741,8 @@ pub const PM_LIVE_PARAMS: [(&str, i64); 9] = [
 /// The live maker (`order_env = "prod"`, no `--dry-run`): the maker simulation's venues, slots and
 /// strategy with a Live account `pm-live` (`is_prod`, UID `live.uid`) on Polymarket, its keys in
 /// `live.keys_dir`, `PM_LIVE_PARAMS`, the micro risk limits (order 10 USDC, account and venue
-/// 55, slot group 25, daily loss 15) and OMS `ack_timeout_ms[polymarket] = 5000`.
+/// 55, slot group 25, daily loss 15) and OMS `ack_timeout_ms[polymarket] = 5000`; every Polymarket
+/// config sets OMS `expire_window_ms[polymarket]` to the GTD lifetime (`stale_guard()`).
 #[cfg(feature = "polymarket")]
 #[allow(dead_code)]
 pub fn write_polymarket_maker_live(
@@ -920,7 +921,7 @@ fn write_pm(
         max_batch: 1,
         max_inflight_amend: 1,
         crossed_tolerance_default: 0,
-        stale_guard: StaleGuardKind::None,
+        stale_guard: StaleGuardKind::ExpireAt,
     });
     let market = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
     let mut pm_endpoints = vec![
@@ -1215,6 +1216,14 @@ fn write_pm(
     engine.feeds = VenueSet((1 << v.0) | if maker { 1 << bn.0 } else { 0 });
     engine.seq.rings[7] = hft_sequencer::RingLimit::default();
     engine.seq.allow_missing_standby = 1;
+    // Every place is GTD: its lifetime is the expiry window, a NotFound past it + 500 ms ends the
+    // slot (hft-oms "Unknown 收敛流程" 4; venue-polymarket "VenueCaps 默认值").
+    let hft_venue_proto::StaleGuard::ExpireAt { default_ms } =
+        venue_polymarket::PolymarketClob::stale_guard()
+    else {
+        panic!("Polymarket declares ExpireAt");
+    };
+    engine.oms.expire_window_ms.set(v, Some(default_ms));
     if live.is_some() {
         engine.role_prod = true;
         engine.gws.venues = vec![v];

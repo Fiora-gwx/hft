@@ -35,7 +35,7 @@ spec: README.md
 | 累计量与费用来源 | PMK-027, PMK-031 |
 | 结果未知码表 | PMK-026 |
 | 账户配置核验 | PMK-030 |
-| VenueCaps 默认值 | PMK-011 |
+| VenueCaps 默认值 | PMK-011, PMK-033 |
 | 实现说明 | PMK-006, PMK-007 |
 | 延迟与资源契约 | PMK-011 |
 | 测试与验收 | 不适用:非规范 |
@@ -496,3 +496,15 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 | PMK-032.3 | (只编码过下单的 `GwCtx`)查单应答 200 `MATCHED` 4.99737 | `exch_id(H 键, Some(client id))`;`Ack{slot 7, gen 3, exch_order_id = H 键}`,再 `QueryResult{Filled(3), cum 4 997 370, avg_px 0.42, H 键}`;`events 2` |
 | PMK-032.4 | 同一应答再解码一次 | 只有 `QueryResult` |
 
+### PMK-033 过期保护按 GTD 寿命声明为 ExpireAt
+
+- 规则:[VenueCaps 默认值](README.md#venuecaps-默认值)、[下单](README.md#下单)
+- 级别:unit
+- 里程碑:M3
+- 前置:同 PMK-023
+- 实现:`crates/venue-polymarket/tests/orders.rs::pmk_033_stale_guard_is_the_gtd_lifetime`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-033.1 | `PolymarketClob::stale_guard()` | `ExpireAt{default_ms: GTD_S × 1000}`,`GTD_S = 300` |
+| PMK-033.2 | 编码 `Place{UP, Buy, 0.45, 5 份, PostOnly}` | `expiration` − 时钟秒 = `default_ms / 1000`(声明的窗口就是签出订单的寿命) |

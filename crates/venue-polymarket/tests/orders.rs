@@ -1067,3 +1067,21 @@ fn pmk_032_unacked_place_is_resolved_by_its_signed_hash() {
     let e = orders(&s);
     assert_eq!((e.len(), e[0].what), (1, QUERY), "PMK-032.4");
 }
+
+#[test]
+fn pmk_033_stale_guard_is_the_gtd_lifetime() {
+    use hft_venue_proto::StaleGuard;
+    let StaleGuard::ExpireAt { default_ms } = Pm::stale_guard() else {
+        panic!("PMK-033.1 {:?}", Pm::stale_guard());
+    };
+    assert_eq!(
+        (default_ms, venue_polymarket::GTD_S),
+        (venue_polymarket::GTD_S * 1000, 300),
+        "PMK-033.1"
+    );
+    let c = cmd(GwOp::Place, UP, Side::Buy, 450, 5_000_000, Tif::PostOnly);
+    let r = encode(&ctx(), &c, &tgt(0)).unwrap();
+    let b: serde_json::Value = serde_json::from_slice(r.body.as_slice()).unwrap();
+    let exp: i64 = b["order"]["expiration"].as_str().unwrap().parse().unwrap();
+    assert_eq!(exp - NOW_MS / 1000, i64::from(default_ms / 1000), "PMK-033.2");
+}

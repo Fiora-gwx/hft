@@ -1,5 +1,6 @@
 //! StaleOrderSweep (`Timer{Oms, Sweep}`) and the resumption timeout.
 
+use hft_refdata::StaleGuardKind;
 use hft_types::{Tif, Tsc};
 
 use crate::Oms;
@@ -153,7 +154,13 @@ impl Oms {
                 }
             }
             OrderState::Unknown => {
-                if age > self.p.unknown_alarm && !sl.sflags.has(SlotFlags::ALARMED) {
+                // A slot that a NotFound finalises after the grace is not stuck before it.
+                let alarm = if ex.role == 0 && t.stale_guard == StaleGuardKind::ExpireAt {
+                    self.p.unknown_alarm.saturating_add(t.grace)
+                } else {
+                    self.p.unknown_alarm
+                };
+                if age > alarm && !sl.sflags.has(SlotFlags::ALARMED) {
                     if let Some(x) = self.tm(ti).and_then(|t| t.slots.get_mut(s as usize)) {
                         x.sflags.0 |= SlotFlags::ALARMED;
                     }

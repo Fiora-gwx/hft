@@ -66,7 +66,7 @@ fn rd() -> &'static RefData {
             max_batch: 1,
             max_inflight_amend: 1,
             crossed_tolerance_default: 0,
-            stale_guard: StaleGuardKind::None,
+            stale_guard: StaleGuardKind::ExpireAt,
         });
         b.fee(FeeSpec {
             venue: V,
