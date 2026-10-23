@@ -56,10 +56,11 @@ pm-md-probe --bindings FILE --seconds N --out FILE --dir DIR --src-ip IP --bind-
 | `batch` | `slot`、`ex_ms`、`rx_ns`、`prev`、`last`、`bb`、`ba` |
 | `trade` | `slot`、`ex_ms`、`rx_ns`、`px`、`qty`、`side` |
 | `conn` | 连接状态事件 |
-| `dec` | (`journal` 子命令)`OrderDecision`:`slot`、`action`、`side`、`tif`、`px`、`qty`、`oslot`、`gen`、`reject` |
-| `oev` | (`journal`)`OrderEvent`:`slot`、`what`、`px`、`qty`、`cum`、`fee`、`oslot`、`gen`、`ex_ms`、`code` |
-| `ext` | (`journal`)`ExternalFill`(交割为 `cause` 4):`slot`、`cause`、`side`、`px`、`qty`、`end_s` |
-| `settle` / `cmdres` | (`journal`)`Settle` 命令(`slot`、`end_s`、`payout`、`cmd_id`)与命令结果(`cmd_id`、`status`、`detail`) |
+| `dec` | (`journal` 子命令)`OrderDecision`:`slot`、`inst`、`action`、`side`、`tif`、`px`、`qty`、`oslot`、`gen`、`reject` |
+| `oev` | (`journal`)`OrderEvent`:`slot`、`inst`、`what`、`px`、`qty`、`cum`、`fee`、`oslot`、`gen`、`ex_ms`、`code` |
+| `ext` | (`journal`)`ExternalFill`(交割为 `cause` 4):`slot`、`inst`、`cause`、`side`、`px`、`qty`、`end_s` |
+| `bind` | (`journal --orders-only`)每次 `BindSlot`:`inst`、`slot`(`<asset>-<S>-<up|dn>`)、`start_s`;只解码新段的读者靠它自己维护 inst → 窗口标签 |
+| `settle` / `cmdres` | (`journal`)`Settle` 命令(`slot`、`inst`、`end_s`、`payout`、`cmd_id`)与命令结果(`cmd_id`、`status`、`detail`) |
 
 `bb`/`ba` 为重建簿的最优买/卖价(px_exp −3 的整数,空边为 −1)。结束时打印各类事件数、feed 计数器与解码器的去重计数(`decoder dups`、`lates`)。`conn` 行的 `Down` 原因 64(hft-net `WS_CLOSE`)既包括 1013,也包括市场结算后约 147 s 交易所的正常关闭,统计异常断开时要按时间排除后者。
 
@@ -75,12 +76,12 @@ pm-md-probe --bindings FILE --seconds N --out FILE --dir DIR --src-ip IP --bind-
 
 ```text
 bind_slots.py --socket CORE_SOCK [--assets btc,eth,sol,xrp] [--lead 120] [--once] [--log FILE] [--issuer pipeline] [--gap 0.25] [--slots 2] [--settle]
-pm-md-probe journal --refdata RDB1 --out FILE --bindings-out FILE SEG...
+pm-md-probe journal --refdata RDB1 --out FILE --bindings-out FILE [--orders-only] SEG...
 ```
 
 - `bind_slots.py`:每 5 s 对当前与下一个窗口(开始时间 S)取 Gamma 的 Up/Down 代币,写进槽位 `<asset>-<up|dn>-<k>`(k = S / 300 mod `--slots`,默认 2;相邻窗口用不同槽位);下一个窗口在 S − lead 起绑定,此时该槽位的上一个窗口已结束 300 − lead 秒(默认 180 s,晚于交易所约 147 s 后的结算断开)。每次绑定是一条 `BindSlot`(issuer `pipeline`、account `*`;`accepted` 时用同一 cmd_id 重发直到终态;请求间隔 `--gap` 秒以低于 gateway 的每 issuer 限速;被拒的绑定(`RateLimited`、`PreconditionFailed` 如 `GroupHasPosition`)按槽位退避重试,间隔 5 s 起翻倍到 60 s,成功后清零;已结束的窗口不再绑定),以 pipeline 主体的系统用户运行(手工调试可用 `--issuer cli:<login>` 以 Trader/Admin 的 cli 用户运行);已生效的 (代币, S) 不重发。Gamma 没有该市场时不改槽位。
 - `bind_slots.py --settle`(模拟盘):窗口结束 60 s 后起每 5 s 查 CLOB `/markets/<conditionId>`,有 `winner` 后对该窗口的两个槽位各发一条 `Settle`(赢的代币 `payout` "1"、另一个 "0";[control-plane `Settle`](../../docs/subsystems/control-plane.md#命令集),只交割模拟账户,没有持有者时 `NoOp`)。交易所在结束后约 178–204 s 标出 `winner`(2026-10-20 实测),持有库存的槽位交割前不能改绑,所以要配 `--slots 3`(结束后 480 s 才改绑);结束 1 小时仍未结算的窗口记 `unresolved` 后放弃。已生效(`Applied`/`NoOp`)的槽位不重发;被拒的 `Settle` 按窗口同样退避重试;`InvalidArgs`(该槽位没有绑定到这个窗口,例如当时绑定失败)不重试,记 `dropped`。
-- `pm-md-probe journal`:按 `BindSlot` 命令记录跟踪每个槽位当前的窗口,输出与[产出](#产出)相同的事件行,`slot` 为 `<asset>-<S>-<up|dn>`,改绑时清空该 inst 的簿,并像引擎重同步一样丢弃其增量直到该代币的第一个整簿;只用 `origin = EXCHANGE` 的 `L2Snapshot`(sequencer 关键帧里的簿副本不是行情);`--bindings-out` 写 `compare.py` 的绑定文件(每次绑定一项)。
+- `pm-md-probe journal`:按 `BindSlot` 命令记录跟踪每个槽位当前的窗口,输出与[产出](#产出)相同的事件行,`slot` 为 `<asset>-<S>-<up|dn>`,改绑时清空该 inst 的簿,并像引擎重同步一样丢弃其增量直到该代币的第一个整簿;只用 `origin = EXCHANGE` 的 `L2Snapshot`(sequencer 关键帧里的簿副本不是行情);`--bindings-out` 写 `compare.py` 的绑定文件(每次绑定一项)。`--orders-only`:不重建簿、不写 `snap`/`batch`/`trade`,改写 `bind` 行;供结算账本(Telegram 机器人)每分钟只解码新封口的段,9 小时的模拟盘输出从约 4.7 GB 降到 KB 级。
 - 通过标准与[验收步骤](#验收步骤)第 3 步相同,覆盖至少两个连续窗口(含一次改绑)。
 
 ### 挂单模拟
