@@ -368,6 +368,10 @@ mod tests {
         assert_eq!(a.files.len(), 2);
         let a = args(&v(&["--refdata", "r", "--out", "o", "--bindings-out", "b", "s1"])).unwrap();
         assert!(!a.orders_only);
+    }
+
+    #[test]
+    fn missing_segments_or_unknown_flags_are_refused() {
         assert!(args(&v(&["--refdata", "r", "--out", "o", "--bindings-out", "b"])).is_err());
         assert!(
             args(&v(&[
