@@ -33,7 +33,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
 | 协议接口 | VEN-018、VEN-064、VEN-341、VEN-390 |
-| 出环:`OutMsg = GwCmd` | VEN-194、VEN-196、VEN-199–VEN-206、VEN-214、VEN-235–VEN-238、VEN-240、VEN-241、VEN-391、VEN-392 |
+| 出环:`OutMsg = GwCmd` | VEN-194、VEN-196、VEN-199–VEN-206、VEN-214、VEN-235–VEN-238、VEN-240、VEN-241、VEN-391、VEN-392、VEN-403 |
 | 运行时入口 | VEN-007、VEN-011、VEN-013、VEN-071、VEN-084、VEN-085、VEN-161、VEN-210、VEN-245、VEN-264 |
 | 产生与消费的事件 | VEN-005、VEN-065、VEN-160、VEN-205、VEN-233、VEN-242、VEN-243、VEN-303、VEN-320、VEN-321 |
 | 配置项 | VEN-006、VEN-008–VEN-012、VEN-015–VEN-017、VEN-028、VEN-067、VEN-068、VEN-076、VEN-080、VEN-081、VEN-159、VEN-176、VEN-208、VEN-209、VEN-219、VEN-222、VEN-229、VEN-234、VEN-239、VEN-246、VEN-251、VEN-253、VEN-256、VEN-257、VEN-261、VEN-293、VEN-301、VEN-388、VEN-393、VEN-398、VEN-402 |
@@ -2451,7 +2451,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 | VEN-238.1 | `MirrorRestore{slot: 30, gen: 2, epoch: 8, inst: S1, exch_order_id: 555}`,随后 `Query{target_slot: 30}` | 无 `SendReport`(对 MirrorRestore);Query 帧中 client id 的 epoch = 8、槽 30、gen 2,交易所 id = 555;`Written` |
 | VEN-238.2 | 同 .1,随后收到只带 `555` 的回报 | 经 `IdTable` 解析为 `(8, 30, 2)` |
 | VEN-238.3 | `MirrorRestore{slot: 31, exch_order_id: 0, …}`,随后 `Query{target_slot: 31}` | `QueryUnsupported` |
-| VEN-238.4 | `MirrorRestore{slot: 2048, …}` | `ConnState{Degraded, account: A1, reason: 13}`;镜像不变 |
+| VEN-238.4 | `MirrorRestore{slot: 2049, …}` | `ConnState{Degraded, account: A1, reason: 13}`;镜像不变 |
 | VEN-238.5 | `MirrorRestore{inst: 9999, …}`(非本 venue) | `ConnState{Degraded, reason: 13}` |
 
 ### VEN-239 空闲预热默认关闭,打开后只预热不发送
@@ -3787,3 +3787,19 @@ warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入�
 | VEN-402.2 | 轮询于 `26S + 1` | 只有 114 退役;恰一条 REST `BuildReq`(conn-builder 建连);115 仍在池中;完成该建连后新连接装入池 |
 | VEN-402.3 | 轮询于 `27S + 10` | 115 退役,另一条 REST `BuildReq`;完成后装入 |
 | VEN-402.4 | `Place{A1, slot 7, gen 3, S1}` 于 `28S` | `SendReport{Written}`;请求在补建的连接上发出(两条新连接的 `sendmsg` 合计 +1);114、115 都不在池中 |
+
+### VEN-403 槽镜像按槽号 1..=N 下标:第 N 号槽的撤单与查单照常编码
+
+- 规则:[出环](README.md#出环outmsg--gwcmd)
+- 级别:table
+- 里程碑:M1.5
+- 前置:`G0` 但 `GwCfg.oms_slots = 64`(OMS 槽号 1..=64);当前 epoch 5;每条 Place 前一条 `ResetRate{A1}`
+- 实现:`crates/hft-venue/tests/gw_send.rs::ven_403_last_slot_is_mirrored`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| VEN-403.1 | A1 `Place{slot: 1..=64, gen: 1, inst: S1}` 逐条发出 | 64 条 `SendReport{Written}`;镜像 64 = `{gen: 1, epoch: 5, inst: S1, live: true}`;`mirror_out_of_range` = 0 |
+| VEN-403.2 | 回报 `O|<槽 64 的 cid>|EX-64|Ack|…` | 镜像 64 的 `exch_order_id` = `EX-64` 的值;`IdTable` 有 `EX-64 → (5, 64, 1)` |
+| VEN-403.3 | `Cancel{target_slot: 64}` | 恰一条 `SendReport{op: Cancel, target_slot: 64, target_gen: 1, Written}`;撤单帧带槽 64 的 client id 与 `EX-64` 的值 |
+| VEN-403.4 | `Query{target_slot: 64}` | 同 .3,`op: Query`,查单帧带槽 64 的 client id 与 `EX-64` 的值 |
+| VEN-403.5 | `MirrorRestore{slot: 65, …}` | `ConnState{Degraded, reason: 13}`;无镜像 65 |

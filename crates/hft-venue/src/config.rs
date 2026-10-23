@@ -214,7 +214,8 @@ pub struct GwCfg {
     pub acct_body_max: u32,
     pub unknown_evt_note_every: u32,
     pub rotate_margin_s: u32,
-    /// OMS slot count (slot mirror size; hft-oms).
+    /// OMS slot count N per (venue, account) table: slot ids 1..=N (0 reserved); the slot mirror
+    /// holds N + 1 entries indexed by slot id.
     pub oms_slots: u32,
     pub env: VenueEnv,
     /// Order and user-stream connection targets.
