@@ -66,6 +66,16 @@ fn ctl_080_container_and_binding() {
     let (_, recs) = send(&mut g, "cli:tom", "acct-a", sp(&base.bytes()));
     assert!(recs.iter().any(RingRec::is_cmd), "CTL-080.1");
     assert!(take_params(&mut g).is_some(), "CTL-080.1");
+    // CTL-080.13: plus a reference group (`open_allowed = 0`, only leg outside `acct-a`).
+    let mut reference = group(G1 + 1, &[leg(2, 2)]);
+    reference.open_allowed = 0;
+    let mut s = base.clone();
+    s.groups.push(reference);
+    let mut g = G0::new();
+    g.paused = true;
+    let (r, recs) = send(&mut g, "cli:tom", "acct-a", sp(&s.bytes()));
+    assert!(recs.iter().any(RingRec::is_cmd), "CTL-080.13 {r:?}");
+    assert_eq!(take_params(&mut g).map(|p| p.groups.len()), Some(2), "CTL-080.13");
     let mut rows: Vec<(&str, Vec<u8>, &str, &str)> = Vec::new();
     let mut s = base.clone();
     s.groups[0].n_legs = 0;
@@ -95,6 +105,9 @@ fn ctl_080_container_and_binding() {
     let mut s = base.clone();
     s.digest ^= 1;
     rows.push(("CTL-080.11", s.bytes(), "SchemaMismatch", ""));
+    let mut s = base.clone();
+    s.groups.push(group(G1 + 1, &[leg(2, 2)]));
+    rows.push(("CTL-080.14", s.bytes(), "GroupCheck", "LegVenueNotInAccount"));
     for (row, blob, name, arg) in rows {
         let mut g = G0::new();
         g.paused = true;

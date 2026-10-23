@@ -39,6 +39,8 @@ fn evt_131_parse_ok() {
     let gv = v.groups[0].view(&mut legs);
     assert_eq!(gv.legs.len(), 2);
     assert_eq!(gv.legs[1].inst.0, 20);
+    assert!(gv.open_allowed);
+    assert!(!v.groups[1].view(&mut legs).open_allowed);
 }
 
 fn put(b: &mut [u8], o: usize, v: &[u8]) {

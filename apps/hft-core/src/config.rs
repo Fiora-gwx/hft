@@ -755,6 +755,10 @@ pub fn load_timed(
             None,
         ) {
             Ok(p) => {
+                // The same group rule as SetParams (ctl-gateway and sequencer).
+                if let Err(e) = hft_sequencer::parsed::check_groups(&rd, p.account, &p.groups) {
+                    errors.push(Error::config("StrategyParams", format!("detail={e}")));
+                }
                 if p.model_mem != 0 || p.model_ckpt != 0 {
                     errors.push(Error::config(
                         "AdvisorUnavailable",

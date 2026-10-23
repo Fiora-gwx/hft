@@ -82,7 +82,7 @@ impl RefData {
     pub fn caps_row(&self, v: VenueId) -> Option<u32>; pub fn venue_row(&self, v: VenueId) -> Option<u32>; // 段内行下标(错误定位)
     pub fn account_venues(&self) -> &[(AccountId, VenueId, Box<str>)]; pub fn blob(&self) -> &[u8]; pub fn created_utc_ns(&self) -> i64;
 }
-pub struct GroupSpecView<'a> { pub asset: AssetId, pub legs: &'a [LegView] }   // hft-event GroupSpec 的同形视图(hft-event 的 GroupSpec::view 在调用方存储里构造)
+pub struct GroupSpecView<'a> { pub asset: AssetId, pub open_allowed: bool, pub legs: &'a [LegView] }   // hft-event GroupSpec 的同形视图(hft-event 的 GroupSpec::view 在调用方存储里构造)
 pub struct LegView { pub inst: InstId, pub venue: VenueId }
 pub struct ProtocolFacts { pub venue: VenueId, pub market: MarketKind, pub caps: VenueCaps /* VenueProtocol::default_caps() */, pub stale_guard: StaleGuardKind }
 pub struct AssemblyFacts<'a> { pub host: HostClass, pub max_universe_insts: u32, pub protocols: &'a [ProtocolFacts], pub kinds: &'a [u16] /* StrategySet::kinds() */ }
@@ -120,7 +120,7 @@ impl SymbolIndex {
 }
 ```
 
-`GroupSpec` 的布局在 [hft-event](../hft-event/README.md#strategyparamsspb1);本 crate 只提供针对它的 refdata 一致性检查。hft-event 依赖本 crate,所以 `check_group` 接受本 crate 定义的同形视图 `GroupSpecView`(前 `n_legs` 条腿的 `inst`、`venue` 与 `asset`),由 hft-event 提供转换 `GroupSpec::view`(腿视图写在调用方给的存储里)。
+`GroupSpec` 的布局在 [hft-event](../hft-event/README.md#strategyparamsspb1);本 crate 只提供针对它的 refdata 一致性检查。hft-event 依赖本 crate,所以 `check_group` 接受本 crate 定义的同形视图 `GroupSpecView`(前 `n_legs` 条腿的 `inst`、`venue`,`asset` 与 `open_allowed`),由 hft-event 提供转换 `GroupSpec::view`(腿视图写在调用方给的存储里)。
 
 ### LoadErrCode 码表
 
@@ -395,7 +395,7 @@ ECF1 段 id 只追加、永不复用。每段只有一种行格式(`SectionEntry
 **跨 blob 与跨组件校验**(全部为加载/命令失败条件):
 
 1. hft-core 启动(本 crate 的 `check_assembly` 按此顺序检查并收集全部错误):ECF1 `host_class` 等于运行主机类(`HostClassMismatch`);inst 行数 ≤ `max_universe_insts`(`ValueRange`);每个有 inst 的 `VenueId` 有对应的 `VenueProtocol` 编译进来(`UnknownVenue`),其 `VenueCaps.market` 等于协议的 `MARKET`(`CapsMarketMismatch`)、`VenueCaps.flags ⊆ default_caps` 的能力位、协议的 `amend_qty_down_only` 为真时该行也为真,且 `dms` 变体与协议相同(`CapsExceedProtocol`)、`VenueMeta.stale_guard` 与协议一致(`StaleGuardMismatch`);每个 `InstanceMeta.kind_id` 在编译进来的 `StrategySet::kinds()` 里(`UnknownStrategyKind`)。某账户的 `bound_instance` 相对快照中的上一版本发生变化时,该账户必须无仓位、无挂单、无 Unknown(`check_rebind`:`BindingChangedWithPosition`,调用方用快照判定"有仓位、挂单或 Unknown");Sim 账户的 `latency_model`/`margin_model` 下标在 hft-core 的 `[sim.*_models]` 表内;实例角色与账户类型一致(`sim` 实例只含 Sim 账户);描述符 `StrategyDesc.non_prod_only = true` 的策略实例不得绑定 `is_prod = true` 的账户(`ProbeOnProdAccount`)——这两条的错误码与退出码归 [apps/hft-core](../../apps/hft-core/README.md)。
-2. `SetParams`(ctl-gateway 先查、sequencer 复核):`check_binding`——`AccountMeta.bound_instance == hdr.strategy`(否则 `AccountBound`)且该实例的 `kind_id == hdr.kind_id`(`KindMismatch`);`check_group`——每腿 inst 存在且 `Trading`/`ReduceOnly`、`LegDef.venue` = inst 的 venue、该 venue 在账户 `venues` 内(`LegVenueNotInAccount`)、各腿基础资产 = `GroupSpec.asset`(`LegAssetMismatch`)、各腿同一报价资产(`QuoteMismatch`)、**任两腿的 venue 不属于同一 `Exchange`**(`SameExchangeLegs`,命令侧报 `InvalidArgs{SameExchangeLegs}`)。
+2. `SetParams`(ctl-gateway 先查、sequencer 复核):`check_binding`——`AccountMeta.bound_instance == hdr.strategy`(否则 `AccountBound`)且该实例的 `kind_id == hdr.kind_id`(`KindMismatch`);`check_group`——每腿 inst 存在且 `Trading`/`ReduceOnly`、`LegDef.venue` = inst 的 venue、该 venue 在账户 `venues` 内(`LegVenueNotInAccount`;**观察 group** 免查"在账户内"这一项:`open_allowed = 0` 且没有任何一条腿的 venue 在账户 `venues` 内,例如只读的参考行情——它在 Live 下不能开仓、账户在这些 venue 上没有仓位与 OMS 表,把 `open_allowed` 改成 1 的 `SetParams` 照常被拒;腿的其他检查不变)、各腿基础资产 = `GroupSpec.asset`(`LegAssetMismatch`)、各腿同一报价资产(`QuoteMismatch`)、**任两腿的 venue 不属于同一 `Exchange`**(`SameExchangeLegs`,命令侧报 `InvalidArgs{SameExchangeLegs}`)。
 3. 每个 `ref_inst`(EngineConfig 段 2)必须存在于 refdata 且状态为 `Trading`/`ReduceOnly`(`check_ref_inst`:否则 `RefInstNotSubscribed`;段 2 的验证器对每个 `ref_inst` 调用它)。引擎订阅恒含每个 `ref_inst`([hft-sequencer](../hft-sequencer/README.md) 的引擎自身订阅 ③),所以"被订阅"不另行校验;不存在或不可交易的 inst 无法订阅,也就没有汇率。
 
 行可以追加字段(`row_size` 大于本版本已知大小时读前缀);未知段带 `OPTIONAL` 位则跳过,否则拒绝。blob 自身不含哈希,身份是整块字节的 SHA-256(写进 `ConfigBlob` 头)。

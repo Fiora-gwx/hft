@@ -157,6 +157,7 @@ impl GroupSpec {
         }
         GroupSpecView {
             asset: self.asset,
+            open_allowed: self.open_allowed != 0,
             legs: legs.get(..n).unwrap_or(&[]),
         }
     }

@@ -1,4 +1,4 @@
-//! The command path (TESTS.md "命令路径": SEQ-278–SEQ-304, SEQ-348, SEQ-354–SEQ-358).
+//! The command path (TESTS.md "命令路径": SEQ-278–SEQ-304, SEQ-348, SEQ-354–SEQ-358, SEQ-439).
 
 use hft_event::{CmdHdr, ControlCmd};
 use hft_sequencer::codes::{detail, status};
@@ -1143,4 +1143,79 @@ fn seq_435_settle() {
         vec![(OutRing::Venue(A), AC1, A1, Px(0), held, u32::from(A.0), 1_300)],
         "SEQ-435.4"
     );
+}
+
+#[test]
+fn seq_439_set_params_observe_group() {
+    use hft_refdata::{Exchange, LoadErrCode};
+    use hft_types::{InstId, VenueId};
+    const C: VenueId = VenueId::OKX_SPOT;
+    const C1: InstId = InstId(23);
+    reset_script();
+    let mut b = b0();
+    b.rd.extra_venues = vec![(C, Exchange::Okx)];
+    b.rd.caps.push(caps_spec(C, false));
+    b.rd.insts.push(inst_spec(
+        C1,
+        C,
+        "BTC-USDT",
+        false,
+        BTC,
+        ("0.01", 1),
+        ("0.0001", 10_000),
+    ));
+    b.rd.limits.extend(order_limits(C, 100, 600));
+    let mut h = b.boot();
+    h.steady();
+    let r = |open: u8| {
+        let mut g = group(GroupId(0x0100_0002), BTC, &[leg(C1, C)]);
+        g.open_allowed = open;
+        g
+    };
+    let version = |h: &H| h.s.instances().get(S1).unwrap().params_version();
+    let not_in_account = (
+        status::INVALID_ARGS,
+        detail::pack(detail::GROUP_CHECK, LoadErrCode::LegVenueNotInAccount as u16),
+    );
+    // .1 the reference group: never opens, its only leg outside the account.
+    let mut p = Spb::s1(2);
+    p.groups = vec![gspec(G1), r(0)];
+    let id = h.set_params_as(&p, "pipeline", ADMIN, true, |_| {});
+    h.run();
+    assert_eq!(h.res(id), (status::APPLIED, 0), "SEQ-439.1");
+    assert_eq!(version(&h), 2, "SEQ-439.1");
+    assert_eq!(
+        h.s.instances()
+            .get(S1)
+            .unwrap()
+            .cur
+            .as_ref()
+            .unwrap()
+            .groups
+            .len(),
+        2,
+        "SEQ-439.1"
+    );
+    // .2 the running blob re-sent with one non-structural field changed.
+    p.version = 3;
+    p.values[F_THR] = 7;
+    let id = h.set_params_as(&p, "pipeline", ADMIN, true, |_| {});
+    h.run();
+    assert_eq!(h.res(id), (status::APPLIED, 0), "SEQ-439.2");
+    assert_eq!(version(&h), 3, "SEQ-439.2");
+    // .3 the same group allowed to open: rejected.
+    let mut p = Spb::s1(4);
+    p.groups = vec![gspec(G1), r(1)];
+    let id = h.set_params_as(&p, "pipeline", ADMIN, true, |_| {});
+    h.run();
+    assert_eq!(h.res(id), not_in_account, "SEQ-439.3");
+    assert_eq!(version(&h), 3, "SEQ-439.3");
+    // .4 one leg inside the account: not observe-only, rejected.
+    let mut mixed = group(GroupId(0x0100_0002), BTC, &[leg(A1, A), leg(C1, C)]);
+    mixed.open_allowed = 0;
+    p.groups = vec![gspec(G1), mixed];
+    let id = h.set_params_as(&p, "pipeline", ADMIN, true, |_| {});
+    h.run();
+    assert_eq!(h.res(id), not_in_account, "SEQ-439.4");
+    assert_eq!(version(&h), 3, "SEQ-439.4");
 }
