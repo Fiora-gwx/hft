@@ -4,6 +4,7 @@
 
 | 日期 | 变更 | 起因(用例编号或问题) | 涉及文件 | 负责人确认 |
 |---|---|---|---|---|
+| 2026-10-23 | binary-maker v4:① 簿锁住或交叉(买一 ≥ 卖一)时不按被抢先撤单;② 撤单发出后 `stuck_reset_ms`(新参数,默认 5 000 ms,schema v4 追加在体尾)内没有终态回报,或槽位对重新成为当前对时挂单/撤单属于更早的窗口 → 再撤一次(不等待)并视为没有挂单;③ `Aged` 时撤单(此前视为没有挂单、订单留在交易所);快照 `DESC_VERSION` 4 追加 `last_ens`、`win` | 2026-10-23 实盘 journal:锁簿使对价上限挂单一个窗口重挂 33 次;Down 腿停在撤单在途,之后两个窗口零下单(单边窗口)。BMK-016–BMK-019、BMK-007 | strategies/binary-maker 的规格、代码、schema 金样 | 待评审 |
 | 2026-10-23 | binary-maker `pair_margin` 范围由 [0, 1] 放宽到 [−0.10, 1]:负值使对价上限高于 1 − 另一侧平均成本,会凑成对的一侧以每对至多 −`pair_margin` 的亏损减仓(默认 0.01 不变) | 微型做市模拟盘:单边窗口(只成交一条腿、持有到结算)占 24%,每窗约 −$4;8 月回放 `pair_margin` −0.05 使单边窗口 5% → 1%、cap 10 最大回撤 $83 → $32。BMK-011.4–.6 | strategies/binary-maker 的规格、代码、schema 金样 | 待评审 |
 | 2026-10-23 | `Sequencer::boot_accounts` 接受正式(`is_prod`)Live 账户的余额/持仓基线(此前只接受非正式账户);正式账户只会出现在 hft-core 放开正式下单的 venue(Polymarket) | Polymarket 实盘首次启动在 sequencer 装配时被拒(`AccountBootstrap`);SEQ-438 | hft-sequencer 的规格与代码 | 待评审(负责人 2026-10-22 授权) |
 | 2026-10-23 | `Settle` 对实盘账户生效:有挂单 → `PreconditionFailed{NotQuiescent}`;有库存 → 经 `out-<venue>` 发新增的 `GwOp::Deliver`(18),gw 把库存按兑付价报为 `ExternalFill{Delivery}`(与 hft-sim 交割同形,按 `(account, inst, end_s)` 去重);链上兑付由兑付进程完成,余额由账户轮询核对。此前实盘持仓 → `NotSim` | Polymarket 实盘:窗口结算后槽位持仓不清零则 `BindSlot` 无法换绑;SEQ-435.4、VEN-401、EVT-142.13 | hft-event、hft-sequencer、hft-venue、control-plane 的规格与代码 | 待评审(负责人 2026-10-22 授权) |

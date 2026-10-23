@@ -18,12 +18,12 @@ spec: README.md
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
 | group 形态 | BMK-001 |
-| 参数 | BMK-003, BMK-004, BMK-008 |
+| 参数 | BMK-003, BMK-004, BMK-008, BMK-016 |
 | 订阅 | BMK-003、BMK-009 |
 | 波动率 | BMK-002 |
-| 规则 | BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-015 |
+| 规则 | BMK-003–BMK-005, BMK-007, BMK-008, BMK-010–BMK-019 |
 | Note 码表与报表字段 | BMK-003 |
-| 实现说明 | BMK-006 |
+| 实现说明 | BMK-006, BMK-017 |
 | 延迟与资源契约 | BMK-003 |
 | 测试与验收 | 不适用:非规范 |
 | 依赖 | 不适用:非规范 |
@@ -128,7 +128,7 @@ spec: README.md
   2. 541 s(剩余 59 s)送参考报价
 - 期望:
   - 步骤 1:只撤槽 11;无 `place`
-  - 步骤 2:撤槽 12
+  - 步骤 2:撤槽 12;槽 11 的撤单(399.9 s)超过 `stuck_reset_ms` 没有终态回报,再撤一次(规则 8)
 - 实现:`strategies/binary-maker/tests/scenario.rs::bmk_007_requote_and_pull`
 
 ### BMK-008 库存上限
@@ -251,3 +251,59 @@ spec: README.md
 | BMK-015.2 | 持 30 份 @0.450(13.50 USDC);`warm(400, 399, 1)` | 两腿各一条 `place` |
 | BMK-015.3 | 两张挂单存活后加上 50 份 @0.450 的持仓;399.6 s `U1` 簿事件 | 不撤单(上限只挡新挂单) |
 
+
+### BMK-016 撤单没有终态回报时复位
+
+- 规则:[规则](README.md#规则) 8、[参数](README.md#参数)
+- 级别:table
+- 里程碑:M3
+- 前置:同 BMK-005;399.6 s `U1` 簿买一 0.460(被抢先,撤槽 11),之后没有槽 11 的回报
+- 步骤:依次执行下表各行
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_016_stuck_cancel_reset`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-016.1 | 默认 `stuck_reset_ms` 5 000;404.5 s、404.7 s 各一条 `U1` 簿事件(买一 0.460) | 404.5 s 无动作;404.7 s 再撤槽 11,并在 0.460 挂 `U1` |
+| BMK-016.2 | 接 .1,`U1` 新挂单为槽 21 在 0.460 存活;404.8 s 槽 11 的 `Cancelled` | 无动作;`U1` 仍是槽 21 的 Live |
+| BMK-016.3 | `stuck_reset_ms` 10 000;404.7 s `U1` 簿事件 | 无动作 |
+| BMK-016.4 | schema | 版本 4;下标 22(第 23 个)字段 `stuck_reset_ms`,`since` 4,默认 5 000;`n_fields_at(3)` = 22 |
+
+### BMK-017 槽位对复用时清除上一窗口的状态
+
+- 规则:[规则](README.md#规则) 8、[实现说明](README.md#实现说明)
+- 级别:unit
+- 里程碑:M3
+- 前置:`warm(400, 1199, 0)`;`U1` 为窗口 300 的 Live 挂单(槽 11),`D1` 为窗口 300 的撤单在途(槽 12,1 298.6 s 撤单);`U1`、`D1` 簿买一 0.450、卖一 0.470
+- 步骤:
+  1. 1 299.6 s 参考报价(窗口 1200–1500 为第 1 对)
+  2. `U1` 新挂单为槽 21(窗口 1200)存活;1 299.7 s 槽 11 的 `Filled{done}`
+- 期望:
+  - 步骤 1:撤槽 11、12 各一次;`U1`、`D1` 各一条 `place`
+  - 步骤 2:无撤单、无 `U1` 的 `place`;`U1` 仍是槽 21 的 Live
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_017_window_change_clears_stale_quotes`
+
+### BMK-018 锁住或交叉的簿不算被抢先
+
+- 规则:[规则](README.md#规则) 6
+- 级别:table
+- 里程碑:M3
+- 前置:同 BMK-005
+- 步骤:依次执行下表各行
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_018_locked_book_is_not_an_undercut`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| BMK-018.1 | 399.6 s `U1` 簿买一 0.460、卖一 0.460 | 无动作 |
+| BMK-018.2 | 399.7 s 买一 0.470、卖一 0.460 | 无动作 |
+| BMK-018.3 | 399.8 s 买一 0.460、卖一 0.470 | 撤 `U1`(槽 11) |
+
+### BMK-019 `Aged` 时撤单
+
+- 规则:[规则](README.md#规则) 8
+- 级别:unit
+- 里程碑:M3
+- 前置:同 BMK-005
+- 步骤:
+  1. 399.6 s 槽 11 的 `Aged`
+- 期望:撤槽 11;无 `U1` 的 `place`;`U1` 为撤单在途
+- 实现:`strategies/binary-maker/tests/scenario.rs::bmk_019_aged_quote_is_cancelled`
