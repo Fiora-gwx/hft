@@ -3,7 +3,7 @@
 use hft_strategy_sdk::{GroupTable, ParamError, RefView};
 
 hft_strategy_sdk::define_params! {
-    pub struct BinaryMakerParams(schema_id = 7, version = 3, fields = BinaryMakerFields) {
+    pub struct BinaryMakerParams(schema_id = 7, version = 4, fields = BinaryMakerFields) {
         /// false: no quotes (resting quotes are cancelled)
         enabled: Bool [default = 0, manual_only, relax = Up],
         /// window length in seconds; the slot pair of the window starting at S is (S / window_s) mod pairs
@@ -49,6 +49,9 @@ hft_strategy_sdk::define_params! {
         streak_pause_ms: DurationMs [min = 0, max = 600_000, default = 10_000, relax = Down],
         /// bought cost of the current window (both legs) at which no new quote is placed; 0 = no limit
         max_window_cost: Notional [min = 0, max = 1_000_000_000_000, default = 0, relax = Up],
+        /// a cancel unanswered (no terminal order update) for this long is sent again and the leg is
+        /// treated as having no quote
+        stuck_reset_ms: DurationMs [min = 1_000, max = 600_000, default = 5_000, since = 4, relax = Down],
     }
 }
 
