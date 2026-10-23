@@ -76,13 +76,14 @@ fn fixture() -> (BinaryMaker, MockViews) {
     (strategy, views)
 }
 
-/// Both quotes of pair 1 live at 0.450 (OMS slots 11 and 12).
+/// Both quotes of pair 1 live at 0.450 (OMS slots 11 and 12), placed in the current window.
 fn live(strategy: &mut BinaryMaker) {
     for (i, slot) in [(2usize, 11u32), (3, 12)] {
         let q = &mut strategy.fast.quotes[i];
         q.state = QState::Live;
         q.r = Some(order_ref(slot));
         q.px = 450;
+        q.win = 300;
     }
 }
 
