@@ -395,6 +395,29 @@ fn bmk_011_pair_cost_limit() {
     let out = warm(&mut h, 400, 399, 1);
     let insts: Vec<InstId> = out.places().map(|it| it.inst).collect();
     assert_eq!(insts, vec![SLOTS[3]], "BMK-011.3");
+    // .4/.5 a negative margin lets the pair lock at a loss: limit 1 − cost + 0.05.
+    let ix = (0..BinaryMaker::DESC.schema.n_fields())
+        .position(|i| {
+            BinaryMaker::DESC
+                .schema
+                .field(i)
+                .is_some_and(|f| f.name == "pair_margin")
+        })
+        .unwrap();
+    let neg = params(|d| d[ix] = -50_000_000);
+    for (row, cost, up) in [("BMK-011.4", 600, 450), ("BMK-011.5", 640, 410)] {
+        let mut h = harness(&neg);
+        hold(&mut h, 3, 50, cost);
+        let out = warm(&mut h, 400, 399, 1);
+        let got: Vec<(InstId, Px)> = out.places().map(|it| (it.inst, it.px)).collect();
+        assert_eq!(got, vec![(SLOTS[2], Px(up)), (SLOTS[3], Px(450))], "{row}");
+    }
+    // .6 the schema range of pair_margin.
+    let f = BinaryMaker::DESC
+        .schema
+        .field(u16::try_from(ix).unwrap())
+        .unwrap();
+    assert_eq!((f.min, f.max), (-100_000_000, 1_000_000_000), "BMK-011.6");
 }
 
 #[test]

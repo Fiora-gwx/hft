@@ -37,8 +37,8 @@ hft_strategy_sdk::define_params! {
         /// resting limit of every quote (OMS ages it out)
         max_rest_ms: DurationMs [min = 1_000, max = 3_600_000, default = 360_000, relax = Up],
         /// a bid that would complete Up/Down pairs rests at most at 1 − (other side's average cost) −
-        /// pair_margin (fraction of one, 1e-9)
-        pair_margin: Rate [min = 0, max = 1_000_000_000, default = 10_000_000, relax = Down],
+        /// pair_margin (fraction of one, 1e-9); negative: pairs may lock at a loss of up to −pair_margin
+        pair_margin: Rate [min = -100_000_000, max = 1_000_000_000, default = 10_000_000, relax = Down],
         /// no new quote on a leg for this long after it was cancelled for being undercut; 0 = off
         nochase_ms: DurationMs [min = 0, max = 600_000, default = 0, relax = Down],
         /// fills of one leg that start a streak pause; 0 = off (minimum 2 when on)
