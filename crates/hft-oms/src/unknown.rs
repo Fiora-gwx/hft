@@ -45,15 +45,51 @@ impl Oms {
         let id = OmsTimerReq::unknown_query_id(t.tix, s);
         let deadline = Tsc(now.0.saturating_add(self.p.query_interval));
         self.push_timer(OmsTimerKind::UnknownQuery, id, deadline, false, out);
-        self.query_or_reconcile(ti, s, up, seq, out);
+        self.query_or_reconcile(ti, s, up, now, seq, out);
     }
 
-    pub(crate) fn query_or_reconcile(&mut self, ti: usize, s: u32, up: bool, seq: u64, out: &mut OmsOut) {
+    /// A non-linked slot of an `ExpireAt` venue: a NotFound after `not_found_grace` finalises it
+    /// (README "Unknown 收敛流程" 4).
+    pub(crate) fn expiry_bound(&self, ti: usize, s: u32) -> bool {
+        self.t(ti).is_some_and(|t| {
+            t.stale_guard == StaleGuardKind::ExpireAt && t.ext.get(s as usize).is_some_and(|x| x.role == 0)
+        })
+    }
+
+    /// `now − sent_tsc > not_found_grace` (`t_state` when `sent_tsc` is 0).
+    fn past_grace(&self, ti: usize, s: u32, now: Tsc) -> bool {
+        let Some(t) = self.t(ti) else { return false };
+        let (Some(sl), Some(st)) = (t.slot(s), t.stamps.get(s as usize)) else {
+            return false;
+        };
+        let start = if st.sent_tsc != 0 {
+            st.sent_tsc
+        } else {
+            sl.t_state.0
+        };
+        now.0.saturating_sub(start) > t.grace
+    }
+
+    pub(crate) fn query_or_reconcile(
+        &mut self,
+        ti: usize,
+        s: u32,
+        up: bool,
+        now: Tsc,
+        seq: u64,
+        out: &mut OmsOut,
+    ) {
         let Some(sl) = self.t(ti).and_then(|t| t.slot(s)).copied() else {
             return;
         };
         if sl.sflags.has(SlotFlags::HIST_WAIT) {
             self.needs_rest(&sl, true, out);
+        } else if sl.state == OrderState::Unknown && self.expiry_bound(ti, s) && self.past_grace(ti, s, now) {
+            // Past the grace only a NotFound is missing to finalise it: query whatever the
+            // query budget says (README "Unknown 收敛流程" 4).
+            if up {
+                self.push_decision(ti, OrderAction::Query, s, seq, out);
+            }
         } else if sl.sflags.has(SlotFlags::REST_QUERY) || sl.query_count > self.p.unknown_max_queries {
             self.needs_rest(&sl, false, out);
         } else if up {
@@ -81,7 +117,7 @@ impl Oms {
         if !(sl.state == OrderState::Unknown || (sl.state.open() && sl.sflags.has(SlotFlags::VERIFY))) {
             return;
         }
-        self.query_or_reconcile(ti, s, t.conn_up, cause_seq, out);
+        self.query_or_reconcile(ti, s, t.conn_up, now, cause_seq, out);
         let id = OmsTimerReq::unknown_query_id(tix, s);
         let deadline = Tsc(now.0.saturating_add(self.p.query_interval));
         self.push_timer(OmsTimerKind::UnknownQuery, id, deadline, false, out);
@@ -176,22 +212,11 @@ impl Oms {
 
     /// NotFound of an Unknown slot.
     fn not_found(&mut self, ti: usize, s: u32, now: Tsc, seq: u64, out: &mut OmsOut) {
-        let Some(t) = self.t(ti) else { return };
-        let (Some(sl), Some(ex), Some(st)) = (
-            t.slot(s).copied(),
-            t.ext.get(s as usize),
-            t.stamps.get(s as usize),
-        ) else {
+        let Some(sl) = self.t(ti).and_then(|t| t.slot(s)).copied() else {
             return;
         };
-        let start = if st.sent_tsc != 0 {
-            st.sent_tsc
-        } else {
-            sl.t_state.0
-        };
-        let past = now.0.saturating_sub(start) > t.grace;
-        let linked = ex.role != 0;
-        if linked || t.stale_guard != StaleGuardKind::ExpireAt {
+        let past = self.past_grace(ti, s, now);
+        if !self.expiry_bound(ti, s) {
             if past {
                 if let Some(x) = self.tm(ti).and_then(|t| t.slots.get_mut(s as usize)) {
                     x.sflags.0 |= SlotFlags::HIST_WAIT;

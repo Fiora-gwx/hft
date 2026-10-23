@@ -145,6 +145,8 @@ refdata 为每个资产预置固定数量的槽位 inst(符号如 `btc-up-0`)。
 | `testnet` | `None`(交易所没有测试网) |
 | `dms` | `None` |
 
+过期保护 `stale_guard()` = `ExpireAt{default_ms: GTD_S × 1000}`(300 000;官方文档 2026-10-23):每笔下单都是 GTD,`expiration` = 编码时刻秒 + `GTD_S`(见[下单](#下单));交易所对 GTD 单有 60 s 安全阈值,实际在 `expiration` 前 60 s 失效,`expiration` 过近的请求在撮合之前被拒(`INVALID_ORDER_EXPIRATION`),失效后的订单不再撮合。窗口由 `GTD_S` 唯一确定,不读 `gw.stale_guard_ms`;OMS 的 `expire_window_ms[polymarket]` 取这个 `default_ms`(hft-core Polymarket 配置),查单 `NotFound` 在下单后 300 500 ms 由 OMS 定为 `Rejected(NOT_FOUND)`([hft-oms Unknown 收敛](../hft-oms/README.md#unknown-收敛流程))。
+
 限速默认值:`Ip`/`NewConns` 300 次每 5 分钟,`Conn`/`WsInMsgs` 每秒 10 条,`Account`/`Orders` 每秒 20 单(交易所按 key 每秒 40 单、突发 60,撤单 80、突发 120,2026-10-22 官方文档;默认取下单的一半)。死手 `None`:交易所的订单心跳(`POST /v1/heartbeats`,链式 `heartbeat_id`,10 s 无心跳撤全部挂单)尚未接入,见[已知限制](#已知限制与后续工作)。
 
 ### 签名
@@ -187,7 +189,7 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 | `DELETE /order`、`/cancel-market-orders`、`/cancel-all` | 200 `{"canceled":[哈希…],"not_canceled":{哈希: 原因}}` | `canceled` 里每个能定槽的订单一条 `CancelAck`(每单至多一次,与用户频道的 `CANCELLATION` 去重);单笔 `Cancel` 的 `not_canceled` 非空 → `CancelReject{detail = GONE}` |
 | | 非 2xx | 单笔 `Cancel`:`outcome_unknown`(拒绝类 HTTP 码除外);`CancelAll`:只记 `raw_code` |
 | `GET /data/order/<哈希>` | 200 订单对象 | `QueryResult`:`LIVE`/`DELAYED` → New(`size_matched = 0`)或 PartiallyFilled(剩余量不足一个 lot 时 Filled),`MATCHED` → Filled,`CANCELED`、`CANCELED_MARKET_RESOLVED`、`UNMATCHED`、`INVALID` → Cancelled;`cum_filled` = `size_matched`,`avg_px` = 订单价。该单是本进程为所查的槽与代签出、尚无 `Ack` 的订单时,先以签出时的 client id 调 `exch_id(键, Some(id))` 绑定,再在 `QueryResult` 之前产出一条 `Ack{exch_order_id}`(槽由此得到交易所 id,之前以外来成交入账的部分按 OMS `ext_held` 去重) |
-| | 200 `null`/空体、404 | `QueryResult{NotFound}`(`stale_guard = None`,不定终态,契约 10) |
+| | 200 `null`/空体、404 | `QueryResult{NotFound}`(`stale_guard = ExpireAt`,契约 10:非链接槽在过期窗口 + grace 之后由 OMS 定终态) |
 
 ### 用户流事件表
 

@@ -2,6 +2,7 @@
 //! output layer (direct emission, `pending_out` queues, `flush`).
 
 use hft_event::{NoteLevel, OrderAction, OrderDecision};
+use hft_refdata::StaleGuardKind;
 use hft_strategy_sdk::{OrderRef, OrderUpdate, OrderUpdateKind};
 use hft_types::{
     AccountId, GROUP_NONE, GroupId, InstId, Px, Qty, Rate, RejectBits, RoundMode, Side, SlotId, Tif, Tsc,
@@ -788,9 +789,15 @@ impl Oms {
                     sl.state != OrderState::PendingAmend && sl.state != OrderState::PendingCancel
                 }
                 OrderAction::Query => {
+                    // An exhausted slot is only queried past its expiry grace (`query_or_reconcile`).
+                    let expiry = sl.state == OrderState::Unknown
+                        && ex.role == 0
+                        && t.stale_guard == StaleGuardKind::ExpireAt;
                     !(sl.state == OrderState::Unknown || sl.sflags.has(SlotFlags::VERIFY))
-                        || sl.sflags.has(SlotFlags::REST_QUERY | SlotFlags::HIST_WAIT)
-                        || sl.query_count > self.p.unknown_max_queries
+                        || sl.sflags.has(SlotFlags::HIST_WAIT)
+                        || (!expiry
+                            && (sl.sflags.has(SlotFlags::REST_QUERY)
+                                || sl.query_count > self.p.unknown_max_queries))
                 }
                 _ => false,
             };

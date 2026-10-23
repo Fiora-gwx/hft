@@ -44,7 +44,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 使用本组件 | 不适用:见子节 |
 | 命令行与退出码 | CORE-001–CORE-017、CORE-299、CORE-412 |
 | 策略装配 | CORE-030–CORE-035 |
-| 实例角色(prod 与 sim) | CORE-040–CORE-050 |
+| 实例角色(prod 与 sim) | CORE-040–CORE-050、CORE-432 |
 | 线程计划 | CORE-060–CORE-090 |
 | 内存与 journal 段(按主机类唯一归属) | CORE-100–CORE-122、CORE-130–CORE-148、CORE-412 |
 | 主机资源隔离(slice、核与出口 IP) | CORE-160–CORE-177 |
@@ -4498,3 +4498,16 @@ CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 S
 | CORE-431.2 | 同上再加:参考 group `open_allowed = 1` | gateway `InvalidArgs`(`GroupCheck`),不写环 |
 | CORE-431.3 | 第 2 行的形态作为启动 blob | `config::load` 含 `StrategyParams` |
 
+### CORE-432 Polymarket 配置的过期保护取协议声明的 GTD 寿命
+
+- 规则:[实例角色(prod 与 sim)](README.md#实例角色prod-与-sim);窗口的归属见 [venue-polymarket VenueCaps 默认值](../../crates/venue-polymarket/README.md#venuecaps-默认值)、语义见 [hft-oms Unknown 收敛流程](../../crates/hft-oms/README.md#unknown-收敛流程)
+- 级别:table
+- 里程碑:M3
+- 前置:`write_polymarket_maker_live`、`write_polymarket_maker_sim` 各生成一份配置,`config::load(_, dry = false)` / `(_, dry = true)`
+- 实现:`apps/hft-core/tests/config.rs::core_432_polymarket_expiry_window_is_the_gtd_lifetime`
+
+| 行 | 检查 | 期望 |
+|---|---|---|
+| CORE-432.1 | refdata 中 Polymarket 的 `stale_guard` | `ExpireAt`(与 `PolymarketClob::stale_guard()` 同类) |
+| CORE-432.2 | OMS `expire_window_ms[polymarket]` | `PolymarketClob::stale_guard()` 的 `default_ms`(300 000);`not_found_grace_of` = 300 500 |
+| CORE-432.3 | OMS `unknown_alarm_ms` | 30 000(不改;`ExpireAt` 非链接槽的告警由 OMS 顺延 grace) |

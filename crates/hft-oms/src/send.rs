@@ -207,7 +207,7 @@ impl Oms {
                         x.state == OrderState::Unknown || (x.state.open() && x.sflags.has(SlotFlags::VERIFY))
                     });
                     if q {
-                        self.query_or_reconcile(ti, s, true, seq, out);
+                        self.query_or_reconcile(ti, s, true, now, seq, out);
                     }
                 }
                 self.check_ready(ti, was, out);

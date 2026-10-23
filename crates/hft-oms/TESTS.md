@@ -31,7 +31,7 @@ spec: README.md
 | 恢复后的 gw 映射 | OMS-092, OMS-093 |
 | 回报匹配与成交增量 | OMS-031, OMS-035, OMS-057, OMS-069, OMS-100–OMS-115, OMS-154, OMS-253, OMS-460、OMS-467、OMS-468、OMS-470–OMS-475、OMS-476–OMS-480、OMS-481–OMS-483 |
 | 成交净量(B4) | OMS-067, OMS-120–OMS-124, OMS-184, OMS-404 |
-| Unknown 收敛流程 | OMS-032, OMS-065, OMS-066, OMS-068, OMS-070, OMS-073, OMS-089, OMS-130–OMS-154, OMS-400, OMS-402, OMS-420 |
+| Unknown 收敛流程 | OMS-032, OMS-065, OMS-066, OMS-068, OMS-070, OMS-073, OMS-089, OMS-130–OMS-154, OMS-400, OMS-402, OMS-420, OMS-487, OMS-488 |
 | 墓碑与迟到成交(C1) | OMS-013, OMS-148, OMS-160–OMS-164, OMS-287, OMS-322, OMS-462、OMS-469、OMS-485 |
 | StaleOrderSweep(`Timer{Oms, Sweep}`,1 s) | OMS-132, OMS-161, OMS-164, OMS-170–OMS-172, OMS-207, OMS-271 |
 | LegLink 与 HedgePlan | OMS-463, OMS-457, OMS-014, OMS-043, OMS-153, OMS-180, OMS-181, OMS-185, OMS-191, OMS-194, OMS-201, OMS-207, OMS-363 |
@@ -4470,3 +4470,37 @@ POSITION_CLOSE 仅由执行层风险递减平仓携带,ACK 不更新仓位;镜�
 | OMS-486.5 | `cancel(s)` 后 t = 2 500 sweep(超 `ack_timeout`);t = 3 000 `QueryResult{New}` | sweep 后 s `Unknown` 且仍置 `CANCEL_HELD`;收敛时一条撤单,s `PendingCancel` |
 | OMS-486.6 | s 已 Ack(`Live`)后 `cancel(s)` | 立即一条撤单 |
 | OMS-486.7 | `VS` 不含 `CANCEL_NEEDS_ACK`;`cancel(s)` | 立即一条撤单(同 OMS-046);不置 `CANCEL_HELD` |
+
+### OMS-487 ExpireAt 的非链接槽:查询用尽后等到 grace 再查,NotFound 定终态,告警顺延 grace
+
+- 规则:[Unknown 收敛流程](README.md#unknown-收敛流程)(第 4、5 条)、[配置项](README.md#配置项omsconfig)
+- 级别:table
+- 里程碑:M2
+- 前置:P0,另 `not_found_grace_ms[VX]` 不设、`expire_window_ms[VX] = 300 000`(过期窗口长的所,如 Polymarket GTD);a1@VX 下 `sell_y`(槽 t),`SendReport{Place, Written, sent_tsc = 10 ms}`,无回执:t = 2 010 `OutcomeUnknown` → `Unknown`,t = 2 100 `QueryResult{NotFound}`,随后 6 次 `SendReport{Query, Written}`(查询用尽,置 `REST_QUERY`)
+- 步骤:依次执行下表各行(.6 从前置重新开始)
+- 实现:`crates/hft-oms/tests/unknown.rs::oms_487_expire_at_notfound_after_long_grace`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| OMS-487.1 | 前置 | `not_found_grace_of(VX) = 300 500`;t 保持 `Unknown`,不置 `HIST_WAIT` |
+| OMS-487.2 | t = 100 000、300 510 `on_unknown_query` | 无 `OrderDecision{Query}`(`now − sent_tsc ≤ grace`) |
+| OMS-487.3 | t = 32 011、300 000 sweep | 无 P0 `OmsUnknown`(告警阈值 = `unknown_alarm_ms` + grace) |
+| OMS-487.4 | t = 300 511 `on_unknown_query` 并 `SendReport{Query, Written}`;t = 301 511 再一次 | 每次一条 `OrderDecision{Query}`;`query_count` 不变 |
+| OMS-487.5 | t = 301 600 `QueryResult{NotFound}` | → `Rejected`,`reject_code = 0`,cause `NotFoundExpire(22)`;`venue_ready(VX, a1) = true`,`OmsVenueReady` 一条;全程无 P0 `OmsUnknown`(不触发 `UnknownTimeout` cap) |
+| OMS-487.6 | 前置后不再有查询结果;t = 332 510、332 511 sweep | 332 510 无 P0 `OmsUnknown`;332 511 一条,置 `ALARMED`(`t_state` 2 010 + 30 000 + 300 500) |
+
+### OMS-488 ExpireAt 的链接腿在长 grace 下照旧等成交历史确认
+
+- 规则:[Unknown 收敛流程](README.md#unknown-收敛流程)(第 4、5 条)
+- 级别:unit
+- 里程碑:M2
+- 前置:同 OMS-487 的配置;L1 第二腿槽 h(VX,`role = Second`)t = 0 `OutcomeUnknown` → `Unknown`,6 次 `SendReport{Query, Written}`(查询用尽)
+- 步骤:
+  1. t = 30 001 sweep
+  2. t = 300 501 `on_unknown_query`
+  3. t = 300 600 `QueryResult{NotFound}`
+- 期望:
+  - 步骤 1:P0 `OmsUnknown` 一条(链接腿的告警不加 grace)
+  - 步骤 2:无 `OrderDecision{Query}`;`OmsNeedsRestQuery` 一条
+  - 步骤 3:h 保持 `Unknown`,置 `HIST_WAIT`;`OmsNeedsRestQuery{trades = 1}`;无 `NotFoundExpire` 迁移
+- 实现:`crates/hft-oms/tests/unknown.rs::oms_488_expire_at_linked_long_grace_waits_for_history`

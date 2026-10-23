@@ -682,3 +682,139 @@ fn oms_154_query_vs_late_fill() {
     assert!(h.out.fills.is_empty(), "OMS-154.2");
     assert_eq!((h.state(s), h.slot(s).filled), (OrderState::Filled, q("0.01")));
 }
+
+/// Polymarket-like expiry protection on VX: window 300 000 ms → grace 300 500 ms.
+fn long_expiry() -> H {
+    H::with(|c| {
+        c.not_found_grace_ms.set(VX, None);
+        c.expire_window_ms.set(VX, Some(300_000));
+    })
+}
+
+fn p0_unknown(h: &H) -> usize {
+    h.notes(notes::UNKNOWN)
+        .iter()
+        .filter(|n| n.level == NoteLevel::P0)
+        .count()
+}
+
+/// Sell Y on VX sent at 10 ms, no REST answer: `OutcomeUnknown` at 2 010 ms, NotFound at 2 100 ms,
+/// the six budgeted queries written.
+fn unacked_not_found(h: &mut H) -> OrderRef {
+    let t = h.place_ok(&sell_y(), 0);
+    h.send(VX, A1, GwOp::Place, t.slot, t.r#gen, SendStatus::Written, 10, 10);
+    assert_eq!(h.stamps(t).sent_tsc, ms(10).0);
+    h.what(t, OrderEventKind::OutcomeUnknown, 2010);
+    assert_eq!(h.state(t), OrderState::Unknown);
+    h.query(t, 7, Qty(0), Px(0), 2100);
+    assert_eq!(h.state(t), OrderState::Unknown);
+    for i in 0..6u64 {
+        h.send(
+            VX,
+            A1,
+            GwOp::Query,
+            t.slot,
+            t.r#gen,
+            SendStatus::Written,
+            2010 + i * 1000,
+            2010 + i * 1000,
+        );
+    }
+    assert_ne!(h.flags(t) & SlotFlags::REST_QUERY, 0);
+    t
+}
+
+#[test]
+fn oms_487_expire_at_notfound_after_long_grace() {
+    // .1 grace = window + 500.
+    let mut c = p0();
+    c.not_found_grace_ms.set(VX, None);
+    c.expire_window_ms.set(VX, Some(300_000));
+    assert_eq!(c.not_found_grace_of(VX, rd()), 300_500, "OMS-487.1");
+    let mut h = long_expiry();
+    let t = unacked_not_found(&mut h);
+    assert_eq!(h.flags(t) & SlotFlags::HIST_WAIT, 0, "OMS-487.1");
+    let n = h.slot(t).query_count;
+    // .2 budget spent, inside the grace: no Query.
+    h.uq(t, 100_000);
+    assert!(h.decisions(OrderAction::Query).is_empty(), "OMS-487.2");
+    h.uq(t, 300_510);
+    assert!(h.decisions(OrderAction::Query).is_empty(), "OMS-487.2");
+    // .3 no alarm while the grace runs.
+    h.sweep(32_011);
+    assert_eq!(p0_unknown(&h), 0, "OMS-487.3");
+    h.sweep(300_000);
+    assert_eq!(p0_unknown(&h), 0, "OMS-487.3");
+    // .4 past the grace: one Query each timer, not counted.
+    h.uq(t, 300_511);
+    assert_eq!(h.decisions(OrderAction::Query).len(), 1, "OMS-487.4");
+    h.send(
+        VX,
+        A1,
+        GwOp::Query,
+        t.slot,
+        t.r#gen,
+        SendStatus::Written,
+        300_511,
+        300_511,
+    );
+    assert_eq!(h.slot(t).query_count, n, "OMS-487.4");
+    h.uq(t, 301_511);
+    assert_eq!(h.decisions(OrderAction::Query).len(), 1, "OMS-487.4");
+    // .5 its NotFound finalises the slot; the venue is ready again.
+    h.query(t, 7, Qty(0), Px(0), 301_600);
+    assert_eq!(
+        (h.state(t), h.slot(t).reject_code),
+        (OrderState::Rejected, 0),
+        "OMS-487.5"
+    );
+    assert_eq!(transitions(&h)[0].2, 22, "OMS-487.5");
+    assert!(h.o.venue_ready(VX, A1), "OMS-487.5");
+    assert_eq!(h.n_notes(notes::VENUE_READY), 1, "OMS-487.5");
+    assert_eq!(p0_unknown(&h), 0, "OMS-487.5");
+    // .6 the alarm is deferred by the grace, not dropped.
+    let mut h = long_expiry();
+    let t = unacked_not_found(&mut h);
+    h.sweep(332_510);
+    assert_eq!(p0_unknown(&h), 0, "OMS-487.6");
+    h.sweep(332_511);
+    assert_eq!(p0_unknown(&h), 1, "OMS-487.6");
+    assert_ne!(h.flags(t) & SlotFlags::ALARMED, 0, "OMS-487.6");
+}
+
+#[test]
+fn oms_488_expire_at_linked_long_grace_waits_for_history() {
+    let mut h = long_expiry();
+    let (hs, _) = second_leg(&mut h);
+    h.what(hs, OrderEventKind::OutcomeUnknown, 0);
+    for i in 0..6u64 {
+        h.send(
+            VX,
+            A1,
+            GwOp::Query,
+            hs.slot,
+            hs.r#gen,
+            SendStatus::Written,
+            i * 1000,
+            i * 1000,
+        );
+    }
+    // .1 the alarm keeps unknown_alarm_ms.
+    h.sweep(30_001);
+    assert_eq!(p0_unknown(&h), 1, "OMS-488.1");
+    // .2 past the grace: no Query, only the reconciler.
+    h.uq(hs, 300_501);
+    assert!(h.decisions(OrderAction::Query).is_empty(), "OMS-488.2");
+    assert_eq!(h.n_notes(notes::NEEDS_REST_QUERY), 1, "OMS-488.2");
+    // .3 a NotFound past the grace asks for the trade history; no NotFoundExpire.
+    h.query(hs, 7, Qty(0), Px(0), 300_600);
+    assert_eq!(h.state(hs), OrderState::Unknown, "OMS-488.3");
+    assert_ne!(h.flags(hs) & SlotFlags::HIST_WAIT, 0, "OMS-488.3");
+    assert!(
+        h.notes(notes::NEEDS_REST_QUERY)
+            .iter()
+            .any(|n| n.v[0] >> 16 & 1 == 1),
+        "OMS-488.3"
+    );
+    assert!(!transitions(&h).iter().any(|t| t.2 == 22), "OMS-488.3");
+}
