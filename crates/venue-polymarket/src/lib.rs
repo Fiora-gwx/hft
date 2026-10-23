@@ -246,7 +246,7 @@ impl VenueProtocol for PolymarketClob {
     fn encode_rest_ctx(
         rd: &RefData,
         t: &Templates,
-        ctx: &GwCtx,
+        ctx: &mut GwCtx,
         cred: &Credential,
         c: &GwCmd,
         tgt: &TargetRef,

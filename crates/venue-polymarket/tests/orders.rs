@@ -1,4 +1,4 @@
-//! Order entry, REST answers, the user channel and the account baseline (PMK-023 – PMK-030).
+//! Order entry, REST answers, the user channel and the account baseline (PMK-023 – PMK-032).
 //! REST answers and user-channel frames are copied from a capture of 2026-10-22 (post-only bids
 //! at 0.02, never fillable; `owner` API keys replaced by the test key).
 
@@ -12,7 +12,8 @@ use hft_venue_proto::{
     WallClock, raw_code_http, raw_code_str,
 };
 use venue_polymarket::sign::{
-    CHAIN_ID, EXCHANGE_V2, OrderV2, Wallet, exchange_domain, hex_bytes, l2_hmac, parse_u256, sign_order_1271,
+    CHAIN_ID, EXCHANGE_V2, OrderV2, Wallet, exchange_domain, hex_bytes, l2_hmac, order_digest, parse_u256,
+    sign_order_1271,
 };
 use venue_polymarket::{GwCtx, PolymarketClob as Pm, ReportClass};
 
@@ -86,7 +87,12 @@ fn tgt(exch: u64) -> TargetRef {
     }
 }
 
+/// Encodes on a copy of `ctx` (what a `Place` remembers is dropped; see `encode_mut`).
 fn encode(ctx: &GwCtx, c: &GwCmd, t: &TargetRef) -> Result<RestReqBuf, EncodeErr> {
+    encode_mut(&mut ctx.clone(), c, t)
+}
+
+fn encode_mut(ctx: &mut GwCtx, c: &GwCmd, t: &TargetRef) -> Result<RestReqBuf, EncodeErr> {
     let tpl = Pm::build_templates(&cfg(), rd(), AccountId(1), &cred()).unwrap();
     let mut out = RestReqBuf::default();
     Pm::encode_rest_ctx(rd(), &tpl, ctx, &cred(), c, t, &clk(), &mut out).map(|()| out)
@@ -284,7 +290,7 @@ fn pmk_024_place_refusals() {
             "PMK-024.4"
         );
         assert!(
-            Pm::encode_rest_ctx(rd(), &tpl, &ctx(), &k, &ok, &tgt(0), &clk(), &mut out).is_err(),
+            Pm::encode_rest_ctx(rd(), &tpl, &mut ctx(), &k, &ok, &tgt(0), &clk(), &mut out).is_err(),
             "PMK-024.4"
         );
     }
@@ -842,4 +848,222 @@ fn pmk_030_account_baseline() {
     // .6 any non-2xx answer fails the baseline.
     assert!(acct(&Query::Balances, 401, "{}", &mut s).is_err(), "PMK-030.6");
     let _ = ExchIdHint::Unknown;
+}
+
+/// Events of `s` as (kind, slot, gen, epoch, qty, cum, avg_px, detail, exch_order_id).
+#[allow(clippy::type_complexity)]
+fn rows(s: &VecSink) -> Vec<(OrderEventKind, SlotId, u32, u16, i64, i64, i64, u8, u64)> {
+    orders(s)
+        .iter()
+        .map(|e| {
+            (
+                e.what,
+                e.slot,
+                e.r#gen,
+                e.epoch,
+                e.qty.0,
+                e.cum_filled.0,
+                e.avg_px.0,
+                e.detail,
+                e.exch_order_id,
+            )
+        })
+        .collect()
+}
+
+const FILL: OrderEventKind = OrderEventKind::Fill;
+const PARTIAL: OrderEventKind = OrderEventKind::PartialFill;
+const QUERY: OrderEventKind = OrderEventKind::QueryResult;
+const ACK: OrderEventKind = OrderEventKind::Ack;
+const BUY: u8 = Side::Buy as u8;
+
+fn query_body(id: &str, token: &str, status: &str, matched: &str) -> String {
+    format!(
+        "{{\"id\":\"{id}\",\"status\":\"{status}\",\"asset_id\":\"{token}\",\"original_size\":\"5\",\"size_matched\":\"{matched}\",\"price\":\"0.42\",\"side\":\"BUY\"}}"
+    )
+}
+
+fn query(c: &mut GwCtx, s: &mut VecSink, inst: InstId, body: &str) -> hft_venue_proto::ReportOutcome {
+    Pm::decode_rest(rd(), c, &origin(GwOp::Query, inst), 200, body.as_bytes(), &RX, s).unwrap()
+}
+
+#[test]
+fn pmk_031_complete_below_size_ends_the_order() {
+    let k1 = key_of(H1);
+    let s7 = SlotId(7);
+    // .1 MATCHED at 4.99737 of 5 (live journal 2026-10-23): Fill, then QueryResult{Filled}.
+    let mut c = ctx();
+    let mut s = VecSink::default();
+    bind(&mut s, H1);
+    let o = report(&mut c, &mut s, &order_frame(H1, "UPDATE", "MATCHED", "4.99737"));
+    assert_eq!(o.events, 2, "PMK-031.1");
+    assert_eq!(
+        rows(&s),
+        vec![
+            (FILL, s7, 3, 5, 4_997_370, 4_997_370, 20, BUY, k1),
+            (QUERY, s7, 3, 5, 0, 4_997_370, 20, 3, k1),
+        ],
+        "PMK-031.1"
+    );
+    // .2 the same frame again (second connection, replay): nothing.
+    let n = s.reports.len();
+    report(&mut c, &mut s, &order_frame(H1, "UPDATE", "MATCHED", "4.99737"));
+    assert_eq!(s.reports.len(), n, "PMK-031.2");
+    // .3 btc-dn-0 (lot 0.01): LIVE at 4.99116 leaves 0.00884, less than one lot: complete.
+    let dn = |h: &str, st: &str, m: &str| order_frame(h, "UPDATE", st, m).replace(T_UP, T_DN);
+    let h4 = "0xdd8473af003833b1b6fc568247e146ae153586a3e06e16bd0f730dce7a748c19";
+    let mut s3 = VecSink::default();
+    bind(&mut s3, h4);
+    report(&mut c, &mut s3, &dn(h4, "LIVE", "4.99116"));
+    assert_eq!(
+        rows(&s3),
+        vec![
+            (FILL, s7, 3, 5, 4_991_160, 4_991_160, 20, BUY, key_of(h4)),
+            (QUERY, s7, 3, 5, 0, 4_991_160, 20, 3, key_of(h4)),
+        ],
+        "PMK-031.3"
+    );
+    // .4 LIVE at 4.99 leaves exactly one lot: a partial fill only.
+    let h5 = "0x189601a886d3182e6abc6afee63361744721fa72ef31ac48a96b88d5c88f214d";
+    let mut s4 = VecSink::default();
+    bind(&mut s4, h5);
+    report(&mut c, &mut s4, &dn(h5, "LIVE", "4.99"));
+    assert_eq!(
+        rows(&s4),
+        vec![(PARTIAL, s7, 3, 5, 4_990_000, 4_990_000, 20, BUY, key_of(h5))],
+        "PMK-031.4"
+    );
+    // .5 completed while unresolved (no Ack yet, not signed here): Fill UNRESOLVED only; the
+    // REST Place answer then carries Ack + QueryResult{Filled} of the requesting slot.
+    let mut c = ctx();
+    let mut s5 = VecSink::default();
+    report(&mut c, &mut s5, &order_frame(H2, "UPDATE", "MATCHED", "4.99737"));
+    let k2 = key_of(H2);
+    assert_eq!(
+        rows(&s5),
+        vec![(FILL, SlotId::UNRESOLVED, 0, 0, 4_997_370, 4_997_370, 20, BUY, k2)],
+        "PMK-031.5"
+    );
+    let mut s5 = VecSink::default();
+    let body = format!("{{\"errorMsg\":\"\",\"orderID\":\"{H2}\",\"status\":\"matched\",\"success\":true}}");
+    let o = Pm::decode_rest(
+        rd(),
+        &mut c,
+        &origin(GwOp::Place, UP),
+        200,
+        body.as_bytes(),
+        &RX,
+        &mut s5,
+    )
+    .unwrap();
+    assert_eq!(o.events, 2, "PMK-031.5");
+    assert_eq!(
+        rows(&s5),
+        vec![
+            (ACK, s7, 3, 0, 0, 0, 0, 0, k2),
+            (QUERY, s7, 3, 0, 0, 4_997_370, 20, 3, k2),
+        ],
+        "PMK-031.5"
+    );
+    // .6 queries: MATCHED 4.99737 (btc-up-0) and LIVE 4.99116 (btc-dn-0) → Filled; LIVE 4.99
+    // (btc-dn-0) → PartiallyFilled.
+    for (inst, token, st, m, want, row) in [
+        (UP, T_UP, "MATCHED", "4.99737", 3u8, "PMK-031.6 matched"),
+        (DN, T_DN, "LIVE", "4.99116", 3, "PMK-031.6 dust"),
+        (DN, T_DN, "LIVE", "4.99", 2, "PMK-031.6 lot"),
+    ] {
+        let mut s = VecSink::default();
+        query(&mut c, &mut s, inst, &query_body(H1, token, st, m));
+        let e = orders(&s);
+        assert_eq!((e.len(), e[0].what, e[0].detail), (1, QUERY, want), "{row}");
+    }
+}
+
+#[test]
+fn pmk_032_unacked_place_is_resolved_by_its_signed_hash() {
+    // .1 Place Up 0.42 × 5 (slot 7, gen 3, epoch 5), no REST answer: Query by the signed hash.
+    let mut c = ctx();
+    let place = cmd(GwOp::Place, UP, Side::Buy, 420, 5_000_000, Tif::PostOnly);
+    let r = encode_mut(&mut c, &place, &tgt(0)).unwrap();
+    let b: serde_json::Value = serde_json::from_slice(r.body.as_slice()).unwrap();
+    let order = OrderV2 {
+        salt: b["order"]["salt"].as_u64().unwrap(),
+        maker: venue_wallet(),
+        signer: venue_wallet(),
+        token_id: parse_u256(T_UP).unwrap(),
+        maker_amount: 2_100_000,
+        taker_amount: 5_000_000,
+        side: 0,
+        signature_type: 3,
+        timestamp_ms: NOW_MS as u64,
+        metadata: [0; 32],
+        builder: [0; 32],
+    };
+    let hash = order_digest(&exchange_domain("2", CHAIN_ID, &EXCHANGE_V2), &order);
+    let mut hex = [0u8; 66];
+    let h = hex_bytes(&hash, &mut hex).unwrap().to_string();
+    let k = key_of(&h);
+    let q = cmd(GwOp::Query, UP, Side::Buy, 0, 0, Tif::Gtc);
+    let r = encode(&c, &q, &tgt(0)).unwrap();
+    assert_eq!(
+        (r.method, text(r.path_query.as_slice())),
+        (Method::Get, format!("/data/order/{h}").as_str()),
+        "PMK-032.1"
+    );
+    let mut other = tgt(0);
+    other.id.r#gen = 4;
+    assert_eq!(
+        encode(&c, &q, &other).unwrap_err(),
+        EncodeErr::UnknownTarget,
+        "PMK-032.1"
+    );
+    other = tgt(0);
+    other.id.epoch = 6;
+    assert_eq!(
+        encode(&c, &q, &other).unwrap_err(),
+        EncodeErr::UnknownTarget,
+        "PMK-032.1"
+    );
+    // .2 the user channel reports it MATCHED at 4.99737 before any Ack: bound to the signed
+    // client id, Fill + QueryResult{Filled} of slot 7.
+    let placed = c.clone();
+    let mut s = VecSink::default();
+    report(&mut c, &mut s, &order_frame(&h, "UPDATE", "MATCHED", "4.99737"));
+    assert_eq!(
+        rows(&s),
+        vec![
+            (FILL, SlotId(7), 3, 5, 4_997_370, 4_997_370, 20, BUY, k),
+            (QUERY, SlotId(7), 3, 5, 0, 4_997_370, 20, 3, k),
+        ],
+        "PMK-032.2"
+    );
+    assert!(
+        s.id_calls
+            .contains(&(k.to_string().into_bytes(), Some(tgt(0).id))),
+        "PMK-032.2"
+    );
+    // .3 the query answer of the unacked order: Ack (exch id) + QueryResult{Filled, 4.99737}.
+    let mut c = placed;
+    let mut s = VecSink::default();
+    let body = query_body(&h, T_UP, "MATCHED", "4.99737");
+    let o = query(&mut c, &mut s, UP, &body);
+    assert_eq!(o.events, 2, "PMK-032.3");
+    assert_eq!(
+        rows(&s),
+        vec![
+            (ACK, SlotId(7), 3, 0, 0, 0, 0, 0, k),
+            (QUERY, SlotId(7), 3, 0, 0, 4_997_370, 420, 3, k),
+        ],
+        "PMK-032.3"
+    );
+    assert!(
+        s.id_calls
+            .contains(&(k.to_string().into_bytes(), Some(tgt(0).id))),
+        "PMK-032.3"
+    );
+    // .4 queried again: the QueryResult only.
+    let mut s = VecSink::default();
+    query(&mut c, &mut s, UP, &body);
+    let e = orders(&s);
+    assert_eq!((e.len(), e[0].what), (1, QUERY), "PMK-032.4");
 }

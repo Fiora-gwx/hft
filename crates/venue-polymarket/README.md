@@ -55,7 +55,7 @@ pub const TOKEN_MAX: usize = 80;
 pub enum ReportClass { Push, Ignorable, Unknown }
 pub struct Templates { pub account: AccountId, pub eoa: [u8; 20], pub wallet: [u8; 20], pub domain: [u8; 32], pub gtd_s: u32 }
 pub const GTD_S: u32 = 300;
-pub struct GwCtx;                          // 每账户:token 绑定、本进程订单的哈希与累计成交
+pub struct GwCtx;                          // 每账户:token 绑定、本进程订单的哈希(含签出时的 client id)与累计成交
 impl GwCtx {
     pub fn token_of(&self, inst: InstId) -> Option<&[u8]>;
     pub fn order_hash(&self, exch_order_id: u64) -> Option<[u8; 32]>;
@@ -166,14 +166,14 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 
 ### 下单
 
-全部订单类 op 走 REST(`order_channel = Rest`),由 `encode_rest_ctx` 编码(它读 `GwCtx` 里运行期绑定的 token id 与订单哈希;不带 `GwCtx` 的 `encode_rest_signed` 一律 `Unsupported`)。每个请求带 L2 头:`POLY_ADDRESS`(EOA,EIP-55)、`POLY_SIGNATURE`(L2 HMAC,见[签名](#签名))、`POLY_TIMESTAMP`(秒)、`POLY_API_KEY`、`POLY_PASSPHRASE`,有请求体时另加 `Content-Type: application/json`(账户查询不加:hft-venue 的账户客户端自己写);每行以 CRLF 结尾;`redacted = true`。
+全部订单类 op 走 REST(`order_channel = Rest`),由 `encode_rest_ctx` 编码(它读 `GwCtx` 里运行期绑定的 token id 与订单哈希,`Place` 另写入签出的订单哈希;不带 `GwCtx` 的 `encode_rest_signed` 一律 `Unsupported`)。每个请求带 L2 头:`POLY_ADDRESS`(EOA,EIP-55)、`POLY_SIGNATURE`(L2 HMAC,见[签名](#签名))、`POLY_TIMESTAMP`(秒)、`POLY_API_KEY`、`POLY_PASSPHRASE`,有请求体时另加 `Content-Type: application/json`(账户查询不加:hft-venue 的账户客户端自己写);每行以 CRLF 结尾;`redacted = true`。
 
 | op | 请求 | 说明 |
 |---|---|---|
-| `Place` | `POST /order`,体 `{"order":{"salt":<数字>,"maker","signer","tokenId","makerAmount","takerAmount","side":"BUY"/"SELL","expiration","signatureType":3,"timestamp","metadata":0…,"builder":0…,"signature"},"owner":<API key>,"orderType":"GTD","deferExec":false,"postOnly":<bool>}` | `tokenId` = 该 inst 的绑定(`BindWire`);未绑定 → `UnknownInst`。买单 `makerAmount` = 价 × 量、`takerAmount` = 量(卖单相反),以 1e-6 为单位、必须整除,否则 `FieldOverflow`。`Tif::PostOnly` → `postOnly: true`(会成交即被交易所拒绝),`Tif::Gtc` → `false`;IOC/FOK、reduce-only、平仓标记 → `Unsupported`。`expiration` = 当前秒 + `GTD_S`(300 s;交易所要求晚于当前 60 s 以上),进程失联时挂单至多再留 5 分钟。`salt` = (毫秒时间戳低 33 位) << 20 \| 槽号低 20 位(小于 2⁵³,体里写成数字),`timestamp` = 毫秒时间戳。签名 = 存款钱包签名(类型 3) |
+| `Place` | `POST /order`,体 `{"order":{"salt":<数字>,"maker","signer","tokenId","makerAmount","takerAmount","side":"BUY"/"SELL","expiration","signatureType":3,"timestamp","metadata":0…,"builder":0…,"signature"},"owner":<API key>,"orderType":"GTD","deferExec":false,"postOnly":<bool>}` | `tokenId` = 该 inst 的绑定(`BindWire`);未绑定 → `UnknownInst`。买单 `makerAmount` = 价 × 量、`takerAmount` = 量(卖单相反),以 1e-6 为单位、必须整除,否则 `FieldOverflow`。`Tif::PostOnly` → `postOnly: true`(会成交即被交易所拒绝),`Tif::Gtc` → `false`;IOC/FOK、reduce-only、平仓标记 → `Unsupported`。`expiration` = 当前秒 + `GTD_S`(300 s;交易所要求晚于当前 60 s 以上),进程失联时挂单至多再留 5 分钟。`salt` = (毫秒时间戳低 33 位) << 20 \| 槽号低 20 位(小于 2⁵³,体里写成数字),`timestamp` = 毫秒时间戳。签名 = 存款钱包签名(类型 3)。编码时 `GwCtx` 记下订单哈希(= 交易所的 `orderID`:交易所域下订单的 EIP-712 摘要)与该单的 client id(`TargetRef.id`:epoch、槽、代),REST 回执未到也能查单与定槽 |
 | `Cancel` | 订单哈希已知:`DELETE /order {"orderID":"0x…"}`;未知(REST 回执未到、或重启前的订单):`DELETE /cancel-market-orders {"asset_id":<token>}` | 后者撤该账户在该代币上的全部挂单;本 venue 的策略每个代币至多一张挂单 |
 | `CancelAll` | `inst ≠ 0`:`DELETE /cancel-market-orders {"asset_id"}`;`inst = 0`:`DELETE /cancel-all` | |
-| `Query` | `GET /data/order/<哈希>` | 哈希未知 → `UnknownTarget` |
+| `Query` | `GET /data/order/<哈希>` | 哈希按 `exch_order_id` 取;没有(REST 回执未到,槽在 `Unknown`)时取编码 `Place` 时为目标 client id(epoch、账户、槽、代都相同)记下的哈希;都没有 → `UnknownTarget` |
 
 **订单 id**:交易所订单 id 是 32 字节哈希,没有 client id。`exch_order_id` = 哈希前 8 字节(大端,0 记为 1),运行时 `IdTable` 的键是它的十进制文本(`exch_id_value` 取回同一值)。`REST_PLACE_BINDS_ID = true`:`decode_rest` 对成功的 `POST /order` 产出 `Ack{slot, gen, inst, exch_order_id}` 并以该键调 `exch_id(key, None)`,运行时把它绑到发起请求的 `(slot, gen, epoch)`([hft-venue-proto 契约 29](../hft-venue-proto/README.md#实现方必须遵守的契约));`GwCtx` 记下完整哈希(撤单、查单用),每账户 512 条,最旧的先覆盖。
 
@@ -181,12 +181,12 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 
 | 请求 | 应答 | 产出 |
 |---|---|---|
-| `POST /order` | 200 `{"success":true,"orderID":"0x…","status":"live"|"matched"|…}` | `Ack`(成交由用户频道报) |
+| `POST /order` | 200 `{"success":true,"orderID":"0x…","status":"live"|"matched"|…}` | `Ack`(成交由用户频道报);该单此前已在定槽之前低于原始量完成([累计量与费用来源](#累计量与费用来源))时,其后再一条 `QueryResult{Filled}`(`cum_filled` = 已知累计量,`avg_px` = 订单价) |
 | | 200 `{"success":false,"errorMsg":…}`;400/401/403/404 `{"error":…}`;425、429 | `Reject`,`reject_code` = 消息文本的码(无消息时为 HTTP 码);425/429 另置 `ctl = RateLimited` |
 | | 5xx、其他、无应答 | `outcome_unknown` |
 | `DELETE /order`、`/cancel-market-orders`、`/cancel-all` | 200 `{"canceled":[哈希…],"not_canceled":{哈希: 原因}}` | `canceled` 里每个能定槽的订单一条 `CancelAck`(每单至多一次,与用户频道的 `CANCELLATION` 去重);单笔 `Cancel` 的 `not_canceled` 非空 → `CancelReject{detail = GONE}` |
 | | 非 2xx | 单笔 `Cancel`:`outcome_unknown`(拒绝类 HTTP 码除外);`CancelAll`:只记 `raw_code` |
-| `GET /data/order/<哈希>` | 200 订单对象 | `QueryResult`:`LIVE`/`DELAYED` → New(`size_matched = 0`)或 PartiallyFilled,`MATCHED` → Filled,`CANCELED`、`CANCELED_MARKET_RESOLVED`、`UNMATCHED`、`INVALID` → Cancelled;`cum_filled` = `size_matched`,`avg_px` = 订单价 |
+| `GET /data/order/<哈希>` | 200 订单对象 | `QueryResult`:`LIVE`/`DELAYED` → New(`size_matched = 0`)或 PartiallyFilled(剩余量不足一个 lot 时 Filled),`MATCHED` → Filled,`CANCELED`、`CANCELED_MARKET_RESOLVED`、`UNMATCHED`、`INVALID` → Cancelled;`cum_filled` = `size_matched`,`avg_px` = 订单价。该单是本进程为所查的槽与代签出、尚无 `Ack` 的订单时,先以签出时的 client id 调 `exch_id(键, Some(id))` 绑定,再在 `QueryResult` 之前产出一条 `Ack{exch_order_id}`(槽由此得到交易所 id,之前以外来成交入账的部分按 OMS `ext_held` 去重) |
 | | 200 `null`/空体、404 | `QueryResult{NotFound}`(`stale_guard = None`,不定终态,契约 10) |
 
 ### 用户流事件表
@@ -196,19 +196,20 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 | 事件 | 产出 |
 |---|---|
 | `order`,`type = PLACEMENT` | 无(回执来自 REST);记下哈希 |
-| `order`,`type = UPDATE` | `size_matched` 比 `GwCtx` 里该单的累计量大时一条 `PartialFill`(`= original_size` 时 `Fill`):`qty` = 增量,`px` = `avg_px` = 订单价(挂单按自己的价格成交),`detail` = 方向,`ex_ts_ns` = `timestamp`(毫秒) |
-| `order`,`type = CANCELLATION` | 先按 `size_matched` 补成交(同上),再一条 `CancelAck`(未终态且能定槽时) |
+| `order`,`type = UPDATE` | `size_matched` 比 `GwCtx` 里该单的累计量大时一条 `PartialFill`(订单完成时 `Fill`,见[累计量与费用来源](#累计量与费用来源)):`qty` = 增量,`px` = `avg_px` = 订单价(挂单按自己的价格成交),`detail` = 方向,`ex_ts_ns` = `timestamp`(毫秒);低于原始量完成时其后再一条 `QueryResult{Filled}` |
+| `order`,`type = CANCELLATION` | 先按 `size_matched` 补成交(同上),再一条 `CancelAck`(未终态、未完成且能定槽时) |
 | `trade` | 无(成交以订单的累计量为准;`MATCHED → MINED → CONFIRMED` 的链上状态不进事件) |
 | 其他 `event_type` | `skip = Unknown`,事件名供 Note |
 | `PONG` | `skip = Listed` |
 
-定槽:按 `exch_id(哈希键, None)`;未知的成交以 `UNRESOLVED` 交运行时暂存(REST 回执稍后绑定),未知的撤单丢弃。`asset_id` 不在绑定表里的订单(本引擎之外、或已解绑窗口的订单)不产出事件。
+定槽:按 `exch_id(哈希键, None)`;运行时不认识而该哈希是本进程签出的(`GwCtx` 记有 client id),以 `exch_id(键, Some(id))` 绑定并按该 id 定槽(REST 回执未到时成交也归本槽,不成为外来成交);仍未知的成交以 `UNRESOLVED` 交运行时暂存(REST 回执稍后绑定),未知的撤单丢弃。`asset_id` 不在绑定表里的订单(本引擎之外、或已解绑窗口的订单)不产出事件。
 
 ### 累计量与费用来源
 
 | 字段 | 来源 |
 |---|---|
 | `cum_filled` | 用户频道 `order` 的 `size_matched`(累计,按 inst 的 qty 精度) |
+| 完成 | `size_matched > 0` 且(`status = MATCHED` 或剩余 `original_size − size_matched` 不足 inst 的一个 `lot`):交易所的金额取整使完全成交的单常剩下零头(2026-10-23 实盘:5 份的单 `size_matched` 4.99737、4.99116)。完成时成交类事件为 `Fill`;低于原始量完成的,OMS 只在 `cum_filled ≥ qty` 时把 `Fill` 定为终态,所以其后再一条 `QueryResult{Filled, cum_filled, avg_px = 订单价}`(OMS 按结果收敛为 Filled),每单一次;槽未知时欠着,在 REST 回执的 `Ack` 之后补发 |
 | 本笔量 | `size_matched` − `GwCtx` 中该单上次的累计量;重复推送(两条连接、重放)不再产出 |
 | 价格、均价 | 订单的 `price`(挂单不会以别的价格成交) |
 | 手续费 | 0:挂单方不付费(吃单费 0.07·p·(1 − p) 本实现不产生,post-only 单不会吃单);返佣按日另发,不进订单事件 |
@@ -285,6 +286,8 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 - 订单心跳(死手):`POST /v1/heartbeats` 是链式的(每次带上一次返回的 `heartbeat_id`),而 `dead_man_refresh` 拿不到 `GwCtx`;接入前靠 GTD(300 s)、窗口结束前策略撤单与进程退出时的全撤兜底。
 - 吃单手续费 `FeeModel`(0.07·p·(1 − p)):post-only 下单不产生;以后做吃单再补。
 - 重启后的订单哈希:`GwCtx` 不进快照,重启前的挂单只能按代币撤(`/cancel-market-orders`),查单 → `UnknownTarget`(交 reconciler)。
+- 回执未到的撤单仍按代币撤(`/cancel-market-orders`),不用签出时记下的哈希。
+- 本地算出的订单哈希即交易所 `orderID`(交易所域下的 EIP-712 摘要)尚未与实盘回执逐字节核对;不一致时回执未到的查单得 `NotFound`、成交仍按回执补绑(与此前相同)。核实:实盘下一单,比较 `POST /order` 应答的 `orderID` 与 `order_digest`。
 - `tick_size_change` 不解码:每个 5 分钟市场在价格接近 0 或 1 时(约开盘 4 分钟后)把 tick 从 0.01 改为 0.001,之后出现三位小数价格。解码按 px_exp −3 照常解析;hft-core 的 Polymarket 槽位 inst 以 tick 0.001 建 refdata(`pm_sim_config`),所以三位小数的档位照常应用。
 - 服务端 1013 断开见[多连接去重](#多连接去重)。两条连接在同一秒都被断开时仍有约 1–2 s 的缺口(该组连接都断开后推 `Resync{CONN_LOST}`,重连后的整簿恢复)。另外,市场结算后约 147 s 交易所以 1000 关闭订阅了该市场代币的连接;hft-net 把它与 1013 记为同一个 `WS_CLOSE` 位,早先"探针每 13 分钟断 3–4 次"的统计把这类正常关闭也算了进去(2026-10-20 重新比对:同机同期同 6 个 BTC 市场,探针异常断开 1 次,Python 录制器 3 次)。
 

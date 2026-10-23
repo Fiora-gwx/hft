@@ -117,11 +117,12 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
         let mut wire = RestReqBuf::default();
         let clk = self.wall(now);
         let tg = self.target_gen(&c);
+        let x = &mut self.accts[a];
         if P::encode_rest_ctx(
             self.rd,
-            &self.accts[a].tpl,
-            &self.accts[a].ctx,
-            &self.accts[a].rest_credential,
+            &x.tpl,
+            &mut x.ctx,
+            &x.rest_credential,
             &c,
             &target,
             &clk,
