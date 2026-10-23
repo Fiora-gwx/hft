@@ -49,9 +49,11 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
                 "accounts",
                 "live_feed",
                 "feed",
+                "net",
             ],
         ),
         "venue_feed" => (&[], &["raw", "depth_conns"]),
+        "venue_net" => (&[], &["rest_timeout_ms", "rest_max_idle_ms"]),
         "feed_raw" => (&[], &["bbo", "md"]),
         "account_io" => (
             &[
@@ -131,6 +133,7 @@ fn inspect(value: &Value, path: &str, shape: &str, missing: &mut Vec<Error>) -> 
             ("blobs", "refdata" | "engine" | "risk_params") => Some("blob"),
             ("venue", "account_io") => Some("account_io"),
             ("venue", "feed") => Some("venue_feed"),
+            ("venue", "net") => Some("venue_net"),
             ("venue_feed", "raw") => Some("feed_raw"),
             ("journal", "raw_feed" | "raw_gw") => Some("journal_size"),
             _ => None,

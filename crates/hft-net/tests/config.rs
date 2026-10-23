@@ -46,6 +46,7 @@ fn net_300_defaults() {
     assert_eq!(c.rest_timeout_ms, 2000, "NET-300.13");
     assert!(c.ts_expect_hw, "NET-300.14");
     assert_eq!(c.tls_mode, TlsMode::Unbuffered, "NET-300.15");
+    assert_eq!(c.rest_max_idle_ms, 0, "NET-300.16");
 }
 
 #[cfg(target_os = "linux")]

@@ -105,6 +105,9 @@ struct Lane {
     buf: Box<[u8]>,
     len: usize,
     ts: Option<Timestamps>,
+    /// Last activity (install is stamped by the first `idle_check`, then each response); `None`
+    /// while a request is in flight.
+    idle_since: Option<u64>,
 }
 
 pub struct RestPool<const N: usize = 2> {
@@ -113,6 +116,7 @@ pub struct RestPool<const N: usize = 2> {
     tx: Box<[u8]>,
     clock: TscClock,
     timeout_ns: u64,
+    max_idle_ns: u64,
     building: bool,
 }
 
@@ -143,11 +147,13 @@ impl<const N: usize> RestPool<N> {
                 buf: vec![0; cfg.rx_buf.rest.saturating_sub(22) as usize].into_boxed_slice(),
                 len: 0,
                 ts: None,
+                idle_since: None,
             }),
             host: host.into(),
             tx: vec![0; cfg.tx_buf.saturating_sub(22).min(16_384) as usize].into_boxed_slice(),
             clock,
             timeout_ns: u64::from(cfg.rest_timeout_ms) * 1_000_000,
+            max_idle_ns: u64::from(cfg.rest_max_idle_ms) * 1_000_000,
             building: false,
         }
     }
@@ -170,6 +176,7 @@ impl<const N: usize> RestPool<N> {
         let id = h.id();
         lane.id = id;
         lane.h = Some(h);
+        lane.idle_since = None;
         self.building = false;
         Ok(id)
     }
@@ -239,6 +246,7 @@ impl<const N: usize> RestPool<N> {
         lane.len = 0;
         lane.ts = None;
         lane.result = None;
+        lane.idle_since = None;
         Ok(req.tag)
     }
 
@@ -270,6 +278,7 @@ impl<const N: usize> RestPool<N> {
         let lane = self.lanes.iter_mut().find(|l| l.result.is_some())?;
         let result = lane.result.take()?;
         let (tag, sent_tsc) = lane.pending.take()?;
+        lane.idle_since = Some(now_tsc);
         Some(match result {
             Err(err) => Err(RestFail { tag, err }),
             Ok(done) => {
@@ -298,8 +307,12 @@ impl<const N: usize> RestPool<N> {
         })
     }
 
+    /// Liveness read of every idle connection; with `rest_max_idle_ms`, also retires at most one
+    /// connection idle that long, and only while every lane holds a connection and no build is
+    /// outstanding, so the pool keeps its other connection while the replacement is built.
     pub fn idle_check(&mut self, now_tsc: u64) -> u8 {
         let mut count = 0u8;
+        let mut recycle = self.max_idle_ns > 0 && !self.building && self.lanes.iter().all(|l| l.h.is_some());
         for lane in &mut self.lanes {
             if lane.pending.is_some() {
                 continue;
@@ -321,6 +334,13 @@ impl<const N: usize> RestPool<N> {
             };
             if !why.is_empty() {
                 retire(lane, why);
+                recycle = false;
+                continue;
+            }
+            let since = *lane.idle_since.get_or_insert(now_tsc);
+            if recycle && self.clock.delta_ns(Tsc(since), Tsc(now_tsc)) >= self.max_idle_ns {
+                retire(lane, ErrBits::IDLE_TIMEOUT);
+                recycle = false;
             }
         }
         count

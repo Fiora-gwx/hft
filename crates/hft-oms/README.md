@@ -264,7 +264,7 @@ pub struct ForeignFill {                           // 防御路径与 StaleGen �
 |---|---|---|---|
 | `slots[(venue, account)]` | u32 | 4096 | 槽数;24 h 最大在途 + 余量([05 §2.1](../../design/05-CEX执行层.md))。取值 1..=65 535(槽号 1..=N,0 保留),且 (venue, account) 表数 ≤ 256(`Timer{Oms, UnknownQuery}` 的编码位宽,见 `OmsTimerReq`),超出 → `OmsConfigError` |
 | `links_per_account` | u32 | 1024 | 每账户 `LinkTable` 容量;生产定时器与槽位配套容量归 [hft-core](../../apps/hft-core/README.md#内存与-journal-段按主机类唯一归属) |
-| `ack_timeout_ms[venue]` | u32 | 2000 | `PendingNew` 无回执多久进 `Unknown` 并查询 |
+| `ack_timeout_ms[venue]` | u32 | 2000 | `PendingNew` 无回执多久进 `Unknown` 并查询;下单走 REST 的 venue 中,REST 请求超时(hft-net `rest_timeout_ms`,hft-core `venues.<v>.net.rest_timeout_ms`)须 ≤ 本值,否则 gw 在本超时之前已放弃该应答并报 `OutcomeUnknown`,本值不起作用(hft-core 加载时校验) |
 | `cancel_timeout_ms[venue]` | u32 | 2000 | `PendingCancel`/`PendingAmend` 同上 |
 | `ioc_timeout_ms[venue]` | u32 | 1000 | IOC/FOK `Live` 超时仍无终态 → `Unknown` |
 | `unknown_query_interval_ms` | u32 | 1000 | Unknown 查询重试间隔 |

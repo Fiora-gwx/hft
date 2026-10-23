@@ -201,6 +201,34 @@ pub struct Venue {
     /// assembly.
     #[serde(default)]
     pub feed: FeedOpts,
+    /// hft-net `NetConfig` keys of this venue's connections (`venues.<v>.net.*`).
+    #[serde(default)]
+    pub net: NetOpts,
+}
+/// `venues.<v>.net.{rest_timeout_ms,rest_max_idle_ms}` (hft-net "配置项"): absent = the
+/// `NetConfig` default; applies to every REST pool of the venue (gw, snap-fetch).
+#[derive(Debug, Default, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NetOpts {
+    pub rest_timeout_ms: Option<u32>,
+    pub rest_max_idle_ms: Option<u32>,
+}
+impl NetOpts {
+    /// Overrides the configured keys in `net`.
+    pub fn apply(&self, net: &mut hft_net::NetConfig) {
+        if let Some(ms) = self.rest_timeout_ms {
+            net.rest_timeout_ms = ms;
+        }
+        if let Some(ms) = self.rest_max_idle_ms {
+            net.rest_max_idle_ms = ms;
+        }
+    }
+    /// The REST request timeout in effect.
+    pub fn rest_timeout_ms(&self) -> u32 {
+        let mut net = hft_net::NetConfig::default();
+        self.apply(&mut net);
+        net.rest_timeout_ms
+    }
 }
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -509,6 +537,12 @@ pub fn load_timed(
         if v.max_sub_insts == 0 || v.stale_guard_ms == 0 {
             errors.push(Error::config("SubCapacity", name));
         }
+        if v.net.rest_timeout_ms == Some(0) {
+            errors.push(Error::config(
+                "BadValue",
+                format!("venues.{name}.net.rest_timeout_ms must be positive"),
+            ));
+        }
         if dry && !v.accounts.is_empty() {
             errors.push(Error::config("SecretsInSim", name));
         }
@@ -654,6 +688,19 @@ pub fn load_timed(
         0,
     )
     .map_err(|e| one("EngineMismatch", format!("{e:?}")))?;
+    for (name, v) in &c.venues {
+        // A REST order answer must still be read when the OMS gives up on its acknowledgement.
+        let ack = setup.oms.ack_timeout_ms.get(VenueId(v.id));
+        if !v.accounts.is_empty() && v.net.rest_timeout_ms() > ack {
+            errors.push(Error::config(
+                "RestTimeoutAboveAck",
+                format!(
+                    "venues.{name}.net.rest_timeout_ms {} > OMS ack_timeout_ms {ack}",
+                    v.net.rest_timeout_ms()
+                ),
+            ));
+        }
+    }
     for (name, v) in &c.venues {
         if !v.accounts.is_empty()
             && let Err(e) = crate::venues::check_kill_caps(&v.protocol, rd.caps(VenueId(v.id)))
