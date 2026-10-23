@@ -10,7 +10,8 @@ use hft_venue_proto::{DeadManSpec, RateRule, StaleGuard};
 pub(crate) fn default_caps(venue: VenueId, _asset: impl Fn(&str) -> Option<AssetId>) -> VenueCaps {
     let mut c = VenueCaps::none(venue);
     c.market = MarketKind::Spot;
-    c.flags = CapFlags::POST_ONLY | CapFlags::IOC | CapFlags::FOK;
+    // Cancels address the order hash, known only from the place response.
+    c.flags = CapFlags::POST_ONLY | CapFlags::IOC | CapFlags::FOK | CapFlags::CANCEL_NEEDS_ACK;
     c.fee_asset_rule = FeeAssetRule::Quote;
     c.reduce_only = false;
     c.required_spot_borrow = Some(false);

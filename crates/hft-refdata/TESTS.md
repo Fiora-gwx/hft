@@ -1338,7 +1338,7 @@ spec: README.md
 | REF-075.16 | `DeadManCap` | None 1、CountdownPerInst 2、CountdownAccount 3、OnDisconnect 4、Schedule 5 |
 | REF-075.17 | `TestnetKind` | None 1、Testnet 2、Demo 3 |
 | REF-075.18 | `Option<bool>` 线编码(`required_multi_asset`、`required_spot_borrow`) | None 1、Some(false) 2、Some(true) 3 |
-| REF-075.19 | `CapFlags` 位 | AMEND 1、POST_ONLY 2、IOC 4、FOK 8、BATCH_CANCEL 16、PERP_CASH 32,两两不重叠 |
+| REF-075.19 | `CapFlags` 位 | AMEND 1、POST_ONLY 2、IOC 4、FOK 8、BATCH_CANCEL 16、PERP_CASH 32、CANCEL_NEEDS_ACK 256,两两不重叠 |
 | REF-075.20 | `InstHot.flags` 位 | NO_AMEND 1 |
 | REF-075.21 | `FeeAssetRule` 四个变体 | 各写一行(`ReceivedAssetUnlessDiscount{token: BTC}`、`Configured(USDT)`)读回相等 |
 

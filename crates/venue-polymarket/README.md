@@ -138,7 +138,7 @@ refdata 为每个资产预置固定数量的槽位 inst(符号如 `btc-up-0`)。
 | 字段 | 值 |
 |---|---|
 | `market` | `Spot` |
-| `flags` | `POST_ONLY`、`IOC`、`FOK`(交易所支持;本实现只编码 `PostOnly` 与 `Gtc`,IOC/FOK → `Unsupported`) |
+| `flags` | `POST_ONLY`、`IOC`、`FOK`(交易所支持;本实现只编码 `PostOnly` 与 `Gtc`,IOC/FOK → `Unsupported`);`CANCEL_NEEDS_ACK`(撤单按订单哈希,下单回执之前没有哈希;没有哈希的撤单只能按代币撤本账户全部挂单,可能早于订单到达交易所而撤空) |
 | `fee_asset_rule` | `Quote` |
 | `required_spot_borrow` | `Some(false)` |
 | `own_liquidation_marker` | `NotIdentifiable` |

@@ -201,8 +201,11 @@ impl SlotFlags {
     pub const AGED: u16 = 1024;
     /// Gateway queries exhausted or unsupported; reconciliation owns convergence.
     pub const REST_QUERY: u16 = 2048;
+    /// An owner cancel of a `PendingNew` slot on a venue with `CapFlags::CANCEL_NEEDS_ACK`, held
+    /// until the order is known to the exchange (sent when the slot turns `Live`).
+    pub const CANCEL_HELD: u16 = 4096;
     /// Union of every defined bit.
-    pub const ALL: u16 = 0x0FFF;
+    pub const ALL: u16 = 0x1FFF;
 
     #[inline]
     pub const fn has(self, b: u16) -> bool {

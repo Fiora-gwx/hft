@@ -358,3 +358,68 @@ fn oms_482_fee_carried_by_non_fill_report_is_booked_once() {
         assert!(h.out.fees.is_empty() && h.out.fills.is_empty(), "{row} repeat");
     }
 }
+
+#[test]
+fn oms_486_cancel_held_until_ack() {
+    let rd = build_rd(&RdOpts {
+        vs_cancel_needs_ack: true,
+        ..RdOpts::default()
+    });
+    let held = |h: &H, s: OrderRef| h.flags(s) & SlotFlags::CANCEL_HELD != 0;
+    // .1 an unacked order: the cancel is held (no decision, still PendingNew); a second is refused.
+    let mut h = H::from_cfg(&p0(), rd);
+    let s = h.place_ok(&buy_x(), 0);
+    h.cancel(s, 1).unwrap();
+    assert!(h.decisions(OrderAction::Cancel).is_empty(), "OMS-486.1");
+    assert_eq!(h.state(s), OrderState::PendingNew, "OMS-486.1");
+    assert!(held(&h, s), "OMS-486.1");
+    assert_eq!(h.cancel(s, 1), Err(OpError::NotAllowed), "OMS-486.1");
+    // .2 the Ack sends it: Live, then PendingCancel with one Cancel decision.
+    h.ack(s, 777, 2);
+    let d = h.decisions(OrderAction::Cancel);
+    assert_eq!((d.len(), d[0].target_slot.0), (1, s.slot), "OMS-486.2");
+    assert_eq!(h.state(s), OrderState::PendingCancel, "OMS-486.2");
+    assert!(
+        h.flags(s) & SlotFlags::CANCEL_SENT != 0 && !held(&h, s),
+        "OMS-486.2"
+    );
+    assert_eq!(h.slot(s).exch_order_id, 777, "OMS-486.2");
+    // .3 rejected before the ack: dropped.
+    let mut h = H::from_cfg(&p0(), rd);
+    let s = h.place_ok(&buy_x(), 0);
+    h.cancel(s, 1).unwrap();
+    h.what(s, OrderEventKind::Reject, 2);
+    assert_eq!(h.state(s), OrderState::Rejected, "OMS-486.3");
+    assert!(
+        h.decisions(OrderAction::Cancel).is_empty() && !held(&h, s),
+        "OMS-486.3"
+    );
+    // .4 a fill before the ack: sent with the fill.
+    let mut h = H::from_cfg(&p0(), rd);
+    let s = h.place_ok(&buy_x(), 0);
+    h.cancel(s, 1).unwrap();
+    h.fill(s, q("0.004"), p("60000.00"), 2);
+    assert_eq!(h.decisions(OrderAction::Cancel).len(), 1, "OMS-486.4");
+    assert_eq!(h.state(s), OrderState::PendingCancel, "OMS-486.4");
+    // .5 ack timeout → Unknown (still held); a QueryResult New converges to Live and sends it.
+    let mut h = H::from_cfg(&p0(), rd);
+    let s = h.place_ok(&buy_x(), 0);
+    h.cancel(s, 1).unwrap();
+    h.sweep(2_500);
+    assert_eq!(h.state(s), OrderState::Unknown, "OMS-486.5");
+    assert!(held(&h, s), "OMS-486.5");
+    h.query(s, 1, q("0"), p("0"), 3_000);
+    assert_eq!(h.decisions(OrderAction::Cancel).len(), 1, "OMS-486.5");
+    assert_eq!(h.state(s), OrderState::PendingCancel, "OMS-486.5");
+    // .6 an acked order is cancelled at once.
+    let mut h = H::from_cfg(&p0(), rd);
+    let s = live(&mut h, &buy_x(), 777);
+    h.cancel(s, 2).unwrap();
+    assert_eq!(h.decisions(OrderAction::Cancel).len(), 1, "OMS-486.6");
+    // .7 without the capability an unacked order is cancelled at once (OMS-046).
+    let mut h = H::new();
+    let s = h.place_ok(&buy_x(), 0);
+    h.cancel(s, 1).unwrap();
+    assert_eq!(h.decisions(OrderAction::Cancel).len(), 1, "OMS-486.7");
+    assert!(!held(&h, s), "OMS-486.7");
+}
