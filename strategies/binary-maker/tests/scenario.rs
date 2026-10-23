@@ -181,6 +181,7 @@ fn live_pair(h: &mut StrategyHarness<BinaryMaker>) {
         q.state = QState::Live;
         q.r = Some(order_ref(slot));
         q.px = 450;
+        q.win = 300;
     }
 }
 
@@ -280,6 +281,7 @@ fn bmk_007_requote_and_pull() {
         q.state = QState::Live;
         q.r = Some(order_ref(slot));
         q.px = 450;
+        q.win = 300;
     }
     // .1 the Up bid moves to 0.460: its quote is cancelled (the Down quote stays).
     slot_book(h.views_mut(), SLOTS[2], 460, 470);
@@ -292,7 +294,9 @@ fn bmk_007_requote_and_pull() {
     ref_quote(h.views_mut(), 10_000_500);
     let b = h.views_mut().bbo_of(R);
     let out = h.feed(&ev::bbo(R, 6, b).as_ref());
-    assert_eq!(cancels(&out), vec![12], "BMK-007.2");
+    // Slot 11's cancel (399.9 s) has had no terminal update for more than `stuck_reset_ms`: it is
+    // sent once more and forgotten.
+    assert_eq!(cancels(&out), vec![11, 12], "BMK-007.2");
 }
 
 #[test]
@@ -596,4 +600,161 @@ fn bmk_015_window_cost_cap() {
         cancels(&book_at(&mut h, 399_600_000_000, 450)).is_empty(),
         "BMK-015.3"
     );
+}
+
+/// Order update `kind` of the order in slot `slot` of slot group `gix` at engine time `t` (ns).
+fn update_at(
+    h: &mut StrategyHarness<BinaryMaker>,
+    t: i64,
+    gix: u16,
+    slot: u32,
+    kind: OrderUpdateKind,
+) -> hft_testkit::sdk_mock::CtxCapture {
+    h.views_mut().at_engine_ns(t);
+    h.feed(
+        &ev::order(
+            gix,
+            OrderUpdate {
+                r: order_ref(slot),
+                group: gid(u32::from(gix)),
+                tag: binary_maker::fast::tag_of(gix),
+                kind,
+            },
+        )
+        .as_ref(),
+    )
+}
+
+/// Sets slot group `i`'s quote to `state` with order `slot`, price 0.450, window start `win`.
+fn set_quote(
+    h: &mut StrategyHarness<BinaryMaker>,
+    i: usize,
+    state: binary_maker::fast::QState,
+    slot: u32,
+    win: i64,
+    last_ens: i64,
+) {
+    let q = &mut h.strategy_mut().fast.quotes[i];
+    q.state = state;
+    q.r = Some(order_ref(slot));
+    q.px = 450;
+    q.win = win;
+    q.last_ens = last_ens;
+}
+
+#[test]
+fn bmk_016_stuck_cancel_reset() {
+    use binary_maker::fast::QState;
+    use hft_strategy_sdk::params::n_fields_at;
+    // .1 undercut at 399.6 s, no terminal update: nothing at 404.5 s, at 404.7 s (≥ 5 s) the
+    // cancel is sent again and the leg quotes the new best bid.
+    let mut h = harness(&params(|_| {}));
+    live_pair(&mut h);
+    assert_eq!(
+        cancels(&book_at(&mut h, 399_600_000_000, 460)),
+        vec![11],
+        "BMK-016.1"
+    );
+    let out = book_at(&mut h, 404_500_000_000, 460);
+    assert!(out.items.is_empty(), "BMK-016.1 {:?}", out.items);
+    let out = book_at(&mut h, 404_700_000_000, 460);
+    assert_eq!(cancels(&out), vec![11], "BMK-016.1");
+    assert_eq!(up_places(&out), vec![Px(460)], "BMK-016.1");
+    // .2 the old order's late Cancelled does not touch the new quote (slot 21).
+    set_quote(&mut h, 2, QState::Live, 21, 300, 404_700_000_000);
+    h.strategy_mut().fast.quotes[2].px = 460;
+    let out = update_at(&mut h, 404_800_000_000, 2, 11, OrderUpdateKind::Cancelled);
+    assert!(out.items.is_empty(), "BMK-016.2 {:?}", out.items);
+    let q = h.strategy().fast.quotes[2];
+    assert_eq!(
+        (q.state, q.r.map(|r| r.slot)),
+        (QState::Live, Some(21)),
+        "BMK-016.2"
+    );
+    // .3 stuck_reset_ms 10 000: still waiting at 404.7 s.
+    let mut h = harness(&params_with(&[("stuck_reset_ms", 10_000)]));
+    live_pair(&mut h);
+    book_at(&mut h, 399_600_000_000, 460);
+    let out = book_at(&mut h, 404_700_000_000, 460);
+    assert!(out.items.is_empty(), "BMK-016.3 {:?}", out.items);
+    // .4 schema: field 22, since 4, default 5 000 ms; a version-3 body has the first 22 fields.
+    let schema = BinaryMaker::DESC.schema;
+    let f = schema.field(22).unwrap();
+    assert_eq!(
+        (f.name, f.since, f.default),
+        ("stuck_reset_ms", 4, 5_000),
+        "BMK-016.4"
+    );
+    assert_eq!(schema.version(), 4, "BMK-016.4");
+    assert_eq!(n_fields_at(schema, 3), Some(22), "BMK-016.4");
+}
+
+#[test]
+fn bmk_017_window_change_clears_stale_quotes() {
+    use binary_maker::fast::QState;
+    // Pair 1 is current again in the window 1200–1500 (4 mod 3 = 1). Its quotes still carry the
+    // window 300 state: the Up leg Live (slot 11), the Down leg Cancelling since 1 s (slot 12).
+    let mut h = harness(&params(|_| {}));
+    warm(&mut h, 400, 1199, 0);
+    set_quote(&mut h, 2, QState::Live, 11, 300, 399_500_000_000);
+    set_quote(&mut h, 3, QState::Cancelling, 12, 300, 1_298_600_000_000);
+    for i in [SLOTS[2], SLOTS[3]] {
+        slot_book(h.views_mut(), i, 450, 470);
+    }
+    let out = ref_at(&mut h, 1_299_600_000_000, 10_000_500);
+    // .1 both old orders are cancelled once more and both legs quote the new window.
+    let mut c = cancels(&out);
+    c.sort_unstable();
+    assert_eq!(c, vec![11, 12], "BMK-017.1");
+    let insts: Vec<InstId> = out.places().map(|it| it.inst).collect();
+    assert_eq!(insts, vec![SLOTS[2], SLOTS[3]], "BMK-017.1");
+    // .2 a late Filled{done} of the old Up order does not touch the new quote (slot 21).
+    set_quote(&mut h, 2, QState::Live, 21, 1200, 1_299_600_000_000);
+    let out = update_at(
+        &mut h,
+        1_299_700_000_000,
+        2,
+        11,
+        filled(10_000_000, 10_000_000, true),
+    );
+    assert!(
+        cancels(&out).is_empty() && up_places(&out).is_empty(),
+        "BMK-017.2"
+    );
+    let q = h.strategy().fast.quotes[2];
+    assert_eq!(
+        (q.state, q.r.map(|r| r.slot)),
+        (QState::Live, Some(21)),
+        "BMK-017.2"
+    );
+}
+
+#[test]
+fn bmk_018_locked_book_is_not_an_undercut() {
+    let mut h = harness(&params(|_| {}));
+    live_pair(&mut h);
+    // .1 locked (bid 0.460 = ask 0.460) and .2 crossed (bid 0.470 > ask 0.460): the quote stays.
+    for (row, t, bid, ask) in [(1, 399_600_000_000i64, 460, 460), (2, 399_700_000_000, 470, 460)] {
+        slot_book(h.views_mut(), SLOTS[2], bid, ask);
+        h.views_mut().at_engine_ns(t);
+        let out = h.feed(&ev::book(SLOTS[2], 2).as_ref());
+        assert!(out.items.is_empty(), "BMK-018.{row} {:?}", out.items);
+    }
+    // .3 the book uncrosses with bid 0.460 < ask 0.470: undercut, cancelled.
+    assert_eq!(
+        cancels(&book_at(&mut h, 399_800_000_000, 460)),
+        vec![11],
+        "BMK-018.3"
+    );
+}
+
+#[test]
+fn bmk_019_aged_quote_is_cancelled() {
+    use binary_maker::fast::QState;
+    let mut h = harness(&params(|_| {}));
+    live_pair(&mut h);
+    let out = update_at(&mut h, 399_600_000_000, 2, 11, OrderUpdateKind::Aged);
+    assert_eq!(cancels(&out), vec![11], "BMK-019");
+    assert!(up_places(&out).is_empty(), "BMK-019");
+    assert_eq!(h.strategy().fast.quotes[2].state, QState::Cancelling, "BMK-019");
 }

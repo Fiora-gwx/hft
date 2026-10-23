@@ -27,7 +27,7 @@ use hft_strategy_sdk::{
 pub use params::{BinaryMakerFields, BinaryMakerParams};
 
 /// `StrategyDesc.version` (fast-part snapshot layout and decision semantics).
-pub const DESC_VERSION: u16 = 3;
+pub const DESC_VERSION: u16 = 4;
 
 /// The strategy (registry row `binary_maker::BinaryMaker`).
 #[derive(Debug)]

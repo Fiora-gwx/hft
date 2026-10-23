@@ -45,7 +45,8 @@ pub enum QState {
     Placing,
     /// Has an OMS slot (`r`).
     Live,
-    /// Cancel sent.
+    /// Cancel sent; reset to `None` when the slot pair's window changes or after `stuck_reset_ms`
+    /// without a terminal update (README "规则" 8).
     Cancelling,
 }
 
@@ -60,6 +61,8 @@ pub struct Quote {
     pub px: i64,
     /// Engine time of the last place or cancel.
     pub last_ens: i64,
+    /// Start (UTC seconds) of the window the quote was placed in.
+    pub win: i64,
     /// At placement (README "规则" 5): reference 2 × mid; Φ⁻¹(Up mid) and implied σ ×
     /// √(seconds left − 40), both 1e-9.
     pub b0: i64,
@@ -141,6 +144,7 @@ impl Fast {
                 r: None,
                 px: 0,
                 last_ens: i64::MIN / 2,
+                win: i64::MIN,
                 b0: 0,
                 d0: 0,
                 den: 0,
@@ -186,10 +190,15 @@ impl Fast {
                     match u.kind {
                         OrderUpdateKind::Filled { done: true, .. }
                         | OrderUpdateKind::Cancelled
-                        | OrderUpdateKind::Rejected { .. }
-                        | OrderUpdateKind::Aged => {
+                        | OrderUpdateKind::Rejected { .. } => {
                             q.state = QState::None;
                             q.r = None;
+                        }
+                        // Still resting after `max_rest_ms`: cancel it (the OMS does not).
+                        OrderUpdateKind::Aged if q.state == QState::Live => {
+                            let _ = ctx.cancel(u.r);
+                            q.state = QState::Cancelling;
+                            q.last_ens = now;
                         }
                         _ => {}
                     }
@@ -295,10 +304,31 @@ impl Fast {
         let nochase = i64::from(d.nochase_ms) * 1_000_000;
         let streak_window = i64::from(d.streak_window_ms) * 1_000_000;
         let streak_pause = i64::from(d.streak_pause_ms) * 1_000_000;
+        let stuck = i64::from(d.stuck_reset_ms) * 1_000_000;
         for i in 0..self.quotes.len() {
-            let Some(q) = self.quotes.get(i).copied() else {
+            let Some(mut q) = self.quotes.get(i).copied() else {
                 continue;
             };
+            // Stale state (README "规则" 8): a quote of an earlier window on the current slot pair,
+            // or a cancel without a terminal update for `stuck_reset_ms`: cancel once more (never
+            // waits) and forget it; later updates of that order no longer match `r`.
+            let old_window = i / 2 == up / 2 && q.win != start;
+            let stale = match q.state {
+                QState::Live => old_window,
+                QState::Cancelling => old_window || now.engine_ns.saturating_sub(q.last_ens) >= stuck,
+                QState::None | QState::Placing => false,
+            };
+            if stale {
+                if let Some(r) = q.r {
+                    let _ = ctx.cancel(r);
+                }
+                q.state = QState::None;
+                q.r = None;
+                if let Some(m) = self.quotes.get_mut(i) {
+                    m.state = QState::None;
+                    m.r = None;
+                }
+            }
             let hot = *v.inst(q.inst);
             let unit_px = 10i64.saturating_pow(u32::from(hot.px_exp.unsigned_abs()));
             let unit_qty = 10i64.saturating_pow(u32::from(hot.qty_exp.unsigned_abs()));
@@ -308,6 +338,8 @@ impl Fast {
             let live = book.status() == BookStatus::Live;
             let bid = book.best(Side::Buy).map(|l| l.px.0);
             let ask = book.best(Side::Sell).map(|l| l.px.0);
+            // Locked or crossed (one taker trade arriving as several level updates): no undercut.
+            let locked = matches!((bid, ask), (Some(b), Some(a)) if b >= a);
             // Pair-cost limit when this bid completes pairs: 1 − other side's cost − margin,
             // floored to a whole cent.
             let (own_q, other_q, other_c) = if is_up { (qu, qd, cd) } else { (qd, qu, cu) };
@@ -340,9 +372,11 @@ impl Fast {
                             cooled = true;
                         }
                     }
-                    // Undercut (a better bid than ours where we would quote higher) or above the
-                    // pair-cost limit; a cleared level (best bid below ours) keeps the quote.
-                    let undercut = bid.is_some_and(|b| b > q.px) && target.is_none_or(|t| t > q.px);
+                    // Undercut (a better bid than ours where we would quote higher, the book not
+                    // locked or crossed) or above the pair-cost limit; a cleared level (best bid
+                    // below ours) keeps the quote.
+                    let undercut =
+                        !locked && bid.is_some_and(|b| b > q.px) && target.is_none_or(|t| t > q.px);
                     cancel |= undercut;
                     cancel |= lim.is_some_and(|l| q.px > l);
                     if cancel
@@ -392,6 +426,7 @@ impl Fast {
                         m.handle = h.0;
                         m.px = px;
                         m.last_ens = now.engine_ns;
+                        m.win = start;
                         m.b0 = self.ref_mid_x2;
                         m.d0 = inv_cdf(up_mid);
                         m.den = den;
@@ -417,7 +452,7 @@ impl Fast {
 
     /// `n: u16`, then per slot group `id: u32, state: u8, r?: (venue u8, account u8, slot u32,
     /// gen u32), px: i64, b0: i64, d0: i64, den: i64, cool_until: i64, n_fill: u32,
-    /// fill_ens: 8 × i64`. Placing quotes are saved as none.
+    /// fill_ens: 8 × i64, last_ens: i64, win: i64`. Placing quotes are saved as none.
     pub fn snapshot(&self, w: &mut SnapshotWriter) {
         w.put_u16(self.quotes.len() as u16);
         for q in &self.quotes {
@@ -449,6 +484,8 @@ impl Fast {
             for t in q.fill_ens {
                 w.put_i64(t);
             }
+            w.put_i64(q.last_ens);
+            w.put_i64(q.win);
         }
     }
 
@@ -472,6 +509,8 @@ impl Fast {
             for t in fill_ens.iter_mut() {
                 *t = r.get_i64()?;
             }
+            let last_ens = r.get_i64()?;
+            let win = r.get_i64()?;
             if let Some(q) = self.quotes.iter_mut().find(|q| q.id == id) {
                 let (st, oref) = match state {
                     2 => (QState::Live, true),
@@ -493,6 +532,8 @@ impl Fast {
                 q.cool_until = cool_until;
                 q.n_fill = n_fill;
                 q.fill_ens = fill_ens;
+                q.last_ens = last_ens;
+                q.win = win;
             }
         }
         Ok(())
