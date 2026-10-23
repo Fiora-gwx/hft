@@ -3,7 +3,9 @@
 //! `L2Batch` / `Trade` events. Writes the same JSON lines as the live probe, labelled per bound
 //! window (`<asset>-<start_s>-<up|dn>`), and a bindings file in the `compare.py` format. Order
 //! decisions, order events, external fills (settlement deliveries), `Settle` commands, command
-//! results and connection states are written too (README "产出").
+//! results and connection states are written too (README "产出"). `--orders-only` skips the book
+//! rebuild and the market lines and writes one `bind` line per binding instead, so a reader can
+//! decode only the newest segments and keep the inst → window labels itself.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -24,21 +26,24 @@ struct Args {
     refdata: PathBuf,
     out: PathBuf,
     bindings_out: PathBuf,
+    orders_only: bool,
     files: Vec<PathBuf>,
 }
 
 fn usage() -> String {
-    "usage: pm-md-probe journal --refdata RDB1 --out FILE --bindings-out FILE SEG...".into()
+    "usage: pm-md-probe journal --refdata RDB1 --out FILE --bindings-out FILE [--orders-only] SEG...".into()
 }
 
 fn args(raw: &[String]) -> Result<Args, String> {
     let (mut refdata, mut out, mut bindings_out, mut files) = (None, None, None, Vec::new());
+    let mut orders_only = false;
     let mut a = raw.iter();
     while let Some(k) = a.next() {
         match k.as_str() {
             "--refdata" => refdata = a.next().map(PathBuf::from),
             "--out" => out = a.next().map(PathBuf::from),
             "--bindings-out" => bindings_out = a.next().map(PathBuf::from),
+            "--orders-only" => orders_only = true,
             f if !f.starts_with("--") => files.push(PathBuf::from(f)),
             _ => return Err(usage()),
         }
@@ -48,6 +53,7 @@ fn args(raw: &[String]) -> Result<Args, String> {
             refdata,
             out,
             bindings_out,
+            orders_only,
             files,
         }),
         _ => Err(usage()),
@@ -109,8 +115,9 @@ pub fn run(raw: &[String]) -> Result<(), String> {
                 n_settle += 1;
                 let _ = writeln!(
                     out,
-                    "{{\"k\":\"settle\",\"slot\":\"{}\",\"end_s\":{end_s},\"payout\":{},\"cmd_id\":\"{}\"}}",
+                    "{{\"k\":\"settle\",\"slot\":\"{}\",\"inst\":{},\"end_s\":{end_s},\"payout\":{},\"cmd_id\":\"{}\"}}",
                     name(&label, inst),
+                    inst.0,
                     payout.0,
                     hex16(&h.cmd_id)
                 );
@@ -136,6 +143,13 @@ pub fn run(raw: &[String]) -> Result<(), String> {
                 .map_err(|e| format!("bind {}: {e:?}", inst.0))?;
             let (asset, side) = asset_side(&rd.inst_meta(inst).symbol);
             let slot = format!("{asset}-{start_s}-{side}");
+            if a.orders_only {
+                let _ = writeln!(
+                    out,
+                    "{{\"k\":\"bind\",\"inst\":{},\"slot\":\"{slot}\",\"start_s\":{start_s}}}",
+                    inst.0
+                );
+            }
             if let Some(token) = ctx.token_of(inst) {
                 binds.push(format!(
                     "{{\"slot\":\"{slot}\",\"token\":\"{}\",\"start_ts\":{start_s},\"asset\":\"{asset}\"}}",
@@ -150,6 +164,13 @@ pub fn run(raw: &[String]) -> Result<(), String> {
                 *w = true;
             }
             n_bind += 1;
+        } else if a.orders_only
+            && matches!(
+                kind,
+                EventKind::L2_SNAPSHOT | EventKind::L2_BATCH | EventKind::TRADE
+            )
+        {
+            continue;
         } else if kind == EventKind::L2_SNAPSHOT {
             let Ok((h, rest)) = L2SnapHdr::read_from_prefix(body) else {
                 continue;
@@ -222,8 +243,9 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             n_dec += 1;
             let _ = writeln!(
                 out,
-                "{{\"k\":\"dec\",\"slot\":\"{}\",\"action\":{},\"side\":\"{}\",\"tif\":{},\"px\":{},\"qty\":{},\"oslot\":{},\"gen\":{},\"reject\":{}}}",
+                "{{\"k\":\"dec\",\"slot\":\"{}\",\"inst\":{},\"action\":{},\"side\":\"{}\",\"tif\":{},\"px\":{},\"qty\":{},\"oslot\":{},\"gen\":{},\"reject\":{}}}",
                 name(&label, d.inst),
+                d.inst.0,
                 d.action as u8,
                 if d.side == Side::Buy { "BUY" } else { "SELL" },
                 d.tif as u8,
@@ -240,8 +262,9 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             n_oev += 1;
             let _ = writeln!(
                 out,
-                "{{\"k\":\"oev\",\"slot\":\"{}\",\"what\":{},\"px\":{},\"qty\":{},\"cum\":{},\"fee\":{},\"oslot\":{},\"gen\":{},\"ex_ms\":{},\"code\":{}}}",
+                "{{\"k\":\"oev\",\"slot\":\"{}\",\"inst\":{},\"what\":{},\"px\":{},\"qty\":{},\"cum\":{},\"fee\":{},\"oslot\":{},\"gen\":{},\"ex_ms\":{},\"code\":{}}}",
                 name(&label, e.inst),
+                e.inst.0,
                 e.what as u8,
                 e.px.0,
                 e.qty.0,
@@ -259,8 +282,9 @@ pub fn run(raw: &[String]) -> Result<(), String> {
             n_ext += 1;
             let _ = writeln!(
                 out,
-                "{{\"k\":\"ext\",\"slot\":\"{}\",\"cause\":{},\"side\":\"{}\",\"px\":{},\"qty\":{},\"end_s\":{}}}",
+                "{{\"k\":\"ext\",\"slot\":\"{}\",\"inst\":{},\"cause\":{},\"side\":\"{}\",\"px\":{},\"qty\":{},\"end_s\":{}}}",
                 name(&label, e.inst),
+                e.inst.0,
                 e.cause as u8,
                 if e.side == Side::Buy { "BUY" } else { "SELL" },
                 e.px.0,

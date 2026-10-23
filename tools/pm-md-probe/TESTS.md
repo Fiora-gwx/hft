@@ -16,9 +16,9 @@ spec: README.md
 | 目录 | 不适用:非规范 |
 | 使用本组件 | PMP-001 |
 | 命令行 | PMP-001 |
-| 产出 | PMP-001 |
+| 产出 | PMP-001、PMP-004 |
 | 验收步骤 | PMP-001 |
-| hft-core 验收 | PMP-002 |
+| hft-core 验收 | PMP-002、PMP-004 |
 | 存储 | PMP-003 |
 | 实现说明 | PMP-001、PMP-002 |
 | 延迟与资源契约 | 不适用:无门槛 |
@@ -58,6 +58,16 @@ spec: README.md
 - 步骤:运行中以 `PMCORE_MIN_AGE_MIN=0 PMCORE_KEEP_DAYS=0` 执行 `journal_housekeep.sh`,运行结束后再执行一次
 - 期望:运行中最新段保持 `.jrn`、运行目录不删除、hft-core 正常 Drain 退出 0;结束后全部冷段为 `.jrn.zst`;已停止运行的冷段全部压缩
 - 证据:2026-10-20 06:03 UTC 手动执行,两个已停止运行 1.1 GB/1.3 GB → 548 MB/517 MB(其余为验收产物),运行中的段未动,hft-core `STOPPED exit=0`
+- 实现:手动运行
+
+### PMP-004 `--orders-only` 与完整解码的订单行一致
+
+- 规则:[产出](README.md#产出)、[hft-core 验收](README.md#hft-core-验收)
+- 级别:host
+- 里程碑:M3
+- 前置:pm-strategy-euw1;运行中的挂单模拟的已封口 seq 段
+- 步骤:同一批段各解码一次:完整解码、`--orders-only`;另取后一半的段单独以 `--orders-only` 解码
+- 期望:`--orders-only` 的输出没有 `snap`/`batch`/`trade` 行,其 `dec`/`oev`/`ext`/`settle`/`cmdres`/`conn` 行与完整解码逐行相同;`bind` 行数等于完整解码打印的 binds 数;只解码后一半段时,用前一半的 `bind` 行把 `inst` 映射回窗口,标签与完整解码一致
 - 实现:手动运行
 
 ## 验收
