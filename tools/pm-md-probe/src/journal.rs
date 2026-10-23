@@ -341,3 +341,46 @@ pub fn run(raw: &[String]) -> Result<(), String> {
     );
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::args;
+
+    fn v(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn orders_only_flag_and_required_arguments() {
+        let a = args(&v(&[
+            "--refdata",
+            "r",
+            "--out",
+            "o",
+            "--bindings-out",
+            "b",
+            "--orders-only",
+            "s1",
+            "s2",
+        ]));
+        let a = a.unwrap();
+        assert!(a.orders_only);
+        assert_eq!(a.files.len(), 2);
+        let a = args(&v(&["--refdata", "r", "--out", "o", "--bindings-out", "b", "s1"])).unwrap();
+        assert!(!a.orders_only);
+        assert!(args(&v(&["--refdata", "r", "--out", "o", "--bindings-out", "b"])).is_err());
+        assert!(
+            args(&v(&[
+                "--refdata",
+                "r",
+                "--out",
+                "o",
+                "--bindings-out",
+                "b",
+                "--bogus",
+                "s1"
+            ]))
+            .is_err()
+        );
+    }
+}
