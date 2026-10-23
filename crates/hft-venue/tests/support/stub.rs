@@ -1089,7 +1089,7 @@ impl<const FCAP: usize, const V: u32> VenueProtocol for Stub<FCAP, V> {
     fn encode_rest_ctx(
         rd: &RefData,
         t: &Tpl,
-        ctx: &GwCtx,
+        ctx: &mut GwCtx,
         cred: &Credential,
         c: &GwCmd,
         tgt: &TargetRef,

@@ -740,8 +740,8 @@ pub const PM_LIVE_PARAMS: [(&str, i64); 9] = [
 
 /// The live maker (`order_env = "prod"`, no `--dry-run`): the maker simulation's venues, slots and
 /// strategy with a Live account `pm-live` (`is_prod`, UID `live.uid`) on Polymarket, its keys in
-/// `live.keys_dir`, `PM_LIVE_PARAMS` and the micro risk limits (order 10 USDC, account and venue
-/// 55, slot group 25, daily loss 15).
+/// `live.keys_dir`, `PM_LIVE_PARAMS`, the micro risk limits (order 10 USDC, account and venue
+/// 55, slot group 25, daily loss 15) and OMS `ack_timeout_ms[polymarket] = 5000`.
 #[cfg(feature = "polymarket")]
 #[allow(dead_code)]
 pub fn write_polymarket_maker_live(
@@ -1221,6 +1221,9 @@ fn write_pm(
         engine.keys_required = vec![(a, v, 3)];
         // A SmokeOrder bids half the ask (an outcome token at 0.50 → 0.25): it must never fill.
         engine.oms.smoke_far_bp = Rate(500_000_000);
+        // A REST place answer can take over 2 s (2026-10-23, round trips otherwise up to 0.76 s);
+        // a slot that goes Unknown on time-out only resolves by query.
+        engine.oms.ack_timeout_ms.set(v, 5000);
     }
     engine.exec.default.force_slice.max_chunk_notional = Notional(10_000_000);
     let ecf = engine.encode_blob(1, HostClass::Dev2, 0);

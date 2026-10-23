@@ -154,12 +154,13 @@ fn scaled(raw: i128, e: i32) -> Option<u64> {
     u64::try_from(v).ok().filter(|v| *v > 0)
 }
 
-/// Every order operation of the gw (contract 29); all are REST.
+/// Every order operation of the gw (contract 29); all are REST. A `Place` remembers the hash of
+/// the order it signs under its client id `tgt.id` (README "下单").
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn encode(
     rd: &RefData,
     t: &Templates,
-    ctx: &GwCtx,
+    ctx: &mut GwCtx,
     cred: &Credential,
     c: &GwCmd,
     tgt: &TargetRef,
@@ -172,7 +173,10 @@ pub(crate) fn encode(
         return Err(EncodeErr::Unsupported(c.op));
     }
     match c.op {
-        GwOp::Place => place(rd, t, ctx, &k, cred, c, clk, out)?,
+        GwOp::Place => {
+            let hash = place(rd, t, ctx, &k, cred, c, clk, out)?;
+            ctx.placed(&hash, tgt.id);
+        }
         GwOp::Cancel => {
             out.method = Method::Delete;
             match ctx.order_hash(tgt.exch_order_id) {
@@ -197,8 +201,10 @@ pub(crate) fn encode(
             }
         }
         GwOp::Query => {
+            // Not acked yet (no REST answer): the hash signed for the target's client id.
             let h = ctx
                 .order_hash(tgt.exch_order_id)
+                .or_else(|| ctx.placed_hash(&tgt.id))
                 .ok_or(EncodeErr::UnknownTarget)?;
             let mut hex = [0u8; 66];
             let h = sign::hex_bytes(&h, &mut hex).ok_or(EncodeErr::FieldOverflow)?;
@@ -219,6 +225,7 @@ fn cancel_token(ctx: &GwCtx, c: &GwCmd, out: &mut RestReqBuf) -> Result<(), Enco
     out.body.push(b"\"}").map_err(of)
 }
 
+/// Writes the signed `POST /order`; returns the order hash (the exchange's `orderID`).
 #[allow(clippy::too_many_arguments)]
 fn place(
     rd: &RefData,
@@ -229,7 +236,7 @@ fn place(
     c: &GwCmd,
     clk: &WallClock,
     out: &mut RestReqBuf,
-) -> Result<(), EncodeErr> {
+) -> Result<[u8; 32], EncodeErr> {
     let row = rd.inst(c.inst);
     if c.inst.0 == 0 || row.venue != crate::VENUE {
         return Err(EncodeErr::UnknownInst);
@@ -315,7 +322,7 @@ fn place(
     for p in parts {
         out.body.push(p).map_err(of)?;
     }
-    Ok(())
+    Ok(sign::order_digest(&t.domain, &o))
 }
 
 /// Decimal text of `v` in `buf`.

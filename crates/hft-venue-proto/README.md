@@ -126,9 +126,9 @@ pub trait VenueProtocol: Sized + 'static {
     /// order_channel(c.op) = Rest 的订单操作(如 Binance USDT-M 按 symbol 全撤、OKX/Bitget 查单):生成签名 REST 请求(契约 29)。
     fn encode_rest(rd: &RefData, t: &Self::Templates, c: &GwCmd, tgt: &TargetRef, clk: &WallClock, out: &mut RestReqBuf)
                    -> Result<(), EncodeErr> { Err(EncodeErr::Unsupported(c.op)) }
-    /// gw 实际调用的入口:同 encode_rest_signed,另借该账户的 GwCtx(运行期绑定的 token id、交易所订单哈希;Polymarket)。
-    /// 默认忽略 ctx,转 encode_rest_signed(凭证按调用借用,契约 7)。
-    fn encode_rest_ctx(rd: &RefData, t: &Self::Templates, ctx: &Self::GwCtx, cred: &Credential, c: &GwCmd, tgt: &TargetRef,
+    /// gw 实际调用的入口:同 encode_rest_signed,另可写地借该账户的 GwCtx(运行期绑定的 token id、交易所订单哈希,
+    /// 以及编码 Place 时记下本地签出的订单哈希;Polymarket)。默认忽略 ctx,转 encode_rest_signed(凭证按调用借用,契约 7)。
+    fn encode_rest_ctx(rd: &RefData, t: &Self::Templates, ctx: &mut Self::GwCtx, cred: &Credential, c: &GwCmd, tgt: &TargetRef,
                        clk: &WallClock, out: &mut RestReqBuf) -> Result<(), EncodeErr> { Self::encode_rest_signed(rd, t, cred, c, tgt, clk, out) }
     /// 会话维护请求(GwOp::SessionKeepalive,如 Binance USDT-M listenKey PUT 续期);不需要维护的所返回 Ok(false)(默认)。
     fn session_keepalive_request(rd: &RefData, t: &Self::Templates, clk: &WallClock, out: &mut RestReqBuf)

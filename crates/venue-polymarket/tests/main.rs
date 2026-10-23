@@ -26,7 +26,8 @@ const T_DN: &str = "580046655001587116848865171851216696155273179956714957984607
 const MARKET: RouteId = RouteId(0);
 
 /// `RD-PM`: USDC (AssetId 1, Stable), two outcome-token assets (px_exp −3, qty_exp −6), insts
-/// `btc-up-0` = 1 and `btc-dn-0` = 2 on `POLYMARKET_CLOB` (tick 0.01, lot 0.000001).
+/// `btc-up-0` = 1 and `btc-dn-0` = 2 on `POLYMARKET_CLOB` (tick 0.01; lot 0.000001, `btc-dn-0` 0.01
+/// as live).
 fn rd() -> &'static RefData {
     static RD: OnceLock<&'static RefData> = OnceLock::new();
     RD.get_or_init(|| {
@@ -88,7 +89,10 @@ fn rd() -> &'static RefData {
                 },
             );
         }
-        for (id, sym, asset) in [(UP, "btc-up-0", AssetId(2)), (DN, "btc-dn-0", AssetId(3))] {
+        for (id, sym, asset, lot, lot_str) in [
+            (UP, "btc-up-0", AssetId(2), 1, "0.000001"),
+            (DN, "btc-dn-0", AssetId(3), 10_000, "0.01"),
+        ] {
             b.inst(InstSpec {
                 id,
                 venue: V,
@@ -98,16 +102,16 @@ fn rd() -> &'static RefData {
                 asset,
                 quote: AssetId(1),
                 tick: 10,
-                lot: 1,
-                min_qty: Qty(1),
+                lot,
+                min_qty: Qty(lot),
                 max_qty: Qty(1_000_000_000_000),
                 min_notional: Notional(1_000_000),
                 book_window: 128,
                 l2_depth: 100,
                 crossed_tolerance: 0,
                 tick_str: "0.01".into(),
-                lot_str: "0.000001".into(),
-                min_qty_str: "0.000001".into(),
+                lot_str: lot_str.into(),
+                min_qty_str: lot_str.into(),
                 ..InstSpec::default()
             });
         }

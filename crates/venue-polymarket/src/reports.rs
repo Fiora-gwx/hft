@@ -3,7 +3,7 @@
 
 use hft_event::{GwOp, OrderEvent, OrderEventKind};
 use hft_refdata::RefData;
-use hft_types::{AccountId, InstId, Px, Qty, Side, SlotId, parse_exact};
+use hft_types::{AccountId, ClientOrderId, InstId, Px, Qty, Side, SlotId, parse_exact};
 use hft_venue_proto::{
     DecodeErr, ExchIdHint, MsgOp, ProtoErr, ReportCtl, ReportOutcome, ReportSink, RestOrigin, RestWhat,
     RxMeta, Skip, raw_code_http, raw_code_str,
@@ -39,7 +39,17 @@ struct Row {
     hash: [u8; 32],
     /// Cumulative filled quantity (inst qty units).
     cum: i64,
+    /// Order price (inst px units), once a fill was seen.
+    px: i64,
     terminal: bool,
+    /// Client id of the `Place` this process signed the order for (README "下单"); `None` for an
+    /// order first seen in an answer or a report.
+    owner: Option<ClientOrderId>,
+    /// The order's `Ack` was produced (REST Place answer or a query of an unacked order).
+    acked: bool,
+    /// Completed below its size while its slot was unknown: the completing `QueryResult` is
+    /// still owed (README "累计量与费用来源").
+    owed: bool,
 }
 
 /// gw state of one account: token ids bound by `BindWire`, the hashes of this process's orders
@@ -100,6 +110,13 @@ impl GwCtx {
     pub fn order_hash(&self, key: u64) -> Option<[u8; 32]> {
         self.row(key).map(|r| r.hash)
     }
+    /// Hash of the order signed for client id `id` (the `Place` encode), acked or not.
+    pub(crate) fn placed_hash(&self, id: &ClientOrderId) -> Option<[u8; 32]> {
+        self.rows
+            .iter()
+            .find(|r| r.key != 0 && r.owner.is_some_and(|o| same_order(&o, id)))
+            .map(|r| r.hash)
+    }
     /// Remembers an order hash; returns its key.
     fn remember(&mut self, hash: &[u8; 32]) -> u64 {
         let key = key_of(hash);
@@ -109,14 +126,47 @@ impl GwCtx {
                 *r = Row {
                     key,
                     hash: *hash,
-                    cum: 0,
-                    terminal: false,
+                    ..Row::default()
                 };
             }
             self.next = (self.next + 1) % n;
         }
         key
     }
+    /// Remembers the hash of an order signed for client id `owner` (README "下单").
+    pub(crate) fn placed(&mut self, hash: &[u8; 32], owner: ClientOrderId) {
+        let key = self.remember(hash);
+        if let Some(r) = self.row_mut(key) {
+            r.owner = Some(owner);
+        }
+    }
+}
+
+/// Same order slot and generation of the same account and engine epoch.
+fn same_order(a: &ClientOrderId, b: &ClientOrderId) -> bool {
+    a.epoch == b.epoch && a.account == b.account && a.slot == b.slot && a.r#gen == b.r#gen
+}
+
+/// Slot of an order: the runtime's binding of its key, else the client id this process signed it
+/// for, bound now so that later reports resolve too (README "用户流事件表").
+fn resolve(out: &mut impl ReportSink, key: u64, owner: Option<ClientOrderId>) -> Option<(u16, SlotId, u32)> {
+    let mut buf = [0u8; 20];
+    let text = key_text(key, &mut buf);
+    if let ExchIdHint::Resolved { epoch, slot, r#gen } = out.exch_id(text, None) {
+        return Some((epoch, slot, r#gen));
+    }
+    let id = owner?;
+    matches!(out.exch_id(text, Some(&id)), ExchIdHint::Recorded).then_some((
+        id.epoch,
+        SlotId(id.slot),
+        id.r#gen,
+    ))
+}
+
+/// The order is complete: the exchange says `MATCHED`, or what is left is below one lot (the
+/// exchange's amounts leave a dust remainder, README "累计量与费用来源").
+fn complete(status: &str, orig: i64, cum: i64, lot: i64) -> bool {
+    cum > 0 && (status == "MATCHED" || orig - cum < lot.max(1))
 }
 
 /// `0x` + 64 hex digits.
@@ -345,6 +395,20 @@ pub(crate) fn decode_rest(
                     e.exch_order_id = key;
                     out.order(&e);
                     o.events = 1;
+                    // Fills that completed the order below its size before this answer were held
+                    // unresolved (the runtime releases them after this Ack): owe the completion.
+                    if let Some(w) = ctx.row_mut(key) {
+                        w.acked = true;
+                        if w.owed {
+                            w.owed = false;
+                            e.what = OrderEventKind::QueryResult;
+                            e.detail = status::FILLED;
+                            e.cum_filled = Qty(w.cum);
+                            e.avg_px = Px(w.px);
+                            out.order(&e);
+                            o.events += 1;
+                        }
+                    }
                     return Ok(o);
                 }
                 // `success: false` with a message: refused by the exchange.
@@ -435,6 +499,7 @@ pub(crate) fn decode_rest(
             let cum = parse_exact(q.size_matched.as_bytes(), row.qty_exp).map_err(|_| DecodeErr::Number)?;
             let px = parse_exact(q.price.as_bytes(), row.px_exp).map_err(|_| DecodeErr::Number)?;
             e.detail = match q.status {
+                "LIVE" | "DELAYED" if complete(q.status, orig, cum, row.lot) => status::FILLED,
                 "LIVE" | "DELAYED" if cum == 0 => status::NEW,
                 "LIVE" | "DELAYED" => status::PARTIALLY_FILLED,
                 "MATCHED" => status::FILLED,
@@ -444,11 +509,32 @@ pub(crate) fn decode_rest(
             if cum < 0 || cum > orig {
                 return Err(DecodeErr::Shape);
             }
-            e.exch_order_id = key_of(&h);
+            let key = key_of(&h);
+            // An order queried before its REST answer (README "下单"): bind it to the queried
+            // slot and ack it, so the slot learns its exchange id.
+            let owner = ctx
+                .row(key)
+                .filter(|w| !w.acked)
+                .and_then(|w| w.owner)
+                .filter(|id| id.slot == r.slot && id.r#gen == r.r#gen);
+            if let Some(id) = owner
+                && resolve(out, key, Some(id)).is_some()
+            {
+                let mut a = e;
+                a.what = OrderEventKind::Ack;
+                a.detail = 0;
+                a.exch_order_id = key;
+                out.order(&a);
+                o.events += 1;
+                if let Some(w) = ctx.row_mut(key) {
+                    w.acked = true;
+                }
+            }
+            e.exch_order_id = key;
             e.cum_filled = Qty(cum);
             e.avg_px = if cum > 0 { Px(px) } else { Px(0) };
             out.order(&e);
-            o.events = 1;
+            o.events += 1;
             Ok(o)
         }
         _ => Err(DecodeErr::UnknownClass),
@@ -520,6 +606,8 @@ struct Event<'a> {
     price: &'a str,
     #[serde(rename = "type", default, borrow)]
     kind: &'a str,
+    #[serde(default, borrow)]
+    status: &'a str,
     #[serde(default, borrow)]
     timestamp: &'a str,
 }
@@ -611,40 +699,58 @@ fn order_event(
     let ms: i64 = ev.timestamp.parse().map_err(|_| DecodeErr::Number)?;
     let ex_ts_ns = ms.checked_mul(1_000_000).ok_or(DecodeErr::Overflow)?;
     let key = ctx.remember(&h);
-    let (prev, terminal) = ctx.row(key).map_or((0, false), |r| (r.cum, r.terminal));
-    let mut buf = [0u8; 20];
-    let mapped = out.exch_id(key_text(key, &mut buf), None);
-    let (epoch, slot, r#gen) = match mapped {
-        ExchIdHint::Resolved { epoch, slot, r#gen } => (epoch, slot, r#gen),
-        _ => (0, SlotId::UNRESOLVED, 0),
-    };
+    let (prev, terminal, owner) = ctx
+        .row(key)
+        .map_or((0, false, None), |r| (r.cum, r.terminal, r.owner));
+    let slot = resolve(out, key, owner);
+    let (epoch, slot_id, r#gen) = slot.unwrap_or((0, SlotId::UNRESOLVED, 0));
+    let done = complete(ev.status, orig, cum, row.lot);
+    let mut e = blank(rx.account, rx);
+    e.detail = side as u8;
+    e.epoch = epoch;
+    e.slot = slot_id;
+    e.r#gen = r#gen;
+    e.inst = inst;
+    e.exch_order_id = key;
+    e.ex_ts_ns = ex_ts_ns;
     if cum > prev {
-        let mut e = blank(rx.account, rx);
-        e.what = if cum == orig {
+        e.what = if done {
             OrderEventKind::Fill
         } else {
             OrderEventKind::PartialFill
         };
-        e.detail = side as u8;
-        e.epoch = epoch;
-        e.slot = slot;
-        e.r#gen = r#gen;
-        e.inst = inst;
         // Resting orders fill at their own price.
         e.px = Px(px);
         e.qty = Qty(cum - prev);
         e.cum_filled = Qty(cum);
         e.avg_px = Px(px);
-        e.exch_order_id = key;
-        e.ex_ts_ns = ex_ts_ns;
         if let Some(r) = ctx.row_mut(key) {
             r.cum = cum;
-            r.terminal |= cum == orig;
+            r.px = px;
         }
         out.order(&e);
         o.events += 1;
     }
-    if ev.kind == "CANCELLATION" && !terminal && matches!(mapped, ExchIdHint::Resolved { .. }) {
+    // Complete below its size: the OMS ends a slot on `Fill` only at its full size, so the
+    // exchange's verdict follows as a `QueryResult{Filled}` (README "累计量与费用来源"); owed
+    // until the slot is known.
+    if done && !terminal {
+        if let Some(r) = ctx.row_mut(key) {
+            r.terminal = true;
+            r.owed = cum < orig && slot.is_none();
+        }
+        if cum < orig && slot.is_some() {
+            e.what = OrderEventKind::QueryResult;
+            e.detail = status::FILLED;
+            e.px = Px(0);
+            e.qty = Qty(0);
+            e.cum_filled = Qty(cum);
+            e.avg_px = Px(px);
+            out.order(&e);
+            o.events += 1;
+        }
+    }
+    if ev.kind == "CANCELLATION" && !terminal && !done && slot.is_some() {
         cancelled(ctx, &h, inst, ex_ts_ns, rx, out, o);
     }
     Ok(())

@@ -10,7 +10,7 @@ spec: README.md
 
 本文件的记号:
 
-- `RD-PM` = 测试内构建的 refdata:`USDC` = AssetId 1(Stable),两个代币资产(px_exp −3,qty_exp −6);`POLYMARKET_CLOB`(15):`btc-up-0` = InstId 1、`btc-dn-0` = InstId 2,tick 0.01,lot 0.000001。
+- `RD-PM` = 测试内构建的 refdata:`USDC` = AssetId 1(Stable),两个代币资产(px_exp −3,qty_exp −6);`POLYMARKET_CLOB`(15):`btc-up-0` = InstId 1、`btc-dn-0` = InstId 2,tick 0.01;lot 与最小量 `btc-up-0` 0.000001、`btc-dn-0` 0.01(同实盘)。
 - `T_UP`/`T_DN` = 2026-10-19 录制的 `btc-updown-5m` 窗口的 Up/Down 代币 id;`bound()` = 容量 16 的 `FeedCtx`,`T_UP` → 1、`T_DN` → 2。
 - 帧取自 2026-10-19 在 eu-west-1 的独立录制(pmrec);数值写法:价格 `"0.42"` = 420(px_exp −3),数量 `"242.09"` = 242090000(qty_exp −6)。
 
@@ -30,9 +30,9 @@ spec: README.md
 | 心跳 | PMK-001 |
 | 签名 | PMK-018–PMK-022 |
 | 凭证 | PMK-023, PMK-024 |
-| 下单 | PMK-023–PMK-026, PMK-028 |
-| 用户流事件表 | PMK-027, PMK-029 |
-| 累计量与费用来源 | PMK-027 |
+| 下单 | PMK-023–PMK-026, PMK-028, PMK-031, PMK-032 |
+| 用户流事件表 | PMK-027, PMK-029, PMK-032 |
+| 累计量与费用来源 | PMK-027, PMK-031 |
 | 结果未知码表 | PMK-026 |
 | 账户配置核验 | PMK-030 |
 | VenueCaps 默认值 | PMK-011 |
@@ -463,4 +463,36 @@ PMK-001–PMK-011、PMK-015 全部通过;线上验收(两个完整 5 分钟窗�
 | PMK-030.4 | 一页一张挂单(游标 `MTAw`);再查到末页 `LTE=` | 1 张、游标 `MTAw`;0 张、游标空 |
 | PMK-030.5 | `balance` 82254260 | 计价资产 USDC `free` 82 254 260(1e-6)、`locked` 0 |
 | PMK-030.6 | 401 | 失败 |
+
+### PMK-031 低于原始量完成的订单定为终态
+
+- 规则:[累计量与费用来源](README.md#累计量与费用来源)、[下单](README.md#下单)
+- 级别:table
+- 里程碑:M3
+- 前置:同 PMK-027;原始 5 份、价 0.02(查单 0.42)
+- 实现:`crates/venue-polymarket/tests/orders.rs::pmk_031_complete_below_size_ends_the_order`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-031.1 | H1 `UPDATE`,`status` `MATCHED`,`size_matched` 4.99737(2026-10-23 实盘) | `Fill{qty 4 997 370, cum 4 997 370}`,再 `QueryResult{Filled(3), cum 4 997 370, avg_px 0.02}`;均为 slot 7、epoch 5、H1 键;`events 2` |
+| PMK-031.2 | 同一帧再送一次 | 无事件 |
+| PMK-031.3 | `btc-dn-0`(lot 0.01):`LIVE`,4.99116 | `Fill` + `QueryResult{Filled}`,cum 4 991 160 |
+| PMK-031.4 | `btc-dn-0`:`LIVE`,4.99(剩余恰为一个 lot) | 只有 `PartialFill` |
+| PMK-031.5 | 未定槽的 H2 `MATCHED` 4.99737;再解码 H2 的 `POST /order` 回执(slot 7、gen 3) | 前者只有 `Fill{UNRESOLVED}`;后者 `Ack{H2 键}`,再 `QueryResult{Filled, cum 4 997 370, avg_px 0.02, slot 7}`,`events 2` |
+| PMK-031.6 | 查单:`btc-up-0` `MATCHED` 4.99737;`btc-dn-0` `LIVE` 4.99116;`btc-dn-0` `LIVE` 4.99 | Filled(3);Filled(3);PartiallyFilled(2) |
+
+### PMK-032 回执未到的下单按签出的哈希查单与定槽
+
+- 规则:[下单](README.md#下单)、[用户流事件表](README.md#用户流事件表)
+- 级别:unit
+- 里程碑:M3
+- 前置:同 PMK-023;`GwCtx` 可写地编码 `Place{UP, Buy, 0.42, 5 份, PostOnly}`(slot 7、gen 3、`TargetRef.id` epoch 5),之后不送 REST 回执(2026-10-23 实盘:回执超过 `ack_timeout_ms`,槽进 `Unknown`)
+- 实现:`crates/venue-polymarket/tests/orders.rs::pmk_032_unacked_place_is_resolved_by_its_signed_hash`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| PMK-032.1 | `Query`,`exch_order_id` 0,目标 client id 同下单;代改为 4;epoch 改为 6 | `GET /data/order/<H>`,H = 下单体各字段的 `order_digest`;`UnknownTarget`;`UnknownTarget` |
+| PMK-032.2 | 用户频道 H `UPDATE` `MATCHED` 4.99737(sink 未绑定 H) | `exch_id(H 键, Some(签出的 client id))`;`Fill{slot 7, gen 3, epoch 5, cum 4 997 370}` + `QueryResult{Filled}` |
+| PMK-032.3 | (只编码过下单的 `GwCtx`)查单应答 200 `MATCHED` 4.99737 | `exch_id(H 键, Some(client id))`;`Ack{slot 7, gen 3, exch_order_id = H 键}`,再 `QueryResult{Filled(3), cum 4 997 370, avg_px 0.42, H 键}`;`events 2` |
+| PMK-032.4 | 同一应答再解码一次 | 只有 `QueryResult` |
 

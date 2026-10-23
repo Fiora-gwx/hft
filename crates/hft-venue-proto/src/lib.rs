@@ -73,12 +73,13 @@ pub trait VenueProtocol: Sized + 'static {
     }
     /// `encode_rest_signed` with the account's gw state: venues whose REST order operations
     /// need run-time bindings or exchange ids kept in `GwCtx` (Polymarket token ids and order
-    /// hashes). The gw calls this entry; the default ignores `ctx`.
+    /// hashes, and the hash of each order it signs). The gw calls this entry; the default
+    /// ignores `ctx`.
     #[allow(clippy::too_many_arguments)]
     fn encode_rest_ctx(
         rd: &RefData,
         t: &Self::Templates,
-        ctx: &Self::GwCtx,
+        ctx: &mut Self::GwCtx,
         cred: &Credential,
         c: &GwCmd,
         tgt: &TargetRef,
