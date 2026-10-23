@@ -962,3 +962,66 @@ fn core_432_polymarket_expiry_window_is_the_gtd_lifetime() {
         assert_eq!(l.setup.oms.unknown_alarm_ms, 30_000, "CORE-432.3");
     }
 }
+
+#[test]
+fn core_433_venue_rest_timeout_and_max_idle() {
+    let d = tempfile::tempdir().unwrap();
+    let path = support::write(d.path(), &d.path().join("hot"), None);
+    let text = std::fs::read_to_string(&path).unwrap();
+    let net_of = |o: &hft_core::config::NetOpts| {
+        let mut n = hft_net::NetConfig::default();
+        o.apply(&mut n);
+        (n.rest_timeout_ms, n.rest_max_idle_ms)
+    };
+    // .1 absent: the NetConfig defaults.
+    let c = hft_core::config::parse(&path).unwrap();
+    assert_eq!(net_of(&c.venues["public"].net), (2000, 0), "CORE-433.1");
+    // .2 configured values replace them.
+    let with = |extra: &str| text.replace("[sim]", &format!("[venues.public.net]\n{extra}\n[sim]"));
+    std::fs::write(&path, with("rest_timeout_ms = 3000\nrest_max_idle_ms = 20000")).unwrap();
+    let c = hft_core::config::parse(&path).unwrap();
+    assert_eq!(net_of(&c.venues["public"].net), (3000, 20_000), "CORE-433.2");
+    // .3 a zero timeout or an unknown key is refused.
+    for (extra, code) in [
+        ("rest_timeout_ms = 0", "BadValue"),
+        ("idle_ms = 1", "ConfigParse"),
+    ] {
+        std::fs::write(&path, with(extra)).unwrap();
+        let e = hft_core::config::load(&path, true).unwrap_err();
+        assert!(e.iter().any(|e| e.code == code), "CORE-433.3 {extra}: {e:?}");
+    }
+    // .4 the live Polymarket configuration: 5000 ms (= OMS ack timeout) and 25 s idle age.
+    #[cfg(feature = "polymarket")]
+    {
+        let v = hft_types::VenueId::POLYMARKET_CLOB;
+        let live = support::PmLive {
+            uid: "0f5e8d2a-1111-2222-3333-".into(),
+            keys_dir: d.path().join("keys"),
+        };
+        let pm = support::write_polymarket_maker_live(
+            d.path(),
+            &d.path().join("hot2"),
+            None,
+            None,
+            "127.0.0.1",
+            "lo",
+            &live,
+        );
+        let l = match hft_core::config::load(&pm, false) {
+            Ok(l) => l,
+            Err(e) => panic!("CORE-433.4 {e:?}"),
+        };
+        let o = l.cfg.venues["pm"].net;
+        assert_eq!(net_of(&o), (5000, 25_000), "CORE-433.4");
+        assert_eq!(l.setup.oms.ack_timeout_ms.get(v), 5000, "CORE-433.4");
+        // .5 a REST timeout above the OMS ack timeout of a venue with a gateway is refused.
+        let t = std::fs::read_to_string(&pm).unwrap();
+        assert!(t.contains("rest_timeout_ms = 5000"), "CORE-433.5");
+        std::fs::write(&pm, t.replace("rest_timeout_ms = 5000", "rest_timeout_ms = 5001")).unwrap();
+        let e = hft_core::config::load(&pm, false).unwrap_err();
+        assert!(
+            e.iter().any(|e| e.code == "RestTimeoutAboveAck"),
+            "CORE-433.5 {e:?}"
+        );
+    }
+}

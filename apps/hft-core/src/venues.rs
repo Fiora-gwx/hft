@@ -357,6 +357,7 @@ where
         stale_guard_ms: v.stale_guard_ms,
     };
     let mut net = hft_net::NetConfig::default();
+    v.net.apply(&mut net);
     let ip = v.src_ip.ok_or_else(|| Error::config("SourceBind", name))?;
     net.src_ips.push(ip);
     net.bind_device.push((

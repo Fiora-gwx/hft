@@ -7,9 +7,12 @@ use crate::support::{
 use hft_event::{GwOp, OrderEventKind, RepMsg, SendStatus};
 use hft_net::{ConnId, EndpointId, RestPool};
 fn setup<const V: u32>() -> Gh<Stub<2048, V>> {
+    setup_net::<V>(net::net_cfg())
+}
+fn setup_net<const V: u32>(cfg: hft_net::NetConfig) -> Gh<Stub<2048, V>> {
     stub::set_cfg(|c| c.rest_query = true);
     let mut h = gw_full::<Stub<2048, V>>(g0(), &[A1], GhOpts::default());
-    let pool = RestPool::new(b"a.test", &net::net_cfg(), mempeer::clock());
+    let pool = RestPool::new(b"a.test", &cfg, mempeer::clock());
     h.rt.set_rest_pools(A1, vec![(EndpointId(0), pool)]).unwrap();
     h.open(3000, 2);
     h.reps();
@@ -567,4 +570,60 @@ fn ven_209_rest_idle_check() {
     assert!(h.rt.conn(other).is_some());
     assert_eq!(h.rt.conn(other).unwrap().sys().recvmsg, b + 2);
     assert!(h.builds.iter().any(|r| r.role == hft_net::ConnRole::Rest));
+}
+
+#[test]
+fn ven_402_idle_rest_lane_rebuilt_before_an_order_uses_it() {
+    const S: u64 = 1_000_000_000;
+    let mut h = setup_net::<V_BINDS_ID>(hft_net::NetConfig {
+        rest_max_idle_ms: 25_000,
+        ..net::net_cfg()
+    });
+    let (r0, r1) = (ConnId(114), ConnId(115));
+    let rest_builds = |h: &Gh<Stub<2048, V_BINDS_ID>>| -> Vec<ConnId> {
+        h.builds
+            .iter()
+            .filter(|b| b.role == hft_net::ConnRole::Rest)
+            .map(|b| b.conn)
+            .collect()
+    };
+    // .1 the first idle check stamps both lanes; nothing is recycled before the age.
+    for now in [S, 25 * S] {
+        for n in 0..8 {
+            h.poll(now + n);
+        }
+    }
+    assert!(h.retired.is_empty() && rest_builds(&h).is_empty(), "VEN-402.1");
+    // .2 at the age one lane retires and its replacement is requested from conn-builder; the
+    // other lane stays installed.
+    for n in 0..8 {
+        h.poll(26 * S + 1 + n);
+    }
+    assert_eq!(h.retired, vec![r0], "VEN-402.2");
+    let b = rest_builds(&h);
+    assert_eq!(b.len(), 1, "VEN-402.2");
+    assert!(h.rt.conn(r1).is_some(), "VEN-402.2");
+    let fresh = b[0];
+    h.complete(fresh);
+    h.poll(26 * S + 10);
+    assert!(h.rt.conn(fresh).is_some(), "VEN-402.2");
+    // .3 the next check recycles the other aged lane; its replacement is built the same way.
+    for n in 0..8 {
+        h.poll(27 * S + 10 + n);
+    }
+    assert_eq!(h.retired, vec![r0, r1], "VEN-402.3");
+    let b: Vec<_> = rest_builds(&h).into_iter().filter(|c| *c != fresh).collect();
+    assert_eq!(b.len(), 1, "VEN-402.3");
+    h.complete(b[0]);
+    h.poll(27 * S + 20);
+    // .4 a REST place goes out on a rebuilt connection, never on a recycled one.
+    let sent = |h: &mut Gh<Stub<2048, V_BINDS_ID>>, c: ConnId| h.rt.conn(c).map_or(0, |c| c.sys().sendmsg);
+    let before = sent(&mut h, fresh) + sent(&mut h, b[0]);
+    h.reps();
+    let p = h.place(A1, 7, 3, S1, false);
+    h.cmd(p);
+    h.poll(28 * S);
+    assert_eq!(reports(&h.reps())[0].status, SendStatus::Written, "VEN-402.4");
+    assert_eq!(sent(&mut h, fresh) + sent(&mut h, b[0]), before + 1, "VEN-402.4");
+    assert!(h.rt.conn(r0).is_none() && h.rt.conn(r1).is_none(), "VEN-402.4");
 }

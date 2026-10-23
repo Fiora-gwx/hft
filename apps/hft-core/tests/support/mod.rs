@@ -738,10 +738,18 @@ pub const PM_LIVE_PARAMS: [(&str, i64); 9] = [
     ("max_window_cost", 20_000_000),
 ];
 
+/// Live Polymarket: OMS `ack_timeout_ms` and the REST request timeout (equal: the answer is read
+/// as long as the OMS waits for it), and the REST connections' maximum idle age.
+#[allow(dead_code)]
+pub const PM_REST_TIMEOUT_MS: u32 = 5000;
+#[allow(dead_code)]
+pub const PM_REST_MAX_IDLE_MS: u32 = 25_000;
+
 /// The live maker (`order_env = "prod"`, no `--dry-run`): the maker simulation's venues, slots and
 /// strategy with a Live account `pm-live` (`is_prod`, UID `live.uid`) on Polymarket, its keys in
 /// `live.keys_dir`, `PM_LIVE_PARAMS`, the micro risk limits (order 10 USDC, account and venue
-/// 55, slot group 25, daily loss 15) and OMS `ack_timeout_ms[polymarket] = 5000`; every Polymarket
+/// 55, slot group 25, daily loss 15), OMS `ack_timeout_ms[polymarket] = 5000` and the REST pools'
+/// `venues.pm.net` (`rest_timeout_ms = 5000`, `rest_max_idle_ms = 25000`); every Polymarket
 /// config sets OMS `expire_window_ms[polymarket]` to the GTD lifetime (`stale_guard()`).
 #[cfg(feature = "polymarket")]
 #[allow(dead_code)]
@@ -1231,8 +1239,9 @@ fn write_pm(
         // A SmokeOrder bids half the ask (an outcome token at 0.50 → 0.25): it must never fill.
         engine.oms.smoke_far_bp = Rate(500_000_000);
         // A REST place answer can take over 2 s (2026-10-23, round trips otherwise up to 0.76 s);
-        // a slot that goes Unknown on time-out only resolves by query.
-        engine.oms.ack_timeout_ms.set(v, 5000);
+        // a slot that goes Unknown on time-out only resolves by query. The REST pool waits as long
+        // (`venues.pm.net.rest_timeout_ms`, at most this value).
+        engine.oms.ack_timeout_ms.set(v, PM_REST_TIMEOUT_MS);
     }
     engine.exec.default.force_slice.max_chunk_notional = Notional(10_000_000);
     let ecf = engine.encode_blob(1, HostClass::Dev2, 0);
@@ -1374,6 +1383,16 @@ quote_interval_ms = 1000
             toml::from_str(
                 "timeout_ms=5000\ninterval_ms=60000\nrequest_gap_ms=200\nmax_cancel_rounds=3\nlisten_keepalive_ms=600000",
             )
+            .unwrap(),
+        );
+        // A place answer is read up to the OMS ack timeout (tail 0.8 s, multi-second at window
+        // starts); an idle REST connection is rebuilt after 25 s, before a middlebox can drop it
+        // silently (hft-net "9. REST 客户端").
+        pm.insert(
+            "net".into(),
+            toml::from_str(&format!(
+                "rest_timeout_ms={PM_REST_TIMEOUT_MS}\nrest_max_idle_ms={PM_REST_MAX_IDLE_MS}"
+            ))
             .unwrap(),
         );
         let threads = config["threads"].as_array_mut().unwrap();

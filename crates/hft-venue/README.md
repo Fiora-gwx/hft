@@ -237,7 +237,7 @@ pub struct AcctDeps {
 | `gw.cmds_per_loop` | u16 | 16 | 每次 `drain_out()` 最多取的 `GwCmd` |
 | `gw.cmds_per_account_per_loop` | u16 | 8 | 每账户每轮最多发送的订单类 `GwCmd`(超出的下一轮先发) |
 | `gw.aux_every` | u16 | 8 | standby 下单连接与 gw 的 REST 池中**有在途请求**的连接每 N 圈 poll 一次;primary 与独立 UserStream 连接每圈都 poll(§4) |
-| `gw.rest_idle_check_ms` | u32 | 1000 | gw 的 REST 连接没有在途请求时不读;每隔此时长对这些空闲连接做一次存活检查(hft-net `RestPool::idle_check`:各读一次,对端已关闭即退役补建)。snap-fetch 与 acct-fetch 的 REST 池按同一间隔检查 |
+| `gw.rest_idle_check_ms` | u32 | 1000 | gw 的 REST 连接没有在途请求时不读;每隔此时长对这些空闲连接做一次存活检查(hft-net `RestPool::idle_check`:各读一次,对端已关闭即退役补建;hft-net `rest_max_idle_ms` 非 0 时同一次检查另退役一条空闲过久的连接,补建经 build 环交给 conn-builder,下单不在新建中的连接上发出)。snap-fetch 与 acct-fetch 的 REST 池按同一间隔检查 |
 | `gw.rotate_wait_max_ms` | u32 | 60000 | 计划切换等待"无在途"的上限;超时放弃本次,再过同样时长后重新开始等待 |
 | `gw.warm_interval_ns` | u64 | 0(关) | 空闲时"填帧 + 掩码 + scratch 加密"预热;可选,默认关,启用条件:直方图证明冷路径代价显著 |
 | `gw.id_table_cap` | u32 | 16384 | 每账户 exch id 表容量(2 的幂,≥ 2 × (OMS 槽数 + `gw.id_tomb_cap`),负载 ≤ 0.5;不满足 → `InitErr::IdTableCap`) |
@@ -480,7 +480,7 @@ struct GwAccount<P: VenueProtocol> {
 
 1. **primary 下单连接**:`poll_rx`,再逐帧 `next_frame` → 处理回报(第 2 步)→ **每处理完一帧立即 `drain_out()`**(第 1 步);无帧时 poll 完也 `drain_out()` 一次。
 2. **独立 UserStream 连接**(有的话,如 Binance USDT-M 的成交只从这里来):**每圈都 poll**,规则同上(每帧之后 `drain_out()`)。
-3. 每 `gw.aux_every` 圈:standby 连接,以及 gw 的 REST 池中有在途请求的连接(`RestPool::poll` 只读这些),**每 poll 完一个 socket `drain_out()` 一次**。没有在途请求的 REST 连接不读,每 `gw.rest_idle_check_ms` 做一次存活检查(`RestPool::idle_check`,同样每个 socket 之后 `drain_out()` 一次)。gw 不用就绪探测(`epoll_pwait(0)` 只给行情线程,[hot-path-rules T7](../../docs/hot-path-rules.md))。
+3. 每 `gw.aux_every` 圈:standby 连接,以及 gw 的 REST 池中有在途请求的连接(`RestPool::poll` 只读这些),**每 poll 完一个 socket `drain_out()` 一次**。没有在途请求的 REST 连接不读,每 `gw.rest_idle_check_ms` 做一次存活检查(`RestPool::idle_check`,同样每个 socket 之后 `drain_out()` 一次;空闲达 hft-net `rest_max_idle_ms` 的连接在此退役,退役与补建同对端关闭:`take_retired` 交回 conn-builder,`next_build` 发 `BuildReq{role: Rest}`,交接后装入池;REST 请求不重发)。gw 不用就绪探测(`epoll_pwait(0)` 只给行情线程,[hot-path-rules T7](../../docs/hot-path-rules.md))。
 
 全部账户处理完后:**acct 记录**——至多应用一条(§4a),排在本圈最后一次 `drain_out()` 之后。这样出环里的订单最多等一条回报帧的处理时间(或一个空 socket 的 poll、一条 acct 记录的应用),而不是一整批回报或一整圈;对冲第二腿的主机内等待计入 `hedge_host`([latency-budget](../../docs/latency-budget.md))。
 

@@ -13,11 +13,22 @@ fn req(tag: u64) -> RestReq<'static> {
     }
 }
 fn setup<const N: usize>(rx: u32) -> (RestPool<N>, Vec<MemPeer>) {
-    let cfg = NetConfig {
+    setup_cfg(NetConfig {
         rx_buf: RoleBytes::all(rx),
         rest_timeout_ms: 2000,
         ..NetConfig::default()
-    };
+    })
+}
+fn rest_conn(cfg: &NetConfig, id: u8) -> (Handoff, MemPeer) {
+    let (c, s) = mempeer::pair_with(Opts {
+        id: ConnId(id),
+        role: ConnRole::Rest,
+        cfg: ConnCfg::from_net(cfg, ConnRole::Rest),
+        ..Opts::default()
+    });
+    (Handoff::test_from_conn(c), s)
+}
+fn setup_cfg<const N: usize>(cfg: NetConfig) -> (RestPool<N>, Vec<MemPeer>) {
     let mut p = RestPool::new(b"a.test", &cfg, mempeer::clock());
     let mut peers = Vec::new();
     for id in 0..N {
@@ -363,4 +374,84 @@ fn net_264_cancel_retires_lane_and_discards_late_response() {
     p.retire_all();
     assert_eq!(p.take_retired().unwrap().id(), ConnId(2));
     assert!(p.get(ConnId(2)).is_none());
+}
+
+#[test]
+fn net_278_rest_timeout_from_config() {
+    let (mut p, mut s) = setup_cfg::<2>(NetConfig {
+        rest_timeout_ms: 5000,
+        ..NetConfig::default()
+    });
+    // .1 a slow answer inside the configured timeout is read.
+    p.submit(&req(31), 0).unwrap();
+    assert!(p.poll(2_000_000_000).is_none(), "NET-278.1");
+    deliver(&mut p, &mut s[0], 1, OK, 4_999_999_999);
+    let r = p.poll(4_999_999_999).unwrap().unwrap();
+    assert_eq!((r.tag, r.body), (31, b"hello".as_slice()), "NET-278.1");
+    assert!(p.take_retired().is_none(), "NET-278.1");
+    // .2 no answer: Timeout exactly at the configured value.
+    p.submit(&req(32), 10_000_000_000).unwrap();
+    assert!(p.poll(14_999_999_999).is_none(), "NET-278.2");
+    assert_eq!(
+        p.poll(15_000_000_000).unwrap().unwrap_err(),
+        RestFail {
+            tag: 32,
+            err: RestErr::Timeout
+        },
+        "NET-278.2"
+    );
+    assert_eq!(p.take_retired().unwrap().id(), ConnId(1), "NET-278.2");
+}
+
+#[test]
+fn net_279_idle_connection_recycled() {
+    const IDLE: u64 = 25_000_000_000;
+    // .1 rest_max_idle_ms = 0: an idle connection is never recycled.
+    let (mut p, _s) = setup::<2>(65536);
+    for now in [0, IDLE, 1_000 * IDLE] {
+        assert_eq!(p.idle_check(now), 2, "NET-279.1");
+    }
+    assert!(p.take_retired().is_none(), "NET-279.1");
+    let cfg = NetConfig {
+        rest_max_idle_ms: 25_000,
+        ..NetConfig::default()
+    };
+    let (mut p, mut s) = setup_cfg::<2>(cfg.clone());
+    // .2 both idle since the first check; one is retired when it reaches the age, not before.
+    p.idle_check(0);
+    p.idle_check(IDLE - 1);
+    assert!(p.take_retired().is_none(), "NET-279.2");
+    p.idle_check(IDLE);
+    let r = p.take_retired().unwrap();
+    assert_eq!(r.id(), ConnId(1), "NET-279.2");
+    assert!(r.why.contains(ErrBits::IDLE_TIMEOUT), "NET-279.2");
+    assert!(p.take_retired().is_none(), "NET-279.2");
+    assert_eq!(p.next_build(IDLE), Some(BuildWhy::Fill), "NET-279.2");
+    // .3 while the replacement is built the other aged connection stays and serves requests.
+    p.idle_check(IDLE + 1);
+    assert!(p.take_retired().is_none(), "NET-279.3");
+    p.submit(&req(41), IDLE + 2).unwrap();
+    assert_eq!(p.pending_conn(41), Some(ConnId(2)), "NET-279.3");
+    deliver(&mut p, &mut s[1], 2, OK, IDLE + 3);
+    assert_eq!(p.poll(IDLE + 3).unwrap().unwrap().tag, 41, "NET-279.3");
+    // .4 the fresh connection installed; the other one's age restarted at its response.
+    let (h, _fresh) = rest_conn(&cfg, 3);
+    assert_eq!(p.install(h), Ok(ConnId(3)), "NET-279.4");
+    p.idle_check(IDLE + 4);
+    p.idle_check(2 * IDLE + 2);
+    assert!(p.take_retired().is_none(), "NET-279.4");
+    p.idle_check(2 * IDLE + 3);
+    assert_eq!(p.take_retired().unwrap().id(), ConnId(2), "NET-279.4");
+    // .5 an in-flight request is never recycled; the fresh connection carries it.
+    p.submit(&req(42), 2 * IDLE + 4).unwrap();
+    assert_eq!(p.pending_conn(42), Some(ConnId(3)), "NET-279.5");
+    let (h, _other) = rest_conn(&cfg, 4);
+    p.next_build(2 * IDLE + 4);
+    p.install(h).unwrap();
+    p.idle_check(10 * IDLE);
+    assert!(p.take_retired().is_none(), "NET-279.5");
+    p.idle_check(11 * IDLE);
+    let r = p.take_retired().unwrap();
+    assert_eq!(r.id(), ConnId(4), "NET-279.5");
+    assert_eq!(p.pending_conn(42), Some(ConnId(3)), "NET-279.5");
 }

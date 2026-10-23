@@ -56,7 +56,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 多账户 | CORE-330、CORE-168、CORE-247、CORE-313、CORE-427、CORE-428 |
 | HostProfile | CORE-340–CORE-343、CORE-419 |
 | HeartbeatBlock | CORE-350–CORE-352 |
-| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423 |
+| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433 |
 | 实现说明 | CORE-380–CORE-387、CORE-409、CORE-415–CORE-418、CORE-420 |
 | 延迟与资源契约 | CORE-400–CORE-408、CORE-267 |
 | 测试与验收 | 不适用:非规范 |
@@ -4511,3 +4511,19 @@ CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 S
 | CORE-432.1 | refdata 中 Polymarket 的 `stale_guard` | `ExpireAt`(与 `PolymarketClob::stale_guard()` 同类) |
 | CORE-432.2 | OMS `expire_window_ms[polymarket]` | `PolymarketClob::stale_guard()` 的 `default_ms`(300 000);`not_found_grace_of` = 300 500 |
 | CORE-432.3 | OMS `unknown_alarm_ms` | 30 000(不改;`ExpireAt` 非链接槽的告警由 OMS 顺延 grace) |
+
+### CORE-433 REST 请求超时与空闲回收按 venue 配置(`venues.<v>.net`)
+
+- 规则:[配置文件字段](README.md#配置文件字段);键的语义归 [hft-net 配置项](../../crates/hft-net/README.md#配置项)
+- 级别:table
+- 里程碑:M3
+- 前置:`support::write` 的离线配置;`write_polymarket_maker_live`(Cargo feature `polymarket`)
+- 实现:`apps/hft-core/tests/config.rs::core_433_venue_rest_timeout_and_max_idle`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-433.1 | 未配置 | `NetOpts::apply` 后 `rest_timeout_ms = 2000`、`rest_max_idle_ms = 0`(hft-net 默认) |
+| CORE-433.2 | `[venues.public.net] rest_timeout_ms = 3000`、`rest_max_idle_ms = 20000` | 3000、20 000 |
+| CORE-433.3 | `rest_timeout_ms = 0`;未知键 `idle_ms` | `BadValue`;`ConfigParse` |
+| CORE-433.4 | Polymarket 实盘做市配置 | 加载成功;`venues.pm.net` = 5000、25 000;OMS `ack_timeout_ms[polymarket]` = 5000 |
+| CORE-433.5 | 同上改 `rest_timeout_ms = 5001` | 含 `RestTimeoutAboveAck` |

@@ -76,6 +76,7 @@ sequencer 的 `StepOutcome::Done{cause}` 到退出码的映射(cause 的定义�
 | `SimAccountInProdInstance` / `LiveAccountInSimInstance` / `EnvAccountMismatch` / `ProdAccountOnDev2` / `AccountNamePrefix` / `DevBuildWithProdAccount` | 2 | 见[实例角色](#实例角色prod-与-sim) |
 | `EnvCombo` | 2 | `feed_env = "testnet"` 而 `order_env = "prod"`;`sim` 实例出现 `order_env` 或 `feed_env = "testnet"`;`prod` 实例的 `order_env` 不是 `testnet`/`prod` |
 | `ProdOrderVenue` | 2 | `order_env = "prod"` 而某个带账户的 venue 不在正式下单白名单(当前只有 `polymarket-clob`,[实例角色](#实例角色prod-与-sim)) |
+| `RestTimeoutAboveAck` | 2 | 带账户的 venue 的 REST 请求超时(`venues.<v>.net.rest_timeout_ms`,缺省 hft-net 默认)大于 EngineConfig 中该 venue 的 OMS `ack_timeout_ms`([配置文件字段](#配置文件字段)) |
 | `AccountMismatch` | 2 | `[[accounts]]` 的 `id`/`label` 与 refdata `AccountMeta` 不一致,或引用 refdata 中没有的账户 |
 | `SecretsInSim` | 2 | `sim` 实例出现 `paths.secrets_dir` 或任一 `[[accounts]].keys` |
 | `LiveFeed` | 2 | 网络模式(非 `--dry-run`)出现 `venues.<v>.live_feed` |
@@ -754,6 +755,7 @@ refdata 不做热替换(可选扩展:允许热替换的变更集,触发条件:Dr
 | `venues.<v>.feed.conns` | [`{stream, src_ip}`] | 行情连接的出口地址:`stream ∈ bbo\|md`;`src_ip` 须在本实例的出口 IP 列表内(启用 ENI-B2 时 `md` 可用 `prod_bulk` 的地址)。snap-fetch 的公共 REST 连接没有单独的键:复用该 venue 第一条 `stream = md` 条目的 `src_ip`。BBO 赛马的条数与 md 连接的组织归 hft-venue(`feed.bbo_conns` 等) | 必填 |
 | `venues.<v>.feed.*` / `venues.<v>.snap.*` / `venues.<v>.conn.*` / `venues.<v>.gw.*`(其余键) | — | hft-venue 的运行时配置(`feed.raw.bbo`/`feed.raw.md`、`feed.bbo_frames_per_poll`、`snap.parallel` 等;各 REST 连接数也在其中),键名、默认值与语义归 [hft-venue 配置项](../../crates/hft-venue/README.md#配置项) | raw 模式按[内存表](#内存与-journal-段按主机类唯一归属);`feed.depth_conns` 缺省时,有 Bbo 路由的协议取 hft-venue 默认 1,没有 Bbo 路由的协议(Polymarket:深度流就是整簿,交易所会单独断开连接)取 2;其余按 hft-venue 默认 |
 | `venues.<v>.gw.accounts` / `.gw.src_ip` | [string] / {account → ip} | 在该 venue 下单的 Live 账户(按 `AccountMeta.label`)与出口 IP(只能是 ENI-B 的地址);acct-fetch 对该账户的连接复用同一 `src_ip` | 有 Live 账户时必填 |
+| `venues.<v>.net.rest_timeout_ms` / `.net.rest_max_idle_ms` | u32 / u32 | 该 venue 全部 REST 池(gw、snap-fetch)的 hft-net `NetConfig` 键:请求超时与空闲连接回收时长(语义归 [hft-net 配置项](../../crates/hft-net/README.md#配置项));`rest_timeout_ms = 0` → `BadValue`;带账户的 venue 要求 `rest_timeout_ms` ≤ 该 venue 的 OMS `ack_timeout_ms`(EngineConfig),否则 `RestTimeoutAboveAck`。Polymarket 实盘配置(`pm_sim_config --live`)取 5 000 / 25 000,与 OMS `ack_timeout_ms[polymarket] = 5000` 相等 | hft-net 默认(2 000 / 0 = 不回收) |
 | `venues.<v>.gw.rest_endpoints` | [host] | gw REST 池连接的主机列表;请求以下标 `RestReqBuf.endpoint` 选择端点(语义归 [hft-venue](../../crates/hft-venue/README.md)),例:Binance USD-M 的身份查询走现货 REST 主机 | 该 `venue-*` 默认 |
 | `venues.<v>.endpoint_override` / `test.extra_ca` | string / path | 只在 `order_env = "testnet"` 或 `feed_env = "testnet"` 的配置,以及 `sim` 实例(只改行情与 REST 快照端点;不持 key、不下单)出现(交易所测试网、可选的 mock-exchange 或 CI 的假交易所);每个生效的 `endpoint_override`(测试网配置与 `sim` 实例)在步 5 写一条 `Note{EndpointOverride}`(P1,`v[0]` = venue;码由 hft-event 登记),防止误把实例指向假行情;额外 CA 只在存在 `endpoint_override` 时加载;`order_env = "prod"` 的配置出现任一项即退出 2(`EndpointOverrideInProd`) | 无 |
 | `[[accounts]].id` / `.label` | u8 / string | 必须与 refdata `AccountMeta.id`/`AccountMeta.label` 一致;账户名前缀规则见[实例角色](#实例角色prod-与-sim) | 必填 |

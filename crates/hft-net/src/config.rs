@@ -106,7 +106,14 @@ pub struct NetConfig {
     pub reconnect_backoff_ms: (u32, u32),
     pub rotate_stagger_s: u32,
     pub warm_interval_ns: u64,
+    /// A REST request without a complete response this long after `submit` fails with
+    /// `RestErr::Timeout` (the connection retires; a late answer is never read). Must not exceed
+    /// the OMS `ack_timeout_ms` of the venue.
     pub rest_timeout_ms: u32,
+    /// A pooled REST connection with no request for this long is retired by `idle_check` and
+    /// rebuilt off the hot thread before it is used again (one per check, only while the pool is
+    /// full); 0 = never.
+    pub rest_max_idle_ms: u32,
     pub ts_expect_hw: bool,
     pub tls_mode: TlsMode,
 }
@@ -144,6 +151,7 @@ impl Default for NetConfig {
             rotate_stagger_s: 3600,
             warm_interval_ns: 0,
             rest_timeout_ms: 2000,
+            rest_max_idle_ms: 0,
             ts_expect_hw: true,
             tls_mode: TlsMode::Unbuffered,
         }

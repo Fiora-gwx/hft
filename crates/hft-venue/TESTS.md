@@ -36,7 +36,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 | 出环:`OutMsg = GwCmd` | VEN-194、VEN-196、VEN-199–VEN-206、VEN-214、VEN-235–VEN-238、VEN-240、VEN-241、VEN-391、VEN-392 |
 | 运行时入口 | VEN-007、VEN-011、VEN-013、VEN-071、VEN-084、VEN-085、VEN-161、VEN-210、VEN-245、VEN-264 |
 | 产生与消费的事件 | VEN-005、VEN-065、VEN-160、VEN-205、VEN-233、VEN-242、VEN-243、VEN-303、VEN-320、VEN-321 |
-| 配置项 | VEN-006、VEN-008–VEN-012、VEN-015–VEN-017、VEN-028、VEN-067、VEN-068、VEN-076、VEN-080、VEN-081、VEN-159、VEN-176、VEN-208、VEN-209、VEN-219、VEN-222、VEN-229、VEN-234、VEN-239、VEN-246、VEN-251、VEN-253、VEN-256、VEN-257、VEN-261、VEN-293、VEN-301、VEN-388、VEN-393、VEN-398 |
+| 配置项 | VEN-006、VEN-008–VEN-012、VEN-015–VEN-017、VEN-028、VEN-067、VEN-068、VEN-076、VEN-080、VEN-081、VEN-159、VEN-176、VEN-208、VEN-209、VEN-219、VEN-222、VEN-229、VEN-234、VEN-239、VEN-246、VEN-251、VEN-253、VEN-256、VEN-257、VEN-261、VEN-293、VEN-301、VEN-388、VEN-393、VEN-398、VEN-402 |
 | 实现说明 | 不适用:见子节 |
 | 1. 线程与环(由 hft-core 装配) | VEN-013、VEN-020–VEN-027、VEN-030–VEN-036、VEN-069–VEN-074、VEN-086、VEN-087、VEN-212、VEN-380、VEN-383 |
 | 2. `FeedRuntime::poll_once` 的固定顺序 | VEN-017、VEN-040–VEN-046、VEN-050–VEN-056、VEN-060–VEN-069、VEN-075、VEN-077–VEN-084、VEN-330、VEN-367、VEN-384 |
@@ -44,7 +44,7 @@ VEN-051 验证 BBO 帧限额留下的完整缓冲在下一轮不重复 recv。VE
 | 3a. BBO 连接健康 | VEN-026、VEN-031、VEN-075、VEN-076、VEN-079、VEN-082、VEN-103、VEN-104、VEN-120–VEN-134、VEN-360、VEN-389 |
 | 3b. 快照获取(snap-fetch) | VEN-002、VEN-007、VEN-130、VEN-133、VEN-150–VEN-163、VEN-387、VEN-395 |
 | 3c. 分档快照(DepthTopN) | VEN-028、VEN-074、VEN-078、VEN-170–VEN-176、VEN-330、VEN-385、VEN-397、VEN-399 |
-| 4. `GwRuntime::poll_once` 的循环结构 | VEN-014、VEN-190–VEN-249、VEN-357、VEN-369、VEN-386、VEN-389、VEN-391–VEN-393 |
+| 4. `GwRuntime::poll_once` 的循环结构 | VEN-014、VEN-190–VEN-249、VEN-357、VEN-369、VEN-386、VEN-389、VEN-391–VEN-393、VEN-402 |
 | 4a. 账户查询:保证金轮询与配置核验 | VEN-003、VEN-007、VEN-015、VEN-211、VEN-225、VEN-227、VEN-250–VEN-265、VEN-313、VEN-364、VEN-365、VEN-389、VEN-390、VEN-395 |
 | 4b. 私有频道归属与热备连接 | VEN-014、VEN-241、VEN-270–VEN-276、VEN-381 |
 | 5. 心跳 | VEN-120、VEN-134、VEN-280–VEN-283 |
@@ -3773,3 +3773,17 @@ warm REST 与网关 REST 池沿用各自账户持有的凭证,通过 signed 入�
 | VEN-401.1 | `Deliver{A1, S1, payout 1000, end_s 1300, qty 5000}` | 一条 `ExternalFill{A1, S1, Sell, Delivery, qty 5000, px 1000, fee 0, exch_order_id 1300, trade_id 0, fill_seq 5000, ex_ts_ns 1300 × 10⁹}` |
 | VEN-401.2 | 同一命令再来;A9(不归本 gw);`qty 0` | 不报;`delivered` 共 +1,`maint_ignored` +3 |
 
+### VEN-402 空闲过久的 REST 连接在下单使用之前逐条退役并在后台补建
+
+- 规则:[§4](README.md#4-gwruntimepoll_once-的循环结构)、[配置项](README.md#配置项)、[hft-net 9. REST 客户端](../hft-net/README.md#9-rest-客户端)
+- 级别:table
+- 里程碑:M3
+- 前置:`StubProto`(`V_BINDS_ID`:`Place` 走 REST);`G0`(`gw.rest_idle_check_ms = 1000`);A1 的 REST 池 `rest_max_idle_ms = 25000`,连接 114、115 于 3000 ns 交接;`S` = 10⁹
+- 实现:`crates/hft-venue/tests/gw_rest.rs::ven_402_idle_rest_lane_rebuilt_before_an_order_uses_it`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| VEN-402.1 | 轮询于 `S`(首次检查,开始计时)与 `25S` | 无退役、无 REST `BuildReq` |
+| VEN-402.2 | 轮询于 `26S + 1` | 只有 114 退役;恰一条 REST `BuildReq`(conn-builder 建连);115 仍在池中;完成该建连后新连接装入池 |
+| VEN-402.3 | 轮询于 `27S + 10` | 115 退役,另一条 REST `BuildReq`;完成后装入 |
+| VEN-402.4 | `Place{A1, slot 7, gen 3, S1}` 于 `28S` | `SendReport{Written}`;请求在补建的连接上发出(两条新连接的 `sendmsg` 合计 +1);114、115 都不在池中 |

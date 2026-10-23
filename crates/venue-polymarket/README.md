@@ -168,7 +168,7 @@ CLOB V2(2026-04-28 起生产只接受 V2)的签名,`src/sign.rs`,纯函数、不
 
 ### 下单
 
-全部订单类 op 走 REST(`order_channel = Rest`),由 `encode_rest_ctx` 编码(它读 `GwCtx` 里运行期绑定的 token id 与订单哈希,`Place` 另写入签出的订单哈希;不带 `GwCtx` 的 `encode_rest_signed` 一律 `Unsupported`)。每个请求带 L2 头:`POLY_ADDRESS`(EOA,EIP-55)、`POLY_SIGNATURE`(L2 HMAC,见[签名](#签名))、`POLY_TIMESTAMP`(秒)、`POLY_API_KEY`、`POLY_PASSPHRASE`,有请求体时另加 `Content-Type: application/json`(账户查询不加:hft-venue 的账户客户端自己写);每行以 CRLF 结尾;`redacted = true`。
+全部订单类 op 走 REST(`order_channel = Rest`),由 `encode_rest_ctx` 编码(它读 `GwCtx` 里运行期绑定的 token id 与订单哈希,`Place` 另写入签出的订单哈希;不带 `GwCtx` 的 `encode_rest_signed` 一律 `Unsupported`)。每个请求带 L2 头:`POLY_ADDRESS`(EOA,EIP-55)、`POLY_SIGNATURE`(L2 HMAC,见[签名](#签名))、`POLY_TIMESTAMP`(秒)、`POLY_API_KEY`、`POLY_PASSPHRASE`,有请求体时另加 `Content-Type: application/json`(账户查询不加:hft-venue 的账户客户端自己写);每行以 CRLF 结尾;`redacted = true`。 `POST /order` 的应答通常 < 0.8 s,窗口开始时偶尔数秒;gw 的 REST 池因此在实盘配置中等到与 OMS `ack_timeout_ms` 相同的 5 s,并在空闲 25 s 后回收重建连接(防止中间设备静默丢弃的 keep-alive 连接让下单超时),取值归 [hft-core 配置文件字段](../../apps/hft-core/README.md#配置文件字段) 的 `venues.<v>.net.*`。
 
 | op | 请求 | 说明 |
 |---|---|---|

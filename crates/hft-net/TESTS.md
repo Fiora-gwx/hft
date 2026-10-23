@@ -29,7 +29,7 @@ NET-040 检查 300 B、2 KiB、8 KiB 的连续 TLS 记录直接借用解密位�
 | 类型总览 | NET-011、NET-287 |
 | 签名草案 | NET-001–NET-010、NET-026、NET-029、NET-042、NET-043、NET-060、NET-062–NET-066、NET-082、NET-084、NET-085、NET-100–NET-102、NET-122、NET-130、NET-150、NET-158–NET-161、NET-200、NET-202、NET-203、NET-220–NET-227、NET-240–NET-253、NET-271、NET-272、NET-274、NET-275、NET-362 |
 | 调用约束 | NET-011、NET-041、NET-065、NET-090、NET-155、NET-156、NET-180、NET-212、NET-220、NET-245、NET-287 |
-| 配置项 | NET-038、NET-044、NET-099、NET-121、NET-157、NET-199、NET-207、NET-209、NET-213、NET-250、NET-264、NET-265、NET-300–NET-302、NET-340–NET-342、NET-360、NET-375 |
+| 配置项 | NET-038、NET-044、NET-099、NET-121、NET-157、NET-199、NET-207、NET-209、NET-213、NET-250、NET-264、NET-265、NET-278、NET-279、NET-300–NET-302、NET-340–NET-342、NET-360、NET-375 |
 | 实现说明 | 不适用:见子节 |
 | 1. 接收路径 | NET-020–NET-044、NET-080–NET-099、NET-120、NET-127、NET-335、NET-340、NET-374 |
 | 2. 发送路径 | NET-060、NET-061、NET-065、NET-066、NET-150–NET-163、NET-341、NET-342 |
@@ -39,7 +39,7 @@ NET-040 检查 300 B、2 KiB、8 KiB 的连续 TLS 记录直接借用解密位�
 | 6. 源端口预计算(`RssPlan`,可选) | NET-350–NET-353 |
 | 7. 时间戳 | NET-002、NET-080、NET-081、NET-120–NET-136、NET-274、NET-337、NET-360–NET-362、NET-370、NET-373、NET-376 |
 | 8. `ConnPool` 与轮换 | NET-240–NET-254 |
-| 9. REST 客户端 | NET-260–NET-277、NET-336 |
+| 9. REST 客户端 | NET-260–NET-279、NET-336 |
 | 10. 内存 | NET-285、NET-287 |
 | 11. 源文件规划 | NET-164、NET-080 |
 | 延迟与资源契约 | NET-086、NET-267、NET-285、NET-286、NET-320–NET-331 |
@@ -2287,6 +2287,35 @@ Linux 回环扩展验证 TxWrite 的真实 syscall pre/post 与 SendOk 同一次
   - 热线程阶段 `SysCount` 中 `connect`、`shutdown`、`close`、`getaddrinfo`、`epoll_ctl` 的增量都为 0
 - 实现:`crates/hft-net/tests/rest.rs::net_277_hot_rest_never_manages_connections`
 
+### NET-278 rest_timeout_ms 取配置值
+
+- 规则:[9. REST 客户端](README.md#9-rest-客户端)、[配置项](README.md#配置项)
+- 级别:table
+- 里程碑:M3
+- 前置:`MemPeer`;测试时钟(1 tick = 1 ns);`RestPool::<2>`,`rest_timeout_ms = 5000`
+- 实现:`crates/hft-net/tests/rest.rs::net_278_rest_timeout_from_config`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| NET-278.1 | `submit` 于 0(tag 31);`poll(2·10⁹)`;响应于 `5·10⁹ − 1` 到达并 `poll` | `None`;随后 `Ok(tag 31, body = hello)`,连接不退役 |
+| NET-278.2 | `submit` 于 `10¹⁰`(tag 32),不回;`poll(1.5·10¹⁰ − 1)`、`poll(1.5·10¹⁰)` | `None`;`Err(RestFail{tag: 32, err: Timeout})`,该连接退役 |
+
+### NET-279 rest_max_idle_ms:空闲连接逐条退役并补建,池里始终留一条
+
+- 规则:[9. REST 客户端](README.md#9-rest-客户端)、[签名草案](README.md#签名草案)、[配置项](README.md#配置项)
+- 级别:table
+- 里程碑:M3
+- 前置:`MemPeer`;测试时钟;`RestPool::<2>`,连接 1、2 已交接;`I` = 25·10⁹(`rest_max_idle_ms = 25000`,第 1 行为 0)
+- 实现:`crates/hft-net/tests/rest.rs::net_279_idle_connection_recycled`
+
+| 行 | 操作 | 期望 |
+|---|---|---|
+| NET-279.1 | `rest_max_idle_ms = 0`;`idle_check` 于 0、`I`、`1000·I` | 每次 2;不退役 |
+| NET-279.2 | `idle_check` 于 0、`I − 1`、`I` | 前两次不退役;`I` 时只退役连接 1(`why` 含 `IDLE_TIMEOUT`),`next_build` = `Some(Fill)` |
+| NET-279.3 | 补建未交接;`idle_check(I + 1)`;`submit` tag 41 并收到应答于 `I + 3` | 连接 2 不退役(池不满、有在建);tag 41 走连接 2 |
+| NET-279.4 | 交接连接 3;`idle_check` 于 `I + 4`、`2I + 2`、`2I + 3` | 前两次不退役(连接 2 的空闲从 `I + 3` 的应答算起);`2I + 3` 退役连接 2 |
+| NET-279.5 | 连接 3 上 tag 42 在途;交接连接 4;`idle_check` 于 `10I`、`11I` | `10I` 不退役(连接 4 从此刻算起);`11I` 只退役连接 4,在途的连接 3 不受影响 |
+
 ### NET-285 稳态收发零分配
 
 - 规则:[延迟与资源契约](README.md#延迟与资源契约)、[10. 内存](README.md#10-内存)
@@ -2365,6 +2394,7 @@ Linux 回环扩展验证 TxWrite 的真实 syscall pre/post 与 SendOk 同一次
 | NET-300.13 | `rest_timeout_ms` | 2000 |
 | NET-300.14 | `ts_expect_hw` | true |
 | NET-300.15 | `tls_mode` | `Unbuffered` |
+| NET-300.16 | `rest_max_idle_ms` | 0 |
 
 ### NET-301 tcp_user_timeout_ms 原样写进 socket
 
