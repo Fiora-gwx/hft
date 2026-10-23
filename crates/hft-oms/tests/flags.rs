@@ -21,7 +21,7 @@ fn oms_021_slot_flags_never_on_wire() {
     h.ack(s, 777, 1);
     let t = h.place_ok(&sell_y(), 1);
     h.ack(t, 778, 2);
-    let all = SlotFlags::ALL & !SlotFlags::CANCEL_SENT & !SlotFlags::AMEND_SENT;
+    let all = SlotFlags::ALL & !SlotFlags::CANCEL_SENT & !SlotFlags::AMEND_SENT & !SlotFlags::CANCEL_HELD;
     for r in [s, t] {
         h.o.test_slot_mut(r.venue, r.account, r.slot, |sl, _| sl.sflags.0 = all);
     }
@@ -62,8 +62,9 @@ fn oms_021_slot_flags_never_on_wire() {
         SlotFlags::ALARMED,
         SlotFlags::AGED,
         SlotFlags::REST_QUERY,
+        SlotFlags::CANCEL_HELD,
     ];
-    assert_eq!(bits, [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]);
+    assert_eq!(bits, [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]);
     assert_eq!(bits.iter().fold(0u16, |a, b| a | b), SlotFlags::ALL);
 }
 

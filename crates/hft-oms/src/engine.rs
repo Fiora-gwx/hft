@@ -246,6 +246,11 @@ impl Oms {
         if !matches!(to, OrderState::PendingCancel | OrderState::Unknown) {
             *f &= !SlotFlags::CANCEL_SENT;
         }
+        // A held cancel waits in PendingNew/Unknown; Live sends it (below), any other state drops it.
+        let release = to == OrderState::Live && *f & SlotFlags::CANCEL_HELD != 0;
+        if !matches!(to, OrderState::PendingNew | OrderState::Unknown) {
+            *f &= !SlotFlags::CANCEL_HELD;
+        }
         if !matches!(
             to,
             OrderState::PendingAmend | OrderState::PendingCancel | OrderState::Unknown
@@ -274,6 +279,9 @@ impl Oms {
         }
         self.after_transition(ti, s, from, to, now, seq, out);
         self.check_ready(ti, was_ready, out);
+        if release {
+            self.cancel_slot(ti, s, TransitionCause::CancelReq, None, now, seq, out);
+        }
     }
 
     /// Emits `OmsVenueReady` when the table turned ready.

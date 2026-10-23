@@ -217,6 +217,8 @@ pub(crate) struct Table {
     pub(crate) amend: bool,
     pub(crate) amend_down_only: bool,
     pub(crate) batch_cancel: bool,
+    /// `CapFlags::CANCEL_NEEDS_ACK`: owner cancels of unacked orders are held until `Live`.
+    pub(crate) cancel_needs_ack: bool,
     pub(crate) has_dms: bool,
     pub(crate) out_quota: u16,
 }

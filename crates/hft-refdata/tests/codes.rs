@@ -303,10 +303,11 @@ fn ref_075_code_tables() {
         CapFlags::FOK,
         CapFlags::BATCH_CANCEL,
         CapFlags::PERP_CASH,
+        CapFlags::CANCEL_NEEDS_ACK,
     ];
     assert_eq!(
         bits.iter().map(|b| b.0).collect::<Vec<_>>(),
-        vec![1, 2, 4, 8, 16, 32],
+        vec![1, 2, 4, 8, 16, 32, 256],
         "REF-075.19"
     );
     for (i, a) in bits.iter().enumerate() {

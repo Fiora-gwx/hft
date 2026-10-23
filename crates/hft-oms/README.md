@@ -345,7 +345,8 @@ pub struct OrderSlot {                 // 128 B = 2 条缓存行
                                        //        SMOKE_DUE=64(冒烟单已到期、待撤)ACKED=128(收到过 Ack 或成交,在途分类用,见"LegTracker")
                                        //        HIST_WAIT=256(NotFound 已过 grace、等成交历史确认)ALARMED=512(本次 Unknown 已按 unknown_alarm_ms 升级)
                                        //        REST_QUERY=2048(查询不支持或预算耗尽,等待 reconciler;快照保存)
-                                       //        AGED=1024(本次 Live 已发过 Aged);其余预留
+                                       //        AGED=1024(本次 Live 已发过 Aged)
+                                       //        CANCEL_HELD=4096(拥有者对未确认订单的撤单已挂起,见"状态机";快照保存);其余预留
     pub reject_code: u32,              // 108 交易所原始码或 LocalReject 码
     pub t_state: Tsc,                  // 112 进入当前状态时的事件 tsc(sweep 用;进快照的已登记 TSC 字段,见"恢复")
     pub seq_last: u64,                 // 120 最后一次改变本槽的事件 seq
@@ -415,7 +416,7 @@ pub struct VenueAcctTable {            // 每 (venue, account) 一个
 
 - 表的定位是 `tables[table_ix]`,`table_ix = venue_ix × n_accounts + account_ix`,两个下标都是 refdata 给出的稠密序号;**热路径没有 HashMap**。`foreign` 是预分配的开放寻址表,只在外来单路径使用。
 - 空闲表初始含 1..N;终态槽在 `t_state + reuse_quarantine` 之后由 sweep 写墓碑并放回队尾。
-- 私有位的置位与清除:进入 `Live` 时置 `ACKED`、清 `AGED`;离开 `PendingCancel` 时清 `CANCEL_SENT`,离开 `PendingAmend` 时清 `AMEND_SENT`;离开 `Unknown` 时清 `HIST_WAIT`、`ALARMED`;进入终态时清 `CANCEL_SENT`、`AMEND_SENT`、`VERIFY`。
+- 私有位的置位与清除:进入 `Live` 时置 `ACKED`、清 `AGED`;离开 `PendingCancel` 时清 `CANCEL_SENT`,离开 `PendingAmend` 时清 `AMEND_SENT`;离开 `Unknown` 时清 `HIST_WAIT`、`ALARMED`;进入终态时清 `CANCEL_SENT`、`AMEND_SENT`、`VERIFY`;`CANCEL_HELD` 只在 `PendingNew`、`Unknown` 保留,进入 `Live` 时发出撤单(见"状态机"),进入其他状态时清除。
 - 不变量(属性测试逐条检查):`filled ≤ qty`(改单减量后若 `qty < filled`,`qty := filled` 并迁 `Filled`;交易所报告的 `cum_filled > qty` 见"超量成交");`filled` 单调不减;`net_filled` = `filled` 按"成交净量"规则逐笔调整后的累计(买入扣、卖出加基础资产费用;无基础资产费用时 `= filled`);`state == Free ⇔ 槽在空闲表中`;`unknown_count == 本表 state==Unknown 的槽数`;`InflightBook` 的各项等于按其定义对所有非终态槽求和的结果;LegTracker 各腿 `inflight_immediate + inflight_resting` 等于该 group 该腿非终态槽的带符号剩余量之和,两者按"LegTracker"的分类互斥。
 
 ### ClientOrderId
@@ -458,7 +459,7 @@ pub struct VenueAcctTable {            // 每 (venue, account) 一个
 
 `Live` 且 `filled > 0` 就是"部分成交",不单设状态。**成交是证据,永远生效**:任何状态收到 `cum_filled > filled` 的回报都先应用增量(即使是 `Cancelled`),再决定迁移;与状态冲突时额外发异常 `Note` 并请求对账(= 写指向该槽的 `Note{OmsNeedsRestQuery}`,`trades = 1`)。
 
-**拥有者撤改的前置**:`cancel` 只接受状态 `Live`、`PendingNew`、`PendingAmend` 且未置 `CANCEL_SENT` 的槽(→ `PendingCancel`,置 `CANCEL_SENT`,产出 `OrderDecision{Cancel}`);`amend` 只接受 `Live` 且该 venue 的 `VenueCaps.flags` 含 `AMEND` 的槽;该 venue 的 `VenueCaps.amend_qty_down_only` 为真时(只能减量、不能改价的交易所,字段归 [hft-venue-proto](../hft-venue-proto/README.md))另要求新价格等于当前限价且新数量 ≤ 当前数量,改价或增量 → `Err(OpError::AmendUnsupported)`;通过时 → `PendingAmend`,`pending_px/pending_qty` 记目标,置 `AMEND_SENT`,产出 `OrderDecision{Amend}`;其余 → `Err(OpError::NotAllowed)`;`SlotRef.gen` 与槽不符或槽为 `Free` → `Err(OpError::StaleRef)`。各种 Err 都无输出、无状态改变。
+**拥有者撤改的前置**:`cancel` 只接受状态 `Live`、`PendingNew`、`PendingAmend` 且未置 `CANCEL_SENT`、`CANCEL_HELD` 的槽(→ `PendingCancel`,置 `CANCEL_SENT`,产出 `OrderDecision{Cancel}`);**撤单挂起**:该 venue 的 `VenueCaps.flags` 含 `CANCEL_NEEDS_ACK`(交易所只能撤已确认的订单,[hft-refdata](../hft-refdata/README.md))且槽为 `PendingNew`、`exch_order_id = 0`、未置 `ACKED` 时,`cancel` 只置 `CANCEL_HELD`(返回 `Ok`,状态不变、无输出);该槽在任何回报下进入 `Live`(Ack、成交先于回执、`QueryResult`/对账收敛)的同一调用内按拥有者撤单发出(→ `PendingCancel`,迁移原因 `CancelReq`,不记延迟戳),进入终态则丢弃;`PendingNew` 超 `ack_timeout` 进 `Unknown` 时保留。批量撤单(`cancel_all`、撤单持续义务、冒烟单到期)不挂起,照常发出并清除 `CANCEL_HELD`;`amend` 只接受 `Live` 且该 venue 的 `VenueCaps.flags` 含 `AMEND` 的槽;该 venue 的 `VenueCaps.amend_qty_down_only` 为真时(只能减量、不能改价的交易所,字段归 [hft-venue-proto](../hft-venue-proto/README.md))另要求新价格等于当前限价且新数量 ≤ 当前数量,改价或增量 → `Err(OpError::AmendUnsupported)`;通过时 → `PendingAmend`,`pending_px/pending_qty` 记目标,置 `AMEND_SENT`,产出 `OrderDecision{Amend}`;其余 → `Err(OpError::NotAllowed)`;`SlotRef.gen` 与槽不符或槽为 `Free` → `Err(OpError::StaleRef)`。各种 Err 都无输出、无状态改变。
 
 **码表**(唯一登记在此、只追加;进快照节 2、`OutItem` 与 `Note{OmsTransition}` 的 `v[0]`,[hft-telemetry](../hft-telemetry/README.md) 按它翻译):
 

@@ -246,6 +246,7 @@ impl Oms {
                     amend: caps.flags.contains(CapFlags::AMEND),
                     amend_down_only: caps.amend_qty_down_only,
                     batch_cancel: caps.flags.contains(CapFlags::BATCH_CANCEL),
+                    cancel_needs_ack: caps.flags.contains(CapFlags::CANCEL_NEEDS_ACK),
                     has_dms: !matches!(caps.dms, DeadManCap::None),
                     out_quota: cfg.out_quota_of(v, a).max(1),
                 })));

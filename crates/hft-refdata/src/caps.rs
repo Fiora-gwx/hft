@@ -120,8 +120,11 @@ impl CapFlags {
     pub const POSITION_CLOSE: CapFlags = CapFlags(64);
     /// Position-close ignores the requested quantity and closes the symbol's entire position.
     pub const POSITION_CLOSE_ALL: CapFlags = CapFlags(128);
+    /// Cancels need the exchange's acknowledgement of the order (no cancel by client id before the
+    /// ack): hft-oms holds an owner cancel of an unacked order until it is acknowledged.
+    pub const CANCEL_NEEDS_ACK: CapFlags = CapFlags(256);
     /// Union of every defined bit.
-    pub const ALL: CapFlags = CapFlags(255);
+    pub const ALL: CapFlags = CapFlags(511);
 
     #[inline]
     pub const fn contains(self, other: CapFlags) -> bool {

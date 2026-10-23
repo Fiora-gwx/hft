@@ -244,13 +244,24 @@ impl Oms {
         out: &mut OmsOut,
     ) -> Result<(), OpError> {
         let (ti, i) = self.locate(s).ok_or(OpError::StaleRef)?;
-        let sl = self.t(ti).and_then(|t| t.slot(i)).ok_or(OpError::StaleRef)?;
+        let t = self.t(ti).ok_or(OpError::StaleRef)?;
+        let sl = t.slot(i).ok_or(OpError::StaleRef)?;
         if !matches!(
             sl.state,
             OrderState::Live | OrderState::PendingNew | OrderState::PendingAmend
-        ) || sl.sflags.has(SlotFlags::CANCEL_SENT)
+        ) || sl.sflags.has(SlotFlags::CANCEL_SENT | SlotFlags::CANCEL_HELD)
         {
             return Err(OpError::NotAllowed);
+        }
+        // The venue cancels only orders it has acknowledged: hold the cancel until `Live`
+        // (README "拥有者撤改的前置").
+        if t.cancel_needs_ack
+            && sl.state == OrderState::PendingNew
+            && sl.exch_order_id == 0
+            && !sl.sflags.has(SlotFlags::ACKED)
+        {
+            self.or_flag(ti, i, SlotFlags::CANCEL_HELD);
+            return Ok(());
         }
         self.cancel_slot(ti, i, TransitionCause::CancelReq, Some(trig), now, cause_seq, out);
         self.flush(out);

@@ -297,7 +297,7 @@ pub struct VenueCaps {                       // #[repr(C)]:能力位与死手字
     pub own_liquidation_marker: LiqMarker,   // 识别自身强平/ADL 订单的方法(判定由 venue crate 实现)
     pub liq_marker_arg: Box<str>,            // 方法参数(如 client id 前缀);无则 ""
     pub ignorable_user_events: Box<[Box<str>]>, // 用户流中可忽略的事件名:计数,不当解码失败
-    pub flags: CapFlags,                     // AMEND=1 POST_ONLY=2 IOC=4 FOK=8 BATCH_CANCEL=16 PERP_CASH=32 POSITION_CLOSE=64 POSITION_CLOSE_ALL=128
+    pub flags: CapFlags,                     // AMEND=1 POST_ONLY=2 IOC=4 FOK=8 BATCH_CANCEL=16 PERP_CASH=32 POSITION_CLOSE=64 POSITION_CLOSE_ALL=128 CANCEL_NEEDS_ACK=256
     pub amend_qty_down_only: bool,           // 改单只能减量、不能改价(AMEND 置位时才有意义);hft-oms 拒绝该 venue 上改价或增量的 Amend(AMEND_UNSUPPORTED)
     pub dms: DeadManCap,                     // 交易所侧死手;None → 只有 kill-switch 兜底
     pub dms_min_ms: u32, pub dms_max_ms: u32,      // 交易所允许的超时范围(ms;max = 0 表示无上限);None 时为 0
@@ -340,6 +340,8 @@ pub enum MarginData { Push, Poll { interval_ms: u32 }, NotApplicable }   // 线�
 **杠杆不在 refdata**:永续的实际杠杆是账户在交易所上的设置(运营按 [runbooks/launch](../../docs/runbooks/launch.md) 设定),由 gw 逐 inst 读到并经 [`AccountConfigReport` 的杠杆条目](../hft-event/README.md#执行0x02xx)报告;hft-risk 与策略视图只用读到的值。`InstMeta.max_leverage` 只是交易所允许的上限(供 `hft-cfg` 审阅),不参与任何风控计算;refdata 与 `EngineConfig` 都没有"默认杠杆"常量(风控的口径见 [hft-risk](../hft-risk/README.md))。
 
 **`POSITION_CLOSE` / `POSITION_CLOSE_ALL`**:前者允许执行层对清仓尾仓请求场所平仓机制;后者说明该机制忽略数量、关闭该品种整仓。仅允许 `LinearPerp` 且 `reduce_only = true`;ALL 必须同时声明 CLOSE,否则 `CapsMarketMismatch`。具体 wire 与已核实的最小量豁免由协议 README 定义。旧 refdata 不自动启用能力,部署时重新生成并记录生效 blob。
+
+**`CANCEL_NEEDS_ACK`**:交易所只能撤它已确认(Ack)的订单(撤单按交易所订单 id,下单回执之前无法按 client id 撤);任何市场都可声明。hft-oms 把拥有者对未确认订单的撤单挂起到订单确认后再发([hft-oms 拥有者撤改的前置](../hft-oms/README.md#状态机))。
 
 **默认值与覆盖**:每个 `venue-*` 经 `VenueProtocol::default_caps()`(协议同时声明 `const MARKET: MarketKind`,[hft-venue-proto](../hft-venue-proto/README.md))给出默认行,并在其 README 写明每个字段的出处,未核实的字段注明核实方法;`hft-cfg` 生成 refdata 时以默认行为底、叠加 TOML 中的覆盖,把**最终生效的整行**写进 blob(journal 自足)。覆盖只能收紧:能力位只能关不能开、`amend_qty_down_only` 只能由假改真、`ignorable_user_events` 只能追加;`required_*`、`fee_asset_rule`(账户的平台币抵扣设置)、`margin_data.interval_ms` 可改,覆盖处必须写 `reason`。hft-core 启动时用编译进来的 `default_caps` 复核"能力位 ⊆ 协议支持"且协议为真时 `amend_qty_down_only` 为真,不符 → `CapsExceedProtocol`,拒绝启动。
 

@@ -23,7 +23,7 @@ spec: README.md
 | 实现说明 | 不适用:见子节 |
 | 数据布局(草案,实现时以代码与编译期断言为准) | OMS-003, OMS-005, OMS-010–OMS-017, OMS-021, OMS-022, OMS-034, OMS-051, OMS-381, OMS-421 |
 | ClientOrderId | OMS-030–OMS-035 |
-| 状态机 | OMS-456, OMS-018, OMS-019, OMS-023, OMS-040, OMS-045–OMS-052, OMS-380 |
+| 状态机 | OMS-456, OMS-018, OMS-019, OMS-023, OMS-040, OMS-045–OMS-052, OMS-380, OMS-486 |
 | 回报处理表 | OMS-051, OMS-055–OMS-069, OMS-143, OMS-380 |
 | SendReport 处理 | OMS-070–OMS-077, OMS-380 |
 | 延迟样本 | OMS-012, OMS-071, OMS-080–OMS-089 |
@@ -355,12 +355,12 @@ spec: README.md
 - 规则:[RISK_REDUCING 判定](README.md#risk_reducing-判定)、[数据布局](README.md#数据布局草案实现时以代码与编译期断言为准)
 - 级别:unit
 - 里程碑:M2
-- 前置:P0;槽 s 为 `Live`,`oflags = POST_ONLY`(0x0002);测试钩子把 `sflags` 置为 0x07FF 去掉 `CANCEL_SENT`、`AMEND_SENT`(其余全部已定义位;这两位置上时撤改单不再发出)
+- 前置:P0;槽 s 为 `Live`,`oflags = POST_ONLY`(0x0002);测试钩子把 `sflags` 置为 `ALL` 去掉 `CANCEL_SENT`、`AMEND_SENT`、`CANCEL_HELD`(其余全部已定义位;这三位置上时撤改单不再发出)
 - 步骤:
   1. `cancel(s)`;再对 `VX` 上一张 `Live` 槽 `amend`;再 `place` 一张新单
 - 期望:
   - 三条 `OrderDecision` 的 `oflags & 0xFF00 = 0`,且与各自槽的 `oflags` 逐位相等(撤改单 = 目标槽的 `oflags`)
-  - `SlotFlags` 各常量值为 `CANCEL_SENT = 1`、`AMEND_SENT = 2`、`FILL_BEFORE_ACK = 4`、`VERIFY = 8`、`QUEUED = 16`、`EXEC = 32`、`SMOKE_DUE = 64`、`ACKED = 128`、`HIST_WAIT = 256`、`ALARMED = 512`、`AGED = 1024`,两两不重叠
+  - `SlotFlags` 各常量值为 `CANCEL_SENT = 1`、`AMEND_SENT = 2`、`FILL_BEFORE_ACK = 4`、`VERIFY = 8`、`QUEUED = 16`、`EXEC = 32`、`SMOKE_DUE = 64`、`ACKED = 128`、`HIST_WAIT = 256`、`ALARMED = 512`、`AGED = 1024`、`REST_QUERY = 2048`、`CANCEL_HELD = 4096`,两两不重叠,并集为 `ALL`
 - 实现:`crates/hft-oms/tests/flags.rs::oms_021_slot_flags_never_on_wire`
 
 ### OMS-022 槽与决策的线上标志位值取自 hft-event OrderFlags
@@ -4451,3 +4451,22 @@ spec: README.md
 POSITION_CLOSE 仅由执行层风险递减平仓携带,ACK 不更新仓位;镜像恢复保留 oflags。跨组件验收见 [SEQ-185](../hft-sequencer/TESTS.md)。
 
 逐笔现金入口复用 SEQ-411/412 真实引擎验证:连续分笔、重复、缺口、终态查询、快照累计水位和失败前无记账。
+
+### OMS-486 交易所只能撤已确认订单时,未确认订单的撤单挂起到 Live
+
+- 规则:[状态机](README.md#状态机)(拥有者撤改的前置)、[数据布局](README.md#数据布局草案实现时以代码与编译期断言为准)
+- 级别:table
+- 里程碑:M2
+- 前置:P0;`VS` 的 `flags` 另含 `CANCEL_NEEDS_ACK`(.7 除外);a1@VS 在 t = 0 下单 `buy_x`(槽 s,`PendingNew`)
+- 步骤:依次执行下表各行(.3 起每行从前置重新开始)
+- 实现:`crates/hft-oms/tests/fsm.rs::oms_486_cancel_held_until_ack`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| OMS-486.1 | t = 1 `cancel(s)`;再 `cancel(s)` | 第一次 `Ok`:无 `OrderDecision{Cancel}`,s 仍 `PendingNew`,置 `CANCEL_HELD`;第二次 `Err(NotAllowed)` |
+| OMS-486.2 | 接 .1,t = 2 `Ack`(`exch_order_id` 777) | 同一调用一条 `OrderDecision{Cancel, target_slot s}`;s `PendingCancel`,置 `CANCEL_SENT`、清 `CANCEL_HELD`;`exch_order_id = 777` |
+| OMS-486.3 | `cancel(s)` 后 `Reject` | s `Rejected`;无撤单;清 `CANCEL_HELD` |
+| OMS-486.4 | `cancel(s)` 后 `PartialFill`(cum 0.004) | 一条撤单;s `PendingCancel` |
+| OMS-486.5 | `cancel(s)` 后 t = 2 500 sweep(超 `ack_timeout`);t = 3 000 `QueryResult{New}` | sweep 后 s `Unknown` 且仍置 `CANCEL_HELD`;收敛时一条撤单,s `PendingCancel` |
+| OMS-486.6 | s 已 Ack(`Live`)后 `cancel(s)` | 立即一条撤单 |
+| OMS-486.7 | `VS` 不含 `CANCEL_NEEDS_ACK`;`cancel(s)` | 立即一条撤单(同 OMS-046);不置 `CANCEL_HELD` |

@@ -87,6 +87,8 @@ pub struct RdOpts {
     pub x_min_notional: i64,
     pub vx_amend_down_only: bool,
     pub vx_perp_cash: bool,
+    /// `VS` declares `CANCEL_NEEDS_ACK`.
+    pub vs_cancel_needs_ack: bool,
     pub s1_perp: bool,
     /// Total accounts (a1, a2, s1, then Live fillers on VS/VX).
     pub n_accounts: u8,
@@ -103,6 +105,7 @@ impl Default for RdOpts {
             x_min_notional: 5_000_000,
             vx_amend_down_only: false,
             vx_perp_cash: false,
+            vs_cancel_needs_ack: false,
             s1_perp: false,
             n_accounts: 3,
             n_venues: 3,
@@ -219,7 +222,14 @@ pub fn build_rd(o: &RdOpts) -> &'static RefData {
     b.caps(caps(
         VS,
         MarketKind::Spot,
-        CapFlags::POST_ONLY | CapFlags::IOC | CapFlags::BATCH_CANCEL,
+        CapFlags::POST_ONLY
+            | CapFlags::IOC
+            | CapFlags::BATCH_CANCEL
+            | if o.vs_cancel_needs_ack {
+                CapFlags::CANCEL_NEEDS_ACK
+            } else {
+                CapFlags(0)
+            },
         DeadManCap::None,
         false,
     ));
