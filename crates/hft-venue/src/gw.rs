@@ -519,7 +519,8 @@ impl<P: VenueProtocol, const CAP: usize> GwRuntime<P, CAP> {
             t,
             accts: list,
             rest_ip,
-            mirror: vec![SlotMirror::default(); cfg.oms_slots as usize],
+            // Indexed by slot id 1..=oms_slots (OMS slot 0 is reserved and stays empty).
+            mirror: vec![SlotMirror::default(); cfg.oms_slots as usize + 1],
             cmds: deps.cmds,
             out: deps.out,
             pend_rep: VecDeque::with_capacity(REP_PEND_CAP),

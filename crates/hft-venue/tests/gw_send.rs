@@ -1,4 +1,4 @@
-//! VEN-196–VEN-203, VEN-205, VEN-206, VEN-240, VEN-241, VEN-246: the gw send path.
+//! VEN-196–VEN-203, VEN-205, VEN-206, VEN-240, VEN-241, VEN-246, VEN-403: the gw send path.
 #![allow(
     clippy::disallowed_types,
     clippy::disallowed_macros,
@@ -11,7 +11,7 @@ use hft_event::{GwCmd, GwOp, SendStatus};
 use hft_net::ConnId;
 use hft_net::sock::{SendKind, SendStep};
 use hft_types::{ClientOrderId, KillBits, SlotId};
-use hft_venue::{Effect, exch_id_value};
+use hft_venue::{Effect, GwCfg, exch_id_value};
 use hft_venue_proto::{EncodeErr, VenueProtocol};
 use proptest::prelude::*;
 use support::gwh::*;
@@ -663,4 +663,84 @@ fn ven_246_wall_clock_and_expiry() {
         s1.total() - s0.total(),
         (s1.recvmsg - s0.recvmsg) + (s1.sendmsg - s0.sendmsg)
     );
+}
+
+#[test]
+fn ven_403_last_slot_is_mirrored() {
+    let mut h = gw_full::<StubProto>(
+        GwCfg {
+            oms_slots: 64,
+            ..g0()
+        },
+        &[A1, A2],
+        GhOpts::default(),
+    );
+    let mut t = 3_000_000;
+    for slot in 1..=64 {
+        h.cmd(base(GwOp::ResetRate, A1));
+        let c = h.place(A1, slot, 1, S1, false);
+        h.cmd(c);
+        h.poll(t);
+        t += 1;
+    }
+    let v = h.reps();
+    assert_eq!(statuses(&v), vec![SendStatus::Written; 64], "VEN-403.1");
+    let m = h.rt.mirror(64).expect("VEN-403.1: slot N has a mirror entry");
+    assert_eq!((m.r#gen, m.epoch, m.inst, m.live), (1, 5, S1, true), "VEN-403.1");
+    assert_eq!(h.rt.counters().mirror_out_of_range, 0, "VEN-403.1");
+    let id = ClientOrderId {
+        epoch: 5,
+        venue: V7,
+        account: A1,
+        slot: 64,
+        r#gen: 1,
+    };
+    let cid = stub::cid_text(&id);
+    h.net.push(P, format!("O|{cid}|EX-64|Ack|0|0|0|0|0|0").as_bytes());
+    h.poll(t);
+    t += 1;
+    assert_eq!(
+        h.rt.mirror(64).unwrap().exch_order_id,
+        exch_id_value(b"EX-64"),
+        "VEN-403.2"
+    );
+    assert_eq!(
+        h.rt.id_table(A1).unwrap().get(b"EX-64"),
+        Some((5, 64, 1)),
+        "VEN-403.2"
+    );
+    h.reps();
+    texts(&mut h, P);
+    for (row, op, tag) in [
+        ("VEN-403.3", GwOp::Cancel, "C|"),
+        ("VEN-403.4", GwOp::Query, "Q|"),
+    ] {
+        let c = h.targeted(op, A1, 64);
+        h.cmd(c);
+        h.poll(t);
+        t += 1;
+        let r = reports(&h.reps());
+        assert_eq!(r.len(), 1, "{row}");
+        assert_eq!(
+            (r[0].op, r[0].target_slot, r[0].target_gen, r[0].status),
+            (op, SlotId(64), 1, SendStatus::Written),
+            "{row}"
+        );
+        let want = format!("{cid}|{}", exch_id_value(b"EX-64"));
+        let sent = texts(&mut h, P);
+        assert!(
+            sent.iter().any(|s| s.starts_with(tag) && s.contains(&want)),
+            "{row}: frame carries the client id and exchange id of slot 64: {sent:?}"
+        );
+    }
+    h.cmd(GwCmd::mirror_restore(A1, S1, SlotId(65), 1, 5, 777));
+    h.poll(t);
+    let v = h.reps();
+    assert!(
+        conn_states(&v)
+            .iter()
+            .any(|x| x.state == hft_event::ConnStateKind::Degraded && x.reason == hft_venue::codes::MIRROR),
+        "VEN-403.5"
+    );
+    assert!(h.rt.mirror(65).is_none(), "VEN-403.5");
 }
