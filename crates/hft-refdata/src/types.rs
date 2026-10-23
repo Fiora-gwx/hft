@@ -644,6 +644,8 @@ impl LoadReport {
 #[derive(Copy, Clone, Debug)]
 pub struct GroupSpecView<'a> {
     pub asset: AssetId,
+    /// `GroupSpec.open_allowed != 0`.
+    pub open_allowed: bool,
     pub legs: &'a [LegView],
 }
 

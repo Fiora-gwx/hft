@@ -4125,6 +4125,21 @@ SEQ-160 同时覆盖真实 ConnId 112/113/255、重复 Up/Down、主连接退出
 | SEQ-285.6 | 同一 GroupSpec 两腿在同一交易所 | `InvalidArgs{SameExchangeLegs}` |
 | SEQ-285.7 | 两腿报价资产不同 | `InvalidArgs{GroupCheck}`,arg = 43(`LoadErrCode::QuoteMismatch`) |
 
+### SEQ-439 SetParams 第 1 项:观察 group 的腿可以不在账户 venue 内
+
+- 规则:[命令路径](README.md#命令路径)、[hft-refdata 跨 blob 第 2 条](../hft-refdata/README.md#实现说明)
+- 级别:table
+- 里程碑:M2
+- 前置:B0 加 venue C(OKX 现货,不在账户 1 的 venues 内)与其上的 BTC 现货 inst `C1`,稳态;每行一条 pipeline 主体的 `SetParams`(s1,版本递增),G1 不变;R = 单腿 `C1`@C 的 group `0x0100_0002`
+- 实现:`crates/hft-sequencer/tests/commands.rs::seq_439_set_params_observe_group`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| SEQ-439.1 | G1 + R(`open_allowed = 0`,参考行情) | `Applied`;s1 版本 2,有 2 个 group |
+| SEQ-439.2 | 同一 blob 只改一个非结构字段、版本 3(运行中重发) | `Applied`;s1 版本 3 |
+| SEQ-439.3 | G1 + R(`open_allowed = 1`) | `InvalidArgs{GroupCheck}`,arg = 41(`LegVenueNotInAccount`);版本仍为 3 |
+| SEQ-439.4 | G1 + `[a1@A, C1@C]`(`open_allowed = 0`,一腿在账户内) | `InvalidArgs{GroupCheck}`,arg = 41;版本仍为 3 |
+
 ### SEQ-286 SetParams 第 2、3 项:版本与 GroupId
 
 - 规则:[命令路径](README.md#命令路径)

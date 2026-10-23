@@ -1357,6 +1357,7 @@ spec: README.md
 - 期望:
   - `Ok(view)`;`view.hdr.strategy == 3`;`view.groups.len() == 2`,`view.groups[1].id == 0x0300_0002`
   - `view.body.as_ptr() == B[208..].as_ptr()`,`view.body.len() == 16`,内容为 `0x00..=0x0F`
+  - `view.groups[0].view(..)`:2 条腿、第 2 条 `inst == 20`、`open_allowed == true`;`view.groups[1].view(..).open_allowed == false`
 - 实现:`crates/hft-event/tests/spb1.rs::evt_131_parse_ok`
 
 ### EVT-132 SPB1 容器级校验对每类错误返回对应码

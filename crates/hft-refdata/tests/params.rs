@@ -1,4 +1,4 @@
-//! `SetParams` checks: binding and group consistency (REF-058 – REF-060).
+//! `SetParams` checks: binding and group consistency (REF-058 – REF-060, REF-095).
 
 #![allow(
     clippy::disallowed_types,
@@ -63,11 +63,13 @@ fn ref_059_check_group_ok() {
     let legs = [leg(1, 1), leg(4, 6)];
     let g = GroupSpecView {
         asset: BTC,
+        open_allowed: true,
         legs: &legs,
     };
     assert_eq!(rd.check_group(AccountId(1), &g), Ok(AssetId(2)));
     let g1 = GroupSpecView {
         asset: BTC,
+        open_allowed: true,
         legs: &legs[..1],
     };
     assert_eq!(rd.check_group(AccountId(1), &g1), Ok(AssetId(2)));
@@ -94,7 +96,14 @@ fn ref_060_check_group_rejects() {
     };
     let run = |status: InstStatus, asset: AssetId, legs: &[LegView]| -> Result<AssetId, LoadErrCode> {
         rd_with(status)
-            .check_group(AccountId(1), &GroupSpecView { asset, legs })
+            .check_group(
+                AccountId(1),
+                &GroupSpecView {
+                    asset,
+                    open_allowed: true,
+                    legs,
+                },
+            )
             .map_err(|e| e.code)
     };
     use InstStatus::*;
@@ -163,4 +172,38 @@ fn ref_060_check_group_rejects() {
         Err(LegAssetMismatch),
         "REF-060.13"
     );
+}
+
+#[test]
+fn ref_095_observe_group_venue() {
+    let rd = ok(&f0());
+    let run = |asset: AssetId, open_allowed: bool, legs: &[LegView]| {
+        rd.check_group(
+            AccountId(1),
+            &GroupSpecView {
+                asset,
+                open_allowed,
+                legs,
+            },
+        )
+        .map_err(|e| e.code)
+    };
+    assert_eq!(run(BTC, false, &[leg(3, 5)]), Ok(USDT), "REF-095.1");
+    assert_eq!(
+        run(BTC, true, &[leg(3, 5)]),
+        Err(LegVenueNotInAccount),
+        "REF-095.2"
+    );
+    assert_eq!(
+        run(BTC, false, &[leg(1, 1), leg(3, 5)]),
+        Err(LegVenueNotInAccount),
+        "REF-095.3"
+    );
+    assert_eq!(
+        run(BTC, false, &[leg(4, 5)]),
+        Err(LegVenueNotInAccount),
+        "REF-095.4"
+    );
+    assert_eq!(run(BTC, false, &[leg(99, 5)]), Err(LegNotTradable), "REF-095.5");
+    assert_eq!(run(ETH, false, &[leg(3, 5)]), Err(LegAssetMismatch), "REF-095.6");
 }

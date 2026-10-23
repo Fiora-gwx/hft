@@ -1584,6 +1584,23 @@ spec: README.md
 | REF-094.2 | refdata 支持,协议不支持 | CapsExceedProtocol |
 | REF-094.3 | 现货 venue 2 声明 PERP_CASH | CapsMarketMismatch |
 
+### REF-095 观察 group 免查腿 venue 在账户内,其余检查不变
+
+- 规则:[实现说明](README.md#实现说明)(跨 blob 第 2 条)
+- 级别:table
+- 里程碑:M2
+- 前置:F0(账户 1 的 venues = {1, 6},inst 3 `BTC-USDT-SWAP`@5 不在账户内);`L(i, v)` 同 REF-060;`open` 为 `GroupSpecView.open_allowed`
+- 实现:`crates/hft-refdata/tests/params.rs::ref_095_observe_group_venue`
+
+| 行 | `GroupSpecView` | `open` | 期望 |
+|---|---|---|---|
+| REF-095.1 | BTC,`[L(3, 5)]`(参考行情:唯一一腿不在账户内) | false | `Ok(USDT)` |
+| REF-095.2 | 同上 | true | `Err(LegVenueNotInAccount)`(可开仓的 group 不放宽) |
+| REF-095.3 | BTC,`[L(1, 1), L(3, 5)]`(一腿在账户内) | false | `Err(LegVenueNotInAccount)` |
+| REF-095.4 | BTC,`[L(4, 5)]`(腿的 venue 与 inst 不符) | false | `Err(LegVenueNotInAccount)` |
+| REF-095.5 | BTC,`[L(99, 5)]`(inst 不存在) | false | `Err(LegNotTradable)` |
+| REF-095.6 | ETH,`[L(3, 5)]` | false | `Err(LegAssetMismatch)` |
+
 ## 验收
 
 - 里程碑 M1:本文件中里程碑为 M1 的用例全部有同编号的实现且通过(`cargo xtask test-trace` 与 [docs/tests §6](../../docs/tests/README.md#6-与代码的对应));表驱动用例每一行都是独立断言。

@@ -861,7 +861,7 @@ StrategyParamsHdr (48 B) | GroupSpec × n_groups (80 B each) | body (body_len B,
 }
 pub struct SpbView<'a> { pub hdr: &'a StrategyParamsHdr, pub groups: &'a [GroupSpec], pub body: &'a [u8] }
 impl GroupSpec { pub fn view<'a>(&self, legs: &'a mut [hft_refdata::LegView; 4]) -> hft_refdata::GroupSpecView<'a>; }
-    // 供 check_group:asset 与前 n_legs 条腿的 (inst, venue),腿视图写在调用方给的存储里(GroupSpecView 借用 LegView 切片);refdata 不依赖本 crate,转换在这里
+    // 供 check_group:asset、open_allowed 与前 n_legs 条腿的 (inst, venue),腿视图写在调用方给的存储里(GroupSpecView 借用 LegView 切片);refdata 不依赖本 crate,转换在这里
 pub fn parse_spb1(blob: &[u8]) -> Result<SpbView<'_>, ParamsErr>;     // 只做容器级校验(下列 1–3,按序,返回第一个错误);body 原样返回,不检查其内部结构
 #[repr(u8)] pub enum ParamsErr { Truncated = 1, BadLen = 2, BadGroup = 3, BadLeg = 4, Padding = 5, DupGroup = 6, BadHdr = 7,
                                  Misaligned = 8 /* blob 不是 8 B 对齐,无法零拷贝视图 */ }

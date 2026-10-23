@@ -686,7 +686,9 @@ spec: README.md
 | CTL-080.9 | 头部 `kind_id = 0xFF7F`(未编译进来的种类) | `InvalidArgs{SchemaUnsupported}` |
 | CTL-080.10 | `schema_ver` = 编译进来的版本 + 1 | `InvalidArgs{SchemaUnsupported}` |
 | CTL-080.11 | `schema_digest` 末字节改 1 | `InvalidArgs{SchemaMismatch}` |
-| CTL-080.12 | 第 2–11 行的每一行 | 不写 `ConfigBlob`/`ControlCmd`,Mailbox 为空,审计 Note `result_code = 20` |
+| CTL-080.12 | 第 2–11 行与第 14 行的每一行 | 不写 `ConfigBlob`/`ControlCmd`,Mailbox 为空,审计 Note `result_code = 20` |
+| CTL-080.13 | 追加 group `g1 + 1`:单腿 `binance-spot:BTCUSDT`(不在 `acct-a` 内)、`open_allowed = 0`(只读参考行情) | 写环,Mailbox 中的 `ParsedParams` 有 2 个 group |
+| CTL-080.14 | 同第 13 行,但 `open_allowed = 1` | `InvalidArgs{GroupCheck}`,`arg = "LegVenueNotInAccount"` |
 
 ### CTL-081 SetParams body 解码、non_prod_only 与 Model 预算的边界
 

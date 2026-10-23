@@ -714,3 +714,209 @@ fn core_430_production_orders_polymarket_only() {
     std::fs::write(&bn, t.replace("order_env = \"testnet\"", "order_env = \"prod\"")).unwrap();
     assert!(codes(&bn).contains(&"ProdOrderVenue".to_string()), "CORE-430.4");
 }
+
+/// The live maker's startup blob with `version + 1` and `clip_shares` changed, and (`open`) the
+/// reference group's `open_allowed` set.
+#[cfg(feature = "polymarket")]
+fn pm_live_blob(blob: &[u8], open: Option<u8>) -> Vec<u8> {
+    use hft_event::{GroupSpec, StrategyParamsHdr};
+    use hft_strategy_sdk::StrategySet;
+    use zerocopy::{IntoBytes, TryFromBytes};
+    let mut b = blob.to_vec();
+    let (mut h, _) = StrategyParamsHdr::try_read_from_prefix(&b).unwrap();
+    h.version += 1;
+    let hl = h.as_bytes().len();
+    b[..hl].copy_from_slice(h.as_bytes());
+    let desc = hft_core::Strategies::kinds()
+        .iter()
+        .find(|d| d.kind_id == h.kind_id)
+        .unwrap();
+    let ix = hft_strategy_sdk::params::field_ix(desc.schema, "clip_shares").unwrap();
+    let at = b.len() - h.body_len as usize + 8 + 8 * usize::from(ix);
+    let v = i64::from_le_bytes(b[at..at + 8].try_into().unwrap()) + 1;
+    b[at..at + 8].copy_from_slice(&v.to_le_bytes());
+    if let Some(o) = open {
+        let gl = std::mem::size_of::<GroupSpec>();
+        b[hl + (usize::from(h.n_groups) - 1) * gl + 7] = o;
+    }
+    b
+}
+
+#[cfg(feature = "polymarket")]
+#[test]
+fn core_431_live_maker_set_params_accepts_the_startup_shape() {
+    use hft_ctl_proto::{AccountSel, CmdBody, CmdRequest, PROTO_VERSION, ResultCode, Uuid};
+    use hft_event::{CmdResult, EventKind};
+    use zerocopy::FromBytes;
+    let d = tempfile::tempdir().unwrap();
+    let live = support::PmLive {
+        uid: "0f5e8d2a-1111-2222-3333-".into(),
+        keys_dir: d.path().join("keys"),
+    };
+    let path = support::write_polymarket_maker_live(
+        d.path(),
+        &d.path().join("hot"),
+        None,
+        None,
+        "127.0.0.1",
+        "lo",
+        &live,
+    );
+    let l = hft_core::config::load(&path, false).unwrap();
+    let blob = l.configs.params[0].0.clone();
+    let rd = hft_refdata::RefData::load(l.rd.blob(), None).unwrap();
+    // The startup blob's reference group is on binance-spot, outside pm-live's venues.
+    assert_eq!(
+        rd.account(hft_types::AccountId(1)).venues,
+        1u64 << hft_types::VenueId::POLYMARKET_CLOB.0,
+        "CORE-431"
+    );
+    let active = hft_sequencer::parsed::parse_params::<hft_core::Strategies>(
+        &blob,
+        hft_core::config::digest(&blob),
+        &rd,
+        l.setup.caps.max_groups_per_instance,
+        None,
+    )
+    .map(|p| hft_sequencer::ParsedConfig::StrategyParams(Box::new(p)))
+    .unwrap();
+    let io = hft_testkit::seq_rig::RigIo::<hft_core::Strategies> {
+        j: hft_sequencer::MemJournal::new(l.setup.clock),
+        tsc: 1,
+        rings: Default::default(),
+        n_venues: 2,
+        out: vec![],
+        mailbox: vec![],
+        kills: vec![],
+        calib: hft_rt::CalibPair {
+            tsc: hft_types::Tsc(0),
+            realtime_ns: 0,
+            ..Default::default()
+        },
+        hz: l.setup.clock.tsc_hz_milli,
+    };
+    let heartbeat = Box::leak(Box::new(hft_rt::Heartbeat::new()));
+    let mut seq = hft_sequencer::Sequencer::boot(
+        hft_sequencer::BootSource::Empty { configs: l.configs },
+        &l.setup,
+        hft_sequencer::driver::LiveDriver::new(
+            io,
+            hft_sequencer::driver::live::LiveCfg {
+                feed_stage_cap: 1024,
+                ..Default::default()
+            },
+        ),
+        heartbeat,
+    )
+    .unwrap();
+    let clock = hft_rt::TscClock::from_hz_milli(
+        l.setup.clock.tsc_hz_milli,
+        hft_rt::CalibPair {
+            tsc: hft_types::Tsc(0),
+            realtime_ns: 0,
+            ..Default::default()
+        },
+    );
+    let (parsed_tx, mut parsed_rx) = Box::leak(Box::new(hft_rt::Mailbox::new())).split();
+    let (_retired_tx, retired_rx) = Box::leak(Box::new(hft_rt::Mailbox::new())).split();
+    let mut ctl = hft_ctl::Core::<hft_core::Strategies, _>::new(
+        hft_ctl::GatewayConfig::new(
+            l.cfg.paths.ctl_socket,
+            hft_ctl::PrincipalTable::from_parts(
+                vec![(1, hft_ctl::UidKind::Cli { login: "ops".into() })],
+                vec![(
+                    "cli:ops".into(),
+                    hft_ctl_proto::RoleSet::from_roles(&[hft_ctl_proto::Role::Admin]),
+                )],
+            ),
+            256,
+            1024,
+            l.setup.caps.max_groups_per_instance,
+        ),
+        rd,
+        hft_ctl::VecRing::with_free(1 << 20),
+        parsed_tx,
+        retired_rx,
+        |_, _| Err(1),
+        hft_sequencer::config_blob::decode_risk_blob,
+        vec![active],
+        clock.tsc_utc(&clock.base),
+        Default::default(),
+    );
+    // One SetParams through the gateway and, if it was written, the sequencer.
+    let mut n = 0u8;
+    let mut send = |blob: &[u8]| -> (Option<ResultCode>, Option<CmdResult>) {
+        n += 1;
+        let request = CmdRequest {
+            v: PROTO_VERSION,
+            cmd_id: Uuid::from_bytes([n; 16]),
+            issuer: "cli:ops".into(),
+            issued_at_ns: 0,
+            expires_at_ns: 10_000_000_000,
+            account: AccountSel::Name("pm-live".into()),
+            preview: false,
+            confirmed: false,
+            expect_state_version: None,
+            view_account: None,
+            chat_type: None,
+            cmd: CmdBody::SetParams {
+                strategy: "pm-maker".into(),
+                account: None,
+                blob_b64: base64::Engine::encode(&base64::engine::general_purpose::STANDARD, blob),
+                base_version: None,
+            },
+        };
+        if let hft_ctl::Reply::Now(r) = ctl.on_request(1, 1, &request.to_json(), hft_types::Tsc(1)) {
+            return (r.code, None);
+        }
+        let io = &mut seq.driver_mut().io;
+        // The rig ring carries logical bodies: drop the one-part Multi prefix.
+        for (kind, _, mut body) in ctl.ring_mut().out.drain(..) {
+            if kind == EventKind::CONFIG_BLOB || kind == EventKind::CONTROL_CMD {
+                let (part, _) = hft_event::PartHdr::read_from_prefix(&body).unwrap();
+                assert_eq!(part.parts, 1);
+                body.drain(..16);
+            }
+            io.rings.entry((0, 0)).or_default().push_back((kind, body));
+        }
+        while let Some(p) = parsed_rx.try_take() {
+            io.mailbox.push(p);
+        }
+        for _ in 0..64 {
+            assert!(!matches!(seq.step(), hft_sequencer::StepOutcome::Fatal(_)));
+        }
+        let res = seq
+            .driver()
+            .io
+            .j
+            .records()
+            .filter(|r| r.kind == EventKind::CMD_RESULT)
+            .filter_map(|r| CmdResult::read_from_bytes(&r.body).ok())
+            .find(|c| c.cmd_id == [n; 16]);
+        (None, res)
+    };
+    // .1 the running blob, version + 1 and one field changed: written and Applied.
+    let (now, res) = send(&pm_live_blob(&blob, None));
+    assert_eq!(now, None, "CORE-431.1");
+    let res = res.expect("CORE-431.1: no CmdResult");
+    assert_eq!(
+        (res.status, res.detail, res.params_version),
+        (ResultCode::Applied as u8, 0, 2),
+        "CORE-431.1"
+    );
+    // .2 the reference group allowed to open: refused by the gateway.
+    let (now, res) = send(&pm_live_blob(&pm_live_blob(&blob, None), Some(1)));
+    assert_eq!(now, Some(ResultCode::InvalidArgs), "CORE-431.2");
+    assert!(res.is_none(), "CORE-431.2");
+    // .3 startup refuses the same shape (one group rule for both).
+    let bad = pm_live_blob(&blob, Some(1));
+    let file = d.path().join("strategy_params.bin");
+    let text = std::fs::read_to_string(&path).unwrap().replace(
+        &hft_core::config::hex(&hft_core::config::digest(&std::fs::read(&file).unwrap())),
+        &hft_core::config::hex(&hft_core::config::digest(&bad)),
+    );
+    std::fs::write(&file, &bad).unwrap();
+    std::fs::write(&path, text).unwrap();
+    let e = hft_core::config::load(&path, false).unwrap_err();
+    assert!(e.iter().any(|e| e.code == "StrategyParams"), "CORE-431.3: {e:?}");
+}

@@ -29,16 +29,19 @@ impl RefData {
 
     /// Group check (cross-blob rule 2): legs in order (tradable, venue, base asset), then
     /// between legs (same quote, no two legs on one exchange). Returns the quote asset;
-    /// `row` of the error = leg index.
+    /// `row` of the error = leg index. An observe-only group (`open_allowed = false` and no leg
+    /// venue in the account, e.g. a reference market) is exempt from the account-venue rule only.
     pub fn check_group(&self, a: AccountId, g: &GroupSpecView<'_>) -> Result<AssetId, LoadErr> {
         let venues = self.account(a).venues;
+        let in_account = |v: hft_types::VenueId| v.0 < 64 && venues & (1u64 << v.0) != 0;
+        let observe = !g.open_allowed && g.legs.iter().all(|l| !in_account(l.venue));
         for (k, leg) in g.legs.iter().enumerate() {
             let err = |c| Err(LoadErr::new(c, 0, k as u32));
             let h = self.inst(leg.inst);
             if !tradable(h.status) {
                 return err(C::LegNotTradable);
             }
-            if leg.venue != h.venue || leg.venue.0 >= 64 || venues & (1u64 << leg.venue.0) == 0 {
+            if leg.venue != h.venue || !(observe || in_account(leg.venue)) {
                 return err(C::LegVenueNotInAccount);
             }
             if h.asset != g.asset {

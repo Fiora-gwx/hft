@@ -29,6 +29,7 @@ fn ref_072_queries_do_not_allocate() {
     ];
     let g = GroupSpecView {
         asset: BTC,
+        open_allowed: true,
         legs: &legs,
     };
     count_start();

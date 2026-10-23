@@ -1362,6 +1362,7 @@ name = "hft-core"
 version = "0.1.0"
 dependencies = [
  "aws-lc-rs",
+ "base64 0.22.1",
  "hft-ctl",
  "hft-ctl-proto",
  "hft-event",

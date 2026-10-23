@@ -113,6 +113,7 @@ fn ref_086_refdata_check_group(c: &mut Criterion) {
     ];
     let g = GroupSpecView {
         asset: f0::BTC,
+        open_allowed: true,
         legs: &legs,
     };
     assert!(rd.check_group(AccountId(1), &g).is_ok());

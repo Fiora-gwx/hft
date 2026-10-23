@@ -4484,3 +4484,17 @@ CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 S
 | CORE-430.3 | 同上改 `feed_env = "testnet"` | 含 `EnvCombo` |
 | CORE-430.4 | Binance 实盘配置改 `order_env = "prod"` | 含 `ProdOrderVenue` |
 
+### CORE-431 运行中的 SetParams 与启动接受同一种 group 形态
+
+- 规则:[策略装配](README.md#策略装配)、[hft-refdata 跨 blob 第 2 条](../../crates/hft-refdata/README.md#实现说明)
+- 级别:table
+- 里程碑:M3
+- 前置:`write_polymarket_maker_live`(账户 `pm-live` 的 venues 只有 `polymarket-clob`;实例 `pm-maker` 的最后一个 group 是 `binance-spot` BTCUSDT 参考行情,`open_allowed = 0`);`config::load(_, dry = false)`;真实 registry 策略集合的 ctl-gateway `Core`(以启动参数为生效副本)与 sequencer(`RigIo`)在进程内相接,gateway 写环的记录与 Mailbox 对象原样交给 sequencer
+- 实现:`apps/hft-core/tests/config.rs::core_431_live_maker_set_params_accepts_the_startup_shape`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-431.1 | 启动 blob,`version + 1`、`clip_shares + 1`,人工主体 `SetParams` | gateway 写环;sequencer `Applied`,`params_version = 2` |
+| CORE-431.2 | 同上再加:参考 group `open_allowed = 1` | gateway `InvalidArgs`(`GroupCheck`),不写环 |
+| CORE-431.3 | 第 2 行的形态作为启动 blob | `config::load` 含 `StrategyParams` |
+
