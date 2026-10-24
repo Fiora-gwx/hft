@@ -56,7 +56,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 多账户 | CORE-330、CORE-168、CORE-247、CORE-313、CORE-427、CORE-428 |
 | HostProfile | CORE-340–CORE-343、CORE-419 |
 | HeartbeatBlock | CORE-350–CORE-352 |
-| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433、CORE-434 |
+| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433、CORE-434、CORE-435 |
 | 实现说明 | CORE-380–CORE-387、CORE-409、CORE-415–CORE-418、CORE-420 |
 | 延迟与资源契约 | CORE-400–CORE-408、CORE-267 |
 | 测试与验收 | 不适用:非规范 |
@@ -4542,3 +4542,18 @@ CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 S
 | CORE-434.2 | RiskParams 的 pm-live 账户 | `daily_loss_abs = 15`、`daily_loss_kill = 1.0` |
 | CORE-434.3 | 用该 refdata 与 ledger 配置:槽位 inst 买 10 份 @ 0.600,再 `ExternalFill{Delivery, Sell 10 @ 0}` | 账户当日 `net() = −6`(USDC 按 1.0) |
 | CORE-434.4 | ECF1 段 8 | `day_pnl_carry = [(pm-live, 20 750, −28.51)]` |
+
+### CORE-435 Polymarket 实盘配置的当日亏损额度与解除次数可选
+
+- 规则:[config/README](config/README.md)(Polymarket 实盘 `--daily-loss`、`--daily-loss-resumes`);[hft-risk 当日亏损](../../crates/hft-risk/README.md)
+- 级别:table
+- 里程碑:M3
+- 前置:`write_polymarket_maker_live`(Cargo feature `polymarket`),`PmLive.daily_loss_abs`/`daily_loss_max_resumes` 即 `pm_sim_config` 的两个选项;`config::load(.., dry = false)`;.3/.4 以生成的配置 `Sequencer::boot`(`BootSource::Empty`),`day_loss_carry = (20 750, −8)`,housekeeping 环送入日切系统定时器(owner 1,`3 | 20 750 << 8`)
+- 实现:`apps/hft-core/tests/config.rs::core_435_live_polymarket_daily_loss_option`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-435.1 | 两项都不给 | pm-live `daily_loss_abs = 15`、`daily_loss_kill = 1.0`、`daily_loss_max_resumes = 1` |
+| CORE-435.2 | `daily_loss_abs = 7.5`、`daily_loss_max_resumes = 3`;另 `daily_loss_max_resumes = 0` | `7.5`、`1.0`、`3`;`0` |
+| CORE-435.3 | 额度 7.5,结转 −8,日切 | `last_day_rolled = 20 750`,当日 `net() = −8`,pm-live 有 `DailyLoss` cap |
+| CORE-435.4 | 额度缺省 15,同一结转与日切 | 当日 `net() = −8`,无 `DailyLoss` cap |
