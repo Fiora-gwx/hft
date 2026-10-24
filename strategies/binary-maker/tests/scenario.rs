@@ -302,15 +302,22 @@ fn bmk_007_requote_and_pull() {
 #[test]
 fn bmk_008_inventory_cap() {
     let p = params(|_| {});
-    let mut h = harness(&p);
-    // Long 100 Up shares of pair 1 (inv_max_shares = 100): only the Down token is bid.
-    let mut pos = GroupPosView::EMPTY;
-    pos.n_legs = 1;
-    pos.legs[0].qty = Qty(100_000_000);
-    h.views_mut().group_pos(A1, gid(2), pos);
-    let out = warm(&mut h, 400, 399, 1);
-    let insts: Vec<InstId> = out.places().map(|it| it.inst).collect();
-    assert_eq!(insts, vec![SLOTS[3]], "BMK-008.1");
+    // Long Up shares of pair 1 (inv_max_shares = 100, clip_shares = 10): the Up token is bid only
+    // while the net after a whole clip stays within the cap.
+    for (row, qty, want) in [
+        ("BMK-008.1", 100_000_000, vec![SLOTS[3]]),
+        ("BMK-008.2", 90_000_000, vec![SLOTS[2], SLOTS[3]]),
+        ("BMK-008.3", 90_010_000, vec![SLOTS[3]]),
+    ] {
+        let mut h = harness(&p);
+        let mut pos = GroupPosView::EMPTY;
+        pos.n_legs = 1;
+        pos.legs[0].qty = Qty(qty);
+        h.views_mut().group_pos(A1, gid(2), pos);
+        let out = warm(&mut h, 400, 399, 1);
+        let insts: Vec<InstId> = out.places().map(|it| it.inst).collect();
+        assert_eq!(insts, want, "{row}");
+    }
 }
 
 #[test]

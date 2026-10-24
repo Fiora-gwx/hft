@@ -134,13 +134,17 @@ spec: README.md
 ### BMK-008 库存上限
 
 - 规则:[规则](README.md#规则)、[参数](README.md#参数)
-- 级别:unit
+- 级别:table
 - 里程碑:M3
-- 前置:`U1` 所在 group 持有 100 份(`inv_max_shares = 100`)
-- 步骤:
-  1. `warm(400, 399, 1)`
-- 期望:最后一个事件只有 `D1` 的 `place`
+- 前置:`U1` 所在 group 持有的份数见下表(`inv_max_shares = 100`,`clip_shares = 10`)
+- 步骤:依次执行下表各行,每行 `warm(400, 399, 1)`
 - 实现:`strategies/binary-maker/tests/scenario.rs::bmk_008_inventory_cap`
+
+| 行 | `U1` 持有 | 期望(最后一个事件的 `place`) |
+|---|---|---|
+| BMK-008.1 | 100 份 | 只有 `D1` |
+| BMK-008.2 | 90 份(90 + 10 = 100) | `U1` 与 `D1` |
+| BMK-008.3 | 90.01 份(成交尾数;90.01 + 10 > 100) | 只有 `D1` |
 
 ## 验收
 
