@@ -722,7 +722,15 @@ pub struct PmLive {
     /// Day loss of earlier runs of this UTC day: `(UTC day number, USDC raw 1e-6, < 0)`, booked at
     /// the first day roll of the fresh journal (hft-sequencer ECF1 section 8 fields 7/8).
     pub day_loss_carry: Option<(u32, i64)>,
+    /// `daily_loss_abs` of `pm-live` (USDC raw 1e-6, > 0); `None` = 15 USDC.
+    pub daily_loss_abs: Option<i64>,
+    /// `daily_loss_max_resumes` of `pm-live`; `None` = the hft-risk default (1).
+    pub daily_loss_max_resumes: Option<u8>,
 }
+
+/// Live `daily_loss_abs` without `PmLive.daily_loss_abs` (15 USDC).
+#[allow(dead_code)]
+pub const PM_LIVE_DAILY_LOSS: i64 = 15_000_000;
 
 /// Binary-maker parameters of the first live run (`micro_s2_c5_cap10_mc20`, research reply
 /// 2026-10-22): 5 shares per quote, net 10, no-chase 1 s, fair-value cooldown 1 s, streak pause
@@ -751,7 +759,8 @@ pub const PM_REST_MAX_IDLE_MS: u32 = 25_000;
 /// The live maker (`order_env = "prod"`, no `--dry-run`): the maker simulation's venues, slots and
 /// strategy with a Live account `pm-live` (`is_prod`, UID `live.uid`) on Polymarket, its keys in
 /// `live.keys_dir`, `PM_LIVE_PARAMS`, the micro risk limits (order 10 USDC, account and venue
-/// 55, slot group 25, daily loss 15), OMS `ack_timeout_ms[polymarket] = 5000` and the REST pools'
+/// 55, slot group 25, daily loss `live.daily_loss_abs` or 15, resumes `live.daily_loss_max_resumes`
+/// or the default), OMS `ack_timeout_ms[polymarket] = 5000` and the REST pools'
 /// `venues.pm.net` (`rest_timeout_ms = 5000`, `rest_max_idle_ms = 25000`); every Polymarket
 /// config sets OMS `expire_window_ms[polymarket]` to the GTD lifetime (`stale_guard()`).
 #[cfg(feature = "polymarket")]
@@ -1145,11 +1154,15 @@ fn write_pm(
         rr_max_cross: Some(Rate(10_000_000)),
     });
     // Live micro limits (USDC, 1e-6): account and venue 55 (two overlapping windows plus resting
-    // quotes, below the 82 deposited), one slot group 25, daily loss 15.
-    let (acct_cap, group_cap, loss_cap) = match (live.is_some(), maker) {
-        (true, _) => (55_000_000, 25_000_000, 15_000_000),
-        (false, true) => (10_000_000_000, 1_000_000_000, 1_000_000_000),
-        (false, false) => (100_000_000, 10_000_000, 10_000_000),
+    // quotes, below the 82 deposited), one slot group 25, daily loss 15 unless chosen.
+    let (acct_cap, group_cap, loss_cap) = match (live, maker) {
+        (Some(l), _) => (
+            55_000_000,
+            25_000_000,
+            l.daily_loss_abs.unwrap_or(PM_LIVE_DAILY_LOSS),
+        ),
+        (None, true) => (10_000_000_000, 1_000_000_000, 1_000_000_000),
+        (None, false) => (100_000_000, 10_000_000, 10_000_000),
     };
     risk.accounts.push((
         a,
@@ -1183,6 +1196,7 @@ fn write_pm(
                 100_000_000
             }),
             daily_loss_abs: Notional(loss_cap),
+            daily_loss_max_resumes: live.and_then(|l| l.daily_loss_max_resumes),
             recon_closeonly_notional: Notional(5_000_000),
             ..hft_risk::AcctSpec::default()
         },

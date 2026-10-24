@@ -684,6 +684,8 @@ fn core_430_production_orders_polymarket_only() {
         uid: "0f5e8d2a-1111-2222-3333-".into(),
         keys_dir: d.path().join("keys"),
         day_loss_carry: None,
+        daily_loss_abs: None,
+        daily_loss_max_resumes: None,
     };
     let hot = d.path().join("hot");
     let path = support::write_polymarket_maker_live(d.path(), &hot, None, None, "127.0.0.1", "lo", &live);
@@ -754,6 +756,8 @@ fn core_431_live_maker_set_params_accepts_the_startup_shape() {
         uid: "0f5e8d2a-1111-2222-3333-".into(),
         keys_dir: d.path().join("keys"),
         day_loss_carry: None,
+        daily_loss_abs: None,
+        daily_loss_max_resumes: None,
     };
     let path = support::write_polymarket_maker_live(
         d.path(),
@@ -938,6 +942,8 @@ fn core_432_polymarket_expiry_window_is_the_gtd_lifetime() {
         uid: "0f5e8d2a-1111-2222-3333-".into(),
         keys_dir: d.path().join("keys"),
         day_loss_carry: None,
+        daily_loss_abs: None,
+        daily_loss_max_resumes: None,
     };
     let hot = d.path().join("hot");
     let live_path =
@@ -1001,6 +1007,8 @@ fn core_433_venue_rest_timeout_and_max_idle() {
             uid: "0f5e8d2a-1111-2222-3333-".into(),
             keys_dir: d.path().join("keys"),
             day_loss_carry: None,
+            daily_loss_abs: None,
+            daily_loss_max_resumes: None,
         };
         let pm = support::write_polymarket_maker_live(
             d.path(),
@@ -1046,6 +1054,8 @@ fn core_434_live_polymarket_daily_loss_in_usdc() {
         uid: "0f5e8d2a-1111-2222-3333-".into(),
         keys_dir: d.path().join("keys"),
         day_loss_carry: Some((day, -28_510_000)),
+        daily_loss_abs: None,
+        daily_loss_max_resumes: None,
     };
     let path = support::write_polymarket_maker_live(
         d.path(),
@@ -1143,5 +1153,134 @@ fn core_434_live_polymarket_daily_loss_in_usdc() {
         l.setup.day_pnl_carry,
         vec![(a, day, Notional(-28_510_000))],
         "CORE-434.4"
+    );
+}
+
+/// `pm_sim_config --daily-loss USDC --daily-loss-resumes N`: the live account's daily loss and
+/// resume count are the chosen values (defaults 15 and 1), and a carried loss beyond the chosen
+/// limit sets DailyLoss at the first day roll.
+#[cfg(feature = "polymarket")]
+#[test]
+fn core_435_live_polymarket_daily_loss_option() {
+    use hft_types::{AccountId, CapSource, Notional, Rate};
+    use zerocopy::IntoBytes;
+    let a = AccountId(1);
+    // 2026-10-24.
+    let day = 20_750u32;
+    let load = |abs: Option<i64>, resumes: Option<u8>, carry: Option<i64>| {
+        let d = tempfile::tempdir().unwrap();
+        let live = support::PmLive {
+            uid: "0f5e8d2a-1111-2222-3333-".into(),
+            keys_dir: d.path().join("keys"),
+            day_loss_carry: carry.map(|p| (day, p)),
+            daily_loss_abs: abs,
+            daily_loss_max_resumes: resumes,
+        };
+        let path = support::write_polymarket_maker_live(
+            d.path(),
+            &d.path().join("hot"),
+            None,
+            None,
+            "127.0.0.1",
+            "lo",
+            &live,
+        );
+        match hft_core::config::load(&path, false) {
+            Ok(l) => l,
+            Err(e) => panic!("CORE-435: {e:?}"),
+        }
+    };
+    let limits = |l: &hft_core::config::Loaded| {
+        let x = l
+            .configs
+            .risk
+            .accounts
+            .iter()
+            .find(|x| x.account == a)
+            .expect("pm-live limits");
+        (x.daily_loss_abs, x.daily_loss_kill, x.daily_loss_max_resumes)
+    };
+    // .1 defaults.
+    assert_eq!(
+        limits(&load(None, None, None)),
+        (Notional(15_000_000), Rate(1_000_000_000), 1),
+        "CORE-435.1"
+    );
+    // .2 chosen values.
+    assert_eq!(
+        limits(&load(Some(7_500_000), Some(3), None)),
+        (Notional(7_500_000), Rate(1_000_000_000), 3),
+        "CORE-435.2"
+    );
+    assert_eq!(limits(&load(None, Some(0), None)).2, 0, "CORE-435.2");
+    // .3/.4 boot on the generated config and roll into the carried day.
+    let boot_and_roll = |l: hft_core::config::Loaded| {
+        let io = hft_testkit::seq_rig::RigIo::<hft_core::Strategies> {
+            j: hft_sequencer::MemJournal::new(l.setup.clock),
+            tsc: 1,
+            rings: Default::default(),
+            n_venues: 2,
+            out: vec![],
+            mailbox: vec![],
+            kills: vec![],
+            calib: hft_rt::CalibPair {
+                tsc: hft_types::Tsc(0),
+                realtime_ns: 0,
+                ..Default::default()
+            },
+            hz: l.setup.clock.tsc_hz_milli,
+        };
+        let heartbeat = Box::leak(Box::new(hft_rt::Heartbeat::new()));
+        let mut seq = hft_sequencer::Sequencer::boot(
+            hft_sequencer::BootSource::Empty { configs: l.configs },
+            &l.setup,
+            hft_sequencer::driver::LiveDriver::new(
+                io,
+                hft_sequencer::driver::live::LiveCfg {
+                    feed_stage_cap: 1024,
+                    ..Default::default()
+                },
+            ),
+            heartbeat,
+        )
+        .unwrap();
+        // The DayRoll system timer (owner 1, id 3 | day << 8) on the housekeeping ring.
+        let t = hft_event::Timer {
+            timer_id: 3 | (day << 8),
+            owner: 1,
+            _pad: 0,
+            group: hft_types::GroupId(0),
+            _pad2: 0,
+            deadline_tsc: 1,
+        };
+        seq.driver_mut()
+            .io
+            .rings
+            .entry((1, 0))
+            .or_default()
+            .push_back((hft_event::EventKind::TIMER, t.as_bytes().to_vec()));
+        for _ in 0..64 {
+            assert!(!matches!(seq.step(), hft_sequencer::StepOutcome::Fatal(_)));
+        }
+        let e = seq.engine();
+        let capped = e
+            .risk
+            .mode
+            .caps()
+            .iter()
+            .any(|c| c.source == CapSource::DAILY_LOSS && c.scope.account == a);
+        (e.last_day_rolled, e.ledger.account(a).day.net(), capped)
+    };
+    // .3 −8 carried into a chosen 7.5 limit: DailyLoss right after the day roll.
+    assert_eq!(
+        boot_and_roll(load(Some(7_500_000), None, Some(-8_000_000))),
+        (day, Notional(-8_000_000), true),
+        "CORE-435.3"
+    );
+    // .4 the same carry under the default 15: no cap.
+    assert_eq!(
+        boot_and_roll(load(None, None, Some(-8_000_000))),
+        (day, Notional(-8_000_000), false),
+        "CORE-435.4"
     );
 }

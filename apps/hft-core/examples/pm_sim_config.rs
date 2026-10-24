@@ -5,6 +5,9 @@
 //! UID `UID`, credential files in `KEYS_DIR`, micro parameters and risk limits).
 //! `--day-loss-carry YYYY-MM-DD USDC` (live only): the day P&L (< 0) of earlier runs on that UTC
 //! day, booked at the first day roll of the new journal so the daily loss limit counts it.
+//! `--daily-loss USDC` (live only, > 0, default 15): the account's `daily_loss_abs`.
+//! `--daily-loss-resumes N` (live only, 0..=20, default the hft-risk default 1): the account's
+//! `daily_loss_max_resumes` (`Resume{DailyLoss}` per UTC day).
 #[path = "../tests/support/mod.rs"]
 mod support;
 
@@ -35,13 +38,36 @@ fn usdc(s: &str) -> Option<i64> {
     if f.len() > 6 || i.is_empty() {
         return None;
     }
-    let raw = i.parse::<i64>().ok()? * 1_000_000 + format!("{f:0<6}").parse::<i64>().ok()?;
+    let raw = i
+        .parse::<i64>()
+        .ok()?
+        .checked_mul(1_000_000)?
+        .checked_add(format!("{f:0<6}").parse::<i64>().ok()?)?;
     Some(if neg { -raw } else { raw })
 }
 
+/// Removes `flag VALUE` from `all`; `None` if `flag` is absent.
+fn take(all: &mut Vec<String>, flag: &str, usage: &str) -> Option<String> {
+    let i = all.iter().position(|a| a == flag)?;
+    assert!(i + 1 < all.len(), "{usage}");
+    let v: Vec<String> = all.drain(i..i + 2).collect();
+    Some(v[1].clone())
+}
+
 fn main() {
-    let usage = "usage: pm_sim_config [--maker | --live UID KEYS_DIR [--day-loss-carry YYYY-MM-DD USDC]] OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]";
+    let usage = "usage: pm_sim_config [--maker | --live UID KEYS_DIR [--day-loss-carry YYYY-MM-DD USDC] [--daily-loss USDC] [--daily-loss-resumes N]] OUTPUT_DIR TMPFS_DIR SRC_IP BIND_DEVICE [USER] [PIPELINE_USER]";
     let mut all: Vec<String> = std::env::args().skip(1).collect();
+    let daily_loss = take(&mut all, "--daily-loss", usage).map(|v| {
+        usdc(&v)
+            .filter(|p| *p > 0)
+            .expect("--daily-loss: USDC must be a decimal > 0 (at most 6 places)")
+    });
+    let resumes = take(&mut all, "--daily-loss-resumes", usage).map(|v| {
+        v.parse::<u8>()
+            .ok()
+            .filter(|n| *n <= 20)
+            .expect("--daily-loss-resumes: N must be 0..=20")
+    });
     let carry = all.iter().position(|a| a == "--day-loss-carry").map(|i| {
         let v: Vec<String> = all.drain(i..i + 3).collect();
         let day = v.get(1).and_then(|d| utc_day(d)).expect(usage);
@@ -60,10 +86,21 @@ fn main() {
             uid,
             keys_dir,
             day_loss_carry: carry,
+            daily_loss_abs: daily_loss,
+            daily_loss_max_resumes: resumes,
         }
     });
     assert!(carry.is_none() || live.is_some(), "--day-loss-carry needs --live");
+    assert!(
+        daily_loss.is_none() || live.is_some(),
+        "--daily-loss needs --live"
+    );
+    assert!(
+        resumes.is_none() || live.is_some(),
+        "--daily-loss-resumes needs --live"
+    );
     let maker = all.iter().any(|a| a == "--maker");
+    assert!(!(maker && live.is_some()), "--maker and --live are exclusive");
     let mut args = all.into_iter().filter(|a| a != "--maker");
     let root = std::path::PathBuf::from(args.next().expect(usage));
     let hot = std::path::PathBuf::from(args.next().expect(usage));
