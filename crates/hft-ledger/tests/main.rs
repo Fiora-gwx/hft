@@ -10,6 +10,7 @@ mod api;
 mod balance;
 mod cold_reader;
 mod common;
+mod day_loss;
 mod equity;
 mod external;
 mod fill;

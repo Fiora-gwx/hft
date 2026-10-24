@@ -4,7 +4,7 @@ use hft_event::{BlobHdr, BlobKind, BlobRef, ClockStatus, EventKind, Role, Segmen
 use hft_journal::{RollMark, RollReason};
 use hft_refdata::{AccountKind, EcfBuilder, EngineConfig, EngineSection, LoadErrCode, RefData};
 use hft_strategy_sdk::{SnapshotReader, VenueSet};
-use hft_types::{AccountId, HostClass, VenueId};
+use hft_types::{AccountId, HostClass, Notional, VenueId};
 use sha2::{Digest, Sha256};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
@@ -250,6 +250,10 @@ impl EngineSetup {
         for (a, v, bits) in &self.keys_required {
             row(6, 0, a.0, v.0, u64::from(*bits));
         }
+        for (a, day, pnl) in &self.day_pnl_carry {
+            row(7, 0, a.0, 0, u64::from(*day));
+            row(8, 0, a.0, 0, pnl.0 as u64);
+        }
         rows.sort_by_key(|r| (r.field, r.index, r.account, r.venue));
         b.section(
             EngineSection::Assembly,
@@ -298,6 +302,8 @@ impl EngineSetup {
         let mut gws = hft_risk::GwMap { venues: Vec::new() };
         let mut feeds = VenueSet(0);
         let mut keys_required = Vec::new();
+        let mut carry_day: Vec<(AccountId, u32)> = Vec::new();
+        let mut carry_pnl: Vec<(AccountId, Notional)> = Vec::new();
         let mut prev = None;
         for b in s.bytes.chunks_exact(16) {
             let r = AssemblyRow::read_from_bytes(b).map_err(|_| err())?;
@@ -309,8 +315,16 @@ impl EngineSetup {
             if r.field <= 3 && (r.index != 0 || r.account != 0 || r.venue != 0) {
                 return Err(err());
             }
-            if r.field >= 4
+            if (4..=6).contains(&r.field)
                 && (!(1..64).contains(&r.venue) || rd.venue(VenueId(r.venue)).id != VenueId(r.venue))
+            {
+                return Err(err());
+            }
+            if (7..=8).contains(&r.field)
+                && (r.index != 0
+                    || r.venue != 0
+                    || rd.account(AccountId(r.account)).id.0 == 0
+                    || r.account == 0)
             {
                 return Err(err());
             }
@@ -336,6 +350,13 @@ impl EngineSetup {
                     }
                     keys_required.push((a.id, VenueId(r.venue), r.value as u8));
                 }
+                7 if r.value > 0 => {
+                    let day = u32::try_from(r.value).map_err(|_| err())?;
+                    carry_day.push((AccountId(r.account), day));
+                }
+                8 if (r.value as i64) < 0 && r.value as i64 != i64::MIN => {
+                    carry_pnl.push((AccountId(r.account), Notional(r.value as i64)));
+                }
                 _ => return Err(err()),
             }
         }
@@ -353,6 +374,15 @@ impl EngineSetup {
                 }
             }
         }
+        // A carry is one (day, pnl) pair per account; rows are sorted, so both lists are by account.
+        if carry_day.len() != carry_pnl.len() || carry_day.iter().zip(&carry_pnl).any(|(d, p)| d.0 != p.0) {
+            return Err(err());
+        }
+        let day_pnl_carry = carry_day
+            .iter()
+            .zip(&carry_pnl)
+            .map(|(d, p)| (d.0, d.1, p.1))
+            .collect();
         Ok(Self {
             caps,
             seq,
@@ -362,6 +392,7 @@ impl EngineSetup {
             gws,
             feeds,
             keys_required,
+            day_pnl_carry,
             role_prod: role_prod.ok_or_else(err)?,
             advisor_max_lag_ms: advisor_max_lag_ms.ok_or_else(err)?,
             drain_timeout_ms: drain_timeout_ms.ok_or_else(err)?,

@@ -20,7 +20,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 概要 | SEQ-018、SEQ-310 |
 | 目录 | 不适用:非规范 |
 | 使用本组件 | 不适用:见子节 |
-| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-395、SEQ-404–SEQ-406、SEQ-422–SEQ-424 |
+| 装配与运行(由 apps/hft-core、apps/replayer、hft-testkit 调用) | SEQ-006、SEQ-011、SEQ-013、SEQ-014、SEQ-075、SEQ-107、SEQ-347、SEQ-376–SEQ-381、SEQ-384–SEQ-395、SEQ-404–SEQ-406、SEQ-422–SEQ-424、SEQ-441 |
 | 策略集(`StrategySet`) | SEQ-015–SEQ-018、SEQ-340 |
 | 只读视图(`SeqViews`,实现 SDK `Views`) | SEQ-019–SEQ-029、SEQ-181 |
 | 环与容量 | SEQ-001–SEQ-007、SEQ-058、SEQ-059、SEQ-064、SEQ-066、SEQ-086、SEQ-087、SEQ-100、SEQ-221、SEQ-231、SEQ-279、SEQ-288、SEQ-345、SEQ-346、SEQ-367 |
@@ -29,11 +29,11 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 记录分类 | SEQ-020、SEQ-052–SEQ-054 |
 | 主循环(`step`) | SEQ-008–SEQ-010、SEQ-012、SEQ-055–SEQ-077、SEQ-101、SEQ-217、SEQ-319、SEQ-343、SEQ-344、SEQ-346、SEQ-370 |
 | 心跳 | SEQ-010、SEQ-073、SEQ-078 |
-| 环境决定写成 Input | SEQ-036、SEQ-055、SEQ-079–SEQ-098、SEQ-244 |
+| 环境决定写成 Input | SEQ-036、SEQ-055、SEQ-079–SEQ-098、SEQ-244、SEQ-442 |
 | BBO 合并与 CONFLATED | SEQ-095、SEQ-099–SEQ-103 |
 | 引擎时间(engine_ns) | SEQ-008、SEQ-042、SEQ-104–SEQ-112 |
 | 连接活性 | SEQ-436、SEQ-022、SEQ-028、SEQ-113–SEQ-120、SEQ-143、SEQ-173、SEQ-434 |
-| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420、SEQ-425–SEQ-431、SEQ-434 |
+| 每条 Input 的处理顺序(`process`) | SEQ-373–SEQ-375、SEQ-382–SEQ-383、SEQ-411–SEQ-415、SEQ-074、SEQ-080、SEQ-104、SEQ-121–SEQ-169、SEQ-184、SEQ-216、SEQ-341、SEQ-344、SEQ-359、SEQ-360、SEQ-364、SEQ-369、SEQ-370、SEQ-371、SEQ-372、TK-070、TK-106、TK-115、SEQ-416–SEQ-420、SEQ-425–SEQ-431、SEQ-434、SEQ-440 |
 | 意图管线 | SEQ-127、SEQ-129、SEQ-170–SEQ-181、SEQ-300、SEQ-352、SEQ-360 |
 | 目标意图与执行层 | SEQ-135、SEQ-141、SEQ-182–SEQ-187、SEQ-341、SEQ-365、SEQ-397 |
 | Advice 路由 | SEQ-169、SEQ-188–SEQ-191 |
@@ -4124,6 +4124,52 @@ SEQ-160 同时覆盖真实 ConnId 112/113/255、重复 Up/Down、主连接退出
 | SEQ-285.5 | 一条腿的 venue 不在账户内 | `InvalidArgs{GroupCheck}`,arg = 41(`LoadErrCode::LegVenueNotInAccount`) |
 | SEQ-285.6 | 同一 GroupSpec 两腿在同一交易所 | `InvalidArgs{SameExchangeLegs}` |
 | SEQ-285.7 | 两腿报价资产不同 | `InvalidArgs{GroupCheck}`,arg = 43(`LoadErrCode::QuoteMismatch`) |
+
+### SEQ-440 交割按 0 入账使当日亏损越线:DailyLoss、开仓被拒
+
+- 规则:[每条 Input 的处理顺序](README.md#每条-input-的处理顺序process) ExternalFill 行、[hft-risk 当日亏损](../hft-risk/README.md#当日亏损锁存)
+- 级别:integ
+- 里程碑:M2
+- 前置:B0,账户 1 `daily_loss_abs = 50`、`daily_loss_kill = 1.0`,稳态
+- 步骤:
+  1. 账户 1 在 a1 买入 0.002(按买一价成交,约 100 USDT)
+  2. `ExternalFill{a1, Sell 0.002, px 0, cause = Delivery}`(Rep 环)
+  3. s1 在 G1 发 a1 Open 买单
+- 期望:
+  - SEQ-440.1:步骤 1 后无 `DailyLoss`
+  - SEQ-440.2:步骤 2 后 a1 仓位 0;账户当日 `external ≤ −100`、`net() < −50`;同一 Input 恰好一条 `CapSet{DailyLoss}`,`params[0] = −50`
+  - SEQ-440.3:步骤 3 的决策 `reject = DAILY_LOSS`
+- 实现:`crates/hft-sequencer/tests/day_loss.rs::seq_440_delivery_at_zero_crosses_daily_loss`
+
+### SEQ-441 ECF1 段 8 的当日亏损延续行
+
+- 规则:[装配与运行](README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)(ECF1 段 8 field 7/8)
+- 级别:table
+- 里程碑:M2
+- 前置:`b0_setup`;`day_pnl_carry = [(1, D0, −28.51), (2, D0, −1)]`,D0 = B0 时钟的 UTC 日
+- 实现:`crates/hft-sequencer/tests/day_loss.rs::seq_441_day_loss_carry_rows`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| SEQ-441.1 | `encode_blob` → `decode_blob` | `day_pnl_carry` 相同;再编码逐字节相同 |
+| SEQ-441.2 | 只一行:pnl +5;pnl 0;day 0;账户 200(未登记) | 每个 `decode_blob` 都 `Err` |
+| SEQ-441.3 | 删去账户 2 的 field 7 行;删去其 field 8 行 | 都 `Err`(不成对) |
+
+### SEQ-442 当日亏损延续在空 journal 的日切时计入一次
+
+- 规则:[环境决定写成 Input](README.md#环境决定写成-input) DayRoll 行、[hft-ledger 未实现与当日 PnL](../hft-ledger/README.md#未实现与当日-pnl增量维护)
+- 级别:table
+- 里程碑:M2
+- 前置:B0,账户 1 `daily_loss_abs = 50`、`daily_loss_kill = 1.0`;`day_pnl_carry` 按行设定并编入 journal 的 ECF1(`boot_self_contained`);稳态(启动后首轮日切到 D0)
+- 实现:`crates/hft-sequencer/tests/day_loss.rs::seq_442_carry_booked_at_day_roll_once`
+
+| 行 | 延续 | 期望 |
+|---|---|---|
+| SEQ-442.1 | (1, D0, −60) | `last_day_rolled = D0`;账户 1 当日 `adjust = −60`;恰好一条 `Note{Ledger, DayPnlCarried, v = [1, −60 000 000, 0…]}`;`DailyLoss` 已设;s1 的 a1 Open `reject = DAILY_LOSS` |
+| SEQ-442.2 | (1, D0, −20) | 当日 `adjust = −20`;无 `DailyLoss`;Open 放行(`reject = 0`) |
+| SEQ-442.3 | (1, D0 + 1, −60) | 当日 `adjust = 0`;无 `DayPnlCarried`、无 `DailyLoss` |
+| SEQ-442.4 | 同 .1,从首个快照验证回放 | 无不一致 |
+| SEQ-442.5 | 同 .1,写关键帧后崩溃,从最新快照恢复(同一 UTC 日) | 当日 `adjust` 仍 −60(不重复计入);`DailyLoss` 仍在 |
 
 ### SEQ-439 SetParams 第 1 项:观察 group 的腿可以不在账户 venue 内
 

@@ -862,6 +862,10 @@ impl JournalLedger {
                 };
                 self.ledger.apply_adjust(&a, t);
             }
+            (NoteSource::Ledger, code::DAY_PNL_CARRIED) => {
+                let a = AccountId((n.v[0] & 0xFF) as u8);
+                self.ledger.carry_day_pnl(a, Notional(n.v[1] as i64), t);
+            }
             (NoteSource::Ledger, code::RESIDUAL_WRITTEN_OFF) => {
                 let a = AdjustDelta {
                     account: AccountId((n.v[0] & 0xFF) as u8),

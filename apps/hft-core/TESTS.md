@@ -56,7 +56,7 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 多账户 | CORE-330、CORE-168、CORE-247、CORE-313、CORE-427、CORE-428 |
 | HostProfile | CORE-340–CORE-343、CORE-419 |
 | HeartbeatBlock | CORE-350–CORE-352 |
-| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433 |
+| 配置文件字段 | CORE-360–CORE-367、CORE-047、CORE-227–CORE-230、CORE-246、CORE-413、CORE-414、CORE-416、CORE-421、CORE-422、CORE-423、CORE-433、CORE-434 |
 | 实现说明 | CORE-380–CORE-387、CORE-409、CORE-415–CORE-418、CORE-420 |
 | 延迟与资源契约 | CORE-400–CORE-408、CORE-267 |
 | 测试与验收 | 不适用:非规范 |
@@ -4527,3 +4527,18 @@ CORE-033 同时断言仅指定 kind 的通用夹具仍使用 BTC 双现货,供 S
 | CORE-433.3 | `rest_timeout_ms = 0`;未知键 `idle_ms` | `BadValue`;`ConfigParse` |
 | CORE-433.4 | Polymarket 实盘做市配置 | 加载成功;`venues.pm.net` = 5000、25 000;OMS `ack_timeout_ms[polymarket]` = 5000 |
 | CORE-433.5 | 同上改 `rest_timeout_ms = 5001` | 含 `RestTimeoutAboveAck` |
+
+### CORE-434 Polymarket 实盘配置按 USDC 计当日亏损
+
+- 规则:[config/README](config/README.md)(Polymarket 实盘);[hft-ledger USDT 统一计价](../../crates/hft-ledger/README.md#usdt-统一计价);[hft-sequencer ECF1 段 8](../../crates/hft-sequencer/README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)
+- 级别:table
+- 里程碑:M3
+- 前置:`write_polymarket_maker_live`(Cargo feature `polymarket`),`day_loss_carry = (20 750 /* 2026-10-24 */, −28.51 USDC)`;`config::load(.., dry = false)`
+- 实现:`apps/hft-core/tests/config.rs::core_434_live_polymarket_daily_loss_in_usdc`
+
+| 行 | 输入 | 期望 |
+|---|---|---|
+| CORE-434.1 | ECF1 的 ledger 段 | `par_assets` 含 USDC,`Ledger::new` 成功;同一配置 `par_assets = {USDT}` → `Err(NoUsdtRate{USDC})` |
+| CORE-434.2 | RiskParams 的 pm-live 账户 | `daily_loss_abs = 15`、`daily_loss_kill = 1.0` |
+| CORE-434.3 | 用该 refdata 与 ledger 配置:槽位 inst 买 10 份 @ 0.600,再 `ExternalFill{Delivery, Sell 10 @ 0}` | 账户当日 `net() = −6`(USDC 按 1.0) |
+| CORE-434.4 | ECF1 段 8 | `day_pnl_carry = [(pm-live, 20 750, −28.51)]` |

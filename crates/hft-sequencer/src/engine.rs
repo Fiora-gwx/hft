@@ -48,6 +48,9 @@ pub struct EngineSetup {
     pub advisor_max_lag_ms: u32,
     /// hft-core `shutdown.drain_timeout_ms` (0 = no timeout).
     pub drain_timeout_ms: u32,
+    /// Day loss carried from earlier journals: `(account, UTC day, pnl < 0)`, at most one row per
+    /// account; booked at the day roll into that day (README "装配与运行", ECF1 section 8).
+    pub day_pnl_carry: Vec<(AccountId, u32, Notional)>,
     /// `SetRisk` decoding (injected at assembly).
     pub risk_decode: Option<crate::parsed::RiskDecode>,
     /// TSC frequency of this run (mHz) and the UTC calibration pair of the first segment.

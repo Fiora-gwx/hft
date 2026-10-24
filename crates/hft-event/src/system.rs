@@ -349,6 +349,7 @@ pub static NOTE_NAMES: &[NoteName] = notes![
         f("free", 128, 64), f("locked", 192, 64), f("ex_ts_ns", 256, 64)];
     ReceiptMismatch: Ledger, P0, [f("venue", 0, 8), f("account", 8, 8), f("inst", 64, 64), f("trade_id", 128, 64),
         f("exch_order_id", 192, 64), f("fill_seq", 256, 64), f("fields", 320, 64)];
+    DayPnlCarried: Ledger, Info, [f("account", 0, 8), f("pnl", 64, 64)];
     ExecBroken: Exec, P0, [];
     ExecExternalDefault: Exec, None, [];
     ExecAutoFixFailed: Exec, P0, [];

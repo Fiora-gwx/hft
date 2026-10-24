@@ -562,7 +562,7 @@ pub struct KillCmd { pub level: KillLevel, pub scope: CmdScope, pub cancel_resti
 
 ### 当日亏损(锁存)
 
-- **亏损口径**:ledger 增量维护 `day_pnl(account)`(已实现 + 资金费 + 手续费 + 未实现,USDT)。
+- **亏损口径**:ledger 增量维护 `day_pnl(account)`(已实现 + 资金费 + 手续费 + 未实现 + 外来成交(含交割)+ 调整,USDT;= `AccountBook.day.net()`)。各计价资产按 ledger 换算率折 USDT,没有换算来源的计价资产在 ledger 加载时拒绝([hft-ledger USDT 统一计价](../hft-ledger/README.md#usdt-统一计价));同一 UTC 日从空 journal 重启时,此前 journal 的当日亏损经 EngineConfig 的当日亏损延续在日切时计入([hft-sequencer ECF1 段 8](../hft-sequencer/README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用)),从快照恢复时当日 PnL 与锁存随快照保留。
 - **权益来源**:[hft-ledger](../hft-ledger/README.md) 的账户合计权益(`EquityView`,即 SDK `PortfolioView` 的合计权益,估值规则为 ledger 参数)。日切时取 `equity_sod = equity(account).total`(`valid` 时);日切时尚未 `valid` 的账户,在当日首次 `valid` 的 `on_pnl` 中补取。
 - **额度**:`quota = min(daily_loss_abs, equity_sod × daily_loss_kill)`;`equity_sod` 尚未取得时(新账户首个余额到达之前)`quota = daily_loss_abs`。`daily_loss_abs` 必须 > 0(参数校验)。
 - **触发线**:初值 `−quota`;`day_pnl < trigger` → `on_pnl` 返回 `Auto(DailyLoss)`(`params[0]` = 触发线),锁存;锁存期间 `on_pnl` 返回 `None`;熔断不改 cell。当日首次补取 `equity_sod` 时,未锁存且当日未解除过的账户触发线随新额度重设为 `−quota`。

@@ -170,6 +170,13 @@ fn evt_075_note_registry_rows() {
                 (320, 64),
             ],
         ),
+        (
+            "EVT-075.96",
+            "DayPnlCarried",
+            Ledger,
+            Some(Info),
+            &[(0, 8), (64, 64)],
+        ),
         ("EVT-075.56", "ExecBroken", Exec, Some(P0), &[]),
         ("EVT-075.57", "ExecExternalDefault", Exec, None, &[]),
         ("EVT-075.58", "ExecAutoFixFailed", Exec, Some(P0), &[]),
@@ -225,8 +232,8 @@ fn evt_075_note_registry_rows() {
         ("EVT-075.82", "AdvisorStats", Advisor, Some(Info), &[]),
         ("EVT-075.88", "ModelCkptSkipped", Advisor, Some(P1), &[]),
     ];
-    assert_eq!(NOTE_NAMES.len(), 94);
-    assert_eq!(rows.len(), 94);
+    assert_eq!(NOTE_NAMES.len(), 95);
+    assert_eq!(rows.len(), 95);
     for (i, (row, name, src, lvl, v)) in rows.iter().enumerate() {
         let n = note_name(name).unwrap_or_else(|| panic!("{row}"));
         assert_eq!(NOTE_NAMES[i].name, *name, "{row} order");

@@ -16,6 +16,7 @@ mod commands;
 mod common;
 mod config_blob;
 mod conflate;
+mod day_loss;
 mod determinism;
 mod drain;
 mod env;
