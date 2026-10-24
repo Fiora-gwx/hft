@@ -134,7 +134,7 @@ spec: README.md
 ### BMK-008 库存上限
 
 - 规则:[规则](README.md#规则)、[参数](README.md#参数)
-- 级别:unit
+- 级别:table
 - 里程碑:M3
 - 前置:`U1` 所在 group 持有的份数见下表(`inv_max_shares = 100`,`clip_shares = 10`)
 - 步骤:依次执行下表各行,每行 `warm(400, 399, 1)`
