@@ -351,9 +351,15 @@ impl Fast {
             let lo = (i128::from(d.p_min.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
             let hi = (i128::from(d.p_max.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
             let cap = i64::from(d.inv_max_shares).saturating_mul(unit_qty);
+            // The net after this clip fills completely stays within the cap (a short fill such as
+            // 9.99 of 10 shares no longer admits a whole further clip).
+            let clip = i64::from(d.clip_shares).saturating_mul(unit_qty);
             let target = match (mine && live, bid, ask) {
                 (true, Some(b), Some(a))
-                    if b < a && b >= lo && b <= hi && own_q.saturating_sub(other_q) < cap =>
+                    if b < a
+                        && b >= lo
+                        && b <= hi
+                        && own_q.saturating_sub(other_q).saturating_add(clip) <= cap =>
                 {
                     let t = lim.map_or(b, |l| b.min(l));
                     (t >= lo).then_some(t)

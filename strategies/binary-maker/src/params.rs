@@ -10,7 +10,8 @@ hft_strategy_sdk::define_params! {
         window_s: Count [min = 60, max = 86_400, default = 300, relax = None],
         /// shares per quote
         clip_shares: Count [min = 1, max = 100_000, default = 10, relax = Up],
-        /// net shares (Up minus Down of the current window) beyond which the long side stops quoting
+        /// net shares (Up minus Down of the current window) that the long side's next clip, filled
+        /// completely, may not exceed
         inv_max_shares: Count [min = 1, max = 1_000_000, default = 100, relax = Up],
         /// lowest bid price quoted, as a fraction of one (1e-9)
         p_min: Rate [min = 0, max = 1_000_000_000, default = 100_000_000, relax = Down],
