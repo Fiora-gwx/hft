@@ -194,7 +194,7 @@ pub fn rd_funding(kind: FundingSettleKind) -> &'static RefData {
     })
 }
 
-fn venue_spec(id: VenueId, exchange: Exchange, product: InstKind) -> VenueSpec {
+pub fn venue_spec(id: VenueId, exchange: Exchange, product: InstKind) -> VenueSpec {
     VenueSpec {
         id,
         exchange,
@@ -214,7 +214,7 @@ fn venue_spec(id: VenueId, exchange: Exchange, product: InstKind) -> VenueSpec {
     }
 }
 
-fn spot_caps(v: VenueId, fee: FeeAssetRule) -> VenueCaps {
+pub fn spot_caps(v: VenueId, fee: FeeAssetRule) -> VenueCaps {
     let mut c = VenueCaps::none(v);
     c.fee_asset_rule = fee;
     c
@@ -245,7 +245,7 @@ struct I {
 }
 
 /// Decimal string of a positive raw value at `exp` ("0.01").
-fn raw_str(raw: i64, exp: i32) -> String {
+pub fn raw_str(raw: i64, exp: i32) -> String {
     let d = (-exp) as usize;
     let s = format!("{raw:0>w$}", w = d + 1);
     let (i, f) = s.split_at(s.len() - d);

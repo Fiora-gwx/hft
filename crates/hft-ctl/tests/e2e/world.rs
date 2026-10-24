@@ -536,6 +536,7 @@ pub fn engine_setup() -> EngineSetup {
         role_prod: false,
         advisor_max_lag_ms: 5_000,
         drain_timeout_ms: 0,
+        day_pnl_carry: Vec::new(),
         risk_decode: Some(risk_decode),
         clock: SegClock {
             tsc_hz_milli: HZ,

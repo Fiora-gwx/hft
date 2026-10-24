@@ -69,6 +69,7 @@ impl Ledger {
     pub fn on_balance(&mut self, b: &BalanceReport, quiet: bool, t: i64) -> BalanceVerdict; // 首条 quiet 报告 → 初始化;其后只校验
     pub fn on_margin(&mut self, m: &MarginReportView<'_>, t: i64);                        // 保存报告值,重算估计与强平距离
     pub fn on_day_roll(&mut self, t: i64);                                                 // 只重置当日 PnL 基线;日亏锁存在 hft-risk
+    pub fn carry_day_pnl(&mut self, a: AccountId, pnl: Notional, t: i64) -> PnlDelta;   // 日切后把此前 journal 当日已发生的亏损(≤ 0,USDT)记入账户当日 `adjust`,写 Note{DayPnlCarried};见"未实现与当日 PnL"
     pub fn apply_adjust(&mut self, a: &AdjustDelta, t: i64) -> PnlDelta;                  // AdoptExchange 的仓位或余额条目、WriteOffResidual 的核销(Funding 类只经资金费对账校正产生)
     pub fn set_balance_baseline(&mut self, a: AccountId, v: VenueId, cmd_seq: u64, out: &mut FixedVec<AssetId, 64>) -> BaselineResult;
     pub fn apply_transfer(&mut self, tr: &TransferDelta, t: i64);                         // RecordTransfer、SimTransfer:资金流动,不计 PnL
@@ -98,7 +99,8 @@ pub struct PnlDelta    { pub account: AccountId, pub group: GroupId, pub d: PnlB
 pub enum BalanceVerdict { Initialized /* 该资产首条报告 */, Reported /* quiet = false:只更新 rep_* */, Ok, Drift { asset: AssetId, diff: Qty /* 报告 − total */ } }
 pub enum BaselineResult { Set { n_assets: u16, notional: Notional }, NoBalanceView /* 该 (account, venue) 尚无 BalanceReport */ }
 pub struct RateView    { pub bid: Px, pub ask: Px, pub ens: i64, pub stale: bool }      // 换算率所用参考行情与其 engine_ns;stale = RATE_STALE
-pub enum LedgerConfigError { TooManyAssets { venue: VenueId, n: u16 } }                // 某 venue 的资产数 > MAX_ASSETS_PER_VENUE
+pub enum LedgerConfigError { TooManyAssets { venue: VenueId, n: u16 } /* 某 venue 的资产数 > MAX_ASSETS_PER_VENUE */,
+                             NoUsdtRate { asset: AssetId } /* 某有效 inst 的计价资产不在 par_assets、stable_par_fallback 中,也没有参考 inst(见"USDT 统一计价") */ }
 ```
 
 **journal 冷消费者 `JournalLedger`**(读 journal 的冷读者——reconciler 的引擎视图、hft-py——都用它,不另写入账实现;规则见"冷消费者"):
@@ -340,6 +342,7 @@ impl PnlBreakdown { pub fn net_realized(&self) -> Notional; pub fn net(&self) ->
 | `FundingSettle`(推送与 `synth = 1` 的 Output) | 按 `VenueCaps.funding_settle` 调 `apply_funding` / `apply_funding_push` |
 | `Note{Adjusted}`、`Note{FundingCorrected}`(未置 `NO_HISTORY`)| 还原 `AdjustDelta` 调 `apply_adjust` |
 | `BalanceReport`、`MarginReport`、`Bbo`/`MarkPrice`、`Applied` 的 `RecordTransfer`/`SimTransfer`/`SimReset`/`SetBalanceBaseline` 命令、`Timer{Sys, DayRoll}` | 与 sequencer 相同的入口;BalanceReport 先以 quiet=false 更新报告字段,保留同事件原始报告 |
+| `Note{DayPnlCarried}` | 对 `v[0]` 的账户调 `carry_day_pnl(a, Notional(v[1] as i64), t)`(与 sequencer 同一事件、同一顺序:紧跟该事件的 `Timer{Sys, DayRoll}` 之后) |
 | `Note{BalanceInit}` | 必须匹配同事件待处理余额报告的账户、venue、资产与总额;原报告通过 quiet 闸门后初始化,不从注记虚构余额;不匹配则 BalanceEvidence |
 | `Note{BalanceCheck}` | 必须匹配同事件、尚未使用的已初始化 BalanceReport 的账户、venue、资产、free、locked、交易所时刻和引擎时刻;否则 BalanceEvidence 并锁存失败。用冷账本自身钱包重新执行 quiet=true 校验,得到漂移标志;EVENT_END 清除待匹配报告。没有该事实的旧日志只更新报告字段,不能证明漂移标志相等 |
 
@@ -453,6 +456,8 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 
 `on_ref_px`/`on_mark` 只更新持有该 inst 的 (account, group):`new_upnl = qty × (估值价 − avg)` 换算 USDT,`delta` 同步加到 `GroupBook.day.unrealized` 与 `AccountBook.upnl`;不遍历所有 group。`day` 在 `on_day_roll`(UTC 日切的 `Timer`)时清零(未实现以当时值为新基线)——这只是 PnL 基线;日亏熔断是 hft-risk 的锁存 cap,日切不清。`restore_marks` 只重建持有者的 `upnl` 缓存,不产生 `delta`。`on_ref_px`/`on_mark` 入口清空、重估中记下未实现有变化的账户(按账户号的位图,瞬态,不进快照),sequencer 随即以 `take_upnl_changed()`(账户号升序逐个取出)对这些账户调 `risk.on_pnl`——当日亏损熔断看含未实现的当日 PnL([hft-risk 当日亏损](../hft-risk/README.md#当日亏损锁存))。
 
+**跨 journal 的当日亏损延续**:`carry_day_pnl(a, pnl, t)` 只在 sequencer 处理日切(`on_day_roll` 之后、同一 Input 内)时调用,`pnl` 取 EngineConfig 装配段的当日亏损延续行([hft-sequencer ECF1 段 8](../hft-sequencer/README.md#装配与运行由-appshft-coreappsreplayerhft-testkit-调用));它把 `pnl`(< 0;0、正值或未知账户不入账、不写 Note,返回零增量)加到 `AccountBook.day.adjust`(只改账户当日账,不改 group 账、累计与现金),写 `Note{source = Ledger, code = DayPnlCarried}`(Info;`v = [account, pnl as u64, 0…]`),返回 `PnlDelta{account, group: GROUP_NONE, d.adjust = pnl}`;下一次日切随当日账一起清零。冷消费者读到这条 Note 时对同一账户调用同一函数(见"冷消费者")。
+
 ### 轮次(round)
 
 - 腿名义 = |该腿净量| × 该 inst 当前估值价(现货按 `valuation.spot`,永续按 `valuation.perp`)折 USDT。
@@ -465,6 +470,7 @@ pub struct AdjustDelta {                 // Position/Balance 由 sequencer 按 A
 
 参考 BBO 刷新受该资产或参考交易对报价资产影响的 venue 权益。相关持有量为零时只重算汇率过期标志,不重复换算无关现金;所有原有汇总行的 `as_of_ens` 仍推进到本事件。跨过汇率过期边界时完整刷新,数值、标志与完整重算一致(LED-210)。
 
+- **换算来源在加载时校验**:每个有效 inst(状态不是 `Invalid`)的计价资产必须属于 `par_assets` 或 `stable_par_fallback`,或有参考 inst(`ref_inst_for` ≠ `INST_NONE`);否则 `new` 返回 `LedgerConfigError::NoUsdtRate{asset}`,拒绝启动——没有换算来源的计价资产换算率恒为 0,该资产计价的已实现、未实现、持有名义与权益都会折成 0 USDT,当日亏损熔断与名义上限因此失效。
 - 换算率只来自 journal 中的参考行情事件(`Bbo`),**不查外部 API**([07 §5](../../design/07-策略层.md))。每资产存 `(bid, ask, ens)`,换算率 = `Px::mid_floor(bid, ask)`(`par_assets` 恒为 1;基础资产在合计权益里的估值价另按 `valuation.spot`);`rate_max_age_ms` 超时(按 engine_ns:本 crate 没有时钟,以最近一次带 `t` 的入口调用的 `t` 为当前时刻,`t − ens > rate_max_age_ms` 即超时)或早于本次运行起点 → `RATE_STALE`,稳定币按 1.0 回退,其他资产沿用旧值并置 `stale` 位(报表显示,风控照用,`Equity.valid = false`)。
 - 已实现一律按**事件发生时**的换算率入账(不回溯重估);未实现与合计权益按当前换算率随 `on_ref_px` 更新。
 

@@ -25,17 +25,17 @@ CORE-120 非正式账户启动链路由 `apps/hft-core/tests/account_process.rs:
 | 数据结构 | LED-002–LED-004、LED-233、LED-237、LED-247 |
 | 仓位与已实现(平均成本法) | LED-010、LED-021–LED-025、LED-030–LED-039、LED-240、LED-241、LED-243、LED-275–LED-278 |
 | 余额初始化、校验与基线 | LED-039–LED-046、LED-260–LED-262 |
-| 外部成交(`ExternalFill`) | LED-050–LED-081、LED-188、LED-240、LED-245、LED-283–LED-285、LED-292、LED-293、LED-302 |
-| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282、LED-286–LED-291、LED-295–LED-297、LED-301、LED-304、LED-305 |
+| 外部成交(`ExternalFill`) | LED-050–LED-081、LED-188、LED-240、LED-245、LED-283–LED-285、LED-292、LED-293、LED-302、LED-307 |
+| 冷消费者(`JournalLedger`) | LED-263–LED-267、LED-271–LED-273、LED-279–LED-282、LED-286–LED-291、LED-295–LED-297、LED-301、LED-304、LED-305、LED-308 |
 | 资金费 | LED-090–LED-104、LED-136–LED-138、LED-240、LED-245、LED-260 |
 | 资金费时刻归一化 | LED-091、LED-110–LED-116 |
 | 资金费对账校正 | LED-270、LED-268、LED-114、LED-120–LED-139、LED-244、LED-261 |
 | 保证金数据 | LED-150–LED-161 |
 | 人工干预的采纳(`AdoptExchange`) | LED-123、LED-170–LED-179、LED-243 |
 | 划转与模拟账户 | LED-185–LED-188、LED-242、LED-260 |
-| 未实现与当日 PnL(增量维护) | LED-160、LED-190–LED-194 |
+| 未实现与当日 PnL(增量维护) | LED-160、LED-190–LED-194、LED-307、LED-308 |
 | 轮次(round) | LED-176、LED-200–LED-203、LED-274 |
-| USDT 统一计价 | LED-158、LED-210–LED-215 |
+| USDT 统一计价 | LED-158、LED-210–LED-215、LED-306、LED-307 |
 | 链上腿(optional,feature `chain`) | 不适用:里程碑外 |
 | 快照行格式(节 1、13、22;草案,实现时以代码与编译期断言为准) | LED-053、LED-061、LED-104、LED-138、LED-139、LED-230–LED-238、LED-303 |
 | 规划源文件 | 不适用:非规范 |
@@ -3009,6 +3009,55 @@ LED-092 补充验收:估算 6、实额 5.25 只补差 -0.75;重复实额/定时�
 |---|---|---|
 | LED-305.1 | `CancelReject{inst = 0, cum = 0.01}` | 无错误;BTC_S1 仓位 0.01 |
 | LED-305.2 | `Fill{inst = BTC_P2, cum = 0.01}` | 无错误;BTC_S1 仓位 0;USDT 不变 |
+
+### LED-306 计价资产没有 USDT 换算来源时 new 拒绝
+
+- 规则:[USDT 统一计价](README.md#usdt-统一计价)、[使用本组件](README.md#使用本组件)
+- 级别:table
+- 里程碑:M2
+- 前置:`rd_pm()`(`tests/day_loss.rs`):Polymarket 现货 venue,计价资产 USDC(`px_exp −6`、`qty_exp −6`),两个结果代币 inst(`px_exp −3`、`qty_exp −6`,计价 USDC),没有 USDC/USDT 参考 inst;`cfg_lf()` 改 `par_assets` 与 `stable_par_fallback` 如行
+- 实现:`crates/hft-ledger/tests/day_loss.rs::led_306_quote_asset_without_usdt_rate_refused`
+
+| 行 | refdata | `par_assets` / `stable_par_fallback` | 期望 |
+|---|---|---|---|
+| LED-306.1 | `rd_pm` | `{USDT}` / `{}` | `Err(NoUsdtRate { asset: USDC })` |
+| LED-306.2 | `rd_pm` | `{USDT, USDC}` / `{}` | `Ok` |
+| LED-306.3 | `rd_pm` | `{USDT}` / `{USDC}` | `Ok` |
+| LED-306.4 | `rd_lf`(USDC 有参考 inst `USDCUSDT`) | `{USDT}` / `{}` | `Ok` |
+
+### LED-307 结果代币按 0 交割时成本计入当日已实现亏损
+
+- 规则:[外部成交](README.md#外部成交externalfill)第 4 步、[仓位与已实现](README.md#仓位与已实现平均成本法)、[USDT 统一计价](README.md#usdt-统一计价)
+- 级别:unit
+- 里程碑:M2
+- 前置:`rd_pm()`;`par_assets = {USDT, USDC}`、`stable_par_fallback = {}`;账户 pm-live 余额初始化 USDC 82、两种代币 0;group `PG` 两腿 Up、Down
+- 步骤:
+  1. `apply_fill` 买 10 Up @ 0.600、10 Down @ 0.450(t = 1 s)
+  2. `ExternalFill{Delivery, Sell 10 Up @ 0}`(t = 2 s)
+  3. `ExternalFill{Delivery, Sell 10 Down @ 1.000}`(t = 3 s);两本簿报价 Up 0.010/0.020、Down 0.980/0.990
+- 期望:
+  - LED-307.1:步骤 1 后账户当日 `net() = 0`(按成交价估值),账户 `held_notional = 10.5`
+  - LED-307.2:步骤 2 后 `day.external = −6`、`day.net() = −6`(USDC 按 1.0 折 USDT),Up 仓位 0
+  - LED-307.3:步骤 3 后 `day.net() = −0.5`;`Equity.valid`,合计权益 81.5
+- 实现:`crates/hft-ledger/tests/day_loss.rs::led_307_token_delivered_at_zero_is_a_realized_day_loss`
+
+### LED-308 跨 journal 的当日亏损延续
+
+- 规则:[未实现与当日 PnL](README.md#未实现与当日-pnl增量维护)、[冷消费者](README.md#冷消费者journalledger)
+- 级别:unit
+- 里程碑:M2
+- 前置:`booted()`;`F(Buy, BTC_S1, 0.001, 60000, G1)` 已入账
+- 步骤:
+  1. `carry_day_pnl(A1, −28.51)`;再以 0、+5(A1)与 −1(账户 0)各调一次
+  2. 快照并恢复;冷消费者(从 `booted()` 的快照起步)读入步骤 1 的 Note
+  3. `on_day_roll`
+- 期望:
+  - LED-308.1:`carry_day_pnl(A1, −28.51)` 返回 `PnlDelta{A1, GROUP_NONE, adjust = −28.51}`;账户 `day.adjust = −28.51`,`day.net()` 减少 28.51;G1 的当日账不变;恰好一条 `Note{Ledger, DayPnlCarried, Info, v = [1, −28 510 000, 0…]}`
+  - LED-308.2:`carry_day_pnl` 的 0、+5 与账户 0 的 −1 都返回零增量、不写 Note,`day.adjust` 仍 −28.51
+  - LED-308.3:快照恢复后账户当日账逐字段相同
+  - LED-308.4:冷消费者读到 LED-308.1 的 Note 后同一账户 `day.adjust` 减少 28.51
+  - LED-308.5:其后 `on_day_roll` 把账户当日账清零
+- 实现:`crates/hft-ledger/tests/day_loss.rs::led_308_day_pnl_carry`
 
 ### LED-294 原始对账结算入口基准
 

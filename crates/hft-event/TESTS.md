@@ -852,7 +852,7 @@ spec: README.md
 - 规则:[Note 来源与码登记表](README.md#note-来源与码登记表)
 - 级别:table
 - 里程碑:M1
-- 前置:`NOTE_NAMES` 与 `note_name`;"期望"写 `source / level / v`,`level` 为 `None` 表示"按条件";`v` 写成 `(bit, bits)` 序列,只比较位置与宽度,不比较 `VField.name`;`[]` 表示本表不登记 `v[]` 字段;另断言 `NOTE_NAMES.len() == 94` 且顺序与 README 登记表行序一致(EVT-075.85–EVT-075.95 位于各自 source 组末尾)
+- 前置:`NOTE_NAMES` 与 `note_name`;"期望"写 `source / level / v`,`level` 为 `None` 表示"按条件";`v` 写成 `(bit, bits)` 序列,只比较位置与宽度,不比较 `VField.name`;`[]` 表示本表不登记 `v[]` 字段;另断言 `NOTE_NAMES.len() == 95` 且顺序与 README 登记表行序一致(EVT-075.85–EVT-075.96 位于各自 source 组末尾)
 - 实现:`crates/hft-event/tests/notes.rs::evt_075_note_registry_rows`
 
 | 行 | 码名 | 期望 |
@@ -954,6 +954,7 @@ spec: README.md
 | EVT-075.93 | `ReconcileCash` | Sequencer / Info / `(0,64) (64,8) (72,8) (128,64) (192,64) (256,64)` |
 | EVT-075.94 | `ReconcileRejected` | Sequencer / P0 / `(0,64) (64,8) (72,8) (128,64) (192,64)` |
 | EVT-075.95 | `ReceiptMismatch` | Ledger / P0 / `(0,8) (8,8) (64,64) (128,64) (192,64) (256,64) (320,64)` |
+| EVT-075.96 | `DayPnlCarried` | Ledger / Info / `(0,8) (64,64)` |
 
 ### EVT-076 Note 码名登记表满足命名与字段不变量
 
@@ -1826,7 +1827,7 @@ spec: README.md
   1. 生成
   2. 用 Python 导入 `<tmp>/python/_generated/events.py`,对每个 kind 读出 dtype
 - 期望:
-  - `docs/generated/event-catalog.md` 含 40 个 kind 小节,每节列出编号、域、角色、布局、`schema_version` 与字段表;Note 码表含 `NOTE_NAMES` 的全部 94 个名字,包含 Ledger BalanceCheck、ReceiptMismatch 与 Sequencer ReconcileCash、ReconcileRejected
+  - `docs/generated/event-catalog.md` 含 40 个 kind 小节,每节列出编号、域、角色、布局、`schema_version` 与字段表;Note 码表含 `NOTE_NAMES` 的全部 95 个名字,包含 Ledger BalanceCheck、ReceiptMismatch、DayPnlCarried 与 Sequencer ReconcileCash、ReconcileRejected
   - `schemas/arrow/` 下 40 个 `<kind>.json`;`Px`/`Qty` 列为 `Int64` 且带元数据 `hft.type = px`/`qty`
   - 每个 kind 的 dtype `itemsize` 等于 `size`(Var/Multi 等于 `prefix`),`names` 与 `offsets` 与 `FieldDesc` 逐项相同;`StrategyParamsHdr`、`GroupSpec`、`LegDef` 的 dtype itemsize 为 48、80、16
   - `refdata.py` 含 `LoadErrCode` 每个变体一项,数值与 hft-refdata 相同

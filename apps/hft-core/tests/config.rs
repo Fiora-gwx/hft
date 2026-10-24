@@ -683,6 +683,7 @@ fn core_430_production_orders_polymarket_only() {
     let live = support::PmLive {
         uid: "0f5e8d2a-1111-2222-3333-".into(),
         keys_dir: d.path().join("keys"),
+        day_loss_carry: None,
     };
     let hot = d.path().join("hot");
     let path = support::write_polymarket_maker_live(d.path(), &hot, None, None, "127.0.0.1", "lo", &live);
@@ -752,6 +753,7 @@ fn core_431_live_maker_set_params_accepts_the_startup_shape() {
     let live = support::PmLive {
         uid: "0f5e8d2a-1111-2222-3333-".into(),
         keys_dir: d.path().join("keys"),
+        day_loss_carry: None,
     };
     let path = support::write_polymarket_maker_live(
         d.path(),
@@ -935,6 +937,7 @@ fn core_432_polymarket_expiry_window_is_the_gtd_lifetime() {
     let live = support::PmLive {
         uid: "0f5e8d2a-1111-2222-3333-".into(),
         keys_dir: d.path().join("keys"),
+        day_loss_carry: None,
     };
     let hot = d.path().join("hot");
     let live_path =
@@ -997,6 +1000,7 @@ fn core_433_venue_rest_timeout_and_max_idle() {
         let live = support::PmLive {
             uid: "0f5e8d2a-1111-2222-3333-".into(),
             keys_dir: d.path().join("keys"),
+            day_loss_carry: None,
         };
         let pm = support::write_polymarket_maker_live(
             d.path(),
@@ -1024,4 +1028,120 @@ fn core_433_venue_rest_timeout_and_max_idle() {
             "CORE-433.5 {e:?}"
         );
     }
+}
+
+/// The live Polymarket configuration values USDC at par (the daily loss counts USDC losses), its
+/// daily loss is 15 USDC, and `--day-loss-carry` becomes the ECF1 carry row.
+#[cfg(feature = "polymarket")]
+#[test]
+fn core_434_live_polymarket_daily_loss_in_usdc() {
+    use hft_ledger::{AssetName, FillClass, FillDelta, FixedVec, Ledger, LedgerConfigError};
+    use hft_types::{AccountId, Notional, Px, Qty, Rate, Side};
+    let v = hft_types::VenueId::POLYMARKET_CLOB;
+    let a = AccountId(1);
+    // 2026-10-24.
+    let day = 20_750u32;
+    let d = tempfile::tempdir().unwrap();
+    let live = support::PmLive {
+        uid: "0f5e8d2a-1111-2222-3333-".into(),
+        keys_dir: d.path().join("keys"),
+        day_loss_carry: Some((day, -28_510_000)),
+    };
+    let path = support::write_polymarket_maker_live(
+        d.path(),
+        &d.path().join("hot"),
+        None,
+        None,
+        "127.0.0.1",
+        "lo",
+        &live,
+    );
+    let l = match hft_core::config::load(&path, false) {
+        Ok(l) => l,
+        Err(e) => panic!("CORE-434: {e:?}"),
+    };
+    let slot = l.rd.insts_of_venue(v)[0];
+    let usdc = l.rd.inst(slot).quote;
+    assert_eq!(&*l.rd.asset(usdc).name, "USDC");
+    // .1 USDC at par; the same config without it is refused by the ledger.
+    assert!(
+        l.setup.ledger.par_assets.iter().any(|n| n.matches("USDC")),
+        "CORE-434.1"
+    );
+    let caps = l.setup.caps.to_ledger();
+    let mut ledger = Ledger::new(&l.rd, &l.setup.ledger, &caps).expect("CORE-434.1");
+    let mut old = l.setup.ledger.clone();
+    let mut par = FixedVec::new();
+    par.push(AssetName::new("USDT"));
+    old.par_assets = par;
+    assert_eq!(
+        Ledger::new(&l.rd, &old, &caps).err(),
+        Some(LedgerConfigError::NoUsdtRate { asset: usdc }),
+        "CORE-434.1"
+    );
+    // .2 daily loss 15 USDC, not reduced by the equity fraction.
+    let acct = l
+        .configs
+        .risk
+        .accounts
+        .iter()
+        .find(|x| x.account == a)
+        .expect("pm-live limits");
+    assert_eq!(
+        (acct.daily_loss_abs, acct.daily_loss_kill),
+        (Notional(15_000_000), Rate(1_000_000_000)),
+        "CORE-434.2"
+    );
+    // .3 on the live refdata, 10 shares bought at 0.60 and delivered at 0: day −6 USDC.
+    ledger.on_run_start(0);
+    let f = FillDelta {
+        account: a,
+        venue: v,
+        side: Side::Buy,
+        class: FillClass::Open as u8,
+        flags: 0,
+        leg_ix: 0,
+        _pad: [0; 2],
+        inst: slot,
+        group: hft_types::GROUP_NONE,
+        qty: Qty(10_000_000),
+        net_qty: Qty(10_000_000),
+        px: Px(600),
+        fee: 0,
+        fee_asset: hft_types::ASSET_NONE,
+        _pad2: 0,
+        slot: 0,
+        r#gen: 0,
+        _pad3: 0,
+        seq: 0,
+    };
+    assert_eq!(l.rd.inst(slot).px_exp, -3, "CORE-434.3 token price exponent");
+    ledger.apply_fill(&f, 1);
+    let x = hft_event::ExternalFill {
+        venue: v,
+        account: a,
+        side: Side::Sell,
+        cause: hft_event::ExternalCause::Delivery,
+        inst: slot,
+        qty: Qty(10_000_000),
+        px: Px(0),
+        fee: Qty(0),
+        fee_asset: hft_types::ASSET_NONE,
+        _pad: [0; 6],
+        exch_order_id: 0,
+        trade_id: 1,
+        ex_ts_ns: 0,
+        rx_tsc: hft_types::Tsc(0),
+        fill_seq: 0,
+        cash_qty: Qty(0),
+        cash_amount: Qty(0),
+    };
+    ledger.apply_external(&x, false, 2).expect("CORE-434.3 booked");
+    assert_eq!(ledger.account(a).day.net(), Notional(-6_000_000), "CORE-434.3");
+    // .4 the carry row.
+    assert_eq!(
+        l.setup.day_pnl_carry,
+        vec![(a, day, Notional(-28_510_000))],
+        "CORE-434.4"
+    );
 }

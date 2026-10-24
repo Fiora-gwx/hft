@@ -626,6 +626,7 @@ pub struct Note {                   // 0x0506,80 B;热路径唯一的"日志",�
 | `ChainReorg` / `ChainReorgNaked` | Ledger | P1 / P0 | optional 链上腿的重组 |
 | `BalanceCheck` | Ledger | Info | 已初始化余额的 quiet 校验实际执行;v[0] = venue \| account << 8,v[1] = asset,v[2] = free,v[3] = locked,v[4] = ex_ts_ns,其余 0。原始事实与同事件 BalanceReport 一致,不携带账本金额或校验结果 |
 | `ReceiptMismatch` | Ledger | P0 | 原始推送与同身份的待确认对账凭据金额字段不同,不入账、不消耗凭据;v[0] = venue \| account << 8,v[1] = inst,v[2] = trade_id,v[3] = exch_order_id,v[4] = fill_seq,v[5] = 不同字段位图(规则与位值归 [hft-ledger](../hft-ledger/README.md)),其余 0 |
+| `DayPnlCarried` | Ledger | Info | 日切后把此前 journal 当日已发生的亏损记入账户当日账(EngineConfig 装配段的当日亏损延续,规则归 [hft-ledger](../hft-ledger/README.md#未实现与当日-pnl增量维护));v[0] = account,v[1] = 计入的 Notional(≤ 0,i64),其余 0 |
 | `ExecBroken` | Exec | P0 | cell 进入 Broken |
 | `ExecExternalDefault` | Exec | 按条件:发单 P0,裸量在阈值内不发单 P1 | 外来成交的默认处理(条件归 [hft-exec](../hft-exec/README.md)) |
 | `ExecAutoFixFailed` | Exec | P0 | 自动有界平仓失败 |

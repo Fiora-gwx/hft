@@ -663,6 +663,9 @@ pub enum BaselineResult {
 pub enum LedgerConfigError {
     /// A venue has more assets than `MAX_ASSETS_PER_VENUE`.
     TooManyAssets { venue: VenueId, n: u16 },
+    /// The quote asset of a valid inst is neither a par nor a stable-fallback asset and has no
+    /// reference inst: its USDT rate would be 0 and every amount in it would value at 0.
+    NoUsdtRate { asset: AssetId },
 }
 
 /// One `Funding` item of a reconciliation report.

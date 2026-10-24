@@ -305,6 +305,16 @@ impl Ledger {
                 x.ref_of = AssetId(ix as u16);
             }
         }
+        // Every quote asset of a valid inst needs a USDT rate source (README "USDT 统一计价").
+        for s in insts.iter().filter(|s| s.valid) {
+            if let Some(a) = assets.get(usize::from(s.quote.0))
+                && !a.par
+                && !a.fallback
+                && a.ref_inst == INST_NONE
+            {
+                return Err(LedgerConfigError::NoUsdtRate { asset: s.quote });
+            }
+        }
         // Venues.
         let mut venues: Vec<VenueStatic> = (0..MAX_VENUES)
             .map(|_| VenueStatic {
@@ -774,6 +784,35 @@ impl Ledger {
         }
         for c in self.cells.iter_mut() {
             c.book.day = PnlBreakdown::zero();
+        }
+    }
+
+    /// Day loss carried from earlier journals of the same UTC day (README "未实现与当日 PnL"):
+    /// `pnl` (≤ 0; zero, a positive value or an unknown account books nothing and writes no Note)
+    /// is added to the account's day `adjust` only, with a `DayPnlCarried` Note. Called by the sequencer right after `on_day_roll`.
+    pub fn carry_day_pnl(&mut self, a: AccountId, pnl: Notional, t: i64) -> PnlDelta {
+        self.tick(t);
+        let mut d = PnlBreakdown::zero();
+        d.adjust = Notional(pnl.0.min(0));
+        if let Some(acc) = self.accounts.get_mut(usize::from(a.0))
+            && a.0 != 0
+            && d.adjust.0 != 0
+        {
+            acc.day.add(&d);
+            self.push_note(crate::notes::note(
+                crate::notes::code::DAY_PNL_CARRIED,
+                hft_event::NoteLevel::Info,
+                hft_types::GROUP_NONE,
+                hft_types::INST_NONE,
+                [u64::from(a.0), d.adjust.0 as u64, 0, 0, 0, 0, 0, 0],
+            ));
+        } else {
+            d = PnlBreakdown::zero();
+        }
+        PnlDelta {
+            account: a,
+            group: hft_types::GROUP_NONE,
+            d,
         }
     }
 

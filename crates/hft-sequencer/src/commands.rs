@@ -2620,6 +2620,19 @@ pub(crate) fn sys_timer<'a, D: Driver<S>, S: StrategySet>(
                 e.trace.rec("ledger.on_day_roll", 0, 0);
                 e.ledger.on_day_roll(e.now.engine_ns);
                 e.last_day_rolled = day;
+                // Day loss carried from earlier journals of this UTC day (ECF1 section 8).
+                for k in 0..e.setup.day_pnl_carry.len() {
+                    let Some(&(a, d, pnl)) = e.setup.day_pnl_carry.get(k) else {
+                        break;
+                    };
+                    if d != day {
+                        continue;
+                    }
+                    e.trace.rec("ledger.carry_day_pnl", u64::from(a.0), pnl.0 as u64);
+                    let delta = e.ledger.carry_day_pnl(a, pnl, e.now.engine_ns);
+                    crate::process::ledger_notes(e);
+                    crate::process::pnl(e, inst, drv, delta)?;
+                }
             }
         }
         4 => {

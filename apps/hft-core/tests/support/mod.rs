@@ -719,6 +719,9 @@ pub struct PmLive {
     /// Directory of the credential files `api_key`, `secret` (`<api secret>|<EOA key>|<deposit
     /// wallet>`) and `passphrase`; hft-core reads and unlinks them at startup.
     pub keys_dir: PathBuf,
+    /// Day loss of earlier runs of this UTC day: `(UTC day number, USDC raw 1e-6, < 0)`, booked at
+    /// the first day roll of the fresh journal (hft-sequencer ECF1 section 8 fields 7/8).
+    pub day_loss_carry: Option<(u32, i64)>,
 }
 
 /// Binary-maker parameters of the first live run (`micro_s2_c5_cap10_mc20`, research reply
@@ -1173,7 +1176,12 @@ fn write_pm(
             },
             max_hedge_notional: Some(Notional(10_000_000)),
             max_reduce_notional: Some(Notional(10_000_000)),
-            daily_loss_kill: Rate(100_000_000),
+            // The absolute line binds: the quota is min(daily_loss_abs, equity × daily_loss_kill).
+            daily_loss_kill: Rate(if live.is_some() {
+                1_000_000_000
+            } else {
+                100_000_000
+            }),
             daily_loss_abs: Notional(loss_cap),
             recon_closeonly_notional: Notional(5_000_000),
             ..hft_risk::AcctSpec::default()
@@ -1192,8 +1200,12 @@ fn write_pm(
     ));
     let risk = risk.build();
     let rpb = risk.encode_blob().unwrap();
+    // Polymarket settles in USDC (pUSD, 1:1) and lists no USDC/USDT book: USDC is valued at par,
+    // otherwise every USDC amount (P&L, held notional, equity) converts to 0 USDT and the daily
+    // loss never fires (hft-ledger refuses such a config: NoUsdtRate).
     let mut ledger = hft_ledger::LedgerConfig::default();
     ledger.stable_par_fallback.clear();
+    ledger.par_assets.push(hft_ledger::AssetName::new("USDC"));
     let rig = RigConfig {
         refdata_blob: rdb.clone(),
         params: vec![params.clone()],
@@ -1232,7 +1244,7 @@ fn write_pm(
         panic!("Polymarket declares ExpireAt");
     };
     engine.oms.expire_window_ms.set(v, Some(default_ms));
-    if live.is_some() {
+    if let Some(l) = live {
         engine.role_prod = true;
         engine.gws.venues = vec![v];
         engine.keys_required = vec![(a, v, 3)];
@@ -1242,6 +1254,9 @@ fn write_pm(
         // a slot that goes Unknown on time-out only resolves by query. The REST pool waits as long
         // (`venues.pm.net.rest_timeout_ms`, at most this value).
         engine.oms.ack_timeout_ms.set(v, PM_REST_TIMEOUT_MS);
+        if let Some((day, pnl)) = l.day_loss_carry {
+            engine.day_pnl_carry = vec![(a, day, Notional(pnl))];
+        }
     }
     engine.exec.default.force_slice.max_chunk_notional = Notional(10_000_000);
     let ecf = engine.encode_blob(1, HostClass::Dev2, 0);

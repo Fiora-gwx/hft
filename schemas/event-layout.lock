@@ -756,6 +756,7 @@ note Ledger 14 ChainReorg
 note Ledger 15 ChainReorgNaked
 note Ledger 16 BalanceCheck
 note Ledger 17 ReceiptMismatch
+note Ledger 18 DayPnlCarried
 note Exec 1 ExecBroken
 note Exec 2 ExecExternalDefault
 note Exec 3 ExecAutoFixFailed
