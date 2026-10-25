@@ -2,8 +2,10 @@
 //! best bid on the Up and the Down slot of the current window while the reference volatility is
 //! high enough and the window is not about to end; a quote stays when its level clears, is
 //! cancelled when undercut or when the reference moves its fair value against it, and a bid that
-//! completes pairs rests no higher than the pair-cost limit. No allocation after
-//! `new`/`on_params`; snapshots are keyed by `GroupId`.
+//! completes pairs rests no higher than the pair-cost limit; with `fv_limit`, bids are also capped
+//! by the strategy's own fair value (anchored to the Up mid, moved by the reference, the inventory
+//! and a direction forecast). No allocation after `new`/`on_params`; snapshots are keyed by
+//! `GroupId`.
 #![deny(clippy::float_arithmetic)]
 
 use hft_strategy_sdk::prelude::*;
@@ -34,6 +36,21 @@ pub fn subscribe(groups: &GroupTable, out: &mut SubsBuilder<'_>) {
         };
         let _ = out.market(l.inst, gix, mask, Part::Fast);
     }
+}
+
+/// √5 and √30 × 1e6 (forecast return scale and drift horizon, README "规则" 9).
+const SQRT5_MICRO: i128 = 2_236_068;
+const SQRT30_MICRO: i128 = 5_477_226;
+
+/// Fair-value state of the current window (README "规则" 9): the reference 2 × mid at the window's
+/// first event and the anchor offset (`Rate`), with the engine time of its last update.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FvAnchor {
+    pub win: i64,
+    pub b_open: i64,
+    pub off: i64,
+    pub off_ok: bool,
+    pub off_ens: i64,
 }
 
 /// Quote state of one slot leg.
@@ -99,6 +116,10 @@ pub struct Fast {
     pub vol: Vol,
     /// Last reference 2 × mid (0 = none yet).
     pub ref_mid_x2: i64,
+    /// Level-1 imbalance of the last reference quote, (bid − ask quantity) / (bid + ask) (`Rate`).
+    pub ref_imb: i64,
+    /// Fair-value anchor of the current window (not in the snapshot: rebuilt on the next event).
+    pub fv: FvAnchor,
 }
 
 impl Fast {
@@ -112,6 +133,11 @@ impl Fast {
             reference: INST_NONE,
             vol: Vol::new(p.defaults().vol_window_s as usize),
             ref_mid_x2: 0,
+            ref_imb: 0,
+            fv: FvAnchor {
+                win: i64::MIN,
+                ..FvAnchor::default()
+            },
         };
         f.on_params(p, groups);
         f
@@ -169,6 +195,10 @@ impl Fast {
                 if b.bid_px.0 > 0 && b.ask_px.0 > 0 {
                     let mid_x2 = b.bid_px.0.saturating_add(b.ask_px.0);
                     self.ref_mid_x2 = mid_x2;
+                    let (bq, aq) = (i128::from(b.bid_qty.0), i128::from(b.ask_qty.0));
+                    if bq >= 0 && aq >= 0 && bq + aq > 0 {
+                        self.ref_imb = ((bq - aq) * i128::from(ONE) / (bq + aq)) as i64;
+                    }
                     let now = v.now();
                     if now.clock_ok {
                         self.vol
@@ -239,6 +269,106 @@ impl Fast {
         cdf(z) - cdf(q.d0)
     }
 
+    /// Direction forecast in standard deviations of the next 30 s (`Rate`, README "规则" 9):
+    /// `pred_w_imb` × level-1 imbalance + `pred_w_ret` × (sum of the last 5 one-second returns) /
+    /// (σ √5) + `pred_w_ser` × (sum of the last 15) / (sum of their absolute values); clamped to ±6.
+    pub fn forecast(&self, sigma: i64) -> i64 {
+        let d = self.p.defaults();
+        let one = i128::from(ONE);
+        let (s5, _) = self.vol.recent(5);
+        let (s15, a15) = self.vol.recent(15);
+        let sd5 = i128::from(sigma) * SQRT5_MICRO / 1_000_000;
+        let ret = if sd5 > 0 {
+            (i128::from(s5) * one / sd5).clamp(-6 * one, 6 * one)
+        } else {
+            0
+        };
+        let ser = if a15 > 0 {
+            i128::from(s15) * one / i128::from(a15)
+        } else {
+            0
+        };
+        let z = (i128::from(d.pred_w_imb.0) * i128::from(self.ref_imb)
+            + i128::from(d.pred_w_ret.0) * ret
+            + i128::from(d.pred_w_ser.0) * ser)
+            / one;
+        z.clamp(-6 * one, 6 * one) as i64
+    }
+
+    /// Fair-value limits (Up, Down) of the current window as fractions of one (README "规则" 9),
+    /// updating the anchor; `None` before the window has a reference price, an anchor or σ.
+    /// `up` is the Up slot index, `den` = implied σ × √(seconds left − 40), `net` = Up − Down raw
+    /// quantity.
+    fn fair_limits<V: Views>(
+        &mut self,
+        v: &V,
+        start: i64,
+        up: usize,
+        den: i64,
+        net: i64,
+        now_ens: i64,
+    ) -> Option<(i64, i64)> {
+        let d = *self.p.defaults();
+        if self.fv.win != start {
+            self.fv = FvAnchor {
+                win: start,
+                ..FvAnchor::default()
+            };
+        }
+        if self.fv.b_open <= 0 {
+            self.fv.b_open = self.ref_mid_x2;
+        }
+        let sigma = self.vol.sigma(d.vol_min_samples as usize)?;
+        let q = *self.quotes.get(up)?;
+        if self.fv.b_open <= 0 || self.ref_mid_x2 <= 0 || den <= 0 {
+            return None;
+        }
+        let one = i128::from(ONE);
+        let moved =
+            (i128::from(self.ref_mid_x2) - i128::from(self.fv.b_open)) * one / i128::from(self.fv.b_open);
+        let hot = *v.inst(q.inst);
+        let unit = i128::from(10i64.saturating_pow(u32::from(hot.px_exp.unsigned_abs())));
+        let book = v.book(q.inst);
+        if let (Some(x), Some(y)) = (book.best(Side::Buy), book.best(Side::Sell))
+            && x.px.0 < y.px.0
+            && unit > 0
+        {
+            let mid = (i128::from(x.px.0) + i128::from(y.px.0)) * one / (2 * unit);
+            if mid >= one * 3 / 100 && mid <= one * 97 / 100 {
+                // Reference move the Up mid implies, against the actual one: the slow part is the
+                // strike / basis offset, the fast part a move the book has not absorbed yet.
+                let gap = moved - i128::from(inv_cdf(mid as i64)) * i128::from(den) / one;
+                if self.fv.off_ok {
+                    let dt = i128::from(now_ens.saturating_sub(self.fv.off_ens).max(0));
+                    let hl = i128::from(d.fv_anchor_ms) * 1_000_000;
+                    let off = i128::from(self.fv.off);
+                    self.fv.off = (off + (gap - off) * dt / (hl + dt)) as i64;
+                } else {
+                    self.fv.off = gap as i64;
+                    self.fv.off_ok = true;
+                }
+                self.fv.off_ens = now_ens;
+            }
+        }
+        if !self.fv.off_ok {
+            return None;
+        }
+        let drift = i128::from(d.pred_k.0) * i128::from(self.forecast(sigma)) / one * i128::from(sigma) / one
+            * SQRT30_MICRO
+            / 1_000_000;
+        let z = ((moved - i128::from(self.fv.off) + drift) * one / i128::from(den)).clamp(-6 * one, 6 * one);
+        let fu = i128::from(cdf(z as i64));
+        let unit_qty = i128::from(10i64.saturating_pow(u32::from(hot.qty_exp.unsigned_abs())));
+        let cap = i128::from(d.inv_max_shares) * unit_qty;
+        let skew = if cap > 0 {
+            i128::from(d.inv_skew.0) * i128::from(net) / cap
+        } else {
+            0
+        };
+        let edge = i128::from(d.fv_edge.0);
+        Some(((fu - edge - skew) as i64, (one - fu - edge + skew) as i64))
+    }
+
     /// README "规则": decides every slot leg's quote.
     fn run<V: Views>(&mut self, v: &V, ctx: &mut Ctx<'_>) {
         let now = v.now();
@@ -299,6 +429,11 @@ impl Fast {
             let root_milli = isqrt(u128::try_from(v_ms).unwrap_or(1) * 1_000) as i128;
             (implied * root_milli / 1_000) as i64
         });
+        let lims = if d.fv_limit && quoting {
+            self.fair_limits(v, start, up, den, qu.saturating_sub(qd), now.engine_ns)
+        } else {
+            None
+        };
         let requote = i64::from(d.requote_ms) * 1_000_000;
         let cool = i64::from(d.fv_cool_ms) * 1_000_000;
         let nochase = i64::from(d.nochase_ms) * 1_000_000;
@@ -350,6 +485,12 @@ impl Fast {
             });
             let lo = (i128::from(d.p_min.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
             let hi = (i128::from(d.p_max.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
+            // Fair-value limit of this leg (README "规则" 9), raw price; the bid cap is floored to a cent.
+            let fv_px = lims.map(|(lu, ld)| {
+                (i128::from(if is_up { lu } else { ld }) * i128::from(unit_px) / i128::from(ONE)) as i64
+            });
+            let cent = (unit_px / 100).max(1);
+            let fv_cap = fv_px.map(|f| f.div_euclid(cent) * cent);
             let cap = i64::from(d.inv_max_shares).saturating_mul(unit_qty);
             // The net after this clip fills completely stays within the cap (a short fill such as
             // 9.99 of 10 shares no longer admits a whole further clip).
@@ -359,9 +500,11 @@ impl Fast {
                     if b < a
                         && b >= lo
                         && b <= hi
-                        && own_q.saturating_sub(other_q).saturating_add(clip) <= cap =>
+                        && own_q.saturating_sub(other_q).saturating_add(clip) <= cap
+                        && (!d.fv_limit || fv_cap.is_some()) =>
                 {
                     let t = lim.map_or(b, |l| b.min(l));
+                    let t = fv_cap.map_or(t, |f| t.min(f));
                     (t >= lo).then_some(t)
                 }
                 _ => None,
@@ -385,6 +528,8 @@ impl Fast {
                         !locked && bid.is_some_and(|b| b > q.px) && target.is_none_or(|t| t > q.px);
                     cancel |= undercut;
                     cancel |= lim.is_some_and(|l| q.px > l);
+                    let hyst = (i128::from(d.fv_hyst.0) * i128::from(unit_px) / i128::from(ONE)) as i64;
+                    cancel |= fv_px.is_some_and(|f| q.px > f.saturating_add(hyst));
                     if cancel
                         && let Some(r) = q.r
                         && ctx.cancel(r).is_ok()
